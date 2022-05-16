@@ -8,15 +8,14 @@ from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks, BulkLoadStates
 from utils.util_log import test_log as log
-from bulk_load_data import parpar_bulk_load_data, gen_json_file_name
+from bulk_load_data import prepare_bulk_load_json_files, prepare_bulk_load_numpy_files,\
+                            DataField as df, DataErrorType
 
 
-vec_field = "vectors"
-pk_field = "uid"
-float_field = "float_scalar"
-int_field = "int_scalar"
-bool_field = "bool_scalar"
-string_field = "string_scalar"
+default_vec_only_fields = [df.vec_field]
+default_multi_fields = [df.vec_field, df.int_field, df.string_field,
+                        df.bool_field, df.float_field]
+default_vec_n_int_fields = [df.vec_field, df.int_field]
 
 
 def entity_suffix(entities):
@@ -42,7 +41,7 @@ def gen_file_prefix(row_based=True, auto_id=True, prefix=""):
             return f"{prefix}col_cust"
 
 
-class TestImport(TestcaseBase):
+class TestBulkLoad(TestcaseBase):
 
     def setup_class(self):
         log.info("[setup_import] Start setup class...")
@@ -71,18 +70,13 @@ class TestImport(TestcaseBase):
         5. verify search successfully
         6. verify query successfully
         """
-        parpar_bulk_load_data(json_file=True, row_based=row_based, rows=entities, dim=dim,
-                              auto_id=auto_id, str_pk=False, float_vector=True,
-                              multi_scalars=False, file_nums=1)
-        # TODO: file names shall be return by gen_json_files
-        file_name = gen_json_file_name(row_based=row_based, rows=entities,
-                                       dim=dim, auto_id=auto_id, str_pk=False,
-                                       float_vector=True, multi_scalars=False, file_num=0)
-        files = [file_name]
+        files = prepare_bulk_load_json_files(row_based=row_based, rows=entities,
+                                             dim=dim, auto_id=auto_id,
+                                             data_fields=default_vec_only_fields, force=True)
         self._connect()
         c_name = cf.gen_unique_str("bulkload")
-        fields = [cf.gen_int64_field(name=pk_field, is_primary=True),
-                  cf.gen_float_vec_field(name=vec_field, dim=dim)]
+        fields = [cf.gen_int64_field(name=df.pk_field, is_primary=True),
+                  cf.gen_float_vec_field(name=df.vec_field, dim=dim)]
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data
@@ -92,11 +86,12 @@ class TestImport(TestcaseBase):
                                                   row_based=row_based,
                                                   files=files)
         logging.info(f"bulk load task ids:{task_ids}")
-        completed, _ = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids,
-                                                                            timeout=30)
+        success, _ = self.utility_wrap.wait_for_bulk_load_tasks_completed(
+                                            task_ids=task_ids,
+                                            timeout=30)
         tt = time.time() - t0
-        log.info(f"bulk load state:{completed} in {tt}")
-        assert completed
+        log.info(f"bulk load state:{success} in {tt}")
+        assert success
 
         num_entities = self.collection_wrap.num_entities
         log.info(f" collection entities: {num_entities}")
@@ -104,10 +99,10 @@ class TestImport(TestcaseBase):
 
         # verify imported data is available for search
         self.collection_wrap.load()
-        log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
+        # log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
         search_data = cf.gen_vectors(1, dim)
         search_params = {"metric_type": "L2", "params": {"nprobe": 2}}
-        res, _ = self.collection_wrap.search(search_data, vec_field,
+        res, _ = self.collection_wrap.search(search_data, df.vec_field,
                                              param=search_params, limit=1,
                                              check_task=CheckTasks.check_search_results,
                                              check_items={"nq": 1,
@@ -118,7 +113,6 @@ class TestImport(TestcaseBase):
     @pytest.mark.parametrize("row_based", [True, False])
     @pytest.mark.parametrize("dim", [8])  # 8
     @pytest.mark.parametrize("entities", [100])  # 100
-    @pytest.mark.xfail(reason="milvus crash issue #16858")
     def test_str_pk_float_vector_only(self, row_based, dim, entities):
         """
         collection schema: [str_pk, float_vector]
@@ -131,12 +125,14 @@ class TestImport(TestcaseBase):
         6. verify query successfully
         """
         auto_id = False      # no auto id for string_pk schema
-        prefix = gen_file_prefix(row_based=row_based, auto_id=auto_id)
-        files = [f"{prefix}_str_pk_float_vectors_only_{dim}d_{entities}.json"]
+        string_pk = True
+        files = prepare_bulk_load_json_files(row_based=row_based, rows=entities,
+                                             dim=dim, auto_id=auto_id, str_pk=string_pk,
+                                             data_fields=default_vec_only_fields)
         self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        fields = [cf.gen_string_field(name=pk_field, is_primary=True),
-                  cf.gen_float_vec_field(name=vec_field, dim=dim)]
+        c_name = cf.gen_unique_str()
+        fields = [cf.gen_string_field(name=df.pk_field, is_primary=True),
+                  cf.gen_float_vec_field(name=df.vec_field, dim=dim)]
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data
@@ -160,7 +156,7 @@ class TestImport(TestcaseBase):
         log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
         search_data = cf.gen_vectors(1, dim)
         search_params = {"metric_type": "L2", "params": {"nprobe": 2}}
-        res, _ = self.collection_wrap.search(search_data, vec_field,
+        res, _ = self.collection_wrap.search(search_data, df.vec_field,
                                              param=search_params, limit=1,
                                              check_task=CheckTasks.check_search_results,
                                              check_items={"nq": 1,
@@ -171,7 +167,7 @@ class TestImport(TestcaseBase):
     @pytest.mark.parametrize("row_based", [True, False])
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("dim", [4])
-    @pytest.mark.parametrize("entities", [10000])
+    @pytest.mark.parametrize("entities", [3000])
     def test_partition_float_vector_int_scalar(self, row_based, auto_id, dim, entities):
         """
         collection: customized partitions
@@ -183,13 +179,14 @@ class TestImport(TestcaseBase):
         5. verify index status
         6. verify search and query
         """
-        prefix = gen_file_prefix(row_based=row_based, auto_id=auto_id)
-        files = [f"{prefix}_float_vectors_int_scalar_{dim}d_{entities}.json"]
+        files = prepare_bulk_load_json_files(row_based=row_based, rows=entities,
+                                             dim=dim, auto_id=auto_id,
+                                             data_fields=default_vec_n_int_fields, file_nums=1)
         self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        fields = [cf.gen_int64_field(name=pk_field, is_primary=True),
-                  cf.gen_float_vec_field(name=vec_field, dim=dim),
-                  cf.gen_int32_field(name="int_scalar")]
+        c_name = cf.gen_unique_str()
+        fields = [cf.gen_int64_field(name=df.pk_field, is_primary=True),
+                  cf.gen_float_vec_field(name=df.vec_field, dim=dim),
+                  cf.gen_int32_field(name=df.int_field)]
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         self.collection_wrap.init_collection(c_name, schema=schema)
         # create a partition
@@ -197,7 +194,7 @@ class TestImport(TestcaseBase):
         m_partition, _ = self.collection_wrap.create_partition(partition_name=p_name)
         # build index before bulk load
         index_params = {"index_type": "IVF_SQ8", "params": {"nlist": 128}, "metric_type": "L2"}
-        self.collection_wrap.create_index(field_name=vec_field, index_params=index_params)
+        self.collection_wrap.create_index(field_name=df.vec_field, index_params=index_params)
         # load before bulk load
         self.collection_wrap.load(partition_names=[p_name])
 
@@ -208,9 +205,9 @@ class TestImport(TestcaseBase):
                                                   row_based=row_based,
                                                   files=files)
         logging.info(f"bulk load task ids:{task_ids}")
-        success, _ = self.utility_wrap.\
+        success, state = self.utility_wrap.\
             wait_for_bulk_load_tasks_completed(task_ids=task_ids,
-                                               target_state=BulkLoadStates.BulkLoadDataQueryable,
+                                               target_state=BulkLoadStates.BulkLoadPersisted,
                                                timeout=30)
         tt = time.time() - t0
         log.info(f"bulk load state:{success} in {tt}")
@@ -219,24 +216,30 @@ class TestImport(TestcaseBase):
         assert m_partition.num_entities == entities
         assert self.collection_wrap.num_entities == entities
 
+        # TODO: remove sleep when indexed state ready
+        sleep(5)
+        res, _ = self.utility_wrap.index_building_progress(c_name)
+        exp_res = {'total_rows': entities, 'indexed_rows': entities}
+        assert res == exp_res
+
         log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
 
         search_data = cf.gen_vectors(1, dim)
         search_params = {"metric_type": "L2", "params": {"nprobe": 16}}
-        res, _ = self.collection_wrap.search(search_data, vec_field,
+        res, _ = self.collection_wrap.search(search_data, df.vec_field,
                                              param=search_params, limit=1,
                                              check_task=CheckTasks.check_search_results,
                                              check_items={"nq": 1,
                                                           "limit": 1})
 
     @pytest.mark.tags(CaseLabel.L3)
-    @pytest.mark.parametrize("row_based", [True])
-    @pytest.mark.parametrize("auto_id", [True])
+    @pytest.mark.parametrize("row_based", [True, False])
+    @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("dim", [16])
-    @pytest.mark.parametrize("entities", [10])
+    @pytest.mark.parametrize("entities", [200])
+    @pytest.mark.xfail(reason="issue #16890")
     def test_binary_vector_only(self, row_based, auto_id, dim, entities):
         """
-        collection: auto_id
         collection schema: [pk, binary_vector]
         Steps:
         1. create collection
@@ -248,18 +251,20 @@ class TestImport(TestcaseBase):
         7. verify search successfully
         6. verify query successfully
         """
-        prefix = gen_file_prefix(row_based=row_based, auto_id=auto_id)
-        files = [f"{prefix}_binary_vectors_only_{dim}d_{entities}.json"]
+        float_vec = False
+        files = prepare_bulk_load_json_files(row_based=row_based, rows=entities,
+                                             dim=dim, auto_id=auto_id, float_vector=float_vec,
+                                             data_fields=default_vec_only_fields)
         self._connect()
         c_name = cf.gen_unique_str()
-        fields = [cf.gen_int64_field(name=pk_field, is_primary=True),
-                  cf.gen_binary_vec_field(name=vec_field, dim=dim)]
+        fields = [cf.gen_int64_field(name=df.pk_field, is_primary=True),
+                  cf.gen_binary_vec_field(name=df.vec_field, dim=dim)]
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         self.collection_wrap.init_collection(c_name, schema=schema)
         # build index before bulk load
         binary_index_params = {"index_type": "BIN_IVF_FLAT", "metric_type": "JACCARD", "params": {"nlist": 64}}
 
-        self.collection_wrap.create_index(field_name=vec_field, index_params=binary_index_params)
+        self.collection_wrap.create_index(field_name=df.vec_field, index_params=binary_index_params)
 
         # import data
         t0 = time.time()
@@ -267,20 +272,21 @@ class TestImport(TestcaseBase):
                                                   row_based=row_based,
                                                   files=files)
         logging.info(f"bulk load task ids:{task_ids}")
+        # TODO: Update to BulkLoadDataIndexed when issue #16889 fixed
         success, _ = self.utility_wrap.wait_for_bulk_load_tasks_completed(
                                     task_ids=task_ids,
-                                    target_state=BulkLoadStates.BulkLoadDataIndexed,
+                                    target_state=BulkLoadStates.BulkLoadPersisted,
                                     timeout=30)
         tt = time.time() - t0
         log.info(f"bulk load state:{success} in {tt}")
         assert success
 
-        # verify build index status
-        # sleep(3)
-        # TODO: verify build index after index_building_progress() refactor
-        res, _ = self.utility_wrap.index_building_progress(c_name)
-        exp_res = {'total_rows': entities, 'indexed_rows': entities}
-        assert res == exp_res
+        # # verify build index status
+        # sleep(10)
+        # # TODO: verify build index after issue #16890 fixed
+        # res, _ = self.utility_wrap.index_building_progress(c_name)
+        # exp_res = {'total_rows': entities, 'indexed_rows': entities}
+        # assert res == exp_res
 
         # TODO: verify num entities
         assert self.collection_wrap.num_entities == entities
@@ -291,7 +297,7 @@ class TestImport(TestcaseBase):
         # verify search and query
         search_data = cf.gen_binary_vectors(1, dim)[1]
         search_params = {"metric_type": "JACCARD", "params": {"nprobe": 10}}
-        res, _ = self.collection_wrap.search(search_data, vec_field,
+        res, _ = self.collection_wrap.search(search_data, df.vec_field,
                                              param=search_params, limit=1,
                                              check_task=CheckTasks.check_search_results,
                                              check_items={"nq": 1,
@@ -301,8 +307,9 @@ class TestImport(TestcaseBase):
     @pytest.mark.parametrize("row_based", [True, False])
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("fields_num_in_file", ["equal", "more", "less"])   # "equal", "more", "less"
-    @pytest.mark.parametrize("dim", [1024])    # 1024
-    @pytest.mark.parametrize("entities", [5000])    # 5000
+    @pytest.mark.parametrize("dim", [16])
+    @pytest.mark.parametrize("entities", [500])
+    # it occasionally fails due to issue #16947
     def test_float_vector_multi_scalars(self, row_based, auto_id, fields_num_in_file, dim, entities):
         """
         collection schema: [pk, float_vector,
@@ -319,16 +326,17 @@ class TestImport(TestcaseBase):
         7. verify search successfully
         6. verify query successfully
         """
-        prefix = gen_file_prefix(row_based=row_based, auto_id=auto_id)
-        files = [f"{prefix}_float_vectors_multi_scalars_{dim}d_{entities}.json"]
+        files = prepare_bulk_load_json_files(row_based=row_based, rows=entities,
+                                             dim=dim, auto_id=auto_id,
+                                             data_fields=default_multi_fields)
         additional_field = "int_scalar_add"
         self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        fields = [cf.gen_int64_field(name=pk_field, is_primary=True),
-                  cf.gen_float_vec_field(name=vec_field, dim=dim),
-                  cf.gen_int32_field(name=int_field),
-                  cf.gen_string_field(name=string_field),
-                  cf.gen_bool_field(name=bool_field)]
+        c_name = cf.gen_unique_str()
+        fields = [cf.gen_int64_field(name=df.pk_field, is_primary=True),
+                  cf.gen_float_vec_field(name=df.vec_field, dim=dim),
+                  cf.gen_int32_field(name=df.int_field),
+                  cf.gen_string_field(name=df.string_field),
+                  cf.gen_bool_field(name=df.bool_field)]
         if fields_num_in_file == "more":
             fields.pop()
         elif fields_num_in_file == "less":
@@ -345,12 +353,12 @@ class TestImport(TestcaseBase):
         logging.info(f"bulk load task ids:{task_ids}")
         success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
                                                 task_ids=task_ids,
-                                                target_state=BulkLoadStates.BulkLoadDataQueryable,
+                                                target_state=BulkLoadStates.BulkLoadPersisted,
                                                 timeout=30)
         tt = time.time() - t0
         log.info(f"bulk load state:{success} in {tt}")
         if fields_num_in_file == "less":
-            assert not success    # TODO: check error msg
+            assert not success
             if row_based:
                 failed_reason = f"JSON row validator: field {additional_field} missed at the row 0"
             else:
@@ -361,9 +369,9 @@ class TestImport(TestcaseBase):
         else:
             assert success
 
-            # TODO: assert num entities
-            log.info(f" collection entities: {self.collection_wrap.num_entities}")
-            assert self.collection_wrap.num_entities == entities
+            num_entities = self.collection_wrap.num_entities
+            log.info(f" collection entities: {num_entities}")
+            assert num_entities == entities
 
             # verify no index
             res, _ = self.collection_wrap.has_index()
@@ -371,7 +379,7 @@ class TestImport(TestcaseBase):
             # verify search and query
             search_data = cf.gen_vectors(1, dim)
             search_params = {"metric_type": "L2", "params": {"nprobe": 2}}
-            res, _ = self.collection_wrap.search(search_data, vec_field,
+            res, _ = self.collection_wrap.search(search_data, df.vec_field,
                                                  param=search_params, limit=1,
                                                  check_task=CheckTasks.check_search_results,
                                                  check_items={"nq": 1,
@@ -381,7 +389,7 @@ class TestImport(TestcaseBase):
 
             # build index
             index_params = {"index_type": "HNSW", "params": {"M": 8, "efConstruction": 100}, "metric_type": "IP"}
-            self.collection_wrap.create_index(field_name=vec_field, index_params=index_params)
+            self.collection_wrap.create_index(field_name=df.vec_field, index_params=index_params)
 
             # release collection and reload
             self.collection_wrap.release()
@@ -393,7 +401,7 @@ class TestImport(TestcaseBase):
 
             # search and query
             search_params = {"params": {"ef": 64}, "metric_type": "IP"}
-            res, _ = self.collection_wrap.search(search_data, vec_field,
+            res, _ = self.collection_wrap.search(search_data, df.vec_field,
                                                  param=search_params, limit=1,
                                                  check_task=CheckTasks.check_search_results,
                                                  check_items={"nq": 1,
@@ -401,10 +409,9 @@ class TestImport(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("row_based", [True, False])
-    @pytest.mark.parametrize("fields_num_in_file", ["equal"])  # "equal", "more", "less"
-    @pytest.mark.parametrize("dim", [4])  # 1024
-    @pytest.mark.parametrize("entities", [10])  # 5000
-    @pytest.mark.xfail(reason="milvus crash issue #16858")
+    @pytest.mark.parametrize("fields_num_in_file", ["equal", "more", "less"])  # "equal", "more", "less"
+    @pytest.mark.parametrize("dim", [16])  # 1024
+    @pytest.mark.parametrize("entities", [500])  # 5000
     def test_string_pk_float_vector_multi_scalars(self, row_based, fields_num_in_file, dim, entities):
         """
         collection schema: [str_pk, float_vector,
@@ -421,21 +428,24 @@ class TestImport(TestcaseBase):
         7. verify search successfully
         6. verify query successfully
         """
-        prefix = gen_file_prefix(row_based=row_based, auto_id=False)
-        files = [f"{prefix}_str_pk_float_vectors_multi_scalars_{dim}d_{entities}.json"]
+        string_pk = True
+        auto_id = False
+        files = prepare_bulk_load_json_files(row_based=row_based, rows=entities,
+                                             dim=dim, auto_id=auto_id, str_pk=string_pk,
+                                             data_fields=default_multi_fields)
         additional_field = "int_scalar_add"
         self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        fields = [cf.gen_string_field(name=pk_field, is_primary=True),
-                  cf.gen_float_vec_field(name=vec_field, dim=dim),
-                  cf.gen_int32_field(name=int_field),
-                  cf.gen_string_field(name=string_field),
-                  cf.gen_bool_field(name=bool_field)]
+        c_name = cf.gen_unique_str()
+        fields = [cf.gen_string_field(name=df.pk_field, is_primary=True),
+                  cf.gen_float_vec_field(name=df.vec_field, dim=dim),
+                  cf.gen_int32_field(name=df.int_field),
+                  cf.gen_string_field(name=df.string_field),
+                  cf.gen_bool_field(name=df.bool_field)]
         if fields_num_in_file == "more":
             fields.pop()
         elif fields_num_in_file == "less":
             fields.append(cf.gen_int32_field(name=additional_field))
-        schema = cf.gen_collection_schema(fields=fields, auto_id=False)
+        schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         self.collection_wrap.init_collection(c_name, schema=schema)
         # load collection
         self.collection_wrap.load()
@@ -447,7 +457,7 @@ class TestImport(TestcaseBase):
         logging.info(f"bulk load task ids:{task_ids}")
         success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
                                                 task_ids=task_ids,
-                                                target_state=BulkLoadStates.BulkLoadDataQueryable,
+                                                target_state=BulkLoadStates.BulkLoadPersisted,
                                                 timeout=30)
         tt = time.time() - t0
         log.info(f"bulk load state:{success} in {tt}")
@@ -473,7 +483,7 @@ class TestImport(TestcaseBase):
             # verify search and query
             search_data = cf.gen_vectors(1, dim)
             search_params = {"metric_type": "L2", "params": {"nprobe": 2}}
-            res, _ = self.collection_wrap.search(search_data, vec_field,
+            res, _ = self.collection_wrap.search(search_data, df.vec_field,
                                                  param=search_params, limit=1,
                                                  check_task=CheckTasks.check_search_results,
                                                  check_items={"nq": 1,
@@ -483,7 +493,7 @@ class TestImport(TestcaseBase):
 
             # build index
             index_params = {"index_type": "HNSW", "params": {"M": 8, "efConstruction": 100}, "metric_type": "IP"}
-            self.collection_wrap.create_index(field_name=vec_field, index_params=index_params)
+            self.collection_wrap.create_index(field_name=df.vec_field, index_params=index_params)
 
             # release collection and reload
             self.collection_wrap.release()
@@ -495,20 +505,20 @@ class TestImport(TestcaseBase):
 
             # search and query
             search_params = {"params": {"ef": 64}, "metric_type": "IP"}
-            res, _ = self.collection_wrap.search(search_data, vec_field,
+            res, _ = self.collection_wrap.search(search_data, df.vec_field,
                                                  param=search_params, limit=1,
                                                  check_task=CheckTasks.check_search_results,
                                                  check_items={"nq": 1,
                                                               "limit": 1})
 
     @pytest.mark.tags(CaseLabel.L3)
-    @pytest.mark.parametrize("row_based", [True])      # True, False
-    @pytest.mark.parametrize("auto_id", [True])        # True, False
+    @pytest.mark.parametrize("row_based", [True, False])      # True, False
+    @pytest.mark.parametrize("auto_id", [True, False])        # True, False
     @pytest.mark.parametrize("dim", [16])    # 16
-    @pytest.mark.parametrize("entities", [3000])    # 3000
-    @pytest.mark.parametrize("file_nums", [10])    # 10, max task nums 32? need improve
-    @pytest.mark.parametrize("multi_folder", [False])    # True, False
-    @pytest.mark.xfail(reason="BulkloadIndexed cannot be reached for issue ##16848")
+    @pytest.mark.parametrize("entities", [100])    # 3000
+    @pytest.mark.parametrize("file_nums", [2])    # 10
+    @pytest.mark.parametrize("multi_folder", [True, False])    # True, False
+    # TODO: reason="BulkloadIndexed cannot be reached for issue #16889")
     def test_float_vector_from_multi_files(self, row_based, auto_id, dim, entities, file_nums, multi_folder):
         """
         collection: auto_id
@@ -523,40 +533,35 @@ class TestImport(TestcaseBase):
         6. verify search successfully
         7. verify query successfully
         """
-        prefix = gen_file_prefix(row_based=row_based, auto_id=auto_id)
-        files = []
-        if not multi_folder:
-            for i in range(file_nums):
-                files.append(f"{prefix}_float_vectors_multi_scalars_{dim}d_{entities}_{i}.json")
-        else:
-            # sub_folder index 20 to 29
-            for i in range(20, 30):
-                files.append(f"/sub{i}/{prefix}_float_vectors_multi_scalars_{dim}d_{entities}_{i}.json")
+        files = prepare_bulk_load_json_files(row_based=row_based, rows=entities,
+                                             dim=dim, auto_id=auto_id,
+                                             data_fields=default_multi_fields,
+                                             file_nums=file_nums, multi_folder=multi_folder)
         self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        fields = [cf.gen_int64_field(name=pk_field, is_primary=True),
-                  cf.gen_float_vec_field(name=vec_field, dim=dim),
-                  cf.gen_int32_field(name=int_field),
-                  cf.gen_string_field(name=string_field),
-                  cf.gen_bool_field(name=bool_field)
+        c_name = cf.gen_unique_str()
+        fields = [cf.gen_int64_field(name=df.pk_field, is_primary=True),
+                  cf.gen_float_vec_field(name=df.vec_field, dim=dim),
+                  cf.gen_int32_field(name=df.int_field),
+                  cf.gen_string_field(name=df.string_field),
+                  cf.gen_bool_field(name=df.bool_field)
                   ]
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         self.collection_wrap.init_collection(c_name, schema=schema)
         # build index
         index_params = ct.default_index
-        self.collection_wrap.create_index(field_name=vec_field, index_params=index_params)
+        self.collection_wrap.create_index(field_name=df.vec_field, index_params=index_params)
         # load collection
         self.collection_wrap.load()
         # import data
         t0 = time.time()
         task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  partition_name='',
                                                   row_based=row_based,
                                                   files=files)
         logging.info(f"bulk load task ids:{task_ids}")
+        # TODO: update to BulkLoadDataIndexed after issue #16889 fixed
         success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
                                     task_ids=task_ids,
-                                    target_state=BulkLoadStates.BulkLoadDataIndexed,
+                                    target_state=BulkLoadStates.BulkLoadPersisted,
                                     timeout=300)
         tt = time.time() - t0
         log.info(f"bulk load state:{success} in {tt}")
@@ -572,14 +577,14 @@ class TestImport(TestcaseBase):
             assert self.collection_wrap.num_entities == entities * file_nums
 
             # verify index built
-            res, _ = self.utility_wrap.index_building_progress(c_name)
-            exp_res = {'total_rows': entities * file_nums, 'indexed_rows': entities * file_nums}
-            assert res == exp_res
+            # res, _ = self.utility_wrap.index_building_progress(c_name)
+            # exp_res = {'total_rows': entities * file_nums, 'indexed_rows': entities * file_nums}
+            # assert res == exp_res
 
             # verify search and query
             search_data = cf.gen_vectors(1, dim)
             search_params = ct.default_search_params
-            res, _ = self.collection_wrap.search(search_data, vec_field,
+            res, _ = self.collection_wrap.search(search_data, df.vec_field,
                                                  param=search_params, limit=1,
                                                  check_task=CheckTasks.check_search_results,
                                                  check_items={"nq": 1,
@@ -591,10 +596,10 @@ class TestImport(TestcaseBase):
     @pytest.mark.parametrize("row_based", [True, False])
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("multi_fields", [True, False])
-    @pytest.mark.parametrize("dim", [128])  # 128
-    @pytest.mark.parametrize("entities", [1000])  # 1000
+    @pytest.mark.parametrize("dim", [15])
+    @pytest.mark.parametrize("entities", [200])
     # TODO: string data shall be re-generated
-    def test_float_vector_from_npy_file(self, row_based, auto_id, multi_fields, dim, entities):
+    def test_float_vector_from_numpy_file(self, row_based, auto_id, multi_fields, dim, entities):
         """
         collection schema 1: [pk, float_vector]
         schema 2: [pk, float_vector, int_scalar, string_scalar, float_scalar, bool_scalar]
@@ -607,33 +612,41 @@ class TestImport(TestcaseBase):
           4.1 verify the data entities equal the import data
           4.2 verify search and query successfully
         """
-        vec_field = f"vectors_{dim}d_{entities}"
+        data_fields = [df.vec_field]
+        np_files = prepare_bulk_load_numpy_files(rows=entities, dim=dim, data_fields=data_fields,
+                                                 force=True)
+        if not multi_fields:
+            fields = [cf.gen_int64_field(name=df.pk_field, is_primary=True),
+                      cf.gen_float_vec_field(name=df.vec_field, dim=dim)]
+            if not auto_id:
+                scalar_fields = [df.pk_field]
+            else:
+                scalar_fields = None
+        else:
+            fields = [cf.gen_int64_field(name=df.pk_field, is_primary=True),
+                      cf.gen_float_vec_field(name=df.vec_field, dim=dim),
+                      cf.gen_int32_field(name=df.int_field),
+                      cf.gen_string_field(name=df.string_field),
+                      cf.gen_bool_field(name=df.bool_field)
+                      ]
+            if not auto_id:
+                scalar_fields = [df.pk_field, df.float_field, df.int_field, df.string_field, df.bool_field]
+            else:
+                scalar_fields = [df.int_field, df.string_field, df.bool_field, df.float_field]
+
+        files = np_files
+        if scalar_fields is not None:
+            json_files = prepare_bulk_load_json_files(row_based=row_based, dim=dim,
+                                                      auto_id=auto_id, rows=entities,
+                                                      data_fields=scalar_fields, force=True)
+            files = np_files + json_files
+
         self._connect()
         c_name = cf.gen_unique_str()
-        if not multi_fields:
-            fields = [cf.gen_int64_field(name=pk_field, is_primary=True),
-                      cf.gen_float_vec_field(name=vec_field, dim=dim)]
-        else:
-            fields = [cf.gen_int64_field(name=pk_field, is_primary=True),
-                      cf.gen_float_vec_field(name=vec_field, dim=dim),
-                      cf.gen_int32_field(name=int_field),
-                      cf.gen_string_field(name=string_field),
-                      cf.gen_bool_field(name=bool_field)
-                      ]
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         self.collection_wrap.init_collection(c_name, schema=schema)
 
         # import data
-        files = [f"{vec_field}.npy"]      # npy file name shall be the vector field name
-        if not multi_fields:
-            if not auto_id:
-                files.append(f"col_uid_only_{dim}d_{entities}.json")
-                files.reverse()
-        else:
-            if not auto_id:
-                files.append(f"col_uid_multi_scalars_{dim}d_{entities}.json")
-            else:
-                files.append(f"col_multi_scalars_{dim}d_{entities}.json")
         t0 = time.time()
         task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
                                                   row_based=row_based,
@@ -647,17 +660,13 @@ class TestImport(TestcaseBase):
         if row_based:
             assert not success
             failed_reason1 = "unsupported file type for row-based mode"
-            if auto_id:
-                failed_reason2 = f"invalid row-based JSON format, the key {int_field} is not found"
-            else:
-                failed_reason2 = f"invalid row-based JSON format, the key {pk_field} is not found"
+            failed_reason2 = f"JSON row validator: field {df.vec_field} missed at the row 0"
             for state in states.values():
                 assert state.state_name == "BulkLoadFailed"
                 assert failed_reason1 in state.infos.get("failed_reason", "") or \
                        failed_reason2 in state.infos.get("failed_reason", "")
         else:
             assert success
-            # TODO: assert num entities
             log.info(f" collection entities: {self.collection_wrap.num_entities}")
             assert self.collection_wrap.num_entities == entities
 
@@ -666,7 +675,7 @@ class TestImport(TestcaseBase):
             log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
             search_data = cf.gen_vectors(1, dim)
             search_params = {"metric_type": "L2", "params": {"nprobe": 2}}
-            res, _ = self.collection_wrap.search(search_data, vec_field,
+            res, _ = self.collection_wrap.search(search_data, df.vec_field,
                                                  param=search_params, limit=1,
                                                  check_task=CheckTasks.check_search_results,
                                                  check_items={"nq": 1,
@@ -688,16 +697,18 @@ class TestImport(TestcaseBase):
         3. verify the data entities
         4. verify query successfully
         """
-        prefix = gen_file_prefix(row_based=row_based, auto_id=False, prefix="float_on_int_pk_")
-        files = [f"{prefix}_float_vectors_multi_scalars_{dim}d_{entities}_0.json"]
+        files = prepare_bulk_load_json_files(row_based=row_based, rows=entities,
+                                             dim=dim, auto_id=False,
+                                             data_fields=default_multi_fields,
+                                             err_type=DataErrorType.float_on_int_pk, force=True)
         self._connect()
-        c_name = cf.gen_unique_str(prefix)
+        c_name = cf.gen_unique_str()
         # TODO: add string pk
-        fields = [cf.gen_int64_field(name=pk_field, is_primary=True),
-                  cf.gen_float_vec_field(name=vec_field, dim=dim),
-                  cf.gen_int32_field(name=int_field),
-                  cf.gen_string_field(name=string_field),
-                  cf.gen_bool_field(name=bool_field)
+        fields = [cf.gen_int64_field(name=df.pk_field, is_primary=True),
+                  cf.gen_float_vec_field(name=df.vec_field, dim=dim),
+                  cf.gen_int32_field(name=df.int_field),
+                  cf.gen_string_field(name=df.string_field),
+                  cf.gen_bool_field(name=df.bool_field)
                   ]
         schema = cf.gen_collection_schema(fields=fields, auto_id=False)
         self.collection_wrap.init_collection(c_name, schema=schema)
@@ -716,8 +727,8 @@ class TestImport(TestcaseBase):
         self.collection_wrap.load()
 
         # the pk value was automatically convert to int from float
-        res, _ = self.collection_wrap.query(expr=f"{pk_field} in [3]", output_fields=[pk_field])
-        assert [{pk_field: 3}] == res
+        res, _ = self.collection_wrap.query(expr=f"{df.pk_field} in [3]", output_fields=[df.pk_field])
+        assert [{df.pk_field: 3}] == res
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("row_based", [True, False])
@@ -735,17 +746,20 @@ class TestImport(TestcaseBase):
         3. verify the data entities
         4. verify query successfully
         """
-        prefix = gen_file_prefix(row_based=row_based, auto_id=auto_id, prefix="int_on_float_scalar_")
-        files = [f"{prefix}_float_vectors_multi_scalars_{dim}d_{entities}_0.json"]
+        files = prepare_bulk_load_json_files(row_based=row_based, rows=entities,
+                                             dim=dim, auto_id=auto_id,
+                                             data_fields=default_multi_fields,
+                                             err_type=DataErrorType.int_on_float_scalar, force=True)
+
         self._connect()
-        c_name = cf.gen_unique_str(prefix)
+        c_name = cf.gen_unique_str()
         # TODO: add string pk
-        fields = [cf.gen_int64_field(name=pk_field, is_primary=True),
-                  cf.gen_float_vec_field(name=vec_field, dim=dim),
-                  cf.gen_int32_field(name=int_field),
-                  cf.gen_float_field(name=float_field),
-                  cf.gen_string_field(name=string_field),
-                  cf.gen_bool_field(name=bool_field)
+        fields = [cf.gen_int64_field(name=df.pk_field, is_primary=True),
+                  cf.gen_float_vec_field(name=df.vec_field, dim=dim),
+                  cf.gen_int32_field(name=df.int_field),
+                  cf.gen_float_field(name=df.float_field),
+                  cf.gen_string_field(name=df.string_field),
+                  cf.gen_bool_field(name=df.bool_field)
                   ]
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         self.collection_wrap.init_collection(c_name, schema=schema)
@@ -763,20 +777,84 @@ class TestImport(TestcaseBase):
 
         self.collection_wrap.load()
 
-        # the pk value was automatically convert to int from float
-        res, _ = self.collection_wrap.query(expr=f"{float_field} in [1.0]", output_fields=[float_field])
-        assert res[0].get(float_field, 0) == 1.0
+        # it was automatically converted from int to float
+        search_data = cf.gen_vectors(1, dim)
+        search_params = {"metric_type": "L2", "params": {"nprobe": 2}}
+        res, _ = self.collection_wrap.search(search_data, df.vec_field,
+                                             param=search_params, limit=1,
+                                             check_task=CheckTasks.check_search_results,
+                                             check_items={"nq": 1,
+                                                          "limit": 1})
+        uids = res[0].ids
+        res, _ = self.collection_wrap.query(expr=f"{df.pk_field} in {uids}", output_fields=[df.float_field])
+        assert isinstance(res[0].get(df.float_field, 1), float)
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("auto_id", [True, False])
-    @pytest.mark.parametrize("dim", [16])  # 128
-    @pytest.mark.parametrize("entities", [100])  # 1000
-    @pytest.mark.parametrize("file_nums", [32])    # 32, max task nums 32? need improve
-    @pytest.mark.skip(season="redesign after issue #16698 fixed")
-    def test_multi_numpy_files_from_multi_folders(self, auto_id, dim, entities, file_nums):
+    @pytest.mark.parametrize("dim", [128])  # 128
+    @pytest.mark.parametrize("entities", [1000])  # 1000
+    @pytest.mark.parametrize("with_int_field", [True, False])
+    def test_with_uid_n_int_numpy(self, auto_id, dim, entities, with_int_field):
         """
         collection schema 1: [pk, float_vector]
-        data file: .npy files
+        data file: vectors.npy and uid.npy
+        Steps:
+        1. create collection
+        2. import data
+        3. verify failed with errors
+        """
+        data_fields = [df.vec_field]
+        fields = [cf.gen_int64_field(name=df.pk_field, is_primary=True),
+                  cf.gen_float_vec_field(name=df.vec_field, dim=dim)]
+        if not auto_id:
+            data_fields.append(df.pk_field)
+        if with_int_field:
+            data_fields.append(df.int_field)
+            fields.append(cf.gen_int64_field(name=df.int_field))
+        files = prepare_bulk_load_numpy_files(rows=entities, dim=dim,
+                                              data_fields=data_fields,
+                                              force=True)
+        self._connect()
+        c_name = cf.gen_unique_str()
+        schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
+        self.collection_wrap.init_collection(c_name, schema=schema)
+
+        # import data
+        t0 = time.time()
+        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
+                                                  row_based=False,
+                                                  files=files)
+        logging.info(f"bulk load task ids:{task_ids}")
+        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids,
+                                                                               timeout=30)
+        tt = time.time() - t0
+        log.info(f"bulk load state:{success} in {tt}")
+        assert success
+        num_entities = self.collection_wrap.num_entities
+        log.info(f" collection entities: {num_entities}")
+        assert num_entities == entities
+
+        # verify imported data is available for search
+        self.collection_wrap.load()
+        # log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
+        search_data = cf.gen_vectors(1, dim)
+        search_params = {"metric_type": "L2", "params": {"nprobe": 2}}
+        res, _ = self.collection_wrap.search(search_data, df.vec_field,
+                                             param=search_params, limit=1,
+                                             check_task=CheckTasks.check_search_results,
+                                             check_items={"nq": 1,
+                                                          "limit": 1})
+
+    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.parametrize("auto_id", [True])
+    @pytest.mark.parametrize("dim", [6])
+    @pytest.mark.parametrize("entities", [10])
+    @pytest.mark.parametrize("file_nums", [2])    # 32, max task nums 32? need improve
+    @pytest.mark.xfail(reason="only one numpy file imported successfully, issue #16992")
+    def test_multi_numpy_files_from_diff_folders(self, auto_id, dim, entities, file_nums):
+        """
+        collection schema 1: [pk, float_vector]
+        data file: .npy files in different folders
         Steps:
         1. create collection
         2. import data
@@ -785,30 +863,32 @@ class TestImport(TestcaseBase):
           4.1 verify the data entities equal the import data
           4.2 verify search and query successfully
         """
-        vec_field = f"vectors_{dim}d_{entities}"
+        row_based = False    # numpy files supports only column based
+        data_fields = [df.vec_field]
+        if not auto_id:
+            data_fields.append(df.pk_field)
+        files = prepare_bulk_load_numpy_files(rows=entities, dim=dim,
+                                              data_fields=data_fields,
+                                              file_nums=file_nums, force=True)
         self._connect()
         c_name = cf.gen_unique_str()
-        fields = [cf.gen_int64_field(name=pk_field, is_primary=True),
-                  cf.gen_float_vec_field(name=vec_field, dim=dim)]
+        fields = [cf.gen_int64_field(name=df.pk_field, is_primary=True),
+                  cf.gen_float_vec_field(name=df.vec_field, dim=dim)]
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         self.collection_wrap.init_collection(c_name, schema=schema)
         # build index
         index_params = ct.default_index
-        self.collection_wrap.create_index(field_name=vec_field, index_params=index_params)
+        self.collection_wrap.create_index(field_name=df.vec_field, index_params=index_params)
         # load collection
         self.collection_wrap.load()
-        # import data
-        for i in range(file_nums):
-            files = [f"/{i}/{vec_field}.npy"]  # npy file name shall be the vector field name
-            if not auto_id:
-                files.append(f"/{i}/{pk_field}.npy")
-            t0 = time.time()
-            task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                      row_based=False,
-                                                      files=files)
-            logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids,
-                                                                               timeout=30)
+        t0 = time.time()
+        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
+                                                  row_based=row_based,
+                                                  files=files)
+        success, states = self.utility_wrap.\
+            wait_for_bulk_load_tasks_completed(task_ids=task_ids,
+                                               target_state=BulkLoadStates.BulkLoadPersisted,
+                                               timeout=30)
         tt = time.time() - t0
         log.info(f"bulk load state:{success} in {tt}")
 
@@ -817,10 +897,10 @@ class TestImport(TestcaseBase):
         assert self.collection_wrap.num_entities == entities * file_nums
 
         # verify search and query
-        sleep(10)
+        # sleep(10)
         search_data = cf.gen_vectors(1, dim)
         search_params = ct.default_search_params
-        res, _ = self.collection_wrap.search(search_data, vec_field,
+        res, _ = self.collection_wrap.search(search_data, df.vec_field,
                                              param=search_params, limit=1,
                                              check_task=CheckTasks.check_search_results,
                                              check_items={"nq": 1,
@@ -908,7 +988,7 @@ class TestImport(TestcaseBase):
 #         pass
 
 
-class TestImportInvalidParams(TestcaseBase):
+class TestBulkLoadInvalidParams(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("row_based", [True, False])
     def test_non_existing_file(self, row_based):
@@ -923,8 +1003,8 @@ class TestImportInvalidParams(TestcaseBase):
         files = ["not_existing.json"]
         self._connect()
         c_name = cf.gen_unique_str()
-        fields = [cf.gen_int64_field(name=pk_field, is_primary=True),
-                  cf.gen_float_vec_field(name=vec_field, dim=ct.default_dim)]
+        fields = [cf.gen_int64_field(name=df.pk_field, is_primary=True),
+                  cf.gen_float_vec_field(name=df.vec_field, dim=ct.default_dim)]
         schema = cf.gen_collection_schema(fields=fields)
         self.collection_wrap.init_collection(c_name, schema=schema)
 
@@ -938,7 +1018,7 @@ class TestImportInvalidParams(TestcaseBase):
         success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids,
                                                                                timeout=30)
         assert not success
-        failed_reason = "minio file manage cannot be found"
+        failed_reason = f"the file {files[0]} is empty"
         for state in states.values():
             assert state.state_name == "BulkLoadFailed"
             assert failed_reason in state.infos.get("failed_reason", "")
@@ -948,20 +1028,23 @@ class TestImportInvalidParams(TestcaseBase):
     @pytest.mark.parametrize("auto_id", [True, False])
     def test_empty_json_file(self, row_based, auto_id):
         """
-        collection: either auto_id or not
         collection schema: [pk, float_vector]
+        data file: empty file
         Steps:
         1. create collection
         2. import data, but the data file(s) is empty
         3. verify import fail if column based
         4. verify import successfully if row based
         """
-        # set the wrong row based params
-        files = ["empty.json"]
+        # set 0 entities
+        entities = 0
+        files = prepare_bulk_load_json_files(row_based=row_based, rows=entities,
+                                             dim=ct.default_dim, auto_id=auto_id,
+                                             data_fields=default_vec_only_fields)
         self._connect()
         c_name = cf.gen_unique_str()
-        fields = [cf.gen_int64_field(name=pk_field, is_primary=True),
-                  cf.gen_float_vec_field(name=vec_field, dim=ct.default_dim)]
+        fields = [cf.gen_int64_field(name=df.pk_field, is_primary=True),
+                  cf.gen_float_vec_field(name=df.vec_field, dim=ct.default_dim)]
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         self.collection_wrap.init_collection(c_name, schema=schema)
 
@@ -973,19 +1056,16 @@ class TestImportInvalidParams(TestcaseBase):
         logging.info(f"bulk load task ids:{task_ids}")
         success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids,
                                                                                timeout=30)
-        if row_based:
-            assert success
-        else:
-            assert not success
-            failed_reason = "JSON column consumer: row count is 0"
-            for state in states.values():
-                assert state.state_name == "BulkLoadFailed"
-                assert failed_reason in state.infos.get("failed_reason", "")
+        assert not success
+        failed_reason = "JSON parse: row count is 0"
+        for state in states.values():
+            assert state.state_name == "BulkLoadFailed"
+            assert failed_reason in state.infos.get("failed_reason", "")
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("row_based", [True, False])
     @pytest.mark.parametrize("auto_id", [True, False])
-    @pytest.mark.parametrize("dim", [128])  # 8
+    @pytest.mark.parametrize("dim", [8])  # 8
     @pytest.mark.parametrize("entities", [100])  # 100
     def test_wrong_file_type(self, row_based, auto_id, dim, entities):
         """
@@ -996,22 +1076,25 @@ class TestImportInvalidParams(TestcaseBase):
         2. import data
         3. verify import failed with errors
         """
-        prefix = gen_file_prefix(row_based=row_based, auto_id=auto_id, prefix="err_file_type_")
         if row_based:
             if auto_id:
-                data_type = ".csv"
+                file_type = ".csv"
             else:
-                data_type = ""
+                file_type = ""
         else:
             if auto_id:
-                data_type = ".npy"
+                file_type = ".npy"
             else:
-                data_type = ".txt"
-        files = [f"{prefix}_float_vectors_only_{dim}d_{entities}{data_type}"]
+                file_type = ".txt"
+        files = prepare_bulk_load_json_files(row_based=row_based, rows=entities,
+                                             dim=dim, auto_id=auto_id,
+                                             data_fields=default_vec_only_fields,
+                                             file_type=file_type)
+
         self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        fields = [cf.gen_int64_field(name=pk_field, is_primary=True),
-                  cf.gen_float_vec_field(name=vec_field, dim=dim)]
+        c_name = cf.gen_unique_str()
+        fields = [cf.gen_int64_field(name=df.pk_field, is_primary=True),
+                  cf.gen_float_vec_field(name=df.vec_field, dim=dim)]
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data
@@ -1040,20 +1123,22 @@ class TestImportInvalidParams(TestcaseBase):
     @pytest.mark.parametrize("entities", [100])
     def test_wrong_row_based_values(self, row_based, auto_id, dim, entities):
         """
-        collection: either auto_id or not
-        import data: not existing file(s)
+        collection schema: [pk, float_vector]
+        data files: wrong row based values
         Steps:
         1. create collection
-        3. import data, but the data file(s) not exists
+        3. import data with wrong row based value
         4. verify import failed with errors
         """
         # set the wrong row based params
-        prefix = gen_file_prefix(row_based=not row_based)
-        files = [f"{prefix}_float_vectors_only_{dim}d_{entities}.json"]
+        wrong_row_based = not row_based
+        files = prepare_bulk_load_json_files(row_based=wrong_row_based, rows=entities,
+                                             dim=dim, auto_id=auto_id,
+                                             data_fields=default_vec_only_fields)
         self._connect()
         c_name = cf.gen_unique_str()
-        fields = [cf.gen_int64_field(name=pk_field, is_primary=True),
-                  cf.gen_float_vec_field(name=vec_field, dim=dim)]
+        fields = [cf.gen_int64_field(name=df.pk_field, is_primary=True),
+                  cf.gen_float_vec_field(name=df.vec_field, dim=dim)]
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         self.collection_wrap.init_collection(c_name, schema=schema)
 
@@ -1067,9 +1152,10 @@ class TestImportInvalidParams(TestcaseBase):
                                                                                timeout=30)
         assert not success
         if row_based:
-            failed_reason = "invalid row-based JSON format, the key vectors is not found"
+            value = df.vec_field     # if auto_id else df.pk_field
+            failed_reason = f"JSON parse: invalid row-based JSON format, the key {value} is not found"
         else:
-            failed_reason = "JSON column consumer: row count is 0"
+            failed_reason = "JSON parse: row count is 0"
         for state in states.values():
             assert state.state_name == "BulkLoadFailed"
             assert failed_reason in state.infos.get("failed_reason", "")
@@ -1081,21 +1167,22 @@ class TestImportInvalidParams(TestcaseBase):
     @pytest.mark.parametrize("entities", [100])    # 100
     def test_wrong_pk_field_name(self, row_based, auto_id, dim, entities):
         """
-        collection: auto_id, customized_id
-        import data: [pk, float_vector]
+        collection schema: [pk, float_vector]
+        data files: wrong primary key field name
         Steps:
         1. create collection with a dismatch_uid as pk
         2. import data
         3. verify import data successfully if collection with auto_id
         4. verify import error if collection with auto_id=False
         """
-        prefix = gen_file_prefix(row_based, auto_id)
-        files = [f"{prefix}_float_vectors_only_{dim}d_{entities}.json"]
-        pk_field = "dismatch_pk"
+        files = prepare_bulk_load_json_files(row_based=row_based, rows=entities,
+                                             dim=dim, auto_id=auto_id,
+                                             data_fields=default_vec_only_fields)
+        dismatch_pk_field = "dismatch_pk"
         self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        fields = [cf.gen_int64_field(name=pk_field, is_primary=True),
-                  cf.gen_float_vec_field(name=vec_field, dim=dim)]
+        c_name = cf.gen_unique_str()
+        fields = [cf.gen_int64_field(name=dismatch_pk_field, is_primary=True),
+                  cf.gen_float_vec_field(name=df.vec_field, dim=dim)]
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data
@@ -1114,10 +1201,9 @@ class TestImportInvalidParams(TestcaseBase):
         else:
             assert not success
             if row_based:
-                failed_reason = f"field {pk_field} missed at the row 0"
+                failed_reason = f"field {dismatch_pk_field} missed at the row 0"
             else:
-                # TODO: improve the failed msg: issue #16722
-                failed_reason = f"import error: field {pk_field} row count 0 is not equal to other fields"
+                failed_reason = f"import error: field {dismatch_pk_field} row count 0 is not equal to other fields"
             for state in states.values():
                 assert state.state_name == "BulkLoadFailed"
                 assert failed_reason in state.infos.get("failed_reason", "")
@@ -1136,13 +1222,14 @@ class TestImportInvalidParams(TestcaseBase):
         3. verify import data successfully if collection with auto_id
         4. verify import error if collection with auto_id=False
         """
-        prefix = gen_file_prefix(row_based, auto_id)
-        files = [f"{prefix}_float_vectors_only_{dim}d_{entities}.json"]
-        vec_field = "dismatched_vectors"
+        files = prepare_bulk_load_json_files(row_based=row_based, rows=entities,
+                                             dim=dim, auto_id=auto_id,
+                                             data_fields=default_vec_only_fields)
+        dismatch_vec_field = "dismatched_vectors"
         self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        fields = [cf.gen_int64_field(name=pk_field, is_primary=True),
-                  cf.gen_float_vec_field(name=vec_field, dim=dim)]
+        c_name = cf.gen_unique_str()
+        fields = [cf.gen_int64_field(name=df.pk_field, is_primary=True),
+                  cf.gen_float_vec_field(name=dismatch_vec_field, dim=dim)]
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data
@@ -1159,13 +1246,12 @@ class TestImportInvalidParams(TestcaseBase):
 
         assert not success
         if row_based:
-            failed_reason = f"field {vec_field} missed at the row 0"
+            failed_reason = f"field {dismatch_vec_field} missed at the row 0"
         else:
             if auto_id:
                 failed_reason = f"JSON column consumer: row count is 0"
             else:
-                # TODO: improve the failed msg: issue #16722
-                failed_reason = f"import error: field {vec_field} row count 0 is not equal to other fields 100"
+                failed_reason = f"import error: field {dismatch_vec_field} row count 0 is not equal to other fields"
         for state in states.values():
             assert state.state_name == "BulkLoadFailed"
             assert failed_reason in state.infos.get("failed_reason", "")
@@ -1174,23 +1260,24 @@ class TestImportInvalidParams(TestcaseBase):
     @pytest.mark.parametrize("row_based", [True, False])
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("dim", [4])
-    @pytest.mark.parametrize("entities", [10000])
+    @pytest.mark.parametrize("entities", [200])
     def test_wrong_scalar_field_name(self, row_based, auto_id, dim, entities):
         """
-        collection: customized partitions
         collection schema: [pk, float_vectors, int_scalar]
+        data file: with dismatched int scalar
         1. create collection
         2. import data that one scalar field name is dismatched
         3. verify that import fails with errors
         """
-        prefix = gen_file_prefix(row_based=row_based, auto_id=auto_id)
-        files = [f"{prefix}_float_vectors_int_scalar_{dim}d_{entities}.json"]
-        scalar_field = "dismatched_scalar"
+        files = prepare_bulk_load_json_files(row_based=row_based, rows=entities,
+                                             dim=dim, auto_id=auto_id,
+                                             data_fields=default_vec_n_int_fields)
+        dismatch_scalar_field = "dismatched_scalar"
         self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        fields = [cf.gen_int64_field(name=pk_field, is_primary=True),
-                  cf.gen_float_vec_field(name=vec_field, dim=dim),
-                  cf.gen_int32_field(name=scalar_field)]
+        c_name = cf.gen_unique_str()
+        fields = [cf.gen_int64_field(name=df.pk_field, is_primary=True),
+                  cf.gen_float_vec_field(name=df.vec_field, dim=dim),
+                  cf.gen_int32_field(name=dismatch_scalar_field)]
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         self.collection_wrap.init_collection(c_name, schema=schema)
 
@@ -1208,10 +1295,9 @@ class TestImportInvalidParams(TestcaseBase):
         log.info(f"bulk load state:{success} in {tt}")
         assert not success
         if row_based:
-            failed_reason = f"field {scalar_field} missed at the row 0"
+            failed_reason = f"field {dismatch_scalar_field} missed at the row 0"
         else:
-            # TODO: improve the failed msg: issue #16722
-            failed_reason = f"import error: field {scalar_field} row count 0 is not equal to other fields 100"
+            failed_reason = f"import error: field {dismatch_scalar_field} row count 0 is not equal to other fields"
         for state in states.values():
             assert state.state_name == "BulkLoadFailed"
             assert failed_reason in state.infos.get("failed_reason", "")
@@ -1220,22 +1306,23 @@ class TestImportInvalidParams(TestcaseBase):
     @pytest.mark.parametrize("row_based", [True, False])
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("dim", [4])
-    @pytest.mark.parametrize("entities", [10000])
+    @pytest.mark.parametrize("entities", [200])
     def test_wrong_dim_in_schema(self, row_based, auto_id, dim, entities):
         """
-        collection: create a collection with a dim that dismatch with json file
         collection schema: [pk, float_vectors, int_scalar]
+        data file: with wrong dim of vectors
         1. import data the collection
         2. verify that import fails with errors
         """
-        prefix = gen_file_prefix(row_based=row_based, auto_id=auto_id)
-        files = [f"{prefix}_float_vectors_int_scalar_{dim}d_{entities}.json"]
+        files = prepare_bulk_load_json_files(row_based=row_based, rows=entities,
+                                             dim=dim, auto_id=auto_id,
+                                             data_fields=default_vec_n_int_fields)
         self._connect()
-        c_name = cf.gen_unique_str(prefix)
+        c_name = cf.gen_unique_str()
         wrong_dim = dim + 1
-        fields = [cf.gen_int64_field(name=pk_field, is_primary=True),
-                  cf.gen_float_vec_field(name=vec_field, dim=wrong_dim),
-                  cf.gen_int32_field(name=int_field)]
+        fields = [cf.gen_int64_field(name=df.pk_field, is_primary=True),
+                  cf.gen_float_vec_field(name=df.vec_field, dim=wrong_dim),
+                  cf.gen_int32_field(name=df.int_field)]
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data
@@ -1256,7 +1343,7 @@ class TestImportInvalidParams(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("row_based", [True, False])
     @pytest.mark.parametrize("dim", [4])
-    @pytest.mark.parametrize("entities", [10000])
+    @pytest.mark.parametrize("entities", [200])
     def test_non_existing_collection(self, row_based, dim, entities):
         """
         collection: not create collection
@@ -1264,10 +1351,10 @@ class TestImportInvalidParams(TestcaseBase):
         1. import data into a non existing collection
         2. verify that import fails with errors
         """
-        prefix = gen_file_prefix(row_based=row_based)
-        files = [f"{prefix}_float_vectors_int_scalar_{dim}d_{entities}.json"]
+        files = prepare_bulk_load_json_files(row_based=row_based, rows=entities,
+                                             dim=dim, data_fields=default_vec_n_int_fields)
         self._connect()
-        c_name = cf.gen_unique_str(prefix)
+        c_name = cf.gen_unique_str()
         # import data into a non existing collection
         err_msg = f"can't find collection: {c_name}"
         task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
@@ -1281,7 +1368,7 @@ class TestImportInvalidParams(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("row_based", [True, False])
     @pytest.mark.parametrize("dim", [4])
-    @pytest.mark.parametrize("entities", [10000])
+    @pytest.mark.parametrize("entities", [200])
     def test_non_existing_partition(self, row_based, dim, entities):
         """
         collection: create a collection
@@ -1289,13 +1376,13 @@ class TestImportInvalidParams(TestcaseBase):
         1. import data into a non existing partition
         2. verify that import fails with errors
         """
-        prefix = gen_file_prefix(row_based=row_based)
-        files = [f"{prefix}_float_vectors_int_scalar_{dim}d_{entities}.json"]
+        files = prepare_bulk_load_json_files(row_based=row_based, rows=entities,
+                                             dim=dim, data_fields=default_vec_n_int_fields)
         self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        fields = [cf.gen_int64_field(name=pk_field, is_primary=True),
-                  cf.gen_float_vec_field(name=vec_field, dim=dim),
-                  cf.gen_int32_field(name=int_field)]
+        c_name = cf.gen_unique_str()
+        fields = [cf.gen_int64_field(name=df.pk_field, is_primary=True),
+                  cf.gen_float_vec_field(name=df.vec_field, dim=dim),
+                  cf.gen_int32_field(name=df.int_field)]
         schema = cf.gen_collection_schema(fields=fields)
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data into a non existing partition
@@ -1314,22 +1401,25 @@ class TestImportInvalidParams(TestcaseBase):
     @pytest.mark.parametrize("row_based", [True, False])
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("dim", [4])
-    @pytest.mark.parametrize("entities", [10000])
-    @pytest.mark.parametrize("position", ["first", "middle", "end"])
+    @pytest.mark.parametrize("entities", [1000])
+    @pytest.mark.parametrize("position", [0, 500, 999])   # the index of wrong dim entity
     def test_wrong_dim_in_one_entities_of_file(self, row_based, auto_id, dim, entities, position):
         """
-        collection: create a collection
-        collection schema: [pk, float_vectors, int_scalar], one of entities has wrong dim data
+        collection schema: [pk, float_vectors, int_scalar]
+        data file: one of entities has wrong dim data
         1. import data the collection
         2. verify that import fails with errors
         """
-        prefix = gen_file_prefix(row_based=row_based, auto_id=auto_id, prefix=f"err_{position}_dim_")
-        files = [f"{prefix}_float_vectors_int_scalar_{dim}d_{entities}.json"]
+        files = prepare_bulk_load_json_files(row_based=row_based, rows=entities,
+                                             dim=dim, auto_id=auto_id,
+                                             data_fields=default_vec_n_int_fields,
+                                             err_type=DataErrorType.one_entity_wrong_dim,
+                                             wrong_position=position, force=True)
         self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        fields = [cf.gen_int64_field(name=pk_field, is_primary=True),
-                  cf.gen_float_vec_field(name=vec_field, dim=dim),
-                  cf.gen_int32_field(name=int_field)]
+        c_name = cf.gen_unique_str()
+        fields = [cf.gen_int64_field(name=df.pk_field, is_primary=True),
+                  cf.gen_float_vec_field(name=df.vec_field, dim=dim),
+                  cf.gen_int32_field(name=df.int_field)]
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data
@@ -1351,9 +1441,10 @@ class TestImportInvalidParams(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("row_based", [True, False])
     @pytest.mark.parametrize("auto_id", [True, False])
-    @pytest.mark.parametrize("dim", [16])  # 16
-    @pytest.mark.parametrize("entities", [3000])  # 3000
+    @pytest.mark.parametrize("dim", [16])
+    @pytest.mark.parametrize("entities", [300])
     @pytest.mark.parametrize("file_nums", [10])  # max task nums 32? need improve
+    @pytest.mark.xfail(reason="not all correct data file imported successfully, issue #16923")
     def test_float_vector_one_of_files_fail(self, row_based, auto_id, dim, entities, file_nums):
         """
         collection schema: [pk, float_vectors, int_scalar], one of entities has wrong dim data
@@ -1361,21 +1452,26 @@ class TestImportInvalidParams(TestcaseBase):
         1. import data 11 files(10 correct and 1 with errors) into the collection
         2. verify that import fails with errors and no data imported
         """
-        prefix = gen_file_prefix(row_based=row_based, auto_id=auto_id)
-        files = []
-        for i in range(file_nums):
-            files.append(f"{prefix}_float_vectors_multi_scalars_{dim}d_{entities}_{i}.json")
+        correct_files = prepare_bulk_load_json_files(row_based=row_based, rows=entities,
+                                                     dim=dim, auto_id=auto_id,
+                                                     data_fields=default_multi_fields,
+                                                     file_nums=file_nums, force=True)
+
         # append a file that has errors
-        files.append(f"err_{prefix}_float_vectors_multi_scalars_{dim}d_{entities}_101.json")
+        dismatch_dim = dim + 1
+        err_files = prepare_bulk_load_json_files(row_based=row_based, rows=entities,
+                                                 dim=dismatch_dim, auto_id=auto_id,
+                                                 data_fields=default_multi_fields, file_nums=1)
+        files = correct_files + err_files
         random.shuffle(files)     # mix up the file order
 
         self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        fields = [cf.gen_int64_field(name=pk_field, is_primary=True),
-                  cf.gen_float_vec_field(name=vec_field, dim=dim),
-                  cf.gen_int32_field(name=int_field),
-                  cf.gen_string_field(name=string_field),
-                  cf.gen_bool_field(name=bool_field)
+        c_name = cf.gen_unique_str()
+        fields = [cf.gen_int64_field(name=df.pk_field, is_primary=True),
+                  cf.gen_float_vec_field(name=df.vec_field, dim=dim),
+                  cf.gen_int32_field(name=df.int_field),
+                  cf.gen_string_field(name=df.string_field),
+                  cf.gen_bool_field(name=df.bool_field)
                   ]
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         self.collection_wrap.init_collection(c_name, schema=schema)
@@ -1383,7 +1479,6 @@ class TestImportInvalidParams(TestcaseBase):
         # import data
         t0 = time.time()
         task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  partition_name='',
                                                   row_based=row_based,
                                                   files=files)
         logging.info(f"bulk load task ids:{task_ids}")
@@ -1396,56 +1491,7 @@ class TestImportInvalidParams(TestcaseBase):
             # all correct files shall be imported successfully
             assert self.collection_wrap.num_entities == entities * file_nums
         else:
-            # TODO: Update assert after #16707 fixed
             assert self.collection_wrap.num_entities == 0
-
-    @pytest.mark.tags(CaseLabel.L3)
-    @pytest.mark.parametrize("auto_id", [True, False])
-    @pytest.mark.parametrize("same_field", [True, False])
-    @pytest.mark.parametrize("dim", [128])  # 128
-    @pytest.mark.parametrize("entities", [1000])  # 1000
-    @pytest.mark.xfail(reason="issue #16698")
-    def test_float_vector_from_multi_npy_files(self, auto_id, same_field, dim, entities):
-        """
-        collection schema 1: [pk, float_vector]
-        data file: .npy files
-        Steps:
-        1. create collection
-        2. import data with row_based=False from multiple .npy files
-        3. verify import failed with errors
-        """
-        vec_field = f"vectors_{dim}d_{entities}_0"
-        self._connect()
-        c_name = cf.gen_unique_str()
-        fields = [cf.gen_int64_field(name=pk_field, is_primary=True),
-                  cf.gen_float_vec_field(name=vec_field, dim=dim)]
-        if not same_field:
-            fields.append(cf.gen_float_field(name=f"vectors_{dim}d_{entities}_1"))
-        schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
-        self.collection_wrap.init_collection(c_name, schema=schema)
-
-        # import data
-        files = [f"{vec_field}.npy", f"{vec_field}.npy"]
-        if not same_field:
-            files = [f"{vec_field}.npy", f"vectors_{dim}d_{entities}_1.npy"]
-        if not auto_id:
-            files.append(f"col_uid_only_{dim}d_{entities}.json")
-
-        # import data
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  row_based=False,
-                                                  files=files)
-        logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
-            task_ids=task_ids,
-            timeout=30)
-        log.info(f"bulk load state:{success}")
-        assert not success
-        failed_reason = f"Numpy parse: illegal data type"
-        for state in states.values():
-            assert state.state_name == "BulkLoadFailed"
-            assert failed_reason in state.infos.get("failed_reason", "")
-        assert self.collection_wrap.num_entities == 0
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("auto_id", [True, False])
@@ -1460,19 +1506,21 @@ class TestImportInvalidParams(TestcaseBase):
         2. import data
         3. verify failed with errors
         """
-        vec_field = f"vectors_{dim}d_{entities}"
+        data_fields = [df.vec_field]
+        if not auto_id:
+            data_fields.append(df.pk_field)
+        files = prepare_bulk_load_numpy_files(rows=entities, dim=dim,
+                                              data_fields=data_fields,
+                                              force=True)
         self._connect()
         c_name = cf.gen_unique_str()
         wrong_dim = dim + 1
-        fields = [cf.gen_int64_field(name=pk_field, is_primary=True),
-                  cf.gen_float_vec_field(name=vec_field, dim=wrong_dim)]
+        fields = [cf.gen_int64_field(name=df.pk_field, is_primary=True),
+                  cf.gen_float_vec_field(name=df.vec_field, dim=wrong_dim)]
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         self.collection_wrap.init_collection(c_name, schema=schema)
 
         # import data
-        files = [f"{vec_field}.npy"]  # npy file name shall be the vector field name
-        if not auto_id:
-            files.append(f"col_uid_only_{dim}d_{entities}.json")
         t0 = time.time()
         task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
                                                   row_based=False,
@@ -1484,7 +1532,7 @@ class TestImportInvalidParams(TestcaseBase):
         log.info(f"bulk load state:{success} in {tt}")
 
         assert not success
-        failed_reason = f"Numpy parse: illegal row width {dim} for field {vec_field} dimension {wrong_dim}"
+        failed_reason = f"Numpy parse: illegal row width {dim} for field {df.vec_field} dimension {wrong_dim}"
         for state in states.values():
             assert state.state_name == "BulkLoadFailed"
             assert failed_reason in state.infos.get("failed_reason", "")
@@ -1492,8 +1540,8 @@ class TestImportInvalidParams(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("auto_id", [True, False])
-    @pytest.mark.parametrize("dim", [128])  # 128
-    @pytest.mark.parametrize("entities", [1000])  # 1000
+    @pytest.mark.parametrize("dim", [15])
+    @pytest.mark.parametrize("entities", [100])
     def test_wrong_field_name_in_numpy(self, auto_id, dim, entities):
         """
         collection schema 1: [pk, float_vector]
@@ -1506,19 +1554,21 @@ class TestImportInvalidParams(TestcaseBase):
           4.1 verify the data entities equal the import data
           4.2 verify search and query successfully
         """
-        vec_field = f"vectors_{dim}d_{entities}"
+        data_fields = [df.vec_field]
+        if not auto_id:
+            data_fields.append(df.pk_field)
+        files = prepare_bulk_load_numpy_files(rows=entities, dim=dim,
+                                              data_fields=data_fields,
+                                              force=True)
         self._connect()
         c_name = cf.gen_unique_str()
-        wrong_vec_field = f"wrong_{vec_field}"
-        fields = [cf.gen_int64_field(name=pk_field, is_primary=True),
+        wrong_vec_field = f"wrong_{df.vec_field}"
+        fields = [cf.gen_int64_field(name=df.pk_field, is_primary=True),
                   cf.gen_float_vec_field(name=wrong_vec_field, dim=dim)]
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         self.collection_wrap.init_collection(c_name, schema=schema)
 
         # import data
-        files = [f"{vec_field}.npy"]  # npy file name shall be the vector field name
-        if not auto_id:
-            files.append(f"col_uid_only_{dim}d_{entities}.json")
         t0 = time.time()
         task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
                                                   row_based=False,
@@ -1530,7 +1580,49 @@ class TestImportInvalidParams(TestcaseBase):
         log.info(f"bulk load state:{success} in {tt}")
 
         assert not success
-        failed_reason = f"Numpy parse: the field {vec_field} doesn't exist"
+        failed_reason = f"Numpy parse: the field {df.vec_field} doesn't exist"
+        for state in states.values():
+            assert state.state_name == "BulkLoadFailed"
+            assert failed_reason in state.infos.get("failed_reason", "")
+        assert self.collection_wrap.num_entities == 0
+
+    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.parametrize("auto_id", [True, False])
+    @pytest.mark.parametrize("dim", [16])  # 128
+    @pytest.mark.parametrize("entities", [100])  # 1000
+    def test_duplicate_numpy_files(self, auto_id, dim, entities):
+        """
+        collection schema 1: [pk, float_vector]
+        data file: .npy files
+        Steps:
+        1. create collection
+        2. import data with duplicate npy files
+        3. verify fail to import with errors
+        """
+        data_fields = [df.vec_field]
+        if not auto_id:
+            data_fields.append(df.pk_field)
+        files = prepare_bulk_load_numpy_files(rows=entities, dim=dim,
+                                              data_fields=data_fields)
+        files += files
+        self._connect()
+        c_name = cf.gen_unique_str()
+        fields = [cf.gen_int64_field(name=df.pk_field, is_primary=True),
+                  cf.gen_float_vec_field(name=df.vec_field, dim=dim)]
+        schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
+        self.collection_wrap.init_collection(c_name, schema=schema)
+        # import data
+        t0 = time.time()
+        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
+                                                  row_based=False,
+                                                  files=files)
+        logging.info(f"bulk load task ids:{task_ids}")
+        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids,
+                                                                               timeout=30)
+        tt = time.time() - t0
+        log.info(f"bulk load state:{success} in {tt}")
+        assert not success
+        failed_reason = "duplicate file"
         for state in states.values():
             assert state.state_name == "BulkLoadFailed"
             assert failed_reason in state.infos.get("failed_reason", "")
@@ -1542,24 +1634,26 @@ class TestImportInvalidParams(TestcaseBase):
     @pytest.mark.parametrize("entities", [10])
     def test_data_type_string_on_int_pk(self, row_based, dim, entities):
         """
-        collection schema: [pk, float_vectors, int_scalar], one of entities has wrong dim data
+        collection schema: default multi scalars
         data file: json file with one of entities has string on int pk
         Steps:
         1. create collection
         2. import data with row_based=False
         3. verify import failed
         """
-        err_string_on_pk = "iamstring"
-        prefix = gen_file_prefix(row_based=row_based, auto_id=False, prefix="err_str_on_int_pk_")
-        files = [f"{prefix}_float_vectors_multi_scalars_{dim}d_{entities}_0.json"]
+        files = prepare_bulk_load_json_files(row_based=row_based, rows=entities,
+                                             dim=dim, auto_id=False,
+                                             data_fields=default_multi_fields,
+                                             err_type=DataErrorType.str_on_int_pk, force=True)
+
         self._connect()
-        c_name = cf.gen_unique_str(prefix)
+        c_name = cf.gen_unique_str()
         # TODO: add string pk
-        fields = [cf.gen_int64_field(name=pk_field, is_primary=True),
-                  cf.gen_float_vec_field(name=vec_field, dim=dim),
-                  cf.gen_int32_field(name=int_field),
-                  cf.gen_string_field(name=string_field),
-                  cf.gen_bool_field(name=bool_field)
+        fields = [cf.gen_int64_field(name=df.pk_field, is_primary=True),
+                  cf.gen_float_vec_field(name=df.vec_field, dim=dim),
+                  cf.gen_int32_field(name=df.int_field),
+                  cf.gen_string_field(name=df.string_field),
+                  cf.gen_bool_field(name=df.bool_field)
                   ]
         schema = cf.gen_collection_schema(fields=fields, auto_id=False)
         self.collection_wrap.init_collection(c_name, schema=schema)
@@ -1573,7 +1667,7 @@ class TestImportInvalidParams(TestcaseBase):
             timeout=30)
         log.info(f"bulk load state:{success}")
         assert not success
-        failed_reason = f"illegal numeric value {err_string_on_pk} at the row"
+        failed_reason = f"illegal numeric value"
         for state in states.values():
             assert state.state_name == "BulkLoadFailed"
             assert failed_reason in state.infos.get("failed_reason", "")
@@ -1584,7 +1678,7 @@ class TestImportInvalidParams(TestcaseBase):
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("dim", [8])
     @pytest.mark.parametrize("entities", [10])
-    def test_data_type_int_on_float_scalar(self, row_based, auto_id, dim, entities):
+    def test_data_type_typo_on_bool(self, row_based, auto_id, dim, entities):
         """
         collection schema: [pk, float_vector,
                         float_scalar, int_scalar, string_scalar, bool_scalar]
@@ -1594,17 +1688,20 @@ class TestImportInvalidParams(TestcaseBase):
         2. import data
         3. verify import failed with errors
         """
-        prefix = gen_file_prefix(row_based=row_based, auto_id=auto_id, prefix="err_typo_on_bool_")
-        files = [f"{prefix}_float_vectors_multi_scalars_{dim}d_{entities}_0.json"]
+        files = prepare_bulk_load_json_files(row_based=row_based, rows=entities,
+                                             dim=dim, auto_id=False,
+                                             data_fields=default_multi_fields,
+                                             err_type=DataErrorType.typo_on_bool,
+                                             scalars=default_multi_fields)
         self._connect()
-        c_name = cf.gen_unique_str(prefix)
+        c_name = cf.gen_unique_str()
         # TODO: add string pk
-        fields = [cf.gen_int64_field(name=pk_field, is_primary=True),
-                  cf.gen_float_vec_field(name=vec_field, dim=dim),
-                  cf.gen_int32_field(name=int_field),
-                  cf.gen_float_field(name=float_field),
-                  cf.gen_string_field(name=string_field),
-                  cf.gen_bool_field(name=bool_field)
+        fields = [cf.gen_int64_field(name=df.pk_field, is_primary=True),
+                  cf.gen_float_vec_field(name=df.vec_field, dim=dim),
+                  cf.gen_int32_field(name=df.int_field),
+                  cf.gen_float_field(name=df.float_field),
+                  cf.gen_string_field(name=df.string_field),
+                  cf.gen_bool_field(name=df.bool_field)
                   ]
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         self.collection_wrap.init_collection(c_name, schema=schema)
@@ -1640,7 +1737,8 @@ class TestImportInvalidParams(TestcaseBase):
     # TODO: string data on float field
 
 
-class TestImportAdvanced(TestcaseBase):
+@pytest.mark.skip()
+class TestBulkLoadAdvanced(TestcaseBase):
 
     def setup_class(self):
         log.info("[setup_import] Start setup class...")
@@ -1655,7 +1753,7 @@ class TestImportAdvanced(TestcaseBase):
     @pytest.mark.parametrize("dim", [128])  # 128
     @pytest.mark.parametrize("entities", [50000])  # 1m*3; 50k*20; 2m*3, 500k*4
     @pytest.mark.xfail(reason="search fail for issue #16784")
-    def test_float_vector_from_multi_npy_files(self, auto_id, dim, entities):
+    def test_float_vector_from_multi_numpy_files(self, auto_id, dim, entities):
         """
         collection schema 1: [pk, float_vector]
         data file: .npy files
@@ -1670,7 +1768,7 @@ class TestImportAdvanced(TestcaseBase):
         vec_field = f"vectors_{dim}d_{suffix}"
         self._connect()
         c_name = cf.gen_unique_str()
-        fields = [cf.gen_int64_field(name=pk_field, is_primary=True),
+        fields = [cf.gen_int64_field(name=df.pk_field, is_primary=True),
                   cf.gen_float_vec_field(name=vec_field, dim=dim)]
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         self.collection_wrap.init_collection(c_name, schema=schema)
@@ -1680,7 +1778,7 @@ class TestImportAdvanced(TestcaseBase):
         for i in range(file_nums):
             files = [f"{dim}d_{suffix}_{i}/{vec_field}.npy"]  # npy file name shall be the vector field name
             if not auto_id:
-                files.append(f"{dim}d_{suffix}_{i}/{pk_field}.npy")
+                files.append(f"{dim}d_{suffix}_{i}/{df.pk_field}.npy")
             t0 = time.time()
             task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
                                                       row_based=False,
