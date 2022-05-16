@@ -9,9 +9,8 @@ Milvus proxy uses TLS mutual authentication.
 ### 1. Make sure openssl is installed. 
 ```shell
 openssl version
-# OpenSSL 1.1.1f  31 Mar 2020
 ```
-If openssl is not installed. 
+If openssl is not installed. It can be installed like this in Ubuntu.
 ```shell
 sudo apt install openssl
 ```
