@@ -132,7 +132,7 @@ type ReplicaInterface interface {
 
 // collectionReplica is the data replication of memory data in query node.
 // It implements `ReplicaInterface` interface.
-type collectionReplica struct {
+type metaReplica struct {
 	mu          sync.RWMutex // guards all
 	collections map[UniqueID]*Collection
 	partitions  map[UniqueID]*Partition
@@ -145,115 +145,117 @@ type collectionReplica struct {
 }
 
 // queryLock guards query and delete operations
-func (colReplica *collectionReplica) queryLock() {
-	colReplica.queryMu.Lock()
+func (replica *metaReplica) queryLock() {
+	replica.queryMu.Lock()
 }
 
 // queryUnlock guards query and delete segment operations
-func (colReplica *collectionReplica) queryUnlock() {
-	colReplica.queryMu.Unlock()
+func (replica *metaReplica) queryUnlock() {
+	replica.queryMu.Unlock()
 }
 
 // queryRLock guards query and delete segment operations
-func (colReplica *collectionReplica) queryRLock() {
-	colReplica.queryMu.RLock()
+func (replica *metaReplica) queryRLock() {
+	replica.queryMu.RLock()
 }
 
 // queryRUnlock guards query and delete segment operations
-func (colReplica *collectionReplica) queryRUnlock() {
-	colReplica.queryMu.RUnlock()
+func (replica *metaReplica) queryRUnlock() {
+	replica.queryMu.RUnlock()
 }
 
 // getSegmentsMemSize get the memory size in bytes of all the Segments
-func (colReplica *collectionReplica) getSegmentsMemSize() int64 {
-	colReplica.mu.RLock()
-	defer colReplica.mu.RUnlock()
+func (replica *metaReplica) getSegmentsMemSize() int64 {
+	replica.mu.RLock()
+	defer replica.mu.RUnlock()
 
 	memSize := int64(0)
-	for _, segment := range colReplica.segments {
+	for _, segment := range replica.segments {
 		memSize += segment.getMemSize()
 	}
 	return memSize
 }
 
 // printReplica prints the collections, partitions and segments in the collectionReplica
-func (colReplica *collectionReplica) printReplica() {
-	colReplica.mu.Lock()
-	defer colReplica.mu.Unlock()
+func (replica *metaReplica) printReplica() {
+	replica.mu.Lock()
+	defer replica.mu.Unlock()
 
-	log.Info("collections in collectionReplica", zap.Any("info", colReplica.collections))
-	log.Info("partitions in collectionReplica", zap.Any("info", colReplica.partitions))
-	log.Info("segments in collectionReplica", zap.Any("info", colReplica.segments))
-	log.Info("excludedSegments in collectionReplica", zap.Any("info", colReplica.excludedSegments))
+	log.Info("collections in collectionReplica", zap.Any("info", replica.collections))
+	log.Info("partitions in collectionReplica", zap.Any("info", replica.partitions))
+	log.Info("segments in collectionReplica", zap.Any("info", replica.segments))
+	log.Info("excludedSegments in collectionReplica", zap.Any("info", replica.excludedSegments))
 }
 
 //----------------------------------------------------------------------------------------------------- collection
 // getCollectionIDs gets all the collection ids in the collectionReplica
-func (colReplica *collectionReplica) getCollectionIDs() []UniqueID {
-	colReplica.mu.RLock()
-	defer colReplica.mu.RUnlock()
+func (replica *metaReplica) getCollectionIDs() []UniqueID {
+	replica.mu.RLock()
+	defer replica.mu.RUnlock()
 	collectionIDs := make([]UniqueID, 0)
-	for id := range colReplica.collections {
+	for id := range replica.collections {
 		collectionIDs = append(collectionIDs, id)
 	}
 	return collectionIDs
 }
 
 // addCollection creates a new collection and add it to collectionReplica
-func (colReplica *collectionReplica) addCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) *Collection {
-	colReplica.mu.Lock()
-	defer colReplica.mu.Unlock()
+func (replica *metaReplica) addCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) *Collection {
+	replica.mu.Lock()
+	defer replica.mu.Unlock()
 
-	if col, ok := colReplica.collections[collectionID]; ok {
+	if col, ok := replica.collections[collectionID]; ok {
 		return col
 	}
 
 	var newCollection = newCollection(collectionID, schema)
-	colReplica.collections[collectionID] = newCollection
-	metrics.QueryNodeNumCollections.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(len(colReplica.collections)))
+	replica.collections[collectionID] = newCollection
+	metrics.QueryNodeNumCollections.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(len(replica.collections)))
 	return newCollection
 }
 
 // removeCollection removes the collection from collectionReplica
-func (colReplica *collectionReplica) removeCollection(collectionID UniqueID) error {
-	colReplica.queryMu.Lock()
-	colReplica.mu.Lock()
-	defer colReplica.mu.Unlock()
-	defer colReplica.queryMu.Unlock()
-	return colReplica.removeCollectionPrivate(collectionID)
+func (replica *metaReplica) removeCollection(collectionID UniqueID) error {
+	replica.mu.Lock()
+	defer replica.mu.Unlock()
+	return replica.removeCollectionPrivate(collectionID)
 }
 
 // removeCollectionPrivate is the private function in collectionReplica, to remove collection from collectionReplica
-func (colReplica *collectionReplica) removeCollectionPrivate(collectionID UniqueID) error {
-	collection, err := colReplica.getCollectionByIDPrivate(collectionID)
+func (replica *metaReplica) removeCollectionPrivate(collectionID UniqueID) error {
+	collection, err := replica.getCollectionByIDPrivate(collectionID)
 	if err != nil {
 		return err
 	}
 
+	// block incoming search&query
+	collection.Lock()
+	defer collection.Unlock()
+
 	// delete partitions
 	for _, partitionID := range collection.partitionIDs {
 		// ignore error, try to delete
-		_ = colReplica.removePartitionPrivate(partitionID)
+		_ = replica.removePartitionPrivate(partitionID, true)
 	}
 
 	deleteCollection(collection)
-	delete(colReplica.collections, collectionID)
+	delete(replica.collections, collectionID)
 
-	metrics.QueryNodeNumCollections.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(len(colReplica.collections)))
+	metrics.QueryNodeNumCollections.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(len(replica.collections)))
 	metrics.QueryNodeNumPartitions.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Sub(float64(len(collection.partitionIDs)))
 	return nil
 }
 
 // getCollectionByID gets the collection which id is collectionID
-func (colReplica *collectionReplica) getCollectionByID(collectionID UniqueID) (*Collection, error) {
-	colReplica.mu.RLock()
-	defer colReplica.mu.RUnlock()
-	return colReplica.getCollectionByIDPrivate(collectionID)
+func (replica *metaReplica) getCollectionByID(collectionID UniqueID) (*Collection, error) {
+	replica.mu.RLock()
+	defer replica.mu.RUnlock()
+	return replica.getCollectionByIDPrivate(collectionID)
 }
 
 // getCollectionByIDPrivate is the private function in collectionReplica, to get collection from collectionReplica
-func (colReplica *collectionReplica) getCollectionByIDPrivate(collectionID UniqueID) (*Collection, error) {
-	collection, ok := colReplica.collections[collectionID]
+func (replica *metaReplica) getCollectionByIDPrivate(collectionID UniqueID) (*Collection, error) {
+	collection, ok := replica.collections[collectionID]
 	if !ok {
 		return nil, fmt.Errorf("collection hasn't been loaded or has been released, collection id = %d", collectionID)
 	}
@@ -262,31 +264,31 @@ func (colReplica *collectionReplica) getCollectionByIDPrivate(collectionID Uniqu
 }
 
 // hasCollection checks if collectionReplica has the collection which id is collectionID
-func (colReplica *collectionReplica) hasCollection(collectionID UniqueID) bool {
-	colReplica.mu.RLock()
-	defer colReplica.mu.RUnlock()
-	return colReplica.hasCollectionPrivate(collectionID)
+func (replica *metaReplica) hasCollection(collectionID UniqueID) bool {
+	replica.mu.RLock()
+	defer replica.mu.RUnlock()
+	return replica.hasCollectionPrivate(collectionID)
 }
 
 // hasCollectionPrivate is the private function in collectionReplica, to check collection in collectionReplica
-func (colReplica *collectionReplica) hasCollectionPrivate(collectionID UniqueID) bool {
-	_, ok := colReplica.collections[collectionID]
+func (replica *metaReplica) hasCollectionPrivate(collectionID UniqueID) bool {
+	_, ok := replica.collections[collectionID]
 	return ok
 }
 
 // getCollectionNum returns num of collections in collectionReplica
-func (colReplica *collectionReplica) getCollectionNum() int {
-	colReplica.mu.RLock()
-	defer colReplica.mu.RUnlock()
-	return len(colReplica.collections)
+func (replica *metaReplica) getCollectionNum() int {
+	replica.mu.RLock()
+	defer replica.mu.RUnlock()
+	return len(replica.collections)
 }
 
 // getPartitionIDs returns partition ids of collection
-func (colReplica *collectionReplica) getPartitionIDs(collectionID UniqueID) ([]UniqueID, error) {
-	colReplica.mu.RLock()
-	defer colReplica.mu.RUnlock()
+func (replica *metaReplica) getPartitionIDs(collectionID UniqueID) ([]UniqueID, error) {
+	replica.mu.RLock()
+	defer replica.mu.RUnlock()
 
-	collection, err := colReplica.getCollectionByIDPrivate(collectionID)
+	collection, err := replica.getCollectionByIDPrivate(collectionID)
 	if err != nil {
 		return nil, err
 	}
@@ -294,8 +296,8 @@ func (colReplica *collectionReplica) getPartitionIDs(collectionID UniqueID) ([]U
 	return collection.partitionIDs, nil
 }
 
-func (colReplica *collectionReplica) getIndexedFieldIDByCollectionIDPrivate(collectionID UniqueID, segment *Segment) ([]FieldID, error) {
-	fields, err := colReplica.getFieldsByCollectionIDPrivate(collectionID)
+func (replica *metaReplica) getIndexedFieldIDByCollectionIDPrivate(collectionID UniqueID, segment *Segment) ([]FieldID, error) {
+	fields, err := replica.getFieldsByCollectionIDPrivate(collectionID)
 	if err != nil {
 		return nil, err
 	}
@@ -309,8 +311,8 @@ func (colReplica *collectionReplica) getIndexedFieldIDByCollectionIDPrivate(coll
 	return fieldIDS, nil
 }
 
-func (colReplica *collectionReplica) getVecFieldIDsByCollectionIDPrivate(collectionID UniqueID) ([]FieldID, error) {
-	fields, err := colReplica.getFieldsByCollectionIDPrivate(collectionID)
+func (replica *metaReplica) getVecFieldIDsByCollectionIDPrivate(collectionID UniqueID) ([]FieldID, error) {
+	fields, err := replica.getFieldsByCollectionIDPrivate(collectionID)
 	if err != nil {
 		return nil, err
 	}
@@ -325,19 +327,19 @@ func (colReplica *collectionReplica) getVecFieldIDsByCollectionIDPrivate(collect
 }
 
 // getVecFieldIDsByCollectionID returns vector field ids of collection
-func (colReplica *collectionReplica) getVecFieldIDsByCollectionID(collectionID UniqueID) ([]FieldID, error) {
-	colReplica.mu.RLock()
-	defer colReplica.mu.RUnlock()
+func (replica *metaReplica) getVecFieldIDsByCollectionID(collectionID UniqueID) ([]FieldID, error) {
+	replica.mu.RLock()
+	defer replica.mu.RUnlock()
 
-	return colReplica.getVecFieldIDsByCollectionIDPrivate(collectionID)
+	return replica.getVecFieldIDsByCollectionIDPrivate(collectionID)
 }
 
 // getPKFieldIDsByCollectionID returns vector field ids of collection
-func (colReplica *collectionReplica) getPKFieldIDByCollectionID(collectionID UniqueID) (FieldID, error) {
-	colReplica.mu.RLock()
-	defer colReplica.mu.RUnlock()
+func (replica *metaReplica) getPKFieldIDByCollectionID(collectionID UniqueID) (FieldID, error) {
+	replica.mu.RLock()
+	defer replica.mu.RUnlock()
 
-	fields, err := colReplica.getFieldsByCollectionIDPrivate(collectionID)
+	fields, err := replica.getFieldsByCollectionIDPrivate(collectionID)
 	if err != nil {
 		return common.InvalidFieldID, err
 	}
@@ -351,8 +353,8 @@ func (colReplica *collectionReplica) getPKFieldIDByCollectionID(collectionID Uni
 }
 
 // getFieldsByCollectionIDPrivate is the private function in collectionReplica, to return vector field ids of collection
-func (colReplica *collectionReplica) getFieldsByCollectionIDPrivate(collectionID UniqueID) ([]*schemapb.FieldSchema, error) {
-	collection, err := colReplica.getCollectionByIDPrivate(collectionID)
+func (replica *metaReplica) getFieldsByCollectionIDPrivate(collectionID UniqueID) ([]*schemapb.FieldSchema, error) {
+	collection, err := replica.getCollectionByIDPrivate(collectionID)
 	if err != nil {
 		return nil, err
 	}
@@ -365,28 +367,28 @@ func (colReplica *collectionReplica) getFieldsByCollectionIDPrivate(collectionID
 }
 
 // getSegmentInfosByColID return segments info by collectionID
-func (colReplica *collectionReplica) getSegmentInfosByColID(collectionID UniqueID) ([]*querypb.SegmentInfo, error) {
-	colReplica.mu.RLock()
-	defer colReplica.mu.RUnlock()
+func (replica *metaReplica) getSegmentInfosByColID(collectionID UniqueID) ([]*querypb.SegmentInfo, error) {
+	replica.mu.RLock()
+	defer replica.mu.RUnlock()
 
 	segmentInfos := make([]*querypb.SegmentInfo, 0)
-	collection, ok := colReplica.collections[collectionID]
+	collection, ok := replica.collections[collectionID]
 	if !ok {
 		// collection not exist, so result segmentInfos is empty
 		return segmentInfos, nil
 	}
 
 	for _, partitionID := range collection.partitionIDs {
-		partition, ok := colReplica.partitions[partitionID]
+		partition, ok := replica.partitions[partitionID]
 		if !ok {
 			return nil, fmt.Errorf("the meta of collection %d and partition %d are inconsistent in QueryNode", collectionID, partitionID)
 		}
 		for _, segmentID := range partition.segmentIDs {
-			segment, ok := colReplica.segments[segmentID]
+			segment, ok := replica.segments[segmentID]
 			if !ok {
 				return nil, fmt.Errorf("the meta of partition %d and segment %d are inconsistent in QueryNode", partitionID, segmentID)
 			}
-			segmentInfo := colReplica.getSegmentInfo(segment)
+			segmentInfo := replica.getSegmentInfo(segment)
 			segmentInfos = append(segmentInfos, segmentInfo)
 		}
 	}
@@ -396,73 +398,77 @@ func (colReplica *collectionReplica) getSegmentInfosByColID(collectionID UniqueI
 
 //----------------------------------------------------------------------------------------------------- partition
 // addPartition adds a new partition to collection
-func (colReplica *collectionReplica) addPartition(collectionID UniqueID, partitionID UniqueID) error {
-	colReplica.mu.Lock()
-	defer colReplica.mu.Unlock()
-	return colReplica.addPartitionPrivate(collectionID, partitionID)
+func (replica *metaReplica) addPartition(collectionID UniqueID, partitionID UniqueID) error {
+	replica.mu.Lock()
+	defer replica.mu.Unlock()
+	return replica.addPartitionPrivate(collectionID, partitionID)
 }
 
 // addPartitionPrivate is the private function in collectionReplica, to add a new partition to collection
-func (colReplica *collectionReplica) addPartitionPrivate(collectionID UniqueID, partitionID UniqueID) error {
-	collection, err := colReplica.getCollectionByIDPrivate(collectionID)
+func (replica *metaReplica) addPartitionPrivate(collectionID UniqueID, partitionID UniqueID) error {
+	collection, err := replica.getCollectionByIDPrivate(collectionID)
 	if err != nil {
 		return err
 	}
 
-	if !colReplica.hasPartitionPrivate(partitionID) {
+	if !replica.hasPartitionPrivate(partitionID) {
 		collection.addPartitionID(partitionID)
 		var newPartition = newPartition(collectionID, partitionID)
-		colReplica.partitions[partitionID] = newPartition
+		replica.partitions[partitionID] = newPartition
 	}
 
-	metrics.QueryNodeNumPartitions.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(len(colReplica.partitions)))
+	metrics.QueryNodeNumPartitions.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(len(replica.partitions)))
 	return nil
 }
 
 // removePartition removes the partition from collectionReplica
-func (colReplica *collectionReplica) removePartition(partitionID UniqueID) error {
-	colReplica.queryMu.Lock()
-	colReplica.mu.Lock()
-	defer colReplica.mu.Unlock()
-	defer colReplica.queryMu.Unlock()
-	return colReplica.removePartitionPrivate(partitionID)
+func (replica *metaReplica) removePartition(partitionID UniqueID) error {
+	replica.mu.Lock()
+	defer replica.mu.Unlock()
+	return replica.removePartitionPrivate(partitionID, false)
 }
 
 // removePartitionPrivate is the private function in collectionReplica, to remove the partition from collectionReplica
-func (colReplica *collectionReplica) removePartitionPrivate(partitionID UniqueID) error {
-	partition, err := colReplica.getPartitionByIDPrivate(partitionID)
+// `locked` flag indicates whether corresponding collection lock is accquired before calling this method
+func (replica *metaReplica) removePartitionPrivate(partitionID UniqueID, locked bool) error {
+	partition, err := replica.getPartitionByIDPrivate(partitionID)
 	if err != nil {
 		return err
 	}
 
-	collection, err := colReplica.getCollectionByIDPrivate(partition.collectionID)
+	collection, err := replica.getCollectionByIDPrivate(partition.collectionID)
 	if err != nil {
 		return err
+	}
+
+	if !locked {
+		collection.Lock()
+		defer collection.Unlock()
 	}
 
 	// delete segments
 	for _, segmentID := range partition.segmentIDs {
 		// try to delete, ignore error
-		_ = colReplica.removeSegmentPrivate(segmentID)
+		_ = replica.removeSegmentPrivate(segmentID)
 	}
 
 	collection.removePartitionID(partitionID)
-	delete(colReplica.partitions, partitionID)
+	delete(replica.partitions, partitionID)
 
-	metrics.QueryNodeNumPartitions.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(len(colReplica.partitions)))
+	metrics.QueryNodeNumPartitions.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(len(replica.partitions)))
 	return nil
 }
 
 // getPartitionByID returns the partition which id is partitionID
-func (colReplica *collectionReplica) getPartitionByID(partitionID UniqueID) (*Partition, error) {
-	colReplica.mu.RLock()
-	defer colReplica.mu.RUnlock()
-	return colReplica.getPartitionByIDPrivate(partitionID)
+func (replica *metaReplica) getPartitionByID(partitionID UniqueID) (*Partition, error) {
+	replica.mu.RLock()
+	defer replica.mu.RUnlock()
+	return replica.getPartitionByIDPrivate(partitionID)
 }
 
 // getPartitionByIDPrivate is the private function in collectionReplica, to get the partition
-func (colReplica *collectionReplica) getPartitionByIDPrivate(partitionID UniqueID) (*Partition, error) {
-	partition, ok := colReplica.partitions[partitionID]
+func (replica *metaReplica) getPartitionByIDPrivate(partitionID UniqueID) (*Partition, error) {
+	partition, ok := replica.partitions[partitionID]
 	if !ok {
 		return nil, fmt.Errorf("partition %d hasn't been loaded or has been released", partitionID)
 	}
@@ -471,43 +477,43 @@ func (colReplica *collectionReplica) getPartitionByIDPrivate(partitionID UniqueI
 }
 
 // hasPartition returns true if collectionReplica has the partition, false otherwise
-func (colReplica *collectionReplica) hasPartition(partitionID UniqueID) bool {
-	colReplica.mu.RLock()
-	defer colReplica.mu.RUnlock()
-	return colReplica.hasPartitionPrivate(partitionID)
+func (replica *metaReplica) hasPartition(partitionID UniqueID) bool {
+	replica.mu.RLock()
+	defer replica.mu.RUnlock()
+	return replica.hasPartitionPrivate(partitionID)
 }
 
 // hasPartitionPrivate is the private function in collectionReplica, to check if collectionReplica has the partition
-func (colReplica *collectionReplica) hasPartitionPrivate(partitionID UniqueID) bool {
-	_, ok := colReplica.partitions[partitionID]
+func (replica *metaReplica) hasPartitionPrivate(partitionID UniqueID) bool {
+	_, ok := replica.partitions[partitionID]
 	return ok
 }
 
 // getPartitionNum returns num of partitions
-func (colReplica *collectionReplica) getPartitionNum() int {
-	colReplica.mu.RLock()
-	defer colReplica.mu.RUnlock()
-	return len(colReplica.partitions)
+func (replica *metaReplica) getPartitionNum() int {
+	replica.mu.RLock()
+	defer replica.mu.RUnlock()
+	return len(replica.partitions)
 }
 
 // getSegmentIDs returns segment ids
-func (colReplica *collectionReplica) getSegmentIDs(partitionID UniqueID) ([]UniqueID, error) {
-	colReplica.mu.RLock()
-	defer colReplica.mu.RUnlock()
-	return colReplica.getSegmentIDsPrivate(partitionID)
+func (replica *metaReplica) getSegmentIDs(partitionID UniqueID) ([]UniqueID, error) {
+	replica.mu.RLock()
+	defer replica.mu.RUnlock()
+	return replica.getSegmentIDsPrivate(partitionID)
 }
 
 // getSegmentIDsByVChannel returns segment ids which virtual channel is vChannel
-func (colReplica *collectionReplica) getSegmentIDsByVChannel(partitionID UniqueID, vChannel Channel) ([]UniqueID, error) {
-	colReplica.mu.RLock()
-	defer colReplica.mu.RUnlock()
-	segmentIDs, err := colReplica.getSegmentIDsPrivate(partitionID)
+func (replica *metaReplica) getSegmentIDsByVChannel(partitionID UniqueID, vChannel Channel) ([]UniqueID, error) {
+	replica.mu.RLock()
+	defer replica.mu.RUnlock()
+	segmentIDs, err := replica.getSegmentIDsPrivate(partitionID)
 	if err != nil {
 		return nil, err
 	}
 	segmentIDsTmp := make([]UniqueID, 0)
 	for _, segmentID := range segmentIDs {
-		segment, err := colReplica.getSegmentByIDPrivate(segmentID)
+		segment, err := replica.getSegmentByIDPrivate(segmentID)
 		if err != nil {
 			return nil, err
 		}
@@ -520,8 +526,8 @@ func (colReplica *collectionReplica) getSegmentIDsByVChannel(partitionID UniqueI
 }
 
 // getSegmentIDsPrivate is private function in collectionReplica, it returns segment ids
-func (colReplica *collectionReplica) getSegmentIDsPrivate(partitionID UniqueID) ([]UniqueID, error) {
-	partition, err2 := colReplica.getPartitionByIDPrivate(partitionID)
+func (replica *metaReplica) getSegmentIDsPrivate(partitionID UniqueID) ([]UniqueID, error) {
+	partition, err2 := replica.getPartitionByIDPrivate(partitionID)
 	if err2 != nil {
 		return nil, err2
 	}
@@ -530,10 +536,10 @@ func (colReplica *collectionReplica) getSegmentIDsPrivate(partitionID UniqueID) 
 
 //----------------------------------------------------------------------------------------------------- segment
 // addSegment add a new segment to collectionReplica
-func (colReplica *collectionReplica) addSegment(segmentID UniqueID, partitionID UniqueID, collectionID UniqueID, vChannelID Channel, segType segmentType, onService bool) error {
-	colReplica.mu.Lock()
-	defer colReplica.mu.Unlock()
-	collection, err := colReplica.getCollectionByIDPrivate(collectionID)
+func (replica *metaReplica) addSegment(segmentID UniqueID, partitionID UniqueID, collectionID UniqueID, vChannelID Channel, segType segmentType, onService bool) error {
+	replica.mu.Lock()
+	defer replica.mu.Unlock()
+	collection, err := replica.getCollectionByIDPrivate(collectionID)
 	if err != nil {
 		return err
 	}
@@ -541,58 +547,58 @@ func (colReplica *collectionReplica) addSegment(segmentID UniqueID, partitionID 
 	if err != nil {
 		return err
 	}
-	return colReplica.addSegmentPrivate(segmentID, partitionID, seg)
+	return replica.addSegmentPrivate(segmentID, partitionID, seg)
 }
 
 // addSegmentPrivate is private function in collectionReplica, to add a new segment to collectionReplica
-func (colReplica *collectionReplica) addSegmentPrivate(segmentID UniqueID, partitionID UniqueID, segment *Segment) error {
-	partition, err := colReplica.getPartitionByIDPrivate(partitionID)
+func (replica *metaReplica) addSegmentPrivate(segmentID UniqueID, partitionID UniqueID, segment *Segment) error {
+	partition, err := replica.getPartitionByIDPrivate(partitionID)
 	if err != nil {
 		return err
 	}
 
-	if colReplica.hasSegmentPrivate(segmentID) {
+	if replica.hasSegmentPrivate(segmentID) {
 		return nil
 	}
 	partition.addSegmentID(segmentID)
-	colReplica.segments[segmentID] = segment
+	replica.segments[segmentID] = segment
 
 	metrics.QueryNodeNumSegments.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Inc()
 	return nil
 }
 
 // setSegment adds a segment to collectionReplica
-func (colReplica *collectionReplica) setSegment(segment *Segment) error {
-	colReplica.mu.Lock()
-	defer colReplica.mu.Unlock()
-	_, err := colReplica.getCollectionByIDPrivate(segment.collectionID)
+func (replica *metaReplica) setSegment(segment *Segment) error {
+	replica.mu.Lock()
+	defer replica.mu.Unlock()
+	_, err := replica.getCollectionByIDPrivate(segment.collectionID)
 	if err != nil {
 		return err
 	}
-	return colReplica.addSegmentPrivate(segment.segmentID, segment.partitionID, segment)
+	return replica.addSegmentPrivate(segment.segmentID, segment.partitionID, segment)
 }
 
 // removeSegment removes a segment from collectionReplica
-func (colReplica *collectionReplica) removeSegment(segmentID UniqueID) error {
-	colReplica.mu.Lock()
-	defer colReplica.mu.Unlock()
-	return colReplica.removeSegmentPrivate(segmentID)
+func (replica *metaReplica) removeSegment(segmentID UniqueID) error {
+	replica.mu.Lock()
+	defer replica.mu.Unlock()
+	return replica.removeSegmentPrivate(segmentID)
 }
 
 // removeSegmentPrivate is private function in collectionReplica, to remove a segment from collectionReplica
-func (colReplica *collectionReplica) removeSegmentPrivate(segmentID UniqueID) error {
-	segment, err := colReplica.getSegmentByIDPrivate(segmentID)
+func (replica *metaReplica) removeSegmentPrivate(segmentID UniqueID) error {
+	segment, err := replica.getSegmentByIDPrivate(segmentID)
 	if err != nil {
 		return err
 	}
 
-	partition, err2 := colReplica.getPartitionByIDPrivate(segment.partitionID)
+	partition, err2 := replica.getPartitionByIDPrivate(segment.partitionID)
 	if err2 != nil {
 		return err
 	}
 
 	partition.removeSegmentID(segmentID)
-	delete(colReplica.segments, segmentID)
+	delete(replica.segments, segmentID)
 	deleteSegment(segment)
 
 	metrics.QueryNodeNumSegments.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Dec()
@@ -600,15 +606,15 @@ func (colReplica *collectionReplica) removeSegmentPrivate(segmentID UniqueID) er
 }
 
 // getSegmentByID returns the segment which id is segmentID
-func (colReplica *collectionReplica) getSegmentByID(segmentID UniqueID) (*Segment, error) {
-	colReplica.mu.RLock()
-	defer colReplica.mu.RUnlock()
-	return colReplica.getSegmentByIDPrivate(segmentID)
+func (replica *metaReplica) getSegmentByID(segmentID UniqueID) (*Segment, error) {
+	replica.mu.RLock()
+	defer replica.mu.RUnlock()
+	return replica.getSegmentByIDPrivate(segmentID)
 }
 
 // getSegmentByIDPrivate is private function in collectionReplica, it returns the segment which id is segmentID
-func (colReplica *collectionReplica) getSegmentByIDPrivate(segmentID UniqueID) (*Segment, error) {
-	segment, ok := colReplica.segments[segmentID]
+func (replica *metaReplica) getSegmentByIDPrivate(segmentID UniqueID) (*Segment, error) {
+	segment, ok := replica.segments[segmentID]
 	if !ok {
 		return nil, fmt.Errorf("cannot find segment %d in QueryNode", segmentID)
 	}
@@ -617,33 +623,33 @@ func (colReplica *collectionReplica) getSegmentByIDPrivate(segmentID UniqueID) (
 }
 
 // hasSegment returns true if collectionReplica has the segment, false otherwise
-func (colReplica *collectionReplica) hasSegment(segmentID UniqueID) bool {
-	colReplica.mu.RLock()
-	defer colReplica.mu.RUnlock()
-	return colReplica.hasSegmentPrivate(segmentID)
+func (replica *metaReplica) hasSegment(segmentID UniqueID) bool {
+	replica.mu.RLock()
+	defer replica.mu.RUnlock()
+	return replica.hasSegmentPrivate(segmentID)
 }
 
 // hasSegmentPrivate is private function in collectionReplica, to check if collectionReplica has the segment
-func (colReplica *collectionReplica) hasSegmentPrivate(segmentID UniqueID) bool {
-	_, ok := colReplica.segments[segmentID]
+func (replica *metaReplica) hasSegmentPrivate(segmentID UniqueID) bool {
+	_, ok := replica.segments[segmentID]
 	return ok
 }
 
 // getSegmentNum returns num of segments in collectionReplica
-func (colReplica *collectionReplica) getSegmentNum() int {
-	colReplica.mu.RLock()
-	defer colReplica.mu.RUnlock()
-	return len(colReplica.segments)
+func (replica *metaReplica) getSegmentNum() int {
+	replica.mu.RLock()
+	defer replica.mu.RUnlock()
+	return len(replica.segments)
 }
 
 //  getSegmentStatistics returns the statistics of segments in collectionReplica
-func (colReplica *collectionReplica) getSegmentStatistics() []*internalpb.SegmentStats {
-	colReplica.mu.RLock()
-	defer colReplica.mu.RUnlock()
+func (replica *metaReplica) getSegmentStatistics() []*internalpb.SegmentStats {
+	replica.mu.RLock()
+	defer replica.mu.RUnlock()
 
 	var statisticData = make([]*internalpb.SegmentStats, 0)
 
-	for segmentID, segment := range colReplica.segments {
+	for segmentID, segment := range replica.segments {
 		currentMemSize := segment.getMemSize()
 		segment.lastMemSize = currentMemSize
 		segmentNumOfRows := segment.getRowCount()
@@ -663,51 +669,49 @@ func (colReplica *collectionReplica) getSegmentStatistics() []*internalpb.Segmen
 }
 
 //  removeExcludedSegments will remove excludedSegments from collectionReplica
-func (colReplica *collectionReplica) removeExcludedSegments(collectionID UniqueID) {
-	colReplica.mu.Lock()
-	defer colReplica.mu.Unlock()
+func (replica *metaReplica) removeExcludedSegments(collectionID UniqueID) {
+	replica.mu.Lock()
+	defer replica.mu.Unlock()
 
-	delete(colReplica.excludedSegments, collectionID)
+	delete(replica.excludedSegments, collectionID)
 }
 
 // addExcludedSegments will add excludedSegments to collectionReplica
-func (colReplica *collectionReplica) addExcludedSegments(collectionID UniqueID, segmentInfos []*datapb.SegmentInfo) {
-	colReplica.mu.Lock()
-	defer colReplica.mu.Unlock()
+func (replica *metaReplica) addExcludedSegments(collectionID UniqueID, segmentInfos []*datapb.SegmentInfo) {
+	replica.mu.Lock()
+	defer replica.mu.Unlock()
 
-	if _, ok := colReplica.excludedSegments[collectionID]; !ok {
-		colReplica.excludedSegments[collectionID] = make([]*datapb.SegmentInfo, 0)
+	if _, ok := replica.excludedSegments[collectionID]; !ok {
+		replica.excludedSegments[collectionID] = make([]*datapb.SegmentInfo, 0)
 	}
 
-	colReplica.excludedSegments[collectionID] = append(colReplica.excludedSegments[collectionID], segmentInfos...)
+	replica.excludedSegments[collectionID] = append(replica.excludedSegments[collectionID], segmentInfos...)
 }
 
 // getExcludedSegments returns excludedSegments of collectionReplica
-func (colReplica *collectionReplica) getExcludedSegments(collectionID UniqueID) ([]*datapb.SegmentInfo, error) {
-	colReplica.mu.RLock()
-	defer colReplica.mu.RUnlock()
+func (replica *metaReplica) getExcludedSegments(collectionID UniqueID) ([]*datapb.SegmentInfo, error) {
+	replica.mu.RLock()
+	defer replica.mu.RUnlock()
 
-	if _, ok := colReplica.excludedSegments[collectionID]; !ok {
+	if _, ok := replica.excludedSegments[collectionID]; !ok {
 		return nil, errors.New("getExcludedSegments failed, cannot found collection, id =" + fmt.Sprintln(collectionID))
 	}
 
-	return colReplica.excludedSegments[collectionID], nil
+	return replica.excludedSegments[collectionID], nil
 }
 
 // freeAll will free all meta info from collectionReplica
-func (colReplica *collectionReplica) freeAll() {
-	colReplica.queryMu.Lock() // wait for current search/query finish
-	colReplica.mu.Lock()
-	defer colReplica.mu.Unlock()
-	defer colReplica.queryMu.Unlock()
+func (replica *metaReplica) freeAll() {
+	replica.mu.Lock()
+	defer replica.mu.Unlock()
 
-	for id := range colReplica.collections {
-		_ = colReplica.removeCollectionPrivate(id)
+	for id := range replica.collections {
+		_ = replica.removeCollectionPrivate(id)
 	}
 
-	colReplica.collections = make(map[UniqueID]*Collection)
-	colReplica.partitions = make(map[UniqueID]*Partition)
-	colReplica.segments = make(map[UniqueID]*Segment)
+	replica.collections = make(map[UniqueID]*Collection)
+	replica.partitions = make(map[UniqueID]*Partition)
+	replica.segments = make(map[UniqueID]*Segment)
 }
 
 // newCollectionReplica returns a new ReplicaInterface
@@ -717,7 +721,7 @@ func newCollectionReplica(etcdKv *etcdkv.EtcdKV) ReplicaInterface {
 	segments := make(map[UniqueID]*Segment)
 	excludedSegments := make(map[UniqueID][]*datapb.SegmentInfo)
 
-	var replica ReplicaInterface = &collectionReplica{
+	var replica ReplicaInterface = &metaReplica{
 		collections: collections,
 		partitions:  partitions,
 		segments:    segments,
@@ -730,12 +734,12 @@ func newCollectionReplica(etcdKv *etcdkv.EtcdKV) ReplicaInterface {
 }
 
 // trans segment to queryPb.segmentInfo
-func (colReplica *collectionReplica) getSegmentInfo(segment *Segment) *querypb.SegmentInfo {
+func (replica *metaReplica) getSegmentInfo(segment *Segment) *querypb.SegmentInfo {
 	var indexName string
 	var indexID int64
 	var indexInfos []*querypb.FieldIndexInfo
 	// TODO:: segment has multi vec column
-	indexedFieldIDs, _ := colReplica.getIndexedFieldIDByCollectionIDPrivate(segment.collectionID, segment)
+	indexedFieldIDs, _ := replica.getIndexedFieldIDByCollectionIDPrivate(segment.collectionID, segment)
 	for _, fieldID := range indexedFieldIDs {
 		fieldInfo, err := segment.getIndexedFieldInfo(fieldID)
 		if err == nil {

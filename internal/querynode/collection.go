@@ -49,6 +49,7 @@ import (
 
 // Collection is a wrapper of the underlying C-structure C.CCollection
 type Collection struct {
+	sync.RWMutex  // protects colllectionPtr
 	collectionPtr C.CCollection
 	id            UniqueID
 	partitionIDs  []UniqueID
@@ -65,6 +66,7 @@ type Collection struct {
 	releaseMu          sync.RWMutex // guards release
 	releasedPartitions map[UniqueID]struct{}
 	releaseTime        Timestamp
+	released           bool
 }
 
 // ID returns collection id
@@ -268,17 +270,18 @@ func (c *Collection) removeVDeltaChannel(channel Channel) {
 }
 
 // setReleaseTime records when collection is released
-func (c *Collection) setReleaseTime(t Timestamp) {
+func (c *Collection) setReleaseTime(t Timestamp, released bool) {
 	c.releaseMu.Lock()
 	defer c.releaseMu.Unlock()
 	c.releaseTime = t
+	c.released = released
 }
 
 // getReleaseTime gets the time when collection is released
-func (c *Collection) getReleaseTime() Timestamp {
+func (c *Collection) getReleaseTime() (Timestamp, bool) {
 	c.releaseMu.RLock()
 	defer c.releaseMu.RUnlock()
-	return c.releaseTime
+	return c.releaseTime, c.released
 }
 
 // setLoadType set the loading type of collection, which is loadTypeCollection or loadTypePartition
@@ -325,7 +328,7 @@ func newCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) *Co
 
 	log.Info("create collection", zap.Int64("collectionID", collectionID))
 
-	newCollection.setReleaseTime(Timestamp(math.MaxUint64))
+	newCollection.setReleaseTime(Timestamp(math.MaxUint64), false)
 	return newCollection
 }
 

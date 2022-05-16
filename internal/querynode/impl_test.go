@@ -385,7 +385,7 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 			CollectionID: defaultCollectionID,
 		}
 
-		node.streaming.replica.(*collectionReplica).partitions = make(map[UniqueID]*Partition)
+		node.streaming.replica.(*metaReplica).partitions = make(map[UniqueID]*Partition)
 		rsp, err := node.GetSegmentInfo(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, rsp.Status.ErrorCode)
@@ -404,7 +404,7 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 			CollectionID: defaultCollectionID,
 		}
 
-		node.streaming.replica.(*collectionReplica).segments = make(map[UniqueID]*Segment)
+		node.streaming.replica.(*metaReplica).segments = make(map[UniqueID]*Segment)
 		rsp, err := node.GetSegmentInfo(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, rsp.Status.ErrorCode)
@@ -423,7 +423,7 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 			CollectionID: defaultCollectionID,
 		}
 
-		node.historical.replica.(*collectionReplica).partitions = make(map[UniqueID]*Partition)
+		node.historical.replica.(*metaReplica).partitions = make(map[UniqueID]*Partition)
 		rsp, err := node.GetSegmentInfo(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, rsp.Status.ErrorCode)
@@ -442,7 +442,7 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 			CollectionID: defaultCollectionID,
 		}
 
-		node.historical.replica.(*collectionReplica).segments = make(map[UniqueID]*Segment)
+		node.historical.replica.(*metaReplica).segments = make(map[UniqueID]*Segment)
 		rsp, err := node.GetSegmentInfo(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, rsp.Status.ErrorCode)

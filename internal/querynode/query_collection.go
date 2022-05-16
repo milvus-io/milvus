@@ -495,7 +495,7 @@ func (q *queryCollection) receiveQueryMsg(msg queryMsg) error {
 		return err
 	}
 	guaranteeTs := msg.GuaranteeTs()
-	if guaranteeTs >= collection.getReleaseTime() {
+	if releaseTs, _ := collection.getReleaseTime(); guaranteeTs >= releaseTs {
 		err = fmt.Errorf("retrieve failed, collection has been released, msgID = %d, collectionID = %d", msg.ID(), collectionID)
 		publishErr := q.publishFailedQueryResult(msg, err.Error())
 		if publishErr != nil {
