@@ -51,7 +51,12 @@ func NewLocalChunkManager(opts ...Option) *LocalChunkManager {
 
 // Path returns the path of local data if exists.
 func (lcm *LocalChunkManager) Path(filePath string) (string, error) {
-	if !lcm.Exist(filePath) {
+	exist, err := lcm.Exist(filePath)
+	if err != nil {
+		return "", err
+	}
+
+	if !exist {
 		return "", fmt.Errorf("local file cannot be found with filePath: %s", filePath)
 	}
 	absPath := path.Join(lcm.localPath, filePath)
@@ -59,7 +64,11 @@ func (lcm *LocalChunkManager) Path(filePath string) (string, error) {
 }
 
 func (lcm *LocalChunkManager) Reader(filePath string) (FileReader, error) {
-	if !lcm.Exist(filePath) {
+	exist, err := lcm.Exist(filePath)
+	if err != nil {
+		return nil, err
+	}
+	if !exist {
 		return nil, errors.New("local file cannot be found with filePath:" + filePath)
 	}
 	absPath := path.Join(lcm.localPath, filePath)
@@ -70,17 +79,17 @@ func (lcm *LocalChunkManager) Reader(filePath string) (FileReader, error) {
 func (lcm *LocalChunkManager) Write(filePath string, content []byte) error {
 	absPath := path.Join(lcm.localPath, filePath)
 	dir := path.Dir(absPath)
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
+	exist, err := lcm.Exist(dir)
+	if err != nil {
+		return err
+	}
+	if !exist {
 		err := os.MkdirAll(dir, os.ModePerm)
 		if err != nil {
 			return err
 		}
 	}
-	err := ioutil.WriteFile(absPath, content, os.ModePerm)
-	if err != nil {
-		return err
-	}
-	return nil
+	return ioutil.WriteFile(absPath, content, os.ModePerm)
 }
 
 // MultiWrite writes the data to local storage.
@@ -99,17 +108,25 @@ func (lcm *LocalChunkManager) MultiWrite(contents map[string][]byte) error {
 }
 
 // Exist checks whether chunk is saved to local storage.
-func (lcm *LocalChunkManager) Exist(filePath string) bool {
+func (lcm *LocalChunkManager) Exist(filePath string) (bool, error) {
 	absPath := path.Join(lcm.localPath, filePath)
-	if _, err := os.Stat(absPath); errors.Is(err, os.ErrNotExist) {
-		return false
+	_, err := os.Stat(absPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
 	}
-	return true
+	return true, nil
 }
 
 // Read reads the local storage data if exists.
 func (lcm *LocalChunkManager) Read(filePath string) ([]byte, error) {
-	if !lcm.Exist(filePath) {
+	exist, err := lcm.Exist(filePath)
+	if err != nil {
+		return nil, err
+	}
+	if !exist {
 		return nil, fmt.Errorf("file not exist: %s", filePath)
 	}
 	absPath := path.Join(lcm.localPath, filePath)
@@ -202,7 +219,11 @@ func (lcm *LocalChunkManager) Size(filePath string) (int64, error) {
 }
 
 func (lcm *LocalChunkManager) Remove(filePath string) error {
-	if lcm.Exist(filePath) {
+	exist, err := lcm.Exist(filePath)
+	if err != nil {
+		return err
+	}
+	if exist {
 		absPath := path.Join(lcm.localPath, filePath)
 		err := os.RemoveAll(absPath)
 		if err != nil {

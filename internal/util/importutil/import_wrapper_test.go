@@ -46,8 +46,8 @@ func (mc *MockChunkManager) MultiWrite(contents map[string][]byte) error {
 	return nil
 }
 
-func (mc *MockChunkManager) Exist(filePath string) bool {
-	return true
+func (mc *MockChunkManager) Exist(filePath string) (bool, error) {
+	return true, nil
 }
 
 func (mc *MockChunkManager) Read(filePath string) ([]byte, error) {

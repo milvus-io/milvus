@@ -136,7 +136,7 @@ func (vcm *VectorChunkManager) MultiWrite(contents map[string][]byte) error {
 }
 
 // Exist checks whether vector data is saved to local cache.
-func (vcm *VectorChunkManager) Exist(filePath string) bool {
+func (vcm *VectorChunkManager) Exist(filePath string) (bool, error) {
 	return vcm.vectorStorage.Exist(filePath)
 }
 

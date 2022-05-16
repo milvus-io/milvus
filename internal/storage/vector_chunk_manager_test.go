@@ -235,8 +235,9 @@ func TestVectorChunkManager_Write(t *testing.T) {
 		err = vcm.Write(key, []byte{1})
 		assert.Nil(t, err)
 
-		exist := vcm.Exist(key)
+		exist, err := vcm.Exist(key)
 		assert.True(t, exist)
+		assert.NoError(t, err)
 
 		contents := map[string][]byte{
 			"key_1": {111},
@@ -245,10 +246,12 @@ func TestVectorChunkManager_Write(t *testing.T) {
 		err = vcm.MultiWrite(contents)
 		assert.NoError(t, err)
 
-		exist = vcm.Exist("key_1")
+		exist, err = vcm.Exist("key_1")
 		assert.True(t, exist)
-		exist = vcm.Exist("key_2")
+		assert.NoError(t, err)
+		exist, err = vcm.Exist("key_2")
 		assert.True(t, exist)
+		assert.NoError(t, err)
 
 		err = vcm.RemoveWithPrefix(localPath)
 		assert.NoError(t, err)
@@ -271,8 +274,9 @@ func TestVectorChunkManager_Remove(t *testing.T) {
 		err = vcm.Remove(key)
 		assert.Nil(t, err)
 
-		exist := vcm.Exist(key)
+		exist, err := vcm.Exist(key)
 		assert.False(t, exist)
+		assert.NoError(t, err)
 
 		contents := map[string][]byte{
 			"key_1": {111},
@@ -284,10 +288,12 @@ func TestVectorChunkManager_Remove(t *testing.T) {
 		err = vcm.MultiRemove([]string{"key_1", "key_2"})
 		assert.NoError(t, err)
 
-		exist = vcm.Exist("key_1")
+		exist, err = vcm.Exist("key_1")
 		assert.False(t, exist)
-		exist = vcm.Exist("key_2")
+		assert.NoError(t, err)
+		exist, err = vcm.Exist("key_2")
 		assert.False(t, exist)
+		assert.NoError(t, err)
 
 		err = vcm.RemoveWithPrefix(localPath)
 		assert.NoError(t, err)

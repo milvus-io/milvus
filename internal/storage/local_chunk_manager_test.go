@@ -370,4 +370,34 @@ func TestLocalCM(t *testing.T) {
 		assert.Error(t, err)
 		assert.Equal(t, p, "")
 	})
+
+	t.Run("test Prefix", func(t *testing.T) {
+		testPrefix := "prefix"
+
+		testCM := NewLocalChunkManager(RootPath(localPath))
+		defer testCM.RemoveWithPrefix(testPrefix)
+
+		pathB := path.Join("a", "b")
+
+		key := path.Join(testPrefix, pathB)
+		value := []byte("a")
+
+		err := testCM.Write(key, value)
+		assert.NoError(t, err)
+
+		pathC := path.Join("a", "c")
+		key = path.Join(testPrefix, pathC)
+		err = testCM.Write(key, value)
+		assert.NoError(t, err)
+
+		pathPrefix := path.Join(testPrefix, "a")
+		r, err := testCM.ListWithPrefix(pathPrefix)
+		assert.NoError(t, err)
+		assert.Equal(t, len(r), 2)
+
+		testCM.RemoveWithPrefix(testPrefix)
+		r, err = testCM.ListWithPrefix(pathPrefix)
+		assert.NoError(t, err)
+		assert.Equal(t, len(r), 0)
+	})
 }

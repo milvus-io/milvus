@@ -34,7 +34,7 @@ type ChunkManager interface {
 	// MultiWrite writes multi @content to @filePath.
 	MultiWrite(contents map[string][]byte) error
 	// Exist returns true if @filePath exists.
-	Exist(filePath string) bool
+	Exist(filePath string) (bool, error)
 	// Read reads @filePath and returns content.
 	Read(filePath string) ([]byte, error)
 	// Reader return a reader for @filePath
