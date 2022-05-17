@@ -1,6 +1,7 @@
 package kafka
 
 import (
+	"errors"
 	"sync"
 	"time"
 
@@ -15,7 +16,7 @@ type Consumer struct {
 	config     *kafka.ConfigMap
 	msgChannel chan mqwrapper.Message
 	hasSeek    bool
-	isStarted  bool
+	hasConsume bool
 	skipMsg    bool
 	topic      string
 	groupID    string
@@ -24,7 +25,7 @@ type Consumer struct {
 	closeOnce  sync.Once
 }
 
-func newKafkaConsumer(config *kafka.ConfigMap, topic string, groupID string) *Consumer {
+func newKafkaConsumer(config *kafka.ConfigMap, topic string, groupID string) (*Consumer, error) {
 	closeCh := make(chan struct{})
 	msgChannel := make(chan mqwrapper.Message, 256)
 
@@ -36,54 +37,18 @@ func newKafkaConsumer(config *kafka.ConfigMap, topic string, groupID string) *Co
 		closeCh:    closeCh,
 	}
 
-	kafkaConsumer.createKafkaConsumer()
-	return kafkaConsumer
+	err := kafkaConsumer.createKafkaConsumer()
+	return kafkaConsumer, err
 }
 
 func (kc *Consumer) createKafkaConsumer() error {
 	var err error
 	kc.c, err = kafka.NewConsumer(kc.config)
 	if err != nil {
-		log.Fatal("create kafka consumer failed", zap.String("topic", kc.topic), zap.Error(err))
+		log.Error("create kafka consumer failed", zap.String("topic", kc.topic), zap.Error(err))
 		return err
 	}
 	return nil
-}
-
-func (kc *Consumer) startReceiveMsgTask() {
-	if kc.isStarted {
-		return
-	}
-
-	if !kc.hasSeek {
-		tps := []kafka.TopicPartition{{Topic: &kc.topic, Partition: mqwrapper.DefaultPartitionIdx}}
-		if err := kc.c.Assign(tps); err != nil {
-			log.Error("kafka consumer assign failed ", zap.String("topic name", kc.topic), zap.Error(err))
-			panic(err)
-		}
-	}
-
-	go func() {
-		for ev := range kc.c.Events() {
-			switch e := ev.(type) {
-			case *kafka.Message:
-				if kc.skipMsg {
-					kc.skipMsg = false
-					continue
-				}
-
-				kc.msgChannel <- &kafkaMessage{msg: e}
-			case kafka.Error:
-				log.Error("read msg failed", zap.Any("topic", kc.topic), zap.String("groupID", kc.groupID), zap.Error(e))
-			}
-		}
-
-		if kc.msgChannel != nil {
-			close(kc.msgChannel)
-		}
-	}()
-
-	kc.isStarted = true
 }
 
 func (kc *Consumer) Subscription() string {
@@ -96,20 +61,85 @@ func (kc *Consumer) Subscription() string {
 // https://github.com/confluentinc/confluent-kafka-go.
 func (kc *Consumer) Chan() <-chan mqwrapper.Message {
 	kc.chanOnce.Do(func() {
-		kc.startReceiveMsgTask()
+		if !kc.hasSeek {
+			offsetStr, err := kc.config.Get("auto.offset.reset", "earliest")
+			if err != nil {
+				log.Error("get auto.offset.reset config fail in kafka consumer", zap.String("topic name", kc.topic), zap.Error(err))
+				panic(err)
+			}
+
+			offset, err := kafka.NewOffset(offsetStr)
+			if err != nil {
+				log.Error("Invalid kafka offset", zap.String("topic name", kc.topic), zap.Error(err))
+				panic(err)
+			}
+
+			// we assume that case is Chan starting before producing message with auto create topic config,
+			// consuming messages will fail that error is 'Subscribed topic not available'
+			// if invoke Subscribe method of kafka, so we use Assign instead of Subscribe.
+			tps := []kafka.TopicPartition{{Topic: &kc.topic, Partition: mqwrapper.DefaultPartitionIdx, Offset: offset}}
+			if err := kc.c.Assign(tps); err != nil {
+				log.Error("kafka consumer subscribe failed ", zap.String("topic name", kc.topic), zap.Error(err))
+				panic(err)
+			}
+
+			log.Debug("starting kafka consume", zap.String("topic name", kc.topic), zap.Any("offset", offset))
+		}
+
+		go func() {
+			// loop end if consumer is closed
+			for ev := range kc.c.Events() {
+				switch e := ev.(type) {
+				case *kafka.Message:
+					if kc.skipMsg {
+						kc.skipMsg = false
+						continue
+					}
+
+					kc.msgChannel <- &kafkaMessage{msg: e}
+				case kafka.Error:
+					log.Error("consume msg failed", zap.Any("topic", kc.topic), zap.String("groupID", kc.groupID), zap.Error(e))
+					if ev.(kafka.Error).IsFatal() {
+						panic(e)
+					}
+				}
+			}
+
+			if kc.msgChannel != nil {
+				close(kc.msgChannel)
+			}
+		}()
+
+		kc.hasConsume = true
 	})
+
 	return kc.msgChannel
 }
 
 func (kc *Consumer) Seek(id mqwrapper.MessageID, inclusive bool) error {
+	if kc.hasSeek {
+		return errors.New("unsupported multiple seek with the same kafka consumer")
+	}
+
+	if kc.hasConsume {
+		return errors.New("unsupported seek after consume message with the same kafka consumer")
+	}
+
+	start := time.Now()
 	offset := kafka.Offset(id.(*kafkaID).messageID)
-	log.Debug("kafka consumer seek ", zap.String("topic name", kc.topic),
+	log.Debug("kafka consumer seek start", zap.String("topic name", kc.topic),
 		zap.Any("Msg offset", offset), zap.Bool("inclusive", inclusive))
 
 	err := kc.c.Assign([]kafka.TopicPartition{{Topic: &kc.topic, Partition: mqwrapper.DefaultPartitionIdx, Offset: offset}})
 	if err != nil {
 		log.Error("kafka consumer assign failed ", zap.String("topic name", kc.topic), zap.Any("Msg offset", offset), zap.Error(err))
 		return err
+	}
+
+	cost := time.Since(start).Milliseconds()
+	if cost > 100 {
+		log.Debug("kafka consumer assign take too long!", zap.String("topic name", kc.topic),
+			zap.Any("Msg offset", offset), zap.Bool("inclusive", inclusive), zap.Int64("time cost(ms)", cost))
 	}
 
 	// If seek timeout is not 0 the call twice will return error isStarted RD_KAFKA_RESP_ERR__STATE.
@@ -123,7 +153,11 @@ func (kc *Consumer) Seek(id mqwrapper.MessageID, inclusive bool) error {
 	}
 
 	kc.hasSeek = true
-	kc.startReceiveMsgTask()
+
+	cost = time.Since(start).Milliseconds()
+	log.Debug("kafka consumer seek finished", zap.String("topic name", kc.topic),
+		zap.Any("Msg offset", offset), zap.Bool("inclusive", inclusive), zap.Int64("time cost(ms)", cost))
+
 	return nil
 }
 

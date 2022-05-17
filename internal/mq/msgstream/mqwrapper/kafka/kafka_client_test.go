@@ -187,154 +187,6 @@ func TestKafkaClient_ConsumeWithAck(t *testing.T) {
 	assert.Equal(t, len(arr), total3)
 }
 
-func ConsumeFromEarliestToRandomPosition(ctx context.Context, t *testing.T, kc *kafkaClient, topic string, subName string, c chan mqwrapper.MessageID, total *int) {
-	consumer, err := kc.Subscribe(mqwrapper.ConsumerOptions{
-		Topic:                       topic,
-		SubscriptionName:            subName,
-		BufSize:                     1024,
-		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
-	})
-	assert.Nil(t, err)
-	assert.NotNil(t, consumer)
-	defer consumer.Close()
-
-	// get random number between 1 ~ 5
-	rand.Seed(time.Now().UnixNano())
-	cnt := 1 + rand.Int()%5
-
-	log.Info("Consume1 channel start")
-	var msg mqwrapper.Message
-	for i := 0; i < cnt; i++ {
-		select {
-		case <-ctx.Done():
-			log.Info("Consume1 channel closed")
-			return
-		case msg = <-consumer.Chan():
-			if msg == nil {
-				continue
-			}
-
-			v := BytesToInt(msg.Payload())
-			log.Info("Consume1 RECV", zap.Any("v", v))
-			(*total)++
-		}
-	}
-
-	c <- &kafkaID{messageID: msg.ID().(*kafkaID).messageID}
-
-	log.Info("Consume1 randomly RECV", zap.Any("number", cnt))
-	log.Info("Consume1 done")
-}
-
-// Consume2 will consume messages from specified MessageID
-func consumeFromSpecifiedPositionToEnd(ctx context.Context, t *testing.T, kc *kafkaClient, topic string, subName string, msgID mqwrapper.MessageID, total *int) {
-	consumer, err := kc.Subscribe(mqwrapper.ConsumerOptions{
-		Topic:                       topic,
-		SubscriptionName:            subName,
-		BufSize:                     1024,
-		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
-	})
-	assert.Nil(t, err)
-	assert.NotNil(t, consumer)
-	defer consumer.Close()
-
-	err = consumer.Seek(msgID, false)
-	assert.Nil(t, err)
-
-	log.Info("Consume2 start")
-	for {
-		select {
-		case <-ctx.Done():
-			log.Info("Consume2 channel closed")
-			return
-		case msg, ok := <-consumer.Chan():
-			if msg == nil || !ok {
-				return
-			}
-
-			v := BytesToInt(msg.Payload())
-			log.Info("Consume2 RECV", zap.Any("v", v))
-			(*total)++
-		}
-	}
-
-}
-
-func ConsumeFromEarliestToEndPosition(ctx context.Context, t *testing.T, kc *kafkaClient, topic string, subName string, total *int) {
-	consumer, err := kc.Subscribe(mqwrapper.ConsumerOptions{
-		Topic:                       topic,
-		SubscriptionName:            subName,
-		BufSize:                     1024,
-		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
-	})
-	assert.Nil(t, err)
-	assert.NotNil(t, consumer)
-	defer consumer.Close()
-
-	log.Info("Consume3 start")
-	for {
-		select {
-		case <-ctx.Done():
-			log.Info("Consume3 channel closed")
-			return
-		case msg, ok := <-consumer.Chan():
-			if msg == nil || !ok {
-				return
-			}
-			v := BytesToInt(msg.Payload())
-			log.Info("Consume3 RECV", zap.Any("v", v))
-			(*total)++
-		}
-	}
-}
-
-func TestKafkaClient_ConsumeNoAck(t *testing.T) {
-	kc := createKafkaClient(t)
-	defer kc.Close()
-	assert.NotNil(t, kc)
-
-	rand.Seed(time.Now().UnixNano())
-	topic := fmt.Sprintf("test-topic-%d", rand.Int())
-	subName := fmt.Sprintf("test-subname-%d", rand.Int())
-
-	var total1 int
-	var total2 int
-	var total3 int
-
-	arr := []int{111, 222, 333, 444, 555, 666, 777}
-	ctx, cancel := context.WithCancel(context.Background())
-
-	producer := createProducer(t, kc, topic)
-	defer producer.Close()
-	produceData(ctx, t, producer, arr)
-	time.Sleep(100 * time.Millisecond)
-
-	ctx1, cancel1 := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel1()
-
-	c := make(chan mqwrapper.MessageID, 1)
-	ConsumeFromEarliestToRandomPosition(ctx1, t, kc, topic, subName, c, &total1)
-
-	// record the last received message id
-	lastMsgID := <-c
-	log.Info("msg", zap.Any("lastMsgID", lastMsgID))
-
-	ctx2, cancel2 := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel2()
-	consumeFromSpecifiedPositionToEnd(ctx2, t, kc, topic, subName, lastMsgID, &total2)
-
-	ctx3, cancel3 := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel3()
-	ConsumeFromEarliestToEndPosition(ctx3, t, kc, topic, subName, &total3)
-
-	cancel()
-
-	//TODO enable, it seems that ack is unavailable
-	//assert.Equal(t, len(arr)*2, total1+total2)
-
-	assert.Equal(t, len(arr), total3)
-}
-
 func TestKafkaClient_SeekPosition(t *testing.T) {
 	kc := createKafkaClient(t)
 	defer kc.Close()
@@ -365,6 +217,39 @@ func TestKafkaClient_SeekPosition(t *testing.T) {
 	}
 }
 
+func TestKafkaClient_ConsumeFromLatest(t *testing.T) {
+	kc := createKafkaClient(t)
+	defer kc.Close()
+
+	rand.Seed(time.Now().UnixNano())
+	ctx := context.Background()
+	topic := fmt.Sprintf("test-topic-%d", rand.Int())
+	subName := fmt.Sprintf("test-subname-%d", rand.Int())
+
+	producer := createProducer(t, kc, topic)
+	defer producer.Close()
+
+	data := []int{1, 2}
+	produceData(ctx, t, producer, data)
+
+	consumer := createConsumer(t, kc, topic, subName, mqwrapper.SubscriptionPositionLatest)
+	defer consumer.Close()
+
+	go func() {
+		time.Sleep(time.Second * 2)
+		data := []int{3}
+		produceData(ctx, t, producer, data)
+	}()
+
+	select {
+	case msg := <-consumer.Chan():
+		consumer.Ack(msg)
+		assert.Equal(t, 3, BytesToInt(msg.Payload()))
+	case <-time.After(5 * time.Second):
+		assert.FailNow(t, "should not wait")
+	}
+}
+
 func TestKafkaClient_EarliestMessageID(t *testing.T) {
 	kafkaAddress, _ := Params.Load("_KafkaBrokerList")
 	kc := NewKafkaClientInstance(kafkaAddress)
@@ -372,6 +257,25 @@ func TestKafkaClient_EarliestMessageID(t *testing.T) {
 
 	mid := kc.EarliestMessageID()
 	assert.NotNil(t, mid)
+}
+
+func TestKafkaClient_MsgSerializAndDeserialize(t *testing.T) {
+	kafkaAddress, _ := Params.Load("_KafkaBrokerList")
+	kc := NewKafkaClientInstance(kafkaAddress)
+	defer kc.Close()
+
+	mid := kc.EarliestMessageID()
+	msgID, err := kc.BytesToMsgID(mid.Serialize())
+	assert.NoError(t, err)
+	assert.True(t, msgID.AtEarliestPosition())
+
+	msgID, err = kc.StringToMsgID("1")
+	assert.NoError(t, err)
+	assert.NotNil(t, msgID)
+
+	msgID, err = kc.StringToMsgID("1.0")
+	assert.Error(t, err)
+	assert.Nil(t, msgID)
 }
 
 func createKafkaClient(t *testing.T) *kafkaClient {
