@@ -1,5 +1,8 @@
+import json
 import os.path
 import time
+
+import requests
 from pymilvus import connections
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
@@ -236,6 +239,32 @@ def read_pod_log(namespace, label_selector, release_name):
     except ApiException as e:
         log.error(f"Exception when read pod {pod} logs: %s\n" % e)
         raise Exception(str(e))
+
+
+def get_metrics_querynode_sq_req_count():
+    """ get metric milvus_querynode_collection_num from prometheus"""
+
+    PROMETHEUS = 'http://10.96.7.6:9090'
+    query_str = 'milvus_querynode_sq_req_count{app_kubernetes_io_instance="mic-replica",' \
+                'app_kubernetes_io_name="milvus",namespace="chaos-testing"}'
+
+    response = requests.get(PROMETHEUS + '/api/v1/query', params={'query': query_str})
+    if response.status_code == 200:
+        results = response.json()["data"]['result']
+        # print(results)
+        # print(type(results))
+        log.debug(json.dumps(results, indent=4))
+        milvus_querynode_sq_req_count = {}
+        for res in results:
+            if res["metric"]["status"] == "total":
+                querynode_id = res["metric"]["node_id"]
+                # pod = res["metric"]["pod"]
+                value = res["value"][-1]
+                milvus_querynode_sq_req_count[int(querynode_id)] = int(value)
+        # log.debug(milvus_querynode_sq_req_count)
+        return milvus_querynode_sq_req_count
+    else:
+        raise Exception(-1, f"Failed to get metrics with status code {response.status_code}")
 
 
 if __name__ == '__main__':
