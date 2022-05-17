@@ -13,7 +13,8 @@
 
 #include <memory>
 #include <string>
-#include <index/ScalarIndexSort.h>
+#include "index/ScalarIndexSort.h"
+#include "index/StringIndexSort.h"
 
 #include "common/FieldMeta.h"
 #include "common/Span.h"
@@ -24,6 +25,14 @@ template <typename T>
 inline scalar::ScalarIndexPtr<T>
 generate_scalar_index(Span<T> data) {
     auto indexing = std::make_unique<scalar::ScalarIndexSort<T>>();
+    indexing->Build(data.row_count(), data.data());
+    return indexing;
+}
+
+template <>
+inline scalar::ScalarIndexPtr<std::string>
+generate_scalar_index(Span<std::string> data) {
+    auto indexing = scalar::CreateStringIndexSort();
     indexing->Build(data.row_count(), data.data());
     return indexing;
 }

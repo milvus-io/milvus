@@ -222,6 +222,7 @@ TEST(Sealed, LoadFieldData) {
     auto counter_id = schema->AddDebugField("counter", DataType::INT64);
     auto double_id = schema->AddDebugField("double", DataType::DOUBLE);
     auto nothing_id = schema->AddDebugField("nothing", DataType::INT32);
+    auto str_id = schema->AddDebugField("str", DataType::VARCHAR);
     schema->set_primary_field_id(counter_id);
 
     auto dataset = DataGen(schema, N);
@@ -281,13 +282,18 @@ TEST(Sealed, LoadFieldData) {
     segment->LoadIndex(vec_info);
 
     ASSERT_EQ(segment->num_chunk(), 1);
+    ASSERT_EQ(segment->num_chunk_index(double_id), 1);
+    ASSERT_EQ(segment->num_chunk_index(str_id), 1);
     auto chunk_span1 = segment->chunk_data<int64_t>(counter_id, 0);
     auto chunk_span2 = segment->chunk_data<double>(double_id, 0);
+    auto chunk_span3 = segment->chunk_data<std::string>(str_id, 0);
     auto ref1 = dataset.get_col<int64_t>(counter_id);
     auto ref2 = dataset.get_col<double>(double_id);
+    auto ref3 = dataset.get_col(str_id)->scalars().string_data().data();
     for (int i = 0; i < N; ++i) {
         ASSERT_EQ(chunk_span1[i], ref1[i]);
         ASSERT_EQ(chunk_span2[i], ref2[i]);
+        ASSERT_EQ(chunk_span3[i], ref3[i]);
     }
 
     auto sr = segment->Search(plan.get(), *ph_group, time);
