@@ -36,25 +36,15 @@ func (b *replicaBalancer) addNode(nodeID int64) ([]*balancePlan, error) {
 			continue
 		}
 
-		offlineNodesCnt := make(map[UniqueID]int, len(replicas))
 		replicaAvailableMemory := make(map[UniqueID]uint64, len(replicas))
 		for _, replica := range replicas {
-			for _, nodeID := range replica.NodeIds {
-				if isOnline, err := b.cluster.isOnline(nodeID); err != nil || !isOnline {
-					offlineNodesCnt[replica.ReplicaID]++
-				}
-			}
-
 			replicaAvailableMemory[replica.ReplicaID] = getReplicaAvailableMemory(b.cluster, replica)
 		}
 		sort.Slice(replicas, func(i, j int) bool {
 			replicai := replicas[i].ReplicaID
 			replicaj := replicas[j].ReplicaID
 
-			cnti := offlineNodesCnt[replicai]
-			cntj := offlineNodesCnt[replicaj]
-			return cnti > cntj ||
-				cnti == cntj && replicaAvailableMemory[replicai] < replicaAvailableMemory[replicaj]
+			return replicaAvailableMemory[replicai] < replicaAvailableMemory[replicaj]
 		})
 
 		ret = append(ret, &balancePlan{
