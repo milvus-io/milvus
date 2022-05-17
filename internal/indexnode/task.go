@@ -211,6 +211,12 @@ func (it *IndexBuildTask) saveIndexMeta(ctx context.Context) error {
 			panic(errMsg)
 		}
 
+		if it.internalErr != nil {
+			log.Warn("IndexNode IndexBuildTask internal err is not nil, mark the task as retry",
+				zap.Int64("buildID", it.req.IndexBuildID))
+			it.SetState(TaskStateRetry)
+		}
+
 		taskState := it.updateTaskState(indexMeta)
 		if taskState == TaskStateAbandon {
 			log.Info("IndexNode IndexBuildTask saveIndexMeta", zap.String("TaskState", taskState.String()),
@@ -528,13 +534,8 @@ func (it *IndexBuildTask) saveIndex(ctx context.Context, blobs []*storage.Blob) 
 		return nil
 	}
 
-	err := funcutil.ProcessFuncParallel(blobCnt, runtime.NumCPU(), saveIndexFile, "saveIndexFile")
-	if err != nil {
-		log.Warn("saveIndexFile to minio failed", zap.Error(err))
-		// In this case, we intend not to return err, otherwise the task will be marked as failed.
-		it.internalErr = err
-	}
-	return nil
+	// If an error occurs, return the error that the task state will be set to retry.
+	return funcutil.ProcessFuncParallel(blobCnt, runtime.NumCPU(), saveIndexFile, "saveIndexFile")
 }
 
 func (it *IndexBuildTask) releaseMemory() {

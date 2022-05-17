@@ -575,9 +575,10 @@ func (i *IndexCoord) GetIndexFilePaths(ctx context.Context, req *indexpb.GetInde
 	defer sp.Finish()
 	var indexPaths []*indexpb.IndexFilePathInfo
 
-	for _, indexID := range req.IndexBuildIDs {
-		indexPathInfo, err := i.metaTable.GetIndexFilePathInfo(indexID)
+	for _, buildID := range req.IndexBuildIDs {
+		indexPathInfo, err := i.metaTable.GetIndexFilePathInfo(buildID)
 		if err != nil {
+			log.Warn("IndexCoord GetIndexFilePaths failed", zap.Int64("indexBuildID", buildID), zap.Error(err))
 			return &indexpb.GetIndexFilePathsResponse{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
