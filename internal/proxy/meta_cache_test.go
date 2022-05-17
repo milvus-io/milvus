@@ -356,5 +356,46 @@ func TestMetaCache_GetShards(t *testing.T) {
 		assert.Equal(t, 3, len(shards[0].GetNodeAddrs()))
 		assert.Equal(t, 3, len(shards[0].GetNodeIds()))
 	})
+}
+
+func TestMetaCache_ClearShards(t *testing.T) {
+	client := &MockRootCoordClientInterface{}
+	err := InitMetaCache(client)
+	require.Nil(t, err)
+
+	var (
+		ctx            = context.TODO()
+		collectionName = "collection1"
+		qc             = NewQueryCoordMock()
+	)
+	qc.Init()
+	qc.Start()
+	defer qc.Stop()
+
+	t.Run("Clear with no collection info", func(t *testing.T) {
+		globalMetaCache.ClearShards("collection_not_exist")
+	})
+
+	t.Run("Clear valid collection empty cache", func(t *testing.T) {
+		globalMetaCache.ClearShards(collectionName)
+	})
+
+	t.Run("Clear valid collection valid cache", func(t *testing.T) {
+
+		qc.validShardLeaders = true
+		shards, err := globalMetaCache.GetShards(ctx, true, collectionName, qc)
+		require.NoError(t, err)
+		require.NotEmpty(t, shards)
+		require.Equal(t, 1, len(shards))
+		require.Equal(t, 3, len(shards[0].GetNodeAddrs()))
+		require.Equal(t, 3, len(shards[0].GetNodeIds()))
+
+		globalMetaCache.ClearShards(collectionName)
+
+		qc.validShardLeaders = false
+		shards, err = globalMetaCache.GetShards(ctx, true, collectionName, qc)
+		assert.Error(t, err)
+		assert.Empty(t, shards)
+	})
 
 }

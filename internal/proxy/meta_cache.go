@@ -54,6 +54,7 @@ type Cache interface {
 	// GetCollectionSchema get collection's schema.
 	GetCollectionSchema(ctx context.Context, collectionName string) (*schemapb.CollectionSchema, error)
 	GetShards(ctx context.Context, withCache bool, collectionName string, qc types.QueryCoord) ([]*querypb.ShardLeadersList, error)
+	ClearShards(collectionName string)
 	RemoveCollection(ctx context.Context, collectionName string)
 	RemovePartition(ctx context.Context, collectionName string, partitionName string)
 
@@ -541,8 +542,6 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, collectionNam
 			zap.String("collectionName", collectionName))
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	req := &querypb.GetShardLeadersRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:  commonpb.MsgType_GetShardLeaders,
@@ -560,6 +559,23 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, collectionNam
 
 	shards := resp.GetShards()
 
+	m.mu.Lock()
 	m.collInfo[collectionName].shardLeaders = shards
+	m.mu.Unlock()
+
 	return shards, nil
+}
+
+// ClearShards clear the shard leader cache of a collection
+func (m *MetaCache) ClearShards(collectionName string) {
+	log.Info("clearing shard cache for collection", zap.String("collectionName", collectionName))
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	_, ok := m.collInfo[collectionName]
+
+	if !ok {
+		return
+	}
+
+	m.collInfo[collectionName].shardLeaders = nil
 }
