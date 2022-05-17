@@ -350,3 +350,42 @@ func TestIndexCoord_NotHealthy(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp4.Status.ErrorCode)
 }
+
+func TestIndexCoord_GetIndexFilePaths(t *testing.T) {
+	ic := &IndexCoord{
+		metaTable: &metaTable{
+			indexBuildID2Meta: map[UniqueID]Meta{
+				1: {
+					indexMeta: &indexpb.IndexMeta{
+						IndexBuildID:   1,
+						State:          commonpb.IndexState_Finished,
+						IndexFilePaths: []string{"indexFiles-1", "indexFiles-2"},
+					},
+				},
+				2: {
+					indexMeta: &indexpb.IndexMeta{
+						IndexBuildID: 2,
+						State:        commonpb.IndexState_Failed,
+					},
+				},
+			},
+		},
+	}
+
+	ic.stateCode.Store(internalpb.StateCode_Healthy)
+
+	t.Run("GetIndexFilePaths success", func(t *testing.T) {
+		resp, err := ic.GetIndexFilePaths(context.Background(), &indexpb.GetIndexFilePathsRequest{IndexBuildIDs: []UniqueID{1}})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, 1, len(resp.FilePaths))
+		assert.ElementsMatch(t, resp.FilePaths[0].IndexFilePaths, []string{"indexFiles-1", "indexFiles-2"})
+	})
+
+	t.Run("GetIndexFilePaths failed", func(t *testing.T) {
+		resp, err := ic.GetIndexFilePaths(context.Background(), &indexpb.GetIndexFilePathsRequest{IndexBuildIDs: []UniqueID{2}})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+		assert.NotEqual(t, "", resp.Status.Reason)
+	})
+}

@@ -322,6 +322,9 @@ func (mt *metaTable) GetIndexFilePathInfo(indexBuildID UniqueID) (*indexpb.Index
 	if meta.indexMeta.MarkDeleted {
 		return nil, fmt.Errorf("index not exists with ID = %d", indexBuildID)
 	}
+	if meta.indexMeta.State != commonpb.IndexState_Finished {
+		return nil, fmt.Errorf("index not finished with ID = %d", indexBuildID)
+	}
 	ret.IndexFilePaths = meta.indexMeta.IndexFilePaths
 	ret.SerializedSize = meta.indexMeta.GetSerializeSize()
 
