@@ -244,16 +244,17 @@ func (t *queryTask) Execute(ctx context.Context) error {
 		t.resultBuf = make(chan *internalpb.RetrieveResults, len(shards))
 		t.toReduceResults = make([]*internalpb.RetrieveResults, 0, len(shards))
 		t.runningGroup, t.runningGroupCtx = errgroup.WithContext(ctx)
-		for _, shard := range shards {
-			s := shard
+		for channelID, leaders := range shards {
+			channelID := channelID
+			leaders := leaders
 			t.runningGroup.Go(func() error {
 				log.Debug("proxy starting to query one shard",
 					zap.Int64("collectionID", t.CollectionID),
 					zap.String("collection name", t.collectionName),
-					zap.String("shard channel", s.GetChannelName()),
+					zap.String("shard channel", channelID),
 					zap.Uint64("timeoutTs", t.TimeoutTimestamp))
 
-				err := t.queryShard(t.runningGroupCtx, s)
+				err := t.queryShard(t.runningGroupCtx, leaders, channelID)
 				if err != nil {
 					return err
 				}
@@ -344,12 +345,12 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-func (t *queryTask) queryShard(ctx context.Context, leaders *querypb.ShardLeadersList) error {
+func (t *queryTask) queryShard(ctx context.Context, leaders []queryNode, channelID string) error {
 	query := func(nodeID UniqueID, qn types.QueryNode) error {
 		req := &querypb.QueryRequest{
 			Req:           t.RetrieveRequest,
 			IsShardLeader: true,
-			DmlChannel:    leaders.GetChannelName(),
+			DmlChannel:    channelID,
 		}
 
 		result, err := qn.Query(ctx, req)
@@ -364,14 +365,14 @@ func (t *queryTask) queryShard(ctx context.Context, leaders *querypb.ShardLeader
 			return fmt.Errorf("fail to Query, QueryNode ID = %d, reason=%s", nodeID, result.GetStatus().GetReason())
 		}
 
-		log.Debug("get query result", zap.Int64("nodeID", nodeID), zap.String("channelID", leaders.GetChannelName()))
+		log.Debug("get query result", zap.Int64("nodeID", nodeID), zap.String("channelID", channelID))
 		t.resultBuf <- result
 		return nil
 	}
 
 	err := t.queryShardPolicy(t.TraceCtx(), t.getQueryNodePolicy, query, leaders)
 	if err != nil {
-		log.Warn("fail to Query to all shard leaders", zap.Int64("taskID", t.ID()), zap.Any("shard leaders", leaders.GetNodeIds()))
+		log.Warn("fail to Query to all shard leaders", zap.Int64("taskID", t.ID()), zap.Any("shard leaders", leaders))
 		return err
 	}
 

@@ -344,8 +344,8 @@ func TestMetaCache_GetShards(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotEmpty(t, shards)
 		assert.Equal(t, 1, len(shards))
-		assert.Equal(t, 3, len(shards[0].GetNodeAddrs()))
-		assert.Equal(t, 3, len(shards[0].GetNodeIds()))
+
+		assert.Equal(t, 3, len(shards["channel-1"]))
 
 		// get from cache
 		qc.validShardLeaders = false
@@ -353,8 +353,7 @@ func TestMetaCache_GetShards(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotEmpty(t, shards)
 		assert.Equal(t, 1, len(shards))
-		assert.Equal(t, 3, len(shards[0].GetNodeAddrs()))
-		assert.Equal(t, 3, len(shards[0].GetNodeIds()))
+		assert.Equal(t, 3, len(shards["channel-1"]))
 	})
 }
 
@@ -387,8 +386,7 @@ func TestMetaCache_ClearShards(t *testing.T) {
 		require.NoError(t, err)
 		require.NotEmpty(t, shards)
 		require.Equal(t, 1, len(shards))
-		require.Equal(t, 3, len(shards[0].GetNodeAddrs()))
-		require.Equal(t, 3, len(shards[0].GetNodeIds()))
+		require.Equal(t, 3, len(shards["channel-1"]))
 
 		globalMetaCache.ClearShards(collectionName)
 

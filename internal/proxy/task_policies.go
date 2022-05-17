@@ -3,11 +3,11 @@ package proxy
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	qnClient "github.com/milvus-io/milvus/internal/distributed/querynode/client"
 
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 
 	"go.uber.org/zap"
@@ -15,7 +15,7 @@ import (
 
 type getQueryNodePolicy func(context.Context, string) (types.QueryNode, error)
 
-type pickShardPolicy func(ctx context.Context, policy getQueryNodePolicy, query func(UniqueID, types.QueryNode) error, leaders *querypb.ShardLeadersList) error
+type pickShardPolicy func(ctx context.Context, policy getQueryNodePolicy, query func(UniqueID, types.QueryNode) error, leaders []queryNode) error
 
 // TODO add another policy to enbale the use of cache
 // defaultGetQueryNodePolicy creates QueryNode client for every address everytime
@@ -40,23 +40,45 @@ var (
 	errInvalidShardLeaders = errors.New("Invalid shard leader")
 )
 
-func roundRobinPolicy(ctx context.Context, getQueryNodePolicy getQueryNodePolicy, query func(UniqueID, types.QueryNode) error, leaders *querypb.ShardLeadersList) error {
+type queryNode struct {
+	nodeID  UniqueID
+	address string
+}
+
+func (q queryNode) String() string {
+	return fmt.Sprintf("<NodeID: %d>", q.nodeID)
+}
+
+func updateShardsWithRoundRobin(shardsLeaders map[string][]queryNode) map[string][]queryNode {
+
+	for channelID, leaders := range shardsLeaders {
+		if len(leaders) <= 1 {
+			continue
+		}
+
+		shardsLeaders[channelID] = append(leaders[1:], leaders[0])
+	}
+
+	return shardsLeaders
+}
+
+func roundRobinPolicy(ctx context.Context, getQueryNodePolicy getQueryNodePolicy, query func(UniqueID, types.QueryNode) error, leaders []queryNode) error {
 	var (
 		err     = errBegin
 		current = 0
 		qn      types.QueryNode
 	)
-	replicaNum := len(leaders.GetNodeIds())
+	replicaNum := len(leaders)
 
 	for err != nil && current < replicaNum {
-		currentID := leaders.GetNodeIds()[current]
+		currentID := leaders[current].nodeID
 		if err != errBegin {
 			log.Warn("retry with another QueryNode",
 				zap.Int("retries numbers", current),
-				zap.String("leader", leaders.GetChannelName()), zap.Int64("nodeID", currentID))
+				zap.Int64("nodeID", currentID))
 		}
 
-		qn, err = getQueryNodePolicy(ctx, leaders.GetNodeAddrs()[current])
+		qn, err = getQueryNodePolicy(ctx, leaders[current].address)
 		if err != nil {
 			log.Warn("fail to get valid QueryNode", zap.Int64("nodeID", currentID),
 				zap.Error(err))
@@ -68,7 +90,6 @@ func roundRobinPolicy(ctx context.Context, getQueryNodePolicy getQueryNodePolicy
 		err = query(currentID, qn)
 		if err != nil {
 			log.Warn("fail to Query with shard leader",
-				zap.String("leader", leaders.GetChannelName()),
 				zap.Int64("nodeID", currentID),
 				zap.Error(err))
 		}
@@ -76,9 +97,8 @@ func roundRobinPolicy(ctx context.Context, getQueryNodePolicy getQueryNodePolicy
 	}
 
 	if current == replicaNum && err != nil {
-		log.Warn("no shard leaders available for channel",
-			zap.String("channel name", leaders.GetChannelName()),
-			zap.Int64s("leaders", leaders.GetNodeIds()), zap.Error(err))
+		log.Warn("no shard leaders available",
+			zap.String("leaders", fmt.Sprintf("%v", leaders)), zap.Error(err))
 		// needs to return the error from query
 		return err
 	}
