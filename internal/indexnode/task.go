@@ -527,13 +527,8 @@ func (it *IndexBuildTask) saveIndex(ctx context.Context, blobs []*storage.Blob) 
 		return nil
 	}
 
-	err := funcutil.ProcessFuncParallel(blobCnt, runtime.NumCPU(), saveIndexFile, "saveIndexFile")
-	if err != nil {
-		log.Warn("saveIndexFile to minio failed", zap.Error(err))
-		// In this case, we intend not to return err, otherwise the task will be marked as failed.
-		it.internalErr = err
-	}
-	return nil
+	// If an error occurs, return the error that the task state will be set to retry.
+	return funcutil.ProcessFuncParallel(blobCnt, runtime.NumCPU(), saveIndexFile, "saveIndexFile")
 }
 
 func (it *IndexBuildTask) releaseMemory() {
