@@ -3,9 +3,9 @@ package storage
 /*
 #cgo CFLAGS: -I${SRCDIR}/cwrapper
 
-#cgo linux LDFLAGS: -L${SRCDIR}/cwrapper/output/lib -L${SRCDIR}/cwrapper/output/lib64 -lwrapper -lparquet -larrow -larrow_bundled_dependencies -lstdc++ -lm
-#cgo darwin LDFLAGS: -L${SRCDIR}/cwrapper/output/lib -lwrapper -lparquet -larrow -larrow_bundled_dependencies -lstdc++ -lm
-#cgo windows LDFLAGS: -L${SRCDIR}/cwrapper/output/lib -lwrapper -lparquet -larrow -lstdc++
+#cgo linux LDFLAGS: -L${SRCDIR}/cwrapper/output/lib -L${SRCDIR}/cwrapper/output/lib64 -L${SRCDIR}/../core/output/lib -L${SRCDIR}/../core/output/lib64 -lwrapper -lparquet -larrow -larrow_bundled_dependencies -lstdc++ -lm
+#cgo darwin LDFLAGS: -L${SRCDIR}/cwrapper/output/lib -L${SRCDIR}/../core/output/lib -lwrapper -lparquet -larrow -larrow_bundled_dependencies -lstdc++ -lm
+#cgo windows LDFLAGS: -L${SRCDIR}/cwrapper/output/lib -L${SRCDIR}/../core/output/lib -lwrapper -lparquet -larrow -lstdc++
 #include <stdlib.h>
 #include "ParquetWrapper.h"
 */

@@ -84,9 +84,9 @@ using_ccache_if_defined(MILVUS_USE_CCACHE)
 include( ExternalProject )
 include( GNUInstallDirs )
 include( FetchContent )
-include_directories(thirdparty)
+include_directories( thirdparty )
 set( FETCHCONTENT_BASE_DIR ${MILVUS_BINARY_DIR}/3rdparty_download )
-set(FETCHCONTENT_QUIET OFF)
+set( FETCHCONTENT_QUIET OFF )
 include( ThirdPartyPackages )
 
 # **************************** Compiler arguments ****************************
