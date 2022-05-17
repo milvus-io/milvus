@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -54,8 +53,7 @@ func newQueryShardService(ctx context.Context, historical *historical, streaming
 	queryShardServiceCtx, queryShardServiceCancel := context.WithCancel(ctx)
 
 	path := Params.LoadWithDefault("localStorage.Path", "/tmp/milvus/data")
-	enabled, _ := Params.Load("localStorage.enabled")
-	localCacheEnabled, _ := strconv.ParseBool(enabled)
+
 	localChunkManager := storage.NewLocalChunkManager(storage.RootPath(path))
 	remoteChunkManager, _ := factory.NewVectorStorageChunkManager(ctx)
 
@@ -69,7 +67,7 @@ func newQueryShardService(ctx context.Context, historical *historical, streaming
 		shardClusterService: clusterService,
 		localChunkManager:   localChunkManager,
 		remoteChunkManager:  remoteChunkManager,
-		localCacheEnabled:   localCacheEnabled,
+		localCacheEnabled:   Params.QueryNodeCfg.CacheEnabled,
 		factory:             factory,
 	}
 	return qss
