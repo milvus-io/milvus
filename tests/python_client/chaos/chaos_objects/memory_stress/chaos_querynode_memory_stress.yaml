@@ -11,9 +11,10 @@ spec:
       app.kubernetes.io/name: milvus
       app.kubernetes.io/instance: mic-memory
       app.kubernetes.io/component: querynode
-  mode: one
+  mode: all
+  value: "2"
   stressors:
     memory:
       workers: 4
-      size: 512Mi
+      size: 5Gi
   duration: 5m
