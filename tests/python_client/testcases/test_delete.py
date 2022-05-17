@@ -771,7 +771,7 @@ class TestDeleteOperation(TestcaseBase):
             log.debug(collection_w.num_entities)
 
         # query entity one
-        res = df_new.iloc[[0], [0, 2]].to_dict('records')
+        res = df_new.iloc[[0], [0, -1]].to_dict('records')
         collection_w.query(tmp_expr, output_fields=[ct.default_float_vec_field_name],
                            check_task=CheckTasks.check_query_results, check_items={'exp_res': res, 'with_vec': True})
 
@@ -814,7 +814,7 @@ class TestDeleteOperation(TestcaseBase):
         log.debug(collection_w.num_entities)
 
         # re-query
-        res = df_new.iloc[[0], [0, 2]].to_dict('records')
+        res = df_new.iloc[[0], [0, -1]].to_dict('records')
         collection_w.query(tmp_expr, output_fields=[ct.default_float_vec_field_name],
                            check_task=CheckTasks.check_query_results, check_items={'exp_res': res, 'with_vec': True})
         collection_w.search(data=[df_new[ct.default_float_vec_field_name][0]], anns_field=ct.default_float_vec_field_name,
