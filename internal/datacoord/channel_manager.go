@@ -712,7 +712,7 @@ func (c *ChannelManager) Release(nodeID UniqueID, channelName string) error {
 
 	toReleaseChannel := c.getChannelByNodeAndName(nodeID, channelName)
 	if toReleaseChannel == nil {
-		return fmt.Errorf("fail to find matching nodID: %d with channelName: %s", nodeID, channelName)
+		return fmt.Errorf("fail to find matching nodeID: %d with channelName: %s", nodeID, channelName)
 	}
 
 	toReleaseUpdates := getReleaseOp(nodeID, toReleaseChannel)
@@ -731,7 +731,7 @@ func (c *ChannelManager) toDelete(nodeID UniqueID, channelName string) error {
 
 	ch := c.getChannelByNodeAndName(nodeID, channelName)
 	if ch == nil {
-		return fmt.Errorf("fail to find matching nodID: %d with channelName: %s", nodeID, channelName)
+		return fmt.Errorf("fail to find matching nodeID: %d with channelName: %s", nodeID, channelName)
 	}
 
 	if !c.isMarkedDrop(channelName) {

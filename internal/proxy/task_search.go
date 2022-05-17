@@ -258,27 +258,28 @@ func (t *searchTask) Execute(ctx context.Context) error {
 	defer tr.Elapse("done")
 
 	executeSearch := func(withCache bool) error {
-		shards, err := globalMetaCache.GetShards(ctx, withCache, t.collectionName, t.qc)
+		shard2Leaders, err := globalMetaCache.GetShards(ctx, withCache, t.collectionName, t.qc)
 		if err != nil {
 			return err
 		}
 
-		t.resultBuf = make(chan *internalpb.SearchResults, len(shards))
-		t.toReduceResults = make([]*internalpb.SearchResults, 0, len(shards))
+		t.resultBuf = make(chan *internalpb.SearchResults, len(shard2Leaders))
+		t.toReduceResults = make([]*internalpb.SearchResults, 0, len(shard2Leaders))
 		t.runningGroup, t.runningGroupCtx = errgroup.WithContext(ctx)
 
 		// TODO: try to merge rpc send to different shard leaders.
 		// If two shard leader is on the same querynode maybe we should merge request to save rpc
-		for _, shard := range shards {
-			s := shard
+		for channelID, leaders := range shard2Leaders {
+			channelID := channelID
+			leaders := leaders
 			t.runningGroup.Go(func() error {
 				log.Debug("proxy starting to query one shard",
 					zap.Int64("collectionID", t.CollectionID),
 					zap.String("collection name", t.collectionName),
-					zap.String("shard channel", s.GetChannelName()),
+					zap.String("shard channel", channelID),
 					zap.Uint64("timeoutTs", t.TimeoutTimestamp))
 
-				err := t.searchShard(t.runningGroupCtx, s)
+				err := t.searchShard(t.runningGroupCtx, leaders, channelID)
 				if err != nil {
 					return err
 				}
@@ -393,13 +394,13 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-func (t *searchTask) searchShard(ctx context.Context, leaders *querypb.ShardLeadersList) error {
+func (t *searchTask) searchShard(ctx context.Context, leaders []queryNode, channelID string) error {
 
 	search := func(nodeID UniqueID, qn types.QueryNode) error {
 		req := &querypb.SearchRequest{
 			Req:           t.SearchRequest,
 			IsShardLeader: true,
-			DmlChannel:    leaders.GetChannelName(),
+			DmlChannel:    channelID,
 		}
 
 		result, err := qn.Search(ctx, req)
@@ -420,7 +421,7 @@ func (t *searchTask) searchShard(ctx context.Context, leaders *querypb.ShardLead
 
 	err := t.searchShardPolicy(t.TraceCtx(), t.getQueryNodePolicy, search, leaders)
 	if err != nil {
-		log.Warn("fail to search to all shard leaders", zap.Any("shard leaders", leaders.GetNodeIds()))
+		log.Warn("fail to search to all shard leaders", zap.Any("shard leaders", leaders))
 		return err
 	}
 

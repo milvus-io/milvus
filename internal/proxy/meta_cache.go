@@ -53,7 +53,7 @@ type Cache interface {
 	GetPartitionInfo(ctx context.Context, collectionName string, partitionName string) (*partitionInfo, error)
 	// GetCollectionSchema get collection's schema.
 	GetCollectionSchema(ctx context.Context, collectionName string) (*schemapb.CollectionSchema, error)
-	GetShards(ctx context.Context, withCache bool, collectionName string, qc types.QueryCoord) ([]*querypb.ShardLeadersList, error)
+	GetShards(ctx context.Context, withCache bool, collectionName string, qc types.QueryCoord) (map[string][]queryNode, error)
 	ClearShards(collectionName string)
 	RemoveCollection(ctx context.Context, collectionName string)
 	RemovePartition(ctx context.Context, collectionName string, partitionName string)
@@ -70,7 +70,7 @@ type collectionInfo struct {
 	collID              typeutil.UniqueID
 	schema              *schemapb.CollectionSchema
 	partInfo            map[string]*partitionInfo
-	shardLeaders        []*querypb.ShardLeadersList
+	shardLeaders        map[string][]queryNode
 	createdTimestamp    uint64
 	createdUtcTimestamp uint64
 }
@@ -528,7 +528,7 @@ func (m *MetaCache) GetCredUsernames(ctx context.Context) ([]string, error) {
 }
 
 // GetShards update cache if withCache == false
-func (m *MetaCache) GetShards(ctx context.Context, withCache bool, collectionName string, qc types.QueryCoord) ([]*querypb.ShardLeadersList, error) {
+func (m *MetaCache) GetShards(ctx context.Context, withCache bool, collectionName string, qc types.QueryCoord) (map[string][]queryNode, error) {
 	info, err := m.GetCollectionInfo(ctx, collectionName)
 	if err != nil {
 		return nil, err
@@ -536,7 +536,12 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, collectionNam
 
 	if withCache {
 		if len(info.shardLeaders) > 0 {
-			return info.shardLeaders, nil
+			shards := updateShardsWithRoundRobin(info.shardLeaders)
+
+			m.mu.Lock()
+			m.collInfo[collectionName].shardLeaders = shards
+			m.mu.Unlock()
+			return shards, nil
 		}
 		log.Info("no shard cache for collection, try to get shard leaders from QueryCoord",
 			zap.String("collectionName", collectionName))
@@ -557,13 +562,31 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, collectionNam
 		return nil, fmt.Errorf("fail to get shard leaders from QueryCoord: %s", resp.Status.Reason)
 	}
 
-	shards := resp.GetShards()
+	shards := parseShardLeaderList2QueryNode(resp.GetShards())
+
+	shards = updateShardsWithRoundRobin(shards)
 
 	m.mu.Lock()
 	m.collInfo[collectionName].shardLeaders = shards
 	m.mu.Unlock()
 
 	return shards, nil
+}
+
+func parseShardLeaderList2QueryNode(shardsLeaders []*querypb.ShardLeadersList) map[string][]queryNode {
+	shard2QueryNodes := make(map[string][]queryNode)
+
+	for _, leaders := range shardsLeaders {
+		qns := make([]queryNode, len(leaders.GetNodeIds()))
+
+		for j := range qns {
+			qns[j] = queryNode{leaders.GetNodeIds()[j], leaders.GetNodeAddrs()[j]}
+		}
+
+		shard2QueryNodes[leaders.GetChannelName()] = qns
+	}
+
+	return shard2QueryNodes
 }
 
 // ClearShards clear the shard leader cache of a collection
