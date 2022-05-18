@@ -1275,4 +1275,16 @@ class  TestqueryString(TestcaseBase):
         res, _ = collection_w.query(default_string_term_expr, output_fields=[ct.default_binary_vec_field_name])
         assert len(res) == 2
 
-   
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_query_string_expr_with_prefixes(self):
+        """
+        target: test query with 
+        method: specify string primary field as output field
+        expected: return string primary field
+        """
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True, primary_field=ct.default_string_field_name)[0:2]
+        res = vectors[0].iloc[:1, :3].to_dict('records')
+        expression = "varchar startsWith \"0\""
+        output_fields = [default_int_field_name, default_float_field_name, default_string_field_name]
+        collection_w.query(expression, output_fields=output_fields, 
+                           check_task=CheckTasks.check_query_results, check_items={exp_res: res})

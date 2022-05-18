@@ -27,6 +27,7 @@ default_search_exp = "int64 >= 0"
 default_search_string_exp =  "varchar >= \"0\""
 default_search_mix_exp = "int64 >= 0 && varchar >= \"0\""
 default_invaild_string_exp = "varchar >= 0"
+perfix_expr = "varchar startsWith \"0\""
 default_search_field = ct.default_float_vec_field_name
 default_search_params = ct.default_search_params
 default_int64_field_name = ct.default_int64_field_name
@@ -2987,3 +2988,37 @@ class  TestsearchString(TestcaseBase):
                                          "ids": insert_ids,
                                          "limit": default_limit,
                                          "_async": _async})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_string_field_not_primary_perfix(self, auto_id, _async):
+        """
+        target: test search with string expr and string field is not primary
+        method: create collection and insert data 
+                create index and collection load
+                collection search uses string expr in string field, string field is not primary
+        expected: Search successfully
+        """
+        # 1. initialize with data
+        collection_w, _, _, insert_ids = \
+            self.init_collection_general(prefix, True, auto_id=auto_id, dim=default_dim)[0:4]
+        index_param = {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}}
+        collection_w.create_index("float_vector", index_param, index_name="a")
+        index_param_two ={}
+        collection_w.create_index("varchar", index_param_two, index_name="b")
+        collection_w.load()
+        # 2. search
+        log.info("test_search_string_field_not_primary: searching collection %s" % collection_w.name)
+        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+        output_fields = [default_float_field_name, default_string_field_name]
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, default_limit, 
+                            perfix_expr,
+                            output_fields=output_fields,
+                            _async=_async,
+                            travel_timestamp=0,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": insert_ids,
+                                         "limit": 1,
+                                         "_async": _async}
+                            )
