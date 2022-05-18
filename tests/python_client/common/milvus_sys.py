@@ -29,6 +29,11 @@ class MilvusSys:
         return self.nodes[0].get('infos').get('system_info').get('system_version')
 
     @property
+    def build_time(self):
+        """get the first node's build time as milvus build time"""
+        return self.nodes[0].get('infos').get('system_info').get('build_time')
+
+    @property
     def deploy_mode(self):
         """get the first node's deploy_mode as milvus deploy_mode"""
         return self.nodes[0].get('infos').get('system_info').get('deploy_mode')
@@ -39,9 +44,8 @@ class MilvusSys:
         get simd type that milvus is running against
         return the first query node's simd type
         """
-        for node in self.nodes:
-            if 'QueryNode' == node.get('infos').get('type'):
-                return node.get('infos').get('system_configurations').get('simd_type')
+        for node in self.query_nodes:
+            return node.get('infos').get('system_configurations').get('simd_type')
         raise Exception("No query node found")
 
     @property
@@ -83,7 +87,9 @@ class MilvusSys:
     @property
     def nodes(self):
         """get all the nodes in Milvus deployment"""
-        return json.loads(self.sys_info.response).get('nodes_info')
+        all_nodes = json.loads(self.sys_info.response).get('nodes_info')
+        online_nodes = [node for node in all_nodes if node["infos"]["has_error"] is False]
+        return online_nodes
 
     def get_nodes_by_type(self, node_type=None):
         """get milvus nodes by node type"""
@@ -93,3 +99,8 @@ class MilvusSys:
                 if str(node_type).lower() == str(node.get('infos').get('type')).lower():
                     target_nodes.append(node)
         return target_nodes
+
+
+if __name__ == '__main__':
+    connections.connect(host="10.96.250.111", port="19530")
+    ms = MilvusSys()
