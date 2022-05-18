@@ -153,7 +153,8 @@ def get_milvus_instance_name(namespace, host, port="19530"):
             "milvus-multi-querynode"
 
     """
-    connections.connect(host=host, port=port)
+    connections.add_connection(_default={"host": host, "port": port})
+    connections.connect(alias='_default')
     ms = MilvusSys()
     query_node_ip = ms.query_nodes[0]["infos"]['hardware_infos']["ip"].split(":")[0]
     pod_name = ""

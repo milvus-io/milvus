@@ -295,6 +295,15 @@ def gen_default_list_data(nb=ct.default_nb, dim=ct.default_dim):
     return data
 
 
+def gen_default_list_data_for_bulk_load(nb=ct.default_nb, dim=ct.default_dim):
+    int_values = [i for i in range(nb)]
+    float_values = [float(i) for i in range(nb)]
+    string_values = [str(i) for i in range(nb)]
+    float_vec_values = gen_vectors(nb, dim)
+    data = [int_values, float_values, string_values, float_vec_values]
+    return data
+
+
 def gen_default_tuple_data(nb=ct.default_nb, dim=ct.default_dim):
     int_values = [i for i in range(nb)]
     float_values = [np.float32(i) for i in range(nb)]
