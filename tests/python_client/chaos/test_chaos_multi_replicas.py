@@ -5,6 +5,7 @@ import pytest
 import os
 import time
 import json
+import random
 from time import sleep
 
 from pymilvus import connections
@@ -130,7 +131,7 @@ class TestChaos(TestChaosBase):
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("is_streaming", [False])  # [False, True]
-    @pytest.mark.parametrize("failed_group_scope", ["one"])  # ["one", "all"]
+    @pytest.mark.parametrize("failed_group_scope", ["one"])  # ["one", "except_one" "all"]
     @pytest.mark.parametrize("failed_node_type", ["shard_leader"])  # ["non_shard_leader", "shard_leader"]
     @pytest.mark.parametrize("chaos_type", ["pod-failure"])  # ["pod-failure", "pod-kill"]
     def test_multi_replicas_with_only_one_group_available(self, chaos_type, failed_node_type, failed_group_scope, is_streaming):
@@ -158,7 +159,9 @@ class TestChaos(TestChaosBase):
         target_group = []
         group_list = sorted(group_list, key=lambda x: -len(x))
         if failed_group_scope == "one":
-            target_group = group_list[:1]
+            target_group = random.sample(group_list, 1)
+        if failed_group_scope == "except_one":
+            target_group = random.sample(group_list, len(group_list)-1)
         if failed_group_scope == "all":
             target_group = group_list[:]
         for g in target_group:
@@ -170,6 +173,7 @@ class TestChaos(TestChaosBase):
             for target_node in target_nodes:
                 pod = querynode_id_pod_pair[target_node]
                 target_pod_list.append(pod)
+        log.info(f"target_pod_list: {target_pod_list}")
         chaos_config = cc.gen_experiment_config(f"chaos/chaos_objects/template/{chaos_type}-by-pod-list.yaml")
         chaos_config['metadata']['name'] = f"test-multi-replicase-{int(time.time())}"
         meta_name = chaos_config.get('metadata', None).get('name', None)
@@ -191,6 +195,7 @@ class TestChaos(TestChaosBase):
                                 group=constants.CHAOS_GROUP,
                                 version=constants.CHAOS_VERSION,
                                 namespace=constants.CHAOS_NAMESPACE)
+
         chaos_res.create(chaos_config)
         log.info("chaos injected")
         sleep(constants.WAIT_PER_OP * 2)
@@ -227,10 +232,11 @@ class TestChaos(TestChaosBase):
         sleep(2)
         # wait all pods ready
         log.info(f"wait for pods in namespace {constants.CHAOS_NAMESPACE} with label app.kubernetes.io/instance={release_name}")
-        wait_pods_ready(constants.CHAOS_NAMESPACE,f"app.kubernetes.io/instance={release_name}")
+        ready_1 = wait_pods_ready(constants.CHAOS_NAMESPACE,f"app.kubernetes.io/instance={release_name}")
         log.info(f"wait for pods in namespace {constants.CHAOS_NAMESPACE} with label release={release_name}")
-        wait_pods_ready(constants.CHAOS_NAMESPACE, f"release={release_name}")
-        log.info("all pods are ready")
+        ready_2 = wait_pods_ready(constants.CHAOS_NAMESPACE, f"release={release_name}")
+        if ready_1 and ready_2:
+            log.info("all pods are ready")
         # reconnect if needed
         sleep(constants.WAIT_PER_OP * 2)
         # cc.reconnect(connections, alias='default')
