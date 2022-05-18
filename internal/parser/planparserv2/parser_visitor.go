@@ -24,12 +24,10 @@ func (v *ParserVisitor) VisitParens(ctx *parser.ParensContext) interface{} {
 	return ctx.Expr().Accept(v)
 }
 
-// VisitIdentifier translates expr to column plan.
-func (v *ParserVisitor) VisitIdentifier(ctx *parser.IdentifierContext) interface{} {
-	fieldName := ctx.Identifier().GetText()
-	field, err := v.schema.GetFieldFromName(fieldName)
+func (v *ParserVisitor) translateIdentifier(identifier string) (*ExprWithType, error) {
+	field, err := v.schema.GetFieldFromName(identifier)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	return &ExprWithType{
 		expr: &planpb.Expr{
@@ -45,7 +43,17 @@ func (v *ParserVisitor) VisitIdentifier(ctx *parser.IdentifierContext) interface
 			},
 		},
 		dataType: field.DataType,
+	}, nil
+}
+
+// VisitIdentifier translates expr to column plan.
+func (v *ParserVisitor) VisitIdentifier(ctx *parser.IdentifierContext) interface{} {
+	identifier := ctx.Identifier().GetText()
+	expr, err := v.translateIdentifier(identifier)
+	if err != nil {
+		return err
 	}
+	return expr
 }
 
 // VisitBoolean translates expr to GenericValue.
@@ -525,24 +533,19 @@ func (v *ParserVisitor) VisitEmptyTerm(ctx *parser.EmptyTermContext) interface{}
 
 // VisitRange translates expr to range plan.
 func (v *ParserVisitor) VisitRange(ctx *parser.RangeContext) interface{} {
-	child := ctx.Expr(1).Accept(v)
-	if err := getError(child); err != nil {
+	identifier := ctx.Identifier().GetText()
+	childExpr, err := v.translateIdentifier(identifier)
+	if err != nil {
 		return err
 	}
 
-	childValue := getGenericValue(child)
-	if childValue != nil {
-		return fmt.Errorf("'range' can only be used on non-const expression")
-	}
-
-	childExpr := getExpr(child)
 	columnInfo := toColumnInfo(childExpr)
 	if columnInfo == nil {
 		return fmt.Errorf("range operations are only supported on single fields now, got: %s", ctx.Expr(1).GetText())
 	}
 
 	lower := ctx.Expr(0).Accept(v)
-	upper := ctx.Expr(2).Accept(v)
+	upper := ctx.Expr(1).Accept(v)
 	if err := getError(lower); err != nil {
 		return err
 	}
@@ -614,23 +617,18 @@ func (v *ParserVisitor) VisitRange(ctx *parser.RangeContext) interface{} {
 
 // VisitReverseRange parses the expression like "1 > a > 0".
 func (v *ParserVisitor) VisitReverseRange(ctx *parser.ReverseRangeContext) interface{} {
-	child := ctx.Expr(1).Accept(v)
-	if err := getError(child); err != nil {
+	identifier := ctx.Identifier().GetText()
+	childExpr, err := v.translateIdentifier(identifier)
+	if err != nil {
 		return err
 	}
 
-	childValue := getGenericValue(child)
-	if childValue != nil {
-		return fmt.Errorf("'range' can only be used on non-const expression")
-	}
-
-	childExpr := getExpr(child)
 	columnInfo := toColumnInfo(childExpr)
 	if columnInfo == nil {
 		return fmt.Errorf("range operations are only supported on single fields now, got: %s", ctx.Expr(1).GetText())
 	}
 
-	lower := ctx.Expr(2).Accept(v)
+	lower := ctx.Expr(1).Accept(v)
 	upper := ctx.Expr(0).Accept(v)
 	if err := getError(lower); err != nil {
 		return err
