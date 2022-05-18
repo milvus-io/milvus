@@ -162,6 +162,8 @@ queryNode:
   # Segcore will divide a segment into multiple chunks to enbale small index
   segcore:
     chunkRows: 32768 # The number of vectors in a chunk.
+    # Note: we have disabled segment small index since @2022.05.12. So below related configurations won't work.
+    # We won't create small index for growing segments and search on these segments will directly use bruteforce scan.
     smallIndex:
       nlist: 256 # small index nlist, recommend to set sqrt(chunkRows), must smaller than chunkRows/8
       nprobe: 16 # nprobe to search small index, based on your accuracy requirement, must smaller than nlist
