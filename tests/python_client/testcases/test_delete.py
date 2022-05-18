@@ -14,7 +14,12 @@ half_nb = ct.default_nb // 2
 tmp_nb = 100
 tmp_expr = f'{ct.default_int64_field_name} in {[0]}'
 query_res_tmp_expr = [{f'{ct.default_int64_field_name}': 0}]
+query_tmp_expr_str = [{f'{ct.default_string_field_name}': "0"}]
 exp_res = "exp_res"
+default_string_expr =  "varchar in [ \"0\"]"
+default_invaild_string_exp=  "varchar >= 0"
+index_name1=cf.gen_unique_str("float")
+index_name2=cf.gen_unique_str("varhar")
 
 
 class TestDeleteParams(TestcaseBase):
@@ -1064,3 +1069,578 @@ class TestDeleteOperation(TestcaseBase):
         collection_w.delete(expr)
 
         collection_w.query(expr, check_task=CheckTasks.check_query_empty)
+
+class TestDeleteString(TestcaseBase):
+    """
+    Test case of delete interface with string 
+    """
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_delete_entities_repeatedly_with_string(self):
+        """
+        target: test delete entities twice with string expr
+        method: delete with same expr twice
+        expected: No exception for second deletion
+        """
+        # init collection with nb default data
+        collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True, primary_field=ct.default_string_field_name)[0]
+
+        # assert delete successfully and no exception
+        collection_w.delete(expr=default_string_expr)
+        collection_w.num_entities
+        collection_w.query(default_string_expr, check_task=CheckTasks.check_query_empty)
+        collection_w.delete(expr=default_string_expr)
+
+    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/17067")
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_delete_all_index_with_string(self):
+        """
+        target: test delete after creating index
+        method: 1.create collection , insert data, primary_field is string field
+                2.create string and float index ,delete entities, query 
+                3.search
+        expected: assert index and deleted id not in search result
+        """
+        # create collection, insert tmp_nb, flush and load
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True, primary_field=ct.default_string_field_name)[0:2]
+
+        # create index
+        index_params_one = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
+        collection_w.create_index(ct.default_float_vec_field_name, index_params_one, index_name=index_name1)
+        index_params_two ={}
+        collection_w.create_index(ct.default_string_field_name, index_params=index_params_two, index_name=index_name2)
+        assert collection_w.has_index(index_name=index_name2)
+
+        collection_w.release()
+        collection_w.load()
+        # delete entity
+        collection_w.delete(default_string_expr)
+        collection_w.query(default_string_expr, check_task=CheckTasks.check_query_empty)
+        assert collection_w.has_index(index_name=index_name2)
+
+        # search with id 0 vectors
+        search_res, _ = collection_w.search([vectors[0][ct.default_float_vec_field_name][0]],
+                                            ct.default_float_vec_field_name,
+                                            ct.default_search_params, ct.default_limit)
+        assert "0" not in search_res[0].ids
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_delete_and_index_with_string(self):
+        """
+        target: test delete and create index
+        method: 1.create, insert, string field is primary
+                2.delete half
+                3.flush and create index
+                4.search
+        expected: Empty search result
+        """
+        # init collection and insert data without flush
+        schema = cf.gen_string_pk_default_collection_schema()
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
+        df = cf.gen_default_dataframe_data()
+        insert_res, _ = collection_w.insert(df)
+
+        # delete half and flush
+        expr = f'{ct.default_string_field_name} in {insert_res.primary_keys[:ct.default_nb // 2]}'
+        del_res, _ = collection_w.delete(expr)
+        assert collection_w.num_entities == ct.default_nb
+
+        # create index
+        index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
+        collection_w.create_index(ct.default_float_vec_field_name, index_params)
+        assert collection_w.has_index()[0]
+
+        collection_w.load()
+        search_res, _ = collection_w.search([df[ct.default_float_vec_field_name][0]],
+                                            ct.default_float_vec_field_name,
+                                            ct.default_search_params, ct.default_limit)
+        log.debug(search_res[0].ids)
+        # assert search results not contains deleted ids
+        inter = set(insert_res.primary_keys[:ct.default_nb // 2]).intersection(set(search_res[0].ids))
+        log.debug(inter)
+        assert len(inter) == 0
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_delete_query_ids_both_sealed_and_channel_with_string(self):
+        """
+        target: test query that delete ids from both channel and sealed
+        method: 1.create and insert, string field is primary
+                2.delete id 0 and flush
+                3.load and query id 0
+                4.insert new id and delete the id
+                5.query id 0 and new id
+        expected: Empty query result
+        """
+        # init collection and insert data without flush
+        schema = cf.gen_string_pk_default_collection_schema()
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
+        df = cf.gen_default_dataframe_data(tmp_nb)
+        collection_w.insert(df)
+
+        # delete id 0 and flush
+        del_res, _ = collection_w.delete(default_string_expr)
+        assert del_res.delete_count == 1
+        assert collection_w.num_entities == tmp_nb
+
+        # load and query id 0
+        collection_w.load()
+        collection_w.query(default_string_expr, check_task=CheckTasks.check_query_empty)
+
+        # insert id tmp_nb and delete id 0 and tmp_nb
+        df_new = cf.gen_default_dataframe_data(nb=1, start=tmp_nb)
+        collection_w.insert(df_new)
+        collection_w.delete(expr=f'{ct.default_string_field_name} in {["tmp_nb"]}')
+
+        # query with id 0 and tmp_nb
+        collection_w.query(expr=f'{ct.default_string_field_name} in {["0", "tmp_nb"]}',
+                           check_task=CheckTasks.check_query_empty)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_delete_search_with_string(self):
+        """
+        target: test delete and search
+        method: search entities after it was deleted, string field is primary
+        expected: deleted entity is not in the search result
+        """
+        # init collection with nb default data
+        collection_w, _, _, ids = self.init_collection_general(prefix, insert_data=True, primary_field=ct.default_string_field_name)[0:4]
+        entity, _ = collection_w.query(default_string_expr, output_fields=["%"])
+        search_res, _ = collection_w.search([entity[0][ct.default_float_vec_field_name]],
+                                            ct.default_float_vec_field_name,
+                                            ct.default_search_params, ct.default_limit)
+        # assert search results contains entity
+        assert "0" in search_res[0].ids
+
+        expr = f'{ct.default_string_field_name} in {ids[:ct.default_nb // 2]}'
+        collection_w.delete(expr)
+        search_res_2, _ = collection_w.search([entity[0][ct.default_float_vec_field_name]],
+                                              ct.default_float_vec_field_name,
+                                              ct.default_search_params, ct.default_limit)
+        # assert search result is not equal to entity
+        log.debug(f"Second search result ids: {search_res_2[0].ids}")
+        inter = set(ids[:ct.default_nb // 2]).intersection(set(search_res_2[0].ids))
+        # Using bounded staleness, we could still search the "deleted" entities,
+        # since the search requests arrived query nodes earlier than query nodes consume the delete requests.
+        assert len(inter) == 0
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_delete_expr_repeated_values_with_string(self):
+        """
+        target: test delete with repeated values
+        method: 1.insert data with unique primary keys, string field is primary
+                2.delete with repeated values: 'id in [0, 0]'
+        expected: delete one entity
+        """
+        # init collection with nb default data
+        collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True, primary_field=ct.default_string_field_name)[0]
+        expr = f'{ct.default_string_field_name} in {["0", "0", "0"]}'
+        del_res, _ = collection_w.delete(expr)
+        assert del_res.delete_count == 3
+        collection_w.num_entities
+        collection_w.query(expr, check_task=CheckTasks.check_query_empty)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_delete_duplicate_primary_keys_with_string(self):
+        """
+        target: test delete from duplicate primary keys
+        method: 1.insert data with dup ids, string field is primary
+                2.delete with repeated or not values
+        expected: currently only delete one entity, query get one entity
+        todo delete all entities
+        """
+        schema = cf.gen_string_pk_default_collection_schema()
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
+        df = cf.gen_default_dataframe_data(nb=tmp_nb)
+        df[ct.default_string_field_name] = "0"
+        collection_w.insert(df)
+        assert collection_w.num_entities == tmp_nb
+        del_res, _ = collection_w.delete(default_string_expr)
+        collection_w.load()
+
+        # Just one query res and search res, because de-dup
+        res, _ = collection_w.query(default_string_expr, output_fields=["*"])
+        assert len(res) == 0
+
+        search_res, _ = collection_w.search([df[ct.default_float_vec_field_name][1]],
+                                            ct.default_float_vec_field_name,
+                                            ct.default_search_params, ct.default_limit,
+                                            output_fields=[ct.default_int64_field_name, ct.default_float_field_name, ct.default_string_field_name])
+        assert len(search_res) == 1
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_delete_from_partitions_with_same_ids_of_string(self):
+        """
+        target: test delete same ids from two partitions with same data
+        method: 1.insert same nb data into two partitions
+                2.delete same ids from partition_1
+        expected: The data only in partition_1 will be deleted
+        """
+        # init collection and partition
+        schema = cf.gen_string_pk_default_collection_schema()
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
+        partition_w = self.init_partition_wrap(collection_wrap=collection_w)
+
+        # insert same data into partition_w and default partition
+        df = cf.gen_default_dataframe_data(tmp_nb)
+        collection_w.insert(df)
+        partition_w.insert(df)
+
+        # delete same id 0 from default_partition, and query on it get empty result
+        collection_w.delete(default_string_expr, partition_name=ct.default_partition_name)
+        assert collection_w.num_entities == tmp_nb * 2
+        collection_w.load()
+        collection_w.query(default_string_expr, partition_names=[ct.default_partition_name],
+                           check_task=CheckTasks.check_query_empty)
+
+        # query on partition_w with id 0 and get an result
+        collection_w.query(default_string_expr, partition_names=[partition_w.name],
+                           check_task=CheckTasks.check_query_results, check_items={exp_res: query_tmp_expr_str})
+
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_delete_sealed_segment_without_flush_with_string(self):
+        """
+        target: test delete without flush
+        method: 1.insert and flush data
+                2.delete ids from collection and no flush
+                3.load and query with id
+        expected: No query result
+        """
+        # create collection, insert data without flush
+        schema = cf.gen_string_pk_default_collection_schema()
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
+        df = cf.gen_default_dataframe_data(tmp_nb)
+        collection_w.insert(df)
+        assert collection_w.num_entities == tmp_nb
+
+        # delete
+        del_res, _ = collection_w.delete(default_string_expr)
+        assert del_res.delete_count == 1
+
+        # load and query with id
+        collection_w.load()
+        collection_w.query(default_string_expr, check_task=CheckTasks.check_query_empty)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_delete_growing_data_channel_delete_with_string(self):
+        """
+        target: test delete entities from growing segment, and channel deleteMsg
+        method: 1.create collection, string field is primary
+                2.load collection
+                3.insert data and delete ids
+                4.query deleted ids
+        expected: No query result
+        """
+        # create collection
+        schema = cf.gen_string_pk_default_collection_schema()
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
+        # load collection and the queryNode watch the insertChannel
+        collection_w.load()
+        # insert data
+        df = cf.gen_default_dataframe_data(tmp_nb)
+        collection_w.insert(df)
+        # delete id 0
+        del_res = collection_w.delete(default_string_expr)[0]
+        assert del_res.delete_count == 1
+        # query id 0
+        collection_w.query(default_string_expr, check_task=CheckTasks.check_query_empty)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_delete_sealed_data_channel_delete_with_string(self):
+        """
+        target: test delete sealed data and get deleteMsg from insertChannel
+        method: 1.create, insert and flush data, string field is primary
+                2.load collection
+                3.delete id without flush
+                4.query deleted ids (queryNode get deleted ids from channel not persistence)
+        expected: Delete successfully and no query result
+        """
+        # create collection and insert flush data
+        schema = cf.gen_string_pk_default_collection_schema()
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
+        df = cf.gen_default_dataframe_data(tmp_nb)
+        collection_w.insert(df)
+        assert collection_w.num_entities == tmp_nb
+
+        # load collection and queryNode subscribe channel
+        collection_w.load()
+
+        # delete ids and query
+        collection_w.delete(default_string_expr)
+        collection_w.query(default_string_expr, check_task=CheckTasks.check_query_empty)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_delete_sealed_segment_with_flush_string(self):
+        """
+        target: test delete data from sealed segment and flush delta log
+        method: 1.create and insert and flush data, string field is primary
+                2.delete entities and flush (insert and flush)
+                3.load collection (load data and delta log)
+                4.query deleted ids
+        expected: No query result
+        """
+        # create collection
+        schema = cf.gen_string_pk_default_collection_schema()
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
+        # insert and flush data
+        df = cf.gen_default_dataframe_data(tmp_nb)
+        collection_w.insert(df)
+        assert collection_w.num_entities == tmp_nb
+
+        # delete id 0 and flush
+        del_res = collection_w.delete(default_string_expr)[0]
+        assert del_res.delete_count == 1
+        collection_w.insert(cf.gen_default_dataframe_data(nb=1, start=tmp_nb))
+        log.info(collection_w.num_entities)
+        # load and query id 0
+        collection_w.load()
+        collection_w.query(default_string_expr, check_task=CheckTasks.check_query_empty)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_delete_sealed_data_sealed_delete_string(self):
+        """
+        target: test delete with sealed data and sealed delete request
+        method: 1.create, insert, string field is primary
+                2.delete and flush (will flush data and delete)
+                3.load and query
+        expected: Empty query result
+        """
+        # create collection
+        schema = cf.gen_string_pk_default_collection_schema()
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
+        # insert without flush
+        df = cf.gen_default_dataframe_data(tmp_nb)
+        collection_w.insert(df)
+
+        # delete id 0 and flush
+        del_res = collection_w.delete(default_string_expr)[0]
+        assert del_res.delete_count == 1
+        assert collection_w.num_entities == tmp_nb
+
+        # load and query id 0
+        collection_w.load()
+        collection_w.query(default_string_expr, check_task=CheckTasks.check_query_empty)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_delete_entity_loop_with_string(self):
+        """
+        target: test delete all entities one by one in a loop
+        method: delete data one by one for a loop
+        expected: No exception
+        """
+        # init an auto_id collection and insert tmp_nb data, flush and load
+        collection_w, _, _, ids = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True, primary_field=ct.default_string_field_name)[0:4]
+
+        for del_id in ids:
+            expr = f'{ct.default_string_field_name} in {[del_id]}'
+            res = collection_w.delete(expr)[0]
+            assert res.delete_count == 1
+
+        # query with all ids
+        expr = f'{ct.default_string_field_name} in {ids}'
+        collection_w.query(expr, check_task=CheckTasks.check_query_empty)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_delete_flush_loop_with_string(self):
+        """
+        target: test delete and flush in a loop
+        method: in a loop, delete batch and flush, until delete all entities
+        expected: No exception
+        """
+        # init an auto_id collection and insert tmp_nb data
+        collection_w, _, _, ids = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True, primary_field=ct.default_string_field_name)[0:4]
+
+        batch = 10
+        for i in range(tmp_nb // batch):
+            expr = f'{ct.default_string_field_name} in {ids[i * batch: (i + 1) * batch]}'
+            res, _ = collection_w.delete(expr)
+            assert res.delete_count == batch
+            assert collection_w.num_entities == tmp_nb
+
+        # query with all ids
+        expr = f'{ct.default_string_field_name} in {ids}'
+        collection_w.query(expr, check_task=CheckTasks.check_query_empty)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("to_flush_data", [True, False])
+    @pytest.mark.parametrize("to_flush_delete", [True, False])
+    def test_delete_merge_same_id_channel_and_sealed_string(self, to_flush_data, to_flush_delete):
+        """
+        target: test merge same delete ids from channel and sealed
+        method: 1.create, insert, string field is primary
+                2.delete id and flush (data and deleted become sealed)
+                3.load and query (verify delete successfully)
+                4.insert entity with deleted id
+                5.delete id
+                6.query with id
+        expected: Empty query result
+        """
+        # init collection and insert data without flush
+        schema = cf.gen_string_pk_default_collection_schema()
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema, shards_num=1)
+        df = cf.gen_default_dataframe_data(tmp_nb)
+        collection_w.insert(df)
+
+        # delete id 0 and flush
+        del_res, _ = collection_w.delete(default_string_expr)
+        assert del_res.delete_count == 1
+        assert collection_w.num_entities == tmp_nb
+
+        # load and query id 0
+        collection_w.load()
+        collection_w.query(default_string_expr, check_task=CheckTasks.check_query_empty)
+
+        # insert new entity with same id 0 and query
+        df_new = cf.gen_default_dataframe_data(1)
+        collection_w.insert(df_new)
+        if to_flush_data:
+            log.debug(collection_w.num_entities)
+        collection_w.query(default_string_expr, output_fields=[ct.default_float_vec_field_name],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={'exp_res': df_new.iloc[[0], [2, 3]].to_dict('records'), 'primary_field': ct.default_string_field_name, 'with_vec': True})
+
+        collection_w.delete(default_string_expr)
+        if to_flush_delete:
+            log.debug(collection_w.num_entities)
+        collection_w.query(default_string_expr, check_task=CheckTasks.check_query_empty)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_delete_merge_ids_channel_and_sealed_string(self):
+        """
+        target: test merge deleted ids come from both channel and sealed
+        method: 1.create, insert ids [0, tmp_nb) with shard_num=1, string field is primary
+                2.delete id 0 and flush
+                3.load and query with id 0
+                4.delete id 1 (merge same segment deleted ids 0 and 1)
+                5.query with id 0 and 1
+        expected: Empty query result
+        """
+        # init collection and insert data without flush
+        schema = cf.gen_string_pk_default_collection_schema()
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema, shards_num=1)
+        df = cf.gen_default_dataframe_data(tmp_nb)
+        collection_w.insert(df)
+
+        # delete id 0 and flush
+        del_res, _ = collection_w.delete(default_string_expr)
+        assert del_res.delete_count == 1
+        assert collection_w.num_entities == tmp_nb
+
+        # load and query id 0
+        collection_w.load()
+        collection_w.query(default_string_expr, check_task=CheckTasks.check_query_empty)
+
+        # delete id 1 and query id 0 and 1
+        collection_w.delete(expr=f'{ct.default_string_field_name} in {["1"]}')
+        collection_w.query(expr=f'{ct.default_string_field_name} in {["0", "1"]}',
+                           check_task=CheckTasks.check_query_empty)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_delete_query_after_handoff_with_string(self):
+        """
+        target: test search after delete and handoff
+        method: 1.create and load collection, string field is primary
+                2.insert entities and delete id 0
+                3.flush entities
+                4.query deleted id after handoff completed
+        expected: Delete successfully, query get empty result
+        """
+        # init collection and load
+        schema = cf.gen_string_pk_default_collection_schema()
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema, shards_num=1)
+        collection_w.load()
+
+        # insert data and delete id 0
+        df = cf.gen_default_dataframe_data(tmp_nb)
+        collection_w.insert(df)
+        del_res, _ = collection_w.delete(default_string_expr)
+
+        # flush
+        assert collection_w.num_entities == tmp_nb
+
+        # wait for the handoff to complete
+        while True:
+            time.sleep(0.5)
+            segment_infos = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
+            if segment_infos[0].state == SegmentState.Sealed:
+                break
+        # query deleted id
+        collection_w.query(default_string_expr, check_task=CheckTasks.check_query_empty)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_delete_time_travel_string(self):
+        """
+        target: test search with time travel after delete
+        method: 1.create a collection with string field is primary, insert and flush
+                2.delete
+                3.load and search with time travel
+        expected: search successfully
+        """
+        schema = cf.gen_string_pk_default_collection_schema()
+        collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix), schema=schema)
+        df = cf.gen_default_dataframe_data(tmp_nb)
+        insert_res, _ = collection_w.insert(df)
+        collection_w.load()
+
+        tt = self.utility_wrap.mkts_from_hybridts(insert_res.timestamp, milliseconds=0.)
+
+        res_before, _ = collection_w.search(df[ct.default_float_vec_field_name][:1].to_list(),
+                                            ct.default_float_vec_field_name,
+                                            ct.default_search_params, ct.default_limit)
+
+        expr = f'{ct.default_string_field_name} in {insert_res.primary_keys[:tmp_nb // 2]}'
+        delete_res, _ = collection_w.delete(expr)
+
+        res_travel, _ = collection_w.search(df[ct.default_float_vec_field_name][:1].to_list(),
+                                            ct.default_float_vec_field_name,
+                                            ct.default_search_params, ct.default_limit,
+                                            travel_timestamp=tt)
+        assert res_before[0].ids == res_travel[0].ids
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_delete_insert_multi_with_string(self):
+        """
+        target: test delete after multi insert with string
+        method: 1.create a collection with string field is primary
+                2.insert multi times, no flush
+                3.load
+                3.delete even number
+                4.search and query
+        expected: Verify result
+        """
+        # create collection, insert multi times, each with tmp_nb entities
+        schema = cf.gen_string_pk_default_collection_schema()
+        collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix), schema=schema)
+        multi = 3
+        for i in range(multi):
+            start = i * tmp_nb
+            df = cf.gen_default_dataframe_data(tmp_nb, start=start)
+            collection_w.insert(df)
+
+        # delete even numbers
+        ids = [str(i) for i in range(0, tmp_nb * multi, 2)]
+        expr = f'{ct.default_string_field_name} in {ids}'
+        collection_w.delete(expr)
+
+        collection_w.load()
+        collection_w.query(expr, check_task=CheckTasks.check_query_empty)
+        search_res, _ = collection_w.search(cf.gen_vectors(ct.default_nq, ct.default_dim),
+                                            ct.default_float_vec_field_name,
+                                            ct.default_search_params, ct.default_limit)
+        for res_id in search_res[0].ids:
+            assert res_id not in ids
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_delete_invalid_expr(self):
+        """
+        target: test delete data with string expr
+        method: 1.create collection, insert data and collection.load()
+                2.collection delete with invalid expr 
+                3.query expr
+        expected: Raise exception
+        """
+        collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True, primary_field=ct.default_string_field_name)[0]
+        collection_w.load()
+        error = {ct.err_code: 0, ct.err_msg: f"failed to create expr plan, expr = {default_invaild_string_exp}"}
+        collection_w.delete(expr=default_invaild_string_exp, check_task=CheckTasks.err_res, check_items=error)
+    

@@ -148,7 +148,7 @@ def equal_entity(exp, actual):
     return True
 
 
-def entity_in(entity, entities, primary_field=ct.default_int64_field_name):
+def entity_in(entity, entities, primary_field):
     """
     according to the primary key to judge entity in the entities list
     :param entity: dict
@@ -158,6 +158,8 @@ def entity_in(entity, entities, primary_field=ct.default_int64_field_name):
     :param primary_field: collection primary field
     :return: True or False
     """
+    primary_default = ct.default_int64_field_name
+    primary_field = primary_default if primary_field is None else primary_field
     primary_key = entity.get(primary_field, None)
     primary_keys = []
     for e in entities:
@@ -168,7 +170,7 @@ def entity_in(entity, entities, primary_field=ct.default_int64_field_name):
     return equal_entity(entities[index], entity)
 
 
-def remove_entity(entity, entities, primary_field=ct.default_int64_field_name):
+def remove_entity(entity, entities, primary_field):
     """
     according to the primary key to remove an entity from an entities list
     :param entity: dict
@@ -178,6 +180,8 @@ def remove_entity(entity, entities, primary_field=ct.default_int64_field_name):
     :param primary_field: collection primary field
     :return: entities of removed entity
     """
+    primary_default = ct.default_int64_field_name
+    primary_field = primary_default if primary_field is None else primary_field
     primary_key = entity.get(primary_field, None)
     primary_keys = []
     for e in entities:
@@ -187,7 +191,7 @@ def remove_entity(entity, entities, primary_field=ct.default_int64_field_name):
     return entities
 
 
-def equal_entities_list(exp, actual, with_vec=False):
+def equal_entities_list(exp, actual, primary_field, with_vec=False):
     """
     compare two entities lists in inconsistent order
     :param with_vec: whether entities with vec field
@@ -206,10 +210,10 @@ def equal_entities_list(exp, actual, with_vec=False):
     if with_vec:
         for a in actual:
             # if vec field returned in query res
-            if entity_in(a, exp):
+            if entity_in(a, exp, primary_field):
                 try:
                     # if vec field returned in query res
-                    remove_entity(a, exp)
+                    remove_entity(a, exp, primary_field)
                 except Exception as ex:
                     log.error(ex)
     else:
