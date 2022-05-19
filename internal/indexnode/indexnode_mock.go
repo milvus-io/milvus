@@ -183,7 +183,6 @@ func (inm *Mock) Register() error {
 	if inm.Err {
 		return errors.New("IndexNode register failed")
 	}
-	Params.Init()
 	inm.etcdKV = etcdkv.NewEtcdKV(inm.etcdCli, Params.EtcdCfg.MetaRootPath)
 	if err := inm.etcdKV.RemoveWithPrefix("session/" + typeutil.IndexNodeRole); err != nil {
 		return err
