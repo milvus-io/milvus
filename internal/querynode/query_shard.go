@@ -357,7 +357,7 @@ func (q *queryShard) search(ctx context.Context, req *querypb.SearchRequest) (*i
 	// validate top-k
 	topK := plan.getTopK()
 	if topK <= 0 || topK >= 16385 {
-		return nil, fmt.Errorf("limit should be in range [1, 16385], but got %d", topK)
+		return nil, fmt.Errorf("limit should be in range [1, 16385), but got %d", topK)
 	}
 
 	// parse plan to search request
