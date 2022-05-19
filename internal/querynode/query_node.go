@@ -397,23 +397,19 @@ func (node *QueryNode) Stop() error {
 	if node.dataSyncService != nil {
 		node.dataSyncService.close()
 	}
-	if node.historical != nil {
-		node.historical.close()
-	}
+
+	// release streaming first for query/search holds query lock in streaming collection
 	if node.streaming != nil {
 		node.streaming.close()
 	}
-	/*
-		if node.queryService != nil {
-			node.queryService.close()
-		}*/
+	if node.historical != nil {
+		node.historical.close()
+	}
 
 	if node.queryShardService != nil {
 		node.queryShardService.close()
 	}
-	//if node.statsService != nil {
-	//	node.statsService.close()
-	//}
+
 	node.session.Revoke(time.Second)
 	node.wg.Wait()
 	return nil
