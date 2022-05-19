@@ -334,12 +334,13 @@ enum CompactionState : int {
   UndefiedState = 0,
   Executing = 1,
   Completed = 2,
+  Timeout = 3,
   CompactionState_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
   CompactionState_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
 };
 bool CompactionState_IsValid(int value);
 constexpr CompactionState CompactionState_MIN = UndefiedState;
-constexpr CompactionState CompactionState_MAX = Completed;
+constexpr CompactionState CompactionState_MAX = Timeout;
 constexpr int CompactionState_ARRAYSIZE = CompactionState_MAX + 1;
 
 const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* CompactionState_descriptor();

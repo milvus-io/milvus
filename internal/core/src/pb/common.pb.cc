@@ -326,17 +326,17 @@ const char descriptor_table_protodef_common_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "\022\022\n\rGetCredential\020\335\013\022\025\n\020DeleteCredential"
   "\020\336\013\022\025\n\020UpdateCredential\020\337\013\022\026\n\021ListCredUs"
   "ernames\020\340\013*\"\n\007DslType\022\007\n\003Dsl\020\000\022\016\n\nBoolEx"
-  "prV1\020\001*B\n\017CompactionState\022\021\n\rUndefiedSta"
-  "te\020\000\022\r\n\tExecuting\020\001\022\r\n\tCompleted\020\002*X\n\020Co"
-  "nsistencyLevel\022\n\n\006Strong\020\000\022\013\n\007Session\020\001\022"
-  "\013\n\007Bounded\020\002\022\016\n\nEventually\020\003\022\016\n\nCustomiz"
-  "ed\020\004*\227\001\n\013ImportState\022\021\n\rImportPending\020\000\022"
-  "\020\n\014ImportFailed\020\001\022\021\n\rImportStarted\020\002\022\024\n\020"
-  "ImportDownloaded\020\003\022\020\n\014ImportParsed\020\004\022\023\n\017"
-  "ImportPersisted\020\005\022\023\n\017ImportCompleted\020\006BW"
-  "\n\016io.milvus.grpcB\013CommonProtoP\001Z3github."
-  "com/milvus-io/milvus/internal/proto/comm"
-  "onpb\240\001\001b\006proto3"
+  "prV1\020\001*O\n\017CompactionState\022\021\n\rUndefiedSta"
+  "te\020\000\022\r\n\tExecuting\020\001\022\r\n\tCompleted\020\002\022\013\n\007Ti"
+  "meout\020\003*X\n\020ConsistencyLevel\022\n\n\006Strong\020\000\022"
+  "\013\n\007Session\020\001\022\013\n\007Bounded\020\002\022\016\n\nEventually\020"
+  "\003\022\016\n\nCustomized\020\004*\227\001\n\013ImportState\022\021\n\rImp"
+  "ortPending\020\000\022\020\n\014ImportFailed\020\001\022\021\n\rImport"
+  "Started\020\002\022\024\n\020ImportDownloaded\020\003\022\020\n\014Impor"
+  "tParsed\020\004\022\023\n\017ImportPersisted\020\005\022\023\n\017Import"
+  "Completed\020\006BW\n\016io.milvus.grpcB\013CommonPro"
+  "toP\001Z3github.com/milvus-io/milvus/intern"
+  "al/proto/commonpb\240\001\001b\006proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_common_2eproto_deps[1] = {
 };
@@ -353,7 +353,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_com
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_common_2eproto_once;
 static bool descriptor_table_common_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_common_2eproto = {
-  &descriptor_table_common_2eproto_initialized, descriptor_table_protodef_common_2eproto, "common.proto", 3335,
+  &descriptor_table_common_2eproto_initialized, descriptor_table_protodef_common_2eproto, "common.proto", 3348,
   &descriptor_table_common_2eproto_once, descriptor_table_common_2eproto_sccs, descriptor_table_common_2eproto_deps, 8, 0,
   schemas, file_default_instances, TableStruct_common_2eproto::offsets,
   file_level_metadata_common_2eproto, 8, file_level_enum_descriptors_common_2eproto, file_level_service_descriptors_common_2eproto,
@@ -549,6 +549,7 @@ bool CompactionState_IsValid(int value) {
     case 0:
     case 1:
     case 2:
+    case 3:
       return true;
     default:
       return false;

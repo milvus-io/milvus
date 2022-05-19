@@ -781,6 +781,7 @@ message GetCompactionStateResponse {
   int64 executingPlanNo = 3;
   int64 timeoutPlanNo = 4;
   int64 completedPlanNo = 5;
+  repeated CompactionMergeInfo mergeInfos = 6;
 }
 
 message GetCompactionPlansRequest {
@@ -796,6 +797,7 @@ message GetCompactionPlansResponse {
 message CompactionMergeInfo {
   repeated int64 sources = 1;
   int64 target = 2;
+  common.CompactionState state = 3;
 }
 
 message GetFlushStateRequest {

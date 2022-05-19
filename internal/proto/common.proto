@@ -206,6 +206,7 @@ enum CompactionState {
   UndefiedState = 0;
   Executing = 1;
   Completed = 2;
+  Timeout = 3;
 }
 
 enum ConsistencyLevel {

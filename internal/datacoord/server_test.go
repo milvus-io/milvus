@@ -1755,62 +1755,83 @@ func TestGetRecoveryInfo(t *testing.T) {
 
 func TestGetCompactionState(t *testing.T) {
 	Params.DataCoordCfg.EnableCompaction = true
-	t.Run("test get compaction state with new compactionhandler", func(t *testing.T) {
-		svr := &Server{}
-		svr.isServing = ServerStateHealthy
-
-		svr.compactionHandler = &mockCompactionHandler{
-			methods: map[string]interface{}{
-				"getCompactionTasksBySignalID": func(signalID int64) []*compactionTask {
-					return []*compactionTask{
-						{state: completed},
-					}
-				},
+	cases := []struct {
+		name        string
+		sources     [][]int64 // sources[0] for task0, sources[1] for task1 ...
+		targets     []int64   // targets[0] for task0, targets[1] for task1 ...
+		states      []compactionTaskState
+		expectState commonpb.CompactionState
+	}{
+		{
+			name: "test merge info",
+			sources: [][]int64{
+				{1, 2},
 			},
-		}
-
-		resp, err := svr.GetCompactionState(context.Background(), &milvuspb.GetCompactionStateRequest{})
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-		assert.Equal(t, commonpb.CompactionState_Completed, resp.GetState())
-	})
-	t.Run("test get compaction state in running", func(t *testing.T) {
-		svr := &Server{}
-		svr.isServing = ServerStateHealthy
-
-		svr.compactionHandler = &mockCompactionHandler{
-			methods: map[string]interface{}{
-				"getCompactionTasksBySignalID": func(signalID int64) []*compactionTask {
-					return []*compactionTask{
-						{state: executing},
-						{state: executing},
-						{state: executing},
-						{state: completed},
-						{state: completed},
-						{state: timeout},
-					}
-				},
+			targets:     []int64{3},
+			states:      []compactionTaskState{completed},
+			expectState: commonpb.CompactionState_Completed,
+		},
+		{
+			name: "test compaction containing executing task",
+			sources: [][]int64{
+				{1, 2}, {4, 5},
 			},
-		}
+			targets:     []int64{3, 6},
+			states:      []compactionTaskState{executing, completed},
+			expectState: commonpb.CompactionState_Executing,
+		},
+		{
+			name: "test compaction containing timeout task",
+			sources: [][]int64{
+				{1, 2}, {4, 5}, {7, 8},
+			},
+			targets:     []int64{3, 6, 9},
+			states:      []compactionTaskState{executing, completed, timeout},
+			expectState: commonpb.CompactionState_Timeout,
+		},
+	}
 
-		resp, err := svr.GetCompactionState(context.Background(), &milvuspb.GetCompactionStateRequest{CompactionID: 1})
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-		assert.Equal(t, commonpb.CompactionState_Executing, resp.GetState())
-		assert.EqualValues(t, 3, resp.GetExecutingPlanNo())
-		assert.EqualValues(t, 2, resp.GetCompletedPlanNo())
-		assert.EqualValues(t, 1, resp.GetTimeoutPlanNo())
-	})
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			svr := &Server{isServing: ServerStateHealthy}
+			tasksNum := len(c.sources)
+			tasks := make([]*compactionTask, 0, tasksNum)
+			expectedMergeInfos := make([]*milvuspb.CompactionMergeInfo, 0, tasksNum)
+			for i := 0; i < tasksNum; i++ {
+				task := createTestCompactionTask(c.sources[i], c.targets[i], c.states[i])
+				tasks = append(tasks, task)
+				expectedMergeInfos = append(expectedMergeInfos, getCompactionMergeInfo(task))
+			}
+			svr.compactionHandler = &mockCompactionHandler{
+				methods: map[string]interface{}{
+					"getCompactionTasksBySignalID": func(signalID int64) []*compactionTask { return tasks },
+				},
+			}
 
-	t.Run("with closed server", func(t *testing.T) {
-		svr := &Server{}
-		svr.isServing = ServerStateStopped
+			resp, err := svr.GetCompactionState(context.Background(), &milvuspb.GetCompactionStateRequest{})
+			assert.Nil(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+			assert.Equal(t, c.expectState, resp.GetState())
+			assert.EqualValues(t, expectedMergeInfos, resp.GetMergeInfos())
+		})
+	}
+}
 
-		resp, err := svr.GetCompactionState(context.Background(), &milvuspb.GetCompactionStateRequest{})
-		assert.Nil(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-		assert.Equal(t, msgDataCoordIsUnhealthy(Params.DataCoordCfg.GetNodeID()), resp.GetStatus().GetReason())
-	})
+func createTestCompactionTask(sources []int64, result int64, state compactionTaskState) *compactionTask {
+	fakeSegments := make([]*datapb.CompactionSegmentBinlogs, 0, len(sources))
+	for _, s := range sources {
+		fakeSegments = append(fakeSegments, &datapb.CompactionSegmentBinlogs{SegmentID: s})
+	}
+
+	return &compactionTask{
+		plan: &datapb.CompactionPlan{
+			SegmentBinlogs: fakeSegments,
+		},
+		result: &datapb.CompactionResult{
+			SegmentID: result,
+		},
+		state: state,
+	}
 }
 
 func TestCompleteCompaction(t *testing.T) {

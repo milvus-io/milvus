@@ -849,6 +849,10 @@ func (s *Server) GetCompactionState(ctx context.Context, req *milvuspb.GetCompac
 	}
 
 	tasks := s.compactionHandler.getCompactionTasksBySignalID(req.GetCompactionID())
+	for _, task := range tasks {
+		resp.MergeInfos = append(resp.MergeInfos, getCompactionMergeInfo(task))
+	}
+
 	state, executingCnt, completedCnt, timeoutCnt := getCompactionState(tasks)
 
 	resp.State = state
@@ -861,6 +865,7 @@ func (s *Server) GetCompactionState(ctx context.Context, req *milvuspb.GetCompac
 	return resp, nil
 }
 
+// Deprecated
 // GetCompactionStateWithPlans returns the compaction state of given plan
 func (s *Server) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.GetCompactionPlansRequest) (*milvuspb.GetCompactionPlansResponse, error) {
 	log.Info("received the request to get compaction state with plans", zap.Int64("compactionID", req.GetCompactionID()))
@@ -905,27 +910,38 @@ func getCompactionMergeInfo(task *compactionTask) *milvuspb.CompactionMergeInfo 
 		target = task.result.GetSegmentID()
 	}
 
+	var state commonpb.CompactionState
+	switch task.state {
+	case executing:
+		state = commonpb.CompactionState_Executing
+	case completed:
+		state = commonpb.CompactionState_Completed
+	default:
+		state = commonpb.CompactionState_Timeout
+	}
+
 	return &milvuspb.CompactionMergeInfo{
 		Sources: sources,
 		Target:  target,
+		State:   state,
 	}
 }
 
 func getCompactionState(tasks []*compactionTask) (state commonpb.CompactionState, executingCnt, completedCnt, timeoutCnt int) {
+	state = commonpb.CompactionState_Completed
 	for _, t := range tasks {
 		switch t.state {
 		case executing:
 			executingCnt++
+			if state == commonpb.CompactionState_Completed {
+				state = commonpb.CompactionState_Executing
+			}
 		case completed:
 			completedCnt++
 		case timeout:
 			timeoutCnt++
+			state = commonpb.CompactionState_Timeout
 		}
-	}
-	if executingCnt != 0 {
-		state = commonpb.CompactionState_Executing
-	} else {
-		state = commonpb.CompactionState_Completed
 	}
 	return
 }

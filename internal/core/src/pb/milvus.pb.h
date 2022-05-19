@@ -12478,12 +12478,24 @@ class GetCompactionStateResponse :
   // accessors -------------------------------------------------------
 
   enum : int {
+    kMergeInfosFieldNumber = 6,
     kStatusFieldNumber = 1,
     kExecutingPlanNoFieldNumber = 3,
     kTimeoutPlanNoFieldNumber = 4,
     kCompletedPlanNoFieldNumber = 5,
     kStateFieldNumber = 2,
   };
+  // repeated .milvus.proto.milvus.CompactionMergeInfo mergeInfos = 6;
+  int mergeinfos_size() const;
+  void clear_mergeinfos();
+  ::milvus::proto::milvus::CompactionMergeInfo* mutable_mergeinfos(int index);
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::milvus::CompactionMergeInfo >*
+      mutable_mergeinfos();
+  const ::milvus::proto::milvus::CompactionMergeInfo& mergeinfos(int index) const;
+  ::milvus::proto::milvus::CompactionMergeInfo* add_mergeinfos();
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::milvus::CompactionMergeInfo >&
+      mergeinfos() const;
+
   // .milvus.proto.common.Status status = 1;
   bool has_status() const;
   void clear_status();
@@ -12517,6 +12529,7 @@ class GetCompactionStateResponse :
   class _Internal;
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::milvus::CompactionMergeInfo > mergeinfos_;
   ::milvus::proto::common::Status* status_;
   ::PROTOBUF_NAMESPACE_ID::int64 executingplanno_;
   ::PROTOBUF_NAMESPACE_ID::int64 timeoutplanno_;
@@ -12927,6 +12940,7 @@ class CompactionMergeInfo :
   enum : int {
     kSourcesFieldNumber = 1,
     kTargetFieldNumber = 2,
+    kStateFieldNumber = 3,
   };
   // repeated int64 sources = 1;
   int sources_size() const;
@@ -12944,6 +12958,11 @@ class CompactionMergeInfo :
   ::PROTOBUF_NAMESPACE_ID::int64 target() const;
   void set_target(::PROTOBUF_NAMESPACE_ID::int64 value);
 
+  // .milvus.proto.common.CompactionState state = 3;
+  void clear_state();
+  ::milvus::proto::common::CompactionState state() const;
+  void set_state(::milvus::proto::common::CompactionState value);
+
   // @@protoc_insertion_point(class_scope:milvus.proto.milvus.CompactionMergeInfo)
  private:
   class _Internal;
@@ -12952,6 +12971,7 @@ class CompactionMergeInfo :
   ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 > sources_;
   mutable std::atomic<int> _sources_cached_byte_size_;
   ::PROTOBUF_NAMESPACE_ID::int64 target_;
+  int state_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -26944,6 +26964,36 @@ inline void GetCompactionStateResponse::set_completedplanno(::PROTOBUF_NAMESPACE
   // @@protoc_insertion_point(field_set:milvus.proto.milvus.GetCompactionStateResponse.completedPlanNo)
 }
 
+// repeated .milvus.proto.milvus.CompactionMergeInfo mergeInfos = 6;
+inline int GetCompactionStateResponse::mergeinfos_size() const {
+  return mergeinfos_.size();
+}
+inline void GetCompactionStateResponse::clear_mergeinfos() {
+  mergeinfos_.Clear();
+}
+inline ::milvus::proto::milvus::CompactionMergeInfo* GetCompactionStateResponse::mutable_mergeinfos(int index) {
+  // @@protoc_insertion_point(field_mutable:milvus.proto.milvus.GetCompactionStateResponse.mergeInfos)
+  return mergeinfos_.Mutable(index);
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::milvus::CompactionMergeInfo >*
+GetCompactionStateResponse::mutable_mergeinfos() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.milvus.GetCompactionStateResponse.mergeInfos)
+  return &mergeinfos_;
+}
+inline const ::milvus::proto::milvus::CompactionMergeInfo& GetCompactionStateResponse::mergeinfos(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.GetCompactionStateResponse.mergeInfos)
+  return mergeinfos_.Get(index);
+}
+inline ::milvus::proto::milvus::CompactionMergeInfo* GetCompactionStateResponse::add_mergeinfos() {
+  // @@protoc_insertion_point(field_add:milvus.proto.milvus.GetCompactionStateResponse.mergeInfos)
+  return mergeinfos_.Add();
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::milvus::CompactionMergeInfo >&
+GetCompactionStateResponse::mergeinfos() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.milvus.GetCompactionStateResponse.mergeInfos)
+  return mergeinfos_;
+}
+
 // -------------------------------------------------------------------
 
 // GetCompactionPlansRequest
@@ -27101,6 +27151,20 @@ inline void CompactionMergeInfo::set_target(::PROTOBUF_NAMESPACE_ID::int64 value
   
   target_ = value;
   // @@protoc_insertion_point(field_set:milvus.proto.milvus.CompactionMergeInfo.target)
+}
+
+// .milvus.proto.common.CompactionState state = 3;
+inline void CompactionMergeInfo::clear_state() {
+  state_ = 0;
+}
+inline ::milvus::proto::common::CompactionState CompactionMergeInfo::state() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.CompactionMergeInfo.state)
+  return static_cast< ::milvus::proto::common::CompactionState >(state_);
+}
+inline void CompactionMergeInfo::set_state(::milvus::proto::common::CompactionState value) {
+  
+  state_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.CompactionMergeInfo.state)
 }
 
 // -------------------------------------------------------------------
