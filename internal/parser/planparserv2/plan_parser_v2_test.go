@@ -316,6 +316,8 @@ func TestExpr_Combinations(t *testing.T) {
 		`not (Int8Field + 1 == 2)`,
 		`(Int16Field - 3 == 4) and (Int32Field * 5 != 6)`,
 		`(Int64Field / 7 != 8) or (Int64Field % 10 == 9)`,
+		`Int64Field > 0 && VarCharField > "0"`,
+		`Int64Field < 0 && VarCharField < "0"`,
 	}
 	for _, exprStr := range exprStrs {
 		assertValidExpr(t, helper, exprStr)

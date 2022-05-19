@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -157,7 +159,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		return fmt.Errorf("query expression is empty")
 	}
 
-	plan, err := createExprPlan(schema, t.request.Expr)
+	plan, err := planparserv2.CreateRetrievePlan(schema, t.request.Expr)
 	if err != nil {
 		return err
 	}

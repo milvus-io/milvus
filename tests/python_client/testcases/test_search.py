@@ -27,7 +27,7 @@ default_search_exp = "int64 >= 0"
 default_search_string_exp =  "varchar >= \"0\""
 default_search_mix_exp = "int64 >= 0 && varchar >= \"0\""
 default_invaild_string_exp = "varchar >= 0"
-perfix_expr = "varchar startsWith \"0\""
+perfix_expr = 'varchar like "0%"'
 default_search_field = ct.default_float_vec_field_name
 default_search_params = ct.default_search_params
 default_int64_field_name = ct.default_int64_field_name

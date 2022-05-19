@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -185,7 +187,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 			zap.String("anns field", annsField),
 			zap.Any("query info", queryInfo))
 
-		plan, err := createQueryPlan(t.schema, t.request.Dsl, annsField, queryInfo)
+		plan, err := planparserv2.CreateSearchPlan(t.schema, t.request.Dsl, annsField, queryInfo)
 		if err != nil {
 			log.Debug("failed to create query plan",
 				zap.Error(err),

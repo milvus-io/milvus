@@ -627,6 +627,7 @@ func Test_CheckIdentical(t *testing.T) {
 		"200+300 < Int64Field <= 500+500",
 		"Int32Field != Int64Field",
 		"Int64Field not in []",
+		`Int64Field >= 0 && VarCharField >= "0"`,
 		largeIntTermExpr,
 		largeFloatTermExpr,
 	}

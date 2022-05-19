@@ -1142,6 +1142,7 @@ class TestDeleteString(TestcaseBase):
 
         # delete half and flush
         expr = f'{ct.default_string_field_name} in {insert_res.primary_keys[:ct.default_nb // 2]}'
+        expr = expr.replace("'", "\"")
         del_res, _ = collection_w.delete(expr)
         assert collection_w.num_entities == ct.default_nb
 
@@ -1189,10 +1190,10 @@ class TestDeleteString(TestcaseBase):
         # insert id tmp_nb and delete id 0 and tmp_nb
         df_new = cf.gen_default_dataframe_data(nb=1, start=tmp_nb)
         collection_w.insert(df_new)
-        collection_w.delete(expr=f'{ct.default_string_field_name} in {["tmp_nb"]}')
+        collection_w.delete(expr=f'{ct.default_string_field_name} in ["tmp_nb"]')
 
         # query with id 0 and tmp_nb
-        collection_w.query(expr=f'{ct.default_string_field_name} in {["0", "tmp_nb"]}',
+        collection_w.query(expr=f'{ct.default_string_field_name} in ["0", "tmp_nb"]',
                            check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1212,6 +1213,7 @@ class TestDeleteString(TestcaseBase):
         assert "0" in search_res[0].ids
 
         expr = f'{ct.default_string_field_name} in {ids[:ct.default_nb // 2]}'
+        expr = expr.replace("'", "\"")
         collection_w.delete(expr)
         search_res_2, _ = collection_w.search([entity[0][ct.default_float_vec_field_name]],
                                               ct.default_float_vec_field_name,
@@ -1233,7 +1235,7 @@ class TestDeleteString(TestcaseBase):
         """
         # init collection with nb default data
         collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True, primary_field=ct.default_string_field_name)[0]
-        expr = f'{ct.default_string_field_name} in {["0", "0", "0"]}'
+        expr = f'{ct.default_string_field_name} in ["0", "0", "0"]'
         del_res, _ = collection_w.delete(expr)
         assert del_res.delete_count == 3
         collection_w.num_entities
@@ -1433,11 +1435,13 @@ class TestDeleteString(TestcaseBase):
 
         for del_id in ids:
             expr = f'{ct.default_string_field_name} in {[del_id]}'
+            expr = expr.replace("'", "\"")
             res = collection_w.delete(expr)[0]
             assert res.delete_count == 1
 
         # query with all ids
         expr = f'{ct.default_string_field_name} in {ids}'
+        expr = expr.replace("'", "\"")
         collection_w.query(expr, check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1453,12 +1457,14 @@ class TestDeleteString(TestcaseBase):
         batch = 10
         for i in range(tmp_nb // batch):
             expr = f'{ct.default_string_field_name} in {ids[i * batch: (i + 1) * batch]}'
+            expr = expr.replace("'", "\"")
             res, _ = collection_w.delete(expr)
             assert res.delete_count == batch
             assert collection_w.num_entities == tmp_nb
 
         # query with all ids
         expr = f'{ct.default_string_field_name} in {ids}'
+        expr = expr.replace("'", "\"")
         collection_w.query(expr, check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1531,8 +1537,8 @@ class TestDeleteString(TestcaseBase):
         collection_w.query(default_string_expr, check_task=CheckTasks.check_query_empty)
 
         # delete id 1 and query id 0 and 1
-        collection_w.delete(expr=f'{ct.default_string_field_name} in {["1"]}')
-        collection_w.query(expr=f'{ct.default_string_field_name} in {["0", "1"]}',
+        collection_w.delete(expr=f'{ct.default_string_field_name} in ["1"]')
+        collection_w.query(expr=f'{ct.default_string_field_name} in ["0", "1"]',
                            check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1589,6 +1595,7 @@ class TestDeleteString(TestcaseBase):
                                             ct.default_search_params, ct.default_limit)
 
         expr = f'{ct.default_string_field_name} in {insert_res.primary_keys[:tmp_nb // 2]}'
+        expr = expr.replace("'", "\"")
         delete_res, _ = collection_w.delete(expr)
 
         res_travel, _ = collection_w.search(df[ct.default_float_vec_field_name][:1].to_list(),
@@ -1620,6 +1627,7 @@ class TestDeleteString(TestcaseBase):
         # delete even numbers
         ids = [str(i) for i in range(0, tmp_nb * multi, 2)]
         expr = f'{ct.default_string_field_name} in {ids}'
+        expr = expr.replace("'", "\"")
         collection_w.delete(expr)
 
         collection_w.load()
