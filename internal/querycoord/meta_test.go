@@ -122,6 +122,7 @@ func TestMetaFunc(t *testing.T) {
 		queryChannelInfos: map[UniqueID]*querypb.QueryChannelInfo{},
 		dmChannelInfos:    map[string]*querypb.DmChannelWatchInfo{},
 		segmentsInfo:      segmentsInfo,
+		replicas:          NewReplicaInfos(),
 	}
 	meta.setKvClient(kv)
 	dmChannels := []string{"testDm1", "testDm2"}
