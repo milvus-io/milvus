@@ -21,14 +21,15 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"go.uber.org/zap"
 )
 
 type proxyClientManager struct {
@@ -104,151 +105,132 @@ func (p *proxyClientManager) DelProxyClient(s *sessionutil.Session) {
 	log.Debug("remove proxy client", zap.String("proxy address", s.Address), zap.Int64("proxy id", s.ServerID))
 }
 
-func (p *proxyClientManager) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) {
+func (p *proxyClientManager) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
 	if len(p.proxyClient) == 0 {
-		log.Debug("proxy client is empty,InvalidateCollectionMetaCache will not send to any client")
-		return
+		log.Warn("proxy client is empty, InvalidateCollectionMetaCache will not send to any client")
+		return nil
 	}
 
-	for k, f := range p.proxyClient {
-		err := func() error {
-			defer func() {
-				if err := recover(); err != nil {
-					log.Debug("call InvalidateCollectionMetaCache panic", zap.Int64("proxy id", k), zap.Any("msg", err))
-				}
-
-			}()
-			sta, err := f.InvalidateCollectionMetaCache(ctx, request)
+	group := &errgroup.Group{}
+	for k, v := range p.proxyClient {
+		k, v := k, v
+		group.Go(func() error {
+			sta, err := v.InvalidateCollectionMetaCache(ctx, request)
 			if err != nil {
-				return fmt.Errorf("grpc fail,error=%w", err)
+				return fmt.Errorf("InvalidateCollectionMetaCache failed, proxyID = %d, err = %s", k, err)
 			}
 			if sta.ErrorCode != commonpb.ErrorCode_Success {
-				return fmt.Errorf("message = %s", sta.Reason)
+				return fmt.Errorf("InvalidateCollectionMetaCache failed, proxyID = %d, err = %s", k, sta.Reason)
 			}
 			return nil
-		}()
-		if err != nil {
-			log.Error("Failed to call invalidate collection meta", zap.Int64("proxy id", k), zap.Error(err))
-		} else {
-			log.Debug("send invalidate collection meta cache to proxy node", zap.Int64("node id", k))
-		}
-
+		})
 	}
+	return group.Wait()
 }
 
-func (p *proxyClientManager) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
+func (p *proxyClientManager) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
 	if len(p.proxyClient) == 0 {
-		log.Debug("proxy client is empty,ReleaseDQLMessageStream will not send to any client")
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		}, nil
+		log.Warn("proxy client is empty, ReleaseDQLMessageStream will not send to any client")
+		return nil
 	}
-	for k, f := range p.proxyClient {
-		sta, err := func() (retSta *commonpb.Status, retErr error) {
-			defer func() {
-				if err := recover(); err != nil {
-					log.Debug("call proxy node ReleaseDQLMessageStream panic", zap.Int64("proxy node id", k), zap.Any("error", err))
-					retSta.ErrorCode = commonpb.ErrorCode_UnexpectedError
-					retSta.Reason = fmt.Sprintf("call proxy node ReleaseDQLMessageStream panic, proxy node id =%d, error = %v", k, err)
-					retErr = nil
-				}
-			}()
-			retSta, retErr = f.ReleaseDQLMessageStream(ctx, in)
-			return
-		}()
-		if err != nil {
-			return sta, err
-		}
-		if sta.ErrorCode != commonpb.ErrorCode_Success {
-			return sta, err
-		}
 
+	group := &errgroup.Group{}
+	for k, v := range p.proxyClient {
+		k, v := k, v
+		group.Go(func() error {
+			sta, err := v.ReleaseDQLMessageStream(ctx, in)
+			if err != nil {
+				return fmt.Errorf("ReleaseDQLMessageStream failed, proxyID = %d, err = %s", k, err)
+			}
+			if sta.ErrorCode != commonpb.ErrorCode_Success {
+				return fmt.Errorf("ReleaseDQLMessageStream failed, proxyID = %d, err = %s", k, sta.Reason)
+			}
+			return nil
+		})
 	}
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}, nil
+	return group.Wait()
 }
 
 func (p *proxyClientManager) InvalidateCredentialCache(ctx context.Context, request *proxypb.InvalidateCredCacheRequest) error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	defer func() {
-		if err := recover(); err != nil {
-			log.Debug("call InvalidateCredentialCache panic", zap.Any("msg", err))
-		}
-	}()
 
 	if len(p.proxyClient) == 0 {
 		log.Warn("proxy client is empty, InvalidateCredentialCache will not send to any client")
 		return nil
 	}
 
-	for _, f := range p.proxyClient {
-		sta, err := f.InvalidateCredentialCache(ctx, request)
-		if err != nil {
-			return fmt.Errorf("grpc fail, error=%w", err)
-		}
-		if sta.ErrorCode != commonpb.ErrorCode_Success {
-			return fmt.Errorf("message = %s", sta.Reason)
-		}
+	group := &errgroup.Group{}
+	for k, v := range p.proxyClient {
+		k, v := k, v
+		group.Go(func() error {
+			sta, err := v.InvalidateCredentialCache(ctx, request)
+			if err != nil {
+				return fmt.Errorf("InvalidateCredentialCache failed, proxyID = %d, err = %s", k, err)
+			}
+			if sta.ErrorCode != commonpb.ErrorCode_Success {
+				return fmt.Errorf("InvalidateCredentialCache failed, proxyID = %d, err = %s", k, sta.Reason)
+			}
+			return nil
+		})
 	}
-	return nil
+	return group.Wait()
 }
 
 func (p *proxyClientManager) UpdateCredentialCache(ctx context.Context, request *proxypb.UpdateCredCacheRequest) error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	defer func() {
-		if err := recover(); err != nil {
-			log.Debug("call UpdateCredentialCache panic", zap.Any("msg", err))
-		}
-	}()
 
 	if len(p.proxyClient) == 0 {
 		log.Warn("proxy client is empty, UpdateCredentialCache will not send to any client")
 		return nil
 	}
 
-	for _, f := range p.proxyClient {
-		sta, err := f.UpdateCredentialCache(ctx, request)
-		if err != nil {
-			return fmt.Errorf("grpc fail, error=%w", err)
-		}
-		if sta.ErrorCode != commonpb.ErrorCode_Success {
-			return fmt.Errorf("message = %s", sta.Reason)
-		}
+	group := &errgroup.Group{}
+	for k, v := range p.proxyClient {
+		k, v := k, v
+		group.Go(func() error {
+			sta, err := v.UpdateCredentialCache(ctx, request)
+			if err != nil {
+				return fmt.Errorf("UpdateCredentialCache failed, proxyID = %d, err = %s", k, err)
+			}
+			if sta.ErrorCode != commonpb.ErrorCode_Success {
+				return fmt.Errorf("UpdateCredentialCache failed, proxyID = %d, err = %s", k, sta.Reason)
+			}
+			return nil
+		})
 	}
-	return nil
+	return group.Wait()
 }
 
 func (p *proxyClientManager) ClearCredUsersCache(ctx context.Context, request *internalpb.ClearCredUsersCacheRequest) error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	defer func() {
-		if err := recover(); err != nil {
-			log.Debug("call ClearCredUsersCache panic", zap.Any("msg", err))
-		}
-	}()
 
 	if len(p.proxyClient) == 0 {
 		log.Warn("proxy client is empty, ClearCredUsersCache will not send to any client")
 		return nil
 	}
 
-	for _, f := range p.proxyClient {
-		sta, err := f.ClearCredUsersCache(ctx, request)
-		if err != nil {
-			return fmt.Errorf("grpc fail, error=%w", err)
-		}
-		if sta.ErrorCode != commonpb.ErrorCode_Success {
-			return fmt.Errorf("message = %s", sta.Reason)
-		}
+	group := &errgroup.Group{}
+	for k, v := range p.proxyClient {
+		k, v := k, v
+		group.Go(func() error {
+			sta, err := v.ClearCredUsersCache(ctx, request)
+			if err != nil {
+				return fmt.Errorf("ClearCredUsersCache failed, proxyID = %d, err = %s", k, err)
+			}
+			if sta.ErrorCode != commonpb.ErrorCode_Success {
+				return fmt.Errorf("ClearCredUsersCache failed, proxyID = %d, err = %s", k, sta.Reason)
+			}
+			return nil
+		})
 	}
-	return nil
+	return group.Wait()
 }

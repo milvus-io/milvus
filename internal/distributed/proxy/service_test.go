@@ -194,6 +194,10 @@ func (m *MockRootCoord) ReleaseDQLMessageStream(ctx context.Context, in *proxypb
 	return nil, nil
 }
 
+func (m *MockRootCoord) InvalidateCollectionMetaCache(ctx context.Context, in *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
 func (m *MockRootCoord) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlushCompletedMsg) (*commonpb.Status, error) {
 	return nil, nil
 }

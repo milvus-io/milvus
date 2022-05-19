@@ -50,7 +50,7 @@ func TestQueryTask_all(t *testing.T) {
 	qc.Start()
 	defer qc.Stop()
 
-	err = InitMetaCache(rc)
+	err = InitMetaCache(rc, qc)
 	assert.NoError(t, err)
 
 	fieldName2Types := map[string]schemapb.DataType{
@@ -166,4 +166,159 @@ func TestQueryTask_all(t *testing.T) {
 	assert.NoError(t, task.Execute(ctx))
 
 	assert.NoError(t, task.PostExecute(ctx))
+}
+
+func TestCheckIfLoaded(t *testing.T) {
+	var err error
+
+	Params.Init()
+	var (
+		rc  = NewRootCoordMock()
+		qc  = NewQueryCoordMock()
+		ctx = context.TODO()
+	)
+
+	err = rc.Start()
+	defer rc.Stop()
+	require.NoError(t, err)
+	err = InitMetaCache(rc, qc)
+	require.NoError(t, err)
+
+	err = qc.Start()
+	defer qc.Stop()
+	require.NoError(t, err)
+
+	getQueryTask := func(t *testing.T, collName string) *queryTask {
+		task := &queryTask{
+			ctx: ctx,
+			RetrieveRequest: &internalpb.RetrieveRequest{
+				Base: &commonpb.MsgBase{
+					MsgType: commonpb.MsgType_Retrieve,
+				},
+			},
+			request: &milvuspb.QueryRequest{
+				Base: &commonpb.MsgBase{
+					MsgType: commonpb.MsgType_Retrieve,
+				},
+				CollectionName: collName,
+			},
+			qc: qc,
+		}
+		require.NoError(t, task.OnEnqueue())
+		return task
+	}
+
+	t.Run("test checkIfLoaded error", func(t *testing.T) {
+		collName := "test_checkIfLoaded_error" + funcutil.GenRandomStr()
+		createColl(t, collName, rc)
+		collID, err := globalMetaCache.GetCollectionID(context.TODO(), collName)
+		require.NoError(t, err)
+		task := getQueryTask(t, collName)
+		task.collectionName = collName
+
+		t.Run("show collection err", func(t *testing.T) {
+			qc.SetShowCollectionsFunc(func(ctx context.Context, request *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
+				return nil, fmt.Errorf("mock")
+			})
+
+			loaded, err := task.checkIfLoaded(collID, []UniqueID{})
+			assert.Error(t, err)
+			assert.False(t, loaded)
+		})
+
+		t.Run("show collection status unexpected error", func(t *testing.T) {
+			qc.SetShowCollectionsFunc(func(ctx context.Context, request *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
+				return &querypb.ShowCollectionsResponse{
+					Status: &commonpb.Status{
+						ErrorCode: commonpb.ErrorCode_UnexpectedError,
+						Reason:    "mock",
+					},
+				}, nil
+			})
+
+			loaded, err := task.checkIfLoaded(collID, []UniqueID{})
+			assert.Error(t, err)
+			assert.False(t, loaded)
+			assert.Error(t, task.PreExecute(ctx))
+			qc.ResetShowCollectionsFunc()
+		})
+
+		t.Run("show partition error", func(t *testing.T) {
+			qc.SetShowPartitionsFunc(func(ctx context.Context, req *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
+				return &querypb.ShowPartitionsResponse{
+					Status: &commonpb.Status{
+						ErrorCode: commonpb.ErrorCode_UnexpectedError,
+						Reason:    "mock",
+					},
+				}, nil
+			})
+			loaded, err := task.checkIfLoaded(collID, []UniqueID{1})
+			assert.Error(t, err)
+			assert.False(t, loaded)
+		})
+
+		t.Run("show partition status unexpected error", func(t *testing.T) {
+			qc.SetShowPartitionsFunc(func(ctx context.Context, req *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
+				return nil, fmt.Errorf("mock error")
+			})
+			loaded, err := task.checkIfLoaded(collID, []UniqueID{1})
+			assert.Error(t, err)
+			assert.False(t, loaded)
+		})
+
+		t.Run("show partitions success", func(t *testing.T) {
+			qc.SetShowPartitionsFunc(func(ctx context.Context, req *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
+				return &querypb.ShowPartitionsResponse{
+					Status: &commonpb.Status{
+						ErrorCode: commonpb.ErrorCode_Success,
+					},
+				}, nil
+			})
+			loaded, err := task.checkIfLoaded(collID, []UniqueID{1})
+			assert.NoError(t, err)
+			assert.True(t, loaded)
+			qc.ResetShowPartitionsFunc()
+		})
+
+		t.Run("show collection success but not loaded", func(t *testing.T) {
+			qc.SetShowCollectionsFunc(func(ctx context.Context, request *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
+				return &querypb.ShowCollectionsResponse{
+					Status: &commonpb.Status{
+						ErrorCode: commonpb.ErrorCode_Success,
+					},
+					CollectionIDs:       []UniqueID{collID},
+					InMemoryPercentages: []int64{0},
+				}, nil
+			})
+
+			qc.SetShowPartitionsFunc(func(ctx context.Context, req *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
+				return nil, fmt.Errorf("mock error")
+			})
+			loaded, err := task.checkIfLoaded(collID, []UniqueID{})
+			assert.Error(t, err)
+			assert.False(t, loaded)
+
+			qc.SetShowPartitionsFunc(func(ctx context.Context, req *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
+				return nil, fmt.Errorf("mock error")
+			})
+			loaded, err = task.checkIfLoaded(collID, []UniqueID{})
+			assert.Error(t, err)
+			assert.False(t, loaded)
+
+			qc.SetShowPartitionsFunc(func(ctx context.Context, req *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
+				return &querypb.ShowPartitionsResponse{
+					Status: &commonpb.Status{
+						ErrorCode: commonpb.ErrorCode_Success,
+					},
+					PartitionIDs: []UniqueID{1},
+				}, nil
+			})
+			loaded, err = task.checkIfLoaded(collID, []UniqueID{})
+			assert.NoError(t, err)
+			assert.True(t, loaded)
+		})
+
+		qc.ResetShowCollectionsFunc()
+		qc.ResetShowPartitionsFunc()
+	})
 }

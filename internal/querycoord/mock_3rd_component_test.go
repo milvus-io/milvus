@@ -134,6 +134,8 @@ type rootCoordMock struct {
 	returnError     bool
 	returnGrpcError bool
 	enableIndex     bool
+
+	invalidateCollMetaCacheFailed bool
 }
 
 func newRootCoordMock(ctx context.Context) *rootCoordMock {
@@ -230,6 +232,30 @@ func (rc *rootCoordMock) ReleaseDQLMessageStream(ctx context.Context, in *proxyp
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    "release DQLMessage stream failed",
+		}, nil
+	}
+
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}, nil
+}
+
+func (rc *rootCoordMock) InvalidateCollectionMetaCache(ctx context.Context, in *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
+	if rc.returnGrpcError {
+		return nil, errors.New("InvalidateCollectionMetaCache failed")
+	}
+
+	if rc.returnError {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "InvalidateCollectionMetaCache failed",
+		}, nil
+	}
+
+	if rc.invalidateCollMetaCacheFailed {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "InvalidateCollectionMetaCache failed",
 		}, nil
 	}
 

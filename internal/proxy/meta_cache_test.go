@@ -22,21 +22,28 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/crypto"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 type MockRootCoordClientInterface struct {
 	types.RootCoord
+	Error       bool
+	AccessCount int
+}
+
+type MockQueryCoordClientInterface struct {
+	types.QueryCoord
 	Error       bool
 	AccessCount int
 }
@@ -171,32 +178,48 @@ func (m *MockRootCoordClientInterface) ListCredUsers(ctx context.Context, req *m
 	}, nil
 }
 
+func (m *MockQueryCoordClientInterface) ShowCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
+	if m.Error {
+		return nil, errors.New("mocked error")
+	}
+	m.AccessCount++
+	rsp := &querypb.ShowCollectionsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		CollectionIDs:       []UniqueID{1, 2},
+		InMemoryPercentages: []int64{100, 50},
+	}
+	return rsp, nil
+}
+
 //Simulate the cache path and the
 func TestMetaCache_GetCollection(t *testing.T) {
 	ctx := context.Background()
-	client := &MockRootCoordClientInterface{}
-	err := InitMetaCache(client)
+	rootCoord := &MockRootCoordClientInterface{}
+	queryCoord := &MockQueryCoordClientInterface{}
+	err := InitMetaCache(rootCoord, queryCoord)
 	assert.Nil(t, err)
 
 	id, err := globalMetaCache.GetCollectionID(ctx, "collection1")
 	assert.Nil(t, err)
 	assert.Equal(t, id, typeutil.UniqueID(1))
-	assert.Equal(t, client.AccessCount, 1)
+	assert.Equal(t, rootCoord.AccessCount, 1)
 
 	// should'nt be accessed to remote root coord.
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, "collection1")
-	assert.Equal(t, client.AccessCount, 1)
+	assert.Equal(t, rootCoord.AccessCount, 1)
 	assert.Nil(t, err)
 	assert.Equal(t, schema, &schemapb.CollectionSchema{
 		AutoID: true,
 		Fields: []*schemapb.FieldSchema{},
 	})
 	id, err = globalMetaCache.GetCollectionID(ctx, "collection2")
-	assert.Equal(t, client.AccessCount, 2)
+	assert.Equal(t, rootCoord.AccessCount, 2)
 	assert.Nil(t, err)
 	assert.Equal(t, id, typeutil.UniqueID(2))
 	schema, err = globalMetaCache.GetCollectionSchema(ctx, "collection2")
-	assert.Equal(t, client.AccessCount, 2)
+	assert.Equal(t, rootCoord.AccessCount, 2)
 	assert.Nil(t, err)
 	assert.Equal(t, schema, &schemapb.CollectionSchema{
 		AutoID: true,
@@ -205,11 +228,11 @@ func TestMetaCache_GetCollection(t *testing.T) {
 
 	// test to get from cache, this should trigger root request
 	id, err = globalMetaCache.GetCollectionID(ctx, "collection1")
-	assert.Equal(t, client.AccessCount, 2)
+	assert.Equal(t, rootCoord.AccessCount, 2)
 	assert.Nil(t, err)
 	assert.Equal(t, id, typeutil.UniqueID(1))
 	schema, err = globalMetaCache.GetCollectionSchema(ctx, "collection1")
-	assert.Equal(t, client.AccessCount, 2)
+	assert.Equal(t, rootCoord.AccessCount, 2)
 	assert.Nil(t, err)
 	assert.Equal(t, schema, &schemapb.CollectionSchema{
 		AutoID: true,
@@ -220,16 +243,17 @@ func TestMetaCache_GetCollection(t *testing.T) {
 
 func TestMetaCache_GetCollectionFailure(t *testing.T) {
 	ctx := context.Background()
-	client := &MockRootCoordClientInterface{}
-	err := InitMetaCache(client)
+	rootCoord := &MockRootCoordClientInterface{}
+	queryCoord := &MockQueryCoordClientInterface{}
+	err := InitMetaCache(rootCoord, queryCoord)
 	assert.Nil(t, err)
-	client.Error = true
+	rootCoord.Error = true
 
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, "collection1")
 	assert.NotNil(t, err)
 	assert.Nil(t, schema)
 
-	client.Error = false
+	rootCoord.Error = false
 
 	schema, err = globalMetaCache.GetCollectionSchema(ctx, "collection1")
 	assert.Nil(t, err)
@@ -238,7 +262,7 @@ func TestMetaCache_GetCollectionFailure(t *testing.T) {
 		Fields: []*schemapb.FieldSchema{},
 	})
 
-	client.Error = true
+	rootCoord.Error = true
 	// should be cached with no error
 	assert.Nil(t, err)
 	assert.Equal(t, schema, &schemapb.CollectionSchema{
@@ -249,8 +273,9 @@ func TestMetaCache_GetCollectionFailure(t *testing.T) {
 
 func TestMetaCache_GetNonExistCollection(t *testing.T) {
 	ctx := context.Background()
-	client := &MockRootCoordClientInterface{}
-	err := InitMetaCache(client)
+	rootCoord := &MockRootCoordClientInterface{}
+	queryCoord := &MockQueryCoordClientInterface{}
+	err := InitMetaCache(rootCoord, queryCoord)
 	assert.Nil(t, err)
 
 	id, err := globalMetaCache.GetCollectionID(ctx, "collection3")
@@ -263,8 +288,9 @@ func TestMetaCache_GetNonExistCollection(t *testing.T) {
 
 func TestMetaCache_GetPartitionID(t *testing.T) {
 	ctx := context.Background()
-	client := &MockRootCoordClientInterface{}
-	err := InitMetaCache(client)
+	rootCoord := &MockRootCoordClientInterface{}
+	queryCoord := &MockQueryCoordClientInterface{}
+	err := InitMetaCache(rootCoord, queryCoord)
 	assert.Nil(t, err)
 
 	id, err := globalMetaCache.GetPartitionID(ctx, "collection1", "par1")
@@ -283,8 +309,9 @@ func TestMetaCache_GetPartitionID(t *testing.T) {
 
 func TestMetaCache_GetPartitionError(t *testing.T) {
 	ctx := context.Background()
-	client := &MockRootCoordClientInterface{}
-	err := InitMetaCache(client)
+	rootCoord := &MockRootCoordClientInterface{}
+	queryCoord := &MockQueryCoordClientInterface{}
+	err := InitMetaCache(rootCoord, queryCoord)
 	assert.Nil(t, err)
 
 	// Test the case where ShowPartitionsResponse is not aligned
@@ -312,8 +339,9 @@ func TestMetaCache_GetPartitionError(t *testing.T) {
 }
 
 func TestMetaCache_GetShards(t *testing.T) {
-	client := &MockRootCoordClientInterface{}
-	err := InitMetaCache(client)
+	rootCoord := &MockRootCoordClientInterface{}
+	queryCoord := &MockQueryCoordClientInterface{}
+	err := InitMetaCache(rootCoord, queryCoord)
 	require.Nil(t, err)
 
 	var (
@@ -358,8 +386,9 @@ func TestMetaCache_GetShards(t *testing.T) {
 }
 
 func TestMetaCache_ClearShards(t *testing.T) {
-	client := &MockRootCoordClientInterface{}
-	err := InitMetaCache(client)
+	rootCoord := &MockRootCoordClientInterface{}
+	queryCoord := &MockQueryCoordClientInterface{}
+	err := InitMetaCache(rootCoord, queryCoord)
 	require.Nil(t, err)
 
 	var (
@@ -396,4 +425,83 @@ func TestMetaCache_ClearShards(t *testing.T) {
 		assert.Empty(t, shards)
 	})
 
+}
+
+func TestMetaCache_LoadCache(t *testing.T) {
+	ctx := context.Background()
+	rootCoord := &MockRootCoordClientInterface{}
+	queryCoord := &MockQueryCoordClientInterface{}
+	err := InitMetaCache(rootCoord, queryCoord)
+	assert.Nil(t, err)
+
+	t.Run("test IsCollectionLoaded", func(t *testing.T) {
+		info, err := globalMetaCache.GetCollectionInfo(ctx, "collection1")
+		assert.NoError(t, err)
+		assert.True(t, info.isLoaded)
+		// no collectionInfo of collection1, should access RootCoord
+		assert.Equal(t, rootCoord.AccessCount, 1)
+		// not loaded, should access QueryCoord
+		assert.Equal(t, queryCoord.AccessCount, 1)
+
+		info, err = globalMetaCache.GetCollectionInfo(ctx, "collection1")
+		assert.NoError(t, err)
+		assert.True(t, info.isLoaded)
+		// shouldn't access QueryCoord or RootCoord again
+		assert.Equal(t, rootCoord.AccessCount, 1)
+		assert.Equal(t, queryCoord.AccessCount, 1)
+
+		// test collection2 not fully loaded
+		info, err = globalMetaCache.GetCollectionInfo(ctx, "collection2")
+		assert.NoError(t, err)
+		assert.False(t, info.isLoaded)
+		// no collectionInfo of collection2, should access RootCoord
+		assert.Equal(t, rootCoord.AccessCount, 2)
+		// not loaded, should access QueryCoord
+		assert.Equal(t, queryCoord.AccessCount, 2)
+	})
+
+	t.Run("test RemoveCollectionLoadCache", func(t *testing.T) {
+		globalMetaCache.RemoveCollection(ctx, "collection1")
+		info, err := globalMetaCache.GetCollectionInfo(ctx, "collection1")
+		assert.NoError(t, err)
+		assert.True(t, info.isLoaded)
+		// should access QueryCoord
+		assert.Equal(t, queryCoord.AccessCount, 3)
+	})
+}
+
+func TestMetaCache_RemoveCollection(t *testing.T) {
+	ctx := context.Background()
+	rootCoord := &MockRootCoordClientInterface{}
+	queryCoord := &MockQueryCoordClientInterface{}
+	err := InitMetaCache(rootCoord, queryCoord)
+	assert.Nil(t, err)
+
+	info, err := globalMetaCache.GetCollectionInfo(ctx, "collection1")
+	assert.NoError(t, err)
+	assert.True(t, info.isLoaded)
+	// no collectionInfo of collection1, should access RootCoord
+	assert.Equal(t, rootCoord.AccessCount, 1)
+
+	info, err = globalMetaCache.GetCollectionInfo(ctx, "collection1")
+	assert.NoError(t, err)
+	assert.True(t, info.isLoaded)
+	// shouldn't access RootCoord again
+	assert.Equal(t, rootCoord.AccessCount, 1)
+
+	globalMetaCache.RemoveCollection(ctx, "collection1")
+	// no collectionInfo of collection2, should access RootCoord
+	info, err = globalMetaCache.GetCollectionInfo(ctx, "collection1")
+	assert.NoError(t, err)
+	assert.True(t, info.isLoaded)
+	// shouldn't access RootCoord again
+	assert.Equal(t, rootCoord.AccessCount, 2)
+
+	globalMetaCache.RemoveCollectionsByID(ctx, UniqueID(1))
+	// no collectionInfo of collection2, should access RootCoord
+	info, err = globalMetaCache.GetCollectionInfo(ctx, "collection1")
+	assert.NoError(t, err)
+	assert.True(t, info.isLoaded)
+	// shouldn't access RootCoord again
+	assert.Equal(t, rootCoord.AccessCount, 3)
 }

@@ -324,9 +324,6 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		return fmt.Errorf("encodeDdOperation fail, error = %w", err)
 	}
 
-	// get all aliases before meta table updated
-	aliases := t.core.MetaTable.ListAliases(collMeta.ID)
-
 	// use lambda function here to guarantee all resources to be released
 	dropCollectionFn := func() error {
 		// lock for ddl operation
@@ -375,8 +372,11 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	t.core.ExpireMetaCache(ctx, []string{t.Req.CollectionName}, ts)
-	t.core.ExpireMetaCache(ctx, aliases, ts)
+	// invalidate all the collection meta cache with the specified collectionID
+	err = t.core.ExpireMetaCache(ctx, nil, collMeta.ID, ts)
+	if err != nil {
+		return err
+	}
 
 	// Update DDOperation in etcd
 	return t.core.MetaTable.txn.Save(DDMsgSendPrefix, strconv.FormatBool(true))
@@ -571,7 +571,11 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	t.core.ExpireMetaCache(ctx, []string{t.Req.CollectionName}, ts)
+	// invalidate all the collection meta cache with the specified collectionID
+	err = t.core.ExpireMetaCache(ctx, nil, collMeta.ID, ts)
+	if err != nil {
+		return err
+	}
 
 	// Update DDOperation in etcd
 	return t.core.MetaTable.txn.Save(DDMsgSendPrefix, strconv.FormatBool(true))
@@ -658,7 +662,11 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	t.core.ExpireMetaCache(ctx, []string{t.Req.CollectionName}, ts)
+	// invalidate all the collection meta cache with the specified collectionID
+	err = t.core.ExpireMetaCache(ctx, nil, collInfo.ID, ts)
+	if err != nil {
+		return err
+	}
 
 	//notify query service to release partition
 	// TODO::xige-16, reOpen when queryCoord support release partitions after load collection
@@ -1111,9 +1119,7 @@ func (t *DropAliasReqTask) Execute(ctx context.Context) error {
 		return fmt.Errorf("meta table drop alias failed, error = %w", err)
 	}
 
-	t.core.ExpireMetaCache(ctx, []string{t.Req.Alias}, ts)
-
-	return nil
+	return t.core.ExpireMetaCache(ctx, []string{t.Req.Alias}, InvalidCollectionID, ts)
 }
 
 // AlterAliasReqTask alter alias request task
@@ -1142,7 +1148,5 @@ func (t *AlterAliasReqTask) Execute(ctx context.Context) error {
 		return fmt.Errorf("meta table alter alias failed, error = %w", err)
 	}
 
-	t.core.ExpireMetaCache(ctx, []string{t.Req.Alias}, ts)
-
-	return nil
+	return t.core.ExpireMetaCache(ctx, []string{t.Req.Alias}, InvalidCollectionID, ts)
 }

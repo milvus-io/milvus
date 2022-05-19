@@ -133,8 +133,12 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		}
 	}
 
-	if !t.checkIfLoaded(collID, t.PartitionIDs) {
-		return fmt.Errorf("collection:%v or partition:%v not loaded into memory", collectionName, t.request.GetPartitionNames())
+	loaded, err := t.checkIfLoaded(collID, t.PartitionIDs)
+	if err != nil {
+		return fmt.Errorf("checkIfLoaded failed when query, collection:%v, partitions:%v, err = %s", collectionName, t.request.GetPartitionNames(), err)
+	}
+	if !loaded {
+		return fmt.Errorf("collection:%v or partition:%v not loaded into memory when query", collectionName, t.request.GetPartitionNames())
 	}
 
 	schema, _ := globalMetaCache.GetCollectionSchema(ctx, collectionName)
@@ -379,9 +383,18 @@ func (t *queryTask) queryShard(ctx context.Context, leaders []queryNode, channel
 	return nil
 }
 
-func (t *queryTask) checkIfLoaded(collectionID UniqueID, searchPartitionIDs []UniqueID) bool {
-	// If request to search partitions
-	if len(searchPartitionIDs) > 0 {
+func (t *queryTask) checkIfLoaded(collectionID UniqueID, queryPartitionIDs []UniqueID) (bool, error) {
+	// check if collection was loaded into QueryNode
+	info, err := globalMetaCache.GetCollectionInfo(t.ctx, t.collectionName)
+	if err != nil {
+		return false, fmt.Errorf("GetCollectionInfo failed, collectionID = %d, err = %s", collectionID, err)
+	}
+	if info.isLoaded {
+		return true, nil
+	}
+
+	// If request to query partitions
+	if len(queryPartitionIDs) > 0 {
 		resp, err := t.qc.ShowPartitions(t.ctx, &querypb.ShowPartitionsRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_ShowCollections,
@@ -390,95 +403,43 @@ func (t *queryTask) checkIfLoaded(collectionID UniqueID, searchPartitionIDs []Un
 				SourceID:  Params.ProxyCfg.GetNodeID(),
 			},
 			CollectionID: collectionID,
-			PartitionIDs: searchPartitionIDs,
+			PartitionIDs: queryPartitionIDs,
 		})
 		if err != nil {
-			log.Warn("fail to show partitions by QueryCoord",
-				zap.Int64("requestID", t.Base.MsgID),
-				zap.Int64("collectionID", collectionID),
-				zap.Int64s("partitionIDs", searchPartitionIDs),
-				zap.String("requestType", "search"),
-				zap.Error(err))
-			return false
+			return false, fmt.Errorf("showPartitions failed, collectionID = %d, partitionIDs = %v, err = %s", collectionID, queryPartitionIDs, err)
 		}
-
-		if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
-			log.Warn("fail to show partitions by QueryCoord",
-				zap.Int64("collectionID", collectionID),
-				zap.Int64s("partitionIDs", searchPartitionIDs),
-				zap.Int64("requestID", t.Base.MsgID), zap.String("requestType", "search"),
-				zap.String("reason", resp.GetStatus().GetReason()))
-			return false
+		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+			return false, fmt.Errorf("showPartitions failed, collectionID = %d, partitionIDs = %v, reason = %s", collectionID, queryPartitionIDs, resp.GetStatus().GetReason())
 		}
 		// Current logic: show partitions won't return error if the given partitions are all loaded
-		return true
+		return true, nil
 	}
 
-	// If request to search collection
-	resp, err := t.qc.ShowCollections(t.ctx, &querypb.ShowCollectionsRequest{
+	// If request to query collection and collection is not fully loaded
+	resp, err := t.qc.ShowPartitions(t.ctx, &querypb.ShowPartitionsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_ShowCollections,
 			MsgID:     t.Base.MsgID,
 			Timestamp: t.Base.Timestamp,
 			SourceID:  Params.ProxyCfg.GetNodeID(),
 		},
+		CollectionID: collectionID,
 	})
 	if err != nil {
-		log.Warn("fail to show collections by QueryCoord",
-			zap.Int64("requestID", t.Base.MsgID), zap.String("requestType", "search"),
-			zap.Error(err))
-		return false
+		return false, fmt.Errorf("showPartitions failed, collectionID = %d, partitionIDs = %v, err = %s", collectionID, queryPartitionIDs, err)
+	}
+	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		return false, fmt.Errorf("showPartitions failed, collectionID = %d, partitionIDs = %v, reason = %s", collectionID, queryPartitionIDs, resp.GetStatus().GetReason())
 	}
 
-	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
-		log.Warn("fail to show collections by QueryCoord",
-			zap.Int64("requestID", t.Base.MsgID), zap.String("requestType", "search"),
-			zap.String("reason", resp.GetStatus().GetReason()))
-		return false
+	if len(resp.GetPartitionIDs()) > 0 {
+		log.Warn("collection not fully loaded, query on these partitions",
+			zap.Int64("collectionID", collectionID),
+			zap.Int64s("partitionIDs", resp.GetPartitionIDs()))
+		return true, nil
 	}
 
-	loaded := false
-	for index, collID := range resp.CollectionIDs {
-		if collID == collectionID && resp.GetInMemoryPercentages()[index] >= int64(100) {
-			loaded = true
-			break
-		}
-	}
-
-	if !loaded {
-		resp, err := t.qc.ShowPartitions(t.ctx, &querypb.ShowPartitionsRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_ShowCollections,
-				MsgID:     t.Base.MsgID,
-				Timestamp: t.Base.Timestamp,
-				SourceID:  Params.ProxyCfg.GetNodeID(),
-			},
-			CollectionID: collectionID,
-		})
-		if err != nil {
-			log.Warn("fail to show partitions by QueryCoord",
-				zap.Int64("requestID", t.Base.MsgID),
-				zap.Int64("collectionID", collectionID),
-				zap.String("requestType", "search"),
-				zap.Error(err))
-			return false
-		}
-
-		if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
-			log.Warn("fail to show partitions by QueryCoord",
-				zap.Int64("collectionID", collectionID),
-				zap.Int64("requestID", t.Base.MsgID), zap.String("requestType", "search"),
-				zap.String("reason", resp.GetStatus().GetReason()))
-			return false
-		}
-
-		if len(resp.GetPartitionIDs()) > 0 {
-			log.Warn("collection not fully loaded, search on these partitions", zap.Int64s("partitionIDs", resp.GetPartitionIDs()))
-			return true
-		}
-	}
-
-	return loaded
+	return false, nil
 }
 
 // IDs2Expr converts ids slices to bool expresion with specified field name

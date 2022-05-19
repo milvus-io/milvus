@@ -50,6 +50,7 @@ func TestGetIndexStateTask_Execute(t *testing.T) {
 
 	rootCoord := newMockRootCoord()
 	indexCoord := newMockIndexCoord()
+	queryCoord := NewQueryCoordMock()
 
 	gist := &getIndexStateTask{
 		GetIndexStateRequest: &milvuspb.GetIndexStateRequest{
@@ -70,7 +71,7 @@ func TestGetIndexStateTask_Execute(t *testing.T) {
 	}
 
 	// failed to get collection id.
-	_ = InitMetaCache(rootCoord)
+	_ = InitMetaCache(rootCoord, queryCoord)
 	assert.Error(t, gist.Execute(ctx))
 	rootCoord.DescribeCollectionFunc = func(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 		return &milvuspb.DescribeCollectionResponse{

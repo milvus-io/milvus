@@ -765,6 +765,7 @@ func (dct *dropCollectionTask) Execute(ctx context.Context) error {
 
 	_ = dct.chMgr.removeDMLStream(collID)
 	_ = dct.chMgr.removeDQLStream(collID)
+	globalMetaCache.RemoveCollection(ctx, dct.CollectionName)
 	return nil
 }
 
@@ -2859,6 +2860,7 @@ func (rct *releaseCollectionTask) Execute(ctx context.Context) (err error) {
 	rct.result, err = rct.queryCoord.ReleaseCollection(ctx, request)
 
 	_ = rct.chMgr.removeDQLStream(collID)
+	globalMetaCache.RemoveCollection(ctx, rct.CollectionName)
 
 	return err
 }

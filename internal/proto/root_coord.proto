@@ -103,6 +103,7 @@ service RootCoord {
     rpc AllocID(AllocIDRequest) returns (AllocIDResponse) {}
     rpc UpdateChannelTimeTick(internal.ChannelTimeTickMsg) returns (common.Status) {}
     rpc ReleaseDQLMessageStream(proxy.ReleaseDQLMessageStreamRequest) returns (common.Status) {}
+    rpc InvalidateCollectionMetaCache(proxy.InvalidateCollMetaCacheRequest) returns (common.Status) {}
     rpc SegmentFlushCompleted(data.SegmentFlushCompletedMsg) returns (common.Status) {}
 
     // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy

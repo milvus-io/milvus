@@ -161,6 +161,9 @@ func Test_NewClient(t *testing.T) {
 
 		r34, err := client.ListCredUsers(ctx, nil)
 		retCheck(retNotNil, r34, err)
+
+		r35, err := client.InvalidateCollectionMetaCache(ctx, nil)
+		retCheck(retNotNil, r35, err)
 	}
 
 	client.grpcClient = &mock.ClientBase{
@@ -312,6 +315,9 @@ func Test_NewClient(t *testing.T) {
 
 	r35Timeout, err := client.ListImportTasks(shortCtx, nil)
 	retCheck(r35Timeout, err)
+
+	r36Timeout, err := client.InvalidateCollectionMetaCache(shortCtx, nil)
+	retCheck(r36Timeout, err)
 
 	// clean up
 	err = client.Stop()

@@ -304,6 +304,9 @@ func TestTriggerTask(t *testing.T) {
 	queryCoord, err := startQueryCoord(ctx)
 	assert.Nil(t, err)
 
+	err = queryCoord.meta.addCollection(defaultCollectionID, querypb.LoadType_LoadCollection, genDefaultCollectionSchema(false))
+	assert.NoError(t, err)
+
 	node1, err := startQueryNodeServer(ctx)
 	assert.Nil(t, err)
 	node2, err := startQueryNodeServer(ctx)
@@ -352,6 +355,14 @@ func TestTriggerTask(t *testing.T) {
 		releaseCollectionTask := genReleaseCollectionTask(ctx, queryCoord)
 		err = queryCoord.scheduler.processTask(releaseCollectionTask)
 		assert.Nil(t, err)
+	})
+
+	t.Run("Test ReleaseCollection with invalidateCollectionMetaCache error", func(t *testing.T) {
+		releaseCollectionTask := genReleaseCollectionTask(ctx, queryCoord)
+		queryCoord.scheduler.broker.rootCoord.(*rootCoordMock).invalidateCollMetaCacheFailed = true
+		err = queryCoord.scheduler.processTask(releaseCollectionTask)
+		assert.Error(t, err)
+		queryCoord.scheduler.broker.rootCoord.(*rootCoordMock).invalidateCollMetaCacheFailed = false
 	})
 
 	t.Run("Test LoadPartition With Replicas", func(t *testing.T) {
@@ -586,6 +597,9 @@ func Test_ReleaseCollectionExecuteFail(t *testing.T) {
 	node, err := startQueryNodeServer(ctx)
 	assert.Nil(t, err)
 	node.setRPCInterface(&node.releaseCollection, returnFailedResult)
+
+	err = queryCoord.meta.addCollection(defaultCollectionID, querypb.LoadType_LoadCollection, genDefaultCollectionSchema(false))
+	assert.NoError(t, err)
 
 	waitQueryNodeOnline(queryCoord.cluster, node.queryNodeID)
 	releaseCollectionTask := genReleaseCollectionTask(ctx, queryCoord)

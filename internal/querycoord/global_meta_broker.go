@@ -73,6 +73,32 @@ func (broker *globalMetaBroker) releaseDQLMessageStream(ctx context.Context, col
 	return nil
 }
 
+// invalidateCollectionMetaCache notifies RootCoord to remove all the collection meta cache with the specified collectionID in Proxies
+func (broker *globalMetaBroker) invalidateCollectionMetaCache(ctx context.Context, collectionID UniqueID) error {
+	ctx1, cancel1 := context.WithTimeout(ctx, timeoutForRPC)
+	defer cancel1()
+	req := &proxypb.InvalidateCollMetaCacheRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: 0, // TODO: msg type?
+		},
+		CollectionID: collectionID,
+	}
+
+	res, err := broker.rootCoord.InvalidateCollectionMetaCache(ctx1, req)
+	if err != nil {
+		log.Error("InvalidateCollMetaCacheRequest failed", zap.Int64("collectionID", collectionID), zap.Error(err))
+		return err
+	}
+	if res.ErrorCode != commonpb.ErrorCode_Success {
+		err = errors.New(res.Reason)
+		log.Error("InvalidateCollMetaCacheRequest failed", zap.Int64("collectionID", collectionID), zap.Error(err))
+		return err
+	}
+	log.Info("InvalidateCollMetaCacheRequest successfully", zap.Int64("collectionID", collectionID))
+
+	return nil
+}
+
 func (broker *globalMetaBroker) showPartitionIDs(ctx context.Context, collectionID UniqueID) ([]UniqueID, error) {
 	ctx2, cancel2 := context.WithTimeout(ctx, timeoutForRPC)
 	defer cancel2()

@@ -100,19 +100,27 @@ func (node *Proxy) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringRe
 // InvalidateCollectionMetaCache invalidate the meta cache of specific collection.
 func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 	ctx = logutil.WithModule(ctx, moduleName)
-	logutil.Logger(ctx).Debug("received request to invalidate collection meta cache",
+	logutil.Logger(ctx).Info("received request to invalidate collection meta cache",
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
-		zap.String("collection", request.CollectionName))
+		zap.String("collectionName", request.CollectionName),
+		zap.Int64("collectionID", request.CollectionID))
 
 	collectionName := request.CollectionName
+	collectionID := request.CollectionID
 	if globalMetaCache != nil {
-		globalMetaCache.RemoveCollection(ctx, collectionName) // no need to return error, though collection may be not cached
+		if collectionName != "" {
+			globalMetaCache.RemoveCollection(ctx, collectionName) // no need to return error, though collection may be not cached
+		}
+		if request.CollectionID != UniqueID(0) {
+			globalMetaCache.RemoveCollectionsByID(ctx, collectionID)
+		}
 	}
-	logutil.Logger(ctx).Debug("complete to invalidate collection meta cache",
+	logutil.Logger(ctx).Info("complete to invalidate collection meta cache",
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
-		zap.String("collection", request.CollectionName))
+		zap.String("collection", collectionName),
+		zap.Int64("collectionID", collectionID))
 
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,

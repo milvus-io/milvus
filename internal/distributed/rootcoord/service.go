@@ -429,6 +429,11 @@ func (s *Server) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.Releas
 	return s.rootCoord.ReleaseDQLMessageStream(ctx, in)
 }
 
+// InvalidateCollectionMetaCache notifies RootCoord to release the collection cache in Proxies.
+func (s *Server) InvalidateCollectionMetaCache(ctx context.Context, in *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
+	return s.rootCoord.InvalidateCollectionMetaCache(ctx, in)
+}
+
 // SegmentFlushCompleted notifies RootCoord that specified segment has been flushed.
 func (s *Server) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlushCompletedMsg) (*commonpb.Status, error) {
 	return s.rootCoord.SegmentFlushCompleted(ctx, in)
