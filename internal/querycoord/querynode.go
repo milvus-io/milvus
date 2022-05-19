@@ -408,8 +408,8 @@ func (qn *queryNode) releaseSegments(ctx context.Context, in *querypb.ReleaseSeg
 }
 
 func (qn *queryNode) getNodeInfo() (Node, error) {
-	qn.RLock()
-	defer qn.RUnlock()
+	qn.Lock()
+	defer qn.Unlock()
 
 	if !qn.isOnline() {
 		return nil, errors.New("getNodeInfo: queryNode is offline")
