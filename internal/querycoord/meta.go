@@ -529,6 +529,8 @@ func (m *MetaReplica) releaseCollection(collectionID UniqueID) error {
 	}
 	m.dmChannelMu.Unlock()
 
+	m.replicas.Remove(collection.ReplicaIds...)
+
 	return nil
 }
 
