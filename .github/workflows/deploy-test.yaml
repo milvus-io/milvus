@@ -146,7 +146,7 @@ jobs:
         run: |
           docker-compose ps -a || true
           mkdir -p logs
-          docker-compose logs > ./logs/test-${{ matrix.mode }}-${{ matrix.task }}.log 2>&1 || echo "export logs failed"
+          bash ../../../scripts/export_log_docker.sh ./logs || echo "export logs failed"
       - name: 'Send mail'
         if: ${{ failure() }}
         uses: dawidd6/action-send-mail@v3
