@@ -25,7 +25,7 @@ import (
 const (
 	JSONFileExt  = ".json"
 	NumpyFileExt = ".npy"
-	MaxFileSize  = 4 * 1024 * 1024 * 1024 // maximum size of each file
+	MaxFileSize  = 1 * 1024 * 1024 * 1024 // maximum size of each file
 )
 
 type ImportWrapper struct {
@@ -110,20 +110,20 @@ func getFileNameAndExt(filePath string) (string, string) {
 }
 
 func (p *ImportWrapper) fileValidation(filePaths []string, rowBased bool) error {
-	// use this map to check duplicate files
-	files := make(map[string]struct{})
+	// use this map to check duplicate file name(only for numpy file)
+	fileNames := make(map[string]struct{})
 
 	for i := 0; i < len(filePaths); i++ {
 		filePath := filePaths[i]
-		_, fileType := getFileNameAndExt(filePath)
-		_, ok := files[filePath]
+		name, fileType := getFileNameAndExt(filePath)
+		_, ok := fileNames[name]
 		if ok {
 			// only check dupliate numpy file
 			if fileType == NumpyFileExt {
-				return errors.New("duplicate file: " + filePath)
+				return errors.New("duplicate file: " + name + "." + fileType)
 			}
 		} else {
-			files[filePath] = struct{}{}
+			fileNames[name] = struct{}{}
 		}
 
 		// check file type
@@ -344,8 +344,7 @@ func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate b
 					flushFunc := func(field storage.FieldData) error {
 						fields := make(map[storage.FieldID]storage.FieldData)
 						fields[id] = field
-						combineFunc(fields)
-						return nil
+						return combineFunc(fields)
 					}
 
 					// for numpy file, we say the file name(without extension) is the filed name

@@ -745,6 +745,15 @@ func Test_FileValidation(t *testing.T) {
 	err = wrapper.fileValidation(files[:], true)
 	assert.NotNil(t, err)
 
+	// unsupported file name
+	files[0] = "a/1.npy"
+	files[1] = "b/1.npy"
+	err = wrapper.fileValidation(files[:], true)
+	assert.NotNil(t, err)
+
+	err = wrapper.fileValidation(files[:], false)
+	assert.NotNil(t, err)
+
 	// unsupported file type
 	files[0] = "1"
 	files[1] = "1"
