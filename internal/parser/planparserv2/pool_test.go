@@ -25,11 +25,15 @@ func Test_getLexer(t *testing.T) {
 }
 
 func Test_getParser(t *testing.T) {
+	var lexer *antlrparser.PlanLexer
 	var parser *antlrparser.PlanParser
 
-	parser = getParser(genNaiveInputStream(), &errorListener{})
+	lexer = getLexer(genNaiveInputStream(), &errorListener{})
+	assert.NotNil(t, lexer)
+
+	parser = getParser(lexer, &errorListener{})
 	assert.NotNil(t, parser)
 
-	parser = getParser(genNaiveInputStream(), &errorListener{})
+	parser = getParser(lexer, &errorListener{})
 	assert.NotNil(t, parser)
 }

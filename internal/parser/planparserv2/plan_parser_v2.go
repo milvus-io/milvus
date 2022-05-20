@@ -17,12 +17,25 @@ func handleExpr(schema *typeutil.SchemaHelper, exprStr string) interface{} {
 
 	inputStream := antlr.NewInputStream(exprStr)
 	errorListener := &errorListener{}
-	parser := getParser(inputStream, errorListener)
+
+	lexer := getLexer(inputStream, errorListener)
+	if errorListener.err != nil {
+		return errorListener.err
+	}
+
+	parser := getParser(lexer, errorListener)
+	if errorListener.err != nil {
+		return errorListener.err
+	}
 
 	ast := parser.Expr()
 	if errorListener.err != nil {
 		return errorListener.err
 	}
+
+	// lexer & parser won't be used by this thread, can be put into pool.
+	putLexer(lexer)
+	putParser(parser)
 
 	visitor := NewParserVisitor(schema)
 	return ast.Accept(visitor)

@@ -25,26 +25,33 @@ func getLexer(stream *antlr.InputStream, listeners ...antlr.ErrorListener) *antl
 	if !ok {
 		lexer = antlrparser.NewPlanLexer(nil)
 	}
-	lexer.SetInputStream(stream)
 	for _, listener := range listeners {
 		lexer.AddErrorListener(listener)
 	}
-	lexerPool.Put(lexer)
+	lexer.SetInputStream(stream)
 	return lexer
 }
 
-func getParser(stream *antlr.InputStream, listeners ...antlr.ErrorListener) *antlrparser.PlanParser {
-	lexer := getLexer(stream, listeners...)
+func getParser(lexer *antlrparser.PlanLexer, listeners ...antlr.ErrorListener) *antlrparser.PlanParser {
 	tokenStream := antlr.NewCommonTokenStream(lexer, antlr.TokenDefaultChannel)
 	parser, ok := parserPool.Get().(*antlrparser.PlanParser)
 	if !ok {
 		parser = antlrparser.NewPlanParser(nil)
 	}
-	parser.SetInputStream(tokenStream)
-	parser.BuildParseTrees = true
 	for _, listener := range listeners {
 		parser.AddErrorListener(listener)
 	}
-	parserPool.Put(parser)
+	parser.BuildParseTrees = true
+	parser.SetInputStream(tokenStream)
 	return parser
+}
+
+func putLexer(lexer *antlrparser.PlanLexer) {
+	lexer.SetInputStream(nil)
+	lexerPool.Put(lexer)
+}
+
+func putParser(parser *antlrparser.PlanParser) {
+	parser.SetInputStream(nil)
+	parserPool.Put(parser)
 }
