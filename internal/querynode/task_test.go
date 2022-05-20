@@ -574,6 +574,44 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("test repeated load", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		fieldBinlog, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
+		assert.NoError(t, err)
+
+		req := &querypb.LoadSegmentsRequest{
+			Base:   genCommonMsgBase(commonpb.MsgType_LoadSegments),
+			Schema: schema,
+			Infos: []*querypb.SegmentLoadInfo{
+				{
+					SegmentID:    defaultSegmentID,
+					PartitionID:  defaultPartitionID,
+					CollectionID: defaultCollectionID,
+					BinlogPaths:  fieldBinlog,
+				},
+			},
+		}
+
+		task := loadSegmentsTask{
+			req:  req,
+			node: node,
+		}
+		// execute loadSegmentsTask twice
+		err = task.PreExecute(ctx)
+		assert.NoError(t, err)
+		err = task.Execute(ctx)
+		assert.NoError(t, err)
+		err = task.PreExecute(ctx)
+		assert.NoError(t, err)
+		err = task.Execute(ctx)
+		assert.NoError(t, err)
+		// expected only one segment in replica
+		num := node.historical.replica.getSegmentNum()
+		assert.Equal(t, 1, num)
+	})
+
 	t.Run("test execute grpc error", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)

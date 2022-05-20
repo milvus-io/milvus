@@ -633,14 +633,8 @@ func (l *loadSegmentsTask) OnEnqueue() error {
 }
 
 func (l *loadSegmentsTask) PreExecute(ctx context.Context) error {
-	return nil
-}
-
-func (l *loadSegmentsTask) Execute(ctx context.Context) error {
-	// TODO: support db
-	log.Info("LoadSegment start", zap.Int64("msgID", l.req.Base.MsgID))
+	log.Info("LoadSegmentTask PreExecute start", zap.Int64("msgID", l.req.Base.MsgID))
 	var err error
-
 	// init meta
 	collectionID := l.req.GetCollectionID()
 	l.node.historical.replica.addCollection(collectionID, l.req.GetSchema())
@@ -656,13 +650,29 @@ func (l *loadSegmentsTask) Execute(ctx context.Context) error {
 		}
 	}
 
-	err = l.node.loader.loadSegment(l.req, segmentTypeSealed)
+	// filter segments that are already loaded in this querynode
+	var filteredInfos []*queryPb.SegmentLoadInfo
+	for _, info := range l.req.Infos {
+		if !l.node.historical.replica.hasSegment(info.SegmentID) {
+			filteredInfos = append(filteredInfos, info)
+		} else {
+			log.Debug("ignore segment that is already loaded", zap.Int64("segmentID", info.SegmentID))
+		}
+	}
+	l.req.Infos = filteredInfos
+	log.Info("LoadSegmentTask PreExecute done", zap.Int64("msgID", l.req.Base.MsgID))
+	return nil
+}
+
+func (l *loadSegmentsTask) Execute(ctx context.Context) error {
+	// TODO: support db
+	log.Info("LoadSegmentTask Execute start", zap.Int64("msgID", l.req.Base.MsgID))
+	err := l.node.loader.loadSegment(l.req, segmentTypeSealed)
 	if err != nil {
 		log.Warn(err.Error())
 		return err
 	}
-
-	log.Info("LoadSegments done", zap.Int64("msgID", l.req.Base.MsgID))
+	log.Info("LoadSegmentTask Execute done", zap.Int64("msgID", l.req.Base.MsgID))
 	return nil
 }
 
