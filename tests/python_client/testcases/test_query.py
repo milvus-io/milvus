@@ -259,7 +259,11 @@ class TestQueryParams(TestcaseBase):
         res = df.iloc[:2, :-1].to_dict('records')
         for field in non_primary_field:
             filter_values = df[field].tolist()[:2]
-            term_expr = f'{field} in {filter_values}'
+            if field is not ct.default_string_field_name:
+                term_expr = f'{field} in {filter_values}'
+            else:
+                term_expr = f'{field} in {filter_values}'
+                term_expr = term_expr.replace("'", "\"")
             self.collection_wrap.query(term_expr, output_fields=["*"],
                                        check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
@@ -1260,7 +1264,6 @@ class  TestqueryString(TestcaseBase):
         collection_w.query(expression, check_task=CheckTasks.err_res,
                            check_items={ct.err_code: 1, ct.err_msg: "type mismatch"})
        
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_string_expr_with_binary(self):
         """
@@ -1279,8 +1282,8 @@ class  TestqueryString(TestcaseBase):
     def test_query_string_expr_with_prefixes(self):
         """
         target: test query with 
-        method: specify string primary field as output field
-        expected: return string primary field
+        method: specify string is primary field, use prefix string expr
+        expected: verify query successfully
         """
         collection_w, vectors = self.init_collection_general(prefix, insert_data=True, primary_field=ct.default_string_field_name)[0:2]
         res = vectors[0].iloc[:1, :3].to_dict('records')
@@ -1288,3 +1291,16 @@ class  TestqueryString(TestcaseBase):
         output_fields = [default_int_field_name, default_float_field_name, default_string_field_name]
         collection_w.query(expression, output_fields=output_fields, 
                            check_task=CheckTasks.check_query_results, check_items={exp_res: res})
+    
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_query_string_with_invaild_prefix_expr(self):
+        """
+        target: test query with 
+        method: specify string primary field, use invaild prefix string expr
+        expected: raise error
+        """
+        collection_w = self.init_collection_general(prefix, insert_data=True)[0]
+        expression = 'float like "0%"'
+        collection_w.query(expression, check_task=CheckTasks.err_res,
+                           check_items={ct.err_code: 1, ct.err_msg: "like operation on non-text field is unsupported"}
+                           )
