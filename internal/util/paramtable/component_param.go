@@ -705,6 +705,12 @@ type queryNodeConfig struct {
 	// cache limit
 	CacheEnabled     bool
 	CacheMemoryLimit int64
+
+	GroupEnabled         bool
+	MaxReceiveChanSize   int32
+	MaxUnsolvedQueueSize int32
+	MaxGroupNQ           int64
+	TopKMergeRatio       float64
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -728,6 +734,12 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 
 	p.initCacheMemoryLimit()
 	p.initCacheEnabled()
+
+	p.initGroupEnabled()
+	p.initMaxReceiveChanSize()
+	p.initMaxUnsolvedQueueSize()
+	p.initMaxGroupNQ()
+	p.initTopKMergeRatio()
 }
 
 // InitAlias initializes an alias for the QueryNode role.
@@ -844,6 +856,26 @@ func (p *queryNodeConfig) initCacheEnabled() {
 	if err != nil {
 		panic(err)
 	}
+}
+
+func (p *queryNodeConfig) initGroupEnabled() {
+	p.GroupEnabled = p.Base.ParseBool("queryNode.grouping.enabled", true)
+}
+
+func (p *queryNodeConfig) initMaxReceiveChanSize() {
+	p.MaxReceiveChanSize = p.Base.ParseInt32WithDefault("queryNode.grouping.receiveChanSize", 10240)
+}
+
+func (p *queryNodeConfig) initMaxUnsolvedQueueSize() {
+	p.MaxUnsolvedQueueSize = p.Base.ParseInt32WithDefault("queryNode.grouping.unsolvedQueueSize", 10240)
+}
+
+func (p *queryNodeConfig) initMaxGroupNQ() {
+	p.MaxGroupNQ = p.Base.ParseInt64WithDefault("queryNode.grouping.maxNQ", 1000)
+}
+
+func (p *queryNodeConfig) initTopKMergeRatio() {
+	p.TopKMergeRatio = p.Base.ParseFloatWithDefault("queryNode.grouping.topKMergeRatio", 10.0)
 }
 
 func (p *queryNodeConfig) SetNodeID(id UniqueID) {

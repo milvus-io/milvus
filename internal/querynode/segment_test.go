@@ -24,6 +24,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+
 	"github.com/milvus-io/milvus/internal/storage"
 
 	"github.com/golang/protobuf/proto"
@@ -31,7 +33,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
@@ -50,7 +51,7 @@ func TestSegment_newSegment(t *testing.T) {
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
+	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing)
 	assert.Nil(t, err)
 	assert.Equal(t, segmentID, segment.segmentID)
 	deleteSegment(segment)
@@ -60,7 +61,7 @@ func TestSegment_newSegment(t *testing.T) {
 		_, err = newSegment(collection,
 			defaultSegmentID,
 			defaultPartitionID,
-			collectionID, "", 100, true)
+			collectionID, "", 100)
 		assert.Error(t, err)
 	})
 }
@@ -75,7 +76,7 @@ func TestSegment_deleteSegment(t *testing.T) {
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
+	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing)
 	assert.Equal(t, segmentID, segment.segmentID)
 	assert.Nil(t, err)
 
@@ -100,7 +101,7 @@ func TestSegment_getRowCount(t *testing.T) {
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
+	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing)
 	assert.Equal(t, segmentID, segment.segmentID)
 	assert.Nil(t, err)
 
@@ -143,7 +144,7 @@ func TestSegment_retrieve(t *testing.T) {
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
+	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing)
 	assert.Equal(t, segmentID, segment.segmentID)
 	assert.Nil(t, err)
 
@@ -223,7 +224,7 @@ func TestSegment_getDeletedCount(t *testing.T) {
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
+	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing)
 	assert.Equal(t, segmentID, segment.segmentID)
 	assert.Nil(t, err)
 
@@ -273,7 +274,7 @@ func TestSegment_getMemSize(t *testing.T) {
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
+	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing)
 	assert.Equal(t, segmentID, segment.segmentID)
 	assert.Nil(t, err)
 
@@ -309,7 +310,7 @@ func TestSegment_segmentInsert(t *testing.T) {
 	collection := newCollection(collectionID, schema)
 	assert.Equal(t, collection.ID(), collectionID)
 	segmentID := UniqueID(0)
-	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
+	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing)
 	assert.Equal(t, segmentID, segment.segmentID)
 	assert.Nil(t, err)
 
@@ -354,7 +355,7 @@ func TestSegment_segmentDelete(t *testing.T) {
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
+	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing)
 	assert.Equal(t, segmentID, segment.segmentID)
 	assert.Nil(t, err)
 
@@ -390,10 +391,10 @@ func TestSegment_segmentSearch(t *testing.T) {
 	node, err := genSimpleQueryNode(ctx)
 	assert.NoError(t, err)
 
-	collection, err := node.historical.replica.getCollectionByID(defaultCollectionID)
+	collection, err := node.historical.getCollectionByID(defaultCollectionID)
 	assert.NoError(t, err)
 
-	segment, err := node.historical.replica.getSegmentByID(defaultSegmentID)
+	segment, err := node.historical.getSegmentByID(defaultSegmentID)
 	assert.NoError(t, err)
 
 	// TODO: replace below by genPlaceholderGroup(nq)
@@ -405,9 +406,9 @@ func TestSegment_segmentSearch(t *testing.T) {
 		searchRawData = append(searchRawData, buf...)
 	}
 
-	placeholderValue := milvuspb.PlaceholderValue{
+	placeholderValue := commonpb.PlaceholderValue{
 		Tag:    "$0",
-		Type:   milvuspb.PlaceholderType_FloatVector,
+		Type:   commonpb.PlaceholderType_FloatVector,
 		Values: [][]byte{},
 	}
 
@@ -415,8 +416,8 @@ func TestSegment_segmentSearch(t *testing.T) {
 		placeholderValue.Values = append(placeholderValue.Values, searchRawData)
 	}
 
-	placeholderGroup := milvuspb.PlaceholderGroup{
-		Placeholders: []*milvuspb.PlaceholderValue{&placeholderValue},
+	placeholderGroup := commonpb.PlaceholderGroup{
+		Placeholders: []*commonpb.PlaceholderValue{&placeholderValue},
 	}
 
 	placeGroupByte, err := proto.Marshal(&placeholderGroup)
@@ -428,20 +429,16 @@ func TestSegment_segmentSearch(t *testing.T) {
 
 	plan, err := createSearchPlan(collection, dslString)
 	assert.NoError(t, err)
-	holder, err := parseSearchRequest(plan, placeGroupByte)
+	req, err := parseSearchRequest(plan, placeGroupByte)
 	assert.NoError(t, err)
 
-	placeholderGroups := make([]*searchRequest, 0)
-	placeholderGroups = append(placeholderGroups, holder)
-
-	searchResult, err := segment.search(plan, placeholderGroups, []Timestamp{0})
+	searchResult, err := segment.search(req)
 	assert.NoError(t, err)
 
 	err = checkSearchResult(nq, plan, searchResult)
 	assert.NoError(t, err)
 
-	plan.delete()
-	holder.delete()
+	req.delete()
 	deleteSegment(segment)
 	deleteCollection(collection)
 }
@@ -455,7 +452,7 @@ func TestSegment_segmentPreInsert(t *testing.T) {
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
+	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing)
 	assert.Equal(t, segmentID, segment.segmentID)
 	assert.Nil(t, err)
 
@@ -475,7 +472,7 @@ func TestSegment_segmentPreDelete(t *testing.T) {
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, true)
+	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing)
 	assert.Equal(t, segmentID, segment.segmentID)
 	assert.Nil(t, err)
 
@@ -519,8 +516,7 @@ func TestSegment_segmentLoadDeletedRecord(t *testing.T) {
 		defaultPartitionID,
 		defaultCollectionID,
 		defaultDMLChannel,
-		segmentTypeSealed,
-		true)
+		segmentTypeSealed)
 	assert.Nil(t, err)
 	ids := []int64{1, 2, 3}
 	pks := make([]primaryKey, 0)
@@ -573,7 +569,7 @@ func TestSegment_ConcurrentOperation(t *testing.T) {
 	wg := sync.WaitGroup{}
 	for i := 0; i < 100; i++ {
 		segmentID := UniqueID(i)
-		segment, err := newSegment(collection, segmentID, partitionID, collectionID, "", segmentTypeSealed, true)
+		segment, err := newSegment(collection, segmentID, partitionID, collectionID, "", segmentTypeSealed)
 		assert.Equal(t, segmentID, segment.segmentID)
 		assert.Equal(t, partitionID, segment.partitionID)
 		assert.Nil(t, err)
@@ -597,11 +593,10 @@ func TestSegment_indexInfo(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	tSafe := newTSafeReplica()
-	h, err := genSimpleHistorical(ctx, tSafe)
+	h, err := genSimpleHistorical(ctx)
 	assert.NoError(t, err)
 
-	seg, err := h.replica.getSegmentByID(defaultSegmentID)
+	seg, err := h.getSegmentByID(defaultSegmentID)
 	assert.NoError(t, err)
 
 	fieldID := simpleFloatVecField.id
@@ -647,8 +642,7 @@ func TestSegment_BasicMetrics(t *testing.T) {
 		defaultPartitionID,
 		defaultCollectionID,
 		defaultDMLChannel,
-		segmentTypeSealed,
-		true)
+		segmentTypeSealed)
 	assert.Nil(t, err)
 
 	t.Run("test id binlog row size", func(t *testing.T) {
@@ -664,12 +658,6 @@ func TestSegment_BasicMetrics(t *testing.T) {
 		segment.setType(sType)
 		resType := segment.getType()
 		assert.Equal(t, sType, resType)
-	})
-
-	t.Run("test onService", func(t *testing.T) {
-		segment.setOnService(false)
-		resOnService := segment.getOnService()
-		assert.Equal(t, false, resOnService)
 	})
 
 	t.Run("test IndexedFieldInfo", func(t *testing.T) {
@@ -702,8 +690,7 @@ func TestSegment_fillIndexedFieldsData(t *testing.T) {
 		defaultPartitionID,
 		defaultCollectionID,
 		defaultDMLChannel,
-		segmentTypeSealed,
-		true)
+		segmentTypeSealed)
 	assert.Nil(t, err)
 
 	vecCM, err := genVectorChunkManager(ctx, collection)
@@ -1028,8 +1015,7 @@ func TestUpdateBloomFilter(t *testing.T) {
 			defaultPartitionID,
 			defaultCollectionID,
 			defaultDMLChannel,
-			segmentTypeSealed,
-			true)
+			segmentTypeSealed)
 		assert.NoError(t, err)
 		seg, err := historical.getSegmentByID(defaultSegmentID)
 		assert.Nil(t, err)
@@ -1052,8 +1038,7 @@ func TestUpdateBloomFilter(t *testing.T) {
 			defaultPartitionID,
 			defaultCollectionID,
 			defaultDMLChannel,
-			segmentTypeSealed,
-			true)
+			segmentTypeSealed)
 		assert.NoError(t, err)
 		seg, err := historical.getSegmentByID(defaultSegmentID)
 		assert.Nil(t, err)

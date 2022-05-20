@@ -152,17 +152,17 @@ func initTestMeta(t *testing.T, node *QueryNode, collectionID UniqueID, segmentI
 	pkType := schemapb.DataType_Int64
 	schema := genTestCollectionSchema(pkType)
 
-	node.historical.replica.addCollection(defaultCollectionID, schema)
+	node.historical.addCollection(defaultCollectionID, schema)
 
-	collection, err := node.historical.replica.getCollectionByID(collectionID)
+	collection, err := node.historical.getCollectionByID(collectionID)
 	assert.NoError(t, err)
 	assert.Equal(t, collection.ID(), collectionID)
-	assert.Equal(t, node.historical.replica.getCollectionNum(), 1)
+	assert.Equal(t, node.historical.getCollectionNum(), 1)
 
-	err = node.historical.replica.addPartition(collection.ID(), defaultPartitionID)
+	err = node.historical.addPartition(collection.ID(), defaultPartitionID)
 	assert.NoError(t, err)
 
-	err = node.historical.replica.addSegment(segmentID, defaultPartitionID, collectionID, "", segmentTypeSealed, true)
+	err = node.historical.addSegment(segmentID, defaultPartitionID, collectionID, "", segmentTypeSealed)
 	assert.NoError(t, err)
 }
 
@@ -203,10 +203,10 @@ func newQueryNodeMock() *QueryNode {
 	tsReplica := newTSafeReplica()
 	streamingReplica := newCollectionReplica(etcdKV)
 	historicalReplica := newCollectionReplica(etcdKV)
-	svr.historical = newHistorical(svr.queryNodeLoopCtx, historicalReplica, tsReplica)
-	svr.streaming = newStreaming(ctx, streamingReplica, factory, etcdKV, tsReplica)
-	svr.dataSyncService = newDataSyncService(ctx, svr.streaming.replica, svr.historical.replica, tsReplica, factory)
-	svr.statsService = newStatsService(ctx, svr.historical.replica, factory)
+	svr.historical = streamingReplica
+	svr.streaming = historicalReplica
+	svr.dataSyncService = newDataSyncService(ctx, svr.streaming, svr.historical, tsReplica, factory)
+	svr.statsService = newStatsService(ctx, svr.historical, factory)
 	svr.vectorStorage, err = factory.NewVectorStorageChunkManager(ctx)
 	if err != nil {
 		panic(err)
@@ -215,7 +215,7 @@ func newQueryNodeMock() *QueryNode {
 	if err != nil {
 		panic(err)
 	}
-	svr.loader = newSegmentLoader(svr.historical.replica, svr.streaming.replica, etcdKV, svr.vectorStorage, factory)
+	svr.loader = newSegmentLoader(svr.historical, svr.streaming, etcdKV, svr.vectorStorage, factory)
 	svr.etcdKV = etcdKV
 
 	return svr
@@ -333,11 +333,9 @@ func TestQueryNode_adjustByChangeInfo(t *testing.T) {
 	wg.Add(1)
 	t.Run("test cleanup segments", func(t *testing.T) {
 		defer wg.Done()
-		node, err := genSimpleQueryNodeToTestWatchChangeInfo(ctx)
+		_, err := genSimpleQueryNodeToTestWatchChangeInfo(ctx)
 		assert.NoError(t, err)
 
-		err = node.removeSegments(genSimpleChangeInfo())
-		assert.NoError(t, err)
 	})
 
 	wg.Add(1)
@@ -346,7 +344,7 @@ func TestQueryNode_adjustByChangeInfo(t *testing.T) {
 		node, err := genSimpleQueryNodeToTestWatchChangeInfo(ctx)
 		assert.NoError(t, err)
 
-		err = node.historical.replica.removeSegment(defaultSegmentID)
+		err = node.historical.removeSegment(defaultSegmentID)
 		assert.NoError(t, err)
 
 		segmentChangeInfos := genSimpleChangeInfo()
@@ -358,8 +356,7 @@ func TestQueryNode_adjustByChangeInfo(t *testing.T) {
 			assert.NoError(t, err)
 			qc.globalSegmentManager.removeGlobalSealedSegmentInfo(defaultSegmentID)
 		*/
-		err = node.removeSegments(segmentChangeInfos)
-		assert.Error(t, err)
+
 	})
 	wg.Wait()
 }
@@ -419,7 +416,7 @@ func TestQueryNode_watchChangeInfo(t *testing.T) {
 		node, err := genSimpleQueryNodeToTestWatchChangeInfo(ctx)
 		assert.NoError(t, err)
 
-		err = node.historical.replica.removeSegment(defaultSegmentID)
+		err = node.historical.removeSegment(defaultSegmentID)
 		assert.NoError(t, err)
 
 		segmentChangeInfos := genSimpleChangeInfo()

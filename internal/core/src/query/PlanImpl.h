@@ -20,7 +20,6 @@
 #include "Plan.h"
 #include "PlanNode.h"
 #include "exceptions/EasyAssert.h"
-#include "pb/milvus.pb.h"
 #include "utils/Json.h"
 #include "common/Consts.h"
 

@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/rand"
 	"runtime/debug"
 	"time"
 
@@ -35,8 +34,7 @@ import (
 )
 
 type task interface {
-	ID() UniqueID       // return ReqID
-	SetID(uid UniqueID) // set ReqID
+	ID() UniqueID // return ReqID
 	Timestamp() Timestamp
 	PreExecute(ctx context.Context) error
 	Execute(ctx context.Context) error
@@ -50,6 +48,40 @@ type baseTask struct {
 	done chan error
 	ctx  context.Context
 	id   UniqueID
+	ts   Timestamp
+}
+
+func (b *baseTask) Ctx() context.Context {
+	return b.ctx
+}
+
+func (b *baseTask) OnEnqueue() error {
+	return nil
+}
+
+func (b *baseTask) ID() UniqueID {
+	return b.id
+}
+
+func (b *baseTask) Timestamp() Timestamp {
+	return b.ts
+}
+
+func (b *baseTask) PreExecute(ctx context.Context) error {
+	return nil
+}
+
+func (b *baseTask) PostExecute(ctx context.Context) error {
+	return nil
+}
+
+func (b *baseTask) WaitToFinish() error {
+	err := <-b.done
+	return err
+}
+
+func (b *baseTask) Notify(err error) {
+	b.done <- err
 }
 
 type addQueryChannelTask struct {
@@ -88,45 +120,7 @@ type releasePartitionsTask struct {
 	node *QueryNode
 }
 
-func (b *baseTask) ID() UniqueID {
-	return b.id
-}
-
-func (b *baseTask) SetID(uid UniqueID) {
-	b.id = uid
-}
-
-func (b *baseTask) WaitToFinish() error {
-	err := <-b.done
-	return err
-}
-
-func (b *baseTask) Notify(err error) {
-	b.done <- err
-}
-
-// addQueryChannel
-func (r *addQueryChannelTask) Timestamp() Timestamp {
-	if r.req.Base == nil {
-		log.Warn("nil base req in addQueryChannelTask", zap.Any("collectionID", r.req.CollectionID))
-		return 0
-	}
-	return r.req.Base.Timestamp
-}
-
-func (r *addQueryChannelTask) OnEnqueue() error {
-	if r.req == nil || r.req.Base == nil {
-		r.SetID(rand.Int63n(100000000000))
-	} else {
-		r.SetID(r.req.Base.MsgID)
-	}
-	return nil
-}
-
-func (r *addQueryChannelTask) PreExecute(ctx context.Context) error {
-	return nil
-}
-
+// addQueryChannelTask
 func (r *addQueryChannelTask) Execute(ctx context.Context) error {
 	log.Info("Execute addQueryChannelTask",
 		zap.Any("collectionID", r.req.CollectionID))
@@ -160,32 +154,7 @@ func (r *addQueryChannelTask) Execute(ctx context.Context) error {
 	return nil
 }
 
-func (r *addQueryChannelTask) PostExecute(ctx context.Context) error {
-	return nil
-}
-
 // watchDmChannelsTask
-func (w *watchDmChannelsTask) Timestamp() Timestamp {
-	if w.req.Base == nil {
-		log.Warn("nil base req in watchDmChannelsTask", zap.Any("collectionID", w.req.CollectionID))
-		return 0
-	}
-	return w.req.Base.Timestamp
-}
-
-func (w *watchDmChannelsTask) OnEnqueue() error {
-	if w.req == nil || w.req.Base == nil {
-		w.SetID(rand.Int63n(100000000000))
-	} else {
-		w.SetID(w.req.Base.MsgID)
-	}
-	return nil
-}
-
-func (w *watchDmChannelsTask) PreExecute(ctx context.Context) error {
-	return nil
-}
-
 func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 	collectionID := w.req.CollectionID
 	partitionIDs := w.req.GetPartitionIDs()
@@ -225,8 +194,8 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 	)
 
 	// init collection meta
-	sCol := w.node.streaming.replica.addCollection(collectionID, w.req.Schema)
-	hCol := w.node.historical.replica.addCollection(collectionID, w.req.Schema)
+	sCol := w.node.streaming.addCollection(collectionID, w.req.Schema)
+	hCol := w.node.historical.addCollection(collectionID, w.req.Schema)
 
 	//add shard cluster
 	for _, vchannel := range vChannels {
@@ -274,12 +243,12 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 
 	// update partition info from unFlushedSegments and loadMeta
 	for _, info := range req.Infos {
-		w.node.streaming.replica.addPartition(collectionID, info.PartitionID)
-		w.node.historical.replica.addPartition(collectionID, info.PartitionID)
+		w.node.streaming.addPartition(collectionID, info.PartitionID)
+		w.node.historical.addPartition(collectionID, info.PartitionID)
 	}
 	for _, partitionID := range req.GetLoadMeta().GetPartitionIDs() {
-		w.node.historical.replica.addPartition(collectionID, partitionID)
-		w.node.streaming.replica.addPartition(collectionID, partitionID)
+		w.node.historical.addPartition(collectionID, partitionID)
+		w.node.streaming.addPartition(collectionID, partitionID)
 	}
 
 	log.Info("loading growing segments in WatchDmChannels...",
@@ -299,8 +268,13 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 	// remove growing segment if watch dmChannels failed
 	defer func() {
 		if err != nil {
-			for _, segmentID := range unFlushedSegmentIDs {
-				w.node.streaming.replica.removeSegment(segmentID)
+			collection, err2 := w.node.streaming.getCollectionByID(collectionID)
+			if err2 == nil {
+				collection.Lock()
+				defer collection.Unlock()
+				for _, segmentID := range unFlushedSegmentIDs {
+					w.node.streaming.removeSegment(segmentID)
+				}
 			}
 		}
 	}()
@@ -326,7 +300,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 	for _, info := range w.req.Infos {
 		unFlushedCheckPointInfos = append(unFlushedCheckPointInfos, info.UnflushedSegments...)
 	}
-	w.node.streaming.replica.addExcludedSegments(collectionID, unFlushedCheckPointInfos)
+	w.node.streaming.addExcludedSegments(collectionID, unFlushedCheckPointInfos)
 	unflushedSegmentIDs := make([]UniqueID, 0)
 	for i := 0; i < len(unFlushedCheckPointInfos); i++ {
 		unflushedSegmentIDs = append(unflushedSegmentIDs, unFlushedCheckPointInfos[i].GetID())
@@ -350,7 +324,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 			}
 		}
 	}
-	w.node.streaming.replica.addExcludedSegments(collectionID, flushedCheckPointInfos)
+	w.node.streaming.addExcludedSegments(collectionID, flushedCheckPointInfos)
 	log.Info("watchDMChannel, add check points info for flushed segments done",
 		zap.Int64("collectionID", collectionID),
 		zap.Any("flushedCheckPointInfos", flushedCheckPointInfos),
@@ -370,7 +344,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 			}
 		}
 	}
-	w.node.streaming.replica.addExcludedSegments(collectionID, droppedCheckPointInfos)
+	w.node.streaming.addExcludedSegments(collectionID, droppedCheckPointInfos)
 	log.Info("watchDMChannel, add check points info for dropped segments done",
 		zap.Int64("collectionID", collectionID),
 		zap.Any("droppedCheckPointInfos", droppedCheckPointInfos),
@@ -441,16 +415,6 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 		if !w.node.queryShardService.hasQueryShard(dmlChannel) {
 			w.node.queryShardService.addQueryShard(collectionID, dmlChannel, w.req.GetReplicaID())
 		}
-
-		qs, err := w.node.queryShardService.getQueryShard(dmlChannel)
-		if err != nil {
-			log.Warn("failed to get query shard", zap.String("dmlChannel", dmlChannel), zap.Error(err))
-			continue
-		}
-		err = qs.watchDMLTSafe()
-		if err != nil {
-			log.Warn("failed to start query shard watch dml tsafe", zap.Error(err))
-		}
 	}
 
 	// start flow graphs
@@ -462,32 +426,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 	return nil
 }
 
-func (w *watchDmChannelsTask) PostExecute(ctx context.Context) error {
-	return nil
-}
-
 // watchDeltaChannelsTask
-func (w *watchDeltaChannelsTask) Timestamp() Timestamp {
-	if w.req.Base == nil {
-		log.Warn("nil base req in watchDeltaChannelsTask", zap.Any("collectionID", w.req.CollectionID))
-		return 0
-	}
-	return w.req.Base.Timestamp
-}
-
-func (w *watchDeltaChannelsTask) OnEnqueue() error {
-	if w.req == nil || w.req.Base == nil {
-		w.SetID(rand.Int63n(100000000000))
-	} else {
-		w.SetID(w.req.Base.MsgID)
-	}
-	return nil
-}
-
-func (w *watchDeltaChannelsTask) PreExecute(ctx context.Context) error {
-	return nil
-}
-
 func (w *watchDeltaChannelsTask) Execute(ctx context.Context) error {
 	collectionID := w.req.CollectionID
 
@@ -516,18 +455,18 @@ func (w *watchDeltaChannelsTask) Execute(ctx context.Context) error {
 		zap.Any("collectionID", collectionID),
 	)
 
-	if hasCollectionInHistorical := w.node.historical.replica.hasCollection(collectionID); !hasCollectionInHistorical {
+	if hasCollectionInHistorical := w.node.historical.hasCollection(collectionID); !hasCollectionInHistorical {
 		return fmt.Errorf("cannot find collection with collectionID, %d", collectionID)
 	}
-	hCol, err := w.node.historical.replica.getCollectionByID(collectionID)
+	hCol, err := w.node.historical.getCollectionByID(collectionID)
 	if err != nil {
 		return err
 	}
 
-	if hasCollectionInStreaming := w.node.streaming.replica.hasCollection(collectionID); !hasCollectionInStreaming {
+	if hasCollectionInStreaming := w.node.streaming.hasCollection(collectionID); !hasCollectionInStreaming {
 		return fmt.Errorf("cannot find collection with collectionID, %d", collectionID)
 	}
-	sCol, err := w.node.streaming.replica.getCollectionByID(collectionID)
+	sCol, err := w.node.streaming.getCollectionByID(collectionID)
 	if err != nil {
 		return err
 	}
@@ -589,16 +528,6 @@ func (w *watchDeltaChannelsTask) Execute(ctx context.Context) error {
 		if !w.node.queryShardService.hasQueryShard(dmlChannel) {
 			w.node.queryShardService.addQueryShard(collectionID, dmlChannel, w.req.GetReplicaId())
 		}
-
-		qs, err := w.node.queryShardService.getQueryShard(dmlChannel)
-		if err != nil {
-			log.Warn("failed to get query shard", zap.String("dmlChannel", dmlChannel), zap.Error(err))
-			continue
-		}
-		err = qs.watchDeltaTSafe()
-		if err != nil {
-			log.Warn("failed to start query shard watch delta tsafe", zap.Error(err))
-		}
 	}
 
 	// start flow graphs
@@ -610,41 +539,21 @@ func (w *watchDeltaChannelsTask) Execute(ctx context.Context) error {
 	return nil
 }
 
-func (w *watchDeltaChannelsTask) PostExecute(ctx context.Context) error {
-	return nil
-}
-
 // loadSegmentsTask
-func (l *loadSegmentsTask) Timestamp() Timestamp {
-	if l.req.Base == nil {
-		log.Warn("nil base req in loadSegmentsTask")
-		return 0
-	}
-	return l.req.Base.Timestamp
-}
-
-func (l *loadSegmentsTask) OnEnqueue() error {
-	if l.req == nil || l.req.Base == nil {
-		l.SetID(rand.Int63n(100000000000))
-	} else {
-		l.SetID(l.req.Base.MsgID)
-	}
-	return nil
-}
 
 func (l *loadSegmentsTask) PreExecute(ctx context.Context) error {
 	log.Info("LoadSegmentTask PreExecute start", zap.Int64("msgID", l.req.Base.MsgID))
 	var err error
 	// init meta
 	collectionID := l.req.GetCollectionID()
-	l.node.historical.replica.addCollection(collectionID, l.req.GetSchema())
-	l.node.streaming.replica.addCollection(collectionID, l.req.GetSchema())
+	l.node.historical.addCollection(collectionID, l.req.GetSchema())
+	l.node.streaming.addCollection(collectionID, l.req.GetSchema())
 	for _, partitionID := range l.req.GetLoadMeta().GetPartitionIDs() {
-		err = l.node.historical.replica.addPartition(collectionID, partitionID)
+		err = l.node.historical.addPartition(collectionID, partitionID)
 		if err != nil {
 			return err
 		}
-		err = l.node.streaming.replica.addPartition(collectionID, partitionID)
+		err = l.node.streaming.addPartition(collectionID, partitionID)
 		if err != nil {
 			return err
 		}
@@ -653,7 +562,7 @@ func (l *loadSegmentsTask) PreExecute(ctx context.Context) error {
 	// filter segments that are already loaded in this querynode
 	var filteredInfos []*queryPb.SegmentLoadInfo
 	for _, info := range l.req.Infos {
-		if !l.node.historical.replica.hasSegment(info.SegmentID) {
+		if !l.node.historical.hasSegment(info.SegmentID) {
 			filteredInfos = append(filteredInfos, info)
 		} else {
 			log.Debug("ignore segment that is already loaded", zap.Int64("segmentID", info.SegmentID))
@@ -676,32 +585,6 @@ func (l *loadSegmentsTask) Execute(ctx context.Context) error {
 	return nil
 }
 
-func (l *loadSegmentsTask) PostExecute(ctx context.Context) error {
-	return nil
-}
-
-// releaseCollectionTask
-func (r *releaseCollectionTask) Timestamp() Timestamp {
-	if r.req.Base == nil {
-		log.Warn("nil base req in releaseCollectionTask", zap.Any("collectionID", r.req.CollectionID))
-		return 0
-	}
-	return r.req.Base.Timestamp
-}
-
-func (r *releaseCollectionTask) OnEnqueue() error {
-	if r.req == nil || r.req.Base == nil {
-		r.SetID(rand.Int63n(100000000000))
-	} else {
-		r.SetID(r.req.Base.MsgID)
-	}
-	return nil
-}
-
-func (r *releaseCollectionTask) PreExecute(ctx context.Context) error {
-	return nil
-}
-
 type ReplicaType int
 
 const (
@@ -719,14 +602,14 @@ func (r *releaseCollectionTask) Execute(ctx context.Context) error {
 		zap.Any("collectionID", r.req.CollectionID),
 	)
 
-	err := r.releaseReplica(r.node.streaming.replica, replicaStreaming)
+	err := r.releaseReplica(r.node.streaming, replicaStreaming)
 	if err != nil {
 		return fmt.Errorf("release collection failed, collectionID = %d, err = %s", r.req.CollectionID, err)
 	}
 
 	// remove collection metas in streaming and historical
 	log.Info("release historical", zap.Any("collectionID", r.req.CollectionID))
-	err = r.releaseReplica(r.node.historical.replica, replicaHistorical)
+	err = r.releaseReplica(r.node.historical, replicaHistorical)
 	if err != nil {
 		return fmt.Errorf("release collection failed, collectionID = %d, err = %s", r.req.CollectionID, err)
 	}
@@ -777,32 +660,7 @@ func (r *releaseCollectionTask) releaseReplica(replica ReplicaInterface, replica
 	return nil
 }
 
-func (r *releaseCollectionTask) PostExecute(ctx context.Context) error {
-	return nil
-}
-
 // releasePartitionsTask
-func (r *releasePartitionsTask) Timestamp() Timestamp {
-	if r.req.Base == nil {
-		log.Warn("nil base req in releasePartitionsTask", zap.Any("collectionID", r.req.CollectionID))
-		return 0
-	}
-	return r.req.Base.Timestamp
-}
-
-func (r *releasePartitionsTask) OnEnqueue() error {
-	if r.req == nil || r.req.Base == nil {
-		r.SetID(rand.Int63n(100000000000))
-	} else {
-		r.SetID(r.req.Base.MsgID)
-	}
-	return nil
-}
-
-func (r *releasePartitionsTask) PreExecute(ctx context.Context) error {
-	return nil
-}
-
 func (r *releasePartitionsTask) Execute(ctx context.Context) error {
 	log.Info("Execute release partition task",
 		zap.Any("collectionID", r.req.CollectionID),
@@ -813,11 +671,11 @@ func (r *releasePartitionsTask) Execute(ctx context.Context) error {
 	time.Sleep(gracefulReleaseTime * time.Second)
 
 	// get collection from streaming and historical
-	_, err := r.node.historical.replica.getCollectionByID(r.req.CollectionID)
+	_, err := r.node.historical.getCollectionByID(r.req.CollectionID)
 	if err != nil {
 		return fmt.Errorf("release partitions failed, collectionID = %d, err = %s", r.req.CollectionID, err)
 	}
-	_, err = r.node.streaming.replica.getCollectionByID(r.req.CollectionID)
+	_, err = r.node.streaming.getCollectionByID(r.req.CollectionID)
 	if err != nil {
 		return fmt.Errorf("release partitions failed, collectionID = %d, err = %s", r.req.CollectionID, err)
 	}
@@ -825,17 +683,17 @@ func (r *releasePartitionsTask) Execute(ctx context.Context) error {
 
 	for _, id := range r.req.PartitionIDs {
 		// remove partition from streaming and historical
-		hasPartitionInHistorical := r.node.historical.replica.hasPartition(id)
+		hasPartitionInHistorical := r.node.historical.hasPartition(id)
 		if hasPartitionInHistorical {
-			err := r.node.historical.replica.removePartition(id)
+			err := r.node.historical.removePartition(id)
 			if err != nil {
 				// not return, try to release all partitions
 				log.Warn(err.Error())
 			}
 		}
-		hasPartitionInStreaming := r.node.streaming.replica.hasPartition(id)
+		hasPartitionInStreaming := r.node.streaming.hasPartition(id)
 		if hasPartitionInStreaming {
-			err := r.node.streaming.replica.removePartition(id)
+			err := r.node.streaming.removePartition(id)
 			if err != nil {
 				// not return, try to release all partitions
 				log.Warn(err.Error())
@@ -846,9 +704,5 @@ func (r *releasePartitionsTask) Execute(ctx context.Context) error {
 	log.Info("Release partition task done",
 		zap.Any("collectionID", r.req.CollectionID),
 		zap.Any("partitionIDs", r.req.PartitionIDs))
-	return nil
-}
-
-func (r *releasePartitionsTask) PostExecute(ctx context.Context) error {
 	return nil
 }

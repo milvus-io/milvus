@@ -26,14 +26,9 @@ func TestTSafeReplica(t *testing.T) {
 	t.Run("test valid", func(t *testing.T) {
 		replica := newTSafeReplica()
 		replica.addTSafe(defaultDMLChannel)
-		watcher := newTSafeWatcher()
-		assert.NotNil(t, watcher)
-
-		err := replica.registerTSafeWatcher(defaultDMLChannel, watcher)
-		assert.NoError(t, err)
 
 		timestamp := Timestamp(1000)
-		err = replica.setTSafe(defaultDMLChannel, timestamp)
+		err := replica.setTSafe(defaultDMLChannel, timestamp)
 		assert.NoError(t, err)
 
 		resT, err := replica.getTSafe(defaultDMLChannel)
@@ -48,10 +43,7 @@ func TestTSafeReplica(t *testing.T) {
 	t.Run("test invalid", func(t *testing.T) {
 		replica := newTSafeReplica()
 
-		err := replica.registerTSafeWatcher(defaultDMLChannel, nil)
-		assert.Error(t, err)
-
-		_, err = replica.getTSafe(defaultDMLChannel)
+		_, err := replica.getTSafe(defaultDMLChannel)
 		assert.Error(t, err)
 
 		err = replica.setTSafe(defaultDMLChannel, Timestamp(1000))

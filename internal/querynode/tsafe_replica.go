@@ -23,6 +23,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 // TSafeReplicaInterface is the interface wrapper of tSafeReplica
@@ -31,13 +32,56 @@ type TSafeReplicaInterface interface {
 	setTSafe(vChannel Channel, timestamp Timestamp) error
 	addTSafe(vChannel Channel)
 	removeTSafe(vChannel Channel)
-	registerTSafeWatcher(vChannel Channel, watcher *tSafeWatcher) error
+	Watch() <-chan struct{}
+}
+
+type tSafe struct {
+	channel Channel
+	mu      sync.RWMutex // guards all fields
+	tSafe   Timestamp
+	closed  bool
+}
+
+func (ts *tSafe) valid() bool {
+	ts.mu.RLock()
+	defer ts.mu.RUnlock()
+	return !ts.closed
+}
+
+func (ts *tSafe) close() {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	ts.closed = true
+}
+
+func (ts *tSafe) get() Timestamp {
+	ts.mu.RLock()
+	defer ts.mu.RUnlock()
+	return ts.tSafe
+}
+
+func (ts *tSafe) set(t Timestamp) {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	ts.tSafe = t
+}
+
+func newTSafe(channel Channel) *tSafe {
+	return &tSafe{
+		channel: channel,
+		tSafe:   typeutil.ZeroTimestamp,
+	}
 }
 
 // tSafeReplica implements `TSafeReplicaInterface` interface.
 type tSafeReplica struct {
-	mu     sync.Mutex         // guards tSafes
-	tSafes map[Channel]*tSafe // map[DMLChannel|deltaChannel]*tSafe
+	mu         sync.Mutex         // guards tSafes
+	tSafes     map[Channel]*tSafe // map[DMLChannel|deltaChannel]*tSafe
+	notifyChan chan struct{}
+}
+
+func (t *tSafeReplica) Watch() <-chan struct{} {
+	return t.notifyChan
 }
 
 func (t *tSafeReplica) getTSafe(vChannel Channel) (Timestamp, error) {
@@ -45,10 +89,6 @@ func (t *tSafeReplica) getTSafe(vChannel Channel) (Timestamp, error) {
 	defer t.mu.Unlock()
 	ts, err := t.getTSafePrivate(vChannel)
 	if err != nil {
-		//log.Warn("get tSafe failed",
-		//	zap.Any("channel", vChannel),
-		//	zap.Error(err),
-		//)
 		return 0, err
 	}
 	return ts.get(), nil
@@ -62,6 +102,11 @@ func (t *tSafeReplica) setTSafe(vChannel Channel, timestamp Timestamp) error {
 		return fmt.Errorf("set tSafe failed, err = %w", err)
 	}
 	ts.set(timestamp)
+	select {
+	case t.notifyChan <- struct{}{}:
+	default:
+
+	}
 	return nil
 }
 
@@ -73,27 +118,20 @@ func (t *tSafeReplica) getTSafePrivate(vChannel Channel) (*tSafe, error) {
 }
 
 func (t *tSafeReplica) addTSafe(vChannel Channel) {
+	log.Info("add tSafe done",
+		zap.String("channel", vChannel))
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if _, ok := t.tSafes[vChannel]; !ok {
 		t.tSafes[vChannel] = newTSafe(vChannel)
-		log.Info("add tSafe done",
-			zap.String("channel", vChannel),
-		)
-	} else {
-		log.Info("tSafe has been existed",
-			zap.String("channel", vChannel),
-		)
 	}
 }
 
 func (t *tSafeReplica) removeTSafe(vChannel Channel) {
+	log.Info("remove tSafe replica",
+		zap.String("vChannel", vChannel))
 	t.mu.Lock()
 	defer t.mu.Unlock()
-
-	log.Info("remove tSafe replica",
-		zap.String("vChannel", vChannel),
-	)
 	tsafe, ok := t.tSafes[vChannel]
 	if ok {
 		tsafe.close()
@@ -101,19 +139,10 @@ func (t *tSafeReplica) removeTSafe(vChannel Channel) {
 	delete(t.tSafes, vChannel)
 }
 
-func (t *tSafeReplica) registerTSafeWatcher(vChannel Channel, watcher *tSafeWatcher) error {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	ts, err := t.getTSafePrivate(vChannel)
-	if err != nil {
-		return err
-	}
-	return ts.registerTSafeWatcher(watcher)
-}
-
 func newTSafeReplica() TSafeReplicaInterface {
 	var replica TSafeReplicaInterface = &tSafeReplica{
-		tSafes: make(map[string]*tSafe),
+		tSafes:     make(map[string]*tSafe),
+		notifyChan: make(chan struct{}, 1),
 	}
 	return replica
 }

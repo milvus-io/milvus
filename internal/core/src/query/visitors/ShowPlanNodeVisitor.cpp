@@ -49,7 +49,7 @@ get_indent(int indent) {
 
 void
 ShowPlanNodeVisitor::visit(FloatVectorANNS& node) {
-    // std::vector<float> data(node.data_.get(), node.data_.get() + node.num_queries_  * node.dim_);
+    // std::vector<float> data(node.data_.get(), node.data_.get() + node.total_nq_  * node.dim_);
     assert(!ret_);
     auto& info = node.search_info_;
     Json json_body{

@@ -345,8 +345,8 @@ SegmentSealedImpl::vector_search(int64_t vec_count,
     SearchResult results;
     results.distances_ = std::move(sub_qr.mutable_distances());
     results.seg_offsets_ = std::move(sub_qr.mutable_seg_offsets());
-    results.topk_ = dataset.topk;
-    results.num_queries_ = dataset.num_queries;
+    results.unity_topK_ = dataset.topk;
+    results.total_nq_ = dataset.num_queries;
 
     output = std::move(results);
 }

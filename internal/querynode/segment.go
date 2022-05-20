@@ -83,8 +83,6 @@ type Segment struct {
 	partitionID  UniqueID
 	collectionID UniqueID
 
-	onService bool
-
 	vChannelID   Channel
 	lastMemSize  int64
 	lastRowCount int64
@@ -140,14 +138,6 @@ func (s *Segment) getType() segmentType {
 	return s.segmentType
 }
 
-func (s *Segment) getOnService() bool {
-	return s.onService
-}
-
-func (s *Segment) setOnService(onService bool) {
-	s.onService = onService
-}
-
 func (s *Segment) setIndexedFieldInfo(fieldID UniqueID, info *IndexedFieldInfo) {
 	s.indexedFieldMutex.Lock()
 	defer s.indexedFieldMutex.Unlock()
@@ -177,7 +167,7 @@ func (s *Segment) hasLoadIndexForIndexedField(fieldID int64) bool {
 	return false
 }
 
-func newSegment(collection *Collection, segmentID UniqueID, partitionID UniqueID, collectionID UniqueID, vChannelID Channel, segType segmentType, onService bool) (*Segment, error) {
+func newSegment(collection *Collection, segmentID UniqueID, partitionID UniqueID, collectionID UniqueID, vChannelID Channel, segType segmentType) (*Segment, error) {
 	/*
 		CSegmentInterface
 		NewSegment(CCollection collection, uint64_t segment_id, SegmentType seg_type);
@@ -212,7 +202,6 @@ func newSegment(collection *Collection, segmentID UniqueID, partitionID UniqueID
 		partitionID:       partitionID,
 		collectionID:      collectionID,
 		vChannelID:        vChannelID,
-		onService:         onService,
 		indexedFieldInfos: make(map[UniqueID]*IndexedFieldInfo),
 
 		pkFilter: bloom.NewWithEstimates(bloomFilterSize, maxBloomFalsePositive),
@@ -284,9 +273,7 @@ func (s *Segment) getMemSize() int64 {
 	return int64(memoryUsageInBytes)
 }
 
-func (s *Segment) search(plan *SearchPlan,
-	searchRequests []*searchRequest,
-	timestamp []Timestamp) (*SearchResult, error) {
+func (s *Segment) search(searchReq *searchRequest) (*SearchResult, error) {
 	/*
 		CStatus
 		Search(void* plan,
@@ -301,23 +288,20 @@ func (s *Segment) search(plan *SearchPlan,
 	if s.segmentPtr == nil {
 		return nil, errors.New("null seg core pointer")
 	}
-	cPlaceholderGroups := make([]C.CPlaceholderGroup, 0)
-	for _, pg := range searchRequests {
-		cPlaceholderGroups = append(cPlaceholderGroups, (*pg).cPlaceholderGroup)
+
+	if searchReq.plan == nil {
+		return nil, fmt.Errorf("nil search plan")
 	}
 
 	var searchResult SearchResult
-	ts := C.uint64_t(timestamp[0])
-	cPlaceHolderGroup := cPlaceholderGroups[0]
-
 	log.Debug("do search on segment", zap.Int64("segmentID", s.segmentID), zap.Int32("segmentType", int32(s.segmentType)))
 	tr := timerecord.NewTimeRecorder("cgoSearch")
-	status := C.Search(s.segmentPtr, plan.cSearchPlan, cPlaceHolderGroup, ts, &searchResult.cSearchResult, C.int64_t(s.segmentID))
+	status := C.Search(s.segmentPtr, searchReq.plan.cSearchPlan, searchReq.cPlaceholderGroup,
+		C.uint64_t(searchReq.timestamp), &searchResult.cSearchResult, C.int64_t(s.segmentID))
 	metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.SearchLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	if err := HandleCStatus(&status, "Search failed"); err != nil {
 		return nil, err
 	}
-
 	return &searchResult, nil
 }
 

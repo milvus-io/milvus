@@ -90,7 +90,7 @@ type ReplicaInterface interface {
 
 	// segment
 	// addSegment add a new segment to collectionReplica
-	addSegment(segmentID UniqueID, partitionID UniqueID, collectionID UniqueID, vChannelID Channel, segType segmentType, onService bool) error
+	addSegment(segmentID UniqueID, partitionID UniqueID, collectionID UniqueID, vChannelID Channel, segType segmentType) error
 	// setSegment adds a segment to collectionReplica
 	setSegment(segment *Segment) error
 	// removeSegment removes a segment from collectionReplica
@@ -112,16 +112,6 @@ type ReplicaInterface interface {
 	// getExcludedSegments returns excludedSegments of collectionReplica
 	getExcludedSegments(collectionID UniqueID) ([]*datapb.SegmentInfo, error)
 
-	// query mu
-	// queryLock guards query and delete operations
-	queryLock()
-	// queryUnlock guards query and delete segment operations
-	queryUnlock()
-	// queryRLock guards query and delete segment operations
-	queryRLock()
-	// queryRUnlock guards query and delete segment operations
-	queryRUnlock()
-
 	// getSegmentsMemSize get the memory size in bytes of all the Segments
 	getSegmentsMemSize() int64
 	// freeAll will free all meta info from collectionReplica
@@ -138,30 +128,9 @@ type metaReplica struct {
 	partitions  map[UniqueID]*Partition
 	segments    map[UniqueID]*Segment
 
-	queryMu          sync.RWMutex
 	excludedSegments map[UniqueID][]*datapb.SegmentInfo // map[collectionID]segmentIDs
 
 	etcdKV *etcdkv.EtcdKV
-}
-
-// queryLock guards query and delete operations
-func (replica *metaReplica) queryLock() {
-	replica.queryMu.Lock()
-}
-
-// queryUnlock guards query and delete segment operations
-func (replica *metaReplica) queryUnlock() {
-	replica.queryMu.Unlock()
-}
-
-// queryRLock guards query and delete segment operations
-func (replica *metaReplica) queryRLock() {
-	replica.queryMu.RLock()
-}
-
-// queryRUnlock guards query and delete segment operations
-func (replica *metaReplica) queryRUnlock() {
-	replica.queryMu.RUnlock()
 }
 
 // getSegmentsMemSize get the memory size in bytes of all the Segments
@@ -208,10 +177,10 @@ func (replica *metaReplica) addCollection(collectionID UniqueID, schema *schemap
 		return col
 	}
 
-	var newCollection = newCollection(collectionID, schema)
-	replica.collections[collectionID] = newCollection
+	var newC = newCollection(collectionID, schema)
+	replica.collections[collectionID] = newC
 	metrics.QueryNodeNumCollections.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(len(replica.collections)))
-	return newCollection
+	return newC
 }
 
 // removeCollection removes the collection from collectionReplica
@@ -536,14 +505,14 @@ func (replica *metaReplica) getSegmentIDsPrivate(partitionID UniqueID) ([]Unique
 
 //----------------------------------------------------------------------------------------------------- segment
 // addSegment add a new segment to collectionReplica
-func (replica *metaReplica) addSegment(segmentID UniqueID, partitionID UniqueID, collectionID UniqueID, vChannelID Channel, segType segmentType, onService bool) error {
+func (replica *metaReplica) addSegment(segmentID UniqueID, partitionID UniqueID, collectionID UniqueID, vChannelID Channel, segType segmentType) error {
 	replica.mu.Lock()
 	defer replica.mu.Unlock()
 	collection, err := replica.getCollectionByIDPrivate(collectionID)
 	if err != nil {
 		return err
 	}
-	seg, err := newSegment(collection, segmentID, partitionID, collectionID, vChannelID, segType, onService)
+	seg, err := newSegment(collection, segmentID, partitionID, collectionID, vChannelID, segType)
 	if err != nil {
 		return err
 	}

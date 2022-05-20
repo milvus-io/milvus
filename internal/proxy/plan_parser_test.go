@@ -74,7 +74,7 @@ func assertValidExprV2(t *testing.T, schema *typeutil.SchemaHelper, exprStr stri
 	expr2, err := planparserv2.ParseExpr(schema, exprStr)
 	assert.Nil(t, err)
 
-	if !planparserv2.CheckIdentical(expr1, expr2) {
+	if !planparserv2.CheckPredicatesIdentical(expr1, expr2) {
 		fmt.Println("expr: ", exprStr)
 
 		fmt.Println("AST1:")
@@ -115,7 +115,7 @@ func assertValidSearchPlanV2(t *testing.T, schema *schemapb.CollectionSchema, ex
 	expr2 := planProto2.GetVectorAnns().GetPredicates()
 	assert.NotNil(t, expr2)
 
-	if !planparserv2.CheckIdentical(expr1, expr2) {
+	if !planparserv2.CheckPredicatesIdentical(expr1, expr2) {
 		fmt.Println("expr: ", exprStr)
 
 		fmt.Println("AST1:")
@@ -637,6 +637,6 @@ func Test_CheckIdentical(t *testing.T) {
 		assert.NoError(t, err)
 		expr2, err := planparserv2.ParseExpr(helper, input)
 		assert.NoError(t, err)
-		assert.True(t, planparserv2.CheckIdentical(expr1, expr2))
+		assert.True(t, planparserv2.CheckPredicatesIdentical(expr1, expr2))
 	}
 }

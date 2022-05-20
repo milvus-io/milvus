@@ -38,8 +38,7 @@ func TestFlowGraphDeleteNode_delete(t *testing.T) {
 			defaultPartitionID,
 			defaultCollectionID,
 			defaultDMLChannel,
-			segmentTypeSealed,
-			true)
+			segmentTypeSealed)
 		assert.NoError(t, err)
 
 		deleteData, err := genFlowGraphDeleteData()
@@ -59,8 +58,7 @@ func TestFlowGraphDeleteNode_delete(t *testing.T) {
 			defaultPartitionID,
 			defaultCollectionID,
 			defaultDMLChannel,
-			segmentTypeSealed,
-			true)
+			segmentTypeSealed)
 		assert.NoError(t, err)
 
 		deleteData, err := genFlowGraphDeleteData()
@@ -90,8 +88,7 @@ func TestFlowGraphDeleteNode_delete(t *testing.T) {
 			defaultPartitionID,
 			defaultCollectionID,
 			defaultDMLChannel,
-			segmentTypeGrowing,
-			true)
+			segmentTypeGrowing)
 		assert.NoError(t, err)
 
 		wg := &sync.WaitGroup{}
@@ -110,8 +107,7 @@ func TestFlowGraphDeleteNode_operate(t *testing.T) {
 			defaultPartitionID,
 			defaultCollectionID,
 			defaultDMLChannel,
-			segmentTypeSealed,
-			true)
+			segmentTypeSealed)
 		assert.NoError(t, err)
 
 		msgDeleteMsg := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
@@ -145,8 +141,7 @@ func TestFlowGraphDeleteNode_operate(t *testing.T) {
 			defaultPartitionID,
 			defaultCollectionID,
 			defaultDMLChannel,
-			segmentTypeSealed,
-			true)
+			segmentTypeSealed)
 		assert.NoError(t, err)
 
 		msgDeleteMsg := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
@@ -170,8 +165,7 @@ func TestFlowGraphDeleteNode_operate(t *testing.T) {
 			defaultPartitionID,
 			defaultCollectionID,
 			defaultDMLChannel,
-			segmentTypeSealed,
-			true)
+			segmentTypeSealed)
 		assert.NoError(t, err)
 
 		msgDeleteMsg := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
@@ -196,8 +190,7 @@ func TestFlowGraphDeleteNode_operate(t *testing.T) {
 			defaultPartitionID,
 			defaultCollectionID,
 			defaultDMLChannel,
-			segmentTypeSealed,
-			true)
+			segmentTypeSealed)
 		assert.NoError(t, err)
 
 		msgDeleteMsg := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
@@ -221,8 +214,7 @@ func TestFlowGraphDeleteNode_operate(t *testing.T) {
 			defaultPartitionID,
 			defaultCollectionID,
 			defaultDMLChannel,
-			segmentTypeSealed,
-			true)
+			segmentTypeSealed)
 		assert.NoError(t, err)
 
 		msgDeleteMsg := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)

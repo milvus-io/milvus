@@ -265,7 +265,7 @@ func constructCollectionSchemaWithAllType(
 
 func constructPlaceholderGroup(
 	nq, dim int,
-) *milvuspb.PlaceholderGroup {
+) *commonpb.PlaceholderGroup {
 	values := make([][]byte, 0, nq)
 	for i := 0; i < nq; i++ {
 		bs := make([]byte, 0, dim*4)
@@ -281,11 +281,11 @@ func constructPlaceholderGroup(
 		values = append(values, bs)
 	}
 
-	return &milvuspb.PlaceholderGroup{
-		Placeholders: []*milvuspb.PlaceholderValue{
+	return &commonpb.PlaceholderGroup{
+		Placeholders: []*commonpb.PlaceholderValue{
 			{
 				Tag:    "$0",
-				Type:   milvuspb.PlaceholderType_FloatVector,
+				Type:   commonpb.PlaceholderType_FloatVector,
 				Values: values,
 			},
 		},

@@ -69,8 +69,8 @@ SearchOnSealed(const Schema& schema,
     }
     result.seg_offsets_.resize(total_num);
     result.distances_.resize(total_num);
-    result.num_queries_ = num_queries;
-    result.topk_ = topk;
+    result.total_nq_ = num_queries;
+    result.unity_topK_ = topk;
 
     std::copy_n(ids, total_num, result.seg_offsets_.data());
     std::copy_n(distances, total_num, result.distances_.data());

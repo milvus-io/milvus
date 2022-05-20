@@ -126,7 +126,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 		// check if segment exists, if not, create this segment
 		if !iNode.streamingReplica.hasSegment(insertMsg.SegmentID) {
-			err := iNode.streamingReplica.addSegment(insertMsg.SegmentID, insertMsg.PartitionID, insertMsg.CollectionID, insertMsg.ShardName, segmentTypeGrowing, true)
+			err := iNode.streamingReplica.addSegment(insertMsg.SegmentID, insertMsg.PartitionID, insertMsg.CollectionID, insertMsg.ShardName, segmentTypeGrowing)
 			if err != nil {
 				log.Warn("failed to add segment", zap.Error(err))
 				continue

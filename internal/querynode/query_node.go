@@ -90,8 +90,8 @@ type QueryNode struct {
 	initOnce sync.Once
 
 	// internal components
-	historical *historical
-	streaming  *streaming
+	historical ReplicaInterface
+	streaming  ReplicaInterface
 
 	// tSafeReplica
 	tSafeReplica TSafeReplicaInterface
@@ -135,7 +135,8 @@ func NewQueryNode(ctx context.Context, factory dependency.Factory) *QueryNode {
 		factory:             factory,
 	}
 
-	node.scheduler = newTaskScheduler(ctx1)
+	node.tSafeReplica = newTSafeReplica()
+	node.scheduler = newTaskScheduler(ctx1, node.tSafeReplica)
 	node.UpdateStateCode(internalpb.StateCode_Abnormal)
 
 	return node
@@ -302,46 +303,23 @@ func (node *QueryNode) Init() error {
 
 		node.etcdKV = etcdkv.NewEtcdKV(node.etcdCli, Params.EtcdCfg.MetaRootPath)
 		log.Info("queryNode try to connect etcd success", zap.Any("MetaRootPath", Params.EtcdCfg.MetaRootPath))
-		node.tSafeReplica = newTSafeReplica()
 
-		streamingReplica := newCollectionReplica(node.etcdKV)
-		historicalReplica := newCollectionReplica(node.etcdKV)
-
-		node.historical = newHistorical(node.queryNodeLoopCtx,
-			historicalReplica,
-			node.tSafeReplica,
-		)
-		node.streaming = newStreaming(node.queryNodeLoopCtx,
-			streamingReplica,
-			node.factory,
-			node.etcdKV,
-			node.tSafeReplica,
-		)
+		node.streaming = newCollectionReplica(node.etcdKV)
+		node.historical = newCollectionReplica(node.etcdKV)
 
 		node.loader = newSegmentLoader(
-			node.historical.replica,
-			node.streaming.replica,
+			node.historical,
+			node.streaming,
 			node.etcdKV,
 			node.vectorStorage,
 			node.factory)
 
-		// node.statsService = newStatsService(node.queryNodeLoopCtx, node.historical.replica, node.factory)
-		node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, streamingReplica, historicalReplica, node.tSafeReplica, node.factory)
+		node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, node.streaming, node.historical, node.tSafeReplica, node.factory)
 
 		node.InitSegcore()
 
 		// TODO: add session creator to node
 		node.sessionManager = NewSessionManager(withSessionCreator(defaultSessionCreator()))
-
-		// init services and manager
-		// TODO: pass node.streaming.replica to search service
-		// node.queryService = newQueryService(node.queryNodeLoopCtx,
-		// 	node.historical,
-		// 	node.streaming,
-		// 	node.vectorStorage,
-		// 	node.cacheStorage,
-		// 	node.factory,
-		// 	qsOptWithSessionManager(node.sessionManager))
 
 		log.Info("query node init successfully",
 			zap.Any("queryNodeID", Params.QueryNodeCfg.GetNodeID()),
@@ -373,7 +351,8 @@ func (node *QueryNode) Start() error {
 	// create shardClusterService for shardLeader functions.
 	node.ShardClusterService = newShardClusterService(node.etcdCli, node.session, node)
 	// create shard-level query service
-	node.queryShardService = newQueryShardService(node.queryNodeLoopCtx, node.historical, node.streaming, node.ShardClusterService, node.factory)
+	node.queryShardService = newQueryShardService(node.queryNodeLoopCtx, node.historical, node.streaming, node.tSafeReplica,
+		node.ShardClusterService, node.factory, node.scheduler)
 
 	Params.QueryNodeCfg.CreatedTime = time.Now()
 	Params.QueryNodeCfg.UpdatedTime = time.Now()
@@ -400,10 +379,10 @@ func (node *QueryNode) Stop() error {
 
 	// release streaming first for query/search holds query lock in streaming collection
 	if node.streaming != nil {
-		node.streaming.close()
+		node.streaming.freeAll()
 	}
 	if node.historical != nil {
-		node.historical.close()
+		node.historical.freeAll()
 	}
 
 	if node.queryShardService != nil {
@@ -497,47 +476,4 @@ func validateChangeChannel(info *querypb.SegmentChangeInfo) (string, error) {
 	}
 
 	return channelName, nil
-}
-
-// remove the segments since it's already compacted or balanced to other QueryNodes
-func (node *QueryNode) removeSegments(segmentChangeInfos *querypb.SealedSegmentsChangeInfo) error {
-
-	node.streaming.replica.queryLock()
-	node.historical.replica.queryLock()
-	defer node.streaming.replica.queryUnlock()
-	defer node.historical.replica.queryUnlock()
-	for _, info := range segmentChangeInfos.Infos {
-		// For online segments:
-		for _, segmentInfo := range info.OnlineSegments {
-			// delete growing segment because these segments are loaded in historical.
-			hasGrowingSegment := node.streaming.replica.hasSegment(segmentInfo.SegmentID)
-			if hasGrowingSegment {
-				err := node.streaming.replica.removeSegment(segmentInfo.SegmentID)
-				if err != nil {
-					return err
-				}
-				log.Info("remove growing segment in removeSegments",
-					zap.Any("collectionID", segmentInfo.CollectionID),
-					zap.Any("segmentID", segmentInfo.SegmentID),
-					zap.Any("infoID", segmentChangeInfos.Base.GetMsgID()),
-				)
-			}
-		}
-
-		// For offline segments:
-		for _, segmentInfo := range info.OfflineSegments {
-			// load balance or compaction, remove old sealed segments.
-			if info.OfflineNodeID == Params.QueryNodeCfg.GetNodeID() {
-				err := node.historical.replica.removeSegment(segmentInfo.SegmentID)
-				if err != nil {
-					return err
-				}
-				log.Info("remove sealed segment", zap.Any("collectionID", segmentInfo.CollectionID),
-					zap.Any("segmentID", segmentInfo.SegmentID),
-					zap.Any("infoID", segmentChangeInfos.Base.GetMsgID()),
-				)
-			}
-		}
-	}
-	return nil
 }

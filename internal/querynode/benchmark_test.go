@@ -23,53 +23,47 @@ import (
 	"strconv"
 	"testing"
 
+	queryPb "github.com/milvus-io/milvus/internal/proto/querypb"
+
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap/zapcore"
 
 	"github.com/milvus-io/milvus/internal/log"
-	msgstream2 "github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
 const (
-	maxNQ = 100
-	nb    = 10000
+	benchmarkMaxNQ = 100
+	nb             = 10000
 )
 
-func benchmarkQueryCollectionSearch(nq int, b *testing.B) {
+func benchmarkQueryCollectionSearch(nq int64, b *testing.B) {
 	log.SetLevel(zapcore.ErrorLevel)
 	defer log.SetLevel(zapcore.DebugLevel)
 
 	tx, cancel := context.WithCancel(context.Background())
-
-	queryCollection, err := genSimpleQueryCollection(tx, cancel)
+	defer cancel()
+	queryShardObj, err := genSimpleQueryShard(tx)
 	assert.NoError(b, err)
 
 	// search only one segment
-	err = queryCollection.streaming.replica.removeSegment(defaultSegmentID)
+	err = queryShardObj.streaming.removeSegment(defaultSegmentID)
 	assert.NoError(b, err)
-	err = queryCollection.historical.replica.removeSegment(defaultSegmentID)
+	err = queryShardObj.historical.removeSegment(defaultSegmentID)
 	assert.NoError(b, err)
 
-	assert.Equal(b, 0, queryCollection.historical.replica.getSegmentNum())
-	assert.Equal(b, 0, queryCollection.streaming.replica.getSegmentNum())
+	assert.Equal(b, 0, queryShardObj.historical.getSegmentNum())
+	assert.Equal(b, 0, queryShardObj.streaming.getSegmentNum())
 
 	segment, err := genSimpleSealedSegment(nb)
 	assert.NoError(b, err)
-	err = queryCollection.historical.replica.setSegment(segment)
+	err = queryShardObj.historical.setSegment(segment)
 	assert.NoError(b, err)
 
-	sessionManager := NewSessionManager(withSessionCreator(mockProxyCreator()))
-	sessionManager.AddSession(&NodeInfo{
-		NodeID:  0,
-		Address: "",
-	})
-	queryCollection.sessionManager = sessionManager
-
 	// segment check
-	assert.Equal(b, 1, queryCollection.historical.replica.getSegmentNum())
-	assert.Equal(b, 0, queryCollection.streaming.replica.getSegmentNum())
-	seg, err := queryCollection.historical.replica.getSegmentByID(defaultSegmentID)
+	assert.Equal(b, 1, queryShardObj.historical.getSegmentNum())
+	assert.Equal(b, 0, queryShardObj.streaming.getSegmentNum())
+	seg, err := queryShardObj.historical.getSegmentByID(defaultSegmentID)
 	assert.NoError(b, err)
 	assert.Equal(b, int64(nb), seg.getRowCount())
 
@@ -81,23 +75,32 @@ func benchmarkQueryCollectionSearch(nq int, b *testing.B) {
 
 	// warming up
 
-	collection, err := queryCollection.historical.replica.getCollectionByID(defaultCollectionID)
+	collection, err := queryShardObj.historical.getCollectionByID(defaultCollectionID)
 	assert.NoError(b, err)
-	msgTmp, err := genSearchMsg(collection.schema, nq, IndexFaissIDMap)
+
+	iReq, _ := genSearchRequest(nq, IndexFaissIDMap, collection.schema)
+	queryReq := &queryPb.SearchRequest{
+		Req:             iReq,
+		DmlChannel:      defaultDMLChannel,
+		SegmentIDs:      []UniqueID{defaultSegmentID},
+		FromShardLeader: true,
+		Scope:           queryPb.DataScope_Historical,
+	}
+	searchReq, err := newSearchRequest(collection, queryReq, queryReq.Req.GetPlaceholderGroup())
 	assert.NoError(b, err)
 	for j := 0; j < 10000; j++ {
-		err = queryCollection.search(msgTmp)
+		_, _, _, err := searchHistorical(queryShardObj.historical, searchReq, defaultCollectionID, nil, queryReq.GetSegmentIDs())
 		assert.NoError(b, err)
 	}
 
-	msgs := make([]*msgstream2.SearchMsg, maxNQ/nq)
-	for i := 0; i < maxNQ/nq; i++ {
-		msg, err := genSearchMsg(collection.schema, nq, IndexFaissIDMap)
+	reqs := make([]*searchRequest, benchmarkMaxNQ/nq)
+	for i := 0; i < benchmarkMaxNQ/int(nq); i++ {
+		sReq, err := genSearchPlanAndRequests(collection, IndexFaissIDMap, nq)
 		assert.NoError(b, err)
-		msgs[i] = msg
+		reqs[i] = sReq
 	}
 
-	f, err := os.Create("nq_" + strconv.Itoa(nq) + ".perf")
+	f, err := os.Create("nq_" + strconv.Itoa(int(nq)) + ".perf")
 	if err != nil {
 		panic(err)
 	}
@@ -109,48 +112,41 @@ func benchmarkQueryCollectionSearch(nq int, b *testing.B) {
 	// start benchmark
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		for j := 0; j < maxNQ/nq; j++ {
-			err = queryCollection.search(msgs[j])
+		for j := int64(0); j < benchmarkMaxNQ/nq; j++ {
+			_, _, _, err := searchHistorical(queryShardObj.historical, searchReq, defaultCollectionID, nil, queryReq.GetSegmentIDs())
 			assert.NoError(b, err)
 		}
 	}
 }
 
-func benchmarkQueryCollectionSearchIndex(nq int, indexType string, b *testing.B) {
+func benchmarkQueryCollectionSearchIndex(nq int64, indexType string, b *testing.B) {
 	log.SetLevel(zapcore.ErrorLevel)
 	defer log.SetLevel(zapcore.DebugLevel)
 
 	tx, cancel := context.WithCancel(context.Background())
-
-	queryCollection, err := genSimpleQueryCollection(tx, cancel)
+	defer cancel()
+	queryShardObj, err := genSimpleQueryShard(tx)
 	assert.NoError(b, err)
 
-	err = queryCollection.historical.replica.removeSegment(defaultSegmentID)
+	err = queryShardObj.historical.removeSegment(defaultSegmentID)
 	assert.NoError(b, err)
-	err = queryCollection.streaming.replica.removeSegment(defaultSegmentID)
+	err = queryShardObj.streaming.removeSegment(defaultSegmentID)
 	assert.NoError(b, err)
 
-	assert.Equal(b, 0, queryCollection.historical.replica.getSegmentNum())
-	assert.Equal(b, 0, queryCollection.streaming.replica.getSegmentNum())
+	assert.Equal(b, 0, queryShardObj.historical.getSegmentNum())
+	assert.Equal(b, 0, queryShardObj.streaming.getSegmentNum())
 
 	node, err := genSimpleQueryNode(tx)
 	assert.NoError(b, err)
-	node.loader.historicalReplica = queryCollection.historical.replica
+	node.loader.historicalReplica = queryShardObj.historical
 
 	err = loadIndexForSegment(tx, node, defaultSegmentID, nb, indexType, L2, schemapb.DataType_Int64)
 	assert.NoError(b, err)
 
-	sessionManager := NewSessionManager(withSessionCreator(mockProxyCreator()))
-	sessionManager.AddSession(&NodeInfo{
-		NodeID:  0,
-		Address: "",
-	})
-	queryCollection.sessionManager = sessionManager
-
 	// segment check
-	assert.Equal(b, 1, queryCollection.historical.replica.getSegmentNum())
-	assert.Equal(b, 0, queryCollection.streaming.replica.getSegmentNum())
-	seg, err := queryCollection.historical.replica.getSegmentByID(defaultSegmentID)
+	assert.Equal(b, 1, queryShardObj.historical.getSegmentNum())
+	assert.Equal(b, 0, queryShardObj.streaming.getSegmentNum())
+	seg, err := queryShardObj.historical.getSegmentByID(defaultSegmentID)
 	assert.NoError(b, err)
 	assert.Equal(b, int64(nb), seg.getRowCount())
 	//TODO:: check string data in segcore
@@ -160,23 +156,26 @@ func benchmarkQueryCollectionSearchIndex(nq int, indexType string, b *testing.B)
 	//assert.Equal(b, seg.getMemSize(), int64(expectSize))
 
 	// warming up
-	collection, err := queryCollection.historical.replica.getCollectionByID(defaultCollectionID)
+	collection, err := queryShardObj.historical.getCollectionByID(defaultCollectionID)
 	assert.NoError(b, err)
-	msgTmp, err := genSearchMsg(collection.schema, nq, indexType)
-	assert.NoError(b, err)
+
+	//ollection *Collection, indexType string, nq int32
+
+	searchReq, _ := genSearchPlanAndRequests(collection, indexType, nq)
 	for j := 0; j < 10000; j++ {
-		err = queryCollection.search(msgTmp)
+		_, _, _, err := searchHistorical(queryShardObj.historical, searchReq, defaultCollectionID, nil, []UniqueID{defaultSegmentID})
 		assert.NoError(b, err)
 	}
 
-	msgs := make([]*msgstream2.SearchMsg, maxNQ/nq)
-	for i := 0; i < maxNQ/nq; i++ {
-		msg, err := genSearchMsg(collection.schema, nq, indexType)
+	reqs := make([]*searchRequest, benchmarkMaxNQ/nq)
+	for i := int64(0); i < benchmarkMaxNQ/nq; i++ {
+		req, err := genSearchPlanAndRequests(collection, indexType, defaultNQ)
+		//msg, err := genSearchMsg(collection.schema, nq, indexType)
 		assert.NoError(b, err)
-		msgs[i] = msg
+		reqs[i] = req
 	}
 
-	f, err := os.Create(indexType + "_nq_" + strconv.Itoa(nq) + ".perf")
+	f, err := os.Create(indexType + "_nq_" + strconv.Itoa(int(nq)) + ".perf")
 	if err != nil {
 		panic(err)
 	}
@@ -188,8 +187,8 @@ func benchmarkQueryCollectionSearchIndex(nq int, indexType string, b *testing.B)
 	// start benchmark
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		for j := 0; j < maxNQ/nq; j++ {
-			err = queryCollection.search(msgs[j])
+		for j := 0; j < benchmarkMaxNQ/int(nq); j++ {
+			_, _, _, err := searchHistorical(queryShardObj.historical, searchReq, defaultCollectionID, nil, []UniqueID{defaultSegmentID})
 			assert.NoError(b, err)
 		}
 	}

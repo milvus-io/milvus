@@ -86,6 +86,24 @@ message Blob {
     bytes value = 1;
 }
 
+enum PlaceholderType {
+  None = 0;
+  BinaryVector = 100;
+  FloatVector = 101;
+}
+
+message PlaceholderValue {
+  string tag = 1;
+  PlaceholderType type = 2;
+  // values is a 2d-array, every array contains a vector
+  repeated bytes values = 3;
+}
+
+message PlaceholderGroup {
+  repeated PlaceholderValue placeholders = 1;
+}
+
+
 message Address {
   string ip = 1;
   int64 port = 2;

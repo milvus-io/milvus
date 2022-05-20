@@ -30,26 +30,20 @@ import "C"
 import (
 	"errors"
 	"fmt"
-	"github.com/milvus-io/milvus/internal/proto/schemapb"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"unsafe"
 )
 
 // SearchPlan is a wrapper of the underlying C-structure C.CSearchPlan
 type SearchPlan struct {
 	cSearchPlan C.CSearchPlan
-	pkType      schemapb.DataType
 }
 
 // createSearchPlan returns a new SearchPlan and error
 func createSearchPlan(col *Collection, dsl string) (*SearchPlan, error) {
 	if col.collectionPtr == nil {
 		return nil, errors.New("nil collection ptr, collectionID = " + fmt.Sprintln(col.id))
-	}
-
-	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(col.schema)
-	if err != nil {
-		return nil, err
 	}
 
 	cDsl := C.CString(dsl)
@@ -62,7 +56,7 @@ func createSearchPlan(col *Collection, dsl string) (*SearchPlan, error) {
 		return nil, err1
 	}
 
-	var newPlan = &SearchPlan{cSearchPlan: cPlan, pkType: primaryFieldSchema.DataType}
+	var newPlan = &SearchPlan{cSearchPlan: cPlan}
 	return newPlan, nil
 }
 
@@ -70,11 +64,6 @@ func createSearchPlanByExpr(col *Collection, expr []byte) (*SearchPlan, error) {
 	if col.collectionPtr == nil {
 		return nil, errors.New("nil collection ptr, collectionID = " + fmt.Sprintln(col.id))
 	}
-	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(col.schema)
-	if err != nil {
-		return nil, err
-	}
-
 	var cPlan C.CSearchPlan
 	status := C.CreateSearchPlanByExpr(col.collectionPtr, unsafe.Pointer(&expr[0]), (C.int64_t)(len(expr)), &cPlan)
 
@@ -83,7 +72,7 @@ func createSearchPlanByExpr(col *Collection, expr []byte) (*SearchPlan, error) {
 		return nil, err1
 	}
 
-	var newPlan = &SearchPlan{cSearchPlan: cPlan, pkType: primaryFieldSchema.DataType}
+	var newPlan = &SearchPlan{cSearchPlan: cPlan}
 	return newPlan, nil
 }
 
@@ -104,12 +93,67 @@ func (plan *SearchPlan) delete() {
 }
 
 type searchRequest struct {
+	plan              *SearchPlan
 	cPlaceholderGroup C.CPlaceholderGroup
+	timestamp         Timestamp
+}
+
+func newSearchRequest(collection *Collection, req *querypb.SearchRequest, placeholderGrp []byte) (*searchRequest, error) {
+	var err error
+	var plan *SearchPlan
+	if req.Req.GetDslType() == commonpb.DslType_BoolExprV1 {
+		expr := req.Req.SerializedExprPlan
+		plan, err = createSearchPlanByExpr(collection, expr)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		dsl := req.Req.GetDsl()
+		plan, err = createSearchPlan(collection, dsl)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if len(placeholderGrp) == 0 {
+		plan.delete()
+		return nil, errors.New("empty search request")
+	}
+
+	var blobPtr = unsafe.Pointer(&placeholderGrp[0])
+	blobSize := C.int64_t(len(placeholderGrp))
+	var cPlaceholderGroup C.CPlaceholderGroup
+	status := C.ParsePlaceholderGroup(plan.cSearchPlan, blobPtr, blobSize, &cPlaceholderGroup)
+
+	if err := HandleCStatus(&status, "parser searchRequest failed"); err != nil {
+		plan.delete()
+		return nil, err
+	}
+
+	ret := &searchRequest{
+		plan:              plan,
+		cPlaceholderGroup: cPlaceholderGroup,
+		timestamp:         req.Req.GetTravelTimestamp(),
+	}
+
+	return ret, nil
+}
+
+func (sr *searchRequest) getNumOfQuery() int64 {
+	numQueries := C.GetNumOfQueries(sr.cPlaceholderGroup)
+	return int64(numQueries)
+}
+
+func (sr *searchRequest) delete() {
+	if sr.plan != nil {
+		sr.plan.delete()
+	}
+	C.DeletePlaceholderGroup(sr.cPlaceholderGroup)
 }
 
 func parseSearchRequest(plan *SearchPlan, searchRequestBlob []byte) (*searchRequest, error) {
 	if len(searchRequestBlob) == 0 {
-		return nil, errors.New("empty search request")
+		return nil, fmt.Errorf("empty search request")
 	}
 	var blobPtr = unsafe.Pointer(&searchRequestBlob[0])
 	blobSize := C.int64_t(len(searchRequestBlob))
@@ -120,17 +164,8 @@ func parseSearchRequest(plan *SearchPlan, searchRequestBlob []byte) (*searchRequ
 		return nil, err
 	}
 
-	var newSearchRequest = &searchRequest{cPlaceholderGroup: cPlaceholderGroup}
-	return newSearchRequest, nil
-}
-
-func (pg *searchRequest) getNumOfQuery() int64 {
-	numQueries := C.GetNumOfQueries(pg.cPlaceholderGroup)
-	return int64(numQueries)
-}
-
-func (pg *searchRequest) delete() {
-	C.DeletePlaceholderGroup(pg.cPlaceholderGroup)
+	var ret = &searchRequest{cPlaceholderGroup: cPlaceholderGroup, plan: plan}
+	return ret, nil
 }
 
 // RetrievePlan is a wrapper of the underlying C-structure C.CRetrievePlan
@@ -138,21 +173,6 @@ type RetrievePlan struct {
 	cRetrievePlan C.CRetrievePlan
 	Timestamp     Timestamp
 }
-
-// func createRetrievePlan(col *Collection, msg *segcorepb.RetrieveRequest, timestamp uint64) (*RetrievePlan, error) {
-// 	protoCGo, err := MarshalForCGo(msg)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	plan := new(RetrievePlan)
-// 	plan.Timestamp = timestamp
-// 	status := C.CreateRetrievePlan(col.collectionPtr, protoCGo.CProto, &plan.cRetrievePlan)
-// 	err2 := HandleCStatus(&status, "create retrieve plan failed")
-// 	if err2 != nil {
-// 		return nil, err2
-// 	}
-// 	return plan, nil
-// }
 
 func createRetrievePlanByExpr(col *Collection, expr []byte, timestamp Timestamp) (*RetrievePlan, error) {
 	var cPlan C.CRetrievePlan

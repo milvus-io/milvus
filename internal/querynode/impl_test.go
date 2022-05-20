@@ -268,7 +268,7 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 
-		err = node.historical.replica.removeCollection(defaultCollectionID)
+		err = node.historical.removeCollection(defaultCollectionID)
 		assert.NoError(t, err)
 
 		req := &queryPb.GetSegmentInfoRequest{
@@ -289,7 +289,7 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 
-		err = node.streaming.replica.removeCollection(defaultCollectionID)
+		err = node.streaming.removeCollection(defaultCollectionID)
 		assert.NoError(t, err)
 
 		req := &queryPb.GetSegmentInfoRequest{
@@ -319,7 +319,7 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 			CollectionID: defaultCollectionID,
 		}
 
-		seg, err := node.streaming.replica.getSegmentByID(defaultSegmentID)
+		seg, err := node.streaming.getSegmentByID(defaultSegmentID)
 		assert.NoError(t, err)
 
 		seg.setType(segmentTypeSealed)
@@ -342,7 +342,7 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 
-		seg, err := node.historical.replica.getSegmentByID(defaultSegmentID)
+		seg, err := node.historical.getSegmentByID(defaultSegmentID)
 		assert.NoError(t, err)
 
 		seg.setIndexedFieldInfo(simpleFloatVecField.id, &IndexedFieldInfo{
@@ -385,7 +385,7 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 			CollectionID: defaultCollectionID,
 		}
 
-		node.streaming.replica.(*metaReplica).partitions = make(map[UniqueID]*Partition)
+		node.streaming.(*metaReplica).partitions = make(map[UniqueID]*Partition)
 		rsp, err := node.GetSegmentInfo(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, rsp.Status.ErrorCode)
@@ -404,7 +404,7 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 			CollectionID: defaultCollectionID,
 		}
 
-		node.streaming.replica.(*metaReplica).segments = make(map[UniqueID]*Segment)
+		node.streaming.(*metaReplica).segments = make(map[UniqueID]*Segment)
 		rsp, err := node.GetSegmentInfo(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, rsp.Status.ErrorCode)
@@ -423,7 +423,7 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 			CollectionID: defaultCollectionID,
 		}
 
-		node.historical.replica.(*metaReplica).partitions = make(map[UniqueID]*Partition)
+		node.historical.(*metaReplica).partitions = make(map[UniqueID]*Partition)
 		rsp, err := node.GetSegmentInfo(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, rsp.Status.ErrorCode)
@@ -442,7 +442,7 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 			CollectionID: defaultCollectionID,
 		}
 
-		node.historical.replica.(*metaReplica).segments = make(map[UniqueID]*Segment)
+		node.historical.(*metaReplica).segments = make(map[UniqueID]*Segment)
 		rsp, err := node.GetSegmentInfo(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, rsp.Status.ErrorCode)
@@ -568,10 +568,10 @@ func TestImpl_ReleaseSegments(t *testing.T) {
 			SegmentIDs:   []UniqueID{defaultSegmentID},
 		}
 
-		err = node.historical.replica.removeSegment(defaultSegmentID)
+		err = node.historical.removeSegment(defaultSegmentID)
 		assert.NoError(t, err)
 
-		err = node.streaming.replica.removeSegment(defaultSegmentID)
+		err = node.streaming.removeSegment(defaultSegmentID)
 		assert.NoError(t, err)
 
 		status, err := node.ReleaseSegments(ctx, req)
@@ -596,9 +596,9 @@ func TestImpl_Search(t *testing.T) {
 	node.queryShardService.addQueryShard(defaultCollectionID, defaultDMLChannel, defaultReplicaID)
 
 	_, err = node.Search(ctx, &queryPb.SearchRequest{
-		Req:           req,
-		IsShardLeader: true,
-		DmlChannel:    defaultDMLChannel,
+		Req:             req,
+		FromShardLeader: false,
+		DmlChannel:      defaultDMLChannel,
 	})
 	assert.NoError(t, err)
 }
@@ -619,9 +619,9 @@ func TestImpl_Query(t *testing.T) {
 	node.queryShardService.addQueryShard(defaultCollectionID, defaultDMLChannel, defaultReplicaID)
 
 	_, err = node.Query(ctx, &queryPb.QueryRequest{
-		Req:           req,
-		IsShardLeader: true,
-		DmlChannel:    defaultDMLChannel,
+		Req:             req,
+		FromShardLeader: false,
+		DmlChannel:      defaultDMLChannel,
 	})
 	assert.NoError(t, err)
 }

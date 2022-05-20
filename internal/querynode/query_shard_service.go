@@ -40,16 +40,18 @@ type queryShardService struct {
 
 	factory dependency.Factory
 
-	historical *historical
-	streaming  *streaming
+	historical   ReplicaInterface
+	streaming    ReplicaInterface
+	tSafeReplica TSafeReplicaInterface
 
 	shardClusterService *ShardClusterService
 	localChunkManager   storage.ChunkManager
 	remoteChunkManager  storage.ChunkManager
 	localCacheEnabled   bool
+	scheduler           *taskScheduler
 }
 
-func newQueryShardService(ctx context.Context, historical *historical, streaming *streaming, clusterService *ShardClusterService, factory dependency.Factory) *queryShardService {
+func newQueryShardService(ctx context.Context, historical ReplicaInterface, streaming ReplicaInterface, tSafeReplica TSafeReplicaInterface, clusterService *ShardClusterService, factory dependency.Factory, scheduler *taskScheduler) *queryShardService {
 	queryShardServiceCtx, queryShardServiceCancel := context.WithCancel(ctx)
 
 	path := Params.LoadWithDefault("localStorage.Path", "/tmp/milvus/data")
@@ -64,11 +66,13 @@ func newQueryShardService(ctx context.Context, historical *historical, streaming
 		queryChannels:       make(map[int64]*queryChannel),
 		historical:          historical,
 		streaming:           streaming,
+		tSafeReplica:        tSafeReplica,
 		shardClusterService: clusterService,
 		localChunkManager:   localChunkManager,
 		remoteChunkManager:  remoteChunkManager,
 		localCacheEnabled:   Params.QueryNodeCfg.CacheEnabled,
 		factory:             factory,
+		scheduler:           scheduler,
 	}
 	return qss
 }
@@ -87,6 +91,7 @@ func (q *queryShardService) addQueryShard(collectionID UniqueID, channel Channel
 		q.shardClusterService,
 		q.historical,
 		q.streaming,
+		q.tSafeReplica,
 		q.localChunkManager,
 		q.remoteChunkManager,
 		q.localCacheEnabled,

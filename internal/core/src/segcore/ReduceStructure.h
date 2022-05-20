@@ -22,7 +22,7 @@ struct SearchResultPair {
     milvus::PkType primary_key_;
     float distance_;
     milvus::SearchResult* search_result_;
-    int64_t index_;
+    int64_t segment_index_;
     int64_t offset_;
     int64_t offset_rb_;  // right bound
 
@@ -31,7 +31,7 @@ struct SearchResultPair {
         : primary_key_(primary_key),
           distance_(distance),
           search_result_(result),
-          index_(index),
+          segment_index_(index),
           offset_(lb),
           offset_rb_(rb) {
     }

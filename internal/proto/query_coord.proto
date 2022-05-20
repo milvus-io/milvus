@@ -266,14 +266,16 @@ message SearchRequest {
   internal.SearchRequest req = 1;
   string dml_channel = 2;
   repeated int64 segmentIDs = 3;
-  bool is_shard_leader = 4;
+  bool from_shard_leader = 4;
+  DataScope scope = 5; // All, Streaming, Historical
 }
 
 message QueryRequest {
   internal.RetrieveRequest req = 1;
   string dml_channel = 2;
   repeated int64 segmentIDs = 3;
-  bool is_shard_leader = 4;
+  bool from_shard_leader = 4;
+  DataScope scope = 5; // All, Streaming, Historical
 }
 
 message SyncReplicaSegmentsRequest {
@@ -304,6 +306,14 @@ message LoadBalanceRequest {
 }
 
 //-------------------- internal meta proto------------------
+
+enum DataScope {
+  UnKnown = 0;
+  All = 1;
+  Streaming = 2;
+  Historical = 3;
+}
+
 enum PartitionState {
   NotExist = 0;
   NotPresent = 1;
