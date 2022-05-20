@@ -49,8 +49,7 @@ func (q queryNode) String() string {
 	return fmt.Sprintf("<NodeID: %d>", q.nodeID)
 }
 
-func updateShardsWithRoundRobin(shardsLeaders map[string][]queryNode) map[string][]queryNode {
-
+func updateShardsWithRoundRobin(shardsLeaders map[string][]queryNode) {
 	for channelID, leaders := range shardsLeaders {
 		if len(leaders) <= 1 {
 			continue
@@ -58,8 +57,6 @@ func updateShardsWithRoundRobin(shardsLeaders map[string][]queryNode) map[string
 
 		shardsLeaders[channelID] = append(leaders[1:], leaders[0])
 	}
-
-	return shardsLeaders
 }
 
 func roundRobinPolicy(ctx context.Context, getQueryNodePolicy getQueryNodePolicy, query func(UniqueID, types.QueryNode) error, leaders []queryNode) error {
