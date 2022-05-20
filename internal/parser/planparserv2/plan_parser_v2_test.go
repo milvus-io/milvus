@@ -1,6 +1,7 @@
 package planparserv2
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/proto/planpb"
@@ -487,4 +488,46 @@ func TestCreateSearchPlan_Invalid(t *testing.T) {
 		_, err := CreateSearchPlan(schema, "Int64Field > 0", "VarCharField", nil)
 		assert.Error(t, err)
 	})
+}
+
+func Test_handleExpr(t *testing.T) {
+	schema := newTestSchema()
+	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	ret1 := handleExpr(schemaHelper, "this is not a normal expression")
+	err1, ok := ret1.(error)
+	assert.True(t, ok)
+	assert.Error(t, err1)
+}
+
+// test if handleExpr is thread-safe.
+func Test_handleExpr_17126(t *testing.T) {
+	schema := newTestSchema()
+	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+	normal := "Int64Field > 0"
+	abnormal := "this is not a normal expression"
+
+	n := 4 // default parallel in regression.
+	m := 16
+	var wg sync.WaitGroup
+	for i := 0; i < n*m; i++ {
+		wg.Add(1)
+		i := i
+		go func() {
+			defer wg.Done()
+			if i%2 == 0 {
+				ret := handleExpr(schemaHelper, normal)
+				_, ok := ret.(error)
+				assert.False(t, ok)
+			} else {
+				ret := handleExpr(schemaHelper, abnormal)
+				err, ok := ret.(error)
+				assert.True(t, ok)
+				assert.Error(t, err)
+			}
+		}()
+	}
+	wg.Wait()
 }
