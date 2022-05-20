@@ -967,6 +967,10 @@ func updateSegmentInfoFromTask(ctx context.Context, triggerTask task, meta Meta)
 				}
 			}
 		}
+
+		log.Info("update segment info",
+			zap.Int64("triggerTaskID", triggerTask.getTaskID()),
+			zap.Any("segment", segmentInfosToSave))
 		sealedSegmentChangeInfos, err = meta.saveGlobalSealedSegInfos(segmentInfosToSave)
 	}
 
