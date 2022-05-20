@@ -47,3 +47,27 @@ const (
 	// DataNodeRole is a constant represent DataNode
 	DataNodeRole = "datanode"
 )
+
+func ServerTypeMap() map[string]interface{} {
+	return map[string]interface{}{
+		EmbeddedRole:   nil,
+		StandaloneRole: nil,
+		RootCoordRole:  nil,
+		ProxyRole:      nil,
+		QueryCoordRole: nil,
+		QueryNodeRole:  nil,
+		IndexCoordRole: nil,
+		IndexNodeRole:  nil,
+		DataCoordRole:  nil,
+		DataNodeRole:   nil,
+	}
+}
+
+func ServerTypeList() []string {
+	serverTypeMap := ServerTypeMap()
+	types := make([]string, 0, len(serverTypeMap))
+	for key := range serverTypeMap {
+		types = append(types, key)
+	}
+	return types
+}
