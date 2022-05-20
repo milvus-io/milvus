@@ -10539,6 +10539,7 @@ class QuerySegmentInfo :
   // accessors -------------------------------------------------------
 
   enum : int {
+    kNodeIdsFieldNumber = 10,
     kIndexNameFieldNumber = 6,
     kSegmentIDFieldNumber = 1,
     kCollectionIDFieldNumber = 2,
@@ -10549,6 +10550,17 @@ class QuerySegmentInfo :
     kNodeIDFieldNumber = 8,
     kStateFieldNumber = 9,
   };
+  // repeated int64 nodeIds = 10;
+  int nodeids_size() const;
+  void clear_nodeids();
+  ::PROTOBUF_NAMESPACE_ID::int64 nodeids(int index) const;
+  void set_nodeids(int index, ::PROTOBUF_NAMESPACE_ID::int64 value);
+  void add_nodeids(::PROTOBUF_NAMESPACE_ID::int64 value);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
+      nodeids() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
+      mutable_nodeids();
+
   // string index_name = 6;
   void clear_index_name();
   const std::string& index_name() const;
@@ -10605,6 +10617,8 @@ class QuerySegmentInfo :
   class _Internal;
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 > nodeids_;
+  mutable std::atomic<int> _nodeids_cached_byte_size_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr index_name_;
   ::PROTOBUF_NAMESPACE_ID::int64 segmentid_;
   ::PROTOBUF_NAMESPACE_ID::int64 collectionid_;
@@ -25861,6 +25875,36 @@ inline void QuerySegmentInfo::set_state(::milvus::proto::common::SegmentState va
   
   state_ = value;
   // @@protoc_insertion_point(field_set:milvus.proto.milvus.QuerySegmentInfo.state)
+}
+
+// repeated int64 nodeIds = 10;
+inline int QuerySegmentInfo::nodeids_size() const {
+  return nodeids_.size();
+}
+inline void QuerySegmentInfo::clear_nodeids() {
+  nodeids_.Clear();
+}
+inline ::PROTOBUF_NAMESPACE_ID::int64 QuerySegmentInfo::nodeids(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.QuerySegmentInfo.nodeIds)
+  return nodeids_.Get(index);
+}
+inline void QuerySegmentInfo::set_nodeids(int index, ::PROTOBUF_NAMESPACE_ID::int64 value) {
+  nodeids_.Set(index, value);
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.QuerySegmentInfo.nodeIds)
+}
+inline void QuerySegmentInfo::add_nodeids(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  nodeids_.Add(value);
+  // @@protoc_insertion_point(field_add:milvus.proto.milvus.QuerySegmentInfo.nodeIds)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
+QuerySegmentInfo::nodeids() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.milvus.QuerySegmentInfo.nodeIds)
+  return nodeids_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
+QuerySegmentInfo::mutable_nodeids() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.milvus.QuerySegmentInfo.nodeIds)
+  return &nodeids_;
 }
 
 // -------------------------------------------------------------------

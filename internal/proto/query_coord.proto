@@ -354,6 +354,7 @@ message SegmentInfo {
   int64 segmentID = 1;
   int64 collectionID = 2;
   int64 partitionID = 3;
+  // deprecated, check node_ids(NodeIds) field
   int64 nodeID = 4;
   int64 mem_size = 5;
   int64 num_rows = 6;

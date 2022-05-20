@@ -1516,6 +1516,7 @@ class TestUtilityAdvanced(TestcaseBase):
         assert cnt == nb
 
     @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.xfail(reason="need newer SDK")
     def test_load_balance_normal(self):
         """
         target: test load balance of collection
@@ -1557,6 +1558,7 @@ class TestUtilityAdvanced(TestcaseBase):
         assert set(sealed_segment_ids).issubset(des_sealed_segment_ids)
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="need newer SDK")
     def test_load_balance_with_src_node_not_exist(self):
         """
         target: test load balance of collection
@@ -1593,6 +1595,7 @@ class TestUtilityAdvanced(TestcaseBase):
                                        check_items={ct.err_code: 1, ct.err_msg: "is not exist to balance"})
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="need newer SDK")
     def test_load_balance_with_all_dst_node_not_exist(self):
         """
         target: test load balance of collection
@@ -1628,6 +1631,7 @@ class TestUtilityAdvanced(TestcaseBase):
                                        check_items={ct.err_code: 1, ct.err_msg: "no available queryNode to allocate"})
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="need newer SDK")
     def test_load_balance_with_one_sealed_segment_id_not_exist(self):
         """
         target: test load balance of collection
@@ -1668,6 +1672,7 @@ class TestUtilityAdvanced(TestcaseBase):
                                        check_items={ct.err_code: 1, ct.err_msg: "is not exist"})
 
     @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.xfail(reason="need newer SDK")
     def test_load_balance_in_one_group(self):
         """
         target: test load balance of collection in one group
@@ -1715,6 +1720,7 @@ class TestUtilityAdvanced(TestcaseBase):
         assert set(sealed_segment_ids).issubset(des_sealed_segment_ids)
 
     @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.xfail(reason="need newer SDK")
     def test_load_balance_not_in_one_group(self):
         """
         target: test load balance of collection in one group

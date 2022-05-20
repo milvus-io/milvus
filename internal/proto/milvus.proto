@@ -708,8 +708,10 @@ message QuerySegmentInfo {
   int64 num_rows = 5;
   string index_name = 6;
   int64 indexID = 7;
+  // deprecated, check node_ids(NodeIds) field
   int64 nodeID = 8;
   common.SegmentState state = 9;
+  repeated int64 nodeIds = 10;
 }
 
 message GetQuerySegmentInfoRequest {

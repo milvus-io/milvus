@@ -3594,8 +3594,8 @@ func (node *Proxy) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.GetQue
 			MemSize:      info.MemSize,
 			IndexName:    info.IndexName,
 			IndexID:      info.IndexID,
-			NodeID:       info.NodeID,
 			State:        info.SegmentState,
+			NodeIds:      info.NodeIds,
 		}
 	}
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success

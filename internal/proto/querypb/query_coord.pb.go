@@ -2471,9 +2471,10 @@ func (m *PartitionStates) GetInMemoryPercentage() int64 {
 }
 
 type SegmentInfo struct {
-	SegmentID            int64                 `protobuf:"varint,1,opt,name=segmentID,proto3" json:"segmentID,omitempty"`
-	CollectionID         int64                 `protobuf:"varint,2,opt,name=collectionID,proto3" json:"collectionID,omitempty"`
-	PartitionID          int64                 `protobuf:"varint,3,opt,name=partitionID,proto3" json:"partitionID,omitempty"`
+	SegmentID    int64 `protobuf:"varint,1,opt,name=segmentID,proto3" json:"segmentID,omitempty"`
+	CollectionID int64 `protobuf:"varint,2,opt,name=collectionID,proto3" json:"collectionID,omitempty"`
+	PartitionID  int64 `protobuf:"varint,3,opt,name=partitionID,proto3" json:"partitionID,omitempty"`
+	// deprecated, check node_ids(NodeIds) field
 	NodeID               int64                 `protobuf:"varint,4,opt,name=nodeID,proto3" json:"nodeID,omitempty"`
 	MemSize              int64                 `protobuf:"varint,5,opt,name=mem_size,json=memSize,proto3" json:"mem_size,omitempty"`
 	NumRows              int64                 `protobuf:"varint,6,opt,name=num_rows,json=numRows,proto3" json:"num_rows,omitempty"`
