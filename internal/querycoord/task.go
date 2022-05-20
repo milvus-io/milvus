@@ -2175,6 +2175,10 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 						Schema:       collectionInfo.Schema,
 						CollectionID: collectionID,
 						ReplicaID:    lbt.replicaID,
+						LoadMeta: &querypb.LoadMetaInfo{
+							CollectionID: collectionID,
+							PartitionIDs: collectionInfo.PartitionIDs,
+						},
 					}
 					loadSegmentReqs = append(loadSegmentReqs, loadSegmentReq)
 				}
