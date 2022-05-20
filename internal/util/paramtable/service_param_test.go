@@ -35,6 +35,21 @@ func TestServiceParam(t *testing.T) {
 		assert.NotEqual(t, Params.KvRootPath, "")
 		t.Logf("kv root path = %s", Params.KvRootPath)
 
+		assert.NotNil(t, Params.EtcdUseSSL)
+		t.Logf("use ssl = %t", Params.EtcdUseSSL)
+
+		assert.NotEmpty(t, Params.EtcdTLSKey)
+		t.Logf("tls key = %s", Params.EtcdTLSKey)
+
+		assert.NotEmpty(t, Params.EtcdTLSCACert)
+		t.Logf("tls CACert = %s", Params.EtcdTLSCACert)
+
+		assert.NotEmpty(t, Params.EtcdTLSCert)
+		t.Logf("tls cert = %s", Params.EtcdTLSCert)
+
+		assert.NotEmpty(t, Params.EtcdTLSMinVersion)
+		t.Logf("tls minVersion = %s", Params.EtcdTLSMinVersion)
+
 		// test UseEmbedEtcd
 		Params.Base.Save("etcd.use.embed", "true")
 		assert.Nil(t, os.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.ClusterDeployMode))
