@@ -20,6 +20,7 @@ class Op(Enum):
     index = 'index'
     search = 'search'
     query = 'query'
+    bulk_load = 'bulk_load'
 
     unknown = 'unknown'
 
@@ -238,40 +239,48 @@ class BulkLoadChecker(Checker):
         super().__init__()
         self.utility_wrap = ApiUtilityWrapper()
         self.schema = cf.gen_default_collection_schema()
-        self.files = ["/tmp/test_data.json"]
+        self.files = ["bulk_load_data_source.json"]
+        self.row_based = True
+        self.recheck_failed_task = False
         self.failed_tasks = []
 
-    def update(self, files=None, schema=None):
-        if files:
+    def update(self, files=None, schema=None, row_based=None):
+        if files is not None:
             self.files = files
-        if schema:
+        if schema is not None:
             self.schema = schema
+        if row_based is not None:
+            self.row_based = row_based
 
     def keep_running(self):
         while True:
-            c_name = cf.gen_unique_str("BulkLoadChecker_")
+            if self.recheck_failed_task and self.failed_tasks:
+                c_name = self.failed_tasks.pop(0)
+                log.debug(f"check failed task: {c_name}")
+            else:
+                c_name = cf.gen_unique_str("BulkLoadChecker_")
             self.c_wrap.init_collection(name=c_name, schema=self.schema)
+            # pre_entities_num = self.c_wrap.num_entities
             # import data
             t0 = time.time()
             task_ids, res_1 = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                          partition_name='',
-                                                          row_based=True,
+                                                          row_based=self.row_based,
                                                           files=self.files)
             log.info(f"bulk load task ids:{task_ids}")
-            completed, res_2 = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids,
-                                                                                timeout=30)
-            t1 = time.time() - t0
-            if completed and res_1 and res_2:
-                self.rsp_times.append(t1 - t0)
-                self.average_time = ((t1 - t0) + self.average_time * self._succ) / (self._succ + 1)
+            completed, res_2 = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids, timeout=30)
+            tt = time.time() - t0
+            # added_num = sum(res_2[task_id].row_count for task_id in task_ids)
+            if completed:
+                self.rsp_times.append(tt)
+                self.average_time = (tt + self.average_time * self._succ) / (self._succ + 1)
                 self._succ += 1
-                log.debug(f"bulk load success, time: {t1 - t0:.4f}, average_time: {self.average_time:4f}")                         
+                log.info(f"bulk load success for collection {c_name}, time: {tt:.4f}, average_time: {self.average_time:4f}")
             else:
                 self._fail += 1
+                # if the task failed, store the failed collection name for further checking after chaos
                 self.failed_tasks.append(c_name)
+                log.info(f"bulk load failed for collection {c_name} time: {tt:.4f}, average_time: {self.average_time:4f}")
                 sleep(constants.WAIT_PER_OP / 10)
-
-
 
 
 def assert_statistic(checkers, expectations={}):
