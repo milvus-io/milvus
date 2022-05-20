@@ -15,7 +15,7 @@ import (
 )
 
 func TestUpdateShardsWithRoundRobin(t *testing.T) {
-	in := map[string][]queryNode{
+	list := map[string][]queryNode{
 		"channel-1": {
 			{1, "addr1"},
 			{2, "addr2"},
@@ -26,12 +26,12 @@ func TestUpdateShardsWithRoundRobin(t *testing.T) {
 		},
 	}
 
-	out := updateShardsWithRoundRobin(in)
+	updateShardsWithRoundRobin(list)
 
-	assert.Equal(t, int64(2), out["channel-1"][0].nodeID)
-	assert.Equal(t, "addr2", out["channel-1"][0].address)
-	assert.Equal(t, int64(21), out["channel-2"][0].nodeID)
-	assert.Equal(t, "addr21", out["channel-2"][0].address)
+	assert.Equal(t, int64(2), list["channel-1"][0].nodeID)
+	assert.Equal(t, "addr2", list["channel-1"][0].address)
+	assert.Equal(t, int64(21), list["channel-2"][0].nodeID)
+	assert.Equal(t, "addr21", list["channel-2"][0].address)
 
 	t.Run("check print", func(t *testing.T) {
 		qns := []queryNode{

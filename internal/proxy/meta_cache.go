@@ -72,9 +72,22 @@ type collectionInfo struct {
 	schema              *schemapb.CollectionSchema
 	partInfo            map[string]*partitionInfo
 	shardLeaders        map[string][]queryNode
+	leaderMutex         sync.Mutex
 	createdTimestamp    uint64
 	createdUtcTimestamp uint64
 	isLoaded            bool
+}
+
+// CloneShardLeaders returns a copy of shard leaders
+// leaderMutex shall be accuired before invoking this method
+func (c *collectionInfo) CloneShardLeaders() map[string][]queryNode {
+	m := make(map[string][]queryNode)
+	for channel, leaders := range c.shardLeaders {
+		l := make([]queryNode, len(leaders))
+		copy(l, leaders)
+		m[channel] = l
+	}
+	return m
 }
 
 type partitionInfo struct {
@@ -584,11 +597,11 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, collectionNam
 
 	if withCache {
 		if len(info.shardLeaders) > 0 {
-			shards := updateShardsWithRoundRobin(info.shardLeaders)
+			info.leaderMutex.Lock()
+			updateShardsWithRoundRobin(info.shardLeaders)
 
-			m.mu.Lock()
-			m.collInfo[collectionName].shardLeaders = shards
-			m.mu.Unlock()
+			shards := info.CloneShardLeaders()
+			info.leaderMutex.Unlock()
 			return shards, nil
 		}
 		log.Info("no shard cache for collection, try to get shard leaders from QueryCoord",
@@ -612,13 +625,16 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, collectionNam
 
 	shards := parseShardLeaderList2QueryNode(resp.GetShards())
 
-	shards = updateShardsWithRoundRobin(shards)
+	// manipulate info in map, get map returns a copy of the information
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	info = m.collInfo[collectionName]
+	// lock leader
+	info.leaderMutex.Lock()
+	defer info.leaderMutex.Unlock()
+	info.shardLeaders = shards
 
-	m.mu.Lock()
-	m.collInfo[collectionName].shardLeaders = shards
-	m.mu.Unlock()
-
-	return shards, nil
+	return info.CloneShardLeaders(), nil
 }
 
 func parseShardLeaderList2QueryNode(shardsLeaders []*querypb.ShardLeadersList) map[string][]queryNode {
