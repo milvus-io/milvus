@@ -39,8 +39,6 @@ type Client interface {
 	// Create a consumer instance and subscribe a topic
 	Subscribe(options ConsumerOptions) (Consumer, error)
 
-	CreateReader(options ReaderOptions) (Reader, error)
-
 	// Close the client and free associated resources
 	Close()
 }

@@ -12,7 +12,6 @@
 package server
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"os"
@@ -726,128 +725,6 @@ func TestRocksmq_SeekToLatest(t *testing.T) {
 	}
 }
 
-func TestRocksmq_Reader(t *testing.T) {
-	ep := etcdEndpoints()
-	etcdCli, err := etcd.GetRemoteEtcdClient(ep)
-	assert.Nil(t, err)
-	defer etcdCli.Close()
-	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
-	assert.Nil(t, err)
-	defer etcdKV.Close()
-	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
-	_ = idAllocator.Initialize()
-
-	name := "/tmp/rocksmq_reader"
-	defer os.RemoveAll(name)
-	kvName := name + "_meta_kv"
-	_ = os.RemoveAll(kvName)
-	defer os.RemoveAll(kvName)
-	rmq, err := NewRocksMQ(name, idAllocator)
-	assert.Nil(t, err)
-	defer rmq.Close()
-
-	channelName := newChanName()
-	_, err = rmq.CreateReader(channelName, 0, true, "")
-	assert.Error(t, err)
-	err = rmq.CreateTopic(channelName)
-	assert.Nil(t, err)
-	defer rmq.DestroyTopic(channelName)
-	loopNum := 100
-
-	pMsgs := make([]ProducerMessage, loopNum)
-	for i := 0; i < loopNum; i++ {
-		msg := "message_" + strconv.Itoa(i+loopNum)
-		pMsg := ProducerMessage{Payload: []byte(msg)}
-		pMsgs[i] = pMsg
-	}
-	ids, err := rmq.Produce(channelName, pMsgs)
-	assert.Nil(t, err)
-	assert.Equal(t, len(ids), loopNum)
-
-	readerName1, err := rmq.CreateReader(channelName, ids[0], true, "test-reader-true")
-	assert.NoError(t, err)
-	rmq.ReaderSeek(channelName, readerName1, ids[0])
-	ctx := context.Background()
-	for i := 0; i < loopNum; i++ {
-		assert.Equal(t, true, rmq.HasNext(channelName, readerName1))
-		msg, err := rmq.Next(ctx, channelName, readerName1)
-		assert.NoError(t, err)
-		assert.Equal(t, msg.MsgID, ids[i])
-	}
-	assert.False(t, rmq.HasNext(channelName, readerName1))
-
-	readerName2, err := rmq.CreateReader(channelName, ids[0], false, "test-reader-false")
-	assert.NoError(t, err)
-
-	rmq.ReaderSeek(channelName, readerName2, ids[0])
-	for i := 0; i < loopNum-1; i++ {
-		assert.Equal(t, true, rmq.HasNext(channelName, readerName2))
-		msg, err := rmq.Next(ctx, channelName, readerName2)
-		assert.NoError(t, err)
-		assert.Equal(t, msg.MsgID, ids[i+1])
-	}
-	assert.False(t, rmq.HasNext(channelName, readerName2))
-}
-
-func TestReader_CornerCase(t *testing.T) {
-	ep := etcdEndpoints()
-	etcdCli, err := etcd.GetRemoteEtcdClient(ep)
-	assert.Nil(t, err)
-	defer etcdCli.Close()
-	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
-	defer etcdKV.Close()
-	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
-	_ = idAllocator.Initialize()
-
-	name := "/tmp/rocksmq_reader_cornercase"
-	defer os.RemoveAll(name)
-	kvName := name + "_meta_kv"
-	_ = os.RemoveAll(kvName)
-	defer os.RemoveAll(kvName)
-	rmq, err := NewRocksMQ(name, idAllocator)
-	assert.Nil(t, err)
-	defer rmq.Close()
-
-	channelName := newChanName()
-	err = rmq.CreateTopic(channelName)
-	assert.Nil(t, err)
-	defer rmq.DestroyTopic(channelName)
-	loopNum := 10
-
-	pMsgs := make([]ProducerMessage, loopNum)
-	for i := 0; i < loopNum; i++ {
-		msg := "message_" + strconv.Itoa(i+loopNum)
-		pMsg := ProducerMessage{Payload: []byte(msg)}
-		pMsgs[i] = pMsg
-	}
-	ids, err := rmq.Produce(channelName, pMsgs)
-	assert.Nil(t, err)
-	assert.Equal(t, len(ids), loopNum)
-
-	readerName, err := rmq.CreateReader(channelName, ids[loopNum-1], true, "cornercase")
-	assert.NoError(t, err)
-
-	ctx := context.Background()
-	msg, err := rmq.Next(ctx, channelName, readerName)
-	assert.NoError(t, err)
-	assert.Equal(t, msg.MsgID, ids[loopNum-1])
-
-	var extraIds []UniqueID
-	go func() {
-		time.Sleep(1 * time.Second)
-		extraMsgs := make([]ProducerMessage, 1)
-		msg := "extra_message"
-		extraMsgs[0] = ProducerMessage{Payload: []byte(msg)}
-		extraIds, _ = rmq.Produce(channelName, extraMsgs)
-		// assert.NoError(t, er)
-		assert.Equal(t, 1, len(extraIds))
-	}()
-
-	msg, err = rmq.Next(ctx, channelName, readerName)
-	assert.NoError(t, err)
-	assert.Equal(t, string(msg.Payload), "extra_message")
-}
-
 func TestRocksmq_GetLatestMsg(t *testing.T) {
 	ep := etcdEndpoints()
 	etcdCli, err := etcd.GetRemoteEtcdClient(ep)
@@ -953,13 +830,6 @@ func TestRocksmq_Close(t *testing.T) {
 
 	assert.Error(t, rmq.seek("", "", 0))
 	assert.Error(t, rmq.SeekToLatest("", ""))
-	_, err = rmq.CreateReader("", 0, false, "")
-	assert.Error(t, err)
-	rmq.ReaderSeek("", "", 0)
-	_, err = rmq.Next(nil, "", "")
-	assert.Error(t, err)
-	rmq.HasNext("", "")
-	rmq.CloseReader("", "")
 }
 
 func TestRocksmq_SeekWithNoConsumerError(t *testing.T) {
