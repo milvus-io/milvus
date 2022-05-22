@@ -61,6 +61,7 @@ endif()
 
 add_subdirectory( protobuf )
 add_subdirectory( boost_ext )
+add_subdirectory( arrow )
 
 # ******************************* Thridparty marisa ********************************
 # TODO: support apple & win.

@@ -20,6 +20,31 @@ add_library(milvus_common SHARED
         ${COMMON_SRC}
         )
 
-target_link_libraries(milvus_common milvus_utils milvus_config milvus_log knowhere milvus_proto yaml-cpp boost_bitset_ext)
+if ( MSYS )
+    target_link_libraries(milvus_common
+            milvus_utils
+            milvus_config
+            milvus_log
+            knowhere
+            milvus_proto
+            yaml-cpp
+            boost_bitset_ext
+            arrow
+            parquet
+            )
+else()
+    target_link_libraries(milvus_common
+            milvus_utils
+            milvus_config
+            milvus_log
+            knowhere
+            milvus_proto
+            yaml-cpp
+            boost_bitset_ext
+            arrow
+            parquet
+            arrow_bundled
+            )
+endif()
 
 install(TARGETS milvus_common DESTINATION lib)
