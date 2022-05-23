@@ -1438,8 +1438,7 @@ class TestUtilityAdvanced(TestcaseBase):
                 cnt += r.num_rows
         assert cnt == nb
 
-    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/16598")
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_get_growing_segment_info_after_load(self):
         """
         target: test get growing segment info
@@ -1453,6 +1452,7 @@ class TestUtilityAdvanced(TestcaseBase):
 
         collection_w.load()
         collection_w.insert(cf.gen_default_dataframe_data())
+        collection_w.search(cf.gen_vectors(1, ct.default_dim), default_field_name, ct.default_search_params, ct.default_limit)
         seg_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
         num_entities = 0
         for seg in seg_info:
