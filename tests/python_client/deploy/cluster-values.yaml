@@ -7,7 +7,7 @@ image:
     pullPolicy: IfNotPresent
 
 etcd:
-  replicaCount: 1
+  replicaCount: 3
 minio:
   resources:
     requests:
