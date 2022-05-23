@@ -31,7 +31,7 @@ const (
 	DefaultRetentionDuration = 3600 * 24 * 5
 
 	// DefaultIndexSliceSize defines the default slice size of index file when serializing.
-	DefaultIndexSliceSize = 4
+	DefaultIndexSliceSize = 16
 )
 
 // ComponentParam is used to quickly and easily access all components' configurations.
