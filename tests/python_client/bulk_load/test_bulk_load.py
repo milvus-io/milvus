@@ -516,7 +516,7 @@ class TestBulkLoad(TestcaseBase):
     @pytest.mark.parametrize("auto_id", [True, False])        # True, False
     @pytest.mark.parametrize("dim", [16])    # 16
     @pytest.mark.parametrize("entities", [100])    # 3000
-    @pytest.mark.parametrize("file_nums", [2])    # 10
+    @pytest.mark.parametrize("file_nums", [3])    # 10  # TODO: more after issue #17152 fixed
     @pytest.mark.parametrize("multi_folder", [True, False])    # True, False
     # TODO: reason="BulkloadIndexed cannot be reached for issue #16889")
     def test_float_vector_from_multi_files(self, row_based, auto_id, dim, entities, file_nums, multi_folder):
@@ -573,8 +573,9 @@ class TestBulkLoad(TestcaseBase):
                 assert failed_reason in state.infos.get("failed_reason", "")
         else:
             assert success
-            log.info(f" collection entities: {self.collection_wrap.num_entities}")
-            assert self.collection_wrap.num_entities == entities * file_nums
+            num_entities = self.collection_wrap.num_entities
+            log.info(f" collection entities: {num_entities}")
+            assert num_entities == entities * file_nums
 
             # verify index built
             # res, _ = self.utility_wrap.index_building_progress(c_name)
@@ -1751,8 +1752,7 @@ class TestBulkLoadAdvanced(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("auto_id", [True])
     @pytest.mark.parametrize("dim", [128])  # 128
-    @pytest.mark.parametrize("entities", [50000])  # 1m*3; 50k*20; 2m*3, 500k*4
-    @pytest.mark.xfail(reason="search fail for issue #16784")
+    @pytest.mark.parametrize("entities", [50000, 500000, 1000000])  # 1m*3; 50k*20; 2m*3, 500k*4
     def test_float_vector_from_multi_numpy_files(self, auto_id, dim, entities):
         """
         collection schema 1: [pk, float_vector]
@@ -1799,7 +1799,8 @@ class TestBulkLoadAdvanced(TestcaseBase):
 
         # verify imported data is available for search
         self.collection_wrap.load()
-        log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
+        loaded_segs = len(self.utility_wrap.get_query_segment_info(c_name)[0])
+        log.info(f"query seg info: {loaded_segs} segs loaded.")
         search_data = cf.gen_vectors(1, dim)
         search_params = {"metric_type": "L2", "params": {"nprobe": 2}}
         res, _ = self.collection_wrap.search(search_data, vec_field,
@@ -1810,8 +1811,5 @@ class TestBulkLoadAdvanced(TestcaseBase):
         # self.collection_wrap.query(expr=f"id in {ids}")
 
     """Validate data consistency and availability during import"""
-    @pytest.mark.tags(CaseLabel.L3)
-    def test_default(self):
-        pass
 
 
