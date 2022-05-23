@@ -75,11 +75,11 @@ func Mod24H(ts uint64) uint64 {
 	return (physical << logicalBits) | logical
 }
 
-// AddPhysicalTimeOnTs adds physical time on ts and return ts
-func AddPhysicalTimeOnTs(timeInMs int64, ts uint64) uint64 {
+// AddPhysicalDurationOnTs adds physical interval on ts
+func AddPhysicalDurationOnTs(ts uint64, duration time.Duration) uint64 {
+	msecs := duration.Milliseconds()
 	physical, logical := ParseHybridTs(ts)
-
-	return ComposeTS(physical+timeInMs, logical)
+	return ComposeTS(physical+msecs, logical)
 }
 
 // NewTSOKVBase returns a etcdkv.EtcdKV object

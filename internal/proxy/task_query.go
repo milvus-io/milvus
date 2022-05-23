@@ -7,7 +7,6 @@ import (
 	"regexp"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 
@@ -212,19 +211,16 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	if t.request.TravelTimestamp == 0 {
 		t.TravelTimestamp = t.BeginTs()
 	} else {
-		durationSeconds := tsoutil.CalculateDuration(t.BeginTs(), t.request.TravelTimestamp) / 1000
-		if durationSeconds > Params.CommonCfg.RetentionDuration {
-			duration := time.Second * time.Duration(durationSeconds)
-			return fmt.Errorf("only support to travel back to %s so far", duration.String())
-		}
 		t.TravelTimestamp = t.request.TravelTimestamp
 	}
 
-	if t.request.GuaranteeTimestamp == 0 {
-		t.GuaranteeTimestamp = t.BeginTs()
-	} else {
-		t.GuaranteeTimestamp = t.request.GuaranteeTimestamp
+	err = validateTravelTimestamp(t.TravelTimestamp, t.BeginTs())
+	if err != nil {
+		return err
 	}
+
+	guaranteeTs := t.request.GetGuaranteeTimestamp()
+	t.GuaranteeTimestamp = parseGuaranteeTs(guaranteeTs, t.BeginTs())
 
 	deadline, ok := t.TraceCtx().Deadline()
 	if ok {

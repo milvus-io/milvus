@@ -28,8 +28,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
-	"github.com/milvus-io/milvus/internal/util/tsoutil"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 type queryShard struct {
@@ -165,10 +163,5 @@ func (q *queryShard) getServiceableTime(tp tsType) (Timestamp, error) {
 	if err != nil {
 		return 0, err
 	}
-	gracefulTimeInMilliSecond := Params.QueryNodeCfg.GracefulTime
-	gracefulTime := typeutil.ZeroTimestamp
-	if gracefulTimeInMilliSecond > 0 {
-		gracefulTime = tsoutil.ComposeTS(gracefulTimeInMilliSecond, 0)
-	}
-	return (ts + gracefulTime), nil
+	return ts, nil
 }

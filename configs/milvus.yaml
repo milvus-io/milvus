@@ -153,7 +153,6 @@ queryCoord:
 # Related configuration of queryNode, used to run hybrid search between vector and scalar data.
 queryNode:
   cacheSize: 32 # GB, default 32 GB, `cacheSize` is the memory used for caching data for faster query. The `cacheSize` must be less than system memory size.
-  gracefulTime: 0 # Minimum time before the newly inserted data can be searched (in ms)
   port: 21123
 
   stats:
@@ -291,6 +290,7 @@ common:
   retentionDuration: 432000 # 5 days in seconds
   entityExpiration:  -1     # Entity expiration in seconds, CAUTION make sure entityExpiration >= retentionDuration and -1 means never expire
 
+  gracefulTime: 5000 # milliseconds. it represents the interval (in ms) by which the request arrival time needs to be subtracted in the case of Bounded Consistency.
 
   # Default value: auto
   # Valid values: [auto, avx512, avx2, avx, sse4_2]

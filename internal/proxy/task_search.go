@@ -7,7 +7,6 @@ import (
 	"regexp"
 	"strconv"
 	"sync"
-	"time"
 
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 
@@ -227,22 +226,21 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		log.Debug("Proxy::searchTask::PreExecute", zap.Any("plan.OutputFieldIds", plan.OutputFieldIds),
 			zap.Any("plan", plan.String()))
 	}
+
 	travelTimestamp := t.request.TravelTimestamp
 	if travelTimestamp == 0 {
 		travelTimestamp = typeutil.MaxTimestamp
-	} else {
-		durationSeconds := tsoutil.CalculateDuration(t.BeginTs(), travelTimestamp) / 1000
-		if durationSeconds > Params.CommonCfg.RetentionDuration {
-			duration := time.Second * time.Duration(durationSeconds)
-			return fmt.Errorf("only support to travel back to %s so far", duration.String())
-		}
 	}
-	guaranteeTimestamp := t.request.GuaranteeTimestamp
-	if guaranteeTimestamp == 0 {
-		guaranteeTimestamp = t.BeginTs()
+	err = validateTravelTimestamp(travelTimestamp, t.BeginTs())
+	if err != nil {
+		return err
 	}
 	t.SearchRequest.TravelTimestamp = travelTimestamp
-	t.SearchRequest.GuaranteeTimestamp = guaranteeTimestamp
+
+	guaranteeTs := t.request.GetGuaranteeTimestamp()
+	guaranteeTs = parseGuaranteeTs(guaranteeTs, t.BeginTs())
+	t.SearchRequest.GuaranteeTimestamp = guaranteeTs
+
 	deadline, ok := t.TraceCtx().Deadline()
 	if ok {
 		t.SearchRequest.TimeoutTimestamp = tsoutil.ComposeTSByTime(deadline, 0)
