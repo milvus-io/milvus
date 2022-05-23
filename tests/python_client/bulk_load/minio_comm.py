@@ -25,7 +25,7 @@ def copy_files_to_bucket(client, r_source, target_files, bucket_name, force=Fals
             res = client.fput_object(bucket_name, target_file, f"{r_source}/{target_file}")
             log.info(f"copied {res.object_name} to minio")
         else:
-            log.info(f"skip copy {res.object_name} to minio")
+            log.info(f"skip copy {target_file} to minio")
 
 
 def copy_files_to_minio(host, r_source, files, bucket_name, access_key="minioadmin", secret_key="minioadmin",
