@@ -19,8 +19,12 @@ package datanode
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"sync"
 	"sync/atomic"
+
+	"github.com/opentracing/opentracing-go"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
@@ -30,9 +34,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/trace"
-	"github.com/opentracing/opentracing-go"
-	"go.uber.org/zap"
 )
 
 // make sure ddNode implements flowgraph.Node
@@ -55,6 +58,7 @@ var _ flowgraph.Node = (*ddNode)(nil)
 type ddNode struct {
 	BaseNode
 
+	ctx          context.Context
 	collectionID UniqueID
 
 	segID2SegInfo   sync.Map // segment ID to *SegmentInfo
@@ -81,7 +85,11 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 
 	msMsg, ok := in[0].(*MsgStreamMsg)
 	if !ok {
-		log.Warn("Type assertion failed for MsgStreamMsg")
+		if in[0] == nil {
+			log.Debug("type assertion failed for MsgStreamMsg because it's nil")
+		} else {
+			log.Warn("type assertion failed for MsgStreamMsg", zap.String("name", reflect.TypeOf(in[0]).Name()))
+		}
 		return []Msg{}
 	}
 
@@ -163,12 +171,13 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			fgMsg.deleteMessages = append(fgMsg.deleteMessages, dmsg)
 		}
 	}
-	err := ddn.forwardDeleteMsg(forwardMsgs, msMsg.TimestampMin(), msMsg.TimestampMax())
+	err := retry.Do(ddn.ctx, func() error {
+		return ddn.forwardDeleteMsg(forwardMsgs, msMsg.TimestampMin(), msMsg.TimestampMax())
+	}, flowGraphRetryOpt)
 	if err != nil {
-		// TODO: proper deal with error
-		log.Warn("DDNode forward delete msg failed",
-			zap.String("vChannelName", ddn.vchannelName),
-			zap.Error(err))
+		err = fmt.Errorf("DDNode forward delete msg failed, vChannel = %s, err = %s", ddn.vchannelName, err)
+		log.Error(err.Error())
+		panic(err)
 	}
 
 	fgMsg.startPositions = append(fgMsg.startPositions, msMsg.StartPositions()...)
@@ -301,6 +310,7 @@ func newDDNode(ctx context.Context, collID UniqueID, vchanInfo *datapb.VchannelI
 	deltaMsgStream.Start()
 
 	dd := &ddNode{
+		ctx:                ctx,
 		BaseNode:           baseNode,
 		collectionID:       collID,
 		flushedSegments:    fs,

@@ -23,6 +23,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/retry"
+
+	"github.com/milvus-io/milvus/internal/util/typeutil"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -199,6 +203,34 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	inMsg = genFlowGraphInsertMsg(insertChannelName)
 	inMsg.dropCollection = true
 	assert.NotPanics(t, func() { iBNode.Operate([]flowgraph.Msg{&inMsg}) })
+
+	// test consume old message
+	inMsg = genFlowGraphInsertMsg(insertChannelName)
+	timestampBak := iBNode.lastTimestamp
+	iBNode.lastTimestamp = typeutil.MaxTimestamp
+	assert.Panics(t, func() { iBNode.Operate([]flowgraph.Msg{&inMsg}) })
+	iBNode.lastTimestamp = timestampBak
+
+	// test updateSegStatesInReplica failed
+	inMsg = genFlowGraphInsertMsg(insertChannelName)
+	inMsg.insertMessages[0].CollectionID = UniqueID(-1)
+	inMsg.insertMessages[0].SegmentID = UniqueID(-1)
+	assert.NoError(t, err)
+	assert.Panics(t, func() { iBNode.Operate([]flowgraph.Msg{&inMsg}) })
+
+	// test bufferInsertMsg failed
+	inMsg = genFlowGraphInsertMsg(insertChannelName)
+	inMsg.insertMessages[0].Timestamps = []Timestamp{1, 2}
+	inMsg.insertMessages[0].RowIDs = []int64{1}
+	assert.Panics(t, func() { iBNode.Operate([]flowgraph.Msg{&inMsg}) })
+
+	// test flushBufferData failed
+	flowGraphRetryOpt = retry.Attempts(1)
+	inMsg = genFlowGraphInsertMsg(insertChannelName)
+	iBNode.flushManager = &mockFlushManager{returnError: true}
+	iBNode.insertBuffer.Store(inMsg.insertMessages[0].SegmentID, &BufferData{})
+	assert.Panics(t, func() { iBNode.Operate([]flowgraph.Msg{&inMsg}) })
+	iBNode.flushManager = fm
 }
 
 /*
@@ -464,7 +496,8 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 
 		for _, im := range fgm.segmentsToFlush {
 			// send del done signal
-			fm.flushDelData(nil, im, fgm.endPositions[0])
+			err = fm.flushDelData(nil, im, fgm.endPositions[0])
+			assert.NoError(t, err)
 		}
 		wg.Wait()
 		require.Equal(t, 0, len(colRep.newSegments))
@@ -573,7 +606,8 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 		wg.Add(len(fgm.segmentsToFlush))
 		for _, im := range fgm.segmentsToFlush {
 			// send del done signal
-			fm.flushDelData(nil, im, fgm.endPositions[0])
+			err = fm.flushDelData(nil, im, fgm.endPositions[0])
+			assert.NoError(t, err)
 		}
 		wg.Wait()
 		require.Equal(t, 0, len(colRep.newSegments))

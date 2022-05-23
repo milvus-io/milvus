@@ -973,7 +973,7 @@ func genSimpleInsertMsg(schema *schemapb.CollectionSchema, numRows int) (*msgstr
 	return &msgstream.InsertMsg{
 		BaseMsg: genMsgStreamBaseMsg(),
 		InsertRequest: internalpb.InsertRequest{
-			Base:           genCommonMsgBase(commonpb.MsgType_Retrieve),
+			Base:           genCommonMsgBase(commonpb.MsgType_Insert),
 			CollectionName: defaultCollectionName,
 			PartitionName:  defaultPartitionName,
 			CollectionID:   defaultCollectionID,

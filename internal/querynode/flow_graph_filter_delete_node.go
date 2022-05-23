@@ -81,12 +81,18 @@ func (fddNode *filterDeleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	for _, msg := range msgStreamMsg.TsMessages() {
 		switch msg.Type() {
 		case commonpb.MsgType_Delete:
-			resMsg := fddNode.filterInvalidDeleteMessage(msg.(*msgstream.DeleteMsg))
+			resMsg, err := fddNode.filterInvalidDeleteMessage(msg.(*msgstream.DeleteMsg))
+			if err != nil {
+				// error occurs when missing meta info or data is misaligned, should not happen
+				err = fmt.Errorf("filterInvalidDeleteMessage failed, err = %s", err)
+				log.Error(err.Error())
+				panic(err)
+			}
 			if resMsg != nil {
 				dMsg.deleteMessages = append(dMsg.deleteMessages, resMsg)
 			}
 		default:
-			log.Warn("Non supporting", zap.Int32("message type", int32(msg.Type())))
+			log.Warn("invalid message type in filterDeleteNode", zap.String("message type", msg.Type().String()))
 		}
 	}
 	var res Msg = &dMsg
@@ -97,11 +103,9 @@ func (fddNode *filterDeleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 }
 
 // filterInvalidDeleteMessage would filter invalid delete messages
-func (fddNode *filterDeleteNode) filterInvalidDeleteMessage(msg *msgstream.DeleteMsg) *msgstream.DeleteMsg {
+func (fddNode *filterDeleteNode) filterInvalidDeleteMessage(msg *msgstream.DeleteMsg) (*msgstream.DeleteMsg, error) {
 	if err := msg.CheckAligned(); err != nil {
-		// TODO: what if the messages are misaligned? Here, we ignore those messages and print error
-		log.Warn("misaligned delete messages detected", zap.Error(err))
-		return nil
+		return nil, fmt.Errorf("CheckAligned failed, err = %s", err)
 	}
 
 	sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
@@ -109,16 +113,29 @@ func (fddNode *filterDeleteNode) filterInvalidDeleteMessage(msg *msgstream.Delet
 	defer sp.Finish()
 
 	if msg.CollectionID != fddNode.collectionID {
-		return nil
+		return nil, nil
 	}
 
 	if len(msg.Timestamps) <= 0 {
 		log.Debug("filter invalid delete message, no message",
 			zap.Any("collectionID", msg.CollectionID),
 			zap.Any("partitionID", msg.PartitionID))
-		return nil
+		return nil, nil
 	}
-	return msg
+
+	// check if collection exists
+	col, err := fddNode.replica.getCollectionByID(msg.CollectionID)
+	if err != nil {
+		// QueryNode should add collection before start flow graph
+		return nil, fmt.Errorf("filter invalid delete message, collection does not exist, collectionID = %d", msg.CollectionID)
+	}
+	if col.getLoadType() == loadTypePartition {
+		if !fddNode.replica.hasPartition(msg.PartitionID) {
+			// filter out msg which not belongs to the loaded partitions
+			return nil, nil
+		}
+	}
+	return msg, nil
 }
 
 // newFilteredDeleteNode returns a new filterDeleteNode

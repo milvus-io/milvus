@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/util/retry"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -148,7 +150,10 @@ func TestFlowGraph_DDNode_Operate(to *testing.T) {
 				factory := dependency.NewDefaultFactory(true)
 				deltaStream, err := factory.NewMsgStream(context.Background())
 				assert.Nil(t, err)
+				deltaStream.SetRepackFunc(msgstream.DefaultRepackFunc)
+				deltaStream.AsProducer([]string{"DataNode-test-delta-channel-0"})
 				ddn := ddNode{
+					ctx:                context.Background(),
 					collectionID:       test.ddnCollID,
 					deltaMsgStream:     deltaStream,
 					vchannelName:       "ddn_drop_msg",
@@ -208,8 +213,11 @@ func TestFlowGraph_DDNode_Operate(to *testing.T) {
 				factory := dependency.NewDefaultFactory(true)
 				deltaStream, err := factory.NewMsgStream(context.Background())
 				assert.Nil(t, err)
+				deltaStream.SetRepackFunc(msgstream.DefaultRepackFunc)
+				deltaStream.AsProducer([]string{"DataNode-test-delta-channel-0"})
 				// Prepare ddNode states
 				ddn := ddNode{
+					ctx:             context.Background(),
 					flushedSegments: []*datapb.SegmentInfo{fs},
 					collectionID:    test.ddnCollID,
 					deltaMsgStream:  deltaStream,
@@ -254,15 +262,21 @@ func TestFlowGraph_DDNode_Operate(to *testing.T) {
 				factory := dependency.NewDefaultFactory(true)
 				deltaStream, err := factory.NewMsgStream(context.Background())
 				assert.Nil(t, err)
+				deltaStream.SetRepackFunc(msgstream.DefaultRepackFunc)
+				deltaStream.AsProducer([]string{"DataNode-test-delta-channel-0"})
 				// Prepare ddNode states
 				ddn := ddNode{
+					ctx:            context.Background(),
 					collectionID:   test.ddnCollID,
 					deltaMsgStream: deltaStream,
 				}
 
 				// Prepare delete messages
 				var dMsg msgstream.TsMsg = &msgstream.DeleteMsg{
-					BaseMsg: msgstream.BaseMsg{EndTimestamp: test.MsgEndTs},
+					BaseMsg: msgstream.BaseMsg{
+						EndTimestamp: test.MsgEndTs,
+						HashValues:   []uint32{0},
+					},
 					DeleteRequest: internalpb.DeleteRequest{
 						Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_Delete},
 						CollectionID: test.inMsgCollID,
@@ -276,6 +290,39 @@ func TestFlowGraph_DDNode_Operate(to *testing.T) {
 				assert.Equal(t, test.expectedRtLen, len(rt[0].(*flowGraphMsg).deleteMessages))
 			})
 		}
+	})
+
+	to.Run("Test forwardDeleteMsg failed", func(te *testing.T) {
+		factory := dependency.NewDefaultFactory(true)
+		deltaStream, err := factory.NewMsgStream(context.Background())
+		assert.Nil(to, err)
+		deltaStream.SetRepackFunc(msgstream.DefaultRepackFunc)
+		// Prepare ddNode states
+		ddn := ddNode{
+			ctx:            context.Background(),
+			collectionID:   1,
+			deltaMsgStream: deltaStream,
+		}
+
+		// Prepare delete messages
+		var dMsg msgstream.TsMsg = &msgstream.DeleteMsg{
+			BaseMsg: msgstream.BaseMsg{
+				EndTimestamp: 2000,
+				HashValues:   []uint32{0},
+			},
+			DeleteRequest: internalpb.DeleteRequest{
+				Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_Delete},
+				CollectionID: 1,
+			},
+		}
+		tsMessages := []msgstream.TsMsg{dMsg}
+		var msgStreamMsg Msg = flowgraph.GenerateMsgStreamMsg(tsMessages, 0, 0, nil, nil)
+
+		// Test
+		flowGraphRetryOpt = retry.Attempts(1)
+		assert.Panics(te, func() {
+			ddn.Operate([]Msg{msgStreamMsg})
+		})
 	})
 }
 

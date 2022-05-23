@@ -596,7 +596,7 @@ func (s *Segment) segmentInsert(offset int64, entityIDs []UniqueID, timestamps [
 	s.segPtrMu.RLock()
 	defer s.segPtrMu.RUnlock() // thread safe guaranteed by segCore, use RLock
 	if s.segmentType != segmentTypeGrowing {
-		return nil
+		return fmt.Errorf("unexpected segmentType when segmentInsert, segmentType = %s", s.segmentType.String())
 	}
 
 	if s.segmentPtr == nil {

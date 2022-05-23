@@ -18,6 +18,7 @@ package datanode
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"testing"
 	"time"
@@ -862,15 +863,22 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 
 type mockFlushManager struct {
 	sleepSeconds int32
+	returnError  bool
 }
 
 var _ flushManager = (*mockFlushManager)(nil)
 
 func (mfm *mockFlushManager) flushBufferData(data *BufferData, segmentID UniqueID, flushed bool, dropped bool, pos *internalpb.MsgPosition) error {
+	if mfm.returnError {
+		return fmt.Errorf("mock error")
+	}
 	return nil
 }
 
 func (mfm *mockFlushManager) flushDelData(data *DelDataBuf, segmentID UniqueID, pos *internalpb.MsgPosition) error {
+	if mfm.returnError {
+		return fmt.Errorf("mock error")
+	}
 	return nil
 }
 

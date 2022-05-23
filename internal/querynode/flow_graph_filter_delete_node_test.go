@@ -17,7 +17,6 @@
 package querynode
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -28,7 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 )
 
-func getFilterDeleteNode(ctx context.Context) (*filterDeleteNode, error) {
+func getFilterDeleteNode() (*filterDeleteNode, error) {
 	historical, err := genSimpleReplica()
 	if err != nil {
 		return nil, err
@@ -39,61 +38,77 @@ func getFilterDeleteNode(ctx context.Context) (*filterDeleteNode, error) {
 }
 
 func TestFlowGraphFilterDeleteNode_filterDeleteNode(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	fg, err := getFilterDeleteNode(ctx)
+	fg, err := getFilterDeleteNode()
 	assert.NoError(t, err)
 	fg.Name()
 }
 
 func TestFlowGraphFilterDeleteNode_filterInvalidDeleteMessage(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	t.Run("delete valid test", func(t *testing.T) {
 		msg := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
-		fg, err := getFilterDeleteNode(ctx)
+		fg, err := getFilterDeleteNode()
 		assert.NoError(t, err)
-		res := fg.filterInvalidDeleteMessage(msg)
+		res, err := fg.filterInvalidDeleteMessage(msg)
+		assert.NoError(t, err)
 		assert.NotNil(t, res)
 	})
 
 	t.Run("test delete no collection", func(t *testing.T) {
 		msg := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
 		msg.CollectionID = UniqueID(1003)
-		fg, err := getFilterDeleteNode(ctx)
+		fg, err := getFilterDeleteNode()
 		assert.NoError(t, err)
-		res := fg.filterInvalidDeleteMessage(msg)
+		fg.collectionID = UniqueID(1003)
+		res, err := fg.filterInvalidDeleteMessage(msg)
+		assert.Error(t, err)
 		assert.Nil(t, res)
+		fg.collectionID = defaultCollectionID
 	})
 
 	t.Run("test delete not target collection", func(t *testing.T) {
 		msg := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
-		fg, err := getFilterDeleteNode(ctx)
+		fg, err := getFilterDeleteNode()
 		assert.NoError(t, err)
 		fg.collectionID = UniqueID(1000)
-		res := fg.filterInvalidDeleteMessage(msg)
+		res, err := fg.filterInvalidDeleteMessage(msg)
+		assert.NoError(t, err)
 		assert.Nil(t, res)
 	})
 
 	t.Run("test delete no data", func(t *testing.T) {
 		msg := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
-		fg, err := getFilterDeleteNode(ctx)
+		fg, err := getFilterDeleteNode()
 		assert.NoError(t, err)
 		msg.Timestamps = make([]Timestamp, 0)
 		msg.Int64PrimaryKeys = make([]IntPrimaryKey, 0)
-		res := fg.filterInvalidDeleteMessage(msg)
+		msg.PrimaryKeys = &schemapb.IDs{}
+		msg.NumRows = 0
+		res, err := fg.filterInvalidDeleteMessage(msg)
+		assert.NoError(t, err)
 		assert.Nil(t, res)
 		msg.PrimaryKeys = storage.ParsePrimaryKeys2IDs([]primaryKey{})
-		res = fg.filterInvalidDeleteMessage(msg)
+		res, err = fg.filterInvalidDeleteMessage(msg)
+		assert.NoError(t, err)
+		assert.Nil(t, res)
+	})
+
+	t.Run("test not target partition", func(t *testing.T) {
+		msg := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
+		fg, err := getFilterDeleteNode()
+		assert.NoError(t, err)
+		col, err := fg.replica.getCollectionByID(defaultCollectionID)
+		assert.NoError(t, err)
+		col.setLoadType(loadTypePartition)
+		err = fg.replica.removePartition(defaultPartitionID)
+		assert.NoError(t, err)
+
+		res, err := fg.filterInvalidDeleteMessage(msg)
+		assert.NoError(t, err)
 		assert.Nil(t, res)
 	})
 }
 
 func TestFlowGraphFilterDeleteNode_Operate(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	genFilterDeleteMsg := func() []flowgraph.Msg {
 		dMsg := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
 		msg := flowgraph.GenerateMsgStreamMsg([]msgstream.TsMsg{dMsg}, 0, 1000, nil, nil)
@@ -102,7 +117,7 @@ func TestFlowGraphFilterDeleteNode_Operate(t *testing.T) {
 
 	t.Run("valid test", func(t *testing.T) {
 		msg := genFilterDeleteMsg()
-		fg, err := getFilterDeleteNode(ctx)
+		fg, err := getFilterDeleteNode()
 		assert.NoError(t, err)
 		res := fg.Operate(msg)
 		assert.NotNil(t, res)
@@ -110,11 +125,34 @@ func TestFlowGraphFilterDeleteNode_Operate(t *testing.T) {
 
 	t.Run("invalid input length", func(t *testing.T) {
 		msg := genFilterDeleteMsg()
-		fg, err := getFilterDeleteNode(ctx)
+		fg, err := getFilterDeleteNode()
 		assert.NoError(t, err)
 		var m flowgraph.Msg
 		msg = append(msg, m)
 		res := fg.Operate(msg)
+		assert.NotNil(t, res)
+	})
+
+	t.Run("filterInvalidDeleteMessage failed", func(t *testing.T) {
+		dMsg := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
+		dMsg.NumRows = 0
+		msg := flowgraph.GenerateMsgStreamMsg([]msgstream.TsMsg{dMsg}, 0, 1000, nil, nil)
+		fg, err := getFilterDeleteNode()
+		assert.NoError(t, err)
+		m := []flowgraph.Msg{msg}
+		assert.Panics(t, func() {
+			fg.Operate(m)
+		})
+	})
+
+	t.Run("invalid msgType", func(t *testing.T) {
+		iMsg, err := genSimpleInsertMsg(genTestCollectionSchema(schemapb.DataType_Int64), defaultDelLength)
+		assert.NoError(t, err)
+		msg := flowgraph.GenerateMsgStreamMsg([]msgstream.TsMsg{iMsg}, 0, 1000, nil, nil)
+
+		fg, err := getFilterDeleteNode()
+		assert.NoError(t, err)
+		res := fg.Operate([]flowgraph.Msg{msg})
 		assert.NotNil(t, res)
 	})
 }

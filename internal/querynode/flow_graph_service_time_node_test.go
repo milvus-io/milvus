@@ -19,6 +19,8 @@ package querynode
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 )
 
@@ -78,7 +80,9 @@ func TestServiceTimeNode_Operate(t *testing.T) {
 				timestampMax: 1000,
 			},
 		}
-		in := []flowgraph.Msg{msg, msg}
-		node.Operate(in)
+		in := []flowgraph.Msg{msg}
+		assert.Panics(t, func() {
+			node.Operate(in)
+		})
 	})
 }
