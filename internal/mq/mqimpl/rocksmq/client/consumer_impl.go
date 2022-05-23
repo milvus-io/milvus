@@ -128,9 +128,10 @@ func (c *consumer) Seek(id UniqueID) error { //nolint:govet
 
 // Close destroy current consumer in rocksmq
 func (c *consumer) Close() {
+	// TODO should panic?
 	err := c.client.server.DestroyConsumerGroup(c.topic, c.consumerName)
 	if err != nil {
-		log.Debug("Consumer close failed", zap.Any("topicName", c.topic), zap.Any("groupName", c.consumerName), zap.Any("error", err))
+		log.Warn("Consumer close failed", zap.Any("topicName", c.topic), zap.Any("groupName", c.consumerName), zap.Any("error", err))
 	}
 }
 
