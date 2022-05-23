@@ -217,6 +217,12 @@ func (it *IndexBuildTask) saveIndexMeta(ctx context.Context) error {
 			panic(errMsg)
 		}
 
+		if it.internalErr != nil {
+			log.Warn("IndexNode IndexBuildTask internal err is not nil, mark the task as retry",
+				zap.Int64("buildID", it.req.IndexBuildID))
+			it.SetState(TaskStateRetry)
+		}
+
 		taskState := it.updateTaskState(indexMeta)
 		if taskState == TaskStateAbandon {
 			log.Info("IndexNode IndexBuildTask saveIndexMeta", zap.String("TaskState", taskState.String()),
