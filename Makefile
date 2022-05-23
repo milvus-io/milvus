@@ -237,6 +237,9 @@ clean:
 	@rm -rf cmake_build
 	@rm -rf cwrapper_rocksdb_build
 	@rm -rf cwrapper_build
+	@rm -rf internal/storage/cwrapper/output
+	@rm -rf internal/core/output
+	@rm -rf internal/kv/rocksdb/cwrapper/output
 
 milvus-tools: print-build-info
 	@echo "Building tools ..."
@@ -244,7 +247,7 @@ milvus-tools: print-build-info
 		-ldflags="-X 'main.BuildTags=$(BUILD_TAGS)' -X 'main.BuildTime=$(BUILD_TIME)' -X 'main.GitCommit=$(GIT_COMMIT)' -X 'main.GoVersion=$(GO_VERSION)'" \
 		-o $(INSTALL_PATH)/tools $(PWD)/cmd/tools/* 1>/dev/null
 
-rpm-setup: 
+rpm-setup:
 	@echo "Setuping rpm env ...;"
 	@build/rpm/setup-env.sh
 
