@@ -251,6 +251,16 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	t.DbID = 0 // todo
 	t.SearchRequest.Dsl = t.request.Dsl
 	t.SearchRequest.PlaceholderGroup = t.request.PlaceholderGroup
+	if t.request.GetNq() == 0 {
+		x := &commonpb.PlaceholderGroup{}
+		err := proto.Unmarshal(t.request.GetPlaceholderGroup(), x)
+		if err != nil {
+			return err
+		}
+		for _, h := range x.GetPlaceholders() {
+			t.request.Nq += int64(len(h.Values))
+		}
+	}
 	t.SearchRequest.Nq = t.request.GetNq()
 	log.Info("search PreExecute done.",
 		zap.Any("requestID", t.Base.MsgID), zap.Any("requestType", "search"))
