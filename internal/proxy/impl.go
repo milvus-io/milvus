@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util"
 
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
@@ -38,10 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/crypto"
-	"github.com/milvus-io/milvus/internal/util/distance"
-	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
@@ -3037,16 +3035,6 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 			Status: unhealthyStatus(),
 		}, nil
 	}
-	param, _ := funcutil.GetAttrByKeyFromRepeatedKV("metric", request.GetParams())
-	metric, err := distance.ValidateMetricType(param)
-	if err != nil {
-		return &milvuspb.CalcDistanceResults{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
-		}, nil
-	}
 
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-CalcDistance")
 	defer sp.Finish()
@@ -3080,15 +3068,15 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 			queryShardPolicy:   roundRobinPolicy,
 		}
 
+		items := []zapcore.Field{
+			zap.String("collection", queryRequest.CollectionName),
+			zap.Any("partitions", queryRequest.PartitionNames),
+			zap.Any("OutputFields", queryRequest.OutputFields),
+		}
+
 		err := node.sched.dqQueue.Enqueue(qt)
 		if err != nil {
-			log.Debug("CalcDistance queryTask failed to enqueue",
-				zap.Error(err),
-				zap.String("traceID", traceID),
-				zap.String("role", typeutil.ProxyRole),
-				zap.String("db", queryRequest.DbName),
-				zap.String("collection", queryRequest.CollectionName),
-				zap.Any("partitions", queryRequest.PartitionNames))
+			log.Error("CalcDistance queryTask failed to enqueue", append(items, zap.Error(err))...)
 
 			return &milvuspb.QueryResults{
 				Status: &commonpb.Status{
@@ -3098,28 +3086,11 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 			}, err
 		}
 
-		log.Debug("CalcDistance queryTask enqueued",
-			zap.String("traceID", traceID),
-			zap.String("role", typeutil.ProxyRole),
-			zap.Int64("msgID", qt.Base.MsgID),
-			zap.Uint64("timestamp", qt.Base.Timestamp),
-			zap.String("db", queryRequest.DbName),
-			zap.String("collection", queryRequest.CollectionName),
-			zap.Any("partitions", queryRequest.PartitionNames),
-			zap.Any("OutputFields", queryRequest.OutputFields))
+		log.Debug("CalcDistance queryTask enqueued", items...)
 
 		err = qt.WaitToFinish()
 		if err != nil {
-			log.Debug("CalcDistance queryTask failed to WaitToFinish",
-				zap.Error(err),
-				zap.String("traceID", traceID),
-				zap.String("role", typeutil.ProxyRole),
-				zap.Int64("msgID", qt.Base.MsgID),
-				zap.Uint64("timestamp", qt.Base.Timestamp),
-				zap.String("db", queryRequest.DbName),
-				zap.String("collection", queryRequest.CollectionName),
-				zap.Any("partitions", queryRequest.PartitionNames),
-				zap.Any("OutputFields", queryRequest.OutputFields))
+			log.Error("CalcDistance queryTask failed to WaitToFinish", append(items, zap.Error(err))...)
 
 			return &milvuspb.QueryResults{
 				Status: &commonpb.Status{
@@ -3129,15 +3100,7 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 			}, err
 		}
 
-		log.Debug("CalcDistance queryTask Done",
-			zap.String("traceID", traceID),
-			zap.String("role", typeutil.ProxyRole),
-			zap.Int64("msgID", qt.Base.MsgID),
-			zap.Uint64("timestamp", qt.Base.Timestamp),
-			zap.String("db", queryRequest.DbName),
-			zap.String("collection", queryRequest.CollectionName),
-			zap.Any("partitions", queryRequest.PartitionNames),
-			zap.Any("OutputFields", queryRequest.OutputFields))
+		log.Debug("CalcDistance queryTask Done", items...)
 
 		return &milvuspb.QueryResults{
 			Status:     qt.result.Status,
@@ -3145,328 +3108,13 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 		}, nil
 	}
 
-	// the vectors retrieved are random order, we need re-arrange the vectors by the order of input ids
-	arrangeFunc := func(ids *milvuspb.VectorIDs, retrievedFields []*schemapb.FieldData) (*schemapb.VectorField, error) {
-		var retrievedIds *schemapb.ScalarField
-		var retrievedVectors *schemapb.VectorField
-		for _, fieldData := range retrievedFields {
-			if fieldData.FieldName == ids.FieldName {
-				retrievedVectors = fieldData.GetVectors()
-			}
-			if fieldData.Type == schemapb.DataType_Int64 {
-				retrievedIds = fieldData.GetScalars()
-			}
-		}
-
-		if retrievedIds == nil || retrievedVectors == nil {
-			return nil, errors.New("failed to fetch vectors")
-		}
-
-		dict := make(map[int64]int)
-		for index, id := range retrievedIds.GetLongData().Data {
-			dict[id] = index
-		}
-
-		inputIds := ids.IdArray.GetIntId().Data
-		if retrievedVectors.GetFloatVector() != nil {
-			floatArr := retrievedVectors.GetFloatVector().Data
-			element := retrievedVectors.GetDim()
-			result := make([]float32, 0, int64(len(inputIds))*element)
-			for _, id := range inputIds {
-				index, ok := dict[id]
-				if !ok {
-					log.Error("id not found in CalcDistance", zap.Int64("id", id))
-					return nil, errors.New("failed to fetch vectors by id: " + fmt.Sprintln(id))
-				}
-				result = append(result, floatArr[int64(index)*element:int64(index+1)*element]...)
-			}
-
-			return &schemapb.VectorField{
-				Dim: element,
-				Data: &schemapb.VectorField_FloatVector{
-					FloatVector: &schemapb.FloatArray{
-						Data: result,
-					},
-				},
-			}, nil
-		}
-
-		if retrievedVectors.GetBinaryVector() != nil {
-			binaryArr := retrievedVectors.GetBinaryVector()
-			element := retrievedVectors.GetDim()
-			if element%8 != 0 {
-				element = element + 8 - element%8
-			}
-
-			result := make([]byte, 0, int64(len(inputIds))*element)
-			for _, id := range inputIds {
-				index, ok := dict[id]
-				if !ok {
-					log.Error("id not found in CalcDistance", zap.Int64("id", id))
-					return nil, errors.New("failed to fetch vectors by id: " + fmt.Sprintln(id))
-				}
-				result = append(result, binaryArr[int64(index)*element:int64(index+1)*element]...)
-			}
-
-			return &schemapb.VectorField{
-				Dim: element * 8,
-				Data: &schemapb.VectorField_BinaryVector{
-					BinaryVector: result,
-				},
-			}, nil
-		}
-
-		return nil, errors.New("failed to fetch vectors")
+	// calcDistanceTask is not a standard task, no need to enqueue
+	task := &calcDistanceTask{
+		traceID:   traceID,
+		queryFunc: query,
 	}
 
-	log.Debug("CalcDistance received",
-		zap.String("traceID", traceID),
-		zap.String("role", typeutil.ProxyRole),
-		zap.String("metric", metric))
-
-	vectorsLeft := request.GetOpLeft().GetDataArray()
-	opLeft := request.GetOpLeft().GetIdArray()
-	if opLeft != nil {
-		log.Debug("OpLeft IdArray not empty, Get vectors by id",
-			zap.String("traceID", traceID),
-			zap.String("role", typeutil.ProxyRole))
-
-		result, err := query(opLeft)
-		if err != nil {
-			log.Debug("Failed to get left vectors by id",
-				zap.Error(err),
-				zap.String("traceID", traceID),
-				zap.String("role", typeutil.ProxyRole))
-
-			return &milvuspb.CalcDistanceResults{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_UnexpectedError,
-					Reason:    err.Error(),
-				},
-			}, nil
-		}
-
-		log.Debug("OpLeft IdArray not empty, Get vectors by id done",
-			zap.String("traceID", traceID),
-			zap.String("role", typeutil.ProxyRole))
-
-		vectorsLeft, err = arrangeFunc(opLeft, result.FieldsData)
-		if err != nil {
-			log.Debug("Failed to re-arrange left vectors",
-				zap.Error(err),
-				zap.String("traceID", traceID),
-				zap.String("role", typeutil.ProxyRole))
-
-			return &milvuspb.CalcDistanceResults{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_UnexpectedError,
-					Reason:    err.Error(),
-				},
-			}, nil
-		}
-
-		log.Debug("Re-arrange left vectors done",
-			zap.String("traceID", traceID),
-			zap.String("role", typeutil.ProxyRole))
-	}
-
-	if vectorsLeft == nil {
-		msg := "Left vectors array is empty"
-		log.Debug(msg,
-			zap.String("traceID", traceID),
-			zap.String("role", typeutil.ProxyRole))
-
-		return &milvuspb.CalcDistanceResults{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    msg,
-			},
-		}, nil
-	}
-
-	vectorsRight := request.GetOpRight().GetDataArray()
-	opRight := request.GetOpRight().GetIdArray()
-	if opRight != nil {
-		log.Debug("OpRight IdArray not empty, Get vectors by id",
-			zap.String("traceID", traceID),
-			zap.String("role", typeutil.ProxyRole))
-
-		result, err := query(opRight)
-		if err != nil {
-			log.Debug("Failed to get right vectors by id",
-				zap.Error(err),
-				zap.String("traceID", traceID),
-				zap.String("role", typeutil.ProxyRole))
-
-			return &milvuspb.CalcDistanceResults{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_UnexpectedError,
-					Reason:    err.Error(),
-				},
-			}, nil
-		}
-
-		log.Debug("OpRight IdArray not empty, Get vectors by id done",
-			zap.String("traceID", traceID),
-			zap.String("role", typeutil.ProxyRole))
-
-		vectorsRight, err = arrangeFunc(opRight, result.FieldsData)
-		if err != nil {
-			log.Debug("Failed to re-arrange right vectors",
-				zap.Error(err),
-				zap.String("traceID", traceID),
-				zap.String("role", typeutil.ProxyRole))
-
-			return &milvuspb.CalcDistanceResults{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_UnexpectedError,
-					Reason:    err.Error(),
-				},
-			}, nil
-		}
-
-		log.Debug("Re-arrange right vectors done",
-			zap.String("traceID", traceID),
-			zap.String("role", typeutil.ProxyRole))
-	}
-
-	if vectorsRight == nil {
-		msg := "Right vectors array is empty"
-		log.Debug(msg,
-			zap.String("traceID", traceID),
-			zap.String("role", typeutil.ProxyRole))
-
-		return &milvuspb.CalcDistanceResults{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    msg,
-			},
-		}, nil
-	}
-
-	if vectorsLeft.Dim != vectorsRight.Dim {
-		msg := "Vectors dimension is not equal"
-		log.Debug(msg,
-			zap.String("traceID", traceID),
-			zap.String("role", typeutil.ProxyRole))
-
-		return &milvuspb.CalcDistanceResults{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    msg,
-			},
-		}, nil
-	}
-
-	if vectorsLeft.GetFloatVector() != nil && vectorsRight.GetFloatVector() != nil {
-		distances, err := distance.CalcFloatDistance(vectorsLeft.Dim, vectorsLeft.GetFloatVector().Data, vectorsRight.GetFloatVector().Data, metric)
-		if err != nil {
-			log.Debug("Failed to CalcFloatDistance",
-				zap.Error(err),
-				zap.String("traceID", traceID),
-				zap.String("role", typeutil.ProxyRole))
-
-			return &milvuspb.CalcDistanceResults{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_UnexpectedError,
-					Reason:    err.Error(),
-				},
-			}, nil
-		}
-
-		log.Debug("CalcFloatDistance done",
-			zap.Error(err),
-			zap.String("traceID", traceID),
-			zap.String("role", typeutil.ProxyRole))
-
-		return &milvuspb.CalcDistanceResults{
-			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success, Reason: ""},
-			Array: &milvuspb.CalcDistanceResults_FloatDist{
-				FloatDist: &schemapb.FloatArray{
-					Data: distances,
-				},
-			},
-		}, nil
-	}
-
-	if vectorsLeft.GetBinaryVector() != nil && vectorsRight.GetBinaryVector() != nil {
-		hamming, err := distance.CalcHammingDistance(vectorsLeft.Dim, vectorsLeft.GetBinaryVector(), vectorsRight.GetBinaryVector())
-		if err != nil {
-			log.Debug("Failed to CalcHammingDistance",
-				zap.Error(err),
-				zap.String("traceID", traceID),
-				zap.String("role", typeutil.ProxyRole))
-
-			return &milvuspb.CalcDistanceResults{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_UnexpectedError,
-					Reason:    err.Error(),
-				},
-			}, nil
-		}
-
-		if metric == distance.HAMMING {
-			log.Debug("CalcHammingDistance done",
-				zap.String("traceID", traceID),
-				zap.String("role", typeutil.ProxyRole))
-
-			return &milvuspb.CalcDistanceResults{
-				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success, Reason: ""},
-				Array: &milvuspb.CalcDistanceResults_IntDist{
-					IntDist: &schemapb.IntArray{
-						Data: hamming,
-					},
-				},
-			}, nil
-		}
-
-		if metric == distance.TANIMOTO {
-			tanimoto, err := distance.CalcTanimotoCoefficient(vectorsLeft.Dim, hamming)
-			if err != nil {
-				log.Debug("Failed to CalcTanimotoCoefficient",
-					zap.Error(err),
-					zap.String("traceID", traceID),
-					zap.String("role", typeutil.ProxyRole))
-
-				return &milvuspb.CalcDistanceResults{
-					Status: &commonpb.Status{
-						ErrorCode: commonpb.ErrorCode_UnexpectedError,
-						Reason:    err.Error(),
-					},
-				}, nil
-			}
-
-			log.Debug("CalcTanimotoCoefficient done",
-				zap.String("traceID", traceID),
-				zap.String("role", typeutil.ProxyRole))
-
-			return &milvuspb.CalcDistanceResults{
-				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success, Reason: ""},
-				Array: &milvuspb.CalcDistanceResults_FloatDist{
-					FloatDist: &schemapb.FloatArray{
-						Data: tanimoto,
-					},
-				},
-			}, nil
-		}
-	}
-
-	err = errors.New("unexpected error")
-	if (vectorsLeft.GetBinaryVector() != nil && vectorsRight.GetFloatVector() != nil) || (vectorsLeft.GetFloatVector() != nil && vectorsRight.GetBinaryVector() != nil) {
-		err = errors.New("cannot calculate distance between binary vectors and float vectors")
-	}
-
-	log.Debug("Failed to CalcDistance",
-		zap.Error(err),
-		zap.String("traceID", traceID),
-		zap.String("role", typeutil.ProxyRole))
-
-	return &milvuspb.CalcDistanceResults{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		},
-	}, nil
+	return task.Execute(ctx, request)
 }
 
 // GetDdChannel returns the used channel for dd operations.
