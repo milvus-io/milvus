@@ -22,6 +22,7 @@ import (
 	"log"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 
@@ -101,8 +102,12 @@ import (
 //	assert.Equal(t, o3.BeginTs, p3.BeginTs)
 //}
 
-func TestStream_KafkaMsgStream_SeekToLast(t *testing.T) {
+func skipTest(t *testing.T) {
 	t.Skip("skip kafka test")
+}
+
+func TestStream_KafkaMsgStream_SeekToLast(t *testing.T) {
+	skipTest(t)
 
 	kafkaAddress, _ := Params.Load("_KafkaBrokerList")
 	c := funcutil.RandomString(8)
@@ -179,7 +184,7 @@ func TestStream_KafkaMsgStream_SeekToLast(t *testing.T) {
 }
 
 func TestStream_KafkaTtMsgStream_Seek(t *testing.T) {
-	t.Skip("skip kafka test")
+	skipTest(t)
 
 	kafkaAddress, _ := Params.Load("_KafkaBrokerList")
 	c1 := funcutil.RandomString(8)
@@ -293,7 +298,7 @@ func TestStream_KafkaTtMsgStream_Seek(t *testing.T) {
 }
 
 func TestStream_KafkaTtMsgStream_1(t *testing.T) {
-	t.Skip("skip kafka test")
+	skipTest(t)
 
 	kafkaAddress, _ := Params.Load("_KafkaBrokerList")
 	c1 := funcutil.RandomString(8)
@@ -340,7 +345,7 @@ func TestStream_KafkaTtMsgStream_1(t *testing.T) {
 }
 
 func TestStream_KafkaTtMsgStream_2(t *testing.T) {
-	t.Skip("skip kafka test")
+	skipTest(t)
 
 	kafkaAddress, _ := Params.Load("_KafkaBrokerList")
 	c1 := funcutil.RandomString(8)
@@ -398,7 +403,7 @@ func TestStream_KafkaTtMsgStream_2(t *testing.T) {
 }
 
 func TestStream_KafkaTtMsgStream_DataNodeTimetickMsgstream(t *testing.T) {
-	t.Skip("skip kafka test")
+	skipTest(t)
 
 	kafkaAddress, _ := Params.Load("_KafkaBrokerList")
 	c1 := funcutil.RandomString(8)
@@ -434,6 +439,9 @@ func TestStream_KafkaTtMsgStream_DataNodeTimetickMsgstream(t *testing.T) {
 			}
 		}
 	}()
+
+	// make producer start to produce messages after invoking Chan
+	time.Sleep(5 * time.Second)
 
 	inputStream1 := getKafkaInputStream(ctx, kafkaAddress, p1Channels)
 	msgPacks1 := createRandMsgPacks(2, 1, 1)

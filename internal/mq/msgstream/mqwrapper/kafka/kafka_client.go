@@ -43,6 +43,24 @@ func (kc *kafkaClient) getKafkaProducer() (*kafka.Producer, error) {
 	once.Do(func() {
 		config := kc.newProducerConfig()
 		Producer, err = kafka.NewProducer(config)
+
+		go func() {
+			for e := range Producer.Events() {
+				switch ev := e.(type) {
+				case kafka.Error:
+					// Generic client instance-level errors, such as broker connection failures,
+					// authentication issues, etc.
+					// After a fatal error has been raised, any subsequent Produce*() calls will fail with
+					// the original error code.
+					log.Error("kafka error", zap.Any("error msg", ev.Error()))
+					if ev.IsFatal() {
+						panic(ev)
+					}
+				default:
+					log.Debug("kafka producer event", zap.Any("event", ev))
+				}
+			}
+		}()
 	})
 
 	if err != nil {
@@ -98,8 +116,8 @@ func (kc *kafkaClient) CreateProducer(options mqwrapper.ProducerOptions) (mqwrap
 
 func (kc *kafkaClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.Consumer, error) {
 	config := kc.newConsumerConfig(options.SubscriptionName, options.SubscriptionInitialPosition)
-	consumer := newKafkaConsumer(config, options.Topic, options.SubscriptionName)
-	return consumer, nil
+	consumer, err := newKafkaConsumer(config, options.Topic, options.SubscriptionName)
+	return consumer, err
 }
 
 func (kc *kafkaClient) EarliestMessageID() mqwrapper.MessageID {
