@@ -53,7 +53,7 @@
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
   "id": null,
-  "iteration": 1651824664370,
+  "iteration": 1653297662305,
   "links": [],
   "liveNow": false,
   "panels": [
@@ -118,16 +118,16 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "sum(increase(milvus_proxy_search_vectors_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])/2)",
+              "expr": "sum(increase(milvus_proxy_search_vectors_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])/2) by (pod, node_id)",
               "interval": "",
-              "legendFormat": "vector count",
+              "legendFormat": "{{pod}}-{{node_id}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
           ],
           "thresholds": [],
           "timeRegions": [],
-          "title": "Search Vector Count rate",
+          "title": "Search Vector Count Rate",
           "tooltip": {
             "shared": true,
             "sort": 0,
@@ -209,16 +209,16 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "sum(increase(milvus_proxy_insert_vectors_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])/2)",
+              "expr": "sum(increase(milvus_proxy_insert_vectors_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])/2) by (pod, node_id)",
               "interval": "",
-              "legendFormat": "vector count",
+              "legendFormat": "{{pod}}-{{node_id}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
           ],
           "thresholds": [],
           "timeRegions": [],
-          "title": "Insert Vector Count rate",
+          "title": "Insert Vector Count Rate",
           "tooltip": {
             "shared": true,
             "sort": 0,
@@ -300,10 +300,10 @@
                 "uid": "$datasource"
               },
               "exemplar": true,
-              "expr": "histogram_quantile(0.99, sum by (le, query_type) (rate(milvus_proxy_sq_lantency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
+              "expr": "histogram_quantile(0.99, sum by (le, query_type, pod, node_id) (rate(milvus_proxy_sq_lantency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
               "hide": false,
               "interval": "",
-              "legendFormat": "{{query_type}}",
+              "legendFormat": "{{pod}}-{{node_id}}-{{query_type}}",
               "refId": "A"
             }
           ],
@@ -391,10 +391,10 @@
                 "uid": "$datasource"
               },
               "exemplar": true,
-              "expr": "histogram_quantile(0.99, sum by (le, query_type) (rate(milvus_proxy_sq_wait_result_lantency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
+              "expr": "histogram_quantile(0.99, sum by (le, query_type, pod, node_id) (rate(milvus_proxy_sq_wait_result_lantency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
               "hide": false,
               "interval": "",
-              "legendFormat": "{{query_type}}",
+              "legendFormat": "{{pod}}-{{node_id}}{{query_type}}",
               "refId": "A"
             }
           ],
@@ -482,9 +482,9 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "histogram_quantile(0.99, sum by (le, query_type) (rate(milvus_proxy_sq_reduce_result_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
+              "expr": "histogram_quantile(0.99, sum by (le, query_type, pod, node_id) (rate(milvus_proxy_sq_reduce_result_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
               "interval": "",
-              "legendFormat": "{{query_type}}",
+              "legendFormat": "{{pod}}-{{node_id}}-{{query_type}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
@@ -573,10 +573,10 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "histogram_quantile(0.99, sum by (le, query_type) (rate(milvus_proxy_sq_decode_result_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
+              "expr": "histogram_quantile(0.99, sum by (le, query_type, pod, node_id) (rate(milvus_proxy_sq_decode_result_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
               "hide": false,
               "interval": "",
-              "legendFormat": "{{query_type}}",
+              "legendFormat": "{{pod}}-{{node_id}}-{{query_type}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
@@ -665,10 +665,10 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "avg(milvus_proxy_msgstream_obj_num{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (app_kubernetes_io_instance)",
+              "expr": "avg(milvus_proxy_msgstream_obj_num{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (pod, node_id)",
               "interval": "",
               "intervalFactor": 2,
-              "legendFormat": "avg",
+              "legendFormat": "{{pod}}-{{node_id}}-avg",
               "queryType": "randomWalk",
               "refId": "A"
             },
@@ -678,10 +678,10 @@
                 "uid": "$datasource"
               },
               "exemplar": true,
-              "expr": "max(milvus_proxy_msgstream_obj_num{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (app_kubernetes_io_instance)",
+              "expr": "max(milvus_proxy_msgstream_obj_num{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (pod, node_id)",
               "hide": false,
               "interval": "",
-              "legendFormat": "max",
+              "legendFormat": "{{pod}}-{{node_id}}-max",
               "refId": "B"
             },
             {
@@ -690,10 +690,10 @@
                 "uid": "$datasource"
               },
               "exemplar": true,
-              "expr": "min(milvus_proxy_msgstream_obj_num{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (app_kubernetes_io_instance)",
+              "expr": "min(milvus_proxy_msgstream_obj_num{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (pod, node_id)",
               "hide": false,
               "interval": "",
-              "legendFormat": "min",
+              "legendFormat": "{{pod}}-{{node_id}}-min",
               "refId": "C"
             }
           ],
@@ -781,9 +781,9 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "histogram_quantile(0.99, sum by (le, msg_type) (rate(milvus_proxy_mutation_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
+              "expr": "histogram_quantile(0.99, sum by (le, msg_type, pod, node_id) (rate(milvus_proxy_mutation_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
               "interval": "",
-              "legendFormat": "{{msg_type}}",
+              "legendFormat": "{{pod}}-{{node_id}}-{{msg_type}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
@@ -872,9 +872,9 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "histogram_quantile(0.99, sum by (le, msg_type) (rate(milvus_proxy_mutation_send_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
+              "expr": "histogram_quantile(0.99, sum by (le, msg_type, pod, node_id) (rate(milvus_proxy_mutation_send_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
               "interval": "",
-              "legendFormat": "{{msg_type}}",
+              "legendFormat": "{{pod}}-{{node_id}}-{{msg_type}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
@@ -963,9 +963,9 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "sum(increase(milvus_proxy_cache_hit_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", cache_state=\"hit\"}[2m])/2) by(cache_name) / sum(increase(milvus_proxy_cache_hit_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])/2) by(cache_name)",
+              "expr": "sum(increase(milvus_proxy_cache_hit_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", cache_state=\"hit\"}[2m])/2) by(cache_name, pod, node_id) / sum(increase(milvus_proxy_cache_hit_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])/2) by(cache_name, pod, node_id)",
               "interval": "",
-              "legendFormat": "{{cache_name}}",
+              "legendFormat": "{{pod}}-{{node_id}}-{{cache_name}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
@@ -1055,9 +1055,9 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "histogram_quantile(0.99, sum by (le) (rate(milvus_proxy_cache_update_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
+              "expr": "histogram_quantile(0.99, sum by (le, pod, node_id) (rate(milvus_proxy_cache_update_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
               "interval": "",
-              "legendFormat": "latency",
+              "legendFormat": "{{pod}}-{{node_id}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
@@ -1146,10 +1146,10 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "avg(milvus_proxy_sync_epoch_time{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (app_kubernetes_io_instance)",
+              "expr": "avg(milvus_proxy_sync_epoch_time{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (pod, node_id)",
               "interval": "",
               "intervalFactor": 2,
-              "legendFormat": "avg time tick",
+              "legendFormat": "{{pod}}-{{node_id}}-avg",
               "queryType": "randomWalk",
               "refId": "A"
             },
@@ -1159,10 +1159,10 @@
                 "uid": "$datasource"
               },
               "exemplar": true,
-              "expr": "max(milvus_proxy_sync_epoch_time{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (app_kubernetes_io_instance)",
+              "expr": "max(milvus_proxy_sync_epoch_time{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (pod, node_id)",
               "hide": false,
               "interval": "",
-              "legendFormat": "max time tick",
+              "legendFormat": "{{pod}}-{{node_id}}-max",
               "refId": "B"
             },
             {
@@ -1171,10 +1171,10 @@
                 "uid": "$datasource"
               },
               "exemplar": true,
-              "expr": "min(milvus_proxy_sync_epoch_time{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (app_kubernetes_io_instance)",
+              "expr": "min(milvus_proxy_sync_epoch_time{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (pod, node_id)",
               "hide": false,
               "interval": "",
-              "legendFormat": "min time tick",
+              "legendFormat": "{{pod}}-{{node_id}}-min",
               "refId": "C"
             }
           ],
@@ -1262,9 +1262,9 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "histogram_quantile(0.99, sum by (le) (rate(milvus_proxy_apply_pk_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
+              "expr": "histogram_quantile(0.99, sum by (le, pod, node_id) (rate(milvus_proxy_apply_pk_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
               "interval": "",
-              "legendFormat": "latency",
+              "legendFormat": "{{pod}}-{{node_id}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
@@ -1353,9 +1353,9 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "histogram_quantile(0.99, sum by (le) (rate(milvus_proxy_apply_timestamp_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
+              "expr": "histogram_quantile(0.99, sum by (le, pod, node_id) (rate(milvus_proxy_apply_timestamp_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
               "interval": "",
-              "legendFormat": "latency",
+              "legendFormat": "{{pod}}-{{node_id}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
@@ -1444,9 +1444,9 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "sum(increase(milvus_proxy_dql_req_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])/2) by(function_name, status)",
+              "expr": "sum(increase(milvus_proxy_dql_req_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])/2) by(function_name, status, pod, node_id)",
               "interval": "",
-              "legendFormat": "{{function_name}}",
+              "legendFormat": "{{pod}}-{{node_id}}-{{function_name}}-{{status}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
@@ -1535,9 +1535,9 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "sum(increase(milvus_proxy_dml_req_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])/2) by(function_name, status)",
+              "expr": "sum(increase(milvus_proxy_dml_req_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])/2) by(function_name, status, pod, node_id)",
               "interval": "",
-              "legendFormat": "{{function_name}}",
+              "legendFormat": "{{pod}}-{{node_id}}-{{function_name}}-{{status}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
@@ -1626,9 +1626,9 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "sum(increase(milvus_proxy_ddl_req_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])/2) by(function_name, status)",
+              "expr": "sum(increase(milvus_proxy_ddl_req_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])/2) by(function_name, status, pod, node_id)",
               "interval": "",
-              "legendFormat": "{{function_name}}",
+              "legendFormat": "{{pod}}-{{node_id}}-{{function_name}}-{{status}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
@@ -1717,9 +1717,9 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "histogram_quantile(0.99, sum by (le, function_name) (rate(milvus_proxy_dql_req_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
+              "expr": "histogram_quantile(0.99, sum by (le, function_name, pod, node_id) (rate(milvus_proxy_dql_req_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
               "interval": "",
-              "legendFormat": "{{function_name}}",
+              "legendFormat": "{{pod}}-{{node_id}}-{{function_name}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
@@ -1808,9 +1808,9 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "histogram_quantile(0.99, sum by (le, function_name) (rate(milvus_proxy_dml_req_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
+              "expr": "histogram_quantile(0.99, sum by (le, function_name, pod, node_id) (rate(milvus_proxy_dml_req_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
               "interval": "",
-              "legendFormat": "{{function_name}}",
+              "legendFormat": "{{pod}}-{{node_id}}-{{function_name}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
@@ -1899,9 +1899,9 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "histogram_quantile(0.99, sum by (le, function_name) (rate(milvus_proxy_ddl_req_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
+              "expr": "histogram_quantile(0.99, sum by (le, function_name, pod, node_id) (rate(milvus_proxy_ddl_req_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
               "interval": "",
-              "legendFormat": "{{function_name}}",
+              "legendFormat": "{{pod}}-{{node_id}}-{{function_name}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
@@ -2212,9 +2212,9 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "sum(increase(milvus_rootcoord_ddl_req_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])/2) by (status)",
+              "expr": "sum(increase(milvus_rootcoord_ddl_req_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])/2) by (status, function_name)",
               "interval": "",
-              "legendFormat": "{{status}}",
+              "legendFormat": "{{function_name}}-{{status}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
@@ -4163,10 +4163,10 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "sum(milvus_querynode_collection_num{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (app_kubernetes_io_instance)",
+              "expr": "sum(milvus_querynode_collection_num{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (pod, node_id)",
               "interval": "",
               "intervalFactor": 2,
-              "legendFormat": "total_num",
+              "legendFormat": "{{pod}}-{{node_id}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
@@ -4256,10 +4256,10 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "sum(milvus_querynode_partition_num{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (app_kubernetes_io_instance)",
+              "expr": "sum(milvus_querynode_partition_num{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (pod, node_id)",
               "interval": "",
               "intervalFactor": 2,
-              "legendFormat": "total_num",
+              "legendFormat": "{{pod}}-{{node_id}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
@@ -4349,10 +4349,10 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "sum(milvus_querynode_segment_num{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (app_kubernetes_io_instance)",
+              "expr": "sum(milvus_querynode_segment_num{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (pod, node_id)",
               "interval": "",
               "intervalFactor": 2,
-              "legendFormat": "total_num",
+              "legendFormat": "{{pod}}-{{node_id}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
@@ -4442,10 +4442,10 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "sum(milvus_querynode_dml_vchannel_num{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (app_kubernetes_io_instance)",
+              "expr": "sum(milvus_querynode_dml_vchannel_num{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (pod, node_id)",
               "interval": "",
               "intervalFactor": 2,
-              "legendFormat": "total_num",
+              "legendFormat": "{{pod}}-{{node_id}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
@@ -4534,11 +4534,11 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "sum(milvus_querynode_delta_vchannel_num{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (app_kubernetes_io_instance)",
+              "expr": "sum(milvus_querynode_delta_vchannel_num{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (pod, node_id)",
               "hide": false,
               "interval": "",
               "intervalFactor": 2,
-              "legendFormat": "total_num",
+              "legendFormat": "{{pod}}-{{node_id}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
@@ -4627,11 +4627,11 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "sum(milvus_querynode_consumer_num{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (app_kubernetes_io_instance)",
+              "expr": "sum(milvus_querynode_consumer_num{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (pod, node_id)",
               "hide": false,
               "interval": "",
               "intervalFactor": 2,
-              "legendFormat": "total_num",
+              "legendFormat": "{{pod}}-{{node_id}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
@@ -4720,10 +4720,10 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": false,
-              "expr": "histogram_quantile(0.99, sum by (le, query_type, segment_state) (rate(milvus_querynode_sq_segment_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
+              "expr": "histogram_quantile(0.99, sum by (le, query_type, segment_state, pod, node_id) (rate(milvus_querynode_sq_segment_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
               "instant": true,
               "interval": "",
-              "legendFormat": "{{query_type}}_{{segment_state}}",
+              "legendFormat": "{{pod}}-{{node_id}}-{{query_type}}-{{segment_state}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
@@ -4812,9 +4812,9 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "histogram_quantile(0.99, sum by (le, query_type) (rate(milvus_querynode_sq_core_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
+              "expr": "histogram_quantile(0.99, sum by (le, query_type, pod, node_id) (rate(milvus_querynode_sq_core_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
               "interval": "",
-              "legendFormat": "{{query_type}}",
+              "legendFormat": "{{pod}}-{{node_id}}-{{query_type}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
@@ -4903,9 +4903,9 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "histogram_quantile(0.99, sum by (le) (rate(milvus_querynode_load_segment_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
+              "expr": "histogram_quantile(0.99, sum by (le, pod, node_id) (rate(milvus_querynode_load_segment_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
               "interval": "",
-              "legendFormat": "latency",
+              "legendFormat": "{{pod}}-{{node_id}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
@@ -4994,10 +4994,10 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "sum(milvus_querynode_flowgraph_num{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (app_kubernetes_io_instance)",
+              "expr": "sum(milvus_querynode_flowgraph_num{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (pod, node_id)",
               "interval": "",
               "intervalFactor": 2,
-              "legendFormat": "total_num",
+              "legendFormat": "{{pod}}-{{node_id}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
@@ -5599,10 +5599,10 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "sum(milvus_datanode_flowgraph_num{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (app_kubernetes_io_instance)",
+              "expr": "sum(milvus_datanode_flowgraph_num{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (pod, node_id)",
               "interval": "",
               "intervalFactor": 2,
-              "legendFormat": "num",
+              "legendFormat": "{{pod}}-{{node_id}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
@@ -5691,9 +5691,9 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "sum(increase(milvus_datanode_msg_rows_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])/2) by (msg_type)",
+              "expr": "sum(increase(milvus_datanode_msg_rows_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])/2) by (msg_type, pod, node_id)",
               "interval": "",
-              "legendFormat": "{{msg_type}}",
+              "legendFormat": "{{pod}}-{{node_id}}-{{msg_type}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
@@ -5782,9 +5782,9 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "sum(increase(milvus_datanode_flushed_data_size{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])/2) by (msg_type)",
+              "expr": "sum(increase(milvus_datanode_flushed_data_size{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])/2) by (msg_type, pod, node_id)",
               "interval": "",
-              "legendFormat": "{{msg_type}}",
+              "legendFormat": "{{pod}}-{{node_id}}-{{msg_type}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
@@ -5873,10 +5873,10 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "sum(milvus_datanode_consumer_num{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (app_kubernetes_io_instance)",
+              "expr": "sum(milvus_datanode_consumer_num{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (pod, node_id)",
               "interval": "",
               "intervalFactor": 2,
-              "legendFormat": "num",
+              "legendFormat": "{{pod}}-{{node_id}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
@@ -5965,10 +5965,10 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "sum(milvus_datanode_producer_num{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (app_kubernetes_io_instance)",
+              "expr": "sum(milvus_datanode_producer_num{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (pod, node_id)",
               "interval": "",
               "intervalFactor": 2,
-              "legendFormat": "num",
+              "legendFormat": "{{pod}}-{{node_id}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
@@ -6057,10 +6057,10 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "avg(milvus_datanode_sync_epoch_time{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (app_kubernetes_io_instance)",
+              "expr": "avg(milvus_datanode_sync_epoch_time{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (pod, node_id)",
               "interval": "",
               "intervalFactor": 2,
-              "legendFormat": "avg time tick",
+              "legendFormat": "avg-{{pod}}-{{node_id}}",
               "queryType": "randomWalk",
               "refId": "A"
             },
@@ -6070,10 +6070,10 @@
                 "uid": "$datasource"
               },
               "exemplar": true,
-              "expr": "max(milvus_datanode_sync_epoch_time{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (app_kubernetes_io_instance)",
+              "expr": "max(milvus_datanode_sync_epoch_time{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (pod, node_id)",
               "hide": false,
               "interval": "",
-              "legendFormat": "max time tick",
+              "legendFormat": "max-{{pod}}-{{node_id}}",
               "refId": "B"
             },
             {
@@ -6082,10 +6082,10 @@
                 "uid": "$datasource"
               },
               "exemplar": true,
-              "expr": "min(milvus_datanode_sync_epoch_time{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (app_kubernetes_io_instance)",
+              "expr": "min(milvus_datanode_sync_epoch_time{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (pod, node_id)",
               "hide": false,
               "interval": "",
-              "legendFormat": "min time tick",
+              "legendFormat": "min-{{pod}}-{{node_id}}",
               "refId": "C"
             }
           ],
@@ -6173,10 +6173,10 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "sum(milvus_datanode_unflushed_segment_num{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (app_kubernetes_io_instance)",
+              "expr": "sum(milvus_datanode_unflushed_segment_num{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (pod, node_id)",
               "interval": "",
               "intervalFactor": 2,
-              "legendFormat": "num",
+              "legendFormat": "{{pod}}-{{node_id}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
@@ -6265,9 +6265,9 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "histogram_quantile(0.99, sum by (le) (rate(milvus_datanode_encode_buffer_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
+              "expr": "histogram_quantile(0.99, sum by (le, pod, node_id) (rate(milvus_datanode_encode_buffer_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
               "interval": "",
-              "legendFormat": "latency",
+              "legendFormat": "{{pod}}-{{node_id}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
@@ -6356,9 +6356,9 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "histogram_quantile(0.99, sum by (le) (rate(milvus_datanode_save_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
+              "expr": "histogram_quantile(0.99, sum by (le, pod, node_id) (rate(milvus_datanode_save_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
               "interval": "",
-              "legendFormat": "latency",
+              "legendFormat": "{{pod}}-{{node_id}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
@@ -6447,9 +6447,9 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "sum(increase(milvus_datanode_flush_buffer_op_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])/2) by (status)",
+              "expr": "sum(increase(milvus_datanode_flush_buffer_op_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])/2) by (status, pod, node_id)",
               "interval": "",
-              "legendFormat": "{{status}}",
+              "legendFormat": "{{pod}}-{{node_id}}-{{status}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
@@ -6538,9 +6538,9 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "sum(increase(milvus_datanode_autoflush_buffer_op_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])/2) by (status)",
+              "expr": "sum(increase(milvus_datanode_autoflush_buffer_op_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])/2) by (status, pod, node_id)",
               "interval": "",
-              "legendFormat": "{{status}}",
+              "legendFormat": "{{pod}}-{{node_id}}-{{status}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
@@ -6629,9 +6629,9 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "sum(increase(milvus_datanode_flush_req_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])/2) by (status)",
+              "expr": "sum(increase(milvus_datanode_flush_req_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])/2) by (status, pod, node_id)",
               "interval": "",
-              "legendFormat": "{{status}}",
+              "legendFormat": "{{pod}}-{{node_id}}-{{status}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
@@ -6720,9 +6720,9 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "histogram_quantile(0.99, sum by (le) (rate(milvus_datanode_compaction_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
+              "expr": "histogram_quantile(0.99, sum by (le, pod, node_id) (rate(milvus_datanode_compaction_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
               "interval": "",
-              "legendFormat": "latency",
+              "legendFormat": "{{pod}}-{{node_id}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
@@ -7115,16 +7115,16 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "sum(increase(milvus_indexnode_index_task_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])/2) by (status)",
+              "expr": "sum(increase(milvus_indexnode_index_task_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])/2) by (status, pod, node_id)",
               "interval": "",
-              "legendFormat": "{{status}}",
+              "legendFormat": "{{pod}}-{{node_id}}-{{status}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
           ],
           "thresholds": [],
           "timeRegions": [],
-          "title": "Index Task rate",
+          "title": "Index Task Rate",
           "tooltip": {
             "shared": true,
             "sort": 0,
@@ -7206,9 +7206,9 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "histogram_quantile(0.99, sum by (le) (rate(milvus_indexnode_load_field_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
+              "expr": "histogram_quantile(0.99, sum by (le, pod, node_id) (rate(milvus_indexnode_load_field_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
               "interval": "",
-              "legendFormat": "latency",
+              "legendFormat": "{{pod}}-{{node_id}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
@@ -7296,9 +7296,9 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "histogram_quantile(0.99, sum by (le) (rate(milvus_indexnode_decode_field_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
+              "expr": "histogram_quantile(0.99, sum by (le, pod, node_id) (rate(milvus_indexnode_decode_field_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
               "interval": "",
-              "legendFormat": "latency",
+              "legendFormat": "{{pod}}-{{node_id}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
@@ -7387,9 +7387,9 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "histogram_quantile(0.99, sum by (le) (rate(milvus_indexnode_build_index_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
+              "expr": "histogram_quantile(0.99, sum by (le, pod, node_id) (rate(milvus_indexnode_build_index_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
               "interval": "",
-              "legendFormat": "latency",
+              "legendFormat": "{{pod}}-{{node_id}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
@@ -7478,9 +7478,9 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "histogram_quantile(0.99, sum by (le) (rate(milvus_indexnode_encode_index_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
+              "expr": "histogram_quantile(0.99, sum by (le, pod, node_id) (rate(milvus_indexnode_encode_index_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
               "interval": "",
-              "legendFormat": "latency",
+              "legendFormat": "{{pod}}-{{node_id}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
@@ -7569,9 +7569,9 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "exemplar": true,
-              "expr": "histogram_quantile(0.99, sum by (le) (rate(milvus_indexnode_save_index_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
+              "expr": "histogram_quantile(0.99, sum by (le, pod, node_id) (rate(milvus_indexnode_save_index_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
               "interval": "",
-              "legendFormat": "latency",
+              "legendFormat": "{{pod}}-{{node_id}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
@@ -7628,6 +7628,7 @@
           "dashLength": 10,
           "dashes": false,
           "datasource": {
+            "type": "prometheus",
             "uid": "$datasource"
           },
           "description": "Total cpu usage of all milvus components.",
@@ -7667,6 +7668,10 @@
           "steppedLine": false,
           "targets": [
             {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+              },
               "exemplar": true,
               "expr": "sum(rate(process_cpu_seconds_total{app_kubernetes_io_name=\"$app_name\", app_kubernetes_io_instance=~\"$instance\", namespace=\"$namespace\"}[5m]))",
               "interval": "",
@@ -7692,12 +7697,14 @@
           },
           "yaxes": [
             {
+              "$$hashKey": "object:8411",
               "format": "short",
               "logBase": 1,
               "min": "0",
               "show": true
             },
             {
+              "$$hashKey": "object:8412",
               "format": "short",
               "logBase": 1,
               "show": true
@@ -8901,6 +8908,7 @@
           "dashLength": 10,
           "dashes": false,
           "datasource": {
+            "type": "prometheus",
             "uid": "$datasource"
           },
           "description": "Rate of bytes allocated, even if freed.",
@@ -8940,6 +8948,10 @@
           "steppedLine": false,
           "targets": [
             {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+              },
               "exemplar": true,
               "expr": "rate(go_memstats_alloc_bytes_total{app_kubernetes_io_name=\"$app_name\", app_kubernetes_io_instance=~\"$instance\", namespace=\"$namespace\"}[5m])",
               "interval": "",
@@ -8965,12 +8977,14 @@
           },
           "yaxes": [
             {
+              "$$hashKey": "object:8539",
               "format": "short",
               "logBase": 1,
               "min": "0",
               "show": true
             },
             {
+              "$$hashKey": "object:8540",
               "format": "short",
               "logBase": 1,
               "show": true
@@ -9332,6 +9346,6 @@
   "timezone": "browser",
   "title": "Milvus2.0",
   "uid": "uLf5cJ3Gz",
-  "version": 160,
+  "version": 13,
   "weekStart": ""
 }
