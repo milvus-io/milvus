@@ -1,0 +1,29 @@
+#!/usr/bin/make -f
+export HOME = $(CURDIR)
+%:
+	dh $@
+
+override_dh_auto_build:
+	echo "skip build"	
+
+override_dh_auto_install:
+	mkdir -p $(PWD)/debian/milvus/usr/bin
+	mkdir -p $(PWD)/debian/milvus/usr/lib/milvus/
+	mkdir -p $(PWD)/debian/milvus/etc/milvus/configs/advanced
+	mkdir -p $(PWD)/debian/milvus/var/lib/milvus/minio-data
+	mkdir -p $(PWD)/debian/milvus/var/lib/milvus/etcd-data
+	mkdir -p $(PWD)/debian/milvus/lib/systemd/system
+	mkdir -p $(PWD)/debian/milvus/etc/ld.so.conf.d
+	cp -f $(PWD)/milvus-bin/milvus $(PWD)/debian/milvus/usr/bin/
+	cp -f $(PWD)/milvus-bin/milvus-minio $(PWD)/debian/milvus/usr/bin/
+	cp -f $(PWD)/milvus-bin/milvus-etcd $(PWD)/debian/milvus/usr/bin/
+	cp -P -r $(PWD)/milvus-lib/* $(PWD)/debian/milvus/usr/lib/milvus/
+	cp -r $(PWD)/configs/advanced/* $(PWD)/debian/milvus/etc/milvus/configs/advanced/
+	cp $(PWD)/configs/milvus.yaml $(PWD)/debian/milvus/etc/milvus/configs/
+	cp $(PWD)/scripts/milvus.conf $(PWD)/debian/milvus/etc/ld.so.conf.d/
+	cp $(PWD)/scripts/milvus.service $(PWD)/debian/milvus/lib/systemd/system/
+	cp $(PWD)/scripts/milvus-etcd.service $(PWD)/debian/milvus/lib/systemd/system/
+	cp $(PWD)/scripts/milvus-minio.service $(PWD)/debian/milvus/lib/systemd/system/
+
+override_dh_shlibdeps:
+	dh_shlibdeps -l$(shell pwd)/milvus-lib
