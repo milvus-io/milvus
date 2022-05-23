@@ -46,6 +46,11 @@ type MockDataNode struct {
 	regErr     error
 	strResp    *milvuspb.StringResponse
 	metricResp *milvuspb.GetMetricsResponse
+	resendResp *datapb.ResendSegmentStatsResponse
+}
+
+func (m *MockDataNode) ResendSegmentStats(ctx context.Context, req *datapb.ResendSegmentStatsRequest) (*datapb.ResendSegmentStatsResponse, error) {
+	return m.resendResp, nil
 }
 
 func (m *MockDataNode) Init() error {

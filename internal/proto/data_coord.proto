@@ -64,6 +64,8 @@ service DataNode {
 
   // https://wiki.lfaidata.foundation/display/MIL/MEP+24+--+Support+bulk+load
   rpc Import(ImportTaskRequest) returns(common.Status) {}
+
+  rpc ResendSegmentStats(ResendSegmentStatsRequest) returns(ResendSegmentStatsResponse) {}
 }
 
 message FlushRequest {
@@ -486,4 +488,13 @@ message ImportTaskRequest {
 message UpdateSegmentStatisticsRequest {
   common.MsgBase base = 1;
   repeated SegmentStats stats = 2;
+}
+
+message ResendSegmentStatsRequest {
+  common.MsgBase base = 1;
+}
+
+message ResendSegmentStatsResponse {
+  common.Status status = 1;
+  repeated int64 seg_resent = 2;
 }

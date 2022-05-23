@@ -55,6 +55,7 @@ type Replica interface {
 	getCollectionAndPartitionID(segID UniqueID) (collID, partitionID UniqueID, err error)
 
 	listAllSegmentIDs() []UniqueID
+	listNotFlushedSegmentIDs() []UniqueID
 	addNewSegment(segID, collID, partitionID UniqueID, channelName string, startPos, endPos *internalpb.MsgPosition) error
 	addNormalSegment(segID, collID, partitionID UniqueID, channelName string, numOfRows int64, statsBinlog []*datapb.FieldBinlog, cp *segmentCheckPoint, recoverTs Timestamp) error
 	filterSegments(channelName string, partitionID UniqueID) []*Segment
@@ -817,6 +818,23 @@ func (replica *SegmentReplica) listAllSegmentIDs() []UniqueID {
 	}
 
 	for _, seg := range replica.flushedSegments {
+		segIDs = append(segIDs, seg.segmentID)
+	}
+
+	return segIDs
+}
+
+func (replica *SegmentReplica) listNotFlushedSegmentIDs() []UniqueID {
+	replica.segMu.RLock()
+	defer replica.segMu.RUnlock()
+
+	var segIDs []UniqueID
+
+	for _, seg := range replica.newSegments {
+		segIDs = append(segIDs, seg.segmentID)
+	}
+
+	for _, seg := range replica.normalSegments {
 		segIDs = append(segIDs, seg.segmentID)
 	}
 

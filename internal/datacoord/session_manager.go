@@ -24,6 +24,7 @@ import (
 
 	grpcdatanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/types"
 	"go.uber.org/zap"
@@ -32,7 +33,8 @@ import (
 const (
 	flushTimeout = 5 * time.Second
 	// TODO: evaluate and update import timeout.
-	importTimeout = 3 * time.Hour
+	importTimeout    = 3 * time.Hour
+	reCollectTimeout = 5 * time.Second
 )
 
 // SessionManager provides the grpc interfaces of cluster
@@ -170,6 +172,35 @@ func (c *SessionManager) execImport(ctx context.Context, nodeID int64, itr *data
 	}
 
 	log.Info("success to import", zap.Int64("node", nodeID), zap.Any("import task", itr))
+}
+
+// ReCollectSegmentStats collects segment stats info from DataNodes, after DataCoord reboots.
+func (c *SessionManager) ReCollectSegmentStats(ctx context.Context, nodeID int64) {
+	go c.execReCollectSegmentStats(ctx, nodeID)
+}
+
+func (c *SessionManager) execReCollectSegmentStats(ctx context.Context, nodeID int64) {
+	cli, err := c.getClient(ctx, nodeID)
+	if err != nil {
+		log.Warn("failed to get dataNode client", zap.Int64("DataNode ID", nodeID), zap.Error(err))
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, reCollectTimeout)
+	defer cancel()
+	resp, err := cli.ResendSegmentStats(ctx, &datapb.ResendSegmentStatsRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:  commonpb.MsgType_ResendSegmentStats,
+			SourceID: Params.DataCoordCfg.GetNodeID(),
+		},
+	})
+	if err := VerifyResponse(resp, err); err != nil {
+		log.Error("re-collect segment stats call failed",
+			zap.Int64("DataNode ID", nodeID), zap.Error(err))
+	} else {
+		log.Info("re-collect segment stats call succeeded",
+			zap.Int64("DataNode ID", nodeID),
+			zap.Int64s("segment stat collected", resp.GetSegResent()))
+	}
 }
 
 func (c *SessionManager) getClient(ctx context.Context, nodeID int64) (types.DataNode, error) {

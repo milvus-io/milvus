@@ -53,3 +53,8 @@ type flushMsg struct {
 	collectionID UniqueID
 	flushed      bool
 }
+
+type resendTTMsg struct {
+	msgID      UniqueID
+	segmentIDs []UniqueID
+}
