@@ -13,7 +13,6 @@ set( proto_file_names
     segcore.proto
     index_cgo_msg.proto
     plan.proto
-    milvus.proto
     schema.proto
     common.proto
     )

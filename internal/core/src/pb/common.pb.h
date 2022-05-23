@@ -48,7 +48,7 @@ struct TableStruct_common_2eproto {
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::AuxillaryParseTableField aux[]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
-  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[8]
+  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[10]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::FieldMetadata field_metadata[];
   static const ::PROTOBUF_NAMESPACE_ID::internal::SerializationTable serialization_table[];
@@ -79,6 +79,12 @@ extern MsgBaseDefaultTypeInternal _MsgBase_default_instance_;
 class MsgHeader;
 class MsgHeaderDefaultTypeInternal;
 extern MsgHeaderDefaultTypeInternal _MsgHeader_default_instance_;
+class PlaceholderGroup;
+class PlaceholderGroupDefaultTypeInternal;
+extern PlaceholderGroupDefaultTypeInternal _PlaceholderGroup_default_instance_;
+class PlaceholderValue;
+class PlaceholderValueDefaultTypeInternal;
+extern PlaceholderValueDefaultTypeInternal _PlaceholderValue_default_instance_;
 class Status;
 class StatusDefaultTypeInternal;
 extern StatusDefaultTypeInternal _Status_default_instance_;
@@ -93,6 +99,8 @@ template<> ::milvus::proto::common::KeyDataPair* Arena::CreateMaybeMessage<::mil
 template<> ::milvus::proto::common::KeyValuePair* Arena::CreateMaybeMessage<::milvus::proto::common::KeyValuePair>(Arena*);
 template<> ::milvus::proto::common::MsgBase* Arena::CreateMaybeMessage<::milvus::proto::common::MsgBase>(Arena*);
 template<> ::milvus::proto::common::MsgHeader* Arena::CreateMaybeMessage<::milvus::proto::common::MsgHeader>(Arena*);
+template<> ::milvus::proto::common::PlaceholderGroup* Arena::CreateMaybeMessage<::milvus::proto::common::PlaceholderGroup>(Arena*);
+template<> ::milvus::proto::common::PlaceholderValue* Arena::CreateMaybeMessage<::milvus::proto::common::PlaceholderValue>(Arena*);
 template<> ::milvus::proto::common::Status* Arena::CreateMaybeMessage<::milvus::proto::common::Status>(Arena*);
 PROTOBUF_NAMESPACE_CLOSE
 namespace milvus {
@@ -215,6 +223,32 @@ inline bool SegmentState_Parse(
     const std::string& name, SegmentState* value) {
   return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<SegmentState>(
     SegmentState_descriptor(), name, value);
+}
+enum PlaceholderType : int {
+  None = 0,
+  BinaryVector = 100,
+  FloatVector = 101,
+  PlaceholderType_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
+  PlaceholderType_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
+};
+bool PlaceholderType_IsValid(int value);
+constexpr PlaceholderType PlaceholderType_MIN = None;
+constexpr PlaceholderType PlaceholderType_MAX = FloatVector;
+constexpr int PlaceholderType_ARRAYSIZE = PlaceholderType_MAX + 1;
+
+const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* PlaceholderType_descriptor();
+template<typename T>
+inline const std::string& PlaceholderType_Name(T enum_t_value) {
+  static_assert(::std::is_same<T, PlaceholderType>::value ||
+    ::std::is_integral<T>::value,
+    "Incorrect type passed to function PlaceholderType_Name.");
+  return ::PROTOBUF_NAMESPACE_ID::internal::NameOfEnum(
+    PlaceholderType_descriptor(), enum_t_value);
+}
+inline bool PlaceholderType_Parse(
+    const std::string& name, PlaceholderType* value) {
+  return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<PlaceholderType>(
+    PlaceholderType_descriptor(), name, value);
 }
 enum MsgType : int {
   Undefined = 0,
@@ -997,6 +1031,306 @@ class Blob :
 };
 // -------------------------------------------------------------------
 
+class PlaceholderValue :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.common.PlaceholderValue) */ {
+ public:
+  PlaceholderValue();
+  virtual ~PlaceholderValue();
+
+  PlaceholderValue(const PlaceholderValue& from);
+  PlaceholderValue(PlaceholderValue&& from) noexcept
+    : PlaceholderValue() {
+    *this = ::std::move(from);
+  }
+
+  inline PlaceholderValue& operator=(const PlaceholderValue& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline PlaceholderValue& operator=(PlaceholderValue&& from) noexcept {
+    if (GetArenaNoVirtual() == from.GetArenaNoVirtual()) {
+      if (this != &from) InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
+    return GetDescriptor();
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
+    return GetMetadataStatic().descriptor;
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
+    return GetMetadataStatic().reflection;
+  }
+  static const PlaceholderValue& default_instance();
+
+  static void InitAsDefaultInstance();  // FOR INTERNAL USE ONLY
+  static inline const PlaceholderValue* internal_default_instance() {
+    return reinterpret_cast<const PlaceholderValue*>(
+               &_PlaceholderValue_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    4;
+
+  friend void swap(PlaceholderValue& a, PlaceholderValue& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(PlaceholderValue* other) {
+    if (other == this) return;
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  inline PlaceholderValue* New() const final {
+    return CreateMaybeMessage<PlaceholderValue>(nullptr);
+  }
+
+  PlaceholderValue* New(::PROTOBUF_NAMESPACE_ID::Arena* arena) const final {
+    return CreateMaybeMessage<PlaceholderValue>(arena);
+  }
+  void CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void CopyFrom(const PlaceholderValue& from);
+  void MergeFrom(const PlaceholderValue& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  #if GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  #else
+  bool MergePartialFromCodedStream(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedInputStream* input) final;
+  #endif  // GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  void SerializeWithCachedSizes(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream* output) const final;
+  ::PROTOBUF_NAMESPACE_ID::uint8* InternalSerializeWithCachedSizesToArray(
+      ::PROTOBUF_NAMESPACE_ID::uint8* target) const final;
+  int GetCachedSize() const final { return _cached_size_.Get(); }
+
+  private:
+  inline void SharedCtor();
+  inline void SharedDtor();
+  void SetCachedSize(int size) const final;
+  void InternalSwap(PlaceholderValue* other);
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "milvus.proto.common.PlaceholderValue";
+  }
+  private:
+  inline ::PROTOBUF_NAMESPACE_ID::Arena* GetArenaNoVirtual() const {
+    return nullptr;
+  }
+  inline void* MaybeArenaPtr() const {
+    return nullptr;
+  }
+  public:
+
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  private:
+  static ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadataStatic() {
+    ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&::descriptor_table_common_2eproto);
+    return ::descriptor_table_common_2eproto.file_level_metadata[kIndexInFileMessages];
+  }
+
+  public:
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kValuesFieldNumber = 3,
+    kTagFieldNumber = 1,
+    kTypeFieldNumber = 2,
+  };
+  // repeated bytes values = 3;
+  int values_size() const;
+  void clear_values();
+  const std::string& values(int index) const;
+  std::string* mutable_values(int index);
+  void set_values(int index, const std::string& value);
+  void set_values(int index, std::string&& value);
+  void set_values(int index, const char* value);
+  void set_values(int index, const void* value, size_t size);
+  std::string* add_values();
+  void add_values(const std::string& value);
+  void add_values(std::string&& value);
+  void add_values(const char* value);
+  void add_values(const void* value, size_t size);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>& values() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>* mutable_values();
+
+  // string tag = 1;
+  void clear_tag();
+  const std::string& tag() const;
+  void set_tag(const std::string& value);
+  void set_tag(std::string&& value);
+  void set_tag(const char* value);
+  void set_tag(const char* value, size_t size);
+  std::string* mutable_tag();
+  std::string* release_tag();
+  void set_allocated_tag(std::string* tag);
+
+  // .milvus.proto.common.PlaceholderType type = 2;
+  void clear_type();
+  ::milvus::proto::common::PlaceholderType type() const;
+  void set_type(::milvus::proto::common::PlaceholderType value);
+
+  // @@protoc_insertion_point(class_scope:milvus.proto.common.PlaceholderValue)
+ private:
+  class _Internal;
+
+  ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string> values_;
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr tag_;
+  int type_;
+  mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  friend struct ::TableStruct_common_2eproto;
+};
+// -------------------------------------------------------------------
+
+class PlaceholderGroup :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.common.PlaceholderGroup) */ {
+ public:
+  PlaceholderGroup();
+  virtual ~PlaceholderGroup();
+
+  PlaceholderGroup(const PlaceholderGroup& from);
+  PlaceholderGroup(PlaceholderGroup&& from) noexcept
+    : PlaceholderGroup() {
+    *this = ::std::move(from);
+  }
+
+  inline PlaceholderGroup& operator=(const PlaceholderGroup& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline PlaceholderGroup& operator=(PlaceholderGroup&& from) noexcept {
+    if (GetArenaNoVirtual() == from.GetArenaNoVirtual()) {
+      if (this != &from) InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
+    return GetDescriptor();
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
+    return GetMetadataStatic().descriptor;
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
+    return GetMetadataStatic().reflection;
+  }
+  static const PlaceholderGroup& default_instance();
+
+  static void InitAsDefaultInstance();  // FOR INTERNAL USE ONLY
+  static inline const PlaceholderGroup* internal_default_instance() {
+    return reinterpret_cast<const PlaceholderGroup*>(
+               &_PlaceholderGroup_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    5;
+
+  friend void swap(PlaceholderGroup& a, PlaceholderGroup& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(PlaceholderGroup* other) {
+    if (other == this) return;
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  inline PlaceholderGroup* New() const final {
+    return CreateMaybeMessage<PlaceholderGroup>(nullptr);
+  }
+
+  PlaceholderGroup* New(::PROTOBUF_NAMESPACE_ID::Arena* arena) const final {
+    return CreateMaybeMessage<PlaceholderGroup>(arena);
+  }
+  void CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void CopyFrom(const PlaceholderGroup& from);
+  void MergeFrom(const PlaceholderGroup& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  #if GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  #else
+  bool MergePartialFromCodedStream(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedInputStream* input) final;
+  #endif  // GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  void SerializeWithCachedSizes(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream* output) const final;
+  ::PROTOBUF_NAMESPACE_ID::uint8* InternalSerializeWithCachedSizesToArray(
+      ::PROTOBUF_NAMESPACE_ID::uint8* target) const final;
+  int GetCachedSize() const final { return _cached_size_.Get(); }
+
+  private:
+  inline void SharedCtor();
+  inline void SharedDtor();
+  void SetCachedSize(int size) const final;
+  void InternalSwap(PlaceholderGroup* other);
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "milvus.proto.common.PlaceholderGroup";
+  }
+  private:
+  inline ::PROTOBUF_NAMESPACE_ID::Arena* GetArenaNoVirtual() const {
+    return nullptr;
+  }
+  inline void* MaybeArenaPtr() const {
+    return nullptr;
+  }
+  public:
+
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  private:
+  static ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadataStatic() {
+    ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&::descriptor_table_common_2eproto);
+    return ::descriptor_table_common_2eproto.file_level_metadata[kIndexInFileMessages];
+  }
+
+  public:
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kPlaceholdersFieldNumber = 1,
+  };
+  // repeated .milvus.proto.common.PlaceholderValue placeholders = 1;
+  int placeholders_size() const;
+  void clear_placeholders();
+  ::milvus::proto::common::PlaceholderValue* mutable_placeholders(int index);
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::PlaceholderValue >*
+      mutable_placeholders();
+  const ::milvus::proto::common::PlaceholderValue& placeholders(int index) const;
+  ::milvus::proto::common::PlaceholderValue* add_placeholders();
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::PlaceholderValue >&
+      placeholders() const;
+
+  // @@protoc_insertion_point(class_scope:milvus.proto.common.PlaceholderGroup)
+ private:
+  class _Internal;
+
+  ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::PlaceholderValue > placeholders_;
+  mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  friend struct ::TableStruct_common_2eproto;
+};
+// -------------------------------------------------------------------
+
 class Address :
     public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.common.Address) */ {
  public:
@@ -1039,7 +1373,7 @@ class Address :
                &_Address_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    4;
+    6;
 
   friend void swap(Address& a, Address& b) {
     a.Swap(&b);
@@ -1183,7 +1517,7 @@ class MsgBase :
                &_MsgBase_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    5;
+    7;
 
   friend void swap(MsgBase& a, MsgBase& b) {
     a.Swap(&b);
@@ -1335,7 +1669,7 @@ class MsgHeader :
                &_MsgHeader_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    6;
+    8;
 
   friend void swap(MsgHeader& a, MsgHeader& b) {
     a.Swap(&b);
@@ -1469,7 +1803,7 @@ class DMLMsgHeader :
                &_DMLMsgHeader_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    7;
+    9;
 
   friend void swap(DMLMsgHeader& a, DMLMsgHeader& b) {
     a.Swap(&b);
@@ -1917,6 +2251,174 @@ inline void Blob::set_allocated_value(std::string* value) {
 
 // -------------------------------------------------------------------
 
+// PlaceholderValue
+
+// string tag = 1;
+inline void PlaceholderValue::clear_tag() {
+  tag_.ClearToEmptyNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline const std::string& PlaceholderValue::tag() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.common.PlaceholderValue.tag)
+  return tag_.GetNoArena();
+}
+inline void PlaceholderValue::set_tag(const std::string& value) {
+  
+  tag_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), value);
+  // @@protoc_insertion_point(field_set:milvus.proto.common.PlaceholderValue.tag)
+}
+inline void PlaceholderValue::set_tag(std::string&& value) {
+  
+  tag_.SetNoArena(
+    &::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::move(value));
+  // @@protoc_insertion_point(field_set_rvalue:milvus.proto.common.PlaceholderValue.tag)
+}
+inline void PlaceholderValue::set_tag(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  
+  tag_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), ::std::string(value));
+  // @@protoc_insertion_point(field_set_char:milvus.proto.common.PlaceholderValue.tag)
+}
+inline void PlaceholderValue::set_tag(const char* value, size_t size) {
+  
+  tag_.SetNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(),
+      ::std::string(reinterpret_cast<const char*>(value), size));
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.common.PlaceholderValue.tag)
+}
+inline std::string* PlaceholderValue::mutable_tag() {
+  
+  // @@protoc_insertion_point(field_mutable:milvus.proto.common.PlaceholderValue.tag)
+  return tag_.MutableNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline std::string* PlaceholderValue::release_tag() {
+  // @@protoc_insertion_point(field_release:milvus.proto.common.PlaceholderValue.tag)
+  
+  return tag_.ReleaseNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited());
+}
+inline void PlaceholderValue::set_allocated_tag(std::string* tag) {
+  if (tag != nullptr) {
+    
+  } else {
+    
+  }
+  tag_.SetAllocatedNoArena(&::PROTOBUF_NAMESPACE_ID::internal::GetEmptyStringAlreadyInited(), tag);
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.common.PlaceholderValue.tag)
+}
+
+// .milvus.proto.common.PlaceholderType type = 2;
+inline void PlaceholderValue::clear_type() {
+  type_ = 0;
+}
+inline ::milvus::proto::common::PlaceholderType PlaceholderValue::type() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.common.PlaceholderValue.type)
+  return static_cast< ::milvus::proto::common::PlaceholderType >(type_);
+}
+inline void PlaceholderValue::set_type(::milvus::proto::common::PlaceholderType value) {
+  
+  type_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.common.PlaceholderValue.type)
+}
+
+// repeated bytes values = 3;
+inline int PlaceholderValue::values_size() const {
+  return values_.size();
+}
+inline void PlaceholderValue::clear_values() {
+  values_.Clear();
+}
+inline const std::string& PlaceholderValue::values(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.common.PlaceholderValue.values)
+  return values_.Get(index);
+}
+inline std::string* PlaceholderValue::mutable_values(int index) {
+  // @@protoc_insertion_point(field_mutable:milvus.proto.common.PlaceholderValue.values)
+  return values_.Mutable(index);
+}
+inline void PlaceholderValue::set_values(int index, const std::string& value) {
+  // @@protoc_insertion_point(field_set:milvus.proto.common.PlaceholderValue.values)
+  values_.Mutable(index)->assign(value);
+}
+inline void PlaceholderValue::set_values(int index, std::string&& value) {
+  // @@protoc_insertion_point(field_set:milvus.proto.common.PlaceholderValue.values)
+  values_.Mutable(index)->assign(std::move(value));
+}
+inline void PlaceholderValue::set_values(int index, const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  values_.Mutable(index)->assign(value);
+  // @@protoc_insertion_point(field_set_char:milvus.proto.common.PlaceholderValue.values)
+}
+inline void PlaceholderValue::set_values(int index, const void* value, size_t size) {
+  values_.Mutable(index)->assign(
+    reinterpret_cast<const char*>(value), size);
+  // @@protoc_insertion_point(field_set_pointer:milvus.proto.common.PlaceholderValue.values)
+}
+inline std::string* PlaceholderValue::add_values() {
+  // @@protoc_insertion_point(field_add_mutable:milvus.proto.common.PlaceholderValue.values)
+  return values_.Add();
+}
+inline void PlaceholderValue::add_values(const std::string& value) {
+  values_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add:milvus.proto.common.PlaceholderValue.values)
+}
+inline void PlaceholderValue::add_values(std::string&& value) {
+  values_.Add(std::move(value));
+  // @@protoc_insertion_point(field_add:milvus.proto.common.PlaceholderValue.values)
+}
+inline void PlaceholderValue::add_values(const char* value) {
+  GOOGLE_DCHECK(value != nullptr);
+  values_.Add()->assign(value);
+  // @@protoc_insertion_point(field_add_char:milvus.proto.common.PlaceholderValue.values)
+}
+inline void PlaceholderValue::add_values(const void* value, size_t size) {
+  values_.Add()->assign(reinterpret_cast<const char*>(value), size);
+  // @@protoc_insertion_point(field_add_pointer:milvus.proto.common.PlaceholderValue.values)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>&
+PlaceholderValue::values() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.common.PlaceholderValue.values)
+  return values_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField<std::string>*
+PlaceholderValue::mutable_values() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.common.PlaceholderValue.values)
+  return &values_;
+}
+
+// -------------------------------------------------------------------
+
+// PlaceholderGroup
+
+// repeated .milvus.proto.common.PlaceholderValue placeholders = 1;
+inline int PlaceholderGroup::placeholders_size() const {
+  return placeholders_.size();
+}
+inline void PlaceholderGroup::clear_placeholders() {
+  placeholders_.Clear();
+}
+inline ::milvus::proto::common::PlaceholderValue* PlaceholderGroup::mutable_placeholders(int index) {
+  // @@protoc_insertion_point(field_mutable:milvus.proto.common.PlaceholderGroup.placeholders)
+  return placeholders_.Mutable(index);
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::PlaceholderValue >*
+PlaceholderGroup::mutable_placeholders() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.common.PlaceholderGroup.placeholders)
+  return &placeholders_;
+}
+inline const ::milvus::proto::common::PlaceholderValue& PlaceholderGroup::placeholders(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.common.PlaceholderGroup.placeholders)
+  return placeholders_.Get(index);
+}
+inline ::milvus::proto::common::PlaceholderValue* PlaceholderGroup::add_placeholders() {
+  // @@protoc_insertion_point(field_add:milvus.proto.common.PlaceholderGroup.placeholders)
+  return placeholders_.Add();
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::common::PlaceholderValue >&
+PlaceholderGroup::placeholders() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.common.PlaceholderGroup.placeholders)
+  return placeholders_;
+}
+
+// -------------------------------------------------------------------
+
 // Address
 
 // string ip = 1;
@@ -2222,6 +2724,10 @@ inline void DMLMsgHeader::set_allocated_shardname(std::string* shardname) {
 
 // -------------------------------------------------------------------
 
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
 
 // @@protoc_insertion_point(namespace_scope)
 
@@ -2245,6 +2751,11 @@ template <> struct is_proto_enum< ::milvus::proto::common::SegmentState> : ::std
 template <>
 inline const EnumDescriptor* GetEnumDescriptor< ::milvus::proto::common::SegmentState>() {
   return ::milvus::proto::common::SegmentState_descriptor();
+}
+template <> struct is_proto_enum< ::milvus::proto::common::PlaceholderType> : ::std::true_type {};
+template <>
+inline const EnumDescriptor* GetEnumDescriptor< ::milvus::proto::common::PlaceholderType>() {
+  return ::milvus::proto::common::PlaceholderType_descriptor();
 }
 template <> struct is_proto_enum< ::milvus::proto::common::MsgType> : ::std::true_type {};
 template <>

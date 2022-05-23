@@ -57,6 +57,7 @@ type searchTask struct {
 
 func (t *searchTask) PreExecute(ctx context.Context) error {
 	sp, ctx := trace.StartSpanFromContextWithOperationName(t.TraceCtx(), "Proxy-Search-PreExecute")
+	defer sp.Finish()
 
 	if t.getQueryNodePolicy == nil {
 		t.getQueryNodePolicy = defaultGetQueryNodePolicy
@@ -66,7 +67,6 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		t.searchShardPolicy = roundRobinPolicy
 	}
 
-	defer sp.Finish()
 	t.Base.MsgType = commonpb.MsgType_Search
 	t.Base.SourceID = Params.ProxyCfg.GetNodeID()
 
@@ -220,6 +220,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 
 		t.SearchRequest.DslType = commonpb.DslType_BoolExprV1
 		t.SearchRequest.SerializedExprPlan, err = proto.Marshal(plan)
+		t.SearchRequest.Topk = int64(topK)
 		if err != nil {
 			return err
 		}
@@ -228,7 +229,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	}
 	travelTimestamp := t.request.TravelTimestamp
 	if travelTimestamp == 0 {
-		travelTimestamp = t.BeginTs()
+		travelTimestamp = typeutil.MaxTimestamp
 	} else {
 		durationSeconds := tsoutil.CalculateDuration(t.BeginTs(), travelTimestamp) / 1000
 		if durationSeconds > Params.CommonCfg.RetentionDuration {
@@ -240,8 +241,8 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	if guaranteeTimestamp == 0 {
 		guaranteeTimestamp = t.BeginTs()
 	}
-	t.TravelTimestamp = travelTimestamp
-	t.GuaranteeTimestamp = guaranteeTimestamp
+	t.SearchRequest.TravelTimestamp = travelTimestamp
+	t.SearchRequest.GuaranteeTimestamp = guaranteeTimestamp
 	deadline, ok := t.TraceCtx().Deadline()
 	if ok {
 		t.SearchRequest.TimeoutTimestamp = tsoutil.ComposeTSByTime(deadline, 0)
@@ -250,7 +251,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	t.DbID = 0 // todo
 	t.SearchRequest.Dsl = t.request.Dsl
 	t.SearchRequest.PlaceholderGroup = t.request.PlaceholderGroup
-
+	t.SearchRequest.Nq = t.request.GetNq()
 	log.Info("search PreExecute done.",
 		zap.Any("requestID", t.Base.MsgID), zap.Any("requestType", "search"))
 	return nil
@@ -404,9 +405,9 @@ func (t *searchTask) searchShard(ctx context.Context, leaders []queryNode, chann
 
 	search := func(nodeID UniqueID, qn types.QueryNode) error {
 		req := &querypb.SearchRequest{
-			Req:           t.SearchRequest,
-			IsShardLeader: true,
-			DmlChannel:    channelID,
+			Req:        t.SearchRequest,
+			DmlChannel: channelID,
+			Scope:      querypb.DataScope_All,
 		}
 
 		result, err := qn.Search(ctx, req)

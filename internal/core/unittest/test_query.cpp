@@ -106,7 +106,6 @@ TEST(Query, DSL) {
 }
 
 TEST(Query, ParsePlaceholderGroup) {
-    namespace ser = milvus::proto::milvus;
     std::string dsl_string = R"(
 {
     "bool": {
@@ -394,8 +393,8 @@ TEST(Query, ExecTerm) {
     std::vector<std::vector<std::string>> results;
     int topk = 5;
     auto json = SearchResultToJson(*sr);
-    ASSERT_EQ(sr->num_queries_, num_queries);
-    ASSERT_EQ(sr->topk_, topk);
+    ASSERT_EQ(sr->total_nq_, num_queries);
+    ASSERT_EQ(sr->unity_topK_, topk);
     // for(auto x: )
 }
 

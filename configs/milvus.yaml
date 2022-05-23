@@ -180,6 +180,14 @@ queryNode:
     enabled: true
     memoryLimit: 2147483648 # 2 GB, 2 * 1024 *1024 *1024
 
+  grouping:
+    enabled: true
+    receiveChanSize: 10240
+    unsolvedQueueSize: 10240
+    maxNQ: 1000
+    topKMergeRatio: 10.0
+
+
 
 indexCoord:
   address: localhost
@@ -222,7 +230,7 @@ dataNode:
 
 # Configures the system log output.
 log:
-  level: info # Only supports debug, info, warn, error, panic, or fatal. Default 'info'.
+  level: debug # Only supports debug, info, warn, error, panic, or fatal. Default 'info'.
   file:
     # please adjust in embedded Milvus: /tmp/milvus/logs
     rootPath: "" # default to stdout, stderr

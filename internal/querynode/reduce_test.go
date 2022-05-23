@@ -22,12 +22,26 @@ import (
 	"math"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/common"
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
 )
+
+func TestReduce_parseSliceInfo(t *testing.T) {
+	originNQs := []int64{2, 3, 2}
+	originTopKs := []int64{10, 5, 20}
+	nqPerSlice := int64(2)
+	sInfo := parseSliceInfo(originNQs, originTopKs, nqPerSlice)
+
+	expectedSliceNQs := []int32{2, 2, 1, 2}
+	expectedSliceTopKs := []int32{10, 5, 5, 20}
+	assert.True(t, funcutil.SliceSetEqual(sInfo.sliceNQs, expectedSliceNQs))
+	assert.True(t, funcutil.SliceSetEqual(sInfo.sliceTopKs, expectedSliceTopKs))
+}
 
 func TestReduce_AllFunc(t *testing.T) {
 	nq := int64(10)
@@ -37,10 +51,10 @@ func TestReduce_AllFunc(t *testing.T) {
 	node, err := genSimpleQueryNode(ctx)
 	assert.NoError(t, err)
 
-	collection, err := node.historical.replica.getCollectionByID(defaultCollectionID)
+	collection, err := node.historical.getCollectionByID(defaultCollectionID)
 	assert.NoError(t, err)
 
-	segment, err := node.historical.replica.getSegmentByID(defaultSegmentID)
+	segment, err := node.historical.getSegmentByID(defaultSegmentID)
 	assert.NoError(t, err)
 
 	// TODO: replace below by genPlaceholderGroup(nq)
@@ -52,9 +66,9 @@ func TestReduce_AllFunc(t *testing.T) {
 		searchRawData = append(searchRawData, buf...)
 	}
 
-	placeholderValue := milvuspb.PlaceholderValue{
+	placeholderValue := commonpb.PlaceholderValue{
 		Tag:    "$0",
-		Type:   milvuspb.PlaceholderType_FloatVector,
+		Type:   commonpb.PlaceholderType_FloatVector,
 		Values: [][]byte{},
 	}
 
@@ -62,8 +76,8 @@ func TestReduce_AllFunc(t *testing.T) {
 		placeholderValue.Values = append(placeholderValue.Values, searchRawData)
 	}
 
-	placeholderGroup := milvuspb.PlaceholderGroup{
-		Placeholders: []*milvuspb.PlaceholderValue{&placeholderValue},
+	placeholderGroup := commonpb.PlaceholderGroup{
+		Placeholders: []*commonpb.PlaceholderValue{&placeholderValue},
 	}
 
 	placeGroupByte, err := proto.Marshal(&placeholderGroup)
@@ -75,26 +89,23 @@ func TestReduce_AllFunc(t *testing.T) {
 
 	plan, err := createSearchPlan(collection, dslString)
 	assert.NoError(t, err)
-	holder, err := parseSearchRequest(plan, placeGroupByte)
+	searchReq, err := parseSearchRequest(plan, placeGroupByte)
+	searchReq.timestamp = 0
 	assert.NoError(t, err)
 
-	placeholderGroups := make([]*searchRequest, 0)
-	placeholderGroups = append(placeholderGroups, holder)
-
-	searchResult, err := segment.search(plan, placeholderGroups, []Timestamp{0})
+	searchResult, err := segment.search(searchReq)
 	assert.NoError(t, err)
 
 	err = checkSearchResult(nq, plan, searchResult)
 	assert.NoError(t, err)
 
-	plan.delete()
-	holder.delete()
+	searchReq.delete()
 	deleteSegment(segment)
 	deleteCollection(collection)
 }
 
 func TestReduce_nilPlan(t *testing.T) {
 	plan := &SearchPlan{}
-	err := reduceSearchResultsAndFillData(plan, nil, 1)
+	_, err := reduceSearchResultsAndFillData(plan, nil, 1, nil, nil)
 	assert.Error(t, err)
 }

@@ -259,7 +259,7 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42, uint64_t ts_offset = 0,
 
 inline auto
 CreatePlaceholderGroup(int64_t num_queries, int dim, int64_t seed = 42) {
-    namespace ser = milvus::proto::milvus;
+    namespace ser = milvus::proto::common;
     ser::PlaceholderGroup raw_group;
     auto value = raw_group.add_placeholders();
     value->set_tag("$0");
@@ -279,7 +279,7 @@ CreatePlaceholderGroup(int64_t num_queries, int dim, int64_t seed = 42) {
 
 inline auto
 CreatePlaceholderGroupFromBlob(int64_t num_queries, int dim, const float* src) {
-    namespace ser = milvus::proto::milvus;
+    namespace ser = milvus::proto::common;
     ser::PlaceholderGroup raw_group;
     auto value = raw_group.add_placeholders();
     value->set_tag("$0");
@@ -300,7 +300,7 @@ CreatePlaceholderGroupFromBlob(int64_t num_queries, int dim, const float* src) {
 inline auto
 CreateBinaryPlaceholderGroup(int64_t num_queries, int64_t dim, int64_t seed = 42) {
     assert(dim % 8 == 0);
-    namespace ser = milvus::proto::milvus;
+    namespace ser = milvus::proto::common;
     ser::PlaceholderGroup raw_group;
     auto value = raw_group.add_placeholders();
     value->set_tag("$0");
@@ -320,7 +320,7 @@ CreateBinaryPlaceholderGroup(int64_t num_queries, int64_t dim, int64_t seed = 42
 inline auto
 CreateBinaryPlaceholderGroupFromBlob(int64_t num_queries, int64_t dim, const uint8_t* ptr) {
     assert(dim % 8 == 0);
-    namespace ser = milvus::proto::milvus;
+    namespace ser = milvus::proto::common;
     ser::PlaceholderGroup raw_group;
     auto value = raw_group.add_placeholders();
     value->set_tag("$0");
@@ -339,8 +339,8 @@ CreateBinaryPlaceholderGroupFromBlob(int64_t num_queries, int64_t dim, const uin
 
 inline json
 SearchResultToJson(const SearchResult& sr) {
-    int64_t num_queries = sr.num_queries_;
-    int64_t topk = sr.topk_;
+    int64_t num_queries = sr.total_nq_;
+    int64_t topk = sr.unity_topK_;
     std::vector<std::vector<std::string>> results;
     for (int q = 0; q < num_queries; ++q) {
         std::vector<std::string> result;

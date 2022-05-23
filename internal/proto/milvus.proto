@@ -578,22 +578,6 @@ message DeleteRequest {
   repeated uint32 hash_keys = 6;
 }
 
-enum PlaceholderType {
-  None = 0;
-  BinaryVector = 100;
-  FloatVector = 101;
-}
-
-message PlaceholderValue {
-  string tag = 1;
-  PlaceholderType type = 2;
-  // values is a 2d-array, every array contains a vector
-  repeated bytes values = 3;
-}
-
-message PlaceholderGroup {
-  repeated PlaceholderValue placeholders = 1;
-}
 
 message SearchRequest {
   common.MsgBase base = 1; // must
@@ -608,6 +592,7 @@ message SearchRequest {
   repeated common.KeyValuePair search_params = 9; // must
   uint64 travel_timestamp = 10;
   uint64 guarantee_timestamp = 11; // guarantee_timestamp
+  int64  nq = 12;
 }
 
 message Hits {

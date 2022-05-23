@@ -53,8 +53,8 @@ struct SearchResult {
     }
 
  public:
-    int64_t num_queries_;
-    int64_t topk_;
+    int64_t total_nq_;
+    int64_t unity_topK_;
     void* segment_;
 
     // first fill data during search, and then update data after reducing search results

@@ -81,9 +81,6 @@ func (c *Collection) Schema() *schemapb.CollectionSchema {
 
 // addPartitionID would add a partition id to partition id list of collection
 func (c *Collection) addPartitionID(partitionID UniqueID) {
-	c.releaseMu.Lock()
-	defer c.releaseMu.Unlock()
-
 	c.partitionIDs = append(c.partitionIDs, partitionID)
 	log.Info("queryNode collection info after add a partition",
 		zap.Int64("partitionID", partitionID), zap.Int64("collectionID", c.id),

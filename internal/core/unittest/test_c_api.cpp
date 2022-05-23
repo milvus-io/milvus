@@ -23,7 +23,6 @@
 #include <boost/format.hpp>
 
 #include "common/LoadInfo.h"
-#include "pb/milvus.pb.h"
 #include "pb/plan.pb.h"
 #include "query/ExprImpl.h"
 #include "segcore/Collection.h"
@@ -106,7 +105,7 @@ generate_data(int N) {
 
 std::string
 generate_query_data(int nq) {
-    namespace ser = milvus::proto::milvus;
+    namespace ser = milvus::proto::common;
     std::default_random_engine e(67);
     int dim = DIM;
     std::normal_distribution<double> dis(0.0, 1.0);
@@ -823,8 +822,8 @@ TEST(CApiTest, GetRowCountTest) {
 void
 CheckSearchResultDuplicate(const std::vector<CSearchResult>& results) {
     auto sr = (SearchResult*)results[0];
-    auto topk = sr->topk_;
-    auto num_queries = sr->num_queries_;
+    auto topk = sr->unity_topK_;
+    auto num_queries = sr->total_nq_;
 
     // fill primary keys
     std::vector<PkType> result_pks(num_queries * topk);
@@ -882,12 +881,14 @@ TEST(CApiTest, ReduceRemoveDuplicates) {
                     "query": "$0",
                     "topk": 10,
                     "round_decimal": 3
-                }
+               }
             }
         }
-    })";
+   })";
 
     int num_queries = 10;
+    int topK = 10;
+
     auto blob = generate_query_data(num_queries);
 
     void* plan = nullptr;
@@ -904,6 +905,8 @@ TEST(CApiTest, ReduceRemoveDuplicates) {
     dataset.timestamps_.push_back(1);
 
     {
+        auto slice_nqs = std::vector<int32_t>{num_queries / 2, num_queries / 2};
+        auto slice_topKs = std::vector<int32_t>{topK / 2, topK};
         std::vector<CSearchResult> results;
         CSearchResult res1, res2;
         status = Search(segment, plan, placeholderGroup, dataset.timestamps_[0], &res1, -1);
@@ -913,7 +916,9 @@ TEST(CApiTest, ReduceRemoveDuplicates) {
         results.push_back(res1);
         results.push_back(res2);
 
-        status = ReduceSearchResultsAndFillData(plan, results.data(), results.size());
+        CSearchResultDataBlobs cSearchResultData;
+        status = ReduceSearchResultsAndFillData(&cSearchResultData, plan, results.data(), results.size(),
+                                                slice_nqs.data(), slice_topKs.data(), slice_nqs.size());
         assert(status.error_code == Success);
         // TODO:: insert no duplicate pks and check reduce results
         CheckSearchResultDuplicate(results);
@@ -922,6 +927,11 @@ TEST(CApiTest, ReduceRemoveDuplicates) {
         DeleteSearchResult(res2);
     }
     {
+        int nq1 = num_queries / 3;
+        int nq2 = num_queries / 3;
+        int nq3 = num_queries - nq1 - nq2;
+        auto slice_nqs = std::vector<int32_t>{nq1, nq2, nq3};
+        auto slice_topKs = std::vector<int32_t>{topK / 2, topK, topK};
         std::vector<CSearchResult> results;
         CSearchResult res1, res2, res3;
         status = Search(segment, plan, placeholderGroup, dataset.timestamps_[0], &res1, -1);
@@ -933,8 +943,9 @@ TEST(CApiTest, ReduceRemoveDuplicates) {
         results.push_back(res1);
         results.push_back(res2);
         results.push_back(res3);
-
-        status = ReduceSearchResultsAndFillData(plan, results.data(), results.size());
+        CSearchResultDataBlobs cSearchResultData;
+        status = ReduceSearchResultsAndFillData(&cSearchResultData, plan, results.data(), results.size(),
+                                                slice_nqs.data(), slice_topKs.data(), slice_nqs.size());
         assert(status.error_code == Success);
         // TODO:: insert no duplicate pks and check reduce results
         CheckSearchResultDuplicate(results);
@@ -1004,28 +1015,46 @@ testReduceSearchWithExpr(int N, int topK, int num_queries) {
     results.push_back(res1);
     results.push_back(res2);
 
+    auto slice_nqs = std::vector<int32_t>{num_queries / 2, num_queries / 2};
+    if (num_queries == 1) {
+        slice_nqs = std::vector<int32_t>{num_queries};
+    }
+    auto slice_topKs = std::vector<int32_t>{topK / 2, topK};
+    if (topK == 1) {
+        slice_topKs = std::vector<int32_t>{topK, topK};
+    }
+
     // 1. reduce
-    status = ReduceSearchResultsAndFillData(plan, results.data(), results.size());
+    CSearchResultDataBlobs cSearchResultData;
+    status = ReduceSearchResultsAndFillData(&cSearchResultData, plan, results.data(), results.size(), slice_nqs.data(),
+                                            slice_topKs.data(), slice_nqs.size());
     assert(status.error_code == Success);
 
-    // 2. marshal
-    CSearchResultDataBlobs cSearchResultData;
-    auto req_sizes = std::vector<int32_t>{num_queries / 2, num_queries / 2};
-    if (num_queries == 1) {
-        req_sizes = std::vector<int32_t>{num_queries};
-    }
-    status = Marshal(&cSearchResultData, results.data(), plan, results.size(), req_sizes.data(), req_sizes.size());
-    assert(status.error_code == Success);
     auto search_result_data_blobs = reinterpret_cast<milvus::segcore::SearchResultDataBlobs*>(cSearchResultData);
 
     // check result
-    for (int i = 0; i < req_sizes.size(); i++) {
+    for (int i = 0; i < slice_nqs.size(); i++) {
         milvus::proto::schema::SearchResultData search_result_data;
         auto suc = search_result_data.ParseFromArray(search_result_data_blobs->blobs[i].data(),
                                                      search_result_data_blobs->blobs[i].size());
         assert(suc);
-        assert(search_result_data.top_k() == topK);
-        assert(search_result_data.num_queries() == req_sizes[i]);
+
+        assert(suc);
+        assert(search_result_data.num_queries() == slice_nqs[i]);
+        assert(search_result_data.top_k() == slice_topKs[i]);
+        assert(search_result_data.scores().size() == slice_topKs[i] * slice_nqs[i]);
+        assert(search_result_data.ids().int_id().data_size() == slice_topKs[i] * slice_nqs[i]);
+
+        // check topKs
+        assert(search_result_data.topks().size() == slice_nqs[i]);
+        for (int j = 0; j < search_result_data.topks().size(); j++) {
+            assert(search_result_data.topks().at(j) == slice_topKs[i]);
+        }
+
+        // assert(search_result_data.scores().size() == slice_topKs[i] * slice_nqs[i]);
+        // assert(search_result_data.ids().int_id().data_size() == slice_topKs[i] * slice_nqs[i]);
+        // assert(search_result_data.top_k() == topK);
+        // assert(search_result_data.num_queries() == req_sizes[i]);
         // assert(search_result_data.scores().size() == topK * req_sizes[i]);
         // assert(search_result_data.ids().int_id().data_size() == topK * req_sizes[i]);
     }
@@ -2300,6 +2329,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
 
     // create place_holder_group
     int num_queries = 5;
+    int topK = 5;
     auto raw_group = CreateBinaryPlaceholderGroupFromBlob(num_queries, DIM, query_ptr);
     auto blob = raw_group.SerializeAsString();
 
@@ -2373,8 +2403,17 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
 
     std::vector<CSearchResult> results;
     results.push_back(c_search_result_on_bigIndex);
-    status = ReduceSearchResultsAndFillData(plan, results.data(), results.size());
+
+    auto slice_nqs = std::vector<int32_t>{num_queries};
+    auto slice_topKs = std::vector<int32_t>{topK};
+
+    CSearchResultDataBlobs cSearchResultData;
+    status = ReduceSearchResultsAndFillData(&cSearchResultData, plan, results.data(), results.size(), slice_nqs.data(),
+                                            slice_topKs.data(), slice_nqs.size());
     assert(status.error_code == Success);
+
+    //    status = ReduceSearchResultsAndFillData(plan, results.data(), results.size());
+    //    assert(status.error_code == Success);
 
     auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
     for (int i = 0; i < num_queries; ++i) {
@@ -2450,6 +2489,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
 
     // create place_holder_group
     int num_queries = 5;
+    int topK = 5;
     auto raw_group = CreateBinaryPlaceholderGroupFromBlob(num_queries, DIM, query_ptr);
     auto blob = raw_group.SerializeAsString();
 
@@ -2524,8 +2564,17 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
 
     std::vector<CSearchResult> results;
     results.push_back(c_search_result_on_bigIndex);
-    status = ReduceSearchResultsAndFillData(plan, results.data(), results.size());
+
+    auto slice_nqs = std::vector<int32_t>{num_queries};
+    auto slice_topKs = std::vector<int32_t>{topK};
+
+    CSearchResultDataBlobs cSearchResultData;
+    status = ReduceSearchResultsAndFillData(&cSearchResultData, plan, results.data(), results.size(), slice_nqs.data(),
+                                            slice_topKs.data(), slice_nqs.size());
     assert(status.error_code == Success);
+
+    //    status = ReduceSearchResultsAndFillData(plan, results.data(), results.size());
+    //    assert(status.error_code == Success);
 
     auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
     for (int i = 0; i < num_queries; ++i) {

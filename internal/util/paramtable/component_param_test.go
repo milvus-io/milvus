@@ -247,6 +247,12 @@ func TestComponentParam(t *testing.T) {
 		nprobe := Params.SmallIndexNProbe
 		assert.Equal(t, int64(16), nprobe)
 
+		assert.Equal(t, true, Params.GroupEnabled)
+		assert.Equal(t, int32(10240), Params.MaxReceiveChanSize)
+		assert.Equal(t, int32(10240), Params.MaxUnsolvedQueueSize)
+		assert.Equal(t, int64(1000), Params.MaxGroupNQ)
+		assert.Equal(t, 10.0, Params.TopKMergeRatio)
+
 		// test small indexNlist/NProbe default
 		Params.Base.Remove("queryNode.segcore.smallIndex.nlist")
 		Params.Base.Remove("queryNode.segcore.smallIndex.nprobe")

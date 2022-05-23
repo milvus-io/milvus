@@ -99,8 +99,8 @@ FloatSearch(const segcore::SegmentGrowingImpl& segment,
     current_chunk_id = max_chunk;
     results.distances_ = std::move(final_qr.mutable_distances());
     results.seg_offsets_ = std::move(final_qr.mutable_seg_offsets());
-    results.topk_ = topk;
-    results.num_queries_ = num_queries;
+    results.unity_topK_ = topk;
+    results.total_nq_ = num_queries;
 
     return Status::OK();
 }
@@ -162,8 +162,8 @@ BinarySearch(const segcore::SegmentGrowingImpl& segment,
     final_result.round_values();
     results.distances_ = std::move(final_result.mutable_distances());
     results.seg_offsets_ = std::move(final_result.mutable_seg_offsets());
-    results.topk_ = topk;
-    results.num_queries_ = num_queries;
+    results.unity_topK_ = topk;
+    results.total_nq_ = num_queries;
 
     return Status::OK();
 }

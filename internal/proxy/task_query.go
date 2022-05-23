@@ -354,9 +354,9 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 func (t *queryTask) queryShard(ctx context.Context, leaders []queryNode, channelID string) error {
 	query := func(nodeID UniqueID, qn types.QueryNode) error {
 		req := &querypb.QueryRequest{
-			Req:           t.RetrieveRequest,
-			IsShardLeader: true,
-			DmlChannel:    channelID,
+			Req:        t.RetrieveRequest,
+			DmlChannel: channelID,
+			Scope:      querypb.DataScope_All,
 		}
 
 		result, err := qn.Query(ctx, req)

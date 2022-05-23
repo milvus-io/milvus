@@ -23,7 +23,7 @@ namespace milvus::query {
 
 std::unique_ptr<PlaceholderGroup>
 ParsePlaceholderGroup(const Plan* plan, const std::string& blob) {
-    namespace ser = milvus::proto::milvus;
+    namespace ser = milvus::proto::common;
     auto result = std::make_unique<PlaceholderGroup>();
     ser::PlaceholderGroup ph_group;
     auto ok = ph_group.ParseFromString(blob);

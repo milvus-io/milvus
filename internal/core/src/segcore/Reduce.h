@@ -13,9 +13,12 @@
 #include <cstdint>
 #include <vector>
 #include <algorithm>
+#include <memory>
 
 #include "utils/Status.h"
 #include "common/type_c.h"
+#include "common/QueryResult.h"
+#include "query/PlanImpl.h"
 
 namespace milvus::segcore {
 
@@ -24,11 +27,58 @@ struct SearchResultDataBlobs {
     std::vector<std::vector<char>> blobs;
 };
 
-Status
-merge_into(int64_t num_queries,
-           int64_t topk,
-           float* distances,
-           int64_t* uids,
-           const float* new_distances,
-           const int64_t* new_uids);
+class ReduceHelper {
+ public:
+    explicit ReduceHelper(std::vector<SearchResult*>& search_results,
+                          milvus::query::Plan* plan,
+                          std::vector<int64_t>& slice_nqs,
+                          std::vector<int64_t>& slice_topKs)
+        : search_results_(search_results), plan_(plan), slice_nqs_(slice_nqs), slice_topKs_(slice_topKs) {
+        Initialize();
+    }
+
+    void
+    Reduce();
+
+    void
+    Marshal();
+
+    void*
+    GetSearchResultDataBlobs() {
+        return search_result_data_blobs_.release();
+    }
+
+ private:
+    void
+    Initialize();
+
+    void
+    FilterInvalidSearchResult(SearchResult* search_result);
+
+    void
+    ReduceResultData(int slice_index);
+
+    std::vector<char>
+    GetSearchResultDataSlice(int slice_index_, int64_t result_count);
+
+ private:
+    std::vector<int64_t> slice_topKs_;
+    std::vector<int64_t> slice_nqs_;
+    int64_t unify_topK_;
+    int64_t total_nq_;
+    int64_t num_segments_;
+    int64_t num_slices_;
+
+    milvus::query::Plan* plan_;
+    std::vector<SearchResult*>& search_results_;
+
+    //
+    std::vector<int32_t> nq_slice_offsets_;
+    std::vector<std::vector<int64_t>> final_search_records_;
+    std::vector<std::vector<int64_t>> final_real_topKs_;
+
+    // output
+    std::unique_ptr<SearchResultDataBlobs> search_result_data_blobs_;
+};
+
 }  // namespace milvus::segcore

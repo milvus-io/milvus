@@ -85,8 +85,7 @@ func TestFlowGraphInsertNode_insert(t *testing.T) {
 			defaultPartitionID,
 			defaultCollectionID,
 			defaultDMLChannel,
-			segmentTypeGrowing,
-			true)
+			segmentTypeGrowing)
 		assert.NoError(t, err)
 
 		collection, err := streaming.getCollectionByID(defaultCollectionID)
@@ -108,8 +107,7 @@ func TestFlowGraphInsertNode_insert(t *testing.T) {
 			defaultPartitionID,
 			defaultCollectionID,
 			defaultDMLChannel,
-			segmentTypeGrowing,
-			true)
+			segmentTypeGrowing)
 		assert.NoError(t, err)
 
 		collection, err := streaming.getCollectionByID(defaultCollectionID)
@@ -141,8 +139,7 @@ func TestFlowGraphInsertNode_insert(t *testing.T) {
 			defaultPartitionID,
 			defaultCollectionID,
 			defaultDMLChannel,
-			segmentTypeSealed,
-			true)
+			segmentTypeSealed)
 		assert.NoError(t, err)
 
 		wg := &sync.WaitGroup{}
@@ -161,8 +158,7 @@ func TestFlowGraphInsertNode_delete(t *testing.T) {
 			defaultPartitionID,
 			defaultCollectionID,
 			defaultDMLChannel,
-			segmentTypeGrowing,
-			true)
+			segmentTypeGrowing)
 		assert.NoError(t, err)
 
 		collection, err := streaming.getCollectionByID(defaultCollectionID)
@@ -189,8 +185,7 @@ func TestFlowGraphInsertNode_delete(t *testing.T) {
 			defaultPartitionID,
 			defaultCollectionID,
 			defaultDMLChannel,
-			segmentTypeGrowing,
-			true)
+			segmentTypeGrowing)
 		assert.NoError(t, err)
 
 		deleteData, err := genFlowGraphDeleteData()
@@ -209,8 +204,7 @@ func TestFlowGraphInsertNode_delete(t *testing.T) {
 			defaultPartitionID,
 			defaultCollectionID,
 			defaultDMLChannel,
-			segmentTypeGrowing,
-			true)
+			segmentTypeGrowing)
 		assert.NoError(t, err)
 
 		deleteData, err := genFlowGraphDeleteData()
@@ -241,8 +235,7 @@ func TestFlowGraphInsertNode_operate(t *testing.T) {
 			defaultPartitionID,
 			defaultCollectionID,
 			defaultDMLChannel,
-			segmentTypeGrowing,
-			true)
+			segmentTypeGrowing)
 		assert.NoError(t, err)
 
 		collection, err := streaming.getCollectionByID(defaultCollectionID)
@@ -279,8 +272,7 @@ func TestFlowGraphInsertNode_operate(t *testing.T) {
 			defaultPartitionID,
 			defaultCollectionID,
 			defaultDMLChannel,
-			segmentTypeGrowing,
-			true)
+			segmentTypeGrowing)
 		assert.NoError(t, err)
 
 		msgDeleteMsg := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
@@ -304,8 +296,7 @@ func TestFlowGraphInsertNode_operate(t *testing.T) {
 			defaultPartitionID,
 			defaultCollectionID,
 			defaultDMLChannel,
-			segmentTypeGrowing,
-			true)
+			segmentTypeGrowing)
 		assert.NoError(t, err)
 
 		msgDeleteMsg := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
@@ -330,8 +321,7 @@ func TestFlowGraphInsertNode_operate(t *testing.T) {
 			defaultPartitionID,
 			defaultCollectionID,
 			defaultDMLChannel,
-			segmentTypeGrowing,
-			true)
+			segmentTypeGrowing)
 		assert.NoError(t, err)
 
 		msgDeleteMsg := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
@@ -355,8 +345,7 @@ func TestFlowGraphInsertNode_operate(t *testing.T) {
 			defaultPartitionID,
 			defaultCollectionID,
 			defaultDMLChannel,
-			segmentTypeGrowing,
-			true)
+			segmentTypeGrowing)
 		assert.NoError(t, err)
 
 		collection, err := streaming.getCollectionByID(defaultCollectionID)

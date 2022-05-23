@@ -58,8 +58,9 @@ func (m *mockTask) PostExecute(ctx context.Context) error {
 func TestTaskScheduler(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	tSafe := newTSafeReplica()
 
-	ts := newTaskScheduler(ctx)
+	ts := newTaskScheduler(ctx, tSafe)
 	ts.Start()
 
 	task := &mockTask{

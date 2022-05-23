@@ -49,7 +49,7 @@ func TestSegmentLoader_loadSegment(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 
-		err = node.historical.replica.removeSegment(defaultSegmentID)
+		err = node.historical.removeSegment(defaultSegmentID)
 		assert.NoError(t, err)
 
 		loader := node.loader
@@ -80,7 +80,7 @@ func TestSegmentLoader_loadSegment(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 
-		err = node.historical.replica.removePartition(defaultPartitionID)
+		err = node.historical.removePartition(defaultPartitionID)
 		assert.NoError(t, err)
 
 		loader := node.loader
@@ -179,8 +179,7 @@ func TestSegmentLoader_loadSegmentFieldsData(t *testing.T) {
 			defaultPartitionID,
 			defaultCollectionID,
 			defaultDMLChannel,
-			segmentTypeSealed,
-			true)
+			segmentTypeSealed)
 		assert.Nil(t, err)
 
 		binlog, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
@@ -221,7 +220,7 @@ func TestSegmentLoader_invalid(t *testing.T) {
 		loader := node.loader
 		assert.NotNil(t, loader)
 
-		err = node.historical.replica.removeCollection(defaultCollectionID)
+		err = node.historical.removeCollection(defaultCollectionID)
 		assert.NoError(t, err)
 
 		req := &querypb.LoadSegmentsRequest{
@@ -243,48 +242,13 @@ func TestSegmentLoader_invalid(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	//t.Run("test no collection 2", func(t *testing.T) {
-	//	historical, err := genSimpleHistorical(ctx)
-	//	assert.NoError(t, err)
-	//
-	//	err = historical.replica.removeCollection(defaultCollectionID)
-	//	assert.NoError(t, err)
-	//
-	//	err = historical.loader.loadSegmentInternal(defaultCollectionID, nil, nil)
-	//	assert.Error(t, err)
-	//})
-	//
-	//t.Run("test no vec field", func(t *testing.T) {
-	//	historical, err := genSimpleHistorical(ctx)
-	//	assert.NoError(t, err)
-	//
-	//	err = historical.replica.removeCollection(defaultCollectionID)
-	//	assert.NoError(t, err)
-	//
-	//	schema := &schemapb.CollectionSchema{
-	//		Name:   defaultCollectionName,
-	//		AutoID: true,
-	//		Fields: []*schemapb.FieldSchema{
-	//			genConstantFieldSchema(constFieldParam{
-	//				id:       FieldID(100),
-	//				dataType: schemapb.DataType_Int8,
-	//			}),
-	//		},
-	//	}
-	//	err = historical.loader.historicalReplica.addCollection(defaultCollectionID, schema)
-	//	assert.NoError(t, err)
-	//
-	//	err = historical.loader.loadSegmentInternal(defaultCollectionID, nil, nil)
-	//	assert.Error(t, err)
-	//})
-
 	t.Run("test no vec field 2", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 		loader := node.loader
 		assert.NotNil(t, loader)
 
-		err = node.historical.replica.removeCollection(defaultCollectionID)
+		err = node.historical.removeCollection(defaultCollectionID)
 		assert.NoError(t, err)
 
 		schema := &schemapb.CollectionSchema{
@@ -365,10 +329,10 @@ func TestSegmentLoader_testLoadGrowing(t *testing.T) {
 		loader := node.loader
 		assert.NotNil(t, loader)
 
-		collection, err := node.historical.replica.getCollectionByID(defaultCollectionID)
+		collection, err := node.historical.getCollectionByID(defaultCollectionID)
 		assert.NoError(t, err)
 
-		segment, err := newSegment(collection, defaultSegmentID+1, defaultPartitionID, defaultCollectionID, defaultDMLChannel, segmentTypeGrowing, true)
+		segment, err := newSegment(collection, defaultSegmentID+1, defaultPartitionID, defaultCollectionID, defaultDMLChannel, segmentTypeGrowing)
 		assert.Nil(t, err)
 
 		insertData, err := genInsertData(defaultMsgLength, collection.schema)
@@ -394,10 +358,10 @@ func TestSegmentLoader_testLoadGrowing(t *testing.T) {
 		loader := node.loader
 		assert.NotNil(t, loader)
 
-		collection, err := node.historical.replica.getCollectionByID(defaultCollectionID)
+		collection, err := node.historical.getCollectionByID(defaultCollectionID)
 		assert.NoError(t, err)
 
-		segment, err := newSegment(collection, defaultSegmentID+1, defaultPartitionID, defaultCollectionID, defaultDMLChannel, segmentTypeGrowing, true)
+		segment, err := newSegment(collection, defaultSegmentID+1, defaultPartitionID, defaultCollectionID, defaultDMLChannel, segmentTypeGrowing)
 		assert.Nil(t, err)
 
 		insertData, err := genInsertData(defaultMsgLength, collection.schema)
@@ -604,7 +568,7 @@ func TestSegmentLoader_testLoadSealedSegmentWithIndex(t *testing.T) {
 	err = loader.loadSegment(req, segmentTypeSealed)
 	assert.NoError(t, err)
 
-	segment, err := node.historical.replica.getSegmentByID(segmentID)
+	segment, err := node.historical.getSegmentByID(segmentID)
 	assert.NoError(t, err)
 	vecFieldInfo, err := segment.getIndexedFieldInfo(simpleFloatVecField.id)
 	assert.NoError(t, err)
