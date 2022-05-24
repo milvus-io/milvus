@@ -128,6 +128,7 @@ func genReleaseSegmentTask(ctx context.Context, queryCoord *QueryCoord, nodeID i
 		baseTask:               baseTask,
 		ReleaseSegmentsRequest: req,
 		cluster:                queryCoord.cluster,
+		leaderID:               nodeID,
 	}
 	return releaseSegmentTask
 }
@@ -1100,7 +1101,7 @@ func TestLoadBalanceIndexedSegmentsAfterNodeDown(t *testing.T) {
 		}
 		log.Debug("node still has segments",
 			zap.Int64("nodeID", node1.queryNodeID))
-		time.Sleep(200 * time.Millisecond)
+		time.Sleep(time.Second)
 	}
 
 	for {

@@ -3552,11 +3552,7 @@ func (node *Proxy) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.GetQue
 		resp.Status = unhealthyStatus()
 		return resp, nil
 	}
-	segments, err := node.getSegmentsOfCollection(ctx, req.DbName, req.CollectionName)
-	if err != nil {
-		resp.Status.Reason = err.Error()
-		return resp, nil
-	}
+
 	collID, err := globalMetaCache.GetCollectionID(ctx, req.CollectionName)
 	if err != nil {
 		resp.Status.Reason = err.Error()
@@ -3570,11 +3566,10 @@ func (node *Proxy) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.GetQue
 			SourceID:  Params.ProxyCfg.GetNodeID(),
 		},
 		CollectionID: collID,
-		SegmentIDs:   segments,
 	})
 	if err != nil {
 		log.Error("Failed to get segment info from QueryCoord",
-			zap.Int64s("segmentIDs", segments), zap.Error(err))
+			zap.Error(err))
 		resp.Status.Reason = err.Error()
 		return resp, nil
 	}

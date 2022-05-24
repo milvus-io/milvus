@@ -897,6 +897,7 @@ func (qc *QueryCoord) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmen
 			Status: status,
 		}, nil
 	}
+
 	for _, info := range segmentInfos {
 		totalNumRows += info.NumRows
 		totalMemSize += info.MemSize

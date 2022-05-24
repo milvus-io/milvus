@@ -300,6 +300,10 @@ func TestGrpcTask(t *testing.T) {
 	})
 
 	t.Run("Test GetSegmentInfo", func(t *testing.T) {
+		err := waitLoadCollectionDone(ctx, queryCoord, defaultCollectionID)
+		assert.NoError(t, err)
+		time.Sleep(3 * time.Second)
+
 		res, err := queryCoord.GetSegmentInfo(ctx, &querypb.GetSegmentInfoRequest{
 			Base: &commonpb.MsgBase{
 				MsgType: commonpb.MsgType_SegmentInfo,

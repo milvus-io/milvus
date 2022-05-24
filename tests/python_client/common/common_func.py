@@ -641,15 +641,16 @@ def get_segment_distribution(res):
     from collections import defaultdict
     segment_distribution = defaultdict(lambda: {"growing": [], "sealed": []})
     for r in res:
-        if r.nodeID not in segment_distribution:
-            segment_distribution[r.nodeID] = {
-                "growing": [],
-                "sealed": []
-            }
-        if r.state == 3:
-            segment_distribution[r.nodeID]["sealed"].append(r.segmentID)
-        if r.state == 2:
-            segment_distribution[r.nodeID]["growing"].append(r.segmentID)
+        for node_id in r.nodeIds:
+            if node_id not in segment_distribution:
+                segment_distribution[node_id] = {
+                    "growing": [],
+                    "sealed": []
+                }
+            if r.state == 3:
+                segment_distribution[node_id]["sealed"].append(r.segmentID)
+            if r.state == 2:
+                segment_distribution[node_id]["growing"].append(r.segmentID)
 
     return segment_distribution
 
