@@ -543,7 +543,7 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 					DmChannelName: task.WatchDmChannelsRequest.Infos[0].ChannelName,
 				})
 			}
-			log.Info("loadCollectionTask: add a childTask", zap.Int64("collectionID", collectionID), zap.Int32("task type", int32(internalTask.msgType())), zap.Int64("msgID", lct.Base.MsgID))
+			log.Info("loadCollectionTask: add a childTask", zap.Int64("collectionID", collectionID), zap.String("task type", internalTask.msgType().String()), zap.Int64("msgID", lct.Base.MsgID))
 		}
 		metrics.QueryCoordNumChildTasks.WithLabelValues().Add(float64(len(internalTasks)))
 		log.Info("loadCollectionTask: assign child task done", zap.Int64("collectionID", collectionID), zap.Int64("msgID", lct.Base.MsgID))
@@ -992,7 +992,7 @@ func (lpt *loadPartitionTask) execute(ctx context.Context) error {
 					DmChannelName: task.WatchDmChannelsRequest.Infos[0].ChannelName,
 				})
 			}
-			log.Info("loadPartitionTask: add a childTask", zap.Int64("collectionID", collectionID), zap.Int32("task type", int32(internalTask.msgType())))
+			log.Info("loadPartitionTask: add a childTask", zap.Int64("collectionID", collectionID), zap.String("task type", internalTask.msgType().String()))
 		}
 		metrics.QueryCoordNumChildTasks.WithLabelValues().Add(float64(len(internalTasks)))
 		log.Info("loadPartitionTask: assign child task done", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIDs), zap.Int64("msgID", lpt.Base.MsgID))
@@ -1804,7 +1804,7 @@ func (ht *handoffTask) execute(ctx context.Context) error {
 			}
 			for _, internalTask := range internalTasks {
 				ht.addChildTask(internalTask)
-				log.Info("handoffTask: add a childTask", zap.Int32("task type", int32(internalTask.msgType())), zap.Int64("segmentID", segmentID))
+				log.Info("handoffTask: add a childTask", zap.String("task type", internalTask.msgType().String()), zap.Int64("segmentID", segmentID))
 			}
 		} else {
 			err = fmt.Errorf("sealed segment has been exist on query node, segmentID is %d", segmentID)
@@ -2078,7 +2078,7 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 		}
 		for _, internalTask := range internalTasks {
 			lbt.addChildTask(internalTask)
-			log.Info("loadBalanceTask: add a childTask", zap.Int32("task type", int32(internalTask.msgType())), zap.Any("task", internalTask))
+			log.Info("loadBalanceTask: add a childTask", zap.String("task type", internalTask.msgType().String()), zap.Any("task", internalTask))
 		}
 		log.Info("loadBalanceTask: assign child task done", zap.Int64s("sourceNodeIDs", lbt.SourceNodeIDs))
 	} else if lbt.triggerCondition == querypb.TriggerCondition_LoadBalance {
@@ -2212,7 +2212,7 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 		}
 		for _, internalTask := range internalTasks {
 			lbt.addChildTask(internalTask)
-			log.Info("loadBalanceTask: add a childTask", zap.Int32("task type", int32(internalTask.msgType())), zap.Any("balance request", lbt.LoadBalanceRequest))
+			log.Info("loadBalanceTask: add a childTask", zap.String("task type", internalTask.msgType().String()), zap.Any("balance request", lbt.LoadBalanceRequest))
 		}
 		log.Info("loadBalanceTask: assign child task done", zap.Any("balance request", lbt.LoadBalanceRequest))
 	}
