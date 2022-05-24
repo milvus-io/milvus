@@ -211,11 +211,6 @@ func (sa *segIDAssigner) pickCanDoFunc() {
 
 		records[collID][partitionID][channelName] += segRequest.count
 		assign, err := sa.getAssign(segRequest.collID, segRequest.partitionID, segRequest.channelName)
-		if err != nil {
-			log.Debug("Proxy segIDAssigner, pickCanDoFunc getAssign err:", zap.Any("collID", segRequest.collID),
-				zap.Any("partitionID", segRequest.partitionID), zap.Any("channelName", segRequest.channelName),
-				zap.Error(err))
-		}
 		if err != nil || assign.Capacity(segRequest.timestamp) < records[collID][partitionID][channelName] {
 			sa.segReqs = append(sa.segReqs, &datapb.SegmentIDRequest{
 				ChannelName:  channelName,
