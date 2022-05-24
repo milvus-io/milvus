@@ -55,7 +55,7 @@ class ScalarIndexSort : public ScalarIndex<T> {
     NotIn(size_t n, const T* values) override;
 
     const TargetBitmapPtr
-    Range(T value, OperatorType op) override;
+    Range(T value, OpType op) override;
 
     const TargetBitmapPtr
     Range(T lower_bound_value, bool lb_inclusive, T upper_bound_value, bool ub_inclusive) override;

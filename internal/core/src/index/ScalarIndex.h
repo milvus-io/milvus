@@ -16,6 +16,7 @@
 #include <string>
 #include <boost/dynamic_bitset.hpp>
 #include "index/Index.h"
+#include "common/Types.h"
 
 namespace milvus::scalar {
 
@@ -32,7 +33,7 @@ class ScalarIndex : public IndexBase {
     NotIn(size_t n, const T* values) = 0;
 
     virtual const TargetBitmapPtr
-    Range(T value, OperatorType op) = 0;
+    Range(T value, OpType op) = 0;
 
     virtual const TargetBitmapPtr
     Range(T lower_bound_value, bool lb_inclusive, T upper_bound_value, bool ub_inclusive) = 0;

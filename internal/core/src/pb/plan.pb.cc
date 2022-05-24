@@ -626,15 +626,15 @@ const char descriptor_table_protodef_plan_2eproto[] PROTOBUF_SECTION_VARIABLE(pr
   "\030\005 \001(\t\"\221\001\n\010PlanNode\0224\n\013vector_anns\030\001 \001(\013"
   "2\035.milvus.proto.plan.VectorANNSH\000\022-\n\npre"
   "dicates\030\002 \001(\0132\027.milvus.proto.plan.ExprH\000"
-  "\022\030\n\020output_field_ids\030\003 \003(\003B\006\n\004node*\234\001\n\006O"
+  "\022\030\n\020output_field_ids\030\003 \003(\003B\006\n\004node*\272\001\n\006O"
   "pType\022\013\n\007Invalid\020\000\022\017\n\013GreaterThan\020\001\022\020\n\014G"
   "reaterEqual\020\002\022\014\n\010LessThan\020\003\022\r\n\tLessEqual"
   "\020\004\022\t\n\005Equal\020\005\022\014\n\010NotEqual\020\006\022\017\n\013PrefixMat"
-  "ch\020\007\022\020\n\014PostfixMatch\020\010\022\t\n\005Match\020\t*G\n\013Ari"
-  "thOpType\022\013\n\007Unknown\020\000\022\007\n\003Add\020\001\022\007\n\003Sub\020\002\022"
-  "\007\n\003Mul\020\003\022\007\n\003Div\020\004\022\007\n\003Mod\020\005B3Z1github.com"
-  "/milvus-io/milvus/internal/proto/planpbb"
-  "\006proto3"
+  "ch\020\007\022\020\n\014PostfixMatch\020\010\022\t\n\005Match\020\t\022\t\n\005Ran"
+  "ge\020\n\022\006\n\002In\020\013\022\t\n\005NotIn\020\014*G\n\013ArithOpType\022\013"
+  "\n\007Unknown\020\000\022\007\n\003Add\020\001\022\007\n\003Sub\020\002\022\007\n\003Mul\020\003\022\007"
+  "\n\003Div\020\004\022\007\n\003Mod\020\005B3Z1github.com/milvus-io"
+  "/milvus/internal/proto/planpbb\006proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_plan_2eproto_deps[1] = {
   &::descriptor_table_schema_2eproto,
@@ -658,7 +658,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_pla
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_plan_2eproto_once;
 static bool descriptor_table_plan_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_plan_2eproto = {
-  &descriptor_table_plan_2eproto_initialized, descriptor_table_protodef_plan_2eproto, "plan.proto", 3327,
+  &descriptor_table_plan_2eproto_initialized, descriptor_table_protodef_plan_2eproto, "plan.proto", 3357,
   &descriptor_table_plan_2eproto_once, descriptor_table_plan_2eproto_sccs, descriptor_table_plan_2eproto_deps, 14, 1,
   schemas, file_default_instances, TableStruct_plan_2eproto::offsets,
   file_level_metadata_plan_2eproto, 17, file_level_enum_descriptors_plan_2eproto, file_level_service_descriptors_plan_2eproto,
@@ -729,6 +729,9 @@ bool OpType_IsValid(int value) {
     case 7:
     case 8:
     case 9:
+    case 10:
+    case 11:
+    case 12:
       return true;
     default:
       return false;

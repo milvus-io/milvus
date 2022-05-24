@@ -25,6 +25,7 @@
 #include <vector>
 
 #include "common/Schema.h"
+#include "pb/plan.pb.h"
 
 namespace milvus::query {
 
@@ -99,27 +100,6 @@ struct TermExpr : Expr {
  public:
     void
     accept(ExprVisitor&) override;
-};
-
-enum class OpType {
-    Invalid = 0,
-    GreaterThan = 1,
-    GreaterEqual = 2,
-    LessThan = 3,
-    LessEqual = 4,
-    Equal = 5,
-    NotEqual = 6,
-    PrefixMatch = 7,
-    PostfixMatch = 8,
-};
-
-enum class ArithOpType {
-    Unknown = 0,
-    Add = 1,
-    Sub = 2,
-    Mul = 3,
-    Div = 4,
-    Mod = 5,
 };
 
 static const std::map<std::string, ArithOpType> arith_op_mapping_ = {

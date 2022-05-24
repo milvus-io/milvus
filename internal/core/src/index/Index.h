@@ -14,7 +14,6 @@
 #include <memory>
 #include <knowhere/index/Index.h>
 #include <knowhere/common/Dataset.h>
-#include "index/OperatorType.h"
 #include <boost/dynamic_bitset.hpp>
 
 namespace milvus::scalar {

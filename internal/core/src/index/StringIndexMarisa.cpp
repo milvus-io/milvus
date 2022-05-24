@@ -20,7 +20,7 @@
 #include <stdio.h>
 #include <fcntl.h>
 #include <knowhere/common/Utils.h>
-#include <pb/schema.pb.h>
+#include "exceptions/EasyAssert.h"
 
 namespace milvus::scalar {
 
@@ -149,7 +149,7 @@ StringIndexMarisa::NotIn(size_t n, const std::string* values) {
 }
 
 const TargetBitmapPtr
-StringIndexMarisa::Range(std::string value, OperatorType op) {
+StringIndexMarisa::Range(std::string value, OpType op) {
     throw std::runtime_error("todo: unsupported now");
 }
 

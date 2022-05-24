@@ -53,19 +53,19 @@ assert_range(const ScalarIndexPtr<T>& index, const std::vector<T>& arr) {
     auto test_min = arr[0];
     auto test_max = arr[arr.size() - 1];
 
-    auto bitset1 = index->Range(test_min - 1, milvus::scalar::OperatorType::GT);
+    auto bitset1 = index->Range(test_min - 1, milvus::OpType::GreaterThan);
     ASSERT_EQ(arr.size(), bitset1->size());
     ASSERT_TRUE(bitset1->any());
 
-    auto bitset2 = index->Range(test_min, milvus::scalar::OperatorType::GE);
+    auto bitset2 = index->Range(test_min, milvus::OpType::GreaterEqual);
     ASSERT_EQ(arr.size(), bitset2->size());
     ASSERT_TRUE(bitset2->any());
 
-    auto bitset3 = index->Range(test_max + 1, milvus::scalar::OperatorType::LT);
+    auto bitset3 = index->Range(test_max + 1, milvus::OpType::LessThan);
     ASSERT_EQ(arr.size(), bitset3->size());
     ASSERT_TRUE(bitset3->any());
 
-    auto bitset4 = index->Range(test_max, milvus::scalar::OperatorType::LE);
+    auto bitset4 = index->Range(test_max, milvus::OpType::LessEqual);
     ASSERT_EQ(arr.size(), bitset4->size());
     ASSERT_TRUE(bitset4->any());
 
@@ -96,11 +96,11 @@ assert_range(const ScalarIndexPtr<std::string>& index, const std::vector<std::st
     auto test_min = arr[0];
     auto test_max = arr[arr.size() - 1];
 
-    auto bitset2 = index->Range(test_min, milvus::scalar::OperatorType::GE);
+    auto bitset2 = index->Range(test_min, milvus::OpType::GreaterEqual);
     ASSERT_EQ(arr.size(), bitset2->size());
     ASSERT_TRUE(bitset2->any());
 
-    auto bitset4 = index->Range(test_max, milvus::scalar::OperatorType::LE);
+    auto bitset4 = index->Range(test_max, milvus::OpType::LessEqual);
     ASSERT_EQ(arr.size(), bitset4->size());
     ASSERT_TRUE(bitset4->any());
 

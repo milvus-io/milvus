@@ -17,17 +17,17 @@ namespace milvus::scalar {
 template <typename T>
 const TargetBitmapPtr
 ScalarIndex<T>::Query(const DatasetPtr& dataset) {
-    auto op = dataset->Get<OperatorType>(OPERATOR_TYPE);
+    auto op = dataset->Get<OpType>(OPERATOR_TYPE);
     switch (op) {
-        case LT:
-        case LE:
-        case GT:
-        case GE: {
+        case OpType::LessThan:
+        case OpType::LessEqual:
+        case OpType::GreaterThan:
+        case OpType::GreaterEqual: {
             auto value = dataset->Get<T>(RANGE_VALUE);
             return Range(value, op);
         }
 
-        case RangeOp: {
+        case OpType::Range: {
             auto lower_bound_value = dataset->Get<T>(LOWER_BOUND_VALUE);
             auto upper_bound_value = dataset->Get<T>(UPPER_BOUND_VALUE);
             auto lower_bound_inclusive = dataset->Get<bool>(LOWER_BOUND_INCLUSIVE);
@@ -35,20 +35,20 @@ ScalarIndex<T>::Query(const DatasetPtr& dataset) {
             return Range(lower_bound_value, lower_bound_inclusive, upper_bound_value, upper_bound_inclusive);
         }
 
-        case InOp: {
+        case OpType::In: {
             auto n = dataset->Get<int64_t>(knowhere::meta::ROWS);
             auto values = dataset->Get<const void*>(knowhere::meta::TENSOR);
             return In(n, reinterpret_cast<const T*>(values));
         }
 
-        case NotInOp: {
+        case OpType::NotIn: {
             auto n = dataset->Get<int64_t>(knowhere::meta::ROWS);
             auto values = dataset->Get<const void*>(knowhere::meta::TENSOR);
             return NotIn(n, reinterpret_cast<const T*>(values));
         }
 
-        case PrefixMatchOp:
-        case PostfixMatchOp:
+        case OpType::PrefixMatch:
+        case OpType::PostfixMatch:
         default:
             throw std::invalid_argument(std::string("unsupported operator type: " + std::to_string(op)));
     }

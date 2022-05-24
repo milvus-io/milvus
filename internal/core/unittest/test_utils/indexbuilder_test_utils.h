@@ -43,7 +43,6 @@ namespace indexcgo = milvus::proto::indexcgo;
 namespace schemapb = milvus::proto::schema;
 using milvus::indexbuilder::MapParams;
 using milvus::indexbuilder::ScalarIndexCreator;
-using milvus::scalar::OperatorType;
 using ScalarTestParams = std::pair<MapParams, MapParams>;
 using milvus::scalar::ScalarIndexPtr;
 using milvus::scalar::StringIndexPtr;
