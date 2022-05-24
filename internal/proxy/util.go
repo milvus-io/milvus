@@ -21,10 +21,16 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
+
+const strongTS = 0
+const boundedTS = 2
 
 // enableMultipleVectorFields indicates whether to enable multiple vector fields.
 const enableMultipleVectorFields = false
@@ -556,6 +562,26 @@ func ValidatePassword(password string) error {
 	return nil
 }
 
+func validateTravelTimestamp(travelTs, tMax typeutil.Timestamp) error {
+	durationSeconds := tsoutil.CalculateDuration(tMax, travelTs) / 1000
+	if durationSeconds > Params.CommonCfg.RetentionDuration {
+		duration := time.Second * time.Duration(durationSeconds)
+		return fmt.Errorf("only support to travel back to %s so far", duration.String())
+	}
+	return nil
+}
+
 func ReplaceID2Name(oldStr string, id int64, name string) string {
 	return strings.ReplaceAll(oldStr, strconv.FormatInt(id, 10), name)
+}
+
+func parseGuaranteeTs(ts, tMax typeutil.Timestamp) typeutil.Timestamp {
+	switch ts {
+	case strongTS:
+		ts = tMax
+	case boundedTS:
+		ratio := time.Duration(-Params.CommonCfg.GracefulTime)
+		ts = tsoutil.AddPhysicalDurationOnTs(tMax, ratio*time.Millisecond)
+	}
+	return ts
 }
