@@ -438,7 +438,7 @@ func (qn *queryNode) getNodeInfo() (Node, error) {
 	return &queryNode{
 		id:      qn.id,
 		address: qn.address,
-		state:   qn.state,
+		state:   qn.getState(),
 
 		totalMem:     qn.totalMem,
 		memUsage:     qn.memUsage,
