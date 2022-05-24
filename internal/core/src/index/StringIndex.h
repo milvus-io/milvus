@@ -44,8 +44,8 @@ class StringIndex : public ScalarIndex<std::string> {
 
     const TargetBitmapPtr
     Query(const DatasetPtr& dataset) override {
-        auto op = dataset->Get<OperatorType>(OPERATOR_TYPE);
-        if (op == PrefixMatchOp) {
+        auto op = dataset->Get<OpType>(OPERATOR_TYPE);
+        if (op == OpType::PrefixMatch) {
             auto prefix = dataset->Get<std::string>(PREFIX_VALUE);
             return PrefixMatch(prefix);
         }

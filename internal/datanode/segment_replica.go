@@ -318,7 +318,7 @@ func (replica *SegmentReplica) filterSegments(channelName string, partitionID Un
 	results := make([]*Segment, 0)
 
 	isMatched := func(segment *Segment, chanName string, partID UniqueID) bool {
-		return segment.channelName == chanName && (partID == common.InvalidFieldID || segment.partitionID == partID)
+		return segment.channelName == chanName && (partID == common.InvalidPartitionID || segment.partitionID == partID)
 	}
 	for _, seg := range replica.newSegments {
 		if isMatched(seg, channelName, partitionID) {

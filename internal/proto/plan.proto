@@ -15,6 +15,9 @@ enum OpType {
   PrefixMatch = 7;  // startsWith
   PostfixMatch = 8; // endsWith
   Match = 9;        // like
+  Range = 10;       // for case 1 < a < b
+  In = 11;          // TODO:: used for term expr
+  NotIn = 12;
 };
 
 enum ArithOpType {

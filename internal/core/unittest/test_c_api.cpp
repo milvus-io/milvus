@@ -1008,9 +1008,9 @@ testReduceSearchWithExpr(int N, int topK, int num_queries) {
     std::vector<CSearchResult> results;
     CSearchResult res1;
     CSearchResult res2;
-    auto res = Search(segment, plan, placeholderGroup, dataset.timestamps_[0], &res1, -1);
+    auto res = Search(segment, plan, placeholderGroup, dataset.timestamps_[N - 1], &res1, -1);
     assert(res.error_code == Success);
-    res = Search(segment, plan, placeholderGroup, dataset.timestamps_[0], &res2, -1);
+    res = Search(segment, plan, placeholderGroup, dataset.timestamps_[N - 1], &res2, -1);
     assert(res.error_code == Success);
     results.push_back(res1);
     results.push_back(res2);

@@ -31,6 +31,7 @@
 #include "knowhere/common/MetricType.h"
 #include "pb/schema.pb.h"
 #include "pb/segcore.pb.h"
+#include "pb/plan.pb.h"
 
 namespace milvus {
 
@@ -61,6 +62,8 @@ using Timestamp = uint64_t;  // TODO: use TiKV-like timestamp
 constexpr auto MAX_TIMESTAMP = std::numeric_limits<Timestamp>::max();
 constexpr auto MAX_ROW_COUNT = std::numeric_limits<idx_t>::max();
 
+using OpType = proto::plan::OpType;
+using ArithOpType = proto::plan::ArithOpType;
 using ScalarArray = proto::schema::ScalarField;
 using DataArray = proto::schema::FieldData;
 using VectorArray = proto::schema::VectorField;

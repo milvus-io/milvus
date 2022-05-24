@@ -20,7 +20,9 @@
 #include "index/ScalarIndex.h"
 #include "index/StringIndex.h"
 #include "index/StringIndexMarisa.h"
+#include "index/IndexFactory.h"
 #include "test_utils/indexbuilder_test_utils.h"
+#include "test_utils/AssertUtils.h"
 
 constexpr int64_t nb = 100;
 namespace schemapb = milvus::proto::schema;
@@ -87,7 +89,7 @@ TEST_F(StringIndexMarisaTest, Range) {
     auto index = milvus::scalar::CreateStringIndexMarisa();
     index->BuildWithDataset(str_ds);
 
-    ASSERT_ANY_THROW(index->Range("not important", milvus::scalar::OperatorType::LE));
+    ASSERT_ANY_THROW(index->Range("not important", milvus::OpType::LessEqual));
     ASSERT_ANY_THROW(index->Range("not important", true, "not important", true));
 }
 
@@ -109,28 +111,28 @@ TEST_F(StringIndexMarisaTest, Query) {
 
     {
         auto ds = knowhere::GenDataset(strs.size(), 8, strs.data());
-        ds->Set<milvus::scalar::OperatorType>(milvus::scalar::OPERATOR_TYPE, milvus::scalar::OperatorType::InOp);
+        ds->Set<milvus::OpType>(milvus::scalar::OPERATOR_TYPE, milvus::OpType::In);
         auto bitset = index->Query(ds);
         ASSERT_TRUE(bitset->any());
     }
 
     {
         auto ds = knowhere::GenDataset(strs.size(), 8, strs.data());
-        ds->Set<milvus::scalar::OperatorType>(milvus::scalar::OPERATOR_TYPE, milvus::scalar::OperatorType::NotInOp);
+        ds->Set<milvus::OpType>(milvus::scalar::OPERATOR_TYPE, milvus::OpType::NotIn);
         auto bitset = index->Query(ds);
         ASSERT_TRUE(bitset->none());
     }
 
     {
         auto ds = std::make_shared<knowhere::Dataset>();
-        ds->Set<milvus::scalar::OperatorType>(milvus::scalar::OPERATOR_TYPE, milvus::scalar::OperatorType::GE);
+        ds->Set<milvus::OpType>(milvus::scalar::OPERATOR_TYPE, milvus::OpType::GreaterEqual);
         ds->Set<std::string>(milvus::scalar::RANGE_VALUE, "range");
         ASSERT_ANY_THROW(index->Query(ds));
     }
 
     {
         auto ds = std::make_shared<knowhere::Dataset>();
-        ds->Set<milvus::scalar::OperatorType>(milvus::scalar::OPERATOR_TYPE, milvus::scalar::OperatorType::RangeOp);
+        ds->Set<milvus::OpType>(milvus::scalar::OPERATOR_TYPE, milvus::OpType::Range);
         ds->Set<std::string>(milvus::scalar::LOWER_BOUND_VALUE, "range");
         ds->Set<std::string>(milvus::scalar::UPPER_BOUND_VALUE, "range");
         ds->Set<bool>(milvus::scalar::LOWER_BOUND_INCLUSIVE, true);
@@ -141,8 +143,7 @@ TEST_F(StringIndexMarisaTest, Query) {
     {
         for (size_t i = 0; i < strs.size(); i++) {
             auto ds = std::make_shared<knowhere::Dataset>();
-            ds->Set<milvus::scalar::OperatorType>(milvus::scalar::OPERATOR_TYPE,
-                                                  milvus::scalar::OperatorType::PrefixMatchOp);
+            ds->Set<milvus::OpType>(milvus::scalar::OPERATOR_TYPE, milvus::OpType::PrefixMatch);
             ds->Set<std::string>(milvus::scalar::PREFIX_VALUE, std::move(strs[i]));
             auto bitset = index->Query(ds);
             ASSERT_EQ(bitset->size(), strs.size());
@@ -175,7 +176,7 @@ TEST_F(StringIndexMarisaTest, Codec) {
     }
 
     {
-        ASSERT_ANY_THROW(copy_index->Range("not important", milvus::scalar::OperatorType::LE));
+        ASSERT_ANY_THROW(copy_index->Range("not important", milvus::OpType::LessEqual));
         ASSERT_ANY_THROW(copy_index->Range("not important", true, "not important", true));
     }
 

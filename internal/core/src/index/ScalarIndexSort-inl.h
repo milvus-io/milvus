@@ -17,6 +17,7 @@
 #include <string>
 #include "knowhere/common/Log.h"
 #include "Meta.h"
+#include "common/Utils.h"
 
 namespace milvus::scalar {
 
@@ -140,7 +141,7 @@ ScalarIndexSort<T>::NotIn(const size_t n, const T* values) {
 
 template <typename T>
 inline const TargetBitmapPtr
-ScalarIndexSort<T>::Range(const T value, const OperatorType op) {
+ScalarIndexSort<T>::Range(const T value, const OpType op) {
     if (!is_built_) {
         build();
     }
@@ -148,16 +149,16 @@ ScalarIndexSort<T>::Range(const T value, const OperatorType op) {
     auto lb = data_.begin();
     auto ub = data_.end();
     switch (op) {
-        case OperatorType::LT:
+        case OpType::LessThan:
             ub = std::lower_bound(data_.begin(), data_.end(), IndexStructure<T>(value));
             break;
-        case OperatorType::LE:
+        case OpType::LessEqual:
             ub = std::upper_bound(data_.begin(), data_.end(), IndexStructure<T>(value));
             break;
-        case OperatorType::GT:
+        case OpType::GreaterThan:
             lb = std::upper_bound(data_.begin(), data_.end(), IndexStructure<T>(value));
             break;
-        case OperatorType::GE:
+        case OpType::GreaterEqual:
             lb = std::lower_bound(data_.begin(), data_.end(), IndexStructure<T>(value));
             break;
         default:

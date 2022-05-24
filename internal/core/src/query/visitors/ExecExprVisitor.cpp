@@ -211,7 +211,6 @@ auto
 ExecExprVisitor::ExecUnaryRangeVisitorDispatcher(UnaryRangeExpr& expr_raw) -> BitsetType {
     auto& expr = static_cast<UnaryRangeExprImpl<T>&>(expr_raw);
     using Index = scalar::ScalarIndex<T>;
-    using Operator = scalar::OperatorType;
     auto op = expr.op_type_;
     auto val = expr.value_;
     switch (op) {
@@ -226,29 +225,29 @@ ExecExprVisitor::ExecUnaryRangeVisitorDispatcher(UnaryRangeExpr& expr_raw) -> Bi
             return ExecRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
         }
         case OpType::GreaterEqual: {
-            auto index_func = [val](Index* index) { return index->Range(val, Operator::GE); };
+            auto index_func = [val](Index* index) { return index->Range(val, OpType::GreaterEqual); };
             auto elem_func = [val](T x) { return (x >= val); };
             return ExecRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
         }
         case OpType::GreaterThan: {
-            auto index_func = [val](Index* index) { return index->Range(val, Operator::GT); };
+            auto index_func = [val](Index* index) { return index->Range(val, OpType::GreaterThan); };
             auto elem_func = [val](T x) { return (x > val); };
             return ExecRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
         }
         case OpType::LessEqual: {
-            auto index_func = [val](Index* index) { return index->Range(val, Operator::LE); };
+            auto index_func = [val](Index* index) { return index->Range(val, OpType::LessEqual); };
             auto elem_func = [val](T x) { return (x <= val); };
             return ExecRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
         }
         case OpType::LessThan: {
-            auto index_func = [val](Index* index) { return index->Range(val, Operator::LT); };
+            auto index_func = [val](Index* index) { return index->Range(val, OpType::LessThan); };
             auto elem_func = [val](T x) { return (x < val); };
             return ExecRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
         }
         case OpType::PrefixMatch: {
             auto index_func = [val](Index* index) {
                 auto dataset = std::make_unique<knowhere::Dataset>();
-                dataset->Set(scalar::OPERATOR_TYPE, Operator::PrefixMatchOp);
+                dataset->Set(scalar::OPERATOR_TYPE, OpType::PrefixMatch);
                 dataset->Set(scalar::PREFIX_VALUE, val);
                 return index->Query(std::move(dataset));
             };
@@ -706,7 +705,6 @@ ExecExprVisitor::ExecTermVisitorImpl<std::string>(TermExpr& expr_raw) -> BitsetT
     using T = std::string;
     auto& expr = static_cast<TermExprImpl<T>&>(expr_raw);
     using Index = scalar::ScalarIndex<T>;
-    using Operator = scalar::OperatorType;
     const auto& terms = expr.terms_;
     auto n = terms.size();
     std::unordered_set<T> term_set(expr.terms_.begin(), expr.terms_.end());

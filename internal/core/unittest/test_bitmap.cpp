@@ -25,7 +25,7 @@ TEST(Bitmap, Naive) {
     auto sort_index = std::make_shared<scalar::ScalarIndexSort<float>>();
     sort_index->Build(N, vec.data());
     {
-        auto res = sort_index->Range(0, scalar::OperatorType::LT);
+        auto res = sort_index->Range(0, OpType::LessThan);
         double count = res->count();
         ASSERT_NEAR(count / N, 0.5, 0.01);
     }
