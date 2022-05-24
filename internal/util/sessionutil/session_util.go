@@ -197,7 +197,7 @@ func (s *Session) getServerIDWithKey(key string) (int64, error) {
 // it is false. Otherwise, set it to true.
 func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, error) {
 	var ch <-chan *clientv3.LeaseKeepAliveResponse
-	log.Debug("DataNode begin to register to etcd", zap.String("serverName", s.ServerName))
+	log.Debug("service begin to register to etcd", zap.String("serverName", s.ServerName), zap.Int64("ServerID", s.ServerID))
 	registerFn := func() error {
 		resp, err := s.etcdCli.Grant(s.ctx, DefaultTTL)
 		if err != nil {
@@ -213,7 +213,7 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 
 		key := s.ServerName
 		if !s.Exclusive {
-			key = key + "-" + strconv.FormatInt(s.ServerID, 10)
+			key = fmt.Sprintf("%s-%d", key, s.ServerID)
 		}
 		txnResp, err := s.etcdCli.Txn(s.ctx).If(
 			clientv3.Compare(
@@ -238,7 +238,7 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 			fmt.Printf("got error during keeping alive with etcd, err: %s\n", err)
 			return err
 		}
-		log.Info("DataNode registered successfully", zap.Int64("serverID", s.ServerID))
+		log.Info("Service registered successfully", zap.String("ServerName", s.ServerName), zap.Int64("serverID", s.ServerID))
 		return nil
 	}
 	err := retry.Do(s.ctx, registerFn, retry.Attempts(DefaultRetryTimes))
