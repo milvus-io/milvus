@@ -1750,6 +1750,10 @@ func (ht *handoffTask) execute(ctx context.Context) error {
 						Infos:        []*querypb.SegmentLoadInfo{segmentLoadInfo},
 						Schema:       collectionInfo.Schema,
 						CollectionID: collectionID,
+						LoadMeta: &querypb.LoadMetaInfo{
+							CollectionID: collectionID,
+							PartitionIDs: collectionInfo.PartitionIDs,
+						},
 					}
 				}
 			}
