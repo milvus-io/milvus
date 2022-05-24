@@ -20,10 +20,11 @@ import (
 	"fmt"
 	"reflect"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
-	"go.uber.org/zap"
 )
 
 // serviceTimeNode is one of the nodes in delta flow graph
@@ -63,10 +64,8 @@ func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	// update service time
 	err := stNode.tSafeReplica.setTSafe(stNode.vChannel, serviceTimeMsg.timeRange.timestampMax)
 	if err != nil {
-		log.Error("serviceTimeNode setTSafe failed",
-			zap.Any("collectionID", stNode.collectionID),
-			zap.Error(err),
-		)
+		// should not happen, QueryNode should addTSafe before start flow graph
+		panic(fmt.Errorf("serviceTimeNode setTSafe timeout, collectionID = %d, err = %s", stNode.collectionID, err))
 	}
 	p, _ := tsoutil.ParseTS(serviceTimeMsg.timeRange.timestampMax)
 	log.RatedDebug(10.0, "update tSafe:",

@@ -20,8 +20,10 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"reflect"
 	"sync"
 
+	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/common"
@@ -31,8 +33,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/trace"
-	"github.com/opentracing/opentracing-go"
 )
 
 type (
@@ -43,6 +45,8 @@ type (
 // DeleteNode is to process delete msg, flush delete info into storage.
 type deleteNode struct {
 	BaseNode
+
+	ctx          context.Context
 	channelName  string
 	delBuf       sync.Map // map[segmentID]*DelDataBuf
 	replica      Replica
@@ -129,9 +133,7 @@ func (dn *deleteNode) bufferDeleteMsg(msg *msgstream.DeleteMsg, tr TimeRange) er
 		rows := len(pks)
 		tss, ok := segIDToTss[segID]
 		if !ok || rows != len(tss) {
-			// TODO: what's the expected behavior after this Error?
-			log.Error("primary keys and timestamp's element num mis-match")
-			continue
+			return fmt.Errorf("primary keys and timestamp's element num mis-match, segmentID = %d", segID)
 		}
 
 		var delDataBuf *DelDataBuf
@@ -202,8 +204,12 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 
 	fgMsg, ok := in[0].(*flowGraphMsg)
 	if !ok {
-		log.Warn("type assertion failed for flowGraphMsg")
-		return nil
+		if in[0] == nil {
+			log.Debug("type assertion failed for flowGraphMsg because it's nil")
+		} else {
+			log.Warn("type assertion failed for flowGraphMsg", zap.String("name", reflect.TypeOf(in[0]).Name()))
+		}
+		return []Msg{}
 	}
 
 	var spans []opentracing.Span
@@ -217,8 +223,12 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 		traceID, _, _ := trace.InfoFromSpan(spans[i])
 		log.Info("Buffer delete request in DataNode", zap.String("traceID", traceID))
 
-		if err := dn.bufferDeleteMsg(msg, fgMsg.timeRange); err != nil {
-			log.Error("buffer delete msg failed", zap.Error(err))
+		err := dn.bufferDeleteMsg(msg, fgMsg.timeRange)
+		if err != nil {
+			// error occurs only when deleteMsg is misaligned, should not happen
+			err = fmt.Errorf("buffer delete msg failed, err = %s", err)
+			log.Error(err.Error())
+			panic(err)
 		}
 	}
 
@@ -238,13 +248,16 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 				// no related delta data to flush, send empty buf to complete flush life-cycle
 				dn.flushManager.flushDelData(nil, segmentToFlush, fgMsg.endPositions[0])
 			} else {
-				err := dn.flushManager.flushDelData(buf.(*DelDataBuf), segmentToFlush, fgMsg.endPositions[0])
+				err := retry.Do(dn.ctx, func() error {
+					return dn.flushManager.flushDelData(buf.(*DelDataBuf), segmentToFlush, fgMsg.endPositions[0])
+				}, flowGraphRetryOpt)
 				if err != nil {
-					log.Warn("Failed to flush delete data", zap.Error(err))
-				} else {
-					// remove delete buf
-					dn.delBuf.Delete(segmentToFlush)
+					err = fmt.Errorf("failed to flush delete data, err = %s", err)
+					log.Error(err.Error())
+					panic(err)
 				}
+				// remove delete buf
+				dn.delBuf.Delete(segmentToFlush)
 			}
 		}
 	}
@@ -301,6 +314,7 @@ func newDeleteNode(ctx context.Context, fm flushManager, sig chan<- string, conf
 	baseNode.SetMaxParallelism(config.maxParallelism)
 
 	return &deleteNode{
+		ctx:      ctx,
 		BaseNode: baseNode,
 		delBuf:   sync.Map{},
 

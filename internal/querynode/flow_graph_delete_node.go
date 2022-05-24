@@ -17,6 +17,7 @@
 package querynode
 
 import (
+	"fmt"
 	"reflect"
 	"sync"
 
@@ -96,7 +97,13 @@ func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		)
 
 		if dNode.replica.getSegmentNum() != 0 {
-			processDeleteMessages(dNode.replica, delMsg, delData)
+			err := processDeleteMessages(dNode.replica, delMsg, delData)
+			if err != nil {
+				// error occurs when missing meta info or unexpected pk type, should not happen
+				err = fmt.Errorf("deleteNode processDeleteMessages failed, collectionID = %d, err = %s", delMsg.CollectionID, err)
+				log.Error(err.Error())
+				panic(err)
+			}
 		}
 	}
 
@@ -104,8 +111,10 @@ func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	for segmentID, pks := range delData.deleteIDs {
 		segment, err := dNode.replica.getSegmentByID(segmentID)
 		if err != nil {
-			log.Debug("failed to get segment", zap.Int64("segmentId", segmentID), zap.Error(err))
-			continue
+			// should not happen, segment should be created before
+			err = fmt.Errorf("deleteNode getSegmentByID failed, err = %s", err)
+			log.Error(err.Error())
+			panic(err)
 		}
 		offset := segment.segmentPreDelete(len(pks))
 		delData.deleteOffset[segmentID] = offset
@@ -114,8 +123,17 @@ func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	// 3. do delete
 	wg := sync.WaitGroup{}
 	for segmentID := range delData.deleteOffset {
+		segmentID := segmentID
 		wg.Add(1)
-		go dNode.delete(delData, segmentID, &wg)
+		go func() {
+			err := dNode.delete(delData, segmentID, &wg)
+			if err != nil {
+				// error occurs when segment cannot be found, calling cgo function delete failed and etc...
+				err = fmt.Errorf("segment delete failed, segmentID = %d, err = %s", segmentID, err)
+				log.Error(err.Error())
+				panic(err)
+			}
+		}()
 	}
 	wg.Wait()
 
@@ -130,16 +148,15 @@ func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 }
 
 // delete will do delete operation at segment which id is segmentID
-func (dNode *deleteNode) delete(deleteData *deleteData, segmentID UniqueID, wg *sync.WaitGroup) {
+func (dNode *deleteNode) delete(deleteData *deleteData, segmentID UniqueID, wg *sync.WaitGroup) error {
 	defer wg.Done()
 	targetSegment, err := dNode.replica.getSegmentByID(segmentID)
 	if err != nil {
-		log.Error(err.Error())
-		return
+		return fmt.Errorf("getSegmentByID failed, err = %s", err)
 	}
 
 	if targetSegment.segmentType != segmentTypeSealed {
-		return
+		return fmt.Errorf("unexpected segmentType when delete, segmentID = %d, segmentType = %s", segmentID, targetSegment.segmentType.String())
 	}
 
 	ids := deleteData.deleteIDs[segmentID]
@@ -148,11 +165,11 @@ func (dNode *deleteNode) delete(deleteData *deleteData, segmentID UniqueID, wg *
 
 	err = targetSegment.segmentDelete(offset, ids, timestamps)
 	if err != nil {
-		log.Warn("delete segment data failed", zap.Int64("segmentID", segmentID), zap.Error(err))
-		return
+		return fmt.Errorf("segmentDelete failed, segmentID = %d", segmentID)
 	}
 
 	log.Debug("Do delete done", zap.Int("len", len(deleteData.deleteIDs[segmentID])), zap.Int64("segmentID", segmentID), zap.Any("SegmentType", targetSegment.segmentType))
+	return nil
 }
 
 // newDeleteNode returns a new deleteNode

@@ -113,14 +113,18 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		// if loadType is loadCollection, check if partition exists, if not, create partition
 		col, err := iNode.streamingReplica.getCollectionByID(insertMsg.CollectionID)
 		if err != nil {
-			log.Warn("failed to get collection", zap.Error(err))
-			continue
+			// should not happen, QueryNode should create collection before start flow graph
+			err = fmt.Errorf("insertNode getCollectionByID failed, err = %s", err)
+			log.Error(err.Error())
+			panic(err)
 		}
 		if col.getLoadType() == loadTypeCollection {
 			err = iNode.streamingReplica.addPartition(insertMsg.CollectionID, insertMsg.PartitionID)
 			if err != nil {
-				log.Warn("failed to add partition", zap.Error(err))
-				continue
+				// error occurs only when collection cannot be found, should not happen
+				err = fmt.Errorf("insertNode addPartition failed, err = %s", err)
+				log.Error(err.Error())
+				panic(err)
 			}
 		}
 
@@ -128,15 +132,19 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		if !iNode.streamingReplica.hasSegment(insertMsg.SegmentID) {
 			err := iNode.streamingReplica.addSegment(insertMsg.SegmentID, insertMsg.PartitionID, insertMsg.CollectionID, insertMsg.ShardName, segmentTypeGrowing)
 			if err != nil {
-				log.Warn("failed to add segment", zap.Error(err))
-				continue
+				// error occurs when collection or partition cannot be found, collection and partition should be created before
+				err = fmt.Errorf("insertNode addSegment failed, err = %s", err)
+				log.Error(err.Error())
+				panic(err)
 			}
 		}
 
 		insertRecord, err := storage.TransferInsertMsgToInsertRecord(col.schema, insertMsg)
 		if err != nil {
-			log.Warn("failed to transfer msgStream.insertMsg to segcorepb.InsertRecord", zap.Error(err))
-			return []Msg{}
+			// occurs only when schema doesn't have dim param, this should not happen
+			err = fmt.Errorf("failed to transfer msgStream.insertMsg to storage.InsertRecord, err = %s", err)
+			log.Error(err.Error())
+			panic(err)
 		}
 
 		iData.insertIDs[insertMsg.SegmentID] = append(iData.insertIDs[insertMsg.SegmentID], insertMsg.RowIDs...)
@@ -148,8 +156,10 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		}
 		pks, err := getPrimaryKeys(insertMsg, iNode.streamingReplica)
 		if err != nil {
-			log.Warn("failed to get primary keys", zap.Error(err))
-			continue
+			// error occurs when cannot find collection or data is misaligned, should not happen
+			err = fmt.Errorf("failed to get primary keys, err = %d", err)
+			log.Error(err.Error())
+			panic(err)
 		}
 		iData.insertPKs[insertMsg.SegmentID] = append(iData.insertPKs[insertMsg.SegmentID], pks...)
 	}
@@ -158,16 +168,20 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	for segmentID := range iData.insertRecords {
 		var targetSegment, err = iNode.streamingReplica.getSegmentByID(segmentID)
 		if err != nil {
-			log.Warn(err.Error())
-			continue
+			// should not happen, segment should be created before
+			err = fmt.Errorf("insertNode getSegmentByID failed, err = %s", err)
+			log.Error(err.Error())
+			panic(err)
 		}
 
 		var numOfRecords = len(iData.insertIDs[segmentID])
 		if targetSegment != nil {
 			offset, err := targetSegment.segmentPreInsert(numOfRecords)
 			if err != nil {
-				log.Warn(err.Error())
-				continue
+				// error occurs when cgo function `PreInsert` failed
+				err = fmt.Errorf("segmentPreInsert failed, segmentID = %d, err = %s", segmentID, err)
+				log.Error(err.Error())
+				panic(err)
 			}
 			iData.insertOffset[segmentID] = offset
 			log.Debug("insertNode operator", zap.Int("insert size", numOfRecords), zap.Int64("insert offset", offset), zap.Int64("segment id", segmentID))
@@ -178,8 +192,17 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	// 3. do insert
 	wg := sync.WaitGroup{}
 	for segmentID := range iData.insertRecords {
+		segmentID := segmentID
 		wg.Add(1)
-		go iNode.insert(&iData, segmentID, &wg)
+		go func() {
+			err := iNode.insert(&iData, segmentID, &wg)
+			if err != nil {
+				// error occurs when segment cannot be found or cgo function `Insert` failed
+				err = fmt.Errorf("segment insert failed, segmentID = %d, err = %s", segmentID, err)
+				log.Error(err.Error())
+				panic(err)
+			}
+		}()
 	}
 	wg.Wait()
 
@@ -196,7 +219,13 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 				zap.Any("collectionName", delMsg.CollectionName),
 				zap.Int64("numPKs", delMsg.NumRows),
 				zap.Any("timestamp", delMsg.Timestamps))
-			processDeleteMessages(iNode.streamingReplica, delMsg, delData)
+			err := processDeleteMessages(iNode.streamingReplica, delMsg, delData)
+			if err != nil {
+				// error occurs when missing meta info or unexpected pk type, should not happen
+				err = fmt.Errorf("insertNode processDeleteMessages failed, collectionID = %d, err = %s", delMsg.CollectionID, err)
+				log.Error(err.Error())
+				panic(err)
+			}
 		}
 	}
 
@@ -204,8 +233,10 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	for segmentID, pks := range delData.deleteIDs {
 		segment, err := iNode.streamingReplica.getSegmentByID(segmentID)
 		if err != nil {
-			log.Debug(err.Error())
-			continue
+			// error occurs when segment cannot be found, should not happen
+			err = fmt.Errorf("insertNode getSegmentByID failed, err = %s", err)
+			log.Error(err.Error())
+			panic(err)
 		}
 		offset := segment.segmentPreDelete(len(pks))
 		delData.deleteOffset[segmentID] = offset
@@ -213,8 +244,17 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 	// 3. do delete
 	for segmentID := range delData.deleteOffset {
+		segmentID := segmentID
 		wg.Add(1)
-		go iNode.delete(delData, segmentID, &wg)
+		go func() {
+			err := iNode.delete(delData, segmentID, &wg)
+			if err != nil {
+				// error occurs when segment cannot be found, calling cgo function delete failed and etc...
+				err = fmt.Errorf("segment delete failed, segmentID = %d, err = %s", segmentID, err)
+				log.Error(err.Error())
+				panic(err)
+			}
+		}()
 	}
 	wg.Wait()
 
@@ -229,7 +269,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 }
 
 // processDeleteMessages would execute delete operations for growing segments
-func processDeleteMessages(replica ReplicaInterface, msg *msgstream.DeleteMsg, delData *deleteData) {
+func processDeleteMessages(replica ReplicaInterface, msg *msgstream.DeleteMsg, delData *deleteData) error {
 	var partitionIDs []UniqueID
 	var err error
 	if msg.PartitionID != -1 {
@@ -237,16 +277,14 @@ func processDeleteMessages(replica ReplicaInterface, msg *msgstream.DeleteMsg, d
 	} else {
 		partitionIDs, err = replica.getPartitionIDs(msg.CollectionID)
 		if err != nil {
-			log.Warn(err.Error())
-			return
+			return err
 		}
 	}
 	resultSegmentIDs := make([]UniqueID, 0)
 	for _, partitionID := range partitionIDs {
 		segmentIDs, err := replica.getSegmentIDs(partitionID)
 		if err != nil {
-			log.Warn(err.Error())
-			continue
+			return err
 		}
 		resultSegmentIDs = append(resultSegmentIDs, segmentIDs...)
 	}
@@ -255,26 +293,22 @@ func processDeleteMessages(replica ReplicaInterface, msg *msgstream.DeleteMsg, d
 	for _, segmentID := range resultSegmentIDs {
 		segment, err := replica.getSegmentByID(segmentID)
 		if err != nil {
-			log.Warn(err.Error())
-			continue
+			return err
 		}
 		pks, tss, err := filterSegmentsByPKs(primaryKeys, msg.Timestamps, segment)
 		if err != nil {
-			log.Warn(err.Error())
-			continue
+			return err
 		}
 		if len(pks) > 0 {
 			delData.deleteIDs[segmentID] = append(delData.deleteIDs[segmentID], pks...)
 			delData.deleteTimestamps[segmentID] = append(delData.deleteTimestamps[segmentID], tss...)
 		}
 	}
+	return nil
 }
 
 // filterSegmentsByPKs would filter segments by primary keys
 func filterSegmentsByPKs(pks []primaryKey, timestamps []Timestamp, segment *Segment) ([]primaryKey, []Timestamp, error) {
-	if pks == nil {
-		return nil, nil, fmt.Errorf("pks is nil when getSegmentsByPKs")
-	}
 	if segment == nil {
 		return nil, nil, fmt.Errorf("segments is nil when getSegmentsByPKs")
 	}
@@ -304,18 +338,12 @@ func filterSegmentsByPKs(pks []primaryKey, timestamps []Timestamp, segment *Segm
 }
 
 // insert would execute insert operations for specific growing segment
-func (iNode *insertNode) insert(iData *insertData, segmentID UniqueID, wg *sync.WaitGroup) {
+func (iNode *insertNode) insert(iData *insertData, segmentID UniqueID, wg *sync.WaitGroup) error {
+	defer wg.Done()
+
 	var targetSegment, err = iNode.streamingReplica.getSegmentByID(segmentID)
 	if err != nil {
-		log.Warn("cannot find segment:", zap.Int64("segmentID", segmentID))
-		// TODO: add error handling
-		wg.Done()
-		return
-	}
-
-	if targetSegment.segmentType != segmentTypeGrowing {
-		wg.Done()
-		return
+		return fmt.Errorf("getSegmentByID failed, err = %s", err)
 	}
 
 	ids := iData.insertIDs[segmentID]
@@ -328,27 +356,23 @@ func (iNode *insertNode) insert(iData *insertData, segmentID UniqueID, wg *sync.
 
 	err = targetSegment.segmentInsert(offsets, ids, timestamps, insertRecord)
 	if err != nil {
-		log.Debug("QueryNode: targetSegmentInsert failed", zap.Error(err))
-		// TODO: add error handling
-		wg.Done()
-		return
+		return fmt.Errorf("segmentInsert failed, segmentID = %d, err = %s", segmentID, err)
 	}
 
 	log.Debug("Do insert done", zap.Int("len", len(iData.insertIDs[segmentID])), zap.Int64("collectionID", targetSegment.collectionID), zap.Int64("segmentID", segmentID))
-	wg.Done()
+	return nil
 }
 
 // delete would execute delete operations for specific growing segment
-func (iNode *insertNode) delete(deleteData *deleteData, segmentID UniqueID, wg *sync.WaitGroup) {
+func (iNode *insertNode) delete(deleteData *deleteData, segmentID UniqueID, wg *sync.WaitGroup) error {
 	defer wg.Done()
 	targetSegment, err := iNode.streamingReplica.getSegmentByID(segmentID)
 	if err != nil {
-		log.Warn(err.Error())
-		return
+		return fmt.Errorf("getSegmentByID failed, err = %s", err)
 	}
 
 	if targetSegment.segmentType != segmentTypeGrowing {
-		return
+		return fmt.Errorf("unexpected segmentType when delete, segmentType = %s", targetSegment.segmentType.String())
 	}
 
 	ids := deleteData.deleteIDs[segmentID]
@@ -357,11 +381,11 @@ func (iNode *insertNode) delete(deleteData *deleteData, segmentID UniqueID, wg *
 
 	err = targetSegment.segmentDelete(offset, ids, timestamps)
 	if err != nil {
-		log.Warn("QueryNode: targetSegmentDelete failed", zap.Error(err))
-		return
+		return fmt.Errorf("segmentDelete failed, err = %s", err)
 	}
 
 	log.Debug("Do delete done", zap.Int("len", len(deleteData.deleteIDs[segmentID])), zap.Int64("segmentID", segmentID))
+	return nil
 }
 
 // TODO: remove this function to proper file
@@ -415,8 +439,7 @@ func getPKsFromRowBasedInsertMsg(msg *msgstream.InsertMsg, schema *schemapb.Coll
 				if t.Key == "dim" {
 					dim, err := strconv.Atoi(t.Value)
 					if err != nil {
-						log.Warn("strconv wrong on get dim", zap.Error(err))
-						break
+						return nil, fmt.Errorf("strconv wrong on get dim, err = %s", err)
 					}
 					offset += dim * 4
 					break
@@ -427,8 +450,7 @@ func getPKsFromRowBasedInsertMsg(msg *msgstream.InsertMsg, schema *schemapb.Coll
 				if t.Key == "dim" {
 					dim, err := strconv.Atoi(t.Value)
 					if err != nil {
-						log.Warn("strconv wrong on get dim", zap.Error(err))
-						return nil, err
+						return nil, fmt.Errorf("strconv wrong on get dim, err = %s", err)
 					}
 					offset += dim / 8
 					break

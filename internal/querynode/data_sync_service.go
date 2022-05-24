@@ -42,10 +42,41 @@ type dataSyncService struct {
 	msFactory         msgstream.Factory
 }
 
+// checkReplica used to check replica info before init flow graph, it's a private method of dataSyncService
+func (dsService *dataSyncService) checkReplica(collectionID UniqueID) error {
+	// check if the collection exists
+	hisColl, err := dsService.historicalReplica.getCollectionByID(collectionID)
+	if err != nil {
+		return err
+	}
+	strColl, err := dsService.streamingReplica.getCollectionByID(collectionID)
+	if err != nil {
+		return err
+	}
+	if hisColl.getLoadType() != strColl.getLoadType() {
+		return fmt.Errorf("inconsistent loadType of collection, collectionID = %d", collectionID)
+	}
+	for _, channel := range hisColl.getVChannels() {
+		if _, err := dsService.tSafeReplica.getTSafe(channel); err != nil {
+			return fmt.Errorf("getTSafe failed, err = %s", err)
+		}
+	}
+	for _, channel := range hisColl.getVDeltaChannels() {
+		if _, err := dsService.tSafeReplica.getTSafe(channel); err != nil {
+			return fmt.Errorf("getTSafe failed, err = %s", err)
+		}
+	}
+	return nil
+}
+
 // addFlowGraphsForDMLChannels add flowGraphs to dmlChannel2FlowGraph
 func (dsService *dataSyncService) addFlowGraphsForDMLChannels(collectionID UniqueID, dmlChannels []string) (map[string]*queryNodeFlowGraph, error) {
 	dsService.mu.Lock()
 	defer dsService.mu.Unlock()
+
+	if err := dsService.checkReplica(collectionID); err != nil {
+		return nil, err
+	}
 
 	results := make(map[string]*queryNodeFlowGraph)
 	for _, channel := range dmlChannels {
@@ -86,6 +117,10 @@ func (dsService *dataSyncService) addFlowGraphsForDMLChannels(collectionID Uniqu
 func (dsService *dataSyncService) addFlowGraphsForDeltaChannels(collectionID UniqueID, deltaChannels []string) (map[string]*queryNodeFlowGraph, error) {
 	dsService.mu.Lock()
 	defer dsService.mu.Unlock()
+
+	if err := dsService.checkReplica(collectionID); err != nil {
+		return nil, err
+	}
 
 	results := make(map[string]*queryNodeFlowGraph)
 	for _, channel := range deltaChannels {

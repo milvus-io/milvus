@@ -343,7 +343,7 @@ func TestSegment_segmentInsert(t *testing.T) {
 		segment, err := genSimpleSealedSegment(defaultMsgLength)
 		assert.NoError(t, err)
 		err = segment.segmentInsert(0, nil, nil, nil)
-		assert.NoError(t, err)
+		assert.Error(t, err)
 	})
 }
 

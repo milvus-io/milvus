@@ -22,6 +22,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/retry"
+
 	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
@@ -207,6 +209,8 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 				"Invalid input length == 3"},
 			{[]Msg{&flowGraphMsg{}},
 				"Invalid input length == 1 but input message is not msgStreamMsg"},
+			{[]Msg{&flowgraph.MsgStreamMsg{}},
+				"Invalid input length == 1 but input message is not flowGraphMsg"},
 		}
 
 		for _, test := range invalidInTests {
@@ -387,5 +391,38 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 			t.FailNow()
 		case <-sig:
 		}
+	})
+
+	t.Run("Test deleteNode Operate flushDelData failed", func(te *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		chanName := "datanode-test-FlowGraphDeletenode-operate"
+		testPath := "/test/datanode/root/meta"
+		assert.NoError(t, clearEtcd(testPath))
+		Params.EtcdCfg.MetaRootPath = testPath
+		Params.DataNodeCfg.DeleteBinlogRootPath = testPath
+
+		c := &nodeConfig{
+			replica:      &mockReplica{},
+			allocator:    NewAllocatorFactory(),
+			vChannelName: chanName,
+		}
+		delNode, err := newDeleteNode(ctx, fm, make(chan string, 1), c)
+		assert.Nil(te, err)
+
+		msg := genFlowGraphDeleteMsg(int64Pks, chanName)
+		msg.segmentsToFlush = []UniqueID{-1}
+		delNode.delBuf.Store(UniqueID(-1), &DelDataBuf{})
+		delNode.flushManager = &mockFlushManager{
+			returnError: true,
+		}
+
+		var fgMsg flowgraph.Msg = &msg
+
+		flowGraphRetryOpt = retry.Attempts(1)
+		assert.Panics(te, func() {
+			delNode.Operate([]flowgraph.Msg{fgMsg})
+		})
 	})
 }

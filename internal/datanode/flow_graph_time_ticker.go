@@ -19,6 +19,10 @@ package datanode
 import (
 	"sync"
 	"time"
+
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/log"
 )
 
 type sendTimeTick func(Timestamp, []int64) error
@@ -118,7 +122,9 @@ func (mt *mergedTimeTickerSender) work() {
 			lastTs = mt.ts
 			mt.lastSent = time.Now()
 
-			mt.send(mt.ts, sids)
+			if err := mt.send(mt.ts, sids); err != nil {
+				log.Error("send hard time tick failed", zap.Error(err))
+			}
 		}
 		mt.mu.Unlock()
 	}

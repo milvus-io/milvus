@@ -16,7 +16,10 @@
 
 package datanode
 
-import "github.com/milvus-io/milvus/internal/util/flowgraph"
+import (
+	"github.com/milvus-io/milvus/internal/util/flowgraph"
+	"github.com/milvus-io/milvus/internal/util/retry"
+)
 
 type (
 	// Node is flowgraph.Node
@@ -28,3 +31,5 @@ type (
 	// InputNode is flowgraph.InputNode
 	InputNode = flowgraph.InputNode
 )
+
+var flowGraphRetryOpt = retry.Attempts(5)

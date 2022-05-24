@@ -84,17 +84,29 @@ func (fdmNode *filterDmNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		log.Debug("Filter invalid message in QueryNode", zap.String("traceID", traceID))
 		switch msg.Type() {
 		case commonpb.MsgType_Insert:
-			resMsg := fdmNode.filterInvalidInsertMessage(msg.(*msgstream.InsertMsg))
+			resMsg, err := fdmNode.filterInvalidInsertMessage(msg.(*msgstream.InsertMsg))
+			if err != nil {
+				// error occurs when missing meta info or data is misaligned, should not happen
+				err = fmt.Errorf("filterInvalidInsertMessage failed, err = %s", err)
+				log.Error(err.Error())
+				panic(err)
+			}
 			if resMsg != nil {
 				iMsg.insertMessages = append(iMsg.insertMessages, resMsg)
 			}
 		case commonpb.MsgType_Delete:
-			resMsg := fdmNode.filterInvalidDeleteMessage(msg.(*msgstream.DeleteMsg))
+			resMsg, err := fdmNode.filterInvalidDeleteMessage(msg.(*msgstream.DeleteMsg))
+			if err != nil {
+				// error occurs when missing meta info or data is misaligned, should not happen
+				err = fmt.Errorf("filterInvalidDeleteMessage failed, err = %s", err)
+				log.Error(err.Error())
+				panic(err)
+			}
 			if resMsg != nil {
 				iMsg.deleteMessages = append(iMsg.deleteMessages, resMsg)
 			}
 		default:
-			log.Warn("Non supporting", zap.Int32("message type", int32(msg.Type())))
+			log.Warn("invalid message type in filterDmNode", zap.String("message type", msg.Type().String()))
 		}
 	}
 
@@ -106,11 +118,16 @@ func (fdmNode *filterDmNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 }
 
 // filterInvalidDeleteMessage would filter out invalid delete messages
-func (fdmNode *filterDmNode) filterInvalidDeleteMessage(msg *msgstream.DeleteMsg) *msgstream.DeleteMsg {
+func (fdmNode *filterDmNode) filterInvalidDeleteMessage(msg *msgstream.DeleteMsg) (*msgstream.DeleteMsg, error) {
 	if err := msg.CheckAligned(); err != nil {
-		// TODO: what if the messages are misaligned? Here, we ignore those messages and print error
-		log.Warn("misaligned delete messages detected", zap.Error(err))
-		return nil
+		return nil, fmt.Errorf("CheckAligned failed, err = %s", err)
+	}
+
+	if len(msg.Timestamps) <= 0 {
+		log.Debug("filter invalid delete message, no message",
+			zap.Any("collectionID", msg.CollectionID),
+			zap.Any("partitionID", msg.PartitionID))
+		return nil, nil
 	}
 
 	sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
@@ -118,41 +135,37 @@ func (fdmNode *filterDmNode) filterInvalidDeleteMessage(msg *msgstream.DeleteMsg
 	defer sp.Finish()
 
 	if msg.CollectionID != fdmNode.collectionID {
-		return nil
+		// filter out msg which not belongs to the current collection
+		return nil, nil
 	}
 
-	// check if collection and partition exist
+	// check if collection exist
 	col, err := fdmNode.replica.getCollectionByID(msg.CollectionID)
 	if err != nil {
-		log.Debug("filter invalid delete message, collection does not exist",
-			zap.Any("collectionID", msg.CollectionID),
-			zap.Any("partitionID", msg.PartitionID))
-		return nil
+		// QueryNode should add collection before start flow graph
+		return nil, fmt.Errorf("filter invalid delete message, collection does not exist, collectionID = %d", msg.CollectionID)
 	}
 	if col.getLoadType() == loadTypePartition {
 		if !fdmNode.replica.hasPartition(msg.PartitionID) {
-			log.Debug("filter invalid delete message, partition does not exist",
-				zap.Any("collectionID", msg.CollectionID),
-				zap.Any("partitionID", msg.PartitionID))
-			return nil
+			// filter out msg which not belongs to the loaded partitions
+			return nil, nil
 		}
 	}
 
-	if len(msg.Timestamps) <= 0 {
-		log.Debug("filter invalid delete message, no message",
-			zap.Any("collectionID", msg.CollectionID),
-			zap.Any("partitionID", msg.PartitionID))
-		return nil
-	}
-	return msg
+	return msg, nil
 }
 
 // filterInvalidInsertMessage would filter out invalid insert messages
-func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg) *msgstream.InsertMsg {
+func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg) (*msgstream.InsertMsg, error) {
 	if err := msg.CheckAligned(); err != nil {
-		// TODO: what if the messages are misaligned? Here, we ignore those messages and print error
-		log.Warn("Error, misaligned insert messages detected")
-		return nil
+		return nil, fmt.Errorf("CheckAligned failed, err = %s", err)
+	}
+
+	if len(msg.Timestamps) <= 0 {
+		log.Debug("filter invalid insert message, no message",
+			zap.Any("collectionID", msg.CollectionID),
+			zap.Any("partitionID", msg.PartitionID))
+		return nil, nil
 	}
 
 	sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
@@ -164,23 +177,19 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 		//log.Debug("filter invalid insert message, collection is not the target collection",
 		//	zap.Any("collectionID", msg.CollectionID),
 		//	zap.Any("partitionID", msg.PartitionID))
-		return nil
+		return nil, nil
 	}
 
-	// check if collection and partition exist
+	// check if collection exists
 	col, err := fdmNode.replica.getCollectionByID(msg.CollectionID)
 	if err != nil {
-		log.Debug("filter invalid insert message, collection does not exist",
-			zap.Any("collectionID", msg.CollectionID),
-			zap.Any("partitionID", msg.PartitionID))
-		return nil
+		// QueryNode should add collection before start flow graph
+		return nil, fmt.Errorf("filter invalid insert message, collection does not exist, collectionID = %d", msg.CollectionID)
 	}
 	if col.getLoadType() == loadTypePartition {
 		if !fdmNode.replica.hasPartition(msg.PartitionID) {
-			log.Debug("filter invalid insert message, partition does not exist",
-				zap.Any("collectionID", msg.CollectionID),
-				zap.Any("partitionID", msg.PartitionID))
-			return nil
+			// filter out msg which not belongs to the loaded partitions
+			return nil, nil
 		}
 	}
 
@@ -189,8 +198,8 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 	// so we need to compare the endTimestamp of received messages and position's timestamp.
 	excludedSegments, err := fdmNode.replica.getExcludedSegments(fdmNode.collectionID)
 	if err != nil {
-		log.Warn(err.Error())
-		return nil
+		// QueryNode should addExcludedSegments for the current collection before start flow graph
+		return nil, err
 	}
 	for _, segmentInfo := range excludedSegments {
 		// unFlushed segment may not have checkPoint, so `segmentInfo.DmlPosition` may be nil
@@ -198,24 +207,17 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 			log.Warn("filter unFlushed segment without checkPoint",
 				zap.Any("collectionID", msg.CollectionID),
 				zap.Any("partitionID", msg.PartitionID))
-			return nil
+			continue
 		}
 		if msg.SegmentID == segmentInfo.ID && msg.EndTs() < segmentInfo.DmlPosition.Timestamp {
 			log.Debug("filter invalid insert message, segments are excluded segments",
 				zap.Any("collectionID", msg.CollectionID),
 				zap.Any("partitionID", msg.PartitionID))
-			return nil
+			return nil, nil
 		}
 	}
 
-	if len(msg.Timestamps) <= 0 {
-		log.Debug("filter invalid insert message, no message",
-			zap.Any("collectionID", msg.CollectionID),
-			zap.Any("partitionID", msg.PartitionID))
-		return nil
-	}
-
-	return msg
+	return msg, nil
 }
 
 // newFilteredDmNode returns a new filterDmNode
