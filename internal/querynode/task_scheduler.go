@@ -205,6 +205,7 @@ func (s *taskScheduler) scheduleReadTasks() {
 
 func (s *taskScheduler) AddReadTask(ctx context.Context, t readTask) error {
 	t.SetMaxCPUUSage(s.maxCPUUsage)
+	t.OnEnqueue()
 	select {
 	case <-ctx.Done():
 		return fmt.Errorf("taskScheduler AddReadTask context is done")
