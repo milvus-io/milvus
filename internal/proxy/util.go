@@ -55,6 +55,14 @@ func isNumber(c uint8) bool {
 	return true
 }
 
+func validateTopK(topK int64) error {
+	// TODO make this configurable
+	if topK <= 0 || topK >= 16385 {
+		return fmt.Errorf("limit should be in range [1, 16385], but got %d", topK)
+	}
+	return nil
+}
+
 func validateCollectionNameOrAlias(entity, entityType string) error {
 	entity = strings.TrimSpace(entity)
 

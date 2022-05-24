@@ -219,7 +219,12 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 
 		t.SearchRequest.DslType = commonpb.DslType_BoolExprV1
 		t.SearchRequest.SerializedExprPlan, err = proto.Marshal(plan)
+		if err != nil {
+			return err
+		}
+
 		t.SearchRequest.Topk = int64(topK)
+		err = validateTopK(int64(topK))
 		if err != nil {
 			return err
 		}
