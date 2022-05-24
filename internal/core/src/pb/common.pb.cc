@@ -353,7 +353,7 @@ const char descriptor_table_protodef_common_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "led\020\003\022\013\n\007Flushed\020\004\022\014\n\010Flushing\020\005\022\013\n\007Drop"
   "ped\020\006\022\r\n\tImporting\020\007*>\n\017PlaceholderType\022"
   "\010\n\004None\020\000\022\020\n\014BinaryVector\020d\022\017\n\013FloatVect"
-  "or\020e*\331\n\n\007MsgType\022\r\n\tUndefined\020\000\022\024\n\020Creat"
+  "or\020e*\362\n\n\007MsgType\022\r\n\tUndefined\020\000\022\024\n\020Creat"
   "eCollection\020d\022\022\n\016DropCollection\020e\022\021\n\rHas"
   "Collection\020f\022\026\n\022DescribeCollection\020g\022\023\n\017"
   "ShowCollections\020h\022\024\n\020GetSystemConfigs\020i\022"
@@ -369,36 +369,37 @@ const char descriptor_table_protodef_common_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "Segments\020\377\001\022\025\n\020DescribeSegments\020\200\002\022\020\n\013Cr"
   "eateIndex\020\254\002\022\022\n\rDescribeIndex\020\255\002\022\016\n\tDrop"
   "Index\020\256\002\022\013\n\006Insert\020\220\003\022\013\n\006Delete\020\221\003\022\n\n\005Fl"
-  "ush\020\222\003\022\013\n\006Search\020\364\003\022\021\n\014SearchResult\020\365\003\022\022"
-  "\n\rGetIndexState\020\366\003\022\032\n\025GetIndexBuildProgr"
-  "ess\020\367\003\022\034\n\027GetCollectionStatistics\020\370\003\022\033\n\026"
-  "GetPartitionStatistics\020\371\003\022\r\n\010Retrieve\020\372\003"
-  "\022\023\n\016RetrieveResult\020\373\003\022\024\n\017WatchDmChannels"
-  "\020\374\003\022\025\n\020RemoveDmChannels\020\375\003\022\027\n\022WatchQuery"
-  "Channels\020\376\003\022\030\n\023RemoveQueryChannels\020\377\003\022\035\n"
-  "\030SealedSegmentsChangeInfo\020\200\004\022\027\n\022WatchDel"
-  "taChannels\020\201\004\022\024\n\017GetShardLeaders\020\202\004\022\020\n\013G"
-  "etReplicas\020\203\004\022\020\n\013SegmentInfo\020\330\004\022\017\n\nSyste"
-  "mInfo\020\331\004\022\024\n\017GetRecoveryInfo\020\332\004\022\024\n\017GetSeg"
-  "mentState\020\333\004\022\r\n\010TimeTick\020\260\t\022\023\n\016QueryNode"
-  "Stats\020\261\t\022\016\n\tLoadIndex\020\262\t\022\016\n\tRequestID\020\263\t"
-  "\022\017\n\nRequestTSO\020\264\t\022\024\n\017AllocateSegment\020\265\t\022"
-  "\026\n\021SegmentStatistics\020\266\t\022\025\n\020SegmentFlushD"
-  "one\020\267\t\022\017\n\nDataNodeTt\020\270\t\022\025\n\020CreateCredent"
-  "ial\020\334\013\022\022\n\rGetCredential\020\335\013\022\025\n\020DeleteCred"
-  "ential\020\336\013\022\025\n\020UpdateCredential\020\337\013\022\026\n\021List"
-  "CredUsernames\020\340\013*\"\n\007DslType\022\007\n\003Dsl\020\000\022\016\n\n"
-  "BoolExprV1\020\001*B\n\017CompactionState\022\021\n\rUndef"
-  "iedState\020\000\022\r\n\tExecuting\020\001\022\r\n\tCompleted\020\002"
-  "*X\n\020ConsistencyLevel\022\n\n\006Strong\020\000\022\013\n\007Sess"
-  "ion\020\001\022\013\n\007Bounded\020\002\022\016\n\nEventually\020\003\022\016\n\nCu"
-  "stomized\020\004*\227\001\n\013ImportState\022\021\n\rImportPend"
-  "ing\020\000\022\020\n\014ImportFailed\020\001\022\021\n\rImportStarted"
-  "\020\002\022\024\n\020ImportDownloaded\020\003\022\020\n\014ImportParsed"
-  "\020\004\022\023\n\017ImportPersisted\020\005\022\023\n\017ImportComplet"
-  "ed\020\006BW\n\016io.milvus.grpcB\013CommonProtoP\001Z3g"
-  "ithub.com/milvus-io/milvus/internal/prot"
-  "o/commonpb\240\001\001b\006proto3"
+  "ush\020\222\003\022\027\n\022ResendSegmentStats\020\223\003\022\013\n\006Searc"
+  "h\020\364\003\022\021\n\014SearchResult\020\365\003\022\022\n\rGetIndexState"
+  "\020\366\003\022\032\n\025GetIndexBuildProgress\020\367\003\022\034\n\027GetCo"
+  "llectionStatistics\020\370\003\022\033\n\026GetPartitionSta"
+  "tistics\020\371\003\022\r\n\010Retrieve\020\372\003\022\023\n\016RetrieveRes"
+  "ult\020\373\003\022\024\n\017WatchDmChannels\020\374\003\022\025\n\020RemoveDm"
+  "Channels\020\375\003\022\027\n\022WatchQueryChannels\020\376\003\022\030\n\023"
+  "RemoveQueryChannels\020\377\003\022\035\n\030SealedSegments"
+  "ChangeInfo\020\200\004\022\027\n\022WatchDeltaChannels\020\201\004\022\024"
+  "\n\017GetShardLeaders\020\202\004\022\020\n\013GetReplicas\020\203\004\022\020"
+  "\n\013SegmentInfo\020\330\004\022\017\n\nSystemInfo\020\331\004\022\024\n\017Get"
+  "RecoveryInfo\020\332\004\022\024\n\017GetSegmentState\020\333\004\022\r\n"
+  "\010TimeTick\020\260\t\022\023\n\016QueryNodeStats\020\261\t\022\016\n\tLoa"
+  "dIndex\020\262\t\022\016\n\tRequestID\020\263\t\022\017\n\nRequestTSO\020"
+  "\264\t\022\024\n\017AllocateSegment\020\265\t\022\026\n\021SegmentStati"
+  "stics\020\266\t\022\025\n\020SegmentFlushDone\020\267\t\022\017\n\nDataN"
+  "odeTt\020\270\t\022\025\n\020CreateCredential\020\334\013\022\022\n\rGetCr"
+  "edential\020\335\013\022\025\n\020DeleteCredential\020\336\013\022\025\n\020Up"
+  "dateCredential\020\337\013\022\026\n\021ListCredUsernames\020\340"
+  "\013*\"\n\007DslType\022\007\n\003Dsl\020\000\022\016\n\nBoolExprV1\020\001*B\n"
+  "\017CompactionState\022\021\n\rUndefiedState\020\000\022\r\n\tE"
+  "xecuting\020\001\022\r\n\tCompleted\020\002*X\n\020Consistency"
+  "Level\022\n\n\006Strong\020\000\022\013\n\007Session\020\001\022\013\n\007Bounde"
+  "d\020\002\022\016\n\nEventually\020\003\022\016\n\nCustomized\020\004*\227\001\n\013"
+  "ImportState\022\021\n\rImportPending\020\000\022\020\n\014Import"
+  "Failed\020\001\022\021\n\rImportStarted\020\002\022\024\n\020ImportDow"
+  "nloaded\020\003\022\020\n\014ImportParsed\020\004\022\023\n\017ImportPer"
+  "sisted\020\005\022\023\n\017ImportCompleted\020\006BW\n\016io.milv"
+  "us.grpcB\013CommonProtoP\001Z3github.com/milvu"
+  "s-io/milvus/internal/proto/commonpb\240\001\001b\006"
+  "proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_common_2eproto_deps[1] = {
 };
@@ -417,7 +418,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_com
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_common_2eproto_once;
 static bool descriptor_table_common_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_common_2eproto = {
-  &descriptor_table_common_2eproto_initialized, descriptor_table_protodef_common_2eproto, "common.proto", 3581,
+  &descriptor_table_common_2eproto_initialized, descriptor_table_protodef_common_2eproto, "common.proto", 3606,
   &descriptor_table_common_2eproto_once, descriptor_table_common_2eproto_sccs, descriptor_table_common_2eproto_deps, 10, 0,
   schemas, file_default_instances, TableStruct_common_2eproto::offsets,
   file_level_metadata_common_2eproto, 10, file_level_enum_descriptors_common_2eproto, file_level_service_descriptors_common_2eproto,
@@ -565,6 +566,7 @@ bool MsgType_IsValid(int value) {
     case 400:
     case 401:
     case 402:
+    case 403:
     case 500:
     case 501:
     case 502:

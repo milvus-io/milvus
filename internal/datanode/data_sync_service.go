@@ -38,6 +38,7 @@ type dataSyncService struct {
 	cancelFn     context.CancelFunc
 	fg           *flowgraph.TimeTickedFlowGraph // internal flowgraph processes insert/delta messages
 	flushCh      chan flushMsg                  // chan to notify flush
+	resendTTCh   chan resendTTMsg               // chan to ask for resending DataNode time tick message.
 	replica      Replica                        // segment replica stores meta
 	idAllocator  allocatorInterface             // id/timestamp allocator
 	msFactory    msgstream.Factory
@@ -54,6 +55,7 @@ type dataSyncService struct {
 
 func newDataSyncService(ctx context.Context,
 	flushCh chan flushMsg,
+	resendTTCh chan resendTTMsg,
 	replica Replica,
 	alloc allocatorInterface,
 	factory msgstream.Factory,
@@ -76,6 +78,7 @@ func newDataSyncService(ctx context.Context,
 		cancelFn:         cancel,
 		fg:               nil,
 		flushCh:          flushCh,
+		resendTTCh:       resendTTCh,
 		replica:          replica,
 		idAllocator:      alloc,
 		msFactory:        factory,
@@ -223,6 +226,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 		dsService.ctx,
 		dsService.collectionID,
 		dsService.flushCh,
+		dsService.resendTTCh,
 		dsService.flushManager,
 		dsService.flushingSegCache,
 		c,

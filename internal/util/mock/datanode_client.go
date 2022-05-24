@@ -58,3 +58,7 @@ func (m *DataNodeClient) Compaction(ctx context.Context, req *datapb.CompactionP
 func (m *DataNodeClient) Import(ctx context.Context, req *datapb.ImportTaskRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }
+
+func (m *DataNodeClient) ResendSegmentStats(ctx context.Context, req *datapb.ResendSegmentStatsRequest, opts ...grpc.CallOption) (*datapb.ResendSegmentStatsResponse, error) {
+	return &datapb.ResendSegmentStatsResponse{}, m.Err
+}

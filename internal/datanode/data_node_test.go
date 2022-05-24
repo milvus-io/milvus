@@ -742,3 +742,59 @@ func TestDataNode_GetComponentStates(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 }
+
+func TestDataNode_ResendSegmentStats(t *testing.T) {
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	assert.Nil(t, err)
+	defer etcdCli.Close()
+	dmChannelName := "fake-by-dev-rootcoord-dml-channel-test-ResendSegmentStats"
+
+	node := newIDLEDataNodeMock(context.TODO(), schemapb.DataType_Int64)
+	node.SetEtcdClient(etcdCli)
+	err = node.Init()
+	assert.Nil(t, err)
+	err = node.Start()
+	assert.Nil(t, err)
+	defer func() {
+		err := node.Stop()
+		assert.Nil(t, err)
+	}()
+
+	vChan := &datapb.VchannelInfo{
+		CollectionID:      1,
+		ChannelName:       dmChannelName,
+		UnflushedSegments: []*datapb.SegmentInfo{},
+		FlushedSegments:   []*datapb.SegmentInfo{},
+	}
+
+	err = node.flowgraphManager.addAndStart(node, vChan)
+	require.Nil(t, err)
+
+	fgService, ok := node.flowgraphManager.getFlowgraphService(dmChannelName)
+	assert.True(t, ok)
+
+	err = fgService.replica.addNewSegment(0, 1, 1, dmChannelName, &internalpb.MsgPosition{}, &internalpb.MsgPosition{})
+	assert.Nil(t, err)
+	err = fgService.replica.addNewSegment(1, 1, 2, dmChannelName, &internalpb.MsgPosition{}, &internalpb.MsgPosition{})
+	assert.Nil(t, err)
+	err = fgService.replica.addNewSegment(2, 1, 3, dmChannelName, &internalpb.MsgPosition{}, &internalpb.MsgPosition{})
+	assert.Nil(t, err)
+
+	req := &datapb.ResendSegmentStatsRequest{
+		Base: &commonpb.MsgBase{},
+	}
+
+	wg := sync.WaitGroup{}
+	wg.Add(2)
+
+	resp, err := node.ResendSegmentStats(node.ctx, req)
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	assert.ElementsMatch(t, []UniqueID{0, 1, 2}, resp.GetSegResent())
+
+	// Duplicate call.
+	resp, err = node.ResendSegmentStats(node.ctx, req)
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	assert.ElementsMatch(t, []UniqueID{0, 1, 2}, resp.GetSegResent())
+}

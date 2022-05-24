@@ -283,6 +283,7 @@ enum MsgType : int {
   Insert = 400,
   Delete = 401,
   Flush = 402,
+  ResendSegmentStats = 403,
   Search = 500,
   SearchResult = 501,
   GetIndexState = 502,

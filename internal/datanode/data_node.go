@@ -629,6 +629,23 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 	}, nil
 }
 
+// ResendSegmentStats resend un-flushed segment stats back upstream to DataCoord by resending DataNode time tick message.
+// It returns a list of segments to be sent.
+func (node *DataNode) ResendSegmentStats(ctx context.Context, req *datapb.ResendSegmentStatsRequest) (*datapb.ResendSegmentStatsResponse, error) {
+	log.Info("start resending segment stats, if any",
+		zap.Int64("DataNode ID", node.NodeID))
+	segResent := node.flowgraphManager.resendTT()
+	log.Info("found segment(s) with stats to resend",
+		zap.Int64s("segment IDs", segResent))
+	return &datapb.ResendSegmentStatsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+		SegResent: segResent,
+	}, nil
+}
+
 // Stop will release DataNode resources and shutdown datanode
 func (node *DataNode) Stop() error {
 	// https://github.com/milvus-io/milvus/issues/12282
