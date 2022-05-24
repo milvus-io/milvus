@@ -119,7 +119,7 @@ func TestQueryShard_Close(t *testing.T) {
 	qs.Close()
 }
 
-func TestQueryShard_waitNewTSafe(t *testing.T) {
+func TestQueryShard_getServiceableTime(t *testing.T) {
 	qs, err := genSimpleQueryShard(context.Background())
 	assert.NoError(t, err)
 
@@ -127,11 +127,11 @@ func TestQueryShard_waitNewTSafe(t *testing.T) {
 	err = updateQueryShardTSafe(qs, timestamp)
 	assert.NoError(t, err)
 
-	dmlTimestamp, err := qs.getNewTSafe(tsTypeDML)
+	dmlTimestamp, err := qs.getServiceableTime(tsTypeDML)
 	assert.NoError(t, err)
 	assert.Equal(t, timestamp, dmlTimestamp)
 
-	deltaTimestamp, err := qs.getNewTSafe(tsTypeDelta)
+	deltaTimestamp, err := qs.getServiceableTime(tsTypeDelta)
 	assert.NoError(t, err)
 	assert.Equal(t, timestamp, deltaTimestamp)
 }

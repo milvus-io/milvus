@@ -18,9 +18,7 @@ package querynode
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"math"
 
 	"go.uber.org/zap"
 
@@ -127,27 +125,6 @@ func (tp tsType) String() string {
 		return "Delta tSafe"
 	}
 	return ""
-}
-
-func (q *queryShard) getNewTSafe(tp tsType) (Timestamp, error) {
-	var channel string
-	switch tp {
-	case tsTypeDML:
-		channel = q.channel
-	case tsTypeDelta:
-		channel = q.deltaChannel
-	default:
-		return 0, errors.New("invalid ts type")
-	}
-	t := Timestamp(math.MaxInt64)
-	ts, err := q.tSafeReplica.getTSafe(channel)
-	if err != nil {
-		return 0, err
-	}
-	if ts <= t {
-		t = ts
-	}
-	return t, nil
 }
 
 func (q *queryShard) getServiceableTime(tp tsType) (Timestamp, error) {
