@@ -924,7 +924,9 @@ func updateSegmentInfoFromTask(ctx context.Context, triggerTask task, meta Meta)
 
 	default:
 		// save new segmentInfo when load segment
-		segments := make(map[UniqueID]*querypb.SegmentInfo)
+		var (
+			segments = make(map[UniqueID]*querypb.SegmentInfo)
+		)
 
 		for _, childTask := range triggerTask.getChildTask() {
 			if childTask.msgType() == commonpb.MsgType_LoadSegments {
@@ -934,27 +936,29 @@ func updateSegmentInfoFromTask(ctx context.Context, triggerTask task, meta Meta)
 					collectionID := loadInfo.CollectionID
 					segmentID := loadInfo.SegmentID
 
-					segment, err := meta.getSegmentInfoByID(segmentID)
-					if err != nil {
-						segment = &querypb.SegmentInfo{
-							SegmentID:      segmentID,
-							CollectionID:   loadInfo.CollectionID,
-							PartitionID:    loadInfo.PartitionID,
-							NodeID:         dstNodeID,
-							DmChannel:      loadInfo.InsertChannel,
-							SegmentState:   commonpb.SegmentState_Sealed,
-							CompactionFrom: loadInfo.CompactionFrom,
-							ReplicaIds:     []UniqueID{req.ReplicaID},
-							NodeIds:        []UniqueID{dstNodeID},
+					segment, saved := segments[segmentID]
+					if !saved {
+						segment, err = meta.getSegmentInfoByID(segmentID)
+						if err != nil {
+							segment = &querypb.SegmentInfo{
+								SegmentID:      segmentID,
+								CollectionID:   loadInfo.CollectionID,
+								PartitionID:    loadInfo.PartitionID,
+								DmChannel:      loadInfo.InsertChannel,
+								SegmentState:   commonpb.SegmentState_Sealed,
+								CompactionFrom: loadInfo.CompactionFrom,
+								ReplicaIds:     []UniqueID{},
+								NodeIds:        []UniqueID{},
+								NumRows:        loadInfo.NumOfRows,
+							}
 						}
-					} else {
-						segment.ReplicaIds = append(segment.ReplicaIds, req.ReplicaID)
-						segment.ReplicaIds = removeFromSlice(segment.GetReplicaIds())
-
-						segment.NodeIds = append(segment.NodeIds, dstNodeID)
-						segment.NodeID = dstNodeID
 					}
-					_, saved := segments[segmentID]
+					segment.ReplicaIds = append(segment.ReplicaIds, req.ReplicaID)
+					segment.ReplicaIds = removeFromSlice(segment.GetReplicaIds())
+
+					segment.NodeIds = append(segment.NodeIds, dstNodeID)
+					segment.NodeID = dstNodeID
+
 					segments[segmentID] = segment
 
 					if _, ok := segmentInfosToSave[collectionID]; !ok {

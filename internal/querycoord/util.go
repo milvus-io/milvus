@@ -218,3 +218,18 @@ func getReplicaAvailableMemory(cluster Cluster, replica *milvuspb.ReplicaInfo) u
 
 	return availableMemory
 }
+
+// func getShardLeaderByNodeID(meta Meta, replicaID UniqueID, dmChannel string) (UniqueID, error) {
+// 	replica, err := meta.getReplicaByID(replicaID)
+// 	if err != nil {
+// 		return 0, err
+// 	}
+
+// 	for _, shard := range replica.ShardReplicas {
+// 		if shard.DmChannelName == dmChannel {
+// 			return shard.LeaderID, nil
+// 		}
+// 	}
+
+// 	return 0, fmt.Errorf("shard leader not found in replica %v and dm channel %s", replicaID, dmChannel)
+// }

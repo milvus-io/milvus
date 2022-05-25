@@ -1314,7 +1314,8 @@ func (lst *loadSegmentTask) reschedule(ctx context.Context) ([]task, error) {
 type releaseSegmentTask struct {
 	*baseTask
 	*querypb.ReleaseSegmentsRequest
-	cluster Cluster
+	cluster  Cluster
+	leaderID UniqueID
 }
 
 func (rst *releaseSegmentTask) msgBase() *commonpb.MsgBase {
@@ -1354,7 +1355,7 @@ func (rst *releaseSegmentTask) preExecute(context.Context) error {
 func (rst *releaseSegmentTask) execute(ctx context.Context) error {
 	defer rst.reduceRetryCount()
 
-	err := rst.cluster.releaseSegments(rst.ctx, rst.NodeID, rst.ReleaseSegmentsRequest)
+	err := rst.cluster.releaseSegments(rst.ctx, rst.leaderID, rst.ReleaseSegmentsRequest)
 	if err != nil {
 		log.Warn("releaseSegmentTask: releaseSegment occur error", zap.Int64("taskID", rst.getTaskID()))
 		rst.setResultInfo(err)
@@ -2123,6 +2124,53 @@ func (lbt *loadBalanceTask) execute(ctx context.Context) error {
 		if len(lbt.SealedSegmentIDs) != 0 {
 			balancedSegmentIDs = lbt.SealedSegmentIDs
 		}
+
+		// TODO(yah01): release balanced segments in source nodes
+		// balancedSegmentSet := make(typeutil.UniqueSet)
+		// balancedSegmentSet.Insert(balancedSegmentIDs...)
+
+		// for _, nodeID := range lbt.SourceNodeIDs {
+		// 	segments := lbt.meta.getSegmentInfosByNode(nodeID)
+
+		// 	shardSegments := make(map[string][]UniqueID)
+		// 	for _, segment := range segments {
+		// 		if !balancedSegmentSet.Contain(segment.SegmentID) {
+		// 			continue
+		// 		}
+
+		// 		shardSegments[segment.DmChannel] = append(shardSegments[segment.DmChannel], segment.SegmentID)
+		// 	}
+
+		// 	for dmc, segmentIDs := range shardSegments {
+		// 		shardLeader, err := getShardLeaderByNodeID(lbt.meta, lbt.replicaID, dmc)
+		// 		if err != nil {
+		// 			log.Error("failed to get shardLeader",
+		// 				zap.Int64("replicaID", lbt.replicaID),
+		// 				zap.Int64("nodeID", nodeID),
+		// 				zap.String("dmChannel", dmc),
+		// 				zap.Error(err))
+		// 			lbt.setResultInfo(err)
+
+		// 			return err
+		// 		}
+
+		// 		releaseSegmentReq := &querypb.ReleaseSegmentsRequest{
+		// 			Base: &commonpb.MsgBase{
+		// 				MsgType: commonpb.MsgType_ReleaseSegments,
+		// 			},
+
+		// 			NodeID:     nodeID,
+		// 			SegmentIDs: segmentIDs,
+		// 		}
+		// 		baseTask := newBaseTask(ctx, querypb.TriggerCondition_LoadBalance)
+		// 		lbt.addChildTask(&releaseSegmentTask{
+		// 			baseTask:               baseTask,
+		// 			ReleaseSegmentsRequest: releaseSegmentReq,
+		// 			cluster:                lbt.cluster,
+		// 			leaderID:               shardLeader,
+		// 		})
+		// 	}
+		// }
 
 		col2PartitionIDs := make(map[UniqueID][]UniqueID)
 		par2Segments := make(map[UniqueID][]*querypb.SegmentInfo)

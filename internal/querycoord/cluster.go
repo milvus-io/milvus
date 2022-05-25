@@ -224,10 +224,10 @@ func (c *queryNodeCluster) loadSegments(ctx context.Context, nodeID int64, in *q
 	return fmt.Errorf("loadSegments: can't find QueryNode by nodeID, nodeID = %d", nodeID)
 }
 
-func (c *queryNodeCluster) releaseSegments(ctx context.Context, nodeID int64, in *querypb.ReleaseSegmentsRequest) error {
+func (c *queryNodeCluster) releaseSegments(ctx context.Context, leaderID int64, in *querypb.ReleaseSegmentsRequest) error {
 	c.RLock()
 	var targetNode Node
-	if node, ok := c.nodes[nodeID]; ok {
+	if node, ok := c.nodes[leaderID]; ok {
 		targetNode = node
 	}
 	c.RUnlock()
@@ -239,14 +239,14 @@ func (c *queryNodeCluster) releaseSegments(ctx context.Context, nodeID int64, in
 
 		err := targetNode.releaseSegments(ctx, in)
 		if err != nil {
-			log.Warn("releaseSegments: queryNode release segments error", zap.Int64("nodeID", nodeID), zap.String("error info", err.Error()))
+			log.Warn("releaseSegments: queryNode release segments error", zap.Int64("leaderID", leaderID), zap.Int64("nodeID", in.NodeID), zap.String("error info", err.Error()))
 			return err
 		}
 
 		return nil
 	}
 
-	return fmt.Errorf("releaseSegments: can't find QueryNode by nodeID, nodeID = %d", nodeID)
+	return fmt.Errorf("releaseSegments: can't find QueryNode by nodeID, nodeID = %d", leaderID)
 }
 
 func (c *queryNodeCluster) watchDmChannels(ctx context.Context, nodeID int64, in *querypb.WatchDmChannelsRequest) error {
@@ -443,18 +443,40 @@ func (c *queryNodeCluster) getSegmentInfoByID(ctx context.Context, segmentID Uni
 }
 
 func (c *queryNodeCluster) getSegmentInfo(ctx context.Context, in *querypb.GetSegmentInfoRequest) ([]*querypb.SegmentInfo, error) {
-
 	type respTuple struct {
 		res *querypb.GetSegmentInfoResponse
 		err error
 	}
 
+	var (
+		segmentInfos []*querypb.SegmentInfo
+	)
+
+	// Fetch sealed segments from Meta
+	if len(in.SegmentIDs) > 0 {
+		for _, segmentID := range in.SegmentIDs {
+			segment, err := c.clusterMeta.getSegmentInfoByID(segmentID)
+			if err != nil {
+				return nil, err
+			}
+
+			segmentInfos = append(segmentInfos, segment)
+		}
+	} else {
+		allSegments := c.clusterMeta.showSegmentInfos(in.CollectionID, nil)
+		for _, segment := range allSegments {
+			if in.CollectionID == 0 || segment.CollectionID == in.CollectionID {
+				segmentInfos = append(segmentInfos, segment)
+			}
+		}
+	}
+
+	// Fetch growing segments
 	c.RLock()
 	var wg sync.WaitGroup
 	cnt := len(c.nodes)
 	resChan := make(chan respTuple, cnt)
 	wg.Add(cnt)
-
 	for _, node := range c.nodes {
 		go func(node Node) {
 			defer wg.Done()
@@ -468,13 +490,18 @@ func (c *queryNodeCluster) getSegmentInfo(ctx context.Context, in *querypb.GetSe
 	c.RUnlock()
 	wg.Wait()
 	close(resChan)
-	var segmentInfos []*querypb.SegmentInfo
 
 	for tuple := range resChan {
 		if tuple.err != nil {
 			return nil, tuple.err
 		}
-		segmentInfos = append(segmentInfos, tuple.res.GetInfos()...)
+
+		segments := tuple.res.GetInfos()
+		for _, segment := range segments {
+			if segment.SegmentState != commonpb.SegmentState_Sealed {
+				segmentInfos = append(segmentInfos, segment)
+			}
+		}
 	}
 
 	//TODO::update meta
