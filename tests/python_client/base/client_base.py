@@ -54,7 +54,10 @@ class Base:
                                              port=cf.param_info.param_port)
 
             if self.collection_wrap.collection is not None:
-                self.collection_wrap.drop(check_task=ct.CheckTasks.check_nothing)
+                if self.collection_wrap.collection.name.startswith("alias"):
+                    log.info(f"collection {self.collection_wrap.collection.name} is alias, skip drop operation")
+                else:
+                    self.collection_wrap.drop(check_task=ct.CheckTasks.check_nothing)
 
             collection_list = self.utility_wrap.list_collections()[0]
             for collection_object in self.collection_object_list:
