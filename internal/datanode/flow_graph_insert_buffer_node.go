@@ -351,9 +351,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 		case resendTTMsg := <-ibNode.resendTTChan:
 			log.Info("resend TT msg received in insertBufferNode",
 				zap.Int64s("segment IDs", resendTTMsg.segmentIDs))
-			if err := ibNode.writeHardTimeTick(fgMsg.timeRange.timestampMax, resendTTMsg.segmentIDs); err != nil {
-				log.Error("send hard time tick into pulsar channel failed", zap.Error(err))
-			}
+			ibNode.writeHardTimeTick(fgMsg.timeRange.timestampMax, resendTTMsg.segmentIDs)
 		default:
 		}
 	}
