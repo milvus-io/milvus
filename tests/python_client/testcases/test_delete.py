@@ -780,7 +780,6 @@ class TestDeleteOperation(TestcaseBase):
         collection_w.query(tmp_expr, output_fields=[ct.default_float_vec_field_name],
                            check_task=CheckTasks.check_query_results, check_items={'exp_res': res, 'with_vec': True})
 
-    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/15744")
     @pytest.mark.parametrize("to_query", [True, False])
     def test_delete_insert_same_id_sealed(self, to_query):
         """

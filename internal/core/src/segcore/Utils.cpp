@@ -305,14 +305,25 @@ get_deleted_bitmap(int64_t del_barrier,
         auto [iter_b, iter_e] = pk2offset.equal_range(pk);
         for (auto iter = iter_b; iter != iter_e; ++iter) {
             auto insert_row_offset = iter->second;
+            // for now, insert_barrier == insert count of segment, so this Assert will always work
             AssertInfo(insert_row_offset < insert_barrier, "Timestamp offset is larger than insert barrier");
-            if (delete_record.timestamps_[del_index] > query_timestamp) {
-                // the deletion record do not take effect in search/query, and reset bitmap to 0
+
+            // insert after delete with same pk, delete will not task effect on this insert record
+            // and reset bitmap to 0
+            if (insert_record.timestamps_[insert_row_offset] > delete_record.timestamps_[del_index]) {
                 bitmap->reset(insert_row_offset);
-            } else {
-                // insert data corresponding to the insert_row_offset will be ignored in search/query
-                bitmap->set(insert_row_offset);
+                continue;
             }
+
+            // the deletion record do not take effect in search/query
+            // and reset bitmap to 0
+            if (delete_record.timestamps_[del_index] > query_timestamp) {
+                bitmap->reset(insert_row_offset);
+                continue;
+            }
+
+            // insert data corresponding to the insert_row_offset will be ignored in search/query
+            bitmap->set(insert_row_offset);
         }
     }
     delete_record.insert_lru_entry(current);
