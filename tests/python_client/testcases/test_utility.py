@@ -1515,7 +1515,7 @@ class TestUtilityAdvanced(TestcaseBase):
                 cnt += r.num_rows
         assert cnt == nb
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_load_balance_normal(self):
         """
         target: test load balance of collection
@@ -1523,6 +1523,10 @@ class TestUtilityAdvanced(TestcaseBase):
         expected: sealed_segment_ids is subset of des_sealed_segment_ids
         """
         # init a collection
+        self._connect()
+        querynode_num = len(MilvusSys().query_nodes)
+        if querynode_num < 2:
+            pytest.skip("skip load balance testcase when querynode number less than 2")
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
         ms = MilvusSys()
@@ -1550,6 +1554,9 @@ class TestUtilityAdvanced(TestcaseBase):
         # get segments distribution after load balance
         res, _ = self.utility_wrap.get_query_segment_info(c_name)
         segment_distribution = cf.get_segment_distribution(res)
+        sealed_segment_ids_after_load_banalce = segment_distribution[src_node_id]["sealed"]
+        # assert src node has no sealed segments
+        assert sealed_segment_ids_after_load_banalce == []
         des_sealed_segment_ids = []
         for des_node_id in des_node_ids:
             des_sealed_segment_ids += segment_distribution[des_node_id]["sealed"]
@@ -1667,17 +1674,20 @@ class TestUtilityAdvanced(TestcaseBase):
                                        check_task=CheckTasks.err_res,
                                        check_items={ct.err_code: 1, ct.err_msg: "is not exist"})
 
-    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_load_balance_in_one_group(self):
         """
         target: test load balance of collection in one group
         method: init a collection, load with multi replicas and load balance among the querynodes in one group
         expected: load balance successfully
         """
+        self._connect()
+        querynode_num = len(MilvusSys().query_nodes)
+        if querynode_num < 3:
+            pytest.skip("skip load balance for multi replicas testcase when querynode number less than 3")
         # init a collection
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
-        ms = MilvusSys()
         nb = 3000
         df = cf.gen_default_dataframe_data(nb)
         collection_w.insert(df)
@@ -1695,10 +1705,14 @@ class TestUtilityAdvanced(TestcaseBase):
             if len(g.group_nodes) >= 2:
                 group_nodes = list(g.group_nodes)
                 break
-        src_node_id = group_nodes[0]
-        dst_node_ids = group_nodes[1:]
         res, _ = self.utility_wrap.get_query_segment_info(c_name)
         segment_distribution = cf.get_segment_distribution(res)
+        group_nodes = sorted(group_nodes,
+                             key=lambda x: len(
+                                 segment_distribution[x]["sealed"])
+                             if x in segment_distribution else 0, reverse=True)
+        src_node_id = group_nodes[0]
+        dst_node_ids = group_nodes[1:]
         sealed_segment_ids = segment_distribution[src_node_id]["sealed"]
         # load balance
         self.utility_wrap.load_balance(collection_w.name, src_node_id, dst_node_ids, sealed_segment_ids)
@@ -1706,7 +1720,7 @@ class TestUtilityAdvanced(TestcaseBase):
         res, _ = self.utility_wrap.get_query_segment_info(c_name)
         segment_distribution = cf.get_segment_distribution(res)
         sealed_segment_ids_after_load_banalce = segment_distribution[src_node_id]["sealed"]
-        # assert
+        # assert src node has no sealed segments
         assert sealed_segment_ids_after_load_banalce == []
         des_sealed_segment_ids = []
         for des_node_id in dst_node_ids:
