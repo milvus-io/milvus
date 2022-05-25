@@ -179,22 +179,9 @@ func (rep *ReplicaInfos) ApplyBalancePlan(p *balancePlan, kv kv.MetaKv) error {
 	}
 
 	// save to etcd first
-	if len(replicasChanged) > 0 {
-		data := make(map[string]string)
-
-		for _, info := range replicasChanged {
-			infoBytes, err := proto.Marshal(info)
-			if err != nil {
-				return err
-			}
-
-			key := fmt.Sprintf("%s/%d", ReplicaMetaPrefix, info.ReplicaID)
-			data[key] = string(infoBytes)
-		}
-		err := kv.MultiSave(data)
-		if err != nil {
-			return err
-		}
+	err := saveReplica(kv, replicasChanged...)
+	if err != nil {
+		return err
 	}
 
 	// apply change to in-memory meta
@@ -209,6 +196,33 @@ func (rep *ReplicaInfos) ApplyBalancePlan(p *balancePlan, kv kv.MetaKv) error {
 	return nil
 }
 
+func (rep *ReplicaInfos) UpdateShardLeader(replicaID UniqueID, dmChannel string, leaderID UniqueID, leaderAddr string, meta kv.MetaKv) error {
+	rep.globalGuard.Lock()
+	defer rep.globalGuard.Unlock()
+
+	replica, ok := rep.get(replicaID)
+	if !ok {
+		return fmt.Errorf("replica %v not found", replicaID)
+	}
+
+	for _, shard := range replica.ShardReplicas {
+		if shard.DmChannelName == dmChannel {
+			shard.LeaderID = leaderID
+			shard.LeaderAddr = leaderAddr
+			break
+		}
+	}
+
+	err := saveReplica(meta, replica)
+	if err != nil {
+		return err
+	}
+
+	rep.upsert(replica)
+
+	return nil
+}
+
 // removeNodeFromReplica helper function to remove nodeID from replica NodeIds list.
 func removeNodeFromReplica(replica *milvuspb.ReplicaInfo, nodeID int64) *milvuspb.ReplicaInfo {
 	for i := 0; i < len(replica.NodeIds); i++ {
@@ -219,4 +233,21 @@ func removeNodeFromReplica(replica *milvuspb.ReplicaInfo, nodeID int64) *milvusp
 		return replica
 	}
 	return replica
+}
+
+// save the replicas into etcd.
+func saveReplica(meta kv.MetaKv, replicas ...*milvuspb.ReplicaInfo) error {
+	data := make(map[string]string)
+
+	for _, info := range replicas {
+		infoBytes, err := proto.Marshal(info)
+		if err != nil {
+			return err
+		}
+
+		key := fmt.Sprintf("%s/%d", ReplicaMetaPrefix, info.ReplicaID)
+		data[key] = string(infoBytes)
+	}
+
+	return meta.MultiSave(data)
 }
