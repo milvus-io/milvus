@@ -109,6 +109,14 @@ jobs:
           if [ ${{ matrix.task }} == "upgrade" ]; then
             python3 action_before_upgrade.py
           fi
+      - name: Export logs
+        if: ${{ always() }}
+        shell: bash
+        working-directory: tests/python_client/deploy/${{ matrix.mode }}
+        run: |
+          docker-compose ps -a || true
+          mkdir -p logs/first_deploy
+          bash ../../../scripts/export_log_docker.sh ./logs/first_deploy || echo "export logs failed"
       - name: Second Milvus deployment
         timeout-minutes: 15
         shell: bash
@@ -145,8 +153,8 @@ jobs:
         working-directory: tests/python_client/deploy/${{ matrix.mode }}
         run: |
           docker-compose ps -a || true
-          mkdir -p logs
-          bash ../../../scripts/export_log_docker.sh ./logs || echo "export logs failed"
+          mkdir -p logs/second_deploy
+          bash ../../../scripts/export_log_docker.sh ./logs/second_deploy || echo "export logs failed"
       - name: 'Send mail'
         if: ${{ failure() }}
         uses: dawidd6/action-send-mail@v3
@@ -263,7 +271,14 @@ jobs:
           # first test
           if [ ${{ matrix.task }} == "reinstall" ]; then python scripts/action_before_reinstall.py; fi
           if [ ${{ matrix.task }} == "upgrade" ]; then python scripts/action_before_upgrade.py; fi
-
+      - name: Export logs
+        if: ${{ always() }}
+        shell: bash
+        working-directory: tests/python_client/deploy
+        run: |
+          kubectl get pod
+          # export k8s log for milvus
+          bash ../../scripts/export_log_k8s.sh default deploy-testing k8s_logs/first_deploy
       - name: Restart Milvus
         timeout-minutes: 15
         shell: bash
@@ -311,10 +326,10 @@ jobs:
         run: |
           kubectl get pod
           # export k8s log for milvus
-          bash ../../scripts/export_log_k8s.sh default deploy-testing
+          bash ../../scripts/export_log_k8s.sh default deploy-testing k8s_logs/second_deploy
 
       - name: Upload logs
-        if: ${{ always() }}
+        if: ${{ failure() }}
         uses: actions/upload-artifact@v2
         with:
           name: helm-log-${{ matrix.mode }}-${{ matrix.task }}

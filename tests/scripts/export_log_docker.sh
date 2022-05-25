@@ -13,7 +13,10 @@ fi
 echo "export logs start"
 for container in ${array[*]}
 do
-echo "export logs for container $container "
-docker logs $container > ./$log_dir/$container.log 2>&1 || echo "export logs for container $container failed"
+if [[ $container == milvus-* ]];
+then
+    echo "export logs for container $container "
+    docker logs $container > ./$log_dir/$container.log 2>&1 || echo "export logs for container $container failed"
+fi
 done
 echo "export logs done"
