@@ -146,6 +146,7 @@ func TestDataSyncService_newDataSyncService(te *testing.T) {
 
 			ds, err := newDataSyncService(ctx,
 				make(chan flushMsg),
+				make(chan resendTTMsg),
 				replica,
 				NewAllocatorFactory(),
 				test.inMsgFactory,
@@ -192,6 +193,7 @@ func TestDataSyncService_Start(t *testing.T) {
 	collectionID := UniqueID(1)
 
 	flushChan := make(chan flushMsg, 100)
+	resendTTChan := make(chan resendTTMsg, 100)
 	cm := storage.NewLocalChunkManager(storage.RootPath(dataSyncServiceTestDir))
 	defer cm.RemoveWithPrefix("")
 	replica, err := newReplica(context.Background(), mockRootCoord, cm, collectionID)
@@ -228,7 +230,7 @@ func TestDataSyncService_Start(t *testing.T) {
 	}
 
 	signalCh := make(chan string, 100)
-	sync, err := newDataSyncService(ctx, flushChan, replica, allocFactory, factory, vchan, signalCh, &DataCoordFactory{}, newCache(), cm, newCompactionExecutor())
+	sync, err := newDataSyncService(ctx, flushChan, resendTTChan, replica, allocFactory, factory, vchan, signalCh, &DataCoordFactory{}, newCache(), cm, newCompactionExecutor())
 
 	assert.Nil(t, err)
 	// sync.replica.addCollection(collMeta.ID, collMeta.Schema)

@@ -152,6 +152,7 @@ enum MsgType {
     Insert = 400;
     Delete = 401;
     Flush = 402;
+    ResendSegmentStats = 403;
 
     /* QUERY */
     Search = 500;

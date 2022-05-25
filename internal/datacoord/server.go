@@ -297,6 +297,13 @@ func (s *Server) Start() error {
 	atomic.StoreInt64(&s.isServing, ServerStateHealthy)
 	logutil.Logger(s.ctx).Debug("startup success")
 
+	// DataCoord (re)starts successfully and starts to collection segment stats
+	// data from all DataNode.
+	// This will prevent DataCoord from missing out any important segment stats
+	// data while offline.
+	log.Info("DataNode (re)starts successfully and re-collecting segment stats from DataNodes")
+	s.reCollectSegmentStats(s.ctx)
+
 	return nil
 }
 
@@ -848,4 +855,17 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 	}
 	s.meta.AddCollection(collInfo)
 	return nil
+}
+
+func (s *Server) reCollectSegmentStats(ctx context.Context) {
+	if s.channelManager == nil {
+		log.Error("null channel manager found, which should NOT happen in non-testing environment")
+		return
+	}
+	nodes := s.channelManager.store.GetNodes()
+	log.Info("re-collecting segment stats from DataNodes",
+		zap.Int64s("DataNode IDs", nodes))
+	for _, node := range nodes {
+		s.cluster.ReCollectSegmentStats(ctx, node)
+	}
 }

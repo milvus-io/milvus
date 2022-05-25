@@ -357,3 +357,7 @@ func (s *Server) Compaction(ctx context.Context, request *datapb.CompactionPlan)
 func (s *Server) Import(ctx context.Context, request *datapb.ImportTaskRequest) (*commonpb.Status, error) {
 	return s.datanode.Import(ctx, request)
 }
+
+func (s *Server) ResendSegmentStats(ctx context.Context, request *datapb.ResendSegmentStatsRequest) (*datapb.ResendSegmentStatsResponse, error) {
+	return s.datanode.ResendSegmentStats(ctx, request)
+}

@@ -198,3 +198,16 @@ func (c *Client) Import(ctx context.Context, req *datapb.ImportTaskRequest) (*co
 	}
 	return ret.(*commonpb.Status), err
 }
+
+func (c *Client) ResendSegmentStats(ctx context.Context, req *datapb.ResendSegmentStatsRequest) (*datapb.ResendSegmentStatsResponse, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.(datapb.DataNodeClient).ResendSegmentStats(ctx, req)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+	return ret.(*datapb.ResendSegmentStatsResponse), err
+}

@@ -77,6 +77,10 @@ type DataNode interface {
 	// Return status indicates if this operation is processed successfully or fail cause;
 	// error is always nil
 	Import(ctx context.Context, req *datapb.ImportTaskRequest) (*commonpb.Status, error)
+
+	// ResendSegmentStats resend un-flushed segment stats back upstream to DataCoord by resending DataNode time tick message.
+	// It returns a list of segments to be sent.
+	ResendSegmentStats(ctx context.Context, req *datapb.ResendSegmentStatsRequest) (*datapb.ResendSegmentStatsResponse, error)
 }
 
 // DataNodeComponent is used by grpc server of DataNode

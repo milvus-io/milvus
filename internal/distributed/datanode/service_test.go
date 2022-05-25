@@ -46,6 +46,7 @@ type MockDataNode struct {
 	regErr     error
 	strResp    *milvuspb.StringResponse
 	metricResp *milvuspb.GetMetricsResponse
+	resendResp *datapb.ResendSegmentStatsResponse
 }
 
 func (m *MockDataNode) Init() error {
@@ -113,6 +114,10 @@ func (m *MockDataNode) SetEtcdClient(client *clientv3.Client) {
 
 func (m *MockDataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest) (*commonpb.Status, error) {
 	return m.status, m.err
+}
+
+func (m *MockDataNode) ResendSegmentStats(ctx context.Context, req *datapb.ResendSegmentStatsRequest) (*datapb.ResendSegmentStatsResponse, error) {
+	return m.resendResp, nil
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -255,6 +260,15 @@ func Test_NewServer(t *testing.T) {
 			status: &commonpb.Status{},
 		}
 		resp, err := server.Import(ctx, nil)
+		assert.Nil(t, err)
+		assert.NotNil(t, resp)
+	})
+
+	t.Run("ResendSegmentStats", func(t *testing.T) {
+		server.datanode = &MockDataNode{
+			resendResp: &datapb.ResendSegmentStatsResponse{},
+		}
+		resp, err := server.ResendSegmentStats(ctx, nil)
 		assert.Nil(t, err)
 		assert.NotNil(t, resp)
 	})

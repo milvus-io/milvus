@@ -90,6 +90,7 @@ func TestFlowGraphInsertBufferNodeCreate(t *testing.T) {
 	fm := NewRendezvousFlushManager(&allocator{}, cm, replica, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
 
 	flushChan := make(chan flushMsg, 100)
+	resendTTChan := make(chan resendTTMsg, 100)
 
 	c := &nodeConfig{
 		replica:      replica,
@@ -98,7 +99,7 @@ func TestFlowGraphInsertBufferNodeCreate(t *testing.T) {
 		vChannelName: "string",
 	}
 
-	iBNode, err := newInsertBufferNode(ctx, collMeta.ID, flushChan, fm, newCache(), c)
+	iBNode, err := newInsertBufferNode(ctx, collMeta.ID, flushChan, resendTTChan, fm, newCache(), c)
 	assert.NotNil(t, iBNode)
 	require.NoError(t, err)
 
@@ -112,7 +113,7 @@ func TestFlowGraphInsertBufferNodeCreate(t *testing.T) {
 		cd:      0,
 	}
 
-	_, err = newInsertBufferNode(ctx, collMeta.ID, flushChan, fm, newCache(), c)
+	_, err = newInsertBufferNode(ctx, collMeta.ID, flushChan, resendTTChan, fm, newCache(), c)
 	assert.Error(t, err)
 }
 
@@ -176,6 +177,7 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	fm := NewRendezvousFlushManager(NewAllocatorFactory(), cm, replica, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
 
 	flushChan := make(chan flushMsg, 100)
+	resendTTChan := make(chan resendTTMsg, 100)
 	c := &nodeConfig{
 		replica:      replica,
 		msFactory:    factory,
@@ -183,7 +185,7 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 		vChannelName: "string",
 	}
 
-	iBNode, err := newInsertBufferNode(ctx, collMeta.ID, flushChan, fm, newCache(), c)
+	iBNode, err := newInsertBufferNode(ctx, collMeta.ID, flushChan, resendTTChan, fm, newCache(), c)
 	require.NoError(t, err)
 
 	// trigger log ts
@@ -197,6 +199,13 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	}
 
 	inMsg := genFlowGraphInsertMsg(insertChannelName)
+	assert.NotPanics(t, func() { iBNode.Operate([]flowgraph.Msg{&inMsg}) })
+
+	resendTTChan <- resendTTMsg{
+		segmentIDs: []int64{0, 1, 2},
+	}
+
+	inMsg = genFlowGraphInsertMsg(insertChannelName)
 	assert.NotPanics(t, func() { iBNode.Operate([]flowgraph.Msg{&inMsg}) })
 
 	// test drop collection operate
@@ -420,13 +429,14 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 	}, emptyFlushAndDropFunc)
 
 	flushChan := make(chan flushMsg, 100)
+	resendTTChan := make(chan resendTTMsg, 100)
 	c := &nodeConfig{
 		replica:      colRep,
 		msFactory:    factory,
 		allocator:    NewAllocatorFactory(),
 		vChannelName: "string",
 	}
-	iBNode, err := newInsertBufferNode(ctx, collMeta.ID, flushChan, fm, newCache(), c)
+	iBNode, err := newInsertBufferNode(ctx, collMeta.ID, flushChan, resendTTChan, fm, newCache(), c)
 	require.NoError(t, err)
 
 	// Auto flush number of rows set to 2
@@ -688,13 +698,14 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 		fm := NewRendezvousFlushManager(&allocator{}, cm, replica, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
 
 		flushChan := make(chan flushMsg, 100)
+		resendTTChan := make(chan resendTTMsg, 100)
 		c := &nodeConfig{
 			replica:      replica,
 			msFactory:    factory,
 			allocator:    NewAllocatorFactory(),
 			vChannelName: "string",
 		}
-		iBNode, err := newInsertBufferNode(ctx, collMeta.ID, flushChan, fm, newCache(), c)
+		iBNode, err := newInsertBufferNode(ctx, collMeta.ID, flushChan, resendTTChan, fm, newCache(), c)
 		require.NoError(t, err)
 
 		inMsg := genFlowGraphInsertMsg(insertChannelName)
