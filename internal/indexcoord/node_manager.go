@@ -117,7 +117,7 @@ func (nm *NodeManager) PeekClient(meta Meta) (UniqueID, types.IndexNode) {
 		return nodeID, nil
 	}
 	if nodeID == 0 {
-		log.Error("No IndexNode available", zap.Uint64("data size", dataSize),
+		log.Error("No IndexNode available or all IndexNodes are busy", zap.Uint64("data size", dataSize),
 			zap.Uint64("IndexNode must have memory size", dataSize*indexSizeFactor))
 		return nodeID, nil
 	}

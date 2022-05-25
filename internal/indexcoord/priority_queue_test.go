@@ -33,7 +33,7 @@ func newPriorityQueue() *PriorityQueue {
 	for i := 1; i <= QueueLen; i++ {
 		item := &PQItem{
 			key:      UniqueID(i),
-			priority: i,
+			priority: i - 1,
 			index:    i - 1,
 			totalMem: 1000,
 		}
@@ -99,7 +99,7 @@ func TestPriorityQueue_SetMemory(t *testing.T) {
 	for i := 0; i < QueueLen; i++ {
 		item := &PQItem{
 			key:      UniqueID(i),
-			priority: i,
+			priority: 0,
 			index:    i,
 			totalMem: 1000,
 		}

@@ -21,6 +21,7 @@ import (
 	"errors"
 	"math/rand"
 	"os"
+	"path"
 	"sort"
 	"strconv"
 	"sync"
@@ -59,10 +60,6 @@ import (
 
 // make sure IndexCoord implements types.IndexCoord
 var _ types.IndexCoord = (*IndexCoord)(nil)
-
-const (
-	indexSizeFactor = 6
-)
 
 var Params paramtable.ComponentParam
 
@@ -538,7 +535,9 @@ func (i *IndexCoord) DropIndex(ctx context.Context, req *indexpb.DropIndexReques
 	ret := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}
-	err := i.metaTable.MarkIndexAsDeleted(req.IndexID)
+	err := retry.Do(ctx, func() error {
+		return i.metaTable.MarkIndexAsDeleted(req.IndexID)
+	}, retry.Attempts(5))
 	if err != nil {
 		ret.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		ret.Reason = err.Error()
@@ -717,7 +716,7 @@ func (i *IndexCoord) recycleUnusedIndexFiles() {
 			metas := i.metaTable.GetUnusedIndexFiles(i.taskLimit)
 			for _, meta := range metas {
 				if meta.indexMeta.MarkDeleted {
-					unusedIndexFilePathPrefix := Params.IndexCoordCfg.IndexStorageRootPath + "/" + strconv.Itoa(int(meta.indexMeta.IndexBuildID))
+					unusedIndexFilePathPrefix := path.Join(Params.IndexCoordCfg.IndexStorageRootPath, strconv.Itoa(int(meta.indexMeta.IndexBuildID)))
 					log.Debug("IndexCoord recycleUnusedIndexFiles",
 						zap.Int64("Recycle the index files for deleted index with indexBuildID", meta.indexMeta.IndexBuildID))
 					if err := i.chunkManager.RemoveWithPrefix(unusedIndexFilePathPrefix); err != nil {
@@ -732,14 +731,16 @@ func (i *IndexCoord) recycleUnusedIndexFiles() {
 						zap.Int64("Recycle the low version index files of the index with indexBuildID", meta.indexMeta.IndexBuildID),
 						zap.Int64("indexMeta version", meta.indexMeta.Version))
 					for j := 1; j < int(meta.indexMeta.Version); j++ {
-						unusedIndexFilePathPrefix := Params.IndexCoordCfg.IndexStorageRootPath + "/" + strconv.Itoa(int(meta.indexMeta.IndexBuildID)) + "/" + strconv.Itoa(j)
+						unusedIndexFilePathPrefix := path.Join(Params.IndexCoordCfg.IndexStorageRootPath, strconv.Itoa(int(meta.indexMeta.IndexBuildID)), strconv.Itoa(j))
 						if err := i.chunkManager.RemoveWithPrefix(unusedIndexFilePathPrefix); err != nil {
 							log.Error("IndexCoord recycleUnusedIndexFiles Remove index files failed",
 								zap.Bool("MarkDeleted", false), zap.Error(err))
 						}
 					}
 					if err := i.metaTable.UpdateRecycleState(meta.indexMeta.IndexBuildID); err != nil {
-						log.Error("IndexCoord recycleUnusedIndexFiles UpdateRecycleState failed", zap.Error(err))
+						log.Error("IndexCoord recycleUnusedIndexFiles UpdateRecycleState failed, wait to retry",
+							zap.Int64("buildID", meta.indexMeta.IndexBuildID), zap.Error(err))
+						continue
 					}
 					log.Debug("IndexCoord recycleUnusedIndexFiles",
 						zap.Int64("Recycle the low version index files successfully of the index with indexBuildID", meta.indexMeta.IndexBuildID))
@@ -899,12 +900,14 @@ func (i *IndexCoord) assignTaskLoop() {
 			})
 			// only log if we find unassigned tasks
 			if len(metas) != 0 {
-				log.Debug("IndexCoord find unassigned tasks ", zap.Int("Unassigned tasks number", len(metas)), zap.Int64s("Available IndexNode IDs", serverIDs))
+				log.Debug("IndexCoord find unassigned tasks ", zap.Int("Unassigned tasks number", len(metas)),
+					zap.Int64s("Available IndexNode IDs", serverIDs))
 			}
 			for index, meta := range metas {
 				indexBuildID := meta.indexMeta.IndexBuildID
 				if err := i.metaTable.UpdateVersion(indexBuildID); err != nil {
-					log.Warn("IndexCoord assignmentTasksLoop metaTable.UpdateVersion failed", zap.Error(err))
+					log.Warn("IndexCoord assignmentTasksLoop metaTable.UpdateVersion failed, wait to retry",
+						zap.Int64("buildID", indexBuildID), zap.Error(err))
 					continue
 				}
 				log.Debug("The version of the task has been updated", zap.Int64("indexBuildID", indexBuildID))
@@ -934,7 +937,8 @@ func (i *IndexCoord) assignTaskLoop() {
 					continue
 				}
 				if err := i.metaTable.BuildIndex(indexBuildID, nodeID); err != nil {
-					log.Error("IndexCoord assignmentTasksLoop metaTable.BuildIndex failed", zap.Error(err))
+					log.Error("IndexCoord assignmentTasksLoop metaTable.BuildIndex failed, wait to retry",
+						zap.Int64("buildID", indexBuildID), zap.Error(err))
 					break
 				}
 				log.Debug("This task has been assigned successfully", zap.Int64("indexBuildID", indexBuildID), zap.Int64("nodeID", nodeID))

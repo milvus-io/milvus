@@ -17,6 +17,7 @@
 package indexcoord
 
 import (
+	"path"
 	"strconv"
 	"testing"
 
@@ -40,7 +41,7 @@ func TestMetaTable(t *testing.T) {
 	req := &indexpb.BuildIndexRequest{
 		IndexBuildID: 1,
 		IndexName:    "test_index",
-		IndexID:      0,
+		IndexID:      1,
 		DataPaths:    []string{"DataPath-1-1", "DataPath-1-2"},
 		TypeParams:   []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}},
 		IndexParams:  []*commonpb.KeyValuePair{{Key: "IndexParam-1-1", Value: "IndexParam-1-1"}, {Key: "IndexParam-1-2", Value: "IndexParam-1-2"}},
@@ -58,37 +59,42 @@ func TestMetaTable(t *testing.T) {
 		Version:        10,
 		Recycled:       false,
 	}
-	value, err := proto.Marshal(indexMeta1)
-	assert.Nil(t, err)
-	key := "indexes/" + strconv.FormatInt(indexMeta1.IndexBuildID, 10)
-	err = etcdKV.Save(key, string(value))
-	assert.Nil(t, err)
 	metaTable, err := NewMetaTable(etcdKV)
 	assert.Nil(t, err)
 	assert.NotNil(t, metaTable)
 
 	t.Run("saveIndexMeta", func(t *testing.T) {
-		meta := &Meta{
+		meta1 := &Meta{
+			indexMeta: indexMeta1,
+			revision:  0,
+		}
+		err = metaTable.saveIndexMeta(meta1)
+		assert.NoError(t, err)
+
+		meta2 := &Meta{
 			indexMeta: indexMeta1,
 			revision:  10,
 		}
-		err = metaTable.saveIndexMeta(meta)
-		assert.NotNil(t, err)
+		err = metaTable.saveIndexMeta(meta2)
+		assert.Error(t, err)
 	})
 
 	t.Run("reloadMeta", func(t *testing.T) {
-		indexBuildID := UniqueID(3)
-		meta3, err := metaTable.reloadMeta(indexBuildID)
-		assert.NotNil(t, err)
-		assert.Nil(t, meta3)
+		meta1, err := metaTable.reloadMeta(indexMeta1.IndexBuildID)
+		assert.NoError(t, err)
+		assert.NotNil(t, meta1)
+		meta2, err := metaTable.reloadMeta(UniqueID(2))
+		assert.Error(t, err)
+		assert.Nil(t, meta2)
 	})
 
 	t.Run("AddIndex", func(t *testing.T) {
 		req := &indexpb.BuildIndexRequest{
-			IndexBuildID: 1,
+			IndexBuildID: 3,
+			IndexID:      2,
 		}
 		err = metaTable.AddIndex(req.IndexBuildID, req)
-		assert.NotNil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("GetIndexMetaByIndexBuildID", func(t *testing.T) {
@@ -100,77 +106,78 @@ func TestMetaTable(t *testing.T) {
 	})
 
 	t.Run("BuildIndex", func(t *testing.T) {
-		err = metaTable.BuildIndex(UniqueID(4), 1)
-		assert.NotNil(t, err)
+		err = metaTable.BuildIndex(UniqueID(3), 1)
+		assert.NoError(t, err)
 
-		indexMeta1.NodeID = 2
-		value, err = proto.Marshal(indexMeta1)
-		assert.Nil(t, err)
-		key = "indexes/" + strconv.FormatInt(indexMeta1.IndexBuildID, 10)
-		err = etcdKV.Save(key, string(value))
-		assert.Nil(t, err)
+		err = metaTable.BuildIndex(UniqueID(4), 1)
+		assert.Error(t, err)
+
 		err = metaTable.BuildIndex(indexMeta1.IndexBuildID, 1)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("UpdateVersion", func(t *testing.T) {
 		err = metaTable.UpdateVersion(UniqueID(5))
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 
-		indexMeta1.Version = indexMeta1.Version + 1
-		value, err = proto.Marshal(indexMeta1)
-		assert.Nil(t, err)
-		key = "indexes/" + strconv.FormatInt(indexMeta1.IndexBuildID, 10)
-		err = etcdKV.Save(key, string(value))
-		assert.Nil(t, err)
-		err = metaTable.UpdateVersion(indexMeta1.IndexBuildID)
-		assert.Nil(t, err)
+		err = metaTable.UpdateVersion(3)
+		assert.NoError(t, err)
 	})
 
 	t.Run("MarkIndexAsDeleted", func(t *testing.T) {
 		indexMeta1.Version = indexMeta1.Version + 1
-		value, err = proto.Marshal(indexMeta1)
+		value, err := proto.Marshal(indexMeta1)
 		assert.Nil(t, err)
-		key = "indexes/" + strconv.FormatInt(indexMeta1.IndexBuildID, 10)
+		key := path.Join(indexMetaPrefix, strconv.FormatInt(indexMeta1.IndexBuildID, 10))
 		err = etcdKV.Save(key, string(value))
 		assert.Nil(t, err)
 		err = metaTable.MarkIndexAsDeleted(indexMeta1.Req.IndexID)
+		assert.Error(t, err)
+
+		err = metaTable.MarkIndexAsDeleted(2)
 		assert.Nil(t, err)
+
+		m, err := metaTable.reloadMeta(indexMeta1.IndexBuildID)
+		assert.NoError(t, err)
+		assert.NotNil(t, m)
+		err = metaTable.saveIndexMeta(m)
+		assert.NoError(t, err)
 	})
 
 	t.Run("GetIndexState", func(t *testing.T) {
-		indexInfos := metaTable.GetIndexStates([]UniqueID{0, 1})
-		assert.Equal(t, 2, len(indexInfos))
+		indexInfos := metaTable.GetIndexStates([]UniqueID{0, 1, 2, 3})
+		assert.Equal(t, 4, len(indexInfos))
 		assert.Equal(t, "index 0 not exists", indexInfos[0].Reason)
-		assert.Equal(t, "index 1 has been deleted", indexInfos[1].Reason)
+		assert.Equal(t, "", indexInfos[1].Reason)
+		assert.Equal(t, commonpb.IndexState_Finished, indexInfos[1].State)
+		assert.Equal(t, "index 2 not exists", indexInfos[2].Reason)
+		assert.Equal(t, "index 3 has been deleted", indexInfos[3].Reason)
 	})
 
 	t.Run("GetIndexFilePathInfo", func(t *testing.T) {
 		indexFilePathInfo, err := metaTable.GetIndexFilePathInfo(0)
 		assert.Nil(t, indexFilePathInfo)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 
 		indexFilePathInfo2, err := metaTable.GetIndexFilePathInfo(1)
-		assert.Nil(t, indexFilePathInfo2)
-		assert.NotNil(t, err)
+		assert.NotNil(t, indexFilePathInfo2)
+		assert.Nil(t, err)
+		assert.ElementsMatch(t, []string{"IndexFilePath-1-1", "IndexFilePath-1-2"}, indexFilePathInfo2.IndexFilePaths)
+
+		indexFilePathInfo3, err := metaTable.GetIndexFilePathInfo(3)
+		assert.Nil(t, indexFilePathInfo3)
+		assert.Error(t, err)
 	})
 
 	t.Run("UpdateRecycleState", func(t *testing.T) {
-		indexMeta1.Version = indexMeta1.Version + 1
-		value, err = proto.Marshal(indexMeta1)
-		assert.Nil(t, err)
-		key = "indexes/" + strconv.FormatInt(indexMeta1.IndexBuildID, 10)
-		err = etcdKV.Save(key, string(value))
-		assert.Nil(t, err)
+		err = metaTable.UpdateRecycleState(indexMeta1.IndexBuildID)
+		assert.NoError(t, err)
 
 		err = metaTable.UpdateRecycleState(indexMeta1.IndexBuildID)
-		assert.Nil(t, err)
-
-		err = metaTable.UpdateRecycleState(indexMeta1.IndexBuildID)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		err = metaTable.UpdateRecycleState(5)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 	})
 
 	t.Run("HasSameReq", func(t *testing.T) {
@@ -274,9 +281,9 @@ func TestMetaTable(t *testing.T) {
 		assert.Nil(t, err)
 
 		ok := metaTable.LoadMetaFromETCD(8, 0)
-		assert.Equal(t, false, ok)
+		assert.False(t, ok)
 
-		key = "indexes/" + strconv.FormatInt(req4.IndexBuildID, 10)
+		key := path.Join(indexMetaPrefix, strconv.FormatInt(req4.IndexBuildID, 10))
 		err = etcdKV.RemoveWithPrefix(key)
 		assert.Nil(t, err)
 
@@ -308,7 +315,7 @@ func TestMetaTable(t *testing.T) {
 		assert.Equal(t, 1, priorities[4])
 	})
 
-	err = etcdKV.RemoveWithPrefix("indexes/")
+	err = etcdKV.RemoveWithPrefix(indexMetaPrefix)
 	assert.Nil(t, err)
 }
 
@@ -322,7 +329,7 @@ func TestMetaTable_Error(t *testing.T) {
 
 	t.Run("reloadFromKV error", func(t *testing.T) {
 		value := "indexMeta-1"
-		key := "indexes/" + strconv.FormatInt(2, 10)
+		key := path.Join(indexMetaPrefix, strconv.FormatInt(2, 10))
 		err = etcdKV.Save(key, value)
 		assert.Nil(t, err)
 		meta, err := NewMetaTable(etcdKV)
@@ -332,6 +339,6 @@ func TestMetaTable_Error(t *testing.T) {
 		assert.Nil(t, err)
 	})
 
-	err = etcdKV.RemoveWithPrefix("indexes/")
+	err = etcdKV.RemoveWithPrefix(indexMetaPrefix)
 	assert.Nil(t, err)
 }
