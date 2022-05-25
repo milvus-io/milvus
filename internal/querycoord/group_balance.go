@@ -49,7 +49,7 @@ func (b *replicaBalancer) addNode(nodeID int64) ([]*balancePlan, error) {
 
 		ret = append(ret, &balancePlan{
 			nodeID:        nodeID,
-			sourceReplica: -1,
+			sourceReplica: invalidReplicaID,
 			targetReplica: replicas[0].GetReplicaID(),
 		})
 	}

@@ -39,7 +39,6 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
@@ -387,7 +386,7 @@ func (qc *QueryCoord) allocateNode(nodeID int64) error {
 		return err
 	}
 	for _, p := range plans {
-		if err := qc.applyBalancePlan(p); err != nil {
+		if err := qc.meta.applyReplicaBalancePlan(p); err != nil {
 			log.Warn("failed to apply balance plan", zap.Error(err), zap.Any("plan", p))
 		}
 	}
@@ -407,42 +406,6 @@ func (qc *QueryCoord) getUnallocatedNodes() []int64 {
 		}
 	}
 	return ret
-}
-
-func (qc *QueryCoord) applyBalancePlan(p *balancePlan) error {
-	if p.sourceReplica != -1 {
-		replica, err := qc.meta.getReplicaByID(p.sourceReplica)
-		if err != nil {
-			return err
-		}
-		replica = removeNodeFromReplica(replica, p.nodeID)
-		if err := qc.meta.setReplicaInfo(replica); err != nil {
-			return err
-		}
-	}
-	if p.targetReplica != -1 {
-		replica, err := qc.meta.getReplicaByID(p.targetReplica)
-		if err != nil {
-			return err
-		}
-
-		replica.NodeIds = append(replica.NodeIds, p.nodeID)
-		if err := qc.meta.setReplicaInfo(replica); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func removeNodeFromReplica(replica *milvuspb.ReplicaInfo, nodeID int64) *milvuspb.ReplicaInfo {
-	for i := 0; i < len(replica.NodeIds); i++ {
-		if replica.NodeIds[i] != nodeID {
-			continue
-		}
-		replica.NodeIds = append(replica.NodeIds[:i], replica.NodeIds[i+1:]...)
-		return replica
-	}
-	return replica
 }
 
 func (qc *QueryCoord) handleNodeEvent(ctx context.Context) {
@@ -471,9 +434,11 @@ func (qc *QueryCoord) handleNodeEvent(ctx context.Context) {
 					log.Error("QueryCoord failed to register a QueryNode", zap.Int64("nodeID", serverID), zap.String("error info", err.Error()))
 					continue
 				}
-				if err := qc.allocateNode(serverID); err != nil {
-					log.Error("unable to allcoate node", zap.Int64("nodeID", serverID), zap.Error(err))
-				}
+				go func(serverID int64) {
+					if err := qc.allocateNode(serverID); err != nil {
+						log.Error("unable to allcoate node", zap.Int64("nodeID", serverID), zap.Error(err))
+					}
+				}(serverID)
 				qc.metricsCacheManager.InvalidateSystemInfoMetrics()
 
 			case sessionutil.SessionDelEvent:
