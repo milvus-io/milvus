@@ -15,7 +15,7 @@
 
 #include "common/Utils.h"
 #include "query/Utils.h"
-#include "segcore/Utils.h"
+#include "test_utils/DataGen.h"
 
 TEST(Util, FaissMetricTypeToString) {
     using namespace milvus::segcore;
@@ -53,4 +53,68 @@ TEST(Util, StringMatch) {
 
     ASSERT_FALSE(PrefixMatch("dontmatch", "prefix"));
     ASSERT_FALSE(PostfixMatch("dontmatch", "postfix"));
+}
+
+TEST(Util, GetDeleteBitmap) {
+    using namespace milvus;
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
+    auto i64_fid = schema->AddDebugField("age", DataType::INT64);
+    schema->set_primary_field_id(i64_fid);
+    auto N = 10;
+
+    Pk2OffsetType pk2offset;
+    InsertRecord insert_record(*schema, N);
+    DeletedRecord delete_record;
+
+    // fill insert record, all insert records has same pk = 1, timestamps= {1 ... N}
+    std::vector<int64_t> age_data(N);
+    std::vector<Timestamp> tss(N);
+    for (int i = 0; i < N; ++i) {
+        age_data[i] = 1;
+        tss[i] = i + 1;
+        pk2offset.insert(std::make_pair(1, i));
+    }
+    auto insert_offset = insert_record.reserved.fetch_add(N);
+    insert_record.timestamps_.fill_chunk_data(tss.data(), N);
+    auto field_data = insert_record.get_field_data_base(i64_fid);
+    field_data->fill_chunk_data(age_data.data(), N);
+    insert_record.ack_responder_.AddSegment(insert_offset, insert_offset + N);
+
+    // test case delete pk1(ts = 0) -> insert repeated pk1 (ts = {1 ... N}) -> query (ts = N)
+    std::vector<Timestamp> delete_ts = {0};
+    std::vector<PkType> delete_pk = {1};
+    auto offset = delete_record.reserved.fetch_add(1);
+    delete_record.timestamps_.set_data_raw(offset, delete_ts.data(), 1);
+    delete_record.pks_.set_data_raw(offset, delete_pk.data(), 1);
+    delete_record.ack_responder_.AddSegment(offset, offset + 1);
+
+    auto query_timestamp = tss[N - 1];
+    auto del_barrier = get_barrier(delete_record, query_timestamp);
+    auto insert_barrier = get_barrier(insert_record, query_timestamp);
+    auto res_bitmap =
+        get_deleted_bitmap(del_barrier, insert_barrier, delete_record, insert_record, pk2offset, query_timestamp);
+    ASSERT_EQ(res_bitmap->bitmap_ptr->count(), 0);
+
+    // test case insert repeated pk1 (ts = {1 ... N}) -> delete pk1 (ts = N) -> query (ts = N)
+    delete_ts = {uint64_t(N)};
+    delete_pk = {1};
+    offset = delete_record.reserved.fetch_add(1);
+    delete_record.timestamps_.set_data_raw(offset, delete_ts.data(), 1);
+    delete_record.pks_.set_data_raw(offset, delete_pk.data(), 1);
+    delete_record.ack_responder_.AddSegment(offset, offset + 1);
+
+    del_barrier = get_barrier(delete_record, query_timestamp);
+    res_bitmap =
+        get_deleted_bitmap(del_barrier, insert_barrier, delete_record, insert_record, pk2offset, query_timestamp);
+    ASSERT_EQ(res_bitmap->bitmap_ptr->count(), N);
+
+    // test case insert repeated pk1 (ts = {1 ... N}) -> delete pk1 (ts = N) -> query (ts = N/2)
+    query_timestamp = tss[N - 1] / 2;
+    del_barrier = get_barrier(delete_record, query_timestamp);
+    res_bitmap = get_deleted_bitmap(del_barrier, N, delete_record, insert_record, pk2offset, query_timestamp);
+    ASSERT_EQ(res_bitmap->bitmap_ptr->count(), 0);
 }
