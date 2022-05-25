@@ -17,14 +17,22 @@
 package querycoord
 
 import (
+	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+)
+
+const (
+	invalidReplicaID int64 = -1
 )
 
 type replicaSlice = []*milvuspb.ReplicaInfo
 
+// ReplicaInfos maintains replica related meta information.
 type ReplicaInfos struct {
 	globalGuard sync.RWMutex // We have to make sure atomically update replicas and index
 
@@ -35,6 +43,7 @@ type ReplicaInfos struct {
 	nodeIndex map[UniqueID]map[UniqueID]*milvuspb.ReplicaInfo // nodeID, replicaID -> []*ReplicaInfo
 }
 
+// NewReplicaInfos creates a ReplicaInfos instance with internal map created.
 func NewReplicaInfos() *ReplicaInfos {
 	return &ReplicaInfos{
 		globalGuard: sync.RWMutex{},
@@ -43,20 +52,37 @@ func NewReplicaInfos() *ReplicaInfos {
 	}
 }
 
+// Get returns the ReplicaInfo with provided replicaID.
+// If the ReplicaInfo does not exist, nil will be returned
 func (rep *ReplicaInfos) Get(replicaID UniqueID) (*milvuspb.ReplicaInfo, bool) {
 	rep.globalGuard.RLock()
 	defer rep.globalGuard.RUnlock()
 
+	return rep.get(replicaID)
+}
+
+// get is the internal common util function to get replica with provided replicaID.
+// the lock shall be accquired first
+// NO outer invocation is allowed
+func (rep *ReplicaInfos) get(replicaID UniqueID) (*milvuspb.ReplicaInfo, bool) {
 	info, ok := rep.replicas[replicaID]
 	clone := proto.Clone(info).(*milvuspb.ReplicaInfo)
 	return clone, ok
 }
 
-// Make sure atomically update replica and index
+// Insert atomically updates replica and node index.
 func (rep *ReplicaInfos) Insert(info *milvuspb.ReplicaInfo) {
 	rep.globalGuard.Lock()
 	defer rep.globalGuard.Unlock()
 
+	rep.upsert(info)
+}
+
+// upsert is the internal common util function to upsert replica info.
+// it also update the related nodeIndex information.
+// the lock shall be accquired first
+// NO outer invocation is allowed
+func (rep *ReplicaInfos) upsert(info *milvuspb.ReplicaInfo) {
 	old, ok := rep.replicas[info.ReplicaID]
 
 	info = proto.Clone(info).(*milvuspb.ReplicaInfo)
@@ -81,6 +107,7 @@ func (rep *ReplicaInfos) Insert(info *milvuspb.ReplicaInfo) {
 	}
 }
 
+// GetReplicasByNodeID returns the replicas associated with provided node id.
 func (rep *ReplicaInfos) GetReplicasByNodeID(nodeID UniqueID) []*milvuspb.ReplicaInfo {
 	rep.globalGuard.RLock()
 	defer rep.globalGuard.RUnlock()
@@ -99,6 +126,7 @@ func (rep *ReplicaInfos) GetReplicasByNodeID(nodeID UniqueID) []*milvuspb.Replic
 	return clones
 }
 
+// Remove deletes provided replica ids from meta.
 func (rep *ReplicaInfos) Remove(replicaIds ...UniqueID) {
 	rep.globalGuard.Lock()
 	defer rep.globalGuard.Unlock()
@@ -111,4 +139,84 @@ func (rep *ReplicaInfos) Remove(replicaIds ...UniqueID) {
 			delete(replicaIndex, replicaID)
 		}
 	}
+}
+
+// ApplyBalancePlan applies balancePlan to replica nodes.
+func (rep *ReplicaInfos) ApplyBalancePlan(p *balancePlan, kv kv.MetaKv) error {
+	rep.globalGuard.Lock()
+	defer rep.globalGuard.Unlock()
+
+	var sourceReplica, targetReplica *milvuspb.ReplicaInfo
+	var ok bool
+
+	// check source and target replica ids are valid
+	if p.sourceReplica != invalidReplicaID {
+		sourceReplica, ok = rep.get(p.sourceReplica)
+		if !ok {
+			return errors.New("replica not found")
+		}
+	}
+
+	if p.targetReplica != invalidReplicaID {
+		targetReplica, ok = rep.replicas[p.targetReplica]
+		if !ok {
+			return errors.New("replica not found")
+		}
+	}
+
+	var replicasChanged []*milvuspb.ReplicaInfo
+
+	// generate ReplicaInfo to save to MetaKv
+	if sourceReplica != nil {
+		// remove node from replica node list
+		removeNodeFromReplica(sourceReplica, p.nodeID)
+		replicasChanged = append(replicasChanged, sourceReplica)
+	}
+	if targetReplica != nil {
+		// add node to replica
+		targetReplica.NodeIds = append(targetReplica.NodeIds, p.nodeID)
+		replicasChanged = append(replicasChanged, targetReplica)
+	}
+
+	// save to etcd first
+	if len(replicasChanged) > 0 {
+		data := make(map[string]string)
+
+		for _, info := range replicasChanged {
+			infoBytes, err := proto.Marshal(info)
+			if err != nil {
+				return err
+			}
+
+			key := fmt.Sprintf("%s/%d", ReplicaMetaPrefix, info.ReplicaID)
+			data[key] = string(infoBytes)
+		}
+		err := kv.MultiSave(data)
+		if err != nil {
+			return err
+		}
+	}
+
+	// apply change to in-memory meta
+	if sourceReplica != nil {
+		rep.upsert(sourceReplica)
+	}
+
+	if targetReplica != nil {
+		rep.upsert(targetReplica)
+	}
+
+	return nil
+}
+
+// removeNodeFromReplica helper function to remove nodeID from replica NodeIds list.
+func removeNodeFromReplica(replica *milvuspb.ReplicaInfo, nodeID int64) *milvuspb.ReplicaInfo {
+	for i := 0; i < len(replica.NodeIds); i++ {
+		if replica.NodeIds[i] != nodeID {
+			continue
+		}
+		replica.NodeIds = append(replica.NodeIds[:i], replica.NodeIds[i+1:]...)
+		return replica
+	}
+	return replica
 }
