@@ -31,6 +31,8 @@ class DataErrorType:
     int_on_float_scalar = "int_on_float_scalar"
     float_on_int_pk = "float_on_int_pk"
     typo_on_bool = "typo_on_bool"
+    str_on_float_scalar = "str_on_float_scalar"
+    str_on_vector_field = "str_on_vector_field"
 
 
 def gen_file_prefix(row_based=True, auto_id=True, prefix=""):
@@ -62,11 +64,15 @@ def gen_float_vectors(nb, dim):
     return vectors.tolist()
 
 
+def gen_str_invalid_vectors(nb, dim):
+    vectors = [[str(gen_unique_str()) for _ in range(dim)] for _ in range(nb)]
+    return vectors
+
+
 def gen_binary_vectors(nb, dim):
     # binary: each int presents 8 dimension
     # so if binary vector dimension is 16，use [x, y], which x and y could be any int between 0 to 255
     vectors = [[random.randint(0, 255) for _ in range(dim)] for _ in range(nb)]
-    # vectors = preprocessing.normalize(vectors, axis=1, norm='l2')
     return vectors
 
 
@@ -75,7 +81,7 @@ def gen_row_based_json_file(row_file, str_pk, data_fields, float_vect,
 
     if err_type == DataErrorType.str_on_int_pk:
         str_pk = True
-    if err_type == DataErrorType.one_entity_wrong_dim:
+    if err_type in [DataErrorType.one_entity_wrong_dim, DataErrorType.str_on_vector_field]:
         wrong_dim = dim + 8     # add 8 to compatible with binary vectors
         wrong_row = kwargs.get("wrong_position", start_uid)
 
@@ -106,6 +112,8 @@ def gen_row_based_json_file(row_file, str_pk, data_fields, float_vect,
                 if data_field == DataField.float_field:
                     if err_type == DataErrorType.int_on_float_scalar:
                         f.write('"float_scalar":' + str(random.randint(-999999, 9999999)) + '')
+                    elif err_type == DataErrorType.str_on_float_scalar:
+                        f.write('"float_scalar":"' + str(gen_unique_str()) + '"')
                     else:
                         f.write('"float_scalar":' + str(random.random()) + '')
                 if data_field == DataField.string_field:
@@ -118,10 +126,12 @@ def gen_row_based_json_file(row_file, str_pk, data_fields, float_vect,
                 if data_field == DataField.vec_field:
                     # vector field
                     if err_type == DataErrorType.one_entity_wrong_dim and i == wrong_row:
-                        vectors = gen_float_vectors(1, wrong_dim) if float_vect else gen_binary_vectors(1, (wrong_dim // 8))
+                        vectors = gen_float_vectors(1, wrong_dim) if float_vect else gen_binary_vectors(1, (wrong_dim//8))
+                    elif err_type == DataErrorType.str_on_vector_field and i == wrong_row:
+                        vectors = gen_str_invalid_vectors(1, dim) if float_vect else gen_str_invalid_vectors(1, dim//8)
                     else:
                         vectors = gen_float_vectors(1, dim) if float_vect else gen_binary_vectors(1, (dim//8))
-                    f.write('"vectors":' + ",".join(str(x) for x in vectors) + '')
+                    f.write('"vectors":' + ",".join(str(x).replace("'", '"') for x in vectors) + '')
                 # not write common for the last field
                 if j != len(data_fields) - 1:
                     f.write(',')
@@ -164,6 +174,9 @@ def gen_column_base_json_file(col_file, str_pk, data_fields, float_vect,
                     if err_type == DataErrorType.int_on_float_scalar:
                         f.write('"float_scalar":[' + ",".join(
                             str(random.randint(-999999, 9999999)) for i in range(rows)) + "]")
+                    elif err_type == DataErrorType.str_on_float_scalar:
+                        f.write('"float_scalar":["' + ',"'.join(str(
+                            gen_unique_str()) + '"' for i in range(rows)) + ']')
                     else:
                         f.write('"float_scalar":[' + ",".join(
                             str(random.random()) for i in range(rows)) + "]")
@@ -188,17 +201,34 @@ def gen_column_base_json_file(col_file, str_pk, data_fields, float_vect,
                         if wrong_row <= 0:
                             vectors1 = []
                         else:
-                            vectors1 = gen_float_vectors(wrong_row, dim) if float_vect else gen_binary_vectors(wrong_row, (dim//8))
+                            vectors1 = gen_float_vectors(wrong_row, dim) if float_vect else \
+                                gen_binary_vectors(wrong_row, (dim//8))
                         if wrong_row >= rows -1:
                             vectors2 = []
                         else:
-                            vectors2 = gen_float_vectors(rows-wrong_row-1, dim) if float_vect else gen_binary_vectors(rows-wrong_row-1, (dim//8))
-
-                        vectors_wrong_dim = gen_float_vectors(1, wrong_dim) if float_vect else gen_binary_vectors(1, (wrong_dim//8))
+                            vectors2 = gen_float_vectors(rows-wrong_row-1, dim) if float_vect else\
+                                gen_binary_vectors(rows-wrong_row-1, (dim//8))
+                        vectors_wrong_dim = gen_float_vectors(1, wrong_dim) if float_vect else \
+                            gen_binary_vectors(1, (wrong_dim//8))
                         vectors = vectors1 + vectors_wrong_dim + vectors2
+                    elif err_type == DataErrorType.str_on_vector_field:
+                        wrong_row = kwargs.get("wrong_position", 0)
+                        if wrong_row <= 0:
+                            vectors1 = []
+                        else:
+                            vectors1 = gen_float_vectors(wrong_row, dim) if float_vect else \
+                                gen_binary_vectors(wrong_row, (dim//8))
+                        if wrong_row >= rows - 1:
+                            vectors2 = []
+                        else:
+                            vectors2 = gen_float_vectors(rows - wrong_row - 1, dim) if float_vect else \
+                                gen_binary_vectors(rows - wrong_row - 1, (dim // 8))
+                        invalid_str_vectors = gen_str_invalid_vectors(1, dim) if float_vect else \
+                            gen_str_invalid_vectors(1, (dim // 8))
+                        vectors = vectors1 + invalid_str_vectors + vectors2
                     else:
                         vectors = gen_float_vectors(rows, dim) if float_vect else gen_binary_vectors(rows, (dim//8))
-                    f.write('"vectors":[' + ",".join(str(x) for x in vectors) + "]")
+                    f.write('"vectors":[' + ",".join(str(x).replace("'", '"') for x in vectors) + "]")
                     f.write("\n")
                 if j != len(data_fields) - 1:
                     f.write(",")
@@ -435,3 +465,4 @@ def prepare_bulk_load_numpy_files(rows, dim, data_fields=[DataField.vec_field],
 
     copy_files_to_minio(host=minio, r_source=data_source, files=files, bucket_name=bucket_name, force=force)
     return files
+
