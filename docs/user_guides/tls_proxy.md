@@ -1,29 +1,34 @@
 # How to enable use TLS proxy
 
-Milvus proxy uses TLS mutual authentication. 
+Milvus proxy uses TLS mutual authentication.
 
 
 
 ## How to create your own certificate.
 
-### 1. Make sure openssl is installed. 
+### 1. Prerequisites
+
+Make sure OpenSSL is installed. If you have not installed it, [build and install](https://github.com/openssl/openssl/blob/master/INSTALL.md) OpenSSL first.
+
 ```shell
 openssl version
 ```
+
 If openssl is not installed. It can be installed like this in Ubuntu.
+
 ```shell
 sudo apt install openssl
 ```
+
 ### 2. Create openssl.cnf and gen.sh
+
 ```shell
 mkdir cert && cd cert
 touch openssl.cnf gen.sh
 ```
-Copy the configuration below into the file. You can modify gen.ssh configurations.
 
-CommonName is a required configuration. The client needs to specify the server name when connecting. The server name is common name.
+Copy the following configurations to the ```openssl.cnf``` and ```gen.sh``` files.
 
-Other configurations can be filled in as required.
 <details><summary><code>openssl.cnf</code></summary>
 
 ```ini
@@ -397,38 +402,85 @@ Country="CN"
 State="Shanghai"
 Location="Shanghai"
 Organization="milvus"
-Organizational="milvus"
+OrganizationUnit="milvus"
 CommonName="localhost"
 
 echo "generate ca.key"
-openssl genrsa -out ca.key 2048
+openssl genpkey -algorithm RSA -out ca.key
 
 echo "generate ca.pem"
-openssl req -new -x509 -key ca.key -out ca.pem -days 3650 -subj "/C=$Country/ST=$State/L=$Location/O=$Organization/OU=$Organizational/CN=$CommonName"
+openssl req -new -x509 -key ca.key -out ca.pem -days 3650 -subj "/C=$Country/ST=$State/L=$Location/O=$Organization/OU=$OrganizationUnit/CN=$CommonName"
 
 echo "generate server SAN certificate"
 openssl genpkey -algorithm RSA -out server.key
-openssl req -new -nodes -key server.key -out server5.csr -days 3650 -subj "/C=$Country/O=$Organization/OU=$Organizational/CN=$CommonName" -config ./openssl.cnf -extensions v3_req
+openssl req -new -nodes -key server.key -out server.csr -days 3650 -subj "/C=$Country/O=$Organization/OU=$OrganizationUnit/CN=$CommonName" -config ./openssl.cnf -extensions v3_req
 openssl x509 -req -days 3650 -in server.csr -out server.pem -CA ca.pem -CAkey ca.key -CAcreateserial -extfile ./openssl.cnf -extensions v3_req
 
 echo "generate client SAN certificate"
 openssl genpkey -algorithm RSA -out client.key
-openssl req -new -nodes -key client.key -out client.csr -days 3650 -subj "/C=$Country/O=$Organization/OU=$Organizational/CN=$CommonName" -config ./openssl.cnf -extensions v3_req
+openssl req -new -nodes -key client.key -out client.csr -days 3650 -subj "/C=$Country/O=$Organization/OU=$OrganizationUnit/CN=$CommonName" -config ./openssl.cnf -extensions v3_req
 openssl x509 -req -days 3650 -in client.csr -out client.pem -CA ca.pem -CAkey ca.key -CAcreateserial -extfile ./openssl.cnf -extensions v3_req
 
 ```
 </details>
 
-### 3. Run gen.sh to create certificate.
+The ```openssl.cnf``` file is a default OpenSSL configuration file. See [manual page](https://www.openssl.org/docs/manmaster/man5/config.html) for more information. The ```gen.sh``` file generates relevant certificate files. You can modify the gen.sh file for different purposes such as changing the validity period of the certificate file, the length of the certificate key or the certificate file names.
+
+These variables in the ```gen.sh``` file are crucial to the process of creating a certificate signing request file. The first five variables are the basic signing information, including country, state, location, organization, organization unit. Caution is needed when configuring CommonName as it will be verified during client-server communication.
+
+### 3. Run gen.sh to generate certificate.
+
 ```shell
 chmod +x gen.sh
 ./gen.sh
 ```
-They will creat 9 files about ca.key, ca.pem, ca.srl, server.key, server.pem, server.csr, client.key, client.pem, client.csr.
 
-## Modify config
-Modify tlsEnabled to true and the file path in config/milvus.yaml.  
-Server need server.pem, server.key and ca.pem. Client need client.pem, client.key, ca.pem.
+Finally, the following nine files will be created: ca.key, ca.pem, ca.srl, server.key, server.pem, server.csr, client.key, client.pem, client.csr.
+
+### 4. Get the detail of generating certificate files
+
+The implementation of SSL or TSL mutual authentication involves a client, a server, and a certificate authority (CA). A CA is used to ensure that the certificate between a client and a server is legal.
+
+> Tips: Run ```man openssl``` or see [the openssl manual page](https://www.openssl.org/docs/) for more information about using the OpenSSL command.
+
+- Generate an RSA private key for the ca.
+
+```shell
+openssl genpkey -algorithm RSA -out ca.key
+```
+
+- Request to generate a CA certificate. You need to provide the basic information about the CA in this step. And you can get a ca.pem file , a CA certificate that can be used to generate client-server certificates. Choose the x509 option to skip the request and directly generate a self-signing certificate.
+
+```shell
+openssl req -new -x509 -key ca.key -out ca.pem -days 3650 -subj "/C=$Country/ST=$State/L=$Location/O=$Organization/OU=$Organizational/CN=$CommonName"
+```
+
+Generating a server certificate involves three steps and is similar to generating a client certificate.
+
+- Generate a server private key. You will get a ```server.key``` file.
+
+```shell
+openssl genpkey -algorithm RSA -out server.key
+```
+
+- Generate a certificate signing request file, and provide the required information about the server. After running the following command, you will get a ```server.csr``` file.
+
+```shell
+openssl req -new -nodes -key server.key -out server.csr -days 3650 -subj "/C=$Country/O=$Organization/OU=$Organizational/CN=$CommonName" -config ./openssl.cnf -extensions v3_req
+```
+
+- Open the ```server.csr```, the ```ca.key``` and the ```ca.pem``` files to sign the certificate. The ```CAcreateserial``` command option is used to create a CA serial number file if it does not exist. You will get ```aca.srl``` file after choosing this command option.
+
+```shell
+openssl x509 -req -days 3650 -in server.csr -out server.pem -CA ca.pem -CAkey ca.key -CAcreateserial -extfile ./openssl.cnf -extensions v3_req
+```
+
+## Modify Milvus Server config
+
+Modify tlsEnabled to true and the file path in config/milvus.yaml.
+
+The ```server.pem```, ```server.key```, and ```ca.pem``` files for the server need to be configured.
+
 ```yaml
 tls:
   serverPemPath: configs/cert/server.pem
@@ -441,6 +493,24 @@ common:
 ```
 
 
-## How does the client use tls to connect to milvus
+## Connect to the Milvus server with TLS
 
-Please refer to [example_tls.py](https://github.com/milvus-io/pymilvus/blob/master/examples/example_tls.py).
+You should note the file paths of ```client.pem```, ```client.key```, and ```ca.pem``` files for the client when using the Milvus SDK.
+
+The following example uses the Milvus Python SDK.
+
+```python3
+from pymilvus import connections
+
+_HOST = '127.0.0.1'
+_PORT = '19530'
+
+print(f"\nCreate connection...")
+connections.connect(host=_HOST, port=_PORT, secure=True, client_pem_path="cert/client.pem",
+                        client_key_path="cert/client.key",
+                        ca_pem_path="cert/ca.pem", server_name="localhost")
+print(f"\nList connections:")
+print(connections.list_connections())
+```
+
+If you want to know more details of this case, please refer to [example_tls.py](https://github.com/milvus-io/pymilvus/blob/master/examples/example_tls.py).
