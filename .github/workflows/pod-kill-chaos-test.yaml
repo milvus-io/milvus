@@ -217,7 +217,7 @@ jobs:
           bash ../../scripts/export_log_k8s.sh chaos-testing chaos-daemon k8s_logs/chaos-mesh-daemon
       
       - name: Upload logs
-        if: ${{ always() }}
+        if: ${{ failure() }}
         uses: actions/upload-artifact@v2
         with:
           name: logs-${{ matrix.pod }}
