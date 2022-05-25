@@ -216,15 +216,7 @@ func (m *MetaCache) GetCollectionInfo(ctx context.Context, collectionName string
 	}
 
 	metrics.ProxyCacheHitCounter.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), "GetCollectionInfo", metrics.CacheHitLabel).Inc()
-	return &collectionInfo{
-		collID:              collInfo.collID,
-		schema:              collInfo.schema,
-		partInfo:            collInfo.partInfo,
-		createdTimestamp:    collInfo.createdTimestamp,
-		createdUtcTimestamp: collInfo.createdUtcTimestamp,
-		shardLeaders:        collInfo.shardLeaders,
-		isLoaded:            collInfo.isLoaded,
-	}, nil
+	return collInfo, nil
 }
 
 func (m *MetaCache) GetCollectionSchema(ctx context.Context, collectionName string) (*schemapb.CollectionSchema, error) {
