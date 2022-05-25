@@ -11,11 +11,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/util/mock"
+
 	"go.uber.org/zap"
 )
 
 func TestUpdateShardsWithRoundRobin(t *testing.T) {
-	list := map[string][]queryNode{
+	list := map[string][]nodeInfo{
 		"channel-1": {
 			{1, "addr1"},
 			{2, "addr2"},
@@ -34,7 +36,7 @@ func TestUpdateShardsWithRoundRobin(t *testing.T) {
 	assert.Equal(t, "addr21", list["channel-2"][0].address)
 
 	t.Run("check print", func(t *testing.T) {
-		qns := []queryNode{
+		qns := []nodeInfo{
 			{1, "addr1"},
 			{2, "addr2"},
 			{20, "addr20"},
@@ -54,10 +56,16 @@ func TestUpdateShardsWithRoundRobin(t *testing.T) {
 
 func TestRoundRobinPolicy(t *testing.T) {
 	var (
-		getQueryNodePolicy = mockGetQueryNodePolicy
-		ctx                = context.TODO()
+		ctx = context.TODO()
 	)
 
+	mockCreator := func(ctx context.Context, addr string) (types.QueryNode, error) {
+		return &mock.QueryNodeClient{}, nil
+	}
+
+	mgr := newShardClientMgr(withShardClientCreator(mockCreator))
+	dummyLeaders := genShardLeaderInfo("c1", []UniqueID{-1, 1, 2, 3})
+	mgr.UpdateShardLeaders(nil, dummyLeaders)
 	t.Run("All fails", func(t *testing.T) {
 		allFailTests := []struct {
 			leaderIDs []UniqueID
@@ -73,13 +81,13 @@ func TestRoundRobinPolicy(t *testing.T) {
 			t.Run(test.description, func(t *testing.T) {
 				query := (&mockQuery{isvalid: false}).query
 
-				leaders := make([]queryNode, 0, len(test.leaderIDs))
+				leaders := make([]nodeInfo, 0, len(test.leaderIDs))
 				for _, ID := range test.leaderIDs {
-					leaders = append(leaders, queryNode{ID, "random-addr"})
+					leaders = append(leaders, nodeInfo{ID, "random-addr"})
 
 				}
 
-				err := roundRobinPolicy(ctx, getQueryNodePolicy, query, leaders)
+				err := roundRobinPolicy(ctx, mgr, query, leaders)
 				require.Error(t, err)
 			})
 		}
@@ -98,12 +106,12 @@ func TestRoundRobinPolicy(t *testing.T) {
 
 		for _, test := range allPassTests {
 			query := (&mockQuery{isvalid: true}).query
-			leaders := make([]queryNode, 0, len(test.leaderIDs))
+			leaders := make([]nodeInfo, 0, len(test.leaderIDs))
 			for _, ID := range test.leaderIDs {
-				leaders = append(leaders, queryNode{ID, "random-addr"})
+				leaders = append(leaders, nodeInfo{ID, "random-addr"})
 
 			}
-			err := roundRobinPolicy(ctx, getQueryNodePolicy, query, leaders)
+			err := roundRobinPolicy(ctx, mgr, query, leaders)
 			require.NoError(t, err)
 		}
 	})
@@ -120,18 +128,18 @@ func TestRoundRobinPolicy(t *testing.T) {
 
 		for _, test := range passAtLast {
 			query := (&mockQuery{isvalid: true}).query
-			leaders := make([]queryNode, 0, len(test.leaderIDs))
+			leaders := make([]nodeInfo, 0, len(test.leaderIDs))
 			for _, ID := range test.leaderIDs {
-				leaders = append(leaders, queryNode{ID, "random-addr"})
+				leaders = append(leaders, nodeInfo{ID, "random-addr"})
 
 			}
-			err := roundRobinPolicy(ctx, getQueryNodePolicy, query, leaders)
+			err := roundRobinPolicy(ctx, mgr, query, leaders)
 			require.NoError(t, err)
 		}
 	})
 }
 
-func mockGetQueryNodePolicy(ctx context.Context, address string) (types.QueryNode, error) {
+func mockQueryNodeCreator(ctx context.Context, address string) (types.QueryNode, error) {
 	return &QueryNodeMock{address: address}, nil
 }
 

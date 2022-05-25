@@ -55,7 +55,7 @@ type Cache interface {
 	GetPartitionInfo(ctx context.Context, collectionName string, partitionName string) (*partitionInfo, error)
 	// GetCollectionSchema get collection's schema.
 	GetCollectionSchema(ctx context.Context, collectionName string) (*schemapb.CollectionSchema, error)
-	GetShards(ctx context.Context, withCache bool, collectionName string, qc types.QueryCoord) (map[string][]queryNode, error)
+	GetShards(ctx context.Context, withCache bool, collectionName string) (map[string][]nodeInfo, error)
 	ClearShards(collectionName string)
 	RemoveCollection(ctx context.Context, collectionName string)
 	RemoveCollectionsByID(ctx context.Context, collectionID UniqueID)
@@ -73,7 +73,7 @@ type collectionInfo struct {
 	collID              typeutil.UniqueID
 	schema              *schemapb.CollectionSchema
 	partInfo            map[string]*partitionInfo
-	shardLeaders        map[string][]queryNode
+	shardLeaders        map[string][]nodeInfo
 	leaderMutex         sync.Mutex
 	createdTimestamp    uint64
 	createdUtcTimestamp uint64
@@ -82,10 +82,10 @@ type collectionInfo struct {
 
 // CloneShardLeaders returns a copy of shard leaders
 // leaderMutex shall be accuired before invoking this method
-func (c *collectionInfo) CloneShardLeaders() map[string][]queryNode {
-	m := make(map[string][]queryNode)
+func (c *collectionInfo) CloneShardLeaders() map[string][]nodeInfo {
+	m := make(map[string][]nodeInfo)
 	for channel, leaders := range c.shardLeaders {
-		l := make([]queryNode, len(leaders))
+		l := make([]nodeInfo, len(leaders))
 		copy(l, leaders)
 		m[channel] = l
 	}
@@ -111,15 +111,16 @@ type MetaCache struct {
 	credUsernameList []string                              // no need initialize when NewMetaCache
 	mu               sync.RWMutex
 	credMut          sync.RWMutex
+	shardMgr         *shardClientMgr
 }
 
 // globalMetaCache is singleton instance of Cache
 var globalMetaCache Cache
 
 // InitMetaCache initializes globalMetaCache
-func InitMetaCache(rootCoord types.RootCoord, queryCoord types.QueryCoord) error {
+func InitMetaCache(rootCoord types.RootCoord, queryCoord types.QueryCoord, shardMgr *shardClientMgr) error {
 	var err error
-	globalMetaCache, err = NewMetaCache(rootCoord, queryCoord)
+	globalMetaCache, err = NewMetaCache(rootCoord, queryCoord, shardMgr)
 	if err != nil {
 		return err
 	}
@@ -127,12 +128,13 @@ func InitMetaCache(rootCoord types.RootCoord, queryCoord types.QueryCoord) error
 }
 
 // NewMetaCache creates a MetaCache with provided RootCoord and QueryNode
-func NewMetaCache(rootCoord types.RootCoord, queryCoord types.QueryCoord) (*MetaCache, error) {
+func NewMetaCache(rootCoord types.RootCoord, queryCoord types.QueryCoord, shardMgr *shardClientMgr) (*MetaCache, error) {
 	return &MetaCache{
 		rootCoord:  rootCoord,
 		queryCoord: queryCoord,
 		collInfo:   map[string]*collectionInfo{},
 		credMap:    map[string]*internalpb.CredentialInfo{},
+		shardMgr:   shardMgr,
 	}, nil
 }
 
@@ -583,7 +585,7 @@ func (m *MetaCache) GetCredUsernames(ctx context.Context) ([]string, error) {
 }
 
 // GetShards update cache if withCache == false
-func (m *MetaCache) GetShards(ctx context.Context, withCache bool, collectionName string, qc types.QueryCoord) (map[string][]queryNode, error) {
+func (m *MetaCache) GetShards(ctx context.Context, withCache bool, collectionName string) (map[string][]nodeInfo, error) {
 	info, err := m.GetCollectionInfo(ctx, collectionName)
 	if err != nil {
 		return nil, err
@@ -601,7 +603,6 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, collectionNam
 		log.Info("no shard cache for collection, try to get shard leaders from QueryCoord",
 			zap.String("collectionName", collectionName))
 	}
-
 	req := &querypb.GetShardLeadersRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:  commonpb.MsgType_GetShardLeaders,
@@ -615,7 +616,7 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, collectionNam
 	childCtx, cancel := context.WithTimeout(ctx, time.Second*10)
 	defer cancel()
 	err = retry.Do(childCtx, func() error {
-		resp, err = qc.GetShardLeaders(ctx, req)
+		resp, err = m.queryCoord.GetShardLeaders(ctx, req)
 		if err != nil {
 			return retry.Unrecoverable(err)
 		}
@@ -629,31 +630,38 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, collectionNam
 		return fmt.Errorf("fail to get shard leaders from QueryCoord: %s", resp.Status.Reason)
 	})
 	if err != nil {
-		return nil, fmt.Errorf("GetShardLeaders timeout, error: %s", err.Error())
+		return nil, err
+	}
+	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+		return nil, fmt.Errorf("fail to get shard leaders from QueryCoord: %s", resp.Status.Reason)
 	}
 
 	shards := parseShardLeaderList2QueryNode(resp.GetShards())
 
 	// manipulate info in map, get map returns a copy of the information
 	m.mu.RLock()
-	defer m.mu.RUnlock()
 	info = m.collInfo[collectionName]
 	// lock leader
 	info.leaderMutex.Lock()
-	defer info.leaderMutex.Unlock()
+	oldShards := info.shardLeaders
 	info.shardLeaders = shards
+	info.leaderMutex.Unlock()
+	m.mu.RUnlock()
 
-	return info.CloneShardLeaders(), nil
+	// update refcnt in shardClientMgr
+	ret := info.CloneShardLeaders()
+	_ = m.shardMgr.UpdateShardLeaders(oldShards, ret)
+	return ret, nil
 }
 
-func parseShardLeaderList2QueryNode(shardsLeaders []*querypb.ShardLeadersList) map[string][]queryNode {
-	shard2QueryNodes := make(map[string][]queryNode)
+func parseShardLeaderList2QueryNode(shardsLeaders []*querypb.ShardLeadersList) map[string][]nodeInfo {
+	shard2QueryNodes := make(map[string][]nodeInfo)
 
 	for _, leaders := range shardsLeaders {
-		qns := make([]queryNode, len(leaders.GetNodeIds()))
+		qns := make([]nodeInfo, len(leaders.GetNodeIds()))
 
 		for j := range qns {
-			qns[j] = queryNode{leaders.GetNodeIds()[j], leaders.GetNodeAddrs()[j]}
+			qns[j] = nodeInfo{leaders.GetNodeIds()[j], leaders.GetNodeAddrs()[j]}
 		}
 
 		shard2QueryNodes[leaders.GetChannelName()] = qns
@@ -666,12 +674,14 @@ func parseShardLeaderList2QueryNode(shardsLeaders []*querypb.ShardLeadersList) m
 func (m *MetaCache) ClearShards(collectionName string) {
 	log.Info("clearing shard cache for collection", zap.String("collectionName", collectionName))
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	_, ok := m.collInfo[collectionName]
-
-	if !ok {
-		return
+	//var ret map[string][]nodeInfo
+	info, ok := m.collInfo[collectionName]
+	if ok {
+		m.collInfo[collectionName].shardLeaders = nil
 	}
-
-	m.collInfo[collectionName].shardLeaders = nil
+	m.mu.Unlock()
+	// delete refcnt in shardClientMgr
+	if ok {
+		_ = m.shardMgr.UpdateShardLeaders(info.shardLeaders, nil)
+	}
 }

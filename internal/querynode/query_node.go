@@ -111,9 +111,8 @@ type QueryNode struct {
 	factory   dependency.Factory
 	scheduler *taskScheduler
 
-	session        *sessionutil.Session
-	eventCh        <-chan *sessionutil.SessionEvent
-	sessionManager *SessionManager
+	session *sessionutil.Session
+	eventCh <-chan *sessionutil.SessionEvent
 
 	vectorStorage storage.ChunkManager
 	cacheStorage  storage.ChunkManager
@@ -203,74 +202,6 @@ func (node *QueryNode) InitSegcore() {
 	C.SegcoreSetIndexSliceSize(cIndexSliceSize)
 }
 
-func (node *QueryNode) initServiceDiscovery() error {
-	if node.session == nil {
-		return errors.New("session is nil")
-	}
-
-	sessions, rev, err := node.session.GetSessions(typeutil.ProxyRole)
-	if err != nil {
-		log.Warn("QueryNode failed to init service discovery", zap.Error(err))
-		return err
-	}
-	log.Info("QueryNode success to get Proxy sessions", zap.Any("sessions", sessions))
-
-	nodes := make([]*NodeInfo, 0, len(sessions))
-	for _, session := range sessions {
-		info := &NodeInfo{
-			NodeID:  session.ServerID,
-			Address: session.Address,
-		}
-		nodes = append(nodes, info)
-	}
-
-	node.sessionManager.Startup(nodes)
-
-	node.eventCh = node.session.WatchServices(typeutil.ProxyRole, rev+1, nil)
-	return nil
-}
-
-func (node *QueryNode) watchService(ctx context.Context) {
-	defer node.wg.Done()
-	for {
-		select {
-		case <-ctx.Done():
-			log.Info("watch service shutdown")
-			return
-		case event, ok := <-node.eventCh:
-			if !ok {
-				// ErrCompacted is handled inside SessionWatcher
-				log.Error("Session Watcher channel closed", zap.Int64("server id", node.session.ServerID))
-				// need to call stop in separate goroutine
-				go node.Stop()
-				if node.session.TriggerKill {
-					if p, err := os.FindProcess(os.Getpid()); err == nil {
-						p.Signal(syscall.SIGINT)
-					}
-				}
-				return
-			}
-			node.handleSessionEvent(ctx, event)
-		}
-	}
-}
-
-func (node *QueryNode) handleSessionEvent(ctx context.Context, event *sessionutil.SessionEvent) {
-	info := &NodeInfo{
-		NodeID:  event.Session.ServerID,
-		Address: event.Session.Address,
-	}
-	switch event.EventType {
-	case sessionutil.SessionAddEvent:
-		node.sessionManager.AddSession(info)
-	case sessionutil.SessionDelEvent:
-		node.sessionManager.DeleteSession(info)
-	default:
-		log.Warn("receive unknown service event type",
-			zap.Any("type", event.EventType))
-	}
-}
-
 // Init function init historical and streaming module to manage segments
 func (node *QueryNode) Init() error {
 	var initError error = nil
@@ -315,9 +246,6 @@ func (node *QueryNode) Init() error {
 
 		node.InitSegcore()
 
-		// TODO: add session creator to node
-		node.sessionManager = NewSessionManager(withSessionCreator(defaultSessionCreator()))
-
 		log.Info("query node init successfully",
 			zap.Any("queryNodeID", Params.QueryNodeCfg.GetNodeID()),
 			zap.Any("IP", Params.QueryNodeCfg.QueryNodeIP),
@@ -336,14 +264,6 @@ func (node *QueryNode) Start() error {
 	// start services
 	go node.watchChangeInfo()
 	//go node.statsService.start()
-
-	// watch proxy
-	if err := node.initServiceDiscovery(); err != nil {
-		return err
-	}
-
-	node.wg.Add(1)
-	go node.watchService(node.queryNodeLoopCtx)
 
 	// create shardClusterService for shardLeader functions.
 	node.ShardClusterService = newShardClusterService(node.etcdCli, node.session, node)

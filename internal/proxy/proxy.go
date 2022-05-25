@@ -89,7 +89,8 @@ type Proxy struct {
 
 	metricsCacheManager *metricsinfo.MetricsCacheManager
 
-	session *sessionutil.Session
+	session  *sessionutil.Session
+	shardMgr *shardClientMgr
 
 	factory dependency.Factory
 
@@ -110,6 +111,7 @@ func NewProxy(ctx context.Context, factory dependency.Factory) (*Proxy, error) {
 		cancel:         cancel,
 		factory:        factory,
 		searchResultCh: make(chan *internalpb.SearchResults, n),
+		shardMgr:       newShardClientMgr(),
 	}
 	node.UpdateStateCode(internalpb.StateCode_Abnormal)
 	logutil.Logger(ctx).Debug("create a new Proxy instance", zap.Any("state", node.stateCode.Load()))
@@ -219,7 +221,7 @@ func (node *Proxy) Init() error {
 	log.Debug("create metrics cache manager done", zap.String("role", typeutil.ProxyRole))
 
 	log.Debug("init meta cache", zap.String("role", typeutil.ProxyRole))
-	if err := InitMetaCache(node.rootCoord, node.queryCoord); err != nil {
+	if err := InitMetaCache(node.rootCoord, node.queryCoord, node.shardMgr); err != nil {
 		log.Warn("failed to init meta cache", zap.Error(err), zap.String("role", typeutil.ProxyRole))
 		return err
 	}
@@ -377,6 +379,10 @@ func (node *Proxy) Stop() error {
 	}
 
 	node.session.Revoke(time.Second)
+
+	if node.shardMgr != nil {
+		node.shardMgr.Close()
+	}
 
 	// https://github.com/milvus-io/milvus/issues/12282
 	node.UpdateStateCode(internalpb.StateCode_Abnormal)

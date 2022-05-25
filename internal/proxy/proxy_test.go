@@ -3036,7 +3036,8 @@ func TestProxy_Import(t *testing.T) {
 	qc := NewQueryCoordMock()
 	qc.Start()
 	defer qc.Stop()
-	err := InitMetaCache(rc, qc)
+	shardMgr := newShardClientMgr()
+	err := InitMetaCache(rc, qc, shardMgr)
 	assert.NoError(t, err)
 	rc.CreateCollection(context.TODO(), &milvuspb.CreateCollectionRequest{
 		Base: &commonpb.MsgBase{

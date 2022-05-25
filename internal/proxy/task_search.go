@@ -50,17 +50,13 @@ type searchTask struct {
 	runningGroup    *errgroup.Group
 	runningGroupCtx context.Context
 
-	getQueryNodePolicy getQueryNodePolicy
-	searchShardPolicy  pickShardPolicy
+	searchShardPolicy pickShardPolicy
+	shardMgr          *shardClientMgr
 }
 
 func (t *searchTask) PreExecute(ctx context.Context) error {
 	sp, ctx := trace.StartSpanFromContextWithOperationName(t.TraceCtx(), "Proxy-Search-PreExecute")
 	defer sp.Finish()
-
-	if t.getQueryNodePolicy == nil {
-		t.getQueryNodePolicy = defaultGetQueryNodePolicy
-	}
 
 	if t.searchShardPolicy == nil {
 		t.searchShardPolicy = roundRobinPolicy
@@ -278,11 +274,10 @@ func (t *searchTask) Execute(ctx context.Context) error {
 	defer tr.Elapse("done")
 
 	executeSearch := func(withCache bool) error {
-		shard2Leaders, err := globalMetaCache.GetShards(ctx, withCache, t.collectionName, t.qc)
+		shard2Leaders, err := globalMetaCache.GetShards(ctx, withCache, t.collectionName)
 		if err != nil {
 			return err
 		}
-
 		t.resultBuf = make(chan *internalpb.SearchResults, len(shard2Leaders))
 		t.toReduceResults = make([]*internalpb.SearchResults, 0, len(shard2Leaders))
 		t.runningGroup, t.runningGroupCtx = errgroup.WithContext(ctx)
@@ -299,28 +294,23 @@ func (t *searchTask) Execute(ctx context.Context) error {
 					zap.String("shard channel", channelID),
 					zap.Uint64("timeoutTs", t.TimeoutTimestamp))
 
-				err := t.searchShard(t.runningGroupCtx, leaders, channelID)
-				if err != nil {
-					return err
-				}
-				return nil
+				return t.searchShard(t.runningGroupCtx, leaders, channelID)
 			})
 		}
-
 		err = t.runningGroup.Wait()
 		return err
 	}
 
 	err := executeSearch(WithCache)
-	if err == errInvalidShardLeaders {
-		log.Warn("invalid shard leaders from cache, updating shardleader caches and retry search")
+	if err == errInvalidShardLeaders || funcutil.IsGrpcErr(err) {
+		log.Warn("first search failed, updating shardleader caches and retry search", zap.Error(err))
 		return executeSearch(WithoutCache)
 	}
 	if err != nil {
-		return fmt.Errorf("fail to search on all shard leaders, err=%s", err.Error())
+		return fmt.Errorf("fail to search on all shard leaders, err=%w", err)
 	}
 
-	log.Info("Search Execute done.",
+	log.Debug("Search Execute done.",
 		zap.Any("requestID", t.Base.MsgID), zap.Any("requestType", "search"))
 	return nil
 }
@@ -415,7 +405,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-func (t *searchTask) searchShard(ctx context.Context, leaders []queryNode, channelID string) error {
+func (t *searchTask) searchShard(ctx context.Context, leaders []nodeInfo, channelID string) error {
 
 	search := func(nodeID UniqueID, qn types.QueryNode) error {
 		req := &querypb.SearchRequest{
@@ -423,9 +413,11 @@ func (t *searchTask) searchShard(ctx context.Context, leaders []queryNode, chann
 			DmlChannel: channelID,
 			Scope:      querypb.DataScope_All,
 		}
-
 		result, err := qn.Search(ctx, req)
-		if err != nil || result.GetStatus().GetErrorCode() == commonpb.ErrorCode_NotShardLeader {
+		if err != nil {
+			return err
+		}
+		if result.GetStatus().GetErrorCode() == commonpb.ErrorCode_NotShardLeader {
 			log.Warn("QueryNode search returns error", zap.Int64("nodeID", nodeID),
 				zap.Error(err))
 			return errInvalidShardLeaders
@@ -435,12 +427,11 @@ func (t *searchTask) searchShard(ctx context.Context, leaders []queryNode, chann
 				zap.String("reason", result.GetStatus().GetReason()))
 			return fmt.Errorf("fail to Search, QueryNode ID=%d, reason=%s", nodeID, result.GetStatus().GetReason())
 		}
-
 		t.resultBuf <- result
 		return nil
 	}
 
-	err := t.searchShardPolicy(t.TraceCtx(), t.getQueryNodePolicy, search, leaders)
+	err := t.searchShardPolicy(t.TraceCtx(), t.shardMgr, search, leaders)
 	if err != nil {
 		log.Warn("fail to search to all shard leaders", zap.Any("shard leaders", leaders))
 		return err

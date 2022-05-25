@@ -70,8 +70,9 @@ func TestGetIndexStateTask_Execute(t *testing.T) {
 		collectionID: collectionID,
 	}
 
+	shardMgr := newShardClientMgr()
 	// failed to get collection id.
-	_ = InitMetaCache(rootCoord, queryCoord)
+	_ = InitMetaCache(rootCoord, queryCoord, shardMgr)
 	assert.Error(t, gist.Execute(ctx))
 	rootCoord.DescribeCollectionFunc = func(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 		return &milvuspb.DescribeCollectionResponse{
