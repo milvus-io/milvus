@@ -8,6 +8,10 @@ image:
 
 etcd:
   replicaCount: 3
+  image:
+    repository: milvusdb/etcd
+    tag: 3.5.0-debian-10-r117
+
 minio:
   resources:
     requests:
@@ -24,7 +28,7 @@ pulsar:
   extra:
     bastion: no
     wsproxy: no
-  
+
   autorecovery:
     resources:
       requests:
@@ -45,7 +49,7 @@ pulsar:
         -Xms256m -Xmx256m
       PULSAR_GC: >
         -XX:MaxDirectMemorySize=512m
-      httpNumThreads: "50"      
+      httpNumThreads: "50"
 
   bookkeeper:
     replicaCount: 2
@@ -85,14 +89,14 @@ pulsar:
         -Xms512m
         -Xmx512m
       PULSAR_GC: >
-         -Dcom.sun.management.jmxremote
-         -Djute.maxbuffer=10485760
-         -XX:+ParallelRefProcEnabled
-         -XX:+UnlockExperimentalVMOptions
-         -XX:+DoEscapeAnalysis
-         -XX:+DisableExplicitGC
-         -XX:+PerfDisableSharedMem
-         -Dzookeeper.forceSync=no
+        -Dcom.sun.management.jmxremote
+        -Djute.maxbuffer=10485760
+        -XX:+ParallelRefProcEnabled
+        -XX:+UnlockExperimentalVMOptions
+        -XX:+DoEscapeAnalysis
+        -XX:+DisableExplicitGC
+        -XX:+PerfDisableSharedMem
+        -Dzookeeper.forceSync=no
   broker:
     replicaCount: 1
     resources:
