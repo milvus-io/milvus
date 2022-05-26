@@ -109,6 +109,12 @@ jobs:
           if [ ${{ matrix.task }} == "upgrade" ]; then
             python3 action_before_upgrade.py
           fi
+      - name: Milvus Idle Time
+        timeout-minutes: 5
+        shell: bash
+        working-directory: tests/python_client/deploy
+        run: |
+          sleep 60s
       - name: Export logs
         if: ${{ always() }}
         shell: bash
@@ -271,6 +277,12 @@ jobs:
           # first test
           if [ ${{ matrix.task }} == "reinstall" ]; then python scripts/action_before_reinstall.py; fi
           if [ ${{ matrix.task }} == "upgrade" ]; then python scripts/action_before_upgrade.py; fi
+      - name: Milvus Idle Time
+        timeout-minutes: 5
+        shell: bash
+        working-directory: tests/python_client/deploy
+        run: |
+          sleep 60s
       - name: Export logs
         if: ${{ always() }}
         shell: bash
