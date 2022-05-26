@@ -110,7 +110,11 @@ TEST(Sealed, without_predicate) {
     load_info.index = indexing;
     load_info.index_params["metric_type"] = "L2";
 
-    auto sealed_segment = SealedCreator(schema, dataset, load_info);
+    // load index for vec field, load raw data for scalar filed
+    auto sealed_segment = SealedCreator(schema, dataset);
+    sealed_segment->DropFieldData(fake_id);
+    sealed_segment->LoadIndex(load_info);
+
     sr = sealed_segment->Search(plan.get(), *ph_group, time);
 
     auto post_result = SearchResultToJson(*sr);
@@ -202,7 +206,11 @@ TEST(Sealed, with_predicate) {
     load_info.index = indexing;
     load_info.index_params["metric_type"] = "L2";
 
-    auto sealed_segment = SealedCreator(schema, dataset, load_info);
+    // load index for vec field, load raw data for scalar filed
+    auto sealed_segment = SealedCreator(schema, dataset);
+    sealed_segment->DropFieldData(fake_id);
+    sealed_segment->LoadIndex(load_info);
+
     sr = sealed_segment->Search(plan.get(), *ph_group, time);
 
     for (int i = 0; i < num_queries; ++i) {
@@ -229,7 +237,7 @@ TEST(Sealed, LoadFieldData) {
 
     auto fakevec = dataset.get_col<float>(fakevec_id);
 
-    auto indexing = GenIndexing(N, dim, fakevec.data());
+    auto indexing = GenVecIndexing(N, dim, fakevec.data());
 
     auto segment = CreateSealedSegment(schema);
     std::string dsl = R"({
@@ -268,7 +276,7 @@ TEST(Sealed, LoadFieldData) {
 
     ASSERT_ANY_THROW(segment->Search(plan.get(), *ph_group, time));
 
-    SealedLoader(dataset, *segment);
+    SealedLoadFieldData(dataset, *segment);
     segment->DropFieldData(nothing_id);
     segment->Search(plan.get(), *ph_group, time);
 
@@ -282,8 +290,8 @@ TEST(Sealed, LoadFieldData) {
     segment->LoadIndex(vec_info);
 
     ASSERT_EQ(segment->num_chunk(), 1);
-    ASSERT_EQ(segment->num_chunk_index(double_id), 1);
-    ASSERT_EQ(segment->num_chunk_index(str_id), 1);
+    ASSERT_EQ(segment->num_chunk_index(double_id), 0);
+    ASSERT_EQ(segment->num_chunk_index(str_id), 0);
     auto chunk_span1 = segment->chunk_data<int64_t>(counter_id, 0);
     auto chunk_span2 = segment->chunk_data<double>(double_id, 0);
     auto chunk_span3 = segment->chunk_data<std::string>(str_id, 0);
@@ -349,7 +357,7 @@ TEST(Sealed, LoadScalarIndex) {
 
     auto fakevec = dataset.get_col<float>(fakevec_id);
 
-    auto indexing = GenIndexing(N, dim, fakevec.data());
+    auto indexing = GenVecIndexing(N, dim, fakevec.data());
 
     auto segment = CreateSealedSegment(schema);
     std::string dsl = R"({
@@ -386,7 +394,21 @@ TEST(Sealed, LoadScalarIndex) {
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
     auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
-    SealedLoader(dataset, *segment);
+    LoadFieldDataInfo row_id_info;
+    FieldMeta row_id_field_meta(FieldName("RowID"), RowFieldID, DataType::INT64);
+    auto array = CreateScalarDataArrayFrom(dataset.row_ids_.data(), N, row_id_field_meta);
+    row_id_info.field_data = array.release();
+    row_id_info.row_count = dataset.row_ids_.size();
+    row_id_info.field_id = RowFieldID.get();  // field id for RowId
+    segment->LoadFieldData(row_id_info);
+
+    LoadFieldDataInfo ts_info;
+    FieldMeta ts_field_meta(FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
+    array = CreateScalarDataArrayFrom(dataset.timestamps_.data(), N, ts_field_meta);
+    ts_info.field_data = array.release();
+    ts_info.row_count = dataset.timestamps_.size();
+    ts_info.field_id = TimestampFieldID.get();
+    segment->LoadFieldData(ts_info);
 
     LoadIndexInfo vec_info;
     vec_info.field_id = fakevec_id.get();
@@ -477,7 +499,7 @@ TEST(Sealed, Delete) {
 
     ASSERT_ANY_THROW(segment->Search(plan.get(), *ph_group, time));
 
-    SealedLoader(dataset, *segment);
+    SealedLoadFieldData(dataset, *segment);
 
     int64_t row_count = 5;
     std::vector<idx_t> pks{1, 2, 3, 4, 5};

@@ -97,6 +97,13 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return indexing_record_.get_finished_ack();
     }
 
+    // count of chunk that has raw data
+    int64_t
+    num_chunk_data(FieldId field_id) const final {
+        auto size = get_insert_record().ack_responder_.GetAck();
+        return upper_div(size, segcore_config_.get_chunk_rows());
+    }
+
     // deprecated
     const knowhere::Index*
     chunk_index_impl(FieldId field_id, int64_t chunk_id) const final {

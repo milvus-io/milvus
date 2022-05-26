@@ -38,6 +38,9 @@ class ScalarIndex : public IndexBase {
     virtual const TargetBitmapPtr
     Range(T lower_bound_value, bool lb_inclusive, T upper_bound_value, bool ub_inclusive) = 0;
 
+    virtual T
+    Reverse_Lookup(size_t offset) const = 0;
+
     const TargetBitmapPtr
     Query(const DatasetPtr& dataset) override;
 };

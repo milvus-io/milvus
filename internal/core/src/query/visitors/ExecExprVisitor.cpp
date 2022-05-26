@@ -179,16 +179,25 @@ ExecExprVisitor::ExecRangeVisitorImpl(FieldId field_id, IndexFunc index_func, El
     return final_result;
 }
 
-template <typename T, typename ElementFunc>
+template <typename T, typename IndexFunc, typename ElementFunc>
 auto
-ExecExprVisitor::ExecDataRangeVisitorImpl(FieldId field_id, ElementFunc element_func) -> BitsetType {
+ExecExprVisitor::ExecDataRangeVisitorImpl(FieldId field_id, IndexFunc index_func, ElementFunc element_func)
+    -> BitsetType {
     auto& schema = segment_.get_schema();
     auto& field_meta = schema[field_id];
     auto size_per_chunk = segment_.size_per_chunk();
     auto num_chunk = upper_div(row_count_, size_per_chunk);
+    auto indexing_barrier = segment_.num_chunk_index(field_id);
+    auto data_barrier = segment_.num_chunk_data(field_id);
+    AssertInfo(std::max(data_barrier, indexing_barrier) == num_chunk,
+               "max(data_barrier, index_barrier) not equal to num_chunk");
     std::deque<BitsetType> results;
 
-    for (auto chunk_id = 0; chunk_id < num_chunk; ++chunk_id) {
+    // for growing segment, indexing_barrier will always less than data_barrier
+    // so growing segment will always execute expr plan using raw data
+    // if sealed segment has loaded raw data on this field, then index_barrier = 0 and data_barrier = 1
+    // in this case, sealed segment execute expr plan using raw data
+    for (auto chunk_id = 0; chunk_id < data_barrier; ++chunk_id) {
         auto this_size = chunk_id == num_chunk - 1 ? row_count_ - chunk_id * size_per_chunk : size_per_chunk;
         BitsetType result(this_size);
         auto chunk = segment_.chunk_data<T>(field_id, chunk_id);
@@ -199,6 +208,20 @@ ExecExprVisitor::ExecDataRangeVisitorImpl(FieldId field_id, ElementFunc element_
         AssertInfo(result.size() == this_size, "[ExecExprVisitor]Chunk result size not equal to expected size");
         results.emplace_back(std::move(result));
     }
+
+    // if sealed segment has loaded scalar index for this field, then index_barrier = 1 and data_barrier = 0
+    // in this case, sealed segment execute expr plan using scalar index
+    using Index = scalar::ScalarIndex<T>;
+    for (auto chunk_id = data_barrier; chunk_id < indexing_barrier; ++chunk_id) {
+        auto& indexing = segment_.chunk_scalar_index<T>(field_id, chunk_id);
+        auto this_size = const_cast<Index*>(&indexing)->Count();
+        BitsetType result(this_size);
+        for (int offset = 0; offset < this_size; ++offset) {
+            result[offset] = index_func(const_cast<Index*>(&indexing), offset);
+        }
+        results.emplace_back(std::move(result));
+    }
+
     auto final_result = Assemble(results);
     AssertInfo(final_result.size() == row_count_, "[ExecExprVisitor]Final result size not equal to row count");
     return final_result;
@@ -278,26 +301,46 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcher(BinaryArithOpEvalRa
         case OpType::Equal: {
             switch (arith_op) {
                 case ArithOpType::Add: {
+                    auto index_func = [val, right_operand](Index* index, size_t offset) {
+                        auto x = index->Reverse_Lookup(offset);
+                        return (x + right_operand) == val;
+                    };
                     auto elem_func = [val, right_operand](T x) { return ((x + right_operand) == val); };
-                    return ExecDataRangeVisitorImpl<T>(expr.field_id_, elem_func);
+                    return ExecDataRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
                 }
                 case ArithOpType::Sub: {
+                    auto index_func = [val, right_operand](Index* index, size_t offset) {
+                        auto x = index->Reverse_Lookup(offset);
+                        return (x - right_operand) == val;
+                    };
                     auto elem_func = [val, right_operand](T x) { return ((x - right_operand) == val); };
-                    return ExecDataRangeVisitorImpl<T>(expr.field_id_, elem_func);
+                    return ExecDataRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
                 }
                 case ArithOpType::Mul: {
+                    auto index_func = [val, right_operand](Index* index, size_t offset) {
+                        auto x = index->Reverse_Lookup(offset);
+                        return (x * right_operand) == val;
+                    };
                     auto elem_func = [val, right_operand](T x) { return ((x * right_operand) == val); };
-                    return ExecDataRangeVisitorImpl<T>(expr.field_id_, elem_func);
+                    return ExecDataRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
                 }
                 case ArithOpType::Div: {
+                    auto index_func = [val, right_operand](Index* index, size_t offset) {
+                        auto x = index->Reverse_Lookup(offset);
+                        return (x / right_operand) == val;
+                    };
                     auto elem_func = [val, right_operand](T x) { return ((x / right_operand) == val); };
-                    return ExecDataRangeVisitorImpl<T>(expr.field_id_, elem_func);
+                    return ExecDataRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
                 }
                 case ArithOpType::Mod: {
+                    auto index_func = [val, right_operand](Index* index, size_t offset) {
+                        auto x = index->Reverse_Lookup(offset);
+                        return static_cast<T>(fmod(x, right_operand)) == val;
+                    };
                     auto elem_func = [val, right_operand](T x) {
                         return (static_cast<T>(fmod(x, right_operand)) == val);
                     };
-                    return ExecDataRangeVisitorImpl<T>(expr.field_id_, elem_func);
+                    return ExecDataRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
                 }
                 default: {
                     PanicInfo("unsupported arithmetic operation");
@@ -307,26 +350,46 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcher(BinaryArithOpEvalRa
         case OpType::NotEqual: {
             switch (arith_op) {
                 case ArithOpType::Add: {
+                    auto index_func = [val, right_operand](Index* index, size_t offset) {
+                        auto x = index->Reverse_Lookup(offset);
+                        return (x + right_operand) != val;
+                    };
                     auto elem_func = [val, right_operand](T x) { return ((x + right_operand) != val); };
-                    return ExecDataRangeVisitorImpl<T>(expr.field_id_, elem_func);
+                    return ExecDataRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
                 }
                 case ArithOpType::Sub: {
+                    auto index_func = [val, right_operand](Index* index, size_t offset) {
+                        auto x = index->Reverse_Lookup(offset);
+                        return (x - right_operand) != val;
+                    };
                     auto elem_func = [val, right_operand](T x) { return ((x - right_operand) != val); };
-                    return ExecDataRangeVisitorImpl<T>(expr.field_id_, elem_func);
+                    return ExecDataRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
                 }
                 case ArithOpType::Mul: {
+                    auto index_func = [val, right_operand](Index* index, size_t offset) {
+                        auto x = index->Reverse_Lookup(offset);
+                        return (x * right_operand) != val;
+                    };
                     auto elem_func = [val, right_operand](T x) { return ((x * right_operand) != val); };
-                    return ExecDataRangeVisitorImpl<T>(expr.field_id_, elem_func);
+                    return ExecDataRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
                 }
                 case ArithOpType::Div: {
+                    auto index_func = [val, right_operand](Index* index, size_t offset) {
+                        auto x = index->Reverse_Lookup(offset);
+                        return (x / right_operand) != val;
+                    };
                     auto elem_func = [val, right_operand](T x) { return ((x / right_operand) != val); };
-                    return ExecDataRangeVisitorImpl<T>(expr.field_id_, elem_func);
+                    return ExecDataRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
                 }
                 case ArithOpType::Mod: {
+                    auto index_func = [val, right_operand](Index* index, size_t offset) {
+                        auto x = index->Reverse_Lookup(offset);
+                        return static_cast<T>(fmod(x, right_operand)) != val;
+                    };
                     auto elem_func = [val, right_operand](T x) {
                         return (static_cast<T>(fmod(x, right_operand)) != val);
                     };
-                    return ExecDataRangeVisitorImpl<T>(expr.field_id_, elem_func);
+                    return ExecDataRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
                 }
                 default: {
                     PanicInfo("unsupported arithmetic operation");
@@ -351,11 +414,7 @@ ExecExprVisitor::ExecBinaryRangeVisitorDispatcher(BinaryRangeExpr& expr_raw) -> 
     bool upper_inclusive = expr.upper_inclusive_;
     T val1 = expr.lower_value_;
     T val2 = expr.upper_value_;
-    // TODO: disable check?
-    if (val1 > val2 || (val1 == val2 && !(lower_inclusive && upper_inclusive))) {
-        BitsetType res(row_count_, false);
-        return res;
-    }
+
     auto index_func = [=](Index* index) { return index->Range(val1, lower_inclusive, val2, upper_inclusive); };
     if (lower_inclusive && upper_inclusive) {
         auto elem_func = [val1, val2](T x) { return (val1 <= x && x <= val2); };
@@ -524,48 +583,109 @@ ExecExprVisitor::ExecCompareExprDispatcher(CompareExpr& expr, Op op) -> BitsetTy
     auto size_per_chunk = segment_.size_per_chunk();
     auto num_chunk = upper_div(row_count_, size_per_chunk);
     std::deque<BitsetType> bitsets;
+
+    // check for sealed segment, load either raw field data or index
+    auto left_indexing_barrier = segment_.num_chunk_index(expr.left_field_id_);
+    auto left_data_barrier = segment_.num_chunk_data(expr.left_field_id_);
+    AssertInfo(std::max(left_data_barrier, left_indexing_barrier) == num_chunk,
+               "max(left_data_barrier, left_indexing_barrier) not equal to num_chunk");
+
+    auto right_indexing_barrier = segment_.num_chunk_index(expr.right_field_id_);
+    auto right_data_barrier = segment_.num_chunk_data(expr.right_field_id_);
+    AssertInfo(std::max(right_data_barrier, right_indexing_barrier) == num_chunk,
+               "max(right_data_barrier, right_indexing_barrier) not equal to num_chunk");
+
     for (int64_t chunk_id = 0; chunk_id < num_chunk; ++chunk_id) {
         auto size = chunk_id == num_chunk - 1 ? row_count_ - chunk_id * size_per_chunk : size_per_chunk;
-        auto getChunkData = [&, chunk_id](DataType type, FieldId field_id) -> std::function<const number(int)> {
+        auto getChunkData = [&, chunk_id](DataType type, FieldId field_id,
+                                          int64_t data_barrier) -> std::function<const number(int)> {
             switch (type) {
                 case DataType::BOOL: {
-                    auto chunk_data = segment_.chunk_data<bool>(field_id, chunk_id).data();
-                    return [chunk_data](int i) -> const number { return chunk_data[i]; };
+                    if (chunk_id < data_barrier) {
+                        auto chunk_data = segment_.chunk_data<bool>(field_id, chunk_id).data();
+                        return [chunk_data](int i) -> const number { return chunk_data[i]; };
+                    } else {
+                        // for case, sealed segment has loaded index for scalar field instead of raw data
+                        auto& indexing = segment_.chunk_scalar_index<bool>(field_id, chunk_id);
+                        return [&indexing](int i) -> const number { return indexing.Reverse_Lookup(i); };
+                    }
                 }
                 case DataType::INT8: {
-                    auto chunk_data = segment_.chunk_data<int8_t>(field_id, chunk_id).data();
-                    return [chunk_data](int i) -> const number { return chunk_data[i]; };
+                    if (chunk_id < data_barrier) {
+                        auto chunk_data = segment_.chunk_data<int8_t>(field_id, chunk_id).data();
+                        return [chunk_data](int i) -> const number { return chunk_data[i]; };
+                    } else {
+                        // for case, sealed segment has loaded index for scalar field instead of raw data
+                        auto& indexing = segment_.chunk_scalar_index<int8_t>(field_id, chunk_id);
+                        return [&indexing](int i) -> const number { return indexing.Reverse_Lookup(i); };
+                    }
                 }
                 case DataType::INT16: {
-                    auto chunk_data = segment_.chunk_data<int16_t>(field_id, chunk_id).data();
-                    return [chunk_data](int i) -> const number { return chunk_data[i]; };
+                    if (chunk_id < data_barrier) {
+                        auto chunk_data = segment_.chunk_data<int16_t>(field_id, chunk_id).data();
+                        return [chunk_data](int i) -> const number { return chunk_data[i]; };
+                    } else {
+                        // for case, sealed segment has loaded index for scalar field instead of raw data
+                        auto& indexing = segment_.chunk_scalar_index<int16_t>(field_id, chunk_id);
+                        return [&indexing](int i) -> const number { return indexing.Reverse_Lookup(i); };
+                    }
                 }
                 case DataType::INT32: {
-                    auto chunk_data = segment_.chunk_data<int32_t>(field_id, chunk_id).data();
-                    return [chunk_data](int i) -> const number { return chunk_data[i]; };
+                    if (chunk_id < data_barrier) {
+                        auto chunk_data = segment_.chunk_data<int32_t>(field_id, chunk_id).data();
+                        return [chunk_data](int i) -> const number { return chunk_data[i]; };
+                    } else {
+                        // for case, sealed segment has loaded index for scalar field instead of raw data
+                        auto& indexing = segment_.chunk_scalar_index<int32_t>(field_id, chunk_id);
+                        return [&indexing](int i) -> const number { return indexing.Reverse_Lookup(i); };
+                    }
                 }
                 case DataType::INT64: {
-                    auto chunk_data = segment_.chunk_data<int64_t>(field_id, chunk_id).data();
-                    return [chunk_data](int i) -> const number { return chunk_data[i]; };
+                    if (chunk_id < data_barrier) {
+                        auto chunk_data = segment_.chunk_data<int64_t>(field_id, chunk_id).data();
+                        return [chunk_data](int i) -> const number { return chunk_data[i]; };
+                    } else {
+                        // for case, sealed segment has loaded index for scalar field instead of raw data
+                        auto& indexing = segment_.chunk_scalar_index<int64_t>(field_id, chunk_id);
+                        return [&indexing](int i) -> const number { return indexing.Reverse_Lookup(i); };
+                    }
                 }
                 case DataType::FLOAT: {
-                    auto chunk_data = segment_.chunk_data<float>(field_id, chunk_id).data();
-                    return [chunk_data](int i) -> const number { return chunk_data[i]; };
+                    if (chunk_id < data_barrier) {
+                        auto chunk_data = segment_.chunk_data<float>(field_id, chunk_id).data();
+                        return [chunk_data](int i) -> const number { return chunk_data[i]; };
+                    } else {
+                        // for case, sealed segment has loaded index for scalar field instead of raw data
+                        auto& indexing = segment_.chunk_scalar_index<float>(field_id, chunk_id);
+                        return [&indexing](int i) -> const number { return indexing.Reverse_Lookup(i); };
+                    }
                 }
                 case DataType::DOUBLE: {
-                    auto chunk_data = segment_.chunk_data<double>(field_id, chunk_id).data();
-                    return [chunk_data](int i) -> const number { return chunk_data[i]; };
+                    if (chunk_id < data_barrier) {
+                        auto chunk_data = segment_.chunk_data<double>(field_id, chunk_id).data();
+                        return [chunk_data](int i) -> const number { return chunk_data[i]; };
+                    } else {
+                        // for case, sealed segment has loaded index for scalar field instead of raw data
+                        auto& indexing = segment_.chunk_scalar_index<double>(field_id, chunk_id);
+                        return [&indexing](int i) -> const number { return indexing.Reverse_Lookup(i); };
+                    }
                 }
                 case DataType::VARCHAR: {
-                    auto chunk_data = segment_.chunk_data<std::string>(field_id, chunk_id).data();
-                    return [chunk_data](int i) -> const number { return chunk_data[i]; };
+                    if (chunk_id < data_barrier) {
+                        auto chunk_data = segment_.chunk_data<std::string>(field_id, chunk_id).data();
+                        return [chunk_data](int i) -> const number { return chunk_data[i]; };
+                    } else {
+                        // for case, sealed segment has loaded index for scalar field instead of raw data
+                        auto& indexing = segment_.chunk_scalar_index<std::string>(field_id, chunk_id);
+                        return [&indexing](int i) -> const number { return indexing.Reverse_Lookup(i); };
+                    }
                 }
                 default:
                     PanicInfo("unsupported datatype");
             }
         };
-        auto left = getChunkData(expr.left_data_type_, expr.left_field_id_);
-        auto right = getChunkData(expr.right_data_type_, expr.right_field_id_);
+        auto left = getChunkData(expr.left_data_type_, expr.left_field_id_, left_data_barrier);
+        auto right = getChunkData(expr.right_data_type_, expr.right_field_id_, right_data_barrier);
 
         BitsetType bitset(size);
         for (int i = 0; i < size; ++i) {

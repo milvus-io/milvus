@@ -88,6 +88,18 @@ TYPED_TEST_P(TypedScalarIndexTest, NotIn) {
     }
 }
 
+TYPED_TEST_P(TypedScalarIndexTest, Reverse) {
+    using T = TypeParam;
+    auto dtype = milvus::GetDType<T>();
+    auto index_types = GetIndexTypes<T>();
+    for (const auto& index_type : index_types) {
+        auto index = milvus::scalar::IndexFactory::GetInstance().CreateIndex<T>(index_type);
+        auto arr = GenArr<T>(nb);
+        index->Build(nb, arr.data());
+        assert_reverse<T>(index, arr);
+    }
+}
+
 TYPED_TEST_P(TypedScalarIndexTest, Range) {
     using T = TypeParam;
     auto dtype = milvus::GetDType<T>();
@@ -123,6 +135,6 @@ TYPED_TEST_P(TypedScalarIndexTest, Codec) {
 // TODO: it's easy to overflow for int8_t. Design more reasonable ut.
 using ScalarT = ::testing::Types<int8_t, int16_t, int32_t, int64_t, float, double>;
 
-REGISTER_TYPED_TEST_CASE_P(TypedScalarIndexTest, Dummy, Constructor, Count, In, NotIn, Range, Codec);
+REGISTER_TYPED_TEST_CASE_P(TypedScalarIndexTest, Dummy, Constructor, Count, In, NotIn, Range, Codec, Reverse);
 
 INSTANTIATE_TYPED_TEST_CASE_P(ArithmeticCheck, TypedScalarIndexTest, ScalarT);

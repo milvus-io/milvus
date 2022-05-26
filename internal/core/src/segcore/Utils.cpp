@@ -9,7 +9,8 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include "Utils.h"
+#include "segcore/Utils.h"
+#include "index/ScalarIndex.h"
 
 namespace milvus::segcore {
 
@@ -250,6 +251,115 @@ MergeDataArray(std::vector<std::pair<milvus::SearchResult*, int64_t>>& result_of
             default: {
                 PanicInfo("unsupported datatype");
             }
+        }
+    }
+
+    return data_array;
+}
+
+// TODO: split scalar IndexBase with knowhere::Index
+std::unique_ptr<DataArray>
+ReverseDataFromIndex(const knowhere::Index* index,
+                     const int64_t* seg_offsets,
+                     int64_t count,
+                     const FieldMeta& field_meta) {
+    auto data_type = field_meta.get_data_type();
+    auto data_array = std::make_unique<DataArray>();
+    data_array->set_field_id(field_meta.get_id().get());
+    data_array->set_type(milvus::proto::schema::DataType(field_meta.get_data_type()));
+
+    auto scalar_array = data_array->mutable_scalars();
+    switch (data_type) {
+        case DataType::BOOL: {
+            using IndexType = scalar::ScalarIndex<bool>;
+            auto ptr = dynamic_cast<const IndexType*>(index);
+            std::vector<bool> raw_data(count);
+            for (int64_t i = 0; i < count; ++i) {
+                raw_data[i] = ptr->Reverse_Lookup(seg_offsets[i]);
+            }
+            auto obj = scalar_array->mutable_bool_data();
+            *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
+            break;
+        }
+        case DataType::INT8: {
+            using IndexType = scalar::ScalarIndex<int8_t>;
+            auto ptr = dynamic_cast<const IndexType*>(index);
+            std::vector<int8_t> raw_data(count);
+            for (int64_t i = 0; i < count; ++i) {
+                raw_data[i] = ptr->Reverse_Lookup(seg_offsets[i]);
+            }
+            auto obj = scalar_array->mutable_int_data();
+            *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
+            break;
+        }
+        case DataType::INT16: {
+            using IndexType = scalar::ScalarIndex<int16_t>;
+            auto ptr = dynamic_cast<const IndexType*>(index);
+            std::vector<int16_t> raw_data(count);
+            for (int64_t i = 0; i < count; ++i) {
+                raw_data[i] = ptr->Reverse_Lookup(seg_offsets[i]);
+            }
+            auto obj = scalar_array->mutable_int_data();
+            *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
+            break;
+        }
+        case DataType::INT32: {
+            using IndexType = scalar::ScalarIndex<int32_t>;
+            auto ptr = dynamic_cast<const IndexType*>(index);
+            std::vector<int32_t> raw_data(count);
+            for (int64_t i = 0; i < count; ++i) {
+                raw_data[i] = ptr->Reverse_Lookup(seg_offsets[i]);
+            }
+            auto obj = scalar_array->mutable_int_data();
+            *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
+            break;
+        }
+        case DataType::INT64: {
+            using IndexType = scalar::ScalarIndex<int64_t>;
+            auto ptr = dynamic_cast<const IndexType*>(index);
+            std::vector<int64_t> raw_data(count);
+            for (int64_t i = 0; i < count; ++i) {
+                raw_data[i] = ptr->Reverse_Lookup(seg_offsets[i]);
+            }
+            auto obj = scalar_array->mutable_long_data();
+            *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
+            break;
+        }
+        case DataType::FLOAT: {
+            using IndexType = scalar::ScalarIndex<float>;
+            auto ptr = dynamic_cast<const IndexType*>(index);
+            std::vector<float> raw_data(count);
+            for (int64_t i = 0; i < count; ++i) {
+                raw_data[i] = ptr->Reverse_Lookup(seg_offsets[i]);
+            }
+            auto obj = scalar_array->mutable_float_data();
+            *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
+            break;
+        }
+        case DataType::DOUBLE: {
+            using IndexType = scalar::ScalarIndex<double>;
+            auto ptr = dynamic_cast<const IndexType*>(index);
+            std::vector<double> raw_data(count);
+            for (int64_t i = 0; i < count; ++i) {
+                raw_data[i] = ptr->Reverse_Lookup(seg_offsets[i]);
+            }
+            auto obj = scalar_array->mutable_double_data();
+            *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
+            break;
+        }
+        case DataType::VARCHAR: {
+            using IndexType = scalar::ScalarIndex<std::string>;
+            auto ptr = dynamic_cast<const IndexType*>(index);
+            std::vector<std::string> raw_data(count);
+            for (int64_t i = 0; i < count; ++i) {
+                raw_data[i] = ptr->Reverse_Lookup(seg_offsets[i]);
+            }
+            auto obj = scalar_array->mutable_string_data();
+            *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
+            break;
+        }
+        default: {
+            PanicInfo("unsupported datatype");
         }
     }
 

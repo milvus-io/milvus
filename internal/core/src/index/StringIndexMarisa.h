@@ -58,6 +58,9 @@ class StringIndexMarisa : public StringIndex {
     const TargetBitmapPtr
     PrefixMatch(std::string prefix) override;
 
+    std::string
+    Reverse_Lookup(size_t offset) const override;
+
  private:
     void
     fill_str_ids(size_t n, const std::string* values);

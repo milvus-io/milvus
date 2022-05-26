@@ -15,9 +15,9 @@
 #include <memory>
 #include <utility>
 #include <vector>
+#include <string>
 #include "knowhere/common/Exception.h"
 #include "index/IndexStructure.h"
-#include <string>
 #include "index/ScalarIndex.h"
 
 namespace milvus::scalar {
@@ -60,6 +60,9 @@ class ScalarIndexSort : public ScalarIndex<T> {
     const TargetBitmapPtr
     Range(T lower_bound_value, bool lb_inclusive, T upper_bound_value, bool ub_inclusive) override;
 
+    T
+    Reverse_Lookup(size_t offset) const override;
+
  public:
     const std::vector<IndexStructure<T>>&
     GetData() {
@@ -78,6 +81,7 @@ class ScalarIndexSort : public ScalarIndex<T> {
 
  private:
     bool is_built_;
+    std::vector<size_t> idx_to_offsets_;  // used to retrieve.
     std::vector<IndexStructure<T>> data_;
 };
 

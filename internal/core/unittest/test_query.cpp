@@ -660,8 +660,8 @@ TEST(Query, FillSegment) {
     }());
     segments.emplace_back([&] {
         auto segment = CreateSealedSegment(schema);
-        SealedLoader(dataset, *segment);
-        // auto indexing = GenIndexing(N, dim, std_vfloat_vec.data());
+        SealedLoadFieldData(dataset, *segment);
+        // auto indexing = GenVecIndexing(N, dim, std_vfloat_vec.data());
 
         // LoadIndexInfo info;
         // auto field_offset = schema->get_offset(FieldName("fakevec"));
