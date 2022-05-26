@@ -232,6 +232,11 @@ func (ddn *ddNode) forwardDeleteMsg(msgs []msgstream.TsMsg, minTs Timestamp, max
 		}
 		if err := ddn.deltaMsgStream.Produce(&msgPack); err != nil {
 			return err
+		} else {
+			for _, msg := range msgs {
+				deleteMsg := msg.(*msgstream.DeleteMsg)
+				log.Debug("data node forward delete msg", zap.Any("info", deleteMsg.DeleteRequest))
+			}
 		}
 	}
 	if err := ddn.sendDeltaTimeTick(maxTs); err != nil {
