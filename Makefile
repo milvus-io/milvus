@@ -237,6 +237,9 @@ clean:
 	@rm -rf cmake_build
 	@rm -rf cwrapper_rocksdb_build
 	@rm -rf cwrapper_build
+	@rm -rf internal/storage/cwrapper/output
+	@rm -rf internal/core/output
+	@rm -rf internal/kv/rocksdb/cwrapper/output
 
 milvus-tools: print-build-info
 	@echo "Building tools ..."
