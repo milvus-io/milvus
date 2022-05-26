@@ -105,6 +105,7 @@ type Meta interface {
 	getReplicasByCollectionID(collectionID int64) ([]*milvuspb.ReplicaInfo, error)
 	getReplicasByNodeID(nodeID int64) ([]*milvuspb.ReplicaInfo, error)
 	applyReplicaBalancePlan(p *balancePlan) error
+	updateShardLeader(replicaID UniqueID, dmChannel string, leaderID UniqueID, leaderAddr string) error
 }
 
 // MetaReplica records the current load information on all querynodes
@@ -1286,6 +1287,10 @@ func (m *MetaReplica) getReplicasByCollectionID(collectionID int64) ([]*milvuspb
 // applyReplicaBalancePlan applies replica balance plan to replica info.
 func (m *MetaReplica) applyReplicaBalancePlan(p *balancePlan) error {
 	return m.replicas.ApplyBalancePlan(p, m.getKvClient())
+}
+
+func (m *MetaReplica) updateShardLeader(replicaID UniqueID, dmChannel string, leaderID UniqueID, leaderAddr string) error {
+	return m.replicas.UpdateShardLeader(replicaID, dmChannel, leaderID, leaderAddr, m.getKvClient())
 }
 
 //func (m *MetaReplica) printMeta() {

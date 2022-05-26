@@ -2405,50 +2405,36 @@ func (lbt *loadBalanceTask) globalPostExecute(ctx context.Context) error {
 		for _, childTask := range lbt.getChildTask() {
 			if task, ok := childTask.(*watchDmChannelTask); ok {
 				wg.Go(func() error {
-					nodeInfo, err := lbt.cluster.getNodeInfoByID(task.NodeID)
+					leaderID := task.NodeID
+					dmChannel := task.Infos[0].ChannelName
+
+					nodeInfo, err := lbt.cluster.getNodeInfoByID(leaderID)
 					if err != nil {
 						log.Error("failed to get node info to update shard leader info",
 							zap.Int64("triggerTaskID", lbt.getTaskID()),
 							zap.Int64("taskID", task.getTaskID()),
-							zap.Int64("nodeID", task.NodeID),
-							zap.String("dmChannel", task.Infos[0].ChannelName),
+							zap.Int64("nodeID", leaderID),
+							zap.String("dmChannel", dmChannel),
 							zap.Error(err))
 						return err
 					}
 
-					replica, err := lbt.meta.getReplicaByID(task.ReplicaID)
+					err = lbt.meta.updateShardLeader(task.ReplicaID, dmChannel, leaderID, nodeInfo.(*queryNode).address)
 					if err != nil {
-						log.Error("failed to get replica to update shard leader info",
+						log.Error("failed to update shard leader info of replica",
 							zap.Int64("triggerTaskID", lbt.getTaskID()),
 							zap.Int64("taskID", task.getTaskID()),
 							zap.Int64("replicaID", task.ReplicaID),
-							zap.String("dmChannel", task.Infos[0].ChannelName),
+							zap.String("dmChannel", dmChannel),
 							zap.Error(err))
 						return err
 					}
 
-					for _, shard := range replica.ShardReplicas {
-						if shard.DmChannelName == task.Infos[0].ChannelName {
-							log.Debug("LoadBalance: update shard leader",
-								zap.Int64("triggerTaskID", lbt.getTaskID()),
-								zap.Int64("taskID", task.getTaskID()),
-								zap.Int64("oldLeader", shard.LeaderID),
-								zap.Int64("newLeader", task.NodeID))
-							shard.LeaderID = task.NodeID
-							shard.LeaderAddr = nodeInfo.(*queryNode).address
-							break
-						}
-					}
-
-					err = lbt.meta.setReplicaInfo(replica)
-					if err != nil {
-						log.Error("failed to remove offline nodes from replica info",
-							zap.Int64("triggerTaskID", lbt.getTaskID()),
-							zap.Int64("taskID", task.getTaskID()),
-							zap.Int64("replicaID", replica.ReplicaID),
-							zap.Error(err))
-						return err
-					}
+					log.Debug("LoadBalance: update shard leader",
+						zap.Int64("triggerTaskID", lbt.getTaskID()),
+						zap.Int64("taskID", task.getTaskID()),
+						zap.String("dmChannel", dmChannel),
+						zap.Int64("leader", leaderID))
 
 					return nil
 				})
