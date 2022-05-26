@@ -178,8 +178,14 @@ func TestIndexCoord(t *testing.T) {
 			resp, err := ic.GetIndexStates(ctx, req)
 			assert.Nil(t, err)
 			assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-			if resp.States[0].State == commonpb.IndexState_Finished ||
-				resp.States[0].State == commonpb.IndexState_Failed {
+			isOver := true
+			for _, indexInfo := range resp.States {
+				if indexInfo.State != commonpb.IndexState_Finished &&
+					indexInfo.State != commonpb.IndexState_Failed {
+					isOver = false
+				}
+			}
+			if isOver {
 				break
 			}
 			time.Sleep(100 * time.Millisecond)
