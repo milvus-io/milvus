@@ -42,6 +42,21 @@ pipeline {
             defaultValue: 'master-latest'
         )
         string(
+            description: 'Etcd Image Repository',
+            name: 'etcd_image_repository',
+            defaultValue: "milvusdb/etcd"
+        )
+        string(
+            description: 'Etcd Image Tag',
+            name: 'etcd_image_tag',
+            defaultValue: "3.5.0-debian-10-r117"
+        )
+        string(
+            description: 'Query Replic Nums',
+            name: 'querynode_replica_nums',
+            defaultValue: '3'
+        )
+        string(
             description: 'Pod Nums',
             name: 'pod_nums',
             defaultValue: '1'
@@ -70,6 +85,24 @@ pipeline {
                     }
                 }
             }
+        }
+        stage ('Modify Milvus chart values') {
+            steps {
+                container('main') {
+                    dir ('tests/python_client/chaos') {
+                        script {
+                        sh """
+                        yq -i '.queryNode.replicas = "${params.querynode_replica_nums}"' cluster-values.yaml
+                        yq -i '.etcd.image.repository = "${params.etcd_image_repository}"' cluster-values.yaml
+                        yq -i '.etcd.image.tag = "${params.etcd_image_tag}"' cluster-values.yaml
+                        yq -i '.etcd.image.repository = "${params.etcd_image_repository}"' standalone-values.yaml
+                        yq -i '.etcd.image.tag = "${params.etcd_image_tag}"' standalone-values.yaml
+                        cat cluster-values.yaml
+                        """
+                        }
+                        }
+                    }
+                }
         }
         stage ('Deploy Milvus') {
             options {

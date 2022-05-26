@@ -8,6 +8,10 @@ image:
 
 etcd:
   replicaCount: 3
+  image:
+    repository: milvusdb/etcd
+    tag: 3.5.0-debian-10-r117  
+
 minio:
   resources:
     requests:
