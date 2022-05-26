@@ -1205,7 +1205,7 @@ func (qc *QueryCoord) GetShardLeaders(ctx context.Context, req *querypb.GetShard
 	if len(shardLeaderLists) == 0 {
 		return &querypb.GetShardLeadersResponse{
 			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				ErrorCode: commonpb.ErrorCode_NoReplicaAvailable,
 				Reason:    "no replica available",
 			},
 		}, nil

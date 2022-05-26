@@ -142,6 +142,7 @@ enum ErrorCode : int {
   GetCredentialFailure = 32,
   ListCredUsersFailure = 33,
   NotShardLeader = 34,
+  NoReplicaAvailable = 35,
   DDRequestRace = 1000,
   ErrorCode_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
   ErrorCode_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
