@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -35,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -607,12 +609,27 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, collectionNam
 		},
 		CollectionID: info.collID,
 	}
-	resp, err := qc.GetShardLeaders(ctx, req)
+
+	// retry until service available or context timeout
+	var resp *querypb.GetShardLeadersResponse
+	childCtx, cancel := context.WithTimeout(ctx, time.Second*10)
+	defer cancel()
+	err = retry.Do(childCtx, func() error {
+		resp, err = qc.GetShardLeaders(ctx, req)
+		if err != nil {
+			return retry.Unrecoverable(err)
+		}
+		if resp.Status.ErrorCode == commonpb.ErrorCode_Success {
+			return nil
+		}
+		// do not retry unless got NoReplicaAvailable from querycoord
+		if resp.Status.ErrorCode != commonpb.ErrorCode_NoReplicaAvailable {
+			return retry.Unrecoverable(fmt.Errorf("fail to get shard leaders from QueryCoord: %s", resp.Status.Reason))
+		}
+		return fmt.Errorf("fail to get shard leaders from QueryCoord: %s", resp.Status.Reason)
+	})
 	if err != nil {
-		return nil, err
-	}
-	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
-		return nil, fmt.Errorf("fail to get shard leaders from QueryCoord: %s", resp.Status.Reason)
+		return nil, fmt.Errorf("GetShardLeaders timeout, error: %s", err.Error())
 	}
 
 	shards := parseShardLeaderList2QueryNode(resp.GetShards())

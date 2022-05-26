@@ -43,6 +43,7 @@ enum ErrorCode {
     GetCredentialFailure = 32;
     ListCredUsersFailure = 33;
     NotShardLeader = 34;
+    NoReplicaAvailable = 35;
 
     // internal error code.
     DDRequestRace = 1000;

@@ -23,10 +23,11 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"go.uber.org/zap"
 
 	"github.com/stretchr/testify/assert"
 
@@ -1695,7 +1696,7 @@ func TestGetShardLeaders(t *testing.T) {
 	queryCoord.cluster = mockCluster
 	resp, err = queryCoord.GetShardLeaders(ctx, getShardLeadersReq)
 	assert.NoError(t, err)
-	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+	assert.Equal(t, commonpb.ErrorCode_NoReplicaAvailable, resp.Status.ErrorCode)
 
 	// TODO(yah01): Disable the unit test case for now,
 	// restore it after the rebalance between replicas feature is implemented
