@@ -9,10 +9,6 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include "index/StringIndexMarisa.h"
-#include "index/Utils.h"
-#include "index/Index.h"
-
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <boost/uuid/uuid_generators.hpp>
@@ -20,7 +16,11 @@
 #include <stdio.h>
 #include <fcntl.h>
 #include <knowhere/common/Utils.h>
-#include "exceptions/EasyAssert.h"
+
+#include "index/StringIndexMarisa.h"
+#include "index/Utils.h"
+#include "index/Index.h"
+#include "common/Utils.h"
 
 namespace milvus::scalar {
 
@@ -150,7 +150,35 @@ StringIndexMarisa::NotIn(size_t n, const std::string* values) {
 
 const TargetBitmapPtr
 StringIndexMarisa::Range(std::string value, OpType op) {
-    throw std::runtime_error("todo: unsupported now");
+    auto count = Count();
+    TargetBitmapPtr bitset = std::make_unique<TargetBitmap>(count);
+    marisa::Agent agent;
+    for (size_t offset = 0; offset < count; ++offset) {
+        agent.set_query(str_ids_[offset]);
+        trie_.reverse_lookup(agent);
+        std::string raw_data(agent.key().ptr(), agent.key().length());
+        bool set = false;
+        switch (op) {
+            case OpType::LessThan:
+                set = raw_data.compare(value) < 0;
+                break;
+            case OpType::LessEqual:
+                set = raw_data.compare(value) <= 0;
+                break;
+            case OpType::GreaterThan:
+                set = raw_data.compare(value) > 0;
+                break;
+            case OpType::GreaterEqual:
+                set = raw_data.compare(value) >= 0;
+                break;
+            default:
+                throw std::invalid_argument(std::string("Invalid OperatorType: ") + std::to_string((int)op) + "!");
+        }
+        if (set) {
+            bitset->set(offset);
+        }
+    }
+    return bitset;
 }
 
 const TargetBitmapPtr
@@ -158,7 +186,33 @@ StringIndexMarisa::Range(std::string lower_bound_value,
                          bool lb_inclusive,
                          std::string upper_bound_value,
                          bool ub_inclusive) {
-    throw std::runtime_error("todo: unsupported now");
+    auto count = Count();
+    TargetBitmapPtr bitset = std::make_unique<TargetBitmap>(count);
+    if (lower_bound_value.compare(upper_bound_value) > 0 ||
+        (lower_bound_value.compare(upper_bound_value) == 0 && !(lb_inclusive && ub_inclusive))) {
+        return bitset;
+    }
+    marisa::Agent agent;
+    for (size_t offset = 0; offset < count; ++offset) {
+        agent.set_query(str_ids_[offset]);
+        trie_.reverse_lookup(agent);
+        std::string raw_data(agent.key().ptr(), agent.key().length());
+        bool set = true;
+        if (lb_inclusive) {
+            set &= raw_data.compare(lower_bound_value) >= 0;
+        } else {
+            set &= raw_data.compare(lower_bound_value) > 0;
+        }
+        if (ub_inclusive) {
+            set &= raw_data.compare(upper_bound_value) <= 0;
+        } else {
+            set &= raw_data.compare(upper_bound_value) < 0;
+        }
+        if (set) {
+            bitset->set(offset);
+        }
+    }
+    return bitset;
 }
 
 const TargetBitmapPtr
@@ -213,6 +267,15 @@ StringIndexMarisa::prefix_match(const std::string& prefix) {
         ret.push_back(agent.key().id());
     }
     return ret;
+}
+
+std::string
+StringIndexMarisa::Reverse_Lookup(size_t offset) const {
+    AssertInfo(offset < str_ids_.size(), "out of range of total count");
+    marisa::Agent agent;
+    agent.set_query(str_ids_[offset]);
+    trie_.reverse_lookup(agent);
+    return std::string(agent.key().ptr(), agent.key().length());
 }
 
 #endif

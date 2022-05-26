@@ -17,9 +17,10 @@
 #include <vector>
 #include <stdexcept>
 #include <knowhere/common/MetricType.h>
+#include "knowhere/index/Index.h"
 #include "common/QueryResult.h"
-#include "DeletedRecord.h"
-#include "InsertRecord.h"
+#include "segcore/DeletedRecord.h"
+#include "segcore/InsertRecord.h"
 
 namespace milvus::segcore {
 
@@ -88,5 +89,11 @@ get_deleted_bitmap(int64_t del_barrier,
                    const InsertRecord& insert_record,
                    const Pk2OffsetType& pk2offset,
                    Timestamp query_timestamp);
+
+std::unique_ptr<DataArray>
+ReverseDataFromIndex(const knowhere::Index* index,
+                     const int64_t* seg_offsets,
+                     int64_t count,
+                     const FieldMeta& field_meta);
 
 }  // namespace milvus::segcore

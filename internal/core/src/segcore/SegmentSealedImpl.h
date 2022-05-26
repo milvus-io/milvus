@@ -64,6 +64,10 @@ class SegmentSealedImpl : public SegmentSealed {
     int64_t
     num_chunk_index(FieldId field_id) const override;
 
+    // count of chunk that has raw data
+    int64_t
+    num_chunk_data(FieldId field_id) const override;
+
     int64_t
     num_chunk() const override;
 
@@ -168,7 +172,7 @@ class SegmentSealedImpl : public SegmentSealed {
  private:
     // segment loading state
     BitsetType field_data_ready_bitset_;
-    BitsetType vecindex_ready_bitset_;
+    BitsetType index_ready_bitset_;
     std::atomic<int> system_ready_count_ = 0;
     // segment datas
 
@@ -188,7 +192,6 @@ class SegmentSealedImpl : public SegmentSealed {
 
     // pks to row offset
     Pk2OffsetType pk2offset_;
-    //    std::unique_ptr<ScalarIndexBase> primary_key_index_;
 
     SchemaPtr schema_;
     int64_t id_;

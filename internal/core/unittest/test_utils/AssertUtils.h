@@ -18,6 +18,20 @@
 using milvus::scalar::ScalarIndexPtr;
 
 namespace {
+
+bool
+compare_float(float x, float y, float epsilon = 0.000001f) {
+    if (fabs(x - y) < epsilon)
+        return true;
+    return false;
+}
+bool
+compare_double(double x, double y, double epsilon = 0.000001f) {
+    if (fabs(x - y) < epsilon)
+        return true;
+    return false;
+}
+
 template <typename T>
 inline void
 assert_in(const ScalarIndexPtr<T>& index, const std::vector<T>& arr) {
@@ -72,6 +86,38 @@ assert_range(const ScalarIndexPtr<T>& index, const std::vector<T>& arr) {
     auto bitset5 = index->Range(test_min, true, test_max, true);
     ASSERT_EQ(arr.size(), bitset5->size());
     ASSERT_TRUE(bitset5->any());
+}
+
+template <typename T>
+inline void
+assert_reverse(const ScalarIndexPtr<T>& index, const std::vector<T>& arr) {
+    for (size_t offset = 0; offset < arr.size(); ++offset) {
+        ASSERT_EQ(index->Reverse_Lookup(offset), arr[offset]);
+    }
+}
+
+template <>
+inline void
+assert_reverse(const ScalarIndexPtr<float>& index, const std::vector<float>& arr) {
+    for (size_t offset = 0; offset < arr.size(); ++offset) {
+        ASSERT_TRUE(compare_float(index->Reverse_Lookup(offset), arr[offset]));
+    }
+}
+
+template <>
+inline void
+assert_reverse(const ScalarIndexPtr<double>& index, const std::vector<double>& arr) {
+    for (size_t offset = 0; offset < arr.size(); ++offset) {
+        ASSERT_TRUE(compare_double(index->Reverse_Lookup(offset), arr[offset]));
+    }
+}
+
+template <>
+inline void
+assert_reverse(const ScalarIndexPtr<std::string>& index, const std::vector<std::string>& arr) {
+    for (size_t offset = 0; offset < arr.size(); ++offset) {
+        ASSERT_TRUE(arr[offset].compare(index->Reverse_Lookup(offset)) == 0);
+    }
 }
 
 template <>

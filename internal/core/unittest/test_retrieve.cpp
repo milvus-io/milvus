@@ -57,7 +57,7 @@ TEST(Retrieve, AutoID) {
 
     auto dataset = DataGen(schema, N);
     auto segment = CreateSealedSegment(schema);
-    SealedLoader(dataset, *segment);
+    SealedLoadFieldData(dataset, *segment);
     auto i64_col = dataset.get_col<int64_t>(fid_64);
 
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
@@ -107,7 +107,7 @@ TEST(Retrieve, AutoID2) {
 
     auto dataset = DataGen(schema, N);
     auto segment = CreateSealedSegment(schema);
-    SealedLoader(dataset, *segment);
+    SealedLoadFieldData(dataset, *segment);
     auto i64_col = dataset.get_col<int64_t>(fid_64);
 
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
@@ -153,7 +153,7 @@ TEST(Retrieve, NotExist) {
 
     auto dataset = DataGen(schema, N);
     auto segment = CreateSealedSegment(schema);
-    SealedLoader(dataset, *segment);
+    SealedLoadFieldData(dataset, *segment);
     auto i64_col = dataset.get_col<int64_t>(fid_64);
 
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
@@ -236,7 +236,7 @@ TEST(Retrieve, LargeTimestamp) {
     uint64_t ts_offset = 100;
     auto dataset = DataGen(schema, N, 42, ts_offset + 1);
     auto segment = CreateSealedSegment(schema);
-    SealedLoader(dataset, *segment);
+    SealedLoadFieldData(dataset, *segment);
     auto i64_col = dataset.get_col<int64_t>(fid_64);
 
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
@@ -285,7 +285,7 @@ TEST(Retrieve, Delete) {
 
     auto dataset = DataGen(schema, N);
     auto segment = CreateSealedSegment(schema);
-    SealedLoader(dataset, *segment);
+    SealedLoadFieldData(dataset, *segment);
     auto i64_col = dataset.get_col<int64_t>(fid_64);
 
     auto plan = std::make_unique<query::RetrievePlan>(*schema);

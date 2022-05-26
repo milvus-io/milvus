@@ -95,14 +95,14 @@ Search_Sealed(benchmark::State& state) {
         auto dataset_ = DataGen(schema, N);
         return dataset_;
     }();
-    SealedLoader(dataset_, *segment);
+    SealedLoadFieldData(dataset_, *segment);
     auto choice = state.range(0);
     if (choice == 0) {
         // Brute Force
     } else if (choice == 1) {
         // ivf
         auto vec = dataset_.get_col<float>(milvus::FieldId(100));
-        auto indexing = GenIndexing(N, dim, vec.data());
+        auto indexing = GenVecIndexing(N, dim, vec.data());
         LoadIndexInfo info;
         info.index = indexing;
         info.field_id = (*schema)[FieldName("fakevec")].get_id().get();

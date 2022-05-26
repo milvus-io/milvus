@@ -20,6 +20,7 @@
 #include "query/generated/ExecExprVisitor.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "test_utils/DataGen.h"
+#include "index/IndexFactory.h"
 
 using namespace milvus;
 
@@ -583,6 +584,183 @@ TEST(Expr, TestCompare) {
     }
 }
 
+TEST(Expr, TestCompareWithScalarIndex) {
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+    std::vector<std::tuple<std::string, std::function<bool(int, int64_t)>>> testcases = {
+        {R"(LessThan)", [](int a, int64_t b) { return a < b; }},
+        {R"(LessEqual)", [](int a, int64_t b) { return a <= b; }},
+        {R"(GreaterThan)", [](int a, int64_t b) { return a > b; }},
+        {R"(GreaterEqual)", [](int a, int64_t b) { return a >= b; }},
+        {R"(Equal)", [](int a, int64_t b) { return a == b; }},
+        {R"(NotEqual)", [](int a, int64_t b) { return a != b; }},
+    };
+
+    std::string serialized_expr_plan = R"(vector_anns: <
+                                            field_id: %1%
+                                            predicates: <
+                                                compare_expr: <
+                                                    left_column_info: <
+                                                        field_id: %3%
+                                                        data_type: %4%
+                                                    >
+                                                    right_column_info: <
+                                                        field_id: %5%
+                                                        data_type: %6%
+                                                    >
+                                                    op: %2%
+                                                >
+                                            >
+                                            query_info: <
+                                                topk: 10
+                                                round_decimal: 3
+                                                metric_type: "L2"
+                                                search_params: "{\"nprobe\": 10}"
+                                            >
+                                            placeholder_tag: "$0"
+     >)";
+
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
+    auto i32_fid = schema->AddDebugField("age32", DataType::INT32);
+    auto i64_fid = schema->AddDebugField("age64", DataType::INT64);
+    schema->set_primary_field_id(i64_fid);
+
+    auto seg = CreateSealedSegment(schema);
+    int N = 1000;
+    auto raw_data = DataGen(schema, N);
+    LoadIndexInfo load_index_info;
+
+    // load index for int32 field
+    auto age32_col = raw_data.get_col<int32_t>(i32_fid);
+    age32_col[0] = 1000;
+    GenScalarIndexing(N, age32_col.data());
+    auto age32_index = milvus::scalar::CreateScalarIndexSort<int32_t>();
+    age32_index->Build(N, age32_col.data());
+    load_index_info.field_id = i32_fid.get();
+    load_index_info.field_type = Int32;
+    load_index_info.index = std::shared_ptr<milvus::scalar::ScalarIndexSort<int32_t>>(age32_index.release());
+    seg->LoadIndex(load_index_info);
+
+    // load index for int64 field
+    auto age64_col = raw_data.get_col<int64_t>(i64_fid);
+    age64_col[0] = 2000;
+    GenScalarIndexing(N, age64_col.data());
+    auto age64_index = milvus::scalar::CreateScalarIndexSort<int64_t>();
+    age64_index->Build(N, age64_col.data());
+    load_index_info.field_id = i64_fid.get();
+    load_index_info.field_type = Int64;
+    load_index_info.index = std::shared_ptr<milvus::scalar::ScalarIndexSort<int64_t>>(age64_index.release());
+    seg->LoadIndex(load_index_info);
+
+    ExecExprVisitor visitor(*seg, seg->get_row_count(), MAX_TIMESTAMP);
+    for (auto [clause, ref_func] : testcases) {
+        auto dsl_string = boost::format(serialized_expr_plan) % vec_fid.get() % clause % i32_fid.get() %
+                          proto::schema::DataType_Name(int(DataType::INT32)) % i64_fid.get() %
+                          proto::schema::DataType_Name(int(DataType::INT64));
+        auto binary_plan = translate_text_plan_to_binary_plan(dsl_string.str().data());
+        auto plan = CreateSearchPlanByExpr(*schema, binary_plan.data(), binary_plan.size());
+        // std::cout << ShowPlanNodeVisitor().call_child(*plan->plan_node_) << std::endl;
+        auto final = visitor.call_child(*plan->plan_node_->predicate_.value());
+        EXPECT_EQ(final.size(), N);
+
+        for (int i = 0; i < N; ++i) {
+            auto ans = final[i];
+            auto val1 = age32_col[i];
+            auto val2 = age64_col[i];
+            auto ref = ref_func(val1, val2);
+            ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << boost::format("[%1%, %2%]") % val1 % val2;
+        }
+    }
+}
+
+TEST(Expr, TestCompareWithScalarIndexMaris) {
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+    std::vector<std::tuple<std::string, std::function<bool(std::string, std::string)>>> testcases = {
+        {R"(LessThan)", [](std::string a, std::string b) { return a.compare(b) < 0; }},
+        {R"(LessEqual)", [](std::string a, std::string b) { return a.compare(b) <= 0; }},
+        {R"(GreaterThan)", [](std::string a, std::string b) { return a.compare(b) > 0; }},
+        {R"(GreaterEqual)", [](std::string a, std::string b) { return a.compare(b) >= 0; }},
+        {R"(Equal)", [](std::string a, std::string b) { return a.compare(b) == 0; }},
+        {R"(NotEqual)", [](std::string a, std::string b) { return a.compare(b) != 0; }},
+    };
+
+    const char* serialized_expr_plan = R"(vector_anns: <
+                                            field_id: %1%
+                                            predicates: <
+                                                compare_expr: <
+                                                    left_column_info: <
+                                                        field_id: %3%
+                                                        data_type: VarChar
+                                                    >
+                                                    right_column_info: <
+                                                        field_id: %4%
+                                                        data_type: VarChar
+                                                    >
+                                                    op: %2%
+                                                >
+                                            >
+                                            query_info: <
+                                                topk: 10
+                                                round_decimal: 3
+                                                metric_type: "L2"
+                                                search_params: "{\"nprobe\": 10}"
+                                            >
+                                            placeholder_tag: "$0"
+     >)";
+
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
+    auto str1_fid = schema->AddDebugField("string1", DataType::VARCHAR);
+    auto str2_fid = schema->AddDebugField("string2", DataType::VARCHAR);
+    schema->set_primary_field_id(str1_fid);
+
+    auto seg = CreateSealedSegment(schema);
+    int N = 1000;
+    auto raw_data = DataGen(schema, N);
+    LoadIndexInfo load_index_info;
+
+    // load index for int32 field
+    auto str1_col = raw_data.get_col<std::string>(str1_fid);
+    GenScalarIndexing(N, str1_col.data());
+    auto str1_index = milvus::scalar::CreateScalarIndexSort<std::string>();
+    str1_index->Build(N, str1_col.data());
+    load_index_info.field_id = str1_fid.get();
+    load_index_info.field_type = VarChar;
+    load_index_info.index = std::shared_ptr<milvus::scalar::ScalarIndexSort<std::string>>(str1_index.release());
+    seg->LoadIndex(load_index_info);
+
+    // load index for int64 field
+    auto str2_col = raw_data.get_col<std::string>(str2_fid);
+    GenScalarIndexing(N, str2_col.data());
+    auto str2_index = milvus::scalar::CreateScalarIndexSort<std::string>();
+    str2_index->Build(N, str2_col.data());
+    load_index_info.field_id = str2_fid.get();
+    load_index_info.field_type = VarChar;
+    load_index_info.index = std::shared_ptr<milvus::scalar::ScalarIndexSort<std::string>>(str2_index.release());
+    seg->LoadIndex(load_index_info);
+
+    ExecExprVisitor visitor(*seg, seg->get_row_count(), MAX_TIMESTAMP);
+    for (auto [clause, ref_func] : testcases) {
+        auto dsl_string =
+            boost::format(serialized_expr_plan) % vec_fid.get() % clause % str1_fid.get() % str2_fid.get();
+        auto binary_plan = translate_text_plan_to_binary_plan(dsl_string.str().data());
+        auto plan = CreateSearchPlanByExpr(*schema, binary_plan.data(), binary_plan.size());
+        //         std::cout << ShowPlanNodeVisitor().call_child(*plan->plan_node_) << std::endl;
+        auto final = visitor.call_child(*plan->plan_node_->predicate_.value());
+        EXPECT_EQ(final.size(), N);
+
+        for (int i = 0; i < N; ++i) {
+            auto ans = final[i];
+            auto val1 = str1_col[i];
+            auto val2 = str2_col[i];
+            auto ref = ref_func(val1, val2);
+            ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << boost::format("[%1%, %2%]") % val1 % val2;
+        }
+    }
+}
+
 TEST(Expr, TestBinaryArithOpEvalRange) {
     using namespace milvus::query;
     using namespace milvus::segcore;
@@ -957,6 +1135,305 @@ TEST(Expr, TestBinaryArithOpEvalRangeExceptions) {
             ASSERT_TRUE(err_msg.find(assert_info) != std::string::npos);
         } catch (...) {
             FAIL() << "Expected AssertionError: " << assert_info << " not thrown";
+        }
+    }
+}
+
+TEST(Expr, TestBinaryArithOpEvalRangeWithScalarSortIndex) {
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+    std::vector<std::tuple<std::string, std::function<bool(int)>, DataType>> testcases = {
+        // Add test cases for BinaryArithOpEvalRangeExpr EQ of various data types
+        {R"(arith_op: Add
+            right_operand: <
+                int64_val: 4
+            >
+            op: Equal
+            value: <
+                int64_val: 8
+            >)",
+         [](int8_t v) { return (v + 4) == 8; }, DataType::INT8},
+        {R"(arith_op: Sub
+            right_operand: <
+                int64_val: 500
+            >
+            op: Equal
+            value: <
+                int64_val: 1500
+            >)",
+         [](int16_t v) { return (v - 500) == 1500; }, DataType::INT16},
+        {R"(arith_op: Mul
+            right_operand: <
+                int64_val: 2
+            >
+            op: Equal
+            value: <
+                int64_val: 4000
+            >)",
+         [](int32_t v) { return (v * 2) == 4000; }, DataType::INT32},
+        {R"(arith_op: Div
+            right_operand: <
+                int64_val: 2
+            >
+            op: Equal
+            value: <
+                int64_val: 1000
+            >)",
+         [](int64_t v) { return (v / 2) == 1000; }, DataType::INT64},
+        {R"(arith_op: Mod
+            right_operand: <
+                int64_val: 100
+            >
+            op: Equal
+            value: <
+                int64_val: 0
+            >)",
+         [](int32_t v) { return (v % 100) == 0; }, DataType::INT32},
+        {R"(arith_op: Add
+            right_operand: <
+                float_val: 500
+            >
+            op: Equal
+            value: <
+                float_val: 2500
+            >)",
+         [](float v) { return (v + 500) == 2500; }, DataType::FLOAT},
+        {R"(arith_op: Add
+            right_operand: <
+                float_val: 500
+            >
+            op: Equal
+            value: <
+                float_val: 2500
+            >)",
+         [](double v) { return (v + 500) == 2500; }, DataType::DOUBLE},
+        {R"(arith_op: Add
+            right_operand: <
+                float_val: 500
+            >
+            op: NotEqual
+            value: <
+                float_val: 2000
+            >)",
+         [](float v) { return (v + 500) != 2000; }, DataType::FLOAT},
+        {R"(arith_op: Sub
+            right_operand: <
+                float_val: 500
+            >
+            op: NotEqual
+            value: <
+                float_val: 2500
+            >)",
+         [](double v) { return (v - 500) != 2000; }, DataType::DOUBLE},
+        {R"(arith_op: Mul
+            right_operand: <
+                int64_val: 2
+            >
+            op: NotEqual
+            value: <
+                int64_val: 2
+            >)",
+         [](int8_t v) { return (v * 2) != 2; }, DataType::INT8},
+        {R"(arith_op: Div
+            right_operand: <
+                int64_val: 2
+            >
+            op: NotEqual
+            value: <
+                int64_val: 2000
+            >)",
+         [](int16_t v) { return (v / 2) != 2000; }, DataType::INT16},
+        {R"(arith_op: Mod
+            right_operand: <
+                int64_val: 100
+            >
+            op: NotEqual
+            value: <
+                int64_val: 1
+            >)",
+         [](int32_t v) { return (v % 100) != 1; }, DataType::INT32},
+        {R"(arith_op: Add
+            right_operand: <
+                int64_val: 500
+            >
+            op: NotEqual
+            value: <
+                int64_val: 2000
+            >)",
+         [](int64_t v) { return (v + 500) != 2000; }, DataType::INT64},
+    };
+
+    std::string serialized_expr_plan = R"(vector_anns: <
+                                            field_id: %1%
+                                            predicates: <
+                                                binary_arith_op_eval_range_expr: <
+                                                    @@@@@
+                                                >
+                                            >
+                                            query_info: <
+                                                topk: 10
+                                                round_decimal: 3
+                                                metric_type: "L2"
+                                                search_params: "{\"nprobe\": 10}"
+                                            >
+                                            placeholder_tag: "$0"
+     >)";
+
+    std::string arith_expr = R"(
+    column_info: <
+        field_id: %2%
+        data_type: %3%
+    >
+    @@@@)";
+
+    auto schema = std::make_shared<Schema>();
+    auto vec_fid = schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
+    auto i8_fid = schema->AddDebugField("age8", DataType::INT8);
+    auto i16_fid = schema->AddDebugField("age16", DataType::INT16);
+    auto i32_fid = schema->AddDebugField("age32", DataType::INT32);
+    auto i64_fid = schema->AddDebugField("age64", DataType::INT64);
+    auto float_fid = schema->AddDebugField("age_float", DataType::FLOAT);
+    auto double_fid = schema->AddDebugField("age_double", DataType::DOUBLE);
+    schema->set_primary_field_id(i64_fid);
+
+    auto seg = CreateSealedSegment(schema);
+    int N = 1000;
+    auto raw_data = DataGen(schema, N);
+    LoadIndexInfo load_index_info;
+
+    // load index for int8 field
+    auto age8_col = raw_data.get_col<int8_t>(i8_fid);
+    age8_col[0] = 4;
+    GenScalarIndexing(N, age8_col.data());
+    auto age8_index = milvus::scalar::CreateScalarIndexSort<int8_t>();
+    age8_index->Build(N, age8_col.data());
+    load_index_info.field_id = i8_fid.get();
+    load_index_info.field_type = Int8;
+    load_index_info.index = std::shared_ptr<milvus::scalar::ScalarIndexSort<int8_t>>(age8_index.release());
+    seg->LoadIndex(load_index_info);
+
+    // load index for 16 field
+    auto age16_col = raw_data.get_col<int16_t>(i16_fid);
+    age16_col[0] = 2000;
+    GenScalarIndexing(N, age16_col.data());
+    auto age16_index = milvus::scalar::CreateScalarIndexSort<int16_t>();
+    age16_index->Build(N, age16_col.data());
+    load_index_info.field_id = i16_fid.get();
+    load_index_info.field_type = Int16;
+    load_index_info.index = std::shared_ptr<milvus::scalar::ScalarIndexSort<int16_t>>(age16_index.release());
+    seg->LoadIndex(load_index_info);
+
+    // load index for int32 field
+    auto age32_col = raw_data.get_col<int32_t>(i32_fid);
+    age32_col[0] = 2000;
+    GenScalarIndexing(N, age32_col.data());
+    auto age32_index = milvus::scalar::CreateScalarIndexSort<int32_t>();
+    age32_index->Build(N, age32_col.data());
+    load_index_info.field_id = i32_fid.get();
+    load_index_info.field_type = Int32;
+    load_index_info.index = std::shared_ptr<milvus::scalar::ScalarIndexSort<int32_t>>(age32_index.release());
+    seg->LoadIndex(load_index_info);
+
+    // load index for int64 field
+    auto age64_col = raw_data.get_col<int64_t>(i64_fid);
+    age64_col[0] = 2000;
+    GenScalarIndexing(N, age64_col.data());
+    auto age64_index = milvus::scalar::CreateScalarIndexSort<int64_t>();
+    age64_index->Build(N, age64_col.data());
+    load_index_info.field_id = i64_fid.get();
+    load_index_info.field_type = Int64;
+    load_index_info.index = std::shared_ptr<milvus::scalar::ScalarIndexSort<int64_t>>(age64_index.release());
+    seg->LoadIndex(load_index_info);
+
+    // load index for float field
+    auto age_float_col = raw_data.get_col<float>(float_fid);
+    age_float_col[0] = 2000;
+    GenScalarIndexing(N, age_float_col.data());
+    auto age_float_index = milvus::scalar::CreateScalarIndexSort<float>();
+    age_float_index->Build(N, age_float_col.data());
+    load_index_info.field_id = float_fid.get();
+    load_index_info.field_type = Float;
+    load_index_info.index = std::shared_ptr<milvus::scalar::ScalarIndexSort<float>>(age_float_index.release());
+    seg->LoadIndex(load_index_info);
+
+    // load index for double field
+    auto age_double_col = raw_data.get_col<double>(double_fid);
+    age_double_col[0] = 2000;
+    GenScalarIndexing(N, age_double_col.data());
+    auto age_double_index = milvus::scalar::CreateScalarIndexSort<double>();
+    age_double_index->Build(N, age_double_col.data());
+    load_index_info.field_id = double_fid.get();
+    load_index_info.field_type = Float;
+    load_index_info.index = std::shared_ptr<milvus::scalar::ScalarIndexSort<double>>(age_double_index.release());
+    seg->LoadIndex(load_index_info);
+
+    auto seg_promote = dynamic_cast<SegmentSealedImpl*>(seg.get());
+    ExecExprVisitor visitor(*seg_promote, seg_promote->get_row_count(), MAX_TIMESTAMP);
+    int offset = 0;
+    for (auto [clause, ref_func, dtype] : testcases) {
+        auto loc = serialized_expr_plan.find("@@@@@");
+        auto expr_plan = serialized_expr_plan;
+        expr_plan.replace(loc, 5, arith_expr);
+        loc = expr_plan.find("@@@@");
+        expr_plan.replace(loc, 4, clause);
+        boost::format expr;
+        if (dtype == DataType::INT8) {
+            expr = boost::format(expr_plan) % vec_fid.get() % i8_fid.get() %
+                   proto::schema::DataType_Name(int(DataType::INT8));
+        } else if (dtype == DataType::INT16) {
+            expr = boost::format(expr_plan) % vec_fid.get() % i16_fid.get() %
+                   proto::schema::DataType_Name(int(DataType::INT16));
+        } else if (dtype == DataType::INT32) {
+            expr = boost::format(expr_plan) % vec_fid.get() % i32_fid.get() %
+                   proto::schema::DataType_Name(int(DataType::INT32));
+        } else if (dtype == DataType::INT64) {
+            expr = boost::format(expr_plan) % vec_fid.get() % i64_fid.get() %
+                   proto::schema::DataType_Name(int(DataType::INT64));
+        } else if (dtype == DataType::FLOAT) {
+            expr = boost::format(expr_plan) % vec_fid.get() % float_fid.get() %
+                   proto::schema::DataType_Name(int(DataType::FLOAT));
+        } else if (dtype == DataType::DOUBLE) {
+            expr = boost::format(expr_plan) % vec_fid.get() % double_fid.get() %
+                   proto::schema::DataType_Name(int(DataType::DOUBLE));
+        } else {
+            ASSERT_TRUE(false) << "No test case defined for this data type";
+        }
+
+        auto binary_plan = translate_text_plan_to_binary_plan(expr.str().data());
+        auto plan = CreateSearchPlanByExpr(*schema, binary_plan.data(), binary_plan.size());
+
+        auto final = visitor.call_child(*plan->plan_node_->predicate_.value());
+        EXPECT_EQ(final.size(), N);
+
+        for (int i = 0; i < N; ++i) {
+            auto ans = final[i];
+            if (dtype == DataType::INT8) {
+                auto val = age8_col[i];
+                auto ref = ref_func(val);
+                ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
+            } else if (dtype == DataType::INT16) {
+                auto val = age16_col[i];
+                auto ref = ref_func(val);
+                ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
+            } else if (dtype == DataType::INT32) {
+                auto val = age32_col[i];
+                auto ref = ref_func(val);
+                ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
+            } else if (dtype == DataType::INT64) {
+                auto val = age64_col[i];
+                auto ref = ref_func(val);
+                ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
+            } else if (dtype == DataType::FLOAT) {
+                auto val = age_float_col[i];
+                auto ref = ref_func(val);
+                ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
+            } else if (dtype == DataType::DOUBLE) {
+                auto val = age_double_col[i];
+                auto ref = ref_func(val);
+                ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
+            } else {
+                ASSERT_TRUE(false) << "No test case defined for this data type";
+            }
         }
     }
 }

@@ -253,12 +253,6 @@ func (loader *segmentLoader) loadSegmentInternal(segment *Segment,
 					indexInfo:   indexInfo,
 				}
 				indexedFieldInfos[fieldID] = fieldInfo
-
-				if fieldBinlog.FieldID == pkFieldID {
-					// pk field data should always be loaded.
-					// segCore need a map (pk data -> offset)
-					fieldBinlogs = append(fieldBinlogs, fieldBinlog)
-				}
 			} else {
 				fieldBinlogs = append(fieldBinlogs, fieldBinlog)
 			}
@@ -402,7 +396,7 @@ func (loader *segmentLoader) loadIndexedFieldData(segment *Segment, vecFieldInfo
 			if err != nil {
 				return err
 			}
-			log.Debug("load vector field's index data done", zap.Int64("segmentID", segment.ID()), zap.Int64("fieldID", fieldID))
+			log.Debug("load field's index data done", zap.Int64("segmentID", segment.ID()), zap.Int64("fieldID", fieldID))
 		}
 		segment.setIndexedFieldInfo(fieldID, fieldInfo)
 	}

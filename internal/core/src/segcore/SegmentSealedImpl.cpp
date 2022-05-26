@@ -80,6 +80,7 @@ void
 SegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
     // NOTE: lock only when data is ready to avoid starvation
     auto field_id = FieldId(info.field_id);
+    auto& field_meta = schema_->operator[](field_id);
 
     auto index = std::dynamic_pointer_cast<knowhere::VecIndex>(info.index);
     AssertInfo(info.index_params.count("metric_type"), "Can't get metric_type in index_params");
@@ -88,8 +89,11 @@ SegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
     AssertInfo(row_count > 0, "Index count is 0");
 
     std::unique_lock lck(mutex_);
-    AssertInfo(!get_bit(vecindex_ready_bitset_, field_id),
-               "Can't get bitset element at " + std::to_string(field_id.get()));
+    // Don't allow vector raw data and index exist at the same time
+    AssertInfo(!get_bit(field_data_ready_bitset_, field_id),
+               "vector index can't be loaded when raw data exists at field " + std::to_string(field_id.get()));
+    AssertInfo(!get_bit(index_ready_bitset_, field_id),
+               "vector index has been exist at " + std::to_string(field_id.get()));
     if (row_count_opt_.has_value()) {
         AssertInfo(row_count_opt_.value() == row_count, "load data has different row count from other columns");
     } else {
@@ -98,7 +102,8 @@ SegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
     AssertInfo(!vector_indexings_.is_ready(field_id), "vec index is not ready");
     vector_indexings_.append_field_indexing(field_id, GetMetricType(metric_type_str), index);
 
-    set_bit(vecindex_ready_bitset_, field_id, true);
+    set_bit(index_ready_bitset_, field_id, true);
+    update_row_count(row_count);
     lck.unlock();
 }
 
@@ -106,22 +111,52 @@ void
 SegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
     // NOTE: lock only when data is ready to avoid starvation
     auto field_id = FieldId(info.field_id);
+    auto& field_meta = schema_->operator[](field_id);
 
     auto index = std::dynamic_pointer_cast<scalar::IndexBase>(info.index);
     auto row_count = index->Count();
     AssertInfo(row_count > 0, "Index count is 0");
 
     std::unique_lock lck(mutex_);
-
+    // Don't allow scalar raw data and index exist at the same time
+    AssertInfo(!get_bit(field_data_ready_bitset_, field_id),
+               "scalar index can't be loaded when raw data exists at field " + std::to_string(field_id.get()));
+    AssertInfo(!get_bit(index_ready_bitset_, field_id),
+               "scalar index has been exist at " + std::to_string(field_id.get()));
     if (row_count_opt_.has_value()) {
         AssertInfo(row_count_opt_.value() == row_count, "load data has different row count from other columns");
     } else {
         row_count_opt_ = row_count;
     }
 
-    scalar_indexings_[field_id] = std::move(index);
+    scalar_indexings_[field_id] = index;
+    // reverse pk from scalar index and set pks to offset
+    if (schema_->get_primary_field_id() == field_id) {
+        AssertInfo(field_id.get() != -1, "Primary key is -1");
+        AssertInfo(pk2offset_.empty(), "already exists");
+        switch (field_meta.get_data_type()) {
+            case DataType::INT64: {
+                auto int64_index = std::dynamic_pointer_cast<scalar::ScalarIndex<int64_t>>(info.index);
+                for (int i = 0; i < row_count; ++i) {
+                    pk2offset_.insert(std::make_pair(int64_index->Reverse_Lookup(i), i));
+                }
+                break;
+            }
+            case DataType::VARCHAR: {
+                auto string_index = std::dynamic_pointer_cast<scalar::ScalarIndex<std::string>>(info.index);
+                for (int i = 0; i < row_count; ++i) {
+                    pk2offset_.insert(std::make_pair(string_index->Reverse_Lookup(i), i));
+                }
+                break;
+            }
+            default: {
+                PanicInfo("unsupported primary key type");
+            }
+        }
+    }
 
-    set_bit(field_data_ready_bitset_, field_id, true);
+    set_bit(index_ready_bitset_, field_id, true);
+    update_row_count(row_count);
     lck.unlock();
 }
 
@@ -167,11 +202,14 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
         auto data_type = field_meta.get_data_type();
         AssertInfo(data_type == DataType(info.field_data->type()),
                    "field type of load data is inconsistent with the schema");
-        auto field_data = insert_record_.get_field_data_base(field_id);
-        AssertInfo(field_data->empty(), "already exists");
 
         // write data under lock
         std::unique_lock lck(mutex_);
+
+        // Don't allow raw data and index exist at the same time
+        AssertInfo(!get_bit(index_ready_bitset_, field_id), "field data can't be loaded when indexing exists");
+        auto field_data = insert_record_.get_field_data_base(field_id);
+        AssertInfo(field_data->empty(), "already exists");
 
         // insert data to insertRecord
         field_data->fill_chunk_data(size, info.field_data, field_meta);
@@ -186,15 +224,6 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
             for (int i = 0; i < size; ++i) {
                 pk2offset_.insert(std::make_pair(pks[i], i));
             }
-        }
-
-        if (field_meta.is_vector()) {
-            AssertInfo(!vector_indexings_.is_ready(field_id), "field data can't be loaded when indexing exists");
-        } else if (!scalar_indexings_.count(field_id)) {
-            // generate scalar index
-            std::unique_ptr<knowhere::Index> index;
-            index = query::generate_scalar_index(field_data->get_span_base(0), data_type);
-            scalar_indexings_[field_id] = std::move(index);
         }
 
         set_bit(field_data_ready_bitset_, field_id, true);
@@ -224,9 +253,22 @@ SegmentSealedImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
     deleted_record_.record_size_ = size;
 }
 
+// internal API: support scalar index only
 int64_t
 SegmentSealedImpl::num_chunk_index(FieldId field_id) const {
-    return 1;
+    auto& field_meta = schema_->operator[](field_id);
+    if (field_meta.is_vector()) {
+        return int64_t(vector_indexings_.is_ready(field_id));
+    }
+
+    return scalar_indexings_.count(field_id);
+}
+
+int64_t
+SegmentSealedImpl::num_chunk_data(FieldId field_id) const {
+    auto field_data = insert_record_.get_field_data_base(field_id);
+    AssertInfo(field_data != nullptr, "null field data ptr");
+    return field_data->num_chunk();
 }
 
 int64_t
@@ -253,8 +295,6 @@ SegmentSealedImpl::chunk_data_impl(FieldId field_id, int64_t chunk_id) const {
 
 const knowhere::Index*
 SegmentSealedImpl::chunk_index_impl(FieldId field_id, int64_t chunk_id) const {
-    AssertInfo(chunk_id == 0, "Chunk_id is not equal to 0");
-    // TODO: support scalar index
     auto ptr = scalar_indexings_.at(field_id).get();
     AssertInfo(ptr, "Scalar index of " + std::to_string(field_id.get()) + " is null");
     return ptr;
@@ -308,7 +348,7 @@ SegmentSealedImpl::vector_search(int64_t vec_count,
     auto& field_meta = schema_->operator[](field_id);
 
     AssertInfo(field_meta.is_vector(), "The meta type of vector field is not vector type");
-    if (get_bit(vecindex_ready_bitset_, field_id)) {
+    if (get_bit(index_ready_bitset_, field_id)) {
         AssertInfo(vector_indexings_.is_ready(field_id),
                    "vector indexes isn't ready for field " + std::to_string(field_id.get()));
         query::SearchOnSealed(*schema_, vector_indexings_, search_info, query_data, query_count, bitset, output, id_);
@@ -383,7 +423,7 @@ SegmentSealedImpl::DropIndex(const FieldId field_id) {
 
     std::unique_lock lck(mutex_);
     vector_indexings_.drop_field_indexing(field_id);
-    set_bit(vecindex_ready_bitset_, field_id, false);
+    set_bit(index_ready_bitset_, field_id, false);
 }
 
 void
@@ -396,7 +436,7 @@ SegmentSealedImpl::check_search(const query::Plan* plan) const {
     }
 
     auto& request_fields = plan->extra_info_opt_.value().involved_fields_;
-    auto field_ready_bitset = field_data_ready_bitset_ | vecindex_ready_bitset_;
+    auto field_ready_bitset = field_data_ready_bitset_ | index_ready_bitset_;
     AssertInfo(request_fields.size() == field_ready_bitset.size(),
                "Request fields size not equal to field ready bitset size when check search");
     auto absent_fields = request_fields - field_ready_bitset;
@@ -412,7 +452,7 @@ SegmentSealedImpl::SegmentSealedImpl(SchemaPtr schema, int64_t segment_id)
     : schema_(schema),
       insert_record_(*schema, MAX_ROW_COUNT),
       field_data_ready_bitset_(schema->size()),
-      vecindex_ready_bitset_(schema->size()),
+      index_ready_bitset_(schema->size()),
       scalar_indexings_(schema->size()),
       id_(segment_id) {
 }
@@ -509,13 +549,26 @@ SegmentSealedImpl::fill_with_empty(FieldId field_id, int64_t count) const {
 
 std::unique_ptr<DataArray>
 SegmentSealedImpl::bulk_subscript(FieldId field_id, const int64_t* seg_offsets, int64_t count) const {
-    if (!HasFieldData(field_id)) {
+    auto& field_meta = schema_->operator[](field_id);
+    // if count == 0, return empty data array
+    if (count == 0) {
+        return fill_with_empty(field_id, count);
+    }
+
+    if (HasIndex(field_id)) {
+        // if field has load scalar index, reverse raw data from index
+        if (!datatype_is_vector(field_meta.get_data_type())) {
+            AssertInfo(num_chunk() == 1, "num chunk not equal to 1 for sealed segment");
+            auto index = chunk_index_impl(field_id, 0);
+            return ReverseDataFromIndex(index, seg_offsets, count, field_meta);
+        }
+
+        // TODO: knowhere support reverse data from vector index
+        // Now, real data will be filled in data array using chunk manager
         return fill_with_empty(field_id, count);
     }
 
     Assert(get_bit(field_data_ready_bitset_, field_id));
-
-    auto& field_meta = schema_->operator[](field_id);
     auto field_data = insert_record_.get_field_data_base(field_id);
     AssertInfo(field_data->num_chunk() == 1, std::string("num chunk not equal to 1 for sealed segment, num_chunk: ") +
                                                  std::to_string(field_data->num_chunk()));
@@ -580,7 +633,7 @@ SegmentSealedImpl::HasIndex(FieldId field_id) const {
     std::shared_lock lck(mutex_);
     AssertInfo(!SystemProperty::Instance().IsSystem(field_id),
                "Field id:" + std::to_string(field_id.get()) + " isn't one of system type when drop index");
-    return get_bit(vecindex_ready_bitset_, field_id);
+    return get_bit(index_ready_bitset_, field_id);
 }
 
 bool

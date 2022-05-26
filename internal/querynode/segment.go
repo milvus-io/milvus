@@ -828,7 +828,7 @@ func (s *Segment) segmentLoadIndexData(bytesIndex [][]byte, indexInfo *querypb.F
 		return err
 	}
 
-	log.Info("updateSegmentIndex done", zap.Int64("segmentID", s.ID()))
+	log.Info("updateSegmentIndex done", zap.Int64("segmentID", s.ID()), zap.Int64("fieldID", indexInfo.FieldID))
 
 	return nil
 }

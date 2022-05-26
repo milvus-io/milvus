@@ -15,6 +15,7 @@
 #include <cstring>
 #include <memory>
 #include <random>
+#include "google/protobuf/text_format.h"
 #include <knowhere/index/vector_index/VecIndex.h>
 #include <knowhere/index/vector_index/adapter/VectorAdapter.h>
 #include <knowhere/index/vector_index/VecIndexFactory.h>
@@ -97,8 +98,10 @@ struct GeneratedData {
                     break;
                 }
                 case DataType::VARCHAR: {
-                    auto src_data = reinterpret_cast<const T*>(target_field_data.scalars().string_data().data().data());
-                    std::copy_n(src_data, raw_->num_rows(), ret.data());
+                    auto ret_data = reinterpret_cast<std::string*>(ret.data());
+                    auto src_data = target_field_data.scalars().string_data().data();
+                    std::copy(src_data.begin(), src_data.end(), ret_data);
+
                     break;
                 }
                 default: {
@@ -354,8 +357,7 @@ SearchResultToJson(const SearchResult& sr) {
 };
 
 inline void
-SealedLoader(const GeneratedData& dataset, SegmentSealed& seg) {
-    // TODO
+SealedLoadFieldData(const GeneratedData& dataset, SegmentSealed& seg) {
     auto row_count = dataset.row_ids_.size();
     {
         LoadFieldDataInfo info;
@@ -385,15 +387,14 @@ SealedLoader(const GeneratedData& dataset, SegmentSealed& seg) {
 }
 
 inline std::unique_ptr<SegmentSealed>
-SealedCreator(SchemaPtr schema, const GeneratedData& dataset, const LoadIndexInfo& index_info) {
+SealedCreator(SchemaPtr schema, const GeneratedData& dataset) {
     auto segment = CreateSealedSegment(schema);
-    SealedLoader(dataset, *segment);
-    segment->LoadIndex(index_info);
+    SealedLoadFieldData(dataset, *segment);
     return segment;
 }
 
 inline knowhere::VecIndexPtr
-GenIndexing(int64_t N, int64_t dim, const float* vec) {
+GenVecIndexing(int64_t N, int64_t dim, const float* vec) {
     // {knowhere::IndexParams::nprobe, 10},
     auto conf = knowhere::Config{{knowhere::meta::DIM, dim},
                                  {knowhere::IndexParams::nlist, 1024},
@@ -418,6 +419,22 @@ GenScalarIndexing(int64_t N, const T* data) {
         indexing->Build(N, data);
         return indexing;
     }
+}
+
+inline std::vector<char>
+translate_text_plan_to_binary_plan(const char* text_plan) {
+    proto::plan::PlanNode plan_node;
+    auto ok = google::protobuf::TextFormat::ParseFromString(text_plan, &plan_node);
+    AssertInfo(ok, "Failed to parse");
+
+    std::string binary_plan;
+    plan_node.SerializeToString(&binary_plan);
+
+    std::vector<char> ret;
+    ret.resize(binary_plan.size());
+    std::memcpy(ret.data(), binary_plan.c_str(), binary_plan.size());
+
+    return ret;
 }
 
 }  // namespace milvus::segcore

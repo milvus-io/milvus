@@ -29,6 +29,8 @@
 
 namespace milvus::query {
 
+using optype = proto::plan::OpType;
+
 class ExprVisitor;
 
 // Base of all Exprs

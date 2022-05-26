@@ -133,6 +133,10 @@ class SegmentInternalInterface : public SegmentInterface {
     virtual int64_t
     num_chunk_index(FieldId field_id) const = 0;
 
+    // count of chunk that has raw data
+    virtual int64_t
+    num_chunk_data(FieldId field_id) const = 0;
+
     virtual void
     mask_with_timestamps(BitsetType& bitset_chunk, Timestamp timestamp) const = 0;
 
