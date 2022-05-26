@@ -908,83 +908,6 @@ class TestBulkLoad(TestcaseBase):
     def test_from_customize_bucket(self):
         pass
 
-#     @pytest.mark.tags(CaseLabel.L3)
-#     @pytest.mark.parametrize("row_based", [True, False])
-#     @pytest.mark.parametrize("auto_id", [True, False])
-#     def test_auto_id_binary_vector_string_scalar(self, row_based, auto_id):
-#         """
-#         collection:
-#         collection schema: [pk, binary_vector, string_scalar]
-#         1. create collection
-#         2. insert some data
-#         3. import data
-#         4. verify data entities
-#         5. build index
-#         6. load collection
-#         7. verify search and query
-#         """
-#         pass
-#
-#     @pytest.mark.tags(CaseLabel.L3)
-#     def test_custom_id_float_vector_string_primary(self):
-#         """
-#         collection: custom_id
-#         collection schema: float vectors and string primary key
-#         """
-#         pass
-#
-#     @pytest.mark.tags(CaseLabel.L3)
-#     def test_custom_id_float_partition_vector_string_primary(self):
-#         """
-#         collection: custom_id and custom partition
-#         collection schema: float vectors and string primary key
-#         """
-#         pass
-#
-#     @pytest.mark.tags(CaseLabel.L3)
-#     def test_custom_id_binary_vector_int_primary_from_bucket(self):
-#         """
-#         collection: custom_id
-#         collection schema: binary vectors and int primary key
-#         import from a particular bucket
-#         """
-#         pass
-#
-#     @pytest.mark.tags(CaseLabel.L3)
-#     def test_custom_id_binary_vector_string_primary_multi_scalars_twice(self):
-#         """
-#         collection: custom_id
-#         collection schema: binary vectors, string primary key and multiple scalars
-#         import twice
-#         """
-#         pass
-#
-#     @pytest.mark.tags(CaseLabel.L3)
-#     def test_custom_id_float_vector_int_primary_multi_scalars_twice(self):
-#         """
-#         collection: custom_id
-#         collection schema: float vectors, int primary key and multiple scalars
-#         import twice
-#         """
-#         pass
-#
-#
-# class TestColumnBasedImport(TestcaseBase):
-#     @pytest.mark.tags(CaseLabel.L3)
-#     def test_auto_id_float_vector(self):
-#         """
-#         collection: auto_id
-#         collection schema: [auto_id, float vector]
-#         Steps:
-#         1. create collection
-#         2. import column based data file
-#         3. verify the data entities equal the import data
-#         4. load the collection
-#         5. verify search successfully
-#         6. verify query successfully
-#         """
-#         pass
-
 
 class TestBulkLoadInvalidParams(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L3)
@@ -1777,7 +1700,103 @@ class TestBulkLoadInvalidParams(TestcaseBase):
             assert failed_reason in state.infos.get("failed_reason", "")
         assert self.collection_wrap.num_entities == 0
 
-    # TODO: string data on float field
+    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.parametrize("row_based", [True, False])
+    @pytest.mark.parametrize("auto_id", [True, False])
+    @pytest.mark.parametrize("dim", [9])
+    @pytest.mark.parametrize("entities", [10])
+    def test_data_type_str_on_float_scalar(self, row_based, auto_id, dim, entities):
+        """
+        collection schema: [pk, float_vector,
+                        float_scalar, int_scalar, string_scalar, bool_scalar]
+        data files: json file that entities has string data on float scalars
+        Steps:
+        1. create collection
+        2. import data
+        3. verify import failed with errors
+        """
+        files = prepare_bulk_load_json_files(row_based=row_based, rows=entities,
+                                             dim=dim, auto_id=auto_id,
+                                             data_fields=default_multi_fields,
+                                             err_type=DataErrorType.str_on_float_scalar,
+                                             scalars=default_multi_fields)
+        self._connect()
+        c_name = cf.gen_unique_str()
+        fields = [cf.gen_int64_field(name=df.pk_field, is_primary=True),
+                  cf.gen_float_vec_field(name=df.vec_field, dim=dim),
+                  cf.gen_int32_field(name=df.int_field),
+                  cf.gen_float_field(name=df.float_field),
+                  cf.gen_string_field(name=df.string_field),
+                  cf.gen_bool_field(name=df.bool_field)
+                  ]
+        schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
+        self.collection_wrap.init_collection(c_name, schema=schema)
+        # import data
+        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
+                                                  row_based=row_based,
+                                                  files=files)
+        logging.info(f"bulk load task ids:{task_ids}")
+        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
+            task_ids=task_ids,
+            timeout=30)
+        log.info(f"bulk load state:{success}")
+        assert not success
+        failed_reason = "illegal numeric value"
+        for state in states.values():
+            assert state.state_name == "BulkLoadFailed"
+            assert failed_reason in state.infos.get("failed_reason", "")
+        assert self.collection_wrap.num_entities == 0
+
+    @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.parametrize("row_based", [True, False])
+    @pytest.mark.parametrize("auto_id", [True, False])
+    @pytest.mark.parametrize("float_vector", [True, False])
+    @pytest.mark.parametrize("dim", [8])
+    @pytest.mark.parametrize("entities", [500])
+    def test_data_type_str_on_vector_fields(self, row_based, auto_id, float_vector, dim, entities):
+        """
+        collection schema: [pk, float_vector,
+                        float_scalar, int_scalar, string_scalar, bool_scalar]
+        data files: json file that entities has string data on vectors
+        Steps:
+        1. create collection
+        2. import data
+        3. verify import failed with errors
+        """
+        files = prepare_bulk_load_json_files(row_based=row_based, rows=entities,
+                                             dim=dim, auto_id=auto_id, float_vector=float_vector,
+                                             data_fields=default_multi_fields,
+                                             err_type=DataErrorType.str_on_vector_field,
+                                             wrong_position=entities // 2,
+                                             scalars=default_multi_fields, force=True)
+        self._connect()
+        c_name = cf.gen_unique_str()
+        fields = [cf.gen_int64_field(name=df.pk_field, is_primary=True),
+                  cf.gen_float_vec_field(name=df.vec_field, dim=dim),
+                  cf.gen_int32_field(name=df.int_field),
+                  cf.gen_float_field(name=df.float_field),
+                  cf.gen_string_field(name=df.string_field),
+                  cf.gen_bool_field(name=df.bool_field)
+                  ]
+        schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
+        self.collection_wrap.init_collection(c_name, schema=schema)
+        # import data
+        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
+                                                  row_based=row_based,
+                                                  files=files)
+        logging.info(f"bulk load task ids:{task_ids}")
+        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
+            task_ids=task_ids,
+            timeout=30)
+        log.info(f"bulk load state:{success}")
+        assert not success
+        failed_reason = "illegal numeric value"
+        if not float_vector:
+            failed_reason = f"doesn't equal to vector dimension {dim} of field vectors"
+        for state in states.values():
+            assert state.state_name == "BulkLoadFailed"
+            assert failed_reason in state.infos.get("failed_reason", "")
+        assert self.collection_wrap.num_entities == 0
 
 
 @pytest.mark.skip()
