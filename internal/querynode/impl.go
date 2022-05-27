@@ -26,12 +26,14 @@ import (
 
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	queryPb "github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -560,11 +562,18 @@ func (node *QueryNode) isHealthy() bool {
 
 // Search performs replica search tasks.
 func (node *QueryNode) Search(ctx context.Context, req *queryPb.SearchRequest) (*internalpb.SearchResults, error) {
+	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.SearchLabel, metrics.TotalLabel).Inc()
 	failRet := &internalpb.SearchResults{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		},
 	}
+
+	defer func() {
+		if failRet.Status.ErrorCode != commonpb.ErrorCode_Success {
+			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.QueryLabel, metrics.FailLabel).Inc()
+		}
+	}()
 	if !node.isHealthy() {
 		failRet.Status.Reason = msgQueryNodeIsUnhealthy(Params.QueryNodeCfg.GetNodeID())
 		return failRet, nil
@@ -577,14 +586,6 @@ func (node *QueryNode) Search(ctx context.Context, req *queryPb.SearchRequest) (
 		return failRet, nil
 	}
 
-	if !node.queryShardService.hasQueryShard(req.GetDmlChannel()) {
-		// TODO: add replicaID in request or remove it in query shard
-		err := node.queryShardService.addQueryShard(req.Req.CollectionID, req.GetDmlChannel(), 0)
-		if err != nil {
-			failRet.Status.Reason = err.Error()
-			return failRet, nil
-		}
-	}
 	qs, err := node.queryShardService.getQueryShard(req.GetDmlChannel())
 	if err != nil {
 		log.Warn("Search failed, failed to get query shard", zap.String("dml channel", req.GetDmlChannel()), zap.Error(err))
@@ -592,6 +593,8 @@ func (node *QueryNode) Search(ctx context.Context, req *queryPb.SearchRequest) (
 		failRet.Status.Reason = err.Error()
 		return failRet, nil
 	}
+
+	tr := timerecord.NewTimeRecorder(fmt.Sprintf("search %d", req.Req.CollectionID))
 
 	if req.FromShardLeader {
 		historicalTask, err2 := newSearchTask(ctx, req)
@@ -612,6 +615,15 @@ func (node *QueryNode) Search(ctx context.Context, req *queryPb.SearchRequest) (
 			failRet.Status.Reason = err2.Error()
 			return failRet, nil
 		}
+
+		failRet.Status.ErrorCode = commonpb.ErrorCode_Success
+		metrics.QueryNodeSQLatencyInQueue.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
+			metrics.SearchLabel).Observe(float64(historicalTask.queueDur.Milliseconds()))
+		metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
+			metrics.SearchLabel).Observe(float64(historicalTask.reduceDur.Milliseconds()))
+		latency := tr.ElapseSpan()
+		metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.SearchLabel).Observe(float64(latency.Milliseconds()))
+		metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.SearchLabel, metrics.SuccessLabel).Inc()
 		return historicalTask.Ret, nil
 	}
 
@@ -671,6 +683,10 @@ func (node *QueryNode) Search(ctx context.Context, req *queryPb.SearchRequest) (
 			errStreaming = err2
 			return
 		}
+		metrics.QueryNodeSQLatencyInQueue.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
+			metrics.SearchLabel).Observe(float64(streamingTask.queueDur.Milliseconds()))
+		metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
+			metrics.SearchLabel).Observe(float64(streamingTask.reduceDur.Milliseconds()))
 		streamingResult = streamingTask.Ret
 	}()
 	wg.Wait()
@@ -697,16 +713,28 @@ func (node *QueryNode) Search(ctx context.Context, req *queryPb.SearchRequest) (
 		failRet.Status.Reason = err2.Error()
 		return failRet, nil
 	}
+
+	failRet.Status.ErrorCode = commonpb.ErrorCode_Success
+	latency := tr.ElapseSpan()
+	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.SearchLabel).Observe(float64(latency.Milliseconds()))
+	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.SearchLabel, metrics.SuccessLabel).Inc()
 	return ret, nil
 }
 
 // Query performs replica query tasks.
 func (node *QueryNode) Query(ctx context.Context, req *queryPb.QueryRequest) (*internalpb.RetrieveResults, error) {
+	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.QueryLabel, metrics.TotalLabel).Inc()
 	failRet := &internalpb.RetrieveResults{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		},
 	}
+
+	defer func() {
+		if failRet.Status.ErrorCode != commonpb.ErrorCode_Success {
+			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.SearchLabel, metrics.FailLabel).Inc()
+		}
+	}()
 	if !node.isHealthy() {
 		failRet.Status.Reason = msgQueryNodeIsUnhealthy(Params.QueryNodeCfg.GetNodeID())
 		return failRet, nil
@@ -718,12 +746,6 @@ func (node *QueryNode) Query(ctx context.Context, req *queryPb.QueryRequest) (*i
 		return failRet, nil
 	}
 
-	if !node.queryShardService.hasQueryShard(req.GetDmlChannel()) {
-		err := node.queryShardService.addQueryShard(req.Req.CollectionID, req.GetDmlChannel(), 0) // TODO: add replicaID in request or remove it in query shard
-		failRet.Status.Reason = err.Error()
-		return failRet, nil
-	}
-
 	qs, err := node.queryShardService.getQueryShard(req.GetDmlChannel())
 	if err != nil {
 		log.Warn("Query failed, failed to get query shard", zap.String("dml channel", req.GetDmlChannel()), zap.Error(err))
@@ -731,6 +753,7 @@ func (node *QueryNode) Query(ctx context.Context, req *queryPb.QueryRequest) (*i
 		return failRet, nil
 	}
 
+	tr := timerecord.NewTimeRecorder(fmt.Sprintf("retrieve %d", req.Req.CollectionID))
 	if req.FromShardLeader {
 		// construct a queryTask
 		queryTask := newQueryTask(ctx, req)
@@ -747,6 +770,14 @@ func (node *QueryNode) Query(ctx context.Context, req *queryPb.QueryRequest) (*i
 			failRet.Status.Reason = err2.Error()
 			return failRet, nil
 		}
+		failRet.Status.ErrorCode = commonpb.ErrorCode_Success
+		metrics.QueryNodeSQLatencyInQueue.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
+			metrics.QueryLabel).Observe(float64(queryTask.queueDur.Milliseconds()))
+		metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
+			metrics.QueryLabel).Observe(float64(queryTask.reduceDur.Milliseconds()))
+		latency := tr.ElapseSpan()
+		metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.QueryLabel).Observe(float64(latency.Milliseconds()))
+		metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.QueryLabel, metrics.SuccessLabel).Inc()
 		return queryTask.Ret, nil
 	}
 
@@ -801,6 +832,10 @@ func (node *QueryNode) Query(ctx context.Context, req *queryPb.QueryRequest) (*i
 		if err2 != nil {
 			return
 		}
+		metrics.QueryNodeSQLatencyInQueue.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
+			metrics.QueryLabel).Observe(float64(streamingTask.queueDur.Milliseconds()))
+		metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
+			metrics.QueryLabel).Observe(float64(streamingTask.reduceDur.Milliseconds()))
 		streamingResult = streamingTask.Ret
 	}()
 	wg.Wait()
@@ -827,6 +862,10 @@ func (node *QueryNode) Query(ctx context.Context, req *queryPb.QueryRequest) (*i
 		failRet.Status.Reason = err2.Error()
 		return failRet, nil
 	}
+	failRet.Status.ErrorCode = commonpb.ErrorCode_Success
+	latency := tr.ElapseSpan()
+	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.QueryLabel).Observe(float64(latency.Milliseconds()))
+	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.QueryLabel, metrics.SuccessLabel).Inc()
 	return ret, nil
 }
 

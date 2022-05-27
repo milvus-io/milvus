@@ -360,7 +360,8 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	metrics.ProxyDecodeSearchResultLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), metrics.SearchLabel).Observe(float64(tr.RecordSpan().Milliseconds()))
+	metrics.ProxyDecodeResultLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10),
+		metrics.SearchLabel).Observe(float64(tr.RecordSpan().Milliseconds()))
 	log.Debug("proxy search post execute stage 2", zap.Any("len(validSearchResults)", len(validSearchResults)))
 	if len(validSearchResults) <= 0 {
 		log.Warn("search result is empty", zap.Any("requestID", t.Base.MsgID), zap.String("requestType", "search"))
@@ -392,7 +393,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 		return err
 	}
 
-	metrics.ProxyReduceSearchResultLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), metrics.SuccessLabel).Observe(float64(tr.RecordSpan().Milliseconds()))
+	metrics.ProxyReduceResultLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), metrics.SearchLabel).Observe(float64(tr.RecordSpan().Milliseconds()))
 	t.result.CollectionName = t.collectionName
 
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, t.request.CollectionName)

@@ -35,7 +35,7 @@ var (
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryCoordRole,
-			Name:      "entitiy_num",
+			Name:      "entity_num",
 			Help:      "number of entities",
 		}, []string{})
 

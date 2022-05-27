@@ -58,6 +58,10 @@ type searchTask struct {
 }
 
 func (s *searchTask) PreExecute(ctx context.Context) error {
+	s.SetStep(TaskStepPreExecute)
+	for _, t := range s.otherTasks {
+		t.SetStep(TaskStepPreExecute)
+	}
 	s.combinePlaceHolderGroups()
 	return nil
 }
@@ -187,6 +191,7 @@ func (s *searchTask) reduceResults(searchReq *searchRequest, results []*SearchRe
 	isEmpty := len(results) == 0
 	cnt := 1 + len(s.otherTasks)
 	var t *searchTask
+	s.tr.RecordSpan()
 	if !isEmpty {
 		sInfo := parseSliceInfo(s.OrigNQs, s.OrigTopKs, s.NQ)
 		numSegment := int64(len(results))
@@ -240,6 +245,7 @@ func (s *searchTask) reduceResults(searchReq *searchRequest, results []*SearchRe
 			}
 		}
 	}
+	s.reduceDur = s.tr.RecordSpan()
 	return nil
 }
 
