@@ -1,5 +1,3 @@
-from functools import reduce
-from os import name
 import threading
 import pytest
 
@@ -386,11 +384,12 @@ class TestPartitionParams(TestcaseBase):
         assert len(two_replicas.groups) == 2
 
         # verify loaded segments included 2 replicas and twice num entities
-        seg_info, _ = self.utility_wrap.get_query_segment_info(collection_w.name)
-        seg_ids = list(map(lambda seg: seg.segmentID, seg_info))
-        num_entities = list(map(lambda seg: seg.num_rows, seg_info))
-        assert reduce(lambda x, y: x ^ y, seg_ids) == 0
-        assert reduce(lambda x, y: x + y, num_entities) == ct.default_nb * 2
+        seg_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
+        num_entities = 0
+        for seg in seg_info:
+            assert len(seg.nodeIds) == 2
+            num_entities += seg.num_rows
+        assert num_entities == ct.default_nb
 
     @pytest.mark.tags(CaseLabel.ClusterOnly)
     def test_partition_replicas_change_cross_partitions(self):
@@ -421,11 +420,12 @@ class TestPartitionParams(TestcaseBase):
         assert group1_ids.sort() == group2_ids.sort()
 
         # verify loaded segments included 2 replicas and 1 partition
-        seg_info, _ = self.utility_wrap.get_query_segment_info(collection_w.name)
-        seg_ids = list(map(lambda seg: seg.segmentID, seg_info))
-        num_entities = list(map(lambda seg: seg.num_rows, seg_info))
-        assert reduce(lambda x, y: x ^ y, seg_ids) == 0
-        assert reduce(lambda x, y: x + y, num_entities) == ct.default_nb * 2
+        seg_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
+        num_entities = 0
+        for seg in seg_info:
+            assert len(seg.nodeIds) == 2
+            num_entities += seg.num_rows
+        assert num_entities == ct.default_nb
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_partition_release(self):
