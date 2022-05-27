@@ -797,7 +797,7 @@ func (m *MockProxy) ListCredUsers(ctx context.Context, req *milvuspb.ListCredUse
 type WaitOption struct {
 	Duration      time.Duration `json:"duration"`
 	Port          int           `json:"port"`
-	TLSEnabled    bool          `json:"tls_enabled"`
+	TLSMode       int           `json:"tls_mode"`
 	ClientPemPath string        `json:"client_pem_path"`
 	ClientKeyPath string        `json:"client_key_path"`
 	CaPath        string        `json:"ca_path"`
@@ -811,11 +811,11 @@ func (opt *WaitOption) String() string {
 	return string(s)
 }
 
-func newWaitOption(duration time.Duration, Port int, tlsEnabled bool, clientPemPath, clientKeyPath, clientCaPath string) *WaitOption {
+func newWaitOption(duration time.Duration, Port int, tlsMode int, clientPemPath, clientKeyPath, clientCaPath string) *WaitOption {
 	return &WaitOption{
 		Duration:      duration,
 		Port:          Port,
-		TLSEnabled:    tlsEnabled,
+		TLSMode:       tlsMode,
 		ClientPemPath: clientPemPath,
 		ClientKeyPath: clientKeyPath,
 		CaPath:        clientCaPath,
@@ -852,15 +852,24 @@ func waitForGrpcReady(opt *WaitOption) {
 	go func() {
 		// just used in UT to self-check service is available.
 		address := "localhost:" + strconv.Itoa(opt.Port)
-		if !opt.TLSEnabled {
-			_, err := grpc.Dial(address, grpc.WithBlock(), grpc.WithInsecure())
-			ch <- err
-		} else {
-			creds, err := withCredential(opt.ClientPemPath, opt.ClientKeyPath, opt.CaPath)
+		var err error
+
+		if opt.TLSMode == 1 || opt.TLSMode == 2 {
+			var creds credentials.TransportCredentials
+			if opt.TLSMode == 1 {
+				creds, err = credentials.NewClientTLSFromFile(Params.ServerPemPath, "localhost")
+			} else {
+				creds, err = withCredential(opt.ClientPemPath, opt.ClientKeyPath, opt.CaPath)
+			}
 			if err != nil {
 				ch <- err
+				return
 			}
 			_, err = grpc.Dial(address, grpc.WithBlock(), grpc.WithTransportCredentials(creds))
+			ch <- err
+			return
+		}
+		if _, err := grpc.Dial(address, grpc.WithBlock(), grpc.WithInsecure()); true {
 			ch <- err
 		}
 	}()
@@ -887,8 +896,8 @@ var clientKeyPath = "../../../configs/cert/client.key"
 
 // waitForServerReady wait for internal grpc service and external service to be ready, according to the params.
 func waitForServerReady() {
-	waitForGrpcReady(newWaitOption(waitDuration, Params.InternalPort, false, "", "", ""))
-	waitForGrpcReady(newWaitOption(waitDuration, Params.Port, Params.TLSEnabled, clientPemPath, clientKeyPath, Params.CaPemPath))
+	waitForGrpcReady(newWaitOption(waitDuration, Params.InternalPort, 0, "", "", ""))
+	waitForGrpcReady(newWaitOption(waitDuration, Params.Port, Params.TLSMode, clientPemPath, clientKeyPath, Params.CaPemPath))
 }
 
 func runAndWaitForServerReady(server *Server) error {
@@ -1176,7 +1185,6 @@ func Test_NewServer(t *testing.T) {
 	proxy.Params.ProxyCfg.GinLogging = false
 	err = runAndWaitForServerReady(server)
 	assert.Nil(t, err)
-
 	err = server.Stop()
 	assert.Nil(t, err)
 }
@@ -1321,11 +1329,11 @@ func Test_NewServer_HTTPServerDisabled(t *testing.T) {
 	err = runAndWaitForServerReady(server)
 	assert.Nil(t, err)
 	assert.Nil(t, server.httpServer)
-
 	err = server.Stop()
 	assert.Nil(t, err)
 }
-func Test_NewServer_TLS(t *testing.T) {
+
+func getServer(t *testing.T) *Server {
 	ctx := context.Background()
 	server, err := NewServer(ctx, nil)
 	assert.NotNil(t, server)
@@ -1336,15 +1344,67 @@ func Test_NewServer_TLS(t *testing.T) {
 	server.indexCoordClient = &MockIndexCoord{}
 	server.queryCoordClient = &MockQueryCoord{}
 	server.dataCoordClient = &MockDataCoord{}
+	return server
+}
 
-	Params.TLSEnabled = true
+func Test_NewServer_TLS_TwoWay(t *testing.T) {
+	server := getServer(t)
+
+	Params.InitOnce("proxy")
+	Params.TLSMode = 2
 	Params.ServerPemPath = "../../../configs/cert/server.pem"
 	Params.ServerKeyPath = "../../../configs/cert/server.key"
 	Params.CaPemPath = "../../../configs/cert/ca.pem"
 
-	err = runAndWaitForServerReady(server)
+	err := runAndWaitForServerReady(server)
 	assert.Nil(t, err)
-
+	assert.NotNil(t, server.grpcExternalServer)
 	err = server.Stop()
 	assert.Nil(t, err)
+}
+
+func Test_NewServer_TLS_OneWay(t *testing.T) {
+	server := getServer(t)
+
+	Params.InitOnce("proxy")
+	Params.TLSMode = 1
+	Params.ServerPemPath = "../../../configs/cert/server.pem"
+	Params.ServerKeyPath = "../../../configs/cert/server.key"
+
+	err := runAndWaitForServerReady(server)
+	assert.Nil(t, err)
+	assert.NotNil(t, server.grpcExternalServer)
+	err = server.Stop()
+	assert.Nil(t, err)
+}
+
+func Test_NewServer_TLS_FileNotExisted(t *testing.T) {
+	server := getServer(t)
+
+	Params.InitOnce("proxy")
+	Params.TLSMode = 1
+	Params.ServerPemPath = "../not/existed/server.pem"
+	Params.ServerKeyPath = "../../../configs/cert/server.key"
+	err := runAndWaitForServerReady(server)
+	assert.NotNil(t, err)
+	server.Stop()
+
+	Params.TLSMode = 2
+	Params.ServerPemPath = "../not/existed/server.pem"
+	Params.CaPemPath = "../../../configs/cert/ca.pem"
+	err = runAndWaitForServerReady(server)
+	assert.NotNil(t, err)
+	server.Stop()
+
+	Params.ServerPemPath = "../../../configs/cert/server.pem"
+	Params.CaPemPath = "../not/existed/ca.pem"
+	err = runAndWaitForServerReady(server)
+	assert.NotNil(t, err)
+	server.Stop()
+
+	Params.ServerPemPath = "../../../configs/cert/server.pem"
+	Params.CaPemPath = "service.go"
+	err = runAndWaitForServerReady(server)
+	assert.NotNil(t, err)
+	server.Stop()
 }
