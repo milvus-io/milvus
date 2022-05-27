@@ -516,6 +516,7 @@ func (s *Server) handleDataNodeTimetickMsgstream(ctx context.Context, ttMsgStrea
 }
 
 func (s *Server) handleTimetickMessage(ctx context.Context, ttMsg *msgstream.DataNodeTtMsg) error {
+	start := time.Now()
 	ch := ttMsg.GetChannelName()
 	ts := ttMsg.GetTimestamp()
 	physical, _ := tsoutil.ParseTS(ts)
@@ -546,7 +547,7 @@ func (s *Server) handleTimetickMessage(ctx context.Context, ttMsg *msgstream.Dat
 		return nil
 	}
 
-	log.Info("start flushing segments",
+	log.Info("issue 16984 start flushing segments",
 		zap.Int64s("segment IDs", flushableIDs),
 		zap.Int("# of stale/mark segments", len(staleSegments)))
 
@@ -560,7 +561,14 @@ func (s *Server) handleTimetickMessage(ctx context.Context, ttMsg *msgstream.Dat
 	for _, info := range staleSegments {
 		minfo = append(minfo, info.SegmentInfo)
 	}
+
+	start2 := time.Now()
 	s.cluster.Flush(s.ctx, finfo, minfo)
+	duration2 := time.Since(start2).String()
+	log.Debug("issue 16984 datacoord call cluster.Flush", zap.String("duration", duration2))
+
+	duration := time.Since(start).String()
+	log.Debug("issue 16984 datacoord handleTimetickMessage", zap.String("duration", duration))
 	return nil
 }
 

@@ -543,6 +543,7 @@ func (node *DataNode) ReadyToFlush() error {
 //
 //   One precondition: The segmentID in req is in ascending order.
 func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest) (*commonpb.Status, error) {
+	start := time.Now()
 	metrics.DataNodeFlushReqCounter.WithLabelValues(
 		fmt.Sprint(Params.DataNodeCfg.GetNodeID()),
 		MetricRequestsTotal).Inc()
@@ -556,7 +557,7 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 		return errStatus, nil
 	}
 
-	log.Info("receiving FlushSegments request",
+	log.Info("issue 16984 receiving FlushSegments request",
 		zap.Int64("collection ID", req.GetCollectionID()),
 		zap.Int64s("segments", req.GetSegmentIDs()),
 		zap.Int64s("stale segments", req.GetMarkSegmentIDs()),
@@ -600,7 +601,7 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 				flushed:      flushed,
 			}
 		}
-		log.Info("flow graph flushSegment tasks triggered",
+		log.Info("issue 16984 flow graph flushSegment tasks triggered",
 			zap.Bool("flushed", flushed),
 			zap.Int64("collection ID", req.GetCollectionID()),
 			zap.Int64s("segments", segmentIDs),
@@ -612,7 +613,7 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 	staleSeg, noErr2 := processSegments(req.GetMarkSegmentIDs(), false)
 	// Log success flushed segments.
 	if len(seg)+len(staleSeg) > 0 {
-		log.Info("sending segments to flush channel",
+		log.Info("issue 16984 sending segments to flush channel",
 			zap.Any("newly sealed segment IDs", seg),
 			zap.Any("stale segment IDs", staleSeg))
 	}
@@ -624,6 +625,8 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 	metrics.DataNodeFlushReqCounter.WithLabelValues(
 		fmt.Sprint(Params.DataNodeCfg.GetNodeID()),
 		MetricRequestsSuccess).Inc()
+	duration := time.Since(start).String()
+	log.Debug("issue 16984 datanode FlushSegments", zap.String("duration", duration))
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}, nil

@@ -23,6 +23,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 
@@ -2638,6 +2639,8 @@ func (ft *flushTask) PreExecute(ctx context.Context) error {
 }
 
 func (ft *flushTask) Execute(ctx context.Context) error {
+	start := time.Now()
+
 	coll2Segments := make(map[string]*schemapb.LongArray)
 	for _, collName := range ft.CollectionNames {
 		collID, err := globalMetaCache.GetCollectionID(ctx, collName)
@@ -2654,7 +2657,10 @@ func (ft *flushTask) Execute(ctx context.Context) error {
 			DbID:         0,
 			CollectionID: collID,
 		}
+		start2 := time.Now()
 		resp, err := ft.dataCoord.Flush(ctx, flushReq)
+		duration2 := time.Since(start2).String()
+		log.Debug("issue 16984 proxy call dataCoord.Flush", zap.String("duration", duration2))
 		if err != nil {
 			return fmt.Errorf("failed to call flush to data coordinator: %s", err.Error())
 		}
@@ -2671,6 +2677,9 @@ func (ft *flushTask) Execute(ctx context.Context) error {
 		DbName:     "",
 		CollSegIDs: coll2Segments,
 	}
+
+	duration := time.Since(start).String()
+	log.Debug("issue 16984 proxy flushTask Execute", zap.String("duration", duration))
 	return nil
 }
 
