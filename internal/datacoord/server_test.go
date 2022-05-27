@@ -853,6 +853,27 @@ func TestSaveBinlogPaths(t *testing.T) {
 		assert.EqualValues(t, segmentInfo.NumOfRows, 10)
 	})
 
+	t.Run("with channel not matched", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+		err := svr.channelManager.AddNode(0)
+		require.Nil(t, err)
+		err = svr.channelManager.Watch(&channel{"ch1", 0})
+		require.Nil(t, err)
+		s := &datapb.SegmentInfo{
+			ID:            1,
+			InsertChannel: "ch2",
+			State:         commonpb.SegmentState_Growing,
+		}
+		svr.meta.AddSegment(NewSegmentInfo(s))
+
+		resp, err := svr.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{
+			SegmentID: 1,
+		})
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_MetaFailed, resp.GetErrorCode())
+	})
+
 	t.Run("with closed server", func(t *testing.T) {
 		svr := newTestServer(t, nil)
 		closeTestServer(t, svr)
@@ -1038,7 +1059,7 @@ func TestDropVirtualChannel(t *testing.T) {
 			ChannelName: "ch2",
 		})
 		assert.Nil(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, commonpb.ErrorCode_MetaFailed, resp.GetStatus().GetErrorCode())
 	})
 
 	t.Run("with closed server", func(t *testing.T) {
