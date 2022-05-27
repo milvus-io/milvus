@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
@@ -555,8 +556,17 @@ func TestFlushNotifyFunc(t *testing.T) {
 	})
 
 	t.Run("datacoord Save fails", func(t *testing.T) {
-		dataCoord.SaveBinlogPathNotSuccess = true
+		dataCoord.SaveBinlogPathStatus = commonpb.ErrorCode_UnexpectedError
 		assert.Panics(t, func() {
+			notifyFunc(&segmentFlushPack{})
+		})
+	})
+
+	// issue https://github.com/milvus-io/milvus/issues/17097
+	// meta error, datanode shall not panic, just drop the virtual channel
+	t.Run("datacoord found meta error", func(t *testing.T) {
+		dataCoord.SaveBinlogPathStatus = commonpb.ErrorCode_MetaFailed
+		assert.NotPanics(t, func() {
 			notifyFunc(&segmentFlushPack{})
 		})
 	})
@@ -623,7 +633,7 @@ func TestDropVirtualChannelFunc(t *testing.T) {
 		})
 	})
 	t.Run("datacoord drop fails", func(t *testing.T) {
-		dataCoord.DropVirtualChannelNotSuccess = true
+		dataCoord.DropVirtualChannelStatus = commonpb.ErrorCode_UnexpectedError
 		assert.Panics(t, func() {
 			dropFunc(nil)
 		})
@@ -631,9 +641,19 @@ func TestDropVirtualChannelFunc(t *testing.T) {
 
 	t.Run("datacoord call error", func(t *testing.T) {
 
-		dataCoord.DropVirtualChannelNotSuccess = false
+		dataCoord.DropVirtualChannelStatus = commonpb.ErrorCode_UnexpectedError
 		dataCoord.DropVirtualChannelError = true
 		assert.Panics(t, func() {
+			dropFunc(nil)
+		})
+	})
+
+	// issue https://github.com/milvus-io/milvus/issues/17097
+	// meta error, datanode shall not panic, just drop the virtual channel
+	t.Run("datacoord found meta error", func(t *testing.T) {
+		dataCoord.DropVirtualChannelStatus = commonpb.ErrorCode_MetaFailed
+		dataCoord.DropVirtualChannelError = false
+		assert.NotPanics(t, func() {
 			dropFunc(nil)
 		})
 	})

@@ -686,7 +686,13 @@ func dropVirtualChannelFunc(dsService *dataSyncService, opts ...retry.Option) fl
 				return fmt.Errorf(err.Error())
 			}
 
-			// TODO should retry only when datacoord status is unhealthy
+			// meta error, datanode handles a virtual channel does not belong here
+			if rsp.GetStatus().GetErrorCode() == commonpb.ErrorCode_MetaFailed {
+				log.Warn("meta error found, skip sync and start to drop virtual channel", zap.String("channel", dsService.vchannelName))
+				return nil
+			}
+
+			// retry for other error
 			if rsp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 				return fmt.Errorf("data service DropVirtualChannel failed, reason = %s", rsp.GetStatus().GetReason())
 			}
@@ -772,7 +778,12 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 				return fmt.Errorf(err.Error())
 			}
 
-			// TODO should retry only when datacoord status is unhealthy
+			// meta error, datanode handles a virtual channel does not belong here
+			if rsp.GetErrorCode() == commonpb.ErrorCode_MetaFailed {
+				log.Warn("meta error found, skip sync and start to drop virtual channel", zap.String("channel", dsService.vchannelName))
+				return nil
+			}
+
 			if rsp.ErrorCode != commonpb.ErrorCode_Success {
 				return fmt.Errorf("data service save bin log path failed, reason = %s", rsp.Reason)
 			}

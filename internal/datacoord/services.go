@@ -335,6 +335,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	channel := segment.GetInsertChannel()
 	if !s.channelManager.Match(nodeID, channel) {
 		FailResponse(resp, fmt.Sprintf("channel %s is not watched on node %d", channel, nodeID))
+		resp.ErrorCode = commonpb.ErrorCode_MetaFailed
 		log.Warn("node is not matched with channel", zap.String("channel", channel), zap.Int64("nodeID", nodeID))
 		return resp, nil
 	}
@@ -412,6 +413,7 @@ func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 	nodeID := req.GetBase().GetSourceID()
 	if !s.channelManager.Match(nodeID, channel) {
 		FailResponse(resp.Status, fmt.Sprintf("channel %s is not watched on node %d", channel, nodeID))
+		resp.Status.ErrorCode = commonpb.ErrorCode_MetaFailed
 		log.Warn("node is not matched with channel", zap.String("channel", channel), zap.Int64("nodeID", nodeID))
 		return resp, nil
 	}
