@@ -117,4 +117,13 @@ func TestGrpcClientParams(t *testing.T) {
 	Params.initKeepAliveTimeout()
 	assert.Equal(t, Params.KeepAliveTimeout, 500*time.Millisecond)
 
+	Params.Save("common.security.tlsMode", "1")
+	Params.Save("tls.serverPemPath", "/pem")
+	Params.Save("tls.serverKeyPath", "/key")
+	Params.Save("tls.caPemPath", "/ca")
+	Params.initTLSPath()
+	assert.Equal(t, Params.TLSMode, 1)
+	assert.Equal(t, Params.ServerPemPath, "/pem")
+	assert.Equal(t, Params.ServerKeyPath, "/key")
+	assert.Equal(t, Params.CaPemPath, "/ca")
 }

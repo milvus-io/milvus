@@ -55,7 +55,7 @@ type grpcConfig struct {
 	once          sync.Once
 	Domain        string
 	IP            string
-	TLSEnabled    bool
+	TLSMode       int
 	Port          int
 	InternalPort  int
 	ServerPemPath string
@@ -89,7 +89,7 @@ func (p *grpcConfig) initPort() {
 }
 
 func (p *grpcConfig) initTLSPath() {
-	p.TLSEnabled = p.ParseBool("common.security.tlsEnabled", false)
+	p.TLSMode = p.ParseIntWithDefault("common.security.tlsMode", 0)
 	p.ServerPemPath = p.Get("tls.serverPemPath")
 	p.ServerKeyPath = p.Get("tls.serverKeyPath")
 	p.CaPemPath = p.Get("tls.caPemPath")
