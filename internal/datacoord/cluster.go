@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
@@ -81,6 +82,7 @@ func (c *Cluster) Watch(ch string, collectionID UniqueID) error {
 
 // Flush sends flush requests to corresponding dataNodes according to channels where segments are assigned to.
 func (c *Cluster) Flush(ctx context.Context, segments []*datapb.SegmentInfo, markSegments []*datapb.SegmentInfo) {
+	start := time.Now()
 	channels := c.channelManager.GetChannels()
 	nodeSegments := make(map[int64][]int64)
 	nodeMarks := make(map[int64][]int64)
@@ -131,12 +133,14 @@ func (c *Cluster) Flush(ctx context.Context, segments []*datapb.SegmentInfo, mar
 			SegmentIDs:     segments,
 			MarkSegmentIDs: marks,
 		}
-		log.Info("calling dataNode to flush",
+		log.Info("issue 16984 calling dataNode to flush",
 			zap.Int64("dataNode ID", nodeID),
 			zap.Int64s("segments", segments),
 			zap.Int64s("marks", marks))
 		c.sessionManager.Flush(ctx, nodeID, req)
 	}
+	duration := time.Since(start).String()
+	log.Debug("issue 16984 datacoord Flush", zap.String("duration", duration))
 }
 
 // Import sends import requests to DataNodes whose ID==nodeID.

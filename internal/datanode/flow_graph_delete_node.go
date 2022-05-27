@@ -22,6 +22,7 @@ import (
 	"math"
 	"reflect"
 	"sync"
+	"time"
 
 	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
@@ -106,7 +107,7 @@ func (dn *deleteNode) Close() {
 }
 
 func (dn *deleteNode) bufferDeleteMsg(msg *msgstream.DeleteMsg, tr TimeRange) error {
-	log.Debug("bufferDeleteMsg", zap.Any("primary keys", msg.PrimaryKeys), zap.String("vChannelName", dn.channelName))
+	//log.Debug("bufferDeleteMsg", zap.Any("primary keys", msg.PrimaryKeys), zap.String("vChannelName", dn.channelName))
 
 	// Update delBuf for merged segments
 	compactedTo2From := dn.replica.listCompactedSegmentIDs()
@@ -148,11 +149,11 @@ func (dn *deleteNode) bufferDeleteMsg(msg *msgstream.DeleteMsg, tr TimeRange) er
 		for i := 0; i < rows; i++ {
 			delData.Pks = append(delData.Pks, pks[i])
 			delData.Tss = append(delData.Tss, tss[i])
-			log.Debug("delete",
-				zap.Any("primary key", pks[i]),
-				zap.Uint64("ts", tss[i]),
-				zap.Int64("segmentID", segID),
-				zap.String("vChannelName", dn.channelName))
+			//log.Debug("delete",
+			//	zap.Any("primary key", pks[i]),
+			//	zap.Uint64("ts", tss[i]),
+			//	zap.Int64("segmentID", segID),
+			//	zap.String("vChannelName", dn.channelName))
 		}
 
 		// store
@@ -178,12 +179,12 @@ func (dn *deleteNode) showDelBuf() {
 			// TODO control the printed length
 			length := len(delDataBuf.delData.Pks)
 			for i := 0; i < length; i++ {
-				log.Debug("del data",
-					zap.Any("pk", delDataBuf.delData.Pks[i]),
-					zap.Uint64("ts", delDataBuf.delData.Tss[i]),
-					zap.Int64("segment ID", segID),
-					zap.String("vChannel", dn.channelName),
-				)
+				//log.Debug("del data",
+				//	zap.Any("pk", delDataBuf.delData.Pks[i]),
+				//	zap.Uint64("ts", delDataBuf.delData.Tss[i]),
+				//	zap.Int64("segment ID", segID),
+				//	zap.String("vChannel", dn.channelName),
+				//)
 			}
 		} else {
 			log.Debug("segment not exist",
@@ -196,6 +197,7 @@ func (dn *deleteNode) showDelBuf() {
 // Operate implementing flowgraph.Node, performs delete data process
 func (dn *deleteNode) Operate(in []Msg) []Msg {
 	//log.Debug("deleteNode Operating")
+	start := time.Now()
 
 	if len(in) != 1 {
 		log.Error("Invalid operate message input in deleteNode", zap.Int("input length", len(in)))
@@ -239,7 +241,7 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 
 	// handle flush
 	if len(fgMsg.segmentsToFlush) > 0 {
-		log.Debug("DeleteNode receives flush message",
+		log.Debug("issue 16984 DeleteNode receives flush message",
 			zap.Int64s("segIDs", fgMsg.segmentsToFlush),
 			zap.String("vChannelName", dn.channelName))
 		for _, segmentToFlush := range fgMsg.segmentsToFlush {
@@ -272,6 +274,9 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 	for _, sp := range spans {
 		sp.Finish()
 	}
+
+	duration := time.Since(start).String()
+	log.Debug("issue 16984 deleteNode Operating", zap.String("duration", duration))
 	return nil
 }
 
