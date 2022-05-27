@@ -33,6 +33,7 @@
 #include <google/protobuf/extension_set.h>  // IWYU pragma: export
 #include <google/protobuf/generated_enum_reflection.h>
 #include <google/protobuf/unknown_field_set.h>
+#include <google/protobuf/descriptor.pb.h>
 // @@protoc_insertion_point(includes)
 #include <google/protobuf/port_def.inc>
 #define PROTOBUF_INTERNAL_EXPORT_common_2eproto
@@ -48,7 +49,7 @@ struct TableStruct_common_2eproto {
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::AuxillaryParseTableField aux[]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
-  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[10]
+  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[11]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::FieldMetadata field_metadata[];
   static const ::PROTOBUF_NAMESPACE_ID::internal::SerializationTable serialization_table[];
@@ -85,6 +86,9 @@ extern PlaceholderGroupDefaultTypeInternal _PlaceholderGroup_default_instance_;
 class PlaceholderValue;
 class PlaceholderValueDefaultTypeInternal;
 extern PlaceholderValueDefaultTypeInternal _PlaceholderValue_default_instance_;
+class PrivilegeExt;
+class PrivilegeExtDefaultTypeInternal;
+extern PrivilegeExtDefaultTypeInternal _PrivilegeExt_default_instance_;
 class Status;
 class StatusDefaultTypeInternal;
 extern StatusDefaultTypeInternal _Status_default_instance_;
@@ -101,6 +105,7 @@ template<> ::milvus::proto::common::MsgBase* Arena::CreateMaybeMessage<::milvus:
 template<> ::milvus::proto::common::MsgHeader* Arena::CreateMaybeMessage<::milvus::proto::common::MsgHeader>(Arena*);
 template<> ::milvus::proto::common::PlaceholderGroup* Arena::CreateMaybeMessage<::milvus::proto::common::PlaceholderGroup>(Arena*);
 template<> ::milvus::proto::common::PlaceholderValue* Arena::CreateMaybeMessage<::milvus::proto::common::PlaceholderValue>(Arena*);
+template<> ::milvus::proto::common::PrivilegeExt* Arena::CreateMaybeMessage<::milvus::proto::common::PrivilegeExt>(Arena*);
 template<> ::milvus::proto::common::Status* Arena::CreateMaybeMessage<::milvus::proto::common::Status>(Arena*);
 PROTOBUF_NAMESPACE_CLOSE
 namespace milvus {
@@ -141,8 +146,19 @@ enum ErrorCode : int {
   DeleteCredentialFailure = 31,
   GetCredentialFailure = 32,
   ListCredUsersFailure = 33,
-  NotShardLeader = 34,
-  NoReplicaAvailable = 35,
+  GetUserFailure = 34,
+  CreateRoleFailure = 35,
+  DropRoleFailure = 36,
+  OperateUserRoleFailure = 37,
+  SelectRoleFailure = 38,
+  SelectUserFailure = 39,
+  SelectResourceFailure = 40,
+  OperatePrivilegeFailure = 41,
+  SelectGrantFailure = 42,
+  RefreshPolicyInfoCacheFailure = 43,
+  ListPolicyFailure = 44,
+  NotShardLeader = 45,
+  NoReplicaAvailable = 46,
   DDRequestRace = 1000,
   ErrorCode_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
   ErrorCode_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
@@ -319,12 +335,22 @@ enum MsgType : int {
   DeleteCredential = 1502,
   UpdateCredential = 1503,
   ListCredUsernames = 1504,
+  CreateRole = 1600,
+  DropRole = 1601,
+  OperateUserRole = 1602,
+  SelectRole = 1603,
+  SelectUser = 1604,
+  SelectResource = 1605,
+  OperatePrivilege = 1606,
+  SelectGrant = 1607,
+  RefreshPolicyInfoCache = 1608,
+  ListPolicy = 1609,
   MsgType_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
   MsgType_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
 };
 bool MsgType_IsValid(int value);
 constexpr MsgType MsgType_MIN = Undefined;
-constexpr MsgType MsgType_MAX = ListCredUsernames;
+constexpr MsgType MsgType_MAX = ListPolicy;
 constexpr int MsgType_ARRAYSIZE = MsgType_MAX + 1;
 
 const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* MsgType_descriptor();
@@ -449,6 +475,63 @@ inline bool ImportState_Parse(
     const std::string& name, ImportState* value) {
   return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<ImportState>(
     ImportState_descriptor(), name, value);
+}
+enum ResourceType : int {
+  Collection = 0,
+  ResourceType_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
+  ResourceType_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
+};
+bool ResourceType_IsValid(int value);
+constexpr ResourceType ResourceType_MIN = Collection;
+constexpr ResourceType ResourceType_MAX = Collection;
+constexpr int ResourceType_ARRAYSIZE = ResourceType_MAX + 1;
+
+const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* ResourceType_descriptor();
+template<typename T>
+inline const std::string& ResourceType_Name(T enum_t_value) {
+  static_assert(::std::is_same<T, ResourceType>::value ||
+    ::std::is_integral<T>::value,
+    "Incorrect type passed to function ResourceType_Name.");
+  return ::PROTOBUF_NAMESPACE_ID::internal::NameOfEnum(
+    ResourceType_descriptor(), enum_t_value);
+}
+inline bool ResourceType_Parse(
+    const std::string& name, ResourceType* value) {
+  return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<ResourceType>(
+    ResourceType_descriptor(), name, value);
+}
+enum ResourcePrivilege : int {
+  PrivilegeAll = 0,
+  PrivilegeCreate = 1,
+  PrivilegeDrop = 2,
+  PrivilegeAlter = 3,
+  PrivilegeRead = 4,
+  PrivilegeLoad = 5,
+  PrivilegeRelease = 6,
+  PrivilegeCompact = 7,
+  PrivilegeInsert = 8,
+  PrivilegeDelete = 9,
+  ResourcePrivilege_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
+  ResourcePrivilege_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
+};
+bool ResourcePrivilege_IsValid(int value);
+constexpr ResourcePrivilege ResourcePrivilege_MIN = PrivilegeAll;
+constexpr ResourcePrivilege ResourcePrivilege_MAX = PrivilegeDelete;
+constexpr int ResourcePrivilege_ARRAYSIZE = ResourcePrivilege_MAX + 1;
+
+const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* ResourcePrivilege_descriptor();
+template<typename T>
+inline const std::string& ResourcePrivilege_Name(T enum_t_value) {
+  static_assert(::std::is_same<T, ResourcePrivilege>::value ||
+    ::std::is_integral<T>::value,
+    "Incorrect type passed to function ResourcePrivilege_Name.");
+  return ::PROTOBUF_NAMESPACE_ID::internal::NameOfEnum(
+    ResourcePrivilege_descriptor(), enum_t_value);
+}
+inline bool ResourcePrivilege_Parse(
+    const std::string& name, ResourcePrivilege* value) {
+  return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<ResourcePrivilege>(
+    ResourcePrivilege_descriptor(), name, value);
 }
 // ===================================================================
 
@@ -1908,8 +1991,157 @@ class DMLMsgHeader :
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_common_2eproto;
 };
+// -------------------------------------------------------------------
+
+class PrivilegeExt :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.common.PrivilegeExt) */ {
+ public:
+  PrivilegeExt();
+  virtual ~PrivilegeExt();
+
+  PrivilegeExt(const PrivilegeExt& from);
+  PrivilegeExt(PrivilegeExt&& from) noexcept
+    : PrivilegeExt() {
+    *this = ::std::move(from);
+  }
+
+  inline PrivilegeExt& operator=(const PrivilegeExt& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline PrivilegeExt& operator=(PrivilegeExt&& from) noexcept {
+    if (GetArenaNoVirtual() == from.GetArenaNoVirtual()) {
+      if (this != &from) InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
+    return GetDescriptor();
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
+    return GetMetadataStatic().descriptor;
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
+    return GetMetadataStatic().reflection;
+  }
+  static const PrivilegeExt& default_instance();
+
+  static void InitAsDefaultInstance();  // FOR INTERNAL USE ONLY
+  static inline const PrivilegeExt* internal_default_instance() {
+    return reinterpret_cast<const PrivilegeExt*>(
+               &_PrivilegeExt_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    10;
+
+  friend void swap(PrivilegeExt& a, PrivilegeExt& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(PrivilegeExt* other) {
+    if (other == this) return;
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  inline PrivilegeExt* New() const final {
+    return CreateMaybeMessage<PrivilegeExt>(nullptr);
+  }
+
+  PrivilegeExt* New(::PROTOBUF_NAMESPACE_ID::Arena* arena) const final {
+    return CreateMaybeMessage<PrivilegeExt>(arena);
+  }
+  void CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void CopyFrom(const PrivilegeExt& from);
+  void MergeFrom(const PrivilegeExt& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  #if GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  #else
+  bool MergePartialFromCodedStream(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedInputStream* input) final;
+  #endif  // GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  void SerializeWithCachedSizes(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream* output) const final;
+  ::PROTOBUF_NAMESPACE_ID::uint8* InternalSerializeWithCachedSizesToArray(
+      ::PROTOBUF_NAMESPACE_ID::uint8* target) const final;
+  int GetCachedSize() const final { return _cached_size_.Get(); }
+
+  private:
+  inline void SharedCtor();
+  inline void SharedDtor();
+  void SetCachedSize(int size) const final;
+  void InternalSwap(PrivilegeExt* other);
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "milvus.proto.common.PrivilegeExt";
+  }
+  private:
+  inline ::PROTOBUF_NAMESPACE_ID::Arena* GetArenaNoVirtual() const {
+    return nullptr;
+  }
+  inline void* MaybeArenaPtr() const {
+    return nullptr;
+  }
+  public:
+
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  private:
+  static ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadataStatic() {
+    ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&::descriptor_table_common_2eproto);
+    return ::descriptor_table_common_2eproto.file_level_metadata[kIndexInFileMessages];
+  }
+
+  public:
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kResourceTypeFieldNumber = 1,
+    kResourcePrivilegeFieldNumber = 2,
+    kResourceNameIndexFieldNumber = 3,
+  };
+  // .milvus.proto.common.ResourceType resource_type = 1;
+  void clear_resource_type();
+  ::milvus::proto::common::ResourceType resource_type() const;
+  void set_resource_type(::milvus::proto::common::ResourceType value);
+
+  // .milvus.proto.common.ResourcePrivilege resource_privilege = 2;
+  void clear_resource_privilege();
+  ::milvus::proto::common::ResourcePrivilege resource_privilege() const;
+  void set_resource_privilege(::milvus::proto::common::ResourcePrivilege value);
+
+  // int32 resource_name_index = 3;
+  void clear_resource_name_index();
+  ::PROTOBUF_NAMESPACE_ID::int32 resource_name_index() const;
+  void set_resource_name_index(::PROTOBUF_NAMESPACE_ID::int32 value);
+
+  // @@protoc_insertion_point(class_scope:milvus.proto.common.PrivilegeExt)
+ private:
+  class _Internal;
+
+  ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  int resource_type_;
+  int resource_privilege_;
+  ::PROTOBUF_NAMESPACE_ID::int32 resource_name_index_;
+  mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  friend struct ::TableStruct_common_2eproto;
+};
 // ===================================================================
 
+static const int kPrivilegeExtObjFieldNumber = 1001;
+extern ::PROTOBUF_NAMESPACE_ID::internal::ExtensionIdentifier< ::google::protobuf::MessageOptions,
+    ::PROTOBUF_NAMESPACE_ID::internal::MessageTypeTraits< ::milvus::proto::common::PrivilegeExt >, 11, false >
+  privilege_ext_obj;
 
 // ===================================================================
 
@@ -2709,9 +2941,57 @@ inline void DMLMsgHeader::set_allocated_shardname(std::string* shardname) {
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.common.DMLMsgHeader.shardName)
 }
 
+// -------------------------------------------------------------------
+
+// PrivilegeExt
+
+// .milvus.proto.common.ResourceType resource_type = 1;
+inline void PrivilegeExt::clear_resource_type() {
+  resource_type_ = 0;
+}
+inline ::milvus::proto::common::ResourceType PrivilegeExt::resource_type() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.common.PrivilegeExt.resource_type)
+  return static_cast< ::milvus::proto::common::ResourceType >(resource_type_);
+}
+inline void PrivilegeExt::set_resource_type(::milvus::proto::common::ResourceType value) {
+  
+  resource_type_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.common.PrivilegeExt.resource_type)
+}
+
+// .milvus.proto.common.ResourcePrivilege resource_privilege = 2;
+inline void PrivilegeExt::clear_resource_privilege() {
+  resource_privilege_ = 0;
+}
+inline ::milvus::proto::common::ResourcePrivilege PrivilegeExt::resource_privilege() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.common.PrivilegeExt.resource_privilege)
+  return static_cast< ::milvus::proto::common::ResourcePrivilege >(resource_privilege_);
+}
+inline void PrivilegeExt::set_resource_privilege(::milvus::proto::common::ResourcePrivilege value) {
+  
+  resource_privilege_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.common.PrivilegeExt.resource_privilege)
+}
+
+// int32 resource_name_index = 3;
+inline void PrivilegeExt::clear_resource_name_index() {
+  resource_name_index_ = 0;
+}
+inline ::PROTOBUF_NAMESPACE_ID::int32 PrivilegeExt::resource_name_index() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.common.PrivilegeExt.resource_name_index)
+  return resource_name_index_;
+}
+inline void PrivilegeExt::set_resource_name_index(::PROTOBUF_NAMESPACE_ID::int32 value) {
+  
+  resource_name_index_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.common.PrivilegeExt.resource_name_index)
+}
+
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
+// -------------------------------------------------------------------
+
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------
@@ -2783,6 +3063,16 @@ template <> struct is_proto_enum< ::milvus::proto::common::ImportState> : ::std:
 template <>
 inline const EnumDescriptor* GetEnumDescriptor< ::milvus::proto::common::ImportState>() {
   return ::milvus::proto::common::ImportState_descriptor();
+}
+template <> struct is_proto_enum< ::milvus::proto::common::ResourceType> : ::std::true_type {};
+template <>
+inline const EnumDescriptor* GetEnumDescriptor< ::milvus::proto::common::ResourceType>() {
+  return ::milvus::proto::common::ResourceType_descriptor();
+}
+template <> struct is_proto_enum< ::milvus::proto::common::ResourcePrivilege> : ::std::true_type {};
+template <>
+inline const EnumDescriptor* GetEnumDescriptor< ::milvus::proto::common::ResourcePrivilege>() {
+  return ::milvus::proto::common::ResourcePrivilege_descriptor();
 }
 
 PROTOBUF_NAMESPACE_CLOSE

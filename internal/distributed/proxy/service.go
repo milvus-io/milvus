@@ -844,3 +844,48 @@ func (s *Server) DeleteCredential(ctx context.Context, req *milvuspb.DeleteCrede
 func (s *Server) ListCredUsers(ctx context.Context, req *milvuspb.ListCredUsersRequest) (*milvuspb.ListCredUsersResponse, error) {
 	return s.proxy.ListCredUsers(ctx, req)
 }
+
+func (s *Server) CreateRole(ctx context.Context, request *milvuspb.CreateRoleRequest) (*commonpb.Status, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s *Server) DropRole(ctx context.Context, request *milvuspb.DropRoleRequest) (*commonpb.Status, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s *Server) OperateUserRole(ctx context.Context, request *milvuspb.OperateUserRoleRequest) (*commonpb.Status, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s *Server) SelectRole(ctx context.Context, request *milvuspb.SelectRoleRequest) (*milvuspb.SelectRoleResponse, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s *Server) SelectUser(ctx context.Context, request *milvuspb.SelectUserRequest) (*milvuspb.SelectUserResponse, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s *Server) SelectResource(ctx context.Context, request *milvuspb.SelectResourceRequest) (*milvuspb.SelectResourceResponse, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s *Server) OperatePrivilege(ctx context.Context, request *milvuspb.OperatePrivilegeRequest) (*commonpb.Status, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s *Server) SelectGrant(ctx context.Context, request *milvuspb.SelectGrantRequest) (*milvuspb.SelectGrantResponse, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s *Server) RefreshPolicyInfoCache(ctx context.Context, request *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error) {
+	//TODO implement me
+	panic("implement me")
+}

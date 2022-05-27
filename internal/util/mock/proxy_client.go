@@ -70,3 +70,7 @@ func (m *ProxyClient) UpdateCredentialCache(ctx context.Context, in *proxypb.Upd
 func (m *ProxyClient) ClearCredUsersCache(ctx context.Context, in *internalpb.ClearCredUsersCacheRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }
+
+func (m *ProxyClient) RefreshPolicyInfoCache(ctx context.Context, in *proxypb.RefreshPolicyInfoCacheRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
