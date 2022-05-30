@@ -57,7 +57,6 @@ jobs:
           shell: bash
           command: |
             pip install -r tests/python_client/requirements.txt --trusted-host https://test.pypi.org
-            pip install --upgrade protobuf
 
       - name: Deploy Chaos Mesh
         timeout-minutes: 2

@@ -297,7 +297,6 @@ jobs:
         working-directory: tests/python_client/deploy
         run: |
           # uninstall milvus
-          if [[ $(date +%w) -eq 0 || $(data +%w) -eq 6 ]]; then sleep 1800s; fi
           if [ ${{ matrix.mode }} == "standalone" ];
           then
             kubectl delete pod -l app.kubernetes.io/instance=deploy-testing --grace-period=0 --force;
