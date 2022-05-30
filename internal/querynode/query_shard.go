@@ -127,15 +127,7 @@ func (tp tsType) String() string {
 	return ""
 }
 
-func (q *queryShard) getServiceableTime(tp tsType) (Timestamp, error) {
-	var channel string
-	switch tp {
-	case tsTypeDML:
-		channel = q.channel
-	case tsTypeDelta:
-		channel = q.deltaChannel
-	}
-
+func (q *queryShard) getServiceableTime(channel Channel) (Timestamp, error) {
 	ts, err := q.tSafeReplica.getTSafe(channel)
 	if err != nil {
 		return 0, err

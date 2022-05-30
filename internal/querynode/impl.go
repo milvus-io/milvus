@@ -579,7 +579,12 @@ func (node *QueryNode) Search(ctx context.Context, req *queryPb.SearchRequest) (
 		return failRet, nil
 	}
 
-	log.Debug("Received SearchRequest", zap.String("vchannel", req.GetDmlChannel()), zap.Int64s("segmentIDs", req.GetSegmentIDs()))
+	log.Debug("Received SearchRequest",
+		zap.Int64("msgID", req.GetReq().GetBase().GetMsgID()),
+		zap.String("vChannel", req.GetDmlChannel()),
+		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
+		zap.Uint64("guaranteeTimestamp", req.GetReq().GetGuaranteeTimestamp()),
+		zap.Uint64("timeTravel", req.GetReq().GetTravelTimestamp()))
 
 	if node.queryShardService == nil {
 		failRet.Status.Reason = "queryShardService is nil"
@@ -739,7 +744,13 @@ func (node *QueryNode) Query(ctx context.Context, req *queryPb.QueryRequest) (*i
 		failRet.Status.Reason = msgQueryNodeIsUnhealthy(Params.QueryNodeCfg.GetNodeID())
 		return failRet, nil
 	}
-	log.Debug("Received QueryRequest", zap.String("vchannel", req.GetDmlChannel()), zap.Int64s("segmentIDs", req.GetSegmentIDs()))
+
+	log.Debug("Received QueryRequest",
+		zap.Int64("msgID", req.GetReq().GetBase().GetMsgID()),
+		zap.String("vChannel", req.GetDmlChannel()),
+		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
+		zap.Uint64("guaranteeTimestamp", req.GetReq().GetGuaranteeTimestamp()),
+		zap.Uint64("timeTravel", req.GetReq().GetTravelTimestamp()))
 
 	if node.queryShardService == nil {
 		failRet.Status.Reason = "queryShardService is nil"
