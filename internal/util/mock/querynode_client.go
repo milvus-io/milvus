@@ -19,77 +19,96 @@ package mock
 import (
 	"context"
 
-	"google.golang.org/grpc"
-
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/types"
 )
 
+var _ types.QueryNode = &QueryNodeClient{}
+
 type QueryNodeClient struct {
-	Err error
+	grpcClient *GrpcQueryNodeClient
+	Err        error
 }
 
-func (m *QueryNodeClient) GetComponentStates(ctx context.Context, in *internalpb.GetComponentStatesRequest, opts ...grpc.CallOption) (*internalpb.ComponentStates, error) {
-	return &internalpb.ComponentStates{}, m.Err
+func (q QueryNodeClient) Init() error {
+	return nil
 }
 
-func (m *QueryNodeClient) GetTimeTickChannel(ctx context.Context, in *internalpb.GetTimeTickChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error) {
-	return &milvuspb.StringResponse{}, m.Err
-}
-func (m *QueryNodeClient) GetStatisticsChannel(ctx context.Context, in *internalpb.GetStatisticsChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error) {
-	return &milvuspb.StringResponse{}, m.Err
+func (q QueryNodeClient) Start() error {
+	return nil
 }
 
-func (m *QueryNodeClient) AddQueryChannel(ctx context.Context, in *querypb.AddQueryChannelRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.Err
+func (q QueryNodeClient) Stop() error {
+	return nil
 }
 
-func (m *QueryNodeClient) RemoveQueryChannel(ctx context.Context, in *querypb.RemoveQueryChannelRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.Err
+func (q QueryNodeClient) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+	return q.grpcClient.GetComponentStates(ctx, &internalpb.GetComponentStatesRequest{})
 }
 
-func (m *QueryNodeClient) WatchDmChannels(ctx context.Context, in *querypb.WatchDmChannelsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.Err
+func (q QueryNodeClient) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+	return q.grpcClient.GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
 }
 
-func (m *QueryNodeClient) WatchDeltaChannels(ctx context.Context, in *querypb.WatchDeltaChannelsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.Err
+func (q QueryNodeClient) Register() error {
+	return nil
 }
 
-func (m *QueryNodeClient) LoadSegments(ctx context.Context, in *querypb.LoadSegmentsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.Err
+func (q QueryNodeClient) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+	return q.grpcClient.GetTimeTickChannel(ctx, &internalpb.GetTimeTickChannelRequest{})
 }
 
-func (m *QueryNodeClient) ReleaseCollection(ctx context.Context, in *querypb.ReleaseCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.Err
+func (q QueryNodeClient) AddQueryChannel(ctx context.Context, req *querypb.AddQueryChannelRequest) (*commonpb.Status, error) {
+	return q.grpcClient.AddQueryChannel(ctx, req)
 }
 
-func (m *QueryNodeClient) ReleasePartitions(ctx context.Context, in *querypb.ReleasePartitionsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.Err
+func (q QueryNodeClient) RemoveQueryChannel(ctx context.Context, req *querypb.RemoveQueryChannelRequest) (*commonpb.Status, error) {
+	return q.grpcClient.RemoveQueryChannel(ctx, req)
 }
 
-func (m *QueryNodeClient) ReleaseSegments(ctx context.Context, in *querypb.ReleaseSegmentsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.Err
+func (q QueryNodeClient) WatchDmChannels(ctx context.Context, req *querypb.WatchDmChannelsRequest) (*commonpb.Status, error) {
+	return q.grpcClient.WatchDmChannels(ctx, req)
 }
 
-func (m *QueryNodeClient) GetSegmentInfo(ctx context.Context, in *querypb.GetSegmentInfoRequest, opts ...grpc.CallOption) (*querypb.GetSegmentInfoResponse, error) {
-	return &querypb.GetSegmentInfoResponse{}, m.Err
+func (q QueryNodeClient) WatchDeltaChannels(ctx context.Context, req *querypb.WatchDeltaChannelsRequest) (*commonpb.Status, error) {
+	return q.grpcClient.WatchDeltaChannels(ctx, req)
 }
 
-func (m *QueryNodeClient) Search(ctx context.Context, in *querypb.SearchRequest, opts ...grpc.CallOption) (*internalpb.SearchResults, error) {
-	return &internalpb.SearchResults{}, m.Err
+func (q QueryNodeClient) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) (*commonpb.Status, error) {
+	return q.grpcClient.LoadSegments(ctx, req)
 }
 
-func (m *QueryNodeClient) Query(ctx context.Context, in *querypb.QueryRequest, opts ...grpc.CallOption) (*internalpb.RetrieveResults, error) {
-	return &internalpb.RetrieveResults{}, m.Err
+func (q QueryNodeClient) ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
+	return q.grpcClient.ReleaseCollection(ctx, req)
 }
 
-func (m *QueryNodeClient) SyncReplicaSegments(ctx context.Context, in *querypb.SyncReplicaSegmentsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.Err
+func (q QueryNodeClient) ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
+	return q.grpcClient.ReleasePartitions(ctx, req)
 }
 
-func (m *QueryNodeClient) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest, opts ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error) {
-	return &milvuspb.GetMetricsResponse{}, m.Err
+func (q QueryNodeClient) ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest) (*commonpb.Status, error) {
+	return q.grpcClient.ReleaseSegments(ctx, req)
+}
+
+func (q QueryNodeClient) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
+	return q.grpcClient.GetSegmentInfo(ctx, req)
+}
+
+func (q QueryNodeClient) Search(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error) {
+	return q.grpcClient.Search(ctx, req)
+}
+
+func (q QueryNodeClient) Query(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
+	return q.grpcClient.Query(ctx, req)
+}
+
+func (q QueryNodeClient) SyncReplicaSegments(ctx context.Context, req *querypb.SyncReplicaSegmentsRequest) (*commonpb.Status, error) {
+	return q.grpcClient.SyncReplicaSegments(ctx, req)
+}
+
+func (q QueryNodeClient) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	return q.grpcClient.GetMetrics(ctx, req)
 }

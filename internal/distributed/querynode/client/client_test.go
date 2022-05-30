@@ -109,42 +109,42 @@ func Test_NewClient(t *testing.T) {
 		retCheck(retNotNil, r16, err)
 	}
 
-	client.grpcClient = &mock.ClientBase{
+	client.grpcClient = &mock.GRPCClientBase{
 		GetGrpcClientErr: errors.New("dummy"),
 	}
 
 	newFunc1 := func(cc *grpc.ClientConn) interface{} {
-		return &mock.QueryNodeClient{Err: nil}
+		return &mock.GrpcQueryNodeClient{Err: nil}
 	}
 	client.grpcClient.SetNewGrpcClientFunc(newFunc1)
 
 	checkFunc(false)
 
-	client.grpcClient = &mock.ClientBase{
+	client.grpcClient = &mock.GRPCClientBase{
 		GetGrpcClientErr: nil,
 	}
 
 	newFunc2 := func(cc *grpc.ClientConn) interface{} {
-		return &mock.QueryNodeClient{Err: errors.New("dummy")}
+		return &mock.GrpcQueryNodeClient{Err: errors.New("dummy")}
 	}
 
 	client.grpcClient.SetNewGrpcClientFunc(newFunc2)
 
 	checkFunc(false)
 
-	client.grpcClient = &mock.ClientBase{
+	client.grpcClient = &mock.GRPCClientBase{
 		GetGrpcClientErr: nil,
 	}
 
 	newFunc3 := func(cc *grpc.ClientConn) interface{} {
-		return &mock.QueryNodeClient{Err: nil}
+		return &mock.GrpcQueryNodeClient{Err: nil}
 	}
 	client.grpcClient.SetNewGrpcClientFunc(newFunc3)
 
 	checkFunc(true)
 
 	// ctx canceled
-	client.grpcClient = &mock.ClientBase{
+	client.grpcClient = &mock.GRPCClientBase{
 		GetGrpcClientErr: nil,
 	}
 	client.grpcClient.SetNewGrpcClientFunc(newFunc1)

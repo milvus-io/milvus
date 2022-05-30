@@ -86,33 +86,33 @@ func Test_NewClient(t *testing.T) {
 		retCheck(retNotNil, r5, err)
 	}
 
-	client.grpcClient = &mock.ClientBase{
+	client.grpcClient = &mock.GRPCClientBase{
 		GetGrpcClientErr: errors.New("dummy"),
 	}
 
 	newFunc1 := func(cc *grpc.ClientConn) interface{} {
-		return &mock.IndexNodeClient{Err: nil}
+		return &mock.GrpcIndexNodeClient{Err: nil}
 	}
 	client.grpcClient.SetNewGrpcClientFunc(newFunc1)
 
 	checkFunc(false)
 
-	client.grpcClient = &mock.ClientBase{
+	client.grpcClient = &mock.GRPCClientBase{
 		GetGrpcClientErr: nil,
 	}
 
 	newFunc2 := func(cc *grpc.ClientConn) interface{} {
-		return &mock.IndexNodeClient{Err: errors.New("dummy")}
+		return &mock.GrpcIndexNodeClient{Err: errors.New("dummy")}
 	}
 	client.grpcClient.SetNewGrpcClientFunc(newFunc2)
 	checkFunc(false)
 
-	client.grpcClient = &mock.ClientBase{
+	client.grpcClient = &mock.GRPCClientBase{
 		GetGrpcClientErr: nil,
 	}
 
 	newFunc3 := func(cc *grpc.ClientConn) interface{} {
-		return &mock.IndexNodeClient{Err: nil}
+		return &mock.GrpcIndexNodeClient{Err: nil}
 	}
 	client.grpcClient.SetNewGrpcClientFunc(newFunc3)
 	checkFunc(true)
