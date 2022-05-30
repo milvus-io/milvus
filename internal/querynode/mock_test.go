@@ -338,7 +338,7 @@ func loadIndexForSegment(ctx context.Context, node *QueryNode, segmentID UniqueI
 		},
 	}
 
-	err = loader.loadSegment(req, segmentTypeSealed)
+	err = loader.LoadSegment(req, segmentTypeSealed)
 	if err != nil {
 		return err
 	}
