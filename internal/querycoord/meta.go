@@ -897,7 +897,7 @@ func (m *MetaReplica) getCollectionInfoByID(collectionID UniqueID) (*querypb.Col
 		return proto.Clone(info).(*querypb.CollectionInfo), nil
 	}
 
-	return nil, fmt.Errorf("getCollectionInfoByID: can't find collectionID=%v in collectionInfo", collectionID)
+	return nil, fmt.Errorf("collection not found, maybe not loaded")
 }
 
 func (m *MetaReplica) getPartitionStatesByID(collectionID UniqueID, partitionID UniqueID) (*querypb.PartitionStates, error) {
