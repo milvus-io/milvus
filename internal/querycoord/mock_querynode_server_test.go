@@ -63,8 +63,6 @@ type queryNodeServerMock struct {
 	queryNodeID   int64
 
 	rwmutex             sync.RWMutex // guard for all modification
-	addQueryChannels    rpcHandler
-	removeQueryChannels rpcHandler
 	watchDmChannels     rpcHandler
 	watchDeltaChannels  rpcHandler
 	loadSegment         rpcHandler
@@ -88,8 +86,6 @@ func newQueryNodeServerMock(ctx context.Context) *queryNodeServerMock {
 		grpcErrChan: make(chan error),
 
 		rwmutex:             sync.RWMutex{},
-		addQueryChannels:    returnSuccessResult,
-		removeQueryChannels: returnSuccessResult,
 		watchDmChannels:     returnSuccessResult,
 		watchDeltaChannels:  returnSuccessResult,
 		loadSegment:         returnSuccessResult,
@@ -201,14 +197,6 @@ func (qs *queryNodeServerMock) GetComponentStates(ctx context.Context, req *inte
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
 	}, nil
-}
-
-func (qs *queryNodeServerMock) AddQueryChannel(ctx context.Context, req *querypb.AddQueryChannelRequest) (*commonpb.Status, error) {
-	return qs.addQueryChannels()
-}
-
-func (qs *queryNodeServerMock) RemoveQueryChannel(ctx context.Context, req *querypb.RemoveQueryChannelRequest) (*commonpb.Status, error) {
-	return qs.removeQueryChannels()
 }
 
 func (qs *queryNodeServerMock) WatchDmChannels(ctx context.Context, req *querypb.WatchDmChannelsRequest) (*commonpb.Status, error) {

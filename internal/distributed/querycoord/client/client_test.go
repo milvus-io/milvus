@@ -90,9 +90,6 @@ func Test_NewClient(t *testing.T) {
 		r10, err := client.ReleaseCollection(ctx, nil)
 		retCheck(retNotNil, r10, err)
 
-		r11, err := client.CreateQueryChannel(ctx, nil)
-		retCheck(retNotNil, r11, err)
-
 		r12, err := client.ShowPartitions(ctx, nil)
 		retCheck(retNotNil, r12, err)
 

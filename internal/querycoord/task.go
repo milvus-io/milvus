@@ -182,7 +182,7 @@ func (bt *baseTask) getParentTask() task {
 }
 
 // GetChildTask function returns all the child tasks of the trigger task
-// Child task may be loadSegmentTask, watchDmChannelTask or watchQueryChannelTask
+// Child task may be loadSegmentTask or watchDmChannelTask
 func (bt *baseTask) getChildTask() []task {
 	bt.childTasksMu.RLock()
 	defer bt.childTasksMu.RUnlock()
@@ -327,19 +327,10 @@ func (lct *loadCollectionTask) updateTaskProcess() {
 			break
 		}
 
-		// wait watchDeltaChannel and watchQueryChannel task done after loading segment
+		// wait watchDeltaChannel task done after loading segment
 		nodeID := getDstNodeIDByTask(t)
 		if t.msgType() == commonpb.MsgType_LoadSegments {
-			if !lct.cluster.hasWatchedDeltaChannel(lct.ctx, nodeID, collectionID) ||
-				!lct.cluster.hasWatchedQueryChannel(lct.ctx, nodeID, collectionID) {
-				allDone = false
-				break
-			}
-		}
-
-		// wait watchQueryChannel task done after watch dmChannel
-		if t.msgType() == commonpb.MsgType_WatchDmChannels {
-			if !lct.cluster.hasWatchedQueryChannel(lct.ctx, nodeID, collectionID) {
+			if !lct.cluster.hasWatchedDeltaChannel(lct.ctx, nodeID, collectionID) {
 				allDone = false
 				break
 			}
@@ -680,17 +671,8 @@ func (rct *releaseCollectionTask) execute(ctx context.Context) error {
 
 	// if nodeID ==0, it means that the release request has not been assigned to the specified query node
 	if rct.NodeID <= 0 {
-		ctx2, cancel2 := context.WithTimeout(rct.ctx, timeoutForRPC)
-		defer cancel2()
-		err := rct.broker.releaseDQLMessageStream(ctx2, collectionID)
-		if err != nil {
-			log.Error("releaseCollectionTask: release collection end, releaseDQLMessageStream occur error", zap.Int64("collectionID", rct.CollectionID), zap.Int64("msgID", rct.Base.MsgID), zap.Error(err))
-			rct.setResultInfo(err)
-			return err
-		}
-
 		// invalidate all the collection meta cache with the specified collectionID
-		err = rct.broker.invalidateCollectionMetaCache(ctx, collectionID)
+		err := rct.broker.invalidateCollectionMetaCache(ctx, collectionID)
 		if err != nil {
 			log.Error("releaseCollectionTask: release collection end, invalidateCollectionMetaCache occur error", zap.Int64("collectionID", rct.CollectionID), zap.Int64("msgID", rct.Base.MsgID), zap.Error(err))
 			rct.setResultInfo(err)
@@ -789,19 +771,10 @@ func (lpt *loadPartitionTask) updateTaskProcess() {
 			allDone = false
 		}
 
-		// wait watchDeltaChannel and watchQueryChannel task done after loading segment
+		// wait watchDeltaChannel task done after loading segment
 		nodeID := getDstNodeIDByTask(t)
 		if t.msgType() == commonpb.MsgType_LoadSegments {
-			if !lpt.cluster.hasWatchedDeltaChannel(lpt.ctx, nodeID, collectionID) ||
-				!lpt.cluster.hasWatchedQueryChannel(lpt.ctx, nodeID, collectionID) {
-				allDone = false
-				break
-			}
-		}
-
-		// wait watchQueryChannel task done after watching dmChannel
-		if t.msgType() == commonpb.MsgType_WatchDmChannels {
-			if !lpt.cluster.hasWatchedQueryChannel(lpt.ctx, nodeID, collectionID) {
+			if !lpt.cluster.hasWatchedDeltaChannel(lpt.ctx, nodeID, collectionID) {
 				allDone = false
 				break
 			}
@@ -1564,87 +1537,6 @@ func (wdt *watchDeltaChannelTask) execute(ctx context.Context) error {
 func (wdt *watchDeltaChannelTask) postExecute(context.Context) error {
 	log.Info("watchDeltaChannelTask postExecute done",
 		zap.Int64("taskID", wdt.getTaskID()))
-	return nil
-}
-
-type watchQueryChannelTask struct {
-	*baseTask
-	*querypb.AddQueryChannelRequest
-	cluster Cluster
-}
-
-func (wqt *watchQueryChannelTask) msgBase() *commonpb.MsgBase {
-	return wqt.Base
-}
-
-func (wqt *watchQueryChannelTask) marshal() ([]byte, error) {
-	return proto.Marshal(wqt.AddQueryChannelRequest)
-}
-
-func (wqt *watchQueryChannelTask) isValid() bool {
-	online, err := wqt.cluster.isOnline(wqt.NodeID)
-	if err != nil {
-		return false
-	}
-
-	return wqt.ctx != nil && online
-}
-
-func (wqt *watchQueryChannelTask) msgType() commonpb.MsgType {
-	return wqt.Base.MsgType
-}
-
-func (wqt *watchQueryChannelTask) timestamp() Timestamp {
-	return wqt.Base.Timestamp
-}
-
-func (wqt *watchQueryChannelTask) updateTaskProcess() {
-	parentTask := wqt.getParentTask()
-	if parentTask == nil {
-		log.Warn("watchQueryChannelTask: parentTask should not be nil")
-		return
-	}
-	parentTask.updateTaskProcess()
-}
-
-func (wqt *watchQueryChannelTask) preExecute(context.Context) error {
-	wqt.setResultInfo(nil)
-	log.Info("start do watchQueryChannelTask",
-		zap.Int64("collectionID", wqt.CollectionID),
-		zap.String("queryChannel", wqt.QueryChannel),
-		zap.String("queryResultChannel", wqt.QueryResultChannel),
-		zap.Int64("loaded nodeID", wqt.NodeID),
-		zap.Int64("taskID", wqt.getTaskID()))
-	return nil
-}
-
-func (wqt *watchQueryChannelTask) execute(ctx context.Context) error {
-	defer wqt.reduceRetryCount()
-
-	err := wqt.cluster.addQueryChannel(wqt.ctx, wqt.NodeID, wqt.AddQueryChannelRequest)
-	if err != nil {
-		log.Warn("watchQueryChannelTask: watchQueryChannel occur error",
-			zap.Int64("taskID", wqt.getTaskID()),
-			zap.String("channel", wqt.AddQueryChannelRequest.QueryChannel),
-			zap.Error(err))
-		wqt.setResultInfo(err)
-		return err
-	}
-
-	log.Info("watchQueryChannelTask Execute done",
-		zap.Int64("collectionID", wqt.CollectionID),
-		zap.String("queryChannel", wqt.QueryChannel),
-		zap.String("queryResultChannel", wqt.QueryResultChannel),
-		zap.Int64("taskID", wqt.getTaskID()))
-	return nil
-}
-
-func (wqt *watchQueryChannelTask) postExecute(context.Context) error {
-	log.Info("watchQueryChannelTask postExecute done",
-		zap.Int64("collectionID", wqt.CollectionID),
-		zap.String("queryChannel", wqt.QueryChannel),
-		zap.String("queryResultChannel", wqt.QueryResultChannel),
-		zap.Int64("taskID", wqt.getTaskID()))
 	return nil
 }
 

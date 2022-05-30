@@ -281,19 +281,6 @@ func (coord *QueryCoordMock) ReleasePartitions(ctx context.Context, req *querypb
 	panic("implement me")
 }
 
-func (coord *QueryCoordMock) CreateQueryChannel(ctx context.Context, req *querypb.CreateQueryChannelRequest) (*querypb.CreateQueryChannelResponse, error) {
-	if !coord.healthy() {
-		return &querypb.CreateQueryChannelResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    "unhealthy",
-			},
-		}, nil
-	}
-
-	panic("implement me")
-}
-
 func (coord *QueryCoordMock) GetPartitionStates(ctx context.Context, req *querypb.GetPartitionStatesRequest) (*querypb.GetPartitionStatesResponse, error) {
 	if !coord.healthy() {
 		return &querypb.GetPartitionStatesResponse{

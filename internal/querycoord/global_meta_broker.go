@@ -47,32 +47,6 @@ func newGlobalMetaBroker(ctx context.Context, rootCoord types.RootCoord, dataCoo
 	return parser, nil
 }
 
-func (broker *globalMetaBroker) releaseDQLMessageStream(ctx context.Context, collectionID UniqueID) error {
-	ctx2, cancel2 := context.WithTimeout(ctx, timeoutForRPC)
-	defer cancel2()
-	releaseDQLMessageStreamReq := &proxypb.ReleaseDQLMessageStreamRequest{
-		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_RemoveQueryChannels,
-		},
-		CollectionID: collectionID,
-	}
-
-	// TODO(yah01): check whether RootCoord returns error if QueryChannel not exists
-	res, err := broker.rootCoord.ReleaseDQLMessageStream(ctx2, releaseDQLMessageStreamReq)
-	if err != nil {
-		log.Error("releaseDQLMessageStream occur error", zap.Int64("collectionID", collectionID), zap.Error(err))
-		return err
-	}
-	if res.ErrorCode != commonpb.ErrorCode_Success {
-		err = errors.New(res.Reason)
-		log.Error("releaseDQLMessageStream occur error", zap.Int64("collectionID", collectionID), zap.Error(err))
-		return err
-	}
-	log.Info("releaseDQLMessageStream successfully", zap.Int64("collectionID", collectionID))
-
-	return nil
-}
-
 // invalidateCollectionMetaCache notifies RootCoord to remove all the collection meta cache with the specified collectionID in Proxies
 func (broker *globalMetaBroker) invalidateCollectionMetaCache(ctx context.Context, collectionID UniqueID) error {
 	ctx1, cancel1 := context.WithTimeout(ctx, timeoutForRPC)

@@ -23,7 +23,6 @@ service QueryCoord {
   rpc LoadCollection(LoadCollectionRequest) returns (common.Status) {}
   rpc ReleaseCollection(ReleaseCollectionRequest) returns (common.Status) {}
 
-  rpc CreateQueryChannel(CreateQueryChannelRequest) returns (CreateQueryChannelResponse) {}
   rpc GetPartitionStates(GetPartitionStatesRequest) returns (GetPartitionStatesResponse) {}
   rpc GetSegmentInfo(GetSegmentInfoRequest) returns (GetSegmentInfoResponse) {}
   rpc LoadBalance(LoadBalanceRequest) returns (common.Status) {}
@@ -41,8 +40,6 @@ service QueryNode {
   rpc GetTimeTickChannel(internal.GetTimeTickChannelRequest) returns(milvus.StringResponse) {}
   rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
 
-  rpc AddQueryChannel(AddQueryChannelRequest) returns (common.Status) {}
-  rpc RemoveQueryChannel(RemoveQueryChannelRequest) returns (common.Status) {}
   rpc WatchDmChannels(WatchDmChannelsRequest) returns (common.Status) {}
   rpc WatchDeltaChannels(WatchDeltaChannelsRequest) returns (common.Status) {}
   rpc LoadSegments(LoadSegmentsRequest) returns (common.Status) {}
@@ -118,17 +115,6 @@ message ReleasePartitionsRequest {
   int64 nodeID = 5;
 }
 
-message CreateQueryChannelRequest {
-  int64 collectionID = 1;
-  int64 proxyID = 2;
-}
-
-message CreateQueryChannelResponse {
-  common.Status status = 1;
-  string query_channel = 2;
-  string query_result_channel = 3;
-}
-
 message GetPartitionStatesRequest {
   common.MsgBase base = 1;
   int64 dbID = 2;
@@ -169,24 +155,6 @@ message ShardLeadersList {  // All leaders of all replicas of one shard
 }
 
 //-----------------query node grpc request and response proto----------------
-message AddQueryChannelRequest {
-  common.MsgBase base = 1;
-  int64 nodeID = 2;
-  int64 collectionID = 3;
-  string query_channel = 4;
-  string query_result_channel = 5;
-  internal.MsgPosition seek_position = 6;
-  repeated SegmentInfo global_sealed_segments = 7;
-}
-
-message RemoveQueryChannelRequest {
-  common.MsgBase base = 1;
-  int64 nodeID = 2;
-  int64 collectionID = 3;
-  string query_channel = 4;
-  string query_result_channel = 5;
-}
-
 message LoadMetaInfo {
   LoadType load_type = 1;
   int64 collectionID = 2;

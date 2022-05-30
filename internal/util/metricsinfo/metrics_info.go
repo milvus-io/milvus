@@ -92,14 +92,6 @@ type BaseComponentInfos struct {
 
 // QueryNodeConfiguration records the configuration of QueryNode.
 type QueryNodeConfiguration struct {
-	SearchReceiveBufSize       int64 `json:"search_receive_buf_size"`
-	SearchPulsarBufSize        int64 `json:"search_pulsar_buf_size"`
-	SearchResultReceiveBufSize int64 `json:"search_result_receive_buf_size"`
-
-	RetrieveReceiveBufSize       int64 `json:"retrieve_receive_buf_size"`
-	RetrievePulsarBufSize        int64 `json:"retrieve_pulsar_buf_size"`
-	RetrieveResultReceiveBufSize int64 `json:"retrieve_result_receive_buf_size"`
-
 	SimdType string `json:"simd_type"`
 }
 

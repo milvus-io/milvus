@@ -69,12 +69,6 @@ func Test_NewClient(t *testing.T) {
 		r3, err := client.GetStatisticsChannel(ctx)
 		retCheck(retNotNil, r3, err)
 
-		r4, err := client.AddQueryChannel(ctx, nil)
-		retCheck(retNotNil, r4, err)
-
-		r5, err := client.RemoveQueryChannel(ctx, nil)
-		retCheck(retNotNil, r5, err)
-
 		r6, err := client.WatchDmChannels(ctx, nil)
 		retCheck(retNotNil, r6, err)
 

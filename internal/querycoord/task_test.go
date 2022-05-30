@@ -249,26 +249,6 @@ func genLoadSegmentTask(ctx context.Context, queryCoord *QueryCoord, nodeID int6
 	return loadSegmentTask
 }
 
-func genWatchQueryChannelTask(ctx context.Context, queryCoord *QueryCoord, nodeID int64) *watchQueryChannelTask {
-	queryChannelInfo := queryCoord.meta.getQueryChannelInfoByID(defaultCollectionID)
-	req := &querypb.AddQueryChannelRequest{
-		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_WatchQueryChannels,
-		},
-		NodeID:             nodeID,
-		CollectionID:       defaultCollectionID,
-		QueryChannel:       queryChannelInfo.QueryChannel,
-		QueryResultChannel: queryChannelInfo.QueryResultChannel,
-	}
-	baseTask := newBaseTask(ctx, querypb.TriggerCondition_GrpcRequest)
-	baseTask.taskID = 200
-	return &watchQueryChannelTask{
-		baseTask:               baseTask,
-		AddQueryChannelRequest: req,
-		cluster:                queryCoord.cluster,
-	}
-}
-
 func genWatchDeltaChannelTask(ctx context.Context, queryCoord *QueryCoord, nodeID int64) *watchDeltaChannelTask {
 	req := &querypb.WatchDeltaChannelsRequest{
 		Base: &commonpb.MsgBase{
@@ -1361,11 +1341,8 @@ func TestUpdateTaskProcessWhenLoadSegment(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, int64(0), collectionInfo.InMemoryPercentage)
 
-	watchQueryChannel := genWatchQueryChannelTask(ctx, queryCoord, node1.queryNodeID)
-	watchQueryChannel.setParentTask(loadCollectionTask)
 	watchDeltaChannel := genWatchDeltaChannelTask(ctx, queryCoord, node1.queryNodeID)
 	watchDeltaChannel.setParentTask(loadCollectionTask)
-	queryCoord.scheduler.processTask(watchQueryChannel)
 	queryCoord.scheduler.processTask(watchDeltaChannel)
 	collectionInfo, err = queryCoord.meta.getCollectionInfoByID(defaultCollectionID)
 	assert.Nil(t, err)
@@ -1387,16 +1364,12 @@ func TestUpdateTaskProcessWhenWatchDmChannel(t *testing.T) {
 	queryCoord.meta.addCollection(defaultCollectionID, querypb.LoadType_LoadCollection, genDefaultCollectionSchema(false))
 
 	watchDmChannel := genWatchDmChannelTask(ctx, queryCoord, node1.queryNodeID)
-	loadCollectionTask := watchDmChannel.getParentTask()
 
-	queryCoord.scheduler.processTask(watchDmChannel)
 	collectionInfo, err := queryCoord.meta.getCollectionInfoByID(defaultCollectionID)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(0), collectionInfo.InMemoryPercentage)
+	queryCoord.scheduler.processTask(watchDmChannel)
 
-	watchQueryChannel := genWatchQueryChannelTask(ctx, queryCoord, node1.queryNodeID)
-	watchQueryChannel.setParentTask(loadCollectionTask)
-	queryCoord.scheduler.processTask(watchQueryChannel)
 	collectionInfo, err = queryCoord.meta.getCollectionInfoByID(defaultCollectionID)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(100), collectionInfo.InMemoryPercentage)

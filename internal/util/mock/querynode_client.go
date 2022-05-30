@@ -61,14 +61,6 @@ func (q QueryNodeClient) GetTimeTickChannel(ctx context.Context) (*milvuspb.Stri
 	return q.grpcClient.GetTimeTickChannel(ctx, &internalpb.GetTimeTickChannelRequest{})
 }
 
-func (q QueryNodeClient) AddQueryChannel(ctx context.Context, req *querypb.AddQueryChannelRequest) (*commonpb.Status, error) {
-	return q.grpcClient.AddQueryChannel(ctx, req)
-}
-
-func (q QueryNodeClient) RemoveQueryChannel(ctx context.Context, req *querypb.RemoveQueryChannelRequest) (*commonpb.Status, error) {
-	return q.grpcClient.RemoveQueryChannel(ctx, req)
-}
-
 func (q QueryNodeClient) WatchDmChannels(ctx context.Context, req *querypb.WatchDmChannelsRequest) (*commonpb.Status, error) {
 	return q.grpcClient.WatchDmChannels(ctx, req)
 }

@@ -3058,7 +3058,7 @@ func TestProxy_Import(t *testing.T) {
 	t.Run("test import get vChannel failed (the first one)", func(t *testing.T) {
 		defer wg.Done()
 		proxy.stateCode.Store(internalpb.StateCode_Healthy)
-		proxy.chMgr = newChannelsMgrImpl(master.GetChannels, nil, nil, nil, msgStreamFactory)
+		proxy.chMgr = newChannelsMgrImpl(master.GetChannels, nil, nil, msgStreamFactory)
 		resp, err := proxy.Import(context.TODO(),
 			&milvuspb.ImportRequest{
 				CollectionName: "import_collection",

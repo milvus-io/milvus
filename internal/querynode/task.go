@@ -84,12 +84,6 @@ func (b *baseTask) Notify(err error) {
 	b.done <- err
 }
 
-type addQueryChannelTask struct {
-	baseTask
-	req  *queryPb.AddQueryChannelRequest
-	node *QueryNode
-}
-
 type watchDmChannelsTask struct {
 	baseTask
 	req  *queryPb.WatchDmChannelsRequest
@@ -118,40 +112,6 @@ type releasePartitionsTask struct {
 	baseTask
 	req  *queryPb.ReleasePartitionsRequest
 	node *QueryNode
-}
-
-// addQueryChannelTask
-func (r *addQueryChannelTask) Execute(ctx context.Context) error {
-	log.Info("Execute addQueryChannelTask",
-		zap.Any("collectionID", r.req.CollectionID))
-
-	collectionID := r.req.CollectionID
-	if r.node.queryShardService == nil {
-		return fmt.Errorf("null query shard service, collectionID %d", collectionID)
-	}
-
-	qc := r.node.queryShardService.getQueryChannel(collectionID)
-	log.Info("add query channel for collection", zap.Int64("collectionID", collectionID))
-
-	consumeSubName := funcutil.GenChannelSubName(Params.CommonCfg.QueryNodeSubName, collectionID, Params.QueryNodeCfg.GetNodeID())
-
-	err := qc.AsConsumer(r.req.QueryChannel, consumeSubName, r.req.SeekPosition)
-	if err != nil {
-		log.Warn("query channel as consumer failed", zap.Int64("collectionID", collectionID), zap.String("channel", r.req.QueryChannel), zap.Error(err))
-		return err
-	}
-
-	// init global sealed segments
-	/*
-		for _, segment := range r.req.GlobalSealedSegments {
-			sc.globalSegmentManager.addGlobalSegmentInfo(segment)
-		}*/
-
-	qc.Start()
-	log.Info("addQueryChannelTask done",
-		zap.Any("collectionID", r.req.CollectionID),
-	)
-	return nil
 }
 
 // watchDmChannelsTask

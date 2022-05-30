@@ -679,20 +679,6 @@ type queryNodeConfig struct {
 	FlowGraphMaxQueueLength int32
 	FlowGraphMaxParallelism int32
 
-	// search
-	SearchChannelNames         []string
-	SearchResultChannelNames   []string
-	SearchReceiveBufSize       int64
-	SearchPulsarBufSize        int64
-	SearchResultReceiveBufSize int64
-
-	// Retrieve
-	RetrieveChannelNames         []string
-	RetrieveResultChannelNames   []string
-	RetrieveReceiveBufSize       int64
-	RetrievePulsarBufSize        int64
-	RetrieveResultReceiveBufSize int64
-
 	// stats
 	StatsPublishInterval int
 
@@ -727,10 +713,6 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 
 	p.initFlowGraphMaxQueueLength()
 	p.initFlowGraphMaxParallelism()
-
-	p.initSearchReceiveBufSize()
-	p.initSearchPulsarBufSize()
-	p.initSearchResultReceiveBufSize()
 
 	p.initStatsPublishInterval()
 
@@ -787,19 +769,6 @@ func (p *queryNodeConfig) initFlowGraphMaxQueueLength() {
 
 func (p *queryNodeConfig) initFlowGraphMaxParallelism() {
 	p.FlowGraphMaxParallelism = p.Base.ParseInt32WithDefault("queryNode.dataSync.flowGraph.maxParallelism", 1024)
-}
-
-// msgStream
-func (p *queryNodeConfig) initSearchReceiveBufSize() {
-	p.SearchReceiveBufSize = p.Base.ParseInt64WithDefault("queryNode.msgStream.search.recvBufSize", 512)
-}
-
-func (p *queryNodeConfig) initSearchPulsarBufSize() {
-	p.SearchPulsarBufSize = p.Base.ParseInt64WithDefault("queryNode.msgStream.search.pulsarBufSize", 512)
-}
-
-func (p *queryNodeConfig) initSearchResultReceiveBufSize() {
-	p.SearchResultReceiveBufSize = p.Base.ParseInt64WithDefault("queryNode.msgStream.searchResult.recvBufSize", 64)
 }
 
 func (p *queryNodeConfig) initSmallIndexParams() {

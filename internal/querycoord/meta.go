@@ -33,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
-	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -87,14 +86,12 @@ type Meta interface {
 	setDeltaChannel(collectionID UniqueID, info []*datapb.VchannelInfo) error
 
 	getQueryChannelInfoByID(collectionID UniqueID) *querypb.QueryChannelInfo
-	getQueryStreamByID(collectionID UniqueID, queryChannel string) (msgstream.MsgStream, error)
 
 	setLoadType(collectionID UniqueID, loadType querypb.LoadType) error
 	setLoadPercentage(collectionID UniqueID, partitionID UniqueID, percentage int64, loadType querypb.LoadType) error
 	//printMeta()
 	saveGlobalSealedSegInfos(saves col2SegmentInfos) (col2SealedSegmentChangeInfos, error)
 	removeGlobalSealedSegInfos(collectionID UniqueID, partitionIDs []UniqueID) (col2SealedSegmentChangeInfos, error)
-	sendSealedSegmentChangeInfos(collectionID UniqueID, queryChannel string, changeInfos *querypb.SealedSegmentsChangeInfo) (*internalpb.MsgPosition, error)
 
 	getWatchedChannelsByNodeID(nodeID int64) *querypb.UnsubscribeChannelInfo
 
@@ -127,8 +124,6 @@ type MetaReplica struct {
 	deltaChannelMu    sync.RWMutex
 	dmChannelInfos    map[string]*querypb.DmChannelWatchInfo
 	dmChannelMu       sync.RWMutex
-	queryStreams      map[UniqueID]msgstream.MsgStream
-	streamMu          sync.RWMutex
 
 	segmentsInfo *segmentsInfo
 	//partitionStates map[UniqueID]*querypb.PartitionStates
@@ -141,7 +136,6 @@ func newMeta(ctx context.Context, kv kv.MetaKv, factory dependency.Factory, idAl
 	queryChannelInfos := make(map[UniqueID]*querypb.QueryChannelInfo)
 	deltaChannelInfos := make(map[UniqueID][]*datapb.VchannelInfo)
 	dmChannelInfos := make(map[string]*querypb.DmChannelWatchInfo)
-	queryMsgStream := make(map[UniqueID]msgstream.MsgStream)
 
 	m := &MetaReplica{
 		ctx:         childCtx,
@@ -153,7 +147,6 @@ func newMeta(ctx context.Context, kv kv.MetaKv, factory dependency.Factory, idAl
 		queryChannelInfos: queryChannelInfos,
 		deltaChannelInfos: deltaChannelInfos,
 		dmChannelInfos:    dmChannelInfos,
-		queryStreams:      queryMsgStream,
 
 		segmentsInfo: newSegmentsInfo(kv),
 		replicas:     NewReplicaInfos(),
@@ -632,36 +625,28 @@ func (m *MetaReplica) saveGlobalSealedSegInfos(saves col2SegmentInfos) (col2Seal
 		}
 		col2SegmentChangeInfos[collectionID] = segmentsChangeInfo
 	}
-
 	queryChannelInfosMap := make(map[UniqueID]*querypb.QueryChannelInfo)
-	for collectionID, segmentChangeInfos := range col2SegmentChangeInfos {
-		// get msgStream to produce sealedSegmentChangeInfos to query channel
+	for collectionID, infos := range saves {
+		// TODO silverxia change QueryChannelInfo struct to simplifed one
+		// queryChannelInfo contains the GlobalSealedSegment list
 		queryChannelInfo := m.getQueryChannelInfoByID(collectionID)
-		msgPosition, err := m.sendSealedSegmentChangeInfos(collectionID, queryChannelInfo.QueryChannel, segmentChangeInfos)
-		if err != nil {
-			return nil, err
-		}
-		queryChannelInfo.SeekPosition = msgPosition
 
-		// update segmentInfo, queryChannelInfo meta to cache and etcd
+		// merge save segment info and existing GlobalSealedSegments
 		seg2Info := make(map[UniqueID]*querypb.SegmentInfo)
 		for _, segmentInfo := range queryChannelInfo.GlobalSealedSegments {
 			segmentID := segmentInfo.SegmentID
 			seg2Info[segmentID] = segmentInfo
 		}
-		if infos, ok := saves[collectionID]; ok {
-			for _, segmentInfo := range infos {
-				segmentID := segmentInfo.SegmentID
-				seg2Info[segmentID] = segmentInfo
-			}
+		for _, segmentInfo := range infos {
+			segmentID := segmentInfo.SegmentID
+			seg2Info[segmentID] = segmentInfo
 		}
 
-		globalSealedSegmentInfos := make([]*querypb.SegmentInfo, 0)
+		globalSealedSegmentInfos := make([]*querypb.SegmentInfo, len(seg2Info))
 		for _, info := range seg2Info {
 			globalSealedSegmentInfos = append(globalSealedSegmentInfos, info)
 		}
 		queryChannelInfo.GlobalSealedSegments = globalSealedSegmentInfos
-		queryChannelInfosMap[collectionID] = queryChannelInfo
 	}
 
 	// save segmentInfo to etcd
@@ -700,6 +685,7 @@ func (m *MetaReplica) saveGlobalSealedSegInfos(saves col2SegmentInfos) (col2Seal
 		panic(err)
 	}
 
+	// Write back to cache
 	m.channelMu.Lock()
 	for collectionID, channelInfo := range queryChannelInfosMap {
 		m.queryChannelInfos[collectionID] = channelInfo
@@ -733,11 +719,6 @@ func (m *MetaReplica) removeGlobalSealedSegInfos(collectionID UniqueID, partitio
 
 	// produce sealedSegmentChangeInfos to query channel
 	queryChannelInfo := m.getQueryChannelInfoByID(collectionID)
-	msgPosition, err := m.sendSealedSegmentChangeInfos(collectionID, queryChannelInfo.QueryChannel, segmentChangeInfos)
-	if err != nil {
-		return nil, err
-	}
-	queryChannelInfo.SeekPosition = msgPosition
 
 	// update segmentInfo, queryChannelInfo meta to cache and etcd
 	seg2Info := make(map[UniqueID]*querypb.SegmentInfo)
@@ -759,7 +740,7 @@ func (m *MetaReplica) removeGlobalSealedSegInfos(collectionID UniqueID, partitio
 
 	// remove meta from etcd
 	for _, info := range removes {
-		if err = m.segmentsInfo.removeSegment(info); err != nil {
+		if err := m.segmentsInfo.removeSegment(info); err != nil {
 			panic(err)
 		}
 	}
@@ -786,55 +767,6 @@ func (m *MetaReplica) removeGlobalSealedSegInfos(collectionID UniqueID, partitio
 	m.channelMu.Unlock()
 
 	return col2SealedSegmentChangeInfos{collectionID: segmentChangeInfos}, nil
-}
-
-// send sealed segment change infos into query channels
-func (m *MetaReplica) sendSealedSegmentChangeInfos(collectionID UniqueID, queryChannel string, changeInfos *querypb.SealedSegmentsChangeInfo) (*internalpb.MsgPosition, error) {
-	// get msgStream to produce sealedSegmentChangeInfos to query channel
-	queryStream, err := m.getQueryStreamByID(collectionID, queryChannel)
-	if err != nil {
-		log.Error("sendSealedSegmentChangeInfos: get query stream failed", zap.Int64("collectionID", collectionID), zap.Error(err))
-		return nil, err
-	}
-
-	var msgPack = &msgstream.MsgPack{
-		Msgs: []msgstream.TsMsg{},
-	}
-	id, err := m.idAllocator()
-	if err != nil {
-		log.Error("sendSealedSegmentChangeInfos: allocator trigger taskID failed", zap.Int64("collectionID", collectionID), zap.Error(err))
-		return nil, err
-	}
-	changeInfos.Base.MsgID = id
-	segmentChangeMsg := &msgstream.SealedSegmentsChangeInfoMsg{
-		BaseMsg: msgstream.BaseMsg{
-			HashValues: []uint32{0},
-		},
-		SealedSegmentsChangeInfo: *changeInfos,
-	}
-	msgPack.Msgs = append(msgPack.Msgs, segmentChangeMsg)
-
-	messageIDInfos, err := queryStream.ProduceMark(msgPack)
-	if err != nil {
-		log.Error("sendSealedSegmentChangeInfos: send sealed segment change info failed", zap.Int64("collectionID", collectionID), zap.Error(err))
-		return nil, err
-	}
-
-	messageIDs, ok := messageIDInfos[queryChannel]
-	if !ok {
-		return nil, fmt.Errorf("sendSealedSegmentChangeInfos: send sealed segment change info to wrong query channel, collectionID = %d, query channel = %s", collectionID, queryChannel)
-	}
-
-	// len(messageIDs) = 1
-	if len(messageIDs) != 1 {
-		return nil, fmt.Errorf("sendSealedSegmentChangeInfos: length of the positions in stream is not correct, collectionID = %d, query channel = %s, len = %d", collectionID, queryChannel, len(messageIDs))
-	}
-
-	log.Info("updateGlobalSealedSegmentInfos: send sealed segment change info to queryChannel", zap.Any("msgPack", msgPack))
-	return &internalpb.MsgPosition{
-		ChannelName: queryChannel,
-		MsgID:       messageIDs[0].Serialize(),
-	}, nil
 }
 
 func (m *MetaReplica) showSegmentInfos(collectionID UniqueID, partitionIDs []UniqueID) []*querypb.SegmentInfo {
@@ -1021,29 +953,6 @@ func (m *MetaReplica) getQueryChannelInfoByID(collectionID UniqueID) *querypb.Qu
 	}
 
 	return proto.Clone(channelInfo).(*querypb.QueryChannelInfo)
-}
-
-func (m *MetaReplica) getQueryStreamByID(collectionID UniqueID, queryChannel string) (msgstream.MsgStream, error) {
-	m.streamMu.Lock()
-	defer m.streamMu.Unlock()
-
-	var queryStream msgstream.MsgStream
-	var err error
-	if stream, ok := m.queryStreams[collectionID]; ok {
-		queryStream = stream
-	} else {
-		queryStream, err = m.factory.NewMsgStream(m.ctx)
-		if err != nil {
-			log.Error("updateGlobalSealedSegmentInfos: create msgStream failed", zap.Error(err))
-			return nil, err
-		}
-
-		queryStream.AsProducer([]string{queryChannel})
-		m.queryStreams[collectionID] = queryStream
-		log.Info("getQueryStreamByID: create query msgStream for collection", zap.Int64("collectionID", collectionID))
-	}
-
-	return queryStream, nil
 }
 
 func (m *MetaReplica) setLoadType(collectionID UniqueID, loadType querypb.LoadType) error {

@@ -166,17 +166,6 @@ func initTestMeta(t *testing.T, node *QueryNode, collectionID UniqueID, segmentI
 	assert.NoError(t, err)
 }
 
-func initSearchChannel(ctx context.Context, searchChan string, resultChan string, node *QueryNode) {
-	searchReq := &querypb.AddQueryChannelRequest{
-		QueryChannel:       searchChan,
-		QueryResultChannel: resultChan,
-	}
-	_, err := node.AddQueryChannel(ctx, searchReq)
-	if err != nil {
-		panic(err)
-	}
-}
-
 func newQueryNodeMock() *QueryNode {
 
 	var ctx context.Context

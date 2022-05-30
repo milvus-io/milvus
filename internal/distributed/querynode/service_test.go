@@ -76,14 +76,6 @@ func (m *MockQueryNode) GetTimeTickChannel(ctx context.Context) (*milvuspb.Strin
 	return m.strResp, m.err
 }
 
-func (m *MockQueryNode) AddQueryChannel(ctx context.Context, req *querypb.AddQueryChannelRequest) (*commonpb.Status, error) {
-	return m.status, m.err
-}
-
-func (m *MockQueryNode) RemoveQueryChannel(ctx context.Context, req *querypb.RemoveQueryChannelRequest) (*commonpb.Status, error) {
-	return m.status, m.err
-}
-
 func (m *MockQueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDmChannelsRequest) (*commonpb.Status, error) {
 	return m.status, m.err
 }
@@ -255,20 +247,6 @@ func Test_NewServer(t *testing.T) {
 		resp, err := server.GetTimeTickChannel(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-	})
-
-	t.Run("AddQueryChannel", func(t *testing.T) {
-		req := &querypb.AddQueryChannelRequest{}
-		resp, err := server.AddQueryChannel(ctx, req)
-		assert.Nil(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-	})
-
-	t.Run("RemoveQueryChannel", func(t *testing.T) {
-		req := &querypb.RemoveQueryChannelRequest{}
-		resp, err := server.RemoveQueryChannel(ctx, req)
-		assert.Nil(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
 	t.Run("WatchDmChannels", func(t *testing.T) {

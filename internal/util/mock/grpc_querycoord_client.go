@@ -70,10 +70,6 @@ func (m *GrpcQueryCoordClient) ReleaseCollection(ctx context.Context, in *queryp
 	return &commonpb.Status{}, m.Err
 }
 
-func (m *GrpcQueryCoordClient) CreateQueryChannel(ctx context.Context, in *querypb.CreateQueryChannelRequest, opts ...grpc.CallOption) (*querypb.CreateQueryChannelResponse, error) {
-	return &querypb.CreateQueryChannelResponse{}, m.Err
-}
-
 func (m *GrpcQueryCoordClient) GetPartitionStates(ctx context.Context, in *querypb.GetPartitionStatesRequest, opts ...grpc.CallOption) (*querypb.GetPartitionStatesResponse, error) {
 	return &querypb.GetPartitionStatesResponse{}, m.Err
 }

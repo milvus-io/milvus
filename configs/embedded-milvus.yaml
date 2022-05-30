@@ -168,12 +168,6 @@ queryNode:
     flowGraph:
       maxQueueLength: 1024 # Maximum length of task queue in flowgraph
       maxParallelism: 1024 # Maximum number of tasks executed in parallel in the flowgraph
-  msgStream:
-    search:
-      recvBufSize: 512 # msgPack channel buffer size
-      pulsarBufSize: 512 # pulsar channel buffer size
-    searchResult:
-      recvBufSize: 64 # msgPack channel buffer size
   # Segcore will divide a segment into multiple chunks.
   segcore:
     chunkRows: 32768 # The number of vectors in a chunk.
