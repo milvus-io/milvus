@@ -87,6 +87,7 @@ rocksmq:
 rootCoord:
   address: localhost
   port: 53100
+  enableActiveStandby: false  # Enable active-standby
 
   dmlChannelNum: 256 # The number of dml channels created at system startup
   maxPartitionNum: 4096 # Maximum number of partitions in a collection
@@ -149,6 +150,7 @@ queryCoord:
   overloadedMemoryThresholdPercentage: 90 # The threshold percentage that memory overload
   balanceIntervalSeconds: 60
   memoryUsageMaxDifferencePercentage: 30
+  enableActiveStandby: false  # Enable active-standby
 
 # Related configuration of queryNode, used to run hybrid search between vector and scalar data.
 queryNode:
@@ -191,6 +193,7 @@ queryNode:
 indexCoord:
   address: localhost
   port: 31000
+  enableActiveStandby: false  # Enable active-standby
 
 indexNode:
   port: 21121
@@ -200,6 +203,7 @@ dataCoord:
   port: 13333
   enableCompaction: true # Enable data segment compression
   enableGarbageCollection: false
+  enableActiveStandby: false  # Enable active-standby
 
   segment:
     maxSize: 512 # Maximum size of a segment in MB

@@ -730,7 +730,7 @@ func TestRootCoordInitData(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestRootCoord_Base(t *testing.T) {
+func testRootCoordBase(t *testing.T) {
 	const (
 		dbName    = "testDb"
 		collName  = "testColl"
@@ -744,7 +744,6 @@ func TestRootCoord_Base(t *testing.T) {
 	defer cancel()
 
 	coreFactory := dependency.NewDefaultFactory(true)
-	Params.Init()
 	Params.RootCoordCfg.DmlChannelNum = TestDMLChannelNum
 	Params.RootCoordCfg.ImportIndexCheckInterval = 0.1
 	Params.RootCoordCfg.ImportIndexWaitLimit = 0.2
@@ -2729,6 +2728,19 @@ func TestRootCoord_Base(t *testing.T) {
 	wg.Wait()
 	err = core.Stop()
 	assert.NoError(t, err)
+}
+
+func TestRootcoord_DisableActiveStandby(t *testing.T) {
+	Params.Init()
+	Params.RootCoordCfg.EnableActiveStandby = false
+	testRootCoordBase(t)
+}
+
+// make sure the main functions work well when EnableActiveStandby=true
+func TestRootcoord_EnableActiveStandby(t *testing.T) {
+	Params.Init()
+	Params.RootCoordCfg.EnableActiveStandby = true
+	testRootCoordBase(t)
 }
 
 func TestRootCoord2(t *testing.T) {

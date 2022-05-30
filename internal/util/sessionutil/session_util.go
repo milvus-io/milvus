@@ -68,6 +68,10 @@ type Session struct {
 	metaRoot string
 
 	registered atomic.Value
+
+	isStandby           atomic.Value
+	enableActiveStandBy bool
+	primaryKey          string
 }
 
 // NewSession is a helper to build Session object.
@@ -196,6 +200,14 @@ func (s *Session) getServerIDWithKey(key string) (int64, error) {
 // Exclusive means whether this service can exist two at the same time, if so,
 // it is false. Otherwise, set it to true.
 func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, error) {
+	if s.enableActiveStandBy {
+		s.updateStandby(true)
+	}
+	key := s.ServerName
+	if !s.Exclusive || s.enableActiveStandBy {
+		key = fmt.Sprintf("%s-%d", key, s.ServerID)
+	}
+	completeKey := path.Join(s.metaRoot, DefaultServiceRoot, key)
 	var ch <-chan *clientv3.LeaseKeepAliveResponse
 	log.Debug("service begin to register to etcd", zap.String("serverName", s.ServerName), zap.Int64("ServerID", s.ServerID))
 	registerFn := func() error {
@@ -211,16 +223,12 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 			return err
 		}
 
-		key := s.ServerName
-		if !s.Exclusive {
-			key = fmt.Sprintf("%s-%d", key, s.ServerID)
-		}
 		txnResp, err := s.etcdCli.Txn(s.ctx).If(
 			clientv3.Compare(
-				clientv3.Version(path.Join(s.metaRoot, DefaultServiceRoot, key)),
+				clientv3.Version(completeKey),
 				"=",
 				0)).
-			Then(clientv3.OpPut(path.Join(s.metaRoot, DefaultServiceRoot, key), string(sessionJSON), clientv3.WithLease(resp.ID))).Commit()
+			Then(clientv3.OpPut(completeKey, string(sessionJSON), clientv3.WithLease(resp.ID))).Commit()
 
 		if err != nil {
 			log.Warn("compare and swap error, maybe the key has already been registered", zap.Error(err))
@@ -486,4 +494,91 @@ func (s *Session) Registered() bool {
 		return false
 	}
 	return b
+}
+
+func (s *Session) SetEnableActiveStandBy(enable bool) {
+	s.enableActiveStandBy = enable
+}
+
+func (s *Session) updateStandby(b bool) {
+	s.isStandby.Store(b)
+}
+
+func (s *Session) ProcessActiveStandBy(activateFunc func()) error {
+	if !s.enableActiveStandBy {
+		return nil
+	}
+	key := s.ServerName
+	s.primaryKey = path.Join(s.metaRoot, DefaultServiceRoot, s.ServerName)
+
+	registerPrimaryFn := func() error {
+		sessionJSON, err := json.Marshal(s)
+		if err != nil {
+			return err
+		}
+		txnResp, err := s.etcdCli.Txn(s.ctx).If(
+			clientv3.Compare(
+				clientv3.Version(s.primaryKey),
+				"=",
+				0)).
+			Then(clientv3.OpPut(s.primaryKey, string(sessionJSON), clientv3.WithLease(*s.leaseID))).Commit()
+		if err != nil {
+			log.Warn("compare and swap error, maybe the key has already been registered", zap.Error(err))
+			return err
+		}
+		if !txnResp.Succeeded {
+			return fmt.Errorf("function CompareAndSwap error for compare is false for key: %s", key)
+		}
+		log.Info("Register primary successfully", zap.Int64("ServerID", s.ServerID))
+		return nil
+	}
+
+	s.updateStandby(true)
+	log.Info("Enter Standby mode")
+	go func() {
+		for s.isStandby.Load().(bool) {
+			log.Info("This node is standing by ...")
+			time.Sleep(10 * time.Second)
+		}
+	}()
+
+	for {
+		err := retry.Do(s.ctx, registerPrimaryFn, retry.Attempts(DefaultRetryTimes), retry.Sleep(1000*time.Millisecond))
+		if err != nil {
+			// watch the primary key in etcd
+			ctx, cancel := context.WithCancel(s.ctx)
+			watchChan := s.etcdCli.Watch(ctx, s.primaryKey, clientv3.WithPrefix(), clientv3.WithPrevKV())
+			select {
+			case <-ctx.Done():
+				cancel()
+			case wresp, ok := <-watchChan:
+				if !ok {
+					cancel()
+				}
+				if wresp.Err() != nil {
+					cancel()
+				}
+				for _, event := range wresp.Events {
+					switch event.Type {
+					case mvccpb.PUT:
+						log.Debug("Watch the primary key", zap.Any("ADD", event.Kv))
+					case mvccpb.DELETE:
+						log.Debug("Watch the primary key", zap.Any("DELETE", event.Kv))
+						cancel()
+					}
+				}
+			}
+			cancel()
+			log.Info("Stop watching primary lock key")
+		} else {
+			break
+		}
+	}
+
+	s.updateStandby(false)
+	log.Info("Quit Standby mode, this node will become primary")
+	if activateFunc != nil {
+		activateFunc()
+	}
+	return nil
 }

@@ -404,6 +404,8 @@ type rootCoordConfig struct {
 
 	CreatedTime time.Time
 	UpdatedTime time.Time
+
+	EnableActiveStandby bool
 }
 
 func (p *rootCoordConfig) init(base *BaseTable) {
@@ -418,6 +420,7 @@ func (p *rootCoordConfig) init(base *BaseTable) {
 	p.ImportIndexCheckInterval = p.Base.ParseFloatWithDefault("rootCoord.importIndexCheckInterval", 60*5)
 	p.ImportIndexWaitLimit = p.Base.ParseFloatWithDefault("rootCoord.importIndexWaitLimit", 60*20)
 	p.ImportTaskSubPath = "importtask"
+	p.EnableActiveStandby = p.Base.ParseBool("rootCoord.enableActiveStandby", false)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -590,6 +593,8 @@ type queryCoordConfig struct {
 	OverloadedMemoryThresholdPercentage float64
 	BalanceIntervalSeconds              int64
 	MemoryUsageMaxDifferencePercentage  float64
+
+	EnableActiveStandby bool
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -603,6 +608,7 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	p.initOverloadedMemoryThresholdPercentage()
 	p.initBalanceIntervalSeconds()
 	p.initMemoryUsageMaxDifferencePercentage()
+	p.initEnableActiveStandby()
 }
 
 func (p *queryCoordConfig) initAutoHandoff() {
@@ -650,6 +656,10 @@ func (p *queryCoordConfig) initMemoryUsageMaxDifferencePercentage() {
 		panic(err)
 	}
 	p.MemoryUsageMaxDifferencePercentage = float64(diffPercentage) / 100
+}
+
+func (p *queryCoordConfig) initEnableActiveStandby() {
+	p.EnableActiveStandby = p.Base.ParseBool("queryCoord.enableActiveStandby", false)
 }
 
 func (p *queryCoordConfig) SetNodeID(id UniqueID) {
@@ -922,6 +932,8 @@ type dataCoordConfig struct {
 	GCInterval         time.Duration
 	GCMissingTolerance time.Duration
 	GCDropTolerance    time.Duration
+
+	EnableActiveStandby bool
 }
 
 func (p *dataCoordConfig) init(base *BaseTable) {
@@ -940,6 +952,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	p.initGCInterval()
 	p.initGCMissingTolerance()
 	p.initGCDropTolerance()
+	p.initEnableActiveStandby()
 }
 
 func (p *dataCoordConfig) initSegmentMaxSize() {
@@ -987,6 +1000,10 @@ func (p *dataCoordConfig) initGCDropTolerance() {
 
 func (p *dataCoordConfig) initEnableAutoCompaction() {
 	p.EnableAutoCompaction = p.Base.ParseBool("dataCoord.compaction.enableAutoCompaction", false)
+}
+
+func (p *dataCoordConfig) initEnableActiveStandby() {
+	p.EnableActiveStandby = p.Base.ParseBool("dataCoord.enableActiveStandby", false)
 }
 
 func (p *dataCoordConfig) SetNodeID(id UniqueID) {
@@ -1112,12 +1129,15 @@ type indexCoordConfig struct {
 
 	CreatedTime time.Time
 	UpdatedTime time.Time
+
+	EnableActiveStandby bool
 }
 
 func (p *indexCoordConfig) init(base *BaseTable) {
 	p.Base = base
 
 	p.initIndexStorageRootPath()
+	p.initEnableActiveStandby()
 }
 
 // initIndexStorageRootPath initializes the root path of index files.
@@ -1127,6 +1147,10 @@ func (p *indexCoordConfig) initIndexStorageRootPath() {
 		panic(err)
 	}
 	p.IndexStorageRootPath = path.Join(rootPath, "index_files")
+}
+
+func (p *indexCoordConfig) initEnableActiveStandby() {
+	p.EnableActiveStandby = p.Base.ParseBool("indexCoord.enableActiveStandby", false)
 }
 
 ///////////////////////////////////////////////////////////////////////////////

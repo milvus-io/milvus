@@ -85,6 +85,8 @@ const (
 	ServerStateInitializing ServerState = 1
 	// ServerStateHealthy state stands for healthy `Server` instance
 	ServerStateHealthy ServerState = 2
+	// ServerStateStandby state stands for standby `Server` instance
+	ServerStateStandby ServerState = 3
 )
 
 type dataNodeCreatorFunc func(ctx context.Context, addr string) (types.DataNode, error)
@@ -129,6 +131,9 @@ type Server struct {
 
 	session *sessionutil.Session
 	eventCh <-chan *sessionutil.SessionEvent
+
+	enableActiveStandBy bool
+	activateFunc        func()
 
 	dataNodeCreator        dataNodeCreatorFunc
 	rootCoordClientCreator rootCoordCreatorFunc
@@ -194,8 +199,8 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 		dataNodeCreator:        defaultDataNodeCreatorFunc,
 		rootCoordClientCreator: defaultRootCoordCreatorFunc,
 		helper:                 defaultServerHelper(),
-
-		metricsCacheManager: metricsinfo.NewMetricsCacheManager(),
+		metricsCacheManager:    metricsinfo.NewMetricsCacheManager(),
+		enableActiveStandBy:    Params.DataCoordCfg.EnableActiveStandby,
 	}
 
 	for _, opt := range opts {
@@ -219,7 +224,12 @@ func (s *Server) QuitSignal() <-chan struct{} {
 
 // Register registers data service at etcd
 func (s *Server) Register() error {
-	s.session.Register()
+	if s.enableActiveStandBy {
+		s.session.Register()
+		s.session.ProcessActiveStandBy(s.activateFunc)
+	} else {
+		s.session.Register()
+	}
 	go s.session.LivenessCheck(s.serverLoopCtx, func() {
 		logutil.Logger(s.ctx).Error("disconnected from etcd and exited", zap.Int64("serverID", s.session.ServerID))
 		if err := s.Stop(); err != nil {
@@ -241,6 +251,7 @@ func (s *Server) initSession() error {
 		return errors.New("failed to initialize session")
 	}
 	s.session.Init(typeutil.DataCoordRole, Params.DataCoordCfg.Address, true, true)
+	s.session.SetEnableActiveStandBy(s.enableActiveStandBy)
 	Params.DataCoordCfg.SetNodeID(s.session.ServerID)
 	Params.SetLogger(Params.DataCoordCfg.GetNodeID())
 	return nil
@@ -291,11 +302,21 @@ func (s *Server) Start() error {
 		return err
 	}
 
-	s.startServerLoop()
+	if s.enableActiveStandBy {
+		s.activateFunc = func() {
+			s.startServerLoop()
+			atomic.StoreInt64(&s.isServing, ServerStateHealthy)
+			logutil.Logger(s.ctx).Debug("startup success")
+		}
+		atomic.StoreInt64(&s.isServing, ServerStateStandby)
+		logutil.Logger(s.ctx).Debug("DataCoord enter standby mode successfully")
+	} else {
+		s.startServerLoop()
+		atomic.StoreInt64(&s.isServing, ServerStateHealthy)
+		logutil.Logger(s.ctx).Debug("DataCoord startup successfully")
+	}
 	Params.DataCoordCfg.CreatedTime = time.Now()
 	Params.DataCoordCfg.UpdatedTime = time.Now()
-	atomic.StoreInt64(&s.isServing, ServerStateHealthy)
-	logutil.Logger(s.ctx).Debug("startup success")
 
 	// DataCoord (re)starts successfully and starts to collection segment stats
 	// data from all DataNode.

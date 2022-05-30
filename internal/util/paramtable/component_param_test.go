@@ -125,6 +125,8 @@ func TestComponentParam(t *testing.T) {
 		t.Logf("master ImportIndexCheckInterval = %f", Params.ImportIndexCheckInterval)
 		assert.NotEqual(t, Params.ImportIndexWaitLimit, 0)
 		t.Logf("master ImportIndexWaitLimit = %f", Params.ImportIndexWaitLimit)
+		assert.Equal(t, Params.EnableActiveStandby, false)
+		t.Logf("rootCoord EnableActiveStandby = %t", Params.EnableActiveStandby)
 
 		Params.CreatedTime = time.Now()
 		Params.UpdatedTime = time.Now()
@@ -205,7 +207,9 @@ func TestComponentParam(t *testing.T) {
 	})
 
 	t.Run("test queryCoordConfig", func(t *testing.T) {
-		//Params := CParams.QueryCoordCfg
+		Params := CParams.QueryCoordCfg
+		assert.Equal(t, Params.EnableActiveStandby, false)
+		t.Logf("queryCoord EnableActiveStandby = %t", Params.EnableActiveStandby)
 	})
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {
@@ -287,6 +291,8 @@ func TestComponentParam(t *testing.T) {
 	t.Run("test dataCoordConfig", func(t *testing.T) {
 		Params := CParams.DataCoordCfg
 		assert.Equal(t, 24*60*60*time.Second, Params.SegmentMaxLifetime)
+		assert.Equal(t, Params.EnableActiveStandby, false)
+		t.Logf("dataCoord EnableActiveStandby = %t", Params.EnableActiveStandby)
 	})
 
 	t.Run("test dataNodeConfig", func(t *testing.T) {
@@ -337,6 +343,9 @@ func TestComponentParam(t *testing.T) {
 		t.Logf("UpdatedTime: %v", Params.UpdatedTime)
 
 		t.Logf("IndexStorageRootPath: %v", Params.IndexStorageRootPath)
+
+		assert.Equal(t, Params.EnableActiveStandby, false)
+		t.Logf("indexCoord EnableActiveStandby = %t", Params.EnableActiveStandby)
 	})
 
 	t.Run("test indexNodeConfig", func(t *testing.T) {

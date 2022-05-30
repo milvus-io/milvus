@@ -2580,3 +2580,58 @@ func closeTestServer(t *testing.T, svr *Server) {
 	err = svr.CleanMeta()
 	assert.Nil(t, err)
 }
+
+func testDataCoordBase(t *testing.T, opts ...Option) *Server {
+	var err error
+	Params.CommonCfg.DataCoordTimeTick = Params.CommonCfg.DataCoordTimeTick + strconv.Itoa(rand.Int())
+	factory := dependency.NewDefaultFactory(true)
+
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	assert.Nil(t, err)
+	sessKey := path.Join(Params.EtcdCfg.MetaRootPath, sessionutil.DefaultServiceRoot)
+	_, err = etcdCli.Delete(context.Background(), sessKey, clientv3.WithPrefix())
+	assert.Nil(t, err)
+
+	svr := CreateServer(context.TODO(), factory, opts...)
+	svr.SetEtcdClient(etcdCli)
+	svr.dataNodeCreator = func(ctx context.Context, addr string) (types.DataNode, error) {
+		return newMockDataNodeClient(0, nil)
+	}
+	svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
+		return newMockRootCoordService(), nil
+	}
+
+	err = svr.Init()
+	assert.Nil(t, err)
+	err = svr.Start()
+	assert.Nil(t, err)
+	err = svr.Register()
+	assert.Nil(t, err)
+
+	resp, err := svr.GetComponentStates(context.Background())
+	assert.Nil(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	assert.Equal(t, internalpb.StateCode_Healthy, resp.GetState().GetStateCode())
+
+	// stop channal watch state watcher in tests
+	if svr.channelManager != nil && svr.channelManager.stopChecker != nil {
+		svr.channelManager.stopChecker()
+	}
+
+	return svr
+}
+
+func TestDataCoord_DisableActiveStandby(t *testing.T) {
+	Params.Init()
+	Params.DataCoordCfg.EnableActiveStandby = false
+	svr := testDataCoordBase(t)
+	defer closeTestServer(t, svr)
+}
+
+// make sure the main functions work well when EnableActiveStandby=true
+func TestDataCoord_EnableActiveStandby(t *testing.T) {
+	Params.Init()
+	Params.DataCoordCfg.EnableActiveStandby = true
+	svr := testDataCoordBase(t)
+	defer closeTestServer(t, svr)
+}

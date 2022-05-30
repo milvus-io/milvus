@@ -105,6 +105,9 @@ type Core struct {
 	kvBase    kv.TxnKV //*etcdkv.EtcdKV
 	impTaskKv kv.MetaKv
 
+	enableActiveStandBy bool
+	activateFunc        func()
+
 	//DDL lock
 	ddlLock sync.Mutex
 
@@ -193,10 +196,11 @@ func NewCore(c context.Context, factory dependency.Factory) (*Core, error) {
 	ctx, cancel := context.WithCancel(c)
 	rand.Seed(time.Now().UnixNano())
 	core := &Core{
-		ctx:     ctx,
-		cancel:  cancel,
-		ddlLock: sync.Mutex{},
-		factory: factory,
+		ctx:                 ctx,
+		cancel:              cancel,
+		ddlLock:             sync.Mutex{},
+		factory:             factory,
+		enableActiveStandBy: Params.RootCoordCfg.EnableActiveStandby,
 	}
 	core.UpdateStateCode(internalpb.StateCode_Abnormal)
 	return core, nil
@@ -1002,7 +1006,15 @@ func (c *Core) ExpireMetaCache(ctx context.Context, collNames []string, collecti
 
 // Register register rootcoord at etcd
 func (c *Core) Register() error {
-	c.session.Register()
+	if c.enableActiveStandBy {
+		c.session.Register()
+		c.session.ProcessActiveStandBy(c.activateFunc)
+	} else {
+		c.session.Register()
+		c.UpdateStateCode(internalpb.StateCode_Healthy)
+		log.Debug("RootCoord start successfully ", zap.String("State Code", internalpb.StateCode_Healthy.String()))
+	}
+	log.Info("RootCoord Register Finished")
 	go c.session.LivenessCheck(c.ctx, func() {
 		log.Error("Root Coord disconnected from etcd, process will exit", zap.Int64("Server Id", c.session.ServerID))
 		if err := c.Stop(); err != nil {
@@ -1016,8 +1028,6 @@ func (c *Core) Register() error {
 		}
 	})
 
-	c.UpdateStateCode(internalpb.StateCode_Healthy)
-	log.Debug("RootCoord start successfully ", zap.String("State Code", internalpb.StateCode_Healthy.String()))
 	return nil
 }
 
@@ -1032,6 +1042,7 @@ func (c *Core) initSession() error {
 		return fmt.Errorf("session is nil, the etcd client connection may have failed")
 	}
 	c.session.Init(typeutil.RootCoordRole, Params.RootCoordCfg.Address, true, true)
+	c.session.SetEnableActiveStandBy(c.enableActiveStandBy)
 	Params.SetLogger(c.session.ServerID)
 	return nil
 }
@@ -1326,6 +1337,14 @@ func (c *Core) Start() error {
 		go c.importManager.sendOutTasksLoop(&c.wg)
 		Params.RootCoordCfg.CreatedTime = time.Now()
 		Params.RootCoordCfg.UpdatedTime = time.Now()
+		if c.enableActiveStandBy {
+			c.activateFunc = func() {
+				log.Info("RootCoord switch from standby to active, reload the KV")
+				c.MetaTable.reloadFromKV()
+				c.UpdateStateCode(internalpb.StateCode_Healthy)
+			}
+			c.UpdateStateCode(internalpb.StateCode_StandBy)
+		}
 	})
 
 	return nil

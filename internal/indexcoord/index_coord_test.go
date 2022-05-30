@@ -44,10 +44,9 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 )
 
-func TestIndexCoord(t *testing.T) {
+func testIndexCoord(t *testing.T) {
 	ctx := context.Background()
 	inm0 := &indexnode.Mock{}
-	Params.Init()
 	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.NoError(t, err)
 	inm0.SetEtcdClient(etcdCli)
@@ -68,9 +67,9 @@ func TestIndexCoord(t *testing.T) {
 	ic.SetEtcdClient(etcdCli)
 	err = ic.Init()
 	assert.Nil(t, err)
-	err = ic.Register()
-	assert.Nil(t, err)
 	err = ic.Start()
+	assert.Nil(t, err)
+	err = ic.Register()
 	assert.Nil(t, err)
 
 	err = inm0.Stop()
@@ -270,6 +269,19 @@ func TestIndexCoord(t *testing.T) {
 	assert.Nil(t, err)
 	err = ic.Stop()
 	assert.Nil(t, err)
+}
+
+func TestIndexCoord_DisableActiveStandby(t *testing.T) {
+	Params.Init()
+	Params.IndexCoordCfg.EnableActiveStandby = false
+	testIndexCoord(t)
+}
+
+// make sure the main functions work well when EnableActiveStandby=true
+func TestIndexCoord_EnableActiveStandby(t *testing.T) {
+	Params.Init()
+	Params.IndexCoordCfg.EnableActiveStandby = true
+	testIndexCoord(t)
 }
 
 func TestIndexCoord_watchNodeLoop(t *testing.T) {

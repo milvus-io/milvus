@@ -103,6 +103,9 @@ type IndexCoord struct {
 	assignTaskInterval time.Duration
 	taskLimit          int
 
+	enableActiveStandBy bool
+	activateFunc        func()
+
 	// Add callback functions at different stages
 	startCallbacks []func()
 	closeCallbacks []func()
@@ -116,13 +119,14 @@ func NewIndexCoord(ctx context.Context, factory dependency.Factory) (*IndexCoord
 	rand.Seed(time.Now().UnixNano())
 	ctx1, cancel := context.WithCancel(ctx)
 	i := &IndexCoord{
-		loopCtx:            ctx1,
-		loopCancel:         cancel,
-		reqTimeoutInterval: time.Second * 10,
-		durationInterval:   time.Second * 10,
-		assignTaskInterval: time.Second * 3,
-		taskLimit:          20,
-		factory:            factory,
+		loopCtx:             ctx1,
+		loopCancel:          cancel,
+		reqTimeoutInterval:  time.Second * 10,
+		durationInterval:    time.Second * 10,
+		assignTaskInterval:  time.Second * 3,
+		taskLimit:           20,
+		factory:             factory,
+		enableActiveStandBy: Params.IndexCoordCfg.EnableActiveStandby,
 	}
 	i.UpdateStateCode(internalpb.StateCode_Abnormal)
 	return i, nil
@@ -130,7 +134,12 @@ func NewIndexCoord(ctx context.Context, factory dependency.Factory) (*IndexCoord
 
 // Register register IndexCoord role at etcd.
 func (i *IndexCoord) Register() error {
-	i.session.Register()
+	if i.enableActiveStandBy {
+		i.session.Register()
+		i.session.ProcessActiveStandBy(i.activateFunc)
+	} else {
+		i.session.Register()
+	}
 	go i.session.LivenessCheck(i.loopCtx, func() {
 		log.Error("Index Coord disconnected from etcd, process will exit", zap.Int64("Server Id", i.session.ServerID))
 		if err := i.Stop(); err != nil {
@@ -152,6 +161,7 @@ func (i *IndexCoord) initSession() error {
 		return errors.New("failed to initialize session")
 	}
 	i.session.Init(typeutil.IndexCoordRole, Params.IndexCoordCfg.Address, true, true)
+	i.session.SetEnableActiveStandBy(i.enableActiveStandBy)
 	Params.SetLogger(i.session.ServerID)
 	return nil
 }
@@ -284,8 +294,18 @@ func (i *IndexCoord) Start() error {
 	Params.IndexCoordCfg.CreatedTime = time.Now()
 	Params.IndexCoordCfg.UpdatedTime = time.Now()
 
-	i.UpdateStateCode(internalpb.StateCode_Healthy)
-	log.Debug("IndexCoord start successfully", zap.Any("State", i.stateCode.Load()))
+	if i.enableActiveStandBy {
+		i.activateFunc = func() {
+			log.Info("IndexCoord switch from standby to active, reload the KV")
+			i.metaTable.reloadFromKV()
+			i.UpdateStateCode(internalpb.StateCode_Healthy)
+		}
+		i.UpdateStateCode(internalpb.StateCode_StandBy)
+		log.Info("IndexCoord start successfully", zap.Any("state", i.stateCode.Load()))
+	} else {
+		i.UpdateStateCode(internalpb.StateCode_Healthy)
+		log.Info("IndexCoord start successfully", zap.Any("state", i.stateCode.Load()))
+	}
 
 	return startErr
 }

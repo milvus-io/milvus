@@ -406,3 +406,75 @@ func TestSession_String(t *testing.T) {
 	s := &Session{}
 	log.Debug("log session", zap.Any("session", s))
 }
+
+func TestSessionProcessActiveStandBy(t *testing.T) {
+	// initial etcd
+	Params.Init()
+	endpoints, err := Params.Load("_EtcdEndpoints")
+	if err != nil {
+		panic(err)
+	}
+	metaRoot := fmt.Sprintf("%d/%s1", rand.Int(), DefaultServiceRoot)
+
+	etcdEndpoints := strings.Split(endpoints, ",")
+	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
+	require.NoError(t, err)
+	etcdKV := etcdkv.NewEtcdKV(etcdCli, metaRoot)
+	err = etcdKV.RemoveWithPrefix("")
+	assert.NoError(t, err)
+
+	defer etcdKV.Close()
+	defer etcdKV.RemoveWithPrefix("")
+
+	var wg sync.WaitGroup
+	ch := make(chan bool)
+	signal := make(chan struct{}, 1)
+	flag := false
+
+	// register session 1, will be active
+	ctx1 := context.Background()
+	s1 := NewSession(ctx1, metaRoot, etcdCli)
+	s1.Init("inittest", "testAddr", true, true)
+	s1.SetEnableActiveStandBy(true)
+	s1.Register()
+	wg.Add(1)
+	s1.liveCh = ch
+	s1.ProcessActiveStandBy(func() {
+		log.Debug("Session 1 become active")
+		wg.Done()
+	})
+	go s1.LivenessCheck(ctx1, func() {
+		flag = true
+		signal <- struct{}{}
+		s1.keepAliveCancel()
+		// directly delete the primary key to make this UT fast,
+		// or the session2 has to wait for session1 release after ttl(60s)
+		etcdCli.Delete(ctx1, s1.primaryKey)
+	})
+	assert.False(t, s1.isStandby.Load().(bool))
+
+	// register session 2, will be standby
+	ctx2 := context.Background()
+	s2 := NewSession(ctx2, metaRoot, etcdCli)
+	s2.Init("inittest", "testAddr", true, true)
+	s2.SetEnableActiveStandBy(true)
+	s2.Register()
+	wg.Add(1)
+	go s2.ProcessActiveStandBy(func() {
+		log.Debug("Session 2 become active")
+		wg.Done()
+	})
+	assert.True(t, s2.isStandby.Load().(bool))
+
+	// stop session 1, session 2 will take over primary service
+	log.Debug("Stop session 1, session 2 will take over primary service")
+	assert.False(t, flag)
+	ch <- true
+	assert.False(t, flag)
+	close(ch)
+	<-signal
+	assert.True(t, flag)
+
+	wg.Wait()
+	assert.False(t, s2.isStandby.Load().(bool))
+}
