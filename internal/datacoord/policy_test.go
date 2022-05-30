@@ -97,11 +97,10 @@ func TestConsistentHashRegisterPolicy(t *testing.T) {
 
 		updates := policy(store, 2)
 
-		// chan1 will be hash to 2, chan2 will be hash to 1
 		assert.NotNil(t, updates)
-		assert.Equal(t, 2, len(updates))
-		assert.EqualValues(t, &ChannelOp{Type: Delete, NodeID: 1, Channels: []*channel{channels[0]}}, updates[0])
-		assert.EqualValues(t, &ChannelOp{Type: Add, NodeID: 2, Channels: []*channel{channels[0]}}, updates[1])
+		assert.Equal(t, 1, len(updates))
+		// No Delete operation will be generated
+		assert.EqualValues(t, &ChannelOp{Type: Add, NodeID: 1, Channels: []*channel{channels[0]}}, updates[0])
 	})
 }
 
@@ -487,13 +486,8 @@ func TestAvgAssignRegisterPolicy(t *testing.T) {
 			},
 			[]*ChannelOp{
 				{
-					Type:     Delete,
-					NodeID:   1,
-					Channels: []*channel{{"ch1", 1}},
-				},
-				{
 					Type:     Add,
-					NodeID:   3,
+					NodeID:   1,
 					Channels: []*channel{{"ch1", 1}},
 				},
 			},
@@ -526,13 +520,8 @@ func TestAvgAssignRegisterPolicy(t *testing.T) {
 			},
 			[]*ChannelOp{
 				{
-					Type:     Delete,
-					NodeID:   1,
-					Channels: []*channel{{"ch1", 1}},
-				},
-				{
 					Type:     Add,
-					NodeID:   3,
+					NodeID:   1,
 					Channels: []*channel{{"ch1", 1}},
 				},
 			},
