@@ -966,7 +966,7 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 
 // GetFlushState gets the flush state of multiple segments
 func (s *Server) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
-	log.Info("received get flush state request", zap.Int64s("segmentIDs", req.GetSegmentIDs()), zap.Int("len", len(req.GetSegmentIDs())))
+	log.Info("DataCoord receive get flush state request", zap.Int64s("segmentIDs", req.GetSegmentIDs()), zap.Int("len", len(req.GetSegmentIDs())))
 
 	resp := &milvuspb.GetFlushStateResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}}
 	if s.isClosed() {
@@ -1003,7 +1003,7 @@ func (s *Server) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateR
 // Import distributes the import tasks to dataNodes.
 // It returns a failed status if no dataNode is available or if any error occurs.
 func (s *Server) Import(ctx context.Context, itr *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
-	log.Info("received import request", zap.Any("import task request", itr))
+	log.Info("DataCoord receive import request", zap.Any("import task request", itr))
 	resp := &datapb.ImportTaskResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -1021,19 +1021,20 @@ func (s *Server) Import(ctx context.Context, itr *datapb.ImportTaskRequest) (*da
 		log.Error("import failed as all dataNodes are offline")
 		return resp, nil
 	}
+
 	avaNodes := getDiff(nodes, itr.GetWorkingNodes())
 	if len(avaNodes) > 0 {
 		// If there exists available DataNodes, pick one at random.
-		dnID := avaNodes[rand.Intn(len(avaNodes))]
+		resp.DatanodeId = avaNodes[rand.Intn(len(avaNodes))]
 		log.Info("picking a free dataNode",
 			zap.Any("all dataNodes", nodes),
-			zap.Int64("picking free dataNode with ID", dnID))
-		s.cluster.Import(s.ctx, dnID, itr)
+			zap.Int64("picking free dataNode with ID", resp.GetDatanodeId()))
+		s.cluster.Import(s.ctx, resp.GetDatanodeId(), itr)
 	} else {
 		// No dataNode is available, reject the import request.
-		errMsg := "all dataNodes are busy working on data import, please try again later or add new dataNode instances"
-		log.Error(errMsg, zap.Int64("task ID", itr.GetImportTask().GetTaskId()))
-		resp.Status.Reason = errMsg
+		msg := "all dataNodes are busy working on data import, the task has been rejected and wait for idle datanode"
+		log.Info(msg, zap.Int64("task ID", itr.GetImportTask().GetTaskId()))
+		resp.Status.Reason = msg
 		return resp, nil
 	}
 
