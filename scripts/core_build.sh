@@ -204,6 +204,30 @@ echo ${CMAKE_CMD}
 ${CMAKE_CMD} -G "${CMAKE_GENERATOR}"
 
 
+# enable offline build of arrow dependency if files exist.
+arrowDepKeys=(
+"ARROW_JEMALLOC_URL"
+"ARROW_THRIFT_URL"
+"ARROW_UTF8PROC_URL"
+"ARROW_XSIMD_URL"
+"ARROW_ZSTD_URL"
+)
+arrowDepValues=(
+"jemalloc-5.2.1.tar.bz2"
+"thrift-0.13.0.tar.gz"
+"utf8proc-v2.7.0.tar.gz"
+"xsimd-7d1778c3b38d63db7cec7145d939f40bc5d859d1.tar.gz"
+"zstd-v1.5.1.tar.gz"
+)
+for i in "${!arrowDepValues[@]}"; do
+   if test -f "${CUSTOM_THIRDPARTY_PATH}/${arrowDepValues[$i]}"; then
+	echo "${arrowDepValues[$i]} exists."
+	export ${arrowDepKeys[$i]}=${CUSTOM_THIRDPARTY_PATH}/${arrowDepValues[$i]}
+   fi
+done
+
+set
+
 if [[ ${RUN_CPPLINT} == "ON" ]]; then
   # cpplint check
   make lint
@@ -231,6 +255,12 @@ if [[ ${RUN_CPPLINT} == "ON" ]]; then
 else
   # compile and build
   make -j ${jobs} install || exit 1
+fi
+
+if command -v ccache &> /dev/null
+then
+	ccache -s
+    exit
 fi
 
 popd
