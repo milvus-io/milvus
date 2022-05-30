@@ -45,7 +45,6 @@ type MockQueryCoord struct {
 	showcolResp      *querypb.ShowCollectionsResponse
 	showpartResp     *querypb.ShowPartitionsResponse
 	partResp         *querypb.GetPartitionStatesResponse
-	channelResp      *querypb.CreateQueryChannelResponse
 	infoResp         *querypb.GetSegmentInfoResponse
 	metricResp       *milvuspb.GetMetricsResponse
 	replicasResp     *milvuspb.GetReplicasResponse
@@ -126,10 +125,6 @@ func (m *MockQueryCoord) LoadPartitions(ctx context.Context, req *querypb.LoadPa
 
 func (m *MockQueryCoord) ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
 	return m.status, m.err
-}
-
-func (m *MockQueryCoord) CreateQueryChannel(ctx context.Context, req *querypb.CreateQueryChannelRequest) (*querypb.CreateQueryChannelResponse, error) {
-	return m.channelResp, m.err
 }
 
 func (m *MockQueryCoord) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
@@ -269,7 +264,6 @@ func Test_NewServer(t *testing.T) {
 		showcolResp:  &querypb.ShowCollectionsResponse{},
 		showpartResp: &querypb.ShowPartitionsResponse{},
 		partResp:     &querypb.GetPartitionStatesResponse{},
-		channelResp:  &querypb.CreateQueryChannelResponse{},
 		infoResp:     &querypb.GetSegmentInfoResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}},
 		metricResp:   &milvuspb.GetMetricsResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}},
 	}
@@ -354,12 +348,6 @@ func Test_NewServer(t *testing.T) {
 
 	t.Run("ReleasePartitions", func(t *testing.T) {
 		resp, err := server.ReleasePartitions(ctx, nil)
-		assert.Nil(t, err)
-		assert.NotNil(t, resp)
-	})
-
-	t.Run("CreateQueryChannel", func(t *testing.T) {
-		resp, err := server.CreateQueryChannel(ctx, nil)
 		assert.Nil(t, err)
 		assert.NotNil(t, resp)
 	})

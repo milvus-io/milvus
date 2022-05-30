@@ -35,9 +35,6 @@ type queryShardService struct {
 	queryShardsMu sync.Mutex              // guards queryShards
 	queryShards   map[Channel]*queryShard // Virtual Channel -> *queryShard
 
-	queryChannelMu sync.Mutex              // guards queryChannels
-	queryChannels  map[int64]*queryChannel // Collection ID -> query channel
-
 	factory dependency.Factory
 
 	historical   ReplicaInterface
@@ -63,7 +60,6 @@ func newQueryShardService(ctx context.Context, historical ReplicaInterface, stre
 		ctx:                 queryShardServiceCtx,
 		cancel:              queryShardServiceCancel,
 		queryShards:         make(map[Channel]*queryShard),
-		queryChannels:       make(map[int64]*queryChannel),
 		historical:          historical,
 		streaming:           streaming,
 		tSafeReplica:        tSafeReplica,
@@ -142,29 +138,7 @@ func (q *queryShardService) close() {
 	}
 }
 
-func (q *queryShardService) getQueryChannel(collectionID int64) *queryChannel {
-	q.queryChannelMu.Lock()
-	defer q.queryChannelMu.Unlock()
-
-	qc, ok := q.queryChannels[collectionID]
-	if !ok {
-		queryStream, _ := q.factory.NewQueryMsgStream(q.ctx)
-		qc = NewQueryChannel(collectionID, q.shardClusterService, queryStream, q.streaming)
-		q.queryChannels[collectionID] = qc
-	}
-
-	return qc
-}
-
 func (q *queryShardService) releaseCollection(collectionID int64) {
-	q.queryChannelMu.Lock()
-	qc, ok := q.queryChannels[collectionID]
-	if ok && qc != nil {
-		qc.Stop()
-		delete(q.queryChannels, collectionID)
-	}
-	q.queryChannelMu.Unlock()
-
 	q.queryShardsMu.Lock()
 	for channel, queryShard := range q.queryShards {
 		if queryShard.collectionID == collectionID {

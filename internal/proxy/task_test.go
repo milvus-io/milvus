@@ -1097,9 +1097,8 @@ func TestDropCollectionTask(t *testing.T) {
 	InitMetaCache(rc, qc)
 
 	master := newMockGetChannelsService()
-	query := newMockGetChannelsService()
 	factory := newSimpleMockMsgStreamFactory()
-	channelMgr := newChannelsMgrImpl(master.GetChannels, nil, query.GetChannels, nil, factory)
+	channelMgr := newChannelsMgrImpl(master.GetChannels, nil, nil, factory)
 	defer channelMgr.removeAllDMLStream()
 
 	prefix := "TestDropCollectionTask"
@@ -1649,7 +1648,6 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 	var err error
 
 	Params.Init()
-	Params.ProxyCfg.RetrieveResultChannelNames = []string{funcutil.GenRandomStr()}
 
 	rc := NewRootCoordMock()
 	rc.Start()
@@ -1723,11 +1721,9 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 	assert.NoError(t, err)
 
 	dmlChannelsFunc := getDmlChannelsFunc(ctx, rc)
-	query := newMockGetChannelsService()
 	factory := newSimpleMockMsgStreamFactory()
-	chMgr := newChannelsMgrImpl(dmlChannelsFunc, nil, query.GetChannels, nil, factory)
+	chMgr := newChannelsMgrImpl(dmlChannelsFunc, nil, nil, factory)
 	defer chMgr.removeAllDMLStream()
-	defer chMgr.removeAllDQLStream()
 
 	err = chMgr.createDMLMsgStream(collectionID)
 	assert.NoError(t, err)
@@ -1905,7 +1901,6 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 	var err error
 
 	Params.Init()
-	Params.ProxyCfg.RetrieveResultChannelNames = []string{funcutil.GenRandomStr()}
 
 	rc := NewRootCoordMock()
 	rc.Start()
@@ -1980,11 +1975,9 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 	assert.NoError(t, err)
 
 	dmlChannelsFunc := getDmlChannelsFunc(ctx, rc)
-	query := newMockGetChannelsService()
 	factory := newSimpleMockMsgStreamFactory()
-	chMgr := newChannelsMgrImpl(dmlChannelsFunc, nil, query.GetChannels, nil, factory)
+	chMgr := newChannelsMgrImpl(dmlChannelsFunc, nil, nil, factory)
 	defer chMgr.removeAllDMLStream()
-	defer chMgr.removeAllDQLStream()
 
 	err = chMgr.createDMLMsgStream(collectionID)
 	assert.NoError(t, err)

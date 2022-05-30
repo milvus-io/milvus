@@ -60,11 +60,6 @@ type UniqueID = typeutil.UniqueID
 // Timestamp is an alias for the Int64 type
 type Timestamp = typeutil.Timestamp
 
-type queryChannelInfo struct {
-	requestChannel  string
-	responseChannel string
-}
-
 // Params is param table of query coordinator
 var Params paramtable.ComponentParam
 

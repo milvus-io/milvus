@@ -84,44 +84,6 @@ func TestImpl_GetStatisticsChannel(t *testing.T) {
 	assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
 }
 
-func TestImpl_AddQueryChannel(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	node, err := genSimpleQueryNode(ctx)
-	assert.NoError(t, err)
-
-	req := &queryPb.AddQueryChannelRequest{
-		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_LoadCollection,
-			MsgID:   rand.Int63(),
-		},
-		NodeID:             0,
-		CollectionID:       defaultCollectionID,
-		QueryChannel:       genQueryChannel(),
-		QueryResultChannel: genQueryResultChannel(),
-	}
-
-	status, err := node.AddQueryChannel(ctx, req)
-	assert.NoError(t, err)
-	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
-
-	node.UpdateStateCode(internalpb.StateCode_Abnormal)
-	status, err = node.AddQueryChannel(ctx, req)
-	assert.NoError(t, err)
-	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
-}
-
-func TestImpl_RemoveQueryChannel(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	node, err := genSimpleQueryNode(ctx)
-	assert.NoError(t, err)
-
-	status, err := node.RemoveQueryChannel(ctx, nil)
-	assert.NoError(t, err)
-	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
-}
-
 func TestImpl_WatchDmChannels(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

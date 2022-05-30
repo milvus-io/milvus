@@ -384,10 +384,6 @@ func (m *MockQueryCoord) ReleasePartitions(ctx context.Context, req *querypb.Rel
 	return nil, nil
 }
 
-func (m *MockQueryCoord) CreateQueryChannel(ctx context.Context, req *querypb.CreateQueryChannelRequest) (*querypb.CreateQueryChannelResponse, error) {
-	return nil, nil
-}
-
 func (m *MockQueryCoord) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
 	return nil, nil
 }

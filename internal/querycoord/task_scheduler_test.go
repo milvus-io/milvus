@@ -139,22 +139,6 @@ func (tt *testTask) execute(ctx context.Context) error {
 			excludeNodeIDs: []int64{},
 		}
 		tt.addChildTask(childTask)
-	case commonpb.MsgType_WatchQueryChannels:
-		childTask := &watchQueryChannelTask{
-			baseTask: &baseTask{
-				ctx:              tt.ctx,
-				condition:        newTaskCondition(tt.ctx),
-				triggerCondition: tt.triggerCondition,
-			},
-			AddQueryChannelRequest: &querypb.AddQueryChannelRequest{
-				Base: &commonpb.MsgBase{
-					MsgType: commonpb.MsgType_WatchQueryChannels,
-				},
-				NodeID: tt.nodeID,
-			},
-			cluster: tt.cluster,
-		}
-		tt.addChildTask(childTask)
 	}
 
 	return nil
@@ -174,7 +158,6 @@ func TestWatchQueryChannel_ClearEtcdInfoAfterAssignedNodeDown(t *testing.T) {
 	assert.Nil(t, err)
 	queryNode, err := startQueryNodeServer(baseCtx)
 	assert.Nil(t, err)
-	queryNode.addQueryChannels = returnFailedResult
 
 	nodeID := queryNode.queryNodeID
 	waitQueryNodeOnline(queryCoord.cluster, nodeID)
@@ -389,27 +372,6 @@ func TestUnMarshalTask(t *testing.T) {
 		assert.Equal(t, task.msgType(), commonpb.MsgType_WatchDeltaChannels)
 	})
 
-	t.Run("Test watchQueryChannelTask", func(t *testing.T) {
-		watchTask := &watchQueryChannelTask{
-			AddQueryChannelRequest: &querypb.AddQueryChannelRequest{
-				Base: &commonpb.MsgBase{
-					MsgType: commonpb.MsgType_WatchQueryChannels,
-				},
-			},
-		}
-		blobs, err := watchTask.marshal()
-		assert.Nil(t, err)
-		err = kv.Save("testMarshalWatchQueryChannel", string(blobs))
-		assert.Nil(t, err)
-		defer kv.RemoveWithPrefix("testMarshalWatchQueryChannel")
-		value, err := kv.Load("testMarshalWatchQueryChannel")
-		assert.Nil(t, err)
-
-		task, err := taskScheduler.unmarshalTask(1008, value)
-		assert.Nil(t, err)
-		assert.Equal(t, task.msgType(), commonpb.MsgType_WatchQueryChannels)
-	})
-
 	t.Run("Test loadBalanceTask", func(t *testing.T) {
 		loadBalanceTask := &loadBalanceTask{
 			LoadBalanceRequest: &querypb.LoadBalanceRequest{
@@ -568,15 +530,12 @@ func Test_generateDerivedInternalTasks(t *testing.T) {
 
 	derivedTasks, err := generateDerivedInternalTasks(loadCollectionTask, queryCoord.meta, queryCoord.cluster)
 	assert.Nil(t, err)
-	assert.Equal(t, 2, len(derivedTasks))
+	assert.Equal(t, 1, len(derivedTasks))
 	for _, internalTask := range derivedTasks {
-		matchType := internalTask.msgType() == commonpb.MsgType_WatchDeltaChannels || internalTask.msgType() == commonpb.MsgType_WatchQueryChannels
+		matchType := internalTask.msgType() == commonpb.MsgType_WatchDeltaChannels
 		assert.Equal(t, true, matchType)
 		if internalTask.msgType() == commonpb.MsgType_WatchDeltaChannels {
 			assert.Equal(t, node1.queryNodeID, internalTask.(*watchDeltaChannelTask).NodeID)
-		}
-		if internalTask.msgType() == commonpb.MsgType_WatchQueryChannels {
-			assert.Equal(t, node1.queryNodeID, internalTask.(*watchQueryChannelTask).NodeID)
 		}
 	}
 

@@ -138,8 +138,6 @@ func (node *Proxy) ReleaseDQLMessageStream(ctx context.Context, request *proxypb
 		return unhealthyStatus(), nil
 	}
 
-	_ = node.chMgr.removeDQLStream(request.CollectionID)
-
 	logutil.Logger(ctx).Debug("complete to release DQL message stream",
 		zap.Any("role", typeutil.ProxyRole),
 		zap.Any("db", request.DbID),

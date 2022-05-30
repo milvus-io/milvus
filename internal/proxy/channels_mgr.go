@@ -18,7 +18,6 @@ package proxy
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"runtime"
 	"sort"
@@ -30,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
 
@@ -41,10 +39,6 @@ import (
 type channelsMgr interface {
 	getChannels(collectionID UniqueID) ([]pChan, error)
 	getVChannels(collectionID UniqueID) ([]vChan, error)
-	createDQLStream(collectionID UniqueID) error
-	getDQLStream(collectionID UniqueID) (msgstream.MsgStream, error)
-	removeDQLStream(collectionID UniqueID) error
-	removeAllDQLStream() error
 	createDMLMsgStream(collectionID UniqueID) error
 	getDMLStream(collectionID UniqueID) (msgstream.MsgStream, error)
 	removeDMLStream(collectionID UniqueID) error
@@ -105,28 +99,6 @@ func getDmlChannelsFunc(ctx context.Context, rc types.RootCoord) getChannelsFunc
 		}
 
 		return ret, nil
-	}
-}
-
-// getDqlChannelsFunc returns a function about how to get query channels of a collection.
-func getDqlChannelsFunc(ctx context.Context, proxyID int64, qc createQueryChannelInterface) getChannelsFuncType {
-	return func(collectionID UniqueID) (map[vChan]pChan, error) {
-		req := &querypb.CreateQueryChannelRequest{
-			CollectionID: collectionID,
-			ProxyID:      proxyID,
-		}
-		resp, err := qc.CreateQueryChannel(ctx, req)
-		if err != nil {
-			return nil, err
-		}
-		if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
-			return nil, errors.New(resp.Status.Reason)
-		}
-
-		m := make(map[vChan]pChan)
-		m[resp.QueryChannel] = resp.QueryChannel
-
-		return m, nil
 	}
 }
 
@@ -474,7 +446,6 @@ var _ channelsMgr = (*channelsMgrImpl)(nil)
 // channelsMgrImpl implements channelsMgr.
 type channelsMgrImpl struct {
 	dmlChannelsMgr *singleTypeChannelsMgr
-	dqlChannelsMgr *singleTypeChannelsMgr
 }
 
 func (mgr *channelsMgrImpl) getChannels(collectionID UniqueID) ([]pChan, error) {
@@ -483,22 +454,6 @@ func (mgr *channelsMgrImpl) getChannels(collectionID UniqueID) ([]pChan, error) 
 
 func (mgr *channelsMgrImpl) getVChannels(collectionID UniqueID) ([]vChan, error) {
 	return mgr.dmlChannelsMgr.getVChannels(collectionID)
-}
-
-func (mgr *channelsMgrImpl) createDQLStream(collectionID UniqueID) error {
-	return mgr.dqlChannelsMgr.createMsgStream(collectionID)
-}
-
-func (mgr *channelsMgrImpl) getDQLStream(collectionID UniqueID) (msgstream.MsgStream, error) {
-	return mgr.dqlChannelsMgr.getStream(collectionID)
-}
-
-func (mgr *channelsMgrImpl) removeDQLStream(collectionID UniqueID) error {
-	return mgr.dqlChannelsMgr.removeStream(collectionID)
-}
-
-func (mgr *channelsMgrImpl) removeAllDQLStream() error {
-	return mgr.dqlChannelsMgr.removeAllStream()
 }
 
 func (mgr *channelsMgrImpl) createDMLMsgStream(collectionID UniqueID) error {
@@ -521,12 +476,10 @@ func (mgr *channelsMgrImpl) removeAllDMLStream() error {
 func newChannelsMgrImpl(
 	getDmlChannelsFunc getChannelsFuncType,
 	dmlRepackFunc repackFuncType,
-	getDqlChannelsFunc getChannelsFuncType,
 	dqlRepackFunc repackFuncType,
 	msgStreamFactory msgstream.Factory,
 ) *channelsMgrImpl {
 	return &channelsMgrImpl{
 		dmlChannelsMgr: newSingleTypeChannelsMgr(getDmlChannelsFunc, msgStreamFactory, dmlRepackFunc, dmlStreamType),
-		dqlChannelsMgr: newSingleTypeChannelsMgr(getDqlChannelsFunc, msgStreamFactory, dqlRepackFunc, dqlStreamType),
 	}
 }

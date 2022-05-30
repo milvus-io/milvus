@@ -1537,11 +1537,6 @@ func genRetrieveMsg(schema *schemapb.CollectionSchema) (*msgstream.RetrieveMsg, 
 	return msg, nil
 }
 
-func genQueryChannel() Channel {
-	const queryChannelPrefix = "query-node-unittest-query-channel-"
-	return queryChannelPrefix + strconv.Itoa(rand.Int())
-}
-
 func genQueryResultChannel() Channel {
 	const queryResultChannelPrefix = "query-node-unittest-query-result-channel-"
 	return queryResultChannelPrefix + strconv.Itoa(rand.Int())

@@ -496,30 +496,6 @@ func TestGrpcRequest(t *testing.T) {
 		assert.Nil(t, err)
 	})
 
-	t.Run("Test AddQueryChannel", func(t *testing.T) {
-		info := cluster.clusterMeta.getQueryChannelInfoByID(defaultCollectionID)
-		addQueryChannelReq := &querypb.AddQueryChannelRequest{
-			NodeID:             nodeID,
-			CollectionID:       defaultCollectionID,
-			QueryChannel:       info.QueryChannel,
-			QueryResultChannel: info.QueryResultChannel,
-		}
-		err = cluster.addQueryChannel(baseCtx, nodeID, addQueryChannelReq)
-		assert.Nil(t, err)
-	})
-
-	t.Run("Test RemoveQueryChannel", func(t *testing.T) {
-		info := cluster.clusterMeta.getQueryChannelInfoByID(defaultCollectionID)
-		removeQueryChannelReq := &querypb.RemoveQueryChannelRequest{
-			NodeID:             nodeID,
-			CollectionID:       defaultCollectionID,
-			QueryChannel:       info.QueryChannel,
-			QueryResultChannel: info.QueryResultChannel,
-		}
-		err = cluster.removeQueryChannel(baseCtx, nodeID, removeQueryChannelReq)
-		assert.Nil(t, err)
-	})
-
 	t.Run("Test GetSegmentInfo", func(t *testing.T) {
 		getSegmentInfoReq := &querypb.GetSegmentInfoRequest{
 			Base: &commonpb.MsgBase{

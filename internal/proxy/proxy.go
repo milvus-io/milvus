@@ -35,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/logutil"
@@ -158,30 +157,6 @@ func (node *Proxy) Init() error {
 	}
 	log.Info("init session for Proxy done")
 
-	if node.queryCoord != nil {
-		log.Debug("create query channel for Proxy")
-		resp, err := node.queryCoord.CreateQueryChannel(node.ctx, &querypb.CreateQueryChannelRequest{})
-		if err != nil {
-			log.Warn("failed to create query channel for Proxy", zap.Error(err))
-			return err
-		}
-
-		if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
-			log.Warn("failed to create query channel for Proxy",
-				zap.String("error_code", resp.Status.ErrorCode.String()),
-				zap.String("reason", resp.Status.Reason))
-			return errors.New(resp.Status.Reason)
-		}
-
-		// TODO SearchResultChannelNames and RetrieveResultChannelNames should not be part in the Param table
-		// we should maintain a separate map for search result
-		Params.ProxyCfg.SearchResultChannelNames = []string{resp.QueryResultChannel}
-		Params.ProxyCfg.RetrieveResultChannelNames = []string{resp.QueryResultChannel}
-		log.Debug("Proxy CreateQueryChannel success", zap.Any("SearchResultChannelNames", Params.ProxyCfg.SearchResultChannelNames))
-		log.Debug("Proxy CreateQueryChannel success", zap.Any("RetrieveResultChannelNames", Params.ProxyCfg.RetrieveResultChannelNames))
-		log.Debug("create query channel for Proxy done", zap.String("QueryResultChannel", resp.QueryResultChannel))
-	}
-
 	node.factory.Init(&Params)
 	log.Debug("init parameters for factory", zap.String("role", typeutil.ProxyRole), zap.Any("parameters", Params.ServiceParam))
 
@@ -221,8 +196,7 @@ func (node *Proxy) Init() error {
 
 	log.Debug("create channels manager", zap.String("role", typeutil.ProxyRole))
 	dmlChannelsFunc := getDmlChannelsFunc(node.ctx, node.rootCoord)
-	dqlChannelsFunc := getDqlChannelsFunc(node.ctx, node.session.ServerID, node.queryCoord)
-	chMgr := newChannelsMgrImpl(dmlChannelsFunc, defaultInsertRepackFunc, dqlChannelsFunc, nil, node.factory)
+	chMgr := newChannelsMgrImpl(dmlChannelsFunc, defaultInsertRepackFunc, nil, node.factory)
 	node.chMgr = chMgr
 	log.Debug("create channels manager done", zap.String("role", typeutil.ProxyRole))
 
