@@ -139,15 +139,13 @@ func (b *baseReadTask) Ready() (bool, error) {
 	if b.Timeout() {
 		return false, fmt.Errorf("deadline exceed")
 	}
-	var err error
-	var tType tsType
+	var channel Channel
 	if b.DataScope == querypb.DataScope_Streaming {
-		tType = tsTypeDML
+		channel = b.QS.channel
 	} else if b.DataScope == querypb.DataScope_Historical {
-		tType = tsTypeDelta
-	}
-	if err != nil {
-		return false, err
+		channel = b.QS.deltaChannel
+	} else {
+		return false, fmt.Errorf("unexpected dataScope %s", b.DataScope.String())
 	}
 
 	if _, released := b.QS.collection.getReleaseTime(); released {
@@ -155,9 +153,9 @@ func (b *baseReadTask) Ready() (bool, error) {
 		return false, fmt.Errorf("collection has been released, taskID = %d, collectionID = %d", b.ID(), b.CollectionID)
 	}
 
-	serviceTime, err2 := b.QS.getServiceableTime(tType)
-	if err2 != nil {
-		return false, fmt.Errorf("failed to get service timestamp, taskID = %d, collectionID = %d, err=%w", b.ID(), b.CollectionID, err2)
+	serviceTime, err := b.QS.getServiceableTime(channel)
+	if err != nil {
+		return false, fmt.Errorf("failed to get service timestamp, taskID = %d, collectionID = %d, err=%w", b.ID(), b.CollectionID, err)
 	}
 	guaranteeTs := b.GuaranteeTimestamp
 	gt, _ := tsoutil.ParseTS(guaranteeTs)
@@ -167,9 +165,17 @@ func (b *baseReadTask) Ready() (bool, error) {
 			zap.Any("collectionID", b.CollectionID),
 			zap.Any("sm.GuaranteeTimestamp", gt),
 			zap.Any("serviceTime", st),
-			zap.Any("delta seconds", (guaranteeTs-serviceTime)/(1000*1000*1000)),
+			zap.Any("delta milliseconds", gt.Sub(st).Milliseconds()),
+			zap.Any("channel", channel),
 			zap.Any("msgID", b.ID()))
 		return false, nil
 	}
+	log.Debug("query msg can do",
+		zap.Any("collectionID", b.CollectionID),
+		zap.Any("sm.GuaranteeTimestamp", gt),
+		zap.Any("serviceTime", st),
+		zap.Any("delta milliseconds", gt.Sub(st).Milliseconds()),
+		zap.Any("channel", channel),
+		zap.Any("msgID", b.ID()))
 	return true, nil
 }

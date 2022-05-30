@@ -127,11 +127,11 @@ func TestQueryShard_getServiceableTime(t *testing.T) {
 	err = updateQueryShardTSafe(qs, timestamp)
 	assert.NoError(t, err)
 
-	dmlTimestamp, err := qs.getServiceableTime(tsTypeDML)
+	dmlTimestamp, err := qs.getServiceableTime(qs.channel)
 	assert.NoError(t, err)
 	assert.Equal(t, timestamp, dmlTimestamp)
 
-	deltaTimestamp, err := qs.getServiceableTime(tsTypeDelta)
+	deltaTimestamp, err := qs.getServiceableTime(qs.deltaChannel)
 	assert.NoError(t, err)
 	assert.Equal(t, timestamp, deltaTimestamp)
 }
