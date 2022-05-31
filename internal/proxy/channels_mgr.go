@@ -329,7 +329,17 @@ func (mgr *singleTypeChannelsMgr) getVChannels(collectionID UniqueID) ([]vChan, 
 	return nil, err
 }
 
+func (mgr *singleTypeChannelsMgr) streamExist(collectionID UniqueID) bool {
+	stream, err := mgr.getStream(collectionID)
+	return err == nil && stream != nil
+}
+
 func (mgr *singleTypeChannelsMgr) createMsgStream(collectionID UniqueID) error {
+	if mgr.streamExist(collectionID) {
+		log.Info("stream already exist, no need to re-create", zap.Int64("collection_id", collectionID))
+		return nil
+	}
+
 	channels, err := mgr.getChannelsFunc(collectionID)
 	if err != nil {
 		log.Warn("failed to create message stream",
