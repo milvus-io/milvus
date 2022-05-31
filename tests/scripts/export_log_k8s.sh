@@ -6,6 +6,17 @@ set -e
 ns_name=$1
 prefix_name=$2
 log_dir=${3:-"k8s_logs"}
+
+array=($(kubectl get pod -n ${ns_name} -l "app.kubernetes.io/name=etcd" | grep ${prefix_name} | awk '{print $1}'))
+echo ${array[@]}
+mkdir -p $log_dir/etcd_session
+for pod in ${array[*]}
+do
+echo "check session for etcd pod $pod "
+kubectl exec $pod -n ${ns_name} -- etcdctl get --prefix by-dev/meta/session > ./$log_dir/etcd_session/$pod.log || echo "export session for pod $pod failed"
+done
+echo "check session done"
+
 array=($(kubectl get pod -n ${ns_name}|grep ${prefix_name}|awk '{print $1}'))
 echo ${array[@]}
 if [ ! -d $log_dir/pod_log ] || [ ! -d $log_dir/pod_describe ];

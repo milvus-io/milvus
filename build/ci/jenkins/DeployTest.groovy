@@ -176,7 +176,7 @@ pipeline {
                             }
                             sh "kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=${env.RELEASE_NAME} -n ${env.NAMESPACE} --timeout=360s"
                             sh "kubectl wait --for=condition=Ready pod -l release=${env.RELEASE_NAME} -n ${env.NAMESPACE} --timeout=360s"
-                            sh "kubectl get pods|grep ${env.RELEASE_NAME}"
+                            sh "kubectl get pods -o wide|grep ${env.RELEASE_NAME}"
                             }
                         }
                     }
@@ -266,7 +266,7 @@ pipeline {
                             }
                             sh "kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=${env.RELEASE_NAME} -n ${env.NAMESPACE} --timeout=360s"
                             sh "kubectl wait --for=condition=Ready pod -l release=${env.RELEASE_NAME} -n ${env.NAMESPACE} --timeout=360s"                               
-                            sh "kubectl get pods|grep ${env.RELEASE_NAME}"
+                            sh "kubectl get pods -o wide|grep ${env.RELEASE_NAME}"
                         }
                     }
                 }
@@ -303,7 +303,7 @@ pipeline {
                 dir ('tests/python_client/chaos') {
                     script {
                         echo "get pod status"
-                        sh "kubectl get pods|grep ${env.RELEASE_NAME} || true"
+                        sh "kubectl get pods -o wide|grep ${env.RELEASE_NAME} || true"
                         echo "collecte logs"
                         sh "bash ../../scripts/export_log_k8s.sh ${env.NAMESPACE} ${env.RELEASE_NAME} k8s_log/${env.RELEASE_NAME} || echo 'export log failed'"
                         echo "upload logs"
