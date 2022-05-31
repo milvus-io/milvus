@@ -864,8 +864,7 @@ func (m *RootCoordFactory) AllocID(ctx context.Context, in *rootcoordpb.AllocIDR
 	}
 
 	if m.ID == -1 {
-		resp.Status.ErrorCode = commonpb.ErrorCode_Success
-		return resp, errors.New(resp.Status.GetReason())
+		return nil, errors.New(resp.Status.GetReason())
 	}
 
 	resp.ID = m.ID

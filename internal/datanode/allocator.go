@@ -58,13 +58,12 @@ func (alloc *allocator) allocID() (UniqueID, error) {
 		},
 		Count: 1,
 	})
-
-	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
-		return 0, errors.New(resp.Status.GetReason())
-	}
-
 	if err != nil {
 		return 0, err
+	}
+
+	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		return 0, errors.New(resp.GetStatus().GetReason())
 	}
 
 	return resp.ID, nil
@@ -81,13 +80,14 @@ func (alloc *allocator) allocIDBatch(count uint32) (UniqueID, uint32, error) {
 		Count: count,
 	})
 
-	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
-		return 0, 0, errors.New(resp.Status.GetReason())
-	}
-
 	if err != nil {
 		return 0, 0, err
 	}
+
+	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		return 0, 0, errors.New(resp.GetStatus().GetReason())
+	}
+
 	return resp.GetID(), resp.GetCount(), nil
 }
 
