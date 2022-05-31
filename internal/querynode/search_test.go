@@ -28,7 +28,7 @@ func TestHistorical_Search(t *testing.T) {
 	defer cancel()
 
 	t.Run("test search", func(t *testing.T) {
-		his, err := genSimpleHistorical(ctx)
+		his, err := genSimpleReplicaWithSealSegment(ctx)
 		assert.NoError(t, err)
 
 		collection, err := his.getCollectionByID(defaultCollectionID)
@@ -41,7 +41,7 @@ func TestHistorical_Search(t *testing.T) {
 	})
 
 	t.Run("test no collection - search partitions", func(t *testing.T) {
-		his, err := genSimpleHistorical(ctx)
+		his, err := genSimpleReplicaWithSealSegment(ctx)
 		assert.NoError(t, err)
 
 		collection, err := his.getCollectionByID(defaultCollectionID)
@@ -57,7 +57,7 @@ func TestHistorical_Search(t *testing.T) {
 	})
 
 	t.Run("test no collection - search all collection", func(t *testing.T) {
-		his, err := genSimpleHistorical(ctx)
+		his, err := genSimpleReplicaWithSealSegment(ctx)
 		assert.NoError(t, err)
 
 		collection, err := his.getCollectionByID(defaultCollectionID)
@@ -73,7 +73,7 @@ func TestHistorical_Search(t *testing.T) {
 	})
 
 	t.Run("test load partition and partition has been released", func(t *testing.T) {
-		his, err := genSimpleHistorical(ctx)
+		his, err := genSimpleReplicaWithSealSegment(ctx)
 		assert.NoError(t, err)
 
 		collection, err := his.getCollectionByID(defaultCollectionID)
@@ -93,7 +93,7 @@ func TestHistorical_Search(t *testing.T) {
 	})
 
 	t.Run("test no partition in collection", func(t *testing.T) {
-		his, err := genSimpleHistorical(ctx)
+		his, err := genSimpleReplicaWithSealSegment(ctx)
 		assert.NoError(t, err)
 
 		collection, err := his.getCollectionByID(defaultCollectionID)
@@ -112,11 +112,8 @@ func TestHistorical_Search(t *testing.T) {
 }
 
 func TestStreaming_search(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	t.Run("test search", func(t *testing.T) {
-		streaming, err := genSimpleStreaming(ctx)
+		streaming, err := genSimpleReplicaWithGrowingSegment()
 		assert.NoError(t, err)
 
 		collection, err := streaming.getCollectionByID(defaultCollectionID)
@@ -133,7 +130,7 @@ func TestStreaming_search(t *testing.T) {
 	})
 
 	t.Run("test run empty partition", func(t *testing.T) {
-		streaming, err := genSimpleStreaming(ctx)
+		streaming, err := genSimpleReplicaWithGrowingSegment()
 		assert.NoError(t, err)
 
 		collection, err := streaming.getCollectionByID(defaultCollectionID)
@@ -150,7 +147,7 @@ func TestStreaming_search(t *testing.T) {
 	})
 
 	t.Run("test run empty partition and loadCollection", func(t *testing.T) {
-		streaming, err := genSimpleStreaming(ctx)
+		streaming, err := genSimpleReplicaWithGrowingSegment()
 		assert.NoError(t, err)
 
 		collection, err := streaming.getCollectionByID(defaultCollectionID)
@@ -175,7 +172,7 @@ func TestStreaming_search(t *testing.T) {
 	})
 
 	t.Run("test run empty partition and loadPartition", func(t *testing.T) {
-		streaming, err := genSimpleStreaming(ctx)
+		streaming, err := genSimpleReplicaWithGrowingSegment()
 		assert.NoError(t, err)
 
 		collection, err := streaming.getCollectionByID(defaultCollectionID)
@@ -198,7 +195,7 @@ func TestStreaming_search(t *testing.T) {
 	})
 
 	t.Run("test no partitions in collection", func(t *testing.T) {
-		streaming, err := genSimpleStreaming(ctx)
+		streaming, err := genSimpleReplicaWithGrowingSegment()
 		assert.NoError(t, err)
 
 		collection, err := streaming.getCollectionByID(defaultCollectionID)
@@ -218,7 +215,7 @@ func TestStreaming_search(t *testing.T) {
 	})
 
 	t.Run("test search failed", func(t *testing.T) {
-		streaming, err := genSimpleStreaming(ctx)
+		streaming, err := genSimpleReplicaWithGrowingSegment()
 		assert.NoError(t, err)
 
 		collection, err := streaming.getCollectionByID(defaultCollectionID)
@@ -226,7 +223,7 @@ func TestStreaming_search(t *testing.T) {
 		searchReq, err := genSearchPlanAndRequests(collection, IndexFaissIDMap, defaultNQ)
 		assert.NoError(t, err)
 
-		seg, err := streaming.getSegmentByID(defaultSegmentID)
+		seg, err := streaming.getSegmentByID(defaultSegmentID, segmentTypeGrowing)
 		assert.NoError(t, err)
 
 		seg.segmentPtr = nil

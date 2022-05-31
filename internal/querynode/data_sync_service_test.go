@@ -21,25 +21,20 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-
-	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
 func TestDataSyncService_DMLFlowGraphs(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	streamingReplica, err := genSimpleReplica()
-	assert.NoError(t, err)
-
-	historicalReplica, err := genSimpleReplica()
+	replica, err := genSimpleReplica()
 	assert.NoError(t, err)
 
 	fac := genFactory()
 	assert.NoError(t, err)
 
 	tSafe := newTSafeReplica()
-	dataSyncService := newDataSyncService(ctx, streamingReplica, historicalReplica, tSafe, fac)
+	dataSyncService := newDataSyncService(ctx, replica, tSafe, fac)
 	assert.NotNil(t, dataSyncService)
 
 	t.Run("test DMLFlowGraphs", func(t *testing.T) {
@@ -83,11 +78,11 @@ func TestDataSyncService_DMLFlowGraphs(t *testing.T) {
 	})
 
 	t.Run("test addFlowGraphsForDMLChannels checkReplica Failed", func(t *testing.T) {
-		err = dataSyncService.historicalReplica.removeCollection(defaultCollectionID)
+		err = dataSyncService.metaReplica.removeCollection(defaultCollectionID)
 		assert.NoError(t, err)
 		_, err = dataSyncService.addFlowGraphsForDMLChannels(defaultCollectionID, []Channel{defaultDMLChannel})
 		assert.Error(t, err)
-		dataSyncService.historicalReplica.addCollection(defaultCollectionID, genTestCollectionSchema(schemapb.DataType_Int64))
+		dataSyncService.metaReplica.addCollection(defaultCollectionID, genTestCollectionSchema())
 	})
 }
 
@@ -95,17 +90,14 @@ func TestDataSyncService_DeltaFlowGraphs(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	streamingReplica, err := genSimpleReplica()
-	assert.NoError(t, err)
-
-	historicalReplica, err := genSimpleReplica()
+	replica, err := genSimpleReplica()
 	assert.NoError(t, err)
 
 	fac := genFactory()
 	assert.NoError(t, err)
 
 	tSafe := newTSafeReplica()
-	dataSyncService := newDataSyncService(ctx, streamingReplica, historicalReplica, tSafe, fac)
+	dataSyncService := newDataSyncService(ctx, replica, tSafe, fac)
 	assert.NotNil(t, dataSyncService)
 
 	t.Run("test DeltaFlowGraphs", func(t *testing.T) {
@@ -149,11 +141,11 @@ func TestDataSyncService_DeltaFlowGraphs(t *testing.T) {
 	})
 
 	t.Run("test addFlowGraphsForDeltaChannels checkReplica Failed", func(t *testing.T) {
-		err = dataSyncService.historicalReplica.removeCollection(defaultCollectionID)
+		err = dataSyncService.metaReplica.removeCollection(defaultCollectionID)
 		assert.NoError(t, err)
 		_, err = dataSyncService.addFlowGraphsForDeltaChannels(defaultCollectionID, []Channel{defaultDMLChannel})
 		assert.Error(t, err)
-		dataSyncService.historicalReplica.addCollection(defaultCollectionID, genTestCollectionSchema(schemapb.DataType_Int64))
+		dataSyncService.metaReplica.addCollection(defaultCollectionID, genTestCollectionSchema())
 	})
 }
 
@@ -161,17 +153,14 @@ func TestDataSyncService_checkReplica(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	streamingReplica, err := genSimpleReplica()
-	assert.NoError(t, err)
-
-	historicalReplica, err := genSimpleReplica()
+	replica, err := genSimpleReplica()
 	assert.NoError(t, err)
 
 	fac := genFactory()
 	assert.NoError(t, err)
 
 	tSafe := newTSafeReplica()
-	dataSyncService := newDataSyncService(ctx, streamingReplica, historicalReplica, tSafe, fac)
+	dataSyncService := newDataSyncService(ctx, replica, tSafe, fac)
 	assert.NotNil(t, dataSyncService)
 	defer dataSyncService.close()
 
@@ -181,37 +170,16 @@ func TestDataSyncService_checkReplica(t *testing.T) {
 	})
 
 	t.Run("test collection doesn't exist", func(t *testing.T) {
-		err = dataSyncService.streamingReplica.removeCollection(defaultCollectionID)
+		err = dataSyncService.metaReplica.removeCollection(defaultCollectionID)
 		assert.NoError(t, err)
 		err = dataSyncService.checkReplica(defaultCollectionID)
 		assert.Error(t, err)
-
-		err = dataSyncService.historicalReplica.removeCollection(defaultCollectionID)
-		assert.NoError(t, err)
-		err = dataSyncService.checkReplica(defaultCollectionID)
-		assert.Error(t, err)
-
-		coll := dataSyncService.historicalReplica.addCollection(defaultCollectionID, genTestCollectionSchema(schemapb.DataType_Int64))
+		coll := dataSyncService.metaReplica.addCollection(defaultCollectionID, genTestCollectionSchema())
 		assert.NotNil(t, coll)
-		coll = dataSyncService.streamingReplica.addCollection(defaultCollectionID, genTestCollectionSchema(schemapb.DataType_Int64))
-		assert.NotNil(t, coll)
-	})
-
-	t.Run("test different loadType", func(t *testing.T) {
-		coll, err := dataSyncService.historicalReplica.getCollectionByID(defaultCollectionID)
-		assert.NoError(t, err)
-		coll.setLoadType(loadTypePartition)
-
-		err = dataSyncService.checkReplica(defaultCollectionID)
-		assert.Error(t, err)
-
-		coll, err = dataSyncService.streamingReplica.getCollectionByID(defaultCollectionID)
-		assert.NoError(t, err)
-		coll.setLoadType(loadTypePartition)
 	})
 
 	t.Run("test cannot find tSafe", func(t *testing.T) {
-		coll, err := dataSyncService.historicalReplica.getCollectionByID(defaultCollectionID)
+		coll, err := dataSyncService.metaReplica.getCollectionByID(defaultCollectionID)
 		assert.NoError(t, err)
 		coll.addVDeltaChannels([]Channel{defaultDeltaChannel})
 		coll.addVChannels([]Channel{defaultDMLChannel})

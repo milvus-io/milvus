@@ -80,6 +80,13 @@ func (c *Collection) Schema() *schemapb.CollectionSchema {
 	return c.schema
 }
 
+// getPartitionIDs return partitionIDs of collection
+func (c *Collection) getPartitionIDs() []UniqueID {
+	dst := make([]UniqueID, len(c.partitionIDs))
+	copy(dst, c.partitionIDs)
+	return dst
+}
+
 // addPartitionID would add a partition id to partition id list of collection
 func (c *Collection) addPartitionID(partitionID UniqueID) {
 	c.partitionIDs = append(c.partitionIDs, partitionID)

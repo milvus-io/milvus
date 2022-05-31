@@ -354,13 +354,13 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, in *queryPb.ReleaseS
 	}
 	// collection lock is not needed since we guarantee not query/search will be dispatch from leader
 	for _, id := range in.SegmentIDs {
-		err := node.historical.removeSegment(id)
+		err := node.metaReplica.removeSegment(id, segmentTypeSealed)
 		if err != nil {
 			// not return, try to release all segments
 			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 			status.Reason = err.Error()
 		}
-		err = node.streaming.removeSegment(id)
+		err = node.metaReplica.removeSegment(id, segmentTypeGrowing)
 		if err != nil {
 			// not return, try to release all segments
 			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
@@ -392,33 +392,8 @@ func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *queryPb.GetSegmen
 		segmentIDs[segmentID] = struct{}{}
 	}
 
-	// get info from historical
-	historicalSegmentInfos, err := node.historical.getSegmentInfosByColID(in.CollectionID)
-	if err != nil {
-		log.Warn("GetSegmentInfo: get historical segmentInfo failed", zap.Int64("collectionID", in.CollectionID), zap.Error(err))
-		res := &queryPb.GetSegmentInfoResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
-		}
-		return res, nil
-	}
-	segmentInfos = append(segmentInfos, filterSegmentInfo(historicalSegmentInfos, segmentIDs)...)
-
-	// get info from streaming
-	streamingSegmentInfos, err := node.streaming.getSegmentInfosByColID(in.CollectionID)
-	if err != nil {
-		log.Warn("GetSegmentInfo: get streaming segmentInfo failed", zap.Int64("collectionID", in.CollectionID), zap.Error(err))
-		res := &queryPb.GetSegmentInfoResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
-		}
-		return res, nil
-	}
-	segmentInfos = append(segmentInfos, filterSegmentInfo(streamingSegmentInfos, segmentIDs)...)
+	infos := node.metaReplica.getSegmentInfosByColID(in.CollectionID)
+	segmentInfos = append(segmentInfos, filterSegmentInfo(infos, segmentIDs)...)
 
 	return &queryPb.GetSegmentInfoResponse{
 		Status: &commonpb.Status{

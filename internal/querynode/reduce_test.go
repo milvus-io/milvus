@@ -51,10 +51,10 @@ func TestReduce_AllFunc(t *testing.T) {
 	node, err := genSimpleQueryNode(ctx)
 	assert.NoError(t, err)
 
-	collection, err := node.historical.getCollectionByID(defaultCollectionID)
+	collection, err := node.metaReplica.getCollectionByID(defaultCollectionID)
 	assert.NoError(t, err)
 
-	segment, err := node.historical.getSegmentByID(defaultSegmentID)
+	segment, err := node.metaReplica.getSegmentByID(defaultSegmentID, segmentTypeSealed)
 	assert.NoError(t, err)
 
 	// TODO: replace below by genPlaceholderGroup(nq)

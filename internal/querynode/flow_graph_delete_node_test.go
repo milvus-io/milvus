@@ -122,7 +122,7 @@ func TestFlowGraphDeleteNode_operate(t *testing.T) {
 		}
 		msg := []flowgraph.Msg{&dMsg}
 		deleteNode.Operate(msg)
-		s, err := historical.getSegmentByID(defaultSegmentID)
+		s, err := historical.getSegmentByID(defaultSegmentID, segmentTypeSealed)
 		pks := make([]primaryKey, defaultMsgLength)
 		for i := 0; i < defaultMsgLength; i++ {
 			pks[i] = newInt64PrimaryKey(int64(i))

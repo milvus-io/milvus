@@ -23,11 +23,11 @@ import (
 
 // retrieveOnSegments performs retrieve on listed segments
 // all segment ids are validated before calling this function
-func retrieveOnSegments(replica ReplicaInterface, collID UniqueID, plan *RetrievePlan, segIDs []UniqueID, vcm storage.ChunkManager) ([]*segcorepb.RetrieveResults, error) {
+func retrieveOnSegments(replica ReplicaInterface, segType segmentType, collID UniqueID, plan *RetrievePlan, segIDs []UniqueID, vcm storage.ChunkManager) ([]*segcorepb.RetrieveResults, error) {
 	var retrieveResults []*segcorepb.RetrieveResults
 
 	for _, segID := range segIDs {
-		seg, err := replica.getSegmentByID(segID)
+		seg, err := replica.getSegmentByID(segID, segType)
 		if err != nil {
 			return nil, err
 		}
@@ -54,7 +54,7 @@ func retrieveHistorical(replica ReplicaInterface, plan *RetrievePlan, collID Uni
 		return retrieveResults, retrieveSegmentIDs, retrievePartIDs, err
 	}
 
-	retrieveResults, err = retrieveOnSegments(replica, collID, plan, retrieveSegmentIDs, vcm)
+	retrieveResults, err = retrieveOnSegments(replica, segmentTypeSealed, collID, plan, retrieveSegmentIDs, vcm)
 	return retrieveResults, retrievePartIDs, retrieveSegmentIDs, err
 }
 
@@ -69,6 +69,6 @@ func retrieveStreaming(replica ReplicaInterface, plan *RetrievePlan, collID Uniq
 	if err != nil {
 		return retrieveResults, retrieveSegmentIDs, retrievePartIDs, err
 	}
-	retrieveResults, err = retrieveOnSegments(replica, collID, plan, retrieveSegmentIDs, vcm)
+	retrieveResults, err = retrieveOnSegments(replica, segmentTypeGrowing, collID, plan, retrieveSegmentIDs, vcm)
 	return retrieveResults, retrievePartIDs, retrieveSegmentIDs, err
 }

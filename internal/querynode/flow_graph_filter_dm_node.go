@@ -34,7 +34,7 @@ import (
 type filterDmNode struct {
 	baseNode
 	collectionID UniqueID
-	replica      ReplicaInterface
+	metaReplica  ReplicaInterface
 }
 
 // Name returns the name of filterDmNode
@@ -140,13 +140,13 @@ func (fdmNode *filterDmNode) filterInvalidDeleteMessage(msg *msgstream.DeleteMsg
 	}
 
 	// check if collection exist
-	col, err := fdmNode.replica.getCollectionByID(msg.CollectionID)
+	col, err := fdmNode.metaReplica.getCollectionByID(msg.CollectionID)
 	if err != nil {
 		// QueryNode should add collection before start flow graph
 		return nil, fmt.Errorf("filter invalid delete message, collection does not exist, collectionID = %d", msg.CollectionID)
 	}
 	if col.getLoadType() == loadTypePartition {
-		if !fdmNode.replica.hasPartition(msg.PartitionID) {
+		if !fdmNode.metaReplica.hasPartition(msg.PartitionID) {
 			// filter out msg which not belongs to the loaded partitions
 			return nil, nil
 		}
@@ -181,13 +181,13 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 	}
 
 	// check if collection exists
-	col, err := fdmNode.replica.getCollectionByID(msg.CollectionID)
+	col, err := fdmNode.metaReplica.getCollectionByID(msg.CollectionID)
 	if err != nil {
 		// QueryNode should add collection before start flow graph
 		return nil, fmt.Errorf("filter invalid insert message, collection does not exist, collectionID = %d", msg.CollectionID)
 	}
 	if col.getLoadType() == loadTypePartition {
-		if !fdmNode.replica.hasPartition(msg.PartitionID) {
+		if !fdmNode.metaReplica.hasPartition(msg.PartitionID) {
 			// filter out msg which not belongs to the loaded partitions
 			return nil, nil
 		}
@@ -196,7 +196,7 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 	// Check if the segment is in excluded segments,
 	// messages after seekPosition may contain the redundant data from flushed slice of segment,
 	// so we need to compare the endTimestamp of received messages and position's timestamp.
-	excludedSegments, err := fdmNode.replica.getExcludedSegments(fdmNode.collectionID)
+	excludedSegments, err := fdmNode.metaReplica.getExcludedSegments(fdmNode.collectionID)
 	if err != nil {
 		// QueryNode should addExcludedSegments for the current collection before start flow graph
 		return nil, err
@@ -221,7 +221,7 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 }
 
 // newFilteredDmNode returns a new filterDmNode
-func newFilteredDmNode(replica ReplicaInterface, collectionID UniqueID) *filterDmNode {
+func newFilteredDmNode(metaReplica ReplicaInterface, collectionID UniqueID) *filterDmNode {
 
 	maxQueueLength := Params.QueryNodeCfg.FlowGraphMaxQueueLength
 	maxParallelism := Params.QueryNodeCfg.FlowGraphMaxParallelism
@@ -233,6 +233,6 @@ func newFilteredDmNode(replica ReplicaInterface, collectionID UniqueID) *filterD
 	return &filterDmNode{
 		baseNode:     baseNode,
 		collectionID: collectionID,
-		replica:      replica,
+		metaReplica:  metaReplica,
 	}
 }

@@ -26,7 +26,7 @@ import (
 
 // searchOnSegments performs search on listed segments
 // all segment ids are validated before calling this function
-func searchOnSegments(replica ReplicaInterface, searchReq *searchRequest, segIDs []UniqueID) ([]*SearchResult, error) {
+func searchOnSegments(replica ReplicaInterface, segType segmentType, searchReq *searchRequest, segIDs []UniqueID) ([]*SearchResult, error) {
 	// results variables
 	searchResults := make([]*SearchResult, len(segIDs))
 	errs := make([]error, len(segIDs))
@@ -37,7 +37,7 @@ func searchOnSegments(replica ReplicaInterface, searchReq *searchRequest, segIDs
 		wg.Add(1)
 		go func(segID UniqueID, i int) {
 			defer wg.Done()
-			seg, err := replica.getSegmentByID(segID)
+			seg, err := replica.getSegmentByID(segID, segType)
 			if err != nil {
 				return
 			}
@@ -75,7 +75,7 @@ func searchHistorical(replica ReplicaInterface, searchReq *searchRequest, collID
 	if err != nil {
 		return searchResults, searchSegmentIDs, searchPartIDs, err
 	}
-	searchResults, err = searchOnSegments(replica, searchReq, searchSegmentIDs)
+	searchResults, err = searchOnSegments(replica, segmentTypeSealed, searchReq, searchSegmentIDs)
 	return searchResults, searchPartIDs, searchSegmentIDs, err
 }
 
@@ -91,6 +91,6 @@ func searchStreaming(replica ReplicaInterface, searchReq *searchRequest, collID 
 	if err != nil {
 		return searchResults, searchSegmentIDs, searchPartIDs, err
 	}
-	searchResults, err = searchOnSegments(replica, searchReq, searchSegmentIDs)
+	searchResults, err = searchOnSegments(replica, segmentTypeGrowing, searchReq, searchSegmentIDs)
 	return searchResults, searchPartIDs, searchSegmentIDs, err
 }

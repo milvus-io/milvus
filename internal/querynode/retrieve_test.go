@@ -17,7 +17,6 @@
 package querynode
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -26,10 +25,7 @@ import (
 )
 
 func TestStreaming_retrieve(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	streaming, err := genSimpleStreaming(ctx)
+	streaming, err := genSimpleReplicaWithGrowingSegment()
 	assert.NoError(t, err)
 
 	collection, err := streaming.getCollectionByID(defaultCollectionID)
@@ -40,7 +36,7 @@ func TestStreaming_retrieve(t *testing.T) {
 	insertMsg, err := genSimpleInsertMsg(collection.schema, defaultMsgLength)
 	assert.NoError(t, err)
 
-	segment, err := streaming.getSegmentByID(defaultSegmentID)
+	segment, err := streaming.getSegmentByID(defaultSegmentID, segmentTypeGrowing)
 	assert.NoError(t, err)
 
 	offset, err := segment.segmentPreInsert(len(insertMsg.RowIDs))

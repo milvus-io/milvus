@@ -38,7 +38,6 @@ import (
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -57,112 +56,20 @@ func setup() {
 	Params.EtcdCfg.MetaRootPath = "/etcd/test/root/querynode"
 }
 
-//func genTestCollectionSchema(collectionID UniqueID, isBinary bool, dim int) *schemapb.CollectionSchema {
-//	var fieldVec schemapb.FieldSchema
-//	if isBinary {
-//		fieldVec = schemapb.FieldSchema{
-//			FieldID:      UniqueID(100),
-//			Name:         "vec",
-//			IsPrimaryKey: false,
-//			DataType:     schemapb.DataType_BinaryVector,
-//			TypeParams: []*commonpb.KeyValuePair{
-//				{
-//					Key:   "dim",
-//					Value: strconv.Itoa(dim * 8),
-//				},
-//			},
-//			IndexParams: []*commonpb.KeyValuePair{
-//				{
-//					Key:   "metric_type",
-//					Value: "JACCARD",
-//				},
-//			},
-//		}
-//	} else {
-//		fieldVec = schemapb.FieldSchema{
-//			FieldID:      UniqueID(100),
-//			Name:         "vec",
-//			IsPrimaryKey: false,
-//			DataType:     schemapb.DataType_FloatVector,
-//			TypeParams: []*commonpb.KeyValuePair{
-//				{
-//					Key:   "dim",
-//					Value: strconv.Itoa(dim),
-//				},
-//			},
-//			IndexParams: []*commonpb.KeyValuePair{
-//				{
-//					Key:   "metric_type",
-//					Value: "L2",
-//				},
-//			},
-//		}
-//	}
-//
-//	fieldInt := schemapb.FieldSchema{
-//		FieldID:      UniqueID(101),
-//		Name:         "age",
-//		IsPrimaryKey: false,
-//		DataType:     schemapb.DataType_Int32,
-//	}
-//
-//	schema := &schemapb.CollectionSchema{
-//		AutoID: true,
-//		Fields: []*schemapb.FieldSchema{
-//			&fieldVec, &fieldInt,
-//		},
-//	}
-//
-//	return schema
-//}
-//
-//func genTestCollectionMeta(collectionID UniqueID, isBinary bool) *etcdpb.CollectionInfo {
-//	schema := genTestCollectionSchema(collectionID, isBinary, 16)
-//
-//	collectionMeta := etcdpb.CollectionInfo{
-//		ID:           collectionID,
-//		Schema:       schema,
-//		CreateTime:   Timestamp(0),
-//		PartitionIDs: []UniqueID{defaultPartitionID},
-//	}
-//
-//	return &collectionMeta
-//}
-//
-//func genTestCollectionMetaWithPK(collectionID UniqueID, isBinary bool) *etcdpb.CollectionInfo {
-//	schema := genTestCollectionSchema(collectionID, isBinary, 16)
-//	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
-//		FieldID:      UniqueID(0),
-//		Name:         "id",
-//		IsPrimaryKey: true,
-//		DataType:     schemapb.DataType_Int64,
-//	})
-//
-//	collectionMeta := etcdpb.CollectionInfo{
-//		ID:           collectionID,
-//		Schema:       schema,
-//		CreateTime:   Timestamp(0),
-//		PartitionIDs: []UniqueID{defaultPartitionID},
-//	}
-//
-//	return &collectionMeta
-//}
-
 func initTestMeta(t *testing.T, node *QueryNode, collectionID UniqueID, segmentID UniqueID, optional ...bool) {
-	pkType := schemapb.DataType_Int64
-	schema := genTestCollectionSchema(pkType)
+	schema := genTestCollectionSchema()
 
-	node.historical.addCollection(defaultCollectionID, schema)
+	node.metaReplica.addCollection(defaultCollectionID, schema)
 
-	collection, err := node.historical.getCollectionByID(collectionID)
+	collection, err := node.metaReplica.getCollectionByID(collectionID)
 	assert.NoError(t, err)
 	assert.Equal(t, collection.ID(), collectionID)
-	assert.Equal(t, node.historical.getCollectionNum(), 1)
+	assert.Equal(t, node.metaReplica.getCollectionNum(), 1)
 
-	err = node.historical.addPartition(collection.ID(), defaultPartitionID)
+	err = node.metaReplica.addPartition(collection.ID(), defaultPartitionID)
 	assert.NoError(t, err)
 
-	err = node.historical.addSegment(segmentID, defaultPartitionID, collectionID, "", segmentTypeSealed)
+	err = node.metaReplica.addSegment(segmentID, defaultPartitionID, collectionID, "", segmentTypeSealed)
 	assert.NoError(t, err)
 }
 
@@ -190,12 +97,10 @@ func newQueryNodeMock() *QueryNode {
 	factory := newMessageStreamFactory()
 	svr := NewQueryNode(ctx, factory)
 	tsReplica := newTSafeReplica()
-	streamingReplica := newCollectionReplica(etcdKV)
-	historicalReplica := newCollectionReplica(etcdKV)
-	svr.historical = streamingReplica
-	svr.streaming = historicalReplica
-	svr.dataSyncService = newDataSyncService(ctx, svr.streaming, svr.historical, tsReplica, factory)
-	svr.statsService = newStatsService(ctx, svr.historical, factory)
+	replica := newCollectionReplica()
+	svr.metaReplica = replica
+	svr.dataSyncService = newDataSyncService(ctx, svr.metaReplica, tsReplica, factory)
+	svr.statsService = newStatsService(ctx, svr.metaReplica, factory)
 	svr.vectorStorage, err = factory.NewVectorStorageChunkManager(ctx)
 	if err != nil {
 		panic(err)
@@ -204,7 +109,7 @@ func newQueryNodeMock() *QueryNode {
 	if err != nil {
 		panic(err)
 	}
-	svr.loader = newSegmentLoader(svr.historical, svr.streaming, etcdKV, svr.vectorStorage, factory)
+	svr.loader = newSegmentLoader(svr.metaReplica, etcdKV, svr.vectorStorage, factory)
 	svr.etcdKV = etcdKV
 
 	return svr
@@ -333,7 +238,7 @@ func TestQueryNode_adjustByChangeInfo(t *testing.T) {
 		node, err := genSimpleQueryNodeToTestWatchChangeInfo(ctx)
 		assert.NoError(t, err)
 
-		err = node.historical.removeSegment(defaultSegmentID)
+		err = node.metaReplica.removeSegment(defaultSegmentID, segmentTypeSealed)
 		assert.NoError(t, err)
 
 		segmentChangeInfos := genSimpleChangeInfo()
@@ -405,7 +310,7 @@ func TestQueryNode_watchChangeInfo(t *testing.T) {
 		node, err := genSimpleQueryNodeToTestWatchChangeInfo(ctx)
 		assert.NoError(t, err)
 
-		err = node.historical.removeSegment(defaultSegmentID)
+		err = node.metaReplica.removeSegment(defaultSegmentID, segmentTypeSealed)
 		assert.NoError(t, err)
 
 		segmentChangeInfos := genSimpleChangeInfo()

@@ -49,8 +49,7 @@ import (
 
 // segmentLoader is only responsible for loading the field data from binlog
 type segmentLoader struct {
-	historicalReplica ReplicaInterface
-	streamingReplica  ReplicaInterface
+	metaReplica ReplicaInterface
 
 	dataCoord types.DataCoord
 
@@ -64,22 +63,9 @@ type segmentLoader struct {
 }
 
 func (loader *segmentLoader) getFieldType(segment *Segment, fieldID FieldID) (schemapb.DataType, error) {
-	var coll *Collection
-	var err error
-
-	switch segment.getType() {
-	case segmentTypeGrowing:
-		coll, err = loader.streamingReplica.getCollectionByID(segment.collectionID)
-		if err != nil {
-			return schemapb.DataType_None, err
-		}
-	case segmentTypeSealed:
-		coll, err = loader.historicalReplica.getCollectionByID(segment.collectionID)
-		if err != nil {
-			return schemapb.DataType_None, err
-		}
-	default:
-		return schemapb.DataType_None, fmt.Errorf("invalid segment type: %s", segment.getType().String())
+	coll, err := loader.metaReplica.getCollectionByID(segment.collectionID)
+	if err != nil {
+		return schemapb.DataType_None, err
 	}
 
 	return coll.getFieldType(fieldID)
@@ -93,20 +79,6 @@ func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest, segme
 	// no segment needs to load, return
 	if len(req.Infos) == 0 {
 		return nil
-	}
-
-	var metaReplica ReplicaInterface
-	switch segmentType {
-	case segmentTypeGrowing:
-		metaReplica = loader.streamingReplica
-	case segmentTypeSealed:
-		metaReplica = loader.historicalReplica
-	default:
-		err := fmt.Errorf("illegal segment type when load segment, collectionID = %d", req.CollectionID)
-		log.Error("load segment failed, illegal segment type",
-			zap.Int64("loadSegmentRequest msgID", req.Base.MsgID),
-			zap.Error(err))
-		return err
 	}
 
 	log.Info("segmentLoader start loading...",
@@ -150,7 +122,7 @@ func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest, segme
 		partitionID := info.PartitionID
 		collectionID := info.CollectionID
 
-		collection, err := loader.historicalReplica.getCollectionByID(collectionID)
+		collection, err := loader.metaReplica.getCollectionByID(collectionID)
 		if err != nil {
 			segmentGC()
 			return err
@@ -206,7 +178,7 @@ func (loader *segmentLoader) loadSegment(req *querypb.LoadSegmentsRequest, segme
 
 	// set segment to meta replica
 	for _, s := range newSegments {
-		err = metaReplica.setSegment(s)
+		err = loader.metaReplica.setSegment(s)
 		if err != nil {
 			log.Error("load segment failed, set segment to meta failed",
 				zap.Int64("collectionID", s.collectionID),
@@ -232,7 +204,7 @@ func (loader *segmentLoader) loadSegmentInternal(segment *Segment,
 		zap.Int64("partitionID", partitionID),
 		zap.Int64("segmentID", segmentID))
 
-	pkFieldID, err := loader.historicalReplica.getPKFieldIDByCollectionID(collectionID)
+	pkFieldID, err := loader.metaReplica.getPKFieldIDByCollectionID(collectionID)
 	if err != nil {
 		return err
 	}
@@ -496,7 +468,7 @@ func (loader *segmentLoader) loadGrowingSegments(segment *Segment,
 			Version:      internalpb.InsertDataVersion_ColumnBased,
 		},
 	}
-	pks, err := getPrimaryKeys(tmpInsertMsg, loader.streamingReplica)
+	pks, err := getPrimaryKeys(tmpInsertMsg, loader.metaReplica)
 	if err != nil {
 		return err
 	}
@@ -665,7 +637,14 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 						zap.String("vChannelName", position.GetChannelName()),
 						zap.Any("msg id", position.GetMsgID()),
 					)
-					processDeleteMessages(loader.historicalReplica, dmsg, delData)
+					err = processDeleteMessages(loader.metaReplica, segmentTypeSealed, dmsg, delData)
+					if err != nil {
+						// TODO: panic?
+						// error occurs when missing meta info or unexpected pk type, should not happen
+						err = fmt.Errorf("deleteNode processDeleteMessages failed, collectionID = %d, err = %s", dmsg.CollectionID, err)
+						log.Error(err.Error())
+						return err
+					}
 				}
 
 				ret, err := lastMsgID.LessOrEqualThan(tsMsg.Position().MsgID)
@@ -686,7 +665,7 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 	log.Info("All data has been read, there is no more data", zap.Int64("Collection ID", collectionID),
 		zap.String("channel", pChannelName), zap.Any("msg id", position.GetMsgID()))
 	for segmentID, pks := range delData.deleteIDs {
-		segment, err := loader.historicalReplica.getSegmentByID(segmentID)
+		segment, err := loader.metaReplica.getSegmentByID(segmentID, segmentTypeSealed)
 		if err != nil {
 			log.Warn(err.Error())
 			continue
@@ -698,7 +677,7 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 	wg := sync.WaitGroup{}
 	for segmentID := range delData.deleteOffset {
 		wg.Add(1)
-		go deletePk(loader.historicalReplica, delData, segmentID, &wg)
+		go deletePk(loader.metaReplica, delData, segmentID, &wg)
 	}
 	wg.Wait()
 	log.Info("from dml check point load done", zap.Any("msg id", position.GetMsgID()))
@@ -708,7 +687,7 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 func deletePk(replica ReplicaInterface, deleteData *deleteData, segmentID UniqueID, wg *sync.WaitGroup) {
 	defer wg.Done()
 	log.Debug("QueryNode::iNode::delete", zap.Any("SegmentID", segmentID))
-	targetSegment, err := replica.getSegmentByID(segmentID)
+	targetSegment, err := replica.getSegmentByID(segmentID, segmentTypeSealed)
 	if err != nil {
 		log.Error(err.Error())
 		return
@@ -774,8 +753,7 @@ func (loader *segmentLoader) checkSegmentSize(collectionID UniqueID, segmentLoad
 }
 
 func newSegmentLoader(
-	historicalReplica ReplicaInterface,
-	streamingReplica ReplicaInterface,
+	metaReplica ReplicaInterface,
 	etcdKV *etcdkv.EtcdKV,
 	cm storage.ChunkManager,
 	factory msgstream.Factory) *segmentLoader {
@@ -797,8 +775,7 @@ func newSegmentLoader(
 	}
 
 	loader := &segmentLoader{
-		historicalReplica: historicalReplica,
-		streamingReplica:  streamingReplica,
+		metaReplica: metaReplica,
 
 		cm:     cm,
 		etcdKV: etcdKV,
