@@ -64,7 +64,7 @@ add_subdirectory( boost_ext )
 add_subdirectory( arrow )
 
 # ******************************* Thridparty marisa ********************************
-# TODO: support apple & win.
-if ( LINUX )
+# TODO: support win.
+if ( LINUX OR APPLE)
     add_subdirectory( marisa )
 endif()

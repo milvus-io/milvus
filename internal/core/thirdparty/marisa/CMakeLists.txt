@@ -13,7 +13,12 @@ macro(build_marisa)
 
     set (MARISA_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX})
     set (MARISA_DIR "${CMAKE_CURRENT_BINARY_DIR}/src")
-    set (MARISA_CONFIGURE_COMMAND cd ${MARISA_DIR} && libtoolize && autoreconf -i && ./configure --prefix=${MARISA_INSTALL_PREFIX})
+    if ( LINUX )
+          set (MARISA_CONFIGURE_COMMAND cd ${MARISA_DIR} && libtoolize && autoreconf -i && ./configure --prefix=${MARISA_INSTALL_PREFIX})
+    else()
+          set (MARISA_CONFIGURE_COMMAND brew install automake && cd ${MARISA_DIR} && glibtoolize && autoreconf -i && ./configure --prefix=${MARISA_INSTALL_PREFIX})
+    endif()
+
     set (MARISA_BUILD_COMMAND make -j)
     set (MARISA_INSTALL_COMMAND make install)
 
