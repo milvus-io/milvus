@@ -40,7 +40,8 @@ var newVarCharPrimaryKey = storage.NewVarCharPrimaryKey
 // deleteNode is the one of nodes in delta flow graph
 type deleteNode struct {
 	baseNode
-	metaReplica ReplicaInterface // historical
+	collectionID UniqueID
+	metaReplica  ReplicaInterface // historical
 }
 
 // Name returns the name of deleteNode
@@ -81,6 +82,14 @@ func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		spans = append(spans, sp)
 		msg.SetTraceCtx(ctx)
 	}
+
+	collection, err := dNode.metaReplica.getCollectionByID(dNode.collectionID)
+	if err != nil {
+		// QueryNode should add collection before start flow graph
+		panic(fmt.Errorf("%s getCollectionByID failed, collectionID = %d", dNode.Name(), dNode.collectionID))
+	}
+	collection.RLock()
+	defer collection.RUnlock()
 
 	// 1. filter segment by bloom filter
 	for i, delMsg := range dMsg.deleteMessages {
@@ -173,7 +182,7 @@ func (dNode *deleteNode) delete(deleteData *deleteData, segmentID UniqueID, wg *
 }
 
 // newDeleteNode returns a new deleteNode
-func newDeleteNode(metaReplica ReplicaInterface) *deleteNode {
+func newDeleteNode(metaReplica ReplicaInterface, collectionID UniqueID) *deleteNode {
 	maxQueueLength := Params.QueryNodeCfg.FlowGraphMaxQueueLength
 	maxParallelism := Params.QueryNodeCfg.FlowGraphMaxParallelism
 
@@ -182,7 +191,8 @@ func newDeleteNode(metaReplica ReplicaInterface) *deleteNode {
 	baseNode.SetMaxParallelism(maxParallelism)
 
 	return &deleteNode{
-		baseNode:    baseNode,
-		metaReplica: metaReplica,
+		baseNode:     baseNode,
+		collectionID: collectionID,
+		metaReplica:  metaReplica,
 	}
 }

@@ -76,7 +76,6 @@ type IndexedFieldInfo struct {
 
 // Segment is a wrapper of the underlying C-structure segment.
 type Segment struct {
-	segPtrMu   sync.RWMutex // guards segmentPtr
 	segmentPtr C.CSegmentInterface
 
 	segmentID    UniqueID
@@ -219,15 +218,11 @@ func deleteSegment(segment *Segment) {
 		return
 	}
 
-	segment.segPtrMu.Lock()
-	defer segment.segPtrMu.Unlock()
 	cPtr := segment.segmentPtr
 	C.DeleteSegment(cPtr)
 	segment.segmentPtr = nil
 
 	log.Info("delete segment from memory", zap.Int64("collectionID", segment.collectionID), zap.Int64("partitionID", segment.partitionID), zap.Int64("segmentID", segment.ID()))
-
-	segment = nil
 }
 
 func (s *Segment) getRowCount() int64 {
@@ -235,8 +230,6 @@ func (s *Segment) getRowCount() int64 {
 		long int
 		getRowCount(CSegmentInterface c_segment);
 	*/
-	s.segPtrMu.RLock()
-	defer s.segPtrMu.RUnlock()
 	if s.segmentPtr == nil {
 		return -1
 	}
@@ -249,8 +242,6 @@ func (s *Segment) getDeletedCount() int64 {
 		long int
 		getDeletedCount(CSegmentInterface c_segment);
 	*/
-	s.segPtrMu.RLock()
-	defer s.segPtrMu.RUnlock()
 	if s.segmentPtr == nil {
 		return -1
 	}
@@ -263,8 +254,6 @@ func (s *Segment) getMemSize() int64 {
 		long int
 		GetMemoryUsageInBytes(CSegmentInterface c_segment);
 	*/
-	s.segPtrMu.RLock()
-	defer s.segPtrMu.RUnlock()
 	if s.segmentPtr == nil {
 		return -1
 	}
@@ -283,8 +272,6 @@ func (s *Segment) search(searchReq *searchRequest) (*SearchResult, error) {
 			long int* result_ids,
 			float* result_distances);
 	*/
-	s.segPtrMu.RLock()
-	defer s.segPtrMu.RUnlock()
 	if s.segmentPtr == nil {
 		return nil, errors.New("null seg core pointer")
 	}
@@ -317,8 +304,6 @@ func HandleCProto(cRes *C.CProto, msg proto.Message) error {
 }
 
 func (s *Segment) retrieve(plan *RetrievePlan) (*segcorepb.RetrieveResults, error) {
-	s.segPtrMu.RLock()
-	defer s.segPtrMu.RUnlock()
 	if s.segmentPtr == nil {
 		return nil, errors.New("null seg core pointer")
 	}
@@ -566,8 +551,6 @@ func (s *Segment) segmentPreInsert(numOfRecords int) (int64, error) {
 		long int
 		PreInsert(CSegmentInterface c_segment, long int size);
 	*/
-	s.segPtrMu.RLock()
-	defer s.segPtrMu.RUnlock() // thread safe guaranteed by segCore, use RLock
 	if s.segmentType != segmentTypeGrowing {
 		return 0, nil
 	}
@@ -585,16 +568,12 @@ func (s *Segment) segmentPreDelete(numOfRecords int) int64 {
 		long int
 		PreDelete(CSegmentInterface c_segment, long int size);
 	*/
-	s.segPtrMu.RLock()
-	defer s.segPtrMu.RUnlock() // thread safe guaranteed by segCore, use RLock
 	var offset = C.PreDelete(s.segmentPtr, C.int64_t(int64(numOfRecords)))
 
 	return int64(offset)
 }
 
 func (s *Segment) segmentInsert(offset int64, entityIDs []UniqueID, timestamps []Timestamp, record *segcorepb.InsertRecord) error {
-	s.segPtrMu.RLock()
-	defer s.segPtrMu.RUnlock() // thread safe guaranteed by segCore, use RLock
 	if s.segmentType != segmentTypeGrowing {
 		return fmt.Errorf("unexpected segmentType when segmentInsert, segmentType = %s", s.segmentType.String())
 	}
@@ -642,8 +621,6 @@ func (s *Segment) segmentDelete(offset int64, entityIDs []primaryKey, timestamps
 		return fmt.Errorf("empty pks to delete")
 	}
 
-	s.segPtrMu.RLock()
-	defer s.segPtrMu.RUnlock() // thread safe guaranteed by segCore, use RLock
 	if s.segmentPtr == nil {
 		return errors.New("null seg core pointer")
 	}
@@ -702,8 +679,6 @@ func (s *Segment) segmentLoadFieldData(fieldID int64, rowCount int64, data *sche
 		CStatus
 		LoadFieldData(CSegmentInterface c_segment, CLoadFieldDataInfo load_field_data_info);
 	*/
-	s.segPtrMu.RLock()
-	defer s.segPtrMu.RUnlock() // thread safe guaranteed by segCore, use RLock
 	if s.segmentPtr == nil {
 		return errors.New("null seg core pointer")
 	}
@@ -738,8 +713,6 @@ func (s *Segment) segmentLoadFieldData(fieldID int64, rowCount int64, data *sche
 }
 
 func (s *Segment) segmentLoadDeletedRecord(primaryKeys []primaryKey, timestamps []Timestamp, rowCount int64) error {
-	s.segPtrMu.RLock()
-	defer s.segPtrMu.RUnlock() // thread safe guaranteed by segCore, use RLock
 	if s.segmentPtr == nil {
 		return errors.New("null seg core pointer")
 	}
@@ -812,8 +785,6 @@ func (s *Segment) segmentLoadIndexData(bytesIndex [][]byte, indexInfo *querypb.F
 		return err
 	}
 
-	s.segPtrMu.RLock()
-	defer s.segPtrMu.RUnlock() // thread safe guaranteed by segCore, use RLock
 	if s.segmentPtr == nil {
 		return errors.New("null seg core pointer")
 	}

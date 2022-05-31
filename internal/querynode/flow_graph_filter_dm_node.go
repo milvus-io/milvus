@@ -79,12 +79,20 @@ func (fdmNode *filterDmNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		},
 	}
 
+	collection, err := fdmNode.metaReplica.getCollectionByID(fdmNode.collectionID)
+	if err != nil {
+		// QueryNode should add collection before start flow graph
+		panic(fmt.Errorf("%s getCollectionByID failed, collectionID = %d", fdmNode.Name(), fdmNode.collectionID))
+	}
+	collection.RLock()
+	defer collection.RUnlock()
+
 	for i, msg := range msgStreamMsg.TsMessages() {
 		traceID, _, _ := trace.InfoFromSpan(spans[i])
 		log.Debug("Filter invalid message in QueryNode", zap.String("traceID", traceID))
 		switch msg.Type() {
 		case commonpb.MsgType_Insert:
-			resMsg, err := fdmNode.filterInvalidInsertMessage(msg.(*msgstream.InsertMsg))
+			resMsg, err := fdmNode.filterInvalidInsertMessage(msg.(*msgstream.InsertMsg), collection.getLoadType())
 			if err != nil {
 				// error occurs when missing meta info or data is misaligned, should not happen
 				err = fmt.Errorf("filterInvalidInsertMessage failed, err = %s", err)
@@ -95,7 +103,7 @@ func (fdmNode *filterDmNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 				iMsg.insertMessages = append(iMsg.insertMessages, resMsg)
 			}
 		case commonpb.MsgType_Delete:
-			resMsg, err := fdmNode.filterInvalidDeleteMessage(msg.(*msgstream.DeleteMsg))
+			resMsg, err := fdmNode.filterInvalidDeleteMessage(msg.(*msgstream.DeleteMsg), collection.getLoadType())
 			if err != nil {
 				// error occurs when missing meta info or data is misaligned, should not happen
 				err = fmt.Errorf("filterInvalidDeleteMessage failed, err = %s", err)
@@ -118,7 +126,7 @@ func (fdmNode *filterDmNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 }
 
 // filterInvalidDeleteMessage would filter out invalid delete messages
-func (fdmNode *filterDmNode) filterInvalidDeleteMessage(msg *msgstream.DeleteMsg) (*msgstream.DeleteMsg, error) {
+func (fdmNode *filterDmNode) filterInvalidDeleteMessage(msg *msgstream.DeleteMsg, loadType loadType) (*msgstream.DeleteMsg, error) {
 	if err := msg.CheckAligned(); err != nil {
 		return nil, fmt.Errorf("CheckAligned failed, err = %s", err)
 	}
@@ -139,13 +147,7 @@ func (fdmNode *filterDmNode) filterInvalidDeleteMessage(msg *msgstream.DeleteMsg
 		return nil, nil
 	}
 
-	// check if collection exist
-	col, err := fdmNode.metaReplica.getCollectionByID(msg.CollectionID)
-	if err != nil {
-		// QueryNode should add collection before start flow graph
-		return nil, fmt.Errorf("filter invalid delete message, collection does not exist, collectionID = %d", msg.CollectionID)
-	}
-	if col.getLoadType() == loadTypePartition {
+	if loadType == loadTypePartition {
 		if !fdmNode.metaReplica.hasPartition(msg.PartitionID) {
 			// filter out msg which not belongs to the loaded partitions
 			return nil, nil
@@ -156,7 +158,7 @@ func (fdmNode *filterDmNode) filterInvalidDeleteMessage(msg *msgstream.DeleteMsg
 }
 
 // filterInvalidInsertMessage would filter out invalid insert messages
-func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg) (*msgstream.InsertMsg, error) {
+func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg, loadType loadType) (*msgstream.InsertMsg, error) {
 	if err := msg.CheckAligned(); err != nil {
 		return nil, fmt.Errorf("CheckAligned failed, err = %s", err)
 	}
@@ -180,13 +182,7 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 		return nil, nil
 	}
 
-	// check if collection exists
-	col, err := fdmNode.metaReplica.getCollectionByID(msg.CollectionID)
-	if err != nil {
-		// QueryNode should add collection before start flow graph
-		return nil, fmt.Errorf("filter invalid insert message, collection does not exist, collectionID = %d", msg.CollectionID)
-	}
-	if col.getLoadType() == loadTypePartition {
+	if loadType == loadTypePartition {
 		if !fdmNode.metaReplica.hasPartition(msg.PartitionID) {
 			// filter out msg which not belongs to the loaded partitions
 			return nil, nil

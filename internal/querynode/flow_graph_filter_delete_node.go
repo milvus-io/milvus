@@ -78,10 +78,18 @@ func (fddNode *filterDeleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		},
 	}
 
+	collection, err := fddNode.metaReplica.getCollectionByID(fddNode.collectionID)
+	if err != nil {
+		// QueryNode should add collection before start flow graph
+		panic(fmt.Errorf("%s getCollectionByID failed, collectionID = %d", fddNode.Name(), fddNode.collectionID))
+	}
+	collection.RLock()
+	defer collection.RUnlock()
+
 	for _, msg := range msgStreamMsg.TsMessages() {
 		switch msg.Type() {
 		case commonpb.MsgType_Delete:
-			resMsg, err := fddNode.filterInvalidDeleteMessage(msg.(*msgstream.DeleteMsg))
+			resMsg, err := fddNode.filterInvalidDeleteMessage(msg.(*msgstream.DeleteMsg), collection.getLoadType())
 			if err != nil {
 				// error occurs when missing meta info or data is misaligned, should not happen
 				err = fmt.Errorf("filterInvalidDeleteMessage failed, err = %s", err)
@@ -103,7 +111,7 @@ func (fddNode *filterDeleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 }
 
 // filterInvalidDeleteMessage would filter invalid delete messages
-func (fddNode *filterDeleteNode) filterInvalidDeleteMessage(msg *msgstream.DeleteMsg) (*msgstream.DeleteMsg, error) {
+func (fddNode *filterDeleteNode) filterInvalidDeleteMessage(msg *msgstream.DeleteMsg, loadType loadType) (*msgstream.DeleteMsg, error) {
 	if err := msg.CheckAligned(); err != nil {
 		return nil, fmt.Errorf("CheckAligned failed, err = %s", err)
 	}
@@ -123,13 +131,7 @@ func (fddNode *filterDeleteNode) filterInvalidDeleteMessage(msg *msgstream.Delet
 		return nil, nil
 	}
 
-	// check if collection exists
-	col, err := fddNode.metaReplica.getCollectionByID(msg.CollectionID)
-	if err != nil {
-		// QueryNode should add collection before start flow graph
-		return nil, fmt.Errorf("filter invalid delete message, collection does not exist, collectionID = %d", msg.CollectionID)
-	}
-	if col.getLoadType() == loadTypePartition {
+	if loadType == loadTypePartition {
 		if !fddNode.metaReplica.hasPartition(msg.PartitionID) {
 			// filter out msg which not belongs to the loaded partitions
 			return nil, nil

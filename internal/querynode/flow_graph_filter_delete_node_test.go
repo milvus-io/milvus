@@ -48,21 +48,9 @@ func TestFlowGraphFilterDeleteNode_filterInvalidDeleteMessage(t *testing.T) {
 		msg := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
 		fg, err := getFilterDeleteNode()
 		assert.NoError(t, err)
-		res, err := fg.filterInvalidDeleteMessage(msg)
+		res, err := fg.filterInvalidDeleteMessage(msg, loadTypeCollection)
 		assert.NoError(t, err)
 		assert.NotNil(t, res)
-	})
-
-	t.Run("test delete no collection", func(t *testing.T) {
-		msg := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
-		msg.CollectionID = UniqueID(1003)
-		fg, err := getFilterDeleteNode()
-		assert.NoError(t, err)
-		fg.collectionID = UniqueID(1003)
-		res, err := fg.filterInvalidDeleteMessage(msg)
-		assert.Error(t, err)
-		assert.Nil(t, res)
-		fg.collectionID = defaultCollectionID
 	})
 
 	t.Run("test delete not target collection", func(t *testing.T) {
@@ -70,7 +58,7 @@ func TestFlowGraphFilterDeleteNode_filterInvalidDeleteMessage(t *testing.T) {
 		fg, err := getFilterDeleteNode()
 		assert.NoError(t, err)
 		fg.collectionID = UniqueID(1000)
-		res, err := fg.filterInvalidDeleteMessage(msg)
+		res, err := fg.filterInvalidDeleteMessage(msg, loadTypeCollection)
 		assert.NoError(t, err)
 		assert.Nil(t, res)
 	})
@@ -83,11 +71,11 @@ func TestFlowGraphFilterDeleteNode_filterInvalidDeleteMessage(t *testing.T) {
 		msg.Int64PrimaryKeys = make([]IntPrimaryKey, 0)
 		msg.PrimaryKeys = &schemapb.IDs{}
 		msg.NumRows = 0
-		res, err := fg.filterInvalidDeleteMessage(msg)
+		res, err := fg.filterInvalidDeleteMessage(msg, loadTypeCollection)
 		assert.NoError(t, err)
 		assert.Nil(t, res)
 		msg.PrimaryKeys = storage.ParsePrimaryKeys2IDs([]primaryKey{})
-		res, err = fg.filterInvalidDeleteMessage(msg)
+		res, err = fg.filterInvalidDeleteMessage(msg, loadTypeCollection)
 		assert.NoError(t, err)
 		assert.Nil(t, res)
 	})
@@ -96,13 +84,10 @@ func TestFlowGraphFilterDeleteNode_filterInvalidDeleteMessage(t *testing.T) {
 		msg := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
 		fg, err := getFilterDeleteNode()
 		assert.NoError(t, err)
-		col, err := fg.metaReplica.getCollectionByID(defaultCollectionID)
-		assert.NoError(t, err)
-		col.setLoadType(loadTypePartition)
 		err = fg.metaReplica.removePartition(defaultPartitionID)
 		assert.NoError(t, err)
 
-		res, err := fg.filterInvalidDeleteMessage(msg)
+		res, err := fg.filterInvalidDeleteMessage(msg, loadTypePartition)
 		assert.NoError(t, err)
 		assert.Nil(t, res)
 	})

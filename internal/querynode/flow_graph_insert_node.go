@@ -43,7 +43,8 @@ import (
 // insertNode is one of the nodes in query flow graph
 type insertNode struct {
 	baseNode
-	metaReplica ReplicaInterface // streaming
+	collectionID UniqueID
+	metaReplica  ReplicaInterface // streaming
 }
 
 // insertData stores the valid insert data
@@ -103,6 +104,13 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		msg.SetTraceCtx(ctx)
 	}
 
+	collection, err := iNode.metaReplica.getCollectionByID(iNode.collectionID)
+	if err != nil {
+		// QueryNode should add collection before start flow graph
+		panic(fmt.Errorf("%s getCollectionByID failed, collectionID = %d", iNode.Name(), iNode.collectionID))
+	}
+	collection.RLock()
+	defer collection.RUnlock()
 	// 1. hash insertMessages to insertData
 	// sort timestamps ensures that the data in iData.insertRecords is sorted in ascending order of timestamp
 	// avoiding re-sorting in segCore, which will need data copying
@@ -111,14 +119,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	})
 	for _, insertMsg := range iMsg.insertMessages {
 		// if loadType is loadCollection, check if partition exists, if not, create partition
-		col, err := iNode.metaReplica.getCollectionByID(insertMsg.CollectionID)
-		if err != nil {
-			// should not happen, QueryNode should create collection before start flow graph
-			err = fmt.Errorf("insertNode getCollectionByID failed, err = %s", err)
-			log.Error(err.Error())
-			panic(err)
-		}
-		if col.getLoadType() == loadTypeCollection {
+		if collection.getLoadType() == loadTypeCollection {
 			err = iNode.metaReplica.addPartition(insertMsg.CollectionID, insertMsg.PartitionID)
 			if err != nil {
 				// error occurs only when collection cannot be found, should not happen
@@ -144,7 +145,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			}
 		}
 
-		insertRecord, err := storage.TransferInsertMsgToInsertRecord(col.schema, insertMsg)
+		insertRecord, err := storage.TransferInsertMsgToInsertRecord(collection.schema, insertMsg)
 		if err != nil {
 			// occurs only when schema doesn't have dim param, this should not happen
 			err = fmt.Errorf("failed to transfer msgStream.insertMsg to storage.InsertRecord, err = %s", err)
@@ -503,7 +504,7 @@ func getPKsFromColumnBasedInsertMsg(msg *msgstream.InsertMsg, schema *schemapb.C
 }
 
 // newInsertNode returns a new insertNode
-func newInsertNode(metaReplica ReplicaInterface) *insertNode {
+func newInsertNode(metaReplica ReplicaInterface, collectionID UniqueID) *insertNode {
 	maxQueueLength := Params.QueryNodeCfg.FlowGraphMaxQueueLength
 	maxParallelism := Params.QueryNodeCfg.FlowGraphMaxParallelism
 
@@ -512,7 +513,8 @@ func newInsertNode(metaReplica ReplicaInterface) *insertNode {
 	baseNode.SetMaxParallelism(maxParallelism)
 
 	return &insertNode{
-		baseNode:    baseNode,
-		metaReplica: metaReplica,
+		baseNode:     baseNode,
+		collectionID: collectionID,
+		metaReplica:  metaReplica,
 	}
 }
