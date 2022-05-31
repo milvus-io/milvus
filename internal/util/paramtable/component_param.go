@@ -916,7 +916,7 @@ func (p *dataCoordConfig) initSegmentMaxSize() {
 }
 
 func (p *dataCoordConfig) initSegmentSealProportion() {
-	p.SegmentSealProportion = p.Base.ParseFloatWithDefault("dataCoord.segment.sealProportion", 0.75)
+	p.SegmentSealProportion = p.Base.ParseFloatWithDefault("dataCoord.segment.sealProportion", 0.25)
 }
 
 func (p *dataCoordConfig) initSegAssignmentExpiration() {
