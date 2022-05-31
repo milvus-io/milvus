@@ -210,7 +210,7 @@ dataCoord:
 
   segment:
     maxSize: 512 # Maximum size of a segment in MB
-    sealProportion: 0.75 # It's the minimum proportion for a segment which can be sealed
+    sealProportion: 0.25 # It's the minimum proportion for a segment which can be sealed
     assignmentExpiration: 2000 # The time of the assignment expiration in ms
 
   compaction:
