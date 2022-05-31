@@ -46,14 +46,20 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v2
+      - name: "Generate CCache Hash"
+        env:
+          CORE_HASH: ${{ hashFiles( 'internal/core/**/*.cpp', 'internal/core/**/*.cc', 'internal/core/**/*.c', 'internal/core/**/*.h', 'internal/core/**/*.hpp', 'internal/core/**/CMakeLists.txt') }}
+        run: |
+          echo "corehash=${CORE_HASH}" >> $GITHUB_ENV
+          echo "Set CCache hash to ${CORE_HASH}"
       - name: Cache CCache Volumes
-        uses: actions/cache@v1
+        uses: actions/cache@v3
         with:
           path: .docker/amd64-ubuntu${{ matrix.ubuntu }}-ccache
-          key: ubuntu${{ matrix.ubuntu }}-ccache-${{ hashFiles('/internal/core/**') }}
+          key: ubuntu${{ matrix.ubuntu }}-ccache-${{ env.corehash }}
           restore-keys: ubuntu${{ matrix.ubuntu }}-ccache-
       - name: Cache Go Mod Volumes
-        uses: actions/cache@v1
+        uses: actions/cache@v3
         with:
           path: .docker/amd64-ubuntu${{ matrix.ubuntu }}-go-mod
           key: ubuntu${{ matrix.ubuntu }}-go-mod-${{ hashFiles('**/go.sum') }}
