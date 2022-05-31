@@ -2335,7 +2335,7 @@ func (c *Core) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvus
 			zap.Error(err))
 		return nil, err
 	}
-	log.Info("receive import request",
+	log.Info("RootCoord receive import request",
 		zap.String("collection name", req.GetCollectionName()),
 		zap.Int64("collection ID", cID),
 		zap.String("partition name", req.GetPartitionName()),
@@ -2376,7 +2376,7 @@ func (c *Core) ListImportTasks(ctx context.Context, req *milvuspb.ListImportTask
 
 // ReportImport reports import task state to RootCoord.
 func (c *Core) ReportImport(ctx context.Context, ir *rootcoordpb.ImportResult) (*commonpb.Status, error) {
-	log.Info("receive import state report",
+	log.Info("RootCoord receive import state report",
 		zap.Int64("task ID", ir.GetTaskId()),
 		zap.Any("import state", ir.GetState()))
 	if code, ok := c.checkHealthy(); !ok {
@@ -2389,6 +2389,25 @@ func (c *Core) ReportImport(ctx context.Context, ir *rootcoordpb.ImportResult) (
 			ErrorCode: commonpb.ErrorCode_UpdateImportTaskFailure,
 			Reason:    err.Error(),
 		}, nil
+	}
+
+	// This method update a busy node to idle node, and send import task to idle node
+	resendTaskFunc := func() {
+		func() {
+			c.importManager.busyNodesLock.Lock()
+			defer c.importManager.busyNodesLock.Unlock()
+			delete(c.importManager.busyNodes, ir.GetDatanodeId())
+			log.Info("DataNode is no longer busy",
+				zap.Int64("dataNode ID", ir.GetDatanodeId()),
+				zap.Int64("task ID", ir.GetTaskId()))
+
+		}()
+		c.importManager.sendOutTasks(c.importManager.ctx)
+	}
+
+	// If task failed, send task to idle datanode
+	if ir.GetState() == commonpb.ImportState_ImportFailed {
+		resendTaskFunc()
 	}
 
 	// So much for reporting, unless the task just reached `ImportPersisted` state.
@@ -2415,15 +2434,8 @@ func (c *Core) ReportImport(ctx context.Context, ir *rootcoordpb.ImportResult) (
 	}
 	colName = colMeta.GetSchema().GetName()
 
-	// When DataNode has done its thing, remove it from the busy node list.
-	func() {
-		c.importManager.busyNodesLock.Lock()
-		defer c.importManager.busyNodesLock.Unlock()
-		delete(c.importManager.busyNodes, ir.GetDatanodeId())
-		log.Info("dataNode is no longer busy",
-			zap.Int64("dataNode ID", ir.GetDatanodeId()),
-			zap.Int64("task ID", ir.GetTaskId()))
-	}()
+	// When DataNode has done its thing, remove it from the busy node list. And send import task again
+	resendTaskFunc()
 
 	// Flush all import data segments.
 	c.CallFlushOnCollection(ctx, ti.GetCollectionId(), ir.GetSegments())
