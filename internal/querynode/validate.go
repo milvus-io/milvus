@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 )
 
+// TODO: merge validate?
 func validateOnHistoricalReplica(replica ReplicaInterface, collectionID UniqueID, partitionIDs []UniqueID, segmentIDs []UniqueID) ([]UniqueID, []UniqueID, error) {
 	var err error
 	var searchPartIDs []UniqueID
@@ -63,7 +64,7 @@ func validateOnHistoricalReplica(replica ReplicaInterface, collectionID UniqueID
 	var newSegmentIDs []UniqueID
 	if len(segmentIDs) == 0 {
 		for _, partID := range searchPartIDs {
-			segIDs, err2 := replica.getSegmentIDs(partID)
+			segIDs, err2 := replica.getSegmentIDs(partID, segmentTypeSealed)
 			if err2 != nil {
 				return searchPartIDs, newSegmentIDs, err
 			}
@@ -73,7 +74,7 @@ func validateOnHistoricalReplica(replica ReplicaInterface, collectionID UniqueID
 		newSegmentIDs = segmentIDs
 		for _, segmentID := range newSegmentIDs {
 			var segment *Segment
-			if segment, err = replica.getSegmentByID(segmentID); err != nil {
+			if segment, err = replica.getSegmentByID(segmentID, segmentTypeSealed); err != nil {
 				return searchPartIDs, newSegmentIDs, err
 			}
 			if !inList(searchPartIDs, segment.partitionID) {

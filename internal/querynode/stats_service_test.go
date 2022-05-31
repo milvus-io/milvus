@@ -32,7 +32,7 @@ func TestStatsService_start(t *testing.T) {
 	initTestMeta(t, node, 0, 0)
 
 	factory := dependency.NewDefaultFactory(true)
-	node.statsService = newStatsService(node.queryNodeLoopCtx, node.historical, factory)
+	node.statsService = newStatsService(node.queryNodeLoopCtx, node.metaReplica, factory)
 	node.statsService.start()
 	node.Stop()
 }
@@ -57,7 +57,7 @@ func TestSegmentManagement_sendSegmentStatistic(t *testing.T) {
 
 	var statsMsgStream msgstream.MsgStream = statsStream
 
-	node.statsService = newStatsService(node.queryNodeLoopCtx, node.historical, factory)
+	node.statsService = newStatsService(node.queryNodeLoopCtx, node.metaReplica, factory)
 	node.statsService.statsStream = statsMsgStream
 	node.statsService.statsStream.Start()
 

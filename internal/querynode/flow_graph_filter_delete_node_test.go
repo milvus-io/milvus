@@ -96,10 +96,10 @@ func TestFlowGraphFilterDeleteNode_filterInvalidDeleteMessage(t *testing.T) {
 		msg := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
 		fg, err := getFilterDeleteNode()
 		assert.NoError(t, err)
-		col, err := fg.replica.getCollectionByID(defaultCollectionID)
+		col, err := fg.metaReplica.getCollectionByID(defaultCollectionID)
 		assert.NoError(t, err)
 		col.setLoadType(loadTypePartition)
-		err = fg.replica.removePartition(defaultPartitionID)
+		err = fg.metaReplica.removePartition(defaultPartitionID)
 		assert.NoError(t, err)
 
 		res, err := fg.filterInvalidDeleteMessage(msg)
@@ -146,7 +146,7 @@ func TestFlowGraphFilterDeleteNode_Operate(t *testing.T) {
 	})
 
 	t.Run("invalid msgType", func(t *testing.T) {
-		iMsg, err := genSimpleInsertMsg(genTestCollectionSchema(schemapb.DataType_Int64), defaultDelLength)
+		iMsg, err := genSimpleInsertMsg(genTestCollectionSchema(), defaultDelLength)
 		assert.NoError(t, err)
 		msg := flowgraph.GenerateMsgStreamMsg([]msgstream.TsMsg{iMsg}, 0, 1000, nil, nil)
 

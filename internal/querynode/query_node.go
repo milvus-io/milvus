@@ -90,8 +90,7 @@ type QueryNode struct {
 	initOnce sync.Once
 
 	// internal components
-	historical ReplicaInterface
-	streaming  ReplicaInterface
+	metaReplica ReplicaInterface
 
 	// tSafeReplica
 	tSafeReplica TSafeReplicaInterface
@@ -304,17 +303,15 @@ func (node *QueryNode) Init() error {
 		node.etcdKV = etcdkv.NewEtcdKV(node.etcdCli, Params.EtcdCfg.MetaRootPath)
 		log.Info("queryNode try to connect etcd success", zap.Any("MetaRootPath", Params.EtcdCfg.MetaRootPath))
 
-		node.streaming = newCollectionReplica(node.etcdKV)
-		node.historical = newCollectionReplica(node.etcdKV)
+		node.metaReplica = newCollectionReplica()
 
 		node.loader = newSegmentLoader(
-			node.historical,
-			node.streaming,
+			node.metaReplica,
 			node.etcdKV,
 			node.vectorStorage,
 			node.factory)
 
-		node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, node.streaming, node.historical, node.tSafeReplica, node.factory)
+		node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, node.metaReplica, node.tSafeReplica, node.factory)
 
 		node.InitSegcore()
 
@@ -351,7 +348,7 @@ func (node *QueryNode) Start() error {
 	// create shardClusterService for shardLeader functions.
 	node.ShardClusterService = newShardClusterService(node.etcdCli, node.session, node)
 	// create shard-level query service
-	node.queryShardService = newQueryShardService(node.queryNodeLoopCtx, node.historical, node.streaming, node.tSafeReplica,
+	node.queryShardService = newQueryShardService(node.queryNodeLoopCtx, node.metaReplica, node.tSafeReplica,
 		node.ShardClusterService, node.factory, node.scheduler)
 
 	Params.QueryNodeCfg.CreatedTime = time.Now()
@@ -377,12 +374,8 @@ func (node *QueryNode) Stop() error {
 		node.dataSyncService.close()
 	}
 
-	// release streaming first for query/search holds query lock in streaming collection
-	if node.streaming != nil {
-		node.streaming.freeAll()
-	}
-	if node.historical != nil {
-		node.historical.freeAll()
+	if node.metaReplica != nil {
+		node.metaReplica.freeAll()
 	}
 
 	if node.queryShardService != nil {

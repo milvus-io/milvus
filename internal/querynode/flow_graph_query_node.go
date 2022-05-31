@@ -45,7 +45,7 @@ type queryNodeFlowGraph struct {
 // newQueryNodeFlowGraph returns a new queryNodeFlowGraph
 func newQueryNodeFlowGraph(ctx context.Context,
 	collectionID UniqueID,
-	streamingReplica ReplicaInterface,
+	metaReplica ReplicaInterface,
 	tSafeReplica TSafeReplicaInterface,
 	channel Channel,
 	factory msgstream.Factory) (*queryNodeFlowGraph, error) {
@@ -64,8 +64,8 @@ func newQueryNodeFlowGraph(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
-	var filterDmNode node = newFilteredDmNode(streamingReplica, collectionID)
-	var insertNode node = newInsertNode(streamingReplica)
+	var filterDmNode node = newFilteredDmNode(metaReplica, collectionID)
+	var insertNode node = newInsertNode(metaReplica)
 	var serviceTimeNode node = newServiceTimeNode(tSafeReplica, collectionID, channel)
 
 	q.flowGraph.AddNode(dmStreamNode)
@@ -115,7 +115,7 @@ func newQueryNodeFlowGraph(ctx context.Context,
 // newQueryNodeDeltaFlowGraph returns a new queryNodeFlowGraph
 func newQueryNodeDeltaFlowGraph(ctx context.Context,
 	collectionID UniqueID,
-	historicalReplica ReplicaInterface,
+	metaReplica ReplicaInterface,
 	tSafeReplica TSafeReplicaInterface,
 	channel Channel,
 	factory msgstream.Factory) (*queryNodeFlowGraph, error) {
@@ -134,8 +134,8 @@ func newQueryNodeDeltaFlowGraph(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
-	var filterDeleteNode node = newFilteredDeleteNode(historicalReplica, collectionID)
-	var deleteNode node = newDeleteNode(historicalReplica)
+	var filterDeleteNode node = newFilteredDeleteNode(metaReplica, collectionID)
+	var deleteNode node = newDeleteNode(metaReplica)
 	var serviceTimeNode node = newServiceTimeNode(tSafeReplica, collectionID, channel)
 
 	q.flowGraph.AddNode(dmStreamNode)

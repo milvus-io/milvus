@@ -29,15 +29,13 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 func TestTask_watchDmChannelsTask(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	pkType := schemapb.DataType_Int64
-	schema := genTestCollectionSchema(pkType)
+	schema := genTestCollectionSchema()
 
 	genWatchDMChannelsRequest := func() *querypb.WatchDmChannelsRequest {
 		req := &querypb.WatchDmChannelsRequest{
@@ -348,8 +346,7 @@ func TestTask_watchDeltaChannelsTask(t *testing.T) {
 func TestTask_loadSegmentsTask(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	pkType := schemapb.DataType_Int64
-	schema := genTestCollectionSchema(pkType)
+	schema := genTestCollectionSchema()
 
 	genLoadEmptySegmentsRequest := func() *querypb.LoadSegmentsRequest {
 		req := &querypb.LoadSegmentsRequest{
@@ -445,7 +442,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 		err = task.Execute(ctx)
 		assert.NoError(t, err)
 		// expected only one segment in replica
-		num := node.historical.getSegmentNum()
+		num := node.metaReplica.getSegmentNum(segmentTypeSealed)
 		assert.Equal(t, 1, num)
 	})
 
@@ -493,7 +490,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 
 		totalRAM := Params.QueryNodeCfg.CacheSize * 1024 * 1024 * 1024
 
-		col, err := node.historical.getCollectionByID(defaultCollectionID)
+		col, err := node.metaReplica.getCollectionByID(defaultCollectionID)
 		assert.NoError(t, err)
 
 		sizePerRecord, err := typeutil.EstimateSizePerRecord(col.schema)
@@ -577,9 +574,7 @@ func TestTask_releaseCollectionTask(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 
-		err = node.streaming.removeCollection(defaultCollectionID)
-		assert.NoError(t, err)
-		err = node.historical.removeCollection(defaultCollectionID)
+		err = node.metaReplica.removeCollection(defaultCollectionID)
 		assert.NoError(t, err)
 
 		task := releaseCollectionTask{
@@ -598,7 +593,7 @@ func TestTask_releaseCollectionTask(t *testing.T) {
 			err = node.queryService.addQueryCollection(defaultCollectionID)
 			assert.NoError(t, err)*/
 
-		col, err := node.historical.getCollectionByID(defaultCollectionID)
+		col, err := node.metaReplica.getCollectionByID(defaultCollectionID)
 		assert.NoError(t, err)
 		col.addVDeltaChannels([]Channel{defaultDeltaChannel})
 
@@ -673,10 +668,7 @@ func TestTask_releasePartitionTask(t *testing.T) {
 			req:  genReleasePartitionsRequest(),
 			node: node,
 		}
-		err = node.historical.removeCollection(defaultCollectionID)
-		assert.NoError(t, err)
-
-		err = node.streaming.removeCollection(defaultCollectionID)
+		err = node.metaReplica.removeCollection(defaultCollectionID)
 		assert.NoError(t, err)
 
 		err = task.Execute(ctx)
@@ -687,17 +679,14 @@ func TestTask_releasePartitionTask(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 
-		hisCol, err := node.historical.getCollectionByID(defaultCollectionID)
-		assert.NoError(t, err)
-		strCol, err := node.streaming.getCollectionByID(defaultCollectionID)
+		col, err := node.metaReplica.getCollectionByID(defaultCollectionID)
 		assert.NoError(t, err)
 
-		err = node.historical.removePartition(defaultPartitionID)
+		err = node.metaReplica.removePartition(defaultPartitionID)
 		assert.NoError(t, err)
 
-		hisCol.addVDeltaChannels([]Channel{defaultDeltaChannel})
-		hisCol.setLoadType(loadTypePartition)
-		strCol.setLoadType(loadTypePartition)
+		col.addVDeltaChannels([]Channel{defaultDeltaChannel})
+		col.setLoadType(loadTypePartition)
 
 		/*
 			err = node.queryService.addQueryCollection(defaultCollectionID)

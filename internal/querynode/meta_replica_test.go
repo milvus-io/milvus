@@ -21,312 +21,252 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
-//----------------------------------------------------------------------------------------------------- collection
-func TestMetaReplica_getCollectionNum(t *testing.T) {
-	node := newQueryNodeMock()
-	initTestMeta(t, node, 0, 0)
-	assert.Equal(t, node.historical.getCollectionNum(), 1)
-	err := node.Stop()
-	assert.NoError(t, err)
-}
-
-func TestMetaReplica_addCollection(t *testing.T) {
-	node := newQueryNodeMock()
-	initTestMeta(t, node, 0, 0)
-	err := node.Stop()
-	assert.NoError(t, err)
-}
-
-func TestMetaReplica_removeCollection(t *testing.T) {
-	node := newQueryNodeMock()
-	initTestMeta(t, node, 0, 0)
-	assert.Equal(t, node.historical.getCollectionNum(), 1)
-
-	err := node.historical.removeCollection(0)
-	assert.NoError(t, err)
-	assert.Equal(t, node.historical.getCollectionNum(), 0)
-	err = node.Stop()
-	assert.NoError(t, err)
-}
-
-func TestMetaReplica_getCollectionByID(t *testing.T) {
-	node := newQueryNodeMock()
-	collectionID := UniqueID(0)
-	initTestMeta(t, node, collectionID, 0)
-	targetCollection, err := node.historical.getCollectionByID(collectionID)
-	assert.NoError(t, err)
-	assert.NotNil(t, targetCollection)
-	assert.Equal(t, targetCollection.ID(), collectionID)
-	err = node.Stop()
-	assert.NoError(t, err)
-}
-
-func TestMetaReplica_hasCollection(t *testing.T) {
-	node := newQueryNodeMock()
-	collectionID := UniqueID(0)
-	initTestMeta(t, node, collectionID, 0)
-
-	hasCollection := node.historical.hasCollection(collectionID)
-	assert.Equal(t, hasCollection, true)
-	hasCollection = node.historical.hasCollection(UniqueID(1))
-	assert.Equal(t, hasCollection, false)
-
-	err := node.Stop()
-	assert.NoError(t, err)
-}
-
-//----------------------------------------------------------------------------------------------------- partition
-func TestMetaReplica_getPartitionNum(t *testing.T) {
-	node := newQueryNodeMock()
-	collectionID := UniqueID(0)
-	initTestMeta(t, node, collectionID, 0)
-
-	partitionIDs := []UniqueID{1, 2, 3}
-	for _, id := range partitionIDs {
-		err := node.historical.addPartition(collectionID, id)
+func TestMetaReplica_collection(t *testing.T) {
+	t.Run("test getCollectionNum", func(t *testing.T) {
+		replica, err := genSimpleReplica()
 		assert.NoError(t, err)
-		partition, err := node.historical.getPartitionByID(id)
+		defer replica.freeAll()
+		assert.Equal(t, 1, replica.getCollectionNum())
+	})
+
+	t.Run("test addCollection", func(t *testing.T) {
+		replica, err := genSimpleReplica()
 		assert.NoError(t, err)
-		assert.Equal(t, partition.ID(), id)
-	}
+		defer replica.freeAll()
+		replica.addCollection(defaultCollectionID+1, genTestCollectionSchema())
+		assert.Equal(t, 2, replica.getCollectionNum())
+	})
 
-	partitionNum := node.historical.getPartitionNum()
-	assert.Equal(t, partitionNum, len(partitionIDs))
-	err := node.Stop()
-	assert.NoError(t, err)
-}
-
-func TestMetaReplica_addPartition(t *testing.T) {
-	node := newQueryNodeMock()
-	collectionID := UniqueID(0)
-	initTestMeta(t, node, collectionID, 0)
-
-	partitionIDs := []UniqueID{1, 2, 3}
-	for _, id := range partitionIDs {
-		err := node.historical.addPartition(collectionID, id)
+	t.Run("test removeCollection", func(t *testing.T) {
+		replica, err := genSimpleReplica()
 		assert.NoError(t, err)
-		partition, err := node.historical.getPartitionByID(id)
+		defer replica.freeAll()
+		err = replica.removeCollection(defaultCollectionID)
 		assert.NoError(t, err)
-		assert.Equal(t, partition.ID(), id)
-	}
-	err := node.Stop()
-	assert.NoError(t, err)
-}
+	})
 
-func TestMetaReplica_removePartition(t *testing.T) {
-	node := newQueryNodeMock()
-	collectionID := UniqueID(0)
-	initTestMeta(t, node, collectionID, 0)
-
-	partitionIDs := []UniqueID{1, 2, 3}
-
-	for _, id := range partitionIDs {
-		err := node.historical.addPartition(collectionID, id)
+	t.Run("test getCollectionByID", func(t *testing.T) {
+		replica, err := genSimpleReplica()
 		assert.NoError(t, err)
-		partition, err := node.historical.getPartitionByID(id)
+		defer replica.freeAll()
+
+		targetCollection, err := replica.getCollectionByID(defaultCollectionID)
 		assert.NoError(t, err)
-		assert.Equal(t, partition.ID(), id)
-		err = node.historical.removePartition(id)
+		assert.NotNil(t, targetCollection)
+		assert.Equal(t, defaultCollectionID, targetCollection.ID())
+	})
+
+	t.Run("test hasCollection", func(t *testing.T) {
+		replica, err := genSimpleReplica()
 		assert.NoError(t, err)
-	}
-	err := node.Stop()
-	assert.NoError(t, err)
-}
+		defer replica.freeAll()
 
-func TestMetaReplica_getPartitionByTag(t *testing.T) {
-	node := newQueryNodeMock()
-	collectionID := UniqueID(0)
-	initTestMeta(t, node, collectionID, 0)
+		hasCollection := replica.hasCollection(defaultCollectionID)
+		assert.Equal(t, true, hasCollection)
+		hasCollection = replica.hasCollection(defaultCollectionID + 1)
+		assert.Equal(t, false, hasCollection)
+	})
 
-	collection, err := node.historical.getCollectionByID(collectionID)
-	assert.NoError(t, err)
-
-	for _, id := range collection.partitionIDs {
-		err := node.historical.addPartition(collectionID, id)
-		assert.NoError(t, err)
-		partition, err := node.historical.getPartitionByID(id)
-		assert.NoError(t, err)
-		assert.Equal(t, partition.ID(), id)
-		assert.NotNil(t, partition)
-	}
-	err = node.Stop()
-	assert.NoError(t, err)
-}
-
-func TestMetaReplica_hasPartition(t *testing.T) {
-	node := newQueryNodeMock()
-	collectionID := UniqueID(0)
-	initTestMeta(t, node, collectionID, 0)
-
-	collection, err := node.historical.getCollectionByID(collectionID)
-	assert.NoError(t, err)
-	err = node.historical.addPartition(collectionID, collection.partitionIDs[0])
-	assert.NoError(t, err)
-	hasPartition := node.historical.hasPartition(defaultPartitionID)
-	assert.Equal(t, hasPartition, true)
-	hasPartition = node.historical.hasPartition(defaultPartitionID + 1)
-	assert.Equal(t, hasPartition, false)
-	err = node.Stop()
-	assert.NoError(t, err)
-}
-
-//----------------------------------------------------------------------------------------------------- segment
-func TestMetaReplica_addSegment(t *testing.T) {
-	node := newQueryNodeMock()
-	collectionID := UniqueID(0)
-	initTestMeta(t, node, collectionID, 0)
-
-	const segmentNum = 3
-	for i := 0; i < segmentNum; i++ {
-		err := node.historical.addSegment(UniqueID(i), defaultPartitionID, collectionID, "", segmentTypeGrowing)
-		assert.NoError(t, err)
-		targetSeg, err := node.historical.getSegmentByID(UniqueID(i))
-		assert.NoError(t, err)
-		assert.Equal(t, targetSeg.segmentID, UniqueID(i))
-	}
-
-	err := node.Stop()
-	assert.NoError(t, err)
-}
-
-func TestMetaReplica_removeSegment(t *testing.T) {
-	node := newQueryNodeMock()
-	collectionID := UniqueID(0)
-	initTestMeta(t, node, collectionID, 0)
-
-	const segmentNum = 3
-
-	for i := 0; i < segmentNum; i++ {
-		err := node.historical.addSegment(UniqueID(i), defaultPartitionID, collectionID, "", segmentTypeGrowing)
-		assert.NoError(t, err)
-		targetSeg, err := node.historical.getSegmentByID(UniqueID(i))
-		assert.NoError(t, err)
-		assert.Equal(t, targetSeg.segmentID, UniqueID(i))
-		err = node.historical.removeSegment(UniqueID(i))
-		assert.NoError(t, err)
-	}
-
-	err := node.Stop()
-	assert.NoError(t, err)
-}
-
-func TestMetaReplica_getSegmentByID(t *testing.T) {
-	node := newQueryNodeMock()
-	collectionID := UniqueID(0)
-	initTestMeta(t, node, collectionID, 0)
-
-	const segmentNum = 3
-
-	for i := 0; i < segmentNum; i++ {
-		err := node.historical.addSegment(UniqueID(i), defaultPartitionID, collectionID, "", segmentTypeGrowing)
-		assert.NoError(t, err)
-		targetSeg, err := node.historical.getSegmentByID(UniqueID(i))
-		assert.NoError(t, err)
-		assert.Equal(t, targetSeg.segmentID, UniqueID(i))
-	}
-
-	err := node.Stop()
-	assert.NoError(t, err)
-}
-
-func TestMetaReplica_getSegmentInfosByColID(t *testing.T) {
-	node := newQueryNodeMock()
-	collectionID := UniqueID(0)
-	pkType := schemapb.DataType_Int64
-	schema := genTestCollectionSchema(pkType)
-	collection := node.historical.addCollection(collectionID, schema)
-	node.historical.addPartition(collectionID, defaultPartitionID)
-
-	// test get indexed segment info
-	vectorFieldIDDs, err := node.historical.getVecFieldIDsByCollectionID(collectionID)
-	assert.NoError(t, err)
-	assert.Equal(t, 2, len(vectorFieldIDDs))
-	fieldID := vectorFieldIDDs[0]
-
-	indexID := UniqueID(10000)
-	indexInfo := &IndexedFieldInfo{
-		indexInfo: &querypb.FieldIndexInfo{
-			IndexName:   "test-index-name",
-			IndexID:     indexID,
-			EnableIndex: true,
-		},
-	}
-
-	segment1, err := newSegment(collection, UniqueID(1), defaultPartitionID, collectionID, "", segmentTypeGrowing)
-	assert.NoError(t, err)
-	err = node.historical.setSegment(segment1)
-	assert.NoError(t, err)
-
-	segment2, err := newSegment(collection, UniqueID(2), defaultPartitionID, collectionID, "", segmentTypeSealed)
-	assert.NoError(t, err)
-	segment2.setIndexedFieldInfo(fieldID, indexInfo)
-	err = node.historical.setSegment(segment2)
-	assert.NoError(t, err)
-
-	targetSegs, err := node.historical.getSegmentInfosByColID(collectionID)
-	assert.NoError(t, err)
-	assert.Equal(t, 2, len(targetSegs))
-	for _, segment := range targetSegs {
-		if segment.GetSegmentState() == segmentTypeGrowing {
-			assert.Equal(t, UniqueID(0), segment.IndexID)
-		} else {
-			assert.Equal(t, indexID, segment.IndexID)
-		}
-	}
-
-	err = node.Stop()
-	assert.NoError(t, err)
-}
-
-func TestMetaReplica_hasSegment(t *testing.T) {
-	node := newQueryNodeMock()
-	collectionID := UniqueID(0)
-	initTestMeta(t, node, collectionID, 0)
-
-	const segmentNum = 3
-
-	for i := 0; i < segmentNum; i++ {
-		err := node.historical.addSegment(UniqueID(i), defaultPartitionID, collectionID, "", segmentTypeGrowing)
-		assert.NoError(t, err)
-		targetSeg, err := node.historical.getSegmentByID(UniqueID(i))
-		assert.NoError(t, err)
-		assert.Equal(t, targetSeg.segmentID, UniqueID(i))
-		hasSeg := node.historical.hasSegment(UniqueID(i))
-		assert.Equal(t, hasSeg, true)
-		hasSeg = node.historical.hasSegment(UniqueID(i + 100))
-		assert.Equal(t, hasSeg, false)
-	}
-
-	err := node.Stop()
-	assert.NoError(t, err)
-}
-
-func TestMetaReplica_freeAll(t *testing.T) {
-	node := newQueryNodeMock()
-	collectionID := UniqueID(0)
-	initTestMeta(t, node, collectionID, 0)
-
-	err := node.Stop()
-	assert.NoError(t, err)
-}
-
-func TestMetaReplica_statistic(t *testing.T) {
 	t.Run("test getCollectionIDs", func(t *testing.T) {
 		replica, err := genSimpleReplica()
 		assert.NoError(t, err)
+		defer replica.freeAll()
 		ids := replica.getCollectionIDs()
 		assert.Len(t, ids, 1)
 		assert.Equal(t, defaultCollectionID, ids[0])
 	})
+}
 
-	t.Run("test getCollectionIDs", func(t *testing.T) {
+func TestMetaReplica_partition(t *testing.T) {
+	t.Run("test addPartition, getPartitionNum and getPartitionByID", func(t *testing.T) {
 		replica, err := genSimpleReplica()
 		assert.NoError(t, err)
-		num := replica.getSegmentNum()
+		defer replica.freeAll()
+
+		partitionIDs := []UniqueID{1, 2, 3}
+		for _, id := range partitionIDs {
+			err := replica.addPartition(defaultCollectionID, id)
+			assert.NoError(t, err)
+			partition, err := replica.getPartitionByID(id)
+			assert.NoError(t, err)
+			assert.Equal(t, id, partition.ID())
+		}
+
+		partitionNum := replica.getPartitionNum()
+		assert.Equal(t, len(partitionIDs), partitionNum)
+	})
+
+	t.Run("test removePartition", func(t *testing.T) {
+		replica, err := genSimpleReplica()
+		assert.NoError(t, err)
+		defer replica.freeAll()
+
+		partitionIDs := []UniqueID{1, 2, 3}
+
+		for _, id := range partitionIDs {
+			err := replica.addPartition(defaultCollectionID, id)
+			assert.NoError(t, err)
+			partition, err := replica.getPartitionByID(id)
+			assert.NoError(t, err)
+			assert.Equal(t, id, partition.ID())
+			err = replica.removePartition(id)
+			assert.NoError(t, err)
+			_, err = replica.getPartitionByID(id)
+			assert.Error(t, err)
+		}
+	})
+
+	t.Run("test hasPartition", func(t *testing.T) {
+		replica, err := genSimpleReplica()
+		assert.NoError(t, err)
+		defer replica.freeAll()
+
+		collection, err := replica.getCollectionByID(defaultCollectionID)
+		assert.NoError(t, err)
+		err = replica.addPartition(defaultCollectionID, collection.partitionIDs[0])
+		assert.NoError(t, err)
+		hasPartition := replica.hasPartition(defaultPartitionID)
+		assert.Equal(t, true, hasPartition)
+		hasPartition = replica.hasPartition(defaultPartitionID + 1)
+		assert.Equal(t, false, hasPartition)
+	})
+}
+
+func TestMetaReplica_segment(t *testing.T) {
+	t.Run("test addSegment and getSegmentByID", func(t *testing.T) {
+		replica, err := genSimpleReplica()
+		assert.NoError(t, err)
+		defer replica.freeAll()
+
+		const segmentNum = 3
+		for i := 0; i < segmentNum; i++ {
+			err := replica.addSegment(UniqueID(i), defaultPartitionID, defaultCollectionID, "", segmentTypeGrowing)
+			assert.NoError(t, err)
+			targetSeg, err := replica.getSegmentByID(UniqueID(i), segmentTypeGrowing)
+			assert.NoError(t, err)
+			assert.Equal(t, UniqueID(i), targetSeg.segmentID)
+		}
+	})
+
+	t.Run("test removeSegment", func(t *testing.T) {
+		replica, err := genSimpleReplica()
+		assert.NoError(t, err)
+		defer replica.freeAll()
+
+		const segmentNum = 3
+		for i := 0; i < segmentNum; i++ {
+			err := replica.addSegment(UniqueID(i), defaultPartitionID, defaultCollectionID, "", segmentTypeGrowing)
+			assert.NoError(t, err)
+			targetSeg, err := replica.getSegmentByID(UniqueID(i), segmentTypeGrowing)
+			assert.NoError(t, err)
+			assert.Equal(t, UniqueID(i), targetSeg.segmentID)
+			err = replica.removeSegment(UniqueID(i), segmentTypeGrowing)
+			assert.NoError(t, err)
+		}
+	})
+
+	t.Run("test hasSegment", func(t *testing.T) {
+		replica, err := genSimpleReplica()
+		assert.NoError(t, err)
+		defer replica.freeAll()
+
+		const segmentNum = 3
+		for i := 0; i < segmentNum; i++ {
+			err := replica.addSegment(UniqueID(i), defaultPartitionID, defaultCollectionID, "", segmentTypeGrowing)
+			assert.NoError(t, err)
+			targetSeg, err := replica.getSegmentByID(UniqueID(i), segmentTypeGrowing)
+			assert.NoError(t, err)
+			assert.Equal(t, UniqueID(i), targetSeg.segmentID)
+			hasSeg, err := replica.hasSegment(UniqueID(i), segmentTypeGrowing)
+			assert.NoError(t, err)
+			assert.Equal(t, true, hasSeg)
+			hasSeg, err = replica.hasSegment(UniqueID(i+100), segmentTypeGrowing)
+			assert.NoError(t, err)
+			assert.Equal(t, false, hasSeg)
+		}
+	})
+
+	t.Run("test invalid segment type", func(t *testing.T) {
+		replica, err := genSimpleReplica()
+		assert.NoError(t, err)
+		defer replica.freeAll()
+
+		invalidType := commonpb.SegmentState_NotExist
+		err = replica.addSegment(defaultSegmentID, defaultPartitionID, defaultCollectionID, "", invalidType)
+		assert.Error(t, err)
+		_, err = replica.getSegmentByID(defaultSegmentID, invalidType)
+		assert.Error(t, err)
+		_, err = replica.getSegmentIDs(defaultPartitionID, invalidType)
+		assert.Error(t, err)
+		err = replica.removeSegment(defaultSegmentID, invalidType)
+		assert.Error(t, err)
+		_, err = replica.hasSegment(defaultSegmentID, invalidType)
+		assert.Error(t, err)
+		num := replica.getSegmentNum(invalidType)
 		assert.Equal(t, 0, num)
 	})
+
+	t.Run("test getSegmentInfosByColID", func(t *testing.T) {
+		replica, err := genSimpleReplica()
+		assert.NoError(t, err)
+		defer replica.freeAll()
+
+		schema := genTestCollectionSchema()
+		collection := replica.addCollection(defaultCollectionID, schema)
+		replica.addPartition(defaultCollectionID, defaultPartitionID)
+
+		// test get indexed segment info
+		vectorFieldIDDs, err := replica.getVecFieldIDsByCollectionID(defaultCollectionID)
+		assert.NoError(t, err)
+		assert.Equal(t, 2, len(vectorFieldIDDs))
+		fieldID := vectorFieldIDDs[0]
+
+		indexID := UniqueID(10000)
+		indexInfo := &IndexedFieldInfo{
+			indexInfo: &querypb.FieldIndexInfo{
+				IndexName:   "test-index-name",
+				IndexID:     indexID,
+				EnableIndex: true,
+			},
+		}
+
+		segment1, err := newSegment(collection, UniqueID(1), defaultPartitionID, defaultCollectionID, "", segmentTypeGrowing)
+		assert.NoError(t, err)
+		err = replica.setSegment(segment1)
+		assert.NoError(t, err)
+
+		segment2, err := newSegment(collection, UniqueID(2), defaultPartitionID, defaultCollectionID, "", segmentTypeSealed)
+		assert.NoError(t, err)
+		segment2.setIndexedFieldInfo(fieldID, indexInfo)
+		err = replica.setSegment(segment2)
+		assert.NoError(t, err)
+
+		targetSegs := replica.getSegmentInfosByColID(defaultCollectionID)
+		assert.Equal(t, 2, len(targetSegs))
+		for _, segment := range targetSegs {
+			if segment.GetSegmentState() == segmentTypeGrowing {
+				assert.Equal(t, UniqueID(0), segment.IndexID)
+			} else {
+				assert.Equal(t, indexID, segment.IndexID)
+			}
+		}
+	})
+}
+
+func TestMetaReplica_freeAll(t *testing.T) {
+	replica, err := genSimpleReplica()
+	assert.NoError(t, err)
+	replica.freeAll()
+	num := replica.getCollectionNum()
+	assert.Equal(t, 0, num)
+	num = replica.getPartitionNum()
+	assert.Equal(t, 0, num)
+	num = replica.getSegmentNum(segmentTypeGrowing)
+	assert.Equal(t, 0, num)
+	num = replica.getSegmentNum(segmentTypeSealed)
+	assert.Equal(t, 0, num)
 }

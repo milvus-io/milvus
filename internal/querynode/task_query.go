@@ -50,6 +50,7 @@ func (q *queryTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
+// TODO: merge queryOnStreaming and queryOnHistorical?
 func (q *queryTask) queryOnStreaming() error {
 	// check ctx timeout
 	if !funcutil.CheckCtxValid(q.Ctx()) {
@@ -57,7 +58,7 @@ func (q *queryTask) queryOnStreaming() error {
 	}
 
 	// check if collection has been released, check streaming since it's released first
-	_, err := q.QS.streaming.getCollectionByID(q.CollectionID)
+	_, err := q.QS.metaReplica.getCollectionByID(q.CollectionID)
 	if err != nil {
 		return err
 	}
@@ -76,7 +77,7 @@ func (q *queryTask) queryOnStreaming() error {
 	}
 	defer plan.delete()
 
-	sResults, _, _, sErr := retrieveStreaming(q.QS.streaming, plan, q.CollectionID, q.iReq.GetPartitionIDs(), q.QS.channel, q.QS.vectorChunkManager)
+	sResults, _, _, sErr := retrieveStreaming(q.QS.metaReplica, plan, q.CollectionID, q.iReq.GetPartitionIDs(), q.QS.channel, q.QS.vectorChunkManager)
 	if sErr != nil {
 		return sErr
 	}
@@ -103,7 +104,7 @@ func (q *queryTask) queryOnHistorical() error {
 	}
 
 	// check if collection has been released, check historical since it's released first
-	_, err := q.QS.streaming.getCollectionByID(q.CollectionID)
+	_, err := q.QS.metaReplica.getCollectionByID(q.CollectionID)
 	if err != nil {
 		return err
 	}
@@ -122,7 +123,7 @@ func (q *queryTask) queryOnHistorical() error {
 		return err
 	}
 	defer plan.delete()
-	retrieveResults, _, _, err := retrieveHistorical(q.QS.historical, plan, q.CollectionID, nil, q.req.SegmentIDs, q.QS.vectorChunkManager)
+	retrieveResults, _, _, err := retrieveHistorical(q.QS.metaReplica, plan, q.CollectionID, nil, q.req.SegmentIDs, q.QS.vectorChunkManager)
 	if err != nil {
 		return err
 	}
