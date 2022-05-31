@@ -74,6 +74,10 @@ func TestChannelsMgrImpl_createDMLMsgStream(t *testing.T) {
 	err = mgr.createDMLMsgStream(collID)
 	assert.Equal(t, nil, err)
 
+	// re-create message stream.
+	err = mgr.createDMLMsgStream(collID)
+	assert.Equal(t, nil, err)
+
 	_, err = mgr.getChannels(collID)
 	assert.Equal(t, nil, err)
 	_, err = mgr.getVChannels(collID)
