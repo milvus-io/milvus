@@ -334,6 +334,7 @@ type dataCoordMock struct {
 	returnError         bool
 	returnGrpcError     bool
 	segmentState        commonpb.SegmentState
+	errLevel            int
 }
 
 func newDataCoordMock(ctx context.Context) *dataCoordMock {
@@ -445,6 +446,42 @@ func (data *dataCoordMock) GetSegmentStates(ctx context.Context, req *datapb.Get
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
 		States: segmentStates,
+	}, nil
+}
+
+func (data *dataCoordMock) AcquireSegmentLock(ctx context.Context, req *datapb.AcquireSegmentLockRequest) (*commonpb.Status, error) {
+	if data.errLevel == 2 {
+		data.errLevel++
+		return nil, errors.New("AcquireSegmentLock failed")
+
+	}
+	if data.errLevel == 1 {
+		data.errLevel++
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "AcquireSegmentLock failed",
+		}, nil
+	}
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}, nil
+}
+func (data *dataCoordMock) ReleaseSegmentLock(ctx context.Context, req *datapb.ReleaseSegmentLockRequest) (*commonpb.Status, error) {
+	if data.errLevel == 4 {
+		data.errLevel++
+		return nil, errors.New("ReleaseSegmentLock failed")
+	}
+
+	if data.errLevel == 3 {
+		data.errLevel++
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "ReleaseSegmentLock failed",
+		}, nil
+	}
+
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
 	}, nil
 }
 

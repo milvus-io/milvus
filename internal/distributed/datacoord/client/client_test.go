@@ -129,6 +129,12 @@ func Test_NewClient(t *testing.T) {
 
 		r24, err := client.UpdateSegmentStatistics(ctx, nil)
 		retCheck(retNotNil, r24, err)
+
+		r25, err := client.AcquireSegmentLock(ctx, nil)
+		retCheck(retNotNil, r25, err)
+
+		r26, err := client.ReleaseSegmentLock(ctx, nil)
+		retCheck(retNotNil, r26, err)
 	}
 
 	client.grpcClient = &mock.GRPCClientBase{

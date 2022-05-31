@@ -340,3 +340,13 @@ func (s *Server) Import(ctx context.Context, req *datapb.ImportTaskRequest) (*da
 func (s *Server) UpdateSegmentStatistics(ctx context.Context, req *datapb.UpdateSegmentStatisticsRequest) (*commonpb.Status, error) {
 	return s.dataCoord.UpdateSegmentStatistics(ctx, req)
 }
+
+// AcquireSegmentLock acquire the reference lock of the segments.
+func (s *Server) AcquireSegmentLock(ctx context.Context, req *datapb.AcquireSegmentLockRequest) (*commonpb.Status, error) {
+	return s.dataCoord.AcquireSegmentLock(ctx, req)
+}
+
+// ReleaseSegmentLock release the reference lock of the segments.
+func (s *Server) ReleaseSegmentLock(ctx context.Context, req *datapb.ReleaseSegmentLockRequest) (*commonpb.Status, error) {
+	return s.dataCoord.ReleaseSegmentLock(ctx, req)
+}

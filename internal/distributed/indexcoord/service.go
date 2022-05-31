@@ -30,8 +30,9 @@ import (
 	"google.golang.org/grpc/keepalive"
 
 	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
-
+	dcc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
 	"github.com/milvus-io/milvus/internal/indexcoord"
+	ic "github.com/milvus-io/milvus/internal/indexcoord"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -64,6 +65,8 @@ type Server struct {
 	loopWg     sync.WaitGroup
 
 	etcdCli *clientv3.Client
+
+	dataCoord types.DataCoord
 
 	closer io.Closer
 }
@@ -113,6 +116,34 @@ func (s *Server) init() error {
 		return err
 	}
 
+	// --- DataCoord ---
+	if s.dataCoord == nil {
+		s.dataCoord, err = dcc.NewClient(s.loopCtx, ic.Params.EtcdCfg.MetaRootPath, s.etcdCli)
+		if err != nil {
+			log.Debug("IndexCoord try to new DataCoord client failed", zap.Error(err))
+			panic(err)
+		}
+	}
+
+	if err = s.dataCoord.Init(); err != nil {
+		log.Debug("IndexCoord DataCoordClient Init failed", zap.Error(err))
+		panic(err)
+	}
+	if err = s.dataCoord.Start(); err != nil {
+		log.Debug("IndexCoord DataCoordClient Start failed", zap.Error(err))
+		panic(err)
+	}
+	log.Debug("IndexCoord try to wait for DataCoord ready")
+	err = funcutil.WaitForComponentHealthy(s.loopCtx, s.dataCoord, "DataCoord", 1000000, time.Millisecond*200)
+	if err != nil {
+		log.Debug("IndexCoord wait for DataCoord ready failed", zap.Error(err))
+		panic(err)
+	}
+
+	if err := s.SetDataCoord(s.dataCoord); err != nil {
+		panic(err)
+	}
+
 	return nil
 }
 
@@ -158,6 +189,12 @@ func (s *Server) Stop() error {
 func (s *Server) SetClient(indexCoordClient types.IndexCoordComponent) error {
 	s.indexcoord = indexCoordClient
 	return nil
+}
+
+// SetDataCoord sets the DataCoord's client for IndexCoord component.
+func (s *Server) SetDataCoord(d types.DataCoord) error {
+	s.dataCoord = d
+	return s.indexcoord.SetDataCoord(d)
 }
 
 // GetComponentStates gets the component states of IndexCoord.

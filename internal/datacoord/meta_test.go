@@ -698,3 +698,26 @@ func Test_meta_GetSegmentsOfCollection(t *testing.T) {
 		})
 	}
 }
+
+func TestMeta_HasSegments(t *testing.T) {
+	m := &meta{
+		segments: &SegmentsInfo{
+			segments: map[UniqueID]*SegmentInfo{
+				1: {
+					SegmentInfo: &datapb.SegmentInfo{
+						ID: 1,
+					},
+					currRows: 100,
+				},
+			},
+		},
+	}
+
+	has, err := m.HasSegments([]UniqueID{1})
+	assert.Equal(t, true, has)
+	assert.NoError(t, err)
+
+	has, err = m.HasSegments([]UniqueID{2})
+	assert.Equal(t, false, has)
+	assert.Error(t, err)
+}

@@ -42,6 +42,9 @@ func TestIndexCoordClient(t *testing.T) {
 	icm := &indexcoord.Mock{}
 	err = server.SetClient(icm)
 	assert.Nil(t, err)
+	dcm := &indexcoord.DataCoordMock{}
+	err = server.SetDataCoord(dcm)
+	assert.Nil(t, err)
 
 	err = server.Run()
 	assert.Nil(t, err)

@@ -1052,3 +1052,15 @@ func isSegmentHealthy(segment *SegmentInfo) bool {
 		segment.GetState() != commonpb.SegmentState_NotExist &&
 		segment.GetState() != commonpb.SegmentState_Dropped
 }
+
+func (m *meta) HasSegments(segIDs []UniqueID) (bool, error) {
+	m.RLock()
+	defer m.RUnlock()
+
+	for _, segID := range segIDs {
+		if _, ok := m.segments.segments[segID]; !ok {
+			return false, fmt.Errorf("segment is not exist with ID = %d", segID)
+		}
+	}
+	return true, nil
+}

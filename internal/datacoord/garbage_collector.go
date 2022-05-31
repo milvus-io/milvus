@@ -50,8 +50,9 @@ type GcOption struct {
 // garbageCollector handles garbage files in object storage
 // which could be dropped collection remanent or data node failure traces
 type garbageCollector struct {
-	option GcOption
-	meta   *meta
+	option   GcOption
+	meta     *meta
+	segRefer *SegmentReferenceManager
 
 	startOnce sync.Once
 	stopOnce  sync.Once
@@ -60,13 +61,14 @@ type garbageCollector struct {
 }
 
 // newGarbageCollector create garbage collector with meta and option
-func newGarbageCollector(meta *meta, opt GcOption) *garbageCollector {
+func newGarbageCollector(meta *meta, segRefer *SegmentReferenceManager, opt GcOption) *garbageCollector {
 	log.Info("GC with option", zap.Bool("enabled", opt.enabled), zap.Duration("interval", opt.checkInterval),
 		zap.Duration("missingTolerance", opt.missingTolerance), zap.Duration("dropTolerance", opt.dropTolerance))
 	return &garbageCollector{
-		meta:    meta,
-		option:  opt,
-		closeCh: make(chan struct{}),
+		meta:     meta,
+		segRefer: segRefer,
+		option:   opt,
+		closeCh:  make(chan struct{}),
 	}
 }
 
@@ -134,6 +136,15 @@ func (gc *garbageCollector) scan() {
 				v++
 				continue
 			}
+
+			// binlog path should consist of "/files/insertLog/collID/partID/segID/fieldID/fileName"
+			segmentID, err := parseSegmentIDByBinlog(info.Key)
+			if err == nil {
+				if gc.segRefer.HasSegmentLock(segmentID) {
+					v++
+					continue
+				}
+			}
 			m++
 			// not found in meta, check last modified time exceeds tolerance duration
 			if time.Since(info.LastModified) > gc.option.missingTolerance {
@@ -148,7 +159,7 @@ func (gc *garbageCollector) scan() {
 
 func (gc *garbageCollector) clearEtcd() {
 	drops := gc.meta.SelectSegments(func(segment *SegmentInfo) bool {
-		return segment.GetState() == commonpb.SegmentState_Dropped
+		return segment.GetState() == commonpb.SegmentState_Dropped && !gc.segRefer.HasSegmentLock(segment.ID)
 	})
 
 	for _, sinfo := range drops {

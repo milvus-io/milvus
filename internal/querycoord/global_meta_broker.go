@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"path"
 
+	"github.com/milvus-io/milvus/internal/util/retry"
+
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 
 	"go.uber.org/zap"
@@ -475,4 +477,56 @@ func (broker *globalMetaBroker) getSegmentStates(ctx context.Context, segmentID 
 	}
 
 	return resp.States[0], nil
+}
+
+func (broker *globalMetaBroker) acquireSegmentsReferLock(ctx context.Context, segmentIDs []UniqueID) error {
+	ctx, cancel := context.WithTimeout(ctx, timeoutForRPC)
+	defer cancel()
+	acquireSegLockReq := &datapb.AcquireSegmentLockRequest{
+		SegmentIDs: segmentIDs,
+		NodeID:     Params.QueryCoordCfg.GetNodeID(),
+	}
+	status, err := broker.dataCoord.AcquireSegmentLock(ctx, acquireSegLockReq)
+	if err != nil {
+		log.Error("QueryCoord acquire the segment reference lock error", zap.Int64s("segIDs", segmentIDs),
+			zap.Error(err))
+		return err
+	}
+	if status.ErrorCode != commonpb.ErrorCode_Success {
+		log.Error("QueryCoord acquire the segment reference lock error", zap.Int64s("segIDs", segmentIDs),
+			zap.String("failed reason", status.Reason))
+		return fmt.Errorf(status.Reason)
+	}
+
+	return nil
+}
+
+func (broker *globalMetaBroker) releaseSegmentReferLock(ctx context.Context, segmentIDs []UniqueID) error {
+	ctx, cancel := context.WithTimeout(ctx, timeoutForRPC)
+	defer cancel()
+
+	releaseSegReferLockReq := &datapb.ReleaseSegmentLockRequest{
+		SegmentIDs: segmentIDs,
+		NodeID:     Params.QueryCoordCfg.GetNodeID(),
+	}
+
+	if err := retry.Do(ctx, func() error {
+		status, err := broker.dataCoord.ReleaseSegmentLock(ctx, releaseSegReferLockReq)
+		if err != nil {
+			log.Error("QueryCoord release reference lock on segments failed", zap.Int64s("segmentIDs", segmentIDs),
+				zap.Error(err))
+			return err
+		}
+
+		if status.ErrorCode != commonpb.ErrorCode_Success {
+			log.Error("QueryCoord release reference lock on segments failed", zap.Int64s("segmentIDs", segmentIDs),
+				zap.String("failed reason", status.Reason))
+			return errors.New(status.Reason)
+		}
+		return nil
+	}, retry.Attempts(100)); err != nil {
+		return err
+	}
+
+	return nil
 }

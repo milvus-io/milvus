@@ -336,6 +336,7 @@ func (scheduler *TaskScheduler) unmarshalTask(taskID UniqueID, t string) (task, 
 			cluster:             scheduler.cluster,
 			meta:                scheduler.meta,
 			excludeNodeIDs:      []int64{},
+			broker:              scheduler.broker,
 		}
 		newTask = loadSegmentTask
 	case commonpb.MsgType_ReleaseSegments:
@@ -521,7 +522,11 @@ func (scheduler *TaskScheduler) processTask(t task) error {
 
 	// task preExecute
 	span.LogFields(oplog.Int64("processTask: scheduler process PreExecute", t.getTaskID()))
-	t.preExecute(ctx)
+	err = t.preExecute(ctx)
+	if err != nil {
+		log.Warn("failed to preExecute task", zap.Error(err))
+		return err
+	}
 	taskInfoKey = fmt.Sprintf("%s/%d", taskInfoPrefix, t.getTaskID())
 	err = scheduler.client.Save(taskInfoKey, strconv.Itoa(int(taskDoing)))
 	if err != nil {

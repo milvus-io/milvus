@@ -127,11 +127,15 @@ type Server struct {
 	flushCh chan UniqueID
 	factory dependency.Factory
 
-	session *sessionutil.Session
-	eventCh <-chan *sessionutil.SessionEvent
+	session   *sessionutil.Session
+	dnEventCh <-chan *sessionutil.SessionEvent
+	icEventCh <-chan *sessionutil.SessionEvent
+	qcEventCh <-chan *sessionutil.SessionEvent
 
 	dataNodeCreator        dataNodeCreatorFunc
 	rootCoordClientCreator rootCoordCreatorFunc
+
+	segReferManager *SegmentReferenceManager
 }
 
 // ServerHelper datacoord server injection helper
@@ -380,7 +384,7 @@ func (s *Server) initGarbageCollection() error {
 		}
 	}
 
-	s.garbageCollector = newGarbageCollector(s.meta, GcOption{
+	s.garbageCollector = newGarbageCollector(s.meta, s.segReferManager, GcOption{
 		cli:        cli,
 		enabled:    Params.DataCoordCfg.EnableGarbageCollection,
 		bucketName: Params.MinioCfg.BucketName,
@@ -413,8 +417,31 @@ func (s *Server) initServiceDiscovery() error {
 	s.cluster.Startup(s.ctx, datanodes)
 
 	// TODO implement rewatch logic
-	s.eventCh = s.session.WatchServices(typeutil.DataNodeRole, rev+1, nil)
-	return nil
+	s.dnEventCh = s.session.WatchServices(typeutil.DataNodeRole, rev+1, nil)
+
+	icSessions, icRevision, err := s.session.GetSessions(typeutil.IndexCoordRole)
+	if err != nil {
+		log.Error("DataCoord get IndexCoord session failed", zap.Error(err))
+		return err
+	}
+	serverIDs := make([]UniqueID, 0, len(icSessions))
+	for _, session := range icSessions {
+		serverIDs = append(serverIDs, session.ServerID)
+	}
+	s.icEventCh = s.session.WatchServices(typeutil.IndexCoordRole, icRevision+1, nil)
+
+	qcSessions, qcRevision, err := s.session.GetSessions(typeutil.QueryCoordRole)
+	if err != nil {
+		log.Error("DataCoord get QueryCoord session failed", zap.Error(err))
+		return err
+	}
+	for _, session := range qcSessions {
+		serverIDs = append(serverIDs, session.ServerID)
+	}
+	s.qcEventCh = s.session.WatchServices(typeutil.QueryCoordRole, qcRevision+1, nil)
+
+	s.segReferManager, err = NewSegmentReferenceManager(s.kvClient, serverIDs)
+	return err
 }
 
 func (s *Server) startSegmentManager() {
@@ -628,7 +655,7 @@ func (s *Server) watchService(ctx context.Context) {
 		case <-ctx.Done():
 			log.Info("watch service shutdown")
 			return
-		case event, ok := <-s.eventCh:
+		case event, ok := <-s.dnEventCh:
 			if !ok {
 				// ErrCompacted in handled inside SessionWatcher
 				// So there is some other error occurred, closing DataCoord server
@@ -648,6 +675,56 @@ func (s *Server) watchService(ctx context.Context) {
 					}
 				}()
 				return
+			}
+		case event, ok := <-s.icEventCh:
+			if !ok {
+				// ErrCompacted in handled inside SessionWatcher
+				// So there is some other error occurred, closing DataCoord server
+				logutil.Logger(s.ctx).Error("watch service channel closed", zap.Int64("serverID", s.session.ServerID))
+				go s.Stop()
+				if s.session.TriggerKill {
+					if p, err := os.FindProcess(os.Getpid()); err == nil {
+						p.Signal(syscall.SIGINT)
+					}
+				}
+				return
+			}
+			switch event.EventType {
+			case sessionutil.SessionAddEvent:
+				log.Info("there is a new IndexCoord online", zap.Int64("serverID", event.Session.ServerID))
+
+			case sessionutil.SessionDelEvent:
+				log.Warn("there is IndexCoord offline", zap.Int64("serverID", event.Session.ServerID))
+				if err := retry.Do(ctx, func() error {
+					return s.segReferManager.ReleaseSegmentsLockByNodeID(event.Session.ServerID)
+				}, retry.Attempts(100)); err != nil {
+					panic(err)
+				}
+			}
+		case event, ok := <-s.qcEventCh:
+			if !ok {
+				// ErrCompacted in handled inside SessionWatcher
+				// So there is some other error occurred, closing DataCoord server
+				logutil.Logger(s.ctx).Error("watch service channel closed", zap.Int64("serverID", s.session.ServerID))
+				go s.Stop()
+				if s.session.TriggerKill {
+					if p, err := os.FindProcess(os.Getpid()); err == nil {
+						p.Signal(syscall.SIGINT)
+					}
+				}
+				return
+			}
+			switch event.EventType {
+			case sessionutil.SessionAddEvent:
+				log.Info("there is a new QueryCoord online", zap.Int64("serverID", event.Session.ServerID))
+
+			case sessionutil.SessionDelEvent:
+				log.Warn("there is QueryCoord offline", zap.Int64("serverID", event.Session.ServerID))
+				if err := retry.Do(ctx, func() error {
+					return s.segReferManager.ReleaseSegmentsLockByNodeID(event.Session.ServerID)
+				}, retry.Attempts(100)); err != nil {
+					panic(err)
+				}
 			}
 		}
 	}
