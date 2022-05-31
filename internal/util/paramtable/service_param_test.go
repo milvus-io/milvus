@@ -89,6 +89,10 @@ func TestServiceParam(t *testing.T) {
 
 		assert.Equal(t, Params.UseSSL, false)
 
+		assert.Equal(t, Params.UseIAM, false)
+
+		assert.Equal(t, Params.IAMEndpoint, "")
+
 		t.Logf("Minio BucketName = %s", Params.BucketName)
 
 		t.Logf("Minio rootpath = %s", Params.RootPath)

@@ -60,6 +60,12 @@ minio:
   useSSL: false # Access to MinIO/S3 with SSL
   bucketName: "a-bucket" # Bucket name in MinIO/S3
   rootPath: files # The root path where the message is stored in MinIO/S3
+  # Whether to use AWS IAM role to access S3 instead of access/secret keys
+  # For more infomation, refer to https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_use.html
+  useIAM: false 
+  # Custom endpoint for fetch IAM role credentials. 
+  # Leave it empty if you want to use AWS default endpoint
+  iamEndpoint: "" 
 
 # Milvus supports three MQ: rocksmq(based on RockDB), Pulsar and Kafka, which should be reserved in config what you use.
 # There is a note about enabling priority if we config multiple mq in this file

@@ -40,6 +40,8 @@ func newMinIOChunkManager(ctx context.Context, bucketName string) (*MinioChunkMa
 		SecretAccessKeyID(secretAccessKey),
 		UseSSL(useSSL),
 		BucketName(bucketName),
+		UseIAM(false),
+		IAMEndpoint(""),
 		CreateBucket(true),
 	)
 	return client, err

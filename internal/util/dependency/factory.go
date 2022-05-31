@@ -49,6 +49,8 @@ func (f *DefaultFactory) Init(params *paramtable.ComponentParam) {
 			storage.SecretAccessKeyID(params.MinioCfg.SecretAccessKey),
 			storage.UseSSL(params.MinioCfg.UseSSL),
 			storage.BucketName(params.MinioCfg.BucketName),
+			storage.UseIAM(params.MinioCfg.UseIAM),
+			storage.IAMEndpoint(params.MinioCfg.IAMEndpoint),
 			storage.CreateBucket(true))
 	}
 

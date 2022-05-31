@@ -43,6 +43,8 @@ const (
 	DefaultMinioSecretAccessKey = "minioadmin"
 	DefaultMinioUseSSL          = "false"
 	DefaultMinioBucketName      = "a-bucket"
+	DefaultMinioUseIAM          = "false"
+	DefaultMinioIAMEndpoint     = ""
 	DefaultEtcdEndpoints        = "localhost:2379"
 	DefaultInsertBufferSize     = "16777216"
 	DefaultEnvPrefix            = "milvus"
@@ -499,6 +501,18 @@ func (gp *BaseTable) loadMinioConfig() {
 		minioBucketName = gp.LoadWithDefault("minio.bucketName", DefaultMinioBucketName)
 	}
 	gp.Save("_MinioBucketName", minioBucketName)
+
+	minioUseIAM := os.Getenv("MINIO_USE_IAM")
+	if minioUseIAM == "" {
+		minioUseIAM = gp.LoadWithDefault("minio.useIAM", DefaultMinioUseIAM)
+	}
+	gp.Save("_MinioUseIAM", minioUseIAM)
+
+	minioIAMEndpoint := os.Getenv("MINIO_IAM_ENDPOINT")
+	if minioIAMEndpoint == "" {
+		minioIAMEndpoint = gp.LoadWithDefault("minio.iamEndpoint", DefaultMinioIAMEndpoint)
+	}
+	gp.Save("_MinioIAMEndpoint", minioIAMEndpoint)
 }
 
 func (gp *BaseTable) loadDataNodeConfig() {
