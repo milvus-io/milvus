@@ -18,7 +18,7 @@
 
 function install_linux_deps() {
   if [[ -x "$(command -v apt)" ]]; then
-      # for Ubuntu 18.04
+      # for Ubuntu 20.04
       sudo apt install -y g++ gcc make ccache libssl-dev zlib1g-dev libboost-regex-dev \
           libboost-program-options-dev libboost-system-dev libboost-filesystem-dev \
           libboost-serialization-dev python3-dev libboost-python-dev libcurl4-openssl-dev gfortran libtbb-dev

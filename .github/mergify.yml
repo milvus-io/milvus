@@ -30,8 +30,8 @@ pull_request_rules:
       - or:
         - base=master
         - base~=^2(\.\d+){2}$
-      - "status-success=Code Checker AMD64 Ubuntu 18.04"
-      - "status-success=Build and test AMD64 Ubuntu 18.04"
+      - "status-success=Code Checker AMD64 Ubuntu 20.04"
+      - "status-success=Build and test AMD64 Ubuntu 20.04"
       - "status-success=Code Checker MacOS 11"
       - "status-success=Code Checker CentOS 7"
       - "status-success=continuous-integration/jenkins/pr-merge"
@@ -83,8 +83,8 @@ pull_request_rules:
       - or:
         - base=master
         - base~=^2(\.\d+){2}$
-      - "status-success=Code Checker AMD64 Ubuntu 18.04"
-      - "status-success=Build and test AMD64 Ubuntu 18.04"
+      - "status-success=Code Checker AMD64 Ubuntu 20.04"
+      - "status-success=Build and test AMD64 Ubuntu 20.04"
       - "status-success=Code Checker MacOS 11"
       - "status-success=Code Checker CentOS 7"
       - -files~=^(?!internal\/.*_test\.go).*$
@@ -172,8 +172,8 @@ pull_request_rules:
         - base=master
         - base~=^2(\.\d+){2}$
       - title~=\[skip e2e\]
-      - "status-success=Code Checker AMD64 Ubuntu 18.04"
-      - "status-success=Build and test AMD64 Ubuntu 18.04"
+      - "status-success=Code Checker AMD64 Ubuntu 20.04"
+      - "status-success=Build and test AMD64 Ubuntu 20.04"
       - "status-success=Code Checker MacOS 11"
       - "status-success=Code Checker CentOS 7"
       - files~=^(?=.*((\.(go|h|cpp)|CMakeLists.txt))).*$
@@ -191,8 +191,8 @@ pull_request_rules:
         - base~=^2(\.\d+){2}$
       - files~=^(?=.*((\.(go|h|cpp)|CMakeLists.txt))).*$
       - or:
-        - "status-success!=Code Checker AMD64 Ubuntu 18.04"
-        - "status-success!=Build and test AMD64 Ubuntu 18.04" 
+        - "status-success!=Code Checker AMD64 Ubuntu 20.04"
+        - "status-success!=Build and test AMD64 Ubuntu 20.04"
         - "status-success!=Code Checker MacOS 11"    
         - "status-success!=Code Checker CentOS 7"
     actions:
@@ -231,8 +231,8 @@ pull_request_rules:
         - base=master
         - base~=^2(\.\d+){2}$
       - or:
-        - "check-failure=Code Checker AMD64 Ubuntu 18.04"
-        - "check-failure=Build and test AMD64 Ubuntu 18.04"       
+        - "check-failure=Code Checker AMD64 Ubuntu 20.04"
+        - "check-failure=Build and test AMD64 Ubuntu 20.04"
     actions:
       comment:
         message: |

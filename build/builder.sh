@@ -5,7 +5,7 @@ set -euo pipefail
 # Absolute path to the toplevel milvus directory.
 toplevel=$(dirname "$(cd "$(dirname "${0}")"; pwd)")
 
-export OS_NAME="${OS_NAME:-ubuntu18.04}"
+export OS_NAME="${OS_NAME:-ubuntu20.04}"
 
 pushd "${toplevel}"
 

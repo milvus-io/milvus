@@ -25,7 +25,7 @@ pipeline {
                 axes {
                     axis {
                         name 'OS_NAME'
-                        values 'ubuntu18.04', 'centos7'
+                        values 'ubuntu20.04', 'centos7'
                     }
 
                     axis {

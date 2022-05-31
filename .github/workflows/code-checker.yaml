@@ -32,29 +32,29 @@ jobs:
       fail-fast: false
       matrix:
         include:
-        - name: Code Checker AMD64 Ubuntu 18.04
-          os: ubuntu-18.04
+        - name: Code Checker AMD64 Ubuntu 20.04
+          os: ubuntu-20.04
         - name: Code Checker MacOS 11
           os: macos-11
     env:
-      UBUNTU: 18.04
+      UBUNTU: 20.04
     steps:
       - name: Checkout
         uses: actions/checkout@v2
       - name: Cache CCache Volumes
-        if: ${{  matrix.os == 'ubuntu-18.04' }}
+        if: ${{  matrix.os == 'ubuntu-20.04' }}
         uses: actions/cache@v3
         with:
-          path: .docker/amd64-ubuntu18.04-ccache
-          key: ubuntu18.04-ccache-${{ hashFiles('internal/core/**') }}
-          restore-keys: ubuntu18.04-ccache-
+          path: .docker/amd64-ubuntu20.04-ccache
+          key: ubuntu20.04-ccache-${{ hashFiles('internal/core/**') }}
+          restore-keys: ubuntu20.04-ccache-
       - name: Cache Third Party
-        if: ${{  matrix.os == 'ubuntu-18.04' }}
+        if: ${{  matrix.os == 'ubuntu-20.04' }}
         uses: actions/cache@v3
         with:
           path: .docker/thirdparty
-          key: ubuntu18.04-thirdparty-${{ hashFiles('internal/core/thirdparty/**') }}
-          restore-keys: ubuntu18.04-thirdparty-
+          key: ubuntu20.04-thirdparty-${{ hashFiles('internal/core/thirdparty/**') }}
+          restore-keys: ubuntu20.04-thirdparty-
       - name: Mac Cache Third Party
         if: ${{  matrix.os == 'macos-11' }}
         uses: actions/cache@v3
@@ -72,12 +72,12 @@ jobs:
           key: macos-11-ccache-${{ hashFiles('internal/core/**') }}
           restore-keys: macos-11-ccache-
       - name: Cache Go Mod Volumes
-        if: ${{  matrix.os == 'ubuntu-18.04' }}
+        if: ${{  matrix.os == 'ubuntu-20.04' }}
         uses: actions/cache@v3
         with:
-          path: .docker/amd64-ubuntu18.04-go-mod
-          key: ubuntu18.04-go-mod-${{ hashFiles('**/go.sum') }}
-          restore-keys: ubuntu18.04-go-mod-
+          path: .docker/amd64-ubuntu20.04-go-mod
+          key: ubuntu20.04-go-mod-${{ hashFiles('**/go.sum') }}
+          restore-keys: ubuntu20.04-go-mod-
       - name: Setup Go environment
         uses: actions/setup-go@v2.2.0
         if: ${{  matrix.os == 'macos-11' }}
@@ -91,7 +91,7 @@ jobs:
           key: macos-11-go-mod-${{ hashFiles('**/go.sum') }}
           restore-keys: macos-11-go-mod-
       - name: Code Check
-        if: ${{  matrix.os == 'ubuntu-18.04' }}
+        if: ${{  matrix.os == 'ubuntu-20.04' }}
         env:
           CHECK_BUILDER: "1"
         run: |
@@ -114,7 +114,7 @@ jobs:
   centos:
     name: Code Checker CentOS 7
     # Run in centos docker 
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
     timeout-minutes: 60
     steps:
       - name: Checkout

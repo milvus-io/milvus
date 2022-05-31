@@ -40,7 +40,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        ubuntu: [18.04]
+        ubuntu: [20.04]
     env:
       UBUNTU: ${{ matrix.ubuntu }}
     steps:

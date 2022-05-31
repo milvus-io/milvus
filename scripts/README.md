@@ -3,7 +3,7 @@
 ## Environment
 
 ```
-OS: Ubuntu 18.04
+OS: Ubuntu 20.04
 go：1.16
 cmake: >=3.18
 gcc： 7.5
