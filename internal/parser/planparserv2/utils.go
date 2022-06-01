@@ -306,7 +306,17 @@ func handleCompare(op planpb.OpType, left *ExprWithType, right *ExprWithType) (*
 	}
 }
 
+func relationalCompatible(t1, t2 schemapb.DataType) bool {
+	both := typeutil.IsStringType(t1) && typeutil.IsStringType(t2)
+	neither := !typeutil.IsStringType(t1) && !typeutil.IsStringType(t2)
+	return both || neither
+}
+
 func HandleCompare(op int, left, right *ExprWithType) (*planpb.Expr, error) {
+	if !relationalCompatible(left.dataType, right.dataType) {
+		return nil, fmt.Errorf("comparisons between string and non-string are not supported")
+	}
+
 	cmpOp := cmpOpMap[op]
 	if valueExpr := left.expr.GetValueExpr(); valueExpr != nil {
 		op, err := reverseOrder(cmpOp)

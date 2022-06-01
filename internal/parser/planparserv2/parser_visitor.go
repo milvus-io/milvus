@@ -396,7 +396,7 @@ func (v *ParserVisitor) VisitLike(ctx *parser.LikeContext) interface{} {
 	}
 
 	if !typeutil.IsStringType(leftExpr.dataType) {
-		return fmt.Errorf("like operation on non-text field is unsupported")
+		return fmt.Errorf("like operation on non-string field is unsupported")
 	}
 
 	column := toColumnInfo(leftExpr)
