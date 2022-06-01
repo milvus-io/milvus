@@ -2,14 +2,15 @@ package kafka
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/log"
+	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"go.uber.org/zap"
 
-	"github.com/confluentinc/confluent-kafka-go/kafka"
+	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 )
 
@@ -37,7 +38,7 @@ func (kp *kafkaProducer) Send(ctx context.Context, message *mqwrapper.ProducerMe
 	e, ok := <-kp.deliveryChan
 	if !ok {
 		log.Error("kafka produce message fail because of delivery chan is closed", zap.String("topic", kp.topic))
-		return nil, errors.New("delivery chan of kafka producer is closed")
+		return nil, common.NewIgnorableError(fmt.Errorf("delivery chan of kafka producer is closed"))
 	}
 
 	m := e.(*kafka.Message)
