@@ -768,39 +768,6 @@ func (qc *QueryCoord) ReleasePartitions(ctx context.Context, req *querypb.Releas
 	return status, nil
 }
 
-// CreateQueryChannel assigns unique querychannel and resultchannel to the specified collecion
-func (qc *QueryCoord) CreateQueryChannel(ctx context.Context, req *querypb.CreateQueryChannelRequest) (*querypb.CreateQueryChannelResponse, error) {
-	log.Debug("createQueryChannelRequest received",
-		zap.String("role", typeutil.QueryCoordRole),
-		zap.Int64("collectionID", req.CollectionID))
-
-	status := &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}
-	if qc.stateCode.Load() != internalpb.StateCode_Healthy {
-		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-		err := errors.New("QueryCoord is not healthy")
-		status.Reason = err.Error()
-		log.Error("createQueryChannel failed", zap.String("role", typeutil.QueryCoordRole), zap.Error(err))
-		return &querypb.CreateQueryChannelResponse{
-			Status: status,
-		}, nil
-	}
-
-	collectionID := req.CollectionID
-	info := qc.meta.getQueryChannelInfoByID(collectionID)
-	log.Debug("createQueryChannelRequest completed",
-		zap.String("role", typeutil.QueryCoordRole),
-		zap.Int64("collectionID", collectionID),
-		zap.String("request channel", info.QueryChannel),
-		zap.String("result channel", info.QueryResultChannel))
-	return &querypb.CreateQueryChannelResponse{
-		Status:             status,
-		QueryChannel:       info.QueryChannel,
-		QueryResultChannel: info.QueryResultChannel,
-	}, nil
-}
-
 // GetPartitionStates returns state of the partition, including notExist, notPresent, onDisk, partitionInMemory, inMemory, partitionInGPU, InGPU
 func (qc *QueryCoord) GetPartitionStates(ctx context.Context, req *querypb.GetPartitionStatesRequest) (*querypb.GetPartitionStatesResponse, error) {
 	log.Info("getPartitionStatesRequest received",
@@ -1205,7 +1172,7 @@ func (qc *QueryCoord) GetShardLeaders(ctx context.Context, req *querypb.GetShard
 	if len(shardLeaderLists) == 0 {
 		return &querypb.GetShardLeadersResponse{
 			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				ErrorCode: commonpb.ErrorCode_NoReplicaAvailable,
 				Reason:    "no replica available",
 			},
 		}, nil

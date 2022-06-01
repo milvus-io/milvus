@@ -41,8 +41,7 @@ type queryShard struct {
 	clusterService *ShardClusterService
 
 	tSafeReplica TSafeReplicaInterface
-	historical   ReplicaInterface
-	streaming    ReplicaInterface
+	metaReplica  ReplicaInterface
 
 	vectorChunkManager *storage.VectorChunkManager
 	localCacheEnabled  bool
@@ -55,15 +54,14 @@ func newQueryShard(
 	channel Channel,
 	replicaID int64,
 	clusterService *ShardClusterService,
-	historical ReplicaInterface,
-	streaming ReplicaInterface,
+	metaReplica ReplicaInterface,
 	tSafeReplica TSafeReplicaInterface,
 	localChunkManager storage.ChunkManager,
 	remoteChunkManager storage.ChunkManager,
 	localCacheEnabled bool,
 ) (*queryShard, error) {
 
-	collection, err := streaming.getCollectionByID(collectionID)
+	collection, err := metaReplica.getCollectionByID(collectionID)
 	if err != nil {
 		return nil, err
 	}
@@ -91,8 +89,7 @@ func newQueryShard(
 		channel:            channel,
 		replicaID:          replicaID,
 		clusterService:     clusterService,
-		historical:         historical,
-		streaming:          streaming,
+		metaReplica:        metaReplica,
 		vectorChunkManager: vectorChunkManager,
 		tSafeReplica:       tSafeReplica,
 	}
@@ -127,15 +124,7 @@ func (tp tsType) String() string {
 	return ""
 }
 
-func (q *queryShard) getServiceableTime(tp tsType) (Timestamp, error) {
-	var channel string
-	switch tp {
-	case tsTypeDML:
-		channel = q.channel
-	case tsTypeDelta:
-		channel = q.deltaChannel
-	}
-
+func (q *queryShard) getServiceableTime(channel Channel) (Timestamp, error) {
 	ts, err := q.tSafeReplica.getTSafe(channel)
 	if err != nil {
 		return 0, err

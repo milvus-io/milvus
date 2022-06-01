@@ -47,23 +47,18 @@ func benchmarkQueryCollectionSearch(nq int64, b *testing.B) {
 	assert.NoError(b, err)
 
 	// search only one segment
-	err = queryShardObj.streaming.removeSegment(defaultSegmentID)
-	assert.NoError(b, err)
-	err = queryShardObj.historical.removeSegment(defaultSegmentID)
-	assert.NoError(b, err)
-
-	assert.Equal(b, 0, queryShardObj.historical.getSegmentNum())
-	assert.Equal(b, 0, queryShardObj.streaming.getSegmentNum())
+	assert.Equal(b, 0, queryShardObj.metaReplica.getSegmentNum(segmentTypeSealed))
+	assert.Equal(b, 0, queryShardObj.metaReplica.getSegmentNum(segmentTypeGrowing))
 
 	segment, err := genSimpleSealedSegment(nb)
 	assert.NoError(b, err)
-	err = queryShardObj.historical.setSegment(segment)
+	err = queryShardObj.metaReplica.setSegment(segment)
 	assert.NoError(b, err)
 
 	// segment check
-	assert.Equal(b, 1, queryShardObj.historical.getSegmentNum())
-	assert.Equal(b, 0, queryShardObj.streaming.getSegmentNum())
-	seg, err := queryShardObj.historical.getSegmentByID(defaultSegmentID)
+	assert.Equal(b, 1, queryShardObj.metaReplica.getSegmentNum(segmentTypeSealed))
+	assert.Equal(b, 0, queryShardObj.metaReplica.getSegmentNum(segmentTypeGrowing))
+	seg, err := queryShardObj.metaReplica.getSegmentByID(defaultSegmentID, segmentTypeSealed)
 	assert.NoError(b, err)
 	assert.Equal(b, int64(nb), seg.getRowCount())
 
@@ -75,7 +70,7 @@ func benchmarkQueryCollectionSearch(nq int64, b *testing.B) {
 
 	// warming up
 
-	collection, err := queryShardObj.historical.getCollectionByID(defaultCollectionID)
+	collection, err := queryShardObj.metaReplica.getCollectionByID(defaultCollectionID)
 	assert.NoError(b, err)
 
 	iReq, _ := genSearchRequest(nq, IndexFaissIDMap, collection.schema)
@@ -89,7 +84,7 @@ func benchmarkQueryCollectionSearch(nq int64, b *testing.B) {
 	searchReq, err := newSearchRequest(collection, queryReq, queryReq.Req.GetPlaceholderGroup())
 	assert.NoError(b, err)
 	for j := 0; j < 10000; j++ {
-		_, _, _, err := searchHistorical(queryShardObj.historical, searchReq, defaultCollectionID, nil, queryReq.GetSegmentIDs())
+		_, _, _, err := searchHistorical(queryShardObj.metaReplica, searchReq, defaultCollectionID, nil, queryReq.GetSegmentIDs())
 		assert.NoError(b, err)
 	}
 
@@ -113,7 +108,7 @@ func benchmarkQueryCollectionSearch(nq int64, b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for j := int64(0); j < benchmarkMaxNQ/nq; j++ {
-			_, _, _, err := searchHistorical(queryShardObj.historical, searchReq, defaultCollectionID, nil, queryReq.GetSegmentIDs())
+			_, _, _, err := searchHistorical(queryShardObj.metaReplica, searchReq, defaultCollectionID, nil, queryReq.GetSegmentIDs())
 			assert.NoError(b, err)
 		}
 	}
@@ -128,25 +123,20 @@ func benchmarkQueryCollectionSearchIndex(nq int64, indexType string, b *testing.
 	queryShardObj, err := genSimpleQueryShard(tx)
 	assert.NoError(b, err)
 
-	err = queryShardObj.historical.removeSegment(defaultSegmentID)
-	assert.NoError(b, err)
-	err = queryShardObj.streaming.removeSegment(defaultSegmentID)
-	assert.NoError(b, err)
-
-	assert.Equal(b, 0, queryShardObj.historical.getSegmentNum())
-	assert.Equal(b, 0, queryShardObj.streaming.getSegmentNum())
+	assert.Equal(b, 0, queryShardObj.metaReplica.getSegmentNum(segmentTypeSealed))
+	assert.Equal(b, 0, queryShardObj.metaReplica.getSegmentNum(segmentTypeGrowing))
 
 	node, err := genSimpleQueryNode(tx)
 	assert.NoError(b, err)
-	node.loader.historicalReplica = queryShardObj.historical
+	node.loader.metaReplica = queryShardObj.metaReplica
 
 	err = loadIndexForSegment(tx, node, defaultSegmentID, nb, indexType, L2, schemapb.DataType_Int64)
 	assert.NoError(b, err)
 
 	// segment check
-	assert.Equal(b, 1, queryShardObj.historical.getSegmentNum())
-	assert.Equal(b, 0, queryShardObj.streaming.getSegmentNum())
-	seg, err := queryShardObj.historical.getSegmentByID(defaultSegmentID)
+	assert.Equal(b, 1, queryShardObj.metaReplica.getSegmentNum(segmentTypeSealed))
+	assert.Equal(b, 0, queryShardObj.metaReplica.getSegmentNum(segmentTypeGrowing))
+	seg, err := queryShardObj.metaReplica.getSegmentByID(defaultSegmentID, segmentTypeSealed)
 	assert.NoError(b, err)
 	assert.Equal(b, int64(nb), seg.getRowCount())
 	//TODO:: check string data in segcore
@@ -156,14 +146,14 @@ func benchmarkQueryCollectionSearchIndex(nq int64, indexType string, b *testing.
 	//assert.Equal(b, seg.getMemSize(), int64(expectSize))
 
 	// warming up
-	collection, err := queryShardObj.historical.getCollectionByID(defaultCollectionID)
+	collection, err := queryShardObj.metaReplica.getCollectionByID(defaultCollectionID)
 	assert.NoError(b, err)
 
 	//ollection *Collection, indexType string, nq int32
 
 	searchReq, _ := genSearchPlanAndRequests(collection, indexType, nq)
 	for j := 0; j < 10000; j++ {
-		_, _, _, err := searchHistorical(queryShardObj.historical, searchReq, defaultCollectionID, nil, []UniqueID{defaultSegmentID})
+		_, _, _, err := searchHistorical(queryShardObj.metaReplica, searchReq, defaultCollectionID, nil, []UniqueID{defaultSegmentID})
 		assert.NoError(b, err)
 	}
 
@@ -188,7 +178,7 @@ func benchmarkQueryCollectionSearchIndex(nq int64, indexType string, b *testing.
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for j := 0; j < benchmarkMaxNQ/int(nq); j++ {
-			_, _, _, err := searchHistorical(queryShardObj.historical, searchReq, defaultCollectionID, nil, []UniqueID{defaultSegmentID})
+			_, _, _, err := searchHistorical(queryShardObj.metaReplica, searchReq, defaultCollectionID, nil, []UniqueID{defaultSegmentID})
 			assert.NoError(b, err)
 		}
 	}

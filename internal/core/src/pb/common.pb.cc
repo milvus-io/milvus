@@ -17,6 +17,7 @@
 #include <google/protobuf/port_def.inc>
 extern PROTOBUF_INTERNAL_EXPORT_common_2eproto ::PROTOBUF_NAMESPACE_ID::internal::SCCInfo<0> scc_info_MsgBase_common_2eproto;
 extern PROTOBUF_INTERNAL_EXPORT_common_2eproto ::PROTOBUF_NAMESPACE_ID::internal::SCCInfo<0> scc_info_PlaceholderValue_common_2eproto;
+extern PROTOBUF_INTERNAL_EXPORT_common_2eproto ::PROTOBUF_NAMESPACE_ID::internal::SCCInfo<0> scc_info_PrivilegeExt_common_2eproto;
 namespace milvus {
 namespace proto {
 namespace common {
@@ -60,6 +61,10 @@ class DMLMsgHeaderDefaultTypeInternal {
  public:
   ::PROTOBUF_NAMESPACE_ID::internal::ExplicitlyConstructed<DMLMsgHeader> _instance;
 } _DMLMsgHeader_default_instance_;
+class PrivilegeExtDefaultTypeInternal {
+ public:
+  ::PROTOBUF_NAMESPACE_ID::internal::ExplicitlyConstructed<PrivilegeExt> _instance;
+} _PrivilegeExt_default_instance_;
 }  // namespace common
 }  // namespace proto
 }  // namespace milvus
@@ -192,6 +197,20 @@ static void InitDefaultsscc_info_PlaceholderValue_common_2eproto() {
 ::PROTOBUF_NAMESPACE_ID::internal::SCCInfo<0> scc_info_PlaceholderValue_common_2eproto =
     {{ATOMIC_VAR_INIT(::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase::kUninitialized), 0, InitDefaultsscc_info_PlaceholderValue_common_2eproto}, {}};
 
+static void InitDefaultsscc_info_PrivilegeExt_common_2eproto() {
+  GOOGLE_PROTOBUF_VERIFY_VERSION;
+
+  {
+    void* ptr = &::milvus::proto::common::_PrivilegeExt_default_instance_;
+    new (ptr) ::milvus::proto::common::PrivilegeExt();
+    ::PROTOBUF_NAMESPACE_ID::internal::OnShutdownDestroyMessage(ptr);
+  }
+  ::milvus::proto::common::PrivilegeExt::InitAsDefaultInstance();
+}
+
+::PROTOBUF_NAMESPACE_ID::internal::SCCInfo<0> scc_info_PrivilegeExt_common_2eproto =
+    {{ATOMIC_VAR_INIT(::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase::kUninitialized), 0, InitDefaultsscc_info_PrivilegeExt_common_2eproto}, {}};
+
 static void InitDefaultsscc_info_Status_common_2eproto() {
   GOOGLE_PROTOBUF_VERIFY_VERSION;
 
@@ -206,8 +225,8 @@ static void InitDefaultsscc_info_Status_common_2eproto() {
 ::PROTOBUF_NAMESPACE_ID::internal::SCCInfo<0> scc_info_Status_common_2eproto =
     {{ATOMIC_VAR_INIT(::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase::kUninitialized), 0, InitDefaultsscc_info_Status_common_2eproto}, {}};
 
-static ::PROTOBUF_NAMESPACE_ID::Metadata file_level_metadata_common_2eproto[10];
-static const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* file_level_enum_descriptors_common_2eproto[9];
+static ::PROTOBUF_NAMESPACE_ID::Metadata file_level_metadata_common_2eproto[11];
+static const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* file_level_enum_descriptors_common_2eproto[11];
 static constexpr ::PROTOBUF_NAMESPACE_ID::ServiceDescriptor const** file_level_service_descriptors_common_2eproto = nullptr;
 
 const ::PROTOBUF_NAMESPACE_ID::uint32 TableStruct_common_2eproto::offsets[] PROTOBUF_SECTION_VARIABLE(protodesc_cold) = {
@@ -281,6 +300,14 @@ const ::PROTOBUF_NAMESPACE_ID::uint32 TableStruct_common_2eproto::offsets[] PROT
   ~0u,  // no _weak_field_map_
   PROTOBUF_FIELD_OFFSET(::milvus::proto::common::DMLMsgHeader, base_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::common::DMLMsgHeader, shardname_),
+  ~0u,  // no _has_bits_
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::common::PrivilegeExt, _internal_metadata_),
+  ~0u,  // no _extensions_
+  ~0u,  // no _oneof_case_
+  ~0u,  // no _weak_field_map_
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::common::PrivilegeExt, resource_type_),
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::common::PrivilegeExt, resource_privilege_),
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::common::PrivilegeExt, resource_name_index_),
 };
 static const ::PROTOBUF_NAMESPACE_ID::internal::MigrationSchema schemas[] PROTOBUF_SECTION_VARIABLE(protodesc_cold) = {
   { 0, -1, sizeof(::milvus::proto::common::Status)},
@@ -293,6 +320,7 @@ static const ::PROTOBUF_NAMESPACE_ID::internal::MigrationSchema schemas[] PROTOB
   { 48, -1, sizeof(::milvus::proto::common::MsgBase)},
   { 57, -1, sizeof(::milvus::proto::common::MsgHeader)},
   { 63, -1, sizeof(::milvus::proto::common::DMLMsgHeader)},
+  { 70, -1, sizeof(::milvus::proto::common::PrivilegeExt)},
 };
 
 static ::PROTOBUF_NAMESPACE_ID::Message const * const file_default_instances[] = {
@@ -306,104 +334,132 @@ static ::PROTOBUF_NAMESPACE_ID::Message const * const file_default_instances[] =
   reinterpret_cast<const ::PROTOBUF_NAMESPACE_ID::Message*>(&::milvus::proto::common::_MsgBase_default_instance_),
   reinterpret_cast<const ::PROTOBUF_NAMESPACE_ID::Message*>(&::milvus::proto::common::_MsgHeader_default_instance_),
   reinterpret_cast<const ::PROTOBUF_NAMESPACE_ID::Message*>(&::milvus::proto::common::_DMLMsgHeader_default_instance_),
+  reinterpret_cast<const ::PROTOBUF_NAMESPACE_ID::Message*>(&::milvus::proto::common::_PrivilegeExt_default_instance_),
 };
 
 const char descriptor_table_protodef_common_2eproto[] PROTOBUF_SECTION_VARIABLE(protodesc_cold) =
-  "\n\014common.proto\022\023milvus.proto.common\"L\n\006S"
-  "tatus\0222\n\nerror_code\030\001 \001(\0162\036.milvus.proto"
-  ".common.ErrorCode\022\016\n\006reason\030\002 \001(\t\"*\n\014Key"
-  "ValuePair\022\013\n\003key\030\001 \001(\t\022\r\n\005value\030\002 \001(\t\"(\n"
-  "\013KeyDataPair\022\013\n\003key\030\001 \001(\t\022\014\n\004data\030\002 \001(\014\""
-  "\025\n\004Blob\022\r\n\005value\030\001 \001(\014\"c\n\020PlaceholderVal"
-  "ue\022\013\n\003tag\030\001 \001(\t\0222\n\004type\030\002 \001(\0162$.milvus.p"
-  "roto.common.PlaceholderType\022\016\n\006values\030\003 "
-  "\003(\014\"O\n\020PlaceholderGroup\022;\n\014placeholders\030"
-  "\001 \003(\0132%.milvus.proto.common.PlaceholderV"
-  "alue\"#\n\007Address\022\n\n\002ip\030\001 \001(\t\022\014\n\004port\030\002 \001("
-  "\003\"m\n\007MsgBase\022.\n\010msg_type\030\001 \001(\0162\034.milvus."
-  "proto.common.MsgType\022\r\n\005msgID\030\002 \001(\003\022\021\n\tt"
-  "imestamp\030\003 \001(\004\022\020\n\010sourceID\030\004 \001(\003\"7\n\tMsgH"
-  "eader\022*\n\004base\030\001 \001(\0132\034.milvus.proto.commo"
-  "n.MsgBase\"M\n\014DMLMsgHeader\022*\n\004base\030\001 \001(\0132"
-  "\034.milvus.proto.common.MsgBase\022\021\n\tshardNa"
-  "me\030\002 \001(\t*\222\006\n\tErrorCode\022\013\n\007Success\020\000\022\023\n\017U"
-  "nexpectedError\020\001\022\021\n\rConnectFailed\020\002\022\024\n\020P"
-  "ermissionDenied\020\003\022\027\n\023CollectionNotExists"
-  "\020\004\022\023\n\017IllegalArgument\020\005\022\024\n\020IllegalDimens"
-  "ion\020\007\022\024\n\020IllegalIndexType\020\010\022\031\n\025IllegalCo"
-  "llectionName\020\t\022\017\n\013IllegalTOPK\020\n\022\024\n\020Illeg"
-  "alRowRecord\020\013\022\023\n\017IllegalVectorID\020\014\022\027\n\023Il"
-  "legalSearchResult\020\r\022\020\n\014FileNotFound\020\016\022\016\n"
-  "\nMetaFailed\020\017\022\017\n\013CacheFailed\020\020\022\026\n\022Cannot"
-  "CreateFolder\020\021\022\024\n\020CannotCreateFile\020\022\022\026\n\022"
-  "CannotDeleteFolder\020\023\022\024\n\020CannotDeleteFile"
-  "\020\024\022\023\n\017BuildIndexError\020\025\022\020\n\014IllegalNLIST\020"
-  "\026\022\025\n\021IllegalMetricType\020\027\022\017\n\013OutOfMemory\020"
-  "\030\022\021\n\rIndexNotExist\020\031\022\023\n\017EmptyCollection\020"
-  "\032\022\033\n\027UpdateImportTaskFailure\020\033\022\032\n\026Collec"
-  "tionNameNotFound\020\034\022\033\n\027CreateCredentialFa"
-  "ilure\020\035\022\033\n\027UpdateCredentialFailure\020\036\022\033\n\027"
-  "DeleteCredentialFailure\020\037\022\030\n\024GetCredenti"
-  "alFailure\020 \022\030\n\024ListCredUsersFailure\020!\022\022\n"
-  "\016NotShardLeader\020\"\022\022\n\rDDRequestRace\020\350\007*X\n"
-  "\nIndexState\022\022\n\016IndexStateNone\020\000\022\014\n\010Uniss"
-  "ued\020\001\022\016\n\nInProgress\020\002\022\014\n\010Finished\020\003\022\n\n\006F"
-  "ailed\020\004*\202\001\n\014SegmentState\022\024\n\020SegmentState"
-  "None\020\000\022\014\n\010NotExist\020\001\022\013\n\007Growing\020\002\022\n\n\006Sea"
-  "led\020\003\022\013\n\007Flushed\020\004\022\014\n\010Flushing\020\005\022\013\n\007Drop"
-  "ped\020\006\022\r\n\tImporting\020\007*>\n\017PlaceholderType\022"
-  "\010\n\004None\020\000\022\020\n\014BinaryVector\020d\022\017\n\013FloatVect"
-  "or\020e*\362\n\n\007MsgType\022\r\n\tUndefined\020\000\022\024\n\020Creat"
-  "eCollection\020d\022\022\n\016DropCollection\020e\022\021\n\rHas"
-  "Collection\020f\022\026\n\022DescribeCollection\020g\022\023\n\017"
-  "ShowCollections\020h\022\024\n\020GetSystemConfigs\020i\022"
-  "\022\n\016LoadCollection\020j\022\025\n\021ReleaseCollection"
-  "\020k\022\017\n\013CreateAlias\020l\022\r\n\tDropAlias\020m\022\016\n\nAl"
-  "terAlias\020n\022\024\n\017CreatePartition\020\310\001\022\022\n\rDrop"
-  "Partition\020\311\001\022\021\n\014HasPartition\020\312\001\022\026\n\021Descr"
-  "ibePartition\020\313\001\022\023\n\016ShowPartitions\020\314\001\022\023\n\016"
-  "LoadPartitions\020\315\001\022\026\n\021ReleasePartitions\020\316"
-  "\001\022\021\n\014ShowSegments\020\372\001\022\024\n\017DescribeSegment\020"
-  "\373\001\022\021\n\014LoadSegments\020\374\001\022\024\n\017ReleaseSegments"
-  "\020\375\001\022\024\n\017HandoffSegments\020\376\001\022\030\n\023LoadBalance"
-  "Segments\020\377\001\022\025\n\020DescribeSegments\020\200\002\022\020\n\013Cr"
-  "eateIndex\020\254\002\022\022\n\rDescribeIndex\020\255\002\022\016\n\tDrop"
-  "Index\020\256\002\022\013\n\006Insert\020\220\003\022\013\n\006Delete\020\221\003\022\n\n\005Fl"
-  "ush\020\222\003\022\027\n\022ResendSegmentStats\020\223\003\022\013\n\006Searc"
-  "h\020\364\003\022\021\n\014SearchResult\020\365\003\022\022\n\rGetIndexState"
-  "\020\366\003\022\032\n\025GetIndexBuildProgress\020\367\003\022\034\n\027GetCo"
-  "llectionStatistics\020\370\003\022\033\n\026GetPartitionSta"
-  "tistics\020\371\003\022\r\n\010Retrieve\020\372\003\022\023\n\016RetrieveRes"
-  "ult\020\373\003\022\024\n\017WatchDmChannels\020\374\003\022\025\n\020RemoveDm"
-  "Channels\020\375\003\022\027\n\022WatchQueryChannels\020\376\003\022\030\n\023"
-  "RemoveQueryChannels\020\377\003\022\035\n\030SealedSegments"
-  "ChangeInfo\020\200\004\022\027\n\022WatchDeltaChannels\020\201\004\022\024"
-  "\n\017GetShardLeaders\020\202\004\022\020\n\013GetReplicas\020\203\004\022\020"
-  "\n\013SegmentInfo\020\330\004\022\017\n\nSystemInfo\020\331\004\022\024\n\017Get"
-  "RecoveryInfo\020\332\004\022\024\n\017GetSegmentState\020\333\004\022\r\n"
-  "\010TimeTick\020\260\t\022\023\n\016QueryNodeStats\020\261\t\022\016\n\tLoa"
-  "dIndex\020\262\t\022\016\n\tRequestID\020\263\t\022\017\n\nRequestTSO\020"
-  "\264\t\022\024\n\017AllocateSegment\020\265\t\022\026\n\021SegmentStati"
-  "stics\020\266\t\022\025\n\020SegmentFlushDone\020\267\t\022\017\n\nDataN"
-  "odeTt\020\270\t\022\025\n\020CreateCredential\020\334\013\022\022\n\rGetCr"
-  "edential\020\335\013\022\025\n\020DeleteCredential\020\336\013\022\025\n\020Up"
-  "dateCredential\020\337\013\022\026\n\021ListCredUsernames\020\340"
-  "\013*\"\n\007DslType\022\007\n\003Dsl\020\000\022\016\n\nBoolExprV1\020\001*B\n"
-  "\017CompactionState\022\021\n\rUndefiedState\020\000\022\r\n\tE"
-  "xecuting\020\001\022\r\n\tCompleted\020\002*X\n\020Consistency"
-  "Level\022\n\n\006Strong\020\000\022\013\n\007Session\020\001\022\013\n\007Bounde"
-  "d\020\002\022\016\n\nEventually\020\003\022\016\n\nCustomized\020\004*\227\001\n\013"
-  "ImportState\022\021\n\rImportPending\020\000\022\020\n\014Import"
-  "Failed\020\001\022\021\n\rImportStarted\020\002\022\024\n\020ImportDow"
-  "nloaded\020\003\022\020\n\014ImportParsed\020\004\022\023\n\017ImportPer"
-  "sisted\020\005\022\023\n\017ImportCompleted\020\006BW\n\016io.milv"
-  "us.grpcB\013CommonProtoP\001Z3github.com/milvu"
-  "s-io/milvus/internal/proto/commonpb\240\001\001b\006"
-  "proto3"
+  "\n\014common.proto\022\023milvus.proto.common\032 goo"
+  "gle/protobuf/descriptor.proto\"L\n\006Status\022"
+  "2\n\nerror_code\030\001 \001(\0162\036.milvus.proto.commo"
+  "n.ErrorCode\022\016\n\006reason\030\002 \001(\t\"*\n\014KeyValueP"
+  "air\022\013\n\003key\030\001 \001(\t\022\r\n\005value\030\002 \001(\t\"(\n\013KeyDa"
+  "taPair\022\013\n\003key\030\001 \001(\t\022\014\n\004data\030\002 \001(\014\"\025\n\004Blo"
+  "b\022\r\n\005value\030\001 \001(\014\"c\n\020PlaceholderValue\022\013\n\003"
+  "tag\030\001 \001(\t\0222\n\004type\030\002 \001(\0162$.milvus.proto.c"
+  "ommon.PlaceholderType\022\016\n\006values\030\003 \003(\014\"O\n"
+  "\020PlaceholderGroup\022;\n\014placeholders\030\001 \003(\0132"
+  "%.milvus.proto.common.PlaceholderValue\"#"
+  "\n\007Address\022\n\n\002ip\030\001 \001(\t\022\014\n\004port\030\002 \001(\003\"m\n\007M"
+  "sgBase\022.\n\010msg_type\030\001 \001(\0162\034.milvus.proto."
+  "common.MsgType\022\r\n\005msgID\030\002 \001(\003\022\021\n\ttimesta"
+  "mp\030\003 \001(\004\022\020\n\010sourceID\030\004 \001(\003\"7\n\tMsgHeader\022"
+  "*\n\004base\030\001 \001(\0132\034.milvus.proto.common.MsgB"
+  "ase\"M\n\014DMLMsgHeader\022*\n\004base\030\001 \001(\0132\034.milv"
+  "us.proto.common.MsgBase\022\021\n\tshardName\030\002 \001"
+  "(\t\"\251\001\n\014PrivilegeExt\0228\n\rresource_type\030\001 \001"
+  "(\0162!.milvus.proto.common.ResourceType\022B\n"
+  "\022resource_privilege\030\002 \001(\0162&.milvus.proto"
+  ".common.ResourcePrivilege\022\033\n\023resource_na"
+  "me_index\030\003 \001(\005*\276\010\n\tErrorCode\022\013\n\007Success\020"
+  "\000\022\023\n\017UnexpectedError\020\001\022\021\n\rConnectFailed\020"
+  "\002\022\024\n\020PermissionDenied\020\003\022\027\n\023CollectionNot"
+  "Exists\020\004\022\023\n\017IllegalArgument\020\005\022\024\n\020Illegal"
+  "Dimension\020\007\022\024\n\020IllegalIndexType\020\010\022\031\n\025Ill"
+  "egalCollectionName\020\t\022\017\n\013IllegalTOPK\020\n\022\024\n"
+  "\020IllegalRowRecord\020\013\022\023\n\017IllegalVectorID\020\014"
+  "\022\027\n\023IllegalSearchResult\020\r\022\020\n\014FileNotFoun"
+  "d\020\016\022\016\n\nMetaFailed\020\017\022\017\n\013CacheFailed\020\020\022\026\n\022"
+  "CannotCreateFolder\020\021\022\024\n\020CannotCreateFile"
+  "\020\022\022\026\n\022CannotDeleteFolder\020\023\022\024\n\020CannotDele"
+  "teFile\020\024\022\023\n\017BuildIndexError\020\025\022\020\n\014Illegal"
+  "NLIST\020\026\022\025\n\021IllegalMetricType\020\027\022\017\n\013OutOfM"
+  "emory\020\030\022\021\n\rIndexNotExist\020\031\022\023\n\017EmptyColle"
+  "ction\020\032\022\033\n\027UpdateImportTaskFailure\020\033\022\032\n\026"
+  "CollectionNameNotFound\020\034\022\033\n\027CreateCreden"
+  "tialFailure\020\035\022\033\n\027UpdateCredentialFailure"
+  "\020\036\022\033\n\027DeleteCredentialFailure\020\037\022\030\n\024GetCr"
+  "edentialFailure\020 \022\030\n\024ListCredUsersFailur"
+  "e\020!\022\022\n\016GetUserFailure\020\"\022\025\n\021CreateRoleFai"
+  "lure\020#\022\023\n\017DropRoleFailure\020$\022\032\n\026OperateUs"
+  "erRoleFailure\020%\022\025\n\021SelectRoleFailure\020&\022\025"
+  "\n\021SelectUserFailure\020\'\022\031\n\025SelectResourceF"
+  "ailure\020(\022\033\n\027OperatePrivilegeFailure\020)\022\026\n"
+  "\022SelectGrantFailure\020*\022!\n\035RefreshPolicyIn"
+  "foCacheFailure\020+\022\025\n\021ListPolicyFailure\020,\022"
+  "\022\n\016NotShardLeader\020-\022\026\n\022NoReplicaAvailabl"
+  "e\020.\022\022\n\rDDRequestRace\020\350\007*X\n\nIndexState\022\022\n"
+  "\016IndexStateNone\020\000\022\014\n\010Unissued\020\001\022\016\n\nInPro"
+  "gress\020\002\022\014\n\010Finished\020\003\022\n\n\006Failed\020\004*\202\001\n\014Se"
+  "gmentState\022\024\n\020SegmentStateNone\020\000\022\014\n\010NotE"
+  "xist\020\001\022\013\n\007Growing\020\002\022\n\n\006Sealed\020\003\022\013\n\007Flush"
+  "ed\020\004\022\014\n\010Flushing\020\005\022\013\n\007Dropped\020\006\022\r\n\tImpor"
+  "ting\020\007*>\n\017PlaceholderType\022\010\n\004None\020\000\022\020\n\014B"
+  "inaryVector\020d\022\017\n\013FloatVector\020e*\266\014\n\007MsgTy"
+  "pe\022\r\n\tUndefined\020\000\022\024\n\020CreateCollection\020d\022"
+  "\022\n\016DropCollection\020e\022\021\n\rHasCollection\020f\022\026"
+  "\n\022DescribeCollection\020g\022\023\n\017ShowCollection"
+  "s\020h\022\024\n\020GetSystemConfigs\020i\022\022\n\016LoadCollect"
+  "ion\020j\022\025\n\021ReleaseCollection\020k\022\017\n\013CreateAl"
+  "ias\020l\022\r\n\tDropAlias\020m\022\016\n\nAlterAlias\020n\022\024\n\017"
+  "CreatePartition\020\310\001\022\022\n\rDropPartition\020\311\001\022\021"
+  "\n\014HasPartition\020\312\001\022\026\n\021DescribePartition\020\313"
+  "\001\022\023\n\016ShowPartitions\020\314\001\022\023\n\016LoadPartitions"
+  "\020\315\001\022\026\n\021ReleasePartitions\020\316\001\022\021\n\014ShowSegme"
+  "nts\020\372\001\022\024\n\017DescribeSegment\020\373\001\022\021\n\014LoadSegm"
+  "ents\020\374\001\022\024\n\017ReleaseSegments\020\375\001\022\024\n\017Handoff"
+  "Segments\020\376\001\022\030\n\023LoadBalanceSegments\020\377\001\022\025\n"
+  "\020DescribeSegments\020\200\002\022\020\n\013CreateIndex\020\254\002\022\022"
+  "\n\rDescribeIndex\020\255\002\022\016\n\tDropIndex\020\256\002\022\013\n\006In"
+  "sert\020\220\003\022\013\n\006Delete\020\221\003\022\n\n\005Flush\020\222\003\022\027\n\022Rese"
+  "ndSegmentStats\020\223\003\022\013\n\006Search\020\364\003\022\021\n\014Search"
+  "Result\020\365\003\022\022\n\rGetIndexState\020\366\003\022\032\n\025GetInde"
+  "xBuildProgress\020\367\003\022\034\n\027GetCollectionStatis"
+  "tics\020\370\003\022\033\n\026GetPartitionStatistics\020\371\003\022\r\n\010"
+  "Retrieve\020\372\003\022\023\n\016RetrieveResult\020\373\003\022\024\n\017Watc"
+  "hDmChannels\020\374\003\022\025\n\020RemoveDmChannels\020\375\003\022\027\n"
+  "\022WatchQueryChannels\020\376\003\022\030\n\023RemoveQueryCha"
+  "nnels\020\377\003\022\035\n\030SealedSegmentsChangeInfo\020\200\004\022"
+  "\027\n\022WatchDeltaChannels\020\201\004\022\024\n\017GetShardLead"
+  "ers\020\202\004\022\020\n\013GetReplicas\020\203\004\022\020\n\013SegmentInfo\020"
+  "\330\004\022\017\n\nSystemInfo\020\331\004\022\024\n\017GetRecoveryInfo\020\332"
+  "\004\022\024\n\017GetSegmentState\020\333\004\022\r\n\010TimeTick\020\260\t\022\023"
+  "\n\016QueryNodeStats\020\261\t\022\016\n\tLoadIndex\020\262\t\022\016\n\tR"
+  "equestID\020\263\t\022\017\n\nRequestTSO\020\264\t\022\024\n\017Allocate"
+  "Segment\020\265\t\022\026\n\021SegmentStatistics\020\266\t\022\025\n\020Se"
+  "gmentFlushDone\020\267\t\022\017\n\nDataNodeTt\020\270\t\022\025\n\020Cr"
+  "eateCredential\020\334\013\022\022\n\rGetCredential\020\335\013\022\025\n"
+  "\020DeleteCredential\020\336\013\022\025\n\020UpdateCredential"
+  "\020\337\013\022\026\n\021ListCredUsernames\020\340\013\022\017\n\nCreateRol"
+  "e\020\300\014\022\r\n\010DropRole\020\301\014\022\024\n\017OperateUserRole\020\302"
+  "\014\022\017\n\nSelectRole\020\303\014\022\017\n\nSelectUser\020\304\014\022\023\n\016S"
+  "electResource\020\305\014\022\025\n\020OperatePrivilege\020\306\014\022"
+  "\020\n\013SelectGrant\020\307\014\022\033\n\026RefreshPolicyInfoCa"
+  "che\020\310\014\022\017\n\nListPolicy\020\311\014*\"\n\007DslType\022\007\n\003Ds"
+  "l\020\000\022\016\n\nBoolExprV1\020\001*B\n\017CompactionState\022\021"
+  "\n\rUndefiedState\020\000\022\r\n\tExecuting\020\001\022\r\n\tComp"
+  "leted\020\002*X\n\020ConsistencyLevel\022\n\n\006Strong\020\000\022"
+  "\013\n\007Session\020\001\022\013\n\007Bounded\020\002\022\016\n\nEventually\020"
+  "\003\022\016\n\nCustomized\020\004*\227\001\n\013ImportState\022\021\n\rImp"
+  "ortPending\020\000\022\020\n\014ImportFailed\020\001\022\021\n\rImport"
+  "Started\020\002\022\024\n\020ImportDownloaded\020\003\022\020\n\014Impor"
+  "tParsed\020\004\022\023\n\017ImportPersisted\020\005\022\023\n\017Import"
+  "Completed\020\006*\036\n\014ResourceType\022\016\n\nCollectio"
+  "n\020\000*\335\001\n\021ResourcePrivilege\022\020\n\014PrivilegeAl"
+  "l\020\000\022\023\n\017PrivilegeCreate\020\001\022\021\n\rPrivilegeDro"
+  "p\020\002\022\022\n\016PrivilegeAlter\020\003\022\021\n\rPrivilegeRead"
+  "\020\004\022\021\n\rPrivilegeLoad\020\005\022\024\n\020PrivilegeReleas"
+  "e\020\006\022\024\n\020PrivilegeCompact\020\007\022\023\n\017PrivilegeIn"
+  "sert\020\010\022\023\n\017PrivilegeDelete\020\t:^\n\021privilege"
+  "_ext_obj\022\037.google.protobuf.MessageOption"
+  "s\030\351\007 \001(\0132!.milvus.proto.common.Privilege"
+  "ExtBW\n\016io.milvus.grpcB\013CommonProtoP\001Z3gi"
+  "thub.com/milvus-io/milvus/internal/proto"
+  "/commonpb\240\001\001b\006proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_common_2eproto_deps[1] = {
+  &::descriptor_table_google_2fprotobuf_2fdescriptor_2eproto,
 };
-static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_common_2eproto_sccs[10] = {
+static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_common_2eproto_sccs[11] = {
   &scc_info_Address_common_2eproto.base,
   &scc_info_Blob_common_2eproto.base,
   &scc_info_DMLMsgHeader_common_2eproto.base,
@@ -413,15 +469,16 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_com
   &scc_info_MsgHeader_common_2eproto.base,
   &scc_info_PlaceholderGroup_common_2eproto.base,
   &scc_info_PlaceholderValue_common_2eproto.base,
+  &scc_info_PrivilegeExt_common_2eproto.base,
   &scc_info_Status_common_2eproto.base,
 };
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_common_2eproto_once;
 static bool descriptor_table_common_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_common_2eproto = {
-  &descriptor_table_common_2eproto_initialized, descriptor_table_protodef_common_2eproto, "common.proto", 3606,
-  &descriptor_table_common_2eproto_once, descriptor_table_common_2eproto_sccs, descriptor_table_common_2eproto_deps, 10, 0,
+  &descriptor_table_common_2eproto_initialized, descriptor_table_protodef_common_2eproto, "common.proto", 4660,
+  &descriptor_table_common_2eproto_once, descriptor_table_common_2eproto_sccs, descriptor_table_common_2eproto_deps, 11, 1,
   schemas, file_default_instances, TableStruct_common_2eproto::offsets,
-  file_level_metadata_common_2eproto, 10, file_level_enum_descriptors_common_2eproto, file_level_service_descriptors_common_2eproto,
+  file_level_metadata_common_2eproto, 11, file_level_enum_descriptors_common_2eproto, file_level_service_descriptors_common_2eproto,
 };
 
 // Force running AddDescriptors() at dynamic initialization time.
@@ -469,6 +526,18 @@ bool ErrorCode_IsValid(int value) {
     case 32:
     case 33:
     case 34:
+    case 35:
+    case 36:
+    case 37:
+    case 38:
+    case 39:
+    case 40:
+    case 41:
+    case 42:
+    case 43:
+    case 44:
+    case 45:
+    case 46:
     case 1000:
       return true;
     default:
@@ -601,6 +670,16 @@ bool MsgType_IsValid(int value) {
     case 1502:
     case 1503:
     case 1504:
+    case 1600:
+    case 1601:
+    case 1602:
+    case 1603:
+    case 1604:
+    case 1605:
+    case 1606:
+    case 1607:
+    case 1608:
+    case 1609:
       return true;
     default:
       return false;
@@ -666,6 +745,41 @@ bool ImportState_IsValid(int value) {
     case 4:
     case 5:
     case 6:
+      return true;
+    default:
+      return false;
+  }
+}
+
+const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* ResourceType_descriptor() {
+  ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&descriptor_table_common_2eproto);
+  return file_level_enum_descriptors_common_2eproto[9];
+}
+bool ResourceType_IsValid(int value) {
+  switch (value) {
+    case 0:
+      return true;
+    default:
+      return false;
+  }
+}
+
+const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* ResourcePrivilege_descriptor() {
+  ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&descriptor_table_common_2eproto);
+  return file_level_enum_descriptors_common_2eproto[10];
+}
+bool ResourcePrivilege_IsValid(int value) {
+  switch (value) {
+    case 0:
+    case 1:
+    case 2:
+    case 3:
+    case 4:
+    case 5:
+    case 6:
+    case 7:
+    case 8:
+    case 9:
       return true;
     default:
       return false;
@@ -3811,6 +3925,352 @@ void DMLMsgHeader::InternalSwap(DMLMsgHeader* other) {
 }
 
 
+// ===================================================================
+
+void PrivilegeExt::InitAsDefaultInstance() {
+}
+class PrivilegeExt::_Internal {
+ public:
+};
+
+PrivilegeExt::PrivilegeExt()
+  : ::PROTOBUF_NAMESPACE_ID::Message(), _internal_metadata_(nullptr) {
+  SharedCtor();
+  // @@protoc_insertion_point(constructor:milvus.proto.common.PrivilegeExt)
+}
+PrivilegeExt::PrivilegeExt(const PrivilegeExt& from)
+  : ::PROTOBUF_NAMESPACE_ID::Message(),
+      _internal_metadata_(nullptr) {
+  _internal_metadata_.MergeFrom(from._internal_metadata_);
+  ::memcpy(&resource_type_, &from.resource_type_,
+    static_cast<size_t>(reinterpret_cast<char*>(&resource_name_index_) -
+    reinterpret_cast<char*>(&resource_type_)) + sizeof(resource_name_index_));
+  // @@protoc_insertion_point(copy_constructor:milvus.proto.common.PrivilegeExt)
+}
+
+void PrivilegeExt::SharedCtor() {
+  ::memset(&resource_type_, 0, static_cast<size_t>(
+      reinterpret_cast<char*>(&resource_name_index_) -
+      reinterpret_cast<char*>(&resource_type_)) + sizeof(resource_name_index_));
+}
+
+PrivilegeExt::~PrivilegeExt() {
+  // @@protoc_insertion_point(destructor:milvus.proto.common.PrivilegeExt)
+  SharedDtor();
+}
+
+void PrivilegeExt::SharedDtor() {
+}
+
+void PrivilegeExt::SetCachedSize(int size) const {
+  _cached_size_.Set(size);
+}
+const PrivilegeExt& PrivilegeExt::default_instance() {
+  ::PROTOBUF_NAMESPACE_ID::internal::InitSCC(&::scc_info_PrivilegeExt_common_2eproto.base);
+  return *internal_default_instance();
+}
+
+
+void PrivilegeExt::Clear() {
+// @@protoc_insertion_point(message_clear_start:milvus.proto.common.PrivilegeExt)
+  ::PROTOBUF_NAMESPACE_ID::uint32 cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  ::memset(&resource_type_, 0, static_cast<size_t>(
+      reinterpret_cast<char*>(&resource_name_index_) -
+      reinterpret_cast<char*>(&resource_type_)) + sizeof(resource_name_index_));
+  _internal_metadata_.Clear();
+}
+
+#if GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+const char* PrivilegeExt::_InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    ::PROTOBUF_NAMESPACE_ID::uint32 tag;
+    ptr = ::PROTOBUF_NAMESPACE_ID::internal::ReadTag(ptr, &tag);
+    CHK_(ptr);
+    switch (tag >> 3) {
+      // .milvus.proto.common.ResourceType resource_type = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 8)) {
+          ::PROTOBUF_NAMESPACE_ID::uint64 val = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
+          CHK_(ptr);
+          set_resource_type(static_cast<::milvus::proto::common::ResourceType>(val));
+        } else goto handle_unusual;
+        continue;
+      // .milvus.proto.common.ResourcePrivilege resource_privilege = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 16)) {
+          ::PROTOBUF_NAMESPACE_ID::uint64 val = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
+          CHK_(ptr);
+          set_resource_privilege(static_cast<::milvus::proto::common::ResourcePrivilege>(val));
+        } else goto handle_unusual;
+        continue;
+      // int32 resource_name_index = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<::PROTOBUF_NAMESPACE_ID::uint8>(tag) == 24)) {
+          resource_name_index_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint(&ptr);
+          CHK_(ptr);
+        } else goto handle_unusual;
+        continue;
+      default: {
+      handle_unusual:
+        if ((tag & 7) == 4 || tag == 0) {
+          ctx->SetLastTag(tag);
+          goto success;
+        }
+        ptr = UnknownFieldParse(tag, &_internal_metadata_, ptr, ctx);
+        CHK_(ptr != nullptr);
+        continue;
+      }
+    }  // switch
+  }  // while
+success:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto success;
+#undef CHK_
+}
+#else  // GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+bool PrivilegeExt::MergePartialFromCodedStream(
+    ::PROTOBUF_NAMESPACE_ID::io::CodedInputStream* input) {
+#define DO_(EXPRESSION) if (!PROTOBUF_PREDICT_TRUE(EXPRESSION)) goto failure
+  ::PROTOBUF_NAMESPACE_ID::uint32 tag;
+  // @@protoc_insertion_point(parse_start:milvus.proto.common.PrivilegeExt)
+  for (;;) {
+    ::std::pair<::PROTOBUF_NAMESPACE_ID::uint32, bool> p = input->ReadTagWithCutoffNoLastTag(127u);
+    tag = p.first;
+    if (!p.second) goto handle_unusual;
+    switch (::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::GetTagFieldNumber(tag)) {
+      // .milvus.proto.common.ResourceType resource_type = 1;
+      case 1: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (8 & 0xFF)) {
+          int value = 0;
+          DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
+                   int, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_ENUM>(
+                 input, &value)));
+          set_resource_type(static_cast< ::milvus::proto::common::ResourceType >(value));
+        } else {
+          goto handle_unusual;
+        }
+        break;
+      }
+
+      // .milvus.proto.common.ResourcePrivilege resource_privilege = 2;
+      case 2: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (16 & 0xFF)) {
+          int value = 0;
+          DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
+                   int, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_ENUM>(
+                 input, &value)));
+          set_resource_privilege(static_cast< ::milvus::proto::common::ResourcePrivilege >(value));
+        } else {
+          goto handle_unusual;
+        }
+        break;
+      }
+
+      // int32 resource_name_index = 3;
+      case 3: {
+        if (static_cast< ::PROTOBUF_NAMESPACE_ID::uint8>(tag) == (24 & 0xFF)) {
+
+          DO_((::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::ReadPrimitive<
+                   ::PROTOBUF_NAMESPACE_ID::int32, ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_INT32>(
+                 input, &resource_name_index_)));
+        } else {
+          goto handle_unusual;
+        }
+        break;
+      }
+
+      default: {
+      handle_unusual:
+        if (tag == 0) {
+          goto success;
+        }
+        DO_(::PROTOBUF_NAMESPACE_ID::internal::WireFormat::SkipField(
+              input, tag, _internal_metadata_.mutable_unknown_fields()));
+        break;
+      }
+    }
+  }
+success:
+  // @@protoc_insertion_point(parse_success:milvus.proto.common.PrivilegeExt)
+  return true;
+failure:
+  // @@protoc_insertion_point(parse_failure:milvus.proto.common.PrivilegeExt)
+  return false;
+#undef DO_
+}
+#endif  // GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+
+void PrivilegeExt::SerializeWithCachedSizes(
+    ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream* output) const {
+  // @@protoc_insertion_point(serialize_start:milvus.proto.common.PrivilegeExt)
+  ::PROTOBUF_NAMESPACE_ID::uint32 cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // .milvus.proto.common.ResourceType resource_type = 1;
+  if (this->resource_type() != 0) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteEnum(
+      1, this->resource_type(), output);
+  }
+
+  // .milvus.proto.common.ResourcePrivilege resource_privilege = 2;
+  if (this->resource_privilege() != 0) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteEnum(
+      2, this->resource_privilege(), output);
+  }
+
+  // int32 resource_name_index = 3;
+  if (this->resource_name_index() != 0) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt32(3, this->resource_name_index(), output);
+  }
+
+  if (_internal_metadata_.have_unknown_fields()) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormat::SerializeUnknownFields(
+        _internal_metadata_.unknown_fields(), output);
+  }
+  // @@protoc_insertion_point(serialize_end:milvus.proto.common.PrivilegeExt)
+}
+
+::PROTOBUF_NAMESPACE_ID::uint8* PrivilegeExt::InternalSerializeWithCachedSizesToArray(
+    ::PROTOBUF_NAMESPACE_ID::uint8* target) const {
+  // @@protoc_insertion_point(serialize_to_array_start:milvus.proto.common.PrivilegeExt)
+  ::PROTOBUF_NAMESPACE_ID::uint32 cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // .milvus.proto.common.ResourceType resource_type = 1;
+  if (this->resource_type() != 0) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteEnumToArray(
+      1, this->resource_type(), target);
+  }
+
+  // .milvus.proto.common.ResourcePrivilege resource_privilege = 2;
+  if (this->resource_privilege() != 0) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteEnumToArray(
+      2, this->resource_privilege(), target);
+  }
+
+  // int32 resource_name_index = 3;
+  if (this->resource_name_index() != 0) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::WriteInt32ToArray(3, this->resource_name_index(), target);
+  }
+
+  if (_internal_metadata_.have_unknown_fields()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormat::SerializeUnknownFieldsToArray(
+        _internal_metadata_.unknown_fields(), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:milvus.proto.common.PrivilegeExt)
+  return target;
+}
+
+size_t PrivilegeExt::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:milvus.proto.common.PrivilegeExt)
+  size_t total_size = 0;
+
+  if (_internal_metadata_.have_unknown_fields()) {
+    total_size +=
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormat::ComputeUnknownFieldsSize(
+        _internal_metadata_.unknown_fields());
+  }
+  ::PROTOBUF_NAMESPACE_ID::uint32 cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // .milvus.proto.common.ResourceType resource_type = 1;
+  if (this->resource_type() != 0) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::EnumSize(this->resource_type());
+  }
+
+  // .milvus.proto.common.ResourcePrivilege resource_privilege = 2;
+  if (this->resource_privilege() != 0) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::EnumSize(this->resource_privilege());
+  }
+
+  // int32 resource_name_index = 3;
+  if (this->resource_name_index() != 0) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::Int32Size(
+        this->resource_name_index());
+  }
+
+  int cached_size = ::PROTOBUF_NAMESPACE_ID::internal::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void PrivilegeExt::MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) {
+// @@protoc_insertion_point(generalized_merge_from_start:milvus.proto.common.PrivilegeExt)
+  GOOGLE_DCHECK_NE(&from, this);
+  const PrivilegeExt* source =
+      ::PROTOBUF_NAMESPACE_ID::DynamicCastToGenerated<PrivilegeExt>(
+          &from);
+  if (source == nullptr) {
+  // @@protoc_insertion_point(generalized_merge_from_cast_fail:milvus.proto.common.PrivilegeExt)
+    ::PROTOBUF_NAMESPACE_ID::internal::ReflectionOps::Merge(from, this);
+  } else {
+  // @@protoc_insertion_point(generalized_merge_from_cast_success:milvus.proto.common.PrivilegeExt)
+    MergeFrom(*source);
+  }
+}
+
+void PrivilegeExt::MergeFrom(const PrivilegeExt& from) {
+// @@protoc_insertion_point(class_specific_merge_from_start:milvus.proto.common.PrivilegeExt)
+  GOOGLE_DCHECK_NE(&from, this);
+  _internal_metadata_.MergeFrom(from._internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::uint32 cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (from.resource_type() != 0) {
+    set_resource_type(from.resource_type());
+  }
+  if (from.resource_privilege() != 0) {
+    set_resource_privilege(from.resource_privilege());
+  }
+  if (from.resource_name_index() != 0) {
+    set_resource_name_index(from.resource_name_index());
+  }
+}
+
+void PrivilegeExt::CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) {
+// @@protoc_insertion_point(generalized_copy_from_start:milvus.proto.common.PrivilegeExt)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+void PrivilegeExt::CopyFrom(const PrivilegeExt& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:milvus.proto.common.PrivilegeExt)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool PrivilegeExt::IsInitialized() const {
+  return true;
+}
+
+void PrivilegeExt::InternalSwap(PrivilegeExt* other) {
+  using std::swap;
+  _internal_metadata_.Swap(&other->_internal_metadata_);
+  swap(resource_type_, other->resource_type_);
+  swap(resource_privilege_, other->resource_privilege_);
+  swap(resource_name_index_, other->resource_name_index_);
+}
+
+::PROTOBUF_NAMESPACE_ID::Metadata PrivilegeExt::GetMetadata() const {
+  return GetMetadataStatic();
+}
+
+::PROTOBUF_NAMESPACE_ID::internal::ExtensionIdentifier< ::google::protobuf::MessageOptions,
+    ::PROTOBUF_NAMESPACE_ID::internal::MessageTypeTraits< ::milvus::proto::common::PrivilegeExt >, 11, false >
+  privilege_ext_obj(kPrivilegeExtObjFieldNumber, *::milvus::proto::common::PrivilegeExt::internal_default_instance());
+
 // @@protoc_insertion_point(namespace_scope)
 }  // namespace common
 }  // namespace proto
@@ -3845,6 +4305,9 @@ template<> PROTOBUF_NOINLINE ::milvus::proto::common::MsgHeader* Arena::CreateMa
 }
 template<> PROTOBUF_NOINLINE ::milvus::proto::common::DMLMsgHeader* Arena::CreateMaybeMessage< ::milvus::proto::common::DMLMsgHeader >(Arena* arena) {
   return Arena::CreateInternal< ::milvus::proto::common::DMLMsgHeader >(arena);
+}
+template<> PROTOBUF_NOINLINE ::milvus::proto::common::PrivilegeExt* Arena::CreateMaybeMessage< ::milvus::proto::common::PrivilegeExt >(Arena* arena) {
+  return Arena::CreateInternal< ::milvus::proto::common::PrivilegeExt >(arena);
 }
 PROTOBUF_NAMESPACE_CLOSE
 

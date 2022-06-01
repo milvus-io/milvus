@@ -19,6 +19,8 @@ package datacoord
 import (
 	"context"
 	"errors"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -76,4 +78,10 @@ func getTimetravelReverseTime(ctx context.Context, allocator allocator) (*timetr
 	ttpts := pts.Add(-time.Duration(Params.CommonCfg.RetentionDuration) * time.Second)
 	tt := tsoutil.ComposeTS(ttpts.UnixNano()/int64(time.Millisecond), 0)
 	return &timetravel{tt}, nil
+}
+
+func parseSegmentIDByBinlog(path string) (UniqueID, error) {
+	// binlog path should consist of "files/insertLog/collID/partID/segID/fieldID/fileName"
+	keyStr := strings.Split(path, "/")
+	return strconv.ParseInt(keyStr[len(keyStr)-3], 10, 64)
 }

@@ -19,6 +19,7 @@ package querynode
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -40,8 +41,10 @@ type readTask interface {
 	Merge(readTask)
 	CanMergeWith(readTask) bool
 	CPUUsage() int32
-	SetMaxCPUUSage(int32)
 	Timeout() bool
+
+	SetMaxCPUUSage(int32)
+	SetStep(step TaskStep)
 }
 
 var _ readTask = (*baseReadTask)(nil)
@@ -59,15 +62,53 @@ type baseReadTask struct {
 	TravelTimestamp    uint64
 	GuaranteeTimestamp uint64
 	TimeoutTimestamp   uint64
+	step               TaskStep
+	queueDur           time.Duration
+	reduceDur          time.Duration
 	tr                 *timerecord.TimeRecorder
+}
+
+func (b *baseReadTask) SetStep(step TaskStep) {
+	b.step = step
+	switch step {
+	case TaskStepEnqueue:
+		b.queueDur = 0
+		b.tr.Record("enqueueStart")
+	case TaskStepPreExecute:
+		b.queueDur = b.tr.Record("enqueueEnd")
+	}
+}
+
+func (b *baseReadTask) OnEnqueue() error {
+	b.SetStep(TaskStepEnqueue)
+	return nil
 }
 
 func (b *baseReadTask) SetMaxCPUUSage(cpu int32) {
 	b.maxCPU = cpu
 }
 
-func (b *baseReadTask) Execute(ctx context.Context) error {
+func (b *baseReadTask) PreExecute(ctx context.Context) error {
+	b.SetStep(TaskStepPreExecute)
 	return nil
+}
+
+func (b *baseReadTask) Execute(ctx context.Context) error {
+	b.SetStep(TaskStepExecute)
+	return nil
+}
+
+func (b *baseReadTask) PostExecute(ctx context.Context) error {
+	b.SetStep(TaskStepPostExecute)
+	return nil
+}
+
+func (b *baseReadTask) Notify(err error) {
+	switch b.step {
+	case TaskStepEnqueue:
+		b.queueDur = b.tr.Record("enqueueEnd")
+	}
+	b.baseTask.Notify(err)
 }
 
 // GetCollectionID return CollectionID.
@@ -98,15 +139,13 @@ func (b *baseReadTask) Ready() (bool, error) {
 	if b.Timeout() {
 		return false, fmt.Errorf("deadline exceed")
 	}
-	var err error
-	var tType tsType
+	var channel Channel
 	if b.DataScope == querypb.DataScope_Streaming {
-		tType = tsTypeDML
+		channel = b.QS.channel
 	} else if b.DataScope == querypb.DataScope_Historical {
-		tType = tsTypeDelta
-	}
-	if err != nil {
-		return false, err
+		channel = b.QS.deltaChannel
+	} else {
+		return false, fmt.Errorf("unexpected dataScope %s", b.DataScope.String())
 	}
 
 	if _, released := b.QS.collection.getReleaseTime(); released {
@@ -114,9 +153,9 @@ func (b *baseReadTask) Ready() (bool, error) {
 		return false, fmt.Errorf("collection has been released, taskID = %d, collectionID = %d", b.ID(), b.CollectionID)
 	}
 
-	serviceTime, err2 := b.QS.getServiceableTime(tType)
-	if err2 != nil {
-		return false, fmt.Errorf("failed to get service timestamp, taskID = %d, collectionID = %d, err=%w", b.ID(), b.CollectionID, err2)
+	serviceTime, err := b.QS.getServiceableTime(channel)
+	if err != nil {
+		return false, fmt.Errorf("failed to get service timestamp, taskID = %d, collectionID = %d, err=%w", b.ID(), b.CollectionID, err)
 	}
 	guaranteeTs := b.GuaranteeTimestamp
 	gt, _ := tsoutil.ParseTS(guaranteeTs)
@@ -126,9 +165,17 @@ func (b *baseReadTask) Ready() (bool, error) {
 			zap.Any("collectionID", b.CollectionID),
 			zap.Any("sm.GuaranteeTimestamp", gt),
 			zap.Any("serviceTime", st),
-			zap.Any("delta seconds", (guaranteeTs-serviceTime)/(1000*1000*1000)),
+			zap.Any("delta milliseconds", gt.Sub(st).Milliseconds()),
+			zap.Any("channel", channel),
 			zap.Any("msgID", b.ID()))
 		return false, nil
 	}
+	log.Debug("query msg can do",
+		zap.Any("collectionID", b.CollectionID),
+		zap.Any("sm.GuaranteeTimestamp", gt),
+		zap.Any("serviceTime", st),
+		zap.Any("delta milliseconds", gt.Sub(st).Milliseconds()),
+		zap.Any("channel", channel),
+		zap.Any("msgID", b.ID()))
 	return true, nil
 }

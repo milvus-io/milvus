@@ -30,11 +30,15 @@ func TestAllocator_Basic(t *testing.T) {
 		ms.setID(666)
 		_, err := allocator.allocID()
 		assert.NoError(t, err)
+
+		ms.setID(-1)
+		_, err = allocator.allocID()
+		assert.Error(t, err)
 	})
 
 	t.Run("Test alloc ID batch", func(t *testing.T) {
 		// If id == 0, AllocID will return not successful status
-		// If id == -1, AllocID will return err
+		// If id == -1, AllocID will return err with nil status
 		ms.setID(666)
 		_, count, err := allocator.allocIDBatch(10)
 		assert.NoError(t, err)

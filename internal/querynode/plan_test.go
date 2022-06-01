@@ -27,13 +27,11 @@ import (
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
-	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
 func TestPlan_Plan(t *testing.T) {
 	collectionID := UniqueID(0)
-	pkType := schemapb.DataType_Int64
-	schema := genTestCollectionSchema(pkType)
+	schema := genTestCollectionSchema()
 
 	collection := newCollection(collectionID, schema)
 
@@ -54,7 +52,7 @@ func TestPlan_createSearchPlanByExpr(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	historical, err := genSimpleHistorical(ctx)
+	historical, err := genSimpleReplicaWithSealSegment(ctx)
 	assert.NoError(t, err)
 
 	col, err := historical.getCollectionByID(defaultCollectionID)
@@ -84,8 +82,7 @@ func TestPlan_NilCollection(t *testing.T) {
 
 func TestPlan_PlaceholderGroup(t *testing.T) {
 	collectionID := UniqueID(0)
-	pkType := schemapb.DataType_Int64
-	schema := genTestCollectionSchema(pkType)
+	schema := genTestCollectionSchema()
 	collection := newCollection(collectionID, schema)
 
 	dslString := "{\"bool\": { \n\"vector\": {\n \"floatVectorField\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\n \"topk\": 10 \n,\"round_decimal\": 6\n } \n } \n } \n }"

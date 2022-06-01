@@ -20,6 +20,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/proto/datapb"
+
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -200,4 +202,109 @@ func TestIndexCoordMockError(t *testing.T) {
 
 	err = icm.Stop()
 	assert.NotNil(t, err)
+}
+
+func TestDataCoordMock_Error(t *testing.T) {
+	t.Run("Init", func(t *testing.T) {
+		dcm := &DataCoordMock{
+			Fail: true,
+			Err:  true,
+		}
+		err := dcm.Init()
+		assert.Error(t, err)
+	})
+
+	t.Run("Start", func(t *testing.T) {
+		dcm := &DataCoordMock{
+			Fail: true,
+			Err:  true,
+		}
+		err := dcm.Start()
+		assert.Error(t, err)
+	})
+
+	t.Run("GetComponentStates", func(t *testing.T) {
+		dcm := &DataCoordMock{
+			Fail: true,
+			Err:  true,
+		}
+		resp, err := dcm.GetComponentStates(context.TODO())
+		assert.Error(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.GetErrorCode())
+
+		dcm.Err = false
+		resp, err = dcm.GetComponentStates(context.TODO())
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.GetErrorCode())
+	})
+
+	t.Run("AcquireSegmentLock", func(t *testing.T) {
+		dcm := &DataCoordMock{
+			Fail: true,
+			Err:  true,
+		}
+		resp, err := dcm.AcquireSegmentLock(context.TODO(), &datapb.AcquireSegmentLockRequest{})
+		assert.Error(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+
+		dcm.Err = false
+		resp, err = dcm.AcquireSegmentLock(context.TODO(), &datapb.AcquireSegmentLockRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+	})
+
+	t.Run("ReleaseSegmentLock", func(t *testing.T) {
+		dcm := &DataCoordMock{
+			Fail: true,
+			Err:  true,
+		}
+
+		resp, err := dcm.ReleaseSegmentLock(context.TODO(), &datapb.ReleaseSegmentLockRequest{})
+		assert.Error(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+
+		dcm.Err = false
+		resp, err = dcm.ReleaseSegmentLock(context.TODO(), &datapb.ReleaseSegmentLockRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+	})
+}
+
+func TestChunkManageMock_Error(t *testing.T) {
+	t.Run("Exist", func(t *testing.T) {
+		cmm := &ChunkManagerMock{
+			Fail: true,
+			Err:  true,
+		}
+		ok, err := cmm.Exist("")
+		assert.Error(t, err)
+		assert.False(t, ok)
+
+		cmm.Err = false
+		ok, err = cmm.Exist("")
+		assert.NoError(t, err)
+		assert.False(t, ok)
+
+		cmm.Fail = false
+		ok, err = cmm.Exist("")
+		assert.NoError(t, err)
+		assert.True(t, ok)
+	})
+	t.Run("RemoveWithPrefix", func(t *testing.T) {
+		cmm := &ChunkManagerMock{
+			Fail: true,
+			Err:  true,
+		}
+
+		err := cmm.RemoveWithPrefix("")
+		assert.Error(t, err)
+
+		cmm.Err = false
+		err = cmm.RemoveWithPrefix("")
+		assert.NoError(t, err)
+
+		cmm.Fail = false
+		err = cmm.RemoveWithPrefix("")
+		assert.NoError(t, err)
+	})
 }

@@ -31,17 +31,11 @@ import (
 
 func genSimpleQueryShard(ctx context.Context) (*queryShard, error) {
 	tSafe := newTSafeReplica()
-	historical, err := genSimpleHistorical(ctx)
+	replica, err := genSimpleReplica()
 	if err != nil {
 		return nil, err
 	}
 	tSafe.addTSafe(defaultDMLChannel)
-
-	streaming, err := genSimpleStreaming(ctx)
-	if err != nil {
-		return nil, err
-	}
-
 	tSafe.addTSafe(defaultDeltaChannel)
 	localCM, err := genLocalChunkManager()
 	if err != nil {
@@ -61,7 +55,7 @@ func genSimpleQueryShard(ctx context.Context) (*queryShard, error) {
 	shardClusterService.clusters.Store(defaultDMLChannel, shardCluster)
 
 	qs, err := newQueryShard(ctx, defaultCollectionID, defaultDMLChannel, defaultReplicaID, shardClusterService,
-		historical, streaming, tSafe, localCM, remoteCM, false)
+		replica, tSafe, localCM, remoteCM, false)
 	if err != nil {
 		return nil, err
 	}
@@ -80,10 +74,7 @@ func updateQueryShardTSafe(qs *queryShard, timestamp Timestamp) error {
 func TestNewQueryShard_IllegalCases(t *testing.T) {
 	ctx := context.Background()
 	tSafe := newTSafeReplica()
-	historical, err := genSimpleHistorical(ctx)
-	require.NoError(t, err)
-
-	streaming, err := genSimpleStreaming(ctx)
+	replica, err := genSimpleReplica()
 	require.NoError(t, err)
 
 	localCM, err := genLocalChunkManager()
@@ -100,15 +91,15 @@ func TestNewQueryShard_IllegalCases(t *testing.T) {
 	shardClusterService.clusters.Store(defaultDMLChannel, shardCluster)
 
 	_, err = newQueryShard(ctx, defaultCollectionID-1, defaultDMLChannel, defaultReplicaID, shardClusterService,
-		historical, streaming, tSafe, localCM, remoteCM, false)
+		replica, tSafe, localCM, remoteCM, false)
 	assert.Error(t, err)
 
 	_, err = newQueryShard(ctx, defaultCollectionID, defaultDMLChannel, defaultReplicaID, shardClusterService,
-		historical, streaming, tSafe, nil, remoteCM, false)
+		replica, tSafe, nil, remoteCM, false)
 	assert.Error(t, err)
 
 	_, err = newQueryShard(ctx, defaultCollectionID, defaultDMLChannel, defaultReplicaID, shardClusterService,
-		historical, streaming, tSafe, localCM, nil, false)
+		replica, tSafe, localCM, nil, false)
 	assert.Error(t, err)
 }
 
@@ -127,11 +118,11 @@ func TestQueryShard_getServiceableTime(t *testing.T) {
 	err = updateQueryShardTSafe(qs, timestamp)
 	assert.NoError(t, err)
 
-	dmlTimestamp, err := qs.getServiceableTime(tsTypeDML)
+	dmlTimestamp, err := qs.getServiceableTime(qs.channel)
 	assert.NoError(t, err)
 	assert.Equal(t, timestamp, dmlTimestamp)
 
-	deltaTimestamp, err := qs.getServiceableTime(tsTypeDelta)
+	deltaTimestamp, err := qs.getServiceableTime(qs.deltaChannel)
 	assert.NoError(t, err)
 	assert.Equal(t, timestamp, deltaTimestamp)
 }

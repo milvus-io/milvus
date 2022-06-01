@@ -90,9 +90,6 @@ func Test_NewClient(t *testing.T) {
 		r10, err := client.ReleaseCollection(ctx, nil)
 		retCheck(retNotNil, r10, err)
 
-		r11, err := client.CreateQueryChannel(ctx, nil)
-		retCheck(retNotNil, r11, err)
-
 		r12, err := client.ShowPartitions(ctx, nil)
 		retCheck(retNotNil, r12, err)
 
@@ -115,35 +112,35 @@ func Test_NewClient(t *testing.T) {
 		retCheck(retNotNil, r18, err)
 	}
 
-	client.grpcClient = &mock.ClientBase{
+	client.grpcClient = &mock.GRPCClientBase{
 		GetGrpcClientErr: errors.New("dummy"),
 	}
 
 	newFunc1 := func(cc *grpc.ClientConn) interface{} {
-		return &mock.QueryCoordClient{Err: nil}
+		return &mock.GrpcQueryCoordClient{Err: nil}
 	}
 	client.grpcClient.SetNewGrpcClientFunc(newFunc1)
 
 	checkFunc(false)
 
-	client.grpcClient = &mock.ClientBase{
+	client.grpcClient = &mock.GRPCClientBase{
 		GetGrpcClientErr: nil,
 	}
 
 	newFunc2 := func(cc *grpc.ClientConn) interface{} {
-		return &mock.QueryCoordClient{Err: errors.New("dummy")}
+		return &mock.GrpcQueryCoordClient{Err: errors.New("dummy")}
 	}
 
 	client.grpcClient.SetNewGrpcClientFunc(newFunc2)
 
 	checkFunc(false)
 
-	client.grpcClient = &mock.ClientBase{
+	client.grpcClient = &mock.GRPCClientBase{
 		GetGrpcClientErr: nil,
 	}
 
 	newFunc3 := func(cc *grpc.ClientConn) interface{} {
-		return &mock.QueryCoordClient{Err: nil}
+		return &mock.GrpcQueryCoordClient{Err: nil}
 	}
 	client.grpcClient.SetNewGrpcClientFunc(newFunc3)
 

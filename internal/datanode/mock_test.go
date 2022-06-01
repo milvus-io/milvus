@@ -164,14 +164,14 @@ type RootCoordFactory struct {
 type DataCoordFactory struct {
 	types.DataCoord
 
-	SaveBinlogPathError      bool
-	SaveBinlogPathNotSuccess bool
+	SaveBinlogPathError  bool
+	SaveBinlogPathStatus commonpb.ErrorCode
 
 	CompleteCompactionError      bool
 	CompleteCompactionNotSuccess bool
 
-	DropVirtualChannelError      bool
-	DropVirtualChannelNotSuccess bool
+	DropVirtualChannelError  bool
+	DropVirtualChannelStatus commonpb.ErrorCode
 }
 
 func (ds *DataCoordFactory) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error) {
@@ -202,27 +202,16 @@ func (ds *DataCoordFactory) SaveBinlogPaths(ctx context.Context, req *datapb.Sav
 	if ds.SaveBinlogPathError {
 		return nil, errors.New("Error")
 	}
-	if ds.SaveBinlogPathNotSuccess {
-		return &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}, nil
-	}
-
-	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
+	return &commonpb.Status{ErrorCode: ds.SaveBinlogPathStatus}, nil
 }
 
 func (ds *DataCoordFactory) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtualChannelRequest) (*datapb.DropVirtualChannelResponse, error) {
 	if ds.DropVirtualChannelError {
 		return nil, errors.New("error")
 	}
-	if ds.DropVirtualChannelNotSuccess {
-		return &datapb.DropVirtualChannelResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			},
-		}, nil
-	}
 	return &datapb.DropVirtualChannelResponse{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
+			ErrorCode: ds.DropVirtualChannelStatus,
 		},
 	}, nil
 }
@@ -875,8 +864,7 @@ func (m *RootCoordFactory) AllocID(ctx context.Context, in *rootcoordpb.AllocIDR
 	}
 
 	if m.ID == -1 {
-		resp.Status.ErrorCode = commonpb.ErrorCode_Success
-		return resp, errors.New(resp.Status.GetReason())
+		return nil, errors.New(resp.Status.GetReason())
 	}
 
 	resp.ID = m.ID

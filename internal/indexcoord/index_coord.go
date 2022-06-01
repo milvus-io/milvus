@@ -28,26 +28,25 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/metrics"
-	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/dependency"
-
-	"go.etcd.io/etcd/api/v3/mvccpb"
-	"go.uber.org/zap"
-
 	"github.com/golang/protobuf/proto"
+	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/common"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
@@ -59,10 +58,6 @@ import (
 
 // make sure IndexCoord implements types.IndexCoord
 var _ types.IndexCoord = (*IndexCoord)(nil)
-
-const (
-	indexSizeFactor = 6
-)
 
 var Params paramtable.ComponentParam
 
@@ -102,6 +97,8 @@ type IndexCoord struct {
 	durationInterval   time.Duration
 	assignTaskInterval time.Duration
 	taskLimit          int
+
+	dataCoordClient types.DataCoord
 
 	// Add callback functions at different stages
 	startCallbacks []func()
@@ -319,6 +316,16 @@ func (i *IndexCoord) SetEtcdClient(etcdClient *clientv3.Client) {
 	i.etcdCli = etcdClient
 }
 
+// SetDataCoord sets data coordinator's client
+func (i *IndexCoord) SetDataCoord(dataCoord types.DataCoord) error {
+	if dataCoord == nil {
+		return errors.New("null DataCoord interface")
+	}
+
+	i.dataCoordClient = dataCoord
+	return nil
+}
+
 // UpdateStateCode updates the component state of IndexCoord.
 func (i *IndexCoord) UpdateStateCode(code internalpb.StateCode) {
 	i.stateCode.Store(code)
@@ -395,21 +402,26 @@ func (i *IndexCoord) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequ
 			},
 		}, err
 	}
-	metrics.IndexCoordIndexRequestCounter.WithLabelValues(metrics.TotalLabel).Inc()
-	log.Debug("IndexCoord building index ...",
-		zap.Int64("IndexBuildID", req.IndexBuildID),
-		zap.String("IndexName = ", req.IndexName),
-		zap.Int64("IndexID = ", req.IndexID),
-		zap.Strings("DataPath = ", req.DataPaths),
-		zap.Any("TypeParams", req.TypeParams),
-		zap.Any("IndexParams", req.IndexParams),
-		zap.Int64("numRow", req.NumRows),
+	log.Debug("IndexCoord building index ...", zap.Int64("segmentID", req.SegmentID),
+		zap.String("IndexName", req.IndexName), zap.Int64("IndexID", req.IndexID),
+		zap.Strings("DataPath", req.DataPaths), zap.Any("TypeParams", req.TypeParams),
+		zap.Any("IndexParams", req.IndexParams), zap.Int64("numRows", req.NumRows),
 		zap.Any("field type", req.FieldSchema.DataType))
+
+	ret := &indexpb.BuildIndexResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		},
+		IndexBuildID: 0,
+	}
+
+	metrics.IndexCoordIndexRequestCounter.WithLabelValues(metrics.TotalLabel).Inc()
+
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "IndexCoord-BuildIndex")
 	defer sp.Finish()
 	hasIndex, indexBuildID := i.metaTable.HasSameReq(req)
 	if hasIndex {
-		log.Debug("IndexCoord", zap.Int64("hasIndex true", indexBuildID), zap.Strings("data paths", req.DataPaths))
+		log.Debug("IndexCoord has same index", zap.Int64("buildID", indexBuildID), zap.Int64("segmentID", req.SegmentID))
 		return &indexpb.BuildIndexResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_Success,
@@ -418,11 +430,7 @@ func (i *IndexCoord) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequ
 			IndexBuildID: indexBuildID,
 		}, nil
 	}
-	ret := &indexpb.BuildIndexResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		},
-	}
+
 	t := &IndexAddTask{
 		BaseTask: BaseTask{
 			ctx:   ctx,
@@ -837,6 +845,9 @@ func (i *IndexCoord) watchMetaLoop() {
 						log.Debug("This task has finished", zap.Int64("indexBuildID", indexBuildID),
 							zap.Int64("Finish by IndexNode", indexMeta.NodeID),
 							zap.Int64("The version of the task", indexMeta.Version))
+						if err = i.tryReleaseSegmentReferLock(ctx, []UniqueID{indexMeta.Req.SegmentID}); err != nil {
+							panic(err)
+						}
 						i.nodeManager.pq.IncPriority(indexMeta.NodeID, -1)
 						metrics.IndexCoordIndexTaskCounter.WithLabelValues(metrics.InProgressIndexTaskLabel).Dec()
 						if indexMeta.State == commonpb.IndexState_Finished {
@@ -852,6 +863,47 @@ func (i *IndexCoord) watchMetaLoop() {
 			}
 		}
 	}
+}
+
+func (i *IndexCoord) tryAcquireSegmentReferLock(ctx context.Context, segIDs []UniqueID) error {
+	status, err := i.dataCoordClient.AcquireSegmentLock(ctx, &datapb.AcquireSegmentLockRequest{
+		NodeID:     i.session.ServerID,
+		SegmentIDs: segIDs,
+	})
+	if err != nil {
+		log.Error("IndexCoord try to acquire segment reference lock failed", zap.Int64s("segIDs", segIDs),
+			zap.Error(err))
+		return err
+	}
+	if status.ErrorCode != commonpb.ErrorCode_Success {
+		log.Error("IndexCoord try to acquire segment reference lock failed", zap.Int64s("segIDs", segIDs),
+			zap.Error(errors.New(status.Reason)))
+		return errors.New(status.Reason)
+	}
+	return nil
+}
+
+func (i *IndexCoord) tryReleaseSegmentReferLock(ctx context.Context, segIDs []UniqueID) error {
+	releaseLock := func() error {
+		status, err := i.dataCoordClient.ReleaseSegmentLock(ctx, &datapb.ReleaseSegmentLockRequest{
+			NodeID:     i.session.ServerID,
+			SegmentIDs: segIDs,
+		})
+		if err != nil {
+			return err
+		}
+		if status.ErrorCode != commonpb.ErrorCode_Success {
+			return errors.New(status.Reason)
+		}
+		return nil
+	}
+	err := retry.Do(ctx, releaseLock, retry.Attempts(100))
+	if err != nil {
+		log.Error("IndexCoord try to release segment reference lock failed", zap.Int64s("segIDs", segIDs),
+			zap.Error(err))
+		return err
+	}
+	return nil
 }
 
 // assignTask sends the index task to the IndexNode, it has a timeout interval, if the IndexNode doesn't respond within
@@ -903,6 +955,12 @@ func (i *IndexCoord) assignTaskLoop() {
 			}
 			for index, meta := range metas {
 				indexBuildID := meta.indexMeta.IndexBuildID
+				segID := meta.indexMeta.Req.SegmentID
+				if err := i.tryAcquireSegmentReferLock(ctx, []UniqueID{segID}); err != nil {
+					log.Warn("IndexCoord try to acquire segment reference lock failed, maybe this segment has been compacted",
+						zap.Int64("segID", segID), zap.Int64("buildID", indexBuildID), zap.Error(err))
+					continue
+				}
 				if err := i.metaTable.UpdateVersion(indexBuildID); err != nil {
 					log.Warn("IndexCoord assignmentTasksLoop metaTable.UpdateVersion failed", zap.Error(err))
 					continue

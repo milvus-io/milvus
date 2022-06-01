@@ -43,7 +43,6 @@ type queryNodeClientMock struct {
 }
 
 func newQueryNodeTest(ctx context.Context, address string, id UniqueID, kv *etcdkv.EtcdKV) (Node, error) {
-	watchedChannels := make(map[UniqueID]*querypb.QueryChannelInfo)
 	watchedDeltaChannels := make(map[UniqueID][]*datapb.VchannelInfo)
 	childCtx, cancel := context.WithCancel(ctx)
 	client, err := newQueryNodeClientMock(childCtx, address)
@@ -58,7 +57,6 @@ func newQueryNodeTest(ctx context.Context, address string, id UniqueID, kv *etcd
 		address:              address,
 		client:               client,
 		kvClient:             kv,
-		watchedQueryChannels: watchedChannels,
 		watchedDeltaChannels: watchedDeltaChannels,
 	}
 
@@ -116,14 +114,6 @@ func (client *queryNodeClientMock) GetTimeTickChannel(ctx context.Context) (*mil
 
 func (client *queryNodeClientMock) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return client.grpcClient.GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
-}
-
-func (client *queryNodeClientMock) AddQueryChannel(ctx context.Context, req *querypb.AddQueryChannelRequest) (*commonpb.Status, error) {
-	return client.grpcClient.AddQueryChannel(ctx, req)
-}
-
-func (client *queryNodeClientMock) RemoveQueryChannel(ctx context.Context, req *querypb.RemoveQueryChannelRequest) (*commonpb.Status, error) {
-	return client.grpcClient.RemoveQueryChannel(ctx, req)
 }
 
 func (client *queryNodeClientMock) WatchDmChannels(ctx context.Context, req *querypb.WatchDmChannelsRequest) (*commonpb.Status, error) {

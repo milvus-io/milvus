@@ -29,6 +29,8 @@ package querynode
 */
 import "C"
 import (
+	"fmt"
+
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -36,9 +38,10 @@ import (
 
 // Partition is a logical division of Collection and can be considered as an attribute of Segment.
 type Partition struct {
-	collectionID UniqueID
-	partitionID  UniqueID
-	segmentIDs   []UniqueID
+	collectionID      UniqueID
+	partitionID       UniqueID
+	growingSegmentIDs []UniqueID
+	sealedSegmentIDs  []UniqueID
 }
 
 // ID returns the identity of the partition.
@@ -46,21 +49,58 @@ func (p *Partition) ID() UniqueID {
 	return p.partitionID
 }
 
+// getSegmentIDs returns segment ids by DataScope
+func (p *Partition) getSegmentIDs(segType segmentType) ([]UniqueID, error) {
+	switch segType {
+	case segmentTypeGrowing:
+		dst := make([]UniqueID, len(p.growingSegmentIDs))
+		copy(dst, p.growingSegmentIDs)
+		return dst, nil
+	case segmentTypeSealed:
+		dst := make([]UniqueID, len(p.sealedSegmentIDs))
+		copy(dst, p.sealedSegmentIDs)
+		return dst, nil
+	default:
+		return nil, fmt.Errorf("unexpected segmentType %s", segType.String())
+	}
+}
+
 // addSegmentID add segmentID to segmentIDs
-func (p *Partition) addSegmentID(segmentID UniqueID) {
-	p.segmentIDs = append(p.segmentIDs, segmentID)
-	log.Info("add a segment to replica", zap.Int64("collectionID", p.collectionID), zap.Int64("partitionID", p.partitionID), zap.Int64("segmentID", segmentID))
+func (p *Partition) addSegmentID(segmentID UniqueID, segType segmentType) {
+	switch segType {
+	case segmentTypeGrowing:
+		p.growingSegmentIDs = append(p.growingSegmentIDs, segmentID)
+	case segmentTypeSealed:
+		p.sealedSegmentIDs = append(p.sealedSegmentIDs, segmentID)
+	default:
+		return
+	}
+	log.Info("add a segment to replica",
+		zap.Int64("collectionID", p.collectionID),
+		zap.Int64("partitionID", p.partitionID),
+		zap.Int64("segmentID", segmentID),
+		zap.String("segmentType", segType.String()))
 }
 
 // removeSegmentID removes segmentID from segmentIDs
-func (p *Partition) removeSegmentID(segmentID UniqueID) {
-	tmpIDs := make([]UniqueID, 0)
-	for _, id := range p.segmentIDs {
-		if id != segmentID {
-			tmpIDs = append(tmpIDs, id)
+func (p *Partition) removeSegmentID(segmentID UniqueID, segType segmentType) {
+	deleteFunc := func(segmentIDs []UniqueID) []UniqueID {
+		tmpIDs := make([]UniqueID, 0)
+		for _, id := range segmentIDs {
+			if id != segmentID {
+				tmpIDs = append(tmpIDs, id)
+			}
 		}
+		return tmpIDs
 	}
-	p.segmentIDs = tmpIDs
+	switch segType {
+	case segmentTypeGrowing:
+		p.growingSegmentIDs = deleteFunc(p.growingSegmentIDs)
+	case segmentTypeSealed:
+		p.sealedSegmentIDs = deleteFunc(p.sealedSegmentIDs)
+	default:
+		return
+	}
 	log.Info("remove a segment from replica", zap.Int64("collectionID", p.collectionID), zap.Int64("partitionID", p.partitionID), zap.Int64("segmentID", segmentID))
 }
 

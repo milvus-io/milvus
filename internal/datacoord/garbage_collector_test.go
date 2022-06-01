@@ -20,12 +20,15 @@ import (
 	"bytes"
 	"context"
 	"path"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -44,8 +47,15 @@ func Test_garbageCollector_basic(t *testing.T) {
 	meta, err := newMemoryMeta(mockAllocator)
 	assert.Nil(t, err)
 
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	assert.Nil(t, err)
+	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
+	segRefer, err := NewSegmentReferenceManager(etcdKV, nil)
+	assert.NoError(t, err)
+	assert.NotNil(t, segRefer)
+
 	t.Run("normal gc", func(t *testing.T) {
-		gc := newGarbageCollector(meta, GcOption{
+		gc := newGarbageCollector(meta, segRefer, GcOption{
 			cli:              cli,
 			enabled:          true,
 			checkInterval:    time.Millisecond * 10,
@@ -63,7 +73,7 @@ func Test_garbageCollector_basic(t *testing.T) {
 	})
 
 	t.Run("with nil cli", func(t *testing.T) {
-		gc := newGarbageCollector(meta, GcOption{
+		gc := newGarbageCollector(meta, segRefer, GcOption{
 			cli:              nil,
 			enabled:          true,
 			checkInterval:    time.Millisecond * 10,
@@ -102,8 +112,50 @@ func Test_garbageCollector_scan(t *testing.T) {
 	meta, err := newMemoryMeta(mockAllocator)
 	assert.Nil(t, err)
 
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	assert.Nil(t, err)
+	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
+	segRefer, err := NewSegmentReferenceManager(etcdKV, nil)
+	assert.NoError(t, err)
+	assert.NotNil(t, segRefer)
+
+	t.Run("key is reference", func(t *testing.T) {
+		segReferManager := &SegmentReferenceManager{
+			etcdKV: etcdKV,
+			segmentsLock: map[UniqueID][]*SegmentLock{
+				2: {
+					{
+						segmentID: 2,
+						nodeID:    1,
+						locKey:    "path",
+					},
+				},
+			},
+		}
+		gc := newGarbageCollector(meta, segRefer, GcOption{
+			cli:              cli,
+			enabled:          true,
+			checkInterval:    time.Minute * 30,
+			missingTolerance: time.Hour * 24,
+			dropTolerance:    time.Hour * 24,
+			bucketName:       bucketName,
+			rootPath:         rootPath,
+		})
+		gc.segRefer = segReferManager
+		gc.scan()
+
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, insertLogPrefix), inserts)
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, statsLogPrefix), stats)
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, deltaLogPrefix), delta)
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, `indexes`), others)
+
+		err = gc.segRefer.ReleaseSegmentsLock([]UniqueID{2}, 1)
+		assert.NoError(t, err)
+		gc.close()
+	})
+
 	t.Run("missing all but save tolerance", func(t *testing.T) {
-		gc := newGarbageCollector(meta, GcOption{
+		gc := newGarbageCollector(meta, segRefer, GcOption{
 			cli:              cli,
 			enabled:          true,
 			checkInterval:    time.Minute * 30,
@@ -130,7 +182,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 		err = meta.AddSegment(segment)
 		require.NoError(t, err)
 
-		gc := newGarbageCollector(meta, GcOption{
+		gc := newGarbageCollector(meta, segRefer, GcOption{
 			cli:              cli,
 			enabled:          true,
 			checkInterval:    time.Minute * 30,
@@ -160,7 +212,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 		err = meta.AddSegment(segment)
 		require.NoError(t, err)
 
-		gc := newGarbageCollector(meta, GcOption{
+		gc := newGarbageCollector(meta, segRefer, GcOption{
 			cli:              cli,
 			enabled:          true,
 			checkInterval:    time.Minute * 30,
@@ -178,7 +230,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 		gc.close()
 	})
 	t.Run("missing gc all", func(t *testing.T) {
-		gc := newGarbageCollector(meta, GcOption{
+		gc := newGarbageCollector(meta, segRefer, GcOption{
 			cli:              cli,
 			enabled:          true,
 			checkInterval:    time.Minute * 30,
@@ -229,7 +281,10 @@ func initUtOSSEnv(bucket, root string, n int) (cli *minio.Client, inserts []stri
 	content := []byte("test")
 	for i := 0; i < n; i++ {
 		reader := bytes.NewReader(content)
-		token := funcutil.RandomString(8)
+		token := path.Join(funcutil.RandomString(8), funcutil.RandomString(8), strconv.Itoa(i), funcutil.RandomString(8), funcutil.RandomString(8))
+		if i == 1 {
+			token = path.Join(funcutil.RandomString(8), funcutil.RandomString(8), strconv.Itoa(i), funcutil.RandomString(8))
+		}
 		// insert
 		filePath := path.Join(root, insertLogPrefix, token)
 		info, err := cli.PutObject(context.TODO(), bucket, filePath, reader, int64(len(content)), minio.PutObjectOptions{})

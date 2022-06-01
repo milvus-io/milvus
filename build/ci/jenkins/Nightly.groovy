@@ -142,6 +142,8 @@ pipeline {
                                                     --set queryNode.replicas=2 \
                                                     --set indexNode.replicas=2 \
                                                     --set dataNode.replicas=2 \
+                                                    --set dataCoordinator.gc.missingTolerance=86400 \
+                                                    --set dataCoordinator.gc.dropTolerance=86400 \
                                                     --version ${chart_version} \
                                                     -f values/${mqMode}.yaml \
                                                     -f values/nightly.yaml "
@@ -246,7 +248,7 @@ pipeline {
                             dir ('tests/scripts') {
                                 script {
                                     def release_name=sh(returnStdout: true, script: './get_release_name.sh')
-                                    //sh "./uninstall_milvus.sh --release-name ${release_name}"
+                                    sh "./uninstall_milvus.sh --release-name ${release_name}"
                                     sh "./ci_logs.sh --log-dir /ci-logs  --artifacts-name ${env.ARTIFACTS}/artifacts-${PROJECT_NAME}-${MILVUS_SERVER_TYPE}-${SEMVER}-${env.BUILD_NUMBER}-${MILVUS_CLIENT}-e2e-logs \
                                     --release-name ${release_name}"
                                     dir("${env.ARTIFACTS}") {

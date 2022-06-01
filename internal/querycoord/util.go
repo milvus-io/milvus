@@ -90,9 +90,6 @@ func getDstNodeIDByTask(t task) int64 {
 	case commonpb.MsgType_WatchDeltaChannels:
 		watchDeltaChannel := t.(*watchDeltaChannelTask)
 		nodeID = watchDeltaChannel.NodeID
-	case commonpb.MsgType_WatchQueryChannels:
-		watchQueryChannel := t.(*watchQueryChannelTask)
-		nodeID = watchQueryChannel.NodeID
 	case commonpb.MsgType_ReleaseCollection:
 		releaseCollection := t.(*releaseCollectionTask)
 		nodeID = releaseCollection.NodeID

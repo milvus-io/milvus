@@ -65,9 +65,23 @@ func TestIndexCoord(t *testing.T) {
 	ic.assignTaskInterval = 200 * time.Millisecond
 	ic.taskLimit = 20
 
+	dcm := &DataCoordMock{
+		Err:  false,
+		Fail: false,
+	}
+	err = ic.SetDataCoord(dcm)
+	assert.Nil(t, err)
+
 	ic.SetEtcdClient(etcdCli)
 	err = ic.Init()
 	assert.Nil(t, err)
+
+	ccm := &ChunkManagerMock{
+		Err:  false,
+		Fail: false,
+	}
+	ic.chunkManager = ccm
+
 	err = ic.Register()
 	assert.Nil(t, err)
 	err = ic.Start()
@@ -178,8 +192,7 @@ func TestIndexCoord(t *testing.T) {
 			resp, err := ic.GetIndexStates(ctx, req)
 			assert.Nil(t, err)
 			assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-			if resp.States[0].State == commonpb.IndexState_Finished ||
-				resp.States[0].State == commonpb.IndexState_Failed {
+			if resp.States[0].State == commonpb.IndexState_Finished {
 				break
 			}
 			time.Sleep(100 * time.Millisecond)
@@ -387,5 +400,73 @@ func TestIndexCoord_GetIndexFilePaths(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
 		assert.NotEqual(t, "", resp.Status.Reason)
+	})
+
+	t.Run("set DataCoord with nil", func(t *testing.T) {
+		err := ic.SetDataCoord(nil)
+		assert.Error(t, err)
+	})
+}
+
+func Test_tryAcquireSegmentReferLock(t *testing.T) {
+	ic := &IndexCoord{
+		session: &sessionutil.Session{
+			ServerID: 1,
+		},
+	}
+	dcm := &DataCoordMock{
+		Err:  false,
+		Fail: false,
+	}
+	cmm := &ChunkManagerMock{
+		Err:  false,
+		Fail: false,
+	}
+
+	ic.dataCoordClient = dcm
+	ic.chunkManager = cmm
+
+	t.Run("success", func(t *testing.T) {
+		err := ic.tryAcquireSegmentReferLock(context.Background(), []UniqueID{1})
+		assert.Nil(t, err)
+	})
+
+	t.Run("error", func(t *testing.T) {
+		dcmE := &DataCoordMock{
+			Err:  true,
+			Fail: false,
+		}
+		ic.dataCoordClient = dcmE
+		err := ic.tryAcquireSegmentReferLock(context.Background(), []UniqueID{1})
+		assert.Error(t, err)
+	})
+
+	t.Run("Fail", func(t *testing.T) {
+		dcmF := &DataCoordMock{
+			Err:  false,
+			Fail: true,
+		}
+		ic.dataCoordClient = dcmF
+		err := ic.tryAcquireSegmentReferLock(context.Background(), []UniqueID{1})
+		assert.Error(t, err)
+	})
+}
+
+func Test_tryReleaseSegmentReferLock(t *testing.T) {
+	ic := &IndexCoord{
+		session: &sessionutil.Session{
+			ServerID: 1,
+		},
+	}
+	dcm := &DataCoordMock{
+		Err:  false,
+		Fail: false,
+	}
+
+	ic.dataCoordClient = dcm
+
+	t.Run("success", func(t *testing.T) {
+		err := ic.tryReleaseSegmentReferLock(context.Background(), []UniqueID{1})
+		assert.NoError(t, err)
 	})
 }

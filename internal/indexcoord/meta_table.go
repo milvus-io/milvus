@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path"
 	"strconv"
 	"sync"
 
@@ -99,7 +100,7 @@ func (mt *metaTable) saveIndexMeta(meta *Meta) error {
 	if err != nil {
 		return err
 	}
-	key := "indexes/" + strconv.FormatInt(meta.indexMeta.IndexBuildID, 10)
+	key := path.Join(indexFilePrefix, strconv.FormatInt(meta.indexMeta.IndexBuildID, 10))
 	err = mt.client.CompareVersionAndSwap(key, meta.revision, string(value))
 	log.Debug("IndexCoord metaTable saveIndexMeta ", zap.String("key", key), zap.Error(err))
 	if err != nil {
@@ -434,13 +435,13 @@ func (mt *metaTable) GetUnassignedTasks(onlineNodeIDs []int64) []Meta {
 
 // HasSameReq determine whether there are same indexing tasks.
 func (mt *metaTable) HasSameReq(req *indexpb.BuildIndexRequest) (bool, UniqueID) {
-	mt.lock.Lock()
-	defer mt.lock.Unlock()
+	mt.lock.RLock()
+	defer mt.lock.RUnlock()
 
-	log.Debug("IndexCoord judges whether the same task exists in meta table", zap.Int64("indexBuildID", req.IndexBuildID),
-		zap.Int64("indexID", req.IndexID), zap.Any("index params", req.IndexParams),
-		zap.Any("type params", req.TypeParams))
 	for _, meta := range mt.indexBuildID2Meta {
+		if req.GetSegmentID() != meta.indexMeta.Req.GetSegmentID() {
+			continue
+		}
 		if meta.indexMeta.Req.IndexID != req.IndexID {
 			continue
 		}
@@ -497,7 +498,7 @@ func (mt *metaTable) HasSameReq(req *indexpb.BuildIndexRequest) (bool, UniqueID)
 		return true, meta.indexMeta.IndexBuildID
 	}
 
-	return false, -1
+	return false, 0
 }
 
 // LoadMetaFromETCD load the meta of specified indexBuildID from ETCD.

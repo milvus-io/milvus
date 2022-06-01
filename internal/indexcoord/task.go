@@ -27,11 +27,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 )
 
-const (
-	// IndexAddTaskName is the name of the operation to add index task.
-	IndexAddTaskName = "IndexAddTask"
-)
-
 type task interface {
 	Ctx() context.Context
 	ID() UniqueID       // return ReqID

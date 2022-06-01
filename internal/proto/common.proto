@@ -8,6 +8,8 @@ option java_package = "io.milvus.grpc";
 option java_outer_classname = "CommonProto";
 option java_generate_equals_and_hash = true;
 
+import "google/protobuf/descriptor.proto";
+
 enum ErrorCode {
     Success = 0;
     UnexpectedError = 1;
@@ -42,7 +44,19 @@ enum ErrorCode {
     DeleteCredentialFailure = 31;
     GetCredentialFailure = 32;
     ListCredUsersFailure = 33;
-    NotShardLeader = 34;
+    GetUserFailure = 34;
+    CreateRoleFailure = 35;
+    DropRoleFailure = 36;
+    OperateUserRoleFailure = 37;
+    SelectRoleFailure = 38;
+    SelectUserFailure = 39;
+    SelectResourceFailure = 40;
+    OperatePrivilegeFailure = 41;
+    SelectGrantFailure = 42;
+    RefreshPolicyInfoCacheFailure = 43;
+    ListPolicyFailure = 44;
+    NotShardLeader = 45;
+    NoReplicaAvailable = 46;
 
     // internal error code.
     DDRequestRace = 1000;
@@ -196,6 +210,18 @@ enum MsgType {
     DeleteCredential = 1502;
     UpdateCredential = 1503;
     ListCredUsernames = 1504;
+
+    /* RBAC */
+    CreateRole = 1600;
+    DropRole = 1601;
+    OperateUserRole = 1602;
+    SelectRole = 1603;
+    SelectUser = 1604;
+    SelectResource = 1605;
+    OperatePrivilege = 1606;
+    SelectGrant = 1607;
+    RefreshPolicyInfoCache = 1608;
+    ListPolicy = 1609;
 }
 
 message MsgBase {
@@ -243,4 +269,31 @@ enum ImportState {
     ImportParsed = 4;
     ImportPersisted = 5;
     ImportCompleted = 6;
+}
+
+enum ResourceType {
+    Collection = 0;
+}
+
+enum ResourcePrivilege {
+    PrivilegeAll = 0;
+    PrivilegeCreate = 1;
+    PrivilegeDrop = 2;
+    PrivilegeAlter = 3;
+    PrivilegeRead = 4;
+    PrivilegeLoad = 5;
+    PrivilegeRelease = 6;
+    PrivilegeCompact = 7;
+    PrivilegeInsert = 8;
+    PrivilegeDelete = 9;
+}
+
+message PrivilegeExt {
+    ResourceType resource_type = 1;
+    ResourcePrivilege resource_privilege = 2;
+    int32 resource_name_index = 3;
+}
+
+extend google.protobuf.MessageOptions {
+    PrivilegeExt privilege_ext_obj = 1001;
 }

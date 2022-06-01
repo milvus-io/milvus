@@ -122,6 +122,17 @@ service RootCoord {
     rpc ListCredUsers(milvus.ListCredUsersRequest) returns (milvus.ListCredUsersResponse) {}
     // userd by proxy, not exposed to sdk
     rpc GetCredential(GetCredentialRequest) returns (GetCredentialResponse) {}
+
+    // https://wiki.lfaidata.foundation/display/MIL/MEP+29+--+Support+Role-Based+Access+Control
+    rpc CreateRole(milvus.CreateRoleRequest) returns (common.Status) {}
+    rpc DropRole(milvus.DropRoleRequest) returns (common.Status) {}
+    rpc OperateUserRole(milvus.OperateUserRoleRequest) returns (common.Status) {}
+    rpc SelectRole(milvus.SelectRoleRequest) returns (milvus.SelectRoleResponse) {}
+    rpc SelectUser(milvus.SelectUserRequest) returns (milvus.SelectUserResponse) {}
+    rpc SelectResource(milvus.SelectResourceRequest) returns (milvus.SelectResourceResponse) {}
+    rpc OperatePrivilege(milvus.OperatePrivilegeRequest) returns (common.Status) {}
+    rpc SelectGrant(milvus.SelectGrantRequest) returns (milvus.SelectGrantResponse) {}
+    rpc ListPolicy(internal.ListPolicyRequest) returns (internal.ListPolicyResponse) {}
 }
 
 message AllocTimestampRequest {

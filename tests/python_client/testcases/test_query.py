@@ -1302,7 +1302,7 @@ class  TestqueryString(TestcaseBase):
         collection_w = self.init_collection_general(prefix, insert_data=True)[0]
         expression = 'float like "0%"'
         collection_w.query(expression, check_task=CheckTasks.err_res,
-                           check_items={ct.err_code: 1, ct.err_msg: "like operation on non-text field is unsupported"}
+                           check_items={ct.err_code: 1, ct.err_msg: "like operation on non-string field is unsupported"}
                            )
 
     @pytest.mark.tags(CaseLabel.L1)

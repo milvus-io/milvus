@@ -48,13 +48,6 @@ func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, 
 			ID:          node.session.ServerID,
 		},
 		SystemConfigurations: metricsinfo.QueryNodeConfiguration{
-			SearchReceiveBufSize:         Params.QueryNodeCfg.SearchReceiveBufSize,
-			SearchPulsarBufSize:          Params.QueryNodeCfg.SearchPulsarBufSize,
-			SearchResultReceiveBufSize:   Params.QueryNodeCfg.SearchResultReceiveBufSize,
-			RetrieveReceiveBufSize:       Params.QueryNodeCfg.RetrieveReceiveBufSize,
-			RetrievePulsarBufSize:        Params.QueryNodeCfg.RetrievePulsarBufSize,
-			RetrieveResultReceiveBufSize: Params.QueryNodeCfg.RetrieveResultReceiveBufSize,
-
 			SimdType: Params.CommonCfg.SimdType,
 		},
 	}

@@ -70,8 +70,8 @@ var (
 			Buckets:   buckets, // unit: ms
 		}, []string{nodeIDLabelName, queryTypeLabelName})
 
-	// ProxyReduceSearchResultLatency record the time that the proxy reduces search result.
-	ProxyReduceSearchResultLatency = prometheus.NewHistogramVec(
+	// ProxyReduceResultLatency record the time that the proxy reduces search result.
+	ProxyReduceResultLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.ProxyRole,
@@ -80,8 +80,8 @@ var (
 			Buckets:   buckets, // unit: ms
 		}, []string{nodeIDLabelName, queryTypeLabelName})
 
-	// ProxyDecodeSearchResultLatency record the time that the proxy decodes the search result.
-	ProxyDecodeSearchResultLatency = prometheus.NewHistogramVec(
+	// ProxyDecodeResultLatency record the time that the proxy decodes the search result.
+	ProxyDecodeResultLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.ProxyRole,
@@ -233,8 +233,8 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(ProxySearchLatency)
 	registry.MustRegister(ProxySendSQReqLatency)
 	registry.MustRegister(ProxyWaitForSearchResultLatency)
-	registry.MustRegister(ProxyReduceSearchResultLatency)
-	registry.MustRegister(ProxyDecodeSearchResultLatency)
+	registry.MustRegister(ProxyReduceResultLatency)
+	registry.MustRegister(ProxyDecodeResultLatency)
 
 	registry.MustRegister(ProxyMsgStreamObjectsForPChan)
 

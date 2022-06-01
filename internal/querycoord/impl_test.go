@@ -23,10 +23,11 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"go.uber.org/zap"
 
 	"github.com/stretchr/testify/assert"
 
@@ -362,14 +363,6 @@ func TestGrpcTask(t *testing.T) {
 		states, err := queryCoord.GetComponentStates(ctx)
 		assert.Equal(t, commonpb.ErrorCode_Success, states.Status.ErrorCode)
 		assert.Equal(t, internalpb.StateCode_Healthy, states.State.StateCode)
-		assert.Nil(t, err)
-	})
-
-	t.Run("Test CreateQueryChannel", func(t *testing.T) {
-		res, err := queryCoord.CreateQueryChannel(ctx, &querypb.CreateQueryChannelRequest{
-			CollectionID: defaultCollectionID,
-		})
-		assert.Equal(t, commonpb.ErrorCode_Success, res.Status.ErrorCode)
 		assert.Nil(t, err)
 	})
 
@@ -762,14 +755,6 @@ func TestGrpcTaskBeforeHealthy(t *testing.T) {
 		states, err := unHealthyCoord.GetComponentStates(ctx)
 		assert.Equal(t, commonpb.ErrorCode_Success, states.Status.ErrorCode)
 		assert.Equal(t, internalpb.StateCode_Abnormal, states.State.StateCode)
-		assert.Nil(t, err)
-	})
-
-	t.Run("Test CreateQueryChannel", func(t *testing.T) {
-		res, err := unHealthyCoord.CreateQueryChannel(ctx, &querypb.CreateQueryChannelRequest{
-			CollectionID: defaultCollectionID,
-		})
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, res.Status.ErrorCode)
 		assert.Nil(t, err)
 	})
 
@@ -1695,7 +1680,7 @@ func TestGetShardLeaders(t *testing.T) {
 	queryCoord.cluster = mockCluster
 	resp, err = queryCoord.GetShardLeaders(ctx, getShardLeadersReq)
 	assert.NoError(t, err)
-	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+	assert.Equal(t, commonpb.ErrorCode_NoReplicaAvailable, resp.Status.ErrorCode)
 
 	// TODO(yah01): Disable the unit test case for now,
 	// restore it after the rebalance between replicas feature is implemented

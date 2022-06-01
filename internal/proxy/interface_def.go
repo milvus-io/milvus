@@ -19,8 +19,6 @@ package proxy
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/internal/proto/querypb"
-
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 )
 
@@ -43,9 +41,4 @@ type timestampAllocatorInterface interface {
 
 type getChannelsService interface {
 	GetChannels(collectionID UniqueID) (map[vChan]pChan, error)
-}
-
-// createQueryChannelInterface defines CreateQueryChannel
-type createQueryChannelInterface interface {
-	CreateQueryChannel(ctx context.Context, request *querypb.CreateQueryChannelRequest) (*querypb.CreateQueryChannelResponse, error)
 }

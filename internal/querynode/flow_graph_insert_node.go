@@ -43,7 +43,7 @@ import (
 // insertNode is one of the nodes in query flow graph
 type insertNode struct {
 	baseNode
-	streamingReplica ReplicaInterface
+	metaReplica ReplicaInterface // streaming
 }
 
 // insertData stores the valid insert data
@@ -111,7 +111,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	})
 	for _, insertMsg := range iMsg.insertMessages {
 		// if loadType is loadCollection, check if partition exists, if not, create partition
-		col, err := iNode.streamingReplica.getCollectionByID(insertMsg.CollectionID)
+		col, err := iNode.metaReplica.getCollectionByID(insertMsg.CollectionID)
 		if err != nil {
 			// should not happen, QueryNode should create collection before start flow graph
 			err = fmt.Errorf("insertNode getCollectionByID failed, err = %s", err)
@@ -119,7 +119,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			panic(err)
 		}
 		if col.getLoadType() == loadTypeCollection {
-			err = iNode.streamingReplica.addPartition(insertMsg.CollectionID, insertMsg.PartitionID)
+			err = iNode.metaReplica.addPartition(insertMsg.CollectionID, insertMsg.PartitionID)
 			if err != nil {
 				// error occurs only when collection cannot be found, should not happen
 				err = fmt.Errorf("insertNode addPartition failed, err = %s", err)
@@ -129,8 +129,13 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		}
 
 		// check if segment exists, if not, create this segment
-		if !iNode.streamingReplica.hasSegment(insertMsg.SegmentID) {
-			err := iNode.streamingReplica.addSegment(insertMsg.SegmentID, insertMsg.PartitionID, insertMsg.CollectionID, insertMsg.ShardName, segmentTypeGrowing)
+		has, err := iNode.metaReplica.hasSegment(insertMsg.SegmentID, segmentTypeGrowing)
+		if err != nil {
+			log.Error(err.Error()) // never gonna happen
+			panic(err)
+		}
+		if !has {
+			err = iNode.metaReplica.addSegment(insertMsg.SegmentID, insertMsg.PartitionID, insertMsg.CollectionID, insertMsg.ShardName, segmentTypeGrowing)
 			if err != nil {
 				// error occurs when collection or partition cannot be found, collection and partition should be created before
 				err = fmt.Errorf("insertNode addSegment failed, err = %s", err)
@@ -154,7 +159,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		} else {
 			typeutil.MergeFieldData(iData.insertRecords[insertMsg.SegmentID], insertRecord.FieldsData)
 		}
-		pks, err := getPrimaryKeys(insertMsg, iNode.streamingReplica)
+		pks, err := getPrimaryKeys(insertMsg, iNode.metaReplica)
 		if err != nil {
 			// error occurs when cannot find collection or data is misaligned, should not happen
 			err = fmt.Errorf("failed to get primary keys, err = %d", err)
@@ -166,7 +171,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 	// 2. do preInsert
 	for segmentID := range iData.insertRecords {
-		var targetSegment, err = iNode.streamingReplica.getSegmentByID(segmentID)
+		var targetSegment, err = iNode.metaReplica.getSegmentByID(segmentID, segmentTypeGrowing)
 		if err != nil {
 			// should not happen, segment should be created before
 			err = fmt.Errorf("insertNode getSegmentByID failed, err = %s", err)
@@ -213,13 +218,13 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	}
 	// 1. filter segment by bloom filter
 	for _, delMsg := range iMsg.deleteMessages {
-		if iNode.streamingReplica.getSegmentNum() != 0 {
+		if iNode.metaReplica.getSegmentNum(segmentTypeGrowing) != 0 {
 			log.Debug("delete in streaming replica",
 				zap.Any("collectionID", delMsg.CollectionID),
 				zap.Any("collectionName", delMsg.CollectionName),
 				zap.Int64("numPKs", delMsg.NumRows),
 				zap.Any("timestamp", delMsg.Timestamps))
-			err := processDeleteMessages(iNode.streamingReplica, delMsg, delData)
+			err := processDeleteMessages(iNode.metaReplica, segmentTypeGrowing, delMsg, delData)
 			if err != nil {
 				// error occurs when missing meta info or unexpected pk type, should not happen
 				err = fmt.Errorf("insertNode processDeleteMessages failed, collectionID = %d, err = %s", delMsg.CollectionID, err)
@@ -231,7 +236,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 	// 2. do preDelete
 	for segmentID, pks := range delData.deleteIDs {
-		segment, err := iNode.streamingReplica.getSegmentByID(segmentID)
+		segment, err := iNode.metaReplica.getSegmentByID(segmentID, segmentTypeGrowing)
 		if err != nil {
 			// error occurs when segment cannot be found, should not happen
 			err = fmt.Errorf("insertNode getSegmentByID failed, err = %s", err)
@@ -269,7 +274,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 }
 
 // processDeleteMessages would execute delete operations for growing segments
-func processDeleteMessages(replica ReplicaInterface, msg *msgstream.DeleteMsg, delData *deleteData) error {
+func processDeleteMessages(replica ReplicaInterface, segType segmentType, msg *msgstream.DeleteMsg, delData *deleteData) error {
 	var partitionIDs []UniqueID
 	var err error
 	if msg.PartitionID != -1 {
@@ -282,7 +287,7 @@ func processDeleteMessages(replica ReplicaInterface, msg *msgstream.DeleteMsg, d
 	}
 	resultSegmentIDs := make([]UniqueID, 0)
 	for _, partitionID := range partitionIDs {
-		segmentIDs, err := replica.getSegmentIDs(partitionID)
+		segmentIDs, err := replica.getSegmentIDs(partitionID, segType)
 		if err != nil {
 			return err
 		}
@@ -291,7 +296,7 @@ func processDeleteMessages(replica ReplicaInterface, msg *msgstream.DeleteMsg, d
 
 	primaryKeys := storage.ParseIDs2PrimaryKeys(msg.PrimaryKeys)
 	for _, segmentID := range resultSegmentIDs {
-		segment, err := replica.getSegmentByID(segmentID)
+		segment, err := replica.getSegmentByID(segmentID, segType)
 		if err != nil {
 			return err
 		}
@@ -341,7 +346,7 @@ func filterSegmentsByPKs(pks []primaryKey, timestamps []Timestamp, segment *Segm
 func (iNode *insertNode) insert(iData *insertData, segmentID UniqueID, wg *sync.WaitGroup) error {
 	defer wg.Done()
 
-	var targetSegment, err = iNode.streamingReplica.getSegmentByID(segmentID)
+	var targetSegment, err = iNode.metaReplica.getSegmentByID(segmentID, segmentTypeGrowing)
 	if err != nil {
 		return fmt.Errorf("getSegmentByID failed, err = %s", err)
 	}
@@ -366,7 +371,7 @@ func (iNode *insertNode) insert(iData *insertData, segmentID UniqueID, wg *sync.
 // delete would execute delete operations for specific growing segment
 func (iNode *insertNode) delete(deleteData *deleteData, segmentID UniqueID, wg *sync.WaitGroup) error {
 	defer wg.Done()
-	targetSegment, err := iNode.streamingReplica.getSegmentByID(segmentID)
+	targetSegment, err := iNode.metaReplica.getSegmentByID(segmentID, segmentTypeGrowing)
 	if err != nil {
 		return fmt.Errorf("getSegmentByID failed, err = %s", err)
 	}
@@ -390,14 +395,14 @@ func (iNode *insertNode) delete(deleteData *deleteData, segmentID UniqueID, wg *
 
 // TODO: remove this function to proper file
 // getPrimaryKeys would get primary keys by insert messages
-func getPrimaryKeys(msg *msgstream.InsertMsg, streamingReplica ReplicaInterface) ([]primaryKey, error) {
+func getPrimaryKeys(msg *msgstream.InsertMsg, metaReplica ReplicaInterface) ([]primaryKey, error) {
 	if err := msg.CheckAligned(); err != nil {
 		log.Warn("misaligned messages detected", zap.Error(err))
 		return nil, err
 	}
 	collectionID := msg.GetCollectionID()
 
-	collection, err := streamingReplica.getCollectionByID(collectionID)
+	collection, err := metaReplica.getCollectionByID(collectionID)
 	if err != nil {
 		log.Warn(err.Error())
 		return nil, err
@@ -498,7 +503,7 @@ func getPKsFromColumnBasedInsertMsg(msg *msgstream.InsertMsg, schema *schemapb.C
 }
 
 // newInsertNode returns a new insertNode
-func newInsertNode(streamingReplica ReplicaInterface) *insertNode {
+func newInsertNode(metaReplica ReplicaInterface) *insertNode {
 	maxQueueLength := Params.QueryNodeCfg.FlowGraphMaxQueueLength
 	maxParallelism := Params.QueryNodeCfg.FlowGraphMaxParallelism
 
@@ -507,7 +512,7 @@ func newInsertNode(streamingReplica ReplicaInterface) *insertNode {
 	baseNode.SetMaxParallelism(maxParallelism)
 
 	return &insertNode{
-		baseNode:         baseNode,
-		streamingReplica: streamingReplica,
+		baseNode:    baseNode,
+		metaReplica: metaReplica,
 	}
 }

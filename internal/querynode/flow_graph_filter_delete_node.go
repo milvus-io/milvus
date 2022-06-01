@@ -34,7 +34,7 @@ import (
 type filterDeleteNode struct {
 	baseNode
 	collectionID UniqueID
-	replica      ReplicaInterface
+	metaReplica  ReplicaInterface
 }
 
 // Name returns the name of filterDeleteNode
@@ -124,13 +124,13 @@ func (fddNode *filterDeleteNode) filterInvalidDeleteMessage(msg *msgstream.Delet
 	}
 
 	// check if collection exists
-	col, err := fddNode.replica.getCollectionByID(msg.CollectionID)
+	col, err := fddNode.metaReplica.getCollectionByID(msg.CollectionID)
 	if err != nil {
 		// QueryNode should add collection before start flow graph
 		return nil, fmt.Errorf("filter invalid delete message, collection does not exist, collectionID = %d", msg.CollectionID)
 	}
 	if col.getLoadType() == loadTypePartition {
-		if !fddNode.replica.hasPartition(msg.PartitionID) {
+		if !fddNode.metaReplica.hasPartition(msg.PartitionID) {
 			// filter out msg which not belongs to the loaded partitions
 			return nil, nil
 		}
@@ -139,7 +139,7 @@ func (fddNode *filterDeleteNode) filterInvalidDeleteMessage(msg *msgstream.Delet
 }
 
 // newFilteredDeleteNode returns a new filterDeleteNode
-func newFilteredDeleteNode(replica ReplicaInterface, collectionID UniqueID) *filterDeleteNode {
+func newFilteredDeleteNode(metaReplica ReplicaInterface, collectionID UniqueID) *filterDeleteNode {
 
 	maxQueueLength := Params.QueryNodeCfg.FlowGraphMaxQueueLength
 	maxParallelism := Params.QueryNodeCfg.FlowGraphMaxParallelism
@@ -151,6 +151,6 @@ func newFilteredDeleteNode(replica ReplicaInterface, collectionID UniqueID) *fil
 	return &filterDeleteNode{
 		baseNode:     baseNode,
 		collectionID: collectionID,
-		replica:      replica,
+		metaReplica:  metaReplica,
 	}
 }

@@ -55,10 +55,7 @@ type Cluster interface {
 	watchDmChannels(ctx context.Context, nodeID int64, in *querypb.WatchDmChannelsRequest) error
 	watchDeltaChannels(ctx context.Context, nodeID int64, in *querypb.WatchDeltaChannelsRequest) error
 
-	hasWatchedQueryChannel(ctx context.Context, nodeID int64, collectionID UniqueID) bool
 	hasWatchedDeltaChannel(ctx context.Context, nodeID int64, collectionID UniqueID) bool
-	addQueryChannel(ctx context.Context, nodeID int64, in *querypb.AddQueryChannelRequest) error
-	removeQueryChannel(ctx context.Context, nodeID int64, in *querypb.RemoveQueryChannelRequest) error
 	releaseCollection(ctx context.Context, nodeID int64, in *querypb.ReleaseCollectionRequest) error
 	releasePartitions(ctx context.Context, nodeID int64, in *querypb.ReleasePartitionsRequest) error
 	getSegmentInfo(ctx context.Context, in *querypb.GetSegmentInfoRequest) ([]*querypb.SegmentInfo, error)
@@ -309,64 +306,6 @@ func (c *queryNodeCluster) hasWatchedDeltaChannel(ctx context.Context, nodeID in
 	defer c.RUnlock()
 
 	return c.nodes[nodeID].hasWatchedDeltaChannel(collectionID)
-}
-
-func (c *queryNodeCluster) hasWatchedQueryChannel(ctx context.Context, nodeID int64, collectionID UniqueID) bool {
-	c.RLock()
-	defer c.RUnlock()
-
-	return c.nodes[nodeID].hasWatchedQueryChannel(collectionID)
-}
-
-func (c *queryNodeCluster) addQueryChannel(ctx context.Context, nodeID int64, in *querypb.AddQueryChannelRequest) error {
-	c.RLock()
-	var targetNode Node
-	if node, ok := c.nodes[nodeID]; ok {
-		targetNode = node
-	}
-	c.RUnlock()
-
-	if targetNode != nil {
-		emptyChangeInfo := &querypb.SealedSegmentsChangeInfo{
-			Base: &commonpb.MsgBase{
-				MsgType: commonpb.MsgType_SealedSegmentsChangeInfo,
-			},
-		}
-		msgPosition, err := c.clusterMeta.sendSealedSegmentChangeInfos(in.CollectionID, in.QueryChannel, emptyChangeInfo)
-		if err != nil {
-			return err
-		}
-
-		// update watch position to latest
-		in.SeekPosition = msgPosition
-		err = targetNode.addQueryChannel(ctx, in)
-		if err != nil {
-			return err
-		}
-		return nil
-	}
-
-	return fmt.Errorf("addQueryChannel: can't find QueryNode by nodeID, nodeID = %d", nodeID)
-}
-func (c *queryNodeCluster) removeQueryChannel(ctx context.Context, nodeID int64, in *querypb.RemoveQueryChannelRequest) error {
-	c.RLock()
-	var targetNode Node
-	if node, ok := c.nodes[nodeID]; ok {
-		targetNode = node
-	}
-	c.RUnlock()
-
-	if targetNode != nil {
-		err := targetNode.removeQueryChannel(ctx, in)
-		if err != nil {
-			log.Warn("removeQueryChannel: queryNode remove query channel error", zap.String("error", err.Error()))
-			return err
-		}
-
-		return nil
-	}
-
-	return fmt.Errorf("removeQueryChannel: can't find QueryNode by nodeID, nodeID = %d", nodeID)
 }
 
 func (c *queryNodeCluster) releaseCollection(ctx context.Context, nodeID int64, in *querypb.ReleaseCollectionRequest) error {
@@ -724,10 +663,6 @@ func (c *queryNodeCluster) isOnline(nodeID int64) (bool, error) {
 //				log.Debug("PrintMeta: query coordinator cluster info: collectionInfo", zap.Int64("nodeID", id), zap.Int64("collectionID", info.CollectionID), zap.Any("info", info))
 //			}
 //
-//			queryChannelInfos := node.showWatchedQueryChannels()
-//			for _, info := range queryChannelInfos {
-//				log.Debug("PrintMeta: query coordinator cluster info: watchedQueryChannelInfo", zap.Int64("nodeID", id), zap.Int64("collectionID", info.CollectionID), zap.Any("info", info))
-//			}
 //		}
 //	}
 //}

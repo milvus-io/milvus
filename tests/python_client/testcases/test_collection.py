@@ -1,5 +1,3 @@
-from functools import reduce
-
 import numpy
 import pandas as pd
 import pytest
@@ -1074,7 +1072,6 @@ class TestCollectionOperation(TestcaseBase):
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.check_collection_property,
                                              check_items={exp_name: c_name, exp_schema: schema})
 
-    
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_collection_after_load_partition(self):
         """
@@ -2227,6 +2224,9 @@ class TestLoadCollection(TestcaseBase):
         assert collection_w.num_entities == ct.default_nb
 
         collection_w.load(replica_number=1)
+        for seg in self.utility_wrap.get_query_segment_info(collection_w.name)[0]:
+            assert len(seg.nodeIds) == 1
+
         collection_w.query(expr=f"{ct.default_int64_field_name} in [0]")
         loading_progress, _ = self.utility_wrap.loading_progress(collection_w.name)
         assert loading_progress == {'loading_progress': '100%', 'num_loaded_partitions': 1, 'not_loaded_partitions': []}
@@ -2248,11 +2248,12 @@ class TestLoadCollection(TestcaseBase):
                            check_items={'exp_res': [{'int64': 0}]})
 
         # verify loaded segments included 2 replicas and twice num entities
-        seg_info, _ = self.utility_wrap.get_query_segment_info(collection_w.name)
-        seg_ids = list(map(lambda seg: seg.segmentID, seg_info))
-        num_entities = list(map(lambda seg: seg.num_rows, seg_info))
-        assert reduce(lambda x, y: x ^ y, seg_ids) == 0
-        assert reduce(lambda x, y: x + y, num_entities) == ct.default_nb * 2
+        seg_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
+        num_entities = 0
+        for seg in seg_info:
+            assert len(seg.nodeIds) == 2
+            num_entities += seg.num_rows
+        assert num_entities == ct.default_nb
 
     @pytest.mark.tags(CaseLabel.ClusterOnly)
     def test_load_replica_multi(self):
@@ -2276,6 +2277,9 @@ class TestLoadCollection(TestcaseBase):
         collection_w.load(replica_number=replica_number)
         replicas = collection_w.get_replicas()[0]
         assert len(replicas.groups) == replica_number
+
+        for seg in self.utility_wrap.get_query_segment_info(collection_w.name)[0]:
+            assert len(seg.nodeIds) == replica_number
 
         query_res, _ = collection_w.query(expr=f"{ct.default_int64_field_name} in [0, {tmp_nb}]")
         assert len(query_res) == 2
@@ -2302,6 +2306,8 @@ class TestLoadCollection(TestcaseBase):
         assert collection_w.num_entities == ct.default_nb * 2
 
         collection_w.load([partition_w.name], replica_number=2)
+        for seg in self.utility_wrap.get_query_segment_info(collection_w.name)[0]:
+            assert len(seg.nodeIds) == 2
         # default tag query 0 empty
         collection_w.query(expr=f"{ct.default_int64_field_name} in [0]", partition_names=[ct.default_tag],
                            check_tasks=CheckTasks.check_query_empty)
@@ -2342,20 +2348,18 @@ class TestLoadCollection(TestcaseBase):
         # verify there are 2 groups (2 replicas)
         assert len(replicas.groups) == 2
         log.debug(replicas)
+        all_group_nodes = []
         for group in replicas.groups:
             # verify each group have 3 shards
             assert len(group.shards) == 2
-            shard_leaders = []
-            # verify one group has 3 querynodes, and one of the querynode isn't shard leader
-            if len(group.group_nodes) == 3:
-                for shard in group.shards:
-                    shard_leaders.append(shard.shard_leader)
-                assert len(shard_leaders) == 2
+            all_group_nodes.extend(group.group_nodes)
+        # verify all groups has 5 querynodes
+        assert len(all_group_nodes) == 5
 
         # Verify 2 replicas segments loaded
         seg_info, _ = self.utility_wrap.get_query_segment_info(collection_w.name)
-        seg_ids = list(map(lambda seg: seg.segmentID, seg_info))
-        assert reduce(lambda x, y: x ^ y, seg_ids) == 0
+        for seg in seg_info:
+            assert len(seg.nodeIds) == 2
 
         # verify search successfully
         res, _ = collection_w.search(vectors, default_search_field, default_search_params, default_limit)
@@ -2393,20 +2397,18 @@ class TestLoadCollection(TestcaseBase):
         replicas, _ = collection_w.get_replicas()
         log.debug(replicas)
         assert len(replicas.groups) == 2
+        all_group_nodes = []
         for group in replicas.groups:
             # verify each group have 3 shards
             assert len(group.shards) == 3
-            # verify one group has 2 querynodes, and one of the querynode subscripe 2 dml channel
-            shard_leaders = []
-            if len(group.group_nodes) == 2:
-                for shard in group.shards:
-                    shard_leaders.append(shard.shard_leader)
-                assert len(shard_leaders) == 3 and len(set(shard_leaders)) == 2
+            all_group_nodes.extend(group.group_nodes)
+        # verify all groups has 5 querynodes
+        assert len(all_group_nodes) == 5
 
         # Verify 2 replicas segments loaded
         seg_info, _ = self.utility_wrap.get_query_segment_info(collection_w.name)
-        seg_ids = list(map(lambda seg: seg.segmentID, seg_info))
-        assert reduce(lambda x, y: x ^ y, seg_ids) == 0
+        for seg in seg_info:
+            assert len(seg.nodeIds) == 2
 
         # Verify search successfully
         res, _ = collection_w.search(vectors, default_search_field, default_search_params, default_limit)
@@ -2417,7 +2419,38 @@ class TestLoadCollection(TestcaseBase):
                            check_task=CheckTasks.check_query_results,
                            check_items={'exp_res': [{'int64': 0}, {'int64': 3000}]})
 
-    # https://github.com/milvus-io/milvus/issues/16726
+    @pytest.mark.tags(CaseLabel.L3)
+    def test_load_replica_sq_count_balance(self):
+        """
+        target: test load with multi replicas, and sq request load balance cross replicas
+        method: 1.Deploy milvus with multi querynodes
+                2.Insert entities and load with replicas
+                3.Do query req many times
+                4.Verify the querynode sq_req_count metrics
+        expected: Infer whether the query request is load balanced.
+        """
+        from utils.util_k8s import get_metrics_querynode_sq_req_count
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        df = cf.gen_default_dataframe_data(nb=5000)
+        mutation_res, _ = collection_w.insert(df)
+        assert collection_w.num_entities == 5000
+        total_sq_count = 20
+
+        collection_w.load(replica_number=3)
+        for i in range(total_sq_count):
+            ids = [random.randint(0, 100) for _ in range(5)]
+            collection_w.query(f"{ct.default_int64_field_name} in {ids}")
+
+        replicas, _ = collection_w.get_replicas()
+        log.debug(replicas)
+        sq_req_count = get_metrics_querynode_sq_req_count()
+        for group in replicas.groups:
+            group_nodes = group.group_nodes
+            group_sq_req_count = 0
+            for node in group_nodes:
+                group_sq_req_count += sq_req_count[node]
+            log.debug(f"Group nodes {group_nodes} with total sq_req_count {group_sq_req_count}")
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_get_collection_replicas_not_loaded(self):
         """
@@ -2432,7 +2465,8 @@ class TestLoadCollection(TestcaseBase):
         assert collection_w.num_entities == ct.default_nb
 
         collection_w.get_replicas(check_task=CheckTasks.err_res,
-                                  check_items={"err_code": 15, "err_msg": "getCollectionInfoByID: can't find collectionID"})
+                                  check_items={"err_code": 15,
+                                               "err_msg": "collection not found, maybe not loaded"})
 
 
 class TestReleaseAdvanced(TestcaseBase):
@@ -2735,9 +2769,10 @@ class TestCollectionString(TestcaseBase):
         self._connect()
         c_name = cf.gen_unique_str(prefix)
         schema = cf.gen_string_pk_default_collection_schema()
-        self.collection_wrap.init_collection(name=c_name, schema=schema, check_task=CheckTasks.check_collection_property,
+        self.collection_wrap.init_collection(name=c_name, schema=schema,
+                                             check_task=CheckTasks.check_collection_property,
                                              check_items={exp_name: c_name, exp_schema: schema})
-    
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_collection_with_muti_string_fields(self):
         """
@@ -2753,7 +2788,8 @@ class TestCollectionString(TestcaseBase):
         string_field_1 = cf.gen_string_field(is_primary=True)
         string_field_2 = cf.gen_string_field(name=c_name)
         schema = cf.gen_collection_schema(fields=[int_field, string_field_1, string_field_2, vec_field])
-        self.collection_wrap.init_collection(name=c_name, schema=schema, check_task=CheckTasks.check_collection_property,
+        self.collection_wrap.init_collection(name=c_name, schema=schema,
+                                             check_task=CheckTasks.check_collection_property,
                                              check_items={exp_name: c_name, exp_schema: schema})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -2785,8 +2821,8 @@ class TestCollectionString(TestcaseBase):
         max_length = 100000
         string_field = cf.gen_string_field(max_length_per_row=max_length)
         schema = cf.gen_collection_schema([int_field, string_field, vec_field])
-        error = {ct.err_code: 0, ct.err_msg: "invalid max_length_per_row: %s" %max_length}
-        self.collection_wrap.init_collection(name=c_name, schema=schema, 
+        error = {ct.err_code: 0, ct.err_msg: "invalid max_length_per_row: %s" % max_length}
+        self.collection_wrap.init_collection(name=c_name, schema=schema,
                                              check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -2816,13 +2852,8 @@ class TestCollectionString(TestcaseBase):
         int_field = cf.gen_int64_field()
         vec_field = cf.gen_float_vec_field()
         string_field = cf.gen_string_field(is_primary=True, auto_id=True)
-        fields=[int_field, string_field, vec_field]
-        schema, _=self.collection_schema_wrap.init_collection_schema(fields=fields)
+        fields = [int_field, string_field, vec_field]
+        schema, _ = self.collection_schema_wrap.init_collection_schema(fields=fields)
         error = {ct.err_code: 0, ct.err_msg: "autoID is not supported when the VarChar field is the primary key"}
         self.collection_wrap.init_collection(name=cf.gen_unique_str(prefix), schema=schema,
                                              check_task=CheckTasks.err_res, check_items=error)
-        
-        
-
-
-

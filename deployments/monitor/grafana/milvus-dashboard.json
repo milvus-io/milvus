@@ -53,7 +53,7 @@
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
   "id": null,
-  "iteration": 1653297662305,
+  "iteration": 1653896402508,
   "links": [],
   "liveNow": false,
   "panels": [
@@ -4678,13 +4678,104 @@
             "type": "prometheus",
             "uid": "$datasource"
           },
-          "description": "The 99th percentile of latency for searching segment over the last 2 minutes.",
+          "description": "per-minute increasing rate of searching requests.",
           "fill": 1,
           "fillGradient": 0,
           "gridPos": {
             "h": 6,
             "w": 8,
             "x": 0,
+            "y": 16
+          },
+          "hiddenSeries": false,
+          "id": 123350,
+          "legend": {
+            "avg": false,
+            "current": false,
+            "max": false,
+            "min": false,
+            "show": true,
+            "total": false,
+            "values": false
+          },
+          "lines": true,
+          "linewidth": 1,
+          "nullPointMode": "null",
+          "options": {
+            "alertThreshold": true
+          },
+          "percentage": false,
+          "pluginVersion": "8.3.2",
+          "pointradius": 2,
+          "points": false,
+          "renderer": "flot",
+          "seriesOverrides": [],
+          "spaceLength": 10,
+          "stack": false,
+          "steppedLine": false,
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${DS_PROMETHEUS}"
+              },
+              "exemplar": true,
+              "expr": "sum(increase(milvus_querynode_sq_req_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])/2) by (query_type, status, pod, node_id)",
+              "interval": "",
+              "legendFormat": "{{pod}}-{{node_id}}-{{query_type}}-{{status}}",
+              "queryType": "randomWalk",
+              "refId": "A"
+            }
+          ],
+          "thresholds": [],
+          "timeRegions": [],
+          "title": "Search Request Rate",
+          "tooltip": {
+            "shared": true,
+            "sort": 0,
+            "value_type": "individual"
+          },
+          "type": "graph",
+          "xaxis": {
+            "mode": "time",
+            "show": true,
+            "values": []
+          },
+          "yaxes": [
+            {
+              "$$hashKey": "object:3414",
+              "format": "short",
+              "logBase": 1,
+              "min": "0",
+              "show": true
+            },
+            {
+              "$$hashKey": "object:3415",
+              "format": "short",
+              "logBase": 1,
+              "show": true
+            }
+          ],
+          "yaxis": {
+            "align": false
+          }
+        },
+        {
+          "aliasColors": {},
+          "bars": false,
+          "dashLength": 10,
+          "dashes": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "description": "The 99th percentile of latency for searching segment over the last 2 minutes.",
+          "fill": 1,
+          "fillGradient": 0,
+          "gridPos": {
+            "h": 6,
+            "w": 8,
+            "x": 8,
             "y": 16
           },
           "hiddenSeries": false,
@@ -4776,7 +4867,7 @@
           "gridPos": {
             "h": 6,
             "w": 8,
-            "x": 8,
+            "x": 16,
             "y": 16
           },
           "hiddenSeries": false,
@@ -4867,8 +4958,8 @@
           "gridPos": {
             "h": 6,
             "w": 8,
-            "x": 16,
-            "y": 16
+            "x": 0,
+            "y": 22
           },
           "hiddenSeries": false,
           "id": 123311,
@@ -4958,7 +5049,7 @@
           "gridPos": {
             "h": 6,
             "w": 8,
-            "x": 0,
+            "x": 8,
             "y": 22
           },
           "hiddenSeries": false,
@@ -9346,6 +9437,6 @@
   "timezone": "browser",
   "title": "Milvus2.0",
   "uid": "uLf5cJ3Gz",
-  "version": 13,
+  "version": 4,
   "weekStart": ""
 }

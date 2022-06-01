@@ -35,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	oplog "github.com/opentracing/opentracing-go/log"
 )
@@ -337,6 +336,7 @@ func (scheduler *TaskScheduler) unmarshalTask(taskID UniqueID, t string) (task, 
 			cluster:             scheduler.cluster,
 			meta:                scheduler.meta,
 			excludeNodeIDs:      []int64{},
+			broker:              scheduler.broker,
 		}
 		newTask = loadSegmentTask
 	case commonpb.MsgType_ReleaseSegments:
@@ -381,18 +381,8 @@ func (scheduler *TaskScheduler) unmarshalTask(taskID UniqueID, t string) (task, 
 		}
 		newTask = watchDeltaChannelTask
 	case commonpb.MsgType_WatchQueryChannels:
-		//TODO::trigger condition may be different
-		loadReq := querypb.AddQueryChannelRequest{}
-		err = proto.Unmarshal([]byte(t), &loadReq)
-		if err != nil {
-			return nil, err
-		}
-		watchQueryChannelTask := &watchQueryChannelTask{
-			baseTask:               baseTask,
-			AddQueryChannelRequest: &loadReq,
-			cluster:                scheduler.cluster,
-		}
-		newTask = watchQueryChannelTask
+		//Deprecated WatchQueryChannel
+		log.Warn("legacy WatchQueryChannels type found, ignore")
 	case commonpb.MsgType_LoadBalanceSegments:
 		//TODO::trigger condition may be different
 		loadReq := querypb.LoadBalanceRequest{}
@@ -490,8 +480,6 @@ func (scheduler *TaskScheduler) processTask(t task) error {
 				protoSize = proto.Size(childTask.(*watchDmChannelTask).WatchDmChannelsRequest)
 			case commonpb.MsgType_WatchDeltaChannels:
 				protoSize = proto.Size(childTask.(*watchDeltaChannelTask).WatchDeltaChannelsRequest)
-			case commonpb.MsgType_WatchQueryChannels:
-				protoSize = proto.Size(childTask.(*watchQueryChannelTask).AddQueryChannelRequest)
 			default:
 				//TODO::
 			}
@@ -534,7 +522,11 @@ func (scheduler *TaskScheduler) processTask(t task) error {
 
 	// task preExecute
 	span.LogFields(oplog.Int64("processTask: scheduler process PreExecute", t.getTaskID()))
-	t.preExecute(ctx)
+	err = t.preExecute(ctx)
+	if err != nil {
+		log.Warn("failed to preExecute task", zap.Error(err))
+		return err
+	}
 	taskInfoKey = fmt.Sprintf("%s/%d", taskInfoPrefix, t.getTaskID())
 	err = scheduler.client.Save(taskInfoKey, strconv.Itoa(int(taskDoing)))
 	if err != nil {
@@ -771,7 +763,6 @@ func (scheduler *TaskScheduler) waitActivateTaskDone(wg *sync.WaitGroup, t task,
 					saves[stateKey] = strconv.Itoa(int(taskUndo))
 				}
 			}
-			//TODO::queryNode auto watch queryChannel, then update etcd use same id directly
 			err = scheduler.client.MultiSaveAndRemove(saves, removes)
 			if err != nil {
 				log.Error("waitActivateTaskDone: error when save and remove task from etcd", zap.Int64("triggerTaskID", triggerTask.getTaskID()))
@@ -898,14 +889,14 @@ func updateSegmentInfoFromTask(ctx context.Context, triggerTask task, meta Meta)
 	segmentInfosToSave := make(map[UniqueID][]*querypb.SegmentInfo)
 	segmentInfosToRemove := make(map[UniqueID][]*querypb.SegmentInfo)
 
-	var sealedSegmentChangeInfos col2SealedSegmentChangeInfos
+	//var sealedSegmentChangeInfos col2SealedSegmentChangeInfos
 	var err error
 	switch triggerTask.msgType() {
 	case commonpb.MsgType_ReleaseCollection:
 		// release all segmentInfo of the collection when release collection
 		req := triggerTask.(*releaseCollectionTask).ReleaseCollectionRequest
 		collectionID := req.CollectionID
-		sealedSegmentChangeInfos, err = meta.removeGlobalSealedSegInfos(collectionID, nil)
+		_, err = meta.removeGlobalSealedSegInfos(collectionID, nil)
 
 	case commonpb.MsgType_ReleasePartitions:
 		// release all segmentInfo of the partitions when release partitions
@@ -920,7 +911,7 @@ func updateSegmentInfoFromTask(ctx context.Context, triggerTask task, meta Meta)
 				segmentInfosToRemove[collectionID] = append(segmentInfosToRemove[collectionID], info)
 			}
 		}
-		sealedSegmentChangeInfos, err = meta.removeGlobalSealedSegInfos(collectionID, req.PartitionIDs)
+		_, err = meta.removeGlobalSealedSegInfos(collectionID, req.PartitionIDs)
 
 	default:
 		// save new segmentInfo when load segment
@@ -975,28 +966,11 @@ func updateSegmentInfoFromTask(ctx context.Context, triggerTask task, meta Meta)
 		log.Info("update segment info",
 			zap.Int64("triggerTaskID", triggerTask.getTaskID()),
 			zap.Any("segment", segmentInfosToSave))
-		sealedSegmentChangeInfos, err = meta.saveGlobalSealedSegInfos(segmentInfosToSave)
+		_, err = meta.saveGlobalSealedSegInfos(segmentInfosToSave)
 	}
 
+	// no need to rollback since etcd meta is not changed
 	if err != nil {
-		log.Error("Failed to update global sealed seg infos, begin to rollback", zap.Error(err))
-		rollBackSegmentChangeInfoErr := retry.Do(ctx, func() error {
-			rollBackChangeInfos := reverseSealedSegmentChangeInfo(sealedSegmentChangeInfos)
-			for collectionID, infos := range rollBackChangeInfos {
-				channelInfo := meta.getQueryChannelInfoByID(collectionID)
-				_, sendErr := meta.sendSealedSegmentChangeInfos(collectionID, channelInfo.QueryChannel, infos)
-				if sendErr != nil {
-					return sendErr
-				}
-			}
-			return nil
-		}, retry.Attempts(20))
-		if rollBackSegmentChangeInfoErr != nil {
-			log.Error("scheduleLoop: Restore the information of global sealed segments in query node failed", zap.Error(rollBackSegmentChangeInfoErr))
-			panic(rollBackSegmentChangeInfoErr)
-		} else {
-			log.Info("Successfully roll back segment info change")
-		}
 		return err
 	}
 
@@ -1030,7 +1004,6 @@ func reverseSealedSegmentChangeInfo(changeInfosMap map[UniqueID]*querypb.SealedS
 // generateDerivedInternalTasks generate watchDeltaChannel and watchQueryChannel tasks
 func generateDerivedInternalTasks(triggerTask task, meta Meta, cluster Cluster) ([]task, error) {
 	var derivedInternalTasks []task
-	watchQueryChannelInfo := make(map[int64]map[UniqueID]UniqueID)
 	watchDeltaChannelInfo := make(map[int64]map[UniqueID]UniqueID)
 	addChannelWatchInfoFn := func(nodeID int64, collectionID UniqueID, replicaID UniqueID, watchInfo map[int64]map[UniqueID]UniqueID) {
 		if _, ok := watchInfo[nodeID]; !ok {
@@ -1046,47 +1019,9 @@ func generateDerivedInternalTasks(triggerTask task, meta Meta, cluster Cluster) 
 			collectionID := loadSegmentTask.CollectionID
 			replicaID := loadSegmentTask.GetReplicaID()
 			nodeID := loadSegmentTask.DstNodeID
-			if !cluster.hasWatchedQueryChannel(triggerTask.traceCtx(), nodeID, collectionID) {
-				addChannelWatchInfoFn(nodeID, collectionID, replicaID, watchQueryChannelInfo)
-			}
 			if !cluster.hasWatchedDeltaChannel(triggerTask.traceCtx(), nodeID, collectionID) {
 				addChannelWatchInfoFn(nodeID, collectionID, replicaID, watchDeltaChannelInfo)
 			}
-		}
-
-		if childTask.msgType() == commonpb.MsgType_WatchDmChannels {
-			watchDmChannelTask := childTask.(*watchDmChannelTask)
-			collectionID := watchDmChannelTask.CollectionID
-			nodeID := watchDmChannelTask.NodeID
-			replicaID := watchDmChannelTask.GetReplicaID()
-			if !cluster.hasWatchedQueryChannel(triggerTask.traceCtx(), nodeID, collectionID) {
-				addChannelWatchInfoFn(nodeID, collectionID, replicaID, watchQueryChannelInfo)
-			}
-		}
-	}
-
-	for nodeID, collectionIDs := range watchQueryChannelInfo {
-		for collectionID := range collectionIDs {
-			queryChannelInfo := meta.getQueryChannelInfoByID(collectionID)
-			msgBase := proto.Clone(triggerTask.msgBase()).(*commonpb.MsgBase)
-			msgBase.MsgType = commonpb.MsgType_WatchQueryChannels
-			addQueryChannelRequest := &querypb.AddQueryChannelRequest{
-				Base:                 msgBase,
-				NodeID:               nodeID,
-				CollectionID:         collectionID,
-				QueryChannel:         queryChannelInfo.QueryChannel,
-				QueryResultChannel:   queryChannelInfo.QueryResultChannel,
-				GlobalSealedSegments: queryChannelInfo.GlobalSealedSegments,
-			}
-			baseTask := newBaseTask(triggerTask.traceCtx(), triggerTask.getTriggerCondition())
-			baseTask.setParentTask(triggerTask)
-			watchQueryChannelTask := &watchQueryChannelTask{
-				baseTask: baseTask,
-
-				AddQueryChannelRequest: addQueryChannelRequest,
-				cluster:                cluster,
-			}
-			derivedInternalTasks = append(derivedInternalTasks, watchQueryChannelTask)
 		}
 	}
 

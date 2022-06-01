@@ -26,12 +26,14 @@ import (
 
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	queryPb "github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -87,116 +89,6 @@ func (node *QueryNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.Stri
 		},
 		Value: Params.CommonCfg.QueryNodeStats,
 	}, nil
-}
-
-// AddQueryChannel watch queryChannel of the collection to receive query message
-func (node *QueryNode) AddQueryChannel(ctx context.Context, in *queryPb.AddQueryChannelRequest) (*commonpb.Status, error) {
-	code := node.stateCode.Load().(internalpb.StateCode)
-	if code != internalpb.StateCode_Healthy {
-		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeCfg.GetNodeID())
-		status := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}
-		return status, nil
-	}
-	dct := &addQueryChannelTask{
-		baseTask: baseTask{
-			ctx:  ctx,
-			done: make(chan error),
-		},
-		req:  in,
-		node: node,
-	}
-
-	err := node.scheduler.queue.Enqueue(dct)
-	if err != nil {
-		status := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}
-		log.Warn(err.Error())
-		return status, nil
-	}
-	log.Info("addQueryChannelTask Enqueue done",
-		zap.Int64("collectionID", in.CollectionID),
-		zap.String("queryChannel", in.QueryChannel),
-		zap.String("queryResultChannel", in.QueryResultChannel),
-	)
-
-	waitFunc := func() (*commonpb.Status, error) {
-		err = dct.WaitToFinish()
-		if err != nil {
-			status := &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			}
-			log.Warn(err.Error())
-			return status, nil
-		}
-		log.Info("addQueryChannelTask WaitToFinish done",
-			zap.Int64("collectionID", in.CollectionID),
-			zap.String("queryChannel", in.QueryChannel),
-			zap.String("queryResultChannel", in.QueryResultChannel),
-		)
-
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		}, nil
-	}
-
-	return waitFunc()
-}
-
-// RemoveQueryChannel remove queryChannel of the collection to stop receiving query message
-func (node *QueryNode) RemoveQueryChannel(ctx context.Context, in *queryPb.RemoveQueryChannelRequest) (*commonpb.Status, error) {
-	// if node.searchService == nil || node.searchService.searchMsgStream == nil {
-	// 	errMsg := "null search service or null search result message stream"
-	// 	status := &commonpb.Status{
-	// 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
-	// 		Reason:    errMsg,
-	// 	}
-
-	// 	return status, errors.New(errMsg)
-	// }
-
-	// searchStream, ok := node.searchService.searchMsgStream.(*pulsarms.PulsarMsgStream)
-	// if !ok {
-	// 	errMsg := "type assertion failed for search message stream"
-	// 	status := &commonpb.Status{
-	// 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
-	// 		Reason:    errMsg,
-	// 	}
-
-	// 	return status, errors.New(errMsg)
-	// }
-
-	// resultStream, ok := node.searchService.searchResultMsgStream.(*pulsarms.PulsarMsgStream)
-	// if !ok {
-	// 	errMsg := "type assertion failed for search result message stream"
-	// 	status := &commonpb.Status{
-	// 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
-	// 		Reason:    errMsg,
-	// 	}
-
-	// 	return status, errors.New(errMsg)
-	// }
-
-	// // remove request channel
-	// consumeChannels := []string{in.RequestChannelID}
-	// consumeSubName := Params.MsgChannelSubName
-	// // TODO: searchStream.RemovePulsarConsumers(producerChannels)
-	// searchStream.AsConsumer(consumeChannels, consumeSubName)
-
-	// // remove result channel
-	// producerChannels := []string{in.ResultChannelID}
-	// // TODO: resultStream.RemovePulsarProducer(producerChannels)
-	// resultStream.AsProducer(producerChannels)
-
-	status := &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}
-	return status, nil
 }
 
 // WatchDmChannels create consumers on dmChannels to receive Incremental data，which is the important part of real-time query
@@ -457,27 +349,17 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, in *queryPb.ReleaseS
 		}
 		return status, nil
 	}
-	status := &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}
+
 	// collection lock is not needed since we guarantee not query/search will be dispatch from leader
 	for _, id := range in.SegmentIDs {
-		err := node.historical.removeSegment(id)
-		if err != nil {
-			// not return, try to release all segments
-			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-			status.Reason = err.Error()
-		}
-		err = node.streaming.removeSegment(id)
-		if err != nil {
-			// not return, try to release all segments
-			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-			status.Reason = err.Error()
-		}
+		node.metaReplica.removeSegment(id, segmentTypeSealed)
+		node.metaReplica.removeSegment(id, segmentTypeGrowing)
 	}
 
 	log.Info("release segments done", zap.Int64("collectionID", in.CollectionID), zap.Int64s("segmentIDs", in.SegmentIDs))
-	return status, nil
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}, nil
 }
 
 // GetSegmentInfo returns segment information of the collection on the queryNode, and the information includes memSize, numRow, indexName, indexID ...
@@ -500,33 +382,8 @@ func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *queryPb.GetSegmen
 		segmentIDs[segmentID] = struct{}{}
 	}
 
-	// get info from historical
-	historicalSegmentInfos, err := node.historical.getSegmentInfosByColID(in.CollectionID)
-	if err != nil {
-		log.Warn("GetSegmentInfo: get historical segmentInfo failed", zap.Int64("collectionID", in.CollectionID), zap.Error(err))
-		res := &queryPb.GetSegmentInfoResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
-		}
-		return res, nil
-	}
-	segmentInfos = append(segmentInfos, filterSegmentInfo(historicalSegmentInfos, segmentIDs)...)
-
-	// get info from streaming
-	streamingSegmentInfos, err := node.streaming.getSegmentInfosByColID(in.CollectionID)
-	if err != nil {
-		log.Warn("GetSegmentInfo: get streaming segmentInfo failed", zap.Int64("collectionID", in.CollectionID), zap.Error(err))
-		res := &queryPb.GetSegmentInfoResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
-		}
-		return res, nil
-	}
-	segmentInfos = append(segmentInfos, filterSegmentInfo(streamingSegmentInfos, segmentIDs)...)
+	infos := node.metaReplica.getSegmentInfosByColID(in.CollectionID)
+	segmentInfos = append(segmentInfos, filterSegmentInfo(infos, segmentIDs)...)
 
 	return &queryPb.GetSegmentInfoResponse{
 		Status: &commonpb.Status{
@@ -560,31 +417,35 @@ func (node *QueryNode) isHealthy() bool {
 
 // Search performs replica search tasks.
 func (node *QueryNode) Search(ctx context.Context, req *queryPb.SearchRequest) (*internalpb.SearchResults, error) {
+	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.SearchLabel, metrics.TotalLabel).Inc()
 	failRet := &internalpb.SearchResults{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		},
 	}
+
+	defer func() {
+		if failRet.Status.ErrorCode != commonpb.ErrorCode_Success {
+			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.QueryLabel, metrics.FailLabel).Inc()
+		}
+	}()
 	if !node.isHealthy() {
 		failRet.Status.Reason = msgQueryNodeIsUnhealthy(Params.QueryNodeCfg.GetNodeID())
 		return failRet, nil
 	}
 
-	log.Debug("Received SearchRequest", zap.String("vchannel", req.GetDmlChannel()), zap.Int64s("segmentIDs", req.GetSegmentIDs()))
+	log.Debug("Received SearchRequest",
+		zap.Int64("msgID", req.GetReq().GetBase().GetMsgID()),
+		zap.String("vChannel", req.GetDmlChannel()),
+		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
+		zap.Uint64("guaranteeTimestamp", req.GetReq().GetGuaranteeTimestamp()),
+		zap.Uint64("timeTravel", req.GetReq().GetTravelTimestamp()))
 
 	if node.queryShardService == nil {
 		failRet.Status.Reason = "queryShardService is nil"
 		return failRet, nil
 	}
 
-	if !node.queryShardService.hasQueryShard(req.GetDmlChannel()) {
-		// TODO: add replicaID in request or remove it in query shard
-		err := node.queryShardService.addQueryShard(req.Req.CollectionID, req.GetDmlChannel(), 0)
-		if err != nil {
-			failRet.Status.Reason = err.Error()
-			return failRet, nil
-		}
-	}
 	qs, err := node.queryShardService.getQueryShard(req.GetDmlChannel())
 	if err != nil {
 		log.Warn("Search failed, failed to get query shard", zap.String("dml channel", req.GetDmlChannel()), zap.Error(err))
@@ -592,6 +453,8 @@ func (node *QueryNode) Search(ctx context.Context, req *queryPb.SearchRequest) (
 		failRet.Status.Reason = err.Error()
 		return failRet, nil
 	}
+
+	tr := timerecord.NewTimeRecorder(fmt.Sprintf("search %d", req.Req.CollectionID))
 
 	if req.FromShardLeader {
 		historicalTask, err2 := newSearchTask(ctx, req)
@@ -612,6 +475,15 @@ func (node *QueryNode) Search(ctx context.Context, req *queryPb.SearchRequest) (
 			failRet.Status.Reason = err2.Error()
 			return failRet, nil
 		}
+
+		failRet.Status.ErrorCode = commonpb.ErrorCode_Success
+		metrics.QueryNodeSQLatencyInQueue.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
+			metrics.SearchLabel).Observe(float64(historicalTask.queueDur.Milliseconds()))
+		metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
+			metrics.SearchLabel).Observe(float64(historicalTask.reduceDur.Milliseconds()))
+		latency := tr.ElapseSpan()
+		metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.SearchLabel).Observe(float64(latency.Milliseconds()))
+		metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.SearchLabel, metrics.SuccessLabel).Inc()
 		return historicalTask.Ret, nil
 	}
 
@@ -671,6 +543,10 @@ func (node *QueryNode) Search(ctx context.Context, req *queryPb.SearchRequest) (
 			errStreaming = err2
 			return
 		}
+		metrics.QueryNodeSQLatencyInQueue.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
+			metrics.SearchLabel).Observe(float64(streamingTask.queueDur.Milliseconds()))
+		metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
+			metrics.SearchLabel).Observe(float64(streamingTask.reduceDur.Milliseconds()))
 		streamingResult = streamingTask.Ret
 	}()
 	wg.Wait()
@@ -697,30 +573,42 @@ func (node *QueryNode) Search(ctx context.Context, req *queryPb.SearchRequest) (
 		failRet.Status.Reason = err2.Error()
 		return failRet, nil
 	}
+
+	failRet.Status.ErrorCode = commonpb.ErrorCode_Success
+	latency := tr.ElapseSpan()
+	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.SearchLabel).Observe(float64(latency.Milliseconds()))
+	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.SearchLabel, metrics.SuccessLabel).Inc()
 	return ret, nil
 }
 
 // Query performs replica query tasks.
 func (node *QueryNode) Query(ctx context.Context, req *queryPb.QueryRequest) (*internalpb.RetrieveResults, error) {
+	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.QueryLabel, metrics.TotalLabel).Inc()
 	failRet := &internalpb.RetrieveResults{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		},
 	}
+
+	defer func() {
+		if failRet.Status.ErrorCode != commonpb.ErrorCode_Success {
+			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.SearchLabel, metrics.FailLabel).Inc()
+		}
+	}()
 	if !node.isHealthy() {
 		failRet.Status.Reason = msgQueryNodeIsUnhealthy(Params.QueryNodeCfg.GetNodeID())
 		return failRet, nil
 	}
-	log.Debug("Received QueryRequest", zap.String("vchannel", req.GetDmlChannel()), zap.Int64s("segmentIDs", req.GetSegmentIDs()))
+
+	log.Debug("Received QueryRequest",
+		zap.Int64("msgID", req.GetReq().GetBase().GetMsgID()),
+		zap.String("vChannel", req.GetDmlChannel()),
+		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
+		zap.Uint64("guaranteeTimestamp", req.GetReq().GetGuaranteeTimestamp()),
+		zap.Uint64("timeTravel", req.GetReq().GetTravelTimestamp()))
 
 	if node.queryShardService == nil {
 		failRet.Status.Reason = "queryShardService is nil"
-		return failRet, nil
-	}
-
-	if !node.queryShardService.hasQueryShard(req.GetDmlChannel()) {
-		err := node.queryShardService.addQueryShard(req.Req.CollectionID, req.GetDmlChannel(), 0) // TODO: add replicaID in request or remove it in query shard
-		failRet.Status.Reason = err.Error()
 		return failRet, nil
 	}
 
@@ -731,6 +619,7 @@ func (node *QueryNode) Query(ctx context.Context, req *queryPb.QueryRequest) (*i
 		return failRet, nil
 	}
 
+	tr := timerecord.NewTimeRecorder(fmt.Sprintf("retrieve %d", req.Req.CollectionID))
 	if req.FromShardLeader {
 		// construct a queryTask
 		queryTask := newQueryTask(ctx, req)
@@ -747,6 +636,14 @@ func (node *QueryNode) Query(ctx context.Context, req *queryPb.QueryRequest) (*i
 			failRet.Status.Reason = err2.Error()
 			return failRet, nil
 		}
+		failRet.Status.ErrorCode = commonpb.ErrorCode_Success
+		metrics.QueryNodeSQLatencyInQueue.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
+			metrics.QueryLabel).Observe(float64(queryTask.queueDur.Milliseconds()))
+		metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
+			metrics.QueryLabel).Observe(float64(queryTask.reduceDur.Milliseconds()))
+		latency := tr.ElapseSpan()
+		metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.QueryLabel).Observe(float64(latency.Milliseconds()))
+		metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.QueryLabel, metrics.SuccessLabel).Inc()
 		return queryTask.Ret, nil
 	}
 
@@ -801,6 +698,10 @@ func (node *QueryNode) Query(ctx context.Context, req *queryPb.QueryRequest) (*i
 		if err2 != nil {
 			return
 		}
+		metrics.QueryNodeSQLatencyInQueue.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
+			metrics.QueryLabel).Observe(float64(streamingTask.queueDur.Milliseconds()))
+		metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
+			metrics.QueryLabel).Observe(float64(streamingTask.reduceDur.Milliseconds()))
 		streamingResult = streamingTask.Ret
 	}()
 	wg.Wait()
@@ -827,6 +728,10 @@ func (node *QueryNode) Query(ctx context.Context, req *queryPb.QueryRequest) (*i
 		failRet.Status.Reason = err2.Error()
 		return failRet, nil
 	}
+	failRet.Status.ErrorCode = commonpb.ErrorCode_Success
+	latency := tr.ElapseSpan()
+	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.QueryLabel).Observe(float64(latency.Milliseconds()))
+	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.QueryLabel, metrics.SuccessLabel).Inc()
 	return ret, nil
 }
 

@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	queryPb "github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -84,53 +83,13 @@ func TestImpl_GetStatisticsChannel(t *testing.T) {
 	assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
 }
 
-func TestImpl_AddQueryChannel(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	node, err := genSimpleQueryNode(ctx)
-	assert.NoError(t, err)
-
-	req := &queryPb.AddQueryChannelRequest{
-		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_LoadCollection,
-			MsgID:   rand.Int63(),
-		},
-		NodeID:             0,
-		CollectionID:       defaultCollectionID,
-		QueryChannel:       genQueryChannel(),
-		QueryResultChannel: genQueryResultChannel(),
-	}
-
-	status, err := node.AddQueryChannel(ctx, req)
-	assert.NoError(t, err)
-	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
-
-	node.UpdateStateCode(internalpb.StateCode_Abnormal)
-	status, err = node.AddQueryChannel(ctx, req)
-	assert.NoError(t, err)
-	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
-}
-
-func TestImpl_RemoveQueryChannel(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	node, err := genSimpleQueryNode(ctx)
-	assert.NoError(t, err)
-
-	status, err := node.RemoveQueryChannel(ctx, nil)
-	assert.NoError(t, err)
-	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
-}
-
 func TestImpl_WatchDmChannels(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	node, err := genSimpleQueryNode(ctx)
 	assert.NoError(t, err)
 
-	pkType := schemapb.DataType_Int64
-	schema := genTestCollectionSchema(pkType)
-
+	schema := genTestCollectionSchema()
 	req := &queryPb.WatchDmChannelsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_WatchDmChannels,
@@ -158,8 +117,7 @@ func TestImpl_LoadSegments(t *testing.T) {
 	node, err := genSimpleQueryNode(ctx)
 	assert.NoError(t, err)
 
-	pkType := schemapb.DataType_Int64
-	schema := genTestCollectionSchema(pkType)
+	schema := genTestCollectionSchema()
 
 	req := &queryPb.LoadSegmentsRequest{
 		Base: &commonpb.MsgBase{
@@ -264,32 +222,11 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, rsp.Status.ErrorCode)
 	})
 
-	t.Run("test no collection in historical", func(t *testing.T) {
+	t.Run("test no collection in metaReplica", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 
-		err = node.historical.removeCollection(defaultCollectionID)
-		assert.NoError(t, err)
-
-		req := &queryPb.GetSegmentInfoRequest{
-			Base: &commonpb.MsgBase{
-				MsgType: commonpb.MsgType_WatchQueryChannels,
-				MsgID:   rand.Int63(),
-			},
-			SegmentIDs:   []UniqueID{defaultSegmentID},
-			CollectionID: defaultCollectionID,
-		}
-
-		rsp, err := node.GetSegmentInfo(ctx, req)
-		assert.Nil(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
-	})
-
-	t.Run("test no collection in streaming", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
-		assert.NoError(t, err)
-
-		err = node.streaming.removeCollection(defaultCollectionID)
+		err = node.metaReplica.removeCollection(defaultCollectionID)
 		assert.NoError(t, err)
 
 		req := &queryPb.GetSegmentInfoRequest{
@@ -319,7 +256,7 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 			CollectionID: defaultCollectionID,
 		}
 
-		seg, err := node.streaming.getSegmentByID(defaultSegmentID)
+		seg, err := node.metaReplica.getSegmentByID(defaultSegmentID, segmentTypeSealed)
 		assert.NoError(t, err)
 
 		seg.setType(segmentTypeSealed)
@@ -342,7 +279,7 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 
-		seg, err := node.historical.getSegmentByID(defaultSegmentID)
+		seg, err := node.metaReplica.getSegmentByID(defaultSegmentID, segmentTypeSealed)
 		assert.NoError(t, err)
 
 		seg.setIndexedFieldInfo(simpleFloatVecField.id, &IndexedFieldInfo{
@@ -368,82 +305,6 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 
 		node.UpdateStateCode(internalpb.StateCode_Abnormal)
 		rsp, err = node.GetSegmentInfo(ctx, req)
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, rsp.Status.ErrorCode)
-	})
-
-	t.Run("test GetSegmentInfo without streaming partition", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
-		assert.NoError(t, err)
-
-		req := &queryPb.GetSegmentInfoRequest{
-			Base: &commonpb.MsgBase{
-				MsgType: commonpb.MsgType_WatchQueryChannels,
-				MsgID:   rand.Int63(),
-			},
-			SegmentIDs:   []UniqueID{},
-			CollectionID: defaultCollectionID,
-		}
-
-		node.streaming.(*metaReplica).partitions = make(map[UniqueID]*Partition)
-		rsp, err := node.GetSegmentInfo(ctx, req)
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, rsp.Status.ErrorCode)
-	})
-
-	t.Run("test GetSegmentInfo without streaming segment", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
-		assert.NoError(t, err)
-
-		req := &queryPb.GetSegmentInfoRequest{
-			Base: &commonpb.MsgBase{
-				MsgType: commonpb.MsgType_WatchQueryChannels,
-				MsgID:   rand.Int63(),
-			},
-			SegmentIDs:   []UniqueID{},
-			CollectionID: defaultCollectionID,
-		}
-
-		node.streaming.(*metaReplica).segments = make(map[UniqueID]*Segment)
-		rsp, err := node.GetSegmentInfo(ctx, req)
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, rsp.Status.ErrorCode)
-	})
-
-	t.Run("test GetSegmentInfo without historical partition", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
-		assert.NoError(t, err)
-
-		req := &queryPb.GetSegmentInfoRequest{
-			Base: &commonpb.MsgBase{
-				MsgType: commonpb.MsgType_WatchQueryChannels,
-				MsgID:   rand.Int63(),
-			},
-			SegmentIDs:   []UniqueID{},
-			CollectionID: defaultCollectionID,
-		}
-
-		node.historical.(*metaReplica).partitions = make(map[UniqueID]*Partition)
-		rsp, err := node.GetSegmentInfo(ctx, req)
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, rsp.Status.ErrorCode)
-	})
-
-	t.Run("test GetSegmentInfo without historical segment", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
-		assert.NoError(t, err)
-
-		req := &queryPb.GetSegmentInfoRequest{
-			Base: &commonpb.MsgBase{
-				MsgType: commonpb.MsgType_WatchQueryChannels,
-				MsgID:   rand.Int63(),
-			},
-			SegmentIDs:   []UniqueID{},
-			CollectionID: defaultCollectionID,
-		}
-
-		node.historical.(*metaReplica).segments = make(map[UniqueID]*Segment)
-		rsp, err := node.GetSegmentInfo(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, rsp.Status.ErrorCode)
 	})
@@ -568,15 +429,11 @@ func TestImpl_ReleaseSegments(t *testing.T) {
 			SegmentIDs:   []UniqueID{defaultSegmentID},
 		}
 
-		err = node.historical.removeSegment(defaultSegmentID)
-		assert.NoError(t, err)
-
-		err = node.streaming.removeSegment(defaultSegmentID)
-		assert.NoError(t, err)
+		node.metaReplica.removeSegment(defaultSegmentID, segmentTypeSealed)
 
 		status, err := node.ReleaseSegments(ctx, req)
 		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 	})
 	wg.Wait()
 }
@@ -588,8 +445,7 @@ func TestImpl_Search(t *testing.T) {
 	node, err := genSimpleQueryNode(ctx)
 	require.NoError(t, err)
 
-	pkType := schemapb.DataType_Int64
-	schema := genTestCollectionSchema(pkType)
+	schema := genTestCollectionSchema()
 	req, err := genSearchRequest(defaultNQ, IndexFaissIDMap, schema)
 	require.NoError(t, err)
 
@@ -611,8 +467,7 @@ func TestImpl_Query(t *testing.T) {
 	defer node.Stop()
 	require.NoError(t, err)
 
-	pkType := schemapb.DataType_Int64
-	schema := genTestCollectionSchema(pkType)
+	schema := genTestCollectionSchema()
 	req, err := genRetrieveRequest(schema)
 	require.NoError(t, err)
 

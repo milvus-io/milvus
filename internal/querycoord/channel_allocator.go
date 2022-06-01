@@ -48,7 +48,12 @@ func shuffleChannelsToQueryNode(ctx context.Context, reqs []*querypb.WatchDmChan
 			if err != nil {
 				return err
 			}
-			onlineNodeIDs = replica.GetNodeIds()
+			replicaNodes := replica.GetNodeIds()
+			for _, nodeID := range replicaNodes {
+				if ok, err := cluster.isOnline(nodeID); err == nil && ok {
+					onlineNodeIDs = append(onlineNodeIDs, nodeID)
+				}
+			}
 		}
 		if len(onlineNodeIDs) == 0 {
 			err := errors.New("no online QueryNode to allocate")

@@ -138,8 +138,6 @@ func (node *Proxy) ReleaseDQLMessageStream(ctx context.Context, request *proxypb
 		return unhealthyStatus(), nil
 	}
 
-	_ = node.chMgr.removeDQLStream(request.CollectionID)
-
 	logutil.Logger(ctx).Debug("complete to release DQL message stream",
 		zap.Any("role", typeutil.ProxyRole),
 		zap.Any("db", request.DbID),
@@ -3908,4 +3906,49 @@ func (node *Proxy) SendRetrieveResult(ctx context.Context, req *internalpb.Retri
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		Reason:    "Not implemented",
 	}, nil
+}
+
+func (node *Proxy) CreateRole(ctx context.Context, request *milvuspb.CreateRoleRequest) (*commonpb.Status, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (node *Proxy) DropRole(ctx context.Context, request *milvuspb.DropRoleRequest) (*commonpb.Status, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (node *Proxy) OperateUserRole(ctx context.Context, request *milvuspb.OperateUserRoleRequest) (*commonpb.Status, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (node *Proxy) SelectRole(ctx context.Context, request *milvuspb.SelectRoleRequest) (*milvuspb.SelectRoleResponse, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (node *Proxy) SelectUser(ctx context.Context, request *milvuspb.SelectUserRequest) (*milvuspb.SelectUserResponse, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (node *Proxy) SelectResource(ctx context.Context, request *milvuspb.SelectResourceRequest) (*milvuspb.SelectResourceResponse, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (node *Proxy) OperatePrivilege(ctx context.Context, request *milvuspb.OperatePrivilegeRequest) (*commonpb.Status, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (node *Proxy) SelectGrant(ctx context.Context, request *milvuspb.SelectGrantRequest) (*milvuspb.SelectGrantResponse, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (node *Proxy) RefreshPolicyInfoCache(ctx context.Context, request *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error) {
+	//TODO implement me
+	panic("implement me")
 }

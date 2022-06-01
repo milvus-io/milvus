@@ -384,11 +384,15 @@ func TestExpr_Invalid(t *testing.T) {
 		`1 == not_in_schema`,
 		`true == "str"`,
 		`"str" != false`,
+		`VarCharField != FloatField`,
+		`FloatField == VarCharField`,
 		// ---------------------- relational --------------------
 		`not_in_schema < 1`,
 		`1 <= not_in_schema`,
 		`true <= "str"`,
 		`"str" >= false`,
+		`VarCharField < FloatField`,
+		`FloatField > VarCharField`,
 		// ------------------------ like ------------------------
 		`(VarCharField % 2) like "prefix%"`,
 		`FloatField like "prefix%"`,

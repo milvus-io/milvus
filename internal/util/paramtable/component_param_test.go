@@ -225,15 +225,6 @@ func TestComponentParam(t *testing.T) {
 		interval := Params.StatsPublishInterval
 		assert.Equal(t, 1000, interval)
 
-		bufSize := Params.SearchReceiveBufSize
-		assert.Equal(t, int64(512), bufSize)
-
-		bufSize = Params.SearchResultReceiveBufSize
-		assert.Equal(t, int64(64), bufSize)
-
-		bufSize = Params.SearchPulsarBufSize
-		assert.Equal(t, int64(512), bufSize)
-
 		length := Params.FlowGraphMaxQueueLength
 		assert.Equal(t, int32(1024), length)
 

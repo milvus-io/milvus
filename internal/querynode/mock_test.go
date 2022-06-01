@@ -343,7 +343,7 @@ func loadIndexForSegment(ctx context.Context, node *QueryNode, segmentID UniqueI
 		return err
 	}
 
-	segment, err := node.loader.historicalReplica.getSegmentByID(segmentID)
+	segment, err := node.loader.metaReplica.getSegmentByID(segmentID, segmentTypeSealed)
 	if err != nil {
 		return err
 	}
@@ -499,7 +499,7 @@ func genIndexParams(indexType, metricType string) (map[string]string, map[string
 	return typeParams, indexParams
 }
 
-func genTestCollectionSchema(pkType schemapb.DataType) *schemapb.CollectionSchema {
+func genTestCollectionSchema(pkTypes ...schemapb.DataType) *schemapb.CollectionSchema {
 	fieldBool := genConstantFieldSchema(simpleBoolField)
 	fieldInt8 := genConstantFieldSchema(simpleInt8Field)
 	fieldInt16 := genConstantFieldSchema(simpleInt16Field)
@@ -509,6 +509,12 @@ func genTestCollectionSchema(pkType schemapb.DataType) *schemapb.CollectionSchem
 	floatVecFieldSchema := genVectorFieldSchema(simpleFloatVecField)
 	binVecFieldSchema := genVectorFieldSchema(simpleBinVecField)
 	var pkFieldSchema *schemapb.FieldSchema
+	var pkType schemapb.DataType
+	if len(pkTypes) == 0 {
+		pkType = schemapb.DataType_Int64
+	} else {
+		pkType = pkTypes[0]
+	}
 	switch pkType {
 	case schemapb.DataType_Int64:
 		pkFieldSchema = genPKFieldSchema(simpleInt64Field)
@@ -1213,7 +1219,7 @@ func genSealedSegment(schema *schemapb.CollectionSchema,
 }
 
 func genSimpleSealedSegment(msgLength int) (*Segment, error) {
-	schema := genTestCollectionSchema(schemapb.DataType_Int64)
+	schema := genTestCollectionSchema()
 	return genSealedSegment(schema,
 		defaultCollectionID,
 		defaultPartitionID,
@@ -1223,27 +1229,23 @@ func genSimpleSealedSegment(msgLength int) (*Segment, error) {
 }
 
 func genSimpleReplica() (ReplicaInterface, error) {
-	kv, err := genEtcdKV()
-	if err != nil {
-		return nil, err
-	}
-	r := newCollectionReplica(kv)
-	schema := genTestCollectionSchema(schemapb.DataType_Int64)
+	r := newCollectionReplica()
+	schema := genTestCollectionSchema()
 	r.addCollection(defaultCollectionID, schema)
-	err = r.addPartition(defaultCollectionID, defaultPartitionID)
+	err := r.addPartition(defaultCollectionID, defaultPartitionID)
 	return r, err
 }
 
-func genSimpleSegmentLoaderWithMqFactory(historicalReplica ReplicaInterface, streamingReplica ReplicaInterface, factory msgstream.Factory) (*segmentLoader, error) {
+func genSimpleSegmentLoaderWithMqFactory(metaReplica ReplicaInterface, factory msgstream.Factory) (*segmentLoader, error) {
 	kv, err := genEtcdKV()
 	if err != nil {
 		return nil, err
 	}
 	cm := storage.NewLocalChunkManager(storage.RootPath(defaultLocalStorage))
-	return newSegmentLoader(historicalReplica, streamingReplica, kv, cm, factory), nil
+	return newSegmentLoader(metaReplica, kv, cm, factory), nil
 }
 
-func genSimpleHistorical(ctx context.Context) (ReplicaInterface, error) {
+func genSimpleReplicaWithSealSegment(ctx context.Context) (ReplicaInterface, error) {
 	r, err := genSimpleReplica()
 	if err != nil {
 		return nil, err
@@ -1266,7 +1268,7 @@ func genSimpleHistorical(ctx context.Context) (ReplicaInterface, error) {
 	return r, nil
 }
 
-func genSimpleStreaming(ctx context.Context) (ReplicaInterface, error) {
+func genSimpleReplicaWithGrowingSegment() (ReplicaInterface, error) {
 	r, err := genSimpleReplica()
 	if err != nil {
 		return nil, err
@@ -1537,11 +1539,6 @@ func genRetrieveMsg(schema *schemapb.CollectionSchema) (*msgstream.RetrieveMsg, 
 	return msg, nil
 }
 
-func genQueryChannel() Channel {
-	const queryChannelPrefix = "query-node-unittest-query-channel-"
-	return queryChannelPrefix + strconv.Itoa(rand.Int())
-}
-
 func genQueryResultChannel() Channel {
 	const queryResultChannelPrefix = "query-node-unittest-query-result-channel-"
 	return queryResultChannelPrefix + strconv.Itoa(rand.Int())
@@ -1657,23 +1654,18 @@ func genSimpleQueryNodeWithMQFactory(ctx context.Context, fac dependency.Factory
 
 	node.tSafeReplica = newTSafeReplica()
 
-	streaming, err := genSimpleStreaming(ctx)
+	replica, err := genSimpleReplicaWithSealSegment(ctx)
 	if err != nil {
 		return nil, err
 	}
 	node.tSafeReplica.addTSafe(defaultDMLChannel)
 
-	historical, err := genSimpleHistorical(ctx)
-	if err != nil {
-		return nil, err
-	}
 	node.tSafeReplica.addTSafe(defaultDeltaChannel)
-	node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, streaming, historical, node.tSafeReplica, node.factory)
+	node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, replica, node.tSafeReplica, node.factory)
 
-	node.streaming = streaming
-	node.historical = historical
+	node.metaReplica = replica
 
-	loader, err := genSimpleSegmentLoaderWithMqFactory(historical, streaming, fac)
+	loader, err := genSimpleSegmentLoaderWithMqFactory(replica, fac)
 	if err != nil {
 		return nil, err
 	}
@@ -1686,7 +1678,7 @@ func genSimpleQueryNodeWithMQFactory(ctx context.Context, fac dependency.Factory
 	node.ShardClusterService = newShardClusterService(node.etcdCli, node.session, node)
 
 	node.queryShardService = newQueryShardService(node.queryNodeLoopCtx,
-		node.historical, node.streaming, node.tSafeReplica,
+		node.metaReplica, node.tSafeReplica,
 		node.ShardClusterService, node.factory, node.scheduler)
 
 	node.UpdateStateCode(internalpb.StateCode_Healthy)

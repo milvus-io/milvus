@@ -10,6 +10,7 @@ option java_generate_equals_and_hash = true;
 
 import "common.proto";
 import "schema.proto";
+import "google/protobuf/descriptor.proto";
 
 service MilvusService {
   rpc CreateCollection(CreateCollectionRequest) returns (common.Status) {}
@@ -73,6 +74,16 @@ service MilvusService {
   rpc UpdateCredential(UpdateCredentialRequest) returns (common.Status) {}
   rpc DeleteCredential(DeleteCredentialRequest) returns (common.Status) {}
   rpc ListCredUsers(ListCredUsersRequest) returns (ListCredUsersResponse) {}
+
+  // https://wiki.lfaidata.foundation/display/MIL/MEP+29+--+Support+Role-Based+Access+Control
+  rpc CreateRole(CreateRoleRequest) returns (common.Status) {}
+  rpc DropRole(DropRoleRequest) returns (common.Status) {}
+  rpc OperateUserRole(OperateUserRoleRequest) returns (common.Status) {}
+  rpc SelectRole(SelectRoleRequest) returns (SelectRoleResponse) {}
+  rpc SelectUser(SelectUserRequest) returns (SelectUserResponse) {}
+  rpc SelectResource(SelectResourceRequest) returns (SelectResourceResponse) {}
+  rpc OperatePrivilege(OperatePrivilegeRequest) returns (common.Status) {}
+  rpc SelectGrant(SelectGrantRequest) returns (SelectGrantResponse) {}
 }
 
 message CreateAliasRequest {
@@ -99,14 +110,19 @@ message AlterAliasRequest{
 * Create collection in milvus
 */
 message CreateCollectionRequest {
+  option (common.privilege_ext_obj) = {
+    resource_type: Collection
+    resource_privilege: PrivilegeCreate
+    resource_name_index: 3
+  };
   // Not useful for now
   common.MsgBase base = 1;
   // Not useful for now
   string db_name = 2;
   // The unique collection name in milvus.(Required)
-  string collection_name = 3; 
+  string collection_name = 3;
   // The serialized `schema.CollectionSchema`(Required)
-  bytes schema = 4; 
+  bytes schema = 4;
   // Once set, no modification is allowed (Optional)
   // https://github.com/milvus-io/milvus/issues/6690
   int32 shards_num = 5;
@@ -115,11 +131,16 @@ message CreateCollectionRequest {
 }
 
 /**
-* Drop collection in milvus, also will drop data in collection. 
+* Drop collection in milvus, also will drop data in collection.
 */
 message DropCollectionRequest {
+  option (common.privilege_ext_obj) = {
+    resource_type: Collection
+    resource_privilege: PrivilegeDrop
+    resource_name_index: 3
+  };
   // Not useful for now
-  common.MsgBase base = 1; 
+  common.MsgBase base = 1;
   // Not useful for now
   string db_name = 2;
   // The unique collection name in milvus.(Required)
@@ -130,12 +151,17 @@ message DropCollectionRequest {
 * Check collection exist in milvus or not.
 */
 message HasCollectionRequest {
+  option (common.privilege_ext_obj) = {
+    resource_type: Collection
+    resource_privilege: PrivilegeRead
+    resource_name_index: 3
+  };
   // Not useful for now
   common.MsgBase base = 1;
   // Not useful for now
   string db_name = 2;
   // The collection name you want to check.
-  string collection_name = 3; 
+  string collection_name = 3;
   // If time_stamp is not zero, will return true when time_stamp >= created collection timestamp, otherwise will return false.
   uint64 time_stamp = 4;
 }
@@ -155,6 +181,11 @@ message StringResponse {
 * Get collection meta datas like: schema, collectionID, shards number ...
 */
 message DescribeCollectionRequest {
+  option (common.privilege_ext_obj) = {
+    resource_type: Collection
+    resource_privilege: PrivilegeRead
+    resource_name_index: 3
+  };
   // Not useful for now
   common.MsgBase base = 1;
   // Not useful for now
@@ -201,6 +232,11 @@ message DescribeCollectionResponse {
 * Load collection data into query nodes, then you can do vector search on this collection.
 */
 message LoadCollectionRequest {
+  option (common.privilege_ext_obj) = {
+    resource_type: Collection
+    resource_privilege: PrivilegeLoad
+    resource_name_index: 3
+  };
   // Not useful for now
   common.MsgBase base = 1;
   // Not useful for now
@@ -215,6 +251,11 @@ message LoadCollectionRequest {
 * Release collection data from query nodes, then you can't do vector search on this collection.
 */
 message ReleaseCollectionRequest {
+  option (common.privilege_ext_obj) = {
+    resource_type: Collection
+    resource_privilege: PrivilegeRelease
+    resource_name_index: 3
+  };
   // Not useful for now
   common.MsgBase base = 1;
   // Not useful for now
@@ -227,6 +268,11 @@ message ReleaseCollectionRequest {
 * Get collection statistics like row_count.
 */
 message GetCollectionStatisticsRequest {
+  option (common.privilege_ext_obj) = {
+    resource_type: Collection
+    resource_privilege: PrivilegeRead
+    resource_name_index: 3
+  };
   // Not useful for now
   common.MsgBase base = 1;
   // Not useful for now
@@ -249,16 +295,20 @@ message GetCollectionStatisticsResponse {
 * This is for ShowCollectionsRequest type field.
 */
 enum ShowType {
-  // Will return all colloections 
+  // Will return all colloections
   All = 0;
   // Will return loaded collections with their inMemory_percentages
   InMemory = 1;
 }
 
 /*
-* List collections 
+* List collections
 */
 message ShowCollectionsRequest {
+  option (common.privilege_ext_obj) = {
+    resource_type: Collection
+    resource_privilege: PrivilegeRead
+  };
   // Not useful for now
   common.MsgBase base = 1;
   // Not useful for now
@@ -268,7 +318,7 @@ message ShowCollectionsRequest {
   // Decide return Loaded collections or All collections(Optional)
   ShowType type = 4;
   // When type is InMemory, will return these collection's inMemory_percentages.(Optional)
-  repeated string collection_names = 5; 
+  repeated string collection_names = 5;
 }
 
 /*
@@ -286,7 +336,7 @@ message ShowCollectionsResponse {
   // The utc timestamp calculated by created_timestamp
   repeated uint64 created_utc_timestamps = 5;
   // Load percentage on querynode when type is InMemory
-  repeated int64 inMemory_percentages = 6; 
+  repeated int64 inMemory_percentages = 6;
 }
 
 /*
@@ -314,7 +364,7 @@ message DropPartitionRequest {
   // The collection name in milvus
   string collection_name = 3;
   // The partition name you want to drop
-  string partition_name = 4; 
+  string partition_name = 4;
 }
 
 /*
@@ -374,7 +424,7 @@ message GetPartitionStatisticsRequest {
   // The collection name in milvus
   string collection_name = 3;
   // The partition name you want to collect statistics
-  string partition_name = 4; 
+  string partition_name = 4;
 }
 
 message GetPartitionStatisticsResponse {
@@ -449,7 +499,7 @@ message ShowSegmentsResponse {
 */
 message CreateIndexRequest {
   // Not useful for now
-  common.MsgBase base = 1; 
+  common.MsgBase base = 1;
   // Not useful for now
   string db_name = 2;
   // The particular collection name you want to create index.
@@ -463,7 +513,7 @@ message CreateIndexRequest {
 }
 
 /*
-* Get created index information. 
+* Get created index information.
 * Current release of Milvus only supports showing latest built index.
 */
 message DescribeIndexRequest {
@@ -476,7 +526,7 @@ message DescribeIndexRequest {
    // The vector field name in this particular collection
   string field_name = 4;
   // No need to set up for now @2021.06.30
-  string index_name = 5; 
+  string index_name = 5;
 }
 
 /*
@@ -504,7 +554,7 @@ message DescribeIndexResponse {
 }
 
 /*
-*  Get index building progress 
+*  Get index building progress
 */
 message GetIndexBuildProgressRequest {
   // Not useful for now
@@ -647,7 +697,7 @@ message VectorsArray {
   oneof array {
     VectorIDs id_array = 1; // vector ids
     schema.VectorField data_array = 2; // vectors data
-  } 
+  }
 }
 
 message CalcDistanceRequest {
@@ -802,16 +852,16 @@ message ImportRequest {
   repeated string files = 5;                 // file paths to be imported
   repeated common.KeyValuePair options = 6;  // import options, bucket, etc.
 }
- 
+
 message ImportResponse {
   common.Status status = 1;
   repeated int64 tasks = 2;  // id array of import tasks
 }
- 
+
 message GetImportStateRequest {
   int64 task = 1;  // id of an import task
 }
- 
+
 message GetImportStateResponse {
   common.Status status = 1;
   common.ImportState state = 2;                      // is this import task finished or not
@@ -912,3 +962,178 @@ message ListCredUsersRequest {
   common.MsgBase base = 1;
 }
 
+// https://wiki.lfaidata.foundation/display/MIL/MEP+29+--+Support+Role-Based+Access+Control
+message RoleEntity {
+  string name = 1;
+}
+
+message UserEntity {
+  string name = 1;
+}
+
+message CreateRoleRequest {
+  // Not useful for now
+  common.MsgBase base = 1;
+  // role
+  RoleEntity entity = 2;
+}
+
+message DropRoleRequest {
+  // Not useful for now
+  common.MsgBase base = 1;
+  // role name
+  string role_name = 2;
+}
+
+enum OperateUserRoleType {
+  AddUserToRole = 0;
+  RemoveUserFromRole = 1;
+}
+
+message OperateUserRoleRequest {
+  // Not useful for now
+  common.MsgBase base = 1;
+  // username
+  string username = 2;
+  // role name
+  string role_name = 3;
+  // operation type
+  OperateUserRoleType type = 4;
+}
+
+message SelectRoleRequest {
+  // Not useful for now
+  common.MsgBase base = 1;
+  // role
+  RoleEntity role = 2;
+  // include user info
+  bool include_user_info = 3;
+}
+
+message RoleResult {
+  RoleEntity role = 1;
+  repeated UserEntity users = 2;
+}
+
+message SelectRoleResponse {
+  // Not useful for now
+  common.Status status = 1;
+  // role result array
+  repeated RoleResult results = 2;
+}
+
+message SelectUserRequest {
+  // Not useful for now
+  common.MsgBase base = 1;
+  // user
+  UserEntity user = 2;
+  // include user info
+  bool include_role_info = 3;
+}
+
+message UserResult {
+  UserEntity user = 1;
+  repeated RoleEntity roles = 2;
+}
+
+message SelectUserResponse {
+  // Not useful for now
+  common.Status status = 1;
+  // user result array
+  repeated UserResult result = 2;
+}
+
+message ResourceEntity {
+  string type = 1;
+}
+
+message PrivilegeEntity {
+  string name = 1;
+}
+
+message SelectResourceRequest {
+  // Not useful for now
+  common.MsgBase base = 1;
+  // resource
+  ResourceEntity entity = 2;
+  // include privilege info
+  bool include_privilege_info = 3;
+}
+
+message ResourceResult {
+  ResourceEntity resource = 1;
+  repeated PrivilegeEntity privileges = 2;
+}
+
+message SelectResourceResponse {
+  // Not useful for now
+  common.Status status = 1;
+  // resource result array
+  repeated ResourceResult results = 2;
+}
+
+message PrincipalEntity {
+  // principal type, including user, role
+  string principal_type = 1;
+  // principal, including user entity or role entity
+  oneof principal {
+    UserEntity user = 2;
+    RoleEntity role = 3;
+  }
+}
+
+message GrantorEntity {
+  UserEntity user = 1;
+  PrivilegeEntity privilege = 2;
+}
+
+message GrantEntity {
+  // principal
+  PrincipalEntity principal = 1;
+  // resource
+  ResourceEntity resource = 2;
+  // resource name
+  string resource_name = 3;
+  // privilege
+  GrantorEntity grantor = 4;
+}
+
+message SelectGrantRequest {
+  // Not useful for now
+  common.MsgBase base = 1;
+  // grant
+  GrantEntity entity = 2;
+}
+
+message SelectGrantResponse {
+  // Not useful for now
+  common.Status status = 1;
+  // grant info array
+  repeated GrantEntity entities = 2;
+}
+
+enum OperatePrivilegeType {
+  Grant = 0;
+  Revoke = 1;
+}
+
+message OperatePrivilegeRequest {
+  // Not useful for now
+  common.MsgBase base = 1;
+  // grant
+  GrantEntity entity = 2;
+  // operation type
+  OperatePrivilegeType type = 3;
+}
+
+message MilvusExt {
+  string version = 1;
+}
+
+extend google.protobuf.FileOptions {
+  MilvusExt milvus_ext_obj = 1001;
+}
+
+option (milvus_ext_obj) = {
+  version: "2.1.0"
+};

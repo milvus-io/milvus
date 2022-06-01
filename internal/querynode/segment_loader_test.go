@@ -40,8 +40,7 @@ func TestSegmentLoader_loadSegment(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	pkType := schemapb.DataType_Int64
-	schema := genTestCollectionSchema(pkType)
+	schema := genTestCollectionSchema()
 	fieldBinlog, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
 	assert.NoError(t, err)
 
@@ -49,9 +48,7 @@ func TestSegmentLoader_loadSegment(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 
-		err = node.historical.removeSegment(defaultSegmentID)
-		assert.NoError(t, err)
-
+		node.metaReplica.removeSegment(defaultSegmentID, segmentTypeSealed)
 		loader := node.loader
 		assert.NotNil(t, loader)
 
@@ -80,7 +77,7 @@ func TestSegmentLoader_loadSegment(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 
-		err = node.historical.removePartition(defaultPartitionID)
+		err = node.metaReplica.removePartition(defaultPartitionID)
 		assert.NoError(t, err)
 
 		loader := node.loader
@@ -169,8 +166,7 @@ func TestSegmentLoader_loadSegmentFieldsData(t *testing.T) {
 			schema.Fields = append(schema.Fields, genVectorFieldSchema(simpleBinVecField))
 		}
 
-		err = loader.historicalReplica.removeSegment(defaultSegmentID)
-		assert.NoError(t, err)
+		loader.metaReplica.removeSegment(defaultSegmentID, segmentTypeSealed)
 
 		col := newCollection(defaultCollectionID, schema)
 		assert.NotNil(t, col)
@@ -220,7 +216,7 @@ func TestSegmentLoader_invalid(t *testing.T) {
 		loader := node.loader
 		assert.NotNil(t, loader)
 
-		err = node.historical.removeCollection(defaultCollectionID)
+		err = node.metaReplica.removeCollection(defaultCollectionID)
 		assert.NoError(t, err)
 
 		req := &querypb.LoadSegmentsRequest{
@@ -248,7 +244,7 @@ func TestSegmentLoader_invalid(t *testing.T) {
 		loader := node.loader
 		assert.NotNil(t, loader)
 
-		err = node.historical.removeCollection(defaultCollectionID)
+		err = node.metaReplica.removeCollection(defaultCollectionID)
 		assert.NoError(t, err)
 
 		schema := &schemapb.CollectionSchema{
@@ -259,7 +255,7 @@ func TestSegmentLoader_invalid(t *testing.T) {
 				genPKFieldSchema(simpleInt64Field),
 			},
 		}
-		loader.historicalReplica.addCollection(defaultCollectionID, schema)
+		loader.metaReplica.addCollection(defaultCollectionID, schema)
 
 		req := &querypb.LoadSegmentsRequest{
 			Base: &commonpb.MsgBase{
@@ -329,7 +325,7 @@ func TestSegmentLoader_testLoadGrowing(t *testing.T) {
 		loader := node.loader
 		assert.NotNil(t, loader)
 
-		collection, err := node.historical.getCollectionByID(defaultCollectionID)
+		collection, err := node.metaReplica.getCollectionByID(defaultCollectionID)
 		assert.NoError(t, err)
 
 		segment, err := newSegment(collection, defaultSegmentID+1, defaultPartitionID, defaultCollectionID, defaultDMLChannel, segmentTypeGrowing)
@@ -358,7 +354,7 @@ func TestSegmentLoader_testLoadGrowing(t *testing.T) {
 		loader := node.loader
 		assert.NotNil(t, loader)
 
-		collection, err := node.historical.getCollectionByID(defaultCollectionID)
+		collection, err := node.metaReplica.getCollectionByID(defaultCollectionID)
 		assert.NoError(t, err)
 
 		segment, err := newSegment(collection, defaultSegmentID+1, defaultPartitionID, defaultCollectionID, defaultDMLChannel, segmentTypeGrowing)
@@ -386,8 +382,7 @@ func TestSegmentLoader_testLoadGrowingAndSealed(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	pkType := schemapb.DataType_Int64
-	schema := genTestCollectionSchema(pkType)
+	schema := genTestCollectionSchema()
 	fieldBinlog, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
 	assert.NoError(t, err)
 
@@ -422,7 +417,7 @@ func TestSegmentLoader_testLoadGrowingAndSealed(t *testing.T) {
 		err = loader.loadSegment(req1, segmentTypeSealed)
 		assert.NoError(t, err)
 
-		segment1, err := loader.historicalReplica.getSegmentByID(segmentID1)
+		segment1, err := loader.metaReplica.getSegmentByID(segmentID1, segmentTypeSealed)
 		assert.NoError(t, err)
 		assert.Equal(t, segment1.getRowCount(), int64(100))
 
@@ -448,7 +443,7 @@ func TestSegmentLoader_testLoadGrowingAndSealed(t *testing.T) {
 		err = loader.loadSegment(req2, segmentTypeSealed)
 		assert.NoError(t, err)
 
-		segment2, err := loader.historicalReplica.getSegmentByID(segmentID2)
+		segment2, err := loader.metaReplica.getSegmentByID(segmentID2, segmentTypeSealed)
 		assert.NoError(t, err)
 		// Note: getRowCount currently does not return accurate counts. The deleted rows are also counted.
 		assert.Equal(t, segment2.getRowCount(), int64(100)) // accurate counts should be 98
@@ -482,7 +477,7 @@ func TestSegmentLoader_testLoadGrowingAndSealed(t *testing.T) {
 		err = loader.loadSegment(req1, segmentTypeGrowing)
 		assert.NoError(t, err)
 
-		segment1, err := loader.streamingReplica.getSegmentByID(segmentID1)
+		segment1, err := loader.metaReplica.getSegmentByID(segmentID1, segmentTypeGrowing)
 		assert.NoError(t, err)
 		assert.Equal(t, segment1.getRowCount(), int64(100))
 
@@ -508,7 +503,7 @@ func TestSegmentLoader_testLoadGrowingAndSealed(t *testing.T) {
 		err = loader.loadSegment(req2, segmentTypeGrowing)
 		assert.NoError(t, err)
 
-		segment2, err := loader.streamingReplica.getSegmentByID(segmentID2)
+		segment2, err := loader.metaReplica.getSegmentByID(segmentID2, segmentTypeGrowing)
 		assert.NoError(t, err)
 		// Note: getRowCount currently does not return accurate counts. The deleted rows are also counted.
 		assert.Equal(t, segment2.getRowCount(), int64(100)) // accurate counts should be 98
@@ -519,8 +514,7 @@ func TestSegmentLoader_testLoadSealedSegmentWithIndex(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	pkType := schemapb.DataType_Int64
-	schema := genTestCollectionSchema(pkType)
+	schema := genTestCollectionSchema()
 
 	// generate insert binlog
 	fieldBinlog, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
@@ -568,7 +562,7 @@ func TestSegmentLoader_testLoadSealedSegmentWithIndex(t *testing.T) {
 	err = loader.loadSegment(req, segmentTypeSealed)
 	assert.NoError(t, err)
 
-	segment, err := node.historical.getSegmentByID(segmentID)
+	segment, err := node.metaReplica.getSegmentByID(segmentID, segmentTypeSealed)
 	assert.NoError(t, err)
 	vecFieldInfo, err := segment.getIndexedFieldInfo(simpleFloatVecField.id)
 	assert.NoError(t, err)
@@ -752,16 +746,17 @@ func newMockReplicaInterface() *mockReplicaInterface {
 }
 
 func TestSegmentLoader_getFieldType_err(t *testing.T) {
-	loader := &segmentLoader{}
-	// nor growing or sealed.
-	segment := &Segment{segmentType: 200}
-	_, err := loader.getFieldType(segment, 100)
+	replica, err := genSimpleReplica()
+	assert.NoError(t, err)
+	loader := &segmentLoader{metaReplica: replica}
+	segment := &Segment{collectionID: 200}
+	_, err = loader.getFieldType(segment, 100)
 	assert.Error(t, err)
 }
 
 func TestSegmentLoader_getFieldType(t *testing.T) {
 	replica := newMockReplicaInterface()
-	loader := &segmentLoader{streamingReplica: replica, historicalReplica: replica}
+	loader := &segmentLoader{metaReplica: replica}
 
 	// failed to get collection.
 	segment := &Segment{segmentType: segmentTypeSealed}

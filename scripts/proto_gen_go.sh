@@ -19,6 +19,7 @@
 SCRIPTS_DIR=$(dirname "$0")
 
 PROTO_DIR=$SCRIPTS_DIR/../internal/proto/
+GOOGLE_PROTO_DIR=$SCRIPTS_DIR/../cmake_build/thirdparty/protobuf/protobuf-src/src/
 
 PROGRAM=$(basename "$0")
 GOPATH=$(go env GOPATH)
@@ -51,20 +52,20 @@ mkdir -p datapb
 mkdir -p querypb
 mkdir -p planpb
 
-${protoc} --go_out=plugins=grpc,paths=source_relative:./commonpb common.proto
-${protoc} --go_out=plugins=grpc,paths=source_relative:./schemapb schema.proto
-${protoc} --go_out=plugins=grpc,paths=source_relative:./etcdpb etcd_meta.proto
-${protoc} --go_out=plugins=grpc,paths=source_relative:./indexcgopb index_cgo_msg.proto
+${protoc} --proto_path="${GOOGLE_PROTO_DIR}" --proto_path=. --go_out=plugins=grpc,paths=source_relative:./commonpb common.proto
+${protoc} --proto_path="${GOOGLE_PROTO_DIR}" --proto_path=. --go_out=plugins=grpc,paths=source_relative:./schemapb schema.proto
+${protoc} --proto_path="${GOOGLE_PROTO_DIR}" --proto_path=. --go_out=plugins=grpc,paths=source_relative:./etcdpb etcd_meta.proto
+${protoc} --proto_path="${GOOGLE_PROTO_DIR}" --proto_path=. --go_out=plugins=grpc,paths=source_relative:./indexcgopb index_cgo_msg.proto
 
-${protoc} --go_out=plugins=grpc,paths=source_relative:./rootcoordpb root_coord.proto
+${protoc} --proto_path="${GOOGLE_PROTO_DIR}" --proto_path=. --go_out=plugins=grpc,paths=source_relative:./rootcoordpb root_coord.proto
 
-${protoc} --go_out=plugins=grpc,paths=source_relative:./internalpb internal.proto
-${protoc} --go_out=plugins=grpc,paths=source_relative:./milvuspb milvus.proto
-${protoc} --go_out=plugins=grpc,paths=source_relative:./proxypb proxy.proto
-${protoc} --go_out=plugins=grpc,paths=source_relative:./indexpb index_coord.proto
-${protoc} --go_out=plugins=grpc,paths=source_relative:./datapb data_coord.proto
-${protoc} --go_out=plugins=grpc,paths=source_relative:./querypb query_coord.proto
-${protoc} --go_out=plugins=grpc,paths=source_relative:./planpb plan.proto
-${protoc} --go_out=plugins=grpc,paths=source_relative:./segcorepb segcore.proto
+${protoc} --proto_path="${GOOGLE_PROTO_DIR}" --proto_path=. --go_out=plugins=grpc,paths=source_relative:./internalpb internal.proto
+${protoc} --proto_path="${GOOGLE_PROTO_DIR}" --proto_path=. --go_out=plugins=grpc,paths=source_relative:./milvuspb milvus.proto
+${protoc} --proto_path="${GOOGLE_PROTO_DIR}" --proto_path=. --go_out=plugins=grpc,paths=source_relative:./proxypb proxy.proto
+${protoc} --proto_path="${GOOGLE_PROTO_DIR}" --proto_path=. --go_out=plugins=grpc,paths=source_relative:./indexpb index_coord.proto
+${protoc} --proto_path="${GOOGLE_PROTO_DIR}" --proto_path=. --go_out=plugins=grpc,paths=source_relative:./datapb data_coord.proto
+${protoc} --proto_path="${GOOGLE_PROTO_DIR}" --proto_path=. --go_out=plugins=grpc,paths=source_relative:./querypb query_coord.proto
+${protoc} --proto_path="${GOOGLE_PROTO_DIR}" --proto_path=. --go_out=plugins=grpc,paths=source_relative:./planpb plan.proto
+${protoc} --proto_path="${GOOGLE_PROTO_DIR}" --proto_path=. --go_out=plugins=grpc,paths=source_relative:./segcorepb segcore.proto
 
 popd

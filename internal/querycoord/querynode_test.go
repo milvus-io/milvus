@@ -310,18 +310,6 @@ func TestGrpcRequestWithNodeOffline(t *testing.T) {
 		assert.NotNil(t, err)
 	})
 
-	t.Run("Test AddQueryChannel", func(t *testing.T) {
-		req := &querypb.AddQueryChannelRequest{}
-		err = node.addQueryChannel(baseCtx, req)
-		assert.NotNil(t, err)
-	})
-
-	t.Run("Test RemoveQueryChannel", func(t *testing.T) {
-		req := &querypb.RemoveQueryChannelRequest{}
-		err = node.removeQueryChannel(baseCtx, req)
-		assert.Nil(t, err)
-	})
-
 	t.Run("Test ReleaseCollection", func(t *testing.T) {
 		req := &querypb.ReleaseCollectionRequest{}
 		err = node.releaseCollection(baseCtx, req)

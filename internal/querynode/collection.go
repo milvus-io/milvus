@@ -33,6 +33,7 @@ import (
 	"fmt"
 	"math"
 	"sync"
+	"sync/atomic"
 	"unsafe"
 
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -61,7 +62,7 @@ type Collection struct {
 	vDeltaChannels []Channel
 	pDeltaChannels []Channel
 
-	loadType loadType
+	loadType int32
 
 	releaseMu          sync.RWMutex // guards release
 	releasedPartitions map[UniqueID]struct{}
@@ -77,6 +78,13 @@ func (c *Collection) ID() UniqueID {
 // Schema returns the schema of collection
 func (c *Collection) Schema() *schemapb.CollectionSchema {
 	return c.schema
+}
+
+// getPartitionIDs return partitionIDs of collection
+func (c *Collection) getPartitionIDs() []UniqueID {
+	dst := make([]UniqueID, len(c.partitionIDs))
+	copy(dst, c.partitionIDs)
+	return dst
 }
 
 // addPartitionID would add a partition id to partition id list of collection
@@ -283,12 +291,13 @@ func (c *Collection) getReleaseTime() (Timestamp, bool) {
 
 // setLoadType set the loading type of collection, which is loadTypeCollection or loadTypePartition
 func (c *Collection) setLoadType(l loadType) {
-	c.loadType = l
+	atomic.StoreInt32(&c.loadType, int32(l))
 }
 
 // getLoadType get the loadType of collection, which is loadTypeCollection or loadTypePartition
 func (c *Collection) getLoadType() loadType {
-	return c.loadType
+	l := atomic.LoadInt32(&c.loadType)
+	return loadType(l)
 }
 
 // getFieldType get the field type according to the field id.

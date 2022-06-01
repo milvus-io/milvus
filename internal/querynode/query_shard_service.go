@@ -35,13 +35,9 @@ type queryShardService struct {
 	queryShardsMu sync.Mutex              // guards queryShards
 	queryShards   map[Channel]*queryShard // Virtual Channel -> *queryShard
 
-	queryChannelMu sync.Mutex              // guards queryChannels
-	queryChannels  map[int64]*queryChannel // Collection ID -> query channel
-
 	factory dependency.Factory
 
-	historical   ReplicaInterface
-	streaming    ReplicaInterface
+	metaReplica  ReplicaInterface
 	tSafeReplica TSafeReplicaInterface
 
 	shardClusterService *ShardClusterService
@@ -51,7 +47,7 @@ type queryShardService struct {
 	scheduler           *taskScheduler
 }
 
-func newQueryShardService(ctx context.Context, historical ReplicaInterface, streaming ReplicaInterface, tSafeReplica TSafeReplicaInterface, clusterService *ShardClusterService, factory dependency.Factory, scheduler *taskScheduler) *queryShardService {
+func newQueryShardService(ctx context.Context, metaReplica ReplicaInterface, tSafeReplica TSafeReplicaInterface, clusterService *ShardClusterService, factory dependency.Factory, scheduler *taskScheduler) *queryShardService {
 	queryShardServiceCtx, queryShardServiceCancel := context.WithCancel(ctx)
 
 	path := Params.LoadWithDefault("localStorage.Path", "/tmp/milvus/data")
@@ -63,9 +59,7 @@ func newQueryShardService(ctx context.Context, historical ReplicaInterface, stre
 		ctx:                 queryShardServiceCtx,
 		cancel:              queryShardServiceCancel,
 		queryShards:         make(map[Channel]*queryShard),
-		queryChannels:       make(map[int64]*queryChannel),
-		historical:          historical,
-		streaming:           streaming,
+		metaReplica:         metaReplica,
 		tSafeReplica:        tSafeReplica,
 		shardClusterService: clusterService,
 		localChunkManager:   localChunkManager,
@@ -89,8 +83,7 @@ func (q *queryShardService) addQueryShard(collectionID UniqueID, channel Channel
 		channel,
 		replicaID,
 		q.shardClusterService,
-		q.historical,
-		q.streaming,
+		q.metaReplica,
 		q.tSafeReplica,
 		q.localChunkManager,
 		q.remoteChunkManager,
@@ -142,29 +135,7 @@ func (q *queryShardService) close() {
 	}
 }
 
-func (q *queryShardService) getQueryChannel(collectionID int64) *queryChannel {
-	q.queryChannelMu.Lock()
-	defer q.queryChannelMu.Unlock()
-
-	qc, ok := q.queryChannels[collectionID]
-	if !ok {
-		queryStream, _ := q.factory.NewQueryMsgStream(q.ctx)
-		qc = NewQueryChannel(collectionID, q.shardClusterService, queryStream, q.streaming)
-		q.queryChannels[collectionID] = qc
-	}
-
-	return qc
-}
-
 func (q *queryShardService) releaseCollection(collectionID int64) {
-	q.queryChannelMu.Lock()
-	qc, ok := q.queryChannels[collectionID]
-	if ok && qc != nil {
-		qc.Stop()
-		delete(q.queryChannels, collectionID)
-	}
-	q.queryChannelMu.Unlock()
-
 	q.queryShardsMu.Lock()
 	for channel, queryShard := range q.queryShards {
 		if queryShard.collectionID == collectionID {

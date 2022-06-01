@@ -69,12 +69,6 @@ func Test_NewClient(t *testing.T) {
 		r3, err := client.GetStatisticsChannel(ctx)
 		retCheck(retNotNil, r3, err)
 
-		r4, err := client.AddQueryChannel(ctx, nil)
-		retCheck(retNotNil, r4, err)
-
-		r5, err := client.RemoveQueryChannel(ctx, nil)
-		retCheck(retNotNil, r5, err)
-
 		r6, err := client.WatchDmChannels(ctx, nil)
 		retCheck(retNotNil, r6, err)
 
@@ -109,42 +103,42 @@ func Test_NewClient(t *testing.T) {
 		retCheck(retNotNil, r16, err)
 	}
 
-	client.grpcClient = &mock.ClientBase{
+	client.grpcClient = &mock.GRPCClientBase{
 		GetGrpcClientErr: errors.New("dummy"),
 	}
 
 	newFunc1 := func(cc *grpc.ClientConn) interface{} {
-		return &mock.QueryNodeClient{Err: nil}
+		return &mock.GrpcQueryNodeClient{Err: nil}
 	}
 	client.grpcClient.SetNewGrpcClientFunc(newFunc1)
 
 	checkFunc(false)
 
-	client.grpcClient = &mock.ClientBase{
+	client.grpcClient = &mock.GRPCClientBase{
 		GetGrpcClientErr: nil,
 	}
 
 	newFunc2 := func(cc *grpc.ClientConn) interface{} {
-		return &mock.QueryNodeClient{Err: errors.New("dummy")}
+		return &mock.GrpcQueryNodeClient{Err: errors.New("dummy")}
 	}
 
 	client.grpcClient.SetNewGrpcClientFunc(newFunc2)
 
 	checkFunc(false)
 
-	client.grpcClient = &mock.ClientBase{
+	client.grpcClient = &mock.GRPCClientBase{
 		GetGrpcClientErr: nil,
 	}
 
 	newFunc3 := func(cc *grpc.ClientConn) interface{} {
-		return &mock.QueryNodeClient{Err: nil}
+		return &mock.GrpcQueryNodeClient{Err: nil}
 	}
 	client.grpcClient.SetNewGrpcClientFunc(newFunc3)
 
 	checkFunc(true)
 
 	// ctx canceled
-	client.grpcClient = &mock.ClientBase{
+	client.grpcClient = &mock.GRPCClientBase{
 		GetGrpcClientErr: nil,
 	}
 	client.grpcClient.SetNewGrpcClientFunc(newFunc1)

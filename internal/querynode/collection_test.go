@@ -26,8 +26,7 @@ import (
 
 func TestCollection_newCollection(t *testing.T) {
 	collectionID := UniqueID(0)
-	pkType := schemapb.DataType_Int64
-	schema := genTestCollectionSchema(pkType)
+	schema := genTestCollectionSchema()
 
 	collection := newCollection(collectionID, schema)
 	assert.Equal(t, collection.ID(), collectionID)
@@ -35,8 +34,7 @@ func TestCollection_newCollection(t *testing.T) {
 
 func TestCollection_deleteCollection(t *testing.T) {
 	collectionID := UniqueID(0)
-	pkType := schemapb.DataType_Int64
-	schema := genTestCollectionSchema(pkType)
+	schema := genTestCollectionSchema()
 
 	collection := newCollection(collectionID, schema)
 	assert.Equal(t, collection.ID(), collectionID)
@@ -45,8 +43,7 @@ func TestCollection_deleteCollection(t *testing.T) {
 
 func TestCollection_schema(t *testing.T) {
 	collectionID := UniqueID(0)
-	pkType := schemapb.DataType_Int64
-	schema := genTestCollectionSchema(pkType)
+	schema := genTestCollectionSchema()
 
 	collection := newCollection(collectionID, schema)
 	collectionSchema := collection.Schema()
@@ -57,8 +54,7 @@ func TestCollection_schema(t *testing.T) {
 
 func TestCollection_vChannel(t *testing.T) {
 	collectionID := UniqueID(0)
-	pkType := schemapb.DataType_Int64
-	schema := genTestCollectionSchema(pkType)
+	schema := genTestCollectionSchema()
 
 	collection := newCollection(collectionID, schema)
 	collection.addVChannels([]Channel{defaultDMLChannel})
@@ -75,8 +71,7 @@ func TestCollection_vChannel(t *testing.T) {
 
 func TestCollection_vDeltaChannel(t *testing.T) {
 	collectionID := UniqueID(0)
-	pkType := schemapb.DataType_Int64
-	schema := genTestCollectionSchema(pkType)
+	schema := genTestCollectionSchema()
 
 	collection := newCollection(collectionID, schema)
 	collection.addVDeltaChannels([]Channel{defaultDeltaChannel})
@@ -93,8 +88,7 @@ func TestCollection_vDeltaChannel(t *testing.T) {
 
 func TestCollection_pChannel(t *testing.T) {
 	collectionID := UniqueID(0)
-	pkType := schemapb.DataType_Int64
-	schema := genTestCollectionSchema(pkType)
+	schema := genTestCollectionSchema()
 
 	collection := newCollection(collectionID, schema)
 	collection.addPChannels([]Channel{"TestCollection_addPChannel_channel-0"})
@@ -107,8 +101,7 @@ func TestCollection_pChannel(t *testing.T) {
 
 func TestCollection_pDeltaChannel(t *testing.T) {
 	collectionID := UniqueID(0)
-	pkType := schemapb.DataType_Int64
-	schema := genTestCollectionSchema(pkType)
+	schema := genTestCollectionSchema()
 
 	collection := newCollection(collectionID, schema)
 	collection.addPDeltaChannels([]Channel{"TestCollection_addPDeltaChannel_channel-0"})
@@ -121,8 +114,7 @@ func TestCollection_pDeltaChannel(t *testing.T) {
 
 func TestCollection_releaseTime(t *testing.T) {
 	collectionID := UniqueID(0)
-	pkType := schemapb.DataType_Int64
-	schema := genTestCollectionSchema(pkType)
+	schema := genTestCollectionSchema()
 
 	collection := newCollection(collectionID, schema)
 	t0 := Timestamp(1000)
@@ -134,8 +126,7 @@ func TestCollection_releaseTime(t *testing.T) {
 
 func TestCollection_loadType(t *testing.T) {
 	collectionID := UniqueID(0)
-	pkType := schemapb.DataType_Int64
-	schema := genTestCollectionSchema(pkType)
+	schema := genTestCollectionSchema()
 
 	collection := newCollection(collectionID, schema)
 	collection.setLoadType(loadTypeCollection)

@@ -51,7 +51,6 @@ jobs:
           shell: bash
           command: |
             pip install -r tests/python_client/requirements.txt
-            pip install --upgrade protobuf
       
       - name: Deploy Chaos Mesh
         shell: bash
