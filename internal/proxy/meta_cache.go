@@ -674,7 +674,6 @@ func parseShardLeaderList2QueryNode(shardsLeaders []*querypb.ShardLeadersList) m
 func (m *MetaCache) ClearShards(collectionName string) {
 	log.Info("clearing shard cache for collection", zap.String("collectionName", collectionName))
 	m.mu.Lock()
-	//var ret map[string][]nodeInfo
 	info, ok := m.collInfo[collectionName]
 	if ok {
 		m.collInfo[collectionName].shardLeaders = nil

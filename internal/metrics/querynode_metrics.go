@@ -17,9 +17,8 @@
 package metrics
 
 import (
-	"github.com/prometheus/client_golang/prometheus"
-
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 var (
@@ -167,12 +166,127 @@ var (
 			nodeIDLabelName,
 		})
 
+	QueryNodeReadTaskUnsolveLen = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "read_task_unsolved_len",
+			Help:      "number of unsolved read tasks in unsolvedQueue",
+		}, []string{
+			nodeIDLabelName,
+		})
+
+	QueryNodeReadTaskReadyLen = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "read_task_ready_len",
+			Help:      "number of ready read tasks in readyQueue",
+		}, []string{
+			nodeIDLabelName,
+		})
+
+	QueryNodeReadTaskConcurrency = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "read_task_concurrency",
+			Help:      "number of concurrent executing read tasks in QueryNode",
+		}, []string{
+			nodeIDLabelName,
+		})
+
+	QueryNodeEstimateCPUUsage = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "estimate_cpu_usage",
+			Help:      "estimated cpu usage by the scheduler in QueryNode",
+		}, []string{
+			nodeIDLabelName,
+		})
+
+	QueryNodeSearchGroupNQ = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "search_group_nq",
+			Help:      "the number of queries of each grouped search task",
+			Buckets:   buckets,
+		}, []string{
+			nodeIDLabelName,
+		})
+
+	QueryNodeSearchNQ = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "search_nq",
+			Help:      "the number of queries of each search task",
+			Buckets:   buckets,
+		}, []string{
+			nodeIDLabelName,
+		})
+
+	QueryNodeSearchGroupTopK = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "search_group_topk",
+			Help:      "the topK of each grouped search task",
+			Buckets:   buckets,
+		}, []string{
+			nodeIDLabelName,
+		})
+
+	QueryNodeSearchTopK = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "search_topk",
+			Help:      "the top of each search task",
+			Buckets:   buckets,
+		}, []string{
+			nodeIDLabelName,
+		})
+
+	QueryNodeSearchGroupSize = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "search_group_size",
+			Help:      "the number of tasks of each grouped search task",
+			Buckets:   buckets,
+		}, []string{
+			nodeIDLabelName,
+		})
+
+	QueryNodeEvictedReadReqCount = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "read_evicted_count",
+			Help:      "count of evicted search / query request",
+		}, []string{
+			nodeIDLabelName,
+		})
+
 	QueryNodeNumFlowGraphs = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
 			Name:      "flowgraph_num",
 			Help:      "number of flowgraphs",
+		}, []string{
+			nodeIDLabelName,
+		})
+
+	QueryNodeNumEntities = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "entities_num",
+			Help:      "number of entities which can be searched/queried",
 		}, []string{
 			nodeIDLabelName,
 		})
@@ -193,5 +307,16 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeSQSegmentLatencyInCore)
 	registry.MustRegister(QueryNodeReduceLatency)
 	registry.MustRegister(QueryNodeLoadSegmentLatency)
+	registry.MustRegister(QueryNodeReadTaskUnsolveLen)
+	registry.MustRegister(QueryNodeReadTaskReadyLen)
+	registry.MustRegister(QueryNodeReadTaskConcurrency)
+	registry.MustRegister(QueryNodeEstimateCPUUsage)
+	registry.MustRegister(QueryNodeSearchGroupNQ)
+	registry.MustRegister(QueryNodeSearchNQ)
+	registry.MustRegister(QueryNodeSearchGroupSize)
+	registry.MustRegister(QueryNodeEvictedReadReqCount)
+	registry.MustRegister(QueryNodeSearchGroupTopK)
+	registry.MustRegister(QueryNodeSearchTopK)
 	registry.MustRegister(QueryNodeNumFlowGraphs)
+	registry.MustRegister(QueryNodeNumEntities)
 }

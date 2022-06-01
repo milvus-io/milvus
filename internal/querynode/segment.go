@@ -603,7 +603,7 @@ func (s *Segment) segmentInsert(offset int64, entityIDs []UniqueID, timestamps [
 	if err := HandleCStatus(&status, "Insert failed"); err != nil {
 		return err
 	}
-
+	metrics.QueryNodeNumEntities.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Add(float64(numOfRow))
 	s.setRecentlyModified(true)
 	return nil
 }

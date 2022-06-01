@@ -27,6 +27,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 )
 
 const (
@@ -52,7 +53,8 @@ type taskScheduler struct {
 	schedule scheduleReadTaskPolicy
 	// for search and query end
 
-	cpuUsage int32 // 1200 means 1200% 12 cores
+	cpuUsage        int32 // 1200 means 1200% 12 cores
+	readConcurrency int32 // 1200 means 1200% 12 cores
 
 	// for other tasks
 	queue       taskQueue
@@ -153,6 +155,7 @@ func (s *taskScheduler) tryEvictUnsolvedReadTask(headCount int) {
 	if diff <= 0 {
 		return
 	}
+	metrics.QueryNodeEvictedReadReqCount.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Add(float64(diff))
 	busyErr := fmt.Errorf("server is busy")
 	for e := s.unsolvedReadTasks.Front(); e != nil && diff > 0; e = e.Next() {
 		diff--
@@ -224,6 +227,7 @@ func (s *taskScheduler) popAndAddToExecute() {
 	if curUsage < 0 {
 		curUsage = 0
 	}
+	metrics.QueryNodeReadTaskConcurrency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(curUsage))
 	targetUsage := s.maxCPUUsage - curUsage
 	if targetUsage <= 0 {
 		return
@@ -246,11 +250,14 @@ func (s *taskScheduler) executeReadTasks() {
 			return
 		case t, ok := <-s.executeReadTaskChan:
 			if ok {
+				pendingTaskLen := len(s.executeReadTaskChan)
 				taskWg.Add(1)
+				atomic.AddInt32(&s.readConcurrency, int32(pendingTaskLen+1))
 				go func(t readTask) {
 					defer taskWg.Done()
 					s.processReadTask(t)
 					cpu := t.CPUUsage()
+					atomic.AddInt32(&s.readConcurrency, -1)
 					atomic.AddInt32(&s.cpuUsage, -cpu)
 					select {
 					case s.notifyChan <- struct{}{}:
@@ -258,7 +265,6 @@ func (s *taskScheduler) executeReadTasks() {
 					}
 				}(t)
 
-				pendingTaskLen := len(s.executeReadTaskChan)
 				for i := 0; i < pendingTaskLen; i++ {
 					taskWg.Add(1)
 					t := <-s.executeReadTaskChan
@@ -266,6 +272,7 @@ func (s *taskScheduler) executeReadTasks() {
 						defer taskWg.Done()
 						s.processReadTask(t)
 						cpu := t.CPUUsage()
+						atomic.AddInt32(&s.readConcurrency, -1)
 						atomic.AddInt32(&s.cpuUsage, -cpu)
 						select {
 						case s.notifyChan <- struct{}{}:
@@ -344,4 +351,8 @@ func (s *taskScheduler) tryMergeReadTasks() {
 			s.unsolvedReadTasks.Remove(e)
 		}
 	}
+	metrics.QueryNodeReadTaskUnsolveLen.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(s.unsolvedReadTasks.Len()))
+	metrics.QueryNodeReadTaskReadyLen.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(s.readyReadTasks.Len()))
+	readConcurrency := atomic.LoadInt32(&s.readConcurrency)
+	metrics.QueryNodeEstimateCPUUsage.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(readConcurrency))
 }
