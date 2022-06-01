@@ -429,12 +429,11 @@ func TestImpl_ReleaseSegments(t *testing.T) {
 			SegmentIDs:   []UniqueID{defaultSegmentID},
 		}
 
-		err = node.metaReplica.removeSegment(defaultSegmentID, segmentTypeSealed)
-		assert.NoError(t, err)
+		node.metaReplica.removeSegment(defaultSegmentID, segmentTypeSealed)
 
 		status, err := node.ReleaseSegments(ctx, req)
 		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 	})
 	wg.Wait()
 }

@@ -164,8 +164,7 @@ func TestMetaReplica_segment(t *testing.T) {
 			targetSeg, err := replica.getSegmentByID(UniqueID(i), segmentTypeGrowing)
 			assert.NoError(t, err)
 			assert.Equal(t, UniqueID(i), targetSeg.segmentID)
-			err = replica.removeSegment(UniqueID(i), segmentTypeGrowing)
-			assert.NoError(t, err)
+			replica.removeSegment(UniqueID(i), segmentTypeGrowing)
 		}
 	})
 
@@ -202,8 +201,7 @@ func TestMetaReplica_segment(t *testing.T) {
 		assert.Error(t, err)
 		_, err = replica.getSegmentIDs(defaultPartitionID, invalidType)
 		assert.Error(t, err)
-		err = replica.removeSegment(defaultSegmentID, invalidType)
-		assert.Error(t, err)
+		assert.Panics(t, func() { replica.removeSegment(defaultSegmentID, invalidType) })
 		_, err = replica.hasSegment(defaultSegmentID, invalidType)
 		assert.Error(t, err)
 		num := replica.getSegmentNum(invalidType)
