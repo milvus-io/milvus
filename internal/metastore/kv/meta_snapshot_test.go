@@ -14,20 +14,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package rootcoord
+package kv
 
 import (
 	"context"
 	"fmt"
 	"math/rand"
+	"os"
 	"path"
 	"testing"
 	"time"
+
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
 )
+
+var Params paramtable.ComponentParam
+
+func TestMain(m *testing.M) {
+	Params.Init()
+	code := m.Run()
+	os.Exit(code)
+}
 
 func TestMetaSnapshot(t *testing.T) {
 	rand.Seed(time.Now().UnixNano())
@@ -46,7 +57,7 @@ func TestMetaSnapshot(t *testing.T) {
 		return vtso
 	}
 
-	ms, err := newMetaSnapshot(etcdCli, rootPath, tsKey, 4)
+	ms, err := NewMetaSnapshot(etcdCli, rootPath, tsKey, 4)
 	assert.Nil(t, err)
 	assert.NotNil(t, ms)
 
@@ -60,13 +71,13 @@ func TestMetaSnapshot(t *testing.T) {
 		assert.Nil(t, err)
 	}
 
-	ms, err = newMetaSnapshot(etcdCli, rootPath, tsKey, 4)
+	ms, err = NewMetaSnapshot(etcdCli, rootPath, tsKey, 4)
 	assert.Nil(t, err)
 	assert.NotNil(t, ms)
 }
 
 func TestSearchOnCache(t *testing.T) {
-	ms := &metaSnapshot{}
+	ms := &MetaSnapshot{}
 	for i := 0; i < 8; i++ {
 		ms.ts2Rev = append(ms.ts2Rev,
 			rtPair{
@@ -87,7 +98,7 @@ func TestSearchOnCache(t *testing.T) {
 }
 
 func TestGetRevOnCache(t *testing.T) {
-	ms := &metaSnapshot{}
+	ms := &MetaSnapshot{}
 	ms.ts2Rev = make([]rtPair, 7)
 	ms.initTs(7, 16)
 	ms.initTs(6, 14)
@@ -181,7 +192,7 @@ func TestGetRevOnEtcd(t *testing.T) {
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 
-	ms := metaSnapshot{
+	ms := MetaSnapshot{
 		cli:   etcdCli,
 		root:  rootPath,
 		tsKey: tsKey,
@@ -230,7 +241,7 @@ func TestLoad(t *testing.T) {
 		return vtso
 	}
 
-	ms, err := newMetaSnapshot(etcdCli, rootPath, tsKey, 7)
+	ms, err := NewMetaSnapshot(etcdCli, rootPath, tsKey, 7)
 	assert.Nil(t, err)
 	assert.NotNil(t, ms)
 
@@ -250,7 +261,7 @@ func TestLoad(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, "value-19", val)
 
-	ms, err = newMetaSnapshot(etcdCli, rootPath, tsKey, 11)
+	ms, err = NewMetaSnapshot(etcdCli, rootPath, tsKey, 11)
 	assert.Nil(t, err)
 	assert.NotNil(t, ms)
 
@@ -278,7 +289,7 @@ func TestMultiSave(t *testing.T) {
 		return vtso
 	}
 
-	ms, err := newMetaSnapshot(etcdCli, rootPath, tsKey, 7)
+	ms, err := NewMetaSnapshot(etcdCli, rootPath, tsKey, 7)
 	assert.Nil(t, err)
 	assert.NotNil(t, ms)
 
@@ -309,7 +320,7 @@ func TestMultiSave(t *testing.T) {
 	assert.Equal(t, vals[0], "v1-19")
 	assert.Equal(t, vals[1], "v2-19")
 
-	ms, err = newMetaSnapshot(etcdCli, rootPath, tsKey, 11)
+	ms, err = NewMetaSnapshot(etcdCli, rootPath, tsKey, 11)
 	assert.Nil(t, err)
 	assert.NotNil(t, ms)
 
@@ -343,7 +354,7 @@ func TestMultiSaveAndRemoveWithPrefix(t *testing.T) {
 	}
 	defer etcdCli.Close()
 
-	ms, err := newMetaSnapshot(etcdCli, rootPath, tsKey, 7)
+	ms, err := NewMetaSnapshot(etcdCli, rootPath, tsKey, 7)
 	assert.Nil(t, err)
 	assert.NotNil(t, ms)
 
@@ -381,7 +392,7 @@ func TestMultiSaveAndRemoveWithPrefix(t *testing.T) {
 		assert.Equal(t, 39-i, len(vals))
 	}
 
-	ms, err = newMetaSnapshot(etcdCli, rootPath, tsKey, 11)
+	ms, err = NewMetaSnapshot(etcdCli, rootPath, tsKey, 11)
 	assert.Nil(t, err)
 	assert.NotNil(t, ms)
 
@@ -415,7 +426,7 @@ func TestTsBackward(t *testing.T) {
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 
-	kv, err := newMetaSnapshot(etcdCli, rootPath, tsKey, 1024)
+	kv, err := NewMetaSnapshot(etcdCli, rootPath, tsKey, 1024)
 	assert.Nil(t, err)
 
 	err = kv.loadTs()
@@ -425,7 +436,7 @@ func TestTsBackward(t *testing.T) {
 	kv.Save("a", "c", 99) // backward
 	kv.Save("a", "d", 200)
 
-	kv, err = newMetaSnapshot(etcdCli, rootPath, tsKey, 1024)
+	kv, err = NewMetaSnapshot(etcdCli, rootPath, tsKey, 1024)
 	assert.Error(t, err)
 
 }
@@ -442,7 +453,7 @@ func TestFix7150(t *testing.T) {
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 
-	kv, err := newMetaSnapshot(etcdCli, rootPath, tsKey, 1024)
+	kv, err := NewMetaSnapshot(etcdCli, rootPath, tsKey, 1024)
 	assert.Nil(t, err)
 
 	err = kv.loadTs()
@@ -452,7 +463,7 @@ func TestFix7150(t *testing.T) {
 	kv.Save("a", "c", 0) // bug introduced
 	kv.Save("a", "d", 200)
 
-	kv, err = newMetaSnapshot(etcdCli, rootPath, tsKey, 1024)
+	kv, err = NewMetaSnapshot(etcdCli, rootPath, tsKey, 1024)
 	assert.Nil(t, err)
 	err = kv.loadTs()
 	assert.Nil(t, err)

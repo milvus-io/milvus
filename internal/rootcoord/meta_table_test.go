@@ -17,6 +17,7 @@
 package rootcoord
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -25,14 +26,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
+	kvmetestore "github.com/milvus-io/milvus/internal/metastore/kv"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -114,65 +116,48 @@ func Test_MockKV(t *testing.T) {
 		return nil, nil, fmt.Errorf("load prefix error")
 	}
 
-	_, err := NewMetaTable(kt, k1)
+	_, err := NewMetaTable(context.TODO(), kt, k1)
 	assert.NotNil(t, err)
 	assert.EqualError(t, err, "load prefix error")
 
-	// proxy
-	prefix[ProxyMetaPrefix] = []string{"porxy-meta"}
-	_, err = NewMetaTable(kt, k1)
-	assert.NotNil(t, err)
-
-	value, err := proto.Marshal(&pb.ProxyMeta{})
-	assert.Nil(t, err)
-	prefix[ProxyMetaPrefix] = []string{string(value)}
-	_, err = NewMetaTable(kt, k1)
-	assert.NotNil(t, err)
-
 	// collection
-	prefix[CollectionMetaPrefix] = []string{"collection-meta"}
-	_, err = NewMetaTable(kt, k1)
+	prefix[kvmetestore.CollectionMetaPrefix] = []string{"collection-meta"}
+	_, err = NewMetaTable(context.TODO(), kt, k1)
 	assert.NotNil(t, err)
 
-	value, err = proto.Marshal(&pb.CollectionInfo{Schema: &schemapb.CollectionSchema{}})
+	value, err := proto.Marshal(&pb.CollectionInfo{Schema: &schemapb.CollectionSchema{}})
 	assert.Nil(t, err)
-	prefix[CollectionMetaPrefix] = []string{string(value)}
-	_, err = NewMetaTable(kt, k1)
+	prefix[kvmetestore.CollectionMetaPrefix] = []string{string(value)}
+	_, err = NewMetaTable(context.TODO(), kt, k1)
 	assert.NotNil(t, err)
 
 	// segment index
-	prefix[SegmentIndexMetaPrefix] = []string{"segment-index-meta"}
-	_, err = NewMetaTable(kt, k1)
+	prefix[kvmetestore.SegmentIndexMetaPrefix] = []string{"segment-index-meta"}
+	_, err = NewMetaTable(context.TODO(), kt, k1)
 	assert.NotNil(t, err)
 
 	value, err = proto.Marshal(&pb.SegmentIndexInfo{})
 	assert.Nil(t, err)
-	prefix[SegmentIndexMetaPrefix] = []string{string(value)}
-	_, err = NewMetaTable(kt, k1)
+	prefix[kvmetestore.SegmentIndexMetaPrefix] = []string{string(value)}
+	_, err = NewMetaTable(context.TODO(), kt, k1)
 	assert.NotNil(t, err)
 
-	prefix[SegmentIndexMetaPrefix] = []string{string(value), string(value)}
-	_, err = NewMetaTable(kt, k1)
+	prefix[kvmetestore.SegmentIndexMetaPrefix] = []string{string(value), string(value)}
+	_, err = NewMetaTable(context.TODO(), kt, k1)
 	assert.NotNil(t, err)
 	assert.EqualError(t, err, "load prefix error")
 
 	// index
-	prefix[IndexMetaPrefix] = []string{"index-meta"}
-	_, err = NewMetaTable(kt, k1)
+	prefix[kvmetestore.IndexMetaPrefix] = []string{"index-meta"}
+	_, err = NewMetaTable(context.TODO(), kt, k1)
 	assert.NotNil(t, err)
 
 	value, err = proto.Marshal(&pb.IndexInfo{})
 	assert.Nil(t, err)
-	prefix[IndexMetaPrefix] = []string{string(value)}
-	m1, err := NewMetaTable(kt, k1)
+	prefix[kvmetestore.IndexMetaPrefix] = []string{string(value)}
+	_, err = NewMetaTable(context.TODO(), kt, k1)
 	assert.NotNil(t, err)
 	assert.EqualError(t, err, "load prefix error")
-	prefix[CollectionAliasMetaPrefix] = []string{"alias-meta"}
-
-	k1.save = func(key string, value string, ts typeutil.Timestamp) error {
-		return fmt.Errorf("save proxy error")
-	}
-	assert.Panics(t, func() { m1.AddProxy(&pb.ProxyMeta{}) })
 }
 
 func TestMetaTable(t *testing.T) {
@@ -212,60 +197,63 @@ func TestMetaTable(t *testing.T) {
 	require.Nil(t, err)
 	defer etcdCli.Close()
 
-	skv, err := newMetaSnapshot(etcdCli, rootPath, TimestampPrefix, 7)
+	skv, err := kvmetestore.NewMetaSnapshot(etcdCli, rootPath, TimestampPrefix, 7)
 	assert.Nil(t, err)
 	assert.NotNil(t, skv)
 	txnKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
-	mt, err := NewMetaTable(txnKV, skv)
+	mt, err := NewMetaTable(context.TODO(), txnKV, skv)
 	assert.Nil(t, err)
 
-	collInfo := &pb.CollectionInfo{
-		ID: collID,
-		Schema: &schemapb.CollectionSchema{
-			Name:   collName,
-			AutoID: false,
-			Fields: []*schemapb.FieldSchema{
-				{
-					FieldID:      fieldID,
-					Name:         "field110",
-					IsPrimaryKey: false,
-					Description:  "",
-					DataType:     schemapb.DataType_FloatVector,
-					TypeParams: []*commonpb.KeyValuePair{
-						{
-							Key:   "field110-k1",
-							Value: "field110-v1",
-						},
-						{
-							Key:   "field110-k2",
-							Value: "field110-v2",
-						},
+	collInfo := &model.Collection{
+		CollectionID: collID,
+		Name:         collName,
+		AutoID:       false,
+		Fields: []*model.Field{
+			{
+				FieldID:      fieldID,
+				Name:         "field110",
+				IsPrimaryKey: false,
+				Description:  "",
+				DataType:     schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   "field110-k1",
+						Value: "field110-v1",
 					},
-					IndexParams: []*commonpb.KeyValuePair{
-						{
-							Key:   "field110-i1",
-							Value: "field110-v1",
-						},
-						{
-							Key:   "field110-i2",
-							Value: "field110-v2",
-						},
+					{
+						Key:   "field110-k2",
+						Value: "field110-v2",
+					},
+				},
+				IndexParams: []*commonpb.KeyValuePair{
+					{
+						Key:   "field110-i1",
+						Value: "field110-v1",
+					},
+					{
+						Key:   "field110-i2",
+						Value: "field110-v2",
 					},
 				},
 			},
 		},
-		FieldIndexes: []*pb.FieldIndexInfo{
+		FieldIndexes: []*model.Index{
 			{
-				FiledID: fieldID,
+				FieldID: fieldID,
 				IndexID: indexID,
 			},
 		},
-		CreateTime:                 0,
-		PartitionIDs:               []typeutil.UniqueID{partIDDefault},
-		PartitionNames:             []string{Params.CommonCfg.DefaultPartitionName},
-		PartitionCreatedTimestamps: []uint64{0},
+		CreateTime: 0,
+		Partitions: []*model.Partition{
+			{
+				PartitionID:               partIDDefault,
+				PartitionName:             Params.CommonCfg.DefaultPartitionName,
+				PartitionCreatedTimestamp: 0,
+			},
+		},
 	}
-	idxInfo := []*pb.IndexInfo{
+
+	idxInfo := []*model.Index{
 		{
 			IndexName: indexName,
 			IndexID:   indexID,
@@ -282,30 +270,30 @@ func TestMetaTable(t *testing.T) {
 		},
 	}
 
+	mt.indexID2Meta[indexID] = *idxInfo[0]
+
 	var wg sync.WaitGroup
 	wg.Add(1)
 	t.Run("add collection", func(t *testing.T) {
 		defer wg.Done()
 		ts := ftso()
-		err = mt.AddCollection(collInfo, ts, nil, "")
-		assert.NotNil(t, err)
 
-		err = mt.AddCollection(collInfo, ts, idxInfo, "")
+		err = mt.AddCollection(collInfo, ts, "")
 		assert.Nil(t, err)
 		assert.Equal(t, uint64(1), ts)
 
-		collMeta, err := mt.GetCollectionByName(collName, 0)
+		collMeta, err := mt.GetCollectionByName(collName, ts)
 		assert.Nil(t, err)
 		assert.Equal(t, collMeta.CreateTime, ts)
-		assert.Equal(t, collMeta.PartitionCreatedTimestamps[0], ts)
+		assert.Equal(t, collMeta.Partitions[0].PartitionCreatedTimestamp, ts)
 
-		assert.Equal(t, partIDDefault, collMeta.PartitionIDs[0])
-		assert.Equal(t, 1, len(collMeta.PartitionIDs))
-		assert.True(t, mt.HasCollection(collInfo.ID, 0))
+		assert.Equal(t, partIDDefault, collMeta.Partitions[0].PartitionID)
+		assert.Equal(t, 1, len(collMeta.Partitions))
+		assert.True(t, mt.HasCollection(collInfo.CollectionID, 0))
 
 		field, err := mt.GetFieldSchema(collName, "field110")
 		assert.Nil(t, err)
-		assert.Equal(t, collInfo.Schema.Fields[0].FieldID, field.FieldID)
+		assert.Equal(t, collInfo.Fields[0].FieldID, field.FieldID)
 
 		// check DD operation flag
 		flag, err := mt.snapshot.Load(DDMsgSendPrefix, 0)
@@ -354,9 +342,9 @@ func TestMetaTable(t *testing.T) {
 
 		collMeta, ok := mt.collID2Meta[collID]
 		assert.True(t, ok)
-		assert.Equal(t, 2, len(collMeta.PartitionNames))
-		assert.Equal(t, collMeta.PartitionNames[1], partName)
-		assert.Equal(t, ts, collMeta.PartitionCreatedTimestamps[1])
+		assert.Equal(t, 2, len(collMeta.Partitions))
+		assert.Equal(t, collMeta.Partitions[1].PartitionName, partName)
+		assert.Equal(t, ts, collMeta.Partitions[1].PartitionCreatedTimestamp)
 
 		// check DD operation flag
 		flag, err := mt.txn.Load(DDMsgSendPrefix)
@@ -367,25 +355,33 @@ func TestMetaTable(t *testing.T) {
 	wg.Add(1)
 	t.Run("add segment index", func(t *testing.T) {
 		defer wg.Done()
-		segIdxInfo := pb.SegmentIndexInfo{
+		index := model.Index{
 			CollectionID: collID,
-			PartitionID:  partID,
-			SegmentID:    segID,
 			FieldID:      fieldID,
 			IndexID:      indexID,
-			BuildID:      buildID,
+			SegmentIndexes: map[int64]model.SegmentIndex{
+				segID: {
+					Segment: model.Segment{
+						SegmentID:   segID,
+						PartitionID: partID,
+					},
+					BuildID:     buildID,
+					EnableIndex: true,
+				},
+			},
 		}
-		err = mt.AddIndex(&segIdxInfo)
+		err = mt.AlterIndex(&index)
 		assert.Nil(t, err)
 
 		// it's legal to add index twice
-		err = mt.AddIndex(&segIdxInfo)
+		err = mt.AlterIndex(&index)
 		assert.Nil(t, err)
 
-		segIdxInfo.BuildID = 202
-		err = mt.AddIndex(&segIdxInfo)
-		assert.NotNil(t, err)
-		assert.EqualError(t, err, fmt.Sprintf("index id = %d exist", segIdxInfo.IndexID))
+		idxMeta, ok := mt.segID2IndexMeta[segID]
+		assert.True(t, ok)
+		segMeta, ok := idxMeta[indexID]
+		assert.True(t, ok)
+		assert.True(t, segMeta.SegmentIndexes[segID].EnableIndex)
 	})
 
 	wg.Add(1)
@@ -401,13 +397,13 @@ func TestMetaTable(t *testing.T) {
 				Value: "field110-v2",
 			},
 		}
-		idxInfo := &pb.IndexInfo{
+		idxInfo := &model.Index{
 			IndexName:   "testColl_index_110",
 			IndexID:     indexID,
 			IndexParams: params,
 		}
 
-		_, _, err := mt.GetNotIndexedSegments("collTest", "field110", idxInfo, nil)
+		err := mt.AddIndex("collTest", "field110", idxInfo, []typeutil.UniqueID{segID})
 		assert.NotNil(t, err)
 	})
 
@@ -425,7 +421,17 @@ func TestMetaTable(t *testing.T) {
 			},
 		}
 
-		idxInfo := &pb.IndexInfo{
+		tparams := []*commonpb.KeyValuePair{
+			{
+				Key:   "field110-k1",
+				Value: "field110-v1",
+			},
+			{
+				Key:   "field110-k2",
+				Value: "field110-v2",
+			},
+		}
+		idxInfo := &model.Index{
 			IndexName:   "field110",
 			IndexID:     2000,
 			IndexParams: params,
@@ -433,8 +439,11 @@ func TestMetaTable(t *testing.T) {
 
 		_, _, err := mt.GetNotIndexedSegments("collTest", "field110", idxInfo, nil)
 		assert.NotNil(t, err)
-		_, _, err = mt.GetNotIndexedSegments(collName, "field110", idxInfo, []typeutil.UniqueID{segID, segID2})
-		assert.NotNil(t, err)
+		seg, field, err := mt.GetNotIndexedSegments(collName, "field110", idxInfo, []typeutil.UniqueID{segID, segID2})
+		assert.Nil(t, err)
+		assert.Equal(t, 1, len(seg))
+		assert.Equal(t, segID2, seg[0])
+		assert.True(t, EqualKeyPairArray(field.TypeParams, tparams))
 
 		params = []*commonpb.KeyValuePair{
 			{
@@ -446,8 +455,12 @@ func TestMetaTable(t *testing.T) {
 		idxInfo.IndexID = 2001
 		idxInfo.IndexName = "field110-1"
 
-		_, _, err = mt.GetNotIndexedSegments(collName, "field110", idxInfo, []typeutil.UniqueID{segID, segID2})
-		assert.NotNil(t, err)
+		seg, field, err = mt.GetNotIndexedSegments(collName, "field110", idxInfo, []typeutil.UniqueID{segID, segID2})
+		assert.Nil(t, err)
+		assert.Equal(t, 2, len(seg))
+		assert.Equal(t, segID, seg[0])
+		assert.Equal(t, segID2, seg[1])
+		assert.True(t, EqualKeyPairArray(field.TypeParams, tparams))
 	})
 
 	wg.Add(1)
@@ -475,19 +488,6 @@ func TestMetaTable(t *testing.T) {
 	})
 
 	wg.Add(1)
-	t.Run("reload meta", func(t *testing.T) {
-		defer wg.Done()
-		po := pb.ProxyMeta{
-			ID: 101,
-		}
-		err = mt.AddProxy(&po)
-		assert.Nil(t, err)
-
-		_, err = NewMetaTable(txnKV, skv)
-		assert.Nil(t, err)
-	})
-
-	wg.Add(1)
 	t.Run("drop index", func(t *testing.T) {
 		defer wg.Done()
 		idx, ok, err := mt.DropIndex(collName, "field110", indexName)
@@ -500,10 +500,6 @@ func TestMetaTable(t *testing.T) {
 		assert.False(t, ok)
 
 		_, idxs, err := mt.GetIndexByName(collName, "field110")
-		assert.Nil(t, err)
-		assert.Zero(t, len(idxs))
-
-		_, idxs, err = mt.GetIndexByName(collName, "field110-1")
 		assert.Nil(t, err)
 		assert.Zero(t, len(idxs))
 
@@ -559,8 +555,11 @@ func TestMetaTable(t *testing.T) {
 
 	/////////////////////////// these tests should run at last, it only used to hit the error lines ////////////////////////
 	txnkv := etcdkv.NewEtcdKV(etcdCli, rootPath)
-	mockKV := &mockTestKV{}
-	mt.snapshot = mockKV
+	mockKV := &mockTestKV{
+		loadWithPrefix: func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
+			return nil, nil, nil
+		},
+	}
 	mockTxnKV := &mockTestTxnKV{
 		TxnKV:          mt.txn,
 		loadWithPrefix: func(key string) ([]string, []string, error) { return txnkv.LoadWithPrefix(key) },
@@ -571,7 +570,9 @@ func TestMetaTable(t *testing.T) {
 		},
 		remove: func(key string) error { return txnkv.Remove(key) },
 	}
-	mt.txn = mockTxnKV
+
+	mt, err = NewMetaTable(context.TODO(), mockTxnKV, mockKV)
+	assert.Nil(t, err)
 
 	wg.Add(1)
 	t.Run("add collection failed", func(t *testing.T) {
@@ -582,10 +583,8 @@ func TestMetaTable(t *testing.T) {
 		mockKV.multiSave = func(kvs map[string]string, ts typeutil.Timestamp) error {
 			return fmt.Errorf("multi save error")
 		}
-		collInfo.PartitionIDs = nil
-		collInfo.PartitionNames = nil
-		collInfo.PartitionCreatedTimestamps = nil
-		assert.Panics(t, func() { mt.AddCollection(collInfo, 0, idxInfo, "") })
+		collInfo.Partitions = []*model.Partition{}
+		assert.Error(t, mt.AddCollection(collInfo, 0, ""))
 	})
 
 	wg.Add(1)
@@ -598,7 +597,7 @@ func TestMetaTable(t *testing.T) {
 			return fmt.Errorf("multi save and remove with prefix error")
 		}
 		ts := ftso()
-		assert.Panics(t, func() { mt.DeleteCollection(collInfo.ID, ts, "") })
+		assert.Error(t, mt.DeleteCollection(collInfo.CollectionID, ts, ""))
 	})
 
 	wg.Add(1)
@@ -608,17 +607,15 @@ func TestMetaTable(t *testing.T) {
 			return nil
 		}
 
-		collInfo.PartitionIDs = nil
-		collInfo.PartitionNames = nil
-		collInfo.PartitionCreatedTimestamps = nil
 		ts := ftso()
-		err = mt.AddCollection(collInfo, ts, idxInfo, "")
+		collInfo.Partitions = []*model.Partition{}
+		err = mt.AddCollection(collInfo, ts, "")
 		assert.Nil(t, err)
 
-		mt.collID2Meta = make(map[int64]pb.CollectionInfo)
-		_, err = mt.GetCollectionByName(collInfo.Schema.Name, 0)
+		mt.collID2Meta = make(map[int64]model.Collection)
+		_, err = mt.GetCollectionByName(collInfo.Name, 0)
 		assert.NotNil(t, err)
-		assert.EqualError(t, err, fmt.Sprintf("can't find collection %s with id %d", collInfo.Schema.Name, collInfo.ID))
+		assert.EqualError(t, err, fmt.Sprintf("can't find collection %s with id %d", collInfo.Name, collInfo.CollectionID))
 
 	})
 
@@ -634,11 +631,9 @@ func TestMetaTable(t *testing.T) {
 		err := mt.reloadFromKV()
 		assert.Nil(t, err)
 
-		collInfo.PartitionIDs = nil
-		collInfo.PartitionNames = nil
-		collInfo.PartitionCreatedTimestamps = nil
 		ts := ftso()
-		err = mt.AddCollection(collInfo, ts, idxInfo, "")
+		collInfo.Partitions = []*model.Partition{}
+		err = mt.AddCollection(collInfo, ts, "")
 		assert.Nil(t, err)
 
 		ts = ftso()
@@ -646,41 +641,34 @@ func TestMetaTable(t *testing.T) {
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, "can't find collection. id = 2")
 
-		coll := mt.collID2Meta[collInfo.ID]
-		coll.PartitionIDs = make([]int64, Params.RootCoordCfg.MaxPartitionNum)
-		mt.collID2Meta[coll.ID] = coll
-		err = mt.AddPartition(coll.ID, "no-part", 22, ts, "")
+		coll := mt.collID2Meta[collInfo.CollectionID]
+		coll.Partitions = make([]*model.Partition, Params.RootCoordCfg.MaxPartitionNum)
+		mt.collID2Meta[coll.CollectionID] = coll
+		err = mt.AddPartition(coll.CollectionID, "no-part", 22, ts, "")
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, fmt.Sprintf("maximum partition's number should be limit to %d", Params.RootCoordCfg.MaxPartitionNum))
 
-		coll.PartitionIDs = []int64{partID}
-		coll.PartitionNames = []string{partName}
-		coll.PartitionCreatedTimestamps = []uint64{ftso()}
-		mt.collID2Meta[coll.ID] = coll
+		coll.Partitions = []*model.Partition{{PartitionID: partID, PartitionName: partName, PartitionCreatedTimestamp: ftso()}}
+		mt.collID2Meta[coll.CollectionID] = coll
+
 		mockKV.multiSave = func(kvs map[string]string, ts typeutil.Timestamp) error {
 			return fmt.Errorf("multi save error")
 		}
-		assert.Panics(t, func() { mt.AddPartition(coll.ID, "no-part", 22, ts, "") })
-		//err = mt.AddPartition(coll.ID, "no-part", 22, ts, nil)
+		assert.Error(t, mt.AddPartition(coll.CollectionID, "no-part", 22, ts, ""))
+		//err = mt.AddPartition(coll.CollectionID, "no-part", 22, ts, nil)
 		//assert.NotNil(t, err)
 		//assert.EqualError(t, err, "multi save error")
 
 		mockKV.multiSave = func(kvs map[string]string, ts typeutil.Timestamp) error {
 			return nil
 		}
-		collInfo.PartitionIDs = nil
-		collInfo.PartitionNames = nil
-		collInfo.PartitionCreatedTimestamps = nil
 
-		//_, err = mt.AddCollection(collInfo, idxInfo, nil)
-		//assert.Nil(t, err)
-		//_, err = mt.AddPartition(coll.ID, partName, partID, nil)
-		//assert.Nil(t, err)
+		collInfo.Partitions = []*model.Partition{}
 		ts = ftso()
-		err = mt.AddPartition(coll.ID, partName, 22, ts, "")
+		err = mt.AddPartition(coll.CollectionID, partName, 22, ts, "")
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, fmt.Sprintf("partition name = %s already exists", partName))
-		err = mt.AddPartition(coll.ID, "no-part", partID, ts, "")
+		err = mt.AddPartition(coll.CollectionID, "no-part", partID, ts, "")
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, fmt.Sprintf("partition id = %d already exists", partID))
 	})
@@ -697,17 +685,15 @@ func TestMetaTable(t *testing.T) {
 		err := mt.reloadFromKV()
 		assert.Nil(t, err)
 
-		collInfo.PartitionIDs = nil
-		collInfo.PartitionNames = nil
-		collInfo.PartitionCreatedTimestamps = nil
+		collInfo.Partitions = []*model.Partition{}
 		ts := ftso()
-		err = mt.AddCollection(collInfo, ts, idxInfo, "")
+		err = mt.AddCollection(collInfo, ts, "")
 		assert.Nil(t, err)
 
-		assert.False(t, mt.HasPartition(collInfo.ID, "no-partName", 0))
+		assert.False(t, mt.HasPartition(collInfo.CollectionID, "no-partName", 0))
 
-		mt.collID2Meta = make(map[int64]pb.CollectionInfo)
-		assert.False(t, mt.HasPartition(collInfo.ID, partName, 0))
+		mt.collID2Meta = make(map[int64]model.Collection)
+		assert.False(t, mt.HasPartition(collInfo.CollectionID, partName, 0))
 	})
 
 	wg.Add(1)
@@ -722,32 +708,28 @@ func TestMetaTable(t *testing.T) {
 		err := mt.reloadFromKV()
 		assert.Nil(t, err)
 
-		collInfo.PartitionIDs = []int64{partID}
-		collInfo.PartitionNames = []string{partName}
-		collInfo.PartitionCreatedTimestamps = []uint64{ftso()}
+		collInfo.Partitions = []*model.Partition{{PartitionID: partID, PartitionName: partName, PartitionCreatedTimestamp: ftso()}}
 		ts := ftso()
-		err = mt.AddCollection(collInfo, ts, idxInfo, "")
+		err = mt.AddCollection(collInfo, ts, "")
 		assert.Nil(t, err)
 
 		ts = ftso()
-		_, err = mt.DeletePartition(collInfo.ID, Params.CommonCfg.DefaultPartitionName, ts, "")
+		_, err = mt.DeletePartition(collInfo.CollectionID, Params.CommonCfg.DefaultPartitionName, ts, "")
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, "default partition cannot be deleted")
 
-		_, err = mt.DeletePartition(collInfo.ID, "abc", ts, "")
+		_, err = mt.DeletePartition(collInfo.CollectionID, "abc", ts, "")
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, "partition abc does not exist")
 
 		mockKV.save = func(key, value string, ts typeutil.Timestamp) error { return errors.New("mocked error") }
-		assert.Panics(t, func() { mt.DeletePartition(collInfo.ID, partName, ts, "") })
-		//_, err = mt.DeletePartition(collInfo.ID, partName, ts, nil)
-		//assert.NotNil(t, err)
-		//assert.EqualError(t, err, "multi save and remove with prefix error")
+		_, err = mt.DeletePartition(collInfo.CollectionID, partName, ts, "")
+		assert.Error(t, err)
 
-		mt.collID2Meta = make(map[int64]pb.CollectionInfo)
-		_, err = mt.DeletePartition(collInfo.ID, "abc", ts, "")
+		mt.collID2Meta = make(map[int64]model.Collection)
+		_, err = mt.DeletePartition(collInfo.CollectionID, "abc", ts, "")
 		assert.NotNil(t, err)
-		assert.EqualError(t, err, fmt.Sprintf("can't find collection id = %d", collInfo.ID))
+		assert.EqualError(t, err, fmt.Sprintf("can't find collection id = %d", collInfo.CollectionID))
 	})
 
 	wg.Add(1)
@@ -765,45 +747,48 @@ func TestMetaTable(t *testing.T) {
 		err = mt.reloadFromKV()
 		assert.Nil(t, err)
 
-		collInfo.PartitionIDs = nil
-		collInfo.PartitionNames = nil
-		collInfo.PartitionCreatedTimestamps = nil
+		collInfo.Partitions = []*model.Partition{}
 		ts := ftso()
-		err = mt.AddCollection(collInfo, ts, idxInfo, "")
+		err = mt.AddCollection(collInfo, ts, "")
 		assert.Nil(t, err)
 
-		segIdxInfo := pb.SegmentIndexInfo{
+		segIdxInfo := model.Index{
 			CollectionID: collID,
-			PartitionID:  partID,
-			SegmentID:    segID,
 			FieldID:      fieldID,
 			IndexID:      indexID2,
-			BuildID:      buildID,
+			SegmentIndexes: map[int64]model.SegmentIndex{
+				segID: {
+					Segment: model.Segment{
+						SegmentID:   segID,
+						PartitionID: partID,
+					},
+					BuildID: buildID,
+				},
+			},
 		}
-		err = mt.AddIndex(&segIdxInfo)
+		err = mt.AlterIndex(&segIdxInfo)
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, fmt.Sprintf("index id = %d not found", segIdxInfo.IndexID))
 
-		mt.collID2Meta = make(map[int64]pb.CollectionInfo)
-		err = mt.AddIndex(&segIdxInfo)
+		mt.collID2Meta = make(map[int64]model.Collection)
+		err = mt.AlterIndex(&segIdxInfo)
 		assert.NotNil(t, err)
-		assert.EqualError(t, err, fmt.Sprintf("collection id = %d not found", collInfo.ID))
+		assert.EqualError(t, err, fmt.Sprintf("collection id = %d not found", collInfo.CollectionID))
 
 		err = mt.reloadFromKV()
 		assert.Nil(t, err)
 
-		collInfo.PartitionIDs = nil
-		collInfo.PartitionNames = nil
-		collInfo.PartitionCreatedTimestamps = nil
+		collInfo.Partitions = []*model.Partition{}
 		ts = ftso()
-		err = mt.AddCollection(collInfo, ts, idxInfo, "")
+		err = mt.AddCollection(collInfo, ts, "")
 		assert.Nil(t, err)
 
 		segIdxInfo.IndexID = indexID
-		mockTxnKV.save = func(key string, value string) error {
+		mt.indexID2Meta[indexID] = segIdxInfo
+		mockTxnKV.multiSave = func(kvs map[string]string) error {
 			return fmt.Errorf("save error")
 		}
-		assert.Panics(t, func() { mt.AddIndex(&segIdxInfo) })
+		assert.Error(t, mt.AlterIndex(&segIdxInfo))
 	})
 
 	wg.Add(1)
@@ -821,12 +806,11 @@ func TestMetaTable(t *testing.T) {
 		err := mt.reloadFromKV()
 		assert.Nil(t, err)
 
-		collInfo.PartitionIDs = nil
-		collInfo.PartitionNames = nil
-		collInfo.PartitionCreatedTimestamps = nil
+		collInfo.Partitions = []*model.Partition{}
 		ts := ftso()
-		err = mt.AddCollection(collInfo, ts, idxInfo, "")
+		err = mt.AddCollection(collInfo, ts, "")
 		assert.Nil(t, err)
+		mt.indexID2Meta[indexID] = *idxInfo[0]
 
 		_, _, err = mt.DropIndex("abc", "abc", "abc")
 		assert.NotNil(t, err)
@@ -837,40 +821,42 @@ func TestMetaTable(t *testing.T) {
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, "collection name  = abc not has meta")
 
-		_, _, err = mt.DropIndex(collInfo.Schema.Name, "abc", "abc")
+		_, _, err = mt.DropIndex(collInfo.Name, "abc", "abc")
 		assert.NotNil(t, err)
-		assert.EqualError(t, err, fmt.Sprintf("collection %s doesn't have filed abc", collInfo.Schema.Name))
+		assert.EqualError(t, err, fmt.Sprintf("collection %s doesn't have filed abc", collInfo.Name))
 
-		coll := mt.collID2Meta[collInfo.ID]
-		coll.FieldIndexes = []*pb.FieldIndexInfo{
+		coll := mt.collID2Meta[collInfo.CollectionID]
+		coll.FieldIndexes = []*model.Index{
 			{
-				FiledID: fieldID2,
+				FieldID: fieldID2,
 				IndexID: indexID2,
 			},
 			{
-				FiledID: fieldID,
+				FieldID: fieldID,
 				IndexID: indexID,
 			},
 		}
-		mt.collID2Meta[coll.ID] = coll
-		mt.indexID2Meta = make(map[int64]pb.IndexInfo)
-		idxID, isDroped, err := mt.DropIndex(collInfo.Schema.Name, collInfo.Schema.Fields[0].Name, idxInfo[0].IndexName)
+		mt.collID2Meta[coll.CollectionID] = coll
+		mt.indexID2Meta = make(map[int64]model.Index)
+		idxID, isDroped, err := mt.DropIndex(collInfo.Name, collInfo.Fields[0].Name, idxInfo[0].IndexName)
 		assert.Zero(t, idxID)
 		assert.False(t, isDroped)
 		assert.Nil(t, err)
 
 		err = mt.reloadFromKV()
 		assert.Nil(t, err)
-		collInfo.PartitionIDs = nil
-		collInfo.PartitionNames = nil
-		coll.PartitionCreatedTimestamps = nil
+		collInfo.Partitions = []*model.Partition{}
 		ts = ftso()
-		err = mt.AddCollection(collInfo, ts, idxInfo, "")
+		err = mt.AddCollection(collInfo, ts, "")
+		mt.indexID2Meta[indexID] = *idxInfo[0]
+
 		assert.Nil(t, err)
 		mockTxnKV.multiSaveAndRemoveWithPrefix = func(saves map[string]string, removals []string) error {
 			return fmt.Errorf("multi save and remove with prefix error")
 		}
-		assert.Panics(t, func() { mt.DropIndex(collInfo.Schema.Name, collInfo.Schema.Fields[0].Name, idxInfo[0].IndexName) })
+
+		_, _, err = mt.DropIndex(collInfo.Name, collInfo.Fields[0].Name, idxInfo[0].IndexName)
+		assert.Error(t, err)
 	})
 
 	wg.Add(1)
@@ -888,40 +874,45 @@ func TestMetaTable(t *testing.T) {
 		err := mt.reloadFromKV()
 		assert.Nil(t, err)
 
-		collInfo.PartitionIDs = nil
-		collInfo.PartitionNames = nil
-		collInfo.PartitionCreatedTimestamps = nil
+		collInfo.Partitions = []*model.Partition{}
 		ts := ftso()
-		err = mt.AddCollection(collInfo, ts, idxInfo, "")
+		err = mt.AddCollection(collInfo, ts, "")
 		assert.Nil(t, err)
+		mt.indexID2Meta[indexID] = *idxInfo[0]
 
-		seg, err := mt.GetSegmentIndexInfoByID(segID2, fieldID, "abc")
+		index, err := mt.GetSegmentIndexInfoByID(segID2, fieldID, "abc")
 		assert.Nil(t, err)
-		assert.Equal(t, segID2, seg.SegmentID)
-		assert.Equal(t, fieldID, seg.FieldID)
-		assert.Equal(t, false, seg.EnableIndex)
+		assert.Equal(t, segID2, index.SegmentIndexes[segID2].Segment.SegmentID)
+		assert.Equal(t, fieldID, index.FieldID)
+		assert.Equal(t, false, index.SegmentIndexes[segID2].EnableIndex)
 
-		segIdxInfo := pb.SegmentIndexInfo{
+		segIdxInfo := model.Index{
 			CollectionID: collID,
-			PartitionID:  partID,
-			SegmentID:    segID,
-			FieldID:      fieldID,
-			IndexID:      indexID,
-			BuildID:      buildID,
+			SegmentIndexes: map[int64]model.SegmentIndex{
+				segID: {
+					Segment: model.Segment{
+						SegmentID:   segID,
+						PartitionID: partID,
+					},
+					BuildID: buildID,
+				},
+			},
+			FieldID: fieldID,
+			IndexID: indexID,
 		}
-		err = mt.AddIndex(&segIdxInfo)
+		err = mt.AlterIndex(&segIdxInfo)
 		assert.Nil(t, err)
-		idx, err := mt.GetSegmentIndexInfoByID(segIdxInfo.SegmentID, segIdxInfo.FieldID, idxInfo[0].IndexName)
+		idx, err := mt.GetSegmentIndexInfoByID(segID, segIdxInfo.FieldID, idxInfo[0].IndexName)
 		assert.Nil(t, err)
 		assert.Equal(t, segIdxInfo.IndexID, idx.IndexID)
 
-		_, err = mt.GetSegmentIndexInfoByID(segIdxInfo.SegmentID, segIdxInfo.FieldID, "abc")
+		_, err = mt.GetSegmentIndexInfoByID(segID, segIdxInfo.FieldID, "abc")
 		assert.NotNil(t, err)
-		assert.EqualError(t, err, fmt.Sprintf("can't find index name = abc on segment = %d, with filed id = %d", segIdxInfo.SegmentID, segIdxInfo.FieldID))
+		assert.EqualError(t, err, fmt.Sprintf("can't find index name = abc on segment = %d, with filed id = %d", segID, segIdxInfo.FieldID))
 
-		_, err = mt.GetSegmentIndexInfoByID(segIdxInfo.SegmentID, 11, idxInfo[0].IndexName)
+		_, err = mt.GetSegmentIndexInfoByID(segID, 11, idxInfo[0].IndexName)
 		assert.NotNil(t, err)
-		assert.EqualError(t, err, fmt.Sprintf("can't find index name = %s on segment = %d, with filed id = 11", idxInfo[0].IndexName, segIdxInfo.SegmentID))
+		assert.EqualError(t, err, fmt.Sprintf("can't find index name = %s on segment = %d, with filed id = 11", idxInfo[0].IndexName, segID))
 	})
 
 	wg.Add(1)
@@ -939,22 +930,20 @@ func TestMetaTable(t *testing.T) {
 		err := mt.reloadFromKV()
 		assert.Nil(t, err)
 
-		collInfo.PartitionIDs = nil
-		collInfo.PartitionNames = nil
-		collInfo.PartitionCreatedTimestamps = nil
+		collInfo.Partitions = []*model.Partition{}
 		ts := ftso()
-		err = mt.AddCollection(collInfo, ts, idxInfo, "")
+		err = mt.AddCollection(collInfo, ts, "")
 		assert.Nil(t, err)
 
-		mt.collID2Meta = make(map[int64]pb.CollectionInfo)
-		_, err = mt.unlockGetFieldSchema(collInfo.Schema.Name, collInfo.Schema.Fields[0].Name)
+		mt.collID2Meta = make(map[int64]model.Collection)
+		_, err = mt.unlockGetFieldSchema(collInfo.Name, collInfo.Fields[0].Name)
 		assert.NotNil(t, err)
-		assert.EqualError(t, err, fmt.Sprintf("collection %s not found", collInfo.Schema.Name))
+		assert.EqualError(t, err, fmt.Sprintf("collection %s not found", collInfo.Name))
 
 		mt.collName2ID = make(map[string]int64)
-		_, err = mt.unlockGetFieldSchema(collInfo.Schema.Name, collInfo.Schema.Fields[0].Name)
+		_, err = mt.unlockGetFieldSchema(collInfo.Name, collInfo.Fields[0].Name)
 		assert.NotNil(t, err)
-		assert.EqualError(t, err, fmt.Sprintf("collection %s not found", collInfo.Schema.Name))
+		assert.EqualError(t, err, fmt.Sprintf("collection %s not found", collInfo.Name))
 	})
 
 	wg.Add(1)
@@ -973,7 +962,7 @@ func TestMetaTable(t *testing.T) {
 		idxMeta := make(map[int64]pb.SegmentIndexInfo)
 		idxMeta[idx.IndexID] = *idx
 
-		field := schemapb.FieldSchema{
+		field := model.Field{
 			FieldID: 31,
 		}
 		assert.False(t, mt.IsSegmentIndexed(idx.SegmentID, &field, nil))
@@ -990,7 +979,7 @@ func TestMetaTable(t *testing.T) {
 		err := mt.reloadFromKV()
 		assert.Nil(t, err)
 
-		idx := &pb.IndexInfo{
+		idx := &model.Index{
 			IndexName: "no-idx",
 			IndexID:   456,
 			IndexParams: []*commonpb.KeyValuePair{
@@ -1004,6 +993,7 @@ func TestMetaTable(t *testing.T) {
 		mt.collName2ID["abc"] = 123
 		_, _, err = mt.GetNotIndexedSegments("abc", "no-field", idx, nil)
 		assert.NotNil(t, err)
+		assert.EqualError(t, err, "collection abc not found")
 
 		mockKV.multiSave = func(kvs map[string]string, ts typeutil.Timestamp) error {
 			return nil
@@ -1014,26 +1004,18 @@ func TestMetaTable(t *testing.T) {
 		err = mt.reloadFromKV()
 		assert.Nil(t, err)
 
-		collInfo.PartitionIDs = nil
-		collInfo.PartitionNames = nil
-		collInfo.PartitionCreatedTimestamps = nil
+		collInfo.Partitions = []*model.Partition{}
 		ts := ftso()
-		err = mt.AddCollection(collInfo, ts, idxInfo, "")
+		err = mt.AddCollection(collInfo, ts, "")
 		assert.Nil(t, err)
 
-		_, _, err = mt.GetNotIndexedSegments(collInfo.Schema.Name, "no-field", idx, nil)
+		_, _, err = mt.GetNotIndexedSegments(collInfo.Name, "no-field", idx, nil)
 		assert.NotNil(t, err)
-		assert.EqualError(t, err, fmt.Sprintf("collection %s doesn't have filed no-field", collInfo.Schema.Name))
+		assert.EqualError(t, err, fmt.Sprintf("collection %s doesn't have filed no-field", collInfo.Name))
 
-		bakMeta := mt.indexID2Meta
-		mt.indexID2Meta = make(map[int64]pb.IndexInfo)
-		mockTxnKV.multiSave = func(kvs map[string]string) error {
-			return fmt.Errorf("multi save error")
-		}
-		assert.Panics(t, func() {
-			_, _, _ = mt.GetNotIndexedSegments(collInfo.Schema.Name, collInfo.Schema.Fields[0].Name, idxInfo[0], []UniqueID{10001, 10002})
-		})
-		mt.indexID2Meta = bakMeta
+		mt.indexID2Meta = make(map[int64]model.Index)
+		_, _, err = mt.GetNotIndexedSegments(collInfo.Name, collInfo.Fields[0].Name, idx, nil)
+		assert.Nil(t, err)
 	})
 
 	wg.Add(1)
@@ -1059,14 +1041,12 @@ func TestMetaTable(t *testing.T) {
 		err = mt.reloadFromKV()
 		assert.Nil(t, err)
 
-		collInfo.PartitionIDs = nil
-		collInfo.PartitionNames = nil
-		collInfo.PartitionCreatedTimestamps = nil
+		collInfo.Partitions = []*model.Partition{}
 		ts := ftso()
-		err = mt.AddCollection(collInfo, ts, idxInfo, "")
+		err = mt.AddCollection(collInfo, ts, "")
 		assert.Nil(t, err)
-		mt.indexID2Meta = make(map[int64]pb.IndexInfo)
-		_, _, err = mt.GetIndexByName(collInfo.Schema.Name, idxInfo[0].IndexName)
+		mt.indexID2Meta = make(map[int64]model.Index)
+		_, _, err = mt.GetIndexByName(collInfo.Name, idxInfo[0].IndexName)
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, fmt.Sprintf("index id = %d not found", idxInfo[0].IndexID))
 
@@ -1123,35 +1103,28 @@ func TestMetaWithTimestamp(t *testing.T) {
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 
-	skv, err := newMetaSnapshot(etcdCli, rootPath, TimestampPrefix, 7)
+	skv, err := kvmetestore.NewMetaSnapshot(etcdCli, rootPath, TimestampPrefix, 7)
 	assert.Nil(t, err)
 	assert.NotNil(t, skv)
 	txnKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
-	mt, err := NewMetaTable(txnKV, skv)
+	mt, err := NewMetaTable(context.TODO(), txnKV, skv)
 	assert.Nil(t, err)
 
-	collInfo := &pb.CollectionInfo{
-		ID: 1,
-		Schema: &schemapb.CollectionSchema{
-			Name: collName1,
-		},
+	collInfo := &model.Collection{
+		CollectionID: collID1,
+		Name:         collName1,
 	}
 
-	collInfo.PartitionIDs = []int64{partID1}
-	collInfo.PartitionNames = []string{partName1}
-	collInfo.PartitionCreatedTimestamps = []uint64{ftso()}
+	collInfo.Partitions = []*model.Partition{{PartitionID: partID1, PartitionName: partName1, PartitionCreatedTimestamp: ftso()}}
 	t1 := ftso()
-	err = mt.AddCollection(collInfo, t1, nil, "")
+	err = mt.AddCollection(collInfo, t1, "")
 	assert.Nil(t, err)
 
-	collInfo.ID = 2
-	collInfo.PartitionIDs = []int64{partID2}
-	collInfo.PartitionNames = []string{partName2}
-	collInfo.PartitionCreatedTimestamps = []uint64{ftso()}
-	collInfo.Schema.Name = collName2
-
+	collInfo.CollectionID = collID2
+	collInfo.Partitions = []*model.Partition{{PartitionID: partID2, PartitionName: partName2, PartitionCreatedTimestamp: ftso()}}
+	collInfo.Name = collName2
 	t2 := ftso()
-	err = mt.AddCollection(collInfo, t2, nil, "")
+	err = mt.AddCollection(collInfo, t2, "")
 	assert.Nil(t, err)
 
 	assert.True(t, mt.HasCollection(collID1, 0))
@@ -1170,21 +1143,21 @@ func TestMetaWithTimestamp(t *testing.T) {
 	assert.Nil(t, err)
 	c2, err := mt.GetCollectionByID(collID2, 0)
 	assert.Nil(t, err)
-	assert.Equal(t, collID1, c1.ID)
-	assert.Equal(t, collID2, c2.ID)
+	assert.Equal(t, collID1, c1.CollectionID)
+	assert.Equal(t, collID2, c2.CollectionID)
 
 	c1, err = mt.GetCollectionByID(collID1, t2)
 	assert.Nil(t, err)
 	c2, err = mt.GetCollectionByID(collID2, t2)
 	assert.Nil(t, err)
-	assert.Equal(t, collID1, c1.ID)
-	assert.Equal(t, collID2, c2.ID)
+	assert.Equal(t, collID1, c1.CollectionID)
+	assert.Equal(t, collID2, c2.CollectionID)
 
 	c1, err = mt.GetCollectionByID(collID1, t1)
 	assert.Nil(t, err)
 	c2, err = mt.GetCollectionByID(collID2, t1)
 	assert.NotNil(t, err)
-	assert.Equal(t, int64(1), c1.ID)
+	assert.Equal(t, int64(1), c1.CollectionID)
 
 	c1, err = mt.GetCollectionByID(collID1, tsoStart)
 	assert.NotNil(t, err)
@@ -1195,28 +1168,28 @@ func TestMetaWithTimestamp(t *testing.T) {
 	assert.Nil(t, err)
 	c2, err = mt.GetCollectionByName(collName2, 0)
 	assert.Nil(t, err)
-	assert.Equal(t, int64(1), c1.ID)
-	assert.Equal(t, int64(2), c2.ID)
+	assert.Equal(t, int64(1), c1.CollectionID)
+	assert.Equal(t, int64(2), c2.CollectionID)
 
 	c1, err = mt.GetCollectionByName(collName1, t2)
 	assert.Nil(t, err)
 	c2, err = mt.GetCollectionByName(collName2, t2)
 	assert.Nil(t, err)
-	assert.Equal(t, int64(1), c1.ID)
-	assert.Equal(t, int64(2), c2.ID)
+	assert.Equal(t, int64(1), c1.CollectionID)
+	assert.Equal(t, int64(2), c2.CollectionID)
 
 	c1, err = mt.GetCollectionByName(collName1, t1)
 	assert.Nil(t, err)
 	c2, err = mt.GetCollectionByName(collName2, t1)
 	assert.NotNil(t, err)
-	assert.Equal(t, int64(1), c1.ID)
+	assert.Equal(t, int64(1), c1.CollectionID)
 
 	c1, err = mt.GetCollectionByName(collName1, tsoStart)
 	assert.NotNil(t, err)
 	c2, err = mt.GetCollectionByName(collName2, tsoStart)
 	assert.NotNil(t, err)
 
-	getKeys := func(m map[string]*pb.CollectionInfo) []string {
+	getKeys := func(m map[string]*model.Collection) []string {
 		keys := make([]string, 0, len(m))
 		for key := range m {
 			keys = append(keys, key)
@@ -1243,17 +1216,16 @@ func TestMetaWithTimestamp(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, 0, len(s1))
 
-	p1, err := mt.GetPartitionByName(1, partName1, 0)
+	p1, err := mt.GetPartitionByName(collID1, partName1, 0)
 	assert.Nil(t, err)
-	p2, err := mt.GetPartitionByName(2, partName2, 0)
+	p2, err := mt.GetPartitionByName(collID2, partName2, 0)
 	assert.Nil(t, err)
-	assert.Equal(t, int64(11), p1)
-	assert.Equal(t, int64(12), p2)
-	assert.Nil(t, err)
+	assert.Equal(t, int64(partID1), p1)
+	assert.Equal(t, int64(partID2), p2)
 
-	p1, err = mt.GetPartitionByName(1, partName1, t2)
+	p1, err = mt.GetPartitionByName(collID1, partName1, t2)
 	assert.Nil(t, err)
-	p2, err = mt.GetPartitionByName(2, partName2, t2)
+	p2, err = mt.GetPartitionByName(collID2, partName2, t2)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(11), p1)
 	assert.Equal(t, int64(12), p2)
@@ -1288,65 +1260,72 @@ func TestFixIssue10540(t *testing.T) {
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 
-	skv, err := newMetaSnapshot(etcdCli, rootPath, TimestampPrefix, 7)
+	skv, err := kvmetestore.NewMetaSnapshot(etcdCli, rootPath, TimestampPrefix, 7)
 	assert.Nil(t, err)
 	assert.NotNil(t, skv)
 	//txnKV := etcdkv.NewEtcdKVWithClient(etcdCli, rootPath)
 	txnKV := memkv.NewMemoryKV()
 	// compose rc7 legace tombstone cases
-	txnKV.Save(path.Join(ProxyMetaPrefix, "1"), string(suffixSnapshotTombstone))
-	txnKV.Save(path.Join(SegmentIndexMetaPrefix, "2"), string(suffixSnapshotTombstone))
-	txnKV.Save(path.Join(IndexMetaPrefix, "3"), string(suffixSnapshotTombstone))
+	txnKV.Save(path.Join(kvmetestore.SegmentIndexMetaPrefix, "2"), string(kvmetestore.SuffixSnapshotTombstone))
+	txnKV.Save(path.Join(kvmetestore.IndexMetaPrefix, "3"), string(kvmetestore.SuffixSnapshotTombstone))
 
-	_, err = NewMetaTable(txnKV, skv)
+	_, err = NewMetaTable(context.TODO(), txnKV, skv)
 	assert.Nil(t, err)
 }
 
 func TestMetaTable_GetSegmentIndexInfos(t *testing.T) {
 	meta := &MetaTable{
-		segID2IndexMeta: map[typeutil.UniqueID]map[typeutil.UniqueID]pb.SegmentIndexInfo{},
+		segID2IndexMeta: map[typeutil.UniqueID]map[typeutil.UniqueID]model.Index{},
 	}
 
 	segID := typeutil.UniqueID(100)
 	_, err := meta.GetSegmentIndexInfos(segID)
 	assert.Error(t, err)
 
-	meta.segID2IndexMeta[segID] = map[typeutil.UniqueID]pb.SegmentIndexInfo{
+	meta.segID2IndexMeta[segID] = map[typeutil.UniqueID]model.Index{
 		5: {
 			CollectionID: 1,
-			PartitionID:  2,
-			SegmentID:    segID,
 			FieldID:      4,
 			IndexID:      5,
-			BuildID:      6,
-			EnableIndex:  true,
+			SegmentIndexes: map[int64]model.SegmentIndex{
+				segID: {
+					Segment: model.Segment{
+						SegmentID:   segID,
+						PartitionID: 2,
+					},
+					BuildID:     6,
+					EnableIndex: true,
+				},
+			},
 		},
 	}
 	infos, err := meta.GetSegmentIndexInfos(segID)
 	assert.NoError(t, err)
 	indexInfos, ok := infos[5]
 	assert.True(t, ok)
-	assert.Equal(t, typeutil.UniqueID(1), indexInfos.GetCollectionID())
-	assert.Equal(t, typeutil.UniqueID(2), indexInfos.GetPartitionID())
-	assert.Equal(t, segID, indexInfos.GetSegmentID())
-	assert.Equal(t, typeutil.UniqueID(4), indexInfos.GetFieldID())
-	assert.Equal(t, typeutil.UniqueID(5), indexInfos.GetIndexID())
-	assert.Equal(t, typeutil.UniqueID(6), indexInfos.GetBuildID())
-	assert.Equal(t, true, indexInfos.GetEnableIndex())
+	assert.Equal(t, typeutil.UniqueID(1), indexInfos.CollectionID)
+	segmentIndex := indexInfos.SegmentIndexes[segID]
+	segment := segmentIndex.Segment
+	assert.Equal(t, typeutil.UniqueID(2), segment.PartitionID)
+	assert.Equal(t, segID, segment.SegmentID)
+	assert.Equal(t, typeutil.UniqueID(4), indexInfos.FieldID)
+	assert.Equal(t, typeutil.UniqueID(5), indexInfos.IndexID)
+	assert.Equal(t, typeutil.UniqueID(6), segmentIndex.BuildID)
+	assert.Equal(t, true, segmentIndex.EnableIndex)
 }
 
 func TestMetaTable_unlockGetCollectionInfo(t *testing.T) {
 	t.Run("normal case", func(t *testing.T) {
 		mt := &MetaTable{
 			collName2ID: map[string]typeutil.UniqueID{"test": 100},
-			collID2Meta: map[typeutil.UniqueID]pb.CollectionInfo{
-				100: {ID: 100, Schema: &schemapb.CollectionSchema{Name: "test"}},
+			collID2Meta: map[typeutil.UniqueID]model.Collection{
+				100: {CollectionID: 100, Name: "test"},
 			},
 		}
 		info, err := mt.unlockGetCollectionInfo("test")
 		assert.NoError(t, err)
-		assert.Equal(t, UniqueID(100), info.ID)
-		assert.Equal(t, "test", info.GetSchema().GetName())
+		assert.Equal(t, UniqueID(100), info.CollectionID)
+		assert.Equal(t, "test", info.Name)
 	})
 
 	t.Run("collection name not found", func(t *testing.T) {
@@ -1379,29 +1358,29 @@ func TestMetaTable_unlockGetCollectionInfo(t *testing.T) {
 func TestMetaTable_checkFieldCanBeIndexed(t *testing.T) {
 	t.Run("field not indexed", func(t *testing.T) {
 		mt := &MetaTable{}
-		collMeta := pb.CollectionInfo{
-			FieldIndexes: []*pb.FieldIndexInfo{{FiledID: 100, IndexID: 200}},
+		collMeta := model.Collection{
+			FieldIndexes: []*model.Index{{FieldID: 100, IndexID: 200}},
 		}
-		fieldSchema := schemapb.FieldSchema{
+		fieldSchema := model.Field{
 			FieldID: 101,
 		}
-		idxInfo := &pb.IndexInfo{}
+		idxInfo := &model.Index{}
 		err := mt.checkFieldCanBeIndexed(collMeta, fieldSchema, idxInfo)
 		assert.NoError(t, err)
 	})
 
 	t.Run("field already indexed", func(t *testing.T) {
 		mt := &MetaTable{
-			indexID2Meta: map[typeutil.UniqueID]pb.IndexInfo{
+			indexID2Meta: map[typeutil.UniqueID]model.Index{
 				200: {IndexID: 200, IndexName: "test"},
 			},
 		}
-		collMeta := pb.CollectionInfo{
-			Schema:       &schemapb.CollectionSchema{Name: "test"},
-			FieldIndexes: []*pb.FieldIndexInfo{{FiledID: 100, IndexID: 200}},
+		collMeta := model.Collection{
+			Name:         "test",
+			FieldIndexes: []*model.Index{{FieldID: 100, IndexID: 200}},
 		}
-		fieldSchema := schemapb.FieldSchema{Name: "test", FieldID: 100}
-		idxInfo := &pb.IndexInfo{IndexName: "not_test"}
+		fieldSchema := model.Field{Name: "test", FieldID: 100}
+		idxInfo := &model.Index{IndexName: "not_test"}
 		err := mt.checkFieldCanBeIndexed(collMeta, fieldSchema, idxInfo)
 		assert.Error(t, err)
 	})
@@ -1409,15 +1388,15 @@ func TestMetaTable_checkFieldCanBeIndexed(t *testing.T) {
 	t.Run("unexpected", func(t *testing.T) {
 		mt := &MetaTable{
 			// index meta incomplete.
-			indexID2Meta: map[typeutil.UniqueID]pb.IndexInfo{},
+			indexID2Meta: map[typeutil.UniqueID]model.Index{},
 		}
-		collMeta := pb.CollectionInfo{
-			Schema:       &schemapb.CollectionSchema{Name: "test"},
-			ID:           1000,
-			FieldIndexes: []*pb.FieldIndexInfo{{FiledID: 100, IndexID: 200}},
+		collMeta := model.Collection{
+			Name:         "test",
+			CollectionID: 1000,
+			FieldIndexes: []*model.Index{{FieldID: 100, IndexID: 200}},
 		}
-		fieldSchema := schemapb.FieldSchema{Name: "test", FieldID: 100}
-		idxInfo := &pb.IndexInfo{IndexName: "not_test"}
+		fieldSchema := model.Field{Name: "test", FieldID: 100}
+		idxInfo := &model.Index{IndexName: "not_test"}
 		err := mt.checkFieldCanBeIndexed(collMeta, fieldSchema, idxInfo)
 		assert.NoError(t, err)
 	})
@@ -1426,50 +1405,50 @@ func TestMetaTable_checkFieldCanBeIndexed(t *testing.T) {
 func TestMetaTable_checkFieldIndexDuplicate(t *testing.T) {
 	t.Run("index already exists", func(t *testing.T) {
 		mt := &MetaTable{
-			indexID2Meta: map[typeutil.UniqueID]pb.IndexInfo{
+			indexID2Meta: map[typeutil.UniqueID]model.Index{
 				200: {IndexID: 200, IndexName: "test"},
 			},
 		}
-		collMeta := pb.CollectionInfo{
-			Schema:       &schemapb.CollectionSchema{Name: "test"},
-			FieldIndexes: []*pb.FieldIndexInfo{{FiledID: 100, IndexID: 200}},
+		collMeta := model.Collection{
+			Name:         "test",
+			FieldIndexes: []*model.Index{{FieldID: 100, IndexID: 200}},
 		}
-		fieldSchema := schemapb.FieldSchema{Name: "test", FieldID: 101}
-		idxInfo := &pb.IndexInfo{IndexName: "test"}
+		fieldSchema := model.Field{Name: "test", FieldID: 101}
+		idxInfo := &model.Index{IndexName: "test"}
 		_, err := mt.checkFieldIndexDuplicate(collMeta, fieldSchema, idxInfo)
 		assert.Error(t, err)
 	})
 
 	t.Run("index parameters mismatch", func(t *testing.T) {
 		mt := &MetaTable{
-			indexID2Meta: map[typeutil.UniqueID]pb.IndexInfo{
+			indexID2Meta: map[typeutil.UniqueID]model.Index{
 				200: {IndexID: 200, IndexName: "test",
 					IndexParams: []*commonpb.KeyValuePair{{Key: "Key", Value: "Value"}}},
 			},
 		}
-		collMeta := pb.CollectionInfo{
-			Schema:       &schemapb.CollectionSchema{Name: "test"},
-			FieldIndexes: []*pb.FieldIndexInfo{{FiledID: 100, IndexID: 200}},
+		collMeta := model.Collection{
+			Name:         "test",
+			FieldIndexes: []*model.Index{{FieldID: 100, IndexID: 200}},
 		}
-		fieldSchema := schemapb.FieldSchema{Name: "test", FieldID: 100}
-		idxInfo := &pb.IndexInfo{IndexName: "test", IndexParams: []*commonpb.KeyValuePair{{Key: "Key", Value: "not_Value"}}}
+		fieldSchema := model.Field{Name: "test", FieldID: 100}
+		idxInfo := &model.Index{IndexName: "test", IndexParams: []*commonpb.KeyValuePair{{Key: "Key", Value: "not_Value"}}}
 		_, err := mt.checkFieldIndexDuplicate(collMeta, fieldSchema, idxInfo)
 		assert.Error(t, err)
 	})
 
 	t.Run("index parameters match", func(t *testing.T) {
 		mt := &MetaTable{
-			indexID2Meta: map[typeutil.UniqueID]pb.IndexInfo{
+			indexID2Meta: map[typeutil.UniqueID]model.Index{
 				200: {IndexID: 200, IndexName: "test",
 					IndexParams: []*commonpb.KeyValuePair{{Key: "Key", Value: "Value"}}},
 			},
 		}
-		collMeta := pb.CollectionInfo{
-			Schema:       &schemapb.CollectionSchema{Name: "test"},
-			FieldIndexes: []*pb.FieldIndexInfo{{FiledID: 100, IndexID: 200}},
+		collMeta := model.Collection{
+			Name:         "test",
+			FieldIndexes: []*model.Index{{FieldID: 100, IndexID: 200}},
 		}
-		fieldSchema := schemapb.FieldSchema{Name: "test", FieldID: 100}
-		idxInfo := &pb.IndexInfo{IndexName: "test", IndexParams: []*commonpb.KeyValuePair{{Key: "Key", Value: "Value"}}}
+		fieldSchema := model.Field{Name: "test", FieldID: 100}
+		idxInfo := &model.Index{IndexName: "test", IndexParams: []*commonpb.KeyValuePair{{Key: "Key", Value: "Value"}}}
 		duplicate, err := mt.checkFieldIndexDuplicate(collMeta, fieldSchema, idxInfo)
 		assert.NoError(t, err)
 		assert.True(t, duplicate)
@@ -1477,13 +1456,13 @@ func TestMetaTable_checkFieldIndexDuplicate(t *testing.T) {
 
 	t.Run("field not found", func(t *testing.T) {
 		mt := &MetaTable{}
-		collMeta := pb.CollectionInfo{
-			FieldIndexes: []*pb.FieldIndexInfo{{FiledID: 100, IndexID: 200}},
+		collMeta := model.Collection{
+			FieldIndexes: []*model.Index{{FieldID: 100, IndexID: 200}},
 		}
-		fieldSchema := schemapb.FieldSchema{
+		fieldSchema := model.Field{
 			FieldID: 101,
 		}
-		idxInfo := &pb.IndexInfo{}
+		idxInfo := &model.Index{}
 		duplicate, err := mt.checkFieldIndexDuplicate(collMeta, fieldSchema, idxInfo)
 		assert.NoError(t, err)
 		assert.False(t, duplicate)
