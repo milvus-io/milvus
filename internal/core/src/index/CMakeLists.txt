@@ -13,9 +13,9 @@ aux_source_directory( ${MILVUS_ENGINE_SRC}/index INDEX_FILES )
 
 add_library( milvus_index SHARED ${INDEX_FILES} )
 
-# TODO: support compile marisa on windows and mac.
+# TODO: support compile marisa on windows.
 set(PLATFORM_LIBS )
-if ( LINUX )
+if ( LINUX OR APPLE )
     set(PLATFORM_LIBS marisa)
 endif()
 if (MSYS)

@@ -15,11 +15,11 @@
 #include <knowhere/index/vector_index/ConfAdapterMgr.h>
 #include <knowhere/archive/KnowhereConfig.h>
 
-#define private public
-
 #include "indexbuilder/index_c.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/indexbuilder_test_utils.h"
+
+#define private public
 #include "indexbuilder/ScalarIndexCreator.h"
 #include "indexbuilder/IndexFactory.h"
 

@@ -45,8 +45,7 @@ set(MILVUS_TEST_FILES
         test_utils.cpp
         )
 
-# These 2 cases cannot run in mac because of tbb build error
-if (LINUX)
+if (LINUX OR APPLE)
     set(MILVUS_TEST_FILES
             ${MILVUS_TEST_FILES}
             test_scalar_index_creator.cpp
