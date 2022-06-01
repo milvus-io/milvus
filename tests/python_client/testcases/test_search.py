@@ -46,6 +46,8 @@ entity = gen_entities(1, is_normal=True)
 entities = gen_entities(default_nb, is_normal=True)
 raw_vectors, binary_entities = gen_binary_entities(default_nb)
 default_query, _ = gen_search_vectors_params(field_name, entities, default_top_k, nq)
+index_name1=cf.gen_unique_str("float")
+index_name2=cf.gen_unique_str("varhar")
 
 
 class TestCollectionSearchInvalid(TestcaseBase):
@@ -3022,3 +3024,44 @@ class  TestsearchString(TestcaseBase):
                                          "limit": 1,
                                          "_async": _async}
                             )
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_all_index_with_compare_expr(self, _async):
+        """
+        target: test delete after creating index
+        method: 1.create collection , insert data, primary_field is string field
+                2.create string and float index ,delete entities, query 
+                3.search
+        expected: assert index and deleted id not in search result
+        """
+        # create collection, insert tmp_nb, flush and load
+        collection_w, vectors, _, insert_ids = self.init_collection_general(prefix, insert_data=True, primary_field=ct.default_string_field_name)[0:4]
+
+        # create index
+        index_params_one = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
+        collection_w.create_index(ct.default_float_vec_field_name, index_params_one, index_name=index_name1)
+        index_params_two ={}
+        collection_w.create_index(ct.default_string_field_name, index_params=index_params_two, index_name=index_name2)
+        assert collection_w.has_index(index_name=index_name2)
+
+        collection_w.release()
+        collection_w.load()
+        # delete entity
+        expr = 'float >= int64'
+        # search with id 0 vectors
+        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+        output_fields = [default_int64_field_name, default_float_field_name,  default_string_field_name]
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, default_limit, 
+                            expr,
+                            output_fields=output_fields,
+                            _async=_async,
+                            travel_timestamp=0,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": insert_ids,
+                                         "limit": default_limit,
+                                         "_async": _async}
+                            )
+                            
+    

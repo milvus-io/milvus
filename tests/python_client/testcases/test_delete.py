@@ -1650,4 +1650,49 @@ class TestDeleteString(TestcaseBase):
         collection_w.load()
         error = {ct.err_code: 0, ct.err_msg: f"failed to create expr plan, expr = {default_invaild_string_exp}"}
         collection_w.delete(expr=default_invaild_string_exp, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.parametrize("to_query", [True, False])
+    def test_delete_insert_same_id_sealed_string(self, to_query):
+        """
+        target: test insert same id entity after delete from sealed data
+        method: 1.create and insert with flush, string is pk field
+                2.load and query with the  id
+                3.delete the id entity
+                4.insert new entity with the same id and flush
+                5.query the id
+        expected: Verify that the query gets the newly inserted entity
+        """
+        # init collection and insert data without flush
+        schema = cf.gen_string_pk_default_collection_schema()
+        collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix), schema=schema)
+
+        # insert
+        df = cf.gen_default_dataframe_data(1000)
+        collection_w.insert(df)
+        log.debug(collection_w.num_entities)
+
+        # load and query
+        collection_w.load()
+        res = df.iloc[:1, 2:3].to_dict('records')
+        default_search_params = {"metric_type": "L2", "params": {"nprobe": 16}}
+        collection_w.search(data=[df[ct.default_float_vec_field_name][0]], anns_field=ct.default_float_vec_field_name,
+                            param=default_search_params, limit=1)
+        collection_w.query(default_string_expr, check_task=CheckTasks.check_query_results, check_items={'exp_res': res})
+
+        # delete
+        collection_w.delete(default_string_expr)
+        if to_query:
+            collection_w.query(default_string_expr, check_task=CheckTasks.check_query_empty)
+
+        # re-insert
+        df_new = cf.gen_default_dataframe_data(nb=1)
+        collection_w.insert(df_new)
+        log.debug(collection_w.num_entities)
+
+        # re-query
+        res = df_new.iloc[[0], [2, 3]].to_dict('records')
+        collection_w.query(default_string_expr, output_fields=[ct.default_float_vec_field_name],
+                           check_task=CheckTasks.check_query_results, check_items={'exp_res': res , 'primary_field': ct.default_string_field_name, 'with_vec': True})
+        collection_w.search(data=[df_new[ct.default_float_vec_field_name][0]], anns_field=ct.default_float_vec_field_name,
+                            param=default_search_params, limit=1)
     
