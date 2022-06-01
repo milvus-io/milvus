@@ -404,10 +404,14 @@ func (qc *QueryCoord) getUnallocatedNodes() []int64 {
 }
 
 func (qc *QueryCoord) handleNodeEvent(ctx context.Context) {
+	offlineNodeCh := make(chan UniqueID, 100)
+	go qc.loadBalanceNodeLoop(ctx, offlineNodeCh)
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
+
 		case event, ok := <-qc.eventChan:
 			if !ok {
 				// ErrCompacted is handled inside SessionWatcher
@@ -420,6 +424,7 @@ func (qc *QueryCoord) handleNodeEvent(ctx context.Context) {
 				}
 				return
 			}
+
 			switch event.EventType {
 			case sessionutil.SessionAddEvent:
 				serverID := event.Session.ServerID
@@ -446,28 +451,62 @@ func (qc *QueryCoord) handleNodeEvent(ctx context.Context) {
 				}
 
 				qc.cluster.stopNode(serverID)
-				loadBalanceSegment := &querypb.LoadBalanceRequest{
-					Base: &commonpb.MsgBase{
-						MsgType:  commonpb.MsgType_LoadBalanceSegments,
-						SourceID: qc.session.ServerID,
-					},
-					SourceNodeIDs: []int64{serverID},
-					BalanceReason: querypb.TriggerCondition_NodeDown,
-				}
-
-				baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_NodeDown)
-				loadBalanceTask := &loadBalanceTask{
-					baseTask:           baseTask,
-					LoadBalanceRequest: loadBalanceSegment,
-					broker:             qc.broker,
-					cluster:            qc.cluster,
-					meta:               qc.meta,
-				}
-				qc.metricsCacheManager.InvalidateSystemInfoMetrics()
-				//TODO:: deal enqueue error
-				qc.scheduler.Enqueue(loadBalanceTask)
-				log.Info("start a loadBalance task", zap.Any("task", loadBalanceTask))
+				offlineNodeCh <- serverID
 			}
+		}
+	}
+}
+
+func (qc *QueryCoord) loadBalanceNodeLoop(ctx context.Context, offlineNodeCh chan UniqueID) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+
+		case node := <-offlineNodeCh:
+			loadBalanceSegment := &querypb.LoadBalanceRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:  commonpb.MsgType_LoadBalanceSegments,
+					SourceID: qc.session.ServerID,
+				},
+				SourceNodeIDs: []int64{node},
+				BalanceReason: querypb.TriggerCondition_NodeDown,
+			}
+
+			baseTask := newBaseTaskWithRetry(qc.loopCtx, querypb.TriggerCondition_NodeDown, 0)
+			loadBalanceTask := &loadBalanceTask{
+				baseTask:           baseTask,
+				LoadBalanceRequest: loadBalanceSegment,
+				broker:             qc.broker,
+				cluster:            qc.cluster,
+				meta:               qc.meta,
+			}
+			qc.metricsCacheManager.InvalidateSystemInfoMetrics()
+			//TODO:: deal enqueue error
+			err := qc.scheduler.Enqueue(loadBalanceTask)
+			if err != nil {
+				log.Warn("failed to enqueue LoadBalance task into the scheduler",
+					zap.Int64("nodeID", node),
+					zap.Error(err))
+				offlineNodeCh <- node
+				continue
+			}
+
+			log.Info("start a loadBalance task",
+				zap.Int64("nodeID", node),
+				zap.Int64("taskID", loadBalanceTask.getTaskID()))
+
+			err = loadBalanceTask.waitToFinish()
+			if err != nil {
+				log.Warn("failed to process LoadBalance task",
+					zap.Int64("nodeID", node),
+					zap.Error(err))
+				offlineNodeCh <- node
+				continue
+			}
+
+			log.Info("LoadBalance task done, offline node is removed",
+				zap.Int64("nodeID", node))
 		}
 	}
 }
