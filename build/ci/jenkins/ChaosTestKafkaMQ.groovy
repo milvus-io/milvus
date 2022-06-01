@@ -121,7 +121,7 @@ pipeline {
                             }
                             sh "kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=${env.RELEASE_NAME} -n ${env.NAMESPACE} --timeout=360s"
                             sh "kubectl wait --for=condition=Ready pod -l release=${env.RELEASE_NAME} -n ${env.NAMESPACE} --timeout=360s"
-                            sh "kubectl get pods -o wide -o wide|grep ${env.RELEASE_NAME}"
+                            sh "kubectl get pods -o wide|grep ${env.RELEASE_NAME}"
                             }
                         }
                     }
