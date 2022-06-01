@@ -349,27 +349,17 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, in *queryPb.ReleaseS
 		}
 		return status, nil
 	}
-	status := &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}
+
 	// collection lock is not needed since we guarantee not query/search will be dispatch from leader
 	for _, id := range in.SegmentIDs {
-		err := node.metaReplica.removeSegment(id, segmentTypeSealed)
-		if err != nil {
-			// not return, try to release all segments
-			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-			status.Reason = err.Error()
-		}
-		err = node.metaReplica.removeSegment(id, segmentTypeGrowing)
-		if err != nil {
-			// not return, try to release all segments
-			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-			status.Reason = err.Error()
-		}
+		node.metaReplica.removeSegment(id, segmentTypeSealed)
+		node.metaReplica.removeSegment(id, segmentTypeGrowing)
 	}
 
 	log.Info("release segments done", zap.Int64("collectionID", in.CollectionID), zap.Int64s("segmentIDs", in.SegmentIDs))
-	return status, nil
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}, nil
 }
 
 // GetSegmentInfo returns segment information of the collection on the queryNode, and the information includes memSize, numRow, indexName, indexID ...

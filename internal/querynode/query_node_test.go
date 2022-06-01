@@ -238,9 +238,7 @@ func TestQueryNode_adjustByChangeInfo(t *testing.T) {
 		node, err := genSimpleQueryNodeToTestWatchChangeInfo(ctx)
 		assert.NoError(t, err)
 
-		err = node.metaReplica.removeSegment(defaultSegmentID, segmentTypeSealed)
-		assert.NoError(t, err)
-
+		node.metaReplica.removeSegment(defaultSegmentID, segmentTypeSealed)
 		segmentChangeInfos := genSimpleChangeInfo()
 		segmentChangeInfos.Infos[0].OnlineSegments = nil
 		segmentChangeInfos.Infos[0].OfflineNodeID = Params.QueryNodeCfg.GetNodeID()
@@ -310,8 +308,7 @@ func TestQueryNode_watchChangeInfo(t *testing.T) {
 		node, err := genSimpleQueryNodeToTestWatchChangeInfo(ctx)
 		assert.NoError(t, err)
 
-		err = node.metaReplica.removeSegment(defaultSegmentID, segmentTypeSealed)
-		assert.NoError(t, err)
+		node.metaReplica.removeSegment(defaultSegmentID, segmentTypeSealed)
 
 		segmentChangeInfos := genSimpleChangeInfo()
 		segmentChangeInfos.Infos[0].OnlineSegments = nil

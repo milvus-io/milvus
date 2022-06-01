@@ -48,9 +48,7 @@ func TestSegmentLoader_loadSegment(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 
-		err = node.metaReplica.removeSegment(defaultSegmentID, segmentTypeSealed)
-		assert.NoError(t, err)
-
+		node.metaReplica.removeSegment(defaultSegmentID, segmentTypeSealed)
 		loader := node.loader
 		assert.NotNil(t, loader)
 
@@ -168,8 +166,7 @@ func TestSegmentLoader_loadSegmentFieldsData(t *testing.T) {
 			schema.Fields = append(schema.Fields, genVectorFieldSchema(simpleBinVecField))
 		}
 
-		err = loader.metaReplica.removeSegment(defaultSegmentID, segmentTypeSealed)
-		assert.NoError(t, err)
+		loader.metaReplica.removeSegment(defaultSegmentID, segmentTypeSealed)
 
 		col := newCollection(defaultCollectionID, schema)
 		assert.NotNil(t, col)

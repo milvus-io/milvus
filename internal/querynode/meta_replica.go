@@ -93,7 +93,7 @@ type ReplicaInterface interface {
 	// setSegment adds a segment to collectionReplica
 	setSegment(segment *Segment) error
 	// removeSegment removes a segment from collectionReplica
-	removeSegment(segmentID UniqueID, segType segmentType) error
+	removeSegment(segmentID UniqueID, segType segmentType)
 	// getSegmentByID returns the segment which id is segmentID
 	getSegmentByID(segmentID UniqueID, segType segmentType) (*Segment, error)
 	// hasSegment returns true if collectionReplica has the segment, false otherwise
@@ -418,13 +418,11 @@ func (replica *metaReplica) removePartitionPrivate(partitionID UniqueID, locked 
 	// delete segments
 	ids, _ := partition.getSegmentIDs(segmentTypeGrowing)
 	for _, segmentID := range ids {
-		// try to delete, ignore error
-		_ = replica.removeSegmentPrivate(segmentID, segmentTypeGrowing)
+		replica.removeSegmentPrivate(segmentID, segmentTypeGrowing)
 	}
 	ids, _ = partition.getSegmentIDs(segmentTypeSealed)
 	for _, segmentID := range ids {
-		// try to delete, ignore error
-		_ = replica.removeSegmentPrivate(segmentID, segmentTypeSealed)
+		replica.removeSegmentPrivate(segmentID, segmentTypeSealed)
 	}
 
 	collection.removePartitionID(partitionID)
@@ -576,37 +574,38 @@ func (replica *metaReplica) setSegment(segment *Segment) error {
 }
 
 // removeSegment removes a segment from collectionReplica
-func (replica *metaReplica) removeSegment(segmentID UniqueID, segType segmentType) error {
+func (replica *metaReplica) removeSegment(segmentID UniqueID, segType segmentType) {
 	replica.mu.Lock()
 	defer replica.mu.Unlock()
-
-	return replica.removeSegmentPrivate(segmentID, segType)
+	replica.removeSegmentPrivate(segmentID, segType)
 }
 
 // removeSegmentPrivate is private function in collectionReplica, to remove a segment from collectionReplica
-func (replica *metaReplica) removeSegmentPrivate(segmentID UniqueID, segType segmentType) error {
-	segment, err := replica.getSegmentByIDPrivate(segmentID, segType)
-	if err != nil {
-		return err
-	}
-
-	partition, err2 := replica.getPartitionByIDPrivate(segment.partitionID)
-	if err2 != nil {
-		return err
-	}
-	partition.removeSegmentID(segmentID, segType)
+func (replica *metaReplica) removeSegmentPrivate(segmentID UniqueID, segType segmentType) {
 	switch segType {
 	case segmentTypeGrowing:
-		delete(replica.growingSegments, segmentID)
+		if segment, ok := replica.growingSegments[segmentID]; ok {
+			if partition, ok := replica.partitions[segment.partitionID]; ok {
+				partition.removeSegmentID(segmentID, segType)
+			}
+
+			delete(replica.growingSegments, segmentID)
+			deleteSegment(segment)
+		}
 	case segmentTypeSealed:
-		delete(replica.sealedSegments, segmentID)
+		if segment, ok := replica.sealedSegments[segmentID]; ok {
+			if partition, ok := replica.partitions[segment.partitionID]; ok {
+				partition.removeSegmentID(segmentID, segType)
+			}
+
+			delete(replica.sealedSegments, segmentID)
+			deleteSegment(segment)
+		}
 	default:
-		err = fmt.Errorf("unexpected segment type, segmentID = %d, segmentType = %s", segmentID, segType.String())
+		panic("unsupported segment type")
 	}
-	deleteSegment(segment)
 
 	metrics.QueryNodeNumSegments.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Dec()
-	return err
 }
 
 // getSegmentByID returns the segment which id is segmentID
