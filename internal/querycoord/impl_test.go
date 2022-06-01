@@ -441,7 +441,7 @@ func TestGrpcTaskEnqueueFail(t *testing.T) {
 	queryCoord.scheduler.taskIDAllocator = failedAllocator
 
 	waitQueryNodeOnline(queryCoord.cluster, queryNode.queryNodeID)
-	assert.NotEmpty(t, queryCoord.cluster.onlineNodeIDs())
+	assert.NotEmpty(t, queryCoord.cluster.OnlineNodeIDs())
 
 	t.Run("Test LoadPartition", func(t *testing.T) {
 		status, err := queryCoord.LoadPartitions(ctx, &querypb.LoadPartitionsRequest{
@@ -579,7 +579,7 @@ func TestLoadBalanceTask(t *testing.T) {
 		}
 	}
 	nodeID := queryNode1.queryNodeID
-	queryCoord.cluster.stopNode(nodeID)
+	queryCoord.cluster.StopNode(nodeID)
 	loadBalanceSegment := &querypb.LoadBalanceRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:  commonpb.MsgType_LoadBalanceSegments,
@@ -914,7 +914,7 @@ func TestLoadCollectionWithReplicas(t *testing.T) {
 	}
 
 	// load collection with 3 replicas, but no enough querynodes
-	assert.Equal(t, 2, len(queryCoord.cluster.onlineNodeIDs()))
+	assert.Equal(t, 2, len(queryCoord.cluster.OnlineNodeIDs()))
 	status, err := queryCoord.LoadCollection(ctx, loadCollectionReq)
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
@@ -988,7 +988,7 @@ func TestLoadPartitionsWithReplicas(t *testing.T) {
 	}
 
 	// load collection with 3 replicas, but no enough querynodes
-	assert.Equal(t, 2, len(queryCoord.cluster.onlineNodeIDs()))
+	assert.Equal(t, 2, len(queryCoord.cluster.OnlineNodeIDs()))
 	status, err := queryCoord.LoadPartitions(ctx, loadPartitionsReq)
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)

@@ -1019,7 +1019,7 @@ func generateDerivedInternalTasks(triggerTask task, meta Meta, cluster Cluster) 
 			collectionID := loadSegmentTask.CollectionID
 			replicaID := loadSegmentTask.GetReplicaID()
 			nodeID := loadSegmentTask.DstNodeID
-			if !cluster.hasWatchedDeltaChannel(triggerTask.traceCtx(), nodeID, collectionID) {
+			if !cluster.HasWatchedDeltaChannel(triggerTask.traceCtx(), nodeID, collectionID) {
 				addChannelWatchInfoFn(nodeID, collectionID, replicaID, watchDeltaChannelInfo)
 			}
 		}

@@ -42,7 +42,7 @@ func shuffleChannelsToQueryNode(ctx context.Context, reqs []*querypb.WatchDmChan
 	var onlineNodeIDs []int64
 	for {
 		if replicaID == -1 {
-			onlineNodeIDs = cluster.onlineNodeIDs()
+			onlineNodeIDs = cluster.OnlineNodeIDs()
 		} else {
 			replica, err := metaCache.getReplicaByID(replicaID)
 			if err != nil {
@@ -50,7 +50,7 @@ func shuffleChannelsToQueryNode(ctx context.Context, reqs []*querypb.WatchDmChan
 			}
 			replicaNodes := replica.GetNodeIds()
 			for _, nodeID := range replicaNodes {
-				if ok, err := cluster.isOnline(nodeID); err == nil && ok {
+				if ok, err := cluster.IsOnline(nodeID); err == nil && ok {
 					onlineNodeIDs = append(onlineNodeIDs, nodeID)
 				}
 			}

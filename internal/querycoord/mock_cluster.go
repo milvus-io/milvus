@@ -28,10 +28,10 @@ func NewMockCluster(cluster Cluster) *MockCluster {
 	}
 }
 
-func (mock *MockCluster) isOnline(nodeID int64) (bool, error) {
+func (mock *MockCluster) IsOnline(nodeID int64) (bool, error) {
 	if mock.isOnlineHandler != nil {
 		return mock.isOnlineHandler(nodeID)
 	}
 
-	return mock.Cluster.isOnline(nodeID)
+	return mock.Cluster.IsOnline(nodeID)
 }

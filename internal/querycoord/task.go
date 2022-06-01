@@ -336,7 +336,7 @@ func (lct *loadCollectionTask) updateTaskProcess() {
 		// wait watchDeltaChannel task done after loading segment
 		nodeID := getDstNodeIDByTask(t)
 		if t.msgType() == commonpb.MsgType_LoadSegments {
-			if !lct.cluster.hasWatchedDeltaChannel(lct.ctx, nodeID, collectionID) {
+			if !lct.cluster.HasWatchedDeltaChannel(lct.ctx, nodeID, collectionID) {
 				allDone = false
 				break
 			}
@@ -456,7 +456,7 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 		replicaIds[i] = replica.ReplicaID
 	}
 
-	err = lct.cluster.assignNodesToReplicas(ctx, replicas, collectionSize)
+	err = lct.cluster.AssignNodesToReplicas(ctx, replicas, collectionSize)
 	if err != nil {
 		log.Error("failed to assign nodes to replicas",
 			zap.Int64("collectionID", collectionID),
@@ -524,7 +524,7 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 		for _, internalTask := range internalTasks {
 			lct.addChildTask(internalTask)
 			if task, ok := internalTask.(*watchDmChannelTask); ok {
-				nodeInfo, err := lct.cluster.getNodeInfoByID(task.NodeID)
+				nodeInfo, err := lct.cluster.GetNodeInfoByID(task.NodeID)
 				if err != nil {
 					log.Error("loadCollectionTask: get shard leader node info failed",
 						zap.Int64("collectionID", collectionID),
@@ -593,7 +593,7 @@ func (lct *loadCollectionTask) postExecute(ctx context.Context) error {
 }
 
 func (lct *loadCollectionTask) rollBack(ctx context.Context) []task {
-	onlineNodeIDs := lct.cluster.onlineNodeIDs()
+	onlineNodeIDs := lct.cluster.OnlineNodeIDs()
 	resultTasks := make([]task, 0)
 	for _, nodeID := range onlineNodeIDs {
 		//brute force rollBack, should optimize
@@ -686,7 +686,7 @@ func (rct *releaseCollectionTask) execute(ctx context.Context) error {
 		}
 
 		// TODO(yah01): broadcast to all nodes? Or only nodes serve the collection
-		onlineNodeIDs := rct.cluster.onlineNodeIDs()
+		onlineNodeIDs := rct.cluster.OnlineNodeIDs()
 		for _, nodeID := range onlineNodeIDs {
 			req := proto.Clone(rct.ReleaseCollectionRequest).(*querypb.ReleaseCollectionRequest)
 			req.NodeID = nodeID
@@ -704,7 +704,7 @@ func (rct *releaseCollectionTask) execute(ctx context.Context) error {
 	} else {
 		// If the node crashed or be offline, the loaded segments are lost
 		defer rct.reduceRetryCount()
-		err := rct.cluster.releaseCollection(ctx, rct.NodeID, rct.ReleaseCollectionRequest)
+		err := rct.cluster.ReleaseCollection(ctx, rct.NodeID, rct.ReleaseCollectionRequest)
 		if err != nil {
 			log.Warn("releaseCollectionTask: release collection end, node occur error", zap.Int64("collectionID", collectionID), zap.Int64("nodeID", rct.NodeID))
 			// after release failed, the task will always redo
@@ -780,7 +780,7 @@ func (lpt *loadPartitionTask) updateTaskProcess() {
 		// wait watchDeltaChannel task done after loading segment
 		nodeID := getDstNodeIDByTask(t)
 		if t.msgType() == commonpb.MsgType_LoadSegments {
-			if !lpt.cluster.hasWatchedDeltaChannel(lpt.ctx, nodeID, collectionID) {
+			if !lpt.cluster.HasWatchedDeltaChannel(lpt.ctx, nodeID, collectionID) {
 				allDone = false
 				break
 			}
@@ -889,7 +889,7 @@ func (lpt *loadPartitionTask) execute(ctx context.Context) error {
 		replicaIds[i] = replica.ReplicaID
 	}
 
-	err = lpt.cluster.assignNodesToReplicas(ctx, replicas, collectionSize)
+	err = lpt.cluster.AssignNodesToReplicas(ctx, replicas, collectionSize)
 	if err != nil {
 		log.Error("failed to assign nodes to replicas",
 			zap.Int64("collectionID", collectionID),
@@ -954,7 +954,7 @@ func (lpt *loadPartitionTask) execute(ctx context.Context) error {
 		for _, internalTask := range internalTasks {
 			lpt.addChildTask(internalTask)
 			if task, ok := internalTask.(*watchDmChannelTask); ok {
-				nodeInfo, err := lpt.cluster.getNodeInfoByID(task.NodeID)
+				nodeInfo, err := lpt.cluster.GetNodeInfoByID(task.NodeID)
 				if err != nil {
 					log.Error("loadCollectionTask: get shard leader node info failed",
 						zap.Int64("collectionID", collectionID),
@@ -1031,7 +1031,7 @@ func (lpt *loadPartitionTask) rollBack(ctx context.Context) []task {
 	collectionID := lpt.CollectionID
 	resultTasks := make([]task, 0)
 	//brute force rollBack, should optimize
-	onlineNodeIDs := lpt.cluster.onlineNodeIDs()
+	onlineNodeIDs := lpt.cluster.OnlineNodeIDs()
 	for _, nodeID := range onlineNodeIDs {
 		req := &querypb.ReleaseCollectionRequest{
 			Base: &commonpb.MsgBase{
@@ -1119,7 +1119,7 @@ func (rpt *releasePartitionTask) execute(ctx context.Context) error {
 
 	// if nodeID ==0, it means that the release request has not been assigned to the specified query node
 	if rpt.NodeID <= 0 {
-		onlineNodeIDs := rpt.cluster.onlineNodeIDs()
+		onlineNodeIDs := rpt.cluster.OnlineNodeIDs()
 		for _, nodeID := range onlineNodeIDs {
 			req := proto.Clone(rpt.ReleasePartitionsRequest).(*querypb.ReleasePartitionsRequest)
 			req.NodeID = nodeID
@@ -1137,7 +1137,7 @@ func (rpt *releasePartitionTask) execute(ctx context.Context) error {
 	} else {
 		// If the node crashed or be offline, the loaded segments are lost
 		defer rpt.reduceRetryCount()
-		err := rpt.cluster.releasePartitions(ctx, rpt.NodeID, rpt.ReleasePartitionsRequest)
+		err := rpt.cluster.ReleasePartitions(ctx, rpt.NodeID, rpt.ReleasePartitionsRequest)
 		if err != nil {
 			log.Warn("ReleasePartitionsTask: release partition end, node occur error", zap.Int64("collectionID", collectionID), zap.String("nodeID", fmt.Sprintln(rpt.NodeID)))
 			// after release failed, the task will always redo
@@ -1195,7 +1195,7 @@ func (lst *loadSegmentTask) marshal() ([]byte, error) {
 }
 
 func (lst *loadSegmentTask) isValid() bool {
-	online, err := lst.cluster.isOnline(lst.DstNodeID)
+	online, err := lst.cluster.IsOnline(lst.DstNodeID)
 	if err != nil {
 		return false
 	}
@@ -1242,7 +1242,7 @@ func (lst *loadSegmentTask) preExecute(ctx context.Context) error {
 func (lst *loadSegmentTask) execute(ctx context.Context) error {
 	defer lst.reduceRetryCount()
 
-	err := lst.cluster.loadSegments(ctx, lst.DstNodeID, lst.LoadSegmentsRequest)
+	err := lst.cluster.LoadSegments(ctx, lst.DstNodeID, lst.LoadSegmentsRequest)
 	if err != nil {
 		log.Warn("loadSegmentTask: loadSegment occur error", zap.Int64("taskID", lst.getTaskID()))
 		lst.setResultInfo(err)
@@ -1322,7 +1322,7 @@ func (rst *releaseSegmentTask) marshal() ([]byte, error) {
 }
 
 func (rst *releaseSegmentTask) isValid() bool {
-	online, err := rst.cluster.isOnline(rst.NodeID)
+	online, err := rst.cluster.IsOnline(rst.NodeID)
 	if err != nil {
 		return false
 	}
@@ -1350,7 +1350,7 @@ func (rst *releaseSegmentTask) preExecute(context.Context) error {
 func (rst *releaseSegmentTask) execute(ctx context.Context) error {
 	defer rst.reduceRetryCount()
 
-	err := rst.cluster.releaseSegments(rst.ctx, rst.leaderID, rst.ReleaseSegmentsRequest)
+	err := rst.cluster.ReleaseSegments(rst.ctx, rst.leaderID, rst.ReleaseSegmentsRequest)
 	if err != nil {
 		log.Warn("releaseSegmentTask: releaseSegment occur error", zap.Int64("taskID", rst.getTaskID()))
 		rst.setResultInfo(err)
@@ -1388,7 +1388,7 @@ func (wdt *watchDmChannelTask) marshal() ([]byte, error) {
 }
 
 func (wdt *watchDmChannelTask) isValid() bool {
-	online, err := wdt.cluster.isOnline(wdt.NodeID)
+	online, err := wdt.cluster.IsOnline(wdt.NodeID)
 	if err != nil {
 		return false
 	}
@@ -1429,7 +1429,7 @@ func (wdt *watchDmChannelTask) preExecute(context.Context) error {
 func (wdt *watchDmChannelTask) execute(ctx context.Context) error {
 	defer wdt.reduceRetryCount()
 
-	err := wdt.cluster.watchDmChannels(wdt.ctx, wdt.NodeID, wdt.WatchDmChannelsRequest)
+	err := wdt.cluster.WatchDmChannels(wdt.ctx, wdt.NodeID, wdt.WatchDmChannelsRequest)
 	if err != nil {
 		log.Warn("watchDmChannelTask: watchDmChannel occur error", zap.Int64("taskID", wdt.getTaskID()))
 		wdt.setResultInfo(err)
@@ -1502,7 +1502,7 @@ func (wdt *watchDeltaChannelTask) marshal() ([]byte, error) {
 }
 
 func (wdt *watchDeltaChannelTask) isValid() bool {
-	online, err := wdt.cluster.isOnline(wdt.NodeID)
+	online, err := wdt.cluster.IsOnline(wdt.NodeID)
 	if err != nil {
 		return false
 	}
@@ -1544,7 +1544,7 @@ func (wdt *watchDeltaChannelTask) preExecute(context.Context) error {
 func (wdt *watchDeltaChannelTask) execute(ctx context.Context) error {
 	defer wdt.reduceRetryCount()
 
-	err := wdt.cluster.watchDeltaChannels(wdt.ctx, wdt.NodeID, wdt.WatchDeltaChannelsRequest)
+	err := wdt.cluster.WatchDeltaChannels(wdt.ctx, wdt.NodeID, wdt.WatchDeltaChannelsRequest)
 	if err != nil {
 		log.Warn("watchDeltaChannelTask: watchDeltaChannel occur error", zap.Int64("taskID", wdt.getTaskID()), zap.Error(err))
 		wdt.setResultInfo(err)
@@ -2042,7 +2042,7 @@ func (lbt *loadBalanceTask) processManualLoadBalance(ctx context.Context) error 
 	balancedSegmentInfos := make(map[UniqueID]*querypb.SegmentInfo)
 	balancedSegmentIDs := make([]UniqueID, 0)
 	for _, nodeID := range lbt.SourceNodeIDs {
-		nodeExist := lbt.cluster.hasNode(nodeID)
+		nodeExist := lbt.cluster.HasNode(nodeID)
 		if !nodeExist {
 			err := fmt.Errorf("loadBalanceTask: query node %d is not exist to balance", nodeID)
 			log.Error(err.Error())
@@ -2302,7 +2302,7 @@ func (lbt *loadBalanceTask) globalPostExecute(ctx context.Context) error {
 			// then the queryCoord will panic, and the nodeInfo should not be removed immediately
 			// after queryCoord recovery, the balanceTask will redo
 			for _, offlineNodeID := range lbt.SourceNodeIDs {
-				err := lbt.cluster.removeNodeInfo(offlineNodeID)
+				err := lbt.cluster.RemoveNodeInfo(offlineNodeID)
 				if err != nil {
 					log.Error("loadBalanceTask: occur error when removing node info from cluster",
 						zap.Int64("nodeID", offlineNodeID),
@@ -2345,7 +2345,7 @@ func (lbt *loadBalanceTask) globalPostExecute(ctx context.Context) error {
 					leaderID := task.NodeID
 					dmChannel := task.Infos[0].ChannelName
 
-					nodeInfo, err := lbt.cluster.getNodeInfoByID(leaderID)
+					nodeInfo, err := lbt.cluster.GetNodeInfoByID(leaderID)
 					if err != nil {
 						log.Error("failed to get node info to update shard leader info",
 							zap.Int64("triggerTaskID", lbt.getTaskID()),
@@ -2399,14 +2399,14 @@ func assignInternalTask(ctx context.Context,
 	broker *globalMetaBroker) ([]task, error) {
 
 	internalTasks := make([]task, 0)
-	err := cluster.allocateSegmentsToQueryNode(ctx, loadSegmentRequests, wait, excludeNodeIDs, includeNodeIDs, replicaID)
+	err := cluster.AllocateSegmentsToQueryNode(ctx, loadSegmentRequests, wait, excludeNodeIDs, includeNodeIDs, replicaID)
 	if err != nil {
 		log.Error("assignInternalTask: assign segment to node failed", zap.Error(err))
 		return nil, err
 	}
 	log.Info("assignInternalTask: assign segment to node success", zap.Int("load segments", len(loadSegmentRequests)))
 
-	err = cluster.allocateChannelsToQueryNode(ctx, watchDmChannelRequests, wait, excludeNodeIDs, includeNodeIDs, replicaID)
+	err = cluster.AllocateChannelsToQueryNode(ctx, watchDmChannelRequests, wait, excludeNodeIDs, includeNodeIDs, replicaID)
 	if err != nil {
 		log.Error("assignInternalTask: assign dmChannel to node failed", zap.Error(err))
 		return nil, err

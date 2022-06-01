@@ -187,7 +187,7 @@ func TestWatchNodeLoop(t *testing.T) {
 		assert.Nil(t, err)
 
 		for {
-			offlineNodeIDs := queryCoord.cluster.offlineNodeIDs()
+			offlineNodeIDs := queryCoord.cluster.OfflineNodeIDs()
 			if len(offlineNodeIDs) != 0 {
 				log.Warn("find offline Nodes", zap.Int64s("offlineNodeIDs", offlineNodeIDs))
 				break
@@ -233,7 +233,7 @@ func TestWatchNodeLoop(t *testing.T) {
 
 		nodeID := queryNode1.queryNodeID
 		waitQueryNodeOnline(queryCoord.cluster, nodeID)
-		onlineNodeIDs := queryCoord.cluster.onlineNodeIDs()
+		onlineNodeIDs := queryCoord.cluster.OnlineNodeIDs()
 		assert.Equal(t, 1, len(onlineNodeIDs))
 
 		queryNode1.stop()
@@ -598,7 +598,7 @@ func TestLoadBalanceSegmentLoop(t *testing.T) {
 		err = queryCoord.scheduler.Enqueue(loadPartitionTask)
 		assert.Nil(t, err)
 		waitTaskFinalState(loadPartitionTask, taskExpired)
-		nodeInfo, err := queryCoord.cluster.getNodeInfoByID(queryNode1.queryNodeID)
+		nodeInfo, err := queryCoord.cluster.GetNodeInfoByID(queryNode1.queryNodeID)
 		assert.Nil(t, err)
 		if nodeInfo.(*queryNode).memUsageRate >= Params.QueryCoordCfg.OverloadedMemoryThresholdPercentage {
 			break
@@ -612,7 +612,7 @@ func TestLoadBalanceSegmentLoop(t *testing.T) {
 
 	// if sealed has been balance to query node2, than balance work
 	for {
-		segmentInfos, err := queryCoord.cluster.getSegmentInfoByNode(baseCtx, queryNode2.queryNodeID, &querypb.GetSegmentInfoRequest{
+		segmentInfos, err := queryCoord.cluster.GetSegmentInfoByNode(baseCtx, queryNode2.queryNodeID, &querypb.GetSegmentInfoRequest{
 			Base: &commonpb.MsgBase{
 				MsgType: commonpb.MsgType_LoadBalanceSegments,
 			},
