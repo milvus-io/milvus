@@ -1304,3 +1304,29 @@ class  TestqueryString(TestcaseBase):
         collection_w.query(expression, check_task=CheckTasks.err_res,
                            check_items={ct.err_code: 1, ct.err_msg: "like operation on non-string field is unsupported"}
                            )
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_query_compare_two_fields(self):
+        """
+        target: test query with 
+        method: specify string primary field, compare two fields
+        expected: verify query successfully
+        """
+        collection_w = self.init_collection_general(prefix, insert_data=True, primary_field=ct.default_string_field_name)[0]
+        res = []
+        expression = 'float > int64'
+        output_fields = [default_int_field_name, default_float_field_name, default_string_field_name]
+        collection_w.query(expression, output_fields=output_fields, 
+                           check_task=CheckTasks.check_query_results, check_items={exp_res: res})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_query_compare_invalid_fields(self):
+        """
+        target: test query with 
+        method: specify string primary field, compare string and int field
+        expected: raise error
+        """
+        collection_w = self.init_collection_general(prefix, insert_data=True, primary_field=ct.default_string_field_name)[0]
+        expression = 'varchar == int64'
+        collection_w.query(expression, check_task=CheckTasks.err_res,
+                           check_items={ct.err_code: 1, ct.err_msg: f' cannot parse expression:{expression}'})
