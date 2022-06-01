@@ -135,3 +135,49 @@ func TestShuffleSegmentsToQueryNode(t *testing.T) {
 	err = removeAllSession()
 	assert.Nil(t, err)
 }
+
+func TestAvgAllocation(t *testing.T) {
+	cases := []struct {
+		name           string
+		rowNums        []int64
+		groupCnt       int
+		arrOfIndices   [][]int
+		maxCntDiffRate float64
+	}{
+		{
+			name:           "test larger than mean",
+			rowNums:        []int64{300, 33, 30, 20, 15, 14, 11, 10, 9, 4, 2},
+			groupCnt:       3,
+			arrOfIndices:   [][]int{{0, 10, 9}, {1, 2, 8}, {3, 4, 5, 6, 7}},
+			maxCntDiffRate: 0.1,
+		},
+		{
+			name:           "test one group",
+			rowNums:        []int64{100, 3, 2, 1},
+			groupCnt:       1,
+			arrOfIndices:   [][]int{{0, 1, 2, 3}},
+			maxCntDiffRate: 0.1,
+		},
+		{
+			name:           "test empty group",
+			rowNums:        []int64{300, 100},
+			groupCnt:       3,
+			arrOfIndices:   [][]int{{0}, {1}, {}},
+			maxCntDiffRate: 0.1,
+		},
+		{
+			name:           "test larger than mean 2",
+			rowNums:        []int64{500, 35, 28, 27, 22, 18, 10, 6, 5, 3, 2, 2, 1},
+			groupCnt:       4,
+			arrOfIndices:   [][]int{{0, 12, 11}, {1, 5, 10}, {2, 4, 9}, {3, 6, 7, 8}},
+			maxCntDiffRate: 0.1,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			res := avgAllocate(c.rowNums, c.groupCnt, c.maxCntDiffRate)
+			assert.EqualValues(t, c.arrOfIndices, res)
+		})
+	}
+}
