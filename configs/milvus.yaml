@@ -75,6 +75,8 @@ pulsar:
 # If you want to enable kafka, needs to comment the pulsar configs
 #kafka:
 #  brokerList: localhost1:9092,localhost2:9092,localhost3:9092
+#  saslUsername: username
+#  saslPassword: password
 
 rocksmq:
   # please adjust in embedded Milvus: /tmp/milvus/rdb_data

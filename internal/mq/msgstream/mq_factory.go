@@ -124,17 +124,17 @@ func NewRmsFactory(path string) *RmsFactory {
 
 type KmsFactory struct {
 	dispatcherFactory ProtoUDFactory
-	KafkaAddress      string
+	config            *paramtable.KafkaConfig
 	ReceiveBufSize    int64
 }
 
 func (f *KmsFactory) NewMsgStream(ctx context.Context) (MsgStream, error) {
-	kafkaClient := kafkawrapper.NewKafkaClientInstance(f.KafkaAddress)
+	kafkaClient := kafkawrapper.NewKafkaClientInstanceWithConfig(f.config)
 	return NewMqMsgStream(ctx, f.ReceiveBufSize, -1, kafkaClient, f.dispatcherFactory.NewUnmarshalDispatcher())
 }
 
 func (f *KmsFactory) NewTtMsgStream(ctx context.Context) (MsgStream, error) {
-	kafkaClient := kafkawrapper.NewKafkaClientInstance(f.KafkaAddress)
+	kafkaClient := kafkawrapper.NewKafkaClientInstanceWithConfig(f.config)
 	return NewMqTtMsgStream(ctx, f.ReceiveBufSize, -1, kafkaClient, f.dispatcherFactory.NewUnmarshalDispatcher())
 }
 
@@ -146,7 +146,7 @@ func NewKmsFactory(config *paramtable.KafkaConfig) Factory {
 	f := &KmsFactory{
 		dispatcherFactory: ProtoUDFactory{},
 		ReceiveBufSize:    1024,
-		KafkaAddress:      config.Address,
+		config:            config,
 	}
 	return f
 }

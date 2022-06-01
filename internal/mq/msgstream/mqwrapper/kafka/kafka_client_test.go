@@ -278,6 +278,19 @@ func TestKafkaClient_MsgSerializAndDeserialize(t *testing.T) {
 	assert.Nil(t, msgID)
 }
 
+func TestKafkaClient_NewKafkaClientInstanceWithConfig(t *testing.T) {
+	config1 := &paramtable.KafkaConfig{Address: "addr", SaslPassword: "password"}
+	assert.Panics(t, func() { NewKafkaClientInstanceWithConfig(config1) })
+
+	config2 := &paramtable.KafkaConfig{Address: "addr", SaslUsername: "username"}
+	assert.Panics(t, func() { NewKafkaClientInstanceWithConfig(config2) })
+
+	config3 := &paramtable.KafkaConfig{Address: "addr", SaslUsername: "username", SaslPassword: "password"}
+	client := NewKafkaClientInstanceWithConfig(config3)
+	assert.NotNil(t, client)
+	assert.NotNil(t, client.basicConfig)
+}
+
 func createKafkaClient(t *testing.T) *kafkaClient {
 	kafkaAddress, _ := Params.Load("_KafkaBrokerList")
 	kc := NewKafkaClientInstance(kafkaAddress)
