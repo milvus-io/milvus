@@ -20,7 +20,6 @@ import (
 	"context"
 	"math"
 	"os"
-	"sync"
 	"testing"
 	"time"
 
@@ -90,9 +89,9 @@ func TestNodeCtx_Start(t *testing.T) {
 		node.inputChannels[i] = make(chan Msg)
 	}
 
-	var waitGroup sync.WaitGroup
-	waitGroup.Add(1)
-	node.Start(&waitGroup)
+	assert.NotPanics(t, func() {
+		node.Start()
+	})
 
 	node.Close()
 }
