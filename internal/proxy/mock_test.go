@@ -86,37 +86,6 @@ func newMockIDAllocatorInterface() idAllocatorInterface {
 	return &mockIDAllocatorInterface{}
 }
 
-type mockGetChannelsService struct {
-	collectionID2Channels map[UniqueID]map[vChan]pChan
-	f                     getChannelsFuncType
-}
-
-func newMockGetChannelsService() *mockGetChannelsService {
-	return &mockGetChannelsService{
-		collectionID2Channels: make(map[UniqueID]map[vChan]pChan),
-	}
-}
-
-func (m *mockGetChannelsService) GetChannels(collectionID UniqueID) (map[vChan]pChan, error) {
-	if m.f != nil {
-		return m.f(collectionID)
-	}
-
-	channels, ok := m.collectionID2Channels[collectionID]
-	if ok {
-		return channels, nil
-	}
-
-	channels = make(map[vChan]pChan)
-	l := rand.Uint64()%10 + 1
-	for i := 0; uint64(i) < l; i++ {
-		channels[funcutil.GenRandomStr()] = funcutil.GenRandomStr()
-	}
-
-	m.collectionID2Channels[collectionID] = channels
-	return channels, nil
-}
-
 type mockTask struct {
 	*TaskCondition
 	id    UniqueID

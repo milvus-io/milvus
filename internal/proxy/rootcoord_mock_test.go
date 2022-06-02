@@ -1066,6 +1066,8 @@ type ShowPartitionsFunc func(ctx context.Context, request *milvuspb.ShowPartitio
 type DescribeIndexFunc func(ctx context.Context, request *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error)
 type ShowSegmentsFunc func(ctx context.Context, request *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error)
 type DescribeSegmentsFunc func(ctx context.Context, request *rootcoordpb.DescribeSegmentsRequest) (*rootcoordpb.DescribeSegmentsResponse, error)
+type ImportFunc func(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error)
+type DropCollectionFunc func(ctx context.Context, request *milvuspb.DropCollectionRequest) (*commonpb.Status, error)
 
 type mockRootCoord struct {
 	types.RootCoord
@@ -1074,6 +1076,8 @@ type mockRootCoord struct {
 	DescribeIndexFunc
 	ShowSegmentsFunc
 	DescribeSegmentsFunc
+	ImportFunc
+	DropCollectionFunc
 }
 
 func (m *mockRootCoord) DescribeCollection(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
@@ -1107,6 +1111,20 @@ func (m *mockRootCoord) ShowSegments(ctx context.Context, request *milvuspb.Show
 func (m *mockRootCoord) DescribeSegments(ctx context.Context, request *rootcoordpb.DescribeSegmentsRequest) (*rootcoordpb.DescribeSegmentsResponse, error) {
 	if m.DescribeSegmentsFunc != nil {
 		return m.DescribeSegmentsFunc(ctx, request)
+	}
+	return nil, errors.New("mock")
+}
+
+func (m *mockRootCoord) Import(ctx context.Context, request *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
+	if m.ImportFunc != nil {
+		return m.ImportFunc(ctx, request)
+	}
+	return nil, errors.New("mock")
+}
+
+func (m *mockRootCoord) DropCollection(ctx context.Context, request *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
+	if m.DropCollectionFunc != nil {
+		return m.DropCollectionFunc(ctx, request)
 	}
 	return nil, errors.New("mock")
 }

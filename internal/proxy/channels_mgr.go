@@ -18,9 +18,9 @@ package proxy
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"runtime"
-	"sort"
 	"strconv"
 	"sync"
 
@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
 
 	"go.uber.org/zap"
 )
@@ -45,60 +44,70 @@ type channelsMgr interface {
 	removeAllDMLStream() error
 }
 
+type channelInfos struct {
+	// It seems that there is no need to maintain relationships between vchans & pchans.
+	vchans []vChan
+	pchans []pChan
+}
+
+type streamInfos struct {
+	channelInfos channelInfos
+	stream       msgstream.MsgStream
+}
+
+func removeDuplicate(ss []string) []string {
+	m := make(map[string]struct{})
+	filtered := make([]string, 0, len(ss))
+	for _, s := range ss {
+		if _, ok := m[s]; !ok {
+			filtered = append(filtered, s)
+			m[s] = struct{}{}
+		}
+	}
+	return filtered
+}
+
+func newChannels(vchans []vChan, pchans []pChan) (channelInfos, error) {
+	if len(vchans) != len(pchans) {
+		err := fmt.Errorf("physical channels mismatch virtual channels, len(VirtualChannelNames): %v, len(PhysicalChannelNames): %v", len(vchans), len(pchans))
+		log.Error(err.Error())
+		return channelInfos{}, err
+	}
+	/*
+		// remove duplicate physical channels.
+		return channelInfos{vchans: vchans, pchans: removeDuplicate(pchans)}, nil
+	*/
+	return channelInfos{vchans: vchans, pchans: pchans}, nil
+}
+
 // getChannelsFuncType returns the channel information according to the collection id.
-type getChannelsFuncType = func(collectionID UniqueID) (map[vChan]pChan, error)
+type getChannelsFuncType = func(collectionID UniqueID) (channelInfos, error)
 
 // repackFuncType repacks message into message pack.
 type repackFuncType = func(tsMsgs []msgstream.TsMsg, hashKeys [][]int32) (map[int32]*msgstream.MsgPack, error)
 
 // getDmlChannelsFunc returns a function about how to get dml channels of a collection.
 func getDmlChannelsFunc(ctx context.Context, rc types.RootCoord) getChannelsFuncType {
-	return func(collectionID UniqueID) (map[vChan]pChan, error) {
+	return func(collectionID UniqueID) (channelInfos, error) {
 		req := &milvuspb.DescribeCollectionRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_DescribeCollection,
-				MsgID:     0, // todo
-				Timestamp: 0, // todo
-				SourceID:  0, // todo
-			},
-			DbName:         "", // todo
-			CollectionName: "", // todo
-			CollectionID:   collectionID,
-			TimeStamp:      0, // todo
+			Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_DescribeCollection},
+			CollectionID: collectionID,
 		}
+
 		resp, err := rc.DescribeCollection(ctx, req)
 		if err != nil {
-			log.Warn("failed to describe collection", zap.Error(err), zap.Int64("collection", collectionID))
-			return nil, err
-		}
-		if resp.Status.ErrorCode != 0 {
-			log.Warn("DescribeCollection",
-				zap.Any("ErrorCode", resp.Status.ErrorCode),
-				zap.Any("Reason", resp.Status.Reason))
-			return nil, err
-		}
-		if len(resp.VirtualChannelNames) != len(resp.PhysicalChannelNames) {
-			err := fmt.Errorf(
-				"len(VirtualChannelNames): %v, len(PhysicalChannelNames): %v",
-				len(resp.VirtualChannelNames),
-				len(resp.PhysicalChannelNames))
-			log.Warn("GetDmlChannels", zap.Error(err))
-			return nil, err
+			log.Error("failed to describe collection", zap.Error(err), zap.Int64("collection", collectionID))
+			return channelInfos{}, err
 		}
 
-		ret := make(map[vChan]pChan)
-		for idx, name := range resp.VirtualChannelNames {
-			if _, ok := ret[name]; ok {
-				err := fmt.Errorf(
-					"duplicated virtual channel found, vchan: %v, pchan: %v",
-					name,
-					resp.PhysicalChannelNames[idx])
-				return nil, err
-			}
-			ret[name] = resp.PhysicalChannelNames[idx]
+		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+			log.Error("failed to describe collection",
+				zap.String("error_code", resp.GetStatus().GetErrorCode().String()),
+				zap.String("reason", resp.GetStatus().GetReason()))
+			return channelInfos{}, errors.New(resp.GetStatus().GetReason())
 		}
 
-		return ret, nil
+		return newChannels(resp.GetVirtualChannelNames(), resp.GetPhysicalChannelNames())
 	}
 }
 
@@ -111,323 +120,195 @@ const (
 )
 
 type singleTypeChannelsMgr struct {
-	collectionID2VIDs map[UniqueID][]int // id are sorted
-	collMtx           sync.RWMutex
+	infos map[UniqueID]streamInfos // collection id -> stream infos
+	mu    sync.RWMutex
 
-	id2vchans    map[int][]vChan
-	id2vchansMtx sync.RWMutex
-
-	id2Stream                 map[int]msgstream.MsgStream
-	id2UsageHistogramOfStream map[int]int
-	streamMtx                 sync.RWMutex
-
-	vchans2pchans    map[vChan]pChan
-	vchans2pchansMtx sync.RWMutex
-
-	getChannelsFunc getChannelsFuncType
-
-	repackFunc repackFuncType
-
+	getChannelsFunc  getChannelsFuncType
+	repackFunc       repackFuncType
 	singleStreamType streamType
-
 	msgStreamFactory msgstream.Factory
 }
 
-func getAllKeys(m map[vChan]pChan) []vChan {
-	keys := make([]vChan, 0, len(m))
-	for key := range m {
-		keys = append(keys, key)
-	}
-	return keys
-}
+func (mgr *singleTypeChannelsMgr) getAllChannels(collectionID UniqueID) (channelInfos, error) {
+	mgr.mu.RLock()
+	defer mgr.mu.RUnlock()
 
-func getAllValues(m map[vChan]pChan) []pChan {
-	values := make([]pChan, 0, len(m))
-	for _, value := range m {
-		values = append(values, value)
-	}
-	return values
-}
-
-func (mgr *singleTypeChannelsMgr) getLatestVID(collectionID UniqueID) (int, error) {
-	mgr.collMtx.RLock()
-	defer mgr.collMtx.RUnlock()
-
-	ids, ok := mgr.collectionID2VIDs[collectionID]
-	if !ok || len(ids) <= 0 {
-		return 0, fmt.Errorf("v-channel ID is not found for collection %d", collectionID)
+	infos, ok := mgr.infos[collectionID]
+	if ok {
+		return infos.channelInfos, nil
 	}
 
-	return ids[len(ids)-1], nil
+	return channelInfos{}, fmt.Errorf("collection not found in channels manager: %d", collectionID)
 }
 
-func (mgr *singleTypeChannelsMgr) getAllVIDs(collectionID UniqueID) ([]int, error) {
-	mgr.collMtx.RLock()
-	defer mgr.collMtx.RUnlock()
-
-	ids, exist := mgr.collectionID2VIDs[collectionID]
-	if !exist {
-		return nil, fmt.Errorf("collection %d not found", collectionID)
+func (mgr *singleTypeChannelsMgr) getPChans(collectionID UniqueID) ([]pChan, error) {
+	channelInfos, err := mgr.getChannelsFunc(collectionID)
+	if err != nil {
+		return nil, err
 	}
-
-	return ids, nil
+	return channelInfos.pchans, nil
 }
 
-func (mgr *singleTypeChannelsMgr) getVChansByVID(vid int) ([]vChan, error) {
-	mgr.id2vchansMtx.RLock()
-	defer mgr.id2vchansMtx.RUnlock()
-
-	vchans, ok := mgr.id2vchans[vid]
-	if !ok {
-		return nil, fmt.Errorf("vid %d not found", vid)
+func (mgr *singleTypeChannelsMgr) getVChans(collectionID UniqueID) ([]vChan, error) {
+	channelInfos, err := mgr.getChannelsFunc(collectionID)
+	if err != nil {
+		return nil, err
 	}
-
-	return vchans, nil
+	return channelInfos.vchans, nil
 }
 
-// getPChansByVChans converts virtual channel names to physical channel names
-func (mgr *singleTypeChannelsMgr) getPChansByVChans(vchans []vChan) ([]pChan, error) {
-	mgr.vchans2pchansMtx.RLock()
-	defer mgr.vchans2pchansMtx.RUnlock()
-
-	pchans := make([]pChan, 0, len(vchans))
-	for _, vchan := range vchans {
-		pchan, ok := mgr.vchans2pchans[vchan]
-		if !ok {
-			return nil, fmt.Errorf("vchan %v not found", vchan)
-		}
-		pchans = append(pchans, pchan)
-	}
-
-	return pchans, nil
-}
-
-func (mgr *singleTypeChannelsMgr) updateVChans(vid int, vchans []vChan) {
-	mgr.id2vchansMtx.Lock()
-	defer mgr.id2vchansMtx.Unlock()
-
-	mgr.id2vchans[vid] = vchans
-}
-
-func (mgr *singleTypeChannelsMgr) deleteVChansByVID(vid int) {
-	mgr.id2vchansMtx.Lock()
-	defer mgr.id2vchansMtx.Unlock()
-
-	delete(mgr.id2vchans, vid)
-}
-
-func (mgr *singleTypeChannelsMgr) deleteVChansByVIDs(vids []int) {
-	mgr.id2vchansMtx.Lock()
-	defer mgr.id2vchansMtx.Unlock()
-
-	for _, vid := range vids {
-		delete(mgr.id2vchans, vid)
-	}
-}
-
-func (mgr *singleTypeChannelsMgr) deleteStreamByVID(vid int) {
-	mgr.streamMtx.Lock()
-	defer mgr.streamMtx.Unlock()
-
-	delete(mgr.id2Stream, vid)
-}
-
-func (mgr *singleTypeChannelsMgr) deleteStreamByVIDs(vids []int) {
-	mgr.streamMtx.Lock()
-	defer mgr.streamMtx.Unlock()
-
-	for _, vid := range vids {
-		delete(mgr.id2Stream, vid)
-	}
-}
-
-func (mgr *singleTypeChannelsMgr) updateChannels(channels map[vChan]pChan) {
-	mgr.vchans2pchansMtx.Lock()
-	defer mgr.vchans2pchansMtx.Unlock()
-
-	for vchan, pchan := range channels {
-		mgr.vchans2pchans[vchan] = pchan
-	}
-}
-
-func (mgr *singleTypeChannelsMgr) deleteAllChannels() {
-	mgr.vchans2pchansMtx.Lock()
-	defer mgr.vchans2pchansMtx.Unlock()
-
-	mgr.vchans2pchans = nil
-}
-
-func (mgr *singleTypeChannelsMgr) deleteAllStream() {
-	mgr.id2vchansMtx.Lock()
-	defer mgr.id2vchansMtx.Unlock()
-
-	mgr.id2UsageHistogramOfStream = nil
-	mgr.id2Stream = nil
-}
-
-func (mgr *singleTypeChannelsMgr) deleteAllVChans() {
-	mgr.id2vchansMtx.Lock()
-	defer mgr.id2vchansMtx.Unlock()
-
-	mgr.id2vchans = nil
-}
-
-func (mgr *singleTypeChannelsMgr) deleteAllCollection() {
-	mgr.collMtx.Lock()
-	defer mgr.collMtx.Unlock()
-
-	mgr.collectionID2VIDs = nil
-}
-
-func (mgr *singleTypeChannelsMgr) addStream(vid int, stream msgstream.MsgStream) {
-	mgr.streamMtx.Lock()
-	defer mgr.streamMtx.Unlock()
-
-	mgr.id2Stream[vid] = stream
-	mgr.id2UsageHistogramOfStream[vid] = 0
-}
-
-func (mgr *singleTypeChannelsMgr) updateCollection(collectionID UniqueID, id int) {
-	mgr.collMtx.Lock()
-	defer mgr.collMtx.Unlock()
-
-	vids, ok := mgr.collectionID2VIDs[collectionID]
-	if !ok {
-		mgr.collectionID2VIDs[collectionID] = make([]int, 1)
-		mgr.collectionID2VIDs[collectionID][0] = id
-	} else {
-		vids = append(vids, id)
-		sort.Slice(vids, func(i, j int) bool {
-			return vids[i] < vids[j]
-		})
-		mgr.collectionID2VIDs[collectionID] = vids
-	}
-}
-
+// getChannels returns the physical channels.
 func (mgr *singleTypeChannelsMgr) getChannels(collectionID UniqueID) ([]pChan, error) {
-	id, err := mgr.getLatestVID(collectionID)
-	if err == nil {
-		vchans, err := mgr.getVChansByVID(id)
-		if err != nil {
-			return nil, err
-		}
-
-		return mgr.getPChansByVChans(vchans)
+	var channelInfos channelInfos
+	channelInfos, err := mgr.getAllChannels(collectionID)
+	if err != nil {
+		return mgr.getPChans(collectionID)
 	}
-
-	// TODO(dragondriver): return error or update channel information from master?
-	return nil, err
+	return channelInfos.pchans, nil
 }
 
+// getVChannels returns the virtual channels.
 func (mgr *singleTypeChannelsMgr) getVChannels(collectionID UniqueID) ([]vChan, error) {
-	id, err := mgr.getLatestVID(collectionID)
-	if err == nil {
-		return mgr.getVChansByVID(id)
+	var channelInfos channelInfos
+	channelInfos, err := mgr.getAllChannels(collectionID)
+	if err != nil {
+		return mgr.getVChans(collectionID)
 	}
+	return channelInfos.vchans, nil
+}
 
-	// TODO(dragondriver): return error or update channel information from master?
-	return nil, err
+func (mgr *singleTypeChannelsMgr) streamExistPrivate(collectionID UniqueID) bool {
+	streamInfos, ok := mgr.infos[collectionID]
+	return ok && streamInfos.stream != nil
 }
 
 func (mgr *singleTypeChannelsMgr) streamExist(collectionID UniqueID) bool {
-	stream, err := mgr.getStream(collectionID)
-	return err == nil && stream != nil
+	mgr.mu.RLock()
+	defer mgr.mu.RUnlock()
+	return mgr.streamExistPrivate(collectionID)
 }
 
+func createStream(factory msgstream.Factory, streamType streamType, pchans []pChan, repack repackFuncType) (msgstream.MsgStream, error) {
+	var stream msgstream.MsgStream
+	var err error
+
+	if streamType == dqlStreamType {
+		stream, err = factory.NewQueryMsgStream(context.Background())
+	} else {
+		stream, err = factory.NewMsgStream(context.Background())
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	stream.AsProducer(pchans)
+	if repack != nil {
+		stream.SetRepackFunc(repack)
+	}
+	runtime.SetFinalizer(stream, func(stream msgstream.MsgStream) {
+		stream.Close()
+	})
+
+	return stream, nil
+}
+
+func (mgr *singleTypeChannelsMgr) updateCollection(collectionID UniqueID, channelInfos channelInfos, stream msgstream.MsgStream) {
+	mgr.mu.Lock()
+	defer mgr.mu.Unlock()
+	if !mgr.streamExistPrivate(collectionID) {
+		mgr.infos[collectionID] = streamInfos{channelInfos: channelInfos, stream: stream}
+	}
+}
+
+func incPChansMetrics(pchans []pChan) {
+	for _, pc := range pchans {
+		metrics.ProxyMsgStreamObjectsForPChan.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), pc).Inc()
+	}
+}
+
+func decPChanMetrics(pchans []pChan) {
+	for _, pc := range pchans {
+		metrics.ProxyMsgStreamObjectsForPChan.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), pc).Dec()
+	}
+}
+
+// createMsgStream create message stream for specified collection. Idempotent.
+// If stream already exists, directly return nil.
 func (mgr *singleTypeChannelsMgr) createMsgStream(collectionID UniqueID) error {
 	if mgr.streamExist(collectionID) {
 		log.Info("stream already exist, no need to re-create", zap.Int64("collection_id", collectionID))
 		return nil
 	}
 
-	channels, err := mgr.getChannelsFunc(collectionID)
+	channelInfos, err := mgr.getChannelsFunc(collectionID)
 	if err != nil {
-		log.Warn("failed to create message stream",
-			zap.Int64("collection_id", collectionID),
-			zap.Error(err))
+		log.Error("failed to get channels", zap.Error(err), zap.Int64("collection", collectionID))
 		return err
 	}
-	log.Debug("singleTypeChannelsMgr",
+
+	stream, err := createStream(mgr.msgStreamFactory, mgr.singleStreamType, channelInfos.pchans, mgr.repackFunc)
+	if err != nil {
+		log.Error("failed to create message stream", zap.Error(err), zap.Int64("collection", collectionID))
+		return err
+	}
+
+	mgr.updateCollection(collectionID, channelInfos, stream)
+
+	log.Info("create message stream",
 		zap.Int64("collection_id", collectionID),
-		zap.Any("createMsgStream.getChannels", channels))
+		zap.Strings("virtual_channels", channelInfos.vchans),
+		zap.Strings("physical_channels", channelInfos.pchans))
 
-	mgr.updateChannels(channels)
+	incPChansMetrics(channelInfos.pchans)
 
-	id := uniquegenerator.GetUniqueIntGeneratorIns().GetInt()
-
-	vchans, pchans := make([]string, 0, len(channels)), make([]string, 0, len(channels))
-	for k, v := range channels {
-		vchans = append(vchans, k)
-		pchans = append(pchans, v)
-	}
-	mgr.updateVChans(id, vchans)
-
-	var stream msgstream.MsgStream
-	if mgr.singleStreamType == dqlStreamType {
-		stream, err = mgr.msgStreamFactory.NewQueryMsgStream(context.Background())
-	} else {
-		stream, err = mgr.msgStreamFactory.NewMsgStream(context.Background())
-	}
-	if err != nil {
-		return err
-	}
-	stream.AsProducer(pchans)
-	if mgr.repackFunc != nil {
-		stream.SetRepackFunc(mgr.repackFunc)
-	}
-	runtime.SetFinalizer(stream, func(stream msgstream.MsgStream) {
-		stream.Close()
-	})
-	mgr.addStream(id, stream)
-
-	mgr.updateCollection(collectionID, id)
-	for _, pc := range pchans {
-		metrics.ProxyMsgStreamObjectsForPChan.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), pc).Inc()
-	}
 	return nil
 }
 
-func (mgr *singleTypeChannelsMgr) getStream(collectionID UniqueID) (msgstream.MsgStream, error) {
-	mgr.streamMtx.RLock()
-	defer mgr.streamMtx.RUnlock()
+func (mgr *singleTypeChannelsMgr) lockGetStream(collectionID UniqueID) (msgstream.MsgStream, error) {
+	mgr.mu.RLock()
+	defer mgr.mu.RUnlock()
+	streamInfos, ok := mgr.infos[collectionID]
+	if ok {
+		return streamInfos.stream, nil
+	}
+	return nil, fmt.Errorf("collection not found: %d", collectionID)
+}
 
-	vid, err := mgr.getLatestVID(collectionID)
-	if err != nil {
+// getStream get message stream of specified collection.
+// If stream don't exists, call createMsgStream to create for it.
+func (mgr *singleTypeChannelsMgr) getStream(collectionID UniqueID) (msgstream.MsgStream, error) {
+	if stream, err := mgr.lockGetStream(collectionID); err == nil {
+		return stream, nil
+	}
+
+	if err := mgr.createMsgStream(collectionID); err != nil {
 		return nil, err
 	}
 
-	stream, ok := mgr.id2Stream[vid]
-	if !ok {
-		return nil, fmt.Errorf("no dml stream for collection %v", collectionID)
-	}
-
-	return stream, nil
+	return mgr.lockGetStream(collectionID)
 }
 
+// removeStream remove the corresponding stream of the specified collection. Idempotent.
+// If stream already exists, remove it, otherwise do nothing.
 func (mgr *singleTypeChannelsMgr) removeStream(collectionID UniqueID) error {
-	channels, err := mgr.getChannels(collectionID)
-	if err != nil {
-		return err
-	}
-	ids, err2 := mgr.getAllVIDs(collectionID)
-	if err2 != nil {
-		return err2
-	}
-
-	mgr.deleteVChansByVIDs(ids)
-	mgr.deleteStreamByVIDs(ids)
-	for _, pc := range channels {
-		metrics.ProxyMsgStreamObjectsForPChan.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), pc).Dec()
+	mgr.mu.Lock()
+	defer mgr.mu.Unlock()
+	if info, ok := mgr.infos[collectionID]; ok {
+		decPChanMetrics(info.channelInfos.pchans)
+		delete(mgr.infos, collectionID)
 	}
 	return nil
 }
 
+// removeAllStream remove all message stream.
 func (mgr *singleTypeChannelsMgr) removeAllStream() error {
-	mgr.deleteAllChannels()
-	mgr.deleteAllStream()
-	mgr.deleteAllVChans()
-	mgr.deleteAllCollection()
-
+	mgr.mu.Lock()
+	defer mgr.mu.Unlock()
+	for _, info := range mgr.infos {
+		decPChanMetrics(info.channelInfos.pchans)
+	}
+	mgr.infos = make(map[UniqueID]streamInfos)
 	return nil
 }
 
@@ -438,15 +319,11 @@ func newSingleTypeChannelsMgr(
 	singleStreamType streamType,
 ) *singleTypeChannelsMgr {
 	return &singleTypeChannelsMgr{
-		collectionID2VIDs:         make(map[UniqueID][]int),
-		id2vchans:                 make(map[int][]vChan),
-		id2Stream:                 make(map[int]msgstream.MsgStream),
-		id2UsageHistogramOfStream: make(map[int]int),
-		vchans2pchans:             make(map[vChan]pChan),
-		getChannelsFunc:           getChannelsFunc,
-		repackFunc:                repackFunc,
-		singleStreamType:          singleStreamType,
-		msgStreamFactory:          msgStreamFactory,
+		infos:            make(map[UniqueID]streamInfos),
+		getChannelsFunc:  getChannelsFunc,
+		repackFunc:       repackFunc,
+		singleStreamType: singleStreamType,
+		msgStreamFactory: msgStreamFactory,
 	}
 }
 
@@ -486,7 +363,6 @@ func (mgr *channelsMgrImpl) removeAllDMLStream() error {
 func newChannelsMgrImpl(
 	getDmlChannelsFunc getChannelsFuncType,
 	dmlRepackFunc repackFuncType,
-	dqlRepackFunc repackFuncType,
 	msgStreamFactory msgstream.Factory,
 ) *channelsMgrImpl {
 	return &channelsMgrImpl{

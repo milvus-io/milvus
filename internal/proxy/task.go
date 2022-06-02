@@ -111,7 +111,7 @@ type task interface {
 
 type dmlTask interface {
 	task
-	getChannels() ([]vChan, error)
+	getChannels() ([]pChan, error)
 	getPChanStats() (map[pChan]pChanStatistics, error)
 }
 
@@ -192,16 +192,7 @@ func (it *insertTask) getChannels() ([]pChan, error) {
 	if err != nil {
 		return nil, err
 	}
-	var channels []pChan
-	channels, err = it.chMgr.getChannels(collID)
-	if err != nil {
-		err = it.chMgr.createDMLMsgStream(collID)
-		if err != nil {
-			return nil, err
-		}
-		channels, err = it.chMgr.getChannels(collID)
-	}
-	return channels, err
+	return it.chMgr.getChannels(collID)
 }
 
 func (it *insertTask) OnEnqueue() error {
@@ -508,18 +499,7 @@ func (it *insertTask) Execute(ctx context.Context) error {
 
 	stream, err := it.chMgr.getDMLStream(collID)
 	if err != nil {
-		err = it.chMgr.createDMLMsgStream(collID)
-		if err != nil {
-			it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-			it.result.Status.Reason = err.Error()
-			return err
-		}
-		stream, err = it.chMgr.getDMLStream(collID)
-		if err != nil {
-			it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-			it.result.Status.Reason = err.Error()
-			return err
-		}
+		return err
 	}
 	tr.Record("get used message stream")
 
@@ -530,6 +510,14 @@ func (it *insertTask) Execute(ctx context.Context) error {
 		it.result.Status.Reason = err.Error()
 		return err
 	}
+
+	log.Info("send insert request to virtual channels",
+		zap.String("collection", it.GetCollectionName()),
+		zap.String("partition", it.GetPartitionName()),
+		zap.Int64("collection_id", collID),
+		zap.Int64("partition_id", partitionID),
+		zap.Strings("virtual_channels", channelNames),
+		zap.Int64("task_id", it.ID()))
 
 	// assign segmentID for insert data and repack data by segmentID
 	msgPack, err := it.assignSegmentID(channelNames)
@@ -3141,16 +3129,7 @@ func (dt *deleteTask) getChannels() ([]pChan, error) {
 	if err != nil {
 		return nil, err
 	}
-	var channels []pChan
-	channels, err = dt.chMgr.getChannels(collID)
-	if err != nil {
-		err = dt.chMgr.createDMLMsgStream(collID)
-		if err != nil {
-			return nil, err
-		}
-		channels, err = dt.chMgr.getChannels(collID)
-	}
-	return channels, err
+	return dt.chMgr.getChannels(collID)
 }
 
 func getPrimaryKeysFromExpr(schema *schemapb.CollectionSchema, expr string) (res *schemapb.IDs, rowNum int64, err error) {
@@ -3283,18 +3262,7 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 	collID := dt.DeleteRequest.CollectionID
 	stream, err := dt.chMgr.getDMLStream(collID)
 	if err != nil {
-		err = dt.chMgr.createDMLMsgStream(collID)
-		if err != nil {
-			dt.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-			dt.result.Status.Reason = err.Error()
-			return err
-		}
-		stream, err = dt.chMgr.getDMLStream(collID)
-		if err != nil {
-			dt.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-			dt.result.Status.Reason = err.Error()
-			return err
-		}
+		return err
 	}
 
 	// hash primary keys to channels
@@ -3306,6 +3274,12 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 		return err
 	}
 	dt.HashValues = typeutil.HashPK2Channels(dt.result.IDs, channelNames)
+
+	log.Info("send delete request to virtual channels",
+		zap.String("collection", dt.GetCollectionName()),
+		zap.Int64("collection_id", collID),
+		zap.Strings("virtual_channels", channelNames),
+		zap.Int64("task_id", dt.ID()))
 
 	tr.Record("get vchannels")
 	// repack delete msg by dmChannel
