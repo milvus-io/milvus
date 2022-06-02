@@ -58,15 +58,16 @@ type nodeCtx struct {
 	downstream             []*nodeCtx
 	downstreamInputChanIdx map[string]int
 
-	closeCh chan struct{}
+	closeCh chan struct{}  // notify work to exit
+	closeWg sync.WaitGroup // block Close until work exit
 }
 
 // Start invoke Node `Start` method and start a worker goroutine
-func (nodeCtx *nodeCtx) Start(wg *sync.WaitGroup) {
+func (nodeCtx *nodeCtx) Start() {
 	nodeCtx.node.Start()
 
+	nodeCtx.closeWg.Add(1)
 	go nodeCtx.work()
-	wg.Done()
 }
 
 // work handles node work spinning
@@ -74,6 +75,7 @@ func (nodeCtx *nodeCtx) Start(wg *sync.WaitGroup) {
 // 2. invoke node.Operate
 // 3. deliver the Operate result to downstream nodes
 func (nodeCtx *nodeCtx) work() {
+	defer nodeCtx.closeWg.Done()
 	name := fmt.Sprintf("nodeCtxTtChecker-%s", nodeCtx.node.Name())
 	var checker *timerecord.GroupChecker
 	if enableTtChecker {
@@ -87,10 +89,10 @@ func (nodeCtx *nodeCtx) work() {
 	for {
 		select {
 		case <-nodeCtx.closeCh:
+			log.Debug("flow graph node closed", zap.String("nodeName", nodeCtx.node.Name()))
 			return
 		default:
 			// inputs from inputsMessages for Operate
-
 			var inputs, res []Msg
 			if !nodeCtx.node.IsInputNode() {
 				nodeCtx.collectInputMessages()
@@ -124,10 +126,15 @@ func (nodeCtx *nodeCtx) work() {
 
 // Close handles cleanup logic and notify worker to quit
 func (nodeCtx *nodeCtx) Close() {
-	// close Node
-	nodeCtx.node.Close()
-	// notify worker
-	close(nodeCtx.closeCh)
+	if nodeCtx.node.IsInputNode() {
+		nodeCtx.node.Close() // close input msgStream
+		close(nodeCtx.closeCh)
+		nodeCtx.closeWg.Wait()
+	} else {
+		close(nodeCtx.closeCh)
+		nodeCtx.closeWg.Wait()
+		nodeCtx.node.Close() // close output msgStream, and etc...
+	}
 }
 
 // deliverMsg tries to put the Msg to specified downstream channel

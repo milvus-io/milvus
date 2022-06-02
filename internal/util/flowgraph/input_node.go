@@ -64,7 +64,7 @@ func (inNode *InputNode) InStream() msgstream.MsgStream {
 func (inNode *InputNode) Operate(in []Msg) []Msg {
 	msgPack, ok := <-inNode.inStream.Chan()
 	if !ok {
-		log.Warn("Receive Msg failed from upstream node", zap.Any("input node", inNode.Name()))
+		log.Warn("MsgStream closed", zap.Any("input node", inNode.Name()))
 		return []Msg{}
 	}
 

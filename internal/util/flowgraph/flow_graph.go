@@ -79,12 +79,9 @@ func (fg *TimeTickedFlowGraph) SetEdges(nodeName string, in []string, out []stri
 // Start starts all nodes in timetick flowgragh
 func (fg *TimeTickedFlowGraph) Start() {
 	fg.startOnce.Do(func() {
-		wg := sync.WaitGroup{}
 		for _, v := range fg.nodeCtx {
-			wg.Add(1)
-			v.Start(&wg)
+			v.Start()
 		}
-		wg.Wait()
 	})
 }
 
@@ -92,8 +89,16 @@ func (fg *TimeTickedFlowGraph) Start() {
 func (fg *TimeTickedFlowGraph) Close() {
 	fg.stopOnce.Do(func() {
 		for _, v := range fg.nodeCtx {
-			// maybe need to stop in order
-			v.Close()
+			if v.node.IsInputNode() {
+				// close inputNode first
+				v.Close()
+			}
+		}
+		for _, v := range fg.nodeCtx {
+			if !v.node.IsInputNode() {
+				// close other nodes
+				v.Close()
+			}
 		}
 	})
 }
