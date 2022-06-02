@@ -188,22 +188,33 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 			grpc_auth.StreamServerInterceptor(proxy.AuthenticationInterceptor))),
 	}
 
-	if Params.TLSEnabled {
+	if Params.TLSMode == 1 {
+		creds, err := credentials.NewServerTLSFromFile(Params.ServerPemPath, Params.ServerKeyPath)
+		if err != nil {
+			log.Warn("proxy can't create creds", zap.Error(err))
+			errChan <- err
+			return
+		}
+		grpcOpts = append(grpcOpts, grpc.Creds(creds))
+	} else if Params.TLSMode == 2 {
 		cert, err := tls.LoadX509KeyPair(Params.ServerPemPath, Params.ServerKeyPath)
 		if err != nil {
 			log.Warn("proxy cant load x509 key pair", zap.Error(err))
-			panic(err)
+			errChan <- err
+			return
 		}
 
 		certPool := x509.NewCertPool()
 		rootBuf, err := ioutil.ReadFile(Params.CaPemPath)
 		if err != nil {
 			log.Warn("failed read ca pem", zap.Error(err))
-			panic(err)
+			errChan <- err
+			return
 		}
 		if !certPool.AppendCertsFromPEM(rootBuf) {
 			log.Warn("fail to append ca to cert")
-			panic("fail to append ca to cert")
+			errChan <- fmt.Errorf("fail to append ca to cert")
+			return
 		}
 
 		tlsConf := &tls.Config{
@@ -226,7 +237,8 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 
 	if err := s.grpcExternalServer.Serve(lis); err != nil {
 		log.Error("failed to serve on Proxy's listener", zap.Error(err))
-		panic(err)
+		errChan <- err
+		return
 	}
 }
 
@@ -277,7 +289,8 @@ func (s *Server) startInternalGrpc(grpcPort int, errChan chan error) {
 
 	if err := s.grpcInternalServer.Serve(lis); err != nil {
 		log.Error("failed to internal serve on Proxy's listener", zap.Error(err))
-		panic(err)
+		errChan <- err
+		return
 	}
 }
 

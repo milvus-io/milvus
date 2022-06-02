@@ -1,6 +1,6 @@
 # How to enable use TLS proxy
 
-Milvus proxy uses TLS mutual authentication.
+Milvus proxy uses TLS two-way and one-way authentication.
 
 
 
@@ -489,8 +489,14 @@ tls:
 
 common:
   security:
-    tlsEnabled: true
+    tlsMode: 2
 ```
+### One-way authentication
+Server need server.pem and server.key. Client-side need server.pem.
+### Two-way authentication
+Server-side need server.pem, server.key and ca.pem. Client-side need client.pem, client.key, ca.pem.
+
+
 
 
 ## Connect to the Milvus server with TLS

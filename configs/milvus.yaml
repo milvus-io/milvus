@@ -297,6 +297,9 @@ common:
   # please adjust in embedded Milvus: local
   storageType: minio
 
+
   security:
     authorizationEnabled: false
-    tlsEnabled: false
+    # tls mode values [0, 1, 2]
+    # 0 is close, 1 is one-way authentication, 2 is two-way authentication.
+    tlsMode: 0
