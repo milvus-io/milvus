@@ -4,6 +4,8 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/util/paramtable"
+
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
@@ -18,16 +20,36 @@ type kafkaClient struct {
 	basicConfig kafka.ConfigMap
 }
 
-func NewKafkaClientInstance(address string) *kafkaClient {
-	config := kafka.ConfigMap{
-		"bootstrap.servers": address,
-		"socket.timeout.ms": 300000,
-		"socket.max.fails":  3,
-		//"receive.message.max.bytes": 10485760,
+func getBasicConfig(address string) kafka.ConfigMap {
+	return kafka.ConfigMap{
+		"bootstrap.servers":   address,
+		"socket.timeout.ms":   300000,
+		"socket.max.fails":    3,
 		"api.version.request": true,
 	}
+}
 
+func NewKafkaClientInstance(address string) *kafkaClient {
+	config := getBasicConfig(address)
 	return &kafkaClient{basicConfig: config}
+}
+
+func NewKafkaClientInstanceWithConfig(config *paramtable.KafkaConfig) *kafkaClient {
+	kafkaConfig := getBasicConfig(config.Address)
+
+	if (config.SaslUsername == "" && config.SaslPassword != "") ||
+		(config.SaslUsername != "" && config.SaslPassword == "") {
+		panic("enable security mode need config username and password at the same time!")
+	}
+
+	if config.SaslUsername != "" && config.SaslPassword != "" {
+		kafkaConfig.SetKey("sasl.mechanisms", "PLAIN")
+		kafkaConfig.SetKey("security.protocol", "SASL_SSL")
+		kafkaConfig.SetKey("sasl.username", config.SaslUsername)
+		kafkaConfig.SetKey("sasl.password", config.SaslPassword)
+	}
+
+	return &kafkaClient{basicConfig: kafkaConfig}
 }
 
 func cloneKafkaConfig(config kafka.ConfigMap) *kafka.ConfigMap {

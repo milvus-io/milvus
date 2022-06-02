@@ -234,13 +234,17 @@ func (p *PulsarConfig) initMaxMessageSize() {
 
 // --- kafka ---
 type KafkaConfig struct {
-	Base    *BaseTable
-	Address string
+	Base         *BaseTable
+	Address      string
+	SaslUsername string
+	SaslPassword string
 }
 
 func (k *KafkaConfig) init(base *BaseTable) {
 	k.Base = base
 	k.initAddress()
+	k.initSaslUsername()
+	k.initSaslPassword()
 }
 
 func (k *KafkaConfig) initAddress() {
@@ -249,6 +253,14 @@ func (k *KafkaConfig) initAddress() {
 		panic(err)
 	}
 	k.Address = addr
+}
+
+func (k *KafkaConfig) initSaslUsername() {
+	k.SaslUsername = k.Base.LoadWithDefault("kafka.saslUsername", "")
+}
+
+func (k *KafkaConfig) initSaslPassword() {
+	k.SaslPassword = k.Base.LoadWithDefault("kafka.saslPassword", "")
 }
 
 ///////////////////////////////////////////////////////////////////////////////
