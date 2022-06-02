@@ -212,6 +212,10 @@ func (node *QueryNode) LoadSegments(ctx context.Context, in *queryPb.LoadSegment
 		node: node,
 	}
 
+	segmentIDs := make([]UniqueID, 0, len(in.GetInfos()))
+	for _, info := range in.Infos {
+		segmentIDs = append(segmentIDs, info.SegmentID)
+	}
 	err := node.scheduler.queue.Enqueue(dct)
 	if err != nil {
 		status := &commonpb.Status{
@@ -221,10 +225,7 @@ func (node *QueryNode) LoadSegments(ctx context.Context, in *queryPb.LoadSegment
 		log.Warn(err.Error())
 		return status, nil
 	}
-	segmentIDs := make([]UniqueID, 0)
-	for _, info := range in.Infos {
-		segmentIDs = append(segmentIDs, info.SegmentID)
-	}
+
 	log.Info("loadSegmentsTask Enqueue done", zap.Int64("collectionID", in.CollectionID), zap.Int64s("segmentIDs", segmentIDs), zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()))
 
 	waitFunc := func() (*commonpb.Status, error) {
