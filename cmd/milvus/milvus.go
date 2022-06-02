@@ -284,6 +284,7 @@ func RunMilvus(args []string) {
 	case typeutil.IndexNodeRole:
 		role.EnableIndexNode = true
 	case typeutil.StandaloneRole, typeutil.EmbeddedRole:
+		role.HasMultipleRoles = true
 		role.EnableRootCoord = true
 		role.EnableProxy = true
 		role.EnableQueryCoord = true
@@ -294,6 +295,7 @@ func RunMilvus(args []string) {
 		role.EnableIndexNode = true
 		local = true
 	case roleMixture:
+		role.HasMultipleRoles = true
 		role.EnableRootCoord = enableRootCoord
 		role.EnableQueryCoord = enableQueryCoord
 		role.EnableDataCoord = enableDataCoord
