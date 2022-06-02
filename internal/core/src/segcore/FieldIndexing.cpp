@@ -83,13 +83,15 @@ IndexingRecord::UpdateResourceAck(int64_t chunk_ack, const InsertRecord& record)
         return;
     }
 
-    std::unique_lock lck(mutex_);
-    int64_t old_ack = resource_ack_;
-    if (old_ack >= chunk_ack) {
-        return;
+    int64_t old_ack;
+    {
+        std::lock_guard lck(mutex_);
+        old_ack = resource_ack_;
+        if (old_ack >= chunk_ack) {
+            return;
+        }
+        resource_ack_ = chunk_ack;
     }
-    resource_ack_ = chunk_ack;
-    lck.unlock();
 
     //    std::thread([this, old_ack, chunk_ack, &record] {
     for (auto& [field_offset, entry] : field_indexings_) {

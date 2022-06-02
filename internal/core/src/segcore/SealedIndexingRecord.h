@@ -37,7 +37,7 @@ struct SealedIndexingRecord {
         auto ptr = std::make_unique<SealedIndexingEntry>();
         ptr->indexing_ = indexing;
         ptr->metric_type_ = metric_type;
-        std::unique_lock lck(mutex_);
+        std::lock_guard lck(mutex_);
         field_indexings_[field_id] = std::move(ptr);
     }
 
@@ -50,7 +50,7 @@ struct SealedIndexingRecord {
 
     void
     drop_field_indexing(FieldId field_id) {
-        std::unique_lock lck(mutex_);
+        std::lock_guard lck(mutex_);
         field_indexings_.erase(field_id);
     }
 

@@ -88,7 +88,7 @@ SegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
     auto row_count = index->Count();
     AssertInfo(row_count > 0, "Index count is 0");
 
-    std::unique_lock lck(mutex_);
+    std::lock_guard lck(mutex_);
     // Don't allow vector raw data and index exist at the same time
     AssertInfo(!get_bit(field_data_ready_bitset_, field_id),
                "vector index can't be loaded when raw data exists at field " + std::to_string(field_id.get()));
@@ -104,7 +104,6 @@ SegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
 
     set_bit(index_ready_bitset_, field_id, true);
     update_row_count(row_count);
-    lck.unlock();
 }
 
 void
@@ -117,7 +116,7 @@ SegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
     auto row_count = index->Count();
     AssertInfo(row_count > 0, "Index count is 0");
 
-    std::unique_lock lck(mutex_);
+    std::lock_guard lck(mutex_);
     // Don't allow scalar raw data and index exist at the same time
     AssertInfo(!get_bit(field_data_ready_bitset_, field_id),
                "scalar index can't be loaded when raw data exists at field " + std::to_string(field_id.get()));
@@ -157,7 +156,6 @@ SegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
 
     set_bit(index_ready_bitset_, field_id, true);
     update_row_count(row_count);
-    lck.unlock();
 }
 
 void
@@ -181,7 +179,7 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
             index.build_with(timestamps, size);
 
             // use special index
-            std::unique_lock lck(mutex_);
+            std::lock_guard lck(mutex_);
             AssertInfo(insert_record_.timestamps_.empty(), "already exists");
             insert_record_.timestamps_.fill_chunk_data(timestamps, size);
             insert_record_.timestamp_index_ = std::move(index);
@@ -190,7 +188,7 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
             AssertInfo(system_field_type == SystemFieldType::RowId, "System field type of id column is not RowId");
             auto row_ids = reinterpret_cast<const idx_t*>(info.field_data->scalars().long_data().data().data());
             // write data under lock
-            std::unique_lock lck(mutex_);
+            std::lock_guard lck(mutex_);
             AssertInfo(insert_record_.row_ids_.empty(), "already exists");
             insert_record_.row_ids_.fill_chunk_data(row_ids, size);
             AssertInfo(insert_record_.row_ids_.num_chunk() == 1, "num chunk not equal to 1 for sealed segment");
@@ -204,7 +202,7 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
                    "field type of load data is inconsistent with the schema");
 
         // write data under lock
-        std::unique_lock lck(mutex_);
+        std::lock_guard lck(mutex_);
 
         // Don't allow raw data and index exist at the same time
         AssertInfo(!get_bit(index_ready_bitset_, field_id), "field data can't be loaded when indexing exists");
@@ -396,20 +394,18 @@ SegmentSealedImpl::DropFieldData(const FieldId field_id) {
     if (SystemProperty::Instance().IsSystem(field_id)) {
         auto system_field_type = SystemProperty::Instance().GetSystemFieldType(field_id);
 
-        std::unique_lock lck(mutex_);
+        std::lock_guard lck(mutex_);
         --system_ready_count_;
         if (system_field_type == SystemFieldType::RowId) {
             insert_record_.row_ids_.clear();
         } else if (system_field_type == SystemFieldType::Timestamp) {
             insert_record_.timestamps_.clear();
         }
-        lck.unlock();
     } else {
         auto& field_meta = schema_->operator[](field_id);
-        std::unique_lock lck(mutex_);
+        std::lock_guard lck(mutex_);
         set_bit(field_data_ready_bitset_, field_id, false);
         insert_record_.drop_field_data(field_id);
-        lck.unlock();
     }
 }
 
@@ -421,7 +417,7 @@ SegmentSealedImpl::DropIndex(const FieldId field_id) {
     AssertInfo(field_meta.is_vector(),
                "Field meta of offset:" + std::to_string(field_id.get()) + " is not vector type");
 
-    std::unique_lock lck(mutex_);
+    std::lock_guard lck(mutex_);
     vector_indexings_.drop_field_indexing(field_id);
     set_bit(index_ready_bitset_, field_id, false);
 }
@@ -750,7 +746,7 @@ SegmentSealedImpl::debug() const {
 
 void
 SegmentSealedImpl::LoadSegmentMeta(const proto::segcore::LoadSegmentMeta& segment_meta) {
-    std::unique_lock lck(mutex_);
+    std::lock_guard lck(mutex_);
     std::vector<int64_t> slice_lengths;
     for (auto& info : segment_meta.metas()) {
         slice_lengths.push_back(info.row_count());
