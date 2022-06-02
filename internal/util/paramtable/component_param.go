@@ -704,6 +704,12 @@ type queryNodeConfig struct {
 	MaxUnsolvedQueueSize int32
 	MaxGroupNQ           int64
 	TopKMergeRatio       float64
+
+	// gc tune related
+	GCHelperEnabled   bool
+	TargetMemoryRatio float64
+	MinimumGOGCConfig int
+	MaximumGOGCConfig int
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -728,6 +734,11 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	p.initMaxUnsolvedQueueSize()
 	p.initMaxGroupNQ()
 	p.initTopKMergeRatio()
+
+	// init gc tuner related
+	p.initTargetMemoryRatio()
+	p.initMaximumGOGC()
+	p.initMinimumGOGC()
 }
 
 // InitAlias initializes an alias for the QueryNode role.
@@ -846,6 +857,22 @@ func (p *queryNodeConfig) initMaxGroupNQ() {
 
 func (p *queryNodeConfig) initTopKMergeRatio() {
 	p.TopKMergeRatio = p.Base.ParseFloatWithDefault("queryNode.grouping.topKMergeRatio", 10.0)
+}
+
+func (p *queryNodeConfig) initGCTunerEnbaled() {
+	p.GCHelperEnabled = p.Base.ParseBool("queryNode.gchelper.enabled", false)
+}
+
+func (p *queryNodeConfig) initTargetMemoryRatio() {
+	p.TargetMemoryRatio = p.Base.ParseFloatWithDefault("queryNode.gchelper.memoryTargetRatio", 0.8)
+}
+
+func (p *queryNodeConfig) initMinimumGOGC() {
+	p.MinimumGOGCConfig = p.Base.ParseIntWithDefault("queryNode.gchelper.minimumGoGC", 30)
+}
+
+func (p *queryNodeConfig) initMaximumGOGC() {
+	p.MaximumGOGCConfig = p.Base.ParseIntWithDefault("queryNode.gchelper.maximumGoGC", 300)
 }
 
 func (p *queryNodeConfig) SetNodeID(id UniqueID) {

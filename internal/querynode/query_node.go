@@ -38,6 +38,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime/debug"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -61,6 +62,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/milvus-io/milvus/internal/util/memoryutil"
 )
 
 // make sure QueryNode implements types.QueryNode
@@ -246,6 +248,16 @@ func (node *QueryNode) Init() error {
 
 		node.InitSegcore()
 
+		// init gc helper
+		if Params.QueryNodeCfg.GCHelperEnabled {
+			action := func(GOGC int) {
+				debug.SetGCPercent(GOGC)
+			}
+			memoryutil.NewHelper(Params.QueryNodeCfg.TargetMemoryRatio, Params.QueryNodeCfg.MinimumGOGCConfig, Params.QueryNodeCfg.MaximumGOGCConfig, action)
+		} else {
+			action := func(int) {}
+			memoryutil.NewHelper(Params.QueryNodeCfg.TargetMemoryRatio, Params.QueryNodeCfg.MinimumGOGCConfig, Params.QueryNodeCfg.MaximumGOGCConfig, action)
+		}
 		log.Info("query node init successfully",
 			zap.Any("queryNodeID", Params.QueryNodeCfg.GetNodeID()),
 			zap.Any("IP", Params.QueryNodeCfg.QueryNodeIP),

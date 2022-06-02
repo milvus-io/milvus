@@ -31,8 +31,7 @@ var (
 func GetCPUCoreCount(logical bool) int {
 	c, err := cpu.Counts(logical)
 	if err != nil {
-		log.Warn("failed to get cpu counts",
-			zap.Error(err))
+		log.Warn("failed to get cpu counts", zap.Error(err))
 		return 0
 	}
 
@@ -69,8 +68,7 @@ func GetMemoryCount() uint64 {
 	// get host memory by `gopsutil`
 	stats, err := mem.VirtualMemory()
 	if err != nil {
-		log.Warn("failed to get memory count",
-			zap.Error(err))
+		log.Warn("failed to get memory count", zap.Error(err))
 		return 0
 	}
 	// not in container, return host memory
