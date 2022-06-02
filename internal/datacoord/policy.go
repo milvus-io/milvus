@@ -51,6 +51,7 @@ func BufferChannelAssignPolicy(store ROChannelStore, nodeID int64) ChannelOpSet 
 }
 
 // AvgAssignRegisterPolicy assigns channels with average to new registered node
+// Register will not directly delete the node-channel pair, channel manager handles the release itself
 func AvgAssignRegisterPolicy(store ROChannelStore, nodeID int64) ChannelOpSet {
 	opSet := BufferChannelAssignPolicy(store, nodeID)
 	if len(opSet) != 0 {
@@ -74,24 +75,19 @@ func AvgAssignRegisterPolicy(store ROChannelStore, nodeID int64) ChannelOpSet {
 		return len(infos[i].Channels) > len(infos[j].Channels)
 	})
 
-	deletes := make(map[int64][]*channel)
-	adds := make(map[int64][]*channel)
+	releases := make(map[int64][]*channel)
 	for i := 0; i < avg; {
 		t := infos[i%len(infos)]
 		idx := i / len(infos)
 		if idx >= len(t.Channels) {
 			continue
 		}
-		deletes[t.NodeID] = append(deletes[t.NodeID], t.Channels[idx])
-		adds[nodeID] = append(adds[nodeID], t.Channels[idx])
+		releases[t.NodeID] = append(releases[t.NodeID], t.Channels[idx])
 		i++
 	}
 
 	opSet = ChannelOpSet{}
-	for k, v := range deletes {
-		opSet.Delete(k, v)
-	}
-	for k, v := range adds {
+	for k, v := range releases {
 		opSet.Add(k, v)
 	}
 	return opSet
@@ -114,8 +110,7 @@ func ConsistentHashRegisterPolicy(hashRing *consistent.Consistent) RegisterPolic
 		elems := formatNodeIDs(store.GetNodes())
 		hashRing.Set(elems)
 
-		removes := make(map[int64][]*channel)
-		adds := make(map[int64][]*channel)
+		releases := make(map[int64][]*channel)
 
 		// If there are buffer channels, then nodeID is the first node.
 		opSet := BufferChannelAssignPolicy(store, nodeID)
@@ -141,16 +136,12 @@ func ConsistentHashRegisterPolicy(hashRing *consistent.Consistent) RegisterPolic
 					return nil
 				}
 				if did != c.NodeID {
-					removes[c.NodeID] = append(removes[c.NodeID], ch)
-					adds[did] = append(adds[did], ch)
+					releases[c.NodeID] = append(releases[c.NodeID], ch)
 				}
 			}
 		}
 
-		for id, channels := range removes {
-			opSet.Delete(id, channels)
-		}
-		for id, channels := range adds {
+		for id, channels := range releases {
 			opSet.Add(id, channels)
 		}
 		return opSet
