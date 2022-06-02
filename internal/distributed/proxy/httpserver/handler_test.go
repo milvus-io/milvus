@@ -199,6 +199,10 @@ func (mockProxyComponent) GetQuerySegmentInfo(ctx context.Context, request *milv
 	return &milvuspb.GetQuerySegmentInfoResponse{Status: testStatus}, nil
 }
 
+func (mockProxyComponent) GetReplicas(ctx context.Context, request *milvuspb.GetReplicasRequest) (*milvuspb.GetReplicasResponse, error) {
+	return &milvuspb.GetReplicasResponse{Status: testStatus}, nil
+}
+
 func (mockProxyComponent) GetMetrics(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return &milvuspb.GetMetricsResponse{Status: testStatus}, nil
 }
@@ -227,6 +231,26 @@ func (mockProxyComponent) GetImportState(ctx context.Context, request *milvuspb.
 	return &milvuspb.GetImportStateResponse{Status: testStatus}, nil
 }
 
+func (mockProxyComponent) ListImportTasks(ctx context.Context, request *milvuspb.ListImportTasksRequest) (*milvuspb.ListImportTasksResponse, error) {
+	return &milvuspb.ListImportTasksResponse{Status: testStatus}, nil
+}
+
+func (mockProxyComponent) CreateCredential(ctx context.Context, request *milvuspb.CreateCredentialRequest) (*commonpb.Status, error) {
+	return testStatus, nil
+}
+
+func (mockProxyComponent) UpdateCredential(ctx context.Context, request *milvuspb.UpdateCredentialRequest) (*commonpb.Status, error) {
+	return testStatus, nil
+}
+
+func (mockProxyComponent) DeleteCredential(ctx context.Context, request *milvuspb.DeleteCredentialRequest) (*commonpb.Status, error) {
+	return testStatus, nil
+}
+
+func (mockProxyComponent) ListCredUsers(ctx context.Context, request *milvuspb.ListCredUsersRequest) (*milvuspb.ListCredUsersResponse, error) {
+	return &milvuspb.ListCredUsersResponse{Status: testStatus}, nil
+}
+
 func TestHandlers(t *testing.T) {
 	mockProxy := &mockProxyComponent{}
 	h := NewHandlers(mockProxy)
@@ -251,7 +275,8 @@ func TestHandlers(t *testing.T) {
 		assert.Equal(t, w.Body.Bytes(), []byte("status: ok\n"))
 	})
 	t.Run("handlePostDummy parsejson failed 400", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/dummy", nil)
+		bodyBytes := []byte("---")
+		req := httptest.NewRequest(http.MethodPost, "/dummy", bytes.NewReader(bodyBytes))
 		req.Header = http.Header{
 			"Content-Type": []string{binding.MIMEJSON},
 		}
@@ -260,7 +285,8 @@ func TestHandlers(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
 	t.Run("handlePostDummy parseyaml failed 400", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/dummy", nil)
+		bodyBytes := []byte("{")
+		req := httptest.NewRequest(http.MethodPost, "/dummy", bytes.NewReader(bodyBytes))
 		req.Header = http.Header{
 			"Content-Type": []string{binding.MIMEYAML},
 		}
@@ -269,7 +295,7 @@ func TestHandlers(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
 	t.Run("handlePostDummy default json ok", func(t *testing.T) {
-		bodyBytes := []byte("{}")
+		bodyBytes := []byte("")
 		req := httptest.NewRequest(http.MethodPost, "/dummy", bytes.NewReader(bodyBytes))
 		req.Header = http.Header{
 			"Content-Type": []string{binding.MIMEJSON},
@@ -279,7 +305,7 @@ func TestHandlers(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 	})
 	t.Run("handlePostDummy yaml ok", func(t *testing.T) {
-		bodyBytes := []byte("---")
+		bodyBytes := []byte("")
 		req := httptest.NewRequest(http.MethodPost, "/dummy", bytes.NewReader(bodyBytes))
 		req.Header = http.Header{
 			"Content-Type": []string{binding.MIMEYAML},
@@ -429,6 +455,10 @@ func TestHandlers(t *testing.T) {
 			http.StatusOK, &milvuspb.GetQuerySegmentInfoResponse{Status: testStatus},
 		},
 		{
+			http.MethodGet, "/replicas", emptyBody,
+			http.StatusOK, &milvuspb.GetReplicasResponse{Status: testStatus},
+		},
+		{
 			http.MethodGet, "/metrics", emptyBody,
 			http.StatusOK, &milvuspb.GetMetricsResponse{Status: testStatus},
 		},
@@ -455,6 +485,26 @@ func TestHandlers(t *testing.T) {
 		{
 			http.MethodGet, "/import/state", emptyBody,
 			http.StatusOK, &milvuspb.GetImportStateResponse{Status: testStatus},
+		},
+		{
+			http.MethodGet, "/import/tasks", emptyBody,
+			http.StatusOK, &milvuspb.ListImportTasksResponse{Status: testStatus},
+		},
+		{
+			http.MethodPost, "/credential", emptyBody,
+			http.StatusOK, testStatus,
+		},
+		{
+			http.MethodPatch, "/credential", emptyBody,
+			http.StatusOK, testStatus,
+		},
+		{
+			http.MethodDelete, "/credential", emptyBody,
+			http.StatusOK, testStatus,
+		},
+		{
+			http.MethodGet, "/credential/users", emptyBody,
+			http.StatusOK, &milvuspb.ListCredUsersResponse{Status: testStatus},
 		},
 	}
 	for _, tt := range testCases {

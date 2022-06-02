@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"errors"
+	"io"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -55,7 +56,11 @@ func wrapHandler(handle handlerFunc) gin.HandlerFunc {
 // gin.ShouldBind() default as `form`, but we want JSON
 func shouldBind(c *gin.Context, obj interface{}) error {
 	b := getBinding(c.ContentType())
-	return c.ShouldBindWith(obj, b)
+	err := c.ShouldBindWith(obj, b)
+	if errors.Is(err, io.EOF) {
+		return nil
+	}
+	return err
 }
 
 func getBinding(contentType string) binding.Binding {
