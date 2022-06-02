@@ -37,7 +37,6 @@ import (
 )
 
 func genLoadCollectionTask(ctx context.Context, queryCoord *QueryCoord) *loadCollectionTask {
-	queryCoord.meta.setDeltaChannel(defaultCollectionID, nil)
 	req := &querypb.LoadCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_LoadCollection,
@@ -58,7 +57,6 @@ func genLoadCollectionTask(ctx context.Context, queryCoord *QueryCoord) *loadCol
 }
 
 func genLoadPartitionTask(ctx context.Context, queryCoord *QueryCoord) *loadPartitionTask {
-	queryCoord.meta.setDeltaChannel(defaultCollectionID, nil)
 	req := &querypb.LoadPartitionsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_LoadPartitions,
@@ -195,7 +193,6 @@ func genWatchDmChannelTask(ctx context.Context, queryCoord *QueryCoord, nodeID i
 	return watchDmChannelTask
 }
 func genLoadSegmentTask(ctx context.Context, queryCoord *QueryCoord, nodeID int64) *loadSegmentTask {
-	queryCoord.meta.setDeltaChannel(defaultCollectionID, nil)
 	schema := genDefaultCollectionSchema(false)
 	segmentInfo := &querypb.SegmentLoadInfo{
 		SegmentID:    defaultSegmentID,
@@ -666,7 +663,6 @@ func Test_RescheduleSegment(t *testing.T) {
 
 	node1.loadSegment = returnFailedResult
 	loadSegmentTask := genLoadSegmentTask(ctx, queryCoord, node1.queryNodeID)
-	loadSegmentTask.meta.setDeltaChannel(defaultCollectionID, []*datapb.VchannelInfo{})
 	loadCollectionTask := loadSegmentTask.parentTask
 	queryCoord.scheduler.triggerTaskQueue.addTask(loadCollectionTask)
 
@@ -1445,8 +1441,7 @@ func Test_LoadSegment(t *testing.T) {
 	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
 
 	loadSegmentTask := genLoadSegmentTask(ctx, queryCoord, node1.queryNodeID)
-	err = loadSegmentTask.meta.setDeltaChannel(111, []*datapb.VchannelInfo{})
-	assert.Nil(t, err)
+
 	loadCollectionTask := loadSegmentTask.parentTask
 	queryCoord.scheduler.triggerTaskQueue.addTask(loadCollectionTask)
 

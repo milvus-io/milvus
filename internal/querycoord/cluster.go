@@ -33,9 +33,11 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -210,6 +212,48 @@ func (c *queryNodeCluster) LoadSegments(ctx context.Context, nodeID int64, in *q
 	c.RUnlock()
 
 	if targetNode != nil {
+		collectionID := in.CollectionID
+		// if node has watched the collection's deltaChannel
+		// then the node should recover part delete log from dmChanel
+		if c.HasWatchedDeltaChannel(ctx, nodeID, collectionID) {
+			// get all deltaChannelInfo of the collection from meta
+			deltaChannelInfos, err := c.clusterMeta.getDeltaChannelsByCollectionID(collectionID)
+			if err != nil {
+				// this case should not happen
+				// deltaChannelInfos should have been set to meta before executing child tasks
+				log.Error("loadSegments: failed to get deltaChannelInfo from meta", zap.Error(err))
+				return err
+			}
+			deltaChannel2Info := make(map[string]*datapb.VchannelInfo, len(deltaChannelInfos))
+			for _, info := range deltaChannelInfos {
+				deltaChannel2Info[info.ChannelName] = info
+			}
+
+			// check delta channel which should be reloaded
+			reloadDeltaChannels := make(map[string]struct{})
+			for _, segment := range in.Infos {
+				// convert vChannel to deltaChannel
+				deltaChannelName, err := funcutil.ConvertChannelName(segment.InsertChannel, Params.CommonCfg.RootCoordDml, Params.CommonCfg.RootCoordDelta)
+				if err != nil {
+					return err
+				}
+
+				reloadDeltaChannels[deltaChannelName] = struct{}{}
+			}
+
+			in.DeltaPositions = make([]*internalpb.MsgPosition, 0)
+			for deltaChannelName := range reloadDeltaChannels {
+				if info, ok := deltaChannel2Info[deltaChannelName]; ok {
+					in.DeltaPositions = append(in.DeltaPositions, info.SeekPosition)
+				} else {
+					// this case should not happen
+					err = fmt.Errorf("loadSegments: can't find deltaChannelInfo, channel name = %s", deltaChannelName)
+					log.Error(err.Error())
+					return err
+				}
+			}
+		}
+
 		err := targetNode.loadSegments(ctx, in)
 		if err != nil {
 			log.Warn("loadSegments: queryNode load segments error", zap.Int64("nodeID", nodeID), zap.String("error info", err.Error()))

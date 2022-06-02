@@ -218,6 +218,7 @@ message LoadSegmentsRequest {
   int64 collectionID = 6;
   LoadMetaInfo load_meta = 7;
   int64 replicaID = 8;
+  repeated internal.MsgPosition delta_positions = 9;
 }
 
 message ReleaseSegmentsRequest {

@@ -519,6 +519,16 @@ func Test_generateDerivedInternalTasks(t *testing.T) {
 	node1, err := startQueryNodeServer(baseCtx)
 	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
+	vChannelInfos, _, err := queryCoord.broker.getRecoveryInfo(baseCtx, defaultCollectionID, defaultPartitionID)
+	assert.NoError(t, err)
+	deltaChannelInfos := make([]*datapb.VchannelInfo, len(vChannelInfos))
+	for i, info := range vChannelInfos {
+		deltaInfo, err := generateWatchDeltaChannelInfo(info)
+		assert.NoError(t, err)
+		deltaChannelInfos[i] = deltaInfo
+	}
+
+	queryCoord.meta.setDeltaChannel(defaultCollectionID, deltaChannelInfos)
 
 	loadCollectionTask := genLoadCollectionTask(baseCtx, queryCoord)
 	loadSegmentTask := genLoadSegmentTask(baseCtx, queryCoord, node1.queryNodeID)

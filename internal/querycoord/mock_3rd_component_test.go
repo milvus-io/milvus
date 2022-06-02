@@ -36,7 +36,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -374,9 +373,8 @@ func (data *dataCoordMock) GetRecoveryInfo(ctx context.Context, req *datapb.GetR
 	if _, ok := data.col2DmChannels[collectionID]; !ok {
 		channelInfos := make([]*datapb.VchannelInfo, 0)
 		data.collections = append(data.collections, collectionID)
-		collectionName := funcutil.RandomString(8)
 		for i := int32(0); i < common.DefaultShardsNum; i++ {
-			vChannel := fmt.Sprintf("Dml_%s_%d_%d_v", collectionName, collectionID, i)
+			vChannel := fmt.Sprintf("%s_%d_%dv%d", Params.CommonCfg.RootCoordDml, i, collectionID, i)
 			channelInfo := &datapb.VchannelInfo{
 				CollectionID: collectionID,
 				ChannelName:  vChannel,

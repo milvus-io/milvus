@@ -19,7 +19,6 @@ package msgstream
 import (
 	"errors"
 	"fmt"
-	"strconv"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 )
@@ -71,9 +70,6 @@ func DeleteRepackFunc(tsMsgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, e
 
 		if keysLen != timestampLen || int64(keysLen) != deleteRequest.NumRows {
 			return nil, errors.New("the length of hashValue, timestamps, primaryKeys are not equal")
-		}
-		if keysLen != 1 {
-			return nil, errors.New("len(msg.hashValue) must equal 1, but it is: " + strconv.Itoa(keysLen))
 		}
 
 		key := keys[0]

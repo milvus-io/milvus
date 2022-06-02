@@ -27,8 +27,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/util/dependency"
-	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
+	"github.com/stretchr/testify/assert"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
@@ -36,13 +35,15 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
+	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/stretchr/testify/assert"
 )
 
 const (
@@ -426,6 +427,17 @@ func TestGrpcRequest(t *testing.T) {
 	}
 	meta, err := newMeta(baseCtx, kv, factory, idAllocator)
 	assert.Nil(t, err)
+	deltaChannelInfo := []*datapb.VchannelInfo{
+		{
+			CollectionID: defaultCollectionID,
+			ChannelName:  "by-dev-rootcoord-delta_1_2021v1",
+			SeekPosition: &internalpb.MsgPosition{
+				ChannelName: "by-dev-rootcoord-dml_1",
+			},
+		},
+	}
+	err = meta.setDeltaChannel(defaultCollectionID, deltaChannelInfo)
+	assert.Nil(t, err)
 
 	handler, err := newChannelUnsubscribeHandler(baseCtx, kv, factory)
 	assert.Nil(t, err)
@@ -471,9 +483,10 @@ func TestGrpcRequest(t *testing.T) {
 
 	t.Run("Test LoadSegments", func(t *testing.T) {
 		segmentLoadInfo := &querypb.SegmentLoadInfo{
-			SegmentID:    defaultSegmentID,
-			PartitionID:  defaultPartitionID,
-			CollectionID: defaultCollectionID,
+			SegmentID:     defaultSegmentID,
+			PartitionID:   defaultPartitionID,
+			CollectionID:  defaultCollectionID,
+			InsertChannel: "by-dev-rootcoord-dml_1_2021v1",
 		}
 		loadSegmentReq := &querypb.LoadSegmentsRequest{
 			DstNodeID:    nodeID,
@@ -482,6 +495,35 @@ func TestGrpcRequest(t *testing.T) {
 			CollectionID: defaultCollectionID,
 		}
 		err := cluster.LoadSegments(baseCtx, nodeID, loadSegmentReq)
+		assert.Equal(t, 0, len(loadSegmentReq.DeltaPositions))
+		assert.Nil(t, err)
+	})
+
+	t.Run("Test WatchDeletaChannel", func(t *testing.T) {
+		watchDeltaChannelReq := &querypb.WatchDeltaChannelsRequest{
+			CollectionID: defaultCollectionID,
+			Infos:        deltaChannelInfo,
+		}
+		err := cluster.WatchDeltaChannels(baseCtx, nodeID, watchDeltaChannelReq)
+		assert.Nil(t, err)
+		assert.Equal(t, true, cluster.HasWatchedDeltaChannel(baseCtx, nodeID, defaultCollectionID))
+	})
+
+	t.Run("Test LoadSegmentsAfterWatchDeltaChannel", func(t *testing.T) {
+		segmentLoadInfo := &querypb.SegmentLoadInfo{
+			SegmentID:     defaultSegmentID,
+			PartitionID:   defaultPartitionID,
+			CollectionID:  defaultCollectionID,
+			InsertChannel: "by-dev-rootcoord-dml_1_2021v1",
+		}
+		loadSegmentReq := &querypb.LoadSegmentsRequest{
+			DstNodeID:    nodeID,
+			Infos:        []*querypb.SegmentLoadInfo{segmentLoadInfo},
+			Schema:       genDefaultCollectionSchema(false),
+			CollectionID: defaultCollectionID,
+		}
+		err := cluster.LoadSegments(baseCtx, nodeID, loadSegmentReq)
+		assert.Equal(t, 1, len(loadSegmentReq.DeltaPositions))
 		assert.Nil(t, err)
 	})
 
