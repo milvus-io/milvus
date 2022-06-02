@@ -54,8 +54,6 @@ func refreshParams() {
 	Params.CommonCfg.QueryNodeStats = Params.CommonCfg.QueryNodeStats + suffix
 	Params.CommonCfg.QueryCoordTimeTick = Params.CommonCfg.QueryCoordTimeTick + suffix
 	Params.EtcdCfg.MetaRootPath = Params.EtcdCfg.MetaRootPath + suffix
-	Params.CommonCfg.RootCoordDml = "Dml"
-	Params.CommonCfg.RootCoordDelta = "delta"
 	GlobalSegmentInfos = make(map[UniqueID]*querypb.SegmentInfo)
 }
 

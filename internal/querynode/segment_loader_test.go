@@ -41,7 +41,7 @@ func TestSegmentLoader_loadSegment(t *testing.T) {
 	defer cancel()
 
 	schema := genTestCollectionSchema()
-	fieldBinlog, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
+	fieldBinlog, statsLog, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
 	assert.NoError(t, err)
 
 	t.Run("test load segment", func(t *testing.T) {
@@ -65,6 +65,7 @@ func TestSegmentLoader_loadSegment(t *testing.T) {
 					PartitionID:  defaultPartitionID,
 					CollectionID: defaultCollectionID,
 					BinlogPaths:  fieldBinlog,
+					Statslogs:    statsLog,
 				},
 			},
 		}
@@ -178,7 +179,7 @@ func TestSegmentLoader_loadSegmentFieldsData(t *testing.T) {
 			segmentTypeSealed)
 		assert.Nil(t, err)
 
-		binlog, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
+		binlog, _, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
 		assert.NoError(t, err)
 
 		err = loader.loadFiledBinlogData(segment, binlog)
@@ -383,7 +384,7 @@ func TestSegmentLoader_testLoadGrowingAndSealed(t *testing.T) {
 	defer cancel()
 
 	schema := genTestCollectionSchema()
-	fieldBinlog, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
+	fieldBinlog, statsLog, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
 	assert.NoError(t, err)
 
 	deltaLogs, err := saveDeltaLog(defaultCollectionID, defaultPartitionID, defaultSegmentID)
@@ -410,6 +411,7 @@ func TestSegmentLoader_testLoadGrowingAndSealed(t *testing.T) {
 					PartitionID:  defaultPartitionID,
 					CollectionID: defaultCollectionID,
 					BinlogPaths:  fieldBinlog,
+					Statslogs:    statsLog,
 				},
 			},
 		}
@@ -517,7 +519,7 @@ func TestSegmentLoader_testLoadSealedSegmentWithIndex(t *testing.T) {
 	schema := genTestCollectionSchema()
 
 	// generate insert binlog
-	fieldBinlog, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
+	fieldBinlog, statsLog, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
 	assert.NoError(t, err)
 
 	segmentID := UniqueID(100)
@@ -555,6 +557,7 @@ func TestSegmentLoader_testLoadSealedSegmentWithIndex(t *testing.T) {
 				CollectionID: defaultCollectionID,
 				BinlogPaths:  fieldBinlog,
 				IndexInfos:   []*querypb.FieldIndexInfo{indexInfo},
+				Statslogs:    statsLog,
 			},
 		},
 	}

@@ -19,9 +19,9 @@ package querynode
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/apache/pulsar-client-go/pulsar"
-
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
@@ -29,6 +29,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -231,7 +233,7 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 			node: node,
 		}
 
-		fieldBinlog, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
+		fieldBinlog, statsLog, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
 		assert.NoError(t, err)
 
 		task.req.Infos = []*datapb.VchannelInfo{
@@ -246,7 +248,8 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 							ChannelName: defaultDMLChannel,
 							Timestamp:   typeutil.MaxTimestamp,
 						},
-						Binlogs: fieldBinlog,
+						Binlogs:   fieldBinlog,
+						Statslogs: statsLog,
 					},
 				},
 			},
@@ -384,7 +387,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 
-		fieldBinlog, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
+		fieldBinlog, statsLog, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
 		assert.NoError(t, err)
 
 		req := &querypb.LoadSegmentsRequest{
@@ -396,6 +399,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 					PartitionID:  defaultPartitionID,
 					CollectionID: defaultCollectionID,
 					BinlogPaths:  fieldBinlog,
+					Statslogs:    statsLog,
 				},
 			},
 		}
@@ -412,7 +416,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 
-		fieldBinlog, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
+		fieldBinlog, statsLog, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
 		assert.NoError(t, err)
 
 		req := &querypb.LoadSegmentsRequest{
@@ -424,6 +428,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 					PartitionID:  defaultPartitionID,
 					CollectionID: defaultCollectionID,
 					BinlogPaths:  fieldBinlog,
+					Statslogs:    statsLog,
 				},
 			},
 		}
@@ -446,42 +451,112 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 		assert.Equal(t, 1, num)
 	})
 
-	t.Run("test execute grpc error", func(t *testing.T) {
+	t.Run("test FromDmlCPLoadDelete", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 
-		task := loadSegmentsTask{
-			req:  genLoadEmptySegmentsRequest(),
-			node: node,
-		}
-		task.req.Infos = []*querypb.SegmentLoadInfo{
-			{
-				SegmentID:    defaultSegmentID + 1,
-				PartitionID:  defaultPartitionID + 1,
-				CollectionID: defaultCollectionID + 1,
+		vDmChannel := "by-dev-rootcoord-dml_1_2021v1"
+		pDmChannel := funcutil.ToPhysicalChannel(vDmChannel)
+		stream, err := node.factory.NewMsgStream(node.queryNodeLoopCtx)
+		assert.Nil(t, err)
+		stream.AsProducer([]string{pDmChannel})
+		timeTickMsg := &msgstream.TimeTickMsg{
+			BaseMsg: msgstream.BaseMsg{
+				HashValues: []uint32{1},
+			},
+			TimeTickMsg: internalpb.TimeTickMsg{
+				Base: &commonpb.MsgBase{
+					MsgType:   commonpb.MsgType_TimeTick,
+					Timestamp: 100,
+				},
 			},
 		}
-		err = task.Execute(ctx)
-		assert.Error(t, err)
-	})
 
-	t.Run("test execute node down", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
+		deleteMsg := &msgstream.DeleteMsg{
+			BaseMsg: msgstream.BaseMsg{
+				HashValues: []uint32{1, 1, 1},
+			},
+			DeleteRequest: internalpb.DeleteRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:   commonpb.MsgType_Delete,
+					Timestamp: 110,
+				},
+				CollectionID: defaultCollectionID,
+				PartitionID:  defaultPartitionID,
+				PrimaryKeys: &schemapb.IDs{
+					IdField: &schemapb.IDs_IntId{
+						IntId: &schemapb.LongArray{
+							Data: []int64{1, 2, 3},
+						},
+					},
+				},
+				Timestamps: []Timestamp{110, 110, 110},
+				NumRows:    3,
+			},
+		}
+
+		pos1, err := stream.ProduceMark(&msgstream.MsgPack{Msgs: []msgstream.TsMsg{timeTickMsg}})
+		assert.NoError(t, err)
+		msgIDs, ok := pos1[pDmChannel]
+		assert.True(t, ok)
+		assert.Equal(t, 1, len(msgIDs))
+		err = stream.Produce(&msgstream.MsgPack{Msgs: []msgstream.TsMsg{deleteMsg}})
 		assert.NoError(t, err)
 
-		task := loadSegmentsTask{
-			req:  genLoadEmptySegmentsRequest(),
-			node: node,
-		}
-		task.req.Infos = []*querypb.SegmentLoadInfo{
-			{
-				SegmentID:    defaultSegmentID + 1,
-				PartitionID:  defaultPartitionID + 1,
-				CollectionID: defaultCollectionID + 1,
+		// to stop reader from cp
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					break
+				default:
+					timeTickMsg.Base.Timestamp += 100
+					stream.Produce(&msgstream.MsgPack{Msgs: []msgstream.TsMsg{timeTickMsg}})
+					time.Sleep(200 * time.Millisecond)
+				}
+			}
+		}()
+
+		segmentID := defaultSegmentID + 1
+		fieldBinlog, statsLog, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, segmentID, defaultMsgLength, schema)
+		assert.NoError(t, err)
+
+		req := &querypb.LoadSegmentsRequest{
+			Base:   genCommonMsgBase(commonpb.MsgType_LoadSegments),
+			Schema: schema,
+			Infos: []*querypb.SegmentLoadInfo{
+				{
+					SegmentID:    segmentID,
+					PartitionID:  defaultPartitionID,
+					CollectionID: defaultCollectionID,
+					BinlogPaths:  fieldBinlog,
+					NumOfRows:    defaultMsgLength,
+					Statslogs:    statsLog,
+				},
+			},
+			DeltaPositions: []*internalpb.MsgPosition{
+				{
+					ChannelName: vDmChannel,
+					MsgID:       msgIDs[0].Serialize(),
+					Timestamp:   100,
+				},
 			},
 		}
+
+		task := loadSegmentsTask{
+			req:  req,
+			node: node,
+		}
+		err = task.PreExecute(ctx)
+		assert.NoError(t, err)
 		err = task.Execute(ctx)
-		assert.Error(t, err)
+		assert.NoError(t, err)
+		segment, err := node.metaReplica.getSegmentByID(segmentID, segmentTypeSealed)
+		assert.NoError(t, err)
+
+		// has reload 3 delete log from dm channel, so next delete offset should be 3
+		offset := segment.segmentPreDelete(1)
+		assert.Equal(t, int64(3), offset)
 	})
 
 	t.Run("test OOM", func(t *testing.T) {

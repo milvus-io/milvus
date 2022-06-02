@@ -923,6 +923,13 @@ func (m *MetaReplica) getDeltaChannelsByCollectionID(collectionID UniqueID) ([]*
 func (m *MetaReplica) setDeltaChannel(collectionID UniqueID, infos []*datapb.VchannelInfo) error {
 	m.deltaChannelMu.Lock()
 	defer m.deltaChannelMu.Unlock()
+
+	if len(infos) == 0 {
+		err := fmt.Errorf("set empty delta channel info to meta of collection %d", collectionID)
+		log.Error(err.Error())
+		return err
+	}
+
 	_, ok := m.deltaChannelInfos[collectionID]
 	if ok {
 		log.Debug("delta channel already exist", zap.Any("collectionID", collectionID))

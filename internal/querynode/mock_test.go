@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"path"
 	"strconv"
 
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -298,7 +299,7 @@ func loadIndexForSegment(ctx context.Context, node *QueryNode, segmentID UniqueI
 	schema := genTestCollectionSchema(pkType)
 
 	// generate insert binlog
-	fieldBinlog, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, msgLength, schema)
+	fieldBinlog, _, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, msgLength, schema)
 	if err != nil {
 		return err
 	}
@@ -925,7 +926,7 @@ func genStorageBlob(collectionID UniqueID,
 	partitionID UniqueID,
 	segmentID UniqueID,
 	msgLength int,
-	schema *schemapb.CollectionSchema) ([]*storage.Blob, error) {
+	schema *schemapb.CollectionSchema) ([]*storage.Blob, []*storage.Blob, error) {
 	tmpSchema := &schemapb.CollectionSchema{
 		Name:   schema.Name,
 		AutoID: schema.AutoID,
@@ -936,11 +937,11 @@ func genStorageBlob(collectionID UniqueID,
 	inCodec := storage.NewInsertCodec(collMeta)
 	insertData, err := genInsertData(msgLength, schema)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	binLogs, _, err := inCodec.Serialize(partitionID, segmentID, insertData)
+	binLogs, statsLogs, err := inCodec.Serialize(partitionID, segmentID, insertData)
 
-	return binLogs, err
+	return binLogs, statsLogs, err
 }
 
 func genSimpleInsertMsg(schema *schemapb.CollectionSchema, numRows int) (*msgstream.InsertMsg, error) {
@@ -1000,14 +1001,14 @@ func saveBinLog(ctx context.Context,
 	partitionID UniqueID,
 	segmentID UniqueID,
 	msgLength int,
-	schema *schemapb.CollectionSchema) ([]*datapb.FieldBinlog, error) {
-	binLogs, err := genStorageBlob(collectionID,
+	schema *schemapb.CollectionSchema) ([]*datapb.FieldBinlog, []*datapb.FieldBinlog, error) {
+	binLogs, statsLogs, err := genStorageBlob(collectionID,
 		partitionID,
 		segmentID,
 		msgLength,
 		schema)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	log.Debug(".. [query node unittest] Saving bin logs to MinIO ..", zap.Int("number", len(binLogs)))
@@ -1019,10 +1020,11 @@ func saveBinLog(ctx context.Context,
 		fieldID, err := strconv.ParseInt(blob.GetKey(), 10, 64)
 		log.Debug("[query node unittest] save binlog", zap.Int64("fieldID", fieldID))
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
-		key := JoinIDPath(collectionID, partitionID, segmentID, fieldID)
+		k := JoinIDPath(collectionID, partitionID, segmentID, fieldID)
+		key := path.Join("insert-log", k)
 		kvs[key] = blob.Value[:]
 		fieldBinlog = append(fieldBinlog, &datapb.FieldBinlog{
 			FieldID: fieldID,
@@ -1031,9 +1033,28 @@ func saveBinLog(ctx context.Context,
 	}
 	log.Debug("[query node unittest] save binlog file to MinIO/S3")
 
+	// write insert binlog
+	statsBinlog := make([]*datapb.FieldBinlog, 0)
+	for _, blob := range statsLogs {
+		fieldID, err := strconv.ParseInt(blob.GetKey(), 10, 64)
+		log.Debug("[query node unittest] save statLog", zap.Int64("fieldID", fieldID))
+		if err != nil {
+			return nil, nil, err
+		}
+
+		k := JoinIDPath(collectionID, partitionID, segmentID, fieldID)
+		key := path.Join("delta-log", k)
+		kvs[key] = blob.Value[:]
+		statsBinlog = append(statsBinlog, &datapb.FieldBinlog{
+			FieldID: fieldID,
+			Binlogs: []*datapb.Binlog{{LogPath: key}},
+		})
+	}
+	log.Debug("[query node unittest] save statsLog file to MinIO/S3")
+
 	cm := storage.NewLocalChunkManager(storage.RootPath(defaultLocalStorage))
 	err = cm.MultiWrite(kvs)
-	return fieldBinlog, err
+	return fieldBinlog, statsBinlog, err
 }
 
 // saveDeltaLog saves delta logs into MinIO for testing purpose.

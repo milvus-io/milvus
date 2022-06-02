@@ -529,6 +529,19 @@ func (l *loadSegmentsTask) Execute(ctx context.Context) error {
 		log.Warn(err.Error())
 		return err
 	}
+
+	// reload delete log from cp to latest position
+	for _, deltaPosition := range l.req.DeltaPositions {
+		err = l.node.loader.FromDmlCPLoadDelete(ctx, l.req.CollectionID, deltaPosition)
+		if err != nil {
+			for _, segment := range l.req.Infos {
+				l.node.metaReplica.removeSegment(segment.SegmentID, segmentTypeSealed)
+			}
+			log.Warn("LoadSegmentTask from delta check point load delete failed", zap.Int64("msgID", l.req.Base.MsgID), zap.Error(err))
+			return err
+		}
+	}
+
 	log.Info("LoadSegmentTask Execute done", zap.Int64("msgID", l.req.Base.MsgID))
 	return nil
 }
