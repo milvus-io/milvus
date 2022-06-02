@@ -222,6 +222,12 @@ func (ds *DataCoordFactory) UpdateSegmentStatistics(ctx context.Context, req *da
 	}, nil
 }
 
+func (ds *DataCoordFactory) AddSegment(ctx context.Context, req *datapb.AddSegmentRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}, nil
+}
+
 func (mf *MetaFactory) GetCollectionMeta(collectionID UniqueID, collectionName string, pkDataType schemapb.DataType) *etcdpb.CollectionMeta {
 	sch := schemapb.CollectionSchema{
 		Name:        collectionName,
@@ -918,6 +924,7 @@ func (m *RootCoordFactory) DescribeCollection(ctx context.Context, in *milvuspb.
 
 	resp.CollectionID = m.collectionID
 	resp.Schema = meta.Schema
+	resp.ShardsNum = 2
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	return resp, nil
 }

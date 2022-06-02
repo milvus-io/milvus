@@ -783,6 +783,17 @@ func (c *ChannelManager) getChannelByNodeAndName(nodeID UniqueID, channelName st
 	return ret
 }
 
+func (c *ChannelManager) getNodeIDByChannelName(chName string) (bool, UniqueID) {
+	for _, nodeChannel := range c.GetChannels() {
+		for _, ch := range nodeChannel.Channels {
+			if ch.Name == chName {
+				return true, nodeChannel.NodeID
+			}
+		}
+	}
+	return false, 0
+}
+
 func (c *ChannelManager) isMarkedDrop(channelName string) bool {
 	return c.h.CheckShouldDropChannel(channelName)
 }

@@ -52,6 +52,8 @@ service DataCoord {
 
   rpc AcquireSegmentLock(AcquireSegmentLockRequest) returns (common.Status) {}
   rpc ReleaseSegmentLock(ReleaseSegmentLockRequest) returns (common.Status) {}
+
+  rpc AddSegment(AddSegmentRequest) returns(common.Status) {}
 }
 
 service DataNode {
@@ -69,6 +71,8 @@ service DataNode {
   rpc Import(ImportTaskRequest) returns(common.Status) {}
 
   rpc ResendSegmentStats(ResendSegmentStatsRequest) returns(ResendSegmentStatsResponse) {}
+
+  rpc AddSegment(AddSegmentRequest) returns(common.Status) {}
 }
 
 message FlushRequest {
@@ -511,4 +515,13 @@ message ResendSegmentStatsRequest {
 message ResendSegmentStatsResponse {
   common.Status status = 1;
   repeated int64 seg_resent = 2;
+}
+
+message AddSegmentRequest {
+  common.MsgBase base = 1;
+  int64 segment_id = 2;
+  string channel_name = 3;
+  int64 collection_id = 4;
+  int64 partition_id = 5;
+  int64 row_num = 6;
 }

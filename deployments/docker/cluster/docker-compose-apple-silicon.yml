@@ -14,7 +14,7 @@ services:
 
   pulsar:
     container_name: milvus-pulsar
-    image: apachepulsar/pulsar:2.8.2
+    image: milvusdb/pulsar:v2.8.2-m1
     volumes:
       - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/pulsar:/pulsar/data
     environment:
@@ -26,20 +26,16 @@ services:
       # maxMessageSize is missing from standalone.conf, must use PULSAR_PREFIX_ to get it configured
       - PULSAR_PREFIX_maxMessageSize=104857600
       - PULSAR_GC=-XX:+UseG1GC
-    command: |
-      /bin/bash -c \
-      "bin/apply-config-from-env.py conf/standalone.conf && \
-      exec bin/pulsar standalone --no-functions-worker --no-stream-storage"
 
   minio:
     container_name: milvus-minio
     image: minio/minio:RELEASE.2022-03-17T06-34-49Z
-    environment:
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
     ports:
       - "9000:9000"
       - "9001:9001"
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
     volumes:
       - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/minio:/minio_data
     command: minio server /minio_data --console-address ":9001"
@@ -185,7 +181,6 @@ services:
 #      PULSAR_ADDRESS: pulsar://pulsar:6650
 #    depends_on:
 #      - "datacoord"
-
 
 networks:
   default:

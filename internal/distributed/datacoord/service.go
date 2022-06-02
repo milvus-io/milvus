@@ -350,3 +350,7 @@ func (s *Server) AcquireSegmentLock(ctx context.Context, req *datapb.AcquireSegm
 func (s *Server) ReleaseSegmentLock(ctx context.Context, req *datapb.ReleaseSegmentLockRequest) (*commonpb.Status, error) {
 	return s.dataCoord.ReleaseSegmentLock(ctx, req)
 }
+
+func (s *Server) AddSegment(ctx context.Context, request *datapb.AddSegmentRequest) (*commonpb.Status, error) {
+	return s.dataCoord.AddSegment(ctx, request)
+}
