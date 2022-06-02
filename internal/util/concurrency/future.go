@@ -46,8 +46,8 @@ func (future *Future) Value() interface{} {
 	return future.value
 }
 
-// True if error occurred,
-// false otherwise.
+// False if error occurred,
+// true otherwise.
 func (future *Future) OK() bool {
 	<-future.ch
 

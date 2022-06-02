@@ -70,7 +70,7 @@ func TestSegmentLoader_loadSegment(t *testing.T) {
 			},
 		}
 
-		err = loader.loadSegment(req, segmentTypeSealed)
+		err = loader.LoadSegment(req, segmentTypeSealed)
 		assert.NoError(t, err)
 	})
 
@@ -101,7 +101,7 @@ func TestSegmentLoader_loadSegment(t *testing.T) {
 			},
 		}
 
-		err = loader.loadSegment(req, segmentTypeSealed)
+		err = loader.LoadSegment(req, segmentTypeSealed)
 		assert.Error(t, err)
 	})
 
@@ -114,7 +114,7 @@ func TestSegmentLoader_loadSegment(t *testing.T) {
 
 		req := &querypb.LoadSegmentsRequest{}
 
-		err = loader.loadSegment(req, segmentTypeSealed)
+		err = loader.LoadSegment(req, segmentTypeSealed)
 		assert.Error(t, err)
 	})
 }
@@ -182,7 +182,7 @@ func TestSegmentLoader_loadSegmentFieldsData(t *testing.T) {
 		binlog, _, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
 		assert.NoError(t, err)
 
-		err = loader.loadFiledBinlogData(segment, binlog)
+		err = loader.loadSealedSegmentFields(segment, binlog)
 		assert.NoError(t, err)
 	}
 
@@ -235,7 +235,7 @@ func TestSegmentLoader_invalid(t *testing.T) {
 			},
 		}
 
-		err = loader.loadSegment(req, segmentTypeSealed)
+		err = loader.LoadSegment(req, segmentTypeSealed)
 		assert.Error(t, err)
 	})
 
@@ -273,7 +273,7 @@ func TestSegmentLoader_invalid(t *testing.T) {
 				},
 			},
 		}
-		err = loader.loadSegment(req, segmentTypeSealed)
+		err = loader.LoadSegment(req, segmentTypeSealed)
 		assert.Error(t, err)
 	})
 
@@ -298,7 +298,7 @@ func TestSegmentLoader_invalid(t *testing.T) {
 			},
 		}
 
-		err = loader.loadSegment(req, commonpb.SegmentState_Dropped)
+		err = loader.LoadSegment(req, commonpb.SegmentState_Dropped)
 		assert.Error(t, err)
 	})
 }
@@ -416,7 +416,7 @@ func TestSegmentLoader_testLoadGrowingAndSealed(t *testing.T) {
 			},
 		}
 
-		err = loader.loadSegment(req1, segmentTypeSealed)
+		err = loader.LoadSegment(req1, segmentTypeSealed)
 		assert.NoError(t, err)
 
 		segment1, err := loader.metaReplica.getSegmentByID(segmentID1, segmentTypeSealed)
@@ -442,7 +442,7 @@ func TestSegmentLoader_testLoadGrowingAndSealed(t *testing.T) {
 			},
 		}
 
-		err = loader.loadSegment(req2, segmentTypeSealed)
+		err = loader.LoadSegment(req2, segmentTypeSealed)
 		assert.NoError(t, err)
 
 		segment2, err := loader.metaReplica.getSegmentByID(segmentID2, segmentTypeSealed)
@@ -476,7 +476,7 @@ func TestSegmentLoader_testLoadGrowingAndSealed(t *testing.T) {
 			},
 		}
 
-		err = loader.loadSegment(req1, segmentTypeGrowing)
+		err = loader.LoadSegment(req1, segmentTypeGrowing)
 		assert.NoError(t, err)
 
 		segment1, err := loader.metaReplica.getSegmentByID(segmentID1, segmentTypeGrowing)
@@ -502,7 +502,7 @@ func TestSegmentLoader_testLoadGrowingAndSealed(t *testing.T) {
 			},
 		}
 
-		err = loader.loadSegment(req2, segmentTypeGrowing)
+		err = loader.LoadSegment(req2, segmentTypeGrowing)
 		assert.NoError(t, err)
 
 		segment2, err := loader.metaReplica.getSegmentByID(segmentID2, segmentTypeGrowing)
@@ -562,7 +562,7 @@ func TestSegmentLoader_testLoadSealedSegmentWithIndex(t *testing.T) {
 		},
 	}
 
-	err = loader.loadSegment(req, segmentTypeSealed)
+	err = loader.LoadSegment(req, segmentTypeSealed)
 	assert.NoError(t, err)
 
 	segment, err := node.metaReplica.getSegmentByID(segmentID, segmentTypeSealed)

@@ -218,7 +218,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 		zap.Int64("collectionID", collectionID),
 		zap.Int64s("unFlushedSegmentIDs", unFlushedSegmentIDs),
 	)
-	err = w.node.loader.loadSegment(req, segmentTypeGrowing)
+	err = w.node.loader.LoadSegment(req, segmentTypeGrowing)
 	if err != nil {
 		log.Warn(err.Error())
 		return err
@@ -524,7 +524,7 @@ func (l *loadSegmentsTask) PreExecute(ctx context.Context) error {
 func (l *loadSegmentsTask) Execute(ctx context.Context) error {
 	// TODO: support db
 	log.Info("LoadSegmentTask Execute start", zap.Int64("msgID", l.req.Base.MsgID))
-	err := l.node.loader.loadSegment(l.req, segmentTypeSealed)
+	err := l.node.loader.LoadSegment(l.req, segmentTypeSealed)
 	if err != nil {
 		log.Warn(err.Error())
 		return err
