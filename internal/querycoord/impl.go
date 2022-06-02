@@ -850,7 +850,7 @@ func (qc *QueryCoord) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmen
 	//TODO::get segment infos from MetaReplica
 	//segmentIDs := req.SegmentIDs
 	//segmentInfos, err := qs.MetaReplica.getSegmentInfos(segmentIDs)
-	segmentInfos, err := qc.cluster.getSegmentInfo(ctx, req)
+	segmentInfos, err := qc.cluster.GetSegmentInfo(ctx, req)
 	if err != nil {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = err.Error()
@@ -1134,7 +1134,7 @@ func (qc *QueryCoord) GetShardLeaders(ctx context.Context, req *querypb.GetShard
 				}
 			}
 
-			isShardAvailable, err := qc.cluster.isOnline(shard.LeaderID)
+			isShardAvailable, err := qc.cluster.IsOnline(shard.LeaderID)
 			if err != nil || !isShardAvailable {
 				log.Warn("shard leader is unavailable",
 					zap.Int64("collectionID", replica.CollectionID),
@@ -1148,7 +1148,7 @@ func (qc *QueryCoord) GetShardLeaders(ctx context.Context, req *querypb.GetShard
 			nodes := shardNodes[shard.DmChannelName]
 			for _, nodeID := range replica.NodeIds {
 				if _, ok := nodes[nodeID]; ok {
-					if ok, err := qc.cluster.isOnline(nodeID); err != nil || !ok {
+					if ok, err := qc.cluster.IsOnline(nodeID); err != nil || !ok {
 						isShardAvailable = false
 						break
 					}

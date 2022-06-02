@@ -50,7 +50,7 @@ func TestShuffleChannelsToQueryNode(t *testing.T) {
 	}
 	meta, err := newMeta(baseCtx, kv, nil, idAllocator)
 	assert.Nil(t, err)
-	cluster := &queryNodeCluster{
+	var cluster Cluster = &queryNodeCluster{
 		ctx:         baseCtx,
 		cancel:      cancel,
 		client:      kv,
@@ -87,7 +87,7 @@ func TestShuffleChannelsToQueryNode(t *testing.T) {
 	assert.Nil(t, err)
 	nodeSession := node.session
 	nodeID := node.queryNodeID
-	cluster.registerNode(baseCtx, nodeSession, nodeID, disConnect)
+	cluster.RegisterNode(baseCtx, nodeSession, nodeID, disConnect)
 	waitQueryNodeOnline(cluster, nodeID)
 
 	err = shuffleChannelsToQueryNode(baseCtx, reqs, cluster, meta, false, nil, nil, -1)

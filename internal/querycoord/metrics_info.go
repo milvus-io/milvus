@@ -66,7 +66,7 @@ func getSystemInfoMetrics(
 	}
 	metricsinfo.FillDeployMetricsWithEnv(&clusterTopology.Self.SystemInfo)
 
-	nodesMetrics := qc.cluster.getMetrics(ctx, req)
+	nodesMetrics := qc.cluster.GetMetrics(ctx, req)
 	for _, nodeMetrics := range nodesMetrics {
 		if nodeMetrics.err != nil {
 			log.Warn("invalid metrics of query node was found",

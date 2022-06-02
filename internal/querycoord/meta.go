@@ -306,7 +306,7 @@ func reloadShardLeaderAddress(meta Meta, cluster Cluster) error {
 			isModified := false
 			for _, shard := range replica.ShardReplicas {
 				if len(shard.LeaderAddr) == 0 {
-					nodeInfo, err := cluster.getNodeInfoByID(shard.LeaderID)
+					nodeInfo, err := cluster.GetNodeInfoByID(shard.LeaderID)
 					if err != nil {
 						log.Warn("failed to retrieve the node's address",
 							zap.Int64("nodeID", shard.LeaderID),

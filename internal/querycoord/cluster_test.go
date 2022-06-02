@@ -430,7 +430,7 @@ func TestGrpcRequest(t *testing.T) {
 	handler, err := newChannelUnsubscribeHandler(baseCtx, kv, factory)
 	assert.Nil(t, err)
 
-	cluster := &queryNodeCluster{
+	var cluster Cluster = &queryNodeCluster{
 		ctx:         baseCtx,
 		cancel:      cancel,
 		client:      kv,
@@ -442,7 +442,7 @@ func TestGrpcRequest(t *testing.T) {
 	}
 
 	t.Run("Test GetNodeInfoByIDWithNodeNotExist", func(t *testing.T) {
-		_, err := cluster.getNodeInfoByID(defaultQueryNodeID)
+		_, err := cluster.GetNodeInfoByID(defaultQueryNodeID)
 		assert.NotNil(t, err)
 	})
 
@@ -453,7 +453,7 @@ func TestGrpcRequest(t *testing.T) {
 			},
 			CollectionID: defaultCollectionID,
 		}
-		_, err = cluster.getSegmentInfoByNode(baseCtx, defaultQueryNodeID, getSegmentInfoReq)
+		_, err = cluster.GetSegmentInfoByNode(baseCtx, defaultQueryNodeID, getSegmentInfoReq)
 		assert.NotNil(t, err)
 	})
 
@@ -461,7 +461,7 @@ func TestGrpcRequest(t *testing.T) {
 	assert.Nil(t, err)
 	nodeSession := node.session
 	nodeID := node.queryNodeID
-	cluster.registerNode(baseCtx, nodeSession, nodeID, disConnect)
+	cluster.RegisterNode(baseCtx, nodeSession, nodeID, disConnect)
 	waitQueryNodeOnline(cluster, nodeID)
 
 	t.Run("Test GetComponentInfos", func(t *testing.T) {
@@ -481,7 +481,7 @@ func TestGrpcRequest(t *testing.T) {
 			Schema:       genDefaultCollectionSchema(false),
 			CollectionID: defaultCollectionID,
 		}
-		err := cluster.loadSegments(baseCtx, nodeID, loadSegmentReq)
+		err := cluster.LoadSegments(baseCtx, nodeID, loadSegmentReq)
 		assert.Nil(t, err)
 	})
 
@@ -492,7 +492,7 @@ func TestGrpcRequest(t *testing.T) {
 			PartitionIDs: []UniqueID{defaultPartitionID},
 			SegmentIDs:   []UniqueID{defaultSegmentID},
 		}
-		err := cluster.releaseSegments(baseCtx, nodeID, releaseSegmentReq)
+		err := cluster.ReleaseSegments(baseCtx, nodeID, releaseSegmentReq)
 		assert.Nil(t, err)
 	})
 
@@ -503,7 +503,7 @@ func TestGrpcRequest(t *testing.T) {
 			},
 			CollectionID: defaultCollectionID,
 		}
-		_, err = cluster.getSegmentInfo(baseCtx, getSegmentInfoReq)
+		_, err = cluster.GetSegmentInfo(baseCtx, getSegmentInfoReq)
 		assert.Nil(t, err)
 	})
 
@@ -514,7 +514,7 @@ func TestGrpcRequest(t *testing.T) {
 			},
 			CollectionID: defaultCollectionID,
 		}
-		_, err = cluster.getSegmentInfoByNode(baseCtx, nodeID, getSegmentInfoReq)
+		_, err = cluster.GetSegmentInfoByNode(baseCtx, nodeID, getSegmentInfoReq)
 		assert.Nil(t, err)
 	})
 
@@ -527,7 +527,7 @@ func TestGrpcRequest(t *testing.T) {
 			},
 			CollectionID: defaultCollectionID,
 		}
-		_, err = cluster.getSegmentInfo(baseCtx, getSegmentInfoReq)
+		_, err = cluster.GetSegmentInfo(baseCtx, getSegmentInfoReq)
 		assert.NotNil(t, err)
 	})
 
@@ -538,14 +538,14 @@ func TestGrpcRequest(t *testing.T) {
 			},
 			CollectionID: defaultCollectionID,
 		}
-		_, err = cluster.getSegmentInfoByNode(baseCtx, nodeID, getSegmentInfoReq)
+		_, err = cluster.GetSegmentInfoByNode(baseCtx, nodeID, getSegmentInfoReq)
 		assert.NotNil(t, err)
 	})
 
 	node.getSegmentInfos = returnSuccessGetSegmentInfoResult
 
 	t.Run("Test GetNodeInfoByID", func(t *testing.T) {
-		res, err := cluster.getNodeInfoByID(nodeID)
+		res, err := cluster.GetNodeInfoByID(nodeID)
 		assert.Nil(t, err)
 		assert.NotNil(t, res)
 	})
@@ -553,13 +553,13 @@ func TestGrpcRequest(t *testing.T) {
 	node.getMetrics = returnFailedGetMetricsResult
 
 	t.Run("Test GetNodeInfoByIDFailed", func(t *testing.T) {
-		_, err := cluster.getNodeInfoByID(nodeID)
+		_, err := cluster.GetNodeInfoByID(nodeID)
 		assert.NotNil(t, err)
 	})
 
 	node.getMetrics = returnSuccessGetMetricsResult
 
-	cluster.stopNode(nodeID)
+	cluster.StopNode(nodeID)
 	t.Run("Test GetSegmentInfoByNodeAfterNodeStop", func(t *testing.T) {
 		getSegmentInfoReq := &querypb.GetSegmentInfoRequest{
 			Base: &commonpb.MsgBase{
@@ -567,7 +567,7 @@ func TestGrpcRequest(t *testing.T) {
 			},
 			CollectionID: defaultCollectionID,
 		}
-		_, err = cluster.getSegmentInfoByNode(baseCtx, nodeID, getSegmentInfoReq)
+		_, err = cluster.GetSegmentInfoByNode(baseCtx, nodeID, getSegmentInfoReq)
 		assert.NotNil(t, err)
 	})
 
@@ -608,7 +608,7 @@ func TestSetNodeState(t *testing.T) {
 
 	node, err := startQueryNodeServer(baseCtx)
 	assert.Nil(t, err)
-	err = cluster.registerNode(baseCtx, node.session, node.queryNodeID, disConnect)
+	err = cluster.RegisterNode(baseCtx, node.session, node.queryNodeID, disConnect)
 	assert.Nil(t, err)
 	waitQueryNodeOnline(cluster, node.queryNodeID)
 
@@ -627,7 +627,7 @@ func TestSetNodeState(t *testing.T) {
 	err = meta.setDeltaChannel(defaultCollectionID, []*datapb.VchannelInfo{deltaChannelInfo})
 	assert.Nil(t, err)
 
-	nodeInfo, err := cluster.getNodeInfoByID(node.queryNodeID)
+	nodeInfo, err := cluster.GetNodeInfoByID(node.queryNodeID)
 	assert.Nil(t, err)
 	cluster.setNodeState(node.queryNodeID, nodeInfo, offline)
 	assert.Equal(t, 1, len(handler.downNodeChan))

@@ -69,7 +69,7 @@ func waitAllQueryNodeOffline(cluster Cluster, nodeIDs []int64) bool {
 	for {
 		allOffline := true
 		for _, nodeID := range nodeIDs {
-			isOnline, err := cluster.isOnline(nodeID)
+			isOnline, err := cluster.IsOnline(nodeID)
 			if err == nil && isOnline {
 				allOffline = false
 				break
@@ -85,7 +85,7 @@ func waitAllQueryNodeOffline(cluster Cluster, nodeIDs []int64) bool {
 
 func waitQueryNodeOnline(cluster Cluster, nodeID int64) {
 	for {
-		online, err := cluster.isOnline(nodeID)
+		online, err := cluster.IsOnline(nodeID)
 		if err != nil {
 			continue
 		}
@@ -130,7 +130,7 @@ func TestQueryNode_MultiNode_stop(t *testing.T) {
 	})
 	assert.Nil(t, err)
 	time.Sleep(100 * time.Millisecond)
-	onlineNodeIDs := queryCoord.cluster.onlineNodeIDs()
+	onlineNodeIDs := queryCoord.cluster.OnlineNodeIDs()
 	assert.NotEqual(t, 0, len(onlineNodeIDs))
 	queryNode2.stop()
 	err = removeNodeSession(queryNode2.queryNodeID)
@@ -176,7 +176,7 @@ func TestQueryNode_MultiNode_reStart(t *testing.T) {
 		CollectionID: defaultCollectionID,
 	})
 	assert.Nil(t, err)
-	onlineNodeIDs := queryCoord.cluster.onlineNodeIDs()
+	onlineNodeIDs := queryCoord.cluster.OnlineNodeIDs()
 	assert.NotEqual(t, 0, len(onlineNodeIDs))
 	queryNode3.stop()
 	err = removeNodeSession(queryNode3.queryNodeID)

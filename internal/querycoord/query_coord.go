@@ -346,7 +346,7 @@ func (qc *QueryCoord) watchNodeLoop() {
 		}
 	}
 
-	offlineNodeIDs := qc.cluster.offlineNodeIDs()
+	offlineNodeIDs := qc.cluster.OfflineNodeIDs()
 	if len(offlineNodeIDs) != 0 {
 		loadBalanceSegment := &querypb.LoadBalanceRequest{
 			Base: &commonpb.MsgBase{
@@ -371,7 +371,7 @@ func (qc *QueryCoord) watchNodeLoop() {
 	}
 
 	// TODO silverxia add Rewatch logic
-	qc.eventChan = qc.session.WatchServices(typeutil.QueryNodeRole, qc.cluster.getSessionVersion()+1, nil)
+	qc.eventChan = qc.session.WatchServices(typeutil.QueryNodeRole, qc.cluster.GetSessionVersion()+1, nil)
 	qc.handleNodeEvent(ctx)
 }
 
@@ -388,7 +388,7 @@ func (qc *QueryCoord) allocateNode(nodeID int64) error {
 	return nil
 }
 func (qc *QueryCoord) getUnallocatedNodes() []int64 {
-	onlines := qc.cluster.onlineNodeIDs()
+	onlines := qc.cluster.OnlineNodeIDs()
 	var ret []int64
 	for _, n := range onlines {
 		replica, err := qc.meta.getReplicasByNodeID(n)
@@ -429,7 +429,7 @@ func (qc *QueryCoord) handleNodeEvent(ctx context.Context) {
 			case sessionutil.SessionAddEvent:
 				serverID := event.Session.ServerID
 				log.Info("start add a QueryNode to cluster", zap.Any("nodeID", serverID))
-				err := qc.cluster.registerNode(ctx, event.Session, serverID, disConnect)
+				err := qc.cluster.RegisterNode(ctx, event.Session, serverID, disConnect)
 				if err != nil {
 					log.Error("QueryCoord failed to register a QueryNode", zap.Int64("nodeID", serverID), zap.String("error info", err.Error()))
 					continue
@@ -444,13 +444,13 @@ func (qc *QueryCoord) handleNodeEvent(ctx context.Context) {
 			case sessionutil.SessionDelEvent:
 				serverID := event.Session.ServerID
 				log.Info("get a del event after QueryNode down", zap.Int64("nodeID", serverID))
-				nodeExist := qc.cluster.hasNode(serverID)
+				nodeExist := qc.cluster.HasNode(serverID)
 				if !nodeExist {
 					log.Error("QueryNode not exist", zap.Int64("nodeID", serverID))
 					continue
 				}
 
-				qc.cluster.stopNode(serverID)
+				qc.cluster.StopNode(serverID)
 				offlineNodeCh <- serverID
 			}
 		}
@@ -599,7 +599,7 @@ func (qc *QueryCoord) loadBalanceSegmentLoop() {
 					nodeID2SegmentInfos := make(map[int64]map[UniqueID]*querypb.SegmentInfo)
 					for _, nodeID := range onlineNodeIDs {
 						if _, ok := nodeID2MemUsage[nodeID]; !ok {
-							nodeInfo, err := qc.cluster.getNodeInfoByID(nodeID)
+							nodeInfo, err := qc.cluster.GetNodeInfoByID(nodeID)
 							if err != nil {
 								log.Warn("loadBalanceSegmentLoop: get node info from QueryNode failed",
 									zap.Int64("nodeID", nodeID), zap.Int64("collection", replica.CollectionID), zap.Int64("replica", replica.ReplicaID),
@@ -615,7 +615,7 @@ func (qc *QueryCoord) loadBalanceSegmentLoop() {
 						leastSegmentInfos := make(map[UniqueID]*querypb.SegmentInfo)
 						segmentInfos := qc.meta.getSegmentInfosByNodeAndCollection(nodeID, replica.GetCollectionID())
 						for _, segmentInfo := range segmentInfos {
-							leastInfo, err := qc.cluster.getSegmentInfoByID(ctx, segmentInfo.SegmentID)
+							leastInfo, err := qc.cluster.GetSegmentInfoByID(ctx, segmentInfo.SegmentID)
 							if err != nil {
 								log.Warn("loadBalanceSegmentLoop: get segment info from QueryNode failed", zap.Int64("nodeID", nodeID),
 									zap.Int64("collection", replica.CollectionID), zap.Int64("replica", replica.ReplicaID),

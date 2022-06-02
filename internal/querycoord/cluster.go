@@ -46,40 +46,43 @@ const (
 
 // Cluster manages all query node connections and grpc requests
 type Cluster interface {
+	// Collection/Parition
+	ReleaseCollection(ctx context.Context, nodeID int64, in *querypb.ReleaseCollectionRequest) error
+	ReleasePartitions(ctx context.Context, nodeID int64, in *querypb.ReleasePartitionsRequest) error
+
+	// Segment
+	LoadSegments(ctx context.Context, nodeID int64, in *querypb.LoadSegmentsRequest) error
+	ReleaseSegments(ctx context.Context, nodeID int64, in *querypb.ReleaseSegmentsRequest) error
+	GetSegmentInfo(ctx context.Context, in *querypb.GetSegmentInfoRequest) ([]*querypb.SegmentInfo, error)
+	GetSegmentInfoByNode(ctx context.Context, nodeID int64, in *querypb.GetSegmentInfoRequest) ([]*querypb.SegmentInfo, error)
+	GetSegmentInfoByID(ctx context.Context, segmentID UniqueID) (*querypb.SegmentInfo, error)
+	SyncReplicaSegments(ctx context.Context, leaderID UniqueID, in *querypb.SyncReplicaSegmentsRequest) error
+
+	// Channel
+	WatchDmChannels(ctx context.Context, nodeID int64, in *querypb.WatchDmChannelsRequest) error
+	WatchDeltaChannels(ctx context.Context, nodeID int64, in *querypb.WatchDeltaChannelsRequest) error
+	HasWatchedDeltaChannel(ctx context.Context, nodeID int64, collectionID UniqueID) bool
+
+	// Node
+	RegisterNode(ctx context.Context, session *sessionutil.Session, id UniqueID, state nodeState) error
+	GetNodeInfoByID(nodeID int64) (Node, error)
+	RemoveNodeInfo(nodeID int64) error
+	StopNode(nodeID int64)
+	OnlineNodeIDs() []int64
+	IsOnline(nodeID int64) (bool, error)
+	OfflineNodeIDs() []int64
+	HasNode(nodeID int64) bool
+	GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) []queryNodeGetMetricsResponse
+
+	AllocateSegmentsToQueryNode(ctx context.Context, reqs []*querypb.LoadSegmentsRequest, wait bool, excludeNodeIDs []int64, includeNodeIDs []int64, replicaID int64) error
+	AllocateChannelsToQueryNode(ctx context.Context, reqs []*querypb.WatchDmChannelsRequest, wait bool, excludeNodeIDs []int64, includeNodeIDs []int64, replicaID int64) error
+	AssignNodesToReplicas(ctx context.Context, replicas []*milvuspb.ReplicaInfo, collectionSize uint64) error
+
+	GetSessionVersion() int64
+
+	// Inner
 	reloadFromKV() error
 	getComponentInfos(ctx context.Context) []*internalpb.ComponentInfo
-
-	loadSegments(ctx context.Context, nodeID int64, in *querypb.LoadSegmentsRequest) error
-	releaseSegments(ctx context.Context, nodeID int64, in *querypb.ReleaseSegmentsRequest) error
-
-	watchDmChannels(ctx context.Context, nodeID int64, in *querypb.WatchDmChannelsRequest) error
-	watchDeltaChannels(ctx context.Context, nodeID int64, in *querypb.WatchDeltaChannelsRequest) error
-
-	hasWatchedDeltaChannel(ctx context.Context, nodeID int64, collectionID UniqueID) bool
-	releaseCollection(ctx context.Context, nodeID int64, in *querypb.ReleaseCollectionRequest) error
-	releasePartitions(ctx context.Context, nodeID int64, in *querypb.ReleasePartitionsRequest) error
-	getSegmentInfo(ctx context.Context, in *querypb.GetSegmentInfoRequest) ([]*querypb.SegmentInfo, error)
-	getSegmentInfoByNode(ctx context.Context, nodeID int64, in *querypb.GetSegmentInfoRequest) ([]*querypb.SegmentInfo, error)
-	getSegmentInfoByID(ctx context.Context, segmentID UniqueID) (*querypb.SegmentInfo, error)
-	syncReplicaSegments(ctx context.Context, leaderID UniqueID, in *querypb.SyncReplicaSegmentsRequest) error
-
-	registerNode(ctx context.Context, session *sessionutil.Session, id UniqueID, state nodeState) error
-	getNodeInfoByID(nodeID int64) (Node, error)
-	removeNodeInfo(nodeID int64) error
-	stopNode(nodeID int64)
-	onlineNodeIDs() []int64
-	isOnline(nodeID int64) (bool, error)
-	offlineNodeIDs() []int64
-	hasNode(nodeID int64) bool
-
-	allocateSegmentsToQueryNode(ctx context.Context, reqs []*querypb.LoadSegmentsRequest, wait bool, excludeNodeIDs []int64, includeNodeIDs []int64, replicaID int64) error
-	allocateChannelsToQueryNode(ctx context.Context, reqs []*querypb.WatchDmChannelsRequest, wait bool, excludeNodeIDs []int64, includeNodeIDs []int64, replicaID int64) error
-
-	assignNodesToReplicas(ctx context.Context, replicas []*milvuspb.ReplicaInfo, collectionSize uint64) error
-
-	getSessionVersion() int64
-
-	getMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) []queryNodeGetMetricsResponse
 }
 
 type newQueryNodeFn func(ctx context.Context, address string, id UniqueID, kv *etcdkv.EtcdKV) (Node, error)
@@ -135,7 +138,6 @@ func newQueryNodeCluster(ctx context.Context, clusterMeta Meta, kv *etcdkv.EtcdK
 // Reload trigger task, trigger task states, internal task, internal task state from etcd
 // Assign the internal task to the corresponding trigger task as a child task
 func (c *queryNodeCluster) reloadFromKV() error {
-	toLoadMetaNodeIDs := make([]int64, 0)
 	// get current online session
 	onlineNodeSessions, version, _ := c.session.GetSessions(typeutil.QueryNodeRole)
 	onlineSessionMap := make(map[int64]*sessionutil.Session)
@@ -145,12 +147,11 @@ func (c *queryNodeCluster) reloadFromKV() error {
 	}
 	for nodeID, session := range onlineSessionMap {
 		log.Info("reloadFromKV: register a queryNode to cluster", zap.Any("nodeID", nodeID))
-		err := c.registerNode(c.ctx, session, nodeID, disConnect)
+		err := c.RegisterNode(c.ctx, session, nodeID, disConnect)
 		if err != nil {
 			log.Warn("QueryNode failed to register", zap.Int64("nodeID", nodeID), zap.String("error info", err.Error()))
 			return err
 		}
-		toLoadMetaNodeIDs = append(toLoadMetaNodeIDs, nodeID)
 	}
 	c.sessionVersion = version
 
@@ -173,19 +174,18 @@ func (c *queryNodeCluster) reloadFromKV() error {
 				log.Warn("watchNodeLoop: unmarshal session error", zap.Error(err))
 				return err
 			}
-			err = c.registerNode(context.Background(), session, nodeID, offline)
+			err = c.RegisterNode(context.Background(), session, nodeID, offline)
 			if err != nil {
 				log.Warn("reloadFromKV: failed to add queryNode to cluster", zap.Int64("nodeID", nodeID), zap.String("error info", err.Error()))
 				return err
 			}
-			toLoadMetaNodeIDs = append(toLoadMetaNodeIDs, nodeID)
 		}
 	}
 
 	return nil
 }
 
-func (c *queryNodeCluster) getSessionVersion() int64 {
+func (c *queryNodeCluster) GetSessionVersion() int64 {
 	return c.sessionVersion
 }
 
@@ -201,7 +201,7 @@ func (c *queryNodeCluster) getComponentInfos(ctx context.Context) []*internalpb.
 	return subComponentInfos
 }
 
-func (c *queryNodeCluster) loadSegments(ctx context.Context, nodeID int64, in *querypb.LoadSegmentsRequest) error {
+func (c *queryNodeCluster) LoadSegments(ctx context.Context, nodeID int64, in *querypb.LoadSegmentsRequest) error {
 	c.RLock()
 	var targetNode Node
 	if node, ok := c.nodes[nodeID]; ok {
@@ -221,7 +221,7 @@ func (c *queryNodeCluster) loadSegments(ctx context.Context, nodeID int64, in *q
 	return fmt.Errorf("loadSegments: can't find QueryNode by nodeID, nodeID = %d", nodeID)
 }
 
-func (c *queryNodeCluster) releaseSegments(ctx context.Context, leaderID int64, in *querypb.ReleaseSegmentsRequest) error {
+func (c *queryNodeCluster) ReleaseSegments(ctx context.Context, leaderID int64, in *querypb.ReleaseSegmentsRequest) error {
 	c.RLock()
 	var targetNode Node
 	if node, ok := c.nodes[leaderID]; ok {
@@ -246,7 +246,7 @@ func (c *queryNodeCluster) releaseSegments(ctx context.Context, leaderID int64, 
 	return fmt.Errorf("releaseSegments: can't find QueryNode by nodeID, nodeID = %d", leaderID)
 }
 
-func (c *queryNodeCluster) watchDmChannels(ctx context.Context, nodeID int64, in *querypb.WatchDmChannelsRequest) error {
+func (c *queryNodeCluster) WatchDmChannels(ctx context.Context, nodeID int64, in *querypb.WatchDmChannelsRequest) error {
 	c.RLock()
 	var targetNode Node
 	if node, ok := c.nodes[nodeID]; ok {
@@ -281,7 +281,7 @@ func (c *queryNodeCluster) watchDmChannels(ctx context.Context, nodeID int64, in
 	return fmt.Errorf("watchDmChannels: can't find QueryNode by nodeID, nodeID = %d", nodeID)
 }
 
-func (c *queryNodeCluster) watchDeltaChannels(ctx context.Context, nodeID int64, in *querypb.WatchDeltaChannelsRequest) error {
+func (c *queryNodeCluster) WatchDeltaChannels(ctx context.Context, nodeID int64, in *querypb.WatchDeltaChannelsRequest) error {
 	c.RLock()
 	var targetNode Node
 	if node, ok := c.nodes[nodeID]; ok {
@@ -301,14 +301,14 @@ func (c *queryNodeCluster) watchDeltaChannels(ctx context.Context, nodeID int64,
 	return fmt.Errorf("watchDeltaChannels: can't find QueryNode by nodeID, nodeID = %d", nodeID)
 }
 
-func (c *queryNodeCluster) hasWatchedDeltaChannel(ctx context.Context, nodeID int64, collectionID UniqueID) bool {
+func (c *queryNodeCluster) HasWatchedDeltaChannel(ctx context.Context, nodeID int64, collectionID UniqueID) bool {
 	c.RLock()
 	defer c.RUnlock()
 
 	return c.nodes[nodeID].hasWatchedDeltaChannel(collectionID)
 }
 
-func (c *queryNodeCluster) releaseCollection(ctx context.Context, nodeID int64, in *querypb.ReleaseCollectionRequest) error {
+func (c *queryNodeCluster) ReleaseCollection(ctx context.Context, nodeID int64, in *querypb.ReleaseCollectionRequest) error {
 	c.RLock()
 	var targetNode Node
 	if node, ok := c.nodes[nodeID]; ok {
@@ -328,7 +328,7 @@ func (c *queryNodeCluster) releaseCollection(ctx context.Context, nodeID int64, 
 	return fmt.Errorf("releaseCollection: can't find QueryNode by nodeID, nodeID = %d", nodeID)
 }
 
-func (c *queryNodeCluster) releasePartitions(ctx context.Context, nodeID int64, in *querypb.ReleasePartitionsRequest) error {
+func (c *queryNodeCluster) ReleasePartitions(ctx context.Context, nodeID int64, in *querypb.ReleasePartitionsRequest) error {
 	c.RLock()
 	var targetNode Node
 	if node, ok := c.nodes[nodeID]; ok {
@@ -348,7 +348,7 @@ func (c *queryNodeCluster) releasePartitions(ctx context.Context, nodeID int64, 
 	return fmt.Errorf("releasePartitions: can't find QueryNode by nodeID, nodeID = %d", nodeID)
 }
 
-func (c *queryNodeCluster) getSegmentInfoByID(ctx context.Context, segmentID UniqueID) (*querypb.SegmentInfo, error) {
+func (c *queryNodeCluster) GetSegmentInfoByID(ctx context.Context, segmentID UniqueID) (*querypb.SegmentInfo, error) {
 	segmentInfo, err := c.clusterMeta.getSegmentInfoByID(segmentID)
 	if err != nil {
 		return nil, err
@@ -381,7 +381,7 @@ func (c *queryNodeCluster) getSegmentInfoByID(ctx context.Context, segmentID Uni
 	return nil, fmt.Errorf("updateSegmentInfo: can't find segment %d on QueryNode %d", segmentID, segmentInfo.NodeID)
 }
 
-func (c *queryNodeCluster) getSegmentInfo(ctx context.Context, in *querypb.GetSegmentInfoRequest) ([]*querypb.SegmentInfo, error) {
+func (c *queryNodeCluster) GetSegmentInfo(ctx context.Context, in *querypb.GetSegmentInfoRequest) ([]*querypb.SegmentInfo, error) {
 	type respTuple struct {
 		res *querypb.GetSegmentInfoResponse
 		err error
@@ -447,7 +447,7 @@ func (c *queryNodeCluster) getSegmentInfo(ctx context.Context, in *querypb.GetSe
 	return segmentInfos, nil
 }
 
-func (c *queryNodeCluster) getSegmentInfoByNode(ctx context.Context, nodeID int64, in *querypb.GetSegmentInfoRequest) ([]*querypb.SegmentInfo, error) {
+func (c *queryNodeCluster) GetSegmentInfoByNode(ctx context.Context, nodeID int64, in *querypb.GetSegmentInfoRequest) ([]*querypb.SegmentInfo, error) {
 	c.RLock()
 	node, ok := c.nodes[nodeID]
 	c.RUnlock()
@@ -462,7 +462,7 @@ func (c *queryNodeCluster) getSegmentInfoByNode(ctx context.Context, nodeID int6
 	return res.GetInfos(), nil
 }
 
-func (c *queryNodeCluster) syncReplicaSegments(ctx context.Context, leaderID UniqueID, in *querypb.SyncReplicaSegmentsRequest) error {
+func (c *queryNodeCluster) SyncReplicaSegments(ctx context.Context, leaderID UniqueID, in *querypb.SyncReplicaSegmentsRequest) error {
 	c.RLock()
 	leader, ok := c.nodes[leaderID]
 	c.RUnlock()
@@ -478,7 +478,7 @@ type queryNodeGetMetricsResponse struct {
 	err  error
 }
 
-func (c *queryNodeCluster) getMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) []queryNodeGetMetricsResponse {
+func (c *queryNodeCluster) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) []queryNodeGetMetricsResponse {
 	c.RLock()
 	var wg sync.WaitGroup
 	cnt := len(c.nodes)
@@ -527,7 +527,7 @@ func (c *queryNodeCluster) setNodeState(nodeID int64, node Node, state nodeState
 	node.setState(state)
 }
 
-func (c *queryNodeCluster) registerNode(ctx context.Context, session *sessionutil.Session, id UniqueID, state nodeState) error {
+func (c *queryNodeCluster) RegisterNode(ctx context.Context, session *sessionutil.Session, id UniqueID, state nodeState) error {
 	c.Lock()
 	defer c.Unlock()
 
@@ -559,7 +559,7 @@ func (c *queryNodeCluster) registerNode(ctx context.Context, session *sessionuti
 	return fmt.Errorf("registerNode: QueryNode %d alredy exists in cluster", id)
 }
 
-func (c *queryNodeCluster) getNodeInfoByID(nodeID int64) (Node, error) {
+func (c *queryNodeCluster) GetNodeInfoByID(nodeID int64) (Node, error) {
 	c.RLock()
 	node, ok := c.nodes[nodeID]
 	c.RUnlock()
@@ -574,7 +574,7 @@ func (c *queryNodeCluster) getNodeInfoByID(nodeID int64) (Node, error) {
 	return nodeInfo, nil
 }
 
-func (c *queryNodeCluster) removeNodeInfo(nodeID int64) error {
+func (c *queryNodeCluster) RemoveNodeInfo(nodeID int64) error {
 	c.Lock()
 	defer c.Unlock()
 
@@ -591,7 +591,7 @@ func (c *queryNodeCluster) removeNodeInfo(nodeID int64) error {
 	return nil
 }
 
-func (c *queryNodeCluster) stopNode(nodeID int64) {
+func (c *queryNodeCluster) StopNode(nodeID int64) {
 	c.RLock()
 	defer c.RUnlock()
 
@@ -602,7 +602,7 @@ func (c *queryNodeCluster) stopNode(nodeID int64) {
 	}
 }
 
-func (c *queryNodeCluster) onlineNodeIDs() []int64 {
+func (c *queryNodeCluster) OnlineNodeIDs() []int64 {
 	c.RLock()
 	defer c.RUnlock()
 
@@ -616,7 +616,7 @@ func (c *queryNodeCluster) onlineNodeIDs() []int64 {
 	return onlineNodeIDs
 }
 
-func (c *queryNodeCluster) offlineNodeIDs() []int64 {
+func (c *queryNodeCluster) OfflineNodeIDs() []int64 {
 	c.RLock()
 	defer c.RUnlock()
 
@@ -630,7 +630,7 @@ func (c *queryNodeCluster) offlineNodeIDs() []int64 {
 	return offlineNodeIDs
 }
 
-func (c *queryNodeCluster) hasNode(nodeID int64) bool {
+func (c *queryNodeCluster) HasNode(nodeID int64) bool {
 	c.RLock()
 	defer c.RUnlock()
 
@@ -641,7 +641,7 @@ func (c *queryNodeCluster) hasNode(nodeID int64) bool {
 	return false
 }
 
-func (c *queryNodeCluster) isOnline(nodeID int64) (bool, error) {
+func (c *queryNodeCluster) IsOnline(nodeID int64) (bool, error) {
 	c.RLock()
 	defer c.RUnlock()
 
@@ -667,17 +667,17 @@ func (c *queryNodeCluster) isOnline(nodeID int64) (bool, error) {
 //	}
 //}
 
-func (c *queryNodeCluster) allocateSegmentsToQueryNode(ctx context.Context, reqs []*querypb.LoadSegmentsRequest, wait bool, excludeNodeIDs []int64, includeNodeIDs []int64, replicaID int64) error {
+func (c *queryNodeCluster) AllocateSegmentsToQueryNode(ctx context.Context, reqs []*querypb.LoadSegmentsRequest, wait bool, excludeNodeIDs []int64, includeNodeIDs []int64, replicaID int64) error {
 	return c.segmentAllocator(ctx, reqs, c, c.clusterMeta, wait, excludeNodeIDs, includeNodeIDs, replicaID)
 }
 
-func (c *queryNodeCluster) allocateChannelsToQueryNode(ctx context.Context, reqs []*querypb.WatchDmChannelsRequest, wait bool, excludeNodeIDs []int64, includeNodeIDs []int64, replicaID int64) error {
+func (c *queryNodeCluster) AllocateChannelsToQueryNode(ctx context.Context, reqs []*querypb.WatchDmChannelsRequest, wait bool, excludeNodeIDs []int64, includeNodeIDs []int64, replicaID int64) error {
 	return c.channelAllocator(ctx, reqs, c, c.clusterMeta, wait, excludeNodeIDs, includeNodeIDs, replicaID)
 }
 
 // Return error if no enough nodes/resources to create replicas
-func (c *queryNodeCluster) assignNodesToReplicas(ctx context.Context, replicas []*milvuspb.ReplicaInfo, collectionSize uint64) error {
-	nodeIds := c.onlineNodeIDs()
+func (c *queryNodeCluster) AssignNodesToReplicas(ctx context.Context, replicas []*milvuspb.ReplicaInfo, collectionSize uint64) error {
+	nodeIds := c.OnlineNodeIDs()
 	if len(nodeIds) < len(replicas) {
 		return fmt.Errorf("no enough nodes to create replicas, node_num=%d replica_num=%d", len(nodeIds), len(replicas))
 	}
@@ -725,7 +725,7 @@ func getNodeInfos(cluster Cluster, nodeIds []UniqueID) []*queryNode {
 		wg.Add(1)
 		go func(id UniqueID) {
 			defer wg.Done()
-			info, err := cluster.getNodeInfoByID(id)
+			info, err := cluster.GetNodeInfoByID(id)
 			if err != nil {
 				return
 			}

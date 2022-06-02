@@ -99,7 +99,7 @@ func TestShuffleSegmentsToQueryNode(t *testing.T) {
 	assert.Nil(t, err)
 	node1Session := node1.session
 	node1ID := node1.queryNodeID
-	cluster.registerNode(baseCtx, node1Session, node1ID, disConnect)
+	cluster.RegisterNode(baseCtx, node1Session, node1ID, disConnect)
 	waitQueryNodeOnline(cluster, node1ID)
 
 	t.Run("Test shuffleSegmentsToQueryNode", func(t *testing.T) {
@@ -114,9 +114,9 @@ func TestShuffleSegmentsToQueryNode(t *testing.T) {
 	assert.Nil(t, err)
 	node2Session := node2.session
 	node2ID := node2.queryNodeID
-	cluster.registerNode(baseCtx, node2Session, node2ID, disConnect)
+	cluster.RegisterNode(baseCtx, node2Session, node2ID, disConnect)
 	waitQueryNodeOnline(cluster, node2ID)
-	cluster.stopNode(node1ID)
+	cluster.StopNode(node1ID)
 
 	t.Run("Test shuffleSegmentsToQueryNodeV2", func(t *testing.T) {
 		err = shuffleSegmentsToQueryNodeV2(baseCtx, reqs, cluster, meta, false, nil, nil, -1)

@@ -45,7 +45,7 @@ func shuffleSegmentsToQueryNode(ctx context.Context, reqs []*querypb.LoadSegment
 	}
 
 	for {
-		onlineNodeIDs := cluster.onlineNodeIDs()
+		onlineNodeIDs := cluster.OnlineNodeIDs()
 		if len(onlineNodeIDs) == 0 {
 			err := errors.New("no online QueryNode to allocate")
 			log.Error("shuffleSegmentsToQueryNode failed", zap.Error(err))
@@ -117,7 +117,7 @@ func shuffleSegmentsToQueryNodeV2(ctx context.Context, reqs []*querypb.LoadSegme
 		memUsageRate := make(map[int64]float64)
 		var onlineNodeIDs []int64
 		if replicaID == -1 {
-			onlineNodeIDs = cluster.onlineNodeIDs()
+			onlineNodeIDs = cluster.OnlineNodeIDs()
 		} else {
 			replica, err := metaCache.getReplicaByID(replicaID)
 			if err != nil {
@@ -125,7 +125,7 @@ func shuffleSegmentsToQueryNodeV2(ctx context.Context, reqs []*querypb.LoadSegme
 			}
 			replicaNodes := replica.GetNodeIds()
 			for _, nodeID := range replicaNodes {
-				if ok, err := cluster.isOnline(nodeID); err == nil && ok {
+				if ok, err := cluster.IsOnline(nodeID); err == nil && ok {
 					onlineNodeIDs = append(onlineNodeIDs, nodeID)
 				}
 			}
@@ -148,7 +148,7 @@ func shuffleSegmentsToQueryNodeV2(ctx context.Context, reqs []*querypb.LoadSegme
 				continue
 			}
 			// statistic nodeInfo, used memory, memory usage of every query node
-			nodeInfo, err := cluster.getNodeInfoByID(nodeID)
+			nodeInfo, err := cluster.GetNodeInfoByID(nodeID)
 			if err != nil {
 				log.Warn("shuffleSegmentsToQueryNodeV2: getNodeInfoByID failed", zap.Error(err))
 				continue

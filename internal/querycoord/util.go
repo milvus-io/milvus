@@ -188,7 +188,7 @@ func syncReplicaSegments(ctx context.Context, cluster Cluster, childTasks []task
 				}
 			}
 
-			err := cluster.syncReplicaSegments(ctx, leader.LeaderID, &req)
+			err := cluster.SyncReplicaSegments(ctx, leader.LeaderID, &req)
 			if err != nil {
 				return err
 			}
