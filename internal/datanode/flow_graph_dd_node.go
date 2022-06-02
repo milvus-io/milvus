@@ -26,6 +26,7 @@ import (
 	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
@@ -177,7 +178,9 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 	if err != nil {
 		err = fmt.Errorf("DDNode forward delete msg failed, vChannel = %s, err = %s", ddn.vchannelName, err)
 		log.Error(err.Error())
-		panic(err)
+		if !common.IsIgnorableError(err) {
+			panic(err)
+		}
 	}
 
 	fgMsg.startPositions = append(fgMsg.startPositions, msMsg.StartPositions()...)
