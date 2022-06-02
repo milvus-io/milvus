@@ -39,6 +39,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/retry"
+
+	grpcStatus "google.golang.org/grpc/status"
 )
 
 // CheckGrpcReady wait for context timeout, or wait 100ms then send nil to targetCh
@@ -351,4 +353,12 @@ func GetNumRowOfFieldData(fieldData *schemapb.FieldData) (uint64, error) {
 func ReadBinary(endian binary.ByteOrder, bs []byte, receiver interface{}) error {
 	buf := bytes.NewReader(bs)
 	return binary.Read(buf, endian, receiver)
+}
+
+func IsGrpcErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	_, ok := grpcStatus.FromError(err)
+	return ok
 }

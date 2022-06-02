@@ -198,7 +198,8 @@ func TestMetaCache_GetCollection(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
 	queryCoord := &MockQueryCoordClientInterface{}
-	err := InitMetaCache(rootCoord, queryCoord)
+	mgr := newShardClientMgr()
+	err := InitMetaCache(rootCoord, queryCoord, mgr)
 	assert.Nil(t, err)
 
 	id, err := globalMetaCache.GetCollectionID(ctx, "collection1")
@@ -245,7 +246,8 @@ func TestMetaCache_GetCollectionFailure(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
 	queryCoord := &MockQueryCoordClientInterface{}
-	err := InitMetaCache(rootCoord, queryCoord)
+	mgr := newShardClientMgr()
+	err := InitMetaCache(rootCoord, queryCoord, mgr)
 	assert.Nil(t, err)
 	rootCoord.Error = true
 
@@ -275,7 +277,8 @@ func TestMetaCache_GetNonExistCollection(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
 	queryCoord := &MockQueryCoordClientInterface{}
-	err := InitMetaCache(rootCoord, queryCoord)
+	mgr := newShardClientMgr()
+	err := InitMetaCache(rootCoord, queryCoord, mgr)
 	assert.Nil(t, err)
 
 	id, err := globalMetaCache.GetCollectionID(ctx, "collection3")
@@ -290,7 +293,8 @@ func TestMetaCache_GetPartitionID(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
 	queryCoord := &MockQueryCoordClientInterface{}
-	err := InitMetaCache(rootCoord, queryCoord)
+	mgr := newShardClientMgr()
+	err := InitMetaCache(rootCoord, queryCoord, mgr)
 	assert.Nil(t, err)
 
 	id, err := globalMetaCache.GetPartitionID(ctx, "collection1", "par1")
@@ -311,7 +315,8 @@ func TestMetaCache_GetPartitionError(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
 	queryCoord := &MockQueryCoordClientInterface{}
-	err := InitMetaCache(rootCoord, queryCoord)
+	mgr := newShardClientMgr()
+	err := InitMetaCache(rootCoord, queryCoord, mgr)
 	assert.Nil(t, err)
 
 	// Test the case where ShowPartitionsResponse is not aligned
@@ -340,35 +345,35 @@ func TestMetaCache_GetPartitionError(t *testing.T) {
 
 func TestMetaCache_GetShards(t *testing.T) {
 	rootCoord := &MockRootCoordClientInterface{}
-	queryCoord := &MockQueryCoordClientInterface{}
-	err := InitMetaCache(rootCoord, queryCoord)
+	qc := NewQueryCoordMock()
+	shardMgr := newShardClientMgr()
+	err := InitMetaCache(rootCoord, qc, shardMgr)
 	require.Nil(t, err)
 
 	var (
 		ctx            = context.TODO()
 		collectionName = "collection1"
-		qc             = NewQueryCoordMock()
 	)
 	qc.Init()
 	qc.Start()
 	defer qc.Stop()
 
 	t.Run("No collection in meta cache", func(t *testing.T) {
-		shards, err := globalMetaCache.GetShards(ctx, true, "non-exists", qc)
+		shards, err := globalMetaCache.GetShards(ctx, true, "non-exists")
 		assert.Error(t, err)
 		assert.Empty(t, shards)
 	})
 
 	t.Run("without shardLeaders in collection info invalid shardLeaders", func(t *testing.T) {
 		qc.validShardLeaders = false
-		shards, err := globalMetaCache.GetShards(ctx, false, collectionName, qc)
+		shards, err := globalMetaCache.GetShards(ctx, false, collectionName)
 		assert.Error(t, err)
 		assert.Empty(t, shards)
 	})
 
 	t.Run("without shardLeaders in collection info", func(t *testing.T) {
 		qc.validShardLeaders = true
-		shards, err := globalMetaCache.GetShards(ctx, true, collectionName, qc)
+		shards, err := globalMetaCache.GetShards(ctx, true, collectionName)
 		assert.NoError(t, err)
 		assert.NotEmpty(t, shards)
 		assert.Equal(t, 1, len(shards))
@@ -377,7 +382,7 @@ func TestMetaCache_GetShards(t *testing.T) {
 
 		// get from cache
 		qc.validShardLeaders = false
-		shards, err = globalMetaCache.GetShards(ctx, true, collectionName, qc)
+		shards, err = globalMetaCache.GetShards(ctx, true, collectionName)
 		assert.NoError(t, err)
 		assert.NotEmpty(t, shards)
 		assert.Equal(t, 1, len(shards))
@@ -387,14 +392,14 @@ func TestMetaCache_GetShards(t *testing.T) {
 
 func TestMetaCache_ClearShards(t *testing.T) {
 	rootCoord := &MockRootCoordClientInterface{}
-	queryCoord := &MockQueryCoordClientInterface{}
-	err := InitMetaCache(rootCoord, queryCoord)
+	qc := NewQueryCoordMock()
+	mgr := newShardClientMgr()
+	err := InitMetaCache(rootCoord, qc, mgr)
 	require.Nil(t, err)
 
 	var (
 		ctx            = context.TODO()
 		collectionName = "collection1"
-		qc             = NewQueryCoordMock()
 	)
 	qc.Init()
 	qc.Start()
@@ -411,7 +416,7 @@ func TestMetaCache_ClearShards(t *testing.T) {
 	t.Run("Clear valid collection valid cache", func(t *testing.T) {
 
 		qc.validShardLeaders = true
-		shards, err := globalMetaCache.GetShards(ctx, true, collectionName, qc)
+		shards, err := globalMetaCache.GetShards(ctx, true, collectionName)
 		require.NoError(t, err)
 		require.NotEmpty(t, shards)
 		require.Equal(t, 1, len(shards))
@@ -420,7 +425,7 @@ func TestMetaCache_ClearShards(t *testing.T) {
 		globalMetaCache.ClearShards(collectionName)
 
 		qc.validShardLeaders = false
-		shards, err = globalMetaCache.GetShards(ctx, true, collectionName, qc)
+		shards, err = globalMetaCache.GetShards(ctx, true, collectionName)
 		assert.Error(t, err)
 		assert.Empty(t, shards)
 	})
@@ -431,7 +436,8 @@ func TestMetaCache_LoadCache(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
 	queryCoord := &MockQueryCoordClientInterface{}
-	err := InitMetaCache(rootCoord, queryCoord)
+	mgr := newShardClientMgr()
+	err := InitMetaCache(rootCoord, queryCoord, mgr)
 	assert.Nil(t, err)
 
 	t.Run("test IsCollectionLoaded", func(t *testing.T) {
@@ -474,7 +480,8 @@ func TestMetaCache_RemoveCollection(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
 	queryCoord := &MockQueryCoordClientInterface{}
-	err := InitMetaCache(rootCoord, queryCoord)
+	shardMgr := newShardClientMgr()
+	err := InitMetaCache(rootCoord, queryCoord, shardMgr)
 	assert.Nil(t, err)
 
 	info, err := globalMetaCache.GetCollectionInfo(ctx, "collection1")

@@ -203,17 +203,14 @@ func (c *ClientBase) callOnce(ctx context.Context, caller func(client interface{
 		return ret, nil
 	}
 
-	// status.Error(codes.Canceled, context.Canceled.Error()
-	// if err2 == context.Canceled || err2 == context.DeadlineExceeded {
-	// 	return nil, err2
-	// }
-
 	if !funcutil.CheckCtxValid(ctx) {
 		return nil, err2
 	}
-
+	if !funcutil.IsGrpcErr(err2) {
+		log.Debug("ClientBase:isNotGrpcErr", zap.Error(err2))
+		return nil, err2
+	}
 	log.Debug(c.GetRole()+" ClientBase grpc error, start to reset connection", zap.Error(err2))
-
 	c.resetConnection(client)
 	return ret, err2
 }

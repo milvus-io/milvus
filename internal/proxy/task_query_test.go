@@ -11,13 +11,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/common"
-	"github.com/milvus-io/milvus/internal/types"
-
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/types"
 
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -41,16 +40,18 @@ func TestQueryTask_all(t *testing.T) {
 		hitNum = 10
 	)
 
-	mockGetQueryNodePolicy := func(ctx context.Context, address string) (types.QueryNode, error) {
+	mockCreator := func(ctx context.Context, address string) (types.QueryNode, error) {
 		return qn, nil
 	}
+
+	mgr := newShardClientMgr(withShardClientCreator(mockCreator))
 
 	rc.Start()
 	defer rc.Stop()
 	qc.Start()
 	defer qc.Stop()
 
-	err = InitMetaCache(rc, qc)
+	err = InitMetaCache(rc, qc, mgr)
 	assert.NoError(t, err)
 
 	fieldName2Types := map[string]schemapb.DataType{
@@ -125,8 +126,8 @@ func TestQueryTask_all(t *testing.T) {
 		},
 		qc: qc,
 
-		getQueryNodePolicy: mockGetQueryNodePolicy,
-		queryShardPolicy:   roundRobinPolicy,
+		queryShardPolicy: roundRobinPolicy,
+		shardMgr:         mgr,
 	}
 	for i := 0; i < len(fieldName2Types); i++ {
 		task.RetrieveRequest.OutputFieldsId[i] = int64(common.StartOfUserFieldID + i)
@@ -181,7 +182,8 @@ func TestCheckIfLoaded(t *testing.T) {
 	err = rc.Start()
 	defer rc.Stop()
 	require.NoError(t, err)
-	err = InitMetaCache(rc, qc)
+	mgr := newShardClientMgr()
+	err = InitMetaCache(rc, qc, mgr)
 	require.NoError(t, err)
 
 	err = qc.Start()

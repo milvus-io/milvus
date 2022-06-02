@@ -32,6 +32,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/stretchr/testify/assert"
+	grpcCodes "google.golang.org/grpc/codes"
+	grpcStatus "google.golang.org/grpc/status"
 )
 
 type MockComponent struct {
@@ -462,4 +464,29 @@ func Test_ReadBinary(t *testing.T) {
 	var fs = make([]float32, 2)
 	assert.NoError(t, ReadBinary(endian, bs, &fs))
 	assert.ElementsMatch(t, []float32{0, 0}, fs)
+}
+
+func TestIsGrpcErr(t *testing.T) {
+	var err1 error
+	assert.False(t, IsGrpcErr(err1))
+
+	err1 = errors.New("error")
+	assert.False(t, IsGrpcErr(err1))
+
+	bgCtx := context.Background()
+	ctx1, cancel1 := context.WithCancel(bgCtx)
+	cancel1()
+	assert.False(t, IsGrpcErr(ctx1.Err()))
+
+	timeout := 20 * time.Millisecond
+	ctx1, cancel1 = context.WithTimeout(bgCtx, timeout)
+	time.Sleep(timeout * 2)
+	assert.False(t, IsGrpcErr(ctx1.Err()))
+	cancel1()
+
+	err1 = grpcStatus.Error(grpcCodes.Canceled, "test")
+	assert.True(t, IsGrpcErr(err1))
+
+	err1 = grpcStatus.Error(grpcCodes.Unavailable, "test")
+	assert.True(t, IsGrpcErr(err1))
 }

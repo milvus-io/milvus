@@ -50,15 +50,11 @@ type queryTask struct {
 	runningGroup    *errgroup.Group
 	runningGroupCtx context.Context
 
-	getQueryNodePolicy getQueryNodePolicy
-	queryShardPolicy   pickShardPolicy
+	queryShardPolicy pickShardPolicy
+	shardMgr         *shardClientMgr
 }
 
 func (t *queryTask) PreExecute(ctx context.Context) error {
-	if t.getQueryNodePolicy == nil {
-		t.getQueryNodePolicy = defaultGetQueryNodePolicy
-	}
-
 	if t.queryShardPolicy == nil {
 		t.queryShardPolicy = roundRobinPolicy
 	}
@@ -240,11 +236,10 @@ func (t *queryTask) Execute(ctx context.Context) error {
 	defer tr.Elapse("done")
 
 	executeQuery := func(withCache bool) error {
-		shards, err := globalMetaCache.GetShards(ctx, withCache, t.collectionName, t.qc)
+		shards, err := globalMetaCache.GetShards(ctx, withCache, t.collectionName)
 		if err != nil {
 			return err
 		}
-
 		t.resultBuf = make(chan *internalpb.RetrieveResults, len(shards))
 		t.toReduceResults = make([]*internalpb.RetrieveResults, 0, len(shards))
 		t.runningGroup, t.runningGroupCtx = errgroup.WithContext(ctx)
@@ -353,7 +348,7 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-func (t *queryTask) queryShard(ctx context.Context, leaders []queryNode, channelID string) error {
+func (t *queryTask) queryShard(ctx context.Context, leaders []nodeInfo, channelID string) error {
 	query := func(nodeID UniqueID, qn types.QueryNode) error {
 		req := &querypb.QueryRequest{
 			Req:        t.RetrieveRequest,
@@ -378,7 +373,7 @@ func (t *queryTask) queryShard(ctx context.Context, leaders []queryNode, channel
 		return nil
 	}
 
-	err := t.queryShardPolicy(t.TraceCtx(), t.getQueryNodePolicy, query, leaders)
+	err := t.queryShardPolicy(t.TraceCtx(), t.shardMgr, query, leaders)
 	if err != nil {
 		log.Warn("fail to Query to all shard leaders", zap.Int64("taskID", t.ID()), zap.Any("shard leaders", leaders))
 		return err

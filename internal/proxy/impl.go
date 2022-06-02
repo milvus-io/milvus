@@ -2410,10 +2410,10 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 			},
 			ReqID: Params.ProxyCfg.GetNodeID(),
 		},
-		request:            request,
-		qc:                 node.queryCoord,
-		tr:                 timerecord.NewTimeRecorder("search"),
-		getQueryNodePolicy: defaultGetQueryNodePolicy,
+		request:  request,
+		qc:       node.queryCoord,
+		tr:       timerecord.NewTimeRecorder("search"),
+		shardMgr: node.shardMgr,
 	}
 
 	travelTs := request.TravelTimestamp
@@ -2649,10 +2649,10 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 			},
 			ReqID: Params.ProxyCfg.GetNodeID(),
 		},
-		request:            request,
-		qc:                 node.queryCoord,
-		getQueryNodePolicy: defaultGetQueryNodePolicy,
-		queryShardPolicy:   roundRobinPolicy,
+		request:          request,
+		qc:               node.queryCoord,
+		queryShardPolicy: roundRobinPolicy,
+		shardMgr:         node.shardMgr,
 	}
 
 	method := "Query"
@@ -3062,8 +3062,8 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 			qc:      node.queryCoord,
 			ids:     ids.IdArray,
 
-			getQueryNodePolicy: defaultGetQueryNodePolicy,
-			queryShardPolicy:   roundRobinPolicy,
+			queryShardPolicy: roundRobinPolicy,
+			shardMgr:         node.shardMgr,
 		}
 
 		items := []zapcore.Field{
