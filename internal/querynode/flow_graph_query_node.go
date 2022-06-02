@@ -64,8 +64,8 @@ func newQueryNodeFlowGraph(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
-	var filterDmNode node = newFilteredDmNode(metaReplica, collectionID)
-	var insertNode node = newInsertNode(metaReplica, collectionID)
+	var filterDmNode node = newFilteredDmNode(metaReplica, collectionID, channel)
+	var insertNode node = newInsertNode(metaReplica, collectionID, channel)
 	var serviceTimeNode node = newServiceTimeNode(tSafeReplica, collectionID, channel)
 
 	q.flowGraph.AddNode(dmStreamNode)
@@ -134,8 +134,8 @@ func newQueryNodeDeltaFlowGraph(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
-	var filterDeleteNode node = newFilteredDeleteNode(metaReplica, collectionID)
-	var deleteNode node = newDeleteNode(metaReplica, collectionID)
+	var filterDeleteNode node = newFilteredDeleteNode(metaReplica, collectionID, channel)
+	var deleteNode node = newDeleteNode(metaReplica, collectionID, channel)
 	var serviceTimeNode node = newServiceTimeNode(tSafeReplica, collectionID, channel)
 
 	q.flowGraph.AddNode(dmStreamNode)

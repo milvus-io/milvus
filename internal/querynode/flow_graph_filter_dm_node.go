@@ -35,6 +35,7 @@ type filterDmNode struct {
 	baseNode
 	collectionID UniqueID
 	metaReplica  ReplicaInterface
+	channel      Channel
 }
 
 // Name returns the name of filterDmNode
@@ -82,7 +83,7 @@ func (fdmNode *filterDmNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	collection, err := fdmNode.metaReplica.getCollectionByID(fdmNode.collectionID)
 	if err != nil {
 		// QueryNode should add collection before start flow graph
-		panic(fmt.Errorf("%s getCollectionByID failed, collectionID = %d", fdmNode.Name(), fdmNode.collectionID))
+		panic(fmt.Errorf("%s getCollectionByID failed, collectionID = %d, channel: %s", fdmNode.Name(), fdmNode.collectionID, fdmNode.channel))
 	}
 	collection.RLock()
 	defer collection.RUnlock()
@@ -96,7 +97,7 @@ func (fdmNode *filterDmNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			if err != nil {
 				// error occurs when missing meta info or data is misaligned, should not happen
 				err = fmt.Errorf("filterInvalidInsertMessage failed, err = %s", err)
-				log.Error(err.Error())
+				log.Error(err.Error(), zap.Int64("collection", fdmNode.collectionID), zap.String("channel", fdmNode.channel))
 				panic(err)
 			}
 			if resMsg != nil {
@@ -107,14 +108,17 @@ func (fdmNode *filterDmNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			if err != nil {
 				// error occurs when missing meta info or data is misaligned, should not happen
 				err = fmt.Errorf("filterInvalidDeleteMessage failed, err = %s", err)
-				log.Error(err.Error())
+				log.Error(err.Error(), zap.Int64("collection", fdmNode.collectionID), zap.String("channel", fdmNode.channel))
 				panic(err)
 			}
 			if resMsg != nil {
 				iMsg.deleteMessages = append(iMsg.deleteMessages, resMsg)
 			}
 		default:
-			log.Warn("invalid message type in filterDmNode", zap.String("message type", msg.Type().String()))
+			log.Warn("invalid message type in filterDmNode",
+				zap.String("message type", msg.Type().String()),
+				zap.Int64("collection", fdmNode.collectionID),
+				zap.String("channel", fdmNode.channel))
 		}
 	}
 
@@ -133,6 +137,7 @@ func (fdmNode *filterDmNode) filterInvalidDeleteMessage(msg *msgstream.DeleteMsg
 
 	if len(msg.Timestamps) <= 0 {
 		log.Debug("filter invalid delete message, no message",
+			zap.String("channel", fdmNode.channel),
 			zap.Any("collectionID", msg.CollectionID),
 			zap.Any("partitionID", msg.PartitionID))
 		return nil, nil
@@ -165,6 +170,7 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 
 	if len(msg.Timestamps) <= 0 {
 		log.Debug("filter invalid insert message, no message",
+			zap.String("channel", fdmNode.channel),
 			zap.Any("collectionID", msg.CollectionID),
 			zap.Any("partitionID", msg.PartitionID))
 		return nil, nil
@@ -201,12 +207,14 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 		// unFlushed segment may not have checkPoint, so `segmentInfo.DmlPosition` may be nil
 		if segmentInfo.DmlPosition == nil {
 			log.Warn("filter unFlushed segment without checkPoint",
+				zap.String("channel", fdmNode.channel),
 				zap.Any("collectionID", msg.CollectionID),
 				zap.Any("partitionID", msg.PartitionID))
 			continue
 		}
 		if msg.SegmentID == segmentInfo.ID && msg.EndTs() < segmentInfo.DmlPosition.Timestamp {
 			log.Debug("filter invalid insert message, segments are excluded segments",
+				zap.String("channel", fdmNode.channel),
 				zap.Any("collectionID", msg.CollectionID),
 				zap.Any("partitionID", msg.PartitionID))
 			return nil, nil
@@ -217,7 +225,7 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 }
 
 // newFilteredDmNode returns a new filterDmNode
-func newFilteredDmNode(metaReplica ReplicaInterface, collectionID UniqueID) *filterDmNode {
+func newFilteredDmNode(metaReplica ReplicaInterface, collectionID UniqueID, channel Channel) *filterDmNode {
 
 	maxQueueLength := Params.QueryNodeCfg.FlowGraphMaxQueueLength
 	maxParallelism := Params.QueryNodeCfg.FlowGraphMaxParallelism
@@ -230,5 +238,6 @@ func newFilteredDmNode(metaReplica ReplicaInterface, collectionID UniqueID) *fil
 		baseNode:     baseNode,
 		collectionID: collectionID,
 		metaReplica:  metaReplica,
+		channel:      channel,
 	}
 }
