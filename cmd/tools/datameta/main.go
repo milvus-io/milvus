@@ -29,7 +29,7 @@ var (
 func main() {
 	flag.Parse()
 
-	etcdCli, err := etcd.GetRemoteEtcdClient([]string{*etcdAddr})
+	etcdCli, err := etcd.GetRemoteEtcdClient([]string{*etcdAddr}, 10*1024*1024)
 	if err != nil {
 		log.Fatal("failed to connect to etcd", zap.Error(err))
 	}

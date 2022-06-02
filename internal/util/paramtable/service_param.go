@@ -64,6 +64,7 @@ type EtcdConfig struct {
 	Endpoints         []string
 	MetaRootPath      string
 	KvRootPath        string
+	MaxRequestBytes   int
 	EtcdLogLevel      string
 	EtcdLogPath       string
 	EtcdUseSSL        bool
@@ -91,6 +92,7 @@ func (p *EtcdConfig) LoadCfgToMemory() {
 	} else {
 		p.initEndpoints()
 	}
+	p.initMaxRequestBytes()
 	p.initMetaRootPath()
 	p.initKvRootPath()
 	p.initEtcdLogLevel()
@@ -149,6 +151,18 @@ func (p *EtcdConfig) initKvRootPath() {
 		panic(err)
 	}
 	p.KvRootPath = path.Join(rootPath, subPath)
+}
+
+func (p *EtcdConfig) initMaxRequestBytes() {
+	maxReqBytesStr, err := p.Base.Load("etcd.maxRequestBytes")
+	if err != nil {
+		panic(err)
+	}
+	maxRequestBytes, err := strconv.ParseInt(maxReqBytesStr, 10, 32)
+	if err != nil {
+		panic(err)
+	}
+	p.MaxRequestBytes = int(maxRequestBytes)
 }
 
 func (p *EtcdConfig) initEtcdLogLevel() {

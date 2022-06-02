@@ -76,7 +76,7 @@ func (f *fixture) setup() []parameters {
 		endpoints = "localhost:2379"
 	}
 	etcdEndpoints := strings.Split(endpoints, ",")
-	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
+	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints, 10*1024*1024)
 	defer etcdCli.Close()
 	if err != nil {
 		log.Fatalf("New clientv3 error = %v", err)
@@ -1398,7 +1398,7 @@ func initRmq(name string) *etcdkv.EtcdKV {
 		endpoints = "localhost:2379"
 	}
 	etcdEndpoints := strings.Split(endpoints, ",")
-	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
+	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints, 10*1024*1024)
 	if err != nil {
 		log.Fatalf("New clientv3 error = %v", err)
 	}

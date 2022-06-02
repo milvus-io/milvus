@@ -251,7 +251,7 @@ func initSession(ctx context.Context) *sessionutil.Session {
 	log.Debug("metaRootPath", zap.Any("metaRootPath", metaRootPath))
 	log.Debug("etcdPoints", zap.Any("etcdPoints", etcdEndpoints))
 
-	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
+	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints, 10*1024*1024)
 	if err != nil {
 		panic(err)
 	}

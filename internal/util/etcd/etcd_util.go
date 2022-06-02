@@ -34,23 +34,25 @@ func GetEtcdClient(cfg *paramtable.EtcdConfig) (*clientv3.Client, error) {
 		return GetEmbedEtcdClient()
 	}
 	if cfg.EtcdUseSSL {
-		return GetRemoteEtcdSSLClient(cfg.Endpoints, cfg.EtcdTLSCert, cfg.EtcdTLSKey, cfg.EtcdTLSCACert, cfg.EtcdTLSMinVersion)
+		return GetRemoteEtcdSSLClient(cfg.Endpoints, cfg.MaxRequestBytes, cfg.EtcdTLSCert, cfg.EtcdTLSKey, cfg.EtcdTLSCACert, cfg.EtcdTLSMinVersion)
 	}
-	return GetRemoteEtcdClient(cfg.Endpoints)
+	return GetRemoteEtcdClient(cfg.Endpoints, cfg.MaxRequestBytes)
 }
 
 // GetRemoteEtcdClient returns client of remote etcd by given endpoints
-func GetRemoteEtcdClient(endpoints []string) (*clientv3.Client, error) {
+func GetRemoteEtcdClient(endpoints []string, maxReqBytes int) (*clientv3.Client, error) {
 	return clientv3.New(clientv3.Config{
-		Endpoints:   endpoints,
-		DialTimeout: 5 * time.Second,
+		Endpoints:          endpoints,
+		DialTimeout:        5 * time.Second,
+		MaxCallSendMsgSize: maxReqBytes,
 	})
 }
 
-func GetRemoteEtcdSSLClient(endpoints []string, certFile string, keyFile string, caCertFile string, minVersion string) (*clientv3.Client, error) {
+func GetRemoteEtcdSSLClient(endpoints []string, maxReqBytes int, certFile string, keyFile string, caCertFile string, minVersion string) (*clientv3.Client, error) {
 	var cfg clientv3.Config
 	cfg.Endpoints = endpoints
 	cfg.DialTimeout = 5 * time.Second
+	cfg.MaxCallSendMsgSize = maxReqBytes
 	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
 		return nil, errors.Wrap(err, "load etcd cert key pair error")

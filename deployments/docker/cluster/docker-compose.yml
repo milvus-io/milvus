@@ -10,7 +10,8 @@ services:
       - ETCD_QUOTA_BACKEND_BYTES=4294967296
     volumes:
       - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/etcd:/etcd
-    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 
+      --data-dir /etcd --quota-backend-bytes=8589934592 --max-request-bytes=10485760
 
   pulsar:
     container_name: milvus-pulsar

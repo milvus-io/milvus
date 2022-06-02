@@ -36,7 +36,7 @@ func TestGetServerIDConcurrently(t *testing.T) {
 	}
 
 	etcdEndpoints := strings.Split(endpoints, ",")
-	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
+	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints, 10*1024*1024)
 	require.NoError(t, err)
 	defer etcdCli.Close()
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, metaRoot)
@@ -83,7 +83,7 @@ func TestInit(t *testing.T) {
 	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
 
 	etcdEndpoints := strings.Split(endpoints, ",")
-	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
+	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints, 10*1024*1024)
 	require.NoError(t, err)
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, metaRoot)
 	err = etcdKV.RemoveWithPrefix("")
@@ -113,7 +113,7 @@ func TestUpdateSessions(t *testing.T) {
 
 	etcdEndpoints := strings.Split(endpoints, ",")
 	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
-	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
+	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints, 10*1024*1024)
 	require.NoError(t, err)
 	defer etcdCli.Close()
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, "")
@@ -134,7 +134,7 @@ func TestUpdateSessions(t *testing.T) {
 	sList := []*Session{}
 
 	getIDFunc := func() {
-		etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
+		etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints, 10*1024*1024)
 		require.NoError(t, err)
 		singleS := NewSession(ctx, metaRoot, etcdCli)
 		singleS.Init("test", "testAddr", false, false)
@@ -230,7 +230,7 @@ func TestWatcherHandleWatchResp(t *testing.T) {
 	etcdEndpoints := strings.Split(endpoints, ",")
 	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
 
-	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
+	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints, 10*1024*1024)
 	require.NoError(t, err)
 	defer etcdCli.Close()
 
@@ -377,7 +377,7 @@ func TestSessionRevoke(t *testing.T) {
 	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
 
 	etcdEndpoints := strings.Split(endpoints, ",")
-	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
+	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints, 10*1024*1024)
 	defer etcdCli.Close()
 	require.NoError(t, err)
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, metaRoot)

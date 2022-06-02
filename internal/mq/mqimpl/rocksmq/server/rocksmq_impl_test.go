@@ -314,7 +314,7 @@ func TestRocksmq_Seek(t *testing.T) {
 
 func TestRocksmq_Loop(t *testing.T) {
 	ep := etcdEndpoints()
-	etcdCli, err := etcd.GetRemoteEtcdClient(ep)
+	etcdCli, err := etcd.GetRemoteEtcdClient(ep, 10*1024*1024)
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
@@ -385,7 +385,7 @@ func TestRocksmq_Loop(t *testing.T) {
 
 func TestRocksmq_Goroutines(t *testing.T) {
 	ep := etcdEndpoints()
-	etcdCli, err := etcd.GetRemoteEtcdClient(ep)
+	etcdCli, err := etcd.GetRemoteEtcdClient(ep, 10*1024*1024)
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
@@ -460,7 +460,7 @@ func TestRocksmq_Goroutines(t *testing.T) {
 */
 func TestRocksmq_Throughout(t *testing.T) {
 	ep := etcdEndpoints()
-	etcdCli, err := etcd.GetRemoteEtcdClient(ep)
+	etcdCli, err := etcd.GetRemoteEtcdClient(ep, 10*1024*1024)
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
@@ -518,7 +518,7 @@ func TestRocksmq_Throughout(t *testing.T) {
 
 func TestRocksmq_MultiChan(t *testing.T) {
 	ep := etcdEndpoints()
-	etcdCli, err := etcd.GetRemoteEtcdClient(ep)
+	etcdCli, err := etcd.GetRemoteEtcdClient(ep, 10*1024*1024)
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
@@ -570,7 +570,7 @@ func TestRocksmq_MultiChan(t *testing.T) {
 
 func TestRocksmq_CopyData(t *testing.T) {
 	ep := etcdEndpoints()
-	etcdCli, err := etcd.GetRemoteEtcdClient(ep)
+	etcdCli, err := etcd.GetRemoteEtcdClient(ep, 10*1024*1024)
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
@@ -636,7 +636,7 @@ func TestRocksmq_CopyData(t *testing.T) {
 
 func TestRocksmq_SeekToLatest(t *testing.T) {
 	ep := etcdEndpoints()
-	etcdCli, err := etcd.GetRemoteEtcdClient(ep)
+	etcdCli, err := etcd.GetRemoteEtcdClient(ep, 10*1024*1024)
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
@@ -727,7 +727,7 @@ func TestRocksmq_SeekToLatest(t *testing.T) {
 
 func TestRocksmq_GetLatestMsg(t *testing.T) {
 	ep := etcdEndpoints()
-	etcdCli, err := etcd.GetRemoteEtcdClient(ep)
+	etcdCli, err := etcd.GetRemoteEtcdClient(ep, 10*1024*1024)
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
@@ -801,7 +801,7 @@ func TestRocksmq_GetLatestMsg(t *testing.T) {
 
 func TestRocksmq_Close(t *testing.T) {
 	ep := etcdEndpoints()
-	etcdCli, err := etcd.GetRemoteEtcdClient(ep)
+	etcdCli, err := etcd.GetRemoteEtcdClient(ep, 10*1024*1024)
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
@@ -834,7 +834,7 @@ func TestRocksmq_Close(t *testing.T) {
 
 func TestRocksmq_SeekWithNoConsumerError(t *testing.T) {
 	ep := etcdEndpoints()
-	etcdCli, err := etcd.GetRemoteEtcdClient(ep)
+	etcdCli, err := etcd.GetRemoteEtcdClient(ep, 10*1024*1024)
 	assert.Nil(t, err)
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
 	defer etcdKV.Close()

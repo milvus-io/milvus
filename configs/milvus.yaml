@@ -21,6 +21,8 @@ etcd:
   rootPath: by-dev # The root path where data is stored in etcd
   metaSubPath: meta # metaRootPath = rootPath + '/' + metaSubPath
   kvSubPath: kv # kvRootPath = rootPath + '/' + kvSubPath
+  # client side request size limit, which should be >= server side limit (--max-request-bytes). Default 10 MB.
+  maxRequestBytes: 10485760
   log:
     # path is one of:
     #  - "default" as os.Stderr,

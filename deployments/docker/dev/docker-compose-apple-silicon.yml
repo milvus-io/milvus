@@ -5,7 +5,10 @@ services:
     image: quay.io/coreos/etcd:v3.5.0
     volumes:
       - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/etcd:/etcd
-    command: etcd -listen-peer-urls=http://127.0.0.1:2380 -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379,http://0.0.0.0:4001 -initial-advertise-peer-urls=http://127.0.0.1:2380 --initial-cluster default=http://127.0.0.1:2380
+    command: etcd -listen-peer-urls=http://127.0.0.1:2380 -advertise-client-urls=http://127.0.0.1:2379 
+      -listen-client-urls http://0.0.0.0:2379,http://0.0.0.0:4001 -initial-advertise-peer-urls=http://127.0.0.1:2380 
+      --initial-cluster default=http://127.0.0.1:2380 --data-dir /etcd --quota-backend-bytes=8589934592 
+      --max-request-bytes=10485760
     ports:
       - "2379:2379"
       - "2380:2380"
