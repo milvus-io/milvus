@@ -114,6 +114,10 @@ func (coord *DataCoordMock) Flush(ctx context.Context, req *datapb.FlushRequest)
 	panic("implement me")
 }
 
+func (coord *DataCoordMock) AddSegment(ctx context.Context, req *datapb.AddSegmentRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
 func (coord *DataCoordMock) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error) {
 	panic("implement me")
 }

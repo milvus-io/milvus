@@ -331,12 +331,15 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		return resp, nil
 	}
 
-	channel := segment.GetInsertChannel()
-	if !s.channelManager.Match(nodeID, channel) {
-		FailResponse(resp, fmt.Sprintf("channel %s is not watched on node %d", channel, nodeID))
-		resp.ErrorCode = commonpb.ErrorCode_MetaFailed
-		log.Warn("node is not matched with channel", zap.String("channel", channel), zap.Int64("nodeID", nodeID))
-		return resp, nil
+	// No need to check import channel--node matching in data import case.
+	if !req.GetImporting() {
+		channel := segment.GetInsertChannel()
+		if !s.channelManager.Match(nodeID, channel) {
+			FailResponse(resp, fmt.Sprintf("channel %s is not watched on node %d", channel, nodeID))
+			resp.ErrorCode = commonpb.ErrorCode_MetaFailed
+			log.Warn("node is not matched with channel", zap.String("channel", channel), zap.Int64("nodeID", nodeID))
+			return resp, nil
+		}
 	}
 
 	if req.GetDropped() {
@@ -1004,7 +1007,7 @@ func (s *Server) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateR
 // Import distributes the import tasks to dataNodes.
 // It returns a failed status if no dataNode is available or if any error occurs.
 func (s *Server) Import(ctx context.Context, itr *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
-	log.Info("DataCoord receive import request", zap.Any("import task request", itr))
+	log.Info("DataCoord receives import request", zap.Any("import task request", itr))
 	resp := &datapb.ImportTaskResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -1012,14 +1015,14 @@ func (s *Server) Import(ctx context.Context, itr *datapb.ImportTaskRequest) (*da
 	}
 
 	if s.isClosed() {
-		log.Error("failed to import for closed dataCoord service")
+		log.Error("failed to import for closed DataCoord service")
 		resp.Status.Reason = msgDataCoordIsUnhealthy(Params.DataCoordCfg.GetNodeID())
 		return resp, nil
 	}
 
 	nodes := s.channelManager.store.GetNodes()
 	if len(nodes) == 0 {
-		log.Error("import failed as all dataNodes are offline")
+		log.Error("import failed as all DataNodes are offline")
 		return resp, nil
 	}
 
@@ -1033,7 +1036,7 @@ func (s *Server) Import(ctx context.Context, itr *datapb.ImportTaskRequest) (*da
 		s.cluster.Import(s.ctx, resp.GetDatanodeId(), itr)
 	} else {
 		// No dataNode is available, reject the import request.
-		msg := "all dataNodes are busy working on data import, the task has been rejected and wait for idle datanode"
+		msg := "all DataNodes are busy working on data import, the task has been rejected and wait for idle datanode"
 		log.Info(msg, zap.Int64("task ID", itr.GetImportTask().GetTaskId()))
 		resp.Status.Reason = msg
 		return resp, nil
@@ -1136,4 +1139,32 @@ func (s *Server) ReleaseSegmentLock(ctx context.Context, req *datapb.ReleaseSegm
 	}
 	resp.ErrorCode = commonpb.ErrorCode_Success
 	return resp, nil
+}
+
+func (s *Server) AddSegment(ctx context.Context, req *datapb.AddSegmentRequest) (*commonpb.Status, error) {
+	log.Info("DataCoord putting segment to the right DataNode",
+		zap.Int64("segment ID", req.GetSegmentId()),
+		zap.Int64("collection ID", req.GetCollectionId()),
+		zap.Int64("partition ID", req.GetPartitionId()),
+		zap.String("channel name", req.GetChannelName()),
+		zap.Int64("# of rows", req.GetRowNum()))
+	errResp := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		Reason:    "",
+	}
+	if s.isClosed() {
+		log.Warn("failed to add segment for closed server")
+		errResp.Reason = msgDataCoordIsUnhealthy(Params.DataCoordCfg.GetNodeID())
+		return errResp, nil
+	}
+	ok, nodeID := s.channelManager.getNodeIDByChannelName(req.GetChannelName())
+	if !ok {
+		log.Error("no DataNode found for channel", zap.String("channel name", req.GetChannelName()))
+		errResp.Reason = fmt.Sprint("no DataNode found for channel ", req.GetChannelName())
+		return errResp, nil
+	}
+	s.cluster.AddSegment(s.ctx, nodeID, req)
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}, nil
 }

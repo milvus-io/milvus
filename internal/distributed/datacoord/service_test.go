@@ -60,6 +60,7 @@ type MockDataCoord struct {
 	updateSegStatResp    *commonpb.Status
 	acquireSegLockResp   *commonpb.Status
 	releaseSegLockResp   *commonpb.Status
+	addSegmentResp       *commonpb.Status
 }
 
 func (m *MockDataCoord) Init() error {
@@ -187,6 +188,10 @@ func (m *MockDataCoord) AcquireSegmentLock(ctx context.Context, req *datapb.Acqu
 
 func (m *MockDataCoord) ReleaseSegmentLock(ctx context.Context, req *datapb.ReleaseSegmentLockRequest) (*commonpb.Status, error) {
 	return m.releaseSegLockResp, m.err
+}
+
+func (m *MockDataCoord) AddSegment(ctx context.Context, req *datapb.AddSegmentRequest) (*commonpb.Status, error) {
+	return m.addSegmentResp, m.err
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -448,6 +453,17 @@ func Test_NewServer(t *testing.T) {
 			},
 		}
 		resp, err := server.ReleaseSegmentLock(ctx, nil)
+		assert.Nil(t, err)
+		assert.NotNil(t, resp)
+	})
+
+	t.Run("add segment", func(t *testing.T) {
+		server.dataCoord = &MockDataCoord{
+			addSegmentResp: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+		}
+		resp, err := server.AddSegment(ctx, nil)
 		assert.Nil(t, err)
 		assert.NotNil(t, resp)
 	})

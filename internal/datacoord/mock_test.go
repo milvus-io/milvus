@@ -209,6 +209,10 @@ func (c *mockDataNodeClient) Import(ctx context.Context, in *datapb.ImportTaskRe
 	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
 }
 
+func (c *mockDataNodeClient) AddSegment(ctx context.Context, req *datapb.AddSegmentRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
+}
+
 func (c *mockDataNodeClient) Stop() error {
 	c.state = internalpb.StateCode_Abnormal
 	return nil

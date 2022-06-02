@@ -227,7 +227,7 @@ func (replica *SegmentReplica) normal2FlushedSegment(segID UniqueID) {
 	replica.flushedSegments[segID] = &seg
 
 	delete(replica.normalSegments, segID)
-	metrics.DataNodeNumUnflushedSegments.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.NodeID)).Dec()
+	metrics.DataNodeNumUnflushedSegments.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID())).Dec()
 }
 
 func (replica *SegmentReplica) getCollectionAndPartitionID(segID UniqueID) (collID, partitionID UniqueID, err error) {

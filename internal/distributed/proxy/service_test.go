@@ -438,6 +438,10 @@ func (m *MockDataCoord) Flush(ctx context.Context, req *datapb.FlushRequest) (*d
 	return nil, nil
 }
 
+func (m *MockDataCoord) AddSegment(ctx context.Context, req *datapb.AddSegmentRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
 func (m *MockDataCoord) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error) {
 	return nil, nil
 }

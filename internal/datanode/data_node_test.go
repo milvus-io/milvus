@@ -495,6 +495,75 @@ func TestDataNode(t *testing.T) {
 	})
 }
 
+func TestDataNode_AddSegment(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	node := newIDLEDataNodeMock(ctx, schemapb.DataType_Int64)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	assert.Nil(t, err)
+	defer etcdCli.Close()
+	node.SetEtcdClient(etcdCli)
+	err = node.Init()
+	assert.Nil(t, err)
+	err = node.Start()
+	assert.Nil(t, err)
+	defer node.Stop()
+
+	node.chunkManager = storage.NewLocalChunkManager(storage.RootPath("/tmp/lib/milvus"))
+	Params.DataNodeCfg.SetNodeID(1)
+
+	t.Run("test AddSegment", func(t *testing.T) {
+		node.rootCoord = &RootCoordFactory{
+			collectionID: 100,
+			pkType:       schemapb.DataType_Int64,
+		}
+
+		chName1 := "fake-by-dev-rootcoord-dml-testaddsegment-1"
+		chName2 := "fake-by-dev-rootcoord-dml-testaddsegment-2"
+		err := node.flowgraphManager.addAndStart(node, &datapb.VchannelInfo{
+			CollectionID:      100,
+			ChannelName:       chName1,
+			UnflushedSegments: []*datapb.SegmentInfo{},
+			FlushedSegments:   []*datapb.SegmentInfo{},
+		})
+		require.Nil(t, err)
+		err = node.flowgraphManager.addAndStart(node, &datapb.VchannelInfo{
+			CollectionID:      100,
+			ChannelName:       chName2,
+			UnflushedSegments: []*datapb.SegmentInfo{},
+			FlushedSegments:   []*datapb.SegmentInfo{},
+		})
+		require.Nil(t, err)
+
+		_, ok := node.flowgraphManager.getFlowgraphService(chName1)
+		assert.True(t, ok)
+		_, ok = node.flowgraphManager.getFlowgraphService(chName2)
+		assert.True(t, ok)
+
+		stat, err := node.AddSegment(context.WithValue(ctx, ctxKey{}, ""), &datapb.AddSegmentRequest{
+			SegmentId:    100,
+			CollectionId: 100,
+			PartitionId:  100,
+			ChannelName:  chName1,
+			RowNum:       500,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, stat.GetErrorCode())
+		assert.Equal(t, "", stat.GetReason())
+
+		stat, err = node.AddSegment(context.WithValue(ctx, ctxKey{}, ""), &datapb.AddSegmentRequest{
+			SegmentId:    100,
+			CollectionId: 100,
+			PartitionId:  100,
+			ChannelName:  "bad-ch-name",
+			RowNum:       500,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, stat.GetErrorCode())
+	})
+}
+
 func TestWatchChannel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	node := newIDLEDataNodeMock(ctx, schemapb.DataType_Int64)

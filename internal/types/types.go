@@ -81,6 +81,9 @@ type DataNode interface {
 	// ResendSegmentStats resend un-flushed segment stats back upstream to DataCoord by resending DataNode time tick message.
 	// It returns a list of segments to be sent.
 	ResendSegmentStats(ctx context.Context, req *datapb.ResendSegmentStatsRequest) (*datapb.ResendSegmentStatsResponse, error)
+
+	// AddSegment puts the given segment to current DataNode's flow graph.
+	AddSegment(ctx context.Context, req *datapb.AddSegmentRequest) (*commonpb.Status, error)
 }
 
 // DataNodeComponent is used by grpc server of DataNode
@@ -284,6 +287,10 @@ type DataCoord interface {
 
 	AcquireSegmentLock(ctx context.Context, req *datapb.AcquireSegmentLockRequest) (*commonpb.Status, error)
 	ReleaseSegmentLock(ctx context.Context, req *datapb.ReleaseSegmentLockRequest) (*commonpb.Status, error)
+
+	// AddSegment looks for the right DataNode given channel name, and triggers AddSegment call on that DataNode to
+	// add the segment into this DataNode.
+	AddSegment(ctx context.Context, req *datapb.AddSegmentRequest) (*commonpb.Status, error)
 }
 
 // DataCoordComponent defines the interface of DataCoord component.
