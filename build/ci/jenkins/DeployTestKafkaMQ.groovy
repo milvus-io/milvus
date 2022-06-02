@@ -49,6 +49,21 @@ pipeline {
             defaultValue: 'master-latest'
         )
         string(
+            description: 'Etcd Image Repository',
+            name: 'etcd_image_repository',
+            defaultValue: "bitnami/etcd"
+        )
+        string(
+            description: 'Etcd Image Tag',
+            name: 'etcd_image_tag',
+            defaultValue: "3.5.0-debian-10-r24"
+        )
+        string(
+            description: 'Querynode Nums',
+            name: 'querynode_nums',
+            defaultValue: '3'
+        )        
+        string(
             description: 'Data Size',
             name: 'data_size',
             defaultValue: '3000'
