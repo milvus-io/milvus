@@ -30,6 +30,9 @@ func (m *mockCache) GetCollectionSchema(ctx context.Context, collectionName stri
 	return nil, nil
 }
 
+func (m *mockCache) RemoveCollection(ctx context.Context, collectionName string) {
+}
+
 func (m *mockCache) setGetIDFunc(f getCollectionIDFunc) {
 	m.getIDFunc = f
 }
