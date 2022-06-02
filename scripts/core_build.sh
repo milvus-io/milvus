@@ -260,7 +260,6 @@ fi
 if command -v ccache &> /dev/null
 then
 	ccache -s
-    exit
 fi
 
 popd

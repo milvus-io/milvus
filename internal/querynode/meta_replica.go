@@ -553,6 +553,10 @@ func (replica *metaReplica) addSegmentPrivate(segmentID UniqueID, partitionID Un
 	}
 
 	metrics.QueryNodeNumSegments.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Inc()
+	rowCount := segment.getRowCount()
+	if rowCount > 0 {
+		metrics.QueryNodeNumEntities.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Add(float64(rowCount))
+	}
 	return nil
 }
 
@@ -582,13 +586,14 @@ func (replica *metaReplica) removeSegment(segmentID UniqueID, segType segmentTyp
 
 // removeSegmentPrivate is private function in collectionReplica, to remove a segment from collectionReplica
 func (replica *metaReplica) removeSegmentPrivate(segmentID UniqueID, segType segmentType) {
+	var rowCount int64
 	switch segType {
 	case segmentTypeGrowing:
 		if segment, ok := replica.growingSegments[segmentID]; ok {
 			if partition, ok := replica.partitions[segment.partitionID]; ok {
 				partition.removeSegmentID(segmentID, segType)
 			}
-
+			rowCount = segment.getRowCount()
 			delete(replica.growingSegments, segmentID)
 			deleteSegment(segment)
 		}
@@ -598,6 +603,7 @@ func (replica *metaReplica) removeSegmentPrivate(segmentID UniqueID, segType seg
 				partition.removeSegmentID(segmentID, segType)
 			}
 
+			rowCount = segment.getRowCount()
 			delete(replica.sealedSegments, segmentID)
 			deleteSegment(segment)
 		}
@@ -606,6 +612,9 @@ func (replica *metaReplica) removeSegmentPrivate(segmentID UniqueID, segType seg
 	}
 
 	metrics.QueryNodeNumSegments.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Dec()
+	if rowCount > 0 {
+		metrics.QueryNodeNumEntities.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Sub(float64(rowCount))
+	}
 }
 
 // getSegmentByID returns the segment which id is segmentID

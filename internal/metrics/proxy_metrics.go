@@ -223,6 +223,24 @@ var (
 			Help:      "latency of each DQL request excluding search and query",
 			Buckets:   buckets, // unit: ms
 		}, []string{nodeIDLabelName, functionLabelName})
+
+	// ProxyMutationReceiveBytes record the received bytes of Insert/Delete in Proxy
+	ProxyMutationReceiveBytes = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "receive_bytes_count",
+			Help:      "count of bytes received  from sdk",
+		}, []string{nodeIDLabelName})
+
+	// ProxyReadReqSendBytes record the bytes sent back to client by Proxy
+	ProxyReadReqSendBytes = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "send_bytes_count",
+			Help:      "count of bytes sent back to sdk",
+		}, []string{nodeIDLabelName})
 )
 
 //RegisterProxy registers Proxy metrics
@@ -254,5 +272,6 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(ProxyDDLReqLatency)
 	registry.MustRegister(ProxyDMLReqLatency)
 	registry.MustRegister(ProxyDQLReqLatency)
-
+	registry.MustRegister(ProxyMutationReceiveBytes)
+	registry.MustRegister(ProxyReadReqSendBytes)
 }
