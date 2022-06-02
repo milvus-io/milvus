@@ -24,7 +24,7 @@
 
 namespace milvus::scalar {
 
-#ifdef __linux__
+#if defined(__linux__) || defined(__APPLE__)
 
 int64_t
 StringIndexMarisa::Size() {

@@ -16,7 +16,7 @@ macro(build_marisa)
     if ( LINUX )
           set (MARISA_CONFIGURE_COMMAND cd ${MARISA_DIR} && libtoolize && autoreconf -i && ./configure --prefix=${MARISA_INSTALL_PREFIX})
     else()
-          set (MARISA_CONFIGURE_COMMAND brew install automake && cd ${MARISA_DIR} && glibtoolize && autoreconf -i && ./configure --prefix=${MARISA_INSTALL_PREFIX})
+          set (MARISA_CONFIGURE_COMMAND brew install automake libtool && cd ${MARISA_DIR} && glibtoolize && autoreconf -i && ./configure --prefix=${MARISA_INSTALL_PREFIX})
     endif()
 
     set (MARISA_BUILD_COMMAND make -j)

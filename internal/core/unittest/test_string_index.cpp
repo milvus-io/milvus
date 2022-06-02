@@ -14,12 +14,13 @@
 #include <knowhere/index/vector_index/adapter/VectorAdapter.h>
 #include <knowhere/archive/KnowhereConfig.h>
 
-#define private public
-
 #include "index/Index.h"
 #include "index/ScalarIndex.h"
+
+#define private public
 #include "index/StringIndex.h"
 #include "index/StringIndexMarisa.h"
+
 #include "index/IndexFactory.h"
 #include "test_utils/indexbuilder_test_utils.h"
 #include "test_utils/AssertUtils.h"

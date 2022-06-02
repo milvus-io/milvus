@@ -32,7 +32,7 @@ IndexFactory::CreateIndex(const std::string& index_type) {
 template <>
 inline ScalarIndexPtr<std::string>
 IndexFactory::CreateIndex(const std::string& index_type) {
-#ifdef __linux__
+#if defined(__linux__) || defined(__APPLE__)
     return CreateStringIndexMarisa();
 #else
     throw std::runtime_error("unsupported platform");
