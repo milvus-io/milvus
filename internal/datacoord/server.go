@@ -353,32 +353,26 @@ func (s *Server) initGarbageCollection() error {
 	var cli *minio.Client
 	var err error
 	if Params.DataCoordCfg.EnableGarbageCollection {
+		var creds *credentials.Credentials
+		if Params.MinioCfg.UseIAM {
+			creds = credentials.NewIAM(Params.MinioCfg.IAMEndpoint)
+		} else {
+			creds = credentials.NewStaticV4(Params.MinioCfg.AccessKeyID, Params.MinioCfg.SecretAccessKey, "")
+		}
+		// TODO: We call minio.New in different places with same procedures to call several functions.
+		// We should abstract this to a focade function to avoid applying changes to only one place.
 		cli, err = minio.New(Params.MinioCfg.Address, &minio.Options{
-			Creds:  credentials.NewStaticV4(Params.MinioCfg.AccessKeyID, Params.MinioCfg.SecretAccessKey, ""),
+			Creds:  creds,
 			Secure: Params.MinioCfg.UseSSL,
 		})
 		if err != nil {
-			return err
-		}
-
-		checkBucketFn := func() error {
-			has, err := cli.BucketExists(context.TODO(), Params.MinioCfg.BucketName)
-			if err != nil {
-				return err
-			}
-			if !has {
-				err = cli.MakeBucket(context.TODO(), Params.MinioCfg.BucketName, minio.MakeBucketOptions{})
-				if err != nil {
-					return err
-				}
-			}
-			return nil
+			return fmt.Errorf("failed to create minio client: %v", err)
 		}
 		// retry times shall be two, just to prevent
 		// 1. bucket not exists
 		// 2. bucket is created by other componnent
 		// 3. datacoord try to create but failed with bucket already exists error
-		err = retry.Do(s.ctx, checkBucketFn, retry.Attempts(2))
+		err = retry.Do(s.ctx, getCheckBucketFn(cli), retry.Attempts(2))
 		if err != nil {
 			return err
 		}
@@ -395,6 +389,23 @@ func (s *Server) initGarbageCollection() error {
 		dropTolerance:    Params.DataCoordCfg.GCDropTolerance,
 	})
 	return nil
+}
+
+// here we use variable for test convenience
+var getCheckBucketFn = func(cli *minio.Client) func() error {
+	return func() error {
+		has, err := cli.BucketExists(context.TODO(), Params.MinioCfg.BucketName)
+		if err != nil {
+			return err
+		}
+		if !has {
+			err = cli.MakeBucket(context.TODO(), Params.MinioCfg.BucketName, minio.MakeBucketOptions{})
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 }
 
 func (s *Server) initServiceDiscovery() error {

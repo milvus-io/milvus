@@ -9,6 +9,8 @@ type config struct {
 	useSSL            bool
 	createBucket      bool
 	rootPath          string
+	useIAM            bool
+	iamEndpoint       string
 }
 
 func newDefaultConfig() *config {
@@ -56,5 +58,17 @@ func CreateBucket(createBucket bool) Option {
 func RootPath(rootPath string) Option {
 	return func(c *config) {
 		c.rootPath = rootPath
+	}
+}
+
+func UseIAM(useIAM bool) Option {
+	return func(c *config) {
+		c.useIAM = useIAM
+	}
+}
+
+func IAMEndpoint(iamEndpoint string) Option {
+	return func(c *config) {
+		c.iamEndpoint = iamEndpoint
 	}
 }

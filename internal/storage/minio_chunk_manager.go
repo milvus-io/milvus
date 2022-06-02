@@ -56,8 +56,14 @@ func NewMinioChunkManager(ctx context.Context, opts ...Option) (*MinioChunkManag
 }
 
 func newMinioChunkManagerWithConfig(ctx context.Context, c *config) (*MinioChunkManager, error) {
+	var creds *credentials.Credentials
+	if c.useIAM {
+		creds = credentials.NewIAM(c.iamEndpoint)
+	} else {
+		creds = credentials.NewStaticV4(c.accessKeyID, c.secretAccessKeyID, "")
+	}
 	minIOClient, err := minio.New(c.address, &minio.Options{
-		Creds:  credentials.NewStaticV4(c.accessKeyID, c.secretAccessKeyID, ""),
+		Creds:  creds,
 		Secure: c.useSSL,
 	})
 	// options nil or invalid formatted endpoint, don't need to retry
