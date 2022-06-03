@@ -30,8 +30,8 @@ function replace_image_tag {
 
 #to check containers all running and minio is healthy
 function check_healthy {
-    Expect=$(grep "container_name" docker-compose.yml | wc -l)
-    Expect_health=$(grep "healthcheck" docker-compose.yml | wc -l)
+    Expect=$(yq '.services | length' 'docker-compose.yml')
+    Expect_health=$(yq '.services' 'docker-compose.yml' |grep 'healthcheck'|wc -l)
     cnt=$(docker-compose ps | grep -E "running|Running|Up|up" | wc -l)
     healthy=$(docker-compose ps | grep "healthy" | wc -l)
     time_cnt=0
