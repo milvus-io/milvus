@@ -21,6 +21,7 @@ import (
 	"errors"
 	"math/rand"
 	"os"
+	"path"
 	"sort"
 	"strconv"
 	"sync"
@@ -818,20 +819,27 @@ func (i *IndexCoord) watchMetaLoop() {
 	defer i.loopWg.Done()
 	log.Debug("IndexCoord watchMetaLoop start")
 
-	watchChan := i.metaTable.client.WatchWithPrefix("indexes")
+	watchChan := i.metaTable.client.WatchWithPrefix(indexFilePrefix)
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case resp := <-watchChan:
-			log.Debug("IndexCoord watchMetaLoop find meta updated.")
+		case resp, ok := <-watchChan:
+			if !ok {
+				log.Warn("index coord watch meta loop failed because watch channel closed")
+				return
+			}
+			if err := resp.Err(); err != nil {
+				log.Error("received error event from etcd watcher", zap.String("path", indexFilePrefix), zap.Error(err))
+				panic("failed to handle etcd request, exit..")
+			}
 			for _, event := range resp.Events {
 				eventRevision := event.Kv.Version
 				indexMeta := &indexpb.IndexMeta{}
 				err := proto.Unmarshal(event.Kv.Value, indexMeta)
 				indexBuildID := indexMeta.IndexBuildID
-				log.Debug("IndexCoord watchMetaLoop", zap.Int64("IndexBuildID", indexBuildID))
+				log.Info("IndexCoord watchMetaLoop", zap.Int64("IndexBuildID", indexBuildID))
 				if err != nil {
 					log.Warn("IndexCoord unmarshal indexMeta failed", zap.Int64("IndexBuildID", indexBuildID),
 						zap.Error(err))
@@ -982,7 +990,7 @@ func (i *IndexCoord) assignTaskLoop() {
 					IndexName:    meta.indexMeta.Req.IndexName,
 					IndexID:      meta.indexMeta.Req.IndexID,
 					Version:      meta.indexMeta.Version + 1,
-					MetaPath:     "/indexes/" + strconv.FormatInt(indexBuildID, 10),
+					MetaPath:     path.Join(indexFilePrefix, strconv.FormatInt(indexBuildID, 10)),
 					DataPaths:    meta.indexMeta.Req.DataPaths,
 					TypeParams:   meta.indexMeta.Req.TypeParams,
 					IndexParams:  meta.indexMeta.Req.IndexParams,

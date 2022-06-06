@@ -129,6 +129,8 @@ func (sd *etcdShardSegmentDetector) watch(ch clientv3.WatchChan, collectionID in
 					go sd.watch(watchCh, collectionID, replicaID, vchannel)
 					return
 				}
+				log.Error("failed to handle watch segment error, panic", zap.Error(err))
+				panic(err)
 			}
 			for _, e := range evt.Events {
 				switch e.Type {

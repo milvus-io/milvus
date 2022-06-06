@@ -61,6 +61,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 )
 
 // make sure QueryNode implements types.QueryNode
@@ -325,7 +326,23 @@ func (node *QueryNode) watchChangeInfo() {
 		case <-node.queryNodeLoopCtx.Done():
 			log.Info("query node watchChangeInfo close")
 			return
-		case resp := <-watchChan:
+		case resp, ok := <-watchChan:
+			if !ok {
+				log.Warn("querynode failed to watch channel, return")
+				return
+			}
+
+			if err := resp.Err(); err != nil {
+				log.Warn("query watch channel canceled", zap.Error(resp.Err()))
+				// https://github.com/etcd-io/etcd/issues/8980
+				if resp.Err() == v3rpc.ErrCompacted {
+					go node.watchChangeInfo()
+					return
+				}
+				// if watch loop return due to event canceled, the datanode is not functional anymore
+				log.Panic("querynoe3 is not functional for event canceled", zap.Error(err))
+				return
+			}
 			for _, event := range resp.Events {
 				switch event.Type {
 				case mvccpb.PUT:

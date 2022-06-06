@@ -69,7 +69,7 @@ func NewMetaTable(kv *etcdkv.EtcdKV) (*metaTable, error) {
 // reloadFromKV reloads the index meta from ETCD.
 func (mt *metaTable) reloadFromKV() error {
 	mt.indexBuildID2Meta = make(map[UniqueID]Meta)
-	key := "indexes"
+	key := indexFilePrefix
 	log.Debug("IndexCoord metaTable LoadWithPrefix ", zap.String("prefix", key))
 
 	_, values, versions, err := mt.client.LoadWithPrefix2(key)
@@ -115,8 +115,7 @@ func (mt *metaTable) saveIndexMeta(meta *Meta) error {
 
 // reloadMeta reloads the index meta corresponding indexBuildID from ETCD.
 func (mt *metaTable) reloadMeta(indexBuildID UniqueID) (*Meta, error) {
-	key := "indexes/" + strconv.FormatInt(indexBuildID, 10)
-
+	key := path.Join(indexFilePrefix, strconv.FormatInt(indexBuildID, 10))
 	_, values, version, err := mt.client.LoadWithPrefix2(key)
 	log.Debug("IndexCoord reloadMeta mt.client.LoadWithPrefix2", zap.Any("indexBuildID", indexBuildID), zap.Error(err))
 	if err != nil {
@@ -340,7 +339,7 @@ func (mt *metaTable) DeleteIndex(indexBuildID UniqueID) {
 	defer mt.lock.Unlock()
 
 	delete(mt.indexBuildID2Meta, indexBuildID)
-	key := "indexes/" + strconv.FormatInt(indexBuildID, 10)
+	key := path.Join(indexFilePrefix, strconv.FormatInt(indexBuildID, 10))
 
 	if err := mt.client.Remove(key); err != nil {
 		log.Error("IndexCoord delete index meta from etcd failed", zap.Error(err))

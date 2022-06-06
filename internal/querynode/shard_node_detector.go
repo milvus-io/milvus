@@ -139,7 +139,10 @@ func (nd *etcdShardNodeDetector) watch(ch clientv3.WatchChan, collectionID, repl
 					go nd.cancelClose(cancel)
 					nd.wg.Add(1)
 					go nd.watch(watchCh, collectionID, replicaID)
+					return
 				}
+				log.Error("failed to handle watch node error", zap.Error(err))
+				panic(err)
 			}
 			for _, e := range evt.Events {
 				switch e.Type {

@@ -227,6 +227,7 @@ func (node *DataNode) Init() error {
 func (node *DataNode) StartWatchChannels(ctx context.Context) {
 	defer logutil.LogPanic()
 	// REF MEP#7 watch path should be [prefix]/channel/{node_id}/{channel_name}
+	// TODO, this is risky, we'd better watch etcd with revision rather simply a path
 	watchPrefix := path.Join(Params.DataNodeCfg.ChannelWatchSubPath, fmt.Sprintf("%d", Params.DataNodeCfg.GetNodeID()))
 	evtChan := node.watchKv.WatchWithPrefix(watchPrefix)
 	// after watch, first check all exists nodes first
@@ -240,20 +241,21 @@ func (node *DataNode) StartWatchChannels(ctx context.Context) {
 		case <-ctx.Done():
 			log.Info("watch etcd loop quit")
 			return
-		case event := <-evtChan:
-			if event.Canceled { // event canceled
-				log.Warn("watch channel canceled", zap.Error(event.Err()))
+		case event, ok := <-evtChan:
+			if !ok {
+				log.Warn("datanode failed to watch channel, return")
+				return
+			}
+
+			if err := event.Err(); err != nil {
+				log.Warn("datanode watch channel canceled", zap.Error(event.Err()))
 				// https://github.com/etcd-io/etcd/issues/8980
 				if event.Err() == v3rpc.ErrCompacted {
 					go node.StartWatchChannels(ctx)
 					return
 				}
 				// if watch loop return due to event canceled, the datanode is not functional anymore
-				// stop the datanode and wait for restart
-				err := node.Stop()
-				if err != nil {
-					log.Warn("node stop failed", zap.Error(err))
-				}
+				log.Panic("datanode is not functional for event canceled", zap.Error(err))
 				return
 			}
 			for _, evt := range event.Events {
