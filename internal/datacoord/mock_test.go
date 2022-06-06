@@ -60,13 +60,22 @@ func (m *MockAllocator) allocID(ctx context.Context) (UniqueID, error) {
 var _ allocator = (*FailsAllocator)(nil)
 
 // FailsAllocator allocator that fails
-type FailsAllocator struct{}
+type FailsAllocator struct {
+	allocTsSucceed bool
+	allocIDSucceed bool
+}
 
 func (a *FailsAllocator) allocTimestamp(_ context.Context) (Timestamp, error) {
+	if a.allocTsSucceed {
+		return 0, nil
+	}
 	return 0, errors.New("always fail")
 }
 
 func (a *FailsAllocator) allocID(_ context.Context) (UniqueID, error) {
+	if a.allocIDSucceed {
+		return 0, nil
+	}
 	return 0, errors.New("always fail")
 }
 

@@ -94,6 +94,7 @@ message SegmentIDRequest {
   string channel_name = 2;
   int64 collectionID = 3;
   int64 partitionID = 4;
+  bool isImport = 5;
 }
 
 message AssignSegmentIDRequest {
