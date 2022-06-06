@@ -392,6 +392,7 @@ func (scheduler *TaskScheduler) unmarshalTask(taskID UniqueID, t string) (task, 
 		}
 		// if triggerCondition == nodeDown, and the queryNode resources are insufficient,
 		// queryCoord will waits until queryNode can load the data, ensuring that the data is not lost
+		baseTask = newBaseTaskWithRetry(scheduler.ctx, loadReq.BalanceReason, 0)
 		baseTask.setTriggerCondition(loadReq.BalanceReason)
 		loadBalanceTask := &loadBalanceTask{
 			baseTask:           baseTask,
