@@ -51,12 +51,12 @@ pipeline {
         string(
             description: 'Etcd Image Repository',
             name: 'etcd_image_repository',
-            defaultValue: "bitnami/etcd"
+            defaultValue: "milvusdb/etcd"
         )
         string(
             description: 'Etcd Image Tag',
             name: 'etcd_image_tag',
-            defaultValue: "3.5.0-debian-10-r24"
+            defaultValue: "3.5.0-debian-10-r115"
         )
         string(
             description: 'Querynode Nums',
