@@ -318,7 +318,7 @@ pipeline {
         always {
             echo 'upload logs'
             container('main') {
-                dir ('tests/python_client/chaos') {
+                dir ('tests/python_client/deploy') {
                     script {
                         echo "get pod status"
                         sh "kubectl get pods -o wide|grep ${env.RELEASE_NAME} || true"
@@ -328,7 +328,7 @@ pipeline {
                         sh "tar -zcvf artifacts-${env.RELEASE_NAME}-logs.tar.gz k8s_log/ --remove-files || true"
                         archiveArtifacts artifacts: "artifacts-${env.RELEASE_NAME}-logs.tar.gz", allowEmptyArchive: true
                         if ("${params.keep_env}" == "false"){
-                            sh "bash scripts/uninstall_milvus.sh ${env.RELEASE_NAME}"
+                            sh "bash ../chaos/scripts/uninstall_milvus.sh ${env.RELEASE_NAME}"
                         }
                     }
                 }
