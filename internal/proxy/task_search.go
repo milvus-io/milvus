@@ -302,7 +302,7 @@ func (t *searchTask) Execute(ctx context.Context) error {
 	}
 
 	err := executeSearch(WithCache)
-	if err == errInvalidShardLeaders || funcutil.IsGrpcErr(err) {
+	if err == errInvalidShardLeaders {
 		log.Warn("first search failed, updating shardleader caches and retry search", zap.Error(err))
 		return executeSearch(WithoutCache)
 	}
@@ -415,11 +415,12 @@ func (t *searchTask) searchShard(ctx context.Context, leaders []nodeInfo, channe
 		}
 		result, err := qn.Search(ctx, req)
 		if err != nil {
-			return err
-		}
-		if result.GetStatus().GetErrorCode() == commonpb.ErrorCode_NotShardLeader {
 			log.Warn("QueryNode search returns error", zap.Int64("nodeID", nodeID),
 				zap.Error(err))
+			return errInvalidShardLeaders
+		}
+		if result.GetStatus().GetErrorCode() == commonpb.ErrorCode_NotShardLeader {
+			log.Warn("QueryNode not shard leader", zap.Int64("nodeID", nodeID), zap.String("channel", channelID))
 			return errInvalidShardLeaders
 		}
 		if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
