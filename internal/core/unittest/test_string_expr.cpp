@@ -540,7 +540,7 @@ TEST(AlwaysTrueStringPlan, SearchWithOutputFields) {
     };
     auto sub_result = FloatSearchBruteForce(search_dataset, vec_col.data(), N, nullptr);
 
-    auto sr = segment->Search(plan.get(), *ph_group, time);
+    auto sr = segment->Search(plan.get(), ph_group.get(), time);
     segment->FillPrimaryKeys(plan.get(), *sr);
     segment->FillTargetEntry(plan.get(), *sr);
     ASSERT_EQ(sr->pk_type_, DataType::VARCHAR);
