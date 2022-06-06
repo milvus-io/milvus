@@ -135,34 +135,22 @@ func shuffleSegmentsToQueryNodeV2(ctx context.Context, reqs []*querypb.LoadSegme
 			log.Error("shuffleSegmentsToQueryNode failed", zap.Error(err))
 			return err
 		}
+		onlineNodeIDs = nodesFilter(onlineNodeIDs, includeNodeIDs, excludeNodeIDs)
 
 		var availableNodeIDs []int64
-		for _, nodeID := range onlineNodeIDs {
-			// nodeID not in includeNodeIDs
-			if len(includeNodeIDs) > 0 && !nodeIncluded(nodeID, includeNodeIDs) {
-				continue
-			}
-
-			// nodeID in excludeNodeIDs
-			if nodeIncluded(nodeID, excludeNodeIDs) {
-				continue
-			}
-			// statistic nodeInfo, used memory, memory usage of every query node
-			nodeInfo, err := cluster.GetNodeInfoByID(nodeID)
-			if err != nil {
-				log.Warn("shuffleSegmentsToQueryNodeV2: getNodeInfoByID failed", zap.Error(err))
-				continue
-			}
-			queryNodeInfo := nodeInfo.(*queryNode)
+		nodes := getNodeInfos(cluster, onlineNodeIDs)
+		for _, nodeInfo := range nodes {
 			// avoid allocate segment to node which memUsageRate is high
-			if queryNodeInfo.memUsageRate >= Params.QueryCoordCfg.OverloadedMemoryThresholdPercentage {
-				log.Info("shuffleSegmentsToQueryNodeV2: queryNode memUsageRate large than MaxMemUsagePerNode", zap.Int64("nodeID", nodeID), zap.Float64("current rate", queryNodeInfo.memUsageRate))
+			if nodeInfo.memUsageRate >= Params.QueryCoordCfg.OverloadedMemoryThresholdPercentage {
+				log.Info("shuffleSegmentsToQueryNodeV2: queryNode memUsageRate large than MaxMemUsagePerNode",
+					zap.Int64("nodeID", nodeInfo.id),
+					zap.Float64("memoryUsageRate", nodeInfo.memUsageRate))
 				continue
 			}
 
 			// update totalMem, memUsage, memUsageRate
-			totalMem[nodeID], memUsage[nodeID], memUsageRate[nodeID] = queryNodeInfo.totalMem, queryNodeInfo.memUsage, queryNodeInfo.memUsageRate
-			availableNodeIDs = append(availableNodeIDs, nodeID)
+			totalMem[nodeInfo.id], memUsage[nodeInfo.id], memUsageRate[nodeInfo.id] = nodeInfo.totalMem, nodeInfo.memUsage, nodeInfo.memUsageRate
+			availableNodeIDs = append(availableNodeIDs, nodeInfo.id)
 		}
 		if len(availableNodeIDs) > 0 {
 			log.Info("shuffleSegmentsToQueryNodeV2: shuffle segment to available QueryNode", zap.Int64s("available nodeIDs", availableNodeIDs))
@@ -226,4 +214,24 @@ func nodeIncluded(nodeID int64, includeNodeIDs []int64) bool {
 	}
 
 	return false
+}
+
+func nodesFilter(nodes []UniqueID, include []UniqueID, exclude []UniqueID) []UniqueID {
+	result := make([]UniqueID, 0)
+
+	for _, node := range nodes {
+		// nodeID not in includeNodeIDs
+		if len(include) > 0 && !nodeIncluded(node, include) {
+			continue
+		}
+
+		// nodeID in excludeNodeIDs
+		if nodeIncluded(node, exclude) {
+			continue
+		}
+
+		result = append(result, node)
+	}
+
+	return result
 }

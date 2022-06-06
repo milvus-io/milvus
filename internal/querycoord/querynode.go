@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -335,7 +336,10 @@ func (qn *queryNode) getNodeInfo() (Node, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, err := qn.client.GetMetrics(qn.ctx, req)
+
+	ctx, cancel := context.WithTimeout(qn.ctx, time.Second)
+	defer cancel()
+	resp, err := qn.client.GetMetrics(ctx, req)
 	if err != nil {
 		return nil, err
 	}
