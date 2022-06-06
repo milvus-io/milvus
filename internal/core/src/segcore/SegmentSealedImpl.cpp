@@ -775,19 +775,19 @@ SegmentSealedImpl::mask_with_timestamps(BitsetType& bitset_chunk, Timestamp time
 
     // range == (size_, size_) and size_ is this->timestamps_.size().
     // it means these data are all useful, we don't need to update bitset_chunk.
-    // It can be thought of as an AND operation with another bitmask that is all 1s, but it is not necessary to do so.
+    // It can be thought of as an OR operation with another bitmask that is all 0s, but it is not necessary to do so.
     if (range.first == range.second && range.first == timestamps_data.size()) {
         // just skip
         return;
     }
-    // range == (0, 0). it means these data can not be used, directly set bitset_chunk to all 0s.
-    // It can be thought of as an AND operation with another bitmask that is all 0s.
+    // range == (0, 0). it means these data can not be used, directly set bitset_chunk to all 1s.
+    // It can be thought of as an OR operation with another bitmask that is all 1s.
     if (range.first == range.second && range.first == 0) {
-        bitset_chunk.reset();
+        bitset_chunk.set();
         return;
     }
     auto mask = TimestampIndex::GenerateBitset(timestamp, range, timestamps_data.data(), timestamps_data.size());
-    bitset_chunk &= mask;
+    bitset_chunk |= mask;
 }
 
 }  // namespace milvus::segcore
