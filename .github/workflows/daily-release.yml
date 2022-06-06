@@ -15,6 +15,7 @@ on:
 jobs:
   nightly:
     name: Run Daily Release
+    if: github.repository == 'milvus-io/milvus'
     runs-on: ubuntu-latest
     env:
       IMAGE_REPO: "milvusdb"
