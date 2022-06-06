@@ -8,8 +8,8 @@ image:
 etcd:
   replicaCount: 1
   image:
-    repository: bitnami/etcd
-    tag: 3.5.0-debian-10-r24  
+    repository: milvusdb/etcd
+    tag: 3.5.0-debian-10-r115  
 minio:
   mode: standalone
 pulsar:
