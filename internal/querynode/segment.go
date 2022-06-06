@@ -53,7 +53,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/cgoconverter"
 )
 
 type segmentType = commonpb.SegmentState
@@ -290,17 +289,6 @@ func (s *Segment) search(searchReq *searchRequest) (*SearchResult, error) {
 		return nil, err
 	}
 	return &searchResult, nil
-}
-
-// HandleCProto deal with the result proto returned from CGO
-func HandleCProto(cRes *C.CProto, msg proto.Message) error {
-	// Standalone CProto is protobuf created by C side,
-	// Passed from c side
-	// memory is managed manually
-	lease, blob := cgoconverter.UnsafeGoBytes(&cRes.proto_blob, int(cRes.proto_size))
-	defer cgoconverter.Release(lease)
-
-	return proto.Unmarshal(blob, msg)
 }
 
 func (s *Segment) retrieve(plan *RetrievePlan) (*segcorepb.RetrieveResults, error) {
