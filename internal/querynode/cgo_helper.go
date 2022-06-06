@@ -32,6 +32,8 @@ import (
 	"fmt"
 	"unsafe"
 
+	"github.com/golang/protobuf/proto"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/util/cgoconverter"
@@ -56,12 +58,27 @@ func HandleCStatus(status *C.CStatus, extraInfo string) error {
 	return errors.New(finalMsg)
 }
 
+// HandleCProto deal with the result proto returned from CGO
+func HandleCProto(cRes *C.CProto, msg proto.Message) error {
+	// Standalone CProto is protobuf created by C side,
+	// Passed from c side
+	// memory is managed manually
+	lease, blob := cgoconverter.UnsafeGoBytes(&cRes.proto_blob, int(cRes.proto_size))
+	defer cgoconverter.Release(lease)
+
+	return proto.Unmarshal(blob, msg)
+}
+
+// CopyCProtoBlob returns the copy of C memory
 func CopyCProtoBlob(cProto *C.CProto) []byte {
 	blob := C.GoBytes(unsafe.Pointer(cProto.proto_blob), C.int32_t(cProto.proto_size))
+	C.free(unsafe.Pointer(cProto.proto_blob))
 	return blob
 }
 
+// GetCProtoBlob returns the raw C memory, invoker should release it itself
 func GetCProtoBlob(cProto *C.CProto) []byte {
-	_, blob := cgoconverter.UnsafeGoBytes(&cProto.proto_blob, int(cProto.proto_size))
+	lease, blob := cgoconverter.UnsafeGoBytes(&cProto.proto_blob, int(cProto.proto_size))
+	cgoconverter.Extract(lease)
 	return blob
 }
