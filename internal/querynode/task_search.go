@@ -181,7 +181,9 @@ func (s *searchTask) estimateCPUUsage() {
 		segmentNum := int64(len(s.req.GetSegmentIDs()))
 		s.cpu = int32(s.NQ * segmentNum / 2)
 	}
-	if s.cpu > s.maxCPU {
+	if s.cpu <= 0 {
+		s.cpu = 5
+	} else if s.cpu > s.maxCPU {
 		s.cpu = s.maxCPU
 	}
 }

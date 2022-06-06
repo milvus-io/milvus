@@ -97,7 +97,9 @@ func (info *segInfo) Assign(ts Timestamp, count uint32) uint32 {
 }
 
 func (info *assignInfo) RemoveExpired(ts Timestamp) {
-	for e := info.segInfos.Front(); e != nil; e = e.Next() {
+	var next *list.Element
+	for e := info.segInfos.Front(); e != nil; e = next {
+		next = e.Next()
 		segInfo, ok := e.Value.(*segInfo)
 		if !ok {
 			log.Warn("can not cast to segInfo")
@@ -175,8 +177,10 @@ func newSegIDAssigner(ctx context.Context, dataCoord DataCoord, getTickFunc func
 
 func (sa *segIDAssigner) collectExpired() {
 	ts := sa.getTickFunc()
+	var next *list.Element
 	for _, info := range sa.assignInfos {
-		for e := info.Front(); e != nil; e = e.Next() {
+		for e := info.Front(); e != nil; e = next {
+			next = e.Next()
 			assign := e.Value.(*assignInfo)
 			assign.RemoveExpired(ts)
 			if assign.Capacity(ts) == 0 {
