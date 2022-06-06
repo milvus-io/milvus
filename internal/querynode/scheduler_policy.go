@@ -9,7 +9,9 @@ type scheduleReadTaskPolicy func(sqTasks *list.List, targetUsage int32) ([]readT
 func defaultScheduleReadPolicy(sqTasks *list.List, targetUsage int32) ([]readTask, int32) {
 	var ret []readTask
 	usage := int32(0)
-	for e := sqTasks.Front(); e != nil; e = e.Next() {
+	var next *list.Element
+	for e := sqTasks.Front(); e != nil; e = next {
+		next = e.Next()
 		t, _ := e.Value.(readTask)
 		tUsage := t.CPUUsage()
 		if usage+tUsage > targetUsage {

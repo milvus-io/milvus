@@ -139,7 +139,9 @@ func (s *taskScheduler) tryEvictUnsolvedReadTask(headCount int) {
 		return
 	}
 	timeoutErr := fmt.Errorf("deadline exceed")
-	for e := s.unsolvedReadTasks.Front(); e != nil; e = e.Next() {
+	var next *list.Element
+	for e := s.unsolvedReadTasks.Front(); e != nil; e = next {
+		next = e.Next()
 		t, ok := e.Value.(readTask)
 		if !ok {
 			s.unsolvedReadTasks.Remove(e)
@@ -157,7 +159,8 @@ func (s *taskScheduler) tryEvictUnsolvedReadTask(headCount int) {
 	}
 	metrics.QueryNodeEvictedReadReqCount.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Add(float64(diff))
 	busyErr := fmt.Errorf("server is busy")
-	for e := s.unsolvedReadTasks.Front(); e != nil && diff > 0; e = e.Next() {
+	for e := s.unsolvedReadTasks.Front(); e != nil && diff > 0; e = next {
+		next = e.Next()
 		diff--
 		s.unsolvedReadTasks.Remove(e)
 		t, ok := e.Value.(readTask)
@@ -316,7 +319,9 @@ func (s *taskScheduler) Close() {
 }
 
 func (s *taskScheduler) tryMergeReadTasks() {
-	for e := s.unsolvedReadTasks.Front(); e != nil; e = e.Next() {
+	var next *list.Element
+	for e := s.unsolvedReadTasks.Front(); e != nil; e = next {
+		next = e.Next()
 		t, ok := e.Value.(readTask)
 		if !ok {
 			s.unsolvedReadTasks.Remove(e)
