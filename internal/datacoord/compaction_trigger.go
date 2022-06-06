@@ -125,7 +125,7 @@ func (t *compactionTrigger) startGlobalCompactionLoop() {
 	defer t.wg.Done()
 
 	// If AutoCompaction disabled, global loop will not start
-	if !Params.DataCoordCfg.EnableAutoCompaction {
+	if !Params.DataCoordCfg.GetEnableAutoCompaction() {
 		return
 	}
 
@@ -176,7 +176,7 @@ func (t *compactionTrigger) triggerCompaction(timetravel *timetravel) error {
 // triggerSingleCompaction triger a compaction bundled with collection-partiiton-channel-segment
 func (t *compactionTrigger) triggerSingleCompaction(collectionID, partitionID, segmentID int64, channel string, timetravel *timetravel) error {
 	// If AutoCompaction diabled, flush request will not trigger compaction
-	if !Params.DataCoordCfg.EnableAutoCompaction {
+	if !Params.DataCoordCfg.GetEnableAutoCompaction() {
 		return nil
 	}
 

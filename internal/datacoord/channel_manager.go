@@ -333,7 +333,16 @@ func (c *ChannelManager) AddNode(nodeID int64) error {
 		zap.Int64("registered node", nodeID),
 		zap.Array("updates", updates))
 
-	return c.updateWithTimer(updates, datapb.ChannelWatchState_ToRelease)
+	state := datapb.ChannelWatchState_ToRelease
+
+	for _, u := range updates {
+		if u.Type == Delete && u.NodeID == bufferID {
+			state = datapb.ChannelWatchState_ToWatch
+			break
+		}
+	}
+
+	return c.updateWithTimer(updates, state)
 }
 
 // DeleteNode deletes the node from the cluster.
