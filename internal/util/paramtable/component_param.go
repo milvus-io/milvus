@@ -884,7 +884,7 @@ type dataCoordConfig struct {
 	UpdatedTime time.Time
 
 	EnableCompaction        bool
-	EnableAutoCompaction    bool
+	EnableAutoCompaction    atomic.Value
 	EnableGarbageCollection bool
 
 	// Garbage Collection
@@ -955,7 +955,19 @@ func (p *dataCoordConfig) initGCDropTolerance() {
 }
 
 func (p *dataCoordConfig) initEnableAutoCompaction() {
-	p.EnableAutoCompaction = p.Base.ParseBool("dataCoord.compaction.enableAutoCompaction", false)
+	p.EnableAutoCompaction.Store(p.Base.ParseBool("dataCoord.compaction.enableAutoCompaction", false))
+}
+
+func (p *dataCoordConfig) SetEnableAutoCompaction(enable bool) {
+	p.EnableAutoCompaction.Store(enable)
+}
+
+func (p *dataCoordConfig) GetEnableAutoCompaction() bool {
+	enable := p.EnableAutoCompaction.Load()
+	if enable != nil {
+		return enable.(bool)
+	}
+	return false
 }
 
 func (p *dataCoordConfig) SetNodeID(id UniqueID) {

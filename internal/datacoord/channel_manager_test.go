@@ -283,7 +283,27 @@ func TestChannelManager(t *testing.T) {
 	}()
 
 	prefix := Params.DataCoordCfg.ChannelWatchSubPath
-	t.Run("test AddNode", func(t *testing.T) {
+	waitAndStore := func(waitState, storeState datapb.ChannelWatchState, nodeID UniqueID, channelName string) {
+		for {
+			key := path.Join(prefix, strconv.FormatInt(nodeID, 10), channelName)
+			v, err := metakv.Load(key)
+			if err == nil && len(v) > 0 {
+				watchInfo, err := parseWatchInfo(key, []byte(v))
+				require.NoError(t, err)
+				require.Equal(t, waitState, watchInfo.GetState())
+
+				watchInfo.State = storeState
+				data, err := proto.Marshal(watchInfo)
+				require.NoError(t, err)
+
+				metakv.Save(key, string(data))
+				break
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+
+	t.Run("test AddNode with avalible node", func(t *testing.T) {
 		// Note: this test is based on the default registerPolicy
 		defer metakv.RemoveWithPrefix("")
 		var (
@@ -320,6 +340,45 @@ func TestChannelManager(t *testing.T) {
 		chManager.stateTimer.removeTimers([]string{"channel-3"})
 
 		checkWatchInfoWithState(t, metakv, datapb.ChannelWatchState_ToWatch, nodeToAdd, "channel-3", collectionID)
+	})
+
+	t.Run("test AddNode with no available node", func(t *testing.T) {
+		// Note: this test is based on the default registerPolicy
+		defer metakv.RemoveWithPrefix("")
+		var (
+			collectionID       = UniqueID(8)
+			nodeID             = UniqueID(119)
+			channel1, channel2 = "channel1", "channel2"
+		)
+
+		chManager, err := NewChannelManager(metakv, newMockHandler())
+		require.NoError(t, err)
+		chManager.store = &ChannelStore{
+			store: metakv,
+			channelsInfo: map[int64]*NodeChannelInfo{
+				bufferID: {bufferID, []*channel{
+					{channel1, collectionID},
+					{channel2, collectionID},
+				}},
+			},
+		}
+
+		err = chManager.AddNode(nodeID)
+		assert.NoError(t, err)
+
+		waitAndStore(datapb.ChannelWatchState_ToWatch, datapb.ChannelWatchState_WatchSuccess, nodeID, channel1)
+		waitAndStore(datapb.ChannelWatchState_ToWatch, datapb.ChannelWatchState_WatchSuccess, nodeID, channel2)
+
+		chInfo := chManager.store.GetNode(nodeID)
+		assert.Equal(t, 2, len(chInfo.Channels))
+		chManager.Match(nodeID, channel1)
+		chManager.Match(nodeID, channel2)
+
+		err = chManager.Watch(&channel{"channel-3", collectionID})
+		assert.NoError(t, err)
+		checkWatchInfoWithState(t, metakv, datapb.ChannelWatchState_ToWatch, nodeID, "channel-3", collectionID)
+		chManager.stateTimer.stopIfExsit(&ackEvent{watchSuccessAck, "channel-3", nodeID})
+
 	})
 
 	t.Run("test Watch", func(t *testing.T) {
@@ -786,7 +845,7 @@ func TestChannelManager_BalanceBehaviour(t *testing.T) {
 
 	prefix := Params.DataCoordCfg.ChannelWatchSubPath
 
-	t.Run("one node with two channels add a new node", func(t *testing.T) {
+	t.Run("one node with three channels add a new node", func(t *testing.T) {
 		defer metakv.RemoveWithPrefix("")
 
 		var (

@@ -664,7 +664,7 @@ func Test_compactionTrigger_triggerCompaction(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			Params.DataCoordCfg.EnableAutoCompaction = tt.fields.autoCompactionEnabled
+			Params.DataCoordCfg.SetEnableAutoCompaction(tt.fields.autoCompactionEnabled)
 			tr := &compactionTrigger{
 				meta:                            tt.fields.meta,
 				allocator:                       tt.fields.allocator,
@@ -1083,7 +1083,7 @@ func Test_compactionTrigger_singleTriggerCompaction(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			Params.DataCoordCfg.EnableAutoCompaction = tt.fields.enableAutoCompaction
+			Params.DataCoordCfg.SetEnableAutoCompaction(tt.fields.enableAutoCompaction)
 			tr := &compactionTrigger{
 				meta:                   tt.fields.meta,
 				allocator:              tt.fields.allocator,
