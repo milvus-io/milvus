@@ -267,8 +267,10 @@ func TestWatcherHandleWatchResp(t *testing.T) {
 				},
 			},
 		}
-		err := w.handleWatchResponse(wresp)
-		assert.NoError(t, err)
+		assert.NotPanics(t, func() {
+			w.handleWatchResponse(wresp)
+		})
+
 		assert.Equal(t, 2, len(w.eventCh))
 	})
 
@@ -290,11 +292,9 @@ func TestWatcherHandleWatchResp(t *testing.T) {
 				},
 			},
 		}
-		var err error
 		assert.NotPanics(t, func() {
-			err = w.handleWatchResponse(wresp)
+			w.handleWatchResponse(wresp)
 		})
-		assert.NoError(t, err)
 		assert.Equal(t, 0, len(w.eventCh))
 	})
 
@@ -303,8 +303,9 @@ func TestWatcherHandleWatchResp(t *testing.T) {
 		wresp := clientv3.WatchResponse{
 			CompactRevision: 1,
 		}
-		err := w.handleWatchResponse(wresp)
-		assert.NoError(t, err)
+		assert.NotPanics(t, func() {
+			w.handleWatchResponse(wresp)
+		})
 	})
 
 	t.Run("err compacted resp, valid Rewatch", func(t *testing.T) {
@@ -314,8 +315,9 @@ func TestWatcherHandleWatchResp(t *testing.T) {
 		wresp := clientv3.WatchResponse{
 			CompactRevision: 1,
 		}
-		err := w.handleWatchResponse(wresp)
-		assert.NoError(t, err)
+		assert.NotPanics(t, func() {
+			w.handleWatchResponse(wresp)
+		})
 	})
 
 	t.Run("err canceled", func(t *testing.T) {
@@ -323,8 +325,10 @@ func TestWatcherHandleWatchResp(t *testing.T) {
 		wresp := clientv3.WatchResponse{
 			Canceled: true,
 		}
-		err := w.handleWatchResponse(wresp)
-		assert.Error(t, err)
+
+		assert.Panics(t, func() {
+			w.handleWatchResponse(wresp)
+		})
 	})
 
 	t.Run("err handled but rewatch failed", func(t *testing.T) {
@@ -334,10 +338,9 @@ func TestWatcherHandleWatchResp(t *testing.T) {
 		wresp := clientv3.WatchResponse{
 			CompactRevision: 1,
 		}
-		err := w.handleWatchResponse(wresp)
-		t.Log(err.Error())
-
-		assert.Error(t, err)
+		assert.Panics(t, func() {
+			w.handleWatchResponse(wresp)
+		})
 	})
 
 	t.Run("err handled but list failed", func(t *testing.T) {
@@ -350,8 +353,10 @@ func TestWatcherHandleWatchResp(t *testing.T) {
 			CompactRevision: 1,
 		}
 
-		err = w.handleWatchResponse(wresp)
-		assert.Error(t, err)
+		assert.Panics(t, func() {
+			w.handleWatchResponse(wresp)
+		})
+
 	})
 
 }

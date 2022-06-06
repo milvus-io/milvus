@@ -111,8 +111,9 @@ func (p *proxyManager) startWatchEtcd(ctx context.Context, eventCh clientv3.Watc
 				return
 			}
 			if err := event.Err(); err != nil {
-				log.Error("received error event from etcd watcher", zap.Error(err))
-				return
+				// TODO do we need to retry watch etcd when ErrCompacted, but the init session func may not be idempotent so skip
+				log.Error("Watch proxy service failed", zap.Error(err))
+				panic(err)
 			}
 			for _, e := range event.Events {
 				var err error

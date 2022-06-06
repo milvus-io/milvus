@@ -329,15 +329,10 @@ func (w *sessionWatcher) start() {
 				return
 			case wresp, ok := <-w.rch:
 				if !ok {
+					log.Warn("session watch channel closed")
 					return
 				}
-
-				err := w.handleWatchResponse(wresp)
-				// internal error not handled,goroutine quit
-				if err != nil {
-					log.Warn("watch goroutine found error", zap.Error(err))
-					return
-				}
+				w.handleWatchResponse(wresp)
 			}
 		}
 	}()
@@ -363,9 +358,14 @@ func (s *Session) WatchServices(prefix string, revision int64, rewatch Rewatch) 
 	return w.eventCh
 }
 
-func (w *sessionWatcher) handleWatchResponse(wresp clientv3.WatchResponse) error {
+func (w *sessionWatcher) handleWatchResponse(wresp clientv3.WatchResponse) {
 	if wresp.Err() != nil {
-		return w.handleWatchErr(wresp.Err())
+		err := w.handleWatchErr(wresp.Err())
+		if err != nil {
+			log.Error("failed to handle watch session response", zap.Error(err))
+			panic(err)
+		}
+		return
 	}
 	for _, ev := range wresp.Events {
 		session := &Session{}
@@ -396,7 +396,6 @@ func (w *sessionWatcher) handleWatchResponse(wresp clientv3.WatchResponse) error
 			Session:   session,
 		}
 	}
-	return nil
 }
 
 func (w *sessionWatcher) handleWatchErr(err error) error {
