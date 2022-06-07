@@ -19,7 +19,6 @@ package rootcoord
 import (
 	"context"
 	"fmt"
-	"strconv"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/common"
@@ -185,10 +184,6 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	// build DdOperation and save it into etcd, when ddmsg send fail,
 	// system can restore ddmsg from etcd and re-send
 	ddCollReq.Base.Timestamp = ts
-	ddOpStr, err := EncodeDdOperation(&ddCollReq, CreateCollectionDDType)
-	if err != nil {
-		return fmt.Errorf("encodeDdOperation fail, error = %w", err)
-	}
 
 	collInfo := model.Collection{
 		CollectionID:         collID,
@@ -239,7 +234,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		}
 
 		// update meta table after send dd operation
-		if err = t.core.MetaTable.AddCollection(&collInfo, ts, ddOpStr); err != nil {
+		if err = t.core.MetaTable.AddCollection(&collInfo, ts); err != nil {
 			t.core.chanTimeTick.removeDmlChannels(chanNames...)
 			t.core.chanTimeTick.removeDeltaChannels(deltaChanNames...)
 			// it's ok just to leave create collection message sent, datanode and querynode does't process CreateCollection logic
@@ -263,8 +258,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	// Update DDOperation in etcd
-	return t.core.MetaTable.txn.Save(DDMsgSendPrefix, strconv.FormatBool(true))
+	return nil
 }
 
 // DropCollectionReqTask drop collection request task
@@ -326,10 +320,6 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 	// build DdOperation and save it into etcd, when ddmsg send fail,
 	// system can restore ddmsg from etcd and re-send
 	ddReq.Base.Timestamp = ts
-	ddOpStr, err := EncodeDdOperation(&ddReq, DropCollectionDDType)
-	if err != nil {
-		return fmt.Errorf("encodeDdOperation fail, error = %w", err)
-	}
 
 	// use lambda function here to guarantee all resources to be released
 	dropCollectionFn := func() error {
@@ -346,7 +336,7 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		}
 
 		// update meta table after send dd operation
-		if err = t.core.MetaTable.DeleteCollection(collMeta.CollectionID, ts, ddOpStr); err != nil {
+		if err = t.core.MetaTable.DeleteCollection(collMeta.CollectionID, ts); err != nil {
 			return err
 		}
 
@@ -385,8 +375,7 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	// Update DDOperation in etcd
-	return t.core.MetaTable.txn.Save(DDMsgSendPrefix, strconv.FormatBool(true))
+	return nil
 }
 
 // HasCollectionReqTask has collection request task
@@ -546,10 +535,6 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 	// build DdOperation and save it into etcd, when ddmsg send fail,
 	// system can restore ddmsg from etcd and re-send
 	ddReq.Base.Timestamp = ts
-	ddOpStr, err := EncodeDdOperation(&ddReq, CreatePartitionDDType)
-	if err != nil {
-		return fmt.Errorf("encodeDdOperation fail, error = %w", err)
-	}
 
 	// use lambda function here to guarantee all resources to be released
 	createPartitionFn := func() error {
@@ -566,7 +551,7 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 		}
 
 		// update meta table after send dd operation
-		if err = t.core.MetaTable.AddPartition(collMeta.CollectionID, t.Req.PartitionName, partID, ts, ddOpStr); err != nil {
+		if err = t.core.MetaTable.AddPartition(collMeta.CollectionID, t.Req.PartitionName, partID, ts); err != nil {
 			return err
 		}
 
@@ -589,8 +574,7 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	// Update DDOperation in etcd
-	return t.core.MetaTable.txn.Save(DDMsgSendPrefix, strconv.FormatBool(true))
+	return nil
 }
 
 // DropPartitionReqTask drop partition request task
@@ -637,10 +621,6 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 	// build DdOperation and save it into etcd, when ddmsg send fail,
 	// system can restore ddmsg from etcd and re-send
 	ddReq.Base.Timestamp = ts
-	ddOpStr, err := EncodeDdOperation(&ddReq, DropPartitionDDType)
-	if err != nil {
-		return fmt.Errorf("encodeDdOperation fail, error = %w", err)
-	}
 
 	// use lambda function here to guarantee all resources to be released
 	dropPartitionFn := func() error {
@@ -657,7 +637,7 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 		}
 
 		// update meta table after send dd operation
-		if _, err = t.core.MetaTable.DeletePartition(collInfo.CollectionID, t.Req.PartitionName, ts, ddOpStr); err != nil {
+		if _, err = t.core.MetaTable.DeletePartition(collInfo.CollectionID, t.Req.PartitionName, ts); err != nil {
 			return err
 		}
 
@@ -687,8 +667,7 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 	//	return err
 	//}
 
-	// Update DDOperation in etcd
-	return t.core.MetaTable.txn.Save(DDMsgSendPrefix, strconv.FormatBool(true))
+	return nil
 }
 
 // HasPartitionReqTask has partition request task

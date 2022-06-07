@@ -39,24 +39,6 @@ const (
 	// TimestampPrefix prefix for timestamp
 	TimestampPrefix = kvmetestore.ComponentPrefix + "/timestamp"
 
-	// DDOperationPrefix prefix for DD operation
-	DDOperationPrefix = kvmetestore.ComponentPrefix + "/dd-operation"
-
-	// DDMsgSendPrefix prefix to indicate whether DD msg has been send
-	DDMsgSendPrefix = kvmetestore.ComponentPrefix + "/dd-msg-send"
-
-	// CreateCollectionDDType name of DD type for create collection
-	CreateCollectionDDType = "CreateCollection"
-
-	// DropCollectionDDType name of DD type for drop collection
-	DropCollectionDDType = "DropCollection"
-
-	// CreatePartitionDDType name of DD type for create partition
-	CreatePartitionDDType = "CreatePartition"
-
-	// DropPartitionDDType name of DD type for drop partition
-	DropPartitionDDType = "DropPartition"
-
 	// DefaultIndexType name of default index type for scalar field
 	DefaultIndexType = "STL_SORT"
 
@@ -164,7 +146,7 @@ func (mt *MetaTable) reloadFromKV() error {
 }
 
 // AddCollection add collection
-func (mt *MetaTable) AddCollection(coll *model.Collection, ts typeutil.Timestamp, ddOpStr string) error {
+func (mt *MetaTable) AddCollection(coll *model.Collection, ts typeutil.Timestamp) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -180,15 +162,11 @@ func (mt *MetaTable) AddCollection(coll *model.Collection, ts typeutil.Timestamp
 		partition.PartitionCreatedTimestamp = ts
 	}
 
-	meta := map[string]string{}
-	meta[DDMsgSendPrefix] = "false"
-	meta[DDOperationPrefix] = ddOpStr
-	coll.Extra = meta
 	return mt.catalog.CreateCollection(mt.ctx, coll, ts)
 }
 
 // DeleteCollection delete collection
-func (mt *MetaTable) DeleteCollection(collID typeutil.UniqueID, ts typeutil.Timestamp, ddOpStr string) error {
+func (mt *MetaTable) DeleteCollection(collID typeutil.UniqueID, ts typeutil.Timestamp) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -228,16 +206,9 @@ func (mt *MetaTable) DeleteCollection(collID typeutil.UniqueID, ts typeutil.Time
 		}
 	}
 
-	// save ddOpStr into etcd
-	var meta = map[string]string{
-		DDMsgSendPrefix:   "false",
-		DDOperationPrefix: ddOpStr,
-	}
-
 	collection := &model.Collection{
 		CollectionID: collID,
 		Aliases:      aliases,
-		Extra:        meta,
 	}
 
 	return mt.catalog.DropCollection(mt.ctx, collection, ts)
@@ -362,7 +333,7 @@ func (mt *MetaTable) ListCollectionPhysicalChannels() map[typeutil.UniqueID][]st
 }
 
 // AddPartition add partition
-func (mt *MetaTable) AddPartition(collID typeutil.UniqueID, partitionName string, partitionID typeutil.UniqueID, ts typeutil.Timestamp, ddOpStr string) error {
+func (mt *MetaTable) AddPartition(collID typeutil.UniqueID, partitionName string, partitionID typeutil.UniqueID, ts typeutil.Timestamp) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 	coll, ok := mt.collID2Meta[collID]
@@ -393,11 +364,6 @@ func (mt *MetaTable) AddPartition(collID typeutil.UniqueID, partitionName string
 		})
 	mt.collID2Meta[collID] = coll
 
-	metaTxn := map[string]string{}
-	// save ddOpStr into etcd
-	metaTxn[DDMsgSendPrefix] = "false"
-	metaTxn[DDOperationPrefix] = ddOpStr
-	coll.Extra = metaTxn
 	return mt.catalog.CreatePartition(mt.ctx, &coll, ts)
 }
 
@@ -472,7 +438,7 @@ func (mt *MetaTable) HasPartition(collID typeutil.UniqueID, partitionName string
 }
 
 // DeletePartition delete partition
-func (mt *MetaTable) DeletePartition(collID typeutil.UniqueID, partitionName string, ts typeutil.Timestamp, ddOpStr string) (typeutil.UniqueID, error) {
+func (mt *MetaTable) DeletePartition(collID typeutil.UniqueID, partitionName string, ts typeutil.Timestamp) (typeutil.UniqueID, error) {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
@@ -512,12 +478,6 @@ func (mt *MetaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 		}
 	}
 	delete(mt.partID2SegID, partID)
-
-	metaTxn := make(map[string]string)
-	// save ddOpStr into etcd
-	metaTxn[DDMsgSendPrefix] = "false"
-	metaTxn[DDOperationPrefix] = ddOpStr
-	col.Extra = metaTxn
 
 	err := mt.catalog.DropPartition(mt.ctx, &col, partID, ts)
 	if err != nil {

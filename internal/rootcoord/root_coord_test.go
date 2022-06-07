@@ -534,38 +534,10 @@ func createCollectionInMeta(dbName, collName string, core *Core, shardsNum int32
 		modifyFunc(&collInfo)
 	}
 
-	// schema is modified (add RowIDField and TimestampField),
-	// so need Marshal again
-	schemaBytes, err := proto.Marshal(&schema)
-	if err != nil {
-		return fmt.Errorf("marshal schema error = %w", err)
-	}
-
-	ddCollReq := internalpb.CreateCollectionRequest{
-		Base:                 t.Base,
-		DbName:               t.DbName,
-		CollectionName:       t.CollectionName,
-		PartitionName:        Params.CommonCfg.DefaultPartitionName,
-		DbID:                 0, //TODO,not used
-		CollectionID:         collID,
-		PartitionID:          partID,
-		Schema:               schemaBytes,
-		VirtualChannelNames:  vchanNames,
-		PhysicalChannelNames: chanNames,
-	}
-
 	reason := fmt.Sprintf("create collection %d", collID)
 	ts, err := core.TSOAllocator(1)
 	if err != nil {
 		return fmt.Errorf("tso alloc fail, error = %w", err)
-	}
-
-	// build DdOperation and save it into etcd, when ddmsg send fail,
-	// system can restore ddmsg from etcd and re-send
-	ddCollReq.Base.Timestamp = ts
-	ddOpStr, err := EncodeDdOperation(&ddCollReq, CreateCollectionDDType)
-	if err != nil {
-		return fmt.Errorf("encodeDdOperation fail, error = %w", err)
 	}
 
 	// use lambda function here to guarantee all resources to be released
@@ -578,7 +550,7 @@ func createCollectionInMeta(dbName, collName string, core *Core, shardsNum int32
 		// clear ddl timetick in all conditions
 		defer core.chanTimeTick.removeDdlTimeTick(ts, reason)
 
-		err = core.MetaTable.AddCollection(&collInfo, ts, ddOpStr)
+		err = core.MetaTable.AddCollection(&collInfo, ts)
 		if err != nil {
 			return fmt.Errorf("meta table add collection failed,error = %w", err)
 		}
@@ -973,23 +945,6 @@ func TestRootCoord_Base(t *testing.T) {
 		}
 		core.chanTimeTick.lock.Unlock()
 
-		// check DD operation info
-		flag, err := core.MetaTable.txn.Load(DDMsgSendPrefix)
-		assert.NoError(t, err)
-		assert.Equal(t, "true", flag)
-		ddOpStr, err := core.MetaTable.txn.Load(DDOperationPrefix)
-		assert.NoError(t, err)
-		var ddOp DdOperation
-		err = DecodeDdOperation(ddOpStr, &ddOp)
-		assert.NoError(t, err)
-		assert.Equal(t, CreateCollectionDDType, ddOp.Type)
-
-		var ddCollReq = internalpb.CreateCollectionRequest{}
-		err = proto.Unmarshal(ddOp.Body, &ddCollReq)
-		assert.NoError(t, err)
-		assert.Equal(t, createMeta.CollectionID, ddCollReq.CollectionID)
-		assert.Equal(t, createMeta.Partitions[0].PartitionID, ddCollReq.PartitionID)
-
 		// check invalid operation
 		req.Base.MsgID = 101
 		req.Base.Timestamp = 101
@@ -1016,9 +971,6 @@ func TestRootCoord_Base(t *testing.T) {
 		status, err = core.CreateCollection(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
-
-		err = core.reSendDdMsg(core.ctx, true)
-		assert.NoError(t, err)
 	})
 
 	wg.Add(1)
@@ -1150,26 +1102,6 @@ func TestRootCoord_Base(t *testing.T) {
 
 		assert.Equal(t, 1, len(pnm.GetCollIDs()))
 		assert.Equal(t, collMeta.CollectionID, pnm.GetCollIDs()[0])
-
-		// check DD operation info
-		flag, err := core.MetaTable.txn.Load(DDMsgSendPrefix)
-		assert.NoError(t, err)
-		assert.Equal(t, "true", flag)
-		ddOpStr, err := core.MetaTable.txn.Load(DDOperationPrefix)
-		assert.NoError(t, err)
-		var ddOp DdOperation
-		err = DecodeDdOperation(ddOpStr, &ddOp)
-		assert.NoError(t, err)
-		assert.Equal(t, CreatePartitionDDType, ddOp.Type)
-
-		var ddReq = internalpb.CreatePartitionRequest{}
-		err = proto.Unmarshal(ddOp.Body, &ddReq)
-		assert.NoError(t, err)
-		assert.Equal(t, collMeta.CollectionID, ddReq.CollectionID)
-		assert.Equal(t, collMeta.Partitions[1].PartitionID, ddReq.PartitionID)
-
-		err = core.reSendDdMsg(core.ctx, true)
-		assert.NoError(t, err)
 	})
 
 	wg.Add(1)
@@ -1742,26 +1674,6 @@ func TestRootCoord_Base(t *testing.T) {
 
 		assert.Equal(t, 2, len(pnm.GetCollIDs()))
 		assert.Equal(t, collMeta.CollectionID, pnm.GetCollIDs()[1])
-
-		// check DD operation info
-		flag, err := core.MetaTable.txn.Load(DDMsgSendPrefix)
-		assert.NoError(t, err)
-		assert.Equal(t, "true", flag)
-		ddOpStr, err := core.MetaTable.txn.Load(DDOperationPrefix)
-		assert.NoError(t, err)
-		var ddOp DdOperation
-		err = DecodeDdOperation(ddOpStr, &ddOp)
-		assert.NoError(t, err)
-		assert.Equal(t, DropPartitionDDType, ddOp.Type)
-
-		var ddReq = internalpb.DropPartitionRequest{}
-		err = proto.Unmarshal(ddOp.Body, &ddReq)
-		assert.NoError(t, err)
-		assert.Equal(t, collMeta.CollectionID, ddReq.CollectionID)
-		assert.Equal(t, dropPartID, ddReq.PartitionID)
-
-		err = core.reSendDdMsg(core.ctx, true)
-		assert.NoError(t, err)
 	})
 
 	wg.Add(1)
@@ -1836,25 +1748,6 @@ func TestRootCoord_Base(t *testing.T) {
 		collIDs = pnm.GetCollIDs()
 		assert.Equal(t, 3, len(collIDs))
 		assert.Equal(t, collMeta.CollectionID, collIDs[2])
-
-		// check DD operation info
-		flag, err := core.MetaTable.txn.Load(DDMsgSendPrefix)
-		assert.NoError(t, err)
-		assert.Equal(t, "true", flag)
-		ddOpStr, err := core.MetaTable.txn.Load(DDOperationPrefix)
-		assert.NoError(t, err)
-		var ddOp DdOperation
-		err = DecodeDdOperation(ddOpStr, &ddOp)
-		assert.NoError(t, err)
-		assert.Equal(t, DropCollectionDDType, ddOp.Type)
-
-		var ddReq = internalpb.DropCollectionRequest{}
-		err = proto.Unmarshal(ddOp.Body, &ddReq)
-		assert.NoError(t, err)
-		assert.Equal(t, collMeta.CollectionID, ddReq.CollectionID)
-
-		err = core.reSendDdMsg(core.ctx, true)
-		assert.NoError(t, err)
 	})
 
 	wg.Add(1)

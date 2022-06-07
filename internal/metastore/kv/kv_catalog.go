@@ -33,12 +33,7 @@ func (kc *Catalog) CreateCollection(ctx context.Context, coll *model.Collection,
 		return err
 	}
 
-	// save ddOpStr into etcd
 	kvs := map[string]string{k1: string(v1)}
-	for k, v := range coll.Extra {
-		kvs[k] = v
-	}
-
 	err = kc.Snapshot.MultiSave(kvs, ts)
 	if err != nil {
 		log.Error("create collection persist meta fail", zap.String("key", k1), zap.Error(err))
@@ -61,14 +56,6 @@ func (kc *Catalog) CreatePartition(ctx context.Context, coll *model.Collection, 
 	err = kc.Snapshot.MultiSave(kvs, ts)
 	if err != nil {
 		log.Error("create partition persist meta fail", zap.String("key", k1), zap.Error(err))
-		return err
-	}
-
-	// save ddOpStr into etcd
-	err = kc.Txn.MultiSave(coll.Extra)
-	if err != nil {
-		// will not panic, missing create msg
-		log.Warn("create partition persist ddop meta fail", zap.Int64("collectionID", coll.CollectionID), zap.Error(err))
 		return err
 	}
 
@@ -227,18 +214,12 @@ func (kc *Catalog) DropCollection(ctx context.Context, collectionInfo *model.Col
 		return err
 	}
 
-	// Txn operation
-	kvs := map[string]string{}
-	for k, v := range collectionInfo.Extra {
-		kvs[k] = v
-	}
-
 	delMetaKeysTxn := []string{
 		fmt.Sprintf("%s/%d", SegmentIndexMetaPrefix, collectionInfo.CollectionID),
 		fmt.Sprintf("%s/%d", IndexMetaPrefix, collectionInfo.CollectionID),
 	}
 
-	err = kc.Txn.MultiSaveAndRemoveWithPrefix(kvs, delMetaKeysTxn)
+	err = kc.Txn.MultiRemoveWithPrefix(delMetaKeysTxn)
 	if err != nil {
 		log.Warn("drop collection update meta fail", zap.Int64("collectionID", collectionInfo.CollectionID), zap.Error(err))
 		return err
@@ -271,12 +252,7 @@ func (kc *Catalog) DropPartition(ctx context.Context, collectionInfo *model.Coll
 		delMetaKeys = append(delMetaKeys, k)
 	}
 
-	// Txn operation
-	metaTxn := map[string]string{}
-	for k, v := range collectionInfo.Extra {
-		metaTxn[k] = v
-	}
-	err = kc.Txn.MultiSaveAndRemoveWithPrefix(metaTxn, delMetaKeys)
+	err = kc.Txn.MultiRemoveWithPrefix(delMetaKeys)
 	if err != nil {
 		log.Warn("drop partition update meta fail",
 			zap.Int64("collectionID", collectionInfo.CollectionID),
