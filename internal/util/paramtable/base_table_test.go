@@ -75,11 +75,11 @@ func TestBaseTable_LoadFromKVPair(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, "v2", v)
 
-	v, err = baseParams.Load2([]string{"k2_new"})
+	v, err = baseParams.LoadWithPriority([]string{"k2_new"})
 	assert.NotNil(t, err)
 	assert.Equal(t, "", v)
 
-	v, err = baseParams.Load2([]string{"k2_new", "k2"})
+	v, err = baseParams.LoadWithPriority([]string{"k2_new", "k2"})
 	assert.Nil(t, err)
 	assert.Equal(t, "v2", v)
 

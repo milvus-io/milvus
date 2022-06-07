@@ -174,10 +174,10 @@ func (p *commonConfig) init(base *BaseTable) {
 
 func (p *commonConfig) initClusterPrefix() {
 	keys := []string{
-		"common.chanNamePrefix.cluster",
 		"msgChannel.chanNamePrefix.cluster",
+		"common.chanNamePrefix.cluster",
 	}
-	str, err := p.Base.Load2(keys)
+	str, err := p.Base.LoadWithPriority(keys)
 	if err != nil {
 		panic(err)
 	}
@@ -185,7 +185,7 @@ func (p *commonConfig) initClusterPrefix() {
 }
 
 func (p *commonConfig) initChanNamePrefix(keys []string) string {
-	value, err := p.Base.Load2(keys)
+	value, err := p.Base.LoadWithPriority(keys)
 	if err != nil {
 		panic(err)
 	}
@@ -196,8 +196,8 @@ func (p *commonConfig) initChanNamePrefix(keys []string) string {
 // --- proxy ---
 func (p *commonConfig) initProxySubName() {
 	keys := []string{
-		"common.subNamePrefix.proxySubNamePrefix",
 		"msgChannel.subNamePrefix.proxySubNamePrefix",
+		"common.subNamePrefix.proxySubNamePrefix",
 	}
 	p.ProxySubName = p.initChanNamePrefix(keys)
 }
@@ -206,40 +206,40 @@ func (p *commonConfig) initProxySubName() {
 // Deprecate
 func (p *commonConfig) initRootCoordTimeTick() {
 	keys := []string{
-		"common.chanNamePrefix.rootCoordTimeTick",
 		"msgChannel.chanNamePrefix.rootCoordTimeTick",
+		"common.chanNamePrefix.rootCoordTimeTick",
 	}
 	p.RootCoordTimeTick = p.initChanNamePrefix(keys)
 }
 
 func (p *commonConfig) initRootCoordStatistics() {
 	keys := []string{
-		"common.chanNamePrefix.rootCoordStatistics",
 		"msgChannel.chanNamePrefix.rootCoordStatistics",
+		"common.chanNamePrefix.rootCoordStatistics",
 	}
 	p.RootCoordStatistics = p.initChanNamePrefix(keys)
 }
 
 func (p *commonConfig) initRootCoordDml() {
 	keys := []string{
-		"common.chanNamePrefix.rootCoordDml",
 		"msgChannel.chanNamePrefix.rootCoordDml",
+		"common.chanNamePrefix.rootCoordDml",
 	}
 	p.RootCoordDml = p.initChanNamePrefix(keys)
 }
 
 func (p *commonConfig) initRootCoordDelta() {
 	keys := []string{
-		"common.chanNamePrefix.rootCoordDelta",
 		"msgChannel.chanNamePrefix.rootCoordDelta",
+		"common.chanNamePrefix.rootCoordDelta",
 	}
 	p.RootCoordDelta = p.initChanNamePrefix(keys)
 }
 
 func (p *commonConfig) initRootCoordSubName() {
 	keys := []string{
-		"common.subNamePrefix.rootCoordSubNamePrefix",
 		"msgChannel.subNamePrefix.rootCoordSubNamePrefix",
+		"common.subNamePrefix.rootCoordSubNamePrefix",
 	}
 	p.RootCoordSubName = p.initChanNamePrefix(keys)
 }
@@ -247,8 +247,8 @@ func (p *commonConfig) initRootCoordSubName() {
 // --- querycoord ---
 func (p *commonConfig) initQueryCoordSearch() {
 	keys := []string{
-		"common.chanNamePrefix.search",
 		"msgChannel.chanNamePrefix.search",
+		"common.chanNamePrefix.search",
 	}
 	p.QueryCoordSearch = p.initChanNamePrefix(keys)
 }
@@ -256,8 +256,8 @@ func (p *commonConfig) initQueryCoordSearch() {
 // Deprecated, search result use grpc instead of a result channel
 func (p *commonConfig) initQueryCoordSearchResult() {
 	keys := []string{
-		"common.chanNamePrefix.searchResult",
 		"msgChannel.chanNamePrefix.searchResult",
+		"common.chanNamePrefix.searchResult",
 	}
 	p.QueryCoordSearchResult = p.initChanNamePrefix(keys)
 }
@@ -265,8 +265,8 @@ func (p *commonConfig) initQueryCoordSearchResult() {
 // Deprecate
 func (p *commonConfig) initQueryCoordTimeTick() {
 	keys := []string{
-		"common.chanNamePrefix.queryTimeTick",
 		"msgChannel.chanNamePrefix.queryTimeTick",
+		"common.chanNamePrefix.queryTimeTick",
 	}
 	p.QueryCoordTimeTick = p.initChanNamePrefix(keys)
 }
@@ -274,16 +274,16 @@ func (p *commonConfig) initQueryCoordTimeTick() {
 // --- querynode ---
 func (p *commonConfig) initQueryNodeStats() {
 	keys := []string{
-		"common.chanNamePrefix.queryNodeStats",
 		"msgChannel.chanNamePrefix.queryNodeStats",
+		"common.chanNamePrefix.queryNodeStats",
 	}
 	p.QueryNodeStats = p.initChanNamePrefix(keys)
 }
 
 func (p *commonConfig) initQueryNodeSubName() {
 	keys := []string{
-		"common.subNamePrefix.queryNodeSubNamePrefix",
 		"msgChannel.subNamePrefix.queryNodeSubNamePrefix",
+		"common.subNamePrefix.queryNodeSubNamePrefix",
 	}
 	p.QueryNodeSubName = p.initChanNamePrefix(keys)
 }
@@ -291,8 +291,8 @@ func (p *commonConfig) initQueryNodeSubName() {
 // --- datacoord ---
 func (p *commonConfig) initDataCoordStatistic() {
 	keys := []string{
-		"common.chanNamePrefix.dataCoordStatistic",
 		"msgChannel.chanNamePrefix.dataCoordStatistic",
+		"common.chanNamePrefix.dataCoordStatistic",
 	}
 	p.DataCoordStatistic = p.initChanNamePrefix(keys)
 }
@@ -300,32 +300,32 @@ func (p *commonConfig) initDataCoordStatistic() {
 // Deprecate
 func (p *commonConfig) initDataCoordTimeTick() {
 	keys := []string{
-		"common.chanNamePrefix.dataCoordTimeTick",
 		"msgChannel.chanNamePrefix.dataCoordTimeTick",
+		"common.chanNamePrefix.dataCoordTimeTick",
 	}
 	p.DataCoordTimeTick = p.initChanNamePrefix(keys)
 }
 
 func (p *commonConfig) initDataCoordSegmentInfo() {
 	keys := []string{
-		"common.chanNamePrefix.dataCoordSegmentInfo",
 		"msgChannel.chanNamePrefix.dataCoordSegmentInfo",
+		"common.chanNamePrefix.dataCoordSegmentInfo",
 	}
 	p.DataCoordSegmentInfo = p.initChanNamePrefix(keys)
 }
 
 func (p *commonConfig) initDataCoordSubName() {
 	keys := []string{
-		"common.subNamePrefix.dataCoordSubNamePrefix",
 		"msgChannel.subNamePrefix.dataCoordSubNamePrefix",
+		"common.subNamePrefix.dataCoordSubNamePrefix",
 	}
 	p.DataCoordSubName = p.initChanNamePrefix(keys)
 }
 
 func (p *commonConfig) initDataNodeSubName() {
 	keys := []string{
-		"common.subNamePrefix.dataNodeSubNamePrefix",
 		"msgChannel.subNamePrefix.dataNodeSubNamePrefix",
+		"common.subNamePrefix.dataNodeSubNamePrefix",
 	}
 	p.DataNodeSubName = p.initChanNamePrefix(keys)
 }

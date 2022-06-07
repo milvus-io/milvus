@@ -147,10 +147,10 @@ func (gp *BaseTable) Load(key string) (string, error) {
 	return gp.params.Load(strings.ToLower(key))
 }
 
-// Load2 loads an object with multiple @keys, return the first successful value.
+// LoadWithPriority loads an object with multiple @keys, return the first successful value.
 // If all keys not exist, return error.
 // This is to be compatible with old configuration file.
-func (gp *BaseTable) Load2(keys []string) (string, error) {
+func (gp *BaseTable) LoadWithPriority(keys []string) (string, error) {
 	for _, key := range keys {
 		if str, err := gp.params.Load(strings.ToLower(key)); err == nil {
 			return str, nil
