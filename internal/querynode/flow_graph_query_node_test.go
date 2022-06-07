@@ -18,7 +18,10 @@ package querynode
 
 import (
 	"context"
+	"errors"
 	"testing"
+
+	"github.com/milvus-io/milvus/internal/mq/msgstream"
 
 	"github.com/stretchr/testify/assert"
 
@@ -79,4 +82,64 @@ func TestQueryNodeFlowGraph_seekQueryNodeFlowGraph(t *testing.T) {
 	assert.Error(t, err)
 
 	fg.close()
+}
+
+func Test_queryNodeFlowGraph_seekToLatest(t *testing.T) {
+	t.Run("null dml message stream", func(t *testing.T) {
+		fg := &queryNodeFlowGraph{dmlStream: nil}
+		err := fg.seekToLatest("pchannel", "subname")
+		assert.Error(t, err)
+	})
+
+	t.Run("failed to get latest message id", func(t *testing.T) {
+		stream := newMockMsgStream()
+		stream.getLatestMsgID = func(channel string) (msgstream.MessageID, error) {
+			return nil, errors.New("mock")
+		}
+		fg := &queryNodeFlowGraph{dmlStream: stream}
+		err := fg.seekToLatest("pchannel", "subname")
+		assert.Error(t, err)
+	})
+
+	t.Run("at earliest position", func(t *testing.T) {
+		earliestMsgID := newMockMessageID()
+		earliestMsgID.atEarliestPosition = true
+		stream := newMockMsgStream()
+		stream.getLatestMsgID = func(channel string) (msgstream.MessageID, error) {
+			return earliestMsgID, nil
+		}
+		fg := &queryNodeFlowGraph{dmlStream: stream}
+		err := fg.seekToLatest("pchannel", "subname")
+		assert.NoError(t, err)
+	})
+
+	t.Run("failed to seek", func(t *testing.T) {
+		msgID := newMockMessageID()
+		msgID.atEarliestPosition = false
+		stream := newMockMsgStream()
+		stream.getLatestMsgID = func(channel string) (msgstream.MessageID, error) {
+			return msgID, nil
+		}
+		stream.seek = func(positions []*internalpb.MsgPosition) error {
+			return errors.New("mock")
+		}
+		fg := &queryNodeFlowGraph{dmlStream: stream}
+		err := fg.seekToLatest("pchannel", "subname")
+		assert.Error(t, err)
+	})
+
+	t.Run("normal case", func(t *testing.T) {
+		msgID := newMockMessageID()
+		msgID.atEarliestPosition = false
+		stream := newMockMsgStream()
+		stream.getLatestMsgID = func(channel string) (msgstream.MessageID, error) {
+			return msgID, nil
+		}
+		stream.seek = func(positions []*internalpb.MsgPosition) error {
+			return nil
+		}
+		fg := &queryNodeFlowGraph{dmlStream: stream}
+		err := fg.seekToLatest("pchannel", "subname")
+		assert.NoError(t, err)
+	})
 }

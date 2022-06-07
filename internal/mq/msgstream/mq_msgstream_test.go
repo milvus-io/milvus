@@ -936,6 +936,7 @@ func TestStream_PulsarTtMsgStream_Seek(t *testing.T) {
 
 	outputStream.Close()
 
+	// receivedMsg3.StartPositions is exclusive.
 	outputStream = getPulsarTtOutputStreamAndSeek(ctx, pulsarAddress, receivedMsg3.StartPositions)
 	seekMsg := consumer(ctx, outputStream)
 	assert.Equal(t, len(seekMsg.Msgs), 3)
@@ -945,17 +946,12 @@ func TestStream_PulsarTtMsgStream_Seek(t *testing.T) {
 	}
 
 	seekMsg2 := consumer(ctx, outputStream)
-	assert.Equal(t, len(seekMsg2.Msgs), 1)
-	for _, msg := range seekMsg2.Msgs {
-		assert.Equal(t, msg.BeginTs(), uint64(19))
-	}
+	assert.Equal(t, 0, len(seekMsg2.Msgs))
 
+	// receivedMsg3.EndPositions is exclusive.
 	outputStream2 := getPulsarTtOutputStreamAndSeek(ctx, pulsarAddress, receivedMsg3.EndPositions)
 	seekMsg = consumer(ctx, outputStream2)
-	assert.Equal(t, len(seekMsg.Msgs), 1)
-	for _, msg := range seekMsg.Msgs {
-		assert.Equal(t, msg.BeginTs(), uint64(19))
-	}
+	assert.Equal(t, 0, len(seekMsg.Msgs))
 
 	inputStream.Close()
 	outputStream2.Close()
@@ -1177,7 +1173,8 @@ func TestStream_PulsarTtMsgStream_2(t *testing.T) {
 	}
 	cnt1 := (len(msgPacks1)/2 - 1) * len(msgPacks1[0].Msgs)
 	cnt2 := (len(msgPacks2)/2 - 1) * len(msgPacks2[0].Msgs)
-	assert.Equal(t, (cnt1 + cnt2), msgCount)
+	// 10 tt was exclusive when seek.
+	assert.Equal(t, (cnt1+cnt2)-10, msgCount)
 
 	inputStream1.Close()
 	inputStream2.Close()
@@ -1622,6 +1619,7 @@ func TestStream_RmqTtMsgStream_Seek(t *testing.T) {
 	consumerSubName = funcutil.RandomString(8)
 	outputStream.AsConsumer(consumerChannels, consumerSubName)
 
+	// receivedMsg3.StartPositions is exclusive.
 	outputStream.Seek(receivedMsg3.StartPositions)
 	outputStream.Start()
 	seekMsg := consumer(ctx, outputStream)
@@ -1632,10 +1630,7 @@ func TestStream_RmqTtMsgStream_Seek(t *testing.T) {
 	}
 
 	seekMsg2 := consumer(ctx, outputStream)
-	assert.Equal(t, len(seekMsg2.Msgs), 1)
-	for _, msg := range seekMsg2.Msgs {
-		assert.Equal(t, msg.BeginTs(), uint64(19))
-	}
+	assert.Equal(t, 0, len(seekMsg2.Msgs))
 
 	Close(rocksdbName, inputStream, outputStream, etcdKV)
 }

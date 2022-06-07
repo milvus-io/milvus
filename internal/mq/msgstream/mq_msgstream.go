@@ -841,46 +841,41 @@ func (ms *MqTtMsgStream) allChanReachSameTtMsg(chanTtMsgSync map[mqwrapper.Consu
 
 // Seek to the specified position
 func (ms *MqTtMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
-	var consumer mqwrapper.Consumer
 	var mp *MsgPosition
-	var err error
 	fn := func() error {
-		var ok bool
-		consumer, ok = ms.consumers[mp.ChannelName]
-		if !ok {
-			return fmt.Errorf("please subcribe the channel, channel name =%s", mp.ChannelName)
-		}
-
-		if consumer == nil {
-			return fmt.Errorf("consumer is nil")
-		}
-
-		seekMsgID, err := ms.client.BytesToMsgID(mp.MsgID)
-		if err != nil {
-			return err
-		}
-		err = consumer.Seek(seekMsgID, true)
-		if err != nil {
-			return err
-		}
-
-		return nil
+		// since @2022.0606, seek logic by MsgID, should be same to mqMsgStream.Seek.
+		// Note: MsgID is exclusive in mqMsgStream.Seek.
+		return ms.mqMsgStream.Seek([]*MsgPosition{mp})
 	}
 
 	ms.consumerLock.Lock()
 	defer ms.consumerLock.Unlock()
 
 	for idx := range msgPositions {
+		// check if consumer exist.
 		mp = msgPositions[idx]
+		consumer, ok := ms.consumers[mp.ChannelName]
+		if !ok {
+			return fmt.Errorf("channel %s not subscribed", mp.ChannelName)
+		}
+
 		if len(mp.MsgID) == 0 {
 			return fmt.Errorf("when msgID's length equal to 0, please use AsConsumer interface")
 		}
-		err = retry.Do(context.TODO(), fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200), retry.MaxSleepTime(5*time.Second))
-		if err != nil {
+
+		// seek by MsgID
+		if err := retry.Do(context.TODO(), fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200), retry.MaxSleepTime(5*time.Second)); err != nil {
 			return fmt.Errorf("failed to seek, error %s", err.Error())
 		}
+
+		// add consumer & save position
 		ms.addConsumer(consumer, mp.ChannelName)
 		ms.chanMsgPos[consumer] = (proto.Clone(mp)).(*MsgPosition)
+
+		// skip if timestamp passed equal to zero.
+		if mp.GetTimestamp() == 0 {
+			continue
+		}
 
 		// skip all data before current tt
 		runLoop := true

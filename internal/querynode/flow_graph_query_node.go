@@ -230,6 +230,66 @@ func (q *queryNodeFlowGraph) consumeFlowGraphFromLatest(channel Channel, subName
 	return nil
 }
 
+// seekToLatest only used in delta flow graph.
+func (q *queryNodeFlowGraph) seekToLatest(pChannel Channel, subName ConsumeSubName) error {
+	if q.dmlStream == nil {
+		return fmt.Errorf("got null message stream when querynode flow graph try to seek, collection id: %d", q.collectionID)
+	}
+
+	q.dmlStream.AsConsumer([]string{pChannel}, subName)
+	log.Info("query node as consumer", zap.Int64("collection", q.collectionID),
+		zap.String("physical_channel", pChannel),
+		zap.String("subscription", subName))
+
+	latestMsgID, err := q.dmlStream.GetLatestMsgID(pChannel)
+	if err != nil {
+		log.Error("failed to get latest msg id of message stream",
+			zap.Error(err),
+			zap.Int64("collection", q.collectionID),
+			zap.String("physical_channel", pChannel),
+			zap.String("subscription", subName))
+		return err
+	}
+	log.Info("get latest msg id of message stream",
+		zap.String("msg_id", string(latestMsgID.Serialize())),
+		zap.Int64("collection", q.collectionID),
+		zap.String("physical_channel", pChannel),
+		zap.String("subscription", subName))
+
+	if latestMsgID.AtEarliestPosition() {
+		q.consumerCnt++
+		metrics.QueryNodeNumConsumers.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Inc()
+		return nil
+	}
+
+	pos := &internalpb.MsgPosition{
+		ChannelName: pChannel,
+		MsgID:       latestMsgID.Serialize(),
+		MsgGroup:    subName,
+		Timestamp:   0, // tell message stream only to use msg id to seek, skip consuming until tt.
+	}
+	if err := q.dmlStream.Seek([]*internalpb.MsgPosition{pos}); err != nil {
+		log.Error("failed to seek to position of message stream",
+			zap.Error(err),
+			zap.String("msg_id", string(latestMsgID.Serialize())),
+			zap.Int64("collection", q.collectionID),
+			zap.String("physical_channel", pChannel),
+			zap.String("subscription", subName),
+			zap.String("msg_group", subName))
+		return err
+	}
+	log.Info("seek to position of message stream",
+		zap.String("msg_id", string(latestMsgID.Serialize())),
+		zap.Int64("collection", q.collectionID),
+		zap.String("physical_channel", pChannel),
+		zap.String("subscription", subName),
+		zap.String("msg_group", subName))
+
+	q.consumerCnt++
+	metrics.QueryNodeNumConsumers.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Inc()
+	return nil
+}
+
 // seekQueryNodeFlowGraph would seek by position
 func (q *queryNodeFlowGraph) seekQueryNodeFlowGraph(position *internalpb.MsgPosition) error {
 	q.dmlStream.AsConsumer([]string{position.ChannelName}, position.MsgGroup)

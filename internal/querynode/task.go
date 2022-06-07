@@ -432,7 +432,7 @@ func (w *watchDeltaChannelsTask) Execute(ctx context.Context) error {
 	// channels as consumer
 	for channel, fg := range channel2FlowGraph {
 		// use pChannel to consume
-		err = fg.consumeFlowGraphFromLatest(VPDeltaChannels[channel], consumeSubName)
+		err = fg.seekToLatest(VPDeltaChannels[channel], consumeSubName)
 		if err != nil {
 			log.Error("msgStream as consumer failed for deltaChannels", zap.Int64("collectionID", collectionID), zap.Strings("vDeltaChannels", vDeltaChannels))
 			break
