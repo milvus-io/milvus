@@ -17,36 +17,34 @@
 package grpcclient
 
 import (
-	"context"
 	"errors"
-	"testing"
-	"time"
-
-	"github.com/stretchr/testify/assert"
+	"fmt"
 )
 
-func TestClientBase_SetRole(t *testing.T) {
-	base := ClientBase{}
-	expect := "abc"
-	base.SetRole("abc")
-	assert.Equal(t, expect, base.GetRole())
+// ErrConnect is the instance for errors.Is target usage.
+var ErrConnect errConnect
+
+// make sure ErrConnect implements error.
+var _ error = errConnect{}
+
+// errConnect error instance returned when dial error returned.
+type errConnect struct {
+	addr string
+	err  error
 }
 
-func TestClientBase_GetRole(t *testing.T) {
-	base := ClientBase{}
-	assert.Equal(t, "", base.GetRole())
+// Error implements error interface.
+func (e errConnect) Error() string {
+	return fmt.Sprintf("failed to connect %s, reason: %s", e.addr, e.err.Error())
 }
 
-func TestClientBase_connect(t *testing.T) {
-	t.Run("failed to connect", func(t *testing.T) {
-		base := ClientBase{
-			getAddrFunc: func() (string, error) {
-				return "", nil
-			},
-			DialTimeout: time.Millisecond,
-		}
-		err := base.connect(context.Background())
-		assert.Error(t, err)
-		assert.True(t, errors.Is(err, ErrConnect))
-	})
+// Is checks err is ErrConnect to make errors.Is work.
+func (e errConnect) Is(err error) bool {
+	var ce errConnect
+	return errors.As(err, &ce)
+}
+
+// wrapErrConnect wrap connection error and related address to ErrConnect.
+func wrapErrConnect(addr string, err error) error {
+	return errConnect{addr: addr, err: err}
 }

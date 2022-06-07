@@ -18,6 +18,8 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -266,7 +268,7 @@ func (t *queryTask) Execute(ctx context.Context) error {
 	}
 
 	err := executeQuery(WithCache)
-	if err == errInvalidShardLeaders {
+	if errors.Is(err, errInvalidShardLeaders) || funcutil.IsGrpcErr(err) || errors.Is(err, grpcclient.ErrConnect) {
 		log.Warn("invalid shard leaders cache, updating shardleader caches and retry search")
 		return executeQuery(WithoutCache)
 	}
@@ -357,9 +359,13 @@ func (t *queryTask) queryShard(ctx context.Context, leaders []nodeInfo, channelI
 		}
 
 		result, err := qn.Query(ctx, req)
-		if err != nil || result.GetStatus().GetErrorCode() == commonpb.ErrorCode_NotShardLeader {
-			log.Warn("QueryNode query returns error", zap.Int64("nodeID", nodeID),
+		if err != nil {
+			log.Warn("QueryNode query return error", zap.Int64("nodeID", nodeID), zap.String("channel", channelID),
 				zap.Error(err))
+			return err
+		}
+		if result.GetStatus().GetErrorCode() == commonpb.ErrorCode_NotShardLeader {
+			log.Warn("QueryNode is not shardLeader", zap.Int64("nodeID", nodeID), zap.String("channel", channelID))
 			return errInvalidShardLeaders
 		}
 		if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
