@@ -20,12 +20,9 @@ pacman -S --noconfirm --needed \
     mingw-w64-x86_64-clang-tools-extra \
     mingw-w64-x86_64-python2 \
     mingw-w64-x86_64-diffutils \
-    mingw-w64-x86_64-arrow
-
-# workaround for install older packages
-pacman -U --noconfirm \
-    https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-go-1.17-1-any.pkg.tar.zst \
-    https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-rocksdb-6.26.1-1-any.pkg.tar.zst
+    mingw-w64-x86_64-arrow \
+    mingw-w64-x86_64-go \
+    mingw-w64-x86_64-rocksdb
 
 
 # dummy empty dl, TODO: remove later

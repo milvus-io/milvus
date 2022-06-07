@@ -176,7 +176,7 @@ jobs:
           key: ${{ runner.os }}-ccache-${{ hashFiles('internal/core/**') }}
           restore-keys: ${{ runner.os }}-ccache-
       - name: Configure Toolchain
-        uses: msys2/setup-msys2@v2
+        uses: msys2/setup-msys2@v2.10.3
         with:
           msystem: mingw64
       - name: Install Deps
