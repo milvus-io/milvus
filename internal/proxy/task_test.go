@@ -123,7 +123,7 @@ func constructCollectionSchemaByDataType(collectionName string, fieldName2DataTy
 		if dataType == schemapb.DataType_VarChar {
 			fieldSchema.TypeParams = []*commonpb.KeyValuePair{
 				{
-					Key:   "max_length_per_row",
+					Key:   "max_length",
 					Value: strconv.Itoa(testMaxVarCharLength),
 				},
 			}

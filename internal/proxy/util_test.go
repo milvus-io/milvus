@@ -217,7 +217,7 @@ func TestValidatePrimaryKey(t *testing.T) {
 		DataType:     schemapb.DataType_VarChar,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
-				Key:   "max_length_per_row",
+				Key:   "max_length",
 				Value: "100",
 			},
 		},

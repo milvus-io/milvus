@@ -36,7 +36,7 @@ const boundedTS = 2
 const enableMultipleVectorFields = false
 
 // maximum length of variable-length strings
-const maxVarCharLengthKey = "max_length_per_row"
+const maxVarCharLengthKey = "max_length"
 const defaultMaxVarCharLength = 65535
 
 // isAlpha check if c is alpha.
@@ -199,7 +199,7 @@ func validateMaxLengthPerRow(collectionName string, field *schemapb.FieldSchema)
 	exist := false
 	for _, param := range field.TypeParams {
 		if param.Key != maxVarCharLengthKey {
-			return fmt.Errorf("type param key(max_length_per_row) should be specified for varChar field, not %s", param.Key)
+			return fmt.Errorf("type param key(max_length) should be specified for varChar field, not %s", param.Key)
 		}
 
 		maxLengthPerRow, err := strconv.ParseInt(param.Value, 10, 64)
@@ -211,9 +211,9 @@ func validateMaxLengthPerRow(collectionName string, field *schemapb.FieldSchema)
 		}
 		exist = true
 	}
-	// if not exist type params max_length_per_row, return error
+	// if not exist type params max_length, return error
 	if !exist {
-		return fmt.Errorf("type param(max_length_per_row) should be specified for varChar field of collection %s", collectionName)
+		return fmt.Errorf("type param(max_length) should be specified for varChar field of collection %s", collectionName)
 	}
 
 	return nil

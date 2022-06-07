@@ -1179,7 +1179,7 @@ class TestInsertString(TestcaseBase):
         nums = 70000  
         field_one = cf.gen_int64_field()
         field_two = cf.gen_float_field()
-        field_three = cf.gen_string_field(max_length_per_row=nums)
+        field_three = cf.gen_string_field(max_length=nums)
         vec_field = cf.gen_float_vec_field()
         df = [field_one, field_two, field_three, vec_field]
         error = {ct.err_code: 0, ct.err_msg: 'Data type is not support.'}

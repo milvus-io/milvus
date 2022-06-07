@@ -2811,7 +2811,7 @@ class TestCollectionString(TestcaseBase):
         """
         target: test create collection with string field
         method: 1. create collection with string field
-                2. String field max_length_per_row exceeds maximum
+                2. String field max_length exceeds maximum
         expected: Raise exception
         """
         self._connect()
@@ -2819,9 +2819,9 @@ class TestCollectionString(TestcaseBase):
         int_field = cf.gen_int64_field(is_primary=True)
         vec_field = cf.gen_float_vec_field()
         max_length = 100000
-        string_field = cf.gen_string_field(max_length_per_row=max_length)
+        string_field = cf.gen_string_field(max_length=max_length)
         schema = cf.gen_collection_schema([int_field, string_field, vec_field])
-        error = {ct.err_code: 0, ct.err_msg: "invalid max_length_per_row: %s" % max_length}
+        error = {ct.err_code: 0, ct.err_msg: "invalid max_length: %s" % max_length}
         self.collection_wrap.init_collection(name=c_name, schema=schema,
                                              check_task=CheckTasks.err_res, check_items=error)
 
