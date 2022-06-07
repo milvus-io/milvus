@@ -29,7 +29,7 @@ def hello_milvus(collection_name):
     default_fields = [
         FieldSchema(name="int64", dtype=DataType.INT64, is_primary=True),
         FieldSchema(name="float", dtype=DataType.FLOAT),
-        FieldSchema(name="varchar", dtype=DataType.VARCHAR, max_length_per_row=65535),
+        FieldSchema(name="varchar", dtype=DataType.VARCHAR, max_length=65535),
         FieldSchema(name="float_vector", dtype=DataType.FLOAT_VECTOR, dim=dim)
     ]
     default_schema = CollectionSchema(fields=default_fields, description="test collection")

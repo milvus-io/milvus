@@ -60,8 +60,8 @@ class Schema {
 
     // string type
     void
-    AddField(const FieldName& name, const FieldId id, DataType data_type, int64_t max_length_per_row) {
-        auto field_meta = FieldMeta(name, id, data_type, max_length_per_row);
+    AddField(const FieldName& name, const FieldId id, DataType data_type, int64_t max_length) {
+        auto field_meta = FieldMeta(name, id, data_type, max_length);
         this->AddField(std::move(field_meta));
     }
 

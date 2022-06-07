@@ -85,7 +85,7 @@ func TestSchema(t *testing.T) {
 				DataType:     21,
 				TypeParams: []*commonpb.KeyValuePair{
 					{
-						Key:   "max_length_per_row",
+						Key:   "max_length",
 						Value: "125",
 					},
 				},

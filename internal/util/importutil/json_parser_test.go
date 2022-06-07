@@ -112,7 +112,7 @@ func strKeySchema() *schemapb.CollectionSchema {
 				Description:  "uid",
 				DataType:     schemapb.DataType_VarChar,
 				TypeParams: []*commonpb.KeyValuePair{
-					{Key: "max_length_per_row", Value: "1024"},
+					{Key: "max_length", Value: "1024"},
 				},
 			},
 			{

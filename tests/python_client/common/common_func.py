@@ -48,8 +48,8 @@ def gen_bool_field(name=ct.default_bool_field_name, description=ct.default_desc,
                                                               is_primary=is_primary, **kwargs)
     return bool_field
 
-def gen_string_field(name=ct.default_string_field_name, description=ct.default_desc, is_primary=False, max_length_per_row=ct.default_length, **kwargs):
-    string_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.VARCHAR, description=description, max_length_per_row=max_length_per_row, 
+def gen_string_field(name=ct.default_string_field_name, description=ct.default_desc, is_primary=False, max_length=ct.default_length, **kwargs):
+    string_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.VARCHAR, description=description, max_length=max_length, 
                                                               is_primary=is_primary, **kwargs)
     return string_field
 
