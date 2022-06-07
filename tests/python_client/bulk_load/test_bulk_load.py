@@ -76,7 +76,7 @@ class TestBulkLoad(TestcaseBase):
 
         # verify imported data is available for search
         self.collection_wrap.load()
-        # log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
+        log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
         nq = 2
         topk = 2
         search_data = cf.gen_vectors(nq, dim)
@@ -307,7 +307,6 @@ class TestBulkLoad(TestcaseBase):
     @pytest.mark.parametrize("fields_num_in_file", ["equal", "more", "less"])   # "equal", "more", "less"
     @pytest.mark.parametrize("dim", [16])
     @pytest.mark.parametrize("entities", [500])
-    # it occasionally fails due to issue #16947
     def test_float_vector_multi_scalars(self, row_based, auto_id, fields_num_in_file, dim, entities):
         """
         collection schema: [pk, float_vector,
@@ -326,7 +325,7 @@ class TestBulkLoad(TestcaseBase):
         """
         files = prepare_bulk_load_json_files(row_based=row_based, rows=entities,
                                              dim=dim, auto_id=auto_id,
-                                             data_fields=default_multi_fields)
+                                             data_fields=default_multi_fields, force=True)
         additional_field = "int_scalar_add"
         self._connect()
         c_name = cf.gen_unique_str()
@@ -375,17 +374,23 @@ class TestBulkLoad(TestcaseBase):
             res, _ = self.collection_wrap.has_index()
             assert res is False
             # verify search and query
-            search_data = cf.gen_vectors(1, dim)
+            nq = 3
+            topk = 10
+            search_data = cf.gen_vectors(nq, dim)
             search_params = {"metric_type": "L2", "params": {"nprobe": 2}}
             res, _ = self.collection_wrap.search(search_data, df.vec_field,
-                                                 param=search_params, limit=1,
+                                                 param=search_params, limit=topk,
                                                  check_task=CheckTasks.check_search_results,
-                                                 check_items={"nq": 1,
-                                                              "limit": 1})
+                                                 check_items={"nq": nq,
+                                                              "limit": topk})
             for hits in res:
                 ids = hits.ids
-                results, _ = self.collection_wrap.query(expr=f"{df.pk_field} in {ids}")
+                results, _ = self.collection_wrap.query(expr=f"{df.pk_field} in {ids}",
+                                                        output_fields=[df.pk_field, df.int_field])
                 assert len(results) == len(ids)
+                if not auto_id:
+                    for i in range(len(results)):
+                        assert results[i].get(df.int_field, 0) == results[i].get(df.pk_field, 1)
 
             # build index
             index_params = {"index_type": "HNSW", "params": {"M": 8, "efConstruction": 100}, "metric_type": "IP"}
@@ -402,14 +407,18 @@ class TestBulkLoad(TestcaseBase):
             # search and query
             search_params = {"params": {"ef": 64}, "metric_type": "IP"}
             res, _ = self.collection_wrap.search(search_data, df.vec_field,
-                                                 param=search_params, limit=1,
+                                                 param=search_params, limit=topk,
                                                  check_task=CheckTasks.check_search_results,
-                                                 check_items={"nq": 1,
-                                                              "limit": 1})
+                                                 check_items={"nq": nq,
+                                                              "limit": topk})
             for hits in res:
                 ids = hits.ids
-                results, _ = self.collection_wrap.query(expr=f"{df.pk_field} in {ids}")
+                results, _ = self.collection_wrap.query(expr=f"{df.pk_field} in {ids}",
+                                                        output_fields=[df.pk_field, df.int_field])
                 assert len(results) == len(ids)
+                if not auto_id:
+                    for i in range(len(results)):
+                        assert results[i].get(df.int_field, 0) == results[i].get(df.pk_field, 1)
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("row_based", [True, False])
@@ -530,7 +539,7 @@ class TestBulkLoad(TestcaseBase):
     @pytest.mark.parametrize("auto_id", [True, False])        # True, False
     @pytest.mark.parametrize("dim", [16])    # 16
     @pytest.mark.parametrize("entities", [100])    # 3000
-    @pytest.mark.parametrize("file_nums", [3])    # 10  # TODO: more after issue #17152 fixed
+    @pytest.mark.parametrize("file_nums", [32])    # 10  # TODO: more after issue #17152 fixed
     @pytest.mark.parametrize("multi_folder", [True, False])    # True, False
     # TODO: reason="BulkloadIndexed cannot be reached for issue #16889")
     def test_float_vector_from_multi_files(self, row_based, auto_id, dim, entities, file_nums, multi_folder):
@@ -550,7 +559,7 @@ class TestBulkLoad(TestcaseBase):
         files = prepare_bulk_load_json_files(row_based=row_based, rows=entities,
                                              dim=dim, auto_id=auto_id,
                                              data_fields=default_multi_fields,
-                                             file_nums=file_nums, multi_folder=multi_folder)
+                                             file_nums=file_nums, multi_folder=multi_folder, force=True)
         self._connect()
         c_name = cf.gen_unique_str()
         fields = [cf.gen_int64_field(name=df.pk_field, is_primary=True),
