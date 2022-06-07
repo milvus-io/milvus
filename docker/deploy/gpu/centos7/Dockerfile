@@ -10,8 +10,9 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
 FROM hectormolinero/tini:v18 AS tini
+FROM nvidia/cuda:11.6.2-runtime-centos7 AS runtime
 
-FROM nvidia/cuda:10.1-devel-centos7
+FROM nvidia/cuda:11.6.2-base-centos7
 
 ENV NVIDIA_DRIVER_CAPABILITIES compute,utility
 
@@ -23,6 +24,10 @@ COPY ./milvus /var/lib/milvus
 ENV LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/var/lib/milvus/lib"
 
 COPY --from=tini /usr/bin/tini /tini
+
+# copy cublas library from runtime
+COPY --from=runtime /usr/local/cuda/targets/x86_64-linux/lib/libcublasLt.so.11 /var/lib/milvus/lib/libcublasLt.so.11
+COPY --from=runtime /usr/local/cuda/targets/x86_64-linux/lib/libcublas.so.11 /var/lib/milvus/lib/libcublas.so.11
 
 ENTRYPOINT ["/tini", "--"]
 

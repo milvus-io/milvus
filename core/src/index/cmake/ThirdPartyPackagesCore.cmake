@@ -513,7 +513,7 @@ macro(build_faiss)
     set(FAISS_CONFIGURE_ARGS
             "--prefix=${FAISS_PREFIX}"
             "CFLAGS=${EP_C_FLAGS}"
-            "CXXFLAGS=${EP_CXX_FLAGS} -mf16c -O3"
+            "CXXFLAGS=${EP_CXX_FLAGS} -msse4.2 -O3"
             --without-python)
 
     if (FAISS_WITH_MKL)
@@ -535,7 +535,7 @@ macro(build_faiss)
     if (KNOWHERE_GPU_VERSION)
         set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS}
                 "--with-cuda=${CUDA_TOOLKIT_ROOT_DIR}"
-                "--with-cuda-arch=-gencode=arch=compute_60,code=sm_60 -gencode=arch=compute_61,code=sm_61 -gencode=arch=compute_70,code=sm_70 -gencode=arch=compute_75,code=sm_75"
+                "--with-cuda-arch=-gencode=arch=compute_35,code=sm_35 -gencode=arch=compute_50,code=sm_50 -gencode=arch=compute_60,code=sm_60 -gencode=arch=compute_61,code=sm_61 -gencode=arch=compute_70,code=sm_70 -gencode=arch=compute_75,code=sm_75 -gencode=arch=compute_86,code=sm_86"
                 )
     else ()
         set(FAISS_CONFIGURE_ARGS ${FAISS_CONFIGURE_ARGS}

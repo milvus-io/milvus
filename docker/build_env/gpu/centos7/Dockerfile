@@ -9,7 +9,7 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
-FROM nvidia/cuda:10.1-devel-centos7
+FROM nvidia/cuda:11.6.2-devel-centos7
 
 ENV NVIDIA_DRIVER_CAPABILITIES compute,utility
 
