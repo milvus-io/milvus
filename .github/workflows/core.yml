@@ -34,7 +34,7 @@ jobs:
       - name: Checkout Milvus
         uses: actions/checkout@v1
       - name: Check Dockerfile
-        uses: reviewdog/action-hadolint@v1.16.1
+        uses: reviewdog/action-hadolint@v1
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           reporter: github-pr-check # Default is github-pr-check
