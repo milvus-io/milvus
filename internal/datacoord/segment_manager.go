@@ -66,6 +66,8 @@ func putAllocation(a *Allocation) {
 type Manager interface {
 	// AllocSegment allocates rows and record the allocation.
 	AllocSegment(ctx context.Context, collectionID, partitionID UniqueID, channelName string, requestRows int64) ([]*Allocation, error)
+	// AllocSegmentForImport allocates one segment allocation for bulkload.
+	AllocSegmentForImport(ctx context.Context, collectionID, partitionID UniqueID, channelName string, requestRows int64) (*Allocation, error)
 	// DropSegment drops the segment from manager.
 	DropSegment(ctx context.Context, segmentID UniqueID)
 	// SealAllSegments seals all segments of collection with collectionID and return sealed segments.
@@ -248,7 +250,7 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 		return nil, err
 	}
 	for _, allocation := range newSegmentAllocations {
-		segment, err := s.openNewSegment(ctx, collectionID, partitionID, channelName)
+		segment, err := s.openNewSegment(ctx, collectionID, partitionID, channelName, commonpb.SegmentState_Growing)
 		if err != nil {
 			return nil, err
 		}
@@ -268,6 +270,31 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 
 	allocations := append(newSegmentAllocations, existedSegmentAllocations...)
 	return allocations, nil
+}
+
+// AllocSegmentForImport allocates one segment allocation for bulkload
+func (s *SegmentManager) AllocSegmentForImport(ctx context.Context, collectionID UniqueID,
+	partitionID UniqueID, channelName string, requestRows int64) (*Allocation, error) {
+	// init allocation
+	allocation := getAllocation(requestRows)
+
+	// create new segments and add allocations to meta
+	// to avoid mixing up with growing segments, the segment state is "Importing"
+	expireTs, err := s.genExpireTs(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	segment, err := s.openNewSegment(ctx, collectionID, partitionID, channelName, commonpb.SegmentState_Importing)
+	if err != nil {
+		return nil, err
+	}
+	allocation.ExpireTime = expireTs
+	allocation.SegmentID = segment.GetID()
+	if err := s.meta.AddAllocation(segment.GetID(), allocation); err != nil {
+		return nil, err
+	}
+	return allocation, nil
 }
 
 func satisfy(segment *SegmentInfo, collectionID, partitionID UniqueID, channel string) bool {
@@ -290,7 +317,8 @@ func (s *SegmentManager) genExpireTs(ctx context.Context) (Timestamp, error) {
 	return expireTs, nil
 }
 
-func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID UniqueID, partitionID UniqueID, channelName string) (*SegmentInfo, error) {
+func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID UniqueID, partitionID UniqueID,
+	channelName string, segmentState commonpb.SegmentState) (*SegmentInfo, error) {
 	sp, _ := trace.StartSpanFromContext(ctx)
 	defer sp.Finish()
 	id, err := s.allocator.allocID(ctx)
@@ -308,7 +336,7 @@ func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID Unique
 		PartitionID:    partitionID,
 		InsertChannel:  channelName,
 		NumOfRows:      0,
-		State:          commonpb.SegmentState_Growing,
+		State:          segmentState,
 		MaxRowNum:      int64(maxNumOfRows),
 		LastExpireTime: 0,
 	}

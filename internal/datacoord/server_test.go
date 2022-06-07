@@ -108,6 +108,38 @@ func TestAssignSegmentID(t *testing.T) {
 		assert.EqualValues(t, 1000, assign.Count)
 	})
 
+	t.Run("assign segment for bulkload", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+		schema := newTestSchema()
+		svr.meta.AddCollection(&datapb.CollectionInfo{
+			ID:         collID,
+			Schema:     schema,
+			Partitions: []int64{},
+		})
+		req := &datapb.SegmentIDRequest{
+			Count:        1000,
+			ChannelName:  channel0,
+			CollectionID: collID,
+			PartitionID:  partID,
+			IsImport:     true,
+		}
+
+		resp, err := svr.AssignSegmentID(context.TODO(), &datapb.AssignSegmentIDRequest{
+			NodeID:            0,
+			PeerRole:          "",
+			SegmentIDRequests: []*datapb.SegmentIDRequest{req},
+		})
+		assert.Nil(t, err)
+		assert.EqualValues(t, 1, len(resp.SegIDAssignments))
+		assign := resp.SegIDAssignments[0]
+		assert.EqualValues(t, commonpb.ErrorCode_Success, assign.Status.ErrorCode)
+		assert.EqualValues(t, collID, assign.CollectionID)
+		assert.EqualValues(t, partID, assign.PartitionID)
+		assert.EqualValues(t, channel0, assign.ChannelName)
+		assert.EqualValues(t, 1000, assign.Count)
+	})
+
 	t.Run("with closed server", func(t *testing.T) {
 		req := &datapb.SegmentIDRequest{
 			Count:        100,
@@ -867,6 +899,10 @@ type spySegmentManager struct {
 
 // AllocSegment allocates rows and record the allocation.
 func (s *spySegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID, partitionID UniqueID, channelName string, requestRows int64) ([]*Allocation, error) {
+	panic("not implemented") // TODO: Implement
+}
+
+func (s *spySegmentManager) AllocSegmentForImport(ctx context.Context, collectionID UniqueID, partitionID UniqueID, channelName string, requestRows int64) (*Allocation, error) {
 	panic("not implemented") // TODO: Implement
 }
 

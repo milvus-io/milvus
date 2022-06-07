@@ -964,13 +964,23 @@ func importFlushReqFunc(node *DataNode, req *datapb.ImportTaskRequest, res *root
 		tr := timerecord.NewTimeRecorder("import callback function")
 		defer tr.Elapse("finished")
 
+		// use the first field's row count as segment row count
+		// all the fileds row count are same, checked by ImportWrapper
+		var rowNum int
+		for _, field := range fields {
+			rowNum = field.RowNum()
+			break
+		}
+
+		// ask DataCoord to alloc a new segment
 		log.Info("import task flush segment", zap.Any("ChannelNames", req.ImportTask.ChannelNames), zap.Int("shardNum", shardNum))
 		segReqs := []*datapb.SegmentIDRequest{
 			{
 				ChannelName:  req.ImportTask.ChannelNames[shardNum],
-				Count:        1,
+				Count:        uint32(rowNum),
 				CollectionID: req.GetImportTask().GetCollectionId(),
 				PartitionID:  req.GetImportTask().GetPartitionId(),
+				IsImport:     true,
 			},
 		}
 		segmentIDReq := &datapb.AssignSegmentIDRequest{
@@ -990,11 +1000,6 @@ func importFlushReqFunc(node *DataNode, req *datapb.ImportTaskRequest, res *root
 		segmentID := resp.SegIDAssignments[0].SegID
 
 		// TODO: this code block is long and tedious, maybe split it into separate functions.
-		var rowNum int
-		for _, field := range fields {
-			rowNum = field.RowNum()
-			break
-		}
 		tsFieldData := make([]int64, rowNum)
 		for i := range tsFieldData {
 			tsFieldData[i] = int64(ts)

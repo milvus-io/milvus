@@ -116,7 +116,8 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 			zap.Int64("collectionID", r.GetCollectionID()),
 			zap.Int64("partitionID", r.GetPartitionID()),
 			zap.String("channelName", r.GetChannelName()),
-			zap.Uint32("count", r.GetCount()))
+			zap.Uint32("count", r.GetCount()),
+			zap.Bool("isImport", r.GetIsImport()))
 
 		// Load the collection info from Root Coordinator, if it is not found in server meta.
 		if s.meta.GetCollection(r.GetCollectionID()) == nil {
@@ -130,16 +131,30 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 		// Add the channel to cluster for watching.
 		s.cluster.Watch(r.ChannelName, r.CollectionID)
 
-		// Have segment manager allocate and return the segment allocation info.
-		segAlloc, err := s.segmentManager.AllocSegment(ctx,
-			r.CollectionID, r.PartitionID, r.ChannelName, int64(r.Count))
-		if err != nil {
-			log.Warn("failed to alloc segment", zap.Any("request", r), zap.Error(err))
-			continue
+		segmentAllocations := make([]*Allocation, 0)
+		if r.GetIsImport() {
+			// Have segment manager allocate and return the segment allocation info.
+			segAlloc, err := s.segmentManager.AllocSegmentForImport(ctx,
+				r.CollectionID, r.PartitionID, r.ChannelName, int64(r.Count))
+			if err != nil {
+				log.Warn("failed to alloc segment for import", zap.Any("request", r), zap.Error(err))
+				continue
+			}
+			segmentAllocations = append(segmentAllocations, segAlloc)
+		} else {
+			// Have segment manager allocate and return the segment allocation info.
+			segAlloc, err := s.segmentManager.AllocSegment(ctx,
+				r.CollectionID, r.PartitionID, r.ChannelName, int64(r.Count))
+			if err != nil {
+				log.Warn("failed to alloc segment", zap.Any("request", r), zap.Error(err))
+				continue
+			}
+			segmentAllocations = append(segmentAllocations, segAlloc...)
 		}
-		log.Info("success to assign segments", zap.Int64("collectionID", r.GetCollectionID()), zap.Any("assignments", segAlloc))
 
-		for _, allocation := range segAlloc {
+		log.Info("success to assign segments", zap.Int64("collectionID", r.GetCollectionID()), zap.Any("assignments", segmentAllocations))
+
+		for _, allocation := range segmentAllocations {
 			result := &datapb.SegmentIDAssignment{
 				SegID:        allocation.SegmentID,
 				ChannelName:  r.ChannelName,

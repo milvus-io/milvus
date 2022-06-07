@@ -113,10 +113,62 @@ func TestAllocSegment(t *testing.T) {
 		assert.NotEqualValues(t, 0, allocations[0].ExpireTime)
 	})
 
-	t.Run("allocation fails", func(t *testing.T) {
-		failsAllocator := &FailsAllocator{}
+	t.Run("allocation fails 1", func(t *testing.T) {
+		failsAllocator := &FailsAllocator{
+			allocTsSucceed: true,
+		}
+		segmentManager := newSegmentManager(meta, failsAllocator)
+		_, err := segmentManager.AllocSegment(ctx, collID, 100, "c2", 100)
+		assert.NotNil(t, err)
+	})
+
+	t.Run("allocation fails 2", func(t *testing.T) {
+		failsAllocator := &FailsAllocator{
+			allocIDSucceed: true,
+		}
 		segmentManager := newSegmentManager(meta, failsAllocator)
 		_, err := segmentManager.AllocSegment(ctx, collID, 100, "c1", 100)
+		assert.NotNil(t, err)
+	})
+}
+
+func TestAllocSegmentForImport(t *testing.T) {
+	ctx := context.Background()
+	Params.Init()
+	mockAllocator := newMockAllocator()
+	meta, err := newMemoryMeta(mockAllocator)
+	assert.Nil(t, err)
+	segmentManager := newSegmentManager(meta, mockAllocator)
+
+	schema := newTestSchema()
+	collID, err := mockAllocator.allocID(ctx)
+	assert.Nil(t, err)
+	meta.AddCollection(&datapb.CollectionInfo{ID: collID, Schema: schema})
+
+	t.Run("normal allocation", func(t *testing.T) {
+		allocation, err := segmentManager.AllocSegmentForImport(ctx, collID, 100, "c1", 100)
+		assert.Nil(t, err)
+		assert.NotNil(t, allocation)
+		assert.EqualValues(t, 100, allocation.NumOfRows)
+		assert.NotEqualValues(t, 0, allocation.SegmentID)
+		assert.NotEqualValues(t, 0, allocation.ExpireTime)
+	})
+
+	t.Run("allocation fails 1", func(t *testing.T) {
+		failsAllocator := &FailsAllocator{
+			allocTsSucceed: true,
+		}
+		segmentManager := newSegmentManager(meta, failsAllocator)
+		_, err := segmentManager.AllocSegmentForImport(ctx, collID, 100, "c1", 100)
+		assert.NotNil(t, err)
+	})
+
+	t.Run("allocation fails 2", func(t *testing.T) {
+		failsAllocator := &FailsAllocator{
+			allocIDSucceed: true,
+		}
+		segmentManager := newSegmentManager(meta, failsAllocator)
+		_, err := segmentManager.AllocSegmentForImport(ctx, collID, 100, "c1", 100)
 		assert.NotNil(t, err)
 	})
 }
