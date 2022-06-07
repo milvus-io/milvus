@@ -181,7 +181,7 @@ func (c *ClientBase) connect(ctx context.Context) error {
 	)
 	cancel()
 	if err != nil {
-		return err
+		return wrapErrConnect(addr, err)
 	}
 	if c.conn != nil {
 		_ = c.conn.Close()

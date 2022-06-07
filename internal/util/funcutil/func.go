@@ -355,6 +355,7 @@ func ReadBinary(endian binary.ByteOrder, bs []byte, receiver interface{}) error 
 	return binary.Read(buf, endian, receiver)
 }
 
+// IsGrpcErr checks whether err is instance of grpc status error.
 func IsGrpcErr(err error) bool {
 	if err == nil {
 		return false
