@@ -136,8 +136,6 @@ enum MsgType {
     ReleaseCollection = 107;
     CreateAlias = 108;
     DropAlias = 109;
-    AlterAlias = 110;
-
 
     /* DEFINITION REQUESTS: PARTITION */
     CreatePartition = 200;

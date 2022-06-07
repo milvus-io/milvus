@@ -47,7 +47,6 @@ func (h *Handlers) RegisterRoutesTo(router gin.IRouter) {
 
 	router.POST("/alias", wrapHandler(h.handleCreateAlias))
 	router.DELETE("/alias", wrapHandler(h.handleDropAlias))
-	router.PATCH("/alias", wrapHandler(h.handleAlterAlias))
 
 	router.POST("/index", wrapHandler(h.handleCreateIndex))
 	router.GET("/index", wrapHandler(h.handleDescribeIndex))
@@ -283,15 +282,6 @@ func (h *Handlers) handleDropAlias(c *gin.Context) (interface{}, error) {
 		return nil, fmt.Errorf("%w: parse body failed: %v", errBadRequest, err)
 	}
 	return h.proxy.DropAlias(c, &req)
-}
-
-func (h *Handlers) handleAlterAlias(c *gin.Context) (interface{}, error) {
-	req := milvuspb.AlterAliasRequest{}
-	err := shouldBind(c, &req)
-	if err != nil {
-		return nil, fmt.Errorf("%w: parse body failed: %v", errBadRequest, err)
-	}
-	return h.proxy.AlterAlias(c, &req)
 }
 
 func (h *Handlers) handleCreateIndex(c *gin.Context) (interface{}, error) {

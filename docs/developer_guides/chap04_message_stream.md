@@ -82,7 +82,6 @@ const (
 	MsgType_ReleaseCollection  MsgType = 107
 	MsgType_CreateAlias        MsgType = 108
 	MsgType_DropAlias          MsgType = 109
-	MsgType_AlterAlias         MsgType = 110
 	// DEFINITION REQUESTS: PARTITION
 	MsgType_CreatePartition   MsgType = 200
 	MsgType_DropPartition     MsgType = 201

@@ -190,14 +190,6 @@ class ApiUtilityWrapper:
                                        timeout=timeout, using=using).run()
         return res, check_result
 
-    def alter_alias(self, collection_name, alias, timeout=None, using="default", check_task=None, check_items=None):
-        timeout = TIMEOUT if timeout is None else timeout
-        func_name = sys._getframe().f_code.co_name
-        res, is_succ = api_request([self.ut.alter_alias, collection_name, alias, timeout, using])
-        check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
-                                       timeout=timeout, using=using).run()
-        return res, check_result
-
     def list_aliases(self, collection_name, timeout=None, using="default", check_task=None, check_items=None):
         timeout = TIMEOUT if timeout is None else timeout
         func_name = sys._getframe().f_code.co_name

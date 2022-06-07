@@ -1022,27 +1022,6 @@ func (mt *MetaTable) DropAlias(collectionAlias string, ts typeutil.Timestamp) er
 	return mt.catalog.DropAlias(mt.ctx, collectionID, collectionAlias, ts)
 }
 
-// AlterAlias alter collection alias
-func (mt *MetaTable) AlterAlias(collectionAlias string, collectionName string, ts typeutil.Timestamp) error {
-	mt.ddLock.Lock()
-	defer mt.ddLock.Unlock()
-	if _, ok := mt.collAlias2ID[collectionAlias]; !ok {
-		return fmt.Errorf("alias does not exist, alias = %s", collectionAlias)
-	}
-
-	id, ok := mt.collName2ID[collectionName]
-	if !ok {
-		return fmt.Errorf("aliased collection name does not exist, name = %s", collectionName)
-	}
-	mt.collAlias2ID[collectionAlias] = id
-
-	coll := &model.Collection{
-		CollectionID: id,
-		Aliases:      []string{collectionAlias},
-	}
-	return mt.catalog.AlterAlias(mt.ctx, coll, ts)
-}
-
 // IsAlias returns true if specific `collectionAlias` is an alias of collection.
 func (mt *MetaTable) IsAlias(collectionAlias string) bool {
 	mt.ddLock.RLock()

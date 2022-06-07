@@ -2226,48 +2226,6 @@ func TestDropAlias_all(t *testing.T) {
 
 }
 
-func TestAlterAlias_all(t *testing.T) {
-	Params.Init()
-	rc := NewRootCoordMock()
-	rc.Start()
-	defer rc.Stop()
-	ctx := context.Background()
-	prefix := "TestAlterAlias_all"
-	collectionName := prefix + funcutil.GenRandomStr()
-	task := &AlterAliasTask{
-		Condition: NewTaskCondition(ctx),
-		AlterAliasRequest: &milvuspb.AlterAliasRequest{
-			Base:           nil,
-			CollectionName: collectionName,
-			Alias:          "alias1",
-		},
-		ctx: ctx,
-		result: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-		rootCoord: rc,
-	}
-
-	assert.NoError(t, task.OnEnqueue())
-
-	assert.NotNil(t, task.TraceCtx())
-
-	id := UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
-	task.SetID(id)
-	assert.Equal(t, id, task.ID())
-
-	task.Base.MsgType = commonpb.MsgType_AlterAlias
-	assert.Equal(t, commonpb.MsgType_AlterAlias, task.Type())
-	ts := Timestamp(time.Now().UnixNano())
-	task.SetTs(ts)
-	assert.Equal(t, ts, task.BeginTs())
-	assert.Equal(t, ts, task.EndTs())
-
-	assert.NoError(t, task.PreExecute(ctx))
-	assert.NoError(t, task.Execute(ctx))
-	assert.NoError(t, task.PostExecute(ctx))
-}
-
 func Test_createIndexTask_getIndexedField(t *testing.T) {
 	collectionName := "test"
 	fieldName := "test"

@@ -207,10 +207,6 @@ func (kc *Catalog) GetCredential(ctx context.Context, username string) (*model.C
 	return &model.Credential{Username: username, EncryptedPassword: credentialInfo.EncryptedPassword}, nil
 }
 
-func (kc *Catalog) AlterAlias(ctx context.Context, collection *model.Collection, ts typeutil.Timestamp) error {
-	return kc.CreateAlias(ctx, collection, ts)
-}
-
 func (kc *Catalog) DropCollection(ctx context.Context, collectionInfo *model.Collection, ts typeutil.Timestamp) error {
 	delMetakeysSnap := []string{
 		fmt.Sprintf("%s/%d", CollectionMetaPrefix, collectionInfo.CollectionID),

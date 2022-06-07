@@ -100,7 +100,6 @@ type MilvusService interface {
 
 	CreateAlias(ctx context.Context, request *milvuspb.CreateAliasRequest) (*commonpb.Status, error)
 	DropAlias(ctx context.Context, request *milvuspb.DropAliasRequest) (*commonpb.Status, error)
-	AlterAlias(ctx context.Context, request *milvuspb.AlterAliasRequest) (*commonpb.Status, error)
 
 	CreatePartition(ctx context.Context, request *milvuspb.CreatePartitionRequest) (*commonpb.Status, error)
 	DropPartition(ctx context.Context, request *milvuspb.DropPartitionRequest) (*commonpb.Status, error)
@@ -196,10 +195,6 @@ See _Master API_ for detailed definitions.
 See _Master API_ for detailed definitions.
 
 - _DropAlias_
-
-See _Master API_ for detailed definitions.
-
-- _AlterAlias_
 
 See _Master API_ for detailed definitions.
 

@@ -62,10 +62,6 @@ func (tc *Catalog) DropAlias(ctx context.Context, collectionID typeutil.UniqueID
 	return nil
 }
 
-func (tc *Catalog) AlterAlias(ctx context.Context, collection *model.Collection, ts typeutil.Timestamp) error {
-	return nil
-}
-
 func (tc *Catalog) ListAliases(ctx context.Context) ([]*model.Collection, error) {
 	return nil, nil
 }

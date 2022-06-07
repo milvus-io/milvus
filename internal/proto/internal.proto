@@ -110,13 +110,6 @@ message DropAliasRequest {
   string alias = 3;
 }
 
-message AlterAliasRequest{
-  common.MsgBase base = 1;
-  string db_name = 2;
-  string collection_name = 3;
-  string alias = 4;
-}
-
 message CreateIndexRequest {
   common.MsgBase base = 1;
   string db_name = 2;

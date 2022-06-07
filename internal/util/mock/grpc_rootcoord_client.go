@@ -105,10 +105,6 @@ func (m *GrpcRootCoordClient) DropAlias(ctx context.Context, in *milvuspb.DropAl
 	return &commonpb.Status{}, m.Err
 }
 
-func (m *GrpcRootCoordClient) AlterAlias(ctx context.Context, in *milvuspb.AlterAliasRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.Err
-}
-
 func (m *GrpcRootCoordClient) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowCollectionsResponse, error) {
 	return &milvuspb.ShowCollectionsResponse{}, m.Err
 }

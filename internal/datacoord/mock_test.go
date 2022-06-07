@@ -240,10 +240,6 @@ func (m *mockRootCoordService) DropAlias(ctx context.Context, req *milvuspb.Drop
 	panic("implement me")
 }
 
-func (m *mockRootCoordService) AlterAlias(ctx context.Context, req *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
-	panic("implement me")
-}
-
 func newMockRootCoordService() *mockRootCoordService {
 	return &mockRootCoordService{state: internalpb.StateCode_Healthy}
 }

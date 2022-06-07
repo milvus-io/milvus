@@ -274,16 +274,6 @@ class ApiCollectionWrapper:
         return res, check_result
 
     @trace()
-    def alter_alias(self, alias_name, check_task=None, check_items=None, **kwargs):
-        timeout = kwargs.get("timeout", TIMEOUT)
-        kwargs.update({"timeout": timeout})
-
-        func_name = sys._getframe().f_code.co_name
-        res, check = api_request([self.collection.alter_alias, alias_name], **kwargs)
-        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
-        return res, check_result
-
-    @trace()
     def delete(self, expr, partition_name=None, timeout=None, check_task=None, check_items=None, **kwargs):
         timeout = TIMEOUT if timeout is None else timeout
         func_name = sys._getframe().f_code.co_name

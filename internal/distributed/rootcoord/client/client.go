@@ -492,20 +492,6 @@ func (c *Client) DropAlias(ctx context.Context, req *milvuspb.DropAliasRequest) 
 	return ret.(*commonpb.Status), err
 }
 
-// AlterAlias alter collection alias
-func (c *Client) AlterAlias(ctx context.Context, req *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
-		if !funcutil.CheckCtxValid(ctx) {
-			return nil, ctx.Err()
-		}
-		return client.(rootcoordpb.RootCoordClient).AlterAlias(ctx, req)
-	})
-	if err != nil || ret == nil {
-		return nil, err
-	}
-	return ret.(*commonpb.Status), err
-}
-
 // Import data files(json, numpy, etc.) on MinIO/S3 storage, read and parse them into sealed segments
 func (c *Client) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {

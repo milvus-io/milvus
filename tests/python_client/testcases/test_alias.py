@@ -82,70 +82,6 @@ class TestAliasOperation(TestcaseBase):
         assert [p.name for p in collection_w.partitions] == [p.name for p in collection_alias.partitions]
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_alias_alter_operation_default(self):
-        """
-        target: test collection altering alias
-        method: 
-                1. create collection_1 with 10 partitions and its alias alias_a
-                2. create collection_2 with 5 partitions and its alias alias_b
-                3. collection_1 alter alias to alias_b
-        expected: 
-                in step 1, collection_1 is equal to alias_a
-                in step 2, collection_2 is equal to alias_b
-                in step 3, collection_1 is equal to alias_a and alias_b, and collection_2 is not equal to alias_b
-        """
-        self._connect()
-
-        # create collection_1 with 10 partitions and its alias alias_a
-        c_1_name = cf.gen_unique_str("collection")
-        collection_1 = self.init_collection_wrap(name=c_1_name, schema=default_schema,
-                                                 check_task=CheckTasks.check_collection_property,
-                                                 check_items={exp_name: c_1_name, exp_schema: default_schema})
-        for _ in range(10):
-            partition_name = cf.gen_unique_str("partition")
-            # create partition with different names and check the partition exists
-            self.init_partition_wrap(collection_1, partition_name)
-            assert collection_1.has_partition(partition_name)[0]        
-        
-        alias_a_name = cf.gen_unique_str(prefix)
-        self.utility_wrap.create_alias(collection_1.name, alias_a_name)
-        collection_alias_a, _ = self.collection_wrap.init_collection(name=alias_a_name,
-                                                                     check_task=CheckTasks.check_collection_property,
-                                                                     check_items={exp_name: alias_a_name,
-                                                                                  exp_schema: default_schema})
-        # assert collection is equal to alias according to partitions
-        assert [p.name for p in collection_1.partitions] == [p.name for p in collection_alias_a.partitions]        
-        
-        # create collection_2 with 5 partitions and its alias alias_b
-        c_2_name = cf.gen_unique_str("collection")
-        collection_2 = self.init_collection_wrap(name=c_2_name, schema=default_schema,
-                                                 check_task=CheckTasks.check_collection_property,
-                                                 check_items={exp_name: c_2_name, exp_schema: default_schema})
-
-        for _ in range(5):
-            partition_name = cf.gen_unique_str("partition")
-            # create partition with different names and check the partition exists
-            self.init_partition_wrap(collection_2, partition_name)
-            assert collection_2.has_partition(partition_name)[0]
-
-        alias_b_name = cf.gen_unique_str(prefix)
-        self.utility_wrap.create_alias(collection_2.name, alias_b_name)
-        collection_alias_b, _ = self.collection_wrap.init_collection(name=alias_b_name,
-                                                                     check_task=CheckTasks.check_collection_property,
-                                                                     check_items={exp_name: alias_b_name,
-                                                                                  exp_schema: default_schema})
-        # assert collection is equal to alias according to partitions
-        assert [p.name for p in collection_2.partitions] == [p.name for p in collection_alias_b.partitions]
-        
-        # collection_1 alter alias to alias_b
-        self.utility_wrap.alter_alias(collection_1.name, alias_b_name)
-
-        # collection_1 has two alias name, alias_a and alias_b, but collection_2 has no alias any more
-        assert [p.name for p in collection_1.partitions] == [p.name for p in collection_alias_b.partitions]
-        assert [p.name for p in collection_1.partitions] == [p.name for p in collection_alias_a.partitions]
-        assert [p.name for p in collection_2.partitions] != [p.name for p in collection_alias_b.partitions]
-
-    @pytest.mark.tags(CaseLabel.L1)
     def test_alias_drop_operation_default(self):
         """
         target: test collection dropping alias
@@ -418,34 +354,6 @@ class TestAliasOperationInvalid(TestcaseBase):
         # collection_2.create_alias(alias_a_name,
         #                           check_task=CheckTasks.err_res,
         #                           check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_alias_alter_not_exist_alias(self):
-        """
-        target: test collection altering to alias which is not exist
-        method: 
-                1.create a collection with alias
-                2.collection alters to an alias name which is not exist
-        expected: 
-                in step 2, alter alias with a not exist name is not allowed
-        """
-        self._connect()
-        c_name = cf.gen_unique_str("collection")
-        collection_w = self.init_collection_wrap(name=c_name, schema=default_schema,
-                                                 check_task=CheckTasks.check_collection_property,
-                                                 check_items={exp_name: c_name, exp_schema: default_schema})
-        alias_name = cf.gen_unique_str(prefix)
-        self.utility_wrap.create_alias(collection_w.name, alias_name)
-        # collection_w.create_alias(alias_name)
-
-        alias_not_exist_name = cf.gen_unique_str(prefix)
-        error = {ct.err_code: 1, ct.err_msg: "Alter alias failed: alias does not exist"}                                         
-        self.utility_wrap.alter_alias(collection_w.name, alias_not_exist_name,
-                                      check_task=CheckTasks.err_res,
-                                      check_items=error)
-        # collection_w.alter_alias(alias_not_exist_name,
-        #                          check_task=CheckTasks.err_res,
-        #                          check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_alias_drop_not_exist_alias(self):

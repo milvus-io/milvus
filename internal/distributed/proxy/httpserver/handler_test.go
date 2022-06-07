@@ -99,10 +99,6 @@ func (mockProxyComponent) DropAlias(ctx context.Context, request *milvuspb.DropA
 	return testStatus, nil
 }
 
-func (mockProxyComponent) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
-	return testStatus, nil
-}
-
 func (mockProxyComponent) CreateIndex(ctx context.Context, request *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
 	return testStatus, nil
 }

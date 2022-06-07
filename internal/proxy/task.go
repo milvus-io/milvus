@@ -86,7 +86,6 @@ const (
 	deleteTaskName                  = "DeleteTask"
 	CreateAliasTaskName             = "CreateAliasTask"
 	DropAliasTaskName               = "DropAliasTask"
-	AlterAliasTaskName              = "AlterAliasTask"
 
 	// minFloat32 minimum float.
 	minFloat32 = -1 * float32(math.MaxFloat32)
@@ -3501,79 +3500,5 @@ func (d *DropAliasTask) Execute(ctx context.Context) error {
 }
 
 func (d *DropAliasTask) PostExecute(ctx context.Context) error {
-	return nil
-}
-
-// AlterAliasTask is the task to alter alias
-type AlterAliasTask struct {
-	Condition
-	*milvuspb.AlterAliasRequest
-	ctx       context.Context
-	rootCoord types.RootCoord
-	result    *commonpb.Status
-}
-
-func (a *AlterAliasTask) TraceCtx() context.Context {
-	return a.ctx
-}
-
-func (a *AlterAliasTask) ID() UniqueID {
-	return a.Base.MsgID
-}
-
-func (a *AlterAliasTask) SetID(uid UniqueID) {
-	a.Base.MsgID = uid
-}
-
-func (a *AlterAliasTask) Name() string {
-	return AlterAliasTaskName
-}
-
-func (a *AlterAliasTask) Type() commonpb.MsgType {
-	return a.Base.MsgType
-}
-
-func (a *AlterAliasTask) BeginTs() Timestamp {
-	return a.Base.Timestamp
-}
-
-func (a *AlterAliasTask) EndTs() Timestamp {
-	return a.Base.Timestamp
-}
-
-func (a *AlterAliasTask) SetTs(ts Timestamp) {
-	a.Base.Timestamp = ts
-}
-
-func (a *AlterAliasTask) OnEnqueue() error {
-	a.Base = &commonpb.MsgBase{}
-	return nil
-}
-
-func (a *AlterAliasTask) PreExecute(ctx context.Context) error {
-	a.Base.MsgType = commonpb.MsgType_AlterAlias
-	a.Base.SourceID = Params.ProxyCfg.GetNodeID()
-
-	collAlias := a.Alias
-	// collection alias uses the same format as collection name
-	if err := ValidateCollectionAlias(collAlias); err != nil {
-		return err
-	}
-
-	collName := a.CollectionName
-	if err := validateCollectionName(collName); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (a *AlterAliasTask) Execute(ctx context.Context) error {
-	var err error
-	a.result, err = a.rootCoord.AlterAlias(ctx, a.AlterAliasRequest)
-	return err
-}
-
-func (a *AlterAliasTask) PostExecute(ctx context.Context) error {
 	return nil
 }

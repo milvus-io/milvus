@@ -314,15 +314,6 @@ func TestMetaTable(t *testing.T) {
 		exists = mt.IsAlias(aliasName1)
 		assert.True(t, exists)
 	})
-	wg.Add(1)
-	t.Run("alter alias", func(t *testing.T) {
-		defer wg.Done()
-		ts := ftso()
-		err = mt.AlterAlias(aliasName1, collName, ts)
-		assert.Nil(t, err)
-		err = mt.AlterAlias(aliasName1, collNameInvalid, ts)
-		assert.NotNil(t, err)
-	})
 
 	wg.Add(1)
 	t.Run("delete alias", func(t *testing.T) {

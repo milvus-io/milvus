@@ -2421,24 +2421,6 @@ func TestRootCoord_Base(t *testing.T) {
 	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 
 	wg.Add(1)
-	t.Run("alter alias", func(t *testing.T) {
-		defer wg.Done()
-		req := &milvuspb.AlterAliasRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_AlterAlias,
-				MsgID:     3015,
-				Timestamp: 3015,
-				SourceID:  3015,
-			},
-			CollectionName: collName2,
-			Alias:          aliasName,
-		}
-		rsp, err := core.AlterAlias(ctx, req)
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, rsp.ErrorCode)
-	})
-
-	wg.Add(1)
 	t.Run("drop collection with alias", func(t *testing.T) {
 		defer wg.Done()
 		req := &milvuspb.DropCollectionRequest{

@@ -2237,40 +2237,6 @@ func (c *Core) DropAlias(ctx context.Context, in *milvuspb.DropAliasRequest) (*c
 	return succStatus(), nil
 }
 
-// AlterAlias alter collection alias
-func (c *Core) AlterAlias(ctx context.Context, in *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
-	metrics.RootCoordDDLReqCounter.WithLabelValues("DropAlias", metrics.TotalLabel).Inc()
-	if code, ok := c.checkHealthy(); !ok {
-		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+internalpb.StateCode_name[int32(code)]), nil
-	}
-	tr := timerecord.NewTimeRecorder("AlterAlias")
-	log.Debug("AlterAlias", zap.String("role", typeutil.RootCoordRole),
-		zap.String("alias", in.Alias), zap.String("collection name", in.CollectionName),
-		zap.Int64("msgID", in.Base.MsgID))
-	t := &AlterAliasReqTask{
-		baseReqTask: baseReqTask{
-			ctx:  ctx,
-			core: c,
-		},
-		Req: in,
-	}
-	err := executeTask(t)
-	if err != nil {
-		log.Error("AlterAlias failed", zap.String("role", typeutil.RootCoordRole),
-			zap.String("alias", in.Alias), zap.String("collection name", in.CollectionName),
-			zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
-		metrics.RootCoordDDLReqCounter.WithLabelValues("AlterAlias", metrics.FailLabel).Inc()
-		return failStatus(commonpb.ErrorCode_UnexpectedError, "AlterAlias failed: "+err.Error()), nil
-	}
-	log.Debug("AlterAlias success", zap.String("role", typeutil.RootCoordRole),
-		zap.String("alias", in.Alias), zap.String("collection name", in.CollectionName),
-		zap.Int64("msgID", in.Base.MsgID))
-
-	metrics.RootCoordDDLReqCounter.WithLabelValues("AlterAlias", metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLReqLatency.WithLabelValues("AlterAlias").Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return succStatus(), nil
-}
-
 // Import imports large files (json, numpy, etc.) on MinIO/S3 storage into Milvus storage.
 func (c *Core) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
 	if code, ok := c.checkHealthy(); !ok {

@@ -174,10 +174,6 @@ func (m *MockRootCoord) DropAlias(ctx context.Context, req *milvuspb.DropAliasRe
 	return nil, nil
 }
 
-func (m *MockRootCoord) AlterAlias(ctx context.Context, req *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
-	return nil, nil
-}
-
 func (m *MockRootCoord) AllocTimestamp(ctx context.Context, req *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error) {
 	return nil, nil
 }
@@ -705,10 +701,6 @@ func (m *MockProxy) DropAlias(ctx context.Context, request *milvuspb.DropAliasRe
 	return nil, nil
 }
 
-func (m *MockProxy) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
-	return nil, nil
-}
-
 func (m *MockProxy) SetRootCoordClient(rootCoord types.RootCoord) {
 
 }
@@ -1127,11 +1119,6 @@ func Test_NewServer(t *testing.T) {
 
 	t.Run("DropAlias", func(t *testing.T) {
 		_, err := server.DropAlias(ctx, nil)
-		assert.Nil(t, err)
-	})
-
-	t.Run("AlterAlias", func(t *testing.T) {
-		_, err := server.AlterAlias(ctx, nil)
 		assert.Nil(t, err)
 	})
 

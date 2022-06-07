@@ -46,8 +46,6 @@ This document will help SDK developers to understand each API of Milvus RPC prot
     - [CreateAliasRequest](#createaliasrequest)
   - [DropAlias](#dropalias)
     - [DropAliasRequest](#dropaliasrequest)
-  - [AlterAlias](#alteralias)
-    - [AlterAliasRequest](#alteraliasrequest)
   - [CreateIndex](#createindex)
     - [CreateIndexRequest](#createindexrequest)
   - [DescribeIndex](#describeindex)
@@ -650,31 +648,8 @@ message DropAliasRequest {
   string alias = 3;
 }
 ```
-
-## AlterAlias
-Alter an alias from a collection to another. Return a `common.Status`(see [common.Status](#status)) to tell client whether the operation is successful.
-For more information please refer the [document](https://wiki.lfaidata.foundation/display/MIL/MEP+10+--+Support+Collection+Alias).
-```
-rpc AlterAlias(AlterAliasRequest) returns (common.Status) {}
-```
 [back to top](#brief)
 
-### AlterAliasRequest
-```
-message AlterAliasRequest{
-  // Not useful for now
-  common.MsgBase base = 1;
-
-  // Not useful for now
-  string db_name = 2;
-
-  // The target collection name. (Required)
-  string collection_name = 3;
-
-  // The alias. (Required)
-  string alias = 4;
-}
-```
 
 ## CreateIndex
 Create an index. Return a `common.Status`(see [common.Status](#status)) to tell client whether the operation is successful.

@@ -170,38 +170,6 @@ func (coord *RootCoordMock) DropAlias(ctx context.Context, req *milvuspb.DropAli
 	}, nil
 }
 
-func (coord *RootCoordMock) AlterAlias(ctx context.Context, req *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
-	code := coord.state.Load().(internalpb.StateCode)
-	if code != internalpb.StateCode_Healthy {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
-		}, nil
-	}
-	coord.collMtx.Lock()
-	defer coord.collMtx.Unlock()
-
-	_, exist := coord.collAlias2ID[req.Alias]
-	if !exist {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_CollectionNotExists,
-			Reason:    fmt.Sprintf("alias does not exist, alias = %s", req.Alias),
-		}, nil
-	}
-	collID, exist := coord.collName2ID[req.CollectionName]
-	if !exist {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_CollectionNotExists,
-			Reason:    fmt.Sprintf("aliased collection name does not exist, name = %s", req.CollectionName),
-		}, nil
-	}
-	coord.collAlias2ID[req.Alias] = collID
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-		Reason:    "",
-	}, nil
-}
-
 func (coord *RootCoordMock) updateState(state internalpb.StateCode) {
 	coord.state.Store(state)
 }

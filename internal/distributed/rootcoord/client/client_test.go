@@ -135,9 +135,6 @@ func Test_NewClient(t *testing.T) {
 		r25, err := client.DropAlias(ctx, nil)
 		retCheck(retNotNil, r25, err)
 
-		r26, err := client.AlterAlias(ctx, nil)
-		retCheck(retNotNil, r26, err)
-
 		r27, err := client.Import(ctx, nil)
 		retCheck(retNotNil, r27, err)
 
@@ -285,9 +282,6 @@ func Test_NewClient(t *testing.T) {
 
 	r25Timeout, err := client.DropAlias(shortCtx, nil)
 	retCheck(r25Timeout, err)
-
-	r26Timeout, err := client.AlterAlias(shortCtx, nil)
-	retCheck(r26Timeout, err)
 
 	r27Timeout, err := client.Import(shortCtx, nil)
 	retCheck(r27Timeout, err)

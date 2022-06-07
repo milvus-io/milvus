@@ -1146,32 +1146,3 @@ func (t *DropAliasReqTask) Execute(ctx context.Context) error {
 
 	return t.core.ExpireMetaCache(ctx, []string{t.Req.Alias}, InvalidCollectionID, ts)
 }
-
-// AlterAliasReqTask alter alias request task
-type AlterAliasReqTask struct {
-	baseReqTask
-	Req *milvuspb.AlterAliasRequest
-}
-
-// Type return msg type
-func (t *AlterAliasReqTask) Type() commonpb.MsgType {
-	return t.Req.Base.MsgType
-}
-
-// Execute task execution
-func (t *AlterAliasReqTask) Execute(ctx context.Context) error {
-	if t.Type() != commonpb.MsgType_AlterAlias {
-		return fmt.Errorf("alter alias, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
-	}
-
-	ts, err := t.core.TSOAllocator(1)
-	if err != nil {
-		return fmt.Errorf("TSO alloc fail, error = %w", err)
-	}
-	err = t.core.MetaTable.AlterAlias(t.Req.Alias, t.Req.CollectionName, ts)
-	if err != nil {
-		return fmt.Errorf("meta table alter alias failed, error = %w", err)
-	}
-
-	return t.core.ExpireMetaCache(ctx, []string{t.Req.Alias}, InvalidCollectionID, ts)
-}

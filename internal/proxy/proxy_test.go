@@ -759,41 +759,6 @@ func TestProxy(t *testing.T) {
 	})
 
 	wg.Add(1)
-	t.Run("alter alias", func(t *testing.T) {
-		defer wg.Done()
-		// alter alias
-		alterReq := &milvuspb.AlterAliasRequest{
-			Base:           nil,
-			CollectionName: collectionName,
-			Alias:          "alias",
-		}
-		resp, err := proxy.AlterAlias(ctx, alterReq)
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-
-		_, _ = proxy.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   0,
-				MsgID:     0,
-				Timestamp: 0,
-				SourceID:  0,
-			},
-			DbName:         dbName,
-			CollectionName: collectionName,
-		})
-
-		nonExistingCollName := "coll_name_random_zarathustra"
-		faultyAlterReq := &milvuspb.AlterAliasRequest{
-			Base:           nil,
-			CollectionName: nonExistingCollName,
-			Alias:          "alias",
-		}
-		resp, err = proxy.AlterAlias(ctx, faultyAlterReq)
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-	})
-
-	wg.Add(1)
 	t.Run("drop alias", func(t *testing.T) {
 		defer wg.Done()
 		// drop alias
@@ -2359,14 +2324,6 @@ func TestProxy(t *testing.T) {
 	})
 
 	wg.Add(1)
-	t.Run("AlterAlias fail, unhealthy", func(t *testing.T) {
-		defer wg.Done()
-		resp, err := proxy.AlterAlias(ctx, &milvuspb.AlterAliasRequest{})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-	})
-
-	wg.Add(1)
 	t.Run("GetPersistentSegmentInfo fail, unhealthy", func(t *testing.T) {
 		defer wg.Done()
 		resp, err := proxy.GetPersistentSegmentInfo(ctx, &milvuspb.GetPersistentSegmentInfoRequest{})
@@ -2593,14 +2550,6 @@ func TestProxy(t *testing.T) {
 	t.Run("DropAlias fail, dd queue full", func(t *testing.T) {
 		defer wg.Done()
 		resp, err := proxy.DropAlias(ctx, &milvuspb.DropAliasRequest{})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-	})
-
-	wg.Add(1)
-	t.Run("AlterAlias fail, dd queue full", func(t *testing.T) {
-		defer wg.Done()
-		resp, err := proxy.AlterAlias(ctx, &milvuspb.AlterAliasRequest{})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
@@ -2869,14 +2818,6 @@ func TestProxy(t *testing.T) {
 	t.Run("DropAlias fail, timeout", func(t *testing.T) {
 		defer wg.Done()
 		resp, err := proxy.DropAlias(shortCtx, &milvuspb.DropAliasRequest{})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-	})
-
-	wg.Add(1)
-	t.Run("AlterAlias fail, timeout", func(t *testing.T) {
-		defer wg.Done()
-		resp, err := proxy.AlterAlias(shortCtx, &milvuspb.AlterAliasRequest{})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})

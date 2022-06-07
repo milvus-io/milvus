@@ -25,7 +25,6 @@ type Catalog interface {
 
 	CreateAlias(ctx context.Context, collection *model.Collection, ts typeutil.Timestamp) error
 	DropAlias(ctx context.Context, collectionID typeutil.UniqueID, alias string, ts typeutil.Timestamp) error
-	AlterAlias(ctx context.Context, collection *model.Collection, ts typeutil.Timestamp) error
 	ListAliases(ctx context.Context) ([]*model.Collection, error)
 
 	GetCredential(ctx context.Context, username string) (*model.Credential, error)
