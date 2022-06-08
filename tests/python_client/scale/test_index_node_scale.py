@@ -19,7 +19,6 @@ default_index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": 
 
 class TestIndexNodeScale:
 
-    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/16832")
     @pytest.mark.tags(CaseLabel.L3)
     def test_expand_index_node(self):
         """
@@ -115,7 +114,6 @@ class TestIndexNodeScale:
             read_pod_log(namespace=constants.NAMESPACE, label_selector=label, release_name=release_name)
             mic.uninstall(release_name, namespace=constants.NAMESPACE)
 
-    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/16832")
     @pytest.mark.tags(CaseLabel.L3)
     def test_shrink_index_node(self):
         """
@@ -181,7 +179,7 @@ class TestIndexNodeScale:
             wait_pods_ready(constants.NAMESPACE, f"app.kubernetes.io/instance={release_name}")
 
             start = datetime.datetime.now()
-            collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
+            collection_w.create_index(ct.default_float_vec_field_name, default_index_params, timeout=60)
             assert collection_w.has_index()[0]
             t1 = datetime.datetime.now() - start
             log.info(f'Create index on 1 indexNode cost t1: {t1}')
