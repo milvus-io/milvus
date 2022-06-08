@@ -222,3 +222,16 @@ func (c *Client) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.Refres
 	}
 	return ret.(*commonpb.Status), err
 }
+
+func (c *Client) PushAliasInfo(ctx context.Context, req *milvuspb.PushAliasInfoRequest) (*commonpb.Status, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.(proxypb.ProxyClient).PushAliasInfo(ctx, req)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return ret.(*commonpb.Status), err
+}

@@ -728,6 +728,13 @@ func (t *searchTask) OnEnqueue() error {
 	t.Base = &commonpb.MsgBase{}
 	t.Base.MsgType = commonpb.MsgType_Search
 	t.Base.SourceID = Params.ProxyCfg.GetNodeID()
+	alias2name, _ := globalMetaCache.GetAliasInfoCache()
+	name, err := alias2name.Get(t.request.CollectionName)
+	if err != nil {
+		return nil
+	}
+	t.request.CollectionName = name
+	t.collectionName = name
 	return nil
 }
 

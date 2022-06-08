@@ -474,8 +474,8 @@ func TestSearchTask_Ts(t *testing.T) {
 	Params.Init()
 	task := &searchTask{
 		SearchRequest: &internalpb.SearchRequest{},
-
-		tr: timerecord.NewTimeRecorder("test-search"),
+		request:       &milvuspb.SearchRequest{},
+		tr:            timerecord.NewTimeRecorder("test-search"),
 	}
 	require.NoError(t, task.OnEnqueue())
 

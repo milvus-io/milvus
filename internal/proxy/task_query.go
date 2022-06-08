@@ -539,5 +539,12 @@ func (t *queryTask) SetTs(ts Timestamp) {
 
 func (t *queryTask) OnEnqueue() error {
 	t.Base.MsgType = commonpb.MsgType_Retrieve
+	alias2name, _ := globalMetaCache.GetAliasInfoCache()
+	name, err := alias2name.Get(t.request.CollectionName)
+	if err != nil {
+		return nil
+	}
+	t.request.CollectionName = name
+	t.collectionName = name
 	return nil
 }

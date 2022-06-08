@@ -3016,3 +3016,23 @@ func (c *Core) ListCredUsers(ctx context.Context, in *milvuspb.ListCredUsersRequ
 		Usernames: credInfo.Usernames,
 	}, nil
 }
+
+func (c *Core) PullAliasInfo(ctx context.Context, in *milvuspb.PullAliasInfoRequest) (*milvuspb.PullAliasInfoResponse, error) {
+	method := "PullAliasInfo"
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder(method)
+
+	AliasTimeStamp := c.MetaTable.newestAliasTs
+	immutablemapAlias2Name := c.MetaTable.ts2alias2name[AliasTimeStamp]
+	Alias2Name := immutablemapAlias2Name.GetCopy()
+
+	log.Debug("PullAliasInfo success", zap.String("role", typeutil.RootCoordRole))
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return &milvuspb.PullAliasInfoResponse{
+		Status:         succStatus(),
+		Alias2Name:     Alias2Name,
+		AliasTimestamp: AliasTimeStamp,
+	}, nil
+}

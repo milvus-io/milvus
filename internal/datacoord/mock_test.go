@@ -234,6 +234,11 @@ type mockRootCoordService struct {
 	cnt   int64
 }
 
+func (m *mockRootCoordService) PullAliasInfo(ctx context.Context, in *milvuspb.PullAliasInfoRequest) (*milvuspb.PullAliasInfoResponse, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
 func (m *mockRootCoordService) CreateAlias(ctx context.Context, req *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
 	panic("implement me")
 }

@@ -792,6 +792,10 @@ func (s *Server) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasReque
 	return s.proxy.GetReplicas(ctx, req)
 }
 
+func (s *Server) PushAliasInfo(ctx context.Context, req *milvuspb.PushAliasInfoRequest) (*commonpb.Status, error) {
+	return s.proxy.PushAliasInfo(ctx, req)
+}
+
 // Check is required by gRPC healthy checking
 func (s *Server) Check(ctx context.Context, req *grpc_health_v1.HealthCheckRequest) (*grpc_health_v1.HealthCheckResponse, error) {
 	ret := &grpc_health_v1.HealthCheckResponse{

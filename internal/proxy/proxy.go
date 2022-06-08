@@ -225,6 +225,7 @@ func (node *Proxy) Init() error {
 		log.Warn("failed to init meta cache", zap.Error(err), zap.String("role", typeutil.ProxyRole))
 		return err
 	}
+	go startPullAlias(node.ctx)
 	log.Debug("init meta cache done", zap.String("role", typeutil.ProxyRole))
 
 	return nil

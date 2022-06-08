@@ -37,6 +37,10 @@ type GrpcRootCoordClient struct {
 	Err error
 }
 
+func (m *GrpcRootCoordClient) PullAliasInfo(ctx context.Context, in *milvuspb.PullAliasInfoRequest, opts ...grpc.CallOption) (*milvuspb.PullAliasInfoResponse, error) {
+	return &milvuspb.PullAliasInfoResponse{}, m.Err
+}
+
 func (m *GrpcRootCoordClient) CreateRole(ctx context.Context, in *milvuspb.CreateRoleRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }

@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
@@ -290,7 +291,7 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_DropCollection {
 		return fmt.Errorf("drop collection, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
 	}
-	if t.core.MetaTable.IsAlias(t.Req.CollectionName) {
+	if t.core.MetaTable.IsAlias(t.Req.CollectionName, t.core.MetaTable.newestAliasTs) {
 		return fmt.Errorf("cannot drop the collection via alias = %s", t.Req.CollectionName)
 	}
 
@@ -356,6 +357,19 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		if err = t.core.MetaTable.DeleteCollection(collMeta.ID, ts, ddOpStr); err != nil {
 			return err
 		}
+
+		newestAliasTimeStamp := t.core.MetaTable.newestAliasTs
+		immutablemapAlias2Name := t.core.MetaTable.ts2alias2name[newestAliasTimeStamp]
+		req := &milvuspb.PushAliasInfoRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_PushAliasInfo,
+			},
+			AliasTimestamp: newestAliasTimeStamp,
+			Alias2Name:     immutablemapAlias2Name.GetCopy(),
+		}
+		retry.Do(ctx, func() error {
+			return t.core.proxyClientManager.PushAliasInfo(ctx, req)
+		})
 
 		// use addDdlTimeTick and removeDdlTimeTick to mark DDL operation in process
 		t.core.chanTimeTick.removeDdlTimeTick(ts, reason)
@@ -467,7 +481,7 @@ func (t *DescribeCollectionReqTask) Execute(ctx context.Context) error {
 	t.Rsp.CreatedTimestamp = collInfo.CreateTime
 	createdPhysicalTime, _ := tsoutil.ParseHybridTs(collInfo.CreateTime)
 	t.Rsp.CreatedUtcTimestamp = uint64(createdPhysicalTime)
-	t.Rsp.Aliases = t.core.MetaTable.ListAliases(collInfo.ID)
+	t.Rsp.Aliases = t.core.MetaTable.ListAliases(collInfo.ID, t.Req.AliasTimestamp)
 	t.Rsp.StartPositions = collInfo.GetStartPositions()
 	t.Rsp.CollectionName = t.Rsp.Schema.Name
 	return nil
@@ -1104,6 +1118,19 @@ func (t *CreateAliasReqTask) Execute(ctx context.Context) error {
 		return fmt.Errorf("meta table add alias failed, error = %w", err)
 	}
 
+	newestAliasTimeStamp := t.core.MetaTable.newestAliasTs
+	immutablemapAlias2Name := t.core.MetaTable.ts2alias2name[newestAliasTimeStamp]
+	req := &milvuspb.PushAliasInfoRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_PushAliasInfo,
+		},
+		AliasTimestamp: newestAliasTimeStamp,
+		Alias2Name:     immutablemapAlias2Name.GetCopy(),
+	}
+	retry.Do(ctx, func() error {
+		return t.core.proxyClientManager.PushAliasInfo(ctx, req)
+	})
+
 	return nil
 }
 
@@ -1133,6 +1160,19 @@ func (t *DropAliasReqTask) Execute(ctx context.Context) error {
 		return fmt.Errorf("meta table drop alias failed, error = %w", err)
 	}
 
+	newestAliasTimeStamp := t.core.MetaTable.newestAliasTs
+	immutablemapAlias2Name := t.core.MetaTable.ts2alias2name[newestAliasTimeStamp]
+	req := &milvuspb.PushAliasInfoRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_PushAliasInfo,
+		},
+		AliasTimestamp: newestAliasTimeStamp,
+		Alias2Name:     immutablemapAlias2Name.GetCopy(),
+	}
+	retry.Do(ctx, func() error {
+		return t.core.proxyClientManager.PushAliasInfo(ctx, req)
+	})
+
 	return t.core.ExpireMetaCache(ctx, []string{t.Req.Alias}, InvalidCollectionID, ts)
 }
 
@@ -1161,6 +1201,19 @@ func (t *AlterAliasReqTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("meta table alter alias failed, error = %w", err)
 	}
+
+	newestAliasTimeStamp := t.core.MetaTable.newestAliasTs
+	immutablemapAlias2Name := t.core.MetaTable.ts2alias2name[newestAliasTimeStamp]
+	req := &milvuspb.PushAliasInfoRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_PushAliasInfo,
+		},
+		AliasTimestamp: newestAliasTimeStamp,
+		Alias2Name:     immutablemapAlias2Name.GetCopy(),
+	}
+	retry.Do(ctx, func() error {
+		return t.core.proxyClientManager.PushAliasInfo(ctx, req)
+	})
 
 	return t.core.ExpireMetaCache(ctx, []string{t.Req.Alias}, InvalidCollectionID, ts)
 }

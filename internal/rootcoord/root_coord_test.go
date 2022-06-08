@@ -83,6 +83,13 @@ func (p *proxyMock) Stop() error {
 	return nil
 }
 
+func (p *proxyMock) PushAliasInfo(ctx context.Context, req *milvuspb.PushAliasInfoRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
+}
+
 func (p *proxyMock) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()

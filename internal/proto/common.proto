@@ -55,8 +55,10 @@ enum ErrorCode {
     SelectGrantFailure = 42;
     RefreshPolicyInfoCacheFailure = 43;
     ListPolicyFailure = 44;
-    NotShardLeader = 45;
-    NoReplicaAvailable = 46;
+    PushAliasInfoFailure = 45;
+    PullAliasInfoFailure = 46;
+    NotShardLeader = 47;
+    NoReplicaAvailable = 48;
 
     // internal error code.
     DDRequestRace = 1000;
@@ -222,6 +224,10 @@ enum MsgType {
     SelectGrant = 1607;
     RefreshPolicyInfoCache = 1608;
     ListPolicy = 1609;
+
+    /* Alias cache */
+    PushAliasInfo = 1701;
+    PullAliasInfo = 1702;
 }
 
 message MsgBase {

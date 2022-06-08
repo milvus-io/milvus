@@ -33,6 +33,10 @@ type GrpcProxyClient struct {
 	Err error
 }
 
+func (m *GrpcProxyClient) PushAliasInfo(ctx context.Context, in *milvuspb.PushAliasInfoRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
 func (m *GrpcProxyClient) RefreshPolicyInfoCache(ctx context.Context, in *proxypb.RefreshPolicyInfoCacheRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }

@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"path"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/golang/protobuf/proto"
@@ -59,7 +60,7 @@ const (
 	// DDOperationPrefix prefix for DD operation
 	DDOperationPrefix = ComponentPrefix + "/dd-operation"
 
-	// DDMsgSendPrefix prefix to indicate whether DD msg has been send
+	// DDMsgSendPrefix prefix to indicate whether DD msg has been sent
 	DDMsgSendPrefix = ComponentPrefix + "/dd-msg-send"
 
 	// CreateCollectionDDType name of DD type for create collection
@@ -89,11 +90,15 @@ const (
 
 // MetaTable store all rootCoord meta info
 type MetaTable struct {
-	txn             kv.TxnKV                                                        // client of a reliable txnkv service, i.e. etcd client
-	snapshot        kv.SnapShotKV                                                   // client of a reliable snapshotkv service, i.e. etcd client
-	collID2Meta     map[typeutil.UniqueID]pb.CollectionInfo                         // collection id -> collection meta
-	collName2ID     map[string]typeutil.UniqueID                                    // collection name to collection id
-	collAlias2ID    map[string]typeutil.UniqueID                                    // collection alias to collection id
+	txn          kv.TxnKV                                // client of a reliable txnkv service, i.e. etcd client
+	snapshot     kv.SnapShotKV                           // client of a reliable snapshotkv service, i.e. etcd client
+	proxyID2Meta map[typeutil.UniqueID]pb.ProxyMeta      // proxy id to proxy meta
+	collID2Meta  map[typeutil.UniqueID]pb.CollectionInfo // collection id -> collection meta
+	collName2ID  map[string]typeutil.UniqueID            // collection name to collection id
+	//collAlias2ID    map[string]typeutil.UniqueID                                    // collection alias to collection id
+	ts2alias2name map[typeutil.Timestamp]typeutil.ImmutablemapString2string //aliasTs to alias to collection name
+	newestAliasTs typeutil.Timestamp                                        //newest alias changing timestamp named Ts
+
 	partID2SegID    map[typeutil.UniqueID]map[typeutil.UniqueID]bool                // partition id -> segment_id -> bool
 	segID2IndexMeta map[typeutil.UniqueID]map[typeutil.UniqueID]pb.SegmentIndexInfo // collection id/index_id/partition_id/segment_id -> meta
 	indexID2Meta    map[typeutil.UniqueID]pb.IndexInfo                              // collection id/index_id -> meta
@@ -121,25 +126,12 @@ func NewMetaTable(txn kv.TxnKV, snap kv.SnapShotKV) (*MetaTable, error) {
 func (mt *MetaTable) reloadFromKV() error {
 	mt.collID2Meta = make(map[typeutil.UniqueID]pb.CollectionInfo)
 	mt.collName2ID = make(map[string]typeutil.UniqueID)
-	mt.collAlias2ID = make(map[string]typeutil.UniqueID)
+	mt.ts2alias2name = make(map[typeutil.Timestamp]typeutil.ImmutablemapString2string)
 	mt.partID2SegID = make(map[typeutil.UniqueID]map[typeutil.UniqueID]bool)
 	mt.segID2IndexMeta = make(map[typeutil.UniqueID]map[typeutil.UniqueID]pb.SegmentIndexInfo)
 	mt.indexID2Meta = make(map[typeutil.UniqueID]pb.IndexInfo)
 
-	_, values, err := mt.snapshot.LoadWithPrefix(CollectionAliasMetaPrefix, 0)
-	if err != nil {
-		return err
-	}
-	for _, value := range values {
-		aliasInfo := pb.CollectionInfo{}
-		err = proto.Unmarshal([]byte(value), &aliasInfo)
-		if err != nil {
-			return fmt.Errorf("rootcoord Unmarshal pb.AliasInfo err:%w", err)
-		}
-		mt.collAlias2ID[aliasInfo.Schema.Name] = aliasInfo.ID
-	}
-
-	_, values, err = mt.snapshot.LoadWithPrefix(CollectionMetaPrefix, 0)
+	_, values, err := mt.snapshot.LoadWithPrefix(CollectionMetaPrefix, 0)
 	if err != nil {
 		return err
 	}
@@ -150,7 +142,9 @@ func (mt *MetaTable) reloadFromKV() error {
 		if err != nil {
 			return fmt.Errorf("rootcoord Unmarshal pb.CollectionInfo err:%w", err)
 		}
-		if _, ok := mt.collAlias2ID[collInfo.Schema.Name]; ok {
+
+		if collInfo.Schema.Name == "" {
+			log.Info("reloadkv collection meets alias")
 			continue
 		}
 		mt.collID2Meta[collInfo.ID] = collInfo
@@ -208,6 +202,22 @@ func (mt *MetaTable) reloadFromKV() error {
 			return fmt.Errorf("rootcoord Unmarshal pb.IndexInfo err:%w", err)
 		}
 		mt.indexID2Meta[meta.IndexID] = meta
+	}
+
+	_, values, err = mt.snapshot.LoadWithPrefix(CollectionAliasMetaPrefix, 0)
+	if err != nil {
+		return err
+	}
+	for _, value := range values {
+		aliasInfo := pb.CollectionInfo{}
+		err = proto.Unmarshal([]byte(value), &aliasInfo)
+		if err != nil {
+			return fmt.Errorf("rootcoord Unmarshal pb.AliasInfo err:%w", err)
+		}
+		mt.ts2alias2name[aliasInfo.Schema.AliasTimestamp] = typeutil.NewImmutablemapString2string(aliasInfo.Schema.Alias2Name)
+		if aliasInfo.Schema.AliasTimestamp > mt.newestAliasTs {
+			mt.newestAliasTs = aliasInfo.Schema.AliasTimestamp
+		}
 	}
 
 	log.Debug("reload meta table from KV successfully")
@@ -309,13 +319,6 @@ func (mt *MetaTable) DeleteCollection(collID typeutil.UniqueID, ts typeutil.Time
 		}
 		delete(mt.indexID2Meta, idxInfo.IndexID)
 	}
-	var aliases []string
-	// delete collection aliases
-	for alias, cid := range mt.collAlias2ID {
-		if cid == collID {
-			aliases = append(aliases, alias)
-		}
-	}
 
 	delMetakeysSnap := []string{
 		fmt.Sprintf("%s/%d", CollectionMetaPrefix, collID),
@@ -325,11 +328,36 @@ func (mt *MetaTable) DeleteCollection(collID typeutil.UniqueID, ts typeutil.Time
 		fmt.Sprintf("%s/%d", IndexMetaPrefix, collID),
 	}
 
-	for _, alias := range aliases {
-		delete(mt.collAlias2ID, alias)
-		delMetakeysSnap = append(delMetakeysSnap,
-			fmt.Sprintf("%s/%s", CollectionAliasMetaPrefix, alias),
-		)
+	var aliases []string
+	// delete collection aliases
+	immutablemapAlias2Name := mt.ts2alias2name[mt.newestAliasTs]
+	Bdr := build(immutablemapAlias2Name)
+	for alias, name := range immutablemapAlias2Name.GetCopy() {
+		if name == collMeta.Schema.Name {
+			aliases = append(aliases, alias)
+			log.Debug("droped alias when drop collection:", zap.String("alias", alias))
+			_, ok := Bdr.removealias2name(alias)
+			if !ok {
+				return fmt.Errorf("alias does not exist when drop collection, alias = %s", alias)
+			}
+		}
+	}
+	builtImmutableAlias2Name := Bdr.Build()
+	mt.ts2alias2name[ts] = builtImmutableAlias2Name
+	mt.newestAliasTs = ts
+
+	k := fmt.Sprintf("%s/%s", CollectionAliasMetaPrefix, strings.Join(aliases, "_"))
+	v, err := proto.Marshal(&pb.CollectionInfo{Schema: &schemapb.CollectionSchema{Alias2Name: builtImmutableAlias2Name.GetCopy(), AliasTimestamp: ts}})
+	if err != nil {
+		log.Error("MetaTable DropAlias of DropCollection Marshal CollectionInfo fail",
+			zap.String("key", k), zap.Error(err))
+		return fmt.Errorf("metaTable DropAlias Marshal CollectionInfo fail key:%s, err:%w", k, err)
+	}
+
+	err = mt.snapshot.Save(k, string(v), ts)
+	if err != nil {
+		log.Error("drop alias persist meta fail", zap.String("key", k), zap.Error(err))
+		panic("SnapShotKV Save fail")
 	}
 
 	// save ddOpStr into etcd
@@ -338,7 +366,7 @@ func (mt *MetaTable) DeleteCollection(collID typeutil.UniqueID, ts typeutil.Time
 		DDOperationPrefix: ddOpStr,
 	}
 
-	err := mt.snapshot.MultiSaveAndRemoveWithPrefix(map[string]string{}, delMetakeysSnap, ts)
+	err = mt.snapshot.MultiSaveAndRemoveWithPrefix(map[string]string{}, delMetakeysSnap, ts)
 	if err != nil {
 		log.Error("SnapShotKV MultiSaveAndRemoveWithPrefix fail", zap.Error(err))
 		panic("SnapShotKV MultiSaveAndRemoveWithPrefix fail")
@@ -346,7 +374,7 @@ func (mt *MetaTable) DeleteCollection(collID typeutil.UniqueID, ts typeutil.Time
 	err = mt.txn.MultiSaveAndRemoveWithPrefix(saveMeta, delMetaKeysTxn)
 	if err != nil {
 		log.Warn("TxnKV MultiSaveAndRemoveWithPrefix fail", zap.Error(err))
-		//Txn kv fail will no panic here, treated as garbage
+		//Txn kv fail will not panic here, treated as garbage
 	}
 
 	return nil
@@ -424,9 +452,7 @@ func (mt *MetaTable) GetCollectionByName(collectionName string, ts typeutil.Time
 	if ts == 0 {
 		vid, ok := mt.collName2ID[collectionName]
 		if !ok {
-			if vid, ok = mt.collAlias2ID[collectionName]; !ok {
-				return nil, fmt.Errorf("can't find collection: " + collectionName)
-			}
+			return nil, fmt.Errorf("can't find collection: " + collectionName)
 		}
 		col, ok := mt.collID2Meta[vid]
 		if !ok {
@@ -479,18 +505,26 @@ func (mt *MetaTable) ListCollections(ts typeutil.Timestamp) (map[string]*pb.Coll
 		if err != nil {
 			log.Debug("unmarshal collection info failed", zap.Error(err))
 		}
+		if collMeta.Schema.Name == "" {
+			log.Info("list collection meets alias")
+			continue
+		}
 		colls[collMeta.Schema.Name] = &collMeta
 	}
 	return colls, nil
 }
 
 // ListAliases list all collection aliases
-func (mt *MetaTable) ListAliases(collID typeutil.UniqueID) []string {
+func (mt *MetaTable) ListAliases(collID typeutil.UniqueID, aliasTs typeutil.Timestamp) []string {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
 	var aliases []string
-	for alias, cid := range mt.collAlias2ID {
-		if cid == collID {
+	immutablemapAlias2Name, ok := mt.ts2alias2name[aliasTs]
+	if !ok {
+		immutablemapAlias2Name = mt.ts2alias2name[mt.newestAliasTs]
+	}
+	for alias, name := range immutablemapAlias2Name.GetCopy() {
+		if mt.collName2ID[name] == collID {
 			aliases = append(aliases, alias)
 		}
 	}
@@ -871,10 +905,7 @@ func (mt *MetaTable) DropIndex(collName, fieldName, indexName string) (typeutil.
 
 	collID, ok := mt.collName2ID[collName]
 	if !ok {
-		collID, ok = mt.collAlias2ID[collName]
-		if !ok {
-			return 0, false, fmt.Errorf("collection name = %s not exist", collName)
-		}
+		return 0, false, fmt.Errorf("collection name = %s not exist", collName)
 	}
 	collMeta, ok := mt.collID2Meta[collID]
 	if !ok {
@@ -1192,10 +1223,7 @@ func (mt *MetaTable) GetFieldSchema(collName string, fieldName string) (schemapb
 func (mt *MetaTable) getFieldSchemaInternal(collName string, fieldName string) (schemapb.FieldSchema, error) {
 	collID, ok := mt.collName2ID[collName]
 	if !ok {
-		collID, ok = mt.collAlias2ID[collName]
-		if !ok {
-			return schemapb.FieldSchema{}, fmt.Errorf("collection %s not found", collName)
-		}
+		return schemapb.FieldSchema{}, fmt.Errorf("collection %s not found", collName)
 	}
 	collMeta, ok := mt.collID2Meta[collID]
 	if !ok {
@@ -1242,10 +1270,7 @@ func (mt *MetaTable) isSegmentIndexedInternal(segID typeutil.UniqueID, fieldSche
 func (mt *MetaTable) getCollectionInfoInternal(collName string) (pb.CollectionInfo, error) {
 	collID, ok := mt.collName2ID[collName]
 	if !ok {
-		collID, ok = mt.collAlias2ID[collName]
-		if !ok {
-			return pb.CollectionInfo{}, fmt.Errorf("collection not found: %s", collName)
-		}
+		return pb.CollectionInfo{}, fmt.Errorf("collection not found: %s", collName)
 	}
 	collMeta, ok := mt.collID2Meta[collID]
 	if !ok {
@@ -1393,10 +1418,7 @@ func (mt *MetaTable) GetIndexByName(collName, indexName string) (pb.CollectionIn
 
 	collID, ok := mt.collName2ID[collName]
 	if !ok {
-		collID, ok = mt.collAlias2ID[collName]
-		if !ok {
-			return pb.CollectionInfo{}, nil, fmt.Errorf("collection %s not found", collName)
-		}
+		return pb.CollectionInfo{}, nil, fmt.Errorf("collection %s not found", collName)
 	}
 	collMeta, ok := mt.collID2Meta[collID]
 	if !ok {
@@ -1473,22 +1495,28 @@ func (mt *MetaTable) dupMeta() (
 func (mt *MetaTable) AddAlias(collectionAlias string, collectionName string, ts typeutil.Timestamp) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
-	if _, ok := mt.collAlias2ID[collectionAlias]; ok {
-		return fmt.Errorf("duplicate collection alias, alias = %s", collectionAlias)
-	}
 
 	if _, ok := mt.collName2ID[collectionAlias]; ok {
 		return fmt.Errorf("collection alias collides with existing collection name. collection = %s, alias = %s", collectionAlias, collectionAlias)
 	}
 
-	id, ok := mt.collName2ID[collectionName]
+	_, ok := mt.collName2ID[collectionName]
 	if !ok {
 		return fmt.Errorf("aliased collection name does not exist, name = %s", collectionName)
 	}
-	mt.collAlias2ID[collectionAlias] = id
+	//mt.collAlias2ID[collectionAlias] = id
+	tsPre := mt.newestAliasTs
+	Bdr := build(mt.ts2alias2name[tsPre])
+	_, ok = Bdr.putalias2name(collectionAlias, collectionName)
+	if ok {
+		return fmt.Errorf("duplicate collection alias, alias = %s", collectionAlias)
+	}
+	builtImmutableAlias2Name := Bdr.Build()
+	mt.ts2alias2name[ts] = builtImmutableAlias2Name
+	mt.newestAliasTs = ts
 
 	k := fmt.Sprintf("%s/%s", CollectionAliasMetaPrefix, collectionAlias)
-	v, err := proto.Marshal(&pb.CollectionInfo{ID: id, Schema: &schemapb.CollectionSchema{Name: collectionAlias}})
+	v, err := proto.Marshal(&pb.CollectionInfo{Schema: &schemapb.CollectionSchema{Alias2Name: builtImmutableAlias2Name.GetCopy(), AliasTimestamp: ts}})
 	if err != nil {
 		log.Error("MetaTable AddAlias Marshal CollectionInfo fail",
 			zap.String("key", k), zap.Error(err))
@@ -1507,19 +1535,30 @@ func (mt *MetaTable) AddAlias(collectionAlias string, collectionName string, ts 
 func (mt *MetaTable) DropAlias(collectionAlias string, ts typeutil.Timestamp) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
-	if _, ok := mt.collAlias2ID[collectionAlias]; !ok {
+
+	//delete(mt.collAlias2ID, collectionAlias)
+	tsPre := mt.newestAliasTs
+	Bdr := build(mt.ts2alias2name[tsPre])
+	_, ok := Bdr.removealias2name(collectionAlias)
+	if !ok {
 		return fmt.Errorf("alias does not exist, alias = %s", collectionAlias)
 	}
-	delete(mt.collAlias2ID, collectionAlias)
+	builtImmutableAlias2Name := Bdr.Build()
+	mt.ts2alias2name[ts] = builtImmutableAlias2Name
+	mt.newestAliasTs = ts
 
-	delMetakeys := []string{
-		fmt.Sprintf("%s/%s", CollectionAliasMetaPrefix, collectionAlias),
-	}
-	meta := make(map[string]string)
-	err := mt.snapshot.MultiSaveAndRemoveWithPrefix(meta, delMetakeys, ts)
+	k := fmt.Sprintf("%s/%s", CollectionAliasMetaPrefix, collectionAlias)
+	v, err := proto.Marshal(&pb.CollectionInfo{Schema: &schemapb.CollectionSchema{Alias2Name: builtImmutableAlias2Name.GetCopy(), AliasTimestamp: ts}})
 	if err != nil {
-		log.Error("SnapShotKV MultiSaveAndRemoveWithPrefix fail", zap.Error(err))
-		panic("SnapShotKV MultiSaveAndRemoveWithPrefix fail")
+		log.Error("MetaTable DropAlias Marshal CollectionInfo fail",
+			zap.String("key", k), zap.Error(err))
+		return fmt.Errorf("metaTable DropAlias Marshal CollectionInfo fail key:%s, err:%w", k, err)
+	}
+
+	err = mt.snapshot.Save(k, string(v), ts)
+	if err != nil {
+		log.Error("SnapShotKV Save fail", zap.Error(err))
+		panic("SnapShotKV Save fail")
 	}
 	return nil
 }
@@ -1528,18 +1567,24 @@ func (mt *MetaTable) DropAlias(collectionAlias string, ts typeutil.Timestamp) er
 func (mt *MetaTable) AlterAlias(collectionAlias string, collectionName string, ts typeutil.Timestamp) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
-	if _, ok := mt.collAlias2ID[collectionAlias]; !ok {
-		return fmt.Errorf("alias does not exist, alias = %s", collectionAlias)
-	}
 
-	id, ok := mt.collName2ID[collectionName]
+	_, ok := mt.collName2ID[collectionName]
 	if !ok {
 		return fmt.Errorf("aliased collection name does not exist, name = %s", collectionName)
 	}
-	mt.collAlias2ID[collectionAlias] = id
+	//mt.collAlias2ID[collectionAlias] = id
+	tsPre := mt.newestAliasTs
+	Bdr := build(mt.ts2alias2name[tsPre])
+	_, ok = Bdr.putalias2name(collectionAlias, collectionName)
+	if !ok {
+		return fmt.Errorf("alias does not exist, alias = %s", collectionAlias)
+	}
+	builtImmutableAlias2Name := Bdr.Build()
+	mt.ts2alias2name[ts] = builtImmutableAlias2Name
+	mt.newestAliasTs = ts
 
 	k := fmt.Sprintf("%s/%s", CollectionAliasMetaPrefix, collectionAlias)
-	v, err := proto.Marshal(&pb.CollectionInfo{ID: id, Schema: &schemapb.CollectionSchema{Name: collectionAlias}})
+	v, err := proto.Marshal(&pb.CollectionInfo{Schema: &schemapb.CollectionSchema{Alias2Name: builtImmutableAlias2Name.GetCopy(), AliasTimestamp: ts}})
 	if err != nil {
 		log.Error("MetaTable AlterAlias Marshal CollectionInfo fail",
 			zap.String("key", k), zap.Error(err))
@@ -1555,11 +1600,16 @@ func (mt *MetaTable) AlterAlias(collectionAlias string, collectionName string, t
 }
 
 // IsAlias returns true if specific `collectionAlias` is an alias of collection.
-func (mt *MetaTable) IsAlias(collectionAlias string) bool {
+func (mt *MetaTable) IsAlias(collectionAlias string, aliasTs typeutil.Timestamp) bool {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
-	_, ok := mt.collAlias2ID[collectionAlias]
-	return ok
+	immutablemapAlias2Name, ok := mt.ts2alias2name[aliasTs]
+	if !ok {
+		immutablemapAlias2Name = mt.ts2alias2name[mt.newestAliasTs]
+	}
+	_, err := immutablemapAlias2Name.Get(collectionAlias)
+	return err == nil
+
 }
 
 // AddCredential add credential

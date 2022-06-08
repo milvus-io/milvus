@@ -54,6 +54,12 @@ type proxyMock struct {
 	invalidateCollectionMetaCache func(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error)
 }
 
+func (p *proxyMock) PushAliasInfo(ctx context.Context, req *milvuspb.PushAliasInfoRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}, nil
+}
+
 func (p *proxyMock) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 	return p.invalidateCollectionMetaCache(ctx, request)
 }

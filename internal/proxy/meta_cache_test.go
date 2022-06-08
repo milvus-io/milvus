@@ -48,6 +48,19 @@ type MockQueryCoordClientInterface struct {
 	AccessCount int
 }
 
+func (m *MockRootCoordClientInterface) PullAliasInfo(ctx context.Context, in *milvuspb.PullAliasInfoRequest) (*milvuspb.PullAliasInfoResponse, error) {
+	if m.Error {
+		return nil, errors.New("mocked error")
+	}
+	return &milvuspb.PullAliasInfoResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		AliasTimestamp: typeutil.Timestamp(0),
+		Alias2Name:     make(map[string]string),
+	}, nil
+}
+
 func (m *MockRootCoordClientInterface) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
 	if m.Error {
 		return nil, errors.New("mocked error")

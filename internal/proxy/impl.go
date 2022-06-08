@@ -3913,6 +3913,20 @@ func (node *Proxy) ListCredUsers(ctx context.Context, req *milvuspb.ListCredUser
 	}, nil
 }
 
+func (node *Proxy) PushAliasInfo(ctx context.Context, req *milvuspb.PushAliasInfoRequest) (*commonpb.Status, error) {
+	err := globalMetaCache.SetAliasInfoCache(req)
+	if err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_PushAliasInfoFailure,
+			Reason:    err.Error(),
+		}, err
+	}
+	log.Debug("PushAliasInfo", zap.String("role", typeutil.ProxyRole))
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}, nil
+}
+
 // SendSearchResult needs to be removed TODO
 func (node *Proxy) SendSearchResult(ctx context.Context, req *internalpb.SearchResults) (*commonpb.Status, error) {
 	return &commonpb.Status{

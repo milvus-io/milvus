@@ -157,8 +157,10 @@ enum ErrorCode : int {
   SelectGrantFailure = 42,
   RefreshPolicyInfoCacheFailure = 43,
   ListPolicyFailure = 44,
-  NotShardLeader = 45,
-  NoReplicaAvailable = 46,
+  PushAliasInfoFailure = 45,
+  PullAliasInfoFailure = 46,
+  NotShardLeader = 47,
+  NoReplicaAvailable = 48,
   DDRequestRace = 1000,
   ErrorCode_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
   ErrorCode_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
@@ -345,12 +347,14 @@ enum MsgType : int {
   SelectGrant = 1607,
   RefreshPolicyInfoCache = 1608,
   ListPolicy = 1609,
+  PushAliasInfo = 1701,
+  PullAliasInfo = 1702,
   MsgType_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
   MsgType_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
 };
 bool MsgType_IsValid(int value);
 constexpr MsgType MsgType_MIN = Undefined;
-constexpr MsgType MsgType_MAX = ListPolicy;
+constexpr MsgType MsgType_MAX = PullAliasInfo;
 constexpr int MsgType_ARRAYSIZE = MsgType_MAX + 1;
 
 const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* MsgType_descriptor();

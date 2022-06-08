@@ -89,10 +89,11 @@ type RootCoordMock struct {
 	timeTickChannel   string
 
 	// naive inverted index
-	collName2ID  map[string]typeutil.UniqueID
-	collID2Meta  map[typeutil.UniqueID]collectionMeta
-	collAlias2ID map[string]typeutil.UniqueID
-	collMtx      sync.RWMutex
+	collName2ID   map[string]typeutil.UniqueID
+	collID2Meta   map[typeutil.UniqueID]collectionMeta
+	ts2alias2name map[typeutil.Timestamp]typeutil.ImmutablemapString2string
+	newestAliasTs typeutil.Timestamp
+	collMtx       sync.RWMutex
 
 	// TODO(dragondriver): need default partition?
 	collID2Partitions map[typeutil.UniqueID]partitionMap
@@ -112,6 +113,21 @@ type RootCoordMock struct {
 	lastTsMtx sync.Mutex
 }
 
+func (coord *RootCoordMock) PullAliasInfo(ctx context.Context, in *milvuspb.PullAliasInfoRequest) (*milvuspb.PullAliasInfoResponse, error) {
+	AliasTimeStamp := coord.newestAliasTs
+	immutablemapAlias2Name := coord.ts2alias2name[AliasTimeStamp]
+	Alias2Nmae := immutablemapAlias2Name.GetCopy()
+
+	return &milvuspb.PullAliasInfoResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+		Alias2Name:     Alias2Nmae,
+		AliasTimestamp: AliasTimeStamp,
+	}, nil
+}
+
 func (coord *RootCoordMock) CreateAlias(ctx context.Context, req *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
 	code := coord.state.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
@@ -123,23 +139,28 @@ func (coord *RootCoordMock) CreateAlias(ctx context.Context, req *milvuspb.Creat
 	coord.collMtx.Lock()
 	defer coord.collMtx.Unlock()
 
-	_, exist := coord.collAlias2ID[req.Alias]
-	if exist {
+	string2string := coord.ts2alias2name[coord.newestAliasTs]
+	_, exist := string2string.Get(req.Alias)
+	if exist == nil {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    fmt.Sprintf("duplicate collection alias, alias = %s", req.Alias),
 		}, nil
 	}
 
-	collID, exist := coord.collName2ID[req.CollectionName]
-	if !exist {
+	_, exist2 := coord.collName2ID[req.CollectionName]
+	if !exist2 {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    fmt.Sprintf("aliased collection name does not exist, name = %s", req.CollectionName),
 		}, nil
 	}
 
-	coord.collAlias2ID[req.Alias] = collID
+	immutablemapString2string := coord.ts2alias2name[coord.newestAliasTs]
+	alias2name := immutablemapString2string.GetCopy()
+	alias2name[req.Alias] = req.CollectionName
+	coord.newestAliasTs = Timestamp(coord.newestAliasTs + 1)
+	coord.ts2alias2name[coord.newestAliasTs] = typeutil.NewImmutablemapString2string(alias2name)
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
@@ -157,15 +178,20 @@ func (coord *RootCoordMock) DropAlias(ctx context.Context, req *milvuspb.DropAli
 	coord.collMtx.Lock()
 	defer coord.collMtx.Unlock()
 
-	_, exist := coord.collAlias2ID[req.Alias]
-	if !exist {
+	string2string := coord.ts2alias2name[coord.newestAliasTs]
+	_, exist := string2string.Get(req.Alias)
+	if exist != nil {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    fmt.Sprintf("alias does not exist, alias = %s", req.Alias),
 		}, nil
 	}
 
-	delete(coord.collAlias2ID, req.Alias)
+	immutablemapString2string := coord.ts2alias2name[coord.newestAliasTs]
+	alias2name := immutablemapString2string.GetCopy()
+	delete(alias2name, req.Alias)
+	coord.newestAliasTs = Timestamp(coord.newestAliasTs + 1)
+	coord.ts2alias2name[coord.newestAliasTs] = typeutil.NewImmutablemapString2string(alias2name)
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
@@ -183,21 +209,28 @@ func (coord *RootCoordMock) AlterAlias(ctx context.Context, req *milvuspb.AlterA
 	coord.collMtx.Lock()
 	defer coord.collMtx.Unlock()
 
-	_, exist := coord.collAlias2ID[req.Alias]
-	if !exist {
+	string2string := coord.ts2alias2name[coord.newestAliasTs]
+	_, exist := string2string.Get(req.Alias)
+	if exist != nil {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_CollectionNotExists,
 			Reason:    fmt.Sprintf("alias does not exist, alias = %s", req.Alias),
 		}, nil
 	}
-	collID, exist := coord.collName2ID[req.CollectionName]
-	if !exist {
+
+	_, exist2 := coord.collName2ID[req.CollectionName]
+	if !exist2 {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_CollectionNotExists,
 			Reason:    fmt.Sprintf("aliased collection name does not exist, name = %s", req.CollectionName),
 		}, nil
 	}
-	coord.collAlias2ID[req.Alias] = collID
+
+	immutablemapString2string := coord.ts2alias2name[coord.newestAliasTs]
+	alias2name := immutablemapString2string.GetCopy()
+	alias2name[req.Alias] = req.CollectionName
+	coord.newestAliasTs = Timestamp(coord.newestAliasTs + 1)
+	coord.ts2alias2name[coord.newestAliasTs] = typeutil.NewImmutablemapString2string(alias2name)
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
@@ -218,6 +251,8 @@ func (coord *RootCoordMock) healthy() bool {
 
 func (coord *RootCoordMock) Init() error {
 	coord.updateState(internalpb.StateCode_Initializing)
+	coord.newestAliasTs = typeutil.Timestamp(0)
+	coord.ts2alias2name[coord.newestAliasTs] = typeutil.NewImmutablemapString2string(make(map[string]string))
 	return nil
 }
 

@@ -102,6 +102,10 @@ type MockRootCoord struct {
 	stopErr  error
 }
 
+func (m *MockRootCoord) PullAliasInfo(ctx context.Context, in *milvuspb.PullAliasInfoRequest) (*milvuspb.PullAliasInfoResponse, error) {
+	return nil, nil
+}
+
 func (m *MockRootCoord) Init() error {
 	return m.initErr
 }
@@ -549,6 +553,10 @@ type MockProxy struct {
 	isMockOn bool
 }
 
+func (m *MockProxy) PushAliasInfo(ctx context.Context, req *milvuspb.PushAliasInfoRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
 func (m *MockProxy) Init() error {
 	return m.initErr
 }
@@ -738,6 +746,7 @@ func (m *MockProxy) UpdateStateCode(stateCode internalpb.StateCode) {
 }
 
 func (m *MockProxy) SetEtcdClient(etcdClient *clientv3.Client) {
+
 }
 
 func (m *MockProxy) GetCompactionState(ctx context.Context, req *milvuspb.GetCompactionStateRequest) (*milvuspb.GetCompactionStateResponse, error) {

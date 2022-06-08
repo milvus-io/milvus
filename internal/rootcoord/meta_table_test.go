@@ -243,13 +243,13 @@ func TestMetaTable(t *testing.T) {
 	t.Run("add alias", func(t *testing.T) {
 		defer wg.Done()
 		ts := ftso()
-		exists := mt.IsAlias(aliasName1)
+		exists := mt.IsAlias(aliasName1, mt.newestAliasTs)
 		assert.False(t, exists)
 		err = mt.AddAlias(aliasName1, collName, ts)
 		assert.Nil(t, err)
-		aliases := mt.ListAliases(collID)
+		aliases := mt.ListAliases(collID, mt.newestAliasTs)
 		assert.Equal(t, aliases, []string{aliasName1})
-		exists = mt.IsAlias(aliasName1)
+		exists = mt.IsAlias(aliasName1, mt.newestAliasTs)
 		assert.True(t, exists)
 	})
 	wg.Add(1)
@@ -1281,26 +1281,35 @@ func TestMetaTable_unlockGetCollectionInfo(t *testing.T) {
 	})
 
 	t.Run("collection name not found", func(t *testing.T) {
-		mt := &MetaTable{collName2ID: nil, collAlias2ID: nil}
+		ts2immuMap := make(map[typeutil.Timestamp]typeutil.ImmutablemapString2string)
+		ts := typeutil.Timestamp(0)
+		ts2immuMap[ts] = typeutil.ImmutablemapString2string{}
+		mt := &MetaTable{collName2ID: nil, newestAliasTs: ts, ts2alias2name: ts2immuMap}
 		_, err := mt.getCollectionInfoInternal("test")
 		assert.Error(t, err)
 	})
 
 	t.Run("name found, meta not found", func(t *testing.T) {
+		ts2immuMap := make(map[typeutil.Timestamp]typeutil.ImmutablemapString2string)
+		ts := typeutil.Timestamp(0)
+		ts2immuMap[ts] = typeutil.ImmutablemapString2string{}
 		mt := &MetaTable{
-			collName2ID:  map[string]typeutil.UniqueID{"test": 100},
-			collAlias2ID: nil,
-			collID2Meta:  nil,
+			collName2ID:   map[string]typeutil.UniqueID{"test": 100},
+			newestAliasTs: ts, ts2alias2name: ts2immuMap,
+			collID2Meta: nil,
 		}
 		_, err := mt.getCollectionInfoInternal("test")
 		assert.Error(t, err)
 	})
 
 	t.Run("alias found, meta not found", func(t *testing.T) {
+		ts2immuMap := make(map[typeutil.Timestamp]typeutil.ImmutablemapString2string)
+		ts := typeutil.Timestamp(0)
+		ts2immuMap[ts] = typeutil.NewImmutablemapString2string(map[string]string{"test": "collname"})
 		mt := &MetaTable{
-			collName2ID:  nil,
-			collAlias2ID: map[string]typeutil.UniqueID{"test": 100},
-			collID2Meta:  nil,
+			collName2ID:   nil,
+			newestAliasTs: ts, ts2alias2name: ts2immuMap,
+			collID2Meta: nil,
 		}
 		_, err := mt.getCollectionInfoInternal("test")
 		assert.Error(t, err)
