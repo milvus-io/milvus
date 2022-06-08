@@ -544,6 +544,10 @@ func (c *ChannelManager) RemoveChannel(channelName string) error {
 func (c *ChannelManager) remove(nodeID int64, ch *channel) error {
 	var op ChannelOpSet
 	op.Delete(nodeID, []*channel{ch})
+	log.Debug("remove channel assignment",
+		zap.Int64("nodeID to be removed", nodeID),
+		zap.String("channelID", ch.Name),
+		zap.Int64("collectionID", ch.CollectionID))
 	if err := c.store.Update(op); err != nil {
 		return err
 	}
