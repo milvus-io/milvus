@@ -259,7 +259,8 @@ func (node *DataNode) StartWatchChannels(ctx context.Context) {
 				return
 			}
 			for _, evt := range event.Events {
-				go node.handleChannelEvt(evt)
+				// We need to stay in order until events enqueued
+				node.handleChannelEvt(evt)
 			}
 		}
 	}
