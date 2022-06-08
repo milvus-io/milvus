@@ -337,6 +337,8 @@ message ShowCollectionsResponse {
   repeated uint64 created_utc_timestamps = 5;
   // Load percentage on querynode when type is InMemory
   repeated int64 inMemory_percentages = 6;
+  // Indicate whether query service is available
+  repeated bool query_service_available = 7;
 }
 
 /*

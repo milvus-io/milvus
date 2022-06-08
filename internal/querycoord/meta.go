@@ -81,6 +81,7 @@ type Meta interface {
 
 	getDmChannelInfosByNodeID(nodeID int64) []*querypb.DmChannelWatchInfo
 	setDmChannelInfos(channelInfos []*querypb.DmChannelWatchInfo) error
+	getDmChannelNamesByCollectionID(CollectionID UniqueID) []string
 
 	getDeltaChannelsByCollectionID(collectionID UniqueID) ([]*datapb.VchannelInfo, error)
 	setDeltaChannel(collectionID UniqueID, info []*datapb.VchannelInfo) error
@@ -860,6 +861,19 @@ func (m *MetaReplica) getDmChannelInfosByNodeID(nodeID int64) []*querypb.DmChann
 	}
 
 	return watchedDmChannelWatchInfo
+}
+
+func (m *MetaReplica) getDmChannelNamesByCollectionID(CollectionID UniqueID) []string {
+	m.dmChannelMu.RLock()
+	defer m.dmChannelMu.RUnlock()
+
+	var dmChannelNames []string
+	for _, channelInfo := range m.dmChannelInfos {
+		if channelInfo.CollectionID == CollectionID {
+			dmChannelNames = append(dmChannelNames, channelInfo.DmChannel)
+		}
+	}
+	return dmChannelNames
 }
 
 func (m *MetaReplica) setDmChannelInfos(dmChannelWatchInfos []*querypb.DmChannelWatchInfo) error {
