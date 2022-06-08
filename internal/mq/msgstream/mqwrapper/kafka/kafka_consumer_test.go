@@ -61,9 +61,7 @@ func TestKafkaConsumer_GetSeek(t *testing.T) {
 	err = consumer.Seek(msgID, false)
 	assert.Nil(t, err)
 
-	assert.Panics(t, func() {
-		consumer.Seek(msgID, false)
-	})
+	assert.Error(t, consumer.Seek(msgID, false))
 }
 
 func TestKafkaConsumer_SeekAfterChan(t *testing.T) {
@@ -106,6 +104,29 @@ func TestKafkaConsumer_GetLatestMsgID(t *testing.T) {
 	latestMsgID, err = consumer.GetLatestMsgID()
 	assert.Equal(t, int64(2), latestMsgID.(*kafkaID).messageID)
 	assert.Nil(t, err)
+}
+
+func TestKafkaConsumer_ConsumeFromLatest(t *testing.T) {
+	rand.Seed(time.Now().UnixNano())
+	groupID := fmt.Sprintf("test-groupid-%d", rand.Int())
+	topic := fmt.Sprintf("test-topicName-%d", rand.Int())
+
+	data := []int{111, 222, 333}
+	testKafkaConsumerProduceData(t, topic, data)
+
+	config := createConfig(groupID)
+	config.SetKey("auto.offset.reset", "latest")
+	consumer, err := newKafkaConsumer(config, topic, groupID)
+	assert.NoError(t, err)
+	defer consumer.Close()
+
+	data = []int{444, 555}
+	testKafkaConsumerProduceData(t, topic, data)
+
+	msg := <-consumer.Chan()
+	assert.Equal(t, 444, BytesToInt(msg.Payload()))
+	msg = <-consumer.Chan()
+	assert.Equal(t, 555, BytesToInt(msg.Payload()))
 }
 
 func testKafkaConsumerProduceData(t *testing.T, topic string, data []int) {
