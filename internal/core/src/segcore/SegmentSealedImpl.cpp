@@ -95,9 +95,10 @@ SegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
     AssertInfo(!get_bit(index_ready_bitset_, field_id),
                "vector index has been exist at " + std::to_string(field_id.get()));
     if (row_count_opt_.has_value()) {
-        AssertInfo(row_count_opt_.value() == row_count, "load data has different row count from other columns");
-    } else {
-        row_count_opt_ = row_count;
+        AssertInfo(row_count_opt_.value() == row_count,
+                   "field (" + std::to_string(field_id.get()) + ") data has different row count (" +
+                       std::to_string(row_count) + ") than other column's row count (" +
+                       std::to_string(row_count_opt_.value()) + ")");
     }
     AssertInfo(!vector_indexings_.is_ready(field_id), "vec index is not ready");
     vector_indexings_.append_field_indexing(field_id, GetMetricType(metric_type_str), index);
@@ -124,9 +125,10 @@ SegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
     AssertInfo(!get_bit(index_ready_bitset_, field_id),
                "scalar index has been exist at " + std::to_string(field_id.get()));
     if (row_count_opt_.has_value()) {
-        AssertInfo(row_count_opt_.value() == row_count, "load data has different row count from other columns");
-    } else {
-        row_count_opt_ = row_count;
+        AssertInfo(row_count_opt_.value() == row_count,
+                   "field (" + std::to_string(field_id.get()) + ") data has different row count (" +
+                       std::to_string(row_count) + ") than other column's row count (" +
+                       std::to_string(row_count_opt_.value()) + ")");
     }
 
     scalar_indexings_[field_id] = index;
@@ -168,6 +170,12 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
     auto field_id = FieldId(info.field_id);
     AssertInfo(info.field_data != nullptr, "Field info blob is null");
     auto size = info.row_count;
+    if (row_count_opt_.has_value()) {
+        AssertInfo(row_count_opt_.value() == size, "field (" + std::to_string(field_id.get()) +
+                                                       ") data has different row count (" + std::to_string(size) +
+                                                       ") than other column's row count (" +
+                                                       std::to_string(row_count_opt_.value()) + ")");
+    }
 
     if (SystemProperty::Instance().IsSystem(field_id)) {
         auto system_field_type = SystemProperty::Instance().GetSystemFieldType(field_id);
