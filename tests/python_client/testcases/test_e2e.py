@@ -33,7 +33,7 @@ class TestE2e(TestcaseBase):
 
         # flush
         t0 = time.time()
-        num_entities, check_result = collection_w.flush(timeout=30)
+        num_entities, check_result = collection_w.flush(timeout=180)
         assert check_result
         assert num_entities == len(data[0]) + entities
         tt = time.time() - t0
