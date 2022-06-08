@@ -122,7 +122,6 @@ func (m *importManager) sendOutTasksLoop(wg *sync.WaitGroup) {
 			log.Debug("import manager context done, exit check sendOutTasksLoop")
 			return
 		case <-ticker.C:
-			log.Debug("sending out tasks")
 			m.sendOutTasks(m.ctx)
 		}
 	}
