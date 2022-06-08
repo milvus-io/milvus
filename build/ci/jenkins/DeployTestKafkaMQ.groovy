@@ -185,6 +185,9 @@ pipeline {
                 }
         }
         stage ('Run first test') {
+            options {
+              timeout(time: 20, unit: 'MINUTES')   // timeout on this stage
+            }            
             steps {
                 container('main') {
                     dir ('tests/python_client/deploy/scripts') {
@@ -293,6 +296,9 @@ pipeline {
         }
 
         stage ('Run Second Test') {
+            options {
+              timeout(time: 20, unit: 'MINUTES')   // timeout on this stage
+            }
             steps {
                 container('main') {
                     dir ('tests/python_client/deploy/scripts') {
