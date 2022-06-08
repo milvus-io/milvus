@@ -211,7 +211,7 @@ Milvus [训练营](https://github.com/milvus-io/bootcamp)能够帮助你了解�
 <a href="https://github.com/SkyYang"><img src="https://avatars.githubusercontent.com/u/4702509?v=4" width="30px" /></a>
 <a href="https://github.com/SnowyOwl-KHY"><img src="https://avatars.githubusercontent.com/u/10348819?v=4" width="30px" /></a>
 <a href="https://github.com/SwaggySong"><img src="https://avatars.githubusercontent.com/u/36157116?v=4" width="30px" /></a>
-<a href="https://github.com/ThorZilliz"><img src="https://avatars.githubusercontent.com/u/104345188?v=4" width="30px" /></a>
+<a href="https://github.com/Thor-ChenBiao"><img src="https://avatars.githubusercontent.com/u/104345188?v=4" width="30px" /></a>
 <a href="https://github.com/ThreadDao"><img src="https://avatars.githubusercontent.com/u/27288593?v=4" width="30px" /></a>
 <a href="https://github.com/ThyeeZz"><img src="https://avatars.githubusercontent.com/u/41352919?v=4" width="30px" /></a>
 <a href="https://github.com/Tlincy"><img src="https://avatars.githubusercontent.com/u/11934432?v=4" width="30px" /></a>
