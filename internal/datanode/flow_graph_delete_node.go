@@ -148,11 +148,13 @@ func (dn *deleteNode) bufferDeleteMsg(msg *msgstream.DeleteMsg, tr TimeRange) er
 		for i := 0; i < rows; i++ {
 			delData.Pks = append(delData.Pks, pks[i])
 			delData.Tss = append(delData.Tss, tss[i])
-			log.Debug("delete",
-				zap.Any("primary key", pks[i]),
-				zap.Uint64("ts", tss[i]),
-				zap.Int64("segmentID", segID),
-				zap.String("vChannelName", dn.channelName))
+			// this log will influence the data node performance as it may be too many,
+			// only use it when we focus on delete operations
+			//log.Debug("delete",
+			//	zap.Any("primary key", pks[i]),
+			//	zap.Uint64("ts", tss[i]),
+			//	zap.Int64("segmentID", segID),
+			//	zap.String("vChannelName", dn.channelName))
 		}
 
 		// store
@@ -178,12 +180,14 @@ func (dn *deleteNode) showDelBuf() {
 			// TODO control the printed length
 			length := len(delDataBuf.delData.Pks)
 			for i := 0; i < length; i++ {
-				log.Debug("del data",
-					zap.Any("pk", delDataBuf.delData.Pks[i]),
-					zap.Uint64("ts", delDataBuf.delData.Tss[i]),
-					zap.Int64("segment ID", segID),
-					zap.String("vChannel", dn.channelName),
-				)
+				// this log will influence the data node performance as it may be too many,
+				// only use it when we focus on delete operations
+				//log.Debug("del data",
+				//	zap.Any("pk", delDataBuf.delData.Pks[i]),
+				//	zap.Uint64("ts", delDataBuf.delData.Tss[i]),
+				//	zap.Int64("segment ID", segID),
+				//	zap.String("vChannel", dn.channelName),
+				//)
 			}
 		} else {
 			log.Debug("segment not exist",
