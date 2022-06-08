@@ -31,6 +31,9 @@
 #include <google/protobuf/message.h>
 #include <google/protobuf/repeated_field.h>  // IWYU pragma: export
 #include <google/protobuf/extension_set.h>  // IWYU pragma: export
+#include <google/protobuf/map.h>  // IWYU pragma: export
+#include <google/protobuf/map_entry.h>
+#include <google/protobuf/map_field_inl.h>
 #include <google/protobuf/generated_enum_reflection.h>
 #include <google/protobuf/unknown_field_set.h>
 #include "common.pb.h"
@@ -49,7 +52,7 @@ struct TableStruct_schema_2eproto {
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::AuxillaryParseTableField aux[]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
-  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[14]
+  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[15]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::FieldMetadata field_metadata[];
   static const ::PROTOBUF_NAMESPACE_ID::internal::SerializationTable serialization_table[];
@@ -68,6 +71,9 @@ extern BytesArrayDefaultTypeInternal _BytesArray_default_instance_;
 class CollectionSchema;
 class CollectionSchemaDefaultTypeInternal;
 extern CollectionSchemaDefaultTypeInternal _CollectionSchema_default_instance_;
+class CollectionSchema_Alias2NameEntry_DoNotUse;
+class CollectionSchema_Alias2NameEntry_DoNotUseDefaultTypeInternal;
+extern CollectionSchema_Alias2NameEntry_DoNotUseDefaultTypeInternal _CollectionSchema_Alias2NameEntry_DoNotUse_default_instance_;
 class DoubleArray;
 class DoubleArrayDefaultTypeInternal;
 extern DoubleArrayDefaultTypeInternal _DoubleArray_default_instance_;
@@ -108,6 +114,7 @@ PROTOBUF_NAMESPACE_OPEN
 template<> ::milvus::proto::schema::BoolArray* Arena::CreateMaybeMessage<::milvus::proto::schema::BoolArray>(Arena*);
 template<> ::milvus::proto::schema::BytesArray* Arena::CreateMaybeMessage<::milvus::proto::schema::BytesArray>(Arena*);
 template<> ::milvus::proto::schema::CollectionSchema* Arena::CreateMaybeMessage<::milvus::proto::schema::CollectionSchema>(Arena*);
+template<> ::milvus::proto::schema::CollectionSchema_Alias2NameEntry_DoNotUse* Arena::CreateMaybeMessage<::milvus::proto::schema::CollectionSchema_Alias2NameEntry_DoNotUse>(Arena*);
 template<> ::milvus::proto::schema::DoubleArray* Arena::CreateMaybeMessage<::milvus::proto::schema::DoubleArray>(Arena*);
 template<> ::milvus::proto::schema::FieldData* Arena::CreateMaybeMessage<::milvus::proto::schema::FieldData>(Arena*);
 template<> ::milvus::proto::schema::FieldSchema* Arena::CreateMaybeMessage<::milvus::proto::schema::FieldSchema>(Arena*);
@@ -365,6 +372,40 @@ class FieldSchema :
 };
 // -------------------------------------------------------------------
 
+class CollectionSchema_Alias2NameEntry_DoNotUse : public ::PROTOBUF_NAMESPACE_ID::internal::MapEntry<CollectionSchema_Alias2NameEntry_DoNotUse, 
+    std::string, std::string,
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_STRING,
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_STRING,
+    0 > {
+public:
+  typedef ::PROTOBUF_NAMESPACE_ID::internal::MapEntry<CollectionSchema_Alias2NameEntry_DoNotUse, 
+    std::string, std::string,
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_STRING,
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_STRING,
+    0 > SuperType;
+  CollectionSchema_Alias2NameEntry_DoNotUse();
+  CollectionSchema_Alias2NameEntry_DoNotUse(::PROTOBUF_NAMESPACE_ID::Arena* arena);
+  void MergeFrom(const CollectionSchema_Alias2NameEntry_DoNotUse& other);
+  static const CollectionSchema_Alias2NameEntry_DoNotUse* internal_default_instance() { return reinterpret_cast<const CollectionSchema_Alias2NameEntry_DoNotUse*>(&_CollectionSchema_Alias2NameEntry_DoNotUse_default_instance_); }
+  static bool ValidateKey(std::string* s) {
+    return ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(s->data(), s->size(), ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::PARSE, "milvus.proto.schema.CollectionSchema.Alias2NameEntry.key");
+ }
+  static bool ValidateValue(std::string* s) {
+    return ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(s->data(), s->size(), ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::PARSE, "milvus.proto.schema.CollectionSchema.Alias2NameEntry.value");
+ }
+  void MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& other) final;
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  private:
+  static ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadataStatic() {
+    ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&::descriptor_table_schema_2eproto);
+    return ::descriptor_table_schema_2eproto.file_level_metadata[1];
+  }
+
+  public:
+};
+
+// -------------------------------------------------------------------
+
 class CollectionSchema :
     public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.schema.CollectionSchema) */ {
  public:
@@ -407,7 +448,7 @@ class CollectionSchema :
                &_CollectionSchema_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    1;
+    2;
 
   friend void swap(CollectionSchema& a, CollectionSchema& b) {
     a.Swap(&b);
@@ -475,12 +516,15 @@ class CollectionSchema :
 
   // nested types ----------------------------------------------------
 
+
   // accessors -------------------------------------------------------
 
   enum : int {
     kFieldsFieldNumber = 4,
+    kAlias2NameFieldNumber = 5,
     kNameFieldNumber = 1,
     kDescriptionFieldNumber = 2,
+    kAliasTimestampFieldNumber = 6,
     kAutoIDFieldNumber = 3,
   };
   // repeated .milvus.proto.schema.FieldSchema fields = 4;
@@ -493,6 +537,14 @@ class CollectionSchema :
   ::milvus::proto::schema::FieldSchema* add_fields();
   const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::schema::FieldSchema >&
       fields() const;
+
+  // map<string, string> Alias2Name = 5;
+  int alias2name_size() const;
+  void clear_alias2name();
+  const ::PROTOBUF_NAMESPACE_ID::Map< std::string, std::string >&
+      alias2name() const;
+  ::PROTOBUF_NAMESPACE_ID::Map< std::string, std::string >*
+      mutable_alias2name();
 
   // string name = 1;
   void clear_name();
@@ -516,6 +568,11 @@ class CollectionSchema :
   std::string* release_description();
   void set_allocated_description(std::string* description);
 
+  // uint64 AliasTimestamp = 6;
+  void clear_aliastimestamp();
+  ::PROTOBUF_NAMESPACE_ID::uint64 aliastimestamp() const;
+  void set_aliastimestamp(::PROTOBUF_NAMESPACE_ID::uint64 value);
+
   // bool autoID = 3;
   void clear_autoid();
   bool autoid() const;
@@ -527,8 +584,15 @@ class CollectionSchema :
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
   ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::schema::FieldSchema > fields_;
+  ::PROTOBUF_NAMESPACE_ID::internal::MapField<
+      CollectionSchema_Alias2NameEntry_DoNotUse,
+      std::string, std::string,
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_STRING,
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::TYPE_STRING,
+      0 > alias2name_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr name_;
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr description_;
+  ::PROTOBUF_NAMESPACE_ID::uint64 aliastimestamp_;
   bool autoid_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_schema_2eproto;
@@ -577,7 +641,7 @@ class BoolArray :
                &_BoolArray_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    2;
+    3;
 
   friend void swap(BoolArray& a, BoolArray& b) {
     a.Swap(&b);
@@ -715,7 +779,7 @@ class IntArray :
                &_IntArray_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    3;
+    4;
 
   friend void swap(IntArray& a, IntArray& b) {
     a.Swap(&b);
@@ -853,7 +917,7 @@ class LongArray :
                &_LongArray_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    4;
+    5;
 
   friend void swap(LongArray& a, LongArray& b) {
     a.Swap(&b);
@@ -991,7 +1055,7 @@ class FloatArray :
                &_FloatArray_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    5;
+    6;
 
   friend void swap(FloatArray& a, FloatArray& b) {
     a.Swap(&b);
@@ -1129,7 +1193,7 @@ class DoubleArray :
                &_DoubleArray_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    6;
+    7;
 
   friend void swap(DoubleArray& a, DoubleArray& b) {
     a.Swap(&b);
@@ -1267,7 +1331,7 @@ class BytesArray :
                &_BytesArray_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    7;
+    8;
 
   friend void swap(BytesArray& a, BytesArray& b) {
     a.Swap(&b);
@@ -1410,7 +1474,7 @@ class StringArray :
                &_StringArray_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    8;
+    9;
 
   friend void swap(StringArray& a, StringArray& b) {
     a.Swap(&b);
@@ -1564,7 +1628,7 @@ class ScalarField :
                &_ScalarField_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    9;
+    10;
 
   friend void swap(ScalarField& a, ScalarField& b) {
     a.Swap(&b);
@@ -1781,7 +1845,7 @@ class VectorField :
                &_VectorField_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    10;
+    11;
 
   friend void swap(VectorField& a, VectorField& b) {
     a.Swap(&b);
@@ -1956,7 +2020,7 @@ class FieldData :
                &_FieldData_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    11;
+    12;
 
   friend void swap(FieldData& a, FieldData& b) {
     a.Swap(&b);
@@ -2145,7 +2209,7 @@ class IDs :
                &_IDs_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    12;
+    13;
 
   friend void swap(IDs& a, IDs& b) {
     a.Swap(&b);
@@ -2301,7 +2365,7 @@ class SearchResultData :
                &_SearchResultData_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    13;
+    14;
 
   friend void swap(SearchResultData& a, SearchResultData& b) {
     a.Swap(&b);
@@ -2671,6 +2735,8 @@ inline void FieldSchema::set_autoid(bool value) {
 
 // -------------------------------------------------------------------
 
+// -------------------------------------------------------------------
+
 // CollectionSchema
 
 // string name = 1;
@@ -2817,6 +2883,38 @@ inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::milvus::proto::schema:
 CollectionSchema::fields() const {
   // @@protoc_insertion_point(field_list:milvus.proto.schema.CollectionSchema.fields)
   return fields_;
+}
+
+// map<string, string> Alias2Name = 5;
+inline int CollectionSchema::alias2name_size() const {
+  return alias2name_.size();
+}
+inline void CollectionSchema::clear_alias2name() {
+  alias2name_.Clear();
+}
+inline const ::PROTOBUF_NAMESPACE_ID::Map< std::string, std::string >&
+CollectionSchema::alias2name() const {
+  // @@protoc_insertion_point(field_map:milvus.proto.schema.CollectionSchema.Alias2Name)
+  return alias2name_.GetMap();
+}
+inline ::PROTOBUF_NAMESPACE_ID::Map< std::string, std::string >*
+CollectionSchema::mutable_alias2name() {
+  // @@protoc_insertion_point(field_mutable_map:milvus.proto.schema.CollectionSchema.Alias2Name)
+  return alias2name_.MutableMap();
+}
+
+// uint64 AliasTimestamp = 6;
+inline void CollectionSchema::clear_aliastimestamp() {
+  aliastimestamp_ = PROTOBUF_ULONGLONG(0);
+}
+inline ::PROTOBUF_NAMESPACE_ID::uint64 CollectionSchema::aliastimestamp() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.schema.CollectionSchema.AliasTimestamp)
+  return aliastimestamp_;
+}
+inline void CollectionSchema::set_aliastimestamp(::PROTOBUF_NAMESPACE_ID::uint64 value) {
+  
+  aliastimestamp_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.schema.CollectionSchema.AliasTimestamp)
 }
 
 // -------------------------------------------------------------------
@@ -4030,6 +4128,8 @@ SearchResultData::mutable_topks() {
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
+// -------------------------------------------------------------------
+
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------

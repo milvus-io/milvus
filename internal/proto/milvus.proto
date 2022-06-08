@@ -196,6 +196,8 @@ message DescribeCollectionRequest {
   int64 collectionID = 4;
   // If time_stamp is not zero, will describe collection success when time_stamp >= created collection timestamp, otherwise will throw error.
   uint64 time_stamp = 5;
+  // Alias timestamp is used to list alias at the corresponding timestamp version
+  uint64 alias_timestamp = 6;
 }
 
 /**
@@ -1137,3 +1139,19 @@ extend google.protobuf.FileOptions {
 option (milvus_ext_obj) = {
   version: "2.1.0"
 };
+
+message PullAliasInfoRequest{
+  common.MsgBase base = 1;
+}
+
+message PullAliasInfoResponse{
+  common.Status status = 1;
+  map<string, string> Alias2Name = 2;
+  uint64 AliasTimestamp = 3;
+}
+
+message PushAliasInfoRequest{
+  common.MsgBase base = 1;
+  map<string, string> Alias2Name = 2;
+  uint64 AliasTimestamp = 3;
+}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path"
 	"strconv"
+	"strings"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/kv"
@@ -134,11 +135,12 @@ func (kc *Catalog) AlterIndex(ctx context.Context, oldIndex *model.Index, newInd
 }
 
 func (kc *Catalog) CreateAlias(ctx context.Context, collection *model.Collection, ts typeutil.Timestamp) error {
-	k := fmt.Sprintf("%s/%s", CollectionAliasMetaPrefix, collection.Aliases[0])
-	v, err := proto.Marshal(&pb.CollectionInfo{ID: collection.CollectionID, Schema: &schemapb.CollectionSchema{Name: collection.Aliases[0]}})
+	k := fmt.Sprintf("%s/%s", CollectionAliasMetaPrefix, strings.Join(collection.Aliases, "_"))
+	v, err := proto.Marshal(&pb.CollectionInfo{Schema: &schemapb.CollectionSchema{Alias2Name: collection.BuiltImmutableAlias2Name.GetCopy(), AliasTimestamp: ts}})
 	if err != nil {
-		log.Error("create alias marshal fail", zap.String("key", k), zap.Error(err))
-		return err
+		log.Error("MetaTable AddAlias Marshal CollectionInfo fail",
+			zap.String("key", k), zap.Error(err))
+		return fmt.Errorf("metaTable AddAlias Marshal CollectionInfo fail key:%s, err:%w", k, err)
 	}
 
 	err = kc.Snapshot.Save(k, string(v), ts)
@@ -208,17 +210,26 @@ func (kc *Catalog) GetCredential(ctx context.Context, username string) (*model.C
 }
 
 func (kc *Catalog) AlterAlias(ctx context.Context, collection *model.Collection, ts typeutil.Timestamp) error {
-	return kc.CreateAlias(ctx, collection, ts)
+	k := fmt.Sprintf("%s/%s", CollectionAliasMetaPrefix, strings.Join(collection.Aliases, "_"))
+	v, err := proto.Marshal(&pb.CollectionInfo{Schema: &schemapb.CollectionSchema{Alias2Name: collection.BuiltImmutableAlias2Name.GetCopy(), AliasTimestamp: ts}})
+	if err != nil {
+		log.Error("MetaTable AlterAlias Marshal CollectionInfo fail",
+			zap.String("key", k), zap.Error(err))
+		return fmt.Errorf("metaTable AlterAlias Marshal CollectionInfo fail key:%s, err:%w", k, err)
+	}
+
+	err = kc.Snapshot.Save(k, string(v), ts)
+	if err != nil {
+		log.Error("alter alias persist meta fail", zap.String("key", k), zap.Error(err))
+		return err
+	}
+
+	return nil
 }
 
 func (kc *Catalog) DropCollection(ctx context.Context, collectionInfo *model.Collection, ts typeutil.Timestamp) error {
 	delMetakeysSnap := []string{
 		fmt.Sprintf("%s/%d", CollectionMetaPrefix, collectionInfo.CollectionID),
-	}
-	for _, alias := range collectionInfo.Aliases {
-		delMetakeysSnap = append(delMetakeysSnap,
-			fmt.Sprintf("%s/%s", CollectionAliasMetaPrefix, alias),
-		)
 	}
 
 	err := kc.Snapshot.MultiSaveAndRemoveWithPrefix(map[string]string{}, delMetakeysSnap, ts)
@@ -327,15 +338,18 @@ func (kc *Catalog) DropCredential(ctx context.Context, username string) error {
 	return nil
 }
 
-func (kc *Catalog) DropAlias(ctx context.Context, collectionID typeutil.UniqueID, alias string, ts typeutil.Timestamp) error {
-	delMetakeys := []string{
-		fmt.Sprintf("%s/%s", CollectionAliasMetaPrefix, alias),
+func (kc *Catalog) DropAlias(ctx context.Context, collection *model.Collection, ts typeutil.Timestamp) error {
+	k := fmt.Sprintf("%s/%s", CollectionAliasMetaPrefix, strings.Join(collection.Aliases, "_"))
+	v, err := proto.Marshal(&pb.CollectionInfo{Schema: &schemapb.CollectionSchema{Alias2Name: collection.BuiltImmutableAlias2Name.GetCopy(), AliasTimestamp: ts}})
+	if err != nil {
+		log.Error("MetaTable DropAlias Marshal CollectionInfo fail",
+			zap.String("key", k), zap.Error(err))
+		return fmt.Errorf("metaTable DropAlias Marshal CollectionInfo fail key:%s, err:%w", k, err)
 	}
 
-	meta := make(map[string]string)
-	err := kc.Snapshot.MultiSaveAndRemoveWithPrefix(meta, delMetakeys, ts)
+	err = kc.Snapshot.Save(k, string(v), ts)
 	if err != nil {
-		log.Error("drop alias update meta fail", zap.String("alias", alias), zap.Error(err))
+		log.Error("drop alias persist meta fail", zap.String("key", k), zap.Error(err))
 		return err
 	}
 

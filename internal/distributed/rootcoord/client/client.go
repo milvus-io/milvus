@@ -743,3 +743,16 @@ func (c *Client) ListPolicy(ctx context.Context, req *internalpb.ListPolicyReque
 	}
 	return ret.(*internalpb.ListPolicyResponse), err
 }
+
+func (c *Client) PullAliasInfo(ctx context.Context, req *milvuspb.PullAliasInfoRequest) (*milvuspb.PullAliasInfoResponse, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.(rootcoordpb.RootCoordClient).PullAliasInfo(ctx, req)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return ret.(*milvuspb.PullAliasInfoResponse), err
+}

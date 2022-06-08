@@ -78,6 +78,10 @@ type Server struct {
 	closer io.Closer
 }
 
+func (s *Server) PullAliasInfo(ctx context.Context, request *milvuspb.PullAliasInfoRequest) (*milvuspb.PullAliasInfoResponse, error) {
+	return s.rootCoord.PullAliasInfo(ctx, request)
+}
+
 // CreateAlias creates an alias for specified collection.
 func (s *Server) CreateAlias(ctx context.Context, request *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
 	return s.rootCoord.CreateAlias(ctx, request)

@@ -19,6 +19,7 @@ package rootcoord
 import (
 	"context"
 	"fmt"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"sync"
 
 	"go.uber.org/zap"
@@ -103,6 +104,32 @@ func (p *proxyClientManager) DelProxyClient(s *sessionutil.Session) {
 
 	delete(p.proxyClient, s.ServerID)
 	log.Debug("remove proxy client", zap.String("proxy address", s.Address), zap.Int64("proxy id", s.ServerID))
+}
+
+func (p *proxyClientManager) PushAliasInfo(ctx context.Context, request *milvuspb.PushAliasInfoRequest) error {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+
+	if len(p.proxyClient) == 0 {
+		log.Warn("proxy client is empty, PushAliasInfo will not send to any client")
+		return nil
+	}
+
+	group := &errgroup.Group{}
+	for k, v := range p.proxyClient {
+		k, v := k, v
+		group.Go(func() error {
+			sta, err := v.PushAliasInfo(ctx, request)
+			if err != nil {
+				return fmt.Errorf("PushAliasInfo failed, proxyID = %d, err = %s", k, err)
+			}
+			if sta.ErrorCode != commonpb.ErrorCode_Success {
+				return fmt.Errorf("PushAliasInfo failed, proxyID = %d, err = %s", k, sta.Reason)
+			}
+			return nil
+		})
+	}
+	return group.Wait()
 }
 
 func (p *proxyClientManager) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) error {

@@ -71,13 +71,14 @@ type MetaTable struct {
 	snapshot kv.SnapShotKV // client of a reliable snapshotkv service, i.e. etcd client
 	catalog  metastore.Catalog
 
-	proxyID2Meta    map[typeutil.UniqueID]pb.ProxyMeta                      // proxy id to proxy meta
-	collID2Meta     map[typeutil.UniqueID]model.Collection                  // collection id -> collection meta
-	collName2ID     map[string]typeutil.UniqueID                            // collection name to collection id
-	collAlias2ID    map[string]typeutil.UniqueID                            // collection alias to collection id
-	partID2SegID    map[typeutil.UniqueID]map[typeutil.UniqueID]bool        // partition id -> segment_id -> bool
-	segID2IndexMeta map[typeutil.UniqueID]map[typeutil.UniqueID]model.Index // collection id/index_id/partition_id/segment_id -> meta
-	indexID2Meta    map[typeutil.UniqueID]model.Index                       // collection id/index_id -> meta
+	proxyID2Meta    map[typeutil.UniqueID]pb.ProxyMeta                        // proxy id to proxy meta
+	collID2Meta     map[typeutil.UniqueID]model.Collection                    // collection id -> collection meta
+	collName2ID     map[string]typeutil.UniqueID                              // collection name to collection id
+	ts2alias2name   map[typeutil.Timestamp]typeutil.ImmutablemapString2string //aliasTs to alias to collection name
+	newestAliasTs   typeutil.Timestamp                                        //newest alias changing timestamp named Ts
+	partID2SegID    map[typeutil.UniqueID]map[typeutil.UniqueID]bool          // partition id -> segment_id -> bool
+	segID2IndexMeta map[typeutil.UniqueID]map[typeutil.UniqueID]model.Index   // collection id/index_id/partition_id/segment_id -> meta
+	indexID2Meta    map[typeutil.UniqueID]model.Index                         // collection id/index_id -> meta
 
 	proxyLock sync.RWMutex
 	ddLock    sync.RWMutex
@@ -107,7 +108,7 @@ func (mt *MetaTable) reloadFromKV() error {
 	mt.proxyID2Meta = make(map[typeutil.UniqueID]pb.ProxyMeta)
 	mt.collID2Meta = make(map[typeutil.UniqueID]model.Collection)
 	mt.collName2ID = make(map[string]typeutil.UniqueID)
-	mt.collAlias2ID = make(map[string]typeutil.UniqueID)
+	mt.ts2alias2name = make(map[typeutil.Timestamp]typeutil.ImmutablemapString2string)
 	mt.partID2SegID = make(map[typeutil.UniqueID]map[typeutil.UniqueID]bool)
 	mt.segID2IndexMeta = make(map[typeutil.UniqueID]map[typeutil.UniqueID]model.Index)
 	mt.indexID2Meta = make(map[typeutil.UniqueID]model.Index)
@@ -156,7 +157,7 @@ func (mt *MetaTable) reloadFromKV() error {
 		return err
 	}
 	for _, aliasInfo := range collAliases {
-		mt.collAlias2ID[aliasInfo.Name] = aliasInfo.CollectionID
+		mt.ts2alias2name[aliasInfo.AliasTimeStamp] = aliasInfo.BuiltImmutableAlias2Name
 	}
 
 	log.Debug("reload meta table from KV successfully")
@@ -219,13 +220,31 @@ func (mt *MetaTable) DeleteCollection(collID typeutil.UniqueID, ts typeutil.Time
 		}
 		delete(mt.indexID2Meta, idxInfo.IndexID)
 	}
+
 	var aliases []string
 	// delete collection aliases
-	for alias, cid := range mt.collAlias2ID {
-		if cid == collID {
+	immutablemapAlias2Name := mt.ts2alias2name[mt.newestAliasTs]
+	Bdr := build(immutablemapAlias2Name)
+	for alias, name := range immutablemapAlias2Name.GetCopy() {
+		if mt.collName2ID[name] == collID {
 			aliases = append(aliases, alias)
-			delete(mt.collAlias2ID, alias)
+			_, ok := Bdr.removealias2name(alias)
+			if !ok {
+				return fmt.Errorf("alias does not exist, alias = %s", alias)
+			}
 		}
+	}
+	builtImmutableAlias2Name := Bdr.Build()
+	mt.ts2alias2name[ts] = builtImmutableAlias2Name
+	mt.newestAliasTs = ts
+
+	coll := &model.Collection{
+		Aliases:                  aliases,
+		BuiltImmutableAlias2Name: builtImmutableAlias2Name,
+	}
+	err := mt.catalog.DropAlias(mt.ctx, coll, ts)
+	if err != nil {
+		return err
 	}
 
 	// save ddOpStr into etcd
@@ -236,7 +255,6 @@ func (mt *MetaTable) DeleteCollection(collID typeutil.UniqueID, ts typeutil.Time
 
 	collection := &model.Collection{
 		CollectionID: collID,
-		Aliases:      aliases,
 		Extra:        meta,
 	}
 
@@ -292,9 +310,7 @@ func (mt *MetaTable) GetCollectionByName(collectionName string, ts typeutil.Time
 	if ts == 0 {
 		vid, ok := mt.collName2ID[collectionName]
 		if !ok {
-			if vid, ok = mt.collAlias2ID[collectionName]; !ok {
-				return nil, fmt.Errorf("can't find collection: " + collectionName)
-			}
+			return nil, fmt.Errorf("can't find collection: " + collectionName)
 		}
 		col, ok := mt.collID2Meta[vid]
 		if !ok {
@@ -325,12 +341,16 @@ func (mt *MetaTable) ListCollections(ts typeutil.Timestamp) (map[string]*model.C
 }
 
 // ListAliases list all collection aliases
-func (mt *MetaTable) ListAliases(collID typeutil.UniqueID) []string {
+func (mt *MetaTable) ListAliases(collID typeutil.UniqueID, aliasTs typeutil.Timestamp) []string {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
 	var aliases []string
-	for alias, cid := range mt.collAlias2ID {
-		if cid == collID {
+	immutablemapAlias2Name, ok := mt.ts2alias2name[aliasTs]
+	if !ok {
+		immutablemapAlias2Name = mt.ts2alias2name[mt.newestAliasTs]
+	}
+	for alias, name := range immutablemapAlias2Name.GetCopy() {
+		if mt.collName2ID[name] == collID {
 			aliases = append(aliases, alias)
 		}
 	}
@@ -572,10 +592,7 @@ func (mt *MetaTable) DropIndex(collName, fieldName, indexName string) (typeutil.
 
 	collID, ok := mt.collName2ID[collName]
 	if !ok {
-		collID, ok = mt.collAlias2ID[collName]
-		if !ok {
-			return 0, false, fmt.Errorf("collection name = %s not exist", collName)
-		}
+		return 0, false, fmt.Errorf("collection name = %s not exist", collName)
 	}
 	col, ok := mt.collID2Meta[collID]
 	if !ok {
@@ -708,10 +725,7 @@ func (mt *MetaTable) GetFieldSchema(collName string, fieldName string) (model.Fi
 func (mt *MetaTable) unlockGetFieldSchema(collName string, fieldName string) (model.Field, error) {
 	collID, ok := mt.collName2ID[collName]
 	if !ok {
-		collID, ok = mt.collAlias2ID[collName]
-		if !ok {
-			return model.Field{}, fmt.Errorf("collection %s not found", collName)
-		}
+		return model.Field{}, fmt.Errorf("collection %s not found", collName)
 	}
 	col, ok := mt.collID2Meta[collID]
 	if !ok {
@@ -765,10 +779,7 @@ func (mt *MetaTable) unlockIsSegmentIndexed(segID typeutil.UniqueID, fieldSchema
 func (mt *MetaTable) unlockGetCollectionInfo(collName string) (model.Collection, error) {
 	collID, ok := mt.collName2ID[collName]
 	if !ok {
-		collID, ok = mt.collAlias2ID[collName]
-		if !ok {
-			return model.Collection{}, fmt.Errorf("collection not found: %s", collName)
-		}
+		return model.Collection{}, fmt.Errorf("collection not found: %s", collName)
 	}
 	collMeta, ok := mt.collID2Meta[collID]
 	if !ok {
@@ -923,10 +934,7 @@ func (mt *MetaTable) GetIndexByName(collName, indexName string) (model.Collectio
 
 	collID, ok := mt.collName2ID[collName]
 	if !ok {
-		collID, ok = mt.collAlias2ID[collName]
-		if !ok {
-			return model.Collection{}, nil, fmt.Errorf("collection %s not found", collName)
-		}
+		return model.Collection{}, nil, fmt.Errorf("collection %s not found", collName)
 	}
 	col, ok := mt.collID2Meta[collID]
 	if !ok {
@@ -988,23 +996,29 @@ func (mt *MetaTable) dupMeta() (
 func (mt *MetaTable) AddAlias(collectionAlias string, collectionName string, ts typeutil.Timestamp) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
-	if _, ok := mt.collAlias2ID[collectionAlias]; ok {
-		return fmt.Errorf("duplicate collection alias, alias = %s", collectionAlias)
-	}
 
 	if _, ok := mt.collName2ID[collectionAlias]; ok {
 		return fmt.Errorf("collection alias collides with existing collection name. collection = %s, alias = %s", collectionAlias, collectionAlias)
 	}
 
-	id, ok := mt.collName2ID[collectionName]
+	_, ok := mt.collName2ID[collectionName]
 	if !ok {
 		return fmt.Errorf("aliased collection name does not exist, name = %s", collectionName)
 	}
-	mt.collAlias2ID[collectionAlias] = id
+	//mt.collAlias2ID[collectionAlias] = id
+	tsPre := mt.newestAliasTs
+	Bdr := build(mt.ts2alias2name[tsPre])
+	_, ok = Bdr.putalias2name(collectionAlias, collectionName)
+	if ok {
+		return fmt.Errorf("duplicate collection alias, alias = %s", collectionAlias)
+	}
+	builtImmutableAlias2Name := Bdr.Build()
+	mt.ts2alias2name[ts] = builtImmutableAlias2Name
+	mt.newestAliasTs = ts
 
 	coll := &model.Collection{
-		CollectionID: id,
-		Aliases:      []string{collectionAlias},
+		Aliases:                  []string{collectionAlias},
+		BuiltImmutableAlias2Name: builtImmutableAlias2Name,
 	}
 	return mt.catalog.CreateAlias(mt.ctx, coll, ts)
 }
@@ -1013,42 +1027,67 @@ func (mt *MetaTable) AddAlias(collectionAlias string, collectionName string, ts 
 func (mt *MetaTable) DropAlias(collectionAlias string, ts typeutil.Timestamp) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
-	collectionID, ok := mt.collAlias2ID[collectionAlias]
+
+	//delete(mt.collAlias2ID, collectionAlias)
+	tsPre := mt.newestAliasTs
+	Bdr := build(mt.ts2alias2name[tsPre])
+	_, ok := Bdr.removealias2name(collectionAlias)
 	if !ok {
 		return fmt.Errorf("alias does not exist, alias = %s", collectionAlias)
 	}
-	delete(mt.collAlias2ID, collectionAlias)
+	builtImmutableAlias2Name := Bdr.Build()
+	mt.ts2alias2name[ts] = builtImmutableAlias2Name
+	mt.newestAliasTs = ts
 
-	return mt.catalog.DropAlias(mt.ctx, collectionID, collectionAlias, ts)
+	coll := &model.Collection{
+		Aliases:                  []string{collectionAlias},
+		BuiltImmutableAlias2Name: builtImmutableAlias2Name,
+	}
+	return mt.catalog.DropAlias(mt.ctx, coll, ts)
 }
 
 // AlterAlias alter collection alias
 func (mt *MetaTable) AlterAlias(collectionAlias string, collectionName string, ts typeutil.Timestamp) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
-	if _, ok := mt.collAlias2ID[collectionAlias]; !ok {
-		return fmt.Errorf("alias does not exist, alias = %s", collectionAlias)
-	}
 
-	id, ok := mt.collName2ID[collectionName]
+	_, ok := mt.collName2ID[collectionName]
 	if !ok {
 		return fmt.Errorf("aliased collection name does not exist, name = %s", collectionName)
 	}
-	mt.collAlias2ID[collectionAlias] = id
+	//mt.collAlias2ID[collectionAlias] = id
+	tsPre := mt.newestAliasTs
+	Bdr := build(mt.ts2alias2name[tsPre])
+	_, ok = Bdr.putalias2name(collectionAlias, collectionName)
+	if !ok {
+		return fmt.Errorf("alias does not exist, alias = %s", collectionAlias)
+	}
+	builtImmutableAlias2Name := Bdr.Build()
+	mt.ts2alias2name[ts] = builtImmutableAlias2Name
+	mt.newestAliasTs = ts
 
 	coll := &model.Collection{
-		CollectionID: id,
-		Aliases:      []string{collectionAlias},
+		Aliases:                  []string{collectionAlias},
+		BuiltImmutableAlias2Name: builtImmutableAlias2Name,
 	}
+
 	return mt.catalog.AlterAlias(mt.ctx, coll, ts)
 }
 
 // IsAlias returns true if specific `collectionAlias` is an alias of collection.
-func (mt *MetaTable) IsAlias(collectionAlias string) bool {
+func (mt *MetaTable) IsAlias(collectionAlias string, aliasTs typeutil.Timestamp) bool {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
-	_, ok := mt.collAlias2ID[collectionAlias]
-	return ok
+	immutablemapAlias2Name, ok := mt.ts2alias2name[aliasTs]
+	if !ok {
+		immutablemapAlias2Name = mt.ts2alias2name[mt.newestAliasTs]
+	}
+	_, err := immutablemapAlias2Name.Get(collectionAlias)
+	if err == nil {
+		return true
+	}
+	return false
+
 }
 
 // AddCredential add credential

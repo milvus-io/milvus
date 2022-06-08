@@ -16,6 +16,47 @@
 
 package typeutil
 
+import (
+	"fmt"
+	"reflect"
+)
+
+// ImmutablemapString2string is a map only support read
+type ImmutablemapString2string struct {
+	storemap map[string]string
+}
+
+func NewImmutablemapString2string(in map[string]string) ImmutablemapString2string {
+	out := ImmutablemapString2string{
+		storemap: in,
+	}
+	return out
+}
+
+func (imstr2str ImmutablemapString2string) IsEmpty() bool {
+	return reflect.DeepEqual(imstr2str, ImmutablemapString2string{})
+}
+
+func (imstr2str *ImmutablemapString2string) Get(key string) (string, error) {
+	rstr, ok := imstr2str.storemap[key]
+	if !ok {
+		return "", fmt.Errorf("key not exist")
+	}
+	return rstr, nil
+}
+
+func (imstr2str *ImmutablemapString2string) Put(key string, val string) (string, error) {
+	return "", fmt.Errorf("not allowed put in immutablemap")
+}
+
+func (imstr2str *ImmutablemapString2string) GetCopy() map[string]string {
+	mapcopy := make(map[string]string)
+	for key, value := range imstr2str.storemap {
+		mapcopy[key] = value
+	}
+	return mapcopy
+}
+
 // Timestamp is an alias of uint64
 type Timestamp = uint64
 

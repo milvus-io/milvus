@@ -41,7 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
-// Cache is the interface for system meta data cache
+// Cache is the interface for system metadata cache
 type Cache interface {
 	// GetCollectionID get collection's id by name.
 	GetCollectionID(ctx context.Context, collectionName string) (typeutil.UniqueID, error)
@@ -67,6 +67,10 @@ type Cache interface {
 	UpdateCredential(credInfo *internalpb.CredentialInfo)
 	GetCredUsernames(ctx context.Context) ([]string, error)
 	ClearCredUsers()
+
+	PullAliasInfo(ctx context.Context) (*milvuspb.PullAliasInfoResponse, error)
+	GetAliasInfoCache() (typeutil.ImmutablemapString2string, typeutil.Timestamp)
+	SetAliasInfoCache(request *milvuspb.PushAliasInfoRequest) error
 }
 
 type collectionInfo struct {
@@ -109,9 +113,13 @@ type MetaCache struct {
 	collInfo         map[string]*collectionInfo
 	credMap          map[string]*internalpb.CredentialInfo // cache for credential, lazy load
 	credUsernameList []string                              // no need initialize when NewMetaCache
-	mu               sync.RWMutex
-	credMut          sync.RWMutex
-	shardMgr         *shardClientMgr
+
+	alias2name typeutil.ImmutablemapString2string
+	aliasTs    typeutil.Timestamp
+
+	mu       sync.RWMutex
+	credMut  sync.RWMutex
+	shardMgr *shardClientMgr
 }
 
 // globalMetaCache is singleton instance of Cache
@@ -124,6 +132,14 @@ func InitMetaCache(rootCoord types.RootCoord, queryCoord types.QueryCoord, shard
 	if err != nil {
 		return err
 	}
+	go func() {
+		for true {
+			ctx, cancel := context.WithCancel(context.Background())
+			globalMetaCache.PullAliasInfo(ctx)
+			cancel()
+			time.Sleep(30 * time.Second)
+		}
+	}()
 	return nil
 }
 
@@ -373,6 +389,34 @@ func (m *MetaCache) GetPartitionInfo(ctx context.Context, collectionName string,
 	}, nil
 }
 
+func (m *MetaCache) PullAliasInfo(ctx context.Context) (*milvuspb.PullAliasInfoResponse, error) {
+	req := &milvuspb.PullAliasInfoRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_PullAliasInfo,
+		},
+	}
+	aliasinfo, err := m.rootCoord.PullAliasInfo(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	if aliasinfo.Status.ErrorCode != commonpb.ErrorCode_Success {
+		return nil, errors.New(aliasinfo.Status.Reason)
+	}
+	m.alias2name = typeutil.NewImmutablemapString2string(aliasinfo.Alias2Name)
+	m.aliasTs = aliasinfo.AliasTimestamp
+	return aliasinfo, nil
+}
+
+func (m *MetaCache) GetAliasInfoCache() (typeutil.ImmutablemapString2string, typeutil.Timestamp) {
+	return m.alias2name, m.aliasTs
+}
+
+func (m *MetaCache) SetAliasInfoCache(request *milvuspb.PushAliasInfoRequest) error {
+	m.aliasTs = request.AliasTimestamp
+	m.alias2name = typeutil.NewImmutablemapString2string(request.Alias2Name)
+	return nil
+}
+
 // Get the collection information from rootcoord.
 func (m *MetaCache) describeCollection(ctx context.Context, collectionName string) (*milvuspb.DescribeCollectionResponse, error) {
 	req := &milvuspb.DescribeCollectionRequest{
@@ -380,6 +424,7 @@ func (m *MetaCache) describeCollection(ctx context.Context, collectionName strin
 			MsgType: commonpb.MsgType_DescribeCollection,
 		},
 		CollectionName: collectionName,
+		AliasTimestamp: m.aliasTs,
 	}
 	coll, err := m.rootCoord.DescribeCollection(ctx, req)
 	if err != nil {

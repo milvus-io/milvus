@@ -53,6 +53,8 @@ message CollectionSchema {
   string description = 2;
   bool autoID = 3; // deprecated later, keep compatible with c++ part now
   repeated FieldSchema fields = 4;
+  map<string, string> Alias2Name = 5;
+  uint64 AliasTimestamp = 6;
 }
 
 message BoolArray {

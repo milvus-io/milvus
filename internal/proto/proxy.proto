@@ -24,6 +24,8 @@ service Proxy {
   rpc ClearCredUsersCache(internal.ClearCredUsersCacheRequest) returns (common.Status) {}
 
   rpc RefreshPolicyInfoCache(RefreshPolicyInfoCacheRequest) returns (common.Status) {}
+
+  rpc PushAliasInfo(milvus.PushAliasInfoRequest) returns (common.Status) {}
 }
 
 message InvalidateCollMetaCacheRequest {

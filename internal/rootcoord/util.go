@@ -20,13 +20,83 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/milvus-io/milvus/internal/metastore/model"
-
 	"github.com/golang/protobuf/proto"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
+
+func build(im typeutil.ImmutablemapString2string) *Builder {
+	builder := &Builder{
+		reference: im,
+		mutable:   nil,
+	}
+	return builder
+}
+
+type Builder struct {
+	reference typeutil.ImmutablemapString2string
+	mutable   map[string]string
+}
+
+func (bdr *Builder) maybeClone() {
+	if !bdr.reference.IsEmpty() {
+		bdr.mutable = make(map[string]string)
+		for k, v := range bdr.reference.GetCopy() {
+			bdr.mutable[k] = v
+		}
+
+		bdr.reference = typeutil.ImmutablemapString2string{}
+	} else {
+		bdr.mutable = make(map[string]string)
+	}
+}
+
+func (bdr *Builder) getnamefromalias(key string) (string, bool) {
+	bdr.maybeClone()
+	rstr, rbool := bdr.mutable[key]
+	return rstr, rbool
+}
+
+func (bdr *Builder) putalias2name(key string, val string) (string, bool) {
+	bdr.maybeClone()
+	var pre string
+	v, ok := bdr.mutable[key]
+	if ok {
+		pre = v
+	} else {
+		pre = ""
+	}
+	bdr.mutable[key] = val
+	return pre, ok
+}
+
+func (bdr *Builder) removealias2name(key string) (string, bool) {
+	bdr.maybeClone()
+	var pre string
+	v, ok := bdr.mutable[key]
+	if ok {
+		pre = v
+		delete(bdr.mutable, key)
+	} else {
+		pre = ""
+	}
+	return pre, ok
+}
+
+func (bdr *Builder) Build() typeutil.ImmutablemapString2string {
+	if !bdr.reference.IsEmpty() {
+		reference := bdr.reference
+		bdr.reference = typeutil.ImmutablemapString2string{}
+		return reference
+	} else {
+		mutable := bdr.mutable
+		bdr.mutable = nil
+		res := typeutil.NewImmutablemapString2string(mutable)
+		return res
+	}
+}
 
 // EqualKeyPairArray check whether 2 KeyValuePairs are equal
 func EqualKeyPairArray(p1 []*commonpb.KeyValuePair, p2 []*commonpb.KeyValuePair) bool {

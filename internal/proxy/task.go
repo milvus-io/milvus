@@ -18,6 +18,7 @@ package proxy
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -196,6 +197,12 @@ func (it *insertTask) getChannels() ([]pChan, error) {
 }
 
 func (it *insertTask) OnEnqueue() error {
+	alias2name, _ := globalMetaCache.GetAliasInfoCache()
+	name, err := alias2name.Get(it.CollectionName)
+	if err != nil {
+		return nil
+	}
+	it.CollectionName = name
 	return nil
 }
 
@@ -592,6 +599,12 @@ func (cct *createCollectionTask) OnEnqueue() error {
 	cct.Base = &commonpb.MsgBase{}
 	cct.Base.MsgType = commonpb.MsgType_CreateCollection
 	cct.Base.SourceID = Params.ProxyCfg.GetNodeID()
+	alias2name, _ := globalMetaCache.GetAliasInfoCache()
+	name, err := alias2name.Get(cct.CollectionName)
+	if err != nil {
+		return nil
+	}
+	cct.CollectionName = name
 	return nil
 }
 
@@ -855,6 +868,12 @@ func (hct *hasCollectionTask) SetTs(ts Timestamp) {
 
 func (hct *hasCollectionTask) OnEnqueue() error {
 	hct.Base = &commonpb.MsgBase{}
+	alias2name, _ := globalMetaCache.GetAliasInfoCache()
+	name, err := alias2name.Get(hct.CollectionName)
+	if err != nil {
+		return nil
+	}
+	hct.CollectionName = name
 	return nil
 }
 
@@ -929,6 +948,12 @@ func (dct *describeCollectionTask) SetTs(ts Timestamp) {
 
 func (dct *describeCollectionTask) OnEnqueue() error {
 	dct.Base = &commonpb.MsgBase{}
+	alias2name, _ := globalMetaCache.GetAliasInfoCache()
+	name, err := alias2name.Get(dct.CollectionName)
+	if err != nil {
+		return nil
+	}
+	dct.CollectionName = name
 	return nil
 }
 
@@ -1045,6 +1070,12 @@ func (g *getCollectionStatisticsTask) SetTs(ts Timestamp) {
 
 func (g *getCollectionStatisticsTask) OnEnqueue() error {
 	g.Base = &commonpb.MsgBase{}
+	alias2name, _ := globalMetaCache.GetAliasInfoCache()
+	name, err := alias2name.Get(g.CollectionName)
+	if err != nil {
+		return nil
+	}
+	g.CollectionName = name
 	return nil
 }
 
@@ -1135,6 +1166,12 @@ func (g *getPartitionStatisticsTask) SetTs(ts Timestamp) {
 
 func (g *getPartitionStatisticsTask) OnEnqueue() error {
 	g.Base = &commonpb.MsgBase{}
+	alias2name, _ := globalMetaCache.GetAliasInfoCache()
+	name, err := alias2name.Get(g.CollectionName)
+	if err != nil {
+		return nil
+	}
+	g.CollectionName = name
 	return nil
 }
 
@@ -1229,6 +1266,20 @@ func (sct *showCollectionsTask) SetTs(ts Timestamp) {
 
 func (sct *showCollectionsTask) OnEnqueue() error {
 	sct.Base = &commonpb.MsgBase{}
+	alias2name, _ := globalMetaCache.GetAliasInfoCache()
+	jsonstr, err := json.Marshal(sct.CollectionNames)
+	if err != nil {
+		return err
+	}
+	log.Warn(string(jsonstr))
+	for i, orgName := range sct.CollectionNames {
+		name, err := alias2name.Get(orgName)
+		if err != nil {
+			sct.CollectionNames[i] = orgName
+		} else {
+			sct.CollectionNames[i] = name
+		}
+	}
 	return nil
 }
 
@@ -1388,6 +1439,12 @@ func (cpt *createPartitionTask) SetTs(ts Timestamp) {
 
 func (cpt *createPartitionTask) OnEnqueue() error {
 	cpt.Base = &commonpb.MsgBase{}
+	alias2name, _ := globalMetaCache.GetAliasInfoCache()
+	name, err := alias2name.Get(cpt.CollectionName)
+	if err != nil {
+		return nil
+	}
+	cpt.CollectionName = name
 	return nil
 }
 
@@ -1465,6 +1522,12 @@ func (dpt *dropPartitionTask) SetTs(ts Timestamp) {
 
 func (dpt *dropPartitionTask) OnEnqueue() error {
 	dpt.Base = &commonpb.MsgBase{}
+	alias2name, _ := globalMetaCache.GetAliasInfoCache()
+	name, err := alias2name.Get(dpt.CollectionName)
+	if err != nil {
+		return nil
+	}
+	dpt.CollectionName = name
 	return nil
 }
 
@@ -1542,6 +1605,12 @@ func (hpt *hasPartitionTask) SetTs(ts Timestamp) {
 
 func (hpt *hasPartitionTask) OnEnqueue() error {
 	hpt.Base = &commonpb.MsgBase{}
+	alias2name, _ := globalMetaCache.GetAliasInfoCache()
+	name, err := alias2name.Get(hpt.CollectionName)
+	if err != nil {
+		return nil
+	}
+	hpt.CollectionName = name
 	return nil
 }
 
@@ -1619,6 +1688,12 @@ func (spt *showPartitionsTask) SetTs(ts Timestamp) {
 
 func (spt *showPartitionsTask) OnEnqueue() error {
 	spt.Base = &commonpb.MsgBase{}
+	alias2name, _ := globalMetaCache.GetAliasInfoCache()
+	name, err := alias2name.Get(spt.CollectionName)
+	if err != nil {
+		return nil
+	}
+	spt.CollectionName = name
 	return nil
 }
 
@@ -1785,6 +1860,12 @@ func (cit *createIndexTask) SetTs(ts Timestamp) {
 
 func (cit *createIndexTask) OnEnqueue() error {
 	cit.Base = &commonpb.MsgBase{}
+	alias2name, _ := globalMetaCache.GetAliasInfoCache()
+	name, err := alias2name.Get(cit.CollectionName)
+	if err != nil {
+		return nil
+	}
+	cit.CollectionName = name
 	return nil
 }
 
@@ -1973,6 +2054,12 @@ func (dit *describeIndexTask) SetTs(ts Timestamp) {
 
 func (dit *describeIndexTask) OnEnqueue() error {
 	dit.Base = &commonpb.MsgBase{}
+	alias2name, _ := globalMetaCache.GetAliasInfoCache()
+	name, err := alias2name.Get(dit.CollectionName)
+	if err != nil {
+		return nil
+	}
+	dit.CollectionName = name
 	return nil
 }
 
@@ -2049,6 +2136,12 @@ func (dit *dropIndexTask) SetTs(ts Timestamp) {
 
 func (dit *dropIndexTask) OnEnqueue() error {
 	dit.Base = &commonpb.MsgBase{}
+	alias2name, _ := globalMetaCache.GetAliasInfoCache()
+	name, err := alias2name.Get(dit.CollectionName)
+	if err != nil {
+		return nil
+	}
+	dit.CollectionName = name
 	return nil
 }
 
@@ -2138,6 +2231,12 @@ func (gibpt *getIndexBuildProgressTask) SetTs(ts Timestamp) {
 
 func (gibpt *getIndexBuildProgressTask) OnEnqueue() error {
 	gibpt.Base = &commonpb.MsgBase{}
+	alias2name, _ := globalMetaCache.GetAliasInfoCache()
+	name, err := alias2name.Get(gibpt.CollectionName)
+	if err != nil {
+		return nil
+	}
+	gibpt.CollectionName = name
 	return nil
 }
 
@@ -2362,6 +2461,12 @@ func (gist *getIndexStateTask) SetTs(ts Timestamp) {
 
 func (gist *getIndexStateTask) OnEnqueue() error {
 	gist.Base = &commonpb.MsgBase{}
+	alias2name, _ := globalMetaCache.GetAliasInfoCache()
+	name, err := alias2name.Get(gist.CollectionName)
+	if err != nil {
+		return nil
+	}
+	gist.CollectionName = name
 	return nil
 }
 
@@ -2615,6 +2720,15 @@ func (ft *flushTask) SetTs(ts Timestamp) {
 
 func (ft *flushTask) OnEnqueue() error {
 	ft.Base = &commonpb.MsgBase{}
+	alias2name, _ := globalMetaCache.GetAliasInfoCache()
+	for i, orgName := range ft.CollectionNames {
+		name, err := alias2name.Get(orgName)
+		if err != nil {
+			ft.CollectionNames[i] = orgName
+		} else {
+			ft.CollectionNames[i] = name
+		}
+	}
 	return nil
 }
 
@@ -2709,6 +2823,12 @@ func (lct *loadCollectionTask) SetTs(ts Timestamp) {
 
 func (lct *loadCollectionTask) OnEnqueue() error {
 	lct.Base = &commonpb.MsgBase{}
+	alias2name, _ := globalMetaCache.GetAliasInfoCache()
+	name, err := alias2name.Get(lct.CollectionName)
+	if err != nil {
+		return nil
+	}
+	lct.CollectionName = name
 	return nil
 }
 
@@ -2811,6 +2931,12 @@ func (rct *releaseCollectionTask) SetTs(ts Timestamp) {
 
 func (rct *releaseCollectionTask) OnEnqueue() error {
 	rct.Base = &commonpb.MsgBase{}
+	alias2name, _ := globalMetaCache.GetAliasInfoCache()
+	name, err := alias2name.Get(rct.CollectionName)
+	if err != nil {
+		return nil
+	}
+	rct.CollectionName = name
 	return nil
 }
 
@@ -2900,6 +3026,12 @@ func (lpt *loadPartitionsTask) SetTs(ts Timestamp) {
 
 func (lpt *loadPartitionsTask) OnEnqueue() error {
 	lpt.Base = &commonpb.MsgBase{}
+	alias2name, _ := globalMetaCache.GetAliasInfoCache()
+	name, err := alias2name.Get(lpt.CollectionName)
+	if err != nil {
+		return nil
+	}
+	lpt.CollectionName = name
 	return nil
 }
 
@@ -2999,6 +3131,12 @@ func (rpt *releasePartitionsTask) SetTs(ts Timestamp) {
 
 func (rpt *releasePartitionsTask) OnEnqueue() error {
 	rpt.Base = &commonpb.MsgBase{}
+	alias2name, _ := globalMetaCache.GetAliasInfoCache()
+	name, err := alias2name.Get(rpt.CollectionName)
+	if err != nil {
+		return nil
+	}
+	rpt.CollectionName = name
 	return nil
 }
 
@@ -3101,6 +3239,12 @@ func (dt *deleteTask) SetTs(ts Timestamp) {
 
 func (dt *deleteTask) OnEnqueue() error {
 	dt.DeleteRequest.Base = &commonpb.MsgBase{}
+	alias2name, _ := globalMetaCache.GetAliasInfoCache()
+	name, err := alias2name.Get(dt.CollectionName)
+	if err != nil {
+		return nil
+	}
+	dt.CollectionName = name
 	return nil
 }
 
@@ -3401,6 +3545,12 @@ func (c *CreateAliasTask) SetTs(ts Timestamp) {
 // OnEnqueue defines the behavior task enqueued
 func (c *CreateAliasTask) OnEnqueue() error {
 	c.Base = &commonpb.MsgBase{}
+	alias2name, _ := globalMetaCache.GetAliasInfoCache()
+	name, err := alias2name.Get(c.CollectionName)
+	if err != nil {
+		return nil
+	}
+	c.CollectionName = name
 	return nil
 }
 
@@ -3429,9 +3579,10 @@ func (c *CreateAliasTask) Execute(ctx context.Context) error {
 	return err
 }
 
-// PostExecute defines the post execution, do nothing for create alias
+// PostExecute defines the post execution, pull alias cache
 func (c *CreateAliasTask) PostExecute(ctx context.Context) error {
-	return nil
+	_, err := globalMetaCache.PullAliasInfo(ctx)
+	return err
 }
 
 // DropAliasTask is the task to drop alias
@@ -3501,7 +3652,8 @@ func (d *DropAliasTask) Execute(ctx context.Context) error {
 }
 
 func (d *DropAliasTask) PostExecute(ctx context.Context) error {
-	return nil
+	_, err := globalMetaCache.PullAliasInfo(ctx)
+	return err
 }
 
 // AlterAliasTask is the task to alter alias
@@ -3547,6 +3699,12 @@ func (a *AlterAliasTask) SetTs(ts Timestamp) {
 
 func (a *AlterAliasTask) OnEnqueue() error {
 	a.Base = &commonpb.MsgBase{}
+	alias2name, _ := globalMetaCache.GetAliasInfoCache()
+	name, err := alias2name.Get(a.CollectionName)
+	if err != nil {
+		return nil
+	}
+	a.CollectionName = name
 	return nil
 }
 
@@ -3575,5 +3733,6 @@ func (a *AlterAliasTask) Execute(ctx context.Context) error {
 }
 
 func (a *AlterAliasTask) PostExecute(ctx context.Context) error {
-	return nil
+	_, err := globalMetaCache.PullAliasInfo(ctx)
+	return err
 }

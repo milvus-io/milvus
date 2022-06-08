@@ -4,6 +4,7 @@ import (
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 func ConvertToFieldSchemaPB(field *Field) *schemapb.FieldSchema {
@@ -65,20 +66,22 @@ func ConvertCollectionPBToModel(coll *pb.CollectionInfo, extra map[string]string
 		}
 	}
 	return &Collection{
-		CollectionID:         coll.ID,
-		Name:                 coll.Schema.Name,
-		Description:          coll.Schema.Description,
-		AutoID:               coll.Schema.AutoID,
-		Fields:               BatchConvertFieldPBToModel(coll.Schema.Fields),
-		Partitions:           partitions,
-		FieldIndexes:         indexes,
-		VirtualChannelNames:  coll.VirtualChannelNames,
-		PhysicalChannelNames: coll.PhysicalChannelNames,
-		ShardsNum:            coll.ShardsNum,
-		ConsistencyLevel:     coll.ConsistencyLevel,
-		CreateTime:           coll.CreateTime,
-		StartPositions:       coll.StartPositions,
-		Extra:                extra,
+		CollectionID:             coll.ID,
+		Name:                     coll.Schema.Name,
+		Description:              coll.Schema.Description,
+		AutoID:                   coll.Schema.AutoID,
+		Fields:                   BatchConvertFieldPBToModel(coll.Schema.Fields),
+		Partitions:               partitions,
+		FieldIndexes:             indexes,
+		VirtualChannelNames:      coll.VirtualChannelNames,
+		PhysicalChannelNames:     coll.PhysicalChannelNames,
+		ShardsNum:                coll.ShardsNum,
+		ConsistencyLevel:         coll.ConsistencyLevel,
+		CreateTime:               coll.CreateTime,
+		StartPositions:           coll.StartPositions,
+		BuiltImmutableAlias2Name: typeutil.NewImmutablemapString2string(coll.Schema.Alias2Name),
+		AliasTimeStamp:           coll.Schema.AliasTimestamp,
+		Extra:                    extra,
 	}
 }
 

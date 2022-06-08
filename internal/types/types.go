@@ -680,6 +680,8 @@ type RootCoord interface {
 	ListCredUsers(ctx context.Context, req *milvuspb.ListCredUsersRequest) (*milvuspb.ListCredUsersResponse, error)
 	// GetCredential get credential by username
 	GetCredential(ctx context.Context, req *rootcoordpb.GetCredentialRequest) (*rootcoordpb.GetCredentialResponse, error)
+	// PullAliasInfo pull alias timestamp and alias2name from metatable
+	PullAliasInfo(ctx context.Context, in *milvuspb.PullAliasInfoRequest) (*milvuspb.PullAliasInfoResponse, error)
 }
 
 // RootCoordComponent is used by grpc server of RootCoord
@@ -771,6 +773,7 @@ type Proxy interface {
 
 	SendSearchResult(ctx context.Context, req *internalpb.SearchResults) (*commonpb.Status, error)
 	SendRetrieveResult(ctx context.Context, req *internalpb.RetrieveResults) (*commonpb.Status, error)
+	PushAliasInfo(ctx context.Context, req *milvuspb.PushAliasInfoRequest) (*commonpb.Status, error)
 }
 
 // ProxyComponent defines the interface of proxy component.

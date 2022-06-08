@@ -110,6 +110,10 @@ type RootCoordMock struct {
 	lastTsMtx sync.Mutex
 }
 
+func (coord *RootCoordMock) PullAliasInfo(ctx context.Context, in *milvuspb.PullAliasInfoRequest) (*milvuspb.PullAliasInfoResponse, error) {
+	return coord.PullAliasInfo(ctx, in)
+}
+
 func (coord *RootCoordMock) CreateAlias(ctx context.Context, req *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
 	code := coord.state.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
