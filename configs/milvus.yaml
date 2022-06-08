@@ -162,6 +162,7 @@ queryCoord:
 queryNode:
   cacheSize: 32 # GB, default 32 GB, `cacheSize` is the memory used for caching data for faster query. The `cacheSize` must be less than system memory size.
   port: 21123
+  loadMemoryUsageFactor: 3 # The multiply factor of calculating the memory usage while loading segments
 
   stats:
     publishInterval: 1000 # Interval for querynode to report node information (milliseconds)

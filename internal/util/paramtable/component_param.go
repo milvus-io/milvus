@@ -693,6 +693,7 @@ type queryNodeConfig struct {
 	UpdatedTime time.Time
 
 	// memory limit
+	LoadMemoryUsageFactor               float64
 	OverloadedMemoryThresholdPercentage float64
 
 	// cache limit
@@ -718,6 +719,7 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 
 	p.initSmallIndexParams()
 
+	p.initLoadMemoryUsageFactor()
 	p.initOverloadedMemoryThresholdPercentage()
 
 	p.initCacheMemoryLimit()
@@ -799,6 +801,15 @@ func (p *queryNodeConfig) initSmallIndexParams() {
 		log.Warn("small index nprobe must smaller than nlist, force set to", zap.Any("nprobe", p.SmallIndexNlist))
 		p.SmallIndexNProbe = p.SmallIndexNlist
 	}
+}
+
+func (p *queryNodeConfig) initLoadMemoryUsageFactor() {
+	loadMemoryUsageFactor := p.Base.LoadWithDefault("queryNode.loadMemoryUsageFactor", "3")
+	factor, err := strconv.ParseFloat(loadMemoryUsageFactor, 64)
+	if err != nil {
+		panic(err)
+	}
+	p.LoadMemoryUsageFactor = factor
 }
 
 func (p *queryNodeConfig) initOverloadedMemoryThresholdPercentage() {
