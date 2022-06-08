@@ -32,7 +32,8 @@ import (
 const (
 	bufferID            = math.MinInt64
 	delimiter           = "/"
-	maxOperationsPerTxn = 128
+	maxOperationsPerTxn = 64
+	maxBytesPerTxn      = 1024 * 1024
 )
 
 var errUnknownOpType = errors.New("unknown operation type")
