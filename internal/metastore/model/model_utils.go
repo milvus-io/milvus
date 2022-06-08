@@ -62,6 +62,7 @@ func ConvertCollectionPBToModel(coll *pb.CollectionInfo, extra map[string]string
 		indexes[idx] = &Index{
 			FieldID: fieldIndexInfo.FiledID,
 			IndexID: fieldIndexInfo.IndexID,
+			Deleted: fieldIndexInfo.Deleted,
 		}
 	}
 	return &Collection{
@@ -136,6 +137,7 @@ func ConvertToCollectionPB(coll *Collection) *pb.CollectionInfo {
 		fieldIndexes[idx] = &pb.FieldIndexInfo{
 			FiledID: index.FieldID,
 			IndexID: index.IndexID,
+			Deleted: index.Deleted,
 		}
 	}
 	return &pb.CollectionInfo{
@@ -215,6 +217,7 @@ func ConvertIndexPBToModel(indexInfo *pb.IndexInfo) *Index {
 		IndexName:   indexInfo.IndexName,
 		IndexID:     indexInfo.IndexID,
 		IndexParams: indexInfo.IndexParams,
+		Deleted:     indexInfo.Deleted,
 	}
 }
 
@@ -223,6 +226,7 @@ func ConvertToIndexPB(index *Index) *pb.IndexInfo {
 		IndexName:   index.IndexName,
 		IndexID:     index.IndexID,
 		IndexParams: index.IndexParams,
+		Deleted:     index.Deleted,
 	}
 }
 

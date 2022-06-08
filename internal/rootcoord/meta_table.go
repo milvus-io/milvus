@@ -565,6 +565,72 @@ func (mt *MetaTable) AlterIndex(newIndex *model.Index) error {
 	return mt.catalog.AlterIndex(mt.ctx, &oldIndex, newIndex)
 }
 
+func (mt *MetaTable) MarkIndexDeleted(collName, fieldName, indexName string) error {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+
+	collID, ok := mt.collName2ID[collName]
+	if !ok {
+		collID, ok = mt.collAlias2ID[collName]
+		if !ok {
+			return fmt.Errorf("collection name = %s not exist", collName)
+		}
+	}
+	col, ok := mt.collID2Meta[collID]
+	if !ok {
+		return fmt.Errorf("collection name  = %s not has meta", collName)
+	}
+	fieldSch, err := mt.unlockGetFieldSchema(collName, fieldName)
+	if err != nil {
+		return err
+	}
+
+	var dropIdxID typeutil.UniqueID = -1
+	fieldIndexInfo := make([]*model.Index, 0, len(col.FieldIndexes))
+	for i, info := range col.FieldIndexes {
+		fieldIndexInfo = append(fieldIndexInfo, info)
+		if info.FieldID == fieldSch.FieldID && info.IndexName == indexName {
+			cloneIndexInfo := new(model.Index)
+			*cloneIndexInfo = *info
+			cloneIndexInfo.Deleted = true
+			fieldIndexInfo[i] = cloneIndexInfo
+			fieldIndexInfo = append(fieldIndexInfo, col.FieldIndexes[i+1:]...)
+			dropIdxID = info.IndexID
+			break
+		}
+	}
+
+	if dropIdxID == -1 {
+		log.Warn("drop index,index not found", zap.String("collection name", collName), zap.String("filed name", fieldName), zap.String("index name", indexName))
+		return nil
+	}
+
+	indexInfo, ok := mt.indexID2Meta[dropIdxID]
+	if !ok {
+		log.Warn("index id not has meta", zap.Int64("index id", dropIdxID))
+		return fmt.Errorf("index id not has meta with indexID %d, but collection has the index with index name: %s", dropIdxID, indexName)
+	}
+	indexInfo.Deleted = true
+
+	if err = mt.catalog.CreateIndex(mt.ctx, &col, &indexInfo); err != nil {
+		return err
+	}
+
+	col.FieldIndexes = fieldIndexInfo
+	// update cache
+	mt.collID2Meta[collID] = col
+	mt.indexID2Meta[dropIdxID] = indexInfo
+
+	for segID, indexID2Meta := range mt.segID2IndexMeta {
+		if indexMeta, ok := indexID2Meta[dropIdxID]; ok {
+			indexMeta.Deleted = true
+			mt.segID2IndexMeta[segID][dropIdxID] = indexMeta
+		}
+	}
+
+	return nil
+}
+
 // DropIndex drop index
 func (mt *MetaTable) DropIndex(collName, fieldName, indexName string) (typeutil.UniqueID, bool, error) {
 	mt.ddLock.Lock()
@@ -636,6 +702,62 @@ func (mt *MetaTable) DropIndex(collName, fieldName, indexName string) (typeutil.
 	return dropIdxID, true, nil
 }
 
+func (mt *MetaTable) GetDroppedIndex() map[UniqueID]map[UniqueID]UniqueID {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+
+	droppedIndex := make(map[UniqueID]map[UniqueID]UniqueID)
+	for collID, meta := range mt.collID2Meta {
+		for _, fieldIndex := range meta.FieldIndexes {
+			if fieldIndex.Deleted {
+				droppedIndex[fieldIndex.IndexID] = map[UniqueID]UniqueID{
+					fieldIndex.FieldID: collID,
+				}
+			}
+		}
+	}
+	return droppedIndex
+}
+
+func (mt *MetaTable) RemoveDroppedIndex(indexID, fieldID, collID UniqueID) error {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+
+	col, ok := mt.collID2Meta[collID]
+	if !ok {
+		return fmt.Errorf("collection = %d not has meta", collID)
+	}
+
+	clonedCol := new(model.Collection)
+	*clonedCol = col
+
+	for i, info := range clonedCol.FieldIndexes {
+		if info.FieldID == fieldID && info.IndexID == indexID {
+			clonedCol.FieldIndexes = append(clonedCol.FieldIndexes[:i], clonedCol.FieldIndexes[i+1:]...)
+			break
+		}
+	}
+
+	// update metastore
+	if err := mt.catalog.DropIndex(mt.ctx, clonedCol, indexID, 0); err != nil {
+		return err
+	}
+	// update cache
+	mt.collID2Meta[collID] = *clonedCol
+
+	delete(mt.indexID2Meta, indexID)
+	for _, part := range col.Partitions {
+		if segIDMap, ok := mt.partID2SegID[part.PartitionID]; ok {
+			for segID := range segIDMap {
+				if segIndexInfos, ok := mt.segID2IndexMeta[segID]; ok {
+					delete(segIndexInfos, indexID)
+				}
+			}
+		}
+	}
+	return nil
+}
+
 // GetSegmentIndexInfoByID return segment index info by segment id
 func (mt *MetaTable) GetSegmentIndexInfoByID(segID typeutil.UniqueID, fieldID int64, idxName string) (model.Index, error) {
 	mt.ddLock.RLock()
@@ -671,7 +793,7 @@ func (mt *MetaTable) GetSegmentIndexInfoByID(segID typeutil.UniqueID, fieldID in
 	} else {
 		for idxID, seg := range segIdxMap {
 			idxMeta, ok := mt.indexID2Meta[idxID]
-			if ok {
+			if ok && !idxMeta.Deleted {
 				if idxMeta.IndexName != idxName {
 					continue
 				}
@@ -692,6 +814,12 @@ func (mt *MetaTable) GetSegmentIndexInfos(segID typeutil.UniqueID) (map[typeutil
 	ret, ok := mt.segID2IndexMeta[segID]
 	if !ok {
 		return nil, fmt.Errorf("segment not found in meta, segment: %d", segID)
+	}
+
+	for indexID, indexInfo := range ret {
+		if indexInfo.Deleted {
+			delete(ret, indexID)
+		}
 	}
 
 	return ret, nil
@@ -748,6 +876,10 @@ func (mt *MetaTable) unlockIsSegmentIndexed(segID typeutil.UniqueID, fieldSchema
 			continue
 		}
 
+		if idxMeta.Deleted {
+			continue
+		}
+
 		segIndex, ok := meta.SegmentIndexes[segID]
 		if !ok {
 			continue
@@ -779,6 +911,9 @@ func (mt *MetaTable) unlockGetCollectionInfo(collName string) (model.Collection,
 
 func (mt *MetaTable) checkFieldCanBeIndexed(collMeta model.Collection, fieldSchema model.Field, idxInfo *model.Index) error {
 	for _, f := range collMeta.FieldIndexes {
+		if f.Deleted {
+			continue
+		}
 		if f.FieldID == fieldSchema.FieldID {
 			if info, ok := mt.indexID2Meta[f.IndexID]; ok {
 				if idxInfo.IndexName != info.IndexName {
@@ -938,6 +1073,9 @@ func (mt *MetaTable) GetIndexByName(collName, indexName string) (model.Collectio
 		idxInfo, ok := mt.indexID2Meta[idx.IndexID]
 		if !ok {
 			return model.Collection{}, nil, fmt.Errorf("index id = %d not found", idx.IndexID)
+		}
+		if idxInfo.Deleted {
+			continue
 		}
 		if indexName == "" || idxInfo.IndexName == indexName {
 			rstIndex = append(rstIndex, idxInfo)

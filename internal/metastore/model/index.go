@@ -10,4 +10,5 @@ type Index struct {
 	IndexParams    []*commonpb.KeyValuePair
 	SegmentIndexes map[int64]SegmentIndex //segmentID -> segmentIndex
 	Extra          map[string]string
+	Deleted        bool
 }

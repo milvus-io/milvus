@@ -733,10 +733,16 @@ func TestGrpcService(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, rsp.ErrorCode)
 
-		dropIDLock.Lock()
-		assert.Equal(t, 1, len(dropID))
-		assert.Equal(t, idx[0].IndexID, dropID[0])
-		dropIDLock.Unlock()
+		for {
+			dropIDLock.Lock()
+			if len(dropID) == 1 {
+				assert.Equal(t, idx[0].IndexID, dropID[0])
+				dropIDLock.Unlock()
+				break
+			}
+			dropIDLock.Unlock()
+		}
+
 	})
 
 	t.Run("drop partition", func(t *testing.T) {

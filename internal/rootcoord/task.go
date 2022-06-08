@@ -1082,10 +1082,8 @@ func (t *DropIndexReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_DropIndex {
 		return fmt.Errorf("drop index, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
 	}
-	if err := t.core.RemoveIndex(ctx, t.Req.CollectionName, t.Req.IndexName); err != nil {
-		return err
-	}
-	_, _, err := t.core.MetaTable.DropIndex(t.Req.CollectionName, t.Req.FieldName, t.Req.IndexName)
+
+	err := t.core.MetaTable.MarkIndexDeleted(t.Req.CollectionName, t.Req.FieldName, t.Req.IndexName)
 	return err
 }
 

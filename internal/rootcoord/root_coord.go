@@ -445,6 +445,32 @@ func (c *Core) checkFlushedSegments(ctx context.Context) {
 	}
 }
 
+func (c *Core) recycleDroppedIndex() {
+	defer c.wg.Done()
+	ticker := time.NewTicker(3 * time.Second)
+
+	for {
+		select {
+		case <-c.ctx.Done():
+			return
+		case <-ticker.C:
+			droppedIndex := c.MetaTable.GetDroppedIndex()
+			for indexID, fieldID2CollID := range droppedIndex {
+				for fieldID, collID := range fieldID2CollID {
+					if err := c.CallDropIndexService(c.ctx, indexID); err != nil {
+						log.Warn("Notify IndexCoord to drop index failed, wait to retry", zap.Int64("collID", collID),
+							zap.Int64("fieldID", fieldID), zap.Int64("indexID", indexID))
+					}
+					if err := c.MetaTable.RemoveDroppedIndex(indexID, fieldID, collID); err != nil {
+						log.Warn("Remove index meta failed, wait to retry", zap.Int64("collID", collID),
+							zap.Int64("fieldID", fieldID), zap.Int64("indexID", indexID))
+					}
+				}
+			}
+		}
+	}
+}
+
 func (c *Core) getSegments(ctx context.Context, collID typeutil.UniqueID) (map[UniqueID]UniqueID, map[UniqueID]*datapb.SegmentBinlogs, error) {
 	collMeta, err := c.MetaTable.GetCollectionByID(collID, 0)
 	if err != nil {
@@ -1276,6 +1302,8 @@ func (c *Core) Start() error {
 		go c.checkFlushedSegmentsLoop()
 		go c.importManager.expireOldTasksLoop(&c.wg)
 		go c.importManager.sendOutTasksLoop(&c.wg)
+		c.wg.Add(1)
+		go c.recycleDroppedIndex()
 		Params.RootCoordCfg.CreatedTime = time.Now()
 		Params.RootCoordCfg.UpdatedTime = time.Now()
 	})
@@ -2064,6 +2092,9 @@ func (c *Core) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlus
 	}
 
 	for _, f := range coll.FieldIndexes {
+		if f.Deleted {
+			continue
+		}
 		fieldSch, err := GetFieldSchemaByID(coll, f.FieldID)
 		if err != nil {
 			log.Warn("field schema not found", zap.String("role", typeutil.RootCoordRole),
