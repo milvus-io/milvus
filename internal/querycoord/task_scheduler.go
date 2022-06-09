@@ -672,7 +672,8 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 					rollBackTasks := triggerTask.rollBack(scheduler.ctx)
 					log.Info("scheduleLoop: start rollBack after triggerTask failed",
 						zap.Int64("triggerTaskID", triggerTask.getTaskID()),
-						zap.Any("rollBackTasks", rollBackTasks))
+						zap.Any("rollBackTasks", rollBackTasks),
+						zap.String("error", resultInfo.Reason))
 					// there is no need to save rollBacked internal task to etcd
 					// After queryCoord recover, it will retry failed childTask
 					// if childTask still execute failed, then reProduce rollBacked tasks
