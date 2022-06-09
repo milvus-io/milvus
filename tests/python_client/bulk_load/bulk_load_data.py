@@ -108,7 +108,11 @@ def gen_row_based_json_file(row_file, str_pk, data_fields, float_vect,
                         else:
                             f.write('"uid":' + str(i + start_uid) + '')
                 if data_field == DataField.int_field:
-                    f.write('"int_scalar":' + str(random.randint(-999999, 9999999)) + '')
+                    if DataField.pk_field in data_fields:
+                        # if not auto_id, use the same value as pk to check the query results later
+                        f.write('"int_scalar":' + str(i + start_uid) + '')
+                    else:
+                        f.write('"int_scalar":' + str(random.randint(-999999, 9999999)) + '')
                 if data_field == DataField.float_field:
                     if err_type == DataErrorType.int_on_float_scalar:
                         f.write('"float_scalar":' + str(random.randint(-999999, 9999999)) + '')
@@ -167,8 +171,12 @@ def gen_column_base_json_file(col_file, str_pk, data_fields, float_vect,
                             f.write('"uid":[' + ",".join(str(i) for i in range(start_uid, start_uid + rows)) + "]")
                         f.write("\n")
                 if data_field == DataField.int_field:
-                    f.write('"int_scalar":[' + ",".join(str(
-                        random.randint(-999999, 9999999)) for i in range(rows)) + "]")
+                    if DataField.pk_field in data_fields:
+                        # if not auto_id, use the same value as pk to check the query results later
+                        f.write('"int_scalar":[' + ",".join(str(i) for i in range(start_uid, start_uid + rows)) + "]")
+                    else:
+                        f.write('"int_scalar":[' + ",".join(str(
+                            random.randint(-999999, 9999999)) for i in range(rows)) + "]")
                     f.write("\n")
                 if data_field == DataField.float_field:
                     if err_type == DataErrorType.int_on_float_scalar:
