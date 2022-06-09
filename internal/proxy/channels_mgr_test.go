@@ -205,31 +205,6 @@ func Test_singleTypeChannelsMgr_getVChannels(t *testing.T) {
 	})
 }
 
-func Test_singleTypeChannelsMgr_streamExist(t *testing.T) {
-	t.Run("exist", func(t *testing.T) {
-		m := &singleTypeChannelsMgr{
-			infos: map[UniqueID]streamInfos{
-				100: {stream: newSimpleMockMsgStream()},
-			},
-		}
-		exist := m.streamExist(100)
-		assert.True(t, exist)
-	})
-
-	t.Run("not exist", func(t *testing.T) {
-		m := &singleTypeChannelsMgr{
-			infos: map[UniqueID]streamInfos{
-				100: {stream: nil},
-			},
-		}
-		exist := m.streamExist(100)
-		assert.False(t, exist)
-		m.infos = make(map[UniqueID]streamInfos)
-		exist = m.streamExist(100)
-		assert.False(t, exist)
-	})
-}
-
 func Test_createStream(t *testing.T) {
 	t.Run("failed to create msgstream", func(t *testing.T) {
 		factory := newMockMsgStreamFactory()
@@ -268,8 +243,9 @@ func Test_singleTypeChannelsMgr_createMsgStream(t *testing.T) {
 				100: {stream: newMockMsgStream()},
 			},
 		}
-		err := m.createMsgStream(100)
+		stream, err := m.createMsgStream(100)
 		assert.NoError(t, err)
+		assert.NotNil(t, stream)
 	})
 
 	t.Run("failed to get channels", func(t *testing.T) {
@@ -278,7 +254,7 @@ func Test_singleTypeChannelsMgr_createMsgStream(t *testing.T) {
 				return channelInfos{}, errors.New("mock")
 			},
 		}
-		err := m.createMsgStream(100)
+		_, err := m.createMsgStream(100)
 		assert.Error(t, err)
 	})
 
@@ -295,7 +271,7 @@ func Test_singleTypeChannelsMgr_createMsgStream(t *testing.T) {
 			singleStreamType: dmlStreamType,
 			repackFunc:       nil,
 		}
-		err := m.createMsgStream(100)
+		_, err := m.createMsgStream(100)
 		assert.Error(t, err)
 	})
 
@@ -313,9 +289,10 @@ func Test_singleTypeChannelsMgr_createMsgStream(t *testing.T) {
 			singleStreamType: dmlStreamType,
 			repackFunc:       nil,
 		}
-		err := m.createMsgStream(100)
+		stream, err := m.createMsgStream(100)
 		assert.NoError(t, err)
-		stream, err := m.getStream(100)
+		assert.NotNil(t, stream)
+		stream, err = m.getOrCreateStream(100)
 		assert.NoError(t, err)
 		assert.NotNil(t, stream)
 	})
@@ -349,7 +326,7 @@ func Test_singleTypeChannelsMgr_getStream(t *testing.T) {
 				100: {stream: newMockMsgStream()},
 			},
 		}
-		stream, err := m.getStream(100)
+		stream, err := m.getOrCreateStream(100)
 		assert.NoError(t, err)
 		assert.NotNil(t, stream)
 	})
@@ -361,7 +338,7 @@ func Test_singleTypeChannelsMgr_getStream(t *testing.T) {
 				return channelInfos{}, errors.New("mock")
 			},
 		}
-		_, err := m.getStream(100)
+		_, err := m.getOrCreateStream(100)
 		assert.Error(t, err)
 	})
 
@@ -379,7 +356,7 @@ func Test_singleTypeChannelsMgr_getStream(t *testing.T) {
 			singleStreamType: dmlStreamType,
 			repackFunc:       nil,
 		}
-		stream, err := m.getStream(100)
+		stream, err := m.getOrCreateStream(100)
 		assert.NoError(t, err)
 		assert.NotNil(t, stream)
 	})
