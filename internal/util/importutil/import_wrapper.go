@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"path"
+	"runtime/debug"
 	"strconv"
 	"strings"
 
@@ -240,7 +241,6 @@ func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate b
 			tr := timerecord.NewTimeRecorder("combine field data")
 			defer tr.Elapse("finished")
 
-			fieldNames := make([]storage.FieldID, 0)
 			for k, v := range fields {
 				// ignore 0 row field
 				if v.RowNum() == 0 {
@@ -261,7 +261,6 @@ func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate b
 
 				// assign column data to fieldsData
 				fieldsData[k] = v
-				fieldNames = append(fieldNames, k)
 			}
 
 			return nil
@@ -377,6 +376,7 @@ func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate b
 		}
 	}
 
+	debug.FreeOSMemory()
 	// report file process state
 	p.importResult.State = commonpb.ImportState_ImportPersisted
 	return p.reportFunc(p.importResult)
