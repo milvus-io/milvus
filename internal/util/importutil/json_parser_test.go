@@ -7,6 +7,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -156,6 +157,41 @@ func strKeySchema() *schemapb.CollectionSchema {
 		},
 	}
 	return schema
+}
+
+func Test_AdjustBufSize(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// small row
+	schema := sampleSchema()
+	parser := NewJSONParser(ctx, schema)
+	assert.NotNil(t, parser)
+
+	sizePerRecord, _ := typeutil.EstimateSizePerRecord(schema)
+	assert.Equal(t, MaxBatchCount, MaxFileSize/(sizePerRecord*int(parser.bufSize)))
+
+	// huge row
+	schema.Fields[9].TypeParams = []*commonpb.KeyValuePair{
+		{Key: "dim", Value: "32768"},
+	}
+	parser = NewJSONParser(ctx, schema)
+	assert.NotNil(t, parser)
+	sizePerRecord, _ = typeutil.EstimateSizePerRecord(schema)
+
+	assert.Equal(t, 7, MaxFileSize/(sizePerRecord*int(parser.bufSize)))
+
+	// no change
+	schema = &schemapb.CollectionSchema{
+		Name:        "schema",
+		Description: "schema",
+		AutoID:      true,
+		Fields:      []*schemapb.FieldSchema{},
+	}
+	parser = NewJSONParser(ctx, schema)
+	assert.NotNil(t, parser)
+
+	assert.Equal(t, int64(MinBufferSize), parser.bufSize)
 }
 
 func Test_ParserRows(t *testing.T) {

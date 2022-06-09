@@ -119,6 +119,7 @@ type DataNode struct {
 	session      *sessionutil.Session
 	watchKv      kv.MetaKv
 	chunkManager storage.ChunkManager
+	idAllocator  *allocator2.IDAllocator
 
 	closer io.Closer
 
@@ -215,6 +216,15 @@ func (node *DataNode) Init() error {
 		log.Error("DataNode init session failed", zap.Error(err))
 		return err
 	}
+
+	idAllocator, err := allocator2.NewIDAllocator(node.ctx, node.rootCoord, Params.DataNodeCfg.GetNodeID())
+	if err != nil {
+		log.Error("failed to create id allocator",
+			zap.Error(err),
+			zap.String("role", typeutil.DataNodeRole), zap.Int64("DataNodeID", Params.DataNodeCfg.GetNodeID()))
+		return err
+	}
+	node.idAllocator = idAllocator
 
 	node.factory.Init(&Params)
 	log.Info("DataNode Init successfully",
@@ -433,6 +443,11 @@ var FilterThreshold Timestamp
 
 // Start will update DataNode state to HEALTHY
 func (node *DataNode) Start() error {
+	if err := node.idAllocator.Start(); err != nil {
+		log.Error("failed to start id allocator", zap.Error(err), zap.String("role", typeutil.DataNodeRole))
+		return err
+	}
+	log.Debug("start id allocator done", zap.String("role", typeutil.DataNodeRole))
 
 	rep, err := node.rootCoord.AllocTimestamp(node.ctx, &rootcoordpb.AllocTimestampRequest{
 		Base: &commonpb.MsgBase{
@@ -656,6 +671,11 @@ func (node *DataNode) Stop() error {
 	node.cancel()
 	node.flowgraphManager.dropAll()
 
+	if node.idAllocator != nil {
+		log.Info("close id allocator", zap.String("role", typeutil.DataNodeRole))
+		node.idAllocator.Close()
+	}
+
 	if node.closer != nil {
 		err := node.closer.Close()
 		if err != nil {
@@ -840,6 +860,8 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 			Reason:    msg,
 		}, nil
 	}
+
+	// get a timestamp for all the rows
 	rep, err := node.rootCoord.AllocTimestamp(ctx, &rootcoordpb.AllocTimestampRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_RequestTSO,
@@ -866,6 +888,7 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 
 	ts := rep.GetTimestamp()
 
+	// get collection schema and shard number
 	metaService := newMetaService(node.rootCoord, req.GetImportTask().GetCollectionId())
 	colInfo, err := metaService.getCollectionInfo(ctx, req.GetImportTask().GetCollectionId(), 0)
 	if err != nil {
@@ -878,13 +901,9 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 		}, nil
 	}
 
-	// temp id allocator service
-	idAllocator, err := allocator2.NewIDAllocator(node.ctx, node.rootCoord, Params.DataNodeCfg.GetNodeID())
-	_ = idAllocator.Start()
-	defer idAllocator.Close()
-
+	// parse files and generate segments
 	segmentSize := int64(Params.DataCoordCfg.SegmentMaxSize) * 1024 * 1024
-	importWrapper := importutil.NewImportWrapper(ctx, colInfo.GetSchema(), colInfo.GetShardsNum(), segmentSize, idAllocator, node.chunkManager,
+	importWrapper := importutil.NewImportWrapper(ctx, colInfo.GetSchema(), colInfo.GetShardsNum(), segmentSize, node.idAllocator, node.chunkManager,
 		importFlushReqFunc(node, req, importResult, colInfo.GetSchema(), ts), importResult, reportFunc)
 	err = importWrapper.Import(req.GetImportTask().GetFiles(), req.GetImportTask().GetRowBased(), false)
 	if err != nil {

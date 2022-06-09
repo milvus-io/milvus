@@ -421,6 +421,19 @@ func (mt *MetaTable) GetCollectionIDByName(cName string) (typeutil.UniqueID, err
 	return cID, nil
 }
 
+// GetCollectionNameByID returns the collection name according to its ID.
+// Returns an error if no matching name is found.
+func (mt *MetaTable) GetCollectionNameByID(collectionID typeutil.UniqueID) (string, error) {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+	log.Info("xxxxxxxxx", zap.Any("collID2Meta", mt.collID2Meta))
+	col, ok := mt.collID2Meta[collectionID]
+	if !ok {
+		return "", fmt.Errorf("can't find collection id : %d", collectionID)
+	}
+	return col.Schema.Name, nil
+}
+
 // GetCollectionByID return collection meta by collection id
 func (mt *MetaTable) GetCollectionByID(collectionID typeutil.UniqueID, ts typeutil.Timestamp) (*pb.CollectionInfo, error) {
 	mt.ddLock.RLock()

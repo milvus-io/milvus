@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 
 	"github.com/milvus-io/milvus/internal/util/etcd"
@@ -356,7 +357,7 @@ func TestDataNode(t *testing.T) {
 		assert.Equal(t, "", stat.GetReason())
 	})
 
-	t.Run("Test Import w/ bad flow graph", func(t *testing.T) {
+	t.Run("Test Import bad flow graph", func(t *testing.T) {
 		node.rootCoord = &RootCoordFactory{
 			collectionID: 100,
 			pkType:       schemapb.DataType_Int64,
@@ -464,6 +465,30 @@ func TestDataNode(t *testing.T) {
 		stat, err = node.Import(context.WithValue(ctx, ctxKey{}, ""), req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, stat.GetErrorCode())
+	})
+
+	t.Run("Test Import callback func error", func(t *testing.T) {
+		req := &datapb.ImportTaskRequest{
+			ImportTask: &datapb.ImportTask{
+				CollectionId: 100,
+				PartitionId:  100,
+				ChannelNames: []string{"ch1", "ch2"},
+			},
+		}
+		importResult := &rootcoordpb.ImportResult{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+			TaskId:     0,
+			DatanodeId: 0,
+			State:      commonpb.ImportState_ImportStarted,
+			Segments:   make([]int64, 0),
+			AutoIds:    make([]int64, 0),
+			RowCount:   0,
+		}
+		callback := importFlushReqFunc(node, req, importResult, nil, 0)
+		err := callback(nil, len(req.ImportTask.ChannelNames)+1)
+		assert.Error(t, err)
 	})
 
 	t.Run("Test BackGroundGC", func(t *testing.T) {

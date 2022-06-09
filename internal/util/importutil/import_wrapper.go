@@ -172,7 +172,7 @@ func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate b
 
 			if fileType == JSONFileExt {
 				err := func() error {
-					tr := timerecord.NewTimeRecorder("json parser: " + filePath)
+					tr := timerecord.NewTimeRecorder("json row-based parser: " + filePath)
 
 					// for minio storage, chunkManager will download file into local memory
 					// for local storage, chunkManager open the file directly
@@ -181,7 +181,7 @@ func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate b
 						return err
 					}
 					defer file.Close()
-					tr.Record("downloaded")
+					tr.Record("open reader")
 
 					// report file process state
 					p.importResult.State = commonpb.ImportState_ImportDownloaded
@@ -274,7 +274,7 @@ func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate b
 
 			if fileType == JSONFileExt {
 				err := func() error {
-					tr := timerecord.NewTimeRecorder("json parser: " + filePath)
+					tr := timerecord.NewTimeRecorder("json column-based parser: " + filePath)
 
 					// for minio storage, chunkManager will download file into local memory
 					// for local storage, chunkManager open the file directly
@@ -283,7 +283,7 @@ func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate b
 						return err
 					}
 					defer file.Close()
-					tr.Record("downloaded")
+					tr.Record("open reader")
 
 					// report file process state
 					p.importResult.State = commonpb.ImportState_ImportDownloaded
@@ -317,7 +317,7 @@ func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate b
 				}
 			} else if fileType == NumpyFileExt {
 				err := func() error {
-					tr := timerecord.NewTimeRecorder("json parser: " + filePath)
+					tr := timerecord.NewTimeRecorder("numpy parser: " + filePath)
 
 					// for minio storage, chunkManager will download file into local memory
 					// for local storage, chunkManager open the file directly
@@ -326,7 +326,7 @@ func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate b
 						return err
 					}
 					defer file.Close()
-					tr.Record("downloaded")
+					tr.Record("open reader")
 
 					// report file process state
 					p.importResult.State = commonpb.ImportState_ImportDownloaded

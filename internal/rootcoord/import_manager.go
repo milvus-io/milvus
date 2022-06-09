@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -40,6 +41,8 @@ const (
 	Bucket               = "bucket"
 	FailedReason         = "failed_reason"
 	Files                = "files"
+	CollectionName       = "collection"
+	PartitionName        = "partition"
 	MaxPendingCount      = 32
 	delimiter            = "/"
 	taskExpiredMsgPrefix = "task has expired after "
@@ -80,12 +83,14 @@ type importManager struct {
 
 	idAllocator       func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error)
 	callImportService func(ctx context.Context, req *datapb.ImportTaskRequest) *datapb.ImportTaskResponse
+	getCollectionName func(collID, partitionID typeutil.UniqueID) (string, string, error)
 }
 
 // newImportManager helper function to create a importManager
 func newImportManager(ctx context.Context, client kv.MetaKv,
 	idAlloc func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error),
-	importService func(ctx context.Context, req *datapb.ImportTaskRequest) *datapb.ImportTaskResponse) *importManager {
+	importService func(ctx context.Context, req *datapb.ImportTaskRequest) *datapb.ImportTaskResponse,
+	getCollectionName func(collID, partitionID typeutil.UniqueID) (string, string, error)) *importManager {
 	mgr := &importManager{
 		ctx:               ctx,
 		taskStore:         client,
@@ -98,6 +103,7 @@ func newImportManager(ctx context.Context, client kv.MetaKv,
 		lastReqID:         0,
 		idAllocator:       idAlloc,
 		callImportService: importService,
+		getCollectionName: getCollectionName,
 	}
 	return mgr
 }
@@ -431,6 +437,16 @@ func (m *importManager) updateTaskState(ir *rootcoordpb.ImportResult) (*datapb.I
 	return v, nil
 }
 
+func (m *importManager) getCollectionPartitionName(task *datapb.ImportTaskInfo, resp *milvuspb.GetImportStateResponse) {
+	if m.getCollectionName != nil {
+		colName, partName, err := m.getCollectionName(task.GetCollectionId(), task.GetPartitionId())
+		if err == nil {
+			resp.Infos = append(resp.Infos, &commonpb.KeyValuePair{Key: CollectionName, Value: colName})
+			resp.Infos = append(resp.Infos, &commonpb.KeyValuePair{Key: PartitionName, Value: partName})
+		}
+	}
+}
+
 // getTaskState looks for task with the given ID and returns its import state.
 func (m *importManager) getTaskState(tID int64) *milvuspb.GetImportStateResponse {
 	resp := &milvuspb.GetImportStateResponse{
@@ -456,6 +472,7 @@ func (m *importManager) getTaskState(tID int64) *milvuspb.GetImportStateResponse
 				resp.Infos = append(resp.Infos, &commonpb.KeyValuePair{Key: Files, Value: strings.Join(t.GetFiles(), ",")})
 				resp.HeuristicDataQueryable = t.GetHeuristicDataQueryable()
 				resp.HeuristicDataIndexed = t.GetHeuristicDataIndexed()
+				m.getCollectionPartitionName(t, resp)
 				found = true
 				break
 			}
@@ -484,6 +501,7 @@ func (m *importManager) getTaskState(tID int64) *milvuspb.GetImportStateResponse
 			})
 			resp.HeuristicDataQueryable = v.GetHeuristicDataQueryable()
 			resp.HeuristicDataIndexed = v.GetHeuristicDataIndexed()
+			m.getCollectionPartitionName(v, resp)
 		}
 	}()
 	if found {
@@ -597,6 +615,12 @@ func (m *importManager) expireOldTasks() {
 	}()
 }
 
+func rearrangeTasks(tasks []*milvuspb.GetImportStateResponse) {
+	sort.Slice(tasks, func(i, j int) bool {
+		return tasks[i].GetId() < tasks[j].GetId()
+	})
+}
+
 func (m *importManager) listAllTasks() []*milvuspb.GetImportStateResponse {
 	tasks := make([]*milvuspb.GetImportStateResponse, 0)
 
@@ -615,6 +639,7 @@ func (m *importManager) listAllTasks() []*milvuspb.GetImportStateResponse {
 				HeuristicDataIndexed:   t.GetHeuristicDataIndexed(),
 			}
 			resp.Infos = append(resp.Infos, &commonpb.KeyValuePair{Key: Files, Value: strings.Join(t.GetFiles(), ",")})
+			m.getCollectionPartitionName(t, resp)
 			tasks = append(tasks, resp)
 		}
 		log.Info("tasks in pending list", zap.Int("count", len(m.pendingTasks)))
@@ -641,11 +666,13 @@ func (m *importManager) listAllTasks() []*milvuspb.GetImportStateResponse {
 				Key:   FailedReason,
 				Value: v.GetState().GetErrorMessage(),
 			})
+			m.getCollectionPartitionName(v, resp)
 			tasks = append(tasks, resp)
 		}
 		log.Info("tasks in working list", zap.Int("count", len(m.workingTasks)))
 	}()
 
+	rearrangeTasks(tasks)
 	return tasks
 }
 
