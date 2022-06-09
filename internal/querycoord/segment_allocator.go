@@ -202,8 +202,23 @@ func shuffleSegmentsToQueryNodeV2(ctx context.Context, reqs []*querypb.LoadSegme
 			}
 		}
 
-		time.Sleep(shuffleWaitInterval)
+		err := waitWithContext(ctx, shuffleWaitInterval)
+		if err != nil {
+			return err
+		}
 	}
+}
+
+// waitWithContext util function to wait for provided duration or context done.
+func waitWithContext(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	return nil
 }
 
 func nodeIncluded(nodeID int64, includeNodeIDs []int64) bool {

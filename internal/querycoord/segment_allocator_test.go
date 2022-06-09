@@ -18,9 +18,11 @@ package querycoord
 
 import (
 	"context"
+	"errors"
 	"math/rand"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 
@@ -132,6 +134,44 @@ func TestShuffleSegmentsToQueryNode(t *testing.T) {
 		assert.Equal(t, node2ID, secondReq.DstNodeID)
 	})
 
+	cluster.StopNode(node2ID)
+
+	t.Run("Test shuffleSegmentsToQueryNodeV2 ctx", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		err = shuffleSegmentsToQueryNodeV2(ctx, reqs, cluster, meta, true, nil, nil, -1)
+		assert.Error(t, err)
+
+		assert.True(t, errors.Is(err, context.Canceled))
+	})
+
 	err = removeAllSession()
 	assert.Nil(t, err)
+}
+
+func Test_waitWithContext(t *testing.T) {
+	t.Run("normal wait", func(t *testing.T) {
+		ctx := context.Background()
+
+		err := waitWithContext(ctx, time.Millisecond)
+		assert.NoError(t, err)
+	})
+
+	t.Run("context canceled", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		err := waitWithContext(ctx, time.Second)
+		assert.Error(t, err)
+		assert.True(t, errors.Is(err, context.Canceled))
+	})
+
+	t.Run("context deadline", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
+		defer cancel()
+
+		err := waitWithContext(ctx, time.Second)
+		assert.Error(t, err)
+		assert.True(t, errors.Is(err, context.DeadlineExceeded))
+	})
 }
