@@ -20,12 +20,14 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"path"
 	"strconv"
 	"strings"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/milvus-io/milvus/internal/kv"
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
 
@@ -86,6 +88,8 @@ type ROChannelStore interface {
 	GetBufferChannelInfo() *NodeChannelInfo
 	// GetNodes gets all node ids in store.
 	GetNodes() []int64
+	// LoadAllChannels returns all channels of the given nodeId
+	LoadAllChannels(nodeID UniqueID) ([]*datapb.ChannelWatchInfo, error)
 }
 
 // RWChannelStore is the read write channel store for channels and nodes.
@@ -104,9 +108,10 @@ type RWChannelStore interface {
 // ChannelStore must satisfy RWChannelStore.
 var _ RWChannelStore = (*ChannelStore)(nil)
 
+// TODO: merge ChannelStore into meta, meta should tak charge of all the operations with kv
 // ChannelStore maintains a mapping between channels and data nodes.
 type ChannelStore struct {
-	store        kv.TxnKV                   // A kv store with (NodeChannelKey) -> (ChannelWatchInfos) information.
+	meta         meta
 	channelsInfo map[int64]*NodeChannelInfo // A map of (nodeID) -> (NodeChannelInfo).
 }
 
@@ -117,9 +122,9 @@ type NodeChannelInfo struct {
 }
 
 // NewChannelStore creates and returns a new ChannelStore.
-func NewChannelStore(kv kv.TxnKV) *ChannelStore {
+func NewChannelStore(meta meta) *ChannelStore {
 	c := &ChannelStore{
-		store:        kv,
+		meta:         meta,
 		channelsInfo: make(map[int64]*NodeChannelInfo),
 	}
 	c.channelsInfo[bufferID] = &NodeChannelInfo{
@@ -131,7 +136,7 @@ func NewChannelStore(kv kv.TxnKV) *ChannelStore {
 
 // Reload restores the buffer channels and node-channels mapping from kv.
 func (c *ChannelStore) Reload() error {
-	keys, values, err := c.store.LoadWithPrefix(Params.DataCoordCfg.ChannelWatchSubPath)
+	keys, values, err := c.meta.client.LoadWithPrefix(Params.DataCoordCfg.ChannelWatchSubPath)
 	if err != nil {
 		return err
 	}
@@ -190,7 +195,7 @@ func (c *ChannelStore) Update(opSet ChannelOpSet) error {
 				Channels: []*channel{ch},
 			}
 			if op.Type == Add {
-				chOp.ChannelWatchInfos = []*datapb.ChannelWatchInfo{op.ChannelWatchInfos[i]}
+				chOp.ChannelWatchInfos = []*datapb.ChannelWatchInfo{c.meta.compactChannelWatchInfo(op.ChannelWatchInfos[i])}
 			}
 			perChOps[ch.Name] = append(perChOps[ch.Name], chOp)
 		}
@@ -318,7 +323,33 @@ func (c *ChannelStore) GetNodes() []int64 {
 // remove deletes kv pairs from the kv store where keys have given nodeID as prefix.
 func (c *ChannelStore) remove(nodeID int64) error {
 	k := buildKeyPrefix(nodeID)
-	return c.store.RemoveWithPrefix(k)
+	return c.meta.client.RemoveWithPrefix(k)
+}
+
+func (c *ChannelStore) LoadAllChannels(nodeID UniqueID) ([]*datapb.ChannelWatchInfo, error) {
+	prefix := path.Join(Params.DataCoordCfg.ChannelWatchSubPath, strconv.FormatInt(nodeID, 10))
+
+	// TODO: change to LoadWithPrefixBytes
+	keys, values, err := c.meta.client.LoadWithPrefix(prefix)
+	if err != nil {
+		return nil, err
+	}
+
+	ret := []*datapb.ChannelWatchInfo{}
+
+	for i, k := range keys {
+		watchInfo, err := parseWatchInfo(k, []byte(values[i]))
+		watchInfo = c.meta.deCompactChannelWatchInfo(watchInfo)
+		if err != nil {
+			// TODO: delete this kv later
+			log.Warn("invalid watchInfo loaded", zap.Error(err))
+			continue
+		}
+
+		ret = append(ret, watchInfo)
+	}
+
+	return ret, nil
 }
 
 // txn updates the channelStore's kv store with the given channel ops.
@@ -330,19 +361,25 @@ func (c *ChannelStore) txn(opSet ChannelOpSet) error {
 			k := buildNodeChannelKey(op.NodeID, ch.Name)
 			switch op.Type {
 			case Add:
-				info, err := proto.Marshal(op.ChannelWatchInfos[i])
+				info, err := proto.Marshal(c.meta.compactChannelWatchInfo(op.ChannelWatchInfos[i]))
 				if err != nil {
 					return err
 				}
+				log.Info("wayblink ChannelStore add ChannelWatchInfo",
+					zap.String("key", k),
+					zap.String("value", string(info)),
+					zap.Int("length", len(string(info))))
 				saves[k] = string(info)
 			case Delete:
+				log.Info("wayblink ChannelStore delete ChannelWatchInfo",
+					zap.String("key", k))
 				removals = append(removals, k)
 			default:
 				return errUnknownOpType
 			}
 		}
 	}
-	return c.store.MultiSaveAndRemove(saves, removals)
+	return c.meta.client.MultiSaveAndRemove(saves, removals)
 }
 
 // buildNodeChannelKey generates a key for kv store, where the key is a concatenation of ChannelWatchSubPath, nodeID and channel name.

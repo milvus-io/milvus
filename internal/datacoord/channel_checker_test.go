@@ -17,7 +17,6 @@
 package datacoord
 
 import (
-	"path"
 	"testing"
 	"time"
 
@@ -44,46 +43,6 @@ func TestChannelStateTimer(t *testing.T) {
 		timer.getWatchers(prefix)
 		assert.NotNil(t, etcdCh)
 		assert.NotNil(t, timeoutCh)
-	})
-
-	t.Run("test loadAllChannels", func(t *testing.T) {
-		defer kv.RemoveWithPrefix("")
-		timer := newChannelStateTimer(kv)
-		timer.loadAllChannels(1)
-
-		validWatchInfo := datapb.ChannelWatchInfo{
-			Vchan:     &datapb.VchannelInfo{},
-			StartTs:   time.Now().Unix(),
-			State:     datapb.ChannelWatchState_ToWatch,
-			TimeoutTs: time.Now().Add(20 * time.Millisecond).UnixNano(),
-		}
-		validData, err := proto.Marshal(&validWatchInfo)
-		require.NoError(t, err)
-
-		prefix = Params.DataCoordCfg.ChannelWatchSubPath
-		prepareKvs := map[string]string{
-			path.Join(prefix, "1/channel-1"): "invalidWatchInfo",
-			path.Join(prefix, "1/channel-2"): string(validData),
-			path.Join(prefix, "2/channel-3"): string(validData),
-		}
-
-		err = kv.MultiSave(prepareKvs)
-		require.NoError(t, err)
-
-		tests := []struct {
-			inNodeID UniqueID
-			outLen   int
-		}{
-			{1, 1},
-			{2, 1},
-			{3, 0},
-		}
-
-		for _, test := range tests {
-			infos, err := timer.loadAllChannels(test.inNodeID)
-			assert.NoError(t, err)
-			assert.Equal(t, test.outLen, len(infos))
-		}
 	})
 
 	t.Run("test startOne", func(t *testing.T) {

@@ -43,7 +43,7 @@ func TestBufferChannelAssignPolicy(t *testing.T) {
 
 	channels := []*channel{{"chan1", 1}}
 	store := &ChannelStore{
-		store:        kv,
+		meta:         newMockMeta(kv),
 		channelsInfo: map[int64]*NodeChannelInfo{bufferID: {bufferID, channels}},
 	}
 
@@ -63,8 +63,9 @@ func TestConsistentHashRegisterPolicy(t *testing.T) {
 			{"chan1", 1},
 			{"chan2", 2},
 		}
+
 		store := &ChannelStore{
-			store:        kv,
+			meta:         newMockMeta(kv),
 			channelsInfo: map[int64]*NodeChannelInfo{bufferID: {bufferID, channels}},
 		}
 
@@ -87,7 +88,7 @@ func TestConsistentHashRegisterPolicy(t *testing.T) {
 		}
 
 		store := &ChannelStore{
-			store:        kv,
+			meta:         newMockMeta(kv),
 			channelsInfo: map[int64]*NodeChannelInfo{1: {1, channels}, 2: {2, []*channel{}}},
 		}
 
@@ -118,7 +119,7 @@ func TestAverageAssignPolicy(t *testing.T) {
 			"test assign empty cluster",
 			args{
 				&ChannelStore{
-					memkv.NewMemoryKV(),
+					newMockMeta(memkv.NewMemoryKV()),
 					map[int64]*NodeChannelInfo{},
 				},
 				[]*channel{{"chan1", 1}},
@@ -129,7 +130,7 @@ func TestAverageAssignPolicy(t *testing.T) {
 			"test watch same channel",
 			args{
 				&ChannelStore{
-					memkv.NewMemoryKV(),
+					newMockMeta(memkv.NewMemoryKV()),
 					map[int64]*NodeChannelInfo{
 						1: {1, []*channel{{"chan1", 1}}},
 					},
@@ -142,7 +143,7 @@ func TestAverageAssignPolicy(t *testing.T) {
 			"test normal assign",
 			args{
 				&ChannelStore{
-					memkv.NewMemoryKV(),
+					newMockMeta(memkv.NewMemoryKV()),
 					map[int64]*NodeChannelInfo{
 						1: {1, []*channel{{"chan1", 1}, {"chan2", 1}}},
 						2: {2, []*channel{{"chan3", 1}}},
@@ -177,7 +178,7 @@ func TestConsistentHashChannelAssignPolicy(t *testing.T) {
 			args{
 				consistent.New(),
 				&ChannelStore{
-					memkv.NewMemoryKV(),
+					newMockMeta(memkv.NewMemoryKV()),
 					map[int64]*NodeChannelInfo{},
 				},
 				[]*channel{{"chan1", 1}},
@@ -189,7 +190,7 @@ func TestConsistentHashChannelAssignPolicy(t *testing.T) {
 			args{
 				consistent.New(),
 				&ChannelStore{
-					memkv.NewMemoryKV(),
+					newMockMeta(memkv.NewMemoryKV()),
 					map[int64]*NodeChannelInfo{
 						1: {1, []*channel{{"chan1", 1}, {"chan2", 1}}},
 					},
@@ -203,7 +204,7 @@ func TestConsistentHashChannelAssignPolicy(t *testing.T) {
 			args{
 				consistent.New(),
 				&ChannelStore{
-					memkv.NewMemoryKV(),
+					newMockMeta(memkv.NewMemoryKV()),
 					map[int64]*NodeChannelInfo{1: {1, nil}, 2: {2, nil}, 3: {3, nil}},
 				},
 				[]*channel{{"chan1", 1}, {"chan2", 1}, {"chan3", 1}},
@@ -237,7 +238,7 @@ func TestAvgAssignUnregisteredChannels(t *testing.T) {
 			"test deregister the last node",
 			args{
 				&ChannelStore{
-					memkv.NewMemoryKV(),
+					newMockMeta(memkv.NewMemoryKV()),
 					map[int64]*NodeChannelInfo{
 						1: {1, []*channel{{"chan1", 1}}},
 					},
@@ -250,7 +251,7 @@ func TestAvgAssignUnregisteredChannels(t *testing.T) {
 			"test rebalance channels after deregister",
 			args{
 				&ChannelStore{
-					memkv.NewMemoryKV(),
+					newMockMeta(memkv.NewMemoryKV()),
 					map[int64]*NodeChannelInfo{
 						1: {1, []*channel{{"chan1", 1}}},
 						2: {2, []*channel{{"chan2", 1}}},
@@ -286,7 +287,7 @@ func TestConsistentHashDeregisterPolicy(t *testing.T) {
 			args{
 				consistent.New(),
 				&ChannelStore{
-					memkv.NewMemoryKV(),
+					newMockMeta(memkv.NewMemoryKV()),
 					map[int64]*NodeChannelInfo{
 						1: {1, []*channel{{"chan1", 1}}},
 					},
@@ -300,7 +301,7 @@ func TestConsistentHashDeregisterPolicy(t *testing.T) {
 			args{
 				consistent.New(),
 				&ChannelStore{
-					memkv.NewMemoryKV(),
+					newMockMeta(memkv.NewMemoryKV()),
 					map[int64]*NodeChannelInfo{
 						1: {1, []*channel{{"chan2", 1}}},
 						2: {2, []*channel{{"chan1", 1}}},
@@ -335,7 +336,7 @@ func TestAverageReassignPolicy(t *testing.T) {
 			"test only one node",
 			args{
 				&ChannelStore{
-					memkv.NewMemoryKV(),
+					newMockMeta(memkv.NewMemoryKV()),
 					map[int64]*NodeChannelInfo{
 						1: {1, []*channel{{"chan1", 1}}},
 					},
@@ -348,7 +349,7 @@ func TestAverageReassignPolicy(t *testing.T) {
 			"test normal reassing",
 			args{
 				&ChannelStore{
-					memkv.NewMemoryKV(),
+					newMockMeta(memkv.NewMemoryKV()),
 					map[int64]*NodeChannelInfo{
 						1: {1, []*channel{{"chan1", 1}, {"chan2", 1}}},
 						2: {2, []*channel{}},
@@ -442,7 +443,7 @@ func TestAvgAssignRegisterPolicy(t *testing.T) {
 			"test empty",
 			args{
 				&ChannelStore{
-					memkv.NewMemoryKV(),
+					newMockMeta(memkv.NewMemoryKV()),
 					map[int64]*NodeChannelInfo{},
 				},
 				1,
@@ -453,7 +454,7 @@ func TestAvgAssignRegisterPolicy(t *testing.T) {
 			"test with buffer channel",
 			args{
 				&ChannelStore{
-					memkv.NewMemoryKV(),
+					newMockMeta(memkv.NewMemoryKV()),
 					map[int64]*NodeChannelInfo{
 						bufferID: {bufferID, []*channel{{"ch1", 1}}},
 					},
@@ -477,7 +478,7 @@ func TestAvgAssignRegisterPolicy(t *testing.T) {
 			"test with avg assign",
 			args{
 				&ChannelStore{
-					memkv.NewMemoryKV(),
+					newMockMeta(memkv.NewMemoryKV()),
 					map[int64]*NodeChannelInfo{
 						1: {1, []*channel{{"ch1", 1}, {"ch2", 1}}},
 					},
@@ -496,7 +497,7 @@ func TestAvgAssignRegisterPolicy(t *testing.T) {
 			"test with avg equals to zero",
 			args{
 				&ChannelStore{
-					memkv.NewMemoryKV(),
+					newMockMeta(memkv.NewMemoryKV()),
 					map[int64]*NodeChannelInfo{
 						1: {1, []*channel{{"ch1", 1}}},
 						2: {2, []*channel{{"ch3", 1}}},
@@ -510,7 +511,7 @@ func TestAvgAssignRegisterPolicy(t *testing.T) {
 			"test node with empty channel",
 			args{
 				&ChannelStore{
-					memkv.NewMemoryKV(),
+					newMockMeta(memkv.NewMemoryKV()),
 					map[int64]*NodeChannelInfo{
 						1: {1, []*channel{{"ch1", 1}, {"ch2", 1}, {"ch3", 1}}},
 						2: {2, []*channel{}},

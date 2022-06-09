@@ -427,10 +427,16 @@ func (kv *EtcdKV) MultiSaveAndRemove(saves map[string]string, removals []string)
 	start := time.Now()
 	ops := make([]clientv3.Op, 0, len(saves)+len(removals))
 	for key, value := range saves {
+		log.Debug("MultiSaveBytesAndRemove save",
+			zap.String("key", key),
+			zap.String("value", value),
+			zap.Int("length", len(value)))
 		ops = append(ops, clientv3.OpPut(path.Join(kv.rootPath, key), value))
 	}
 
 	for _, keyDelete := range removals {
+		log.Debug("MultiSaveBytesAndRemove remove",
+			zap.String("key", keyDelete))
 		ops = append(ops, clientv3.OpDelete(path.Join(kv.rootPath, keyDelete)))
 	}
 
@@ -447,10 +453,16 @@ func (kv *EtcdKV) MultiSaveBytesAndRemove(saves map[string][]byte, removals []st
 	start := time.Now()
 	ops := make([]clientv3.Op, 0, len(saves)+len(removals))
 	for key, value := range saves {
+		log.Debug("MultiSaveBytesAndRemove save",
+			zap.String("key", key),
+			zap.String("value", string(value)),
+			zap.Int("length", len(string(value))))
 		ops = append(ops, clientv3.OpPut(path.Join(kv.rootPath, key), string(value)))
 	}
 
 	for _, keyDelete := range removals {
+		log.Debug("MultiSaveBytesAndRemove remove",
+			zap.String("key", keyDelete))
 		ops = append(ops, clientv3.OpDelete(path.Join(kv.rootPath, keyDelete)))
 	}
 

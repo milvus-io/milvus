@@ -18,8 +18,6 @@ package datacoord
 
 import (
 	"fmt"
-	"path"
-	"strconv"
 	"sync"
 	"time"
 
@@ -52,31 +50,6 @@ func (c *channelStateTimer) getWatchers(prefix string) (clientv3.WatchChan, chan
 
 	}
 	return c.etcdWatcher, c.timeoutWatcher
-}
-
-func (c *channelStateTimer) loadAllChannels(nodeID UniqueID) ([]*datapb.ChannelWatchInfo, error) {
-	prefix := path.Join(Params.DataCoordCfg.ChannelWatchSubPath, strconv.FormatInt(nodeID, 10))
-
-	// TODO: change to LoadWithPrefixBytes
-	keys, values, err := c.watchkv.LoadWithPrefix(prefix)
-	if err != nil {
-		return nil, err
-	}
-
-	ret := []*datapb.ChannelWatchInfo{}
-
-	for i, k := range keys {
-		watchInfo, err := parseWatchInfo(k, []byte(values[i]))
-		if err != nil {
-			// TODO: delete this kv later
-			log.Warn("invalid watchInfo loaded", zap.Error(err))
-			continue
-		}
-
-		ret = append(ret, watchInfo)
-	}
-
-	return ret, nil
 }
 
 // startOne can write ToWatch or ToRelease states.
@@ -142,7 +115,6 @@ func parseWatchInfo(key string, data []byte) (*datapb.ChannelWatchInfo, error) {
 		return nil, fmt.Errorf("invalid event data: fail to parse ChannelWatchInfo, key: %s, err: %v", key, err)
 
 	}
-
 	if watchInfo.Vchan == nil {
 		return nil, fmt.Errorf("invalid event: ChannelWatchInfo with nil VChannelInfo, key: %s", key)
 	}

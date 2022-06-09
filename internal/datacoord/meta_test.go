@@ -31,6 +31,15 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func newMockMeta(kv kv.TxnKV) meta {
+	mt := &meta{
+		client:      kv,
+		collections: make(map[UniqueID]*datapb.CollectionInfo),
+		segments:    NewSegmentsInfo(),
+	}
+	return *mt
+}
+
 func TestMeta_Basic(t *testing.T) {
 	const collID = UniqueID(0)
 	const partID0 = UniqueID(100)

@@ -317,7 +317,7 @@ func (s *Server) initCluster() error {
 	}
 
 	var err error
-	s.channelManager, err = NewChannelManager(s.kvClient, s.handler, withMsgstreamFactory(s.factory), withStateChecker())
+	s.channelManager, err = NewChannelManager(s.kvClient, *s.meta, s.handler, withMsgstreamFactory(s.factory), withStateChecker())
 	if err != nil {
 		return err
 	}

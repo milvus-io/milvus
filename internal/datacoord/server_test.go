@@ -2175,9 +2175,13 @@ func TestOptions(t *testing.T) {
 	})
 	t.Run("SetCluster", func(t *testing.T) {
 		defer kv.RemoveWithPrefix("")
-
+		mt := meta{
+			client:      kv,
+			collections: make(map[UniqueID]*datapb.CollectionInfo),
+			segments:    NewSegmentsInfo(),
+		}
 		sessionManager := NewSessionManager()
-		channelManager, err := NewChannelManager(kv, newMockHandler())
+		channelManager, err := NewChannelManager(kv, mt, newMockHandler())
 		assert.Nil(t, err)
 
 		cluster := NewCluster(sessionManager, channelManager)
@@ -2230,8 +2234,12 @@ func TestHandleSessionEvent(t *testing.T) {
 	}()
 	ctx, cancel := context.WithCancel(context.TODO())
 	defer cancel()
-
-	channelManager, err := NewChannelManager(kv, newMockHandler(), withFactory(&mockPolicyFactory{}))
+	mt := meta{
+		client:      kv,
+		collections: make(map[UniqueID]*datapb.CollectionInfo),
+		segments:    NewSegmentsInfo(),
+	}
+	channelManager, err := NewChannelManager(kv, mt, newMockHandler(), withFactory(&mockPolicyFactory{}))
 	assert.Nil(t, err)
 	sessionManager := NewSessionManager()
 	cluster := NewCluster(sessionManager, channelManager)

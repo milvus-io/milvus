@@ -1071,3 +1071,42 @@ func (m *meta) HasSegments(segIDs []UniqueID) (bool, error) {
 	}
 	return true, nil
 }
+
+// to fix #16047, erase details except id of segmentInfos in ChannelWatchInfo.VChan in order to make ChannelWatchInfo small
+func (m *meta) compactChannelWatchInfo(info *datapb.ChannelWatchInfo) *datapb.ChannelWatchInfo {
+	if info == nil {
+		return nil
+	}
+	cloneInfo := proto.Clone(info).(*datapb.ChannelWatchInfo)
+	eraseFn := func(segmentInfos []*datapb.SegmentInfo) {
+		for index, segmentInfo := range segmentInfos {
+			segID := segmentInfo.ID
+			segmentInfos[index] = &datapb.SegmentInfo{ID: segID}
+		}
+	}
+	if cloneInfo.Vchan != nil {
+		eraseFn(cloneInfo.Vchan.FlushedSegments)
+		eraseFn(cloneInfo.Vchan.UnflushedSegments)
+		eraseFn(cloneInfo.Vchan.DroppedSegments)
+	}
+	return cloneInfo
+}
+
+func (m *meta) deCompactChannelWatchInfo(info *datapb.ChannelWatchInfo) *datapb.ChannelWatchInfo {
+	if info == nil {
+		return nil
+	}
+	cloneInfo := proto.Clone(info).(*datapb.ChannelWatchInfo)
+	compeleteFn := func(segmentInfos []*datapb.SegmentInfo) {
+		for index, segmentInfo := range segmentInfos {
+			segID := segmentInfo.ID
+			segmentInfos[index] = m.GetSegment(segID).SegmentInfo
+		}
+	}
+	if cloneInfo.Vchan != nil {
+		compeleteFn(cloneInfo.Vchan.FlushedSegments)
+		compeleteFn(cloneInfo.Vchan.UnflushedSegments)
+		compeleteFn(cloneInfo.Vchan.DroppedSegments)
+	}
+	return cloneInfo
+}

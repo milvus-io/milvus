@@ -101,7 +101,7 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 	t.Run("toWatch-WatchSuccess", func(t *testing.T) {
 		metakv.RemoveWithPrefix("")
 		ctx, cancel := context.WithCancel(context.TODO())
-		chManager, err := NewChannelManager(metakv, newMockHandler())
+		chManager, err := NewChannelManager(metakv, newMockMeta(metakv), newMockHandler())
 		require.NoError(t, err)
 
 		wg := sync.WaitGroup{}
@@ -128,7 +128,7 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 	t.Run("ToWatch-WatchFail-ToRelease", func(t *testing.T) {
 		metakv.RemoveWithPrefix("")
 		ctx, cancel := context.WithCancel(context.TODO())
-		chManager, err := NewChannelManager(metakv, newMockHandler())
+		chManager, err := NewChannelManager(metakv, newMockMeta(metakv), newMockHandler())
 		require.NoError(t, err)
 
 		wg := sync.WaitGroup{}
@@ -154,7 +154,7 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 	t.Run("ToWatch-Timeout", func(t *testing.T) {
 		metakv.RemoveWithPrefix("")
 		ctx, cancel := context.WithCancel(context.TODO())
-		chManager, err := NewChannelManager(metakv, newMockHandler())
+		chManager, err := NewChannelManager(metakv, newMockMeta(metakv), newMockHandler())
 		require.NoError(t, err)
 
 		wg := sync.WaitGroup{}
@@ -187,7 +187,7 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 
 		metakv.RemoveWithPrefix("")
 		ctx, cancel := context.WithCancel(context.TODO())
-		chManager, err := NewChannelManager(metakv, newMockHandler())
+		chManager, err := NewChannelManager(metakv, newMockMeta(metakv), newMockHandler())
 		require.NoError(t, err)
 
 		wg := sync.WaitGroup{}
@@ -198,7 +198,6 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 		}()
 
 		chManager.store = &ChannelStore{
-			store: metakv,
 			channelsInfo: map[int64]*NodeChannelInfo{
 				nodeID: {nodeID, []*channel{
 					{channel1, collectionID},
@@ -234,7 +233,7 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 		factory := dependency.NewDefaultFactory(true)
 		_, err := factory.NewMsgStream(context.TODO())
 		require.NoError(t, err)
-		chManager, err := NewChannelManager(metakv, newMockHandler(), withMsgstreamFactory(factory))
+		chManager, err := NewChannelManager(metakv, newMockMeta(metakv), newMockHandler(), withMsgstreamFactory(factory))
 		require.NoError(t, err)
 
 		wg := sync.WaitGroup{}
@@ -245,7 +244,6 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 		}()
 
 		chManager.store = &ChannelStore{
-			store: metakv,
 			channelsInfo: map[int64]*NodeChannelInfo{
 				nodeID: {nodeID, []*channel{
 					{channel1, collectionID},
@@ -312,10 +310,9 @@ func TestChannelManager(t *testing.T) {
 			channel1, channel2 = "channel1", "channel2"
 		)
 
-		chManager, err := NewChannelManager(metakv, newMockHandler())
+		chManager, err := NewChannelManager(metakv, newMockMeta(metakv), newMockHandler())
 		require.NoError(t, err)
 		chManager.store = &ChannelStore{
-			store: metakv,
 			channelsInfo: map[int64]*NodeChannelInfo{
 				nodeID: {nodeID, []*channel{
 					{channel1, collectionID},
@@ -351,10 +348,9 @@ func TestChannelManager(t *testing.T) {
 			channel1, channel2 = "channel1", "channel2"
 		)
 
-		chManager, err := NewChannelManager(metakv, newMockHandler())
+		chManager, err := NewChannelManager(metakv, newMockMeta(metakv), newMockHandler())
 		require.NoError(t, err)
 		chManager.store = &ChannelStore{
-			store: metakv,
 			channelsInfo: map[int64]*NodeChannelInfo{
 				bufferID: {bufferID, []*channel{
 					{channel1, collectionID},
@@ -390,7 +386,7 @@ func TestChannelManager(t *testing.T) {
 			chanToAdd    = "new-channel-watch"
 		)
 
-		chManager, err := NewChannelManager(metakv, newMockHandler())
+		chManager, err := NewChannelManager(metakv, newMockMeta(metakv), newMockHandler())
 		require.NoError(t, err)
 
 		err = chManager.Watch(&channel{bufferCh, collectionID})
@@ -413,10 +409,9 @@ func TestChannelManager(t *testing.T) {
 			channelName, invalidChName = "to-release", "invalid-to-release"
 		)
 
-		chManager, err := NewChannelManager(metakv, newMockHandler())
+		chManager, err := NewChannelManager(metakv, newMockMeta(metakv), newMockHandler())
 		require.NoError(t, err)
 		chManager.store = &ChannelStore{
-			store: metakv,
 			channelsInfo: map[int64]*NodeChannelInfo{
 				nodeID: {nodeID, []*channel{{channelName, collectionID}}},
 			},
@@ -444,7 +439,7 @@ func TestChannelManager(t *testing.T) {
 			{UniqueID(115), "to-delete-chan"},
 		}
 
-		chManager, err := NewChannelManager(metakv, newMockHandler())
+		chManager, err := NewChannelManager(metakv, newMockMeta(metakv), newMockHandler())
 		require.NoError(t, err)
 
 		// prepare tests
@@ -495,10 +490,9 @@ func TestChannelManager(t *testing.T) {
 		var (
 			collectionID = UniqueID(999)
 		)
-		chManager, err := NewChannelManager(metakv, newMockHandler(), withStateChecker())
+		chManager, err := NewChannelManager(metakv, newMockMeta(metakv), newMockHandler(), withStateChecker())
 		require.NoError(t, err)
 		chManager.store = &ChannelStore{
-			store: metakv,
 			channelsInfo: map[int64]*NodeChannelInfo{
 				1: {1, []*channel{
 					{"channel-1", collectionID},
@@ -530,7 +524,7 @@ func TestChannelManager(t *testing.T) {
 		factory := dependency.NewDefaultFactory(true)
 		_, err := factory.NewMsgStream(context.TODO())
 		require.NoError(t, err)
-		chManager, err := NewChannelManager(metakv, newMockHandler(), withMsgstreamFactory(factory))
+		chManager, err := NewChannelManager(metakv, newMockMeta(metakv), newMockHandler(), withMsgstreamFactory(factory))
 
 		require.NoError(t, err)
 
@@ -584,7 +578,7 @@ func TestChannelManager(t *testing.T) {
 			channelName  = "get-channel-by-node-and-name"
 		)
 
-		chManager, err := NewChannelManager(metakv, newMockHandler())
+		chManager, err := NewChannelManager(metakv, newMockMeta(metakv), newMockHandler())
 		require.NoError(t, err)
 
 		ch := chManager.getChannelByNodeAndName(nodeID, channelName)
@@ -595,7 +589,6 @@ func TestChannelManager(t *testing.T) {
 		assert.Nil(t, ch)
 
 		chManager.store = &ChannelStore{
-			store: metakv,
 			channelsInfo: map[int64]*NodeChannelInfo{
 				nodeID: {nodeID, []*channel{{channelName, collectionID}}},
 			},
@@ -614,7 +607,7 @@ func TestChannelManager(t *testing.T) {
 			channelName  = "fill-channel-watchInfo-with-state"
 		)
 
-		chManager, err := NewChannelManager(metakv, newMockHandler())
+		chManager, err := NewChannelManager(metakv, newMockMeta(metakv), newMockHandler())
 		require.NoError(t, err)
 
 		tests := []struct {
@@ -649,7 +642,7 @@ func TestChannelManager(t *testing.T) {
 			channelName  = "update-with-timer"
 		)
 
-		chManager, err := NewChannelManager(metakv, newMockHandler())
+		chManager, err := NewChannelManager(metakv, newMockMeta(metakv), newMockHandler())
 		require.NoError(t, err)
 		chManager.store.Add(nodeID)
 
@@ -694,7 +687,7 @@ func TestChannelManager_Reload(t *testing.T) {
 			defer metakv.RemoveWithPrefix("")
 			data, err := proto.Marshal(getWatchInfoWithState(datapb.ChannelWatchState_ToWatch, collectionID, channelName))
 			require.NoError(t, err)
-			chManager, err := NewChannelManager(metakv, newMockHandler())
+			chManager, err := NewChannelManager(metakv, newMockMeta(metakv), newMockHandler())
 			require.NoError(t, err)
 			err = metakv.Save(path.Join(prefix, strconv.FormatInt(nodeID, 10), channelName), string(data))
 			require.NoError(t, err)
@@ -709,7 +702,7 @@ func TestChannelManager_Reload(t *testing.T) {
 			defer metakv.RemoveWithPrefix("")
 			data, err := proto.Marshal(getWatchInfoWithState(datapb.ChannelWatchState_ToRelease, collectionID, channelName))
 			require.NoError(t, err)
-			chManager, err := NewChannelManager(metakv, newMockHandler())
+			chManager, err := NewChannelManager(metakv, newMockMeta(metakv), newMockHandler())
 			require.NoError(t, err)
 			err = metakv.Save(path.Join(prefix, strconv.FormatInt(nodeID, 10), channelName), string(data))
 			require.NoError(t, err)
@@ -723,10 +716,9 @@ func TestChannelManager_Reload(t *testing.T) {
 
 		t.Run("WatchFail", func(t *testing.T) {
 			defer metakv.RemoveWithPrefix("")
-			chManager, err := NewChannelManager(metakv, newMockHandler())
+			chManager, err := NewChannelManager(metakv, newMockMeta(metakv), newMockHandler())
 			require.NoError(t, err)
 			chManager.store = &ChannelStore{
-				store: metakv,
 				channelsInfo: map[int64]*NodeChannelInfo{
 					nodeID: {nodeID, []*channel{{channelName, collectionID}}}},
 			}
@@ -744,11 +736,10 @@ func TestChannelManager_Reload(t *testing.T) {
 
 		t.Run("ReleaseSuccess", func(t *testing.T) {
 			defer metakv.RemoveWithPrefix("")
-			chManager, err := NewChannelManager(metakv, newMockHandler())
+			chManager, err := NewChannelManager(metakv, newMockMeta(metakv), newMockHandler())
 			require.NoError(t, err)
 			data, err := proto.Marshal(getWatchInfoWithState(datapb.ChannelWatchState_ReleaseSuccess, collectionID, channelName))
 			chManager.store = &ChannelStore{
-				store: metakv,
 				channelsInfo: map[int64]*NodeChannelInfo{
 					nodeID: {nodeID, []*channel{{channelName, collectionID}}}},
 			}
@@ -770,11 +761,10 @@ func TestChannelManager_Reload(t *testing.T) {
 
 		t.Run("ReleaseFail", func(t *testing.T) {
 			defer metakv.RemoveWithPrefix("")
-			chManager, err := NewChannelManager(metakv, newMockHandler())
+			chManager, err := NewChannelManager(metakv, newMockMeta(metakv), newMockHandler())
 			require.NoError(t, err)
 			data, err := proto.Marshal(getWatchInfoWithState(datapb.ChannelWatchState_ReleaseFailure, collectionID, channelName))
 			chManager.store = &ChannelStore{
-				store: metakv,
 				channelsInfo: map[int64]*NodeChannelInfo{
 					nodeID: {nodeID, []*channel{{channelName, collectionID}}},
 					999:    {999, []*channel{}},
@@ -802,12 +792,11 @@ func TestChannelManager_Reload(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.TODO())
 		defer cancel()
 
-		cm, err := NewChannelManager(metakv, newMockHandler())
+		cm, err := NewChannelManager(metakv, newMockMeta(metakv), newMockHandler())
 		assert.Nil(t, err)
 		assert.Nil(t, cm.AddNode(1))
 		assert.Nil(t, cm.AddNode(2))
 		cm.store = &ChannelStore{
-			store: metakv,
 			channelsInfo: map[int64]*NodeChannelInfo{
 				1: {1, []*channel{{"channel1", 1}}},
 				2: {2, []*channel{{"channel2", 1}}},
@@ -823,7 +812,7 @@ func TestChannelManager_Reload(t *testing.T) {
 		err = metakv.Save(path.Join(prefix, strconv.FormatInt(2, 10), "channel2"), string(data))
 		require.NoError(t, err)
 
-		cm2, err := NewChannelManager(metakv, newMockHandler())
+		cm2, err := NewChannelManager(metakv, newMockMeta(metakv), newMockHandler())
 		assert.Nil(t, err)
 		assert.Nil(t, cm2.Startup(ctx, []int64{3}))
 
@@ -852,7 +841,7 @@ func TestChannelManager_BalanceBehaviour(t *testing.T) {
 			collectionID = UniqueID(999)
 		)
 
-		chManager, err := NewChannelManager(metakv, newMockHandler(), withStateChecker())
+		chManager, err := NewChannelManager(metakv, newMockMeta(metakv), newMockHandler(), withStateChecker())
 		require.NoError(t, err)
 
 		ctx, cancel := context.WithCancel(context.TODO())
@@ -861,7 +850,6 @@ func TestChannelManager_BalanceBehaviour(t *testing.T) {
 		go chManager.stateChecker(ctx)
 
 		chManager.store = &ChannelStore{
-			store: metakv,
 			channelsInfo: map[int64]*NodeChannelInfo{
 				1: {1, []*channel{
 					{"channel-1", collectionID},
@@ -972,7 +960,6 @@ func TestChannelManager_RemoveChannel(t *testing.T) {
 			"test remove existed channel",
 			fields{
 				store: &ChannelStore{
-					store: metakv,
 					channelsInfo: map[int64]*NodeChannelInfo{
 						1: {
 							NodeID: 1,

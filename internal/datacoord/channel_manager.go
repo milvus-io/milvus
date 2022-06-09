@@ -46,6 +46,7 @@ type ChannelManager struct {
 	mu               sync.RWMutex
 	h                Handler
 	store            RWChannelStore
+	meta             meta
 	factory          ChannelPolicyFactory
 	registerPolicy   RegisterPolicy
 	deregisterPolicy DeregisterPolicy
@@ -86,6 +87,7 @@ func withStateChecker() ChannelManagerOpt {
 // NewChannelManager creates and returns a new ChannelManager instance.
 func NewChannelManager(
 	kv kv.MetaKv, // for TxnKv and MetaKv
+	meta meta,
 	h Handler,
 	options ...ChannelManagerOpt,
 ) (*ChannelManager, error) {
@@ -93,7 +95,8 @@ func NewChannelManager(
 		ctx:        context.TODO(),
 		h:          h,
 		factory:    NewChannelPolicyFactoryV1(kv),
-		store:      NewChannelStore(kv),
+		store:      NewChannelStore(meta),
+		meta:       meta,
 		stateTimer: newChannelStateTimer(kv),
 	}
 
@@ -175,7 +178,7 @@ func (c *ChannelManager) checkOldNodes(nodes []UniqueID) error {
 	// Load all the watch infos before processing
 	nodeWatchInfos := make(map[UniqueID][]*datapb.ChannelWatchInfo)
 	for _, nodeID := range nodes {
-		watchInfos, err := c.stateTimer.loadAllChannels(nodeID)
+		watchInfos, err := c.store.LoadAllChannels(nodeID)
 		if err != nil {
 			return err
 		}
@@ -722,6 +725,7 @@ func (c *ChannelManager) watchChannelStatesLoop(ctx context.Context) {
 				}
 				key := string(evt.Kv.Key)
 				watchInfo, err := parseWatchInfo(key, evt.Kv.Value)
+				watchInfo = c.meta.deCompactChannelWatchInfo(watchInfo)
 				if err != nil {
 					log.Warn("fail to parse watch info", zap.Error(err))
 					continue
