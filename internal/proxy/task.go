@@ -497,7 +497,7 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	it.PartitionID = partitionID
 	tr.Record("get collection id & partition id from cache")
 
-	stream, err := it.chMgr.getDMLStream(collID)
+	stream, err := it.chMgr.getOrCreateDmlStream(collID)
 	if err != nil {
 		return err
 	}
@@ -3260,7 +3260,7 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute delete %d", dt.ID()))
 
 	collID := dt.DeleteRequest.CollectionID
-	stream, err := dt.chMgr.getDMLStream(collID)
+	stream, err := dt.chMgr.getOrCreateDmlStream(collID)
 	if err != nil {
 		return err
 	}
