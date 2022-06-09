@@ -68,6 +68,7 @@ message ShowCollectionsResponse {
   common.Status status = 1;
   repeated int64 collectionIDs = 2;
   repeated int64 inMemory_percentages = 3;
+  repeated bool query_service_available = 4;
 }
 
 message ShowPartitionsRequest {

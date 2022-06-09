@@ -88,6 +88,51 @@ func (qc *QueryCoord) GetStatisticsChannel(ctx context.Context) (*milvuspb.Strin
 	}, nil
 }
 
+// checkAnyReplicaAvailable checks if the collection has enough distinct available shards. These shards
+// may come from different replica group. We only need these shards to form a replica that serves query
+// requests.
+func (qc *QueryCoord) checkAnyReplicaAvailable(collectionID UniqueID) bool {
+	replicas, _ := qc.meta.getReplicasByCollectionID(collectionID)
+	shardNames := qc.meta.getDmChannelNamesByCollectionID(collectionID)
+	shardNodes := getShardNodes(collectionID, qc.meta)
+	availableShards := make(map[string]struct{}, len(shardNames))
+	for _, replica := range replicas {
+		for _, shard := range replica.ShardReplicas {
+			if _, ok := availableShards[shard.DmChannelName]; ok {
+				continue
+			}
+			// check leader
+			isShardAvailable, err := qc.cluster.IsOnline(shard.LeaderID)
+			if err != nil || !isShardAvailable {
+				log.Warn("shard leader is unavailable",
+					zap.Int64("collectionID", replica.CollectionID),
+					zap.Int64("replicaID", replica.ReplicaID),
+					zap.String("DmChannel", shard.DmChannelName),
+					zap.Int64("shardLeaderID", shard.LeaderID),
+					zap.Error(err))
+				continue
+			}
+			// check other nodes
+			nodes := shardNodes[shard.DmChannelName]
+			for _, nodeID := range replica.NodeIds {
+				if _, ok := nodes[nodeID]; ok {
+					if ok, err := qc.cluster.IsOnline(nodeID); err != nil || !ok {
+						isShardAvailable = false
+						break
+					}
+				}
+			}
+			// set if available
+			if isShardAvailable {
+				availableShards[shard.DmChannelName] = struct{}{}
+			}
+		}
+	}
+
+	// check if there are enough available distinct shards
+	return len(availableShards) == len(shardNames)
+}
+
 // ShowCollections return all the collections that have been loaded
 func (qc *QueryCoord) ShowCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
 	log.Info("show collection start",
@@ -106,54 +151,56 @@ func (qc *QueryCoord) ShowCollections(ctx context.Context, req *querypb.ShowColl
 			Status: status,
 		}, nil
 	}
+	// parse meta
 	collectionInfos := qc.meta.showCollections()
-	ID2collectionInfo := make(map[UniqueID]*querypb.CollectionInfo)
-	inMemoryCollectionIDs := make([]UniqueID, 0)
+	collectionID2Info := make(map[UniqueID]*querypb.CollectionInfo)
 	for _, info := range collectionInfos {
-		ID2collectionInfo[info.CollectionID] = info
-		inMemoryCollectionIDs = append(inMemoryCollectionIDs, info.CollectionID)
+		collectionID2Info[info.CollectionID] = info
 	}
-	inMemoryPercentages := make([]int64, 0)
-	if len(req.CollectionIDs) == 0 {
-		for _, id := range inMemoryCollectionIDs {
-			inMemoryPercentages = append(inMemoryPercentages, ID2collectionInfo[id].InMemoryPercentage)
-		}
-		log.Info("show collection end",
-			zap.String("role", typeutil.QueryCoordRole),
-			zap.Int64s("collections", inMemoryCollectionIDs),
-			zap.Int64s("inMemoryPercentage", inMemoryPercentages),
-			zap.Int64("msgID", req.Base.MsgID))
-		return &querypb.ShowCollectionsResponse{
-			Status:              status,
-			CollectionIDs:       inMemoryCollectionIDs,
-			InMemoryPercentages: inMemoryPercentages,
-		}, nil
-	}
-	for _, id := range req.CollectionIDs {
-		if _, ok := ID2collectionInfo[id]; !ok {
-			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-			err := fmt.Errorf("collection %d has not been loaded to memory or load failed", id)
-			status.Reason = err.Error()
+
+	// validate collectionIDs in request
+	collectionIDs := req.CollectionIDs
+	for _, cid := range collectionIDs {
+		if _, ok := collectionID2Info[cid]; !ok {
+			err := fmt.Errorf("collection %d has not been loaded to memory or load failed", cid)
 			log.Warn("show collection failed",
 				zap.String("role", typeutil.QueryCoordRole),
-				zap.Int64("collectionID", id),
+				zap.Int64("collectionID", cid),
 				zap.Int64("msgID", req.Base.MsgID),
 				zap.Error(err))
 			return &querypb.ShowCollectionsResponse{
-				Status: status,
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UnexpectedError,
+					Reason:    err.Error(),
+				},
 			}, nil
 		}
-		inMemoryPercentages = append(inMemoryPercentages, ID2collectionInfo[id].InMemoryPercentage)
 	}
+
+	if len(collectionIDs) == 0 {
+		for _, info := range collectionInfos {
+			collectionIDs = append(collectionIDs, info.CollectionID)
+		}
+	}
+
+	inMemoryPercentages := make([]int64, 0, len(collectionIDs))
+	queryServiceAvailable := make([]bool, 0, len(collectionIDs))
+	for _, cid := range collectionIDs {
+		inMemoryPercentages = append(inMemoryPercentages, collectionID2Info[cid].InMemoryPercentage)
+		queryServiceAvailable = append(queryServiceAvailable, qc.checkAnyReplicaAvailable(cid))
+	}
+
 	log.Info("show collection end",
 		zap.String("role", typeutil.QueryCoordRole),
-		zap.Int64s("collections", req.CollectionIDs),
+		zap.Int64s("collectionIDs", req.CollectionIDs),
 		zap.Int64("msgID", req.Base.MsgID),
-		zap.Int64s("inMemoryPercentage", inMemoryPercentages))
+		zap.Int64s("inMemoryPercentage", inMemoryPercentages),
+		zap.Bools("queryServiceAvailable", queryServiceAvailable))
 	return &querypb.ShowCollectionsResponse{
-		Status:              status,
-		CollectionIDs:       req.CollectionIDs,
-		InMemoryPercentages: inMemoryPercentages,
+		Status:                status,
+		CollectionIDs:         collectionIDs,
+		InMemoryPercentages:   inMemoryPercentages,
+		QueryServiceAvailable: queryServiceAvailable,
 	}, nil
 }
 
@@ -1107,6 +1154,8 @@ func (qc *QueryCoord) GetShardLeaders(ctx context.Context, req *querypb.GetShard
 	}
 
 	replicas, err := qc.meta.getReplicasByCollectionID(req.CollectionID)
+	shardNames := qc.meta.getDmChannelNamesByCollectionID(req.CollectionID)
+
 	if err != nil {
 		status.ErrorCode = commonpb.ErrorCode_MetaFailed
 		status.Reason = err.Error()
@@ -1168,8 +1217,8 @@ func (qc *QueryCoord) GetShardLeaders(ctx context.Context, req *querypb.GetShard
 		shardLeaderLists = append(shardLeaderLists, shard)
 	}
 
-	// all replicas are not available
-	if len(shardLeaderLists) == 0 {
+	// check if there are enough available distinct shards
+	if len(shardLeaderLists) != len(shardNames) {
 		return &querypb.GetShardLeadersResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_NoReplicaAvailable,

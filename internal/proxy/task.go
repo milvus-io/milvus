@@ -1308,12 +1308,13 @@ func (sct *showCollectionsTask) Execute(ctx context.Context) error {
 		}
 
 		sct.result = &milvuspb.ShowCollectionsResponse{
-			Status:               resp.Status,
-			CollectionNames:      make([]string, 0, len(resp.CollectionIDs)),
-			CollectionIds:        make([]int64, 0, len(resp.CollectionIDs)),
-			CreatedTimestamps:    make([]uint64, 0, len(resp.CollectionIDs)),
-			CreatedUtcTimestamps: make([]uint64, 0, len(resp.CollectionIDs)),
-			InMemoryPercentages:  make([]int64, 0, len(resp.CollectionIDs)),
+			Status:                resp.Status,
+			CollectionNames:       make([]string, 0, len(resp.CollectionIDs)),
+			CollectionIds:         make([]int64, 0, len(resp.CollectionIDs)),
+			CreatedTimestamps:     make([]uint64, 0, len(resp.CollectionIDs)),
+			CreatedUtcTimestamps:  make([]uint64, 0, len(resp.CollectionIDs)),
+			InMemoryPercentages:   make([]int64, 0, len(resp.CollectionIDs)),
+			QueryServiceAvailable: make([]bool, 0, len(resp.CollectionIDs)),
 		}
 
 		for offset, id := range resp.CollectionIDs {
@@ -1334,6 +1335,7 @@ func (sct *showCollectionsTask) Execute(ctx context.Context) error {
 			sct.result.CreatedTimestamps = append(sct.result.CreatedTimestamps, collectionInfo.createdTimestamp)
 			sct.result.CreatedUtcTimestamps = append(sct.result.CreatedUtcTimestamps, collectionInfo.createdUtcTimestamp)
 			sct.result.InMemoryPercentages = append(sct.result.InMemoryPercentages, resp.InMemoryPercentages[offset])
+			sct.result.QueryServiceAvailable = append(sct.result.QueryServiceAvailable, resp.QueryServiceAvailable[offset])
 		}
 	} else {
 		sct.result = respFromRootCoord
