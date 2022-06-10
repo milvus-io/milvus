@@ -5,11 +5,13 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
+
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestDescribeSegmentReqTask_Type(t *testing.T) {
@@ -64,28 +66,22 @@ func TestDescribeSegmentsReqTask_Execute(t *testing.T) {
 		return []typeutil.UniqueID{segID}, nil
 	}
 	c.MetaTable = &MetaTable{
-		segID2IndexMeta: map[typeutil.UniqueID]map[typeutil.UniqueID]model.Index{},
+		segID2IndexMeta: map[typeutil.UniqueID]map[typeutil.UniqueID]etcdpb.SegmentIndexInfo{},
 	}
 	assert.NoError(t, tsk.Execute(context.Background()))
 
 	// index not found in meta.
 	c.MetaTable = &MetaTable{
-		segID2IndexMeta: map[typeutil.UniqueID]map[typeutil.UniqueID]model.Index{
+		segID2IndexMeta: map[typeutil.UniqueID]map[typeutil.UniqueID]etcdpb.SegmentIndexInfo{
 			segID: {
 				indexID: {
 					CollectionID: collID,
+					PartitionID:  partID,
+					SegmentID:    segID,
 					FieldID:      fieldID,
 					IndexID:      indexID,
-					SegmentIndexes: map[int64]model.SegmentIndex{
-						segID: {
-							Segment: model.Segment{
-								SegmentID:   segID,
-								PartitionID: partID,
-							},
-							BuildID:     buildID,
-							EnableIndex: true,
-						},
-					},
+					BuildID:      buildID,
+					EnableIndex:  true,
 				},
 			},
 		},
@@ -94,26 +90,20 @@ func TestDescribeSegmentsReqTask_Execute(t *testing.T) {
 
 	// success.
 	c.MetaTable = &MetaTable{
-		segID2IndexMeta: map[typeutil.UniqueID]map[typeutil.UniqueID]model.Index{
+		segID2IndexMeta: map[typeutil.UniqueID]map[typeutil.UniqueID]etcdpb.SegmentIndexInfo{
 			segID: {
 				indexID: {
 					CollectionID: collID,
+					PartitionID:  partID,
+					SegmentID:    segID,
 					FieldID:      fieldID,
 					IndexID:      indexID,
-					SegmentIndexes: map[int64]model.SegmentIndex{
-						segID: {
-							Segment: model.Segment{
-								SegmentID:   segID,
-								PartitionID: partID,
-							},
-							BuildID:     buildID,
-							EnableIndex: true,
-						},
-					},
+					BuildID:      buildID,
+					EnableIndex:  true,
 				},
 			},
 		},
-		indexID2Meta: map[typeutil.UniqueID]model.Index{
+		indexID2Meta: map[typeutil.UniqueID]etcdpb.IndexInfo{
 			indexID: {
 				IndexName:   indexName,
 				IndexID:     indexID,

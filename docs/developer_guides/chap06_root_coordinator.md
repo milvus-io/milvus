@@ -627,6 +627,7 @@ _proxyMetaBlob_, _collectionInfoBlob_, _partitionInfoBlob_, _IndexInfoBlob_, _se
 type metaTable struct {
 	txn             kv.TxnKV                                                        // client of a reliable txnkv service, i.e. etcd client
 	snapshot        kv.SnapShotKV                                                   // client of a reliable snapshotkv service, i.e. etcd client
+	proxyID2Meta    map[typeutil.UniqueID]pb.ProxyMeta                              // proxy id to proxy meta
 	collID2Meta     map[typeutil.UniqueID]pb.CollectionInfo                         // collection_id -> meta
 	collName2ID     map[string]typeutil.UniqueID                                    // collection name to collection id
 	collAlias2ID    map[string]typeutil.UniqueID                                    // collection alias to collection id
@@ -640,6 +641,7 @@ type metaTable struct {
 
 func NewMetaTable(kv kv.SnapShotKV) (*metaTable, error)
 
+func (mt *metaTable) AddProxy(po *pb.ProxyMeta) (typeutil.Timestamp, error)
 func (mt *metaTable) AddCollection(coll *pb.CollectionInfo, part *pb.PartitionInfo, idx []*pb.IndexInfo, ddOpStr func(ts typeutil.Timestamp) (string, error)) (typeutil.Timestamp, error)
 func (mt *metaTable) DeleteCollection(collID typeutil.UniqueID, ddOpStr func(ts typeutil.Timestamp) (string, error)) (typeutil.Timestamp, error)
 func (mt *metaTable) HasCollection(collID typeutil.UniqueID, ts typeutil.Timestamp) bool
@@ -690,6 +692,7 @@ type timetickSync struct {
 func newTimeTickSync(core *Core) *timetickSync
 
 func (t *timetickSync) UpdateTimeTick(in *internalpb.ChannelTimeTickMsg) error
+func (t *timetickSync) AddProxy(sess *sessionutil.Session)
 func (t *timetickSync) DelProxy(sess *sessionutil.Session)
 func (t *timetickSync) GetProxy(sess []*sessionutil.Session)
 func (t *timetickSync) StartWatch()

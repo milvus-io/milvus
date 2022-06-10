@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package kv
+package rootcoord
 
 import (
 	"context"
@@ -40,7 +40,7 @@ type rtPair struct {
 	ts  typeutil.Timestamp
 }
 
-type MetaSnapshot struct {
+type metaSnapshot struct {
 	cli   *clientv3.Client
 	root  string
 	tsKey string
@@ -52,11 +52,11 @@ type MetaSnapshot struct {
 	numTs  int
 }
 
-func NewMetaSnapshot(cli *clientv3.Client, root, tsKey string, bufSize int) (*MetaSnapshot, error) {
+func newMetaSnapshot(cli *clientv3.Client, root, tsKey string, bufSize int) (*metaSnapshot, error) {
 	if bufSize <= 0 {
 		bufSize = 1024
 	}
-	ms := &MetaSnapshot{
+	ms := &metaSnapshot{
 		cli:    cli,
 		root:   root,
 		tsKey:  tsKey,
@@ -72,7 +72,7 @@ func NewMetaSnapshot(cli *clientv3.Client, root, tsKey string, bufSize int) (*Me
 	return ms, nil
 }
 
-func (ms *MetaSnapshot) loadTs() error {
+func (ms *metaSnapshot) loadTs() error {
 	ctx, cancel := context.WithTimeout(context.Background(), RequestTimeout)
 	defer cancel()
 
@@ -115,12 +115,12 @@ func (ms *MetaSnapshot) loadTs() error {
 			return nil
 		}
 		if curVer == version {
-			log.Debug("Snapshot found save version with different revision", zap.Int64("revision", revision), zap.Int64("version", version))
+			log.Debug("snapshot found save version with different revision", zap.Int64("revision", revision), zap.Int64("version", version))
 		}
 		strTs := string(resp.Kvs[0].Value)
 		if strTs == "0" {
 			//#issue 7150, index building inserted "0", skipping
-			//this is a special fix for backward compatibility, the previous version will put 0 ts into the Snapshot building index
+			//this is a special fix for backward compatibility, the previous version will put 0 ts into the snapshot building index
 			continue
 		}
 		curTs, err := strconv.ParseUint(strTs, 10, 64)
@@ -139,16 +139,16 @@ func (ms *MetaSnapshot) loadTs() error {
 	return nil
 }
 
-func (ms *MetaSnapshot) maxTs() typeutil.Timestamp {
+func (ms *metaSnapshot) maxTs() typeutil.Timestamp {
 	return ms.ts2Rev[ms.maxPos].ts
 }
 
-func (ms *MetaSnapshot) minTs() typeutil.Timestamp {
+func (ms *metaSnapshot) minTs() typeutil.Timestamp {
 	return ms.ts2Rev[ms.minPos].ts
 }
 
-func (ms *MetaSnapshot) initTs(rev int64, ts typeutil.Timestamp) {
-	log.Debug("init meta Snapshot ts", zap.Int64("rev", rev), zap.Uint64("ts", ts))
+func (ms *metaSnapshot) initTs(rev int64, ts typeutil.Timestamp) {
+	log.Debug("init meta snapshot ts", zap.Int64("rev", rev), zap.Uint64("ts", ts))
 	if ms.numTs == 0 {
 		ms.maxPos = len(ms.ts2Rev) - 1
 		ms.minPos = len(ms.ts2Rev) - 1
@@ -163,7 +163,7 @@ func (ms *MetaSnapshot) initTs(rev int64, ts typeutil.Timestamp) {
 	}
 }
 
-func (ms *MetaSnapshot) putTs(rev int64, ts typeutil.Timestamp) {
+func (ms *metaSnapshot) putTs(rev int64, ts typeutil.Timestamp) {
 	log.Debug("put meta snapshto ts", zap.Int64("rev", rev), zap.Uint64("ts", ts))
 	ms.maxPos++
 	if ms.maxPos == len(ms.ts2Rev) {
@@ -182,7 +182,7 @@ func (ms *MetaSnapshot) putTs(rev int64, ts typeutil.Timestamp) {
 	}
 }
 
-func (ms *MetaSnapshot) searchOnCache(ts typeutil.Timestamp, start, length int) int64 {
+func (ms *metaSnapshot) searchOnCache(ts typeutil.Timestamp, start, length int) int64 {
 	if length == 1 {
 		return ms.ts2Rev[start].rev
 	}
@@ -208,7 +208,7 @@ func (ms *MetaSnapshot) searchOnCache(ts typeutil.Timestamp, start, length int) 
 	}
 }
 
-func (ms *MetaSnapshot) getRevOnCache(ts typeutil.Timestamp) int64 {
+func (ms *metaSnapshot) getRevOnCache(ts typeutil.Timestamp) int64 {
 	if ms.numTs == 0 {
 		return 0
 	}
@@ -236,7 +236,7 @@ func (ms *MetaSnapshot) getRevOnCache(ts typeutil.Timestamp) int64 {
 	return 0
 }
 
-func (ms *MetaSnapshot) getRevOnEtcd(ts typeutil.Timestamp, rev int64) int64 {
+func (ms *metaSnapshot) getRevOnEtcd(ts typeutil.Timestamp, rev int64) int64 {
 	if rev < 2 {
 		return 0
 	}
@@ -265,7 +265,7 @@ func (ms *MetaSnapshot) getRevOnEtcd(ts typeutil.Timestamp, rev int64) int64 {
 	return 0
 }
 
-func (ms *MetaSnapshot) getRev(ts typeutil.Timestamp) (int64, error) {
+func (ms *metaSnapshot) getRev(ts typeutil.Timestamp) (int64, error) {
 	rev := ms.getRevOnCache(ts)
 	if rev > 0 {
 		return rev, nil
@@ -278,7 +278,7 @@ func (ms *MetaSnapshot) getRev(ts typeutil.Timestamp) (int64, error) {
 	return 0, fmt.Errorf("can't find revision on ts=%d", ts)
 }
 
-func (ms *MetaSnapshot) Save(key, value string, ts typeutil.Timestamp) error {
+func (ms *metaSnapshot) Save(key, value string, ts typeutil.Timestamp) error {
 	ms.lock.Lock()
 	defer ms.lock.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), RequestTimeout)
@@ -297,7 +297,7 @@ func (ms *MetaSnapshot) Save(key, value string, ts typeutil.Timestamp) error {
 	return nil
 }
 
-func (ms *MetaSnapshot) Load(key string, ts typeutil.Timestamp) (string, error) {
+func (ms *metaSnapshot) Load(key string, ts typeutil.Timestamp) (string, error) {
 	ms.lock.RLock()
 	defer ms.lock.RUnlock()
 	ctx, cancel := context.WithTimeout(context.Background(), RequestTimeout)
@@ -327,7 +327,7 @@ func (ms *MetaSnapshot) Load(key string, ts typeutil.Timestamp) (string, error) 
 	return string(resp.Kvs[0].Value), nil
 }
 
-func (ms *MetaSnapshot) MultiSave(kvs map[string]string, ts typeutil.Timestamp) error {
+func (ms *metaSnapshot) MultiSave(kvs map[string]string, ts typeutil.Timestamp) error {
 	ms.lock.Lock()
 	defer ms.lock.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), RequestTimeout)
@@ -348,7 +348,7 @@ func (ms *MetaSnapshot) MultiSave(kvs map[string]string, ts typeutil.Timestamp) 
 	return nil
 }
 
-func (ms *MetaSnapshot) LoadWithPrefix(key string, ts typeutil.Timestamp) ([]string, []string, error) {
+func (ms *metaSnapshot) LoadWithPrefix(key string, ts typeutil.Timestamp) ([]string, []string, error) {
 	ms.lock.RLock()
 	defer ms.lock.RUnlock()
 	ctx, cancel := context.WithTimeout(context.Background(), RequestTimeout)
@@ -385,7 +385,7 @@ func (ms *MetaSnapshot) LoadWithPrefix(key string, ts typeutil.Timestamp) ([]str
 	return keys, values, nil
 }
 
-func (ms *MetaSnapshot) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string, ts typeutil.Timestamp) error {
+func (ms *metaSnapshot) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string, ts typeutil.Timestamp) error {
 	ms.lock.Lock()
 	defer ms.lock.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), RequestTimeout)

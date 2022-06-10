@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package kv
+package rootcoord
 
 import (
 	"bytes"
@@ -35,15 +35,15 @@ import (
 )
 
 var (
-	// SuffixSnapshotTombstone special value for tombstone mark
-	SuffixSnapshotTombstone = []byte{0xE2, 0x9B, 0xBC}
+	// suffixSnapshotTombstone special value for tombstone mark
+	suffixSnapshotTombstone = []byte{0xE2, 0x9B, 0xBC}
 )
 
-// SuffixSnapshot implements SnapshotKV
-// this is a simple replacement for MetaSnapshot, which is not available due to etcd compaction
-// SuffixSnapshot record timestamp as prefix of a key under the Snapshot prefix path
-type SuffixSnapshot struct {
-	// internal kv which SuffixSnapshot based on
+// suffixSnapshot implements SnapshotKV
+// this is a simple replacement for metaSnapshot, which is not available due to etcd compaction
+// suffixSnapshot record timestamp as prefix of a key under the snapshot prefix path
+type suffixSnapshot struct {
+	// internal kv which suffixSnapshot based on
 	kv.TxnKV
 	// rw mutex provided range lock
 	sync.RWMutex
@@ -76,10 +76,10 @@ type tsv struct {
 }
 
 // type conversion make sure implementation
-var _ kv.SnapShotKV = (*SuffixSnapshot)(nil)
+var _ kv.SnapShotKV = (*suffixSnapshot)(nil)
 
-// NewSuffixSnapshot creates a NewSuffixSnapshot with provided kv
-func NewSuffixSnapshot(txnKV kv.TxnKV, sep, root, snapshot string) (*SuffixSnapshot, error) {
+// newSuffixSnapshot creates a newSuffixSnapshot with provided kv
+func newSuffixSnapshot(txnKV kv.TxnKV, sep, root, snapshot string) (*suffixSnapshot, error) {
 	if txnKV == nil {
 		return nil, retry.Unrecoverable(errors.New("txnKV is nil"))
 	}
@@ -92,7 +92,7 @@ func NewSuffixSnapshot(txnKV kv.TxnKV, sep, root, snapshot string) (*SuffixSnaps
 	tk = path.Join(root, "k")
 	rootLen := len(tk) - 1
 
-	return &SuffixSnapshot{
+	return &suffixSnapshot{
 		TxnKV:          txnKV,
 		lastestTS:      make(map[string]typeutil.Timestamp),
 		separator:      sep,
@@ -105,31 +105,31 @@ func NewSuffixSnapshot(txnKV kv.TxnKV, sep, root, snapshot string) (*SuffixSnaps
 }
 
 // isTombstone helper function to check whether is tombstone mark
-func (ss *SuffixSnapshot) isTombstone(value string) bool {
-	return bytes.Equal([]byte(value), SuffixSnapshotTombstone)
+func (ss *suffixSnapshot) isTombstone(value string) bool {
+	return bytes.Equal([]byte(value), suffixSnapshotTombstone)
 }
 
 // hideRootPrefix helper function to hide root prefix from key
-func (ss *SuffixSnapshot) hideRootPrefix(value string) string {
+func (ss *suffixSnapshot) hideRootPrefix(value string) string {
 	return value[ss.rootLen:]
 }
 
 // composeSnapshotPrefix build a prefix for load snapshots
 // formated like [snapshotPrefix]/key[sep]
-func (ss *SuffixSnapshot) composeSnapshotPrefix(key string) string {
+func (ss *suffixSnapshot) composeSnapshotPrefix(key string) string {
 	return path.Join(ss.snapshotPrefix, key+ss.separator)
 }
 
 // composeTSKey unified tsKey composing method
 // uses key, ts and separator to form a key
-func (ss *SuffixSnapshot) composeTSKey(key string, ts typeutil.Timestamp) string {
+func (ss *suffixSnapshot) composeTSKey(key string, ts typeutil.Timestamp) string {
 	// [key][sep][ts]
 	return path.Join(ss.snapshotPrefix, fmt.Sprintf("%s%s%d", key, ss.separator, ts))
 }
 
 // isTSKey checks whether a key is in ts-key format
 // if true, also returns parsed ts value
-func (ss *SuffixSnapshot) isTSKey(key string) (typeutil.Timestamp, bool) {
+func (ss *suffixSnapshot) isTSKey(key string) (typeutil.Timestamp, bool) {
 	// not in snapshot path
 	if !strings.HasPrefix(key, ss.snapshotPrefix) {
 		return 0, false
@@ -146,7 +146,7 @@ func (ss *SuffixSnapshot) isTSKey(key string) (typeutil.Timestamp, bool) {
 
 // isTSOfKey check whether a key is in ts-key format of provided group key
 // if true, laso returns parsed ts value
-func (ss *SuffixSnapshot) isTSOfKey(key string, groupKey string) (typeutil.Timestamp, bool) {
+func (ss *suffixSnapshot) isTSOfKey(key string, groupKey string) (typeutil.Timestamp, bool) {
 	// not in snapshot path
 	if !strings.HasPrefix(key, ss.snapshotPrefix) {
 		return 0, false
@@ -167,7 +167,7 @@ func (ss *SuffixSnapshot) isTSOfKey(key string, groupKey string) (typeutil.Times
 
 // checkKeyTS checks provided key's latest ts is before provided ts
 // lock is needed
-func (ss *SuffixSnapshot) checkKeyTS(key string, ts typeutil.Timestamp) (bool, error) {
+func (ss *suffixSnapshot) checkKeyTS(key string, ts typeutil.Timestamp) (bool, error) {
 	latest, has := ss.lastestTS[key]
 	if !has {
 		err := ss.loadLatestTS(key)
@@ -180,11 +180,11 @@ func (ss *SuffixSnapshot) checkKeyTS(key string, ts typeutil.Timestamp) (bool, e
 }
 
 // loadLatestTS load the loatest ts for specified key
-func (ss *SuffixSnapshot) loadLatestTS(key string) error {
+func (ss *suffixSnapshot) loadLatestTS(key string) error {
 	prefix := ss.composeSnapshotPrefix(key)
 	keys, _, err := ss.TxnKV.LoadWithPrefix(prefix)
 	if err != nil {
-		log.Warn("SuffixSnapshot txnkv LoadWithPrefix failed", zap.String("key", key),
+		log.Warn("suffixSnapshot txnkv LoadWithPrefix failed", zap.String("key", key),
 			zap.Error(err))
 		return err
 	}
@@ -241,10 +241,10 @@ func binarySearchRecords(records []tsv, ts typeutil.Timestamp) (string, bool) {
 }
 
 // Save stores key-value pairs with timestamp
-// if ts is 0, SuffixSnapshot works as a TxnKV
-// otherwise, SuffixSnapshot will store a ts-key as "key[sep]ts"-value pair in snapshot path
+// if ts is 0, suffixSnapshot works as a TxnKV
+// otherwise, suffixSnapshot will store a ts-key as "key[sep]ts"-value pair in snapshot path
 // and for acceleration store original key-value if ts is the latest
-func (ss *SuffixSnapshot) Save(key string, value string, ts typeutil.Timestamp) error {
+func (ss *suffixSnapshot) Save(key string, value string, ts typeutil.Timestamp) error {
 	// if ts == 0, act like TxnKv
 	// will not update lastestTs since ts not not valid
 	if ts == 0 {
@@ -278,7 +278,7 @@ func (ss *SuffixSnapshot) Save(key string, value string, ts typeutil.Timestamp) 
 	return ss.TxnKV.Save(tsKey, value)
 }
 
-func (ss *SuffixSnapshot) Load(key string, ts typeutil.Timestamp) (string, error) {
+func (ss *suffixSnapshot) Load(key string, ts typeutil.Timestamp) (string, error) {
 	// if ts == 0, load latest by definition
 	// and with acceleration logic, just do load key will do
 	if ts == 0 {
@@ -351,7 +351,7 @@ func (ss *SuffixSnapshot) Load(key string, ts typeutil.Timestamp) (string, error
 // MultiSave save multiple kvs
 // if ts == 0, act like TxnKV
 // each key-value will be treated using same logic like Save
-func (ss *SuffixSnapshot) MultiSave(kvs map[string]string, ts typeutil.Timestamp) error {
+func (ss *suffixSnapshot) MultiSave(kvs map[string]string, ts typeutil.Timestamp) error {
 	// if ts == 0, act like TxnKV
 	if ts == 0 {
 		return ss.TxnKV.MultiSave(kvs)
@@ -378,7 +378,7 @@ func (ss *SuffixSnapshot) MultiSave(kvs map[string]string, ts typeutil.Timestamp
 
 // generateSaveExecute examine each key is the after the corresponding latest
 // returns calculated execute map and update ts list
-func (ss *SuffixSnapshot) generateSaveExecute(kvs map[string]string, ts typeutil.Timestamp) (map[string]string, []string, error) {
+func (ss *suffixSnapshot) generateSaveExecute(kvs map[string]string, ts typeutil.Timestamp) (map[string]string, []string, error) {
 	var after bool
 	var err error
 	execute := make(map[string]string)
@@ -403,7 +403,7 @@ func (ss *SuffixSnapshot) generateSaveExecute(kvs map[string]string, ts typeutil
 }
 
 // LoadWithPrefix load keys with provided prefix and returns value in the ts
-func (ss *SuffixSnapshot) LoadWithPrefix(key string, ts typeutil.Timestamp) ([]string, []string, error) {
+func (ss *suffixSnapshot) LoadWithPrefix(key string, ts typeutil.Timestamp) ([]string, []string, error) {
 	// ts 0 case shall be treated as fetch latest/current value
 	if ts == 0 {
 		keys, values, err := ss.TxnKV.LoadWithPrefix(key)
@@ -484,7 +484,7 @@ func (ss *SuffixSnapshot) LoadWithPrefix(key string, ts typeutil.Timestamp) ([]s
 // MultiSaveAndRemoveWithPrefix save muiltple kvs and remove as well
 // if ts == 0, act like TxnKV
 // each key-value will be treated in same logic like Save
-func (ss *SuffixSnapshot) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string, ts typeutil.Timestamp) error {
+func (ss *suffixSnapshot) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string, ts typeutil.Timestamp) error {
 	// if ts == 0, act like TxnKV
 	if ts == 0 {
 		return ss.TxnKV.MultiSaveAndRemoveWithPrefix(saves, removals)
@@ -503,15 +503,15 @@ func (ss *SuffixSnapshot) MultiSaveAndRemoveWithPrefix(saves map[string]string, 
 	for _, removal := range removals {
 		keys, _, err := ss.TxnKV.LoadWithPrefix(removal)
 		if err != nil {
-			log.Warn("SuffixSnapshot TxnKV LoadwithPrefix failed", zap.String("key", removal), zap.Error(err))
+			log.Warn("suffixSnapshot TxnKV LoadwithPrefix failed", zap.String("key", removal), zap.Error(err))
 			return err
 		}
 
 		// add tombstone to orignal key and add ts entry
 		for _, key := range keys {
 			key = ss.hideRootPrefix(key)
-			execute[key] = string(SuffixSnapshotTombstone)
-			execute[ss.composeTSKey(key, ts)] = string(SuffixSnapshotTombstone)
+			execute[key] = string(suffixSnapshotTombstone)
+			execute[ss.composeTSKey(key, ts)] = string(suffixSnapshotTombstone)
 			updateList = append(updateList, key)
 		}
 	}
