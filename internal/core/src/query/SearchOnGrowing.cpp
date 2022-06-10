@@ -55,10 +55,13 @@ FloatSearch(const segcore::SegmentGrowingImpl& segment,
         AssertInfo(vec_ptr->get_size_per_chunk() == field_indexing.get_size_per_chunk(),
                    "[FloatSearch]Chunk size of vector not equal to chunk size of field index");
 
+        auto size_per_chunk = field_indexing.get_size_per_chunk();
         for (int chunk_id = current_chunk_id; chunk_id < max_indexed_id; ++chunk_id) {
-            auto size_per_chunk = field_indexing.get_size_per_chunk();
-            auto indexing = field_indexing.get_chunk_indexing(chunk_id);
+            if ((chunk_id + 1) * size_per_chunk > ins_barrier) {
+                break;
+            }
 
+            auto indexing = field_indexing.get_chunk_indexing(chunk_id);
             auto sub_view = bitset.subview(chunk_id * size_per_chunk, size_per_chunk);
             auto sub_qr = SearchOnIndex(search_dataset, *indexing, search_conf, sub_view);
 
@@ -70,8 +73,8 @@ FloatSearch(const segcore::SegmentGrowingImpl& segment,
             }
 
             final_qr.merge(sub_qr);
+            current_chunk_id++;
         }
-        current_chunk_id = max_indexed_id;
     }
 
     // step 3: brute force search where small indexing is unavailable

@@ -190,9 +190,6 @@ class SegmentSealedImpl : public SegmentSealed {
     // deleted pks
     mutable DeletedRecord deleted_record_;
 
-    // pks to row offset
-    Pk2OffsetType pk2offset_;
-
     SchemaPtr schema_;
     int64_t id_;
 };

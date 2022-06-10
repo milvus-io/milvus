@@ -14,6 +14,7 @@
 #include <memory>
 #include <vector>
 #include <unordered_map>
+#include <utility>
 
 #include "common/Schema.h"
 #include "segcore/AckResponder.h"
@@ -34,7 +35,48 @@ struct InsertRecord {
     // used for timestamps index of sealed segment
     TimestampIndex timestamp_index_;
 
+    // pks to row offset
+    Pk2OffsetType pk2offset_;
+
     explicit InsertRecord(const Schema& schema, int64_t size_per_chunk);
+
+    std::vector<SegOffset>
+    search_pk(const PkType pk, Timestamp timestamp) const {
+        std::vector<SegOffset> res_offsets;
+        auto [iter_b, iter_e] = pk2offset_.equal_range(pk);
+        for (auto iter = iter_b; iter != iter_e; ++iter) {
+            auto offset = SegOffset(iter->second);
+            if (timestamps_[offset.get()] <= timestamp) {
+                res_offsets.push_back(offset);
+            }
+        }
+
+        return res_offsets;
+    }
+
+    std::vector<SegOffset>
+    search_pk(const PkType pk, int64_t insert_barrier) const {
+        std::vector<SegOffset> res_offsets;
+        auto [iter_b, iter_e] = pk2offset_.equal_range(pk);
+        for (auto iter = iter_b; iter != iter_e; ++iter) {
+            auto offset = SegOffset(iter->second);
+            if (offset.get() < insert_barrier) {
+                res_offsets.push_back(offset);
+            }
+        }
+
+        return res_offsets;
+    }
+
+    void
+    insert_pk(const PkType pk, int64_t offset) {
+        pk2offset_.insert(std::make_pair(pk, offset));
+    }
+
+    bool
+    empty_pks() const {
+        return pk2offset_.empty();
+    }
 
     // get field data without knowing the type
     VectorBase*

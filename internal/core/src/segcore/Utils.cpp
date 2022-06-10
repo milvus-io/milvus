@@ -379,7 +379,6 @@ get_deleted_bitmap(int64_t del_barrier,
                    int64_t insert_barrier,
                    DeletedRecord& delete_record,
                    const InsertRecord& insert_record,
-                   const Pk2OffsetType& pk2offset,
                    Timestamp query_timestamp) {
     auto old = delete_record.get_lru_entry();
     // if insert_barrier and del_barrier have not changed, use cache data directly
@@ -412,9 +411,9 @@ get_deleted_bitmap(int64_t del_barrier,
         // get pk in delete logs
         auto pk = delete_record.pks_[del_index];
         // find insert data which has same pk
-        auto [iter_b, iter_e] = pk2offset.equal_range(pk);
-        for (auto iter = iter_b; iter != iter_e; ++iter) {
-            auto insert_row_offset = iter->second;
+        auto segOffsets = insert_record.search_pk(pk, insert_barrier);
+        for (auto offset : segOffsets) {
+            int64_t insert_row_offset = offset.get();
             // for now, insert_barrier == insert count of segment, so this Assert will always work
             AssertInfo(insert_row_offset < insert_barrier, "Timestamp offset is larger than insert barrier");
 
