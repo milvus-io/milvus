@@ -1935,8 +1935,9 @@ func (lbt *loadBalanceTask) processNodeDownLoadBalance(ctx context.Context) erro
 			log.Info("loadBalanceTask: get collection's all partitionIDs", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", toRecoverPartitionIDs))
 			replica, err := lbt.getReplica(nodeID, collectionID)
 			if err != nil {
-				lbt.setResultInfo(err)
-				return err
+				// getReplica maybe failed, it will cause the balanceTask execute infinitely
+				log.Warn("loadBalanceTask: get replica failed", zap.Int64("collectionID", collectionID), zap.Int64("nodeId", nodeID))
+				continue
 			}
 
 			for _, partitionID := range toRecoverPartitionIDs {
