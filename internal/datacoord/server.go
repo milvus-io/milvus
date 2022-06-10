@@ -679,14 +679,7 @@ func (s *Server) watchService(ctx context.Context) {
 				}
 				return
 			}
-			if err := s.handleSessionEvent(ctx, event); err != nil {
-				go func() {
-					if err := s.Stop(); err != nil {
-						log.Warn("datacoord server stop error", zap.Error(err))
-					}
-				}()
-				return
-			}
+			go s.handleSessionEvent(event)
 		case event, ok := <-s.icEventCh:
 			if !ok {
 				// ErrCompacted in handled inside SessionWatcher
@@ -742,9 +735,9 @@ func (s *Server) watchService(ctx context.Context) {
 }
 
 // handles session events - DataNodes Add/Del
-func (s *Server) handleSessionEvent(ctx context.Context, event *sessionutil.SessionEvent) error {
+func (s *Server) handleSessionEvent(event *sessionutil.SessionEvent) {
 	if event == nil {
-		return nil
+		return
 	}
 	info := &datapb.DataNodeInfo{
 		Address:  event.Session.Address,
@@ -761,8 +754,10 @@ func (s *Server) handleSessionEvent(ctx context.Context, event *sessionutil.Sess
 			zap.String("address", info.Address),
 			zap.Int64("serverID", info.Version))
 		if err := s.cluster.Register(node); err != nil {
-			log.Warn("failed to regisger node", zap.Int64("id", node.NodeID), zap.String("address", node.Address), zap.Error(err))
-			return err
+			log.Error("failed to register node, shutting down DataCoord server", zap.Int64("id", node.NodeID), zap.String("address", node.Address), zap.Error(err))
+			if err := s.Stop(); err != nil {
+				log.Error("failed to stop DataCoord server", zap.Error(err))
+			}
 		}
 		s.metricsCacheManager.InvalidateSystemInfoMetrics()
 	case sessionutil.SessionDelEvent:
@@ -770,15 +765,16 @@ func (s *Server) handleSessionEvent(ctx context.Context, event *sessionutil.Sess
 			zap.String("address", info.Address),
 			zap.Int64("serverID", info.Version))
 		if err := s.cluster.UnRegister(node); err != nil {
-			log.Warn("failed to deregisger node", zap.Int64("id", node.NodeID), zap.String("address", node.Address), zap.Error(err))
-			return err
+			log.Error("failed to deregister node, shutting down DataCoord server", zap.Int64("id", node.NodeID), zap.String("address", node.Address), zap.Error(err))
+			if err := s.Stop(); err != nil {
+				log.Error("failed to stop DataCoord server", zap.Error(err))
+			}
 		}
 		s.metricsCacheManager.InvalidateSystemInfoMetrics()
 	default:
-		log.Warn("receive unknown service event type",
+		log.Error("unknown service event type received",
 			zap.Any("type", event.EventType))
 	}
-	return nil
 }
 
 // startFlushLoop starts a goroutine to handle post func process

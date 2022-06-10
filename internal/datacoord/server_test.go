@@ -2254,8 +2254,7 @@ func TestHandleSessionEvent(t *testing.T) {
 				Exclusive:  false,
 			},
 		}
-		err = svr.handleSessionEvent(context.Background(), evt)
-		assert.Nil(t, err)
+		assert.NotPanics(t, func() { svr.handleSessionEvent(evt) })
 
 		evt = &sessionutil.SessionEvent{
 			EventType: sessionutil.SessionAddEvent,
@@ -2266,8 +2265,7 @@ func TestHandleSessionEvent(t *testing.T) {
 				Exclusive:  false,
 			},
 		}
-		err = svr.handleSessionEvent(context.Background(), evt)
-		assert.Nil(t, err)
+		assert.NotPanics(t, func() { svr.handleSessionEvent(evt) })
 		dataNodes := svr.cluster.GetSessions()
 		assert.EqualValues(t, 1, len(dataNodes))
 		assert.EqualValues(t, "DN127.0.0.101", dataNodes[0].info.Address)
@@ -2281,16 +2279,14 @@ func TestHandleSessionEvent(t *testing.T) {
 				Exclusive:  false,
 			},
 		}
-		err = svr.handleSessionEvent(context.Background(), evt)
-		assert.Nil(t, err)
+		assert.NotPanics(t, func() { svr.handleSessionEvent(evt) })
 		dataNodes = svr.cluster.GetSessions()
 		assert.EqualValues(t, 0, len(dataNodes))
 	})
 
 	t.Run("nil evt", func(t *testing.T) {
 		assert.NotPanics(t, func() {
-			err = svr.handleSessionEvent(context.Background(), nil)
-			assert.Nil(t, err)
+			svr.handleSessionEvent(nil)
 		})
 	})
 }
