@@ -327,17 +327,16 @@ func TestChannelManager(t *testing.T) {
 		err = chManager.AddNode(nodeToAdd)
 		assert.NoError(t, err)
 
-		chInfo := chManager.store.GetNode(nodeID)
-		assert.Equal(t, 2, len(chInfo.Channels))
-		chInfo = chManager.store.GetNode(nodeToAdd)
-		assert.Equal(t, 0, len(chInfo.Channels))
+		assert.True(t, chManager.Match(nodeID, channel1))
+		assert.True(t, chManager.Match(nodeID, channel2))
+		assert.False(t, chManager.Match(nodeToAdd, channel1))
+		assert.False(t, chManager.Match(nodeToAdd, channel2))
 
 		err = chManager.Watch(&channel{"channel-3", collectionID})
 		assert.NoError(t, err)
 
-		chInfo = chManager.store.GetNode(nodeToAdd)
-		assert.Equal(t, 1, len(chInfo.Channels))
 		chManager.stateTimer.removeTimers([]string{"channel-3"})
+		assert.True(t, chManager.Match(nodeToAdd, "channel-3"))
 
 		checkWatchInfoWithState(t, metakv, datapb.ChannelWatchState_ToWatch, nodeToAdd, "channel-3", collectionID)
 	})
@@ -369,10 +368,8 @@ func TestChannelManager(t *testing.T) {
 		waitAndStore(datapb.ChannelWatchState_ToWatch, datapb.ChannelWatchState_WatchSuccess, nodeID, channel1)
 		waitAndStore(datapb.ChannelWatchState_ToWatch, datapb.ChannelWatchState_WatchSuccess, nodeID, channel2)
 
-		chInfo := chManager.store.GetNode(nodeID)
-		assert.Equal(t, 2, len(chInfo.Channels))
-		chManager.Match(nodeID, channel1)
-		chManager.Match(nodeID, channel2)
+		assert.True(t, chManager.Match(nodeID, channel1))
+		assert.True(t, chManager.Match(nodeID, channel2))
 
 		err = chManager.Watch(&channel{"channel-3", collectionID})
 		assert.NoError(t, err)
@@ -464,18 +461,11 @@ func TestChannelManager(t *testing.T) {
 		assert.NoError(t, err)
 		chManager.stateTimer.stopIfExsit(&ackEvent{releaseSuccessAck, reassignTest.chName, reassignTest.nodeID})
 
-		// test no nodes are removed from store
-		nodesID := chManager.store.GetNodes()
-		assert.Equal(t, 2, len(nodesID))
-
 		// test nodes of reassignTest contains no channel
-		nodeChanInfo := chManager.store.GetNode(reassignTest.nodeID)
-		assert.Equal(t, 0, len(nodeChanInfo.Channels))
-
 		// test all channels are assgined to node of remainTest
-		nodeChanInfo = chManager.store.GetNode(remainTest.nodeID)
-		assert.Equal(t, 2, len(nodeChanInfo.Channels))
-		assert.ElementsMatch(t, []*channel{{remainTest.chName, collectionID}, {reassignTest.chName, collectionID}}, nodeChanInfo.Channels)
+		assert.False(t, chManager.Match(reassignTest.nodeID, reassignTest.chName))
+		assert.True(t, chManager.Match(remainTest.nodeID, reassignTest.chName))
+		assert.True(t, chManager.Match(remainTest.nodeID, remainTest.chName))
 
 		// Delete node of reassginTest and try to Reassign node in remainTest
 		err = chManager.DeleteNode(reassignTest.nodeID)
@@ -551,18 +541,12 @@ func TestChannelManager(t *testing.T) {
 		assert.NoError(t, err)
 		chManager.stateTimer.stopIfExsit(&ackEvent{releaseSuccessAck, reassignTest.chName, reassignTest.nodeID})
 
-		// test no nodes are removed from store
-		nodesID := chManager.store.GetNodes()
-		assert.Equal(t, 2, len(nodesID))
-
 		// test nodes of reassignTest contains no channel
-		nodeChanInfo := chManager.store.GetNode(reassignTest.nodeID)
-		assert.Equal(t, 0, len(nodeChanInfo.Channels))
+		assert.False(t, chManager.Match(reassignTest.nodeID, reassignTest.chName))
 
 		// test all channels are assgined to node of remainTest
-		nodeChanInfo = chManager.store.GetNode(remainTest.nodeID)
-		assert.Equal(t, 2, len(nodeChanInfo.Channels))
-		assert.ElementsMatch(t, []*channel{{remainTest.chName, collectionID}, {reassignTest.chName, collectionID}}, nodeChanInfo.Channels)
+		assert.True(t, chManager.Match(remainTest.nodeID, reassignTest.chName))
+		assert.True(t, chManager.Match(remainTest.nodeID, remainTest.chName))
 
 		// Delete node of reassginTest and try to CleanupAndReassign node in remainTest
 		err = chManager.DeleteNode(reassignTest.nodeID)
@@ -899,48 +883,32 @@ func TestChannelManager_BalanceBehaviour(t *testing.T) {
 		waitAndStore(datapb.ChannelWatchState_ToRelease, datapb.ChannelWatchState_ReleaseSuccess, 1, channelBalanced)
 		waitAndStore(datapb.ChannelWatchState_ToWatch, datapb.ChannelWatchState_WatchSuccess, 2, channelBalanced)
 
-		infos := chManager.store.GetNode(1)
-		assert.Equal(t, 2, len(infos.Channels))
 		assert.True(t, chManager.Match(1, "channel-2"))
 		assert.True(t, chManager.Match(1, "channel-3"))
 
-		infos = chManager.store.GetNode(2)
-		assert.Equal(t, 1, len(infos.Channels))
 		assert.True(t, chManager.Match(2, "channel-1"))
 
 		chManager.AddNode(3)
 		chManager.Watch(&channel{"channel-4", collectionID})
 		waitAndStore(datapb.ChannelWatchState_ToWatch, datapb.ChannelWatchState_WatchSuccess, 3, "channel-4")
-		infos = chManager.store.GetNode(1)
-		assert.Equal(t, 2, len(infos.Channels))
+
 		assert.True(t, chManager.Match(1, "channel-2"))
 		assert.True(t, chManager.Match(1, "channel-3"))
-
-		infos = chManager.store.GetNode(2)
-		assert.Equal(t, 1, len(infos.Channels))
 		assert.True(t, chManager.Match(2, "channel-1"))
-
-		infos = chManager.store.GetNode(3)
-		assert.Equal(t, 1, len(infos.Channels))
 		assert.True(t, chManager.Match(3, "channel-4"))
 
 		chManager.DeleteNode(3)
 		waitAndStore(datapb.ChannelWatchState_ToWatch, datapb.ChannelWatchState_WatchSuccess, 2, "channel-4")
-		infos = chManager.store.GetNode(1)
-		assert.Equal(t, 2, len(infos.Channels))
+
 		assert.True(t, chManager.Match(1, "channel-2"))
 		assert.True(t, chManager.Match(1, "channel-3"))
-
-		infos = chManager.store.GetNode(2)
-		assert.Equal(t, 2, len(infos.Channels))
 		assert.True(t, chManager.Match(2, "channel-1"))
 		assert.True(t, chManager.Match(2, "channel-4"))
 
 		chManager.DeleteNode(2)
 		waitAndStore(datapb.ChannelWatchState_ToWatch, datapb.ChannelWatchState_WatchSuccess, 1, "channel-4")
 		waitAndStore(datapb.ChannelWatchState_ToWatch, datapb.ChannelWatchState_WatchSuccess, 1, "channel-1")
-		infos = chManager.store.GetNode(1)
-		assert.Equal(t, 4, len(infos.Channels))
+
 		assert.True(t, chManager.Match(1, "channel-2"))
 		assert.True(t, chManager.Match(1, "channel-3"))
 		assert.True(t, chManager.Match(1, "channel-1"))
