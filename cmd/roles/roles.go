@@ -90,6 +90,14 @@ func (mr *MilvusRoles) EnvValue(env string) bool {
 	return env == "1" || env == "true"
 }
 
+func (mr *MilvusRoles) printLDPreLoad() {
+	const LDPreLoad = "LD_PRELOAD"
+	val, ok := os.LookupEnv(LDPreLoad)
+	if ok {
+		log.Info("Enable Jemalloc", zap.String("Jemalloc Path", val))
+	}
+}
+
 func (mr *MilvusRoles) runRootCoord(ctx context.Context, localMsg bool) *components.RootCoord {
 	var rc *components.RootCoord
 	var wg sync.WaitGroup
@@ -349,6 +357,7 @@ func (mr *MilvusRoles) runIndexNode(ctx context.Context, localMsg bool, alias st
 func (mr *MilvusRoles) Run(local bool, alias string) {
 	log.Info("starting running Milvus components")
 	ctx, cancel := context.WithCancel(context.Background())
+	mr.printLDPreLoad()
 
 	// only standalone enable localMsg
 	if local {
