@@ -45,7 +45,8 @@ func TestSegment_newSegment(t *testing.T) {
 	schema := genTestCollectionSchema()
 	collectionMeta := genCollectionMeta(collectionID, schema)
 
-	collection := newCollection(collectionMeta.ID, collectionMeta.Schema)
+	collection, err := newCollection(collectionMeta.ID, collectionMeta.Schema)
+	assert.NoError(t, err)
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
@@ -53,7 +54,8 @@ func TestSegment_newSegment(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, segmentID, segment.segmentID)
 	deleteSegment(segment)
-	deleteCollection(collection)
+	err = deleteCollection(collection)
+	assert.NoError(t, err)
 
 	t.Run("test invalid type", func(t *testing.T) {
 		_, err = newSegment(collection,
@@ -69,7 +71,8 @@ func TestSegment_deleteSegment(t *testing.T) {
 	schema := genTestCollectionSchema()
 	collectionMeta := genCollectionMeta(collectionID, schema)
 
-	collection := newCollection(collectionMeta.ID, schema)
+	collection, err := newCollection(collectionMeta.ID, schema)
+	assert.NoError(t, err)
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
@@ -78,7 +81,8 @@ func TestSegment_deleteSegment(t *testing.T) {
 	assert.Nil(t, err)
 
 	deleteSegment(segment)
-	deleteCollection(collection)
+	err = deleteCollection(collection)
+	assert.NoError(t, err)
 
 	t.Run("test delete nil ptr", func(t *testing.T) {
 		s, err := genSimpleSealedSegment(defaultMsgLength)
@@ -93,7 +97,8 @@ func TestSegment_getRowCount(t *testing.T) {
 	collectionID := UniqueID(0)
 	schema := genTestCollectionSchema()
 
-	collection := newCollection(collectionID, schema)
+	collection, err := newCollection(collectionID, schema)
+	assert.NoError(t, err)
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
@@ -120,7 +125,8 @@ func TestSegment_getRowCount(t *testing.T) {
 	assert.Equal(t, int64(defaultMsgLength), rowCount)
 
 	deleteSegment(segment)
-	deleteCollection(collection)
+	err = deleteCollection(collection)
+	assert.NoError(t, err)
 
 	t.Run("test getRowCount nil ptr", func(t *testing.T) {
 		s, err := genSimpleSealedSegment(defaultMsgLength)
@@ -135,7 +141,8 @@ func TestSegment_retrieve(t *testing.T) {
 	collectionID := UniqueID(0)
 	schema := genTestCollectionSchema()
 
-	collection := newCollection(collectionID, schema)
+	collection, err := newCollection(collectionID, schema)
+	assert.NoError(t, err)
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
@@ -214,7 +221,8 @@ func TestSegment_getDeletedCount(t *testing.T) {
 	collectionID := UniqueID(0)
 	schema := genTestCollectionSchema()
 
-	collection := newCollection(collectionID, schema)
+	collection, err := newCollection(collectionID, schema)
+	assert.NoError(t, err)
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
@@ -236,7 +244,8 @@ func TestSegment_getDeletedCount(t *testing.T) {
 	err = segment.segmentInsert(offsetInsert, insertMsg.RowIDs, insertMsg.Timestamps, insertRecord)
 	assert.NoError(t, err)
 
-	var offsetDelete = segment.segmentPreDelete(10)
+	offsetDelete, err := segment.segmentPreDelete(10)
+	assert.NoError(t, err)
 	assert.GreaterOrEqual(t, offsetDelete, int64(0))
 
 	pks, err := getPKs(insertMsg, collection.schema)
@@ -248,7 +257,8 @@ func TestSegment_getDeletedCount(t *testing.T) {
 	// TODO: assert.Equal(t, deletedCount, len(ids))
 	assert.Equal(t, deletedCount, int64(0))
 
-	deleteCollection(collection)
+	err = deleteCollection(collection)
+	assert.NoError(t, err)
 
 	t.Run("test getDeletedCount nil ptr", func(t *testing.T) {
 		s, err := genSimpleSealedSegment(defaultMsgLength)
@@ -263,7 +273,8 @@ func TestSegment_getMemSize(t *testing.T) {
 	collectionID := UniqueID(0)
 	schema := genTestCollectionSchema()
 
-	collection := newCollection(collectionID, schema)
+	collection, err := newCollection(collectionID, schema)
+	assert.NoError(t, err)
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
@@ -291,7 +302,8 @@ func TestSegment_getMemSize(t *testing.T) {
 	fmt.Printf("memory size of segment: %d\n", memSize)
 
 	deleteSegment(segment)
-	deleteCollection(collection)
+	err = deleteCollection(collection)
+	assert.NoError(t, err)
 }
 
 //-------------------------------------------------------------------------------------- dm & search functions
@@ -299,7 +311,8 @@ func TestSegment_segmentInsert(t *testing.T) {
 	collectionID := UniqueID(0)
 	schema := genTestCollectionSchema()
 
-	collection := newCollection(collectionID, schema)
+	collection, err := newCollection(collectionID, schema)
+	assert.NoError(t, err)
 	assert.Equal(t, collection.ID(), collectionID)
 	segmentID := UniqueID(0)
 	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing)
@@ -320,7 +333,8 @@ func TestSegment_segmentInsert(t *testing.T) {
 	err = segment.segmentInsert(offsetInsert, insertMsg.RowIDs, insertMsg.Timestamps, insertRecord)
 	assert.NoError(t, err)
 	deleteSegment(segment)
-	deleteCollection(collection)
+	err = deleteCollection(collection)
+	assert.NoError(t, err)
 
 	t.Run("test nil segment", func(t *testing.T) {
 		segment, err := genSimpleSealedSegment(defaultMsgLength)
@@ -342,7 +356,8 @@ func TestSegment_segmentInsert(t *testing.T) {
 func TestSegment_segmentDelete(t *testing.T) {
 	collectionID := UniqueID(0)
 	schema := genTestCollectionSchema()
-	collection := newCollection(collectionID, schema)
+	collection, err := newCollection(collectionID, schema)
+	assert.NoError(t, err)
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
@@ -364,7 +379,8 @@ func TestSegment_segmentDelete(t *testing.T) {
 	err = segment.segmentInsert(offsetInsert, insertMsg.RowIDs, insertMsg.Timestamps, insertRecord)
 	assert.NoError(t, err)
 
-	var offsetDelete = segment.segmentPreDelete(10)
+	offsetDelete, err := segment.segmentPreDelete(10)
+	assert.NoError(t, err)
 	assert.GreaterOrEqual(t, offsetDelete, int64(0))
 
 	pks, err := getPKs(insertMsg, schema)
@@ -372,7 +388,8 @@ func TestSegment_segmentDelete(t *testing.T) {
 	err = segment.segmentDelete(offsetDelete, pks, insertMsg.Timestamps)
 	assert.NoError(t, err)
 
-	deleteCollection(collection)
+	err = deleteCollection(collection)
+	assert.NoError(t, err)
 }
 
 func TestSegment_segmentSearch(t *testing.T) {
@@ -431,14 +448,16 @@ func TestSegment_segmentSearch(t *testing.T) {
 
 	req.delete()
 	deleteSegment(segment)
-	deleteCollection(collection)
+	err = deleteCollection(collection)
+	assert.NoError(t, err)
 }
 
 //-------------------------------------------------------------------------------------- preDm functions
 func TestSegment_segmentPreInsert(t *testing.T) {
 	collectionID := UniqueID(0)
 	schema := genTestCollectionSchema()
-	collection := newCollection(collectionID, schema)
+	collection, err := newCollection(collectionID, schema)
+	assert.NoError(t, err)
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
@@ -451,13 +470,15 @@ func TestSegment_segmentPreInsert(t *testing.T) {
 	assert.GreaterOrEqual(t, offset, int64(0))
 
 	deleteSegment(segment)
-	deleteCollection(collection)
+	err = deleteCollection(collection)
+	assert.NoError(t, err)
 }
 
 func TestSegment_segmentPreDelete(t *testing.T) {
 	collectionID := UniqueID(0)
 	schema := genTestCollectionSchema()
-	collection := newCollection(collectionID, schema)
+	collection, err := newCollection(collectionID, schema)
+	assert.NoError(t, err)
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
@@ -479,28 +500,19 @@ func TestSegment_segmentPreDelete(t *testing.T) {
 	err = segment.segmentInsert(offsetInsert, insertMsg.RowIDs, insertMsg.Timestamps, insertRecord)
 	assert.NoError(t, err)
 
-	var offsetDelete = segment.segmentPreDelete(10)
+	offsetDelete, err := segment.segmentPreDelete(10)
+	assert.NoError(t, err)
 	assert.GreaterOrEqual(t, offsetDelete, int64(0))
 
 	deleteSegment(segment)
-	deleteCollection(collection)
+	err = deleteCollection(collection)
+	assert.NoError(t, err)
 }
 
 func TestSegment_segmentLoadDeletedRecord(t *testing.T) {
-	fieldParam := constFieldParam{
-		id:       100,
-		dataType: schemapb.DataType_Int64,
-	}
-	field := genPKFieldSchema(fieldParam)
-	schema := &schemapb.CollectionSchema{
-		Name:   defaultCollectionName,
-		AutoID: false,
-		Fields: []*schemapb.FieldSchema{
-			field,
-		},
-	}
-
-	seg, err := newSegment(newCollection(defaultCollectionID, schema),
+	collection, err := newCollection(defaultCollectionID, genTestCollectionSchema())
+	assert.NoError(t, err)
+	seg, err := newSegment(collection,
 		defaultSegmentID,
 		defaultPartitionID,
 		defaultCollectionID,
@@ -575,7 +587,8 @@ func TestSegment_indexInfo(t *testing.T) {
 
 func TestSegment_BasicMetrics(t *testing.T) {
 	schema := genTestCollectionSchema()
-	collection := newCollection(defaultCollectionID, schema)
+	collection, err := newCollection(defaultCollectionID, schema)
+	assert.NoError(t, err)
 	segment, err := newSegment(collection,
 		defaultSegmentID,
 		defaultPartitionID,
@@ -622,7 +635,8 @@ func TestSegment_fillIndexedFieldsData(t *testing.T) {
 	defer cancel()
 
 	schema := genTestCollectionSchema()
-	collection := newCollection(defaultCollectionID, schema)
+	collection, err := newCollection(defaultCollectionID, schema)
+	assert.NoError(t, err)
 	segment, err := newSegment(collection,
 		defaultSegmentID,
 		defaultPartitionID,

@@ -72,16 +72,16 @@ QueryOnBinaryVecIndexWithParam(CIndex index,
 CStatus
 CreateQueryResult(CIndexQueryResult* res);
 
-int64_t
-NqOfQueryResult(CIndexQueryResult res);
+CStatus
+NqOfQueryResult(CIndexQueryResult res, int64_t* nq);
 
-int64_t
-TopkOfQueryResult(CIndexQueryResult res);
+CStatus
+TopkOfQueryResult(CIndexQueryResult res, int64_t* topK);
 
-void
+CStatus
 GetIdsOfQueryResult(CIndexQueryResult res, int64_t* ids);
 
-void
+CStatus
 GetDistancesOfQueryResult(CIndexQueryResult res, float* distances);
 
 CStatus

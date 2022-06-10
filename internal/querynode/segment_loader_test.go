@@ -168,7 +168,8 @@ func TestSegmentLoader_loadSegmentFieldsData(t *testing.T) {
 
 		loader.metaReplica.removeSegment(defaultSegmentID, segmentTypeSealed)
 
-		col := newCollection(defaultCollectionID, schema)
+		col, err := newCollection(defaultCollectionID, schema)
+		assert.NoError(t, err)
 		assert.NotNil(t, col)
 		segment, err := newSegment(col,
 			defaultSegmentID,

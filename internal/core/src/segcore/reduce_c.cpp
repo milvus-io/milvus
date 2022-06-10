@@ -31,11 +31,11 @@ ReduceSearchResultsAndFillData(CSearchResultDataBlobs* cSearchResultDataBlobs,
                                int32_t num_slices) {
     try {
         // get SearchResult and SearchPlan
-        auto plan = static_cast<milvus::query::Plan*>(c_plan);
+        auto plan = reinterpret_cast<milvus::query::Plan*>(c_plan);
         AssertInfo(num_segments > 0, "num_segments must be greater than 0");
         std::vector<SearchResult*> search_results(num_segments);
         for (int i = 0; i < num_segments; ++i) {
-            search_results[i] = static_cast<SearchResult*>(c_search_results[i]);
+            search_results[i] = reinterpret_cast<SearchResult*>(c_search_results[i]);
         }
 
         // get slice_nqs and slice_topKs
@@ -76,11 +76,17 @@ GetSearchResultDataBlob(CProto* searchResultDataBlob,
     }
 }
 
-void
+CStatus
 DeleteSearchResultDataBlobs(CSearchResultDataBlobs cSearchResultDataBlobs) {
-    if (cSearchResultDataBlobs == nullptr) {
-        return;
+    try {
+        if (cSearchResultDataBlobs == nullptr) {
+            return milvus::SuccessCStatus();
+        }
+        auto search_result_data_blobs =
+            reinterpret_cast<milvus::segcore::SearchResultDataBlobs*>(cSearchResultDataBlobs);
+        delete search_result_data_blobs;
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(UnexpectedError, e.what());
     }
-    auto search_result_data_blobs = reinterpret_cast<milvus::segcore::SearchResultDataBlobs*>(cSearchResultDataBlobs);
-    delete search_result_data_blobs;
 }

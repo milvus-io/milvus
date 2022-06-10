@@ -15,16 +15,15 @@
 extern "C" {
 #endif
 
+#include "common/type_c.h"
+
 typedef void* CCollection;
 
-CCollection
-NewCollection(const char* schema_proto_blob);
+CStatus
+NewCollection(const char* schema_proto_blob, CCollection* c_collection);
 
-void
+CStatus
 DeleteCollection(CCollection collection);
-
-const char*
-GetCollectionName(CCollection collection);
 
 #ifdef __cplusplus
 }

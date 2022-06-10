@@ -314,15 +314,15 @@ func (c *Collection) getFieldType(fieldID FieldID) (schemapb.DataType, error) {
 }
 
 // newCollection returns a new Collection
-func newCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) *Collection {
-	/*
-		CCollection
-		NewCollection(const char* schema_proto_blob);
-	*/
+func newCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) (*Collection, error) {
 	schemaBlob := proto.MarshalTextString(schema)
 
 	cSchemaBlob := C.CString(schemaBlob)
-	collection := C.NewCollection(cSchemaBlob)
+	var collection C.CCollection
+	status := C.NewCollection(cSchemaBlob, &collection)
+	if err := HandleCStatus(&status, "NewCollection failed"); err != nil {
+		return nil, err
+	}
 
 	var newCollection = &Collection{
 		collectionPtr:      collection,
@@ -335,21 +335,16 @@ func newCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) *Co
 	log.Info("create collection", zap.Int64("collectionID", collectionID))
 
 	newCollection.setReleaseTime(Timestamp(math.MaxUint64), false)
-	return newCollection
+	return newCollection, nil
 }
 
 // deleteCollection delete collection and free the collection memory
-func deleteCollection(collection *Collection) {
-	/*
-		void
-		deleteCollection(CCollection collection);
-	*/
+func deleteCollection(collection *Collection) error {
 	cPtr := collection.collectionPtr
-	C.DeleteCollection(cPtr)
-
-	collection.collectionPtr = nil
-
+	status := C.DeleteCollection(cPtr)
+	if err := HandleCStatus(&status, "DeleteCollection failed"); err != nil {
+		return err
+	}
 	log.Info("delete collection", zap.Int64("collectionID", collection.ID()))
-
-	collection = nil
+	return nil
 }

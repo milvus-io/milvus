@@ -214,8 +214,10 @@ func TestMetaReplica_segment(t *testing.T) {
 		defer replica.freeAll()
 
 		schema := genTestCollectionSchema()
-		collection := replica.addCollection(defaultCollectionID, schema)
-		replica.addPartition(defaultCollectionID, defaultPartitionID)
+		collection, err := replica.addCollection(defaultCollectionID, schema)
+		assert.NoError(t, err)
+		err = replica.addPartition(defaultCollectionID, defaultPartitionID)
+		assert.NoError(t, err)
 
 		// test get indexed segment info
 		vectorFieldIDDs, err := replica.getVecFieldIDsByCollectionID(defaultCollectionID)

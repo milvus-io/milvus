@@ -26,7 +26,7 @@ typedef void* CLoadIndexInfo;
 CStatus
 NewLoadIndexInfo(CLoadIndexInfo* c_load_index_info);
 
-void
+CStatus
 DeleteLoadIndexInfo(CLoadIndexInfo c_load_index_info);
 
 CStatus

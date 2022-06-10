@@ -690,7 +690,6 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 					)
 					err = processDeleteMessages(loader.metaReplica, segmentTypeSealed, dmsg, delData)
 					if err != nil {
-						// TODO: panic?
 						// error occurs when missing meta info or unexpected pk type, should not happen
 						err = fmt.Errorf("deleteNode processDeleteMessages failed, collectionID = %d, err = %s", dmsg.CollectionID, err)
 						log.Error(err.Error())
@@ -718,10 +717,15 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 	for segmentID, pks := range delData.deleteIDs {
 		segment, err := loader.metaReplica.getSegmentByID(segmentID, segmentTypeSealed)
 		if err != nil {
-			log.Warn(err.Error())
-			continue
+			return err
 		}
-		offset := segment.segmentPreDelete(len(pks))
+		offset, err := segment.segmentPreDelete(len(pks))
+		if err != nil {
+			// error occurs when cgo function `PreDelete` failed
+			err = fmt.Errorf("segmentPreDelete failed, segmentID = %d, err = %s", segmentID, err)
+			log.Error(err.Error())
+			panic(err)
+		}
 		delData.deleteOffset[segmentID] = offset
 	}
 

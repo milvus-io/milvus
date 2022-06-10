@@ -1207,7 +1207,10 @@ func genSealedSegment(schema *schemapb.CollectionSchema,
 	segmentID UniqueID,
 	vChannel Channel,
 	msgLength int) (*Segment, error) {
-	col := newCollection(collectionID, schema)
+	col, err := newCollection(collectionID, schema)
+	if err != nil {
+		return nil, err
+	}
 	seg, err := newSegment(col,
 		segmentID,
 		partitionID,

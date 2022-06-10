@@ -82,7 +82,8 @@ func TestDataSyncService_DMLFlowGraphs(t *testing.T) {
 		assert.NoError(t, err)
 		_, err = dataSyncService.addFlowGraphsForDMLChannels(defaultCollectionID, []Channel{defaultDMLChannel})
 		assert.Error(t, err)
-		dataSyncService.metaReplica.addCollection(defaultCollectionID, genTestCollectionSchema())
+		_, err = dataSyncService.metaReplica.addCollection(defaultCollectionID, genTestCollectionSchema())
+		assert.NoError(t, err)
 	})
 }
 
@@ -145,7 +146,8 @@ func TestDataSyncService_DeltaFlowGraphs(t *testing.T) {
 		assert.NoError(t, err)
 		_, err = dataSyncService.addFlowGraphsForDeltaChannels(defaultCollectionID, []Channel{defaultDMLChannel})
 		assert.Error(t, err)
-		dataSyncService.metaReplica.addCollection(defaultCollectionID, genTestCollectionSchema())
+		_, err = dataSyncService.metaReplica.addCollection(defaultCollectionID, genTestCollectionSchema())
+		assert.NoError(t, err)
 	})
 }
 
@@ -174,7 +176,8 @@ func TestDataSyncService_checkReplica(t *testing.T) {
 		assert.NoError(t, err)
 		err = dataSyncService.checkReplica(defaultCollectionID)
 		assert.Error(t, err)
-		coll := dataSyncService.metaReplica.addCollection(defaultCollectionID, genTestCollectionSchema())
+		coll, err := dataSyncService.metaReplica.addCollection(defaultCollectionID, genTestCollectionSchema())
+		assert.NoError(t, err)
 		assert.NotNil(t, coll)
 	})
 

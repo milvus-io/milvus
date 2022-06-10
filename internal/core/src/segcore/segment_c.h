@@ -28,13 +28,13 @@ typedef void* CSearchResult;
 typedef CProto CRetrieveResult;
 
 //////////////////////////////    common interfaces    //////////////////////////////
-CSegmentInterface
-NewSegment(CCollection collection, SegmentType seg_type, int64_t segment_id);
+CStatus
+NewSegment(CCollection collection, SegmentType seg_type, int64_t segment_id, CSegmentInterface* c_segment);
 
-void
+CStatus
 DeleteSegment(CSegmentInterface c_segment);
 
-void
+CStatus
 DeleteSearchResult(CSearchResult search_result);
 
 CStatus
@@ -45,20 +45,20 @@ Search(CSegmentInterface c_segment,
        CSearchResult* result,
        int64_t segment_id);
 
-void
+CStatus
 DeleteRetrieveResult(CRetrieveResult* retrieve_result);
 
 CStatus
 Retrieve(CSegmentInterface c_segment, CRetrievePlan c_plan, uint64_t timestamp, CRetrieveResult* result);
 
-int64_t
-GetMemoryUsageInBytes(CSegmentInterface c_segment);
+CStatus
+GetMemoryUsageInBytes(CSegmentInterface c_segment, int64_t* mem_size);
 
-int64_t
-GetRowCount(CSegmentInterface c_segment);
+CStatus
+GetRowCount(CSegmentInterface c_segment, int64_t* row_count);
 
-int64_t
-GetDeletedCount(CSegmentInterface c_segment);
+CStatus
+GetDeletedCount(CSegmentInterface c_segment, int64_t* deleted_count);
 
 //////////////////////////////    interfaces for growing segment    //////////////////////////////
 CStatus
@@ -98,8 +98,8 @@ Delete(CSegmentInterface c_segment,
        const uint64_t ids_size,
        const uint64_t* timestamps);
 
-int64_t
-PreDelete(CSegmentInterface c_segment, int64_t size);
+CStatus
+PreDelete(CSegmentInterface c_segment, int64_t size, int64_t* offset);
 #ifdef __cplusplus
 }
 #endif

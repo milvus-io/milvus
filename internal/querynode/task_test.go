@@ -555,7 +555,8 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 		assert.NoError(t, err)
 
 		// has reload 3 delete log from dm channel, so next delete offset should be 3
-		offset := segment.segmentPreDelete(1)
+		offset, err := segment.segmentPreDelete(1)
+		assert.NoError(t, err)
 		assert.Equal(t, int64(3), offset)
 	})
 

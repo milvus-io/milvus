@@ -154,7 +154,10 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 	)
 
 	// init collection meta
-	coll := w.node.metaReplica.addCollection(collectionID, w.req.Schema)
+	coll, err := w.node.metaReplica.addCollection(collectionID, w.req.Schema)
+	if err != nil {
+		return err
+	}
 
 	//add shard cluster
 	for _, vchannel := range vChannels {
@@ -495,7 +498,10 @@ func (l *loadSegmentsTask) PreExecute(ctx context.Context) error {
 	var err error
 	// init meta
 	collectionID := l.req.GetCollectionID()
-	l.node.metaReplica.addCollection(collectionID, l.req.GetSchema())
+	_, err = l.node.metaReplica.addCollection(collectionID, l.req.GetSchema())
+	if err != nil {
+		return err
+	}
 	for _, partitionID := range l.req.GetLoadMeta().GetPartitionIDs() {
 		err = l.node.metaReplica.addPartition(collectionID, partitionID)
 		if err != nil {

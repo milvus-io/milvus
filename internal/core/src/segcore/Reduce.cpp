@@ -64,7 +64,7 @@ ReduceHelper::Reduce() {
     for (auto search_result : search_results_) {
         FilterInvalidSearchResult(search_result);
         if (search_result->get_total_result_count() > 0) {
-            auto segment = static_cast<SegmentInterface*>(search_result->segment_);
+            auto segment = reinterpret_cast<SegmentInterface*>(search_result->segment_);
             segment->FillPrimaryKeys(plan_, *search_result);
             valid_search_results.emplace_back(search_result);
         }
@@ -103,7 +103,7 @@ ReduceHelper::Reduce() {
 
     // fill target entry
     for (auto& search_result : search_results_) {
-        auto segment = static_cast<milvus::segcore::SegmentInterface*>(search_result->segment_);
+        auto segment = reinterpret_cast<milvus::segcore::SegmentInterface*>(search_result->segment_);
         segment->FillTargetEntry(plan_, *search_result);
     }
 }

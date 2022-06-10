@@ -53,7 +53,7 @@ type ReplicaInterface interface {
 	// getCollectionIDs returns all collection ids in the collectionReplica
 	getCollectionIDs() []UniqueID
 	// addCollection creates a new collection and add it to collectionReplica
-	addCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) *Collection
+	addCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) (*Collection, error)
 	// removeCollection removes the collection from collectionReplica
 	removeCollection(collectionID UniqueID) error
 	// getCollectionByID gets the collection which id is collectionID
@@ -171,18 +171,22 @@ func (replica *metaReplica) getCollectionIDs() []UniqueID {
 }
 
 // addCollection creates a new collection and add it to collectionReplica
-func (replica *metaReplica) addCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) *Collection {
+func (replica *metaReplica) addCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) (*Collection, error) {
 	replica.mu.Lock()
 	defer replica.mu.Unlock()
 
 	if col, ok := replica.collections[collectionID]; ok {
-		return col
+		log.Info("Collection already exists when addCollection", zap.Int64("collectionID", collectionID))
+		return col, nil
 	}
 
-	var newC = newCollection(collectionID, schema)
+	newC, err := newCollection(collectionID, schema)
+	if err != nil {
+		return nil, err
+	}
 	replica.collections[collectionID] = newC
 	metrics.QueryNodeNumCollections.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(len(replica.collections)))
-	return newC
+	return newC, nil
 }
 
 // removeCollection removes the collection from collectionReplica

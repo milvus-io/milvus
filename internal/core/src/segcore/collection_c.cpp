@@ -14,27 +14,33 @@
 #endif
 
 #include <iostream>
+#include "common/CGoHelper.h"
+#include "common/type_c.h"
 #include "segcore/collection_c.h"
 #include "segcore/Collection.h"
 
-CCollection
-NewCollection(const char* schema_proto_blob) {
-    auto proto = std::string(schema_proto_blob);
-    auto collection = std::make_unique<milvus::segcore::Collection>(proto);
-    return (void*)collection.release();
+CStatus
+NewCollection(const char* schema_proto_blob, CCollection* c_collection) {
+    try {
+        auto proto = std::string(schema_proto_blob);
+        auto collection = std::make_unique<milvus::segcore::Collection>(proto);
+        *c_collection = collection.release();
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(UnexpectedError, e.what());
+    }
 }
 
-void
+CStatus
 DeleteCollection(CCollection collection) {
-    auto col = (milvus::segcore::Collection*)collection;
-    delete col;
+    try {
+        auto col = reinterpret_cast<milvus::segcore::Collection*>(collection);
+        delete col;
 #ifdef __linux__
-    malloc_trim(0);
+        malloc_trim(0);
 #endif
-}
-
-const char*
-GetCollectionName(CCollection collection) {
-    auto col = (milvus::segcore::Collection*)collection;
-    return strdup(col->get_collection_name().data());
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(UnexpectedError, e.what());
+    }
 }

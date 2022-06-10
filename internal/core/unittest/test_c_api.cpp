@@ -160,23 +160,29 @@ generate_index(void* raw_data, knowhere::Config conf, int64_t dim, int64_t topK,
     EXPECT_EQ(indexing->Dim(), dim);
     return indexing;
 }
+
+std::tuple<CCollection, CSegmentInterface>
+generate_collection_and_segment(std::string schema_string=get_default_schema_config(), SegmentType segType=Growing) {
+    CCollection collection = nullptr;
+    auto status = NewCollection(schema_string.data(), &collection);
+    EXPECT_EQ(status.error_code, Success);
+    CSegmentInterface segment = nullptr;
+    status = NewSegment(collection, segType, -1, &segment);
+    EXPECT_EQ(status.error_code, Success);
+    return std::make_tuple(collection, segment);
+}
+
 }  // namespace
 
 TEST(CApiTest, CollectionTest) {
-    auto collection = NewCollection(get_default_schema_config());
-    DeleteCollection(collection);
-}
-
-TEST(CApiTest, GetCollectionNameTest) {
-    auto collection = NewCollection(get_default_schema_config());
-    auto name = GetCollectionName(collection);
-    assert(strcmp(name, "default-collection") == 0);
+    void* collection = nullptr;
+    auto status = NewCollection(get_default_schema_config(), &collection);
+    ASSERT_EQ(status.error_code, Success);
     DeleteCollection(collection);
 }
 
 TEST(CApiTest, SegmentTest) {
-    auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, Growing, -1);
+    auto [collection, segment] = generate_collection_and_segment();
     DeleteCollection(collection);
     DeleteSegment(segment);
 }
@@ -192,9 +198,8 @@ serialize(const Message* msg) {
 }
 
 TEST(CApiTest, InsertTest) {
-    auto c_collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(c_collection, Growing, -1);
-    auto col = (milvus::segcore::Collection*)c_collection;
+    auto [collection, segment] = generate_collection_and_segment();
+    auto col = reinterpret_cast<milvus::segcore::Collection*>(collection);
 
     int N = 10000;
     auto dataset = DataGen(col->get_schema(), N);
@@ -207,13 +212,12 @@ TEST(CApiTest, InsertTest) {
                       insert_data.size());
     assert(res.error_code == Success);
 
-    DeleteCollection(c_collection);
+    DeleteCollection(collection);
     DeleteSegment(segment);
 }
 
 TEST(CApiTest, DeleteTest) {
-    auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, Growing, -1);
+    auto [collection, segment] = generate_collection_and_segment();
 
     std::vector<int64_t> delete_row_ids = {100000, 100001, 100002};
     auto ids = std::make_unique<IdArray>();
@@ -221,7 +225,9 @@ TEST(CApiTest, DeleteTest) {
     auto delete_data = serialize(ids.get());
     uint64_t delete_timestamps[] = {0, 0, 0};
 
-    auto offset = PreDelete(segment, 3);
+    int64_t offset;
+    auto status = PreDelete(segment, 3, &offset);
+    assert(status.error_code == Success);
 
     auto del_res = Delete(segment, offset, 3, delete_data.data(), delete_data.size(), delete_timestamps);
     assert(del_res.error_code == Success);
@@ -231,8 +237,7 @@ TEST(CApiTest, DeleteTest) {
 }
 
 TEST(CApiTest, MultiDeleteGrowingSegment) {
-    auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, Growing, -1);
+    auto [collection, segment] = generate_collection_and_segment();
     auto col = (milvus::segcore::Collection*)collection;
 
     int N = 10;
@@ -252,7 +257,8 @@ TEST(CApiTest, MultiDeleteGrowingSegment) {
     ids->mutable_int_id()->mutable_data()->Add(delete_pks.begin(), delete_pks.end());
     auto delete_data = serialize(ids.get());
     std::vector<uint64_t> delete_timestamps(1, dataset.timestamps_[N - 1]);
-    offset = PreDelete(segment, 1);
+    auto status = PreDelete(segment, 1, &offset);
+    assert(status.error_code == Success);
     auto del_res = Delete(segment, offset, 1, delete_data.data(), delete_data.size(), delete_timestamps.data());
     assert(del_res.error_code == Success);
 
@@ -289,7 +295,8 @@ TEST(CApiTest, MultiDeleteGrowingSegment) {
     ids = std::make_unique<IdArray>();
     ids->mutable_int_id()->mutable_data()->Add(delete_pks.begin(), delete_pks.end());
     delete_data = serialize(ids.get());
-    offset = PreDelete(segment, 1);
+    status = PreDelete(segment, 1, &offset);
+    assert(status.error_code == Success);
     del_res = Delete(segment, offset, 1, delete_data.data(), delete_data.size(), delete_timestamps.data());
     assert(del_res.error_code == Success);
 
@@ -308,8 +315,7 @@ TEST(CApiTest, MultiDeleteGrowingSegment) {
 }
 
 TEST(CApiTest, MultiDeleteSealedSegment) {
-    auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, Sealed, -1);
+    auto [collection, segment] = generate_collection_and_segment(get_default_schema_config(), Sealed);
     auto col = (milvus::segcore::Collection*)collection;
 
     int N = 10;
@@ -324,7 +330,8 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
 
         auto res = LoadFieldData(segment, load_info);
         assert(res.error_code == Success);
-        auto count = GetRowCount(segment);
+        int64_t count;
+        GetRowCount(segment, &count);
         assert(count == N);
     }
 
@@ -335,7 +342,8 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
     auto load_info = CLoadFieldDataInfo{TimestampFieldID.get(), ts_data.data(), ts_data.size(), N};
     auto res = LoadFieldData(segment, load_info);
     assert(res.error_code == Success);
-    auto count = GetRowCount(segment);
+    int64_t count;
+    GetRowCount(segment, &count);
     assert(count == N);
 
     // load rowID
@@ -345,7 +353,7 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
     load_info = CLoadFieldDataInfo{RowFieldID.get(), row_id_data.data(), row_id_data.size(), N};
     res = LoadFieldData(segment, load_info);
     assert(res.error_code == Success);
-    count = GetRowCount(segment);
+    GetRowCount(segment, &count);
     assert(count == N);
 
     // delete data pks = {1}
@@ -354,7 +362,9 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
     ids->mutable_int_id()->mutable_data()->Add(delete_pks.begin(), delete_pks.end());
     auto delete_data = serialize(ids.get());
     std::vector<uint64_t> delete_timestamps(1, dataset.timestamps_[N - 1]);
-    auto offset = PreDelete(segment, 1);
+    int64_t offset;
+    auto status = PreDelete(segment, 1, &offset);
+    assert(status.error_code == Success);
     auto del_res = Delete(segment, offset, 1, delete_data.data(), delete_data.size(), delete_timestamps.data());
     assert(del_res.error_code == Success);
 
@@ -391,7 +401,8 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
     ids = std::make_unique<IdArray>();
     ids->mutable_int_id()->mutable_data()->Add(delete_pks.begin(), delete_pks.end());
     delete_data = serialize(ids.get());
-    offset = PreDelete(segment, 1);
+    status = PreDelete(segment, 1, &offset);
+    assert(status.error_code == Success);
     del_res = Delete(segment, offset, 1, delete_data.data(), delete_data.size(), delete_timestamps.data());
     assert(del_res.error_code == Success);
 
@@ -410,8 +421,7 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
 }
 
 TEST(CApiTest, DeleteRepeatedPksFromGrowingSegment) {
-    auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, Growing, -1);
+    auto [collection, segment] = generate_collection_and_segment();
     auto col = (milvus::segcore::Collection*)collection;
 
     int N = 10;
@@ -457,7 +467,8 @@ TEST(CApiTest, DeleteRepeatedPksFromGrowingSegment) {
     auto delete_data = serialize(ids.get());
     std::vector<uint64_t> delete_timestamps(3, dataset.timestamps_[N - 1]);
 
-    offset = PreDelete(segment, 3);
+    auto status = PreDelete(segment, 3, &offset);
+    assert(status.error_code == Success);
     auto del_res = Delete(segment, offset, 3, delete_data.data(), delete_data.size(), delete_timestamps.data());
     assert(del_res.error_code == Success);
 
@@ -478,8 +489,7 @@ TEST(CApiTest, DeleteRepeatedPksFromGrowingSegment) {
 }
 
 TEST(CApiTest, DeleteRepeatedPksFromSealedSegment) {
-    auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, Sealed, -1);
+    auto [collection, segment] = generate_collection_and_segment(get_default_schema_config(), Sealed);
     auto col = (milvus::segcore::Collection*)collection;
 
     int N = 20;
@@ -493,7 +503,8 @@ TEST(CApiTest, DeleteRepeatedPksFromSealedSegment) {
 
         auto res = LoadFieldData(segment, load_info);
         assert(res.error_code == Success);
-        auto count = GetRowCount(segment);
+        int64_t count;
+        GetRowCount(segment, &count);
         assert(count == N);
     }
 
@@ -503,7 +514,8 @@ TEST(CApiTest, DeleteRepeatedPksFromSealedSegment) {
     auto load_info = CLoadFieldDataInfo{TimestampFieldID.get(), ts_data.data(), ts_data.size(), N};
     auto res = LoadFieldData(segment, load_info);
     assert(res.error_code == Success);
-    auto count = GetRowCount(segment);
+    int64_t count;
+    GetRowCount(segment, &count);
     assert(count == N);
 
     FieldMeta row_id_field_meta(FieldName("RowID"), RowFieldID, DataType::INT64);
@@ -512,7 +524,7 @@ TEST(CApiTest, DeleteRepeatedPksFromSealedSegment) {
     load_info = CLoadFieldDataInfo{RowFieldID.get(), row_id_data.data(), row_id_data.size(), N};
     res = LoadFieldData(segment, load_info);
     assert(res.error_code == Success);
-    count = GetRowCount(segment);
+    GetRowCount(segment, &count);
     assert(count == N);
 
     // create retrieve plan pks in {1, 2, 3}
@@ -540,7 +552,9 @@ TEST(CApiTest, DeleteRepeatedPksFromSealedSegment) {
     auto delete_data = serialize(ids.get());
     std::vector<uint64_t> delete_timestamps(3, dataset.timestamps_[N - 1]);
 
-    auto offset = PreDelete(segment, 3);
+    int64_t offset;
+    auto status = PreDelete(segment, 3, &offset);
+    assert(status.error_code == Success);
 
     auto del_res = Delete(segment, offset, 3, delete_data.data(), delete_data.size(), delete_timestamps.data());
     assert(del_res.error_code == Success);
@@ -562,8 +576,7 @@ TEST(CApiTest, DeleteRepeatedPksFromSealedSegment) {
 }
 
 TEST(CApiTest, InsertSamePkAfterDeleteOnGrowingSegment) {
-    auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, Growing, -1);
+    auto [collection, segment] = generate_collection_and_segment();
     auto col = (milvus::segcore::Collection*)collection;
 
     int N = 10;
@@ -585,7 +598,8 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnGrowingSegment) {
     auto delete_data = serialize(ids.get());
     std::vector<uint64_t> delete_timestamps(3, dataset.timestamps_[N - 1]);
 
-    offset = PreDelete(segment, 3);
+    auto status = PreDelete(segment, 3, &offset);
+    assert(status.error_code == Success);
 
     auto del_res = Delete(segment, offset, 3, delete_data.data(), delete_data.size(), delete_timestamps.data());
     assert(del_res.error_code == Success);
@@ -634,8 +648,7 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnGrowingSegment) {
 }
 
 TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
-    auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, Sealed, -1);
+    auto [collection, segment] = generate_collection_and_segment(get_default_schema_config(), Sealed);
     auto col = (milvus::segcore::Collection*)collection;
 
     int N = 10;
@@ -650,7 +663,8 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
 
         auto res = LoadFieldData(segment, load_info);
         assert(res.error_code == Success);
-        auto count = GetRowCount(segment);
+        int64_t count;
+        GetRowCount(segment, &count);
         assert(count == N);
     }
 
@@ -660,7 +674,8 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
     auto load_info = CLoadFieldDataInfo{TimestampFieldID.get(), ts_data.data(), ts_data.size(), N};
     auto res = LoadFieldData(segment, load_info);
     assert(res.error_code == Success);
-    auto count = GetRowCount(segment);
+    int64_t count;
+    GetRowCount(segment, &count);
     assert(count == N);
 
     FieldMeta row_id_field_meta(FieldName("RowID"), RowFieldID, DataType::INT64);
@@ -669,7 +684,7 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
     load_info = CLoadFieldDataInfo{RowFieldID.get(), row_id_data.data(), row_id_data.size(), N};
     res = LoadFieldData(segment, load_info);
     assert(res.error_code == Success);
-    count = GetRowCount(segment);
+    GetRowCount(segment, &count);
     assert(count == N);
 
     // delete data pks = {1, 2, 3}, timestamps = {4, 4, 4}
@@ -679,7 +694,9 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
     auto delete_data = serialize(ids.get());
     std::vector<uint64_t> delete_timestamps(3, dataset.timestamps_[4]);
 
-    auto offset = PreDelete(segment, 3);
+    int64_t offset;
+    auto status = PreDelete(segment, 3, &offset);
+    assert(status.error_code == Success);
 
     auto del_res = Delete(segment, offset, 3, delete_data.data(), delete_data.size(), delete_timestamps.data());
     assert(del_res.error_code == Success);
@@ -710,8 +727,7 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
 }
 
 TEST(CApiTest, SearchTest) {
-    auto c_collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(c_collection, Growing, -1);
+    auto [c_collection, segment] = generate_collection_and_segment();
     auto col = (milvus::segcore::Collection*)c_collection;
 
     int N = 10000;
@@ -774,8 +790,7 @@ TEST(CApiTest, SearchTest) {
 }
 
 TEST(CApiTest, SearchTestWithExpr) {
-    auto c_collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(c_collection, Growing, -1);
+    auto [c_collection, segment] = generate_collection_and_segment();
     auto col = (milvus::segcore::Collection*)c_collection;
 
     int N = 10000;
@@ -828,8 +843,7 @@ TEST(CApiTest, SearchTestWithExpr) {
 }
 
 TEST(CApiTest, RetrieveTestWithExpr) {
-    auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, Growing, -1);
+    auto [collection, segment] = generate_collection_and_segment();
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
 
@@ -864,10 +878,11 @@ TEST(CApiTest, RetrieveTestWithExpr) {
 }
 
 TEST(CApiTest, GetMemoryUsageInBytesTest) {
-    auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, Growing, -1);
+    auto [collection, segment] = generate_collection_and_segment();
 
-    auto old_memory_usage_size = GetMemoryUsageInBytes(segment);
+    int64_t old_memory_usage_size;
+    auto status = GetMemoryUsageInBytes(segment, &old_memory_usage_size);
+    ASSERT_EQ(status.error_code, Success);
     // std::cout << "old_memory_usage_size = " << old_memory_usage_size << std::endl;
     assert(old_memory_usage_size == 0);
 
@@ -883,7 +898,9 @@ TEST(CApiTest, GetMemoryUsageInBytesTest) {
                       insert_data.size());
     assert(res.error_code == Success);
 
-    auto memory_usage_size = GetMemoryUsageInBytes(segment);
+    int64_t memory_usage_size;
+    status = GetMemoryUsageInBytes(segment, &memory_usage_size);
+    ASSERT_EQ(status.error_code, Success);
     // std::cout << "new_memory_usage_size = " << memory_usage_size << std::endl;
     // TODO:: assert
     // assert(memory_usage_size == 2785280);
@@ -893,8 +910,7 @@ TEST(CApiTest, GetMemoryUsageInBytesTest) {
 }
 
 TEST(CApiTest, GetDeletedCountTest) {
-    auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, Growing, -1);
+    auto [collection, segment] = generate_collection_and_segment();
 
     std::vector<int64_t> delete_row_ids = {100000, 100001, 100002};
     auto ids = std::make_unique<IdArray>();
@@ -902,13 +918,17 @@ TEST(CApiTest, GetDeletedCountTest) {
     auto delete_data = serialize(ids.get());
     uint64_t delete_timestamps[] = {0, 0, 0};
 
-    auto offset = PreDelete(segment, 3);
+    int64_t offset;
+    auto status = PreDelete(segment, 3, &offset);
+    assert(status.error_code == Success);
 
     auto del_res = Delete(segment, offset, 3, delete_data.data(), delete_data.size(), delete_timestamps);
     assert(del_res.error_code == Success);
 
     // TODO: assert(deleted_count == len(delete_row_ids))
-    auto deleted_count = GetDeletedCount(segment);
+    int64_t deleted_count;
+    status = GetDeletedCount(segment, &deleted_count);
+    assert(status.error_code == Success);
     assert(deleted_count == 0);
 
     DeleteCollection(collection);
@@ -916,8 +936,7 @@ TEST(CApiTest, GetDeletedCountTest) {
 }
 
 TEST(CApiTest, GetRowCountTest) {
-    auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, Growing, -1);
+    auto [collection, segment] = generate_collection_and_segment();
 
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
     int N = 10000;
@@ -931,25 +950,14 @@ TEST(CApiTest, GetRowCountTest) {
                       insert_data.size());
     assert(res.error_code == Success);
 
-    auto row_count = GetRowCount(segment);
+    int64_t row_count;
+    auto status = GetRowCount(segment, &row_count);
+    assert(status.error_code == Success);
     assert(row_count == N);
 
     DeleteCollection(collection);
     DeleteSegment(segment);
 }
-
-// TEST(CApiTest, SchemaTest) {
-//    std::string schema_string =
-//        "id: 6873737669791618215\nname: \"collection0\"\nschema: \u003c\n  "
-//        "field_metas: \u003c\n    field_name: \"age\"\n    type: INT32\n    dim: 1\n  \u003e\n  "
-//        "field_metas: \u003c\n    field_name: \"field_1\"\n    type: VECTOR_FLOAT\n    dim: 16\n  \u003e\n"
-//        "\u003e\ncreate_time: 1600416765\nsegment_ids: 6873737669791618215\npartition_tags: \"default\"\n";
-//
-//    auto collection = NewCollection(schema_string.data());
-//    auto segment = NewSegment(collection, Growing, -1);
-//    DeleteCollection(collection);
-//    DeleteSegment(segment);
-//}
 
 void
 CheckSearchResultDuplicate(const std::vector<CSearchResult>& results) {
@@ -986,8 +994,7 @@ CheckSearchResultDuplicate(const std::vector<CSearchResult>& results) {
 }
 
 TEST(CApiTest, ReduceRemoveDuplicates) {
-    auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, Growing, -1);
+    auto [collection, segment] = generate_collection_and_segment();
 
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
     int N = 10000;
@@ -1095,8 +1102,7 @@ TEST(CApiTest, ReduceRemoveDuplicates) {
 
 void
 testReduceSearchWithExpr(int N, int topK, int num_queries) {
-    auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, Growing, -1);
+    auto [collection, segment] = generate_collection_and_segment();
 
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
     auto dataset = DataGen(schema, N);
@@ -1302,9 +1308,8 @@ TEST(CApiTest, Indexing_Without_Predicate) {
     constexpr auto TOPK = 5;
 
     std::string schema_string = generate_collection_schema("L2", DIM, false);
-    auto collection = NewCollection(schema_string.c_str());
+    auto [collection, segment] = generate_collection_and_segment(schema_string);
     auto schema = ((segcore::Collection*)collection)->get_schema();
-    auto segment = NewSegment(collection, Growing, -1);
 
     auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
@@ -1432,9 +1437,8 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
     constexpr auto TOPK = 5;
 
     std::string schema_string = generate_collection_schema("L2", DIM, false);
-    auto collection = NewCollection(schema_string.c_str());
+    auto [collection, segment] = generate_collection_and_segment(schema_string);
     auto schema = ((segcore::Collection*)collection)->get_schema();
-    auto segment = NewSegment(collection, Growing, -1);
 
     auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
@@ -1557,9 +1561,8 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
     constexpr auto TOPK = 5;
 
     std::string schema_string = generate_collection_schema("L2", DIM, false);
-    auto collection = NewCollection(schema_string.c_str());
+    auto [collection, segment] = generate_collection_and_segment(schema_string);
     auto schema = ((segcore::Collection*)collection)->get_schema();
-    auto segment = NewSegment(collection, Growing, -1);
 
     auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
@@ -1700,9 +1703,8 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
     constexpr auto TOPK = 5;
 
     std::string schema_string = generate_collection_schema("L2", DIM, false);
-    auto collection = NewCollection(schema_string.c_str());
+    auto [collection, segment] = generate_collection_and_segment(schema_string);
     auto schema = ((segcore::Collection*)collection)->get_schema();
-    auto segment = NewSegment(collection, Growing, -1);
 
     auto N = 1000 * 1000;
     auto dataset = DataGen(schema, N);
@@ -1857,9 +1859,8 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
     constexpr auto TOPK = 5;
 
     std::string schema_string = generate_collection_schema("L2", DIM, false);
-    auto collection = NewCollection(schema_string.c_str());
+    auto [collection, segment] = generate_collection_and_segment(schema_string);
     auto schema = ((segcore::Collection*)collection)->get_schema();
-    auto segment = NewSegment(collection, Growing, -1);
 
     auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
@@ -1998,9 +1999,8 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
     constexpr auto TOPK = 5;
 
     std::string schema_string = generate_collection_schema("L2", DIM, false);
-    auto collection = NewCollection(schema_string.c_str());
+    auto [collection, segment] = generate_collection_and_segment(schema_string);
     auto schema = ((segcore::Collection*)collection)->get_schema();
-    auto segment = NewSegment(collection, Growing, -1);
 
     auto N = 1000 * 1000;
     auto dataset = DataGen(schema, N);
@@ -2148,9 +2148,8 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
     constexpr auto TOPK = 5;
 
     std::string schema_string = generate_collection_schema("JACCARD", DIM, true);
-    auto collection = NewCollection(schema_string.c_str());
+    auto [collection, segment] = generate_collection_and_segment(schema_string);
     auto schema = ((segcore::Collection*)collection)->get_schema();
-    auto segment = NewSegment(collection, Growing, -1);
 
     auto N = 1000 * 1000;
     auto dataset = DataGen(schema, N);
@@ -2291,9 +2290,8 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
     constexpr auto TOPK = 5;
 
     std::string schema_string = generate_collection_schema("JACCARD", DIM, true);
-    auto collection = NewCollection(schema_string.c_str());
+    auto [collection, segment] = generate_collection_and_segment(schema_string);
     auto schema = ((segcore::Collection*)collection)->get_schema();
-    auto segment = NewSegment(collection, Growing, -1);
 
     auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
@@ -2447,9 +2445,8 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     constexpr auto TOPK = 5;
 
     std::string schema_string = generate_collection_schema("JACCARD", DIM, true);
-    auto collection = NewCollection(schema_string.c_str());
+    auto [collection, segment] = generate_collection_and_segment(schema_string);
     auto schema = ((segcore::Collection*)collection)->get_schema();
-    auto segment = NewSegment(collection, Growing, -1);
 
     auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
@@ -2604,9 +2601,8 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     constexpr auto TOPK = 5;
 
     std::string schema_string = generate_collection_schema("JACCARD", DIM, true);
-    auto collection = NewCollection(schema_string.c_str());
+    auto [collection, segment] = generate_collection_and_segment(schema_string);
     auto schema = ((segcore::Collection*)collection)->get_schema();
-    auto segment = NewSegment(collection, Growing, -1);
 
     auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
@@ -2765,8 +2761,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
 }
 
 TEST(CApiTest, SealedSegmentTest) {
-    auto collection = NewCollection(get_default_schema_config());
-    auto segment = NewSegment(collection, Sealed, -1);
+    auto [collection, segment] = generate_collection_and_segment();
 
     int N = 10000;
     std::default_random_engine e(67);
@@ -2783,7 +2778,9 @@ TEST(CApiTest, SealedSegmentTest) {
 
     auto res = LoadFieldData(segment, load_info);
     assert(res.error_code == Success);
-    auto count = GetRowCount(segment);
+    int64_t count;
+    auto status = GetRowCount(segment, &count);
+    assert(status.error_code == Success);
     assert(count == N);
 
     DeleteCollection(collection);
@@ -2794,9 +2791,8 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     constexpr auto TOPK = 5;
 
     std::string schema_string = generate_collection_schema("L2", DIM, false);
-    auto collection = NewCollection(schema_string.c_str());
+    auto [collection, segment] = generate_collection_and_segment(schema_string);
     auto schema = ((segcore::Collection*)collection)->get_schema();
-    auto segment = NewSegment(collection, Sealed, -1);
 
     auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
@@ -2963,9 +2959,8 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
 TEST(CApiTest, SealedSegment_search_without_predicates) {
     constexpr auto TOPK = 5;
     std::string schema_string = generate_collection_schema("L2", DIM, false);
-    auto collection = NewCollection(schema_string.c_str());
+    auto [collection, segment] = generate_collection_and_segment(schema_string);
     auto schema = ((segcore::Collection*)collection)->get_schema();
-    auto segment = NewSegment(collection, Sealed, -1);
 
     auto N = ROW_COUNT;
     uint64_t ts_offset = 1000;
@@ -3076,9 +3071,8 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     constexpr auto TOPK = 5;
 
     std::string schema_string = generate_collection_schema("L2", DIM, false);
-    auto collection = NewCollection(schema_string.c_str());
+    auto [collection, segment] = generate_collection_and_segment(schema_string, Sealed);
     auto schema = ((segcore::Collection*)collection)->get_schema();
-    auto segment = NewSegment(collection, Sealed, -1);
 
     auto N = ROW_COUNT;
     auto dataset = DataGen(schema, N);
@@ -3276,7 +3270,9 @@ TEST(CApiTest, RetriveScalarFieldFromSealedSegmentWithIndex) {
     auto load_info = CLoadFieldDataInfo{TimestampFieldID.get(), ts_data.data(), ts_data.size(), N};
     auto res = LoadFieldData(segment, load_info);
     assert(res.error_code == Success);
-    auto count = GetRowCount(segment);
+    int64_t count;
+    auto status = GetRowCount(segment, &count);
+    assert(status.error_code == Success);
     assert(count == N);
 
     // load rowid field
@@ -3286,7 +3282,8 @@ TEST(CApiTest, RetriveScalarFieldFromSealedSegmentWithIndex) {
     load_info = CLoadFieldDataInfo{RowFieldID.get(), row_id_data.data(), row_id_data.size(), N};
     res = LoadFieldData(segment, load_info);
     assert(res.error_code == Success);
-    count = GetRowCount(segment);
+    status = GetRowCount(segment, &count);
+    assert(status.error_code == Success);
     assert(count == N);
 
     // load index for int8 field

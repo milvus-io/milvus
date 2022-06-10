@@ -30,6 +30,7 @@ import "C"
 import (
 	"errors"
 	"fmt"
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"unsafe"
@@ -77,15 +78,13 @@ func createSearchPlanByExpr(col *Collection, expr []byte) (*SearchPlan, error) {
 }
 
 func (plan *SearchPlan) getTopK() int64 {
-	topK := C.GetTopK(plan.cSearchPlan)
+	var topK C.int64_t
+	status := C.GetTopK(plan.cSearchPlan, &topK)
+	if err := HandleCStatus(&status, "getTopK failed"); err != nil {
+		log.Error(err.Error())
+		return 0
+	}
 	return int64(topK)
-}
-
-func (plan *SearchPlan) getMetricType() string {
-	cMetricType := C.GetMetricType(plan.cSearchPlan)
-	defer C.free(unsafe.Pointer(cMetricType))
-	metricType := C.GoString(cMetricType)
-	return metricType
 }
 
 func (plan *SearchPlan) delete() {
@@ -140,7 +139,12 @@ func newSearchRequest(collection *Collection, req *querypb.SearchRequest, placeh
 }
 
 func (sr *searchRequest) getNumOfQuery() int64 {
-	numQueries := C.GetNumOfQueries(sr.cPlaceholderGroup)
+	var numQueries C.int64_t
+	status := C.GetNumOfQueries(sr.cPlaceholderGroup, &numQueries)
+	if err := HandleCStatus(&status, "getNumOfQuery failed"); err != nil {
+		log.Error(err.Error())
+		return 0
+	}
 	return int64(numQueries)
 }
 

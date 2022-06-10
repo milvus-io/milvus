@@ -33,7 +33,8 @@ func TestPlan_Plan(t *testing.T) {
 	collectionID := UniqueID(0)
 	schema := genTestCollectionSchema()
 
-	collection := newCollection(collectionID, schema)
+	collection, err := newCollection(collectionID, schema)
+	assert.NoError(t, err)
 
 	dslString := "{\"bool\": { \n\"vector\": {\n \"floatVectorField\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\n \"topk\": 10 \n,\"round_decimal\": 6\n } \n } \n } \n }"
 
@@ -42,10 +43,9 @@ func TestPlan_Plan(t *testing.T) {
 	assert.NotEqual(t, plan, nil)
 	topk := plan.getTopK()
 	assert.Equal(t, int(topk), 10)
-	metricType := plan.getMetricType()
-	assert.Equal(t, metricType, "L2")
 	plan.delete()
-	deleteCollection(collection)
+	err = deleteCollection(collection)
+	assert.NoError(t, err)
 }
 
 func TestPlan_createSearchPlanByExpr(t *testing.T) {
@@ -83,7 +83,8 @@ func TestPlan_NilCollection(t *testing.T) {
 func TestPlan_PlaceholderGroup(t *testing.T) {
 	collectionID := UniqueID(0)
 	schema := genTestCollectionSchema()
-	collection := newCollection(collectionID, schema)
+	collection, err := newCollection(collectionID, schema)
+	assert.NoError(t, err)
 
 	dslString := "{\"bool\": { \n\"vector\": {\n \"floatVectorField\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\n \"topk\": 10 \n,\"round_decimal\": 6\n } \n } \n } \n }"
 	plan, err := createSearchPlan(collection, dslString)
@@ -122,5 +123,6 @@ func TestPlan_PlaceholderGroup(t *testing.T) {
 	assert.Equal(t, int(numQueries), 2)
 
 	holder.delete()
-	deleteCollection(collection)
+	err = deleteCollection(collection)
+	assert.NoError(t, err)
 }

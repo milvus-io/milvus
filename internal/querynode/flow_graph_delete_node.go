@@ -125,7 +125,13 @@ func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			log.Error(err.Error())
 			panic(err)
 		}
-		offset := segment.segmentPreDelete(len(pks))
+		offset, err := segment.segmentPreDelete(len(pks))
+		if err != nil {
+			// error occurs when cgo function `PreDelete` failed
+			err = fmt.Errorf("segmentPreDelete failed, segmentID = %d, err = %s", segmentID, err)
+			log.Error(err.Error())
+			panic(err)
+		}
 		delData.deleteOffset[segmentID] = offset
 	}
 
