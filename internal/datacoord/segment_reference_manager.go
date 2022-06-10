@@ -126,9 +126,6 @@ func (srm *SegmentReferenceManager) ReleaseSegmentsLock(segIDs []UniqueID, nodeI
 	log.Info("Release reference lock on segments", zap.Int64s("segIDs", segIDs), zap.Int64("nodeID", nodeID))
 	locKeys := make([]string, 0)
 	for _, segID := range segIDs {
-		if _, ok := srm.segmentsLock[segID]; !ok {
-			continue
-		}
 		for _, segLock := range srm.segmentsLock[segID] {
 			if segLock.nodeID == nodeID {
 				locKeys = append(locKeys, segLock.locKey)

@@ -131,6 +131,7 @@ type Server struct {
 	dnEventCh <-chan *sessionutil.SessionEvent
 	icEventCh <-chan *sessionutil.SessionEvent
 	qcEventCh <-chan *sessionutil.SessionEvent
+	rcEventCh <-chan *sessionutil.SessionEvent
 
 	dataNodeCreator        dataNodeCreatorFunc
 	rootCoordClientCreator rootCoordCreatorFunc
@@ -451,6 +452,16 @@ func (s *Server) initServiceDiscovery() error {
 	}
 	s.qcEventCh = s.session.WatchServices(typeutil.QueryCoordRole, qcRevision+1, nil)
 
+	rcSessions, rcRevision, err := s.session.GetSessions(typeutil.RootCoordRole)
+	if err != nil {
+		log.Error("DataCoord get RootCoord session failed", zap.Error(err))
+		return err
+	}
+	for _, session := range rcSessions {
+		serverIDs = append(serverIDs, session.ServerID)
+	}
+	s.rcEventCh = s.session.WatchServices(typeutil.RootCoordRole, rcRevision+1, nil)
+
 	s.segReferManager, err = NewSegmentReferenceManager(s.kvClient, serverIDs)
 	return err
 }
@@ -657,6 +668,36 @@ func (s *Server) startWatchService(ctx context.Context) {
 	go s.watchService(ctx)
 }
 
+func (s *Server) stopServiceWatch() {
+	// ErrCompacted is handled inside SessionWatcher, which means there is some other error occurred, closing server.
+	logutil.Logger(s.ctx).Error("watch service channel closed", zap.Int64("serverID", s.session.ServerID))
+	go s.Stop()
+	if s.session.TriggerKill {
+		if p, err := os.FindProcess(os.Getpid()); err == nil {
+			p.Signal(syscall.SIGINT)
+		}
+	}
+}
+
+func (s *Server) processSessionEvent(ctx context.Context, role string, event *sessionutil.SessionEvent) {
+	switch event.EventType {
+	case sessionutil.SessionAddEvent:
+		log.Info("there is a new service online",
+			zap.String("server role", role),
+			zap.Int64("server ID", event.Session.ServerID))
+
+	case sessionutil.SessionDelEvent:
+		log.Warn("there is service offline",
+			zap.String("server role", role),
+			zap.Int64("server ID", event.Session.ServerID))
+		if err := retry.Do(ctx, func() error {
+			return s.segReferManager.ReleaseSegmentsLockByNodeID(event.Session.ServerID)
+		}, retry.Attempts(100)); err != nil {
+			panic(err)
+		}
+	}
+}
+
 // watchService watches services.
 func (s *Server) watchService(ctx context.Context) {
 	defer logutil.LogPanic()
@@ -668,75 +709,35 @@ func (s *Server) watchService(ctx context.Context) {
 			return
 		case event, ok := <-s.dnEventCh:
 			if !ok {
-				// ErrCompacted in handled inside SessionWatcher
-				// So there is some other error occurred, closing DataCoord server
-				logutil.Logger(s.ctx).Error("watch service channel closed", zap.Int64("serverID", s.session.ServerID))
-				go s.Stop()
-				if s.session.TriggerKill {
-					if p, err := os.FindProcess(os.Getpid()); err == nil {
-						p.Signal(syscall.SIGINT)
-					}
-				}
+				s.stopServiceWatch()
 				return
 			}
 			if err := s.handleSessionEvent(ctx, event); err != nil {
 				go func() {
 					if err := s.Stop(); err != nil {
-						log.Warn("datacoord server stop error", zap.Error(err))
+						log.Warn("DataCoord server stop error", zap.Error(err))
 					}
 				}()
 				return
 			}
 		case event, ok := <-s.icEventCh:
 			if !ok {
-				// ErrCompacted in handled inside SessionWatcher
-				// So there is some other error occurred, closing DataCoord server
-				logutil.Logger(s.ctx).Error("watch service channel closed", zap.Int64("serverID", s.session.ServerID))
-				go s.Stop()
-				if s.session.TriggerKill {
-					if p, err := os.FindProcess(os.Getpid()); err == nil {
-						p.Signal(syscall.SIGINT)
-					}
-				}
+				s.stopServiceWatch()
 				return
 			}
-			switch event.EventType {
-			case sessionutil.SessionAddEvent:
-				log.Info("there is a new IndexCoord online", zap.Int64("serverID", event.Session.ServerID))
-
-			case sessionutil.SessionDelEvent:
-				log.Warn("there is IndexCoord offline", zap.Int64("serverID", event.Session.ServerID))
-				if err := retry.Do(ctx, func() error {
-					return s.segReferManager.ReleaseSegmentsLockByNodeID(event.Session.ServerID)
-				}, retry.Attempts(100)); err != nil {
-					panic(err)
-				}
-			}
+			s.processSessionEvent(ctx, "IndexCoord", event)
 		case event, ok := <-s.qcEventCh:
 			if !ok {
-				// ErrCompacted in handled inside SessionWatcher
-				// So there is some other error occurred, closing DataCoord server
-				logutil.Logger(s.ctx).Error("watch service channel closed", zap.Int64("serverID", s.session.ServerID))
-				go s.Stop()
-				if s.session.TriggerKill {
-					if p, err := os.FindProcess(os.Getpid()); err == nil {
-						p.Signal(syscall.SIGINT)
-					}
-				}
+				s.stopServiceWatch()
 				return
 			}
-			switch event.EventType {
-			case sessionutil.SessionAddEvent:
-				log.Info("there is a new QueryCoord online", zap.Int64("serverID", event.Session.ServerID))
-
-			case sessionutil.SessionDelEvent:
-				log.Warn("there is QueryCoord offline", zap.Int64("serverID", event.Session.ServerID))
-				if err := retry.Do(ctx, func() error {
-					return s.segReferManager.ReleaseSegmentsLockByNodeID(event.Session.ServerID)
-				}, retry.Attempts(100)); err != nil {
-					panic(err)
-				}
+			s.processSessionEvent(ctx, "QueryCoord", event)
+		case event, ok := <-s.rcEventCh:
+			if !ok {
+				s.stopServiceWatch()
+				return
 			}
+			s.processSessionEvent(ctx, "RootCoord", event)
 		}
 	}
 }

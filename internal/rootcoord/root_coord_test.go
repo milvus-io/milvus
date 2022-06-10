@@ -294,6 +294,20 @@ func (d *dataMock) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb
 	}, nil
 }
 
+func (d *dataMock) AcquireSegmentLock(context.Context, *datapb.AcquireSegmentLockRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
+}
+
+func (d *dataMock) ReleaseSegmentLock(context.Context, *datapb.ReleaseSegmentLockRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
+}
+
 type queryMock struct {
 	types.QueryCoord
 	collID []typeutil.UniqueID
@@ -870,6 +884,7 @@ func TestRootCoord_Base(t *testing.T) {
 		return localTSO, nil
 	}
 
+	expireOldTasksInterval = 500
 	err = core.Start()
 	assert.NoError(t, err)
 
@@ -1366,14 +1381,14 @@ func TestRootCoord_Base(t *testing.T) {
 		coll, err := core.MetaTable.GetCollectionByName(collName, 0)
 		assert.NoError(t, err)
 		// Normal case.
-		count, err := core.CountCompleteIndex(context.WithValue(ctx, ctxKey{}, ""),
+		done, err := core.CountCompleteIndex(context.WithValue(ctx, ctxKey{}, ""),
 			collName, coll.ID, []UniqueID{1000, 1001, 1002})
 		assert.NoError(t, err)
-		assert.Equal(t, 3, count)
+		assert.Equal(t, true, done)
 		// Case with an empty result.
-		count, err = core.CountCompleteIndex(ctx, collName, coll.ID, []UniqueID{})
+		done, err = core.CountCompleteIndex(ctx, collName, coll.ID, []UniqueID{})
 		assert.NoError(t, err)
-		assert.Equal(t, 0, count)
+		assert.Equal(t, true, done)
 		// Case where GetIndexStates failed with error.
 		_, err = core.CountCompleteIndex(context.WithValue(ctx, ctxKey{}, returnError),
 			collName, coll.ID, []UniqueID{1000, 1001, 1002})
@@ -1382,6 +1397,10 @@ func TestRootCoord_Base(t *testing.T) {
 		_, err = core.CountCompleteIndex(context.WithValue(ctx, ctxKey{}, returnUnsuccessfulStatus),
 			collName, coll.ID, []UniqueID{1000, 1001, 1002})
 		assert.Error(t, err)
+		// Case where describing segment fails, which is not considered as an error.
+		_, err = core.CountCompleteIndex(context.WithValue(ctx, ctxKey{}, ""),
+			collName, coll.ID, []UniqueID{9000, 9001, 9002})
+		assert.NoError(t, err)
 	})
 
 	wg.Add(1)
@@ -1563,6 +1582,21 @@ func TestRootCoord_Base(t *testing.T) {
 			RowCount: 100,
 			Segments: []int64{1000, 1001, 1002},
 			State:    commonpb.ImportState_ImportDownloaded,
+		}
+		resp, err := core.ReportImport(context.WithValue(ctx, ctxKey{}, ""), req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+		time.Sleep(500 * time.Millisecond)
+	})
+
+	wg.Add(1)
+	t.Run("report import with alloc seg state", func(t *testing.T) {
+		defer wg.Done()
+		req := &rootcoordpb.ImportResult{
+			TaskId:   1,
+			RowCount: 100,
+			Segments: []int64{1000, 1001, 1002},
+			State:    commonpb.ImportState_ImportAllocSegment,
 		}
 		resp, err := core.ReportImport(context.WithValue(ctx, ctxKey{}, ""), req)
 		assert.NoError(t, err)
@@ -3036,6 +3070,18 @@ func TestCheckInit(t *testing.T) {
 				ErrorCode: commonpb.ErrorCode_Success,
 			},
 		}
+	}
+	err = c.checkInit()
+	assert.Error(t, err)
+
+	c.CallAddSegRefLock = func(context.Context, []int64) error {
+		return nil
+	}
+	err = c.checkInit()
+	assert.Error(t, err)
+
+	c.CallReleaseSegRefLock = func(context.Context, []int64) error {
+		return nil
 	}
 	err = c.checkInit()
 	assert.NoError(t, err)

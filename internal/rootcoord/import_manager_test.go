@@ -93,7 +93,9 @@ func TestImportManager_NewImportManager(t *testing.T) {
 		mgr.init(ctx)
 		var wgLoop sync.WaitGroup
 		wgLoop.Add(2)
-		mgr.expireOldTasksLoop(&wgLoop)
+		mgr.expireOldTasksLoop(&wgLoop, func(ctx context.Context, int64s []int64) error {
+			return nil
+		})
 		mgr.sendOutTasksLoop(&wgLoop)
 		wgLoop.Wait()
 	})
@@ -108,7 +110,9 @@ func TestImportManager_NewImportManager(t *testing.T) {
 		mgr.init(context.TODO())
 		var wgLoop sync.WaitGroup
 		wgLoop.Add(2)
-		mgr.expireOldTasksLoop(&wgLoop)
+		mgr.expireOldTasksLoop(&wgLoop, func(ctx context.Context, int64s []int64) error {
+			return nil
+		})
 		mgr.sendOutTasksLoop(&wgLoop)
 		wgLoop.Wait()
 	})
@@ -130,7 +134,9 @@ func TestImportManager_NewImportManager(t *testing.T) {
 		mgr.loadFromTaskStore()
 		var wgLoop sync.WaitGroup
 		wgLoop.Add(2)
-		mgr.expireOldTasksLoop(&wgLoop)
+		mgr.expireOldTasksLoop(&wgLoop, func(ctx context.Context, int64s []int64) error {
+			return nil
+		})
 		mgr.sendOutTasksLoop(&wgLoop)
 		wgLoop.Wait()
 	})
@@ -145,7 +151,9 @@ func TestImportManager_NewImportManager(t *testing.T) {
 		mgr.init(ctx)
 		var wgLoop sync.WaitGroup
 		wgLoop.Add(2)
-		mgr.expireOldTasksLoop(&wgLoop)
+		mgr.expireOldTasksLoop(&wgLoop, func(ctx context.Context, int64s []int64) error {
+			return nil
+		})
 		mgr.sendOutTasksLoop(&wgLoop)
 		time.Sleep(500 * time.Millisecond)
 		wgLoop.Wait()

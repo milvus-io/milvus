@@ -940,9 +940,10 @@ func (m *RootCoordFactory) GetComponentStates(ctx context.Context) (*internalpb.
 }
 
 func (m *RootCoordFactory) ReportImport(ctx context.Context, req *rootcoordpb.ImportResult) (*commonpb.Status, error) {
-	v := ctx.Value(ctxKey{}).(string)
-	if v == returnError {
-		return nil, fmt.Errorf("injected error")
+	if ctx != nil && ctx.Value(ctxKey{}) != nil {
+		if v := ctx.Value(ctxKey{}).(string); v == returnError {
+			return nil, fmt.Errorf("injected error")
+		}
 	}
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,

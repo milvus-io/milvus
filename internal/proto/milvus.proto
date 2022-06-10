@@ -871,8 +871,8 @@ message GetImportStateResponse {
   repeated int64 id_list = 4;                        // auto generated ids if the primary key is autoid
   repeated common.KeyValuePair infos = 5;            // more information about the task, progress percent, file path, failed reason, etc.
   int64 id = 6;                                      // id of an import task
-  bool heuristic_data_queryable = 7;                 // A flag indicating (heuristically) whether import data are queryable (i.e. loaded in query nodes)
-  bool heuristic_data_indexed = 8;                   // A flag indicating (heuristically) whether import data are indexed.
+  bool data_queryable = 7;                           // A flag indicating whether import data are queryable (i.e. loaded in query nodes)
+  bool data_indexed = 8;                             // A flag indicating whether import data are indexed.
 }
 
 message ListImportTasksRequest {

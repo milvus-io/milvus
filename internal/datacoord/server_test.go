@@ -722,10 +722,12 @@ func TestServer_watchCoord(t *testing.T) {
 	dnCh := make(chan *sessionutil.SessionEvent)
 	icCh := make(chan *sessionutil.SessionEvent)
 	qcCh := make(chan *sessionutil.SessionEvent)
+	rcCh := make(chan *sessionutil.SessionEvent)
 
 	svr.dnEventCh = dnCh
 	svr.icEventCh = icCh
 	svr.qcEventCh = qcCh
+	svr.rcEventCh = rcCh
 
 	segRefer, err := NewSegmentReferenceManager(etcdKV, nil)
 	assert.NoError(t, err)
@@ -783,10 +785,12 @@ func TestServer_watchQueryCoord(t *testing.T) {
 	dnCh := make(chan *sessionutil.SessionEvent)
 	icCh := make(chan *sessionutil.SessionEvent)
 	qcCh := make(chan *sessionutil.SessionEvent)
+	rcCh := make(chan *sessionutil.SessionEvent)
 
 	svr.dnEventCh = dnCh
 	svr.icEventCh = icCh
 	svr.qcEventCh = qcCh
+	svr.rcEventCh = rcCh
 
 	segRefer, err := NewSegmentReferenceManager(etcdKV, nil)
 	assert.NoError(t, err)
@@ -823,6 +827,69 @@ func TestServer_watchQueryCoord(t *testing.T) {
 		},
 	}
 	close(qcCh)
+	<-sigQuit
+	svr.serverLoopWg.Wait()
+	assert.True(t, closed)
+}
+
+func TestServer_watchRootCoord(t *testing.T) {
+	Params.Init()
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	assert.Nil(t, err)
+	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
+	assert.NotNil(t, etcdKV)
+	factory := dependency.NewDefaultFactory(true)
+	svr := CreateServer(context.TODO(), factory)
+	svr.session = &sessionutil.Session{
+		TriggerKill: true,
+	}
+	svr.kvClient = etcdKV
+
+	dnCh := make(chan *sessionutil.SessionEvent)
+	icCh := make(chan *sessionutil.SessionEvent)
+	qcCh := make(chan *sessionutil.SessionEvent)
+	rcCh := make(chan *sessionutil.SessionEvent)
+
+	svr.dnEventCh = dnCh
+	svr.icEventCh = icCh
+	svr.qcEventCh = qcCh
+	svr.rcEventCh = rcCh
+
+	segRefer, err := NewSegmentReferenceManager(etcdKV, nil)
+	assert.NoError(t, err)
+	assert.NotNil(t, segRefer)
+	svr.segReferManager = segRefer
+
+	sc := make(chan os.Signal, 1)
+	signal.Notify(sc, syscall.SIGINT)
+	defer signal.Reset(syscall.SIGINT)
+	closed := false
+	sigQuit := make(chan struct{}, 1)
+
+	svr.serverLoopWg.Add(1)
+	go func() {
+		svr.watchService(context.Background())
+	}()
+
+	go func() {
+		<-sc
+		closed = true
+		sigQuit <- struct{}{}
+	}()
+
+	rcCh <- &sessionutil.SessionEvent{
+		EventType: sessionutil.SessionAddEvent,
+		Session: &sessionutil.Session{
+			ServerID: 3,
+		},
+	}
+	rcCh <- &sessionutil.SessionEvent{
+		EventType: sessionutil.SessionDelEvent,
+		Session: &sessionutil.Session{
+			ServerID: 3,
+		},
+	}
+	close(rcCh)
 	<-sigQuit
 	svr.serverLoopWg.Wait()
 	assert.True(t, closed)
