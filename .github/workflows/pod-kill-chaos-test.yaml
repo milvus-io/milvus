@@ -170,8 +170,8 @@ jobs:
         run: |
           kubectl config set-context --current --namespace=chaos-testing
           bash scripts/uninstall_milvus.sh ${{ env.RELEASE }}
-          if [ ${{ matrix.pod }} != "standalone" ]; then helm install --wait --timeout 720s ${{ env.RELEASE }} milvus/milvus -f cluster-values.yaml  -n=chaos-testing; fi
-          if [ ${{ matrix.pod }} == "standalone" ]; then helm install --wait --timeout 720s ${{ env.RELEASE }} milvus/milvus --set cluster.enabled=false --set etcd.replicaCount=1 --set minio.mode=standalone --set pulsar.enabled=false -n=chaos-testing; fi
+          if [ ${{ matrix.pod }} != "standalone" ]; then helm install --wait --timeout 720s ${{ env.RELEASE }} milvus/milvus --set image.all.repository=${{ env.IMAGE_REPO }} --set image.all.tag=${{ env.IMAGE_TAG }} -f cluster-values.yaml  -n=chaos-testing; fi
+          if [ ${{ matrix.pod }} == "standalone" ]; then helm install --wait --timeout 720s ${{ env.RELEASE }} milvus/milvus --set image.all.repository=${{ env.IMAGE_REPO }} --set image.all.tag=${{ env.IMAGE_TAG }} --set cluster.enabled=false --set etcd.replicaCount=1 --set minio.mode=standalone --set pulsar.enabled=false -n=chaos-testing; fi
           kubectl get pods -n chaos-testing
           sleep 20s
           kubectl get pods -n chaos-testing
