@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package kv
+package rootcoord
 
 import (
 	"fmt"
@@ -171,7 +171,7 @@ func Test_binarySearchRecords(t *testing.T) {
 
 func Test_ComposeIsTsKey(t *testing.T) {
 	sep := "_ts"
-	ss, err := NewSuffixSnapshot((*etcdkv.EtcdKV)(nil), sep, "", snapshotPrefix)
+	ss, err := newSuffixSnapshot((*etcdkv.EtcdKV)(nil), sep, "", snapshotPrefix)
 	require.Nil(t, err)
 	type testcase struct {
 		key         string
@@ -209,7 +209,7 @@ func Test_ComposeIsTsKey(t *testing.T) {
 
 func Test_SuffixSnaphotIsTSOfKey(t *testing.T) {
 	sep := "_ts"
-	ss, err := NewSuffixSnapshot((*etcdkv.EtcdKV)(nil), sep, "", snapshotPrefix)
+	ss, err := newSuffixSnapshot((*etcdkv.EtcdKV)(nil), sep, "", snapshotPrefix)
 	require.Nil(t, err)
 	type testcase struct {
 		key         string
@@ -274,7 +274,7 @@ func Test_SuffixSnapshotLoad(t *testing.T) {
 		return vtso
 	}
 
-	ss, err := NewSuffixSnapshot(etcdkv, sep, rootPath, snapshotPrefix)
+	ss, err := newSuffixSnapshot(etcdkv, sep, rootPath, snapshotPrefix)
 	assert.Nil(t, err)
 	assert.NotNil(t, ss)
 
@@ -295,7 +295,7 @@ func Test_SuffixSnapshotLoad(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, "value-19", val)
 
-	ss, err = NewSuffixSnapshot(etcdkv, sep, rootPath, snapshotPrefix)
+	ss, err = newSuffixSnapshot(etcdkv, sep, rootPath, snapshotPrefix)
 	assert.Nil(t, err)
 	assert.NotNil(t, ss)
 
@@ -326,7 +326,7 @@ func Test_SuffixSnapshotMultiSave(t *testing.T) {
 		return vtso
 	}
 
-	ss, err := NewSuffixSnapshot(etcdkv, sep, rootPath, snapshotPrefix)
+	ss, err := newSuffixSnapshot(etcdkv, sep, rootPath, snapshotPrefix)
 	assert.Nil(t, err)
 	assert.NotNil(t, ss)
 
@@ -358,7 +358,7 @@ func Test_SuffixSnapshotMultiSave(t *testing.T) {
 	assert.Equal(t, vals[0], "v1-19")
 	assert.Equal(t, vals[1], "v2-19")
 
-	ss, err = NewSuffixSnapshot(etcdkv, sep, rootPath, snapshotPrefix)
+	ss, err = newSuffixSnapshot(etcdkv, sep, rootPath, snapshotPrefix)
 	assert.Nil(t, err)
 	assert.NotNil(t, ss)
 	for i := 0; i < 20; i++ {
@@ -403,7 +403,7 @@ func Test_SuffixSnapshotMultiSaveAndRemoveWithPrefix(t *testing.T) {
 		return vtso
 	}
 
-	ss, err := NewSuffixSnapshot(etcdkv, sep, rootPath, snapshotPrefix)
+	ss, err := newSuffixSnapshot(etcdkv, sep, rootPath, snapshotPrefix)
 	assert.Nil(t, err)
 	assert.NotNil(t, ss)
 
@@ -440,7 +440,7 @@ func Test_SuffixSnapshotMultiSaveAndRemoveWithPrefix(t *testing.T) {
 		assert.Equal(t, 39-i, len(vals))
 	}
 
-	ss, err = NewSuffixSnapshot(etcdkv, sep, rootPath, snapshotPrefix)
+	ss, err = newSuffixSnapshot(etcdkv, sep, rootPath, snapshotPrefix)
 	assert.Nil(t, err)
 	assert.NotNil(t, ss)
 

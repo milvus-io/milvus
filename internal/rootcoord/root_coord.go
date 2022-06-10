@@ -31,24 +31,26 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
-	kvmetestore "github.com/milvus-io/milvus/internal/metastore/kv"
-	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/metrics"
 	ms "github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util"
@@ -62,8 +64,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 )
 
 // UniqueID is an alias of typeutil.UniqueID.
@@ -133,7 +133,7 @@ type Core struct {
 	CallGetRecoveryInfoService    func(ctx context.Context, collID, partID UniqueID) ([]*datapb.SegmentBinlogs, error)
 
 	//call index builder's client to build index, return build id or get index state.
-	CallBuildIndexService     func(ctx context.Context, segID UniqueID, binlog []string, field *model.Field, idxInfo *model.Index, numRows int64) (typeutil.UniqueID, error)
+	CallBuildIndexService     func(ctx context.Context, segID UniqueID, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo, numRows int64) (typeutil.UniqueID, error)
 	CallDropIndexService      func(ctx context.Context, indexID typeutil.UniqueID) error
 	CallGetIndexStatesService func(ctx context.Context, IndexBuildIDs []int64) ([]*indexpb.IndexInfo, error)
 
@@ -363,20 +363,20 @@ func (c *Core) checkFlushedSegments(ctx context.Context) {
 		if len(collMeta.FieldIndexes) == 0 {
 			continue
 		}
-		for _, part := range collMeta.Partitions {
+		for _, partID := range collMeta.PartitionIDs {
 			ctx2, cancel2 := context.WithTimeout(ctx, 3*time.Minute)
-			segBinlogs, err := c.CallGetRecoveryInfoService(ctx2, collMeta.CollectionID, part.PartitionID)
+			segBinlogs, err := c.CallGetRecoveryInfoService(ctx2, collMeta.ID, partID)
 			if err != nil {
 				log.Debug("failed to get flushed segments from dataCoord",
-					zap.Int64("collection ID", collMeta.CollectionID),
-					zap.Int64("partition ID", part.PartitionID),
+					zap.Int64("collection ID", collMeta.GetID()),
+					zap.Int64("partition ID", partID),
 					zap.Error(err))
 				cancel2()
 				continue
 			}
 			for _, segBinlog := range segBinlogs {
 				segID := segBinlog.SegmentID
-				var indexInfos []*model.Index
+				var indexInfos []*etcdpb.FieldIndexInfo
 				indexMeta, ok := segID2IndexMeta[segID]
 				if !ok {
 					indexInfos = append(indexInfos, collMeta.FieldIndexes...)
@@ -389,11 +389,11 @@ func (c *Core) checkFlushedSegments(ctx context.Context) {
 				}
 				for _, idxInfo := range indexInfos {
 					/* #nosec G601 */
-					field, err := GetFieldSchemaByID(&collMeta, idxInfo.FieldID)
+					field, err := GetFieldSchemaByID(&collMeta, idxInfo.FiledID)
 					if err != nil {
 						log.Debug("GetFieldSchemaByID",
 							zap.Any("collection_meta", collMeta),
-							zap.Int64("field id", idxInfo.FieldID))
+							zap.Int64("field id", idxInfo.FiledID))
 						continue
 					}
 					indexMeta, ok := indexID2Meta[idxInfo.IndexID]
@@ -401,26 +401,19 @@ func (c *Core) checkFlushedSegments(ctx context.Context) {
 						log.Debug("index meta does not exist", zap.Int64("index_id", idxInfo.IndexID))
 						continue
 					}
-					info := model.Index{
-						CollectionID: collMeta.CollectionID,
-						FieldID:      idxInfo.FieldID,
+					info := etcdpb.SegmentIndexInfo{
+						CollectionID: collMeta.ID,
+						PartitionID:  partID,
+						SegmentID:    segID,
+						FieldID:      idxInfo.FiledID,
 						IndexID:      idxInfo.IndexID,
-						SegmentIndexes: map[int64]model.SegmentIndex{
-							segID: {
-								Segment: model.Segment{
-									SegmentID:   segID,
-									PartitionID: part.PartitionID,
-								},
-								EnableIndex: false,
-							},
-						},
+						EnableIndex:  false,
 					}
 					log.Debug("building index by background checker",
 						zap.Int64("segment_id", segID),
 						zap.Int64("index_id", indexMeta.IndexID),
-						zap.Int64("collection_id", collMeta.CollectionID))
-					segmentIndex := info.SegmentIndexes[segID]
-					segmentIndex.BuildID, err = c.BuildIndex(ctx2, segID, segBinlog.GetNumOfRows(), segBinlog.GetFieldBinlogs(), field, &indexMeta, false)
+						zap.Int64("collection_id", collMeta.ID))
+					info.BuildID, err = c.BuildIndex(ctx2, segID, segBinlog.GetNumOfRows(), segBinlog.GetFieldBinlogs(), field, &indexMeta, false)
 					if err != nil {
 						log.Debug("build index failed",
 							zap.Int64("segment_id", segID),
@@ -428,14 +421,14 @@ func (c *Core) checkFlushedSegments(ctx context.Context) {
 							zap.Int64("index_id", indexMeta.IndexID))
 						continue
 					}
-					if segmentIndex.BuildID != 0 {
-						segmentIndex.EnableIndex = true
+					if info.BuildID != 0 {
+						info.EnableIndex = true
 					}
-					if err := c.MetaTable.AlterIndex(&info); err != nil {
+					if err := c.MetaTable.AddIndex(&info); err != nil {
 						log.Debug("Add index into meta table failed",
-							zap.Int64("collection_id", collMeta.CollectionID),
+							zap.Int64("collection_id", collMeta.ID),
 							zap.Int64("index_id", info.IndexID),
-							zap.Int64("build_id", segmentIndex.BuildID),
+							zap.Int64("build_id", info.BuildID),
 							zap.Error(err))
 					}
 				}
@@ -452,16 +445,16 @@ func (c *Core) getSegments(ctx context.Context, collID typeutil.UniqueID) (map[U
 	}
 	segID2PartID := make(map[UniqueID]UniqueID)
 	segID2Binlog := make(map[UniqueID]*datapb.SegmentBinlogs)
-	for _, part := range collMeta.Partitions {
-		if segs, err := c.CallGetRecoveryInfoService(ctx, collID, part.PartitionID); err == nil {
+	for _, partID := range collMeta.PartitionIDs {
+		if segs, err := c.CallGetRecoveryInfoService(ctx, collID, partID); err == nil {
 			for _, s := range segs {
-				segID2PartID[s.SegmentID] = part.PartitionID
+				segID2PartID[s.SegmentID] = partID
 				segID2Binlog[s.SegmentID] = s
 			}
 		} else {
 			log.Error("failed to get flushed segments info from dataCoord",
 				zap.Int64("collection ID", collID),
-				zap.Int64("partition ID", part.PartitionID),
+				zap.Int64("partition ID", partID),
 				zap.Error(err))
 			return nil, nil, err
 		}
@@ -711,7 +704,7 @@ func (c *Core) SetIndexCoord(s types.IndexCoord) error {
 		}
 	}()
 
-	c.CallBuildIndexService = func(ctx context.Context, segID UniqueID, binlog []string, field *model.Field, idxInfo *model.Index, numRows int64) (retID typeutil.UniqueID, retErr error) {
+	c.CallBuildIndexService = func(ctx context.Context, segID UniqueID, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo, numRows int64) (retID typeutil.UniqueID, retErr error) {
 		defer func() {
 			if err := recover(); err != nil {
 				retErr = fmt.Errorf("build index panic, msg = %v", err)
@@ -725,7 +718,7 @@ func (c *Core) SetIndexCoord(s types.IndexCoord) error {
 			IndexID:     idxInfo.IndexID,
 			IndexName:   idxInfo.IndexName,
 			NumRows:     numRows,
-			FieldSchema: model.ConvertToFieldSchemaPB(field),
+			FieldSchema: field,
 			SegmentID:   segID,
 		})
 		if err != nil {
@@ -871,14 +864,14 @@ func (c *Core) SetQueryCoord(s types.QueryCoord) error {
 }
 
 // BuildIndex will check row num and call build index service
-func (c *Core) BuildIndex(ctx context.Context, segID UniqueID, numRows int64, binlogs []*datapb.FieldBinlog, field *model.Field, idxInfo *model.Index, isFlush bool) (typeutil.UniqueID, error) {
+func (c *Core) BuildIndex(ctx context.Context, segID UniqueID, numRows int64, binlogs []*datapb.FieldBinlog, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo, isFlush bool) (typeutil.UniqueID, error) {
 	log.Debug("start build index", zap.String("index name", idxInfo.IndexName),
 		zap.String("field name", field.Name), zap.Int64("segment id", segID))
 	sp, ctx := trace.StartSpanFromContext(ctx)
 	defer sp.Finish()
 	if c.MetaTable.IsSegmentIndexed(segID, field, idxInfo.IndexParams) {
-		info, err := c.MetaTable.GetSegmentIndexInfoByID(segID, field.FieldID, idxInfo.IndexName)
-		return info.SegmentIndexes[segID].BuildID, err
+		info, err := c.MetaTable.GetSegmentIndexInfoByID(segID, field.FieldID, idxInfo.GetIndexName())
+		return info.BuildID, err
 	}
 	var bldID UniqueID
 	var err error
@@ -887,7 +880,7 @@ func (c *Core) BuildIndex(ctx context.Context, segID UniqueID, numRows int64, bi
 	} else {
 		binLogs := make([]string, 0)
 		for _, fieldBinLog := range binlogs {
-			if fieldBinLog.GetFieldID() == field.FieldID {
+			if fieldBinLog.GetFieldID() == field.GetFieldID() {
 				for _, binLog := range fieldBinLog.GetBinlogs() {
 					binLogs = append(binLogs, binLog.LogPath)
 				}
@@ -1021,13 +1014,12 @@ func (c *Core) Init() error {
 				log.Error("RootCoord failed to new EtcdKV", zap.Any("reason", initError))
 				return initError
 			}
-
-			var ss *kvmetestore.SuffixSnapshot
-			if ss, initError = kvmetestore.NewSuffixSnapshot(metaKV, "_ts", Params.EtcdCfg.MetaRootPath, "snapshots"); initError != nil {
+			var ss *suffixSnapshot
+			if ss, initError = newSuffixSnapshot(metaKV, "_ts", Params.EtcdCfg.MetaRootPath, "snapshots"); initError != nil {
 				log.Error("RootCoord failed to new suffixSnapshot", zap.Error(initError))
 				return initError
 			}
-			if c.MetaTable, initError = NewMetaTable(c.ctx, metaKV, ss); initError != nil {
+			if c.MetaTable, initError = NewMetaTable(metaKV, ss); initError != nil {
 				log.Error("RootCoord failed to new MetaTable", zap.Any("reason", initError))
 				return initError
 			}
@@ -1205,7 +1197,7 @@ func (c *Core) reSendDdMsg(ctx context.Context, force bool) error {
 		if err != nil {
 			return err
 		}
-		if _, err = c.MetaTable.GetPartitionByName(collInfo.CollectionID, ddReq.PartitionName, 0); err != nil {
+		if _, err = c.MetaTable.GetPartitionByName(collInfo.ID, ddReq.PartitionName, 0); err != nil {
 			if err = c.SendDdCreatePartitionReq(ctx, &ddReq, collInfo.PhysicalChannelNames); err != nil {
 				return err
 			}
@@ -1226,7 +1218,7 @@ func (c *Core) reSendDdMsg(ctx context.Context, force bool) error {
 		if err != nil {
 			return err
 		}
-		if _, err = c.MetaTable.GetPartitionByName(collInfo.CollectionID, ddReq.PartitionName, 0); err == nil {
+		if _, err = c.MetaTable.GetPartitionByName(collInfo.ID, ddReq.PartitionName, 0); err == nil {
 			if err = c.SendDdDropPartitionReq(ctx, &ddReq, collInfo.PhysicalChannelNames); err != nil {
 				return err
 			}
@@ -2060,14 +2052,14 @@ func (c *Core) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlus
 
 	if len(coll.FieldIndexes) == 0 {
 		log.Debug("no index params on collection", zap.String("role", typeutil.RootCoordRole),
-			zap.String("collection_name", coll.Name), zap.Int64("msgID", in.Base.MsgID))
+			zap.String("collection_name", coll.Schema.Name), zap.Int64("msgID", in.Base.MsgID))
 	}
 
 	for _, f := range coll.FieldIndexes {
-		fieldSch, err := GetFieldSchemaByID(coll, f.FieldID)
+		fieldSch, err := GetFieldSchemaByID(coll, f.FiledID)
 		if err != nil {
 			log.Warn("field schema not found", zap.String("role", typeutil.RootCoordRole),
-				zap.String("collection_name", coll.Name), zap.Int64("field id", f.FieldID),
+				zap.String("collection_name", coll.Schema.Name), zap.Int64("field id", f.FiledID),
 				zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 			continue
 		}
@@ -2075,41 +2067,33 @@ func (c *Core) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlus
 		idxInfo, err := c.MetaTable.GetIndexByID(f.IndexID)
 		if err != nil {
 			log.Warn("index not found", zap.String("role", typeutil.RootCoordRole),
-				zap.String("collection_name", coll.Name), zap.Int64("field id", f.FieldID),
+				zap.String("collection_name", coll.Schema.Name), zap.Int64("field id", f.FiledID),
 				zap.Int64("index id", f.IndexID), zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 			continue
 		}
 
-		info := model.Index{
+		info := etcdpb.SegmentIndexInfo{
 			CollectionID: in.Segment.CollectionID,
+			PartitionID:  in.Segment.PartitionID,
+			SegmentID:    segID,
 			FieldID:      fieldSch.FieldID,
 			IndexID:      idxInfo.IndexID,
-			SegmentIndexes: map[int64]model.SegmentIndex{
-				segID: {
-					Segment: model.Segment{
-						SegmentID:   segID,
-						PartitionID: in.Segment.PartitionID,
-					},
-					EnableIndex: false,
-				},
-			},
+			EnableIndex:  false,
 		}
-
-		segmentIndex := info.SegmentIndexes[segID]
-		segmentIndex.BuildID, err = c.BuildIndex(ctx, segID, in.Segment.GetNumOfRows(), in.Segment.GetBinlogs(), fieldSch, idxInfo, true)
-		if err == nil && segmentIndex.BuildID != 0 {
-			segmentIndex.EnableIndex = true
+		info.BuildID, err = c.BuildIndex(ctx, segID, in.Segment.GetNumOfRows(), in.Segment.GetBinlogs(), fieldSch, idxInfo, true)
+		if err == nil && info.BuildID != 0 {
+			info.EnableIndex = true
 		} else {
 			log.Error("BuildIndex failed", zap.String("role", typeutil.RootCoordRole),
-				zap.String("collection_name", coll.Name), zap.Int64("field id", f.FieldID),
-				zap.Int64("index id", f.IndexID), zap.Int64("build id", segmentIndex.BuildID),
+				zap.String("collection_name", coll.Schema.Name), zap.Int64("field id", f.FiledID),
+				zap.Int64("index id", f.IndexID), zap.Int64("build id", info.BuildID),
 				zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 			continue
 		}
-		err = c.MetaTable.AlterIndex(&info)
+		err = c.MetaTable.AddIndex(&info)
 		if err != nil {
-			log.Error("AlterIndex failed", zap.String("role", typeutil.RootCoordRole),
-				zap.String("collection_name", coll.Name), zap.Int64("field id", f.FieldID),
+			log.Error("AddIndex failed", zap.String("role", typeutil.RootCoordRole),
+				zap.String("collection_name", coll.Schema.Name), zap.Int64("field id", f.FiledID),
 				zap.Int64("index id", f.IndexID), zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 			continue
 		}
@@ -2382,7 +2366,7 @@ func (c *Core) ReportImport(ctx context.Context, ir *rootcoordpb.ImportResult) (
 
 	// Look up collection name on collection ID.
 	var colName string
-	var colMeta *model.Collection
+	var colMeta *etcdpb.CollectionInfo
 	if colMeta, err = c.MetaTable.GetCollectionByID(ti.GetCollectionId(), 0); err != nil {
 		log.Error("failed to get collection name",
 			zap.Int64("collection ID", ti.GetCollectionId()),
@@ -2392,7 +2376,7 @@ func (c *Core) ReportImport(ctx context.Context, ir *rootcoordpb.ImportResult) (
 			Reason:    "failed to get collection name for collection ID" + strconv.FormatInt(ti.GetCollectionId(), 10),
 		}, nil
 	}
-	colName = colMeta.Name
+	colName = colMeta.GetSchema().GetName()
 
 	// When DataNode has done its thing, remove it from the busy node list. And send import task again
 	resendTaskFunc()
@@ -2506,7 +2490,7 @@ func (c *Core) postImportPersistLoop(ctx context.Context, taskID int64, colID in
 	if colMeta, err := c.MetaTable.GetCollectionByID(colID, 0); err != nil {
 		log.Error("failed to find meta for collection",
 			zap.Int64("collection ID", colID))
-	} else if len(colMeta.FieldIndexes) != 0 {
+	} else if len(colMeta.GetFieldIndexes()) != 0 {
 		c.wg.Add(1)
 		c.checkCompleteIndexLoop(ctx, taskID, colID, colName, segIDs)
 	}
