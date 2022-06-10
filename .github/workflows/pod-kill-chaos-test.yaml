@@ -7,6 +7,10 @@ on:
         description: The image tag to use for the chaos test
         required: true
         default: 'master-latest'
+      image_repo:
+        description: The image repo to use for the chaos test
+        required: true
+        default: 'milvusdb/milvus-dev'        
   schedule:
     - cron: "30 18 * * *"
 jobs:
@@ -27,6 +31,7 @@ jobs:
           DEFAULT_IMAGE_TAG: master-latest
         run: |
           echo "RELEASE=test-${{ matrix.pod }}-pod-kill" >> $GITHUB_ENV
+          echo "IMAGE_REPO=${{ github.event.inputs.image_repo || env.DEFAULT_IMAGE_REPO}}" >> $GITHUB_ENV
           echo "IMAGE_TAG=${{ github.event.inputs.image_tag || env.DEFAULT_IMAGE_TAG}}" >> $GITHUB_ENV
 
       - name: Creating kind cluster
@@ -77,8 +82,8 @@ jobs:
           bash ../../../scripts/docker_image_find_tag.sh -n milvusdb/milvus-dev -t master-latest -f master- -F -L -q
           helm repo add milvus https://milvus-io.github.io/milvus-helm
           helm repo update
-          if [[ ${{ matrix.pod }} != *"standalone"* ]]; then helm install --wait --timeout 720s ${{ env.RELEASE }} milvus/milvus --set image.all.tag=${{ env.IMAGE_TAG }} -f cluster-values.yaml  -n=chaos-testing; fi
-          if [[ ${{ matrix.pod }} == *"standalone"* ]]; then helm install --wait --timeout 720s ${{ env.RELEASE }} milvus/milvus --set image.all.tag=${{ env.IMAGE_TAG }} -f standalone-values.yaml -n=chaos-testing; fi
+          if [[ ${{ matrix.pod }} != *"standalone"* ]]; then helm install --wait --timeout 720s ${{ env.RELEASE }} milvus/milvus --set image.all.repository=${{ env.IMAGE_REPO }} --set image.all.tag=${{ env.IMAGE_TAG }} -f cluster-values.yaml  -n=chaos-testing; fi
+          if [[ ${{ matrix.pod }} == *"standalone"* ]]; then helm install --wait --timeout 720s ${{ env.RELEASE }} milvus/milvus --set image.all.repository=${{ env.IMAGE_REPO }} --set image.all.tag=${{ env.IMAGE_TAG }} -f standalone-values.yaml -n=chaos-testing; fi
           kubectl get pods -n chaos-testing
           sleep 20s
           kubectl get pods -n chaos-testing
