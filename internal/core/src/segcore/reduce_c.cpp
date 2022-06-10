@@ -9,10 +9,6 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#ifndef __APPLE__
-#include <malloc.h>
-#endif
-
 #include <vector>
 #include "Reduce.h"
 #include "common/CGoHelper.h"
@@ -87,7 +83,4 @@ DeleteSearchResultDataBlobs(CSearchResultDataBlobs cSearchResultDataBlobs) {
     }
     auto search_result_data_blobs = reinterpret_cast<milvus::segcore::SearchResultDataBlobs*>(cSearchResultDataBlobs);
     delete search_result_data_blobs;
-#ifdef __linux__
-    malloc_trim(0);
-#endif
 }

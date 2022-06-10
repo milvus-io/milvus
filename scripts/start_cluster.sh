@@ -14,6 +14,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+if [ "$(expr substr $(uname -s) 1 5)" == "Linux" ]; then
+        LIBJEMALLOC=$PWD/internal/core/output/lib/libjemalloc.so
+        if test -f "$LIBJEMALLOC"; then
+                #echo "Found $LIBJEMALLOC"
+                export LD_PRELDOAD="$LIBJEMALLOC"
+        else
+                echo "WARN: Cannot find $LIBJEMALLOC"   
+        fi
+fi
+
 echo "Starting rootcoord..."
 nohup ./bin/milvus run rootcoord > /tmp/rootcoord.log 2>&1 &
 

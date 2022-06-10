@@ -68,3 +68,8 @@ add_subdirectory( arrow )
 if ( LINUX OR APPLE)
     add_subdirectory( marisa )
 endif()
+
+# ******************************* Thridparty jemalloc ********************************
+if ( LINUX )
+    add_subdirectory( jemalloc )
+endif()
