@@ -40,7 +40,6 @@ get-build-deps:
 getdeps:
 	@mkdir -p ${GOPATH}/bin
 	@which golangci-lint 1>/dev/null || (echo "Installing golangci-lint" && curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GOPATH)/bin v1.43.0)
-	@which ruleguard 1>/dev/null || (echo "Installing ruleguard" && go get github.com/quasilyte/go-ruleguard/cmd/ruleguard@v0.2.1)
 
 tools/bin/revive: tools/check/go.mod
 	cd tools/check; \
@@ -81,28 +80,7 @@ static-check:
 	@GO111MODULE=on ${GOPATH}/bin/golangci-lint run --timeout=30m --config ./.golangci.yml ./cmd/...
 #	@GO111MODULE=on ${GOPATH}/bin/golangci-lint run --timeout=30m --config ./.golangci.yml ./tests/go_client/...
 
-ruleguard:
-ifdef GO_DIFF_FILES
-	@echo "Running $@ check"
-	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go $(GO_DIFF_FILES)
-else
-	@echo "Running $@ check"
-ifeq ($(OS),Darwin) # MacOS X
-ifeq ($(ARCH),arm64)
-	@${GOPATH}/bin/darwin_arm64/ruleguard -rules ruleguard.rules.go ./internal/...
-	@${GOPATH}/bin/darwin_arm64/ruleguard -rules ruleguard.rules.go ./cmd/...
-else
-	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./internal/...
-	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./cmd/...
-endif
-else
-	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./internal/...
-	@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./cmd/...
-endif
-	#@${GOPATH}/bin/ruleguard -rules ruleguard.rules.go ./tests/go/...
-endif
-
-verifiers: build-cpp getdeps cppcheck fmt static-check ruleguard
+verifiers: build-cpp getdeps cppcheck fmt static-check
 
 # Build various components locally.
 binlog:

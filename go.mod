@@ -35,6 +35,7 @@ require (
 	github.com/pierrec/lz4 v2.5.2+incompatible // indirect
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.11.0
+	github.com/quasilyte/go-ruleguard/dsl v0.3.21 // indirect
 	github.com/sbinet/npyio v0.6.0
 	github.com/shirou/gopsutil v3.21.8+incompatible
 	github.com/spaolacci/murmur3 v1.1.0

@@ -7,10 +7,6 @@ run:
     - scripts
     - internal/core
 
-linters-settings:
-  misspell:
-    locale: US
-
 linters:
   disable-all: true
   enable:
@@ -22,6 +18,18 @@ linters:
     - gosimple
     - gosec
     - revive
+    - gocritic
+
+linters-settings:
+  misspell:
+    locale: US
+  gocritic:
+    enabled-checks:
+      - ruleguard
+    settings:
+      ruleguard:
+        failOnError: true
+        rules: "rules.go"
 
 issues:
   exclude-use-default: false
