@@ -19,10 +19,10 @@ package rootcoord
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/metastore/model"
-
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -60,10 +60,12 @@ func Test_EqualKeyPairArray(t *testing.T) {
 }
 
 func Test_GetFieldSchemaByID(t *testing.T) {
-	coll := &model.Collection{
-		Fields: []*model.Field{
-			{
-				FieldID: 1,
+	coll := &etcdpb.CollectionInfo{
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID: 1,
+				},
 			},
 		},
 	}
@@ -74,15 +76,17 @@ func Test_GetFieldSchemaByID(t *testing.T) {
 }
 
 func Test_GetFieldSchemaByIndexID(t *testing.T) {
-	coll := &model.Collection{
-		Fields: []*model.Field{
-			{
-				FieldID: 1,
+	coll := &etcdpb.CollectionInfo{
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID: 1,
+				},
 			},
 		},
-		FieldIndexes: []*model.Index{
+		FieldIndexes: []*etcdpb.FieldIndexInfo{
 			{
-				FieldID: 1,
+				FiledID: 1,
 				IndexID: 2,
 			},
 		},

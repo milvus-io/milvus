@@ -20,11 +20,11 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/milvus-io/milvus/internal/metastore/model"
-
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -50,8 +50,8 @@ func EqualKeyPairArray(p1 []*commonpb.KeyValuePair, p2 []*commonpb.KeyValuePair)
 }
 
 // GetFieldSchemaByID return field schema by id
-func GetFieldSchemaByID(coll *model.Collection, fieldID typeutil.UniqueID) (*model.Field, error) {
-	for _, f := range coll.Fields {
+func GetFieldSchemaByID(coll *etcdpb.CollectionInfo, fieldID typeutil.UniqueID) (*schemapb.FieldSchema, error) {
+	for _, f := range coll.Schema.Fields {
 		if f.FieldID == fieldID {
 			return f, nil
 		}
@@ -60,12 +60,12 @@ func GetFieldSchemaByID(coll *model.Collection, fieldID typeutil.UniqueID) (*mod
 }
 
 // GetFieldSchemaByIndexID return field schema by it's index id
-func GetFieldSchemaByIndexID(coll *model.Collection, idxID typeutil.UniqueID) (*model.Field, error) {
+func GetFieldSchemaByIndexID(coll *etcdpb.CollectionInfo, idxID typeutil.UniqueID) (*schemapb.FieldSchema, error) {
 	var fieldID typeutil.UniqueID
 	exist := false
 	for _, f := range coll.FieldIndexes {
 		if f.IndexID == idxID {
-			fieldID = f.FieldID
+			fieldID = f.FiledID
 			exist = true
 			break
 		}
@@ -96,6 +96,16 @@ func EncodeDdOperation(m proto.Message, ddType string) (string, error) {
 // DecodeDdOperation deserialize string to DdOperation
 func DecodeDdOperation(str string, ddOp *DdOperation) error {
 	return json.Unmarshal([]byte(str), ddOp)
+}
+
+// SegmentIndexInfoEqual return true if SegmentIndexInfos are identical
+func SegmentIndexInfoEqual(info1 *etcdpb.SegmentIndexInfo, info2 *etcdpb.SegmentIndexInfo) bool {
+	return info1.CollectionID == info2.CollectionID &&
+		info1.PartitionID == info2.PartitionID &&
+		info1.SegmentID == info2.SegmentID &&
+		info1.FieldID == info2.FieldID &&
+		info1.IndexID == info2.IndexID &&
+		info1.EnableIndex == info2.EnableIndex
 }
 
 // EncodeMsgPositions serialize []*MsgPosition into string
