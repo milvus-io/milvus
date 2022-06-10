@@ -87,7 +87,6 @@ get_deleted_bitmap(int64_t del_barrier,
                    int64_t insert_barrier,
                    DeletedRecord& delete_record,
                    const InsertRecord& insert_record,
-                   const Pk2OffsetType& pk2offset,
                    Timestamp query_timestamp);
 
 std::unique_ptr<DataArray>

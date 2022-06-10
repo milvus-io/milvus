@@ -227,8 +227,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
     // deleted pks
     mutable DeletedRecord deleted_record_;
 
-    // pks to row offset
-    Pk2OffsetType pk2offset_;
     int64_t id_;
 
  private:
