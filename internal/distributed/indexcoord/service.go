@@ -227,6 +227,10 @@ func (s *Server) DropIndex(ctx context.Context, request *indexpb.DropIndexReques
 	return s.indexcoord.DropIndex(ctx, request)
 }
 
+func (s *Server) RemoveIndex(ctx context.Context, req *indexpb.RemoveIndexRequest) (*commonpb.Status, error) {
+	return s.indexcoord.RemoveIndex(ctx, req)
+}
+
 // GetIndexFilePaths gets the index file paths from IndexCoord.
 func (s *Server) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error) {
 	return s.indexcoord.GetIndexFilePaths(ctx, req)

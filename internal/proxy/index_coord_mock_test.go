@@ -133,6 +133,13 @@ func (coord *IndexCoordMock) DropIndex(ctx context.Context, req *indexpb.DropInd
 	}, nil
 }
 
+func (coord *IndexCoordMock) RemoveIndex(ctx context.Context, req *indexpb.RemoveIndexRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
+}
+
 func (coord *IndexCoordMock) GetIndexStates(ctx context.Context, req *indexpb.GetIndexStatesRequest) (*indexpb.GetIndexStatesResponse, error) {
 	return &indexpb.GetIndexStatesResponse{
 		Status: &commonpb.Status{

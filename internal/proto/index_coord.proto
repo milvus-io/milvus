@@ -17,6 +17,7 @@ service IndexCoord {
   rpc GetIndexStates(GetIndexStatesRequest) returns (GetIndexStatesResponse) {}
   rpc GetIndexFilePaths(GetIndexFilePathsRequest) returns (GetIndexFilePathsResponse){}
   rpc DropIndex(DropIndexRequest) returns (common.Status) {}
+  rpc RemoveIndex(RemoveIndexRequest) returns (common.Status) {}
 
   // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
   rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
@@ -119,4 +120,8 @@ message IndexMeta {
 
 message DropIndexRequest {
   int64 indexID = 1;
+}
+
+message RemoveIndexRequest {
+  repeated int64 buildIDs = 1;
 }

@@ -1722,10 +1722,16 @@ func TestRootCoord_Base(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, rsp.ErrorCode)
 
-		im.mutex.Lock()
-		assert.Equal(t, 1, len(im.idxDropID))
-		assert.Equal(t, idx[0].IndexID, im.idxDropID[0])
-		im.mutex.Unlock()
+		for {
+			im.mutex.Lock()
+			if len(im.idxDropID) == 1 {
+				assert.Equal(t, idx[0].IndexID, im.idxDropID[0])
+				im.mutex.Unlock()
+				break
+			}
+			im.mutex.Unlock()
+			time.Sleep(time.Second)
+		}
 
 		_, idx, err = core.MetaTable.GetIndexByName(collName, Params.CommonCfg.DefaultIndexName)
 		assert.NoError(t, err)
@@ -3035,6 +3041,12 @@ func TestCheckInit(t *testing.T) {
 	assert.Error(t, err)
 
 	c.CallDropIndexService = func(ctx context.Context, indexID typeutil.UniqueID) error {
+		return nil
+	}
+	err = c.checkInit()
+	assert.Error(t, err)
+
+	c.CallRemoveIndexService = func(ctx context.Context, buildIDs []typeutil.UniqueID) error {
 		return nil
 	}
 	err = c.checkInit()

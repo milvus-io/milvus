@@ -117,6 +117,15 @@ func TestIndexCoordMock(t *testing.T) {
 		assert.Equal(t, "IndexCoord", resp.ComponentName)
 	})
 
+	t.Run("RemoveIndex", func(t *testing.T) {
+		req := &indexpb.RemoveIndexRequest{
+			BuildIDs: []UniqueID{},
+		}
+		status, err := icm.RemoveIndex(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+	})
+
 	err = icm.Stop()
 	assert.Nil(t, err)
 }
@@ -198,6 +207,15 @@ func TestIndexCoordMockError(t *testing.T) {
 		resp, err := icm.GetMetrics(ctx, req)
 		assert.NotNil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+	})
+
+	t.Run("RemoveIndex", func(t *testing.T) {
+		req := &indexpb.RemoveIndexRequest{
+			BuildIDs: []UniqueID{},
+		}
+		status, err := icm.RemoveIndex(ctx, req)
+		assert.Error(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
 	})
 
 	err = icm.Stop()

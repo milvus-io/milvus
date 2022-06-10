@@ -17,6 +17,7 @@
 package indexcoord
 
 import (
+	"path"
 	"strconv"
 	"testing"
 
@@ -143,6 +144,17 @@ func TestMetaTable(t *testing.T) {
 		assert.Equal(t, 2, len(indexInfos))
 		assert.Equal(t, "index 0 not exists", indexInfos[0].Reason)
 		assert.Equal(t, "index 1 has been deleted", indexInfos[1].Reason)
+	})
+
+	t.Run("MarkSegmentIndexAsDeleted", func(t *testing.T) {
+		indexMeta1.Version = indexMeta1.Version + 1
+		value, err = proto.Marshal(indexMeta1)
+		assert.Nil(t, err)
+		key = path.Join(indexFilePrefix, strconv.FormatInt(indexMeta1.IndexBuildID, 10))
+		err = etcdKV.Save(key, string(value))
+		assert.Nil(t, err)
+		err = metaTable.MarkIndexAsDeletedByBuildIDs([]UniqueID{indexMeta1.IndexBuildID})
+		assert.Nil(t, err)
 	})
 
 	t.Run("GetIndexFilePathInfo", func(t *testing.T) {

@@ -208,6 +208,10 @@ func TestGrpcService(t *testing.T) {
 		return nil
 	}
 
+	core.CallRemoveIndexService = func(ctx context.Context, buildIDs []rootcoord.UniqueID) error {
+		return nil
+	}
+
 	collectionMetaCache := make([]string, 0, 16)
 	pnm := proxyMock{}
 	core.NewProxyClient = func(*sessionutil.Session) (types.Proxy, error) {
@@ -738,10 +742,17 @@ func TestGrpcService(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, rsp.ErrorCode)
 
-		dropIDLock.Lock()
-		assert.Equal(t, 1, len(dropID))
-		assert.Equal(t, idx[0].IndexID, dropID[0])
-		dropIDLock.Unlock()
+		for {
+			dropIDLock.Lock()
+			if len(dropID) == 1 {
+				assert.Equal(t, idx[0].IndexID, dropID[0])
+				dropIDLock.Unlock()
+				break
+			}
+			dropIDLock.Unlock()
+			time.Sleep(time.Second)
+		}
+
 	})
 
 	t.Run("drop partition", func(t *testing.T) {

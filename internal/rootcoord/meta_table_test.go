@@ -75,6 +75,7 @@ type mockTestTxnKV struct {
 	multiSave                    func(kvs map[string]string) error
 	multiSaveAndRemoveWithPrefix func(saves map[string]string, removals []string) error
 	remove                       func(key string) error
+	multiRemove                  func(keys []string) error
 }
 
 func (m *mockTestTxnKV) LoadWithPrefix(key string) ([]string, []string, error) {
@@ -95,6 +96,10 @@ func (m *mockTestTxnKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, re
 
 func (m *mockTestTxnKV) Remove(key string) error {
 	return m.remove(key)
+}
+
+func (m *mockTestTxnKV) MultiRemove(keys []string) error {
+	return m.multiRemove(keys)
 }
 
 func Test_MockKV(t *testing.T) {
@@ -799,7 +804,7 @@ func TestMetaTable(t *testing.T) {
 		mt.collID2Meta = make(map[int64]pb.CollectionInfo)
 		err = mt.AddIndex(&segIdxInfo)
 		assert.NotNil(t, err)
-		assert.EqualError(t, err, fmt.Sprintf("collection id = %d not found", collInfo.ID))
+		assert.EqualError(t, err, fmt.Sprintf("index id = %d not found", segIdxInfo.IndexID))
 
 		err = mt.reloadFromKV()
 		assert.Nil(t, err)
@@ -1586,5 +1591,218 @@ func TestMetaTable_GetInitBuildIDs(t *testing.T) {
 		buildIDs, err := mt.GetInitBuildIDs(collName, indexName)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(buildIDs))
+	})
+}
+
+func TestMetaTable_GetDroppedIndex(t *testing.T) {
+	mt := &MetaTable{
+		collID2Meta: map[typeutil.UniqueID]pb.CollectionInfo{
+			1: {
+				FieldIndexes: []*pb.FieldIndexInfo{
+					{
+						FiledID: 1,
+						IndexID: 1,
+					},
+					{
+						FiledID: 2,
+						IndexID: 2,
+					},
+					{
+						FiledID: 3,
+						IndexID: 3,
+					},
+				},
+			},
+		},
+		indexID2Meta: map[typeutil.UniqueID]pb.IndexInfo{
+			1: {
+				IndexName: "GetInitBuildID-Index-1",
+				IndexID:   1,
+				Deleted:   true,
+			},
+			2: {
+				IndexName: "GetInitBuildID-Index-2",
+				IndexID:   2,
+				Deleted:   false,
+			},
+		},
+	}
+
+	droppedIndexID := mt.GetDroppedIndex()
+	indexInfo, ok := droppedIndexID[1]
+	assert.True(t, ok)
+	assert.Equal(t, 1, len(indexInfo))
+}
+
+func TestMetaTable_AlignSegmentsMeta(t *testing.T) {
+	var (
+		indexName = "GetDroppedIndex-Index"
+		collID    = UniqueID(1)
+		partID    = UniqueID(10)
+		indexID   = UniqueID(1000)
+	)
+	mt := &MetaTable{
+		txn: &mockTestTxnKV{
+			multiRemove: func(keys []string) error {
+				return nil
+			},
+		},
+		collID2Meta: map[typeutil.UniqueID]pb.CollectionInfo{
+			collID: {
+				FieldIndexes: []*pb.FieldIndexInfo{
+					{
+						FiledID: 1,
+						IndexID: 1,
+					},
+				},
+			},
+		},
+		partID2SegID: map[typeutil.UniqueID]map[typeutil.UniqueID]bool{
+			partID: {
+				100: true,
+				101: true,
+				102: true,
+			},
+		},
+		indexID2Meta: map[typeutil.UniqueID]pb.IndexInfo{
+			indexID: {
+				IndexName: indexName,
+				IndexID:   1,
+				Deleted:   true,
+			},
+		},
+	}
+	t.Run("success", func(t *testing.T) {
+		mt.AlignSegmentsMeta(collID, partID, map[UniqueID]struct{}{101: {}, 102: {}, 103: {}})
+	})
+
+	t.Run("txn error", func(t *testing.T) {
+		txn := &mockTestTxnKV{
+			multiRemove: func(keys []string) error {
+				return fmt.Errorf("error occurred")
+			},
+		}
+		mt.txn = txn
+		mt.AlignSegmentsMeta(collID, partID, map[UniqueID]struct{}{103: {}, 104: {}, 105: {}})
+	})
+}
+
+func TestMetaTable_MarkIndexDeleted(t *testing.T) {
+	var (
+		collName  = "MarkIndexDeleted-Coll"
+		fieldName = "MarkIndexDeleted-Field"
+		indexName = "MarkIndexDeleted-Index"
+		collID    = UniqueID(1)
+		partID    = UniqueID(10)
+		fieldID   = UniqueID(100)
+		indexID   = UniqueID(1000)
+	)
+	mt := &MetaTable{
+		txn: &mockTestTxnKV{
+			multiRemove: func(keys []string) error {
+				return nil
+			},
+			save: func(key, value string) error {
+				return nil
+			},
+		},
+		collID2Meta: map[typeutil.UniqueID]pb.CollectionInfo{
+			collID: {
+				FieldIndexes: []*pb.FieldIndexInfo{
+					{
+						FiledID: 101,
+						IndexID: 1001,
+					},
+				},
+				Schema: &schemapb.CollectionSchema{
+					Fields: []*schemapb.FieldSchema{
+						{
+							FieldID: fieldID,
+							Name:    fieldName,
+						},
+					},
+				},
+			},
+		},
+		collName2ID: map[string]typeutil.UniqueID{
+			collName: collID,
+		},
+		partID2SegID: map[typeutil.UniqueID]map[typeutil.UniqueID]bool{
+			partID: {
+				100: true,
+				101: true,
+				102: true,
+			},
+		},
+		indexID2Meta: map[typeutil.UniqueID]pb.IndexInfo{
+			1001: {
+				IndexName: indexName,
+				IndexID:   indexID,
+				Deleted:   true,
+			},
+		},
+	}
+
+	t.Run("get collection meta failed", func(t *testing.T) {
+		err := mt.MarkIndexDeleted("collName", fieldName, indexName)
+		assert.Error(t, err)
+	})
+
+	t.Run("get field meta failed", func(t *testing.T) {
+		err := mt.MarkIndexDeleted(collName, "fieldName", indexName)
+		assert.Error(t, err)
+
+		err = mt.MarkIndexDeleted(collName, fieldName, indexName)
+		assert.NoError(t, err)
+	})
+
+	t.Run("indexMeta error", func(t *testing.T) {
+		collMeta := pb.CollectionInfo{
+			FieldIndexes: []*pb.FieldIndexInfo{
+				{
+					FiledID: fieldID,
+					IndexID: indexID,
+				},
+			},
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID: fieldID,
+						Name:    fieldName,
+					},
+				},
+			},
+		}
+		mt.collID2Meta[collID] = collMeta
+
+		err := mt.MarkIndexDeleted(collName, fieldName, indexName)
+		assert.Error(t, err)
+
+		mt.indexID2Meta[indexID] = pb.IndexInfo{
+			IndexName: "indexName",
+			IndexID:   indexID,
+		}
+
+		err = mt.MarkIndexDeleted(collName, fieldName, indexName)
+		assert.NoError(t, err)
+
+		mt.indexID2Meta[indexID] = pb.IndexInfo{
+			IndexName: indexName,
+			IndexID:   indexID,
+		}
+
+		err = mt.MarkIndexDeleted(collName, fieldName, indexName)
+		assert.NoError(t, err)
+	})
+
+	t.Run("txn save failed", func(t *testing.T) {
+		txn := &mockTestTxnKV{
+			save: func(key, value string) error {
+				return fmt.Errorf("error occurred")
+			},
+		}
+		mt.txn = txn
+		err := mt.MarkIndexDeleted(collName, fieldName, indexName)
+		assert.Error(t, err)
 	})
 }
