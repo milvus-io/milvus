@@ -52,7 +52,7 @@ macro( build_arrow )
         "-DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}"
         "-DCMAKE_INCLUDE_PATH=${Boost_INCLUDE_DIRS}"
         )
-    if (WIN32)
+    if ( WIN32 )
         set( ARROW_CMAKE_ARGS ${ARROW_CMAKE_ARGS} "-DARROW_JEMALLOC=OFF" )
     else ()
         set( ARROW_CMAKE_ARGS ${ARROW_CMAKE_ARGS} "-DARROW_JEMALLOC=ON" )

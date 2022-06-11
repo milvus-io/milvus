@@ -14,19 +14,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-add_executable(wrapper_test
-        ParquetWrapperTest.cpp)
 
-include(FetchContent)
-FetchContent_Declare(googletest
-        URL "https://github.com/google/googletest/archive/release-1.10.0.tar.gz")
-set(BUILD_GMOCK CACHE BOOL OFF)
-set(INSTALL_GTEST CACHE BOOL OFF)
-FetchContent_MakeAvailable(googletest)
+option( EMBEDDED_MILVUS "Enable embedded Milvus" OFF )
 
-target_link_libraries(wrapper_test PRIVATE
-        gtest_main
-        wrapper
-        )
+if ( EMBEDDED_MILVUS )
+    add_compile_definitions( EMBEDDED_MILVUS )
+endif()
 
-install(TARGETS wrapper_test DESTINATION ${CMAKE_INSTALL_PREFIX})
+milvus_add_pkg_config("milvus_storage")
+
+set(STORAGE_FILES parquet_c.cpp PayloadStream.cpp)
+add_library(milvus_storage SHARED ${STORAGE_FILES})
+
+target_link_libraries( milvus_storage PUBLIC arrow parquet pthread)
+
+if(NOT CMAKE_INSTALL_PREFIX)
+    set(CMAKE_INSTALL_PREFIX ${CMAKE_CURRENT_BINARY_DIR})
+endif()
+
+install(TARGETS  milvus_storage DESTINATION "${CMAKE_INSTALL_LIBDIR}")

@@ -12,11 +12,7 @@
 package metricsinfo
 
 /*
-#cgo CFLAGS: -I${SRCDIR}/../../core/output/include
-
-#cgo darwin LDFLAGS: -L${SRCDIR}/../../core/output/lib -lmilvus_common -lmilvus_segcore -Wl,-rpath,"${SRCDIR}/../../core/output/lib"
-#cgo linux LDFLAGS: -L${SRCDIR}/../../core/output/lib -lmilvus_common -lmilvus_segcore -Wl,-rpath=${SRCDIR}/../../core/output/lib
-#cgo windows LDFLAGS: -L${SRCDIR}/../../core/output/lib -lmilvus_common -lmilvus_segcore -Wl,-rpath=${SRCDIR}/../../core/output/lib
+#cgo pkg-config: milvus_common milvus_segcore
 
 #include <stdlib.h>
 #include "common/vector_index_c.h"

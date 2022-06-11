@@ -203,6 +203,12 @@ function(ADD_THIRDPARTY_LIB LIB_NAME)
     endif()
 endfunction()
 
+function(MILVUS_ADD_PKG_CONFIG MODULE)
+    configure_file(${MODULE}.pc.in "${CMAKE_CURRENT_BINARY_DIR}/${MODULE}.pc" @ONLY)
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/${MODULE}.pc"
+          DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig/")
+endfunction()
+
 MACRO (import_mysql_inc)
     find_path (MYSQL_INCLUDE_DIR
         NAMES "mysql.h"

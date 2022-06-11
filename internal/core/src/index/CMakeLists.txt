@@ -29,4 +29,4 @@ target_link_libraries(milvus_index
         ${PLATFORM_LIBS}
         )
 
-install(TARGETS milvus_index DESTINATION lib)
+install(TARGETS milvus_index DESTINATION "${CMAKE_INSTALL_LIBDIR}")
