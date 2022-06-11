@@ -27,6 +27,9 @@ jobs:
     
     steps:
       - name: Set env param
+        env:
+          DEFAULT_IMAGE_TAG: master-latest
+          DEFAULT_IMAGE_REPO: milvusdb/milvus-dev        
         run: |
           chaos_type=${{ matrix.chaos_type }}
           release="test"-${{ matrix.pod }}-${chaos_type/_/-}

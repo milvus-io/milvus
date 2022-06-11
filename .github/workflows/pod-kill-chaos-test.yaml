@@ -29,6 +29,7 @@ jobs:
       - name: Set env param
         env:
           DEFAULT_IMAGE_TAG: master-latest
+          DEFAULT_IMAGE_REPO: milvusdb/milvus-dev
         run: |
           echo "RELEASE=test-${{ matrix.pod }}-pod-kill" >> $GITHUB_ENV
           echo "IMAGE_REPO=${{ github.event.inputs.image_repo || env.DEFAULT_IMAGE_REPO}}" >> $GITHUB_ENV
