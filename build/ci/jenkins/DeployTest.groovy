@@ -64,6 +64,21 @@ pipeline {
             defaultValue: '3'
         )
         string(
+            description: 'DataNode Nums',
+            name: 'datanode_nums',
+            defaultValue: '2'
+        )
+        string(
+            description: 'IndexNode Nums',
+            name: 'indexnode_nums',
+            defaultValue: '1'
+        )
+        string(
+            description: 'Proxy Nums',
+            name: 'proxy_nums',
+            defaultValue: '1'
+        )
+        string(
             description: 'Data Size',
             name: 'data_size',
             defaultValue: '3000'
@@ -106,6 +121,9 @@ pipeline {
                         script {
                         sh """
                         yq -i '.queryNode.replicas = "${params.querynode_nums}"' cluster-values.yaml
+                        yq -i '.dataNode.replicas = "${params.datanode_nums}"' cluster-values.yaml
+                        yq -i '.indexNode.replicas = "${params.indexnode_nums}"' cluster-values.yaml
+                        yq -i '.proxy.replicas = "${params.proxy_nums}"' cluster-values.yaml
                         yq -i '.etcd.image.repository = "${params.etcd_image_repository}"' cluster-values.yaml
                         yq -i '.etcd.image.tag = "${params.etcd_image_tag}"' cluster-values.yaml
                         yq -i '.etcd.image.repository = "${params.etcd_image_repository}"' standalone-values.yaml
