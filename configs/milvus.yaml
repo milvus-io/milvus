@@ -253,7 +253,7 @@ grpc:
   client:
     dialTimeout:      5000
     keepAliveTime:    10000
-    keepAliveTimeout: 3000
+    keepAliveTimeout: 20000
 
 # Configure the proxy tls enable.
 tls:
