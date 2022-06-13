@@ -281,6 +281,42 @@ func (mt *metaTable) MarkIndexAsDeleted(indexID UniqueID) error {
 	return nil
 }
 
+func (mt *metaTable) MarkSegmentsIndexAsDeleted(segIDs []UniqueID) error {
+	segmentIDs := make(map[UniqueID]struct{})
+	for _, segID := range segIDs {
+		segmentIDs[segID] = struct{}{}
+	}
+	mt.lock.Lock()
+	defer mt.lock.Unlock()
+
+	for _, meta := range mt.indexBuildID2Meta {
+		if _, ok := segmentIDs[meta.indexMeta.Req.SegmentID]; ok {
+			clonedMeta := &Meta{
+				indexMeta: proto.Clone(meta.indexMeta).(*indexpb.IndexMeta),
+				revision:  meta.revision,
+			}
+			clonedMeta.indexMeta.MarkDeleted = true
+			if err := mt.saveIndexMeta(clonedMeta); err != nil {
+				log.Error("IndexCoord metaTable MarkSegmentsIndexAsDeleted saveIndexMeta failed", zap.Error(err))
+				fn := func() error {
+					m, err := mt.reloadMeta(meta.indexMeta.IndexBuildID)
+					if m == nil {
+						return err
+					}
+
+					m.indexMeta.MarkDeleted = true
+					return mt.saveIndexMeta(m)
+				}
+				err2 := retry.Do(context.TODO(), fn, retry.Attempts(5))
+				if err2 != nil {
+					return err2
+				}
+			}
+		}
+	}
+	return nil
+}
+
 // GetIndexStates gets the index states from meta table.
 func (mt *metaTable) GetIndexStates(indexBuildIDs []UniqueID) []*indexpb.IndexInfo {
 	mt.lock.Lock()

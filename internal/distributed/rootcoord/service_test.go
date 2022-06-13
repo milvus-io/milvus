@@ -207,6 +207,9 @@ func TestGrpcService(t *testing.T) {
 		dropID = append(dropID, indexID)
 		return nil
 	}
+	core.CallRemoveIndexService = func(ctx context.Context, segmentIDs []rootcoord.UniqueID) error {
+		return nil
+	}
 
 	collectionMetaCache := make([]string, 0, 16)
 	pnm := proxyMock{}

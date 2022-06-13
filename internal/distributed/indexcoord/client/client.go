@@ -222,3 +222,17 @@ func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 	}
 	return ret.(*milvuspb.GetMetricsResponse), err
 }
+
+func (c *Client) RemoveIndex(ctx context.Context, req *indexpb.RemoveIndexRequest) (*commonpb.Status, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.(indexpb.IndexCoordClient).RemoveIndex(ctx, req)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+
+	return ret.(*commonpb.Status), err
+}

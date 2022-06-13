@@ -130,6 +130,13 @@ func TestIndexCoordClient(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
+	t.Run("RemoveIndex", func(t *testing.T) {
+		req := &indexpb.RemoveIndexRequest{}
+		status, err := icc.RemoveIndex(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+	})
+
 	err = server.Stop()
 	assert.Nil(t, err)
 

@@ -135,6 +135,7 @@ type Core struct {
 	//call index builder's client to build index, return build id or get index state.
 	CallBuildIndexService     func(ctx context.Context, segID UniqueID, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo, numRows int64) (typeutil.UniqueID, error)
 	CallDropIndexService      func(ctx context.Context, indexID typeutil.UniqueID) error
+	CallRemoveIndexService    func(ctx context.Context, segmentIDs []UniqueID) error
 	CallGetIndexStatesService func(ctx context.Context, IndexBuildIDs []int64) ([]*indexpb.IndexInfo, error)
 
 	NewProxyClient func(sess *sessionutil.Session) (types.Proxy, error)
@@ -274,6 +275,9 @@ func (c *Core) checkInit() error {
 	}
 	if c.CallDropIndexService == nil {
 		return fmt.Errorf("callDropIndexService is nil")
+	}
+	if c.CallRemoveIndexService == nil {
+		return fmt.Errorf("callRemoveIndexService is nil")
 	}
 	if c.CallWatchChannels == nil {
 		return fmt.Errorf("callWatchChannels is nil")
@@ -746,6 +750,22 @@ func (c *Core) SetIndexCoord(s types.IndexCoord) error {
 		if rsp.ErrorCode != commonpb.ErrorCode_Success {
 			return fmt.Errorf(rsp.Reason)
 		}
+		return nil
+	}
+
+	c.CallRemoveIndexService = func(ctx context.Context, segmentIDs []UniqueID) error {
+		<-initCh
+		status, err := s.RemoveIndex(ctx, &indexpb.RemoveIndexRequest{
+			SegmentIDs: segmentIDs,
+		})
+		if err != nil {
+			return err
+		}
+
+		if status.GetErrorCode() != commonpb.ErrorCode_Success {
+			return fmt.Errorf(status.Reason)
+		}
+
 		return nil
 	}
 
@@ -2097,6 +2117,12 @@ func (c *Core) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlus
 				zap.Int64("index id", f.IndexID), zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 			continue
 		}
+	}
+
+	if err := c.CallRemoveIndexService(ctx, in.Segment.CompactionFrom); err != nil {
+		log.Error("SegmentFlushCompleted remove indexes on segments that is compacted failed",
+			zap.Int64s("compacted segmentIDs", in.Segment.CompactionFrom), zap.Error(err))
+		return failStatus(commonpb.ErrorCode_UnexpectedError, err.Error()), nil
 	}
 
 	log.Debug("SegmentFlushCompleted success", zap.String("role", typeutil.RootCoordRole),

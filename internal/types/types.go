@@ -351,6 +351,9 @@ type IndexCoord interface {
 
 	// GetMetrics gets the metrics about IndexCoord.
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
+
+	// RemoveIndex removes the index on specify segments.
+	RemoveIndex(ctx context.Context, req *indexpb.RemoveIndexRequest) (*commonpb.Status, error)
 }
 
 // IndexCoordComponent is used by grpc server of IndexCoord

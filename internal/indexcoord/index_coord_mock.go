@@ -45,7 +45,7 @@ type Mock struct {
 // Init initializes the Mock of IndexCoord. When param `Failure` is true, it will return an error.
 func (icm *Mock) Init() error {
 	if icm.Failure {
-		return errors.New("IndexCoordinate init failed")
+		return errors.New("IndexCoordinator init failed")
 	}
 	return nil
 }
@@ -53,7 +53,7 @@ func (icm *Mock) Init() error {
 // Start starts the Mock of IndexCoord. When param `Failure` is true, it will return an error.
 func (icm *Mock) Start() error {
 	if icm.Failure {
-		return errors.New("IndexCoordinate start failed")
+		return errors.New("IndexCoordinator start failed")
 	}
 	return nil
 }
@@ -61,7 +61,7 @@ func (icm *Mock) Start() error {
 // Stop stops the Mock of IndexCoord. When param `Failure` is true, it will return an error.
 func (icm *Mock) Stop() error {
 	if icm.Failure {
-		return errors.New("IndexCoordinate stop failed")
+		return errors.New("IndexCoordinator stop failed")
 	}
 	err := icm.etcdKV.RemoveWithPrefix("session/" + typeutil.IndexCoordRole)
 	return err
@@ -70,7 +70,7 @@ func (icm *Mock) Stop() error {
 // Register registers an IndexCoord role in ETCD, if Param `Failure` is true, it will return an error.
 func (icm *Mock) Register() error {
 	if icm.Failure {
-		return errors.New("IndexCoordinate register failed")
+		return errors.New("IndexCoordinator register failed")
 	}
 	icm.etcdKV = etcdkv.NewEtcdKV(icm.etcdCli, Params.EtcdCfg.MetaRootPath)
 	err := icm.etcdKV.RemoveWithPrefix("session/" + typeutil.IndexCoordRole)
@@ -105,7 +105,7 @@ func (icm *Mock) GetComponentStates(ctx context.Context) (*internalpb.ComponentS
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			},
-		}, errors.New("IndexCoordinate GetComponentStates failed")
+		}, errors.New("IndexCoordinator GetComponentStates failed")
 	}
 	return &internalpb.ComponentStates{
 		State: &internalpb.ComponentInfo{
@@ -124,7 +124,7 @@ func (icm *Mock) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			},
-		}, errors.New("IndexCoordinate GetStatisticsChannel failed")
+		}, errors.New("IndexCoordinator GetStatisticsChannel failed")
 	}
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
@@ -141,7 +141,7 @@ func (icm *Mock) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringRespon
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			},
-		}, errors.New("IndexCoordinate GetTimeTickChannel failed")
+		}, errors.New("IndexCoordinator GetTimeTickChannel failed")
 	}
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
@@ -159,7 +159,7 @@ func (icm *Mock) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest)
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			},
 			IndexBuildID: 0,
-		}, errors.New("IndexCoordinate BuildIndex error")
+		}, errors.New("IndexCoordinator BuildIndex error")
 	}
 	return &indexpb.BuildIndexResponse{
 		Status: &commonpb.Status{
@@ -174,7 +174,7 @@ func (icm *Mock) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (
 	if icm.Failure {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		}, errors.New("IndexCoordinate DropIndex failed")
+		}, errors.New("IndexCoordinator DropIndex failed")
 	}
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
@@ -189,7 +189,7 @@ func (icm *Mock) GetIndexStates(ctx context.Context, req *indexpb.GetIndexStates
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			},
-		}, errors.New("IndexCoordinate GetIndexStates failed")
+		}, errors.New("IndexCoordinator GetIndexStates failed")
 	}
 	states := make([]*indexpb.IndexInfo, len(req.IndexBuildIDs))
 	for i := range states {
@@ -214,7 +214,7 @@ func (icm *Mock) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFil
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			},
-		}, errors.New("IndexCoordinate GetIndexFilePaths failed")
+		}, errors.New("IndexCoordinator GetIndexFilePaths failed")
 	}
 	filePaths := make([]*indexpb.IndexFilePathInfo, len(req.IndexBuildIDs))
 	for i := range filePaths {
@@ -241,7 +241,7 @@ func (icm *Mock) GetMetrics(ctx context.Context, request *milvuspb.GetMetricsReq
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			},
-		}, errors.New("IndexCoordinate GetMetrics failed")
+		}, errors.New("IndexCoordinator GetMetrics failed")
 	}
 	return &milvuspb.GetMetricsResponse{
 		Status: &commonpb.Status{
@@ -249,6 +249,17 @@ func (icm *Mock) GetMetrics(ctx context.Context, request *milvuspb.GetMetricsReq
 		},
 		Response:      "",
 		ComponentName: "IndexCoord",
+	}, nil
+}
+
+func (icm *Mock) RemoveIndex(ctx context.Context, request *indexpb.RemoveIndexRequest) (*commonpb.Status, error) {
+	if icm.Failure {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		}, errors.New("IndexCoordinator RemoveIndex failed")
+	}
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
 	}, nil
 }
 

@@ -491,7 +491,7 @@ func (i *IndexCoord) GetIndexStates(ctx context.Context, req *indexpb.GetIndexSt
 			},
 		}, nil
 	}
-	sp, _ := trace.StartSpanFromContextWithOperationName(ctx, "IndexCoord-BuildIndex")
+	sp, _ := trace.StartSpanFromContextWithOperationName(ctx, "IndexCoord-GetIndexStates")
 	defer sp.Finish()
 	var (
 		cntNone       = 0
@@ -541,7 +541,7 @@ func (i *IndexCoord) DropIndex(ctx context.Context, req *indexpb.DropIndexReques
 			Reason:    errMsg,
 		}, nil
 	}
-	sp, _ := trace.StartSpanFromContextWithOperationName(ctx, "IndexCoord-BuildIndex")
+	sp, _ := trace.StartSpanFromContextWithOperationName(ctx, "IndexCoord-DropIndex")
 	defer sp.Finish()
 
 	ret := &commonpb.Status{
@@ -564,6 +564,34 @@ func (i *IndexCoord) DropIndex(ctx context.Context, req *indexpb.DropIndexReques
 	}()
 
 	log.Debug("IndexCoord DropIndex success", zap.Int64("IndexID", req.IndexID))
+	return ret, nil
+}
+
+func (i *IndexCoord) RemoveIndex(ctx context.Context, req *indexpb.RemoveIndexRequest) (*commonpb.Status, error) {
+	log.Info("IndexCoord RemoveIndex", zap.Int64s("segmentIDs", req.GetSegmentIDs()))
+	if !i.isHealthy() {
+		errMsg := "IndexCoord is not healthy"
+		log.Warn(errMsg)
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    errMsg,
+		}, nil
+	}
+
+	sp, _ := trace.StartSpanFromContextWithOperationName(ctx, "IndexCoord-RemoveIndex")
+	defer sp.Finish()
+
+	ret := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}
+	err := i.metaTable.MarkSegmentsIndexAsDeleted(req.GetSegmentIDs())
+	if err != nil {
+		log.Error("IndexCoord MarkSegmentsIndexAsDeleted failed", zap.Int64s("segmentIDs", req.GetSegmentIDs()),
+			zap.Error(err))
+		ret.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		ret.Reason = err.Error()
+		return ret, nil
+	}
 	return ret, nil
 }
 

@@ -237,6 +237,10 @@ func (s *Server) GetMetrics(ctx context.Context, request *milvuspb.GetMetricsReq
 	return s.indexcoord.GetMetrics(ctx, request)
 }
 
+func (s *Server) RemoveIndex(ctx context.Context, request *indexpb.RemoveIndexRequest) (*commonpb.Status, error) {
+	return s.indexcoord.RemoveIndex(ctx, request)
+}
+
 // startGrpcLoop starts the grep loop of IndexCoord component.
 func (s *Server) startGrpcLoop(grpcPort int) {
 

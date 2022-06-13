@@ -417,6 +417,12 @@ func (idx *indexMock) GetIndexStates(ctx context.Context, req *indexpb.GetIndexS
 	return resp, nil
 }
 
+func (idx *indexMock) RemoveIndex(ctx context.Context, req *indexpb.RemoveIndexRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}, nil
+}
+
 func clearMsgChan(timeout time.Duration, targetChan <-chan *msgstream.MsgPack) {
 	ch := time.After(timeout)
 	for {
@@ -3001,6 +3007,12 @@ func TestCheckInit(t *testing.T) {
 	assert.Error(t, err)
 
 	c.CallDropIndexService = func(ctx context.Context, indexID typeutil.UniqueID) error {
+		return nil
+	}
+	err = c.checkInit()
+	assert.Error(t, err)
+
+	c.CallRemoveIndexService = func(ctx context.Context, segmentIDs []UniqueID) error {
 		return nil
 	}
 	err = c.checkInit()

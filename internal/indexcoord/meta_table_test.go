@@ -17,6 +17,7 @@
 package indexcoord
 
 import (
+	"path"
 	"strconv"
 	"testing"
 
@@ -48,6 +49,7 @@ func TestMetaTable(t *testing.T) {
 		FieldSchema: &schemapb.FieldSchema{
 			DataType: schemapb.DataType_FloatVector,
 		},
+		SegmentID: 111,
 	}
 	indexMeta1 := &indexpb.IndexMeta{
 		IndexBuildID:   1,
@@ -135,6 +137,17 @@ func TestMetaTable(t *testing.T) {
 		err = etcdKV.Save(key, string(value))
 		assert.Nil(t, err)
 		err = metaTable.MarkIndexAsDeleted(indexMeta1.Req.IndexID)
+		assert.Nil(t, err)
+	})
+
+	t.Run("MarkSegmentIndexAsDeleted", func(t *testing.T) {
+		indexMeta1.Version = indexMeta1.Version + 1
+		value, err = proto.Marshal(indexMeta1)
+		assert.Nil(t, err)
+		key = path.Join(indexFilePrefix, strconv.FormatInt(indexMeta1.IndexBuildID, 10))
+		err = etcdKV.Save(key, string(value))
+		assert.Nil(t, err)
+		err = metaTable.MarkSegmentsIndexAsDeleted([]UniqueID{indexMeta1.Req.SegmentID})
 		assert.Nil(t, err)
 	})
 

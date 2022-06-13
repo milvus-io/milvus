@@ -299,6 +299,10 @@ func (m *MockIndexCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetric
 	return nil, nil
 }
 
+func (m *MockIndexCoord) RemoveIndex(ctx context.Context, req *indexpb.RemoveIndexRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type MockQueryCoord struct {
 	MockBase

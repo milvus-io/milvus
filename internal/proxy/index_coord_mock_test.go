@@ -177,6 +177,13 @@ func (coord *IndexCoordMock) GetMetrics(ctx context.Context, req *milvuspb.GetMe
 	}, nil
 }
 
+func (coord *IndexCoordMock) RemoveIndex(ctx context.Context, req *indexpb.RemoveIndexRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
+}
+
 func NewIndexCoordMock() *IndexCoordMock {
 	return &IndexCoordMock{
 		nodeID:            typeutil.UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),

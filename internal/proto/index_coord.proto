@@ -20,6 +20,8 @@ service IndexCoord {
 
   // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
   rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
+
+  rpc RemoveIndex(RemoveIndexRequest) returns (common.Status) {}
 }
 
 service IndexNode {
@@ -119,4 +121,8 @@ message IndexMeta {
 
 message DropIndexRequest {
   int64 indexID = 1;
+}
+
+message RemoveIndexRequest {
+  repeated int64 segmentIDs = 1;
 }
