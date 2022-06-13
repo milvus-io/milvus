@@ -9,7 +9,7 @@ etcd:
   replicaCount: 1
   image:
     repository: milvusdb/etcd
-    tag: 3.5.0-debian-10-r115  
+    tag: 3.5.0-r1  
 minio:
   mode: standalone
 pulsar:

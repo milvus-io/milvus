@@ -5,18 +5,33 @@ metadata:
     app: milvus-chaos-test
   namespace: chaos-testing
 spec:
-  enableServiceLinks: false
   containers:
   - name: main
-    image: registry.milvus.io/test/krte:dev-1
-    securityContext:
-      privileged: true
+    image: registry.milvus.io/test/krte:dev-4
+    command:
+    - cat
     tty: true
-    args: ["cat"]
     resources:
       limits:
-        cpu: "6"
-        memory: 12Gi
+        memory: 6Gi
+        cpu: 2.0
       requests:
-        cpu: "2"
-        memory: 10Gi
+        memory: 4Gi
+        cpu: 2.0
+    volumeMounts:
+    - name: qa-kubeconfig
+      mountPath: /root/.kube/
+  - name: jnlp
+    image: jenkins/inbound-agent:4.11-1-jdk8
+    resources:
+      limits: {}
+      requests:
+        memory: 256Mi
+        cpu: 100m
+  volumes:
+  - name: qa-kubeconfig
+    secret:
+      secretName: qa-kubeconfig
+  serviceAccountName: account-milvus-test
+  nodeSelector:
+    kubernetes.io/hostname: "qa-node001.zilliz.local"

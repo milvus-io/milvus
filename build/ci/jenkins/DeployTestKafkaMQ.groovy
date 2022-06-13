@@ -56,7 +56,7 @@ pipeline {
         string(
             description: 'Etcd Image Tag',
             name: 'etcd_image_tag',
-            defaultValue: "3.5.0-debian-10-r115"
+            defaultValue: "3.5.0-r1"
         )
         string(
             description: 'Querynode Nums',
