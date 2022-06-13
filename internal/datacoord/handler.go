@@ -18,6 +18,8 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
+	"math"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -45,6 +47,24 @@ func newServerHandler(s *Server) *ServerHandler {
 	return &ServerHandler{s: s}
 }
 
+const latestMsgFetchPrefix = "datacoord-latest-fetch"
+
+func (h *ServerHandler) getLatestMsgID(channel string) ([]byte, error) {
+	// get latest message ID
+	tmp, err := h.s.factory.NewMsgStream(context.TODO())
+	if err != nil {
+		return nil, err
+	}
+	pchan := funcutil.ToPhysicalChannel(channel)
+	tmp.AsConsumer([]string{pchan}, fmt.Sprintf("%s-%s", latestMsgFetchPrefix, channel))
+	defer tmp.Close()
+	latestMsgID, err := tmp.GetLatestMsgID(pchan)
+	if err != nil {
+		return nil, err
+	}
+	return latestMsgID.Serialize(), nil
+}
+
 // GetVChanPositions gets vchannel latest postitions with provided dml channel names
 func (h *ServerHandler) GetVChanPositions(channel string, collectionID UniqueID, partitionID UniqueID) *datapb.VchannelInfo {
 	// cannot use GetSegmentsByChannel since dropped segments are needed here
@@ -56,6 +76,42 @@ func (h *ServerHandler) GetVChanPositions(channel string, collectionID UniqueID,
 		zap.Any("channel", channel),
 		zap.Any("numOfSegments", len(segments)),
 	)
+	if len(segments) == 0 {
+		msgID, err := h.getLatestMsgID(channel)
+		if err != nil {
+			log.Warn("get latest msgID error",
+				zap.Any("collectionID", collectionID),
+				zap.Any("channel", channel),
+				zap.Any("numOfSegments", len(segments)),
+			)
+			// return vchan info with nil seek position which will seek to the earlist position
+			return &datapb.VchannelInfo{
+				CollectionID: collectionID,
+				ChannelName:  channel,
+			}
+		}
+
+		// double check
+		segments = h.s.meta.SelectSegments(func(s *SegmentInfo) bool {
+			return s.InsertChannel == channel
+		})
+		if len(segments) == 0 {
+			return &datapb.VchannelInfo{
+				CollectionID: collectionID,
+				ChannelName:  channel,
+				SeekPosition: &internalpb.MsgPosition{
+					ChannelName: channel,
+					MsgID:       msgID,
+					Timestamp:   math.MaxUint64,
+				},
+			}
+		}
+		log.Debug("find allcoated segment after fetching latest msgID",
+			zap.Int64("collectionID", collectionID),
+			zap.String("channel", channel),
+			zap.Int("segment num", len(segments)),
+		)
+	}
 	var flushed []*datapb.SegmentInfo
 	var unflushed []*datapb.SegmentInfo
 	var dropped []*datapb.SegmentInfo

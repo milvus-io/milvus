@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"math/rand"
 	"os"
 	"os/signal"
@@ -30,6 +31,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/minio/minio-go/v7"
 
@@ -1234,24 +1236,24 @@ func TestDropVirtualChannel(t *testing.T) {
 	})
 }
 
-func TestDataNodeTtChannel(t *testing.T) {
-	genMsg := func(msgType commonpb.MsgType, ch string, t Timestamp) *msgstream.DataNodeTtMsg {
-		return &msgstream.DataNodeTtMsg{
-			BaseMsg: msgstream.BaseMsg{
-				HashValues: []uint32{0},
+func genMsg(msgType commonpb.MsgType, ch string, t Timestamp) *msgstream.DataNodeTtMsg {
+	return &msgstream.DataNodeTtMsg{
+		BaseMsg: msgstream.BaseMsg{
+			HashValues: []uint32{0},
+		},
+		DataNodeTtMsg: datapb.DataNodeTtMsg{
+			Base: &commonpb.MsgBase{
+				MsgType:   msgType,
+				MsgID:     0,
+				Timestamp: t,
+				SourceID:  0,
 			},
-			DataNodeTtMsg: datapb.DataNodeTtMsg{
-				Base: &commonpb.MsgBase{
-					MsgType:   msgType,
-					MsgID:     0,
-					Timestamp: t,
-					SourceID:  0,
-				},
-				ChannelName: ch,
-				Timestamp:   t,
-			},
-		}
+			ChannelName: ch,
+			Timestamp:   t,
+		},
 	}
+}
+func TestDataNodeTtChannel(t *testing.T) {
 	t.Run("Test segment flush after tt", func(t *testing.T) {
 		ch := make(chan interface{}, 1)
 		svr := newTestServer(t, ch)
@@ -1557,7 +1559,7 @@ func TestGetVChannelPos(t *testing.T) {
 		assert.EqualValues(t, 1, infos.CollectionID)
 		assert.EqualValues(t, 0, len(infos.FlushedSegments))
 		assert.EqualValues(t, 0, len(infos.UnflushedSegments))
-		assert.EqualValues(t, []byte{8, 9, 10}, infos.SeekPosition.MsgID)
+		assert.EqualValues(t, uint64(math.MaxUint64), infos.SeekPosition.Timestamp)
 	})
 
 	t.Run("filter partition", func(t *testing.T) {
@@ -1727,6 +1729,15 @@ func TestGetRecoveryInfo(t *testing.T) {
 			return newMockRootCoordService(), nil
 		}
 
+		vchan := "vchan1"
+		pchan := funcutil.ToPhysicalChannel(vchan)
+		stream, err := svr.factory.NewMsgStream(context.TODO())
+		assert.Nil(t, err)
+		stream.AsProducer([]string{pchan})
+		err = stream.Produce(&msgstream.MsgPack{Msgs: []msgstream.TsMsg{genMsg(commonpb.MsgType_DataNodeTt, "ch-1", 1000)}})
+		assert.Nil(t, err)
+		stream.Close()
+
 		req := &datapb.GetRecoveryInfoRequest{
 			CollectionID: 0,
 			PartitionID:  0,
@@ -1736,7 +1747,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 		assert.EqualValues(t, 0, len(resp.GetBinlogs()))
 		assert.EqualValues(t, 1, len(resp.GetChannels()))
-		assert.Nil(t, resp.GetChannels()[0].SeekPosition)
+		assert.Equal(t, uint64(math.MaxUint64), resp.GetChannels()[0].GetSeekPosition().GetTimestamp())
 	})
 
 	createSegment := func(id, collectionID, partitionID, numOfRows int64, posTs uint64,
