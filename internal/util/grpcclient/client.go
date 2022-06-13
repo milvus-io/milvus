@@ -223,8 +223,8 @@ func (c *ClientBase) Call(ctx context.Context, caller func(client interface{}) (
 
 	ret, err := c.callOnce(ctx, caller)
 	if err != nil {
-		traceErr := fmt.Errorf("err: %s\n, %s", err.Error(), trace.StackTrace())
-		log.Error(c.GetRole()+" ClientBase Call grpc first call get error ", zap.Error(traceErr))
+		traceErr := fmt.Errorf("err: %w\n, %s", err, trace.StackTrace())
+		log.Error("ClientBase Call grpc first call get error", zap.String("role", c.GetRole()), zap.Error(traceErr))
 		return nil, traceErr
 	}
 	return ret, err
@@ -241,7 +241,7 @@ func (c *ClientBase) ReCall(ctx context.Context, caller func(client interface{})
 		return ret, nil
 	}
 
-	traceErr := fmt.Errorf("err: %s\n, %s", err.Error(), trace.StackTrace())
+	traceErr := fmt.Errorf("err: %w\n, %s", err, trace.StackTrace())
 	log.Warn(c.GetRole()+" ClientBase ReCall grpc first call get error ", zap.Error(traceErr))
 
 	if !funcutil.CheckCtxValid(ctx) {
@@ -250,8 +250,8 @@ func (c *ClientBase) ReCall(ctx context.Context, caller func(client interface{})
 
 	ret, err = c.callOnce(ctx, caller)
 	if err != nil {
-		traceErr = fmt.Errorf("err: %s\n, %s", err.Error(), trace.StackTrace())
-		log.Error(c.GetRole()+" ClientBase ReCall grpc second call get error ", zap.Error(traceErr))
+		traceErr = fmt.Errorf("err: %w\n, %s", err, trace.StackTrace())
+		log.Error("ClientBase ReCall grpc second call get error", zap.String("role", c.GetRole()), zap.Error(traceErr))
 		return nil, traceErr
 	}
 	return ret, err
