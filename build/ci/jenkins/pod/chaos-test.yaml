@@ -2,7 +2,7 @@ apiVersion: v1
 kind: Pod
 metadata:
   labels:
-    app: milvus-chaos-test
+    app: milvus-test
   namespace: chaos-testing
 spec:
   containers:
@@ -33,5 +33,3 @@ spec:
     secret:
       secretName: qa-kubeconfig
   serviceAccountName: account-milvus-test
-  nodeSelector:
-    kubernetes.io/hostname: "qa-node001.zilliz.local"
