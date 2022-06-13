@@ -41,7 +41,7 @@ const (
 	// Grpc Timeout related configs
 	DefaultDialTimeout      = 5000 * time.Millisecond
 	DefaultKeepAliveTime    = 10000 * time.Millisecond
-	DefaultKeepAliveTimeout = 3000 * time.Millisecond
+	DefaultKeepAliveTimeout = 20000 * time.Millisecond
 
 	ProxyInternalPort = 19529
 	ProxyExternalPort = 19530
