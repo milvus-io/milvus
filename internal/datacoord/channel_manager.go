@@ -651,6 +651,7 @@ func (c *ChannelManager) watchChannelStatesLoop(ctx context.Context) {
 			return
 		case ackEvent := <-timeoutWatcher:
 			log.Debug("receive timeout acks from state watcher",
+				zap.Any("state", ackEvent.ackType),
 				zap.Int64("nodeID", ackEvent.nodeID), zap.String("channel name", ackEvent.channelName))
 			c.processAck(ackEvent)
 		case event, ok := <-etcdWatcher:

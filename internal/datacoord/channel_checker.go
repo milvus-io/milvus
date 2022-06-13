@@ -90,6 +90,7 @@ func (c *channelStateTimer) startOne(watchState datapb.ChannelWatchState, channe
 		return
 	}
 	stop := make(chan struct{})
+	c.removeTimers([]string{channelName})
 	c.runningTimers.Store(channelName, stop)
 	timeoutT := time.Unix(0, timeoutTs)
 	go func() {
