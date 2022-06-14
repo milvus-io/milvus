@@ -234,10 +234,12 @@ func (p *PulsarConfig) initMaxMessageSize() {
 
 // --- kafka ---
 type KafkaConfig struct {
-	Base         *BaseTable
-	Address      string
-	SaslUsername string
-	SaslPassword string
+	Base             *BaseTable
+	Address          string
+	SaslUsername     string
+	SaslPassword     string
+	SaslMechanisms   string
+	SecurityProtocol string
 }
 
 func (k *KafkaConfig) init(base *BaseTable) {
@@ -245,6 +247,8 @@ func (k *KafkaConfig) init(base *BaseTable) {
 	k.initAddress()
 	k.initSaslUsername()
 	k.initSaslPassword()
+	k.initSaslMechanisms()
+	k.initSecurityProtocol()
 }
 
 func (k *KafkaConfig) initAddress() {
@@ -261,6 +265,14 @@ func (k *KafkaConfig) initSaslUsername() {
 
 func (k *KafkaConfig) initSaslPassword() {
 	k.SaslPassword = k.Base.LoadWithDefault("kafka.saslPassword", "")
+}
+
+func (k *KafkaConfig) initSaslMechanisms() {
+	k.SaslMechanisms = k.Base.LoadWithDefault("kafka.saslMechanisms", "PLAIN")
+}
+
+func (k *KafkaConfig) initSecurityProtocol() {
+	k.SecurityProtocol = k.Base.LoadWithDefault("kafka.securityProtocol", "SASL_SSL")
 }
 
 ///////////////////////////////////////////////////////////////////////////////

@@ -83,6 +83,8 @@ pulsar:
 #  brokerList: localhost1:9092,localhost2:9092,localhost3:9092
 #  saslUsername: username
 #  saslPassword: password
+#  saslMechanisms: PLAIN
+#  securityProtocol: SASL_SSL
 
 rocksmq:
   # please adjust in embedded Milvus: /tmp/milvus/rdb_data
