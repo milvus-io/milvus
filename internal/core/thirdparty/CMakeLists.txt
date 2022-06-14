@@ -70,6 +70,6 @@ if ( LINUX OR APPLE)
 endif()
 
 # ******************************* Thridparty jemalloc ********************************
-if ( LINUX )
-    add_subdirectory( jemalloc )
-endif()
+#if ( LINUX )
+#    add_subdirectory( jemalloc )
+#endif()
