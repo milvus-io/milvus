@@ -32,7 +32,6 @@ COPY ./lib/ /milvus/lib/
 
 ENV PATH=/milvus/bin:$PATH
 ENV LD_LIBRARY_PATH=/milvus/lib:$LD_LIBRARY_PATH:/usr/lib
-ENV LD_PRELOAD=/milvus/lib/libjemalloc.so
 
 # Add Tini
 ADD https://github.com/krallin/tini/releases/download/v0.19.0/tini /tini
