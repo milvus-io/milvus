@@ -51,48 +51,53 @@ func BufferChannelAssignPolicy(store ROChannelStore, nodeID int64) ChannelOpSet 
 }
 
 // AvgAssignRegisterPolicy assigns channels with average to new registered node
-// Register will not directly delete the node-channel pair, channel manager handles the release itself
+// Register will not directly delete the node-channel pair. Channel manager will handle channel release.
 func AvgAssignRegisterPolicy(store ROChannelStore, nodeID int64) ChannelOpSet {
 	opSet := BufferChannelAssignPolicy(store, nodeID)
 	if len(opSet) != 0 {
 		return opSet
 	}
 
-	infos := store.GetNodesChannels()
-	infos = filterNode(infos, nodeID)
+	// Get a list of available node-channel info.
+	avaNodeChannel := filterNode(store.GetNodesChannels(), nodeID)
 
 	channelNum := 0
-	for _, info := range infos {
+	for _, info := range avaNodeChannel {
 		channelNum += len(info.Channels)
 	}
-	avg := channelNum / (len(store.GetNodes()) + 1)
-	if avg == 0 {
+	chPerNode := channelNum / (len(store.GetNodes()) + 1)
+	if chPerNode == 0 {
 		return nil
 	}
 
 	// sort in descending order and reallocate
-	sort.Slice(infos, func(i, j int) bool {
-		return len(infos[i].Channels) > len(infos[j].Channels)
+	sort.Slice(avaNodeChannel, func(i, j int) bool {
+		return len(avaNodeChannel[i].Channels) > len(avaNodeChannel[j].Channels)
 	})
 
 	releases := make(map[int64][]*channel)
-	for i := 0; i < avg; {
-		t := infos[i%len(infos)]
-		idx := i / len(infos)
-		if idx >= len(t.Channels) {
+	for i := 0; i < chPerNode; i++ {
+		// Pick a node with its channel to release.
+		toRelease := avaNodeChannel[i%len(avaNodeChannel)]
+		// Pick a channel that will be reassigned to the new node later.
+		chIdx := i / len(avaNodeChannel)
+		if chIdx >= len(toRelease.Channels) {
+			// Node has too few channels, simply skip. No re-picking.
+			// TODO: Consider re-picking in case assignment is extremely uneven?
 			continue
 		}
-		releases[t.NodeID] = append(releases[t.NodeID], t.Channels[idx])
-		i++
+		releases[toRelease.NodeID] = append(releases[toRelease.NodeID], toRelease.Channels[chIdx])
 	}
 
 	opSet = ChannelOpSet{}
+	// Channels in `releases` are reassigned eventually by channel manager.
 	for k, v := range releases {
 		opSet.Add(k, v)
 	}
 	return opSet
 }
 
+// filterNode filters out node-channel info where node ID == `nodeID`.
 func filterNode(infos []*NodeChannelInfo, nodeID int64) []*NodeChannelInfo {
 	filtered := make([]*NodeChannelInfo, 0)
 	for _, info := range infos {
@@ -141,6 +146,7 @@ func ConsistentHashRegisterPolicy(hashRing *consistent.Consistent) RegisterPolic
 			}
 		}
 
+		// Channels in `releases` are reassigned eventually by channel manager.
 		for id, channels := range releases {
 			opSet.Add(id, channels)
 		}
