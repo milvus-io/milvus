@@ -460,8 +460,12 @@ func (node *QueryNode) Search(ctx context.Context, req *queryPb.SearchRequest) (
 		return failRet, nil
 	}
 
-	tr := timerecord.NewTimeRecorder(fmt.Sprintf("start do search, msgID = %d, fromSharedLeader = %t, vChannel = %s, segmentIDs = %v",
-		msgID, req.GetFromShardLeader(), req.GetDmlChannel(), req.GetSegmentIDs()))
+	log.Debug("start do search",
+		zap.Int64("msgID", msgID),
+		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
+		zap.String("vChannel", req.GetDmlChannel()),
+		zap.Int64s("segmentIDs", req.GetSegmentIDs()))
+	tr := timerecord.NewTimeRecorder("")
 
 	if req.FromShardLeader {
 		historicalTask, err2 := newSearchTask(ctx, req)
@@ -640,8 +644,12 @@ func (node *QueryNode) Query(ctx context.Context, req *queryPb.QueryRequest) (*i
 		return failRet, nil
 	}
 
-	tr := timerecord.NewTimeRecorder(fmt.Sprintf("start do query, msgID = %d, fromSharedLeader = %t, vChannel = %s, segmentIDs = %v",
-		msgID, req.GetFromShardLeader(), req.GetDmlChannel(), req.GetSegmentIDs()))
+	log.Debug("start do query",
+		zap.Int64("msgID", msgID),
+		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
+		zap.String("vChannel", req.GetDmlChannel()),
+		zap.Int64s("segmentIDs", req.GetSegmentIDs()))
+	tr := timerecord.NewTimeRecorder("")
 
 	if req.FromShardLeader {
 		// construct a queryTask
