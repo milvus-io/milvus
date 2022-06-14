@@ -345,6 +345,18 @@ func TestMetaTable(t *testing.T) {
 	})
 
 	wg.Add(1)
+	t.Run("not load alias when load collection meta", func(t *testing.T) {
+		defer wg.Done()
+		ts := ftso()
+		err = mt.AddAlias(aliasName1, collName, ts)
+		assert.Nil(t, err)
+		err = mt.reloadFromKV()
+		assert.Nil(t, err)
+		_, ok := mt.collName2ID[aliasName1]
+		assert.False(t, ok)
+	})
+
+	wg.Add(1)
 	t.Run("add partition", func(t *testing.T) {
 		defer wg.Done()
 		ts := ftso()
