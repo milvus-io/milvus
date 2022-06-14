@@ -223,8 +223,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			log.Debug("delete in streaming replica",
 				zap.Any("collectionID", delMsg.CollectionID),
 				zap.Any("collectionName", delMsg.CollectionName),
-				zap.Int64("numPKs", delMsg.NumRows),
-				zap.Any("timestamp", delMsg.Timestamps))
+				zap.Int64("numPKs", delMsg.NumRows))
 			err := processDeleteMessages(iNode.metaReplica, segmentTypeGrowing, delMsg, delData)
 			if err != nil {
 				// error occurs when missing meta info or unexpected pk type, should not happen
