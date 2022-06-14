@@ -22,6 +22,9 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/golang/protobuf/proto"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
+
 	"github.com/milvus-io/milvus/internal/kv"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -42,62 +45,48 @@ func Test_SegmentReferenceManager(t *testing.T) {
 		var err error
 		var locKey string
 		nodeID := int64(1)
-		locKey = path.Join(segmentReferPrefix, strconv.FormatInt(nodeID, 10), strconv.FormatInt(2, 10))
-		err = etcdKV.Save(locKey, strconv.FormatInt(nodeID, 10))
+		taskID := int64(10)
+		locKey = path.Join(segmentReferPrefix, strconv.FormatInt(taskID, 10))
+		segReferLock1 := &datapb.SegmentReferenceLock{
+			TaskID:     taskID,
+			NodeID:     nodeID,
+			SegmentIDs: []UniqueID{1},
+		}
+		value, err := proto.Marshal(segReferLock1)
+		assert.NoError(t, err)
+		err = etcdKV.Save(locKey, string(value))
 		assert.NoError(t, err)
 
 		segRefer, err = NewSegmentReferenceManager(etcdKV, []UniqueID{nodeID})
 		assert.NoError(t, err)
 		assert.NotNil(t, segRefer)
-		err = etcdKV.Remove(locKey)
-		assert.NoError(t, err)
 
-		locKey = path.Join(segmentReferPrefix, strconv.FormatInt(nodeID, 10), "segID")
-		err = etcdKV.Save(locKey, strconv.FormatInt(nodeID, 10))
-		assert.NoError(t, err)
-		segRefer, err = NewSegmentReferenceManager(etcdKV, []UniqueID{nodeID})
-		assert.Error(t, err)
-		assert.Nil(t, segRefer)
-		err = etcdKV.Remove(locKey)
-		assert.NoError(t, err)
-
-		locKey = path.Join(segmentReferPrefix, "nodeID", strconv.FormatInt(3, 10))
-		err = etcdKV.Save(locKey, strconv.FormatInt(nodeID, 10))
-		assert.NoError(t, err)
-		segRefer, err = NewSegmentReferenceManager(etcdKV, []UniqueID{nodeID})
-		assert.Error(t, err)
-		assert.Nil(t, segRefer)
-		err = etcdKV.Remove(locKey)
-		assert.NoError(t, err)
-
-		locKey = path.Join(segmentReferPrefix, "nodeID")
-		err = etcdKV.Save(locKey, strconv.FormatInt(nodeID, 10))
-		assert.NoError(t, err)
-		segRefer, err = NewSegmentReferenceManager(etcdKV, nil)
-		assert.Error(t, err)
-		assert.Nil(t, segRefer)
-		err = etcdKV.Remove(locKey)
-		assert.NoError(t, err)
-
-		locKey = path.Join(segmentReferPrefix, strconv.FormatInt(nodeID, 10), strconv.FormatInt(2, 10))
-		err = etcdKV.Save(locKey, strconv.FormatInt(nodeID, 10))
-		assert.NoError(t, err)
-		segRefer, err = NewSegmentReferenceManager(etcdKV, nil)
+		segRefer, err = NewSegmentReferenceManager(etcdKV, []UniqueID{nodeID + 1})
 		assert.NoError(t, err)
 		assert.NotNil(t, segRefer)
-		has := segRefer.HasSegmentLock(2)
-		assert.False(t, has)
+		err = etcdKV.Remove(locKey)
+		assert.NoError(t, err)
+
+		locKey = path.Join(segmentReferPrefix, strconv.FormatInt(taskID, 10))
+		err = etcdKV.Save(locKey, strconv.FormatInt(nodeID, 10))
+		assert.NoError(t, err)
+		segRefer, err = NewSegmentReferenceManager(etcdKV, []UniqueID{nodeID})
+		assert.Error(t, err)
+		assert.Nil(t, segRefer)
+		err = etcdKV.Remove(locKey)
+		assert.NoError(t, err)
 	})
 
 	segIDs := []UniqueID{1, 2, 3, 4, 5}
 	nodeID := UniqueID(1)
+	taskID := UniqueID(10)
 	segRefer, err = NewSegmentReferenceManager(etcdKV, nil)
 	assert.NoError(t, err)
 	assert.NotNil(t, segRefer)
 	var has bool
 
 	t.Run("AddSegmentsLock", func(t *testing.T) {
-		err = segRefer.AddSegmentsLock(segIDs, nodeID)
+		err = segRefer.AddSegmentsLock(taskID, segIDs, nodeID)
 		assert.NoError(t, err)
 
 		for _, segID := range segIDs {
@@ -107,7 +96,10 @@ func Test_SegmentReferenceManager(t *testing.T) {
 	})
 
 	t.Run("ReleaseSegmentsLock", func(t *testing.T) {
-		err = segRefer.ReleaseSegmentsLock(segIDs, nodeID)
+		err = segRefer.ReleaseSegmentsLock(taskID, nodeID+1)
+		assert.NoError(t, err)
+
+		err = segRefer.ReleaseSegmentsLock(taskID, nodeID)
 		assert.NoError(t, err)
 
 		for _, segID := range segIDs {
@@ -115,7 +107,15 @@ func Test_SegmentReferenceManager(t *testing.T) {
 			assert.False(t, has)
 		}
 
-		err = segRefer.ReleaseSegmentsLock([]UniqueID{6}, nodeID)
+		taskID = UniqueID(11)
+
+		err = segRefer.ReleaseSegmentsLock(taskID, nodeID)
+		assert.NoError(t, err)
+
+		has = segRefer.HasSegmentLock(6)
+		assert.False(t, has)
+
+		err = segRefer.ReleaseSegmentsLock(taskID, nodeID)
 		assert.NoError(t, err)
 
 		has = segRefer.HasSegmentLock(6)
@@ -125,7 +125,8 @@ func Test_SegmentReferenceManager(t *testing.T) {
 	t.Run("ReleaseSegmentsLockByNodeID", func(t *testing.T) {
 		segIDs = []UniqueID{10, 11, 12, 13, 14, 15}
 		nodeID = 2
-		err = segRefer.AddSegmentsLock(segIDs, nodeID)
+		taskID = UniqueID(12)
+		err = segRefer.AddSegmentsLock(taskID, segIDs, nodeID)
 		assert.NoError(t, err)
 
 		for _, segID := range segIDs {
@@ -133,7 +134,15 @@ func Test_SegmentReferenceManager(t *testing.T) {
 			assert.True(t, has)
 		}
 
-		err = segRefer.ReleaseSegmentsLockByNodeID(UniqueID(2))
+		err = segRefer.ReleaseSegmentsLockByNodeID(nodeID)
+		assert.NoError(t, err)
+
+		for _, segID := range segIDs {
+			has = segRefer.HasSegmentLock(segID)
+			assert.False(t, has)
+		}
+
+		err = segRefer.ReleaseSegmentsLockByNodeID(nodeID)
 		assert.NoError(t, err)
 
 		for _, segID := range segIDs {
@@ -147,7 +156,8 @@ func Test_SegmentReferenceManager(t *testing.T) {
 
 	t.Run("RecoverySegReferManager", func(t *testing.T) {
 		segIDs = []UniqueID{16, 17, 18, 19, 20}
-		err = segRefer.AddSegmentsLock(segIDs, UniqueID(3))
+		taskID = UniqueID(13)
+		err = segRefer.AddSegmentsLock(taskID, segIDs, UniqueID(3))
 		assert.NoError(t, err)
 
 		for _, segID := range segIDs {
@@ -156,7 +166,7 @@ func Test_SegmentReferenceManager(t *testing.T) {
 		}
 
 		segIDs2 := []UniqueID{21, 22, 23, 24, 25}
-		err = segRefer.AddSegmentsLock(segIDs2, UniqueID(4))
+		err = segRefer.AddSegmentsLock(taskID, segIDs2, UniqueID(4))
 		assert.NoError(t, err)
 
 		for _, segID := range segIDs2 {
@@ -188,17 +198,14 @@ func Test_SegmentReferenceManager(t *testing.T) {
 
 	t.Run("GetHasReferLockSegmentIDs", func(t *testing.T) {
 		segIDs = []UniqueID{26, 27, 28, 29, 30}
-		err = segRefer.AddSegmentsLock(segIDs, UniqueID(5))
+		taskID = UniqueID(14)
+		err = segRefer.AddSegmentsLock(taskID, segIDs, UniqueID(5))
 		assert.NoError(t, err)
 
 		for _, segID := range segIDs {
 			has = segRefer.HasSegmentLock(segID)
 			assert.True(t, has)
 		}
-
-		segmentIDs := segRefer.GetHasReferLockSegmentIDs()
-		assert.Equal(t, 5, len(segmentIDs))
-		assert.ElementsMatch(t, segIDs, segmentIDs)
 
 		err = segRefer.ReleaseSegmentsLockByNodeID(UniqueID(5))
 		assert.NoError(t, err)
@@ -207,9 +214,6 @@ func Test_SegmentReferenceManager(t *testing.T) {
 			has = segRefer.HasSegmentLock(segID)
 			assert.False(t, has)
 		}
-
-		segIDs = segRefer.GetHasReferLockSegmentIDs()
-		assert.Equal(t, 0, len(segIDs))
 	})
 }
 
@@ -219,14 +223,14 @@ type etcdKVMock struct {
 	Fail int
 }
 
-func (em *etcdKVMock) MultiSave(data map[string]string) error {
+func (em *etcdKVMock) Save(key, value string) error {
 	if em.Fail > 0 {
 		return errors.New("error occurred")
 	}
 	return nil
 }
 
-func (em *etcdKVMock) MultiRemove(keys []string) error {
+func (em *etcdKVMock) Remove(key string) error {
 	if em.Fail > 0 {
 		return errors.New("error occurred")
 	}
@@ -240,7 +244,13 @@ func (em *etcdKVMock) LoadWithPrefix(prefix string) ([]string, []string, error) 
 	if em.Fail > 1 {
 		return []string{"key"}, []string{"value"}, nil
 	}
-	return []string{"meta/segmentRefer/1/2"}, []string{"1"}, nil
+	referLock := &datapb.SegmentReferenceLock{
+		TaskID:     1,
+		NodeID:     1,
+		SegmentIDs: []UniqueID{1, 2, 3},
+	}
+	value, _ := proto.Marshal(referLock)
+	return []string{segmentReferPrefix + "/1/1"}, []string{string(value)}, nil
 }
 
 func TestSegmentReferenceManager_Error(t *testing.T) {
@@ -268,28 +278,55 @@ func TestSegmentReferenceManager_Error(t *testing.T) {
 		etcdKV: emKV,
 	}
 
+	taskID := UniqueID(1)
 	t.Run("AddSegmentsLock", func(t *testing.T) {
-		err := segRefer.AddSegmentsLock([]UniqueID{1}, 1)
+		err := segRefer.AddSegmentsLock(taskID, []UniqueID{1}, 1)
 		assert.Error(t, err)
 	})
 
 	t.Run("ReleaseSegmentsLock", func(t *testing.T) {
-		err := segRefer.ReleaseSegmentsLock([]UniqueID{1}, 1)
+		nodeID := UniqueID(1)
+		segRefer = &SegmentReferenceManager{
+			etcdKV: emKV,
+			segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{
+				taskID: {
+					nodeID: {
+						TaskID:     taskID,
+						NodeID:     nodeID,
+						SegmentIDs: []UniqueID{1, 2, 3},
+					},
+				},
+			},
+		}
+		err := segRefer.ReleaseSegmentsLock(taskID, 1)
 		assert.Error(t, err)
 	})
 
 	t.Run("ReleaseSegmentsLockByNodeID", func(t *testing.T) {
-		err := segRefer.ReleaseSegmentsLockByNodeID(1)
+		nodeID := UniqueID(1)
+		segRefer = &SegmentReferenceManager{
+			etcdKV: emKV,
+			segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{
+				taskID: {
+					nodeID: {
+						TaskID:     taskID,
+						NodeID:     nodeID,
+						SegmentIDs: []UniqueID{1, 2, 3},
+					},
+				},
+			},
+		}
+		err := segRefer.ReleaseSegmentsLockByNodeID(nodeID)
 		assert.Error(t, err)
 	})
 
 	t.Run("recoverySegReferManager", func(t *testing.T) {
-		segRefer.segmentsLock = map[UniqueID][]*SegmentLock{
+		segRefer.segmentsLock = map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{
 			2: {
-				{
-					segmentID: 2,
-					nodeID:    2,
-					locKey:    "1/2/3",
+				3: {
+					TaskID:     2,
+					NodeID:     3,
+					SegmentIDs: []UniqueID{1, 2, 3},
 				},
 			},
 		}

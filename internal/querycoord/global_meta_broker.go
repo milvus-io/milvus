@@ -479,10 +479,11 @@ func (broker *globalMetaBroker) getSegmentStates(ctx context.Context, segmentID 
 	return resp.States[0], nil
 }
 
-func (broker *globalMetaBroker) acquireSegmentsReferLock(ctx context.Context, segmentIDs []UniqueID) error {
+func (broker *globalMetaBroker) acquireSegmentsReferLock(ctx context.Context, taskID int64, segmentIDs []UniqueID) error {
 	ctx, cancel := context.WithTimeout(ctx, timeoutForRPC)
 	defer cancel()
 	acquireSegLockReq := &datapb.AcquireSegmentLockRequest{
+		TaskID:     taskID,
 		SegmentIDs: segmentIDs,
 		NodeID:     Params.QueryCoordCfg.GetNodeID(),
 	}
@@ -501,13 +502,13 @@ func (broker *globalMetaBroker) acquireSegmentsReferLock(ctx context.Context, se
 	return nil
 }
 
-func (broker *globalMetaBroker) releaseSegmentReferLock(ctx context.Context, segmentIDs []UniqueID) error {
+func (broker *globalMetaBroker) releaseSegmentReferLock(ctx context.Context, taskID int64, segmentIDs []UniqueID) error {
 	ctx, cancel := context.WithTimeout(ctx, timeoutForRPC)
 	defer cancel()
 
 	releaseSegReferLockReq := &datapb.ReleaseSegmentLockRequest{
-		SegmentIDs: segmentIDs,
-		NodeID:     Params.QueryCoordCfg.GetNodeID(),
+		TaskID: taskID,
+		NodeID: Params.QueryCoordCfg.GetNodeID(),
 	}
 
 	if err := retry.Do(ctx, func() error {

@@ -122,14 +122,17 @@ func Test_garbageCollector_scan(t *testing.T) {
 	t.Run("key is reference", func(t *testing.T) {
 		segReferManager := &SegmentReferenceManager{
 			etcdKV: etcdKV,
-			segmentsLock: map[UniqueID][]*SegmentLock{
-				2: {
-					{
-						segmentID: 2,
-						nodeID:    1,
-						locKey:    "path",
+			segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{
+				1: {
+					1: {
+						TaskID:     1,
+						NodeID:     1,
+						SegmentIDs: []UniqueID{2},
 					},
 				},
+			},
+			segmentReferCnt: map[UniqueID]int{
+				2: 1,
 			},
 		}
 		gc := newGarbageCollector(meta, segRefer, GcOption{
@@ -149,7 +152,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, deltaLogPrefix), delta)
 		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, `indexes`), others)
 
-		err = gc.segRefer.ReleaseSegmentsLock([]UniqueID{2}, 1)
+		err = gc.segRefer.ReleaseSegmentsLock(1, 1)
 		assert.NoError(t, err)
 		gc.close()
 	})

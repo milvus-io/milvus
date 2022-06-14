@@ -1112,7 +1112,7 @@ func (s *Server) AcquireSegmentLock(ctx context.Context, req *datapb.AcquireSegm
 		return resp, nil
 	}
 
-	err = s.segReferManager.AddSegmentsLock(req.SegmentIDs, req.NodeID)
+	err = s.segReferManager.AddSegmentsLock(req.TaskID, req.SegmentIDs, req.NodeID)
 	if err != nil {
 		log.Warn("Add reference lock on segments failed", zap.Int64s("segIDs", req.SegmentIDs), zap.Error(err))
 		resp.Reason = err.Error()
@@ -1122,7 +1122,7 @@ func (s *Server) AcquireSegmentLock(ctx context.Context, req *datapb.AcquireSegm
 	if !hasSegments || err != nil {
 		log.Error("AcquireSegmentLock failed, try to release reference lock", zap.Error(err))
 		if err2 := retry.Do(ctx, func() error {
-			return s.segReferManager.ReleaseSegmentsLock(req.SegmentIDs, req.NodeID)
+			return s.segReferManager.ReleaseSegmentsLock(req.TaskID, req.NodeID)
 		}, retry.Attempts(100)); err2 != nil {
 			panic(err)
 		}
@@ -1145,9 +1145,9 @@ func (s *Server) ReleaseSegmentLock(ctx context.Context, req *datapb.ReleaseSegm
 		return resp, nil
 	}
 
-	err := s.segReferManager.ReleaseSegmentsLock(req.SegmentIDs, req.NodeID)
+	err := s.segReferManager.ReleaseSegmentsLock(req.TaskID, req.NodeID)
 	if err != nil {
-		log.Error("DataCoord ReleaseSegmentLock failed", zap.Int64s("segmentIDs", req.SegmentIDs), zap.Int64("nodeID", req.NodeID),
+		log.Error("DataCoord ReleaseSegmentLock failed", zap.Int64("taskID", req.TaskID), zap.Int64("nodeID", req.NodeID),
 			zap.Error(err))
 		resp.Reason = err.Error()
 		return resp, nil

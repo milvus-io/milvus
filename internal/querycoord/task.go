@@ -1239,7 +1239,7 @@ func (lst *loadSegmentTask) preExecute(ctx context.Context) error {
 		zap.Int64("loaded nodeID", lst.DstNodeID),
 		zap.Int64("taskID", lst.getTaskID()))
 
-	if err := lst.broker.acquireSegmentsReferLock(ctx, segmentIDs); err != nil {
+	if err := lst.broker.acquireSegmentsReferLock(ctx, lst.taskID, segmentIDs); err != nil {
 		log.Error("acquire reference lock on segments failed", zap.Int64s("segmentIDs", segmentIDs),
 			zap.Error(err))
 		return err
@@ -1267,7 +1267,7 @@ func (lst *loadSegmentTask) postExecute(context.Context) error {
 	for _, info := range lst.Infos {
 		segmentIDs = append(segmentIDs, info.SegmentID)
 	}
-	if err := lst.broker.releaseSegmentReferLock(lst.ctx, segmentIDs); err != nil {
+	if err := lst.broker.releaseSegmentReferLock(lst.ctx, lst.taskID, segmentIDs); err != nil {
 		panic(err)
 	}
 

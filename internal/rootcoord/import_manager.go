@@ -135,7 +135,7 @@ func (m *importManager) sendOutTasksLoop(wg *sync.WaitGroup) {
 }
 
 // expireOldTasksLoop starts a loop that checks and expires old tasks every `ImportTaskExpiration` seconds.
-func (m *importManager) expireOldTasksLoop(wg *sync.WaitGroup, releaseLockFunc func(context.Context, []int64) error) {
+func (m *importManager) expireOldTasksLoop(wg *sync.WaitGroup, releaseLockFunc func(context.Context, int64, []int64) error) {
 	defer wg.Done()
 	ticker := time.NewTicker(time.Duration(expireOldTasksInterval) * time.Millisecond)
 	defer ticker.Stop()
@@ -607,7 +607,7 @@ func (m *importManager) updateImportTaskStore(ti *datapb.ImportTaskInfo) error {
 }
 
 // expireOldTasks marks expires tasks as failed.
-func (m *importManager) expireOldTasks(releaseLockFunc func(context.Context, []int64) error) {
+func (m *importManager) expireOldTasks(releaseLockFunc func(context.Context, int64, []int64) error) {
 	// Expire old pending tasks, if any.
 	func() {
 		m.pendingLock.Lock()
@@ -622,7 +622,7 @@ func (m *importManager) expireOldTasks(releaseLockFunc func(context.Context, []i
 				log.Info("releasing seg ref locks on expired import task",
 					zap.Int64s("segment IDs", t.GetState().GetSegments()))
 				err := retry.Do(m.ctx, func() error {
-					return releaseLockFunc(m.ctx, t.GetState().GetSegments())
+					return releaseLockFunc(m.ctx, t.GetId(), t.GetState().GetSegments())
 				}, retry.Attempts(100))
 				if err != nil {
 					log.Error("failed to release lock, about to panic!")
@@ -646,7 +646,7 @@ func (m *importManager) expireOldTasks(releaseLockFunc func(context.Context, []i
 				log.Info("releasing seg ref locks on expired import task",
 					zap.Int64s("segment IDs", v.GetState().GetSegments()))
 				err := retry.Do(m.ctx, func() error {
-					return releaseLockFunc(m.ctx, v.GetState().GetSegments())
+					return releaseLockFunc(m.ctx, v.GetId(), v.GetState().GetSegments())
 				}, retry.Attempts(100))
 				if err != nil {
 					log.Error("failed to release lock, about to panic!")

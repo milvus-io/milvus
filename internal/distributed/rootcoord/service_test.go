@@ -229,10 +229,10 @@ func TestGrpcService(t *testing.T) {
 	core.CallImportService = func(ctx context.Context, req *datapb.ImportTaskRequest) *datapb.ImportTaskResponse {
 		return nil
 	}
-	core.CallAddSegRefLock = func(context.Context, []int64) error {
+	core.CallAddSegRefLock = func(context.Context, int64, []int64) error {
 		return nil
 	}
-	core.CallReleaseSegRefLock = func(context.Context, []int64) error {
+	core.CallReleaseSegRefLock = func(context.Context, int64, []int64) error {
 		return nil
 	}
 
