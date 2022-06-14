@@ -10,13 +10,17 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"go.uber.org/zap"
 )
 
 const (
 	// root field of row-based json format
 	RowRootNode = "rows"
-	// initial size of a buffer
-	BufferSize = 1024
+	// minimal size of a buffer
+	MinBufferSize = 1024
+	// split file into batches no more than this count
+	MaxBatchCount = 16
 )
 
 type JSONParser struct {
@@ -38,12 +42,34 @@ func NewJSONParser(ctx context.Context, collectionSchema *schemapb.CollectionSch
 
 	parser := &JSONParser{
 		ctx:          ctx,
-		bufSize:      4096,
+		bufSize:      MinBufferSize,
 		fields:       fields,
 		name2FieldID: name2FieldID,
 	}
+	adjustBufSize(parser, collectionSchema)
 
 	return parser
+}
+
+func adjustBufSize(parser *JSONParser, collectionSchema *schemapb.CollectionSchema) {
+	sizePerRecord, _ := typeutil.EstimateSizePerRecord(collectionSchema)
+	if sizePerRecord <= 0 {
+		return
+	}
+
+	// split the file into no more than MaxBatchCount batches to parse
+	// for high dimensional vector, the bufSize is a small value, read few rows each time
+	// for low dimensional vector, the bufSize is a large value, read more rows each time
+	maxRows := MaxFileSize / sizePerRecord
+	bufSize := maxRows / MaxBatchCount
+
+	// bufSize should not be less than MinBufferSize
+	if bufSize < MinBufferSize {
+		bufSize = MinBufferSize
+	}
+
+	log.Info("JSON parse: reset bufSize", zap.Int("sizePerRecord", sizePerRecord), zap.Int("bufSize", bufSize))
+	parser.bufSize = int64(bufSize)
 }
 
 func (p *JSONParser) logError(msg string) error {
@@ -93,7 +119,7 @@ func (p *JSONParser) ParseRows(r io.Reader, handler JSONRowHandler) error {
 		}
 
 		// read buffer
-		buf := make([]map[storage.FieldID]interface{}, 0, BufferSize)
+		buf := make([]map[storage.FieldID]interface{}, 0, MinBufferSize)
 		for dec.More() {
 			var value interface{}
 			if err := dec.Decode(&value); err != nil {
@@ -121,7 +147,7 @@ func (p *JSONParser) ParseRows(r io.Reader, handler JSONRowHandler) error {
 				}
 
 				// clear the buffer
-				buf = make([]map[storage.FieldID]interface{}, 0, BufferSize)
+				buf = make([]map[storage.FieldID]interface{}, 0, MinBufferSize)
 			}
 		}
 
@@ -205,7 +231,7 @@ func (p *JSONParser) ParseColumns(r io.Reader, handler JSONColumnHandler) error 
 		id := p.name2FieldID[key]
 		// read buffer
 		buf := make(map[storage.FieldID][]interface{})
-		buf[id] = make([]interface{}, 0, BufferSize)
+		buf[id] = make([]interface{}, 0, MinBufferSize)
 		for dec.More() {
 			var value interface{}
 			if err := dec.Decode(&value); err != nil {
@@ -224,7 +250,7 @@ func (p *JSONParser) ParseColumns(r io.Reader, handler JSONColumnHandler) error 
 				}
 
 				// clear the buffer
-				buf[id] = make([]interface{}, 0, BufferSize)
+				buf[id] = make([]interface{}, 0, MinBufferSize)
 			}
 		}
 

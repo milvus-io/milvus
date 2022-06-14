@@ -1276,6 +1276,13 @@ func TestMetaWithTimestamp(t *testing.T) {
 
 	_, err = mt.GetCollectionIDByName("badname")
 	assert.Error(t, err)
+
+	name, err := mt.GetCollectionNameByID(collID2)
+	assert.Nil(t, err)
+	assert.Equal(t, collName2, name)
+
+	_, err = mt.GetCollectionNameByID(int64(999))
+	assert.Error(t, err)
 }
 
 func TestFixIssue10540(t *testing.T) {

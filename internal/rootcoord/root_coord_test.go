@@ -3394,3 +3394,49 @@ func TestCore_DescribeSegments(t *testing.T) {
 	assert.Equal(t, indexName, indexInfo.IndexName)
 	assert.Equal(t, indexID, indexInfo.IndexID)
 }
+
+func TestCore_getCollectionName(t *testing.T) {
+	mt := &MetaTable{
+		ddLock:      sync.RWMutex{},
+		collID2Meta: make(map[int64]etcdpb.CollectionInfo),
+	}
+
+	core := &Core{
+		MetaTable: mt,
+	}
+
+	collName, partName, err := core.getCollectionName(1, 2)
+	assert.Error(t, err)
+	assert.Empty(t, collName)
+	assert.Empty(t, partName)
+
+	ids := make([]int64, 0)
+	names := make([]string, 0)
+	mt.collID2Meta[1] = etcdpb.CollectionInfo{
+		Schema: &schemapb.CollectionSchema{
+			Name: "dummy",
+		},
+		PartitionIDs:   ids,
+		PartitionNames: names,
+	}
+
+	collName, partName, err = core.getCollectionName(1, 2)
+	assert.Error(t, err)
+	assert.Equal(t, "dummy", collName)
+	assert.Empty(t, partName)
+
+	ids = append(ids, 2)
+	names = append(names, "p2")
+	mt.collID2Meta[1] = etcdpb.CollectionInfo{
+		Schema: &schemapb.CollectionSchema{
+			Name: "dummy",
+		},
+		PartitionIDs:   ids,
+		PartitionNames: names,
+	}
+
+	collName, partName, err = core.getCollectionName(1, 2)
+	assert.Nil(t, err)
+	assert.Equal(t, "dummy", collName)
+	assert.Equal(t, "p2", partName)
+}

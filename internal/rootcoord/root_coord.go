@@ -1089,6 +1089,7 @@ func (c *Core) Init() error {
 			c.impTaskKv,
 			c.IDAllocator,
 			c.CallImportService,
+			c.getCollectionName,
 		)
 		c.importManager.init(c.ctx)
 
@@ -1240,6 +1241,22 @@ func (c *Core) reSendDdMsg(ctx context.Context, force bool) error {
 
 	// Update DDOperation in etcd
 	return c.MetaTable.txn.Save(DDMsgSendPrefix, strconv.FormatBool(true))
+}
+
+func (c *Core) getCollectionName(collID, partitionID typeutil.UniqueID) (string, string, error) {
+	colName, err := c.MetaTable.GetCollectionNameByID(collID)
+	if err != nil {
+		log.Error("RootCoord failed to get collection name by id", zap.Int64("ID", collID), zap.Error(err))
+		return "", "", err
+	}
+
+	partName, err := c.MetaTable.GetPartitionNameByID(collID, partitionID, 0)
+	if err != nil {
+		log.Error("RootCoord failed to get partition name by id", zap.Int64("ID", partitionID), zap.Error(err))
+		return colName, "", err
+	}
+
+	return colName, partName, nil
 }
 
 // Start starts RootCoord.
