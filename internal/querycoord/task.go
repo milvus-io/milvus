@@ -99,6 +99,7 @@ type task interface {
 	getResultInfo() *commonpb.Status
 	updateTaskProcess()
 	elapseSpan() time.Duration
+	finishContext()
 }
 
 type baseTask struct {
@@ -296,6 +297,13 @@ func (bt *baseTask) rollBack(ctx context.Context) []task {
 
 func (bt *baseTask) elapseSpan() time.Duration {
 	return bt.timeRecorder.ElapseSpan()
+}
+
+// finishContext calls the cancel function for the trace ctx.
+func (bt *baseTask) finishContext() {
+	if bt.cancel != nil {
+		bt.cancel()
+	}
 }
 
 type loadCollectionTask struct {

@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"strconv"
 	"testing"
+	"time"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
@@ -552,4 +553,51 @@ func Test_generateDerivedInternalTasks(t *testing.T) {
 	queryCoord.Stop()
 	err = removeAllSession()
 	assert.Nil(t, err)
+}
+
+func TestTaskScheduler_BindContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	s := &TaskScheduler{
+		ctx:    ctx,
+		cancel: cancel,
+	}
+
+	t.Run("normal finish", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		ctx, cancel = s.BindContext(ctx)
+
+		cancel() // normal finish
+		assert.Eventually(t, func() bool {
+			return ctx.Err() == context.Canceled
+		}, time.Second, time.Millisecond*10)
+	})
+
+	t.Run("input context canceled", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+
+		nctx, ncancel := s.BindContext(ctx)
+		defer ncancel()
+
+		cancel() // input context cancel
+
+		assert.Eventually(t, func() bool {
+			return nctx.Err() == context.Canceled
+		}, time.Second, time.Millisecond*10)
+
+	})
+
+	t.Run("scheduler context cancel", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		nctx, ncancel := s.BindContext(ctx)
+		defer ncancel()
+
+		s.cancel() // scheduler cancel
+
+		assert.Eventually(t, func() bool {
+			return nctx.Err() == context.Canceled
+		}, time.Second, time.Millisecond*10)
+	})
 }
