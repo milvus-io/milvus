@@ -175,7 +175,7 @@ jobs:
           from: GitHub Actions
 
       - name: Upload logs
-        if: ${{ failure() }}
+        if: ${{ ! success() }}
         uses: actions/upload-artifact@v2
         with:
           name: docker-compose-logs-${{ matrix.mode }}-${{ matrix.task }}
@@ -340,7 +340,7 @@ jobs:
           bash ../../scripts/export_log_k8s.sh default deploy-testing k8s_logs/second_deploy
 
       - name: Upload logs
-        if: ${{ failure() }}
+        if: ${{ ! success() }}
         uses: actions/upload-artifact@v2
         with:
           name: helm-log-${{ matrix.mode }}-${{ matrix.task }}
