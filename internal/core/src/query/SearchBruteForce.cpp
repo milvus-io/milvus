@@ -22,19 +22,19 @@
 
 namespace milvus::query {
 
-// copy from knowhere
+// copy from faiss/IndexBinaryFlat.cpp::IndexBinaryFlat::search()
 // disable lint to make further migration easier
 static void
-raw_search(MetricType metric_type,
-           const uint8_t* xb,  //
-           int64_t ntotal,     //
-           int code_size,      //
-           idx_t n,            // num_queries
-           const uint8_t* x,   //
-           idx_t k,            // topk
-           float* D,
-           idx_t* labels,
-           const BitsetView bitset) {
+binary_search(MetricType metric_type,
+              const uint8_t* xb,
+              int64_t ntotal,
+              int code_size,
+              idx_t n,  // num_queries
+              const uint8_t* x,
+              idx_t k,  // topk
+              float* D,
+              idx_t* labels,
+              const BitsetView bitset) {
     using namespace faiss;  // NOLINT
     if (metric_type == METRIC_Jaccard || metric_type == METRIC_Tanimoto) {
         float_maxheap_array_t res = {size_t(n), size_t(k), labels, D};
@@ -45,7 +45,6 @@ raw_search(MetricType metric_type,
                 D[i] = Jaccard_2_Tanimoto(D[i]);
             }
         }
-
     } else if (metric_type == METRIC_Hamming) {
         std::vector<int32_t> int_distances(n * k);
         int_maxheap_array_t res = {size_t(n), size_t(k), labels, int_distances.data()};
@@ -53,7 +52,6 @@ raw_search(MetricType metric_type,
         for (int i = 0; i < n * k; ++i) {
             D[i] = int_distances[i];
         }
-
     } else if (metric_type == METRIC_Substructure || metric_type == METRIC_Superstructure) {
         // only matched ids will be chosen, not to use heap
         binary_distance_knn_mc(metric_type, x, xb, n, ntotal, k, code_size, D, labels, bitset);
@@ -65,24 +63,23 @@ raw_search(MetricType metric_type,
 }
 
 SubSearchResult
-BinarySearchBruteForceFast(MetricType metric_type,
-                           int64_t dim,
-                           const uint8_t* binary_chunk,
-                           int64_t size_per_chunk,
-                           int64_t topk,
-                           int64_t num_queries,
-                           int64_t round_decimal,
-                           const uint8_t* query_data,
-                           const BitsetView& bitset) {
+BinarySearchBruteForce(const dataset::SearchDataset& dataset,
+                       const void* chunk_data_raw,
+                       int64_t size_per_chunk,
+                       const BitsetView& bitset) {
+    // TODO: refactor the internal function
+    auto metric_type = dataset.metric_type;
+    auto num_queries = dataset.num_queries;
+    auto topk = dataset.topk;
+    auto dim = dataset.dim;
+    auto round_decimal = dataset.round_decimal;
     SubSearchResult sub_result(num_queries, topk, metric_type, round_decimal);
-    float* result_distances = sub_result.get_distances();
-    idx_t* result_ids = sub_result.get_seg_offsets();
+    auto query_data = reinterpret_cast<const uint8_t*>(dataset.query_data);
+    auto chunk_data = reinterpret_cast<const uint8_t*>(chunk_data_raw);
 
     int64_t code_size = dim / 8;
-    const idx_t block_size = size_per_chunk;
-
-    raw_search(metric_type, binary_chunk, size_per_chunk, code_size, num_queries, query_data, topk, result_distances,
-               result_ids, bitset);
+    binary_search(metric_type, chunk_data, size_per_chunk, code_size, num_queries, query_data, topk,
+                  sub_result.get_distances(), sub_result.get_seg_offsets(), bitset);
     sub_result.round_values();
     return sub_result;
 }
@@ -113,15 +110,4 @@ FloatSearchBruteForce(const dataset::SearchDataset& dataset,
     return sub_qr;
 }
 
-SubSearchResult
-BinarySearchBruteForce(const dataset::SearchDataset& dataset,
-                       const void* chunk_data_raw,
-                       int64_t size_per_chunk,
-                       const BitsetView& bitset) {
-    // TODO: refactor the internal function
-    auto query_data = reinterpret_cast<const uint8_t*>(dataset.query_data);
-    auto chunk_data = reinterpret_cast<const uint8_t*>(chunk_data_raw);
-    return BinarySearchBruteForceFast(dataset.metric_type, dataset.dim, chunk_data, size_per_chunk, dataset.topk,
-                                      dataset.num_queries, dataset.round_decimal, query_data, bitset);
-}
 }  // namespace milvus::query
