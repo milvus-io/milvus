@@ -704,7 +704,7 @@ func (c *ChannelManager) watchChannelStatesLoop(ctx context.Context) {
 	}
 }
 
-// Release writes ToRlease channel watch states for a channel
+// Release writes ToRelease channel watch states for a channel
 func (c *ChannelManager) Release(nodeID UniqueID, channelName string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -723,7 +723,7 @@ func (c *ChannelManager) Release(nodeID UniqueID, channelName string) error {
 	return err
 }
 
-// Reassign removes channel assignment from a datanode
+// Reassign reassigns a channel to another DataNode.
 func (c *ChannelManager) Reassign(nodeID UniqueID, channelName string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -747,10 +747,11 @@ func (c *ChannelManager) Reassign(nodeID UniqueID, channelName string) error {
 		return nil
 	}
 
-	// reassign policy won't choose the same Node for a ressignment of a channel
+	// Reassign policy won't choose the original node when a reassigning a channel.
 	updates := c.reassignPolicy(c.store, []*NodeChannelInfo{reallocates})
-	if len(updates) <= 0 { // skip the remove if reassign to the original node
-		log.Warn("fail to reassign channel to other nodes, assign to the original Node",
+	if len(updates) <= 0 {
+		// Skip the remove if reassign to the original node.
+		log.Warn("failed to reassign channel to other nodes, assigning to the original DataNode",
 			zap.Int64("nodeID", nodeID),
 			zap.String("channel name", channelName))
 		updates.Add(nodeID, []*channel{ch})
@@ -760,11 +761,13 @@ func (c *ChannelManager) Reassign(nodeID UniqueID, channelName string) error {
 		}
 	}
 
-	log.Info("channel manager reassign channels", zap.Int64("old node ID", nodeID), zap.Array("updates", updates))
+	log.Info("channel manager reassigning channels",
+		zap.Int64("old node ID", nodeID),
+		zap.Array("updates", updates))
 	return c.updateWithTimer(updates, datapb.ChannelWatchState_ToWatch)
 }
 
-// CleanupAndReassign tries to clean up datanode's subscription, and then delete channel watch info.
+// CleanupAndReassign tries to clean up datanode's subscription, and then reassigns the channel to another DataNode.
 func (c *ChannelManager) CleanupAndReassign(nodeID UniqueID, channelName string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -796,11 +799,12 @@ func (c *ChannelManager) CleanupAndReassign(nodeID UniqueID, channelName string)
 		return nil
 	}
 
-	// reassign policy won't choose the same Node for a ressignment of a channel
+	// Reassign policy won't choose the original node when a reassigning a channel.
 	updates := c.reassignPolicy(c.store, []*NodeChannelInfo{reallocates})
-	if len(updates) <= 0 { // skip the remove if reassign to the original node
-		log.Warn("fail to reassign channel to other nodes, add channel to the original node",
-			zap.Int64("nodeID", nodeID),
+	if len(updates) <= 0 {
+		// Skip the remove if reassign to the original node.
+		log.Warn("failed to reassign channel to other nodes, add channel to the original node",
+			zap.Int64("node ID", nodeID),
 			zap.String("channel name", channelName))
 		updates.Add(nodeID, []*channel{chToCleanUp})
 	} else {
@@ -809,7 +813,9 @@ func (c *ChannelManager) CleanupAndReassign(nodeID UniqueID, channelName string)
 		}
 	}
 
-	log.Info("channel manager reassign channels", zap.Int64("old nodeID", nodeID), zap.Array("updates", updates))
+	log.Info("channel manager reassigning channels",
+		zap.Int64("old nodeID", nodeID),
+		zap.Array("updates", updates))
 	return c.updateWithTimer(updates, datapb.ChannelWatchState_ToWatch)
 }
 
