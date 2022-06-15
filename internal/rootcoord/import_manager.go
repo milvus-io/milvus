@@ -282,13 +282,11 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 			taskCount = len(req.Files)
 		}
 
-		// task queue size has a limit, return error if import request contains too many data files
+		// task queue size has a limit, return error if import request contains too many data files, and skip entire job
 		if capacity-length < taskCount {
-			resp.Status = &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_IllegalArgument,
-				Reason:    "Import task queue max size is " + strconv.Itoa(capacity) + ", currently there are " + strconv.Itoa(length) + " tasks is pending. Not able to execute this request with " + strconv.Itoa(taskCount) + " tasks.",
-			}
-			return
+			err = fmt.Errorf("import task queue max size is %v, currently there are %v tasks is pending. Not able to execute this request with %v tasks", capacity, length, taskCount)
+			log.Error(err.Error())
+			return err
 		}
 
 		bucket := ""

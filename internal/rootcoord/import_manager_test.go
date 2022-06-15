@@ -19,6 +19,7 @@ package rootcoord
 import (
 	"context"
 	"errors"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -260,6 +261,12 @@ func TestImportManager_ImportJob(t *testing.T) {
 	resp = mgr.importJob(context.TODO(), rowReq, colID, 0)
 	assert.Equal(t, len(rowReq.Files)-2, len(mgr.pendingTasks))
 	assert.Equal(t, 2, len(mgr.workingTasks))
+
+	for i := 0; i <= 32; i++ {
+		rowReq.Files = append(rowReq.Files, strconv.Itoa(i))
+	}
+	resp = mgr.importJob(context.TODO(), rowReq, colID, 0)
+	assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 }
 
 func TestImportManager_AllDataNodesBusy(t *testing.T) {
