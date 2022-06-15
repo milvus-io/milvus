@@ -76,7 +76,7 @@ func benchmarkQueryCollectionSearch(nq int64, b *testing.B) {
 	iReq, _ := genSearchRequest(nq, IndexFaissIDMap, collection.schema)
 	queryReq := &queryPb.SearchRequest{
 		Req:             iReq,
-		DmlChannel:      defaultDMLChannel,
+		DmlChannels:     []string{defaultDMLChannel},
 		SegmentIDs:      []UniqueID{defaultSegmentID},
 		FromShardLeader: true,
 		Scope:           queryPb.DataScope_Historical,

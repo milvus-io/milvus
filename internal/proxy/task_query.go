@@ -245,17 +245,22 @@ func (t *queryTask) Execute(ctx context.Context) error {
 		t.resultBuf = make(chan *internalpb.RetrieveResults, len(shards))
 		t.toReduceResults = make([]*internalpb.RetrieveResults, 0, len(shards))
 		t.runningGroup, t.runningGroupCtx = errgroup.WithContext(ctx)
-		for channelID, leaders := range shards {
-			channelID := channelID
-			leaders := leaders
+		node2dmlChans, node2QN, err := groupShardLeadersWithSameQueryNode(t.TraceCtx(), t.queryShardPolicy, t.shardMgr, shards)
+		if err != nil {
+			return err
+		}
+		for nodeID := range node2dmlChans {
+			nodeID := nodeID
+			qn := node2QN[nodeID]
+			chs := node2dmlChans[nodeID]
 			t.runningGroup.Go(func() error {
 				log.Debug("proxy starting to query one shard",
 					zap.Int64("collectionID", t.CollectionID),
 					zap.String("collection name", t.collectionName),
-					zap.String("shard channel", channelID),
+					zap.Strings("shard channels", chs),
 					zap.Uint64("timeoutTs", t.TimeoutTimestamp))
 
-				err := t.queryShard(t.runningGroupCtx, leaders, channelID)
+				err := t.queryShard(t.runningGroupCtx, nodeID, qn, chs)
 				if err != nil {
 					return err
 				}
@@ -350,41 +355,31 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
-func (t *queryTask) queryShard(ctx context.Context, leaders []nodeInfo, channelID string) error {
-	query := func(nodeID UniqueID, qn types.QueryNode) error {
-		req := &querypb.QueryRequest{
-			Req:        t.RetrieveRequest,
-			DmlChannel: channelID,
-			Scope:      querypb.DataScope_All,
-		}
-
-		result, err := qn.Query(ctx, req)
-		if err != nil {
-			log.Warn("QueryNode query return error", zap.Int64("nodeID", nodeID), zap.String("channel", channelID),
-				zap.Error(err))
-			return err
-		}
-		if result.GetStatus().GetErrorCode() == commonpb.ErrorCode_NotShardLeader {
-			log.Warn("QueryNode is not shardLeader", zap.Int64("nodeID", nodeID), zap.String("channel", channelID))
-			return errInvalidShardLeaders
-		}
-		if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-			log.Warn("QueryNode query result error", zap.Int64("nodeID", nodeID),
-				zap.String("reason", result.GetStatus().GetReason()))
-			return fmt.Errorf("fail to Query, QueryNode ID = %d, reason=%s", nodeID, result.GetStatus().GetReason())
-		}
-
-		log.Debug("get query result", zap.Int64("nodeID", nodeID), zap.String("channelID", channelID))
-		t.resultBuf <- result
-		return nil
+func (t *queryTask) queryShard(ctx context.Context, nodeID int64, qn types.QueryNode, channelIDs []string) error {
+	req := &querypb.QueryRequest{
+		Req:         t.RetrieveRequest,
+		DmlChannels: channelIDs,
+		Scope:       querypb.DataScope_All,
 	}
 
-	err := t.queryShardPolicy(t.TraceCtx(), t.shardMgr, query, leaders)
+	result, err := qn.Query(ctx, req)
 	if err != nil {
-		log.Warn("fail to Query to all shard leaders", zap.Int64("taskID", t.ID()), zap.Any("shard leaders", leaders))
+		log.Warn("QueryNode query return error", zap.Int64("nodeID", nodeID), zap.Strings("channels", channelIDs),
+			zap.Error(err))
 		return err
 	}
+	if result.GetStatus().GetErrorCode() == commonpb.ErrorCode_NotShardLeader {
+		log.Warn("QueryNode is not shardLeader", zap.Int64("nodeID", nodeID), zap.Strings("channels", channelIDs))
+		return errInvalidShardLeaders
+	}
+	if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		log.Warn("QueryNode query result error", zap.Int64("nodeID", nodeID),
+			zap.String("reason", result.GetStatus().GetReason()))
+		return fmt.Errorf("fail to Query, QueryNode ID = %d, reason=%s", nodeID, result.GetStatus().GetReason())
+	}
 
+	log.Debug("get query result", zap.Int64("nodeID", nodeID), zap.Strings("channelIDs", channelIDs))
+	t.resultBuf <- result
 	return nil
 }
 

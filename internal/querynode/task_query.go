@@ -24,6 +24,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -162,7 +163,12 @@ func (q *queryTask) CPUUsage() int32 {
 	return q.cpu
 }
 
-func newQueryTask(ctx context.Context, src *querypb.QueryRequest) *queryTask {
+func newQueryTask(ctx context.Context, src *querypb.QueryRequest, dmlChannel string) (*queryTask, error) {
+	copiedMsg := proto.Clone(src)
+	copiedReq, ok := copiedMsg.(*querypb.QueryRequest)
+	if !ok {
+		return nil, fmt.Errorf("failed to clone message")
+	}
 	target := &queryTask{
 		baseReadTask: baseReadTask{
 			baseTask: baseTask{
@@ -179,8 +185,8 @@ func newQueryTask(ctx context.Context, src *querypb.QueryRequest) *queryTask {
 			tr:                 timerecord.NewTimeRecorder("queryTask"),
 			DataScope:          src.GetScope(),
 		},
-		iReq: src.Req,
-		req:  src,
+		iReq: copiedReq.Req,
+		req:  copiedReq,
 	}
-	return target
+	return target, nil
 }

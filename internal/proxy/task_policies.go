@@ -69,3 +69,32 @@ func roundRobinPolicy(ctx context.Context, mgr *shardClientMgr, query func(Uniqu
 	}
 	return nil
 }
+
+// use policy to select shard leader, then group shard leaders within same query node
+func groupShardLeadersWithSameQueryNode(
+	ctx context.Context,
+	policy pickShardPolicy,
+	mgr *shardClientMgr,
+	shard2leaders map[string][]nodeInfo) (map[int64][]string, map[int64]types.QueryNode, error) {
+	node2dmlChans := make(map[int64][]string)
+	node2QNode := make(map[int64]types.QueryNode)
+
+	for dmlChan, leaders := range shard2leaders {
+		ch := dmlChan
+		leaders := leaders
+		if err := policy(ctx, mgr, func(nodeId int64, qn types.QueryNode) error {
+			node2QNode[nodeId] = qn
+			if _, ok := node2dmlChans[nodeId]; !ok {
+				node2dmlChans[nodeId] = make([]string, 0)
+			}
+			node2dmlChans[nodeId] = append(node2dmlChans[nodeId], ch)
+			return nil
+		}, leaders); err != nil {
+			return nil, nil, err
+		}
+	}
+
+	log.Debug("group shard leaders with same query node", zap.Any("node2dmlChannels", node2dmlChans))
+
+	return node2dmlChans, node2QNode, nil
+}

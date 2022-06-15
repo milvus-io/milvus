@@ -89,6 +89,10 @@ func (s *searchTask) searchOnStreaming() error {
 		return errors.New("search context timeout")
 	}
 
+	if len(s.req.GetDmlChannels()) <= 0 {
+		return errors.New("invalid nil dml channels")
+	}
+
 	// check if collection has been released, check streaming since it's released first
 	_, err := s.QS.metaReplica.getCollectionByID(s.CollectionID)
 	if err != nil {
@@ -109,7 +113,7 @@ func (s *searchTask) searchOnStreaming() error {
 	defer searchReq.delete()
 
 	// TODO add context
-	partResults, _, _, sErr := searchStreaming(s.QS.metaReplica, searchReq, s.CollectionID, s.iReq.GetPartitionIDs(), s.req.GetDmlChannel())
+	partResults, _, _, sErr := searchStreaming(s.QS.metaReplica, searchReq, s.CollectionID, s.iReq.GetPartitionIDs(), s.req.GetDmlChannels()[0])
 	if sErr != nil {
 		log.Debug("failed to search streaming data", zap.Int64("collectionID", s.CollectionID), zap.Error(sErr))
 		return sErr
@@ -373,7 +377,13 @@ func (s *searchTask) combinePlaceHolderGroups() {
 	}
 }
 
-func newSearchTask(ctx context.Context, src *querypb.SearchRequest) (*searchTask, error) {
+func newSearchTask(ctx context.Context, src *querypb.SearchRequest, dmlChannel string) (*searchTask, error) {
+	copiedMsg := proto.Clone(src)
+	copiedReq, ok := copiedMsg.(*querypb.SearchRequest)
+	if !ok {
+		return nil, fmt.Errorf("failed to clone message")
+	}
+	copiedReq.DmlChannels = []string{dmlChannel}
 	target := &searchTask{
 		baseReadTask: baseReadTask{
 			baseTask: baseTask{
@@ -390,8 +400,8 @@ func newSearchTask(ctx context.Context, src *querypb.SearchRequest) (*searchTask
 			tr:                 timerecord.NewTimeRecorder("searchTask"),
 			DataScope:          src.GetScope(),
 		},
-		iReq:             src.Req,
-		req:              src,
+		iReq:             copiedReq.Req,
+		req:              copiedReq,
 		TopK:             src.Req.GetTopk(),
 		OrigTopKs:        []int64{src.Req.GetTopk()},
 		NQ:               src.Req.GetNq(),
