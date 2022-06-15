@@ -39,13 +39,11 @@ type TaskCondition struct {
 
 // WaitToFinish waits until the TaskCondition is notified or context done or canceled
 func (tc *TaskCondition) WaitToFinish() error {
-	for {
-		select {
-		case <-tc.ctx.Done():
-			return errors.New("proxy TaskCondition context Done")
-		case err := <-tc.done:
-			return err
-		}
+	select {
+	case <-tc.ctx.Done():
+		return errors.New("proxy TaskCondition context Done")
+	case err := <-tc.done:
+		return err
 	}
 }
 
