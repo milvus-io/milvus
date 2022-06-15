@@ -811,25 +811,24 @@ func (m *meta) CompleteMergeCompaction(compactionLogs []*datapb.CompactionSegmen
 		compactionFrom = append(compactionFrom, s.GetID())
 	}
 
-	segment := &SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{
-			ID:                  result.GetSegmentID(),
-			CollectionID:        segments[0].CollectionID,
-			PartitionID:         segments[0].PartitionID,
-			InsertChannel:       segments[0].InsertChannel,
-			NumOfRows:           result.NumOfRows,
-			State:               commonpb.SegmentState_Flushing,
-			MaxRowNum:           segments[0].MaxRowNum,
-			Binlogs:             result.GetInsertLogs(),
-			Statslogs:           result.GetField2StatslogPaths(),
-			Deltalogs:           deltalogs,
-			StartPosition:       startPosition,
-			DmlPosition:         dmlPosition,
-			CreatedByCompaction: true,
-			CompactionFrom:      compactionFrom,
-		},
-		isCompacting: false,
+	segmentInfo := &datapb.SegmentInfo{
+		ID:                  result.GetSegmentID(),
+		CollectionID:        segments[0].CollectionID,
+		PartitionID:         segments[0].PartitionID,
+		InsertChannel:       segments[0].InsertChannel,
+		NumOfRows:           result.NumOfRows,
+		State:               commonpb.SegmentState_Flushing,
+		MaxRowNum:           segments[0].MaxRowNum,
+		Binlogs:             result.GetInsertLogs(),
+		Statslogs:           result.GetField2StatslogPaths(),
+		Deltalogs:           deltalogs,
+		StartPosition:       startPosition,
+		DmlPosition:         dmlPosition,
+		CreatedByCompaction: true,
+		CompactionFrom:      compactionFrom,
 	}
+
+	segment := NewSegmentInfo(segmentInfo)
 
 	data := make(map[string]string)
 

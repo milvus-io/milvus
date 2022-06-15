@@ -459,6 +459,7 @@ func Test_meta_CompleteMergeCompaction(t *testing.T) {
 					assert.EqualValues(t, tt.args.result.GetInsertLogs(), segment.GetBinlogs())
 					assert.EqualValues(t, tt.args.result.GetField2StatslogPaths(), segment.GetStatslogs())
 					assert.EqualValues(t, tt.args.result.GetDeltalogs(), segment.GetDeltalogs())
+					assert.NotZero(t, segment.lastFlushTime)
 				}
 			}
 		})
