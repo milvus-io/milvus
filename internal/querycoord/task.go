@@ -2029,11 +2029,10 @@ func (lbt *loadBalanceTask) processNodeDownLoadBalance(ctx context.Context) erro
 				}
 			}
 
-			tasks, err := assignInternalTask(ctx, lbt, lbt.meta, lbt.cluster, loadSegmentReqs, watchDmChannelReqs, true, lbt.SourceNodeIDs, lbt.DstNodeIDs, replica.GetReplicaID(), lbt.broker)
+			tasks, err := assignInternalTask(ctx, lbt, lbt.meta, lbt.cluster, loadSegmentReqs, watchDmChannelReqs, false, lbt.SourceNodeIDs, lbt.DstNodeIDs, replica.GetReplicaID(), lbt.broker)
 			if err != nil {
 				log.Error("loadBalanceTask: assign child task failed", zap.Int64("sourceNodeID", nodeID))
 				lbt.setResultInfo(err)
-				panic(err)
 			}
 			internalTasks = append(internalTasks, tasks...)
 		}
@@ -2251,10 +2250,14 @@ func (lbt *loadBalanceTask) globalPostExecute(ctx context.Context) error {
 	if len(lbt.getChildTask()) > 0 {
 		replicas := make(map[UniqueID]*milvuspb.ReplicaInfo)
 		segments := make(map[UniqueID]*querypb.SegmentInfo)
+		dmChannels := make(map[string]*querypb.DmChannelWatchInfo)
 
 		for _, id := range lbt.SourceNodeIDs {
 			for _, segment := range lbt.meta.getSegmentInfosByNode(id) {
 				segments[segment.SegmentID] = segment
+			}
+			for _, dmChannel := range lbt.meta.getDmChannelInfosByNodeID(id) {
+				dmChannels[dmChannel.DmChannel] = dmChannel
 			}
 
 			nodeReplicas, err := lbt.meta.getReplicasByNodeID(id)
@@ -2306,30 +2309,14 @@ func (lbt *loadBalanceTask) globalPostExecute(ctx context.Context) error {
 					return nil
 				})
 			}
-
-			// if loadBalanceTask execute failed after query node down, the lbt.getResultInfo().ErrorCode will be set to commonpb.ErrorCode_UnexpectedError
-			// then the queryCoord will panic, and the nodeInfo should not be removed immediately
-			// after queryCoord recovery, the balanceTask will redo
-			for _, offlineNodeID := range lbt.SourceNodeIDs {
-				err := lbt.cluster.RemoveNodeInfo(offlineNodeID)
-				if err != nil {
-					log.Error("loadBalanceTask: occur error when removing node info from cluster",
-						zap.Int64("nodeID", offlineNodeID),
-						zap.Error(err))
-					lbt.setResultInfo(err)
-					return err
-				}
-			}
 		}
 
+		// Remove offline nodes from segment
 		for _, segment := range segments {
 			segment := segment
 			wg.Go(func() error {
 				segment.NodeID = -1
 				segment.NodeIds = removeFromSlice(segment.NodeIds, lbt.SourceNodeIDs...)
-				if len(segment.NodeIds) > 0 {
-					segment.NodeID = segment.NodeIds[0]
-				}
 
 				err := lbt.meta.saveSegmentInfo(segment)
 				if err != nil {
@@ -2344,6 +2331,30 @@ func (lbt *loadBalanceTask) globalPostExecute(ctx context.Context) error {
 					zap.Int64("taskID", lbt.getTaskID()),
 					zap.Int64("segmentID", segment.GetSegmentID()),
 					zap.Int64s("nodeIds", segment.GetNodeIds()))
+
+				return nil
+			})
+		}
+
+		// Remove offline nodes from dmChannels
+		for _, dmChannel := range dmChannels {
+			dmChannel := dmChannel
+			wg.Go(func() error {
+				dmChannel.NodeIds = removeFromSlice(dmChannel.NodeIds, lbt.SourceNodeIDs...)
+
+				err := lbt.meta.setDmChannelInfos(dmChannel)
+				if err != nil {
+					log.Error("failed to remove offline nodes from dmChannel info",
+						zap.String("dmChannel", dmChannel.DmChannel),
+						zap.Error(err))
+
+					return err
+				}
+
+				log.Info("remove offline nodes from dmChannel",
+					zap.Int64("taskID", lbt.getTaskID()),
+					zap.String("dmChannel", dmChannel.DmChannel),
+					zap.Int64s("nodeIds", dmChannel.NodeIds))
 
 				return nil
 			})
@@ -2394,6 +2405,22 @@ func (lbt *loadBalanceTask) globalPostExecute(ctx context.Context) error {
 		err = syncReplicaSegments(ctx, lbt.cluster, lbt.getChildTask())
 		if err != nil {
 			return err
+		}
+	}
+
+	// if loadBalanceTask execute failed after query node down, the lbt.getResultInfo().ErrorCode will be set to commonpb.ErrorCode_UnexpectedError
+	// then the queryCoord will panic, and the nodeInfo should not be removed immediately
+	// after queryCoord recovery, the balanceTask will redo
+	if lbt.BalanceReason == querypb.TriggerCondition_NodeDown {
+		for _, offlineNodeID := range lbt.SourceNodeIDs {
+			err := lbt.cluster.RemoveNodeInfo(offlineNodeID)
+			if err != nil {
+				log.Error("loadBalanceTask: occur error when removing node info from cluster",
+					zap.Int64("nodeID", offlineNodeID),
+					zap.Error(err))
+				lbt.setResultInfo(err)
+				return err
+			}
 		}
 	}
 

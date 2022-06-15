@@ -387,6 +387,7 @@ func (qc *QueryCoord) allocateNode(nodeID int64) error {
 	}
 	return nil
 }
+
 func (qc *QueryCoord) getUnallocatedNodes() []int64 {
 	onlines := qc.cluster.OnlineNodeIDs()
 	var ret []int64

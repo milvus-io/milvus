@@ -660,7 +660,7 @@ func TestSetNodeState(t *testing.T) {
 		NodeIDLoaded: node.queryNodeID,
 		NodeIds:      []int64{node.queryNodeID},
 	}
-	err = meta.setDmChannelInfos([]*querypb.DmChannelWatchInfo{dmChannelWatchInfo})
+	err = meta.setDmChannelInfos(dmChannelWatchInfo)
 	assert.Nil(t, err)
 	deltaChannelInfo := &datapb.VchannelInfo{
 		CollectionID: defaultCollectionID,

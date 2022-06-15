@@ -235,7 +235,7 @@ func TestMetaFunc(t *testing.T) {
 				NodeIds:      []int64{nodeID},
 			})
 		}
-		err = meta.setDmChannelInfos(dmChannelWatchInfos)
+		err = meta.setDmChannelInfos(dmChannelWatchInfos...)
 		assert.Nil(t, err)
 	})
 

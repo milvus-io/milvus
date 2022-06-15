@@ -79,8 +79,9 @@ type Meta interface {
 
 	getPartitionStatesByID(collectionID UniqueID, partitionID UniqueID) (*querypb.PartitionStates, error)
 
+	getDmChannel(dmChannelName string) (*querypb.DmChannelWatchInfo, bool)
 	getDmChannelInfosByNodeID(nodeID int64) []*querypb.DmChannelWatchInfo
-	setDmChannelInfos(channelInfos []*querypb.DmChannelWatchInfo) error
+	setDmChannelInfos(channelInfos ...*querypb.DmChannelWatchInfo) error
 	getDmChannelNamesByCollectionID(CollectionID UniqueID) []string
 
 	getDeltaChannelsByCollectionID(collectionID UniqueID) ([]*datapb.VchannelInfo, error)
@@ -849,6 +850,14 @@ func (m *MetaReplica) getPartitionStatesByID(collectionID UniqueID, partitionID 
 	return nil, errors.New("getPartitionStateByID: can't find collectionID in collectionInfo")
 }
 
+func (m *MetaReplica) getDmChannel(dmChannelName string) (*querypb.DmChannelWatchInfo, bool) {
+	m.dmChannelMu.RLock()
+	defer m.dmChannelMu.RUnlock()
+
+	dmc, ok := m.dmChannelInfos[dmChannelName]
+	return dmc, ok
+}
+
 func (m *MetaReplica) getDmChannelInfosByNodeID(nodeID int64) []*querypb.DmChannelWatchInfo {
 	m.dmChannelMu.RLock()
 	defer m.dmChannelMu.RUnlock()
@@ -876,15 +885,9 @@ func (m *MetaReplica) getDmChannelNamesByCollectionID(CollectionID UniqueID) []s
 	return dmChannelNames
 }
 
-func (m *MetaReplica) setDmChannelInfos(dmChannelWatchInfos []*querypb.DmChannelWatchInfo) error {
+func (m *MetaReplica) setDmChannelInfos(dmChannelWatchInfos ...*querypb.DmChannelWatchInfo) error {
 	m.dmChannelMu.Lock()
 	defer m.dmChannelMu.Unlock()
-
-	for _, channelInfo := range dmChannelWatchInfos {
-		if old, ok := m.dmChannelInfos[channelInfo.DmChannel]; ok {
-			channelInfo.NodeIds = append(channelInfo.NodeIds, old.NodeIds...)
-		}
-	}
 
 	err := saveDmChannelWatchInfos(dmChannelWatchInfos, m.getKvClient())
 	if err != nil {
