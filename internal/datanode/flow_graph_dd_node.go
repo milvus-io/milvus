@@ -62,10 +62,10 @@ type ddNode struct {
 	ctx          context.Context
 	collectionID UniqueID
 
-	segID2SegInfo   sync.Map // segment ID to *SegmentInfo
-	flushedSegments []*datapb.SegmentInfo
-	droppedSegments []*datapb.SegmentInfo
-	vchannelName    string
+	segID2SegInfo     sync.Map // segment ID to *SegmentInfo
+	flushedSegmentIDs []int64
+	droppedSegmentIDs []int64
+	vchannelName      string
 
 	deltaMsgStream     msgstream.MsgStream
 	dropMode           atomic.Value
@@ -209,8 +209,8 @@ func (ddn *ddNode) filterFlushedSegmentInsertMessages(msg *msgstream.InsertMsg) 
 }
 
 func (ddn *ddNode) isFlushed(segmentID UniqueID) bool {
-	for _, s := range ddn.flushedSegments {
-		if s.ID == segmentID {
+	for _, s := range ddn.flushedSegmentIDs {
+		if s == segmentID {
 			return true
 		}
 	}
@@ -218,8 +218,8 @@ func (ddn *ddNode) isFlushed(segmentID UniqueID) bool {
 }
 
 func (ddn *ddNode) isDropped(segID UniqueID) bool {
-	for _, droppedSegment := range ddn.droppedSegments {
-		if droppedSegment.GetID() == segID {
+	for _, droppedSegmentID := range ddn.droppedSegmentIDs {
+		if droppedSegmentID == segID {
 			return true
 		}
 	}
@@ -277,16 +277,16 @@ func (ddn *ddNode) Close() {
 }
 
 func newDDNode(ctx context.Context, collID UniqueID, vchanInfo *datapb.VchannelInfo,
-	msFactory msgstream.Factory, compactor *compactionExecutor) *ddNode {
+	unflushedSegments []*datapb.SegmentInfo, msFactory msgstream.Factory, compactor *compactionExecutor) *ddNode {
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(Params.DataNodeCfg.FlowGraphMaxQueueLength)
 	baseNode.SetMaxParallelism(Params.DataNodeCfg.FlowGraphMaxParallelism)
 
-	fs := make([]*datapb.SegmentInfo, 0, len(vchanInfo.GetFlushedSegments()))
-	fs = append(fs, vchanInfo.GetFlushedSegments()...)
+	fs := make([]int64, 0, len(vchanInfo.GetFlushedSegmentIds()))
+	fs = append(fs, vchanInfo.GetFlushedSegmentIds()...)
 	log.Info("ddNode add flushed segment",
 		zap.Int64("collectionID", vchanInfo.GetCollectionID()),
-		zap.Int("No. Segment", len(vchanInfo.GetFlushedSegments())),
+		zap.Int("No. Segment", len(vchanInfo.FlushedSegmentIds)),
 	)
 
 	deltaStream, err := msFactory.NewMsgStream(ctx)
@@ -316,8 +316,8 @@ func newDDNode(ctx context.Context, collID UniqueID, vchanInfo *datapb.VchannelI
 		ctx:                ctx,
 		BaseNode:           baseNode,
 		collectionID:       collID,
-		flushedSegments:    fs,
-		droppedSegments:    vchanInfo.GetDroppedSegments(),
+		flushedSegmentIDs:  fs,
+		droppedSegmentIDs:  vchanInfo.GetDroppedSegmentIds(),
 		vchannelName:       vchanInfo.ChannelName,
 		deltaMsgStream:     deltaMsgStream,
 		compactionExecutor: compactor,
@@ -325,13 +325,13 @@ func newDDNode(ctx context.Context, collID UniqueID, vchanInfo *datapb.VchannelI
 
 	dd.dropMode.Store(false)
 
-	for _, us := range vchanInfo.GetUnflushedSegments() {
+	for _, us := range unflushedSegments {
 		dd.segID2SegInfo.Store(us.GetID(), us)
 	}
 
 	log.Info("ddNode add unflushed segment",
 		zap.Int64("collectionID", collID),
-		zap.Int("No. Segment", len(vchanInfo.GetUnflushedSegments())),
+		zap.Int("No. Segment", len(vchanInfo.GetUnflushedSegmentIds())),
 	)
 
 	return dd

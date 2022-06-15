@@ -1456,3 +1456,25 @@ func Test_LoadSegment(t *testing.T) {
 	err = removeAllSession()
 	assert.Nil(t, err)
 }
+
+func TestGenerateVChannelSegmentInfos(t *testing.T) {
+	dataCoord := &dataCoordMock{}
+	meta := &MetaReplica{
+		dataCoord: dataCoord,
+	}
+
+	deltaChannel := &datapb.VchannelInfo{
+		CollectionID:        defaultCollectionID,
+		ChannelName:         "delta-channel1",
+		UnflushedSegmentIds: []int64{1},
+	}
+
+	segmentDict, err := generateVChannelSegmentInfos(meta, deltaChannel)
+	assert.Nil(t, err)
+	assert.Equal(t, 1, len(segmentDict))
+
+	dataCoord.returnError = true
+	segmentDict2, err := generateVChannelSegmentInfos(meta, deltaChannel)
+	assert.Error(t, err)
+	assert.Empty(t, segmentDict2)
+}

@@ -64,12 +64,20 @@ func getVchanInfo(info *testInfo) *datapb.VchannelInfo {
 		ufs = []*datapb.SegmentInfo{}
 	}
 
+	var ufsIds []int64
+	var fsIds []int64
+	for _, segmentInfo := range ufs {
+		ufsIds = append(ufsIds, segmentInfo.ID)
+	}
+	for _, segmentInfo := range fs {
+		fsIds = append(fsIds, segmentInfo.ID)
+	}
 	vi := &datapb.VchannelInfo{
-		CollectionID:      info.collID,
-		ChannelName:       info.chanName,
-		SeekPosition:      &internalpb.MsgPosition{},
-		UnflushedSegments: ufs,
-		FlushedSegments:   fs,
+		CollectionID:        info.collID,
+		ChannelName:         info.chanName,
+		SeekPosition:        &internalpb.MsgPosition{},
+		UnflushedSegmentIds: ufsIds,
+		FlushedSegmentIds:   fsIds,
 	}
 	return vi
 }
@@ -221,12 +229,19 @@ func TestDataSyncService_Start(t *testing.T) {
 		NumOfRows:     0,
 		DmlPosition:   &internalpb.MsgPosition{},
 	}}
-
+	var ufsIds []int64
+	var fsIds []int64
+	for _, segmentInfo := range ufs {
+		ufsIds = append(ufsIds, segmentInfo.ID)
+	}
+	for _, segmentInfo := range fs {
+		fsIds = append(fsIds, segmentInfo.ID)
+	}
 	vchan := &datapb.VchannelInfo{
-		CollectionID:      collMeta.ID,
-		ChannelName:       insertChannelName,
-		UnflushedSegments: ufs,
-		FlushedSegments:   fs,
+		CollectionID:        collMeta.ID,
+		ChannelName:         insertChannelName,
+		UnflushedSegmentIds: ufsIds,
+		FlushedSegmentIds:   fsIds,
 	}
 
 	signalCh := make(chan string, 100)
@@ -366,4 +381,25 @@ func TestBytesReader(t *testing.T) {
 	err = binary.Read(rawDataReader, common.Endian, &dataInt8)
 	assert.Nil(t, err)
 	assert.Equal(t, int8(100), dataInt8)
+}
+
+func TestGetSegmentInfos(t *testing.T) {
+	dataCoord := &DataCoordFactory{}
+	dsService := &dataSyncService{
+		dataCoord: dataCoord,
+	}
+	segmentInfos, err := dsService.getSegmentInfos([]int64{1})
+	assert.Nil(t, err)
+	assert.Equal(t, 1, len(segmentInfos))
+
+	dataCoord.GetSegmentInfosError = true
+	segmentInfos2, err := dsService.getSegmentInfos([]int64{1})
+	assert.Error(t, err)
+	assert.Empty(t, segmentInfos2)
+
+	dataCoord.GetSegmentInfosError = false
+	dataCoord.GetSegmentInfosNotSuccess = true
+	segmentInfos3, err := dsService.getSegmentInfos([]int64{1})
+	assert.Error(t, err)
+	assert.Empty(t, segmentInfos3)
 }

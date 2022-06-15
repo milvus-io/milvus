@@ -201,9 +201,12 @@ message VchannelInfo {
   int64 collectionID = 1;
   string channelName = 2;
   internal.MsgPosition seek_position = 3;
-  repeated SegmentInfo unflushedSegments = 4;
-  repeated SegmentInfo flushedSegments = 5;
-  repeated SegmentInfo dropped_segments = 6;
+  repeated SegmentInfo unflushedSegments = 4; // deprecated, keep it for compatibility
+  repeated SegmentInfo flushedSegments = 5; // deprecated, keep it for compatibility
+  repeated SegmentInfo dropped_segments = 6; // deprecated, keep it for compatibility
+  repeated int64 unflushedSegmentIds = 7;
+  repeated int64 flushedSegmentIds = 8;
+  repeated int64 dropped_segmentIds = 9;
 }
 
 message WatchDmChannelsRequest {

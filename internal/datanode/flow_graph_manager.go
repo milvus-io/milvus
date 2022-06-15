@@ -38,8 +38,8 @@ func newFlowgraphManager() *flowgraphManager {
 func (fm *flowgraphManager) addAndStart(dn *DataNode, vchan *datapb.VchannelInfo) error {
 	log.Info("received Vchannel Info",
 		zap.String("vChannelName", vchan.GetChannelName()),
-		zap.Int("Unflushed Segment Number", len(vchan.GetUnflushedSegments())),
-		zap.Int("Flushed Segment Number", len(vchan.GetFlushedSegments())),
+		zap.Int("Unflushed Segment Number", len(vchan.GetUnflushedSegmentIds())),
+		zap.Int("Flushed Segment Number", len(vchan.GetFlushedSegmentIds())),
 	)
 
 	if _, ok := fm.flowgraphs.Load(vchan.GetChannelName()); ok {

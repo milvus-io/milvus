@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
@@ -104,6 +105,8 @@ type Meta interface {
 	getReplicasByNodeID(nodeID int64) ([]*milvuspb.ReplicaInfo, error)
 	applyReplicaBalancePlan(p *balancePlan) error
 	updateShardLeader(replicaID UniqueID, dmChannel string, leaderID UniqueID, leaderAddr string) error
+
+	getDataSegmentInfosByIDs(segmentIds []int64) ([]*datapb.SegmentInfo, error)
 }
 
 // MetaReplica records the current load information on all querynodes
@@ -129,9 +132,11 @@ type MetaReplica struct {
 	segmentsInfo *segmentsInfo
 	//partitionStates map[UniqueID]*querypb.PartitionStates
 	replicas *ReplicaInfos
+
+	dataCoord types.DataCoord
 }
 
-func newMeta(ctx context.Context, kv kv.MetaKv, factory dependency.Factory, idAllocator func() (UniqueID, error)) (Meta, error) {
+func newMeta(ctx context.Context, kv kv.MetaKv, factory dependency.Factory, idAllocator func() (UniqueID, error), dataCoord types.DataCoord) (Meta, error) {
 	childCtx, cancel := context.WithCancel(ctx)
 	collectionInfos := make(map[UniqueID]*querypb.CollectionInfo)
 	queryChannelInfos := make(map[UniqueID]*querypb.QueryChannelInfo)
@@ -151,6 +156,7 @@ func newMeta(ctx context.Context, kv kv.MetaKv, factory dependency.Factory, idAl
 
 		segmentsInfo: newSegmentsInfo(kv),
 		replicas:     NewReplicaInfos(),
+		dataCoord:    dataCoord,
 	}
 	m.setKvClient(kv)
 
@@ -1323,4 +1329,29 @@ func getShardNodes(collectionID UniqueID, meta Meta) map[string]map[UniqueID]str
 	}
 
 	return shardNodes
+}
+
+// getDataSegmentInfosByIDs return the SegmentInfo details according to the given ids through RPC to datacoord
+func (m *MetaReplica) getDataSegmentInfosByIDs(segmentIds []int64) ([]*datapb.SegmentInfo, error) {
+	var segmentInfos []*datapb.SegmentInfo
+	infoResp, err := m.dataCoord.GetSegmentInfo(m.ctx, &datapb.GetSegmentInfoRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_SegmentInfo,
+			MsgID:     0,
+			Timestamp: 0,
+			SourceID:  Params.ProxyCfg.GetNodeID(),
+		},
+		SegmentIDs: segmentIds,
+	})
+	if err != nil {
+		log.Error("Fail to get datapb.SegmentInfo by ids from datacoord", zap.Error(err))
+		return nil, err
+	}
+	if infoResp.GetStatus().ErrorCode != commonpb.ErrorCode_Success {
+		err = errors.New(infoResp.GetStatus().Reason)
+		log.Error("Fail to get datapb.SegmentInfo by ids from datacoord", zap.Error(err))
+		return nil, err
+	}
+	segmentInfos = infoResp.Infos
+	return segmentInfos, nil
 }

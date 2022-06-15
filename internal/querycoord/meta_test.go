@@ -75,7 +75,7 @@ func TestReplica_Release(t *testing.T) {
 		newID := atomic.AddInt64(&id, 1)
 		return newID, nil
 	}
-	meta, err := newMeta(context.Background(), etcdKV, nil, idAllocator)
+	meta, err := newMeta(context.Background(), etcdKV, nil, idAllocator, nil)
 	assert.Nil(t, err)
 	err = meta.addCollection(1, querypb.LoadType_LoadCollection, nil)
 	require.NoError(t, err)
@@ -423,4 +423,26 @@ func TestCreateQueryChannel(t *testing.T) {
 			assert.Equal(t, info.GetQueryResultChannel(), test.outResultChannel)
 		})
 	}
+}
+
+func TestGetDataSegmentInfosByIDs(t *testing.T) {
+	dataCoord := &dataCoordMock{}
+	meta := &MetaReplica{
+		dataCoord: dataCoord,
+	}
+
+	segmentInfos, err := meta.getDataSegmentInfosByIDs([]int64{1})
+	assert.Nil(t, err)
+	assert.Equal(t, 1, len(segmentInfos))
+
+	dataCoord.returnError = true
+	segmentInfos2, err := meta.getDataSegmentInfosByIDs([]int64{1})
+	assert.Error(t, err)
+	assert.Empty(t, segmentInfos2)
+
+	dataCoord.returnError = false
+	dataCoord.returnGrpcError = true
+	segmentInfos3, err := meta.getDataSegmentInfosByIDs([]int64{1})
+	assert.Error(t, err)
+	assert.Empty(t, segmentInfos3)
 }

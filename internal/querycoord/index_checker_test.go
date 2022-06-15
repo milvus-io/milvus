@@ -47,7 +47,7 @@ func TestReloadFromKV(t *testing.T) {
 		newID := atomic.AddInt64(&id, 1)
 		return newID, nil
 	}
-	meta, err := newMeta(baseCtx, kv, nil, idAllocator)
+	meta, err := newMeta(baseCtx, kv, nil, idAllocator, nil)
 	assert.Nil(t, err)
 
 	segmentInfo := &querypb.SegmentInfo{
@@ -109,7 +109,7 @@ func TestCheckIndexLoop(t *testing.T) {
 		return newID, nil
 	}
 
-	meta, err := newMeta(ctx, kv, nil, idAllocator)
+	meta, err := newMeta(ctx, kv, nil, idAllocator, nil)
 	assert.Nil(t, err)
 
 	rootCoord := newRootCoordMock(ctx)
@@ -184,7 +184,7 @@ func TestHandoffNotExistSegment(t *testing.T) {
 		newID := atomic.AddInt64(&id, 1)
 		return newID, nil
 	}
-	meta, err := newMeta(ctx, kv, nil, idAllocator)
+	meta, err := newMeta(ctx, kv, nil, idAllocator, nil)
 	assert.Nil(t, err)
 
 	rootCoord := newRootCoordMock(ctx)
@@ -243,7 +243,7 @@ func TestProcessHandoffAfterIndexDone(t *testing.T) {
 		newID := atomic.AddInt64(&id, 1)
 		return newID, nil
 	}
-	meta, err := newMeta(ctx, kv, nil, idAllocator)
+	meta, err := newMeta(ctx, kv, nil, idAllocator, nil)
 	assert.Nil(t, err)
 	taskScheduler := &TaskScheduler{
 		ctx:              ctx,
