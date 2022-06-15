@@ -23,6 +23,7 @@ import (
 	"sync"
 
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
@@ -418,6 +419,58 @@ func (node *QueryNode) isHealthy() bool {
 
 // Search performs replica search tasks.
 func (node *QueryNode) Search(ctx context.Context, req *queryPb.SearchRequest) (*internalpb.SearchResults, error) {
+	log.Debug("Received SearchRequest",
+		zap.Int64("msgID", req.GetReq().GetBase().GetMsgID()),
+		zap.Strings("vChannels", req.GetDmlChannels()),
+		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
+		zap.Uint64("guaranteeTimestamp", req.GetReq().GetGuaranteeTimestamp()),
+		zap.Uint64("timeTravel", req.GetReq().GetTravelTimestamp()))
+
+	mu := &sync.Mutex{}
+	failRet := &internalpb.SearchResults{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+	}
+	runningGp, runningGpCtx := errgroup.WithContext(ctx)
+	toReduceResults := make([]*internalpb.SearchResults, 0)
+	for _, ch := range req.GetDmlChannels() {
+		dmlChannel := ch
+		runningGp.Go(func() error {
+			ret, err := node.searchWithDmlChannel(runningGpCtx, req, dmlChannel)
+			if err != nil {
+				return err
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if ret.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+				failRet.Status.Reason = ret.Status.Reason
+				failRet.Status.ErrorCode = ret.Status.ErrorCode
+			} else {
+				toReduceResults = append(toReduceResults, ret)
+			}
+			return nil
+		})
+	}
+	if err := runningGp.Wait(); err != nil {
+		failRet.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		failRet.Status.Reason = err.Error()
+		return failRet, nil
+	}
+	if failRet.Status.ErrorCode != commonpb.ErrorCode_Success {
+		return failRet, nil
+	}
+
+	ret, err := reduceSearchResults(toReduceResults, req.Req.GetNq(), req.Req.GetTopk(), req.Req.GetMetricType())
+	if err != nil {
+		failRet.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		failRet.Status.Reason = err.Error()
+		return failRet, nil
+	}
+	return ret, nil
+}
+
+func (node *QueryNode) searchWithDmlChannel(ctx context.Context, req *queryPb.SearchRequest, dmlChannel string) (*internalpb.SearchResults, error) {
 	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.SearchLabel, metrics.TotalLabel).Inc()
 	failRet := &internalpb.SearchResults{
 		Status: &commonpb.Status{
@@ -439,7 +492,7 @@ func (node *QueryNode) Search(ctx context.Context, req *queryPb.SearchRequest) (
 	log.Debug("Received SearchRequest",
 		zap.Int64("msgID", msgID),
 		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
-		zap.String("vChannel", req.GetDmlChannel()),
+		zap.String("vChannel", dmlChannel),
 		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
 		zap.Uint64("guaranteeTimestamp", req.GetReq().GetGuaranteeTimestamp()),
 		zap.Uint64("timeTravel", req.GetReq().GetTravelTimestamp()))
@@ -449,11 +502,11 @@ func (node *QueryNode) Search(ctx context.Context, req *queryPb.SearchRequest) (
 		return failRet, nil
 	}
 
-	qs, err := node.queryShardService.getQueryShard(req.GetDmlChannel())
+	qs, err := node.queryShardService.getQueryShard(dmlChannel)
 	if err != nil {
 		log.Warn("Search failed, failed to get query shard",
 			zap.Int64("msgID", msgID),
-			zap.String("dml channel", req.GetDmlChannel()),
+			zap.String("dml channel", dmlChannel),
 			zap.Error(err))
 		failRet.Status.ErrorCode = commonpb.ErrorCode_NotShardLeader
 		failRet.Status.Reason = err.Error()
@@ -461,10 +514,10 @@ func (node *QueryNode) Search(ctx context.Context, req *queryPb.SearchRequest) (
 	}
 
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("start do search, msgID = %d, fromSharedLeader = %t, vChannel = %s, segmentIDs = %v",
-		msgID, req.GetFromShardLeader(), req.GetDmlChannel(), req.GetSegmentIDs()))
+		msgID, req.GetFromShardLeader(), dmlChannel, req.GetSegmentIDs()))
 
 	if req.FromShardLeader {
-		historicalTask, err2 := newSearchTask(ctx, req)
+		historicalTask, err2 := newSearchTask(ctx, req, dmlChannel)
 		if err2 != nil {
 			failRet.Status.Reason = err2.Error()
 			return failRet, nil
@@ -484,7 +537,7 @@ func (node *QueryNode) Search(ctx context.Context, req *queryPb.SearchRequest) (
 		}
 
 		tr.Elapse(fmt.Sprintf("do search done, msgID = %d, fromSharedLeader = %t, vChannel = %s, segmentIDs = %v",
-			msgID, req.GetFromShardLeader(), req.GetDmlChannel(), req.GetSegmentIDs()))
+			msgID, req.GetFromShardLeader(), dmlChannel, req.GetSegmentIDs()))
 
 		failRet.Status.ErrorCode = commonpb.ErrorCode_Success
 		metrics.QueryNodeSQLatencyInQueue.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
@@ -498,9 +551,9 @@ func (node *QueryNode) Search(ctx context.Context, req *queryPb.SearchRequest) (
 	}
 
 	//from Proxy
-	cluster, ok := qs.clusterService.getShardCluster(req.GetDmlChannel())
+	cluster, ok := qs.clusterService.getShardCluster(dmlChannel)
 	if !ok {
-		failRet.Status.Reason = fmt.Sprintf("channel %s leader is not here", req.GetDmlChannel())
+		failRet.Status.Reason = fmt.Sprintf("channel %s leader is not here", dmlChannel)
 		return failRet, nil
 	}
 
@@ -537,9 +590,11 @@ func (node *QueryNode) Search(ctx context.Context, req *queryPb.SearchRequest) (
 		}()
 
 		defer wg.Done()
-		streamingTask, err2 := newSearchTask(searchCtx, req)
+		streamingTask, err2 := newSearchTask(searchCtx, req, dmlChannel)
+
 		if err2 != nil {
 			errStreaming = err2
+			return
 		}
 		streamingTask.QS = qs
 		streamingTask.DataScope = querypb.DataScope_Streaming
@@ -579,7 +634,7 @@ func (node *QueryNode) Search(ctx context.Context, req *queryPb.SearchRequest) (
 	}
 
 	tr.Elapse(fmt.Sprintf("start reduce search result, msgID = %d, fromSharedLeader = %t, vChannel = %s, segmentIDs = %v",
-		msgID, req.GetFromShardLeader(), req.GetDmlChannel(), req.GetSegmentIDs()))
+		msgID, req.GetFromShardLeader(), dmlChannel, req.GetSegmentIDs()))
 
 	results = append(results, streamingResult)
 	ret, err2 := reduceSearchResults(results, req.Req.GetNq(), req.Req.GetTopk(), req.Req.GetMetricType())
@@ -589,7 +644,7 @@ func (node *QueryNode) Search(ctx context.Context, req *queryPb.SearchRequest) (
 	}
 
 	tr.Elapse(fmt.Sprintf("do search done, msgID = %d, fromSharedLeader = %t, vChannel = %s, segmentIDs = %v",
-		msgID, req.GetFromShardLeader(), req.GetDmlChannel(), req.GetSegmentIDs()))
+		msgID, req.GetFromShardLeader(), dmlChannel, req.GetSegmentIDs()))
 
 	failRet.Status.ErrorCode = commonpb.ErrorCode_Success
 	latency := tr.ElapseSpan()
@@ -600,8 +655,7 @@ func (node *QueryNode) Search(ctx context.Context, req *queryPb.SearchRequest) (
 	return ret, nil
 }
 
-// Query performs replica query tasks.
-func (node *QueryNode) Query(ctx context.Context, req *queryPb.QueryRequest) (*internalpb.RetrieveResults, error) {
+func (node *QueryNode) queryWithDmlChannel(ctx context.Context, req *queryPb.QueryRequest, dmlChannel string) (*internalpb.RetrieveResults, error) {
 	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.QueryLabel, metrics.TotalLabel).Inc()
 	failRet := &internalpb.RetrieveResults{
 		Status: &commonpb.Status{
@@ -623,7 +677,7 @@ func (node *QueryNode) Query(ctx context.Context, req *queryPb.QueryRequest) (*i
 	log.Debug("Received QueryRequest",
 		zap.Int64("msgID", msgID),
 		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
-		zap.String("vChannel", req.GetDmlChannel()),
+		zap.String("vChannel", dmlChannel),
 		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
 		zap.Uint64("guaranteeTimestamp", req.GetReq().GetGuaranteeTimestamp()),
 		zap.Uint64("timeTravel", req.GetReq().GetTravelTimestamp()))
@@ -633,22 +687,26 @@ func (node *QueryNode) Query(ctx context.Context, req *queryPb.QueryRequest) (*i
 		return failRet, nil
 	}
 
-	qs, err := node.queryShardService.getQueryShard(req.GetDmlChannel())
+	qs, err := node.queryShardService.getQueryShard(dmlChannel)
 	if err != nil {
-		log.Warn("Query failed, failed to get query shard", zap.Int64("msgID", msgID), zap.String("dml channel", req.GetDmlChannel()), zap.Error(err))
+		log.Warn("Query failed, failed to get query shard", zap.Int64("msgID", msgID), zap.String("dml channel", dmlChannel), zap.Error(err))
 		failRet.Status.Reason = err.Error()
 		return failRet, nil
 	}
 
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("start do query, msgID = %d, fromSharedLeader = %t, vChannel = %s, segmentIDs = %v",
-		msgID, req.GetFromShardLeader(), req.GetDmlChannel(), req.GetSegmentIDs()))
+		msgID, req.GetFromShardLeader(), dmlChannel, req.GetSegmentIDs()))
 
 	if req.FromShardLeader {
 		// construct a queryTask
-		queryTask := newQueryTask(ctx, req)
+		queryTask, err2 := newQueryTask(ctx, req, dmlChannel)
+		if err2 != nil {
+			failRet.Status.Reason = err2.Error()
+			return failRet, nil
+		}
 		queryTask.QS = qs
 		queryTask.DataScope = querypb.DataScope_Historical
-		err2 := node.scheduler.AddReadTask(ctx, queryTask)
+		err2 = node.scheduler.AddReadTask(ctx, queryTask)
 		if err2 != nil {
 			failRet.Status.Reason = err2.Error()
 			return failRet, nil
@@ -661,7 +719,7 @@ func (node *QueryNode) Query(ctx context.Context, req *queryPb.QueryRequest) (*i
 		}
 
 		tr.Elapse(fmt.Sprintf("do query done, msgID = %d, fromSharedLeader = %t, vChannel = %s, segmentIDs = %v",
-			msgID, req.GetFromShardLeader(), req.GetDmlChannel(), req.GetSegmentIDs()))
+			msgID, req.GetFromShardLeader(), dmlChannel, req.GetSegmentIDs()))
 
 		failRet.Status.ErrorCode = commonpb.ErrorCode_Success
 		metrics.QueryNodeSQLatencyInQueue.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
@@ -674,9 +732,9 @@ func (node *QueryNode) Query(ctx context.Context, req *queryPb.QueryRequest) (*i
 		return queryTask.Ret, nil
 	}
 
-	cluster, ok := qs.clusterService.getShardCluster(req.GetDmlChannel())
+	cluster, ok := qs.clusterService.getShardCluster(dmlChannel)
 	if !ok {
-		failRet.Status.Reason = fmt.Sprintf("channel %s leader is not here", req.GetDmlChannel())
+		failRet.Status.Reason = fmt.Sprintf("channel %s leader is not here", dmlChannel)
 		return failRet, nil
 	}
 
@@ -706,22 +764,30 @@ func (node *QueryNode) Query(ctx context.Context, req *queryPb.QueryRequest) (*i
 	var errStreaming error
 	wg.Add(1)
 	go func() {
-		defer wg.Done()
-		streamingTask := newQueryTask(queryCtx, req)
-		streamingTask.DataScope = querypb.DataScope_Streaming
-		streamingTask.QS = qs
-		err2 := node.scheduler.AddReadTask(queryCtx, streamingTask)
 		defer func() {
-			errStreaming = err2
-			if err2 != nil {
+			if errStreaming != nil {
 				cancel()
 			}
 		}()
+		defer wg.Done()
+		streamingTask, err2 := newQueryTask(queryCtx, req, dmlChannel)
 		if err2 != nil {
+			errStreaming = err2
 			return
 		}
+
+		streamingTask.DataScope = querypb.DataScope_Streaming
+		streamingTask.QS = qs
+		err2 = node.scheduler.AddReadTask(queryCtx, streamingTask)
+
+		if err2 != nil {
+			errStreaming = err2
+			return
+		}
+
 		err2 = streamingTask.WaitToFinish()
 		if err2 != nil {
+			errStreaming = err2
 			return
 		}
 		metrics.QueryNodeSQLatencyInQueue.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
@@ -750,7 +816,7 @@ func (node *QueryNode) Query(ctx context.Context, req *queryPb.QueryRequest) (*i
 	}
 
 	tr.Elapse(fmt.Sprintf("start reduce query result, msgID = %d, fromSharedLeader = %t, vChannel = %s, segmentIDs = %v",
-		msgID, req.GetFromShardLeader(), req.GetDmlChannel(), req.GetSegmentIDs()))
+		msgID, req.GetFromShardLeader(), dmlChannel, req.GetSegmentIDs()))
 
 	results = append(results, streamingResult)
 	ret, err2 := mergeInternalRetrieveResults(results)
@@ -760,12 +826,62 @@ func (node *QueryNode) Query(ctx context.Context, req *queryPb.QueryRequest) (*i
 	}
 
 	tr.Elapse(fmt.Sprintf("do query done, msgID = %d, fromSharedLeader = %t, vChannel = %s, segmentIDs = %v",
-		msgID, req.GetFromShardLeader(), req.GetDmlChannel(), req.GetSegmentIDs()))
+		msgID, req.GetFromShardLeader(), dmlChannel, req.GetSegmentIDs()))
 
 	failRet.Status.ErrorCode = commonpb.ErrorCode_Success
 	latency := tr.ElapseSpan()
 	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.QueryLabel).Observe(float64(latency.Milliseconds()))
 	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.QueryLabel, metrics.SuccessLabel).Inc()
+	return ret, nil
+}
+
+// Query performs replica query tasks.
+func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
+	log.Debug("Received QueryRequest", zap.Int64("msgID", req.GetReq().GetBase().GetMsgID()),
+		zap.Strings("vChannels", req.GetDmlChannels()),
+		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
+		zap.Uint64("guaranteeTimestamp", req.Req.GetGuaranteeTimestamp()),
+		zap.Uint64("timeTravel", req.GetReq().GetTravelTimestamp()))
+	mu := &sync.Mutex{}
+	failRet := &internalpb.RetrieveResults{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+	}
+	runningGp, runningGpCtx := errgroup.WithContext(ctx)
+	toMergeResults := make([]*internalpb.RetrieveResults, 0)
+	for _, ch := range req.GetDmlChannels() {
+		dmlChan := ch
+		runningGp.Go(func() error {
+			ret, err := node.queryWithDmlChannel(runningGpCtx, req, dmlChan)
+			if err != nil {
+				return err
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if ret.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+				failRet.Status.Reason = ret.Status.Reason
+				failRet.Status.ErrorCode = ret.Status.ErrorCode
+			} else {
+				toMergeResults = append(toMergeResults, ret)
+			}
+			return nil
+		})
+	}
+	if err := runningGp.Wait(); err != nil {
+		failRet.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		failRet.Status.Reason = err.Error()
+		return failRet, nil
+	}
+	if failRet.Status.ErrorCode != commonpb.ErrorCode_Success {
+		return failRet, nil
+	}
+	ret, err := mergeInternalRetrieveResults(toMergeResults)
+	if err != nil {
+		failRet.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		failRet.Status.Reason = err.Error()
+		return failRet, nil
+	}
 	return ret, nil
 }
 

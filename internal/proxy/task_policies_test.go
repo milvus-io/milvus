@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"fmt"
+	"sort"
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -137,6 +138,38 @@ func TestRoundRobinPolicy(t *testing.T) {
 			require.NoError(t, err)
 		}
 	})
+}
+
+func TestGroupShardLeadersWithSameQueryNode(t *testing.T) {
+	var err error
+
+	Params.Init()
+	var (
+		ctx = context.TODO()
+	)
+
+	mgr := newShardClientMgr()
+
+	shard2leaders := map[string][]nodeInfo{
+		"c0": {{nodeID: 0, address: "fake"}, {nodeID: 1, address: "fake"}, {nodeID: 2, address: "fake"}},
+		"c1": {{nodeID: 1, address: "fake"}, {nodeID: 2, address: "fake"}, {nodeID: 3, address: "fake"}},
+		"c2": {{nodeID: 0, address: "fake"}, {nodeID: 2, address: "fake"}, {nodeID: 3, address: "fake"}},
+		"c3": {{nodeID: 1, address: "fake"}, {nodeID: 3, address: "fake"}, {nodeID: 4, address: "fake"}},
+	}
+	mgr.UpdateShardLeaders(nil, shard2leaders)
+
+	node2Dmls, node2QN, err := groupShardLeadersWithSameQueryNode(ctx, roundRobinPolicy, mgr, shard2leaders)
+	require.NoError(t, err)
+	for nodeID := range node2Dmls {
+		sort.Slice(node2Dmls[nodeID], func(i, j int) bool { return node2Dmls[nodeID][i] < node2Dmls[nodeID][j] })
+	}
+	assert.Equal(t, node2Dmls, map[int64][]string{0: {"c0", "c2"}, 1: {"c1", "c3"}})
+
+	cli0, err := mgr.GetClient(ctx, 0)
+	require.NoError(t, err)
+	cli1, err := mgr.GetClient(ctx, 1)
+	require.NoError(t, err)
+	assert.Equal(t, node2QN, map[int64]types.QueryNode{0: cli0, 1: cli1})
 }
 
 func mockQueryNodeCreator(ctx context.Context, address string) (types.QueryNode, error) {

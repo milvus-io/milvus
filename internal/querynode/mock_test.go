@@ -1447,7 +1447,7 @@ func genSearchPlanAndRequests(collection *Collection, indexType string, nq int64
 	iReq, _ := genSearchRequest(nq, indexType, collection.schema)
 	queryReq := &querypb.SearchRequest{
 		Req:             iReq,
-		DmlChannel:      defaultDMLChannel,
+		DmlChannels:     []string{defaultDMLChannel},
 		SegmentIDs:      []UniqueID{defaultSegmentID},
 		FromShardLeader: true,
 		Scope:           querypb.DataScope_Historical,

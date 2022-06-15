@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/errorutil"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
 type shardClusterState int32
@@ -700,9 +701,8 @@ func (sc *ShardCluster) Search(ctx context.Context, req *querypb.SearchRequest) 
 	if sc.state.Load() != int32(available) {
 		return nil, fmt.Errorf("ShardCluster for %s replicaID %d is no available", sc.vchannelName, sc.replicaID)
 	}
-
-	if sc.vchannelName != req.GetDmlChannel() {
-		return nil, fmt.Errorf("ShardCluster for %s does not match to request channel :%s", sc.vchannelName, req.GetDmlChannel())
+	if !funcutil.SliceContain(req.GetDmlChannels(), sc.vchannelName) {
+		return nil, fmt.Errorf("ShardCluster for %s does not match request channels :%v", sc.vchannelName, req.GetDmlChannels())
 	}
 
 	// get node allocation and maintains the inUse reference count
@@ -763,8 +763,8 @@ func (sc *ShardCluster) Query(ctx context.Context, req *querypb.QueryRequest) ([
 	}
 
 	// handles only the dml channel part, segment ids is dispatch by cluster itself
-	if sc.vchannelName != req.GetDmlChannel() {
-		return nil, fmt.Errorf("ShardCluster for %s does not match to request channel :%s", sc.vchannelName, req.GetDmlChannel())
+	if !funcutil.SliceContain(req.GetDmlChannels(), sc.vchannelName) {
+		return nil, fmt.Errorf("ShardCluster for %s does not match to request channels :%v", sc.vchannelName, req.GetDmlChannels())
 	}
 
 	// get node allocation and maintains the inUse reference count

@@ -454,7 +454,7 @@ func TestImpl_Search(t *testing.T) {
 	_, err = node.Search(ctx, &queryPb.SearchRequest{
 		Req:             req,
 		FromShardLeader: false,
-		DmlChannel:      defaultDMLChannel,
+		DmlChannels:     []string{defaultDMLChannel},
 	})
 	assert.NoError(t, err)
 }
@@ -476,7 +476,7 @@ func TestImpl_Query(t *testing.T) {
 	_, err = node.Query(ctx, &queryPb.QueryRequest{
 		Req:             req,
 		FromShardLeader: false,
-		DmlChannel:      defaultDMLChannel,
+		DmlChannels:     []string{defaultDMLChannel},
 	})
 	assert.NoError(t, err)
 }
