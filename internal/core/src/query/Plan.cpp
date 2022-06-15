@@ -38,7 +38,7 @@ ParsePlaceholderGroup(const Plan* plan, const std::string& blob) {
         AssertInfo(element.num_of_queries_, "must have queries");
         Assert(element.num_of_queries_ > 0);
         element.line_sizeof_ = info.values().Get(0).size();
-        Assert(field_meta.get_sizeof() == element.line_sizeof_);
+        AssertInfo(field_meta.get_sizeof() == element.line_sizeof_, "vector dimension mismatch");
         auto& target = element.blob_;
         target.reserve(element.line_sizeof_ * element.num_of_queries_);
         for (auto& line : info.values()) {
