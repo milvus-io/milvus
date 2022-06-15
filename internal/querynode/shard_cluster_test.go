@@ -97,6 +97,7 @@ func TestShardCluster_Create(t *testing.T) {
 			{
 				nodeID:   1,
 				nodeAddr: "addr_1",
+				isLeader: true,
 			},
 			{
 				nodeID:   2,
@@ -114,6 +115,11 @@ func TestShardCluster_Create(t *testing.T) {
 			assert.True(t, has)
 			assert.Equal(t, e.nodeAddr, node.nodeAddr)
 		}
+		sc.mut.Lock()
+		defer sc.mut.Unlock()
+
+		require.NotNil(t, sc.leader)
+		assert.Equal(t, int64(1), sc.leader.nodeID)
 	})
 
 	t.Run("init segments", func(t *testing.T) {

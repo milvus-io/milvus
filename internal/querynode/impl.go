@@ -353,8 +353,15 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, in *queryPb.ReleaseS
 
 	// collection lock is not needed since we guarantee not query/search will be dispatch from leader
 	for _, id := range in.SegmentIDs {
-		node.metaReplica.removeSegment(id, segmentTypeSealed)
-		node.metaReplica.removeSegment(id, segmentTypeGrowing)
+		switch in.GetScope() {
+		case queryPb.DataScope_Streaming:
+			node.metaReplica.removeSegment(id, segmentTypeGrowing)
+		case queryPb.DataScope_Historical:
+			node.metaReplica.removeSegment(id, segmentTypeSealed)
+		case queryPb.DataScope_All:
+			node.metaReplica.removeSegment(id, segmentTypeSealed)
+			node.metaReplica.removeSegment(id, segmentTypeGrowing)
+		}
 	}
 
 	log.Info("release segments done", zap.Int64("collectionID", in.CollectionID), zap.Int64s("segmentIDs", in.SegmentIDs))

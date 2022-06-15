@@ -67,6 +67,7 @@ type nodeEvent struct {
 	eventType nodeEventType
 	nodeID    int64
 	nodeAddr  string
+	isLeader  bool
 }
 
 type segmentEvent struct {
@@ -124,6 +125,7 @@ type ShardCluster struct {
 	nodeBuilder     ShardNodeBuilder
 
 	mut            sync.RWMutex
+	leader         *shardNode                           // shard leader node instance
 	nodes          map[int64]*shardNode                 // online nodes
 	segments       map[int64]*shardSegmentInfo          // shard segments
 	legacySegments []shardSegmentInfo                   // legacySegments records, stores segment usage BEFORE load balance
@@ -191,10 +193,14 @@ func (sc *ShardCluster) addNode(evt nodeEvent) {
 		defer oldNode.client.Stop()
 	}
 
-	sc.nodes[evt.nodeID] = &shardNode{
+	node := &shardNode{
 		nodeID:   evt.nodeID,
 		nodeAddr: evt.nodeAddr,
 		client:   sc.nodeBuilder(evt.nodeID, evt.nodeAddr),
+	}
+	sc.nodes[evt.nodeID] = node
+	if evt.isLeader {
+		sc.leader = node
 	}
 }
 
@@ -219,6 +225,7 @@ func (sc *ShardCluster) removeNode(evt nodeEvent) {
 			sc.state.Store(int32(unavailable))
 		}
 	}
+	// ignore leader process here
 }
 
 // updateSegment apply segment change to shard cluster
@@ -554,6 +561,7 @@ func (sc *ShardCluster) finishUsage(allocs map[int64][]int64) {
 // HandoffSegments processes the handoff/load balance segments update procedure.
 func (sc *ShardCluster) HandoffSegments(info *querypb.SegmentChangeInfo) error {
 	// wait for all OnlineSegment is loaded
+	onlineSegmentIDs := make([]int64, 0, len(info.OnlineSegments))
 	onlineSegments := make([]shardSegmentInfo, 0, len(info.OnlineSegments))
 	for _, seg := range info.OnlineSegments {
 		// filter out segments not maintained in this cluster
@@ -564,6 +572,7 @@ func (sc *ShardCluster) HandoffSegments(info *querypb.SegmentChangeInfo) error {
 			nodeID:    seg.GetNodeID(),
 			segmentID: seg.GetSegmentID(),
 		})
+		onlineSegmentIDs = append(onlineSegmentIDs, seg.GetSegmentID())
 	}
 	sc.waitSegmentsOnline(onlineSegments)
 
@@ -593,6 +602,16 @@ func (sc *ShardCluster) HandoffSegments(info *querypb.SegmentChangeInfo) error {
 	}
 
 	var errs errorutil.ErrorList
+	// remove growing segments if any
+	// handles the case for Growing to Sealed Handoff(which does not has offline segment info)
+	if sc.leader != nil {
+		// error ignored here
+		sc.leader.client.ReleaseSegments(context.Background(), &querypb.ReleaseSegmentsRequest{
+			CollectionID: sc.collectionID,
+			SegmentIDs:   onlineSegmentIDs,
+			Scope:        querypb.DataScope_Streaming,
+		})
+	}
 
 	// notify querynode(s) to release segments
 	for nodeID, segmentIDs := range removes {
@@ -605,6 +624,7 @@ func (sc *ShardCluster) HandoffSegments(info *querypb.SegmentChangeInfo) error {
 		state, err := node.client.ReleaseSegments(context.Background(), &querypb.ReleaseSegmentsRequest{
 			CollectionID: sc.collectionID,
 			SegmentIDs:   segmentIDs,
+			Scope:        querypb.DataScope_Historical,
 		})
 		if err != nil {
 			errs = append(errs, err)
