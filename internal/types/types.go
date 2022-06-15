@@ -495,6 +495,8 @@ type RootCoord interface {
 	// error is always nil
 	DescribeIndex(ctx context.Context, req *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error)
 
+	GetIndexState(ctx context.Context, req *milvuspb.GetIndexStateRequest) (*indexpb.GetIndexStatesResponse, error)
+
 	// DropIndex notifies RootCoord to drop the specified index for the specified field
 	//
 	// ctx is the context to control request deadline and cancellation

@@ -9,6 +9,7 @@ import "internal.proto";
 import "proxy.proto";
 import "data_coord.proto";
 import "etcd_meta.proto";
+import "index_coord.proto";
 
 service RootCoord {
   rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
@@ -98,6 +99,7 @@ service RootCoord {
     rpc CreateIndex(milvus.CreateIndexRequest) returns (common.Status) {}
     rpc DescribeIndex(milvus.DescribeIndexRequest) returns (milvus.DescribeIndexResponse) {}
     rpc DropIndex(milvus.DropIndexRequest) returns (common.Status) {}
+    rpc GetIndexState(milvus.GetIndexStateRequest) returns (index.GetIndexStatesResponse) {}
 
     rpc AllocTimestamp(AllocTimestampRequest) returns (AllocTimestampResponse) {}
     rpc AllocID(AllocIDRequest) returns (AllocIDResponse) {}

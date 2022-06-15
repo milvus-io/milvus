@@ -22,6 +22,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
+
 	"github.com/milvus-io/milvus/internal/kv"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -355,6 +357,10 @@ func (m *mockRootCoordService) CreateIndex(ctx context.Context, req *milvuspb.Cr
 }
 
 func (m *mockRootCoordService) DescribeIndex(ctx context.Context, req *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
+	panic("not implemented") // TODO: Implement
+}
+
+func (m *mockRootCoordService) GetIndexState(ctx context.Context, req *milvuspb.GetIndexStateRequest) (*indexpb.GetIndexStatesResponse, error) {
 	panic("not implemented") // TODO: Implement
 }
 

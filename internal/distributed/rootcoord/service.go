@@ -24,6 +24,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
+
 	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -393,6 +395,10 @@ func (s *Server) DropIndex(ctx context.Context, in *milvuspb.DropIndexRequest) (
 // DescribeIndex get the index information for the specified index name.
 func (s *Server) DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
 	return s.rootCoord.DescribeIndex(ctx, in)
+}
+
+func (s *Server) GetIndexState(ctx context.Context, in *milvuspb.GetIndexStateRequest) (*indexpb.GetIndexStatesResponse, error) {
+	return s.rootCoord.GetIndexState(ctx, in)
 }
 
 // AllocTimestamp global timestamp allocator

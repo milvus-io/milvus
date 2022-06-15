@@ -986,6 +986,7 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 			FieldID:      field.FieldID,
 			IndexID:      idxInfo.IndexID,
 			EnableIndex:  false,
+			ByAutoFlush:  false,
 		}
 		info.BuildID, err = t.core.BuildIndex(ctx, segID, segID2Binlog[segID].GetNumOfRows(), segID2Binlog[segID].GetFieldBinlogs(), &field, idxInfo, false)
 		if err != nil {

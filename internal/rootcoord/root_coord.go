@@ -420,6 +420,7 @@ func (c *Core) checkFlushedSegments(ctx context.Context) {
 						FieldID:      idxInfo.FiledID,
 						IndexID:      idxInfo.IndexID,
 						EnableIndex:  false,
+						ByAutoFlush:  true,
 					}
 					log.Debug("building index by background checker",
 						zap.Int64("segment_id", segID),
@@ -1841,6 +1842,50 @@ func (c *Core) DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRequ
 	return t.Rsp, nil
 }
 
+func (c *Core) GetIndexState(ctx context.Context, in *milvuspb.GetIndexStateRequest) (*indexpb.GetIndexStatesResponse, error) {
+	if code, ok := c.checkHealthy(); !ok {
+		log.Error("RootCoord GetIndexState failed, RootCoord is not healthy")
+		return &indexpb.GetIndexStatesResponse{
+			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+internalpb.StateCode_name[int32(code)]),
+		}, nil
+	}
+	log.Info("RootCoord GetIndexState", zap.String("collName", in.GetCollectionName()),
+		zap.String("fieldName", in.GetFieldName()), zap.String("indexName", in.GetIndexName()))
+
+	// initBuildIDs are the buildIDs generated when CreateIndex is called.
+	initBuildIDs, err := c.MetaTable.GetInitBuildIDs(in.GetCollectionName(), in.GetIndexName())
+	if err != nil {
+		log.Error("RootCoord GetIndexState failed", zap.String("collName", in.GetCollectionName()),
+			zap.String("fieldName", in.GetFieldName()), zap.String("indexName", in.GetIndexName()), zap.Error(err))
+		return &indexpb.GetIndexStatesResponse{
+			Status: failStatus(commonpb.ErrorCode_UnexpectedError, err.Error()),
+		}, nil
+	}
+
+	ret := &indexpb.GetIndexStatesResponse{
+		Status: succStatus(),
+	}
+	if len(initBuildIDs) == 0 {
+		log.Warn("RootCoord GetIndexState successful, all segments generated when CreateIndex is called have been compacted")
+		return ret, nil
+	}
+
+	states, err := c.CallGetIndexStatesService(ctx, initBuildIDs)
+	if err != nil {
+		log.Error("RootCoord GetIndexState CallGetIndexStatesService failed", zap.String("collName", in.GetCollectionName()),
+			zap.String("fieldName", in.GetFieldName()), zap.String("indexName", in.GetIndexName()), zap.Error(err))
+		ret.Status = failStatus(commonpb.ErrorCode_UnexpectedError, err.Error())
+		return ret, err
+	}
+
+	log.Info("RootCoord GetIndexState successful", zap.String("collName", in.GetCollectionName()),
+		zap.String("fieldName", in.GetFieldName()), zap.String("indexName", in.GetIndexName()))
+	return &indexpb.GetIndexStatesResponse{
+		Status: succStatus(),
+		States: states,
+	}, nil
+}
+
 // DropIndex drop index
 func (c *Core) DropIndex(ctx context.Context, in *milvuspb.DropIndexRequest) (*commonpb.Status, error) {
 	metrics.RootCoordDDLReqCounter.WithLabelValues("DropIndex", metrics.TotalLabel).Inc()
@@ -2158,6 +2203,7 @@ func (c *Core) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlus
 			FieldID:      fieldSch.FieldID,
 			IndexID:      idxInfo.IndexID,
 			EnableIndex:  false,
+			ByAutoFlush:  true,
 		}
 		info.BuildID, err = c.BuildIndex(ctx, segID, in.Segment.GetNumOfRows(), in.Segment.GetBinlogs(), fieldSch, idxInfo, true)
 		if err == nil && info.BuildID != 0 {
