@@ -305,9 +305,10 @@ common:
   # please adjust in embedded Milvus: local
   storageType: minio
 
-
   security:
     authorizationEnabled: false
     # tls mode values [0, 1, 2]
     # 0 is close, 1 is one-way authentication, 2 is two-way authentication.
     tlsMode: 0
+
+  mem_purge_ratio: 0.2 # in Linux os, if memory-fragmentation-size >= used-memory * ${mem_purge_ratio}, then do `malloc_trim`

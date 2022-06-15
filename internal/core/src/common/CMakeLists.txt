@@ -14,6 +14,7 @@ set(COMMON_SRC
         Types.cpp
         SystemProperty.cpp
         vector_index_c.cpp
+        memory_c.cpp
         )
 
 add_library(milvus_common SHARED

@@ -11,10 +11,8 @@
 
 #include <string>
 
-#ifndef __APPLE__
-
+#ifdef __linux__
 #include <malloc.h>
-
 #endif
 
 #include "exceptions/EasyAssert.h"

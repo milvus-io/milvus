@@ -28,6 +28,10 @@ package querynode
 import "C"
 import (
 	"fmt"
+
+	"github.com/milvus-io/milvus/internal/log"
+	memutil "github.com/milvus-io/milvus/internal/util/memutil"
+	metricsinfo "github.com/milvus-io/milvus/internal/util/metricsinfo"
 )
 
 type sliceInfo struct {
@@ -132,6 +136,16 @@ func getSearchResultDataBlob(cSearchResultDataBlobs searchResultDataBlobs, blobI
 
 func deleteSearchResultDataBlobs(cSearchResultDataBlobs searchResultDataBlobs) {
 	C.DeleteSearchResultDataBlobs(cSearchResultDataBlobs)
+	// try to do a purgeMemory operation after DeleteSearchResultDataBlobs
+	usedMem := metricsinfo.GetUsedMemoryCount()
+	if usedMem == 0 {
+		log.Error("Get 0 uesdMemory when deleteSearchResultDataBlobs, which is unexpected")
+		return
+	}
+	maxBinsSize := uint64(float64(usedMem) * Params.CommonCfg.MemPurgeRatio)
+	if err := memutil.PurgeMemory(maxBinsSize); err != nil {
+		log.Error(err.Error())
+	}
 }
 
 func deleteSearchResults(results []*SearchResult) {

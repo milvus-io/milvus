@@ -132,6 +132,7 @@ type commonConfig struct {
 	SimdType    string
 
 	AuthorizationEnabled bool
+	MemPurgeRatio        float64
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -170,6 +171,7 @@ func (p *commonConfig) init(base *BaseTable) {
 	p.initStorageType()
 
 	p.initEnableAuthorization()
+	p.initMemoryPurgeRatio()
 }
 
 func (p *commonConfig) initClusterPrefix() {
@@ -379,6 +381,10 @@ func (p *commonConfig) initStorageType() {
 
 func (p *commonConfig) initEnableAuthorization() {
 	p.AuthorizationEnabled = p.Base.ParseBool("common.security.authorizationEnabled", false)
+}
+
+func (p *commonConfig) initMemoryPurgeRatio() {
+	p.MemPurgeRatio = p.Base.ParseFloatWithDefault("common.mem_purge_ratio", 0.2)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
