@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"sort"
-	"time"
 
 	"go.uber.org/zap"
 
@@ -61,7 +60,10 @@ func shuffleChannelsToQueryNode(ctx context.Context, reqs []*querypb.WatchDmChan
 			if !wait {
 				return err
 			}
-			time.Sleep(shuffleWaitInterval)
+			err = waitWithContext(ctx, shuffleWaitInterval)
+			if err != nil {
+				return err
+			}
 			continue
 		}
 
@@ -100,6 +102,10 @@ func shuffleChannelsToQueryNode(ctx context.Context, reqs []*querypb.WatchDmChan
 			log.Error("shuffleChannelsToQueryNode failed", zap.Int64s("online nodeIDs", onlineNodeIDs), zap.Int64s("exclude nodeIDs", excludeNodeIDs), zap.Error(err))
 			return err
 		}
-		time.Sleep(shuffleWaitInterval)
+
+		err := waitWithContext(ctx, shuffleWaitInterval)
+		if err != nil {
+			return err
+		}
 	}
 }
