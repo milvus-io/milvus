@@ -105,7 +105,7 @@ print-build-info:
 
 milvus: build-cpp print-build-info
 	@echo "Building Milvus ..."
-	@echo "if build fails on Mac M1 machines, rerun scripts/install_deps.sh and then run: \`export PKG_CONFIG_PATH=\"/opt/homebrew/opt/openssl@3/lib/pkgconfig\"\`"
+	@echo "if build fails on Mac M1 machines, you probably need to rerun scripts/install_deps.sh and then run: \`export PKG_CONFIG_PATH=\"/opt/homebrew/opt/openssl@3/lib/pkgconfig\"\`"
 	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build \
 		-ldflags="-X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)'" \
 		${APPLE_SILICON_FLAG}  -o $(INSTALL_PATH)/milvus $(PWD)/cmd/main.go 1>/dev/null
@@ -146,6 +146,7 @@ build-cpp-with-coverage: pre-proc
 
 # Run the tests.
 unittest: test-cpp test-go
+	@echo "if test fails on Mac M1 machines, you probably need to rerun scripts/install_deps.sh and then run: \`export PKG_CONFIG_PATH=\"/opt/homebrew/opt/openssl@3/lib/pkgconfig\"\`"
 
 test-indexnode:
 	@echo "Running go unittests..."
@@ -174,23 +175,28 @@ test-querycoord:
 
 test-go: build-cpp-with-unittest
 	@echo "Running go unittests..."
+	@echo "if test fails on Mac M1 machines, you probably need to rerun scripts/install_deps.sh and then run: \`export PKG_CONFIG_PATH=\"/opt/homebrew/opt/openssl@3/lib/pkgconfig\"\`"
 	@(env bash $(PWD)/scripts/run_go_unittest.sh)
 
 test-cpp: build-cpp-with-unittest
 	@echo "Running cpp unittests..."
+	@echo "if test fails on Mac M1 machines, you probably need to rerun scripts/install_deps.sh and then run: \`export PKG_CONFIG_PATH=\"/opt/homebrew/opt/openssl@3/lib/pkgconfig\"\`"
 	@(env bash $(PWD)/scripts/run_cpp_unittest.sh)
 
 # Run code coverage.
 codecov: codecov-go codecov-cpp
+	@echo "if test fails on Mac M1 machines, you probably need to rerun scripts/install_deps.sh and then run: \`export PKG_CONFIG_PATH=\"/opt/homebrew/opt/openssl@3/lib/pkgconfig\"\`"
 
 # Run codecov-go
 codecov-go: build-cpp-with-coverage
 	@echo "Running go coverage..."
+	@echo "if test fails on Mac M1 machines, you probably need to rerun scripts/install_deps.sh and then run: \`export PKG_CONFIG_PATH=\"/opt/homebrew/opt/openssl@3/lib/pkgconfig\"\`"
 	@(env bash $(PWD)/scripts/run_go_codecov.sh)
 
 # Run codecov-cpp
 codecov-cpp: build-cpp-with-coverage
 	@echo "Running cpp coverage..."
+	@echo "if test fails on Mac M1 machines, you probably need to rerun scripts/install_deps.sh and then run: \`export PKG_CONFIG_PATH=\"/opt/homebrew/opt/openssl@3/lib/pkgconfig\"\`"
 	@(env bash $(PWD)/scripts/run_cpp_codecov.sh)
 
 # Package docker image locally.

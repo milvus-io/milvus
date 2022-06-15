@@ -100,9 +100,9 @@ rootCoord:
   maxPartitionNum: 4096 # Maximum number of partitions in a collection
   minSegmentSizeToEnableIndex: 1024 # It's a threshold. When the segment size is less than this value, the segment will not be indexed
 
-  # (in seconds) Duration after which an import task will expire (be killed). Default 3600 seconds (1 hour).
+  # (in seconds) Duration after which an import task will expire (be killed). Default 900 seconds (15 minutes).
   # Note: If default value is to be changed, change also the default in: internal/util/paramtable/component_param.go
-  importTaskExpiration: 3600
+  importTaskExpiration: 900
   # (in seconds) Milvus will keep the record of import tasks for at least `importTaskRetention` seconds. Default 86400
   # seconds (24 hours).
   # Note: If default value is to be changed, change also the default in: internal/util/paramtable/component_param.go
@@ -116,13 +116,13 @@ rootCoord:
   # Note: If default value is to be changed, change also the default in: internal/util/paramtable/component_param.go
   importSegmentStateWaitLimit: 60
   # (in seconds) Check the building status of a task's segments' indices every `importIndexCheckInterval` seconds.
-  # Default 300 seconds (5 minutes).
+  # Default 10 seconds.
   # Note: If default value is to be changed, change also the default in: internal/util/paramtable/component_param.go
-  importIndexCheckInterval: 300
+  importIndexCheckInterval: 10
   # (in seconds) Maximum time to wait for indices to be built on a single import task's segments.
-  # Default 1200 seconds (20 minutes).
+  # Default 600 seconds (10 minutes).
   # Note: If default value is to be changed, change also the default in: internal/util/paramtable/component_param.go
-  importIndexWaitLimit: 1200
+  importIndexWaitLimit: 600
 
 # Related configuration of proxy, used to validate client requests and reduce the returned results.
 proxy:

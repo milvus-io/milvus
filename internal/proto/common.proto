@@ -269,6 +269,7 @@ enum ImportState {
     ImportParsed = 4;
     ImportPersisted = 5;
     ImportCompleted = 6;
+    ImportAllocSegment = 10;
 }
 
 enum ResourceType {
