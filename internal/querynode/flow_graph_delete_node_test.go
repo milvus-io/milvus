@@ -32,7 +32,7 @@ func TestFlowGraphDeleteNode_delete(t *testing.T) {
 	t.Run("test delete", func(t *testing.T) {
 		historical, err := genSimpleReplica()
 		assert.NoError(t, err)
-		deleteNode := newDeleteNode(historical, defaultCollectionID)
+		deleteNode := newDeleteNode(historical, defaultCollectionID, defaultChannelName)
 
 		err = historical.addSegment(defaultSegmentID,
 			defaultPartitionID,
@@ -53,7 +53,7 @@ func TestFlowGraphDeleteNode_delete(t *testing.T) {
 	t.Run("test segment delete error", func(t *testing.T) {
 		historical, err := genSimpleReplica()
 		assert.NoError(t, err)
-		deleteNode := newDeleteNode(historical, defaultCollectionID)
+		deleteNode := newDeleteNode(historical, defaultCollectionID, defaultChannelName)
 
 		err = historical.addSegment(defaultSegmentID,
 			defaultPartitionID,
@@ -75,7 +75,7 @@ func TestFlowGraphDeleteNode_delete(t *testing.T) {
 	t.Run("test no target segment", func(t *testing.T) {
 		historical, err := genSimpleReplica()
 		assert.NoError(t, err)
-		deleteNode := newDeleteNode(historical, defaultCollectionID)
+		deleteNode := newDeleteNode(historical, defaultCollectionID, defaultChannelName)
 		wg := &sync.WaitGroup{}
 		wg.Add(1)
 		err = deleteNode.delete(nil, defaultSegmentID, wg)
@@ -85,7 +85,7 @@ func TestFlowGraphDeleteNode_delete(t *testing.T) {
 	t.Run("test invalid segmentType", func(t *testing.T) {
 		historical, err := genSimpleReplica()
 		assert.NoError(t, err)
-		deleteNode := newDeleteNode(historical, defaultCollectionID)
+		deleteNode := newDeleteNode(historical, defaultCollectionID, defaultChannelName)
 
 		err = historical.addSegment(defaultSegmentID,
 			defaultPartitionID,
@@ -105,7 +105,7 @@ func TestFlowGraphDeleteNode_operate(t *testing.T) {
 	t.Run("test operate", func(t *testing.T) {
 		historical, err := genSimpleReplica()
 		assert.NoError(t, err)
-		deleteNode := newDeleteNode(historical, defaultCollectionID)
+		deleteNode := newDeleteNode(historical, defaultCollectionID, defaultChannelName)
 
 		err = historical.addSegment(defaultSegmentID,
 			defaultPartitionID,
@@ -139,7 +139,7 @@ func TestFlowGraphDeleteNode_operate(t *testing.T) {
 	t.Run("test invalid partitionID", func(t *testing.T) {
 		historical, err := genSimpleReplica()
 		assert.NoError(t, err)
-		deleteNode := newDeleteNode(historical, defaultCollectionID)
+		deleteNode := newDeleteNode(historical, defaultCollectionID, defaultChannelName)
 
 		err = historical.addSegment(defaultSegmentID,
 			defaultPartitionID,
@@ -163,7 +163,7 @@ func TestFlowGraphDeleteNode_operate(t *testing.T) {
 	t.Run("test collection partition not exist", func(t *testing.T) {
 		historical, err := genSimpleReplica()
 		assert.NoError(t, err)
-		deleteNode := newDeleteNode(historical, defaultCollectionID)
+		deleteNode := newDeleteNode(historical, defaultCollectionID, defaultChannelName)
 
 		err = historical.addSegment(defaultSegmentID,
 			defaultPartitionID,
@@ -190,7 +190,7 @@ func TestFlowGraphDeleteNode_operate(t *testing.T) {
 	t.Run("test partition not exist", func(t *testing.T) {
 		historical, err := genSimpleReplica()
 		assert.NoError(t, err)
-		deleteNode := newDeleteNode(historical, defaultCollectionID)
+		deleteNode := newDeleteNode(historical, defaultCollectionID, defaultChannelName)
 
 		err = historical.addSegment(defaultSegmentID,
 			defaultPartitionID,
@@ -216,7 +216,7 @@ func TestFlowGraphDeleteNode_operate(t *testing.T) {
 	t.Run("test invalid input length", func(t *testing.T) {
 		historical, err := genSimpleReplica()
 		assert.NoError(t, err)
-		deleteNode := newDeleteNode(historical, defaultCollectionID)
+		deleteNode := newDeleteNode(historical, defaultCollectionID, defaultChannelName)
 
 		err = historical.addSegment(defaultSegmentID,
 			defaultPartitionID,

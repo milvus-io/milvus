@@ -83,6 +83,8 @@ const (
 
 	defaultCollectionName = "query-node-unittest-default-collection"
 	defaultPartitionName  = "query-node-unittest-default-partition"
+
+	defaultChannelName = "default-channel"
 )
 
 const (

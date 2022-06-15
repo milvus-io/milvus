@@ -37,7 +37,7 @@ func getFilterDMNode() (*filterDmNode, error) {
 	}
 
 	streaming.addExcludedSegments(defaultCollectionID, nil)
-	return newFilteredDmNode(streaming, defaultCollectionID), nil
+	return newFilteredDmNode(streaming, defaultCollectionID, defaultChannelName), nil
 }
 
 func TestFlowGraphFilterDmNode_filterDmNode(t *testing.T) {

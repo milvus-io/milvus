@@ -34,7 +34,7 @@ func getFilterDeleteNode() (*filterDeleteNode, error) {
 	}
 
 	historical.addExcludedSegments(defaultCollectionID, nil)
-	return newFilteredDeleteNode(historical, defaultCollectionID), nil
+	return newFilteredDeleteNode(historical, defaultCollectionID, defaultChannelName), nil
 }
 
 func TestFlowGraphFilterDeleteNode_filterDeleteNode(t *testing.T) {

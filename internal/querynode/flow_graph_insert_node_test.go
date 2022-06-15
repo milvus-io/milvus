@@ -48,7 +48,7 @@ func getInsertNode() (*insertNode, error) {
 		return nil, err
 	}
 
-	return newInsertNode(streaming, defaultCollectionID), nil
+	return newInsertNode(streaming, defaultCollectionID, defaultDMLChannel), nil
 }
 
 func genFlowGraphInsertData(schema *schemapb.CollectionSchema, numRows int) (*insertData, error) {
@@ -128,7 +128,7 @@ func TestFlowGraphInsertNode_insert(t *testing.T) {
 	t.Run("test no target segment", func(t *testing.T) {
 		streaming, err := genSimpleReplica()
 		assert.NoError(t, err)
-		insertNode := newInsertNode(streaming, defaultCollectionID)
+		insertNode := newInsertNode(streaming, defaultCollectionID, defaultDMLChannel)
 		wg := &sync.WaitGroup{}
 		wg.Add(1)
 		err = insertNode.insert(nil, defaultSegmentID, wg)
@@ -203,7 +203,7 @@ func TestFlowGraphInsertNode_delete(t *testing.T) {
 	t.Run("test no target segment", func(t *testing.T) {
 		streaming, err := genSimpleReplica()
 		assert.NoError(t, err)
-		insertNode := newInsertNode(streaming, defaultCollectionID)
+		insertNode := newInsertNode(streaming, defaultCollectionID, defaultDMLChannel)
 		wg := &sync.WaitGroup{}
 		wg.Add(1)
 		err = insertNode.delete(nil, defaultSegmentID, wg)
@@ -338,7 +338,7 @@ func TestFlowGraphInsertNode_operate(t *testing.T) {
 	t.Run("test getCollectionByID failed", func(t *testing.T) {
 		streaming, err := genSimpleReplica()
 		assert.NoError(t, err)
-		insertNode := newInsertNode(streaming, defaultCollectionID)
+		insertNode := newInsertNode(streaming, defaultCollectionID, defaultDMLChannel)
 
 		msg := []flowgraph.Msg{genInsertMsg()}
 
