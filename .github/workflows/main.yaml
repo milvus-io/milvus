@@ -92,7 +92,17 @@ jobs:
           docker logs  milvus_etcd_1
       - name: Upload coverage to Codecov
         if: "github.repository == 'milvus-io/milvus'"
-        uses: codecov/codecov-action@v2
+        uses: codecov/codecov-action@v3.1.0
+        id: upload_cov
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./go_coverage.txt,./lcov_output.info
+          name: ubuntu-${{ matrix.ubuntu }}-unittests
+          fail_ci_if_error: false
+      - name: Retry Upload coverage to Codecov
+        if: "steps.upload_cov.outcome=='failure' && github.repository == 'milvus-io/milvus'"
+        uses: codecov/codecov-action@v3.1.0
+        id: retry_upload_cov
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./go_coverage.txt,./lcov_output.info
