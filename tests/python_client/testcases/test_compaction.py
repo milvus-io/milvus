@@ -966,7 +966,7 @@ class TestCompactionOperation(TestcaseBase):
         c_plans = collection_w.get_compaction_plans()[0]
 
         # Actually no merged
-        assert len(c_plans.plans) == 0
+        assert len(c_plans.plans) == 2
 
     @pytest.mark.tags(CaseLabel.L3)
     def test_compact_delete_cross_shards(self):
@@ -1020,11 +1020,8 @@ class TestCompactionOperation(TestcaseBase):
         collection_w.wait_for_compaction_completed()
         c_plans = collection_w.get_compaction_plans()[0]
 
-        # Actually no merged
-        assert len(c_plans.plans) == 0
-        collection_w.load()
-        segments_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
-        assert segments_info[0].partitionID != segments_info[-1].partitionID
+        # since manual compaction, segment should be compacted any way
+        assert len(c_plans.plans) != 0
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_compact_during_insert(self):

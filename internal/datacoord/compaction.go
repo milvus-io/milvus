@@ -30,6 +30,7 @@ import (
 )
 
 // TODO this num should be determined by resources of datanode, for now, we set to a fixed value for simple
+// TODO we should split compaction into different priorities, small compaction helps to merge segment, large compaction helps to handle delta and expiration of large segments
 const (
 	maxParallelCompactionTaskNum      = 100
 	compactionTimeout                 = 10 * time.Second

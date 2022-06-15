@@ -17,8 +17,8 @@
 package datacoord
 
 import (
-	"container/heap"
 	"context"
+	"sort"
 	"sync"
 	"time"
 
@@ -29,28 +29,20 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	signalBufferSize                = 100
-	maxLittleSegmentNum             = 10
-	maxCompactionTimeoutInSeconds   = 60
-	singleCompactionRatioThreshold  = 0.2
-	singleCompactionDeltaLogMaxSize = 10 * 1024 * 1024 //10MiB
-	globalCompactionInterval        = 60 * time.Second
-)
-
-type timetravel struct {
-	time Timestamp
+type compactTime struct {
+	travelTime Timestamp
+	expireTime Timestamp
 }
 
 type trigger interface {
 	start()
 	stop()
 	// triggerCompaction triggers a compaction if any compaction condition satisfy.
-	triggerCompaction(timetravel *timetravel) error
+	triggerCompaction(compactTime *compactTime) error
 	// triggerSingleCompaction triggers a compaction bundled with collection-partition-channel-segment
-	triggerSingleCompaction(collectionID, partitionID, segmentID int64, channel string, timetravel *timetravel) error
+	triggerSingleCompaction(collectionID, partitionID, segmentID int64, channel string, compactTime *compactTime) error
 	// forceTriggerCompaction force to start a compaction
-	forceTriggerCompaction(collectionID int64, timetravel *timetravel) (UniqueID, error)
+	forceTriggerCompaction(collectionID int64, compactTime *compactTime) (UniqueID, error)
 }
 
 type compactionSignal struct {
@@ -61,40 +53,34 @@ type compactionSignal struct {
 	partitionID  UniqueID
 	segmentID    UniqueID
 	channel      string
-	timetravel   *timetravel
+	compactTime  *compactTime
 }
 
 var _ trigger = (*compactionTrigger)(nil)
 
 type compactionTrigger struct {
-	meta                            *meta
-	allocator                       allocator
-	signals                         chan *compactionSignal
-	singleCompactionPolicy          singleCompactionPolicy
-	mergeCompactionPolicy           mergeCompactionPolicy
-	compactionHandler               compactionPlanContext
-	globalTrigger                   *time.Ticker
-	forceMu                         sync.Mutex
-	mergeCompactionSegmentThreshold int
-	quit                            chan struct{}
-	wg                              sync.WaitGroup
+	meta              *meta
+	allocator         allocator
+	signals           chan *compactionSignal
+	compactionHandler compactionPlanContext
+	globalTrigger     *time.Ticker
+	forceMu           sync.Mutex
+	quit              chan struct{}
+	wg                sync.WaitGroup
 }
 
 func newCompactionTrigger(meta *meta, compactionHandler compactionPlanContext, allocator allocator) *compactionTrigger {
 	return &compactionTrigger{
-		meta:                            meta,
-		allocator:                       allocator,
-		signals:                         make(chan *compactionSignal, signalBufferSize),
-		singleCompactionPolicy:          (singleCompactionFunc)(chooseAllBinlogs),
-		mergeCompactionPolicy:           (mergeCompactionFunc)(greedyMergeCompaction),
-		compactionHandler:               compactionHandler,
-		mergeCompactionSegmentThreshold: maxLittleSegmentNum,
+		meta:              meta,
+		allocator:         allocator,
+		signals:           make(chan *compactionSignal, 100),
+		compactionHandler: compactionHandler,
 	}
 }
 
 func (t *compactionTrigger) start() {
 	t.quit = make(chan struct{})
-	t.globalTrigger = time.NewTicker(globalCompactionInterval)
+	t.globalTrigger = time.NewTicker(Params.DataCoordCfg.GlobalCompactionInterval)
 	t.wg.Add(2)
 	go func() {
 		defer logutil.LogPanic()
@@ -111,7 +97,8 @@ func (t *compactionTrigger) start() {
 					t.handleGlobalSignal(signal)
 				default:
 					t.handleSignal(signal)
-					t.globalTrigger.Reset(globalCompactionInterval)
+					// shouldn't reset, otherwise a frequent flushed collection will affect other collections
+					// t.globalTrigger.Reset(Params.DataCoordCfg.GlobalCompactionInterval)
 				}
 			}
 		}
@@ -137,14 +124,14 @@ func (t *compactionTrigger) startGlobalCompactionLoop() {
 			return
 		case <-t.globalTrigger.C:
 			cctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			tt, err := getTimetravelReverseTime(cctx, t.allocator)
+			ct, err := getCompactTime(cctx, t.allocator)
 			if err != nil {
-				log.Warn("unbale to get compaction timetravel", zap.Error(err))
+				log.Warn("unbale to get compaction time", zap.Error(err))
 				cancel()
 				continue
 			}
 			cancel()
-			err = t.triggerCompaction(tt)
+			err = t.triggerCompaction(ct)
 			if err != nil {
 				log.Warn("unable to triggerCompaction", zap.Error(err))
 			}
@@ -158,23 +145,23 @@ func (t *compactionTrigger) stop() {
 }
 
 // triggerCompaction trigger a compaction if any compaction condition satisfy.
-func (t *compactionTrigger) triggerCompaction(timetravel *timetravel) error {
+func (t *compactionTrigger) triggerCompaction(compactTime *compactTime) error {
 	id, err := t.allocSignalID()
 	if err != nil {
 		return err
 	}
 	signal := &compactionSignal{
-		id:         id,
-		isForce:    false,
-		isGlobal:   true,
-		timetravel: timetravel,
+		id:          id,
+		isForce:     false,
+		isGlobal:    true,
+		compactTime: compactTime,
 	}
 	t.signals <- signal
 	return nil
 }
 
 // triggerSingleCompaction triger a compaction bundled with collection-partiiton-channel-segment
-func (t *compactionTrigger) triggerSingleCompaction(collectionID, partitionID, segmentID int64, channel string, timetravel *timetravel) error {
+func (t *compactionTrigger) triggerSingleCompaction(collectionID, partitionID, segmentID int64, channel string, compactTime *compactTime) error {
 	// If AutoCompaction diabled, flush request will not trigger compaction
 	if !Params.DataCoordCfg.GetEnableAutoCompaction() {
 		return nil
@@ -192,7 +179,7 @@ func (t *compactionTrigger) triggerSingleCompaction(collectionID, partitionID, s
 		partitionID:  partitionID,
 		segmentID:    segmentID,
 		channel:      channel,
-		timetravel:   timetravel,
+		compactTime:  compactTime,
 	}
 	t.signals <- signal
 	return nil
@@ -200,7 +187,7 @@ func (t *compactionTrigger) triggerSingleCompaction(collectionID, partitionID, s
 
 // forceTriggerCompaction force to start a compaction
 // invoked by user `ManualCompaction` operation
-func (t *compactionTrigger) forceTriggerCompaction(collectionID int64, timetravel *timetravel) (UniqueID, error) {
+func (t *compactionTrigger) forceTriggerCompaction(collectionID int64, compactTime *compactTime) (UniqueID, error) {
 	id, err := t.allocSignalID()
 	if err != nil {
 		return -1, err
@@ -210,7 +197,7 @@ func (t *compactionTrigger) forceTriggerCompaction(collectionID int64, timetrave
 		isForce:      true,
 		isGlobal:     true,
 		collectionID: collectionID,
-		timetravel:   timetravel,
+		compactTime:  compactTime,
 	}
 	t.handleGlobalSignal(signal)
 	return id, nil
@@ -245,8 +232,10 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) {
 			break
 		}
 
-		plans := t.generatePlans(group.segments, signal.isForce, signal.timetravel)
-		log.Info("global generated plans", zap.Int64("collection", signal.collectionID), zap.Int("plan count", len(plans)))
+		plans := t.generatePlans(group.segments, signal.isForce, signal.compactTime)
+		if len(plans) != 0 {
+			log.Info("global generated plans", zap.Int64("collection", signal.collectionID), zap.Int("plan count", len(plans)))
+		}
 		for _, plan := range plans {
 			if !signal.isForce && t.compactionHandler.isFull() {
 				log.Warn("compaction plan skipped due to handler full", zap.Int64("collection", signal.collectionID), zap.Int64("planID", plan.PlanID))
@@ -284,7 +273,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 	channel := segment.GetInsertChannel()
 	partitionID := segment.GetPartitionID()
 	segments := t.getCandidateSegments(channel, partitionID)
-	plans := t.generatePlans(segments, signal.isForce, signal.timetravel)
+	plans := t.generatePlans(segments, signal.isForce, signal.compactTime)
 	log.Info("single generated plans", zap.Int64("collection", signal.collectionID), zap.Int("plan count", len(plans)))
 	for _, plan := range plans {
 		if t.compactionHandler.isFull() {
@@ -303,136 +292,95 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 	}
 }
 
-/*
-func (t *compactionTrigger) globalMergeCompaction(signal *compactionSignal, isForce bool, collections ...UniqueID) []*datapb.CompactionPlan {
-	colls := make(map[int64]struct{})
-	for _, collID := range collections {
-		colls[collID] = struct{}{}
-	}
-	m := t.meta.GetSegmentsChanPart(func(segment *SegmentInfo) bool {
-		_, has := colls[segment.GetCollectionID()]
-		return (has || len(collections) == 0) && // if filters collection
-			isSegmentHealthy(segment) &&
-			isFlush(segment) &&
-			!segment.isCompacting // not compacting now
-	}) // m is list of chanPartSegments, which is channel-partition organized segments
-	plans := make([]*datapb.CompactionPlan, 0)
-	for _, segments := range m {
-		if !isForce && t.compactionHandler.isFull() {
-			return plans
-		}
-		mplans := t.mergeCompaction(segments.segments, signal, isForce)
-		plans = append(plans, mplans...)
-	}
-
-	return plans
-}
-
-func (t *compactionTrigger) mergeCompaction(segments []*SegmentInfo, signal *compactionSignal, isForce bool) []*datapb.CompactionPlan {
-	if !isForce && !t.shouldDoMergeCompaction(segments) {
-		return nil
-	}
-
-	plans := t.mergeCompactionPolicy.generatePlan(segments, signal.timetravel)
-	if len(plans) == 0 {
-		return nil
-	}
-
-	res := make([]*datapb.CompactionPlan, 0, len(plans))
-	for _, plan := range plans {
-		if !isForce && t.compactionHandler.isFull() {
-			return nil
-		}
-
-		if err := t.fillOriginPlan(plan); err != nil {
-			log.Warn("failed to fill plan", zap.Error(err))
-			continue
-		}
-
-		log.Debug("exec merge compaction plan", zap.Any("plan", plan))
-		if err := t.compactionHandler.execCompactionPlan(signal, plan); err != nil {
-			log.Warn("failed to execute compaction plan", zap.Error(err))
-			continue
-		}
-		res = append(res, plan)
-	}
-	return res
-}*/
-
-type SegmentHeap []*SegmentInfo
-
-func (h *SegmentHeap) Len() int {
-	return len(*h)
-}
-
-func (h *SegmentHeap) Less(i, j int) bool {
-	return (*h)[i].GetNumOfRows() < (*h)[j].GetNumOfRows()
-}
-
-func (h *SegmentHeap) Swap(i, j int) {
-	(*h)[i], (*h)[j] = (*h)[j], (*h)[i]
-}
-
-func (h *SegmentHeap) Push(x interface{}) {
-	*h = append(*h, x.(*SegmentInfo))
-}
-
-func (h *SegmentHeap) Pop() interface{} {
-	old := *h
-	n := len(old)
-	x := old[n-1]
-	*h = old[:n-1]
-	return x
-}
-
-func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, force bool, timetravel *timetravel) []*datapb.CompactionPlan {
+func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, force bool, compactTime *compactTime) []*datapb.CompactionPlan {
 	// find segments need internal compaction
-	internalCandidates := &SegmentHeap{}
-	mergeCandidates := &SegmentHeap{}
+	// TODO add low priority candidates, for example if the segment is smaller than full 0.9 * max segment size but larger than small segment boundary, we only execute compaction when there are no compaction running actively
+	var prioritizedCandidates []*SegmentInfo
+	var smallCandidates []*SegmentInfo
+
+	// TODO, currently we lack of the measurement of data distribution, there should be another compaction help on redistributing segment based on scalar/vector field distribution
 	for _, segment := range segments {
 		segment := segment.ShadowClone()
-		if (force && t.hasValidDeltaLogs(segment, timetravel)) || t.shouldDoSingleCompaction(segment, timetravel) {
-			heap.Push(internalCandidates, segment)
-			continue
-		}
-		if t.isSmallSegment(segment) {
-			heap.Push(mergeCandidates, segment)
+		// TODO should we trigger compaction periodically even if the segment has no obvious reason to be compacted?
+		if force || t.ShouldDoSingleCompaction(segment, compactTime) {
+			prioritizedCandidates = append(prioritizedCandidates, segment)
+		} else if t.isSmallSegment(segment) {
+			smallCandidates = append(smallCandidates, segment)
 		}
 	}
 
 	var plans []*datapb.CompactionPlan
+	// sort segment from large to small
+	sort.Slice(prioritizedCandidates, func(i, j int) bool {
+		if prioritizedCandidates[i].getSegmentSize() != prioritizedCandidates[i].getSegmentSize() {
+			return prioritizedCandidates[i].getSegmentSize() > prioritizedCandidates[i].getSegmentSize()
+		}
+		return prioritizedCandidates[i].GetID() < prioritizedCandidates[j].GetID()
+	})
 
-	generatePlan := func(segment *SegmentInfo) {
+	sort.Slice(smallCandidates, func(i, j int) bool {
+		if smallCandidates[i].getSegmentSize() != smallCandidates[i].getSegmentSize() {
+			return smallCandidates[i].getSegmentSize() > smallCandidates[i].getSegmentSize()
+		}
+		return smallCandidates[i].GetID() < smallCandidates[j].GetID()
+	})
+
+	// greedy pick from large segment to small, the goal is to fill each segment to reach 512M
+	// we must ensure all prioritized candidates is in a plan
+	//TODO the compaction policy should consider segment with similar timestamp together so timetravel and data expiration could work better.
+	//TODO the compaction selection policy should consider if compaction workload is high
+	for len(prioritizedCandidates) > 0 {
 		var bucket []*SegmentInfo
+		// pop out the first element
+		segment := prioritizedCandidates[0]
 		bucket = append(bucket, segment)
-		free := segment.GetMaxRowNum()
-		result, free := greedySelect(internalCandidates, free)
-		bucket = append(bucket, result...)
-		result, _ = greedySelect(mergeCandidates, free)
-		bucket = append(bucket, result...)
+		prioritizedCandidates = prioritizedCandidates[1:]
 
-		plans = append(plans, segmentsToPlan(bucket, timetravel))
+		// only do single file compaction if segment is already large enough
+		if segment.getSegmentSize() < int64(Params.DataCoordCfg.SegmentMaxSize)*1024*1024 {
+			var result []*SegmentInfo
+			free := int64(Params.DataCoordCfg.SegmentMaxSize)*1024*1024 - segment.getSegmentSize()
+			maxNum := Params.DataCoordCfg.MaxSegmentToMerge - 1
+			prioritizedCandidates, result, free = greedySelect(prioritizedCandidates, free, maxNum)
+			bucket = append(bucket, result...)
+			maxNum -= len(result)
+			if maxNum > 0 {
+				smallCandidates, result, _ = greedySelect(smallCandidates, free, maxNum)
+				bucket = append(bucket, result...)
+			}
+		}
+		// since this is priority compaction, we will execute even if there is only segment
+		plans = append(plans, segmentsToPlan(bucket, compactTime))
 	}
 
-	var segment *SegmentInfo
-	for internalCandidates.Len() > 0 {
-		segment = heap.Pop(internalCandidates).(*SegmentInfo)
-		generatePlan(segment)
-	}
+	// check if there are small candidates left can be merged into large segments
+	for len(smallCandidates) > 0 {
+		var bucket []*SegmentInfo
+		// pop out the first element
+		segment := smallCandidates[0]
+		bucket = append(bucket, segment)
+		smallCandidates = smallCandidates[1:]
 
-	// merge compaction need 2 or more segment candidates
-	for mergeCandidates.Len() > 1 &&
-		(mergeCandidates.Len() >= t.mergeCompactionSegmentThreshold || force) {
-		segment = heap.Pop(mergeCandidates).(*SegmentInfo)
-		generatePlan(segment)
+		var result []*SegmentInfo
+		free := int64(Params.DataCoordCfg.SegmentMaxSize*1024*1024) - segment.getSegmentSize()
+		// for small segment merge, we pick one largest segment and merge as much as small segment together with it
+		// Why reverse?	 try to merge as many segments as expected.
+		// for instance, if a 255M and 255M is the largest small candidates, they will never be merged because of the MinSegmentToMerge limit.
+		smallCandidates, result, _ = reverseGreedySelect(smallCandidates, free, Params.DataCoordCfg.MaxSegmentToMerge-1)
+		bucket = append(bucket, result...)
+
+		// only merge if candidate number is large than MinSegmentToMerge
+		if len(bucket) >= Params.DataCoordCfg.MinSegmentToMerge {
+			plans = append(plans, segmentsToPlan(bucket, compactTime))
+		}
 	}
 
 	return plans
 }
 
-func segmentsToPlan(segments []*SegmentInfo, timeTravel *timetravel) *datapb.CompactionPlan {
+func segmentsToPlan(segments []*SegmentInfo, compactTime *compactTime) *datapb.CompactionPlan {
 	plan := &datapb.CompactionPlan{
-		Timetravel: timeTravel.time,
+		Timetravel: compactTime.travelTime,
 		Type:       datapb.CompactionType_MixCompaction,
 		Channel:    segments[0].GetInsertChannel(),
 	}
@@ -450,14 +398,35 @@ func segmentsToPlan(segments []*SegmentInfo, timeTravel *timetravel) *datapb.Com
 	return plan
 }
 
-func greedySelect(candidates *SegmentHeap, free int64) ([]*SegmentInfo, int64) {
+func greedySelect(candidates []*SegmentInfo, free int64, maxSegment int) ([]*SegmentInfo, []*SegmentInfo, int64) {
 	var result []*SegmentInfo
-	for candidates.Len() > 0 && (*candidates)[0].GetNumOfRows() < free {
-		segment := heap.Pop(candidates).(*SegmentInfo)
-		result = append(result, segment)
-		free -= segment.GetNumOfRows()
+
+	for i := 0; i < len(candidates); {
+		candidate := candidates[i]
+		if len(result) < maxSegment && candidate.getSegmentSize() < free {
+			result = append(result, candidate)
+			free -= candidate.getSegmentSize()
+			candidates = append(candidates[:i], candidates[i+1:]...)
+		} else {
+			i++
+		}
 	}
-	return result, free
+
+	return candidates, result, free
+}
+
+func reverseGreedySelect(candidates []*SegmentInfo, free int64, maxSegment int) ([]*SegmentInfo, []*SegmentInfo, int64) {
+	var result []*SegmentInfo
+
+	for i := len(candidates) - 1; i >= 0; i-- {
+		candidate := candidates[i]
+		if (len(result) < maxSegment) && (candidate.getSegmentSize() < free) {
+			result = append(result, candidate)
+			free -= candidate.getSegmentSize()
+			candidates = append(candidates[:i], candidates[i+1:]...)
+		}
+	}
+	return candidates, result, free
 }
 
 func (t *compactionTrigger) getCandidateSegments(channel string, partitionID UniqueID) []*SegmentInfo {
@@ -474,17 +443,7 @@ func (t *compactionTrigger) getCandidateSegments(channel string, partitionID Uni
 }
 
 func (t *compactionTrigger) isSmallSegment(segment *SegmentInfo) bool {
-	return segment.GetNumOfRows() < segment.GetMaxRowNum()/2
-}
-
-func (t *compactionTrigger) shouldDoMergeCompaction(segments []*SegmentInfo) bool {
-	littleSegmentNum := 0
-	for _, s := range segments {
-		if t.isSmallSegment(s) {
-			littleSegmentNum++
-		}
-	}
-	return littleSegmentNum >= t.mergeCompactionSegmentThreshold
+	return segment.getSegmentSize() < int64(Params.DataCoordCfg.SegmentMaxSize*Params.DataCoordCfg.SegmentSmallProportion*1024*1024)
 }
 
 func (t *compactionTrigger) fillOriginPlan(plan *datapb.CompactionPlan) error {
@@ -499,24 +458,62 @@ func (t *compactionTrigger) fillOriginPlan(plan *datapb.CompactionPlan) error {
 	}
 	plan.PlanID = id
 	plan.StartTime = ts
-	plan.TimeoutInSeconds = maxCompactionTimeoutInSeconds
+	plan.TimeoutInSeconds = Params.DataCoordCfg.CompactionTimeoutInSeconds
 	return nil
 }
 
-func (t *compactionTrigger) shouldDoSingleCompaction(segment *SegmentInfo, timetravel *timetravel) bool {
+func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compactTime *compactTime) bool {
+	// count all the binlog file count
+	var totalLogNum int
+	for _, binlogs := range segment.GetBinlogs() {
+		totalLogNum += len(binlogs.GetBinlogs())
+	}
+
+	for _, deltaLogs := range segment.GetDeltalogs() {
+		totalLogNum += len(deltaLogs.GetBinlogs())
+	}
+
+	for _, statsLogs := range segment.GetStatslogs() {
+		totalLogNum += len(statsLogs.GetBinlogs())
+	}
+	// avoid segment has too many bin logs and the etcd meta is too large, force trigger compaction
+	if totalLogNum > int(Params.DataCoordCfg.SingleCompactionBinlogMaxNum) {
+		log.Info("total binlog number is too much, trigger compaction", zap.Int64("segment", segment.ID),
+			zap.Int("Delta logs", len(segment.GetDeltalogs())), zap.Int("Bin Logs", len(segment.GetBinlogs())), zap.Int("Stat logs", len(segment.GetStatslogs())))
+		return true
+	}
+
+	// if expire time is enabled, put segment into compaction candidate
+	totalExpiredSize := int64(0)
+	for _, binlogs := range segment.GetBinlogs() {
+		for _, l := range binlogs.GetBinlogs() {
+			// TODO, we should probably estimate expired log entries by total rows in binlog and the ralationship of timeTo, timeFrom and expire time
+			if l.TimestampTo < compactTime.expireTime {
+				totalExpiredSize += l.GetLogSize()
+			}
+		}
+	}
+
+	if totalExpiredSize > Params.DataCoordCfg.SingleCompactionExpiredLogMaxSize {
+		log.Info("total expired entities is too much, trigger compation", zap.Int64("segment", segment.ID), zap.Int64("expired log size", totalExpiredSize))
+		return true
+	}
+
 	// single compaction only merge insert and delta log beyond the timetravel
 	// segment's insert binlogs dont have time range info, so we wait until the segment's last expire time is less than timetravel
 	// to ensure that all insert logs is beyond the timetravel.
 	// TODO: add meta in insert binlog
-	if segment.LastExpireTime >= timetravel.time {
+	if segment.LastExpireTime >= compactTime.travelTime {
+		log.Debug("compaction is not triggered", zap.Int64("segment", segment.ID), zap.Int64("expired log size", totalExpiredSize),
+			zap.Uint64("Expire", segment.LastExpireTime), zap.Uint64("Travel", compactTime.travelTime))
 		return false
 	}
 
 	totalDeletedRows := 0
 	totalDeleteLogSize := int64(0)
-	for _, fbl := range segment.GetDeltalogs() {
-		for _, l := range fbl.GetBinlogs() {
-			if l.TimestampTo < timetravel.time {
+	for _, deltaLogs := range segment.GetDeltalogs() {
+		for _, l := range deltaLogs.GetBinlogs() {
+			if l.TimestampTo < compactTime.travelTime {
 				totalDeletedRows += int(l.GetEntriesNum())
 				totalDeleteLogSize += l.GetLogSize()
 			}
@@ -524,64 +521,16 @@ func (t *compactionTrigger) shouldDoSingleCompaction(segment *SegmentInfo, timet
 	}
 
 	// currently delta log size and delete ratio policy is applied
-	return float32(totalDeletedRows)/float32(segment.NumOfRows) >= singleCompactionRatioThreshold || totalDeleteLogSize > singleCompactionDeltaLogMaxSize
-}
-
-func (t *compactionTrigger) hasValidDeltaLogs(segment *SegmentInfo, timetravel *timetravel) bool {
-	if segment.LastExpireTime >= timetravel.time {
-		return false
+	if float32(totalDeletedRows)/float32(segment.NumOfRows) >= Params.DataCoordCfg.SingleCompactionRatioThreshold || totalDeleteLogSize > Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize {
+		log.Info("total delete entities is too much, trigger compation", zap.Int64("segment", segment.ID),
+			zap.Int("deleted rows", totalDeletedRows), zap.Int64("delete log size", totalDeleteLogSize))
+		return true
 	}
 
-	for _, fbl := range segment.GetDeltalogs() {
-		for _, l := range fbl.GetBinlogs() {
-			if l.TimestampTo < timetravel.time {
-				return true
-			}
-		}
-	}
-
+	log.Debug("compaction is not triggered", zap.Int64("segment", segment.ID), zap.Int64("expired log size", totalExpiredSize),
+		zap.Int("deleted rows", totalDeletedRows), zap.Int64("delete log size", totalDeleteLogSize))
 	return false
 }
-
-/*
-func (t *compactionTrigger) globalSingleCompaction(segments []*SegmentInfo, isForce bool, signal *compactionSignal) []*datapb.CompactionPlan {
-	plans := make([]*datapb.CompactionPlan, 0)
-	for _, segment := range segments {
-		if !isForce && t.compactionHandler.isFull() {
-			return plans
-		}
-		plan, err := t.singleCompaction(segment, isForce, signal)
-		if err != nil {
-			log.Warn("failed to exec single compaction", zap.Error(err))
-			continue
-		}
-		if plan != nil {
-			plans = append(plans, plan)
-			log.Debug("exec single compaction plan", zap.Any("plan", plan))
-		}
-	}
-	return plans
-}
-
-func (t *compactionTrigger) singleCompaction(segment *SegmentInfo, isForce bool, signal *compactionSignal) (*datapb.CompactionPlan, error) {
-	if segment == nil {
-		return nil, nil
-	}
-
-	if !isForce && !t.shouldDoSingleCompaction(segment, signal.timetravel) {
-		return nil, nil
-	}
-
-	plan := t.singleCompactionPolicy.generatePlan(segment, signal.timetravel)
-	if plan == nil {
-		return nil, nil
-	}
-
-	if err := t.fillOriginPlan(plan); err != nil {
-		return nil, err
-	}
-	return plan, t.compactionHandler.execCompactionPlan(signal, plan)
-}*/
 
 func isFlush(segment *SegmentInfo) bool {
 	return segment.GetState() == commonpb.SegmentState_Flushed || segment.GetState() == commonpb.SegmentState_Flushing

@@ -894,14 +894,25 @@ type dataCoordConfig struct {
 	CreatedTime time.Time
 	UpdatedTime time.Time
 
-	EnableCompaction        bool
-	EnableAutoCompaction    atomic.Value
-	EnableGarbageCollection bool
+	// compaction
+	EnableCompaction     bool
+	EnableAutoCompaction atomic.Value
+
+	MinSegmentToMerge                 int
+	MaxSegmentToMerge                 int
+	SegmentSmallProportion            float64
+	CompactionTimeoutInSeconds        int32
+	SingleCompactionRatioThreshold    float32
+	SingleCompactionDeltaLogMaxSize   int64
+	SingleCompactionExpiredLogMaxSize int64
+	SingleCompactionBinlogMaxNum      int64
+	GlobalCompactionInterval          time.Duration
 
 	// Garbage Collection
-	GCInterval         time.Duration
-	GCMissingTolerance time.Duration
-	GCDropTolerance    time.Duration
+	EnableGarbageCollection bool
+	GCInterval              time.Duration
+	GCMissingTolerance      time.Duration
+	GCDropTolerance         time.Duration
 }
 
 func (p *dataCoordConfig) init(base *BaseTable) {
@@ -915,6 +926,16 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 
 	p.initEnableCompaction()
 	p.initEnableAutoCompaction()
+
+	p.initCompactionMinSegment()
+	p.initCompactionMaxSegment()
+	p.initSegmentSmallProportion()
+	p.initCompactionTimeoutInSeconds()
+	p.initSingleCompactionRatioThreshold()
+	p.initSingleCompactionDeltaLogMaxSize()
+	p.initSingleCompactionExpiredLogMaxSize()
+	p.initSingleCompactionBinlogMaxNum()
+	p.initGlobalCompactionInterval()
 
 	p.initEnableGarbageCollection()
 	p.initGCInterval()
@@ -948,6 +969,52 @@ func (p *dataCoordConfig) initEnableCompaction() {
 	p.EnableCompaction = p.Base.ParseBool("dataCoord.enableCompaction", false)
 }
 
+func (p *dataCoordConfig) initEnableAutoCompaction() {
+	p.EnableAutoCompaction.Store(p.Base.ParseBool("dataCoord.compaction.enableAutoCompaction", false))
+}
+
+func (p *dataCoordConfig) initCompactionMinSegment() {
+	p.MinSegmentToMerge = p.Base.ParseIntWithDefault("dataCoord.compaction.min.segment", 4)
+}
+
+func (p *dataCoordConfig) initCompactionMaxSegment() {
+	p.MaxSegmentToMerge = p.Base.ParseIntWithDefault("dataCoord.compaction.max.segment", 30)
+}
+
+func (p *dataCoordConfig) initSegmentSmallProportion() {
+	p.SegmentSmallProportion = p.Base.ParseFloatWithDefault("dataCoord.segment.smallProportion", 0.5)
+}
+
+// compaction execution timeout
+func (p *dataCoordConfig) initCompactionTimeoutInSeconds() {
+	p.CompactionTimeoutInSeconds = p.Base.ParseInt32WithDefault("dataCoord.compaction.timeout", 60*3)
+}
+
+// if total delete entities is large than a ratio of total entities, trigger single compaction.
+func (p *dataCoordConfig) initSingleCompactionRatioThreshold() {
+	p.SingleCompactionRatioThreshold = float32(p.Base.ParseFloatWithDefault("dataCoord.compaction.single.ratio.threshold", 0.2))
+}
+
+// if total delta file size > SingleCompactionDeltaLogMaxSize, trigger single compaction
+func (p *dataCoordConfig) initSingleCompactionDeltaLogMaxSize() {
+	p.SingleCompactionDeltaLogMaxSize = p.Base.ParseInt64WithDefault("dataCoord.compaction.single.deltalog.maxsize", 2*1024*1024)
+}
+
+// if total expired file size > SingleCompactionExpiredLogMaxSize, trigger single compaction
+func (p *dataCoordConfig) initSingleCompactionExpiredLogMaxSize() {
+	p.SingleCompactionExpiredLogMaxSize = p.Base.ParseInt64WithDefault("dataCoord.compaction.single.expiredlog.maxsize", 10*1024*1024)
+}
+
+// if total binlog number > SingleCompactionBinlogMaxNum, trigger single compaction to ensure binlog number per segment is limited
+func (p *dataCoordConfig) initSingleCompactionBinlogMaxNum() {
+	p.SingleCompactionBinlogMaxNum = p.Base.ParseInt64WithDefault("dataCoord.compaction.single.binlog.maxnum", 1000)
+}
+
+// interval we check and trigger global compaction
+func (p *dataCoordConfig) initGlobalCompactionInterval() {
+	p.GlobalCompactionInterval = time.Duration(p.Base.ParseInt64WithDefault("dataCoord.compaction.global.interval", int64(60*time.Second)))
+}
+
 // -- GC --
 func (p *dataCoordConfig) initEnableGarbageCollection() {
 	p.EnableGarbageCollection = p.Base.ParseBool("dataCoord.enableGarbageCollection", false)
@@ -963,10 +1030,6 @@ func (p *dataCoordConfig) initGCMissingTolerance() {
 
 func (p *dataCoordConfig) initGCDropTolerance() {
 	p.GCDropTolerance = time.Duration(p.Base.ParseInt64WithDefault("dataCoord.gc.dropTolerance", 24*60*60)) * time.Second
-}
-
-func (p *dataCoordConfig) initEnableAutoCompaction() {
-	p.EnableAutoCompaction.Store(p.Base.ParseBool("dataCoord.compaction.enableAutoCompaction", false))
 }
 
 func (p *dataCoordConfig) SetEnableAutoCompaction(enable bool) {

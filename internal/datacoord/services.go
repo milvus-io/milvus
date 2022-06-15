@@ -391,10 +391,10 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 			cctx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
 			defer cancel()
 
-			tt, err := getTimetravelReverseTime(cctx, s.allocator)
+			ct, err := getCompactTime(cctx, s.allocator)
 			if err == nil {
 				err = s.compactionTrigger.triggerSingleCompaction(segment.GetCollectionID(),
-					segment.GetPartitionID(), segmentID, segment.GetInsertChannel(), tt)
+					segment.GetPartitionID(), segmentID, segment.GetInsertChannel(), ct)
 				if err != nil {
 					log.Warn("failed to trigger single compaction", zap.Int64("segment ID", segmentID))
 				} else {
@@ -828,14 +828,14 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 		return resp, nil
 	}
 
-	tt, err := getTimetravelReverseTime(ctx, s.allocator)
+	ct, err := getCompactTime(ctx, s.allocator)
 	if err != nil {
 		log.Warn("failed to get timetravel reverse time", zap.Int64("collectionID", req.GetCollectionID()), zap.Error(err))
 		resp.Status.Reason = err.Error()
 		return resp, nil
 	}
 
-	id, err := s.compactionTrigger.forceTriggerCompaction(req.CollectionID, tt)
+	id, err := s.compactionTrigger.forceTriggerCompaction(req.CollectionID, ct)
 	if err != nil {
 		log.Error("failed to trigger manual compaction", zap.Int64("collectionID", req.GetCollectionID()), zap.Error(err))
 		resp.Status.Reason = err.Error()

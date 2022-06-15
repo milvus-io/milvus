@@ -68,16 +68,24 @@ func FailResponse(status *commonpb.Status, reason string) {
 	status.Reason = reason
 }
 
-func getTimetravelReverseTime(ctx context.Context, allocator allocator) (*timetravel, error) {
+func getCompactTime(ctx context.Context, allocator allocator) (*compactTime, error) {
 	ts, err := allocator.allocTimestamp(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	pts, _ := tsoutil.ParseTS(ts)
-	ttpts := pts.Add(-time.Duration(Params.CommonCfg.RetentionDuration) * time.Second)
-	tt := tsoutil.ComposeTS(ttpts.UnixNano()/int64(time.Millisecond), 0)
-	return &timetravel{tt}, nil
+	ttRetention := pts.Add(-time.Duration(Params.CommonCfg.RetentionDuration) * time.Second)
+	ttRetentionLogic := tsoutil.ComposeTS(ttRetention.UnixNano()/int64(time.Millisecond), 0)
+
+	// TODO, change to collection level
+	if Params.CommonCfg.EntityExpirationTTL > 0 {
+		ttexpired := pts.Add(-Params.CommonCfg.EntityExpirationTTL)
+		ttexpiredLogic := tsoutil.ComposeTS(ttexpired.UnixNano()/int64(time.Millisecond), 0)
+		return &compactTime{ttRetentionLogic, ttexpiredLogic}, nil
+	}
+	// no expiration time
+	return &compactTime{ttRetentionLogic, 0}, nil
 }
 
 func parseSegmentIDByBinlog(path string) (UniqueID, error) {

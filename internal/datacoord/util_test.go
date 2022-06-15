@@ -111,7 +111,7 @@ func TestVerifyResponse(t *testing.T) {
 	}
 }
 
-func Test_getTimetravelReverseTime(t *testing.T) {
+func Test_getCompactTime(t *testing.T) {
 	Params.Init()
 	Params.CommonCfg.RetentionDuration = 43200 // 5 days
 
@@ -124,19 +124,19 @@ func Test_getTimetravelReverseTime(t *testing.T) {
 	tests := []struct {
 		name    string
 		args    args
-		want    *timetravel
+		want    *compactTime
 		wantErr bool
 	}{
 		{
 			"test get timetravel",
 			args{&fixedTSOAllocator{fixedTime: tFixed}},
-			&timetravel{tsoutil.ComposeTS(tBefore.UnixNano()/int64(time.Millisecond), 0)},
+			&compactTime{tsoutil.ComposeTS(tBefore.UnixNano()/int64(time.Millisecond), 0), 0},
 			false,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := getTimetravelReverseTime(context.TODO(), tt.args.allocator)
+			got, err := getCompactTime(context.TODO(), tt.args.allocator)
 			assert.Equal(t, tt.wantErr, err != nil)
 			assert.EqualValues(t, tt.want, got)
 		})
