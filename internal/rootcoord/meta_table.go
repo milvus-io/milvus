@@ -151,6 +151,19 @@ func (mt *MetaTable) reloadFromKV() error {
 		mt.proxyID2Meta[proxyMeta.ID] = proxyMeta
 	}
 
+	_, values, err = mt.snapshot.LoadWithPrefix(CollectionAliasMetaPrefix, 0)
+	if err != nil {
+		return err
+	}
+	for _, value := range values {
+		aliasInfo := pb.CollectionInfo{}
+		err = proto.Unmarshal([]byte(value), &aliasInfo)
+		if err != nil {
+			return fmt.Errorf("rootcoord Unmarshal pb.AliasInfo err:%w", err)
+		}
+		mt.collAlias2ID[aliasInfo.Schema.Name] = aliasInfo.ID
+	}
+
 	_, values, err = mt.snapshot.LoadWithPrefix(CollectionMetaPrefix, 0)
 	if err != nil {
 		return err
@@ -161,6 +174,9 @@ func (mt *MetaTable) reloadFromKV() error {
 		err = proto.Unmarshal([]byte(value), &collInfo)
 		if err != nil {
 			return fmt.Errorf("rootcoord Unmarshal pb.CollectionInfo err:%w", err)
+		}
+		if _, ok := mt.collAlias2ID[collInfo.Schema.Name]; ok {
+			continue
 		}
 		mt.collID2Meta[collInfo.ID] = collInfo
 		mt.collName2ID[collInfo.Schema.Name] = collInfo.ID
@@ -217,19 +233,6 @@ func (mt *MetaTable) reloadFromKV() error {
 			return fmt.Errorf("rootcoord Unmarshal pb.IndexInfo err:%w", err)
 		}
 		mt.indexID2Meta[meta.IndexID] = meta
-	}
-
-	_, values, err = mt.snapshot.LoadWithPrefix(CollectionAliasMetaPrefix, 0)
-	if err != nil {
-		return err
-	}
-	for _, value := range values {
-		aliasInfo := pb.CollectionInfo{}
-		err = proto.Unmarshal([]byte(value), &aliasInfo)
-		if err != nil {
-			return fmt.Errorf("rootcoord Unmarshal pb.AliasInfo err:%w", err)
-		}
-		mt.collAlias2ID[aliasInfo.Schema.Name] = aliasInfo.ID
 	}
 
 	log.Debug("reload meta table from KV successfully")
