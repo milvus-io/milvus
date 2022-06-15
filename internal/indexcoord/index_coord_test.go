@@ -427,7 +427,7 @@ func Test_tryAcquireSegmentReferLock(t *testing.T) {
 	ic.chunkManager = cmm
 
 	t.Run("success", func(t *testing.T) {
-		err := ic.tryAcquireSegmentReferLock(context.Background(), []UniqueID{1})
+		err := ic.tryAcquireSegmentReferLock(context.Background(), 1, []UniqueID{1})
 		assert.Nil(t, err)
 	})
 
@@ -437,7 +437,7 @@ func Test_tryAcquireSegmentReferLock(t *testing.T) {
 			Fail: false,
 		}
 		ic.dataCoordClient = dcmE
-		err := ic.tryAcquireSegmentReferLock(context.Background(), []UniqueID{1})
+		err := ic.tryAcquireSegmentReferLock(context.Background(), 1, []UniqueID{1})
 		assert.Error(t, err)
 	})
 
@@ -447,7 +447,7 @@ func Test_tryAcquireSegmentReferLock(t *testing.T) {
 			Fail: true,
 		}
 		ic.dataCoordClient = dcmF
-		err := ic.tryAcquireSegmentReferLock(context.Background(), []UniqueID{1})
+		err := ic.tryAcquireSegmentReferLock(context.Background(), 1, []UniqueID{1})
 		assert.Error(t, err)
 	})
 }
@@ -466,7 +466,7 @@ func Test_tryReleaseSegmentReferLock(t *testing.T) {
 	ic.dataCoordClient = dcm
 
 	t.Run("success", func(t *testing.T) {
-		err := ic.tryReleaseSegmentReferLock(context.Background(), []UniqueID{1})
+		err := ic.tryReleaseSegmentReferLock(context.Background(), 1, []UniqueID{1})
 		assert.NoError(t, err)
 	})
 }

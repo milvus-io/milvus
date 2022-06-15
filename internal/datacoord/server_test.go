@@ -2741,8 +2741,8 @@ func TestDataCoord_Import(t *testing.T) {
 		closeTestServer(t, svr)
 
 		status, err := svr.ReleaseSegmentLock(context.TODO(), &datapb.ReleaseSegmentLockRequest{
-			SegmentIDs: []UniqueID{1, 2},
-			NodeID:     UniqueID(1),
+			TaskID: UniqueID(1),
+			NodeID: UniqueID(1),
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())

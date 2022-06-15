@@ -3074,13 +3074,13 @@ func TestCheckInit(t *testing.T) {
 	err = c.checkInit()
 	assert.Error(t, err)
 
-	c.CallAddSegRefLock = func(context.Context, []int64) error {
+	c.CallAddSegRefLock = func(context.Context, int64, []int64) error {
 		return nil
 	}
 	err = c.checkInit()
 	assert.Error(t, err)
 
-	c.CallReleaseSegRefLock = func(context.Context, []int64) error {
+	c.CallReleaseSegRefLock = func(context.Context, int64, []int64) error {
 		return nil
 	}
 	err = c.checkInit()

@@ -187,12 +187,14 @@ message AcquireSegmentLockRequest {
   common.MsgBase base = 1;
   int64 nodeID = 2;
   repeated int64 segmentIDs = 3;
+  int64 taskID = 4;
 }
 
 message ReleaseSegmentLockRequest {
   common.MsgBase base = 1;
   int64 nodeID = 2;
   repeated int64 segmentIDs = 3;
+  int64 taskID = 4;
 }
 
 message VchannelInfo {
@@ -525,4 +527,10 @@ message AddSegmentRequest {
   int64 collection_id = 4;
   int64 partition_id = 5;
   int64 row_num = 6;
+}
+
+message SegmentReferenceLock {
+  int64 taskID = 1;
+  int64 nodeID = 2;
+  repeated int64 segmentIDs = 3;
 }
