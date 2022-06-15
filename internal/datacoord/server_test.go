@@ -2047,7 +2047,7 @@ func TestManualCompaction(t *testing.T) {
 		svr.isServing = ServerStateHealthy
 		svr.compactionTrigger = &mockCompactionTrigger{
 			methods: map[string]interface{}{
-				"forceTriggerCompaction": func(collectionID int64, tt *timetravel) (UniqueID, error) {
+				"forceTriggerCompaction": func(collectionID int64, ct *compactTime) (UniqueID, error) {
 					return 1, nil
 				},
 			},
@@ -2066,7 +2066,7 @@ func TestManualCompaction(t *testing.T) {
 		svr.isServing = ServerStateHealthy
 		svr.compactionTrigger = &mockCompactionTrigger{
 			methods: map[string]interface{}{
-				"forceTriggerCompaction": func(collectionID int64, tt *timetravel) (UniqueID, error) {
+				"forceTriggerCompaction": func(collectionID int64, ct *compactTime) (UniqueID, error) {
 					return 0, errors.New("mock error")
 				},
 			},
@@ -2085,7 +2085,7 @@ func TestManualCompaction(t *testing.T) {
 		svr.isServing = ServerStateStopped
 		svr.compactionTrigger = &mockCompactionTrigger{
 			methods: map[string]interface{}{
-				"forceTriggerCompaction": func(collectionID int64, tt *timetravel) (UniqueID, error) {
+				"forceTriggerCompaction": func(collectionID int64, ct *compactTime) (UniqueID, error) {
 					return 1, nil
 				},
 			},

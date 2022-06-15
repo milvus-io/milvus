@@ -586,30 +586,30 @@ type mockCompactionTrigger struct {
 }
 
 // triggerCompaction trigger a compaction if any compaction condition satisfy.
-func (t *mockCompactionTrigger) triggerCompaction(tt *timetravel) error {
+func (t *mockCompactionTrigger) triggerCompaction(ct *compactTime) error {
 	if f, ok := t.methods["triggerCompaction"]; ok {
-		if ff, ok := f.(func(tt *timetravel) error); ok {
-			return ff(tt)
+		if ff, ok := f.(func(ct *compactTime) error); ok {
+			return ff(ct)
 		}
 	}
 	panic("not implemented")
 }
 
 // triggerSingleCompaction trigerr a compaction bundled with collection-partiiton-channel-segment
-func (t *mockCompactionTrigger) triggerSingleCompaction(collectionID int64, partitionID int64, segmentID int64, channel string, tt *timetravel) error {
+func (t *mockCompactionTrigger) triggerSingleCompaction(collectionID int64, partitionID int64, segmentID int64, channel string, ct *compactTime) error {
 	if f, ok := t.methods["triggerSingleCompaction"]; ok {
-		if ff, ok := f.(func(collectionID int64, partitionID int64, segmentID int64, channel string, tt *timetravel) error); ok {
-			return ff(collectionID, partitionID, segmentID, channel, tt)
+		if ff, ok := f.(func(collectionID int64, partitionID int64, segmentID int64, channel string, ct *compactTime) error); ok {
+			return ff(collectionID, partitionID, segmentID, channel, ct)
 		}
 	}
 	panic("not implemented")
 }
 
 // forceTriggerCompaction force to start a compaction
-func (t *mockCompactionTrigger) forceTriggerCompaction(collectionID int64, tt *timetravel) (UniqueID, error) {
+func (t *mockCompactionTrigger) forceTriggerCompaction(collectionID int64, ct *compactTime) (UniqueID, error) {
 	if f, ok := t.methods["forceTriggerCompaction"]; ok {
-		if ff, ok := f.(func(collectionID int64, tt *timetravel) (UniqueID, error)); ok {
-			return ff(collectionID, tt)
+		if ff, ok := f.(func(collectionID int64, ct *compactTime) (UniqueID, error)); ok {
+			return ff(collectionID, ct)
 		}
 	}
 	panic("not implemented")

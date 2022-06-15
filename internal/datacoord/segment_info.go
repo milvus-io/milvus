@@ -37,6 +37,8 @@ type SegmentInfo struct {
 	allocations   []*Allocation
 	lastFlushTime time.Time
 	isCompacting  bool
+	// a cache to avoid calculate twice
+	size int64
 }
 
 // NewSegmentInfo create `SegmentInfo` wrapper from `datapb.SegmentInfo`
@@ -313,6 +315,31 @@ func addSegmentBinlogs(field2Binlogs map[UniqueID][]*datapb.Binlog) SegmentInfoO
 			}
 		}
 	}
+}
+
+func (s *SegmentInfo) getSegmentSize() int64 {
+	if s.size <= 0 {
+		var size int64
+		for _, binlogs := range s.GetBinlogs() {
+			for _, l := range binlogs.GetBinlogs() {
+				size += l.GetLogSize()
+			}
+		}
+
+		for _, deltaLogs := range s.GetDeltalogs() {
+			for _, l := range deltaLogs.GetBinlogs() {
+				size += l.GetLogSize()
+			}
+		}
+
+		for _, statsLogs := range s.GetStatslogs() {
+			for _, l := range statsLogs.GetBinlogs() {
+				size += l.GetLogSize()
+			}
+		}
+		s.size = size
+	}
+	return s.size
 }
 
 // SegmentInfoSelector is the function type to select SegmentInfo from meta
