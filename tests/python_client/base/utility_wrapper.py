@@ -50,12 +50,23 @@ class ApiUtilityWrapper:
                     continue
                 else:
                     state, _ = self.get_bulk_load_state(task_id, task_timeout, using, **kwargs)
-                    if state.state_name == target_state:
-                        successes[task_id] = state
-                    elif state.state_name == BulkLoadStates.BulkLoadFailed:
-                        fails[task_id] = state
+                    if target_state == BulkLoadStates.BulkLoadDataQueryable:
+                        if state.data_queryable is True:
+                            successes[task_id] = True
+                        else:
+                            in_progress[task_id] = False
+                    elif target_state == BulkLoadStates.BulkLoadDataIndexed:
+                        if state.data_indexed is True:
+                            successes[task_id] = True
+                        else:
+                            in_progress[task_id] = False
                     else:
-                        in_progress[task_id] = state
+                        if state.state_name == target_state:
+                            successes[task_id] = state
+                        elif state.state_name == BulkLoadStates.BulkLoadFailed:
+                            fails[task_id] = state
+                        else:
+                            in_progress[task_id] = state
             end = time.time()
             if timeout is not None:
                 if end - start > timeout:
@@ -214,4 +225,5 @@ class ApiUtilityWrapper:
     def mkts_from_hybridts(self, hybridts, milliseconds=0., delta=None):
         res, _ = api_request([self.ut.mkts_from_hybridts, hybridts, milliseconds, delta])
         return res
+
 
