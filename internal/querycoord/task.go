@@ -263,6 +263,10 @@ func (bt *baseTask) setResultInfo(err error) {
 	bt.resultMu.Lock()
 	defer bt.resultMu.Unlock()
 
+	if err != nil {
+		bt.setState(taskFailed)
+	}
+
 	if bt.result == nil {
 		bt.result = &commonpb.Status{}
 	}
@@ -1313,11 +1317,7 @@ func (lst *loadSegmentTask) reschedule(ctx context.Context) ([]task, error) {
 	}
 	lst.excludeNodeIDs = append(lst.excludeNodeIDs, lst.DstNodeID)
 
-	wait2AssignTaskSuccess := false
-	if lst.getParentTask().getTriggerCondition() == querypb.TriggerCondition_NodeDown {
-		wait2AssignTaskSuccess = true
-	}
-	reScheduledTasks, err := assignInternalTask(ctx, lst.getParentTask(), lst.meta, lst.cluster, loadSegmentReqs, nil, wait2AssignTaskSuccess, lst.excludeNodeIDs, nil, lst.ReplicaID, lst.broker)
+	reScheduledTasks, err := assignInternalTask(ctx, lst.getParentTask(), lst.meta, lst.cluster, loadSegmentReqs, nil, false, lst.excludeNodeIDs, nil, lst.ReplicaID, lst.broker)
 	if err != nil {
 		log.Error("loadSegment reschedule failed", zap.Int64s("excludeNodes", lst.excludeNodeIDs), zap.Int64("taskID", lst.getTaskID()), zap.Error(err))
 		return nil, err
