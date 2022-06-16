@@ -286,7 +286,7 @@ func (mcm *MinioChunkManager) MultiRemove(keys []string) error {
 // RemoveWithPrefix removes all objects with the same prefix @prefix from minio.
 func (mcm *MinioChunkManager) RemoveWithPrefix(prefix string) error {
 	objects := mcm.Client.ListObjects(mcm.ctx, mcm.bucketName, minio.ListObjectsOptions{Prefix: prefix, Recursive: true})
-	for rErr := range mcm.Client.RemoveObjects(mcm.ctx, mcm.bucketName, objects, minio.RemoveObjectsOptions{GovernanceBypass: true}) {
+	for rErr := range mcm.Client.RemoveObjects(mcm.ctx, mcm.bucketName, objects, minio.RemoveObjectsOptions{GovernanceBypass: false}) {
 		if rErr.Err != nil {
 			log.Warn("failed to remove objects", zap.String("prefix", prefix), zap.Error(rErr.Err))
 			return rErr.Err
