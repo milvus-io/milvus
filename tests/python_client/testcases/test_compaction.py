@@ -584,7 +584,7 @@ class TestCompactionOperation(TestcaseBase):
 
         collection_w.compact()
         c_plans = collection_w.get_compaction_plans()[0]
-        assert len(c_plans.plans) == 0
+        assert len(c_plans.plans) == 1
 
         # search
         collection_w.load()
@@ -742,7 +742,7 @@ class TestCompactionOperation(TestcaseBase):
         collection_w.compact()
         collection_w.wait_for_compaction_completed()
         c_plans, _ = collection_w.get_compaction_plans()
-        assert len(c_plans.plans) == 0
+        assert len(c_plans.plans) == 1
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_compact_manual_and_auto(self):
