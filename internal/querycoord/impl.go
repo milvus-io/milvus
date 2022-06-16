@@ -276,7 +276,14 @@ func (qc *QueryCoord) LoadCollection(ctx context.Context, req *querypb.LoadColle
 		}
 	}
 
-	baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_GrpcRequest)
+	ddl, ok := ctx.Deadline()
+	taskCtx := qc.loopCtx
+	if ok {
+		// DON"T defer cancel here,
+		// because the request will return before the task finishes
+		taskCtx, _ = context.WithDeadline(qc.loopCtx, ddl)
+	}
+	baseTask := newBaseTask(taskCtx, querypb.TriggerCondition_GrpcRequest)
 	loadCollectionTask := &loadCollectionTask{
 		baseTask:              baseTask,
 		LoadCollectionRequest: req,
@@ -602,7 +609,14 @@ func (qc *QueryCoord) LoadPartitions(ctx context.Context, req *querypb.LoadParti
 		return status, nil
 	}
 
-	baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_GrpcRequest)
+	ddl, ok := ctx.Deadline()
+	taskCtx := qc.loopCtx
+	if ok {
+		// DON"T defer cancel here,
+		// because the request will return before the task finishes
+		taskCtx, _ = context.WithDeadline(qc.loopCtx, ddl)
+	}
+	baseTask := newBaseTask(taskCtx, querypb.TriggerCondition_GrpcRequest)
 	loadPartitionTask := &loadPartitionTask{
 		baseTask:              baseTask,
 		LoadPartitionsRequest: req,
