@@ -2377,6 +2377,13 @@ func (lbt *loadBalanceTask) globalPostExecute(ctx context.Context) error {
 				return nil
 			})
 		}
+
+		// Wait for the previous goroutines,
+		// which conflicts with the code below due to modifing replicas
+		err := wg.Wait()
+		if err != nil {
+			return err
+		}
 		for _, childTask := range lbt.getChildTask() {
 			if task, ok := childTask.(*watchDmChannelTask); ok {
 				wg.Go(func() error {
@@ -2415,7 +2422,7 @@ func (lbt *loadBalanceTask) globalPostExecute(ctx context.Context) error {
 				})
 			}
 		}
-		err := wg.Wait()
+		err = wg.Wait()
 		if err != nil {
 			return err
 		}
