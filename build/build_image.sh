@@ -32,4 +32,8 @@ pushd "${toplevel}"
 
 docker build -f "./build/docker/milvus/${OS_NAME}/Dockerfile" -t "${MILVUS_IMAGE_REPO}:${MILVUS_IMAGE_TAG}" .
 
+image_size=$(docker inspect ${MILVUS_IMAGE_REPO}:${MILVUS_IMAGE_TAG}  -f '{{.Size}}'| awk '{ byte =$1 /1024/1024/1024; print byte " GB" }')
+
+echo "Image Size for  ${MILVUS_IMAGE_REPO}:${MILVUS_IMAGE_TAG} is ${image_size}"
+
 popd
