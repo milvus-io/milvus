@@ -18,6 +18,7 @@ package querynode
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -67,6 +68,7 @@ type nodeEvent struct {
 	eventType nodeEventType
 	nodeID    int64
 	nodeAddr  string
+	isLeader  bool
 }
 
 type segmentEvent struct {
@@ -111,6 +113,9 @@ type ShardSegmentDetector interface {
 // ShardNodeBuilder function type to build types.QueryNode from addr and id
 type ShardNodeBuilder func(nodeID int64, addr string) shardQueryNode
 
+// withStreaming function type to let search detects corresponding search streaming is done.
+type withStreaming func(ctx context.Context) error
+
 // ShardCluster maintains the ShardCluster information and perform shard level operations
 type ShardCluster struct {
 	state *atomic.Int32
@@ -124,13 +129,14 @@ type ShardCluster struct {
 	nodeBuilder     ShardNodeBuilder
 
 	mut            sync.RWMutex
-	nodes          map[int64]*shardNode                 // online nodes
-	segments       map[int64]*shardSegmentInfo          // shard segments
-	legacySegments []shardSegmentInfo                   // legacySegments records, stores segment usage BEFORE load balance
-	handoffs       map[int32]*querypb.SegmentChangeInfo // current pending handoff
-	lastToken      *atomic.Int32                        // last token used for segment change info
-	segmentCond    *sync.Cond                           // segment state change condition
-	rcCond         *sync.Cond                           // segment rc change condition
+	leader         *shardNode                     // shard leader node instance
+	nodes          map[int64]*shardNode           // online nodes
+	segments       SegmentsStatus                 // shard segments
+	versions       map[int64]*ShardClusterVersion // version id to version map
+	currentVersion *ShardClusterVersion           // current serving segment state version
+	nextVersionID  *atomic.Int64
+	segmentCond    *sync.Cond // segment state change condition
+	rcCond         *sync.Cond // segment rc change condition
 
 	closeOnce sync.Once
 	closeCh   chan struct{}
@@ -150,10 +156,10 @@ func NewShardCluster(collectionID int64, replicaID int64, vchannelName string,
 		segmentDetector: segmentDetector,
 		nodeBuilder:     nodeBuilder,
 
-		nodes:     make(map[int64]*shardNode),
-		segments:  make(map[int64]*shardSegmentInfo),
-		handoffs:  make(map[int32]*querypb.SegmentChangeInfo),
-		lastToken: atomic.NewInt32(0),
+		nodes:         make(map[int64]*shardNode),
+		segments:      make(map[int64]shardSegmentInfo),
+		versions:      make(map[int64]*ShardClusterVersion),
+		nextVersionID: atomic.NewInt64(0),
 
 		closeCh: make(chan struct{}),
 	}
@@ -176,6 +182,19 @@ func (sc *ShardCluster) Close() {
 	})
 }
 
+// serviceable returns whether shard cluster could provide query service.
+func (sc *ShardCluster) serviceable() bool {
+	// all segment in loaded state
+	if sc.state.Load() != int32(available) {
+		return false
+	}
+
+	sc.mut.RLock()
+	defer sc.mut.RUnlock()
+	// check there is a working version(SyncSegments called)
+	return sc.currentVersion != nil
+}
+
 // addNode add a node into cluster
 func (sc *ShardCluster) addNode(evt nodeEvent) {
 	log.Info("ShardCluster add node", zap.Int64("nodeID", evt.nodeID))
@@ -191,10 +210,14 @@ func (sc *ShardCluster) addNode(evt nodeEvent) {
 		defer oldNode.client.Stop()
 	}
 
-	sc.nodes[evt.nodeID] = &shardNode{
+	node := &shardNode{
 		nodeID:   evt.nodeID,
 		nodeAddr: evt.nodeAddr,
 		client:   sc.nodeBuilder(evt.nodeID, evt.nodeAddr),
+	}
+	sc.nodes[evt.nodeID] = node
+	if evt.isLeader {
+		sc.leader = node
 	}
 }
 
@@ -213,12 +236,14 @@ func (sc *ShardCluster) removeNode(evt nodeEvent) {
 	defer old.client.Stop()
 	delete(sc.nodes, evt.nodeID)
 
-	for _, segment := range sc.segments {
+	for id, segment := range sc.segments {
 		if segment.nodeID == evt.nodeID {
 			segment.state = segmentStateOffline
+			sc.segments[id] = segment
 			sc.state.Store(int32(unavailable))
 		}
 	}
+	// ignore leader process here
 }
 
 // updateSegment apply segment change to shard cluster
@@ -236,7 +261,7 @@ func (sc *ShardCluster) updateSegment(evt shardSegmentInfo) {
 
 	old, ok := sc.segments[evt.segmentID]
 	if !ok { // newly add
-		sc.segments[evt.segmentID] = &shardSegmentInfo{
+		sc.segments[evt.segmentID] = shardSegmentInfo{
 			nodeID:      evt.nodeID,
 			partitionID: evt.partitionID,
 			segmentID:   evt.segmentID,
@@ -264,7 +289,7 @@ func (sc *ShardCluster) SyncSegments(distribution []*querypb.ReplicaSegmentsInfo
 		for _, segmentID := range line.GetSegmentIds() {
 			old, ok := sc.segments[segmentID]
 			if !ok { // newly add
-				sc.segments[segmentID] = &shardSegmentInfo{
+				sc.segments[segmentID] = shardSegmentInfo{
 					nodeID:      line.GetNodeId(),
 					partitionID: line.GetPartitionId(),
 					segmentID:   segmentID,
@@ -281,6 +306,10 @@ func (sc *ShardCluster) SyncSegments(distribution []*querypb.ReplicaSegmentsInfo
 			})
 		}
 	}
+
+	version := NewShardClusterVersion(sc.nextVersionID.Inc(), sc.segments.Clone(filterNothing))
+	sc.versions[version.versionID] = version
+	sc.currentVersion = version
 }
 
 // transferSegment apply segment state transition.
@@ -288,11 +317,12 @@ func (sc *ShardCluster) SyncSegments(distribution []*querypb.ReplicaSegmentsInfo
 // Offline | OK		 | OK	   | OK
 // Loading | OK		 | OK	   | NodeID check
 // Loaded  | OK      | OK	   | legacy pending
-func (sc *ShardCluster) transferSegment(old *shardSegmentInfo, evt shardSegmentInfo) {
+func (sc *ShardCluster) transferSegment(old shardSegmentInfo, evt shardSegmentInfo) {
 	switch old.state {
 	case segmentStateOffline: // safe to update nodeID and state
 		old.nodeID = evt.nodeID
 		old.state = evt.state
+		sc.segments[old.segmentID] = old
 		if evt.state == segmentStateLoaded {
 			sc.healthCheck()
 		}
@@ -303,24 +333,15 @@ func (sc *ShardCluster) transferSegment(old *shardSegmentInfo, evt shardSegmentI
 		}
 		old.nodeID = evt.nodeID
 		old.state = evt.state
+		sc.segments[old.segmentID] = old
 		if evt.state == segmentStateLoaded {
 			sc.healthCheck()
 		}
 	case segmentStateLoaded:
 		// load balance
-		if old.nodeID != evt.nodeID {
-			sc.legacySegments = append(sc.legacySegments, shardSegmentInfo{
-				nodeID:    old.nodeID,
-				segmentID: old.segmentID,
-				inUse:     old.inUse,
-				state:     old.state,
-			})
-			// set `old` segment.inUse (actually the new online segment) to zero, since there is no allocation for new segment
-			// original inUse is recorded in legacySegments
-			old.inUse = 0
-		}
 		old.nodeID = evt.nodeID
 		old.state = evt.state
+		sc.segments[old.segmentID] = old
 		if evt.state != segmentStateLoaded {
 			sc.healthCheck()
 		}
@@ -462,59 +483,29 @@ func (sc *ShardCluster) getNode(nodeID int64) (*shardNode, bool) {
 }
 
 // getSegment returns copy of shardSegmentInfo
-func (sc *ShardCluster) getSegment(segmentID int64) (*shardSegmentInfo, bool) {
+func (sc *ShardCluster) getSegment(segmentID int64) (shardSegmentInfo, bool) {
 	sc.mut.RLock()
 	defer sc.mut.RUnlock()
 	segment, ok := sc.segments[segmentID]
-	if !ok {
-		return nil, false
-	}
-	return &shardSegmentInfo{
-		segmentID:   segment.segmentID,
-		nodeID:      segment.nodeID,
-		partitionID: segment.partitionID,
-		state:       segment.state,
-	}, true
+	return segment, ok
 }
 
 // segmentAllocations returns node to segments mappings.
 // calling this function also increases the reference count of related segments.
-func (sc *ShardCluster) segmentAllocations(partitionIDs []int64) map[int64][]int64 {
-	result := make(map[int64][]int64) // nodeID => segmentIDs
-	sc.mut.Lock()
-	defer sc.mut.Unlock()
-
-	for _, segment := range sc.segments {
-		if len(partitionIDs) > 0 && !inList(partitionIDs, segment.partitionID) {
-			continue
-		}
-		if sc.inHandoffOffline(segment.segmentID) {
-			log.Debug("segment ignore in pending offline list", zap.Int64("collectionID", sc.collectionID), zap.Int64("replicaID", sc.replicaID), zap.Int64("segmentID", segment.segmentID))
-			continue
-		}
-		// reference count ++
-		segment.inUse++
-		result[segment.nodeID] = append(result[segment.nodeID], segment.segmentID)
+func (sc *ShardCluster) segmentAllocations(partitionIDs []int64) (map[int64][]int64, int64) {
+	// check cluster serviceable
+	if !sc.serviceable() {
+		log.Warn("request segment allocations when cluster is not serviceable", zap.Int64("collectionID", sc.collectionID), zap.Int64("replicaID", sc.replicaID), zap.String("vchannelName", sc.vchannelName))
+		return map[int64][]int64{}, 0
 	}
-	return result
-}
-
-// inHandoffOffline checks whether segment is pending handoff offline list
-// Note that sc.mut Lock is assumed to be hold outside of this function!
-// legacySegments will no be checked as same segment is in another node with loaded state
-func (sc *ShardCluster) inHandoffOffline(segmentID int64) bool {
-	for _, handoff := range sc.handoffs {
-		for _, offlineSegment := range handoff.OfflineSegments {
-			if segmentID == offlineSegment.GetSegmentID() {
-				return true
-			}
-		}
-	}
-	return false
+	sc.mut.RLock()
+	defer sc.mut.RUnlock()
+	// return allocation from current version and version id
+	return sc.currentVersion.GetAllocation(partitionIDs), sc.currentVersion.versionID
 }
 
 // finishUsage decreases the inUse count of provided segments
-func (sc *ShardCluster) finishUsage(allocs map[int64][]int64) {
+func (sc *ShardCluster) finishUsage(versionID int64) {
 	defer func() {
 		sc.rcCond.L.Lock()
 		sc.rcCond.Broadcast()
@@ -522,38 +513,17 @@ func (sc *ShardCluster) finishUsage(allocs map[int64][]int64) {
 	}()
 	sc.mut.Lock()
 	defer sc.mut.Unlock()
-	for nodeID, segments := range allocs {
-		for _, segmentID := range segments {
-			// checking online segments
-			segment, ok := sc.segments[segmentID]
-			if !ok || segment == nil {
-				// this shall not happen, since removing segment without decreasing rc to zero is illegal
-				log.Error("finishUsage with non-existing segment", zap.Int64("collectionID", sc.collectionID), zap.Int64("replicaID", sc.replicaID), zap.String("vchannel", sc.vchannelName), zap.Int64("segmentID", segmentID))
-				continue
-			}
-			if segment.nodeID == nodeID {
-				// decrease the reference count
-				segment.inUse--
-			}
 
-			// checking legacy segments
-			for idx, segment := range sc.legacySegments {
-				if segment.segmentID == segmentID && segment.nodeID == nodeID {
-					sc.legacySegments[idx].inUse--
-					// rc is zero, remove from legacy list
-					if sc.legacySegments[idx].inUse == 0 {
-						sc.legacySegments[idx] = sc.legacySegments[len(sc.legacySegments)-1]
-						sc.legacySegments = sc.legacySegments[:len(sc.legacySegments)-1]
-					}
-				}
-			}
-		}
+	version, ok := sc.versions[versionID]
+	if ok {
+		version.FinishUsage()
 	}
 }
 
 // HandoffSegments processes the handoff/load balance segments update procedure.
 func (sc *ShardCluster) HandoffSegments(info *querypb.SegmentChangeInfo) error {
 	// wait for all OnlineSegment is loaded
+	onlineSegmentIDs := make([]int64, 0, len(info.OnlineSegments))
 	onlineSegments := make([]shardSegmentInfo, 0, len(info.OnlineSegments))
 	for _, seg := range info.OnlineSegments {
 		// filter out segments not maintained in this cluster
@@ -564,21 +534,16 @@ func (sc *ShardCluster) HandoffSegments(info *querypb.SegmentChangeInfo) error {
 			nodeID:    seg.GetNodeID(),
 			segmentID: seg.GetSegmentID(),
 		})
+		onlineSegmentIDs = append(onlineSegmentIDs, seg.GetSegmentID())
 	}
 	sc.waitSegmentsOnline(onlineSegments)
 
+	// now online segment can provide service, generate a new version
 	// add segmentChangeInfo to pending list
-	token := sc.appendHandoff(info)
+	signal, versionID := sc.appendHandoff(info)
 
-	// wait for all OfflineSegments is not in use
-	offlineSegments := make([]shardSegmentInfo, 0, len(info.OfflineSegments))
-	for _, seg := range info.OfflineSegments {
-		offlineSegments = append(offlineSegments, shardSegmentInfo{
-			nodeID:    seg.GetNodeID(),
-			segmentID: seg.GetSegmentID(),
-		})
-	}
-	sc.waitSegmentsNotInUse(offlineSegments)
+	// wait last version not in use
+	<-signal
 
 	removes := make(map[int64][]int64) // nodeID => []segmentIDs
 	// remove offline segments record
@@ -593,6 +558,16 @@ func (sc *ShardCluster) HandoffSegments(info *querypb.SegmentChangeInfo) error {
 	}
 
 	var errs errorutil.ErrorList
+	// remove growing segments if any
+	// handles the case for Growing to Sealed Handoff(which does not has offline segment info)
+	if sc.leader != nil {
+		// error ignored here
+		sc.leader.client.ReleaseSegments(context.Background(), &querypb.ReleaseSegmentsRequest{
+			CollectionID: sc.collectionID,
+			SegmentIDs:   onlineSegmentIDs,
+			Scope:        querypb.DataScope_Streaming,
+		})
+	}
 
 	// notify querynode(s) to release segments
 	for nodeID, segmentIDs := range removes {
@@ -605,6 +580,7 @@ func (sc *ShardCluster) HandoffSegments(info *querypb.SegmentChangeInfo) error {
 		state, err := node.client.ReleaseSegments(context.Background(), &querypb.ReleaseSegmentsRequest{
 			CollectionID: sc.collectionID,
 			SegmentIDs:   segmentIDs,
+			Scope:        querypb.DataScope_Historical,
 		})
 		if err != nil {
 			errs = append(errs, err)
@@ -615,9 +591,9 @@ func (sc *ShardCluster) HandoffSegments(info *querypb.SegmentChangeInfo) error {
 		}
 	}
 
-	// finish handoff and remove it from pending list
-	sc.finishHandoff(token)
+	sc.cleanupVersion(versionID)
 
+	// return err if release fail, however the whole segment change is completed
 	if len(errs) > 0 {
 		return errs
 	}
@@ -625,21 +601,49 @@ func (sc *ShardCluster) HandoffSegments(info *querypb.SegmentChangeInfo) error {
 }
 
 // appendHandoff adds the change info into pending list and returns the token.
-func (sc *ShardCluster) appendHandoff(info *querypb.SegmentChangeInfo) int32 {
+func (sc *ShardCluster) appendHandoff(info *querypb.SegmentChangeInfo) (chan struct{}, int64) {
 	sc.mut.Lock()
 	defer sc.mut.Unlock()
 
-	token := sc.lastToken.Add(1)
-	sc.handoffs[token] = info
-	return token
+	// generate a new version
+	versionID := sc.nextVersionID.Inc()
+	// remove offline segments in next version
+	// so incoming request will not have allocation of these segments
+	version := NewShardClusterVersion(versionID, sc.segments.Clone(func(segmentID int64) bool {
+		for _, offline := range info.OfflineSegments {
+			if offline.GetSegmentID() == segmentID {
+				return true
+			}
+		}
+		return false
+	}))
+	sc.versions[versionID] = version
+
+	var lastVersionID int64
+	// signal for nil current version case, no need to wait
+	signal := make(chan struct{})
+	close(signal)
+	// currentVersion shall be not nil
+	if sc.currentVersion != nil {
+		signal = sc.currentVersion.Expire()
+		lastVersionID = sc.currentVersion.versionID
+	}
+	// set current version to new one
+	sc.currentVersion = version
+	sc.versions[versionID] = version
+
+	return signal, lastVersionID
 }
 
-// finishHandoff removes the handoff related to the token.
-func (sc *ShardCluster) finishHandoff(token int32) {
+// cleanupVersion clean up version from map
+func (sc *ShardCluster) cleanupVersion(versionID int64) {
 	sc.mut.Lock()
 	defer sc.mut.Unlock()
-
-	delete(sc.handoffs, token)
+	// prevent clean up current version
+	if sc.currentVersion != nil && sc.currentVersion.versionID == versionID {
+		return
+	}
+	delete(sc.versions, versionID)
 }
 
 // waitSegmentsOnline waits until all provided segments is loaded.
@@ -649,15 +653,6 @@ func (sc *ShardCluster) waitSegmentsOnline(segments []shardSegmentInfo) {
 		sc.segmentCond.Wait()
 	}
 	sc.segmentCond.L.Unlock()
-}
-
-// waitSegmentsNotInUse waits until all provided segments is not in use.
-func (sc *ShardCluster) waitSegmentsNotInUse(segments []shardSegmentInfo) {
-	sc.rcCond.L.Lock()
-	for sc.segmentsInUse(segments) {
-		sc.rcCond.Wait()
-	}
-	sc.rcCond.L.Unlock()
 }
 
 // checkOnline checks whether all segment info provided in online state.
@@ -674,30 +669,9 @@ func (sc *ShardCluster) segmentsOnline(segments []shardSegmentInfo) bool {
 	return true
 }
 
-// segmentsInUse checks whether all segment ids provided still in use.
-func (sc *ShardCluster) segmentsInUse(segments []shardSegmentInfo) bool {
-	sc.mut.RLock()
-	defer sc.mut.RUnlock()
-	for _, segInfo := range segments {
-		// check online segments
-		segment, ok := sc.segments[segInfo.segmentID]
-		if ok && segment.inUse > 0 && segment.nodeID == segInfo.nodeID {
-			return true
-		}
-
-		// check legacy segments
-		for _, segment := range sc.legacySegments {
-			if segment.nodeID == segInfo.nodeID && segment.segmentID == segInfo.segmentID {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 // Search preforms search operation on shard cluster.
-func (sc *ShardCluster) Search(ctx context.Context, req *querypb.SearchRequest) ([]*internalpb.SearchResults, error) {
-	if sc.state.Load() != int32(available) {
+func (sc *ShardCluster) Search(ctx context.Context, req *querypb.SearchRequest, withStreaming withStreaming) ([]*internalpb.SearchResults, error) {
+	if !sc.serviceable() {
 		return nil, fmt.Errorf("ShardCluster for %s replicaID %d is no available", sc.vchannelName, sc.replicaID)
 	}
 
@@ -706,8 +680,8 @@ func (sc *ShardCluster) Search(ctx context.Context, req *querypb.SearchRequest) 
 	}
 
 	// get node allocation and maintains the inUse reference count
-	segAllocs := sc.segmentAllocations(req.GetReq().GetPartitionIDs())
-	defer sc.finishUsage(segAllocs)
+	segAllocs, versionID := sc.segmentAllocations(req.GetReq().GetPartitionIDs())
+	defer sc.finishUsage(versionID)
 
 	log.Debug("cluster segment distribution", zap.Int("len", len(segAllocs)))
 	for nodeID, segmentIDs := range segAllocs {
@@ -721,8 +695,26 @@ func (sc *ShardCluster) Search(ctx context.Context, req *querypb.SearchRequest) 
 
 	var err error
 	var resultMut sync.Mutex
-	results := make([]*internalpb.SearchResults, 0, len(segAllocs)+1) // count(nodes) + 1(growing)
+	results := make([]*internalpb.SearchResults, 0, len(segAllocs)) // count(nodes) + 1(growing)
 
+	// detect corresponding streaming search is done
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		streamErr := withStreaming(reqCtx)
+		resultMut.Lock()
+		defer resultMut.Unlock()
+		if streamErr != nil {
+			cancel()
+			// not set cancel error
+			if !errors.Is(streamErr, context.Canceled) {
+				err = fmt.Errorf("stream operation failed: %w", streamErr)
+			}
+		}
+	}()
+
+	// dispatch request to followers
 	for nodeID, segments := range segAllocs {
 		nodeReq := proto.Clone(req).(*querypb.SearchRequest)
 		nodeReq.FromShardLeader = true
@@ -740,7 +732,10 @@ func (sc *ShardCluster) Search(ctx context.Context, req *querypb.SearchRequest) 
 			defer resultMut.Unlock()
 			if nodeErr != nil || partialResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 				cancel()
-				err = fmt.Errorf("Search %d failed, reason %s err %w", node.nodeID, partialResult.GetStatus().GetReason(), nodeErr)
+				// not set cancel error
+				if !errors.Is(nodeErr, context.Canceled) {
+					err = fmt.Errorf("Search %d failed, reason %s err %w", node.nodeID, partialResult.GetStatus().GetReason(), nodeErr)
+				}
 				return
 			}
 			results = append(results, partialResult)
@@ -757,8 +752,8 @@ func (sc *ShardCluster) Search(ctx context.Context, req *querypb.SearchRequest) 
 }
 
 // Query performs query operation on shard cluster.
-func (sc *ShardCluster) Query(ctx context.Context, req *querypb.QueryRequest) ([]*internalpb.RetrieveResults, error) {
-	if sc.state.Load() != int32(available) {
+func (sc *ShardCluster) Query(ctx context.Context, req *querypb.QueryRequest, withStreaming withStreaming) ([]*internalpb.RetrieveResults, error) {
+	if !sc.serviceable() {
 		return nil, fmt.Errorf("ShardCluster for %s replicaID %d is no available", sc.vchannelName, sc.replicaID)
 	}
 
@@ -768,8 +763,8 @@ func (sc *ShardCluster) Query(ctx context.Context, req *querypb.QueryRequest) ([
 	}
 
 	// get node allocation and maintains the inUse reference count
-	segAllocs := sc.segmentAllocations(req.GetReq().GetPartitionIDs())
-	defer sc.finishUsage(segAllocs)
+	segAllocs, versionID := sc.segmentAllocations(req.GetReq().GetPartitionIDs())
+	defer sc.finishUsage(versionID)
 
 	// concurrent visiting nodes
 	var wg sync.WaitGroup
@@ -780,6 +775,24 @@ func (sc *ShardCluster) Query(ctx context.Context, req *querypb.QueryRequest) ([
 	var resultMut sync.Mutex
 	results := make([]*internalpb.RetrieveResults, 0, len(segAllocs)+1) // count(nodes) + 1(growing)
 
+	// detect corresponding streaming query is done
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		streamErr := withStreaming(reqCtx)
+		resultMut.Lock()
+		defer resultMut.Unlock()
+		if streamErr != nil {
+			cancel()
+			// not set cancel error
+			if !errors.Is(streamErr, context.Canceled) {
+				err = fmt.Errorf("stream operation failed: %w", streamErr)
+			}
+		}
+	}()
+
+	// dispatch request to followers
 	for nodeID, segments := range segAllocs {
 		nodeReq := proto.Clone(req).(*querypb.QueryRequest)
 		nodeReq.FromShardLeader = true

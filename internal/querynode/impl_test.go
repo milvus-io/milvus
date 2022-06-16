@@ -392,8 +392,17 @@ func TestImpl_ReleaseSegments(t *testing.T) {
 			CollectionID: defaultCollectionID,
 			PartitionIDs: []UniqueID{defaultPartitionID},
 			SegmentIDs:   []UniqueID{defaultSegmentID},
+			Scope:        queryPb.DataScope_All,
 		}
 
+		_, err = node.ReleaseSegments(ctx, req)
+		assert.NoError(t, err)
+
+		req.Scope = queryPb.DataScope_Streaming
+		_, err = node.ReleaseSegments(ctx, req)
+		assert.NoError(t, err)
+
+		req.Scope = queryPb.DataScope_Historical
 		_, err = node.ReleaseSegments(ctx, req)
 		assert.NoError(t, err)
 	})
