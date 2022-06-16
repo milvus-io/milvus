@@ -152,6 +152,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		if err != nil {
 			return errors.New(MetricTypeKey + " not found in search_params")
 		}
+		t.SearchRequest.MetricType = metricType
 
 		searchParams, err := funcutil.GetAttrByKeyFromRepeatedKV(SearchParamsKey, t.request.SearchParams)
 		if err != nil {
