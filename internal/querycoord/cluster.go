@@ -303,18 +303,25 @@ func (c *queryNodeCluster) WatchDmChannels(ctx context.Context, nodeID int64, in
 		if err != nil {
 			return err
 		}
+
 		dmChannelWatchInfo := make([]*querypb.DmChannelWatchInfo, len(in.Infos))
 		for index, info := range in.Infos {
+			nodes := []UniqueID{nodeID}
+
+			old, ok := c.clusterMeta.getDmChannel(info.ChannelName)
+			if ok {
+				nodes = append(nodes, old.NodeIds...)
+			}
+
 			dmChannelWatchInfo[index] = &querypb.DmChannelWatchInfo{
 				CollectionID: info.CollectionID,
 				DmChannel:    info.ChannelName,
-				NodeIDLoaded: nodeID,
 				ReplicaID:    in.ReplicaID,
-				NodeIds:      []int64{nodeID},
+				NodeIds:      nodes,
 			}
 		}
 
-		err = c.clusterMeta.setDmChannelInfos(dmChannelWatchInfo)
+		err = c.clusterMeta.setDmChannelInfos(dmChannelWatchInfo...)
 		if err != nil {
 			// TODO DML channel maybe leaked, need to release dml if no related segment
 			return err
@@ -640,8 +647,8 @@ func (c *queryNodeCluster) StopNode(nodeID int64) {
 	defer c.RUnlock()
 
 	if node, ok := c.nodes[nodeID]; ok {
-		node.stop()
 		c.setNodeState(nodeID, node, offline)
+		node.stop()
 		log.Info("stopNode: queryNode offline", zap.Int64("nodeID", nodeID))
 	}
 }
