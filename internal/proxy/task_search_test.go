@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/types"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -51,10 +53,6 @@ func TestSearchTask_PostExecute(t *testing.T) {
 		}
 		// no result
 		qt.resultBuf <- &internalpb.SearchResults{}
-
-		mockctx, mockcancel := context.WithCancel(ctx)
-		qt.runningGroupCtx = mockctx
-		mockcancel()
 
 		err := qt.PostExecute(context.TODO())
 		assert.NoError(t, err)
@@ -1590,4 +1588,149 @@ func Test_checkIfLoaded(t *testing.T) {
 		assert.NoError(t, err)
 		assert.False(t, loaded)
 	})
+}
+
+func TestSearchTask_ErrExecute(t *testing.T) {
+	Params.Init()
+
+	var (
+		err error
+		ctx = context.TODO()
+
+		rc = NewRootCoordMock()
+		qc = NewQueryCoordMock(withValidShardLeaders())
+		qn = &QueryNodeMock{}
+
+		shardsNum      = int32(2)
+		collectionName = t.Name() + funcutil.GenRandomStr()
+		errPolicy      = func(context.Context, *shardClientMgr, func(context.Context, int64, types.QueryNode, []string) error, map[string][]nodeInfo) error {
+			return fmt.Errorf("fake error")
+		}
+	)
+
+	mockCreator := func(ctx context.Context, address string) (types.QueryNode, error) {
+		return qn, nil
+	}
+
+	mgr := newShardClientMgr(withShardClientCreator(mockCreator))
+
+	rc.Start()
+	defer rc.Stop()
+	qc.Start()
+	defer qc.Stop()
+
+	err = InitMetaCache(rc, qc, mgr)
+	assert.NoError(t, err)
+
+	fieldName2Types := map[string]schemapb.DataType{
+		testBoolField:     schemapb.DataType_Bool,
+		testInt32Field:    schemapb.DataType_Int32,
+		testInt64Field:    schemapb.DataType_Int64,
+		testFloatField:    schemapb.DataType_Float,
+		testDoubleField:   schemapb.DataType_Double,
+		testFloatVecField: schemapb.DataType_FloatVector,
+	}
+	if enableMultipleVectorFields {
+		fieldName2Types[testBinaryVecField] = schemapb.DataType_BinaryVector
+	}
+
+	schema := constructCollectionSchemaByDataType(collectionName, fieldName2Types, testInt64Field, false)
+	marshaledSchema, err := proto.Marshal(schema)
+	assert.NoError(t, err)
+
+	createColT := &createCollectionTask{
+		Condition: NewTaskCondition(ctx),
+		CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
+			CollectionName: collectionName,
+			Schema:         marshaledSchema,
+			ShardsNum:      shardsNum,
+		},
+		ctx:       ctx,
+		rootCoord: rc,
+	}
+
+	require.NoError(t, createColT.OnEnqueue())
+	require.NoError(t, createColT.PreExecute(ctx))
+	require.NoError(t, createColT.Execute(ctx))
+	require.NoError(t, createColT.PostExecute(ctx))
+
+	collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
+	assert.NoError(t, err)
+
+	status, err := qc.LoadCollection(ctx, &querypb.LoadCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:  commonpb.MsgType_LoadCollection,
+			SourceID: Params.ProxyCfg.GetNodeID(),
+		},
+		CollectionID: collectionID,
+	})
+	require.NoError(t, err)
+	require.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+
+	// test begins
+	task := &searchTask{
+		Condition: NewTaskCondition(ctx),
+		SearchRequest: &internalpb.SearchRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_Retrieve,
+				SourceID: Params.ProxyCfg.GetNodeID(),
+			},
+			CollectionID:   collectionID,
+			OutputFieldsId: make([]int64, len(fieldName2Types)),
+		},
+		ctx: ctx,
+		result: &milvuspb.SearchResults{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+		},
+		request: &milvuspb.SearchRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_Retrieve,
+				SourceID: Params.ProxyCfg.GetNodeID(),
+			},
+			CollectionName: collectionName,
+		},
+		qc:       qc,
+		shardMgr: mgr,
+	}
+	for i := 0; i < len(fieldName2Types); i++ {
+		task.SearchRequest.OutputFieldsId[i] = int64(common.StartOfUserFieldID + i)
+	}
+
+	assert.NoError(t, task.OnEnqueue())
+
+	task.ctx = ctx
+
+	assert.NoError(t, task.PreExecute(ctx))
+
+	task.searchShardPolicy = errPolicy
+	assert.Error(t, task.Execute(ctx))
+
+	task.searchShardPolicy = mergeRoundRobinPolicy
+	qn.searchError = fmt.Errorf("mock error")
+	assert.Error(t, task.Execute(ctx))
+
+	qn.searchError = nil
+	qn.withSearchResult = &internalpb.SearchResults{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_NotShardLeader,
+		},
+	}
+	assert.Equal(t, task.Execute(ctx), errInvalidShardLeaders)
+
+	qn.withSearchResult = &internalpb.SearchResults{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		},
+	}
+	assert.Error(t, task.Execute(ctx))
+
+	result1 := &internalpb.SearchResults{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+	}
+	qn.withSearchResult = result1
+	assert.NoError(t, task.Execute(ctx))
 }

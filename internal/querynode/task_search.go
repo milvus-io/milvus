@@ -89,6 +89,10 @@ func (s *searchTask) searchOnStreaming() error {
 		return errors.New("search context timeout")
 	}
 
+	if len(s.req.GetDmlChannels()) <= 0 {
+		return errors.New("invalid nil dml channels")
+	}
+
 	// check if collection has been released, check streaming since it's released first
 	_, err := s.QS.metaReplica.getCollectionByID(s.CollectionID)
 	if err != nil {
@@ -110,7 +114,7 @@ func (s *searchTask) searchOnStreaming() error {
 	defer searchReq.delete()
 
 	// TODO add context
-	partResults, _, _, sErr := searchStreaming(s.QS.metaReplica, searchReq, s.CollectionID, s.iReq.GetPartitionIDs(), s.req.GetDmlChannel())
+	partResults, _, _, sErr := searchStreaming(s.QS.metaReplica, searchReq, s.CollectionID, s.iReq.GetPartitionIDs(), s.req.GetDmlChannels()[0])
 	if sErr != nil {
 		log.Debug("failed to search streaming data", zap.Int64("msgID", s.ID()),
 			zap.Int64("collectionID", s.CollectionID), zap.Error(sErr))
@@ -181,7 +185,10 @@ func (s *searchTask) estimateCPUUsage() {
 	if s.DataScope == querypb.DataScope_Streaming {
 		// assume growing segments num is 5
 		partitionIDs := s.iReq.GetPartitionIDs()
-		channel := s.req.GetDmlChannel()
+		channel := ""
+		if len(s.req.GetDmlChannels()) > 0 {
+			channel = s.req.GetDmlChannels()[0]
+		}
 		segIDs, err := s.QS.metaReplica.getSegmentIDsByVChannel(partitionIDs, channel, segmentTypeGrowing)
 		if err != nil {
 			log.Error("searchTask estimateCPUUsage", zap.Error(err))

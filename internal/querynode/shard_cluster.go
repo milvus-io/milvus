@@ -22,8 +22,6 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/golang/protobuf/proto"
-
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
@@ -32,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/errorutil"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -724,9 +723,8 @@ func (sc *ShardCluster) Search(ctx context.Context, req *querypb.SearchRequest, 
 	if !sc.serviceable() {
 		return nil, fmt.Errorf("ShardCluster for %s replicaID %d is no available", sc.vchannelName, sc.replicaID)
 	}
-
-	if sc.vchannelName != req.GetDmlChannel() {
-		return nil, fmt.Errorf("ShardCluster for %s does not match to request channel :%s", sc.vchannelName, req.GetDmlChannel())
+	if !funcutil.SliceContain(req.GetDmlChannels(), sc.vchannelName) {
+		return nil, fmt.Errorf("ShardCluster for %s does not match request channels :%v", sc.vchannelName, req.GetDmlChannels())
 	}
 
 	// get node allocation and maintains the inUse reference count
@@ -766,10 +764,13 @@ func (sc *ShardCluster) Search(ctx context.Context, req *querypb.SearchRequest, 
 
 	// dispatch request to followers
 	for nodeID, segments := range segAllocs {
-		nodeReq := proto.Clone(req).(*querypb.SearchRequest)
-		nodeReq.FromShardLeader = true
-		nodeReq.Scope = querypb.DataScope_Historical
-		nodeReq.SegmentIDs = segments
+		nodeReq := &querypb.SearchRequest{
+			Req:             req.Req,
+			DmlChannels:     req.DmlChannels,
+			FromShardLeader: true,
+			Scope:           querypb.DataScope_Historical,
+			SegmentIDs:      segments,
+		}
 		node, ok := sc.getNode(nodeID)
 		if !ok { // meta dismatch, report error
 			return nil, fmt.Errorf("ShardCluster for %s replicaID %d is no available", sc.vchannelName, sc.replicaID)
@@ -808,8 +809,8 @@ func (sc *ShardCluster) Query(ctx context.Context, req *querypb.QueryRequest, wi
 	}
 
 	// handles only the dml channel part, segment ids is dispatch by cluster itself
-	if sc.vchannelName != req.GetDmlChannel() {
-		return nil, fmt.Errorf("ShardCluster for %s does not match to request channel :%s", sc.vchannelName, req.GetDmlChannel())
+	if !funcutil.SliceContain(req.GetDmlChannels(), sc.vchannelName) {
+		return nil, fmt.Errorf("ShardCluster for %s does not match to request channels :%v", sc.vchannelName, req.GetDmlChannels())
 	}
 
 	// get node allocation and maintains the inUse reference count
@@ -844,10 +845,13 @@ func (sc *ShardCluster) Query(ctx context.Context, req *querypb.QueryRequest, wi
 
 	// dispatch request to followers
 	for nodeID, segments := range segAllocs {
-		nodeReq := proto.Clone(req).(*querypb.QueryRequest)
-		nodeReq.FromShardLeader = true
-		nodeReq.SegmentIDs = segments
-		nodeReq.Scope = querypb.DataScope_Historical
+		nodeReq := &querypb.QueryRequest{
+			Req:             req.Req,
+			FromShardLeader: true,
+			SegmentIDs:      segments,
+			Scope:           querypb.DataScope_Historical,
+			DmlChannels:     req.DmlChannels,
+		}
 		node, ok := sc.getNode(nodeID)
 		if !ok { // meta dismatch, report error
 			return nil, fmt.Errorf("SharcCluster for %s replicaID %d is no available", sc.vchannelName, sc.replicaID)

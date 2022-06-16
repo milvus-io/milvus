@@ -3,15 +3,14 @@ package proxy
 import (
 	"context"
 	"fmt"
+	"sort"
+	"sync"
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/types"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-
-	"github.com/milvus-io/milvus/internal/util/mock"
 
 	"go.uber.org/zap"
 )
@@ -54,89 +53,109 @@ func TestUpdateShardsWithRoundRobin(t *testing.T) {
 	})
 }
 
-func TestRoundRobinPolicy(t *testing.T) {
+func TestGroupShardLeadersWithSameQueryNode(t *testing.T) {
+	var err error
+
+	Params.Init()
 	var (
 		ctx = context.TODO()
 	)
 
-	mockCreator := func(ctx context.Context, addr string) (types.QueryNode, error) {
-		return &mock.QueryNodeClient{}, nil
+	mgr := newShardClientMgr()
+
+	shard2leaders := map[string][]nodeInfo{
+		"c0": {{nodeID: 0, address: "fake"}, {nodeID: 1, address: "fake"}, {nodeID: 2, address: "fake"}},
+		"c1": {{nodeID: 1, address: "fake"}, {nodeID: 2, address: "fake"}, {nodeID: 3, address: "fake"}},
+		"c2": {{nodeID: 0, address: "fake"}, {nodeID: 2, address: "fake"}, {nodeID: 3, address: "fake"}},
+		"c3": {{nodeID: 1, address: "fake"}, {nodeID: 3, address: "fake"}, {nodeID: 4, address: "fake"}},
+	}
+	mgr.UpdateShardLeaders(nil, shard2leaders)
+	nexts := map[string]int{
+		"c0": 0,
+		"c1": 0,
+		"c2": 0,
+		"c3": 0,
+	}
+	errSet := map[string]error{}
+	node2dmls, qnSet, err := groupShardleadersWithSameQueryNode(ctx, shard2leaders, nexts, errSet, mgr)
+	assert.Nil(t, err)
+	for nodeID := range node2dmls {
+		sort.Slice(node2dmls[nodeID], func(i, j int) bool { return node2dmls[nodeID][i] < node2dmls[nodeID][j] })
 	}
 
-	mgr := newShardClientMgr(withShardClientCreator(mockCreator))
-	dummyLeaders := genShardLeaderInfo("c1", []UniqueID{-1, 1, 2, 3})
-	mgr.UpdateShardLeaders(nil, dummyLeaders)
-	t.Run("All fails", func(t *testing.T) {
-		allFailTests := []struct {
-			leaderIDs []UniqueID
+	cli0, err := mgr.GetClient(ctx, 0)
+	assert.Nil(t, err)
+	cli1, err := mgr.GetClient(ctx, 1)
+	assert.Nil(t, err)
+	cli2, err := mgr.GetClient(ctx, 2)
+	assert.Nil(t, err)
+	cli3, err := mgr.GetClient(ctx, 3)
+	assert.Nil(t, err)
 
-			description string
-		}{
-			{[]UniqueID{1}, "one invalid shard leader"},
-			{[]UniqueID{1, 2}, "two invalid shard leaders"},
-			{[]UniqueID{1, 1}, "two invalid same shard leaders"},
-		}
+	assert.Equal(t, node2dmls, map[int64][]string{0: {"c0", "c2"}, 1: {"c1", "c3"}})
+	assert.Equal(t, qnSet, map[int64]types.QueryNode{0: cli0, 1: cli1})
+	assert.Equal(t, nexts, map[string]int{"c0": 1, "c1": 1, "c2": 1, "c3": 1})
+	// delete client1 in client mgr
+	delete(mgr.clients.data, 1)
+	node2dmls, qnSet, err = groupShardleadersWithSameQueryNode(ctx, shard2leaders, nexts, errSet, mgr)
+	assert.Nil(t, err)
+	for nodeID := range node2dmls {
+		sort.Slice(node2dmls[nodeID], func(i, j int) bool { return node2dmls[nodeID][i] < node2dmls[nodeID][j] })
+	}
+	assert.Equal(t, node2dmls, map[int64][]string{2: {"c1", "c2"}, 3: {"c3"}})
+	assert.Equal(t, qnSet, map[int64]types.QueryNode{2: cli2, 3: cli3})
+	assert.Equal(t, nexts, map[string]int{"c0": 2, "c1": 2, "c2": 2, "c3": 2})
+	assert.NotNil(t, errSet["c0"])
 
-		for _, test := range allFailTests {
-			t.Run(test.description, func(t *testing.T) {
-				query := (&mockQuery{isvalid: false}).query
+	nexts["c0"] = 3
+	_, _, err = groupShardleadersWithSameQueryNode(ctx, shard2leaders, nexts, errSet, mgr)
+	assert.Equal(t, err, errSet["c0"])
 
-				leaders := make([]nodeInfo, 0, len(test.leaderIDs))
-				for _, ID := range test.leaderIDs {
-					leaders = append(leaders, nodeInfo{ID, "random-addr"})
+	nexts["c0"] = 2
+	nexts["c1"] = 3
+	_, _, err = groupShardleadersWithSameQueryNode(ctx, shard2leaders, nexts, errSet, mgr)
+	assert.Equal(t, err, fmt.Errorf("no available shard leader"))
+}
 
-				}
+func TestMergeRoundRobinPolicy(t *testing.T) {
+	var err error
 
-				err := roundRobinPolicy(ctx, mgr, query, leaders)
-				require.Error(t, err)
-			})
-		}
-	})
+	Params.Init()
+	var (
+		ctx = context.TODO()
+	)
 
-	t.Run("Pass at the first try", func(t *testing.T) {
-		allPassTests := []struct {
-			leaderIDs []UniqueID
+	mgr := newShardClientMgr()
 
-			description string
-		}{
-			{[]UniqueID{1}, "one valid shard leader"},
-			{[]UniqueID{1, 2}, "two valid shard leaders"},
-			{[]UniqueID{1, 1}, "two valid same shard leaders"},
-		}
+	shard2leaders := map[string][]nodeInfo{
+		"c0": {{nodeID: 0, address: "fake"}, {nodeID: 1, address: "fake"}, {nodeID: 2, address: "fake"}},
+		"c1": {{nodeID: 1, address: "fake"}, {nodeID: 2, address: "fake"}, {nodeID: 3, address: "fake"}},
+		"c2": {{nodeID: 0, address: "fake"}, {nodeID: 2, address: "fake"}, {nodeID: 3, address: "fake"}},
+		"c3": {{nodeID: 1, address: "fake"}, {nodeID: 3, address: "fake"}, {nodeID: 4, address: "fake"}},
+	}
+	mgr.UpdateShardLeaders(nil, shard2leaders)
 
-		for _, test := range allPassTests {
-			query := (&mockQuery{isvalid: true}).query
-			leaders := make([]nodeInfo, 0, len(test.leaderIDs))
-			for _, ID := range test.leaderIDs {
-				leaders = append(leaders, nodeInfo{ID, "random-addr"})
+	querier := &mockQuery{}
+	querier.init()
 
-			}
-			err := roundRobinPolicy(ctx, mgr, query, leaders)
-			require.NoError(t, err)
-		}
-	})
+	err = mergeRoundRobinPolicy(ctx, mgr, querier.query, shard2leaders)
+	assert.Nil(t, err)
+	assert.Equal(t, querier.records(), map[UniqueID][]string{0: {"c0", "c2"}, 1: {"c1", "c3"}})
 
-	t.Run("Pass at the second try", func(t *testing.T) {
-		passAtLast := []struct {
-			leaderIDs []UniqueID
+	mockerr := fmt.Errorf("mock query node error")
+	querier.init()
+	querier.failset[0] = mockerr
 
-			description string
-		}{
-			{[]UniqueID{-1, 2}, "invalid vs valid shard leaders"},
-			{[]UniqueID{-1, -1, 3}, "invalid, invalid, and valid shard leaders"},
-		}
+	err = mergeRoundRobinPolicy(ctx, mgr, querier.query, shard2leaders)
+	assert.Nil(t, err)
+	assert.Equal(t, querier.records(), map[int64][]string{1: {"c0", "c1", "c3"}, 2: {"c2"}})
 
-		for _, test := range passAtLast {
-			query := (&mockQuery{isvalid: true}).query
-			leaders := make([]nodeInfo, 0, len(test.leaderIDs))
-			for _, ID := range test.leaderIDs {
-				leaders = append(leaders, nodeInfo{ID, "random-addr"})
-
-			}
-			err := roundRobinPolicy(ctx, mgr, query, leaders)
-			require.NoError(t, err)
-		}
-	})
+	querier.init()
+	querier.failset[0] = mockerr
+	querier.failset[2] = mockerr
+	querier.failset[3] = mockerr
+	err = mergeRoundRobinPolicy(ctx, mgr, querier.query, shard2leaders)
+	assert.Equal(t, err, mockerr)
 }
 
 func mockQueryNodeCreator(ctx context.Context, address string) (types.QueryNode, error) {
@@ -144,17 +163,35 @@ func mockQueryNodeCreator(ctx context.Context, address string) (types.QueryNode,
 }
 
 type mockQuery struct {
-	isvalid bool
+	mu       sync.Mutex
+	queryset map[UniqueID][]string
+	failset  map[UniqueID]error
 }
 
-func (m *mockQuery) query(nodeID UniqueID, qn types.QueryNode) error {
-	if nodeID == -1 {
-		return fmt.Errorf("error at condition")
+func (m *mockQuery) query(_ context.Context, nodeID UniqueID, qn types.QueryNode, chs []string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err, ok := m.failset[nodeID]; ok {
+		return err
 	}
+	m.queryset[nodeID] = append(m.queryset[nodeID], chs...)
+	return nil
+}
 
-	if m.isvalid {
-		return nil
+func (m *mockQuery) init() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.queryset = make(map[int64][]string)
+	m.failset = make(map[int64]error)
+}
+
+func (m *mockQuery) records() map[UniqueID][]string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for nodeID := range m.queryset {
+		sort.Slice(m.queryset[nodeID], func(i, j int) bool {
+			return m.queryset[nodeID][i] < m.queryset[nodeID][j]
+		})
 	}
-
-	return fmt.Errorf("mock error in query, NodeID=%d", nodeID)
+	return m.queryset
 }

@@ -1018,7 +1018,7 @@ func TestShardCluster_Search(t *testing.T) {
 		require.EqualValues(t, unavailable, sc.state.Load())
 
 		_, err := sc.Search(ctx, &querypb.SearchRequest{
-			DmlChannel: vchannelName,
+			DmlChannels: []string{vchannelName},
 		}, streamingDoNothing)
 		assert.Error(t, err)
 	})
@@ -1030,7 +1030,7 @@ func TestShardCluster_Search(t *testing.T) {
 		defer sc.Close()
 
 		_, err := sc.Search(ctx, &querypb.SearchRequest{
-			DmlChannel: vchannelName + "_suffix",
+			DmlChannels: []string{vchannelName + "_suffix"},
 		}, streamingDoNothing)
 		assert.Error(t, err)
 	})
@@ -1079,7 +1079,7 @@ func TestShardCluster_Search(t *testing.T) {
 		require.EqualValues(t, available, sc.state.Load())
 
 		result, err := sc.Search(ctx, &querypb.SearchRequest{
-			DmlChannel: vchannelName,
+			DmlChannels: []string{vchannelName},
 		}, streamingDoNothing)
 		assert.NoError(t, err)
 		assert.Equal(t, len(nodeEvents), len(result))
@@ -1129,7 +1129,7 @@ func TestShardCluster_Search(t *testing.T) {
 		require.EqualValues(t, available, sc.state.Load())
 
 		_, err := sc.Search(ctx, &querypb.SearchRequest{
-			DmlChannel: vchannelName,
+			DmlChannels: []string{vchannelName},
 		}, func(ctx context.Context) error { return errors.New("mocked") })
 		assert.Error(t, err)
 	})
@@ -1186,7 +1186,7 @@ func TestShardCluster_Search(t *testing.T) {
 		require.EqualValues(t, available, sc.state.Load())
 
 		_, err := sc.Search(ctx, &querypb.SearchRequest{
-			DmlChannel: vchannelName,
+			DmlChannels: []string{vchannelName},
 		}, streamingDoNothing)
 		assert.Error(t, err)
 	})
@@ -1238,7 +1238,7 @@ func TestShardCluster_Search(t *testing.T) {
 		require.EqualValues(t, available, sc.state.Load())
 
 		_, err := sc.Search(ctx, &querypb.SearchRequest{
-			DmlChannel: vchannelName,
+			DmlChannels: []string{vchannelName},
 		}, streamingDoNothing)
 		assert.Error(t, err)
 	})
@@ -1296,7 +1296,7 @@ func TestShardCluster_Query(t *testing.T) {
 		require.EqualValues(t, unavailable, sc.state.Load())
 
 		_, err := sc.Query(ctx, &querypb.QueryRequest{
-			DmlChannel: vchannelName,
+			DmlChannels: []string{vchannelName},
 		}, streamingDoNothing)
 		assert.Error(t, err)
 	})
@@ -1309,7 +1309,7 @@ func TestShardCluster_Query(t *testing.T) {
 		sc.SyncSegments(nil, segmentStateLoaded)
 
 		_, err := sc.Query(ctx, &querypb.QueryRequest{
-			DmlChannel: vchannelName + "_suffix",
+			DmlChannels: []string{vchannelName + "_suffix"},
 		}, streamingDoNothing)
 		assert.Error(t, err)
 	})
@@ -1357,7 +1357,7 @@ func TestShardCluster_Query(t *testing.T) {
 		require.EqualValues(t, available, sc.state.Load())
 
 		result, err := sc.Query(ctx, &querypb.QueryRequest{
-			DmlChannel: vchannelName,
+			DmlChannels: []string{vchannelName},
 		}, streamingDoNothing)
 		assert.NoError(t, err)
 		assert.Equal(t, len(nodeEvents), len(result))
@@ -1406,7 +1406,7 @@ func TestShardCluster_Query(t *testing.T) {
 		require.EqualValues(t, available, sc.state.Load())
 
 		_, err := sc.Query(ctx, &querypb.QueryRequest{
-			DmlChannel: vchannelName,
+			DmlChannels: []string{vchannelName},
 		}, func(ctx context.Context) error { return errors.New("mocked") })
 		assert.Error(t, err)
 	})
@@ -1463,7 +1463,7 @@ func TestShardCluster_Query(t *testing.T) {
 		require.EqualValues(t, available, sc.state.Load())
 
 		_, err := sc.Query(ctx, &querypb.QueryRequest{
-			DmlChannel: vchannelName,
+			DmlChannels: []string{vchannelName},
 		}, streamingDoNothing)
 		assert.Error(t, err)
 	})
@@ -1515,7 +1515,7 @@ func TestShardCluster_Query(t *testing.T) {
 		require.EqualValues(t, available, sc.state.Load())
 
 		_, err := sc.Query(ctx, &querypb.QueryRequest{
-			DmlChannel: vchannelName,
+			DmlChannels: []string{vchannelName},
 		}, streamingDoNothing)
 		assert.Error(t, err)
 	})
