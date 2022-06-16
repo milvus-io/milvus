@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/streamnative/pulsarctl/pkg/cmdutils"
 )
 
 const (
@@ -200,6 +201,7 @@ type PulsarConfig struct {
 	Base *BaseTable
 
 	Address        string
+	WebAddress     string
 	MaxMessageSize int
 }
 
@@ -207,6 +209,7 @@ func (p *PulsarConfig) init(base *BaseTable) {
 	p.Base = base
 
 	p.initAddress()
+	p.initWebAddress()
 	p.initMaxMessageSize()
 }
 
@@ -216,6 +219,15 @@ func (p *PulsarConfig) initAddress() {
 		panic(err)
 	}
 	p.Address = addr
+}
+
+func (p *PulsarConfig) initWebAddress() {
+	addr, err := p.Base.Load("_PulsarWebAddress")
+	if err != nil {
+		panic(err)
+	}
+	p.WebAddress = addr
+	cmdutils.PulsarCtlConfig.WebServiceURL = p.WebAddress
 }
 
 func (p *PulsarConfig) initMaxMessageSize() {

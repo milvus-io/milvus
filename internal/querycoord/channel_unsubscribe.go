@@ -21,7 +21,6 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
@@ -35,8 +34,7 @@ import (
 )
 
 const (
-	unsubscribeChannelInfoPrefix    = "queryCoord-unsubscribeChannelInfo"
-	unsubscribeChannelCheckInterval = time.Second
+	unsubscribeChannelInfoPrefix = "queryCoord-unsubscribeChannelInfo"
 )
 
 type channelUnsubscribeHandler struct {

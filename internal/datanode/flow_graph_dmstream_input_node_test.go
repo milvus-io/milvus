@@ -58,6 +58,10 @@ func (mm *mockMsgStreamFactory) NewQueryMsgStream(ctx context.Context) (msgstrea
 	return nil, nil
 }
 
+func (mm *mockMsgStreamFactory) NewMsgStreamDisposer(ctx context.Context) func([]string, string) error {
+	return nil
+}
+
 type mockTtMsgStream struct {
 }
 

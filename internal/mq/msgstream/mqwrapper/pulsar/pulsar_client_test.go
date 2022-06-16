@@ -23,21 +23,22 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"net/url"
 	"os"
 	"testing"
 	"time"
 	"unsafe"
 
-	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
-	"github.com/milvus-io/milvus/internal/util/paramtable"
-
-	"go.uber.org/zap"
-
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
+	"github.com/streamnative/pulsarctl/pkg/cmdutils"
+	"github.com/streamnative/pulsarctl/pkg/pulsar/utils"
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
 )
 
 var Params paramtable.BaseTable
@@ -670,4 +671,67 @@ func TestPulsarClient_SubscribeExclusiveFail(t *testing.T) {
 		assert.Error(t, err)
 		assert.True(t, retry.IsUnRecoverable(err))
 	})
+}
+
+func TestPulsarCtl(t *testing.T) {
+	topic := "test"
+	subName := "hello"
+
+	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	pc, err := NewClient(pulsar.ClientOptions{URL: pulsarAddress})
+	assert.Nil(t, err)
+	consumer, err := pc.Subscribe(mqwrapper.ConsumerOptions{
+		Topic:                       topic,
+		SubscriptionName:            subName,
+		BufSize:                     1024,
+		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
+	})
+	assert.Nil(t, err)
+	assert.NotNil(t, consumer)
+	defer consumer.Close()
+
+	_, err = pc.Subscribe(mqwrapper.ConsumerOptions{
+		Topic:                       topic,
+		SubscriptionName:            subName,
+		BufSize:                     1024,
+		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
+	})
+
+	assert.Error(t, err)
+
+	_, err = pc.Subscribe(mqwrapper.ConsumerOptions{
+		Topic:                       topic,
+		SubscriptionName:            subName,
+		BufSize:                     1024,
+		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
+	})
+	assert.Error(t, err)
+
+	topicName, err := utils.GetTopicName(topic)
+	assert.NoError(t, err)
+
+	pulsarURL, err := url.ParseRequestURI(pulsarAddress)
+	if err != nil {
+		panic(err)
+	}
+	webport := Params.LoadWithDefault("pulsar.webport", "80")
+	cmdutils.PulsarCtlConfig.WebServiceURL = "http://" + pulsarURL.Hostname() + ":" + webport
+	admin := cmdutils.NewPulsarClient()
+	err = admin.Subscriptions().Delete(*topicName, subName, true)
+	if err != nil {
+		cmdutils.PulsarCtlConfig.WebServiceURL = "http://" + pulsarURL.Hostname() + ":" + "8080"
+		admin := cmdutils.NewPulsarClient()
+		err = admin.Subscriptions().Delete(*topicName, subName, true)
+		assert.NoError(t, err)
+	}
+
+	consumer2, err := pc.Subscribe(mqwrapper.ConsumerOptions{
+		Topic:                       topic,
+		SubscriptionName:            subName,
+		BufSize:                     1024,
+		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
+	})
+	assert.Nil(t, err)
+	assert.NotNil(t, consumer2)
+	defer consumer2.Close()
 }

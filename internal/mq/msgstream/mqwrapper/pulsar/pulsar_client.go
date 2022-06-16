@@ -20,10 +20,9 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
-
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"go.uber.org/zap"
 )
