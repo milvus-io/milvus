@@ -1508,3 +1508,83 @@ func TestMetaTable_checkFieldIndexDuplicate(t *testing.T) {
 		assert.False(t, duplicate)
 	})
 }
+
+func TestMetaTable_GetInitBuildIDs(t *testing.T) {
+	var (
+		collName  = "GetInitBuildID-Coll"
+		indexName = "GetInitBuildID-Index"
+	)
+	mt := &MetaTable{
+		collID2Meta: map[typeutil.UniqueID]pb.CollectionInfo{
+			1: {
+				FieldIndexes: []*pb.FieldIndexInfo{
+					{
+						FiledID: 1,
+						IndexID: 1,
+					},
+					{
+						FiledID: 2,
+						IndexID: 2,
+					},
+					{
+						FiledID: 3,
+						IndexID: 3,
+					},
+				},
+			},
+		},
+		collName2ID: map[string]typeutil.UniqueID{
+			"GetInitBuildID-Coll-1": 2,
+		},
+		indexID2Meta: map[typeutil.UniqueID]pb.IndexInfo{
+			1: {
+				IndexName: "GetInitBuildID-Index-1",
+				IndexID:   1,
+			},
+			2: {
+				IndexName: "GetInitBuildID-Index-2",
+				IndexID:   2,
+			},
+		},
+	}
+	t.Run("coll not exist", func(t *testing.T) {
+		buildIDs, err := mt.GetInitBuildIDs("collName", indexName)
+		assert.Error(t, err)
+		assert.Nil(t, buildIDs)
+	})
+
+	mt.collName2ID[collName] = 1
+
+	t.Run("index not exist", func(t *testing.T) {
+		buildIDs, err := mt.GetInitBuildIDs(collName, indexName)
+		assert.Error(t, err)
+		assert.Nil(t, buildIDs)
+	})
+
+	mt.indexID2Meta[3] = pb.IndexInfo{
+		IndexName: indexName,
+		IndexID:   3,
+	}
+
+	mt.segID2IndexMeta = map[typeutil.UniqueID]map[typeutil.UniqueID]pb.SegmentIndexInfo{
+		4: {
+			1: {
+				IndexID:     1,
+				EnableIndex: true,
+			},
+		},
+		5: {
+			3: {
+				IndexID:     3,
+				EnableIndex: true,
+				ByAutoFlush: false,
+			},
+		},
+	}
+
+	t.Run("success", func(t *testing.T) {
+		buildIDs, err := mt.GetInitBuildIDs(collName, indexName)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(buildIDs))
+	})
+}

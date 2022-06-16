@@ -939,6 +939,40 @@ func (mt *MetaTable) DropIndex(collName, fieldName, indexName string) (typeutil.
 	return dropIdxID, true, nil
 }
 
+func (mt *MetaTable) GetInitBuildIDs(collName, indexName string) ([]UniqueID, error) {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+
+	collMeta, err := mt.unlockGetCollectionInfo(collName)
+	if err != nil {
+		return nil, err
+	}
+
+	var indexID typeutil.UniqueID
+	for _, info := range collMeta.FieldIndexes {
+		idxMeta, ok := mt.indexID2Meta[info.IndexID]
+		if ok && idxMeta.IndexName == indexName {
+			indexID = info.IndexID
+			break
+		}
+	}
+
+	if indexID == 0 {
+		log.Warn("get init buildIDs, index not found", zap.String("collection name", collName),
+			zap.String("index name", indexName))
+		return nil, fmt.Errorf("index not found with name = %s in collection %s", indexName, collName)
+	}
+
+	initBuildIDs := make([]UniqueID, 0)
+	for _, indexID2Info := range mt.segID2IndexMeta {
+		segIndexInfo, ok := indexID2Info[indexID]
+		if ok && segIndexInfo.EnableIndex && !segIndexInfo.ByAutoFlush {
+			initBuildIDs = append(initBuildIDs, segIndexInfo.BuildID)
+		}
+	}
+	return initBuildIDs, nil
+}
+
 // GetSegmentIndexInfoByID return segment index info by segment id
 func (mt *MetaTable) GetSegmentIndexInfoByID(segID typeutil.UniqueID, fieldID int64, idxName string) (pb.SegmentIndexInfo, error) {
 	mt.ddLock.RLock()

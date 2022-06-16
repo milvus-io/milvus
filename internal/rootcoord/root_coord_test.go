@@ -3486,3 +3486,108 @@ func TestCore_getCollectionName(t *testing.T) {
 	assert.Equal(t, "dummy", collName)
 	assert.Equal(t, "p2", partName)
 }
+
+func TestCore_GetIndexState(t *testing.T) {
+	var (
+		collName  = "collName"
+		fieldName = "fieldName"
+		indexName = "indexName"
+	)
+	mt := &MetaTable{
+		ddLock: sync.RWMutex{},
+		collID2Meta: map[typeutil.UniqueID]etcdpb.CollectionInfo{
+			1: {
+				FieldIndexes: []*etcdpb.FieldIndexInfo{
+					{
+						FiledID: 1,
+						IndexID: 1,
+					},
+				},
+			},
+		},
+		collName2ID: map[string]typeutil.UniqueID{
+			collName: 2,
+		},
+		indexID2Meta: map[typeutil.UniqueID]etcdpb.IndexInfo{
+			1: {
+				IndexID:   1,
+				IndexName: indexName,
+			},
+		},
+		segID2IndexMeta: map[typeutil.UniqueID]map[typeutil.UniqueID]etcdpb.SegmentIndexInfo{
+			3: {
+				1: {
+					SegmentID:   3,
+					BuildID:     1,
+					EnableIndex: false,
+				},
+			},
+		},
+	}
+
+	core := &Core{
+		MetaTable: mt,
+	}
+	req := &milvuspb.GetIndexStateRequest{
+		CollectionName: collName,
+		FieldName:      fieldName,
+		IndexName:      indexName,
+	}
+	core.stateCode.Store(internalpb.StateCode_Abnormal)
+
+	t.Run("core not healthy", func(t *testing.T) {
+		resp, err := core.GetIndexState(context.Background(), req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.GetErrorCode())
+	})
+
+	core.stateCode.Store(internalpb.StateCode_Healthy)
+
+	t.Run("get init buildiDs failed", func(t *testing.T) {
+		resp, err := core.GetIndexState(context.Background(), req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.GetErrorCode())
+	})
+
+	core.MetaTable.collName2ID[collName] = 1
+
+	t.Run("number of buildIDs is zero", func(t *testing.T) {
+		core.CallGetIndexStatesService = func(ctx context.Context, IndexBuildIDs []int64) ([]*indexpb.IndexInfo, error) {
+			return []*indexpb.IndexInfo{}, nil
+		}
+		resp, err := core.GetIndexState(context.Background(), req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.GetErrorCode())
+	})
+
+	t.Run("CallGetIndexStatesService failed", func(t *testing.T) {
+		core.MetaTable.segID2IndexMeta[3] = map[typeutil.UniqueID]etcdpb.SegmentIndexInfo{
+			1: {
+				SegmentID:   3,
+				BuildID:     1,
+				EnableIndex: true,
+			},
+		}
+		core.CallGetIndexStatesService = func(ctx context.Context, IndexBuildIDs []int64) ([]*indexpb.IndexInfo, error) {
+			return nil, errors.New("error occurred")
+		}
+
+		resp, err := core.GetIndexState(context.Background(), req)
+		assert.Error(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.GetErrorCode())
+	})
+
+	t.Run("success", func(t *testing.T) {
+		core.CallGetIndexStatesService = func(ctx context.Context, IndexBuildIDs []int64) ([]*indexpb.IndexInfo, error) {
+			return []*indexpb.IndexInfo{
+				{
+					State:        commonpb.IndexState_Finished,
+					IndexBuildID: 1,
+				},
+			}, nil
+		}
+		resp, err := core.GetIndexState(context.Background(), req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.GetErrorCode())
+	})
+}

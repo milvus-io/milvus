@@ -24,6 +24,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
+
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/types"
 
@@ -752,6 +754,24 @@ func (coord *RootCoordMock) DescribeIndex(ctx context.Context, req *milvuspb.Des
 	}, nil
 }
 
+func (coord *RootCoordMock) GetIndexState(ctx context.Context, req *milvuspb.GetIndexStateRequest) (*indexpb.GetIndexStatesResponse, error) {
+	code := coord.state.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		return &indexpb.GetIndexStatesResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    fmt.Sprintf("state code = %s", internalpb.StateCode_name[int32(code)]),
+			},
+		}, nil
+	}
+	return &indexpb.GetIndexStatesResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+	}, nil
+}
+
 func (coord *RootCoordMock) DropIndex(ctx context.Context, req *milvuspb.DropIndexRequest) (*commonpb.Status, error) {
 	code := coord.state.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
@@ -1068,6 +1088,7 @@ type ShowSegmentsFunc func(ctx context.Context, request *milvuspb.ShowSegmentsRe
 type DescribeSegmentsFunc func(ctx context.Context, request *rootcoordpb.DescribeSegmentsRequest) (*rootcoordpb.DescribeSegmentsResponse, error)
 type ImportFunc func(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error)
 type DropCollectionFunc func(ctx context.Context, request *milvuspb.DropCollectionRequest) (*commonpb.Status, error)
+type GetIndexStateFunc func(ctx context.Context, request *milvuspb.GetIndexStateRequest) (*indexpb.GetIndexStatesResponse, error)
 
 type mockRootCoord struct {
 	types.RootCoord
@@ -1078,6 +1099,7 @@ type mockRootCoord struct {
 	DescribeSegmentsFunc
 	ImportFunc
 	DropCollectionFunc
+	GetIndexStateFunc
 }
 
 func (m *mockRootCoord) DescribeCollection(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
@@ -1125,6 +1147,13 @@ func (m *mockRootCoord) Import(ctx context.Context, request *milvuspb.ImportRequ
 func (m *mockRootCoord) DropCollection(ctx context.Context, request *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
 	if m.DropCollectionFunc != nil {
 		return m.DropCollectionFunc(ctx, request)
+	}
+	return nil, errors.New("mock")
+}
+
+func (m *mockRootCoord) GetIndexState(ctx context.Context, request *milvuspb.GetIndexStateRequest) (*indexpb.GetIndexStatesResponse, error) {
+	if m.GetIndexStateFunc != nil {
+		return m.GetIndexStateFunc(ctx, request)
 	}
 	return nil, errors.New("mock")
 }
