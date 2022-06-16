@@ -76,6 +76,7 @@ minio:
 pulsar:
   address: localhost # Address of pulsar
   port: 6650 # Port of pulsar
+  webport: 80 # Web port of pulsar, if you connect direcly without proxy, should use 8080
   maxMessageSize: 5242880 # 5 * 1024 * 1024 Bytes, Maximum size of each message in pulsar.
 
 # If you want to enable kafka, needs to comment the pulsar configs

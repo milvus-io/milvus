@@ -27,11 +27,9 @@ import (
 // TODO use streamnative pulsarctl
 func UnsubscribeChannels(ctx context.Context, factory Factory, subName string, channels []string) {
 	log.Info("unsubscribe channel", zap.String("subname", subName), zap.Any("channels", channels))
-	msgStream, err := factory.NewMsgStream(ctx)
+	err := factory.NewMsgStreamDisposer(ctx)(channels, subName)
 	if err != nil {
-		log.Error("unsubscribe channels failed", zap.String("subname", subName), zap.Any("channels", channels))
+		log.Warn("failed to unsubscribe channels", zap.String("subname", subName), zap.Any("channels", channels), zap.Error(err))
 		panic(err)
 	}
-	msgStream.AsConsumer(channels, subName)
-	msgStream.Close()
 }

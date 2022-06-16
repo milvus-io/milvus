@@ -360,6 +360,10 @@ func (factory *simpleMockMsgStreamFactory) NewQueryMsgStream(ctx context.Context
 	return newSimpleMockMsgStream(), nil
 }
 
+func (factory *simpleMockMsgStreamFactory) NewMsgStreamDisposer(ctx context.Context) func([]string, string) error {
+	return nil
+}
+
 func newSimpleMockMsgStreamFactory() *simpleMockMsgStreamFactory {
 	return &simpleMockMsgStreamFactory{}
 }

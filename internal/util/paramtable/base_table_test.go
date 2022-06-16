@@ -157,6 +157,17 @@ func TestBaseTable_LoadYaml(t *testing.T) {
 	assert.Nil(t, err)
 }
 
+func TestBaseTable_Pulsar(t *testing.T) {
+	//test PULSAR ADDRESS
+	os.Setenv("PULSAR_ADDRESS", "pulsar://localhost:6650")
+	baseParams.loadPulsarConfig()
+
+	address := baseParams.Get("_PulsarAddress")
+	assert.Equal(t, "pulsar://localhost:6650", address)
+	webAddress := baseParams.Get("_PulsarWebAddress")
+	assert.Equal(t, "http://localhost:80", webAddress)
+}
+
 func TestBaseTable_ConfDir(t *testing.T) {
 	rightConfig := baseParams.configDir
 	// fake dir

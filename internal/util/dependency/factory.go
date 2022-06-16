@@ -95,13 +95,18 @@ func (f *DefaultFactory) initMQRemoteService(params *paramtable.ComponentParam) 
 
 func (f *DefaultFactory) NewMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
 	return f.msgStreamFactory.NewMsgStream(ctx)
-
 }
+
 func (f *DefaultFactory) NewTtMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
 	return f.msgStreamFactory.NewTtMsgStream(ctx)
 }
+
 func (f *DefaultFactory) NewQueryMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
 	return f.msgStreamFactory.NewQueryMsgStream(ctx)
+}
+
+func (f *DefaultFactory) NewMsgStreamDisposer(ctx context.Context) func([]string, string) error {
+	return f.msgStreamFactory.NewMsgStreamDisposer(ctx)
 }
 
 func (f *DefaultFactory) NewCacheStorageChunkManager(ctx context.Context) (storage.ChunkManager, error) {
@@ -113,10 +118,8 @@ func (f *DefaultFactory) NewVectorStorageChunkManager(ctx context.Context) (stor
 }
 
 type Factory interface {
+	msgstream.Factory
 	Init(p *paramtable.ComponentParam)
-	NewMsgStream(ctx context.Context) (msgstream.MsgStream, error)
-	NewTtMsgStream(ctx context.Context) (msgstream.MsgStream, error)
-	NewQueryMsgStream(ctx context.Context) (msgstream.MsgStream, error)
 	NewCacheStorageChunkManager(ctx context.Context) (storage.ChunkManager, error)
 	NewVectorStorageChunkManager(ctx context.Context) (storage.ChunkManager, error)
 }

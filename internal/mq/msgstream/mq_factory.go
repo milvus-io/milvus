@@ -21,31 +21,34 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/util/paramtable"
-
-	rmqimplserver "github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
-
 	"github.com/apache/pulsar-client-go/pulsar"
+	"github.com/milvus-io/milvus/internal/log"
+	rmqimplserver "github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
 	kafkawrapper "github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper/kafka"
 	puslarmqwrapper "github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper/pulsar"
 	rmqwrapper "github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper/rmq"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"github.com/milvus-io/milvus/internal/util/retry"
+	"github.com/streamnative/pulsarctl/pkg/cmdutils"
+	"github.com/streamnative/pulsarctl/pkg/pulsar/utils"
 )
 
 // PmsFactory is a pulsar msgstream factory that implemented Factory interface(msgstream.go)
 type PmsFactory struct {
 	dispatcherFactory ProtoUDFactory
 	// the following members must be public, so that mapstructure.Decode() can access them
-	PulsarAddress  string
-	ReceiveBufSize int64
-	PulsarBufSize  int64
+	PulsarAddress    string
+	PulsarWebAddress string
+	ReceiveBufSize   int64
+	PulsarBufSize    int64
 }
 
 func NewPmsFactory(config *paramtable.PulsarConfig) *PmsFactory {
 	return &PmsFactory{
-		PulsarBufSize:  1024,
-		ReceiveBufSize: 1024,
-		PulsarAddress:  config.Address,
+		PulsarBufSize:    1024,
+		ReceiveBufSize:   1024,
+		PulsarAddress:    config.Address,
+		PulsarWebAddress: config.WebAddress,
 	}
 }
 
@@ -70,6 +73,33 @@ func (f *PmsFactory) NewTtMsgStream(ctx context.Context) (MsgStream, error) {
 // NewQueryMsgStream is used to generate a new QueryMsgstream object
 func (f *PmsFactory) NewQueryMsgStream(ctx context.Context) (MsgStream, error) {
 	return f.NewMsgStream(ctx)
+}
+
+func (f *PmsFactory) NewMsgStreamDisposer(ctx context.Context) func([]string, string) error {
+	return func(channels []string, subname string) error {
+		// try to delete the old subscription
+		admin := cmdutils.NewPulsarClient()
+		for _, channel := range channels {
+			topic, err := utils.GetTopicName(channel)
+			if err != nil {
+				log.Warn("failed to get topic name", zap.Error(err))
+				return retry.Unrecoverable(err)
+			}
+			err = admin.Subscriptions().Delete(*topic, subname, true)
+			if err != nil {
+				log.Warn("failed to clean up subscriptions", zap.String("pulsar web", f.PulsarWebAddress),
+					zap.String("topic", channel), zap.Any("subname", subname), zap.Error(err))
+				// fallback to original way
+				msgstream, err := f.NewMsgStream(ctx)
+				if err != nil {
+					return err
+				}
+				msgstream.AsConsumer([]string{channel}, subname)
+				msgstream.Close()
+			}
+		}
+		return nil
+	}
 }
 
 // RmsFactory is a rocksmq msgstream factory that implemented Factory interface(msgstream.go)
@@ -107,6 +137,18 @@ func (f *RmsFactory) NewQueryMsgStream(ctx context.Context) (MsgStream, error) {
 	return NewMqMsgStream(ctx, f.ReceiveBufSize, f.RmqBufSize, rmqClient, f.dispatcherFactory.NewUnmarshalDispatcher())
 }
 
+func (f *RmsFactory) NewMsgStreamDisposer(ctx context.Context) func([]string, string) error {
+	return func(channels []string, subname string) error {
+		msgstream, err := f.NewMsgStream(ctx)
+		if err != nil {
+			return err
+		}
+		msgstream.AsConsumer(channels, subname)
+		msgstream.Close()
+		return nil
+	}
+}
+
 // NewRmsFactory is used to generate a new RmsFactory object
 func NewRmsFactory(path string) *RmsFactory {
 	f := &RmsFactory{
@@ -140,6 +182,18 @@ func (f *KmsFactory) NewTtMsgStream(ctx context.Context) (MsgStream, error) {
 
 func (f *KmsFactory) NewQueryMsgStream(ctx context.Context) (MsgStream, error) {
 	return f.NewMsgStream(ctx)
+}
+
+func (f *KmsFactory) NewMsgStreamDisposer(ctx context.Context) func([]string, string) error {
+	return func(channels []string, subname string) error {
+		msgstream, err := f.NewMsgStream(ctx)
+		if err != nil {
+			return err
+		}
+		msgstream.AsConsumer(channels, subname)
+		msgstream.Close()
+		return nil
+	}
 }
 
 func NewKmsFactory(config *paramtable.KafkaConfig) Factory {

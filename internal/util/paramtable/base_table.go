@@ -13,6 +13,7 @@ package paramtable
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"path"
 	"runtime"
@@ -29,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"go.uber.org/zap"
 )
 
 // UniqueID is type alias of typeutil.UniqueID
@@ -438,13 +440,23 @@ func (gp *BaseTable) loadPulsarConfig() {
 	if pulsarAddress == "" {
 		pulsarHost := gp.Get("pulsar.address")
 		port := gp.Get("pulsar.port")
-
 		if len(pulsarHost) != 0 && len(port) != 0 {
 			pulsarAddress = "pulsar://" + pulsarHost + ":" + port
 		}
 	}
-
 	gp.Save("_PulsarAddress", pulsarAddress)
+
+	// parse pulsar address to find the host
+	pulsarURL, err := url.ParseRequestURI(pulsarAddress)
+	if err != nil {
+		gp.Save("_PulsarWebAddress", "")
+		log.Info("failed to parse pulsar config, assume pulsar not used", zap.Error(err))
+		return
+	}
+	webport := gp.LoadWithDefault("pulsar.webport", "80")
+	pulsarWebAddress := "http://" + pulsarURL.Hostname() + ":" + webport
+	gp.Save("_PulsarWebAddress", pulsarWebAddress)
+	log.Info("Pulsar config", zap.String("pulsar url", pulsarAddress), zap.String("pulsar web url", pulsarWebAddress))
 }
 
 func (gp *BaseTable) loadRocksMQConfig() {
