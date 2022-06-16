@@ -1607,31 +1607,31 @@ func TestGetVChannelPos(t *testing.T) {
 
 	t.Run("get unexisted channel", func(t *testing.T) {
 		vchan := svr.handler.GetVChanPositions("chx1", 0, allPartitionID)
-		assert.Empty(t, vchan.UnflushedSegments)
-		assert.Empty(t, vchan.FlushedSegments)
+		assert.Empty(t, vchan.UnflushedSegmentIds)
+		assert.Empty(t, vchan.FlushedSegmentIds)
 	})
 
 	t.Run("get existed channel", func(t *testing.T) {
 		vchan := svr.handler.GetVChanPositions("ch1", 0, allPartitionID)
-		assert.EqualValues(t, 1, len(vchan.FlushedSegments))
-		assert.EqualValues(t, 1, vchan.FlushedSegments[0].ID)
-		assert.EqualValues(t, 2, len(vchan.UnflushedSegments))
+		assert.EqualValues(t, 1, len(vchan.FlushedSegmentIds))
+		assert.EqualValues(t, 1, vchan.FlushedSegmentIds[0])
+		assert.EqualValues(t, 2, len(vchan.UnflushedSegmentIds))
 		assert.EqualValues(t, []byte{1, 2, 3}, vchan.GetSeekPosition().GetMsgID())
 	})
 
 	t.Run("empty collection", func(t *testing.T) {
 		infos := svr.handler.GetVChanPositions("ch0_suffix", 1, allPartitionID)
 		assert.EqualValues(t, 1, infos.CollectionID)
-		assert.EqualValues(t, 0, len(infos.FlushedSegments))
-		assert.EqualValues(t, 0, len(infos.UnflushedSegments))
+		assert.EqualValues(t, 0, len(infos.FlushedSegmentIds))
+		assert.EqualValues(t, 0, len(infos.UnflushedSegmentIds))
 		assert.EqualValues(t, []byte{8, 9, 10}, infos.SeekPosition.MsgID)
 	})
 
 	t.Run("filter partition", func(t *testing.T) {
 		infos := svr.handler.GetVChanPositions("ch1", 0, 1)
 		assert.EqualValues(t, 0, infos.CollectionID)
-		assert.EqualValues(t, 0, len(infos.FlushedSegments))
-		assert.EqualValues(t, 1, len(infos.UnflushedSegments))
+		assert.EqualValues(t, 0, len(infos.FlushedSegmentIds))
+		assert.EqualValues(t, 1, len(infos.UnflushedSegmentIds))
 		assert.EqualValues(t, []byte{11, 12, 13}, infos.SeekPosition.MsgID)
 	})
 }
@@ -1852,8 +1852,8 @@ func TestGetRecoveryInfo(t *testing.T) {
 		assert.Nil(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 		assert.EqualValues(t, 1, len(resp.GetChannels()))
-		assert.EqualValues(t, 0, len(resp.GetChannels()[0].GetUnflushedSegments()))
-		assert.ElementsMatch(t, []*datapb.SegmentInfo{trimSegmentInfo(seg1), trimSegmentInfo(seg2)}, resp.GetChannels()[0].GetFlushedSegments())
+		assert.EqualValues(t, 0, len(resp.GetChannels()[0].GetUnflushedSegmentIds()))
+		//assert.ElementsMatch(t, []*datapb.SegmentInfo{trimSegmentInfo(seg1), trimSegmentInfo(seg2)}, resp.GetChannels()[0].GetFlushedSegments())
 		assert.EqualValues(t, 10, resp.GetChannels()[0].GetSeekPosition().GetTimestamp())
 	})
 
@@ -1989,8 +1989,8 @@ func TestGetRecoveryInfo(t *testing.T) {
 		assert.EqualValues(t, 1, len(resp.GetChannels()))
 		assert.NotNil(t, resp.GetChannels()[0].SeekPosition)
 		assert.NotEqual(t, 0, resp.GetChannels()[0].GetSeekPosition().GetTimestamp())
-		assert.Len(t, resp.GetChannels()[0].GetDroppedSegments(), 1)
-		assert.Equal(t, UniqueID(8), resp.GetChannels()[0].GetDroppedSegments()[0].GetID())
+		assert.Len(t, resp.GetChannels()[0].GetDroppedSegmentIds(), 1)
+		assert.Equal(t, UniqueID(8), resp.GetChannels()[0].GetDroppedSegmentIds()[0])
 	})
 
 	t.Run("with closed server", func(t *testing.T) {

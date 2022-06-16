@@ -164,10 +164,10 @@ func TestDataNode(t *testing.T) {
 		}()
 
 		vchan := &datapb.VchannelInfo{
-			CollectionID:      1,
-			ChannelName:       dmChannelName,
-			UnflushedSegments: []*datapb.SegmentInfo{},
-			FlushedSegments:   []*datapb.SegmentInfo{},
+			CollectionID:        1,
+			ChannelName:         dmChannelName,
+			UnflushedSegmentIds: []int64{},
+			FlushedSegmentIds:   []int64{},
 		}
 
 		err := node1.flowgraphManager.addAndStart(node1, vchan)
@@ -366,17 +366,17 @@ func TestDataNode(t *testing.T) {
 		chName1 := "fake-by-dev-rootcoord-dml-testimport-1"
 		chName2 := "fake-by-dev-rootcoord-dml-testimport-2"
 		err := node.flowgraphManager.addAndStart(node, &datapb.VchannelInfo{
-			CollectionID:      100,
-			ChannelName:       chName1,
-			UnflushedSegments: []*datapb.SegmentInfo{},
-			FlushedSegments:   []*datapb.SegmentInfo{},
+			CollectionID:        100,
+			ChannelName:         chName1,
+			UnflushedSegmentIds: []int64{},
+			FlushedSegmentIds:   []int64{},
 		})
 		require.Nil(t, err)
 		err = node.flowgraphManager.addAndStart(node, &datapb.VchannelInfo{
-			CollectionID:      999, // wrong collection ID.
-			ChannelName:       chName2,
-			UnflushedSegments: []*datapb.SegmentInfo{},
-			FlushedSegments:   []*datapb.SegmentInfo{},
+			CollectionID:        999, // wrong collection ID.
+			ChannelName:         chName2,
+			UnflushedSegmentIds: []int64{},
+			FlushedSegmentIds:   []int64{},
 		})
 		require.Nil(t, err)
 
@@ -547,17 +547,17 @@ func TestDataNode_AddSegment(t *testing.T) {
 		chName1 := "fake-by-dev-rootcoord-dml-testaddsegment-1"
 		chName2 := "fake-by-dev-rootcoord-dml-testaddsegment-2"
 		err := node.flowgraphManager.addAndStart(node, &datapb.VchannelInfo{
-			CollectionID:      100,
-			ChannelName:       chName1,
-			UnflushedSegments: []*datapb.SegmentInfo{},
-			FlushedSegments:   []*datapb.SegmentInfo{},
+			CollectionID:        100,
+			ChannelName:         chName1,
+			UnflushedSegmentIds: []int64{},
+			FlushedSegmentIds:   []int64{},
 		})
 		require.Nil(t, err)
 		err = node.flowgraphManager.addAndStart(node, &datapb.VchannelInfo{
-			CollectionID:      100,
-			ChannelName:       chName2,
-			UnflushedSegments: []*datapb.SegmentInfo{},
-			FlushedSegments:   []*datapb.SegmentInfo{},
+			CollectionID:        100,
+			ChannelName:         chName2,
+			UnflushedSegmentIds: []int64{},
+			FlushedSegmentIds:   []int64{},
 		})
 		require.Nil(t, err)
 
@@ -638,9 +638,9 @@ func TestWatchChannel(t *testing.T) {
 		<-c
 
 		vchan := &datapb.VchannelInfo{
-			CollectionID:      1,
-			ChannelName:       ch,
-			UnflushedSegments: []*datapb.SegmentInfo{},
+			CollectionID:        1,
+			ChannelName:         ch,
+			UnflushedSegmentIds: []int64{},
 		}
 		info := &datapb.ChannelWatchInfo{
 			State:     datapb.ChannelWatchState_ToWatch,
@@ -697,9 +697,9 @@ func TestWatchChannel(t *testing.T) {
 		<-c
 
 		vchan := &datapb.VchannelInfo{
-			CollectionID:      1,
-			ChannelName:       ch,
-			UnflushedSegments: []*datapb.SegmentInfo{},
+			CollectionID:        1,
+			ChannelName:         ch,
+			UnflushedSegmentIds: []int64{},
 		}
 		info := &datapb.ChannelWatchInfo{
 			State:     datapb.ChannelWatchState_ToRelease,
@@ -855,10 +855,10 @@ func TestDataNode_ResendSegmentStats(t *testing.T) {
 	}()
 
 	vChan := &datapb.VchannelInfo{
-		CollectionID:      1,
-		ChannelName:       dmChannelName,
-		UnflushedSegments: []*datapb.SegmentInfo{},
-		FlushedSegments:   []*datapb.SegmentInfo{},
+		CollectionID:        1,
+		ChannelName:         dmChannelName,
+		UnflushedSegmentIds: []int64{},
+		FlushedSegmentIds:   []int64{},
 	}
 
 	err = node.flowgraphManager.addAndStart(node, vChan)

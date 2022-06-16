@@ -158,7 +158,7 @@ func (qc *QueryCoord) Init() error {
 		qc.factory.Init(&Params)
 
 		// init meta
-		qc.meta, initError = newMeta(qc.loopCtx, qc.kvClient, qc.factory, qc.idAllocator)
+		qc.meta, initError = newMeta(qc.loopCtx, qc.kvClient, qc.factory, qc.idAllocator, qc.dataCoordClient)
 		if initError != nil {
 			log.Error("query coordinator init meta failed", zap.Error(initError))
 			return

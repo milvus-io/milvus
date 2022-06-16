@@ -172,6 +172,7 @@ message WatchDmChannelsRequest {
   repeated data.SegmentInfo exclude_infos = 7;
   LoadMetaInfo load_meta = 8;
   int64 replicaID = 9;
+  map<int64, data.SegmentInfo> segment_infos = 10;
 }
 
 message WatchDeltaChannelsRequest {

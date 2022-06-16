@@ -178,14 +178,7 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 					Timestamp:   0,
 					MsgID:       []byte{1, 2, 3, 4, 5, 6, 7, 8},
 				},
-				FlushedSegments: []*datapb.SegmentInfo{
-					{
-						DmlPosition: &internalpb.MsgPosition{
-							ChannelName: tmpChannel,
-							Timestamp:   typeutil.MaxTimestamp,
-						},
-					},
-				},
+				FlushedSegmentIds: []int64{},
 			},
 		}
 		err = task.Execute(ctx)
@@ -210,14 +203,7 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 					Timestamp:   0,
 					MsgID:       []byte{1, 2, 3, 4, 5, 6, 7, 8},
 				},
-				DroppedSegments: []*datapb.SegmentInfo{
-					{
-						DmlPosition: &internalpb.MsgPosition{
-							ChannelName: tmpChannel,
-							Timestamp:   typeutil.MaxTimestamp,
-						},
-					},
-				},
+				DroppedSegmentIds: []int64{},
 			},
 		}
 		err = task.Execute(ctx)
@@ -233,25 +219,13 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 			node: node,
 		}
 
-		fieldBinlog, statsLog, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
 		assert.NoError(t, err)
 
 		task.req.Infos = []*datapb.VchannelInfo{
 			{
-				CollectionID: defaultCollectionID,
-				ChannelName:  defaultDMLChannel,
-				UnflushedSegments: []*datapb.SegmentInfo{
-					{
-						CollectionID: defaultCollectionID,
-						PartitionID:  defaultPartitionID + 1, // load a new partition
-						DmlPosition: &internalpb.MsgPosition{
-							ChannelName: defaultDMLChannel,
-							Timestamp:   typeutil.MaxTimestamp,
-						},
-						Binlogs:   fieldBinlog,
-						Statslogs: statsLog,
-					},
-				},
+				CollectionID:        defaultCollectionID,
+				ChannelName:         defaultDMLChannel,
+				UnflushedSegmentIds: []int64{},
 			},
 		}
 		err = task.Execute(ctx)

@@ -506,12 +506,18 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 		for _, info := range mergedDmChannel {
 			msgBase := proto.Clone(lct.Base).(*commonpb.MsgBase)
 			msgBase.MsgType = commonpb.MsgType_WatchDmChannels
+			segmentInfos, err := generateVChannelSegmentInfos(lct.meta, info)
+			if err != nil {
+				lct.setResultInfo(err)
+				return err
+			}
 			watchRequest := &querypb.WatchDmChannelsRequest{
 				Base:         msgBase,
 				CollectionID: collectionID,
 				//PartitionIDs: toLoadPartitionIDs,
-				Infos:  []*datapb.VchannelInfo{info},
-				Schema: lct.Schema,
+				Infos:        []*datapb.VchannelInfo{info},
+				Schema:       lct.Schema,
+				SegmentInfos: segmentInfos,
 				LoadMeta: &querypb.LoadMetaInfo{
 					LoadType:     querypb.LoadType_LoadCollection,
 					CollectionID: collectionID,
@@ -936,12 +942,18 @@ func (lpt *loadPartitionTask) execute(ctx context.Context) error {
 		for _, info := range mergedDmChannel {
 			msgBase := proto.Clone(lpt.Base).(*commonpb.MsgBase)
 			msgBase.MsgType = commonpb.MsgType_WatchDmChannels
+			segmentInfos, err := generateVChannelSegmentInfos(lpt.meta, info)
+			if err != nil {
+				lpt.setResultInfo(err)
+				return err
+			}
 			watchRequest := &querypb.WatchDmChannelsRequest{
 				Base:         msgBase,
 				CollectionID: collectionID,
 				PartitionIDs: partitionIDs,
 				Infos:        []*datapb.VchannelInfo{info},
 				Schema:       lpt.Schema,
+				SegmentInfos: segmentInfos,
 				LoadMeta: &querypb.LoadMetaInfo{
 					LoadType:     querypb.LoadType_LoadPartition,
 					CollectionID: collectionID,
@@ -1467,7 +1479,7 @@ func (wdt *watchDmChannelTask) reschedule(ctx context.Context) ([]task, error) {
 			PartitionIDs: wdt.PartitionIDs,
 			Infos:        []*datapb.VchannelInfo{info},
 			Schema:       wdt.Schema,
-			ExcludeInfos: wdt.ExcludeInfos,
+			SegmentInfos: wdt.SegmentInfos,
 			LoadMeta: &querypb.LoadMetaInfo{
 				LoadType:     wdt.GetLoadMeta().GetLoadType(),
 				CollectionID: collectionID,
@@ -2008,11 +2020,17 @@ func (lbt *loadBalanceTask) processNodeDownLoadBalance(ctx context.Context) erro
 				if _, ok := dmChannels[channelName]; ok {
 					msgBase := proto.Clone(lbt.Base).(*commonpb.MsgBase)
 					msgBase.MsgType = commonpb.MsgType_WatchDmChannels
+					channelSegmentInfos, err := generateVChannelSegmentInfos(lbt.meta, vChannelInfo)
+					if err != nil {
+						lbt.setResultInfo(err)
+						return err
+					}
 					watchRequest := &querypb.WatchDmChannelsRequest{
 						Base:         msgBase,
 						CollectionID: collectionID,
 						Infos:        []*datapb.VchannelInfo{vChannelInfo},
 						Schema:       schema,
+						SegmentInfos: channelSegmentInfos,
 						LoadMeta: &querypb.LoadMetaInfo{
 							LoadType:     collectionInfo.LoadType,
 							CollectionID: collectionID,
@@ -2491,9 +2509,9 @@ func generateWatchDeltaChannelInfo(info *datapb.VchannelInfo) (*datapb.VchannelI
 	}
 	deltaChannel := proto.Clone(info).(*datapb.VchannelInfo)
 	deltaChannel.ChannelName = deltaChannelName
-	deltaChannel.UnflushedSegments = nil
-	deltaChannel.FlushedSegments = nil
-	deltaChannel.DroppedSegments = nil
+	deltaChannel.UnflushedSegmentIds = nil
+	deltaChannel.FlushedSegmentIds = nil
+	deltaChannel.DroppedSegmentIds = nil
 	return deltaChannel, nil
 }
 
@@ -2531,10 +2549,27 @@ func mergeDmChannelInfo(infos []*datapb.VchannelInfo) map[string]*datapb.Vchanne
 		if info.SeekPosition.GetTimestamp() < minPositionInfo.SeekPosition.GetTimestamp() {
 			minPositionInfo.SeekPosition = info.SeekPosition
 		}
-		minPositionInfo.DroppedSegments = append(minPositionInfo.DroppedSegments, info.DroppedSegments...)
-		minPositionInfo.UnflushedSegments = append(minPositionInfo.UnflushedSegments, info.UnflushedSegments...)
-		minPositionInfo.FlushedSegments = append(minPositionInfo.FlushedSegments, info.FlushedSegments...)
+		minPositionInfo.DroppedSegmentIds = append(minPositionInfo.DroppedSegmentIds, info.DroppedSegmentIds...)
+		minPositionInfo.UnflushedSegmentIds = append(minPositionInfo.UnflushedSegmentIds, info.UnflushedSegmentIds...)
+		minPositionInfo.FlushedSegmentIds = append(minPositionInfo.FlushedSegmentIds, info.FlushedSegmentIds...)
 	}
 
 	return minPositions
+}
+
+// generateVChannelSegmentInfos returns a map<id, SegmentInfo> contains
+// all the segment infos(flushed, unflushed and dropped) in a vChannel.
+func generateVChannelSegmentInfos(m Meta, vChannel *datapb.VchannelInfo) (map[int64]*datapb.SegmentInfo, error) {
+	segmentIds := make([]int64, 0)
+	segmentIds = append(append(append(segmentIds, vChannel.FlushedSegmentIds...), vChannel.UnflushedSegmentIds...), vChannel.DroppedSegmentIds...)
+	segmentInfos, err := m.getDataSegmentInfosByIDs(segmentIds)
+	if err != nil {
+		log.Error("Get Vchannel SegmentInfos failed", zap.String("vChannel", vChannel.String()), zap.Error(err))
+		return nil, err
+	}
+	segmentDict := make(map[int64]*datapb.SegmentInfo)
+	for _, info := range segmentInfos {
+		segmentDict[info.ID] = info
+	}
+	return segmentDict, nil
 }

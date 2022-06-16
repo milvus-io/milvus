@@ -172,6 +172,9 @@ type DataCoordFactory struct {
 
 	DropVirtualChannelError  bool
 	DropVirtualChannelStatus commonpb.ErrorCode
+
+	GetSegmentInfosError      bool
+	GetSegmentInfosNotSuccess bool
 }
 
 func (ds *DataCoordFactory) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error) {
@@ -225,6 +228,32 @@ func (ds *DataCoordFactory) UpdateSegmentStatistics(ctx context.Context, req *da
 func (ds *DataCoordFactory) AddSegment(ctx context.Context, req *datapb.AddSegmentRequest) (*commonpb.Status, error) {
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
+	}, nil
+}
+
+func (ds *DataCoordFactory) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
+	if ds.GetSegmentInfosError {
+		return nil, errors.New("mock error")
+	}
+	if ds.GetSegmentInfosNotSuccess {
+		return &datapb.GetSegmentInfoResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "mock GetSegmentInfo failed",
+			},
+		}, nil
+	}
+	var segmentInfos []*datapb.SegmentInfo
+	for _, segmentID := range req.SegmentIDs {
+		segmentInfos = append(segmentInfos, &datapb.SegmentInfo{
+			ID: segmentID,
+		})
+	}
+	return &datapb.GetSegmentInfoResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		Infos: segmentInfos,
 	}, nil
 }
 

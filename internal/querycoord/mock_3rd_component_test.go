@@ -483,6 +483,34 @@ func (data *dataCoordMock) ReleaseSegmentLock(ctx context.Context, req *datapb.R
 	}, nil
 }
 
+func (data *dataCoordMock) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
+	if data.returnGrpcError {
+		return nil, errors.New("mock get segmentInfo failed")
+	}
+	if data.returnError {
+		return &datapb.GetSegmentInfoResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "mock get segmentInfo failed",
+			},
+		}, nil
+	}
+
+	var segmentInfos []*datapb.SegmentInfo
+	for _, segmentID := range req.SegmentIDs {
+		segmentInfos = append(segmentInfos, &datapb.SegmentInfo{
+			ID:    segmentID,
+			State: data.segmentState,
+		})
+	}
+	return &datapb.GetSegmentInfoResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		Infos: segmentInfos,
+	}, nil
+}
+
 type indexCoordMock struct {
 	types.IndexCoord
 	chunkManager    storage.ChunkManager
