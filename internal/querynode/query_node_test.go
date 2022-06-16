@@ -413,6 +413,74 @@ func TestQueryNode_validateChangeChannel(t *testing.T) {
 	}
 }
 
+func TestQueryNode_filterDuplicateChangeInfo(t *testing.T) {
+	t.Run("dup change info", func(t *testing.T) {
+		info := &querypb.SegmentChangeInfo{
+			OnlineNodeID: 233,
+			OnlineSegments: []*querypb.SegmentInfo{
+				{
+					SegmentID:    23333,
+					SegmentState: segmentTypeSealed,
+				},
+			},
+			OfflineNodeID: 233,
+			OfflineSegments: []*querypb.SegmentInfo{
+				{
+					SegmentID:    23333,
+					SegmentState: segmentTypeSealed,
+				},
+			},
+		}
+		filterDuplicateChangeInfo(info)
+		assert.Equal(t, 0, len(info.OnlineSegments))
+		assert.Equal(t, 0, len(info.OfflineSegments))
+	})
+
+	t.Run("normal change info1", func(t *testing.T) {
+		info := &querypb.SegmentChangeInfo{
+			OnlineNodeID: 233,
+			OnlineSegments: []*querypb.SegmentInfo{
+				{
+					SegmentID:    23333,
+					SegmentState: segmentTypeSealed,
+				},
+			},
+			OfflineNodeID: 234,
+			OfflineSegments: []*querypb.SegmentInfo{
+				{
+					SegmentID:    23333,
+					SegmentState: segmentTypeSealed,
+				},
+			},
+		}
+		filterDuplicateChangeInfo(info)
+		assert.Equal(t, 1, len(info.OnlineSegments))
+		assert.Equal(t, 1, len(info.OfflineSegments))
+	})
+
+	t.Run("normal change info2", func(t *testing.T) {
+		info := &querypb.SegmentChangeInfo{
+			OnlineNodeID: 233,
+			OnlineSegments: []*querypb.SegmentInfo{
+				{
+					SegmentID:    23333,
+					SegmentState: segmentTypeSealed,
+				},
+			},
+			OfflineNodeID: 234,
+			OfflineSegments: []*querypb.SegmentInfo{
+				{
+					SegmentID:    23333,
+					SegmentState: segmentTypeSealed,
+				},
+			},
+		}
+		filterDuplicateChangeInfo(info)
+		assert.Equal(t, 1, len(info.OnlineSegments))
+		assert.Equal(t, 1, len(info.OfflineSegments))
+	})
+}
+
 func TestQueryNode_handleSealedSegmentsChangeInfo(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
