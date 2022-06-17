@@ -512,7 +512,7 @@ func (p *ImportWrapper) splitFieldsData(fieldsData map[storage.FieldID]storage.F
 	rowIDField := fieldsData[common.RowIDField]
 	rowIDFieldArr := rowIDField.(*storage.Int64FieldData)
 	for i := rowIDBegin; i < rowIDEnd; i++ {
-		rowIDFieldArr.Data = append(rowIDFieldArr.Data, rowIDBegin+i)
+		rowIDFieldArr.Data = append(rowIDFieldArr.Data, i)
 	}
 
 	if primaryKey.GetAutoID() {
@@ -520,7 +520,7 @@ func (p *ImportWrapper) splitFieldsData(fieldsData map[storage.FieldID]storage.F
 
 		primaryDataArr := primaryData.(*storage.Int64FieldData)
 		for i := rowIDBegin; i < rowIDEnd; i++ {
-			primaryDataArr.Data = append(primaryDataArr.Data, rowIDBegin+i)
+			primaryDataArr.Data = append(primaryDataArr.Data, i)
 		}
 
 		p.importResult.AutoIds = append(p.importResult.AutoIds, rowIDBegin, rowIDEnd)
