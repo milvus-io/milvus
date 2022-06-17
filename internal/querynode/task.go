@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"runtime/debug"
-	"time"
 
 	"go.uber.org/zap"
 
@@ -561,12 +560,6 @@ const (
 
 func (r *releaseCollectionTask) Execute(ctx context.Context) error {
 	log.Info("Execute release collection task", zap.Any("collectionID", r.req.CollectionID))
-	// sleep to wait for query tasks done
-	const gracefulReleaseTime = 1
-	time.Sleep(gracefulReleaseTime * time.Second)
-	log.Info("Starting release collection...",
-		zap.Any("collectionID", r.req.CollectionID),
-	)
 
 	collection, err := r.node.metaReplica.getCollectionByID(r.req.CollectionID)
 	if err != nil {
@@ -612,10 +605,6 @@ func (r *releasePartitionsTask) Execute(ctx context.Context) error {
 	log.Info("Execute release partition task",
 		zap.Any("collectionID", r.req.CollectionID),
 		zap.Any("partitionIDs", r.req.PartitionIDs))
-
-	// sleep to wait for query tasks done
-	const gracefulReleaseTime = 1
-	time.Sleep(gracefulReleaseTime * time.Second)
 
 	_, err := r.node.metaReplica.getCollectionByID(r.req.CollectionID)
 	if err != nil {
