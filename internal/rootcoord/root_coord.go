@@ -2575,6 +2575,9 @@ func (c *Core) ReportImport(ctx context.Context, ir *rootcoordpb.ImportResult) (
 		log.Error("failed to get collection name",
 			zap.Int64("collection ID", ti.GetCollectionId()),
 			zap.Error(err))
+		// In some unexpected cases, user drop collection when bulkload task still in pending list, the datanode become idle.
+		// If we directly return, the pending tasks will remain in pending list. So we call resendTaskFunc() to push next pending task to idle datanode.
+		resendTaskFunc()
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_CollectionNameNotFound,
 			Reason:    "failed to get collection name for collection ID" + strconv.FormatInt(ti.GetCollectionId(), 10),
