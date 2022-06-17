@@ -76,7 +76,7 @@ func TestDescribeSegmentsReqTask_Execute(t *testing.T) {
 	}
 	assert.NoError(t, tsk.Execute(context.Background()))
 
-	// index not found in meta.
+	// index not found in meta. no return error
 	c.MetaTable = &MetaTable{
 		segID2IndexMeta: map[typeutil.UniqueID]map[typeutil.UniqueID]etcdpb.SegmentIndexInfo{
 			segID: {
@@ -92,7 +92,7 @@ func TestDescribeSegmentsReqTask_Execute(t *testing.T) {
 			},
 		},
 	}
-	assert.Error(t, tsk.Execute(context.Background()))
+	assert.NoError(t, tsk.Execute(context.Background()))
 
 	// success.
 	c.MetaTable = &MetaTable{

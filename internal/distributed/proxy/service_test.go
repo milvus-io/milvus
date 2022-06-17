@@ -291,6 +291,10 @@ func (m *MockIndexCoord) DropIndex(ctx context.Context, req *indexpb.DropIndexRe
 	return nil, nil
 }
 
+func (m *MockIndexCoord) RemoveIndex(ctx context.Context, req *indexpb.RemoveIndexRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
 func (m *MockIndexCoord) GetIndexStates(ctx context.Context, req *indexpb.GetIndexStatesRequest) (*indexpb.GetIndexStatesResponse, error) {
 	return nil, nil
 }

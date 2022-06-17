@@ -919,12 +919,12 @@ func (t *DescribeSegmentsReqTask) Execute(ctx context.Context) error {
 					})
 			extraIndexInfo, err := t.core.MetaTable.GetIndexByID(indexID)
 			if err != nil {
-				log.Error("index not found in meta table",
+				log.Warn("index not found in meta table, maybe index has been deleted",
 					zap.Error(err),
 					zap.Int64("indexID", indexID),
 					zap.Int64("collection", collectionID),
 					zap.Int64("segment", segID))
-				return err
+				continue
 			}
 			t.Rsp.SegmentInfos[segID].ExtraIndexInfos[indexID] = extraIndexInfo
 		}
@@ -1072,11 +1072,10 @@ func (t *DropIndexReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_DropIndex {
 		return fmt.Errorf("drop index, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
 	}
-	if err := t.core.RemoveIndex(ctx, t.Req.CollectionName, t.Req.IndexName); err != nil {
+	if err := t.core.MetaTable.MarkIndexDeleted(t.Req.CollectionName, t.Req.FieldName, t.Req.IndexName); err != nil {
 		return err
 	}
-	_, _, err := t.core.MetaTable.DropIndex(t.Req.CollectionName, t.Req.FieldName, t.Req.IndexName)
-	return err
+	return nil
 }
 
 // CreateAliasReqTask create alias request task

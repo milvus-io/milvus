@@ -102,6 +102,15 @@ func TestIndexCoordClient(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
+	t.Run("RemoveIndex", func(t *testing.T) {
+		req := &indexpb.RemoveIndexRequest{
+			BuildIDs: []int64{0},
+		}
+		resp, err := icc.RemoveIndex(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
 	t.Run("GetIndexStates", func(t *testing.T) {
 		req := &indexpb.GetIndexStatesRequest{
 			IndexBuildIDs: []int64{0},

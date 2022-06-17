@@ -102,6 +102,15 @@ func TestIndexCoordinateServer(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
+	t.Run("RemoveIndex", func(t *testing.T) {
+		req := &indexpb.RemoveIndexRequest{
+			BuildIDs: []UniqueID{0},
+		}
+		resp, err := server.RemoveIndex(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
 	t.Run("GetIndexFilePaths", func(t *testing.T) {
 		req := &indexpb.GetIndexFilePathsRequest{
 			IndexBuildIDs: []UniqueID{0, 1},

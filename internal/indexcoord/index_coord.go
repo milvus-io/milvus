@@ -567,6 +567,36 @@ func (i *IndexCoord) DropIndex(ctx context.Context, req *indexpb.DropIndexReques
 	return ret, nil
 }
 
+func (i *IndexCoord) RemoveIndex(ctx context.Context, req *indexpb.RemoveIndexRequest) (*commonpb.Status, error) {
+	log.Info("IndexCoord receive RemoveIndex", zap.Int64s("buildIDs", req.BuildIDs))
+
+	if !i.isHealthy() {
+		errMsg := "IndexCoord is not healthy"
+		log.Warn(errMsg)
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    errMsg,
+		}, nil
+	}
+
+	sp, _ := trace.StartSpanFromContextWithOperationName(ctx, "IndexCoord-RemoveIndex")
+	defer sp.Finish()
+
+	ret := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}
+	err := i.metaTable.MarkIndexAsDeletedByBuildIDs(req.GetBuildIDs())
+	if err != nil {
+		log.Error("IndexCoord MarkIndexAsDeletedByBuildIDs failed", zap.Int64s("buildIDs", req.GetBuildIDs()),
+			zap.Error(err))
+		ret.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		ret.Reason = err.Error()
+		return ret, nil
+	}
+
+	return ret, nil
+}
+
 // GetIndexFilePaths gets the index file paths from IndexCoord.
 func (i *IndexCoord) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error) {
 	log.Debug("IndexCoord GetIndexFilePaths", zap.Int("number of IndexBuildIds", len(req.IndexBuildIDs)))
