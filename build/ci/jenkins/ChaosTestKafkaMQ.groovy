@@ -217,7 +217,7 @@ pipeline {
                         }
                         if ("${params.chaos_task}" == "data-consist-test"){
                             def host = sh(returnStdout: true, script: "kubectl get svc/${env.RELEASE_NAME}-milvus -o jsonpath=\"{.spec.clusterIP}\"").trim()
-                            sh "pytest -s -v test_chaos_data_consist.py --host $host --log-cli-level=INFO --capture=no || echo "chaos test fail" "
+                            sh "pytest -s -v test_chaos_data_consist.py --host $host --log-cli-level=INFO --capture=no || echo 'chaos test fail' "
                         }
                         echo "chaos test done"
                         sh "kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=${env.RELEASE_NAME} -n ${env.NAMESPACE} --timeout=360s"
