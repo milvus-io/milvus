@@ -2051,6 +2051,7 @@ func (lbt *loadBalanceTask) processNodeDownLoadBalance(ctx context.Context) erro
 			if err != nil {
 				log.Error("loadBalanceTask: assign child task failed", zap.Int64("sourceNodeID", nodeID))
 				lbt.setResultInfo(err)
+				return err
 			}
 			internalTasks = append(internalTasks, tasks...)
 		}
