@@ -902,7 +902,7 @@ func (c *Core) SetIndexCoord(s types.IndexCoord) error {
 	c.CallRemoveIndexService = func(ctx context.Context, buildIDs []UniqueID) (retErr error) {
 		defer func() {
 			if err := recover(); err != nil {
-				retErr = fmt.Errorf("get index state from index service panic, msg = %v", err)
+				retErr = fmt.Errorf("remove index from index service panic, msg = %v", err)
 			}
 		}()
 		<-initCh
@@ -2242,7 +2242,7 @@ func (c *Core) InvalidateCollectionMetaCache(ctx context.Context, in *proxypb.In
 }
 
 // SegmentFlushCompleted check whether segment flush has completed
-func (c *Core) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlushCompletedMsg) (*commonpb.Status, error) {
+func (c *Core) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlushCompletedMsg) (status *commonpb.Status, err error) {
 	if code, ok := c.checkHealthy(); !ok {
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+internalpb.StateCode_name[int32(code)]), nil
 	}
@@ -2252,7 +2252,23 @@ func (c *Core) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlus
 
 	log.Info("SegmentFlushCompleted received", zap.Int64("msgID", in.Base.MsgID), zap.Int64("collID", in.Segment.CollectionID),
 		zap.Int64("partID", in.Segment.PartitionID), zap.Int64("segID", in.Segment.ID), zap.Int64s("compactFrom", in.Segment.CompactionFrom))
-	err := c.createIndexForSegment(ctx, in.Segment.CollectionID, in.Segment.PartitionID, in.Segment.ID, in.Segment.NumOfRows, in.Segment.Binlogs)
+	// acquire reference lock before building index
+	if in.Segment.CreatedByCompaction {
+		log.Debug("try to acquire segment reference lock", zap.Int64("task id", in.Base.MsgID), zap.Int64s("segmentIDs", in.Segment.CompactionFrom))
+		if err := c.CallAddSegRefLock(ctx, in.Base.MsgID, in.Segment.CompactionFrom); err != nil {
+			log.Warn("acquire segment reference lock failed", zap.Int64("task id", in.Base.MsgID), zap.Int64s("segmentIDs", in.Segment.CompactionFrom))
+			return failStatus(commonpb.ErrorCode_UnexpectedError, "AcquireSegRefLock failed: "+err.Error()), nil
+		}
+		defer func() {
+			if err := c.CallReleaseSegRefLock(ctx, in.Base.MsgID, in.Segment.CompactionFrom); err != nil {
+				log.Warn("release segment reference lock failed", zap.Int64("task id", in.Base.MsgID), zap.Int64s("segmentIDs", in.Segment.CompactionFrom))
+				// panic to let ref manager detect release failure
+				panic(err)
+			}
+		}()
+	}
+
+	err = c.createIndexForSegment(ctx, in.Segment.CollectionID, in.Segment.PartitionID, in.Segment.ID, in.Segment.NumOfRows, in.Segment.Binlogs)
 	if err != nil {
 		log.Error("createIndexForSegment", zap.Int64("msgID", in.Base.MsgID), zap.Int64("collID", in.Segment.CollectionID),
 			zap.Int64("partID", in.Segment.PartitionID), zap.Int64("segID", in.Segment.ID), zap.Error(err))
@@ -2275,6 +2291,7 @@ func (c *Core) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlus
 			zap.Int64s("compactFrom", in.Segment.CompactionFrom), zap.Error(err))
 		return failStatus(commonpb.ErrorCode_UnexpectedError, err.Error()), nil
 	}
+
 	log.Debug("SegmentFlushCompleted success", zap.String("role", typeutil.RootCoordRole),
 		zap.Int64("collection id", in.Segment.CollectionID), zap.Int64("partition id", in.Segment.PartitionID),
 		zap.Int64("segment id", in.Segment.ID), zap.Int64("msgID", in.Base.MsgID))
