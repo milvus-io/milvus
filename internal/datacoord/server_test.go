@@ -531,7 +531,33 @@ func TestGetSegmentInfo(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
 		assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
 	})
+	t.Run("with dropped segment", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
 
+		segInfo := &datapb.SegmentInfo{
+			ID:    0,
+			State: commonpb.SegmentState_Dropped,
+		}
+		err := svr.meta.AddSegment(NewSegmentInfo(segInfo))
+		assert.Nil(t, err)
+
+		req := &datapb.GetSegmentInfoRequest{
+			SegmentIDs:       []int64{0},
+			IncludeUnHealthy: false,
+		}
+		resp, err := svr.GetSegmentInfo(svr.ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, 0, len(resp.Infos))
+
+		req = &datapb.GetSegmentInfoRequest{
+			SegmentIDs:       []int64{0},
+			IncludeUnHealthy: true,
+		}
+		resp2, err := svr.GetSegmentInfo(svr.ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, 1, len(resp2.Infos))
+	})
 }
 
 func TestGetComponentStates(t *testing.T) {

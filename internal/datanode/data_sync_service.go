@@ -153,7 +153,8 @@ func (dsService *dataSyncService) getSegmentInfos(segmentIds []int64) ([]*datapb
 			Timestamp: 0,
 			SourceID:  Params.ProxyCfg.GetNodeID(),
 		},
-		SegmentIDs: segmentIds,
+		SegmentIDs:       segmentIds,
+		IncludeUnHealthy: true,
 	})
 	if err != nil {
 		log.Error("Fail to get datapb.SegmentInfo by ids from datacoord", zap.Error(err))

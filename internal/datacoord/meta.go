@@ -207,6 +207,18 @@ func (m *meta) GetSegment(segID UniqueID) *SegmentInfo {
 	return nil
 }
 
+// GetAllSegment returns segment info with provided id
+// different from GetSegment, this will return unhealthy segment as well
+func (m *meta) GetAllSegment(segID UniqueID) *SegmentInfo {
+	m.RLock()
+	defer m.RUnlock()
+	segment := m.segments.GetSegment(segID)
+	if segment != nil {
+		return segment
+	}
+	return nil
+}
+
 // SetState setting segment with provided ID state
 func (m *meta) SetState(segmentID UniqueID, state commonpb.SegmentState) error {
 	m.Lock()
