@@ -139,6 +139,7 @@ message GetSegmentStatesResponse {
 message GetSegmentInfoRequest {
   common.MsgBase base = 1;
   repeated int64 segmentIDs = 2;
+  bool includeUnHealthy =3;
 }
 
 message GetSegmentInfoResponse {
