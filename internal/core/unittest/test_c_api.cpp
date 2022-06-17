@@ -23,6 +23,7 @@
 #include <boost/format.hpp>
 
 #include "common/LoadInfo.h"
+#include "common/memory_c.h"
 #include "pb/plan.pb.h"
 #include "query/ExprImpl.h"
 #include "segcore/Collection.h"
@@ -190,6 +191,32 @@ serialize(const Message* msg) {
     assert(ok);
     return ret;
 }
+
+#ifdef __linux__
+
+//TEST(Common, Memory_benchmark) {
+//    auto run_times = 1000000;
+//    auto start = std::chrono::high_resolution_clock::now();
+//
+//    for (int i = 0; i < run_times; i++) {
+//        PurgeMemory(UINT64_MAX /*never malloc_trim*/);
+//    }
+//
+//    auto stop = std::chrono::high_resolution_clock::now();
+//    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
+//
+//    std::cout << run_times << " times taken by PurgeMemory: " << duration.count() << " milliseconds" << std::endl;
+//    // 1000000 times taken by PurgeMemory: 8307 milliseconds
+//}
+
+TEST(Common, Memory) {
+    auto res = PurgeMemory(UINT64_MAX /*never malloc_trim*/);
+    assert(res.error_code == Success);
+    res = PurgeMemory(0);
+    assert(res.error_code == Success);
+}
+
+#endif
 
 TEST(CApiTest, InsertTest) {
     auto c_collection = NewCollection(get_default_schema_config());

@@ -73,3 +73,8 @@ endif()
 #if ( LINUX )
 #    add_subdirectory( jemalloc )
 #endif()
+
+# ******************************* Thridparty rapidxml ********************************
+if ( LINUX )
+    add_subdirectory( rapidxml )
+endif()
