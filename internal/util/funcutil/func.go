@@ -28,6 +28,7 @@ import (
 	"net/http"
 	"reflect"
 	"strconv"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -243,32 +244,22 @@ func GetAvailablePort() int {
 
 // ToPhysicalChannel get physical channel name from virtual channel name
 func ToPhysicalChannel(vchannel string) string {
-	var idx int
-	for idx = len(vchannel) - 1; idx >= 0; idx-- {
-		if vchannel[idx] == '_' {
-			break
-		}
-	}
-	if idx < 0 {
+	index := strings.LastIndex(vchannel, "_")
+	if index < 0 {
 		return vchannel
 	}
-	return vchannel[:idx]
+	return vchannel[:index]
 }
 
 // ConvertChannelName assembles channel name according to parameters.
 func ConvertChannelName(chanName string, tokenFrom string, tokenTo string) (string, error) {
-	chanNameLen := len(chanName)
-	tokenFromLen := len(tokenFrom)
-	if chanNameLen < tokenFromLen {
+	if tokenFrom == "" {
+		return "", fmt.Errorf("the tokenFrom is empty")
+	}
+	if !strings.Contains(chanName, tokenFrom) {
 		return "", fmt.Errorf("cannot find token '%s' in '%s'", tokenFrom, chanName)
 	}
-
-	for i := 0; i < (chanNameLen - tokenFromLen); i++ {
-		if chanName[i:i+tokenFromLen] == tokenFrom {
-			return chanName[0:i] + tokenTo + chanName[i+tokenFromLen:], nil
-		}
-	}
-	return "", fmt.Errorf("cannot find token '%s' in '%s'", tokenFrom, chanName)
+	return strings.Replace(chanName, tokenFrom, tokenTo, 1), nil
 }
 
 func getNumRowsOfScalarField(datas interface{}) uint64 {

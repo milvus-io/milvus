@@ -311,6 +311,8 @@ func Test_ConvertChannelName(t *testing.T) {
 	)
 	_, err := ConvertChannelName("by-dev", tFrom, tTo)
 	assert.NotNil(t, err)
+	_, err = ConvertChannelName("by-dev", "", tTo)
+	assert.NotNil(t, err)
 	_, err = ConvertChannelName("by-dev_rootcoord-delta_123v0", tFrom, tTo)
 	assert.NotNil(t, err)
 	str, err := ConvertChannelName(chanName, tFrom, tTo)
