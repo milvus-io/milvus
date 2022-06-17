@@ -10,3 +10,12 @@ pulsar:
     volumes:
       data:
         existingStorageClassName: local-path
+
+kafka:
+  metrics:
+    kafka:
+      enabled: true
+    jmx:
+      enabled: true
+    serviceMonitor:
+      enabled: true
