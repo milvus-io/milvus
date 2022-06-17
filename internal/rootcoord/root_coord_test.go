@@ -381,6 +381,15 @@ func (idx *indexMock) DropIndex(ctx context.Context, req *indexpb.DropIndexReque
 	}, nil
 }
 
+func (idx *indexMock) RemoveIndex(ctx context.Context, req *indexpb.RemoveIndexRequest) (*commonpb.Status, error) {
+	idx.mutex.Lock()
+	defer idx.mutex.Unlock()
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
+}
+
 func (idx *indexMock) getFileArray() []string {
 	idx.mutex.Lock()
 	defer idx.mutex.Unlock()
@@ -1418,6 +1427,46 @@ func TestRootCoord_Base(t *testing.T) {
 				ID:           segID,
 				CollectionID: coll.ID,
 				PartitionID:  partID,
+			},
+		}
+		st, err := core.SegmentFlushCompleted(ctx, &flushMsg)
+		assert.NoError(t, err)
+		assert.Equal(t, st.ErrorCode, commonpb.ErrorCode_Success)
+
+		req := &milvuspb.DescribeIndexRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_DescribeIndex,
+				MsgID:     210,
+				Timestamp: 210,
+				SourceID:  210,
+			},
+			DbName:         "",
+			CollectionName: collName,
+			FieldName:      "vector",
+			IndexName:      "",
+		}
+		rsp, err := core.DescribeIndex(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
+		assert.Equal(t, 1, len(rsp.IndexDescriptions))
+		assert.Equal(t, Params.CommonCfg.DefaultIndexName, rsp.IndexDescriptions[0].IndexName)
+	})
+
+	t.Run("flush segment from compaction", func(t *testing.T) {
+		coll, err := core.MetaTable.GetCollectionByName(collName, 0)
+		assert.NoError(t, err)
+		partID := coll.PartitionIDs[1]
+
+		flushMsg := datapb.SegmentFlushCompletedMsg{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_SegmentFlushDone,
+			},
+			Segment: &datapb.SegmentInfo{
+				ID:                  segID + 1,
+				CollectionID:        coll.ID,
+				PartitionID:         partID,
+				CompactionFrom:      []int64{segID},
+				CreatedByCompaction: true,
 			},
 		}
 		st, err := core.SegmentFlushCompleted(ctx, &flushMsg)
