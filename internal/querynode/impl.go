@@ -18,9 +18,7 @@ package querynode
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"sync"
 
 	"go.uber.org/zap"
 
@@ -353,11 +351,18 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, in *queryPb.ReleaseS
 
 	// collection lock is not needed since we guarantee not query/search will be dispatch from leader
 	for _, id := range in.SegmentIDs {
-		node.metaReplica.removeSegment(id, segmentTypeSealed)
-		node.metaReplica.removeSegment(id, segmentTypeGrowing)
+		switch in.GetScope() {
+		case queryPb.DataScope_Streaming:
+			node.metaReplica.removeSegment(id, segmentTypeGrowing)
+		case queryPb.DataScope_Historical:
+			node.metaReplica.removeSegment(id, segmentTypeSealed)
+		case queryPb.DataScope_All:
+			node.metaReplica.removeSegment(id, segmentTypeSealed)
+			node.metaReplica.removeSegment(id, segmentTypeGrowing)
+		}
 	}
 
-	log.Info("release segments done", zap.Int64("collectionID", in.CollectionID), zap.Int64s("segmentIDs", in.SegmentIDs))
+	log.Info("release segments done", zap.Int64("collectionID", in.CollectionID), zap.Int64s("segmentIDs", in.SegmentIDs), zap.String("Scope", in.GetScope().String()))
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}, nil
@@ -513,72 +518,36 @@ func (node *QueryNode) Search(ctx context.Context, req *queryPb.SearchRequest) (
 
 	var results []*internalpb.SearchResults
 	var streamingResult *internalpb.SearchResults
-
-	var wg sync.WaitGroup
 	var errCluster error
 
-	wg.Add(1) // search cluster
-	go func() {
-		defer wg.Done()
-		// shard leader dispatches request to its shard cluster
-		oResults, cErr := cluster.Search(searchCtx, req)
-		if cErr != nil {
-			log.Warn("search cluster failed", zap.Int64("msgID", msgID), zap.Int64("collectionID", req.Req.GetCollectionID()), zap.Error(cErr))
-			cancel()
-			errCluster = cErr
-			return
-		}
-		results = oResults
-	}()
-
-	var errStreaming error
-	wg.Add(1) // search streaming
-	go func() {
-		defer func() {
-			if errStreaming != nil {
-				cancel()
-			}
-		}()
-
-		defer wg.Done()
-		streamingTask, err2 := newSearchTask(searchCtx, req)
-		if err2 != nil {
-			errStreaming = err2
+	withStreaming := func(ctx context.Context) error {
+		streamingTask, err := newSearchTask(searchCtx, req)
+		if err != nil {
+			return err
 		}
 		streamingTask.QS = qs
 		streamingTask.DataScope = querypb.DataScope_Streaming
-		err2 = node.scheduler.AddReadTask(searchCtx, streamingTask)
-		if err2 != nil {
-			errStreaming = err2
-			return
+		err = node.scheduler.AddReadTask(searchCtx, streamingTask)
+		if err != nil {
+			return err
 		}
-		err2 = streamingTask.WaitToFinish()
-		if err2 != nil {
-			errStreaming = err2
-			return
+		err = streamingTask.WaitToFinish()
+		if err != nil {
+			return err
 		}
 		metrics.QueryNodeSQLatencyInQueue.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
 			metrics.SearchLabel).Observe(float64(streamingTask.queueDur.Milliseconds()))
 		metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
 			metrics.SearchLabel).Observe(float64(streamingTask.reduceDur.Milliseconds()))
 		streamingResult = streamingTask.Ret
-	}()
-	wg.Wait()
-
-	var mainErr error
-	if errCluster != nil {
-		mainErr = errCluster
-		if errors.Is(errCluster, context.Canceled) {
-			if errStreaming != nil {
-				mainErr = errStreaming
-			}
-		}
-	} else if errStreaming != nil {
-		mainErr = errStreaming
+		return nil
 	}
 
-	if mainErr != nil {
-		failRet.Status.Reason = mainErr.Error()
+	// shard leader dispatches request to its shard cluster
+	results, errCluster = cluster.Search(searchCtx, req, withStreaming)
+	if errCluster != nil {
+		log.Warn("search cluster failed", zap.Int64("msgID", msgID), zap.Int64("collectionID", req.Req.GetCollectionID()), zap.Error(errCluster))
+		failRet.Status.Reason = errCluster.Error()
 		return failRet, nil
 	}
 
@@ -694,66 +663,34 @@ func (node *QueryNode) Query(ctx context.Context, req *queryPb.QueryRequest) (*i
 
 	var results []*internalpb.RetrieveResults
 	var streamingResult *internalpb.RetrieveResults
-	var wg sync.WaitGroup
 
-	var errCluster error
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		// shard leader dispatches request to its shard cluster
-		oResults, cErr := cluster.Query(queryCtx, req)
-		if cErr != nil {
-			log.Warn("failed to query cluster", zap.Int64("msgID", msgID), zap.Int64("collectionID", req.Req.GetCollectionID()), zap.Error(cErr))
-			errCluster = cErr
-			cancel()
-			return
-		}
-		results = oResults
-	}()
-
-	var errStreaming error
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	withStreaming := func(ctx context.Context) error {
 		streamingTask := newQueryTask(queryCtx, req)
 		streamingTask.DataScope = querypb.DataScope_Streaming
 		streamingTask.QS = qs
-		err2 := node.scheduler.AddReadTask(queryCtx, streamingTask)
-		defer func() {
-			errStreaming = err2
-			if err2 != nil {
-				cancel()
-			}
-		}()
-		if err2 != nil {
-			return
+		err := node.scheduler.AddReadTask(queryCtx, streamingTask)
+
+		if err != nil {
+			return err
 		}
-		err2 = streamingTask.WaitToFinish()
-		if err2 != nil {
-			return
+		err = streamingTask.WaitToFinish()
+		if err != nil {
+			return err
 		}
 		metrics.QueryNodeSQLatencyInQueue.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
 			metrics.QueryLabel).Observe(float64(streamingTask.queueDur.Milliseconds()))
 		metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
 			metrics.QueryLabel).Observe(float64(streamingTask.reduceDur.Milliseconds()))
 		streamingResult = streamingTask.Ret
-	}()
-	wg.Wait()
-
-	var mainErr error
-	if errCluster != nil {
-		mainErr = errCluster
-		if errors.Is(errCluster, context.Canceled) {
-			if errStreaming != nil {
-				mainErr = errStreaming
-			}
-		}
-	} else if errStreaming != nil {
-		mainErr = errStreaming
+		return nil
 	}
 
-	if mainErr != nil {
-		failRet.Status.Reason = mainErr.Error()
+	var errCluster error
+	// shard leader dispatches request to its shard cluster
+	results, errCluster = cluster.Query(queryCtx, req, withStreaming)
+	if errCluster != nil {
+		log.Warn("failed to query cluster", zap.Int64("msgID", msgID), zap.Int64("collectionID", req.Req.GetCollectionID()), zap.Error(errCluster))
+		failRet.Status.Reason = errCluster.Error()
 		return failRet, nil
 	}
 

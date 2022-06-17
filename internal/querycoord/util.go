@@ -166,10 +166,8 @@ func syncReplicaSegments(ctx context.Context, cluster Cluster, childTasks []task
 	}
 
 	for dmc, leaders := range shardLeaders {
-		segments, ok := shardSegments[dmc]
-		if !ok {
-			continue
-		}
+		// invoke sync segments even no segment
+		segments := shardSegments[dmc]
 
 		for _, leader := range leaders {
 			req := querypb.SyncReplicaSegmentsRequest{
@@ -187,7 +185,6 @@ func syncReplicaSegments(ctx context.Context, cluster Cluster, childTasks []task
 						})
 				}
 			}
-
 			err := cluster.SyncReplicaSegments(ctx, leader.LeaderID, &req)
 			if err != nil {
 				return err

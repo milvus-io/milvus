@@ -89,6 +89,15 @@ func (nd *etcdShardNodeDetector) watchNodes(collectionID int64, replicaID int64,
 		if info.GetCollectionID() != collectionID || info.GetReplicaID() != replicaID {
 			continue
 		}
+		// find the leader id for the shard replica
+		var leaderID int64
+		for _, shardReplica := range info.GetShardReplicas() {
+			if shardReplica.GetDmChannelName() == vchannelName {
+				leaderID = shardReplica.GetLeaderID()
+				break
+			}
+		}
+		// generate node event
 		for _, nodeID := range info.GetNodeIds() {
 			addr, has := idAddr[nodeID]
 			if !has {
@@ -99,6 +108,7 @@ func (nd *etcdShardNodeDetector) watchNodes(collectionID int64, replicaID int64,
 				nodeID:    nodeID,
 				nodeAddr:  addr,
 				eventType: nodeAdd,
+				isLeader:  nodeID == leaderID,
 			})
 		}
 	}

@@ -231,6 +231,7 @@ message ReleaseSegmentsRequest {
   int64 collectionID = 4;
   repeated int64 partitionIDs = 5;
   repeated int64 segmentIDs = 6;
+  DataScope scope = 7; // All, Streaming, Historical
 }
 
 message SearchRequest {

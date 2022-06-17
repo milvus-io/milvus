@@ -61,6 +61,12 @@ func TestEtcdShardNodeDetector_watch(t *testing.T) {
 					CollectionID: 1,
 					ReplicaID:    1,
 					NodeIds:      []int64{1, 2},
+					ShardReplicas: []*milvuspb.ShardReplica{
+						{
+							LeaderID:      1,
+							DmChannelName: "dml1",
+						},
+					},
 				},
 			},
 			oldGarbage: map[string]string{
@@ -71,6 +77,7 @@ func TestEtcdShardNodeDetector_watch(t *testing.T) {
 					nodeID:    1,
 					nodeAddr:  "1",
 					eventType: nodeAdd,
+					isLeader:  true,
 				},
 				{
 					nodeID:    2,
@@ -80,6 +87,7 @@ func TestEtcdShardNodeDetector_watch(t *testing.T) {
 			},
 			collectionID: 1,
 			replicaID:    1,
+			channel:      "dml1",
 		},
 		{
 			name: "normal case with other replica",
