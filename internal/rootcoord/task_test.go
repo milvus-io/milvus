@@ -5,6 +5,12 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/golang/protobuf/proto"
+
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
+
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
@@ -112,4 +118,36 @@ func TestDescribeSegmentsReqTask_Execute(t *testing.T) {
 		},
 	}
 	assert.NoError(t, tsk.Execute(context.Background()))
+}
+
+func Test_hasSystemFields(t *testing.T) {
+	t.Run("no system fields", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{Name: "not_system_field"}}}
+		assert.False(t, hasSystemFields(schema, []string{RowIDFieldName, TimeStampFieldName}))
+	})
+
+	t.Run("has row id field", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{Name: RowIDFieldName}}}
+		assert.True(t, hasSystemFields(schema, []string{RowIDFieldName, TimeStampFieldName}))
+	})
+
+	t.Run("has timestamp field", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{Name: TimeStampFieldName}}}
+		assert.True(t, hasSystemFields(schema, []string{RowIDFieldName, TimeStampFieldName}))
+	})
+}
+
+func TestCreateCollectionReqTask_Execute_hasSystemFields(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Name: "test", Fields: []*schemapb.FieldSchema{{Name: TimeStampFieldName}}}
+	marshaledSchema, err := proto.Marshal(schema)
+	assert.NoError(t, err)
+	task := &CreateCollectionReqTask{
+		Req: &milvuspb.CreateCollectionRequest{
+			Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+			CollectionName: "test",
+			Schema:         marshaledSchema,
+		},
+	}
+	err = task.Execute(context.Background())
+	assert.Error(t, err)
 }

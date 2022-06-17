@@ -87,6 +87,15 @@ func (t *CreateCollectionReqTask) Type() commonpb.MsgType {
 	return t.Req.Base.MsgType
 }
 
+func hasSystemFields(schema *schemapb.CollectionSchema, systemFields []string) bool {
+	for _, f := range schema.GetFields() {
+		if funcutil.SliceContain(systemFields, f.GetName()) {
+			return true
+		}
+	}
+	return false
+}
+
 // Execute task execution
 func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_CreateCollection {
@@ -107,6 +116,11 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	log.Debug("CreateCollectionReqTask Execute", zap.Any("CollectionName", t.Req.CollectionName),
 		zap.Int32("ShardsNum", t.Req.ShardsNum),
 		zap.String("ConsistencyLevel", t.Req.ConsistencyLevel.String()))
+
+	if hasSystemFields(&schema, []string{RowIDFieldName, TimeStampFieldName}) {
+		log.Error("failed to create collection, user schema contain system field")
+		return fmt.Errorf("schema contains system field: %s, %s", RowIDFieldName, TimeStampFieldName)
+	}
 
 	for idx, field := range schema.Fields {
 		field.FieldID = int64(idx + StartOfUserFieldID)
