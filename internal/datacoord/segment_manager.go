@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -25,6 +26,8 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"go.uber.org/zap"
@@ -66,8 +69,9 @@ func putAllocation(a *Allocation) {
 type Manager interface {
 	// AllocSegment allocates rows and record the allocation.
 	AllocSegment(ctx context.Context, collectionID, partitionID UniqueID, channelName string, requestRows int64) ([]*Allocation, error)
-	// AllocSegmentForImport allocates one segment allocation for bulkload.
-	AllocSegmentForImport(ctx context.Context, collectionID, partitionID UniqueID, channelName string, requestRows int64) (*Allocation, error)
+	// allocSegmentForImport allocates one segment allocation for bulk load.
+	// TODO: Remove this method and AllocSegment() above instead.
+	allocSegmentForImport(ctx context.Context, collectionID, partitionID UniqueID, channelName string, requestRows int64, taskID int64) (*Allocation, error)
 	// DropSegment drops the segment from manager.
 	DropSegment(ctx context.Context, segmentID UniqueID)
 	// SealAllSegments seals all segments of collection with collectionID and return sealed segments.
@@ -103,6 +107,7 @@ type SegmentManager struct {
 	segmentSealPolicies []segmentSealPolicy
 	channelSealPolicies []channelSealPolicy
 	flushPolicy         flushPolicy
+	rcc                 types.RootCoord
 }
 
 type allocHelper struct {
@@ -185,7 +190,7 @@ func defaultFlushPolicy() flushPolicy {
 }
 
 // newSegmentManager should be the only way to retrieve SegmentManager.
-func newSegmentManager(meta *meta, allocator allocator, opts ...allocOption) *SegmentManager {
+func newSegmentManager(meta *meta, allocator allocator, rcc types.RootCoord, opts ...allocOption) *SegmentManager {
 	manager := &SegmentManager{
 		meta:                meta,
 		allocator:           allocator,
@@ -196,6 +201,7 @@ func newSegmentManager(meta *meta, allocator allocator, opts ...allocOption) *Se
 		segmentSealPolicies: defaultSegmentSealPolicy(), // default only segment size policy
 		channelSealPolicies: []channelSealPolicy{},      // no default channel seal policy
 		flushPolicy:         defaultFlushPolicy(),
+		rcc:                 rcc,
 	}
 	for _, opt := range opts {
 		opt.apply(manager)
@@ -272,9 +278,9 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 	return allocations, nil
 }
 
-// AllocSegmentForImport allocates one segment allocation for bulkload
-func (s *SegmentManager) AllocSegmentForImport(ctx context.Context, collectionID UniqueID,
-	partitionID UniqueID, channelName string, requestRows int64) (*Allocation, error) {
+// allocSegmentForImport allocates one segment allocation for bulk load.
+func (s *SegmentManager) allocSegmentForImport(ctx context.Context, collectionID UniqueID,
+	partitionID UniqueID, channelName string, requestRows int64, importTaskID int64) (*Allocation, error) {
 	// init allocation
 	allocation := getAllocation(requestRows)
 
@@ -289,6 +295,32 @@ func (s *SegmentManager) AllocSegmentForImport(ctx context.Context, collectionID
 	if err != nil {
 		return nil, err
 	}
+	// ReportImport with the new segment so RootCoord can add segment ref lock onto it.
+	// TODO: This is a hack and will be removed once the whole ImportManager is migrated from RootCoord to DataCoord.
+	if s.rcc == nil {
+		log.Error("RootCoord client not set")
+		return nil, errors.New("RootCoord client not set")
+	}
+	status, err := s.rcc.ReportImport(context.Background(), &rootcoordpb.ImportResult{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		TaskId:     importTaskID,
+		DatanodeId: Params.DataNodeCfg.GetNodeID(),
+		State:      commonpb.ImportState_ImportAllocSegment,
+		Segments:   []int64{segment.GetID()},
+	})
+	if err != nil {
+		log.Error("failed to report import on new segment", zap.Error(err))
+		return nil, err
+	}
+	if status.GetErrorCode() != commonpb.ErrorCode_Success {
+		log.Error("failed to report import on new segment", zap.String("reason", status.GetReason()))
+		return nil, fmt.Errorf("failed to report import on new segment: %s", status.GetReason())
+	}
+	log.Info("successfully report import the new segment",
+		zap.Int64("segment ID", segment.GetID()))
+
 	allocation.ExpireTime = expireTs
 	allocation.SegmentID = segment.GetID()
 	if err := s.meta.AddAllocation(segment.GetID(), allocation); err != nil {
@@ -323,10 +355,12 @@ func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID Unique
 	defer sp.Finish()
 	id, err := s.allocator.allocID(ctx)
 	if err != nil {
+		log.Error("failed to open new segment while allocID", zap.Error(err))
 		return nil, err
 	}
 	maxNumOfRows, err := s.estimateMaxNumOfRows(collectionID)
 	if err != nil {
+		log.Error("failed to open new segment while estimateMaxNumOfRows", zap.Error(err))
 		return nil, err
 	}
 
@@ -342,6 +376,7 @@ func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID Unique
 	}
 	segment := NewSegmentInfo(segmentInfo)
 	if err := s.meta.AddSegment(segment); err != nil {
+		log.Error("failed to add segment to DataCoord", zap.Error(err))
 		return nil, err
 	}
 	s.segments = append(s.segments, id)

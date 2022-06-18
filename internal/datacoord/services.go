@@ -117,7 +117,8 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 			zap.Int64("partitionID", r.GetPartitionID()),
 			zap.String("channelName", r.GetChannelName()),
 			zap.Uint32("count", r.GetCount()),
-			zap.Bool("isImport", r.GetIsImport()))
+			zap.Bool("isImport", r.GetIsImport()),
+			zap.Int64("import task ID", r.GetImportTaskID()))
 
 		// Load the collection info from Root Coordinator, if it is not found in server meta.
 		if s.meta.GetCollection(r.GetCollectionID()) == nil {
@@ -134,8 +135,8 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 		segmentAllocations := make([]*Allocation, 0)
 		if r.GetIsImport() {
 			// Have segment manager allocate and return the segment allocation info.
-			segAlloc, err := s.segmentManager.AllocSegmentForImport(ctx,
-				r.CollectionID, r.PartitionID, r.ChannelName, int64(r.Count))
+			segAlloc, err := s.segmentManager.allocSegmentForImport(ctx,
+				r.GetCollectionID(), r.GetPartitionID(), r.GetChannelName(), int64(r.GetCount()), r.GetImportTaskID())
 			if err != nil {
 				log.Warn("failed to alloc segment for import", zap.Any("request", r), zap.Error(err))
 				continue

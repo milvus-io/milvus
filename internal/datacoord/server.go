@@ -468,7 +468,7 @@ func (s *Server) initServiceDiscovery() error {
 
 func (s *Server) startSegmentManager() {
 	if s.segmentManager == nil {
-		s.segmentManager = newSegmentManager(s.meta, s.allocator)
+		s.segmentManager = newSegmentManager(s.meta, s.allocator, s.rootCoordClient)
 	}
 }
 
