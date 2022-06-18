@@ -27,7 +27,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
@@ -100,84 +99,6 @@ func (m *mockTestTxnKV) Remove(key string) error {
 
 func (m *mockTestTxnKV) MultiRemove(keys []string) error {
 	return m.multiRemove(keys)
-}
-
-func Test_MockKV(t *testing.T) {
-	k1 := &mockTestKV{}
-	kt := &mockTestTxnKV{}
-	prefix := make(map[string][]string)
-	k1.loadWithPrefix = func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
-		if val, ok := prefix[key]; ok {
-			return nil, val, nil
-		}
-		return nil, nil, fmt.Errorf("load prefix error")
-	}
-	kt.loadWithPrefix = func(key string) ([]string, []string, error) {
-		if val, ok := prefix[key]; ok {
-			return nil, val, nil
-		}
-		return nil, nil, fmt.Errorf("load prefix error")
-	}
-
-	_, err := NewMetaTable(kt, k1)
-	assert.NotNil(t, err)
-	assert.EqualError(t, err, "load prefix error")
-
-	// proxy
-	prefix[ProxyMetaPrefix] = []string{"porxy-meta"}
-	_, err = NewMetaTable(kt, k1)
-	assert.NotNil(t, err)
-
-	value, err := proto.Marshal(&pb.ProxyMeta{})
-	assert.Nil(t, err)
-	prefix[ProxyMetaPrefix] = []string{string(value)}
-	_, err = NewMetaTable(kt, k1)
-	assert.NotNil(t, err)
-
-	// collection
-	prefix[CollectionMetaPrefix] = []string{"collection-meta"}
-	_, err = NewMetaTable(kt, k1)
-	assert.NotNil(t, err)
-
-	value, err = proto.Marshal(&pb.CollectionInfo{Schema: &schemapb.CollectionSchema{}})
-	assert.Nil(t, err)
-	prefix[CollectionMetaPrefix] = []string{string(value)}
-	_, err = NewMetaTable(kt, k1)
-	assert.NotNil(t, err)
-
-	// segment index
-	prefix[SegmentIndexMetaPrefix] = []string{"segment-index-meta"}
-	_, err = NewMetaTable(kt, k1)
-	assert.NotNil(t, err)
-
-	value, err = proto.Marshal(&pb.SegmentIndexInfo{})
-	assert.Nil(t, err)
-	prefix[SegmentIndexMetaPrefix] = []string{string(value)}
-	_, err = NewMetaTable(kt, k1)
-	assert.NotNil(t, err)
-
-	prefix[SegmentIndexMetaPrefix] = []string{string(value), string(value)}
-	_, err = NewMetaTable(kt, k1)
-	assert.NotNil(t, err)
-	assert.EqualError(t, err, "load prefix error")
-
-	// index
-	prefix[IndexMetaPrefix] = []string{"index-meta"}
-	_, err = NewMetaTable(kt, k1)
-	assert.NotNil(t, err)
-
-	value, err = proto.Marshal(&pb.IndexInfo{})
-	assert.Nil(t, err)
-	prefix[IndexMetaPrefix] = []string{string(value)}
-	m1, err := NewMetaTable(kt, k1)
-	assert.NotNil(t, err)
-	assert.EqualError(t, err, "load prefix error")
-	prefix[CollectionAliasMetaPrefix] = []string{"alias-meta"}
-
-	k1.save = func(key string, value string, ts typeutil.Timestamp) error {
-		return fmt.Errorf("save proxy error")
-	}
-	assert.Panics(t, func() { m1.AddProxy(&pb.ProxyMeta{}) })
 }
 
 func TestMetaTable(t *testing.T) {
@@ -489,19 +410,6 @@ func TestMetaTable(t *testing.T) {
 		_, idx, err = mt.GetIndexByName(collName, "idx201")
 		assert.Nil(t, err)
 		assert.Zero(t, len(idx))
-	})
-
-	wg.Add(1)
-	t.Run("reload meta", func(t *testing.T) {
-		defer wg.Done()
-		po := pb.ProxyMeta{
-			ID: 101,
-		}
-		err = mt.AddProxy(&po)
-		assert.Nil(t, err)
-
-		_, err = NewMetaTable(txnKV, skv)
-		assert.Nil(t, err)
 	})
 
 	wg.Add(1)
@@ -964,12 +872,12 @@ func TestMetaTable(t *testing.T) {
 		assert.Nil(t, err)
 
 		mt.collID2Meta = make(map[int64]pb.CollectionInfo)
-		_, err = mt.unlockGetFieldSchema(collInfo.Schema.Name, collInfo.Schema.Fields[0].Name)
+		_, err = mt.getFieldSchemaInternal(collInfo.Schema.Name, collInfo.Schema.Fields[0].Name)
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, fmt.Sprintf("collection %s not found", collInfo.Schema.Name))
 
 		mt.collName2ID = make(map[string]int64)
-		_, err = mt.unlockGetFieldSchema(collInfo.Schema.Name, collInfo.Schema.Fields[0].Name)
+		_, err = mt.getFieldSchemaInternal(collInfo.Schema.Name, collInfo.Schema.Fields[0].Name)
 		assert.NotNil(t, err)
 		assert.EqualError(t, err, fmt.Sprintf("collection %s not found", collInfo.Schema.Name))
 	})
@@ -1318,7 +1226,6 @@ func TestFixIssue10540(t *testing.T) {
 	//txnKV := etcdkv.NewEtcdKVWithClient(etcdCli, rootPath)
 	txnKV := memkv.NewMemoryKV()
 	// compose rc7 legace tombstone cases
-	txnKV.Save(path.Join(ProxyMetaPrefix, "1"), string(suffixSnapshotTombstone))
 	txnKV.Save(path.Join(SegmentIndexMetaPrefix, "2"), string(suffixSnapshotTombstone))
 	txnKV.Save(path.Join(IndexMetaPrefix, "3"), string(suffixSnapshotTombstone))
 
@@ -1367,7 +1274,7 @@ func TestMetaTable_unlockGetCollectionInfo(t *testing.T) {
 				100: {ID: 100, Schema: &schemapb.CollectionSchema{Name: "test"}},
 			},
 		}
-		info, err := mt.unlockGetCollectionInfo("test")
+		info, err := mt.getCollectionInfoInternal("test")
 		assert.NoError(t, err)
 		assert.Equal(t, UniqueID(100), info.ID)
 		assert.Equal(t, "test", info.GetSchema().GetName())
@@ -1375,7 +1282,7 @@ func TestMetaTable_unlockGetCollectionInfo(t *testing.T) {
 
 	t.Run("collection name not found", func(t *testing.T) {
 		mt := &MetaTable{collName2ID: nil, collAlias2ID: nil}
-		_, err := mt.unlockGetCollectionInfo("test")
+		_, err := mt.getCollectionInfoInternal("test")
 		assert.Error(t, err)
 	})
 
@@ -1385,7 +1292,7 @@ func TestMetaTable_unlockGetCollectionInfo(t *testing.T) {
 			collAlias2ID: nil,
 			collID2Meta:  nil,
 		}
-		_, err := mt.unlockGetCollectionInfo("test")
+		_, err := mt.getCollectionInfoInternal("test")
 		assert.Error(t, err)
 	})
 
@@ -1395,7 +1302,7 @@ func TestMetaTable_unlockGetCollectionInfo(t *testing.T) {
 			collAlias2ID: map[string]typeutil.UniqueID{"test": 100},
 			collID2Meta:  nil,
 		}
-		_, err := mt.unlockGetCollectionInfo("test")
+		_, err := mt.getCollectionInfoInternal("test")
 		assert.Error(t, err)
 	})
 }
