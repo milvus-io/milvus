@@ -22,6 +22,7 @@ import (
 	"net"
 	"strconv"
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -172,6 +173,9 @@ func (qs *queryNodeServerMock) start() error {
 
 func (qs *queryNodeServerMock) stop() error {
 	qs.cancel()
+	if qs.session != nil {
+		qs.session.Revoke(time.Second)
+	}
 	if qs.grpcServer != nil {
 		qs.grpcServer.GracefulStop()
 	}
