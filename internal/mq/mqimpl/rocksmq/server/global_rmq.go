@@ -42,7 +42,8 @@ var params paramtable.BaseTable
 // InitRmq is deprecate implementation of global rocksmq. will be removed later
 func InitRmq(rocksdbName string, idAllocator allocator.GIDAllocator) error {
 	var err error
-	Rmq, err = NewRocksMQ(rocksdbName, idAllocator)
+	params.Init()
+	Rmq, err = NewRocksMQ(params, rocksdbName, idAllocator)
 	return err
 }
 
@@ -96,7 +97,7 @@ func InitRocksMQ(path string) error {
 		}
 		log.Debug("", zap.Any("RocksmqRetentionTimeInMinutes", rawRmqRetentionTimeInMinutes),
 			zap.Any("RocksmqRetentionSizeInMB", RocksmqRetentionSizeInMB), zap.Any("RocksmqPageSize", RocksmqPageSize))
-		Rmq, finalErr = NewRocksMQ(path, nil)
+		Rmq, finalErr = NewRocksMQ(params, path, nil)
 	})
 	return finalErr
 }
