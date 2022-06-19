@@ -197,6 +197,13 @@ pipeline {
                                                 } else {
                                                 error "Error: Unsupported Milvus client: ${MILVUS_CLIENT}"
                                                 }
+                                                sh """
+                                                MILVUS_HELM_RELEASE_NAME="${release_name}" \
+                                                MILVUS_HELM_NAMESPACE="milvus-ci" \
+                                                MILVUS_CLUSTER_ENABLED="${clusterEnabled}" \
+                                                TEST_TIMEOUT="${e2e_timeout_seconds}" \
+                                                ./e2e-restful.sh 
+                                                """
                                     }
                                 }
                             }

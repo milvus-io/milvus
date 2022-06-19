@@ -475,7 +475,7 @@ func parsePrimaryFieldData2IDs(fieldData *schemapb.FieldData) (*schemapb.IDs, er
 			return nil, errors.New("currently only support DataType Int64 or VarChar as PrimaryField")
 		}
 	default:
-		return nil, errors.New("currently only support vector field as PrimaryField")
+		return nil, errors.New("currently not support vector field as PrimaryField")
 	}
 
 	return primaryData, nil

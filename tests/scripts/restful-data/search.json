@@ -1,0 +1,14 @@
+{
+  "collection_name": "book",
+  "output_fields": ["book_id"],
+  "search_params": [
+    {"key": "anns_field", "value": "book_intro"},
+    {"key": "topk", "value": "2"},
+    {"key": "params", "value": "{\"nprobe\": 10}"},
+    {"key": "metric_type", "value": "L2"},
+    {"key": "round_decimal", "value": "-1"}
+  ],
+  "vectors": [ [10,5] ],
+  "dsl": "",
+  "dsl_type": 1
+}
