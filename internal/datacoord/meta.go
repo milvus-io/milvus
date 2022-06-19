@@ -795,7 +795,7 @@ func (m *meta) CompleteMergeCompaction(compactionLogs []*datapb.CompactionSegmen
 
 	var startPosition, dmlPosition *internalpb.MsgPosition
 	for _, s := range segments {
-		if dmlPosition == nil || s.GetDmlPosition().Timestamp > dmlPosition.Timestamp {
+		if dmlPosition == nil || s.GetDmlPosition().Timestamp < dmlPosition.Timestamp {
 			dmlPosition = s.GetDmlPosition()
 		}
 
