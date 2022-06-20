@@ -271,7 +271,7 @@ pipeline {
 
         stage ('Second Milvus Deployment') {
             options {
-              timeout(time: 15, unit: 'MINUTES')   // timeout on this stage
+              timeout(time: 20, unit: 'MINUTES')   // timeout on this stage
             }
             steps {
                 container('main') {
@@ -297,8 +297,9 @@ pipeline {
                             if ("${params.milvus_mode}" == "cluster") {
                                 sh "helm upgrade --wait --timeout 720s ${env.RELEASE_NAME} milvus/milvus  --set image.all.repository=${params.new_image_repository} --set image.all.tag=${new_image_tag_modified} -f cluster-values.yaml"    
                             }
-                            sh "kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=${env.RELEASE_NAME} -n ${env.NAMESPACE} --timeout=360s"
-                            sh "kubectl wait --for=condition=Ready pod -l release=${env.RELEASE_NAME} -n ${env.NAMESPACE} --timeout=360s"                               
+                            sh "sleep 60s"
+                            // sh "kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=${env.RELEASE_NAME} -n ${env.NAMESPACE} --timeout=360s"
+                            // sh "kubectl wait --for=condition=Ready pod -l release=${env.RELEASE_NAME} -n ${env.NAMESPACE} --timeout=360s"                               
                             sh "kubectl get pods -o wide|grep ${env.RELEASE_NAME}"
                         }
                     }
