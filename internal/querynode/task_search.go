@@ -98,7 +98,8 @@ func (s *searchTask) searchOnStreaming() error {
 	s.QS.collection.RLock() // locks the collectionPtr
 	defer s.QS.collection.RUnlock()
 	if _, released := s.QS.collection.getReleaseTime(); released {
-		log.Debug("collection release before search", zap.Int64("collectionID", s.CollectionID))
+		log.Debug("collection release before search", zap.Int64("msgID", s.ID()),
+			zap.Int64("collectionID", s.CollectionID))
 		return fmt.Errorf("retrieve failed, collection has been released, collectionID = %d", s.CollectionID)
 	}
 
@@ -111,7 +112,8 @@ func (s *searchTask) searchOnStreaming() error {
 	// TODO add context
 	partResults, _, _, sErr := searchStreaming(s.QS.metaReplica, searchReq, s.CollectionID, s.iReq.GetPartitionIDs(), s.req.GetDmlChannel())
 	if sErr != nil {
-		log.Debug("failed to search streaming data", zap.Int64("collectionID", s.CollectionID), zap.Error(sErr))
+		log.Debug("failed to search streaming data", zap.Int64("msgID", s.ID()),
+			zap.Int64("collectionID", s.CollectionID), zap.Error(sErr))
 		return sErr
 	}
 	defer deleteSearchResults(partResults)
@@ -133,7 +135,8 @@ func (s *searchTask) searchOnHistorical() error {
 	s.QS.collection.RLock() // locks the collectionPtr
 	defer s.QS.collection.RUnlock()
 	if _, released := s.QS.collection.getReleaseTime(); released {
-		log.Debug("collection release before search", zap.Int64("collectionID", s.CollectionID))
+		log.Debug("collection release before search", zap.Int64("msgID", s.ID()),
+			zap.Int64("collectionID", s.CollectionID))
 		return fmt.Errorf("retrieve failed, collection has been released, collectionID = %d", s.CollectionID)
 	}
 
@@ -206,17 +209,16 @@ func (s *searchTask) reduceResults(searchReq *searchRequest, results []*SearchRe
 		numSegment := int64(len(results))
 		blobs, err := reduceSearchResultsAndFillData(searchReq.plan, results, numSegment, sInfo.sliceNQs, sInfo.sliceTopKs)
 		if err != nil {
+			log.Debug("marshal for historical results error", zap.Int64("msgID", s.ID()), zap.Error(err))
 			return err
 		}
 		defer deleteSearchResultDataBlobs(blobs)
-		if err != nil {
-			log.Debug("marshal for historical results error", zap.Error(err))
-			return err
-		}
+
 		for i := 0; i < cnt; i++ {
 			blob, err := getSearchResultDataBlob(blobs, i)
 			if err != nil {
-				log.Debug("getSearchResultDataBlob for historical results error", zap.Error(err))
+				log.Debug("getSearchResultDataBlob for historical results error", zap.Int64("msgID", s.ID()),
+					zap.Error(err))
 				return err
 			}
 			bs := make([]byte, len(blob))

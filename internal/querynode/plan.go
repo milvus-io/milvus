@@ -30,9 +30,10 @@ import "C"
 import (
 	"errors"
 	"fmt"
+	"unsafe"
+
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"unsafe"
 )
 
 // SearchPlan is a wrapper of the underlying C-structure C.CSearchPlan
@@ -96,6 +97,7 @@ type searchRequest struct {
 	plan              *SearchPlan
 	cPlaceholderGroup C.CPlaceholderGroup
 	timestamp         Timestamp
+	msgID             UniqueID
 }
 
 func newSearchRequest(collection *Collection, req *querypb.SearchRequest, placeholderGrp []byte) (*searchRequest, error) {
@@ -134,6 +136,7 @@ func newSearchRequest(collection *Collection, req *querypb.SearchRequest, placeh
 		plan:              plan,
 		cPlaceholderGroup: cPlaceholderGroup,
 		timestamp:         req.Req.GetTravelTimestamp(),
+		msgID:             req.GetReq().GetReqID(),
 	}
 
 	return ret, nil
