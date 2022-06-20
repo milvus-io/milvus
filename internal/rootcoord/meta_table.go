@@ -1009,10 +1009,10 @@ func (mt *MetaTable) AlignSegmentsMeta(collID, partID UniqueID, segIDs map[Uniqu
 		for segID := range segMap {
 			if _, ok := segIDs[segID]; !ok {
 				recycledSegIDs = append(recycledSegIDs, segID)
-			}
-			if idxID2segIndex, ok := mt.segID2IndexMeta[segID]; ok {
-				for _, segIndex := range idxID2segIndex {
-					recycledBuildIDs = append(recycledBuildIDs, segIndex.BuildID)
+				if idxID2segIndex, ok := mt.segID2IndexMeta[segID]; ok {
+					for _, segIndex := range idxID2segIndex {
+						recycledBuildIDs = append(recycledBuildIDs, segIndex.BuildID)
+					}
 				}
 			}
 		}
