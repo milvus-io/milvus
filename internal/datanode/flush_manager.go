@@ -679,6 +679,13 @@ func dropVirtualChannelFunc(dsService *dataSyncService, opts ...retry.Option) fl
 			segment.StartPosition = pos.GetStartPosition()
 		}
 
+		// assign segments to request
+		segments := make([]*datapb.DropVirtualChannelSegment, 0, len(segmentPack))
+		for _, segment := range segmentPack {
+			segments = append(segments, segment)
+		}
+		req.Segments = segments
+
 		err := retry.Do(context.Background(), func() error {
 			rsp, err := dsService.dataCoord.DropVirtualChannel(context.Background(), req)
 			// should be network issue, return error and retry
