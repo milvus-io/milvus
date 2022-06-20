@@ -412,6 +412,9 @@ func TestProxy(t *testing.T) {
 	factory := dependency.NewDefaultFactory(localMsg)
 	alias := "TestProxy"
 
+	Params.Init()
+	log.Info("Initialize parameter table of Proxy")
+
 	rc := runRootCoord(ctx, localMsg)
 	log.Info("running RootCoord ...")
 
@@ -494,9 +497,6 @@ func TestProxy(t *testing.T) {
 	proxy, err := NewProxy(ctx, factory)
 	assert.NoError(t, err)
 	assert.NotNil(t, proxy)
-
-	Params.Init()
-	log.Info("Initialize parameter table of Proxy")
 
 	etcdcli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	defer etcdcli.Close()
