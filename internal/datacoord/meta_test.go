@@ -447,7 +447,10 @@ func Test_meta_CompleteMergeCompaction(t *testing.T) {
 				collections: tt.fields.collections,
 				segments:    tt.fields.segments,
 			}
-			err := m.CompleteMergeCompaction(tt.args.compactionLogs, tt.args.result)
+			canCompaction := func(segment *datapb.CompactionSegmentBinlogs) bool {
+				return true
+			}
+			err := m.CompleteMergeCompaction(tt.args.compactionLogs, tt.args.result, canCompaction)
 			assert.Equal(t, tt.wantErr, err != nil)
 			if err == nil {
 				for _, l := range tt.args.compactionLogs {

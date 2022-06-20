@@ -76,6 +76,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 		signals           chan *compactionSignal
 		compactionHandler compactionPlanContext
 		globalTrigger     *time.Ticker
+		segRefer          *SegmentReferenceManager
 	}
 	type args struct {
 		collectionID int64
@@ -154,6 +155,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 				nil,
 				&spyCompactionHandler{spyChan: make(chan *datapb.CompactionPlan, 1)},
 				nil,
+				&SegmentReferenceManager{segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{}},
 			},
 			args{
 				2,
@@ -218,6 +220,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 				signals:           tt.fields.signals,
 				compactionHandler: tt.fields.compactionHandler,
 				globalTrigger:     tt.fields.globalTrigger,
+				segRefer:          tt.fields.segRefer,
 			}
 			_, err := tr.forceTriggerCompaction(tt.args.collectionID, tt.args.compactTime)
 			assert.Equal(t, tt.wantErr, err != nil)
@@ -358,6 +361,7 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 				signals:           tt.fields.signals,
 				compactionHandler: tt.fields.compactionHandler,
 				globalTrigger:     tt.fields.globalTrigger,
+				segRefer:          &SegmentReferenceManager{segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{}},
 			}
 			_, err := tr.forceTriggerCompaction(tt.args.collectionID, tt.args.compactTime)
 			assert.Equal(t, tt.wantErr, err != nil)
@@ -535,6 +539,7 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 				signals:           tt.fields.signals,
 				compactionHandler: tt.fields.compactionHandler,
 				globalTrigger:     tt.fields.globalTrigger,
+				segRefer:          &SegmentReferenceManager{segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{}},
 			}
 			tr.start()
 			defer tr.stop()
@@ -708,6 +713,7 @@ func Test_compactionTrigger_smallfiles(t *testing.T) {
 				signals:           tt.fields.signals,
 				compactionHandler: tt.fields.compactionHandler,
 				globalTrigger:     tt.fields.globalTrigger,
+				segRefer:          &SegmentReferenceManager{segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{}},
 			}
 			tr.start()
 			defer tr.stop()
@@ -811,6 +817,7 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 				signals:           tt.fields.signals,
 				compactionHandler: tt.fields.compactionHandler,
 				globalTrigger:     tt.fields.globalTrigger,
+				segRefer:          &SegmentReferenceManager{segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{}},
 			}
 			tr.start()
 			defer tr.stop()
@@ -853,7 +860,8 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	Params.Init()
 
-	trigger := newCompactionTrigger(&meta{}, &compactionPlanHandler{}, newMockAllocator())
+	trigger := newCompactionTrigger(&meta{}, &compactionPlanHandler{}, newMockAllocator(),
+		&SegmentReferenceManager{segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{}})
 
 	// Test too many files.
 	var binlogs []*datapb.FieldBinlog
@@ -985,7 +993,8 @@ func Test_newCompactionTrigger(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := newCompactionTrigger(tt.args.meta, tt.args.compactionHandler, tt.args.allocator)
+			got := newCompactionTrigger(tt.args.meta, tt.args.compactionHandler, tt.args.allocator,
+				&SegmentReferenceManager{segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{}})
 			assert.Equal(t, tt.args.meta, got.meta)
 			assert.Equal(t, tt.args.compactionHandler, got.compactionHandler)
 			assert.Equal(t, tt.args.allocator, got.allocator)
@@ -995,7 +1004,8 @@ func Test_newCompactionTrigger(t *testing.T) {
 
 func Test_handleSignal(t *testing.T) {
 
-	got := newCompactionTrigger(&meta{segments: NewSegmentsInfo()}, &compactionPlanHandler{}, newMockAllocator())
+	got := newCompactionTrigger(&meta{segments: NewSegmentsInfo()}, &compactionPlanHandler{}, newMockAllocator(),
+		&SegmentReferenceManager{segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{}})
 	signal := &compactionSignal{
 		segmentID: 1,
 	}

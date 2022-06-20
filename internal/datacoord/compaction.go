@@ -101,10 +101,11 @@ type compactionPlanHandler struct {
 	quit             chan struct{}
 	wg               sync.WaitGroup
 	flushCh          chan UniqueID
+	segRefer         *SegmentReferenceManager
 }
 
 func newCompactionPlanHandler(sessions *SessionManager, cm *ChannelManager, meta *meta,
-	allocator allocator, flush chan UniqueID) *compactionPlanHandler {
+	allocator allocator, flush chan UniqueID, segRefer *SegmentReferenceManager) *compactionPlanHandler {
 	return &compactionPlanHandler{
 		plans:     make(map[int64]*compactionTask),
 		chManager: cm,
@@ -112,6 +113,7 @@ func newCompactionPlanHandler(sessions *SessionManager, cm *ChannelManager, meta
 		sessions:  sessions,
 		allocator: allocator,
 		flushCh:   flush,
+		segRefer:  segRefer,
 	}
 }
 
@@ -201,7 +203,9 @@ func (c *compactionPlanHandler) completeCompaction(result *datapb.CompactionResu
 			return err
 		}
 	case datapb.CompactionType_MergeCompaction, datapb.CompactionType_MixCompaction:
-		if err := c.handleMergeCompactionResult(plan, result); err != nil {
+		if err := c.handleMergeCompactionResult(plan, result, func(segment *datapb.CompactionSegmentBinlogs) bool {
+			return !c.segRefer.HasSegmentLock(segment.SegmentID)
+		}); err != nil {
 			return err
 		}
 	default:
@@ -219,11 +223,13 @@ func (c *compactionPlanHandler) completeCompaction(result *datapb.CompactionResu
 }
 
 func (c *compactionPlanHandler) handleInnerCompactionResult(plan *datapb.CompactionPlan, result *datapb.CompactionResult) error {
+	//TODO @xiaocai2333: Can reference locks be ignored?
 	return c.meta.CompleteInnerCompaction(plan.GetSegmentBinlogs()[0], result)
 }
 
-func (c *compactionPlanHandler) handleMergeCompactionResult(plan *datapb.CompactionPlan, result *datapb.CompactionResult) error {
-	return c.meta.CompleteMergeCompaction(plan.GetSegmentBinlogs(), result)
+func (c *compactionPlanHandler) handleMergeCompactionResult(plan *datapb.CompactionPlan, result *datapb.CompactionResult,
+	canCompaction func(segment *datapb.CompactionSegmentBinlogs) bool) error {
+	return c.meta.CompleteMergeCompaction(plan.GetSegmentBinlogs(), result, canCompaction)
 }
 
 // getCompaction return compaction task. If planId does not exist, return nil.

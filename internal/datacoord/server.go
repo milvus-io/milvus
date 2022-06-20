@@ -282,15 +282,16 @@ func (s *Server) Start() error {
 	}
 
 	s.allocator = newRootCoordAllocator(s.rootCoordClient)
+
+	if err = s.initServiceDiscovery(); err != nil {
+		return err
+	}
+
 	if Params.DataCoordCfg.EnableCompaction {
 		s.createCompactionHandler()
 		s.createCompactionTrigger()
 	}
-
 	s.startSegmentManager()
-	if err = s.initServiceDiscovery(); err != nil {
-		return err
-	}
 
 	if err = s.initGarbageCollection(); err != nil {
 		return err
@@ -333,7 +334,7 @@ func (s *Server) SetEtcdClient(client *clientv3.Client) {
 }
 
 func (s *Server) createCompactionHandler() {
-	s.compactionHandler = newCompactionPlanHandler(s.sessionManager, s.channelManager, s.meta, s.allocator, s.flushCh)
+	s.compactionHandler = newCompactionPlanHandler(s.sessionManager, s.channelManager, s.meta, s.allocator, s.flushCh, s.segReferManager)
 	s.compactionHandler.start()
 }
 
@@ -342,7 +343,7 @@ func (s *Server) stopCompactionHandler() {
 }
 
 func (s *Server) createCompactionTrigger() {
-	s.compactionTrigger = newCompactionTrigger(s.meta, s.compactionHandler, s.allocator)
+	s.compactionTrigger = newCompactionTrigger(s.meta, s.compactionHandler, s.allocator, s.segReferManager)
 	s.compactionTrigger.start()
 }
 
