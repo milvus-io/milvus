@@ -67,14 +67,17 @@ type compactionTrigger struct {
 	forceMu           sync.Mutex
 	quit              chan struct{}
 	wg                sync.WaitGroup
+	segRefer          *SegmentReferenceManager
 }
 
-func newCompactionTrigger(meta *meta, compactionHandler compactionPlanContext, allocator allocator) *compactionTrigger {
+func newCompactionTrigger(meta *meta, compactionHandler compactionPlanContext, allocator allocator,
+	segRefer *SegmentReferenceManager) *compactionTrigger {
 	return &compactionTrigger{
 		meta:              meta,
 		allocator:         allocator,
 		signals:           make(chan *compactionSignal, 100),
 		compactionHandler: compactionHandler,
+		segRefer:          segRefer,
 	}
 }
 
@@ -225,7 +228,8 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) {
 		return (signal.collectionID == 0 || segment.CollectionID == signal.collectionID) &&
 			isSegmentHealthy(segment) &&
 			isFlush(segment) &&
-			!segment.isCompacting // not compacting now
+			!segment.isCompacting && // not compacting now
+			!t.segRefer.HasSegmentLock(segment.ID) // not reference
 	}) // m is list of chanPartSegments, which is channel-partition organized segments
 	for _, group := range m {
 		if !signal.isForce && t.compactionHandler.isFull() {
@@ -434,7 +438,7 @@ func (t *compactionTrigger) getCandidateSegments(channel string, partitionID Uni
 	var res []*SegmentInfo
 	for _, s := range segments {
 		if !isFlush(s) || s.GetInsertChannel() != channel ||
-			s.GetPartitionID() != partitionID || s.isCompacting {
+			s.GetPartitionID() != partitionID || s.isCompacting || t.segRefer.HasSegmentLock(s.ID) {
 			continue
 		}
 		res = append(res, s)

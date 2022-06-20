@@ -242,6 +242,89 @@ func Test_compactionPlanHandler_completeCompaction(t *testing.T) {
 				sessions: tt.fields.sessions,
 				meta:     tt.fields.meta,
 				flushCh:  tt.fields.flushCh,
+				segRefer: &SegmentReferenceManager{
+					segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{},
+				},
+			}
+			err := c.completeCompaction(tt.args.result)
+			assert.Equal(t, tt.wantErr, err != nil)
+		})
+	}
+}
+
+func Test_compactionPlanHandler_segment_is_referenced(t *testing.T) {
+	type fields struct {
+		plans    map[int64]*compactionTask
+		sessions *SessionManager
+		meta     *meta
+		flushCh  chan UniqueID
+	}
+	type args struct {
+		result *datapb.CompactionResult
+	}
+	tests := []struct {
+		name    string
+		fields  fields
+		args    args
+		wantErr bool
+		want    *compactionTask
+	}{
+		{
+			"test compaction segment is referenced",
+			fields{
+				map[int64]*compactionTask{
+					1: {
+						triggerInfo: &compactionSignal{id: 1},
+						state:       executing,
+						plan: &datapb.CompactionPlan{
+							PlanID: 1,
+							SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+
+								{SegmentID: 1, FieldBinlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log1")}},
+								{SegmentID: 2, FieldBinlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log2")}},
+							},
+							Type: datapb.CompactionType_MergeCompaction,
+						},
+					},
+				},
+				nil,
+				&meta{
+					client: memkv.NewMemoryKV(),
+					segments: &SegmentsInfo{
+						map[int64]*SegmentInfo{
+
+							1: {SegmentInfo: &datapb.SegmentInfo{ID: 1, Binlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log1")}}},
+							2: {SegmentInfo: &datapb.SegmentInfo{ID: 2, Binlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log2")}}},
+						},
+					},
+				},
+				make(chan UniqueID, 1),
+			},
+			args{
+				result: &datapb.CompactionResult{
+					PlanID:     1,
+					SegmentID:  3,
+					InsertLogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log3")},
+				},
+			},
+			true,
+			nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &compactionPlanHandler{
+				plans:    tt.fields.plans,
+				sessions: tt.fields.sessions,
+				meta:     tt.fields.meta,
+				flushCh:  tt.fields.flushCh,
+				segRefer: &SegmentReferenceManager{
+					segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{},
+					segmentReferCnt: map[UniqueID]int{
+						1: 1,
+					},
+				},
 			}
 			err := c.completeCompaction(tt.args.result)
 			assert.Equal(t, tt.wantErr, err != nil)
@@ -382,6 +465,7 @@ func Test_newCompactionPlanHandler(t *testing.T) {
 		meta      *meta
 		allocator allocator
 		flush     chan UniqueID
+		segRefer  *SegmentReferenceManager
 	}
 	tests := []struct {
 		name string
@@ -396,6 +480,7 @@ func Test_newCompactionPlanHandler(t *testing.T) {
 				&meta{},
 				newMockAllocator(),
 				nil,
+				&SegmentReferenceManager{segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{}},
 			},
 			&compactionPlanHandler{
 				plans:     map[int64]*compactionTask{},
@@ -404,12 +489,13 @@ func Test_newCompactionPlanHandler(t *testing.T) {
 				meta:      &meta{},
 				allocator: newMockAllocator(),
 				flushCh:   nil,
+				segRefer:  &SegmentReferenceManager{segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{}},
 			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := newCompactionPlanHandler(tt.args.sessions, tt.args.cm, tt.args.meta, tt.args.allocator, tt.args.flush)
+			got := newCompactionPlanHandler(tt.args.sessions, tt.args.cm, tt.args.meta, tt.args.allocator, tt.args.flush, tt.args.segRefer)
 			assert.EqualValues(t, tt.want, got)
 		})
 	}
