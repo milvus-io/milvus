@@ -499,6 +499,8 @@ github.com/milvus-io/pulsar-client-go v0.6.1-0.20220310065106-1ef6d309ead7 h1:oe
 github.com/milvus-io/pulsar-client-go v0.6.1-0.20220310065106-1ef6d309ead7/go.mod h1:A1P5VjjljsFKAD13w7/jmU3Dly2gcRvcobiULqQXhz4=
 github.com/milvus-io/pulsar-client-go v0.6.7 h1:0HTCNWZ9jM3PNdjteFSjkxu62IJts6JoUNa0RkxWzV8=
 github.com/milvus-io/pulsar-client-go v0.6.7/go.mod h1:oFIlYIk23tamkSLttw849qphmMIpHY8ztEBWDWJW+sc=
+github.com/milvus-io/pulsar-client-go v0.6.8 h1:fZdZH73aPRszu2fazyeeahQEz34tyn1Pt9EkqJmV100=
+github.com/milvus-io/pulsar-client-go v0.6.8/go.mod h1:oFIlYIk23tamkSLttw849qphmMIpHY8ztEBWDWJW+sc=
 github.com/minio/asm2plan9s v0.0.0-20200509001527-cdd76441f9d8 h1:AMFGa4R4MiIpspGNG7Z948v4n35fFGB3RR3G/ry4FWs=
 github.com/minio/asm2plan9s v0.0.0-20200509001527-cdd76441f9d8/go.mod h1:mC1jAcsrzbxHt8iiaC+zU4b1ylILSosueou12R++wfY=
 github.com/minio/c2goasm v0.0.0-20190812172519-36a3d3bbc4f3 h1:+n/aFZefKZp7spd8DFdX7uMikMLXX4oubIzJF4kv/wI=
