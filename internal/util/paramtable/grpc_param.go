@@ -12,6 +12,7 @@
 package paramtable
 
 import (
+	"fmt"
 	"math"
 	"strconv"
 	"sync"
@@ -42,6 +43,12 @@ const (
 	DefaultDialTimeout      = 5000 * time.Millisecond
 	DefaultKeepAliveTime    = 10000 * time.Millisecond
 	DefaultKeepAliveTimeout = 20000 * time.Millisecond
+
+	// Grpc retry policy
+	DefaultMaxAttempts               = 5
+	DefaultInitialBackoff    float32 = 1.0
+	DefaultMaxBackoff        float32 = 60.0
+	DefaultBackoffMultiplier float32 = 2.0
 
 	ProxyInternalPort = 19529
 	ProxyExternalPort = 19530
@@ -185,6 +192,11 @@ type GrpcClientConfig struct {
 	DialTimeout      time.Duration
 	KeepAliveTime    time.Duration
 	KeepAliveTimeout time.Duration
+
+	MaxAttempts       int
+	InitialBackoff    float32
+	MaxBackoff        float32
+	BackoffMultiplier float32
 }
 
 // InitOnce initialize grpc client config once
@@ -202,116 +214,248 @@ func (p *GrpcClientConfig) init(domain string) {
 	p.initDialTimeout()
 	p.initKeepAliveTimeout()
 	p.initKeepAliveTime()
+	p.initMaxAttempts()
+	p.initInitialBackoff()
+	p.initMaxBackoff()
+	p.initBackoffMultiplier()
+}
+
+func (p *GrpcClientConfig) ParseConfig(funcDesc string, key string, backKey string, parseValue func(string) (interface{}, error), applyValue func(interface{}, error)) {
+	var err error
+
+	valueStr, err := p.Load(key)
+	if err != nil && backKey != "" {
+		valueStr, err = p.Load(backKey)
+	}
+	if err != nil {
+		log.Warn(fmt.Sprintf("Failed to load %s, set to default", key), zap.String("role", p.Domain), zap.Error(err))
+		applyValue(nil, err)
+	} else {
+		value, err := parseValue(valueStr)
+		if err != nil {
+			log.Warn(fmt.Sprintf("Failed to parse %s, set to default", key),
+				zap.String("role", p.Domain), zap.String(key, valueStr), zap.Error(err))
+			applyValue(nil, err)
+		} else {
+			applyValue(value, nil)
+		}
+	}
+
+	log.Debug(funcDesc, zap.String("role", p.Domain), zap.Int(key, p.ClientMaxSendSize))
 }
 
 func (p *GrpcClientConfig) initClientMaxSendSize() {
-	var err error
-
-	valueStr, err := p.Load("grpc.clientMaxSendSize")
-	if err != nil {
-		valueStr, err = p.Load(p.Domain + ".grpc.clientMaxSendSize")
-	}
-	if err != nil {
-		p.ClientMaxSendSize = DefaultClientMaxSendSize
-	} else {
-		value, err := strconv.Atoi(valueStr)
-		if err != nil {
-			log.Warn("Failed to parse grpc.clientMaxSendSize, set to default",
-				zap.String("role", p.Domain), zap.String("grpc.clientMaxSendSize", valueStr),
-				zap.Error(err))
-
-			p.ClientMaxSendSize = DefaultClientMaxSendSize
-		} else {
-			p.ClientMaxSendSize = value
-		}
-	}
-
-	log.Debug("initClientMaxSendSize",
-		zap.String("role", p.Domain), zap.Int("grpc.clientMaxSendSize", p.ClientMaxSendSize))
+	funcDesc := "Init client max send size"
+	key := "grpc.clientMaxSendSize"
+	p.ParseConfig(funcDesc, key, fmt.Sprintf("%s.%s", p.Domain, key),
+		func(s string) (interface{}, error) {
+			return strconv.Atoi(s)
+		},
+		func(i interface{}, err error) {
+			if err != nil {
+				p.ClientMaxSendSize = DefaultClientMaxSendSize
+				return
+			}
+			v, ok := i.(int)
+			if !ok {
+				log.Warn(fmt.Sprintf("Failed to convert int when parsing %s, set to default", key),
+					zap.String("role", p.Domain), zap.Any(key, i))
+				p.ClientMaxSendSize = DefaultClientMaxSendSize
+				return
+			}
+			p.ClientMaxSendSize = v
+		})
 }
 
 func (p *GrpcClientConfig) initClientMaxRecvSize() {
-	var err error
-	valueStr, err := p.Load("grpc.clientMaxRecvSize")
-	if err != nil {
-		valueStr, err = p.Load(p.Domain + ".grpc.clientMaxRecvSize")
-	}
-	if err != nil {
-		p.ClientMaxRecvSize = DefaultClientMaxRecvSize
-	} else {
-		value, err := strconv.Atoi(valueStr)
-		if err != nil {
-			log.Warn("Failed to parse grpc.clientMaxRecvSize, set to default",
-				zap.String("role", p.Domain), zap.String("grpc.clientMaxRecvSize", valueStr),
-				zap.Error(err))
-
-			p.ClientMaxRecvSize = DefaultClientMaxRecvSize
-		} else {
-			p.ClientMaxRecvSize = value
-		}
-	}
-
-	log.Debug("initClientMaxRecvSize",
-		zap.String("role", p.Domain), zap.Int("grpc.clientMaxRecvSize", p.ClientMaxRecvSize))
+	funcDesc := "Init client max recv size"
+	key := "grpc.clientMaxRecvSize"
+	p.ParseConfig(funcDesc, key, fmt.Sprintf("%s.%s", p.Domain, key),
+		func(s string) (interface{}, error) {
+			return strconv.Atoi(s)
+		},
+		func(i interface{}, err error) {
+			if err != nil {
+				p.ClientMaxRecvSize = DefaultClientMaxRecvSize
+				return
+			}
+			v, ok := i.(int)
+			if !ok {
+				log.Warn(fmt.Sprintf("Failed to convert int when parsing %s, set to default", key),
+					zap.String("role", p.Domain), zap.Any(key, i))
+				p.ClientMaxRecvSize = DefaultClientMaxRecvSize
+				return
+			}
+			p.ClientMaxRecvSize = v
+		})
 }
 
 func (p *GrpcClientConfig) initDialTimeout() {
-	var err error
-	valueStr, err := p.Load("grpc.client.dialTimeout")
-	if err != nil {
-		p.DialTimeout = DefaultDialTimeout
-	} else {
-		value, err := strconv.Atoi(valueStr)
-		if err != nil {
-			log.Warn("Failed to parse grpc.client.dialTimeout, set to default",
-				zap.String("role", p.Domain), zap.String("grpc.client.dialTimeout", valueStr),
-				zap.Error(err))
-			p.DialTimeout = DefaultDialTimeout
-		} else {
-			p.DialTimeout = time.Duration(value) * time.Millisecond
-		}
-	}
-	log.Debug("Init dial timeout",
-		zap.String("role", p.Domain), zap.Duration("grpc.log.dialTimeout", p.DialTimeout))
+	funcDesc := "Init dial timeout"
+	key := "grpc.client.dialTimeout"
+	p.ParseConfig(funcDesc, key, "",
+		func(s string) (interface{}, error) {
+			return strconv.Atoi(s)
+		},
+		func(i interface{}, err error) {
+			if err != nil {
+				p.DialTimeout = DefaultDialTimeout
+				return
+			}
+			v, ok := i.(int)
+			if !ok {
+				log.Warn(fmt.Sprintf("Failed to convert int when parsing %s, set to default", key),
+					zap.String("role", p.Domain), zap.Any(key, i))
+				p.DialTimeout = DefaultDialTimeout
+				return
+			}
+			p.DialTimeout = time.Duration(v) * time.Millisecond
+		})
 }
 
 func (p *GrpcClientConfig) initKeepAliveTime() {
-	var err error
-	valueStr, err := p.Load("grpc.client.keepAliveTime")
-	if err != nil {
-		p.KeepAliveTime = DefaultKeepAliveTime
-	} else {
-		value, err := strconv.Atoi(valueStr)
-		if err != nil {
-			log.Warn("Failed to parse grpc.client.keepAliveTime, set to default",
-				zap.String("role", p.Domain), zap.String("grpc.client.keepAliveTime", valueStr),
-				zap.Error(err))
-
-			p.KeepAliveTime = DefaultKeepAliveTime
-		} else {
-			p.KeepAliveTime = time.Duration(value) * time.Millisecond
-		}
-	}
-	log.Debug("Init keep alive time",
-		zap.String("role", p.Domain), zap.Duration("grpc.log.keepAliveTime", p.KeepAliveTime))
+	funcDesc := "Init keep alive time"
+	key := "grpc.client.keepAliveTime"
+	p.ParseConfig(funcDesc, key, "",
+		func(s string) (interface{}, error) {
+			return strconv.Atoi(s)
+		},
+		func(i interface{}, err error) {
+			if err != nil {
+				p.KeepAliveTime = DefaultKeepAliveTime
+				return
+			}
+			v, ok := i.(int)
+			if !ok {
+				log.Warn(fmt.Sprintf("Failed to convert int when parsing %s, set to default", key),
+					zap.String("role", p.Domain), zap.Any(key, i))
+				p.KeepAliveTime = DefaultKeepAliveTime
+				return
+			}
+			p.KeepAliveTime = time.Duration(v) * time.Millisecond
+		})
 }
 
 func (p *GrpcClientConfig) initKeepAliveTimeout() {
-	var err error
-	valueStr, err := p.Load("grpc.client.keepAliveTimeout")
-	if err != nil {
-		p.KeepAliveTimeout = DefaultKeepAliveTimeout
-	} else {
-		value, err := strconv.Atoi(valueStr)
-		if err != nil {
-			log.Warn("Failed to parse grpc.client.keepAliveTimeout, set to default",
-				zap.String("role", p.Domain), zap.String("grpc.client.keepAliveTimeout", valueStr),
-				zap.Error(err))
-			p.KeepAliveTimeout = DefaultKeepAliveTimeout
-		} else {
-			p.KeepAliveTimeout = time.Duration(value) * time.Millisecond
-		}
-	}
-	log.Debug("Init keep alive timeout",
-		zap.String("role", p.Domain), zap.Duration("grpc.log.keepAliveTimeout", p.KeepAliveTimeout))
+	funcDesc := "Init keep alive timeout"
+	key := "grpc.client.keepAliveTimeout"
+	p.ParseConfig(funcDesc, key, "",
+		func(s string) (interface{}, error) {
+			return strconv.Atoi(s)
+		},
+		func(i interface{}, err error) {
+			if err != nil {
+				p.KeepAliveTimeout = DefaultKeepAliveTimeout
+				return
+			}
+			v, ok := i.(int)
+			if !ok {
+				log.Warn(fmt.Sprintf("Failed to convert int when parsing %s, set to default", key),
+					zap.String("role", p.Domain), zap.Any(key, i))
+				p.KeepAliveTimeout = DefaultKeepAliveTimeout
+				return
+			}
+			p.KeepAliveTimeout = time.Duration(v) * time.Millisecond
+		})
+}
+
+func (p *GrpcClientConfig) initMaxAttempts() {
+	funcDesc := "Init max attempts"
+	key := "grpc.client.maxMaxAttempts"
+	p.ParseConfig(funcDesc, key, "",
+		func(s string) (interface{}, error) {
+			return strconv.Atoi(s)
+		},
+		func(i interface{}, err error) {
+			if err != nil {
+				p.MaxAttempts = DefaultMaxAttempts
+				return
+			}
+			// This field is required and must be greater than 1.
+			// Any value greater than 5 will be treated as if it were 5.
+			// See: https://github.com/grpc/grpc-proto/blob/master/grpc/service_config/service_config.proto#L138
+			v, ok := i.(int)
+			if !ok {
+				log.Warn(fmt.Sprintf("Failed to convert int when parsing %s, set to default", key),
+					zap.String("role", p.Domain), zap.Any(key, i))
+				p.MaxAttempts = DefaultMaxAttempts
+				return
+			}
+			if v < 2 || v > 5 {
+				log.Warn(fmt.Sprintf("The value of %s should be greater than 1 and less than 6, set to default", key),
+					zap.String("role", p.Domain), zap.Any(key, i))
+				p.MaxAttempts = DefaultMaxAttempts
+				return
+			}
+			p.MaxAttempts = v
+		})
+}
+
+func (p *GrpcClientConfig) initInitialBackoff() {
+	funcDesc := "Init initial back off"
+	key := "grpc.client.initialBackOff"
+	p.ParseConfig(funcDesc, key, "",
+		func(s string) (interface{}, error) {
+			return strconv.ParseFloat(s, 32)
+		},
+		func(i interface{}, err error) {
+			if err != nil {
+				p.InitialBackoff = DefaultInitialBackoff
+				return
+			}
+			v, ok := i.(float64)
+			if !ok {
+				log.Warn(fmt.Sprintf("Failed to convert float64 when parsing %s, set to default", key),
+					zap.String("role", p.Domain), zap.Any(key, i))
+				p.InitialBackoff = DefaultInitialBackoff
+				return
+			}
+			p.InitialBackoff = float32(v)
+		})
+}
+
+func (p *GrpcClientConfig) initMaxBackoff() {
+	funcDesc := "Init max back off"
+	key := "grpc.client.maxBackoff"
+	p.ParseConfig(funcDesc, key, "",
+		func(s string) (interface{}, error) {
+			return strconv.ParseFloat(s, 32)
+		},
+		func(i interface{}, err error) {
+			if err != nil {
+				p.MaxBackoff = DefaultMaxBackoff
+				return
+			}
+			v, ok := i.(float64)
+			if !ok {
+				log.Warn(fmt.Sprintf("Failed to convert float64 when parsing %s, set to default", key),
+					zap.String("role", p.Domain), zap.Any(key, i))
+				p.MaxBackoff = DefaultMaxBackoff
+				return
+			}
+			p.MaxBackoff = float32(v)
+		})
+}
+
+func (p *GrpcClientConfig) initBackoffMultiplier() {
+	funcDesc := "Init back off multiplier"
+	key := "grpc.client.backoffMultiplier"
+	p.ParseConfig(funcDesc, key, "",
+		func(s string) (interface{}, error) {
+			return strconv.ParseFloat(s, 32)
+		},
+		func(i interface{}, err error) {
+			if err != nil {
+				p.BackoffMultiplier = DefaultBackoffMultiplier
+				return
+			}
+			v, ok := i.(float64)
+			if !ok {
+				log.Warn(fmt.Sprintf("Failed to convert float64 when parsing %s, set to default", key),
+					zap.String("role", p.Domain), zap.Any(key, i))
+				p.BackoffMultiplier = DefaultBackoffMultiplier
+				return
+			}
+			p.BackoffMultiplier = float32(v)
+		})
 }

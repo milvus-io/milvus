@@ -255,6 +255,10 @@ grpc:
     dialTimeout:      5000
     keepAliveTime:    10000
     keepAliveTimeout: 20000
+    maxMaxAttempts: 5
+    initialBackOff: 1.0
+    maxBackoff: 60.0
+    backoffMultiplier: 2.0
 
 # Configure the proxy tls enable.
 tls:

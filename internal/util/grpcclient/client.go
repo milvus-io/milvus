@@ -22,6 +22,8 @@ import (
 	"sync"
 	"time"
 
+	"google.golang.org/grpc/backoff"
+
 	"github.com/milvus-io/milvus/internal/util"
 
 	"github.com/milvus-io/milvus/internal/util/crypto"
@@ -32,7 +34,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/keepalive"
 )
 
@@ -53,16 +54,22 @@ type ClientBase struct {
 	getAddrFunc   func() (string, error)
 	newGrpcClient func(cc *grpc.ClientConn) interface{}
 
-	grpcClient        interface{}
-	conn              *grpc.ClientConn
-	grpcClientMtx     sync.RWMutex
-	role              string
-	ClientMaxSendSize int
-	ClientMaxRecvSize int
+	grpcClient             interface{}
+	conn                   *grpc.ClientConn
+	grpcClientMtx          sync.RWMutex
+	role                   string
+	ClientMaxSendSize      int
+	ClientMaxRecvSize      int
+	RetryServiceNameConfig string
 
 	DialTimeout      time.Duration
 	KeepAliveTime    time.Duration
 	KeepAliveTimeout time.Duration
+
+	MaxAttempts       int
+	InitialBackoff    float32
+	MaxBackoff        float32
+	BackoffMultiplier float32
 }
 
 // SetRole sets role of client
@@ -138,18 +145,17 @@ func (c *ClientBase) connect(ctx context.Context) error {
 	dialContext, cancel := context.WithTimeout(ctx, c.DialTimeout)
 
 	// refer to https://github.com/grpc/grpc-proto/blob/master/grpc/service_config/service_config.proto
-	retryPolicy := `{
+	retryPolicy := fmt.Sprintf(`{
 		"methodConfig": [{
-		  "name": [{}],
-		  "waitForReady": false,
+		  "name": [{"service": "%s"}],
 		  "retryPolicy": {
-			  "MaxAttempts": 4,
-			  "InitialBackoff": ".1s",
-			  "MaxBackoff": ".4s",
-			  "BackoffMultiplier": 1.6,
+			  "MaxAttempts": %d,
+			  "InitialBackoff": "%fs",
+			  "MaxBackoff": "%fs",
+			  "BackoffMultiplier": %f,
 			  "RetryableStatusCodes": [ "UNAVAILABLE" ]
 		  }
-		}]}`
+		}]}`, c.RetryServiceNameConfig, c.MaxAttempts, c.InitialBackoff, c.MaxBackoff, c.BackoffMultiplier)
 
 	conn, err := grpc.DialContext(
 		dialContext,
