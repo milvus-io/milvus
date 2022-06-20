@@ -146,6 +146,7 @@ proxy:
   maxDimension: 32768 # Maximum dimension of a vector
   maxShardNum: 256 # Maximum number of shards in a collection
   maxTaskNum: 1024 # max task number of proxy task queue
+  maxSegmentIdPreAlloc: 2000 # max pre-allocated segment
   # please adjust in embedded Milvus: false
   ginLogging: true # Whether to produce gin logs.
 

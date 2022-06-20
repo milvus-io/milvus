@@ -456,6 +456,8 @@ type proxyConfig struct {
 
 	MaxTaskNum int64
 
+	MaxSegmentIDPreAlloc int32
+
 	CreatedTime time.Time
 	UpdatedTime time.Time
 }
@@ -475,6 +477,7 @@ func (p *proxyConfig) init(base *BaseTable) {
 	p.initMaxDimension()
 
 	p.initMaxTaskNum()
+	p.initMaxSegmentIDPreAlloc()
 	p.initGinLogging()
 }
 
@@ -557,6 +560,10 @@ func (p *proxyConfig) initMaxDimension() {
 
 func (p *proxyConfig) initMaxTaskNum() {
 	p.MaxTaskNum = p.Base.ParseInt64WithDefault("proxy.maxTaskNum", 1024)
+}
+
+func (p *proxyConfig) initMaxSegmentIDPreAlloc() {
+	p.MaxSegmentIDPreAlloc = p.Base.ParseInt32WithDefault("proxy.maxSegmentIdPreAlloc", 2000)
 }
 
 func (p *proxyConfig) initGinLogging() {

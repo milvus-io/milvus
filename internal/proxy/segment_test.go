@@ -112,9 +112,10 @@ func TestSegmentAllocator1(t *testing.T) {
 	}
 	assert.Equal(t, uint32(10), total)
 
-	ret, err := segAllocator.GetSegmentID(1, 1, "abc", segCountPerRPC-10, 999)
+	Params.Init()
+	ret, err := segAllocator.GetSegmentID(1, 1, "abc", uint32(Params.ProxyCfg.MaxSegmentIdPreAlloc-10), 999)
 	assert.Nil(t, err)
-	assert.Equal(t, uint32(segCountPerRPC-10), ret[1])
+	assert.Equal(t, uint32(Params.ProxyCfg.MaxSegmentIdPreAlloc-10), ret[1])
 
 	_, err = segAllocator.GetSegmentID(1, 1, "abc", 10, 1001)
 	assert.NotNil(t, err)
@@ -155,7 +156,8 @@ func TestSegmentAllocator2(t *testing.T) {
 	}
 	assert.Equal(t, uint32(10), total)
 	time.Sleep(50 * time.Millisecond)
-	_, err = segAllocator.GetSegmentID(1, 1, "abc", segCountPerRPC-10, getLastTick2())
+	Params.Init()
+	_, err = segAllocator.GetSegmentID(1, 1, "abc", uint32(Params.ProxyCfg.MaxSegmentIdPreAlloc-10), getLastTick2())
 	assert.NotNil(t, err)
 	wg.Wait()
 

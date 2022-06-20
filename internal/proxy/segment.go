@@ -32,10 +32,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
-const (
-	segCountPerRPC = 20000
-)
-
 // Allocator is an alias for the allocator.Allocator type
 type Allocator = allocator.Allocator
 
@@ -159,7 +155,7 @@ func newSegIDAssigner(ctx context.Context, dataCoord DataCoord, getTickFunc func
 			CancelFunc: cancel,
 			Role:       "SegmentIDAllocator",
 		},
-		countPerRPC: segCountPerRPC,
+		countPerRPC: uint32(Params.ProxyCfg.MaxSegmentIdPreAlloc),
 		dataCoord:   dataCoord,
 		assignInfos: make(map[UniqueID]*list.List),
 		getTickFunc: getTickFunc,
