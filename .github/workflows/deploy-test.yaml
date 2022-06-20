@@ -254,11 +254,11 @@ jobs:
           # if the task is upgrade, install milvus with latest rc image in repo milvusdb/milvus
           if [ ${{ matrix.task }} == "upgrade" ] && [ ${{ matrix.mode }} == "cluster" ]; then
               echo "task: ${{ matrix.task }} mode: ${{ matrix.mode }}";
-              helm install --wait --timeout 720s deploy-testing milvus/milvus --set image.all.repository=milvusdb/milvus --set image.all.tag=latest  -f cluster-values.yaml;
+              helm install --wait --timeout 720s deploy-testing milvus/milvus --set image.all.repository=milvusdb/milvus --set image.all.tag=latest --set etcd.image.repository=bitnami/etcd --set etcd.image.tag=3.5.0-debian-10-r24 -f cluster-values.yaml;
           fi
           if [ ${{ matrix.task }} == "upgrade" ] && [ ${{ matrix.mode }} == "standalone" ]; then
               echo "task: ${{ matrix.task }} mode: ${{ matrix.mode }}";
-              helm install --wait --timeout 720s deploy-testing milvus/milvus --set image.all.repository=milvusdb/milvus --set image.all.tag=latest -f standalone-values.yaml;
+              helm install --wait --timeout 720s deploy-testing milvus/milvus --set image.all.repository=milvusdb/milvus --set image.all.tag=latest --set etcd.image.repository=bitnami/etcd --set etcd.image.tag=3.5.0-debian-10-r24 -f standalone-values.yaml;
           fi
 
           kubectl get pods
