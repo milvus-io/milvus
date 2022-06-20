@@ -825,13 +825,15 @@ func (mt *MetaTable) MarkIndexDeleted(collName, fieldName, indexName string) err
 			log.Error("index id not has meta", zap.Int64("index id", info.IndexID))
 			return errMsg
 		}
+		if idxMeta.GetDeleted() {
+			continue
+		}
 		if idxMeta.IndexName != indexName {
 			continue
 		}
 		dropIdxID = info.IndexID
 		clonedIndex = proto.Clone(&idxMeta).(*pb.IndexInfo)
 		clonedIndex.Deleted = true
-		break
 	}
 
 	if dropIdxID == 0 {

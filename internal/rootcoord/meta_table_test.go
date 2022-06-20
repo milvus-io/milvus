@@ -1692,17 +1692,14 @@ func TestMetaTable_MarkIndexDeleted(t *testing.T) {
 
 		err = mt.MarkIndexDeleted(collName, fieldName, indexName)
 		assert.NoError(t, err)
+	})
 
+	t.Run("txn save failed", func(t *testing.T) {
 		mt.indexID2Meta[indexID] = pb.IndexInfo{
 			IndexName: indexName,
 			IndexID:   indexID,
 		}
 
-		err = mt.MarkIndexDeleted(collName, fieldName, indexName)
-		assert.NoError(t, err)
-	})
-
-	t.Run("txn save failed", func(t *testing.T) {
 		txn := &mockTestTxnKV{
 			save: func(key, value string) error {
 				return fmt.Errorf("error occurred")
@@ -1711,5 +1708,18 @@ func TestMetaTable_MarkIndexDeleted(t *testing.T) {
 		mt.txn = txn
 		err := mt.MarkIndexDeleted(collName, fieldName, indexName)
 		assert.Error(t, err)
+
+		txn = &mockTestTxnKV{
+			save: func(key, value string) error {
+				return nil
+			},
+		}
+		mt.txn = txn
+
+		err = mt.MarkIndexDeleted(collName, fieldName, indexName)
+		assert.NoError(t, err)
+
+		err = mt.MarkIndexDeleted(collName, fieldName, indexName)
+		assert.NoError(t, err)
 	})
 }
