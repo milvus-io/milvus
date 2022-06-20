@@ -502,11 +502,14 @@ func (c *Core) checkFlushedSegments(ctx context.Context) {
 			}
 			recycledSegIDs, recycledBuildIDs := c.MetaTable.AlignSegmentsMeta(collID, partID, segIDs)
 			log.Info("there buildIDs should be remove index", zap.Int64s("buildIDs", recycledBuildIDs))
-			if err := c.CallRemoveIndexService(ctx, recycledBuildIDs); err != nil {
-				log.Error("CallRemoveIndexService remove indexes on segments failed",
-					zap.Int64s("need dropped buildIDs", recycledBuildIDs), zap.Error(err))
-				continue
+			if len(recycledBuildIDs) > 0 {
+				if err := c.CallRemoveIndexService(ctx, recycledBuildIDs); err != nil {
+					log.Error("CallRemoveIndexService remove indexes on segments failed",
+						zap.Int64s("need dropped buildIDs", recycledBuildIDs), zap.Error(err))
+					continue
+				}
 			}
+
 			if err := c.MetaTable.RemoveSegments(collID, partID, recycledSegIDs); err != nil {
 				log.Warn("remove segments failed, wait to retry", zap.Int64("collID", collID), zap.Int64("partID", partID),
 					zap.Int64s("segIDs", recycledSegIDs), zap.Error(err))
