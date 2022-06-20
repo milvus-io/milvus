@@ -19,7 +19,7 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
-
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 )
@@ -49,7 +49,9 @@ func TestRmqRetention_Basic(t *testing.T) {
 	metaPath := retentionPath + metaPathSuffix
 	defer os.RemoveAll(metaPath)
 
-	rmq, err := NewRocksMQ(rocksdbPath, nil)
+	var params paramtable.BaseTable
+	params.Init()
+	rmq, err := NewRocksMQ(params, rocksdbPath, nil)
 	defer rmq.Close()
 	assert.Nil(t, err)
 	defer rmq.stopRetention()
@@ -141,7 +143,9 @@ func TestRmqRetention_NotConsumed(t *testing.T) {
 	metaPath := retentionPath + metaPathSuffix
 	defer os.RemoveAll(metaPath)
 
-	rmq, err := NewRocksMQ(rocksdbPath, nil)
+	var params paramtable.BaseTable
+	params.Init()
+	rmq, err := NewRocksMQ(params, rocksdbPath, nil)
 	defer rmq.Close()
 	assert.Nil(t, err)
 	defer rmq.stopRetention()
@@ -248,8 +252,9 @@ func TestRmqRetention_MultipleTopic(t *testing.T) {
 	os.RemoveAll(rocksdbPath)
 	metaPath := retentionPath + "meta_multi_topic"
 	os.RemoveAll(metaPath)
-
-	rmq, err := NewRocksMQ(rocksdbPath, idAllocator)
+	var params paramtable.BaseTable
+	params.Init()
+	rmq, err := NewRocksMQ(params, rocksdbPath, idAllocator)
 	assert.Nil(t, err)
 	defer rmq.Close()
 
@@ -406,7 +411,9 @@ func TestRetentionInfo_InitRetentionInfo(t *testing.T) {
 
 	defer os.RemoveAll(metaPath)
 
-	rmq, err := NewRocksMQ(rocksdbPath, idAllocator)
+	var params paramtable.BaseTable
+	params.Init()
+	rmq, err := NewRocksMQ(params, rocksdbPath, idAllocator)
 	assert.Nil(t, err)
 	assert.NotNil(t, rmq)
 
@@ -415,8 +422,7 @@ func TestRetentionInfo_InitRetentionInfo(t *testing.T) {
 	assert.Nil(t, err)
 
 	rmq.Close()
-
-	rmq, err = NewRocksMQ(rocksdbPath, idAllocator)
+	rmq, err = NewRocksMQ(params, rocksdbPath, idAllocator)
 	assert.Nil(t, err)
 	assert.NotNil(t, rmq)
 
@@ -465,7 +471,9 @@ func TestRmqRetention_PageTimeExpire(t *testing.T) {
 	metaPath := retentionPath + "meta_kv_com1"
 	os.RemoveAll(metaPath)
 
-	rmq, err := NewRocksMQ(rocksdbPath, idAllocator)
+	var params paramtable.BaseTable
+	params.Init()
+	rmq, err := NewRocksMQ(params, rocksdbPath, idAllocator)
 	assert.Nil(t, err)
 	defer rmq.Close()
 
@@ -584,7 +592,9 @@ func TestRmqRetention_PageSizeExpire(t *testing.T) {
 	metaPath := retentionPath + "meta_kv_com2"
 	os.RemoveAll(metaPath)
 
-	rmq, err := NewRocksMQ(rocksdbPath, idAllocator)
+	var params paramtable.BaseTable
+	params.Init()
+	rmq, err := NewRocksMQ(params, rocksdbPath, idAllocator)
 	assert.Nil(t, err)
 	defer rmq.Close()
 

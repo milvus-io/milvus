@@ -27,6 +27,8 @@ import (
 	"github.com/milvus-io/milvus/internal/kv"
 	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -44,12 +46,13 @@ type RmqState = int64
 // RocksmqPageSize is the size of a message page, default 256MB
 var RocksmqPageSize int64 = 256 << 20
 
+// RocksDB cache size limitation(TODO config it)
+var RocksDBLRUCacheMinCapacity = uint64(1 << 29)
+var RocksDBLRUCacheMaxCapacity = uint64(4 << 30)
+
 // Const variable that will be used in rocksmqs
 const (
 	DefaultMessageID = -1
-
-	// TODO make it configable
-	RocksDBLRUCacheCapacity = 1 << 30
 
 	kvSuffix = "_meta_kv"
 
@@ -72,8 +75,6 @@ const (
 
 	// only in memory
 	CurrentIDSuffix = "current_id"
-
-	ReaderNamePrefix = "reader-"
 
 	RmqNotServingErrMsg = "Rocksmq is not serving"
 )
@@ -144,7 +145,7 @@ type rocksmq struct {
 // 1. New rocksmq instance based on rocksdb with name and rocksdbkv with kvname
 // 2. Init retention info, load retention info to memory
 // 3. Start retention goroutine
-func NewRocksMQ(name string, idAllocator allocator.GIDAllocator) (*rocksmq, error) {
+func NewRocksMQ(params paramtable.BaseTable, name string, idAllocator allocator.GIDAllocator) (*rocksmq, error) {
 	// TODO we should use same rocksdb instance with different cfs
 	maxProcs := runtime.GOMAXPROCS(0)
 	parallelism := 1
@@ -153,9 +154,24 @@ func NewRocksMQ(name string, idAllocator allocator.GIDAllocator) (*rocksmq, erro
 	} else if maxProcs > 8 {
 		parallelism = 2
 	}
-	log.Debug("Start rocksmq ", zap.Int("max proc", maxProcs), zap.Int("parallism", parallelism))
+	memoryCount := metricsinfo.GetMemoryCount()
+	// default rocks db cache is set with memory
+	rocksDBLRUCacheCapacity := RocksDBLRUCacheMinCapacity
+	if memoryCount > 0 {
+		ratio := params.ParseFloatWithDefault("rocksmq.lrucacheratio", 0.06)
+		calculatedCapacity := uint64(float64(memoryCount) * ratio)
+		if calculatedCapacity < RocksDBLRUCacheMinCapacity {
+			rocksDBLRUCacheCapacity = RocksDBLRUCacheMinCapacity
+		} else if calculatedCapacity > RocksDBLRUCacheMaxCapacity {
+			rocksDBLRUCacheCapacity = RocksDBLRUCacheMaxCapacity
+		} else {
+			rocksDBLRUCacheCapacity = calculatedCapacity
+		}
+	}
+	log.Debug("Start rocksmq ", zap.Int("max proc", maxProcs),
+		zap.Int("parallism", parallelism), zap.Uint64("lru cache", rocksDBLRUCacheCapacity))
 	bbto := gorocksdb.NewDefaultBlockBasedTableOptions()
-	bbto.SetBlockCache(gorocksdb.NewLRUCache(RocksDBLRUCacheCapacity))
+	bbto.SetBlockCache(gorocksdb.NewLRUCache(rocksDBLRUCacheCapacity))
 	optsKV := gorocksdb.NewDefaultOptions()
 	optsKV.SetBlockBasedTableFactory(bbto)
 	optsKV.SetCreateIfMissing(true)
