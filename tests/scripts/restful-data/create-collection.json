@@ -1,0 +1,32 @@
+{
+  "collection_name": "book",
+  "consistency_level": 1,
+  "db_name": "string",
+  "schema": {
+    "autoID": false,
+    "description": "Test book search",
+    "fields": [
+      {
+        "name": "book_id",
+        "description": "book id",
+        "is_primary_key": true,
+        "autoID": false,
+        "data_type": 5
+      },
+      {
+        "name": "book_intro",
+        "description": "embedded vector of book introduction",
+        "autoID": false,
+        "data_type": 101,
+        "is_primary_key": false,
+        "type_params": [
+          {
+            "key": "dim",
+            "value": "2"
+          }
+        ]
+      }
+    ],
+    "name": "book"
+  }
+}

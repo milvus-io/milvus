@@ -5,9 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang/protobuf/proto"
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
-	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
 )
 
@@ -98,29 +96,7 @@ func (h *Handlers) handleDummy(c *gin.Context) (interface{}, error) {
 	return h.proxy.Dummy(c, &req)
 }
 
-type WrappedCreateCollectionRequest struct {
-	// Not useful for now
-	Base *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
-	// Not useful for now
-	DbName string `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
-	// The unique collection name in milvus.(Required)
-	CollectionName string `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
-	// The serialized `schema.CollectionSchema`(Required)
-	Schema schemapb.CollectionSchema `protobuf:"bytes,4,opt,name=schema,proto3" json:"schema,omitempty"`
-	// Once set, no modification is allowed (Optional)
-	// https://github.com/milvus-io/milvus/issues/6690
-	ShardsNum int32 `protobuf:"varint,5,opt,name=shards_num,json=shardsNum,proto3" json:"shards_num,omitempty"`
-	// The consistency level that the collection used, modification is not supported now.
-	ConsistencyLevel commonpb.ConsistencyLevel `protobuf:"varint,6,opt,name=consistency_level,json=consistencyLevel,proto3,enum=milvus.proto.common.ConsistencyLevel" json:"consistency_level,omitempty"`
-}
-
 func (h *Handlers) handleCreateCollection(c *gin.Context) (interface{}, error) {
-	// About why we uses WrappedCreateCollectionRequest:
-	// Milvus uses `bytes` as the type of `schema` field,
-	// while the bytes has to be serialized by proto.Marshal.
-	// It's very inconvenient for an HTTP clien to do this,
-	// so we change the type to a struct,
-	// and does the conversion for user.
 	wrappedReq := WrappedCreateCollectionRequest{}
 	err := shouldBind(c, &wrappedReq)
 	if err != nil {
@@ -340,10 +316,23 @@ func (h *Handlers) handleDropIndex(c *gin.Context) (interface{}, error) {
 }
 
 func (h *Handlers) handleInsert(c *gin.Context) (interface{}, error) {
-	req := milvuspb.InsertRequest{}
-	err := shouldBind(c, &req)
+	wrappedReq := WrappedInsertRequest{}
+	err := shouldBind(c, &wrappedReq)
 	if err != nil {
 		return nil, fmt.Errorf("%w: parse body failed: %v", errBadRequest, err)
+	}
+	fieldData, err := convertFieldDataArray(wrappedReq.FieldsData)
+	if err != nil {
+		return nil, fmt.Errorf("%w: convert field data failed: %v", errBadRequest, err)
+	}
+	req := milvuspb.InsertRequest{
+		Base:           wrappedReq.Base,
+		DbName:         wrappedReq.DbName,
+		CollectionName: wrappedReq.CollectionName,
+		PartitionName:  wrappedReq.PartitionName,
+		FieldsData:     fieldData,
+		HashKeys:       wrappedReq.HashKeys,
+		NumRows:        wrappedReq.NumRows,
 	}
 	return h.proxy.Insert(c, &req)
 }
@@ -358,10 +347,28 @@ func (h *Handlers) handleDelete(c *gin.Context) (interface{}, error) {
 }
 
 func (h *Handlers) handleSearch(c *gin.Context) (interface{}, error) {
-	req := milvuspb.SearchRequest{}
-	err := shouldBind(c, &req)
+	wrappedReq := SearchRequest{}
+	err := shouldBind(c, &wrappedReq)
 	if err != nil {
 		return nil, fmt.Errorf("%w: parse body failed: %v", errBadRequest, err)
+	}
+	req := milvuspb.SearchRequest{
+		Base:               wrappedReq.Base,
+		DbName:             wrappedReq.DbName,
+		CollectionName:     wrappedReq.CollectionName,
+		PartitionNames:     wrappedReq.PartitionNames,
+		Dsl:                wrappedReq.Dsl,
+		DslType:            wrappedReq.DslType,
+		OutputFields:       wrappedReq.OutputFields,
+		SearchParams:       wrappedReq.SearchParams,
+		TravelTimestamp:    wrappedReq.TravelTimestamp,
+		GuaranteeTimestamp: wrappedReq.GuaranteeTimestamp,
+		Nq:                 wrappedReq.Nq,
+	}
+	if len(wrappedReq.BinaryVectors) > 0 {
+		req.PlaceholderGroup = binaryVector2Bytes(wrappedReq.BinaryVectors)
+	} else {
+		req.PlaceholderGroup = vector2Bytes(wrappedReq.Vectors)
 	}
 	return h.proxy.Search(c, &req)
 }
@@ -385,10 +392,17 @@ func (h *Handlers) handleFlush(c *gin.Context) (interface{}, error) {
 }
 
 func (h *Handlers) handleCalcDistance(c *gin.Context) (interface{}, error) {
-	req := milvuspb.CalcDistanceRequest{}
-	err := shouldBind(c, &req)
+	wrappedReq := WrappedCalcDistanceRequest{}
+	err := shouldBind(c, &wrappedReq)
 	if err != nil {
 		return nil, fmt.Errorf("%w: parse body failed: %v", errBadRequest, err)
+	}
+
+	req := milvuspb.CalcDistanceRequest{
+		Base:    wrappedReq.Base,
+		Params:  wrappedReq.Params,
+		OpLeft:  wrappedReq.OpLeft.AsPbVectorArray(),
+		OpRight: wrappedReq.OpRight.AsPbVectorArray(),
 	}
 	return h.proxy.CalcDistance(c, &req)
 }
