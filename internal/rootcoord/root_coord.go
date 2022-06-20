@@ -408,6 +408,17 @@ func (c *Core) createIndexForSegment(ctx context.Context, collID, partID, segID 
 		log.Error("collection meta is not exist", zap.Int64("collID", collID))
 		return fmt.Errorf("collection meta is not exist with ID = %d", collID)
 	}
+	exist := false
+	for _, partitionID := range collMeta.PartitionIDs {
+		if partitionID == partID {
+			exist = true
+			break
+		}
+	}
+	if !exist {
+		log.Error("partition meta is not exist", zap.Int64("collID", collID), zap.Int64("partID", partID))
+		return fmt.Errorf("partition meta is not exist with ID = %d in collection %d", partID, collID)
+	}
 	if len(collMeta.FieldIndexes) == 0 {
 		log.Info("collection has no index, no need to build index on segment", zap.Int64("collID", collID),
 			zap.Int64("segID", segID))
@@ -501,7 +512,8 @@ func (c *Core) checkFlushedSegments(ctx context.Context) {
 				}
 			}
 			recycledSegIDs, recycledBuildIDs := c.MetaTable.AlignSegmentsMeta(collID, partID, segIDs)
-			log.Info("there buildIDs should be remove index", zap.Int64s("buildIDs", recycledBuildIDs))
+			log.Info("there buildIDs and segIDs should be removed", zap.Int64s("buildIDs", recycledBuildIDs),
+				zap.Int64s("segIDs", recycledSegIDs))
 			if len(recycledBuildIDs) > 0 {
 				if err := c.CallRemoveIndexService(ctx, recycledBuildIDs); err != nil {
 					log.Error("CallRemoveIndexService remove indexes on segments failed",

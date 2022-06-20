@@ -645,6 +645,7 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 	}
 
 	// use lambda function here to guarantee all resources to be released
+	// TODO @xiaocai2333: How to guarantee atomicity?
 	dropPartitionFn := func() error {
 		// lock for ddl operation
 		t.core.ddlLock.Lock()
@@ -656,6 +657,17 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 
 		if err = t.core.SendDdDropPartitionReq(ctx, &ddReq, collInfo.PhysicalChannelNames); err != nil {
 			return err
+		}
+
+		// get segments for partition
+		segIDs := t.core.MetaTable.GetSegmentsByPartition(partID)
+
+		// get buildIDs by segIDs
+		buildIDs := t.core.MetaTable.GetBuildIDsBySegIDs(segIDs)
+		if len(buildIDs) > 0 {
+			if err = t.core.CallRemoveIndexService(ctx, buildIDs); err != nil {
+				return err
+			}
 		}
 
 		// update meta table after send dd operation

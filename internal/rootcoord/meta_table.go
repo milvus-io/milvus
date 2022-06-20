@@ -668,6 +668,21 @@ func (mt *MetaTable) HasPartition(collID typeutil.UniqueID, partitionName string
 	return err == nil
 }
 
+func (mt *MetaTable) GetSegmentsByPartition(partID UniqueID) []UniqueID {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+
+	segIDMap, ok := mt.partID2SegID[partID]
+	if !ok {
+		return nil
+	}
+	segIDs := make([]UniqueID, 0)
+	for segID := range segIDMap {
+		segIDs = append(segIDs, segID)
+	}
+	return segIDs
+}
+
 // DeletePartition delete partition
 func (mt *MetaTable) DeletePartition(collID typeutil.UniqueID, partitionName string, ts typeutil.Timestamp, ddOpStr string) (typeutil.UniqueID, error) {
 	mt.ddLock.Lock()
@@ -705,15 +720,6 @@ func (mt *MetaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 	collMeta.PartitionIDs = pd
 	collMeta.PartitionNames = pn
 	collMeta.PartitionCreatedTimestamps = pts
-	mt.collID2Meta[collID] = collMeta
-
-	// update segID2IndexMeta and partID2SegID
-	if segIDMap, ok := mt.partID2SegID[partID]; ok {
-		for segID := range segIDMap {
-			delete(mt.segID2IndexMeta, segID)
-		}
-	}
-	delete(mt.partID2SegID, partID)
 
 	k := path.Join(CollectionMetaPrefix, strconv.FormatInt(collID, 10))
 	v, err := proto.Marshal(&collMeta)
@@ -743,6 +749,16 @@ func (mt *MetaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 		log.Warn("TxnKV MultiSaveAndRemoveWithPrefix fail", zap.Error(err))
 		// will not panic, failed txn shall be treated by garbage related logic
 	}
+
+	mt.collID2Meta[collID] = collMeta
+
+	// update segID2IndexMeta and partID2SegID
+	if segIDMap, ok := mt.partID2SegID[partID]; ok {
+		for segID := range segIDMap {
+			delete(mt.segID2IndexMeta, segID)
+		}
+	}
+	delete(mt.partID2SegID, partID)
 
 	return partID, nil
 }
