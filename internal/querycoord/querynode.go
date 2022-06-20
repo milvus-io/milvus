@@ -198,7 +198,7 @@ func (qn *queryNode) watchDmChannels(ctx context.Context, in *querypb.WatchDmCha
 
 func (qn *queryNode) watchDeltaChannels(ctx context.Context, in *querypb.WatchDeltaChannelsRequest) error {
 	if !qn.isOnline() {
-		return errors.New("WatchDmChannels: queryNode is offline")
+		return errors.New("WatchDeltaChannels: queryNode is offline")
 	}
 
 	status, err := qn.client.WatchDeltaChannels(qn.ctx, in)
