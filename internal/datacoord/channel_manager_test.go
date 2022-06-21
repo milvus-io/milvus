@@ -174,7 +174,7 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 			nodeID:      nodeID,
 		}
 		chManager.stateTimer.notifyTimeoutWatcher(e)
-		chManager.stateTimer.stopIfExsit(e)
+		chManager.stateTimer.stopIfExist(e)
 
 		waitForEctdDataReady(metakv, path.Join(prefix, strconv.FormatInt(nodeID, 10), channel1))
 		cancel()
@@ -374,7 +374,7 @@ func TestChannelManager(t *testing.T) {
 		err = chManager.Watch(&channel{"channel-3", collectionID})
 		assert.NoError(t, err)
 		checkWatchInfoWithState(t, metakv, datapb.ChannelWatchState_ToWatch, nodeID, "channel-3", collectionID)
-		chManager.stateTimer.stopIfExsit(&ackEvent{watchSuccessAck, "channel-3", nodeID})
+		chManager.stateTimer.stopIfExist(&ackEvent{watchSuccessAck, "channel-3", nodeID})
 
 	})
 
@@ -424,7 +424,7 @@ func TestChannelManager(t *testing.T) {
 
 		err = chManager.Release(nodeID, channelName)
 		assert.NoError(t, err)
-		chManager.stateTimer.stopIfExsit(&ackEvent{releaseSuccessAck, channelName, nodeID})
+		chManager.stateTimer.stopIfExist(&ackEvent{releaseSuccessAck, channelName, nodeID})
 
 		checkWatchInfoWithState(t, metakv, datapb.ChannelWatchState_ToRelease, nodeID, channelName, collectionID)
 	})
@@ -459,7 +459,7 @@ func TestChannelManager(t *testing.T) {
 		remainTest, reassignTest := tests[0], tests[1]
 		err = chManager.Reassign(reassignTest.nodeID, reassignTest.chName)
 		assert.NoError(t, err)
-		chManager.stateTimer.stopIfExsit(&ackEvent{releaseSuccessAck, reassignTest.chName, reassignTest.nodeID})
+		chManager.stateTimer.stopIfExist(&ackEvent{releaseSuccessAck, reassignTest.chName, reassignTest.nodeID})
 
 		// test nodes of reassignTest contains no channel
 		// test all channels are assgined to node of remainTest
@@ -473,7 +473,7 @@ func TestChannelManager(t *testing.T) {
 
 		err = chManager.Reassign(remainTest.nodeID, remainTest.chName)
 		assert.NoError(t, err)
-		chManager.stateTimer.stopIfExsit(&ackEvent{releaseSuccessAck, reassignTest.chName, reassignTest.nodeID})
+		chManager.stateTimer.stopIfExist(&ackEvent{releaseSuccessAck, reassignTest.chName, reassignTest.nodeID})
 
 		// channel is added to remainTest because there's only one node left
 		checkWatchInfoWithState(t, metakv, datapb.ChannelWatchState_ToWatch, remainTest.nodeID, remainTest.chName, collectionID)
@@ -539,7 +539,7 @@ func TestChannelManager(t *testing.T) {
 		remainTest, reassignTest := tests[0], tests[1]
 		err = chManager.CleanupAndReassign(reassignTest.nodeID, reassignTest.chName)
 		assert.NoError(t, err)
-		chManager.stateTimer.stopIfExsit(&ackEvent{releaseSuccessAck, reassignTest.chName, reassignTest.nodeID})
+		chManager.stateTimer.stopIfExist(&ackEvent{releaseSuccessAck, reassignTest.chName, reassignTest.nodeID})
 
 		// test nodes of reassignTest contains no channel
 		assert.False(t, chManager.Match(reassignTest.nodeID, reassignTest.chName))
@@ -554,7 +554,7 @@ func TestChannelManager(t *testing.T) {
 
 		err = chManager.CleanupAndReassign(remainTest.nodeID, remainTest.chName)
 		assert.NoError(t, err)
-		chManager.stateTimer.stopIfExsit(&ackEvent{releaseSuccessAck, reassignTest.chName, reassignTest.nodeID})
+		chManager.stateTimer.stopIfExist(&ackEvent{releaseSuccessAck, reassignTest.chName, reassignTest.nodeID})
 
 		// channel is added to remainTest because there's only one node left
 		checkWatchInfoWithState(t, metakv, datapb.ChannelWatchState_ToWatch, remainTest.nodeID, remainTest.chName, collectionID)
@@ -640,7 +640,7 @@ func TestChannelManager(t *testing.T) {
 		opSet := getReleaseOp(nodeID, &channel{channelName, collectionID})
 
 		chManager.updateWithTimer(opSet, datapb.ChannelWatchState_ToWatch)
-		chManager.stateTimer.stopIfExsit(&ackEvent{watchSuccessAck, channelName, nodeID})
+		chManager.stateTimer.stopIfExist(&ackEvent{watchSuccessAck, channelName, nodeID})
 
 		checkWatchInfoWithState(t, metakv, datapb.ChannelWatchState_ToWatch, nodeID, channelName, collectionID)
 	})
@@ -749,7 +749,7 @@ func TestChannelManager_Reload(t *testing.T) {
 			assert.Empty(t, v)
 
 			checkWatchInfoWithState(t, metakv, datapb.ChannelWatchState_ToWatch, 111, channelName, collectionID)
-			chManager.stateTimer.stopIfExsit(&ackEvent{watchSuccessAck, channelName, nodeID})
+			chManager.stateTimer.stopIfExist(&ackEvent{watchSuccessAck, channelName, nodeID})
 		})
 
 		t.Run("ReleaseFail", func(t *testing.T) {
@@ -815,8 +815,8 @@ func TestChannelManager_Reload(t *testing.T) {
 		assert.True(t, cm2.Match(3, "channel1"))
 		assert.True(t, cm2.Match(3, "channel2"))
 
-		cm2.stateTimer.stopIfExsit(&ackEvent{watchSuccessAck, "channel1", 3})
-		cm2.stateTimer.stopIfExsit(&ackEvent{watchSuccessAck, "channel2", 3})
+		cm2.stateTimer.stopIfExist(&ackEvent{watchSuccessAck, "channel1", 3})
+		cm2.stateTimer.stopIfExist(&ackEvent{watchSuccessAck, "channel2", 3})
 	})
 }
 

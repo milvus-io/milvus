@@ -601,7 +601,7 @@ func (c *ChannelManager) updateWithTimer(updates ChannelOpSet, state datapb.Chan
 }
 
 func (c *ChannelManager) processAck(e *ackEvent) {
-	c.stateTimer.stopIfExsit(e)
+	c.stateTimer.stopIfExist(e)
 
 	switch e.ackType {
 	case invalidAck:

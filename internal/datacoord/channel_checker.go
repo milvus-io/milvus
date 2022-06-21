@@ -130,7 +130,7 @@ func (c *channelStateTimer) removeTimers(channels []string) {
 	}
 }
 
-func (c *channelStateTimer) stopIfExsit(e *ackEvent) {
+func (c *channelStateTimer) stopIfExist(e *ackEvent) {
 	stop, ok := c.runningTimers.LoadAndDelete(e.channelName)
 	if ok && e.ackType != watchTimeoutAck && e.ackType != releaseTimeoutAck {
 		close(stop.(chan struct{}))
