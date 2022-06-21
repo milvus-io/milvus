@@ -2491,7 +2491,7 @@ func assignInternalTask(ctx context.Context,
 				baseTask.setParentTask(parentTask)
 				loadSegmentTask := &loadSegmentTask{
 					baseTask:            baseTask,
-					LoadSegmentsRequest: batchReq,
+					LoadSegmentsRequest: req,
 					meta:                meta,
 					cluster:             cluster,
 					excludeNodeIDs:      excludeNodeIDs,
