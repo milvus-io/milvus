@@ -184,11 +184,22 @@ pipeline {
 
                             sh "helm repo add milvus https://milvus-io.github.io/milvus-helm"
                             sh "helm repo update"
-                            if ("${params.milvus_mode}" == "standalone") {
-                                sh "helm install --wait --timeout 720s ${env.RELEASE_NAME} milvus/milvus  --set image.all.repository=${old_image_repository_modified} --set image.all.tag=${old_image_tag_modified} -f standalone-values.yaml;"    
+                            if ("${params.deploy_task}" == "upgrade"){
+                                if ("${params.milvus_mode}" == "standalone") {
+                                    sh "helm install --wait --timeout 720s ${env.RELEASE_NAME} milvus/milvus  --set image.all.repository=${old_image_repository_modified} --set image.all.tag=${old_image_tag_modified} --set etcd.image.repository=bitnami/etcd --set etcd.image.tag=3.5.0-debian-10-r24 -f standalone-values.yaml;"    
+                                }
+                                if ("${params.milvus_mode}" == "cluster") {
+                                    sh "helm install --wait --timeout 720s ${env.RELEASE_NAME} milvus/milvus  --set image.all.repository=${old_image_repository_modified} --set image.all.tag=${old_image_tag_modified} --set etcd.image.repository=bitnami/etcd --set etcd.image.tag=3.5.0-debian-10-r24 -f cluster-values.yaml;"    
+                                }
                             }
-                            if ("${params.milvus_mode}" == "cluster") {
-                                sh "helm install --wait --timeout 720s ${env.RELEASE_NAME} milvus/milvus  --set image.all.repository=${old_image_repository_modified} --set image.all.tag=${old_image_tag_modified} -f cluster-values.yaml;"    
+
+                            if ("${params.deploy_task}" == "reinstall"){
+                                if ("${params.milvus_mode}" == "standalone") {
+                                    sh "helm install --wait --timeout 720s ${env.RELEASE_NAME} milvus/milvus  --set image.all.repository=${old_image_repository_modified} --set image.all.tag=${old_image_tag_modified} -f standalone-values.yaml;"    
+                                }
+                                if ("${params.milvus_mode}" == "cluster") {
+                                    sh "helm install --wait --timeout 720s ${env.RELEASE_NAME} milvus/milvus  --set image.all.repository=${old_image_repository_modified} --set image.all.tag=${old_image_tag_modified} -f cluster-values.yaml;"    
+                                }
                             }
                             sh "kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=${env.RELEASE_NAME} -n ${env.NAMESPACE} --timeout=360s"
                             sh "kubectl wait --for=condition=Ready pod -l release=${env.RELEASE_NAME} -n ${env.NAMESPACE} --timeout=360s"
@@ -291,11 +302,14 @@ pipeline {
                                 }
                             }
 
+                            echo "uninstall release"
+                            sh "helm uninstall ${env.RELEASE_NAME}"
+
                             if ("${params.milvus_mode}" == "standalone") {
-                                sh "helm upgrade --wait --timeout 720s ${env.RELEASE_NAME} milvus/milvus  --set image.all.repository=${params.new_image_repository} --set image.all.tag=${new_image_tag_modified} -f standalone-values.yaml"    
+                                sh "helm install --wait --timeout 720s ${env.RELEASE_NAME} milvus/milvus  --set image.all.repository=${params.new_image_repository} --set image.all.tag=${new_image_tag_modified} -f standalone-values.yaml"    
                             }
                             if ("${params.milvus_mode}" == "cluster") {
-                                sh "helm upgrade --wait --timeout 720s ${env.RELEASE_NAME} milvus/milvus  --set image.all.repository=${params.new_image_repository} --set image.all.tag=${new_image_tag_modified} -f cluster-values.yaml"    
+                                sh "helm install --wait --timeout 720s ${env.RELEASE_NAME} milvus/milvus  --set image.all.repository=${params.new_image_repository} --set image.all.tag=${new_image_tag_modified} -f cluster-values.yaml"    
                             }
                             sh "sleep 60s"
                             // sh "kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=${env.RELEASE_NAME} -n ${env.NAMESPACE} --timeout=360s"
