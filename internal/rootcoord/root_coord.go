@@ -402,11 +402,24 @@ func (c *Core) recycleDroppedIndex() {
 }
 
 func (c *Core) createIndexForSegment(ctx context.Context, collID, partID, segID UniqueID, numRows int64, binlogs []*datapb.FieldBinlog) error {
+	log.Info("create index for segment", zap.Int64("collID", collID), zap.Int64("partID", partID),
+		zap.Int64("segID", segID))
 	collID2Meta, _, indexID2Meta := c.MetaTable.dupMeta()
 	collMeta, ok := collID2Meta[collID]
 	if !ok {
 		log.Error("collection meta is not exist", zap.Int64("collID", collID))
 		return fmt.Errorf("collection meta is not exist with ID = %d", collID)
+	}
+	exist := false
+	for _, partitionID := range collMeta.PartitionIDs {
+		if partitionID == partID {
+			exist = true
+			break
+		}
+	}
+	if !exist {
+		log.Error("partition meta is not exist", zap.Int64("collID", collID), zap.Int64("partID", partID))
+		return fmt.Errorf("partition meta is not exist with ID = %d in collection %d", partID, collID)
 	}
 	if len(collMeta.FieldIndexes) == 0 {
 		log.Info("collection has no index, no need to build index on segment", zap.Int64("collID", collID),
@@ -472,6 +485,8 @@ func (c *Core) createIndexForSegment(ctx context.Context, collID, partID, segID 
 			return err
 		}
 	}
+	log.Info("create index for segment successfully", zap.Int64("collID", collID), zap.Int64("partID", partID),
+		zap.Int64("segID", segID))
 	return nil
 }
 

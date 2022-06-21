@@ -817,8 +817,13 @@ func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
 		return errors.New("segment not found")
 	}
 	// Notify RootCoord segment is flushed
+	msgID, err := s.allocator.allocID(ctx)
+	if err != nil {
+		return err
+	}
 	req := &datapb.SegmentFlushCompletedMsg{
 		Base: &commonpb.MsgBase{
+			MsgID:   msgID,
 			MsgType: commonpb.MsgType_SegmentFlushDone,
 		},
 		Segment: segment.SegmentInfo,
