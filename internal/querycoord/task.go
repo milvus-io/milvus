@@ -2306,26 +2306,13 @@ func (lbt *loadBalanceTask) globalPostExecute(ctx context.Context) error {
 				offlineNodes.Insert(nodeID)
 			}
 
-			for _, replica := range replicas {
-				replica := replica
+			for replicaID := range replicas {
+				replicaID := replicaID
 				wg.Go(func() error {
-					onlineNodes := make([]UniqueID, 0, len(replica.NodeIds))
-					for _, nodeID := range replica.NodeIds {
-						if !offlineNodes.Contain(nodeID) {
-							onlineNodes = append(onlineNodes, nodeID)
-						}
-					}
-					replica.NodeIds = onlineNodes
-
-					err := lbt.meta.setReplicaInfo(replica)
-					if err != nil {
-						log.Error("failed to remove offline nodes from replica info",
-							zap.Int64("replicaID", replica.ReplicaID),
-							zap.Error(err))
-						return err
-					}
-
-					return nil
+					return lbt.meta.applyReplicaBalancePlan(&balancePlan{
+						nodes:         lbt.SourceNodeIDs,
+						sourceReplica: replicaID,
+					})
 				})
 			}
 		}

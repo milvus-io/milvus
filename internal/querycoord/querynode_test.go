@@ -65,7 +65,7 @@ func removeAllSession() error {
 	return nil
 }
 
-func waitAllQueryNodeOffline(cluster Cluster, nodeIDs []int64) bool {
+func waitAllQueryNodeOffline(cluster Cluster, nodeIDs ...int64) bool {
 	for {
 		allOffline := true
 		for _, nodeID := range nodeIDs {
@@ -136,7 +136,7 @@ func TestQueryNode_MultiNode_stop(t *testing.T) {
 	err = removeNodeSession(queryNode2.queryNodeID)
 	assert.Nil(t, err)
 
-	waitAllQueryNodeOffline(queryCoord.cluster, onlineNodeIDs)
+	waitAllQueryNodeOffline(queryCoord.cluster, onlineNodeIDs...)
 	queryCoord.Stop()
 	err = removeAllSession()
 	assert.Nil(t, err)
@@ -182,7 +182,7 @@ func TestQueryNode_MultiNode_reStart(t *testing.T) {
 	err = removeNodeSession(queryNode3.queryNodeID)
 	assert.Nil(t, err)
 
-	waitAllQueryNodeOffline(queryCoord.cluster, onlineNodeIDs)
+	waitAllQueryNodeOffline(queryCoord.cluster, onlineNodeIDs...)
 	queryCoord.Stop()
 	err = removeAllSession()
 	assert.Nil(t, err)

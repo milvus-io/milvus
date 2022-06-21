@@ -169,12 +169,13 @@ func (rep *ReplicaInfos) ApplyBalancePlan(p *balancePlan, kv kv.MetaKv) error {
 	// generate ReplicaInfo to save to MetaKv
 	if sourceReplica != nil {
 		// remove node from replica node list
-		removeNodeFromReplica(sourceReplica, p.nodeID)
+		sourceReplica.NodeIds = removeFromSlice(sourceReplica.NodeIds, p.nodes...)
 		replicasChanged = append(replicasChanged, sourceReplica)
 	}
 	if targetReplica != nil {
 		// add node to replica
-		targetReplica.NodeIds = append(targetReplica.NodeIds, p.nodeID)
+		targetReplica.NodeIds = append(targetReplica.NodeIds, p.nodes...)
+		targetReplica.NodeIds = uniqueSlice(targetReplica.NodeIds)
 		replicasChanged = append(replicasChanged, targetReplica)
 	}
 
@@ -221,18 +222,6 @@ func (rep *ReplicaInfos) UpdateShardLeader(replicaID UniqueID, dmChannel string,
 	rep.upsert(replica)
 
 	return nil
-}
-
-// removeNodeFromReplica helper function to remove nodeID from replica NodeIds list.
-func removeNodeFromReplica(replica *milvuspb.ReplicaInfo, nodeID int64) *milvuspb.ReplicaInfo {
-	for i := 0; i < len(replica.NodeIds); i++ {
-		if replica.NodeIds[i] != nodeID {
-			continue
-		}
-		replica.NodeIds = append(replica.NodeIds[:i], replica.NodeIds[i+1:]...)
-		return replica
-	}
-	return replica
 }
 
 // save the replicas into etcd.

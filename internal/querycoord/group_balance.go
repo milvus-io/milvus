@@ -1,17 +1,23 @@
 package querycoord
 
-import "sort"
+import (
+	"sort"
+)
 
-type balancer interface {
-	addNode(nodeID int64) ([]*balancePlan, error)
-	removeNode(nodeID int64) []*balancePlan
-	rebalance() []*balancePlan
+type Balancer interface {
+	AddNode(nodeID int64) ([]*balancePlan, error)
+	RemoveNode(nodeID int64) []*balancePlan
+	Rebalance() []*balancePlan
 }
 
+// Plan for adding/removing node from replica,
+// adds node into targetReplica,
+// removes node from sourceReplica.
+// Set the replica ID to invalidReplicaID to avoid adding/removing into/from replica
 type balancePlan struct {
-	nodeID        int64
-	sourceReplica int64
-	targetReplica int64
+	nodes         []UniqueID
+	sourceReplica UniqueID
+	targetReplica UniqueID
 }
 
 type replicaBalancer struct {
@@ -23,7 +29,7 @@ func newReplicaBalancer(meta Meta, cluster Cluster) *replicaBalancer {
 	return &replicaBalancer{meta, cluster}
 }
 
-func (b *replicaBalancer) addNode(nodeID int64) ([]*balancePlan, error) {
+func (b *replicaBalancer) AddNode(nodeID int64) ([]*balancePlan, error) {
 	// allocate this node to all collections replicas
 	var ret []*balancePlan
 	collections := b.meta.showCollections()
@@ -33,6 +39,25 @@ func (b *replicaBalancer) addNode(nodeID int64) ([]*balancePlan, error) {
 			return nil, err
 		}
 		if len(replicas) == 0 {
+			continue
+		}
+
+		foundNode := false
+		for _, replica := range replicas {
+			for _, replicaNode := range replica.NodeIds {
+				if replicaNode == nodeID {
+					foundNode = true
+					break
+				}
+			}
+
+			if foundNode {
+				break
+			}
+		}
+
+		// This node is serving this collection
+		if foundNode {
 			continue
 		}
 
@@ -48,7 +73,7 @@ func (b *replicaBalancer) addNode(nodeID int64) ([]*balancePlan, error) {
 		})
 
 		ret = append(ret, &balancePlan{
-			nodeID:        nodeID,
+			nodes:         []UniqueID{nodeID},
 			sourceReplica: invalidReplicaID,
 			targetReplica: replicas[0].GetReplicaID(),
 		})
@@ -56,11 +81,11 @@ func (b *replicaBalancer) addNode(nodeID int64) ([]*balancePlan, error) {
 	return ret, nil
 }
 
-func (b *replicaBalancer) removeNode(nodeID int64) []*balancePlan {
+func (b *replicaBalancer) RemoveNode(nodeID int64) []*balancePlan {
 	// for this version, querynode does not support move from a replica to another
 	return nil
 }
 
-func (b *replicaBalancer) rebalance() []*balancePlan {
+func (b *replicaBalancer) Rebalance() []*balancePlan {
 	return nil
 }

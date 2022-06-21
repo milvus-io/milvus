@@ -81,7 +81,7 @@ func waitLoadCollectionDone(ctx context.Context, queryCoord *QueryCoord, collect
 			return errors.New("showCollection failed")
 		}
 
-		loadDone := true
+		loadDone := len(res.InMemoryPercentages) > 0
 		for _, percent := range res.InMemoryPercentages {
 			if percent < 100 {
 				loadDone = false
@@ -90,6 +90,8 @@ func waitLoadCollectionDone(ctx context.Context, queryCoord *QueryCoord, collect
 		if loadDone {
 			break
 		}
+
+		time.Sleep(500 * time.Millisecond)
 	}
 
 	return nil

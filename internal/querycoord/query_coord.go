@@ -97,7 +97,7 @@ type QueryCoord struct {
 
 	factory       dependency.Factory
 	chunkManager  storage.ChunkManager
-	groupBalancer balancer
+	groupBalancer Balancer
 }
 
 // Register register query service at etcd
@@ -341,16 +341,37 @@ func (qc *QueryCoord) watchNodeLoop() {
 	defer qc.loopWg.Done()
 	log.Info("QueryCoord start watch node loop")
 
-	unallocatedNodes := qc.getUnallocatedNodes()
-	for _, n := range unallocatedNodes {
-		if err := qc.allocateNode(n); err != nil {
-			log.Warn("unable to allcoate node", zap.Int64("nodeID", n), zap.Error(err))
+	onlineNodes := qc.cluster.OnlineNodeIDs()
+	for _, node := range onlineNodes {
+		if err := qc.allocateNode(node); err != nil {
+			log.Warn("unable to allcoate node", zap.Int64("nodeID", node), zap.Error(err))
 		}
 	}
 
 	go qc.loadBalanceNodeLoop(ctx)
-	for _, nodeID := range qc.cluster.OfflineNodeIDs() {
-		qc.offlineNodesChan <- nodeID
+	offlineNodes := make(typeutil.UniqueSet)
+	collections := qc.meta.showCollections()
+	for _, collection := range collections {
+		for _, replicaID := range collection.ReplicaIds {
+			replica, err := qc.meta.getReplicaByID(replicaID)
+			if err != nil {
+				log.Warn("failed to get replica",
+					zap.Int64("replicaID", replicaID),
+					zap.Error(err))
+				continue
+			}
+
+			for _, node := range replica.NodeIds {
+				ok, err := qc.cluster.IsOnline(node)
+				if err != nil || !ok {
+					offlineNodes.Insert(node)
+				}
+			}
+		}
+	}
+
+	for node := range offlineNodes {
+		qc.offlineNodesChan <- node
 	}
 
 	// TODO silverxia add Rewatch logic
@@ -359,7 +380,7 @@ func (qc *QueryCoord) watchNodeLoop() {
 }
 
 func (qc *QueryCoord) allocateNode(nodeID int64) error {
-	plans, err := qc.groupBalancer.addNode(nodeID)
+	plans, err := qc.groupBalancer.AddNode(nodeID)
 	if err != nil {
 		return err
 	}
@@ -369,22 +390,6 @@ func (qc *QueryCoord) allocateNode(nodeID int64) error {
 		}
 	}
 	return nil
-}
-
-func (qc *QueryCoord) getUnallocatedNodes() []int64 {
-	onlines := qc.cluster.OnlineNodeIDs()
-	var ret []int64
-	for _, n := range onlines {
-		replica, err := qc.meta.getReplicasByNodeID(n)
-		if err != nil {
-			log.Warn("failed to get replica", zap.Int64("nodeID", n), zap.Error(err))
-			continue
-		}
-		if replica == nil {
-			ret = append(ret, n)
-		}
-	}
-	return ret
 }
 
 func (qc *QueryCoord) handleNodeEvent(ctx context.Context) {
@@ -439,6 +444,8 @@ func (qc *QueryCoord) handleNodeEvent(ctx context.Context) {
 }
 
 func (qc *QueryCoord) loadBalanceNodeLoop(ctx context.Context) {
+	const LoadBalanceRetryAfter = 100 * time.Millisecond
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -463,13 +470,14 @@ func (qc *QueryCoord) loadBalanceNodeLoop(ctx context.Context) {
 				meta:               qc.meta,
 			}
 			qc.metricsCacheManager.InvalidateSystemInfoMetrics()
-			//TODO:: deal enqueue error
+
 			err := qc.scheduler.Enqueue(loadBalanceTask)
 			if err != nil {
 				log.Warn("failed to enqueue LoadBalance task into the scheduler",
 					zap.Int64("nodeID", node),
 					zap.Error(err))
 				qc.offlineNodesChan <- node
+				time.Sleep(LoadBalanceRetryAfter)
 				continue
 			}
 
@@ -483,6 +491,7 @@ func (qc *QueryCoord) loadBalanceNodeLoop(ctx context.Context) {
 					zap.Int64("nodeID", node),
 					zap.Error(err))
 				qc.offlineNodesChan <- node
+				time.Sleep(LoadBalanceRetryAfter)
 				continue
 			}
 

@@ -685,12 +685,14 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 				}
 			}
 
-			err = triggerTask.globalPostExecute(triggerTask.traceCtx())
-			if err != nil {
-				log.Error("scheduleLoop: failed to execute globalPostExecute() of task",
-					zap.Int64("taskID", triggerTask.getTaskID()),
-					zap.Error(err))
-				triggerTask.setResultInfo(err)
+			if triggerTask.getResultInfo().ErrorCode == commonpb.ErrorCode_Success {
+				err = triggerTask.globalPostExecute(triggerTask.traceCtx())
+				if err != nil {
+					log.Error("scheduleLoop: failed to execute globalPostExecute() of task",
+						zap.Int64("taskID", triggerTask.getTaskID()),
+						zap.Error(err))
+					triggerTask.setResultInfo(err)
+				}
 			}
 
 			err = removeTaskFromKVFn(triggerTask)
