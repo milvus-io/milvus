@@ -303,7 +303,9 @@ func (s *Segment) retrieve(plan *RetrievePlan) (*segcorepb.RetrieveResults, erro
 	status := C.Retrieve(s.segmentPtr, plan.cRetrievePlan, ts, &retrieveResult.cRetrieveResult)
 	metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
 		metrics.QueryLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	log.Debug("do retrieve on segment", zap.Int64("segmentID", s.segmentID), zap.String("segmentType", s.segmentType.String()))
+	log.Debug("do retrieve on segment",
+		zap.Int64("msgID", plan.msgID),
+		zap.Int64("segmentID", s.segmentID), zap.String("segmentType", s.segmentType.String()))
 	if err := HandleCStatus(&status, "Retrieve failed"); err != nil {
 		return nil, err
 	}

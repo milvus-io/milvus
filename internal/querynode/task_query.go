@@ -66,12 +66,13 @@ func (q *queryTask) queryOnStreaming() error {
 	q.QS.collection.RLock() // locks the collectionPtr
 	defer q.QS.collection.RUnlock()
 	if _, released := q.QS.collection.getReleaseTime(); released {
-		log.Debug("collection release before search", zap.Int64("collectionID", q.CollectionID))
+		log.Debug("collection release before search", zap.Int64("msgID", q.ID()),
+			zap.Int64("collectionID", q.CollectionID))
 		return fmt.Errorf("retrieve failed, collection has been released, collectionID = %d", q.CollectionID)
 	}
 
 	// deserialize query plan
-	plan, err := createRetrievePlanByExpr(q.QS.collection, q.iReq.GetSerializedExprPlan(), q.TravelTimestamp)
+	plan, err := createRetrievePlanByExpr(q.QS.collection, q.iReq.GetSerializedExprPlan(), q.TravelTimestamp, q.ID())
 	if err != nil {
 		return err
 	}
@@ -113,12 +114,13 @@ func (q *queryTask) queryOnHistorical() error {
 	defer q.QS.collection.RUnlock()
 
 	if _, released := q.QS.collection.getReleaseTime(); released {
-		log.Debug("collection release before search", zap.Int64("collectionID", q.CollectionID))
+		log.Debug("collection release before search", zap.Int64("msgID", q.ID()),
+			zap.Int64("collectionID", q.CollectionID))
 		return fmt.Errorf("retrieve failed, collection has been released, collectionID = %d", q.CollectionID)
 	}
 
 	// deserialize query plan
-	plan, err := createRetrievePlanByExpr(q.QS.collection, q.iReq.GetSerializedExprPlan(), q.TravelTimestamp)
+	plan, err := createRetrievePlanByExpr(q.QS.collection, q.iReq.GetSerializedExprPlan(), q.TravelTimestamp, q.ID())
 	if err != nil {
 		return err
 	}

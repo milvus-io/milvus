@@ -243,20 +243,10 @@ func (coord *QueryCoordMock) ResetShowPartitionsFunc() {
 }
 
 func (coord *QueryCoordMock) ShowPartitions(ctx context.Context, req *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
-	if !coord.healthy() {
-		return &querypb.ShowPartitionsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    "unhealthy",
-			},
-		}, nil
-	}
-
 	if coord.showPartitionsFunc != nil {
 		return coord.showPartitionsFunc(ctx, req)
 	}
-
-	panic("implement me")
+	return nil, nil
 }
 
 func (coord *QueryCoordMock) LoadPartitions(ctx context.Context, req *querypb.LoadPartitionsRequest) (*commonpb.Status, error) {
