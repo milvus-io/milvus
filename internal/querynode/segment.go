@@ -280,7 +280,8 @@ func (s *Segment) search(searchReq *searchRequest) (*SearchResult, error) {
 	}
 
 	var searchResult SearchResult
-	log.Debug("do search on segment", zap.Int64("segmentID", s.segmentID), zap.String("segmentType", s.segmentType.String()))
+	log.Debug("do search on segment", zap.Int64("msgID", searchReq.msgID),
+		zap.Int64("segmentID", s.segmentID), zap.String("segmentType", s.segmentType.String()))
 	tr := timerecord.NewTimeRecorder("cgoSearch")
 	status := C.Search(s.segmentPtr, searchReq.plan.cSearchPlan, searchReq.cPlaceholderGroup,
 		C.uint64_t(searchReq.timestamp), &searchResult.cSearchResult, C.int64_t(s.segmentID))
