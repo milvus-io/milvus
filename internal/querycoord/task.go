@@ -510,18 +510,12 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 		for _, info := range mergedDmChannel {
 			msgBase := proto.Clone(lct.Base).(*commonpb.MsgBase)
 			msgBase.MsgType = commonpb.MsgType_WatchDmChannels
-			segmentInfos, err := generateVChannelSegmentInfos(lct.meta, info)
-			if err != nil {
-				lct.setResultInfo(err)
-				return err
-			}
 			watchRequest := &querypb.WatchDmChannelsRequest{
 				Base:         msgBase,
 				CollectionID: collectionID,
 				//PartitionIDs: toLoadPartitionIDs,
-				Infos:        []*datapb.VchannelInfo{info},
-				Schema:       lct.Schema,
-				SegmentInfos: segmentInfos,
+				Infos:  []*datapb.VchannelInfo{info},
+				Schema: lct.Schema,
 				LoadMeta: &querypb.LoadMetaInfo{
 					LoadType:     querypb.LoadType_LoadCollection,
 					CollectionID: collectionID,
@@ -530,7 +524,12 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 				ReplicaID: replica.GetReplicaID(),
 			}
 
-			watchDmChannelReqs = append(watchDmChannelReqs, watchRequest)
+			fullWatchRequest, err := generateFullWatchDmChannelsRequest(lct.meta, watchRequest)
+			if err != nil {
+				lct.setResultInfo(err)
+				return err
+			}
+			watchDmChannelReqs = append(watchDmChannelReqs, fullWatchRequest)
 		}
 
 		internalTasks, err := assignInternalTask(ctx, lct, lct.meta, lct.cluster, loadSegmentReqs, watchDmChannelReqs, false, nil, replica.GetNodeIds(), -1, lct.broker)
@@ -946,18 +945,12 @@ func (lpt *loadPartitionTask) execute(ctx context.Context) error {
 		for _, info := range mergedDmChannel {
 			msgBase := proto.Clone(lpt.Base).(*commonpb.MsgBase)
 			msgBase.MsgType = commonpb.MsgType_WatchDmChannels
-			segmentInfos, err := generateVChannelSegmentInfos(lpt.meta, info)
-			if err != nil {
-				lpt.setResultInfo(err)
-				return err
-			}
 			watchRequest := &querypb.WatchDmChannelsRequest{
 				Base:         msgBase,
 				CollectionID: collectionID,
 				PartitionIDs: partitionIDs,
 				Infos:        []*datapb.VchannelInfo{info},
 				Schema:       lpt.Schema,
-				SegmentInfos: segmentInfos,
 				LoadMeta: &querypb.LoadMetaInfo{
 					LoadType:     querypb.LoadType_LoadPartition,
 					CollectionID: collectionID,
@@ -966,7 +959,12 @@ func (lpt *loadPartitionTask) execute(ctx context.Context) error {
 				ReplicaID: replica.GetReplicaID(),
 			}
 
-			watchDmChannelReqs = append(watchDmChannelReqs, watchRequest)
+			fullWatchRequest, err := generateFullWatchDmChannelsRequest(lpt.meta, watchRequest)
+			if err != nil {
+				lpt.setResultInfo(err)
+				return err
+			}
+			watchDmChannelReqs = append(watchDmChannelReqs, fullWatchRequest)
 		}
 
 		internalTasks, err := assignInternalTask(ctx, lpt, lpt.meta, lpt.cluster, loadSegmentReqs, watchDmChannelReqs, false, nil, replica.GetNodeIds(), -1, lpt.broker)
@@ -1404,7 +1402,7 @@ func (wdt *watchDmChannelTask) msgBase() *commonpb.MsgBase {
 }
 
 func (wdt *watchDmChannelTask) marshal() ([]byte, error) {
-	return proto.Marshal(wdt.WatchDmChannelsRequest)
+	return proto.Marshal(thinWatchDmChannelsRequest(wdt.WatchDmChannelsRequest))
 }
 
 func (wdt *watchDmChannelTask) isValid() bool {
@@ -2020,17 +2018,11 @@ func (lbt *loadBalanceTask) processNodeDownLoadBalance(ctx context.Context) erro
 				if _, ok := dmChannels[channelName]; ok {
 					msgBase := proto.Clone(lbt.Base).(*commonpb.MsgBase)
 					msgBase.MsgType = commonpb.MsgType_WatchDmChannels
-					channelSegmentInfos, err := generateVChannelSegmentInfos(lbt.meta, vChannelInfo)
-					if err != nil {
-						lbt.setResultInfo(err)
-						return err
-					}
 					watchRequest := &querypb.WatchDmChannelsRequest{
 						Base:         msgBase,
 						CollectionID: collectionID,
 						Infos:        []*datapb.VchannelInfo{vChannelInfo},
 						Schema:       schema,
-						SegmentInfos: channelSegmentInfos,
 						LoadMeta: &querypb.LoadMetaInfo{
 							LoadType:     collectionInfo.LoadType,
 							CollectionID: collectionID,
@@ -2043,7 +2035,13 @@ func (lbt *loadBalanceTask) processNodeDownLoadBalance(ctx context.Context) erro
 						watchRequest.PartitionIDs = toRecoverPartitionIDs
 					}
 
-					watchDmChannelReqs = append(watchDmChannelReqs, watchRequest)
+					fullWatchRequest, err := generateFullWatchDmChannelsRequest(lbt.meta, watchRequest)
+					if err != nil {
+						lbt.setResultInfo(err)
+						return err
+					}
+
+					watchDmChannelReqs = append(watchDmChannelReqs, fullWatchRequest)
 				}
 			}
 
@@ -2575,21 +2573,4 @@ func mergeDmChannelInfo(infos []*datapb.VchannelInfo) map[string]*datapb.Vchanne
 	}
 
 	return minPositions
-}
-
-// generateVChannelSegmentInfos returns a map<id, SegmentInfo> contains
-// all the segment infos(flushed, unflushed and dropped) in a vChannel.
-func generateVChannelSegmentInfos(m Meta, vChannel *datapb.VchannelInfo) (map[int64]*datapb.SegmentInfo, error) {
-	segmentIds := make([]int64, 0)
-	segmentIds = append(append(append(segmentIds, vChannel.FlushedSegmentIds...), vChannel.UnflushedSegmentIds...), vChannel.DroppedSegmentIds...)
-	segmentInfos, err := m.getDataSegmentInfosByIDs(segmentIds)
-	if err != nil {
-		log.Error("Get Vchannel SegmentInfos failed", zap.String("vChannel", vChannel.String()), zap.Error(err))
-		return nil, err
-	}
-	segmentDict := make(map[int64]*datapb.SegmentInfo)
-	for _, info := range segmentInfos {
-		segmentDict[info.ID] = info
-	}
-	return segmentDict, nil
 }
