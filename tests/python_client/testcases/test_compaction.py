@@ -339,8 +339,7 @@ class TestCompactionParams(TestcaseBase):
 
 class TestCompactionOperation(TestcaseBase):
 
-    @pytest.mark.xfail(reason="Issue https://github.com/milvus-io/milvus/issues/15665")
-    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/17625")
+    # @pytest.mark.xfail(reason="Issue https://github.com/milvus-io/milvus/issues/15665")
     @pytest.mark.tags(CaseLabel.L3)
     def test_compact_both_delete_merge(self):
         """
@@ -823,6 +822,8 @@ class TestCompactionOperation(TestcaseBase):
         assert len(c_plans.plans) == 1
         assert [seg_before[0].segmentID] == c_plans.plans[0].sources
 
+        collection_w.release()
+        collection_w.load()
         seg_after, _ = self.utility_wrap.get_query_segment_info(collection_w.name)
         assert seg_after[0].segmentID == c_plans.plans[0].target
 
@@ -1167,6 +1168,7 @@ class TestCompactionOperation(TestcaseBase):
         seg_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
         assert len(seg_info) == 1*replica_num
 
+    @pytest.mark.tags(CaseLabel.L2)
     def test_compact_during_search(self):
         """
         target: test compact during search
@@ -1174,7 +1176,7 @@ class TestCompactionOperation(TestcaseBase):
         expected: No exception
         """
         # less than auto-merge threshold 10
-        num_of_segment = 5
+        num_of_segment = ct.compact_segment_num_threshold - 1
 
         # create collection shard_num=1, insert 11 segments, each with one entity
         collection_w = self.collection_insert_multi_segments_one_shard(prefix,
