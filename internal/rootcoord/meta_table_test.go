@@ -1367,7 +1367,7 @@ func TestMetaTable_checkFieldIndexDuplicate(t *testing.T) {
 		}
 		fieldSchema := schemapb.FieldSchema{Name: "test", FieldID: 101}
 		idxInfo := &pb.IndexInfo{IndexName: "test"}
-		_, err := mt.checkFieldIndexDuplicate(collMeta, fieldSchema, idxInfo)
+		_, _, err := mt.checkFieldIndexDuplicate(collMeta, fieldSchema, idxInfo)
 		assert.Error(t, err)
 	})
 
@@ -1384,7 +1384,7 @@ func TestMetaTable_checkFieldIndexDuplicate(t *testing.T) {
 		}
 		fieldSchema := schemapb.FieldSchema{Name: "test", FieldID: 100}
 		idxInfo := &pb.IndexInfo{IndexName: "test", IndexParams: []*commonpb.KeyValuePair{{Key: "Key", Value: "not_Value"}}}
-		_, err := mt.checkFieldIndexDuplicate(collMeta, fieldSchema, idxInfo)
+		_, _, err := mt.checkFieldIndexDuplicate(collMeta, fieldSchema, idxInfo)
 		assert.Error(t, err)
 	})
 
@@ -1401,9 +1401,10 @@ func TestMetaTable_checkFieldIndexDuplicate(t *testing.T) {
 		}
 		fieldSchema := schemapb.FieldSchema{Name: "test", FieldID: 100}
 		idxInfo := &pb.IndexInfo{IndexName: "test", IndexParams: []*commonpb.KeyValuePair{{Key: "Key", Value: "Value"}}}
-		duplicate, err := mt.checkFieldIndexDuplicate(collMeta, fieldSchema, idxInfo)
+		duplicate, dupIdxInfo, err := mt.checkFieldIndexDuplicate(collMeta, fieldSchema, idxInfo)
 		assert.NoError(t, err)
 		assert.True(t, duplicate)
+		assert.Equal(t, idxInfo.IndexName, dupIdxInfo.IndexName)
 	})
 
 	t.Run("field not found", func(t *testing.T) {
@@ -1415,9 +1416,10 @@ func TestMetaTable_checkFieldIndexDuplicate(t *testing.T) {
 			FieldID: 101,
 		}
 		idxInfo := &pb.IndexInfo{}
-		duplicate, err := mt.checkFieldIndexDuplicate(collMeta, fieldSchema, idxInfo)
+		duplicate, dupIdxInfo, err := mt.checkFieldIndexDuplicate(collMeta, fieldSchema, idxInfo)
 		assert.NoError(t, err)
 		assert.False(t, duplicate)
+		assert.Nil(t, dupIdxInfo)
 	})
 }
 
@@ -1450,12 +1452,14 @@ func TestMetaTable_GetInitBuildIDs(t *testing.T) {
 		},
 		indexID2Meta: map[typeutil.UniqueID]pb.IndexInfo{
 			1: {
-				IndexName: "GetInitBuildID-Index-1",
-				IndexID:   1,
+				IndexName:  "GetInitBuildID-Index-1",
+				IndexID:    1,
+				CreateTime: 10,
 			},
 			2: {
-				IndexName: "GetInitBuildID-Index-2",
-				IndexID:   2,
+				IndexName:  "GetInitBuildID-Index-2",
+				IndexID:    2,
+				CreateTime: 10,
 			},
 		},
 	}
@@ -1474,8 +1478,9 @@ func TestMetaTable_GetInitBuildIDs(t *testing.T) {
 	})
 
 	mt.indexID2Meta[3] = pb.IndexInfo{
-		IndexName: indexName,
-		IndexID:   3,
+		IndexName:  indexName,
+		IndexID:    3,
+		CreateTime: 10,
 	}
 
 	mt.segID2IndexMeta = map[typeutil.UniqueID]map[typeutil.UniqueID]pb.SegmentIndexInfo{
@@ -1483,13 +1488,14 @@ func TestMetaTable_GetInitBuildIDs(t *testing.T) {
 			1: {
 				IndexID:     1,
 				EnableIndex: true,
+				CreateTime:  5,
 			},
 		},
 		5: {
 			3: {
 				IndexID:     3,
 				EnableIndex: true,
-				ByAutoFlush: false,
+				CreateTime:  5,
 			},
 		},
 	}
@@ -1720,6 +1726,73 @@ func TestMetaTable_MarkIndexDeleted(t *testing.T) {
 		assert.NoError(t, err)
 
 		err = mt.MarkIndexDeleted(collName, fieldName, indexName)
+		assert.NoError(t, err)
+	})
+}
+
+func TestMetaTable_GetNotIndexedSegments(t *testing.T) {
+	var (
+		collName  = "MarkIndexDeleted-Coll"
+		fieldName = "MarkIndexDeleted-Field"
+		indexName = "MarkIndexDeleted-Index"
+		collID    = UniqueID(1)
+		fieldID   = UniqueID(100)
+		indexID   = UniqueID(1000)
+		segID     = UniqueID(10000)
+	)
+	mt := &MetaTable{
+		txn: &mockTestTxnKV{
+			multiSave: func(kvs map[string]string) error {
+				return nil
+			},
+			multiRemove: func(keys []string) error {
+				return nil
+			},
+			save: func(key, value string) error {
+				return nil
+			},
+		},
+		collID2Meta: map[typeutil.UniqueID]pb.CollectionInfo{
+			collID: {
+				FieldIndexes: []*pb.FieldIndexInfo{
+					{
+						FiledID: fieldID,
+						IndexID: indexID,
+					},
+				},
+				Schema: &schemapb.CollectionSchema{
+					Fields: []*schemapb.FieldSchema{
+						{
+							FieldID:     fieldID,
+							Name:        fieldName,
+							DataType:    schemapb.DataType_FloatVector,
+							IndexParams: []*commonpb.KeyValuePair{{Key: "index_type", Value: DefaultIndexType}},
+						},
+					},
+				},
+			},
+		},
+		collName2ID: map[string]typeutil.UniqueID{
+			collName: collID,
+		},
+		indexID2Meta: map[typeutil.UniqueID]pb.IndexInfo{
+			indexID: {
+				IndexName:   indexName,
+				IndexID:     indexID,
+				IndexParams: []*commonpb.KeyValuePair{{Key: "index_type", Value: DefaultIndexType}},
+				Deleted:     false,
+			},
+		},
+	}
+
+	t.Run("GetNotIndexedSegments", func(t *testing.T) {
+		idxInfo := &pb.IndexInfo{
+			IndexName:   indexName,
+			IndexID:     indexID,
+			IndexParams: []*commonpb.KeyValuePair{{Key: "index_type", Value: DefaultIndexType}},
+			CreateTime:  0,
+		}
+		_, _, err := mt.GetNotIndexedSegments(collName, fieldName, idxInfo, []UniqueID{segID})
 		assert.NoError(t, err)
 	})
 }

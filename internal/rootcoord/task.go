@@ -958,10 +958,15 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	createTS, err := t.core.TSOAllocator(1)
+	if err != nil {
+		return err
+	}
 	idxInfo := &etcdpb.IndexInfo{
 		IndexName:   indexName,
 		IndexID:     indexID,
 		IndexParams: t.Req.ExtraParams,
+		CreateTime:  createTS,
 	}
 	log.Info("create index for collection",
 		zap.String("collection", t.Req.GetCollectionName()),
@@ -1000,7 +1005,7 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 			FieldID:      field.FieldID,
 			IndexID:      idxInfo.IndexID,
 			EnableIndex:  false,
-			ByAutoFlush:  false,
+			CreateTime:   createTS,
 		}
 		info.BuildID, err = t.core.BuildIndex(ctx, segID, segID2Binlog[segID].GetNumOfRows(), segID2Binlog[segID].GetFieldBinlogs(), &field, idxInfo, false)
 		if err != nil {
