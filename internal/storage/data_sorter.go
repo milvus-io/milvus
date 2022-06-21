@@ -83,14 +83,16 @@ func (ds *DataSorter) Swap(i, j int) {
 		case schemapb.DataType_BinaryVector:
 			data := singleData.(*BinaryVectorFieldData).Data
 			dim := singleData.(*BinaryVectorFieldData).Dim
-			for i := 0; i < dim/8; i++ {
-				data[i], data[i+dim/8] = data[i+dim/8], data[i]
+			// dim for binary vector must be multiplier of 8, simple verion for swapping:
+			steps := dim / 8
+			for idx := 0; idx < steps; idx++ {
+				data[i*steps+idx], data[j*steps+idx] = data[j*steps+idx], data[i*steps+idx]
 			}
 		case schemapb.DataType_FloatVector:
 			data := singleData.(*FloatVectorFieldData).Data
 			dim := singleData.(*FloatVectorFieldData).Dim
-			for i := 0; i < dim; i++ {
-				data[i], data[i+dim] = data[i+dim], data[i]
+			for idx := 0; idx < dim; idx++ {
+				data[i*dim+idx], data[j*dim+idx] = data[j*dim+idx], data[i*dim+idx]
 			}
 		default:
 			errMsg := "undefined data type " + string(field.DataType)
