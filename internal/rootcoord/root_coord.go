@@ -426,13 +426,18 @@ func (c *Core) createIndexForSegment(ctx context.Context, collID, partID, segID 
 
 		field, err := GetFieldSchemaByID(&collMeta, fieldIndex.FiledID)
 		if err != nil {
-			log.Debug("GetFieldSchemaByID failed",
+			log.Error("GetFieldSchemaByID failed",
 				zap.Int64("collectionID", collID),
-				zap.Int64("fieldID", fieldIndex.FiledID))
+				zap.Int64("fieldID", fieldIndex.FiledID), zap.Error(err))
 			return err
 		}
 		if c.MetaTable.IsSegmentIndexed(segID, field, indexMeta.IndexParams) {
 			continue
+		}
+		createTS, err := c.TSOAllocator(1)
+		if err != nil {
+			log.Error("RootCoord alloc timestamp failed", zap.Int64("collectionID", collID), zap.Error(err))
+			return err
 		}
 
 		segIndexInfo := etcdpb.SegmentIndexInfo{
@@ -442,7 +447,7 @@ func (c *Core) createIndexForSegment(ctx context.Context, collID, partID, segID 
 			FieldID:      fieldIndex.FiledID,
 			IndexID:      fieldIndex.IndexID,
 			EnableIndex:  false,
-			ByAutoFlush:  true,
+			CreateTime:   createTS,
 		}
 		buildID, err := c.BuildIndex(ctx, segID, numRows, binlogs, field, &indexMeta, false)
 		if err != nil {

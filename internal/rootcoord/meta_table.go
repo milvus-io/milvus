@@ -953,10 +953,12 @@ func (mt *MetaTable) GetInitBuildIDs(collName, indexName string) ([]UniqueID, er
 	}
 
 	var indexID typeutil.UniqueID
+	var indexIDCreateTS uint64
 	for _, info := range collMeta.FieldIndexes {
 		idxMeta, ok := mt.indexID2Meta[info.IndexID]
 		if ok && idxMeta.IndexName == indexName {
 			indexID = info.IndexID
+			indexIDCreateTS = idxMeta.CreateTime
 			break
 		}
 	}
@@ -970,7 +972,7 @@ func (mt *MetaTable) GetInitBuildIDs(collName, indexName string) ([]UniqueID, er
 	initBuildIDs := make([]UniqueID, 0)
 	for _, indexID2Info := range mt.segID2IndexMeta {
 		segIndexInfo, ok := indexID2Info[indexID]
-		if ok && segIndexInfo.EnableIndex && !segIndexInfo.ByAutoFlush {
+		if ok && segIndexInfo.EnableIndex && segIndexInfo.CreateTime <= indexIDCreateTS {
 			initBuildIDs = append(initBuildIDs, segIndexInfo.BuildID)
 		}
 	}
@@ -1282,21 +1284,21 @@ func (mt *MetaTable) checkFieldCanBeIndexed(collMeta pb.CollectionInfo, fieldSch
 	return nil
 }
 
-func (mt *MetaTable) checkFieldIndexDuplicate(collMeta pb.CollectionInfo, fieldSchema schemapb.FieldSchema, idxInfo *pb.IndexInfo) (duplicate bool, err error) {
+func (mt *MetaTable) checkFieldIndexDuplicate(collMeta pb.CollectionInfo, fieldSchema schemapb.FieldSchema, idxInfo *pb.IndexInfo) (duplicate bool, dupIdxInfo *pb.IndexInfo, err error) {
 	for _, f := range collMeta.FieldIndexes {
 		if info, ok := mt.indexID2Meta[f.IndexID]; ok && !info.GetDeleted() {
 			if info.IndexName == idxInfo.IndexName {
 				// the index name must be different for different indexes
 				if f.FiledID != fieldSchema.FieldID || !EqualKeyPairArray(info.IndexParams, idxInfo.IndexParams) {
-					return false, fmt.Errorf("index already exists, collection: %s, field: %s, index: %s", collMeta.GetSchema().GetName(), fieldSchema.GetName(), idxInfo.GetIndexName())
+					return false, nil, fmt.Errorf("index already exists, collection: %s, field: %s, index: %s", collMeta.GetSchema().GetName(), fieldSchema.GetName(), idxInfo.GetIndexName())
 				}
 
 				// same index name, index params, and fieldId
-				return true, nil
+				return true, proto.Clone(&info).(*pb.IndexInfo), nil
 			}
 		}
 	}
-	return false, nil
+	return false, nil, nil
 }
 
 // GetNotIndexedSegments return segment ids which have no index
@@ -1335,7 +1337,7 @@ func (mt *MetaTable) GetNotIndexedSegments(collName string, fieldName string, id
 		return nil, schemapb.FieldSchema{}, err
 	}
 
-	dupIdx, err := mt.checkFieldIndexDuplicate(collMeta, fieldSchema, idxInfo)
+	dupIdx, dupIdxInfo, err := mt.checkFieldIndexDuplicate(collMeta, fieldSchema, idxInfo)
 	if err != nil {
 		// error here if index already exists.
 		return nil, fieldSchema, err
@@ -1374,6 +1376,25 @@ func (mt *MetaTable) GetNotIndexedSegments(collName string, fieldName string, id
 
 		mt.collID2Meta[collMeta.ID] = collMeta
 		mt.indexID2Meta[idx.IndexID] = *idxInfo
+	} else {
+		log.Info("index has been created, update timestamp for IndexID", zap.Int64("indexID", dupIdxInfo.IndexID))
+		// just update create time for IndexID
+		dupIdxInfo.CreateTime = idxInfo.CreateTime
+		k := fmt.Sprintf("%s/%d/%d", IndexMetaPrefix, collMeta.ID, dupIdxInfo.IndexID)
+		v, err := proto.Marshal(dupIdxInfo)
+		if err != nil {
+			log.Error("MetaTable GetNotIndexedSegments Marshal idxInfo fail",
+				zap.String("key", k), zap.Error(err))
+			return nil, schemapb.FieldSchema{}, fmt.Errorf("metaTable GetNotIndexedSegments Marshal idxInfo fail key:%s, err:%w", k, err)
+		}
+		meta := map[string]string{k: string(v)}
+
+		err = mt.txn.MultiSave(meta)
+		if err != nil {
+			log.Error("TxnKV MultiSave fail", zap.Error(err))
+			panic("TxnKV MultiSave fail")
+		}
+		mt.indexID2Meta[dupIdxInfo.IndexID] = *dupIdxInfo
 	}
 
 	rstID := make([]typeutil.UniqueID, 0, 16)
