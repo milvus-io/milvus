@@ -105,7 +105,7 @@ func (dn *deleteNode) Close() {
 	log.Info("Flowgraph Delete Node closing")
 }
 
-func (dn *deleteNode) bufferDeleteMsg(msg *msgstream.DeleteMsg, tr TimeRange) error {
+func (dn *deleteNode) bufferDeleteMsg(msg *msgstream.DeleteMsg, tr TimeRange) ([]UniqueID, error) {
 	log.Debug("bufferDeleteMsg", zap.Any("primary keys", msg.PrimaryKeys), zap.String("vChannelName", dn.channelName))
 
 	// Update delBuf for merged segments
@@ -129,11 +129,12 @@ func (dn *deleteNode) bufferDeleteMsg(msg *msgstream.DeleteMsg, tr TimeRange) er
 	primaryKeys := storage.ParseIDs2PrimaryKeys(msg.PrimaryKeys)
 	segIDToPks, segIDToTss := dn.filterSegmentByPK(msg.PartitionID, primaryKeys, msg.Timestamps)
 
+	var segments []UniqueID
 	for segID, pks := range segIDToPks {
 		rows := len(pks)
 		tss, ok := segIDToTss[segID]
 		if !ok || rows != len(tss) {
-			return fmt.Errorf("primary keys and timestamp's element num mis-match, segmentID = %d", segID)
+			return nil, fmt.Errorf("primary keys and timestamp's element num mis-match, segmentID = %d", segID)
 		}
 
 		var delDataBuf *DelDataBuf
@@ -162,9 +163,11 @@ func (dn *deleteNode) bufferDeleteMsg(msg *msgstream.DeleteMsg, tr TimeRange) er
 		metrics.DataNodeConsumeMsgRowsCount.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID()), metrics.DeleteLabel).Add(float64(rows))
 		delDataBuf.updateTimeRange(tr)
 		dn.delBuf.Store(segID, delDataBuf)
+
+		segments = append(segments, segID)
 	}
 
-	return nil
+	return segments, nil
 }
 
 func (dn *deleteNode) showDelBuf() {
@@ -211,21 +214,34 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 		msg.SetTraceCtx(ctx)
 	}
 
+	segmentsWithDeletedData := make(map[UniqueID]struct{})
 	for i, msg := range fgMsg.deleteMessages {
 		traceID, _, _ := trace.InfoFromSpan(spans[i])
 		log.Info("Buffer delete request in DataNode", zap.String("traceID", traceID))
 
-		err := dn.bufferDeleteMsg(msg, fgMsg.timeRange)
+		segmentIDs, err := dn.bufferDeleteMsg(msg, fgMsg.timeRange)
 		if err != nil {
 			// error occurs only when deleteMsg is misaligned, should not happen
 			err = fmt.Errorf("buffer delete msg failed, err = %s", err)
 			log.Error(err.Error())
 			panic(err)
 		}
+
+		for _, segmentID := range segmentIDs {
+			segmentsWithDeletedData[segmentID] = struct{}{}
+		}
 	}
 
-	// show all data in dn.delBuf
 	if len(fgMsg.deleteMessages) != 0 {
+		channelStats := dn.replica.getChannelConsumeStats()
+		// update segment buffer range
+		startPosition, endPosition := fgMsg.startPositions[0], fgMsg.endPositions[0]
+		for segmentID := range segmentsWithDeletedData {
+			channelStats.update(segmentID, startPosition, endPosition)
+		}
+		// update consume position here because we have to update segment range first to avoid losing data
+		channelStats.setConsumePosition(startPosition)
+
 		dn.showDelBuf()
 	}
 

@@ -109,6 +109,10 @@ func (replica *mockReplica) hasSegment(segID UniqueID, countFlushed bool) bool {
 	return has
 }
 
+func (replica *mockReplica) getChannelConsumeStats() *channelConsumeStats {
+	return newChannelConsumeStats()
+}
+
 func TestFlowGraphDeleteNode_newDeleteNode(te *testing.T) {
 	tests := []struct {
 		ctx    context.Context
@@ -215,7 +219,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 
 		for _, test := range invalidInTests {
 			te.Run(test.desc, func(t *testing.T) {
-				dn := deleteNode{}
+				dn := deleteNode{replica: newMockReplica()}
 				rt := dn.Operate(test.in)
 				assert.Empty(t, rt)
 			})

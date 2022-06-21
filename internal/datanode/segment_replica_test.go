@@ -833,3 +833,148 @@ func TestReplica_UpdatePKRange(t *testing.T) {
 	}
 
 }
+
+func TestChannelConsumeStats(t *testing.T) {
+	cases := []struct {
+		name             string
+		segmentIDs       []int64
+		startPositions   []*internalpb.MsgPosition
+		endPositions     []*internalpb.MsgPosition
+		dropPositions    []*internalpb.MsgPosition
+		consumePosition  *internalpb.MsgPosition
+		expectedPosition *internalpb.MsgPosition
+		expectedSegments []int64
+	}{
+		{
+			name:             "no segment",
+			segmentIDs:       []int64{},
+			startPositions:   []*internalpb.MsgPosition{},
+			endPositions:     []*internalpb.MsgPosition{},
+			dropPositions:    []*internalpb.MsgPosition{},
+			consumePosition:  &internalpb.MsgPosition{Timestamp: 10},
+			expectedPosition: &internalpb.MsgPosition{Timestamp: 10},
+			expectedSegments: []int64{},
+		},
+		{
+			name:       "return less start pos",
+			segmentIDs: []int64{1, 2},
+			startPositions: []*internalpb.MsgPosition{
+				{Timestamp: 1}, {Timestamp: 3},
+			},
+			endPositions: []*internalpb.MsgPosition{
+				{Timestamp: 8}, {Timestamp: 5},
+			},
+			dropPositions: []*internalpb.MsgPosition{
+				nil, nil,
+			},
+			consumePosition: &internalpb.MsgPosition{
+				Timestamp: 10,
+			},
+			expectedPosition: &internalpb.MsgPosition{
+				Timestamp: 1,
+			},
+			expectedSegments: []int64{1, 2},
+		},
+		{
+			name:       "return right position after drop",
+			segmentIDs: []int64{1, 2},
+			startPositions: []*internalpb.MsgPosition{
+				{Timestamp: 1}, {Timestamp: 3},
+			},
+			endPositions: []*internalpb.MsgPosition{
+				{Timestamp: 8}, {Timestamp: 5},
+			},
+			dropPositions: []*internalpb.MsgPosition{
+				{Timestamp: 4}, nil,
+			},
+			consumePosition: &internalpb.MsgPosition{
+				Timestamp: 10,
+			},
+			expectedPosition: &internalpb.MsgPosition{
+				Timestamp: 3,
+			},
+			expectedSegments: []int64{1, 2},
+		},
+		{
+			name:       "consume pos less than segment's least pos",
+			segmentIDs: []int64{1, 2},
+			startPositions: []*internalpb.MsgPosition{
+				{Timestamp: 2}, {Timestamp: 4},
+			},
+			endPositions: []*internalpb.MsgPosition{
+				{Timestamp: 3}, {Timestamp: 5},
+			},
+			dropPositions: []*internalpb.MsgPosition{
+				nil, nil,
+			},
+			consumePosition: &internalpb.MsgPosition{
+				Timestamp: 1,
+			},
+			expectedPosition: &internalpb.MsgPosition{
+				Timestamp: 1,
+			},
+			expectedSegments: []int64{1, 2},
+		},
+		{
+			name:       "out-of-order update",
+			segmentIDs: []int64{1, 2, 1},
+			startPositions: []*internalpb.MsgPosition{
+				{Timestamp: 2}, {Timestamp: 4}, {Timestamp: 1},
+			},
+			endPositions: []*internalpb.MsgPosition{
+				{Timestamp: 3}, {Timestamp: 5}, {Timestamp: 2},
+			},
+			dropPositions: []*internalpb.MsgPosition{
+				nil, nil, nil,
+			},
+			consumePosition: &internalpb.MsgPosition{
+				Timestamp: 10,
+			},
+			expectedPosition: &internalpb.MsgPosition{
+				Timestamp: 1,
+			},
+			expectedSegments: []int64{1, 2},
+		},
+		{
+			name:       "remove stats after drop",
+			segmentIDs: []int64{1, 2, 1},
+			startPositions: []*internalpb.MsgPosition{
+				{Timestamp: 2}, {Timestamp: 4}, {Timestamp: 1},
+			},
+			endPositions: []*internalpb.MsgPosition{
+				{Timestamp: 3}, {Timestamp: 5}, {Timestamp: 2},
+			},
+			dropPositions: []*internalpb.MsgPosition{
+				nil, nil, {Timestamp: 3},
+			},
+			consumePosition: &internalpb.MsgPosition{
+				Timestamp: 10,
+			},
+			expectedPosition: &internalpb.MsgPosition{
+				Timestamp: 4,
+			},
+			expectedSegments: []int64{2},
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			stats := newChannelConsumeStats()
+			stats.setConsumePosition(c.consumePosition)
+			for i := 0; i < len(c.segmentIDs); i++ {
+				stats.update(c.segmentIDs[i], c.startPositions[i], c.endPositions[i])
+				if c.dropPositions[i] != nil {
+					stats.dropBefore(c.segmentIDs[i], c.dropPositions[i])
+				}
+			}
+			cp := stats.getChannelCheckPoint()
+			assert.EqualValues(t, c.expectedPosition, cp)
+
+			assert.Equal(t, len(c.expectedSegments), len(stats.segmentsStats.segmentsStats))
+			for _, segmentID := range c.expectedSegments {
+				_, ok := stats.segmentsStats.segmentsStats[segmentID]
+				assert.True(t, ok)
+			}
+		})
+	}
+}

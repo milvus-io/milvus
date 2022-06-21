@@ -551,7 +551,7 @@ func (ms *mqMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
 		}
 
 		log.Info("MsgStream seek begin", zap.String("channel", mp.ChannelName), zap.Any("MessageID", messageID))
-		err = consumer.Seek(messageID, false)
+		err = consumer.Seek(messageID, true)
 		if err != nil {
 			log.Warn("Failed to seek", zap.String("channel", mp.ChannelName), zap.Error(err))
 			return err

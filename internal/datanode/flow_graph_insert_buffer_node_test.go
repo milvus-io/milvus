@@ -140,7 +140,7 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 		for _, test := range invalidInTests {
 			te.Run(test.description, func(t0 *testing.T) {
 				ibn := &insertBufferNode{
-					ttMerger: newMergedTimeTickerSender(func(Timestamp, []int64) error { return nil }),
+					ttMerger: newMergedTimeTickerSender(func(Timestamp, []int64, *internalpb.MsgPosition) error { return nil }),
 				}
 				rt := ibn.Operate(test.in)
 				assert.Empty(t0, rt)
@@ -400,10 +400,11 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 	}
 
 	colRep := &SegmentReplica{
-		collectionID:    collMeta.ID,
-		newSegments:     make(map[UniqueID]*Segment),
-		normalSegments:  make(map[UniqueID]*Segment),
-		flushedSegments: make(map[UniqueID]*Segment),
+		collectionID:         collMeta.ID,
+		newSegments:          make(map[UniqueID]*Segment),
+		normalSegments:       make(map[UniqueID]*Segment),
+		flushedSegments:      make(map[UniqueID]*Segment),
+		channelsConsumeStats: newChannelConsumeStats(),
 	}
 
 	colRep.metaService = newMetaService(mockRootCoord, collMeta.ID)

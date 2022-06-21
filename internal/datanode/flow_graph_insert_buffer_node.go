@@ -218,6 +218,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 		panic(err)
 	}
 
+	channelStats := ibNode.replica.getChannelConsumeStats()
 	// insert messages -> buffer
 	for _, msg := range fgMsg.insertMessages {
 		err := ibNode.bufferInsertMsg(msg, endPositions[0])
@@ -227,6 +228,8 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 			log.Error(err.Error())
 			panic(err)
 		}
+
+		channelStats.update(msg.GetSegmentID(), startPositions[0], endPositions[0])
 	}
 
 	// Find and return the smaller input
@@ -396,7 +399,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 		seg2Upload = append(seg2Upload, resendTTMsg.segmentIDs...)
 	default:
 	}
-	ibNode.writeHardTimeTick(fgMsg.timeRange.timestampMax, seg2Upload)
+	ibNode.writeHardTimeTick(fgMsg.timeRange.timestampMax, seg2Upload, ibNode.replica.getChannelConsumeStats().getChannelCheckPoint())
 
 	res := flowGraphMsg{
 		deleteMessages:  fgMsg.deleteMessages,
@@ -527,9 +530,9 @@ func (ibNode *insertBufferNode) bufferInsertMsg(msg *msgstream.InsertMsg, endPos
 }
 
 // writeHardTimeTick writes timetick once insertBufferNode operates.
-func (ibNode *insertBufferNode) writeHardTimeTick(ts Timestamp, segmentIDs []int64) {
+func (ibNode *insertBufferNode) writeHardTimeTick(ts Timestamp, segmentIDs []int64, checkpoint *internalpb.MsgPosition) {
 	ibNode.ttLogger.LogTs(ts)
-	ibNode.ttMerger.bufferTs(ts, segmentIDs)
+	ibNode.ttMerger.bufferTs(ts, segmentIDs, checkpoint)
 }
 
 func (ibNode *insertBufferNode) getCollectionandPartitionIDbySegID(segmentID UniqueID) (collID, partitionID UniqueID, err error) {
@@ -554,7 +557,7 @@ func newInsertBufferNode(ctx context.Context, collID UniqueID, flushCh <-chan fl
 	var wTtMsgStream msgstream.MsgStream = wTt
 	wTtMsgStream.Start()
 
-	mt := newMergedTimeTickerSender(func(ts Timestamp, segmentIDs []int64) error {
+	mt := newMergedTimeTickerSender(func(ts Timestamp, segmentIDs []int64, checkpoint *internalpb.MsgPosition) error {
 		stats := make([]*datapb.SegmentStats, 0, len(segmentIDs))
 		for _, sid := range segmentIDs {
 			stat, err := config.replica.getSegmentStatisticsUpdates(sid)
@@ -580,6 +583,7 @@ func newInsertBufferNode(ctx context.Context, collID UniqueID, flushCh <-chan fl
 				ChannelName:   config.vChannelName,
 				Timestamp:     ts,
 				SegmentsStats: stats,
+				Checkpoint:    checkpoint,
 			},
 		}
 		msgPack.Msgs = append(msgPack.Msgs, &timeTickMsg)

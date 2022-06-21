@@ -1638,11 +1638,11 @@ func TestGetVChannelPos(t *testing.T) {
 	})
 
 	t.Run("get existed channel", func(t *testing.T) {
+		assert.Nil(t, err)
 		vchan := svr.handler.GetVChanPositions("ch1", 0, allPartitionID)
 		assert.EqualValues(t, 1, len(vchan.FlushedSegmentIds))
 		assert.EqualValues(t, 1, vchan.FlushedSegmentIds[0])
 		assert.EqualValues(t, 2, len(vchan.UnflushedSegmentIds))
-		assert.EqualValues(t, []byte{1, 2, 3}, vchan.GetSeekPosition().GetMsgID())
 	})
 
 	t.Run("empty collection", func(t *testing.T) {
@@ -1658,7 +1658,15 @@ func TestGetVChannelPos(t *testing.T) {
 		assert.EqualValues(t, 0, infos.CollectionID)
 		assert.EqualValues(t, 0, len(infos.FlushedSegmentIds))
 		assert.EqualValues(t, 1, len(infos.UnflushedSegmentIds))
-		assert.EqualValues(t, []byte{11, 12, 13}, infos.SeekPosition.MsgID)
+	})
+
+	t.Run("get right seek position", func(t *testing.T) {
+		err := svr.meta.setCheckpoint("ch1", &internalpb.MsgPosition{
+			MsgID: []byte{3, 4, 5},
+		})
+		assert.Nil(t, err)
+		infos := svr.handler.GetVChanPositions("ch1", 0, 1)
+		assert.EqualValues(t, []byte{3, 4, 5}, infos.SeekPosition.MsgID)
 	})
 }
 
@@ -1855,62 +1863,6 @@ func TestGetRecoveryInfo(t *testing.T) {
 		}
 	}
 
-	t.Run("test get earliest position of flushed segments as seek position", func(t *testing.T) {
-		svr := newTestServer(t, nil)
-		defer closeTestServer(t, svr)
-
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
-			return newMockRootCoordService(), nil
-		}
-
-		seg1 := createSegment(0, 0, 0, 100, 10, "vchan1", commonpb.SegmentState_Flushed)
-		seg2 := createSegment(1, 0, 0, 100, 20, "vchan1", commonpb.SegmentState_Flushed)
-		err := svr.meta.AddSegment(NewSegmentInfo(seg1))
-		assert.Nil(t, err)
-		err = svr.meta.AddSegment(NewSegmentInfo(seg2))
-		assert.Nil(t, err)
-
-		req := &datapb.GetRecoveryInfoRequest{
-			CollectionID: 0,
-			PartitionID:  0,
-		}
-		resp, err := svr.GetRecoveryInfo(context.TODO(), req)
-		assert.Nil(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-		assert.EqualValues(t, 1, len(resp.GetChannels()))
-		assert.EqualValues(t, 0, len(resp.GetChannels()[0].GetUnflushedSegmentIds()))
-		//assert.ElementsMatch(t, []*datapb.SegmentInfo{trimSegmentInfo(seg1), trimSegmentInfo(seg2)}, resp.GetChannels()[0].GetFlushedSegments())
-		assert.EqualValues(t, 10, resp.GetChannels()[0].GetSeekPosition().GetTimestamp())
-	})
-
-	t.Run("test get recovery of unflushed segments ", func(t *testing.T) {
-		svr := newTestServer(t, nil)
-		defer closeTestServer(t, svr)
-
-		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
-			return newMockRootCoordService(), nil
-		}
-
-		seg1 := createSegment(3, 0, 0, 100, 30, "vchan1", commonpb.SegmentState_Growing)
-		seg2 := createSegment(4, 0, 0, 100, 40, "vchan1", commonpb.SegmentState_Growing)
-		err := svr.meta.AddSegment(NewSegmentInfo(seg1))
-		assert.Nil(t, err)
-		err = svr.meta.AddSegment(NewSegmentInfo(seg2))
-		assert.Nil(t, err)
-
-		req := &datapb.GetRecoveryInfoRequest{
-			CollectionID: 0,
-			PartitionID:  0,
-		}
-		resp, err := svr.GetRecoveryInfo(context.TODO(), req)
-		assert.Nil(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-		assert.EqualValues(t, 0, len(resp.GetBinlogs()))
-		assert.EqualValues(t, 1, len(resp.GetChannels()))
-		assert.NotNil(t, resp.GetChannels()[0].SeekPosition)
-		assert.NotEqual(t, 0, resp.GetChannels()[0].GetSeekPosition().GetTimestamp())
-	})
-
 	t.Run("test get binlogs", func(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
@@ -2008,13 +1960,14 @@ func TestGetRecoveryInfo(t *testing.T) {
 			CollectionID: 0,
 			PartitionID:  0,
 		}
+		svr.meta.setCheckpoint("vchan1", &internalpb.MsgPosition{Timestamp: 10})
 		resp, err := svr.GetRecoveryInfo(context.TODO(), req)
 		assert.Nil(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 		assert.EqualValues(t, 0, len(resp.GetBinlogs()))
 		assert.EqualValues(t, 1, len(resp.GetChannels()))
 		assert.NotNil(t, resp.GetChannels()[0].SeekPosition)
-		assert.NotEqual(t, 0, resp.GetChannels()[0].GetSeekPosition().GetTimestamp())
+		assert.EqualValues(t, 10, resp.GetChannels()[0].GetSeekPosition().GetTimestamp())
 		assert.Len(t, resp.GetChannels()[0].GetDroppedSegmentIds(), 1)
 		assert.Equal(t, UniqueID(8), resp.GetChannels()[0].GetDroppedSegmentIds()[0])
 	})

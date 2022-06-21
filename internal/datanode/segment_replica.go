@@ -74,6 +74,8 @@ type Replica interface {
 	refreshFlushedSegStatistics(segID UniqueID, numRows int64)
 	getSegmentStatisticsUpdates(segID UniqueID) (*datapb.SegmentStats, error)
 	segmentFlushed(segID UniqueID)
+
+	getChannelConsumeStats() *channelConsumeStats
 }
 
 // Segment is the data structure of segments in data node replica.
@@ -110,8 +112,9 @@ type SegmentReplica struct {
 	flushedSegments   map[UniqueID]*Segment
 	compactedSegments map[UniqueID]*Segment
 
-	metaService  *metaService
-	chunkManager storage.ChunkManager
+	metaService          *metaService
+	chunkManager         storage.ChunkManager
+	channelsConsumeStats *channelConsumeStats
 }
 
 func (s *Segment) updatePk(pk primaryKey) error {
@@ -177,8 +180,9 @@ func newReplica(ctx context.Context, rc types.RootCoord, cm storage.ChunkManager
 		flushedSegments:   make(map[UniqueID]*Segment),
 		compactedSegments: make(map[UniqueID]*Segment),
 
-		metaService:  metaService,
-		chunkManager: cm,
+		metaService:          metaService,
+		chunkManager:         cm,
+		channelsConsumeStats: newChannelConsumeStats(),
 	}
 
 	return replica, nil
@@ -839,4 +843,167 @@ func (replica *SegmentReplica) listNotFlushedSegmentIDs() []UniqueID {
 	}
 
 	return segIDs
+}
+
+func (replica *SegmentReplica) getChannelConsumeStats() *channelConsumeStats {
+	return replica.channelsConsumeStats
+}
+
+type channelConsumeStats struct {
+	sync.RWMutex
+	*segmentsStats
+	consumePosition *internalpb.MsgPosition
+}
+
+func (c *channelConsumeStats) setConsumePosition(pos *internalpb.MsgPosition) {
+	c.Lock()
+	defer c.Unlock()
+	c.consumePosition = pos
+}
+
+func (c *channelConsumeStats) getSegmentsStats() *segmentsStats {
+	c.RLock()
+	defer c.RUnlock()
+	return c.segmentsStats
+}
+
+func (c *channelConsumeStats) getChannelCheckPoint() *internalpb.MsgPosition {
+	c.RLock()
+	defer c.RUnlock()
+	pos := c.segmentsStats.getEarlistStartPosition()
+	if pos == nil || c.consumePosition.GetTimestamp() < pos.GetTimestamp() {
+		return c.consumePosition
+	}
+	return pos
+}
+
+func newChannelConsumeStats() *channelConsumeStats {
+	return &channelConsumeStats{
+		segmentsStats: newSegmentsStats(),
+	}
+}
+
+type segmentsStats struct {
+	sync.RWMutex
+	segmentsStats map[UniqueID]*segmentStats
+}
+
+func (s *segmentsStats) getOrCreateSegmentStats(segmentID UniqueID) *segmentStats {
+	s.Lock()
+	defer s.Unlock()
+	if _, ok := s.segmentsStats[segmentID]; !ok {
+		s.segmentsStats[segmentID] = newSegmentStats()
+	}
+	ret := s.segmentsStats[segmentID]
+	ret.incRef()
+	return ret
+}
+
+func (s *segmentsStats) getEarlistStartPosition() *internalpb.MsgPosition {
+	s.RLock()
+	defer s.RUnlock()
+	var earlist *internalpb.MsgPosition
+	for _, stats := range s.segmentsStats {
+		start, _ := stats.getRange()
+		if start == nil {
+			continue
+		}
+		if earlist == nil || start.GetTimestamp() < earlist.GetTimestamp() {
+			earlist = start
+		}
+	}
+	return earlist
+}
+
+func (s *segmentsStats) update(segmentID UniqueID, start, end *internalpb.MsgPosition) {
+	stats := s.getOrCreateSegmentStats(segmentID)
+	stats.update(start, end)
+	stats.decRef()
+}
+
+func (s *segmentsStats) dropBefore(segmentID UniqueID, pos *internalpb.MsgPosition) {
+	stats := s.getOrCreateSegmentStats(segmentID)
+	empty := stats.dropBefore(pos)
+	stats.decRef()
+	if empty {
+		s.tryToRemove(segmentID)
+	}
+}
+
+func (s *segmentsStats) tryToRemove(segmentID UniqueID) {
+	s.Lock()
+	defer s.Unlock()
+	stats, ok := s.segmentsStats[segmentID]
+	if !ok {
+		return
+	}
+	if stats.isEmpty() {
+		delete(s.segmentsStats, segmentID)
+	}
+}
+
+func newSegmentsStats() *segmentsStats {
+	return &segmentsStats{
+		segmentsStats: make(map[int64]*segmentStats),
+	}
+}
+
+type segmentStats struct {
+	sync.RWMutex
+	start *internalpb.MsgPosition
+	end   *internalpb.MsgPosition
+	ref   int32
+}
+
+func (s *segmentStats) incRef() {
+	atomic.AddInt32(&s.ref, 1)
+}
+
+func (s *segmentStats) decRef() {
+	atomic.AddInt32(&s.ref, -1)
+}
+
+func (s *segmentStats) update(start, end *internalpb.MsgPosition) {
+	s.Lock()
+	defer s.Unlock()
+	if s.start == nil || start.GetTimestamp() < s.start.GetTimestamp() {
+		s.start = start
+	}
+
+	if s.end == nil || end.GetTimestamp() > s.end.GetTimestamp() {
+		s.end = end
+	}
+}
+
+func (s *segmentStats) dropBefore(pos *internalpb.MsgPosition) bool {
+	s.Lock()
+	defer s.Unlock()
+	if pos.GetTimestamp() < s.start.GetTimestamp() {
+		return false
+	}
+
+	if pos.GetTimestamp() >= s.end.GetTimestamp() {
+		s.start = nil
+		s.end = nil
+		return true
+	}
+
+	s.start = pos
+	return false
+}
+
+func (s *segmentStats) isEmpty() bool {
+	s.RLock()
+	defer s.RUnlock()
+	return s.start == nil && atomic.LoadInt32(&s.ref) == 0
+}
+
+func (s *segmentStats) getRange() (start, end *internalpb.MsgPosition) {
+	s.RLock()
+	defer s.RUnlock()
+	return s.start, s.end
+}
+
+func newSegmentStats() *segmentStats {
+	return &segmentStats{}
 }

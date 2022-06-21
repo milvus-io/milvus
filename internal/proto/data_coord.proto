@@ -296,6 +296,7 @@ message DataNodeTtMsg {
     string channel_name = 2;
     uint64 timestamp = 3;
     repeated SegmentStats segments_stats = 4;
+    internal.MsgPosition checkpoint = 5;
 }
 
 message SegmentStats {

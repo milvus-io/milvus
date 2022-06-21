@@ -188,11 +188,20 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 	fgMsg.startPositions = append(fgMsg.startPositions, msMsg.StartPositions()...)
 	fgMsg.endPositions = append(fgMsg.endPositions, msMsg.EndPositions()...)
 
+	setVchannelForPositions(ddn.vChannelName, fgMsg.startPositions...)
+	setVchannelForPositions(ddn.vChannelName, fgMsg.endPositions...)
+
 	for _, sp := range spans {
 		sp.Finish()
 	}
 
 	return []Msg{&fgMsg}
+}
+
+func setVchannelForPositions(vchan string, positions ...*internalpb.MsgPosition) {
+	for _, p := range positions {
+		p.ChannelName = vchan
+	}
 }
 
 func (ddn *ddNode) tryToFilterSegmentInsertMessages(msg *msgstream.InsertMsg) bool {

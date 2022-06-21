@@ -811,6 +811,9 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 			panic(err)
 		}
 
+		stats := dsService.replica.getChannelConsumeStats()
+		stats.dropBefore(pack.segmentID, pack.pos)
+
 		if pack.flushed || pack.dropped {
 			dsService.replica.segmentFlushed(pack.segmentID)
 		}

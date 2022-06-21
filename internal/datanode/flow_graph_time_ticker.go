@@ -23,9 +23,10 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 )
 
-type sendTimeTick func(Timestamp, []int64) error
+type sendTimeTick func(Timestamp, []int64, *internalpb.MsgPosition) error
 
 // mergedTimeTickerSender reduces time ticker sending rate when datanode is doing `fast-forwarding`
 // it makes sure time ticker send at most 10 times a second (1tick/100millisecond)
@@ -34,6 +35,7 @@ type mergedTimeTickerSender struct {
 	ts         uint64
 	segmentIDs map[int64]struct{}
 	lastSent   time.Time
+	checkpoint *internalpb.MsgPosition
 	mu         sync.Mutex
 
 	cond *sync.Cond   // condition to send timeticker
@@ -59,13 +61,14 @@ func newMergedTimeTickerSender(send sendTimeTick) *mergedTimeTickerSender {
 	return mt
 }
 
-func (mt *mergedTimeTickerSender) bufferTs(ts Timestamp, segmentIDs []int64) {
+func (mt *mergedTimeTickerSender) bufferTs(ts Timestamp, segmentIDs []int64, checkpoint *internalpb.MsgPosition) {
 	mt.mu.Lock()
 	defer mt.mu.Unlock()
 	mt.ts = ts
 	for _, sid := range segmentIDs {
 		mt.segmentIDs[sid] = struct{}{}
 	}
+	mt.checkpoint = checkpoint
 
 	if !mt.lastSent.IsZero() && time.Since(mt.lastSent) > time.Millisecond*100 {
 		mt.cond.L.Lock()
@@ -121,8 +124,10 @@ func (mt *mergedTimeTickerSender) work() {
 			mt.segmentIDs = make(map[int64]struct{})
 			lastTs = mt.ts
 			mt.lastSent = time.Now()
+			checkpoint := mt.checkpoint
+			mt.checkpoint = nil
 
-			if err := mt.send(mt.ts, sids); err != nil {
+			if err := mt.send(mt.ts, sids, checkpoint); err != nil {
 				log.Error("send hard time tick failed", zap.Error(err))
 			}
 		}

@@ -19,6 +19,7 @@ package datacoord
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -40,6 +41,8 @@ const (
 	channelRemovePrefix = metaPrefix + "/channel-removal"
 
 	removeFlagTomestone = "removed"
+
+	channelCheckpointPrefix = metaPrefix + "/checkpoints"
 )
 
 type meta struct {
@@ -47,6 +50,7 @@ type meta struct {
 	client      kv.TxnKV                            // client of a reliable kv service, i.e. etcd client
 	collections map[UniqueID]*datapb.CollectionInfo // collection id to collection info
 	segments    *SegmentsInfo                       // segment id to segment info
+	checkpoints map[string]*internalpb.MsgPosition
 }
 
 // NewMeta creates meta from provided `kv.TxnKV`
@@ -55,6 +59,7 @@ func newMeta(kv kv.TxnKV) (*meta, error) {
 		client:      kv,
 		collections: make(map[UniqueID]*datapb.CollectionInfo),
 		segments:    NewSegmentsInfo(),
+		checkpoints: make(map[string]*internalpb.MsgPosition),
 	}
 	err := mt.reloadFromKV()
 	if err != nil {
@@ -90,6 +95,21 @@ func (m *meta) reloadFromKV() error {
 			numStoredRows += segmentInfo.GetNumOfRows()
 		}
 	}
+
+	ckeys, cvalues, err := m.client.LoadWithPrefix(channelCheckpointPrefix)
+	if err != nil {
+		return err
+	}
+	for i := 0; i < len(ckeys); i++ {
+		channel := decodeChannelFromCheckpointKey(ckeys[i])
+		checkpoint := &internalpb.MsgPosition{}
+		err = proto.Unmarshal([]byte(cvalues[i]), checkpoint)
+		if err != nil {
+			return err
+		}
+		m.checkpoints[channel] = checkpoint
+	}
+
 	metrics.DataCoordNumStoredRows.WithLabelValues().Set(float64(numStoredRows))
 	metrics.DataCoordNumStoredRowsCounter.WithLabelValues().Add(float64(numStoredRows))
 	return nil
@@ -1092,4 +1112,40 @@ func (m *meta) HasSegments(segIDs []UniqueID) (bool, error) {
 		}
 	}
 	return true, nil
+}
+
+func (m *meta) setCheckpoint(channel string, checkpoint *internalpb.MsgPosition) error {
+	m.Lock()
+	defer m.Unlock()
+	if checkpoint == nil {
+		return nil
+	}
+	oldCheckpoint, ok := m.checkpoints[channel]
+	if !ok || oldCheckpoint.GetTimestamp() < checkpoint.GetTimestamp() {
+		key := encodeChannelCheckpointKey(channel)
+		value, err := proto.Marshal(checkpoint)
+		if err != nil {
+			return err
+		}
+		if err := m.client.Save(key, string(value)); err != nil {
+			return err
+		}
+		m.checkpoints[channel] = checkpoint
+	}
+	return nil
+}
+
+func (m *meta) getCheckpoint(channel string) *internalpb.MsgPosition {
+	m.RLock()
+	defer m.RUnlock()
+	return m.checkpoints[channel]
+}
+
+func encodeChannelCheckpointKey(channel string) string {
+	return fmt.Sprintf("%s/%s", channelCheckpointPrefix, channel)
+}
+
+func decodeChannelFromCheckpointKey(key string) string {
+	splits := strings.Split(key, "/")
+	return splits[len(splits)-1]
 }

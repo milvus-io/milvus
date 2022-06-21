@@ -59,7 +59,6 @@ func (h *ServerHandler) GetVChanPositions(channel string, collectionID UniqueID,
 	var flushedIds []int64
 	var unflushedIds []int64
 	var droppedIds []int64
-	var seekPosition *internalpb.MsgPosition
 	for _, s := range segments {
 		if (partitionID > allPartitionID && s.PartitionID != partitionID) ||
 			(s.GetStartPosition() == nil && s.GetDmlPosition() == nil) {
@@ -76,18 +75,8 @@ func (h *ServerHandler) GetVChanPositions(channel string, collectionID UniqueID,
 		} else {
 			unflushedIds = append(unflushedIds, s.SegmentInfo.GetID())
 		}
-
-		var segmentPosition *internalpb.MsgPosition
-		if s.GetDmlPosition() != nil {
-			segmentPosition = s.GetDmlPosition()
-		} else {
-			segmentPosition = s.GetStartPosition()
-		}
-
-		if seekPosition == nil || segmentPosition.Timestamp < seekPosition.Timestamp {
-			seekPosition = segmentPosition
-		}
 	}
+	seekPosition := h.s.meta.getCheckpoint(channel)
 	// use collection start position when segment position is not found
 	if seekPosition == nil {
 		collection := h.GetCollection(h.s.ctx, collectionID)

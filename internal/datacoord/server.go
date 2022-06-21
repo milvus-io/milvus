@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -582,6 +583,7 @@ func (s *Server) handleTimetickMessage(ctx context.Context, ttMsg *msgstream.Dat
 	metrics.DataCoordSyncEpoch.WithLabelValues(pChannelName).Set(float64(utcT))
 
 	s.updateSegmentStatistics(ttMsg.GetSegmentsStats())
+	s.updateChannelCheckpoint(ttMsg.GetChannelName(), ttMsg.GetCheckpoint())
 
 	if err := s.segmentManager.ExpireAllocations(ch, ts); err != nil {
 		return fmt.Errorf("expire allocations: %w", err)
@@ -621,6 +623,12 @@ func (s *Server) handleTimetickMessage(ctx context.Context, ttMsg *msgstream.Dat
 func (s *Server) updateSegmentStatistics(stats []*datapb.SegmentStats) {
 	for _, stat := range stats {
 		s.meta.SetCurrentRows(stat.GetSegmentID(), stat.GetNumRows())
+	}
+}
+
+func (s *Server) updateChannelCheckpoint(channel string, checkpoint *internalpb.MsgPosition) {
+	if err := s.meta.setCheckpoint(channel, checkpoint); err != nil {
+		log.Warn("failed to update channel check point", zap.String("channel", channel), zap.Error(err))
 	}
 }
 
