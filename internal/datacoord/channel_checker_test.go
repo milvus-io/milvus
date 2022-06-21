@@ -113,7 +113,7 @@ func TestChannelStateTimer(t *testing.T) {
 					assert.Equal(t, watchTimeoutAck, e.ackType)
 					assert.Equal(t, test.channelName, e.channelName)
 				} else {
-					timer.stopIfExsit(&ackEvent{watchSuccessAck, test.channelName, 1})
+					timer.stopIfExist(&ackEvent{watchSuccessAck, test.channelName, 1})
 				}
 			})
 		}

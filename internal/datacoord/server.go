@@ -763,7 +763,7 @@ func (s *Server) handleSessionEvent(ctx context.Context, event *sessionutil.Sess
 			zap.String("address", info.Address),
 			zap.Int64("serverID", info.Version))
 		if err := s.cluster.Register(node); err != nil {
-			log.Warn("failed to regisger node", zap.Int64("id", node.NodeID), zap.String("address", node.Address), zap.Error(err))
+			log.Warn("failed to register node", zap.Int64("id", node.NodeID), zap.String("address", node.Address), zap.Error(err))
 			return err
 		}
 		s.metricsCacheManager.InvalidateSystemInfoMetrics()
@@ -772,7 +772,7 @@ func (s *Server) handleSessionEvent(ctx context.Context, event *sessionutil.Sess
 			zap.String("address", info.Address),
 			zap.Int64("serverID", info.Version))
 		if err := s.cluster.UnRegister(node); err != nil {
-			log.Warn("failed to deregisger node", zap.Int64("id", node.NodeID), zap.String("address", node.Address), zap.Error(err))
+			log.Warn("failed to deregister node", zap.Int64("id", node.NodeID), zap.String("address", node.Address), zap.Error(err))
 			return err
 		}
 		s.metricsCacheManager.InvalidateSystemInfoMetrics()
