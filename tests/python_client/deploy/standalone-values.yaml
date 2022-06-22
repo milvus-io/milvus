@@ -5,6 +5,13 @@ image:
     repository: milvusdb/milvus-dev
     tag: master-latest
     pullPolicy: IfNotPresent
+
+kafka:
+  enabled: false
+  name: kafka
+  replicaCount: 3
+  defaultReplicationFactor: 2
+
 etcd:
   replicaCount: 1
   image:

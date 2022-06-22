@@ -24,7 +24,7 @@ pipeline {
             mem-stress: datanode, etcd, indexnode, minio, proxy, pulsar, querynode, standalone \
             io-fault & io-latency: minio, pulsar, etcd ',
             name: 'pod_name',
-            choices: ["standalone", "datacoord", "datanode", "indexcoord", "indexnode", "proxy", "pulsar", "querycoord", "querynode", "rootcoord", "etcd", "minio"]
+            choices: ["allstandalone", "allcluster", "standalone", "datacoord", "datanode", "indexcoord", "indexnode", "proxy", "pulsar", "querycoord", "querynode", "rootcoord", "etcd", "minio"]
         )
         choice(
             description: 'Chaos Test Task',
