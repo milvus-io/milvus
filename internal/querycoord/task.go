@@ -2309,38 +2309,36 @@ func (lbt *loadBalanceTask) globalPostExecute(ctx context.Context) error {
 			for replicaID := range replicas {
 				replicaID := replicaID
 				wg.Go(func() error {
-					return lbt.meta.applyReplicaBalancePlan(&balancePlan{
-						nodes:         lbt.SourceNodeIDs,
-						sourceReplica: replicaID,
-					})
+					return lbt.meta.applyReplicaBalancePlan(
+						NewRemoveBalancePlan(replicaID, lbt.SourceNodeIDs...))
 				})
 			}
 		}
 
 		// Remove offline nodes from segment
-		for _, segment := range segments {
-			segment := segment
-			wg.Go(func() error {
-				segment.NodeID = -1
-				segment.NodeIds = removeFromSlice(segment.NodeIds, lbt.SourceNodeIDs...)
+		// for _, segment := range segments {
+		// 	segment := segment
+		// 	wg.Go(func() error {
+		// 		segment.NodeID = -1
+		// 		segment.NodeIds = removeFromSlice(segment.NodeIds, lbt.SourceNodeIDs...)
 
-				err := lbt.meta.saveSegmentInfo(segment)
-				if err != nil {
-					log.Error("failed to remove offline nodes from segment info",
-						zap.Int64("segmentID", segment.SegmentID),
-						zap.Error(err))
+		// 		err := lbt.meta.saveSegmentInfo(segment)
+		// 		if err != nil {
+		// 			log.Error("failed to remove offline nodes from segment info",
+		// 				zap.Int64("segmentID", segment.SegmentID),
+		// 				zap.Error(err))
 
-					return err
-				}
+		// 			return err
+		// 		}
 
-				log.Info("remove offline nodes from segment",
-					zap.Int64("taskID", lbt.getTaskID()),
-					zap.Int64("segmentID", segment.GetSegmentID()),
-					zap.Int64s("nodeIds", segment.GetNodeIds()))
+		// 		log.Info("remove offline nodes from segment",
+		// 			zap.Int64("taskID", lbt.getTaskID()),
+		// 			zap.Int64("segmentID", segment.GetSegmentID()),
+		// 			zap.Int64s("nodeIds", segment.GetNodeIds()))
 
-				return nil
-			})
-		}
+		// 		return nil
+		// 	})
+		// }
 
 		// Remove offline nodes from dmChannels
 		for _, dmChannel := range dmChannels {

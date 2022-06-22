@@ -405,11 +405,16 @@ func (c *queryNodeCluster) GetSegmentInfoByID(ctx context.Context, segmentID Uni
 		return nil, err
 	}
 
+	if len(segmentInfo.NodeIds) == 0 {
+		return nil, fmt.Errorf("GetSegmentInfoByID: no node loaded the segment %v", segmentID)
+	}
+
+	node := segmentInfo.NodeIds[0]
 	c.RLock()
-	targetNode, ok := c.nodes[segmentInfo.NodeID]
+	targetNode, ok := c.nodes[node]
 	c.RUnlock()
 	if !ok {
-		return nil, fmt.Errorf("updateSegmentInfo: can't find query node by nodeID, nodeID = %d", segmentInfo.NodeID)
+		return nil, fmt.Errorf("GetSegmentInfoByID: can't find query node by nodeID, nodeID=%v", node)
 	}
 
 	res, err := targetNode.getSegmentInfo(ctx, &querypb.GetSegmentInfoRequest{
@@ -429,7 +434,7 @@ func (c *queryNodeCluster) GetSegmentInfoByID(ctx context.Context, segmentID Uni
 		}
 	}
 
-	return nil, fmt.Errorf("updateSegmentInfo: can't find segment %d on QueryNode %d", segmentID, segmentInfo.NodeID)
+	return nil, fmt.Errorf("GetSegmentInfoByID: can't find segment %d on QueryNode %d", segmentID, node)
 }
 
 func (c *queryNodeCluster) GetSegmentInfo(ctx context.Context, in *querypb.GetSegmentInfoRequest) ([]*querypb.SegmentInfo, error) {

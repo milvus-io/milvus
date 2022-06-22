@@ -209,6 +209,15 @@ func uniqueSlice(origin []UniqueID) []UniqueID {
 	return set.Collect()
 }
 
+// diffSlice returns a slice containing items in src but not in diff
+func diffSlice(src []UniqueID, diff ...UniqueID) []UniqueID {
+	set := make(typeutil.UniqueSet, len(src))
+	set.Insert(src...)
+	set.Remove(diff...)
+
+	return set.Collect()
+}
+
 func getReplicaAvailableMemory(cluster Cluster, replica *milvuspb.ReplicaInfo) uint64 {
 	availableMemory := uint64(0)
 	nodes := getNodeInfos(cluster, replica.NodeIds)

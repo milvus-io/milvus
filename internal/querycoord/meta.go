@@ -599,32 +599,36 @@ func (m *MetaReplica) saveGlobalSealedSegInfos(saves col2SegmentInfos) (col2Seal
 			},
 			Infos: []*querypb.SegmentChangeInfo{},
 		}
+
 		for _, info := range onlineInfos {
 			segmentID := info.SegmentID
-			onlineNodeID := info.NodeID
-			changeInfo := &querypb.SegmentChangeInfo{
-				OnlineNodeID:   onlineNodeID,
-				OnlineSegments: []*querypb.SegmentInfo{info},
-			}
+
 			offlineInfo, err := m.getSegmentInfoByID(segmentID)
 			if err == nil {
-				offlineNodeID := offlineInfo.NodeID
 				// if the offline segment state is growing, it will not impact the global sealed segments
 				if offlineInfo.SegmentState == commonpb.SegmentState_Sealed {
-					changeInfo.OfflineNodeID = offlineNodeID
-					changeInfo.OfflineSegments = []*querypb.SegmentInfo{offlineInfo}
+					offlineNodes := diffSlice(offlineInfo.NodeIds, info.NodeIds...)
+
+					for _, node := range offlineNodes {
+						segmentsChangeInfo.Infos = append(segmentsChangeInfo.Infos,
+							&querypb.SegmentChangeInfo{
+								OfflineNodeID:   node,
+								OfflineSegments: []*querypb.SegmentInfo{offlineInfo},
+							})
+					}
 				}
 			}
-			segmentsChangeInfo.Infos = append(segmentsChangeInfo.Infos, changeInfo)
 
 			// generate offline segment change info if the loaded segment is compacted from other sealed segments
 			for _, compactionSegmentID := range info.CompactionFrom {
 				compactionSegmentInfo, err := m.getSegmentInfoByID(compactionSegmentID)
 				if err == nil && compactionSegmentInfo.SegmentState == commonpb.SegmentState_Sealed {
-					segmentsChangeInfo.Infos = append(segmentsChangeInfo.Infos, &querypb.SegmentChangeInfo{
-						OfflineNodeID:   compactionSegmentInfo.NodeID,
-						OfflineSegments: []*querypb.SegmentInfo{compactionSegmentInfo},
-					})
+					for _, node := range compactionSegmentInfo.NodeIds {
+						segmentsChangeInfo.Infos = append(segmentsChangeInfo.Infos, &querypb.SegmentChangeInfo{
+							OfflineNodeID:   node,
+							OfflineSegments: []*querypb.SegmentInfo{compactionSegmentInfo},
+						})
+					}
 					segmentsCompactionFrom = append(segmentsCompactionFrom, compactionSegmentInfo)
 				} else {
 					return nil, fmt.Errorf("saveGlobalSealedSegInfos: the compacted segment %d has not been loaded into memory", compactionSegmentID)
@@ -632,29 +636,6 @@ func (m *MetaReplica) saveGlobalSealedSegInfos(saves col2SegmentInfos) (col2Seal
 			}
 		}
 		col2SegmentChangeInfos[collectionID] = segmentsChangeInfo
-	}
-	queryChannelInfosMap := make(map[UniqueID]*querypb.QueryChannelInfo)
-	for collectionID, infos := range saves {
-		// TODO silverxia change QueryChannelInfo struct to simplifed one
-		// queryChannelInfo contains the GlobalSealedSegment list
-		queryChannelInfo := m.getQueryChannelInfoByID(collectionID)
-
-		// merge save segment info and existing GlobalSealedSegments
-		seg2Info := make(map[UniqueID]*querypb.SegmentInfo)
-		for _, segmentInfo := range queryChannelInfo.GlobalSealedSegments {
-			segmentID := segmentInfo.SegmentID
-			seg2Info[segmentID] = segmentInfo
-		}
-		for _, segmentInfo := range infos {
-			segmentID := segmentInfo.SegmentID
-			seg2Info[segmentID] = segmentInfo
-		}
-
-		globalSealedSegmentInfos := make([]*querypb.SegmentInfo, len(seg2Info))
-		for _, info := range seg2Info {
-			globalSealedSegmentInfos = append(globalSealedSegmentInfos, info)
-		}
-		queryChannelInfo.GlobalSealedSegments = globalSealedSegmentInfos
 	}
 
 	// save segmentInfo to etcd
@@ -693,13 +674,6 @@ func (m *MetaReplica) saveGlobalSealedSegInfos(saves col2SegmentInfos) (col2Seal
 		panic(err)
 	}
 
-	// Write back to cache
-	m.channelMu.Lock()
-	for collectionID, channelInfo := range queryChannelInfosMap {
-		m.queryChannelInfos[collectionID] = channelInfo
-	}
-	m.channelMu.Unlock()
-
 	return col2SegmentChangeInfos, nil
 }
 
@@ -716,13 +690,14 @@ func (m *MetaReplica) removeGlobalSealedSegInfos(collectionID UniqueID, partitio
 		Infos: []*querypb.SegmentChangeInfo{},
 	}
 	for _, info := range removes {
-		offlineNodeID := info.NodeID
-		changeInfo := &querypb.SegmentChangeInfo{
-			OfflineNodeID:   offlineNodeID,
-			OfflineSegments: []*querypb.SegmentInfo{info},
-		}
+		for _, node := range info.NodeIds {
+			segmentChangeInfos.Infos = append(segmentChangeInfos.Infos,
+				&querypb.SegmentChangeInfo{
+					OfflineNodeID:   node,
+					OfflineSegments: []*querypb.SegmentInfo{info},
+				})
 
-		segmentChangeInfos.Infos = append(segmentChangeInfos.Infos, changeInfo)
+		}
 	}
 
 	// produce sealedSegmentChangeInfos to query channel
@@ -1332,6 +1307,33 @@ func getShardNodes(collectionID UniqueID, meta Meta) map[string]map[UniqueID]str
 	}
 
 	return shardNodes
+}
+
+// addNode2Segment addes node into segment,
+// the old one within the same replica will be replaced
+func addNode2Segment(meta Meta, node UniqueID, replicas []*milvuspb.ReplicaInfo, segment *querypb.SegmentInfo) {
+	for _, oldNode := range segment.NodeIds {
+		isInReplica := false
+		for _, replica := range replicas {
+			if nodeIncluded(oldNode, replica.NodeIds) {
+				// new node is in the same replica, replace the old ones
+				if nodeIncluded(node, replica.NodeIds) {
+					break
+				}
+
+				// The old node is not the offline one
+				isInReplica = true
+				break
+			}
+		}
+
+		if !isInReplica {
+			segment.NodeIds = removeFromSlice(segment.NodeIds, oldNode)
+			break
+		}
+	}
+
+	segment.NodeIds = append(segment.NodeIds, node)
 }
 
 // getDataSegmentInfosByIDs return the SegmentInfo details according to the given ids through RPC to datacoord

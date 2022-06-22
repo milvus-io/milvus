@@ -275,7 +275,7 @@ func TestSealedSegmentChangeAfterQueryNodeStop(t *testing.T) {
 		segmentInfos := queryCoord.meta.showSegmentInfos(defaultCollectionID, nil)
 		recoverDone := true
 		for _, info := range segmentInfos {
-			if info.NodeID != queryNode2.queryNodeID {
+			if !nodeIncluded(queryNode2.queryNodeID, info.NodeIds) {
 				recoverDone = false
 				break
 			}
