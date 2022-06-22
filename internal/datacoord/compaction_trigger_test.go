@@ -258,7 +258,7 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 				PartitionID:    1,
 				LastExpireTime: 100,
 				NumOfRows:      100,
-				MaxRowNum:      300,
+				MaxRowNum:      300000,
 				InsertChannel:  "ch1",
 				State:          commonpb.SegmentState_Flushed,
 				Binlogs: []*datapb.FieldBinlog{
@@ -417,7 +417,7 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 									CollectionID:   2,
 									PartitionID:    1,
 									LastExpireTime: 100,
-									NumOfRows:      100,
+									NumOfRows:      1,
 									MaxRowNum:      300,
 									InsertChannel:  "ch1",
 									State:          commonpb.SegmentState_Flushed,
@@ -425,13 +425,6 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 										{
 											Binlogs: []*datapb.Binlog{
 												{EntriesNum: 5, LogPath: "log1", LogSize: 100},
-											},
-										},
-									},
-									Deltalogs: []*datapb.FieldBinlog{
-										{
-											Binlogs: []*datapb.Binlog{
-												{EntriesNum: 5, LogPath: "deltalog1"},
 											},
 										},
 									},
@@ -443,7 +436,7 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 									CollectionID:   2,
 									PartitionID:    1,
 									LastExpireTime: 100,
-									NumOfRows:      100,
+									NumOfRows:      200,
 									MaxRowNum:      300,
 									InsertChannel:  "ch1",
 									State:          commonpb.SegmentState_Flushed,
@@ -469,7 +462,7 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 									CollectionID:   2,
 									PartitionID:    1,
 									LastExpireTime: 100,
-									NumOfRows:      100,
+									NumOfRows:      2,
 									MaxRowNum:      300,
 									InsertChannel:  "ch1",
 									State:          commonpb.SegmentState_Flushed,
@@ -477,13 +470,6 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 										{
 											Binlogs: []*datapb.Binlog{
 												{EntriesNum: 5, LogPath: "log1", LogSize: 100},
-											},
-										},
-									},
-									Deltalogs: []*datapb.FieldBinlog{
-										{
-											Binlogs: []*datapb.Binlog{
-												{EntriesNum: 5, LogPath: "deltalog1"},
 											},
 										},
 									},
@@ -495,7 +481,7 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 									CollectionID:   2,
 									PartitionID:    1,
 									LastExpireTime: 100,
-									NumOfRows:      100,
+									NumOfRows:      3,
 									MaxRowNum:      300,
 									InsertChannel:  "ch1",
 									State:          commonpb.SegmentState_Flushed,
@@ -503,13 +489,6 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 										{
 											Binlogs: []*datapb.Binlog{
 												{EntriesNum: 5, LogPath: "log1", LogSize: 100},
-											},
-										},
-									},
-									Deltalogs: []*datapb.FieldBinlog{
-										{
-											Binlogs: []*datapb.Binlog{
-												{EntriesNum: 5, LogPath: "deltalog1"},
 											},
 										},
 									},
@@ -591,7 +570,7 @@ func Test_compactionTrigger_smallfiles(t *testing.T) {
 									CollectionID:   2,
 									PartitionID:    1,
 									LastExpireTime: 100,
-									NumOfRows:      100,
+									NumOfRows:      50,
 									MaxRowNum:      300,
 									InsertChannel:  "ch1",
 									State:          commonpb.SegmentState_Flushed,
@@ -617,7 +596,7 @@ func Test_compactionTrigger_smallfiles(t *testing.T) {
 									CollectionID:   2,
 									PartitionID:    1,
 									LastExpireTime: 100,
-									NumOfRows:      100,
+									NumOfRows:      50,
 									MaxRowNum:      300,
 									InsertChannel:  "ch1",
 									State:          commonpb.SegmentState_Flushed,
@@ -643,7 +622,7 @@ func Test_compactionTrigger_smallfiles(t *testing.T) {
 									CollectionID:   2,
 									PartitionID:    1,
 									LastExpireTime: 100,
-									NumOfRows:      100,
+									NumOfRows:      50,
 									MaxRowNum:      300,
 									InsertChannel:  "ch1",
 									State:          commonpb.SegmentState_Flushed,
@@ -669,7 +648,7 @@ func Test_compactionTrigger_smallfiles(t *testing.T) {
 									CollectionID:   2,
 									PartitionID:    1,
 									LastExpireTime: 100,
-									NumOfRows:      100,
+									NumOfRows:      50,
 									MaxRowNum:      300,
 									InsertChannel:  "ch1",
 									State:          commonpb.SegmentState_Flushed,
@@ -767,8 +746,8 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 				CollectionID:   2,
 				PartitionID:    1,
 				LastExpireTime: 100,
-				NumOfRows:      100,
-				MaxRowNum:      300,
+				NumOfRows:      size[i],
+				MaxRowNum:      512,
 				InsertChannel:  "ch1",
 				State:          commonpb.SegmentState_Flushed,
 				Binlogs: []*datapb.FieldBinlog{
@@ -912,7 +891,7 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 			CollectionID:   2,
 			PartitionID:    1,
 			LastExpireTime: 600,
-			NumOfRows:      100,
+			NumOfRows:      10000,
 			MaxRowNum:      300,
 			InsertChannel:  "ch1",
 			State:          commonpb.SegmentState_Flushed,
