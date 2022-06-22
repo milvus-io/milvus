@@ -444,6 +444,24 @@ func TestImpl_ReleaseSegments(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 	})
+
+	wg.Add(1)
+	t.Run("test no collection", func(t *testing.T) {
+		defer wg.Done()
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+		err = node.metaReplica.removeCollection(defaultCollectionID)
+		assert.NoError(t, err)
+
+		req := &queryPb.ReleaseSegmentsRequest{
+			Base:         genCommonMsgBase(commonpb.MsgType_ReleaseSegments),
+			CollectionID: defaultCollectionID,
+		}
+
+		status, err := node.ReleaseSegments(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+	})
 	wg.Wait()
 }
 

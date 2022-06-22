@@ -349,7 +349,17 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, in *queryPb.ReleaseS
 		return status, nil
 	}
 
-	// collection lock is not needed since we guarantee not query/search will be dispatch from leader
+	collection, err := node.metaReplica.getCollectionByID(in.CollectionID)
+	if err != nil {
+		status := &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    fmt.Sprintf("cannot find collection %d when ReleaseSegments", in.CollectionID),
+		}
+		return status, nil
+	}
+
+	collection.Lock()
+	defer collection.Unlock()
 	for _, id := range in.SegmentIDs {
 		switch in.GetScope() {
 		case queryPb.DataScope_Streaming:

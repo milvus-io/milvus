@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 )
@@ -39,6 +40,7 @@ func searchOnSegments(replica ReplicaInterface, segType segmentType, searchReq *
 			defer wg.Done()
 			seg, err := replica.getSegmentByID(segID, segType)
 			if err != nil {
+				log.Error(err.Error()) // should not happen but still ignore it since the result is still correct
 				return
 			}
 			// record search time

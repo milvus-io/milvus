@@ -92,6 +92,9 @@ func reduceSearchResultsAndFillData(plan *SearchPlan, searchResults []*SearchRes
 
 	cSearchResults := make([]C.CSearchResult, 0)
 	for _, res := range searchResults {
+		if res == nil {
+			return nil, fmt.Errorf("nil searchResult detected when reduceSearchResultsAndFillData")
+		}
 		cSearchResults = append(cSearchResults, res.cSearchResult)
 	}
 	cSearchResultPtr := (*C.CSearchResult)(&cSearchResults[0])

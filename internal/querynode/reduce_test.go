@@ -104,8 +104,20 @@ func TestReduce_AllFunc(t *testing.T) {
 	deleteCollection(collection)
 }
 
-func TestReduce_nilPlan(t *testing.T) {
-	plan := &SearchPlan{}
-	_, err := reduceSearchResultsAndFillData(plan, nil, 1, nil, nil)
-	assert.Error(t, err)
+func TestReduce_Invalid(t *testing.T) {
+	t.Run("nil plan", func(t *testing.T) {
+		plan := &SearchPlan{}
+		_, err := reduceSearchResultsAndFillData(plan, nil, 1, nil, nil)
+		assert.Error(t, err)
+	})
+
+	t.Run("nil search result", func(t *testing.T) {
+		collection := newCollection(defaultCollectionID, genTestCollectionSchema())
+		searchReq, err := genSearchPlanAndRequests(collection, IndexHNSW, 10)
+		assert.NoError(t, err)
+		searchResults := make([]*SearchResult, 0)
+		searchResults = append(searchResults, nil)
+		_, err = reduceSearchResultsAndFillData(searchReq.plan, searchResults, 1, []int32{10}, []int32{10})
+		assert.Error(t, err)
+	})
 }
