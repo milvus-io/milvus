@@ -26,7 +26,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func GetMaxLengthOfVarLengthField(fieldSchema *schemapb.FieldSchema) (int, error) {
+func GetAvgLengthOfVarLengthField(fieldSchema *schemapb.FieldSchema) (int, error) {
 	maxLength := 0
 	var err error
 
@@ -51,6 +51,11 @@ func GetMaxLengthOfVarLengthField(fieldSchema *schemapb.FieldSchema) (int, error
 		return 0, fmt.Errorf("field %s is not a variable-length type", fieldSchema.DataType.String())
 	}
 
+	// TODO this is a hack and may not accurate, we should rely on estimate size per record
+	// However we should report size and datacoord calculate based on size
+	if maxLength > 256 {
+		return 256, nil
+	}
 	return maxLength, nil
 }
 
@@ -68,7 +73,7 @@ func EstimateSizePerRecord(schema *schemapb.CollectionSchema) (int, error) {
 		case schemapb.DataType_Int64, schemapb.DataType_Double:
 			res += 8
 		case schemapb.DataType_VarChar:
-			maxLengthPerRow, err := GetMaxLengthOfVarLengthField(fs)
+			maxLengthPerRow, err := GetAvgLengthOfVarLengthField(fs)
 			if err != nil {
 				return 0, err
 			}
