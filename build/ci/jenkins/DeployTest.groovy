@@ -56,7 +56,7 @@ pipeline {
         string(
             description: 'Etcd Image Tag',
             name: 'etcd_image_tag',
-            defaultValue: "3.5.0-r1"
+            defaultValue: "3.5.0-r3"
         )
         string(
             description: 'Querynode Nums',
@@ -302,14 +302,11 @@ pipeline {
                                 }
                             }
 
-                            echo "uninstall release"
-                            sh "helm uninstall ${env.RELEASE_NAME}"
-
                             if ("${params.milvus_mode}" == "standalone") {
-                                sh "helm install --wait --timeout 720s ${env.RELEASE_NAME} milvus/milvus  --set image.all.repository=${params.new_image_repository} --set image.all.tag=${new_image_tag_modified} -f standalone-values.yaml"    
+                                sh "helm upgrade --wait --timeout 720s ${env.RELEASE_NAME} milvus/milvus  --set image.all.repository=${params.new_image_repository} --set image.all.tag=${new_image_tag_modified} -f standalone-values.yaml"    
                             }
                             if ("${params.milvus_mode}" == "cluster") {
-                                sh "helm install --wait --timeout 720s ${env.RELEASE_NAME} milvus/milvus  --set image.all.repository=${params.new_image_repository} --set image.all.tag=${new_image_tag_modified} -f cluster-values.yaml"    
+                                sh "helm upgrade --wait --timeout 720s ${env.RELEASE_NAME} milvus/milvus  --set image.all.repository=${params.new_image_repository} --set image.all.tag=${new_image_tag_modified} -f cluster-values.yaml"    
                             }
                             sh "sleep 60s"
                             // sh "kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=${env.RELEASE_NAME} -n ${env.NAMESPACE} --timeout=360s"

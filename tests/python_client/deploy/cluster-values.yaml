@@ -10,7 +10,7 @@ etcd:
   replicaCount: 3
   image:
     repository: milvusdb/etcd
-    tag: 3.5.0-r1  
+    tag: 3.5.0-r3  
 
 minio:
   resources:
