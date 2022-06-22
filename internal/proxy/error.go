@@ -20,6 +20,9 @@ import (
 	"errors"
 	"fmt"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
@@ -81,5 +84,5 @@ func ErrUnauthenticated() error {
 }
 
 func ErrProxyNotReady() error {
-	return fmt.Errorf("internal: Milvus Proxy is not ready yet. please wait")
+	return status.Errorf(codes.Unavailable, "internal: Milvus Proxy is not ready yet. please wait")
 }
