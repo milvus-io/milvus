@@ -139,8 +139,15 @@ func (dsService *dataSyncService) close() {
 		metrics.DataNodeNumProducers.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID())).Sub(2) // timeTickChannel + deltaChannel
 	}
 
+	dsService.clearGlobalFlushingCache()
+
 	dsService.cancelFn()
 	dsService.flushManager.close()
+}
+
+func (dsService *dataSyncService) clearGlobalFlushingCache() {
+	segments := dsService.replica.listAllSegmentIDs()
+	dsService.flushingSegCache.Remove(segments...)
 }
 
 // getSegmentInfos return the SegmentInfo details according to the given ids through RPC to datacoord
