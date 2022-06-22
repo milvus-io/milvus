@@ -238,7 +238,7 @@ func TestWatchNodeLoop(t *testing.T) {
 		err = removeNodeSession(nodeID)
 		assert.Nil(t, err)
 
-		waitAllQueryNodeOffline(queryCoord.cluster, onlineNodeIDs)
+		waitAllQueryNodeOffline(queryCoord.cluster, onlineNodeIDs...)
 
 		queryCoord.Stop()
 		err = removeAllSession()
@@ -620,6 +620,8 @@ func TestLoadBalanceSegmentLoop(t *testing.T) {
 		if len(segmentInfos) > 0 {
 			break
 		}
+
+		time.Sleep(time.Second)
 	}
 
 	queryCoord.Stop()

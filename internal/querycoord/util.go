@@ -203,6 +203,12 @@ func removeFromSlice(origin []UniqueID, del ...UniqueID) []UniqueID {
 	return set.Collect()
 }
 
+func uniqueSlice(origin []UniqueID) []UniqueID {
+	set := make(typeutil.UniqueSet, len(origin))
+	set.Insert(origin...)
+	return set.Collect()
+}
+
 func getReplicaAvailableMemory(cluster Cluster, replica *milvuspb.ReplicaInfo) uint64 {
 	availableMemory := uint64(0)
 	nodes := getNodeInfos(cluster, replica.NodeIds)

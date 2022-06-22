@@ -135,7 +135,7 @@ func TestReplicaInfos_ApplyBalancePlan(t *testing.T) {
 	t.Run("source replica not exist", func(t *testing.T) {
 		replicas := NewReplicaInfos()
 		err := replicas.ApplyBalancePlan(&balancePlan{
-			nodeID:        1,
+			nodes:         []UniqueID{1},
 			sourceReplica: 1,
 			targetReplica: invalidReplicaID,
 		}, kv)
@@ -145,7 +145,7 @@ func TestReplicaInfos_ApplyBalancePlan(t *testing.T) {
 	t.Run("target replica not exist", func(t *testing.T) {
 		replicas := NewReplicaInfos()
 		err := replicas.ApplyBalancePlan(&balancePlan{
-			nodeID:        1,
+			nodes:         []UniqueID{1},
 			sourceReplica: invalidReplicaID,
 			targetReplica: 1,
 		}, kv)
@@ -162,7 +162,7 @@ func TestReplicaInfos_ApplyBalancePlan(t *testing.T) {
 		})
 
 		err := replicas.ApplyBalancePlan(&balancePlan{
-			nodeID:        2,
+			nodes:         []UniqueID{2},
 			sourceReplica: invalidReplicaID,
 			targetReplica: 1,
 		}, kv)
@@ -189,7 +189,7 @@ func TestReplicaInfos_ApplyBalancePlan(t *testing.T) {
 		})
 
 		err := replicas.ApplyBalancePlan(&balancePlan{
-			nodeID:        1,
+			nodes:         []UniqueID{1},
 			sourceReplica: 1,
 			targetReplica: invalidReplicaID,
 		}, kv)
@@ -216,7 +216,7 @@ func TestReplicaInfos_ApplyBalancePlan(t *testing.T) {
 		})
 
 		err := replicas.ApplyBalancePlan(&balancePlan{
-			nodeID:        2,
+			nodes:         []UniqueID{2},
 			sourceReplica: 1,
 			targetReplica: invalidReplicaID,
 		}, kv)
@@ -235,7 +235,7 @@ func TestReplicaInfos_ApplyBalancePlan(t *testing.T) {
 		})
 
 		err := replicas.ApplyBalancePlan(&balancePlan{
-			nodeID:        2,
+			nodes:         []UniqueID{2},
 			sourceReplica: invalidReplicaID,
 			targetReplica: 1,
 		}, kv)
