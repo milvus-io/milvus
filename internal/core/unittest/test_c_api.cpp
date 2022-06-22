@@ -2797,7 +2797,7 @@ TEST(CApiTest, SealedSegmentTest) {
 
     int N = 10000;
     std::default_random_engine e(67);
-    auto ages = std::vector<int32_t>(N);
+    auto ages = std::vector<int64_t>(N);
     for (auto& age : ages) {
         age = e() % 2000;
     }
