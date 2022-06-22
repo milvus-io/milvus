@@ -291,9 +291,13 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 		}
 	}
 	w.node.metaReplica.addExcludedSegments(collectionID, flushedCheckPointInfos)
+	flushedSegmentIDs := make([]UniqueID, 0)
+	for i := 0; i < len(flushedCheckPointInfos); i++ {
+		flushedSegmentIDs = append(flushedSegmentIDs, flushedCheckPointInfos[i].GetID())
+	}
 	log.Info("watchDMChannel, add check points info for flushed segments done",
 		zap.Int64("collectionID", collectionID),
-		zap.Any("flushedCheckPointInfos", flushedCheckPointInfos),
+		zap.Any("flushedSegmentIDs", flushedSegmentIDs),
 	)
 
 	// add excluded segments for dropped segments,
@@ -312,9 +316,13 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 		}
 	}
 	w.node.metaReplica.addExcludedSegments(collectionID, droppedCheckPointInfos)
+	droppedSegmentIDs := make([]UniqueID, 0)
+	for i := 0; i < len(droppedCheckPointInfos); i++ {
+		droppedSegmentIDs = append(droppedSegmentIDs, droppedCheckPointInfos[i].GetID())
+	}
 	log.Info("watchDMChannel, add check points info for dropped segments done",
 		zap.Int64("collectionID", collectionID),
-		zap.Any("droppedCheckPointInfos", droppedCheckPointInfos),
+		zap.Any("droppedSegmentIDs", droppedSegmentIDs),
 	)
 
 	// add flow graph
