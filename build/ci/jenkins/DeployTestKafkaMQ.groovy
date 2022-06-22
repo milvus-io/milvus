@@ -16,7 +16,7 @@ pipeline {
         choice(
             description: 'Milvus Mode',
             name: 'milvus_mode',
-            choices: ["cluster"]
+            choices: ["standalone", "cluster"]
         )
         choice(
             description: 'MQ Type',
@@ -127,6 +127,7 @@ pipeline {
                             sh "yq -i '.pulsar.enabled = true' cluster-values.yaml"
                         } else if ("${params.mq_type}" == "kafka") {
                             sh "yq -i '.kafka.enabled = true' cluster-values.yaml"
+                            sh "yq -i '.kafka.enabled = true' standalone-values.yaml"
                         }
                         sh"""
                         yq -i '.queryNode.replicas = "${params.querynode_nums}"' cluster-values.yaml
@@ -134,7 +135,13 @@ pipeline {
                         yq -i '.indexNode.replicas = "${params.indexnode_nums}"' cluster-values.yaml
                         yq -i '.proxy.replicas = "${params.proxy_nums}"' cluster-values.yaml
                         """
-                        sh "cat cluster-values.yaml"
+                        if ("${params.milvus_mode}" == "cluster"){
+                            sh "cat cluster-values.yaml"
+                        }
+                        if ("${params.mq_type}" == "standalone"){
+                            sh "cat standalone-values.yaml"
+                        }
+                        
                         }
                         }
                     }

@@ -191,8 +191,6 @@ jobs:
         task: [reinstall,upgrade]
         exclude:
           - mq_type: kafka
-            mode: standalone
-          - mq_type: kafka
             task: upgrade
 
     steps:
@@ -229,7 +227,10 @@ jobs:
         run: |
           yq -i ".kafka.enabled = false" cluster-values.yaml
           yq -i ".pulsar.enabled = false" cluster-values.yaml
-          yq -i ".${{ matrix.mq_type }}.enabled = true" cluster-values.yaml          
+          yq -i ".${{ matrix.mq_type }}.enabled = true" cluster-values.yaml
+          if [ ${{ matrix.mq_type }} == "kafka" ]; then
+              yq -i ".kafka.enabled = true" standalone-values.yaml;
+          fi
 
       - name: First Milvus Deployment
         timeout-minutes: 15
