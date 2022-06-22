@@ -31,13 +31,12 @@ type TimeTickedFlowGraph struct {
 
 // AddNode add Node into flowgraph
 func (fg *TimeTickedFlowGraph) AddNode(node Node) {
-	nodeName := node.Name()
 	nodeCtx := nodeCtx{
 		node:                   node,
 		downstreamInputChanIdx: make(map[string]int),
 		closeCh:                make(chan struct{}),
 	}
-	fg.nodeCtx[nodeName] = &nodeCtx
+	fg.nodeCtx[node.Name()] = &nodeCtx
 }
 
 // SetEdges set directed edges from in nodes to out nodes

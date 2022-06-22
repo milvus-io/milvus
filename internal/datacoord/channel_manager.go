@@ -594,7 +594,7 @@ func (c *ChannelManager) updateWithTimer(updates ChannelOpSet, state datapb.Chan
 
 	err := c.store.Update(updates)
 	if err != nil {
-		log.Warn("fail to update", zap.Array("updates", updates))
+		log.Warn("fail to update", zap.Array("updates", updates), zap.Error(err))
 		c.stateTimer.removeTimers(channelsWithTimer)
 	}
 	return err
