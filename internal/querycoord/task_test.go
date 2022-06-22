@@ -1171,7 +1171,7 @@ func TestLoadBalanceAndReschedulSegmentTaskAfterNodeDown(t *testing.T) {
 
 	segmentInfos := queryCoord.meta.getSegmentInfosByNode(node3.queryNodeID)
 	for _, segmentInfo := range segmentInfos {
-		if segmentInfo.NodeID == node3.queryNodeID {
+		if nodeIncluded(node3.queryNodeID, segmentInfo.NodeIds) {
 			break
 		}
 	}

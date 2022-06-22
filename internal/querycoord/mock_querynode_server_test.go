@@ -281,7 +281,7 @@ func (qs *queryNodeServerMock) GetMetrics(ctx context.Context, req *milvuspb.Get
 
 	totalMemUsage := uint64(0)
 	for _, info := range qs.segmentInfos {
-		if info.NodeID == qs.queryNodeID {
+		if nodeIncluded(qs.queryNodeID, info.NodeIds) {
 			totalMemUsage += uint64(info.MemSize)
 		}
 	}

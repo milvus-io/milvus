@@ -20,6 +20,25 @@ type balancePlan struct {
 	targetReplica UniqueID
 }
 
+// NewAddBalancePlan creates plan for adding nodes into dest replica
+func NewAddBalancePlan(dest UniqueID, nodes ...UniqueID) *balancePlan {
+	return NewMoveBalancePlan(invalidReplicaID, dest, nodes...)
+}
+
+// NewRemoveBalancePlan creates plan for removing nodes from src replica
+func NewRemoveBalancePlan(src UniqueID, nodes ...UniqueID) *balancePlan {
+	return NewMoveBalancePlan(src, invalidReplicaID, nodes...)
+}
+
+// NewMoveBalancePlan creates plan for moving nodes from src replica into dest replicas
+func NewMoveBalancePlan(src, dest UniqueID, nodes ...UniqueID) *balancePlan {
+	return &balancePlan{
+		nodes:         nodes,
+		sourceReplica: src,
+		targetReplica: dest,
+	}
+}
+
 type replicaBalancer struct {
 	meta    Meta
 	cluster Cluster
@@ -72,11 +91,8 @@ func (b *replicaBalancer) AddNode(nodeID int64) ([]*balancePlan, error) {
 			return replicaAvailableMemory[replicai] < replicaAvailableMemory[replicaj]
 		})
 
-		ret = append(ret, &balancePlan{
-			nodes:         []UniqueID{nodeID},
-			sourceReplica: invalidReplicaID,
-			targetReplica: replicas[0].GetReplicaID(),
-		})
+		ret = append(ret,
+			NewAddBalancePlan(replicas[0].GetReplicaID(), nodeID))
 	}
 	return ret, nil
 }

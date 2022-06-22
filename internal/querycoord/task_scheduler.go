@@ -659,14 +659,6 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 				// if triggerCondition == NodeDown, loadSegment and watchDmchannel request will keep reschedule until the success
 				// the node info has been deleted after assgining child task to triggerTask
 				// so it is necessary to update the meta of segment and dmchannel, or some data may be lost in meta
-
-				// triggerTask may be LoadCollection, LoadPartitions, LoadBalance
-				if triggerTask.getResultInfo().ErrorCode == commonpb.ErrorCode_Success || triggerTask.getTriggerCondition() == querypb.TriggerCondition_NodeDown {
-					err = updateSegmentInfoFromTask(scheduler.ctx, triggerTask, scheduler.meta)
-					if err != nil {
-						triggerTask.setResultInfo(err)
-					}
-				}
 				resultInfo := triggerTask.getResultInfo()
 				if resultInfo.ErrorCode != commonpb.ErrorCode_Success {
 					if !alreadyNotify {
@@ -691,6 +683,14 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 					log.Error("scheduleLoop: failed to execute globalPostExecute() of task",
 						zap.Int64("taskID", triggerTask.getTaskID()),
 						zap.Error(err))
+					triggerTask.setResultInfo(err)
+				}
+			}
+
+			// triggerTask may be LoadCollection, LoadPartitions, LoadBalance, Handoff
+			if triggerTask.getResultInfo().ErrorCode == commonpb.ErrorCode_Success || triggerTask.getTriggerCondition() == querypb.TriggerCondition_NodeDown {
+				err = updateSegmentInfoFromTask(scheduler.ctx, triggerTask, scheduler.meta)
+				if err != nil {
 					triggerTask.setResultInfo(err)
 				}
 			}
@@ -963,7 +963,7 @@ func updateSegmentInfoFromTask(ctx context.Context, triggerTask task, meta Meta)
 						if err != nil {
 							segment = &querypb.SegmentInfo{
 								SegmentID:      segmentID,
-								CollectionID:   loadInfo.CollectionID,
+								CollectionID:   collectionID,
 								PartitionID:    loadInfo.PartitionID,
 								DmChannel:      loadInfo.InsertChannel,
 								SegmentState:   commonpb.SegmentState_Sealed,
@@ -975,10 +975,12 @@ func updateSegmentInfoFromTask(ctx context.Context, triggerTask task, meta Meta)
 						}
 					}
 					segment.ReplicaIds = append(segment.ReplicaIds, req.ReplicaID)
-					segment.ReplicaIds = removeFromSlice(segment.GetReplicaIds())
-
-					segment.NodeIds = append(segment.NodeIds, dstNodeID)
-					segment.NodeID = dstNodeID
+					segment.ReplicaIds = uniqueSlice(segment.GetReplicaIds())
+					replicas, err := meta.getReplicasByCollectionID(collectionID)
+					if err != nil {
+						return err
+					}
+					addNode2Segment(meta, dstNodeID, replicas, segment)
 
 					segments[segmentID] = segment
 
