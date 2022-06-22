@@ -56,6 +56,7 @@ require (
 	golang.org/x/exp v0.0.0-20211216164055-b2b84827b756
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
 	google.golang.org/grpc v1.44.0
+	google.golang.org/grpc/examples v0.0.0-20220617181431-3e7b97febc7f // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 	stathat.com/c/consistent v1.0.0
 )
@@ -66,5 +67,4 @@ replace (
 	github.com/dgrijalva/jwt-go => github.com/golang-jwt/jwt v3.2.2+incompatible // Fix security alert for jwt-go 3.2.0
 	github.com/go-kit/kit => github.com/go-kit/kit v0.1.0
 	github.com/streamnative/pulsarctl => github.com/xiaofan-luan/pulsarctl v0.0.2
-	google.golang.org/grpc => google.golang.org/grpc v1.38.0
 )
