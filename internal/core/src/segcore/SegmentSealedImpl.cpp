@@ -303,8 +303,9 @@ SegmentSealedImpl::chunk_data_impl(FieldId field_id, int64_t chunk_id) const {
 
 const knowhere::Index*
 SegmentSealedImpl::chunk_index_impl(FieldId field_id, int64_t chunk_id) const {
+    AssertInfo(scalar_indexings_.find(field_id) != scalar_indexings_.end(),
+               "Cannot find scalar_indexing with field_id: " + std::to_string(field_id.get()));
     auto ptr = scalar_indexings_.at(field_id).get();
-    AssertInfo(ptr, "Scalar index of " + std::to_string(field_id.get()) + " is null");
     return ptr;
 }
 

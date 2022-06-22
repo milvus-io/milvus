@@ -81,6 +81,8 @@ struct InsertRecord {
     // get field data without knowing the type
     VectorBase*
     get_field_data_base(FieldId field_id) const {
+        AssertInfo(fields_data_.find(field_id) != fields_data_.end(),
+                   "Cannot find field_data with field_id: " + std::to_string(field_id.get()));
         auto ptr = fields_data_.at(field_id).get();
         return ptr;
     }

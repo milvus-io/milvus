@@ -194,7 +194,7 @@ serialize(const Message* msg) {
 
 #ifdef __linux__
 
-//TEST(Common, Memory_benchmark) {
+// TEST(Common, Memory_benchmark) {
 //    auto run_times = 1000000;
 //    auto start = std::chrono::high_resolution_clock::now();
 //
