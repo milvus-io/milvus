@@ -73,7 +73,11 @@ var HTTPParams paramtable.HTTPConfig
 var (
 	errMissingMetadata = status.Errorf(codes.InvalidArgument, "missing metadata")
 	errInvalidToken    = status.Errorf(codes.Unauthenticated, "invalid token")
+	// registerHTTPHandlerOnce avoid register http handler multiple times
+	registerHTTPHandlerOnce sync.Once
 )
+
+const apiPathPrefix = "/api/v1"
 
 // Server is the Proxy Server
 type Server struct {
@@ -82,9 +86,6 @@ type Server struct {
 	proxy              types.ProxyComponent
 	grpcInternalServer *grpc.Server
 	grpcExternalServer *grpc.Server
-	httpServer         *http.Server
-	// avoid race
-	httpServerMtx sync.Mutex
 
 	etcdCli          *clientv3.Client
 	rootCoordClient  types.RootCoord
@@ -111,9 +112,8 @@ func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error)
 	return server, err
 }
 
-// startHTTPServer starts the http server, panic when failed
-func (s *Server) startHTTPServer(port int) {
-	defer s.wg.Done()
+// registerHTTPServer register the http server, panic when failed
+func (s *Server) registerHTTPServer() {
 	// (Embedded Milvus Only) Discard gin logs if logging is disabled.
 	// We might need to put these logs in some files in the further.
 	// But we don't care about these logs now, at least not in embedded Milvus.
@@ -125,21 +125,9 @@ func (s *Server) startHTTPServer(port int) {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	ginHandler := gin.Default()
-	apiv1 := ginHandler.Group("/api/v1")
+	apiv1 := ginHandler.Group(apiPathPrefix)
 	httpserver.NewHandlers(s.proxy).RegisterRoutesTo(apiv1)
-	s.httpServerMtx.Lock()
-	s.httpServer = &http.Server{
-		Addr:         fmt.Sprintf(":%d", port),
-		Handler:      ginHandler,
-		ReadTimeout:  HTTPParams.ReadTimeout,
-		WriteTimeout: HTTPParams.WriteTimeout,
-	}
-	s.httpServerMtx.Unlock()
-	if err := s.httpServer.ListenAndServe(); err != nil {
-		if err != http.ErrServerClosed {
-			panic("failed to start http server: " + err.Error())
-		}
-	}
+	http.Handle("/", ginHandler)
 }
 
 func (s *Server) startInternalRPCServer(grpcInternalPort int, errChan chan error) {
@@ -358,9 +346,10 @@ func (s *Server) init() error {
 	}
 
 	if HTTPParams.Enabled {
-		log.Info("start http server of proxy", zap.Int("port", HTTPParams.Port))
-		s.wg.Add(1)
-		go s.startHTTPServer(HTTPParams.Port)
+		registerHTTPHandlerOnce.Do(func() {
+			log.Info("register http server of proxy")
+			s.registerHTTPServer()
+		})
 	}
 
 	if s.rootCoordClient == nil {
@@ -523,16 +512,6 @@ func (s *Server) Stop() error {
 	}
 
 	gracefulWg := sync.WaitGroup{}
-	gracefulWg.Add(1)
-	go func() {
-		defer gracefulWg.Done()
-		s.httpServerMtx.Lock()
-		defer s.httpServerMtx.Unlock()
-		if s.httpServer != nil {
-			log.Debug("Graceful stop http server...")
-			s.httpServer.Shutdown(context.TODO())
-		}
-	}()
 
 	gracefulWg.Add(1)
 	go func() {
