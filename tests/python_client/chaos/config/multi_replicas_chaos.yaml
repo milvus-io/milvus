@@ -1,0 +1,13 @@
+is_streaming:
+  - true
+  # - false
+failed_group_scope:
+  - one
+  # - except_one
+  # - all
+failed_node_type:
+  - non_shard_leader
+  # - shard_leader
+chaos_type:
+  - pod-failure
+  # - pod-kill

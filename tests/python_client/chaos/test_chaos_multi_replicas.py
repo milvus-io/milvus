@@ -2,10 +2,9 @@
 import threading
 
 import pytest
-import os
 import time
-import json
 import random
+from pathlib import Path
 from time import sleep
 
 from pymilvus import connections
@@ -13,14 +12,14 @@ from chaos.checker import (InsertFlushChecker, SearchChecker, QueryChecker, Op)
 from common.cus_resource_opts import CustomResourceOperations as CusResource
 from common.milvus_sys import MilvusSys
 from utils.util_log import test_log as log
-from utils.util_k8s import wait_pods_ready, get_pod_list, get_pod_ip_name_pairs
-from utils.util_common import findkeys
+from utils.util_k8s import wait_pods_ready, get_pod_ip_name_pairs
 from chaos import chaos_commons as cc
 from common.common_type import CaseLabel
 from common import common_func as cf
 from chaos import constants
 from delayed_assert import expect, assert_expectations
 
+config_file_name = f"{str(Path(__file__).absolute().parent)}/config/multi_replicas_chaos.yaml"
 
 def assert_statistic(checkers, expectations={}):
     for k in checkers.keys():
@@ -38,29 +37,6 @@ def assert_statistic(checkers, expectations={}):
                 f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
             expect(succ_rate > 0.90 and total > 2,
                    f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
-
-
-def check_cluster_nodes(chaos_config):
-
-    # if all pods will be effected, the expect is all fail.
-    # Even though the replicas is greater than 1, it can not provide HA, so cluster_nodes is set as 1 for this situation.
-    if "all" in chaos_config["metadata"]["name"]:
-        return 1
-
-    selector = findkeys(chaos_config, "selector")
-    selector = list(selector)
-    log.info(f"chaos target selector: {selector}")
-    # assert len(selector) == 1
-    # chaos yaml file must place the effected pod selector in the first position
-    selector = selector[0]
-    namespace = selector["namespaces"][0]
-    labels_dict = selector["labelSelectors"]
-    labels_list = []
-    for k, v in labels_dict.items():
-        labels_list.append(k+"="+v)
-    labels_str = ",".join(labels_list)
-    pods = get_pod_list(namespace, labels_str)
-    return len(pods)
 
 
 def record_results(checkers):
@@ -130,10 +106,10 @@ class TestChaos(TestChaosBase):
         log.info(f'Alive threads: {threading.enumerate()}')
 
     @pytest.mark.tags(CaseLabel.L3)
-    @pytest.mark.parametrize("is_streaming", [False])  # [False, True]
-    @pytest.mark.parametrize("failed_group_scope", ["one"])  # ["one", "except_one" "all"]
-    @pytest.mark.parametrize("failed_node_type", ["shard_leader"])  # ["non_shard_leader", "shard_leader"]
-    @pytest.mark.parametrize("chaos_type", ["pod-failure"])  # ["pod-failure", "pod-kill"]
+    @pytest.mark.parametrize("is_streaming", cc.gen_experiment_config(config_file_name)['is_streaming'])  # [False, True]
+    @pytest.mark.parametrize("failed_group_scope", cc.gen_experiment_config(config_file_name)['failed_group_scope'])  # ["one", "except_one" "all"]
+    @pytest.mark.parametrize("failed_node_type", cc.gen_experiment_config(config_file_name)['failed_node_type'])  # ["non_shard_leader", "shard_leader"]
+    @pytest.mark.parametrize("chaos_type", cc.gen_experiment_config(config_file_name)['chaos_type'])  # ["pod-failure", "pod-kill"]
     def test_multi_replicas_with_only_one_group_available(self, chaos_type, failed_node_type, failed_group_scope, is_streaming):
         # start the monitor threads to check the milvus ops
         log.info("*********************Chaos Test Start**********************")
@@ -174,7 +150,7 @@ class TestChaos(TestChaosBase):
                 pod = querynode_id_pod_pair[target_node]
                 target_pod_list.append(pod)
         log.info(f"target_pod_list: {target_pod_list}")
-        chaos_config = cc.gen_experiment_config(f"chaos/chaos_objects/template/{chaos_type}-by-pod-list.yaml")
+        chaos_config = cc.gen_experiment_config(f"{str(Path(__file__).absolute().parent)}/chaos_objects/template/{chaos_type}-by-pod-list.yaml")
         chaos_config['metadata']['name'] = f"test-multi-replicase-{int(time.time())}"
         meta_name = chaos_config.get('metadata', None).get('name', None)
         chaos_config['spec']['selector']['pods']['chaos-testing'] = target_pod_list
@@ -247,7 +223,7 @@ class TestChaos(TestChaosBase):
         # node info
         querynode_id_pod_pair = get_querynode_info(release_name)
         log.info(querynode_id_pod_pair)
-        sleep(120)
+        sleep(30)
         # replicas info
         replicas_info, _ = self.health_checkers[Op.search].c_wrap.get_replicas()
         log.info(f"replicas_info for collection {self.health_checkers[Op.search].c_wrap.name}: {replicas_info}")
