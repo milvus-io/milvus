@@ -33,7 +33,7 @@ func PeekClientV0(memorySize uint64, indexParams []*commonpb.KeyValuePair,
 func PeekClientV1(memorySize uint64, indexParams []*commonpb.KeyValuePair,
 	typeParams []*commonpb.KeyValuePair, pq *PriorityQueue) UniqueID {
 	for i := range pq.items {
-		if pq.items[i].totalMem > memorySize {
+		if pq.items[i].totalMem > memorySize && pq.items[i].priority < 2 {
 			return pq.items[i].key
 		}
 	}

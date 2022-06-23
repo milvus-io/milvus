@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"sort"
 	"strconv"
 	"sync"
 
@@ -439,6 +440,16 @@ func (mt *metaTable) GetUnusedIndexFiles(limit int) []Meta {
 	return metas
 }
 
+func sortMetaPolicy(metas []Meta) []Meta {
+	// the larger the segment, the higher the priority
+	sort.Slice(metas, func(i, j int) bool {
+		return metas[i].indexMeta.Version < metas[j].indexMeta.Version ||
+			(metas[i].indexMeta.Version == metas[j].indexMeta.Version &&
+				metas[i].indexMeta.Req.NumRows > metas[j].indexMeta.Req.NumRows)
+	})
+	return metas
+}
+
 // GetUnassignedTasks get the unassigned tasks.
 func (mt *metaTable) GetUnassignedTasks(onlineNodeIDs []int64) []Meta {
 	mt.lock.RLock()
@@ -446,6 +457,9 @@ func (mt *metaTable) GetUnassignedTasks(onlineNodeIDs []int64) []Meta {
 	var metas []Meta
 
 	for _, meta := range mt.indexBuildID2Meta {
+		if meta.indexMeta.MarkDeleted {
+			continue
+		}
 		if meta.indexMeta.State == commonpb.IndexState_Unissued {
 			metas = append(metas, Meta{indexMeta: proto.Clone(meta.indexMeta).(*indexpb.IndexMeta), revision: meta.revision})
 			continue
@@ -465,7 +479,7 @@ func (mt *metaTable) GetUnassignedTasks(onlineNodeIDs []int64) []Meta {
 			metas = append(metas, Meta{indexMeta: proto.Clone(meta.indexMeta).(*indexpb.IndexMeta), revision: meta.revision})
 		}
 	}
-	return metas
+	return sortMetaPolicy(metas)
 }
 
 // HasSameReq determine whether there are same indexing tasks.

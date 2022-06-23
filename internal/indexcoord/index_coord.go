@@ -22,7 +22,6 @@ import (
 	"math/rand"
 	"os"
 	"path"
-	"sort"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -118,7 +117,7 @@ func NewIndexCoord(ctx context.Context, factory dependency.Factory) (*IndexCoord
 		loopCancel:         cancel,
 		reqTimeoutInterval: time.Second * 10,
 		durationInterval:   time.Second * 10,
-		assignTaskInterval: time.Second * 3,
+		assignTaskInterval: time.Second * 1,
 		taskLimit:          20,
 		factory:            factory,
 	}
@@ -986,9 +985,7 @@ func (i *IndexCoord) assignTaskLoop() {
 				continue
 			}
 			metas := i.metaTable.GetUnassignedTasks(serverIDs)
-			sort.Slice(metas, func(i, j int) bool {
-				return metas[i].indexMeta.Version <= metas[j].indexMeta.Version
-			})
+
 			// only log if we find unassigned tasks
 			if len(metas) != 0 {
 				log.Debug("IndexCoord find unassigned tasks ", zap.Int("Unassigned tasks number", len(metas)), zap.Int64s("Available IndexNode IDs", serverIDs))
@@ -996,6 +993,18 @@ func (i *IndexCoord) assignTaskLoop() {
 			for index, meta := range metas {
 				indexBuildID := meta.indexMeta.IndexBuildID
 				segID := meta.indexMeta.Req.SegmentID
+				nodeID, builderClient := i.nodeManager.PeekClient(meta)
+				if builderClient == nil && nodeID == -1 {
+					log.Warn("there is no indexnode online")
+					break
+				}
+
+				if builderClient == nil && nodeID == 0 {
+					log.Warn("The memory of all indexnodes does not meet the requirements")
+					continue
+				}
+				log.Debug("IndexCoord PeekClient success", zap.Int64("nodeID", nodeID))
+
 				if err := i.tryAcquireSegmentReferLock(ctx, indexBuildID, []UniqueID{segID}); err != nil {
 					log.Warn("IndexCoord try to acquire segment reference lock failed, maybe this segment has been compacted",
 						zap.Int64("segID", segID), zap.Int64("buildID", indexBuildID), zap.Error(err))
@@ -1007,16 +1016,6 @@ func (i *IndexCoord) assignTaskLoop() {
 				}
 				log.Debug("The version of the task has been updated", zap.Int64("indexBuildID", indexBuildID))
 
-				nodeID, builderClient := i.nodeManager.PeekClient(meta)
-				if builderClient == nil && nodeID == -1 {
-					log.Warn("there is no indexnode online")
-					break
-				}
-				if builderClient == nil && nodeID == 0 {
-					log.Warn("The memory of all indexnodes does not meet the requirements")
-					continue
-				}
-				log.Debug("IndexCoord PeekClient success", zap.Int64("nodeID", nodeID))
 				req := &indexpb.CreateIndexRequest{
 					IndexBuildID: indexBuildID,
 					IndexName:    meta.indexMeta.Req.IndexName,
