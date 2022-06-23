@@ -249,12 +249,13 @@ func (mt *metaTable) UpdateVersion(indexBuildID UniqueID) error {
 }
 
 // MarkIndexAsDeleted will mark the corresponding index as deleted, and recycleUnusedIndexFiles will recycle these tasks.
-func (mt *metaTable) MarkIndexAsDeleted(indexID UniqueID) error {
+func (mt *metaTable) MarkIndexAsDeleted(indexID UniqueID) (map[int64]int, error) {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
 
 	log.Debug("IndexCoord metaTable MarkIndexAsDeleted ", zap.Int64("indexID", indexID))
 
+	node2TaskNum := make(map[int64]int)
 	for _, meta := range mt.indexBuildID2Meta {
 		if meta.indexMeta.Req.IndexID == indexID && !meta.indexMeta.MarkDeleted {
 			meta.indexMeta.MarkDeleted = true
@@ -273,21 +274,24 @@ func (mt *metaTable) MarkIndexAsDeleted(indexID UniqueID) error {
 				}
 				err2 := retry.Do(context.TODO(), fn, retry.Attempts(5))
 				if err2 != nil {
-					return err2
+					return node2TaskNum, err2
 				}
+			} else {
+				node2TaskNum[meta.indexMeta.NodeID]++
 			}
 		}
 	}
 
-	return nil
+	return node2TaskNum, nil
 }
 
-func (mt *metaTable) MarkIndexAsDeletedByBuildIDs(buildIDs []UniqueID) error {
+func (mt *metaTable) MarkIndexAsDeletedByBuildIDs(buildIDs []UniqueID) (map[int64]int, error) {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
 
 	log.Debug("IndexCoord metaTable MarkIndexAsDeletedByBuildIDs ", zap.Int64s("buildIDs", buildIDs))
 
+	node2TaskNum := make(map[int64]int)
 	for _, buildID := range buildIDs {
 		if meta, ok := mt.indexBuildID2Meta[buildID]; ok {
 			clonedMeta := &Meta{
@@ -310,12 +314,13 @@ func (mt *metaTable) MarkIndexAsDeletedByBuildIDs(buildIDs []UniqueID) error {
 				}
 				err2 := retry.Do(context.TODO(), fn, retry.Attempts(5))
 				if err2 != nil {
-					return err2
+					return node2TaskNum, err2
 				}
 			}
+			node2TaskNum[meta.indexMeta.NodeID]++
 		}
 	}
-	return nil
+	return node2TaskNum, nil
 }
 
 // GetIndexStates gets the index states from meta table.

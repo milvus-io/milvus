@@ -546,7 +546,12 @@ func (i *IndexCoord) DropIndex(ctx context.Context, req *indexpb.DropIndexReques
 	ret := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}
-	err := i.metaTable.MarkIndexAsDeleted(req.IndexID)
+	nodeTasks, err := i.metaTable.MarkIndexAsDeleted(req.IndexID)
+	defer func() {
+		for nodeID, taskNum := range nodeTasks {
+			i.nodeManager.pq.IncPriority(nodeID, taskNum*-1)
+		}
+	}()
 	if err != nil {
 		ret.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		ret.Reason = err.Error()
@@ -584,7 +589,13 @@ func (i *IndexCoord) RemoveIndex(ctx context.Context, req *indexpb.RemoveIndexRe
 	ret := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}
-	err := i.metaTable.MarkIndexAsDeletedByBuildIDs(req.GetBuildIDs())
+
+	nodeTasks, err := i.metaTable.MarkIndexAsDeletedByBuildIDs(req.GetBuildIDs())
+	defer func() {
+		for nodeID, taskNum := range nodeTasks {
+			i.nodeManager.pq.IncPriority(nodeID, -1*taskNum)
+		}
+	}()
 	if err != nil {
 		log.Error("IndexCoord MarkIndexAsDeletedByBuildIDs failed", zap.Int64s("buildIDs", req.GetBuildIDs()),
 			zap.Error(err))
