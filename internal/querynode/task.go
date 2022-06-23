@@ -266,11 +266,11 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 		}
 	}
 	w.node.metaReplica.addExcludedSegments(collectionID, unFlushedCheckPointInfos)
-	unflushedSegmentIDs := make([]UniqueID, 0)
-	for i := 0; i < len(unFlushedCheckPointInfos); i++ {
-		unflushedSegmentIDs = append(unflushedSegmentIDs, unFlushedCheckPointInfos[i].GetID())
+	unflushedSegmentIDs := make([]UniqueID, len(unFlushedCheckPointInfos))
+	for i, segInfo := range unFlushedCheckPointInfos {
+		unflushedSegmentIDs[i] = segInfo.GetID()
 	}
-	log.Info("watchDMChannel, add check points info for unFlushed segments done",
+	log.Info("watchDMChannel, add check points info for unflushed segments done",
 		zap.Int64("collectionID", collectionID),
 		zap.Any("unflushedSegmentIDs", unflushedSegmentIDs),
 	)
@@ -291,9 +291,9 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 		}
 	}
 	w.node.metaReplica.addExcludedSegments(collectionID, flushedCheckPointInfos)
-	flushedSegmentIDs := make([]UniqueID, 0)
-	for i := 0; i < len(flushedCheckPointInfos); i++ {
-		flushedSegmentIDs = append(flushedSegmentIDs, flushedCheckPointInfos[i].GetID())
+	flushedSegmentIDs := make([]UniqueID, len(flushedCheckPointInfos))
+	for i, segInfo := range flushedCheckPointInfos {
+		flushedSegmentIDs[i] = segInfo.GetID()
 	}
 	log.Info("watchDMChannel, add check points info for flushed segments done",
 		zap.Int64("collectionID", collectionID),
@@ -316,9 +316,9 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 		}
 	}
 	w.node.metaReplica.addExcludedSegments(collectionID, droppedCheckPointInfos)
-	droppedSegmentIDs := make([]UniqueID, 0)
-	for i := 0; i < len(droppedCheckPointInfos); i++ {
-		droppedSegmentIDs = append(droppedSegmentIDs, droppedCheckPointInfos[i].GetID())
+	droppedSegmentIDs := make([]UniqueID, len(droppedCheckPointInfos))
+	for i, segInfo := range droppedCheckPointInfos {
+		droppedSegmentIDs[i] = segInfo.GetID()
 	}
 	log.Info("watchDMChannel, add check points info for dropped segments done",
 		zap.Int64("collectionID", collectionID),
