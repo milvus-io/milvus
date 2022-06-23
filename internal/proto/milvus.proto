@@ -876,6 +876,8 @@ message GetImportStateResponse {
 }
 
 message ListImportTasksRequest {
+  string collection_name = 1; // target collection, list all tasks if the name is empty
+  int64 limit = 2;            // maximum number of tasks returned, list all tasks if the value is 0
 }
 
 message ListImportTasksResponse {

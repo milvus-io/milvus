@@ -390,7 +390,7 @@ func (v *JSONColumnValidator) Handle(columns map[storage.FieldID][]interface{}) 
 	return nil
 }
 
-type ImportFlushFunc func(fields map[storage.FieldID]storage.FieldData, shardNum int) error
+type ImportFlushFunc func(fields map[storage.FieldID]storage.FieldData, shardID int) error
 
 // row-based json format consumer class
 type JSONRowConsumer struct {
