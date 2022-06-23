@@ -2298,19 +2298,38 @@ func (lbt *loadBalanceTask) globalPostExecute(ctx context.Context) error {
 			zap.Int64("triggerTaskID", lbt.getTaskID()),
 		)
 
-		// Remove offline nodes from replica
 		wg := errgroup.Group{}
 		if lbt.triggerCondition == querypb.TriggerCondition_NodeDown {
-			offlineNodes := make(typeutil.UniqueSet, len(lbt.SourceNodeIDs))
-			for _, nodeID := range lbt.SourceNodeIDs {
-				offlineNodes.Insert(nodeID)
-			}
-
+			// Remove offline nodes from replica
 			for replicaID := range replicas {
 				replicaID := replicaID
 				wg.Go(func() error {
 					return lbt.meta.applyReplicaBalancePlan(
 						NewRemoveBalancePlan(replicaID, lbt.SourceNodeIDs...))
+				})
+			}
+
+			// Remove offline nodes from dmChannels
+			for _, dmChannel := range dmChannels {
+				dmChannel := dmChannel
+				wg.Go(func() error {
+					dmChannel.NodeIds = removeFromSlice(dmChannel.NodeIds, lbt.SourceNodeIDs...)
+
+					err := lbt.meta.setDmChannelInfos(dmChannel)
+					if err != nil {
+						log.Error("failed to remove offline nodes from dmChannel info",
+							zap.String("dmChannel", dmChannel.DmChannel),
+							zap.Error(err))
+
+						return err
+					}
+
+					log.Info("remove offline nodes from dmChannel",
+						zap.Int64("taskID", lbt.getTaskID()),
+						zap.String("dmChannel", dmChannel.DmChannel),
+						zap.Int64s("nodeIds", dmChannel.NodeIds))
+
+					return nil
 				})
 			}
 		}
@@ -2339,30 +2358,6 @@ func (lbt *loadBalanceTask) globalPostExecute(ctx context.Context) error {
 		// 		return nil
 		// 	})
 		// }
-
-		// Remove offline nodes from dmChannels
-		for _, dmChannel := range dmChannels {
-			dmChannel := dmChannel
-			wg.Go(func() error {
-				dmChannel.NodeIds = removeFromSlice(dmChannel.NodeIds, lbt.SourceNodeIDs...)
-
-				err := lbt.meta.setDmChannelInfos(dmChannel)
-				if err != nil {
-					log.Error("failed to remove offline nodes from dmChannel info",
-						zap.String("dmChannel", dmChannel.DmChannel),
-						zap.Error(err))
-
-					return err
-				}
-
-				log.Info("remove offline nodes from dmChannel",
-					zap.Int64("taskID", lbt.getTaskID()),
-					zap.String("dmChannel", dmChannel.DmChannel),
-					zap.Int64s("nodeIds", dmChannel.NodeIds))
-
-				return nil
-			})
-		}
 
 		// Wait for the previous goroutines,
 		// which conflicts with the code below due to modifing replicas
