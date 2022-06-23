@@ -207,7 +207,7 @@ func (qc *QueryCoord) Init() error {
 		}
 
 		// init index checker
-		qc.indexChecker, initError = newIndexChecker(qc.loopCtx, qc.kvClient, qc.meta, qc.cluster, qc.scheduler, qc.broker)
+		qc.indexChecker, initError = newIndexChecker(qc.loopCtx, qc.kvClient, qc.meta, qc.cluster, qc.scheduler, qc.broker, qc.idAllocator)
 		if initError != nil {
 			log.Error("query coordinator init index checker failed", zap.Error(initError))
 			return
@@ -507,29 +507,27 @@ func (qc *QueryCoord) watchHandoffSegmentLoop() {
 			return
 		case resp := <-watchChan:
 			for _, event := range resp.Events {
-				segmentInfo := &querypb.SegmentInfo{}
-				err := proto.Unmarshal(event.Kv.Value, segmentInfo)
-				if err != nil {
-					log.Error("watchHandoffSegmentLoop: unmarshal failed", zap.Any("error", err.Error()))
+				if event.Type != mvccpb.PUT {
 					continue
 				}
-				switch event.Type {
-				case mvccpb.PUT:
-					validHandoffReq, _ := qc.indexChecker.verifyHandoffReqValid(segmentInfo)
-					if Params.QueryCoordCfg.AutoHandoff && validHandoffReq {
-						qc.indexChecker.enqueueHandoffReq(segmentInfo)
-						log.Info("watchHandoffSegmentLoop: enqueue a handoff request to index checker", zap.Any("segment info", segmentInfo))
-					} else {
-						log.Info("watchHandoffSegmentLoop: collection/partition has not been loaded or autoHandoff equal to false, remove req from etcd", zap.Any("segmentInfo", segmentInfo))
-						buildQuerySegmentPath := fmt.Sprintf("%s/%d/%d/%d", handoffSegmentPrefix, segmentInfo.CollectionID, segmentInfo.PartitionID, segmentInfo.SegmentID)
-						err = qc.kvClient.Remove(buildQuerySegmentPath)
-						if err != nil {
-							log.Error("watchHandoffSegmentLoop: remove handoff segment from etcd failed", zap.Error(err))
-							panic(err)
-						}
+
+				segmentInfo := &querypb.SegmentInfo{}
+				if err := proto.Unmarshal(event.Kv.Value, segmentInfo); err != nil {
+					log.Error("watchHandoffSegmentLoop: unmarshal failed", zap.Error(err))
+					continue
+				}
+
+				validHandoffReq, _ := qc.indexChecker.verifyHandoffReqValid(segmentInfo)
+				if Params.QueryCoordCfg.AutoHandoff && validHandoffReq {
+					go qc.indexChecker.handleHandoffRequest(segmentInfo)
+					log.Info("watchHandoffSegmentLoop: enqueue a handoff request to index checker", zap.Any("segment info", segmentInfo))
+				} else {
+					log.Info("watchHandoffSegmentLoop: collection/partition has not been loaded or autoHandoff equal to false, remove req from etcd", zap.Any("segmentInfo", segmentInfo))
+					buildQuerySegmentPath := fmt.Sprintf("%s/%d/%d/%d", handoffSegmentPrefix, segmentInfo.CollectionID, segmentInfo.PartitionID, segmentInfo.SegmentID)
+					if err := qc.kvClient.Remove(buildQuerySegmentPath); err != nil {
+						log.Error("watchHandoffSegmentLoop: remove handoff segment from etcd failed", zap.Error(err))
+						panic(err)
 					}
-				default:
-					// do nothing
 				}
 			}
 		}

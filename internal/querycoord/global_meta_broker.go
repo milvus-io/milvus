@@ -189,7 +189,7 @@ func (broker *globalMetaBroker) getIndexFilePaths(ctx context.Context, buildID i
 
 	if pathResponse.Status.ErrorCode != commonpb.ErrorCode_Success {
 		err = fmt.Errorf("get index info from indexCoord failed, buildID = %d, reason = %s", buildID, pathResponse.Status.Reason)
-		log.Error(err.Error())
+		log.RatedInfo(10, err.Error())
 		return nil, err
 	}
 	log.Info("get index info from indexCoord successfully", zap.Int64("buildID", buildID))

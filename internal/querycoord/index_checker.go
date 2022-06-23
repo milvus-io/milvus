@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
@@ -40,45 +41,33 @@ type extraIndexInfo struct {
 
 // IndexChecker checks index
 type IndexChecker struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-	client kv.MetaKv
-
+	ctx      context.Context
+	cancel   context.CancelFunc
+	client   kv.MetaKv
 	revision int64
-
-	handoffReqChan        chan *querypb.SegmentInfo
-	unIndexedSegmentsChan chan *querypb.SegmentInfo
-	indexedSegmentsChan   chan *querypb.SegmentInfo
 
 	meta      Meta
 	scheduler *TaskScheduler
 	cluster   Cluster
 
-	broker *globalMetaBroker
+	broker      *globalMetaBroker
+	idAllocator func() (UniqueID, error)
 
 	wg sync.WaitGroup
 }
 
-func newIndexChecker(ctx context.Context, client kv.MetaKv, meta Meta, cluster Cluster, scheduler *TaskScheduler, broker *globalMetaBroker) (*IndexChecker, error) {
+func newIndexChecker(ctx context.Context, client kv.MetaKv, meta Meta, cluster Cluster, scheduler *TaskScheduler, broker *globalMetaBroker, allocator func() (UniqueID, error)) (*IndexChecker, error) {
 	childCtx, cancel := context.WithCancel(ctx)
-	reqChan := make(chan *querypb.SegmentInfo, 1024)
-	unIndexChan := make(chan *querypb.SegmentInfo, 1024)
-	indexedChan := make(chan *querypb.SegmentInfo, 1024)
 
 	checker := &IndexChecker{
-		ctx:    childCtx,
-		cancel: cancel,
-		client: client,
-
-		handoffReqChan:        reqChan,
-		unIndexedSegmentsChan: unIndexChan,
-		indexedSegmentsChan:   indexedChan,
-
-		meta:      meta,
-		scheduler: scheduler,
-		cluster:   cluster,
-
-		broker: broker,
+		ctx:         childCtx,
+		cancel:      cancel,
+		client:      client,
+		meta:        meta,
+		scheduler:   scheduler,
+		cluster:     cluster,
+		broker:      broker,
+		idAllocator: allocator,
 	}
 	err := checker.reloadFromKV()
 	if err != nil {
@@ -90,14 +79,10 @@ func newIndexChecker(ctx context.Context, client kv.MetaKv, meta Meta, cluster C
 }
 
 func (ic *IndexChecker) start() {
-	ic.wg.Add(2)
-	go ic.checkIndexLoop()
-	go ic.processHandoffAfterIndexDone()
 }
 
 func (ic *IndexChecker) close() {
 	ic.cancel()
-	ic.wg.Wait()
 }
 
 // reloadFromKV  reload collection/partition, remove from etcd if failed.
@@ -118,9 +103,7 @@ func (ic *IndexChecker) reloadFromKV() error {
 		}
 		validHandoffReq, _ := ic.verifyHandoffReqValid(segmentInfo)
 		if validHandoffReq && Params.QueryCoordCfg.AutoHandoff {
-			// push the req to handoffReqChan and then wait to load after index created
-			// in case handoffReqChan is full, and block start process
-			go ic.enqueueHandoffReq(segmentInfo)
+			go ic.handleHandoffRequest(segmentInfo)
 		} else {
 			log.Info("reloadFromKV: collection/partition has not been loaded, remove req from etcd", zap.Any("segmentInfo", segmentInfo))
 			buildQuerySegmentPath := fmt.Sprintf("%s/%d/%d/%d", handoffSegmentPrefix, segmentInfo.CollectionID, segmentInfo.PartitionID, segmentInfo.SegmentID)
@@ -133,6 +116,98 @@ func (ic *IndexChecker) reloadFromKV() error {
 		log.Info("reloadFromKV: process handoff request done", zap.Any("segmentInfo", segmentInfo))
 	}
 
+	return nil
+}
+
+func (ic *IndexChecker) handleHandoffRequest(info *querypb.SegmentInfo) error {
+	// allocate a taskID for locking
+	taskID, err := ic.idAllocator()
+	if err != nil {
+		log.Warn("handleHandoffRequest: allocate taskID failed", zap.Error(err))
+		return err
+	}
+
+	// acquire reference lock and defer unlock
+	if err = ic.broker.acquireSegmentsReferLock(ic.ctx, taskID, []UniqueID{info.SegmentID}); err != nil {
+		log.Warn("acquire segment reference lock failed", zap.Int64("taskID", taskID), zap.Int64("segmentID", info.SegmentID))
+		return err
+	}
+	defer func() {
+		if err := ic.broker.releaseSegmentReferLock(ic.ctx, taskID, []UniqueID{info.SegmentID}); err != nil {
+			log.Warn("release segment reference lock failed", zap.Int64("taskID", taskID), zap.Int64("segmentID", info.SegmentID))
+			panic(err)
+		}
+	}()
+
+	collectionInfo, err := ic.meta.getCollectionInfoByID(info.CollectionID)
+	if err != nil {
+		log.Warn("handleHandoffRequest: handoffTask failed", zap.Int64("taskID", taskID), zap.Int64("segmentID", info.SegmentID), zap.Error(err))
+		return err
+	}
+
+	var indexInfo []*querypb.FieldIndexInfo
+	indexInfo, err = ic.broker.getIndexInfo(ic.ctx, info.CollectionID, info.SegmentID, collectionInfo.Schema)
+	if err != nil {
+		// retry index check
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+	FOR:
+		for {
+			select {
+			case <-ticker.C:
+				indexInfo, err = ic.broker.getIndexInfo(ic.ctx, info.CollectionID, info.SegmentID, collectionInfo.Schema)
+				if err == nil {
+					break FOR // index check passed
+				}
+				if segmentState, err := ic.broker.getSegmentStates(ic.ctx, info.SegmentID); err == nil {
+					if segmentState.State == commonpb.SegmentState_NotExist {
+						// segment dropped, stop retry
+						log.Warn("handleHandoffRequest: handoffTask failed because segment is dropped", zap.Int64("taskID", taskID), zap.Int64("segmentID", info.SegmentID))
+						return fmt.Errorf("segment %d has been dropped", info.SegmentID)
+					}
+				}
+			case <-ic.ctx.Done():
+				return ic.ctx.Err()
+			}
+		}
+	}
+	info.IndexInfos = indexInfo
+
+	// create task and enqueue
+	baseTask := newBaseTask(ic.ctx, querypb.TriggerCondition_Handoff)
+	baseTask.setTaskID(taskID)
+	handoffReq := &querypb.HandoffSegmentsRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_HandoffSegments,
+		},
+		SegmentInfos: []*querypb.SegmentInfo{info},
+	}
+	handoffTask := &handoffTask{
+		baseTask:               baseTask,
+		HandoffSegmentsRequest: handoffReq,
+		broker:                 ic.broker,
+		cluster:                ic.cluster,
+		meta:                   ic.meta,
+	}
+	if err := ic.scheduler.Enqueue(handoffTask); err != nil {
+		log.Error("handleHandoffRequest: handoffTask enqueue failed", zap.Error(err))
+		panic(err)
+	}
+
+	// once task enqueue, etcd data can be cleaned, handoffTask will recover from taskScheduler's reloadFromKV()
+	queryKey := fmt.Sprintf("%s/%d/%d/%d", handoffSegmentPrefix, info.CollectionID, info.PartitionID, info.SegmentID)
+	if err = ic.client.Remove(queryKey); err != nil {
+		log.Error("handleHandoffRequest: remove handoff segment from etcd failed", zap.Error(err))
+		panic(err)
+	}
+
+	if err := handoffTask.waitToFinish(); err != nil {
+		// collection or partition may have been released before handoffTask enqueue
+		log.Warn("handleHandoffRequest: handoffTask failed", zap.Int64("taskID", taskID), zap.Int64("segmentID", info.SegmentID), zap.Error(err))
+		return err
+	}
+
+	log.Info("handleHandoffRequest: handoffTask completed", zap.Int64("taskID", taskID), zap.Int64("segmentID", info.SegmentID))
 	return nil
 }
 
@@ -161,119 +236,4 @@ func (ic *IndexChecker) verifyHandoffReqValid(req *querypb.SegmentInfo) (bool, *
 	}
 
 	return false, nil
-}
-
-func (ic *IndexChecker) enqueueHandoffReq(req *querypb.SegmentInfo) {
-	ic.handoffReqChan <- req
-}
-
-func (ic *IndexChecker) enqueueUnIndexSegment(info *querypb.SegmentInfo) {
-	ic.unIndexedSegmentsChan <- info
-}
-
-func (ic *IndexChecker) enqueueIndexedSegment(info *querypb.SegmentInfo) {
-	ic.indexedSegmentsChan <- info
-}
-
-func (ic *IndexChecker) checkIndexLoop() {
-	defer ic.wg.Done()
-
-	for {
-		select {
-		case <-ic.ctx.Done():
-			return
-		case segmentInfo := <-ic.handoffReqChan:
-			// TODO:: check whether the index exists in parallel, in case indexCoord cannot create the index normally, and then block the loop
-			log.Debug("checkIndexLoop: start check index for handoff segment", zap.Int64("segmentID", segmentInfo.SegmentID))
-			for {
-				validHandoffReq, collectionInfo := ic.verifyHandoffReqValid(segmentInfo)
-				if validHandoffReq && Params.QueryCoordCfg.AutoHandoff {
-					indexInfo, err := ic.broker.getIndexInfo(ic.ctx, segmentInfo.CollectionID, segmentInfo.SegmentID, collectionInfo.Schema)
-					if err == nil {
-						// if index exist or not enableIndex, ready to load
-						segmentInfo.IndexInfos = indexInfo
-						ic.enqueueIndexedSegment(segmentInfo)
-						break
-					}
-
-					// if segment has not been compacted and dropped, continue to wait for the build index to complete
-					segmentState, err := ic.broker.getSegmentStates(ic.ctx, segmentInfo.SegmentID)
-					if err != nil {
-						log.Warn("checkIndexLoop: get segment state failed", zap.Int64("segmentID", segmentInfo.SegmentID), zap.Error(err))
-						continue
-					}
-
-					if segmentState.State != commonpb.SegmentState_NotExist {
-						continue
-					}
-
-					log.Info("checkIndexLoop: segment has been compacted and dropped before handoff", zap.Int64("segmentID", segmentInfo.SegmentID))
-				}
-
-				buildQuerySegmentPath := fmt.Sprintf("%s/%d/%d/%d", handoffSegmentPrefix, segmentInfo.CollectionID, segmentInfo.PartitionID, segmentInfo.SegmentID)
-				err := ic.client.Remove(buildQuerySegmentPath)
-				if err != nil {
-					log.Error("checkIndexLoop: remove handoff segment from etcd failed", zap.Error(err))
-					panic(err)
-				}
-				break
-			}
-		case segmentInfo := <-ic.unIndexedSegmentsChan:
-			//TODO:: check index after load collection/partition, some segments may don't has index when loading
-			log.Warn("checkIndexLoop: start check index for segment which has not loaded index", zap.Int64("segmentID", segmentInfo.SegmentID))
-		}
-	}
-}
-
-func (ic *IndexChecker) processHandoffAfterIndexDone() {
-	defer ic.wg.Done()
-
-	for {
-		select {
-		case <-ic.ctx.Done():
-			return
-		case segmentInfo := <-ic.indexedSegmentsChan:
-			collectionID := segmentInfo.CollectionID
-			partitionID := segmentInfo.PartitionID
-			segmentID := segmentInfo.SegmentID
-			log.Info("processHandoffAfterIndexDone: handoff segment start", zap.Any("segmentInfo", segmentInfo))
-			baseTask := newBaseTask(ic.ctx, querypb.TriggerCondition_Handoff)
-			handoffReq := &querypb.HandoffSegmentsRequest{
-				Base: &commonpb.MsgBase{
-					MsgType: commonpb.MsgType_HandoffSegments,
-				},
-				SegmentInfos: []*querypb.SegmentInfo{segmentInfo},
-			}
-			handoffTask := &handoffTask{
-				baseTask:               baseTask,
-				HandoffSegmentsRequest: handoffReq,
-				broker:                 ic.broker,
-				cluster:                ic.cluster,
-				meta:                   ic.meta,
-			}
-			err := ic.scheduler.Enqueue(handoffTask)
-			if err != nil {
-				log.Error("processHandoffAfterIndexDone: handoffTask enqueue failed", zap.Error(err))
-				panic(err)
-			}
-
-			go func() {
-				err := handoffTask.waitToFinish()
-				if err != nil {
-					// collection or partition may have been released before handoffTask enqueue
-					log.Warn("processHandoffAfterIndexDone: handoffTask failed", zap.Error(err))
-				}
-
-				log.Info("processHandoffAfterIndexDone: handoffTask completed", zap.Any("segment infos", handoffTask.SegmentInfos))
-			}()
-
-			// once task enqueue, etcd data can be cleaned, handoffTask will recover from taskScheduler's reloadFromKV()
-			buildQuerySegmentPath := fmt.Sprintf("%s/%d/%d/%d", handoffSegmentPrefix, collectionID, partitionID, segmentID)
-			err = ic.client.Remove(buildQuerySegmentPath)
-			if err != nil {
-				log.Error("processHandoffAfterIndexDone: remove handoff segment from etcd failed", zap.Error(err))
-				panic(err)
-			}
-		}
-	}
 }
