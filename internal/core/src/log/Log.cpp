@@ -15,7 +15,14 @@
 // limitations under the License.
 
 #include "log/Log.h"
-INITIALIZE_EASYLOGGINGPP
+
+/*
+ * INITIALIZE_EASYLOGGINGPP will create a global variable whose name is same to that already created in knowhere,
+ * which will lead a `double-free` bug when the program exits.
+ * For why this issue happened please refer to
+ * https://gcc-help.gcc.gnu.narkive.com/KZGaXRNr/global-variable-in-static-library-double-free-or-corruption-error.
+ */
+// INITIALIZE_EASYLOGGINGPP
 
 #ifdef WIN32
 #include <Windows.h>
