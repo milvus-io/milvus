@@ -45,6 +45,11 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 			CollectionID: defaultCollectionID,
 			PartitionIDs: []UniqueID{defaultPartitionID},
 			Schema:       schema,
+			Infos: []*datapb.VchannelInfo{
+				{
+					ChannelName: defaultDMLChannel,
+				},
+			},
 		}
 		return req
 	}
@@ -134,30 +139,60 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	//t.Run("test execute seek error", func(t *testing.T) {
-	//
-	//	node, err := genSimpleQueryNode(ctx)
-	//	assert.NoError(t, err)
-	//
-	//	task := watchDmChannelsTask{
-	//		req:  genWatchDMChannelsRequest(),
-	//		node: node,
-	//	}
-	//	task.req.Infos = []*datapb.VchannelInfo{
-	//		{
-	//			CollectionID: defaultCollectionID,
-	//			ChannelName:  defaultDMLChannel,
-	//			SeekPosition: &msgstream.MsgPosition{
-	//				ChannelName: defaultDMLChannel,
-	//				MsgID:       []byte{1, 2, 3},
-	//				MsgGroup:    defaultSubName,
-	//				Timestamp:   0,
-	//			},
-	//		},
-	//	}
-	//	err = task.Execute(ctx)
-	//	assert.Error(t, err)
-	//})
+	t.Run("test execute seek error", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		task := watchDmChannelsTask{
+			req:  genWatchDMChannelsRequest(),
+			node: node,
+		}
+		task.req.LoadMeta = &querypb.LoadMetaInfo{
+			LoadType:     querypb.LoadType_LoadPartition,
+			CollectionID: defaultCollectionID,
+			PartitionIDs: []UniqueID{defaultPartitionID},
+		}
+		task.req.Infos = []*datapb.VchannelInfo{
+			{
+				CollectionID:        defaultCollectionID,
+				ChannelName:         defaultDMLChannel,
+				UnflushedSegmentIds: []int64{100},
+				FlushedSegmentIds:   []int64{101},
+				DroppedSegmentIds:   []int64{102},
+				SeekPosition: &internalpb.MsgPosition{
+					ChannelName: defaultDMLChannel,
+					MsgID:       []byte{235, 50, 164, 248, 255, 255, 255, 255},
+					Timestamp:   Timestamp(999),
+				},
+			},
+		}
+		task.req.SegmentInfos = map[int64]*datapb.SegmentInfo{
+			100: {
+				ID: 100,
+				DmlPosition: &internalpb.MsgPosition{
+					ChannelName: defaultDMLChannel,
+					Timestamp:   Timestamp(1000),
+				},
+			},
+			101: {
+				ID: 101,
+				DmlPosition: &internalpb.MsgPosition{
+					ChannelName: defaultDMLChannel,
+					Timestamp:   Timestamp(1001),
+				},
+			},
+			102: {
+				ID: 102,
+				DmlPosition: &internalpb.MsgPosition{
+					ChannelName: defaultDMLChannel,
+					Timestamp:   Timestamp(1002),
+				},
+			},
+		}
+		err = task.Execute(ctx)
+		// ["Failed to seek"] [error="topic name = xxx not exist"]
+		assert.Error(t, err)
+	})
 
 	t.Run("test add excluded segment for flushed segment", func(t *testing.T) {
 
