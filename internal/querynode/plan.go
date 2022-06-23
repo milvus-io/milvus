@@ -136,7 +136,7 @@ func newSearchRequest(collection *Collection, req *querypb.SearchRequest, placeh
 		plan:              plan,
 		cPlaceholderGroup: cPlaceholderGroup,
 		timestamp:         req.Req.GetTravelTimestamp(),
-		msgID:             req.GetReq().GetReqID(),
+		msgID:             req.GetReq().GetBase().GetMsgID(),
 	}
 
 	return ret, nil
@@ -175,9 +175,10 @@ func parseSearchRequest(plan *SearchPlan, searchRequestBlob []byte) (*searchRequ
 type RetrievePlan struct {
 	cRetrievePlan C.CRetrievePlan
 	Timestamp     Timestamp
+	msgID         UniqueID // only used to debug.
 }
 
-func createRetrievePlanByExpr(col *Collection, expr []byte, timestamp Timestamp) (*RetrievePlan, error) {
+func createRetrievePlanByExpr(col *Collection, expr []byte, timestamp Timestamp, msgID UniqueID) (*RetrievePlan, error) {
 	var cPlan C.CRetrievePlan
 	status := C.CreateRetrievePlanByExpr(col.collectionPtr, unsafe.Pointer(&expr[0]), (C.int64_t)(len(expr)), &cPlan)
 
@@ -189,6 +190,7 @@ func createRetrievePlanByExpr(col *Collection, expr []byte, timestamp Timestamp)
 	var newPlan = &RetrievePlan{
 		cRetrievePlan: cPlan,
 		Timestamp:     timestamp,
+		msgID:         msgID,
 	}
 	return newPlan, nil
 }

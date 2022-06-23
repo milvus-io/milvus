@@ -1505,7 +1505,7 @@ func genSimpleRetrievePlan(collection *Collection) (*RetrievePlan, error) {
 	}
 	timestamp := retrieveMsg.RetrieveRequest.TravelTimestamp
 
-	plan, err2 := createRetrievePlanByExpr(collection, retrieveMsg.SerializedExprPlan, timestamp)
+	plan, err2 := createRetrievePlanByExpr(collection, retrieveMsg.SerializedExprPlan, timestamp, 100)
 	return plan, err2
 }
 

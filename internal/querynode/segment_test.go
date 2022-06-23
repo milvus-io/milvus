@@ -200,7 +200,7 @@ func TestSegment_retrieve(t *testing.T) {
 	// }
 	planExpr, err := proto.Marshal(planNode)
 	assert.NoError(t, err)
-	plan, err := createRetrievePlanByExpr(collection, planExpr, 100)
+	plan, err := createRetrievePlanByExpr(collection, planExpr, 100, 100)
 	defer plan.delete()
 	assert.NoError(t, err)
 
