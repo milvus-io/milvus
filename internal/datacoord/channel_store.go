@@ -216,6 +216,17 @@ func (c *ChannelStore) Update(opSet ChannelOpSet) error {
 	return c.update(operations)
 }
 
+func (c *ChannelStore) checkIfExist(nodeID int64, channel *channel) bool {
+	if _, ok := c.channelsInfo[nodeID]; ok {
+		for _, ch := range c.channelsInfo[nodeID].Channels {
+			if channel.Name == ch.Name && channel.CollectionID == ch.CollectionID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // update applies the ADD/DELETE operations to the current channel store.
 func (c *ChannelStore) update(opSet ChannelOpSet) error {
 	// Update ChannelStore's kv store.
@@ -227,8 +238,13 @@ func (c *ChannelStore) update(opSet ChannelOpSet) error {
 	for _, op := range opSet {
 		switch op.Type {
 		case Add:
-			// Append target channels to channel store.
-			c.channelsInfo[op.NodeID].Channels = append(c.channelsInfo[op.NodeID].Channels, op.Channels...)
+			for _, ch := range op.Channels {
+				if c.checkIfExist(op.NodeID, ch) {
+					continue // prevent adding duplicated channel info
+				}
+				// Append target channels to channel store.
+				c.channelsInfo[op.NodeID].Channels = append(c.channelsInfo[op.NodeID].Channels, ch)
+			}
 		case Delete:
 			// Remove target channels from channel store.
 			del := make(map[string]struct{})
