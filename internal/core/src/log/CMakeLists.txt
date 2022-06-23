@@ -12,8 +12,8 @@
 #-------------------------------------------------------------------------------
 set(LOG_FILES   ${MILVUS_ENGINE_SRC}/log/Log.cpp
                 ${MILVUS_ENGINE_SRC}/log/Log.h
-                ${MILVUS_THIRDPARTY_SRC}/easyloggingpp/easylogging++.cc
-                ${MILVUS_THIRDPARTY_SRC}/easyloggingpp/easylogging++.h
+                #${MILVUS_THIRDPARTY_SRC}/easyloggingpp/easylogging++.cc
+                #${MILVUS_THIRDPARTY_SRC}/easyloggingpp/easylogging++.h
                 )
 
 add_library(milvus_log STATIC ${LOG_FILES})
