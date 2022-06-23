@@ -56,11 +56,11 @@ class ExecPlanNodeVisitor : PlanNodeVisitor {
 }  // namespace impl
 
 static SearchResult
-empty_search_result(int64_t num_queries, int64_t topk, int64_t round_decimal, MetricType metric_type) {
+empty_search_result(int64_t num_queries, SearchInfo& search_info) {
     SearchResult final_result;
-    SubSearchResult result(num_queries, topk, metric_type, round_decimal);
+    SubSearchResult result(num_queries, search_info.topk_, search_info.metric_type_, search_info.round_decimal_);
     final_result.total_nq_ = num_queries;
-    final_result.unity_topK_ = topk;
+    final_result.unity_topK_ = search_info.topk_;
     final_result.seg_offsets_ = std::move(result.mutable_seg_offsets());
     final_result.distances_ = std::move(result.mutable_distances());
     return final_result;
@@ -84,8 +84,7 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
 
     // skip all calculation
     if (active_count == 0) {
-        search_result_opt_ = empty_search_result(num_queries, node.search_info_.topk_, node.search_info_.round_decimal_,
-                                                 node.search_info_.metric_type_);
+        search_result_opt_ = empty_search_result(num_queries, node.search_info_);
         return;
     }
 
