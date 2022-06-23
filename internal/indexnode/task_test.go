@@ -24,6 +24,8 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/storage"
+
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 
 	"github.com/golang/protobuf/proto"
@@ -76,4 +78,62 @@ func TestIndexBuildTask_saveIndexMeta(t *testing.T) {
 
 	err = etcdKV.Remove(metaPath)
 	assert.NoError(t, err)
+}
+
+type mockChunkManager struct {
+	storage.ChunkManager
+
+	exist func(key string) (bool, error)
+	read  func(key string) ([]byte, error)
+}
+
+func (mcm *mockChunkManager) Exist(key string) (bool, error) {
+	return mcm.exist(key)
+}
+
+func (mcm *mockChunkManager) Read(key string) ([]byte, error) {
+	return mcm.read(key)
+}
+
+func TestIndexBuildTask_Execute(t *testing.T) {
+	indexTask := &IndexBuildTask{
+		cm: &mockChunkManager{
+			exist: func(key string) (bool, error) {
+				return false, errors.New("error occurred")
+			},
+		},
+		req: &indexpb.CreateIndexRequest{
+			IndexBuildID: 1,
+			DataPaths:    []string{"path1", "path2"},
+		},
+	}
+
+	err := indexTask.Execute(context.Background())
+	assert.Error(t, err)
+	assert.Equal(t, TaskStateRetry, indexTask.state)
+
+	cm := &mockChunkManager{
+		exist: func(key string) (bool, error) {
+			return false, nil
+		},
+	}
+	indexTask.cm = cm
+
+	err = indexTask.Execute(context.Background())
+	assert.ErrorIs(t, err, ErrNoSuchKey)
+	assert.Equal(t, TaskStateFailed, indexTask.state)
+
+	cm = &mockChunkManager{
+		exist: func(key string) (bool, error) {
+			return true, nil
+		},
+		read: func(key string) ([]byte, error) {
+			return nil, errors.New("error occurred")
+		},
+	}
+	indexTask.cm = cm
+
+	err = indexTask.Execute(context.Background())
+	assert.Error(t, err)
+	assert.Equal(t, TaskStateRetry, indexTask.state)
 }

@@ -341,6 +341,13 @@ func (it *IndexBuildTask) prepareParams(ctx context.Context) error {
 
 func (it *IndexBuildTask) loadFieldData(ctx context.Context) (storage.FieldID, storage.FieldData, error) {
 	getValueByPath := func(path string) ([]byte, error) {
+		exist, err := it.cm.Exist(path)
+		if err != nil {
+			return nil, err
+		}
+		if !exist {
+			return nil, ErrNoSuchKey
+		}
 		data, err := it.cm.Read(path)
 		if err != nil {
 			return nil, err
@@ -562,8 +569,15 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 	var blobs []*storage.Blob
 	blobs, err = it.buildIndex(ctx)
 	if err != nil {
-		it.SetState(TaskStateFailed)
-		log.Error("IndexNode IndexBuildTask Execute buildIndex failed",
+		if errors.Is(err, ErrNoSuchKey) {
+			it.SetState(TaskStateFailed)
+			log.Error("IndexNode IndexBuildTask Execute buildIndex failed",
+				zap.Int64("buildId", it.req.IndexBuildID),
+				zap.Error(err))
+			return err
+		}
+		it.SetState(TaskStateRetry)
+		log.Error("IndexNode IndexBuildTask Execute buildIndex failed, need to retry",
 			zap.Int64("buildId", it.req.IndexBuildID),
 			zap.Error(err))
 		return err
