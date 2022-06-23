@@ -85,20 +85,18 @@ func (fm *flowgraphManager) release(vchanName string) {
 func (fm *flowgraphManager) getFlushCh(segID UniqueID) (chan<- flushMsg, error) {
 	var (
 		flushCh chan flushMsg
-		loaded  = false
 	)
 
 	fm.flowgraphs.Range(func(key, value interface{}) bool {
 		fg := value.(*dataSyncService)
 		if fg.replica.hasSegment(segID, true) {
-			loaded = true
 			flushCh = fg.flushCh
 			return false
 		}
 		return true
 	})
 
-	if loaded {
+	if flushCh != nil {
 		return flushCh, nil
 	}
 
