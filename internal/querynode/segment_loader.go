@@ -306,10 +306,10 @@ func (loader *segmentLoader) loadGrowingSegmentFields(segment *Segment, fieldBin
 		blob := future.Value().(*storage.Blob)
 		blobs[index] = blob
 	}
-	log.Info("log field binlogs done",
+	log.Info("load field binlogs done for growing segment",
 		zap.Int64("collection", segment.collectionID),
 		zap.Int64("segment", segment.segmentID),
-		zap.Any("field", fieldBinlogs))
+		zap.Any("len(field)", len(fieldBinlogs)))
 
 	_, _, insertData, err := iCodec.Deserialize(blobs)
 	if err != nil {
@@ -355,10 +355,10 @@ func (loader *segmentLoader) loadSealedSegmentFields(segment *Segment, fields []
 		return err
 	}
 
-	log.Info("log field binlogs done",
+	log.Info("load field binlogs done for sealed segment",
 		zap.Int64("collection", segment.collectionID),
 		zap.Int64("segment", segment.segmentID),
-		zap.Any("fields", fields))
+		zap.Any("len(field)", len(fields)))
 
 	return nil
 }
@@ -425,7 +425,11 @@ func (loader *segmentLoader) loadIndexedFieldData(segment *Segment, vecFieldInfo
 		if err != nil {
 			return err
 		}
-		log.Debug("load field's index data done", zap.Int64("segmentID", segment.ID()), zap.Int64("fieldID", fieldID))
+
+		log.Info("load field binlogs done for sealed segment with index",
+			zap.Int64("collection", segment.collectionID),
+			zap.Int64("segment", segment.segmentID),
+			zap.Int64("fieldID", fieldID))
 
 		segment.setIndexedFieldInfo(fieldID, fieldInfo)
 	}
