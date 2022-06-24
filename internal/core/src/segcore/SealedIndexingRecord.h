@@ -20,7 +20,7 @@
 
 #include "common/Types.h"
 #include "exceptions/EasyAssert.h"
-#include "knowhere/index/vector_index/VecIndex.h"
+#include "knowhere/index/VecIndex.h"
 
 namespace milvus::segcore {
 

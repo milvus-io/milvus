@@ -9,9 +9,11 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <string>
 #include <iostream>
+#include <string>
+
 #include "index/Meta.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 
 namespace milvus::scalar {
 template <typename T>
@@ -36,14 +38,14 @@ ScalarIndex<T>::Query(const DatasetPtr& dataset) {
         }
 
         case OpType::In: {
-            auto n = dataset->Get<int64_t>(knowhere::meta::ROWS);
-            auto values = dataset->Get<const void*>(knowhere::meta::TENSOR);
+            auto n = knowhere::GetDatasetRows(dataset);
+            auto values = knowhere::GetDatasetTensor(dataset);
             return In(n, reinterpret_cast<const T*>(values));
         }
 
         case OpType::NotIn: {
-            auto n = dataset->Get<int64_t>(knowhere::meta::ROWS);
-            auto values = dataset->Get<const void*>(knowhere::meta::TENSOR);
+            auto n = knowhere::GetDatasetRows(dataset);
+            auto values = knowhere::GetDatasetTensor(dataset);
             return NotIn(n, reinterpret_cast<const T*>(values));
         }
 

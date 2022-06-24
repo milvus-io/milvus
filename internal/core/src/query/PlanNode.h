@@ -18,7 +18,7 @@
 #include <string>
 
 #include "Expr.h"
-#include "utils/Json.h"
+#include "knowhere/common/Config.h"
 
 namespace milvus::query {
 
@@ -39,7 +39,7 @@ struct SearchInfo {
     int64_t round_decimal_;
     FieldId field_id_;
     MetricType metric_type_;
-    nlohmann::json search_params_;
+    knowhere::Config search_params_;
 };
 
 struct VectorPlanNode : PlanNode {
