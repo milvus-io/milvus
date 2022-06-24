@@ -18,12 +18,15 @@ package querycoord
 
 import (
 	"context"
+	"sort"
 
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"go.uber.org/zap"
 )
 
 func getCompareMapFromSlice(sliceData []int64) map[int64]struct{} {
@@ -106,93 +109,105 @@ func getDstNodeIDByTask(t task) int64 {
 	return nodeID
 }
 
-func syncReplicaSegments(ctx context.Context, cluster Cluster, childTasks []task) error {
-	type SegmentIndex struct {
-		NodeID      UniqueID
-		PartitionID UniqueID
-		ReplicaID   UniqueID
+// syncReplicaSegments syncs the segments distribution of replica to shard leaders
+// only syncs the segments in shards if not nil
+func syncReplicaSegments(ctx context.Context, meta Meta, cluster Cluster, replicaID UniqueID, shards ...string) error {
+	replica, err := meta.getReplicaByID(replicaID)
+	if err != nil {
+		return err
 	}
 
-	type ShardLeader struct {
-		ReplicaID UniqueID
-		LeaderID  UniqueID
+	collectionSegments := make(map[UniqueID]*querypb.SegmentInfo)
+	for _, segment := range meta.showSegmentInfos(replica.CollectionID, nil) {
+		collectionSegments[segment.SegmentID] = segment
 	}
 
-	shardSegments := make(map[string]map[SegmentIndex]typeutil.UniqueSet) // DMC -> set[Segment]
-	shardLeaders := make(map[string][]*ShardLeader)                       // DMC -> leader
-	for _, childTask := range childTasks {
-		switch task := childTask.(type) {
-		case *loadSegmentTask:
-			nodeID := getDstNodeIDByTask(task)
-			for _, segment := range task.Infos {
-				segments, ok := shardSegments[segment.InsertChannel]
-				if !ok {
-					segments = make(map[SegmentIndex]typeutil.UniqueSet)
-				}
-
-				index := SegmentIndex{
-					NodeID:      nodeID,
-					PartitionID: segment.PartitionID,
-					ReplicaID:   task.ReplicaID,
-				}
-
-				_, ok = segments[index]
-				if !ok {
-					segments[index] = make(typeutil.UniqueSet)
-				}
-				segments[index].Insert(segment.SegmentID)
-
-				shardSegments[segment.InsertChannel] = segments
-			}
-
-		case *watchDmChannelTask:
-			leaderID := getDstNodeIDByTask(task)
-			leader := &ShardLeader{
-				ReplicaID: task.ReplicaID,
-				LeaderID:  leaderID,
-			}
-
-			for _, dmc := range task.Infos {
-				leaders, ok := shardLeaders[dmc.ChannelName]
-				if !ok {
-					leaders = make([]*ShardLeader, 0)
-				}
-
-				leaders = append(leaders, leader)
-
-				shardLeaders[dmc.ChannelName] = leaders
-			}
+	shardSegments := make(map[string][]*querypb.SegmentInfo) // DMC -> []SegmentInfo
+	for _, segment := range collectionSegments {
+		// Group segments by shard
+		segments, ok := shardSegments[segment.DmChannel]
+		if !ok {
+			segments = make([]*querypb.SegmentInfo, 0)
 		}
+
+		segments = append(segments, segment)
+		shardSegments[segment.DmChannel] = segments
 	}
 
-	for dmc, leaders := range shardLeaders {
-		// invoke sync segments even no segment
-		segments := shardSegments[dmc]
+	for _, shard := range replica.ShardReplicas {
+		if len(shards) > 0 && !isInShards(shard.DmChannelName, shards) {
+			continue
+		}
 
-		for _, leader := range leaders {
-			req := querypb.SyncReplicaSegmentsRequest{
-				VchannelName:    dmc,
-				ReplicaSegments: make([]*querypb.ReplicaSegmentsInfo, 0, len(segments)),
+		segments := shardSegments[shard.DmChannelName]
+		req := querypb.SyncReplicaSegmentsRequest{
+			VchannelName:    shard.DmChannelName,
+			ReplicaSegments: make([]*querypb.ReplicaSegmentsInfo, 0, len(segments)),
+		}
+
+		sort.Slice(segments, func(i, j int) bool {
+			inode := getNodeInReplica(replica, segments[i].NodeIds)
+			jnode := getNodeInReplica(replica, segments[j].NodeIds)
+
+			return inode < jnode ||
+				inode == jnode && segments[i].PartitionID < segments[j].PartitionID
+		})
+
+		for i, j := 0, 0; i < len(segments); i = j {
+			node := getNodeInReplica(replica, segments[i].NodeIds)
+			partition := segments[i].PartitionID
+
+			j++
+			for j < len(segments) &&
+				getNodeInReplica(replica, segments[j].NodeIds) == node &&
+				segments[j].PartitionID == partition {
+				j++
 			}
 
-			for index, segmentSet := range segments {
-				if index.ReplicaID == leader.ReplicaID {
-					req.ReplicaSegments = append(req.ReplicaSegments,
-						&querypb.ReplicaSegmentsInfo{
-							NodeId:      index.NodeID,
-							PartitionId: index.PartitionID,
-							SegmentIds:  segmentSet.Collect(),
-						})
-				}
+			segmentIds := make([]UniqueID, 0, len(segments[i:j]))
+			for _, segment := range segments[i:j] {
+				segmentIds = append(segmentIds, segment.SegmentID)
 			}
-			err := cluster.SyncReplicaSegments(ctx, leader.LeaderID, &req)
-			if err != nil {
-				return err
-			}
+
+			req.ReplicaSegments = append(req.ReplicaSegments, &querypb.ReplicaSegmentsInfo{
+				NodeId:      node,
+				PartitionId: partition,
+				SegmentIds:  segmentIds,
+			})
+		}
+
+		log.Debug("sync replica segments",
+			zap.Int64("replicaID", replicaID),
+			zap.Int64("leaderID", shard.LeaderID),
+			zap.Any("req", req))
+		err := cluster.SyncReplicaSegments(ctx, shard.LeaderID, &req)
+		if err != nil {
+			return err
 		}
 	}
 
 	return nil
+}
+
+func isInShards(shard string, shards []string) bool {
+	for _, item := range shards {
+		if shard == item {
+			return true
+		}
+	}
+
+	return false
+}
+
+// getNodeInReplica gets the node which is in the replica
+func getNodeInReplica(replica *milvuspb.ReplicaInfo, nodes []UniqueID) UniqueID {
+	for _, node := range nodes {
+		if nodeIncluded(node, replica.NodeIds) {
+			return node
+		}
+	}
+
+	return 0
 }
 
 func removeFromSlice(origin []UniqueID, del ...UniqueID) []UniqueID {
