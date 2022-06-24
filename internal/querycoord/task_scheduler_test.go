@@ -199,9 +199,14 @@ func TestUnMarshalTask(t *testing.T) {
 	defer etcdCli.Close()
 	kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 	baseCtx, cancel := context.WithCancel(context.Background())
+	dataCoord := &dataCoordMock{}
+	meta := &MetaReplica{
+		dataCoord: dataCoord,
+	}
 	taskScheduler := &TaskScheduler{
 		ctx:    baseCtx,
 		cancel: cancel,
+		meta:   meta,
 	}
 
 	t.Run("Test loadCollectionTask", func(t *testing.T) {
@@ -350,6 +355,14 @@ func TestUnMarshalTask(t *testing.T) {
 		task, err := taskScheduler.unmarshalTask(1006, value)
 		assert.Nil(t, err)
 		assert.Equal(t, task.msgType(), commonpb.MsgType_WatchDmChannels)
+
+		dataCoord.returnError = true
+		defer func() {
+			dataCoord.returnError = false
+		}()
+		task2, err := taskScheduler.unmarshalTask(1006, value)
+		assert.Error(t, err)
+		assert.Nil(t, task2)
 	})
 
 	t.Run("Test watchDeltaChannelTask", func(t *testing.T) {
