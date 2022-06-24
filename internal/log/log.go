@@ -43,13 +43,16 @@ import (
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
 )
 
-var _globalL, _globalP, _globalS, _globalR atomic.Value
+var _globalL, _globalP, _globalS, _globalR, _globalCtxL atomic.Value
 var rateLimiter *utils.ReconfigurableRateLimiter
 
 func init() {
 	l, p := newStdLogger()
+	ctxL := l.WithOptions() // copy logger
 	_globalL.Store(l)
+	_globalCtxL.Store(ctxL)
 	_globalP.Store(p)
+
 	s := _globalL.Load().(*zap.Logger).Sugar()
 	_globalS.Store(s)
 
@@ -150,6 +153,10 @@ func R() *utils.ReconfigurableRateLimiter {
 	return _globalR.Load().(*utils.ReconfigurableRateLimiter)
 }
 
+func ctxL() *zap.Logger {
+	return _globalCtxL.Load().(*zap.Logger)
+}
+
 // ReplaceGlobals replaces the global Logger and SugaredLogger.
 // It's safe for concurrent use.
 func ReplaceGlobals(logger *zap.Logger, props *ZapProperties) {
@@ -158,11 +165,20 @@ func ReplaceGlobals(logger *zap.Logger, props *ZapProperties) {
 	_globalP.Store(props)
 }
 
+func ReplaceGlobalCtxLogger(logger *zap.Logger) {
+	_globalCtxL.Store(logger)
+}
+
 // Sync flushes any buffered log entries.
 func Sync() error {
-	err := L().Sync()
-	if err != nil {
+	if err := L().Sync(); err != nil {
 		return err
 	}
-	return S().Sync()
+	if err := S().Sync(); err != nil {
+		return err
+	}
+	if err := ctxL().Sync(); err != nil {
+		return err
+	}
+	return nil
 }

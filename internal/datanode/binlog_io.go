@@ -124,7 +124,7 @@ func (b *binlogIO) upload(
 	for _, iData := range iDatas {
 		tf, ok := iData.Data[common.TimeStampField]
 		if !ok || tf.RowNum() == 0 {
-			log.Warn("binlog io uploading empty insert data",
+			log.Ctx(ctx).Warn("binlog io uploading empty insert data",
 				zap.Int64("segmentID", segID),
 				zap.Int64("collectionID", meta.GetID()),
 			)
@@ -133,7 +133,7 @@ func (b *binlogIO) upload(
 
 		kv, inpaths, statspaths, err := b.genInsertBlobs(iData, partID, segID, meta)
 		if err != nil {
-			log.Warn("generate insert blobs wrong",
+			log.Ctx(ctx).Warn("generate insert blobs wrong",
 				zap.Int64("collectionID", meta.GetID()),
 				zap.Int64("segmentID", segID),
 				zap.Error(err))
@@ -177,7 +177,7 @@ func (b *binlogIO) upload(
 	if dData.RowCount > 0 {
 		k, v, err := b.genDeltaBlobs(dData, meta.GetID(), partID, segID)
 		if err != nil {
-			log.Warn("generate delta blobs wrong",
+			log.Ctx(ctx).Warn("generate delta blobs wrong",
 				zap.Int64("collectionID", meta.GetID()),
 				zap.Int64("segmentID", segID),
 				zap.Error(err))
@@ -199,14 +199,14 @@ func (b *binlogIO) upload(
 	for err != nil {
 		select {
 		case <-ctx.Done():
-			log.Warn("ctx done when saving kvs to blob storage",
+			log.Ctx(ctx).Warn("ctx done when saving kvs to blob storage",
 				zap.Int64("collectionID", meta.GetID()),
 				zap.Int64("segmentID", segID),
 				zap.Int("number of kvs", len(kvs)))
 			return nil, errUploadToBlobStorage
 		default:
 			if err != errStart {
-				log.Warn("save binlog failed, retry in 50ms",
+				log.Ctx(ctx).Warn("save binlog failed, retry in 50ms",
 					zap.Int64("collectionID", meta.GetID()),
 					zap.Int64("segmentID", segID))
 				<-time.After(50 * time.Millisecond)

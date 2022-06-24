@@ -273,7 +273,7 @@ func (i *IndexNode) CreateIndex(ctx context.Context, request *indexpb.CreateInde
 			Reason:    "state code is not healthy",
 		}, nil
 	}
-	log.Info("IndexNode building index ...",
+	log.Ctx(ctx).Info("IndexNode building index ...",
 		zap.Int64("IndexBuildID", request.IndexBuildID),
 		zap.String("IndexName", request.IndexName),
 		zap.Int64("IndexID", request.IndexID),
@@ -306,13 +306,13 @@ func (i *IndexNode) CreateIndex(ctx context.Context, request *indexpb.CreateInde
 
 	err := i.sched.IndexBuildQueue.Enqueue(t)
 	if err != nil {
-		log.Warn("IndexNode failed to schedule", zap.Int64("indexBuildID", request.IndexBuildID), zap.Error(err))
+		log.Ctx(ctx).Warn("IndexNode failed to schedule", zap.Int64("indexBuildID", request.IndexBuildID), zap.Error(err))
 		ret.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		ret.Reason = err.Error()
 		metrics.IndexNodeBuildIndexTaskCounter.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.GetNodeID(), 10), metrics.FailLabel).Inc()
 		return ret, nil
 	}
-	log.Info("IndexNode successfully scheduled", zap.Int64("indexBuildID", request.IndexBuildID))
+	log.Ctx(ctx).Info("IndexNode successfully scheduled", zap.Int64("indexBuildID", request.IndexBuildID))
 
 	metrics.IndexNodeBuildIndexTaskCounter.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.GetNodeID(), 10), metrics.SuccessLabel).Inc()
 	return ret, nil
@@ -343,7 +343,7 @@ func (i *IndexNode) GetTaskSlots(ctx context.Context, req *indexpb.GetTaskSlotsR
 
 // GetComponentStates gets the component states of IndexNode.
 func (i *IndexNode) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
-	log.Debug("get IndexNode components states ...")
+	log.Ctx(ctx).Debug("get IndexNode components states ...")
 	nodeID := common.NotRegisteredID
 	if i.session != nil && i.session.Registered() {
 		nodeID = i.session.ServerID
@@ -363,7 +363,7 @@ func (i *IndexNode) GetComponentStates(ctx context.Context) (*internalpb.Compone
 		},
 	}
 
-	log.Debug("IndexNode Component states",
+	log.Ctx(ctx).Debug("IndexNode Component states",
 		zap.Any("State", ret.State),
 		zap.Any("Status", ret.Status),
 		zap.Any("SubcomponentStates", ret.SubcomponentStates))
@@ -372,7 +372,7 @@ func (i *IndexNode) GetComponentStates(ctx context.Context) (*internalpb.Compone
 
 // GetTimeTickChannel gets the time tick channel of IndexNode.
 func (i *IndexNode) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	log.Debug("get IndexNode time tick channel ...")
+	log.Ctx(ctx).Debug("get IndexNode time tick channel ...")
 
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
@@ -383,7 +383,7 @@ func (i *IndexNode) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringRes
 
 // GetStatisticsChannel gets the statistics channel of IndexNode.
 func (i *IndexNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	log.Debug("get IndexNode statistics channel ...")
+	log.Ctx(ctx).Debug("get IndexNode statistics channel ...")
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -395,7 +395,7 @@ func (i *IndexNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringR
 // TODO(dragondriver): cache the Metrics and set a retention to the cache
 func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	if !i.isHealthy() {
-		log.Warn("IndexNode.GetMetrics failed",
+		log.Ctx(ctx).Warn("IndexNode.GetMetrics failed",
 			zap.Int64("node_id", Params.IndexNodeCfg.GetNodeID()),
 			zap.String("req", req.Request),
 			zap.Error(errIndexNodeIsUnhealthy(Params.IndexNodeCfg.GetNodeID())))
@@ -411,7 +411,7 @@ func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequ
 
 	metricType, err := metricsinfo.ParseMetricType(req.Request)
 	if err != nil {
-		log.Warn("IndexNode.GetMetrics failed to parse metric type",
+		log.Ctx(ctx).Warn("IndexNode.GetMetrics failed to parse metric type",
 			zap.Int64("node_id", Params.IndexNodeCfg.GetNodeID()),
 			zap.String("req", req.Request),
 			zap.Error(err))
@@ -428,7 +428,7 @@ func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequ
 	if metricType == metricsinfo.SystemInfoMetrics {
 		metrics, err := getSystemInfoMetrics(ctx, req, i)
 
-		log.Debug("IndexNode.GetMetrics",
+		log.Ctx(ctx).Debug("IndexNode.GetMetrics",
 			zap.Int64("node_id", Params.IndexNodeCfg.GetNodeID()),
 			zap.String("req", req.Request),
 			zap.String("metric_type", metricType),
@@ -437,7 +437,7 @@ func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequ
 		return metrics, nil
 	}
 
-	log.Warn("IndexNode.GetMetrics failed, request metric type is not implemented yet",
+	log.Ctx(ctx).Warn("IndexNode.GetMetrics failed, request metric type is not implemented yet",
 		zap.Int64("node_id", Params.IndexNodeCfg.GetNodeID()),
 		zap.String("req", req.Request),
 		zap.String("metric_type", metricType))

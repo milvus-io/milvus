@@ -221,7 +221,7 @@ func (c *queryNodeCluster) LoadSegments(ctx context.Context, nodeID int64, in *q
 			if err != nil {
 				// this case should not happen
 				// deltaChannelInfos should have been set to meta before executing child tasks
-				log.Error("loadSegments: failed to get deltaChannelInfo from meta", zap.Error(err))
+				log.Ctx(ctx).Error("loadSegments: failed to get deltaChannelInfo from meta", zap.Error(err))
 				return err
 			}
 			deltaChannel2Info := make(map[string]*datapb.VchannelInfo, len(deltaChannelInfos))
@@ -248,7 +248,7 @@ func (c *queryNodeCluster) LoadSegments(ctx context.Context, nodeID int64, in *q
 				} else {
 					// this case should not happen
 					err = fmt.Errorf("loadSegments: can't find deltaChannelInfo, channel name = %s", deltaChannelName)
-					log.Error(err.Error())
+					log.Ctx(ctx).Error(err.Error())
 					return err
 				}
 			}
@@ -256,7 +256,7 @@ func (c *queryNodeCluster) LoadSegments(ctx context.Context, nodeID int64, in *q
 
 		err := targetNode.loadSegments(ctx, in)
 		if err != nil {
-			log.Warn("loadSegments: queryNode load segments error", zap.Int64("nodeID", nodeID), zap.String("error info", err.Error()))
+			log.Ctx(ctx).Warn("loadSegments: queryNode load segments error", zap.Int64("nodeID", nodeID), zap.String("error info", err.Error()))
 			return err
 		}
 
@@ -280,7 +280,7 @@ func (c *queryNodeCluster) ReleaseSegments(ctx context.Context, leaderID int64, 
 
 		err := targetNode.releaseSegments(ctx, in)
 		if err != nil {
-			log.Warn("releaseSegments: queryNode release segments error", zap.Int64("leaderID", leaderID), zap.Int64("nodeID", in.NodeID), zap.String("error info", err.Error()))
+			log.Ctx(ctx).Warn("releaseSegments: queryNode release segments error", zap.Int64("leaderID", leaderID), zap.Int64("nodeID", in.NodeID), zap.String("error info", err.Error()))
 			return err
 		}
 
@@ -590,7 +590,7 @@ func (c *queryNodeCluster) RegisterNode(ctx context.Context, session *sessionuti
 	if _, ok := c.nodes[id]; !ok {
 		sessionJSON, err := json.Marshal(session)
 		if err != nil {
-			log.Warn("registerNode: marshal session error", zap.Int64("nodeID", id), zap.Any("address", session))
+			log.Ctx(ctx).Warn("registerNode: marshal session error", zap.Int64("nodeID", id), zap.Any("address", session))
 			return err
 		}
 		key := fmt.Sprintf("%s/%d", queryNodeInfoPrefix, id)
@@ -600,7 +600,7 @@ func (c *queryNodeCluster) RegisterNode(ctx context.Context, session *sessionuti
 		}
 		node, err := c.newNodeFn(ctx, session.Address, id, c.client)
 		if err != nil {
-			log.Warn("registerNode: create a new QueryNode failed", zap.Int64("nodeID", id), zap.Error(err))
+			log.Ctx(ctx).Warn("registerNode: create a new QueryNode failed", zap.Int64("nodeID", id), zap.Error(err))
 			return err
 		}
 		c.setNodeState(id, node, state)
@@ -609,7 +609,7 @@ func (c *queryNodeCluster) RegisterNode(ctx context.Context, session *sessionuti
 		}
 		c.nodes[id] = node
 		metrics.QueryCoordNumQueryNodes.WithLabelValues().Inc()
-		log.Info("registerNode: create a new QueryNode", zap.Int64("nodeID", id), zap.String("address", session.Address), zap.Any("state", state))
+		log.Ctx(ctx).Info("registerNode: create a new QueryNode", zap.Int64("nodeID", id), zap.String("address", session.Address), zap.Any("state", state))
 		return nil
 	}
 	return fmt.Errorf("registerNode: QueryNode %d alredy exists in cluster", id)
@@ -642,7 +642,7 @@ func (c *queryNodeCluster) RemoveNodeInfo(nodeID int64) error {
 
 	delete(c.nodes, nodeID)
 	metrics.QueryCoordNumQueryNodes.WithLabelValues().Dec()
-	log.Info("removeNodeInfo: delete nodeInfo in cluster MetaReplica", zap.Int64("nodeID", nodeID))
+	log.Ctx(c.ctx).Info("removeNodeInfo: delete nodeInfo in cluster MetaReplica", zap.Int64("nodeID", nodeID))
 
 	return nil
 }
@@ -654,7 +654,7 @@ func (c *queryNodeCluster) StopNode(nodeID int64) {
 	if node, ok := c.nodes[nodeID]; ok {
 		c.setNodeState(nodeID, node, offline)
 		node.stop()
-		log.Info("stopNode: queryNode offline", zap.Int64("nodeID", nodeID))
+		log.Ctx(c.ctx).Info("stopNode: queryNode offline", zap.Int64("nodeID", nodeID))
 	}
 }
 

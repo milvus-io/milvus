@@ -38,7 +38,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -61,35 +60,7 @@ func DefaultTimeEncoder(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
 
 // ShortCallerEncoder serializes a caller in file:line format.
 func ShortCallerEncoder(caller zapcore.EntryCaller, enc zapcore.PrimitiveArrayEncoder) {
-	enc.AppendString(getCallerString(caller))
-}
-
-func getCallerString(ec zapcore.EntryCaller) string {
-	if !ec.Defined {
-		return "<unknown>"
-	}
-
-	idx := strings.LastIndexByte(ec.File, '/')
-	buf := _pool.Get()
-	for i := idx + 1; i < len(ec.File); i++ {
-		b := ec.File[i]
-		switch {
-		case b >= 'A' && b <= 'Z':
-			buf.AppendByte(b)
-		case b >= 'a' && b <= 'z':
-			buf.AppendByte(b)
-		case b >= '0' && b <= '9':
-			buf.AppendByte(b)
-		case b == '.' || b == '-' || b == '_':
-			buf.AppendByte(b)
-		default:
-		}
-	}
-	buf.AppendByte(':')
-	buf.AppendInt(int64(ec.Line))
-	caller := buf.String()
-	buf.Free()
-	return caller
+	enc.AppendString(caller.TrimmedPath())
 }
 
 // For JSON-escaping; see textEncoder.safeAddString below.

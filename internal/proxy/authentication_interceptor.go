@@ -33,7 +33,7 @@ func validAuth(ctx context.Context, authorization []string) bool {
 
 	credInfo, err := globalMetaCache.GetCredentialInfo(ctx, username)
 	if err != nil {
-		log.Error("found no credential", zap.String("username", username), zap.Error(err))
+		log.Ctx(ctx).Error("found no credential", zap.String("username", username), zap.Error(err))
 		return false
 	}
 

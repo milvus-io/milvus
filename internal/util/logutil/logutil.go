@@ -17,7 +17,6 @@
 package logutil
 
 import (
-	"context"
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -141,11 +140,12 @@ var once sync.Once
 func SetupLogger(cfg *log.Config) {
 	once.Do(func() {
 		// Initialize logger.
-		logger, p, err := log.InitLogger(cfg, zap.AddStacktrace(zap.ErrorLevel), zap.AddCallerSkip(1))
-		if err == nil {
-			log.ReplaceGlobals(logger, p)
-		} else {
+		logger, p, err := log.InitLogger(cfg, zap.AddStacktrace(zap.ErrorLevel))
+		if err != nil {
 			log.Fatal("initialize logger error", zap.Error(err))
+		} else {
+			log.ReplaceGlobalCtxLogger(logger)
+			log.ReplaceGlobals(logger.WithOptions(zap.AddCallerSkip(1)), p)
 		}
 
 		// Initialize grpc log wrapper
@@ -165,56 +165,4 @@ func SetupLogger(cfg *log.Config) {
 		log.Info("Log directory", zap.String("configDir", cfg.File.RootPath))
 		log.Info("Set log file to ", zap.String("path", cfg.File.Filename))
 	})
-}
-
-type logKey int
-
-const logCtxKey logKey = iota
-
-// WithField adds given kv field to the logger in ctx
-func WithField(ctx context.Context, key string, value string) context.Context {
-	logger := log.L()
-	if ctxLogger, ok := ctx.Value(logCtxKey).(*zap.Logger); ok {
-		logger = ctxLogger
-	}
-
-	return context.WithValue(ctx, logCtxKey, logger.With(zap.String(key, value)))
-}
-
-// WithReqID adds given reqID field to the logger in ctx
-func WithReqID(ctx context.Context, reqID int64) context.Context {
-	logger := log.L()
-	if ctxLogger, ok := ctx.Value(logCtxKey).(*zap.Logger); ok {
-		logger = ctxLogger
-	}
-
-	return context.WithValue(ctx, logCtxKey, logger.With(zap.Int64("reqID", reqID)))
-}
-
-// WithModule adds given module field to the logger in ctx
-func WithModule(ctx context.Context, module string) context.Context {
-	logger := log.L()
-	if ctxLogger, ok := ctx.Value(logCtxKey).(*zap.Logger); ok {
-		logger = ctxLogger
-	}
-
-	return context.WithValue(ctx, logCtxKey, logger.With(zap.String("module", module)))
-}
-
-func WithLogger(ctx context.Context, logger *zap.Logger) context.Context {
-	if logger == nil {
-		logger = log.L()
-	}
-	return context.WithValue(ctx, logCtxKey, logger)
-}
-
-func Logger(ctx context.Context) *zap.Logger {
-	if ctxLogger, ok := ctx.Value(logCtxKey).(*zap.Logger); ok {
-		return ctxLogger
-	}
-	return log.L()
-}
-
-func BgLogger() *zap.Logger {
-	return log.L()
 }

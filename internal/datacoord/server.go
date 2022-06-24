@@ -227,9 +227,9 @@ func (s *Server) QuitSignal() <-chan struct{} {
 func (s *Server) Register() error {
 	s.session.Register()
 	go s.session.LivenessCheck(s.serverLoopCtx, func() {
-		logutil.Logger(s.ctx).Error("disconnected from etcd and exited", zap.Int64("serverID", s.session.ServerID))
+		log.Ctx(s.ctx).Error("disconnected from etcd and exited", zap.Int64("serverID", s.session.ServerID))
 		if err := s.Stop(); err != nil {
-			logutil.Logger(s.ctx).Fatal("failed to stop server", zap.Error(err))
+			log.Ctx(s.ctx).Fatal("failed to stop server", zap.Error(err))
 		}
 		// manually send signal to starter goroutine
 		if s.session.TriggerKill {
@@ -302,7 +302,7 @@ func (s *Server) Start() error {
 	Params.DataCoordCfg.CreatedTime = time.Now()
 	Params.DataCoordCfg.UpdatedTime = time.Now()
 	atomic.StoreInt64(&s.isServing, ServerStateHealthy)
-	logutil.Logger(s.ctx).Debug("startup success")
+	log.Ctx(s.ctx).Debug("startup success")
 
 	// DataCoord (re)starts successfully and starts to collection segment stats
 	// data from all DataNode.
@@ -531,7 +531,7 @@ func (s *Server) handleDataNodeTimetickMsgstream(ctx context.Context, ttMsgStrea
 		// msgstream service closed before datacoord quits
 		defer func() {
 			if x := recover(); x != nil {
-				log.Error("Failed to close ttMessage", zap.Any("recovered", x))
+				log.Ctx(ctx).Error("Failed to close ttMessage", zap.Any("recovered", x))
 			}
 		}()
 		ttMsgStream.Close()
@@ -539,7 +539,7 @@ func (s *Server) handleDataNodeTimetickMsgstream(ctx context.Context, ttMsgStrea
 	for {
 		select {
 		case <-ctx.Done():
-			log.Info("DataNode timetick loop shutdown")
+			log.Ctx(ctx).Info("DataNode timetick loop shutdown")
 			return
 		case msgPack, ok := <-ttMsgStream.Chan():
 			if !ok || msgPack == nil || len(msgPack.Msgs) == 0 {
@@ -600,7 +600,7 @@ func (s *Server) handleTimetickMessage(ctx context.Context, ttMsg *msgstream.Dat
 		return nil
 	}
 
-	log.Info("start flushing segments",
+	log.Ctx(ctx).Info("start flushing segments",
 		zap.Int64s("segment IDs", flushableIDs),
 		zap.Int("# of stale/mark segments", len(staleSegments)))
 
@@ -676,7 +676,7 @@ func (s *Server) startWatchService(ctx context.Context) {
 
 func (s *Server) stopServiceWatch() {
 	// ErrCompacted is handled inside SessionWatcher, which means there is some other error occurred, closing server.
-	logutil.Logger(s.ctx).Error("watch service channel closed", zap.Int64("serverID", s.session.ServerID))
+	log.Ctx(s.ctx).Error("watch service channel closed", zap.Int64("serverID", s.session.ServerID))
 	go s.Stop()
 	if s.session.TriggerKill {
 		if p, err := os.FindProcess(os.Getpid()); err == nil {
@@ -688,12 +688,12 @@ func (s *Server) stopServiceWatch() {
 func (s *Server) processSessionEvent(ctx context.Context, role string, event *sessionutil.SessionEvent) {
 	switch event.EventType {
 	case sessionutil.SessionAddEvent:
-		log.Info("there is a new service online",
+		log.Ctx(ctx).Info("there is a new service online",
 			zap.String("server role", role),
 			zap.Int64("server ID", event.Session.ServerID))
 
 	case sessionutil.SessionDelEvent:
-		log.Warn("there is service offline",
+		log.Ctx(ctx).Warn("there is service offline",
 			zap.String("server role", role),
 			zap.Int64("server ID", event.Session.ServerID))
 		if err := retry.Do(ctx, func() error {
@@ -782,7 +782,7 @@ func (s *Server) handleSessionEvent(ctx context.Context, event *sessionutil.Sess
 		}
 		s.metricsCacheManager.InvalidateSystemInfoMetrics()
 	default:
-		log.Warn("receive unknown service event type",
+		log.Ctx(ctx).Warn("receive unknown service event type",
 			zap.Any("type", event.EventType))
 	}
 	return nil
@@ -801,7 +801,7 @@ func (s *Server) startFlushLoop(ctx context.Context) {
 		for {
 			select {
 			case <-ctx.Done():
-				logutil.Logger(s.ctx).Debug("flush loop shutdown")
+				log.Ctx(s.ctx).Debug("flush loop shutdown")
 				return
 			case segmentID := <-s.flushCh:
 				//Ignore return error
@@ -838,7 +838,7 @@ func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
 		log.Error("flush segment complete failed", zap.Error(err))
 		return err
 	}
-	log.Info("flush segment complete", zap.Int64("id", segmentID))
+	log.Ctx(ctx).Info("flush segment complete", zap.Int64("id", segmentID))
 	return nil
 }
 
@@ -873,7 +873,7 @@ func (s *Server) Stop() error {
 	if !atomic.CompareAndSwapInt64(&s.isServing, ServerStateHealthy, ServerStateStopped) {
 		return nil
 	}
-	logutil.Logger(s.ctx).Debug("server shutdown")
+	log.Ctx(s.ctx).Debug("server shutdown")
 	s.cluster.Close()
 	s.garbageCollector.close()
 	s.stopServerLoop()
@@ -954,11 +954,11 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 
 func (s *Server) reCollectSegmentStats(ctx context.Context) {
 	if s.channelManager == nil {
-		log.Error("null channel manager found, which should NOT happen in non-testing environment")
+		log.Ctx(ctx).Error("null channel manager found, which should NOT happen in non-testing environment")
 		return
 	}
 	nodes := s.channelManager.store.GetNodes()
-	log.Info("re-collecting segment stats from DataNodes",
+	log.Ctx(ctx).Info("re-collecting segment stats from DataNodes",
 		zap.Int64s("DataNode IDs", nodes))
 	for _, node := range nodes {
 		s.cluster.ReCollectSegmentStats(ctx, node)

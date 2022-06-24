@@ -61,7 +61,7 @@ func (c *Core) getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetric
 
 	resp, err := metricsinfo.MarshalTopology(rootCoordTopology)
 	if err != nil {
-		log.Warn("Failed to marshal system info metrics of root coordinator",
+		log.Ctx(ctx).Warn("Failed to marshal system info metrics of root coordinator",
 			zap.Error(err))
 
 		return &milvuspb.GetMetricsResponse{

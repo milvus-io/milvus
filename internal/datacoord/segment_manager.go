@@ -233,7 +233,7 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 	for _, segmentID := range s.segments {
 		segment := s.meta.GetSegment(segmentID)
 		if segment == nil {
-			log.Warn("Failed to get seginfo from meta", zap.Int64("id", segmentID))
+			log.Ctx(ctx).Warn("Failed to get seginfo from meta", zap.Int64("id", segmentID))
 			continue
 		}
 		if !satisfy(segment, collectionID, partitionID, channelName) || !isGrowing(segment) {
@@ -380,7 +380,7 @@ func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID Unique
 		return nil, err
 	}
 	s.segments = append(s.segments, id)
-	log.Info("datacoord: estimateTotalRows: ",
+	log.Ctx(ctx).Info("datacoord: estimateTotalRows: ",
 		zap.Int64("CollectionID", segmentInfo.CollectionID),
 		zap.Int64("SegmentID", segmentInfo.ID),
 		zap.Int("Rows", maxNumOfRows),
@@ -411,7 +411,7 @@ func (s *SegmentManager) DropSegment(ctx context.Context, segmentID UniqueID) {
 	}
 	segment := s.meta.GetSegment(segmentID)
 	if segment == nil {
-		log.Warn("Failed to get segment", zap.Int64("id", segmentID))
+		log.Ctx(ctx).Warn("Failed to get segment", zap.Int64("id", segmentID))
 		return
 	}
 	s.meta.SetAllocations(segmentID, []*Allocation{})
@@ -434,7 +434,7 @@ func (s *SegmentManager) SealAllSegments(ctx context.Context, collectionID Uniqu
 	for _, id := range segCandidates {
 		info := s.meta.GetSegment(id)
 		if info == nil {
-			log.Warn("failed to get seg info from meta", zap.Int64("segment ID", id))
+			log.Ctx(ctx).Warn("failed to get seg info from meta", zap.Int64("segment ID", id))
 			continue
 		}
 		if info.CollectionID != collectionID {

@@ -41,7 +41,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/crypto"
-	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/trace"
@@ -98,8 +97,8 @@ func (node *Proxy) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringRe
 
 // InvalidateCollectionMetaCache invalidate the meta cache of specific collection.
 func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
-	ctx = logutil.WithModule(ctx, moduleName)
-	logutil.Logger(ctx).Info("received request to invalidate collection meta cache",
+	ctx = log.WithModule(ctx, moduleName)
+	log.Ctx(ctx).Info("received request to invalidate collection meta cache",
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collectionName", request.CollectionName),
@@ -115,7 +114,7 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 			globalMetaCache.RemoveCollectionsByID(ctx, collectionID)
 		}
 	}
-	logutil.Logger(ctx).Info("complete to invalidate collection meta cache",
+	log.Ctx(ctx).Info("complete to invalidate collection meta cache",
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", collectionName),
@@ -129,8 +128,8 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 
 // ReleaseDQLMessageStream release the query message stream of specific collection.
 func (node *Proxy) ReleaseDQLMessageStream(ctx context.Context, request *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
-	ctx = logutil.WithModule(ctx, moduleName)
-	logutil.Logger(ctx).Debug("received request to release DQL message strem",
+	ctx = log.WithModule(ctx, moduleName)
+	log.Ctx(ctx).Debug("received request to release DQL message strem",
 		zap.Any("role", typeutil.ProxyRole),
 		zap.Any("db", request.DbID),
 		zap.Any("collection", request.CollectionID))
@@ -139,7 +138,7 @@ func (node *Proxy) ReleaseDQLMessageStream(ctx context.Context, request *proxypb
 		return unhealthyStatus(), nil
 	}
 
-	logutil.Logger(ctx).Debug("complete to release DQL message stream",
+	log.Ctx(ctx).Debug("complete to release DQL message stream",
 		zap.Any("role", typeutil.ProxyRole),
 		zap.Any("db", request.DbID),
 		zap.Any("collection", request.CollectionID))
@@ -159,7 +158,6 @@ func (node *Proxy) CreateCollection(ctx context.Context, request *milvuspb.Creat
 
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-CreateCollection")
 	defer sp.Finish()
-	traceID, _, _ := trace.InfoFromSpan(sp)
 	method := "CreateCollection"
 	tr := timerecord.NewTimeRecorder(method)
 
@@ -174,10 +172,8 @@ func (node *Proxy) CreateCollection(ctx context.Context, request *milvuspb.Creat
 
 	// avoid data race
 	lenOfSchema := len(request.Schema)
-
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcReceived(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
@@ -186,10 +182,9 @@ func (node *Proxy) CreateCollection(ctx context.Context, request *milvuspb.Creat
 		zap.String("consistency_level", request.ConsistencyLevel.String()))
 
 	if err := node.sched.ddQueue.Enqueue(cct); err != nil {
-		log.Warn(
+		log.Ctx(ctx).Warn(
 			rpcFailedToEnqueue(method),
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.String("db", request.DbName),
 			zap.String("collection", request.CollectionName),
@@ -204,9 +199,8 @@ func (node *Proxy) CreateCollection(ctx context.Context, request *milvuspb.Creat
 		}, nil
 	}
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcEnqueued(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", cct.ID()),
 		zap.Uint64("BeginTs", cct.BeginTs()),
@@ -219,10 +213,9 @@ func (node *Proxy) CreateCollection(ctx context.Context, request *milvuspb.Creat
 		zap.String("consistency_level", request.ConsistencyLevel.String()))
 
 	if err := cct.WaitToFinish(); err != nil {
-		log.Warn(
+		log.Ctx(ctx).Warn(
 			rpcFailedToWaitToFinish(method),
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.Int64("MsgID", cct.ID()),
 			zap.Uint64("BeginTs", cct.BeginTs()),
@@ -240,9 +233,8 @@ func (node *Proxy) CreateCollection(ctx context.Context, request *milvuspb.Creat
 		}, nil
 	}
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcDone(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", cct.ID()),
 		zap.Uint64("BeginTs", cct.BeginTs()),
@@ -266,7 +258,6 @@ func (node *Proxy) DropCollection(ctx context.Context, request *milvuspb.DropCol
 
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-DropCollection")
 	defer sp.Finish()
-	traceID, _, _ := trace.InfoFromSpan(sp)
 	method := "DropCollection"
 	tr := timerecord.NewTimeRecorder(method)
 	metrics.ProxyDDLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method, metrics.TotalLabel).Inc()
@@ -280,16 +271,14 @@ func (node *Proxy) DropCollection(ctx context.Context, request *milvuspb.DropCol
 		chTicker:              node.chTicker,
 	}
 
-	log.Debug("DropCollection received",
-		zap.String("traceID", traceID),
+	log.Ctx(ctx).Debug("DropCollection received",
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName))
 
 	if err := node.sched.ddQueue.Enqueue(dct); err != nil {
-		log.Warn("DropCollection failed to enqueue",
+		log.Ctx(ctx).Warn("DropCollection failed to enqueue",
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.String("db", request.DbName),
 			zap.String("collection", request.CollectionName))
@@ -301,8 +290,7 @@ func (node *Proxy) DropCollection(ctx context.Context, request *milvuspb.DropCol
 		}, nil
 	}
 
-	log.Debug("DropCollection enqueued",
-		zap.String("traceID", traceID),
+	log.Ctx(ctx).Debug("DropCollection enqueued",
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", dct.ID()),
 		zap.Uint64("BeginTs", dct.BeginTs()),
@@ -311,9 +299,8 @@ func (node *Proxy) DropCollection(ctx context.Context, request *milvuspb.DropCol
 		zap.String("collection", request.CollectionName))
 
 	if err := dct.WaitToFinish(); err != nil {
-		log.Warn("DropCollection failed to WaitToFinish",
+		log.Ctx(ctx).Warn("DropCollection failed to WaitToFinish",
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.Int64("MsgID", dct.ID()),
 			zap.Uint64("BeginTs", dct.BeginTs()),
@@ -328,8 +315,7 @@ func (node *Proxy) DropCollection(ctx context.Context, request *milvuspb.DropCol
 		}, nil
 	}
 
-	log.Debug("DropCollection done",
-		zap.String("traceID", traceID),
+	log.Ctx(ctx).Debug("DropCollection done",
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", dct.ID()),
 		zap.Uint64("BeginTs", dct.BeginTs()),
@@ -352,14 +338,12 @@ func (node *Proxy) HasCollection(ctx context.Context, request *milvuspb.HasColle
 
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-HasCollection")
 	defer sp.Finish()
-	traceID, _, _ := trace.InfoFromSpan(sp)
 	method := "HasCollection"
 	tr := timerecord.NewTimeRecorder(method)
 	metrics.ProxyDQLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
 		metrics.TotalLabel).Inc()
 
-	log.Debug("HasCollection received",
-		zap.String("traceID", traceID),
+	log.Ctx(ctx).Debug("HasCollection received",
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName))
@@ -372,9 +356,8 @@ func (node *Proxy) HasCollection(ctx context.Context, request *milvuspb.HasColle
 	}
 
 	if err := node.sched.ddQueue.Enqueue(hct); err != nil {
-		log.Warn("HasCollection failed to enqueue",
+		log.Ctx(ctx).Warn("HasCollection failed to enqueue",
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.String("db", request.DbName),
 			zap.String("collection", request.CollectionName))
@@ -389,8 +372,7 @@ func (node *Proxy) HasCollection(ctx context.Context, request *milvuspb.HasColle
 		}, nil
 	}
 
-	log.Debug("HasCollection enqueued",
-		zap.String("traceID", traceID),
+	log.Ctx(ctx).Debug("HasCollection enqueued",
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", hct.ID()),
 		zap.Uint64("BeginTS", hct.BeginTs()),
@@ -399,9 +381,8 @@ func (node *Proxy) HasCollection(ctx context.Context, request *milvuspb.HasColle
 		zap.String("collection", request.CollectionName))
 
 	if err := hct.WaitToFinish(); err != nil {
-		log.Warn("HasCollection failed to WaitToFinish",
+		log.Ctx(ctx).Warn("HasCollection failed to WaitToFinish",
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.Int64("MsgID", hct.ID()),
 			zap.Uint64("BeginTS", hct.BeginTs()),
@@ -419,8 +400,7 @@ func (node *Proxy) HasCollection(ctx context.Context, request *milvuspb.HasColle
 		}, nil
 	}
 
-	log.Debug("HasCollection done",
-		zap.String("traceID", traceID),
+	log.Ctx(ctx).Debug("HasCollection done",
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", hct.ID()),
 		zap.Uint64("BeginTS", hct.BeginTs()),
@@ -442,7 +422,6 @@ func (node *Proxy) LoadCollection(ctx context.Context, request *milvuspb.LoadCol
 
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-LoadCollection")
 	defer sp.Finish()
-	traceID, _, _ := trace.InfoFromSpan(sp)
 	method := "LoadCollection"
 	tr := timerecord.NewTimeRecorder(method)
 
@@ -453,16 +432,14 @@ func (node *Proxy) LoadCollection(ctx context.Context, request *milvuspb.LoadCol
 		queryCoord:            node.queryCoord,
 	}
 
-	log.Debug("LoadCollection received",
-		zap.String("traceID", traceID),
+	log.Ctx(ctx).Debug("LoadCollection received",
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName))
 
 	if err := node.sched.ddQueue.Enqueue(lct); err != nil {
-		log.Warn("LoadCollection failed to enqueue",
+		log.Ctx(ctx).Warn("LoadCollection failed to enqueue",
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.String("db", request.DbName),
 			zap.String("collection", request.CollectionName))
@@ -475,8 +452,7 @@ func (node *Proxy) LoadCollection(ctx context.Context, request *milvuspb.LoadCol
 		}, nil
 	}
 
-	log.Debug("LoadCollection enqueued",
-		zap.String("traceID", traceID),
+	log.Ctx(ctx).Debug("LoadCollection enqueued",
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", lct.ID()),
 		zap.Uint64("BeginTS", lct.BeginTs()),
@@ -485,9 +461,8 @@ func (node *Proxy) LoadCollection(ctx context.Context, request *milvuspb.LoadCol
 		zap.String("collection", request.CollectionName))
 
 	if err := lct.WaitToFinish(); err != nil {
-		log.Warn("LoadCollection failed to WaitToFinish",
+		log.Ctx(ctx).Warn("LoadCollection failed to WaitToFinish",
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.Int64("MsgID", lct.ID()),
 			zap.Uint64("BeginTS", lct.BeginTs()),
@@ -505,8 +480,7 @@ func (node *Proxy) LoadCollection(ctx context.Context, request *milvuspb.LoadCol
 		}, nil
 	}
 
-	log.Debug("LoadCollection done",
-		zap.String("traceID", traceID),
+	log.Ctx(ctx).Debug("LoadCollection done",
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", lct.ID()),
 		zap.Uint64("BeginTS", lct.BeginTs()),
@@ -530,7 +504,6 @@ func (node *Proxy) ReleaseCollection(ctx context.Context, request *milvuspb.Rele
 
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-ReleaseCollection")
 	defer sp.Finish()
-	traceID, _, _ := trace.InfoFromSpan(sp)
 	method := "ReleaseCollection"
 	tr := timerecord.NewTimeRecorder(method)
 
@@ -542,18 +515,16 @@ func (node *Proxy) ReleaseCollection(ctx context.Context, request *milvuspb.Rele
 		chMgr:                    node.chMgr,
 	}
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcReceived(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName))
 
 	if err := node.sched.ddQueue.Enqueue(rct); err != nil {
-		log.Warn(
+		log.Ctx(ctx).Warn(
 			rpcFailedToEnqueue(method),
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.String("db", request.DbName),
 			zap.String("collection", request.CollectionName))
@@ -566,9 +537,8 @@ func (node *Proxy) ReleaseCollection(ctx context.Context, request *milvuspb.Rele
 		}, nil
 	}
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcEnqueued(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", rct.ID()),
 		zap.Uint64("BeginTS", rct.BeginTs()),
@@ -577,10 +547,9 @@ func (node *Proxy) ReleaseCollection(ctx context.Context, request *milvuspb.Rele
 		zap.String("collection", request.CollectionName))
 
 	if err := rct.WaitToFinish(); err != nil {
-		log.Warn(
+		log.Ctx(ctx).Warn(
 			rpcFailedToWaitToFinish(method),
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.Int64("MsgID", rct.ID()),
 			zap.Uint64("BeginTS", rct.BeginTs()),
@@ -598,9 +567,8 @@ func (node *Proxy) ReleaseCollection(ctx context.Context, request *milvuspb.Rele
 		}, nil
 	}
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcDone(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", rct.ID()),
 		zap.Uint64("BeginTS", rct.BeginTs()),
@@ -626,7 +594,6 @@ func (node *Proxy) DescribeCollection(ctx context.Context, request *milvuspb.Des
 
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-DescribeCollection")
 	defer sp.Finish()
-	traceID, _, _ := trace.InfoFromSpan(sp)
 	method := "DescribeCollection"
 	tr := timerecord.NewTimeRecorder(method)
 
@@ -637,16 +604,14 @@ func (node *Proxy) DescribeCollection(ctx context.Context, request *milvuspb.Des
 		rootCoord:                 node.rootCoord,
 	}
 
-	log.Debug("DescribeCollection received",
-		zap.String("traceID", traceID),
+	log.Ctx(ctx).Debug("DescribeCollection received",
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName))
 
 	if err := node.sched.ddQueue.Enqueue(dct); err != nil {
-		log.Warn("DescribeCollection failed to enqueue",
+		log.Ctx(ctx).Warn("DescribeCollection failed to enqueue",
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.String("db", request.DbName),
 			zap.String("collection", request.CollectionName))
@@ -661,8 +626,7 @@ func (node *Proxy) DescribeCollection(ctx context.Context, request *milvuspb.Des
 		}, nil
 	}
 
-	log.Debug("DescribeCollection enqueued",
-		zap.String("traceID", traceID),
+	log.Ctx(ctx).Debug("DescribeCollection enqueued",
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", dct.ID()),
 		zap.Uint64("BeginTS", dct.BeginTs()),
@@ -671,9 +635,8 @@ func (node *Proxy) DescribeCollection(ctx context.Context, request *milvuspb.Des
 		zap.String("collection", request.CollectionName))
 
 	if err := dct.WaitToFinish(); err != nil {
-		log.Warn("DescribeCollection failed to WaitToFinish",
+		log.Ctx(ctx).Warn("DescribeCollection failed to WaitToFinish",
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.Int64("MsgID", dct.ID()),
 			zap.Uint64("BeginTS", dct.BeginTs()),
@@ -694,8 +657,7 @@ func (node *Proxy) DescribeCollection(ctx context.Context, request *milvuspb.Des
 		}, nil
 	}
 
-	log.Debug("DescribeCollection done",
-		zap.String("traceID", traceID),
+	log.Ctx(ctx).Debug("DescribeCollection done",
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", dct.ID()),
 		zap.Uint64("BeginTS", dct.BeginTs()),
@@ -721,7 +683,6 @@ func (node *Proxy) GetCollectionStatistics(ctx context.Context, request *milvusp
 
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-GetCollectionStatistics")
 	defer sp.Finish()
-	traceID, _, _ := trace.InfoFromSpan(sp)
 	method := "GetCollectionStatistics"
 	tr := timerecord.NewTimeRecorder(method)
 
@@ -732,16 +693,14 @@ func (node *Proxy) GetCollectionStatistics(ctx context.Context, request *milvusp
 		dataCoord:                      node.dataCoord,
 	}
 
-	log.Debug("GetCollectionStatistics received",
-		zap.String("traceID", traceID),
+	log.Ctx(ctx).Debug("GetCollectionStatistics received",
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName))
 
 	if err := node.sched.ddQueue.Enqueue(g); err != nil {
-		log.Warn("GetCollectionStatistics failed to enqueue",
+		log.Ctx(ctx).Warn("GetCollectionStatistics failed to enqueue",
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.String("db", request.DbName),
 			zap.String("collection", request.CollectionName))
@@ -757,8 +716,7 @@ func (node *Proxy) GetCollectionStatistics(ctx context.Context, request *milvusp
 		}, nil
 	}
 
-	log.Debug("GetCollectionStatistics enqueued",
-		zap.String("traceID", traceID),
+	log.Ctx(ctx).Debug("GetCollectionStatistics enqueued",
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", g.ID()),
 		zap.Uint64("BeginTS", g.BeginTs()),
@@ -767,9 +725,8 @@ func (node *Proxy) GetCollectionStatistics(ctx context.Context, request *milvusp
 		zap.String("collection", request.CollectionName))
 
 	if err := g.WaitToFinish(); err != nil {
-		log.Warn("GetCollectionStatistics failed to WaitToFinish",
+		log.Ctx(ctx).Warn("GetCollectionStatistics failed to WaitToFinish",
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.Int64("MsgID", g.ID()),
 			zap.Uint64("BeginTS", g.BeginTs()),
@@ -790,8 +747,7 @@ func (node *Proxy) GetCollectionStatistics(ctx context.Context, request *milvusp
 		}, nil
 	}
 
-	log.Debug("GetCollectionStatistics done",
-		zap.String("traceID", traceID),
+	log.Ctx(ctx).Debug("GetCollectionStatistics done",
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", g.ID()),
 		zap.Uint64("BeginTS", g.BeginTs()),
@@ -826,7 +782,7 @@ func (node *Proxy) ShowCollections(ctx context.Context, request *milvuspb.ShowCo
 		rootCoord:              node.rootCoord,
 	}
 
-	log.Debug("ShowCollections received",
+	log.Ctx(ctx).Debug("ShowCollections received",
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("DbName", request.DbName),
 		zap.Uint64("TimeStamp", request.TimeStamp),
@@ -836,7 +792,7 @@ func (node *Proxy) ShowCollections(ctx context.Context, request *milvuspb.ShowCo
 
 	err := node.sched.ddQueue.Enqueue(sct)
 	if err != nil {
-		log.Warn("ShowCollections failed to enqueue",
+		log.Ctx(ctx).Warn("ShowCollections failed to enqueue",
 			zap.Error(err),
 			zap.String("role", typeutil.ProxyRole),
 			zap.String("DbName", request.DbName),
@@ -854,7 +810,7 @@ func (node *Proxy) ShowCollections(ctx context.Context, request *milvuspb.ShowCo
 		}, nil
 	}
 
-	log.Debug("ShowCollections enqueued",
+	log.Ctx(ctx).Debug("ShowCollections enqueued",
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", sct.ID()),
 		zap.String("DbName", sct.ShowCollectionsRequest.DbName),
@@ -865,7 +821,7 @@ func (node *Proxy) ShowCollections(ctx context.Context, request *milvuspb.ShowCo
 
 	err = sct.WaitToFinish()
 	if err != nil {
-		log.Warn("ShowCollections failed to WaitToFinish",
+		log.Ctx(ctx).Warn("ShowCollections failed to WaitToFinish",
 			zap.Error(err),
 			zap.String("role", typeutil.ProxyRole),
 			zap.Int64("MsgID", sct.ID()),
@@ -885,7 +841,7 @@ func (node *Proxy) ShowCollections(ctx context.Context, request *milvuspb.ShowCo
 		}, nil
 	}
 
-	log.Debug("ShowCollections Done",
+	log.Ctx(ctx).Debug("ShowCollections Done",
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", sct.ID()),
 		zap.String("DbName", request.DbName),
@@ -907,7 +863,6 @@ func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.Create
 
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-CreatePartition")
 	defer sp.Finish()
-	traceID, _, _ := trace.InfoFromSpan(sp)
 	method := "CreatePartition"
 	tr := timerecord.NewTimeRecorder(method)
 	metrics.ProxyDDLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method, metrics.TotalLabel).Inc()
@@ -920,19 +875,17 @@ func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.Create
 		result:                 nil,
 	}
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcReceived("CreatePartition"),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.String("partition", request.PartitionName))
 
 	if err := node.sched.ddQueue.Enqueue(cpt); err != nil {
-		log.Warn(
+		log.Ctx(ctx).Warn(
 			rpcFailedToEnqueue("CreatePartition"),
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.String("db", request.DbName),
 			zap.String("collection", request.CollectionName),
@@ -946,9 +899,8 @@ func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.Create
 		}, nil
 	}
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcEnqueued("CreatePartition"),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", cpt.ID()),
 		zap.Uint64("BeginTS", cpt.BeginTs()),
@@ -958,10 +910,9 @@ func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.Create
 		zap.String("partition", request.PartitionName))
 
 	if err := cpt.WaitToFinish(); err != nil {
-		log.Warn(
+		log.Ctx(ctx).Warn(
 			rpcFailedToWaitToFinish("CreatePartition"),
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.Int64("MsgID", cpt.ID()),
 			zap.Uint64("BeginTS", cpt.BeginTs()),
@@ -978,9 +929,8 @@ func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.Create
 		}, nil
 	}
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcDone("CreatePartition"),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", cpt.ID()),
 		zap.Uint64("BeginTS", cpt.BeginTs()),
@@ -1002,7 +952,6 @@ func (node *Proxy) DropPartition(ctx context.Context, request *milvuspb.DropPart
 
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-DropPartition")
 	defer sp.Finish()
-	traceID, _, _ := trace.InfoFromSpan(sp)
 	method := "DropPartition"
 	tr := timerecord.NewTimeRecorder(method)
 	metrics.ProxyDDLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method, metrics.TotalLabel).Inc()
@@ -1015,19 +964,17 @@ func (node *Proxy) DropPartition(ctx context.Context, request *milvuspb.DropPart
 		result:               nil,
 	}
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcReceived(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.String("partition", request.PartitionName))
 
 	if err := node.sched.ddQueue.Enqueue(dpt); err != nil {
-		log.Warn(
+		log.Ctx(ctx).Warn(
 			rpcFailedToEnqueue(method),
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.String("db", request.DbName),
 			zap.String("collection", request.CollectionName),
@@ -1041,9 +988,8 @@ func (node *Proxy) DropPartition(ctx context.Context, request *milvuspb.DropPart
 		}, nil
 	}
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcEnqueued(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", dpt.ID()),
 		zap.Uint64("BeginTS", dpt.BeginTs()),
@@ -1053,10 +999,9 @@ func (node *Proxy) DropPartition(ctx context.Context, request *milvuspb.DropPart
 		zap.String("partition", request.PartitionName))
 
 	if err := dpt.WaitToFinish(); err != nil {
-		log.Warn(
+		log.Ctx(ctx).Warn(
 			rpcFailedToWaitToFinish(method),
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.Int64("MsgID", dpt.ID()),
 			zap.Uint64("BeginTS", dpt.BeginTs()),
@@ -1073,9 +1018,8 @@ func (node *Proxy) DropPartition(ctx context.Context, request *milvuspb.DropPart
 		}, nil
 	}
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcDone(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", dpt.ID()),
 		zap.Uint64("BeginTS", dpt.BeginTs()),
@@ -1099,7 +1043,6 @@ func (node *Proxy) HasPartition(ctx context.Context, request *milvuspb.HasPartit
 
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-HasPartition")
 	defer sp.Finish()
-	traceID, _, _ := trace.InfoFromSpan(sp)
 	method := "HasPartition"
 	tr := timerecord.NewTimeRecorder(method)
 	//TODO: use collectionID instead of collectionName
@@ -1114,19 +1057,17 @@ func (node *Proxy) HasPartition(ctx context.Context, request *milvuspb.HasPartit
 		result:              nil,
 	}
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcReceived(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.String("partition", request.PartitionName))
 
 	if err := node.sched.ddQueue.Enqueue(hpt); err != nil {
-		log.Warn(
+		log.Ctx(ctx).Warn(
 			rpcFailedToEnqueue(method),
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.String("db", request.DbName),
 			zap.String("collection", request.CollectionName),
@@ -1144,9 +1085,8 @@ func (node *Proxy) HasPartition(ctx context.Context, request *milvuspb.HasPartit
 		}, nil
 	}
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcEnqueued(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", hpt.ID()),
 		zap.Uint64("BeginTS", hpt.BeginTs()),
@@ -1156,10 +1096,9 @@ func (node *Proxy) HasPartition(ctx context.Context, request *milvuspb.HasPartit
 		zap.String("partition", request.PartitionName))
 
 	if err := hpt.WaitToFinish(); err != nil {
-		log.Warn(
+		log.Ctx(ctx).Warn(
 			rpcFailedToWaitToFinish(method),
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.Int64("MsgID", hpt.ID()),
 			zap.Uint64("BeginTS", hpt.BeginTs()),
@@ -1180,9 +1119,8 @@ func (node *Proxy) HasPartition(ctx context.Context, request *milvuspb.HasPartit
 		}, nil
 	}
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcDone(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", hpt.ID()),
 		zap.Uint64("BeginTS", hpt.BeginTs()),
@@ -1205,7 +1143,6 @@ func (node *Proxy) LoadPartitions(ctx context.Context, request *milvuspb.LoadPar
 
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-LoadPartitions")
 	defer sp.Finish()
-	traceID, _, _ := trace.InfoFromSpan(sp)
 	method := "LoadPartitions"
 	tr := timerecord.NewTimeRecorder(method)
 
@@ -1216,19 +1153,17 @@ func (node *Proxy) LoadPartitions(ctx context.Context, request *milvuspb.LoadPar
 		queryCoord:            node.queryCoord,
 	}
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcReceived(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.Any("partitions", request.PartitionNames))
 
 	if err := node.sched.ddQueue.Enqueue(lpt); err != nil {
-		log.Warn(
+		log.Ctx(ctx).Warn(
 			rpcFailedToEnqueue(method),
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.String("db", request.DbName),
 			zap.String("collection", request.CollectionName),
@@ -1243,9 +1178,8 @@ func (node *Proxy) LoadPartitions(ctx context.Context, request *milvuspb.LoadPar
 		}, nil
 	}
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcEnqueued(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", lpt.ID()),
 		zap.Uint64("BeginTS", lpt.BeginTs()),
@@ -1255,10 +1189,9 @@ func (node *Proxy) LoadPartitions(ctx context.Context, request *milvuspb.LoadPar
 		zap.Any("partitions", request.PartitionNames))
 
 	if err := lpt.WaitToFinish(); err != nil {
-		log.Warn(
+		log.Ctx(ctx).Warn(
 			rpcFailedToWaitToFinish(method),
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.Int64("MsgID", lpt.ID()),
 			zap.Uint64("BeginTS", lpt.BeginTs()),
@@ -1278,9 +1211,8 @@ func (node *Proxy) LoadPartitions(ctx context.Context, request *milvuspb.LoadPar
 		}, nil
 	}
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcDone(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", lpt.ID()),
 		zap.Uint64("BeginTS", lpt.BeginTs()),
@@ -1305,7 +1237,6 @@ func (node *Proxy) ReleasePartitions(ctx context.Context, request *milvuspb.Rele
 
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-ReleasePartitions")
 	defer sp.Finish()
-	traceID, _, _ := trace.InfoFromSpan(sp)
 
 	rpt := &releasePartitionsTask{
 		ctx:                      ctx,
@@ -1317,19 +1248,17 @@ func (node *Proxy) ReleasePartitions(ctx context.Context, request *milvuspb.Rele
 	method := "ReleasePartitions"
 	tr := timerecord.NewTimeRecorder(method)
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcReceived(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.Any("partitions", request.PartitionNames))
 
 	if err := node.sched.ddQueue.Enqueue(rpt); err != nil {
-		log.Warn(
+		log.Ctx(ctx).Warn(
 			rpcFailedToEnqueue(method),
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.String("db", request.DbName),
 			zap.String("collection", request.CollectionName),
@@ -1344,9 +1273,8 @@ func (node *Proxy) ReleasePartitions(ctx context.Context, request *milvuspb.Rele
 		}, nil
 	}
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcEnqueued(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("msgID", rpt.Base.MsgID),
 		zap.Uint64("BeginTS", rpt.BeginTs()),
@@ -1356,10 +1284,9 @@ func (node *Proxy) ReleasePartitions(ctx context.Context, request *milvuspb.Rele
 		zap.Any("partitions", request.PartitionNames))
 
 	if err := rpt.WaitToFinish(); err != nil {
-		log.Warn(
+		log.Ctx(ctx).Warn(
 			rpcFailedToWaitToFinish(method),
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.Int64("msgID", rpt.Base.MsgID),
 			zap.Uint64("BeginTS", rpt.BeginTs()),
@@ -1379,9 +1306,8 @@ func (node *Proxy) ReleasePartitions(ctx context.Context, request *milvuspb.Rele
 		}, nil
 	}
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcDone(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("msgID", rpt.Base.MsgID),
 		zap.Uint64("BeginTS", rpt.BeginTs()),
@@ -1408,7 +1334,6 @@ func (node *Proxy) GetPartitionStatistics(ctx context.Context, request *milvuspb
 
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-GetPartitionStatistics")
 	defer sp.Finish()
-	traceID, _, _ := trace.InfoFromSpan(sp)
 
 	g := &getPartitionStatisticsTask{
 		ctx:                           ctx,
@@ -1420,19 +1345,17 @@ func (node *Proxy) GetPartitionStatistics(ctx context.Context, request *milvuspb
 	method := "GetPartitionStatistics"
 	tr := timerecord.NewTimeRecorder(method)
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcReceived(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.String("partition", request.PartitionName))
 
 	if err := node.sched.ddQueue.Enqueue(g); err != nil {
-		log.Warn(
+		log.Ctx(ctx).Warn(
 			rpcFailedToEnqueue(method),
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.String("db", request.DbName),
 			zap.String("collection", request.CollectionName),
@@ -1449,9 +1372,8 @@ func (node *Proxy) GetPartitionStatistics(ctx context.Context, request *milvuspb
 		}, nil
 	}
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcEnqueued(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("msgID", g.ID()),
 		zap.Uint64("BeginTS", g.BeginTs()),
@@ -1461,10 +1383,9 @@ func (node *Proxy) GetPartitionStatistics(ctx context.Context, request *milvuspb
 		zap.String("partition", request.PartitionName))
 
 	if err := g.WaitToFinish(); err != nil {
-		log.Warn(
+		log.Ctx(ctx).Warn(
 			rpcFailedToWaitToFinish(method),
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.Int64("msgID", g.ID()),
 			zap.Uint64("BeginTS", g.BeginTs()),
@@ -1486,9 +1407,8 @@ func (node *Proxy) GetPartitionStatistics(ctx context.Context, request *milvuspb
 		}, nil
 	}
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcDone(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("msgID", g.ID()),
 		zap.Uint64("BeginTS", g.BeginTs()),
@@ -1515,7 +1435,6 @@ func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPar
 
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-ShowPartitions")
 	defer sp.Finish()
-	traceID, _, _ := trace.InfoFromSpan(sp)
 
 	spt := &showPartitionsTask{
 		ctx:                   ctx,
@@ -1532,17 +1451,15 @@ func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPar
 	metrics.ProxyDQLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
 		metrics.TotalLabel).Inc()
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcReceived(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Any("request", request))
 
 	if err := node.sched.ddQueue.Enqueue(spt); err != nil {
-		log.Warn(
+		log.Ctx(ctx).Warn(
 			rpcFailedToEnqueue(method),
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.Any("request", request))
 
@@ -1557,9 +1474,8 @@ func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPar
 		}, nil
 	}
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcEnqueued(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("msgID", spt.ID()),
 		zap.Uint64("BeginTS", spt.BeginTs()),
@@ -1569,10 +1485,9 @@ func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPar
 		zap.Any("partitions", spt.ShowPartitionsRequest.PartitionNames))
 
 	if err := spt.WaitToFinish(); err != nil {
-		log.Warn(
+		log.Ctx(ctx).Warn(
 			rpcFailedToWaitToFinish(method),
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.Int64("msgID", spt.ID()),
 			zap.Uint64("BeginTS", spt.BeginTs()),
@@ -1592,9 +1507,8 @@ func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPar
 		}, nil
 	}
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcDone(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("msgID", spt.ID()),
 		zap.Uint64("BeginTS", spt.BeginTs()),
@@ -1617,7 +1531,6 @@ func (node *Proxy) CreateIndex(ctx context.Context, request *milvuspb.CreateInde
 
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-ShowPartitions")
 	defer sp.Finish()
-	traceID, _, _ := trace.InfoFromSpan(sp)
 
 	cit := &createIndexTask{
 		ctx:                ctx,
@@ -1629,9 +1542,8 @@ func (node *Proxy) CreateIndex(ctx context.Context, request *milvuspb.CreateInde
 	method := "CreateIndex"
 	tr := timerecord.NewTimeRecorder(method)
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcReceived(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
@@ -1639,10 +1551,9 @@ func (node *Proxy) CreateIndex(ctx context.Context, request *milvuspb.CreateInde
 		zap.Any("extra_params", request.ExtraParams))
 
 	if err := node.sched.ddQueue.Enqueue(cit); err != nil {
-		log.Warn(
+		log.Ctx(ctx).Warn(
 			rpcFailedToEnqueue(method),
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.String("db", request.DbName),
 			zap.String("collection", request.CollectionName),
@@ -1658,9 +1569,8 @@ func (node *Proxy) CreateIndex(ctx context.Context, request *milvuspb.CreateInde
 		}, nil
 	}
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcEnqueued(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", cit.ID()),
 		zap.Uint64("BeginTs", cit.BeginTs()),
@@ -1671,10 +1581,9 @@ func (node *Proxy) CreateIndex(ctx context.Context, request *milvuspb.CreateInde
 		zap.Any("extra_params", request.ExtraParams))
 
 	if err := cit.WaitToFinish(); err != nil {
-		log.Warn(
+		log.Ctx(ctx).Warn(
 			rpcFailedToWaitToFinish(method),
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.Int64("MsgID", cit.ID()),
 			zap.Uint64("BeginTs", cit.BeginTs()),
@@ -1695,9 +1604,8 @@ func (node *Proxy) CreateIndex(ctx context.Context, request *milvuspb.CreateInde
 		}, nil
 	}
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcDone(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", cit.ID()),
 		zap.Uint64("BeginTs", cit.BeginTs()),
@@ -1725,7 +1633,6 @@ func (node *Proxy) DescribeIndex(ctx context.Context, request *milvuspb.Describe
 
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-DescribeIndex")
 	defer sp.Finish()
-	traceID, _, _ := trace.InfoFromSpan(sp)
 
 	dit := &describeIndexTask{
 		ctx:                  ctx,
@@ -1739,9 +1646,8 @@ func (node *Proxy) DescribeIndex(ctx context.Context, request *milvuspb.Describe
 	indexName := request.IndexName
 	tr := timerecord.NewTimeRecorder(method)
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcReceived(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
@@ -1749,10 +1655,9 @@ func (node *Proxy) DescribeIndex(ctx context.Context, request *milvuspb.Describe
 		zap.String("index name", indexName))
 
 	if err := node.sched.ddQueue.Enqueue(dit); err != nil {
-		log.Warn(
+		log.Ctx(ctx).Warn(
 			rpcFailedToEnqueue(method),
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.String("db", request.DbName),
 			zap.String("collection", request.CollectionName),
@@ -1770,9 +1675,8 @@ func (node *Proxy) DescribeIndex(ctx context.Context, request *milvuspb.Describe
 		}, nil
 	}
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcEnqueued(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", dit.ID()),
 		zap.Uint64("BeginTs", dit.BeginTs()),
@@ -1783,10 +1687,9 @@ func (node *Proxy) DescribeIndex(ctx context.Context, request *milvuspb.Describe
 		zap.String("index name", indexName))
 
 	if err := dit.WaitToFinish(); err != nil {
-		log.Warn(
+		log.Ctx(ctx).Warn(
 			rpcFailedToWaitToFinish(method),
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.Int64("MsgID", dit.ID()),
 			zap.Uint64("BeginTs", dit.BeginTs()),
@@ -1813,9 +1716,8 @@ func (node *Proxy) DescribeIndex(ctx context.Context, request *milvuspb.Describe
 		}, nil
 	}
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcDone(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", dit.ID()),
 		zap.Uint64("BeginTs", dit.BeginTs()),
@@ -1841,7 +1743,6 @@ func (node *Proxy) DropIndex(ctx context.Context, request *milvuspb.DropIndexReq
 
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-DropIndex")
 	defer sp.Finish()
-	traceID, _, _ := trace.InfoFromSpan(sp)
 
 	dit := &dropIndexTask{
 		ctx:              ctx,
@@ -1853,9 +1754,8 @@ func (node *Proxy) DropIndex(ctx context.Context, request *milvuspb.DropIndexReq
 	method := "DropIndex"
 	tr := timerecord.NewTimeRecorder(method)
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcReceived(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
@@ -1863,10 +1763,9 @@ func (node *Proxy) DropIndex(ctx context.Context, request *milvuspb.DropIndexReq
 		zap.String("index name", request.IndexName))
 
 	if err := node.sched.ddQueue.Enqueue(dit); err != nil {
-		log.Warn(
+		log.Ctx(ctx).Warn(
 			rpcFailedToEnqueue(method),
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.String("db", request.DbName),
 			zap.String("collection", request.CollectionName),
@@ -1881,9 +1780,8 @@ func (node *Proxy) DropIndex(ctx context.Context, request *milvuspb.DropIndexReq
 		}, nil
 	}
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcEnqueued(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", dit.ID()),
 		zap.Uint64("BeginTs", dit.BeginTs()),
@@ -1894,10 +1792,9 @@ func (node *Proxy) DropIndex(ctx context.Context, request *milvuspb.DropIndexReq
 		zap.String("index name", request.IndexName))
 
 	if err := dit.WaitToFinish(); err != nil {
-		log.Warn(
+		log.Ctx(ctx).Warn(
 			rpcFailedToWaitToFinish(method),
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.Int64("MsgID", dit.ID()),
 			zap.Uint64("BeginTs", dit.BeginTs()),
@@ -1918,9 +1815,8 @@ func (node *Proxy) DropIndex(ctx context.Context, request *milvuspb.DropIndexReq
 		}, nil
 	}
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcDone(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", dit.ID()),
 		zap.Uint64("BeginTs", dit.BeginTs()),
@@ -1949,7 +1845,6 @@ func (node *Proxy) GetIndexBuildProgress(ctx context.Context, request *milvuspb.
 
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-GetIndexBuildProgress")
 	defer sp.Finish()
-	traceID, _, _ := trace.InfoFromSpan(sp)
 
 	gibpt := &getIndexBuildProgressTask{
 		ctx:                          ctx,
@@ -1963,9 +1858,8 @@ func (node *Proxy) GetIndexBuildProgress(ctx context.Context, request *milvuspb.
 	method := "GetIndexBuildProgress"
 	tr := timerecord.NewTimeRecorder(method)
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcReceived(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
@@ -1973,10 +1867,9 @@ func (node *Proxy) GetIndexBuildProgress(ctx context.Context, request *milvuspb.
 		zap.String("index name", request.IndexName))
 
 	if err := node.sched.ddQueue.Enqueue(gibpt); err != nil {
-		log.Warn(
+		log.Ctx(ctx).Warn(
 			rpcFailedToEnqueue(method),
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.String("db", request.DbName),
 			zap.String("collection", request.CollectionName),
@@ -1993,9 +1886,8 @@ func (node *Proxy) GetIndexBuildProgress(ctx context.Context, request *milvuspb.
 		}, nil
 	}
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcEnqueued(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", gibpt.ID()),
 		zap.Uint64("BeginTs", gibpt.BeginTs()),
@@ -2006,10 +1898,9 @@ func (node *Proxy) GetIndexBuildProgress(ctx context.Context, request *milvuspb.
 		zap.String("index name", request.IndexName))
 
 	if err := gibpt.WaitToFinish(); err != nil {
-		log.Warn(
+		log.Ctx(ctx).Warn(
 			rpcFailedToWaitToFinish(method),
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.Int64("MsgID", gibpt.ID()),
 			zap.Uint64("BeginTs", gibpt.BeginTs()),
@@ -2031,9 +1922,8 @@ func (node *Proxy) GetIndexBuildProgress(ctx context.Context, request *milvuspb.
 		}, nil
 	}
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcDone(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", gibpt.ID()),
 		zap.Uint64("BeginTs", gibpt.BeginTs()),
@@ -2062,7 +1952,6 @@ func (node *Proxy) GetIndexState(ctx context.Context, request *milvuspb.GetIndex
 
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-Insert")
 	defer sp.Finish()
-	traceID, _, _ := trace.InfoFromSpan(sp)
 
 	dipt := &getIndexStateTask{
 		ctx:                  ctx,
@@ -2075,9 +1964,8 @@ func (node *Proxy) GetIndexState(ctx context.Context, request *milvuspb.GetIndex
 	method := "GetIndexState"
 	tr := timerecord.NewTimeRecorder(method)
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcReceived(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
@@ -2085,10 +1973,9 @@ func (node *Proxy) GetIndexState(ctx context.Context, request *milvuspb.GetIndex
 		zap.String("index name", request.IndexName))
 
 	if err := node.sched.ddQueue.Enqueue(dipt); err != nil {
-		log.Warn(
+		log.Ctx(ctx).Warn(
 			rpcFailedToEnqueue(method),
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.String("db", request.DbName),
 			zap.String("collection", request.CollectionName),
@@ -2106,9 +1993,8 @@ func (node *Proxy) GetIndexState(ctx context.Context, request *milvuspb.GetIndex
 		}, nil
 	}
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcEnqueued(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", dipt.ID()),
 		zap.Uint64("BeginTs", dipt.BeginTs()),
@@ -2119,10 +2005,9 @@ func (node *Proxy) GetIndexState(ctx context.Context, request *milvuspb.GetIndex
 		zap.String("index name", request.IndexName))
 
 	if err := dipt.WaitToFinish(); err != nil {
-		log.Warn(
+		log.Ctx(ctx).Warn(
 			rpcFailedToWaitToFinish(method),
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.Int64("MsgID", dipt.ID()),
 			zap.Uint64("BeginTs", dipt.BeginTs()),
@@ -2145,9 +2030,8 @@ func (node *Proxy) GetIndexState(ctx context.Context, request *milvuspb.GetIndex
 		}, nil
 	}
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcDone(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", dipt.ID()),
 		zap.Uint64("BeginTs", dipt.BeginTs()),
@@ -2169,9 +2053,8 @@ func (node *Proxy) GetIndexState(ctx context.Context, request *milvuspb.GetIndex
 func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) (*milvuspb.MutationResult, error) {
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-Insert")
 	defer sp.Finish()
-	traceID, _, _ := trace.InfoFromSpan(sp)
-	log.Info("Start processing insert request in Proxy", zap.String("traceID", traceID))
-	defer log.Info("Finish processing insert request in Proxy", zap.String("traceID", traceID))
+	log.Ctx(ctx).Info("Start processing insert request in Proxy")
+	defer log.Ctx(ctx).Info("Finish processing insert request in Proxy")
 
 	if !node.checkHealthy() {
 		return &milvuspb.MutationResult{
@@ -2236,24 +2119,23 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		}
 	}
 
-	log.Debug("Enqueue insert request in Proxy",
+	log.Ctx(ctx).Debug("Enqueue insert request in Proxy",
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.String("partition", request.PartitionName),
 		zap.Int("len(FieldsData)", len(request.FieldsData)),
 		zap.Int("len(HashKeys)", len(request.HashKeys)),
-		zap.Uint32("NumRows", request.NumRows),
-		zap.String("traceID", traceID))
+		zap.Uint32("NumRows", request.NumRows))
 
 	if err := node.sched.dmQueue.Enqueue(it); err != nil {
-		log.Debug("Failed to enqueue insert task: " + err.Error())
+		log.Ctx(ctx).Error("Failed to enqueue insert task: " + err.Error())
 		metrics.ProxyDMLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
 			metrics.AbandonLabel).Inc()
 		return constructFailedResponse(err), nil
 	}
 
-	log.Debug("Detail of insert request in Proxy",
+	log.Ctx(ctx).Debug("Detail of insert request in Proxy",
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("msgID", it.Base.MsgID),
 		zap.Uint64("BeginTS", it.BeginTs()),
@@ -2261,11 +2143,10 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.String("partition", request.PartitionName),
-		zap.Uint32("NumRows", request.NumRows),
-		zap.String("traceID", traceID))
+		zap.Uint32("NumRows", request.NumRows))
 
 	if err := it.WaitToFinish(); err != nil {
-		log.Debug("Failed to execute insert task in task scheduler: "+err.Error(), zap.String("traceID", traceID))
+		log.Ctx(ctx).Debug("Failed to execute insert task in task scheduler: " + err.Error())
 		metrics.ProxyDMLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
 			metrics.FailLabel).Inc()
 		return constructFailedResponse(err), nil
@@ -2299,9 +2180,8 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) (*milvuspb.MutationResult, error) {
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-Delete")
 	defer sp.Finish()
-	traceID, _, _ := trace.InfoFromSpan(sp)
-	log.Info("Start processing delete request in Proxy", zap.String("traceID", traceID))
-	defer log.Info("Finish processing delete request in Proxy", zap.String("traceID", traceID))
+	log.Ctx(ctx).Info("Start processing delete request in Proxy")
+	defer log.Ctx(ctx).Info("Finish processing delete request in Proxy")
 
 	receiveSize := proto.Size(request)
 	metrics.ProxyMutationReceiveBytes.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10)).Add(float64(receiveSize))
@@ -2340,7 +2220,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 		chTicker: node.chTicker,
 	}
 
-	log.Debug("Enqueue delete request in Proxy",
+	log.Ctx(ctx).Debug("Enqueue delete request in Proxy",
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
@@ -2349,7 +2229,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 
 	// MsgID will be set by Enqueue()
 	if err := node.sched.dmQueue.Enqueue(dt); err != nil {
-		log.Error("Failed to enqueue delete task: "+err.Error(), zap.String("traceID", traceID))
+		log.Ctx(ctx).Error("Failed to enqueue delete task: " + err.Error())
 		metrics.ProxyDMLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
 			metrics.FailLabel).Inc()
 
@@ -2361,18 +2241,17 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 		}, nil
 	}
 
-	log.Debug("Detail of delete request in Proxy",
+	log.Ctx(ctx).Debug("Detail of delete request in Proxy",
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("msgID", dt.Base.MsgID),
 		zap.Uint64("timestamp", dt.Base.Timestamp),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.String("partition", request.PartitionName),
-		zap.String("expr", request.Expr),
-		zap.String("traceID", traceID))
+		zap.String("expr", request.Expr))
 
 	if err := dt.WaitToFinish(); err != nil {
-		log.Error("Failed to execute delete task in task scheduler: "+err.Error(), zap.String("traceID", traceID))
+		log.Ctx(ctx).Error("Failed to execute delete task in task scheduler: " + err.Error())
 		metrics.ProxyDMLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
 			metrics.TotalLabel).Inc()
 		metrics.ProxyDMLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
@@ -2405,7 +2284,6 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-Search")
 	defer sp.Finish()
-	traceID, _, _ := trace.InfoFromSpan(sp)
 
 	qt := &searchTask{
 		ctx:       ctx,
@@ -2426,9 +2304,8 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	travelTs := request.TravelTimestamp
 	guaranteeTs := request.GuaranteeTimestamp
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcReceived(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
@@ -2441,10 +2318,9 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 		zap.Uint64("guarantee_timestamp", guaranteeTs))
 
 	if err := node.sched.dqQueue.Enqueue(qt); err != nil {
-		log.Warn(
+		log.Ctx(ctx).Warn(
 			rpcFailedToEnqueue(method),
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.String("db", request.DbName),
 			zap.String("collection", request.CollectionName),
@@ -2468,9 +2344,8 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	}
 	tr.Record("search request enqueue")
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcEnqueued(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("msgID", qt.ID()),
 		zap.Uint64("timestamp", qt.Base.Timestamp),
@@ -2485,10 +2360,9 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 		zap.Uint64("guarantee_timestamp", guaranteeTs))
 
 	if err := qt.WaitToFinish(); err != nil {
-		log.Warn(
+		log.Ctx(ctx).Warn(
 			rpcFailedToWaitToFinish(method),
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.Int64("msgID", qt.ID()),
 			zap.String("db", request.DbName),
@@ -2515,9 +2389,8 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	span := tr.Record("wait search result")
 	metrics.ProxyWaitForSearchResultLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10),
 		metrics.SearchLabel).Observe(float64(span.Milliseconds()))
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcDone(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("msgID", qt.ID()),
 		zap.String("db", request.DbName),
@@ -2559,7 +2432,6 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-Flush")
 	defer sp.Finish()
-	traceID, _, _ := trace.InfoFromSpan(sp)
 
 	ft := &flushTask{
 		ctx:          ctx,
@@ -2572,18 +2444,16 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 	tr := timerecord.NewTimeRecorder(method)
 	metrics.ProxyDDLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method, metrics.TotalLabel).Inc()
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcReceived(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.Any("collections", request.CollectionNames))
 
 	if err := node.sched.ddQueue.Enqueue(ft); err != nil {
-		log.Warn(
+		log.Ctx(ctx).Warn(
 			rpcFailedToEnqueue(method),
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.String("db", request.DbName),
 			zap.Any("collections", request.CollectionNames))
@@ -2594,9 +2464,8 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 		return resp, nil
 	}
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcEnqueued(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", ft.ID()),
 		zap.Uint64("BeginTs", ft.BeginTs()),
@@ -2605,10 +2474,9 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 		zap.Any("collections", request.CollectionNames))
 
 	if err := ft.WaitToFinish(); err != nil {
-		log.Warn(
+		log.Ctx(ctx).Warn(
 			rpcFailedToWaitToFinish(method),
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.Int64("MsgID", ft.ID()),
 			zap.Uint64("BeginTs", ft.BeginTs()),
@@ -2623,9 +2491,8 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 		return resp, nil
 	}
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcDone(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", ft.ID()),
 		zap.Uint64("BeginTs", ft.BeginTs()),
@@ -2648,7 +2515,6 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-Query")
 	defer sp.Finish()
-	traceID, _, _ := trace.InfoFromSpan(sp)
 	tr := timerecord.NewTimeRecorder("Query")
 
 	qt := &queryTask{
@@ -2672,9 +2538,8 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 	metrics.ProxyDQLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
 		metrics.TotalLabel).Inc()
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcReceived(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
@@ -2685,10 +2550,9 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		zap.Uint64("guarantee_timestamp", request.GuaranteeTimestamp))
 
 	if err := node.sched.dqQueue.Enqueue(qt); err != nil {
-		log.Warn(
+		log.Ctx(ctx).Warn(
 			rpcFailedToEnqueue(method),
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.String("db", request.DbName),
 			zap.String("collection", request.CollectionName),
@@ -2706,9 +2570,8 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 	}
 	tr.Record("query request enqueue")
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcEnqueued(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("msgID", qt.ID()),
 		zap.String("db", request.DbName),
@@ -2716,10 +2579,9 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		zap.Strings("partitions", request.PartitionNames))
 
 	if err := qt.WaitToFinish(); err != nil {
-		log.Warn(
+		log.Ctx(ctx).Warn(
 			rpcFailedToWaitToFinish(method),
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.Int64("msgID", qt.ID()),
 			zap.String("db", request.DbName),
@@ -2739,9 +2601,8 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 	span := tr.Record("wait query result")
 	metrics.ProxyWaitForSearchResultLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10),
 		metrics.QueryLabel).Observe(float64(span.Milliseconds()))
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcDone(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("msgID", qt.ID()),
 		zap.String("db", request.DbName),
@@ -2771,7 +2632,6 @@ func (node *Proxy) CreateAlias(ctx context.Context, request *milvuspb.CreateAlia
 
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-CreateAlias")
 	defer sp.Finish()
-	traceID, _, _ := trace.InfoFromSpan(sp)
 
 	cat := &CreateAliasTask{
 		ctx:                ctx,
@@ -2784,19 +2644,17 @@ func (node *Proxy) CreateAlias(ctx context.Context, request *milvuspb.CreateAlia
 	tr := timerecord.NewTimeRecorder(method)
 	metrics.ProxyDDLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method, metrics.TotalLabel).Inc()
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcReceived(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("alias", request.Alias),
 		zap.String("collection", request.CollectionName))
 
 	if err := node.sched.ddQueue.Enqueue(cat); err != nil {
-		log.Warn(
+		log.Ctx(ctx).Warn(
 			rpcFailedToEnqueue(method),
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.String("db", request.DbName),
 			zap.String("alias", request.Alias),
@@ -2810,9 +2668,8 @@ func (node *Proxy) CreateAlias(ctx context.Context, request *milvuspb.CreateAlia
 		}, nil
 	}
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcEnqueued(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", cat.ID()),
 		zap.Uint64("BeginTs", cat.BeginTs()),
@@ -2822,10 +2679,9 @@ func (node *Proxy) CreateAlias(ctx context.Context, request *milvuspb.CreateAlia
 		zap.String("collection", request.CollectionName))
 
 	if err := cat.WaitToFinish(); err != nil {
-		log.Warn(
+		log.Ctx(ctx).Warn(
 			rpcFailedToWaitToFinish(method),
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.Int64("MsgID", cat.ID()),
 			zap.Uint64("BeginTs", cat.BeginTs()),
@@ -2841,9 +2697,8 @@ func (node *Proxy) CreateAlias(ctx context.Context, request *milvuspb.CreateAlia
 		}, nil
 	}
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcDone(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", cat.ID()),
 		zap.Uint64("BeginTs", cat.BeginTs()),
@@ -2865,7 +2720,6 @@ func (node *Proxy) DropAlias(ctx context.Context, request *milvuspb.DropAliasReq
 
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-DropAlias")
 	defer sp.Finish()
-	traceID, _, _ := trace.InfoFromSpan(sp)
 
 	dat := &DropAliasTask{
 		ctx:              ctx,
@@ -2878,18 +2732,16 @@ func (node *Proxy) DropAlias(ctx context.Context, request *milvuspb.DropAliasReq
 	tr := timerecord.NewTimeRecorder(method)
 	metrics.ProxyDDLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method, metrics.TotalLabel).Inc()
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcReceived(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("alias", request.Alias))
 
 	if err := node.sched.ddQueue.Enqueue(dat); err != nil {
-		log.Warn(
+		log.Ctx(ctx).Warn(
 			rpcFailedToEnqueue(method),
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.String("db", request.DbName),
 			zap.String("alias", request.Alias))
@@ -2901,9 +2753,8 @@ func (node *Proxy) DropAlias(ctx context.Context, request *milvuspb.DropAliasReq
 		}, nil
 	}
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcEnqueued(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", dat.ID()),
 		zap.Uint64("BeginTs", dat.BeginTs()),
@@ -2912,10 +2763,9 @@ func (node *Proxy) DropAlias(ctx context.Context, request *milvuspb.DropAliasReq
 		zap.String("alias", request.Alias))
 
 	if err := dat.WaitToFinish(); err != nil {
-		log.Warn(
+		log.Ctx(ctx).Warn(
 			rpcFailedToWaitToFinish(method),
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.Int64("MsgID", dat.ID()),
 			zap.Uint64("BeginTs", dat.BeginTs()),
@@ -2931,9 +2781,8 @@ func (node *Proxy) DropAlias(ctx context.Context, request *milvuspb.DropAliasReq
 		}, nil
 	}
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcDone(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", dat.ID()),
 		zap.Uint64("BeginTs", dat.BeginTs()),
@@ -2954,7 +2803,6 @@ func (node *Proxy) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasR
 
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-AlterAlias")
 	defer sp.Finish()
-	traceID, _, _ := trace.InfoFromSpan(sp)
 
 	aat := &AlterAliasTask{
 		ctx:               ctx,
@@ -2967,19 +2815,17 @@ func (node *Proxy) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasR
 	tr := timerecord.NewTimeRecorder(method)
 	metrics.ProxyDDLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method, metrics.TotalLabel).Inc()
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcReceived(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("alias", request.Alias),
 		zap.String("collection", request.CollectionName))
 
 	if err := node.sched.ddQueue.Enqueue(aat); err != nil {
-		log.Warn(
+		log.Ctx(ctx).Warn(
 			rpcFailedToEnqueue(method),
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.String("db", request.DbName),
 			zap.String("alias", request.Alias),
@@ -2992,9 +2838,8 @@ func (node *Proxy) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasR
 		}, nil
 	}
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcEnqueued(method),
-		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", aat.ID()),
 		zap.Uint64("BeginTs", aat.BeginTs()),
@@ -3004,10 +2849,9 @@ func (node *Proxy) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasR
 		zap.String("collection", request.CollectionName))
 
 	if err := aat.WaitToFinish(); err != nil {
-		log.Warn(
+		log.Ctx(ctx).Warn(
 			rpcFailedToWaitToFinish(method),
 			zap.Error(err),
-			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
 			zap.Int64("MsgID", aat.ID()),
 			zap.Uint64("BeginTs", aat.BeginTs()),
@@ -3024,10 +2868,8 @@ func (node *Proxy) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasR
 		}, nil
 	}
 
-	log.Debug(
+	log.Ctx(ctx).Debug(
 		rpcDone(method),
-		zap.String("traceID", traceID),
-		zap.String("role", typeutil.ProxyRole),
 		zap.Int64("MsgID", aat.ID()),
 		zap.Uint64("BeginTs", aat.BeginTs()),
 		zap.Uint64("EndTs", aat.EndTs()),
@@ -3088,7 +2930,7 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 
 		err := node.sched.dqQueue.Enqueue(qt)
 		if err != nil {
-			log.Error("CalcDistance queryTask failed to enqueue", append(items, zap.Error(err))...)
+			log.Ctx(ctx).Error("CalcDistance queryTask failed to enqueue", append(items, zap.Error(err))...)
 
 			return &milvuspb.QueryResults{
 				Status: &commonpb.Status{
@@ -3098,11 +2940,11 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 			}, err
 		}
 
-		log.Debug("CalcDistance queryTask enqueued", items...)
+		log.Ctx(ctx).Debug("CalcDistance queryTask enqueued", items...)
 
 		err = qt.WaitToFinish()
 		if err != nil {
-			log.Error("CalcDistance queryTask failed to WaitToFinish", append(items, zap.Error(err))...)
+			log.Ctx(ctx).Error("CalcDistance queryTask failed to WaitToFinish", append(items, zap.Error(err))...)
 
 			return &milvuspb.QueryResults{
 				Status: &commonpb.Status{
@@ -3112,7 +2954,7 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 			}, err
 		}
 
-		log.Debug("CalcDistance queryTask Done", items...)
+		log.Ctx(ctx).Debug("CalcDistance queryTask Done", items...)
 
 		return &milvuspb.QueryResults{
 			Status:     qt.result.Status,
@@ -3136,7 +2978,7 @@ func (node *Proxy) GetDdChannel(ctx context.Context, request *internalpb.GetDdCh
 
 // GetPersistentSegmentInfo get the information of sealed segment.
 func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.GetPersistentSegmentInfoRequest) (*milvuspb.GetPersistentSegmentInfoResponse, error) {
-	log.Debug("GetPersistentSegmentInfo",
+	log.Ctx(ctx).Debug("GetPersistentSegmentInfo",
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", req.DbName),
 		zap.Any("collection", req.CollectionName))
@@ -3169,11 +3011,11 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 		SegmentIDs: segments,
 	})
 	if err != nil {
-		log.Debug("GetPersistentSegmentInfo fail", zap.Error(err))
+		log.Ctx(ctx).Debug("GetPersistentSegmentInfo fail", zap.Error(err))
 		resp.Status.Reason = fmt.Errorf("dataCoord:GetSegmentInfo, err:%w", err).Error()
 		return resp, nil
 	}
-	log.Debug("GetPersistentSegmentInfo ", zap.Int("len(infos)", len(infoResp.Infos)), zap.Any("status", infoResp.Status))
+	log.Ctx(ctx).Debug("GetPersistentSegmentInfo ", zap.Int("len(infos)", len(infoResp.Infos)), zap.Any("status", infoResp.Status))
 	if infoResp.Status.ErrorCode != commonpb.ErrorCode_Success {
 		resp.Status.Reason = infoResp.Status.Reason
 		return resp, nil
@@ -3198,7 +3040,7 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 
 // GetQuerySegmentInfo gets segment information from QueryCoord.
 func (node *Proxy) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.GetQuerySegmentInfoRequest) (*milvuspb.GetQuerySegmentInfoResponse, error) {
-	log.Debug("GetQuerySegmentInfo",
+	log.Ctx(ctx).Debug("GetQuerySegmentInfo",
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", req.DbName),
 		zap.Any("collection", req.CollectionName))
@@ -3228,14 +3070,14 @@ func (node *Proxy) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.GetQue
 		CollectionID: collID,
 	})
 	if err != nil {
-		log.Error("Failed to get segment info from QueryCoord",
+		log.Ctx(ctx).Error("Failed to get segment info from QueryCoord",
 			zap.Error(err))
 		resp.Status.Reason = err.Error()
 		return resp, nil
 	}
-	log.Debug("GetQuerySegmentInfo ", zap.Any("infos", infoResp.Infos), zap.Any("status", infoResp.Status))
+	log.Ctx(ctx).Debug("GetQuerySegmentInfo ", zap.Any("infos", infoResp.Infos), zap.Any("status", infoResp.Status))
 	if infoResp.Status.ErrorCode != commonpb.ErrorCode_Success {
-		log.Error("Failed to get segment info from QueryCoord", zap.String("errMsg", infoResp.Status.Reason))
+		log.Ctx(ctx).Error("Failed to get segment info from QueryCoord", zap.String("errMsg", infoResp.Status.Reason))
 		resp.Status.Reason = infoResp.Status.Reason
 		return resp, nil
 	}
@@ -3326,14 +3168,14 @@ func (node *Proxy) Dummy(ctx context.Context, req *milvuspb.DummyRequest) (*milv
 	// TODO(wxyu): change name RequestType to Request
 	drt, err := parseDummyRequestType(req.RequestType)
 	if err != nil {
-		log.Debug("Failed to parse dummy request type")
+		log.Ctx(ctx).Debug("Failed to parse dummy request type")
 		return failedResponse, nil
 	}
 
 	if drt.RequestType == "query" {
 		drr, err := parseDummyQueryRequest(req.RequestType)
 		if err != nil {
-			log.Debug("Failed to parse dummy query request")
+			log.Ctx(ctx).Debug("Failed to parse dummy query request")
 			return failedResponse, nil
 		}
 
@@ -3346,7 +3188,7 @@ func (node *Proxy) Dummy(ctx context.Context, req *milvuspb.DummyRequest) (*milv
 
 		_, err = node.Query(ctx, request)
 		if err != nil {
-			log.Debug("Failed to execute dummy query")
+			log.Ctx(ctx).Debug("Failed to execute dummy query")
 			return failedResponse, err
 		}
 
@@ -3355,14 +3197,14 @@ func (node *Proxy) Dummy(ctx context.Context, req *milvuspb.DummyRequest) (*milv
 		}, nil
 	}
 
-	log.Debug("cannot find specify dummy request type")
+	log.Ctx(ctx).Debug("cannot find specify dummy request type")
 	return failedResponse, nil
 }
 
 // RegisterLink registers a link
 func (node *Proxy) RegisterLink(ctx context.Context, req *milvuspb.RegisterLinkRequest) (*milvuspb.RegisterLinkResponse, error) {
 	code := node.stateCode.Load().(internalpb.StateCode)
-	log.Debug("RegisterLink",
+	log.Ctx(ctx).Debug("RegisterLink",
 		zap.String("role", typeutil.ProxyRole),
 		zap.Any("state code of proxy", code))
 
@@ -3388,12 +3230,12 @@ func (node *Proxy) RegisterLink(ctx context.Context, req *milvuspb.RegisterLinkR
 // GetMetrics gets the metrics of proxy
 // TODO(dragondriver): cache the Metrics and set a retention to the cache
 func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	log.Debug("Proxy.GetMetrics",
+	log.Ctx(ctx).Debug("Proxy.GetMetrics",
 		zap.Int64("node_id", Params.ProxyCfg.GetNodeID()),
 		zap.String("req", req.Request))
 
 	if !node.checkHealthy() {
-		log.Warn("Proxy.GetMetrics failed",
+		log.Ctx(ctx).Warn("Proxy.GetMetrics failed",
 			zap.Int64("node_id", Params.ProxyCfg.GetNodeID()),
 			zap.String("req", req.Request),
 			zap.Error(errProxyIsUnhealthy(Params.ProxyCfg.GetNodeID())))
@@ -3409,7 +3251,7 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 
 	metricType, err := metricsinfo.ParseMetricType(req.Request)
 	if err != nil {
-		log.Warn("Proxy.GetMetrics failed to parse metric type",
+		log.Ctx(ctx).Warn("Proxy.GetMetrics failed to parse metric type",
 			zap.Int64("node_id", Params.ProxyCfg.GetNodeID()),
 			zap.String("req", req.Request),
 			zap.Error(err))
@@ -3423,13 +3265,13 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 		}, nil
 	}
 
-	log.Debug("Proxy.GetMetrics",
+	log.Ctx(ctx).Debug("Proxy.GetMetrics",
 		zap.String("metric_type", metricType))
 
 	msgID := UniqueID(0)
 	msgID, err = node.idAllocator.AllocOne()
 	if err != nil {
-		log.Warn("Proxy.GetMetrics failed to allocate id",
+		log.Ctx(ctx).Warn("Proxy.GetMetrics failed to allocate id",
 			zap.Error(err))
 	}
 	req.Base = &commonpb.MsgBase{
@@ -3444,12 +3286,12 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 		if err == nil && ret != nil {
 			return ret, nil
 		}
-		log.Debug("failed to get system info metrics from cache, recompute instead",
+		log.Ctx(ctx).Debug("failed to get system info metrics from cache, recompute instead",
 			zap.Error(err))
 
 		metrics, err := getSystemInfoMetrics(ctx, req, node)
 
-		log.Debug("Proxy.GetMetrics",
+		log.Ctx(ctx).Debug("Proxy.GetMetrics",
 			zap.Int64("node_id", Params.ProxyCfg.GetNodeID()),
 			zap.String("req", req.Request),
 			zap.String("metric_type", metricType),
@@ -3461,7 +3303,7 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 		return metrics, nil
 	}
 
-	log.Debug("Proxy.GetMetrics failed, request metric type is not implemented yet",
+	log.Ctx(ctx).Debug("Proxy.GetMetrics failed, request metric type is not implemented yet",
 		zap.Int64("node_id", Params.ProxyCfg.GetNodeID()),
 		zap.String("req", req.Request),
 		zap.String("metric_type", metricType))
@@ -3477,7 +3319,7 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 
 // LoadBalance would do a load balancing operation between query nodes
 func (node *Proxy) LoadBalance(ctx context.Context, req *milvuspb.LoadBalanceRequest) (*commonpb.Status, error) {
-	log.Debug("Proxy.LoadBalance",
+	log.Ctx(ctx).Debug("Proxy.LoadBalance",
 		zap.Int64("proxy_id", Params.ProxyCfg.GetNodeID()),
 		zap.Any("req", req))
 
@@ -3491,7 +3333,7 @@ func (node *Proxy) LoadBalance(ctx context.Context, req *milvuspb.LoadBalanceReq
 
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetCollectionName())
 	if err != nil {
-		log.Error("failed to get collection id", zap.String("collection name", req.GetCollectionName()), zap.Error(err))
+		log.Ctx(ctx).Error("failed to get collection id", zap.String("collection name", req.GetCollectionName()), zap.Error(err))
 		status.Reason = err.Error()
 		return status, nil
 	}
@@ -3509,24 +3351,24 @@ func (node *Proxy) LoadBalance(ctx context.Context, req *milvuspb.LoadBalanceReq
 		CollectionID:     collectionID,
 	})
 	if err != nil {
-		log.Error("Failed to LoadBalance from Query Coordinator",
+		log.Ctx(ctx).Error("Failed to LoadBalance from Query Coordinator",
 			zap.Any("req", req), zap.Error(err))
 		status.Reason = err.Error()
 		return status, nil
 	}
 	if infoResp.ErrorCode != commonpb.ErrorCode_Success {
-		log.Error("Failed to LoadBalance from Query Coordinator", zap.String("errMsg", infoResp.Reason))
+		log.Ctx(ctx).Error("Failed to LoadBalance from Query Coordinator", zap.String("errMsg", infoResp.Reason))
 		status.Reason = infoResp.Reason
 		return status, nil
 	}
-	log.Debug("LoadBalance Done", zap.Any("req", req), zap.Any("status", infoResp))
+	log.Ctx(ctx).Debug("LoadBalance Done", zap.Any("req", req), zap.Any("status", infoResp))
 	status.ErrorCode = commonpb.ErrorCode_Success
 	return status, nil
 }
 
 //GetCompactionState gets the compaction state of multiple segments
 func (node *Proxy) GetCompactionState(ctx context.Context, req *milvuspb.GetCompactionStateRequest) (*milvuspb.GetCompactionStateResponse, error) {
-	log.Info("received GetCompactionState request", zap.Int64("compactionID", req.GetCompactionID()))
+	log.Ctx(ctx).Info("received GetCompactionState request", zap.Int64("compactionID", req.GetCompactionID()))
 	resp := &milvuspb.GetCompactionStateResponse{}
 	if !node.checkHealthy() {
 		resp.Status = unhealthyStatus()
@@ -3534,13 +3376,13 @@ func (node *Proxy) GetCompactionState(ctx context.Context, req *milvuspb.GetComp
 	}
 
 	resp, err := node.dataCoord.GetCompactionState(ctx, req)
-	log.Info("received GetCompactionState response", zap.Int64("compactionID", req.GetCompactionID()), zap.Any("resp", resp), zap.Error(err))
+	log.Ctx(ctx).Info("received GetCompactionState response", zap.Int64("compactionID", req.GetCompactionID()), zap.Any("resp", resp), zap.Error(err))
 	return resp, err
 }
 
 // ManualCompaction invokes compaction on specified collection
 func (node *Proxy) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompactionRequest) (*milvuspb.ManualCompactionResponse, error) {
-	log.Info("received ManualCompaction request", zap.Int64("collectionID", req.GetCollectionID()))
+	log.Ctx(ctx).Info("received ManualCompaction request", zap.Int64("collectionID", req.GetCollectionID()))
 	resp := &milvuspb.ManualCompactionResponse{}
 	if !node.checkHealthy() {
 		resp.Status = unhealthyStatus()
@@ -3548,13 +3390,13 @@ func (node *Proxy) ManualCompaction(ctx context.Context, req *milvuspb.ManualCom
 	}
 
 	resp, err := node.dataCoord.ManualCompaction(ctx, req)
-	log.Info("received ManualCompaction response", zap.Int64("collectionID", req.GetCollectionID()), zap.Any("resp", resp), zap.Error(err))
+	log.Ctx(ctx).Info("received ManualCompaction response", zap.Int64("collectionID", req.GetCollectionID()), zap.Any("resp", resp), zap.Error(err))
 	return resp, err
 }
 
 // GetCompactionStateWithPlans returns the compactions states with the given plan ID
 func (node *Proxy) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.GetCompactionPlansRequest) (*milvuspb.GetCompactionPlansResponse, error) {
-	log.Info("received GetCompactionStateWithPlans request", zap.Int64("compactionID", req.GetCompactionID()))
+	log.Ctx(ctx).Info("received GetCompactionStateWithPlans request", zap.Int64("compactionID", req.GetCompactionID()))
 	resp := &milvuspb.GetCompactionPlansResponse{}
 	if !node.checkHealthy() {
 		resp.Status = unhealthyStatus()
@@ -3562,27 +3404,27 @@ func (node *Proxy) GetCompactionStateWithPlans(ctx context.Context, req *milvusp
 	}
 
 	resp, err := node.dataCoord.GetCompactionStateWithPlans(ctx, req)
-	log.Info("received GetCompactionStateWithPlans response", zap.Int64("compactionID", req.GetCompactionID()), zap.Any("resp", resp), zap.Error(err))
+	log.Ctx(ctx).Info("received GetCompactionStateWithPlans response", zap.Int64("compactionID", req.GetCompactionID()), zap.Any("resp", resp), zap.Error(err))
 	return resp, err
 }
 
 // GetFlushState gets the flush state of multiple segments
 func (node *Proxy) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
-	log.Info("received get flush state request", zap.Any("request", req))
+	log.Ctx(ctx).Info("received get flush state request", zap.Any("request", req))
 	var err error
 	resp := &milvuspb.GetFlushStateResponse{}
 	if !node.checkHealthy() {
 		resp.Status = unhealthyStatus()
-		log.Info("unable to get flush state because of closed server")
+		log.Ctx(ctx).Info("unable to get flush state because of closed server")
 		return resp, nil
 	}
 
 	resp, err = node.dataCoord.GetFlushState(ctx, req)
 	if err != nil {
-		log.Info("failed to get flush state response", zap.Error(err))
+		log.Ctx(ctx).Info("failed to get flush state response", zap.Error(err))
 		return nil, err
 	}
-	log.Info("received get flush state response", zap.Any("response", resp))
+	log.Ctx(ctx).Info("received get flush state response", zap.Any("response", resp))
 	return resp, err
 }
 
@@ -3602,7 +3444,7 @@ func unhealthyStatus() *commonpb.Status {
 
 // Import data files(json, numpy, etc.) on MinIO/S3 storage, read and parse them into sealed segments
 func (node *Proxy) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
-	log.Info("received import request",
+	log.Ctx(ctx).Info("received import request",
 		zap.String("collection name", req.GetCollectionName()),
 		zap.Bool("row-based", req.GetRowBased()))
 	resp := &milvuspb.ImportResponse{
@@ -3618,7 +3460,7 @@ func (node *Proxy) Import(ctx context.Context, req *milvuspb.ImportRequest) (*mi
 	// Get collection ID and then channel names.
 	collID, err := globalMetaCache.GetCollectionID(ctx, req.GetCollectionName())
 	if err != nil {
-		log.Error("collection ID not found",
+		log.Ctx(ctx).Error("collection ID not found",
 			zap.String("collection name", req.GetCollectionName()),
 			zap.Error(err))
 		resp.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
@@ -3627,7 +3469,7 @@ func (node *Proxy) Import(ctx context.Context, req *milvuspb.ImportRequest) (*mi
 	}
 	chNames, err := node.chMgr.getVChannels(collID)
 	if err != nil {
-		log.Error("failed to get virtual channels",
+		log.Ctx(ctx).Error("failed to get virtual channels",
 			zap.Error(err),
 			zap.String("collection", req.GetCollectionName()),
 			zap.Int64("collection_id", collID))
@@ -3642,7 +3484,7 @@ func (node *Proxy) Import(ctx context.Context, req *milvuspb.ImportRequest) (*mi
 	// Call rootCoord to finish import.
 	respFromRC, err := node.rootCoord.Import(ctx, req)
 	if err != nil {
-		log.Error("failed to execute bulk load request", zap.Error(err))
+		log.Ctx(ctx).Error("failed to execute bulk load request", zap.Error(err))
 		resp.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		resp.Status.Reason = err.Error()
 		return resp, nil
@@ -3652,7 +3494,7 @@ func (node *Proxy) Import(ctx context.Context, req *milvuspb.ImportRequest) (*mi
 
 // GetImportState checks import task state from datanode
 func (node *Proxy) GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
-	log.Info("received get import state request", zap.Int64("taskID", req.GetTask()))
+	log.Ctx(ctx).Info("received get import state request", zap.Int64("taskID", req.GetTask()))
 	resp := &milvuspb.GetImportStateResponse{}
 	if !node.checkHealthy() {
 		resp.Status = unhealthyStatus()
@@ -3660,13 +3502,13 @@ func (node *Proxy) GetImportState(ctx context.Context, req *milvuspb.GetImportSt
 	}
 
 	resp, err := node.rootCoord.GetImportState(ctx, req)
-	log.Info("received get import state response", zap.Int64("taskID", req.GetTask()), zap.Any("resp", resp), zap.Error(err))
+	log.Ctx(ctx).Info("received get import state response", zap.Int64("taskID", req.GetTask()), zap.Any("resp", resp), zap.Error(err))
 	return resp, err
 }
 
 // ListImportTasks get id array of all import tasks from rootcoord
 func (node *Proxy) ListImportTasks(ctx context.Context, req *milvuspb.ListImportTasksRequest) (*milvuspb.ListImportTasksResponse, error) {
-	log.Info("received list import tasks request")
+	log.Ctx(ctx).Info("received list import tasks request")
 	resp := &milvuspb.ListImportTasksResponse{}
 	if !node.checkHealthy() {
 		resp.Status = unhealthyStatus()
@@ -3674,13 +3516,13 @@ func (node *Proxy) ListImportTasks(ctx context.Context, req *milvuspb.ListImport
 	}
 
 	resp, err := node.rootCoord.ListImportTasks(ctx, req)
-	log.Info("received list import tasks response")
+	log.Ctx(ctx).Info("received list import tasks response")
 	return resp, err
 }
 
 // GetReplicas gets replica info
 func (node *Proxy) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasRequest) (*milvuspb.GetReplicasResponse, error) {
-	log.Info("received get replicas request")
+	log.Ctx(ctx).Info("received get replicas request")
 	resp := &milvuspb.GetReplicasResponse{}
 	if !node.checkHealthy() {
 		resp.Status = unhealthyStatus()
@@ -3693,14 +3535,14 @@ func (node *Proxy) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasReq
 	}
 
 	resp, err := node.queryCoord.GetReplicas(ctx, req)
-	log.Info("received get replicas response", zap.Any("resp", resp), zap.Error(err))
+	log.Ctx(ctx).Info("received get replicas response", zap.Any("resp", resp), zap.Error(err))
 	return resp, err
 }
 
 // InvalidateCredentialCache invalidate the credential cache of specified username.
 func (node *Proxy) InvalidateCredentialCache(ctx context.Context, request *proxypb.InvalidateCredCacheRequest) (*commonpb.Status, error) {
-	ctx = logutil.WithModule(ctx, moduleName)
-	logutil.Logger(ctx).Debug("received request to invalidate credential cache",
+	ctx = log.WithModule(ctx, moduleName)
+	log.Ctx(ctx).Debug("received request to invalidate credential cache",
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("username", request.Username))
 
@@ -3708,7 +3550,7 @@ func (node *Proxy) InvalidateCredentialCache(ctx context.Context, request *proxy
 	if globalMetaCache != nil {
 		globalMetaCache.RemoveCredential(username) // no need to return error, though credential may be not cached
 	}
-	logutil.Logger(ctx).Debug("complete to invalidate credential cache",
+	log.Ctx(ctx).Debug("complete to invalidate credential cache",
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("username", request.Username))
 
@@ -3720,8 +3562,8 @@ func (node *Proxy) InvalidateCredentialCache(ctx context.Context, request *proxy
 
 // UpdateCredentialCache update the credential cache of specified username.
 func (node *Proxy) UpdateCredentialCache(ctx context.Context, request *proxypb.UpdateCredCacheRequest) (*commonpb.Status, error) {
-	ctx = logutil.WithModule(ctx, moduleName)
-	logutil.Logger(ctx).Debug("received request to update credential cache",
+	ctx = log.WithModule(ctx, moduleName)
+	log.Ctx(ctx).Debug("received request to update credential cache",
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("username", request.Username))
 
@@ -3732,7 +3574,7 @@ func (node *Proxy) UpdateCredentialCache(ctx context.Context, request *proxypb.U
 	if globalMetaCache != nil {
 		globalMetaCache.UpdateCredential(credInfo) // no need to return error, though credential may be not cached
 	}
-	logutil.Logger(ctx).Debug("complete to update credential cache",
+	log.Ctx(ctx).Debug("complete to update credential cache",
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("username", request.Username))
 
@@ -3743,7 +3585,7 @@ func (node *Proxy) UpdateCredentialCache(ctx context.Context, request *proxypb.U
 }
 
 func (node *Proxy) CreateCredential(ctx context.Context, req *milvuspb.CreateCredentialRequest) (*commonpb.Status, error) {
-	log.Debug("CreateCredential", zap.String("role", typeutil.RootCoordRole), zap.String("username", req.Username))
+	log.Ctx(ctx).Debug("CreateCredential", zap.String("role", typeutil.RootCoordRole), zap.String("username", req.Username))
 	// validate params
 	username := req.Username
 	if err := ValidateUsername(username); err != nil {
@@ -3754,14 +3596,14 @@ func (node *Proxy) CreateCredential(ctx context.Context, req *milvuspb.CreateCre
 	}
 	rawPassword, err := crypto.Base64Decode(req.Password)
 	if err != nil {
-		log.Error("decode password fail", zap.String("username", req.Username), zap.Error(err))
+		log.Ctx(ctx).Error("decode password fail", zap.String("username", req.Username), zap.Error(err))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_CreateCredentialFailure,
 			Reason:    "decode password fail key:" + req.Username,
 		}, nil
 	}
 	if err = ValidatePassword(rawPassword); err != nil {
-		log.Error("illegal password", zap.String("username", req.Username), zap.Error(err))
+		log.Ctx(ctx).Error("illegal password", zap.String("username", req.Username), zap.Error(err))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_IllegalArgument,
 			Reason:    err.Error(),
@@ -3769,7 +3611,7 @@ func (node *Proxy) CreateCredential(ctx context.Context, req *milvuspb.CreateCre
 	}
 	encryptedPassword, err := crypto.PasswordEncrypt(rawPassword)
 	if err != nil {
-		log.Error("encrypt password fail", zap.String("username", req.Username), zap.Error(err))
+		log.Ctx(ctx).Error("encrypt password fail", zap.String("username", req.Username), zap.Error(err))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_CreateCredentialFailure,
 			Reason:    "encrypt password fail key:" + req.Username,
@@ -3782,7 +3624,7 @@ func (node *Proxy) CreateCredential(ctx context.Context, req *milvuspb.CreateCre
 	}
 	result, err := node.rootCoord.CreateCredential(ctx, credInfo)
 	if err != nil { // for error like conntext timeout etc.
-		log.Error("create credential fail", zap.String("username", req.Username), zap.Error(err))
+		log.Ctx(ctx).Error("create credential fail", zap.String("username", req.Username), zap.Error(err))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
@@ -3792,10 +3634,10 @@ func (node *Proxy) CreateCredential(ctx context.Context, req *milvuspb.CreateCre
 }
 
 func (node *Proxy) UpdateCredential(ctx context.Context, req *milvuspb.UpdateCredentialRequest) (*commonpb.Status, error) {
-	log.Debug("UpdateCredential", zap.String("role", typeutil.RootCoordRole), zap.String("username", req.Username))
+	log.Ctx(ctx).Debug("UpdateCredential", zap.String("role", typeutil.RootCoordRole), zap.String("username", req.Username))
 	rawOldPassword, err := crypto.Base64Decode(req.OldPassword)
 	if err != nil {
-		log.Error("decode old password fail", zap.String("username", req.Username), zap.Error(err))
+		log.Ctx(ctx).Error("decode old password fail", zap.String("username", req.Username), zap.Error(err))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UpdateCredentialFailure,
 			Reason:    "decode old password fail when updating:" + req.Username,
@@ -3803,7 +3645,7 @@ func (node *Proxy) UpdateCredential(ctx context.Context, req *milvuspb.UpdateCre
 	}
 	rawNewPassword, err := crypto.Base64Decode(req.NewPassword)
 	if err != nil {
-		log.Error("decode password fail", zap.String("username", req.Username), zap.Error(err))
+		log.Ctx(ctx).Error("decode password fail", zap.String("username", req.Username), zap.Error(err))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UpdateCredentialFailure,
 			Reason:    "decode password fail when updating:" + req.Username,
@@ -3811,7 +3653,7 @@ func (node *Proxy) UpdateCredential(ctx context.Context, req *milvuspb.UpdateCre
 	}
 	// valid new password
 	if err = ValidatePassword(rawNewPassword); err != nil {
-		log.Error("illegal password", zap.String("username", req.Username), zap.Error(err))
+		log.Ctx(ctx).Error("illegal password", zap.String("username", req.Username), zap.Error(err))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_IllegalArgument,
 			Reason:    err.Error(),
@@ -3820,7 +3662,7 @@ func (node *Proxy) UpdateCredential(ctx context.Context, req *milvuspb.UpdateCre
 	// check old password is correct
 	oldCredInfo, err := globalMetaCache.GetCredentialInfo(ctx, req.Username)
 	if err != nil {
-		log.Error("found no credential", zap.String("username", req.Username), zap.Error(err))
+		log.Ctx(ctx).Error("found no credential", zap.String("username", req.Username), zap.Error(err))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UpdateCredentialFailure,
 			Reason:    "found no credential:" + req.Username,
@@ -3835,7 +3677,7 @@ func (node *Proxy) UpdateCredential(ctx context.Context, req *milvuspb.UpdateCre
 	// update meta data
 	encryptedPassword, err := crypto.PasswordEncrypt(rawNewPassword)
 	if err != nil {
-		log.Error("encrypt password fail", zap.String("username", req.Username), zap.Error(err))
+		log.Ctx(ctx).Error("encrypt password fail", zap.String("username", req.Username), zap.Error(err))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UpdateCredentialFailure,
 			Reason:    "encrypt password fail when updating:" + req.Username,
@@ -3848,7 +3690,7 @@ func (node *Proxy) UpdateCredential(ctx context.Context, req *milvuspb.UpdateCre
 	}
 	result, err := node.rootCoord.UpdateCredential(ctx, updateCredReq)
 	if err != nil { // for error like conntext timeout etc.
-		log.Error("update credential fail", zap.String("username", req.Username), zap.Error(err))
+		log.Ctx(ctx).Error("update credential fail", zap.String("username", req.Username), zap.Error(err))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
@@ -3858,7 +3700,7 @@ func (node *Proxy) UpdateCredential(ctx context.Context, req *milvuspb.UpdateCre
 }
 
 func (node *Proxy) DeleteCredential(ctx context.Context, req *milvuspb.DeleteCredentialRequest) (*commonpb.Status, error) {
-	log.Debug("DeleteCredential", zap.String("role", typeutil.RootCoordRole), zap.String("username", req.Username))
+	log.Ctx(ctx).Debug("DeleteCredential", zap.String("role", typeutil.RootCoordRole), zap.String("username", req.Username))
 	if req.Username == util.UserRoot {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_DeleteCredentialFailure,
@@ -3867,7 +3709,7 @@ func (node *Proxy) DeleteCredential(ctx context.Context, req *milvuspb.DeleteCre
 	}
 	result, err := node.rootCoord.DeleteCredential(ctx, req)
 	if err != nil { // for error like conntext timeout etc.
-		log.Error("delete credential fail", zap.String("username", req.Username), zap.Error(err))
+		log.Ctx(ctx).Error("delete credential fail", zap.String("username", req.Username), zap.Error(err))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
@@ -3877,7 +3719,7 @@ func (node *Proxy) DeleteCredential(ctx context.Context, req *milvuspb.DeleteCre
 }
 
 func (node *Proxy) ListCredUsers(ctx context.Context, req *milvuspb.ListCredUsersRequest) (*milvuspb.ListCredUsersResponse, error) {
-	log.Debug("ListCredUsers", zap.String("role", typeutil.RootCoordRole))
+	log.Ctx(ctx).Debug("ListCredUsers", zap.String("role", typeutil.RootCoordRole))
 	rootCoordReq := &milvuspb.ListCredUsersRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_ListCredUsernames,

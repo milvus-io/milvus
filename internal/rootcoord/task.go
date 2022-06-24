@@ -113,7 +113,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 	if t.Req.ShardsNum <= 0 {
 		t.Req.ShardsNum = common.DefaultShardsNum
 	}
-	log.Debug("CreateCollectionReqTask Execute", zap.Any("CollectionName", t.Req.CollectionName),
+	log.Ctx(ctx).Debug("CreateCollectionReqTask Execute", zap.Any("CollectionName", t.Req.CollectionName),
 		zap.Int32("ShardsNum", t.Req.ShardsNum),
 		zap.String("ConsistencyLevel", t.Req.ConsistencyLevel.String()))
 
@@ -150,7 +150,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		return fmt.Errorf("alloc partition id error = %w", err)
 	}
 
-	log.Debug("collection name -> id",
+	log.Ctx(ctx).Debug("collection name -> id",
 		zap.String("collection name", t.Req.CollectionName),
 		zap.Int64("collection_id", collID),
 		zap.Int64("default partition id", partID))
@@ -257,7 +257,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		t.core.chanTimeTick.removeDdlTimeTick(ts, reason)
 		errTimeTick := t.core.SendTimeTick(ts, reason)
 		if errTimeTick != nil {
-			log.Warn("Failed to send timetick", zap.Error(errTimeTick))
+			log.Ctx(ctx).Warn("Failed to send timetick", zap.Error(errTimeTick))
 		}
 		return nil
 	}
@@ -315,7 +315,7 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 
 	//notify query service to release collection
 	if err = t.core.CallReleaseCollectionService(t.core.ctx, ts, 0, collMeta.ID); err != nil {
-		log.Error("Failed to CallReleaseCollectionService", zap.Error(err))
+		log.Ctx(ctx).Error("Failed to CallReleaseCollectionService", zap.Error(err))
 		return err
 	}
 
@@ -365,12 +365,12 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		t.core.chanTimeTick.removeDdlTimeTick(ts, reason)
 		errTimeTick := t.core.SendTimeTick(ts, reason)
 		if errTimeTick != nil {
-			log.Warn("Failed to send timetick", zap.Error(errTimeTick))
+			log.Ctx(ctx).Warn("Failed to send timetick", zap.Error(errTimeTick))
 		}
 		// send tt into deleted channels to tell data_node to clear flowgragh
 		err := t.core.chanTimeTick.sendTimeTickToChannel(collMeta.PhysicalChannelNames, ts)
 		if err != nil {
-			log.Warn("failed to send time tick to channel", zap.Any("physical names", collMeta.PhysicalChannelNames), zap.Error(err))
+			log.Ctx(ctx).Warn("failed to send time tick to channel", zap.Any("physical names", collMeta.PhysicalChannelNames), zap.Error(err))
 		}
 		// remove dml channel after send dd msg
 		t.core.chanTimeTick.removeDmlChannels(collMeta.PhysicalChannelNames...)
@@ -580,7 +580,7 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 		t.core.chanTimeTick.removeDdlTimeTick(ts, reason)
 		errTimeTick := t.core.SendTimeTick(ts, reason)
 		if errTimeTick != nil {
-			log.Warn("Failed to send timetick", zap.Error(errTimeTick))
+			log.Ctx(ctx).Warn("Failed to send timetick", zap.Error(errTimeTick))
 		}
 		return nil
 	}
@@ -671,7 +671,7 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 		t.core.chanTimeTick.removeDdlTimeTick(ts, reason)
 		errTimeTick := t.core.SendTimeTick(ts, reason)
 		if errTimeTick != nil {
-			log.Warn("Failed to send timetick", zap.Error(errTimeTick))
+			log.Ctx(ctx).Warn("Failed to send timetick", zap.Error(errTimeTick))
 		}
 		return nil
 	}
@@ -785,7 +785,7 @@ func (t *DescribeSegmentReqTask) Execute(ctx context.Context) error {
 
 	segIDs, err := t.core.CallGetFlushedSegmentsService(ctx, t.Req.CollectionID, -1)
 	if err != nil {
-		log.Debug("Get flushed segment from data coord failed", zap.String("collection_name", coll.Schema.Name), zap.Error(err))
+		log.Ctx(ctx).Debug("Get flushed segment from data coord failed", zap.String("collection_name", coll.Schema.Name), zap.Error(err))
 		return err
 	}
 
@@ -802,7 +802,7 @@ func (t *DescribeSegmentReqTask) Execute(ctx context.Context) error {
 	}
 	//TODO, get filed_id and index_name from request
 	segIdxInfo, err := t.core.MetaTable.GetSegmentIndexInfoByID(t.Req.SegmentID, -1, "")
-	log.Debug("RootCoord DescribeSegmentReqTask, MetaTable.GetSegmentIndexInfoByID", zap.Any("SegmentID", t.Req.SegmentID),
+	log.Ctx(ctx).Debug("RootCoord DescribeSegmentReqTask, MetaTable.GetSegmentIndexInfoByID", zap.Any("SegmentID", t.Req.SegmentID),
 		zap.Any("segIdxInfo", segIdxInfo), zap.Error(err))
 	if err != nil {
 		return err
@@ -847,7 +847,7 @@ func (t *ShowSegmentReqTask) Execute(ctx context.Context) error {
 	}
 	segIDs, err := t.core.CallGetFlushedSegmentsService(ctx, t.Req.CollectionID, t.Req.PartitionID)
 	if err != nil {
-		log.Debug("Get flushed segments from data coord failed", zap.String("collection name", coll.Schema.Name), zap.Int64("partition id", t.Req.PartitionID), zap.Error(err))
+		log.Ctx(ctx).Debug("Get flushed segments from data coord failed", zap.String("collection name", coll.Schema.Name), zap.Int64("partition id", t.Req.PartitionID), zap.Error(err))
 		return err
 	}
 
@@ -869,7 +869,7 @@ func (t *DescribeSegmentsReqTask) Execute(ctx context.Context) error {
 	collectionID := t.Req.GetCollectionID()
 	segIDs, err := t.core.CallGetFlushedSegmentsService(ctx, collectionID, -1)
 	if err != nil {
-		log.Error("failed to get flushed segments",
+		log.Ctx(ctx).Error("failed to get flushed segments",
 			zap.Error(err),
 			zap.Int64("collection", collectionID))
 		return err
@@ -885,7 +885,7 @@ func (t *DescribeSegmentsReqTask) Execute(ctx context.Context) error {
 
 	for _, segID := range t.Req.SegmentIDs {
 		if _, ok := segIDsMap[segID]; !ok {
-			log.Warn("requested segment not found",
+			log.Ctx(ctx).Warn("requested segment not found",
 				zap.Int64("collection", collectionID),
 				zap.Int64("segment", segID))
 			return fmt.Errorf("segment not found, collection: %d, segment: %d",
@@ -923,7 +923,7 @@ func (t *DescribeSegmentsReqTask) Execute(ctx context.Context) error {
 					})
 			extraIndexInfo, err := t.core.MetaTable.GetIndexByID(indexID)
 			if err != nil {
-				log.Warn("index not found in meta table, maybe index has been deleted",
+				log.Ctx(ctx).Warn("index not found in meta table, maybe index has been deleted",
 					zap.Error(err),
 					zap.Int64("indexID", indexID),
 					zap.Int64("collection", collectionID),
@@ -958,7 +958,7 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 		indexName = Params.CommonCfg.DefaultIndexName //TODO, get name from request
 	}
 	indexID, _, err := t.core.IDAllocator(1)
-	log.Debug("RootCoord CreateIndexReqTask", zap.Any("indexID", indexID), zap.Error(err))
+	log.Ctx(ctx).Debug("RootCoord CreateIndexReqTask", zap.Any("indexID", indexID), zap.Error(err))
 	if err != nil {
 		return err
 	}
@@ -972,7 +972,7 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 		IndexParams: t.Req.ExtraParams,
 		CreateTime:  createTS,
 	}
-	log.Info("create index for collection",
+	log.Ctx(ctx).Info("create index for collection",
 		zap.String("collection", t.Req.GetCollectionName()),
 		zap.String("field", t.Req.GetFieldName()),
 		zap.String("index", indexName),
@@ -988,13 +988,13 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 		flushedSegs = append(flushedSegs, k)
 	}
 	if err != nil {
-		log.Debug("Get flushed segments from data coord failed", zap.String("collection_name", collMeta.Schema.Name), zap.Error(err))
+		log.Ctx(ctx).Debug("Get flushed segments from data coord failed", zap.String("collection_name", collMeta.Schema.Name), zap.Error(err))
 		return err
 	}
 
 	segIDs, field, err := t.core.MetaTable.GetNotIndexedSegments(t.Req.CollectionName, t.Req.FieldName, idxInfo, flushedSegs)
 	if err != nil {
-		log.Debug("RootCoord CreateIndexReqTask metaTable.GetNotIndexedSegments", zap.Error(err))
+		log.Ctx(ctx).Debug("RootCoord CreateIndexReqTask metaTable.GetNotIndexedSegments", zap.Error(err))
 		return err
 	}
 
@@ -1019,7 +1019,7 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 			info.EnableIndex = true
 		}
 		if err := t.core.MetaTable.AddIndex(&info); err != nil {
-			log.Debug("Add index into meta table failed", zap.Int64("collection_id", collMeta.ID), zap.Int64("index_id", info.IndexID), zap.Int64("build_id", info.BuildID), zap.Error(err))
+			log.Ctx(ctx).Debug("Add index into meta table failed", zap.Int64("collection_id", collMeta.ID), zap.Int64("index_id", info.IndexID), zap.Int64("build_id", info.BuildID), zap.Error(err))
 		}
 		cnt++
 	}
@@ -1051,7 +1051,7 @@ func (t *DescribeIndexReqTask) Execute(ctx context.Context) error {
 	for _, i := range idx {
 		f, err := GetFieldSchemaByIndexID(&coll, typeutil.UniqueID(i.IndexID))
 		if err != nil {
-			log.Warn("Get field schema by index id failed", zap.String("collection name", t.Req.CollectionName), zap.String("index name", t.Req.IndexName), zap.Error(err))
+			log.Ctx(ctx).Warn("Get field schema by index id failed", zap.String("collection name", t.Req.CollectionName), zap.String("index name", t.Req.IndexName), zap.Error(err))
 			continue
 		}
 		desc := &milvuspb.IndexDescription{

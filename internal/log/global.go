@@ -14,8 +14,16 @@
 package log
 
 import (
+	"context"
+
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+)
+
+type ctxLogKeyType struct{}
+
+var (
+	CtxLogKey = ctxLogKeyType{}
 )
 
 // Debug logs a message at DebugLevel. The message includes any fields passed
@@ -106,4 +114,46 @@ func SetLevel(l zapcore.Level) {
 // GetLevel gets the logging level.
 func GetLevel() zapcore.Level {
 	return _globalP.Load().(*ZapProperties).Level.Level()
+}
+
+// WithTraceID returns a context with trace_id attached
+func WithTraceID(ctx context.Context, traceID string) context.Context {
+	return WithFields(ctx, zap.String("traceID", traceID))
+}
+
+// WithReqID adds given reqID field to the logger in ctx
+func WithReqID(ctx context.Context, reqID int64) context.Context {
+	fields := []zap.Field{zap.Int64("reqID", reqID)}
+	return WithFields(ctx, fields...)
+}
+
+// WithModule adds given module field to the logger in ctx
+func WithModule(ctx context.Context, module string) context.Context {
+	fields := []zap.Field{zap.String("module", module)}
+	return WithFields(ctx, fields...)
+}
+
+// WithFields returns a context with fields attached
+func WithFields(ctx context.Context, fields ...zap.Field) context.Context {
+	var zlogger *zap.Logger
+	if ctxLogger, ok := ctx.Value(CtxLogKey).(*MLogger); ok {
+		zlogger = ctxLogger.Logger
+	} else {
+		zlogger = ctxL()
+	}
+	mLogger := &MLogger{
+		Logger: zlogger.With(fields...),
+	}
+	return context.WithValue(ctx, CtxLogKey, mLogger)
+}
+
+// Ctx returns a logger which will log contextual messages attached in ctx
+func Ctx(ctx context.Context) *MLogger {
+	if ctx == nil {
+		return &MLogger{Logger: ctxL()}
+	}
+	if ctxLogger, ok := ctx.Value(CtxLogKey).(*MLogger); ok {
+		return ctxLogger
+	}
+	return &MLogger{Logger: ctxL()}
 }

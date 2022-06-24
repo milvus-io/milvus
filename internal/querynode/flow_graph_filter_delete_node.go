@@ -94,14 +94,14 @@ func (fddNode *filterDeleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			if err != nil {
 				// error occurs when missing meta info or data is misaligned, should not happen
 				err = fmt.Errorf("filterInvalidDeleteMessage failed, err = %s, collection = %d, channel = %s", err, fddNode.collectionID, fddNode.channel)
-				log.Error(err.Error())
+				log.Ctx(msg.TraceCtx()).Error(err.Error())
 				panic(err)
 			}
 			if resMsg != nil {
 				dMsg.deleteMessages = append(dMsg.deleteMessages, resMsg)
 			}
 		default:
-			log.Warn("invalid message type in filterDeleteNode",
+			log.Ctx(msg.TraceCtx()).Warn("invalid message type in filterDeleteNode",
 				zap.String("message type", msg.Type().String()),
 				zap.Int64("collection", fddNode.collectionID),
 				zap.String("channel", fddNode.channel))
@@ -129,7 +129,7 @@ func (fddNode *filterDeleteNode) filterInvalidDeleteMessage(msg *msgstream.Delet
 	}
 
 	if len(msg.Timestamps) <= 0 {
-		log.Debug("filter invalid delete message, no message",
+		log.Ctx(msg.TraceCtx()).Debug("filter invalid delete message, no message",
 			zap.String("channel", fddNode.channel),
 			zap.Any("collectionID", msg.CollectionID),
 			zap.Any("partitionID", msg.PartitionID))

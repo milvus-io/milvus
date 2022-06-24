@@ -109,7 +109,7 @@ func (p *proxyClientManager) InvalidateCollectionMetaCache(ctx context.Context, 
 	defer p.lock.Unlock()
 
 	if len(p.proxyClient) == 0 {
-		log.Warn("proxy client is empty, InvalidateCollectionMetaCache will not send to any client")
+		log.Ctx(ctx).Warn("proxy client is empty, InvalidateCollectionMetaCache will not send to any client")
 		return nil
 	}
 
@@ -135,7 +135,7 @@ func (p *proxyClientManager) ReleaseDQLMessageStream(ctx context.Context, in *pr
 	defer p.lock.Unlock()
 
 	if len(p.proxyClient) == 0 {
-		log.Warn("proxy client is empty, ReleaseDQLMessageStream will not send to any client")
+		log.Ctx(ctx).Warn("proxy client is empty, ReleaseDQLMessageStream will not send to any client")
 		return nil
 	}
 
@@ -161,7 +161,7 @@ func (p *proxyClientManager) InvalidateCredentialCache(ctx context.Context, requ
 	defer p.lock.Unlock()
 
 	if len(p.proxyClient) == 0 {
-		log.Warn("proxy client is empty, InvalidateCredentialCache will not send to any client")
+		log.Ctx(ctx).Warn("proxy client is empty, InvalidateCredentialCache will not send to any client")
 		return nil
 	}
 
@@ -187,7 +187,7 @@ func (p *proxyClientManager) UpdateCredentialCache(ctx context.Context, request 
 	defer p.lock.Unlock()
 
 	if len(p.proxyClient) == 0 {
-		log.Warn("proxy client is empty, UpdateCredentialCache will not send to any client")
+		log.Ctx(ctx).Warn("proxy client is empty, UpdateCredentialCache will not send to any client")
 		return nil
 	}
 

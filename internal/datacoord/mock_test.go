@@ -118,9 +118,10 @@ func newTestSchema() *schemapb.CollectionSchema {
 }
 
 type mockDataNodeClient struct {
-	id    int64
-	state internalpb.StateCode
-	ch    chan interface{}
+	id        int64
+	state     internalpb.StateCode
+	ch        chan interface{}
+	retStatus *commonpb.Status
 }
 
 func newMockDataNodeClient(id int64, ch chan interface{}) (*mockDataNodeClient, error) {
@@ -164,6 +165,9 @@ func (c *mockDataNodeClient) WatchDmChannels(ctx context.Context, in *datapb.Wat
 func (c *mockDataNodeClient) FlushSegments(ctx context.Context, in *datapb.FlushSegmentsRequest) (*commonpb.Status, error) {
 	if c.ch != nil {
 		c.ch <- in
+	}
+	if c.retStatus != nil {
+		return c.retStatus, nil
 	}
 	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
 }
@@ -217,6 +221,9 @@ func (c *mockDataNodeClient) Compaction(ctx context.Context, req *datapb.Compact
 }
 
 func (c *mockDataNodeClient) Import(ctx context.Context, in *datapb.ImportTaskRequest) (*commonpb.Status, error) {
+	if c.retStatus != nil {
+		return c.retStatus, nil
+	}
 	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
 }
 
@@ -230,8 +237,9 @@ func (c *mockDataNodeClient) Stop() error {
 }
 
 type mockRootCoordService struct {
-	state internalpb.StateCode
-	cnt   int64
+	state     internalpb.StateCode
+	cnt       int64
+	retStatus *commonpb.Status
 }
 
 func (m *mockRootCoordService) CreateAlias(ctx context.Context, req *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
@@ -305,6 +313,11 @@ func (m *mockRootCoordService) HasCollection(ctx context.Context, req *milvuspb.
 }
 
 func (m *mockRootCoordService) DescribeCollection(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+	if m.retStatus != nil {
+		return &milvuspb.DescribeCollectionResponse{
+			Status: m.retStatus,
+		}, nil
+	}
 	return &milvuspb.DescribeCollectionResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,

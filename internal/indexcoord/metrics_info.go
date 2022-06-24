@@ -67,7 +67,7 @@ func getSystemInfoMetrics(
 	nodesMetrics := coord.nodeManager.getMetrics(ctx, req)
 	for _, nodeMetrics := range nodesMetrics {
 		if nodeMetrics.err != nil {
-			log.Warn("invalid metrics of index node was found",
+			log.Ctx(ctx).Warn("invalid metrics of index node was found",
 				zap.Error(nodeMetrics.err))
 			clusterTopology.ConnectedNodes = append(clusterTopology.ConnectedNodes, metricsinfo.IndexNodeInfos{
 				BaseComponentInfos: metricsinfo.BaseComponentInfos{
@@ -82,7 +82,7 @@ func getSystemInfoMetrics(
 		}
 
 		if nodeMetrics.resp.Status.ErrorCode != commonpb.ErrorCode_Success {
-			log.Warn("invalid metrics of index node was found",
+			log.Ctx(ctx).Warn("invalid metrics of index node was found",
 				zap.Any("error_code", nodeMetrics.resp.Status.ErrorCode),
 				zap.Any("error_reason", nodeMetrics.resp.Status.Reason))
 			clusterTopology.ConnectedNodes = append(clusterTopology.ConnectedNodes, metricsinfo.IndexNodeInfos{
@@ -99,7 +99,7 @@ func getSystemInfoMetrics(
 		infos := metricsinfo.IndexNodeInfos{}
 		err := metricsinfo.UnmarshalComponentInfos(nodeMetrics.resp.Response, &infos)
 		if err != nil {
-			log.Warn("invalid metrics of index node was found",
+			log.Ctx(ctx).Warn("invalid metrics of index node was found",
 				zap.Error(err))
 			clusterTopology.ConnectedNodes = append(clusterTopology.ConnectedNodes, metricsinfo.IndexNodeInfos{
 				BaseComponentInfos: metricsinfo.BaseComponentInfos{

@@ -1029,7 +1029,11 @@ func TestSaveBinlogPaths(t *testing.T) {
 		defer closeTestServer(t, svr)
 
 		svr.meta.AddCollection(&datapb.CollectionInfo{ID: 0})
-
+		errResp, err := svr.SaveBinlogPaths(context.TODO(), &datapb.SaveBinlogPathsRequest{
+			SegmentID: 1,
+		})
+		assert.Nil(t, err)
+		assert.Equal(t, errResp.GetErrorCode(), commonpb.ErrorCode_UnexpectedError)
 		segments := []struct {
 			id           UniqueID
 			collectionID UniqueID
@@ -1048,7 +1052,7 @@ func TestSaveBinlogPaths(t *testing.T) {
 			assert.Nil(t, err)
 		}
 
-		err := svr.channelManager.AddNode(0)
+		err = svr.channelManager.AddNode(0)
 		assert.Nil(t, err)
 		err = svr.channelManager.Watch(&channel{"ch1", 0})
 		assert.Nil(t, err)
@@ -2019,6 +2023,30 @@ func TestGetRecoveryInfo(t *testing.T) {
 		assert.Equal(t, UniqueID(8), resp.GetChannels()[0].GetDroppedSegmentIds()[0])
 	})
 
+	t.Run("with rootcoord describe collection error", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+
+		svr.rootCoordClient.(*mockRootCoordService).retStatus = &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "mock err",
+		}
+		seg1 := createSegment(7, 0, 0, 100, 30, "vchan1", commonpb.SegmentState_Growing)
+		seg2 := createSegment(8, 0, 0, 100, 40, "vchan1", commonpb.SegmentState_Dropped)
+		err := svr.meta.AddSegment(NewSegmentInfo(seg1))
+		assert.Nil(t, err)
+		err = svr.meta.AddSegment(NewSegmentInfo(seg2))
+		assert.Nil(t, err)
+
+		req := &datapb.GetRecoveryInfoRequest{
+			CollectionID: 0,
+			PartitionID:  0,
+		}
+		resp, err := svr.GetRecoveryInfo(context.TODO(), req)
+		assert.Nil(t, err)
+		assert.Equal(t, resp.GetStatus().GetErrorCode(), commonpb.ErrorCode_UnexpectedError)
+	})
+
 	t.Run("with closed server", func(t *testing.T) {
 		svr := newTestServer(t, nil)
 		closeTestServer(t, svr)
@@ -2763,6 +2791,17 @@ func TestDataCoord_Import(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
 	})
 
+	t.Run("test acquire segment reference lock with empty meta", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+
+		status, err := svr.AcquireSegmentLock(context.TODO(), &datapb.AcquireSegmentLockRequest{
+			SegmentIDs: []UniqueID{1, 2},
+			NodeID:     UniqueID(1),
+		})
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+	})
+
 	t.Run("test release segment reference lock with closed server", func(t *testing.T) {
 		svr := newTestServer(t, nil)
 		closeTestServer(t, svr)
@@ -2853,6 +2892,20 @@ func TestIssue15659(t *testing.T) {
 	}()
 	cancel()
 	<-ch
+}
+
+func TestDatacoord_Liveness(t *testing.T) {
+	svr := newTestServer(t, nil)
+	defer closeTestServer(t, svr)
+
+	svr.session.TriggerKill = false
+	// cancel keep alive
+	ctx, cancel := context.WithCancel(context.TODO())
+	go svr.session.LivenessCheck(ctx, nil)
+	cancel()
+	// health check will fail
+	<-svr.serverLoopCtx.Done()
+	assert.Equal(t, svr.isServing, ServerStateStopped)
 }
 
 type MockClosePanicMsgstream struct {

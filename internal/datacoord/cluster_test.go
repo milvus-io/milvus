@@ -541,10 +541,36 @@ func TestCluster_Flush(t *testing.T) {
 
 	// flush not watched channel
 	assert.NotPanics(t, func() {
-		cluster.Flush(context.Background(), []*datapb.SegmentInfo{{ID: 1, InsertChannel: "chan-2"}},
+		timeoutCtx, cancel := context.WithTimeout(context.TODO(), time.Millisecond*100)
+		defer cancel()
+		cluster.Flush(timeoutCtx, []*datapb.SegmentInfo{{ID: 1, InsertChannel: "chan-2"}},
 			[]*datapb.SegmentInfo{{ID: 2, InsertChannel: "chan-3"}})
+		<-timeoutCtx.Done()
 	})
 	//TODO add a method to verify datanode has flush request after client injection is available
+
+	channelManager.store = &ChannelStore{
+		channelsInfo: map[int64]*NodeChannelInfo{
+			1: {1, []*channel{{"chan-3", 1}}},
+			2: {2, []*channel{{"chan-4", 1}}},
+		},
+	}
+
+	mockFlushClient, err := newMockDataNodeClient(1, nil)
+	assert.Nil(t, err)
+	mockSession := &Session{
+		isDisposed: false,
+		client:     mockFlushClient,
+	}
+	sessionManager.sessions.data[1] = mockSession
+	assert.NotPanics(t, func() {
+		mockFlushClient.retStatus = &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError, Reason: "mock error"}
+		timeoutCtx, cancel := context.WithTimeout(context.TODO(), time.Millisecond*100)
+		defer cancel()
+		cluster.Flush(timeoutCtx, []*datapb.SegmentInfo{{ID: 1, InsertChannel: "chan-3"}},
+			[]*datapb.SegmentInfo{{ID: 2, InsertChannel: "chan-4"}})
+		<-timeoutCtx.Done()
+	})
 }
 
 func TestCluster_Import(t *testing.T) {
@@ -575,8 +601,35 @@ func TestCluster_Import(t *testing.T) {
 
 	assert.NotPanics(t, func() {
 		cluster.Import(ctx, 1, &datapb.ImportTaskRequest{})
+		<-ctx.Done()
 	})
-	time.Sleep(500 * time.Millisecond)
+
+	channelManager.store = &ChannelStore{
+		channelsInfo: map[int64]*NodeChannelInfo{
+			1: {1, []*channel{{"chan-3", 1}}},
+			2: {2, []*channel{{"chan-4", 1}}},
+		},
+	}
+	mockFlushClient, err := newMockDataNodeClient(1, nil)
+	assert.Nil(t, err)
+	mockSession := &Session{
+		isDisposed: false,
+		client:     mockFlushClient,
+	}
+	sessionManager.sessions.data[1] = mockSession
+
+	assert.NotPanics(t, func() {
+		timeoutCtx, cancel := context.WithTimeout(context.TODO(), time.Millisecond*100)
+		defer cancel()
+		cluster.Import(timeoutCtx, 1, &datapb.ImportTaskRequest{})
+		cluster.Import(timeoutCtx, 3, &datapb.ImportTaskRequest{})
+		<-timeoutCtx.Done()
+		timeoutCtx2, cancel2 := context.WithTimeout(context.TODO(), time.Millisecond*100)
+		defer cancel2()
+		mockFlushClient.retStatus = &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError, Reason: "mock error"}
+		cluster.Import(timeoutCtx2, 1, &datapb.ImportTaskRequest{})
+		<-timeoutCtx.Done()
+	})
 }
 
 func TestCluster_ReCollectSegmentStats(t *testing.T) {
@@ -637,6 +690,10 @@ func TestCluster_ReCollectSegmentStats(t *testing.T) {
 
 		assert.NotPanics(t, func() {
 			cluster.ReCollectSegmentStats(ctx, 1)
+		})
+
+		assert.NotPanics(t, func() {
+			cluster.ReCollectSegmentStats(ctx, 2)
 		})
 		time.Sleep(500 * time.Millisecond)
 	})

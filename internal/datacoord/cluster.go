@@ -99,7 +99,7 @@ func (c *Cluster) Flush(ctx context.Context, segments []*datapb.SegmentInfo, mar
 		collectionID = segment.CollectionID
 		nodeID, ok := channelNodes[segment.GetInsertChannel()]
 		if !ok {
-			log.Warn("channel is not allocated to any node", zap.String("channel", segment.GetInsertChannel()))
+			log.Ctx(ctx).Warn("channel is not allocated to any node", zap.String("channel", segment.GetInsertChannel()))
 			continue
 		}
 		nodeSegments[nodeID] = append(nodeSegments[nodeID], segment.GetID())
@@ -109,7 +109,7 @@ func (c *Cluster) Flush(ctx context.Context, segments []*datapb.SegmentInfo, mar
 		collectionID = segment.CollectionID
 		nodeID, ok := channelNodes[segment.GetInsertChannel()]
 		if !ok {
-			log.Warn("channel is not allocated to any node", zap.String("channel", segment.GetInsertChannel()))
+			log.Ctx(ctx).Warn("channel is not allocated to any node", zap.String("channel", segment.GetInsertChannel()))
 			continue
 		}
 		nodeMarks[nodeID] = append(nodeMarks[nodeID], segment.GetID())
@@ -131,7 +131,7 @@ func (c *Cluster) Flush(ctx context.Context, segments []*datapb.SegmentInfo, mar
 			SegmentIDs:     segments,
 			MarkSegmentIDs: marks,
 		}
-		log.Info("calling dataNode to flush",
+		log.Ctx(ctx).Info("calling dataNode to flush",
 			zap.Int64("dataNode ID", nodeID),
 			zap.Int64s("segments", segments),
 			zap.Int64s("marks", marks))

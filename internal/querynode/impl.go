@@ -63,7 +63,7 @@ func (node *QueryNode) GetComponentStates(ctx context.Context) (*internalpb.Comp
 		StateCode: code,
 	}
 	stats.State = info
-	log.Debug("Get QueryNode component state done", zap.Any("stateCode", info.StateCode))
+	log.Ctx(ctx).Debug("Get QueryNode component state done", zap.Any("stateCode", info.StateCode))
 	return stats, nil
 }
 
@@ -116,10 +116,10 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, in *queryPb.WatchDmC
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}
-		log.Warn(err.Error())
+		log.Ctx(ctx).Warn(err.Error())
 		return status, nil
 	}
-	log.Info("watchDmChannelsTask Enqueue done", zap.Int64("collectionID", in.CollectionID), zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()), zap.Int64("replicaID", in.GetReplicaID()))
+	log.Ctx(ctx).Info("watchDmChannelsTask Enqueue done", zap.Int64("collectionID", in.CollectionID), zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()), zap.Int64("replicaID", in.GetReplicaID()))
 	waitFunc := func() (*commonpb.Status, error) {
 		err = dct.WaitToFinish()
 		if err != nil {
@@ -127,10 +127,10 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, in *queryPb.WatchDmC
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    err.Error(),
 			}
-			log.Warn(err.Error())
+			log.Ctx(ctx).Warn(err.Error())
 			return status, nil
 		}
-		log.Info("watchDmChannelsTask WaitToFinish done", zap.Int64("collectionID", in.CollectionID), zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()))
+		log.Ctx(ctx).Info("watchDmChannelsTask WaitToFinish done", zap.Int64("collectionID", in.CollectionID), zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		}, nil
@@ -165,11 +165,11 @@ func (node *QueryNode) WatchDeltaChannels(ctx context.Context, in *queryPb.Watch
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}
-		log.Warn(err.Error())
+		log.Ctx(ctx).Warn(err.Error())
 		return status, nil
 	}
 
-	log.Info("watchDeltaChannelsTask Enqueue done", zap.Int64("collectionID", in.CollectionID), zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()))
+	log.Ctx(ctx).Info("watchDeltaChannelsTask Enqueue done", zap.Int64("collectionID", in.CollectionID), zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()))
 
 	waitFunc := func() (*commonpb.Status, error) {
 		err = dct.WaitToFinish()
@@ -178,11 +178,11 @@ func (node *QueryNode) WatchDeltaChannels(ctx context.Context, in *queryPb.Watch
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    err.Error(),
 			}
-			log.Warn(err.Error())
+			log.Ctx(ctx).Warn(err.Error())
 			return status, nil
 		}
 
-		log.Info("watchDeltaChannelsTask WaitToFinish done", zap.Int64("collectionID", in.CollectionID), zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()))
+		log.Ctx(ctx).Info("watchDeltaChannelsTask WaitToFinish done", zap.Int64("collectionID", in.CollectionID), zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		}, nil
@@ -221,11 +221,11 @@ func (node *QueryNode) LoadSegments(ctx context.Context, in *queryPb.LoadSegment
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}
-		log.Warn(err.Error())
+		log.Ctx(ctx).Warn(err.Error())
 		return status, nil
 	}
 
-	log.Info("loadSegmentsTask Enqueue done", zap.Int64("collectionID", in.CollectionID), zap.Int64s("segmentIDs", segmentIDs), zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()))
+	log.Ctx(ctx).Info("loadSegmentsTask Enqueue done", zap.Int64("collectionID", in.CollectionID), zap.Int64s("segmentIDs", segmentIDs), zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()))
 
 	waitFunc := func() (*commonpb.Status, error) {
 		err = dct.WaitToFinish()
@@ -234,10 +234,10 @@ func (node *QueryNode) LoadSegments(ctx context.Context, in *queryPb.LoadSegment
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    err.Error(),
 			}
-			log.Warn(err.Error())
+			log.Ctx(ctx).Warn(err.Error())
 			return status, nil
 		}
-		log.Info("loadSegmentsTask WaitToFinish done", zap.Int64("collectionID", in.CollectionID), zap.Int64s("segmentIDs", segmentIDs), zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()))
+		log.Ctx(ctx).Info("loadSegmentsTask WaitToFinish done", zap.Int64("collectionID", in.CollectionID), zap.Int64s("segmentIDs", segmentIDs), zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		}, nil
@@ -272,18 +272,18 @@ func (node *QueryNode) ReleaseCollection(ctx context.Context, in *queryPb.Releas
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}
-		log.Warn(err.Error())
+		log.Ctx(ctx).Warn(err.Error())
 		return status, nil
 	}
-	log.Info("releaseCollectionTask Enqueue done", zap.Int64("collectionID", in.CollectionID))
+	log.Ctx(ctx).Info("releaseCollectionTask Enqueue done", zap.Int64("collectionID", in.CollectionID))
 
 	func() {
 		err = dct.WaitToFinish()
 		if err != nil {
-			log.Warn(err.Error())
+			log.Ctx(ctx).Warn(err.Error())
 			return
 		}
-		log.Info("releaseCollectionTask WaitToFinish done", zap.Int64("collectionID", in.CollectionID))
+		log.Ctx(ctx).Info("releaseCollectionTask WaitToFinish done", zap.Int64("collectionID", in.CollectionID))
 	}()
 
 	status := &commonpb.Status{
@@ -318,18 +318,18 @@ func (node *QueryNode) ReleasePartitions(ctx context.Context, in *queryPb.Releas
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}
-		log.Warn(err.Error())
+		log.Ctx(ctx).Warn(err.Error())
 		return status, nil
 	}
-	log.Info("releasePartitionsTask Enqueue done", zap.Int64("collectionID", in.CollectionID), zap.Int64s("partitionIDs", in.PartitionIDs))
+	log.Ctx(ctx).Info("releasePartitionsTask Enqueue done", zap.Int64("collectionID", in.CollectionID), zap.Int64s("partitionIDs", in.PartitionIDs))
 
 	func() {
 		err = dct.WaitToFinish()
 		if err != nil {
-			log.Warn(err.Error())
+			log.Ctx(ctx).Warn(err.Error())
 			return
 		}
-		log.Info("releasePartitionsTask WaitToFinish done", zap.Int64("collectionID", in.CollectionID), zap.Int64s("partitionIDs", in.PartitionIDs))
+		log.Ctx(ctx).Info("releasePartitionsTask WaitToFinish done", zap.Int64("collectionID", in.CollectionID), zap.Int64s("partitionIDs", in.PartitionIDs))
 	}()
 
 	status := &commonpb.Status{
@@ -373,7 +373,7 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, in *queryPb.ReleaseS
 		}
 	}
 
-	log.Info("release segments done", zap.Int64("collectionID", in.CollectionID), zap.Int64s("segmentIDs", in.SegmentIDs), zap.String("Scope", in.GetScope().String()))
+	log.Ctx(ctx).Info("release segments done", zap.Int64("collectionID", in.CollectionID), zap.Int64s("segmentIDs", in.SegmentIDs), zap.String("Scope", in.GetScope().String()))
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}, nil
@@ -507,7 +507,7 @@ func (node *QueryNode) searchWithDmlChannel(ctx context.Context, req *queryPb.Se
 	}
 
 	msgID := req.GetReq().GetBase().GetMsgID()
-	log.Debug("Received SearchRequest",
+	log.Ctx(ctx).Debug("Received SearchRequest",
 		zap.Int64("msgID", msgID),
 		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
 		zap.String("vChannel", dmlChannel),
@@ -522,7 +522,7 @@ func (node *QueryNode) searchWithDmlChannel(ctx context.Context, req *queryPb.Se
 
 	qs, err := node.queryShardService.getQueryShard(dmlChannel)
 	if err != nil {
-		log.Warn("Search failed, failed to get query shard",
+		log.Ctx(ctx).Warn("Search failed, failed to get query shard",
 			zap.Int64("msgID", msgID),
 			zap.String("dml channel", dmlChannel),
 			zap.Error(err))
@@ -531,7 +531,7 @@ func (node *QueryNode) searchWithDmlChannel(ctx context.Context, req *queryPb.Se
 		return failRet, nil
 	}
 
-	log.Debug("start do search",
+	log.Ctx(ctx).Debug("start do search",
 		zap.Int64("msgID", msgID),
 		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
 		zap.String("vChannel", dmlChannel),
@@ -659,7 +659,7 @@ func (node *QueryNode) queryWithDmlChannel(ctx context.Context, req *queryPb.Que
 	}
 
 	msgID := req.GetReq().GetBase().GetMsgID()
-	log.Debug("Received QueryRequest",
+	log.Ctx(ctx).Debug("Received QueryRequest",
 		zap.Int64("msgID", msgID),
 		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
 		zap.String("vChannel", dmlChannel),
@@ -674,12 +674,12 @@ func (node *QueryNode) queryWithDmlChannel(ctx context.Context, req *queryPb.Que
 
 	qs, err := node.queryShardService.getQueryShard(dmlChannel)
 	if err != nil {
-		log.Warn("Query failed, failed to get query shard", zap.Int64("msgID", msgID), zap.String("dml channel", dmlChannel), zap.Error(err))
+		log.Ctx(ctx).Warn("Query failed, failed to get query shard", zap.Int64("msgID", msgID), zap.String("dml channel", dmlChannel), zap.Error(err))
 		failRet.Status.Reason = err.Error()
 		return failRet, nil
 	}
 
-	log.Debug("start do query",
+	log.Ctx(ctx).Debug("start do query",
 		zap.Int64("msgID", msgID),
 		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
 		zap.String("vChannel", dmlChannel),
@@ -847,18 +847,18 @@ func (node *QueryNode) SyncReplicaSegments(ctx context.Context, req *querypb.Syn
 		}, nil
 	}
 
-	log.Debug("Received SyncReplicaSegments request", zap.String("vchannelName", req.GetVchannelName()))
+	log.Ctx(ctx).Debug("Received SyncReplicaSegments request", zap.String("vchannelName", req.GetVchannelName()))
 
 	err := node.ShardClusterService.SyncReplicaSegments(req.GetVchannelName(), req.GetReplicaSegments())
 	if err != nil {
-		log.Warn("failed to sync replica semgents,", zap.String("vchannel", req.GetVchannelName()), zap.Error(err))
+		log.Ctx(ctx).Warn("failed to sync replica semgents,", zap.String("vchannel", req.GetVchannelName()), zap.Error(err))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}, nil
 	}
 
-	log.Debug("SyncReplicaSegments Done", zap.String("vchannel", req.GetVchannelName()))
+	log.Ctx(ctx).Debug("SyncReplicaSegments Done", zap.String("vchannel", req.GetVchannelName()))
 
 	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
 }
@@ -867,7 +867,7 @@ func (node *QueryNode) SyncReplicaSegments(ctx context.Context, req *querypb.Syn
 // TODO(dragondriver): cache the Metrics and set a retention to the cache
 func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	if !node.isHealthy() {
-		log.Warn("QueryNode.GetMetrics failed",
+		log.Ctx(ctx).Warn("QueryNode.GetMetrics failed",
 			zap.Int64("node_id", Params.QueryNodeCfg.GetNodeID()),
 			zap.String("req", req.Request),
 			zap.Error(errQueryNodeIsUnhealthy(Params.QueryNodeCfg.GetNodeID())))
@@ -883,7 +883,7 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 
 	metricType, err := metricsinfo.ParseMetricType(req.Request)
 	if err != nil {
-		log.Warn("QueryNode.GetMetrics failed to parse metric type",
+		log.Ctx(ctx).Warn("QueryNode.GetMetrics failed to parse metric type",
 			zap.Int64("node_id", Params.QueryNodeCfg.GetNodeID()),
 			zap.String("req", req.Request),
 			zap.Error(err))
@@ -900,7 +900,7 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 	if metricType == metricsinfo.SystemInfoMetrics {
 		metrics, err := getSystemInfoMetrics(ctx, req, node)
 		if err != nil {
-			log.Warn("QueryNode.GetMetrics failed",
+			log.Ctx(ctx).Warn("QueryNode.GetMetrics failed",
 				zap.Int64("node_id", Params.QueryNodeCfg.GetNodeID()),
 				zap.String("req", req.Request),
 				zap.String("metric_type", metricType),
@@ -910,7 +910,7 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 		return metrics, nil
 	}
 
-	log.Debug("QueryNode.GetMetrics failed, request metric type is not implemented yet",
+	log.Ctx(ctx).Debug("QueryNode.GetMetrics failed, request metric type is not implemented yet",
 		zap.Int64("node_id", Params.QueryNodeCfg.GetNodeID()),
 		zap.String("req", req.Request),
 		zap.String("metric_type", metricType))

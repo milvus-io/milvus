@@ -62,6 +62,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -170,10 +171,12 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 			ot.UnaryServerInterceptor(opts...),
 			grpc_auth.UnaryServerInterceptor(proxy.AuthenticationInterceptor),
+			logutil.UnaryTraceLoggerInterceptor,
 		)),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
 			ot.StreamServerInterceptor(opts...),
-			grpc_auth.StreamServerInterceptor(proxy.AuthenticationInterceptor))),
+			grpc_auth.StreamServerInterceptor(proxy.AuthenticationInterceptor),
+			logutil.StreamTraceLoggerInterceptor)),
 	}
 
 	if Params.TLSMode == 1 {
@@ -260,10 +263,12 @@ func (s *Server) startInternalGrpc(grpcPort int, errChan chan error) {
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 			ot.UnaryServerInterceptor(opts...),
 			grpc_auth.UnaryServerInterceptor(proxy.AuthenticationInterceptor),
+			logutil.UnaryTraceLoggerInterceptor,
 		)),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
 			ot.StreamServerInterceptor(opts...),
 			grpc_auth.StreamServerInterceptor(proxy.AuthenticationInterceptor),
+			logutil.StreamTraceLoggerInterceptor,
 		)),
 	)
 	proxypb.RegisterProxyServer(s.grpcInternalServer, s)

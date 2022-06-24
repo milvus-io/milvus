@@ -113,6 +113,24 @@ func TestAllocSegment(t *testing.T) {
 		assert.NotEqualValues(t, 0, allocations[0].ExpireTime)
 	})
 
+	t.Run("allocation with invalid segment id", func(t *testing.T) {
+		meta, err := newMemoryMeta(mockAllocator)
+		assert.Nil(t, err)
+		segmentManager := newSegmentManager(meta, mockAllocator, nil)
+		segID, err := mockAllocator.allocID(ctx)
+		assert.Nil(t, err)
+		collID, err := mockAllocator.allocID(ctx)
+		assert.Nil(t, err)
+		meta.AddCollection(&datapb.CollectionInfo{ID: collID, Schema: schema})
+		segmentManager.segments = append(segmentManager.segments, segID)
+		allocations, err := segmentManager.AllocSegment(ctx, collID, 100, "c1", 100)
+		assert.Nil(t, err)
+		assert.EqualValues(t, 1, len(allocations))
+		assert.EqualValues(t, 100, allocations[0].NumOfRows)
+		assert.NotEqualValues(t, 0, allocations[0].SegmentID)
+		assert.NotEqualValues(t, 0, allocations[0].ExpireTime)
+	})
+
 	t.Run("allocation fails 1", func(t *testing.T) {
 		failsAllocator := &FailsAllocator{
 			allocTsSucceed: true,
@@ -296,6 +314,11 @@ func TestDropSegment(t *testing.T) {
 	segmentManager.DropSegment(context.Background(), segID)
 	segment = meta.GetSegment(segID)
 	assert.NotNil(t, segment)
+
+	// drop invalid segement id
+	invalidSegID, err := mockAllocator.allocID(context.TODO())
+	assert.Nil(t, err)
+	segmentManager.DropSegment(context.TODO(), invalidSegID)
 }
 
 func TestAllocRowsLargerThanOneSegment(t *testing.T) {
@@ -536,6 +559,24 @@ func TestTryToSealSegment(t *testing.T) {
 		assert.Nil(t, err)
 		err = segmentManager.tryToSealSegment(ts, "c1")
 		assert.NotNil(t, err)
+	})
+
+	t.Run("seal with invalid segments", func(t *testing.T) {
+		Params.Init()
+		mockAllocator := newMockAllocator()
+		meta, err := newMemoryMeta(mockAllocator)
+		assert.Nil(t, err)
+
+		schema := newTestSchema()
+		collID, err := mockAllocator.allocID(context.Background())
+		assert.Nil(t, err)
+		meta.AddCollection(&datapb.CollectionInfo{ID: collID, Schema: schema})
+
+		segmentManager := newSegmentManager(meta, mockAllocator, nil)
+		segID, err := mockAllocator.allocID(context.TODO())
+		assert.Nil(t, err)
+		_, err = segmentManager.SealAllSegments(context.TODO(), collID, []UniqueID{segID})
+		assert.Nil(t, err)
 	})
 }
 

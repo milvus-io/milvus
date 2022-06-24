@@ -341,7 +341,7 @@ func (i *IndexCoord) isHealthy() bool {
 
 // GetComponentStates gets the component states of IndexCoord.
 func (i *IndexCoord) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
-	log.Debug("get IndexCoord component states ...")
+	log.Ctx(ctx).Debug("get IndexCoord component states ...")
 
 	nodeID := common.NotRegisteredID
 	if i.session != nil && i.session.Registered() {
@@ -361,13 +361,13 @@ func (i *IndexCoord) GetComponentStates(ctx context.Context) (*internalpb.Compon
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
 	}
-	log.Debug("IndexCoord GetComponentStates", zap.Any("IndexCoord component state", stateInfo))
+	log.Ctx(ctx).Debug("IndexCoord GetComponentStates", zap.Any("IndexCoord component state", stateInfo))
 	return ret, nil
 }
 
 // GetTimeTickChannel gets the time tick channel of IndexCoord.
 func (i *IndexCoord) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	log.Debug("get IndexCoord time tick channel ...")
+	log.Ctx(ctx).Debug("get IndexCoord time tick channel ...")
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -379,7 +379,7 @@ func (i *IndexCoord) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringRe
 
 // GetStatisticsChannel gets the statistics channel of IndexCoord.
 func (i *IndexCoord) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	log.Debug("get IndexCoord statistics channel ...")
+	log.Ctx(ctx).Debug("get IndexCoord statistics channel ...")
 	return &milvuspb.StringResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -397,7 +397,7 @@ func (i *IndexCoord) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequ
 	if !i.isHealthy() {
 		errMsg := "IndexCoord is not healthy"
 		err := errors.New(errMsg)
-		log.Warn(errMsg)
+		log.Ctx(ctx).Warn(errMsg)
 		return &indexpb.BuildIndexResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -405,7 +405,7 @@ func (i *IndexCoord) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequ
 			},
 		}, err
 	}
-	log.Debug("IndexCoord building index ...", zap.Int64("segmentID", req.SegmentID),
+	log.Ctx(ctx).Debug("IndexCoord building index ...", zap.Int64("segmentID", req.SegmentID),
 		zap.String("IndexName", req.IndexName), zap.Int64("IndexID", req.IndexID),
 		zap.Strings("DataPath", req.DataPaths), zap.Any("TypeParams", req.TypeParams),
 		zap.Any("IndexParams", req.IndexParams), zap.Int64("numRows", req.NumRows),
@@ -424,7 +424,7 @@ func (i *IndexCoord) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequ
 	defer sp.Finish()
 	hasIndex, indexBuildID := i.metaTable.HasSameReq(req)
 	if hasIndex {
-		log.Debug("IndexCoord has same index", zap.Int64("buildID", indexBuildID), zap.Int64("segmentID", req.SegmentID))
+		log.Ctx(ctx).Debug("IndexCoord has same index", zap.Int64("buildID", indexBuildID), zap.Int64("segmentID", req.SegmentID))
 		return &indexpb.BuildIndexResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_Success,
@@ -463,11 +463,11 @@ func (i *IndexCoord) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequ
 		metrics.IndexCoordIndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
 		return ret, nil
 	}
-	log.Debug("IndexCoord BuildIndex Enqueue successfully", zap.Int64("IndexBuildID", t.indexBuildID))
+	log.Ctx(ctx).Debug("IndexCoord BuildIndex Enqueue successfully", zap.Int64("IndexBuildID", t.indexBuildID))
 
 	err = t.WaitToFinish()
 	if err != nil {
-		log.Error("IndexCoord scheduler index task failed", zap.Int64("IndexBuildID", t.indexBuildID))
+		log.Ctx(ctx).Error("IndexCoord scheduler index task failed", zap.Int64("IndexBuildID", t.indexBuildID))
 		ret.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		ret.Status.Reason = err.Error()
 		metrics.IndexCoordIndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
@@ -483,10 +483,10 @@ func (i *IndexCoord) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequ
 
 // GetIndexStates gets the index states from IndexCoord.
 func (i *IndexCoord) GetIndexStates(ctx context.Context, req *indexpb.GetIndexStatesRequest) (*indexpb.GetIndexStatesResponse, error) {
-	log.Debug("IndexCoord get index states", zap.Int64s("IndexBuildIDs", req.IndexBuildIDs))
+	log.Ctx(ctx).Debug("IndexCoord get index states", zap.Int64s("IndexBuildIDs", req.IndexBuildIDs))
 	if !i.isHealthy() {
 		errMsg := "IndexCoord is not healthy"
-		log.Warn(errMsg)
+		log.Ctx(ctx).Warn(errMsg)
 		return &indexpb.GetIndexStatesResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -518,7 +518,7 @@ func (i *IndexCoord) GetIndexStates(ctx context.Context, req *indexpb.GetIndexSt
 			cntFailed++
 		}
 	}
-	log.Debug("IndexCoord get index states success",
+	log.Ctx(ctx).Debug("IndexCoord get index states success",
 		zap.Int("total", len(indexStates)), zap.Int("None", cntNone), zap.Int("Unissued", cntUnissued),
 		zap.Int("InProgress", cntInprogress), zap.Int("Finished", cntFinished), zap.Int("Failed", cntFailed))
 
@@ -535,10 +535,10 @@ func (i *IndexCoord) GetIndexStates(ctx context.Context, req *indexpb.GetIndexSt
 // divided into many segments, and each segment corresponds to an IndexBuildID. IndexCoord uses IndexBuildID to record
 // index tasks. Therefore, when DropIndex, delete all tasks corresponding to IndexBuildID corresponding to IndexID.
 func (i *IndexCoord) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
-	log.Debug("IndexCoord DropIndex", zap.Int64("IndexID", req.IndexID))
+	log.Ctx(ctx).Debug("IndexCoord DropIndex", zap.Int64("IndexID", req.IndexID))
 	if !i.isHealthy() {
 		errMsg := "IndexCoord is not healthy"
-		log.Warn(errMsg)
+		log.Ctx(ctx).Warn(errMsg)
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    errMsg,
@@ -570,7 +570,7 @@ func (i *IndexCoord) DropIndex(ctx context.Context, req *indexpb.DropIndexReques
 		}()
 	}()
 
-	log.Debug("IndexCoord DropIndex success", zap.Int64("IndexID", req.IndexID))
+	log.Ctx(ctx).Debug("IndexCoord DropIndex success", zap.Int64("IndexID", req.IndexID))
 	return ret, nil
 }
 
@@ -616,10 +616,10 @@ func (i *IndexCoord) RemoveIndex(ctx context.Context, req *indexpb.RemoveIndexRe
 
 // GetIndexFilePaths gets the index file paths from IndexCoord.
 func (i *IndexCoord) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error) {
-	log.Debug("IndexCoord GetIndexFilePaths", zap.Int("number of IndexBuildIds", len(req.IndexBuildIDs)))
+	log.Ctx(ctx).Debug("IndexCoord GetIndexFilePaths", zap.Int("number of IndexBuildIds", len(req.IndexBuildIDs)))
 	if !i.isHealthy() {
 		errMsg := "IndexCoord is not healthy"
-		log.Warn(errMsg)
+		log.Ctx(ctx).Warn(errMsg)
 		return &indexpb.GetIndexFilePathsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -635,7 +635,7 @@ func (i *IndexCoord) GetIndexFilePaths(ctx context.Context, req *indexpb.GetInde
 	for _, buildID := range req.IndexBuildIDs {
 		indexPathInfo, err := i.metaTable.GetIndexFilePathInfo(buildID)
 		if err != nil {
-			log.Warn("IndexCoord GetIndexFilePaths failed", zap.Int64("indexBuildID", buildID), zap.Error(err))
+			log.Ctx(ctx).Warn("IndexCoord GetIndexFilePaths failed", zap.Int64("indexBuildID", buildID), zap.Error(err))
 			return &indexpb.GetIndexFilePathsResponse{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -652,19 +652,19 @@ func (i *IndexCoord) GetIndexFilePaths(ctx context.Context, req *indexpb.GetInde
 		},
 		FilePaths: indexPaths,
 	}
-	log.Debug("IndexCoord GetIndexFilePaths ", zap.Int("indexBuildIDs num", len(req.IndexBuildIDs)), zap.Int("file path num", len(ret.FilePaths)))
+	log.Ctx(ctx).Debug("IndexCoord GetIndexFilePaths ", zap.Int("indexBuildIDs num", len(req.IndexBuildIDs)), zap.Int("file path num", len(ret.FilePaths)))
 
 	return ret, nil
 }
 
 // GetMetrics gets the metrics info of IndexCoord.
 func (i *IndexCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	log.Debug("IndexCoord.GetMetrics",
+	log.Ctx(ctx).Debug("IndexCoord.GetMetrics",
 		zap.Int64("node id", i.session.ServerID),
 		zap.String("req", req.Request))
 
 	if !i.isHealthy() {
-		log.Warn("IndexCoord.GetMetrics failed",
+		log.Ctx(ctx).Warn("IndexCoord.GetMetrics failed",
 			zap.Int64("node id", i.session.ServerID),
 			zap.String("req", req.Request),
 			zap.Error(errIndexCoordIsUnhealthy(i.session.ServerID)))
@@ -680,7 +680,7 @@ func (i *IndexCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReq
 
 	metricType, err := metricsinfo.ParseMetricType(req.Request)
 	if err != nil {
-		log.Error("IndexCoord.GetMetrics failed to parse metric type",
+		log.Ctx(ctx).Error("IndexCoord.GetMetrics failed to parse metric type",
 			zap.Int64("node id", i.session.ServerID),
 			zap.String("req", req.Request),
 			zap.Error(err))
@@ -694,7 +694,7 @@ func (i *IndexCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReq
 		}, nil
 	}
 
-	log.Debug("IndexCoord.GetMetrics",
+	log.Ctx(ctx).Debug("IndexCoord.GetMetrics",
 		zap.String("metric type", metricType))
 
 	if metricType == metricsinfo.SystemInfoMetrics {
@@ -702,12 +702,12 @@ func (i *IndexCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReq
 		if err == nil && ret != nil {
 			return ret, nil
 		}
-		log.Debug("failed to get system info metrics from cache, recompute instead",
+		log.Ctx(ctx).Debug("failed to get system info metrics from cache, recompute instead",
 			zap.Error(err))
 
 		metrics, err := getSystemInfoMetrics(ctx, req, i)
 
-		log.Debug("IndexCoord.GetMetrics",
+		log.Ctx(ctx).Debug("IndexCoord.GetMetrics",
 			zap.Int64("node id", i.session.ServerID),
 			zap.String("req", req.Request),
 			zap.String("metric type", metricType),
@@ -719,7 +719,7 @@ func (i *IndexCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReq
 		return metrics, nil
 	}
 
-	log.Debug("IndexCoord.GetMetrics failed, request metric type is not implemented yet",
+	log.Ctx(ctx).Debug("IndexCoord.GetMetrics failed, request metric type is not implemented yet",
 		zap.Int64("node id", i.session.ServerID),
 		zap.String("req", req.Request),
 		zap.String("metric type", metricType))
@@ -743,12 +743,12 @@ func (i *IndexCoord) tsLoop() {
 		select {
 		case <-tsoTicker.C:
 			if err := i.idAllocator.UpdateID(); err != nil {
-				log.Error("IndexCoord tsLoop UpdateID failed", zap.Error(err))
+				log.Ctx(ctx).Error("IndexCoord tsLoop UpdateID failed", zap.Error(err))
 				return
 			}
 		case <-ctx.Done():
 			// Server is closed and it should return nil.
-			log.Debug("IndexCoord tsLoop is closed")
+			log.Ctx(ctx).Debug("IndexCoord tsLoop is closed")
 			return
 		}
 	}
@@ -791,7 +791,7 @@ func (i *IndexCoord) watchNodeLoop() {
 				go func() {
 					err := i.nodeManager.AddNode(serverID, event.Session.Address)
 					if err != nil {
-						log.Error("IndexCoord", zap.Any("Add IndexNode err", err))
+						log.Ctx(ctx).Error("IndexCoord", zap.Any("Add IndexNode err", err))
 					}
 					log.Debug("IndexCoord", zap.Int("IndexNode number", len(i.nodeManager.nodeClients)))
 				}()

@@ -224,7 +224,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 		if err != nil {
 			// error occurs when missing schema info or data is misaligned, should not happen
 			err = fmt.Errorf("insertBufferNode msg to buffer failed, err = %s", err)
-			log.Error(err.Error())
+			log.Ctx(msg.TraceCtx()).Error(err.Error())
 			panic(err)
 		}
 	}

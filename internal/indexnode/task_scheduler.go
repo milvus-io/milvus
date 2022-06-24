@@ -259,7 +259,7 @@ func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
 	t.SetError(err)
 
 	if t.GetState() == TaskStateAbandon {
-		log.Info("IndexNode scheduler abandon task",
+		log.Ctx(ctx).Info("IndexNode scheduler abandon task",
 			zap.String("TaskState", t.GetState().String()),
 			zap.Int64("taskID", t.ID()))
 		return

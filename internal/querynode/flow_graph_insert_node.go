@@ -125,7 +125,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			if err != nil {
 				// error occurs only when collection cannot be found, should not happen
 				err = fmt.Errorf("insertNode addPartition failed, err = %s", err)
-				log.Error(err.Error(), zap.Int64("collection", iNode.collectionID), zap.String("channel", iNode.channel))
+				log.Ctx(insertMsg.TraceCtx()).Error(err.Error(), zap.Int64("collection", iNode.collectionID), zap.String("channel", iNode.channel))
 				panic(err)
 			}
 		}
@@ -133,7 +133,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		// check if segment exists, if not, create this segment
 		has, err := iNode.metaReplica.hasSegment(insertMsg.SegmentID, segmentTypeGrowing)
 		if err != nil {
-			log.Error(err.Error()) // never gonna happen
+			log.Ctx(insertMsg.TraceCtx()).Error(err.Error()) // never gonna happen
 			panic(err)
 		}
 		if !has {
@@ -141,7 +141,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			if err != nil {
 				// error occurs when collection or partition cannot be found, collection and partition should be created before
 				err = fmt.Errorf("insertNode addSegment failed, err = %s", err)
-				log.Error(err.Error(), zap.Int64("collection", iNode.collectionID), zap.String("channel", iNode.channel))
+				log.Ctx(insertMsg.TraceCtx()).Error(err.Error(), zap.Int64("collection", iNode.collectionID), zap.String("channel", iNode.channel))
 				panic(err)
 			}
 		}
@@ -150,7 +150,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		if err != nil {
 			// occurs only when schema doesn't have dim param, this should not happen
 			err = fmt.Errorf("failed to transfer msgStream.insertMsg to storage.InsertRecord, err = %s", err)
-			log.Error(err.Error(), zap.Int64("collection", iNode.collectionID), zap.String("channel", iNode.channel))
+			log.Ctx(insertMsg.TraceCtx()).Error(err.Error(), zap.Int64("collection", iNode.collectionID), zap.String("channel", iNode.channel))
 			panic(err)
 		}
 
@@ -165,7 +165,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		if err != nil {
 			// error occurs when cannot find collection or data is misaligned, should not happen
 			err = fmt.Errorf("failed to get primary keys, err = %d", err)
-			log.Error(err.Error(), zap.Int64("collection", iNode.collectionID), zap.String("channel", iNode.channel))
+			log.Ctx(insertMsg.TraceCtx()).Error(err.Error(), zap.Int64("collection", iNode.collectionID), zap.String("channel", iNode.channel))
 			panic(err)
 		}
 		iData.insertPKs[insertMsg.SegmentID] = append(iData.insertPKs[insertMsg.SegmentID], pks...)
@@ -221,7 +221,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	// 1. filter segment by bloom filter
 	for _, delMsg := range iMsg.deleteMessages {
 		if iNode.metaReplica.getSegmentNum(segmentTypeGrowing) != 0 {
-			log.Debug("delete in streaming replica",
+			log.Ctx(delMsg.TraceCtx()).Debug("delete in streaming replica",
 				zap.String("channel", iNode.channel),
 				zap.Any("collectionID", delMsg.CollectionID),
 				zap.Any("collectionName", delMsg.CollectionName),
@@ -230,7 +230,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			if err != nil {
 				// error occurs when missing meta info or unexpected pk type, should not happen
 				err = fmt.Errorf("insertNode processDeleteMessages failed, collectionID = %d, err = %s, channel: %s", delMsg.CollectionID, err, iNode.channel)
-				log.Error(err.Error())
+				log.Ctx(delMsg.TraceCtx()).Error(err.Error())
 				panic(err)
 			}
 		}
@@ -399,14 +399,14 @@ func (iNode *insertNode) delete(deleteData *deleteData, segmentID UniqueID, wg *
 // getPrimaryKeys would get primary keys by insert messages
 func getPrimaryKeys(msg *msgstream.InsertMsg, metaReplica ReplicaInterface) ([]primaryKey, error) {
 	if err := msg.CheckAligned(); err != nil {
-		log.Warn("misaligned messages detected", zap.Error(err))
+		log.Ctx(msg.TraceCtx()).Warn("misaligned messages detected", zap.Error(err))
 		return nil, err
 	}
 	collectionID := msg.GetCollectionID()
 
 	collection, err := metaReplica.getCollectionByID(collectionID)
 	if err != nil {
-		log.Warn(err.Error())
+		log.Ctx(msg.TraceCtx()).Warn(err.Error())
 		return nil, err
 	}
 
@@ -476,7 +476,7 @@ func getPKsFromRowBasedInsertMsg(msg *msgstream.InsertMsg, schema *schemapb.Coll
 		var int64PkValue int64
 		err := binary.Read(reader, common.Endian, &int64PkValue)
 		if err != nil {
-			log.Warn("binary read blob value failed", zap.Error(err))
+			log.Ctx(msg.TraceCtx()).Warn("binary read blob value failed", zap.Error(err))
 			return nil, err
 		}
 		pks[i] = newInt64PrimaryKey(int64PkValue)

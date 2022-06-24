@@ -630,7 +630,7 @@ func (loader *segmentLoader) loadDeltaLogs(segment *Segment, deltaLogs []*datapb
 }
 
 func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collectionID int64, position *internalpb.MsgPosition) error {
-	log.Info("from dml check point load delete", zap.Any("position", position), zap.Any("msg id", position.MsgID))
+	log.Ctx(ctx).Info("from dml check point load delete", zap.Any("position", position), zap.Any("msg id", position.MsgID))
 	stream, err := loader.factory.NewMsgStream(ctx)
 	if err != nil {
 		return err
@@ -651,7 +651,7 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 	}
 
 	if lastMsgID.AtEarliestPosition() {
-		log.Info("there is no more delta msg", zap.Int64("Collection ID", collectionID), zap.String("channel", pChannelName))
+		log.Ctx(ctx).Info("there is no more delta msg", zap.Int64("Collection ID", collectionID), zap.String("channel", pChannelName))
 		return nil
 	}
 
@@ -668,7 +668,7 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 		deleteOffset:     make(map[UniqueID]int64),
 	}
 
-	log.Info("start read delta msg from seek position to last position",
+	log.Ctx(ctx).Info("start read delta msg from seek position to last position",
 		zap.Int64("Collection ID", collectionID), zap.String("channel", pChannelName))
 	hasMore := true
 	for hasMore {
@@ -677,7 +677,7 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 			break
 		case msgPack, ok := <-stream.Chan():
 			if !ok {
-				log.Warn("fail to read delta msg", zap.String("pChannelName", pChannelName), zap.Any("msg id", position.GetMsgID()), zap.Error(err))
+				log.Ctx(ctx).Warn("fail to read delta msg", zap.String("pChannelName", pChannelName), zap.Any("msg id", position.GetMsgID()), zap.Error(err))
 				return err
 			}
 
@@ -691,7 +691,7 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 					if dmsg.CollectionID != collectionID {
 						continue
 					}
-					log.Debug("delete pk",
+					log.Ctx(ctx).Debug("delete pk",
 						zap.Any("pk", dmsg.PrimaryKeys),
 						zap.String("vChannelName", position.GetChannelName()),
 						zap.Any("msg id", position.GetMsgID()),
@@ -701,14 +701,14 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 						// TODO: panic?
 						// error occurs when missing meta info or unexpected pk type, should not happen
 						err = fmt.Errorf("deleteNode processDeleteMessages failed, collectionID = %d, err = %s", dmsg.CollectionID, err)
-						log.Error(err.Error())
+						log.Ctx(ctx).Error(err.Error())
 						return err
 					}
 				}
 
 				ret, err := lastMsgID.LessOrEqualThan(tsMsg.Position().MsgID)
 				if err != nil {
-					log.Warn("check whether current MsgID less than last MsgID failed",
+					log.Ctx(ctx).Warn("check whether current MsgID less than last MsgID failed",
 						zap.Int64("Collection ID", collectionID), zap.String("channel", pChannelName), zap.Error(err))
 					return err
 				}
@@ -721,7 +721,7 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 		}
 	}
 
-	log.Info("All data has been read, there is no more data", zap.Int64("Collection ID", collectionID),
+	log.Ctx(ctx).Info("All data has been read, there is no more data", zap.Int64("Collection ID", collectionID),
 		zap.String("channel", pChannelName), zap.Any("msg id", position.GetMsgID()))
 	for segmentID, pks := range delData.deleteIDs {
 		segment, err := loader.metaReplica.getSegmentByID(segmentID, segmentTypeSealed)
@@ -739,7 +739,7 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 		go deletePk(loader.metaReplica, delData, segmentID, &wg)
 	}
 	wg.Wait()
-	log.Info("from dml check point load done", zap.Any("msg id", position.GetMsgID()))
+	log.Ctx(ctx).Info("from dml check point load done", zap.Any("msg id", position.GetMsgID()))
 	return nil
 }
 

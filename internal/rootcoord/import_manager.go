@@ -190,7 +190,7 @@ func (m *importManager) sendOutTasks(ctx context.Context) error {
 			WorkingNodes: busyNodeList,
 		})
 		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-			log.Warn("import task is rejected",
+			log.Ctx(ctx).Warn("import task is rejected",
 				zap.Int64("task ID", it.GetTaskId()),
 				zap.Any("error code", resp.GetStatus().GetErrorCode()),
 				zap.String("cause", resp.GetStatus().GetReason()))
@@ -199,7 +199,7 @@ func (m *importManager) sendOutTasks(ctx context.Context) error {
 
 		// Successfully assigned dataNode for the import task. Add task to working task list and update task store.
 		task.DatanodeId = resp.GetDatanodeId()
-		log.Debug("import task successfully assigned to dataNode",
+		log.Ctx(ctx).Debug("import task successfully assigned to dataNode",
 			zap.Int64("task ID", it.GetTaskId()),
 			zap.Int64("dataNode ID", task.GetDatanodeId()))
 		// Add new working dataNode to busyNodes.
@@ -209,7 +209,7 @@ func (m *importManager) sendOutTasks(ctx context.Context) error {
 			m.workingLock.Lock()
 			defer m.workingLock.Unlock()
 
-			log.Debug("import task added as working task", zap.Int64("task ID", it.TaskId))
+			log.Ctx(ctx).Debug("import task added as working task", zap.Int64("task ID", it.TaskId))
 			task.State.StateCode = commonpb.ImportState_ImportPending
 			m.workingTasks[task.GetId()] = task
 			m.updateImportTaskStore(task)
@@ -250,7 +250,7 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 		Tasks: make([]int64, 0),
 	}
 
-	log.Debug("request received",
+	log.Ctx(ctx).Debug("request received",
 		zap.String("collection name", req.GetCollectionName()),
 		zap.Int64("collection ID", cID),
 		zap.Int64("partition ID", pID))
@@ -269,7 +269,7 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 		// task queue size has a limit, return error if import request contains too many data files, and skip entire job
 		if capacity-length < taskCount {
 			err = fmt.Errorf("import task queue max size is %v, currently there are %v tasks is pending. Not able to execute this request with %v tasks", capacity, length, taskCount)
-			log.Error(err.Error())
+			log.Ctx(ctx).Error(err.Error())
 			return err
 		}
 
@@ -307,11 +307,11 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 				}
 				resp.Tasks = append(resp.Tasks, newTask.GetId())
 				taskList[i] = newTask.GetId()
-				log.Info("new task created as pending task", zap.Int64("task ID", newTask.GetId()))
+				log.Ctx(ctx).Info("new task created as pending task", zap.Int64("task ID", newTask.GetId()))
 				m.pendingTasks = append(m.pendingTasks, newTask)
 				m.storeImportTask(newTask)
 			}
-			log.Info("row-based import request processed", zap.Any("taskIDs", taskList))
+			log.Ctx(ctx).Info("row-based import request processed", zap.Any("taskIDs", taskList))
 		} else {
 			// TODO: Merge duplicated code :(
 			// for column-based, all files is a task
@@ -335,10 +335,10 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 				DataIndexed:   false,
 			}
 			resp.Tasks = append(resp.Tasks, newTask.GetId())
-			log.Info("new task created as pending task", zap.Int64("task ID", newTask.GetId()))
+			log.Ctx(ctx).Info("new task created as pending task", zap.Int64("task ID", newTask.GetId()))
 			m.pendingTasks = append(m.pendingTasks, newTask)
 			m.storeImportTask(newTask)
-			log.Info("column-based import request processed", zap.Int64("taskID", newTask.GetId()))
+			log.Ctx(ctx).Info("column-based import request processed", zap.Int64("taskID", newTask.GetId()))
 		}
 		return nil
 	}()

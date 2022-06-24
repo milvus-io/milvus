@@ -56,7 +56,7 @@ func shuffleChannelsToQueryNode(ctx context.Context, reqs []*querypb.WatchDmChan
 		}
 		if len(onlineNodeIDs) == 0 {
 			err := errors.New("no online QueryNode to allocate")
-			log.Error("shuffleChannelsToQueryNode failed", zap.Error(err))
+			log.Ctx(ctx).Error("shuffleChannelsToQueryNode failed", zap.Error(err))
 			if !wait {
 				return err
 			}
@@ -85,7 +85,7 @@ func shuffleChannelsToQueryNode(ctx context.Context, reqs []*querypb.WatchDmChan
 		}
 
 		if len(availableNodeIDs) > 0 {
-			log.Debug("shuffleChannelsToQueryNode: shuffle channel to available QueryNode", zap.Int64s("available nodeIDs", availableNodeIDs))
+			log.Ctx(ctx).Debug("shuffleChannelsToQueryNode: shuffle channel to available QueryNode", zap.Int64s("available nodeIDs", availableNodeIDs))
 			for _, req := range reqs {
 				sort.Slice(availableNodeIDs, func(i, j int) bool {
 					return nodeID2NumChannels[availableNodeIDs[i]] < nodeID2NumChannels[availableNodeIDs[j]]
@@ -99,7 +99,7 @@ func shuffleChannelsToQueryNode(ctx context.Context, reqs []*querypb.WatchDmChan
 
 		if !wait {
 			err := errors.New("no available queryNode to allocate")
-			log.Error("shuffleChannelsToQueryNode failed", zap.Int64s("online nodeIDs", onlineNodeIDs), zap.Int64s("exclude nodeIDs", excludeNodeIDs), zap.Error(err))
+			log.Ctx(ctx).Error("shuffleChannelsToQueryNode failed", zap.Int64s("online nodeIDs", onlineNodeIDs), zap.Int64s("exclude nodeIDs", excludeNodeIDs), zap.Error(err))
 			return err
 		}
 

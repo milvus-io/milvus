@@ -113,14 +113,14 @@ func (it *IndexAddTask) OnEnqueue() error {
 
 // PreExecute sets the indexBuildID to index task request.
 func (it *IndexAddTask) PreExecute(ctx context.Context) error {
-	log.Debug("IndexCoord IndexAddTask PreExecute", zap.Any("IndexBuildID", it.indexBuildID))
+	log.Ctx(ctx).Debug("IndexCoord IndexAddTask PreExecute", zap.Any("IndexBuildID", it.indexBuildID))
 	it.req.IndexBuildID = it.indexBuildID
 	return nil
 }
 
 // Execute adds the index task to meta table.
 func (it *IndexAddTask) Execute(ctx context.Context) error {
-	log.Debug("IndexCoord IndexAddTask Execute", zap.Any("IndexBuildID", it.indexBuildID))
+	log.Ctx(ctx).Debug("IndexCoord IndexAddTask Execute", zap.Any("IndexBuildID", it.indexBuildID))
 	err := it.table.AddIndex(it.indexBuildID, it.req)
 	if err != nil {
 		return err
@@ -130,6 +130,6 @@ func (it *IndexAddTask) Execute(ctx context.Context) error {
 
 // PostExecute does nothing here.
 func (it *IndexAddTask) PostExecute(ctx context.Context) error {
-	log.Debug("IndexCoord IndexAddTask PostExecute", zap.Any("IndexBuildID", it.indexBuildID))
+	log.Ctx(ctx).Debug("IndexCoord IndexAddTask PostExecute", zap.Any("IndexBuildID", it.indexBuildID))
 	return nil
 }

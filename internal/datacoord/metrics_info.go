@@ -44,12 +44,12 @@ func (s *Server) getSystemInfoMetrics(
 	}
 
 	// for each data node, fetch metrics info
-	log.Debug("datacoord.getSystemInfoMetrics",
+	log.Ctx(ctx).Debug("datacoord.getSystemInfoMetrics",
 		zap.Int("DataNodes number", len(nodes)))
 	for _, node := range nodes {
 		infos, err := s.getDataNodeMetrics(ctx, req, node)
 		if err != nil {
-			log.Warn("fails to get DataNode metrics", zap.Error(err))
+			log.Ctx(ctx).Warn("fails to get DataNode metrics", zap.Error(err))
 			continue
 		}
 		clusterTopology.ConnectedNodes = append(clusterTopology.ConnectedNodes, infos)
@@ -133,7 +133,7 @@ func (s *Server) getDataNodeMetrics(ctx context.Context, req *milvuspb.GetMetric
 
 	metrics, err := cli.GetMetrics(ctx, req)
 	if err != nil {
-		log.Warn("invalid metrics of DataNode was found",
+		log.Ctx(ctx).Warn("invalid metrics of DataNode was found",
 			zap.Error(err))
 		infos.BaseComponentInfos.ErrorReason = err.Error()
 		// err handled, returns nil
@@ -142,7 +142,7 @@ func (s *Server) getDataNodeMetrics(ctx context.Context, req *milvuspb.GetMetric
 	infos.BaseComponentInfos.Name = metrics.GetComponentName()
 
 	if metrics.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("invalid metrics of DataNode was found",
+		log.Ctx(ctx).Warn("invalid metrics of DataNode was found",
 			zap.Any("error_code", metrics.Status.ErrorCode),
 			zap.Any("error_reason", metrics.Status.Reason))
 		infos.BaseComponentInfos.ErrorReason = metrics.GetStatus().GetReason()
@@ -151,7 +151,7 @@ func (s *Server) getDataNodeMetrics(ctx context.Context, req *milvuspb.GetMetric
 
 	err = metricsinfo.UnmarshalComponentInfos(metrics.GetResponse(), &infos)
 	if err != nil {
-		log.Warn("invalid metrics of DataNode found",
+		log.Ctx(ctx).Warn("invalid metrics of DataNode found",
 			zap.Error(err))
 		infos.BaseComponentInfos.ErrorReason = err.Error()
 		return infos, nil

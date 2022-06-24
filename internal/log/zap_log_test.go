@@ -320,3 +320,17 @@ func (t *testLogSpy) assertMessagesNotContains(msg string) {
 		assert.NotContains(t.TB, actualMsg, msg)
 	}
 }
+
+func (t *testLogSpy) assertLastMessageContains(msg string) {
+	if len(t.Messages) == 0 {
+		assert.Error(t.TB, fmt.Errorf("empty message"))
+	}
+	assert.Contains(t.TB, t.Messages[len(t.Messages)-1], msg)
+}
+
+func (t *testLogSpy) assertLastMessageNotContains(msg string) {
+	if len(t.Messages) == 0 {
+		assert.Error(t.TB, fmt.Errorf("empty message"))
+	}
+	assert.NotContains(t.TB, t.Messages[len(t.Messages)-1], msg)
+}

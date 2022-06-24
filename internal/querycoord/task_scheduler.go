@@ -436,7 +436,7 @@ func (scheduler *TaskScheduler) Enqueue(t task) error {
 	// TODO, loadbalance, handoff and other task may not want to be persisted
 	id, err := scheduler.taskIDAllocator()
 	if err != nil {
-		log.Error("allocator trigger taskID failed", zap.Error(err))
+		log.Ctx(t.traceCtx()).Error("allocator trigger taskID failed", zap.Error(err))
 		return err
 	}
 	t.setTaskID(id)
@@ -444,7 +444,7 @@ func (scheduler *TaskScheduler) Enqueue(t task) error {
 	taskKey := fmt.Sprintf("%s/%d", triggerTaskPrefix, t.getTaskID())
 	blobs, err := t.marshal()
 	if err != nil {
-		log.Error("error when save marshal task", zap.Int64("taskID", t.getTaskID()), zap.Error(err))
+		log.Ctx(t.traceCtx()).Error("error when save marshal task", zap.Int64("taskID", t.getTaskID()), zap.Error(err))
 		return err
 	}
 	kvs[taskKey] = string(blobs)
@@ -453,18 +453,18 @@ func (scheduler *TaskScheduler) Enqueue(t task) error {
 	err = scheduler.client.MultiSave(kvs)
 	if err != nil {
 		//TODO::clean etcd meta
-		log.Error("error when save trigger task to etcd", zap.Int64("taskID", t.getTaskID()), zap.Error(err))
+		log.Ctx(t.traceCtx()).Error("error when save trigger task to etcd", zap.Int64("taskID", t.getTaskID()), zap.Error(err))
 		return err
 	}
 	t.setState(taskUndo)
 	scheduler.triggerTaskQueue.addTask(t)
-	log.Debug("EnQueue a triggerTask and save to etcd", zap.Int64("taskID", t.getTaskID()))
+	log.Ctx(t.traceCtx()).Debug("EnQueue a triggerTask and save to etcd", zap.Int64("taskID", t.getTaskID()))
 
 	return nil
 }
 
 func (scheduler *TaskScheduler) processTask(t task) error {
-	log.Info("begin to process task", zap.Int64("taskID", t.getTaskID()), zap.String("task", reflect.TypeOf(t).String()))
+	log.Ctx(t.traceCtx()).Info("begin to process task", zap.Int64("taskID", t.getTaskID()), zap.String("task", reflect.TypeOf(t).String()))
 	var taskInfoKey string
 	// assign taskID for childTask and update triggerTask's childTask to etcd
 	updateKVFn := func(parentTask task) error {
@@ -490,7 +490,7 @@ func (scheduler *TaskScheduler) processTask(t task) error {
 			default:
 				//TODO::
 			}
-			log.Debug("updateKVFn: the size of internal request",
+			log.Ctx(t.traceCtx()).Debug("updateKVFn: the size of internal request",
 				zap.Int("size", protoSize),
 				zap.Int64("taskID", childTask.getTaskID()),
 				zap.String("type", childTask.msgType().String()))
@@ -538,7 +538,7 @@ func (scheduler *TaskScheduler) processTask(t task) error {
 	span.LogFields(oplog.Int64("processTask: scheduler process PreExecute", t.getTaskID()))
 	err = t.preExecute(ctx)
 	if err != nil {
-		log.Error("failed to preExecute task",
+		log.Ctx(t.traceCtx()).Error("failed to preExecute task",
 			zap.Error(err))
 		t.setResultInfo(err)
 		return err
@@ -556,18 +556,18 @@ func (scheduler *TaskScheduler) processTask(t task) error {
 	span.LogFields(oplog.Int64("processTask: scheduler process Execute", t.getTaskID()))
 	err = t.execute(ctx)
 	if err != nil {
-		log.Warn("failed to execute task", zap.Error(err))
+		log.Ctx(ctx).Warn("failed to execute task", zap.Error(err))
 		trace.LogError(span, err)
 		return err
 	}
 	err = updateKVFn(t)
 	if err != nil {
-		log.Warn("failed to execute task", zap.Error(err))
+		log.Ctx(ctx).Warn("failed to execute task", zap.Error(err))
 		trace.LogError(span, err)
 		t.setResultInfo(err)
 		return err
 	}
-	log.Debug("processTask: update etcd success", zap.Int64("parent taskID", t.getTaskID()))
+	log.Ctx(ctx).Debug("processTask: update etcd success", zap.Int64("parent taskID", t.getTaskID()))
 	if t.msgType() == commonpb.MsgType_LoadCollection || t.msgType() == commonpb.MsgType_LoadPartitions {
 		t.notify(nil)
 	}

@@ -226,12 +226,12 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 
 		plan, err := planparserv2.CreateSearchPlan(t.schema, t.request.Dsl, annsField, queryInfo)
 		if err != nil {
-			log.Debug("failed to create query plan", zap.Error(err), zap.Int64("msgID", t.ID()),
+			log.Ctx(ctx).Debug("failed to create query plan", zap.Error(err), zap.Int64("msgID", t.ID()),
 				zap.String("dsl", t.request.Dsl), // may be very large if large term passed.
 				zap.String("anns field", annsField), zap.Any("query info", queryInfo))
 			return fmt.Errorf("failed to create query plan: %v", err)
 		}
-		log.Debug("create query plan", zap.Int64("msgID", t.ID()),
+		log.Ctx(ctx).Debug("create query plan", zap.Int64("msgID", t.ID()),
 			zap.String("dsl", t.request.Dsl), // may be very large if large term passed.
 			zap.String("anns field", annsField), zap.Any("query info", queryInfo))
 
@@ -253,7 +253,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		if err := validateTopK(queryInfo.GetTopk()); err != nil {
 			return err
 		}
-		log.Debug("Proxy::searchTask::PreExecute", zap.Int64("msgID", t.ID()),
+		log.Ctx(ctx).Debug("Proxy::searchTask::PreExecute", zap.Int64("msgID", t.ID()),
 			zap.Int64s("plan.OutputFieldIds", plan.GetOutputFieldIds()),
 			zap.String("plan", plan.String())) // may be very large if large term passed.
 	}
@@ -282,7 +282,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	if t.SearchRequest.Nq, err = getNq(t.request); err != nil {
 		return err
 	}
-	log.Info("search PreExecute done.", zap.Int64("msgID", t.ID()),
+	log.Ctx(ctx).Info("search PreExecute done.", zap.Int64("msgID", t.ID()),
 		zap.Uint64("travel_ts", travelTimestamp), zap.Uint64("guarantee_ts", guaranteeTs),
 		zap.Uint64("timeout_ts", t.SearchRequest.GetTimeoutTimestamp()))
 
@@ -304,7 +304,7 @@ func (t *searchTask) Execute(ctx context.Context) error {
 		t.resultBuf = make(chan *internalpb.SearchResults, len(shard2Leaders))
 		t.toReduceResults = make([]*internalpb.SearchResults, 0, len(shard2Leaders))
 		if err := t.searchShardPolicy(ctx, t.shardMgr, t.searchShard, shard2Leaders); err != nil {
-			log.Warn("failed to do search", zap.Error(err), zap.String("Shards", fmt.Sprintf("%v", shard2Leaders)))
+			log.Ctx(ctx).Warn("failed to do search", zap.Error(err), zap.String("Shards", fmt.Sprintf("%v", shard2Leaders)))
 			return err
 		}
 		return nil
@@ -312,7 +312,7 @@ func (t *searchTask) Execute(ctx context.Context) error {
 
 	err := executeSearch(WithCache)
 	if errors.Is(err, errInvalidShardLeaders) || funcutil.IsGrpcErr(err) || errors.Is(err, grpcclient.ErrConnect) {
-		log.Warn("first search failed, updating shardleader caches and retry search",
+		log.Ctx(ctx).Warn("first search failed, updating shardleader caches and retry search",
 			zap.Int64("msgID", t.ID()), zap.Error(err))
 		return executeSearch(WithoutCache)
 	}
@@ -320,7 +320,7 @@ func (t *searchTask) Execute(ctx context.Context) error {
 		return fmt.Errorf("fail to search on all shard leaders, err=%v", err)
 	}
 
-	log.Debug("Search Execute done.", zap.Int64("msgID", t.ID()))
+	log.Ctx(ctx).Debug("Search Execute done.", zap.Int64("msgID", t.ID()))
 	return nil
 }
 
@@ -335,10 +335,10 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	select {
 	// in case timeout happened
 	case <-t.TraceCtx().Done():
-		log.Debug("wait to finish timeout!", zap.Int64("msgID", t.ID()))
+		log.Ctx(ctx).Debug("wait to finish timeout!", zap.Int64("msgID", t.ID()))
 		return nil
 	default:
-		log.Debug("all searches are finished or canceled", zap.Int64("msgID", t.ID()))
+		log.Ctx(ctx).Debug("all searches are finished or canceled", zap.Int64("msgID", t.ID()))
 		close(t.resultBuf)
 		for res := range t.resultBuf {
 			t.toReduceResults = append(t.toReduceResults, res)
@@ -353,10 +353,10 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	metrics.ProxyDecodeResultLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10),
 		metrics.SearchLabel).Observe(float64(tr.RecordSpan().Milliseconds()))
 
-	log.Debug("proxy search post execute stage 2", zap.Int64("msgID", t.ID()),
+	log.Ctx(ctx).Debug("proxy search post execute stage 2", zap.Int64("msgID", t.ID()),
 		zap.Int("len(validSearchResults)", len(validSearchResults)))
 	if len(validSearchResults) <= 0 {
-		log.Warn("search result is empty", zap.Int64("msgID", t.ID()))
+		log.Ctx(ctx).Warn("search result is empty", zap.Int64("msgID", t.ID()))
 
 		t.result = &milvuspb.SearchResults{
 			Status: &commonpb.Status{
@@ -403,7 +403,7 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 			}
 		}
 	}
-	log.Info("Search post execute done", zap.Int64("msgID", t.ID()))
+	log.Ctx(ctx).Info("Search post execute done", zap.Int64("msgID", t.ID()))
 	return nil
 }
 
@@ -415,7 +415,7 @@ func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.Que
 	}
 	result, err := qn.Search(ctx, req)
 	if err != nil {
-		log.Warn("QueryNode search return error", zap.Int64("msgID", t.ID()),
+		log.Ctx(ctx).Warn("QueryNode search return error", zap.Int64("msgID", t.ID()),
 			zap.Int64("nodeID", nodeID), zap.Strings("channels", channelIDs), zap.Error(err))
 		return err
 	}

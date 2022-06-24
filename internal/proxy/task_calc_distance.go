@@ -175,7 +175,7 @@ func (t *calcDistanceTask) Execute(ctx context.Context, request *milvuspb.CalcDi
 		return t.arrangeVectorsByIntID(inputIds, dict, retrievedVectors)
 	}
 
-	log.Debug("CalcDistance received",
+	log.Ctx(ctx).Debug("CalcDistance received",
 		zap.String("traceID", t.traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("metric", metric))
@@ -183,13 +183,13 @@ func (t *calcDistanceTask) Execute(ctx context.Context, request *milvuspb.CalcDi
 	vectorsLeft := request.GetOpLeft().GetDataArray()
 	opLeft := request.GetOpLeft().GetIdArray()
 	if opLeft != nil {
-		log.Debug("OpLeft IdArray not empty, Get vectors by id",
+		log.Ctx(ctx).Debug("OpLeft IdArray not empty, Get vectors by id",
 			zap.String("traceID", t.traceID),
 			zap.String("role", typeutil.ProxyRole))
 
 		result, err := t.queryFunc(opLeft)
 		if err != nil {
-			log.Debug("Failed to get left vectors by id",
+			log.Ctx(ctx).Debug("Failed to get left vectors by id",
 				zap.Error(err),
 				zap.String("traceID", t.traceID),
 				zap.String("role", typeutil.ProxyRole))
@@ -202,13 +202,13 @@ func (t *calcDistanceTask) Execute(ctx context.Context, request *milvuspb.CalcDi
 			}, nil
 		}
 
-		log.Debug("OpLeft IdArray not empty, Get vectors by id done",
+		log.Ctx(ctx).Debug("OpLeft IdArray not empty, Get vectors by id done",
 			zap.String("traceID", t.traceID),
 			zap.String("role", typeutil.ProxyRole))
 
 		vectorsLeft, err = arrangeFunc(opLeft, result.FieldsData)
 		if err != nil {
-			log.Debug("Failed to re-arrange left vectors",
+			log.Ctx(ctx).Debug("Failed to re-arrange left vectors",
 				zap.Error(err),
 				zap.String("traceID", t.traceID),
 				zap.String("role", typeutil.ProxyRole))
@@ -221,14 +221,14 @@ func (t *calcDistanceTask) Execute(ctx context.Context, request *milvuspb.CalcDi
 			}, nil
 		}
 
-		log.Debug("Re-arrange left vectors done",
+		log.Ctx(ctx).Debug("Re-arrange left vectors done",
 			zap.String("traceID", t.traceID),
 			zap.String("role", typeutil.ProxyRole))
 	}
 
 	if vectorsLeft == nil {
 		msg := "Left vectors array is empty"
-		log.Debug(msg,
+		log.Ctx(ctx).Debug(msg,
 			zap.String("traceID", t.traceID),
 			zap.String("role", typeutil.ProxyRole))
 
@@ -243,13 +243,13 @@ func (t *calcDistanceTask) Execute(ctx context.Context, request *milvuspb.CalcDi
 	vectorsRight := request.GetOpRight().GetDataArray()
 	opRight := request.GetOpRight().GetIdArray()
 	if opRight != nil {
-		log.Debug("OpRight IdArray not empty, Get vectors by id",
+		log.Ctx(ctx).Debug("OpRight IdArray not empty, Get vectors by id",
 			zap.String("traceID", t.traceID),
 			zap.String("role", typeutil.ProxyRole))
 
 		result, err := t.queryFunc(opRight)
 		if err != nil {
-			log.Debug("Failed to get right vectors by id",
+			log.Ctx(ctx).Debug("Failed to get right vectors by id",
 				zap.Error(err),
 				zap.String("traceID", t.traceID),
 				zap.String("role", typeutil.ProxyRole))
@@ -262,13 +262,13 @@ func (t *calcDistanceTask) Execute(ctx context.Context, request *milvuspb.CalcDi
 			}, nil
 		}
 
-		log.Debug("OpRight IdArray not empty, Get vectors by id done",
+		log.Ctx(ctx).Debug("OpRight IdArray not empty, Get vectors by id done",
 			zap.String("traceID", t.traceID),
 			zap.String("role", typeutil.ProxyRole))
 
 		vectorsRight, err = arrangeFunc(opRight, result.FieldsData)
 		if err != nil {
-			log.Debug("Failed to re-arrange right vectors",
+			log.Ctx(ctx).Debug("Failed to re-arrange right vectors",
 				zap.Error(err),
 				zap.String("traceID", t.traceID),
 				zap.String("role", typeutil.ProxyRole))
@@ -281,14 +281,14 @@ func (t *calcDistanceTask) Execute(ctx context.Context, request *milvuspb.CalcDi
 			}, nil
 		}
 
-		log.Debug("Re-arrange right vectors done",
+		log.Ctx(ctx).Debug("Re-arrange right vectors done",
 			zap.String("traceID", t.traceID),
 			zap.String("role", typeutil.ProxyRole))
 	}
 
 	if vectorsRight == nil {
 		msg := "Right vectors array is empty"
-		log.Debug(msg,
+		log.Ctx(ctx).Debug(msg,
 			zap.String("traceID", t.traceID),
 			zap.String("role", typeutil.ProxyRole))
 
@@ -302,7 +302,7 @@ func (t *calcDistanceTask) Execute(ctx context.Context, request *milvuspb.CalcDi
 
 	if vectorsLeft.GetDim() != vectorsRight.GetDim() {
 		msg := "Vectors dimension is not equal"
-		log.Debug(msg,
+		log.Ctx(ctx).Debug(msg,
 			zap.String("traceID", t.traceID),
 			zap.String("role", typeutil.ProxyRole))
 
@@ -317,7 +317,7 @@ func (t *calcDistanceTask) Execute(ctx context.Context, request *milvuspb.CalcDi
 	if vectorsLeft.GetFloatVector() != nil && vectorsRight.GetFloatVector() != nil {
 		distances, err := distance.CalcFloatDistance(vectorsLeft.GetDim(), vectorsLeft.GetFloatVector().GetData(), vectorsRight.GetFloatVector().GetData(), metric)
 		if err != nil {
-			log.Debug("Failed to CalcFloatDistance",
+			log.Ctx(ctx).Debug("Failed to CalcFloatDistance",
 				zap.Error(err),
 				zap.Int64("leftDim", vectorsLeft.GetDim()),
 				zap.Int("leftLen", len(vectorsLeft.GetFloatVector().GetData())),
@@ -334,7 +334,7 @@ func (t *calcDistanceTask) Execute(ctx context.Context, request *milvuspb.CalcDi
 			}, nil
 		}
 
-		log.Debug("CalcFloatDistance done",
+		log.Ctx(ctx).Debug("CalcFloatDistance done",
 			zap.Error(err),
 			zap.String("traceID", t.traceID),
 			zap.String("role", typeutil.ProxyRole))
@@ -352,7 +352,7 @@ func (t *calcDistanceTask) Execute(ctx context.Context, request *milvuspb.CalcDi
 	if vectorsLeft.GetBinaryVector() != nil && vectorsRight.GetBinaryVector() != nil {
 		hamming, err := distance.CalcHammingDistance(vectorsLeft.GetDim(), vectorsLeft.GetBinaryVector(), vectorsRight.GetBinaryVector())
 		if err != nil {
-			log.Debug("Failed to CalcHammingDistance",
+			log.Ctx(ctx).Debug("Failed to CalcHammingDistance",
 				zap.Error(err),
 				zap.Int64("leftDim", vectorsLeft.GetDim()),
 				zap.Int("leftLen", len(vectorsLeft.GetBinaryVector())),
@@ -370,7 +370,7 @@ func (t *calcDistanceTask) Execute(ctx context.Context, request *milvuspb.CalcDi
 		}
 
 		if metric == distance.HAMMING {
-			log.Debug("CalcHammingDistance done",
+			log.Ctx(ctx).Debug("CalcHammingDistance done",
 				zap.String("traceID", t.traceID),
 				zap.String("role", typeutil.ProxyRole))
 
@@ -387,7 +387,7 @@ func (t *calcDistanceTask) Execute(ctx context.Context, request *milvuspb.CalcDi
 		if metric == distance.TANIMOTO {
 			tanimoto, err := distance.CalcTanimotoCoefficient(vectorsLeft.GetDim(), hamming)
 			if err != nil {
-				log.Debug("Failed to CalcTanimotoCoefficient",
+				log.Ctx(ctx).Debug("Failed to CalcTanimotoCoefficient",
 					zap.Error(err),
 					zap.String("traceID", t.traceID),
 					zap.String("role", typeutil.ProxyRole))
@@ -400,7 +400,7 @@ func (t *calcDistanceTask) Execute(ctx context.Context, request *milvuspb.CalcDi
 				}, nil
 			}
 
-			log.Debug("CalcTanimotoCoefficient done",
+			log.Ctx(ctx).Debug("CalcTanimotoCoefficient done",
 				zap.String("traceID", t.traceID),
 				zap.String("role", typeutil.ProxyRole))
 
@@ -420,7 +420,7 @@ func (t *calcDistanceTask) Execute(ctx context.Context, request *milvuspb.CalcDi
 		err = errors.New("cannot calculate distance between binary vectors and float vectors")
 	}
 
-	log.Debug("Failed to CalcDistance",
+	log.Ctx(ctx).Debug("Failed to CalcDistance",
 		zap.Error(err),
 		zap.String("traceID", t.traceID),
 		zap.String("role", typeutil.ProxyRole))

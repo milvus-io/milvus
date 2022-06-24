@@ -106,7 +106,7 @@ func (dn *deleteNode) Close() {
 }
 
 func (dn *deleteNode) bufferDeleteMsg(msg *msgstream.DeleteMsg, tr TimeRange) error {
-	log.Debug("bufferDeleteMsg", zap.Any("primary keys", msg.PrimaryKeys), zap.String("vChannelName", dn.channelName))
+	log.Ctx(msg.TraceCtx()).Debug("bufferDeleteMsg", zap.Any("primary keys", msg.PrimaryKeys), zap.String("vChannelName", dn.channelName))
 
 	// Update delBuf for merged segments
 	compactedTo2From := dn.replica.listCompactedSegmentIDs()
@@ -211,9 +211,8 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 		msg.SetTraceCtx(ctx)
 	}
 
-	for i, msg := range fgMsg.deleteMessages {
-		traceID, _, _ := trace.InfoFromSpan(spans[i])
-		log.Info("Buffer delete request in DataNode", zap.String("traceID", traceID))
+	for _, msg := range fgMsg.deleteMessages {
+		log.Ctx(msg.TraceCtx()).Info("Buffer delete request in DataNode")
 
 		err := dn.bufferDeleteMsg(msg, fgMsg.timeRange)
 		if err != nil {

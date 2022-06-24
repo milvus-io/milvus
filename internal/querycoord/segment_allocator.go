@@ -48,7 +48,7 @@ func shuffleSegmentsToQueryNode(ctx context.Context, reqs []*querypb.LoadSegment
 		onlineNodeIDs := cluster.OnlineNodeIDs()
 		if len(onlineNodeIDs) == 0 {
 			err := errors.New("no online QueryNode to allocate")
-			log.Error("shuffleSegmentsToQueryNode failed", zap.Error(err))
+			log.Ctx(ctx).Error("shuffleSegmentsToQueryNode failed", zap.Error(err))
 			if !wait {
 				return err
 			}
@@ -74,7 +74,7 @@ func shuffleSegmentsToQueryNode(ctx context.Context, reqs []*querypb.LoadSegment
 		}
 
 		if len(availableNodeIDs) > 0 {
-			log.Info("shuffleSegmentsToQueryNode: shuffle segment to available QueryNode", zap.Int64s("available nodeIDs", availableNodeIDs))
+			log.Ctx(ctx).Info("shuffleSegmentsToQueryNode: shuffle segment to available QueryNode", zap.Int64s("available nodeIDs", availableNodeIDs))
 			for _, req := range reqs {
 				sort.Slice(availableNodeIDs, func(i, j int) bool {
 					return nodeID2NumSegment[availableNodeIDs[i]] < nodeID2NumSegment[availableNodeIDs[j]]
@@ -88,7 +88,7 @@ func shuffleSegmentsToQueryNode(ctx context.Context, reqs []*querypb.LoadSegment
 
 		if !wait {
 			err := errors.New("no available queryNode to allocate")
-			log.Error("shuffleSegmentsToQueryNode failed", zap.Int64s("online nodeIDs", onlineNodeIDs), zap.Int64s("exclude nodeIDs", excludeNodeIDs), zap.Int64s("include nodeIDs", includeNodeIDs), zap.Error(err))
+			log.Ctx(ctx).Error("shuffleSegmentsToQueryNode failed", zap.Int64s("online nodeIDs", onlineNodeIDs), zap.Int64s("exclude nodeIDs", excludeNodeIDs), zap.Int64s("include nodeIDs", includeNodeIDs), zap.Error(err))
 			return err
 		}
 		time.Sleep(shuffleWaitInterval)
@@ -109,7 +109,7 @@ func shuffleSegmentsToQueryNodeV2(ctx context.Context, reqs []*querypb.LoadSegme
 		dataSizePerReq[offset] = reqSize
 	}
 
-	log.Info("shuffleSegmentsToQueryNodeV2: get the segment size of loadReqs end", zap.Int64s("segment size of reqs", dataSizePerReq))
+	log.Ctx(ctx).Info("shuffleSegmentsToQueryNodeV2: get the segment size of loadReqs end", zap.Int64s("segment size of reqs", dataSizePerReq))
 	for {
 		// online nodes map and totalMem, usedMem, memUsage of every node
 		totalMem := make(map[int64]uint64)
@@ -132,7 +132,7 @@ func shuffleSegmentsToQueryNodeV2(ctx context.Context, reqs []*querypb.LoadSegme
 		}
 		if len(onlineNodeIDs) == 0 && !wait {
 			err := errors.New("no online queryNode to allocate")
-			log.Error("shuffleSegmentsToQueryNode failed", zap.Error(err))
+			log.Ctx(ctx).Error("shuffleSegmentsToQueryNode failed", zap.Error(err))
 			return err
 		}
 		onlineNodeIDs = nodesFilter(onlineNodeIDs, includeNodeIDs, excludeNodeIDs)
@@ -142,7 +142,7 @@ func shuffleSegmentsToQueryNodeV2(ctx context.Context, reqs []*querypb.LoadSegme
 		for _, nodeInfo := range nodes {
 			// avoid allocate segment to node which memUsageRate is high
 			if nodeInfo.memUsageRate >= Params.QueryCoordCfg.OverloadedMemoryThresholdPercentage {
-				log.Info("shuffleSegmentsToQueryNodeV2: queryNode memUsageRate large than MaxMemUsagePerNode",
+				log.Ctx(ctx).Info("shuffleSegmentsToQueryNodeV2: queryNode memUsageRate large than MaxMemUsagePerNode",
 					zap.Int64("nodeID", nodeInfo.id),
 					zap.Float64("memoryUsageRate", nodeInfo.memUsageRate))
 				continue
@@ -153,7 +153,7 @@ func shuffleSegmentsToQueryNodeV2(ctx context.Context, reqs []*querypb.LoadSegme
 			availableNodeIDs = append(availableNodeIDs, nodeInfo.id)
 		}
 		if len(availableNodeIDs) > 0 {
-			log.Info("shuffleSegmentsToQueryNodeV2: shuffle segment to available QueryNode", zap.Int64s("available nodeIDs", availableNodeIDs))
+			log.Ctx(ctx).Info("shuffleSegmentsToQueryNodeV2: shuffle segment to available QueryNode", zap.Int64s("available nodeIDs", availableNodeIDs))
 			memoryInsufficient := false
 			for offset, sizeOfReq := range dataSizePerReq {
 				// sort nodes by memUsageRate, low to high
@@ -183,21 +183,21 @@ func shuffleSegmentsToQueryNodeV2(ctx context.Context, reqs []*querypb.LoadSegme
 
 			// shuffle segment success
 			if !memoryInsufficient {
-				log.Info("shuffleSegmentsToQueryNodeV2: shuffle segment to query node success")
+				log.Ctx(ctx).Info("shuffleSegmentsToQueryNodeV2: shuffle segment to query node success")
 				return nil
 			}
 
 			// memory insufficient and wait == false
 			if !wait {
 				err := errors.New("shuffleSegmentsToQueryNodeV2: insufficient memory of available node")
-				log.Error("shuffleSegmentsToQueryNode failed", zap.Int64s("online nodeIDs", onlineNodeIDs), zap.Int64s("exclude nodeIDs", excludeNodeIDs), zap.Int64s("include nodeIDs", includeNodeIDs), zap.Error(err))
+				log.Ctx(ctx).Error("shuffleSegmentsToQueryNode failed", zap.Int64s("online nodeIDs", onlineNodeIDs), zap.Int64s("exclude nodeIDs", excludeNodeIDs), zap.Int64s("include nodeIDs", includeNodeIDs), zap.Error(err))
 				return err
 			}
 		} else {
 			// no available node to allocate and wait == false
 			if !wait {
 				err := errors.New("no available queryNode to allocate")
-				log.Error("shuffleSegmentsToQueryNode failed", zap.Int64s("online nodeIDs", onlineNodeIDs), zap.Int64s("exclude nodeIDs", excludeNodeIDs), zap.Int64s("include nodeIDs", includeNodeIDs), zap.Error(err))
+				log.Ctx(ctx).Error("shuffleSegmentsToQueryNode failed", zap.Int64s("online nodeIDs", onlineNodeIDs), zap.Int64s("exclude nodeIDs", excludeNodeIDs), zap.Int64s("include nodeIDs", includeNodeIDs), zap.Error(err))
 				return err
 			}
 		}

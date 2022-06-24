@@ -124,12 +124,12 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 		switch msg.Type() {
 		case commonpb.MsgType_DropCollection:
 			if msg.(*msgstream.DropCollectionMsg).GetCollectionID() == ddn.collectionID {
-				log.Info("Receiving DropCollection msg",
+				log.Ctx(msg.TraceCtx()).Info("Receiving DropCollection msg",
 					zap.Any("collectionID", ddn.collectionID),
 					zap.String("vChannelName", ddn.vChannelName))
 				ddn.dropMode.Store(true)
 
-				log.Info("Stop compaction of vChannel", zap.String("vChannelName", ddn.vChannelName))
+				log.Ctx(msg.TraceCtx()).Info("Stop compaction of vChannel", zap.String("vChannelName", ddn.vChannelName))
 				ddn.compactionExecutor.stopExecutingtaskByVChannelName(ddn.vChannelName)
 				fgMsg.dropCollection = true
 			}
@@ -137,28 +137,28 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 		case commonpb.MsgType_Insert:
 			imsg := msg.(*msgstream.InsertMsg)
 			if imsg.CollectionID != ddn.collectionID {
-				log.Warn("filter invalid insert message, collection mis-match",
+				log.Ctx(msg.TraceCtx()).Warn("filter invalid insert message, collection mis-match",
 					zap.Int64("Get collID", imsg.CollectionID),
 					zap.Int64("Expected collID", ddn.collectionID))
 				continue
 			}
 
 			if ddn.tryToFilterSegmentInsertMessages(imsg) {
-				log.Info("filter insert messages",
+				log.Ctx(msg.TraceCtx()).Info("filter insert messages",
 					zap.Int64("filter segment ID", imsg.GetSegmentID()),
 					zap.Uint64("message timestamp", msg.EndTs()),
 				)
 				continue
 			}
 
-			log.Debug("DDNode receive insert messages",
+			log.Ctx(msg.TraceCtx()).Debug("DDNode receive insert messages",
 				zap.Int("numRows", len(imsg.GetRowIDs())),
 				zap.String("vChannelName", ddn.vChannelName))
 			fgMsg.insertMessages = append(fgMsg.insertMessages, imsg)
 
 		case commonpb.MsgType_Delete:
 			dmsg := msg.(*msgstream.DeleteMsg)
-			log.Debug("DDNode receive delete messages",
+			log.Ctx(msg.TraceCtx()).Debug("DDNode receive delete messages",
 				zap.Int64("num", dmsg.NumRows),
 				zap.String("vChannelName", ddn.vChannelName))
 			for i := int64(0); i < dmsg.NumRows; i++ {
@@ -166,7 +166,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			}
 			forwardMsgs = append(forwardMsgs, dmsg)
 			if dmsg.CollectionID != ddn.collectionID {
-				log.Warn("filter invalid DeleteMsg, collection mis-match",
+				log.Ctx(msg.TraceCtx()).Warn("filter invalid DeleteMsg, collection mis-match",
 					zap.Int64("Get collID", dmsg.CollectionID),
 					zap.Int64("Expected collID", ddn.collectionID))
 				continue

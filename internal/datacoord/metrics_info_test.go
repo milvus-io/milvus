@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -111,4 +112,37 @@ func TestGetDataNodeMetrics(t *testing.T) {
 	assert.Nil(t, err)
 	assert.True(t, info.HasError)
 
+}
+
+func TestGetSystemInfoMetrics(t *testing.T) {
+	svr := newTestServer(t, nil)
+	defer closeTestServer(t, svr)
+
+	creator := func(ctx context.Context, addr string) (types.DataNode, error) {
+		return newMockDataNodeClient(100, nil)
+	}
+	ctx := context.Background()
+	req := &milvuspb.GetMetricsRequest{}
+	svr.sessionManager.sessionCreator = creator
+	assert.Nil(t, svr.cluster.Register(&NodeInfo{NodeID: 0, Address: "localhost"}))
+	resp, err := svr.getSystemInfoMetrics(ctx, req)
+	assert.Nil(t, err)
+	topology := &metricsinfo.DataCoordTopology{}
+	assert.Nil(t, metricsinfo.UnmarshalTopology(resp.Response, topology))
+	assert.Greater(t, len(topology.Cluster.ConnectedNodes), 0)
+
+	svr2 := newTestServer(t, nil)
+	defer closeTestServer(t, svr2)
+
+	failCreator := func(_ context.Context, addr string) (types.DataNode, error) {
+		return nil, fmt.Errorf("mocked fail")
+	}
+	svr2.sessionManager.sessionCreator = failCreator
+	assert.Nil(t, svr2.cluster.Register(&NodeInfo{NodeID: 1, Address: "localhost"}))
+
+	resp, err = svr2.getSystemInfoMetrics(ctx, req)
+	assert.Nil(t, err)
+	topology = &metricsinfo.DataCoordTopology{}
+	assert.Nil(t, metricsinfo.UnmarshalTopology(resp.Response, topology))
+	assert.Equal(t, 0, len(topology.Cluster.ConnectedNodes))
 }

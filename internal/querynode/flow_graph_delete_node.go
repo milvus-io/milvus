@@ -95,7 +95,7 @@ func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	// 1. filter segment by bloom filter
 	for i, delMsg := range dMsg.deleteMessages {
 		traceID, _, _ := trace.InfoFromSpan(spans[i])
-		log.Debug("delete in historical replica",
+		log.Ctx(delMsg.TraceCtx()).Debug("delete in historical replica",
 			zap.String("channel", dNode.channel),
 			zap.Any("collectionID", delMsg.CollectionID),
 			zap.Any("collectionName", delMsg.CollectionName),
@@ -112,7 +112,7 @@ func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			if err != nil {
 				// error occurs when missing meta info or unexpected pk type, should not happen
 				err = fmt.Errorf("deleteNode processDeleteMessages failed, collectionID = %d, err = %s, channel = %s", delMsg.CollectionID, err, dNode.channel)
-				log.Error(err.Error())
+				log.Ctx(delMsg.TraceCtx()).Error(err.Error())
 				panic(err)
 			}
 		}

@@ -197,7 +197,7 @@ func (m *MetaCache) GetCollectionInfo(ctx context.Context, collectionName string
 		if showResp.Status.ErrorCode != commonpb.ErrorCode_Success {
 			return nil, errors.New(showResp.Status.Reason)
 		}
-		log.Debug("QueryCoord show collections",
+		log.Ctx(ctx).Debug("QueryCoord show collections",
 			zap.Int64("collID", collInfo.collID),
 			zap.Int64s("collections", showResp.GetCollectionIDs()),
 			zap.Int64s("collectionsInMemoryPercentages", showResp.GetInMemoryPercentages()),
@@ -230,7 +230,7 @@ func (m *MetaCache) GetCollectionSchema(ctx context.Context, collectionName stri
 		m.mu.RUnlock()
 		coll, err := m.describeCollection(ctx, collectionName)
 		if err != nil {
-			log.Warn("Failed to load collection from rootcoord ",
+			log.Ctx(ctx).Warn("Failed to load collection from rootcoord ",
 				zap.String("collection name ", collectionName),
 				zap.Error(err))
 			return nil, err
@@ -240,7 +240,7 @@ func (m *MetaCache) GetCollectionSchema(ctx context.Context, collectionName stri
 		m.updateCollection(coll, collectionName)
 		collInfo = m.collInfo[collectionName]
 		metrics.ProxyUpdateCacheLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
-		log.Debug("Reload collection from root coordinator ",
+		log.Ctx(ctx).Debug("Reload collection from root coordinator ",
 			zap.String("collection name ", collectionName),
 			zap.Any("time (milliseconds) take ", tr.ElapseSpan().Milliseconds()))
 		return collInfo.schema, nil
@@ -302,7 +302,7 @@ func (m *MetaCache) GetPartitions(ctx context.Context, collectionName string) (m
 			return nil, err
 		}
 		metrics.ProxyUpdateCacheLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
-		log.Debug("proxy", zap.Any("GetPartitions:partitions after update", partitions), zap.Any("collectionName", collectionName))
+		log.Ctx(ctx).Debug("proxy", zap.Any("GetPartitions:partitions after update", partitions), zap.Any("collectionName", collectionName))
 		ret := make(map[string]typeutil.UniqueID)
 		partInfo := m.collInfo[collectionName].partInfo
 		for k, v := range partInfo {
@@ -356,7 +356,7 @@ func (m *MetaCache) GetPartitionInfo(ctx context.Context, collectionName string,
 			return nil, err
 		}
 		metrics.ProxyUpdateCacheLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
-		log.Debug("proxy", zap.Any("GetPartitionID:partitions after update", partitions), zap.Any("collectionName", collectionName))
+		log.Ctx(ctx).Debug("proxy", zap.Any("GetPartitionID:partitions after update", partitions), zap.Any("collectionName", collectionName))
 		partInfo, ok = m.collInfo[collectionName].partInfo[partitionName]
 		if !ok {
 			return nil, fmt.Errorf("partitionID of partitionName:%s can not be find", partitionName)
@@ -557,7 +557,7 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, collectionNam
 			info.leaderMutex.Unlock()
 			return shards, nil
 		}
-		log.Info("no shard cache for collection, try to get shard leaders from QueryCoord",
+		log.Ctx(ctx).Info("no shard cache for collection, try to get shard leaders from QueryCoord",
 			zap.String("collectionName", collectionName))
 	}
 	req := &querypb.GetShardLeadersRequest{

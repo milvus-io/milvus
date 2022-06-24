@@ -715,9 +715,9 @@ func (qc *QueryCoord) loadBalanceSegmentLoop() {
 					// if failed, wait for next balance loop
 					// it may be that the collection/partition of the balanced segment has been released
 					// it also may be other abnormal errors
-					log.Error("loadBalanceSegmentLoop: balance task execute failed", zap.Any("task", t))
+					log.Ctx(t.ctx).Error("loadBalanceSegmentLoop: balance task execute failed", zap.Any("task", t))
 				} else {
-					log.Info("loadBalanceSegmentLoop: balance task execute success", zap.Any("task", t))
+					log.Ctx(t.ctx).Info("loadBalanceSegmentLoop: balance task execute success", zap.Any("task", t))
 				}
 			}
 		}

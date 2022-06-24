@@ -115,7 +115,7 @@ func (c *SessionManager) Flush(ctx context.Context, nodeID int64, req *datapb.Fl
 func (c *SessionManager) execFlush(ctx context.Context, nodeID int64, req *datapb.FlushSegmentsRequest) {
 	cli, err := c.getClient(ctx, nodeID)
 	if err != nil {
-		log.Warn("failed to get dataNode client", zap.Int64("dataNode ID", nodeID), zap.Error(err))
+		log.Ctx(ctx).Warn("failed to get dataNode client", zap.Int64("dataNode ID", nodeID), zap.Error(err))
 		return
 	}
 	ctx, cancel := context.WithTimeout(ctx, flushTimeout)
@@ -123,9 +123,9 @@ func (c *SessionManager) execFlush(ctx context.Context, nodeID int64, req *datap
 
 	resp, err := cli.FlushSegments(ctx, req)
 	if err := VerifyResponse(resp, err); err != nil {
-		log.Error("flush call (perhaps partially) failed", zap.Int64("dataNode ID", nodeID), zap.Error(err))
+		log.Ctx(ctx).Error("flush call (perhaps partially) failed", zap.Int64("dataNode ID", nodeID), zap.Error(err))
 	} else {
-		log.Info("flush call succeeded", zap.Int64("dataNode ID", nodeID))
+		log.Ctx(ctx).Info("flush call succeeded", zap.Int64("dataNode ID", nodeID))
 	}
 }
 
@@ -161,18 +161,18 @@ func (c *SessionManager) Import(ctx context.Context, nodeID int64, itr *datapb.I
 func (c *SessionManager) execImport(ctx context.Context, nodeID int64, itr *datapb.ImportTaskRequest) {
 	cli, err := c.getClient(ctx, nodeID)
 	if err != nil {
-		log.Warn("failed to get client for import", zap.Int64("nodeID", nodeID), zap.Error(err))
+		log.Ctx(ctx).Warn("failed to get client for import", zap.Int64("nodeID", nodeID), zap.Error(err))
 		return
 	}
 	ctx, cancel := context.WithTimeout(ctx, importTimeout)
 	defer cancel()
 	resp, err := cli.Import(ctx, itr)
 	if err := VerifyResponse(resp, err); err != nil {
-		log.Warn("failed to import", zap.Int64("node", nodeID), zap.Error(err))
+		log.Ctx(ctx).Warn("failed to import", zap.Int64("node", nodeID), zap.Error(err))
 		return
 	}
 
-	log.Info("success to import", zap.Int64("node", nodeID), zap.Any("import task", itr))
+	log.Ctx(ctx).Info("success to import", zap.Int64("node", nodeID), zap.Any("import task", itr))
 }
 
 // ReCollectSegmentStats collects segment stats info from DataNodes, after DataCoord reboots.
@@ -183,7 +183,7 @@ func (c *SessionManager) ReCollectSegmentStats(ctx context.Context, nodeID int64
 func (c *SessionManager) execReCollectSegmentStats(ctx context.Context, nodeID int64) {
 	cli, err := c.getClient(ctx, nodeID)
 	if err != nil {
-		log.Warn("failed to get dataNode client", zap.Int64("DataNode ID", nodeID), zap.Error(err))
+		log.Ctx(ctx).Warn("failed to get dataNode client", zap.Int64("DataNode ID", nodeID), zap.Error(err))
 		return
 	}
 	ctx, cancel := context.WithTimeout(ctx, reCollectTimeout)
@@ -195,10 +195,10 @@ func (c *SessionManager) execReCollectSegmentStats(ctx context.Context, nodeID i
 		},
 	})
 	if err := VerifyResponse(resp, err); err != nil {
-		log.Error("re-collect segment stats call failed",
+		log.Ctx(ctx).Error("re-collect segment stats call failed",
 			zap.Int64("DataNode ID", nodeID), zap.Error(err))
 	} else {
-		log.Info("re-collect segment stats call succeeded",
+		log.Ctx(ctx).Info("re-collect segment stats call succeeded",
 			zap.Int64("DataNode ID", nodeID),
 			zap.Int64s("segment stat collected", resp.GetSegResent()))
 	}
@@ -212,7 +212,7 @@ func (c *SessionManager) AddSegment(ctx context.Context, nodeID int64, req *data
 func (c *SessionManager) execAddSegment(ctx context.Context, nodeID int64, req *datapb.AddSegmentRequest) {
 	cli, err := c.getClient(ctx, nodeID)
 	if err != nil {
-		log.Warn("failed to get client for AddSegment", zap.Int64("DataNode ID", nodeID), zap.Error(err))
+		log.Ctx(ctx).Warn("failed to get client for AddSegment", zap.Int64("DataNode ID", nodeID), zap.Error(err))
 		return
 	}
 	ctx, cancel := context.WithTimeout(ctx, addSegmentTimeout)
@@ -220,11 +220,11 @@ func (c *SessionManager) execAddSegment(ctx context.Context, nodeID int64, req *
 	req.Base.SourceID = Params.DataCoordCfg.GetNodeID()
 	resp, err := cli.AddSegment(ctx, req)
 	if err := VerifyResponse(resp, err); err != nil {
-		log.Warn("failed to add segment", zap.Int64("DataNode ID", nodeID), zap.Error(err))
+		log.Ctx(ctx).Warn("failed to add segment", zap.Int64("DataNode ID", nodeID), zap.Error(err))
 		return
 	}
 
-	log.Info("success to add segment", zap.Int64("DataNode ID", nodeID), zap.Any("add segment req", req))
+	log.Ctx(ctx).Info("success to add segment", zap.Int64("DataNode ID", nodeID), zap.Any("add segment req", req))
 }
 
 func (c *SessionManager) getClient(ctx context.Context, nodeID int64) (types.DataNode, error) {
