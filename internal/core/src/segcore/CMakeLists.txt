@@ -15,6 +15,8 @@ if ( EMBEDDED_MILVUS )
     add_compile_definitions( EMBEDDED_MILVUS )
 endif()
 
+milvus_add_pkg_config("milvus_segcore")
+
 set(SEGCORE_FILES
         Collection.cpp
         collection_c.cpp
@@ -34,9 +36,7 @@ set(SEGCORE_FILES
         TimestampIndex.cpp
         Utils.cpp
         ConcurrentVector.cpp)
-add_library(milvus_segcore SHARED
-        ${SEGCORE_FILES}
-        )
+add_library(milvus_segcore SHARED ${SEGCORE_FILES})
 
 find_library(TBB NAMES tbb)
 set(PLATFORM_LIBS dl)
@@ -54,4 +54,4 @@ target_link_libraries(milvus_segcore
 #        gperftools
         )
 
-install(TARGETS milvus_segcore DESTINATION lib)
+install(TARGETS milvus_segcore DESTINATION "${CMAKE_INSTALL_LIBDIR}")

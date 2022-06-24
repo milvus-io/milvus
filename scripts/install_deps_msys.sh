@@ -21,8 +21,8 @@ pacman -S --noconfirm --needed \
     mingw-w64-x86_64-python2 \
     mingw-w64-x86_64-diffutils \
     mingw-w64-x86_64-arrow \
-    mingw-w64-x86_64-go \
-    mingw-w64-x86_64-rocksdb
+    mingw-w64-x86_64-go
+    # mingw-w64-x86_64-rocksdb
 
 
 # dummy empty dl, TODO: remove later

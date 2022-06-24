@@ -19,19 +19,9 @@ LIBRARY_PATH := $(PWD)/lib
 OS := $(shell uname -s)
 ARCH := $(shell arch)
 mode = Release
+PKG_CONFIG = $(shell echo "${PKG_CONFIG_PATH}:`pwd`/internal/core/output/lib/pkgconfig:`pwd`/internal/core/output/lib64/pkgconfig")
 
 all: build-cpp build-go
-
-pre-proc:
-	@echo "Running pre-processing"
-ifeq ($(OS),Darwin) # MacOS X
-	@echo "MacOS system identified. Switching to customized gorocksdb fork..."
-	@go mod edit -replace=github.com/tecbot/gorocksdb=github.com/soothing-rain/gorocksdb@v0.0.1
-endif
-ifeq ($(MSYSTEM), MINGW64) # MSYS
-	@echo "MSYS. Switching to customized gorocksdb fork..."
-	@go mod edit -replace=github.com/tecbot/gorocksdb=github.com/soothing-rain/gorocksdb@v0.0.1
-endif
 
 get-build-deps:
 	@(env bash $(PWD)/scripts/install_deps.sh)
@@ -76,8 +66,8 @@ lint: tools/bin/revive
 static-check:
 	@echo "Running $@ check"
 	@GO111MODULE=on ${GOPATH}/bin/golangci-lint cache clean
-	@GO111MODULE=on ${GOPATH}/bin/golangci-lint run --timeout=30m --config ./.golangci.yml ./internal/...
-	@GO111MODULE=on ${GOPATH}/bin/golangci-lint run --timeout=30m --config ./.golangci.yml ./cmd/...
+	@GO111MODULE=on PKG_CONFIG_PATH="$(PKG_CONFIG)" ${GOPATH}/bin/golangci-lint run --timeout=30m --config ./.golangci.yml ./internal/...
+	@GO111MODULE=on PKG_CONFIG_PATH="$(PKG_CONFIG)" ${GOPATH}/bin/golangci-lint run --timeout=30m --config ./.golangci.yml ./cmd/...
 #	@GO111MODULE=on ${GOPATH}/bin/golangci-lint run --timeout=30m --config ./.golangci.yml ./tests/go_client/...
 
 verifiers: build-cpp getdeps cppcheck fmt static-check
@@ -106,42 +96,37 @@ print-build-info:
 milvus: build-cpp print-build-info
 	@echo "Building Milvus ..."
 	@echo "if build fails on Mac M1 machines, you probably need to rerun scripts/install_deps.sh and then run: \`export PKG_CONFIG_PATH=\"/opt/homebrew/opt/openssl@3/lib/pkgconfig\"\`"
-	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build \
-		-ldflags="-X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)'" \
-		${APPLE_SILICON_FLAG}  -o $(INSTALL_PATH)/milvus $(PWD)/cmd/main.go 1>/dev/null
+	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && \
+        export PKG_CONFIG_PATH="$(PKG_CONFIG)" && \
+        export RPATH=$$(pkg-config --libs-only-L milvus_common | cut -c 3-) && \
+        GO111MODULE=on $(GO) build -ldflags="-r $${RPATH} -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)'" \
+		${APPLE_SILICON_FLAG} -o $(INSTALL_PATH)/milvus $(PWD)/cmd/main.go 1>/dev/null
 
 embd-milvus: build-cpp-embd print-build-info
 	@echo "Building **Embedded** Milvus ..."
 	@echo "if build fails on Mac M1 machines, rerun scripts/install_deps.sh and then run: \`export PKG_CONFIG_PATH=\"/opt/homebrew/opt/openssl@3/lib/pkgconfig\"\`"
-	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && GO111MODULE=on $(GO) build \
+	@mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && \
+        export PKG_CONFIG_PATH="$(PKG_CONFIG)" && GO111MODULE=on $(GO) build \
 		-ldflags="-r /tmp/milvus/lib/ -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)'" \
 		${APPLE_SILICON_FLAG} -buildmode=c-shared -o $(INSTALL_PATH)/embd-milvus.so $(PWD)/pkg/embedded/embedded.go 1>/dev/null
 
 build-go: milvus
 
-build-cpp: pre-proc
+build-cpp: 
 	@echo "Building Milvus cpp library ..."
 	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)")
-	@(env bash $(PWD)/scripts/cwrapper_build.sh -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)")
-	@(env bash $(PWD)/scripts/cwrapper_rocksdb_build.sh -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)")
 
-build-cpp-embd: pre-proc
+build-cpp-embd: 
 	@echo "Building **Embedded** Milvus cpp library ..."
 	@(env bash $(PWD)/scripts/core_build.sh -b -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)")
-	@(env bash $(PWD)/scripts/cwrapper_build.sh -b -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)")
-	@(env bash $(PWD)/scripts/cwrapper_rocksdb_build.sh -b -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)")
 
-build-cpp-with-unittest: pre-proc
+build-cpp-with-unittest: 
 	@echo "Building Milvus cpp library with unittest ..."
 	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -u -f "$(CUSTOM_THIRDPARTY_PATH)")
-	@(env bash $(PWD)/scripts/cwrapper_build.sh -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)")
-	@(env bash $(PWD)/scripts/cwrapper_rocksdb_build.sh -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)")
 
-build-cpp-with-coverage: pre-proc
+build-cpp-with-coverage: 
 	@echo "Building Milvus cpp library with coverage and unittest ..."
 	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -u -c -f "$(CUSTOM_THIRDPARTY_PATH)")
-	@(env bash $(PWD)/scripts/cwrapper_build.sh -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)")
-	@(env bash $(PWD)/scripts/cwrapper_rocksdb_build.sh -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)")
 
 
 # Run the tests.
@@ -208,7 +193,7 @@ docker: install
 install: all
 	@echo "Installing binary to './bin'"
 	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/milvus $(GOPATH)/bin/milvus
-	@mkdir -p $(LIBRARY_PATH) && cp -r -P $(PWD)/internal/core/output/lib/* $(LIBRARY_PATH)
+	@mkdir -p $(LIBRARY_PATH) && cp -r -P $(PWD)/internal/core/output/lib/*.so* $(LIBRARY_PATH)
 	@echo "Installation successful."
 
 clean:
@@ -219,11 +204,8 @@ clean:
 	@rm -rf lib/
 	@rm -rf $(GOPATH)/bin/milvus
 	@rm -rf cmake_build
-	@rm -rf cwrapper_rocksdb_build
 	@rm -rf cwrapper_build
-	@rm -rf internal/storage/cwrapper/output
 	@rm -rf internal/core/output
-	@rm -rf internal/kv/rocksdb/cwrapper/output
 
 milvus-tools: print-build-info
 	@echo "Building tools ..."
@@ -231,7 +213,7 @@ milvus-tools: print-build-info
 		-ldflags="-X 'main.BuildTags=$(BUILD_TAGS)' -X 'main.BuildTime=$(BUILD_TIME)' -X 'main.GitCommit=$(GIT_COMMIT)' -X 'main.GoVersion=$(GO_VERSION)'" \
 		-o $(INSTALL_PATH)/tools $(PWD)/cmd/tools/* 1>/dev/null
 
-rpm-setup: 
+rpm-setup:
 	@echo "Setuping rpm env ...;"
 	@build/rpm/setup-env.sh
 

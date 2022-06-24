@@ -17,17 +17,11 @@
 package indexnode
 
 /*
-
-#cgo CFLAGS: -I${SRCDIR}/../core/output/include
-
-#cgo darwin LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_indexbuilder -Wl,-rpath,"${SRCDIR}/../core/output/lib"
-#cgo linux LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_indexbuilder -Wl,-rpath=${SRCDIR}/../core/output/lib
-#cgo windows LDFLAGS: -L${SRCDIR}/../core/output/lib -lmilvus_indexbuilder -Wl,-rpath=${SRCDIR}/../core/output/lib
+#cgo pkg-config: milvus_indexbuilder
 
 #include <stdlib.h>
 #include <stdint.h>
 #include "indexbuilder/init_c.h"
-
 */
 import "C"
 import (

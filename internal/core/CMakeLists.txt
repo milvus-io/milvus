@@ -240,6 +240,13 @@ endif ()
 add_custom_target( Clean-All COMMAND ${CMAKE_BUILD_TOOL} clean )
 
 # **************************** Install ****************************
+
+# Install storage
+install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/storage/
+        DESTINATION include/storage
+        FILES_MATCHING PATTERN "*_c.h"
+)
+
 # Install segcore
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/segcore/
         DESTINATION include/segcore

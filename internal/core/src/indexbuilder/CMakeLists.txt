@@ -17,9 +17,9 @@ set(INDEXBUILDER_FILES
         utils.cpp
         ScalarIndexCreator.cpp
         )
-add_library(milvus_indexbuilder SHARED
-        ${INDEXBUILDER_FILES}
-        )
+
+milvus_add_pkg_config("milvus_indexbuilder")
+add_library(milvus_indexbuilder SHARED ${INDEXBUILDER_FILES})
 
 find_library(TBB NAMES tbb)
 set(PLATFORM_LIBS dl)
@@ -37,4 +37,4 @@ target_link_libraries(milvus_indexbuilder
         pthread
         )
 
-install(TARGETS milvus_indexbuilder DESTINATION lib)
+install(TARGETS milvus_indexbuilder DESTINATION "${CMAKE_INSTALL_LIBDIR}")

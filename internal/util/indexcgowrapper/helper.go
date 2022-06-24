@@ -1,16 +1,10 @@
 package indexcgowrapper
 
 /*
-
-#cgo CFLAGS: -I${SRCDIR}/../../core/output/include
-
-#cgo darwin LDFLAGS: -L${SRCDIR}/../../core/output/lib -lmilvus_common -Wl,-rpath,"${SRCDIR}/../../core/output/lib"
-#cgo linux LDFLAGS: -L${SRCDIR}/../../core/output/lib -lmilvus_common -Wl,-rpath=${SRCDIR}/../../core/output/lib
-#cgo windows LDFLAGS: -L${SRCDIR}/../../core/output/lib -lmilvus_common -Wl,-rpath=${SRCDIR}/../../core/output/lib
+#cgo pkg-config: milvus_common
 
 #include <stdlib.h>	// free
 #include "indexbuilder/index_c.h"
-
 */
 import "C"
 import (

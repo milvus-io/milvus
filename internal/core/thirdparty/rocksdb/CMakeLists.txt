@@ -14,47 +14,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-cmake_minimum_required( VERSION 3.18 )
-project(wrapper)
-
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-
-include( ExternalProject )
-if ( APPLE )
-    set( ROCKSDB_VERSION "6.27.3" )
-    set( ROCKSDB_SOURCE_URL
-            "https://github.com/facebook/rocksdb/archive/v${ROCKSDB_VERSION}.tar.gz")
-else ()
-    set( ROCKSDB_VERSION "6.15.2" )
-    set( ROCKSDB_SOURCE_URL
-            "https://github.com/facebook/rocksdb/archive/v${ROCKSDB_VERSION}.tar.gz")
-endif ()
-
-if( CUSTOM_THIRDPARTY_DOWNLOAD_PATH )
-    set( THIRDPARTY_DOWNLOAD_PATH ${CUSTOM_THIRDPARTY_DOWNLOAD_PATH} )
-else()
-    set( THIRDPARTY_DOWNLOAD_PATH ${CMAKE_BINARY_DIR}/3rdparty_download/download )
-endif()
-message( STATUS "Thirdparty downloaded file path: ${THIRDPARTY_DOWNLOAD_PATH}" )
-
-#-----------------------Using ccache if possible------------
-find_program(CCACHE_FOUND ccache)
-if (CCACHE_FOUND)
-    message(STATUS "Using ccache: ${CCACHE_FOUND}")
-    set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE ${CCACHE_FOUND})
-    set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK ${CCACHE_FOUND})
-    set(ENV{CCACHE_COMMENTS} "1")
-endif (CCACHE_FOUND)
+# if ( APPLE )
+set( ROCKSDB_VERSION "6.27.3" )
+set( ROCKSDB_SOURCE_URL
+        "https://github.com/facebook/rocksdb/archive/v${ROCKSDB_VERSION}.tar.gz")
+# else ()
+#     set( ROCKSDB_VERSION "6.15.2" )
+#     set( ROCKSDB_SOURCE_URL
+#             "https://github.com/facebook/rocksdb/archive/v${ROCKSDB_VERSION}.tar.gz")
+# endif ()
 
 macro( build_rocksdb )
     message( STATUS "Building ROCKSDB-${ROCKSDB_VERSION} from source" )
 
-    if ( APPLE )
-        set ( ROCKSDB_URL_MD5 "e4a0625f0cec82060e62c81b787a1124" )
-    else ()
-        set ( ROCKSDB_URL_MD5 "67f9e04fda62af551dd039c37b1808ac" )
-    endif ()
+    # if ( APPLE )
+    set ( ROCKSDB_MD5 "e4a0625f0cec82060e62c81b787a1124" )
+    # else ()
+        # set ( ROCKSDB_MD5 "67f9e04fda62af551dd039c37b1808ac" )
+    # endif ()
 
     if ( EMBEDDED_MILVUS )
         message ( STATUS "Turning on fPIC while building embedded Milvus" )
@@ -63,7 +40,12 @@ macro( build_rocksdb )
     set( ROCKSDB_CMAKE_ARGS
          "-DWITH_GFLAGS=OFF"
          "-DROCKSDB_BUILD_SHARED=OFF"
+         "-DWITH_TESTS=OFF"
+         "-DWITH_BENCHMARK_TOOLS=OFF"
+         "-DWITH_CORE_TOOLS=OFF"
+         "-DWITH_TOOLS=OFF"
          "-DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}"
+         "-DROCKSDB_INSTALL_ON_WINDOWS=ON"
          "-DFAIL_ON_WARNINGS=OFF"
          ${FPIC_ARG}
          #This is used to solve 'illegal instruction' problem in some machine
@@ -77,9 +59,8 @@ macro( build_rocksdb )
             DOWNLOAD_DIR        ${THIRDPARTY_DOWNLOAD_PATH}
             INSTALL_DIR         ${CMAKE_INSTALL_PREFIX}
             URL                 ${ROCKSDB_SOURCE_URL}
-            URL_MD5             ${ROCKSDB_URL_MD5}
+            URL_MD5             ${ROCKSDB_MD5}
             CMAKE_ARGS          ${ROCKSDB_CMAKE_ARGS}
-            INSTALL_COMMAND     make install
             )
 
     ExternalProject_Get_Property( rocksdb-ep INSTALL_DIR )
@@ -88,6 +69,14 @@ macro( build_rocksdb )
     if( NOT IS_DIRECTORY ${INSTALL_DIR}/include )
         file( MAKE_DIRECTORY "${INSTALL_DIR}/include" )
     endif()
+
+    milvus_add_pkg_config("rocksdb")
+    add_library( rocksdb STATIC IMPORTED )
+    set_target_properties( rocksdb
+            PROPERTIES
+                IMPORTED_GLOBAL                 TRUE
+                IMPORTED_LOCATION               ${INSTALL_DIR}/${CMAKE_INSTALL_LIBDIR}/librocksdb.a
+                INTERFACE_INCLUDE_DIRECTORIES   ${INSTALL_DIR}/include )
 
 endmacro()
 
