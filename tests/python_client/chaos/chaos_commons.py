@@ -4,7 +4,7 @@ import glob
 from chaos import constants
 from yaml import full_load
 from utils.util_log import test_log as log
-
+from delayed_assert import expect
 
 def check_config(chaos_config):
     if not chaos_config.get('kind', None):
@@ -72,3 +72,19 @@ def reconnect(connections, alias='default'):
     res = connections.get_connection_addr(alias)
     connections.remove_connection(alias)
     return connections.connect(alias, host=res["host"], port=res["port"])
+
+
+def assert_statistic(checkers, expectations={}):
+    for k in checkers.keys():
+        # expect succ if no expectations
+        succ_rate = checkers[k].succ_rate()
+        total = checkers[k].total()
+        average_time = checkers[k].average_time
+        if expectations.get(k, '') == constants.FAIL:
+            log.info(f"Expect Fail: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
+            expect(succ_rate < 0.49 or total < 2,
+                   f"Expect Fail: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
+        else:
+            log.info(f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
+            expect(succ_rate > 0.90 and total > 2,
+                   f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")

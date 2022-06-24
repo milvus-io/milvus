@@ -1,5 +1,4 @@
 import threading
-
 import pytest
 import os
 import time
@@ -14,25 +13,10 @@ from utils.util_log import test_log as log
 from utils.util_k8s import wait_pods_ready, get_pod_list
 from utils.util_common import findkeys
 from chaos import chaos_commons as cc
+from chaos.chaos_commons import assert_statistic
 from common.common_type import CaseLabel
 from chaos import constants
-from delayed_assert import expect, assert_expectations
-
-
-def assert_statistic(checkers, expectations={}):
-    for k in checkers.keys():
-        # expect succ if no expectations
-        succ_rate = checkers[k].succ_rate()
-        total = checkers[k].total()
-        average_time = checkers[k].average_time
-        if expectations.get(k, '') == constants.FAIL:
-            log.info(f"Expect Fail: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
-            expect(succ_rate < 0.49 or total < 2,
-                   f"Expect Fail: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
-        else:
-            log.info(f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
-            expect(succ_rate > 0.90 or total > 2,
-                   f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
+from delayed_assert import assert_expectations
 
 
 def check_cluster_nodes(chaos_config):
