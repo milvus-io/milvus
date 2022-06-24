@@ -17,6 +17,7 @@ index_params_map = dict(zip(all_index_types, default_index_params))
 
 NUM_REPLICAS = 2
 
+
 def filter_collections_by_prefix(prefix):
     col_list = list_collections()
     res = []
@@ -54,14 +55,17 @@ def gen_search_param(index_type, metric_type="L2"):
     return search_params
 
 
-def get_collections(prefix):
-    print(f"\nList collections...")
+def get_collections(prefix, check=False):
+    print("\nList collections...")
     col_list = filter_collections_by_prefix(prefix)
     print(f"collections_nums: {len(col_list)}")
     # list entities if collections
     for name in col_list:
         c = Collection(name=name)
-        print(f"{name}: {c.num_entities}")
+        num_entities = c.num_entities
+        print(f"{name}: {num_entities}")
+        if check:
+            assert num_entities >= 3000
     return col_list
 
 
@@ -76,7 +80,7 @@ def create_collections_and_insert_data(prefix, flush=True, count=3000, collectio
     ]
     default_schema = CollectionSchema(fields=default_fields, description="test collection")
     for index_name in all_index_types[:collection_cnt]:
-        print(f"\nCreate collection...")
+        print("\nCreate collection...")
         col_name = prefix + index_name
         collection = Collection(name=col_name, schema=default_schema) 
         print(f"collection name: {col_name}")
@@ -104,7 +108,7 @@ def create_collections_and_insert_data(prefix, flush=True, count=3000, collectio
             print(f"collection entities: {collection.num_entities}")
             end_time = time.time()
             print("Get collection entities time = %.4fs" % (end_time - start_time))
-    print(f"\nList collections...")
+    print("\nList collections...")
     print(get_collections(prefix))
 
 
@@ -112,7 +116,7 @@ def create_index(prefix):
     # create index
     default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
     col_list = get_collections(prefix)
-    print(f"\nCreate index...")
+    print("\nCreate index...")
     for col_name in col_list:
         c = Collection(name=col_name)
         index_name = col_name.replace(prefix, "")
