@@ -120,6 +120,7 @@ func (loader *segmentLoader) LoadSegment(req *querypb.LoadSegmentsRequest, segme
 		segmentID := info.SegmentID
 		partitionID := info.PartitionID
 		collectionID := info.CollectionID
+		vChannelID := info.InsertChannel
 
 		collection, err := loader.metaReplica.getCollectionByID(collectionID)
 		if err != nil {
@@ -127,7 +128,7 @@ func (loader *segmentLoader) LoadSegment(req *querypb.LoadSegmentsRequest, segme
 			return err
 		}
 
-		segment, err := newSegment(collection, segmentID, partitionID, collectionID, "", segmentType)
+		segment, err := newSegment(collection, segmentID, partitionID, collectionID, vChannelID, segmentType)
 		if err != nil {
 			log.Error("load segment failed when create new segment",
 				zap.Int64("collectionID", collectionID),
