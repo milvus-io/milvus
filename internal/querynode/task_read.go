@@ -161,13 +161,6 @@ func (b *baseReadTask) Ready() (bool, error) {
 	gt, _ := tsoutil.ParseTS(guaranteeTs)
 	st, _ := tsoutil.ParseTS(serviceTime)
 	if guaranteeTs > serviceTime {
-		log.Debug("query msg can't do",
-			zap.Any("collectionID", b.CollectionID),
-			zap.Any("sm.GuaranteeTimestamp", gt),
-			zap.Any("serviceTime", st),
-			zap.Any("delta milliseconds", gt.Sub(st).Milliseconds()),
-			zap.Any("channel", channel),
-			zap.Any("msgID", b.ID()))
 		return false, nil
 	}
 	log.Debug("query msg can do",
