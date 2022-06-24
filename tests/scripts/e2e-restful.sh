@@ -18,23 +18,18 @@ DATA_PATH="${ROOT}/tests/scripts/restful-data/"
 
 MILVUS_CLUSTER_ENABLED="${MILVUS_CLUSTER_ENABLED:-false}"
 
-# TODO: use service instead of podIP when milvus-helm supports
-if [[ "${MILVUS_CLUSTER_ENABLED}" == "false" ]]; then
-    MILVUS_SERVICE_NAME=$(kubectl -n ${MILVUS_HELM_NAMESPACE} get pods -l app.kubernetes.io/name=milvus -l component=standalone -l app.kubernetes.io/instance=${MILVUS_HELM_RELEASE_NAME} -o=jsonpath='{.items[0].status.podIP}')
-else
-    MILVUS_SERVICE_NAME=$(kubectl -n ${MILVUS_HELM_NAMESPACE} get pods -l app.kubernetes.io/name=milvus -l component=proxy -l app.kubernetes.io/instance=${MILVUS_HELM_RELEASE_NAME} -o=jsonpath='{.items[0].status.podIP}')
-fi
+MILVUS_SERVICE_ADDRESS="${MILVUS_HELM_RELEASE_NAME}-milvus.${MILVUS_HELM_NAMESPACE}:9091"
 
 # Create a collection
 curl -X 'POST' \
-  "http://${MILVUS_SERVICE_NAME}:8080/api/v1/collection" \
+  "http://${MILVUS_SERVICE_ADDRESS}/api/v1/collection" \
   -H 'accept: application/json' \
   -H 'Content-Type: application/json' \
   -d @${DATA_PATH}/create-collection.json
 
 # Has collection
 curl -X 'GET' \
-  "http://${MILVUS_SERVICE_NAME}:8080/api/v1/collection/existence" \
+  "http://${MILVUS_SERVICE_ADDRESS}/api/v1/collection/existence" \
   -H 'accept: application/json' \
   -H 'Content-Type: application/json' \
   -d '{
@@ -43,7 +38,7 @@ curl -X 'GET' \
 
 # Check collection details
 curl -X 'GET' \
-  "http://${MILVUS_SERVICE_NAME}:8080/api/v1/collection" \
+  "http://${MILVUS_SERVICE_ADDRESS}/api/v1/collection" \
   -H 'accept: application/json' \
   -H 'Content-Type: application/json' \
   -d '{
@@ -52,7 +47,7 @@ curl -X 'GET' \
 
 # Load collection
 curl -X 'POST' \
-  "http://${MILVUS_SERVICE_NAME}:8080/api/v1/collection/load" \
+  "http://${MILVUS_SERVICE_ADDRESS}/api/v1/collection/load" \
   -H 'accept: application/json' \
   -H 'Content-Type: application/json' \
   -d '{
@@ -62,14 +57,14 @@ curl -X 'POST' \
 ### Data
 # Insert Data
 curl -X 'POST' \
-  "http://${MILVUS_SERVICE_NAME}:8080/api/v1/entities" \
+  "http://${MILVUS_SERVICE_ADDRESS}/api/v1/entities" \
   -H 'accept: application/json' \
   -H 'Content-Type: application/json' \
   -d @${DATA_PATH}/insert-data.json
 
 # Build Index
 curl -X 'POST' \
-  "http://${MILVUS_SERVICE_NAME}:8080/api/v1/index" \
+  "http://${MILVUS_SERVICE_ADDRESS}/api/v1/index" \
   -H 'accept: application/json' \
   -H 'Content-Type: application/json' \
   -d '{
@@ -84,14 +79,14 @@ curl -X 'POST' \
 
 # KNN Search
 curl -X 'POST' \
-  "http://${MILVUS_SERVICE_NAME}:8080/api/v1/search" \
+  "http://${MILVUS_SERVICE_ADDRESS}/api/v1/search" \
   -H 'accept: application/json' \
   -H 'Content-Type: application/json' \
   -d @${DATA_PATH}/search.json
 
 # Drop Index
 curl -X 'DELETE' \
-  "http://${MILVUS_SERVICE_NAME}:8080/api/v1/index" \
+  "http://${MILVUS_SERVICE_ADDRESS}/api/v1/index" \
   -H 'accept: application/json' \
   -H 'Content-Type: application/json' \
   -d '{
@@ -101,7 +96,7 @@ curl -X 'DELETE' \
 
 # Release collection
 curl -X 'DELETE' \
-  "http://${MILVUS_SERVICE_NAME}:8080/api/v1/collection/load" \
+  "http://${MILVUS_SERVICE_ADDRESS}/api/v1/collection/load" \
   -H 'accept: application/json' \
   -H 'Content-Type: application/json' \
   -d '{
@@ -110,7 +105,7 @@ curl -X 'DELETE' \
 
 # Drop collection
 curl -X 'DELETE' \
-  "http://${MILVUS_SERVICE_NAME}:8080/api/v1/collection" \
+  "http://${MILVUS_SERVICE_ADDRESS}/api/v1/collection" \
   -H 'accept: application/json' \
   -H 'Content-Type: application/json' \
   -d '{
