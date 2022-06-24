@@ -21,25 +21,25 @@ import (
 // Debug logs a message at DebugLevel. The message includes any fields passed
 // at the log site, as well as any fields accumulated on the logger.
 func Debug(msg string, fields ...zap.Field) {
-	L().WithOptions(zap.AddCallerSkip(1)).Debug(msg, fields...)
+	L().Debug(msg, fields...)
 }
 
 // Info logs a message at InfoLevel. The message includes any fields passed
 // at the log site, as well as any fields accumulated on the logger.
 func Info(msg string, fields ...zap.Field) {
-	L().WithOptions(zap.AddCallerSkip(1)).Info(msg, fields...)
+	L().Info(msg, fields...)
 }
 
 // Warn logs a message at WarnLevel. The message includes any fields passed
 // at the log site, as well as any fields accumulated on the logger.
 func Warn(msg string, fields ...zap.Field) {
-	L().WithOptions(zap.AddCallerSkip(1)).Warn(msg, fields...)
+	L().Warn(msg, fields...)
 }
 
 // Error logs a message at ErrorLevel. The message includes any fields passed
 // at the log site, as well as any fields accumulated on the logger.
 func Error(msg string, fields ...zap.Field) {
-	L().WithOptions(zap.AddCallerSkip(1)).Error(msg, fields...)
+	L().Error(msg, fields...)
 }
 
 // Panic logs a message at PanicLevel. The message includes any fields passed
@@ -47,7 +47,7 @@ func Error(msg string, fields ...zap.Field) {
 //
 // The logger then panics, even if logging at PanicLevel is disabled.
 func Panic(msg string, fields ...zap.Field) {
-	L().WithOptions(zap.AddCallerSkip(1)).Panic(msg, fields...)
+	L().Panic(msg, fields...)
 }
 
 // Fatal logs a message at FatalLevel. The message includes any fields passed
@@ -56,7 +56,7 @@ func Panic(msg string, fields ...zap.Field) {
 // The logger then calls os.Exit(1), even if logging at FatalLevel is
 // disabled.
 func Fatal(msg string, fields ...zap.Field) {
-	L().WithOptions(zap.AddCallerSkip(1)).Fatal(msg, fields...)
+	L().Fatal(msg, fields...)
 }
 
 // RatedDebug print logs at debug level
@@ -64,7 +64,7 @@ func Fatal(msg string, fields ...zap.Field) {
 // return true if log successfully
 func RatedDebug(cost float64, msg string, fields ...zap.Field) bool {
 	if R().CheckCredit(cost) {
-		L().WithOptions(zap.AddCallerSkip(1)).Debug(msg, fields...)
+		L().Debug(msg, fields...)
 		return true
 	}
 	return false
@@ -75,7 +75,7 @@ func RatedDebug(cost float64, msg string, fields ...zap.Field) bool {
 // return true if log successfully
 func RatedInfo(cost float64, msg string, fields ...zap.Field) bool {
 	if R().CheckCredit(cost) {
-		L().WithOptions(zap.AddCallerSkip(1)).Info(msg, fields...)
+		L().Info(msg, fields...)
 		return true
 	}
 	return false
@@ -86,7 +86,7 @@ func RatedInfo(cost float64, msg string, fields ...zap.Field) bool {
 // return true if log successfully
 func RatedWarn(cost float64, msg string, fields ...zap.Field) bool {
 	if R().CheckCredit(cost) {
-		L().WithOptions(zap.AddCallerSkip(1)).Warn(msg, fields...)
+		L().Warn(msg, fields...)
 		return true
 	}
 	return false
@@ -95,7 +95,7 @@ func RatedWarn(cost float64, msg string, fields ...zap.Field) bool {
 // With creates a child logger and adds structured context to it.
 // Fields added to the child don't affect the parent, and vice versa.
 func With(fields ...zap.Field) *zap.Logger {
-	return L().WithOptions(zap.AddCallerSkip(1)).With(fields...)
+	return L().With(fields...)
 }
 
 // SetLevel alters the logging level.

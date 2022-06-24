@@ -33,6 +33,7 @@ package log
 import (
 	"bufio"
 	"bytes"
+	"fmt"
 	"testing"
 	"time"
 
@@ -44,7 +45,7 @@ import (
 func TestExport(t *testing.T) {
 	ts := newTestLogSpy(t)
 	conf := &Config{Level: "debug", DisableTimestamp: true}
-	logger, _, _ := InitTestLogger(ts, conf)
+	logger, _, _ := InitTestLogger(ts, conf, zap.AddCallerSkip(1))
 	ReplaceGlobals(logger, nil)
 
 	Info("Testing")
@@ -53,6 +54,7 @@ func TestExport(t *testing.T) {
 	Error("Testing")
 	Sync()
 	ts.assertMessagesContains("log_test.go:")
+	logPanic()
 
 	ts = newTestLogSpy(t)
 	logger, _, _ = InitTestLogger(ts, conf)
@@ -64,6 +66,15 @@ func TestExport(t *testing.T) {
 	Sync()
 	ts.assertMessagesContains(`name=tester`)
 	ts.assertMessagesContains(`age=42`)
+}
+
+func logPanic() {
+	defer func() {
+		if err := recover(); err != nil {
+			fmt.Println("logPanic recover")
+		}
+	}()
+	Panic("Testing")
 }
 
 func TestZapTextEncoder(t *testing.T) {
