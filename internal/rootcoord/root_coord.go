@@ -1048,23 +1048,6 @@ func (c *Core) BuildIndex(ctx context.Context, segID UniqueID, numRows int64, bi
 	return bldID, err
 }
 
-// RemoveIndex will call drop index service
-func (c *Core) RemoveIndex(ctx context.Context, collName string, indexName string) error {
-	_, indexInfos, err := c.MetaTable.GetIndexByName(collName, indexName)
-	if err != nil {
-		log.Error("GetIndexByName failed,", zap.String("collection name", collName),
-			zap.String("index name", indexName), zap.Error(err))
-		return err
-	}
-	for _, indexInfo := range indexInfos {
-		if err = c.CallDropIndexService(ctx, indexInfo.IndexID); err != nil {
-			log.Error("CallDropIndexService failed,", zap.String("collection name", collName), zap.Error(err))
-			return err
-		}
-	}
-	return nil
-}
-
 // ExpireMetaCache will call invalidate collection meta cache
 func (c *Core) ExpireMetaCache(ctx context.Context, collNames []string, collectionID UniqueID, ts typeutil.Timestamp) error {
 	// if collectionID is specified, invalidate all the collection meta cache with the specified collectionID and return
