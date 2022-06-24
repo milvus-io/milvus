@@ -354,14 +354,18 @@ func (scheduler *TaskScheduler) unmarshalTask(taskID UniqueID, t string) (task, 
 		newTask = releaseSegmentTask
 	case commonpb.MsgType_WatchDmChannels:
 		//TODO::trigger condition may be different
-		loadReq := querypb.WatchDmChannelsRequest{}
-		err = proto.Unmarshal([]byte(t), &loadReq)
+		req := querypb.WatchDmChannelsRequest{}
+		err = proto.Unmarshal([]byte(t), &req)
+		if err != nil {
+			return nil, err
+		}
+		fullReq, err := generateFullWatchDmChannelsRequest(scheduler.meta, &req)
 		if err != nil {
 			return nil, err
 		}
 		watchDmChannelTask := &watchDmChannelTask{
 			baseTask:               baseTask,
-			WatchDmChannelsRequest: &loadReq,
+			WatchDmChannelsRequest: fullReq,
 			cluster:                scheduler.cluster,
 			meta:                   scheduler.meta,
 			excludeNodeIDs:         []int64{},
@@ -484,7 +488,10 @@ func (scheduler *TaskScheduler) processTask(t task) error {
 			default:
 				//TODO::
 			}
-			log.Debug("updateKVFn: the size of internal request", zap.Int("size", protoSize), zap.Int64("taskID", childTask.getTaskID()))
+			log.Debug("updateKVFn: the size of internal request",
+				zap.Int("size", protoSize),
+				zap.Int64("taskID", childTask.getTaskID()),
+				zap.String("type", childTask.msgType().String()))
 			blobs, err := childTask.marshal()
 			if err != nil {
 				return err
