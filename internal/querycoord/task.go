@@ -356,17 +356,7 @@ func (lct *loadCollectionTask) updateTaskProcess() {
 
 	}
 	if allDone {
-		err := syncReplicaSegments(lct.ctx, lct.cluster, childTasks)
-		if err != nil {
-			log.Error("loadCollectionTask: failed to sync replica segments to shard leader",
-				zap.Int64("taskID", lct.getTaskID()),
-				zap.Int64("collectionID", collectionID),
-				zap.Error(err))
-			lct.setResultInfo(err)
-			return
-		}
-
-		err = lct.meta.setLoadPercentage(collectionID, 0, 100, querypb.LoadType_LoadCollection)
+		err := lct.meta.setLoadPercentage(collectionID, 0, 100, querypb.LoadType_LoadCollection)
 		if err != nil {
 			log.Error("loadCollectionTask: set load percentage to meta's collectionInfo", zap.Int64("collectionID", collectionID))
 			lct.setResultInfo(err)
@@ -609,6 +599,32 @@ func (lct *loadCollectionTask) postExecute(ctx context.Context) error {
 	return nil
 }
 
+func (lct *loadCollectionTask) globalPostExecute(ctx context.Context) error {
+	collection, err := lct.meta.getCollectionInfoByID(lct.CollectionID)
+	if err != nil {
+		log.Error("loadCollectionTask: failed to get collection info from meta",
+			zap.Int64("taskID", lct.getTaskID()),
+			zap.Int64("collectionID", lct.CollectionID),
+			zap.Error(err))
+
+		return err
+	}
+
+	for _, replica := range collection.ReplicaIds {
+		err := syncReplicaSegments(lct.ctx, lct.meta, lct.cluster, replica)
+		if err != nil {
+			log.Error("loadCollectionTask: failed to sync replica segments to shard leader",
+				zap.Int64("taskID", lct.getTaskID()),
+				zap.Int64("collectionID", lct.CollectionID),
+				zap.Error(err))
+
+			return err
+		}
+	}
+
+	return nil
+}
+
 func (lct *loadCollectionTask) rollBack(ctx context.Context) []task {
 	onlineNodeIDs := lct.cluster.OnlineNodeIDs()
 	resultTasks := make([]task, 0)
@@ -804,16 +820,6 @@ func (lpt *loadPartitionTask) updateTaskProcess() {
 		}
 	}
 	if allDone {
-		err := syncReplicaSegments(lpt.ctx, lpt.cluster, childTasks)
-		if err != nil {
-			log.Error("loadPartitionTask: failed to sync replica segments to shard leader",
-				zap.Int64("taskID", lpt.getTaskID()),
-				zap.Int64("collectionID", collectionID),
-				zap.Error(err))
-			lpt.setResultInfo(err)
-			return
-		}
-
 		for _, id := range partitionIDs {
 			err := lpt.meta.setLoadPercentage(collectionID, id, 100, querypb.LoadType_LoadPartition)
 			if err != nil {
@@ -1046,6 +1052,34 @@ func (lpt *loadPartitionTask) postExecute(ctx context.Context) error {
 		zap.Int64("msgID", lpt.getTaskID()),
 		zap.Int64("collectionID", collectionID),
 		zap.Int64s("partitionIDs", partitionIDs))
+	return nil
+}
+
+func (lpt *loadPartitionTask) globalPostExecute(ctx context.Context) error {
+	collectionID := lpt.CollectionID
+
+	collection, err := lpt.meta.getCollectionInfoByID(collectionID)
+	if err != nil {
+		log.Error("loadPartitionTask: failed to get collection info from meta",
+			zap.Int64("taskID", lpt.getTaskID()),
+			zap.Int64("collectionID", collectionID),
+			zap.Error(err))
+
+		return err
+	}
+
+	for _, replica := range collection.ReplicaIds {
+		err := syncReplicaSegments(lpt.ctx, lpt.meta, lpt.cluster, replica)
+		if err != nil {
+			log.Error("loadPartitionTask: failed to sync replica segments to shard leader",
+				zap.Int64("taskID", lpt.getTaskID()),
+				zap.Int64("collectionID", collectionID),
+				zap.Error(err))
+
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -2264,167 +2298,144 @@ func (lbt *loadBalanceTask) postExecute(context.Context) error {
 }
 
 func (lbt *loadBalanceTask) globalPostExecute(ctx context.Context) error {
-	if len(lbt.getChildTask()) > 0 {
-		replicas := make(map[UniqueID]*milvuspb.ReplicaInfo)
-		segments := make(map[UniqueID]*querypb.SegmentInfo)
-		dmChannels := make(map[string]*querypb.DmChannelWatchInfo)
+	if lbt.BalanceReason != querypb.TriggerCondition_NodeDown {
+		return nil
+	}
 
-		for _, id := range lbt.SourceNodeIDs {
-			for _, segment := range lbt.meta.getSegmentInfosByNode(id) {
-				segments[segment.SegmentID] = segment
-			}
-			for _, dmChannel := range lbt.meta.getDmChannelInfosByNodeID(id) {
-				dmChannels[dmChannel.DmChannel] = dmChannel
-			}
+	replicas := make(map[UniqueID]*milvuspb.ReplicaInfo)
+	segments := make(map[UniqueID]*querypb.SegmentInfo)
+	dmChannels := make(map[string]*querypb.DmChannelWatchInfo)
 
-			nodeReplicas, err := lbt.meta.getReplicasByNodeID(id)
+	for _, id := range lbt.SourceNodeIDs {
+		for _, segment := range lbt.meta.getSegmentInfosByNode(id) {
+			segments[segment.SegmentID] = segment
+		}
+		for _, dmChannel := range lbt.meta.getDmChannelInfosByNodeID(id) {
+			dmChannels[dmChannel.DmChannel] = dmChannel
+		}
+
+		nodeReplicas, err := lbt.meta.getReplicasByNodeID(id)
+		if err != nil {
+			log.Warn("failed to get replicas for removing offline querynode from it",
+				zap.Int64("querynodeID", id),
+				zap.Error(err))
+
+			continue
+		}
+		for _, replica := range nodeReplicas {
+			replicas[replica.ReplicaID] = replica
+		}
+	}
+
+	log.Debug("removing offline nodes from replicas and segments...",
+		zap.Int("replicaNum", len(replicas)),
+		zap.Int("segmentNum", len(segments)),
+		zap.Int64("triggerTaskID", lbt.getTaskID()),
+	)
+
+	wg := errgroup.Group{}
+	// Remove offline nodes from replica
+	for replicaID := range replicas {
+		replicaID := replicaID
+		wg.Go(func() error {
+			return lbt.meta.applyReplicaBalancePlan(
+				NewRemoveBalancePlan(replicaID, lbt.SourceNodeIDs...))
+		})
+	}
+
+	// Remove offline nodes from dmChannels
+	for _, dmChannel := range dmChannels {
+		dmChannel := dmChannel
+		wg.Go(func() error {
+			dmChannel.NodeIds = removeFromSlice(dmChannel.NodeIds, lbt.SourceNodeIDs...)
+
+			err := lbt.meta.setDmChannelInfos(dmChannel)
 			if err != nil {
-				log.Warn("failed to get replicas for removing offline querynode from it",
-					zap.Int64("querynodeID", id),
+				log.Error("failed to remove offline nodes from dmChannel info",
+					zap.String("dmChannel", dmChannel.DmChannel),
 					zap.Error(err))
 
-				continue
-			}
-			for _, replica := range nodeReplicas {
-				replicas[replica.ReplicaID] = replica
-			}
-		}
-
-		log.Debug("removing offline nodes from replicas and segments...",
-			zap.Int("replicaNum", len(replicas)),
-			zap.Int("segmentNum", len(segments)),
-			zap.Int64("triggerTaskID", lbt.getTaskID()),
-		)
-
-		wg := errgroup.Group{}
-		if lbt.triggerCondition == querypb.TriggerCondition_NodeDown {
-			// Remove offline nodes from replica
-			for replicaID := range replicas {
-				replicaID := replicaID
-				wg.Go(func() error {
-					return lbt.meta.applyReplicaBalancePlan(
-						NewRemoveBalancePlan(replicaID, lbt.SourceNodeIDs...))
-				})
+				return err
 			}
 
-			// Remove offline nodes from dmChannels
-			for _, dmChannel := range dmChannels {
-				dmChannel := dmChannel
-				wg.Go(func() error {
-					dmChannel.NodeIds = removeFromSlice(dmChannel.NodeIds, lbt.SourceNodeIDs...)
+			log.Info("remove offline nodes from dmChannel",
+				zap.Int64("taskID", lbt.getTaskID()),
+				zap.String("dmChannel", dmChannel.DmChannel),
+				zap.Int64s("nodeIds", dmChannel.NodeIds))
 
-					err := lbt.meta.setDmChannelInfos(dmChannel)
-					if err != nil {
-						log.Error("failed to remove offline nodes from dmChannel info",
-							zap.String("dmChannel", dmChannel.DmChannel),
-							zap.Error(err))
+			return nil
+		})
+	}
 
-						return err
-					}
+	// Update shard leaders for replicas
+	for _, childTask := range lbt.getChildTask() {
+		if task, ok := childTask.(*watchDmChannelTask); ok {
+			wg.Go(func() error {
+				leaderID := task.NodeID
+				dmChannel := task.Infos[0].ChannelName
 
-					log.Info("remove offline nodes from dmChannel",
-						zap.Int64("taskID", lbt.getTaskID()),
-						zap.String("dmChannel", dmChannel.DmChannel),
-						zap.Int64s("nodeIds", dmChannel.NodeIds))
-
-					return nil
-				})
-			}
-		}
-
-		// Remove offline nodes from segment
-		// for _, segment := range segments {
-		// 	segment := segment
-		// 	wg.Go(func() error {
-		// 		segment.NodeID = -1
-		// 		segment.NodeIds = removeFromSlice(segment.NodeIds, lbt.SourceNodeIDs...)
-
-		// 		err := lbt.meta.saveSegmentInfo(segment)
-		// 		if err != nil {
-		// 			log.Error("failed to remove offline nodes from segment info",
-		// 				zap.Int64("segmentID", segment.SegmentID),
-		// 				zap.Error(err))
-
-		// 			return err
-		// 		}
-
-		// 		log.Info("remove offline nodes from segment",
-		// 			zap.Int64("taskID", lbt.getTaskID()),
-		// 			zap.Int64("segmentID", segment.GetSegmentID()),
-		// 			zap.Int64s("nodeIds", segment.GetNodeIds()))
-
-		// 		return nil
-		// 	})
-		// }
-
-		// Wait for the previous goroutines,
-		// which conflicts with the code below due to modifing replicas
-		err := wg.Wait()
-		if err != nil {
-			return err
-		}
-		for _, childTask := range lbt.getChildTask() {
-			if task, ok := childTask.(*watchDmChannelTask); ok {
-				wg.Go(func() error {
-					leaderID := task.NodeID
-					dmChannel := task.Infos[0].ChannelName
-
-					nodeInfo, err := lbt.cluster.GetNodeInfoByID(leaderID)
-					if err != nil {
-						log.Error("failed to get node info to update shard leader info",
-							zap.Int64("triggerTaskID", lbt.getTaskID()),
-							zap.Int64("taskID", task.getTaskID()),
-							zap.Int64("nodeID", leaderID),
-							zap.String("dmChannel", dmChannel),
-							zap.Error(err))
-						return err
-					}
-
-					err = lbt.meta.updateShardLeader(task.ReplicaID, dmChannel, leaderID, nodeInfo.(*queryNode).address)
-					if err != nil {
-						log.Error("failed to update shard leader info of replica",
-							zap.Int64("triggerTaskID", lbt.getTaskID()),
-							zap.Int64("taskID", task.getTaskID()),
-							zap.Int64("replicaID", task.ReplicaID),
-							zap.String("dmChannel", dmChannel),
-							zap.Error(err))
-						return err
-					}
-
-					log.Debug("LoadBalance: update shard leader",
+				nodeInfo, err := lbt.cluster.GetNodeInfoByID(leaderID)
+				if err != nil {
+					log.Error("failed to get node info to update shard leader info",
 						zap.Int64("triggerTaskID", lbt.getTaskID()),
 						zap.Int64("taskID", task.getTaskID()),
+						zap.Int64("nodeID", leaderID),
 						zap.String("dmChannel", dmChannel),
-						zap.Int64("leader", leaderID))
+						zap.Error(err))
+					return err
+				}
 
-					return nil
-				})
-			}
+				err = lbt.meta.updateShardLeader(task.ReplicaID, dmChannel, leaderID, nodeInfo.(*queryNode).address)
+				if err != nil {
+					log.Error("failed to update shard leader info of replica",
+						zap.Int64("triggerTaskID", lbt.getTaskID()),
+						zap.Int64("taskID", task.getTaskID()),
+						zap.Int64("replicaID", task.ReplicaID),
+						zap.String("dmChannel", dmChannel),
+						zap.Error(err))
+					return err
+				}
+
+				log.Debug("LoadBalance: update shard leader",
+					zap.Int64("triggerTaskID", lbt.getTaskID()),
+					zap.Int64("taskID", task.getTaskID()),
+					zap.String("dmChannel", dmChannel),
+					zap.Int64("leader", leaderID))
+
+				return nil
+			})
 		}
-		err = wg.Wait()
-		if err != nil {
-			return err
+	}
+
+	err := wg.Wait()
+	if err != nil {
+		return err
+	}
+
+	for replicaID := range replicas {
+		shards := make([]string, 0, len(dmChannels))
+		for _, dmc := range dmChannels {
+			shards = append(shards, dmc.DmChannel)
 		}
 
-		err = syncReplicaSegments(ctx, lbt.cluster, lbt.getChildTask())
+		err := syncReplicaSegments(lbt.ctx, lbt.meta, lbt.cluster, replicaID, shards...)
 		if err != nil {
+			log.Error("loadBalanceTask: failed to sync segments distribution",
+				zap.Int64("collectionID", lbt.CollectionID),
+				zap.Int64("replicaID", lbt.replicaID),
+				zap.Error(err))
 			return err
 		}
 	}
 
-	// if loadBalanceTask execute failed after query node down, the lbt.getResultInfo().ErrorCode will be set to commonpb.ErrorCode_UnexpectedError
-	// then the queryCoord will panic, and the nodeInfo should not be removed immediately
-	// after queryCoord recovery, the balanceTask will redo
-	if lbt.BalanceReason == querypb.TriggerCondition_NodeDown {
-		for _, offlineNodeID := range lbt.SourceNodeIDs {
-			err := lbt.cluster.RemoveNodeInfo(offlineNodeID)
-			if err != nil {
-				log.Error("loadBalanceTask: occur error when removing node info from cluster",
-					zap.Int64("nodeID", offlineNodeID),
-					zap.Error(err))
-				lbt.setResultInfo(err)
-				return err
-			}
+	for _, offlineNodeID := range lbt.SourceNodeIDs {
+		err := lbt.cluster.RemoveNodeInfo(offlineNodeID)
+		if err != nil {
+			log.Error("loadBalanceTask: occur error when removing node info from cluster",
+				zap.Int64("nodeID", offlineNodeID),
+				zap.Error(err))
+			lbt.setResultInfo(err)
+			return err
 		}
 	}
 
