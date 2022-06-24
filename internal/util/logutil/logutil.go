@@ -46,68 +46,68 @@ type zapWrapper struct {
 // Info logs a message at InfoLevel.
 func (w *zapWrapper) Info(args ...interface{}) {
 	if infoLog >= w.logLevel {
-		w.logger.WithOptions(zap.AddCallerSkip(1)).Sugar().Info(args...)
+		w.logger.Sugar().Info(args...)
 	}
 }
 
 func (w *zapWrapper) Infoln(args ...interface{}) {
 	if infoLog >= w.logLevel {
-		w.logger.WithOptions(zap.AddCallerSkip(1)).Sugar().Info(args...)
+		w.logger.Sugar().Info(args...)
 	}
 }
 
 func (w zapWrapper) Infof(format string, args ...interface{}) {
 	if infoLog >= w.logLevel {
-		w.logger.WithOptions(zap.AddCallerSkip(1)).Sugar().Infof(format, args...)
+		w.logger.Sugar().Infof(format, args...)
 	}
 }
 
 func (w zapWrapper) Warning(args ...interface{}) {
 	if warningLog >= w.logLevel {
-		w.logger.WithOptions(zap.AddCallerSkip(1)).Sugar().Warn(args...)
+		w.logger.Sugar().Warn(args...)
 	}
 }
 
 func (w zapWrapper) Warningln(args ...interface{}) {
 	if warningLog >= w.logLevel {
-		w.logger.WithOptions(zap.AddCallerSkip(1)).Sugar().Warn(args...)
+		w.logger.Sugar().Warn(args...)
 	}
 }
 
 func (w *zapWrapper) Warningf(format string, args ...interface{}) {
 	if warningLog >= w.logLevel {
-		w.logger.WithOptions(zap.AddCallerSkip(1)).Sugar().Warnf(format, args...)
+		w.logger.Sugar().Warnf(format, args...)
 	}
 }
 
 func (w zapWrapper) Error(args ...interface{}) {
 	if errorLog >= w.logLevel {
-		w.logger.WithOptions(zap.AddCallerSkip(1)).Sugar().Error(args...)
+		w.logger.Sugar().Error(args...)
 	}
 }
 
 func (w *zapWrapper) Errorln(args ...interface{}) {
 	if errorLog >= w.logLevel {
-		w.logger.WithOptions(zap.AddCallerSkip(1)).Sugar().Error(args...)
+		w.logger.Sugar().Error(args...)
 	}
 }
 
 func (w zapWrapper) Errorf(format string, args ...interface{}) {
 	if errorLog >= w.logLevel {
-		w.logger.WithOptions(zap.AddCallerSkip(1)).Sugar().Errorf(format, args...)
+		w.logger.Sugar().Errorf(format, args...)
 	}
 }
 
 func (w *zapWrapper) Fatal(args ...interface{}) {
-	w.logger.WithOptions(zap.AddCallerSkip(1)).Sugar().Fatal(args...)
+	w.logger.Sugar().Fatal(args...)
 }
 
 func (w zapWrapper) Fatalln(args ...interface{}) {
-	w.logger.WithOptions(zap.AddCallerSkip(1)).Sugar().Fatal(args...)
+	w.logger.Sugar().Fatal(args...)
 }
 
 func (w *zapWrapper) Fatalf(format string, args ...interface{}) {
-	w.logger.WithOptions(zap.AddCallerSkip(1)).Sugar().Fatalf(format, args...)
+	w.logger.Sugar().Fatalf(format, args...)
 }
 
 // V reports whether verbosity level l is at least the requested verbose level.
@@ -141,7 +141,7 @@ var once sync.Once
 func SetupLogger(cfg *log.Config) {
 	once.Do(func() {
 		// Initialize logger.
-		logger, p, err := log.InitLogger(cfg, zap.AddStacktrace(zap.ErrorLevel))
+		logger, p, err := log.InitLogger(cfg, zap.AddStacktrace(zap.ErrorLevel), zap.AddCallerSkip(1))
 		if err == nil {
 			log.ReplaceGlobals(logger, p)
 		} else {
