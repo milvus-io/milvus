@@ -1006,7 +1006,7 @@ func (s *Server) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateR
 	var unflushed []UniqueID
 	for _, sid := range req.GetSegmentIDs() {
 		segment := s.meta.GetSegment(sid)
-		// segment is nil if it was compacted
+		// segment is nil if it was compacted or it's a empty segment and is set to dropped
 		if segment == nil || segment.GetState() == commonpb.SegmentState_Flushing ||
 			segment.GetState() == commonpb.SegmentState_Flushed {
 			continue
