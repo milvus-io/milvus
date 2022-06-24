@@ -548,12 +548,14 @@ func (i *IndexCoord) DropIndex(ctx context.Context, req *indexpb.DropIndexReques
 	ret := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}
-	nodeTasks, err := i.metaTable.MarkIndexAsDeleted(req.IndexID)
-	defer func() {
-		for nodeID, taskNum := range nodeTasks {
-			i.nodeManager.pq.IncPriority(nodeID, taskNum*-1)
-		}
-	}()
+	err := i.metaTable.MarkIndexAsDeleted(req.IndexID)
+	//no need do this. IndexNode finds that the task has been deleted, still changes the task status to finished, and writes back to etcd
+	//nodeTasks, err := i.metaTable.MarkIndexAsDeleted(req.IndexID)
+	//defer func() {
+	//	for nodeID, taskNum := range nodeTasks {
+	//		i.nodeManager.pq.IncPriority(nodeID, taskNum*-1)
+	//	}
+	//}()
 	if err != nil {
 		ret.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		ret.Reason = err.Error()
@@ -592,12 +594,13 @@ func (i *IndexCoord) RemoveIndex(ctx context.Context, req *indexpb.RemoveIndexRe
 		ErrorCode: commonpb.ErrorCode_Success,
 	}
 
-	nodeTasks, err := i.metaTable.MarkIndexAsDeletedByBuildIDs(req.GetBuildIDs())
-	defer func() {
-		for nodeID, taskNum := range nodeTasks {
-			i.nodeManager.pq.IncPriority(nodeID, -1*taskNum)
-		}
-	}()
+	err := i.metaTable.MarkIndexAsDeletedByBuildIDs(req.GetBuildIDs())
+	// no need do this. IndexNode finds that the task has been deleted, still changes the task status to finished, and writes back to etcd
+	//defer func() {
+	//	for nodeID, taskNum := range nodeTasks {
+	//		i.nodeManager.pq.IncPriority(nodeID, -1*taskNum)
+	//	}
+	//}()
 	if err != nil {
 		log.Error("IndexCoord MarkIndexAsDeletedByBuildIDs failed", zap.Int64s("buildIDs", req.GetBuildIDs()),
 			zap.Error(err))
@@ -903,8 +906,8 @@ func (i *IndexCoord) watchMetaLoop() {
 					reload := i.metaTable.LoadMetaFromETCD(indexBuildID, eventRevision)
 					log.Debug("IndexCoord watchMetaLoop PUT", zap.Int64("IndexBuildID", indexBuildID), zap.Bool("reload", reload))
 					if reload {
-						log.Debug("This task has finished", zap.Int64("indexBuildID", indexBuildID),
-							zap.Int64("Finish by IndexNode", indexMeta.NodeID),
+						log.Debug("This task has finished or failed", zap.Int64("indexBuildID", indexBuildID),
+							zap.Int64("Finish by IndexNode", indexMeta.NodeID), zap.String("index state", indexMeta.GetState().String()),
 							zap.Int64("The version of the task", indexMeta.Version))
 						if err = i.tryReleaseSegmentReferLock(ctx, indexBuildID, []UniqueID{indexMeta.Req.SegmentID}); err != nil {
 							panic(err)
