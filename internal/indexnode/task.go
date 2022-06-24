@@ -200,7 +200,7 @@ func (it *IndexBuildTask) updateTaskState(indexMeta *indexpb.IndexMeta) TaskStat
 	if indexMeta.Version > it.req.Version || indexMeta.State == commonpb.IndexState_Finished {
 		it.SetState(TaskStateAbandon)
 	} else if indexMeta.MarkDeleted {
-		it.SetState(TaskStateAbandon)
+		it.SetState(TaskStateDeleted)
 	}
 	return it.GetState()
 }
@@ -224,16 +224,12 @@ func (it *IndexBuildTask) saveIndexMeta(ctx context.Context) error {
 		}
 
 		taskState := it.updateTaskState(indexMeta)
-		if taskState == TaskStateAbandon {
+
+		if taskState == TaskStateDeleted {
 			log.Info("IndexNode IndexBuildTask saveIndexMeta", zap.String("TaskState", taskState.String()),
 				zap.Int64("IndexBuildID", indexMeta.IndexBuildID))
-			return nil
-		}
-
-		indexMeta.IndexFilePaths = it.savePaths
-		indexMeta.SerializeSize = it.serializedSize
-
-		if taskState == TaskStateFailed {
+			indexMeta.State = commonpb.IndexState_Finished
+		} else if taskState == TaskStateFailed {
 			log.Error("IndexNode IndexBuildTask saveIndexMeta set indexMeta.state to IndexState_Failed",
 				zap.String("TaskState", taskState.String()),
 				zap.Int64("IndexBuildID", indexMeta.IndexBuildID), zap.Error(it.err))
@@ -245,6 +241,8 @@ func (it *IndexBuildTask) saveIndexMeta(ctx context.Context) error {
 				zap.Int64("IndexBuildID", indexMeta.IndexBuildID), zap.Error(it.internalErr))
 			indexMeta.State = commonpb.IndexState_Unissued
 		} else { // TaskStateNormal
+			indexMeta.IndexFilePaths = it.savePaths
+			indexMeta.SerializeSize = it.serializedSize
 			log.Info("IndexNode IndexBuildTask saveIndexMeta indexMeta.state to IndexState_Finished",
 				zap.String("TaskState", taskState.String()),
 				zap.Int64("IndexBuildID", indexMeta.IndexBuildID))
@@ -546,6 +544,13 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 	log.Debug("IndexNode IndexBuildTask Execute ...", zap.Int64("buildId", it.req.IndexBuildID))
 	sp, _ := trace.StartSpanFromContextWithOperationName(ctx, "CreateIndex-Execute")
 	defer sp.Finish()
+
+	state := it.GetState()
+	if state != TaskStateNormal {
+		log.Info("index task no need to execute", zap.Int64("buildID", it.req.IndexBuildID),
+			zap.String("index state", it.GetState().String()))
+		return nil
+	}
 
 	if err := it.prepareParams(ctx); err != nil {
 		it.SetState(TaskStateFailed)
