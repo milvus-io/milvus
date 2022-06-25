@@ -467,12 +467,23 @@ func (c *queryNodeCluster) GetSegmentInfo(ctx context.Context, in *querypb.GetSe
 	}
 
 	// Fetch growing segments
+
+	// 1. Filter Nodes who are shard leaders
+	leaderNodes := make([]Node, 0)
+	channelNames := c.clusterMeta.getDmChannelNamesByCollectionID(in.CollectionID)
+	for _, channelName := range channelNames {
+		dmInfo, _ := c.clusterMeta.getDmChannel(channelName)
+		nodeId := dmInfo.GetNodeIDLoaded()
+		leaderNodes = append(leaderNodes, c.nodes[nodeId])
+	}
+
+	// 2. GetSegmentInfo from leaders
 	c.RLock()
 	var wg sync.WaitGroup
-	cnt := len(c.nodes)
+	cnt := len(leaderNodes)
 	resChan := make(chan respTuple, cnt)
 	wg.Add(cnt)
-	for _, node := range c.nodes {
+	for _, node := range leaderNodes {
 		go func(node Node) {
 			defer wg.Done()
 			res, err := node.getSegmentInfo(ctx, in)
