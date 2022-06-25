@@ -43,6 +43,7 @@ const (
 	defaultCollectionID     = UniqueID(2021)
 	defaultPartitionID      = UniqueID(2021)
 	defaultSegmentID        = UniqueID(2021)
+	defaultReplicaID        = UniqueID(2022)
 	defaultQueryNodeID      = int64(100)
 	defaultChannelNum       = 2
 	defaultNumRowPerSegment = 1000

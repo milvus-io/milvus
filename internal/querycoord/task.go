@@ -2343,30 +2343,6 @@ func (lbt *loadBalanceTask) globalPostExecute(ctx context.Context) error {
 		})
 	}
 
-	// Remove offline nodes from dmChannels
-	for _, dmChannel := range dmChannels {
-		dmChannel := dmChannel
-		wg.Go(func() error {
-			dmChannel.NodeIds = removeFromSlice(dmChannel.NodeIds, lbt.SourceNodeIDs...)
-
-			err := lbt.meta.setDmChannelInfos(dmChannel)
-			if err != nil {
-				log.Error("failed to remove offline nodes from dmChannel info",
-					zap.String("dmChannel", dmChannel.DmChannel),
-					zap.Error(err))
-
-				return err
-			}
-
-			log.Info("remove offline nodes from dmChannel",
-				zap.Int64("taskID", lbt.getTaskID()),
-				zap.String("dmChannel", dmChannel.DmChannel),
-				zap.Int64s("nodeIds", dmChannel.NodeIds))
-
-			return nil
-		})
-	}
-
 	// Update shard leaders for replicas
 	for _, childTask := range lbt.getChildTask() {
 		if task, ok := childTask.(*watchDmChannelTask); ok {

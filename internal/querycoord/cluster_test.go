@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -538,6 +539,16 @@ func TestGrpcRequest(t *testing.T) {
 		assert.Nil(t, err)
 	})
 
+	// Mock collection and replica
+	meta.addCollection(defaultCollectionID, querypb.LoadType_LoadCollection, nil)
+	meta.addReplica(&milvuspb.ReplicaInfo{
+		ReplicaID:    defaultReplicaID,
+		CollectionID: defaultCollectionID,
+		ShardReplicas: []*milvuspb.ShardReplica{
+			{LeaderID: node.queryNodeID},
+		},
+	})
+
 	t.Run("Test GetSegmentInfo", func(t *testing.T) {
 		getSegmentInfoReq := &querypb.GetSegmentInfoRequest{
 			Base: &commonpb.MsgBase{
@@ -570,7 +581,7 @@ func TestGrpcRequest(t *testing.T) {
 			CollectionID: defaultCollectionID,
 		}
 		_, err = cluster.GetSegmentInfo(baseCtx, getSegmentInfoReq)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 	})
 
 	t.Run("Test GetSegmentInfoByNodeFailed", func(t *testing.T) {

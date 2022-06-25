@@ -313,8 +313,8 @@ func TestGrpcTask(t *testing.T) {
 			},
 			SegmentIDs: []UniqueID{defaultSegmentID},
 		})
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, res.Status.ErrorCode)
-		assert.Nil(t, err)
 	})
 
 	t.Run("Test ReleaseParOfNotLoadedCol", func(t *testing.T) {

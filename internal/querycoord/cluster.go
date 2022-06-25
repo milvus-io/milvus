@@ -299,35 +299,7 @@ func (c *queryNodeCluster) WatchDmChannels(ctx context.Context, nodeID int64, in
 	c.RUnlock()
 
 	if targetNode != nil {
-		err := targetNode.watchDmChannels(ctx, in)
-		if err != nil {
-			return err
-		}
-
-		dmChannelWatchInfo := make([]*querypb.DmChannelWatchInfo, len(in.Infos))
-		for index, info := range in.Infos {
-			nodes := []UniqueID{nodeID}
-
-			old, ok := c.clusterMeta.getDmChannel(info.ChannelName)
-			if ok {
-				nodes = append(nodes, old.NodeIds...)
-			}
-
-			dmChannelWatchInfo[index] = &querypb.DmChannelWatchInfo{
-				CollectionID: info.CollectionID,
-				DmChannel:    info.ChannelName,
-				ReplicaID:    in.ReplicaID,
-				NodeIds:      nodes,
-			}
-		}
-
-		err = c.clusterMeta.setDmChannelInfos(dmChannelWatchInfo...)
-		if err != nil {
-			// TODO DML channel maybe leaked, need to release dml if no related segment
-			return err
-		}
-
-		return nil
+		return targetNode.watchDmChannels(ctx, in)
 	}
 	return fmt.Errorf("watchDmChannels: can't find QueryNode by nodeID, nodeID = %d", nodeID)
 }
