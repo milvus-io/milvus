@@ -322,7 +322,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                     search_params, default_limit,
                                     default_search_exp,
                                     check_task=CheckTasks.err_res,
-                                    check_items={"err_code": 0,
+                                    check_items={"err_code": 1,
                                                  "err_msg": message})
 
     @pytest.mark.tags(CaseLabel.L2)
