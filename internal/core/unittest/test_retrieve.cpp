@@ -23,22 +23,23 @@ TEST(Retrieve, ScalarIndex) {
     auto index = std::make_unique<ScalarIndexVector>();
     std::vector<int64_t> data;
     int N = 1000;
-    auto req_ids = std::make_unique<IdArray>();
-    auto req_ids_arr = req_ids->mutable_int_id();
+
+    auto ids_builder = arrow::Int64Builder();
 
     for (int i = 0; i < N; ++i) {
         data.push_back(i * 3 % N);
-        req_ids_arr->add_data(i);
+        ids_builder.Append(i);
     }
     index->append_data(data.data(), N, SegOffset(10000));
     index->build();
+    auto req_ids = ids_builder.Finish().ValueOrDie();
 
     auto [res_ids, res_offsets] = index->do_search_ids(*req_ids);
-    auto res_ids_arr = res_ids->int_id();
+    auto res_ids_arr = arrow::Int64Array(res_ids->data());
 
     for (int i = 0; i < N; ++i) {
         auto res_offset = res_offsets[i].get() - 10000;
-        auto res_id = res_ids_arr.data(i);
+        auto res_id = res_ids_arr.Value(i);
         auto std_id = (res_offset * 3 % N);
         ASSERT_EQ(res_id, std_id);
     }
@@ -328,8 +329,9 @@ TEST(Retrieve, Delete) {
     auto load_delete_record = false;
     if (load_delete_record) {
         std::vector<idx_t> pks{1, 2, 3, 4, 5};
-        auto ids = std::make_unique<IdArray>();
-        ids->mutable_int_id()->mutable_data()->Add(pks.begin(), pks.end());
+        auto ids_builder = arrow::Int64Builder();
+        ids_builder.AppendValues(pks);
+        auto ids = ids_builder.Finish().ValueOrDie();
 
         std::vector<Timestamp> timestamps{10, 10, 10, 10, 10};
 
@@ -340,8 +342,9 @@ TEST(Retrieve, Delete) {
 
     int64_t new_count = 6;
     std::vector<idx_t> new_pks{0, 1, 2, 3, 4, 5};
-    auto ids = std::make_unique<IdArray>();
-    ids->mutable_int_id()->mutable_data()->Add(new_pks.begin(), new_pks.end());
+    auto ids_builder = arrow::Int64Builder();
+    ids_builder.AppendValues(new_pks);
+    auto ids = ids_builder.Finish().ValueOrDie();
     std::vector<idx_t> new_timestamps{10, 10, 10, 10, 10, 10};
     auto reserved_offset = segment->PreDelete(new_count);
     ASSERT_EQ(reserved_offset, row_count);

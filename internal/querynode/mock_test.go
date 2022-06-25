@@ -245,6 +245,7 @@ func genPKFieldSchema(param constFieldParam) *schemapb.FieldSchema {
 		Name:         param.fieldName,
 		IsPrimaryKey: true,
 		DataType:     param.dataType,
+		TypeParams:   []*commonpb.KeyValuePair{{Key: "max_length", Value: "100"}},
 	}
 	return field
 }

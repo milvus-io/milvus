@@ -14,8 +14,10 @@ milvus_add_pkg_config("milvus_common")
 set(COMMON_SRC
         Schema.cpp
         SystemProperty.cpp
+        ArrowConverter.cpp
         vector_index_c.cpp
         memory_c.cpp
+        allocator_c.cpp
         )
 
 add_library(milvus_common SHARED ${COMMON_SRC})
@@ -25,8 +27,8 @@ if ( MSYS )
             milvus_utils
             milvus_config
             milvus_log
-            knowhere
             milvus_proto
+            knowhere
             yaml-cpp
             boost_bitset_ext
             arrow

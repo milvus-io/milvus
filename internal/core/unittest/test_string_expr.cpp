@@ -198,7 +198,7 @@ GenAlwaysFalsePlan(const FieldMeta& fvec_meta, const FieldMeta& str_meta) {
 
     auto plan_node = GenPlanNode();
     plan_node->set_allocated_vector_anns(anns);
-    return std::move(plan_node);
+    return plan_node;
 }
 
 auto
@@ -209,14 +209,14 @@ GenAlwaysTruePlan(const FieldMeta& fvec_meta, const FieldMeta& str_meta) {
 
     auto plan_node = GenPlanNode();
     plan_node->set_allocated_vector_anns(anns);
-    return std::move(plan_node);
+    return plan_node;
 }
 
 SchemaPtr
 GenTestSchema() {
     auto schema = std::make_shared<Schema>();
-    schema->AddDebugField("str", DataType::VARCHAR);
-    schema->AddDebugField("another_str", DataType::VARCHAR);
+    schema->AddDebugField("str", DataType::VARCHAR, 100);
+    schema->AddDebugField("another_str", DataType::VARCHAR, 100);
     schema->AddDebugField("fvec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto pk = schema->AddDebugField("int64", DataType::INT64);
     schema->set_primary_field_id(pk);
@@ -226,8 +226,8 @@ GenTestSchema() {
 SchemaPtr
 GenStrPKSchema() {
     auto schema = std::make_shared<Schema>();
-    auto pk = schema->AddDebugField("str", DataType::VARCHAR);
-    schema->AddDebugField("another_str", DataType::VARCHAR);
+    auto pk = schema->AddDebugField("str", DataType::VARCHAR, 100);
+    schema->AddDebugField("another_str", DataType::VARCHAR, 100);
     schema->AddDebugField("fvec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     schema->AddDebugField("int64", DataType::INT64);
     schema->set_primary_field_id(pk);
@@ -261,12 +261,13 @@ TEST(StringExpr, Term) {
     int num_iters = 100;
     for (int iter = 0; iter < num_iters; ++iter) {
         auto raw_data = DataGen(schema, N, iter);
-        auto new_str_col = raw_data.get_col(str_meta.get_id());
-        auto begin = new_str_col->scalars().string_data().data().begin();
-        auto end = new_str_col->scalars().string_data().data().end();
-        str_col.insert(str_col.end(), begin, end);
+        auto new_str_col = raw_data.get_data_array(str_meta.get_id());
+        auto array = arrow::StringArray(new_str_col.data->data());
+        for (auto&& arr_iter : array) {
+            str_col.push_back(arr_iter.value().to_string());
+        }
         seg->PreInsert(N);
-        seg->Insert(iter * N, N, raw_data.row_ids_.data(), raw_data.timestamps_.data(), raw_data.raw_);
+        seg->Insert(iter * N, N, raw_data.get_raw_row_ids(), raw_data.get_raw_timestamps(), raw_data.raw_.get());
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -335,10 +336,11 @@ TEST(StringExpr, Compare) {
         auto raw_data = DataGen(schema, N, iter);
 
         auto reserve_col = [&, raw_data](const FieldMeta& field_meta, std::vector<std::string>& str_col) {
-            auto new_str_col = raw_data.get_col(field_meta.get_id());
-            auto begin = new_str_col->scalars().string_data().data().begin();
-            auto end = new_str_col->scalars().string_data().data().end();
-            str_col.insert(str_col.end(), begin, end);
+            auto new_str_col = raw_data.get_data_array(field_meta.get_id());
+            auto array = arrow::StringArray(new_str_col.data->data());
+            for (auto&& arr_iter : array) {
+                str_col.push_back(arr_iter.value().to_string());
+            }
         };
 
         reserve_col(str_meta, str_col);
@@ -346,7 +348,7 @@ TEST(StringExpr, Compare) {
 
         {
             seg->PreInsert(N);
-            seg->Insert(iter * N, N, raw_data.row_ids_.data(), raw_data.timestamps_.data(), raw_data.raw_);
+            seg->Insert(iter * N, N, raw_data.get_raw_row_ids(), raw_data.get_raw_timestamps(), raw_data.raw_.get());
         }
     }
 
@@ -407,12 +409,13 @@ TEST(StringExpr, UnaryRange) {
     int num_iters = 100;
     for (int iter = 0; iter < num_iters; ++iter) {
         auto raw_data = DataGen(schema, N, iter);
-        auto new_str_col = raw_data.get_col(str_meta.get_id());
-        auto begin = new_str_col->scalars().string_data().data().begin();
-        auto end = new_str_col->scalars().string_data().data().end();
-        str_col.insert(str_col.end(), begin, end);
+        auto new_str_col = raw_data.get_data_array(str_meta.get_id());
+        auto array = arrow::StringArray(new_str_col.data->data());
+        for (auto&& arr_iter : array) {
+            str_col.push_back(arr_iter.value().to_string());
+        }
         seg->PreInsert(N);
-        seg->Insert(iter * N, N, raw_data.row_ids_.data(), raw_data.timestamps_.data(), raw_data.raw_);
+        seg->Insert(iter * N, N, raw_data.get_raw_row_ids(), raw_data.get_raw_timestamps(), raw_data.raw_.get());
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -472,12 +475,13 @@ TEST(StringExpr, BinaryRange) {
     int num_iters = 100;
     for (int iter = 0; iter < num_iters; ++iter) {
         auto raw_data = DataGen(schema, N, iter);
-        auto new_str_col = raw_data.get_col(str_meta.get_id());
-        auto begin = new_str_col->scalars().string_data().data().begin();
-        auto end = new_str_col->scalars().string_data().data().end();
-        str_col.insert(str_col.end(), begin, end);
+        auto new_str_col = raw_data.get_data_array(str_meta.get_id());
+        auto array = arrow::StringArray(new_str_col.data->data());
+        for (auto&& arr_iter : array) {
+            str_col.push_back(arr_iter.value().to_string());
+        }
         seg->PreInsert(N);
-        seg->Insert(iter * N, N, raw_data.row_ids_.data(), raw_data.timestamps_.data(), raw_data.raw_);
+        seg->Insert(iter * N, N, raw_data.get_raw_row_ids(), raw_data.get_raw_timestamps(), raw_data.raw_.get());
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -512,12 +516,12 @@ TEST(AlwaysTrueStringPlan, SearchWithOutputFields) {
     auto round_decimal = -1;
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<float>(fvec_meta.get_id());
-    auto str_col = dataset.get_col(str_meta.get_id())->scalars().string_data().data();
+    auto str_col = dataset.get_col<std::string>(str_meta.get_id());
     auto query_ptr = vec_col.data();
     auto segment = CreateGrowingSegment(schema);
     segment->disable_small_index();  // brute-force search.
     segment->PreInsert(N);
-    segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
+    segment->Insert(0, N, dataset.get_raw_row_ids(), dataset.get_raw_timestamps(), dataset.raw_.get());
 
     auto plan_proto = GenAlwaysTruePlan(fvec_meta, str_meta);
     SetTargetEntry(plan_proto, {str_meta.get_id().get()});
@@ -567,11 +571,10 @@ TEST(AlwaysTrueStringPlan, QueryWithOutputFields) {
     auto N = 100000;
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<float>(fvec_meta.get_id());
-    auto str_col = dataset.get_col(str_meta.get_id())->scalars().string_data().data();
     auto segment = CreateGrowingSegment(schema);
     segment->disable_small_index();  // brute-force search.
     segment->PreInsert(N);
-    segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
+    segment->Insert(0, N, dataset.get_raw_row_ids(), dataset.get_raw_timestamps(), dataset.raw_.get());
 
     auto expr_proto = GenAlwaysTrueExpr(fvec_meta, str_meta);
     auto plan_proto = GenPlanNode();

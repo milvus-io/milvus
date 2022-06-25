@@ -24,5 +24,5 @@ TEST(Binary, Insert) {
     auto dataset = DataGen(schema, N, 10);
     auto segment = CreateGrowingSegment(schema);
     auto offset = segment->PreInsert(N);
-    segment->Insert(offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
+    segment->Insert(offset, N, dataset.get_raw_row_ids(), dataset.get_raw_timestamps(), dataset.raw_.get());
 }

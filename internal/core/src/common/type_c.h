@@ -29,6 +29,8 @@ enum SegmentType {
 };
 
 typedef enum SegmentType SegmentType;
+typedef void* CArray;
+typedef void* CArraySchema;
 
 enum ErrorCode {
     Success = 0,
@@ -70,15 +72,15 @@ typedef struct CProto {
 
 typedef struct CLoadFieldDataInfo {
     int64_t field_id;
-    const uint8_t* blob;
-    uint64_t blob_size;
+    CArray data_array;
+    CArraySchema schema;
     int64_t row_count;
 } CLoadFieldDataInfo;
 
 typedef struct CLoadDeletedRecordInfo {
     void* timestamps;
-    const uint8_t* primary_keys;
-    const uint64_t primary_keys_size;
+    CArray pks_array;
+    CArraySchema schema;
     int64_t row_count;
 } CLoadDeletedRecordInfo;
 

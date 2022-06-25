@@ -16,6 +16,7 @@
 #include <boost/iterator/counting_iterator.hpp>
 
 #include "common/Consts.h"
+#include "common/ArrowConverter.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "query/PlanNode.h"
 #include "query/SearchOnSealed.h"
@@ -60,13 +61,11 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
                            const Timestamp* timestamps_raw,
                            const InsertData* insert_data) {
     AssertInfo(insert_data->num_rows() == size, "Entities_raw count not equal to insert size");
-    //    AssertInfo(insert_data->fields_data_size() == schema_->size(),
-    //               "num fields of insert data not equal to num of schema fields");
     // step 1: check insert data if valid
     std::unordered_map<FieldId, int64_t> field_id_to_offset;
     int64_t field_offset = 0;
-    for (auto field : insert_data->fields_data()) {
-        auto field_id = FieldId(field.field_id());
+    for (const auto& field : insert_data->schema()->fields()) {
+        auto field_id = milvus::GetFieldId(field);
         AssertInfo(!field_id_to_offset.count(field_id), "duplicate field data");
         field_id_to_offset.emplace(field_id, field_offset++);
     }
@@ -80,15 +79,15 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
     for (auto [field_id, field_meta] : schema_->get_fields()) {
         AssertInfo(field_id_to_offset.count(field_id), "Cannot find field_id");
         auto data_offset = field_id_to_offset[field_id];
-        insert_record_.get_field_data_base(field_id)->set_data_raw(reserved_offset, size,
-                                                                   &insert_data->fields_data(data_offset), field_meta);
+        auto data_array = DataArray{insert_data->schema()->field(data_offset), insert_data->column(data_offset)};
+        insert_record_.get_field_data_base(field_id)->set_data_raw(reserved_offset, size, &data_array, field_meta);
     }
 
     // step 4: set pks to offset
     auto field_id = schema_->get_primary_field_id().value_or(FieldId(-1));
     AssertInfo(field_id.get() != INVALID_FIELD_ID, "Primary key is -1");
     std::vector<PkType> pks(size);
-    ParsePksFromFieldData(pks, insert_data->fields_data(field_id_to_offset[field_id]));
+    ParsePksFromIDs(pks, (*schema_)[field_id].get_data_type(), *insert_data->column(field_id_to_offset[field_id]));
     for (int i = 0; i < size; ++i) {
         insert_record_.insert_pk(pks[i], reserved_offset + i);
     }
@@ -105,7 +104,7 @@ Status
 SegmentGrowingImpl::Delete(int64_t reserved_begin, int64_t size, const IdArray* ids, const Timestamp* timestamps_raw) {
     auto field_id = schema_->get_primary_field_id().value_or(FieldId(-1));
     AssertInfo(field_id.get() != -1, "Primary key is -1");
-    auto& field_meta = schema_->operator[](field_id);
+    auto& field_meta = (*schema_)[field_id];
     std::vector<PkType> pks(size);
     ParsePksFromIDs(pks, field_meta.get_data_type(), *ids);
 
@@ -192,7 +191,7 @@ SegmentGrowingImpl::vector_search(int64_t vec_count,
     }
 }
 
-std::unique_ptr<DataArray>
+std::unique_ptr<milvus::proto::schema::FieldData>
 SegmentGrowingImpl::bulk_subscript(FieldId field_id, const int64_t* seg_offsets, int64_t count) const {
     // TODO: support more types
     auto vec_ptr = insert_record_.get_field_data_base(field_id);
@@ -343,9 +342,8 @@ SegmentGrowingImpl::search_ids(const BitsetView& bitset, Timestamp timestamp) co
     return res_offsets;
 }
 
-std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
+std::pair<std::shared_ptr<IdArray>, std::vector<SegOffset>>
 SegmentGrowingImpl::search_ids(const IdArray& id_array, Timestamp timestamp) const {
-    AssertInfo(id_array.has_int_id(), "Id array doesn't have int_id element");
     auto field_id = schema_->get_primary_field_id().value_or(FieldId(-1));
     AssertInfo(field_id.get() != -1, "Primary key is -1");
     auto& field_meta = schema_->operator[](field_id);
@@ -354,18 +352,22 @@ SegmentGrowingImpl::search_ids(const IdArray& id_array, Timestamp timestamp) con
     std::vector<PkType> pks(ids_size);
     ParsePksFromIDs(pks, data_type, id_array);
 
-    auto res_id_arr = std::make_unique<IdArray>();
+    std::shared_ptr<arrow::Array> res_id_arr;
     std::vector<SegOffset> res_offsets;
     for (auto pk : pks) {
         auto segOffsets = insert_record_.search_pk(pk, timestamp);
         for (auto offset : segOffsets) {
             switch (data_type) {
                 case DataType::INT64: {
-                    res_id_arr->mutable_int_id()->add_data(std::get<int64_t>(pk));
+                    auto builder = arrow::Int64Builder();
+                    builder.Append(std::get<int64_t>(pk));
+                    res_id_arr = builder.Finish().ValueOrDie();
                     break;
                 }
                 case DataType::VARCHAR: {
-                    res_id_arr->mutable_str_id()->add_data(std::get<std::string>(pk));
+                    auto builder = arrow::StringBuilder();
+                    builder.Append(std::get<std::string>(pk));
+                    res_id_arr = builder.Finish().ValueOrDie();
                     break;
                 }
                 default: {

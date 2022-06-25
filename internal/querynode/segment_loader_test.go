@@ -344,6 +344,8 @@ func TestSegmentLoader_testLoadGrowing(t *testing.T) {
 		rowIDData, ok := insertData.Data[common.RowIDField]
 		assert.Equal(t, true, ok)
 
+		delete(insertData.Data, common.TimeStampField)
+		delete(insertData.Data, common.RowIDField)
 		err = loader.loadGrowingSegments(segment, rowIDData.(*storage.Int64FieldData).Data, utss, insertData)
 		assert.NoError(t, err)
 	})

@@ -51,7 +51,7 @@ TEST(Growing, RealCount) {
     ASSERT_EQ(offset, 0);
     auto dataset = DataGen(schema, c);
     auto pks = dataset.get_col<int64_t>(pk);
-    segment->Insert(offset, c, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
+    segment->Insert(offset, c, dataset.get_raw_row_ids(), dataset.get_raw_timestamps(), dataset.raw_.get());
 
     // no delete.
     ASSERT_EQ(c, segment->get_real_count());

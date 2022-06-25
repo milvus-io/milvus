@@ -29,8 +29,13 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 	"unsafe"
+
+	"github.com/apache/arrow/go/v8/arrow"
+	"github.com/apache/arrow/go/v8/arrow/array"
+	"github.com/apache/arrow/go/v8/arrow/cdata"
 
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 
@@ -585,7 +590,7 @@ func (s *Segment) segmentPreDelete(numOfRecords int) int64 {
 	return int64(offset)
 }
 
-func (s *Segment) segmentInsert(offset int64, entityIDs []UniqueID, timestamps []Timestamp, record *segcorepb.InsertRecord) error {
+func (s *Segment) segmentInsert(offset int64, entityIDs []UniqueID, timestamps []Timestamp, fields []*schemapb.FieldSchema, record *segcorepb.InsertRecord) error {
 	if s.segmentType != segmentTypeGrowing {
 		return fmt.Errorf("unexpected segmentType when segmentInsert, segmentType = %s", s.segmentType.String())
 	}
@@ -594,10 +599,28 @@ func (s *Segment) segmentInsert(offset int64, entityIDs []UniqueID, timestamps [
 		return errors.New("null seg core pointer")
 	}
 
-	insertRecordBlob, err := proto.Marshal(record)
-	if err != nil {
-		return fmt.Errorf("failed to marshal insert record: %s", err)
+	if len(record.FieldsData) != len(fields) {
+		return errors.New("record is not match schema")
 	}
+	schema, err := toArrowSchema(fields)
+	if err != nil {
+		return err
+	}
+	pool := NewCgoArrowAllocator()
+	cols := make([]arrow.Array, len(fields))
+	sort.Slice(record.FieldsData, func(i, j int) bool {
+		return record.FieldsData[i].GetFieldId() < record.FieldsData[j].GetFieldId()
+	})
+	for i, fieldData := range record.FieldsData {
+		arrowArray, err := toArrowArray(fieldData, pool)
+		if err != nil {
+			return err
+		}
+		cols[i] = arrowArray
+		defer arrowArray.Release()
+	}
+	arrowRecord := array.NewRecord(schema, cols, record.NumRows)
+	defer arrowRecord.Release()
 
 	var numOfRow = len(entityIDs)
 	var cOffset = C.int64_t(offset)
@@ -605,13 +628,20 @@ func (s *Segment) segmentInsert(offset int64, entityIDs []UniqueID, timestamps [
 	var cEntityIdsPtr = (*C.int64_t)(&(entityIDs)[0])
 	var cTimestampsPtr = (*C.uint64_t)(&(timestamps)[0])
 
+	out := cdata.CArrowArray{}
+	outSchema := cdata.CArrowSchema{}
+	cdata.ExportArrowRecordBatch(arrowRecord, &out, &outSchema)
+	defer cdata.ReleaseCArrowArray(&out)
+	defer cdata.ReleaseCArrowSchema(&outSchema)
+
 	status := C.Insert(s.segmentPtr,
 		cOffset,
 		cNumOfRows,
 		cEntityIdsPtr,
 		cTimestampsPtr,
-		(*C.uint8_t)(unsafe.Pointer(&insertRecordBlob[0])),
-		(C.uint64_t)(len(insertRecordBlob)))
+		C.CArray(unsafe.Pointer(&out)),
+		C.CArraySchema(unsafe.Pointer(&outSchema)))
+
 	if err := HandleCStatus(&status, "Insert failed"); err != nil {
 		return err
 	}
@@ -645,39 +675,36 @@ func (s *Segment) segmentDelete(offset int64, entityIDs []primaryKey, timestamps
 	var cSize = C.int64_t(len(entityIDs))
 	var cTimestampsPtr = (*C.uint64_t)(&(timestamps)[0])
 
-	ids := &schemapb.IDs{}
+	var ids arrow.Array
+	pool := NewCgoArrowAllocator()
 	pkType := entityIDs[0].Type()
 	switch pkType {
 	case schemapb.DataType_Int64:
-		int64Pks := make([]int64, len(entityIDs))
-		for index, entity := range entityIDs {
-			int64Pks[index] = entity.(*int64PrimaryKey).Value
+		builder := array.NewInt64Builder(pool)
+		defer builder.Release()
+		for _, entity := range entityIDs {
+			builder.Append(entity.(*int64PrimaryKey).Value)
 		}
-		ids.IdField = &schemapb.IDs_IntId{
-			IntId: &schemapb.LongArray{
-				Data: int64Pks,
-			},
-		}
+		ids = builder.NewArray()
+		defer ids.Release()
 	case schemapb.DataType_VarChar:
-		varCharPks := make([]string, len(entityIDs))
-		for index, entity := range entityIDs {
-			varCharPks[index] = entity.(*varCharPrimaryKey).Value
+		builder := array.NewStringBuilder(pool)
+		defer builder.Release()
+		for _, entity := range entityIDs {
+			builder.Append(entity.(*varCharPrimaryKey).Value)
 		}
-		ids.IdField = &schemapb.IDs_StrId{
-			StrId: &schemapb.StringArray{
-				Data: varCharPks,
-			},
-		}
+		ids = builder.NewArray()
+		defer ids.Release()
 	default:
 		return fmt.Errorf("invalid data type of primary keys")
 	}
 
-	dataBlob, err := proto.Marshal(ids)
-	if err != nil {
-		return fmt.Errorf("failed to marshal ids: %s", err)
-	}
-
-	status := C.Delete(s.segmentPtr, cOffset, cSize, (*C.uint8_t)(unsafe.Pointer(&dataBlob[0])), (C.uint64_t)(len(dataBlob)), cTimestampsPtr)
+	out := cdata.CArrowArray{}
+	outSchema := cdata.CArrowSchema{}
+	cdata.ExportArrowArray(ids, &out, &outSchema)
+	defer cdata.ReleaseCArrowArray(&out)
+	defer cdata.ReleaseCArrowSchema(&outSchema)
+	status := C.Delete(s.segmentPtr, cOffset, cSize, C.CArray(unsafe.Pointer(&out)), C.CArraySchema(unsafe.Pointer(&outSchema)), cTimestampsPtr)
 	if err := HandleCStatus(&status, "Delete failed"); err != nil {
 		return err
 	}
@@ -699,16 +726,24 @@ func (s *Segment) segmentLoadFieldData(fieldID int64, rowCount int64, data *sche
 		return errors.New(errMsg)
 	}
 
-	dataBlob, err := proto.Marshal(data)
+	pool := NewCgoArrowAllocator()
+	arrowArray, err := toArrowArray(data, pool)
 	if err != nil {
 		return err
 	}
+	defer arrowArray.Release()
+
+	out := cdata.CArrowArray{}
+	outSchema := cdata.CArrowSchema{}
+	cdata.ExportArrowArray(arrowArray, &out, &outSchema)
+	defer cdata.ReleaseCArrowArray(&out)
+	defer cdata.ReleaseCArrowSchema(&outSchema)
 
 	loadInfo := C.CLoadFieldDataInfo{
-		field_id:  C.int64_t(fieldID),
-		blob:      (*C.uint8_t)(unsafe.Pointer(&dataBlob[0])),
-		blob_size: C.uint64_t(len(dataBlob)),
-		row_count: C.int64_t(rowCount),
+		field_id:   C.int64_t(fieldID),
+		data_array: C.CArray(unsafe.Pointer(&out)),
+		schema:     C.CArraySchema(unsafe.Pointer(&outSchema)),
+		row_count:  C.int64_t(rowCount),
 	}
 
 	status := C.LoadFieldData(s.segmentPtr, loadInfo)
@@ -733,42 +768,41 @@ func (s *Segment) segmentLoadDeletedRecord(primaryKeys []primaryKey, timestamps 
 		return fmt.Errorf("empty pks to delete")
 	}
 	pkType := primaryKeys[0].Type()
-	ids := &schemapb.IDs{}
+
+	var ids arrow.Array
+	pool := NewCgoArrowAllocator()
 	switch pkType {
 	case schemapb.DataType_Int64:
-		int64Pks := make([]int64, len(primaryKeys))
-		for index, pk := range primaryKeys {
-			int64Pks[index] = pk.(*int64PrimaryKey).Value
+		builder := array.NewInt64Builder(pool)
+		defer builder.Release()
+		for _, pk := range primaryKeys {
+			builder.Append(pk.(*int64PrimaryKey).Value)
 		}
-		ids.IdField = &schemapb.IDs_IntId{
-			IntId: &schemapb.LongArray{
-				Data: int64Pks,
-			},
-		}
+		ids = builder.NewArray()
+		defer ids.Release()
 	case schemapb.DataType_VarChar:
-		varCharPks := make([]string, len(primaryKeys))
-		for index, pk := range primaryKeys {
-			varCharPks[index] = pk.(*varCharPrimaryKey).Value
+		builder := array.NewStringBuilder(pool)
+		defer builder.Release()
+		for _, pk := range primaryKeys {
+			builder.Append(pk.(*varCharPrimaryKey).Value)
 		}
-		ids.IdField = &schemapb.IDs_StrId{
-			StrId: &schemapb.StringArray{
-				Data: varCharPks,
-			},
-		}
+		ids = builder.NewArray()
+		defer ids.Release()
 	default:
 		return fmt.Errorf("invalid data type of primary keys")
 	}
 
-	idsBlob, err := proto.Marshal(ids)
-	if err != nil {
-		return err
-	}
+	out := cdata.CArrowArray{}
+	outSchema := cdata.CArrowSchema{}
+	cdata.ExportArrowArray(ids, &out, &outSchema)
+	defer cdata.ReleaseCArrowArray(&out)
+	defer cdata.ReleaseCArrowSchema(&outSchema)
 
 	loadInfo := C.CLoadDeletedRecordInfo{
-		timestamps:        unsafe.Pointer(&timestamps[0]),
-		primary_keys:      (*C.uint8_t)(unsafe.Pointer(&idsBlob[0])),
-		primary_keys_size: C.uint64_t(len(idsBlob)),
-		row_count:         C.int64_t(rowCount),
+		timestamps: unsafe.Pointer(&timestamps[0]),
+		pks_array:  C.CArray(unsafe.Pointer(&out)),
+		schema:     C.CArraySchema(unsafe.Pointer(&outSchema)),
+		row_count:  C.int64_t(rowCount),
 	}
 	/*
 		CStatus

@@ -764,20 +764,22 @@ ExecExprVisitor::ExecTermVisitorImpl(TermExpr& expr_raw) -> BitsetType {
     }
 
     if (use_pk_index) {
-        auto id_array = std::make_unique<IdArray>();
+        std::shared_ptr<IdArray> id_array;
         switch (field_meta.get_data_type()) {
             case DataType::INT64: {
-                auto dst_ids = id_array->mutable_int_id();
+                auto builder = arrow::Int64Builder();
                 for (const auto& id : expr.terms_) {
-                    dst_ids->add_data((int64_t&)id);
+                    builder.Append(id);
                 }
+                id_array = builder.Finish().ValueOrDie();
                 break;
             }
             case DataType::VARCHAR: {
-                auto dst_ids = id_array->mutable_str_id();
+                auto builder = arrow::StringBuilder();
                 for (const auto& id : expr.terms_) {
-                    dst_ids->add_data((std::string&)id);
+                    builder.Append((std::string&)id);
                 }
+                id_array = builder.Finish().ValueOrDie();
                 break;
             }
             default: {

@@ -32,7 +32,7 @@ struct DeletedRecord {
     };
     static constexpr int64_t deprecated_size_per_chunk = 32 * 1024;
     DeletedRecord()
-        : lru_(std::make_shared<TmpBitmap>()), timestamps_(deprecated_size_per_chunk), pks_(deprecated_size_per_chunk) {
+        : timestamps_(deprecated_size_per_chunk), pks_(deprecated_size_per_chunk), lru_(std::make_shared<TmpBitmap>()) {
         lru_->bitmap_ptr = std::make_shared<BitsetType>();
     }
 

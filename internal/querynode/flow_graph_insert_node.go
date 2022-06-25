@@ -360,8 +360,12 @@ func (iNode *insertNode) insert(iData *insertData, segmentID UniqueID, wg *sync.
 		FieldsData: iData.insertRecords[segmentID],
 		NumRows:    int64(len(ids)),
 	}
+	collection, err := iNode.metaReplica.getCollectionByID(targetSegment.collectionID)
+	if err != nil {
+		return fmt.Errorf("getCollectionById failed err = %s", err)
+	}
 
-	err = targetSegment.segmentInsert(offsets, ids, timestamps, insertRecord)
+	err = targetSegment.segmentInsert(offsets, ids, timestamps, collection.schema.Fields, insertRecord)
 	if err != nil {
 		return fmt.Errorf("segmentInsert failed, segmentID = %d, err = %s", segmentID, err)
 	}

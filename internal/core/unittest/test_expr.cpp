@@ -296,14 +296,17 @@ TEST(Expr, TestRange) {
 
     auto seg = CreateGrowingSegment(schema);
     int N = 1000;
-    std::vector<int> age_col;
+    std::vector<int32_t> age_col;
     int num_iters = 100;
     for (int iter = 0; iter < num_iters; ++iter) {
         auto raw_data = DataGen(schema, N, iter);
-        auto new_age_col = raw_data.get_col<int>(i64_fid);
-        age_col.insert(age_col.end(), new_age_col.begin(), new_age_col.end());
+        auto new_age_col = raw_data.get_data_array(i64_fid);
+        auto array = arrow::Int32Array(new_age_col.data->data());
+        for (auto && arr_iter : array) {
+            age_col.push_back(arr_iter.value());
+        }
         seg->PreInsert(N);
-        seg->Insert(iter * N, N, raw_data.row_ids_.data(), raw_data.timestamps_.data(), raw_data.raw_);
+        seg->Insert(iter * N, N, raw_data.get_raw_row_ids(), raw_data.get_raw_timestamps(), raw_data.raw_.get());
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -386,7 +389,7 @@ TEST(Expr, TestTerm) {
         auto new_age_col = raw_data.get_col<int>(i64_fid);
         age_col.insert(age_col.end(), new_age_col.begin(), new_age_col.end());
         seg->PreInsert(N);
-        seg->Insert(iter * N, N, raw_data.row_ids_.data(), raw_data.timestamps_.data(), raw_data.raw_);
+        seg->Insert(iter * N, N, raw_data.get_raw_row_ids(), raw_data.get_raw_timestamps(), raw_data.raw_.get());
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -486,7 +489,7 @@ TEST(Expr, TestSimpleDsl) {
         auto new_age_col = raw_data.get_col<int64_t>(i64_fid);
         age_col.insert(age_col.end(), new_age_col.begin(), new_age_col.end());
         seg->PreInsert(N);
-        seg->Insert(iter * N, N, raw_data.row_ids_.data(), raw_data.timestamps_.data(), raw_data.raw_);
+        seg->Insert(iter * N, N, raw_data.get_raw_row_ids(), raw_data.get_raw_timestamps(), raw_data.raw_.get());
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -562,7 +565,7 @@ TEST(Expr, TestCompare) {
         age1_col.insert(age1_col.end(), new_age1_col.begin(), new_age1_col.end());
         age2_col.insert(age2_col.end(), new_age2_col.begin(), new_age2_col.end());
         seg->PreInsert(N);
-        seg->Insert(iter * N, N, raw_data.row_ids_.data(), raw_data.timestamps_.data(), raw_data.raw_);
+        seg->Insert(iter * N, N, raw_data.get_raw_row_ids(), raw_data.get_raw_timestamps(), raw_data.raw_.get());
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
@@ -713,8 +716,8 @@ TEST(Expr, TestCompareWithScalarIndexMaris) {
 
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
-    auto str1_fid = schema->AddDebugField("string1", DataType::VARCHAR);
-    auto str2_fid = schema->AddDebugField("string2", DataType::VARCHAR);
+    auto str1_fid = schema->AddDebugField("string1", DataType::VARCHAR, 100);
+    auto str2_fid = schema->AddDebugField("string2", DataType::VARCHAR, 100);
     schema->set_primary_field_id(str1_fid);
 
     auto seg = CreateSealedSegment(schema);
@@ -953,7 +956,7 @@ TEST(Expr, TestBinaryArithOpEvalRange) {
         age_double_col.insert(age_double_col.end(), new_age_double_col.begin(), new_age_double_col.end());
 
         seg->PreInsert(N);
-        seg->Insert(iter * N, N, raw_data.row_ids_.data(), raw_data.timestamps_.data(), raw_data.raw_);
+        seg->Insert(iter * N, N, raw_data.get_raw_row_ids(), raw_data.get_raw_timestamps(), raw_data.raw_.get());
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());

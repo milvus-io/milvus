@@ -27,7 +27,7 @@ TimestampIndex::build_with(const Timestamp* timestamps, int64_t size) {
     prefix_sums.push_back(offset);
     std::vector<Timestamp> timestamp_barriers;
     Timestamp last_max_v = 0;
-    for (int slice_id = 0; slice_id < num_slice; ++slice_id) {
+    for (auto slice_id = 0; slice_id < num_slice; ++slice_id) {
         auto length = lengths_[slice_id];
         auto [min_v, max_v] = std::minmax_element(timestamps + offset, timestamps + offset + length);
         Assert(last_max_v <= *min_v);

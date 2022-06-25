@@ -30,6 +30,7 @@
 #include "segcore/reduce_c.h"
 #include "segcore/Reduce.h"
 #include "test_utils/DataGen.h"
+#include "arrow/c/bridge.h"
 
 namespace chrono = std::chrono;
 
@@ -111,7 +112,6 @@ generate_max_float_query_data(int all_nq, int max_float_nq) {
     }
     auto blob = raw_group.SerializeAsString();
     return blob;
-
 }
 
 std::string
@@ -249,16 +249,6 @@ TEST(CApiTest, CPlan) {
     DeleteSearchPlan(plan);
 }
 
-template <typename Message>
-std::vector<uint8_t>
-serialize(const Message* msg) {
-    auto l = msg->ByteSize();
-    std::vector<uint8_t> ret(l);
-    auto ok = msg->SerializeToArray(ret.data(), l);
-    assert(ok);
-    return ret;
-}
-
 #ifdef __linux__
 
 // TEST(Common, Memory_benchmark) {
@@ -301,9 +291,10 @@ TEST(CApiTest, InsertTest) {
     int64_t offset;
     PreInsert(segment, N, &offset);
 
-    auto insert_data = serialize(dataset.raw_);
-    auto res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
-                      insert_data.size());
+    ArrowArray array;
+    ArrowSchema schema;
+    arrow::ExportRecordBatch(*dataset.raw_, &array, &schema);
+    auto res = Insert(segment, offset, N, dataset.get_raw_row_ids(), dataset.get_raw_timestamps(), &array, &schema);
     assert(res.error_code == Success);
 
     DeleteCollection(c_collection);
@@ -315,15 +306,100 @@ TEST(CApiTest, DeleteTest) {
     auto segment = NewSegment(collection, Growing, -1);
 
     std::vector<int64_t> delete_row_ids = {100000, 100001, 100002};
-    auto ids = std::make_unique<IdArray>();
-    ids->mutable_int_id()->mutable_data()->Add(delete_row_ids.begin(), delete_row_ids.end());
-    auto delete_data = serialize(ids.get());
+    auto ids_builder = arrow::Int64Builder();
+    ids_builder.AppendValues(delete_row_ids);
+    auto ids = ids_builder.Finish().ValueOrDie();
+
+    ArrowArray array;
+    ArrowSchema schema;
+    arrow::ExportArray(*ids, &array, &schema);
     uint64_t delete_timestamps[] = {0, 0, 0};
 
     auto offset = PreDelete(segment, 3);
 
-    auto del_res = Delete(segment, offset, 3, delete_data.data(), delete_data.size(), delete_timestamps);
+    auto del_res = Delete(segment, offset, 3, (void*)&array, (void*)&schema, delete_timestamps);
     assert(del_res.error_code == Success);
+
+    DeleteCollection(collection);
+    DeleteSegment(segment);
+}
+
+TEST(CApiTest, DeleteVarcharTest) {
+    auto collection_schema = R"(name: "default-collection"
+                                fields: <
+                                  fieldID: 100
+                                  name: "fakevec"
+                                  data_type: FloatVector
+                                  type_params: <
+                                    key: "dim"
+                                    value: "16"
+                                  >
+                                  index_params: <
+                                    key: "metric_type"
+                                    value: "L2"
+                                  >
+                                >
+                                fields: <
+                                  fieldID: 101
+                                  name: "age"
+                                  data_type: VarChar
+                                  type_params: <
+                                    key: "max_length"
+                                    value: "100"
+                                  >
+                                  is_primary_key: true
+                                >)";
+    auto collection = NewCollection(collection_schema);
+    auto segment = NewSegment(collection, Growing, -1);
+    auto col = (milvus::segcore::Collection*)collection;
+
+    int N = 10;
+    auto dataset = DataGen(col->get_schema(), N);
+    ArrowArray insert_array;
+    ArrowSchema insert_schema;
+    arrow::ExportRecordBatch(*dataset.raw_, &insert_array, &insert_schema);
+
+    auto src_data = arrow::StringArray(dataset.get_data_array(FieldId(101)).data->data());
+
+    int64_t offset;
+    PreInsert(segment, N, &offset);
+    auto res = Insert(segment, offset, N, dataset.get_raw_row_ids(), dataset.get_raw_timestamps(), &insert_array,
+                      &insert_schema);
+    assert(res.error_code == Success);
+
+    std::vector<std::string> delete_pks = {src_data.GetString(1), src_data.GetString(2)};
+    auto ids_builder = arrow::StringBuilder();
+    ids_builder.AppendValues(delete_pks);
+    auto ids = ids_builder.Finish().ValueOrDie();
+    std::vector<uint64_t> delete_timestamps(2, dataset.get_raw_timestamps()[N - 1]);
+    offset = PreDelete(segment, 2);
+
+    ArrowArray id_array;
+    ArrowSchema id_schema;
+    arrow::ExportArray(*ids, &id_array, &id_schema);
+
+    auto del_res = Delete(segment, offset, 2, (void*)&id_array, (void*)&id_schema, delete_timestamps.data());
+    assert(del_res.error_code == Success);
+
+    std::vector<std::string> retrive_pks = {src_data.GetString(2), src_data.GetString(3)};
+    auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
+    auto plan = std::make_unique<query::RetrievePlan>(*schema);
+    auto term_expr = std::make_unique<query::TermExprImpl<std::string>>(FieldId(101), DataType::VARCHAR, retrive_pks);
+    plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
+    plan->plan_node_->predicate_ = std::move(term_expr);
+    std::vector<FieldId> target_field_ids{FieldId(100), FieldId(101)};
+    plan->field_ids_ = target_field_ids;
+
+    CRetrieveResult retrieve_result;
+    res = Retrieve(segment, plan.get(), dataset.get_raw_timestamps()[N - 1], &retrieve_result);
+    ASSERT_EQ(res.error_code, Success);
+    auto query_result = std::make_unique<proto::segcore::RetrieveResults>();
+    auto suc = query_result->ParseFromArray(retrieve_result.proto_blob, retrieve_result.proto_size);
+    ASSERT_TRUE(suc);
+    ASSERT_EQ(query_result->ids().str_id().data().size(), 1);
+
+    DeleteRetrievePlan(plan.release());
+    DeleteRetrieveResult(&retrieve_result);
 
     DeleteCollection(collection);
     DeleteSegment(segment);
@@ -336,37 +412,44 @@ TEST(CApiTest, MultiDeleteGrowingSegment) {
 
     int N = 10;
     auto dataset = DataGen(col->get_schema(), N);
-    auto insert_data = serialize(dataset.raw_);
+    ArrowArray insert_array;
+    ArrowSchema insert_schema;
+    arrow::ExportRecordBatch(*dataset.raw_, &insert_array, &insert_schema);
 
     // insert, pks= {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
     int64_t offset;
     PreInsert(segment, N, &offset);
-    auto res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
-                      insert_data.size());
+    auto res = Insert(segment, offset, N, dataset.get_raw_row_ids(), dataset.get_raw_timestamps(), &insert_array,
+                      &insert_schema);
     assert(res.error_code == Success);
 
     // delete data pks = {1}
     std::vector<int64_t> delete_pks = {1};
-    auto ids = std::make_unique<IdArray>();
-    ids->mutable_int_id()->mutable_data()->Add(delete_pks.begin(), delete_pks.end());
-    auto delete_data = serialize(ids.get());
-    std::vector<uint64_t> delete_timestamps(1, dataset.timestamps_[N - 1]);
+    auto ids_builder = arrow::Int64Builder();
+    ids_builder.AppendValues(delete_pks);
+    auto ids = ids_builder.Finish().ValueOrDie();
+    std::vector<uint64_t> delete_timestamps(1, dataset.get_raw_timestamps()[N - 1]);
     offset = PreDelete(segment, 1);
-    auto del_res = Delete(segment, offset, 1, delete_data.data(), delete_data.size(), delete_timestamps.data());
+
+    ArrowArray array;
+    ArrowSchema id_schema;
+    arrow::ExportArray(*ids, &array, &id_schema);
+
+    auto del_res = Delete(segment, offset, 1, (void*)&array, (void*)&id_schema, delete_timestamps.data());
     assert(del_res.error_code == Success);
 
     // retrieve pks = {1}
-    std::vector<int64_t> retrive_pks = {1};
+    std::vector<int64_t> retrieve_pks = {1};
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(FieldId(101), DataType::INT64, retrive_pks);
+    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(FieldId(101), DataType::INT64, retrieve_pks);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     plan->plan_node_->predicate_ = std::move(term_expr);
     std::vector<FieldId> target_field_ids{FieldId(100), FieldId(101)};
     plan->field_ids_ = target_field_ids;
 
     CRetrieveResult retrieve_result;
-    res = Retrieve(segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
+    res = Retrieve(segment, plan.get(), dataset.get_raw_timestamps()[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
     auto query_result = std::make_unique<proto::segcore::RetrieveResults>();
     auto suc = query_result->ParseFromArray(retrieve_result.proto_blob, retrieve_result.proto_size);
@@ -374,10 +457,10 @@ TEST(CApiTest, MultiDeleteGrowingSegment) {
     ASSERT_EQ(query_result->ids().int_id().data().size(), 0);
 
     // retrieve pks = {2}
-    retrive_pks = {2};
-    term_expr = std::make_unique<query::TermExprImpl<int64_t>>(FieldId(101), DataType::INT64, retrive_pks);
+    retrieve_pks = {2};
+    term_expr = std::make_unique<query::TermExprImpl<int64_t>>(FieldId(101), DataType::INT64, retrieve_pks);
     plan->plan_node_->predicate_ = std::move(term_expr);
-    res = Retrieve(segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
+    res = Retrieve(segment, plan.get(), dataset.get_raw_timestamps()[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
     suc = query_result->ParseFromArray(retrieve_result.proto_blob, retrieve_result.proto_size);
     ASSERT_TRUE(suc);
@@ -385,15 +468,18 @@ TEST(CApiTest, MultiDeleteGrowingSegment) {
 
     // delete pks = {2}
     delete_pks = {2};
-    ids = std::make_unique<IdArray>();
-    ids->mutable_int_id()->mutable_data()->Add(delete_pks.begin(), delete_pks.end());
-    delete_data = serialize(ids.get());
+    ids_builder = arrow::Int64Builder();
+    ids_builder.AppendValues(delete_pks);
+    ids = ids_builder.Finish().ValueOrDie();
     offset = PreDelete(segment, 1);
-    del_res = Delete(segment, offset, 1, delete_data.data(), delete_data.size(), delete_timestamps.data());
+
+    arrow::ExportArray(*ids, &array, &id_schema);
+
+    del_res = Delete(segment, offset, 1, (void*)&array, (void*)&id_schema, delete_timestamps.data());
     assert(del_res.error_code == Success);
 
     // retrieve pks in {2}
-    res = Retrieve(segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
+    res = Retrieve(segment, plan.get(), dataset.get_raw_timestamps()[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
     suc = query_result->ParseFromArray(retrieve_result.proto_blob, retrieve_result.proto_size);
     ASSERT_TRUE(suc);
@@ -416,10 +502,13 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
 
     // load field data
     for (auto& [field_id, field_meta] : col->get_schema()->get_fields()) {
-        auto array = dataset.get_col(field_id);
-        auto data = serialize(array.get());
+        auto column = dataset.get_data_array(field_id);
+        ArrowArray load_array;
+        ArrowSchema load_schema;
+        arrow::ExportArray(*column.data, &load_array, nullptr);
+        arrow::ExportField(*column.field, &load_schema);
 
-        auto load_info = CLoadFieldDataInfo{field_id.get(), data.data(), data.size(), N};
+        auto load_info = CLoadFieldDataInfo{field_id.get(), &load_array, &load_schema, N};
 
         auto res = LoadFieldData(segment, load_info);
         assert(res.error_code == Success);
@@ -429,9 +518,10 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
 
     // load timestamps
     FieldMeta ts_field_meta(FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
-    auto ts_array = CreateScalarDataArrayFrom(dataset.timestamps_.data(), N, ts_field_meta);
-    auto ts_data = serialize(ts_array.get());
-    auto load_info = CLoadFieldDataInfo{TimestampFieldID.get(), ts_data.data(), ts_data.size(), N};
+    ArrowArray ts_array;
+    ArrowSchema ts_schema;
+    arrow::ExportArray(*dataset.timestamps_, &ts_array, &ts_schema);
+    auto load_info = CLoadFieldDataInfo{TimestampFieldID.get(), &ts_array, &ts_schema, N};
     auto res = LoadFieldData(segment, load_info);
     assert(res.error_code == Success);
     auto count = GetRowCount(segment);
@@ -439,9 +529,10 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
 
     // load rowID
     FieldMeta row_id_field_meta(FieldName("RowID"), RowFieldID, DataType::INT64);
-    auto row_id_array = CreateScalarDataArrayFrom(dataset.row_ids_.data(), N, row_id_field_meta);
-    auto row_id_data = serialize(row_id_array.get());
-    load_info = CLoadFieldDataInfo{RowFieldID.get(), row_id_data.data(), row_id_data.size(), N};
+    ArrowArray row_id_array;
+    ArrowSchema row_id_schema;
+    arrow::ExportArray(*dataset.row_ids_, &row_id_array, &row_id_schema);
+    load_info = CLoadFieldDataInfo{RowFieldID.get(), &row_id_array, &row_id_schema, N};
     res = LoadFieldData(segment, load_info);
     assert(res.error_code == Success);
     count = GetRowCount(segment);
@@ -449,26 +540,30 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
 
     // delete data pks = {1}
     std::vector<int64_t> delete_pks = {1};
-    auto ids = std::make_unique<IdArray>();
-    ids->mutable_int_id()->mutable_data()->Add(delete_pks.begin(), delete_pks.end());
-    auto delete_data = serialize(ids.get());
-    std::vector<uint64_t> delete_timestamps(1, dataset.timestamps_[N - 1]);
+    auto ids_builder = arrow::Int64Builder();
+    ids_builder.AppendValues(delete_pks);
+    auto ids = ids_builder.Finish().ValueOrDie();
+    std::vector<uint64_t> delete_timestamps(1, dataset.get_raw_timestamps()[N - 1]);
     auto offset = PreDelete(segment, 1);
-    auto del_res = Delete(segment, offset, 1, delete_data.data(), delete_data.size(), delete_timestamps.data());
-    assert(del_res.error_code == Success);
 
+    ArrowArray array;
+    ArrowSchema id_schema;
+    arrow::ExportArray(*ids, &array, &id_schema);
+
+    auto del_res = Delete(segment, offset, 1, &array, &id_schema, delete_timestamps.data());
+    assert(del_res.error_code == Success);
     // retrieve pks = {1}
-    std::vector<int64_t> retrive_pks = {1};
+    std::vector<int64_t> retrieve_pks = {1};
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(FieldId(101), DataType::INT64, retrive_pks);
+    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(FieldId(101), DataType::INT64, retrieve_pks);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     plan->plan_node_->predicate_ = std::move(term_expr);
     std::vector<FieldId> target_field_ids{FieldId(100), FieldId(101)};
     plan->field_ids_ = target_field_ids;
 
     CRetrieveResult retrieve_result;
-    res = Retrieve(segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
+    res = Retrieve(segment, plan.get(), dataset.get_raw_timestamps()[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
     auto query_result = std::make_unique<proto::segcore::RetrieveResults>();
     auto suc = query_result->ParseFromArray(retrieve_result.proto_blob, retrieve_result.proto_size);
@@ -476,10 +571,10 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
     ASSERT_EQ(query_result->ids().int_id().data().size(), 0);
 
     // retrieve pks = {2}
-    retrive_pks = {2};
-    term_expr = std::make_unique<query::TermExprImpl<int64_t>>(FieldId(101), DataType::INT64, retrive_pks);
+    retrieve_pks = {2};
+    term_expr = std::make_unique<query::TermExprImpl<int64_t>>(FieldId(101), DataType::INT64, retrieve_pks);
     plan->plan_node_->predicate_ = std::move(term_expr);
-    res = Retrieve(segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
+    res = Retrieve(segment, plan.get(), dataset.get_raw_timestamps()[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
     suc = query_result->ParseFromArray(retrieve_result.proto_blob, retrieve_result.proto_size);
     ASSERT_TRUE(suc);
@@ -487,15 +582,18 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
 
     // delete pks = {2}
     delete_pks = {2};
-    ids = std::make_unique<IdArray>();
-    ids->mutable_int_id()->mutable_data()->Add(delete_pks.begin(), delete_pks.end());
-    delete_data = serialize(ids.get());
+    ids_builder = arrow::Int64Builder();
+    ids_builder.AppendValues(delete_pks);
+    ids = ids_builder.Finish().ValueOrDie();
     offset = PreDelete(segment, 1);
-    del_res = Delete(segment, offset, 1, delete_data.data(), delete_data.size(), delete_timestamps.data());
+
+    arrow::ExportArray(*ids, &array, &id_schema);
+
+    del_res = Delete(segment, offset, 1, &array, &id_schema, delete_timestamps.data());
     assert(del_res.error_code == Success);
 
     // retrieve pks in {2}
-    res = Retrieve(segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
+    res = Retrieve(segment, plan.get(), dataset.get_raw_timestamps()[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
     suc = query_result->ParseFromArray(retrieve_result.proto_blob, retrieve_result.proto_size);
     ASSERT_TRUE(suc);
@@ -516,19 +614,22 @@ TEST(CApiTest, DeleteRepeatedPksFromGrowingSegment) {
     int N = 10;
     auto dataset = DataGen(col->get_schema(), N);
 
-    auto insert_data = serialize(dataset.raw_);
+    ArrowArray insert_array;
+    ArrowSchema insert_schema;
+    arrow::ExportRecordBatch(*dataset.raw_, &insert_array, &insert_schema);
 
     // first insert, pks= {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
     int64_t offset;
     PreInsert(segment, N, &offset);
-    auto res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
-                      insert_data.size());
+    auto res = Insert(segment, offset, N, dataset.get_raw_row_ids(), dataset.get_raw_timestamps(), &insert_array,
+                      &insert_schema);
     assert(res.error_code == Success);
 
     // second insert, pks= {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
     PreInsert(segment, N, &offset);
-    res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
-                 insert_data.size());
+    arrow::ExportRecordBatch(*dataset.raw_, &insert_array, &insert_schema);
+    res = Insert(segment, offset, N, dataset.get_raw_row_ids(), dataset.get_raw_timestamps(), &insert_array,
+                 &insert_schema);
     assert(res.error_code == Success);
 
     // create retrieve plan pks in {1, 2, 3}
@@ -542,7 +643,7 @@ TEST(CApiTest, DeleteRepeatedPksFromGrowingSegment) {
     plan->field_ids_ = target_field_ids;
 
     CRetrieveResult retrieve_result;
-    res = Retrieve(segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
+    res = Retrieve(segment, plan.get(), dataset.get_raw_timestamps()[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
     auto query_result = std::make_unique<proto::segcore::RetrieveResults>();
     auto suc = query_result->ParseFromArray(retrieve_result.proto_blob, retrieve_result.proto_size);
@@ -551,17 +652,20 @@ TEST(CApiTest, DeleteRepeatedPksFromGrowingSegment) {
 
     // delete data pks = {1, 2, 3}
     std::vector<int64_t> delete_row_ids = {1, 2, 3};
-    auto ids = std::make_unique<IdArray>();
-    ids->mutable_int_id()->mutable_data()->Add(delete_row_ids.begin(), delete_row_ids.end());
-    auto delete_data = serialize(ids.get());
-    std::vector<uint64_t> delete_timestamps(3, dataset.timestamps_[N - 1]);
+    auto ids_builder = arrow::Int64Builder();
+    ids_builder.AppendValues(delete_row_ids);
+    auto ids = ids_builder.Finish().ValueOrDie();
+    std::vector<uint64_t> delete_timestamps(3, dataset.get_raw_timestamps()[N - 1]);
 
+    ArrowArray array;
+    ArrowSchema id_schema;
+    arrow::ExportArray(*ids, &array, &id_schema);
     offset = PreDelete(segment, 3);
-    auto del_res = Delete(segment, offset, 3, delete_data.data(), delete_data.size(), delete_timestamps.data());
+    auto del_res = Delete(segment, offset, 3, (void*)&array, (void*)&id_schema, delete_timestamps.data());
     assert(del_res.error_code == Success);
 
     // retrieve pks in {1, 2, 3}
-    res = Retrieve(segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
+    res = Retrieve(segment, plan.get(), dataset.get_raw_timestamps()[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
 
     query_result = std::make_unique<proto::segcore::RetrieveResults>();
@@ -585,10 +689,13 @@ TEST(CApiTest, DeleteRepeatedPksFromSealedSegment) {
     auto dataset = DataGen(col->get_schema(), N, 42, 0, 2);
 
     for (auto& [field_id, field_meta] : col->get_schema()->get_fields()) {
-        auto array = dataset.get_col(field_id);
-        auto data = serialize(array.get());
+        auto column = dataset.get_data_array(field_id);
+        ArrowArray load_array;
+        ArrowSchema load_schema;
+        arrow::ExportArray(*column.data, &load_array, nullptr);
+        arrow::ExportField(*column.field, &load_schema);
 
-        auto load_info = CLoadFieldDataInfo{field_id.get(), data.data(), data.size(), N};
+        auto load_info = CLoadFieldDataInfo{field_id.get(), &load_array, &load_schema, N};
 
         auto res = LoadFieldData(segment, load_info);
         assert(res.error_code == Success);
@@ -597,18 +704,20 @@ TEST(CApiTest, DeleteRepeatedPksFromSealedSegment) {
     }
 
     FieldMeta ts_field_meta(FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
-    auto ts_array = CreateScalarDataArrayFrom(dataset.timestamps_.data(), N, ts_field_meta);
-    auto ts_data = serialize(ts_array.get());
-    auto load_info = CLoadFieldDataInfo{TimestampFieldID.get(), ts_data.data(), ts_data.size(), N};
+    ArrowArray ts_array;
+    ArrowSchema ts_schema;
+    arrow::ExportArray(*dataset.timestamps_, &ts_array, &ts_schema);
+    auto load_info = CLoadFieldDataInfo{TimestampFieldID.get(), &ts_array, &ts_schema, N};
     auto res = LoadFieldData(segment, load_info);
     assert(res.error_code == Success);
     auto count = GetRowCount(segment);
     assert(count == N);
 
     FieldMeta row_id_field_meta(FieldName("RowID"), RowFieldID, DataType::INT64);
-    auto row_id_array = CreateScalarDataArrayFrom(dataset.row_ids_.data(), N, row_id_field_meta);
-    auto row_id_data = serialize(row_id_array.get());
-    load_info = CLoadFieldDataInfo{RowFieldID.get(), row_id_data.data(), row_id_data.size(), N};
+    ArrowArray row_id_array;
+    ArrowSchema row_id_schema;
+    arrow::ExportArray(*dataset.row_ids_, &row_id_array, &row_id_schema);
+    load_info = CLoadFieldDataInfo{RowFieldID.get(), &row_id_array, &row_id_schema, N};
     res = LoadFieldData(segment, load_info);
     assert(res.error_code == Success);
     count = GetRowCount(segment);
@@ -625,7 +734,7 @@ TEST(CApiTest, DeleteRepeatedPksFromSealedSegment) {
     plan->field_ids_ = target_field_ids;
 
     CRetrieveResult retrieve_result;
-    res = Retrieve(segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
+    res = Retrieve(segment, plan.get(), dataset.get_raw_timestamps()[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
     auto query_result = std::make_unique<proto::segcore::RetrieveResults>();
     auto suc = query_result->ParseFromArray(retrieve_result.proto_blob, retrieve_result.proto_size);
@@ -634,18 +743,22 @@ TEST(CApiTest, DeleteRepeatedPksFromSealedSegment) {
 
     // delete data pks = {1, 2, 3}
     std::vector<int64_t> delete_row_ids = {1, 2, 3};
-    auto ids = std::make_unique<IdArray>();
-    ids->mutable_int_id()->mutable_data()->Add(delete_row_ids.begin(), delete_row_ids.end());
-    auto delete_data = serialize(ids.get());
-    std::vector<uint64_t> delete_timestamps(3, dataset.timestamps_[N - 1]);
+    auto ids_builder = arrow::Int64Builder();
+    ids_builder.AppendValues(delete_row_ids);
+    auto ids = ids_builder.Finish().ValueOrDie();
+    std::vector<uint64_t> delete_timestamps(3, dataset.get_raw_timestamps()[N - 1]);
+
+    ArrowArray array;
+    ArrowSchema id_schema;
+    arrow::ExportArray(*ids, &array, &id_schema);
 
     auto offset = PreDelete(segment, 3);
 
-    auto del_res = Delete(segment, offset, 3, delete_data.data(), delete_data.size(), delete_timestamps.data());
+    auto del_res = Delete(segment, offset, 3, &array, &id_schema, delete_timestamps.data());
     assert(del_res.error_code == Success);
 
     // retrieve pks in {1, 2, 3}
-    res = Retrieve(segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
+    res = Retrieve(segment, plan.get(), dataset.get_raw_timestamps()[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
 
     query_result = std::make_unique<proto::segcore::RetrieveResults>();
@@ -667,27 +780,32 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnGrowingSegment) {
 
     int N = 10;
     auto dataset = DataGen(col->get_schema(), N);
-    auto insert_data = serialize(dataset.raw_);
+    ArrowArray insert_array;
+    ArrowSchema insert_schema;
+    arrow::ExportRecordBatch(*dataset.raw_, &insert_array, &insert_schema);
 
     // first insert data
     // insert data with pks = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9} , timestamps = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
     int64_t offset;
     PreInsert(segment, N, &offset);
-    auto res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
-                      insert_data.size());
+    auto res = Insert(segment, offset, N, dataset.get_raw_row_ids(), dataset.get_raw_timestamps(), &insert_array,
+                      &insert_schema);
     assert(res.error_code == Success);
 
     // delete data pks = {1, 2, 3}, timestamps = {9, 9, 9}
     std::vector<int64_t> delete_row_ids = {1, 2, 3};
-    auto ids = std::make_unique<IdArray>();
-    ids->mutable_int_id()->mutable_data()->Add(delete_row_ids.begin(), delete_row_ids.end());
-    auto delete_data = serialize(ids.get());
-    std::vector<uint64_t> delete_timestamps(3, dataset.timestamps_[N - 1]);
+    auto ids_builder = arrow::Int64Builder();
+    ids_builder.AppendValues(delete_row_ids);
+    auto ids = ids_builder.Finish().ValueOrDie();
+    std::vector<uint64_t> delete_timestamps(3, dataset.get_raw_timestamps()[N - 1]);
+
+    ArrowArray array;
+    ArrowSchema id_schema;
+    arrow::ExportArray(*ids, &array, &id_schema);
 
     offset = PreDelete(segment, 3);
 
-    auto del_res = Delete(segment, offset, 3, delete_data.data(), delete_data.size(), delete_timestamps.data());
-    assert(del_res.error_code == Success);
+    auto del_res = Delete(segment, offset, 3, &array, &id_schema, delete_timestamps.data());
 
     // create retrieve plan pks in {1, 2, 3}, timestamp = 9
     std::vector<int64_t> retrive_row_ids = {1, 2, 3};
@@ -700,7 +818,7 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnGrowingSegment) {
     plan->field_ids_ = target_field_ids;
 
     CRetrieveResult retrieve_result;
-    res = Retrieve(segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
+    res = Retrieve(segment, plan.get(), dataset.get_raw_timestamps()[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
     auto query_result = std::make_unique<proto::segcore::RetrieveResults>();
     auto suc = query_result->ParseFromArray(retrieve_result.proto_blob, retrieve_result.proto_size);
@@ -710,14 +828,14 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnGrowingSegment) {
     // second insert data
     // insert data with pks = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9} , timestamps = {10, 11, 12, 13, 14, 15, 16, 17, 18, 19}
     dataset = DataGen(col->get_schema(), N, 42, N);
-    insert_data = serialize(dataset.raw_);
+    arrow::ExportRecordBatch(*dataset.raw_, &insert_array, &insert_schema);
     PreInsert(segment, N, &offset);
-    res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
-                 insert_data.size());
+    res = Insert(segment, offset, N, dataset.get_raw_row_ids(), dataset.get_raw_timestamps(), &insert_array,
+                 &insert_schema);
     assert(res.error_code == Success);
 
     // retrieve pks in {1, 2, 3}, timestamp = 19
-    res = Retrieve(segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
+    res = Retrieve(segment, plan.get(), dataset.get_raw_timestamps()[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
 
     query_result = std::make_unique<proto::segcore::RetrieveResults>();
@@ -742,10 +860,13 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
 
     // insert data with pks = {0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5} , timestamps = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
     for (auto& [field_id, field_meta] : col->get_schema()->get_fields()) {
-        auto array = dataset.get_col(field_id);
-        auto data = serialize(array.get());
+        auto column = dataset.get_data_array(field_id);
+        ArrowArray load_array;
+        ArrowSchema load_schema;
+        arrow::ExportArray(*column.data, &load_array, nullptr);
+        arrow::ExportField(*column.field, &load_schema);
 
-        auto load_info = CLoadFieldDataInfo{field_id.get(), data.data(), data.size(), N};
+        auto load_info = CLoadFieldDataInfo{field_id.get(), &load_array, &load_schema, N};
 
         auto res = LoadFieldData(segment, load_info);
         assert(res.error_code == Success);
@@ -754,18 +875,20 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
     }
 
     FieldMeta ts_field_meta(FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
-    auto ts_array = CreateScalarDataArrayFrom(dataset.timestamps_.data(), N, ts_field_meta);
-    auto ts_data = serialize(ts_array.get());
-    auto load_info = CLoadFieldDataInfo{TimestampFieldID.get(), ts_data.data(), ts_data.size(), N};
+    ArrowArray ts_array;
+    ArrowSchema ts_schema;
+    arrow::ExportArray(*dataset.timestamps_, &ts_array, &ts_schema);
+    auto load_info = CLoadFieldDataInfo{TimestampFieldID.get(), &ts_array, &ts_schema, N};
     auto res = LoadFieldData(segment, load_info);
     assert(res.error_code == Success);
     auto count = GetRowCount(segment);
     assert(count == N);
 
     FieldMeta row_id_field_meta(FieldName("RowID"), RowFieldID, DataType::INT64);
-    auto row_id_array = CreateScalarDataArrayFrom(dataset.row_ids_.data(), N, row_id_field_meta);
-    auto row_id_data = serialize(row_id_array.get());
-    load_info = CLoadFieldDataInfo{RowFieldID.get(), row_id_data.data(), row_id_data.size(), N};
+    ArrowArray row_id_array;
+    ArrowSchema row_id_schema;
+    arrow::ExportArray(*dataset.row_ids_, &row_id_array, &row_id_schema);
+    load_info = CLoadFieldDataInfo{RowFieldID.get(), &row_id_array, &row_id_schema, N};
     res = LoadFieldData(segment, load_info);
     assert(res.error_code == Success);
     count = GetRowCount(segment);
@@ -773,14 +896,18 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
 
     // delete data pks = {1, 2, 3}, timestamps = {4, 4, 4}
     std::vector<int64_t> delete_row_ids = {1, 2, 3};
-    auto ids = std::make_unique<IdArray>();
-    ids->mutable_int_id()->mutable_data()->Add(delete_row_ids.begin(), delete_row_ids.end());
-    auto delete_data = serialize(ids.get());
-    std::vector<uint64_t> delete_timestamps(3, dataset.timestamps_[4]);
+    auto ids_builder = arrow::Int64Builder();
+    ids_builder.AppendValues(delete_row_ids);
+    auto ids = ids_builder.Finish().ValueOrDie();
+    std::vector<uint64_t> delete_timestamps(3, dataset.get_raw_timestamps()[4]);
+
+    ArrowArray array;
+    ArrowSchema id_schema;
+    arrow::ExportArray(*ids, &array, &id_schema);
 
     auto offset = PreDelete(segment, 3);
 
-    auto del_res = Delete(segment, offset, 3, delete_data.data(), delete_data.size(), delete_timestamps.data());
+    auto del_res = Delete(segment, offset, 3, &array, &id_schema, delete_timestamps.data());
     assert(del_res.error_code == Success);
 
     // create retrieve plan pks in {1, 2, 3}, timestamp = 9
@@ -794,7 +921,7 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
     plan->field_ids_ = target_field_ids;
 
     CRetrieveResult retrieve_result;
-    res = Retrieve(segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
+    res = Retrieve(segment, plan.get(), dataset.get_raw_timestamps()[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
     auto query_result = std::make_unique<proto::segcore::RetrieveResults>();
     auto suc = query_result->ParseFromArray(retrieve_result.proto_blob, retrieve_result.proto_size);
@@ -815,14 +942,17 @@ TEST(CApiTest, SearchTest) {
 
     int N = 10000;
     auto dataset = DataGen(col->get_schema(), N);
+    ArrowArray insert_array;
+    ArrowSchema insert_schema;
+    arrow::ExportRecordBatch(*dataset.raw_, &insert_array, &insert_schema);
+
     int64_t ts_offset = 1000;
 
     int64_t offset;
     PreInsert(segment, N, &offset);
 
-    auto insert_data = serialize(dataset.raw_);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
-                          insert_data.size());
+    auto ins_res = Insert(segment, offset, N, dataset.get_raw_row_ids(), dataset.get_raw_timestamps(), &insert_array,
+                          &insert_schema);
     ASSERT_EQ(ins_res.error_code, Success);
 
     const char* dsl_string = R"(
@@ -879,13 +1009,15 @@ TEST(CApiTest, SearchTestWithExpr) {
 
     int N = 10000;
     auto dataset = DataGen(col->get_schema(), N);
+    ArrowArray insert_array;
+    ArrowSchema insert_schema;
+    arrow::ExportRecordBatch(*dataset.raw_, &insert_array, &insert_schema);
 
     int64_t offset;
     PreInsert(segment, N, &offset);
 
-    auto insert_data = serialize(dataset.raw_);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
-                          insert_data.size());
+    auto ins_res = Insert(segment, offset, N, dataset.get_raw_row_ids(), dataset.get_raw_timestamps(), &insert_array,
+                          &insert_schema);
     ASSERT_EQ(ins_res.error_code, Success);
 
     const char* serialized_expr_plan = R"(vector_anns: <
@@ -912,11 +1044,14 @@ TEST(CApiTest, SearchTestWithExpr) {
 
     std::vector<CPlaceholderGroup> placeholderGroups;
     placeholderGroups.push_back(placeholderGroup);
-    dataset.timestamps_.clear();
-    dataset.timestamps_.push_back(1);
+    dataset.raw_timestamps_.clear();
+    dataset.raw_timestamps_.push_back(1);
+    insert_array;
+    insert_schema;
+    arrow::ExportRecordBatch(*dataset.raw_, &insert_array, &insert_schema);
 
     CSearchResult search_result;
-    auto res = Search(segment, plan, placeholderGroup, dataset.timestamps_[0], &search_result, -1);
+    auto res = Search(segment, plan, placeholderGroup, dataset.get_raw_timestamps()[0], &search_result, -1);
     ASSERT_EQ(res.error_code, Success);
 
     DeleteSearchPlan(plan);
@@ -934,13 +1069,15 @@ TEST(CApiTest, RetrieveTestWithExpr) {
 
     int N = 10000;
     auto dataset = DataGen(schema, N);
+    ArrowArray insert_array;
+    ArrowSchema insert_schema;
+    arrow::ExportRecordBatch(*dataset.raw_, &insert_array, &insert_schema);
 
     int64_t offset;
     PreInsert(segment, N, &offset);
 
-    auto insert_data = serialize(dataset.raw_);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
-                          insert_data.size());
+    auto ins_res = Insert(segment, offset, N, dataset.get_raw_row_ids(), dataset.get_raw_timestamps(), &insert_array,
+                          &insert_schema);
     ASSERT_EQ(ins_res.error_code, Success);
 
     // create retrieve plan "age in [0]"
@@ -953,7 +1090,7 @@ TEST(CApiTest, RetrieveTestWithExpr) {
     plan->field_ids_ = target_field_ids;
 
     CRetrieveResult retrieve_result;
-    auto res = Retrieve(segment, plan.get(), dataset.timestamps_[0], &retrieve_result);
+    auto res = Retrieve(segment, plan.get(), dataset.get_raw_timestamps()[0], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
 
     DeleteRetrievePlan(plan.release());
@@ -973,13 +1110,15 @@ TEST(CApiTest, GetMemoryUsageInBytesTest) {
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
     int N = 10000;
     auto dataset = DataGen(schema, N);
+    ArrowArray insert_array;
+    ArrowSchema insert_schema;
+    arrow::ExportRecordBatch(*dataset.raw_, &insert_array, &insert_schema);
 
     int64_t offset;
     PreInsert(segment, N, &offset);
 
-    auto insert_data = serialize(dataset.raw_);
-    auto res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
-                      insert_data.size());
+    auto res = Insert(segment, offset, N, dataset.get_raw_row_ids(), dataset.get_raw_timestamps(), &insert_array,
+                      &insert_schema);
     assert(res.error_code == Success);
 
     auto memory_usage_size = GetMemoryUsageInBytes(segment);
@@ -996,14 +1135,19 @@ TEST(CApiTest, GetDeletedCountTest) {
     auto segment = NewSegment(collection, Growing, -1);
 
     std::vector<int64_t> delete_row_ids = {100000, 100001, 100002};
-    auto ids = std::make_unique<IdArray>();
-    ids->mutable_int_id()->mutable_data()->Add(delete_row_ids.begin(), delete_row_ids.end());
-    auto delete_data = serialize(ids.get());
+
+    auto ids_builder = arrow::Int64Builder();
+    ids_builder.AppendValues(delete_row_ids);
+    auto ids = ids_builder.Finish().ValueOrDie();
+
+    ArrowArray array;
+    ArrowSchema schema;
+    arrow::ExportArray(*ids, &array, &schema);
     uint64_t delete_timestamps[] = {0, 0, 0};
 
     auto offset = PreDelete(segment, 3);
 
-    auto del_res = Delete(segment, offset, 3, delete_data.data(), delete_data.size(), delete_timestamps);
+    auto del_res = Delete(segment, offset, 3, &array, &schema, delete_timestamps);
     assert(del_res.error_code == Success);
 
     // TODO: assert(deleted_count == len(delete_row_ids))
@@ -1021,13 +1165,15 @@ TEST(CApiTest, GetRowCountTest) {
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
     int N = 10000;
     auto dataset = DataGen(schema, N);
+    ArrowArray insert_array;
+    ArrowSchema insert_schema;
+    arrow::ExportRecordBatch(*dataset.raw_, &insert_array, &insert_schema);
 
+    // insert, pks= {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
     int64_t offset;
     PreInsert(segment, N, &offset);
-
-    auto insert_data = serialize(dataset.raw_);
-    auto res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
-                      insert_data.size());
+    auto res = Insert(segment, offset, N, dataset.get_raw_row_ids(), dataset.get_raw_timestamps(), &insert_array,
+                      &insert_schema);
     assert(res.error_code == Success);
 
     auto row_count = GetRowCount(segment);
@@ -1044,26 +1190,32 @@ TEST(CApiTest, GetRealCount) {
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
     int N = 10000;
     auto dataset = DataGen(schema, N);
+    ArrowArray insert_array;
+    ArrowSchema insert_schema;
+    arrow::ExportRecordBatch(*dataset.raw_, &insert_array, &insert_schema);
 
     int64_t offset;
     PreInsert(segment, N, &offset);
 
-    auto insert_data = serialize(dataset.raw_);
-    auto res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
-                      insert_data.size());
+    auto res = Insert(segment, offset, N, dataset.get_raw_row_ids(), dataset.get_raw_timestamps(), &insert_array,
+                      &insert_schema);
     assert(res.error_code == Success);
 
     auto pks = dataset.get_col<int64_t>(schema->get_primary_field_id().value());
     std::vector<int64_t> delete_row_ids(pks.begin(), pks.begin() + 3);
-    auto ids = std::make_unique<IdArray>();
-    ids->mutable_int_id()->mutable_data()->Add(delete_row_ids.begin(), delete_row_ids.end());
-    auto delete_data = serialize(ids.get());
-    uint64_t delete_timestamps[] = {dataset.timestamps_[N - 1] + 1, dataset.timestamps_[N - 1] + 2,
-                                    dataset.timestamps_[N - 1] + 3};
+    auto ids_builder = arrow::Int64Builder();
+    ids_builder.AppendValues(delete_row_ids);
+    auto ids = ids_builder.Finish().ValueOrDie();
+
+    ArrowArray del_array;
+    ArrowSchema del_schema;
+    arrow::ExportArray(*ids, &del_array, &del_schema);
+    uint64_t delete_timestamps[] = {dataset.get_raw_timestamps()[N - 1] + 1, dataset.get_raw_timestamps()[N - 1] + 2,
+                                    dataset.get_raw_timestamps()[N - 1] + 3};
 
     auto del_offset = PreDelete(segment, 3);
 
-    auto del_res = Delete(segment, del_offset, 3, delete_data.data(), delete_data.size(), delete_timestamps);
+    auto del_res = Delete(segment, del_offset, 3, (void*)&del_array, (void*)&del_schema, delete_timestamps);
     assert(del_res.error_code == Success);
 
     auto real_count = GetRealCount(segment);
@@ -1126,12 +1278,14 @@ TEST(CApiTest, ReudceNullResult) {
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
     int N = 10000;
     auto dataset = DataGen(schema, N);
+    ArrowArray insert_array;
+    ArrowSchema insert_schema;
+    arrow::ExportRecordBatch(*dataset.raw_, &insert_array, &insert_schema);
     int64_t offset;
 
     PreInsert(segment, N, &offset);
-    auto insert_data = serialize(dataset.raw_);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
-                          insert_data.size());
+    auto res = Insert(segment, offset, N, dataset.get_raw_row_ids(), dataset.get_raw_timestamps(), &insert_array,
+                      &insert_schema);
     assert(ins_res.error_code == Success);
 
     const char* dsl_string = R"(
@@ -1166,15 +1320,15 @@ TEST(CApiTest, ReudceNullResult) {
 
     std::vector<CPlaceholderGroup> placeholderGroups;
     placeholderGroups.push_back(placeholderGroup);
-    dataset.timestamps_.clear();
-    dataset.timestamps_.push_back(1);
+    dataset.raw_timestamps_.clear();
+    dataset.raw_timestamps_.push_back(1);
 
     {
         auto slice_nqs = std::vector<int32_t>{10};
         auto slice_topKs = std::vector<int32_t>{1};
         std::vector<CSearchResult> results;
         CSearchResult res;
-        status = Search(segment, plan, placeholderGroup, dataset.timestamps_[0], &res, -1);
+        status = Search(segment, plan, placeholderGroup, dataset.get_raw_timestamps()[0], &res, -1);
         assert(status.error_code == Success);
         results.push_back(res);
         CSearchResultDataBlobs cSearchResultData;
@@ -1187,14 +1341,12 @@ TEST(CApiTest, ReudceNullResult) {
         EXPECT_EQ(size, num_queries / 2);
 
         DeleteSearchResult(res);
-
     }
 
     DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
     DeleteCollection(collection);
     DeleteSegment(segment);
-
 }
 
 TEST(CApiTest, ReduceRemoveDuplicates) {
@@ -1204,14 +1356,16 @@ TEST(CApiTest, ReduceRemoveDuplicates) {
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
     int N = 10000;
     auto dataset = DataGen(schema, N);
+    ArrowArray insert_array;
+    ArrowSchema insert_schema;
+    arrow::ExportRecordBatch(*dataset.raw_, &insert_array, &insert_schema);
 
+    // insert, pks= {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
     int64_t offset;
     PreInsert(segment, N, &offset);
-
-    auto insert_data = serialize(dataset.raw_);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
-                          insert_data.size());
-    assert(ins_res.error_code == Success);
+    auto res = Insert(segment, offset, N, dataset.get_raw_row_ids(), dataset.get_raw_timestamps(), &insert_array,
+                      &insert_schema);
+    assert(res.error_code == Success);
 
     const char* dsl_string = R"(
     {
@@ -1245,17 +1399,17 @@ TEST(CApiTest, ReduceRemoveDuplicates) {
 
     std::vector<CPlaceholderGroup> placeholderGroups;
     placeholderGroups.push_back(placeholderGroup);
-    dataset.timestamps_.clear();
-    dataset.timestamps_.push_back(1);
+    dataset.raw_timestamps_.clear();
+    dataset.raw_timestamps_.push_back(1);
 
     {
         auto slice_nqs = std::vector<int32_t>{num_queries / 2, num_queries / 2};
         auto slice_topKs = std::vector<int32_t>{topK / 2, topK};
         std::vector<CSearchResult> results;
         CSearchResult res1, res2;
-        status = Search(segment, plan, placeholderGroup, dataset.timestamps_[0], &res1, -1);
+        status = Search(segment, plan, placeholderGroup, dataset.get_raw_timestamps()[0], &res1, -1);
         assert(status.error_code == Success);
-        status = Search(segment, plan, placeholderGroup, dataset.timestamps_[0], &res2, -1);
+        status = Search(segment, plan, placeholderGroup, dataset.get_raw_timestamps()[0], &res2, -1);
         assert(status.error_code == Success);
         results.push_back(res1);
         results.push_back(res2);
@@ -1278,11 +1432,11 @@ TEST(CApiTest, ReduceRemoveDuplicates) {
         auto slice_topKs = std::vector<int32_t>{topK / 2, topK, topK};
         std::vector<CSearchResult> results;
         CSearchResult res1, res2, res3;
-        status = Search(segment, plan, placeholderGroup, dataset.timestamps_[0], &res1, -1);
+        status = Search(segment, plan, placeholderGroup, dataset.get_raw_timestamps()[0], &res1, -1);
         assert(status.error_code == Success);
-        status = Search(segment, plan, placeholderGroup, dataset.timestamps_[0], &res2, -1);
+        status = Search(segment, plan, placeholderGroup, dataset.get_raw_timestamps()[0], &res2, -1);
         assert(status.error_code == Success);
-        status = Search(segment, plan, placeholderGroup, dataset.timestamps_[0], &res3, -1);
+        status = Search(segment, plan, placeholderGroup, dataset.get_raw_timestamps()[0], &res3, -1);
         assert(status.error_code == Success);
         results.push_back(res1);
         results.push_back(res2);
@@ -1312,14 +1466,16 @@ testReduceSearchWithExpr(int N, int topK, int num_queries) {
 
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
     auto dataset = DataGen(schema, N);
+    ArrowArray insert_array;
+    ArrowSchema insert_schema;
+    arrow::ExportRecordBatch(*dataset.raw_, &insert_array, &insert_schema);
 
+    // insert, pks= {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
     int64_t offset;
     PreInsert(segment, N, &offset);
-
-    auto insert_data = serialize(dataset.raw_);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
-                          insert_data.size());
-    assert(ins_res.error_code == Success);
+    auto res = Insert(segment, offset, N, dataset.get_raw_row_ids(), dataset.get_raw_timestamps(), &insert_array,
+                      &insert_schema);
+    assert(res.error_code == Success);
 
     auto fmt = boost::format(R"(vector_anns: <
                                             field_id: 100
@@ -1346,15 +1502,15 @@ testReduceSearchWithExpr(int N, int topK, int num_queries) {
 
     std::vector<CPlaceholderGroup> placeholderGroups;
     placeholderGroups.push_back(placeholderGroup);
-    dataset.timestamps_.clear();
-    dataset.timestamps_.push_back(1);
+    dataset.raw_timestamps_.clear();
+    dataset.raw_timestamps_.push_back(1);
 
     std::vector<CSearchResult> results;
     CSearchResult res1;
     CSearchResult res2;
-    auto res = Search(segment, plan, placeholderGroup, dataset.timestamps_[N - 1], &res1, -1);
+    res = Search(segment, plan, placeholderGroup, dataset.get_raw_timestamps()[N - 1], &res1, -1);
     assert(res.error_code == Success);
-    res = Search(segment, plan, placeholderGroup, dataset.timestamps_[N - 1], &res2, -1);
+    res = Search(segment, plan, placeholderGroup, dataset.get_raw_timestamps()[N - 1], &res2, -1);
     assert(res.error_code == Success);
     results.push_back(res1);
     results.push_back(res2);
@@ -1526,10 +1682,12 @@ TEST(CApiTest, Indexing_Without_Predicate) {
     int64_t offset;
     PreInsert(segment, N, &offset);
 
-    auto insert_data = serialize(dataset.raw_);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
-                          insert_data.size());
-    assert(ins_res.error_code == Success);
+    ArrowArray insert_array;
+    ArrowSchema insert_schema;
+    arrow::ExportRecordBatch(*dataset.raw_, &insert_array, &insert_schema);
+    auto res = Insert(segment, offset, N, dataset.get_raw_row_ids(), dataset.get_raw_timestamps(), &insert_array,
+                      &insert_schema);
+    assert(res.error_code == Success);
 
     const char* dsl_string = R"(
      {
@@ -1656,10 +1814,12 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
     int64_t offset;
     PreInsert(segment, N, &offset);
 
-    auto insert_data = serialize(dataset.raw_);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
-                          insert_data.size());
-    assert(ins_res.error_code == Success);
+    ArrowArray insert_array;
+    ArrowSchema insert_schema;
+    arrow::ExportRecordBatch(*dataset.raw_, &insert_array, &insert_schema);
+    auto res = Insert(segment, offset, N, dataset.get_raw_row_ids(), dataset.get_raw_timestamps(), &insert_array,
+                      &insert_schema);
+    assert(res.error_code == Success);
 
     const char* serialized_expr_plan = R"(vector_anns: <
                                              field_id: 100
@@ -1781,10 +1941,12 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
     int64_t offset;
     PreInsert(segment, N, &offset);
 
-    auto insert_data = serialize(dataset.raw_);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
-                          insert_data.size());
-    assert(ins_res.error_code == Success);
+    ArrowArray insert_array;
+    ArrowSchema insert_schema;
+    arrow::ExportRecordBatch(*dataset.raw_, &insert_array, &insert_schema);
+    auto res = Insert(segment, offset, N, dataset.get_raw_row_ids(), dataset.get_raw_timestamps(), &insert_array,
+                      &insert_schema);
+    assert(res.error_code == Success);
 
     const char* dsl_string = R"({
          "bool": {
@@ -1925,10 +2087,12 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
         int64_t offset;
         PreInsert(segment, N, &offset);
 
-        auto insert_data = serialize(dataset.raw_);
-        auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(),
-                              insert_data.data(), insert_data.size());
-        assert(ins_res.error_code == Success);
+        ArrowArray insert_array;
+        ArrowSchema insert_schema;
+        arrow::ExportRecordBatch(*dataset.raw_, &insert_array, &insert_schema);
+        auto res = Insert(segment, offset, N, dataset.get_raw_row_ids(), dataset.get_raw_timestamps(), &insert_array,
+                          &insert_schema);
+        assert(res.error_code == Success);
     }
 
     const char* serialized_expr_plan = R"(vector_anns: <
@@ -2081,10 +2245,12 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
     int64_t offset;
     PreInsert(segment, N, &offset);
 
-    auto insert_data = serialize(dataset.raw_);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
-                          insert_data.size());
-    assert(ins_res.error_code == Success);
+    ArrowArray insert_array;
+    ArrowSchema insert_schema;
+    arrow::ExportRecordBatch(*dataset.raw_, &insert_array, &insert_schema);
+    auto res = Insert(segment, offset, N, dataset.get_raw_row_ids(), dataset.get_raw_timestamps(), &insert_array,
+                      &insert_schema);
+    assert(res.error_code == Success);
 
     const char* dsl_string = R"({
          "bool": {
@@ -2222,10 +2388,12 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
     int64_t offset;
     PreInsert(segment, N, &offset);
 
-    auto insert_data = serialize(dataset.raw_);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
-                          insert_data.size());
-    assert(ins_res.error_code == Success);
+    ArrowArray insert_array;
+    ArrowSchema insert_schema;
+    arrow::ExportRecordBatch(*dataset.raw_, &insert_array, &insert_schema);
+    auto res = Insert(segment, offset, N, dataset.get_raw_row_ids(), dataset.get_raw_timestamps(), &insert_array,
+                      &insert_schema);
+    assert(res.error_code == Success);
 
     const char* serialized_expr_plan = R"(
  vector_anns: <
@@ -2372,10 +2540,12 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
     int64_t offset;
     PreInsert(segment, N, &offset);
 
-    auto insert_data = serialize(dataset.raw_);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
-                          insert_data.size());
-    assert(ins_res.error_code == Success);
+    ArrowArray insert_array;
+    ArrowSchema insert_schema;
+    arrow::ExportRecordBatch(*dataset.raw_, &insert_array, &insert_schema);
+    auto res = Insert(segment, offset, N, dataset.get_raw_row_ids(), dataset.get_raw_timestamps(), &insert_array,
+                      &insert_schema);
+    assert(res.error_code == Success);
 
     const char* dsl_string = R"({
          "bool": {
@@ -2515,10 +2685,12 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
     int64_t offset;
     PreInsert(segment, N, &offset);
 
-    auto insert_data = serialize(dataset.raw_);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
-                          insert_data.size());
-    assert(ins_res.error_code == Success);
+    ArrowArray insert_array;
+    ArrowSchema insert_schema;
+    arrow::ExportRecordBatch(*dataset.raw_, &insert_array, &insert_schema);
+    auto res = Insert(segment, offset, N, dataset.get_raw_row_ids(), dataset.get_raw_timestamps(), &insert_array,
+                      &insert_schema);
+    assert(res.error_code == Success);
 
     const char* serialized_expr_plan = R"(vector_anns: <
                                             field_id: 100
@@ -2671,10 +2843,12 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     int64_t offset;
     PreInsert(segment, N, &offset);
 
-    auto insert_data = serialize(dataset.raw_);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
-                          insert_data.size());
-    assert(ins_res.error_code == Success);
+    ArrowArray insert_array;
+    ArrowSchema insert_schema;
+    arrow::ExportRecordBatch(*dataset.raw_, &insert_array, &insert_schema);
+    auto res = Insert(segment, offset, N, dataset.get_raw_row_ids(), dataset.get_raw_timestamps(), &insert_array,
+                      &insert_schema);
+    assert(res.error_code == Success);
 
     const char* dsl_string = R"({
         "bool": {
@@ -2828,10 +3002,12 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     int64_t offset;
     PreInsert(segment, N, &offset);
 
-    auto insert_data = serialize(dataset.raw_);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
-                          insert_data.size());
-    assert(ins_res.error_code == Success);
+    ArrowArray insert_array;
+    ArrowSchema insert_schema;
+    arrow::ExportRecordBatch(*dataset.raw_, &insert_array, &insert_schema);
+    auto res = Insert(segment, offset, N, dataset.get_raw_row_ids(), dataset.get_raw_timestamps(), &insert_array,
+                      &insert_schema);
+    assert(res.error_code == Success);
 
     const char* serialized_expr_plan = R"(vector_anns: <
                                             field_id: 100
@@ -2986,12 +3162,15 @@ TEST(CApiTest, SealedSegmentTest) {
     for (auto& age : ages) {
         age = e() % 2000;
     }
-    auto blob = (void*)(&ages[0]);
     FieldMeta field_meta(FieldName("age"), FieldId(101), DataType::INT64);
-    auto array = CreateScalarDataArrayFrom(ages.data(), N, field_meta);
-    auto age_data = serialize(array.get());
-
-    auto load_info = CLoadFieldDataInfo{101, age_data.data(), age_data.size(), N};
+    auto builder = arrow::Int64Builder();
+    builder.AppendValues(ages);
+    auto array = builder.Finish().ValueOrDie();
+    ArrowArray age_array;
+    ArrowSchema age_schema;
+    arrow::ExportArray(*array, &age_array, nullptr);
+    arrow::ExportField(*ToArrowField(field_meta), &age_schema);
+    auto load_info = CLoadFieldDataInfo{101, &age_array, &age_schema, N};
 
     auto res = LoadFieldData(segment, load_info);
     assert(res.error_code == Success);
@@ -3015,18 +3194,20 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     auto vec_col = dataset.get_col<float>(FieldId(100));
     auto query_ptr = vec_col.data() + 42000 * DIM;
 
-    auto counter_col = dataset.get_col<int64_t>(FieldId(101));
-    FieldMeta counter_field_meta(FieldName("counter"), FieldId(101), DataType::INT64);
-    auto count_array = CreateScalarDataArrayFrom(counter_col.data(), N, counter_field_meta);
-    auto counter_data = serialize(count_array.get());
+    auto counter_col = dataset.get_data_array(FieldId(101));
 
-    FieldMeta row_id_field_meta(FieldName("RowID"), RowFieldID, DataType::INT64);
-    auto row_ids_array = CreateScalarDataArrayFrom(dataset.row_ids_.data(), N, row_id_field_meta);
-    auto row_ids_data = serialize(row_ids_array.get());
+    ArrowArray counter_array;
+    ArrowSchema counter_schema;
+    arrow::ExportArray(*counter_col.data, &counter_array, nullptr);
+    arrow::ExportField(*counter_col.field, &counter_schema);
 
-    FieldMeta timestamp_field_meta(FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
-    auto timestamps_array = CreateScalarDataArrayFrom(dataset.timestamps_.data(), N, timestamp_field_meta);
-    auto timestamps_data = serialize(timestamps_array.get());
+    ArrowArray rows_array;
+    ArrowSchema rows_schema;
+    arrow::ExportArray(*dataset.row_ids_, &rows_array, &rows_schema);
+
+    ArrowArray ts_array;
+    ArrowSchema ts_schema;
+    arrow::ExportArray(*dataset.timestamps_, &ts_array, &ts_schema);
 
     const char* dsl_string = R"({
         "bool": {
@@ -3123,8 +3304,8 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
 
     auto c_counter_field_data = CLoadFieldDataInfo{
         101,
-        counter_data.data(),
-        counter_data.size(),
+        &counter_array,
+        &counter_schema,
         N,
     };
     status = LoadFieldData(segment, c_counter_field_data);
@@ -3132,8 +3313,8 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
 
     auto c_id_field_data = CLoadFieldDataInfo{
         0,
-        row_ids_data.data(),
-        row_ids_data.size(),
+        &rows_array,
+        &rows_schema,
         N,
     };
     status = LoadFieldData(segment, c_id_field_data);
@@ -3141,8 +3322,8 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
 
     auto c_ts_field_data = CLoadFieldDataInfo{
         1,
-        timestamps_data.data(),
-        timestamps_data.size(),
+        &ts_array,
+        &ts_schema,
         N,
     };
     status = LoadFieldData(segment, c_ts_field_data);
@@ -3185,21 +3366,25 @@ TEST(CApiTest, SealedSegment_search_without_predicates) {
     auto vec_col = dataset.get_col<float>(FieldId(100));
     auto query_ptr = vec_col.data() + 42000 * DIM;
 
-    auto vec_array = dataset.get_col(FieldId(100));
-    auto vec_data = serialize(vec_array.get());
+    auto vec_column = dataset.get_data_array(FieldId(100));
+    ArrowArray vec_array;
+    ArrowSchema vec_schema;
+    arrow::ExportArray(*vec_column.data, &vec_array, nullptr);
+    arrow::ExportField(*vec_column.field, &vec_schema);
 
-    auto counter_col = dataset.get_col<int64_t>(FieldId(101));
-    FieldMeta counter_field_meta(FieldName("counter"), FieldId(101), DataType::INT64);
-    auto count_array = CreateScalarDataArrayFrom(counter_col.data(), N, counter_field_meta);
-    auto counter_data = serialize(count_array.get());
+    auto counter_column = dataset.get_data_array(FieldId(101));
+    ArrowArray counter_array;
+    ArrowSchema counter_schema;
+    arrow::ExportArray(*counter_column.data, &counter_array, nullptr);
+    arrow::ExportField(*counter_column.field, &counter_schema);
 
-    FieldMeta row_id_field_meta(FieldName("RowID"), RowFieldID, DataType::INT64);
-    auto row_ids_array = CreateScalarDataArrayFrom(dataset.row_ids_.data(), N, row_id_field_meta);
-    auto row_ids_data = serialize(row_ids_array.get());
+    ArrowArray rows_array;
+    ArrowSchema rows_schema;
+    arrow::ExportArray(*dataset.row_ids_, &rows_array, &rows_schema);
 
-    FieldMeta timestamp_field_meta(FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
-    auto timestamps_array = CreateScalarDataArrayFrom(dataset.timestamps_.data(), N, timestamp_field_meta);
-    auto timestamps_data = serialize(timestamps_array.get());
+    ArrowArray ts_array;
+    ArrowSchema ts_schema;
+    arrow::ExportArray(*dataset.timestamps_, &ts_array, &ts_schema);
 
     const char* dsl_string = R"(
     {
@@ -3220,8 +3405,8 @@ TEST(CApiTest, SealedSegment_search_without_predicates) {
 
     auto c_vec_field_data = CLoadFieldDataInfo{
         100,
-        vec_data.data(),
-        vec_data.size(),
+        &vec_array,
+        &vec_schema,
         N,
     };
     auto status = LoadFieldData(segment, c_vec_field_data);
@@ -3229,8 +3414,8 @@ TEST(CApiTest, SealedSegment_search_without_predicates) {
 
     auto c_counter_field_data = CLoadFieldDataInfo{
         101,
-        counter_data.data(),
-        counter_data.size(),
+        &counter_array,
+        &counter_schema,
         N,
     };
     status = LoadFieldData(segment, c_counter_field_data);
@@ -3238,8 +3423,8 @@ TEST(CApiTest, SealedSegment_search_without_predicates) {
 
     auto c_id_field_data = CLoadFieldDataInfo{
         0,
-        row_ids_data.data(),
-        row_ids_data.size(),
+        &rows_array,
+        &rows_schema,
         N,
     };
     status = LoadFieldData(segment, c_id_field_data);
@@ -3247,8 +3432,8 @@ TEST(CApiTest, SealedSegment_search_without_predicates) {
 
     auto c_ts_field_data = CLoadFieldDataInfo{
         1,
-        timestamps_data.data(),
-        timestamps_data.size(),
+        &ts_array,
+        &ts_schema,
         N,
     };
     status = LoadFieldData(segment, c_ts_field_data);
@@ -3297,18 +3482,19 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     auto vec_col = dataset.get_col<float>(FieldId(100));
     auto query_ptr = vec_col.data() + 42000 * DIM;
 
-    auto counter_col = dataset.get_col<int64_t>(FieldId(101));
-    FieldMeta counter_field_meta(FieldName("counter"), FieldId(101), DataType::INT64);
-    auto count_array = CreateScalarDataArrayFrom(counter_col.data(), N, counter_field_meta);
-    auto counter_data = serialize(count_array.get());
+    auto counter_column = dataset.get_data_array(FieldId(101));
+    ArrowArray counter_array;
+    ArrowSchema counter_schema;
+    arrow::ExportArray(*counter_column.data, &counter_array, nullptr);
+    arrow::ExportField(*counter_column.field, &counter_schema);
 
-    FieldMeta row_id_field_meta(FieldName("RowID"), RowFieldID, DataType::INT64);
-    auto row_ids_array = CreateScalarDataArrayFrom(dataset.row_ids_.data(), N, row_id_field_meta);
-    auto row_ids_data = serialize(row_ids_array.get());
+    ArrowArray rows_array;
+    ArrowSchema rows_schema;
+    arrow::ExportArray(*dataset.row_ids_, &rows_array, &rows_schema);
 
-    FieldMeta timestamp_field_meta(FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
-    auto timestamps_array = CreateScalarDataArrayFrom(dataset.timestamps_.data(), N, timestamp_field_meta);
-    auto timestamps_data = serialize(timestamps_array.get());
+    ArrowArray ts_array;
+    ArrowSchema ts_schema;
+    arrow::ExportArray(*dataset.timestamps_, &ts_array, &ts_schema);
 
     const char* serialized_expr_plan = R"(vector_anns: <
                                             field_id: 100
@@ -3411,8 +3597,8 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     // load raw data
     auto c_counter_field_data = CLoadFieldDataInfo{
         101,
-        counter_data.data(),
-        counter_data.size(),
+        &counter_array,
+        &counter_schema,
         N,
     };
     status = LoadFieldData(segment, c_counter_field_data);
@@ -3420,8 +3606,8 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
 
     auto c_id_field_data = CLoadFieldDataInfo{
         0,
-        row_ids_data.data(),
-        row_ids_data.size(),
+        &rows_array,
+        &rows_schema,
         N,
     };
     status = LoadFieldData(segment, c_id_field_data);
@@ -3429,8 +3615,8 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
 
     auto c_ts_field_data = CLoadFieldDataInfo{
         1,
-        timestamps_data.data(),
-        timestamps_data.size(),
+        &ts_array,
+        &ts_schema,
         N,
     };
     status = LoadFieldData(segment, c_ts_field_data);
@@ -3481,21 +3667,22 @@ TEST(CApiTest, RetriveScalarFieldFromSealedSegmentWithIndex) {
     auto raw_data = DataGen(schema, N);
     LoadIndexInfo load_index_info;
 
+    ArrowArray rows_array;
+    ArrowSchema rows_schema;
+    arrow::ExportArray(*raw_data.row_ids_, &rows_array, &rows_schema);
+
+    ArrowArray ts_array;
+    ArrowSchema ts_schema;
+    arrow::ExportArray(*raw_data.timestamps_, &ts_array, &ts_schema);
     // load timestamp field
-    FieldMeta ts_field_meta(FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
-    auto ts_array = CreateScalarDataArrayFrom(raw_data.timestamps_.data(), N, ts_field_meta);
-    auto ts_data = serialize(ts_array.get());
-    auto load_info = CLoadFieldDataInfo{TimestampFieldID.get(), ts_data.data(), ts_data.size(), N};
+    auto load_info = CLoadFieldDataInfo{TimestampFieldID.get(), &ts_array, &ts_schema, N};
     auto res = LoadFieldData(segment, load_info);
     assert(res.error_code == Success);
     auto count = GetRowCount(segment);
     assert(count == N);
 
     // load rowid field
-    FieldMeta row_id_field_meta(FieldName("RowID"), RowFieldID, DataType::INT64);
-    auto row_id_array = CreateScalarDataArrayFrom(raw_data.row_ids_.data(), N, row_id_field_meta);
-    auto row_id_data = serialize(row_id_array.get());
-    load_info = CLoadFieldDataInfo{RowFieldID.get(), row_id_data.data(), row_id_data.size(), N};
+    load_info = CLoadFieldDataInfo{RowFieldID.get(), &rows_array, &rows_schema, N};
     res = LoadFieldData(segment, load_info);
     assert(res.error_code == Success);
     count = GetRowCount(segment);
@@ -3574,7 +3761,7 @@ TEST(CApiTest, RetriveScalarFieldFromSealedSegmentWithIndex) {
     plan->field_ids_ = target_field_ids;
 
     CRetrieveResult retrieve_result;
-    res = Retrieve(segment, plan.get(), raw_data.timestamps_[N - 1], &retrieve_result);
+    res = Retrieve(segment, plan.get(), raw_data.get_raw_timestamps()[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
     auto query_result = std::make_unique<proto::segcore::RetrieveResults>();
     auto suc = query_result->ParseFromArray(retrieve_result.proto_blob, retrieve_result.proto_size);

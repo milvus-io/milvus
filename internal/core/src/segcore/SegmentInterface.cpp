@@ -93,8 +93,9 @@ SegmentInternalInterface::Retrieve(const query::RetrievePlan* plan, Timestamp ti
                 case DataType::VARCHAR: {
                     auto str_ids = ids->mutable_str_id();
                     auto src_data = col_data->scalars().string_data();
-                    for (auto i = 0; i < src_data.data_size(); ++i)
+                    for (auto i = 0; i < src_data.data_size(); ++i) {
                         *(str_ids->mutable_data()->Add()) = src_data.data(i);
+                    }
                     break;
                 }
                 default: {

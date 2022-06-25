@@ -27,6 +27,7 @@
 #include "common/LoadInfo.h"
 #include "common/BitsetView.h"
 #include "common/QueryResult.h"
+#include "arrow/api.h"
 #include "query/Plan.h"
 #include "query/PlanNode.h"
 #include "pb/schema.pb.h"
@@ -168,7 +169,7 @@ class SegmentInternalInterface : public SegmentInterface {
     virtual std::vector<SegOffset>
     search_ids(const BitsetView& view, Timestamp timestamp) const = 0;
 
-    virtual std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
+    virtual std::pair<std::shared_ptr<IdArray>, std::vector<SegOffset>>
     search_ids(const IdArray& id_array, Timestamp timestamp) const = 0;
 
  protected:
@@ -186,7 +187,7 @@ class SegmentInternalInterface : public SegmentInterface {
     bulk_subscript(SystemFieldType system_type, const int64_t* seg_offsets, int64_t count, void* output) const = 0;
 
     // calculate output[i] = Vec[seg_offsets[i]}, where Vec binds to field_offset
-    virtual std::unique_ptr<DataArray>
+    virtual std::unique_ptr<milvus::proto::schema::FieldData>
     bulk_subscript(FieldId field_id, const int64_t* seg_offsets, int64_t count) const = 0;
 
     virtual void

@@ -155,7 +155,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     void
     bulk_subscript(SystemFieldType system_type, const int64_t* seg_offsets, int64_t count, void* output) const override;
 
-    std::unique_ptr<DataArray>
+    std::unique_ptr<milvus::proto::schema::FieldData>
     bulk_subscript(FieldId field_id, const int64_t* seg_offsets, int64_t count) const override;
 
  public:
@@ -165,8 +165,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
     explicit SegmentGrowingImpl(SchemaPtr schema, const SegcoreConfig& segcore_config, int64_t segment_id)
         : segcore_config_(segcore_config),
           schema_(std::move(schema)),
-          insert_record_(*schema_, segcore_config.get_chunk_rows()),
           indexing_record_(*schema_, segcore_config_),
+          insert_record_(*schema_, segcore_config.get_chunk_rows()),
           id_(segment_id) {
     }
 
@@ -186,7 +186,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     void
     mask_with_delete(BitsetType& bitset, int64_t ins_barrier, Timestamp timestamp) const override;
 
-    std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
+    std::pair<std::shared_ptr<IdArray>, std::vector<SegOffset>>
     search_ids(const IdArray& id_array, Timestamp timestamp) const override;
 
     std::vector<SegOffset>

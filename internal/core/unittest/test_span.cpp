@@ -33,7 +33,7 @@ TEST(Span, Naive) {
     auto seg_conf = SegcoreConfig::default_config();
     auto segment = CreateGrowingSegment(schema, -1, seg_conf);
     segment->PreInsert(N);
-    segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
+    segment->Insert(0, N, dataset.get_raw_row_ids(), dataset.get_raw_timestamps(), dataset.raw_.get());
     auto vec_ptr = dataset.get_col<uint8_t>(bin_vec_fid);
     auto age_ptr = dataset.get_col<float>(float_fid);
     auto float_ptr = dataset.get_col<float>(float_vec_fid);

@@ -29,6 +29,7 @@
 #include <NamedType/named_type.hpp>
 #include <variant>
 
+#include "arrow/api.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "pb/schema.pb.h"
 #include "pb/segcore.pb.h"
@@ -63,13 +64,22 @@ using Timestamp = uint64_t;  // TODO: use TiKV-like timestamp
 constexpr auto MAX_TIMESTAMP = std::numeric_limits<Timestamp>::max();
 constexpr auto MAX_ROW_COUNT = std::numeric_limits<idx_t>::max();
 
+constexpr auto METADATA_FIELD_ID_KEY = "FIELD_ID_KEY";
+constexpr auto METADATA_FIELD_TYPE_KEY = "FIELD_TYPE_KEY";
+constexpr auto METADATA_DIM_KEY = "dim";
+constexpr auto METADATA_MAX_LEN_KEY = "max_length";
+constexpr auto METADATA_METRIC_TYPE_KEY = "metric_type";
+
+struct DataArray {
+    std::shared_ptr<arrow::Field> field;
+    std::shared_ptr<arrow::Array> data;
+};
+
 using OpType = proto::plan::OpType;
 using ArithOpType = proto::plan::ArithOpType;
-using ScalarArray = proto::schema::ScalarField;
-using DataArray = proto::schema::FieldData;
-using VectorArray = proto::schema::VectorField;
-using IdArray = proto::schema::IDs;
-using InsertData = proto::segcore::InsertRecord;
+using IdArray = arrow::Array;
+using MetricType = knowhere::MetricType;
+using InsertData = arrow::RecordBatch;
 using PkType = std::variant<std::monostate, int64_t, std::string>;
 // tbb::concurrent_unordered_multimap equal_range too slow when multi repeated key
 // using Pk2OffsetType = tbb::concurrent_unordered_multimap<PkType, int64_t, std::hash<PkType>>;

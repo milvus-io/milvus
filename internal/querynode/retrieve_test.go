@@ -45,7 +45,7 @@ func TestStreaming_retrieve(t *testing.T) {
 	insertRecord, err := storage.TransferInsertMsgToInsertRecord(collection.schema, insertMsg)
 	assert.NoError(t, err)
 
-	err = segment.segmentInsert(offset, insertMsg.RowIDs, insertMsg.Timestamps, insertRecord)
+	err = segment.segmentInsert(offset, insertMsg.RowIDs, insertMsg.Timestamps, collection.schema.GetFields(), insertRecord)
 	assert.NoError(t, err)
 
 	t.Run("test retrieve", func(t *testing.T) {

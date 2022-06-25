@@ -76,7 +76,7 @@ Search_SmallIndex(benchmark::State& state) {
         segment->disable_small_index();
     }
     segment->PreInsert(N);
-    segment->Insert(0, N, dataset_.row_ids_.data(), dataset_.timestamps_.data(), dataset_.raw_);
+    segment->Insert(0, N, dataset_.raw_row_ids_.data(), dataset_.raw_timestamps_.data(), dataset_.raw_.get());
 
     Timestamp time = 10000000;
 

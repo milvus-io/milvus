@@ -41,6 +41,15 @@ class Schema {
         return field_id;
     }
 
+    // string type
+    FieldId
+    AddDebugField(const std::string& name, DataType data_type, int64_t max_length) {
+        auto field_id = FieldId(debug_id);
+        debug_id++;
+        this->AddField(FieldName(name), field_id, data_type, max_length);
+        return field_id;
+    }
+
     // auto gen field_id for convenience
     FieldId
     AddDebugField(const std::string& name,

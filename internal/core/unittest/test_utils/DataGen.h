@@ -18,6 +18,7 @@
 #include <google/protobuf/text_format.h>
 
 #include "Constants.h"
+#include "common/ArrowConverter.h"
 #include "common/Schema.h"
 #include "index/ScalarIndexSort.h"
 #include "index/StringIndexSort.h"
@@ -35,33 +36,39 @@ using boost::algorithm::starts_with;
 namespace milvus::segcore {
 
 struct GeneratedData {
-    std::vector<idx_t> row_ids_;
-    std::vector<Timestamp> timestamps_;
-    InsertData* raw_;
+    std::shared_ptr<arrow::Array> row_ids_;
+    std::shared_ptr<arrow::Array> timestamps_;
+    std::shared_ptr<InsertData> raw_;
     std::vector<FieldId> field_ids;
     SchemaPtr schema_;
+
+    std::vector<int64_t> raw_row_ids_;
+    std::vector<Timestamp> raw_timestamps_;
+
     template <typename T>
     std::vector<T>
     get_col(FieldId field_id) const {
         std::vector<T> ret(raw_->num_rows());
-        for (auto target_field_data : raw_->fields_data()) {
-            if (field_id.get() != target_field_data.field_id()) {
+        int col_index = -1;
+        for (const auto& target_field_data : raw_->schema()->fields()) {
+            col_index++;
+            if (field_id.get() != std::stoi(target_field_data->metadata()->Get(METADATA_FIELD_ID_KEY).ValueOrDie())) {
                 continue;
             }
 
+            auto raw_array_data = raw_->column(col_index)->data();
             auto& field_meta = schema_->operator[](field_id);
             if (field_meta.is_vector()) {
                 if (field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
                     int len = raw_->num_rows() * field_meta.get_dim();
                     ret.resize(len);
-                    auto src_data =
-                        reinterpret_cast<const T*>(target_field_data.vectors().float_vector().data().data());
-                    std::copy_n(src_data, len, ret.data());
+                    std::copy_n(
+                        reinterpret_cast<const float*>(arrow::FixedSizeBinaryArray(raw_array_data).raw_values()), len,
+                        ret.data());
                 } else if (field_meta.get_data_type() == DataType::VECTOR_BINARY) {
                     int len = raw_->num_rows() * (field_meta.get_dim() / 8);
                     ret.resize(len);
-                    auto src_data = reinterpret_cast<const T*>(target_field_data.vectors().binary_vector().data());
-                    std::copy_n(src_data, len, ret.data());
+                    std::copy_n(arrow::FixedSizeBinaryArray(raw_array_data).raw_values(), len, ret.data());
                 } else {
                     PanicInfo("unsupported");
                 }
@@ -70,38 +77,41 @@ struct GeneratedData {
             }
             switch (field_meta.get_data_type()) {
                 case DataType::BOOL: {
-                    auto src_data = reinterpret_cast<const T*>(target_field_data.scalars().bool_data().data().data());
-                    std::copy_n(src_data, raw_->num_rows(), ret.data());
-                    break;
+                    if constexpr (std::is_same_v<T, bool>) {
+                        auto src_data = arrow::BooleanArray(raw_array_data);
+                        std::copy(src_data.begin(), src_data.end(), ret.begin());
+                        break;
+                    }
                 }
                 case DataType::INT8:
+                    std::copy_n(arrow::Int8Array(raw_array_data).raw_values(), raw_->num_rows(), ret.data());
+                    break;
                 case DataType::INT16:
+                    std::copy_n(arrow::Int16Array(raw_array_data).raw_values(), raw_->num_rows(), ret.data());
+                    break;
                 case DataType::INT32: {
-                    auto src_data =
-                        reinterpret_cast<const int32_t*>(target_field_data.scalars().int_data().data().data());
-                    std::copy_n(src_data, raw_->num_rows(), ret.data());
+                    std::copy_n(arrow::Int32Array(raw_array_data).raw_values(), raw_->num_rows(), ret.data());
                     break;
                 }
                 case DataType::INT64: {
-                    auto src_data = reinterpret_cast<const T*>(target_field_data.scalars().long_data().data().data());
-                    std::copy_n(src_data, raw_->num_rows(), ret.data());
+                    std::copy_n(arrow::Int64Array(raw_array_data).raw_values(), raw_->num_rows(), ret.data());
                     break;
                 }
                 case DataType::FLOAT: {
-                    auto src_data = reinterpret_cast<const T*>(target_field_data.scalars().float_data().data().data());
-                    std::copy_n(src_data, raw_->num_rows(), ret.data());
+                    std::copy_n(arrow::FloatArray(raw_array_data).raw_values(), raw_->num_rows(), ret.data());
                     break;
                 }
                 case DataType::DOUBLE: {
-                    auto src_data = reinterpret_cast<const T*>(target_field_data.scalars().double_data().data().data());
-                    std::copy_n(src_data, raw_->num_rows(), ret.data());
+                    std::copy_n(arrow::DoubleArray(raw_array_data).raw_values(), raw_->num_rows(), ret.data());
                     break;
                 }
-                case DataType::VARCHAR: {
-                    auto ret_data = reinterpret_cast<std::string*>(ret.data());
-                    auto src_data = target_field_data.scalars().string_data().data();
-                    std::copy(src_data.begin(), src_data.end(), ret_data);
-
+                case DataType::VARCHAR:
+                case DataType::STRING: {
+                    if constexpr (std::is_same_v<T, std::string>) {
+                        auto src_data = arrow::StringArray(raw_array_data);
+                        std::transform(src_data.begin(), src_data.end(), ret.data(),
+                                       [&src_data](auto item) { return std::string(*item); });
+                    }
                     break;
                 }
                 default: {
@@ -109,18 +119,30 @@ struct GeneratedData {
                 }
             }
         }
-        return std::move(ret);
+        return ret;
     }
 
-    std::unique_ptr<DataArray>
-    get_col(FieldId field_id) const {
-        for (auto target_field_data : raw_->fields_data()) {
-            if (field_id.get() == target_field_data.field_id()) {
-                return std::make_unique<DataArray>(target_field_data);
+    DataArray
+    get_data_array(FieldId field_id) const {
+        int index = 0;
+        for (const auto& field : raw_->schema()->fields()) {
+            if (field_id == milvus::GetFieldId(field)) {
+                return DataArray{field, raw_->column(index)};
             }
+            index++;
         }
 
         PanicInfo("field id not find");
+    }
+
+    const int64_t*
+    get_raw_row_ids() {
+        return raw_row_ids_.data();
+    }
+
+    const Timestamp*
+    get_raw_timestamps() {
+        return raw_timestamps_.data();
     }
 
  private:
@@ -136,20 +158,17 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42, uint64_t ts_offset = 0,
     std::normal_distribution<> distr(0, 1);
     int offset = 0;
 
-    auto insert_data = std::make_unique<InsertData>();
-    auto insert_cols = [&insert_data](auto& data, int64_t count, auto& field_meta) {
-        auto array = milvus::segcore::CreateDataArrayFrom(data.data(), count, field_meta);
-        insert_data->mutable_fields_data()->AddAllocated(array.release());
-    };
+    auto arrow_schema = milvus::ToArrowSchema(schema);
+    std::vector<std::shared_ptr<arrow::Array>> columns;
 
     for (auto field_id : schema->get_field_ids()) {
-        auto field_meta = schema->operator[](field_id);
+        auto field_meta = (*schema)[field_id];
         switch (field_meta.get_data_type()) {
             case DataType::VECTOR_FLOAT: {
                 auto dim = field_meta.get_dim();
-                vector<float> final(dim * N);
+
+                auto col_builder = arrow::FixedSizeBinaryBuilder(arrow::fixed_size_binary(dim * 4));
                 bool is_ip = starts_with(field_meta.get_name().get(), "normalized");
-#pragma omp parallel for
                 for (int n = 0; n < N; ++n) {
                     vector<float> data(dim);
                     float sum = 0;
@@ -166,79 +185,82 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42, uint64_t ts_offset = 0,
                             x /= sum;
                         }
                     }
-
-                    std::copy(data.begin(), data.end(), final.begin() + dim * n);
+                    col_builder.Append((const uint8_t*)data.data());
                 }
-                insert_cols(final, N, field_meta);
+                columns.push_back(col_builder.Finish().ValueOrDie());
                 break;
             }
             case DataType::VECTOR_BINARY: {
                 auto dim = field_meta.get_dim();
                 Assert(dim % 8 == 0);
-                vector<uint8_t> data(dim / 8 * N);
-                for (auto& x : data) {
-                    x = er();
+                auto builder = arrow::FixedSizeBinaryBuilder(arrow::fixed_size_binary(dim / 8));
+                for (int i = 0; i < N; ++i) {
+                    vector<uint8_t> data(dim / 8);
+                    for (auto& x : data) {
+                        x = er();
+                    }
+                    builder.Append(data.data());
                 }
-                insert_cols(data, N, field_meta);
+                columns.push_back(builder.Finish().ValueOrDie());
                 break;
             }
             case DataType::INT64: {
-                vector<int64_t> data(N);
+                auto builder = arrow::Int64Builder();
                 for (int i = 0; i < N; i++) {
-                    data[i] = i / repeat_count;
+                    builder.Append(i / repeat_count);
                 }
-                insert_cols(data, N, field_meta);
+                columns.push_back(builder.Finish().ValueOrDie());
                 break;
             }
             case DataType::INT32: {
-                vector<int> data(N);
-                for (auto& x : data) {
-                    x = er() % (2 * N);
+                auto builder = arrow::Int32Builder();
+                for (int i = 0; i < N; i++) {
+                    builder.Append(er() % (2 * N));
                 }
-                insert_cols(data, N, field_meta);
+                columns.push_back(builder.Finish().ValueOrDie());
                 break;
             }
             case DataType::INT16: {
-                vector<int16_t> data(N);
-                for (auto& x : data) {
-                    x = er() % (2 * N);
+                auto builder = arrow::Int16Builder();
+                for (int i = 0; i < N; i++) {
+                    builder.Append(er() % (2 * N));
                 }
-                insert_cols(data, N, field_meta);
+                columns.push_back(builder.Finish().ValueOrDie());
                 break;
             }
             case DataType::INT8: {
-                vector<int8_t> data(N);
-                for (auto& x : data) {
-                    x = er() % (2 * N);
+                auto builder = arrow::Int8Builder();
+                for (int i = 0; i < N; i++) {
+                    builder.Append(er() % (2 * N));
                 }
-                insert_cols(data, N, field_meta);
+                columns.push_back(builder.Finish().ValueOrDie());
                 break;
             }
             case DataType::FLOAT: {
-                vector<float> data(N);
-                for (auto& x : data) {
-                    x = distr(er);
+                auto builder = arrow::FloatBuilder();
+                for (int i = 0; i < N; i++) {
+                    builder.Append(distr(er));
                 }
-                insert_cols(data, N, field_meta);
+                columns.push_back(builder.Finish().ValueOrDie());
                 break;
             }
             case DataType::DOUBLE: {
-                vector<double> data(N);
-                for (auto& x : data) {
-                    x = distr(er);
+                auto builder = arrow::DoubleBuilder();
+                for (int i = 0; i < N; i++) {
+                    builder.Append(distr(er));
                 }
-                insert_cols(data, N, field_meta);
+                columns.push_back(builder.Finish().ValueOrDie());
                 break;
             }
             case DataType::VARCHAR: {
-                vector<std::string> data(N);
+                auto builder = arrow::StringBuilder();
                 for (int i = 0; i < N / repeat_count; i++) {
                     auto str = std::to_string(er());
                     for (int j = 0; j < repeat_count; j++) {
-                        data[i * repeat_count + j] = str;
+                        builder.Append(str);
                     }
                 }
-                insert_cols(data, N, field_meta);
+                columns.push_back(builder.Finish().ValueOrDie());
                 break;
             }
             default: {
@@ -250,12 +272,19 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42, uint64_t ts_offset = 0,
 
     GeneratedData res;
     res.schema_ = schema;
-    res.raw_ = insert_data.release();
-    res.raw_->set_num_rows(N);
+    res.raw_ = arrow::RecordBatch::Make(arrow_schema, N, columns);
+
+    auto row_ids_builder = arrow::Int64Builder();
+    auto ts_builder = arrow::UInt64Builder();
     for (int i = 0; i < N; ++i) {
-        res.row_ids_.push_back(i);
-        res.timestamps_.push_back(i + ts_offset);
+        row_ids_builder.Append(i);
+        ts_builder.Append(i + ts_offset);
+
+        res.raw_row_ids_.push_back(i);
+        res.raw_timestamps_.push_back(i + ts_offset);
     }
+    res.row_ids_ = row_ids_builder.Finish().ValueOrDie();
+    res.timestamps_ = ts_builder.Finish().ValueOrDie();
 
     return res;
 }
@@ -290,7 +319,7 @@ CreatePlaceholderGroup(int64_t num_queries, int dim, const std::vector<float>& v
     for (int i = 0; i < num_queries; ++i) {
         std::vector<float> vec;
         for (int d = 0; d < dim; ++d) {
-            vec.push_back(vecs[i*dim+d]);
+            vec.push_back(vecs[i * dim + d]);
         }
         value->add_values(vec.data(), vec.size() * sizeof(float));
     }
@@ -389,35 +418,36 @@ SearchResultToJson(const SearchResult& sr) {
 
 inline void
 SealedLoadFieldData(const GeneratedData& dataset, SegmentSealed& seg, const std::set<int64_t>& exclude_fields = {}) {
-    auto row_count = dataset.row_ids_.size();
+    auto row_count = dataset.row_ids_->length();
     {
         LoadFieldDataInfo info;
         FieldMeta field_meta(FieldName("RowID"), RowFieldID, DataType::INT64);
-        auto array = CreateScalarDataArrayFrom(dataset.row_ids_.data(), row_count, field_meta);
-        info.field_data = array.release();
-        info.row_count = dataset.row_ids_.size();
+        info.field_data = new DataArray{ToArrowField(field_meta), dataset.row_ids_};
+        info.row_count = dataset.row_ids_->length();
         info.field_id = RowFieldID.get();  // field id for RowId
         seg.LoadFieldData(info);
     }
     {
         LoadFieldDataInfo info;
         FieldMeta field_meta(FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
-        auto array = CreateScalarDataArrayFrom(dataset.timestamps_.data(), row_count, field_meta);
-        info.field_data = array.release();
-        info.row_count = dataset.timestamps_.size();
+        info.field_data = new DataArray{ToArrowField(field_meta), dataset.timestamps_};
+        info.row_count = dataset.timestamps_->length();
         info.field_id = TimestampFieldID.get();
         seg.LoadFieldData(info);
     }
-    for (auto field_data : dataset.raw_->fields_data()) {
-        int64_t field_id = field_data.field_id();
+    int index = 0;
+    for (const auto& field : dataset.raw_->schema()->fields()) {
+        int64_t field_id = std::stoi(field->metadata()->Get(METADATA_FIELD_ID_KEY).ValueOrDie());
         if (exclude_fields.find(field_id) != exclude_fields.end()) {
             continue;
         }
         LoadFieldDataInfo info;
-        info.field_id = field_data.field_id();
+        // auto data_type = std::stoi(field->metadata()->Get(METADATA_FIELD_TYPE_KEY).ValueOrDie());
+        info.field_id = field_id;
         info.row_count = row_count;
-        info.field_data = &field_data;
+        info.field_data = new DataArray{field, dataset.raw_->column(index)};
         seg.LoadFieldData(info);
+        index++;
     }
 }
 
@@ -481,25 +511,22 @@ GenTss(int64_t num, int64_t begin_ts) {
 
 inline auto
 GenPKs(int64_t num, int64_t begin_pk) {
-    auto arr = std::make_unique<milvus::proto::schema::LongArray>();
+    auto ids_builder = arrow::Int64Builder();
     for (int64_t i = 0; i < num; i++) {
-        arr->add_data(begin_pk + i);
+        ids_builder.Append(begin_pk + i);
     }
-    auto ids = std::make_shared<IdArray>();
-    ids->set_allocated_int_id(arr.release());
-    return ids;
+    return ids_builder.Finish().ValueOrDie();
 }
 
 template <typename Iter>
 inline auto
 GenPKs(const Iter begin, const Iter end) {
     auto arr = std::make_unique<milvus::proto::schema::LongArray>();
+    auto ids_builder = arrow::Int64Builder();
     for (auto it = begin; it != end; it++) {
-        arr->add_data(*it);
+        ids_builder.Append(*it);
     }
-    auto ids = std::make_shared<IdArray>();
-    ids->set_allocated_int_id(arr.release());
-    return ids;
+    return ids_builder.Finish().ValueOrDie();
 }
 
 inline auto

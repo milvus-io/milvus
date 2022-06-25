@@ -7,9 +7,9 @@ require (
 	github.com/BurntSushi/toml v1.0.0
 	github.com/HdrHistogram/hdrhistogram-go v1.0.1 // indirect
 	github.com/StackExchange/wmi v1.2.1 // indirect
-	github.com/antlr/antlr4/runtime/Go/antlr v0.0.0-20210826220005-b48c857c3a0e // indirect
+	github.com/antlr/antlr4/runtime/Go/antlr v0.0.0-20210826220005-b48c857c3a0e
 	github.com/antonmedv/expr v1.8.9
-	github.com/apache/arrow/go/v8 v8.0.0-20220322092137-778b1772fd20
+	github.com/apache/arrow/go/v8 v8.0.0
 	github.com/apache/pulsar-client-go v0.6.1-0.20210728062540-29414db801a7
 	github.com/apache/thrift v0.15.0
 	github.com/bits-and-blooms/bloom/v3 v3.0.1
@@ -21,7 +21,6 @@ require (
 	github.com/gin-gonic/gin v1.7.7
 	github.com/go-basic/ipv4 v1.0.0
 	github.com/gofrs/flock v0.8.1
-	github.com/golang-jwt/jwt/v4 v4.4.1 // indirect
 	github.com/golang/mock v1.5.0
 	github.com/golang/protobuf v1.5.2
 	github.com/google/btree v1.0.1

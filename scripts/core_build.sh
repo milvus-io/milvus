@@ -38,10 +38,11 @@ while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symli
   [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE" # if $SOURCE was a relative symlink, we need to resolve it relative to the path where the symlink file was located
 done
 SCRIPTS_DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
+ROOT_DIR="$( cd ${SCRIPTS_DIR}/../ && pwd )"
 
-CPP_SRC_DIR="${SCRIPTS_DIR}/../internal/core"
+CPP_SRC_DIR="${ROOT_DIR}/internal/core"
 
-BUILD_OUTPUT_DIR="${SCRIPTS_DIR}/../cmake_build"
+BUILD_OUTPUT_DIR="${ROOT_DIR}/cmake_build"
 BUILD_TYPE="Release"
 BUILD_UNITTEST="OFF"
 INSTALL_PREFIX="${CPP_SRC_DIR}/output"
@@ -220,10 +221,10 @@ arrowDepValues=(
 "zstd-v1.5.1.tar.gz"
 )
 for i in "${!arrowDepValues[@]}"; do
-   if test -f "${CUSTOM_THIRDPARTY_PATH}/${arrowDepValues[$i]}"; then
-	echo "${arrowDepValues[$i]} exists."
-	export ${arrowDepKeys[$i]}=${CUSTOM_THIRDPARTY_PATH}/${arrowDepValues[$i]}
-   fi
+  if test -f "${CUSTOM_THIRDPARTY_PATH}/${arrowDepValues[$i]}"; then
+    echo "${arrowDepValues[$i]} exists."
+    export ${arrowDepKeys[$i]}=${CUSTOM_THIRDPARTY_PATH}/${arrowDepValues[$i]}
+  fi
 done
 
 set

@@ -9,9 +9,11 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <arrow/array/builder_nested.h>
 #include <gtest/gtest.h>
 #include <boost/format.hpp>
 
+#include "common/ArrowConverter.h"
 #include "knowhere/index/VecIndex.h"
 #include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
@@ -65,7 +67,7 @@ TEST(Sealed, without_predicate) {
     auto query_ptr = vec_col.data() + 4200 * dim;
     auto segment = CreateGrowingSegment(schema);
     segment->PreInsert(N);
-    segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
+    segment->Insert(0, N, dataset.get_raw_row_ids(), dataset.get_raw_timestamps(), dataset.raw_.get());
 
     auto plan = CreatePlan(*schema, dsl);
     auto num_queries = 5;
@@ -79,14 +81,12 @@ TEST(Sealed, without_predicate) {
     auto pre_result = SearchResultToJson(*sr);
     auto indexing = std::make_shared<knowhere::IVF>();
 
-    auto conf = knowhere::Config{
-            {knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
-            {knowhere::meta::DIM, dim},
-            {knowhere::meta::TOPK, topK},
-            {knowhere::indexparam::NLIST, 100},
-            {knowhere::indexparam::NPROBE, 10},
-            {knowhere::meta::DEVICE_ID, 0}
-    };
+    auto conf = knowhere::Config{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+                                 {knowhere::meta::DIM, dim},
+                                 {knowhere::meta::TOPK, topK},
+                                 {knowhere::indexparam::NLIST, 100},
+                                 {knowhere::indexparam::NPROBE, 10},
+                                 {knowhere::meta::DEVICE_ID, 0}};
 
     auto database = knowhere::GenDataset(N, dim, vec_col.data() + 1000 * dim);
     indexing->Train(database, conf);
@@ -99,7 +99,7 @@ TEST(Sealed, without_predicate) {
 
     auto result = indexing->Query(query_dataset, conf, nullptr);
 
-    auto ids = knowhere::GetDatasetIDs(result);     // for comparison
+    auto ids = knowhere::GetDatasetIDs(result);       // for comparison
     auto dis = knowhere::GetDatasetDistance(result);  // for comparison
     std::vector<int64_t> vec_ids(ids, ids + topK * num_queries);
     std::vector<float> vec_dis(dis, dis + topK * num_queries);
@@ -173,7 +173,7 @@ TEST(Sealed, with_predicate) {
     auto query_ptr = vec_col.data() + 42000 * dim;
     auto segment = CreateGrowingSegment(schema);
     segment->PreInsert(N);
-    segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
+    segment->Insert(0, N, dataset.get_raw_row_ids(), dataset.get_raw_timestamps(), dataset.raw_.get());
 
     auto plan = CreatePlan(*schema, dsl);
     auto num_queries = 5;
@@ -186,14 +186,12 @@ TEST(Sealed, with_predicate) {
     auto sr = segment->Search(plan.get(), ph_group.get(), time);
     auto indexing = std::make_shared<knowhere::IVF>();
 
-    auto conf = knowhere::Config{
-            {knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
-            {knowhere::meta::DIM, dim},
-            {knowhere::meta::TOPK, topK},
-            {knowhere::indexparam::NLIST, 100},
-            {knowhere::indexparam::NPROBE, 10},
-            {knowhere::meta::DEVICE_ID, 0}
-    };
+    auto conf = knowhere::Config{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+                                 {knowhere::meta::DIM, dim},
+                                 {knowhere::meta::TOPK, topK},
+                                 {knowhere::indexparam::NLIST, 100},
+                                 {knowhere::indexparam::NPROBE, 10},
+                                 {knowhere::meta::DEVICE_ID, 0}};
 
     auto database = knowhere::GenDataset(N, dim, vec_col.data());
     indexing->Train(database, conf);
@@ -235,7 +233,7 @@ TEST(Sealed, LoadFieldData) {
     auto counter_id = schema->AddDebugField("counter", DataType::INT64);
     auto double_id = schema->AddDebugField("double", DataType::DOUBLE);
     auto nothing_id = schema->AddDebugField("nothing", DataType::INT32);
-    auto str_id = schema->AddDebugField("str", DataType::VARCHAR);
+    auto str_id = schema->AddDebugField("str", DataType::VARCHAR, 100);
     schema->set_primary_field_id(counter_id);
 
     auto dataset = DataGen(schema, N);
@@ -302,7 +300,7 @@ TEST(Sealed, LoadFieldData) {
     auto chunk_span3 = segment->chunk_data<std::string>(str_id, 0);
     auto ref1 = dataset.get_col<int64_t>(counter_id);
     auto ref2 = dataset.get_col<double>(double_id);
-    auto ref3 = dataset.get_col(str_id)->scalars().string_data().data();
+    auto ref3 = arrow::StringArray(dataset.get_data_array(str_id).data->data());
     for (int i = 0; i < N; ++i) {
         ASSERT_EQ(chunk_span1[i], ref1[i]);
         ASSERT_EQ(chunk_span2[i], ref2[i]);
@@ -401,17 +399,15 @@ TEST(Sealed, LoadScalarIndex) {
 
     LoadFieldDataInfo row_id_info;
     FieldMeta row_id_field_meta(FieldName("RowID"), RowFieldID, DataType::INT64);
-    auto array = CreateScalarDataArrayFrom(dataset.row_ids_.data(), N, row_id_field_meta);
-    row_id_info.field_data = array.release();
-    row_id_info.row_count = dataset.row_ids_.size();
+    row_id_info.field_data = new DataArray{ToArrowField(row_id_field_meta), dataset.row_ids_};
+    row_id_info.row_count = dataset.row_ids_->length();
     row_id_info.field_id = RowFieldID.get();  // field id for RowId
     segment->LoadFieldData(row_id_info);
 
     LoadFieldDataInfo ts_info;
     FieldMeta ts_field_meta(FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
-    array = CreateScalarDataArrayFrom(dataset.timestamps_.data(), N, ts_field_meta);
-    ts_info.field_data = array.release();
-    ts_info.row_count = dataset.timestamps_.size();
+    ts_info.field_data = new DataArray{ToArrowField(ts_field_meta), dataset.timestamps_};
+    ts_info.row_count = dataset.timestamps_->length();
     ts_info.field_id = TimestampFieldID.get();
     segment->LoadFieldData(ts_info);
 
@@ -508,8 +504,9 @@ TEST(Sealed, Delete) {
 
     int64_t row_count = 5;
     std::vector<idx_t> pks{1, 2, 3, 4, 5};
-    auto ids = std::make_unique<IdArray>();
-    ids->mutable_int_id()->mutable_data()->Add(pks.begin(), pks.end());
+    auto ids_builder = arrow::Int64Builder();
+    ids_builder.AppendValues(pks);
+    auto ids = ids_builder.Finish().ValueOrDie();
     std::vector<Timestamp> timestamps{10, 10, 10, 10, 10};
 
     LoadDeletedRecordInfo info = {timestamps.data(), ids.get(), row_count};
@@ -522,8 +519,9 @@ TEST(Sealed, Delete) {
 
     int64_t new_count = 3;
     std::vector<idx_t> new_pks{6, 7, 8};
-    auto new_ids = std::make_unique<IdArray>();
-    new_ids->mutable_int_id()->mutable_data()->Add(new_pks.begin(), new_pks.end());
+    auto new_ids_builder = arrow::Int64Builder();
+    new_ids_builder.AppendValues(new_pks);
+    auto new_ids = new_ids_builder.Finish().ValueOrDie();
     std::vector<idx_t> new_timestamps{10, 10, 10};
     auto reserved_offset = segment->PreDelete(new_count);
     ASSERT_EQ(reserved_offset, row_count);
@@ -566,10 +564,17 @@ GenQueryVecs(int N, int dim) {
 }
 
 auto
-transfer_to_fields_data(const std::vector<float>& vecs) {
-    auto arr = std::make_unique<DataArray>();
-    *(arr->mutable_vectors()->mutable_float_vector()->mutable_data()) = {vecs.begin(), vecs.end()};
-    return arr;
+transfer_to_fields_data(const std::vector<float>& vecs, const FieldMeta& field_meta, const int dim) {
+    auto arr_builder = arrow::FixedSizeBinaryBuilder(arrow::fixed_size_binary(dim * 4));
+    for (int n = 0; n < vecs.size() / dim; ++n) {
+        std::vector<float> data(dim);
+
+        for (int i = 0; i < dim; i++) {
+            data[i] = vecs[n * dim + i];
+        }
+        arr_builder.Append((const uint8_t*)data.data());
+    }
+    return DataArray{ToArrowField(field_meta), arr_builder.Finish().ValueOrDie()};
 }
 
 TEST(Sealed, BF) {
@@ -582,10 +587,10 @@ TEST(Sealed, BF) {
 
     int64_t N = 100000;
     auto base = GenRandomFloatVecs(N, dim);
-    auto base_arr = transfer_to_fields_data(base);
-    base_arr->set_type(proto::schema::DataType::FloatVector);
+    auto meta = schema->get_fields().at(fake_id);
+    auto base_arr = transfer_to_fields_data(base, meta, dim);
 
-    LoadFieldDataInfo load_info{100, base_arr.get(), N};
+    LoadFieldDataInfo load_info{100, &base_arr, N};
 
     auto dataset = DataGen(schema, N);
     auto segment = CreateSealedSegment(schema);
@@ -631,13 +636,13 @@ TEST(Sealed, BF_Overflow) {
     schema->set_primary_field_id(i64_fid);
 
     int64_t N = 10;
+    FieldMeta meta = schema->get_fields().at(fake_id);
     auto base = GenMaxFloatVecs(N, dim);
-    auto base_arr = transfer_to_fields_data(base);
-    base_arr->set_type(proto::schema::DataType::FloatVector);
-    LoadFieldDataInfo load_info{100, base_arr.get(), N};
+    auto data_array = transfer_to_fields_data(base, meta, dim);
+    LoadFieldDataInfo load_info{100, &data_array, N};
     auto dataset = DataGen(schema, N);
     auto segment = CreateSealedSegment(schema);
-    std::cout<< fake_id.get() <<std::endl;
+    std::cout << fake_id.get() << std::endl;
     SealedLoadFieldData(dataset, *segment, {fake_id.get()});
 
     segment->LoadFieldData(load_info);

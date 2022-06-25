@@ -336,6 +336,8 @@ func (loader *segmentLoader) loadGrowingSegmentFields(segment *Segment, fieldBin
 			return errors.New("cannot get row ids from insert data")
 		}
 
+		delete(insertData.Data, common.TimeStampField)
+		delete(insertData.Data, common.RowIDField)
 		return loader.loadGrowingSegments(segment, rowIDData.(*storage.Int64FieldData).Data, utss, insertData)
 
 	default:
@@ -533,8 +535,12 @@ func (loader *segmentLoader) loadGrowingSegments(segment *Segment,
 	}
 	segment.updateBloomFilter(pks)
 
+	collection, err := loader.metaReplica.getCollectionByID(segment.collectionID)
+	if err != nil {
+		return err
+	}
 	// 3. do insert
-	err = segment.segmentInsert(offset, ids, timestamps, insertRecord)
+	err = segment.segmentInsert(offset, ids, timestamps, collection.schema.Fields, insertRecord)
 	if err != nil {
 		return err
 	}

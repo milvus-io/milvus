@@ -70,7 +70,7 @@ TEST(SegmentCoreTest, MockTest2) {
     auto dataset = DataGen(schema, N);
     auto segment = CreateGrowingSegment(schema);
     auto reserved_begin = segment->PreInsert(N);
-    segment->Insert(reserved_begin, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
+    segment->Insert(reserved_begin, N, dataset.get_raw_row_ids(), dataset.get_raw_timestamps(), dataset.raw_.get());
 }
 
 TEST(SegmentCoreTest, SmallIndex) {

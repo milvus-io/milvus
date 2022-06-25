@@ -11,10 +11,12 @@
 
 #include "SegmentSealedImpl.h"
 #include "common/Consts.h"
+#include "common/ArrowConverter.h"
 #include "query/SearchBruteForce.h"
 #include "query/SearchOnSealed.h"
 #include "query/ScalarIndex.h"
 #include "Utils.h"
+#include "log/Log.h"
 
 namespace milvus::segcore {
 
@@ -180,23 +182,24 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
     if (SystemProperty::Instance().IsSystem(field_id)) {
         auto system_field_type = SystemProperty::Instance().GetSystemFieldType(field_id);
         if (system_field_type == SystemFieldType::Timestamp) {
-            auto timestamps = reinterpret_cast<const Timestamp*>(info.field_data->scalars().long_data().data().data());
+            auto source_data = arrow::UInt64Array(info.field_data->data->data());
 
             TimestampIndex index;
             auto min_slice_length = size < 4096 ? 1 : 4096;
-            auto meta = GenerateFakeSlices(timestamps, size, min_slice_length);
+            auto meta = GenerateFakeSlices(source_data.raw_values(), size, min_slice_length);
             index.set_length_meta(std::move(meta));
-            index.build_with(timestamps, size);
+            index.build_with(source_data.raw_values(), size);
 
             // use special index
             std::unique_lock lck(mutex_);
             AssertInfo(insert_record_.timestamps_.empty(), "already exists");
-            insert_record_.timestamps_.fill_chunk_data(timestamps, size);
+            insert_record_.timestamps_.fill_chunk_data(source_data.raw_values(), size);
             insert_record_.timestamp_index_ = std::move(index);
             AssertInfo(insert_record_.timestamps_.num_chunk() == 1, "num chunk not equal to 1 for sealed segment");
         } else {
             AssertInfo(system_field_type == SystemFieldType::RowId, "System field type of id column is not RowId");
-            auto row_ids = reinterpret_cast<const idx_t*>(info.field_data->scalars().long_data().data().data());
+            auto source_data = arrow::Int64Array(info.field_data->data->data());
+            auto row_ids = source_data.raw_values();
             // write data under lock
             std::unique_lock lck(mutex_);
             AssertInfo(insert_record_.row_ids_.empty(), "already exists");
@@ -206,10 +209,10 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
         ++system_ready_count_;
     } else {
         // prepare data
-        auto& field_meta = schema_->operator[](field_id);
-        auto data_type = field_meta.get_data_type();
-        AssertInfo(data_type == DataType(info.field_data->type()),
-                   "field type of load data is inconsistent with the schema");
+        auto& field_meta = (*schema_)[field_id];
+        auto arrow_meta = ToArrowField(field_meta);
+        AssertInfo(arrow_meta->type()->Equals(info.field_data->field->type()),
+                   "field of load data is inconsistent with the schema");
 
         // write data under lock
         std::unique_lock lck(mutex_);
@@ -228,7 +231,7 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
             AssertInfo(field_id.get() != -1, "Primary key is -1");
             AssertInfo(insert_record_.empty_pks(), "already exists");
             std::vector<PkType> pks(size);
-            ParsePksFromFieldData(pks, *info.field_data);
+            ParsePksFromIDs(pks, field_meta.get_data_type(), *info.field_data->data);
             for (int i = 0; i < size; ++i) {
                 insert_record_.insert_pk(pks[i], i);
             }
@@ -455,11 +458,11 @@ SegmentSealedImpl::check_search(const query::Plan* plan) const {
 }
 
 SegmentSealedImpl::SegmentSealedImpl(SchemaPtr schema, int64_t segment_id)
-    : schema_(schema),
-      insert_record_(*schema, MAX_ROW_COUNT),
-      field_data_ready_bitset_(schema->size()),
+    : field_data_ready_bitset_(schema->size()),
       index_ready_bitset_(schema->size()),
       scalar_indexings_(schema->size()),
+      insert_record_(*schema, MAX_ROW_COUNT),
+      schema_(schema),
       id_(segment_id) {
 }
 
@@ -504,7 +507,7 @@ SegmentSealedImpl::bulk_subscript_impl(
     }
 }
 
-std::unique_ptr<DataArray>
+std::unique_ptr<milvus::proto::schema::FieldData>
 SegmentSealedImpl::fill_with_empty(FieldId field_id, int64_t count) const {
     auto& field_meta = schema_->operator[](field_id);
     switch (field_meta.get_data_type()) {
@@ -553,7 +556,7 @@ SegmentSealedImpl::fill_with_empty(FieldId field_id, int64_t count) const {
     }
 }
 
-std::unique_ptr<DataArray>
+std::unique_ptr<milvus::proto::schema::FieldData>
 SegmentSealedImpl::bulk_subscript(FieldId field_id, const int64_t* seg_offsets, int64_t count) const {
     auto& field_meta = schema_->operator[](field_id);
     // if count == 0, return empty data array
@@ -652,9 +655,8 @@ SegmentSealedImpl::HasFieldData(FieldId field_id) const {
     }
 }
 
-std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
+std::pair<std::shared_ptr<IdArray>, std::vector<SegOffset>>
 SegmentSealedImpl::search_ids(const IdArray& id_array, Timestamp timestamp) const {
-    AssertInfo(id_array.has_int_id(), "Id array doesn't have int_id element");
     auto field_id = schema_->get_primary_field_id().value_or(FieldId(-1));
     AssertInfo(field_id.get() != -1, "Primary key is -1");
     auto& field_meta = schema_->operator[](field_id);
@@ -663,18 +665,20 @@ SegmentSealedImpl::search_ids(const IdArray& id_array, Timestamp timestamp) cons
     std::vector<PkType> pks(ids_size);
     ParsePksFromIDs(pks, data_type, id_array);
 
-    auto res_id_arr = std::make_unique<IdArray>();
+    std::shared_ptr<arrow::Array> res_id_arr;
     std::vector<SegOffset> res_offsets;
+    auto int_builder = arrow::Int64Builder();
+    auto str_builder = arrow::StringBuilder();
     for (auto pk : pks) {
         auto segOffsets = insert_record_.search_pk(pk, timestamp);
         for (auto offset : segOffsets) {
             switch (data_type) {
                 case DataType::INT64: {
-                    res_id_arr->mutable_int_id()->add_data(std::get<int64_t>(pk));
+                    int_builder.Append(std::get<int64_t>(pk));
                     break;
                 }
                 case DataType::VARCHAR: {
-                    res_id_arr->mutable_str_id()->add_data(std::get<std::string>(pk));
+                    str_builder.Append(std::get<std::string>(pk));
                     break;
                 }
                 default: {
@@ -682,6 +686,19 @@ SegmentSealedImpl::search_ids(const IdArray& id_array, Timestamp timestamp) cons
                 }
             }
             res_offsets.push_back(offset);
+        }
+    }
+    switch (data_type) {
+        case DataType::INT64: {
+            res_id_arr = int_builder.Finish().ValueOrDie();
+            break;
+        }
+        case DataType::VARCHAR: {
+            res_id_arr = str_builder.Finish().ValueOrDie();
+            break;
+        }
+        default: {
+            PanicInfo("unsupported type");
         }
     }
     return {std::move(res_id_arr), std::move(res_offsets)};
@@ -732,7 +749,7 @@ SegmentSealedImpl::search_ids(const BitsetType& bitset, Timestamp timestamp) con
 std::vector<SegOffset>
 SegmentSealedImpl::search_ids(const BitsetView& bitset, Timestamp timestamp) const {
     std::vector<SegOffset> dst_offset;
-    for (int i = 0; i < bitset.size(); i++) {
+    for (size_t i = 0; i < bitset.size(); i++) {
         if (!bitset.test(i)) {
             auto offset = SegOffset(i);
             if (insert_record_.timestamps_[offset.get()] <= timestamp) {

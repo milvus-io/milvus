@@ -34,9 +34,9 @@ struct LoadIndexInfo {
 // NOTE: Refer to common/SystemProperty.cpp for details
 // TODO: use arrow to pass field data instead of proto
 struct LoadFieldDataInfo {
-    int64_t field_id;
+    int64_t field_id = -1;
     //    const void* blob = nullptr;
-    const milvus::DataArray* field_data;
+    const milvus::DataArray* field_data = nullptr;
     int64_t row_count = -1;
 };
 

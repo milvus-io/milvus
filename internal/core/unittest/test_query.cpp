@@ -173,7 +173,7 @@ TEST(Query, ExecWithPredicateLoader) {
     auto dataset = DataGen(schema, N);
     auto segment = CreateGrowingSegment(schema);
     segment->PreInsert(N);
-    segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
+    segment->Insert(0, N, dataset.get_raw_row_ids(), dataset.get_raw_timestamps(), dataset.raw_.get());
 
     auto plan = CreatePlan(*schema, dsl);
     auto num_queries = 5;
@@ -251,7 +251,7 @@ TEST(Query, ExecWithPredicateSmallN) {
     auto dataset = DataGen(schema, N);
     auto segment = CreateGrowingSegment(schema);
     segment->PreInsert(N);
-    segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
+    segment->Insert(0, N, dataset.get_raw_row_ids(), dataset.get_raw_timestamps(), dataset.raw_.get());
 
     auto plan = CreatePlan(*schema, dsl);
     auto num_queries = 5;
@@ -305,7 +305,7 @@ TEST(Query, ExecWithPredicate) {
     auto dataset = DataGen(schema, N);
     auto segment = CreateGrowingSegment(schema);
     segment->PreInsert(N);
-    segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
+    segment->Insert(0, N, dataset.get_raw_row_ids(), dataset.get_raw_timestamps(), dataset.raw_.get());
 
     auto plan = CreatePlan(*schema, dsl);
     auto num_queries = 5;
@@ -382,7 +382,7 @@ TEST(Query, ExecTerm) {
     auto dataset = DataGen(schema, N);
     auto segment = CreateGrowingSegment(schema);
     segment->PreInsert(N);
-    segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
+    segment->Insert(0, N, dataset.get_raw_row_ids(), dataset.get_raw_timestamps(), dataset.raw_.get());
 
     auto plan = CreatePlan(*schema, dsl);
     auto num_queries = 3;
@@ -476,7 +476,7 @@ TEST(Query, ExecWithoutPredicateFlat) {
     auto dataset = DataGen(schema, N);
     auto segment = CreateGrowingSegment(schema);
     segment->PreInsert(N);
-    segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
+    segment->Insert(0, N, dataset.get_raw_row_ids(), dataset.get_raw_timestamps(), dataset.raw_.get());
 
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
@@ -522,7 +522,7 @@ TEST(Query, ExecWithoutPredicate) {
     auto dataset = DataGen(schema, N);
     auto segment = CreateGrowingSegment(schema);
     segment->PreInsert(N);
-    segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
+    segment->Insert(0, N, dataset.get_raw_row_ids(), dataset.get_raw_timestamps(), dataset.raw_.get());
 
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
@@ -592,7 +592,7 @@ TEST(Indexing, InnerProduct) {
     auto segment = CreateGrowingSegment(schema);
     auto plan = CreatePlan(*schema, dsl);
     segment->PreInsert(N);
-    segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
+    segment->Insert(0, N, dataset.get_raw_row_ids(), dataset.get_raw_timestamps(), dataset.raw_.get());
     auto col = dataset.get_col<float>(vec_fid);
 
     auto ph_group_raw = CreatePlaceholderGroupFromBlob(num_queries, 16, col.data());
@@ -656,7 +656,7 @@ TEST(Query, FillSegment) {
     segments.emplace_back([&] {
         auto segment = CreateGrowingSegment(schema);
         segment->PreInsert(N);
-        segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
+        segment->Insert(0, N, dataset.get_raw_row_ids(), dataset.get_raw_timestamps(), dataset.raw_.get());
         return segment;
     }());
     segments.emplace_back([&] {
@@ -791,7 +791,7 @@ TEST(Query, ExecWithPredicateBinary) {
     auto dataset = DataGen(schema, N);
     auto segment = CreateGrowingSegment(schema);
     segment->PreInsert(N);
-    segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
+    segment->Insert(0, N, dataset.get_raw_row_ids(), dataset.get_raw_timestamps(), dataset.raw_.get());
     auto vec_ptr = dataset.get_col<uint8_t>(vec_fid);
 
     auto plan = CreatePlan(*schema, dsl);

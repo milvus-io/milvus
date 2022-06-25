@@ -107,7 +107,7 @@ class SegmentSealedImpl : public SegmentSealed {
 
     // Calculate: output[i] = Vec[seg_offset[i]]
     // where Vec is determined from field_offset
-    std::unique_ptr<DataArray>
+    std::unique_ptr<milvus::proto::schema::FieldData>
     bulk_subscript(FieldId field_id, const int64_t* seg_offsets, int64_t count) const override;
 
     void
@@ -125,7 +125,7 @@ class SegmentSealedImpl : public SegmentSealed {
     bulk_subscript_impl(
         int64_t element_sizeof, const void* src_raw, const int64_t* seg_offsets, int64_t count, void* dst_raw);
 
-    std::unique_ptr<DataArray>
+    std::unique_ptr<milvus::proto::schema::FieldData>
     fill_with_empty(FieldId field_id, int64_t count) const;
 
     void
@@ -162,7 +162,7 @@ class SegmentSealedImpl : public SegmentSealed {
         return deleted_record_;
     }
 
-    std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
+    std::pair<std::shared_ptr<IdArray>, std::vector<SegOffset>>
     search_ids(const IdArray& id_array, Timestamp timestamp) const override;
 
     std::vector<SegOffset>

@@ -71,7 +71,7 @@ struct SearchResult {
     // size(primary_keys_)
 
     // set output fields data when fill target entity
-    std::map<FieldId, std::unique_ptr<milvus::DataArray>> output_fields_data_;
+    std::map<FieldId, std::unique_ptr<milvus::proto::schema::FieldData>> output_fields_data_;
 
     // used for reduce, filter invalid pk, get real topks count
     std::vector<int64_t> real_topK_per_nq_;
