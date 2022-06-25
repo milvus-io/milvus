@@ -664,7 +664,7 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 
 			// triggerTask may be LoadCollection, LoadPartitions, LoadBalance, Handoff
 			if triggerTask.getResultInfo().ErrorCode == commonpb.ErrorCode_Success || triggerTask.getTriggerCondition() == querypb.TriggerCondition_NodeDown {
-				err = updateSegmentInfoFromTask(scheduler.ctx, triggerTask, scheduler.meta)
+				err = updateMetaFromTask(scheduler.ctx, triggerTask, scheduler.meta)
 				if err != nil {
 					triggerTask.setResultInfo(err)
 				}
@@ -917,18 +917,18 @@ func (scheduler *TaskScheduler) BindContext(ctx context.Context) (context.Contex
 	return nCtx, cancel
 }
 
-func updateSegmentInfoFromTask(ctx context.Context, triggerTask task, meta Meta) error {
+func updateMetaFromTask(ctx context.Context, triggerTask task, meta Meta) error {
 	segmentInfosToSave := make(map[UniqueID][]*querypb.SegmentInfo)
 	segmentInfosToRemove := make(map[UniqueID][]*querypb.SegmentInfo)
 
 	//var sealedSegmentChangeInfos col2SealedSegmentChangeInfos
-	var err error
 	switch triggerTask.msgType() {
 	case commonpb.MsgType_ReleaseCollection:
 		// release all segmentInfo of the collection when release collection
 		req := triggerTask.(*releaseCollectionTask).ReleaseCollectionRequest
 		collectionID := req.CollectionID
-		_, err = meta.removeGlobalSealedSegInfos(collectionID, nil)
+		_, err := meta.removeGlobalSealedSegInfos(collectionID, nil)
+		return err
 
 	case commonpb.MsgType_ReleasePartitions:
 		// release all segmentInfo of the partitions when release partitions
@@ -943,72 +943,139 @@ func updateSegmentInfoFromTask(ctx context.Context, triggerTask task, meta Meta)
 				segmentInfosToRemove[collectionID] = append(segmentInfosToRemove[collectionID], info)
 			}
 		}
-		_, err = meta.removeGlobalSealedSegInfos(collectionID, req.PartitionIDs)
+		_, err := meta.removeGlobalSealedSegInfos(collectionID, req.PartitionIDs)
+		return err
 
 	default:
-		// save new segmentInfo when load segment
 		var (
-			segments = make(map[UniqueID]*querypb.SegmentInfo)
+			loadSegmentTasks    = make([]*loadSegmentTask, 0, len(triggerTask.getChildTask()))
+			watchDmChannelTasks = make([]*watchDmChannelTask, 0)
 		)
 
 		for _, childTask := range triggerTask.getChildTask() {
 			if childTask.msgType() == commonpb.MsgType_LoadSegments {
-				req := childTask.(*loadSegmentTask).LoadSegmentsRequest
-				dstNodeID := req.DstNodeID
-				for _, loadInfo := range req.Infos {
-					collectionID := loadInfo.CollectionID
-					segmentID := loadInfo.SegmentID
+				loadSegmentTasks = append(loadSegmentTasks, childTask.(*loadSegmentTask))
 
-					segment, saved := segments[segmentID]
-					if !saved {
-						segment, err = meta.getSegmentInfoByID(segmentID)
-						if err != nil {
-							segment = &querypb.SegmentInfo{
-								SegmentID:      segmentID,
-								CollectionID:   collectionID,
-								PartitionID:    loadInfo.PartitionID,
-								DmChannel:      loadInfo.InsertChannel,
-								SegmentState:   commonpb.SegmentState_Sealed,
-								CompactionFrom: loadInfo.CompactionFrom,
-								ReplicaIds:     []UniqueID{},
-								NodeIds:        []UniqueID{},
-								NumRows:        loadInfo.NumOfRows,
-							}
-						}
-					}
-					segment.ReplicaIds = append(segment.ReplicaIds, req.ReplicaID)
-					segment.ReplicaIds = uniqueSlice(segment.GetReplicaIds())
-					replicas, err := meta.getReplicasByCollectionID(collectionID)
-					if err != nil {
-						return err
-					}
-					addNode2Segment(meta, dstNodeID, replicas, segment)
-
-					segments[segmentID] = segment
-
-					if _, ok := segmentInfosToSave[collectionID]; !ok {
-						segmentInfosToSave[collectionID] = make([]*querypb.SegmentInfo, 0)
-					}
-
-					if !saved {
-						segmentInfosToSave[collectionID] = append(segmentInfosToSave[collectionID], segment)
-					}
-				}
+			} else if childTask.msgType() == commonpb.MsgType_WatchDmChannels {
+				watchDmChannelTasks = append(watchDmChannelTasks, childTask.(*watchDmChannelTask))
 			}
+		}
+
+		segments, err := getSegmentsFromLoadTasks(meta, loadSegmentTasks)
+		if err != nil {
+			return err
+		}
+
+		for _, segment := range segments {
+			collectionID := segment.CollectionID
+			if _, ok := segmentInfosToSave[collectionID]; !ok {
+				segmentInfosToSave[collectionID] = make([]*querypb.SegmentInfo, 0)
+			}
+
+			segmentInfosToSave[collectionID] = append(segmentInfosToSave[collectionID], segment)
 		}
 
 		log.Info("update segment info",
 			zap.Int64("triggerTaskID", triggerTask.getTaskID()),
 			zap.Any("segment", segmentInfosToSave))
 		_, err = meta.saveGlobalSealedSegInfos(segmentInfosToSave)
+		if err != nil {
+			return err
+		}
+
+		dmChannels, err := getDmChannelsFromLoadTasks(meta, watchDmChannelTasks)
+		if err != nil {
+			return err
+		}
+
+		saveDmChannels := make([]*querypb.DmChannelWatchInfo, 0, len(dmChannels))
+		for _, dmc := range dmChannels {
+			saveDmChannels = append(saveDmChannels, dmc)
+		}
+		return meta.setDmChannelInfos(saveDmChannels...)
+	}
+}
+
+func getSegmentsFromLoadTasks(meta Meta, tasks []*loadSegmentTask) (map[UniqueID]*querypb.SegmentInfo, error) {
+	var (
+		segments = make(map[UniqueID]*querypb.SegmentInfo)
+		err      error
+	)
+
+	for _, task := range tasks {
+		req := task.LoadSegmentsRequest
+		dstNodeID := req.DstNodeID
+		for _, loadInfo := range req.Infos {
+			collectionID := loadInfo.CollectionID
+			segmentID := loadInfo.SegmentID
+
+			segment, saved := segments[segmentID]
+			if !saved {
+				segment, err = meta.getSegmentInfoByID(segmentID)
+				if err != nil {
+					segment = &querypb.SegmentInfo{
+						SegmentID:      segmentID,
+						CollectionID:   collectionID,
+						PartitionID:    loadInfo.PartitionID,
+						DmChannel:      loadInfo.InsertChannel,
+						SegmentState:   commonpb.SegmentState_Sealed,
+						CompactionFrom: loadInfo.CompactionFrom,
+						ReplicaIds:     []UniqueID{},
+						NodeIds:        []UniqueID{},
+						NumRows:        loadInfo.NumOfRows,
+					}
+				}
+			}
+			segment.ReplicaIds = append(segment.ReplicaIds, req.ReplicaID)
+			segment.ReplicaIds = uniqueSlice(segment.GetReplicaIds())
+			replicas, err := meta.getReplicasByCollectionID(collectionID)
+			if err != nil {
+				return nil, err
+			}
+			addNode2Segment(meta, dstNodeID, replicas, segment)
+
+			segments[segmentID] = segment
+		}
 	}
 
-	// no need to rollback since etcd meta is not changed
-	if err != nil {
-		return err
+	return segments, nil
+}
+
+func getDmChannelsFromLoadTasks(meta Meta, tasks []*watchDmChannelTask) (map[string]*querypb.DmChannelWatchInfo, error) {
+	var (
+		dmChannels = make(map[string]*querypb.DmChannelWatchInfo)
+		ok         bool
+	)
+
+	for _, task := range tasks {
+		req := task.WatchDmChannelsRequest
+		dstNodeID := req.NodeID
+		for _, info := range req.Infos {
+			collectionID := info.CollectionID
+			channelName := info.ChannelName
+
+			dmc, saved := dmChannels[channelName]
+			if !saved {
+				dmc, ok = meta.getDmChannel(channelName)
+				if !ok {
+					dmc = &querypb.DmChannelWatchInfo{
+						CollectionID: collectionID,
+						DmChannel:    info.ChannelName,
+						NodeIds:      []UniqueID{},
+					}
+				}
+			}
+			replicas, err := meta.getReplicasByCollectionID(collectionID)
+			if err != nil {
+				return nil, err
+			}
+			addNode2DmChannel(meta, dstNodeID, replicas, dmc)
+
+			dmChannels[channelName] = dmc
+		}
 	}
 
-	return nil
+	return dmChannels, nil
 }
 
 func reverseSealedSegmentChangeInfo(changeInfosMap map[UniqueID]*querypb.SealedSegmentsChangeInfo) map[UniqueID]*querypb.SealedSegmentsChangeInfo {

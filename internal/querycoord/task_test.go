@@ -804,7 +804,7 @@ func Test_reverseSealedSegmentChangeInfo(t *testing.T) {
 	queryCoord.meta.setKvClient(kv)
 
 	assert.Panics(t, func() {
-		updateSegmentInfoFromTask(ctx, parentTask, queryCoord.meta)
+		updateMetaFromTask(ctx, parentTask, queryCoord.meta)
 	})
 
 	queryCoord.Stop()

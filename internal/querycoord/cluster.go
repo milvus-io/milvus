@@ -299,35 +299,7 @@ func (c *queryNodeCluster) WatchDmChannels(ctx context.Context, nodeID int64, in
 	c.RUnlock()
 
 	if targetNode != nil {
-		err := targetNode.watchDmChannels(ctx, in)
-		if err != nil {
-			return err
-		}
-
-		dmChannelWatchInfo := make([]*querypb.DmChannelWatchInfo, len(in.Infos))
-		for index, info := range in.Infos {
-			nodes := []UniqueID{nodeID}
-
-			old, ok := c.clusterMeta.getDmChannel(info.ChannelName)
-			if ok {
-				nodes = append(nodes, old.NodeIds...)
-			}
-
-			dmChannelWatchInfo[index] = &querypb.DmChannelWatchInfo{
-				CollectionID: info.CollectionID,
-				DmChannel:    info.ChannelName,
-				ReplicaID:    in.ReplicaID,
-				NodeIds:      nodes,
-			}
-		}
-
-		err = c.clusterMeta.setDmChannelInfos(dmChannelWatchInfo...)
-		if err != nil {
-			// TODO DML channel maybe leaked, need to release dml if no related segment
-			return err
-		}
-
-		return nil
+		return targetNode.watchDmChannels(ctx, in)
 	}
 	return fmt.Errorf("watchDmChannels: can't find QueryNode by nodeID, nodeID = %d", nodeID)
 }
@@ -438,13 +410,10 @@ func (c *queryNodeCluster) GetSegmentInfoByID(ctx context.Context, segmentID Uni
 }
 
 func (c *queryNodeCluster) GetSegmentInfo(ctx context.Context, in *querypb.GetSegmentInfoRequest) ([]*querypb.SegmentInfo, error) {
-	type respTuple struct {
-		res *querypb.GetSegmentInfoResponse
-		err error
-	}
-
 	var (
 		segmentInfos []*querypb.SegmentInfo
+		res          *querypb.GetSegmentInfoResponse
+		err          error
 	)
 
 	// Fetch sealed segments from Meta
@@ -457,46 +426,60 @@ func (c *queryNodeCluster) GetSegmentInfo(ctx context.Context, in *querypb.GetSe
 
 			segmentInfos = append(segmentInfos, segment)
 		}
-	} else {
-		allSegments := c.clusterMeta.showSegmentInfos(in.CollectionID, nil)
-		for _, segment := range allSegments {
-			if in.CollectionID == 0 || segment.CollectionID == in.CollectionID {
-				segmentInfos = append(segmentInfos, segment)
-			}
+		return segmentInfos, nil
+	}
+
+	allSegments := c.clusterMeta.showSegmentInfos(in.CollectionID, nil)
+	for _, segment := range allSegments {
+		if in.CollectionID == 0 || segment.CollectionID == in.CollectionID {
+			segmentInfos = append(segmentInfos, segment)
 		}
 	}
+
+	sealedSegmentNum := len(segmentInfos)
 
 	// Fetch growing segments
+	replicas, err := c.clusterMeta.getReplicasByCollectionID(in.CollectionID)
+	if err != nil {
+		return nil, err
+	}
+
 	c.RLock()
-	var wg sync.WaitGroup
-	cnt := len(c.nodes)
-	resChan := make(chan respTuple, cnt)
-	wg.Add(cnt)
-	for _, node := range c.nodes {
-		go func(node Node) {
-			defer wg.Done()
-			res, err := node.getSegmentInfo(ctx, in)
-			resChan <- respTuple{
-				res: res,
-				err: err,
+	var hasAvailableReplica bool
+	for _, replica := range replicas {
+		hasAvailableReplica = true
+		for _, shard := range replica.ShardReplicas {
+			node, ok := c.nodes[shard.LeaderID]
+			if !ok {
+				hasAvailableReplica = false
+				break
 			}
-		}(node)
+
+			res, err = node.getSegmentInfo(ctx, in)
+			if err != nil {
+				hasAvailableReplica = false
+				break
+			}
+
+			segments := res.GetInfos()
+			for _, segment := range segments {
+				if segment.SegmentState == commonpb.SegmentState_Growing {
+					segmentInfos = append(segmentInfos, segment)
+				}
+			}
+		}
+
+		if hasAvailableReplica {
+			break
+		} else { // Abort the partial growing segments
+			segmentInfos = segmentInfos[:sealedSegmentNum]
+		}
 	}
 	c.RUnlock()
-	wg.Wait()
-	close(resChan)
 
-	for tuple := range resChan {
-		if tuple.err != nil {
-			return nil, tuple.err
-		}
-
-		segments := tuple.res.GetInfos()
-		for _, segment := range segments {
-			if segment.SegmentState != commonpb.SegmentState_Sealed {
-				segmentInfos = append(segmentInfos, segment)
-			}
-		}
+	// Return the last error if no available replica
+	if !hasAvailableReplica {
+		return nil, err
 	}
 
 	//TODO::update meta

@@ -870,7 +870,7 @@ func (m *MetaReplica) setDmChannelInfos(dmChannelWatchInfos ...*querypb.DmChanne
 	m.dmChannelMu.Lock()
 	defer m.dmChannelMu.Unlock()
 
-	err := saveDmChannelWatchInfos(dmChannelWatchInfos, m.getKvClient())
+	err := saveDmChannelWatchInfos(m.getKvClient(), dmChannelWatchInfos...)
 	if err != nil {
 		return err
 	}
@@ -879,6 +879,20 @@ func (m *MetaReplica) setDmChannelInfos(dmChannelWatchInfos ...*querypb.DmChanne
 	}
 
 	return nil
+}
+
+func saveDmChannelWatchInfos(meta kv.MetaKv, infos ...*querypb.DmChannelWatchInfo) error {
+	kvs := make(map[string]string)
+	for _, info := range infos {
+		infoBytes, err := proto.Marshal(info)
+		if err != nil {
+			return err
+		}
+
+		key := fmt.Sprintf("%s/%d/%s", dmChannelMetaPrefix, info.CollectionID, info.DmChannel)
+		kvs[key] = string(infoBytes)
+	}
+	return meta.MultiSave(kvs)
 }
 
 // createQueryChannel creates topic names for search channel and search result channel
@@ -1247,20 +1261,6 @@ func saveDeltaChannelInfo(collectionID UniqueID, infos []*datapb.VchannelInfo, k
 	return kv.MultiSave(kvs)
 }
 
-func saveDmChannelWatchInfos(infos []*querypb.DmChannelWatchInfo, kv kv.MetaKv) error {
-	kvs := make(map[string]string)
-	for _, info := range infos {
-		infoBytes, err := proto.Marshal(info)
-		if err != nil {
-			return err
-		}
-
-		key := fmt.Sprintf("%s/%d/%s", dmChannelMetaPrefix, info.CollectionID, info.DmChannel)
-		kvs[key] = string(infoBytes)
-	}
-	return kv.MultiSave(kvs)
-}
-
 func saveReplicaInfo(info *milvuspb.ReplicaInfo, kv kv.MetaKv) error {
 	infoBytes, err := proto.Marshal(info)
 	if err != nil {
@@ -1334,6 +1334,31 @@ func addNode2Segment(meta Meta, node UniqueID, replicas []*milvuspb.ReplicaInfo,
 	}
 
 	segment.NodeIds = append(segment.NodeIds, node)
+}
+
+func addNode2DmChannel(meta Meta, node UniqueID, replicas []*milvuspb.ReplicaInfo, dmc *querypb.DmChannelWatchInfo) {
+	for _, oldNode := range dmc.NodeIds {
+		isInReplica := false
+		for _, replica := range replicas {
+			if nodeIncluded(oldNode, replica.NodeIds) {
+				// new node is in the same replica, replace the old ones
+				if nodeIncluded(node, replica.NodeIds) {
+					break
+				}
+
+				// The old node is not the offline one
+				isInReplica = true
+				break
+			}
+		}
+
+		if !isInReplica {
+			dmc.NodeIds = removeFromSlice(dmc.NodeIds, oldNode)
+			break
+		}
+	}
+
+	dmc.NodeIds = append(dmc.NodeIds, node)
 }
 
 // getDataSegmentInfosByIDs return the SegmentInfo details according to the given ids through RPC to datacoord
