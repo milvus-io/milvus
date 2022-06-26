@@ -521,38 +521,30 @@ func (sc *ShardCluster) finishUsage(versionID int64) {
 	}
 }
 
-// HandoffSegments processes the handoff/load balance segments update procedure.
-func (sc *ShardCluster) HandoffSegments(info *querypb.SegmentChangeInfo) error {
+// ChangeSegments processes the handoff/load balance segments update procedure.
+func (sc *ShardCluster) ChangeSegments(onlines []*querypb.SegmentAllocation, offlines []*querypb.SegmentAllocation) error {
 	// wait for all OnlineSegment is loaded
-	onlineSegmentIDs := make([]int64, 0, len(info.OnlineSegments))
-	onlineSegments := make([]shardSegmentInfo, 0, len(info.OnlineSegments))
-	for _, seg := range info.OnlineSegments {
-		// filter out segments not maintained in this cluster
-		if seg.GetCollectionID() != sc.collectionID || seg.GetDmChannel() != sc.vchannelName {
-			continue
-		}
+	onlineSegmentIDs := make([]int64, 0, len(onlines))
+	onlineSegments := make([]shardSegmentInfo, 0, len(onlines))
+	for _, seg := range onlines {
 		onlineSegments = append(onlineSegments, shardSegmentInfo{
-			nodeID:    seg.GetNodeID(),
-			segmentID: seg.GetSegmentID(),
+			nodeID:    seg.GetNodeId(),
+			segmentID: seg.GetSegmentId(),
 		})
-		onlineSegmentIDs = append(onlineSegmentIDs, seg.GetSegmentID())
+		onlineSegmentIDs = append(onlineSegmentIDs, seg.GetSegmentId())
 	}
 	sc.waitSegmentsOnline(onlineSegments)
 
 	// now online segment can provide service, generate a new version
 	// add segmentChangeInfo to pending list
-	versionID := sc.applySegmentChange(info, onlineSegmentIDs)
+	versionID := sc.applySegmentChange(onlines, offlines)
 
 	removes := make(map[int64][]int64) // nodeID => []segmentIDs
 	// remove offline segments record
-	for _, seg := range info.OfflineSegments {
-		// filter out segments not maintained in this cluster
-		if seg.GetCollectionID() != sc.collectionID || seg.GetDmChannel() != sc.vchannelName {
-			continue
-		}
-		sc.removeSegment(shardSegmentInfo{segmentID: seg.GetSegmentID(), nodeID: seg.GetNodeID()})
+	for _, seg := range offlines {
+		sc.removeSegment(shardSegmentInfo{segmentID: seg.GetSegmentId(), nodeID: seg.GetNodeId()})
 
-		removes[seg.GetNodeID()] = append(removes[seg.GetNodeID()], seg.SegmentID)
+		removes[seg.GetNodeId()] = append(removes[seg.GetNodeId()], seg.GetSegmentId())
 	}
 
 	var errs errorutil.ErrorList
@@ -588,8 +580,8 @@ func (sc *ShardCluster) HandoffSegments(info *querypb.SegmentChangeInfo) error {
 	return nil
 }
 
-// appendHandoff adds the change info into pending list and returns the token.
-func (sc *ShardCluster) applySegmentChange(info *querypb.SegmentChangeInfo, onlineSegmentIDs []UniqueID) int64 {
+// applySegmentChange adds the change info into pending list and returns the token.
+func (sc *ShardCluster) applySegmentChange(onlines []*querypb.SegmentAllocation, offlines []*querypb.SegmentAllocation) int64 {
 	sc.mutVersion.Lock()
 	defer sc.mutVersion.Unlock()
 
@@ -598,8 +590,8 @@ func (sc *ShardCluster) applySegmentChange(info *querypb.SegmentChangeInfo, onli
 	// remove offline segments in next version
 	// so incoming request will not have allocation of these segments
 	version := NewShardClusterVersion(versionID, sc.segments.Clone(func(segmentID int64) bool {
-		for _, offline := range info.OfflineSegments {
-			if offline.GetSegmentID() == segmentID {
+		for _, offline := range offlines {
+			if offline.GetSegmentId() == segmentID {
 				return true
 			}
 		}
@@ -625,6 +617,11 @@ func (sc *ShardCluster) applySegmentChange(info *querypb.SegmentChangeInfo, onli
 		After shard cluster is able to maintain growing semgents, this version change could
 		reduce the lock range
 	*/
+	onlineSegmentIDs := make([]int64, 0, len(onlines))
+	for _, seg := range onlines {
+		onlineSegmentIDs = append(onlineSegmentIDs, seg.GetSegmentId())
+	}
+
 	// currentVersion shall be not nil
 	if sc.currentVersion != nil {
 		// wait for last version search done

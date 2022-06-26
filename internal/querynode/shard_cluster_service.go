@@ -113,24 +113,6 @@ func (s *ShardClusterService) releaseCollection(collectionID int64) {
 	log.Info("successfully release collection", zap.Int64("collectionID", collectionID))
 }
 
-// HandoffSegments dispatch segmentChangeInfo to related shardClusters
-func (s *ShardClusterService) HandoffSegments(collectionID int64, info *querypb.SegmentChangeInfo) {
-	var wg sync.WaitGroup
-	s.clusters.Range(func(k, v interface{}) bool {
-		cs := v.(*ShardCluster)
-		if cs.collectionID == collectionID {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				cs.HandoffSegments(info)
-			}()
-		}
-		return true
-	})
-	wg.Wait()
-	log.Info("successfully handoff segments", zap.Int64("collectionID", collectionID))
-}
-
 // SyncReplicaSegments dispatches nodeID segments distribution to ShardCluster.
 func (s *ShardClusterService) SyncReplicaSegments(vchannelName string, distribution []*querypb.ReplicaSegmentsInfo) error {
 	sc, ok := s.getShardCluster(vchannelName)
@@ -143,6 +125,16 @@ func (s *ShardClusterService) SyncReplicaSegments(vchannelName string, distribut
 	return nil
 }
 
+// ChangeReplicaSegments dispatch segment change to related shard cluster.
+func (s *ShardClusterService) ChangeReplicaSegments(vchannelName string, onlines []*querypb.SegmentAllocation, offlines []*querypb.SegmentAllocation) error {
+	sc, ok := s.getShardCluster(vchannelName)
+	if !ok {
+		return fmt.Errorf("Leader of VChannel %s is not this QueryNode %d", vchannelName, s.session.ServerID)
+	}
+
+	return sc.ChangeSegments(onlines, offlines)
+}
+
 // HandoffVChannelSegments dispatches SegmentChangeInfo to related ShardCluster with VChannel
 func (s *ShardClusterService) HandoffVChannelSegments(vchannel string, info *querypb.SegmentChangeInfo) error {
 	raw, ok := s.clusters.Load(vchannel)
@@ -151,7 +143,26 @@ func (s *ShardClusterService) HandoffVChannelSegments(vchannel string, info *que
 		return nil
 	}
 	sc := raw.(*ShardCluster)
-	err := sc.HandoffSegments(info)
+
+	var onlines, offlines []*querypb.SegmentAllocation
+	for _, seg := range info.GetOnlineSegments() {
+		for _, nodeID := range seg.GetNodeIds() {
+			onlines = append(onlines, &querypb.SegmentAllocation{
+				SegmentId: seg.GetSegmentID(),
+				NodeId:    nodeID,
+			})
+		}
+	}
+	for _, seg := range info.GetOfflineSegments() {
+		for _, nodeID := range seg.GetNodeIds() {
+			offlines = append(offlines, &querypb.SegmentAllocation{
+				SegmentId: seg.GetSegmentID(),
+				NodeId:    nodeID,
+			})
+		}
+	}
+
+	err := sc.ChangeSegments(onlines, offlines)
 	if err == nil {
 		log.Info("successfully handoff ", zap.String("channel", vchannel), zap.Any("segment", info))
 	} else {

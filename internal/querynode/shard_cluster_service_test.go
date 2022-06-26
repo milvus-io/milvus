@@ -35,22 +35,6 @@ func TestShardClusterService(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestShardClusterService_HandoffSegments(t *testing.T) {
-	qn, err := genSimpleQueryNode(context.Background())
-	require.NoError(t, err)
-
-	client := v3client.New(embedetcdServer.Server)
-	defer client.Close()
-	session := sessionutil.NewSession(context.Background(), "/by-dev/sessions/unittest/querynode/", client)
-	clusterService := newShardClusterService(client, session, qn)
-
-	clusterService.addShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel)
-	//TODO change shardCluster to interface to mock test behavior
-	assert.NotPanics(t, func() {
-		clusterService.HandoffSegments(defaultCollectionID, &querypb.SegmentChangeInfo{})
-	})
-}
-
 func TestShardClusterService_SyncReplicaSegments(t *testing.T) {
 	qn, err := genSimpleQueryNode(context.Background())
 	require.NoError(t, err)
@@ -87,6 +71,51 @@ func TestShardClusterService_SyncReplicaSegments(t *testing.T) {
 		assert.Equal(t, defaultPartitionID, segment.partitionID)
 		assert.Equal(t, segmentStateLoaded, segment.state)
 	})
+}
+
+func TestShardClusterService_ChangeReplicaSegments(t *testing.T) {
+	qn, err := genSimpleQueryNode(context.Background())
+	require.NoError(t, err)
+
+	client := v3client.New(embedetcdServer.Server)
+	defer client.Close()
+	session := sessionutil.NewSession(context.Background(), "/by-dev/sessions/unittest/querynode/", client)
+	clusterService := newShardClusterService(client, session, qn)
+
+	t.Run("change non-exist shard cluster", func(t *testing.T) {
+		err := clusterService.ChangeReplicaSegments(defaultDMLChannel, nil, nil)
+		assert.Error(t, err)
+	})
+
+	t.Run("change shard cluster", func(t *testing.T) {
+		clusterService.addShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel)
+		cs, ok := clusterService.getShardCluster(defaultDMLChannel)
+		cs.mut.Lock()
+		cs.nodes[1] = &shardNode{client: &mockShardQueryNode{}}
+		cs.mut.Unlock()
+
+		err := clusterService.SyncReplicaSegments(defaultDMLChannel, []*querypb.ReplicaSegmentsInfo{
+			{
+				NodeId:      1,
+				PartitionId: defaultPartitionID,
+
+				SegmentIds: []int64{1},
+			},
+		})
+
+		require.NoError(t, err)
+
+		err = clusterService.ChangeReplicaSegments(defaultDMLChannel, []*querypb.SegmentAllocation{}, []*querypb.SegmentAllocation{
+			{SegmentId: 1, NodeId: 1},
+		})
+
+		assert.NoError(t, err)
+
+		require.True(t, ok)
+		_, ok = cs.getSegment(1)
+		assert.False(t, ok)
+	})
+
 }
 
 func TestShardClusterService_HandoffVChannelSegments(t *testing.T) {

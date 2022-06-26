@@ -53,6 +53,10 @@ func (m *QueryNodeMock) SyncReplicaSegments(ctx context.Context, req *querypb.Sy
 	return &commonpb.Status{}, nil
 }
 
+func (m *QueryNodeMock) ChangeReplicaSegments(ctx context.Context, req *querypb.ChangeReplicaSegmentsRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{}, nil
+}
+
 // TODO
 func (m *QueryNodeMock) WatchDmChannels(ctx context.Context, req *querypb.WatchDmChannelsRequest) (*commonpb.Status, error) {
 	return nil, nil

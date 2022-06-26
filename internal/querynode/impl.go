@@ -749,6 +749,33 @@ func (node *QueryNode) SyncReplicaSegments(ctx context.Context, req *querypb.Syn
 	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
 }
 
+// ChangeReplicaSegments notify shard leader incremental change of segment allocation.
+// It is guaranteed that all online segments is loaded.
+// ShardLeader shall handles the offline segments at the proper moment.
+func (node *QueryNode) ChangeReplicaSegments(ctx context.Context, req *querypb.ChangeReplicaSegmentsRequest) (*commonpb.Status, error) {
+	if !node.isHealthy() {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    msgQueryNodeIsUnhealthy(Params.QueryNodeCfg.GetNodeID()),
+		}, nil
+	}
+
+	log.Debug("Received ChangeReplicaSegments request", zap.Int64("msgID", req.GetBase().GetMsgID()), zap.String("vchannelName", req.GetVchannelName()))
+
+	err := node.ShardClusterService.ChangeReplicaSegments(req.GetVchannelName(), req.GetOnlineSegments(), req.GetOfflineSegments())
+	if err != nil {
+		log.Warn("failed to change replica segments", zap.Int64("msgID", req.GetBase().GetMsgID()), zap.String("vchannel", req.GetVchannelName()), zap.Error(err))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, nil
+	}
+
+	log.Debug("ChangeReplicaSegments Done", zap.Int64("msgID", req.GetBase().GetMsgID()), zap.String("vchannel", req.GetVchannelName()))
+
+	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
+}
+
 // GetMetrics return system infos of the query node, such as total memory, memory usage, cpu usage ...
 // TODO(dragondriver): cache the Metrics and set a retention to the cache
 func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {

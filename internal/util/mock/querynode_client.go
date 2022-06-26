@@ -101,6 +101,10 @@ func (q QueryNodeClient) SyncReplicaSegments(ctx context.Context, req *querypb.S
 	return q.grpcClient.SyncReplicaSegments(ctx, req)
 }
 
+func (q QueryNodeClient) ChangeReplicaSegments(ctx context.Context, req *querypb.ChangeReplicaSegmentsRequest) (*commonpb.Status, error) {
+	return q.grpcClient.ChangeReplicaSegments(ctx, req)
+}
+
 func (q QueryNodeClient) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return q.grpcClient.GetMetrics(ctx, req)
 }

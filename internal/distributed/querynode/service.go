@@ -308,6 +308,10 @@ func (s *Server) SyncReplicaSegments(ctx context.Context, req *querypb.SyncRepli
 	return s.querynode.SyncReplicaSegments(ctx, req)
 }
 
+func (s *Server) ChangeReplicaSegments(ctx context.Context, req *querypb.ChangeReplicaSegmentsRequest) (*commonpb.Status, error) {
+	return s.querynode.ChangeReplicaSegments(ctx, req)
+}
+
 // GetMetrics gets the metrics information of QueryNode.
 func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return s.querynode.GetMetrics(ctx, req)
