@@ -192,4 +192,4 @@ jobs:
           CCACHE_MAXSIZE: 2G
           CCACHE_DIR: ${{ github.workspace }}/.ccache
         run: |
-          mingw32-make verifiers build-go
+          mingw32-make install
