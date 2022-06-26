@@ -1,0 +1,10 @@
+libdir=/mingw64/lib
+includedir=/mingw64/include
+
+Name: Rocksdb
+Description: Rocksdb
+Version: @ROCKSDB_VERSION@
+
+Libs: -L${libdir} -lrocksdb
+Libs.private: -lz -lbz2
+Cflags: -I${includedir}
