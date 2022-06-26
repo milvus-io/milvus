@@ -118,11 +118,10 @@ func TestMetaFunc(t *testing.T) {
 		NodeIds:      []int64{nodeID},
 	}
 	meta := &MetaReplica{
-		collectionInfos:   map[UniqueID]*querypb.CollectionInfo{},
-		queryChannelInfos: map[UniqueID]*querypb.QueryChannelInfo{},
-		dmChannelInfos:    map[string]*querypb.DmChannelWatchInfo{},
-		segmentsInfo:      segmentsInfo,
-		replicas:          NewReplicaInfos(),
+		collectionInfos: map[UniqueID]*querypb.CollectionInfo{},
+		dmChannelInfos:  map[string]*querypb.DmChannelWatchInfo{},
+		segmentsInfo:    segmentsInfo,
+		replicas:        NewReplicaInfos(),
 	}
 	meta.setKvClient(kv)
 	dmChannels := []string{"testDm1", "testDm2"}
@@ -158,11 +157,6 @@ func TestMetaFunc(t *testing.T) {
 		res, err := meta.getCollectionInfoByID(defaultCollectionID)
 		assert.Nil(t, res)
 		assert.NotNil(t, err)
-	})
-
-	t.Run("Test GetQueryChannelInfoByIDFirst", func(t *testing.T) {
-		res := meta.getQueryChannelInfoByID(defaultCollectionID)
-		assert.NotNil(t, res)
 	})
 
 	t.Run("Test GetPartitionStatesByIDFail", func(t *testing.T) {
@@ -256,12 +250,6 @@ func TestMetaFunc(t *testing.T) {
 		assert.Equal(t, defaultSegmentID, infos[0].SegmentID)
 	})
 
-	t.Run("Test getQueryChannelSecond", func(t *testing.T) {
-		info := meta.getQueryChannelInfoByID(defaultCollectionID)
-		assert.NotNil(t, info.QueryChannel)
-		assert.NotNil(t, info.QueryResultChannel)
-	})
-
 	t.Run("Test GetSegmentInfoByID", func(t *testing.T) {
 		info, err := meta.getSegmentInfoByID(defaultSegmentID)
 		assert.Nil(t, err)
@@ -311,7 +299,6 @@ func TestReloadMetaFromKV(t *testing.T) {
 	meta := &MetaReplica{
 		idAllocator:       idAllocator,
 		collectionInfos:   map[UniqueID]*querypb.CollectionInfo{},
-		queryChannelInfos: map[UniqueID]*querypb.QueryChannelInfo{},
 		dmChannelInfos:    map[string]*querypb.DmChannelWatchInfo{},
 		deltaChannelInfos: map[UniqueID][]*datapb.VchannelInfo{},
 		segmentsInfo:      newSegmentsInfo(kv),
@@ -376,53 +363,6 @@ func TestReloadMetaFromKV(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, 1, len(replicas))
 	assert.Equal(t, collectionInfo.CollectionID, replicas[0].CollectionID)
-}
-
-func TestCreateQueryChannel(t *testing.T) {
-	refreshParams()
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	assert.Nil(t, err)
-	defer etcdCli.Close()
-	kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
-
-	nodeID := defaultQueryNodeID
-	segmentsInfo := newSegmentsInfo(kv)
-	segmentsInfo.segmentIDMap[defaultSegmentID] = &querypb.SegmentInfo{
-		CollectionID: defaultCollectionID,
-		PartitionID:  defaultPartitionID,
-		SegmentID:    defaultSegmentID,
-		NodeID:       nodeID,
-		NodeIds:      []int64{nodeID},
-	}
-
-	fixedQueryChannel := Params.CommonCfg.QueryCoordSearch + "-0"
-	fixedQueryResultChannel := Params.CommonCfg.QueryCoordSearchResult + "-0"
-
-	tests := []struct {
-		inID             UniqueID
-		outQueryChannel  string
-		outResultChannel string
-
-		description string
-	}{
-		{0, fixedQueryChannel, fixedQueryResultChannel, "collection ID = 0"},
-		{1, fixedQueryChannel, fixedQueryResultChannel, "collection ID = 1"},
-	}
-
-	m := &MetaReplica{
-		collectionInfos:   map[UniqueID]*querypb.CollectionInfo{},
-		queryChannelInfos: map[UniqueID]*querypb.QueryChannelInfo{},
-		dmChannelInfos:    map[string]*querypb.DmChannelWatchInfo{},
-		segmentsInfo:      segmentsInfo,
-	}
-	m.setKvClient(kv)
-	for _, test := range tests {
-		t.Run(test.description, func(t *testing.T) {
-			info := m.createQueryChannel(test.inID)
-			assert.Equal(t, info.GetQueryChannel(), test.outQueryChannel)
-			assert.Equal(t, info.GetQueryResultChannel(), test.outResultChannel)
-		})
-	}
 }
 
 func TestGetDataSegmentInfosByIDs(t *testing.T) {

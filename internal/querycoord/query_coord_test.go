@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -305,7 +306,7 @@ func TestHandoffSegmentLoop(t *testing.T) {
 			SegmentState: commonpb.SegmentState_Sealed,
 		}
 
-		key := fmt.Sprintf("%s/%d/%d/%d", handoffSegmentPrefix, defaultCollectionID, defaultPartitionID, defaultSegmentID)
+		key := fmt.Sprintf("%s/%d/%d/%d", util.HandoffSegmentPrefix, defaultCollectionID, defaultPartitionID, defaultSegmentID)
 		value, err := proto.Marshal(segmentInfo)
 		assert.Nil(t, err)
 		err = queryCoord.kvClient.Save(key, string(value))

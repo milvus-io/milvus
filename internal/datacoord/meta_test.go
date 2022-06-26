@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -325,7 +326,7 @@ func TestSaveHandoffMeta(t *testing.T) {
 	err = meta.saveSegmentInfo(segmentInfo)
 	assert.Nil(t, err)
 
-	keys, _, err := meta.client.LoadWithPrefix(handoffSegmentPrefix)
+	keys, _, err := meta.client.LoadWithPrefix(util.HandoffSegmentPrefix)
 	assert.Nil(t, err)
 	assert.Equal(t, 1, len(keys))
 	segmentID, err := strconv.ParseInt(filepath.Base(keys[0]), 10, 64)

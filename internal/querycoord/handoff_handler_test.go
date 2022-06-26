@@ -16,25 +16,9 @@
 
 package querycoord
 
-import (
-	"context"
-	"fmt"
-	"math/rand"
-	"sync/atomic"
-	"testing"
+var handoffHandlerTestDir = "/tmp/milvus_test/handoff_handler"
 
-	"github.com/golang/protobuf/proto"
-	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/stretchr/testify/assert"
-
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/util/etcd"
-)
-
-var indexCheckerTestDir = "/tmp/milvus_test/index_checker"
-
+/*
 func TestReloadFromKV(t *testing.T) {
 	refreshParams()
 	baseCtx, cancel := context.WithCancel(context.Background())
@@ -56,16 +40,16 @@ func TestReloadFromKV(t *testing.T) {
 		PartitionID:  defaultPartitionID,
 		SegmentState: commonpb.SegmentState_Sealed,
 	}
-	key := fmt.Sprintf("%s/%d/%d/%d", handoffSegmentPrefix, defaultCollectionID, defaultPartitionID, defaultSegmentID)
+	key := fmt.Sprintf("%s/%d/%d/%d", util.HandoffSegmentPrefix, defaultCollectionID, defaultPartitionID, defaultSegmentID)
 	value, err := proto.Marshal(segmentInfo)
 	assert.Nil(t, err)
 	err = kv.Save(key, string(value))
 	assert.Nil(t, err)
 
 	t.Run("Test_CollectionNotExist", func(t *testing.T) {
-		indexChecker, err := newIndexChecker(baseCtx, kv, meta, nil, nil, nil)
+		handoffHandler, err := newHandoffHandler(baseCtx, kv, meta, nil, nil, nil)
 		assert.Nil(t, err)
-		assert.Equal(t, 0, len(indexChecker.handoffReqChan))
+		assert.Equal(t, 0, len(handoffHandler.handOffTasks))
 	})
 
 	err = kv.Save(key, string(value))
@@ -74,9 +58,9 @@ func TestReloadFromKV(t *testing.T) {
 	meta.addCollection(defaultCollectionID, querypb.LoadType_LoadPartition, genDefaultCollectionSchema(false))
 
 	t.Run("Test_PartitionNotExist", func(t *testing.T) {
-		indexChecker, err := newIndexChecker(baseCtx, kv, meta, nil, nil, nil)
+		handoffHandler, err := newHandoffHandler(baseCtx, kv, meta, nil, nil, nil)
 		assert.Nil(t, err)
-		assert.Equal(t, 0, len(indexChecker.handoffReqChan))
+		assert.Equal(t, 0, len(handoffHandler.handOffTasks))
 	})
 
 	err = kv.Save(key, string(value))
@@ -84,10 +68,10 @@ func TestReloadFromKV(t *testing.T) {
 	meta.setLoadType(defaultCollectionID, querypb.LoadType_LoadCollection)
 
 	t.Run("Test_CollectionExist", func(t *testing.T) {
-		indexChecker, err := newIndexChecker(baseCtx, kv, meta, nil, nil, nil)
+		handoffHandler, err := newHandoffHandler(baseCtx, kv, meta, nil, nil, nil)
 		assert.Nil(t, err)
 		for {
-			if len(indexChecker.handoffReqChan) > 0 {
+			if len(handoffHandler.handOffTasks) > 0 {
 				break
 			}
 		}
@@ -113,10 +97,10 @@ func TestCheckIndexLoop(t *testing.T) {
 	assert.Nil(t, err)
 
 	rootCoord := newRootCoordMock(ctx)
-	indexCoord, err := newIndexCoordMock(indexCheckerTestDir)
+	indexCoord, err := newIndexCoordMock(handoffHandlerTestDir)
 	assert.Nil(t, err)
 	rootCoord.enableIndex = true
-	cm := storage.NewLocalChunkManager(storage.RootPath(indexCheckerTestDir))
+	cm := storage.NewLocalChunkManager(storage.RootPath(handoffHandlerTestDir))
 	defer cm.RemoveWithPrefix("")
 	broker, err := newGlobalMetaBroker(ctx, rootCoord, nil, indexCoord, cm)
 	assert.Nil(t, err)
@@ -127,46 +111,46 @@ func TestCheckIndexLoop(t *testing.T) {
 		PartitionID:  defaultPartitionID,
 		SegmentState: commonpb.SegmentState_Sealed,
 	}
-	key := fmt.Sprintf("%s/%d/%d/%d", handoffSegmentPrefix, defaultCollectionID, defaultPartitionID, defaultSegmentID)
+	key := fmt.Sprintf("%s/%d/%d/%d", util.HandoffSegmentPrefix, defaultCollectionID, defaultPartitionID, defaultSegmentID)
 	value, err := proto.Marshal(segmentInfo)
 	assert.Nil(t, err)
 
 	t.Run("Test_ReqInValid", func(t *testing.T) {
 		childCtx, childCancel := context.WithCancel(context.Background())
-		indexChecker, err := newIndexChecker(childCtx, kv, meta, nil, nil, broker)
+		handoffHandler, err := newHandoffHandler(childCtx, kv, meta, nil, nil, broker)
 		assert.Nil(t, err)
 
 		err = kv.Save(key, string(value))
 		assert.Nil(t, err)
-		indexChecker.enqueueHandoffReq(segmentInfo)
-		indexChecker.wg.Add(1)
-		go indexChecker.checkIndexLoop()
+		handoffHandler.enqueueHandoffReq(segmentInfo)
+		handoffHandler.wg.Add(1)
+		go handoffHandler.schedule()
 		for {
 			_, err := kv.Load(key)
 			if err != nil {
 				break
 			}
 		}
-		assert.Equal(t, 0, len(indexChecker.indexedSegmentsChan))
+		assert.Equal(t, 0, len(handoffHandler.indexNotifyChan))
 		childCancel()
-		indexChecker.wg.Wait()
+		handoffHandler.wg.Wait()
 	})
 	meta.addCollection(defaultCollectionID, querypb.LoadType_LoadCollection, genDefaultCollectionSchema(false))
 	t.Run("Test_GetIndexInfo", func(t *testing.T) {
 		childCtx, childCancel := context.WithCancel(context.Background())
-		indexChecker, err := newIndexChecker(childCtx, kv, meta, nil, nil, broker)
+		handoffHandler, err := newHandoffHandler(childCtx, kv, meta, nil, nil, broker)
 		assert.Nil(t, err)
 
-		indexChecker.enqueueHandoffReq(segmentInfo)
-		indexChecker.wg.Add(1)
-		go indexChecker.checkIndexLoop()
+		handoffHandler.enqueueHandoffReq(segmentInfo)
+		handoffHandler.wg.Add(1)
+		go handoffHandler.schedule()
 		for {
-			if len(indexChecker.indexedSegmentsChan) > 0 {
+			if len(handoffHandler.indexNotifyChan) > 0 {
 				break
 			}
 		}
 		childCancel()
-		indexChecker.wg.Wait()
+		handoffHandler.wg.Wait()
 	})
 
 	cancel()
@@ -189,12 +173,12 @@ func TestHandoffNotExistSegment(t *testing.T) {
 
 	rootCoord := newRootCoordMock(ctx)
 	rootCoord.enableIndex = true
-	indexCoord, err := newIndexCoordMock(indexCheckerTestDir)
+	indexCoord, err := newIndexCoordMock(handoffHandlerTestDir)
 	assert.Nil(t, err)
 	indexCoord.returnError = true
 	dataCoord := newDataCoordMock(ctx)
 	dataCoord.segmentState = commonpb.SegmentState_NotExist
-	cm := storage.NewLocalChunkManager(storage.RootPath(indexCheckerTestDir))
+	cm := storage.NewLocalChunkManager(storage.RootPath(handoffHandlerTestDir))
 	defer cm.RemoveWithPrefix("")
 	broker, err := newGlobalMetaBroker(ctx, rootCoord, dataCoord, indexCoord, cm)
 	assert.Nil(t, err)
@@ -207,27 +191,27 @@ func TestHandoffNotExistSegment(t *testing.T) {
 		PartitionID:  defaultPartitionID,
 		SegmentState: commonpb.SegmentState_Sealed,
 	}
-	key := fmt.Sprintf("%s/%d/%d/%d", handoffSegmentPrefix, defaultCollectionID, defaultPartitionID, defaultSegmentID)
+	key := fmt.Sprintf("%s/%d/%d/%d", util.HandoffSegmentPrefix, defaultCollectionID, defaultPartitionID, defaultSegmentID)
 	value, err := proto.Marshal(segmentInfo)
 	assert.Nil(t, err)
 
-	indexChecker, err := newIndexChecker(ctx, kv, meta, nil, nil, broker)
+	handoffHandler, err := newHandoffHandler(ctx, kv, meta, nil, nil, broker)
 	assert.Nil(t, err)
 
 	err = kv.Save(key, string(value))
 	assert.Nil(t, err)
-	indexChecker.enqueueHandoffReq(segmentInfo)
-	indexChecker.wg.Add(1)
-	go indexChecker.checkIndexLoop()
+	handoffHandler.enqueueHandoffReq(segmentInfo)
+	handoffHandler.wg.Add(1)
+	go handoffHandler.schedule()
 	for {
 		_, err := kv.Load(key)
 		if err != nil {
 			break
 		}
 	}
-	assert.Equal(t, 0, len(indexChecker.indexedSegmentsChan))
+	assert.Equal(t, 0, len(handoffHandler.indexNotifyChan))
 	cancel()
-	indexChecker.wg.Wait()
+	handoffHandler.wg.Wait()
 }
 
 func TestProcessHandoffAfterIndexDone(t *testing.T) {
@@ -252,10 +236,10 @@ func TestProcessHandoffAfterIndexDone(t *testing.T) {
 		triggerTaskQueue: newTaskQueue(),
 		taskIDAllocator:  idAllocator,
 	}
-	indexChecker, err := newIndexChecker(ctx, kv, meta, nil, taskScheduler, nil)
+	handoffHandler, err := newHandoffHandler(ctx, kv, meta, nil, taskScheduler, nil)
 	assert.Nil(t, err)
-	indexChecker.wg.Add(1)
-	go indexChecker.processHandoffAfterIndexDone()
+	handoffHandler.wg.Add(1)
+	go handoffHandler.processHandoffAfterIndexDone()
 
 	segmentInfo := &querypb.SegmentInfo{
 		SegmentID:    defaultSegmentID,
@@ -263,12 +247,12 @@ func TestProcessHandoffAfterIndexDone(t *testing.T) {
 		PartitionID:  defaultPartitionID,
 		SegmentState: commonpb.SegmentState_Sealed,
 	}
-	key := fmt.Sprintf("%s/%d/%d/%d", handoffSegmentPrefix, defaultCollectionID, defaultPartitionID, defaultSegmentID)
+	key := fmt.Sprintf("%s/%d/%d/%d", util.HandoffSegmentPrefix, defaultCollectionID, defaultPartitionID, defaultSegmentID)
 	value, err := proto.Marshal(segmentInfo)
 	assert.Nil(t, err)
 	err = kv.Save(key, string(value))
 	assert.Nil(t, err)
-	indexChecker.enqueueIndexedSegment(segmentInfo)
+	handoffHandler.enqueueIndexedSegment(segmentInfo)
 	for {
 		_, err := kv.Load(key)
 		if err != nil {
@@ -277,5 +261,5 @@ func TestProcessHandoffAfterIndexDone(t *testing.T) {
 	}
 	assert.Equal(t, false, taskScheduler.triggerTaskQueue.taskEmpty())
 	cancel()
-	indexChecker.wg.Wait()
-}
+	handoffHandler.wg.Wait()
+}*/
