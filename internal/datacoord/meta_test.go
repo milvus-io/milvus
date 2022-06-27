@@ -755,3 +755,9 @@ func TestMeta_GetAllSegments(t *testing.T) {
 	assert.Nil(t, seg2)
 	assert.NotNil(t, seg2All)
 }
+
+func TestMeta_isSegmentHealthy_issue17823_panic(t *testing.T) {
+	var seg *SegmentInfo
+
+	assert.False(t, isSegmentHealthy(seg))
+}
