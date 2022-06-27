@@ -200,13 +200,13 @@ func TestUnMarshalTask(t *testing.T) {
 	kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 	baseCtx, cancel := context.WithCancel(context.Background())
 	dataCoord := &dataCoordMock{}
-	meta := &MetaReplica{
-		dataCoord: dataCoord,
-	}
+	broker, err := newGlobalMetaBroker(baseCtx, nil, dataCoord, nil, nil)
+	assert.Nil(t, err)
+
 	taskScheduler := &TaskScheduler{
 		ctx:    baseCtx,
 		cancel: cancel,
-		meta:   meta,
+		broker: broker,
 	}
 
 	t.Run("Test loadCollectionTask", func(t *testing.T) {
