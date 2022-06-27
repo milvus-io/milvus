@@ -19,6 +19,8 @@ from utils.wrapper import counter
 
 nb = 5000
 default_index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
+tag_prefix = '2.1.0'
+tag_latest = '2.1.0-latest'
 
 
 @pytest.mark.tags(CaseLabel.L3)
@@ -37,7 +39,7 @@ class TestQueryNodeScale:
         expected: Verify milvus remains healthy and search successfully during scale
         """
         release_name = "scale-query"
-        image_tag = get_latest_tag()
+        image_tag = get_latest_tag(tag_prefix=tag_prefix, tag_latest=tag_latest)
         image = f'{constants.IMAGE_REPOSITORY}:{image_tag}'
         query_config = {
             'metadata.namespace': constants.NAMESPACE,
@@ -150,7 +152,7 @@ class TestQueryNodeScale:
         expected: Verify search succ rate is 100%
         """
         release_name = "scale-replica"
-        image_tag = get_latest_tag()
+        image_tag = get_latest_tag(tag_prefix=tag_prefix, tag_latest=tag_latest)
         image = f'{constants.IMAGE_REPOSITORY}:{image_tag}'
         query_config = {
             'metadata.namespace': constants.NAMESPACE,
@@ -229,7 +231,7 @@ class TestQueryNodeScale:
         expected: Verify search successfully after scale out
         """
         release_name = "scale-in-query"
-        image_tag = get_latest_tag()
+        image_tag = get_latest_tag(tag_prefix=tag_prefix, tag_latest=tag_latest)
         image = f'{constants.IMAGE_REPOSITORY}:{image_tag}'
         query_config = {
             'metadata.namespace': constants.NAMESPACE,

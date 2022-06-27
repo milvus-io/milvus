@@ -1040,7 +1040,7 @@ def get_tags(url, token):
         return []
 
 
-def get_master_tags(tags_list):
+def get_master_tags(tags_list, tag_prefix="master", tag_latest="master-latest"):
     _list = []
 
     if not isinstance(tags_list, list):
@@ -1048,7 +1048,7 @@ def get_master_tags(tags_list):
         return _list
 
     for tag in tags_list:
-        if "master" in tag and tag != "master-latest":
+        if tag_prefix in tag and tag != tag_latest:
             _list.append(tag)
     return _list
 
@@ -1073,7 +1073,7 @@ def get_config_digest(url, token):
         return ""
 
 
-def get_latest_tag(limit=100):
+def get_latest_tag(limit=100, tag_prefix="master", tag_latest="master-latest"):
     service = "registry.docker.io"
     repository = "milvusdb/milvus-dev"
 
@@ -1081,9 +1081,9 @@ def get_latest_tag(limit=100):
     tags_url = "https://index.docker.io/v2/%s/tags/list" % repository
     tag_url = "https://index.docker.io/v2/milvusdb/milvus-dev/manifests/"
 
-    master_latest_digest = get_config_digest(tag_url + "master-latest", get_token(auth_url))
+    master_latest_digest = get_config_digest(tag_url + tag_latest, get_token(auth_url))
     tags = get_tags(tags_url, get_token(auth_url))
-    tag_list = get_master_tags(tags)
+    tag_list = get_master_tags(tags, tag_prefix=tag_prefix, tag_latest=tag_latest)
 
     latest_tag = ""
     for i in range(1, len(tag_list) + 1):
@@ -1096,7 +1096,7 @@ def get_latest_tag(limit=100):
             break
 
     if latest_tag == "":
-        latest_tag = "master-latest"
+        latest_tag = tag_latest
         print("Can't find the latest image name")
     print("The image name used is %s" % str(latest_tag))
     return latest_tag
