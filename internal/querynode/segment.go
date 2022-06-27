@@ -84,7 +84,7 @@ type Segment struct {
 	rmMutex          sync.RWMutex // guards recentlyModified
 	recentlyModified bool
 
-	typeMu      sync.Mutex // guards builtIndex
+	typeMu      sync.RWMutex // guards segmentType
 	segmentType segmentType
 
 	idBinlogRowSizes []int64
@@ -127,8 +127,8 @@ func (s *Segment) setType(segType segmentType) {
 }
 
 func (s *Segment) getType() segmentType {
-	s.typeMu.Lock()
-	defer s.typeMu.Unlock()
+	s.typeMu.RLock()
+	defer s.typeMu.RUnlock()
 	return s.segmentType
 }
 
@@ -178,7 +178,7 @@ func newSegment(collection *Collection, segmentID UniqueID, partitionID UniqueID
 			zap.Int64("collectionID", collectionID),
 			zap.Int64("partitionID", partitionID),
 			zap.Int64("segmentID", segmentID),
-			zap.Int32("segment type", int32(segType)),
+			zap.String("segmentType", segType.String()),
 			zap.Error(err))
 		return nil, err
 	}
@@ -187,7 +187,7 @@ func newSegment(collection *Collection, segmentID UniqueID, partitionID UniqueID
 		zap.Int64("collectionID", collectionID),
 		zap.Int64("partitionID", partitionID),
 		zap.Int64("segmentID", segmentID),
-		zap.Int32("segmentType", int32(segType)))
+		zap.String("segmentType", segType.String()))
 
 	var segment = &Segment{
 		segmentPtr:        segmentPtr,
@@ -217,7 +217,11 @@ func deleteSegment(segment *Segment) {
 	C.DeleteSegment(cPtr)
 	segment.segmentPtr = nil
 
-	log.Info("delete segment from memory", zap.Int64("collectionID", segment.collectionID), zap.Int64("partitionID", segment.partitionID), zap.Int64("segmentID", segment.ID()))
+	log.Info("delete segment from memory",
+		zap.Int64("collectionID", segment.collectionID),
+		zap.Int64("partitionID", segment.partitionID),
+		zap.Int64("segmentID", segment.ID()),
+		zap.String("segmentType", segment.getType().String()))
 }
 
 func (s *Segment) getRowCount() int64 {
@@ -758,7 +762,8 @@ func (s *Segment) segmentLoadDeletedRecord(primaryKeys []primaryKey, timestamps 
 
 	log.Info("load deleted record done",
 		zap.Int64("row count", rowCount),
-		zap.Int64("segmentID", s.ID()))
+		zap.Int64("segmentID", s.ID()),
+		zap.String("segmentType", s.getType().String()))
 	return nil
 }
 
