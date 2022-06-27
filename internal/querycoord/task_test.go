@@ -1347,6 +1347,12 @@ func TestUpdateTaskProcessWhenLoadSegment(t *testing.T) {
 	queryCoord.scheduler.processTask(watchDeltaChannel)
 	collectionInfo, err = queryCoord.meta.getCollectionInfoByID(defaultCollectionID)
 	assert.Nil(t, err)
+	assert.Equal(t, int64(0), collectionInfo.InMemoryPercentage)
+
+	err = loadCollectionTask.globalPostExecute(ctx)
+	assert.NoError(t, err)
+	collectionInfo, err = queryCoord.meta.getCollectionInfoByID(defaultCollectionID)
+	assert.NoError(t, err)
 	assert.Equal(t, int64(100), collectionInfo.InMemoryPercentage)
 
 	err = removeAllSession()
@@ -1365,6 +1371,7 @@ func TestUpdateTaskProcessWhenWatchDmChannel(t *testing.T) {
 	queryCoord.meta.addCollection(defaultCollectionID, querypb.LoadType_LoadCollection, genDefaultCollectionSchema(false))
 
 	watchDmChannel := genWatchDmChannelTask(ctx, queryCoord, node1.queryNodeID)
+	loadCollectionTask := watchDmChannel.getParentTask()
 
 	collectionInfo, err := queryCoord.meta.getCollectionInfoByID(defaultCollectionID)
 	assert.Nil(t, err)
@@ -1373,6 +1380,12 @@ func TestUpdateTaskProcessWhenWatchDmChannel(t *testing.T) {
 
 	collectionInfo, err = queryCoord.meta.getCollectionInfoByID(defaultCollectionID)
 	assert.Nil(t, err)
+	assert.Equal(t, int64(0), collectionInfo.InMemoryPercentage)
+
+	err = loadCollectionTask.globalPostExecute(ctx)
+	assert.NoError(t, err)
+	collectionInfo, err = queryCoord.meta.getCollectionInfoByID(defaultCollectionID)
+	assert.NoError(t, err)
 	assert.Equal(t, int64(100), collectionInfo.InMemoryPercentage)
 
 	err = removeAllSession()

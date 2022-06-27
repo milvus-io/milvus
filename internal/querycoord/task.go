@@ -336,39 +336,8 @@ func (lct *loadCollectionTask) timestamp() Timestamp {
 }
 
 func (lct *loadCollectionTask) updateTaskProcess() {
-	collectionID := lct.CollectionID
-	childTasks := lct.getChildTask()
-	allDone := true
-	for _, t := range childTasks {
-		if t.getState() != taskDone {
-			allDone = false
-			break
-		}
-
-		// wait watchDeltaChannel task done after loading segment
-		nodeID := getDstNodeIDByTask(t)
-		if t.msgType() == commonpb.MsgType_LoadSegments {
-			if !lct.cluster.HasWatchedDeltaChannel(lct.ctx, nodeID, collectionID) {
-				allDone = false
-				break
-			}
-		}
-
-	}
-	if allDone {
-		err := lct.meta.setLoadPercentage(collectionID, 0, 100, querypb.LoadType_LoadCollection)
-		if err != nil {
-			log.Error("loadCollectionTask: set load percentage to meta's collectionInfo", zap.Int64("collectionID", collectionID))
-			lct.setResultInfo(err)
-			return
-		}
-
-		lct.once.Do(func() {
-			metrics.QueryCoordLoadCount.WithLabelValues(metrics.SuccessLabel).Inc()
-			metrics.QueryCoordLoadLatency.WithLabelValues().Observe(float64(lct.elapseSpan().Milliseconds()))
-			metrics.QueryCoordNumChildTasks.WithLabelValues().Sub(float64(len(lct.getChildTask())))
-		})
-	}
+	//TODO move check all child task done to globalPostExecute
+	//this function shall just calculate intermediate progress
 }
 
 func (lct *loadCollectionTask) preExecute(ctx context.Context) error {
@@ -622,6 +591,18 @@ func (lct *loadCollectionTask) globalPostExecute(ctx context.Context) error {
 		}
 	}
 
+	err = lct.meta.setLoadPercentage(lct.CollectionID, 0, 100, querypb.LoadType_LoadCollection)
+	if err != nil {
+		log.Error("loadCollectionTask: set load percentage to meta's collectionInfo", zap.Int64("collectionID", lct.CollectionID))
+		lct.setResultInfo(err)
+		return err
+	}
+
+	lct.once.Do(func() {
+		metrics.QueryCoordLoadCount.WithLabelValues(metrics.SuccessLabel).Inc()
+		metrics.QueryCoordLoadLatency.WithLabelValues().Observe(float64(lct.elapseSpan().Milliseconds()))
+		metrics.QueryCoordNumChildTasks.WithLabelValues().Sub(float64(len(lct.getChildTask())))
+	})
 	return nil
 }
 
@@ -801,39 +782,8 @@ func (lpt *loadPartitionTask) timestamp() Timestamp {
 }
 
 func (lpt *loadPartitionTask) updateTaskProcess() {
-	collectionID := lpt.CollectionID
-	partitionIDs := lpt.PartitionIDs
-	childTasks := lpt.getChildTask()
-	allDone := true
-	for _, t := range childTasks {
-		if t.getState() != taskDone {
-			allDone = false
-		}
-
-		// wait watchDeltaChannel task done after loading segment
-		nodeID := getDstNodeIDByTask(t)
-		if t.msgType() == commonpb.MsgType_LoadSegments {
-			if !lpt.cluster.HasWatchedDeltaChannel(lpt.ctx, nodeID, collectionID) {
-				allDone = false
-				break
-			}
-		}
-	}
-	if allDone {
-		for _, id := range partitionIDs {
-			err := lpt.meta.setLoadPercentage(collectionID, id, 100, querypb.LoadType_LoadPartition)
-			if err != nil {
-				log.Error("loadPartitionTask: set load percentage to meta's collectionInfo", zap.Int64("collectionID", collectionID), zap.Int64("partitionID", id))
-				lpt.setResultInfo(err)
-				return
-			}
-		}
-		lpt.once.Do(func() {
-			metrics.QueryCoordLoadCount.WithLabelValues(metrics.SuccessLabel).Inc()
-			metrics.QueryCoordLoadLatency.WithLabelValues().Observe(float64(lpt.elapseSpan().Milliseconds()))
-			metrics.QueryCoordNumChildTasks.WithLabelValues().Sub(float64(len(lpt.getChildTask())))
-		})
-	}
+	//TODO move check all child task done to globalPostExecute
+	//this function shall just calculate intermediate progress
 }
 
 func (lpt *loadPartitionTask) preExecute(context.Context) error {
@@ -1057,6 +1007,7 @@ func (lpt *loadPartitionTask) postExecute(ctx context.Context) error {
 
 func (lpt *loadPartitionTask) globalPostExecute(ctx context.Context) error {
 	collectionID := lpt.CollectionID
+	partitionIDs := lpt.PartitionIDs
 
 	collection, err := lpt.meta.getCollectionInfoByID(collectionID)
 	if err != nil {
@@ -1079,6 +1030,21 @@ func (lpt *loadPartitionTask) globalPostExecute(ctx context.Context) error {
 			return err
 		}
 	}
+
+	for _, id := range partitionIDs {
+		err := lpt.meta.setLoadPercentage(collectionID, id, 100, querypb.LoadType_LoadPartition)
+		if err != nil {
+			log.Error("loadPartitionTask: set load percentage to meta's collectionInfo", zap.Int64("collectionID", collectionID), zap.Int64("partitionID", id))
+			lpt.setResultInfo(err)
+			return err
+		}
+	}
+
+	lpt.once.Do(func() {
+		metrics.QueryCoordLoadCount.WithLabelValues(metrics.SuccessLabel).Inc()
+		metrics.QueryCoordLoadLatency.WithLabelValues().Observe(float64(lpt.elapseSpan().Milliseconds()))
+		metrics.QueryCoordNumChildTasks.WithLabelValues().Sub(float64(len(lpt.getChildTask())))
+	})
 
 	return nil
 }
