@@ -1104,8 +1104,8 @@ func importFlushReqFunc(node *DataNode, req *datapb.ImportTaskRequest, res *root
 			kvs[key] = blob.Value
 			field2Stats[fieldID] = &datapb.Binlog{
 				EntriesNum:    0,
-				TimestampFrom: 0, //TODO
-				TimestampTo:   0, //TODO,
+				TimestampFrom: ts,
+				TimestampTo:   ts,
 				LogPath:       key,
 				LogSize:       int64(len(blob.Value)),
 			}

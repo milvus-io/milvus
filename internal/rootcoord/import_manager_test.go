@@ -389,38 +389,12 @@ func TestImportManager_TaskState(t *testing.T) {
 	_, err := mgr.updateTaskState(state)
 	assert.NotNil(t, err)
 
-	state = &rootcoordpb.ImportResult{
-		TaskId:   2,
-		RowCount: 1000,
-		State:    commonpb.ImportState_ImportCompleted,
-		Infos: []*commonpb.KeyValuePair{
-			{
-				Key:   "key1",
-				Value: "value1",
-			},
-			{
-				Key:   "failed_reason",
-				Value: "some_reason",
-			},
-		},
-	}
-	ti, err := mgr.updateTaskState(state)
-	assert.NoError(t, err)
-	assert.Equal(t, int64(2), ti.GetId())
-	assert.Equal(t, int64(100), ti.GetCollectionId())
-	assert.Equal(t, int64(100), ti.GetCollectionId())
-	assert.Equal(t, int64(0), ti.GetPartitionId())
-	assert.Equal(t, true, ti.GetRowBased())
-	assert.Equal(t, []string{"f2"}, ti.GetFiles())
-	assert.Equal(t, commonpb.ImportState_ImportCompleted, ti.GetState().GetStateCode())
-	assert.Equal(t, int64(1000), ti.GetState().GetRowCount())
-
 	resp := mgr.getTaskState(10000)
 	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
 
 	resp = mgr.getTaskState(2)
 	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-	assert.Equal(t, commonpb.ImportState_ImportCompleted, resp.State)
+	assert.Equal(t, commonpb.ImportState_ImportPersisted, resp.State)
 
 	resp = mgr.getTaskState(1)
 	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)

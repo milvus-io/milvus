@@ -450,10 +450,7 @@ enum ImportState : int {
   ImportPending = 0,
   ImportFailed = 1,
   ImportStarted = 2,
-  ImportDownloaded = 3,
-  ImportParsed = 4,
   ImportPersisted = 5,
-  ImportCompleted = 6,
   ImportAllocSegment = 10,
   ImportState_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
   ImportState_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()

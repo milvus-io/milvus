@@ -1624,21 +1624,6 @@ func TestRootCoord_Base(t *testing.T) {
 	})
 
 	wg.Add(1)
-	t.Run("report import with transitional state", func(t *testing.T) {
-		defer wg.Done()
-		req := &rootcoordpb.ImportResult{
-			TaskId:   1,
-			RowCount: 100,
-			Segments: []int64{1000, 1001, 1002},
-			State:    commonpb.ImportState_ImportDownloaded,
-		}
-		resp, err := core.ReportImport(context.WithValue(ctx, ctxKey{}, ""), req)
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-		time.Sleep(500 * time.Millisecond)
-	})
-
-	wg.Add(1)
 	t.Run("report import with alloc seg state", func(t *testing.T) {
 		defer wg.Done()
 		req := &rootcoordpb.ImportResult{

@@ -183,10 +183,6 @@ func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate b
 					defer file.Close()
 					tr.Record("open reader")
 
-					// report file process state
-					p.importResult.State = commonpb.ImportState_ImportDownloaded
-					p.reportFunc(p.importResult)
-
 					// parse file
 					reader := bufio.NewReader(file)
 					parser := NewJSONParser(p.ctx, p.collectionSchema)
@@ -208,10 +204,6 @@ func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate b
 					if consumer != nil {
 						p.importResult.AutoIds = append(p.importResult.AutoIds, consumer.IDRange()...)
 					}
-
-					// report file process state
-					p.importResult.State = commonpb.ImportState_ImportParsed
-					p.reportFunc(p.importResult)
 
 					tr.Record("parsed")
 					return nil
@@ -285,10 +277,6 @@ func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate b
 					defer file.Close()
 					tr.Record("open reader")
 
-					// report file process state
-					p.importResult.State = commonpb.ImportState_ImportDownloaded
-					p.reportFunc(p.importResult)
-
 					// parse file
 					reader := bufio.NewReader(file)
 					parser := NewJSONParser(p.ctx, p.collectionSchema)
@@ -302,10 +290,6 @@ func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate b
 					if err != nil {
 						return err
 					}
-
-					// report file process state
-					p.importResult.State = commonpb.ImportState_ImportParsed
-					p.reportFunc(p.importResult)
 
 					tr.Record("parsed")
 					return nil
@@ -328,10 +312,6 @@ func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate b
 					defer file.Close()
 					tr.Record("open reader")
 
-					// report file process state
-					p.importResult.State = commonpb.ImportState_ImportDownloaded
-					p.reportFunc(p.importResult)
-
 					var id storage.FieldID
 					for _, field := range p.collectionSchema.Fields {
 						if field.GetName() == fileName {
@@ -352,10 +332,6 @@ func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate b
 					if err != nil {
 						return err
 					}
-
-					// report file process state
-					p.importResult.State = commonpb.ImportState_ImportParsed
-					p.reportFunc(p.importResult)
 
 					tr.Record("parsed")
 					return nil

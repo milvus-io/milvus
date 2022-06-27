@@ -707,6 +707,5 @@ func BuildImportTaskKey(taskID int64) string {
 func taskExpired(ti *datapb.ImportTaskInfo) bool {
 	return ti.GetState().GetStateCode() != commonpb.ImportState_ImportFailed &&
 		ti.GetState().GetStateCode() != commonpb.ImportState_ImportPersisted &&
-		ti.GetState().GetStateCode() != commonpb.ImportState_ImportCompleted &&
 		Params.RootCoordCfg.ImportTaskExpiration <= float64(time.Now().Unix()-ti.GetCreateTs())
 }
