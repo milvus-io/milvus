@@ -7,6 +7,8 @@ if [[ "${MSYSTEM}" != "MINGW64" ]] ; then
     exit 1
 fi
 
+pacmanInstall()
+{
 pacman -S --noconfirm --needed \
     git make tar dos2unix zip unzip patch \
     mingw-w64-x86_64-toolchain \
@@ -23,6 +25,18 @@ pacman -S --noconfirm --needed \
     mingw-w64-x86_64-arrow \
     mingw-w64-x86_64-go \
     mingw-w64-x86_64-rocksdb
+}
+
+updateKey()
+{
+	pacman-key --refresh-keys
+}
+
+pacmanInstall || {
+	updateKey
+	pacmanInstall
+
+    }
 
 
 # dummy empty dl, TODO: remove later
