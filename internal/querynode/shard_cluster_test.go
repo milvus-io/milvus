@@ -1978,7 +1978,7 @@ func TestShardCluster_HandoffSegments(t *testing.T) {
 			},
 		})
 
-		assert.Error(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("release failed", func(t *testing.T) {

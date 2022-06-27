@@ -602,38 +602,38 @@ func (m *MetaReplica) saveGlobalSealedSegInfos(saves col2SegmentInfos) (col2Seal
 
 		for _, info := range onlineInfos {
 			segmentID := info.SegmentID
+			onlineInfo := proto.Clone(info).(*querypb.SegmentInfo)
 
+			// LoadBalance case
+			// A node loads the segment, and the other one offloads
 			offlineInfo, err := m.getSegmentInfoByID(segmentID)
-			if err == nil {
+			if err == nil && offlineInfo.SegmentState == commonpb.SegmentState_Sealed {
 				// if the offline segment state is growing, it will not impact the global sealed segments
-				if offlineInfo.SegmentState == commonpb.SegmentState_Sealed {
-					offlineNodes := diffSlice(offlineInfo.NodeIds, info.NodeIds...)
+				onlineInfo.NodeIds = diffSlice(info.NodeIds, offlineInfo.NodeIds...)
+				offlineInfo.NodeIds = diffSlice(offlineInfo.NodeIds, info.NodeIds...)
 
-					for _, node := range offlineNodes {
-						segmentsChangeInfo.Infos = append(segmentsChangeInfo.Infos,
-							&querypb.SegmentChangeInfo{
-								OfflineNodeID:   node,
-								OfflineSegments: []*querypb.SegmentInfo{offlineInfo},
-							})
-					}
-				}
+				segmentsChangeInfo.Infos = append(segmentsChangeInfo.Infos,
+					&querypb.SegmentChangeInfo{
+						OnlineSegments:  []*querypb.SegmentInfo{onlineInfo},
+						OfflineSegments: []*querypb.SegmentInfo{offlineInfo},
+					})
 			}
 
+			// Handoff case
 			// generate offline segment change info if the loaded segment is compacted from other sealed segments
+			compactChangeInfo := &querypb.SegmentChangeInfo{}
 			for _, compactionSegmentID := range info.CompactionFrom {
-				compactionSegmentInfo, err := m.getSegmentInfoByID(compactionSegmentID)
-				if err == nil && compactionSegmentInfo.SegmentState == commonpb.SegmentState_Sealed {
-					for _, node := range compactionSegmentInfo.NodeIds {
-						segmentsChangeInfo.Infos = append(segmentsChangeInfo.Infos, &querypb.SegmentChangeInfo{
-							OfflineNodeID:   node,
-							OfflineSegments: []*querypb.SegmentInfo{compactionSegmentInfo},
-						})
-					}
-					segmentsCompactionFrom = append(segmentsCompactionFrom, compactionSegmentInfo)
+				offlineInfo, err := m.getSegmentInfoByID(compactionSegmentID)
+				if err == nil && offlineInfo.SegmentState == commonpb.SegmentState_Sealed {
+					compactChangeInfo.OfflineSegments = append(compactChangeInfo.OfflineSegments, offlineInfo)
+					segmentsCompactionFrom = append(segmentsCompactionFrom, offlineInfo)
 				} else {
 					return nil, fmt.Errorf("saveGlobalSealedSegInfos: the compacted segment %d has not been loaded into memory", compactionSegmentID)
 				}
 			}
+			compactChangeInfo.OnlineSegments = append(compactChangeInfo.OnlineSegments, onlineInfo)
+			segmentsChangeInfo.Infos = append(segmentsChangeInfo.Infos, compactChangeInfo)
+
 		}
 		col2SegmentChangeInfos[collectionID] = segmentsChangeInfo
 	}
