@@ -12,7 +12,7 @@ from chaos.checker import (InsertFlushChecker, SearchChecker, QueryChecker, Op)
 from common.cus_resource_opts import CustomResourceOperations as CusResource
 from common.milvus_sys import MilvusSys
 from utils.util_log import test_log as log
-from utils.util_k8s import wait_pods_ready, get_pod_ip_name_pairs
+from utils.util_k8s import wait_pods_ready, get_pod_ip_name_pairs, get_milvus_instance_name
 from chaos import chaos_commons as cc
 from common.common_type import CaseLabel
 from common import common_func as cf
@@ -82,6 +82,7 @@ class TestChaos(TestChaosBase):
             raise Exception("no connections")
         self.host = host
         self.port = port
+        self.instance_name = get_milvus_instance_name(constants.CHAOS_NAMESPACE, host)
 
     @pytest.fixture(scope="function", autouse=True)
     def init_health_checkers(self):
@@ -113,13 +114,15 @@ class TestChaos(TestChaosBase):
     def test_multi_replicas_with_only_one_group_available(self, chaos_type, failed_node_type, failed_group_scope, is_streaming):
         # start the monitor threads to check the milvus ops
         log.info("*********************Chaos Test Start**********************")
+        log.info("Test config")
+        log.info(cc.gen_experiment_config(config_file_name))
         # log.info(f"chaos_yaml: {chaos_yaml}")
         log.info(connections.get_connection_addr('default'))
         if is_streaming is False:
             del self.health_checkers[Op.insert]
         cc.start_monitor_threads(self.health_checkers)
         # get replicas info
-        release_name = "milvus-multi-querynode"
+        release_name = self.instance_name
         querynode_id_pod_pair = get_querynode_info(release_name)
         log.info(querynode_id_pod_pair)
         group_list = []
@@ -146,6 +149,9 @@ class TestChaos(TestChaosBase):
                 target_nodes = list(set(g) & set(shard_leader_list))
             if failed_node_type == "non_shard_leader":
                 target_nodes = list(set(g) - set(shard_leader_list))
+            if len(target_nodes) == 0:
+                log.info("there is no node satisfied, chose one randomly")
+                target_nodes = [random.choice(g)]
             for target_node in target_nodes:
                 pod = querynode_id_pod_pair[target_node]
                 target_pod_list.append(pod)
