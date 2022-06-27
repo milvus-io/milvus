@@ -126,6 +126,13 @@ func TestEtcdKV_Load(te *testing.T) {
 			assert.ElementsMatch(t, test.expectedValues, actualValues)
 			assert.NotZero(t, versions)
 			assert.Equal(t, test.expectedError, err)
+
+			actualKeys, actualValues, versions, revision, err := etcdKV.LoadWithRevisionAndVersions(test.prefix)
+			assert.ElementsMatch(t, test.expectedKeys, actualKeys)
+			assert.ElementsMatch(t, test.expectedValues, actualValues)
+			assert.NotZero(t, versions)
+			assert.NotZero(t, revision)
+			assert.Equal(t, test.expectedError, err)
 		}
 
 		removeTests := []struct {

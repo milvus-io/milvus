@@ -28,6 +28,8 @@ import (
 	"syscall"
 	"time"
 
+	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
+
 	"github.com/golang/protobuf/proto"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -859,8 +861,7 @@ func (i *IndexCoord) watchMetaLoop() {
 	defer i.loopWg.Done()
 	log.Debug("IndexCoord watchMetaLoop start")
 
-	watchChan := i.metaTable.client.WatchWithPrefix(indexFilePrefix)
-
+	watchChan := i.metaTable.client.WatchWithRevision(indexFilePrefix, i.metaTable.revision)
 	for {
 		select {
 		case <-ctx.Done():
@@ -871,6 +872,18 @@ func (i *IndexCoord) watchMetaLoop() {
 				return
 			}
 			if err := resp.Err(); err != nil {
+				if err == v3rpc.ErrCompacted {
+					newMetaTable, err := NewMetaTable(i.metaTable.client)
+					if err != nil {
+						log.Error("Constructing new meta table fails when etcd has a compaction error",
+							zap.String("path", indexFilePrefix), zap.String("etcd error", err.Error()), zap.Error(err))
+						panic("failed to handle etcd request, exit..")
+					}
+					i.metaTable = newMetaTable
+					i.loopWg.Add(1)
+					go i.watchMetaLoop()
+					return
+				}
 				log.Error("received error event from etcd watcher", zap.String("path", indexFilePrefix), zap.Error(err))
 				panic("failed to handle etcd request, exit..")
 			}

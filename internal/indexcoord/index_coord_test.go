@@ -18,6 +18,7 @@ package indexcoord
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"os"
 	"os/signal"
@@ -25,6 +26,9 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/milvus-io/milvus/internal/kv"
+	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
@@ -322,6 +326,102 @@ func TestIndexCoord_watchNodeLoop(t *testing.T) {
 	<-sigQuit
 	assert.True(t, flag)
 	assert.True(t, closed)
+}
+
+type mockEtcdKv struct {
+	kv.MetaKv
+
+	watchWithRevision           func(string, int64) clientv3.WatchChan
+	loadWithRevisionAndVersions func(string) ([]string, []string, []int64, int64, error)
+}
+
+func (mek *mockEtcdKv) WatchWithRevision(key string, revision int64) clientv3.WatchChan {
+	return mek.watchWithRevision(key, revision)
+}
+
+func (mek *mockEtcdKv) LoadWithRevisionAndVersions(key string) ([]string, []string, []int64, int64, error) {
+	return mek.loadWithRevisionAndVersions(key)
+}
+
+func TestIndexCoord_watchMetaLoop(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	ic := &IndexCoord{
+		loopCtx: ctx,
+		loopWg:  sync.WaitGroup{},
+	}
+
+	watchChan := make(chan clientv3.WatchResponse, 1024)
+
+	client := &mockEtcdKv{
+		watchWithRevision: func(s string, i int64) clientv3.WatchChan {
+			return watchChan
+		},
+	}
+	mt := &metaTable{
+		client:            client,
+		indexBuildID2Meta: map[UniqueID]Meta{},
+		revision:          0,
+		lock:              sync.RWMutex{},
+	}
+	ic.metaTable = mt
+
+	t.Run("watch chan panic", func(t *testing.T) {
+		ic.loopWg.Add(1)
+		watchChan <- clientv3.WatchResponse{Canceled: true}
+
+		assert.Panics(t, func() {
+			ic.watchMetaLoop()
+		})
+		ic.loopWg.Wait()
+	})
+
+	t.Run("watch chan new meta table panic", func(t *testing.T) {
+		client = &mockEtcdKv{
+			watchWithRevision: func(s string, i int64) clientv3.WatchChan {
+				return watchChan
+			},
+			loadWithRevisionAndVersions: func(s string) ([]string, []string, []int64, int64, error) {
+				return []string{}, []string{}, []int64{}, 0, fmt.Errorf("error occurred")
+			},
+		}
+		mt = &metaTable{
+			client:            client,
+			indexBuildID2Meta: map[UniqueID]Meta{},
+			revision:          0,
+			lock:              sync.RWMutex{},
+		}
+		ic.metaTable = mt
+		ic.loopWg.Add(1)
+		watchChan <- clientv3.WatchResponse{CompactRevision: 10}
+		assert.Panics(t, func() {
+			ic.watchMetaLoop()
+		})
+		ic.loopWg.Wait()
+	})
+
+	t.Run("watch chan new meta success", func(t *testing.T) {
+		ic.loopWg = sync.WaitGroup{}
+		client = &mockEtcdKv{
+			watchWithRevision: func(s string, i int64) clientv3.WatchChan {
+				return watchChan
+			},
+			loadWithRevisionAndVersions: func(s string) ([]string, []string, []int64, int64, error) {
+				return []string{}, []string{}, []int64{}, 0, nil
+			},
+		}
+		mt = &metaTable{
+			client:            client,
+			indexBuildID2Meta: map[UniqueID]Meta{},
+			revision:          0,
+			lock:              sync.RWMutex{},
+		}
+		ic.metaTable = mt
+		ic.loopWg.Add(1)
+		watchChan <- clientv3.WatchResponse{CompactRevision: 10}
+		go ic.watchMetaLoop()
+		cancel()
+		ic.loopWg.Wait()
+	})
 }
 
 func TestIndexCoord_GetComponentStates(t *testing.T) {

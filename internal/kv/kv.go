@@ -64,6 +64,7 @@ type MetaKv interface {
 	GetPath(key string) string
 	LoadWithPrefix(key string) ([]string, []string, error)
 	LoadWithPrefix2(key string) ([]string, []string, []int64, error)
+	LoadWithRevisionAndVersions(key string) ([]string, []string, []int64, int64, error)
 	LoadWithRevision(key string) ([]string, []string, int64, error)
 	Watch(key string) clientv3.WatchChan
 	WatchWithPrefix(key string) clientv3.WatchChan
