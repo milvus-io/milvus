@@ -177,13 +177,14 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 			ufInfo := w.req.SegmentInfos[ufInfoID]
 			if len(ufInfo.Binlogs) > 0 {
 				unFlushedSegments = append(unFlushedSegments, &queryPb.SegmentLoadInfo{
-					SegmentID:    ufInfo.ID,
-					PartitionID:  ufInfo.PartitionID,
-					CollectionID: ufInfo.CollectionID,
-					BinlogPaths:  ufInfo.Binlogs,
-					NumOfRows:    ufInfo.NumOfRows,
-					Statslogs:    ufInfo.Statslogs,
-					Deltalogs:    ufInfo.Deltalogs,
+					SegmentID:     ufInfo.ID,
+					PartitionID:   ufInfo.PartitionID,
+					CollectionID:  ufInfo.CollectionID,
+					BinlogPaths:   ufInfo.Binlogs,
+					NumOfRows:     ufInfo.NumOfRows,
+					Statslogs:     ufInfo.Statslogs,
+					Deltalogs:     ufInfo.Deltalogs,
+					InsertChannel: ufInfo.InsertChannel,
 				})
 				unFlushedSegmentIDs = append(unFlushedSegmentIDs, ufInfo.ID)
 			}
