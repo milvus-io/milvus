@@ -498,9 +498,10 @@ func (m *mockRootCoordService) ListImportTasks(ctx context.Context, in *milvuspb
 	panic("not implemented") // TODO: Implement
 }
 
-// Report impot task state to rootcoord
 func (m *mockRootCoordService) ReportImport(ctx context.Context, req *rootcoordpb.ImportResult) (*commonpb.Status, error) {
-	panic("not implemented") // TODO: Implement
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}, nil
 }
 
 type mockCompactionHandler struct {

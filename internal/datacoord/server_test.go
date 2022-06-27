@@ -995,7 +995,7 @@ func (s *spySegmentManager) AllocSegment(ctx context.Context, collectionID Uniqu
 	panic("not implemented") // TODO: Implement
 }
 
-func (s *spySegmentManager) AllocSegmentForImport(ctx context.Context, collectionID UniqueID, partitionID UniqueID, channelName string, requestRows int64) (*Allocation, error) {
+func (s *spySegmentManager) allocSegmentForImport(ctx context.Context, collectionID UniqueID, partitionID UniqueID, channelName string, requestRows int64, taskID int64) (*Allocation, error) {
 	panic("not implemented") // TODO: Implement
 }
 
