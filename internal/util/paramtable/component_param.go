@@ -709,8 +709,10 @@ type queryNodeConfig struct {
 	GroupEnabled         bool
 	MaxReceiveChanSize   int32
 	MaxUnsolvedQueueSize int32
+	MaxReadConcurrency   int32
 	MaxGroupNQ           int64
 	TopKMergeRatio       float64
+	CPURatio             float64
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -733,9 +735,11 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 
 	p.initGroupEnabled()
 	p.initMaxReceiveChanSize()
+	p.initMaxReadConcurrency()
 	p.initMaxUnsolvedQueueSize()
 	p.initMaxGroupNQ()
 	p.initTopKMergeRatio()
+	p.initCPURatio()
 }
 
 // InitAlias initializes an alias for the QueryNode role.
@@ -850,11 +854,22 @@ func (p *queryNodeConfig) initGroupEnabled() {
 }
 
 func (p *queryNodeConfig) initMaxReceiveChanSize() {
-	p.MaxReceiveChanSize = p.Base.ParseInt32WithDefault("queryNode.grouping.receiveChanSize", 10240)
+	p.MaxReceiveChanSize = p.Base.ParseInt32WithDefault("queryNode.scheduler.receiveChanSize", 10240)
 }
 
 func (p *queryNodeConfig) initMaxUnsolvedQueueSize() {
-	p.MaxUnsolvedQueueSize = p.Base.ParseInt32WithDefault("queryNode.grouping.unsolvedQueueSize", 10240)
+	p.MaxUnsolvedQueueSize = p.Base.ParseInt32WithDefault("queryNode.scheduler.unsolvedQueueSize", 10240)
+}
+
+func (p *queryNodeConfig) initCPURatio() {
+	p.CPURatio = p.Base.ParseFloatWithDefault("queryNode.scheduler.cpuRatio", 10.0)
+}
+
+func (p *queryNodeConfig) initMaxReadConcurrency() {
+	p.MaxReadConcurrency = p.Base.ParseInt32WithDefault("queryNode.scheduler.maxReadConcurrency", 0)
+	if p.MaxReadConcurrency <= 0 {
+		p.MaxReadConcurrency = math.MaxInt32
+	}
 }
 
 func (p *queryNodeConfig) initMaxGroupNQ() {

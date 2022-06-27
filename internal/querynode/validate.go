@@ -122,17 +122,12 @@ func validateOnStreamReplica(replica ReplicaInterface, collectionID UniqueID, pa
 		return searchPartIDs, segmentIDs, nil
 	}
 
-	for _, partID := range searchPartIDs {
-		segIDs, err2 := replica.getSegmentIDsByVChannel(partID, vChannel)
-		log.Debug("get segmentIDs by vChannel",
-			zap.Any("collectionID", collectionID),
-			zap.Any("vChannel", vChannel),
-			zap.Any("partitionID", partID),
-			zap.Any("segmentIDs", segIDs))
-		if err2 != nil {
-			return searchPartIDs, segmentIDs, err2
-		}
-		segmentIDs = append(segmentIDs, segIDs...)
-	}
+	segmentIDs, err = replica.getSegmentIDsByVChannel(searchPartIDs, vChannel, segmentTypeGrowing)
+	log.Debug("validateOnStreamReplica getSegmentIDsByVChannel",
+		zap.Any("collectionID", collectionID),
+		zap.Any("vChannel", vChannel),
+		zap.Any("partitionIDs", searchPartIDs),
+		zap.Any("segmentIDs", segmentIDs),
+		zap.Error(err))
 	return searchPartIDs, segmentIDs, nil
 }

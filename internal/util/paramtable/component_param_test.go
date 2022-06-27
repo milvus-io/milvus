@@ -12,6 +12,7 @@
 package paramtable
 
 import (
+	"math"
 	"os"
 	"path"
 	"testing"
@@ -244,8 +245,10 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, true, Params.GroupEnabled)
 		assert.Equal(t, int32(10240), Params.MaxReceiveChanSize)
 		assert.Equal(t, int32(10240), Params.MaxUnsolvedQueueSize)
+		assert.Equal(t, int32(math.MaxInt32), Params.MaxReadConcurrency)
 		assert.Equal(t, int64(1000), Params.MaxGroupNQ)
 		assert.Equal(t, 10.0, Params.TopKMergeRatio)
+		assert.Equal(t, 10.0, Params.CPURatio)
 
 		// test small indexNlist/NProbe default
 		Params.Base.Remove("queryNode.segcore.smallIndex.nlist")
