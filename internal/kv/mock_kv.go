@@ -107,6 +107,10 @@ func (m *MockMetaKV) LoadWithPrefix2(key string) ([]string, []string, []int64, e
 	panic("not implemented") // TODO: Implement
 }
 
+func (m *MockMetaKV) LoadWithRevisionAndVersions(key string) ([]string, []string, []int64, int64, error) {
+	panic("not implemented") // TODO: Implement
+}
+
 func (m *MockMetaKV) LoadWithRevision(key string) ([]string, []string, int64, error) {
 	panic("not implemented") // TODO: Implement
 }
