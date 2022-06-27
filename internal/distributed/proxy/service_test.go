@@ -258,6 +258,10 @@ func (m *MockRootCoord) GetCredential(ctx context.Context, req *rootcoordpb.GetC
 	return nil, nil
 }
 
+func (m *MockRootCoord) GetImportFailedSegmentIDs(ctx context.Context, req *internalpb.GetImportFailedSegmentIDsRequest) (*internalpb.GetImportFailedSegmentIDsResponse, error) {
+	return nil, nil
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type MockIndexCoord struct {
 	MockBase

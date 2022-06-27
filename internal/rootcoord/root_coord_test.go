@@ -2853,7 +2853,21 @@ func TestRootCoord_Base(t *testing.T) {
 		}
 		p2, err := core.AllocID(ctx, r2)
 		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, p2.Status.ErrorCode)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, p2.GetStatus().GetErrorCode())
+	})
+
+	wg.Add(1)
+	t.Run("getImportFailedSegmentIDs", func(t *testing.T) {
+		defer wg.Done()
+		req := &internalpb.GetImportFailedSegmentIDsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_GetImportFailedSegmentIDs,
+			},
+		}
+		rsp, err := core.GetImportFailedSegmentIDs(ctx, req)
+		assert.True(t, len(rsp.GetSegmentIDs()) >= 0)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, rsp.GetStatus().GetErrorCode())
 	})
 
 	wg.Wait()

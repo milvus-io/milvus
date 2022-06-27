@@ -57,6 +57,7 @@ enum ErrorCode {
     ListPolicyFailure = 44;
     NotShardLeader = 45;
     NoReplicaAvailable = 46;
+    GetImportFailedSegmentsFailure = 47;
 
     // Service availability.
     // NA: Not Available.
@@ -160,6 +161,7 @@ enum MsgType {
     HandoffSegments = 254;
     LoadBalanceSegments = 255;
     DescribeSegments = 256;
+    GetImportFailedSegmentIDs = 257;
 
     /* DEFINITION REQUESTS: INDEX */
     CreateIndex = 300;

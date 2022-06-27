@@ -106,6 +106,14 @@ func (s *SegmentsInfo) SetState(segmentID UniqueID, state commonpb.SegmentState)
 	}
 }
 
+// SetDroppedAt sets Segment DroppedAt time for SegmentInfo with provided segmentID
+// if SegmentInfo not found, do nothing
+func (s *SegmentsInfo) SetDroppedAt(segmentID UniqueID, time uint64) {
+	if segment, ok := s.segments[segmentID]; ok {
+		s.segments[segmentID] = segment.Clone(SetDroppedAt(time))
+	}
+}
+
 // SetDmlPosition sets DmlPosition info (checkpoint for recovery) for SegmentInfo with provided segmentID
 // if SegmentInfo not found, do nothing
 func (s *SegmentsInfo) SetDmlPosition(segmentID UniqueID, pos *internalpb.MsgPosition) {
@@ -238,6 +246,13 @@ func SetExpireTime(expireTs Timestamp) SegmentInfoOption {
 func SetState(state commonpb.SegmentState) SegmentInfoOption {
 	return func(segment *SegmentInfo) {
 		segment.State = state
+	}
+}
+
+// SetDroppedAt is the option to set droppedAt time for segment info
+func SetDroppedAt(time uint64) SegmentInfoOption {
+	return func(segment *SegmentInfo) {
+		segment.DroppedAt = time
 	}
 }
 

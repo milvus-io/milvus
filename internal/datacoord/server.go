@@ -381,7 +381,7 @@ func (s *Server) initGarbageCollection() error {
 		}
 	}
 
-	s.garbageCollector = newGarbageCollector(s.meta, s.segReferManager, GcOption{
+	s.garbageCollector = newGarbageCollector(s.meta, s.segReferManager, s.rootCoordClient, GcOption{
 		cli:        cli,
 		enabled:    Params.DataCoordCfg.EnableGarbageCollection,
 		bucketName: Params.MinioCfg.BucketName,

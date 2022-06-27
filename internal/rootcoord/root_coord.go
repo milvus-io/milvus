@@ -2980,3 +2980,16 @@ func (c *Core) ListCredUsers(ctx context.Context, in *milvuspb.ListCredUsersRequ
 		Usernames: credInfo.Usernames,
 	}, nil
 }
+
+func (c *Core) GetImportFailedSegmentIDs(ctx context.Context, req *internalpb.GetImportFailedSegmentIDsRequest) (*internalpb.GetImportFailedSegmentIDsResponse, error) {
+	segmentIds, err := c.importManager.GetImportFailedSegmentIDs()
+	if err != nil {
+		return &internalpb.GetImportFailedSegmentIDsResponse{
+			Status: failStatus(commonpb.ErrorCode_GetImportFailedSegmentsFailure, "GetImportFailedSegmentsIDFailed"+err.Error()),
+		}, err
+	}
+	return &internalpb.GetImportFailedSegmentIDsResponse{
+		Status:     succStatus(),
+		SegmentIDs: segmentIds,
+	}, nil
+}

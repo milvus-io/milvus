@@ -815,6 +815,17 @@ func TestGrpcService(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
 	})
 
+	t.Run("getImportFailedSegmentIDs", func(t *testing.T) {
+		req := &internalpb.GetImportFailedSegmentIDsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_GetImportFailedSegmentIDs,
+			},
+		}
+		rsp, err := cli.GetImportFailedSegmentIDs(ctx, req)
+		assert.True(t, len(rsp.GetSegmentIDs()) >= 0)
+		assert.Nil(t, err)
+	})
+
 	err = cli.Stop()
 	assert.Nil(t, err)
 
