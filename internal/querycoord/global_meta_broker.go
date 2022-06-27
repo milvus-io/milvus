@@ -531,3 +531,29 @@ func (broker *globalMetaBroker) releaseSegmentReferLock(ctx context.Context, tas
 
 	return nil
 }
+
+// getDataSegmentInfosByIDs return the SegmentInfo details according to the given ids through RPC to datacoord
+func (broker *globalMetaBroker) getDataSegmentInfosByIDs(segmentIds []int64) ([]*datapb.SegmentInfo, error) {
+	var segmentInfos []*datapb.SegmentInfo
+	infoResp, err := broker.dataCoord.GetSegmentInfo(broker.ctx, &datapb.GetSegmentInfoRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_SegmentInfo,
+			MsgID:     0,
+			Timestamp: 0,
+			SourceID:  Params.ProxyCfg.GetNodeID(),
+		},
+		SegmentIDs:       segmentIds,
+		IncludeUnHealthy: true,
+	})
+	if err != nil {
+		log.Error("Fail to get datapb.SegmentInfo by ids from datacoord", zap.Error(err))
+		return nil, err
+	}
+	if infoResp.GetStatus().ErrorCode != commonpb.ErrorCode_Success {
+		err = errors.New(infoResp.GetStatus().Reason)
+		log.Error("Fail to get datapb.SegmentInfo by ids from datacoord", zap.Error(err))
+		return nil, err
+	}
+	segmentInfos = infoResp.Infos
+	return segmentInfos, nil
+}

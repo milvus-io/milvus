@@ -376,7 +376,7 @@ func TestReloadClusterFromKV(t *testing.T) {
 			newID := atomic.AddInt64(&id, 1)
 			return newID, nil
 		}
-		meta, err := newMeta(ctx, kv, factory, idAllocator, nil)
+		meta, err := newMeta(ctx, kv, factory, idAllocator)
 		assert.Nil(t, err)
 
 		cluster := &queryNodeCluster{
@@ -425,7 +425,7 @@ func TestGrpcRequest(t *testing.T) {
 	idAllocator := func() (UniqueID, error) {
 		return 0, nil
 	}
-	meta, err := newMeta(baseCtx, kv, factory, idAllocator, nil)
+	meta, err := newMeta(baseCtx, kv, factory, idAllocator)
 	assert.Nil(t, err)
 	deltaChannelInfo := []*datapb.VchannelInfo{
 		{
@@ -631,7 +631,7 @@ func TestSetNodeState(t *testing.T) {
 	idAllocator := func() (UniqueID, error) {
 		return 0, nil
 	}
-	meta, err := newMeta(baseCtx, kv, factory, idAllocator, nil)
+	meta, err := newMeta(baseCtx, kv, factory, idAllocator)
 	assert.Nil(t, err)
 
 	handler, err := newChannelUnsubscribeHandler(baseCtx, kv, factory)
