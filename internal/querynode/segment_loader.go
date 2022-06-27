@@ -86,7 +86,7 @@ func (loader *segmentLoader) LoadSegment(req *querypb.LoadSegmentsRequest, segme
 	log.Info("segmentLoader start loading...",
 		zap.Any("collectionID", req.CollectionID),
 		zap.Any("segmentNum", segmentNum),
-		zap.Any("loadType", segmentType))
+		zap.Any("segmentType", segmentType.String()))
 
 	// check memory limit
 	concurrencyLevel := loader.cpuPool.Cap()
@@ -134,7 +134,7 @@ func (loader *segmentLoader) LoadSegment(req *querypb.LoadSegmentsRequest, segme
 				zap.Int64("collectionID", collectionID),
 				zap.Int64("partitionID", partitionID),
 				zap.Int64("segmentID", segmentID),
-				zap.Int32("segment type", int32(segmentType)),
+				zap.String("segmentType", segmentType.String()),
 				zap.Error(err))
 			segmentGC()
 			return err
@@ -157,7 +157,7 @@ func (loader *segmentLoader) LoadSegment(req *querypb.LoadSegmentsRequest, segme
 				zap.Int64("collectionID", collectionID),
 				zap.Int64("partitionID", partitionID),
 				zap.Int64("segmentID", segmentID),
-				zap.Int32("segment type", int32(segmentType)),
+				zap.String("segmentType", segmentType.String()),
 				zap.Error(err))
 			return err
 		}
@@ -206,7 +206,8 @@ func (loader *segmentLoader) loadSegmentInternal(segment *Segment,
 	log.Info("start loading segment data into memory",
 		zap.Int64("collectionID", collectionID),
 		zap.Int64("partitionID", partitionID),
-		zap.Int64("segmentID", segmentID))
+		zap.Int64("segmentID", segmentID),
+		zap.String("segmentType", segment.getType().String()))
 
 	pkFieldID, err := loader.metaReplica.getPKFieldIDByCollectionID(collectionID)
 	if err != nil {
@@ -310,7 +311,8 @@ func (loader *segmentLoader) loadGrowingSegmentFields(segment *Segment, fieldBin
 	log.Info("load field binlogs done for growing segment",
 		zap.Int64("collection", segment.collectionID),
 		zap.Int64("segment", segment.segmentID),
-		zap.Any("len(field)", len(fieldBinlogs)))
+		zap.Int("len(field)", len(fieldBinlogs)),
+		zap.String("segmentType", segmentType.String()))
 
 	_, _, insertData, err := iCodec.Deserialize(blobs)
 	if err != nil {
@@ -337,7 +339,7 @@ func (loader *segmentLoader) loadGrowingSegmentFields(segment *Segment, fieldBin
 		return loader.loadGrowingSegments(segment, rowIDData.(*storage.Int64FieldData).Data, utss, insertData)
 
 	default:
-		err := fmt.Errorf("illegal segmentType=%v when load segment, collectionID=%v", segmentType, segment.collectionID)
+		err := fmt.Errorf("illegal segmentType=%s when load segment, collectionID=%v", segmentType.String(), segment.collectionID)
 		return err
 	}
 }
@@ -359,7 +361,8 @@ func (loader *segmentLoader) loadSealedSegmentFields(segment *Segment, fields []
 	log.Info("load field binlogs done for sealed segment",
 		zap.Int64("collection", segment.collectionID),
 		zap.Int64("segment", segment.segmentID),
-		zap.Any("len(field)", len(fields)))
+		zap.Int("len(field)", len(fields)),
+		zap.String("segmentType", segment.getType().String()))
 
 	return nil
 }

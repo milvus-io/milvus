@@ -608,7 +608,7 @@ func (replica *metaReplica) removeSegmentPrivate(segmentID UniqueID, segType seg
 			deleteSegment(segment)
 		}
 	default:
-		panic("unsupported segment type")
+		panic(fmt.Sprintf("unsupported segment type %s", segType.String()))
 	}
 
 	metrics.QueryNodeNumSegments.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Dec()

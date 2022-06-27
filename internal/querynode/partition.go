@@ -101,7 +101,11 @@ func (p *Partition) removeSegmentID(segmentID UniqueID, segType segmentType) {
 	default:
 		return
 	}
-	log.Info("remove a segment from replica", zap.Int64("collectionID", p.collectionID), zap.Int64("partitionID", p.partitionID), zap.Int64("segmentID", segmentID))
+	log.Info("remove a segment from replica",
+		zap.Int64("collectionID", p.collectionID),
+		zap.Int64("partitionID", p.partitionID),
+		zap.Int64("segmentID", segmentID),
+		zap.String("segmentType", segType.String()))
 }
 
 // newPartition returns a new Partition
