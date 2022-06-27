@@ -394,20 +394,31 @@ func (sc *ShardCluster) init() {
 	sc.healthCheck()
 }
 
-// pickNode selects node id in cluster
+// pickNode selects node in the cluster
 func (sc *ShardCluster) pickNode(evt segmentEvent) (shardSegmentInfo, bool) {
-	for _, nodeID := range evt.nodeIDs {
+	nodeID, has := sc.selectNodeInReplica(evt.nodeIDs)
+	if has { // assume one segment shall exist once in one replica
+		return shardSegmentInfo{
+			segmentID:   evt.segmentID,
+			partitionID: evt.partitionID,
+			nodeID:      nodeID,
+			state:       evt.state,
+		}, true
+	}
+
+	return shardSegmentInfo{}, false
+}
+
+// selectNodeInReplica returns first node id inside the shard cluster replica.
+// if there is no nodeID found, returns 0.
+func (sc *ShardCluster) selectNodeInReplica(nodeIDs []int64) (int64, bool) {
+	for _, nodeID := range nodeIDs {
 		_, has := sc.getNode(nodeID)
-		if has { // assume one segment shall exist once in one replica
-			return shardSegmentInfo{
-				segmentID:   evt.segmentID,
-				partitionID: evt.partitionID,
-				nodeID:      nodeID,
-				state:       evt.state,
-			}, true
+		if has {
+			return nodeID, true
 		}
 	}
-	return shardSegmentInfo{}, false
+	return 0, false
 }
 
 // healthCheck iterate all segments to to check cluster could provide service.
@@ -454,6 +465,8 @@ func (sc *ShardCluster) watchSegments(evtCh <-chan segmentEvent) {
 			}
 			info, ok := sc.pickNode(evt)
 			if !ok {
+				log.Info("No node of event is in cluster, skip to process it",
+					zap.Int64s("nodes", evt.nodeIDs))
 				continue
 			}
 			switch evt.eventType {
@@ -531,8 +544,12 @@ func (sc *ShardCluster) HandoffSegments(info *querypb.SegmentChangeInfo) error {
 		if seg.GetCollectionID() != sc.collectionID || seg.GetDmChannel() != sc.vchannelName {
 			continue
 		}
+		nodeID, has := sc.selectNodeInReplica(seg.NodeIds)
+		if !has {
+			continue
+		}
 		onlineSegments = append(onlineSegments, shardSegmentInfo{
-			nodeID:    seg.GetNodeID(),
+			nodeID:    nodeID,
 			segmentID: seg.GetSegmentID(),
 		})
 		onlineSegmentIDs = append(onlineSegmentIDs, seg.GetSegmentID())
@@ -550,9 +567,13 @@ func (sc *ShardCluster) HandoffSegments(info *querypb.SegmentChangeInfo) error {
 		if seg.GetCollectionID() != sc.collectionID || seg.GetDmChannel() != sc.vchannelName {
 			continue
 		}
-		sc.removeSegment(shardSegmentInfo{segmentID: seg.GetSegmentID(), nodeID: seg.GetNodeID()})
+		nodeID, has := sc.selectNodeInReplica(seg.NodeIds)
+		if !has {
+			continue
+		}
+		sc.removeSegment(shardSegmentInfo{segmentID: seg.GetSegmentID(), nodeID: nodeID})
 
-		removes[seg.GetNodeID()] = append(removes[seg.GetNodeID()], seg.SegmentID)
+		removes[nodeID] = append(removes[nodeID], seg.SegmentID)
 	}
 
 	var errs errorutil.ErrorList
