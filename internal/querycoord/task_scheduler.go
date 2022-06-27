@@ -359,7 +359,7 @@ func (scheduler *TaskScheduler) unmarshalTask(taskID UniqueID, t string) (task, 
 		if err != nil {
 			return nil, err
 		}
-		fullReq, err := generateFullWatchDmChannelsRequest(scheduler.meta, &req)
+		fullReq, err := generateFullWatchDmChannelsRequest(scheduler.broker, &req)
 		if err != nil {
 			return nil, err
 		}

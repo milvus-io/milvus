@@ -49,7 +49,7 @@ func TestShuffleChannelsToQueryNode(t *testing.T) {
 		newID := atomic.AddInt64(&id, 1)
 		return newID, nil
 	}
-	meta, err := newMeta(baseCtx, kv, nil, idAllocator, nil)
+	meta, err := newMeta(baseCtx, kv, nil, idAllocator)
 	assert.Nil(t, err)
 	var cluster Cluster = &queryNodeCluster{
 		ctx:         baseCtx,

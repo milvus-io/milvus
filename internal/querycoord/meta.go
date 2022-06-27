@@ -106,8 +106,6 @@ type Meta interface {
 	getReplicasByNodeID(nodeID int64) ([]*milvuspb.ReplicaInfo, error)
 	applyReplicaBalancePlan(p *balancePlan) error
 	updateShardLeader(replicaID UniqueID, dmChannel string, leaderID UniqueID, leaderAddr string) error
-
-	getDataSegmentInfosByIDs(segmentIds []int64) ([]*datapb.SegmentInfo, error)
 }
 
 // MetaReplica records the current load information on all querynodes
@@ -137,7 +135,7 @@ type MetaReplica struct {
 	dataCoord types.DataCoord
 }
 
-func newMeta(ctx context.Context, kv kv.MetaKv, factory dependency.Factory, idAllocator func() (UniqueID, error), dataCoord types.DataCoord) (Meta, error) {
+func newMeta(ctx context.Context, kv kv.MetaKv, factory dependency.Factory, idAllocator func() (UniqueID, error)) (Meta, error) {
 	childCtx, cancel := context.WithCancel(ctx)
 	collectionInfos := make(map[UniqueID]*querypb.CollectionInfo)
 	queryChannelInfos := make(map[UniqueID]*querypb.QueryChannelInfo)
@@ -157,7 +155,6 @@ func newMeta(ctx context.Context, kv kv.MetaKv, factory dependency.Factory, idAl
 
 		segmentsInfo: newSegmentsInfo(kv),
 		replicas:     NewReplicaInfos(),
-		dataCoord:    dataCoord,
 	}
 	m.setKvClient(kv)
 
@@ -1334,30 +1331,4 @@ func addNode2Segment(meta Meta, node UniqueID, replicas []*milvuspb.ReplicaInfo,
 	}
 
 	segment.NodeIds = append(segment.NodeIds, node)
-}
-
-// getDataSegmentInfosByIDs return the SegmentInfo details according to the given ids through RPC to datacoord
-func (m *MetaReplica) getDataSegmentInfosByIDs(segmentIds []int64) ([]*datapb.SegmentInfo, error) {
-	var segmentInfos []*datapb.SegmentInfo
-	infoResp, err := m.dataCoord.GetSegmentInfo(m.ctx, &datapb.GetSegmentInfoRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_SegmentInfo,
-			MsgID:     0,
-			Timestamp: 0,
-			SourceID:  Params.ProxyCfg.GetNodeID(),
-		},
-		SegmentIDs:       segmentIds,
-		IncludeUnHealthy: true,
-	})
-	if err != nil {
-		log.Error("Fail to get datapb.SegmentInfo by ids from datacoord", zap.Error(err))
-		return nil, err
-	}
-	if infoResp.GetStatus().ErrorCode != commonpb.ErrorCode_Success {
-		err = errors.New(infoResp.GetStatus().Reason)
-		log.Error("Fail to get datapb.SegmentInfo by ids from datacoord", zap.Error(err))
-		return nil, err
-	}
-	segmentInfos = infoResp.Infos
-	return segmentInfos, nil
 }
