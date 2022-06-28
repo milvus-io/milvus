@@ -110,7 +110,7 @@ var (
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
-			Name:      "sq_queue_lantency",
+			Name:      "sq_queue_latency",
 			Help:      "latency of search or query in queue",
 			Buckets:   buckets,
 		}, []string{
@@ -285,7 +285,7 @@ var (
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
-			Name:      "entities_num",
+			Name:      "entity_num",
 			Help:      "number of entities which can be searched/queried",
 		}, []string{
 			nodeIDLabelName,
