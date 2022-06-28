@@ -522,13 +522,6 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 		log.Info("loadCollectionTask: assign child task done", zap.Int64("collectionID", collectionID), zap.Int64("msgID", lct.Base.MsgID))
 	}
 
-	err = lct.meta.addCollection(collectionID, querypb.LoadType_LoadCollection, lct.Schema)
-	if err != nil {
-		log.Error("loadCollectionTask: add collection to meta failed", zap.Int64("collectionID", collectionID), zap.Int64("msgID", lct.Base.MsgID), zap.Error(err))
-		lct.setResultInfo(err)
-		return err
-	}
-
 	err = lct.meta.addPartitions(collectionID, partitionIds)
 	if err != nil {
 		log.Error("loadCollectionTask: add partitions to meta failed", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIds), zap.Int64("msgID", lct.Base.MsgID), zap.Error(err))
@@ -953,13 +946,6 @@ func (lpt *loadPartitionTask) execute(ctx context.Context) error {
 		}
 		metrics.QueryCoordNumChildTasks.WithLabelValues().Add(float64(len(internalTasks)))
 		log.Info("loadPartitionTask: assign child task done", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIDs), zap.Int64("msgID", lpt.Base.MsgID))
-	}
-
-	err = lpt.meta.addCollection(collectionID, querypb.LoadType_LoadPartition, lpt.Schema)
-	if err != nil {
-		log.Error("loadPartitionTask: add collection to meta failed", zap.Int64("collectionID", collectionID), zap.Int64("msgID", lpt.Base.MsgID), zap.Error(err))
-		lpt.setResultInfo(err)
-		return err
 	}
 
 	err = lpt.meta.addPartitions(collectionID, partitionIDs)

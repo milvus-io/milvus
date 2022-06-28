@@ -228,52 +228,66 @@ func (qc *QueryCoord) LoadCollection(ctx context.Context, req *querypb.LoadColle
 		return status, nil
 	}
 
-	if collectionInfo, err := qc.meta.getCollectionInfoByID(collectionID); err == nil {
-		// if collection has been loaded by load collection request, return success
-		if collectionInfo.LoadType == querypb.LoadType_LoadCollection {
-			if collectionInfo.ReplicaNumber != req.ReplicaNumber {
-				msg := fmt.Sprintf("collection has already been loaded, and the number of replicas %v is not same as the request's %v. Should release first then reload with the new number of replicas",
-					collectionInfo.ReplicaNumber,
-					req.ReplicaNumber)
-				log.Warn(msg,
+	collection, err := qc.meta.addCollection(collectionID, querypb.LoadType_LoadCollection, req.ReplicaNumber, req.Schema)
+	if err != nil {
+		if errors.Is(err, ErrCollectionLoaded) {
+			// if collection has been loaded by load collection request, return success
+			if collection.LoadType == querypb.LoadType_LoadCollection {
+				if collection.ReplicaNumber != req.ReplicaNumber {
+					msg := fmt.Sprintf("collection has already been loaded, and the number of replicas %v is not same as the request's %v. Should release first then reload with the new number of replicas",
+						collection.ReplicaNumber,
+						req.ReplicaNumber)
+					log.Warn(msg,
+						zap.String("role", typeutil.QueryCoordRole),
+						zap.Int64("collectionID", collectionID),
+						zap.Int64("msgID", req.Base.MsgID),
+						zap.Int32("collectionReplicaNumber", collection.ReplicaNumber),
+						zap.Int32("requestReplicaNumber", req.ReplicaNumber))
+
+					status.ErrorCode = commonpb.ErrorCode_IllegalArgument
+					status.Reason = msg
+
+					metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
+					return status, nil
+				}
+
+				log.Info("collection has already been loaded, return load success directly",
 					zap.String("role", typeutil.QueryCoordRole),
 					zap.Int64("collectionID", collectionID),
-					zap.Int64("msgID", req.Base.MsgID),
-					zap.Int32("collectionReplicaNumber", collectionInfo.ReplicaNumber),
-					zap.Int32("requestReplicaNumber", req.ReplicaNumber))
+					zap.Int64("msgID", req.Base.MsgID))
 
-				status.ErrorCode = commonpb.ErrorCode_IllegalArgument
-				status.Reason = msg
+				metrics.QueryCoordLoadCount.WithLabelValues(metrics.SuccessLabel).Inc()
+				return status, nil
+			}
+			// if some partitions of the collection have been loaded by load partitions request, return error
+			// should release partitions first, then load collection again
+			if collection.LoadType == querypb.LoadType_LoadPartition {
+				status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+				err = fmt.Errorf("some partitions %v of collection %d has been loaded into QueryNode, please release partitions firstly",
+					collection.PartitionIDs, collectionID)
+				status.Reason = err.Error()
+				log.Warn("loadCollectionRequest failed",
+					zap.String("role", typeutil.QueryCoordRole),
+					zap.Int64("collectionID", collectionID),
+					zap.Int64s("loaded partitionIDs", collection.PartitionIDs),
+					zap.Int64("msgID", req.Base.MsgID),
+					zap.Error(err))
 
 				metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
 				return status, nil
 			}
-
-			log.Info("collection has already been loaded, return load success directly",
-				zap.String("role", typeutil.QueryCoordRole),
-				zap.Int64("collectionID", collectionID),
-				zap.Int64("msgID", req.Base.MsgID))
-
-			metrics.QueryCoordLoadCount.WithLabelValues(metrics.SuccessLabel).Inc()
-			return status, nil
 		}
-		// if some partitions of the collection have been loaded by load partitions request, return error
-		// should release partitions first, then load collection again
-		if collectionInfo.LoadType == querypb.LoadType_LoadPartition {
-			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-			err = fmt.Errorf("some partitions %v of collection %d has been loaded into QueryNode, please release partitions firstly",
-				collectionInfo.PartitionIDs, collectionID)
-			status.Reason = err.Error()
-			log.Warn("loadCollectionRequest failed",
-				zap.String("role", typeutil.QueryCoordRole),
-				zap.Int64("collectionID", collectionID),
-				zap.Int64s("loaded partitionIDs", collectionInfo.PartitionIDs),
-				zap.Int64("msgID", req.Base.MsgID),
-				zap.Error(err))
 
-			metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
-			return status, nil
-		}
+		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		status.Reason = err.Error()
+
+		log.Error("failed to create collection",
+			zap.Int64("collectionID", collectionID),
+			zap.Error(err))
+
+		metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
+		return status, nil
+
 	}
 
 	baseTask := newBaseTask(qc.loopCtx, querypb.TriggerCondition_GrpcRequest)
@@ -284,8 +298,10 @@ func (qc *QueryCoord) LoadCollection(ctx context.Context, req *querypb.LoadColle
 		cluster:               qc.cluster,
 		meta:                  qc.meta,
 	}
-	err := qc.scheduler.Enqueue(loadCollectionTask)
+	err = qc.scheduler.Enqueue(loadCollectionTask)
 	if err != nil {
+		qc.meta.releaseCollection(collectionID)
+
 		log.Error("loadCollectionRequest failed to add execute task to scheduler",
 			zap.String("role", typeutil.QueryCoordRole),
 			zap.Int64("collectionID", collectionID),
@@ -533,72 +549,83 @@ func (qc *QueryCoord) LoadPartitions(ctx context.Context, req *querypb.LoadParti
 		return status, nil
 	}
 
-	if collectionInfo, err := qc.meta.getCollectionInfoByID(collectionID); err == nil {
-		// if the collection has been loaded into memory by load collection request, return error
-		// should release collection first, then load partitions again
-		if collectionInfo.LoadType == querypb.LoadType_LoadCollection {
-			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-			err = fmt.Errorf("collection %d has been loaded into QueryNode, please release collection firstly", collectionID)
-			status.Reason = err.Error()
-		}
+	collection, err := qc.meta.addCollection(collectionID, querypb.LoadType_LoadPartition, req.ReplicaNumber, req.Schema)
+	if err != nil {
+		if errors.Is(err, ErrCollectionLoaded) {
+			// if the collection has been loaded into memory by load collection request, return error
+			// should release collection first, then load partitions again
+			if collection.LoadType == querypb.LoadType_LoadCollection {
+				status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+				err = fmt.Errorf("collection %d has been loaded into QueryNode, please release collection firstly", collectionID)
+				status.Reason = err.Error()
+			} else if collection.LoadType == querypb.LoadType_LoadPartition {
+				if collection.ReplicaNumber != req.ReplicaNumber {
+					msg := fmt.Sprintf("partitions has already been loaded, and the number of replicas %v is not same as the request's %v. Should release first then reload with the new number of replicas",
+						collection.ReplicaNumber,
+						req.ReplicaNumber)
+					log.Warn(msg,
+						zap.String("role", typeutil.QueryCoordRole),
+						zap.Int64("collectionID", collectionID),
+						zap.Int64("msgID", req.Base.MsgID),
+						zap.Int32("collectionReplicaNumber", collection.ReplicaNumber),
+						zap.Int32("requestReplicaNumber", req.ReplicaNumber))
 
-		if collectionInfo.LoadType == querypb.LoadType_LoadPartition {
-			if collectionInfo.ReplicaNumber != req.ReplicaNumber {
-				msg := fmt.Sprintf("partitions has already been loaded, and the number of replicas %v is not same as the request's %v. Should release first then reload with the new number of replicas",
-					collectionInfo.ReplicaNumber,
-					req.ReplicaNumber)
-				log.Warn(msg,
+					status.ErrorCode = commonpb.ErrorCode_IllegalArgument
+					status.Reason = msg
+
+					metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
+					return status, nil
+				}
+
+				for _, toLoadPartitionID := range partitionIDs {
+					needLoad := true
+					for _, loadedPartitionID := range collection.PartitionIDs {
+						if toLoadPartitionID == loadedPartitionID {
+							needLoad = false
+							break
+						}
+					}
+					if needLoad {
+						// if new partitions need to be loaded, return error
+						// should release partitions first, then load partitions again
+						status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+						err = fmt.Errorf("some partitions %v of collection %d has been loaded into QueryNode, please release partitions firstly",
+							collection.PartitionIDs, collectionID)
+						status.Reason = err.Error()
+					}
+				}
+			}
+
+			if status.ErrorCode != commonpb.ErrorCode_Success {
+				log.Warn("loadPartitionRequest failed",
 					zap.String("role", typeutil.QueryCoordRole),
 					zap.Int64("collectionID", collectionID),
+					zap.Int64s("partitionIDs", partitionIDs),
 					zap.Int64("msgID", req.Base.MsgID),
-					zap.Int32("collectionReplicaNumber", collectionInfo.ReplicaNumber),
-					zap.Int32("requestReplicaNumber", req.ReplicaNumber))
-
-				status.ErrorCode = commonpb.ErrorCode_IllegalArgument
-				status.Reason = msg
+					zap.Error(err))
 
 				metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
 				return status, nil
 			}
 
-			for _, toLoadPartitionID := range partitionIDs {
-				needLoad := true
-				for _, loadedPartitionID := range collectionInfo.PartitionIDs {
-					if toLoadPartitionID == loadedPartitionID {
-						needLoad = false
-						break
-					}
-				}
-				if needLoad {
-					// if new partitions need to be loaded, return error
-					// should release partitions first, then load partitions again
-					status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-					err = fmt.Errorf("some partitions %v of collection %d has been loaded into QueryNode, please release partitions firstly",
-						collectionInfo.PartitionIDs, collectionID)
-					status.Reason = err.Error()
-				}
-			}
-		}
-
-		if status.ErrorCode != commonpb.ErrorCode_Success {
-			log.Warn("loadPartitionRequest failed",
+			log.Info("loadPartitionRequest completed, all partitions to load have already been loaded into memory",
 				zap.String("role", typeutil.QueryCoordRole),
-				zap.Int64("collectionID", collectionID),
+				zap.Int64("collectionID", req.CollectionID),
 				zap.Int64s("partitionIDs", partitionIDs),
-				zap.Int64("msgID", req.Base.MsgID),
-				zap.Error(err))
+				zap.Int64("msgID", req.Base.MsgID))
 
-			metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
+			metrics.QueryCoordLoadCount.WithLabelValues(metrics.SuccessLabel).Inc()
 			return status, nil
 		}
 
-		log.Info("loadPartitionRequest completed, all partitions to load have already been loaded into memory",
-			zap.String("role", typeutil.QueryCoordRole),
-			zap.Int64("collectionID", req.CollectionID),
-			zap.Int64s("partitionIDs", partitionIDs),
-			zap.Int64("msgID", req.Base.MsgID))
+		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		status.Reason = err.Error()
 
-		metrics.QueryCoordLoadCount.WithLabelValues(metrics.SuccessLabel).Inc()
+		log.Error("failed to create collection",
+			zap.Int64("collectionID", collectionID),
+			zap.Error(err))
+
+		metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
 		return status, nil
 	}
 
@@ -610,8 +637,10 @@ func (qc *QueryCoord) LoadPartitions(ctx context.Context, req *querypb.LoadParti
 		cluster:               qc.cluster,
 		meta:                  qc.meta,
 	}
-	err := qc.scheduler.Enqueue(loadPartitionTask)
+	err = qc.scheduler.Enqueue(loadPartitionTask)
 	if err != nil {
+		qc.meta.releaseCollection(collectionID)
+
 		log.Error("loadPartitionRequest failed to add execute task to scheduler",
 			zap.String("role", typeutil.QueryCoordRole),
 			zap.Int64("collectionID", collectionID),

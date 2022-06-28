@@ -481,7 +481,9 @@ func TestGrpcTaskEnqueueFail(t *testing.T) {
 		Schema:        genDefaultCollectionSchema(false),
 		ReplicaNumber: 1,
 	})
-	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+	assert.Equal(t,
+		commonpb.ErrorCode_Success, status.ErrorCode,
+		status.Reason)
 	assert.Nil(t, err)
 	queryCoord.scheduler.taskIDAllocator = failedAllocator
 

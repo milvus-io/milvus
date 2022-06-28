@@ -52,6 +52,10 @@ const (
 	ReplicaMetaPrefix      = "queryCoord-ReplicaMeta"
 )
 
+var (
+	ErrCollectionLoaded = errors.New("CollectionLoaded")
+)
+
 type col2SegmentInfos = map[UniqueID][]*querypb.SegmentInfo
 type col2SealedSegmentChangeInfos = map[UniqueID]*querypb.SealedSegmentsChangeInfo
 
@@ -63,7 +67,10 @@ type Meta interface {
 	showCollections() []*querypb.CollectionInfo
 	hasCollection(collectionID UniqueID) bool
 	getCollectionInfoByID(collectionID UniqueID) (*querypb.CollectionInfo, error)
-	addCollection(collectionID UniqueID, loadType querypb.LoadType, schema *schemapb.CollectionSchema) error
+	// addCollection adds collection if not existed,
+	// returns the old one and ErrCollectionLoaded if collection existed,
+	// returns the new one otherwise.
+	addCollection(collectionID UniqueID, loadType querypb.LoadType, replicaNumber int32, schema *schemapb.CollectionSchema) (*querypb.CollectionInfo, error)
 	releaseCollection(collectionID UniqueID) error
 
 	addPartitions(collectionID UniqueID, partitionIDs []UniqueID) error
@@ -237,6 +244,7 @@ func (m *MetaReplica) reloadFromKV() error {
 	}
 	for _, collectionInfo := range m.collectionInfos {
 		if len(collectionInfo.ReplicaIds) == 0 {
+			collectionInfo.ReplicaNumber = 1
 			replica, err := m.generateReplica(collectionInfo.CollectionID, collectionInfo.PartitionIDs)
 			if err != nil {
 				return err
@@ -425,32 +433,34 @@ func (m *MetaReplica) hasReleasePartition(collectionID UniqueID, partitionID Uni
 	return false
 }
 
-func (m *MetaReplica) addCollection(collectionID UniqueID, loadType querypb.LoadType, schema *schemapb.CollectionSchema) error {
-	hasCollection := m.hasCollection(collectionID)
-	if !hasCollection {
-		var partitionIDs []UniqueID
-		var partitionStates []*querypb.PartitionStates
-		newCollection := &querypb.CollectionInfo{
-			CollectionID:    collectionID,
-			PartitionIDs:    partitionIDs,
-			PartitionStates: partitionStates,
-			LoadType:        loadType,
-			Schema:          schema,
-			ReplicaIds:      make([]int64, 0),
-			ReplicaNumber:   0,
-		}
-		err := saveGlobalCollectionInfo(collectionID, newCollection, m.getKvClient())
-		if err != nil {
-			log.Error("save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
-			return err
-		}
-		m.collectionMu.Lock()
-		m.collectionInfos[collectionID] = newCollection
-		metrics.QueryCoordNumCollections.WithLabelValues().Set(float64(len(m.collectionInfos)))
-		m.collectionMu.Unlock()
+func (m *MetaReplica) addCollection(collectionID UniqueID, loadType querypb.LoadType, replicaNumber int32, schema *schemapb.CollectionSchema) (*querypb.CollectionInfo, error) {
+	m.collectionMu.Lock()
+	defer m.collectionMu.Unlock()
+	old, ok := m.collectionInfos[collectionID]
+	if ok {
+		return proto.Clone(old).(*querypb.CollectionInfo), ErrCollectionLoaded
 	}
 
-	return nil
+	var partitionIDs []UniqueID
+	var partitionStates []*querypb.PartitionStates
+	newCollection := &querypb.CollectionInfo{
+		CollectionID:    collectionID,
+		PartitionIDs:    partitionIDs,
+		PartitionStates: partitionStates,
+		LoadType:        loadType,
+		Schema:          schema,
+		ReplicaIds:      make([]int64, 0, replicaNumber),
+		ReplicaNumber:   replicaNumber,
+	}
+	err := saveGlobalCollectionInfo(collectionID, newCollection, m.getKvClient())
+	if err != nil {
+		log.Error("save collectionInfo error", zap.Any("error", err.Error()), zap.Int64("collectionID", collectionID))
+		return nil, err
+	}
+	m.collectionInfos[collectionID] = newCollection
+	metrics.QueryCoordNumCollections.WithLabelValues().Set(float64(len(m.collectionInfos)))
+
+	return proto.Clone(newCollection).(*querypb.CollectionInfo), nil
 }
 
 func (m *MetaReplica) addPartitions(collectionID UniqueID, partitionIDs []UniqueID) error {
@@ -633,7 +643,6 @@ func (m *MetaReplica) saveGlobalSealedSegInfos(saves col2SegmentInfos) (col2Seal
 			}
 			compactChangeInfo.OnlineSegments = append(compactChangeInfo.OnlineSegments, onlineInfo)
 			segmentsChangeInfo.Infos = append(segmentsChangeInfo.Infos, compactChangeInfo)
-
 		}
 		col2SegmentChangeInfos[collectionID] = segmentsChangeInfo
 	}
@@ -1125,7 +1134,6 @@ func (m *MetaReplica) addReplica(replica *milvuspb.ReplicaInfo) error {
 	}
 
 	collectionInfo.ReplicaIds = append(collectionInfo.ReplicaIds, replica.ReplicaID)
-	collectionInfo.ReplicaNumber++
 
 	err = saveGlobalCollectionInfo(collectionInfo.CollectionID, collectionInfo, m.getKvClient())
 	if err != nil {

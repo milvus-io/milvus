@@ -36,7 +36,7 @@ func TestAddNode(t *testing.T) {
 	}
 	status, err := coord.LoadCollection(ctx, loadCollectionReq)
 	assert.NoError(t, err)
-	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode, status.Reason)
 	waitLoadCollectionDone(ctx, coord, defaultCollectionID)
 
 	plans, err := coord.groupBalancer.AddNode(node1.queryNodeID)
