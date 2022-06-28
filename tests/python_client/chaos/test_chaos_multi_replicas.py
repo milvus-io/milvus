@@ -86,7 +86,7 @@ class TestChaos(TestChaosBase):
 
     @pytest.fixture(scope="function", autouse=True)
     def init_health_checkers(self):
-        c_name = cf.gen_unique_str('Checker_')
+        c_name = cf.gen_unique_str('MultiReplicasChecker_')
         replicas_num = 2
         shards_num = 2
         checkers = {
