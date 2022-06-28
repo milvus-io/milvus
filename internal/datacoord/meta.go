@@ -1076,7 +1076,8 @@ func buildSegment(collectionID UniqueID, partitionID UniqueID, segmentID UniqueI
 }
 
 func isSegmentHealthy(segment *SegmentInfo) bool {
-	return segment.GetState() != commonpb.SegmentState_SegmentStateNone &&
+	return segment != nil &&
+		segment.GetState() != commonpb.SegmentState_SegmentStateNone &&
 		segment.GetState() != commonpb.SegmentState_NotExist &&
 		segment.GetState() != commonpb.SegmentState_Dropped
 }
