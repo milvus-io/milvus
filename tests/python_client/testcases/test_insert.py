@@ -423,21 +423,113 @@ class TestInsertOperation(TestcaseBase):
         collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/12680")
-    @pytest.mark.parametrize("vec_fields", [[cf.gen_float_vec_field(name="float_vector1")],
-                                            [cf.gen_binary_vec_field()],
-                                            [cf.gen_binary_vec_field(), cf.gen_binary_vec_field("binary_vec")]])
-    def test_insert_multi_float_vec_fields(self, vec_fields):
+    def test_insert_default_partition(self):
         """
-        target: test insert into multi float vec fields collection
-        method: create collection with different schema and insert
-        expected: verify num entities
+        target: test insert entities into default partition
+        method: create partition and insert info collection
+        expected: the collection insert count equals to nb
         """
-        schema = cf.gen_schema_multi_vector_fields(vec_fields)
-        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
-        df = cf.gen_dataframe_multi_vec_fields(vec_fields=vec_fields)
-        collection_w.insert(df)
-        assert collection_w.num_entities == ct.default_nb
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        partition_w1 = self.init_partition_wrap(collection_w)
+        data = cf.gen_default_list_data(nb=ct.default_nb)
+        mutation_res, _ = collection_w.insert(data=data, partition_name=partition_w1.name)
+        assert mutation_res.insert_count == ct.default_nb
+
+    def test_insert_partition_not_existed(self):
+        """
+        target: test insert entities in collection created before
+        method: create collection and insert entities in it, with the not existed partition_name param
+        expected: error raised
+        """
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        df = cf.gen_default_dataframe_data(nb=ct.default_nb)
+        error = {ct.err_code: 1, ct.err_msg: "partitionID of partitionName:p can not be existed"}
+        mutation_res, _ = collection_w.insert(data=df, partition_name="p", check_task=CheckTasks.err_res,
+                                              check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_insert_partition_repeatedly(self):
+        """
+        target: test insert entities in collection created before
+        method: create collection and insert entities in it repeatedly, with the partition_name param
+        expected: the collection row count equals to nq
+        """
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        partition_w1 = self.init_partition_wrap(collection_w)
+        partition_w2 = self.init_partition_wrap(collection_w)
+        df = cf.gen_default_dataframe_data(nb=ct.default_nb)
+        mutation_res, _ = collection_w.insert(data=df, partition_name=partition_w1.name)
+        new_res, _ = collection_w.insert(data=df, partition_name=partition_w2.name)
+        assert mutation_res.insert_count == ct.default_nb
+        assert new_res.insert_count == ct.default_nb
+
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_insert_partition_with_ids(self):
+        """
+        target: test insert entities in collection created before, insert with ids
+        method: create collection and insert entities in it, with the partition_name param
+        expected: the collection insert count equals to nq
+        """
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        partition_name = cf.gen_unique_str(prefix)
+        partition_w1 = self.init_partition_wrap(collection_w, partition_name=partition_name)
+        df = cf.gen_default_dataframe_data(ct.default_nb)
+        mutation_res, _ = collection_w.insert(data=df, partition_name=partition_w1.name)
+        assert mutation_res.insert_count == ct.default_nb
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_insert_with_field_type_not_match(self):
+        """
+        target: test insert entities, with the entity field type updated
+        method: update entity field type
+        expected: error raised
+        """
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        df = cf.gen_collection_schema_all_datatype
+        error = {ct.err_code: 0, ct.err_msg: "Data type is not support"}
+        collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_insert_with_lack_vector_field(self):
+        """
+        target: test insert entities, with no vector field
+        method: remove entity values of vector field
+        expected: error raised
+        """
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        df = cf.gen_collection_schema([cf.gen_int64_field(is_primary=True)])
+        error = {ct.err_code: 0, ct.err_msg: "Primary key field can only be one"}
+        collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_insert_with_no_vector_field_dtype(self):
+        """
+        target: test insert entities, with vector field type is error
+        method: vector field dtype is not existed
+        expected: error raised
+        """
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        vec_field, _ = self.field_schema_wrap.init_field_schema(name=ct.default_int64_field_name, dtype=DataType.NONE)
+        field_one = cf.gen_int64_field(is_primary=True)
+        field_two = cf.gen_int64_field()
+        df = [field_one, field_two, vec_field]
+        error = {ct.err_code: 0, ct.err_msg: "Field dtype must be of DataType."}
+        collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_insert_with_no_vector_field_name(self):
+        """
+        target: test insert entities, with no vector field name
+        method: vector field name is error
+        expected: error raised
+        """
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        vec_field = cf.gen_float_vec_field(name=ct.get_invalid_strs)
+        field_one = cf.gen_int64_field(is_primary=True)
+        field_two = cf.gen_int64_field()
+        df = [field_one, field_two, vec_field]
+        error = {ct.err_code: 0, ct.err_msg: "Data type is not support."}
+        collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_insert_drop_collection(self):
@@ -646,7 +738,7 @@ class TestInsertOperation(TestcaseBase):
         assert collection_w.num_entities == nb
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue 15416")
+    # @pytest.mark.xfail(reason="issue 15416")
     def test_insert_multi_threading(self):
         """
         target: test concurrent insert
@@ -844,121 +936,6 @@ def assert_mutation_result(mutation_res):
     assert mutation_res.insert_count == ct.default_nb
 
 
-class TestInsertOperation(TestcaseBase):
-    """
-    ******************************************************************
-      The following cases are used to test insert interface operations
-    ******************************************************************
-    """
-    
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_insert_default_partition(self):
-        """
-        target: test insert entities into default partition
-        method: create partition and insert info collection
-        expected: the collection insert count equals to nb
-        """
-        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
-        partition_w1 = self.init_partition_wrap(collection_w)
-        data = cf.gen_default_list_data(nb=ct.default_nb)
-        mutation_res, _ = collection_w.insert(data=data, partition_name=partition_w1.name)
-        assert mutation_res.insert_count == ct.default_nb
-
-    def test_insert_partition_not_existed(self):
-        """
-        target: test insert entities in collection created before
-        method: create collection and insert entities in it, with the not existed partition_name param
-        expected: error raised
-        """
-        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
-        df = cf.gen_default_dataframe_data(nb=ct.default_nb)
-        error = {ct.err_code: 1, ct.err_msg: "partitionID of partitionName:p can not be existed"}
-        mutation_res, _ = collection_w.insert(data=df, partition_name="p", check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_insert_partition_repeatedly(self):
-        """
-        target: test insert entities in collection created before
-        method: create collection and insert entities in it repeatedly, with the partition_name param
-        expected: the collection row count equals to nq
-        """
-        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
-        partition_w1 = self.init_partition_wrap(collection_w)
-        partition_w2 = self.init_partition_wrap(collection_w)
-        df = cf.gen_default_dataframe_data(nb=ct.default_nb)
-        mutation_res, _ = collection_w.insert(data=df, partition_name=partition_w1.name)
-        new_res, _ = collection_w.insert(data=df, partition_name=partition_w2.name)
-        assert mutation_res.insert_count == ct.default_nb
-        assert new_res.insert_count == ct.default_nb
-
-    @pytest.mark.tags(CaseLabel.L0)
-    def test_insert_partition_with_ids(self):
-        """
-        target: test insert entities in collection created before, insert with ids
-        method: create collection and insert entities in it, with the partition_name param
-        expected: the collection insert count equals to nq
-        """
-        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
-        partition_name = cf.gen_unique_str(prefix)
-        partition_w1 = self.init_partition_wrap(collection_w, partition_name=partition_name)
-        df = cf.gen_default_dataframe_data(ct.default_nb)
-        mutation_res, _ = collection_w.insert(data=df, partition_name=partition_w1.name)
-        assert mutation_res.insert_count == ct.default_nb
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_insert_with_field_type_not_match(self):
-        """
-        target: test insert entities, with the entity field type updated
-        method: update entity field type
-        expected: error raised
-        """
-        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
-        df = cf.gen_collection_schema_all_datatype
-        error = {ct.err_code: 0, ct.err_msg: "Data type is not support"}
-        collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)  
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_insert_with_lack_vector_field(self):
-        """
-        target: test insert entities, with no vector field 
-        method: remove entity values of vector field
-        expected: error raised
-        """
-        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
-        df = cf.gen_collection_schema([cf.gen_int64_field(is_primary=True)])
-        error = {ct.err_code: 0, ct.err_msg: "Primary key field can only be one"}
-        collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)  
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_insert_with_no_vector_field_dtype(self):
-        """
-        target: test insert entities, with vector field type is error
-        method: vector field dtype is not existed
-        expected: error raised
-        """
-        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
-        vec_field, _ = self.field_schema_wrap.init_field_schema(name=ct.default_int64_field_name, dtype=DataType.NONE)
-        field_one = cf.gen_int64_field(is_primary=True)
-        field_two = cf.gen_int64_field()   
-        df =[field_one, field_two, vec_field]
-        error = {ct.err_code: 0, ct.err_msg: "Field dtype must be of DataType."}
-        collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)  
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_insert_with_no_vector_field_name(self):
-        """
-        target: test insert entities, with no vector field name
-        method: vector field name is error
-        expected: error raised
-        """
-        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
-        vec_field = cf.gen_float_vec_field(name=ct.get_invalid_strs)
-        field_one = cf.gen_int64_field(is_primary=True)
-        field_two = cf.gen_int64_field()   
-        df =[field_one, field_two, vec_field]
-        error = {ct.err_code: 0, ct.err_msg: "Data type is not support."}
-        collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error) 
-
 class TestInsertBinary(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -973,9 +950,9 @@ class TestInsertBinary(TestcaseBase):
         df, _ = cf.gen_default_binary_dataframe_data(ct.default_nb)
         partition_name = cf.gen_unique_str(prefix)
         partition_w1 = self.init_partition_wrap(collection_w, partition_name=partition_name)
-        mutation_res, _ =collection_w.insert(data=df, partition_name=partition_w1.name)
+        mutation_res, _ = collection_w.insert(data=df, partition_name=partition_w1.name)
         assert mutation_res.insert_count == ct.default_nb
-        
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_insert_binary_multi_times(self):
         """
@@ -989,8 +966,8 @@ class TestInsertBinary(TestcaseBase):
         nums = 2
         for i in range(nums):
             mutation_res, _ = collection_w.insert(data=df)
-        assert collection_w.num_entities == ct.default_nb*nums
-        
+        assert collection_w.num_entities == ct.default_nb * nums
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_binary_create_index(self):
         """
@@ -1005,7 +982,8 @@ class TestInsertBinary(TestcaseBase):
         assert mutation_res.insert_count == ct.default_nb
         default_index = {"index_type": "BIN_IVF_FLAT", "params": {"nlist": 128}, "metric_type": "JACCARD"}
         collection_w.create_index("binary_vector", default_index)
-    
+
+
 class TestInsertInvalid(TestcaseBase):
     """
       ******************************************************************
@@ -1024,9 +1002,9 @@ class TestInsertInvalid(TestcaseBase):
         collection_w = self.init_collection_wrap(name=collection_name)
         int_field = cf.gen_float_field(is_primary=True)
         vec_field = cf.gen_float_vec_field(name='vec')
-        df =[int_field, vec_field]
+        df = [int_field, vec_field]
         error = {ct.err_code: 0, ct.err_msg: "Primary key type must be DataType.INT64."}
-        mutation_res, _ =collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
+        mutation_res, _ = collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_with_invalid_partition_name(self):
@@ -1038,8 +1016,9 @@ class TestInsertInvalid(TestcaseBase):
         collection_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=collection_name)
         df = cf.gen_default_list_data(ct.default_nb)
-        error={ct.err_code: 1, 'err_msg': "partition name is illegal"}
-        mutation_res, _ = collection_w.insert(data=df, partition_name="p", check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 1, 'err_msg': "partition name is illegal"}
+        mutation_res, _ = collection_w.insert(data=df, partition_name="p", check_task=CheckTasks.err_res,
+                                              check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_insert_with_invalid_field_value(self):
@@ -1051,12 +1030,13 @@ class TestInsertInvalid(TestcaseBase):
         collection_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=collection_name)
         field_one = cf.gen_int64_field(is_primary=True)
-        field_two = cf.gen_int64_field() 
+        field_two = cf.gen_int64_field()
         vec_field = ct.get_invalid_vectors
-        df =[field_one, field_two, vec_field]
+        df = [field_one, field_two, vec_field]
         error = {ct.err_code: 0, ct.err_msg: "The field of schema type must be FieldSchema."}
         mutation_res, _ = collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
-   
+
+
 class TestInsertInvalidBinary(TestcaseBase):
     """
       ******************************************************************
@@ -1074,8 +1054,9 @@ class TestInsertInvalidBinary(TestcaseBase):
         collection_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=collection_name)
         field_one = cf.gen_float_field(is_primary=True)
-        field_two = cf.gen_float_field() 
-        vec_field, _ = self.field_schema_wrap.init_field_schema(name=ct.default_binary_vec_field_name, dtype=DataType.BINARY_VECTOR)
+        field_two = cf.gen_float_field()
+        vec_field, _ = self.field_schema_wrap.init_field_schema(name=ct.default_binary_vec_field_name,
+                                                                dtype=DataType.BINARY_VECTOR)
         df = [field_one, field_two, vec_field]
         error = {ct.err_code: 0, ct.err_msg: "Data type is not support."}
         mutation_res, _ = collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
@@ -1092,7 +1073,9 @@ class TestInsertInvalidBinary(TestcaseBase):
         partition_name = ct.get_invalid_strs
         df, _ = cf.gen_default_binary_dataframe_data(ct.default_nb)
         error = {ct.err_code: 1, 'err_msg': "The types of schema and data do not match."}
-        mutation_res, _ = collection_w.insert(data=df, partition_name=partition_name, check_task=CheckTasks.err_res, check_items=error)
+        mutation_res, _ = collection_w.insert(data=df, partition_name=partition_name, check_task=CheckTasks.err_res,
+                                              check_items=error)
+
 
 class TestInsertString(TestcaseBase):
     """
@@ -1119,8 +1102,8 @@ class TestInsertString(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("string_fields", [[cf.gen_string_field(name="string_field1")],
-                                            [cf.gen_string_field(name="string_field2")],
-                                            [cf.gen_string_field(name="string_field3")]])
+                                               [cf.gen_string_field(name="string_field2")],
+                                               [cf.gen_string_field(name="string_field3")]])
     def test_insert_multi_string_fields(self, string_fields):
         """
         target: test insert multi string fields
@@ -1161,8 +1144,8 @@ class TestInsertString(TestcaseBase):
         expected: Raise exceptions
         """
         c_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(name=c_name) 
-        df = [cf.gen_int64_field(),cf.gen_string_field(name=ct.get_invalid_strs), cf.gen_float_vec_field()]
+        collection_w = self.init_collection_wrap(name=c_name)
+        df = [cf.gen_int64_field(), cf.gen_string_field(name=ct.get_invalid_strs), cf.gen_float_vec_field()]
         error = {ct.err_code: 0, ct.err_msg: 'Data type is not support.'}
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
@@ -1175,15 +1158,15 @@ class TestInsertString(TestcaseBase):
         expected: Raise exceptions
         """
         c_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(name=c_name)  
-        nums = 70000  
+        collection_w = self.init_collection_wrap(name=c_name)
+        nums = 70000
         field_one = cf.gen_int64_field()
         field_two = cf.gen_float_field()
         field_three = cf.gen_string_field(max_length=nums)
         vec_field = cf.gen_float_vec_field()
         df = [field_one, field_two, field_three, vec_field]
         error = {ct.err_code: 0, ct.err_msg: 'Data type is not support.'}
-        collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error) 
+        collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_insert_string_field_dtype_invalid(self):
@@ -1194,13 +1177,13 @@ class TestInsertString(TestcaseBase):
         expected: Raise exception
         """
         c_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(name=c_name)  
+        collection_w = self.init_collection_wrap(name=c_name)
         string_field = self.field_schema_wrap.init_field_schema(name="string", dtype=DataType.STRING)[0]
         int_field = cf.gen_int64_field(is_primary=True)
         vec_field = cf.gen_float_vec_field()
         df = [string_field, int_field, vec_field]
         error = {ct.err_code: 0, ct.err_msg: 'Data type is not support.'}
-        collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error) 
+        collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_insert_string_field_auto_id_is_true(self):
@@ -1211,13 +1194,10 @@ class TestInsertString(TestcaseBase):
         expected: Raise exception
         """
         c_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(name=c_name)  
+        collection_w = self.init_collection_wrap(name=c_name)
         int_field = cf.gen_int64_field()
         vec_field = cf.gen_float_vec_field()
         string_field = cf.gen_string_field(is_primary=True, auto_id=True)
         df = [int_field, string_field, vec_field]
         error = {ct.err_code: 0, ct.err_msg: 'Data type is not support.'}
-        collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error) 
-    
-        
-
+        collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)

@@ -323,7 +323,7 @@ class TestCollectionParams(TestcaseBase):
         field, _ = self.field_schema_wrap.init_field_schema(name=name, dtype=5, is_primary=True)
         vec_field = cf.gen_float_vec_field()
         schema = cf.gen_collection_schema(fields=[field, vec_field])
-        error = {ct.err_code: 1, ct.err_msg: "expected one of: bytes, unicode"}
+        error = {ct.err_code: 1, ct.err_msg: f"expected one of: bytes, unicode"}
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -444,7 +444,6 @@ class TestCollectionParams(TestcaseBase):
                                              check_items={"err_code": 1, "err_msg": err_msg})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/12680")
     def test_collection_mix_vectors(self):
         """
         target: test collection with mix vectors
@@ -455,8 +454,9 @@ class TestCollectionParams(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         fields = [cf.gen_int64_field(is_primary=True), cf.gen_float_vec_field(), cf.gen_binary_vec_field()]
         schema = cf.gen_collection_schema(fields=fields, auto_id=True)
-        self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.check_collection_property,
-                                             check_items={exp_name: c_name, exp_schema: schema})
+        err_msg = "multiple vector fields is not supported"
+        self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res,
+                                             check_items={"err_code": 1, "err_msg": err_msg})
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_collection_without_vectors(self):
@@ -2571,8 +2571,9 @@ class TestLoadPartition(TestcaseBase):
             pytest.skip("Skip index Temporary")
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/16741")
-    def test_load_partition_after_index_binary(self, get_binary_index):
+    @pytest.mark.parametrize('binary_index', gen_binary_index())
+    @pytest.mark.parametrize('metric_type', ct.binary_metrics)
+    def test_load_partition_after_index_binary(self, binary_index, metric_type):
         """
         target: test load binary_collection, after index created
         method: insert and create index, load binary_collection with correct params
@@ -2583,18 +2584,17 @@ class TestLoadPartition(TestcaseBase):
         collection_w = self.init_collection_general(prefix, True, ct.default_nb, partition_num,
                                                     is_binary=True, is_index=True)[0]
 
-        for metric_type in ct.binary_metrics:
-            log.info(metric_type)
-            get_binary_index["metric_type"] = metric_type
-            if get_binary_index["index_type"] == "BIN_IVF_FLAT" and metric_type in ct.structure_metrics:
-                error = {ct.err_code: -1, ct.err_msg: 'Invalid metric_type: SUBSTRUCTURE, '
-                                                      'which does not match the index type: %s' % metric_type}
-                collection_w.create_index(ct.default_binary_vec_field_name, get_binary_index,
-                                          check_task=CheckTasks.err_res, check_items=error)
-            else:
-                collection_w.create_index(ct.default_binary_vec_field_name, get_binary_index)
-            par = collection_w.partitions
-            par[partition_num].load()
+        # for metric_type in ct.binary_metrics:
+        binary_index["metric_type"] = metric_type
+        if binary_index["index_type"] == "BIN_IVF_FLAT" and metric_type in ct.structure_metrics:
+            error = {ct.err_code: -1, ct.err_msg: 'Invalid metric_type: SUBSTRUCTURE, '
+                                                  'which does not match the index type: %s' % metric_type}
+            collection_w.create_index(ct.default_binary_vec_field_name, binary_index,
+                                      check_task=CheckTasks.err_res, check_items=error)
+        else:
+            collection_w.create_index(ct.default_binary_vec_field_name, binary_index)
+        par = collection_w.partitions
+        par[partition_num].load()
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_partition_dis_connect(self):
