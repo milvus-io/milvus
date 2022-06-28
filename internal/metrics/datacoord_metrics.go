@@ -137,5 +137,6 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(DataCoordNumSegments)
 	registry.MustRegister(DataCoordNumCollections)
 	registry.MustRegister(DataCoordNumStoredRows)
+	registry.MustRegister(DataCoordNumStoredRowsCounter)
 	registry.MustRegister(DataCoordSyncEpoch)
 }
