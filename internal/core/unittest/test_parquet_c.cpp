@@ -248,6 +248,21 @@ TEST(wrapper, binary_vector) {
     ReleasePayloadReader(reader);
 }
 
+TEST(wrapper, binary_vector_empty) {
+    auto payload = NewPayloadWriter(ColumnType::VECTOR_BINARY);
+    auto st = FinishPayloadWriter(payload);
+    ASSERT_EQ(st.error_code, ErrorCode::SUCCESS);
+    auto cb = GetPayloadBufferFromWriter(payload);
+    ASSERT_EQ(cb.length, 0);
+    ASSERT_EQ(cb.data, nullptr);
+    auto nums = GetPayloadLengthFromWriter(payload);
+    ASSERT_EQ(nums, 0);
+    auto reader = NewPayloadReader(ColumnType::VECTOR_BINARY, (uint8_t*)cb.data, cb.length);
+    ASSERT_EQ(reader, nullptr);
+    ReleasePayloadWriter(payload);
+    ReleasePayloadReader(reader);
+}
+
 TEST(wrapper, float_vector) {
     auto payload = NewPayloadWriter(ColumnType::VECTOR_FLOAT);
     float data[] = {1, 2, 3, 4, 5, 6, 7, 8};
@@ -278,6 +293,21 @@ TEST(wrapper, float_vector) {
         ASSERT_EQ(values[i], data[i]);
     }
 
+    ReleasePayloadWriter(payload);
+    ReleasePayloadReader(reader);
+}
+
+TEST(wrapper, float_vector_empty) {
+    auto payload = NewPayloadWriter(ColumnType::VECTOR_FLOAT);
+    auto st = FinishPayloadWriter(payload);
+    ASSERT_EQ(st.error_code, ErrorCode::SUCCESS);
+    auto cb = GetPayloadBufferFromWriter(payload);
+    ASSERT_EQ(cb.length, 0);
+    ASSERT_EQ(cb.data, nullptr);
+    auto nums = GetPayloadLengthFromWriter(payload);
+    ASSERT_EQ(nums, 0);
+    auto reader = NewPayloadReader(ColumnType::VECTOR_FLOAT, (uint8_t*)cb.data, cb.length);
+    ASSERT_EQ(reader, nullptr);
     ReleasePayloadWriter(payload);
     ReleasePayloadReader(reader);
 }

@@ -583,7 +583,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.NotNil(t, err)
 
 		err = w.FinishPayloadWriter()
-		assert.NotNil(t, err)
+		assert.Nil(t, err)
 
 		err = w.AddBinaryVectorToPayload([]byte{}, 8)
 		assert.NotNil(t, err)
@@ -604,7 +604,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		defer w.Close()
 
 		err = w.FinishPayloadWriter()
-		assert.NotNil(t, err)
+		assert.Nil(t, err)
 
 		err = w.AddFloatVectorToPayload([]float32{}, 8)
 		assert.NotNil(t, err)
