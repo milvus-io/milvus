@@ -25,7 +25,7 @@ import (
 )
 
 // generateFullWatchDmChannelsRequest fill the WatchDmChannelsRequest by get segment infos from Meta
-func generateFullWatchDmChannelsRequest(m Meta, request *querypb.WatchDmChannelsRequest) (*querypb.WatchDmChannelsRequest, error) {
+func generateFullWatchDmChannelsRequest(broker *globalMetaBroker, request *querypb.WatchDmChannelsRequest) (*querypb.WatchDmChannelsRequest, error) {
 	cloned := proto.Clone(request).(*querypb.WatchDmChannelsRequest)
 	vChannels := cloned.GetInfos()
 
@@ -36,7 +36,7 @@ func generateFullWatchDmChannelsRequest(m Meta, request *querypb.WatchDmChannels
 		segmentIds = append(segmentIds, vChannel.UnflushedSegmentIds...)
 		segmentIds = append(segmentIds, vChannel.DroppedSegmentIds...)
 	}
-	segmentInfos, err := m.getDataSegmentInfosByIDs(segmentIds)
+	segmentInfos, err := broker.getDataSegmentInfosByIDs(segmentIds)
 	if err != nil {
 		log.Error("Get Vchannel SegmentInfos failed", zap.Error(err))
 		return nil, err

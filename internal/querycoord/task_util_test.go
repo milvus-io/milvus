@@ -17,6 +17,7 @@
 package querycoord
 
 import (
+	"context"
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -27,9 +28,9 @@ import (
 
 func TestGenerateFullWatchDmChannelsRequest(t *testing.T) {
 	dataCoord := &dataCoordMock{}
-	meta := &MetaReplica{
-		dataCoord: dataCoord,
-	}
+	ctx, cancel := context.WithCancel(context.Background())
+	handler, err := newGlobalMetaBroker(ctx, nil, dataCoord, nil, nil)
+	assert.Nil(t, err)
 
 	deltaChannel := &datapb.VchannelInfo{
 		CollectionID:        defaultCollectionID,
@@ -45,14 +46,16 @@ func TestGenerateFullWatchDmChannelsRequest(t *testing.T) {
 		NodeID: 1,
 	}
 
-	fullWatchDmChannelsRequest, err := generateFullWatchDmChannelsRequest(meta, watchDmChannelsRequest)
+	fullWatchDmChannelsRequest, err := generateFullWatchDmChannelsRequest(handler, watchDmChannelsRequest)
 	assert.Nil(t, err)
 	assert.NotEmpty(t, fullWatchDmChannelsRequest.GetSegmentInfos())
 
 	dataCoord.returnError = true
-	fullWatchDmChannelsRequest2, err := generateFullWatchDmChannelsRequest(meta, watchDmChannelsRequest)
+	fullWatchDmChannelsRequest2, err := generateFullWatchDmChannelsRequest(handler, watchDmChannelsRequest)
 	assert.Error(t, err)
 	assert.Empty(t, fullWatchDmChannelsRequest2.GetSegmentInfos())
+
+	cancel()
 }
 
 func TestThinWatchDmChannelsRequest(t *testing.T) {
