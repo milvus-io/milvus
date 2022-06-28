@@ -29,6 +29,8 @@ import (
 	"syscall"
 	"time"
 
+	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
+
 	"github.com/golang/protobuf/proto"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -511,7 +513,32 @@ func (qc *QueryCoord) handoffNotificationLoop() {
 		select {
 		case <-ctx.Done():
 			return
-		case resp := <-watchChan:
+		case resp, ok := <-watchChan:
+			if !ok {
+				log.Warn("QueryCoord watch handoff segment loop failed because watch channel is closed")
+				panic("QueryCoord watch handoff segment loop failed because watch channel is closed")
+			}
+			if err := resp.Err(); err != nil {
+				// https://github.com/etcd-io/etcd/issues/8980
+				if err == v3rpc.ErrCompacted {
+					qc.handoffHandler, err = newHandoffHandler(qc.loopCtx, qc.kvClient, qc.meta, qc.cluster, qc.scheduler, qc.broker)
+					if err != nil {
+						log.Error("query coordinator re new handoff handler failed", zap.Error(err))
+						panic("failed to handle etcd request, exit..")
+					}
+					if err2 := qc.handoffHandler.reloadFromKV(); err2 != nil {
+						log.Error("reload index checker meta fails when etcd has a compaction error",
+							zap.String("etcd error", err.Error()), zap.Error(err2))
+						panic("failed to handle etcd request, exit..")
+					}
+					qc.loopWg.Add(1)
+					go qc.handoffNotificationLoop()
+					return
+				}
+				log.Error("received error event from etcd watcher", zap.String("prefix", util.HandoffSegmentPrefix),
+					zap.Error(err))
+				panic("failed to handle etcd request, exit..")
+			}
 			for _, event := range resp.Events {
 				segmentInfo := &querypb.SegmentInfo{}
 				err := proto.Unmarshal(event.Kv.Value, segmentInfo)
