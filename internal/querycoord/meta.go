@@ -250,9 +250,6 @@ func (m *MetaReplica) reloadFromKV() error {
 					nodes[nodeID] = struct{}{}
 				}
 			}
-			for nodeID := range nodes {
-				replica.NodeIds = append(replica.NodeIds, nodeID)
-			}
 
 			shardReplicas := make([]*milvuspb.ShardReplica, 0, len(dmChannels[collectionInfo.CollectionID]))
 			for _, dmc := range dmChannels[collectionInfo.CollectionID] {
@@ -261,6 +258,12 @@ func (m *MetaReplica) reloadFromKV() error {
 					// LeaderAddr: Will set it after the cluster is reloaded
 					DmChannelName: dmc.DmChannel,
 				})
+				nodes[dmc.NodeIDLoaded] = struct{}{}
+			}
+			replica.ShardReplicas = shardReplicas
+
+			for nodeID := range nodes {
+				replica.NodeIds = append(replica.NodeIds, nodeID)
 			}
 
 			err = m.addReplica(replica)
