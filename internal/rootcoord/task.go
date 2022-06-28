@@ -320,8 +320,12 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 	}
 
 	// drop all indices
-	if err = t.core.RemoveIndex(ctx, t.Req.CollectionName, ""); err != nil {
-		return err
+	for _, fieldIndex := range collMeta.FieldIndexes {
+		if err := t.core.CallDropIndexService(t.core.ctx, fieldIndex.IndexID); err != nil {
+			log.Error("DropCollection CallDropIndexService fail", zap.String("collName", t.Req.CollectionName),
+				zap.Int64("indexID", fieldIndex.IndexID), zap.Error(err))
+			return err
+		}
 	}
 
 	// Allocate a new ts to make sure the channel timetick is consistent.
