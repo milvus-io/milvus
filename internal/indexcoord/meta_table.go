@@ -25,12 +25,13 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/kv"
+
 	"github.com/milvus-io/milvus/internal/metrics"
 
 	"go.uber.org/zap"
 
 	"github.com/golang/protobuf/proto"
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -47,14 +48,16 @@ type Meta struct {
 
 // metaTable records the mapping of IndexBuildID to Meta.
 type metaTable struct {
-	client            *etcdkv.EtcdKV    // client of a reliable kv service, i.e. etcd client
+	client            kv.MetaKv         // client of a reliable kv service, i.e. etcd client
 	indexBuildID2Meta map[UniqueID]Meta // index build id to index meta
+
+	revision int64
 
 	lock sync.RWMutex
 }
 
 // NewMetaTable is used to create a new meta table.
-func NewMetaTable(kv *etcdkv.EtcdKV) (*metaTable, error) {
+func NewMetaTable(kv kv.MetaKv) (*metaTable, error) {
 	mt := &metaTable{
 		client: kv,
 		lock:   sync.RWMutex{},
@@ -73,10 +76,12 @@ func (mt *metaTable) reloadFromKV() error {
 	key := indexFilePrefix
 	log.Debug("IndexCoord metaTable LoadWithPrefix ", zap.String("prefix", key))
 
-	_, values, versions, err := mt.client.LoadWithPrefix2(key)
+	_, values, versions, revision, err := mt.client.LoadWithRevisionAndVersions(key)
 	if err != nil {
 		return err
 	}
+
+	mt.revision = revision
 
 	for i := 0; i < len(values); i++ {
 		indexMeta := indexpb.IndexMeta{}
