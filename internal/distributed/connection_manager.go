@@ -19,7 +19,9 @@ package distributed
 import (
 	"context"
 	"errors"
+	"os"
 	"sync"
+	"syscall"
 	"time"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
@@ -232,7 +234,13 @@ func (cm *ConnectionManager) processEvent(channel <-chan *sessionutil.SessionEve
 			}
 		case ev, ok := <-channel:
 			if !ok {
-				//TODO silverxia add retry logic
+				log.Error("watch service channel closed", zap.Int64("serverID", cm.session.ServerID))
+				go cm.Stop()
+				if cm.session.TriggerKill {
+					if p, err := os.FindProcess(os.Getpid()); err == nil {
+						p.Signal(syscall.SIGINT)
+					}
+				}
 				return
 			}
 			switch ev.EventType {
