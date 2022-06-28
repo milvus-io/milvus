@@ -11,6 +11,9 @@ from utils.util_log import test_log as log
 from utils.util_k8s import wait_pods_ready, read_pod_log
 from utils.util_pymilvus import get_latest_tag
 
+tag_prefix = '2.1.0'
+tag_latest = '2.1.0-latest'
+
 
 def e2e_milvus_parallel(process_num, host, c_name):
     """ e2e milvus """
@@ -40,7 +43,7 @@ class TestProxyScale:
         # deploy milvus cluster with one proxy
         fail_count = 0
         release_name = "scale-proxy"
-        image_tag = get_latest_tag()
+        image_tag = get_latest_tag(tag_prefix=tag_prefix, tag_latest=tag_latest)
         image = f'{constants.IMAGE_REPOSITORY}:{image_tag}'
         data_config = {
             'metadata.namespace': constants.NAMESPACE,

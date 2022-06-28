@@ -15,6 +15,8 @@ from utils.util_pymilvus import get_latest_tag
 
 nb = 5000
 default_index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 128}}
+tag_prefix = '2.1.0'
+tag_latest = '2.1.0-latest'
 
 
 class TestIndexNodeScale:
@@ -30,7 +32,7 @@ class TestIndexNodeScale:
         expected: The cost of one indexNode is about twice that of two indexNodes
         """
         release_name = "expand-index"
-        image_tag = get_latest_tag()
+        image_tag = get_latest_tag(tag_prefix=tag_prefix, tag_latest=tag_latest)
         image = f'{constants.IMAGE_REPOSITORY}:{image_tag}'
         init_replicas = 1
         expand_replicas = 2
@@ -125,7 +127,7 @@ class TestIndexNodeScale:
         expected: The cost of one indexNode is about twice that of two indexNodes
         """
         release_name = "shrink-index"
-        image_tag = get_latest_tag()
+        image_tag = get_latest_tag(tag_prefix=tag_prefix, tag_latest=tag_latest)
         image = f'{constants.IMAGE_REPOSITORY}:{image_tag}'
         data_config = {
             'metadata.namespace': constants.NAMESPACE,
