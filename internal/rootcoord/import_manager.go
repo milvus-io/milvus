@@ -222,22 +222,6 @@ func (m *importManager) sendOutTasks(ctx context.Context) error {
 	return nil
 }
 
-// genReqID generates a unique id for import request, this method has no lock, should only be called by importJob()
-func (m *importManager) genReqID() int64 {
-	if m.lastReqID == 0 {
-		m.lastReqID = time.Now().Unix()
-
-	} else {
-		id := time.Now().Unix()
-		if id == m.lastReqID {
-			id++
-		}
-		m.lastReqID = id
-	}
-
-	return m.lastReqID
-}
-
 // importJob processes the import request, generates import tasks, sends these tasks to DataCoord, and returns
 // immediately.
 func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportRequest, cID int64, pID int64) *milvuspb.ImportResponse {
@@ -297,7 +281,6 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 			}
 		}
 
-		reqID := m.genReqID()
 		// convert import request to import tasks
 		if req.RowBased {
 			// For row-based importing, each file makes a task.
@@ -309,7 +292,6 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 				}
 				newTask := &datapb.ImportTaskInfo{
 					Id:           tID,
-					RequestId:    reqID,
 					CollectionId: cID,
 					PartitionId:  pID,
 					ChannelNames: req.ChannelNames,
@@ -329,7 +311,7 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 				m.pendingTasks = append(m.pendingTasks, newTask)
 				m.storeImportTask(newTask)
 			}
-			log.Info("row-based import request processed", zap.Int64("reqID", reqID), zap.Any("taskIDs", taskList))
+			log.Info("row-based import request processed", zap.Any("taskIDs", taskList))
 		} else {
 			// TODO: Merge duplicated code :(
 			// for column-based, all files is a task
@@ -339,7 +321,6 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 			}
 			newTask := &datapb.ImportTaskInfo{
 				Id:           tID,
-				RequestId:    reqID,
 				CollectionId: cID,
 				PartitionId:  pID,
 				ChannelNames: req.ChannelNames,
@@ -357,7 +338,7 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 			log.Info("new task created as pending task", zap.Int64("task ID", newTask.GetId()))
 			m.pendingTasks = append(m.pendingTasks, newTask)
 			m.storeImportTask(newTask)
-			log.Info("column-based import request processed", zap.Int64("reqID", reqID), zap.Int64("taskID", newTask.GetId()))
+			log.Info("column-based import request processed", zap.Int64("taskID", newTask.GetId()))
 		}
 		return nil
 	}()
