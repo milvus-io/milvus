@@ -145,7 +145,7 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
     auto field_id = FieldId(anns_proto.field_id());
     search_info.field_id_ = field_id;
 
-    search_info.metric_type_ = GetMetricType(query_info_proto.metric_type());
+    search_info.metric_type_ = query_info_proto.metric_type();
     search_info.topk_ = query_info_proto.topk();
     search_info.round_decimal_ = query_info_proto.round_decimal();
     search_info.search_params_ = json::parse(query_info_proto.search_params());

@@ -13,7 +13,6 @@ milvus_add_pkg_config("milvus_common")
 
 set(COMMON_SRC
         Schema.cpp
-        Types.cpp
         SystemProperty.cpp
         vector_index_c.cpp
         memory_c.cpp

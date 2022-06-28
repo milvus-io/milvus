@@ -74,7 +74,7 @@ class VecIndexCreator : public IndexCreatorBase {
 
     template <typename T>
     std::optional<T>
-    get_config_by_name(std::string_view name);
+    get_config_by_name(const std::string& name);
 
     void
     StoreRawData(const knowhere::DatasetPtr& dataset);

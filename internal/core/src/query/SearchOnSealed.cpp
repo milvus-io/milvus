@@ -47,7 +47,7 @@ SearchOnSealed(const Schema& schema,
 
         auto conf = search_info.search_params_;
         knowhere::SetMetaTopk(conf, search_info.topk_);
-        knowhere::SetMetaMetricType(conf, MetricTypeToName(field_indexing->metric_type_));
+        knowhere::SetMetaMetricType(conf, field_indexing->metric_type_);
         auto index_type = field_indexing->indexing_->index_type();
         auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_type);
         try {

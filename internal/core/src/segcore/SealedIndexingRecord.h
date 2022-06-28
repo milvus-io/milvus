@@ -25,7 +25,7 @@
 namespace milvus::segcore {
 
 struct SealedIndexingEntry {
-    MetricType metric_type_;
+    knowhere::MetricType metric_type_;
     knowhere::VecIndexPtr indexing_;
 };
 
@@ -33,7 +33,7 @@ using SealedIndexingEntryPtr = std::unique_ptr<SealedIndexingEntry>;
 
 struct SealedIndexingRecord {
     void
-    append_field_indexing(FieldId field_id, MetricType metric_type, knowhere::VecIndexPtr indexing) {
+    append_field_indexing(FieldId field_id, const knowhere::MetricType& metric_type, knowhere::VecIndexPtr indexing) {
         auto ptr = std::make_unique<SealedIndexingEntry>();
         ptr->indexing_ = indexing;
         ptr->metric_type_ = metric_type;
