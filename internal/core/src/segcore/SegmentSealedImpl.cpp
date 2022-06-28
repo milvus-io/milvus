@@ -359,7 +359,7 @@ SegmentSealedImpl::vector_search(int64_t vec_count,
     if (get_bit(index_ready_bitset_, field_id)) {
         AssertInfo(vector_indexings_.is_ready(field_id),
                    "vector indexes isn't ready for field " + std::to_string(field_id.get()));
-        query::SearchOnSealed(*schema_, vector_indexings_, search_info, query_data, query_count, bitset, output, id_);
+        SearchOnSealed(*schema_, vector_indexings_, search_info, query_data, query_count, bitset, output, id_);
         return;
     } else if (!get_bit(field_data_ready_bitset_, field_id)) {
         PanicInfo("Field Data is not loaded");
@@ -368,7 +368,6 @@ SegmentSealedImpl::vector_search(int64_t vec_count,
     query::dataset::SearchDataset dataset;
     dataset.query_data = query_data;
     dataset.num_queries = query_count;
-    // if(field_meta.is)
     dataset.metric_type = search_info.metric_type_;
     dataset.topk = search_info.topk_;
     dataset.dim = field_meta.get_dim();
@@ -382,21 +381,13 @@ SegmentSealedImpl::vector_search(int64_t vec_count,
     AssertInfo(vec_data->num_chunk() == 1, "num chunk not equal to 1 for sealed segment");
     auto chunk_data = vec_data->get_chunk_data(0);
 
-    auto sub_qr = [&] {
-        if (field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
-            return query::FloatSearchBruteForce(dataset, chunk_data, row_count, bitset);
-        } else {
-            return query::BinarySearchBruteForce(dataset, chunk_data, row_count, bitset);
-        }
-    }();
+    bool is_binary = (field_meta.get_data_type() == DataType::VECTOR_BINARY);
+    auto sub_qr = query::SearchBruteForce(dataset, chunk_data, row_count, bitset, is_binary);
 
-    SearchResult results;
-    results.distances_ = std::move(sub_qr.mutable_distances());
-    results.seg_offsets_ = std::move(sub_qr.mutable_seg_offsets());
-    results.unity_topK_ = dataset.topk;
-    results.total_nq_ = dataset.num_queries;
-
-    output = std::move(results);
+    output.distances_ = std::move(sub_qr.mutable_distances());
+    output.seg_offsets_ = std::move(sub_qr.mutable_seg_offsets());
+    output.unity_topK_ = dataset.topk;
+    output.total_nq_ = dataset.num_queries;
 }
 
 void

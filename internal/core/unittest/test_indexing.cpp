@@ -324,7 +324,7 @@ TEST(Indexing, BinaryBruteForce) {
         query_data  //
     };
 
-    auto sub_result = query::BinarySearchBruteForce(search_dataset, bin_vec.data(), N, nullptr);
+    auto sub_result = query::SearchBruteForce(search_dataset, bin_vec.data(), N, nullptr, true);
 
     SearchResult sr;
     sr.total_nq_ = num_queries;

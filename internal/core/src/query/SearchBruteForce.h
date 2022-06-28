@@ -20,15 +20,10 @@
 namespace milvus::query {
 
 SubSearchResult
-BinarySearchBruteForce(const dataset::SearchDataset& dataset,
-                       const void* chunk_data_raw,
-                       int64_t size_per_chunk,
-                       const BitsetView& bitset);
-
-SubSearchResult
-FloatSearchBruteForce(const dataset::SearchDataset& dataset,
-                      const void* chunk_data_raw,
-                      int64_t size_per_chunk,
-                      const BitsetView& bitset);
+SearchBruteForce(const dataset::SearchDataset& dataset,
+                 const void* chunk_data_raw,
+                 int64_t rows,
+                 const BitsetView& bitset,
+                 bool is_binary);
 
 }  // namespace milvus::query
