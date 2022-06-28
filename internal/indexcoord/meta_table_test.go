@@ -135,7 +135,7 @@ func TestMetaTable(t *testing.T) {
 		key = "indexes/" + strconv.FormatInt(indexMeta1.IndexBuildID, 10)
 		err = etcdKV.Save(key, string(value))
 		assert.Nil(t, err)
-		_, err = metaTable.MarkIndexAsDeleted(indexMeta1.Req.IndexID)
+		err = metaTable.MarkIndexAsDeleted(indexMeta1.Req.IndexID)
 		assert.Nil(t, err)
 	})
 
@@ -153,7 +153,7 @@ func TestMetaTable(t *testing.T) {
 		key = path.Join(indexFilePrefix, strconv.FormatInt(indexMeta1.IndexBuildID, 10))
 		err = etcdKV.Save(key, string(value))
 		assert.Nil(t, err)
-		_, err = metaTable.MarkIndexAsDeletedByBuildIDs([]UniqueID{indexMeta1.IndexBuildID})
+		err = metaTable.MarkIndexAsDeletedByBuildIDs([]UniqueID{indexMeta1.IndexBuildID})
 		assert.Nil(t, err)
 	})
 
