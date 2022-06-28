@@ -60,6 +60,9 @@ GetRowCount(CSegmentInterface c_segment);
 int64_t
 GetDeletedCount(CSegmentInterface c_segment);
 
+int64_t
+GetRealCount(CSegmentInterface c_segment);
+
 //////////////////////////////    interfaces for growing segment    //////////////////////////////
 CStatus
 Insert(CSegmentInterface c_segment,

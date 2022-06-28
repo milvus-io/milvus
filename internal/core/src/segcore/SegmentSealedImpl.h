@@ -57,6 +57,9 @@ class SegmentSealedImpl : public SegmentSealed {
     int64_t
     get_row_count() const override;
 
+    int64_t
+    get_deleted_count() const override;
+
     const Schema&
     get_schema() const override;
 

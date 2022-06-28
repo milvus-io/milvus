@@ -105,4 +105,14 @@ SegmentInternalInterface::Retrieve(const query::RetrievePlan* plan, Timestamp ti
     }
     return results;
 }
+
+int64_t
+SegmentInternalInterface::get_real_count() const {
+    auto insert_cnt = get_row_count();
+    BitsetType bitset_holder;
+    bitset_holder.resize(insert_cnt, false);
+    mask_with_delete(bitset_holder, insert_cnt, MAX_TIMESTAMP);
+    return bitset_holder.size() - bitset_holder.count();
+}
+
 }  // namespace milvus::segcore
