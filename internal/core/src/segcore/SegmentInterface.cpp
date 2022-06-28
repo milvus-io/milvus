@@ -32,9 +32,7 @@ SegmentInternalInterface::FillPrimaryKeys(const query::Plan* plan, SearchResult&
     auto field_data = bulk_subscript(pk_field_id, results.seg_offsets_.data(), size);
     results.pk_type_ = DataType(field_data->type());
 
-    std::vector<PkType> pks(size);
-    ParsePksFromFieldData(pks, *field_data.get());
-    results.primary_keys_ = std::move(pks);
+    ParsePksFromFieldData(results.primary_keys_, *field_data.get());
 }
 
 void
