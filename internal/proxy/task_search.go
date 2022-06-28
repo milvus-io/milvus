@@ -486,7 +486,7 @@ func checkIfLoaded(ctx context.Context, qc types.QueryCoord, collectionName stri
 	if len(searchPartitionIDs) > 0 {
 		resp, err := qc.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:  commonpb.MsgType_ShowCollections,
+				MsgType:  commonpb.MsgType_ShowPartitions,
 				SourceID: Params.ProxyCfg.GetNodeID(),
 			},
 			CollectionID: info.collID,
@@ -506,7 +506,7 @@ func checkIfLoaded(ctx context.Context, qc types.QueryCoord, collectionName stri
 	// If request to search collection and collection is not fully loaded
 	resp, err := qc.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
 		Base: &commonpb.MsgBase{
-			MsgType:  commonpb.MsgType_ShowCollections,
+			MsgType:  commonpb.MsgType_ShowPartitions,
 			SourceID: Params.ProxyCfg.GetNodeID(),
 		},
 		CollectionID: info.collID,
