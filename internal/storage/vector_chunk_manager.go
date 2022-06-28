@@ -216,7 +216,7 @@ func (vcm *VectorChunkManager) MultiRead(filePaths []string) ([][]byte, error) {
 }
 
 func (vcm *VectorChunkManager) ReadWithPrefix(prefix string) ([]string, [][]byte, error) {
-	filePaths, err := vcm.ListWithPrefix(prefix)
+	filePaths, err := vcm.ListWithPrefix(prefix, true)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -227,8 +227,8 @@ func (vcm *VectorChunkManager) ReadWithPrefix(prefix string) ([]string, [][]byte
 	return filePaths, results, nil
 }
 
-func (vcm *VectorChunkManager) ListWithPrefix(prefix string) ([]string, error) {
-	return vcm.vectorStorage.ListWithPrefix(prefix)
+func (vcm *VectorChunkManager) ListWithPrefix(prefix string, recursive bool) ([]string, error) {
+	return vcm.vectorStorage.ListWithPrefix(prefix, recursive)
 }
 
 func (vcm *VectorChunkManager) Mmap(filePath string) (*mmap.ReaderAt, error) {
@@ -312,7 +312,7 @@ func (vcm *VectorChunkManager) RemoveWithPrefix(prefix string) error {
 		return err
 	}
 	if vcm.cacheEnable {
-		filePaths, err := vcm.ListWithPrefix(prefix)
+		filePaths, err := vcm.ListWithPrefix(prefix, true)
 		if err != nil {
 			return err
 		}

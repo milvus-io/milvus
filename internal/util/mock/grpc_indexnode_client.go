@@ -52,3 +52,7 @@ func (m *GrpcIndexNodeClient) CreateIndex(ctx context.Context, in *indexpb.Creat
 func (m *GrpcIndexNodeClient) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest, opts ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error) {
 	return &milvuspb.GetMetricsResponse{}, m.Err
 }
+
+func (m *GrpcIndexNodeClient) GetTaskSlots(ctx context.Context, in *indexpb.GetTaskSlotsRequest, opts ...grpc.CallOption) (*indexpb.GetTaskSlotsResponse, error) {
+	return &indexpb.GetTaskSlotsResponse{}, m.Err
+}

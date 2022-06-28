@@ -130,7 +130,7 @@ type Server struct {
 
 	session   *sessionutil.Session
 	dnEventCh <-chan *sessionutil.SessionEvent
-	icEventCh <-chan *sessionutil.SessionEvent
+	//icEventCh <-chan *sessionutil.SessionEvent
 	qcEventCh <-chan *sessionutil.SessionEvent
 	rcEventCh <-chan *sessionutil.SessionEvent
 
@@ -433,22 +433,23 @@ func (s *Server) initServiceDiscovery() error {
 	// TODO implement rewatch logic
 	s.dnEventCh = s.session.WatchServices(typeutil.DataNodeRole, rev+1, nil)
 
-	icSessions, icRevision, err := s.session.GetSessions(typeutil.IndexCoordRole)
-	if err != nil {
-		log.Error("DataCoord get IndexCoord session failed", zap.Error(err))
-		return err
-	}
-	serverIDs := make([]UniqueID, 0, len(icSessions))
-	for _, session := range icSessions {
-		serverIDs = append(serverIDs, session.ServerID)
-	}
-	s.icEventCh = s.session.WatchServices(typeutil.IndexCoordRole, icRevision+1, nil)
+	//icSessions, icRevision, err := s.session.GetSessions(typeutil.IndexCoordRole)
+	//if err != nil {
+	//	log.Error("DataCoord get IndexCoord session failed", zap.Error(err))
+	//	return err
+	//}
+	//serverIDs := make([]UniqueID, 0, len(icSessions))
+	//for _, session := range icSessions {
+	//	serverIDs = append(serverIDs, session.ServerID)
+	//}
+	//s.icEventCh = s.session.WatchServices(typeutil.IndexCoordRole, icRevision+1, nil)
 
 	qcSessions, qcRevision, err := s.session.GetSessions(typeutil.QueryCoordRole)
 	if err != nil {
 		log.Error("DataCoord get QueryCoord session failed", zap.Error(err))
 		return err
 	}
+	serverIDs := make([]UniqueID, 0, len(qcSessions))
 	for _, session := range qcSessions {
 		serverIDs = append(serverIDs, session.ServerID)
 	}
@@ -725,12 +726,12 @@ func (s *Server) watchService(ctx context.Context) {
 				}()
 				return
 			}
-		case event, ok := <-s.icEventCh:
-			if !ok {
-				s.stopServiceWatch()
-				return
-			}
-			s.processSessionEvent(ctx, "IndexCoord", event)
+		//case event, ok := <-s.icEventCh:
+		//	if !ok {
+		//		s.stopServiceWatch()
+		//		return
+		//	}
+		//	s.processSessionEvent(ctx, "IndexCoord", event)
 		case event, ok := <-s.qcEventCh:
 			if !ok {
 				s.stopServiceWatch()

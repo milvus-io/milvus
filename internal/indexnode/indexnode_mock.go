@@ -60,7 +60,7 @@ func (inm *Mock) Init() error {
 		return errors.New("IndexNode init failed")
 	}
 	inm.ctx, inm.cancel = context.WithCancel(context.Background())
-	inm.buildIndex = make(chan *indexpb.CreateIndexRequest)
+	inm.buildIndex = make(chan *indexpb.CreateIndexRequest, 10)
 	return nil
 }
 
@@ -117,39 +117,12 @@ func (inm *Mock) buildIndexTask() {
 						return err
 					}
 					indexMeta.IndexFilePaths = []string{"IndexFilePath-1", "IndexFilePath-2"}
-					indexMeta.State = commonpb.IndexState_Failed
+					indexMeta.State = commonpb.IndexState_Finished
 					metaData, err := proto.Marshal(&indexMeta)
 					if err != nil {
 						return err
 					}
-
 					success, err := inm.etcdKV.CompareVersionAndSwap(req.MetaPath, versions[0], string(metaData))
-					if err != nil {
-						// TODO, we don't need to reload if it is just etcd error
-						log.Warn("failed to compare and swap in etcd", zap.Int64("buildID", req.IndexBuildID), zap.Error(err))
-						return err
-					}
-					if !success {
-						return fmt.Errorf("failed to save index meta in etcd, buildId: %d, source version: %d", req.IndexBuildID, versions[0])
-					}
-
-					indexMeta2 := indexpb.IndexMeta{}
-					_, values2, versions2, err := inm.etcdKV.LoadWithPrefix2(req.MetaPath)
-					if err != nil {
-						return err
-					}
-					err = proto.Unmarshal([]byte(values2[0]), &indexMeta2)
-					if err != nil {
-						return err
-					}
-					indexMeta2.Version = indexMeta.Version + 1
-					indexMeta2.IndexFilePaths = []string{"IndexFilePath-1", "IndexFilePath-2"}
-					indexMeta2.State = commonpb.IndexState_Finished
-					metaData2, err := proto.Marshal(&indexMeta2)
-					if err != nil {
-						return err
-					}
-					success, err = inm.etcdKV.CompareVersionAndSwap(req.MetaPath, versions2[0], string(metaData2))
 					if err != nil {
 						// TODO, we don't need to reload if it is just etcd error
 						log.Warn("failed to compare and swap in etcd", zap.Int64("buildID", req.IndexBuildID), zap.Error(err))
@@ -340,6 +313,35 @@ func (inm *Mock) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 			Reason:    metricsinfo.MsgUnimplementedMetric,
 		},
 		Response: "",
+	}, nil
+}
+
+func (inm *Mock) GetTaskSlots(ctx context.Context, req *indexpb.GetTaskSlotsRequest) (*indexpb.GetTaskSlotsResponse, error) {
+	if inm.Err {
+		return &indexpb.GetTaskSlotsResponse{
+			Slots: 0,
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "IndexNode mock err",
+			},
+		}, errors.New("IndexNode GetMetrics failed")
+	}
+
+	if inm.Failure {
+		return &indexpb.GetTaskSlotsResponse{
+			Slots: 0,
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "IndexNode mock fail",
+			},
+		}, nil
+	}
+	return &indexpb.GetTaskSlotsResponse{
+		Slots: 1,
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
 	}, nil
 }
 

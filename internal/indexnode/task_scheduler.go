@@ -43,6 +43,7 @@ type TaskQueue interface {
 	PopActiveTask(tID UniqueID) task
 	Enqueue(t task) error
 	//tryToRemoveUselessIndexBuildTask(indexID UniqueID) []UniqueID
+	GetTaskNum() int
 }
 
 // BaseTaskQueue is a basic instance of TaskQueue.
@@ -169,6 +170,18 @@ func (queue *BaseTaskQueue) Enqueue(t task) error {
 	return queue.addUnissuedTask(t)
 }
 
+func (queue *BaseTaskQueue) GetTaskNum() int {
+	queue.utLock.Lock()
+	utNum := queue.unissuedTasks.Len()
+	queue.utLock.Unlock()
+
+	queue.atLock.Lock()
+	atNum := len(queue.activeTasks)
+	queue.atLock.Unlock()
+
+	return utNum + atNum
+}
+
 // IndexBuildTaskQueue is a task queue used to store building index tasks.
 type IndexBuildTaskQueue struct {
 	BaseTaskQueue
@@ -206,7 +219,7 @@ func NewTaskScheduler(ctx context.Context,
 		cm:            cm,
 		ctx:           ctx1,
 		cancel:        cancel,
-		buildParallel: 1, // default value
+		buildParallel: Params.IndexNodeCfg.BuildParallel,
 	}
 	s.IndexBuildQueue = NewIndexBuildTaskQueue(s)
 
@@ -314,4 +327,8 @@ func (sched *TaskScheduler) Start() error {
 func (sched *TaskScheduler) Close() {
 	sched.cancel()
 	sched.wg.Wait()
+}
+
+func (sched *TaskScheduler) GetTaskSlots() int {
+	return sched.buildParallel - sched.IndexBuildQueue.GetTaskNum()
 }

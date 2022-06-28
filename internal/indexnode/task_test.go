@@ -24,14 +24,13 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/util/timerecord"
-
 	"github.com/golang/protobuf/proto"
-
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/etcd"
+	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -47,7 +46,7 @@ func TestIndexBuildTask_saveIndexMeta(t *testing.T) {
 		IndexBuildID: indexBuildID,
 		State:        commonpb.IndexState_InProgress,
 		NodeID:       1,
-		Version:      1,
+		IndexVersion: 1,
 	}
 	metaPath := path.Join("indexes", strconv.FormatInt(indexMeta.IndexBuildID, 10))
 	metaValue, err := proto.Marshal(indexMeta)
@@ -76,4 +75,53 @@ func TestIndexBuildTask_saveIndexMeta(t *testing.T) {
 
 	err = etcdKV.Remove(metaPath)
 	assert.NoError(t, err)
+}
+
+type mockChunkManager struct {
+	storage.ChunkManager
+
+	read func(key string) ([]byte, error)
+}
+
+func (mcm *mockChunkManager) Read(key string) ([]byte, error) {
+	return mcm.read(key)
+}
+
+func TestIndexBuildTask_Execute(t *testing.T) {
+	t.Run("task retry", func(t *testing.T) {
+		indexTask := &IndexBuildTask{
+			cm: &mockChunkManager{
+				read: func(key string) ([]byte, error) {
+					return nil, errors.New("error occurred")
+				},
+			},
+			req: &indexpb.CreateIndexRequest{
+				IndexBuildID: 1,
+				DataPaths:    []string{"path1", "path2"},
+			},
+		}
+
+		err := indexTask.Execute(context.Background())
+		assert.Error(t, err)
+		assert.Equal(t, TaskStateRetry, indexTask.state)
+	})
+
+	t.Run("task failed", func(t *testing.T) {
+		indexTask := &IndexBuildTask{
+			cm: &mockChunkManager{
+				read: func(key string) ([]byte, error) {
+					return nil, ErrNoSuchKey
+				},
+			},
+			req: &indexpb.CreateIndexRequest{
+				IndexBuildID: 1,
+				DataPaths:    []string{"path1", "path2"},
+			},
+		}
+
+		err := indexTask.Execute(context.Background())
+		assert.ErrorIs(t, err, ErrNoSuchKey)
+		assert.Equal(t, TaskStateFailed, indexTask.state)
+
+	})
 }
