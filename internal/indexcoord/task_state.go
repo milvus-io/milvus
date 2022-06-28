@@ -16,25 +16,33 @@
 
 package indexcoord
 
-import (
-	"errors"
-	"fmt"
+type indexTaskState int32
+
+const (
+	// when we receive a index task
+	indexTaskInit indexTaskState = iota
+	// we've sent index task to scheduler, and wait for building index.
+	indexTaskInProgress
+	// task done, wait to be cleaned
+	indexTaskDone
+	// index task need to retry.
+	indexTaskRetry
+	// task has been deleted.
+	indexTaskDeleted
 )
 
-var (
-	ErrCompareVersion = errors.New("failed to save meta in etcd because version compare failure")
-)
-
-// errIndexNodeIsNotOnService return an error that the specified IndexNode is not exists.
-func errIndexNodeIsNotOnService(id UniqueID) error {
-	return fmt.Errorf("index node %d is not on service", id)
+var TaskStateNames = map[indexTaskState]string{
+	0: "Init",
+	1: "InProgress",
+	2: "Done",
+	3: "Retry",
+	4: "Deleted",
 }
 
-// msgIndexCoordIsUnhealthy return an error that the IndexCoord is not healthy.
-func msgIndexCoordIsUnhealthy(coordID UniqueID) string {
-	return fmt.Sprintf("IndexCoord %d is not ready", coordID)
-}
-
-func errIndexCoordIsUnhealthy(coordID UniqueID) error {
-	return errors.New(msgIndexCoordIsUnhealthy(coordID))
+func (x indexTaskState) String() string {
+	ret, ok := TaskStateNames[x]
+	if !ok {
+		return "None"
+	}
+	return ret
 }

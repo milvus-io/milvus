@@ -159,24 +159,28 @@ func (lcm *LocalChunkManager) MultiRead(filePaths []string) ([][]byte, error) {
 	return results, el
 }
 
-func (lcm *LocalChunkManager) ListWithPrefix(prefix string) ([]string, error) {
-	var filePaths []string
-	absPrefix := path.Join(lcm.localPath, prefix)
-	dir := filepath.Dir(absPrefix)
-	err := filepath.Walk(dir, func(filePath string, f os.FileInfo, err error) error {
-		if strings.HasPrefix(filePath, absPrefix) && !f.IsDir() {
-			filePaths = append(filePaths, strings.TrimPrefix(filePath, lcm.localPath))
+func (lcm *LocalChunkManager) ListWithPrefix(prefix string, recursive bool) ([]string, error) {
+	if recursive {
+		var filePaths []string
+		absPrefix := path.Join(lcm.localPath, prefix)
+		dir := filepath.Dir(absPrefix)
+		err := filepath.Walk(dir, func(filePath string, f os.FileInfo, err error) error {
+			if strings.HasPrefix(filePath, absPrefix) && !f.IsDir() {
+				filePaths = append(filePaths, strings.TrimPrefix(filePath, lcm.localPath))
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
 		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
+		return filePaths, nil
 	}
-	return filePaths, nil
+	absPrefix := path.Join(lcm.localPath, prefix+"*")
+	return filepath.Glob(absPrefix)
 }
 
 func (lcm *LocalChunkManager) ReadWithPrefix(prefix string) ([]string, [][]byte, error) {
-	filePaths, err := lcm.ListWithPrefix(prefix)
+	filePaths, err := lcm.ListWithPrefix(prefix, true)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -248,7 +252,7 @@ func (lcm *LocalChunkManager) MultiRemove(filePaths []string) error {
 }
 
 func (lcm *LocalChunkManager) RemoveWithPrefix(prefix string) error {
-	filePaths, err := lcm.ListWithPrefix(prefix)
+	filePaths, err := lcm.ListWithPrefix(prefix, true)
 	if err != nil {
 		return err
 	}

@@ -176,7 +176,7 @@ func TestIndexNodeMockFiled(t *testing.T) {
 		indexMeta := &indexpb.IndexMeta{
 			IndexBuildID: 10,
 			State:        commonpb.IndexState_InProgress,
-			Version:      0,
+			IndexVersion: 0,
 		}
 
 		value, err := proto.Marshal(indexMeta)

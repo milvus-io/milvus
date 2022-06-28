@@ -28,6 +28,7 @@ service IndexNode {
   rpc GetTimeTickChannel(internal.GetTimeTickChannelRequest) returns(milvus.StringResponse) {}
   rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
   rpc CreateIndex(CreateIndexRequest) returns (common.Status){}
+  rpc GetTaskSlots(GetTaskSlotsRequest) returns (GetTaskSlotsResponse){}
 
   // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
   rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
@@ -113,7 +114,7 @@ message IndexMeta {
   repeated string index_file_paths = 5;
   bool mark_deleted = 6;
   int64 nodeID = 7;
-  int64 version = 8;
+  int64 index_version = 8;
   bool recycled = 9;
   uint64 serialize_size = 10;
 }
@@ -124,4 +125,13 @@ message DropIndexRequest {
 
 message RemoveIndexRequest {
   repeated int64 buildIDs = 1;
+}
+
+message GetTaskSlotsRequest {
+
+}
+
+message GetTaskSlotsResponse {
+  common.Status status = 1;
+  int64 slots = 2;
 }

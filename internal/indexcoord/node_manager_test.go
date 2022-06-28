@@ -28,7 +28,7 @@ import (
 
 func TestNodeManager_PeekClient(t *testing.T) {
 	nm := NewNodeManager(context.Background())
-	meta := Meta{
+	meta := &Meta{
 		indexMeta: &indexpb.IndexMeta{
 			Req: &indexpb.BuildIndexRequest{
 				DataPaths: []string{"PeekClient-1", "PeekClient-2"},

@@ -203,3 +203,14 @@ func Test_estimateIndexSizeByReq(t *testing.T) {
 		})
 	}
 }
+
+func Test_parseKey(t *testing.T) {
+	key := "test-ListObjects/1/"
+	buildID, err := parseBuildIDFromFilePath(key)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(1), buildID)
+
+	key2 := "test-ListObjects/key1/"
+	_, err2 := parseBuildIDFromFilePath(key2)
+	assert.Error(t, err2)
+}

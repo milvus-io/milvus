@@ -58,7 +58,7 @@ func (mc *MockChunkManager) MultiRead(filePaths []string) ([][]byte, error) {
 	return nil, nil
 }
 
-func (mc *MockChunkManager) ListWithPrefix(prefix string) ([]string, error) {
+func (mc *MockChunkManager) ListWithPrefix(prefix string, recursive bool) ([]string, error) {
 	return nil, nil
 }
 

@@ -196,8 +196,14 @@ indexCoord:
   address: localhost
   port: 31000
 
+  gc:
+    interval: 600 # gc interval in seconds
+
 indexNode:
   port: 21121
+
+  scheduler:
+    buildParallel: 1
 
 dataCoord:
   address: localhost
