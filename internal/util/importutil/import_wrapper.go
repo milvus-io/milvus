@@ -19,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -185,8 +186,10 @@ func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate b
 
 					// report file process state
 					p.importResult.State = commonpb.ImportState_ImportDownloaded
-					p.reportFunc(p.importResult)
-
+					reportErr := p.reportFunc(p.importResult)
+					if reportErr != nil {
+						log.Warn("fail to report import state to root coord", zap.Error(err))
+					}
 					// parse file
 					reader := bufio.NewReader(file)
 					parser := NewJSONParser(p.ctx, p.collectionSchema)
@@ -211,8 +214,10 @@ func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate b
 
 					// report file process state
 					p.importResult.State = commonpb.ImportState_ImportParsed
-					p.reportFunc(p.importResult)
-
+					reportErr = p.reportFunc(p.importResult)
+					if reportErr != nil {
+						log.Warn("fail to report import state to root coord", zap.Error(err))
+					}
 					tr.Record("parsed")
 					return nil
 				}()
@@ -287,8 +292,10 @@ func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate b
 
 					// report file process state
 					p.importResult.State = commonpb.ImportState_ImportDownloaded
-					p.reportFunc(p.importResult)
-
+					reportErr := p.reportFunc(p.importResult)
+					if reportErr != nil {
+						log.Warn("fail to report import state to root coord", zap.Error(err))
+					}
 					// parse file
 					reader := bufio.NewReader(file)
 					parser := NewJSONParser(p.ctx, p.collectionSchema)
@@ -305,8 +312,10 @@ func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate b
 
 					// report file process state
 					p.importResult.State = commonpb.ImportState_ImportParsed
-					p.reportFunc(p.importResult)
-
+					reportErr = p.reportFunc(p.importResult)
+					if reportErr != nil {
+						log.Warn("fail to report import state to root coord", zap.Error(err))
+					}
 					tr.Record("parsed")
 					return nil
 				}()
@@ -330,8 +339,10 @@ func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate b
 
 					// report file process state
 					p.importResult.State = commonpb.ImportState_ImportDownloaded
-					p.reportFunc(p.importResult)
-
+					reportErr := p.reportFunc(p.importResult)
+					if reportErr != nil {
+						log.Warn("fail to report import state to root coord", zap.Error(err))
+					}
 					var id storage.FieldID
 					for _, field := range p.collectionSchema.Fields {
 						if field.GetName() == fileName {
@@ -355,8 +366,10 @@ func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate b
 
 					// report file process state
 					p.importResult.State = commonpb.ImportState_ImportParsed
-					p.reportFunc(p.importResult)
-
+					reportErr = p.reportFunc(p.importResult)
+					if reportErr != nil {
+						log.Warn("fail to report import state to root coord", zap.Error(err))
+					}
 					tr.Record("parsed")
 					return nil
 				}()
@@ -379,7 +392,15 @@ func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate b
 	debug.FreeOSMemory()
 	// report file process state
 	p.importResult.State = commonpb.ImportState_ImportPersisted
-	return p.reportFunc(p.importResult)
+	// persist state task is valuable, retry more times in case fail this task only because of network error
+	reportErr := retry.Do(p.ctx, func() error {
+		return p.reportFunc(p.importResult)
+	}, retry.Attempts(10))
+	if reportErr != nil {
+		log.Warn("fail to report import state to root coord", zap.Error(err))
+		return reportErr
+	}
+	return nil
 }
 
 func (p *ImportWrapper) appendFunc(schema *schemapb.FieldSchema) func(src storage.FieldData, n int, target storage.FieldData) error {
@@ -544,11 +565,11 @@ func (p *ImportWrapper) splitFieldsData(fieldsData map[storage.FieldID]storage.F
 	appendFunctions := make(map[string]func(src storage.FieldData, n int, target storage.FieldData) error)
 	for i := 0; i < len(p.collectionSchema.Fields); i++ {
 		schema := p.collectionSchema.Fields[i]
-		appendFunc := p.appendFunc(schema)
-		if appendFunc == nil {
+		appendFuncErr := p.appendFunc(schema)
+		if appendFuncErr == nil {
 			return errors.New("import error: unsupported field data type")
 		}
-		appendFunctions[schema.GetName()] = appendFunc
+		appendFunctions[schema.GetName()] = appendFuncErr
 	}
 
 	// split data into segments

@@ -351,6 +351,26 @@ func TestDataNode(t *testing.T) {
 				RowBased:     true,
 			},
 		}
+		node.rootCoord.(*RootCoordFactory).ReportImportErr = true
+		_, err := node.Import(context.WithValue(ctx, ctxKey{}, ""), req)
+		assert.NoError(t, err)
+		node.rootCoord.(*RootCoordFactory).ReportImportErr = false
+
+		node.rootCoord.(*RootCoordFactory).ReportImportNotSuccess = true
+		_, err = node.Import(context.WithValue(ctx, ctxKey{}, ""), req)
+		assert.NoError(t, err)
+		node.rootCoord.(*RootCoordFactory).ReportImportNotSuccess = false
+
+		node.dataCoord.(*DataCoordFactory).AddSegmentError = true
+		_, err = node.Import(context.WithValue(ctx, ctxKey{}, ""), req)
+		assert.NoError(t, err)
+		node.dataCoord.(*DataCoordFactory).AddSegmentError = false
+
+		node.dataCoord.(*DataCoordFactory).AddSegmentNotSuccess = true
+		_, err = node.Import(context.WithValue(ctx, ctxKey{}, ""), req)
+		assert.NoError(t, err)
+		node.dataCoord.(*DataCoordFactory).AddSegmentNotSuccess = false
+
 		stat, err := node.Import(context.WithValue(ctx, ctxKey{}, ""), req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, stat.GetErrorCode())

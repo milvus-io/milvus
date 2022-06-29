@@ -835,9 +835,17 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 		AutoIds:    make([]int64, 0),
 		RowCount:   0,
 	}
+	// func to report import state to rootcoord
 	reportFunc := func(res *rootcoordpb.ImportResult) error {
-		_, err := node.rootCoord.ReportImport(ctx, res)
-		return err
+		status, err := node.rootCoord.ReportImport(ctx, res)
+		if err != nil {
+			log.Error("fail to report import state to root coord", zap.Error(err))
+			return err
+		}
+		if status != nil && status.ErrorCode != commonpb.ErrorCode_Success {
+			return errors.New(status.GetReason())
+		}
+		return nil
 	}
 
 	if !node.isHealthy() {
@@ -850,7 +858,10 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 		msg := msgDataNodeIsUnhealthy(Params.DataNodeCfg.GetNodeID())
 		importResult.State = commonpb.ImportState_ImportFailed
 		importResult.Infos = append(importResult.Infos, &commonpb.KeyValuePair{Key: "failed_reason", Value: msg})
-		reportFunc(importResult)
+		reportErr := reportFunc(importResult)
+		if reportErr != nil {
+			log.Warn("fail to report import state to root coord", zap.Error(reportErr))
+		}
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    msg,
@@ -873,7 +884,10 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 		log.Warn(msg)
 		importResult.State = commonpb.ImportState_ImportFailed
 		importResult.Infos = append(importResult.Infos, &commonpb.KeyValuePair{Key: "failed_reason", Value: msg})
-		reportFunc(importResult)
+		reportErr := reportFunc(importResult)
+		if reportErr != nil {
+			log.Warn("fail to report import state to root coord", zap.Error(err))
+		}
 		if err != nil {
 			return &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -890,7 +904,10 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 	if err != nil {
 		importResult.State = commonpb.ImportState_ImportFailed
 		importResult.Infos = append(importResult.Infos, &commonpb.KeyValuePair{Key: "failed_reason", Value: err.Error()})
-		reportFunc(importResult)
+		reportErr := reportFunc(importResult)
+		if reportErr != nil {
+			log.Warn("fail to report import state to root coord", zap.Error(err))
+		}
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
@@ -905,7 +922,10 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 	if err != nil {
 		importResult.State = commonpb.ImportState_ImportFailed
 		importResult.Infos = append(importResult.Infos, &commonpb.KeyValuePair{Key: "failed_reason", Value: err.Error()})
-		reportFunc(importResult)
+		reportErr := reportFunc(importResult)
+		if reportErr != nil {
+			log.Warn("fail to report import state to root coord", zap.Error(err))
+		}
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
