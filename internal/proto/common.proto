@@ -59,6 +59,10 @@ enum ErrorCode {
     NoReplicaAvailable = 46;
     SegmentNotFound = 47;
 
+    // Service availability.
+    // NA: Not Available.
+    DataCoordNA = 100;
+
     // internal error code.
     DDRequestRace = 1000;
 }

@@ -52,7 +52,15 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 		_, _, _, err = task.getSegmentMeta(100)
 		assert.Error(t, err)
 
-		err = replica.addNewSegment(100, 1, 10, "a", new(internalpb.MsgPosition), nil)
+		err = replica.addSegment(addSegmentReq{
+			segType:     datapb.SegmentType_New,
+			segID:       100,
+			collID:      1,
+			partitionID: 10,
+			channelName: "a",
+			startPos:    new(internalpb.MsgPosition),
+			endPos:      nil,
+		})
 		require.NoError(t, err)
 
 		collID, partID, meta, err := task.getSegmentMeta(100)

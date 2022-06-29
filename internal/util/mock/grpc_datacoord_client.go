@@ -141,6 +141,6 @@ func (m *GrpcDataCoordClient) ReleaseSegmentLock(ctx context.Context, req *datap
 	return &commonpb.Status{}, m.Err
 }
 
-func (m *GrpcDataCoordClient) AddSegment(ctx context.Context, in *datapb.AddSegmentRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+func (m *GrpcDataCoordClient) SaveImportSegment(ctx context.Context, in *datapb.SaveImportSegmentRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }

@@ -25,7 +25,6 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/stretchr/testify/assert"
@@ -637,77 +636,6 @@ func TestCluster_ReCollectSegmentStats(t *testing.T) {
 
 		assert.NotPanics(t, func() {
 			cluster.ReCollectSegmentStats(ctx, 1)
-		})
-		time.Sleep(500 * time.Millisecond)
-	})
-}
-
-func TestCluster_AddSegment(t *testing.T) {
-	kv := getMetaKv(t)
-	defer func() {
-		kv.RemoveWithPrefix("")
-		kv.Close()
-	}()
-
-	t.Run("add segment succeed", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.TODO())
-		defer cancel()
-		var mockSessionCreator = func(ctx context.Context, addr string) (types.DataNode, error) {
-			return newMockDataNodeClient(1, nil)
-		}
-		sessionManager := NewSessionManager(withSessionCreator(mockSessionCreator))
-		channelManager, err := NewChannelManager(kv, newMockHandler())
-		assert.Nil(t, err)
-		cluster := NewCluster(sessionManager, channelManager)
-		defer cluster.Close()
-		addr := "localhost:8080"
-		info := &NodeInfo{
-			Address: addr,
-			NodeID:  1,
-		}
-		nodes := []*NodeInfo{info}
-		err = cluster.Startup(ctx, nodes)
-		assert.Nil(t, err)
-
-		err = cluster.Watch("chan-1", 1)
-		assert.NoError(t, err)
-
-		assert.NotPanics(t, func() {
-			cluster.AddSegment(ctx, 1, &datapb.AddSegmentRequest{
-				Base: &commonpb.MsgBase{
-					SourceID: 0,
-				},
-			})
-		})
-		time.Sleep(500 * time.Millisecond)
-	})
-
-	t.Run("add segment failed", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.TODO())
-		defer cancel()
-		sessionManager := NewSessionManager()
-		channelManager, err := NewChannelManager(kv, newMockHandler())
-		assert.Nil(t, err)
-		cluster := NewCluster(sessionManager, channelManager)
-		defer cluster.Close()
-		addr := "localhost:8080"
-		info := &NodeInfo{
-			Address: addr,
-			NodeID:  1,
-		}
-		nodes := []*NodeInfo{info}
-		err = cluster.Startup(ctx, nodes)
-		assert.Nil(t, err)
-
-		err = cluster.Watch("chan-1", 1)
-		assert.NoError(t, err)
-
-		assert.NotPanics(t, func() {
-			cluster.AddSegment(ctx, 1, &datapb.AddSegmentRequest{
-				Base: &commonpb.MsgBase{
-					SourceID: 0,
-				},
-			})
 		})
 		time.Sleep(500 * time.Millisecond)
 	})

@@ -83,7 +83,7 @@ func Test_NewClient(t *testing.T) {
 		r8, err := client.ResendSegmentStats(ctx, nil)
 		retCheck(retNotNil, r8, err)
 
-		r9, err := client.AddSegment(ctx, nil)
+		r9, err := client.AddImportSegment(ctx, nil)
 		retCheck(retNotNil, r9, err)
 
 		r10, err := client.GetCompactionState(ctx, nil)

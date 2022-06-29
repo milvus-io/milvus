@@ -190,7 +190,7 @@ func (m *MockDataCoord) ReleaseSegmentLock(ctx context.Context, req *datapb.Rele
 	return m.releaseSegLockResp, m.err
 }
 
-func (m *MockDataCoord) AddSegment(ctx context.Context, req *datapb.AddSegmentRequest) (*commonpb.Status, error) {
+func (m *MockDataCoord) SaveImportSegment(ctx context.Context, req *datapb.SaveImportSegmentRequest) (*commonpb.Status, error) {
 	return m.addSegmentResp, m.err
 }
 
@@ -454,7 +454,7 @@ func Test_NewServer(t *testing.T) {
 				ErrorCode: commonpb.ErrorCode_Success,
 			},
 		}
-		resp, err := server.AddSegment(ctx, nil)
+		resp, err := server.SaveImportSegment(ctx, nil)
 		assert.Nil(t, err)
 		assert.NotNil(t, resp)
 	})

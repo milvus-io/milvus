@@ -211,7 +211,15 @@ func TestDataNode(t *testing.T) {
 		fgservice, ok := node1.flowgraphManager.getFlowgraphService(dmChannelName)
 		assert.True(t, ok)
 
-		err = fgservice.replica.addNewSegment(0, 1, 1, dmChannelName, &internalpb.MsgPosition{}, &internalpb.MsgPosition{})
+		err = fgservice.replica.addSegment(addSegmentReq{
+			segType:     datapb.SegmentType_New,
+			segID:       0,
+			collID:      1,
+			partitionID: 1,
+			channelName: dmChannelName,
+			startPos:    &internalpb.MsgPosition{},
+			endPos:      &internalpb.MsgPosition{},
+		})
 		assert.Nil(t, err)
 
 		req := &datapb.FlushSegmentsRequest{
@@ -601,7 +609,7 @@ func TestDataNode_AddSegment(t *testing.T) {
 		_, ok = node.flowgraphManager.getFlowgraphService(chName2)
 		assert.True(t, ok)
 
-		stat, err := node.AddSegment(context.WithValue(ctx, ctxKey{}, ""), &datapb.AddSegmentRequest{
+		stat, err := node.AddImportSegment(context.WithValue(ctx, ctxKey{}, ""), &datapb.AddImportSegmentRequest{
 			SegmentId:    100,
 			CollectionId: 100,
 			PartitionId:  100,
@@ -612,7 +620,8 @@ func TestDataNode_AddSegment(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, stat.GetErrorCode())
 		assert.Equal(t, "", stat.GetReason())
 
-		stat, err = node.AddSegment(context.WithValue(ctx, ctxKey{}, ""), &datapb.AddSegmentRequest{
+		addImportSegmentAttempts = 3
+		stat, err = node.AddImportSegment(context.WithValue(ctx, ctxKey{}, ""), &datapb.AddImportSegmentRequest{
 			SegmentId:    100,
 			CollectionId: 100,
 			PartitionId:  100,
@@ -927,11 +936,35 @@ func TestDataNode_ResendSegmentStats(t *testing.T) {
 	fgService, ok := node.flowgraphManager.getFlowgraphService(dmChannelName)
 	assert.True(t, ok)
 
-	err = fgService.replica.addNewSegment(0, 1, 1, dmChannelName, &internalpb.MsgPosition{}, &internalpb.MsgPosition{})
+	err = fgService.replica.addSegment(addSegmentReq{
+		segType:     datapb.SegmentType_New,
+		segID:       0,
+		collID:      1,
+		partitionID: 1,
+		channelName: dmChannelName,
+		startPos:    &internalpb.MsgPosition{},
+		endPos:      &internalpb.MsgPosition{},
+	})
 	assert.Nil(t, err)
-	err = fgService.replica.addNewSegment(1, 1, 2, dmChannelName, &internalpb.MsgPosition{}, &internalpb.MsgPosition{})
+	err = fgService.replica.addSegment(addSegmentReq{
+		segType:     datapb.SegmentType_New,
+		segID:       1,
+		collID:      1,
+		partitionID: 2,
+		channelName: dmChannelName,
+		startPos:    &internalpb.MsgPosition{},
+		endPos:      &internalpb.MsgPosition{},
+	})
 	assert.Nil(t, err)
-	err = fgService.replica.addNewSegment(2, 1, 3, dmChannelName, &internalpb.MsgPosition{}, &internalpb.MsgPosition{})
+	err = fgService.replica.addSegment(addSegmentReq{
+		segType:     datapb.SegmentType_New,
+		segID:       2,
+		collID:      1,
+		partitionID: 3,
+		channelName: dmChannelName,
+		startPos:    &internalpb.MsgPosition{},
+		endPos:      &internalpb.MsgPosition{},
+	})
 	assert.Nil(t, err)
 
 	req := &datapb.ResendSegmentStatsRequest{

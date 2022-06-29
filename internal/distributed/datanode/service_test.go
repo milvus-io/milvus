@@ -125,7 +125,7 @@ func (m *MockDataNode) ResendSegmentStats(ctx context.Context, req *datapb.Resen
 	return m.resendResp, m.err
 }
 
-func (m *MockDataNode) AddSegment(ctx context.Context, req *datapb.AddSegmentRequest) (*commonpb.Status, error) {
+func (m *MockDataNode) AddImportSegment(ctx context.Context, req *datapb.AddImportSegmentRequest) (*commonpb.Status, error) {
 	return m.status, m.err
 }
 
@@ -286,7 +286,7 @@ func Test_NewServer(t *testing.T) {
 		server.datanode = &MockDataNode{
 			status: &commonpb.Status{},
 		}
-		resp, err := server.AddSegment(ctx, nil)
+		resp, err := server.AddImportSegment(ctx, nil)
 		assert.Nil(t, err)
 		assert.NotNil(t, resp)
 	})

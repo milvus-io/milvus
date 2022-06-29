@@ -12,6 +12,12 @@ import "schema.proto";
 // TODO: import google/protobuf/empty.proto
 message Empty {}
 
+enum SegmentType {
+  New = 0;
+  Normal = 1;
+  Flushed = 2;
+}
+
 service DataCoord {
   rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
   rpc GetTimeTickChannel(internal.GetTimeTickChannelRequest) returns(milvus.StringResponse) {}
@@ -52,7 +58,7 @@ service DataCoord {
   rpc AcquireSegmentLock(AcquireSegmentLockRequest) returns (common.Status) {}
   rpc ReleaseSegmentLock(ReleaseSegmentLockRequest) returns (common.Status) {}
 
-  rpc AddSegment(AddSegmentRequest) returns(common.Status) {}
+  rpc SaveImportSegment(SaveImportSegmentRequest) returns(common.Status) {}
 }
 
 service DataNode {
@@ -73,7 +79,7 @@ service DataNode {
 
   rpc ResendSegmentStats(ResendSegmentStatsRequest) returns(ResendSegmentStatsResponse) {}
 
-  rpc AddSegment(AddSegmentRequest) returns(common.Status) {}
+  rpc AddImportSegment(AddImportSegmentRequest) returns(common.Status) {}
 }
 
 message FlushRequest {
@@ -540,13 +546,24 @@ message ResendSegmentStatsResponse {
   repeated int64 seg_resent = 2;
 }
 
-message AddSegmentRequest {
+message AddImportSegmentRequest {
   common.MsgBase base = 1;
   int64 segment_id = 2;
   string channel_name = 3;
   int64 collection_id = 4;
   int64 partition_id = 5;
   int64 row_num = 6;
+  repeated FieldBinlog stats_log = 7;
+}
+
+message SaveImportSegmentRequest {
+  common.MsgBase base = 1;
+  int64 segment_id = 2;
+  string channel_name = 3;
+  int64 collection_id = 4;
+  int64 partition_id = 5;
+  int64 row_num = 6;
+  SaveBinlogPathsRequest save_binlog_path_req = 7;
 }
 
 message SegmentReferenceLock {

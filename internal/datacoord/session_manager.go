@@ -264,29 +264,6 @@ func (c *SessionManager) GetCompactionState() map[int64]*datapb.CompactionStateR
 	return rst
 }
 
-// AddSegment calls DataNode with ID == `nodeID` to put the segment into this node.
-func (c *SessionManager) AddSegment(ctx context.Context, nodeID int64, req *datapb.AddSegmentRequest) {
-	go c.execAddSegment(ctx, nodeID, req)
-}
-
-func (c *SessionManager) execAddSegment(ctx context.Context, nodeID int64, req *datapb.AddSegmentRequest) {
-	cli, err := c.getClient(ctx, nodeID)
-	if err != nil {
-		log.Warn("failed to get client for AddSegment", zap.Int64("DataNode ID", nodeID), zap.Error(err))
-		return
-	}
-	ctx, cancel := context.WithTimeout(ctx, addSegmentTimeout)
-	defer cancel()
-	req.Base.SourceID = Params.DataCoordCfg.GetNodeID()
-	resp, err := cli.AddSegment(ctx, req)
-	if err := VerifyResponse(resp, err); err != nil {
-		log.Warn("failed to add segment", zap.Int64("DataNode ID", nodeID), zap.Error(err))
-		return
-	}
-
-	log.Info("success to add segment", zap.Int64("DataNode ID", nodeID), zap.Any("add segment req", req))
-}
-
 func (c *SessionManager) getClient(ctx context.Context, nodeID int64) (types.DataNode, error) {
 	c.sessions.RLock()
 	session, ok := c.sessions.data[nodeID]

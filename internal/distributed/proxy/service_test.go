@@ -446,7 +446,7 @@ func (m *MockDataCoord) Flush(ctx context.Context, req *datapb.FlushRequest) (*d
 	return nil, nil
 }
 
-func (m *MockDataCoord) AddSegment(ctx context.Context, req *datapb.AddSegmentRequest) (*commonpb.Status, error) {
+func (m *MockDataCoord) SaveImportSegment(ctx context.Context, req *datapb.SaveImportSegmentRequest) (*commonpb.Status, error) {
 	return nil, nil
 }
 

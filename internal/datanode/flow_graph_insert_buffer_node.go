@@ -450,8 +450,16 @@ func (ibNode *insertBufferNode) updateSegStatesInReplica(insertMsgs []*msgstream
 		partitionID := msg.GetPartitionID()
 
 		if !ibNode.replica.hasSegment(currentSegID, true) {
-			err = ibNode.replica.addNewSegment(currentSegID, collID, partitionID, msg.GetShardName(),
-				startPos, endPos)
+			err = ibNode.replica.addSegment(
+				addSegmentReq{
+					segType:     datapb.SegmentType_New,
+					segID:       currentSegID,
+					collID:      collID,
+					partitionID: partitionID,
+					channelName: msg.GetShardName(),
+					startPos:    startPos,
+					endPos:      endPos,
+				})
 			if err != nil {
 				log.Error("add segment wrong",
 					zap.Int64("segID", currentSegID),

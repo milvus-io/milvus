@@ -95,7 +95,15 @@ func TestFlowGraphManager(t *testing.T) {
 
 		fg, ok := fm.getFlowgraphService(vchanName)
 		require.True(t, ok)
-		err = fg.replica.addNewSegment(100, 1, 10, vchanName, &internalpb.MsgPosition{}, &internalpb.MsgPosition{})
+		err = fg.replica.addSegment(addSegmentReq{
+			segType:     datapb.SegmentType_New,
+			segID:       100,
+			collID:      1,
+			partitionID: 10,
+			channelName: vchanName,
+			startPos:    &internalpb.MsgPosition{},
+			endPos:      &internalpb.MsgPosition{},
+		})
 		require.NoError(t, err)
 
 		tests := []struct {
