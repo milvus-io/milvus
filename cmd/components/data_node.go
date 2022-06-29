@@ -33,7 +33,7 @@ type DataNode struct {
 }
 
 // NewDataNode creates a new DataNode
-func NewDataNode(ctx context.Context, factory dependency.Factory) (*DataNode, error) {
+func NewDataNode(ctx context.Context, factory dependency.MixedFactory) (*DataNode, error) {
 	svr, err := grpcdatanode.NewServer(ctx, factory)
 	if err != nil {
 		return nil, err

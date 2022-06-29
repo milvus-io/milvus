@@ -94,7 +94,7 @@ type QueryCoord struct {
 
 	stateCode atomic.Value
 
-	factory       dependency.Factory
+	factory       dependency.MixedFactory
 	chunkManager  storage.ChunkManager
 	groupBalancer Balancer
 }
@@ -284,7 +284,7 @@ func (qc *QueryCoord) UpdateStateCode(code internalpb.StateCode) {
 }
 
 // NewQueryCoord creates a QueryCoord object.
-func NewQueryCoord(ctx context.Context, factory dependency.Factory) (*QueryCoord, error) {
+func NewQueryCoord(ctx context.Context, factory dependency.MixedFactory) (*QueryCoord, error) {
 	rand.Seed(time.Now().UnixNano())
 	ctx1, cancel := context.WithCancel(ctx)
 	service := &QueryCoord{

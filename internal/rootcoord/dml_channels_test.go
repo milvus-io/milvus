@@ -22,9 +22,9 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/mq"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
-	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 
 	"github.com/stretchr/testify/assert"
@@ -39,7 +39,7 @@ func TestDmlChannels(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	factory := dependency.NewDefaultFactory(true)
+	factory := mq.NewDefaultFactory(true)
 	Params.Init()
 
 	dml := newDmlChannels(ctx, factory, dmlChanPrefix, totalDmlChannelNum)

@@ -41,7 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
-	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -60,7 +60,7 @@ func TestIndexCoord(t *testing.T) {
 	assert.Nil(t, err)
 	err = inm0.Start()
 	assert.Nil(t, err)
-	factory := dependency.NewDefaultFactory(true)
+	factory := storage.NewDefaultChunkManagerFactory()
 	ic, err := NewIndexCoord(ctx, factory)
 	assert.Nil(t, err)
 	ic.reqTimeoutInterval = time.Second * 10

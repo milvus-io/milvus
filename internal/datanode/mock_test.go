@@ -981,7 +981,7 @@ func (m *RootCoordFactory) ReportImport(ctx context.Context, req *rootcoordpb.Im
 
 // FailMessageStreamFactory mock MessageStreamFactory failure
 type FailMessageStreamFactory struct {
-	dependency.Factory
+	dependency.MixedFactory
 }
 
 func (f *FailMessageStreamFactory) NewMsgStream(ctx context.Context) (msgstream.MsgStream, error) {

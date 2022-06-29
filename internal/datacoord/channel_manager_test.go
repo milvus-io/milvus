@@ -28,8 +28,8 @@ import (
 	"github.com/golang/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/kv"
+	"github.com/milvus-io/milvus/internal/mq"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/util/dependency"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -278,7 +278,7 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 
 		metakv.RemoveWithPrefix("")
 		ctx, cancel := context.WithCancel(context.TODO())
-		factory := dependency.NewDefaultFactory(true)
+		factory := mq.NewDefaultFactory(true)
 		_, err := factory.NewMsgStream(context.TODO())
 		require.NoError(t, err)
 		chManager, err := NewChannelManager(metakv, newMockHandler(), withMsgstreamFactory(factory))
@@ -323,7 +323,7 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 	t.Run("ToRelease-ReleaseFail-CleanUpAndDelete-Reassign-ToWatch-1-DN", func(t *testing.T) {
 		metakv.RemoveWithPrefix("")
 		ctx, cancel := context.WithCancel(context.TODO())
-		factory := dependency.NewDefaultFactory(true)
+		factory := mq.NewDefaultFactory(true)
 		_, err := factory.NewMsgStream(context.TODO())
 		require.NoError(t, err)
 		chManager, err := NewChannelManager(metakv, newMockHandler(), withMsgstreamFactory(factory))
@@ -588,7 +588,7 @@ func TestChannelManager(t *testing.T) {
 			{UniqueID(116), "to-delete-chan"},
 		}
 
-		factory := dependency.NewDefaultFactory(true)
+		factory := mq.NewDefaultFactory(true)
 		_, err := factory.NewMsgStream(context.TODO())
 		require.NoError(t, err)
 		chManager, err := NewChannelManager(metakv, newMockHandler(), withMsgstreamFactory(factory))

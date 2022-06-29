@@ -21,8 +21,8 @@ import (
 	"io"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/mq"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/util/dependency"
 
 	"github.com/opentracing/opentracing-go"
 
@@ -39,7 +39,7 @@ type RootCoord struct {
 }
 
 // NewRootCoord creates a new RoorCoord
-func NewRootCoord(ctx context.Context, factory dependency.Factory) (*RootCoord, error) {
+func NewRootCoord(ctx context.Context, factory mq.Factory) (*RootCoord, error) {
 	svr, err := rc.NewServer(ctx, factory)
 	if err != nil {
 		return nil, err

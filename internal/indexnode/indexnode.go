@@ -40,7 +40,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/dependency"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -83,7 +82,7 @@ type IndexNode struct {
 
 	once sync.Once
 
-	factory      dependency.Factory
+	factory      storage.ChunkManagerFactory
 	chunkManager storage.ChunkManager
 	session      *sessionutil.Session
 
@@ -101,7 +100,7 @@ type IndexNode struct {
 }
 
 // NewIndexNode creates a new IndexNode component.
-func NewIndexNode(ctx context.Context, factory dependency.Factory) (*IndexNode, error) {
+func NewIndexNode(ctx context.Context, factory storage.ChunkManagerFactory) (*IndexNode, error) {
 	log.Debug("New IndexNode ...")
 	rand.Seed(time.Now().UnixNano())
 	ctx1, cancel := context.WithCancel(ctx)

@@ -37,13 +37,13 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
+	"github.com/milvus-io/milvus/internal/mq"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
@@ -126,7 +126,7 @@ type Server struct {
 	metricsCacheManager *metricsinfo.MetricsCacheManager
 
 	flushCh chan UniqueID
-	factory dependency.Factory
+	factory mq.Factory
 
 	session   *sessionutil.Session
 	dnEventCh <-chan *sessionutil.SessionEvent
@@ -190,7 +190,7 @@ func SetSegmentManager(manager Manager) Option {
 }
 
 // CreateServer creates a `Server` instance
-func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Option) *Server {
+func CreateServer(ctx context.Context, factory mq.Factory, opts ...Option) *Server {
 	rand.Seed(time.Now().UnixNano())
 	s := &Server{
 		ctx:                    ctx,

@@ -43,13 +43,13 @@ import (
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/mq"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -681,7 +681,7 @@ func TestService_WatchServices(t *testing.T) {
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc, syscall.SIGINT)
 	defer signal.Reset(syscall.SIGINT)
-	factory := dependency.NewDefaultFactory(true)
+	factory := mq.NewDefaultFactory(true)
 	svr := CreateServer(context.TODO(), factory)
 	svr.session = &sessionutil.Session{
 		TriggerKill: true,
@@ -801,7 +801,7 @@ func TestServer_watchQueryCoord(t *testing.T) {
 	assert.Nil(t, err)
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 	assert.NotNil(t, etcdKV)
-	factory := dependency.NewDefaultFactory(true)
+	factory := mq.NewDefaultFactory(true)
 	svr := CreateServer(context.TODO(), factory)
 	svr.session = &sessionutil.Session{
 		TriggerKill: true,
@@ -864,7 +864,7 @@ func TestServer_watchRootCoord(t *testing.T) {
 	assert.Nil(t, err)
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 	assert.NotNil(t, etcdKV)
-	factory := dependency.NewDefaultFactory(true)
+	factory := mq.NewDefaultFactory(true)
 	svr := CreateServer(context.TODO(), factory)
 	svr.session = &sessionutil.Session{
 		TriggerKill: true,
@@ -2291,7 +2291,7 @@ func TestOptions(t *testing.T) {
 		})
 		assert.NotNil(t, opt)
 
-		factory := dependency.NewDefaultFactory(true)
+		factory := mq.NewDefaultFactory(true)
 
 		svr := CreateServer(context.TODO(), factory, opt)
 		dn, err := svr.dataNodeCreator(context.Background(), "")
@@ -2873,7 +2873,7 @@ func newTestServer(t *testing.T, receiveCh chan interface{}, opts ...Option) *Se
 	var err error
 	Params.Init()
 	Params.CommonCfg.DataCoordTimeTick = Params.CommonCfg.DataCoordTimeTick + strconv.Itoa(rand.Int())
-	factory := dependency.NewDefaultFactory(true)
+	factory := mq.NewDefaultFactory(true)
 
 	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.Nil(t, err)
@@ -2916,7 +2916,7 @@ func newTestServer2(t *testing.T, receiveCh chan interface{}, opts ...Option) *S
 	var err error
 	Params.Init()
 	Params.CommonCfg.DataCoordTimeTick = Params.CommonCfg.DataCoordTimeTick + strconv.Itoa(rand.Int())
-	factory := dependency.NewDefaultFactory(true)
+	factory := mq.NewDefaultFactory(true)
 
 	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.Nil(t, err)

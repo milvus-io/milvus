@@ -40,6 +40,7 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
+	"github.com/milvus-io/milvus/internal/mq"
 	ms "github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -55,7 +56,6 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/crypto"
-	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
@@ -186,7 +186,7 @@ type Core struct {
 
 	session *sessionutil.Session
 
-	factory dependency.Factory
+	factory mq.Factory
 
 	//import manager
 	importManager *importManager
@@ -195,7 +195,7 @@ type Core struct {
 // --------------------- function --------------------------
 
 // NewCore creates a new rootcoord core
-func NewCore(c context.Context, factory dependency.Factory) (*Core, error) {
+func NewCore(c context.Context, factory mq.Factory) (*Core, error) {
 	ctx, cancel := context.WithCancel(c)
 	rand.Seed(time.Now().UnixNano())
 	core := &Core{

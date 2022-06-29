@@ -240,7 +240,7 @@ func (c *mck) connectMinio() {
 		}
 		useSSL = minioUseSSL
 	}
-	chunkManagerFactory := storage.NewChunkManagerFactory("local", "minio",
+	chunkManagerFactory := storage.NewChunkManagerFactoryWithConfig("local", "minio",
 		storage.RootPath(c.params.LocalStorageCfg.Path),
 		storage.Address(getConfigValue(c.minioAddress, c.params.MinioCfg.Address, "minio_address")),
 		storage.AccessKeyID(getConfigValue(c.minioUsername, c.params.MinioCfg.AccessKeyID, "minio_username")),

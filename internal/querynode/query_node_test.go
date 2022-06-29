@@ -109,7 +109,7 @@ func newQueryNodeMock() *QueryNode {
 	return svr
 }
 
-func newMessageStreamFactory() dependency.Factory {
+func newMessageStreamFactory() dependency.MixedFactory {
 	return dependency.NewDefaultFactory(true)
 }
 

@@ -68,7 +68,7 @@ func TestMain(m *testing.M) {
 	os.Exit(exitCode)
 }
 
-func NewQueryCoordTest(ctx context.Context, factory dependency.Factory) (*QueryCoord, error) {
+func NewQueryCoordTest(ctx context.Context, factory dependency.MixedFactory) (*QueryCoord, error) {
 	queryCoord, err := NewQueryCoord(ctx, factory)
 	if err != nil {
 		return nil, err

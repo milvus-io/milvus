@@ -98,7 +98,7 @@ type Server struct {
 }
 
 // NewServer create a Proxy server.
-func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error) {
+func NewServer(ctx context.Context, factory dependency.MixedFactory) (*Server, error) {
 
 	var err error
 	server := &Server{

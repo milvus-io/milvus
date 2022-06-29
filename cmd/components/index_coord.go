@@ -22,7 +22,7 @@ import (
 	grpcindexcoord "github.com/milvus-io/milvus/internal/distributed/indexcoord"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/storage"
 )
 
 // IndexCoord implements IndexCoord grpc server
@@ -31,7 +31,7 @@ type IndexCoord struct {
 }
 
 // NewIndexCoord creates a new IndexCoord
-func NewIndexCoord(ctx context.Context, factory dependency.Factory) (*IndexCoord, error) {
+func NewIndexCoord(ctx context.Context, factory storage.ChunkManagerFactory) (*IndexCoord, error) {
 	var err error
 	s := &IndexCoord{}
 	svr, err := grpcindexcoord.NewServer(ctx, factory)

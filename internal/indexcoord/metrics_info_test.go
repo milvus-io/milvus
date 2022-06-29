@@ -23,14 +23,14 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/indexnode"
-	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 )
 
 func TestGetSystemInfoMetrics(t *testing.T) {
 	ctx := context.Background()
-	factory := dependency.NewDefaultFactory(true)
+	factory := storage.NewDefaultChunkManagerFactory()
 	ic, err := NewIndexCoord(ctx, factory)
 	assert.Nil(t, err)
 	Params.Init()

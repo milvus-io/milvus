@@ -92,7 +92,7 @@ type Proxy struct {
 	session  *sessionutil.Session
 	shardMgr *shardClientMgr
 
-	factory dependency.Factory
+	factory dependency.MixedFactory
 
 	searchResultCh chan *internalpb.SearchResults
 
@@ -102,7 +102,7 @@ type Proxy struct {
 }
 
 // NewProxy returns a Proxy struct.
-func NewProxy(ctx context.Context, factory dependency.Factory) (*Proxy, error) {
+func NewProxy(ctx context.Context, factory dependency.MixedFactory) (*Proxy, error) {
 	rand.Seed(time.Now().UnixNano())
 	ctx1, cancel := context.WithCancel(ctx)
 	n := 1024 // better to be configurable

@@ -27,9 +27,9 @@ import (
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/mq"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
@@ -41,7 +41,7 @@ type channelUnsubscribeHandler struct {
 	ctx      context.Context
 	cancel   context.CancelFunc
 	kvClient *etcdkv.EtcdKV
-	factory  msgstream.Factory
+	factory  mq.Factory
 
 	mut          sync.RWMutex // mutex for channelInfos, since container/list is not goroutine-safe
 	channelInfos *list.List
@@ -51,7 +51,7 @@ type channelUnsubscribeHandler struct {
 }
 
 // newChannelUnsubscribeHandler create a new handler service to unsubscribe channels
-func newChannelUnsubscribeHandler(ctx context.Context, kv *etcdkv.EtcdKV, factory dependency.Factory) (*channelUnsubscribeHandler, error) {
+func newChannelUnsubscribeHandler(ctx context.Context, kv *etcdkv.EtcdKV, factory mq.Factory) (*channelUnsubscribeHandler, error) {
 	childCtx, cancel := context.WithCancel(ctx)
 	handler := &channelUnsubscribeHandler{
 		ctx:      childCtx,

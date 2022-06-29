@@ -41,7 +41,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -65,7 +64,7 @@ func TestIndexNode(t *testing.T) {
 	floatVectorBinlogPath := "float_vector_binlog"
 	binaryVectorBinlogPath := "binary_vector_binlog"
 
-	factory := dependency.NewDefaultFactory(true)
+	factory := storage.NewDefaultChunkManagerFactory()
 	in, err := NewIndexNode(ctx, factory)
 	assert.Nil(t, err)
 	Params.Init()
@@ -480,7 +479,7 @@ func TestCreateIndexFailed(t *testing.T) {
 	metaPath2 := "FloatVector2"
 	floatVectorBinlogPath := "float_vector_binlog"
 
-	factory := dependency.NewDefaultFactory(true)
+	factory := storage.NewDefaultChunkManagerFactory()
 	in, err := NewIndexNode(ctx, factory)
 	assert.Nil(t, err)
 	Params.Init()
@@ -754,7 +753,7 @@ func TestCreateIndexFailed(t *testing.T) {
 func TestIndexNode_Error(t *testing.T) {
 	ctx := context.Background()
 
-	factory := dependency.NewDefaultFactory(true)
+	factory := storage.NewDefaultChunkManagerFactory()
 	in, err := NewIndexNode(ctx, factory)
 	assert.Nil(t, err)
 	Params.Init()

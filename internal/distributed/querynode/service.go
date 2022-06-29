@@ -68,7 +68,7 @@ type Server struct {
 }
 
 // NewServer create a new QueryNode grpc server.
-func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error) {
+func NewServer(ctx context.Context, factory dependency.MixedFactory) (*Server, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 
 	s := &Server{

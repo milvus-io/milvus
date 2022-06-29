@@ -38,8 +38,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
@@ -247,7 +247,7 @@ func (s *Server) GetMetrics(ctx context.Context, request *milvuspb.GetMetricsReq
 }
 
 // NewServer create a new IndexNode grpc server.
-func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error) {
+func NewServer(ctx context.Context, factory storage.ChunkManagerFactory) (*Server, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	node, err := indexnode.NewIndexNode(ctx1, factory)
 	if err != nil {

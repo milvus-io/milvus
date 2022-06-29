@@ -61,7 +61,7 @@ type Server struct {
 
 	queryCoord types.QueryCoordComponent
 
-	factory dependency.Factory
+	factory dependency.MixedFactory
 
 	etcdCli *clientv3.Client
 
@@ -73,7 +73,7 @@ type Server struct {
 }
 
 // NewServer create a new QueryCoord grpc server.
-func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error) {
+func NewServer(ctx context.Context, factory dependency.MixedFactory) (*Server, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	svr, err := qc.NewQueryCoord(ctx1, factory)
 	if err != nil {

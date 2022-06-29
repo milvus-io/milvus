@@ -109,7 +109,7 @@ type MetaReplica struct {
 	client kv.MetaKv // client of a reliable kv service, i.e. etcd client
 	//DDL lock
 	clientMutex sync.Mutex
-	factory     dependency.Factory
+	factory     dependency.MixedFactory
 	idAllocator func() (UniqueID, error)
 
 	//sync.RWMutex
@@ -127,7 +127,7 @@ type MetaReplica struct {
 	dataCoord types.DataCoord
 }
 
-func newMeta(ctx context.Context, kv kv.MetaKv, factory dependency.Factory, idAllocator func() (UniqueID, error)) (Meta, error) {
+func newMeta(ctx context.Context, kv kv.MetaKv, factory dependency.MixedFactory, idAllocator func() (UniqueID, error)) (Meta, error) {
 	childCtx, cancel := context.WithCancel(ctx)
 	collectionInfos := make(map[UniqueID]*querypb.CollectionInfo)
 	deltaChannelInfos := make(map[UniqueID][]*datapb.VchannelInfo)

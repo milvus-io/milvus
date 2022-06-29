@@ -20,8 +20,8 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/mq"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/util/dependency"
 
 	grpcdatacoordclient "github.com/milvus-io/milvus/internal/distributed/datacoord"
 )
@@ -33,7 +33,7 @@ type DataCoord struct {
 }
 
 // NewDataCoord creates a new DataCoord
-func NewDataCoord(ctx context.Context, factory dependency.Factory) (*DataCoord, error) {
+func NewDataCoord(ctx context.Context, factory mq.Factory) (*DataCoord, error) {
 	s := grpcdatacoordclient.NewServer(ctx, factory)
 
 	return &DataCoord{

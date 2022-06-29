@@ -37,6 +37,7 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/mq"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -50,7 +51,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util"
-	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
@@ -624,7 +624,7 @@ func TestRootCoordInit(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	coreFactory := dependency.NewDefaultFactory(true)
+	coreFactory := mq.NewDefaultFactory(true)
 	Params.Init()
 	Params.RootCoordCfg.DmlChannelNum = TestDMLChannelNum
 
@@ -748,7 +748,7 @@ func TestRootCoordInitData(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	coreFactory := dependency.NewDefaultFactory(true)
+	coreFactory := mq.NewDefaultFactory(true)
 	Params.Init()
 	Params.RootCoordCfg.DmlChannelNum = TestDMLChannelNum
 
@@ -807,7 +807,7 @@ func TestRootCoord_Base(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	coreFactory := dependency.NewDefaultFactory(true)
+	coreFactory := mq.NewDefaultFactory(true)
 	Params.Init()
 	Params.RootCoordCfg.DmlChannelNum = TestDMLChannelNum
 	Params.RootCoordCfg.ImportIndexCheckInterval = 0.1
@@ -874,7 +874,7 @@ func TestRootCoord_Base(t *testing.T) {
 	err = core.SetQueryCoord(qm)
 	assert.NoError(t, err)
 
-	tmpFactory := dependency.NewDefaultFactory(true)
+	tmpFactory := mq.NewDefaultFactory(true)
 
 	dmlStream, _ := tmpFactory.NewMsgStream(ctx)
 	defer dmlStream.Close()
@@ -2871,7 +2871,7 @@ func TestRootCoord2(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	msFactory := dependency.NewDefaultFactory(true)
+	msFactory := mq.NewDefaultFactory(true)
 
 	Params.Init()
 	Params.RootCoordCfg.DmlChannelNum = TestDMLChannelNum
@@ -3161,7 +3161,7 @@ func TestCheckFlushedSegments(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	msFactory := dependency.NewDefaultFactory(true)
+	msFactory := mq.NewDefaultFactory(true)
 	Params.Init()
 	Params.RootCoordCfg.DmlChannelNum = TestDMLChannelNum
 	core, err := NewCore(ctx, msFactory)
@@ -3316,7 +3316,7 @@ func TestRootCoord_CheckZeroShardsNum(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	msFactory := dependency.NewDefaultFactory(true)
+	msFactory := mq.NewDefaultFactory(true)
 	Params.Init()
 	Params.RootCoordCfg.DmlChannelNum = TestDMLChannelNum
 

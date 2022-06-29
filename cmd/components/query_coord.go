@@ -33,7 +33,7 @@ type QueryCoord struct {
 }
 
 // NewQueryCoord creates a new QueryCoord
-func NewQueryCoord(ctx context.Context, factory dependency.Factory) (*QueryCoord, error) {
+func NewQueryCoord(ctx context.Context, factory dependency.MixedFactory) (*QueryCoord, error) {
 	svr, err := grpcquerycoord.NewServer(ctx, factory)
 	if err != nil {
 		panic(err)

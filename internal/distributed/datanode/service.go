@@ -61,7 +61,7 @@ type Server struct {
 	ctx         context.Context
 	cancel      context.CancelFunc
 	etcdCli     *clientv3.Client
-	factory     dependency.Factory
+	factory     dependency.MixedFactory
 
 	rootCoord types.RootCoord
 	dataCoord types.DataCoord
@@ -73,7 +73,7 @@ type Server struct {
 }
 
 // NewServer new DataNode grpc server
-func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error) {
+func NewServer(ctx context.Context, factory dependency.MixedFactory) (*Server, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	var s = &Server{
 		ctx:         ctx1,

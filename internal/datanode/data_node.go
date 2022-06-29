@@ -121,11 +121,11 @@ type DataNode struct {
 
 	closer io.Closer
 
-	factory dependency.Factory
+	factory dependency.MixedFactory
 }
 
 // NewDataNode will return a DataNode with abnormal state.
-func NewDataNode(ctx context.Context, factory dependency.Factory) *DataNode {
+func NewDataNode(ctx context.Context, factory dependency.MixedFactory) *DataNode {
 	rand.Seed(time.Now().UnixNano())
 	ctx2, cancel2 := context.WithCancel(ctx)
 	node := &DataNode{

@@ -47,7 +47,6 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
@@ -80,7 +79,7 @@ type IndexCoord struct {
 
 	idAllocator *allocator.GlobalIDAllocator
 
-	factory      dependency.Factory
+	factory      storage.ChunkManagerFactory
 	etcdCli      *clientv3.Client
 	chunkManager storage.ChunkManager
 
@@ -109,7 +108,7 @@ type IndexCoord struct {
 type UniqueID = typeutil.UniqueID
 
 // NewIndexCoord creates a new IndexCoord component.
-func NewIndexCoord(ctx context.Context, factory dependency.Factory) (*IndexCoord, error) {
+func NewIndexCoord(ctx context.Context, factory storage.ChunkManagerFactory) (*IndexCoord, error) {
 	rand.Seed(time.Now().UnixNano())
 	ctx1, cancel := context.WithCancel(ctx)
 	i := &IndexCoord{

@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 
 	"github.com/golang/protobuf/proto"
@@ -36,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/common"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/mq"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -563,7 +565,7 @@ func genEtcdKV() (*etcdkv.EtcdKV, error) {
 	return etcdKV, nil
 }
 
-func genFactory() dependency.Factory {
+func genFactory() dependency.MixedFactory {
 	factory := dependency.NewDefaultFactory(true)
 	return factory
 }
@@ -1663,7 +1665,7 @@ func saveChangeInfo(key string, value string) error {
 	return kv.Save(key, value)
 }
 
-func genSimpleQueryNodeWithMQFactory(ctx context.Context, fac dependency.Factory) (*QueryNode, error) {
+func genSimpleQueryNodeWithMQFactory(ctx context.Context, fac dependency.MixedFactory) (*QueryNode, error) {
 	node := NewQueryNode(ctx, fac)
 	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	if err != nil {
@@ -1831,11 +1833,13 @@ func genFieldData(fieldName string, fieldID int64, fieldType schemapb.DataType, 
 }
 
 type mockMsgStreamFactory struct {
-	dependency.Factory
+	dependency.MixedFactory
 	mockMqStream msgstream.MsgStream
 }
 
-var _ dependency.Factory = &mockMsgStreamFactory{}
+var _ mq.Factory = &mockMsgStreamFactory{}
+
+func (mm *mockMsgStreamFactory) Init(params *paramtable.ComponentParam) {}
 
 func (mm *mockMsgStreamFactory) NewMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
 	return mm.mockMqStream, nil
@@ -1848,9 +1852,11 @@ func (mm *mockMsgStreamFactory) NewTtMsgStream(ctx context.Context) (msgstream.M
 func (mm *mockMsgStreamFactory) NewQueryMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
 	return nil, nil
 }
+
 func (mm *mockMsgStreamFactory) NewCacheStorageChunkManager(ctx context.Context) (storage.ChunkManager, error) {
 	return nil, nil
 }
+
 func (mm *mockMsgStreamFactory) NewVectorStorageChunkManager(ctx context.Context) (storage.ChunkManager, error) {
 	return nil, nil
 }

@@ -33,7 +33,7 @@ type Proxy struct {
 }
 
 // NewProxy creates a new Proxy
-func NewProxy(ctx context.Context, factory dependency.Factory) (*Proxy, error) {
+func NewProxy(ctx context.Context, factory dependency.MixedFactory) (*Proxy, error) {
 	var err error
 	n := &Proxy{}
 

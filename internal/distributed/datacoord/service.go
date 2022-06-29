@@ -33,12 +33,12 @@ import (
 
 	"github.com/milvus-io/milvus/internal/datacoord"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/mq"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/logutil"
@@ -66,7 +66,7 @@ type Server struct {
 }
 
 // NewServer new data service grpc server
-func NewServer(ctx context.Context, factory dependency.Factory, opts ...datacoord.Option) *Server {
+func NewServer(ctx context.Context, factory mq.Factory, opts ...datacoord.Option) *Server {
 	ctx1, cancel := context.WithCancel(ctx)
 
 	s := &Server{

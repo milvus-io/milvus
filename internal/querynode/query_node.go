@@ -100,7 +100,7 @@ type QueryNode struct {
 	// etcd client
 	etcdCli *clientv3.Client
 
-	factory   dependency.Factory
+	factory   dependency.MixedFactory
 	scheduler *taskScheduler
 
 	session *sessionutil.Session
@@ -117,7 +117,7 @@ type QueryNode struct {
 }
 
 // NewQueryNode will return a QueryNode with abnormal state.
-func NewQueryNode(ctx context.Context, factory dependency.Factory) *QueryNode {
+func NewQueryNode(ctx context.Context, factory dependency.MixedFactory) *QueryNode {
 	ctx1, cancel := context.WithCancel(ctx)
 	node := &QueryNode{
 		queryNodeLoopCtx:    ctx1,

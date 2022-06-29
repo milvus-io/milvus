@@ -35,7 +35,7 @@ type queryShardService struct {
 	queryShardsMu sync.Mutex              // guards queryShards
 	queryShards   map[Channel]*queryShard // Virtual Channel -> *queryShard
 
-	factory dependency.Factory
+	factory dependency.MixedFactory
 
 	metaReplica  ReplicaInterface
 	tSafeReplica TSafeReplicaInterface
@@ -47,7 +47,7 @@ type queryShardService struct {
 	scheduler           *taskScheduler
 }
 
-func newQueryShardService(ctx context.Context, metaReplica ReplicaInterface, tSafeReplica TSafeReplicaInterface, clusterService *ShardClusterService, factory dependency.Factory, scheduler *taskScheduler) *queryShardService {
+func newQueryShardService(ctx context.Context, metaReplica ReplicaInterface, tSafeReplica TSafeReplicaInterface, clusterService *ShardClusterService, factory dependency.MixedFactory, scheduler *taskScheduler) *queryShardService {
 	queryShardServiceCtx, queryShardServiceCancel := context.WithCancel(ctx)
 
 	path := Params.LoadWithDefault("localStorage.Path", "/tmp/milvus/data")
