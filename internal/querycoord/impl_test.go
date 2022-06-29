@@ -69,6 +69,7 @@ func waitLoadPartitionDone(ctx context.Context, queryCoord *QueryCoord, collecti
 
 func waitLoadCollectionDone(ctx context.Context, queryCoord *QueryCoord, collectionID UniqueID) error {
 	for {
+		log.Debug("waiting for loading collection done...")
 		showCollectionReq := &querypb.ShowCollectionsRequest{
 			Base: &commonpb.MsgBase{
 				MsgType: commonpb.MsgType_ShowPartitions,
@@ -1062,9 +1063,8 @@ func TestLoadCollectionSyncSegmentsFail(t *testing.T) {
 	rollbackDone := waitLoadCollectionRollbackDone(queryCoord, loadCollectionReq.CollectionID)
 	assert.True(t, rollbackDone)
 
-	assert.NoError(t, node1.stop())
-	assert.NoError(t, queryCoord.Stop())
-	assert.NoError(t, removeAllSession())
+	node1.stop()
+	removeAllSession()
 }
 
 func Test_RepeatedLoadSamePartitions(t *testing.T) {

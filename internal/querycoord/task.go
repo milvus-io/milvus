@@ -1647,16 +1647,7 @@ func (ht *handoffTask) execute(ctx context.Context) error {
 			continue
 		}
 
-		//  segment which is compacted from should exist in query node
-		for _, compactedSegID := range segmentInfo.CompactionFrom {
-			_, err = ht.meta.getSegmentInfoByID(compactedSegID)
-			if err != nil {
-				log.Error("handoffTask: compacted segment has not been loaded into memory", zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID), zap.Int64("segmentID", segmentID))
-				ht.setResultInfo(err)
-				return err
-			}
-		}
-
+		// TODO we don't ensure atomicity here, so this could stuck forever
 		// segment which is compacted to should not exist in query node
 		_, err = ht.meta.getSegmentInfoByID(segmentID)
 		if err != nil {

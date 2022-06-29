@@ -507,8 +507,9 @@ func (broker *globalMetaBroker) releaseSegmentReferLock(ctx context.Context, tas
 	defer cancel()
 
 	releaseSegReferLockReq := &datapb.ReleaseSegmentLockRequest{
-		TaskID: taskID,
-		NodeID: Params.QueryCoordCfg.GetNodeID(),
+		TaskID:     taskID,
+		NodeID:     Params.QueryCoordCfg.GetNodeID(),
+		SegmentIDs: segmentIDs,
 	}
 
 	if err := retry.Do(ctx, func() error {
