@@ -199,6 +199,9 @@ ReduceHelper::ReduceResultData(int slice_index) {
         std::vector<SearchResultPair> result_pairs;
         for (int i = 0; i < num_segments_; i++) {
             auto search_result = search_results_[i];
+            if (search_result->real_topK_per_nq_[qi] == 0) {
+                continue;
+            }
             auto base_offset = search_result->get_result_count(qi);
             auto primary_key = search_result->primary_keys_[base_offset];
             auto distance = search_result->distances_[base_offset];
@@ -208,9 +211,7 @@ ReduceHelper::ReduceResultData(int slice_index) {
 
         pk_set.clear();
         int64_t last_nq_result_offset = result_offset;
-        int j = 0;
         while (result_offset - last_nq_result_offset < slice_topKs_[slice_index]) {
-            j++;
             std::sort(result_pairs.begin(), result_pairs.end(), std::greater<>());
             auto& pilot = result_pairs[0];
             auto index = pilot.segment_index_;
