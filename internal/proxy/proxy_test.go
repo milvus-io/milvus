@@ -2082,7 +2082,9 @@ func TestProxy(t *testing.T) {
 		getResp, err := rootCoordClient.GetCredential(ctx, getCredentialReq)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, getResp.Status.ErrorCode)
-		assert.True(t, crypto.PasswordVerify(newPassword, getResp.Password))
+		assert.True(t, crypto.PasswordVerify(newPassword, &internalpb.CredentialInfo{
+			EncryptedPassword: getResp.Password,
+		}))
 
 		getCredentialReq.Username = "("
 		getResp, err = rootCoordClient.GetCredential(ctx, getCredentialReq)

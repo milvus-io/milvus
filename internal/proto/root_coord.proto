@@ -208,6 +208,6 @@ message GetCredentialResponse {
   common.Status status = 1;
   // username
   string username = 2;
-  // password
+  // password stored in etcd/mysql
   string password = 3;
 }

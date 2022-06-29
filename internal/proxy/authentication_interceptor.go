@@ -37,7 +37,7 @@ func validAuth(ctx context.Context, authorization []string) bool {
 		return false
 	}
 
-	return crypto.PasswordVerify(password, credInfo.EncryptedPassword)
+	return crypto.PasswordVerify(password, credInfo)
 }
 
 func validSourceID(ctx context.Context, authorization []string) bool {
