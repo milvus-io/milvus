@@ -44,8 +44,7 @@ class TestDataNodeScale:
             'spec.components.image': image,
             'spec.components.proxy.serviceType': 'LoadBalancer',
             'spec.components.dataNode.replicas': 2,
-            'spec.config.dataCoord.enableCompaction': True,
-            'spec.config.dataCoord.enableGarbageCollection': True
+            'spec.config.common.retentionDuration': 60
         }
         mic = MilvusOperator()
         mic.install(data_config)
@@ -60,9 +59,9 @@ class TestDataNodeScale:
             connections.connect(alias='default')
 
             # create
-            c_name = cf.gen_unique_str("scale_query")
+            c_name = cf.gen_unique_str("scale_data")
             collection_w = ApiCollectionWrapper()
-            collection_w.init_collection(name=c_name, schema=cf.gen_default_collection_schema(), shards_num=5)
+            collection_w.init_collection(name=c_name, schema=cf.gen_default_collection_schema(), shards_num=4)
 
             tmp_nb = 10000
 
@@ -87,9 +86,9 @@ class TestDataNodeScale:
             log.debug("Expand dataNode test finished")
 
             # create new collection and insert
-            new_c_name = cf.gen_unique_str("scale_query")
+            new_c_name = cf.gen_unique_str("scale_data")
             collection_w_new = ApiCollectionWrapper()
-            collection_w_new.init_collection(name=new_c_name, schema=cf.gen_default_collection_schema(), shards_num=2)
+            collection_w_new.init_collection(name=new_c_name, schema=cf.gen_default_collection_schema(), shards_num=3)
 
             @counter
             def do_new_insert():

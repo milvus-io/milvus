@@ -1,10 +1,12 @@
 import multiprocessing
 
 import pytest
-from pymilvus import MilvusException
+from pymilvus import MilvusException, connections
 
+from base.collection_wrapper import ApiCollectionWrapper
 from customize.milvus_operator import MilvusOperator
 from common import common_func as cf
+from common.common_type import default_nb
 from common.common_type import CaseLabel
 from scale import scale_common as sc, constants
 from utils.util_log import test_log as log
@@ -52,8 +54,7 @@ class TestProxyScale:
             'spec.components.proxy.serviceType': 'LoadBalancer',
             'spec.components.proxy.replicas': 1,
             'spec.components.dataNode.replicas': 2,
-            'spec.config.dataCoord.enableCompaction': True,
-            'spec.config.dataCoord.enableGarbageCollection': True
+            'spec.config.common.retentionDuration': 60
         }
         mic = MilvusOperator()
         mic.install(data_config)
@@ -64,7 +65,7 @@ class TestProxyScale:
 
         try:
             c_name = cf.gen_unique_str("proxy_scale")
-            e2e_milvus_parallel(5, host, c_name)
+            e2e_milvus_parallel(2, host, c_name)
             log.info('Milvus test before expand')
 
             # expand proxy replicas from 1 to 5
@@ -82,6 +83,15 @@ class TestProxyScale:
 
             e2e_milvus_parallel(2, host, c_name)
             log.info('Milvus test after shrink')
+
+            connections.connect('default', host=host, port=19530)
+            collection_w = ApiCollectionWrapper()
+            collection_w.init_collection(name=c_name)
+            """
+            total start 2+5+2 process to run e2e, each time insert default_nb data, But one of the 2 processes started
+            for the first time did not insert due to collection creation exception. So actually insert eight times
+            """
+            assert collection_w.num_entities == 8 * default_nb
 
         except Exception as e:
             log.error(str(e))
