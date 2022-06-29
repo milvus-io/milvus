@@ -611,6 +611,18 @@ func (sc *ShardCluster) HandoffSegments(info *querypb.SegmentChangeInfo) error {
 
 // appendHandoff adds the change info into pending list and returns the token.
 func (sc *ShardCluster) applySegmentChange(info *querypb.SegmentChangeInfo, onlineSegmentIDs []UniqueID) int64 {
+	// generate next version allocation
+	sc.mut.RLock()
+	allocations := sc.segments.Clone(func(segmentID int64) bool {
+		for _, offline := range info.OfflineSegments {
+			if offline.GetSegmentID() == segmentID {
+				return true
+			}
+		}
+		return false
+	})
+	sc.mut.RUnlock()
+
 	sc.mutVersion.Lock()
 	defer sc.mutVersion.Unlock()
 
@@ -618,14 +630,7 @@ func (sc *ShardCluster) applySegmentChange(info *querypb.SegmentChangeInfo, onli
 	versionID := sc.nextVersionID.Inc()
 	// remove offline segments in next version
 	// so incoming request will not have allocation of these segments
-	version := NewShardClusterVersion(versionID, sc.segments.Clone(func(segmentID int64) bool {
-		for _, offline := range info.OfflineSegments {
-			if offline.GetSegmentID() == segmentID {
-				return true
-			}
-		}
-		return false
-	}))
+	version := NewShardClusterVersion(versionID, allocations)
 	sc.versions.Store(versionID, version)
 
 	var lastVersionID int64
