@@ -928,12 +928,6 @@ func (m *MetaReplica) setDeltaChannel(collectionID UniqueID, infos []*datapb.Vch
 		return err
 	}
 
-	_, ok := m.deltaChannelInfos[collectionID]
-	if ok {
-		log.Debug("delta channel already exist", zap.Any("collectionID", collectionID))
-		return nil
-	}
-
 	err := saveDeltaChannelInfo(collectionID, infos, m.getKvClient())
 	if err != nil {
 		log.Error("save delta channel info error", zap.Int64("collectionID", collectionID), zap.Error(err))
