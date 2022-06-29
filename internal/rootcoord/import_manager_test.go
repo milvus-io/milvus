@@ -125,7 +125,7 @@ func TestImportManager_NewImportManager(t *testing.T) {
 		defer cancel()
 		mgr := newImportManager(ctx, mockKv, idAlloc, fn, nil)
 		assert.NotNil(t, mgr)
-		mgr.pendingTasks = append(mgr.pendingTasks, &datapb.ImportTaskInfo{
+		mgr.addPendingTask(&datapb.ImportTaskInfo{
 			Id: 300,
 			State: &datapb.ImportTaskState{
 				StateCode: commonpb.ImportState_ImportPending,
@@ -214,13 +214,13 @@ func TestImportManager_ImportJob(t *testing.T) {
 
 	mgr = newImportManager(context.TODO(), mockKv, idAlloc, fn, nil)
 	resp = mgr.importJob(context.TODO(), rowReq, colID, 0)
-	assert.Equal(t, len(rowReq.Files), len(mgr.pendingTasks))
-	assert.Equal(t, 0, len(mgr.workingTasks))
+	assert.Equal(t, len(rowReq.Files), int(mgr.pendingTasksCount.Load()))
+	assert.Equal(t, 0, int(mgr.workingTasksCount.Load()))
 
 	mgr = newImportManager(context.TODO(), mockKv, idAlloc, fn, nil)
 	resp = mgr.importJob(context.TODO(), colReq, colID, 0)
-	assert.Equal(t, 1, len(mgr.pendingTasks))
-	assert.Equal(t, 0, len(mgr.workingTasks))
+	assert.Equal(t, 1, int(mgr.pendingTasksCount.Load()))
+	assert.Equal(t, 0, int(mgr.workingTasksCount.Load()))
 
 	fn = func(ctx context.Context, req *datapb.ImportTaskRequest) *datapb.ImportTaskResponse {
 		return &datapb.ImportTaskResponse{
@@ -232,13 +232,13 @@ func TestImportManager_ImportJob(t *testing.T) {
 
 	mgr = newImportManager(context.TODO(), mockKv, idAlloc, fn, nil)
 	resp = mgr.importJob(context.TODO(), rowReq, colID, 0)
-	assert.Equal(t, 0, len(mgr.pendingTasks))
-	assert.Equal(t, len(rowReq.Files), len(mgr.workingTasks))
+	assert.Equal(t, 0, int(mgr.pendingTasksCount.Load()))
+	assert.Equal(t, len(rowReq.Files), int(mgr.workingTasksCount.Load()))
 
 	mgr = newImportManager(context.TODO(), mockKv, idAlloc, fn, nil)
 	resp = mgr.importJob(context.TODO(), colReq, colID, 0)
-	assert.Equal(t, 0, len(mgr.pendingTasks))
-	assert.Equal(t, 1, len(mgr.workingTasks))
+	assert.Equal(t, 0, int(mgr.pendingTasksCount.Load()))
+	assert.Equal(t, 1, int(mgr.workingTasksCount.Load()))
 
 	count := 0
 	fn = func(ctx context.Context, req *datapb.ImportTaskRequest) *datapb.ImportTaskResponse {
@@ -259,8 +259,8 @@ func TestImportManager_ImportJob(t *testing.T) {
 
 	mgr = newImportManager(context.TODO(), mockKv, idAlloc, fn, nil)
 	resp = mgr.importJob(context.TODO(), rowReq, colID, 0)
-	assert.Equal(t, len(rowReq.Files)-2, len(mgr.pendingTasks))
-	assert.Equal(t, 2, len(mgr.workingTasks))
+	assert.Equal(t, len(rowReq.Files)-2, int(mgr.pendingTasksCount.Load()))
+	assert.Equal(t, 2, int(mgr.workingTasksCount.Load()))
 
 	for i := 0; i <= 32; i++ {
 		rowReq.Files = append(rowReq.Files, strconv.Itoa(i))
@@ -323,32 +323,32 @@ func TestImportManager_AllDataNodesBusy(t *testing.T) {
 
 	mgr := newImportManager(context.TODO(), mockKv, idAlloc, fn, nil)
 	mgr.importJob(context.TODO(), rowReq, colID, 0)
-	assert.Equal(t, 0, len(mgr.pendingTasks))
-	assert.Equal(t, len(rowReq.Files), len(mgr.workingTasks))
+	assert.Equal(t, 0, int(mgr.pendingTasksCount.Load()))
+	assert.Equal(t, len(rowReq.Files), int(mgr.workingTasksCount.Load()))
 
 	mgr = newImportManager(context.TODO(), mockKv, idAlloc, fn, nil)
 	mgr.importJob(context.TODO(), rowReq, colID, 0)
-	assert.Equal(t, len(rowReq.Files), len(mgr.pendingTasks))
-	assert.Equal(t, 0, len(mgr.workingTasks))
+	assert.Equal(t, len(rowReq.Files), int(mgr.pendingTasksCount.Load()))
+	assert.Equal(t, 0, int(mgr.workingTasksCount.Load()))
 
 	// Reset count.
 	count = 0
 	mgr = newImportManager(context.TODO(), mockKv, idAlloc, fn, nil)
 	mgr.importJob(context.TODO(), colReq, colID, 0)
-	assert.Equal(t, 0, len(mgr.pendingTasks))
-	assert.Equal(t, 1, len(mgr.workingTasks))
+	assert.Equal(t, 0, int(mgr.pendingTasksCount.Load()))
+	assert.Equal(t, 1, int(mgr.workingTasksCount.Load()))
 
 	mgr.importJob(context.TODO(), colReq, colID, 0)
-	assert.Equal(t, 0, len(mgr.pendingTasks))
-	assert.Equal(t, 2, len(mgr.workingTasks))
+	assert.Equal(t, 0, int(mgr.pendingTasksCount.Load()))
+	assert.Equal(t, 2, int(mgr.workingTasksCount.Load()))
 
 	mgr.importJob(context.TODO(), colReq, colID, 0)
-	assert.Equal(t, 0, len(mgr.pendingTasks))
-	assert.Equal(t, 3, len(mgr.workingTasks))
+	assert.Equal(t, 0, int(mgr.pendingTasksCount.Load()))
+	assert.Equal(t, 3, int(mgr.workingTasksCount.Load()))
 
 	mgr.importJob(context.TODO(), colReq, colID, 0)
-	assert.Equal(t, 1, len(mgr.pendingTasks))
-	assert.Equal(t, 3, len(mgr.workingTasks))
+	assert.Equal(t, 1, int(mgr.pendingTasksCount.Load()))
+	assert.Equal(t, 3, int(mgr.workingTasksCount.Load()))
 }
 
 func TestImportManager_TaskState(t *testing.T) {
@@ -421,6 +421,7 @@ func TestImportManager_TaskState(t *testing.T) {
 	resp = mgr.getTaskState(2)
 	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	assert.Equal(t, commonpb.ImportState_ImportCompleted, resp.State)
+	assert.Equal(t, int64(1000), resp.GetRowCount())
 
 	resp = mgr.getTaskState(1)
 	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)

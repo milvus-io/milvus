@@ -2525,15 +2525,10 @@ func (c *Core) ReportImport(ctx context.Context, ir *rootcoordpb.ImportResult) (
 
 	// This method update a busy node to idle node, and send import task to idle node
 	resendTaskFunc := func() {
-		func() {
-			c.importManager.busyNodesLock.Lock()
-			defer c.importManager.busyNodesLock.Unlock()
-			delete(c.importManager.busyNodes, ir.GetDatanodeId())
-			log.Info("DataNode is no longer busy",
-				zap.Int64("dataNode ID", ir.GetDatanodeId()),
-				zap.Int64("task ID", ir.GetTaskId()))
-
-		}()
+		c.importManager.removeBusyNode(ir.GetDatanodeId())
+		log.Info("DataNode is no longer busy",
+			zap.Int64("dataNode ID", ir.GetDatanodeId()),
+			zap.Int64("task ID", ir.GetTaskId()))
 		c.importManager.sendOutTasks(c.importManager.ctx)
 	}
 
