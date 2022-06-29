@@ -193,12 +193,13 @@ func (m *InvalidateCredCacheRequest) GetUsername() string {
 }
 
 type UpdateCredCacheRequest struct {
-	Base                 *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
-	Username             string            `protobuf:"bytes,2,opt,name=username,proto3" json:"username,omitempty"`
-	Password             string            `protobuf:"bytes,3,opt,name=password,proto3" json:"password,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}          `json:"-"`
-	XXX_unrecognized     []byte            `json:"-"`
-	XXX_sizecache        int32             `json:"-"`
+	Base     *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
+	Username string            `protobuf:"bytes,2,opt,name=username,proto3" json:"username,omitempty"`
+	// password stored in cache
+	Password             string   `protobuf:"bytes,3,opt,name=password,proto3" json:"password,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
 }
 
 func (m *UpdateCredCacheRequest) Reset()         { *m = UpdateCredCacheRequest{} }

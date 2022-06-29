@@ -1,42 +1,65 @@
 package crypto
 
 import (
-	"encoding/json"
-	"fmt"
 	"testing"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/util"
 	"github.com/stretchr/testify/assert"
+	"golang.org/x/crypto/bcrypt"
 )
 
-func TestPasswordVerify(t *testing.T) {
+func TestPasswordVerify_HitCache(t *testing.T) {
 	wrongPassword := "test_my_name"
 	correctPassword := "test_my_pass_new"
-	hashedPass, _ := PasswordEncrypt(correctPassword)
-	assert.True(t, PasswordVerify(correctPassword, "$2a$10$3H9DLiHyPxJ29bMWRNyueOrGkbzJfE3BAR159ju3UetytAoKk7Ne2"))
-	assert.False(t, PasswordVerify(wrongPassword, hashedPass))
+	credInfo := &internalpb.CredentialInfo{
+		Username:       "root",
+		Sha256Password: "bcca79df9650cef1d7ed9f63449d7f8a27843d2678f5666f38ca65ab77d99a13",
+	}
+	assert.True(t, PasswordVerify(correctPassword, credInfo))
+	assert.False(t, PasswordVerify(wrongPassword, credInfo))
 }
 
-func TestMarshalAndPasswordVerify(t *testing.T) {
-	encryptedRootPassword, _ := PasswordEncrypt(util.DefaultRootPassword)
-	credInfo := &internalpb.CredentialInfo{Username: util.UserRoot, EncryptedPassword: encryptedRootPassword}
-	v, _ := proto.Marshal(&internalpb.CredentialInfo{EncryptedPassword: credInfo.EncryptedPassword})
-	fmt.Println(string(v))
-
-	credentialInfo := internalpb.CredentialInfo{}
-	proto.Unmarshal(v, &credentialInfo)
-	assert.True(t, PasswordVerify(util.DefaultRootPassword, credentialInfo.EncryptedPassword))
+func TestPasswordVerify_MissCache(t *testing.T) {
+	wrongPassword := "test_my_name"
+	correctPassword := "test_my_pass_new"
+	credInfo := &internalpb.CredentialInfo{
+		EncryptedPassword: "$2a$10$3H9DLiHyPxJ29bMWRNyueOrGkbzJfE3BAR159ju3UetytAoKk7Ne2",
+	}
+	assert.True(t, PasswordVerify(correctPassword, credInfo))
+	assert.False(t, PasswordVerify(wrongPassword, credInfo))
 }
 
-func TestJsonMarshalAndPasswordVerify(t *testing.T) {
-	encryptedRootPassword, _ := PasswordEncrypt(util.DefaultRootPassword)
-	credInfo := &internalpb.CredentialInfo{Username: util.UserRoot, EncryptedPassword: encryptedRootPassword}
-	v, _ := json.Marshal(&internalpb.CredentialInfo{EncryptedPassword: credInfo.EncryptedPassword})
-	fmt.Println(string(v))
+//func BenchmarkPasswordVerify(b *testing.B) {
+//	correctPassword := "test_my_pass_new"
+//	credInfo := &internalpb.CredentialInfo{
+//		Username:       "root",
+//		Sha256Password: "bcca79df9650cef1d7ed9f63449d7f8a27843d2678f5666f38ca65ab77d99a13",
+//	}
+//	b.ResetTimer()
+//	for n := 0; n < b.N; n++ {
+//		PasswordVerify(correctPassword, credInfo)
+//	}
+//}
 
-	credentialInfo := internalpb.CredentialInfo{}
-	json.Unmarshal(v, &credentialInfo)
-	assert.True(t, PasswordVerify(util.DefaultRootPassword, credentialInfo.EncryptedPassword))
+func TestBcryptCompare(t *testing.T) {
+	wrongPassword := "test_my_name"
+	correctPassword := "test_my_pass_new"
+
+	err := bcrypt.CompareHashAndPassword([]byte("$2a$10$3H9DLiHyPxJ29bMWRNyueOrGkbzJfE3BAR159ju3UetytAoKk7Ne2"), []byte(correctPassword))
+	assert.NoError(t, err)
+
+	err = bcrypt.CompareHashAndPassword([]byte("$2a$10$3H9DLiHyPxJ29bMWRNyueOrGkbzJfE3BAR159ju3UetytAoKk7Ne2"), []byte(wrongPassword))
+	assert.Error(t, err)
+}
+
+func TestBcryptCost(t *testing.T) {
+	correctPassword := "test_my_pass_new"
+
+	bytes, _ := bcrypt.GenerateFromPassword([]byte(correctPassword), bcrypt.DefaultCost)
+	err := bcrypt.CompareHashAndPassword(bytes, []byte(correctPassword))
+	assert.NoError(t, err)
+
+	bytes, _ = bcrypt.GenerateFromPassword([]byte(correctPassword), bcrypt.MinCost)
+	err = bcrypt.CompareHashAndPassword(bytes, []byte(correctPassword))
+	assert.NoError(t, err)
 }
