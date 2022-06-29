@@ -319,7 +319,8 @@ func TestReloadMetaFromKV(t *testing.T) {
 	kvs[collectionKey] = string(collectionBlobs)
 
 	segmentInfo := &querypb.SegmentInfo{
-		SegmentID: defaultSegmentID,
+		SegmentID:    defaultSegmentID,
+		CollectionID: defaultCollectionID,
 	}
 	segmentBlobs, err := proto.Marshal(segmentInfo)
 	assert.Nil(t, err)
