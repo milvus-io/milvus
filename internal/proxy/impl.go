@@ -3726,8 +3726,8 @@ func (node *Proxy) UpdateCredentialCache(ctx context.Context, request *proxypb.U
 		zap.String("username", request.Username))
 
 	credInfo := &internalpb.CredentialInfo{
-		Username:          request.Username,
-		EncryptedPassword: request.Password,
+		Username:       request.Username,
+		Sha256Password: request.Password,
 	}
 	if globalMetaCache != nil {
 		globalMetaCache.UpdateCredential(credInfo) // no need to return error, though credential may be not cached
@@ -3795,6 +3795,7 @@ func (node *Proxy) CreateCredential(ctx context.Context, req *milvuspb.CreateCre
 	credInfo := &internalpb.CredentialInfo{
 		Username:          req.Username,
 		EncryptedPassword: encryptedPassword,
+		Sha256Password:    crypto.SHA256(rawPassword, req.Username),
 	}
 	result, err := node.rootCoord.CreateCredential(ctx, credInfo)
 	if err != nil { // for error like conntext timeout etc.
@@ -3842,7 +3843,7 @@ func (node *Proxy) UpdateCredential(ctx context.Context, req *milvuspb.UpdateCre
 			Reason:    "found no credential:" + req.Username,
 		}, nil
 	}
-	if !crypto.PasswordVerify(rawOldPassword, oldCredInfo.EncryptedPassword) {
+	if !crypto.PasswordVerify(rawOldPassword, oldCredInfo) {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UpdateCredentialFailure,
 			Reason:    "old password is not correct:" + req.Username,
@@ -3859,6 +3860,7 @@ func (node *Proxy) UpdateCredential(ctx context.Context, req *milvuspb.UpdateCre
 	}
 	updateCredReq := &internalpb.CredentialInfo{
 		Username:          req.Username,
+		Sha256Password:    crypto.SHA256(rawNewPassword, req.Username),
 		EncryptedPassword: encryptedPassword,
 	}
 	result, err := node.rootCoord.UpdateCredential(ctx, updateCredReq)
