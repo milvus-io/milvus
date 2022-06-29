@@ -182,7 +182,12 @@ $ make test-go
 
 To run a single test case (TestSearchTask in /internal/proxy directory, for example):
 ```shell
-$ go test -v ./internal/proxy/ -test.run TestSearchTask
+$ source scripts/setenv.sh && go test -v ./internal/proxy/ -test.run TestSearchTask
+```
+
+If using Mac with M1 chip
+```
+$ source scripts/setenv.sh && go test -tags=dynamic -v ./internal/proxy/ -test.run TestSearchTask
 ```
 
 ### Code coverage
