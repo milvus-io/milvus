@@ -16,7 +16,7 @@ etcd:
   replicaCount: 1
   image:
     repository: milvusdb/etcd
-    tag: 3.5.0-r4  
+    tag: 3.5.0-r5  
 minio:
   mode: standalone
 pulsar:

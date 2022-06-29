@@ -311,7 +311,7 @@ jobs:
         shell: bash
         working-directory: tests/python_client/deploy
         run: |
-          if [ ${{ matrix.mode }} == "cluster" ]; then helm install --wait --timeout 720s deploy-testing milvus/milvus -f cluster-values.yaml; fi
+          if [ ${{ matrix.mode }} == "cluster" ]; then helm install --wait --timeout 720s deploy-testing milvus/milvus -f cluster-values-second.yaml; fi
           if [ ${{ matrix.mode }} == "standalone" ]; then helm upgrade --wait --timeout 720s deploy-testing milvus/milvus -f standalone-values.yaml; fi
           kubectl get pods
           sleep 20s

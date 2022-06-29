@@ -11,7 +11,9 @@ etcd:
   image:
     repository: milvusdb/etcd
     tag: 3.5.0-r5
-
+  extraEnvVars:
+    - name: ETCD_INITIAL_CLUSTER_STATE
+      value: "existing"
 minio:
   resources:
     requests:
