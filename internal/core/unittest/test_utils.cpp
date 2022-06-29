@@ -11,30 +11,10 @@
 
 #include <gtest/gtest.h>
 #include <string.h>
-#include <knowhere/common/MetricType.h>
 
 #include "common/Utils.h"
 #include "query/Utils.h"
 #include "test_utils/DataGen.h"
-
-TEST(Util, FaissMetricTypeToString) {
-    using namespace milvus::segcore;
-    using namespace faiss;
-
-    ASSERT_EQ(MetricTypeToString(MetricType::METRIC_INNER_PRODUCT), "METRIC_INNER_PRODUCT");
-    ASSERT_EQ(MetricTypeToString(MetricType::METRIC_L2), "METRIC_L2");
-    ASSERT_EQ(MetricTypeToString(MetricType::METRIC_L1), "METRIC_L1");
-    ASSERT_EQ(MetricTypeToString(MetricType::METRIC_Linf), "METRIC_Linf");
-    ASSERT_EQ(MetricTypeToString(MetricType::METRIC_Lp), "METRIC_Lp");
-    ASSERT_EQ(MetricTypeToString(MetricType::METRIC_Jaccard), "METRIC_Jaccard");
-    ASSERT_EQ(MetricTypeToString(MetricType::METRIC_Tanimoto), "METRIC_Tanimoto");
-    ASSERT_EQ(MetricTypeToString(MetricType::METRIC_Hamming), "METRIC_Hamming");
-    ASSERT_EQ(MetricTypeToString(MetricType::METRIC_Substructure), "METRIC_Substructure");
-    ASSERT_EQ(MetricTypeToString(MetricType::METRIC_Superstructure), "METRIC_Superstructure");
-    ASSERT_EQ(MetricTypeToString(MetricType::METRIC_Canberra), "METRIC_Canberra");
-    ASSERT_EQ(MetricTypeToString(MetricType::METRIC_BrayCurtis), "METRIC_BrayCurtis");
-    ASSERT_EQ(MetricTypeToString(MetricType::METRIC_JensenShannon), "METRIC_JensenShannon");
-}
 
 TEST(Util, StringMatch) {
     using namespace milvus;
@@ -61,7 +41,7 @@ TEST(Util, GetDeleteBitmap) {
     using namespace milvus::segcore;
 
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
+    auto vec_fid = schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto i64_fid = schema->AddDebugField("age", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
     auto N = 10;

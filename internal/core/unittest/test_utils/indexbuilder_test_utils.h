@@ -25,7 +25,6 @@
 #include "indexbuilder/helper.h"
 #include "indexbuilder/index_c.h"
 #include "indexbuilder/utils.h"
-#include "knowhere/common/MetricType.h"
 #include "knowhere/index/VecIndexFactory.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
@@ -245,12 +244,11 @@ generate_params(const knowhere::IndexType& index_type, const knowhere::MetricTyp
 auto
 GenDataset(int64_t N, const knowhere::MetricType& metric_type, bool is_binary, int64_t dim = DIM) {
     auto schema = std::make_shared<milvus::Schema>();
-    auto faiss_metric_type = knowhere::GetMetricType(std::string(metric_type));
     if (!is_binary) {
-        schema->AddDebugField("fakevec", milvus::DataType::VECTOR_FLOAT, dim, faiss_metric_type);
+        schema->AddDebugField("fakevec", milvus::DataType::VECTOR_FLOAT, dim, metric_type);
         return milvus::segcore::DataGen(schema, N);
     } else {
-        schema->AddDebugField("fakebinvec", milvus::DataType::VECTOR_BINARY, dim, faiss_metric_type);
+        schema->AddDebugField("fakebinvec", milvus::DataType::VECTOR_BINARY, dim, metric_type);
         return milvus::segcore::DataGen(schema, N);
     }
 }
