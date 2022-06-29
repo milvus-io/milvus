@@ -284,7 +284,7 @@ func (s *Segment) search(searchReq *searchRequest) (*SearchResult, error) {
 	}
 
 	var searchResult SearchResult
-	log.Debug("do search on segment", zap.Int64("msgID", searchReq.msgID),
+	log.Debug("start do search on segment", zap.Int64("msgID", searchReq.msgID),
 		zap.Int64("segmentID", s.segmentID), zap.String("segmentType", s.segmentType.String()))
 	tr := timerecord.NewTimeRecorder("cgoSearch")
 	status := C.Search(s.segmentPtr, searchReq.plan.cSearchPlan, searchReq.cPlaceholderGroup,
@@ -293,6 +293,8 @@ func (s *Segment) search(searchReq *searchRequest) (*SearchResult, error) {
 	if err := HandleCStatus(&status, "Search failed"); err != nil {
 		return nil, err
 	}
+	log.Debug("do search on segment done", zap.Int64("msgID", searchReq.msgID),
+		zap.Int64("segmentID", s.segmentID), zap.String("segmentType", s.segmentType.String()))
 	return &searchResult, nil
 }
 
