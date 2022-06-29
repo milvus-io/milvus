@@ -1158,7 +1158,7 @@ class TestCompactionOperation(TestcaseBase):
         t = threading.Thread(target=do_index, args=())
         t.start()
         collection_w.compact()
-        collection_w.wait_for_compaction_completed()
+        collection_w.wait_for_compaction_completed(timeout=90)
         collection_w.get_compaction_plans()
 
         t.join()
