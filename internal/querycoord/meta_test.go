@@ -27,9 +27,12 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util"
@@ -118,11 +121,10 @@ func TestMetaFunc(t *testing.T) {
 		NodeIds:      []int64{nodeID},
 	}
 	meta := &MetaReplica{
-		collectionInfos:   map[UniqueID]*querypb.CollectionInfo{},
-		queryChannelInfos: map[UniqueID]*querypb.QueryChannelInfo{},
-		dmChannelInfos:    map[string]*querypb.DmChannelWatchInfo{},
-		segmentsInfo:      segmentsInfo,
-		replicas:          NewReplicaInfos(),
+		collectionInfos: map[UniqueID]*querypb.CollectionInfo{},
+		dmChannelInfos:  map[string]*querypb.DmChannelWatchInfo{},
+		segmentsInfo:    segmentsInfo,
+		replicas:        NewReplicaInfos(),
 	}
 	meta.setKvClient(kv)
 	dmChannels := []string{"testDm1", "testDm2"}
@@ -158,11 +160,6 @@ func TestMetaFunc(t *testing.T) {
 		res, err := meta.getCollectionInfoByID(defaultCollectionID)
 		assert.Nil(t, res)
 		assert.NotNil(t, err)
-	})
-
-	t.Run("Test GetQueryChannelInfoByIDFirst", func(t *testing.T) {
-		res := meta.getQueryChannelInfoByID(defaultCollectionID)
-		assert.NotNil(t, res)
 	})
 
 	t.Run("Test GetPartitionStatesByIDFail", func(t *testing.T) {
@@ -256,12 +253,6 @@ func TestMetaFunc(t *testing.T) {
 		assert.Equal(t, defaultSegmentID, infos[0].SegmentID)
 	})
 
-	t.Run("Test getQueryChannelSecond", func(t *testing.T) {
-		info := meta.getQueryChannelInfoByID(defaultCollectionID)
-		assert.NotNil(t, info.QueryChannel)
-		assert.NotNil(t, info.QueryResultChannel)
-	})
-
 	t.Run("Test GetSegmentInfoByID", func(t *testing.T) {
 		info, err := meta.getSegmentInfoByID(defaultSegmentID)
 		assert.Nil(t, err)
@@ -311,7 +302,6 @@ func TestReloadMetaFromKV(t *testing.T) {
 	meta := &MetaReplica{
 		idAllocator:       idAllocator,
 		collectionInfos:   map[UniqueID]*querypb.CollectionInfo{},
-		queryChannelInfos: map[UniqueID]*querypb.QueryChannelInfo{},
 		dmChannelInfos:    map[string]*querypb.DmChannelWatchInfo{},
 		deltaChannelInfos: map[UniqueID][]*datapb.VchannelInfo{},
 		segmentsInfo:      newSegmentsInfo(kv),
@@ -378,49 +368,188 @@ func TestReloadMetaFromKV(t *testing.T) {
 	assert.Equal(t, collectionInfo.CollectionID, replicas[0].CollectionID)
 }
 
-func TestCreateQueryChannel(t *testing.T) {
+func TestSaveSegments(t *testing.T) {
 	refreshParams()
 	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 	kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 
-	nodeID := defaultQueryNodeID
-	segmentsInfo := newSegmentsInfo(kv)
-	segmentsInfo.segmentIDMap[defaultSegmentID] = &querypb.SegmentInfo{
-		CollectionID: defaultCollectionID,
-		PartitionID:  defaultPartitionID,
-		SegmentID:    defaultSegmentID,
-		NodeID:       nodeID,
-		NodeIds:      []int64{nodeID},
+	meta := &MetaReplica{
+		collectionInfos: map[UniqueID]*querypb.CollectionInfo{},
+		dmChannelInfos:  map[string]*querypb.DmChannelWatchInfo{},
+		segmentsInfo:    newSegmentsInfo(kv),
+		replicas:        NewReplicaInfos(),
+		client:          kv,
 	}
 
-	fixedQueryChannel := Params.CommonCfg.QueryCoordSearch + "-0"
-	fixedQueryResultChannel := Params.CommonCfg.QueryCoordSearchResult + "-0"
+	t.Run("LoadCollection", func(t *testing.T) {
+		defer func() {
+			meta.segmentsInfo = newSegmentsInfo(kv)
+		}()
+		eventChan := kv.WatchWithPrefix(util.ChangeInfoMetaPrefix)
 
-	tests := []struct {
-		inID             UniqueID
-		outQueryChannel  string
-		outResultChannel string
+		segmentNum := 5
+		save := MockSaveSegments(segmentNum)
+		log.Debug("save segments...",
+			zap.Any("segments", save))
+		meta.saveGlobalSealedSegInfos(save, nil)
 
-		description string
-	}{
-		{0, fixedQueryChannel, fixedQueryResultChannel, "collection ID = 0"},
-		{1, fixedQueryChannel, fixedQueryResultChannel, "collection ID = 1"},
-	}
+		log.Debug("wait for etcd event")
+		sawOnlineSegments := false
+		for !sawOnlineSegments {
+			watchResp, ok := <-eventChan
+			assert.True(t, ok)
 
-	m := &MetaReplica{
-		collectionInfos:   map[UniqueID]*querypb.CollectionInfo{},
-		queryChannelInfos: map[UniqueID]*querypb.QueryChannelInfo{},
-		dmChannelInfos:    map[string]*querypb.DmChannelWatchInfo{},
-		segmentsInfo:      segmentsInfo,
-	}
-	m.setKvClient(kv)
-	for _, test := range tests {
-		t.Run(test.description, func(t *testing.T) {
-			info := m.createQueryChannel(test.inID)
-			assert.Equal(t, info.GetQueryChannel(), test.outQueryChannel)
-			assert.Equal(t, info.GetQueryResultChannel(), test.outResultChannel)
+			for _, event := range watchResp.Events {
+				changeInfoBatch := &querypb.SealedSegmentsChangeInfo{}
+				err := proto.Unmarshal(event.Kv.Value, changeInfoBatch)
+				assert.NoError(t, err)
+
+				assert.Equal(t, segmentNum, len(changeInfoBatch.GetInfos()))
+				for _, changeInfo := range changeInfoBatch.GetInfos() {
+					assert.Empty(t, changeInfo.OfflineSegments)
+					assert.Equal(t, 1, len(changeInfo.OnlineSegments))
+				}
+
+				sawOnlineSegments = true
+			}
+		}
+
+	})
+
+	t.Run("LoadBalance", func(t *testing.T) {
+		defer func() {
+			meta.segmentsInfo = newSegmentsInfo(kv)
+		}()
+
+		eventChan := kv.WatchWithPrefix(util.ChangeInfoMetaPrefix)
+
+		segmentNum := 5
+		save := MockSaveSegments(segmentNum)
+		for _, segment := range save[defaultCollectionID] {
+			meta.segmentsInfo.saveSegment(segment)
+		}
+
+		balancedSegment := &querypb.SegmentInfo{
+			CollectionID: defaultCollectionID,
+			PartitionID:  defaultPartitionID,
+			SegmentID:    defaultSegmentID,
+			DmChannel:    "testDmChannel",
+			SegmentState: commonpb.SegmentState_Sealed,
+			NodeIds:      []UniqueID{defaultQueryNodeID + 1},
+		}
+
+		save = map[int64][]*querypb.SegmentInfo{
+			defaultCollectionID: {balancedSegment},
+		}
+		meta.saveGlobalSealedSegInfos(save, nil)
+
+		sawOnlineSegments := false
+		for !sawOnlineSegments {
+			watchResp, ok := <-eventChan
+			assert.True(t, ok)
+
+			for _, event := range watchResp.Events {
+				changeInfoBatch := &querypb.SealedSegmentsChangeInfo{}
+				err := proto.Unmarshal(event.Kv.Value, changeInfoBatch)
+				assert.NoError(t, err)
+
+				assert.Equal(t, 1, len(changeInfoBatch.GetInfos()))
+				for _, changeInfo := range changeInfoBatch.GetInfos() {
+					assert.Equal(t, 1, len(changeInfo.OfflineSegments))
+					assert.Equal(t, 1, len(changeInfo.OnlineSegments))
+
+					assert.Equal(t, defaultQueryNodeID, changeInfo.OfflineSegments[0].NodeIds[0])
+					assert.Equal(t, defaultQueryNodeID+1, changeInfo.OnlineSegments[0].NodeIds[0])
+				}
+
+				sawOnlineSegments = true
+			}
+		}
+	})
+
+	t.Run("Handoff", func(t *testing.T) {
+		defer func() {
+			meta.segmentsInfo = newSegmentsInfo(kv)
+		}()
+
+		eventChan := kv.WatchWithPrefix(util.ChangeInfoMetaPrefix)
+
+		segmentNum := 5
+		save := MockSaveSegments(segmentNum)
+		for _, segment := range save[defaultCollectionID] {
+			meta.segmentsInfo.saveSegment(segment)
+		}
+
+		spawnSegment := &querypb.SegmentInfo{
+			CollectionID:   defaultCollectionID,
+			PartitionID:    defaultPartitionID,
+			SegmentID:      defaultSegmentID + int64(segmentNum),
+			DmChannel:      "testDmChannel",
+			SegmentState:   commonpb.SegmentState_Sealed,
+			NodeIds:        []UniqueID{defaultQueryNodeID + 1},
+			CompactionFrom: []UniqueID{defaultSegmentID, defaultSegmentID + 1},
+		}
+
+		save = map[int64][]*querypb.SegmentInfo{
+			defaultCollectionID: {spawnSegment},
+		}
+		remove := map[int64][]*querypb.SegmentInfo{
+			defaultCollectionID: {},
+		}
+		for _, segmentID := range spawnSegment.CompactionFrom {
+			segment, err := meta.getSegmentInfoByID(segmentID)
+			assert.NoError(t, err)
+
+			remove[defaultCollectionID] = append(remove[defaultCollectionID],
+				segment)
+		}
+
+		meta.saveGlobalSealedSegInfos(save, remove)
+
+		sawOnlineSegment := false
+		sawOfflineSegment := false
+		for !sawOnlineSegment || !sawOfflineSegment {
+			watchResp, ok := <-eventChan
+			assert.True(t, ok)
+
+			for _, event := range watchResp.Events {
+				changeInfoBatch := &querypb.SealedSegmentsChangeInfo{}
+				err := proto.Unmarshal(event.Kv.Value, changeInfoBatch)
+				assert.NoError(t, err)
+
+				for _, changeInfo := range changeInfoBatch.GetInfos() {
+					if !sawOnlineSegment {
+						assert.Equal(t, 1, len(changeInfo.OnlineSegments))
+						assert.Equal(t, defaultSegmentID+int64(segmentNum), changeInfo.OnlineSegments[0].SegmentID)
+						assert.Equal(t, defaultQueryNodeID+1, changeInfo.OnlineSegments[0].NodeIds[0])
+
+						sawOnlineSegment = true
+					} else {
+						assert.Equal(t, len(spawnSegment.CompactionFrom), len(changeInfo.OfflineSegments))
+						sawOfflineSegment = true
+					}
+				}
+			}
+		}
+	})
+}
+
+func MockSaveSegments(segmentNum int) col2SegmentInfos {
+	saves := make(col2SegmentInfos)
+	segments := make([]*querypb.SegmentInfo, 0)
+	for i := 0; i < segmentNum; i++ {
+		segments = append(segments, &querypb.SegmentInfo{
+			CollectionID: defaultCollectionID,
+			PartitionID:  defaultPartitionID,
+			SegmentID:    defaultSegmentID + int64(i),
+			DmChannel:    "testDmChannel",
+			SegmentState: commonpb.SegmentState_Sealed,
+			NodeIds:      []UniqueID{defaultQueryNodeID},
 		})
 	}
+	saves[defaultCollectionID] = segments
+
+	return saves
 }

@@ -30,14 +30,14 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util"
 	"go.uber.org/zap"
 )
 
 const (
-	metaPrefix           = "datacoord-meta"
-	segmentPrefix        = metaPrefix + "/s"
-	channelRemovePrefix  = metaPrefix + "/channel-removal"
-	handoffSegmentPrefix = "querycoord-handoff"
+	metaPrefix          = "datacoord-meta"
+	segmentPrefix       = metaPrefix + "/s"
+	channelRemovePrefix = metaPrefix + "/channel-removal"
 
 	removeFlagTomestone = "removed"
 )
@@ -1054,7 +1054,7 @@ func buildSegmentPath(collectionID UniqueID, partitionID UniqueID, segmentID Uni
 
 // buildQuerySegmentPath common logic mapping segment info to corresponding key of queryCoord in kv store
 func buildQuerySegmentPath(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID) string {
-	return fmt.Sprintf("%s/%d/%d/%d", handoffSegmentPrefix, collectionID, partitionID, segmentID)
+	return fmt.Sprintf("%s/%d/%d/%d", util.HandoffSegmentPrefix, collectionID, partitionID, segmentID)
 }
 
 // buildChannelRemovePat builds vchannel remove flag path

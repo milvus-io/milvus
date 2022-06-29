@@ -85,6 +85,7 @@ func waitAllQueryNodeOffline(cluster Cluster, nodeIDs ...int64) bool {
 
 func waitQueryNodeOnline(cluster Cluster, nodeID int64) {
 	for {
+		log.Debug("waiting for query node online...")
 		online, err := cluster.IsOnline(nodeID)
 		if err != nil {
 			continue
@@ -92,6 +93,8 @@ func waitQueryNodeOnline(cluster Cluster, nodeID int64) {
 		if online {
 			return
 		}
+
+		time.Sleep(500 * time.Millisecond)
 	}
 }
 
