@@ -217,13 +217,13 @@ func (c *Client) ResendSegmentStats(ctx context.Context, req *datapb.ResendSegme
 	return ret.(*datapb.ResendSegmentStatsResponse), err
 }
 
-// AddSegment is the DataNode client side code for AddSegment call.
-func (c *Client) AddSegment(ctx context.Context, req *datapb.AddSegmentRequest) (*commonpb.Status, error) {
+// AddImportSegment is the DataNode client side code for AddImportSegment call.
+func (c *Client) AddImportSegment(ctx context.Context, req *datapb.AddImportSegmentRequest) (*commonpb.Status, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(datapb.DataNodeClient).AddSegment(ctx, req)
+		return client.(datapb.DataNodeClient).AddImportSegment(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err

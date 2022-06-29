@@ -65,6 +65,6 @@ func (m *GrpcDataNodeClient) ResendSegmentStats(ctx context.Context, req *datapb
 	return &datapb.ResendSegmentStatsResponse{}, m.Err
 }
 
-func (m *GrpcDataNodeClient) AddSegment(ctx context.Context, in *datapb.AddSegmentRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+func (m *GrpcDataNodeClient) AddImportSegment(ctx context.Context, in *datapb.AddImportSegmentRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }

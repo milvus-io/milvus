@@ -180,8 +180,16 @@ func TestSegmentReplica(t *testing.T) {
 	t.Run("Test coll mot match", func(t *testing.T) {
 		replica, err := newReplica(context.Background(), rc, cm, collID)
 		assert.Nil(t, err)
-
-		err = replica.addNewSegment(1, collID+1, 0, "", nil, nil)
+		err = replica.addSegment(
+			addSegmentReq{
+				segType:     datapb.SegmentType_New,
+				segID:       1,
+				collID:      collID + 1,
+				partitionID: 0,
+				channelName: "",
+				startPos:    nil,
+				endPos:      nil,
+			})
 		assert.NotNil(t, err)
 	})
 
@@ -317,8 +325,16 @@ func TestSegmentReplica_InterfaceMethod(t *testing.T) {
 				sr, err := newReplica(context.Background(), rc, cm, test.replicaCollID)
 				assert.Nil(t, err)
 				require.False(t, sr.hasSegment(test.inSegID, true))
-				err = sr.addNewSegment(test.inSegID,
-					test.inCollID, 1, "", test.instartPos, &internalpb.MsgPosition{})
+				err = sr.addSegment(
+					addSegmentReq{
+						segType:     datapb.SegmentType_New,
+						segID:       test.inSegID,
+						collID:      test.inCollID,
+						partitionID: 1,
+						channelName: "",
+						startPos:    test.instartPos,
+						endPos:      &internalpb.MsgPosition{},
+					})
 				if test.isValidCase {
 					assert.NoError(t, err)
 					assert.True(t, sr.hasSegment(test.inSegID, true))
@@ -353,7 +369,18 @@ func TestSegmentReplica_InterfaceMethod(t *testing.T) {
 				sr, err := newReplica(context.Background(), rc, &mockDataCM{}, test.replicaCollID)
 				assert.Nil(t, err)
 				require.False(t, sr.hasSegment(test.inSegID, true))
-				err = sr.addNormalSegment(test.inSegID, test.inCollID, 1, "", 0, []*datapb.FieldBinlog{getSimpleFieldBinlog()}, &segmentCheckPoint{}, 0)
+				err = sr.addSegment(
+					addSegmentReq{
+						segType:      datapb.SegmentType_Normal,
+						segID:        test.inSegID,
+						collID:       test.inCollID,
+						partitionID:  1,
+						channelName:  "",
+						numOfRows:    0,
+						statsBinLogs: []*datapb.FieldBinlog{getSimpleFieldBinlog()},
+						cp:           &segmentCheckPoint{},
+						recoverTs:    0,
+					})
 				if test.isValidCase {
 					assert.NoError(t, err)
 					assert.True(t, sr.hasSegment(test.inSegID, true))
@@ -373,7 +400,18 @@ func TestSegmentReplica_InterfaceMethod(t *testing.T) {
 		segID := int64(101)
 		require.False(t, sr.hasSegment(segID, true))
 		assert.NotPanics(t, func() {
-			err = sr.addNormalSegment(segID, 1, 10, "empty_dml_chan", 0, []*datapb.FieldBinlog{}, nil, 0)
+			err = sr.addSegment(
+				addSegmentReq{
+					segType:      datapb.SegmentType_Normal,
+					segID:        segID,
+					collID:       1,
+					partitionID:  10,
+					channelName:  "empty_dml_chan",
+					numOfRows:    0,
+					statsBinLogs: []*datapb.FieldBinlog{},
+					cp:           nil,
+					recoverTs:    0,
+				})
 			assert.NoError(t, err)
 		})
 	})
@@ -600,9 +638,30 @@ func TestSegmentReplica_InterfaceMethod(t *testing.T) {
 
 		cpPos := &internalpb.MsgPosition{ChannelName: "insert-01", Timestamp: Timestamp(10)}
 		cp := &segmentCheckPoint{int64(10), *cpPos}
-		err = sr.addNormalSegment(1, 1, 2, "insert-01", int64(10), []*datapb.FieldBinlog{getSimpleFieldBinlog()}, cp, 0)
+		err = sr.addSegment(
+			addSegmentReq{
+				segType:      datapb.SegmentType_Normal,
+				segID:        1,
+				collID:       1,
+				partitionID:  2,
+				channelName:  "insert-01",
+				numOfRows:    int64(10),
+				statsBinLogs: []*datapb.FieldBinlog{getSimpleFieldBinlog()},
+				cp:           cp,
+				recoverTs:    0,
+			})
 		assert.NotNil(t, err)
-		err = sr.addFlushedSegment(1, 1, 2, "insert-01", int64(0), []*datapb.FieldBinlog{getSimpleFieldBinlog()}, 0)
+		err = sr.addSegment(
+			addSegmentReq{
+				segType:      datapb.SegmentType_Flushed,
+				segID:        1,
+				collID:       1,
+				partitionID:  2,
+				channelName:  "insert-01",
+				numOfRows:    int64(0),
+				statsBinLogs: []*datapb.FieldBinlog{getSimpleFieldBinlog()},
+				recoverTs:    0,
+			})
 		assert.NotNil(t, err)
 	})
 
@@ -613,9 +672,30 @@ func TestSegmentReplica_InterfaceMethod(t *testing.T) {
 
 		cpPos := &internalpb.MsgPosition{ChannelName: "insert-01", Timestamp: Timestamp(10)}
 		cp := &segmentCheckPoint{int64(10), *cpPos}
-		err = sr.addNormalSegment(1, 1, 2, "insert-01", int64(10), []*datapb.FieldBinlog{getSimpleFieldBinlog()}, cp, 0)
+		err = sr.addSegment(
+			addSegmentReq{
+				segType:      datapb.SegmentType_Normal,
+				segID:        1,
+				collID:       1,
+				partitionID:  2,
+				channelName:  "insert-01",
+				numOfRows:    int64(10),
+				statsBinLogs: []*datapb.FieldBinlog{getSimpleFieldBinlog()},
+				cp:           cp,
+				recoverTs:    0,
+			})
 		assert.NotNil(t, err)
-		err = sr.addFlushedSegment(1, 1, 2, "insert-01", int64(0), []*datapb.FieldBinlog{getSimpleFieldBinlog()}, 0)
+		err = sr.addSegment(
+			addSegmentReq{
+				segType:      datapb.SegmentType_Flushed,
+				segID:        1,
+				collID:       1,
+				partitionID:  2,
+				channelName:  "insert-01",
+				numOfRows:    int64(0),
+				statsBinLogs: []*datapb.FieldBinlog{getSimpleFieldBinlog()},
+				recoverTs:    0,
+			})
 		assert.NotNil(t, err)
 	})
 
@@ -626,9 +706,30 @@ func TestSegmentReplica_InterfaceMethod(t *testing.T) {
 
 		cpPos := &internalpb.MsgPosition{ChannelName: "insert-01", Timestamp: Timestamp(10)}
 		cp := &segmentCheckPoint{int64(10), *cpPos}
-		err = sr.addNormalSegment(1, 1, 2, "insert-01", int64(10), []*datapb.FieldBinlog{getSimpleFieldBinlog()}, cp, 0)
+		err = sr.addSegment(
+			addSegmentReq{
+				segType:      datapb.SegmentType_Normal,
+				segID:        1,
+				collID:       1,
+				partitionID:  2,
+				channelName:  "insert-01",
+				numOfRows:    int64(10),
+				statsBinLogs: []*datapb.FieldBinlog{getSimpleFieldBinlog()},
+				cp:           cp,
+				recoverTs:    0,
+			})
 		assert.NotNil(t, err)
-		err = sr.addFlushedSegment(1, 1, 2, "insert-01", int64(0), []*datapb.FieldBinlog{getSimpleFieldBinlog()}, 0)
+		err = sr.addSegment(
+			addSegmentReq{
+				segType:      datapb.SegmentType_Flushed,
+				segID:        1,
+				collID:       1,
+				partitionID:  2,
+				channelName:  "insert-01",
+				numOfRows:    int64(0),
+				statsBinLogs: []*datapb.FieldBinlog{getSimpleFieldBinlog()},
+				recoverTs:    0,
+			})
 		assert.NotNil(t, err)
 	})
 
@@ -673,7 +774,16 @@ func TestInnerFunctionSegment(t *testing.T) {
 
 	startPos := &internalpb.MsgPosition{ChannelName: "insert-01", Timestamp: Timestamp(100)}
 	endPos := &internalpb.MsgPosition{ChannelName: "insert-01", Timestamp: Timestamp(200)}
-	err = replica.addNewSegment(0, 1, 2, "insert-01", startPos, endPos)
+	err = replica.addSegment(
+		addSegmentReq{
+			segType:     datapb.SegmentType_New,
+			segID:       0,
+			collID:      1,
+			partitionID: 2,
+			channelName: "insert-01",
+			startPos:    startPos,
+			endPos:      endPos,
+		})
 	assert.NoError(t, err)
 	assert.True(t, replica.hasSegment(0, true))
 	assert.Equal(t, 1, len(replica.newSegments))
@@ -698,7 +808,18 @@ func TestInnerFunctionSegment(t *testing.T) {
 
 	cpPos := &internalpb.MsgPosition{ChannelName: "insert-01", Timestamp: Timestamp(10)}
 	cp := &segmentCheckPoint{int64(10), *cpPos}
-	err = replica.addNormalSegment(1, 1, 2, "insert-01", int64(10), []*datapb.FieldBinlog{getSimpleFieldBinlog()}, cp, 0)
+	err = replica.addSegment(
+		addSegmentReq{
+			segType:      datapb.SegmentType_Normal,
+			segID:        1,
+			collID:       1,
+			partitionID:  2,
+			channelName:  "insert-01",
+			numOfRows:    int64(10),
+			statsBinLogs: []*datapb.FieldBinlog{getSimpleFieldBinlog()},
+			cp:           cp,
+			recoverTs:    0,
+		})
 	assert.NoError(t, err)
 	assert.True(t, replica.hasSegment(1, true))
 	assert.Equal(t, 1, len(replica.normalSegments))
@@ -715,7 +836,18 @@ func TestInnerFunctionSegment(t *testing.T) {
 	assert.False(t, seg.isNew.Load().(bool))
 	assert.False(t, seg.isFlushed.Load().(bool))
 
-	err = replica.addNormalSegment(1, 100000, 2, "invalid", int64(0), []*datapb.FieldBinlog{getSimpleFieldBinlog()}, &segmentCheckPoint{}, 0)
+	err = replica.addSegment(
+		addSegmentReq{
+			segType:      datapb.SegmentType_Normal,
+			segID:        1,
+			collID:       100000,
+			partitionID:  2,
+			channelName:  "invalid",
+			numOfRows:    int64(0),
+			statsBinLogs: []*datapb.FieldBinlog{getSimpleFieldBinlog()},
+			cp:           &segmentCheckPoint{},
+			recoverTs:    0,
+		})
 	assert.Error(t, err)
 
 	replica.updateStatistics(1, 10)
@@ -750,7 +882,17 @@ func TestInnerFunctionSegment(t *testing.T) {
 	replica.updateSegmentCheckPoint(1)
 	assert.Equal(t, int64(20), replica.normalSegments[UniqueID(1)].checkPoint.numRows)
 
-	err = replica.addFlushedSegment(1, 1, 2, "insert-01", int64(0), []*datapb.FieldBinlog{getSimpleFieldBinlog()}, 0)
+	err = replica.addSegment(
+		addSegmentReq{
+			segType:      datapb.SegmentType_Flushed,
+			segID:        1,
+			collID:       1,
+			partitionID:  2,
+			channelName:  "insert-01",
+			numOfRows:    int64(0),
+			statsBinLogs: []*datapb.FieldBinlog{getSimpleFieldBinlog()},
+			recoverTs:    0,
+		})
 	assert.Nil(t, err)
 
 	totalSegments := replica.filterSegments("insert-01", common.InvalidPartitionID)
@@ -800,9 +942,29 @@ func TestReplica_UpdatePKRange(t *testing.T) {
 	assert.Nil(t, err)
 	replica.chunkManager = &mockDataCM{}
 
-	err = replica.addNewSegment(1, collID, partID, chanName, startPos, endPos)
+	err = replica.addSegment(
+		addSegmentReq{
+			segType:     datapb.SegmentType_New,
+			segID:       1,
+			collID:      collID,
+			partitionID: partID,
+			channelName: chanName,
+			startPos:    startPos,
+			endPos:      endPos,
+		})
 	assert.Nil(t, err)
-	err = replica.addNormalSegment(2, collID, partID, chanName, 100, []*datapb.FieldBinlog{getSimpleFieldBinlog()}, cp, 0)
+	err = replica.addSegment(
+		addSegmentReq{
+			segType:      datapb.SegmentType_Normal,
+			segID:        2,
+			collID:       collID,
+			partitionID:  partID,
+			channelName:  chanName,
+			numOfRows:    100,
+			statsBinLogs: []*datapb.FieldBinlog{getSimpleFieldBinlog()},
+			cp:           cp,
+			recoverTs:    0,
+		})
 	assert.Nil(t, err)
 
 	segNew := replica.newSegments[1]

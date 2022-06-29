@@ -396,7 +396,8 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		s.segmentManager.DropSegment(ctx, req.SegmentID)
 		s.flushCh <- req.SegmentID
 
-		if Params.DataCoordCfg.EnableCompaction {
+		// Not triggering compaction immediately in import case.
+		if !req.GetImporting() && Params.DataCoordCfg.EnableCompaction {
 			cctx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
 			defer cancel()
 
@@ -1165,8 +1166,9 @@ func (s *Server) ReleaseSegmentLock(ctx context.Context, req *datapb.ReleaseSegm
 	return resp, nil
 }
 
-func (s *Server) AddSegment(ctx context.Context, req *datapb.AddSegmentRequest) (*commonpb.Status, error) {
-	log.Info("DataCoord putting segment to the right DataNode",
+// SaveImportSegment saves the segment binlog paths and puts this segment to its belonging DataNode as a flushed segment.
+func (s *Server) SaveImportSegment(ctx context.Context, req *datapb.SaveImportSegmentRequest) (*commonpb.Status, error) {
+	log.Info("DataCoord putting segment to the right DataNode and saving binlog path",
 		zap.Int64("segment ID", req.GetSegmentId()),
 		zap.Int64("collection ID", req.GetCollectionId()),
 		zap.Int64("partition ID", req.GetPartitionId()),
@@ -1178,16 +1180,54 @@ func (s *Server) AddSegment(ctx context.Context, req *datapb.AddSegmentRequest) 
 	}
 	if s.isClosed() {
 		log.Warn("failed to add segment for closed server")
+		errResp.ErrorCode = commonpb.ErrorCode_DataCoordNA
 		errResp.Reason = msgDataCoordIsUnhealthy(Params.DataCoordCfg.GetNodeID())
 		return errResp, nil
 	}
+	// Look for the DataNode that watches the channel.
 	ok, nodeID := s.channelManager.getNodeIDByChannelName(req.GetChannelName())
 	if !ok {
 		log.Error("no DataNode found for channel", zap.String("channel name", req.GetChannelName()))
 		errResp.Reason = fmt.Sprint("no DataNode found for channel ", req.GetChannelName())
 		return errResp, nil
 	}
-	s.cluster.AddSegment(s.ctx, nodeID, req)
+	// Start saving bin log paths.
+	rsp, err := s.SaveBinlogPaths(context.Background(), req.GetSaveBinlogPathReq())
+	if err := VerifyResponse(rsp, err); err != nil {
+		log.Error("failed to SaveBinlogPaths", zap.Error(err))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		}, nil
+	}
+	// Call DataNode to add the new segment to its own flow graph.
+	cli, err := s.sessionManager.getClient(ctx, nodeID)
+	if err != nil {
+		log.Error("failed to get DataNode client for SaveImportSegment",
+			zap.Int64("DataNode ID", nodeID),
+			zap.Error(err))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		}, nil
+	}
+	resp, err := cli.AddImportSegment(ctx,
+		&datapb.AddImportSegmentRequest{
+			Base: &commonpb.MsgBase{
+				SourceID: Params.DataNodeCfg.GetNodeID(),
+			},
+			SegmentId:    req.GetSegmentId(),
+			ChannelName:  req.GetChannelName(),
+			CollectionId: req.GetCollectionId(),
+			PartitionId:  req.GetPartitionId(),
+			RowNum:       req.GetRowNum(),
+			StatsLog:     req.GetSaveBinlogPathReq().GetField2StatslogPaths(),
+		})
+	if err := VerifyResponse(resp, err); err != nil {
+		log.Error("failed to add segment", zap.Int64("DataNode ID", nodeID), zap.Error(err))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		}, nil
+	}
+	log.Info("succeed to add segment", zap.Int64("DataNode ID", nodeID), zap.Any("add segment req", req))
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}, nil

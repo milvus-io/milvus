@@ -114,7 +114,7 @@ func (coord *DataCoordMock) Flush(ctx context.Context, req *datapb.FlushRequest)
 	panic("implement me")
 }
 
-func (coord *DataCoordMock) AddSegment(ctx context.Context, req *datapb.AddSegmentRequest) (*commonpb.Status, error) {
+func (coord *DataCoordMock) SaveImportSegment(ctx context.Context, req *datapb.SaveImportSegmentRequest) (*commonpb.Status, error) {
 	panic("implement me")
 }
 

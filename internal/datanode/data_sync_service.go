@@ -210,8 +210,16 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 		// avoid closure capture iteration variable
 		segment := us
 		future := dsService.ioPool.Submit(func() (interface{}, error) {
-			if err := dsService.replica.addNormalSegment(segment.GetID(), segment.GetCollectionID(), segment.GetPartitionID(), segment.GetInsertChannel(),
-				segment.GetNumOfRows(), segment.GetStatslogs(), cp, vchanInfo.GetSeekPosition().GetTimestamp()); err != nil {
+			if err := dsService.replica.addSegment(addSegmentReq{
+				segType:      datapb.SegmentType_Normal,
+				segID:        segment.GetID(),
+				collID:       segment.CollectionID,
+				partitionID:  segment.PartitionID,
+				channelName:  segment.GetInsertChannel(),
+				numOfRows:    segment.GetNumOfRows(),
+				statsBinLogs: segment.Statslogs,
+				cp:           cp,
+				recoverTs:    vchanInfo.GetSeekPosition().GetTimestamp()}); err != nil {
 				return nil, err
 			}
 			return nil, nil
@@ -238,8 +246,16 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 		// avoid closure capture iteration variable
 		segment := fs
 		future := dsService.ioPool.Submit(func() (interface{}, error) {
-			if err := dsService.replica.addFlushedSegment(segment.GetID(), segment.GetCollectionID(), segment.GetPartitionID(), segment.GetInsertChannel(),
-				segment.GetNumOfRows(), segment.GetStatslogs(), vchanInfo.GetSeekPosition().GetTimestamp()); err != nil {
+			if err := dsService.replica.addSegment(addSegmentReq{
+				segType:      datapb.SegmentType_Flushed,
+				segID:        segment.GetID(),
+				collID:       segment.CollectionID,
+				partitionID:  segment.PartitionID,
+				channelName:  segment.GetInsertChannel(),
+				numOfRows:    segment.GetNumOfRows(),
+				statsBinLogs: segment.Statslogs,
+				recoverTs:    vchanInfo.GetSeekPosition().GetTimestamp(),
+			}); err != nil {
 				return nil, err
 			}
 			return nil, nil

@@ -419,13 +419,42 @@ func TestClearGlobalFlushingCache(t *testing.T) {
 		flushingSegCache: cache,
 	}
 
-	err = replica.addNewSegment(1, 1, 1, "", &internalpb.MsgPosition{}, &internalpb.MsgPosition{})
+	err = replica.addSegment(
+		addSegmentReq{
+			segType:     datapb.SegmentType_New,
+			segID:       1,
+			collID:      1,
+			partitionID: 1,
+			channelName: "",
+			startPos:    &internalpb.MsgPosition{},
+			endPos:      &internalpb.MsgPosition{}})
 	assert.NoError(t, err)
 
-	err = replica.addFlushedSegment(2, 1, 1, "", 0, nil, 0)
+	err = replica.addSegment(
+		addSegmentReq{
+			segType:      datapb.SegmentType_Flushed,
+			segID:        2,
+			collID:       1,
+			partitionID:  1,
+			channelName:  "",
+			numOfRows:    0,
+			statsBinLogs: nil,
+			recoverTs:    0,
+		})
 	assert.NoError(t, err)
 
-	err = replica.addNormalSegment(3, 1, 1, "", 0, nil, nil, 0)
+	err = replica.addSegment(
+		addSegmentReq{
+			segType:      datapb.SegmentType_Normal,
+			segID:        3,
+			collID:       1,
+			partitionID:  1,
+			channelName:  "",
+			numOfRows:    0,
+			statsBinLogs: nil,
+			cp:           nil,
+			recoverTs:    0,
+		})
 	assert.NoError(t, err)
 
 	cache.checkOrCache(1)

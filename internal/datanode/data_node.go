@@ -79,6 +79,8 @@ const (
 	ConnectEtcdMaxRetryTime = 100
 )
 
+var addImportSegmentAttempts = uint(50)
+
 // makes sure DataNode implements types.DataNode
 var _ types.DataNode = (*DataNode)(nil)
 
@@ -918,8 +920,8 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 	return resp, nil
 }
 
-// AddSegment adds the segment to the current DataNode.
-func (node *DataNode) AddSegment(ctx context.Context, req *datapb.AddSegmentRequest) (*commonpb.Status, error) {
+// AddImportSegment adds the import segment to the current DataNode.
+func (node *DataNode) AddImportSegment(ctx context.Context, req *datapb.AddImportSegmentRequest) (*commonpb.Status, error) {
 	log.Info("adding segment to DataNode flow graph",
 		zap.Int64("segment ID", req.GetSegmentId()),
 		zap.Int64("collection ID", req.GetCollectionId()),
@@ -927,40 +929,62 @@ func (node *DataNode) AddSegment(ctx context.Context, req *datapb.AddSegmentRequ
 		zap.String("channel name", req.GetChannelName()),
 		zap.Int64("# of rows", req.GetRowNum()))
 	// Fetch the flow graph on the given v-channel.
-	ds, ok := node.flowgraphManager.getFlowgraphService(req.GetChannelName())
-	if !ok {
+	var ds *dataSyncService
+	// Retry in case the channel hasn't been watched yet.
+	err := retry.Do(ctx, func() error {
+		var ok bool
+		ds, ok = node.flowgraphManager.getFlowgraphService(req.GetChannelName())
+		if !ok {
+			return errors.New("channel not found")
+		}
+		return nil
+	}, retry.Attempts(addImportSegmentAttempts))
+	if err != nil {
 		log.Error("channel not found in current DataNode",
 			zap.String("channel name", req.GetChannelName()),
 			zap.Int64("node ID", Params.DataNodeCfg.GetNodeID()))
 		return &commonpb.Status{
 			// TODO: Add specific error code.
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "channel not found in current DataNode",
 		}, nil
 	}
 	// Add the new segment to the replica.
 	if !ds.replica.hasSegment(req.GetSegmentId(), true) {
-		log.Info("add a new segment to replica")
-		err := ds.replica.addNewSegment(req.GetSegmentId(),
-			req.GetCollectionId(),
-			req.GetPartitionId(),
-			req.GetChannelName(),
-			&internalpb.MsgPosition{
-				ChannelName: req.GetChannelName(),
-			},
-			&internalpb.MsgPosition{
-				ChannelName: req.GetChannelName(),
-			})
-		if err != nil {
+		log.Info("adding a new segment to replica",
+			zap.Int64("segment ID", req.GetSegmentId()))
+		// Add segment as a flushed segment, but set `importing` to true to add extra information of the segment.
+		// By 'extra information' we mean segment info while adding a `SegmentType_New` typed segment.
+		// TODO: Set proper startPos/endPos values for import segments.
+		// TODO: Set proper recoverTs value for import segments.
+		if err := ds.replica.addSegment(
+			addSegmentReq{
+				segType:      datapb.SegmentType_Flushed,
+				segID:        req.GetSegmentId(),
+				collID:       req.GetCollectionId(),
+				partitionID:  req.GetPartitionId(),
+				channelName:  req.GetChannelName(),
+				numOfRows:    req.GetRowNum(),
+				statsBinLogs: req.GetStatsLog(),
+				startPos: &internalpb.MsgPosition{
+					ChannelName: req.GetChannelName(),
+				},
+				endPos: &internalpb.MsgPosition{
+					ChannelName: req.GetChannelName(),
+				},
+				recoverTs: 0,
+				importing: true,
+			}); err != nil {
 			log.Error("failed to add segment to flow graph",
 				zap.Error(err))
 			return &commonpb.Status{
 				// TODO: Add specific error code.
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
 			}, nil
 		}
 	}
-	// Update # of rows of the given segment.
-	ds.replica.updateStatistics(req.GetSegmentId(), req.GetRowNum())
+	ds.flushingSegCache.Remove(req.GetSegmentId())
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}, nil
@@ -1038,6 +1062,7 @@ func importFlushReqFunc(node *DataNode, req *datapb.ImportTaskRequest, res *root
 		data := BufferData{buffer: &InsertData{
 			Data: fields,
 		}}
+		data.updateSize(int64(rowNum))
 		meta := &etcdpb.CollectionMeta{
 			ID:     req.GetImportTask().GetCollectionId(),
 			Schema: schema,
@@ -1074,8 +1099,8 @@ func importFlushReqFunc(node *DataNode, req *datapb.ImportTaskRequest, res *root
 			kvs[key] = blob.Value[:]
 			field2Insert[fieldID] = &datapb.Binlog{
 				EntriesNum:    data.size,
-				TimestampFrom: 0, //TODO
-				TimestampTo:   0, //TODO,
+				TimestampFrom: 0, //TODO: give proper value
+				TimestampTo:   0, //TODO: give proper value
 				LogPath:       key,
 				LogSize:       int64(len(blob.Value)),
 			}
@@ -1099,9 +1124,9 @@ func importFlushReqFunc(node *DataNode, req *datapb.ImportTaskRequest, res *root
 			key := path.Join(Params.DataNodeCfg.StatsBinlogRootPath, k)
 			kvs[key] = blob.Value
 			field2Stats[fieldID] = &datapb.Binlog{
-				EntriesNum:    0,
-				TimestampFrom: 0, //TODO
-				TimestampTo:   0, //TODO,
+				EntriesNum:    data.size,
+				TimestampFrom: 0, //TODO: give proper value
+				TimestampTo:   0, //TODO: give proper value
 				LogPath:       key,
 				LogSize:       int64(len(blob.Value)),
 			}
@@ -1123,51 +1148,67 @@ func importFlushReqFunc(node *DataNode, req *datapb.ImportTaskRequest, res *root
 			fieldStats = append(fieldStats, &datapb.FieldBinlog{FieldID: k, Binlogs: []*datapb.Binlog{v}})
 		}
 
-		log.Info("now adding segment to the correct DataNode flow graph")
-		// Ask DataCoord to add segment to the corresponding DataNode flow graph.
-		node.dataCoord.AddSegment(context.Background(), &datapb.AddSegmentRequest{
-			Base: &commonpb.MsgBase{
-				SourceID: Params.DataNodeCfg.GetNodeID(),
+		// ReportImport with the new segment so RootCoord can add segment ref lock onto it.
+		// Fail-open.
+		status, err := node.rootCoord.ReportImport(context.Background(), &rootcoordpb.ImportResult{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
 			},
-			SegmentId:    segmentID,
-			ChannelName:  segReqs[0].GetChannelName(),
-			CollectionId: req.GetImportTask().GetCollectionId(),
-			PartitionId:  req.GetImportTask().GetPartitionId(),
-			RowNum:       int64(rowNum),
+			TaskId:     req.GetImportTask().TaskId,
+			DatanodeId: Params.DataNodeCfg.GetNodeID(),
+			State:      commonpb.ImportState_ImportAllocSegment,
+			Segments:   []int64{segmentID},
 		})
-
-		binlogReq := &datapb.SaveBinlogPathsRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   0, //TODO msg type
-				MsgID:     0, //TODO msg id
-				Timestamp: 0, //TODO time stamp
-				SourceID:  Params.DataNodeCfg.GetNodeID(),
-			},
-			SegmentID:           segmentID,
-			CollectionID:        req.GetImportTask().GetCollectionId(),
-			Field2BinlogPaths:   fieldInsert,
-			Field2StatslogPaths: fieldStats,
-			Importing:           true,
+		if err != nil {
+			log.Error("failed to report import on new segment", zap.Error(err))
+			return err
+		}
+		if status.GetErrorCode() != commonpb.ErrorCode_Success {
+			log.Error("failed to report import on new segment", zap.String("reason", status.GetReason()))
+			return fmt.Errorf("failed to report import on new segment: %s", status.GetReason())
 		}
 
+		log.Info("adding segment to the correct DataNode flow graph and saving binlog paths")
 		err = retry.Do(context.Background(), func() error {
-			rsp, err := node.dataCoord.SaveBinlogPaths(context.Background(), binlogReq)
-			// should be network issue, return error and retry
+			// Ask DataCoord to save binlog path and add segment to the corresponding DataNode flow graph.
+			resp, err := node.dataCoord.SaveImportSegment(context.Background(), &datapb.SaveImportSegmentRequest{
+				Base: &commonpb.MsgBase{
+					SourceID: Params.DataNodeCfg.GetNodeID(),
+				},
+				SegmentId:    segmentID,
+				ChannelName:  segReqs[0].GetChannelName(),
+				CollectionId: req.GetImportTask().GetCollectionId(),
+				PartitionId:  req.GetImportTask().GetPartitionId(),
+				RowNum:       int64(rowNum),
+				SaveBinlogPathReq: &datapb.SaveBinlogPathsRequest{
+					Base: &commonpb.MsgBase{
+						MsgType:   0,
+						MsgID:     0,
+						Timestamp: 0,
+						SourceID:  Params.DataNodeCfg.GetNodeID(),
+					},
+					SegmentID:           segmentID,
+					CollectionID:        req.GetImportTask().GetCollectionId(),
+					Field2BinlogPaths:   fieldInsert,
+					Field2StatslogPaths: fieldStats,
+					Importing:           true,
+				},
+			})
+			// Only retrying when DataCoord is unhealthy or err != nil, otherwise return immediately.
 			if err != nil {
 				return fmt.Errorf(err.Error())
 			}
-
-			// TODO should retry only when datacoord status is unhealthy
-			if rsp.ErrorCode != commonpb.ErrorCode_Success {
-				return fmt.Errorf("data service save bin log path failed, reason = %s", rsp.Reason)
+			if resp.ErrorCode != commonpb.ErrorCode_Success && resp.ErrorCode != commonpb.ErrorCode_DataCoordNA {
+				return retry.Unrecoverable(fmt.Errorf("failed to save import segment, reason = %s", resp.Reason))
+			} else if resp.ErrorCode == commonpb.ErrorCode_DataCoordNA {
+				return fmt.Errorf("failed to save import segment: %s", resp.GetReason())
 			}
 			return nil
 		})
 		if err != nil {
-			log.Warn("failed to SaveBinlogPaths", zap.Error(err))
+			log.Warn("failed to save import segment", zap.Error(err))
 			return err
 		}
-
 		log.Info("segment imported and persisted", zap.Int64("segmentID", segmentID))
 		res.Segments = append(res.Segments, segmentID)
 		res.RowCount += int64(rowNum)

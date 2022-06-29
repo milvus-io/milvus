@@ -23,25 +23,21 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/util/retry"
-
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-
-	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/dependency"
-
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
-	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/flowgraph"
-
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/flowgraph"
+	"github.com/milvus-io/milvus/internal/util/retry"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 var insertNodeTestDir = "/tmp/milvus_test/insert_node"
@@ -81,8 +77,16 @@ func TestFlowGraphInsertBufferNodeCreate(t *testing.T) {
 
 	replica, err := newReplica(ctx, mockRootCoord, cm, collMeta.ID)
 	assert.Nil(t, err)
-
-	err = replica.addNewSegment(1, collMeta.ID, 0, insertChannelName, &internalpb.MsgPosition{}, &internalpb.MsgPosition{})
+	err = replica.addSegment(
+		addSegmentReq{
+			segType:     datapb.SegmentType_New,
+			segID:       1,
+			collID:      collMeta.ID,
+			partitionID: 0,
+			channelName: insertChannelName,
+			startPos:    &internalpb.MsgPosition{},
+			endPos:      &internalpb.MsgPosition{},
+		})
 	require.NoError(t, err)
 
 	factory := dependency.NewDefaultFactory(true)
@@ -169,7 +173,16 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	replica, err := newReplica(ctx, mockRootCoord, cm, collMeta.ID)
 	assert.Nil(t, err)
 
-	err = replica.addNewSegment(1, collMeta.ID, 0, insertChannelName, &internalpb.MsgPosition{}, &internalpb.MsgPosition{})
+	err = replica.addSegment(
+		addSegmentReq{
+			segType:     datapb.SegmentType_New,
+			segID:       1,
+			collID:      collMeta.ID,
+			partitionID: 0,
+			channelName: insertChannelName,
+			startPos:    &internalpb.MsgPosition{},
+			endPos:      &internalpb.MsgPosition{},
+		})
 	require.NoError(t, err)
 
 	factory := dependency.NewDefaultFactory(true)
@@ -689,8 +702,16 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 
 		replica, err := newReplica(ctx, mockRootCoord, cm, collMeta.ID)
 		assert.Nil(t, err)
-
-		err = replica.addNewSegment(1, collMeta.ID, 0, insertChannelName, &internalpb.MsgPosition{}, &internalpb.MsgPosition{Timestamp: 101})
+		err = replica.addSegment(
+			addSegmentReq{
+				segType:     datapb.SegmentType_New,
+				segID:       1,
+				collID:      collMeta.ID,
+				partitionID: 0,
+				channelName: insertChannelName,
+				startPos:    &internalpb.MsgPosition{},
+				endPos:      &internalpb.MsgPosition{Timestamp: 101},
+			})
 		require.NoError(t, err)
 
 		factory := dependency.NewDefaultFactory(true)

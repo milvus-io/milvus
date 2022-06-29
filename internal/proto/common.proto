@@ -58,6 +58,10 @@ enum ErrorCode {
     NotShardLeader = 45;
     NoReplicaAvailable = 46;
 
+    // Service availability.
+    // NA: Not Available.
+    DataCoordNA = 100;
+
     // internal error code.
     DDRequestRace = 1000;
 }

@@ -136,7 +136,7 @@ func Test_NewClient(t *testing.T) {
 		r26, err := client.ReleaseSegmentLock(ctx, nil)
 		retCheck(retNotNil, r26, err)
 
-		r27, err := client.AddSegment(ctx, nil)
+		r27, err := client.SaveImportSegment(ctx, nil)
 		retCheck(retNotNil, r27, err)
 	}
 

@@ -2780,18 +2780,31 @@ func TestDataCoord_AddSegment(t *testing.T) {
 	t.Run("test add segment", func(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
-
+		seg := buildSegment(100, 100, 100, "ch1")
+		svr.meta.AddSegment(seg)
+		svr.sessionManager.AddSession(&NodeInfo{
+			NodeID:  110,
+			Address: "localhost:8080",
+		})
 		err := svr.channelManager.AddNode(110)
 		assert.Nil(t, err)
 		err = svr.channelManager.Watch(&channel{"ch1", 100})
 		assert.Nil(t, err)
 
-		status, err := svr.AddSegment(context.TODO(), &datapb.AddSegmentRequest{
+		status, err := svr.SaveImportSegment(context.TODO(), &datapb.SaveImportSegmentRequest{
 			SegmentId:    100,
 			ChannelName:  "ch1",
 			CollectionId: 100,
 			PartitionId:  100,
 			RowNum:       int64(1),
+			SaveBinlogPathReq: &datapb.SaveBinlogPathsRequest{
+				Base: &commonpb.MsgBase{
+					SourceID: Params.DataNodeCfg.GetNodeID(),
+				},
+				SegmentID:    100,
+				CollectionID: 100,
+				Importing:    true,
+			},
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
@@ -2806,7 +2819,7 @@ func TestDataCoord_AddSegment(t *testing.T) {
 		err = svr.channelManager.Watch(&channel{"ch1", 100})
 		assert.Nil(t, err)
 
-		status, err := svr.AddSegment(context.TODO(), &datapb.AddSegmentRequest{
+		status, err := svr.SaveImportSegment(context.TODO(), &datapb.SaveImportSegmentRequest{
 			SegmentId:    100,
 			ChannelName:  "non-channel",
 			CollectionId: 100,
@@ -2821,9 +2834,9 @@ func TestDataCoord_AddSegment(t *testing.T) {
 		svr := newTestServer(t, nil)
 		closeTestServer(t, svr)
 
-		status, err := svr.AddSegment(context.TODO(), &datapb.AddSegmentRequest{})
+		status, err := svr.SaveImportSegment(context.TODO(), &datapb.SaveImportSegmentRequest{})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+		assert.Equal(t, commonpb.ErrorCode_DataCoordNA, status.GetErrorCode())
 	})
 }
 
