@@ -824,6 +824,31 @@ class TestConnect(TestcaseBase):
          # disconnect alias is not exist
         self.connection_wrap.disconnect(alias=connect_name)
 
+    @pytest.mark.tags(ct.CaseLabel.L2)
+    @pytest.mark.parametrize("protocol", ["http", "https", "ftp", "tcp"])
+    @pytest.mark.parametrize("connect_name", [DefaultConfig.DEFAULT_USING])
+    def test_parameters_with_uri_connection(self, host, port, connect_name, protocol):
+        """
+        target: test the uri parameter to get a normal connection
+        method: get a connection with the uri parameter
+        expected: connected is True
+        """
+
+        uri = "{}://{}:{}".format(protocol, host, port)
+        self.connection_wrap.connect(alias=connect_name, uri=uri, check_task=ct.CheckTasks.ccr)
+
+    @pytest.mark.tags(ct.CaseLabel.L2)
+    @pytest.mark.parametrize("connect_name", [DefaultConfig.DEFAULT_USING])
+    def test_parameters_with_address_connection(self, host, port, connect_name):
+        """
+        target: test the uri parameter to get a normal connection
+        method: get a connection with the address parameter
+        expected: connected is True
+        """
+        address = "{}:{}".format(host, port)
+        self.connection_wrap.connect(alias=connect_name, address=address, check_task=ct.CheckTasks.ccr)
+
+
 class TestConnectIPInvalid(TestcaseBase):
     """
     Test connect server with invalid ip
@@ -839,6 +864,7 @@ class TestConnectIPInvalid(TestcaseBase):
         err_msg = cem.FailConnect % (host, port)
         self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, host=host, port=port, check_task=ct.CheckTasks.ccr,
                                      check_items={ct.err_code: -1, ct.err_msg: err_msg})
+
 
 class TestConnectPortInvalid(TestcaseBase):
     """
@@ -858,4 +884,103 @@ class TestConnectPortInvalid(TestcaseBase):
                                      check_items={ct.err_code: -1, ct.err_msg: err_msg})
 
 
+class TestConnectUriInvalid(TestcaseBase):
+    """
+    Test connect server with invalid uri , the result should be failed
+    """
+    @pytest.mark.tags(ct.CaseLabel.L2)
+    @pytest.mark.parametrize("protocol", ["quic,xxx"])
+    @pytest.mark.parametrize("connect_name", [DefaultConfig.DEFAULT_USING])
+    def test_parameters_with_invalid_protocol(self, host, port, connect_name, protocol):
+        """
+        target: test the protocol part of the uri parameter
+        method: with non-existent protocols and unsupported protocols
+        expected: the connection is false
+        """
 
+        uri = "{}://{}:{}".format(protocol, host, port)
+        self.connection_wrap.connect(alias=connect_name, uri=uri, check_task=ct.CheckTasks.err_res,
+                                     # return code -1
+                                     check_items={ct.err_code: 0})
+
+    @pytest.mark.tags(ct.CaseLabel.L2)
+    @pytest.mark.parametrize("host", ["256.256.256.256", "10.1.0"])
+    @pytest.mark.parametrize("connect_name", [DefaultConfig.DEFAULT_USING])
+    @pytest.mark.parametrize("protocol", ["http", "https"])
+    def test_parameters_with_invalid_host(self, host, port, connect_name, protocol):
+        """
+        target: test the host part of the uri parameter
+        method: use a non-existent or wrong host
+        expected: connection is False
+        """
+
+        uri = "{}://{}:{}".format(protocol, host, port)
+        self.connection_wrap.connect(alias=connect_name, uri=uri, check_task=ct.CheckTasks.err_res,
+                                     # return code 2
+                                     check_items={ct.err_code: 0})
+
+    @pytest.mark.tags(ct.CaseLabel.L2)
+    @pytest.mark.parametrize("port", ["8080", "443", "0", "65536"])
+    @pytest.mark.parametrize("connect_name", [DefaultConfig.DEFAULT_USING])
+    @pytest.mark.parametrize("protocol", ["http", "https"])
+    def test_parameters_with_invalid_port(self, host, port, connect_name, protocol):
+        """
+        target: test the port part of the uri parameter
+        method: use a non-existent or wrong port
+        expected: connection is False
+        """
+
+        uri = "{}://{}:{}".format(protocol, host, port)
+        self.connection_wrap.connect(alias=connect_name, uri=uri, check_task=ct.CheckTasks.err_res,
+                                     # return code 2
+                                     check_items={ct.err_code: 0})
+
+    @pytest.mark.tags(ct.CaseLabel.L2)
+    @pytest.mark.parametrize("host", ["www.google.com"])
+    @pytest.mark.parametrize("port", ["65535", "19530"])
+    @pytest.mark.parametrize("connect_name", [DefaultConfig.DEFAULT_USING])
+    @pytest.mark.parametrize("protocol", ["http", "https"])
+    def test_parameters_with_invalid_url(self, host, port, connect_name, protocol):
+        """
+        target: test the host part of the uri parameter
+        method: use a domain name that does not exist in error
+        expected: connection is False
+        """
+
+        uri = "{}://{}:{}".format(protocol, host, port)
+        self.connection_wrap.connect(alias=connect_name, uri=uri, check_task=ct.CheckTasks.err_res,
+                                     # return code 2
+                                     check_items={ct.err_code: 0})
+
+
+class TestConnectAddressInvalid(TestcaseBase):
+    """
+    Test connect server with invalid address
+    """
+    @pytest.mark.tags(ct.CaseLabel.L2)
+    @pytest.mark.parametrize("host", ["192.168.1.256", "10.10.10.10"])
+    @pytest.mark.parametrize("connect_name", [DefaultConfig.DEFAULT_USING])
+    def test_parameters_with_invalid_address(self, host, port, connect_name):
+        """
+        target: create collection with invalid connection
+        method: get a connection with the address parameter
+        expected: connected is False
+        """
+        address = "{}:{}".format(host, port)
+        self.connection_wrap.connect(alias=connect_name, address=address, check_task=ct.CheckTasks.err_res,
+                                     # return code 2
+                                     check_items={ct.err_code: 0})
+
+    @pytest.mark.tags(ct.CaseLabel.L2)
+    @pytest.mark.parametrize("port", ["100", "65536"])
+    @pytest.mark.parametrize("connect_name", [DefaultConfig.DEFAULT_USING])
+    def test_parameters_with_invalid_address_port(self, host, port, connect_name):
+        """
+        target: create collection with invalid connection
+        method: get a connection with the address parameter
+        expected: connected is False
+        """
+        address = "{}:{}".format(host, port)
+        self.connection_wrap.connect(alias=connect_name, address=address, check_task=ct.CheckTasks.err_res,
+                                     # return code 2
+                                     check_items={ct.err_code: 0})
