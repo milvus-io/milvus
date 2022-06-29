@@ -518,11 +518,12 @@ func (m *MetaCache) GetCredentialInfo(ctx context.Context, username string) (*in
 			EncryptedPassword: resp.Password,
 		}
 		m.UpdateCredential(credInfo)
+		return credInfo, nil
 	}
 
 	return &internalpb.CredentialInfo{
-		Username:          credInfo.Username,
-		EncryptedPassword: credInfo.EncryptedPassword,
+		Username:       credInfo.Username,
+		Sha256Password: credInfo.Sha256Password,
 	}, nil
 }
 
@@ -547,13 +548,13 @@ func (m *MetaCache) UpdateCredential(credInfo *internalpb.CredentialInfo) {
 	defer m.credMut.Unlock()
 	// update credMap
 	username := credInfo.Username
-	password := credInfo.EncryptedPassword
 	_, ok := m.credMap[username]
 	if !ok {
 		m.credMap[username] = &internalpb.CredentialInfo{}
 	}
 	m.credMap[username].Username = username
-	m.credMap[username].EncryptedPassword = password
+	m.credMap[username].Sha256Password = credInfo.Sha256Password
+	m.credMap[username].EncryptedPassword = credInfo.EncryptedPassword
 }
 
 func (m *MetaCache) UpdateCredUsersListCache(usernames []string) {
