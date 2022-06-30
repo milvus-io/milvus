@@ -269,7 +269,8 @@ class TestQueryParams(TestcaseBase):
                                        check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="issue #12210 #7522")
+    # @pytest.mark.xfail(reason="issue #12210 #7522")
+    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/7522")
     def test_query_expr_by_bool_field(self):
         """
         target: test query by bool field and output bool field
@@ -287,7 +288,7 @@ class TestQueryParams(TestcaseBase):
         self.collection_wrap.load()
 
         # Now don't support output bool field
-        # res, _ = self.collection_wrap.query(term_expr, output_fields=[ct.default_bool_field_name])
+        # res, _ = self.collection_wrap.query(default_term_expr, output_fields=[ct.default_bool_field_name])
         # assert set(res[0].keys()) == {ct.default_int64_field_name, ct.default_bool_field_name}
 
         exprs = [f'{ct.default_bool_field_name} in [false]',
@@ -576,7 +577,7 @@ class TestQueryParams(TestcaseBase):
                                check_items={exp_res: res, "with_vec": True})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/12680")
+    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/12680")
     @pytest.mark.parametrize("vec_fields", [[cf.gen_float_vec_field(name="float_vector1")]])
     def test_query_output_multi_float_vec_field(self, vec_fields):
         """
@@ -603,7 +604,7 @@ class TestQueryParams(TestcaseBase):
                            check_items={exp_res: res, "with_vec": True})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/12680")
+    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/12680")
     @pytest.mark.parametrize("vec_fields", [[cf.gen_binary_vec_field()],
                                             [cf.gen_binary_vec_field(), cf.gen_binary_vec_field("binary_vec1")]])
     def test_query_output_mix_float_binary_field(self, vec_fields):

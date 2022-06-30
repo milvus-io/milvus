@@ -17,7 +17,7 @@ from utils.util_k8s import wait_pods_ready, read_pod_log
 from utils.util_pymilvus import get_latest_tag
 from utils.wrapper import counter
 
-nb = 5000
+nb = 10000
 default_index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
 
 
@@ -45,8 +45,8 @@ class TestQueryNodeScale:
             'spec.components.image': image,
             'spec.components.proxy.serviceType': 'LoadBalancer',
             'spec.components.queryNode.replicas': 1,
-            'spec.config.dataCoord.enableCompaction': True,
-            'spec.config.dataCoord.enableGarbageCollection': True
+            'spec.config.common.retentionDuration': 60
+
         }
         mic = MilvusOperator()
         mic.install(query_config)
@@ -158,8 +158,7 @@ class TestQueryNodeScale:
             'spec.components.image': image,
             'spec.components.proxy.serviceType': 'LoadBalancer',
             'spec.components.queryNode.replicas': 5,
-            'spec.config.dataCoord.enableCompaction': True,
-            'spec.config.dataCoord.enableGarbageCollection': True
+            'spec.config.common.retentionDuration': 60
         }
         mic = MilvusOperator()
         mic.install(query_config)
@@ -173,13 +172,14 @@ class TestQueryNodeScale:
             connections.connect("scale-replica", host=host, port=19530)
 
             collection_w = ApiCollectionWrapper()
-            collection_w.init_collection(name=cf.gen_unique_str("scale_out"), schema=cf.gen_default_collection_schema(), using='scale-replica')
+            collection_w.init_collection(name=cf.gen_unique_str("scale_out"), schema=cf.gen_default_collection_schema(),
+                                         using='scale-replica', shards_num=3)
 
             # insert 10 sealed segments
             for i in range(5):
-                df = cf.gen_default_dataframe_data(start=i * ct.default_nb)
+                df = cf.gen_default_dataframe_data(start=i * nb)
                 collection_w.insert(df)
-                assert collection_w.num_entities == (i + 1) * ct.default_nb
+                assert collection_w.num_entities == (i + 1) * nb
 
             collection_w.load(replica_number=2)
 
@@ -237,8 +237,7 @@ class TestQueryNodeScale:
             'spec.components.image': image,
             'spec.components.proxy.serviceType': 'LoadBalancer',
             'spec.components.queryNode.replicas': 2,
-            'spec.config.dataCoord.enableCompaction': True,
-            'spec.config.dataCoord.enableGarbageCollection': True
+            'spec.config.common.retentionDuration': 60
         }
         mic = MilvusOperator()
         mic.install(query_config)
@@ -251,7 +250,8 @@ class TestQueryNodeScale:
             connections.connect("scale-in", host=host, port=19530)
             utility_w = ApiUtilityWrapper()
             collection_w = ApiCollectionWrapper()
-            collection_w.init_collection(name=cf.gen_unique_str("scale_in"), schema=cf.gen_default_collection_schema(), using="scale-in")
+            collection_w.init_collection(name=cf.gen_unique_str("scale_in"), schema=cf.gen_default_collection_schema(),
+                                         using="scale-in")
             collection_w.insert(cf.gen_default_dataframe_data())
             assert collection_w.num_entities == ct.default_nb
 

@@ -13,7 +13,7 @@ from utils.util_k8s import read_pod_log, wait_pods_ready
 from utils.util_log import test_log as log
 from utils.util_pymilvus import get_latest_tag
 
-nb = 5000
+nb = 10000
 default_index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 128}}
 
 
@@ -41,8 +41,7 @@ class TestIndexNodeScale:
             'spec.components.proxy.serviceType': 'LoadBalancer',
             'spec.components.indexNode.replicas': init_replicas,
             'spec.components.dataNode.replicas': 2,
-            'spec.config.dataCoord.enableCompaction': True,
-            'spec.config.dataCoord.enableGarbageCollection': True
+            'spec.config.common.retentionDuration': 60
         }
         mic = MilvusOperator()
         mic.install(data_config)
@@ -134,8 +133,7 @@ class TestIndexNodeScale:
             'spec.components.proxy.serviceType': 'LoadBalancer',
             'spec.components.indexNode.replicas': 2,
             'spec.components.dataNode.replicas': 2,
-            'spec.config.dataCoord.enableCompaction': True,
-            'spec.config.dataCoord.enableGarbageCollection': True
+            'spec.config.common.retentionDuration': 60
         }
         mic = MilvusOperator()
         mic.install(data_config)
@@ -184,6 +182,7 @@ class TestIndexNodeScale:
             t1 = datetime.datetime.now() - start
             log.info(f'Create index on 1 indexNode cost t1: {t1}')
             collection_w.drop_index()
+            assert not collection_w.has_index()[0]
 
             start = datetime.datetime.now()
             collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
