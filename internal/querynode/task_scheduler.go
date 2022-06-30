@@ -63,6 +63,14 @@ type taskScheduler struct {
 	wg sync.WaitGroup
 }
 
+func getNumCPU() int {
+	cur := runtime.GOMAXPROCS(0)
+	if cur <= 0 {
+		cur = runtime.NumCPU()
+	}
+	return cur
+}
+
 func newTaskScheduler(ctx context.Context, tSafeReplica TSafeReplicaInterface) *taskScheduler {
 	ctx1, cancel := context.WithCancel(ctx)
 	s := &taskScheduler{
@@ -74,7 +82,7 @@ func newTaskScheduler(ctx context.Context, tSafeReplica TSafeReplicaInterface) *
 		executeReadTaskChan: make(chan readTask, maxExecuteReadChanLen),
 		notifyChan:          make(chan struct{}, 1),
 		tSafeReplica:        tSafeReplica,
-		maxCPUUsage:         int32(runtime.NumCPU() * 100),
+		maxCPUUsage:         int32(getNumCPU() * 100),
 		schedule:            defaultScheduleReadPolicy,
 	}
 	s.queue = newQueryNodeTaskQueue(s)
