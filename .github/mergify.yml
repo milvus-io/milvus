@@ -186,6 +186,7 @@ pull_request_rules:
 
   - name: Remove ci-passed label when status for code checker or ut  is not success
     conditions:
+      - label!=manual-pass
       - or:
         - base=master
         - base~=^2(\.\d+){2}$
@@ -202,6 +203,7 @@ pull_request_rules:
 
   - name: Remove ci-passed label when  status for jenkins job is not success
     conditions:
+      - label!=manual-pass
       - or:
         - base=master
         - base~=^2(\.\d+){2}$
