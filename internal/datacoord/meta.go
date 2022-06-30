@@ -85,7 +85,7 @@ func (m *meta) reloadFromKV() error {
 		}
 		state := segmentInfo.GetState()
 		m.segments.SetSegment(segmentInfo.GetID(), NewSegmentInfo(segmentInfo))
-		metrics.DataCoordNumSegments.WithLabelValues(string(state)).Inc()
+		metrics.DataCoordNumSegments.WithLabelValues(state.String()).Inc()
 		if state == commonpb.SegmentState_Flushed {
 			numStoredRows += segmentInfo.GetNumOfRows()
 		}
@@ -175,7 +175,7 @@ func (m *meta) AddSegment(segment *SegmentInfo) error {
 	if err := m.saveSegmentInfo(segment); err != nil {
 		return err
 	}
-	metrics.DataCoordNumSegments.WithLabelValues(string(segment.GetState())).Inc()
+	metrics.DataCoordNumSegments.WithLabelValues(segment.GetState().String()).Inc()
 	return nil
 }
 
@@ -233,8 +233,8 @@ func (m *meta) SetState(segmentID UniqueID, state commonpb.SegmentState) error {
 	if curSegInfo != nil && isSegmentHealthy(curSegInfo) {
 		err := m.saveSegmentInfo(curSegInfo)
 		if err == nil {
-			metrics.DataCoordNumSegments.WithLabelValues(string(oldState)).Dec()
-			metrics.DataCoordNumSegments.WithLabelValues(string(state)).Inc()
+			metrics.DataCoordNumSegments.WithLabelValues(oldState.String()).Dec()
+			metrics.DataCoordNumSegments.WithLabelValues(state.String()).Inc()
 			if state == commonpb.SegmentState_Flushed {
 				metrics.DataCoordNumStoredRows.WithLabelValues().Add(float64(curSegInfo.GetNumOfRows()))
 				metrics.DataCoordNumStoredRowsCounter.WithLabelValues().Add(float64(curSegInfo.GetNumOfRows()))
@@ -397,8 +397,8 @@ func (m *meta) UpdateFlushSegmentsInfo(
 	}
 	oldSegmentState := segment.GetState()
 	newSegmentState := clonedSegment.GetState()
-	metrics.DataCoordNumSegments.WithLabelValues(string(oldSegmentState)).Dec()
-	metrics.DataCoordNumSegments.WithLabelValues(string(newSegmentState)).Inc()
+	metrics.DataCoordNumSegments.WithLabelValues(oldSegmentState.String()).Dec()
+	metrics.DataCoordNumSegments.WithLabelValues(newSegmentState.String()).Inc()
 	if newSegmentState == commonpb.SegmentState_Flushed {
 		metrics.DataCoordNumStoredRows.WithLabelValues().Add(float64(clonedSegment.GetNumOfRows()))
 		metrics.DataCoordNumStoredRowsCounter.WithLabelValues().Add(float64(clonedSegment.GetNumOfRows()))
@@ -448,7 +448,7 @@ func (m *meta) UpdateDropChannelSegmentInfo(channel string, segments []*SegmentI
 		for _, seg := range originSegments {
 			state := seg.GetState()
 			metrics.DataCoordNumSegments.WithLabelValues(
-				string(state)).Dec()
+				state.String()).Dec()
 			if state == commonpb.SegmentState_Flushed {
 				metrics.DataCoordNumStoredRows.WithLabelValues().Sub(float64(seg.GetNumOfRows()))
 			}

@@ -27,7 +27,7 @@ var (
 			Subsystem: typeutil.RootCoordRole,
 			Name:      "sync_epoch_time",
 			Help:      "synchronized unix epoch per physical channel",
-		}, []string{"PChannel"})
+		}, []string{channelNameLabelName})
 
 	RootCoordDDLReqCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
