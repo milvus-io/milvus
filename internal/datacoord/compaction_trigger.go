@@ -455,7 +455,7 @@ func (t *compactionTrigger) getCandidateSegments(channel string, partitionID Uni
 	segments := t.meta.GetSegmentsByChannel(channel)
 	var res []*SegmentInfo
 	for _, s := range segments {
-		if !isFlush(s) || s.GetInsertChannel() != channel ||
+		if !isSegmentHealthy(s) || !isFlush(s) || s.GetInsertChannel() != channel ||
 			s.GetPartitionID() != partitionID || s.isCompacting || t.segRefer.HasSegmentLock(s.ID) {
 			continue
 		}

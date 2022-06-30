@@ -20,6 +20,7 @@ package util
 const (
 	SegmentMetaPrefix    = "queryCoord-segmentMeta"
 	ChangeInfoMetaPrefix = "queryCoord-sealedSegmentChangeInfo"
+	HandoffSegmentPrefix = "querycoord-handoff"
 	HeaderAuthorize      = "authorization"
 	// HeaderSourceID identify requests from Milvus members and client requests
 	HeaderSourceID = "sourceId"
