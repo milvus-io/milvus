@@ -24,11 +24,16 @@
 #include "exceptions/EasyAssert.h"
 #include "log/Log.h"
 
-void
+int
 DoMallocTrim() {
 #ifdef __linux__
-    malloc_trim(0);
+    /*
+     * The malloc_trim() function returns 1 if memory was actually released back to the system,
+     * or 0 if it was not possible to release any memory.
+     */
+    return malloc_trim(0);
 #endif
+    return 0;
 }
 
 uint64_t
@@ -75,16 +80,19 @@ ParseMallocInfo() {
 }
 
 CStatus
-PurgeMemory(uint64_t max_bins_size) {
+PurgeMemory(uint64_t max_bins_size, int32_t* res) {
     try {
         auto fast_and_rest_total = ParseMallocInfo();
         if (fast_and_rest_total >= max_bins_size) {
             LOG_SEGCORE_DEBUG_ << "Purge memory fragmentation, max_bins_size(bytes) = " << max_bins_size
                                << ", fast_and_rest_total(bytes) = " << fast_and_rest_total;
-            DoMallocTrim();
+            *res = DoMallocTrim();
+        } else {
+            *res = 0;
         }
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
+        *res = 0;
         return milvus::FailureCStatus(UnexpectedError, e.what());
     }
 }
