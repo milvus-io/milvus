@@ -115,13 +115,18 @@ StringIndexMarisa::Load(const BinarySet& set) {
     fill_offsets();
 }
 
+bool
+valid_str_id(size_t str_id) {
+    return str_id >= 0 && str_id != MARISA_INVALID_KEY_ID;
+}
+
 const TargetBitmapPtr
 StringIndexMarisa::In(size_t n, const std::string* values) {
     TargetBitmapPtr bitset = std::make_unique<TargetBitmap>(str_ids_.size());
     for (size_t i = 0; i < n; i++) {
         auto str = values[i];
         auto str_id = lookup(str);
-        if (str_id >= 0) {
+        if (valid_str_id(str_id)) {
             auto offsets = str_ids_to_offsets_[str_id];
             for (auto offset : offsets) {
                 bitset->set(offset);
@@ -138,7 +143,7 @@ StringIndexMarisa::NotIn(size_t n, const std::string* values) {
     for (size_t i = 0; i < n; i++) {
         auto str = values[i];
         auto str_id = lookup(str);
-        if (str_id >= 0) {
+        if (valid_str_id(str_id)) {
             auto offsets = str_ids_to_offsets_[str_id];
             for (auto offset : offsets) {
                 bitset->reset(offset);
@@ -234,7 +239,7 @@ StringIndexMarisa::fill_str_ids(size_t n, const std::string* values) {
     for (size_t i = 0; i < n; i++) {
         auto str = values[i];
         auto str_id = lookup(str);
-        assert(str_id >= 0);
+        assert(valid_str_id(str_id));
         str_ids_[i] = str_id;
     }
 }
@@ -254,8 +259,12 @@ size_t
 StringIndexMarisa::lookup(const std::string& str) {
     marisa::Agent agent;
     agent.set_query(str.c_str());
-    trie_.lookup(agent);
-    return agent.key().id();
+    if (trie_.lookup(agent)) {
+        return agent.key().id();
+    }
+
+    // not found the string in trie
+    return MARISA_INVALID_KEY_ID;
 }
 
 std::vector<size_t>
