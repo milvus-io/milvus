@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       IMAGE_REPO: "milvusdb"
-      DEV: "milvus-dev"
+      DEV: "milvus"
       DAILY: "daily-build"
       TAG_PREFIX: "master-"
     steps:
@@ -34,7 +34,7 @@ jobs:
       run: echo "tag=$(./docker_image_find_tag.sh -n ${IMAGE_REPO}/${DEV} -t ${TAG_PREFIX}latest -f ${TAG_PREFIX} -F -L -q)" >> $GITHUB_ENV
 
 
-    - name: Pull latest milvus-dev image with tag prefix master-
+    - name: Pull latest milvus image with tag prefix master-
       run: |
         docker pull "${IMAGE_REPO}/${DEV}:${{ env.tag }}"
         docker tag "${IMAGE_REPO}/${DEV}:${{ env.tag }}" "${IMAGE_REPO}/${DAILY}:${{ env.tag }}"

@@ -1075,11 +1075,11 @@ def get_config_digest(url, token):
 
 def get_latest_tag(limit=100):
     service = "registry.docker.io"
-    repository = "milvusdb/milvus-dev"
+    repository = "milvusdb/milvus"
 
     auth_url = "https://auth.docker.io/token?service=%s&scope=repository:%s:pull" % (service, repository)
     tags_url = "https://index.docker.io/v2/%s/tags/list" % repository
-    tag_url = "https://index.docker.io/v2/milvusdb/milvus-dev/manifests/"
+    tag_url = "https://index.docker.io/v2/milvusdb/milvus/manifests/"
 
     master_latest_digest = get_config_digest(tag_url + "master-latest", get_token(auth_url))
     tags = get_tags(tags_url, get_token(auth_url))

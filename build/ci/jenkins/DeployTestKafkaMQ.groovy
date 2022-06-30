@@ -162,7 +162,7 @@ pipeline {
                             def new_image_repository_modified = ""
 
                             if ("${params.old_image_tag}" == "master-latest") {
-                                old_image_tag_modified = sh(returnStdout: true, script: 'bash ../../../scripts/docker_image_find_tag.sh -n milvusdb/milvus-dev -t master-latest -f master- -F -L -q').trim()    
+                                old_image_tag_modified = sh(returnStdout: true, script: 'bash ../../../scripts/docker_image_find_tag.sh -n milvusdb/milvus -t master-latest -f master- -F -L -q').trim()    
                             }
                             else if ("${params.old_image_tag}" == "latest") {
                                 old_image_tag_modified = sh(returnStdout: true, script: 'bash ../../../scripts/docker_image_find_tag.sh -n milvusdb/milvus -t latest -F -L -q').trim()
@@ -172,7 +172,7 @@ pipeline {
                             }
 
                             if ("${params.new_image_tag}" == "master-latest") {
-                                new_image_tag_modified = sh(returnStdout: true, script: 'bash ../../../scripts/docker_image_find_tag.sh -n milvusdb/milvus-dev -t master-latest -f master- -F -L -q').trim()    
+                                new_image_tag_modified = sh(returnStdout: true, script: 'bash ../../../scripts/docker_image_find_tag.sh -n milvusdb/milvus -t master-latest -f master- -F -L -q').trim()    
                             }
                             else {
                                 new_image_tag_modified = "${params.new_image_tag}"

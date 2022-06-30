@@ -126,7 +126,7 @@ pipeline {
                         script {
                             def image_tag_modified = ""
                             if ("${params.image_tag}" == "master-latest") {
-                                image_tag_modified = sh(returnStdout: true, script: 'bash ../../../../scripts/docker_image_find_tag.sh -n milvusdb/milvus-dev -t master-latest -f master- -F -L -q').trim()    
+                                image_tag_modified = sh(returnStdout: true, script: 'bash ../../../../scripts/docker_image_find_tag.sh -n milvusdb/milvus -t master-latest -f master- -F -L -q').trim()    
                             }
                             else {
                                 image_tag_modified = "${params.image_tag}"

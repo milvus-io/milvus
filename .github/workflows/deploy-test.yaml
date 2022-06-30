@@ -21,7 +21,7 @@ on:
       new_image_repo:
         description: The image repository name to use for the deploy test
         required: true
-        default: 'milvusdb/milvus-dev'
+        default: 'milvusdb/milvus'
 
       new_image_tag:
         description: The new image tag to use for the deploy test
@@ -57,7 +57,7 @@ jobs:
           DEFAULT_OLD_IMAGE_REPO: "milvusdb/milvus"
           DEFAULT_OLD_IMAGE_TAG: "latest"
           DEFAULT_PREVIOUS_RELEASE_VERSION: "v2.0.2"
-          DEFAULT_NEW_IMAGE_REPO: "milvusdb/milvus-dev"
+          DEFAULT_NEW_IMAGE_REPO: "milvusdb/milvus"
           DEFAULT_NEW_IMAGE_TAG: "master-latest"
         run: |
           echo "OLD_IMAGE_REPO=${{ github.event.inputs.old_image_repo || env.DEFAULT_OLD_IMAGE_REPO }}" >> $GITHUB_ENV
@@ -240,7 +240,7 @@ jobs:
           helm repo add milvus https://milvus-io.github.io/milvus-helm
           helm repo update
 
-          # if the task is reinstall, install milvus with latest image in repo milvusdb/milvus-dev
+          # if the task is reinstall, install milvus with latest image in repo milvusdb/milvus
           # for cluster mode
           if [ ${{ matrix.task }} == "reinstall" ] && [ ${{ matrix.mode }} == "cluster" ]; then
               echo "task: ${{ matrix.task }} mode: ${{ matrix.mode }}";
