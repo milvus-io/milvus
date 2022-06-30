@@ -139,7 +139,7 @@ then
     printf "download latest milvus docker-compose yaml file from github\n"
     wget https://raw.githubusercontent.com/milvus-io/milvus/master/deployments/docker/${Mode}/docker-compose.yml -O docker-compose.yml
     printf "start to deploy latest rc tag milvus\n"
-    replace_image_tag "milvusdb\/milvus-dev" $latest_tag
+    replace_image_tag "milvusdb\/milvus" $latest_tag
 fi
 if [ "$Task" == "upgrade" ];
 then
@@ -187,7 +187,7 @@ then
     printf "download latest milvus docker-compose yaml file from github\n"
     wget https://raw.githubusercontent.com/milvus-io/milvus/master/deployments/docker/${Mode}/docker-compose.yml -O docker-compose.yml
     printf "start to deploy latest rc tag milvus\n"
-    replace_image_tag "milvusdb\/milvus-dev" $latest_tag
+    replace_image_tag "milvusdb\/milvus" $latest_tag
 
 fi
 cat docker-compose.yml|grep milvusdb

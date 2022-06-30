@@ -209,7 +209,7 @@ spec:
   arguments:
     parameters:
       - name: milvus-image-repository
-        value: harbor.milvus.io/dockerhub/milvusdb/milvus-dev
+        value: harbor.milvus.io/dockerhub/milvusdb/milvus
       - name: milvus-image-tag
         value: master-latest
       - name: test-client-branch

@@ -10,7 +10,7 @@ on:
       image_repo:
         description: The image repo to use for the chaos test
         required: true
-        default: 'milvusdb/milvus-dev'
+        default: 'milvusdb/milvus'
   schedule:
     - cron: "30 17 * * *"
 jobs:
@@ -29,7 +29,7 @@ jobs:
       - name: Set env param
         env:
           DEFAULT_IMAGE_TAG: master-latest
-          DEFAULT_IMAGE_REPO: milvusdb/milvus-dev
+          DEFAULT_IMAGE_REPO: milvusdb/milvus
         run: |
           echo "RELEASE=test-${{ matrix.pod }}-pod-kill" >> $GITHUB_ENV
           echo "IMAGE_REPO=${{ github.event.inputs.image_repo || env.DEFAULT_IMAGE_REPO}}" >> $GITHUB_ENV
@@ -80,7 +80,7 @@ jobs:
         working-directory: tests/python_client/chaos
         run: |
           echo "latest tag:"
-          bash ../../../scripts/docker_image_find_tag.sh -n milvusdb/milvus-dev -t master-latest -f master- -F -L -q
+          bash ../../../scripts/docker_image_find_tag.sh -n milvusdb/milvus -t master-latest -f master- -F -L -q
           helm repo add milvus https://milvus-io.github.io/milvus-helm
           helm repo update
           if [[ ${{ matrix.pod }} != *"standalone"* ]]; then helm install --wait --timeout 720s ${{ env.RELEASE }} milvus/milvus --set pulsar.enabled=false --set kafka.enabled=true --set image.all.repository=${{ env.IMAGE_REPO }} --set image.all.tag=${{ env.IMAGE_TAG }} -f cluster-values.yaml  -n=chaos-testing; fi

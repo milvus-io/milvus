@@ -2,7 +2,7 @@ cluster:
   enabled: false
 image:
   all:
-    repository: milvusdb/milvus-dev
+    repository: milvusdb/milvus
     tag: master-latest
     pullPolicy: IfNotPresent
 

@@ -10,7 +10,7 @@ on:
       image_repo:
         description: The image repo to use for the chaos test
         required: true
-        default: 'milvusdb/milvus-dev'    
+        default: 'milvusdb/milvus'    
   schedule:
     - cron: "30 19 * * *"
 jobs:
@@ -29,7 +29,7 @@ jobs:
       - name: Set env param
         env:
           DEFAULT_IMAGE_TAG: master-latest
-          DEFAULT_IMAGE_REPO: milvusdb/milvus-dev        
+          DEFAULT_IMAGE_REPO: milvusdb/milvus        
         run: |
           chaos_type=${{ matrix.chaos_type }}
           release="test"-${{ matrix.pod }}-${chaos_type/_/-}
@@ -80,7 +80,7 @@ jobs:
         working-directory: tests/python_client/chaos
         run: |
           echo "latest tag:"
-          bash ../../../scripts/docker_image_find_tag.sh -n milvusdb/milvus-dev -t master-latest -f master- -F -L -q
+          bash ../../../scripts/docker_image_find_tag.sh -n milvusdb/milvus -t master-latest -f master- -F -L -q
           declare -A pod_map=( ["querynode"]="queryNode" ["indexnode"]="indexNode" ["datanode"]="dataNode" ["proxy"]="proxy")
           helm repo add milvus https://milvus-io.github.io/milvus-helm
           helm repo update

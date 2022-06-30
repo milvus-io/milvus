@@ -17,7 +17,7 @@ namespace = 'chaos-testing'
 
 def _install_milvus(seg_size):
     release_name = f"mil-segsize-{seg_size}-" + cf.gen_digits_by_length(6)
-    cus_configs = {'spec.components.image': 'milvusdb/milvus-dev:master-latest',
+    cus_configs = {'spec.components.image': 'milvusdb/milvus:master-latest',
                    'metadata.namespace': namespace,
                    'metadata.name': release_name,
                    'spec.components.proxy.serviceType': 'LoadBalancer',
