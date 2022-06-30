@@ -109,7 +109,7 @@ jobs:
           if [[ ! -d "/var/tmp/ccache" ]];then
             mkdir -p /var/tmp/ccache
           fi
-          brew install boost libomp ninja tbb openblas ccache
+          brew install boost libomp ninja tbb openblas ccache rocksdb
           if [[ ! -d "/usr/local/opt/llvm" ]]; then
             ln -s /usr/local/opt/llvm@13 /usr/local/opt/llvm
           fi
