@@ -275,9 +275,14 @@ func genWatchDeltaChannelTask(ctx context.Context, queryCoord *QueryCoord, nodeI
 
 func waitTaskFinalState(t task, state taskState) {
 	for {
-		if t.getState() == state {
+		currentState := t.getState()
+		if currentState == state {
 			break
 		}
+
+		log.Debug("task state not match	es",
+			zap.Int("actual", int(currentState)),
+			zap.Int("expected", int(state)))
 	}
 }
 
@@ -286,9 +291,6 @@ func TestTriggerTask(t *testing.T) {
 	ctx := context.Background()
 	queryCoord, err := startQueryCoord(ctx)
 	assert.Nil(t, err)
-
-	err = queryCoord.meta.addCollection(defaultCollectionID, querypb.LoadType_LoadCollection, genDefaultCollectionSchema(false))
-	assert.NoError(t, err)
 
 	node1, err := startQueryNodeServer(ctx)
 	assert.Nil(t, err)
@@ -565,6 +567,7 @@ func Test_LoadPartitionExecuteFailAfterLoadCollection(t *testing.T) {
 
 	waitTaskFinalState(loadPartitionTask, taskFailed)
 
+	log.Debug("test done")
 	node.stop()
 	queryCoord.Stop()
 	err = removeAllSession()
@@ -585,14 +588,18 @@ func Test_ReleaseCollectionExecuteFail(t *testing.T) {
 	assert.NoError(t, err)
 
 	waitQueryNodeOnline(queryCoord.cluster, node.queryNodeID)
+
 	releaseCollectionTask := genReleaseCollectionTask(ctx, queryCoord)
+	notify := make(chan struct{})
+	go func() {
+		waitTaskFinalState(releaseCollectionTask, taskDone)
+		node.setRPCInterface(&node.releaseCollection, returnSuccessResult)
+		waitTaskFinalState(releaseCollectionTask, taskExpired)
+		close(notify)
+	}()
 	err = queryCoord.scheduler.Enqueue(releaseCollectionTask)
 	assert.Nil(t, err)
-
-	waitTaskFinalState(releaseCollectionTask, taskDone)
-
-	node.setRPCInterface(&node.releaseCollection, returnSuccessResult)
-	waitTaskFinalState(releaseCollectionTask, taskExpired)
+	<-notify
 
 	node.stop()
 	queryCoord.Stop()
