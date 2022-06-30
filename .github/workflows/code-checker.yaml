@@ -110,7 +110,10 @@ jobs:
             mkdir -p /var/tmp/ccache
           fi
           brew install boost libomp ninja tbb openblas ccache
-          make check-proto-product && make verifiers && sh scripts/collect_arrow_dep.sh -f /tmp/thirdparty
+          if [[ ! -d "/usr/local/opt/llvm" ]]; then
+            ln -s /usr/local/opt/llvm@13 /usr/local/opt/llvm
+          fi
+          make install && sh scripts/collect_arrow_dep.sh -f /tmp/thirdparty
   centos:
     name: Code Checker CentOS 7
     # Run in centos docker 
