@@ -44,10 +44,7 @@ def api_request(_list, **kwargs):
     if isinstance(_list, list):
         func = _list[0]
         if callable(func):
-            arg = []
-            if len(_list) > 1:
-                for a in _list[1:]:
-                    arg.append(a)
+            arg = _list[1:]
             arg_str = str(arg)
             log_arg = arg_str[0:log_row_length] + '......' if len(arg_str) > log_row_length else arg_str
             # if enable_traceback == "True":
