@@ -6,8 +6,8 @@ import json
 from time import sleep
 
 from pymilvus import connections
-from chaos.checker import (CreateChecker, InsertFlushChecker,
-                           SearchChecker, QueryChecker, IndexChecker, Op)
+from chaos.checker import (CreateChecker, InsertChecker, FlushChecker,
+                           SearchChecker, QueryChecker, IndexChecker, DeleteChecker, Op)
 from common.cus_resource_opts import CustomResourceOperations as CusResource
 from utils.util_log import test_log as log
 from utils.util_k8s import wait_pods_ready, get_pod_list
@@ -20,7 +20,6 @@ from delayed_assert import assert_expectations
 
 
 def check_cluster_nodes(chaos_config):
-     
     # if all pods will be effected, the expect is all fail. 
     # Even though the replicas is greater than 1, it can not provide HA, so cluster_nodes is set as 1 for this situation.
     if "all" in chaos_config["metadata"]["name"]:
@@ -39,6 +38,7 @@ def check_cluster_nodes(chaos_config):
     labels_str = ",".join(labels_list)
     pods = get_pod_list(namespace, labels_str)
     return len(pods)
+
 
 def record_results(checkers):
     res = ""
@@ -103,11 +103,12 @@ class TestChaos(TestChaosBase):
     def init_health_checkers(self):
         checkers = {
             Op.create: CreateChecker(),
-            Op.insert: InsertFlushChecker(),
-            Op.flush: InsertFlushChecker(flush=True),
+            Op.insert: InsertChecker(),
+            Op.flush: FlushChecker(),
             Op.index: IndexChecker(),
             Op.search: SearchChecker(),
-            Op.query: QueryChecker()
+            Op.query: QueryChecker(),
+            Op.delete: DeleteChecker()
         }
         self.health_checkers = checkers
 
@@ -230,6 +231,16 @@ class TestChaos(TestChaosBase):
                 f.write(record_results(self.health_checkers))
         except Exception as e:
             log.info(f"Fail to write the report: {e}")
+        # terminate and restart threads
+        for k, checker in self.health_checkers.items():
+            checker.terminate()
+        sleep(5)
+        log.info(f'Alive threads: {threading.enumerate()}')
+        cc.start_monitor_threads(self.health_checkers)
+        sleep(constants.WAIT_PER_OP * 2)
+        log.info("******4th assert after chaos deleted: ")
+        assert_statistic(self.health_checkers)
+
         # assert all expectations
         assert_expectations()
 
