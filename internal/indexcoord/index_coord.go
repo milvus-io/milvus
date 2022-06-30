@@ -876,10 +876,10 @@ func (i *IndexCoord) watchMetaLoop() {
 			}
 			if err := resp.Err(); err != nil {
 				if err == v3rpc.ErrCompacted {
-					newMetaTable, err := NewMetaTable(i.metaTable.client)
-					if err != nil {
+					newMetaTable, err2 := NewMetaTable(i.metaTable.client)
+					if err2 != nil {
 						log.Error("Constructing new meta table fails when etcd has a compaction error",
-							zap.String("path", indexFilePrefix), zap.String("etcd error", err.Error()), zap.Error(err))
+							zap.String("path", indexFilePrefix), zap.String("etcd error", err.Error()), zap.Error(err2))
 						panic("failed to handle etcd request, exit..")
 					}
 					i.metaTable = newMetaTable
