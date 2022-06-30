@@ -49,7 +49,7 @@ pipeline {
         string(
             description: 'Etcd Image Tag',
             name: 'etcd_image_tag',
-            defaultValue: "3.5.0-r5"
+            defaultValue: "3.5.0-r6"
         )
         string(
             description: 'QueryNode Nums',
