@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/trace"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
 )
 
 // make sure ddNode implements flowgraph.Node
@@ -267,6 +268,13 @@ func (ddn *ddNode) sendDeltaTimeTick(ts Timestamp) error {
 	if err := ddn.deltaMsgStream.Produce(&msgPack); err != nil {
 		return err
 	}
+	p, _ := tsoutil.ParseTS(ts)
+	log.RatedDebug(10.0, "DDNode sent delta timeTick",
+		zap.Any("collectionID", ddn.collectionID),
+		zap.Any("ts", ts),
+		zap.Any("ts_p", p),
+		zap.Any("channel", ddn.vchannelName),
+	)
 	return nil
 }
 
