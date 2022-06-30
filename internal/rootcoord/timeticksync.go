@@ -276,6 +276,8 @@ func (t *timetickSync) delSession(sess *sessionutil.Session) {
 func (t *timetickSync) initSessions(sess []*sessionutil.Session) {
 	t.lock.Lock()
 	defer t.lock.Unlock()
+	t.sess2ChanTsMap = make(map[typeutil.UniqueID]*chanTsMsg)
+	t.sess2ChanTsMap[t.sourceID] = nil
 	for _, s := range sess {
 		t.sess2ChanTsMap[s.ServerID] = nil
 		log.Debug("Init proxy sessions for timeticksync", zap.Int64("serverID", s.ServerID))

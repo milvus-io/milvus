@@ -23,7 +23,9 @@ import (
 	"math/rand"
 	"os"
 	"os/signal"
+	"path"
 	"strconv"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -629,4 +631,111 @@ func TestLoadBalanceSegmentLoop(t *testing.T) {
 	queryCoord.Stop()
 	err = removeAllSession()
 	assert.Nil(t, err)
+}
+
+func TestQueryCoord_watchHandoffSegmentLoop(t *testing.T) {
+	Params.Init()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	assert.Nil(t, err)
+	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
+
+	qc := &QueryCoord{
+		loopCtx:  ctx,
+		loopWg:   sync.WaitGroup{},
+		kvClient: etcdKV,
+		handoffHandler: &HandoffHandler{
+			ctx:    ctx,
+			cancel: cancel,
+			client: etcdKV,
+		},
+	}
+
+	t.Run("chan closed", func(t *testing.T) {
+		qc.loopWg.Add(1)
+		go func() {
+			assert.Panics(t, func() {
+				qc.handoffNotificationLoop()
+			})
+		}()
+
+		etcdCli.Close()
+		qc.loopWg.Wait()
+	})
+
+	t.Run("etcd compaction", func(t *testing.T) {
+		etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+		assert.Nil(t, err)
+		etcdKV = etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
+		qc.kvClient = etcdKV
+		qc.handoffHandler.client = etcdKV
+		qc.handoffHandler.revision = 0
+		qc.meta = &MetaReplica{}
+		qc.handoffHandler.meta = qc.meta
+		qc.handoffHandler.tasks = make(map[int64]*HandOffTask)
+
+		for i := 1; i < 10; i++ {
+			segInfo := &querypb.SegmentInfo{
+				SegmentID: UniqueID(i),
+			}
+			v, err := proto.Marshal(segInfo)
+			assert.Nil(t, err)
+			key := path.Join(util.HandoffSegmentPrefix, strconv.Itoa(i))
+			err = etcdKV.Save(key, string(v))
+			assert.Nil(t, err)
+		}
+		// The reason there the error is no handle is that if you run compact twice, an error will be reported;
+		// error msg is "etcdserver: mvcc: required revision has been compacted"
+		etcdCli.Compact(ctx, 10)
+		qc.loopWg.Add(1)
+		go qc.handoffNotificationLoop()
+
+		time.Sleep(2 * time.Second)
+		for i := 1; i < 10; i++ {
+			k := path.Join(util.HandoffSegmentPrefix, strconv.Itoa(i))
+			_, err = etcdCli.Delete(ctx, k)
+			assert.Nil(t, err)
+		}
+		cancel()
+		qc.loopWg.Wait()
+	})
+
+	t.Run("etcd compaction and reload failed", func(t *testing.T) {
+		ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		etcdCli, err = etcd.GetEtcdClient(&Params.EtcdCfg)
+		assert.Nil(t, err)
+		etcdKV = etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
+		qc.loopCtx = ctx
+		qc.loopCancel = cancel
+		qc.kvClient = etcdKV
+		qc.handoffHandler.client = etcdKV
+		qc.handoffHandler.revision = 0
+		qc.handoffHandler.tasks = make(map[int64]*HandOffTask)
+
+		for i := 1; i < 10; i++ {
+			key := path.Join(util.HandoffSegmentPrefix, strconv.Itoa(i))
+			v := "segment-" + strconv.Itoa(i)
+			err = etcdKV.Save(key, v)
+			assert.Nil(t, err)
+		}
+		// The reason there the error is no handle is that if you run compact twice, an error will be reported;
+		// error msg is "etcdserver: mvcc: required revision has been compacted"
+		etcdCli.Compact(ctx, 10)
+		qc.loopWg.Add(1)
+		go func() {
+			assert.Panics(t, func() {
+				qc.handoffNotificationLoop()
+			})
+		}()
+		qc.loopWg.Wait()
+
+		for i := 1; i < 10; i++ {
+			k := path.Join(util.HandoffSegmentPrefix, strconv.Itoa(i))
+			_, err = etcdCli.Delete(ctx, k)
+			assert.Nil(t, err)
+		}
+	})
 }

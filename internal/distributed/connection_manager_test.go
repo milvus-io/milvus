@@ -19,7 +19,10 @@ package distributed
 import (
 	"context"
 	"net"
+	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -175,33 +178,68 @@ func TestConnectionManager(t *testing.T) {
 }
 
 func TestConnectionManager_processEvent(t *testing.T) {
-	cm := &ConnectionManager{
-		closeCh: make(chan struct{}),
-	}
+	t.Run("close closeCh", func(t *testing.T) {
+		cm := &ConnectionManager{
+			closeCh: make(chan struct{}),
+		}
 
-	ech := make(chan *sessionutil.SessionEvent)
-	flag := false
-	signal := make(chan struct{}, 1)
-	go func() {
-		cm.processEvent(ech)
-		flag = true
-		signal <- struct{}{}
-	}()
+		ech := make(chan *sessionutil.SessionEvent)
+		flag := false
+		signal := make(chan struct{}, 1)
+		go func() {
+			assert.Panics(t, func() {
+				cm.processEvent(ech)
+			})
 
-	close(ech)
-	<-signal
-	assert.True(t, flag)
+			flag = true
+			signal <- struct{}{}
+		}()
 
-	ech = make(chan *sessionutil.SessionEvent)
-	flag = false
-	go func() {
-		cm.processEvent(ech)
-		flag = true
-		signal <- struct{}{}
-	}()
-	close(cm.closeCh)
-	<-signal
-	assert.True(t, flag)
+		close(ech)
+		<-signal
+		assert.True(t, flag)
+
+		ech = make(chan *sessionutil.SessionEvent)
+		flag = false
+		go func() {
+			cm.processEvent(ech)
+			flag = true
+			signal <- struct{}{}
+		}()
+		close(cm.closeCh)
+		<-signal
+		assert.True(t, flag)
+	})
+
+	t.Run("close watch chan", func(t *testing.T) {
+		sc := make(chan os.Signal, 1)
+		signal.Notify(sc, syscall.SIGINT)
+		defer signal.Reset(syscall.SIGINT)
+		sigQuit := make(chan struct{}, 1)
+
+		cm := &ConnectionManager{
+			closeCh: make(chan struct{}),
+			session: &sessionutil.Session{
+				ServerID:    1,
+				TriggerKill: true,
+			},
+		}
+
+		ech := make(chan *sessionutil.SessionEvent)
+
+		go func() {
+			<-sc
+			sigQuit <- struct{}{}
+		}()
+
+		go func() {
+			cm.processEvent(ech)
+		}()
+
+		close(ech)
+
+		<-sigQuit
+	})
 }
 
 type testRootCoord struct {
