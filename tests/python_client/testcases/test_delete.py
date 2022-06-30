@@ -1098,7 +1098,7 @@ class TestDeleteString(TestcaseBase):
         collection_w.query(default_string_expr, check_task=CheckTasks.check_query_empty)
         collection_w.delete(expr=default_string_expr)
 
-    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/17067")
+    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/17924")
     @pytest.mark.tags(CaseLabel.L1)
     def test_delete_all_index_with_string(self):
         """
