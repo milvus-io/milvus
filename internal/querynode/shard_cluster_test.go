@@ -1652,6 +1652,7 @@ func TestShardCluster_HandoffSegments(t *testing.T) {
 			{
 				nodeID:   1,
 				nodeAddr: "addr_1",
+				isLeader: true,
 			},
 			{
 				nodeID:   2,
@@ -1705,6 +1706,7 @@ func TestShardCluster_HandoffSegments(t *testing.T) {
 			{
 				nodeID:   1,
 				nodeAddr: "addr_1",
+				isLeader: true,
 			},
 			{
 				nodeID:   2,
@@ -1755,6 +1757,7 @@ func TestShardCluster_HandoffSegments(t *testing.T) {
 			{
 				nodeID:   1,
 				nodeAddr: "addr_1",
+				isLeader: true,
 			},
 			{
 				nodeID:   2,
@@ -1804,6 +1807,8 @@ func TestShardCluster_HandoffSegments(t *testing.T) {
 			close(sig)
 		}()
 
+		sc.finishUsage(versionID)
+
 		evtCh <- segmentEvent{
 			eventType: segmentAdd,
 			segmentID: 3,
@@ -1847,6 +1852,7 @@ func TestShardCluster_HandoffSegments(t *testing.T) {
 			{
 				nodeID:   1,
 				nodeAddr: "addr_1",
+				isLeader: true,
 			},
 			{
 				nodeID:   2,
@@ -1902,6 +1908,7 @@ func TestShardCluster_HandoffSegments(t *testing.T) {
 			nodeIDs:   []int64{2},
 			state:     segmentStateLoaded,
 		}
+		sc.finishUsage(versionID)
 
 		// wait for handoff appended into list
 		assert.Eventually(t, func() bool {
@@ -1938,6 +1945,7 @@ func TestShardCluster_HandoffSegments(t *testing.T) {
 			{
 				nodeID:   1,
 				nodeAddr: "addr_1",
+				isLeader: true,
 			},
 			{
 				nodeID:   2,
@@ -1986,6 +1994,7 @@ func TestShardCluster_HandoffSegments(t *testing.T) {
 			{
 				nodeID:   1,
 				nodeAddr: "addr_1",
+				isLeader: true,
 			},
 			{
 				nodeID:   2,
