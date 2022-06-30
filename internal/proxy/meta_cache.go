@@ -518,13 +518,9 @@ func (m *MetaCache) GetCredentialInfo(ctx context.Context, username string) (*in
 			EncryptedPassword: resp.Password,
 		}
 		m.UpdateCredential(credInfo)
-		return credInfo, nil
 	}
 
-	return &internalpb.CredentialInfo{
-		Username:       credInfo.Username,
-		Sha256Password: credInfo.Sha256Password,
-	}, nil
+	return credInfo, nil
 }
 
 func (m *MetaCache) ClearCredUsers() {
