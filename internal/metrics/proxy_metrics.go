@@ -45,19 +45,9 @@ var (
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.ProxyRole,
-			Name:      "sq_lantency",
+			Name:      "sq_latency",
 			Help:      "latency of search",
 			Buckets:   buckets,
-		}, []string{nodeIDLabelName, queryTypeLabelName})
-
-	// ProxySendSQReqLatency record the latency that the proxy sent the search request to the message stream.
-	ProxySendSQReqLatency = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace: milvusNamespace,
-			Subsystem: typeutil.ProxyRole,
-			Name:      "sq_send_latency",
-			Help:      "latency that proxy sent the search request to the message stream",
-			Buckets:   buckets, // unit: ms
 		}, []string{nodeIDLabelName, queryTypeLabelName})
 
 	// ProxyWaitForSearchResultLatency record the time that the proxy waits for the search result.
@@ -249,7 +239,6 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(ProxyInsertVectors)
 
 	registry.MustRegister(ProxySearchLatency)
-	registry.MustRegister(ProxySendSQReqLatency)
 	registry.MustRegister(ProxyWaitForSearchResultLatency)
 	registry.MustRegister(ProxyReduceResultLatency)
 	registry.MustRegister(ProxyDecodeResultLatency)

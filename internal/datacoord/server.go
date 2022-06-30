@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
@@ -575,7 +576,9 @@ func (s *Server) handleTimetickMessage(ctx context.Context, ttMsg *msgstream.Dat
 	}
 
 	utcT, _ := tsoutil.ParseHybridTs(ts)
-	metrics.DataCoordSyncEpoch.WithLabelValues(ch).Set(float64(utcT))
+
+	pChannelName := funcutil.ToPhysicalChannel(ch)
+	metrics.DataCoordSyncEpoch.WithLabelValues(pChannelName).Set(float64(utcT))
 
 	s.updateSegmentStatistics(ttMsg.GetSegmentsStats())
 
