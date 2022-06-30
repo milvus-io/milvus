@@ -775,43 +775,6 @@ func Test_AssignInternalTask(t *testing.T) {
 	assert.Nil(t, err)
 }
 
-func Test_reverseSealedSegmentChangeInfo(t *testing.T) {
-	refreshParams()
-	ctx := context.Background()
-	queryCoord, err := startQueryCoord(ctx)
-	assert.Nil(t, err)
-
-	node1, err := startQueryNodeServer(ctx)
-	assert.Nil(t, err)
-	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
-	defer node1.stop()
-
-	loadCollectionTask := genLoadCollectionTask(ctx, queryCoord)
-	queryCoord.scheduler.Enqueue(loadCollectionTask)
-	waitTaskFinalState(loadCollectionTask, taskExpired)
-
-	node2, err := startQueryNodeServer(ctx)
-	assert.Nil(t, err)
-	waitQueryNodeOnline(queryCoord.cluster, node2.queryNodeID)
-	defer node2.stop()
-
-	loadSegmentTask := genLoadSegmentTask(ctx, queryCoord, node2.queryNodeID)
-	parentTask := loadSegmentTask.parentTask
-
-	kv := &testKv{
-		returnFn: failedResult,
-	}
-	queryCoord.meta.setKvClient(kv)
-
-	assert.Panics(t, func() {
-		updateSegmentInfoFromTask(ctx, parentTask, queryCoord.meta)
-	})
-
-	queryCoord.Stop()
-	err = removeAllSession()
-	assert.Nil(t, err)
-}
-
 func Test_handoffSegmentFail(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
@@ -1347,6 +1310,12 @@ func TestUpdateTaskProcessWhenLoadSegment(t *testing.T) {
 	queryCoord.scheduler.processTask(watchDeltaChannel)
 	collectionInfo, err = queryCoord.meta.getCollectionInfoByID(defaultCollectionID)
 	assert.Nil(t, err)
+	assert.Equal(t, int64(0), collectionInfo.InMemoryPercentage)
+
+	err = loadCollectionTask.globalPostExecute(ctx)
+	assert.NoError(t, err)
+	collectionInfo, err = queryCoord.meta.getCollectionInfoByID(defaultCollectionID)
+	assert.NoError(t, err)
 	assert.Equal(t, int64(100), collectionInfo.InMemoryPercentage)
 
 	err = removeAllSession()
@@ -1365,6 +1334,7 @@ func TestUpdateTaskProcessWhenWatchDmChannel(t *testing.T) {
 	queryCoord.meta.addCollection(defaultCollectionID, querypb.LoadType_LoadCollection, genDefaultCollectionSchema(false))
 
 	watchDmChannel := genWatchDmChannelTask(ctx, queryCoord, node1.queryNodeID)
+	loadCollectionTask := watchDmChannel.getParentTask()
 
 	collectionInfo, err := queryCoord.meta.getCollectionInfoByID(defaultCollectionID)
 	assert.Nil(t, err)
@@ -1373,6 +1343,12 @@ func TestUpdateTaskProcessWhenWatchDmChannel(t *testing.T) {
 
 	collectionInfo, err = queryCoord.meta.getCollectionInfoByID(defaultCollectionID)
 	assert.Nil(t, err)
+	assert.Equal(t, int64(0), collectionInfo.InMemoryPercentage)
+
+	err = loadCollectionTask.globalPostExecute(ctx)
+	assert.NoError(t, err)
+	collectionInfo, err = queryCoord.meta.getCollectionInfoByID(defaultCollectionID)
+	assert.NoError(t, err)
 	assert.Equal(t, int64(100), collectionInfo.InMemoryPercentage)
 
 	err = removeAllSession()
@@ -1400,6 +1376,7 @@ func startMockCoord(ctx context.Context) (*QueryCoord, error) {
 		channelNumPerCol:    defaultChannelNum,
 		segmentState:        commonpb.SegmentState_Flushed,
 		errLevel:            1,
+		segmentRefCount:     make(map[int64]int),
 	}
 	indexCoord, err := newIndexCoordMock(queryCoordTestDir)
 	if err != nil {

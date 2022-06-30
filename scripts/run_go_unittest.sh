@@ -19,16 +19,8 @@
 # Exit immediately for non zero status
 set -e
 
-SOURCE="${BASH_SOURCE[0]}"
-while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symlink
-  DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
-  SOURCE="$(readlink "$SOURCE")"
-  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE" # if $SOURCE was a relative symlink, we need to resolve it relative to the path where the symlink file was located
-done
-ROOT_DIR="$( cd -P "$( dirname "$SOURCE" )/.." && pwd )"
-
-export PKG_CONFIG_PATH="${PKG_CONFIG_PATH}:$ROOT_DIR/internal/core/output/lib/pkgconfig:$ROOT_DIR/internal/core/output/lib64/pkgconfig"
-export RPATH=$(pkg-config --libs-only-L milvus_common | cut -c 3-)
+BASEDIR=$(dirname "$0")
+source $BASEDIR/setenv.sh
 
 if [[ $(uname -s) == "Darwin" ]]; then
     export MallocNanoZone=0
@@ -42,30 +34,30 @@ fi
 MILVUS_DIR="${ROOT_DIR}/internal/"
 echo "Running go unittest under $MILVUS_DIR"
 
-go test -race -cover ${APPLE_SILICON_FLAG} -ldflags="-r $RPATH" "${MILVUS_DIR}/allocator/..." -failfast
-go test -race -cover ${APPLE_SILICON_FLAG} -ldflags="-r $RPATH" "${MILVUS_DIR}/kv/..." -failfast
-go test -race -cover ${APPLE_SILICON_FLAG} -ldflags="-r $RPATH" $(go list "${MILVUS_DIR}/mq/..." | grep -v kafka)  -failfast
-go test -race -cover ${APPLE_SILICON_FLAG} -ldflags="-r $RPATH" "${MILVUS_DIR}/storage" -failfast
-go test -race -cover ${APPLE_SILICON_FLAG} -ldflags="-r $RPATH" "${MILVUS_DIR}/tso/..." -failfast
-go test -race -cover ${APPLE_SILICON_FLAG} -ldflags="-r $RPATH" "${MILVUS_DIR}/util/funcutil/..." -failfast
-go test -race -cover ${APPLE_SILICON_FLAG} -ldflags="-r $RPATH" "${MILVUS_DIR}/util/paramtable/..." -failfast
-go test -race -cover ${APPLE_SILICON_FLAG} -ldflags="-r $RPATH" "${MILVUS_DIR}/util/retry/..." -failfast
-go test -race -cover ${APPLE_SILICON_FLAG} -ldflags="-r $RPATH" "${MILVUS_DIR}/util/sessionutil/..." -failfast
-go test -race -cover ${APPLE_SILICON_FLAG} -ldflags="-r $RPATH" "${MILVUS_DIR}/util/trace/..." -failfast
-go test -race -cover ${APPLE_SILICON_FLAG} -ldflags="-r $RPATH" "${MILVUS_DIR}/util/typeutil/..." -failfast
-go test -race -cover ${APPLE_SILICON_FLAG} -ldflags="-r $RPATH" "${MILVUS_DIR}/util/importutil/..." -failfast
-go test -race -cover ${APPLE_SILICON_FLAG} -ldflags="-r $RPATH" "${MILVUS_DIR}/proxy/..." -failfast
-go test -race -cover ${APPLE_SILICON_FLAG} -ldflags="-r $RPATH" "${MILVUS_DIR}/datanode/..." -failfast
-go test -race -cover ${APPLE_SILICON_FLAG} -ldflags="-r $RPATH" "${MILVUS_DIR}/indexnode/..." -failfast
-go test -race -cover ${APPLE_SILICON_FLAG} -ldflags="-r $RPATH" "${MILVUS_DIR}/querynode/..." -failfast
-go test -race -cover ${APPLE_SILICON_FLAG} -ldflags="-r $RPATH" "${MILVUS_DIR}/distributed/rootcoord/..." -failfast
-go test -race -cover ${APPLE_SILICON_FLAG} -ldflags="-r $RPATH" "${MILVUS_DIR}/distributed/datacoord/..." -failfast
-go test -race -cover ${APPLE_SILICON_FLAG} -ldflags="-r $RPATH" "${MILVUS_DIR}/distributed/querycoord/..." -failfast
-go test -race -cover ${APPLE_SILICON_FLAG} -ldflags="-r $RPATH" "${MILVUS_DIR}/distributed/proxy/..." -failfast
-go test -race -cover ${APPLE_SILICON_FLAG} -ldflags="-r $RPATH" "${MILVUS_DIR}/distributed/datanode/..." -failfast
-go test -race -cover ${APPLE_SILICON_FLAG} -ldflags="-r $RPATH" "${MILVUS_DIR}/distributed/querynode/..." -failfast
-go test -race -cover ${APPLE_SILICON_FLAG} -ldflags="-r $RPATH" "${MILVUS_DIR}/rootcoord" -failfast
-go test -race -cover ${APPLE_SILICON_FLAG} -ldflags="-r $RPATH" "${MILVUS_DIR}/datacoord/..." -failfast
-go test -race -cover ${APPLE_SILICON_FLAG} -ldflags="-r $RPATH" "${MILVUS_DIR}/indexcoord/..." -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/allocator/..." -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/kv/..." -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} $(go list "${MILVUS_DIR}/mq/..." | grep -v kafka)  -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/storage" -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/tso/..." -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/funcutil/..." -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/paramtable/..." -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/retry/..." -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/sessionutil/..." -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/trace/..." -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/typeutil/..." -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/importutil/..." -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/proxy/..." -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/datanode/..." -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/indexnode/..." -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/querynode/..." -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/distributed/rootcoord/..." -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/distributed/datacoord/..." -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/distributed/querycoord/..." -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/distributed/proxy/..." -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/distributed/datanode/..." -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/distributed/querynode/..." -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/rootcoord" -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/datacoord/..." -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/indexcoord/..." -failfast
 
 echo " Go unittest finished"

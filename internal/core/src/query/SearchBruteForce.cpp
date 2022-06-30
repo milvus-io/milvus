@@ -25,7 +25,7 @@ namespace milvus::query {
 // copy from faiss/IndexBinaryFlat.cpp::IndexBinaryFlat::search()
 // disable lint to make further migration easier
 static void
-binary_search(MetricType metric_type,
+binary_search(const knowhere::MetricType& metric_type,
               const uint8_t* xb,
               int64_t ntotal,
               int code_size,
@@ -36,28 +36,28 @@ binary_search(MetricType metric_type,
               idx_t* labels,
               const BitsetView bitset) {
     using namespace faiss;  // NOLINT
-    if (metric_type == METRIC_Jaccard || metric_type == METRIC_Tanimoto) {
+    if (metric_type == knowhere::metric::JACCARD || metric_type == knowhere::metric::TANIMOTO) {
         float_maxheap_array_t res = {size_t(n), size_t(k), labels, D};
         binary_distance_knn_hc(METRIC_Jaccard, &res, x, xb, ntotal, code_size, bitset);
 
-        if (metric_type == METRIC_Tanimoto) {
+        if (metric_type == knowhere::metric::TANIMOTO) {
             for (int i = 0; i < k * n; i++) {
                 D[i] = Jaccard_2_Tanimoto(D[i]);
             }
         }
-    } else if (metric_type == METRIC_Hamming) {
+    } else if (metric_type == knowhere::metric::HAMMING) {
         std::vector<int32_t> int_distances(n * k);
         int_maxheap_array_t res = {size_t(n), size_t(k), labels, int_distances.data()};
         binary_distance_knn_hc(METRIC_Hamming, &res, x, xb, ntotal, code_size, bitset);
         for (int i = 0; i < n * k; ++i) {
             D[i] = int_distances[i];
         }
-    } else if (metric_type == METRIC_Substructure || metric_type == METRIC_Superstructure) {
+    } else if (metric_type == knowhere::metric::SUBSTRUCTURE || metric_type == knowhere::metric::SUPERSTRUCTURE) {
         // only matched ids will be chosen, not to use heap
-        binary_distance_knn_mc(metric_type, x, xb, n, ntotal, k, code_size, D, labels, bitset);
+        auto faiss_metric_type = knowhere::GetFaissMetricType(metric_type);
+        binary_distance_knn_mc(faiss_metric_type, x, xb, n, ntotal, k, code_size, D, labels, bitset);
     } else {
-        std::string msg =
-            std::string("binary search not support metric type: ") + segcore::MetricTypeToString(metric_type);
+        std::string msg = "binary search not support metric type: " + metric_type;
         PanicInfo(msg);
     }
 }
@@ -97,7 +97,7 @@ FloatSearchBruteForce(const dataset::SearchDataset& dataset,
     SubSearchResult sub_qr(num_queries, topk, metric_type, round_decimal);
     auto query_data = reinterpret_cast<const float*>(dataset.query_data);
     auto chunk_data = reinterpret_cast<const float*>(chunk_data_raw);
-    if (metric_type == MetricType::METRIC_L2) {
+    if (metric_type == knowhere::metric::L2) {
         faiss::float_maxheap_array_t buf{(size_t)num_queries, (size_t)topk, sub_qr.get_seg_offsets(),
                                          sub_qr.get_distances()};
         faiss::knn_L2sqr(query_data, chunk_data, dim, num_queries, size_per_chunk, &buf, nullptr, bitset);

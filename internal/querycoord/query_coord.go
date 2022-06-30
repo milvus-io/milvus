@@ -42,16 +42,13 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-)
-
-const (
-	handoffSegmentPrefix = "querycoord-handoff"
 )
 
 // UniqueID is an alias for the Int64 type
@@ -72,14 +69,14 @@ type QueryCoord struct {
 
 	initOnce sync.Once
 
-	queryCoordID uint64
-	meta         Meta
-	cluster      Cluster
-	handler      *channelUnsubscribeHandler
-	newNodeFn    newQueryNodeFn
-	scheduler    *TaskScheduler
-	idAllocator  func() (UniqueID, error)
-	indexChecker *IndexChecker
+	queryCoordID   uint64
+	meta           Meta
+	cluster        Cluster
+	handler        *channelUnsubscribeHandler
+	newNodeFn      newQueryNodeFn
+	scheduler      *TaskScheduler
+	idAllocator    func() (UniqueID, error)
+	handoffHandler *HandoffHandler
 
 	metricsCacheManager *metricsinfo.MetricsCacheManager
 
@@ -159,7 +156,7 @@ func (qc *QueryCoord) Init() error {
 		qc.factory.Init(&Params)
 
 		// init meta
-		qc.meta, initError = newMeta(qc.loopCtx, qc.kvClient, qc.factory, qc.idAllocator, qc.dataCoordClient)
+		qc.meta, initError = newMeta(qc.loopCtx, qc.kvClient, qc.factory, qc.idAllocator)
 		if initError != nil {
 			log.Error("query coordinator init meta failed", zap.Error(initError))
 			return
@@ -207,7 +204,7 @@ func (qc *QueryCoord) Init() error {
 		}
 
 		// init index checker
-		qc.indexChecker, initError = newIndexChecker(qc.loopCtx, qc.kvClient, qc.meta, qc.cluster, qc.scheduler, qc.broker)
+		qc.handoffHandler, initError = newHandoffHandler(qc.loopCtx, qc.kvClient, qc.meta, qc.cluster, qc.scheduler, qc.broker)
 		if initError != nil {
 			log.Error("query coordinator init index checker failed", zap.Error(initError))
 			return
@@ -224,7 +221,7 @@ func (qc *QueryCoord) Start() error {
 	qc.scheduler.Start()
 	log.Info("start scheduler ...")
 
-	qc.indexChecker.start()
+	qc.handoffHandler.Start()
 	log.Info("start index checker ...")
 
 	qc.handler.start()
@@ -237,7 +234,7 @@ func (qc *QueryCoord) Start() error {
 	go qc.watchNodeLoop()
 
 	qc.loopWg.Add(1)
-	go qc.watchHandoffSegmentLoop()
+	go qc.handoffNotificationLoop()
 
 	if Params.QueryCoordCfg.AutoBalance {
 		qc.loopWg.Add(1)
@@ -254,26 +251,26 @@ func (qc *QueryCoord) Stop() error {
 	qc.UpdateStateCode(internalpb.StateCode_Abnormal)
 
 	if qc.scheduler != nil {
+		log.Info("close scheduler...")
 		qc.scheduler.Close()
-		log.Info("close scheduler ...")
 	}
 
-	if qc.indexChecker != nil {
-		qc.indexChecker.close()
-		log.Info("close index checker ...")
+	if qc.handoffHandler != nil {
+		log.Info("close index checker...")
+		qc.handoffHandler.Stop()
 	}
 
 	if qc.handler != nil {
+		log.Info("close channel unsubscribe loop...")
 		qc.handler.close()
-		log.Info("close channel unsubscribe loop ...")
 	}
 
 	if qc.loopCancel != nil {
+		log.Info("cancel the loop of QueryCoord...")
 		qc.loopCancel()
-		log.Info("cancel the loop of QueryCoord")
 	}
 
-	log.Warn("Query Coord stopped successfully...")
+	log.Info("Query Coord stopped successfully...")
 	qc.loopWg.Wait()
 	qc.session.Revoke(time.Second)
 	return nil
@@ -501,14 +498,14 @@ func (qc *QueryCoord) loadBalanceNodeLoop(ctx context.Context) {
 	}
 }
 
-func (qc *QueryCoord) watchHandoffSegmentLoop() {
+func (qc *QueryCoord) handoffNotificationLoop() {
 	ctx, cancel := context.WithCancel(qc.loopCtx)
 
 	defer cancel()
 	defer qc.loopWg.Done()
 	log.Info("QueryCoord start watch segment loop")
 
-	watchChan := qc.kvClient.WatchWithRevision(handoffSegmentPrefix, qc.indexChecker.revision+1)
+	watchChan := qc.kvClient.WatchWithRevision(util.HandoffSegmentPrefix, qc.handoffHandler.revision+1)
 
 	for {
 		select {
@@ -524,19 +521,8 @@ func (qc *QueryCoord) watchHandoffSegmentLoop() {
 				}
 				switch event.Type {
 				case mvccpb.PUT:
-					validHandoffReq, _ := qc.indexChecker.verifyHandoffReqValid(segmentInfo)
-					if Params.QueryCoordCfg.AutoHandoff && validHandoffReq {
-						qc.indexChecker.enqueueHandoffReq(segmentInfo)
-						log.Info("watchHandoffSegmentLoop: enqueue a handoff request to index checker", zap.Any("segment info", segmentInfo))
-					} else {
-						log.Info("watchHandoffSegmentLoop: collection/partition has not been loaded or autoHandoff equal to false, remove req from etcd", zap.Any("segmentInfo", segmentInfo))
-						buildQuerySegmentPath := fmt.Sprintf("%s/%d/%d/%d", handoffSegmentPrefix, segmentInfo.CollectionID, segmentInfo.PartitionID, segmentInfo.SegmentID)
-						err = qc.kvClient.Remove(buildQuerySegmentPath)
-						if err != nil {
-							log.Error("watchHandoffSegmentLoop: remove handoff segment from etcd failed", zap.Error(err))
-							panic(err)
-						}
-					}
+					qc.handoffHandler.enqueue(segmentInfo)
+					log.Info("watchHandoffSegmentLoop: enqueue a handoff request to index checker", zap.Any("segment info", segmentInfo))
 				default:
 					// do nothing
 				}

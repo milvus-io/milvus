@@ -280,9 +280,12 @@ message ClearCredUsersCacheRequest {
 
 message CredentialInfo {
   string username = 1;
+  // encrypted by bcrypt (for higher security level)
   string encrypted_password = 2;
   string tenant = 3;
   bool is_super = 4;
+  // encrypted by sha256 (for good performance in cache mapping)
+  string sha256_password = 5;
 }
 
 message ListPolicyRequest {

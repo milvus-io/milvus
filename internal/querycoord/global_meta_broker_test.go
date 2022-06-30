@@ -159,3 +159,31 @@ func TestGlobalMetaBroker_IndexCoord(t *testing.T) {
 
 	cancel()
 }
+
+func TestGetDataSegmentInfosByIDs(t *testing.T) {
+	refreshParams()
+	ctx, cancel := context.WithCancel(context.Background())
+	dataCoord := newDataCoordMock(ctx)
+
+	cm := storage.NewLocalChunkManager(storage.RootPath(globalMetaTestDir))
+	defer cm.RemoveWithPrefix("")
+	handler, err := newGlobalMetaBroker(ctx, nil, dataCoord, nil, cm)
+	assert.Nil(t, err)
+
+	segmentInfos, err := handler.getDataSegmentInfosByIDs([]int64{1})
+	assert.Nil(t, err)
+	assert.Equal(t, 1, len(segmentInfos))
+
+	dataCoord.returnError = true
+	segmentInfos2, err := handler.getDataSegmentInfosByIDs([]int64{1})
+	assert.Error(t, err)
+	assert.Empty(t, segmentInfos2)
+
+	dataCoord.returnError = false
+	dataCoord.returnGrpcError = true
+	segmentInfos3, err := handler.getDataSegmentInfosByIDs([]int64{1})
+	assert.Error(t, err)
+	assert.Empty(t, segmentInfos3)
+
+	cancel()
+}

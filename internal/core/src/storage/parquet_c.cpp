@@ -305,6 +305,12 @@ FinishPayloadWriter(CPayloadWriter payloadWriter) {
     st.error_msg = nullptr;
     auto p = reinterpret_cast<wrapper::PayloadWriter*>(payloadWriter);
     if (p->builder == nullptr) {
+        if (p->dimension == wrapper::EMPTY_DIMENSION) {
+            // For FloatVector/BinaryVector datatype, the builder is lazily inited.
+            // Since wrapper::EMPTY_DIMENSION indicates the builder is not inited,
+            // we simply return success here.
+            return st;
+        }
         st.error_code = static_cast<int>(ErrorCode::UNEXPECTED_ERROR);
         st.error_msg = ErrorMsg("arrow builder is nullptr");
         return st;

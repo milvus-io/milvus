@@ -11,11 +11,11 @@
 
 #pragma once
 
-#include <knowhere/common/MetricType.h>
+#include <knowhere/index/vector_index/helpers/IndexParameter.h>
 
 namespace milvus::segcore {
 static inline bool
-PositivelyRelated(faiss::MetricType metric_type) {
-    return metric_type == faiss::MetricType::METRIC_INNER_PRODUCT;
+PositivelyRelated(const knowhere::MetricType& metric_type) {
+    return metric_type == knowhere::metric::IP;
 }
 }  // namespace milvus::segcore

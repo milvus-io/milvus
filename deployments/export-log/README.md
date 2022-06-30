@@ -15,6 +15,14 @@ For better tracking and debugging Milvus, the script `export-milvus-log.sh` is p
 | i          | Specify the milvus instance name                  | None         |
 | n          | Specify the namespace that milvus is installed in | default      |
 | p          | Specify the log storage path                      | ./milvus-log |
+| e          | Export etcd logs                                  | false        |
+| m          | Export Minio logs                                 | false        |
+| u          | Export pulsar logs                                | false        |
+| k          | Export Kafka logs                                 | False        |
+
+> By default, the script only exports the logs of the Milvus component.
+>
+> If you need to export the logs of etcd, minio, and pulsar components, you need to add the parameters -e, -m, -u.
 
 ## Usage
 
@@ -32,5 +40,17 @@ For better tracking and debugging Milvus, the script `export-milvus-log.sh` is p
 
 ```shell
 ./export-milvus-log.sh -i my-release -n milvus -p ./logs
+```
+
+3. Export the logs of milvus, etcd, minio, and pulsar components.
+
+```shell
+./export-milvus-log.sh -i my-release -n milvus -p ./logs -e -m -u
+```
+
+4. Export the logs of milvus and Kafka components.
+
+```
+./export-milvus-log.sh -i my-release -n milvus -p ./logs -k
 ```
 

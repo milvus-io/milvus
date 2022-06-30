@@ -56,7 +56,7 @@ pipeline {
         string(
             description: 'Etcd Image Tag',
             name: 'etcd_image_tag',
-            defaultValue: "3.5.0-r4"
+            defaultValue: "3.5.0-r5"
         )
         string(
             description: 'Querynode Nums',
@@ -182,8 +182,6 @@ pipeline {
                             sh "echo ${new_image_tag_modified} > new_image_tag_modified.txt"
                             stash includes: 'new_image_tag_modified.txt', name: 'new_image_tag_modified'
                             env.new_image_tag_modified = new_image_tag_modified
-                            sh "docker pull ${params.old_image_repository}:${old_image_tag_modified}"
-                            sh "docker pull ${params.new_image_repository}:${new_image_tag_modified}"
                             if ("${params.deploy_task}" == "reinstall"){
                                 echo "reinstall Milvus with new image tag"
                                 old_image_tag_modified = new_image_tag_modified

@@ -266,6 +266,7 @@ message ReplicaSegmentsInfo {
 message HandoffSegmentsRequest {
   common.MsgBase base = 1;
   repeated SegmentInfo segmentInfos = 2;
+  repeated int64 released_segments = 3;
 }
 
 message LoadBalanceRequest {

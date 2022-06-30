@@ -1048,23 +1048,6 @@ func (c *Core) BuildIndex(ctx context.Context, segID UniqueID, numRows int64, bi
 	return bldID, err
 }
 
-// RemoveIndex will call drop index service
-func (c *Core) RemoveIndex(ctx context.Context, collName string, indexName string) error {
-	_, indexInfos, err := c.MetaTable.GetIndexByName(collName, indexName)
-	if err != nil {
-		log.Error("GetIndexByName failed,", zap.String("collection name", collName),
-			zap.String("index name", indexName), zap.Error(err))
-		return err
-	}
-	for _, indexInfo := range indexInfos {
-		if err = c.CallDropIndexService(ctx, indexInfo.IndexID); err != nil {
-			log.Error("CallDropIndexService failed,", zap.String("collection name", collName), zap.Error(err))
-			return err
-		}
-	}
-	return nil
-}
-
 // ExpireMetaCache will call invalidate collection meta cache
 func (c *Core) ExpireMetaCache(ctx context.Context, collNames []string, collectionID UniqueID, ts typeutil.Timestamp) error {
 	// if collectionID is specified, invalidate all the collection meta cache with the specified collectionID and return
@@ -2260,21 +2243,6 @@ func (c *Core) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlus
 
 	log.Info("SegmentFlushCompleted received", zap.Int64("msgID", in.Base.MsgID), zap.Int64("collID", in.Segment.CollectionID),
 		zap.Int64("partID", in.Segment.PartitionID), zap.Int64("segID", in.Segment.ID), zap.Int64s("compactFrom", in.Segment.CompactionFrom))
-	// acquire reference lock before building index
-	if in.Segment.CreatedByCompaction {
-		log.Debug("try to acquire segment reference lock", zap.Int64("task id", in.Base.MsgID), zap.Int64s("segmentIDs", in.Segment.CompactionFrom))
-		if err := c.CallAddSegRefLock(ctx, in.Base.MsgID, in.Segment.CompactionFrom); err != nil {
-			log.Warn("acquire segment reference lock failed", zap.Int64("task id", in.Base.MsgID), zap.Int64s("segmentIDs", in.Segment.CompactionFrom))
-			return failStatus(commonpb.ErrorCode_UnexpectedError, "AcquireSegRefLock failed: "+err.Error()), nil
-		}
-		defer func() {
-			if err := c.CallReleaseSegRefLock(ctx, in.Base.MsgID, in.Segment.CompactionFrom); err != nil {
-				log.Warn("release segment reference lock failed", zap.Int64("task id", in.Base.MsgID), zap.Int64s("segmentIDs", in.Segment.CompactionFrom))
-				// panic to let ref manager detect release failure
-				panic(err)
-			}
-		}()
-	}
 
 	err = c.createIndexForSegment(ctx, in.Segment.CollectionID, in.Segment.PartitionID, in.Segment.ID, in.Segment.NumOfRows, in.Segment.Binlogs)
 	if err != nil {
@@ -2854,7 +2822,7 @@ func (c *Core) UpdateCredCache(ctx context.Context, credInfo *internalpb.Credent
 			SourceID: c.session.ServerID,
 		},
 		Username: credInfo.Username,
-		Password: credInfo.EncryptedPassword,
+		Password: credInfo.Sha256Password,
 	}
 	return c.proxyClientManager.UpdateCredentialCache(ctx, &req)
 }
@@ -2879,21 +2847,20 @@ func (c *Core) CreateCredential(ctx context.Context, credInfo *internalpb.Creden
 	if cred, _ := c.MetaTable.getCredential(credInfo.Username); cred != nil {
 		return failStatus(commonpb.ErrorCode_CreateCredentialFailure, "user already exists:"+credInfo.Username), nil
 	}
-	// update proxy's local cache
-	err := c.ClearCredUsersCache(ctx)
-	if err != nil {
-		log.Error("CreateCredential clear credential username list cache failed", zap.String("role", typeutil.RootCoordRole),
-			zap.String("username", credInfo.Username), zap.Error(err))
-		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
-		return failStatus(commonpb.ErrorCode_CreateCredentialFailure, "CreateCredential failed: "+err.Error()), nil
-	}
 	// insert to db
-	err = c.MetaTable.AddCredential(credInfo)
+	err := c.MetaTable.AddCredential(credInfo)
 	if err != nil {
 		log.Error("CreateCredential save credential failed", zap.String("role", typeutil.RootCoordRole),
 			zap.String("username", credInfo.Username), zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 		return failStatus(commonpb.ErrorCode_CreateCredentialFailure, "CreateCredential failed: "+err.Error()), nil
+	}
+	// update proxy's local cache
+	err = c.UpdateCredCache(ctx, credInfo)
+	if err != nil {
+		log.Warn("CreateCredential add cache failed", zap.String("role", typeutil.RootCoordRole),
+			zap.String("username", credInfo.Username), zap.Error(err))
+		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 	}
 	log.Debug("CreateCredential success", zap.String("role", typeutil.RootCoordRole),
 		zap.String("username", credInfo.Username))
@@ -2940,18 +2907,18 @@ func (c *Core) UpdateCredential(ctx context.Context, credInfo *internalpb.Creden
 	tr := timerecord.NewTimeRecorder(method)
 	log.Debug("UpdateCredential", zap.String("role", typeutil.RootCoordRole),
 		zap.String("username", credInfo.Username))
-	// update proxy's local cache
-	err := c.UpdateCredCache(ctx, credInfo)
+	// update data on storage
+	err := c.MetaTable.AddCredential(credInfo)
 	if err != nil {
-		log.Error("UpdateCredential update credential cache failed", zap.String("role", typeutil.RootCoordRole),
+		log.Error("UpdateCredential save credential failed", zap.String("role", typeutil.RootCoordRole),
 			zap.String("username", credInfo.Username), zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 		return failStatus(commonpb.ErrorCode_UpdateCredentialFailure, "UpdateCredential failed: "+err.Error()), nil
 	}
-	// update data on storage
-	err = c.MetaTable.AddCredential(credInfo)
+	// update proxy's local cache
+	err = c.UpdateCredCache(ctx, credInfo)
 	if err != nil {
-		log.Error("UpdateCredential save credential failed", zap.String("role", typeutil.RootCoordRole),
+		log.Error("UpdateCredential update cache failed", zap.String("role", typeutil.RootCoordRole),
 			zap.String("username", credInfo.Username), zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 		return failStatus(commonpb.ErrorCode_UpdateCredentialFailure, "UpdateCredential failed: "+err.Error()), nil
@@ -2970,23 +2937,21 @@ func (c *Core) DeleteCredential(ctx context.Context, in *milvuspb.DeleteCredenti
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder(method)
 
-	log.Debug("DeleteCredential", zap.String("role", typeutil.RootCoordRole),
-		zap.String("username", in.Username))
-	// invalidate proxy's local cache
-	err := c.ExpireCredCache(ctx, in.Username)
-	if err != nil {
-		log.Error("DeleteCredential expire credential cache failed", zap.String("role", typeutil.RootCoordRole),
-			zap.String("username", in.Username), zap.Error(err))
-		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
-		return failStatus(commonpb.ErrorCode_DeleteCredentialFailure, "DeleteCredential failed: "+err.Error()), nil
-	}
 	// delete data on storage
-	err = c.MetaTable.DeleteCredential(in.Username)
+	err := c.MetaTable.DeleteCredential(in.Username)
 	if err != nil {
 		log.Error("DeleteCredential remove credential failed", zap.String("role", typeutil.RootCoordRole),
 			zap.String("username", in.Username), zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 		return failStatus(commonpb.ErrorCode_DeleteCredentialFailure, "DeleteCredential failed: "+err.Error()), err
+	}
+	// invalidate proxy's local cache
+	err = c.ExpireCredCache(ctx, in.Username)
+	if err != nil {
+		log.Error("DeleteCredential expire credential cache failed", zap.String("role", typeutil.RootCoordRole),
+			zap.String("username", in.Username), zap.Error(err))
+		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
+		return failStatus(commonpb.ErrorCode_DeleteCredentialFailure, "DeleteCredential failed: "+err.Error()), nil
 	}
 	log.Debug("DeleteCredential success", zap.String("role", typeutil.RootCoordRole),
 		zap.String("username", in.Username))

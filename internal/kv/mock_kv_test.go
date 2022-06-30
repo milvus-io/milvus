@@ -91,6 +91,10 @@ func TestMockKV_MetaKV(t *testing.T) {
 	})
 
 	assert.Panics(t, func() {
+		mockKv.LoadWithRevisionAndVersions(testKey)
+	})
+
+	assert.Panics(t, func() {
 		mockKv.LoadWithRevision(testKey)
 	})
 

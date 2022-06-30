@@ -2,6 +2,7 @@ package querynode
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -113,6 +114,24 @@ func TestShardClusterService_HandoffVChannelSegments(t *testing.T) {
 	})
 
 	t.Run("error case", func(t *testing.T) {
+		mqn := &mockShardQueryNode{}
+		nodeEvents := []nodeEvent{
+			{
+				nodeID:   3,
+				nodeAddr: "addr_3",
+			},
+		}
+
+		sc := NewShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel,
+			&mockNodeDetector{initNodes: nodeEvents}, &mockSegmentDetector{}, func(nodeID int64, addr string) shardQueryNode {
+				return mqn
+			})
+		defer sc.Close()
+
+		mqn.releaseSegmentsErr = errors.New("mocked error")
+
+		// set mocked shard cluster
+		clusterService.clusters.Store(defaultDMLChannel, sc)
 		assert.NotPanics(t, func() {
 			err = clusterService.HandoffVChannelSegments(defaultDMLChannel, &querypb.SegmentChangeInfo{
 				OfflineSegments: []*querypb.SegmentInfo{

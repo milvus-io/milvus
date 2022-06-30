@@ -35,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
@@ -71,14 +70,14 @@ type Meta interface {
 	hasPartition(collectionID UniqueID, partitionID UniqueID) bool
 	hasReleasePartition(collectionID UniqueID, partitionID UniqueID) bool
 	releasePartitions(collectionID UniqueID, partitionIDs []UniqueID) error
+	getPartitionStatesByID(collectionID UniqueID, partitionID UniqueID) (*querypb.PartitionStates, error)
 
 	showSegmentInfos(collectionID UniqueID, partitionIDs []UniqueID) []*querypb.SegmentInfo
 	getSegmentInfoByID(segmentID UniqueID) (*querypb.SegmentInfo, error)
 	getSegmentInfosByNode(nodeID int64) []*querypb.SegmentInfo
 	getSegmentInfosByNodeAndCollection(nodeID, collectionID int64) []*querypb.SegmentInfo
-	saveSegmentInfo(segment *querypb.SegmentInfo) error
-
-	getPartitionStatesByID(collectionID UniqueID, partitionID UniqueID) (*querypb.PartitionStates, error)
+	saveGlobalSealedSegInfos(saves col2SegmentInfos, removes col2SegmentInfos) error
+	removeGlobalSealedSegInfos(collectionID UniqueID, partitionIDs []UniqueID) error
 
 	getDmChannel(dmChannelName string) (*querypb.DmChannelWatchInfo, bool)
 	getDmChannelInfosByNodeID(nodeID int64) []*querypb.DmChannelWatchInfo
@@ -88,13 +87,8 @@ type Meta interface {
 	getDeltaChannelsByCollectionID(collectionID UniqueID) ([]*datapb.VchannelInfo, error)
 	setDeltaChannel(collectionID UniqueID, info []*datapb.VchannelInfo) error
 
-	getQueryChannelInfoByID(collectionID UniqueID) *querypb.QueryChannelInfo
-
 	setLoadType(collectionID UniqueID, loadType querypb.LoadType) error
 	setLoadPercentage(collectionID UniqueID, partitionID UniqueID, percentage int64, loadType querypb.LoadType) error
-	//printMeta()
-	saveGlobalSealedSegInfos(saves col2SegmentInfos) (col2SealedSegmentChangeInfos, error)
-	removeGlobalSealedSegInfos(collectionID UniqueID, partitionIDs []UniqueID) (col2SealedSegmentChangeInfos, error)
 
 	getWatchedChannelsByNodeID(nodeID int64) *querypb.UnsubscribeChannelInfo
 
@@ -106,8 +100,6 @@ type Meta interface {
 	getReplicasByNodeID(nodeID int64) ([]*milvuspb.ReplicaInfo, error)
 	applyReplicaBalancePlan(p *balancePlan) error
 	updateShardLeader(replicaID UniqueID, dmChannel string, leaderID UniqueID, leaderAddr string) error
-
-	getDataSegmentInfosByIDs(segmentIds []int64) ([]*datapb.SegmentInfo, error)
 }
 
 // MetaReplica records the current load information on all querynodes
@@ -123,8 +115,6 @@ type MetaReplica struct {
 	//sync.RWMutex
 	collectionInfos   map[UniqueID]*querypb.CollectionInfo
 	collectionMu      sync.RWMutex
-	queryChannelInfos map[UniqueID]*querypb.QueryChannelInfo
-	channelMu         sync.RWMutex
 	deltaChannelInfos map[UniqueID][]*datapb.VchannelInfo
 	deltaChannelMu    sync.RWMutex
 	dmChannelInfos    map[string]*querypb.DmChannelWatchInfo
@@ -137,10 +127,9 @@ type MetaReplica struct {
 	dataCoord types.DataCoord
 }
 
-func newMeta(ctx context.Context, kv kv.MetaKv, factory dependency.Factory, idAllocator func() (UniqueID, error), dataCoord types.DataCoord) (Meta, error) {
+func newMeta(ctx context.Context, kv kv.MetaKv, factory dependency.Factory, idAllocator func() (UniqueID, error)) (Meta, error) {
 	childCtx, cancel := context.WithCancel(ctx)
 	collectionInfos := make(map[UniqueID]*querypb.CollectionInfo)
-	queryChannelInfos := make(map[UniqueID]*querypb.QueryChannelInfo)
 	deltaChannelInfos := make(map[UniqueID][]*datapb.VchannelInfo)
 	dmChannelInfos := make(map[string]*querypb.DmChannelWatchInfo)
 
@@ -151,13 +140,11 @@ func newMeta(ctx context.Context, kv kv.MetaKv, factory dependency.Factory, idAl
 		idAllocator: idAllocator,
 
 		collectionInfos:   collectionInfos,
-		queryChannelInfos: queryChannelInfos,
 		deltaChannelInfos: deltaChannelInfos,
 		dmChannelInfos:    dmChannelInfos,
 
 		segmentsInfo: newSegmentsInfo(kv),
 		replicas:     NewReplicaInfos(),
-		dataCoord:    dataCoord,
 	}
 	m.setKvClient(kv)
 
@@ -253,9 +240,6 @@ func (m *MetaReplica) reloadFromKV() error {
 					nodes[nodeID] = struct{}{}
 				}
 			}
-			for nodeID := range nodes {
-				replica.NodeIds = append(replica.NodeIds, nodeID)
-			}
 
 			shardReplicas := make([]*milvuspb.ShardReplica, 0, len(dmChannels[collectionInfo.CollectionID]))
 			for _, dmc := range dmChannels[collectionInfo.CollectionID] {
@@ -264,6 +248,12 @@ func (m *MetaReplica) reloadFromKV() error {
 					// LeaderAddr: Will set it after the cluster is reloaded
 					DmChannelName: dmc.DmChannel,
 				})
+				nodes[dmc.NodeIDLoaded] = struct{}{}
+			}
+			replica.ShardReplicas = shardReplicas
+
+			for nodeID := range nodes {
+				replica.NodeIds = append(replica.NodeIds, nodeID)
 			}
 
 			err = m.addReplica(replica)
@@ -583,15 +573,11 @@ func (m *MetaReplica) releasePartitions(collectionID UniqueID, releasedPartition
 	return nil
 }
 
-func (m *MetaReplica) saveGlobalSealedSegInfos(saves col2SegmentInfos) (col2SealedSegmentChangeInfos, error) {
-	if len(saves) == 0 {
-		return nil, nil
-	}
+// TODO refactor this a weird implementation, too many edge cases
+func (m *MetaReplica) saveGlobalSealedSegInfos(saves col2SegmentInfos, removes col2SegmentInfos) error {
 	// generate segment change info according segment info to updated
 	col2SegmentChangeInfos := make(col2SealedSegmentChangeInfos)
-
-	segmentsCompactionFrom := make([]*querypb.SegmentInfo, 0)
-	// get segmentInfos to colSegmentInfos
+	// for load balance, check if the online segments is offline at anywhere else
 	for collectionID, onlineInfos := range saves {
 		segmentsChangeInfo := &querypb.SealedSegmentsChangeInfo{
 			Base: &commonpb.MsgBase{
@@ -602,56 +588,51 @@ func (m *MetaReplica) saveGlobalSealedSegInfos(saves col2SegmentInfos) (col2Seal
 
 		for _, info := range onlineInfos {
 			segmentID := info.SegmentID
+			onlineInfo := proto.Clone(info).(*querypb.SegmentInfo)
 
+			changeInfo := &querypb.SegmentChangeInfo{
+				OnlineSegments: []*querypb.SegmentInfo{onlineInfo},
+			}
+
+			// LoadBalance case
+			// A node loads the segment, and the other one offloads
 			offlineInfo, err := m.getSegmentInfoByID(segmentID)
-			if err == nil {
+			if err == nil && offlineInfo.SegmentState == commonpb.SegmentState_Sealed {
 				// if the offline segment state is growing, it will not impact the global sealed segments
-				if offlineInfo.SegmentState == commonpb.SegmentState_Sealed {
-					offlineNodes := diffSlice(offlineInfo.NodeIds, info.NodeIds...)
+				onlineInfo.NodeIds = diffSlice(info.NodeIds, offlineInfo.NodeIds...)
+				offlineInfo.NodeIds = diffSlice(offlineInfo.NodeIds, info.NodeIds...)
 
-					for _, node := range offlineNodes {
-						segmentsChangeInfo.Infos = append(segmentsChangeInfo.Infos,
-							&querypb.SegmentChangeInfo{
-								OfflineNodeID:   node,
-								OfflineSegments: []*querypb.SegmentInfo{offlineInfo},
-							})
-					}
-				}
+				changeInfo.OfflineSegments = append(changeInfo.OfflineSegments, offlineInfo)
 			}
 
-			// generate offline segment change info if the loaded segment is compacted from other sealed segments
-			for _, compactionSegmentID := range info.CompactionFrom {
-				compactionSegmentInfo, err := m.getSegmentInfoByID(compactionSegmentID)
-				if err == nil && compactionSegmentInfo.SegmentState == commonpb.SegmentState_Sealed {
-					for _, node := range compactionSegmentInfo.NodeIds {
-						segmentsChangeInfo.Infos = append(segmentsChangeInfo.Infos, &querypb.SegmentChangeInfo{
-							OfflineNodeID:   node,
-							OfflineSegments: []*querypb.SegmentInfo{compactionSegmentInfo},
-						})
-					}
-					segmentsCompactionFrom = append(segmentsCompactionFrom, compactionSegmentInfo)
-				} else {
-					return nil, fmt.Errorf("saveGlobalSealedSegInfos: the compacted segment %d has not been loaded into memory", compactionSegmentID)
-				}
-			}
+			segmentsChangeInfo.Infos = append(segmentsChangeInfo.Infos,
+				changeInfo)
 		}
 		col2SegmentChangeInfos[collectionID] = segmentsChangeInfo
 	}
 
-	// save segmentInfo to etcd
-	for _, infos := range saves {
-		for _, info := range infos {
-			if err := m.segmentsInfo.saveSegment(info); err != nil {
-				panic(err)
+	// for handoff, there are some segments removed from segment list
+	for collectionID, offlineInfos := range removes {
+		segmentsChangeInfo, ok := col2SegmentChangeInfos[collectionID]
+		if !ok {
+			// if the case we don't have same collection ID in saves, should not happen
+			segmentsChangeInfo = &querypb.SealedSegmentsChangeInfo{
+				Base: &commonpb.MsgBase{
+					MsgType: commonpb.MsgType_SealedSegmentsChangeInfo,
+				},
+				Infos: []*querypb.SegmentChangeInfo{},
+			}
+			col2SegmentChangeInfos[collectionID] = segmentsChangeInfo
+		}
+
+		changeInfo := &querypb.SegmentChangeInfo{}
+		for _, offlineInfo := range offlineInfos {
+			if offlineInfo.SegmentState == commonpb.SegmentState_Sealed {
+				changeInfo.OfflineSegments = append(changeInfo.OfflineSegments, offlineInfo)
 			}
 		}
-	}
 
-	// remove compacted segment info from etcd
-	for _, segmentInfo := range segmentsCompactionFrom {
-		if err := m.segmentsInfo.removeSegment(segmentInfo); err != nil {
-			panic(err)
-		}
+		segmentsChangeInfo.Infos = append(segmentsChangeInfo.Infos, changeInfo)
 	}
 
 	// save sealedSegmentsChangeInfo to etcd
@@ -662,7 +643,7 @@ func (m *MetaReplica) saveGlobalSealedSegInfos(saves col2SegmentInfos) (col2Seal
 	for _, changeInfos := range col2SegmentChangeInfos {
 		changeInfoBytes, err := proto.Marshal(changeInfos)
 		if err != nil {
-			return col2SegmentChangeInfos, err
+			return err
 		}
 		// TODO:: segmentChangeInfo clear in etcd with coord gc and queryNode watch the changeInfo meta to deal changeInfoMsg
 		changeInfoKey := fmt.Sprintf("%s/%d", util.ChangeInfoMetaPrefix, changeInfos.Base.MsgID)
@@ -671,16 +652,35 @@ func (m *MetaReplica) saveGlobalSealedSegInfos(saves col2SegmentInfos) (col2Seal
 
 	err := m.getKvClient().MultiSave(saveKvs)
 	if err != nil {
-		panic(err)
+		return err
 	}
 
-	return col2SegmentChangeInfos, nil
+	// TODO batch save/remove segment info to maintain atomicity
+	// save segmentInfo to etcd
+	for _, infos := range saves {
+		for _, info := range infos {
+			if err := m.segmentsInfo.saveSegment(info); err != nil {
+				panic(err)
+			}
+		}
+	}
+
+	// remove segmentInfos to remove
+	for _, infos := range removes {
+		for _, info := range infos {
+			if err := m.segmentsInfo.removeSegment(info); err != nil {
+				panic(err)
+			}
+		}
+	}
+
+	return nil
 }
 
-func (m *MetaReplica) removeGlobalSealedSegInfos(collectionID UniqueID, partitionIDs []UniqueID) (col2SealedSegmentChangeInfos, error) {
+func (m *MetaReplica) removeGlobalSealedSegInfos(collectionID UniqueID, partitionIDs []UniqueID) error {
 	removes := m.showSegmentInfos(collectionID, partitionIDs)
 	if len(removes) == 0 {
-		return nil, nil
+		return nil
 	}
 	// get segmentInfos to remove
 	segmentChangeInfos := &querypb.SealedSegmentsChangeInfo{
@@ -700,27 +700,6 @@ func (m *MetaReplica) removeGlobalSealedSegInfos(collectionID UniqueID, partitio
 		}
 	}
 
-	// produce sealedSegmentChangeInfos to query channel
-	queryChannelInfo := m.getQueryChannelInfoByID(collectionID)
-
-	// update segmentInfo, queryChannelInfo meta to cache and etcd
-	seg2Info := make(map[UniqueID]*querypb.SegmentInfo)
-	for _, segmentInfo := range queryChannelInfo.GlobalSealedSegments {
-		segmentID := segmentInfo.SegmentID
-		seg2Info[segmentID] = segmentInfo
-	}
-
-	for _, segmentInfo := range removes {
-		segmentID := segmentInfo.SegmentID
-		delete(seg2Info, segmentID)
-	}
-
-	globalSealedSegmentInfos := make([]*querypb.SegmentInfo, 0)
-	for _, info := range seg2Info {
-		globalSealedSegmentInfos = append(globalSealedSegmentInfos, info)
-	}
-	queryChannelInfo.GlobalSealedSegments = globalSealedSegmentInfos
-
 	// remove meta from etcd
 	for _, info := range removes {
 		if err := m.segmentsInfo.removeSegment(info); err != nil {
@@ -734,7 +713,7 @@ func (m *MetaReplica) removeGlobalSealedSegInfos(collectionID UniqueID, partitio
 	// then the msgID key will not exist, and changeIndo will be ignored by query node
 	changeInfoBytes, err := proto.Marshal(segmentChangeInfos)
 	if err != nil {
-		return col2SealedSegmentChangeInfos{collectionID: segmentChangeInfos}, err
+		return err
 	}
 	// TODO:: segmentChangeInfo clear in etcd with coord gc and queryNode watch the changeInfo meta to deal changeInfoMsg
 	changeInfoKey := fmt.Sprintf("%s/%d", util.ChangeInfoMetaPrefix, segmentChangeInfos.Base.MsgID)
@@ -745,11 +724,7 @@ func (m *MetaReplica) removeGlobalSealedSegInfos(collectionID UniqueID, partitio
 		panic(err)
 	}
 
-	m.channelMu.Lock()
-	m.queryChannelInfos[collectionID] = queryChannelInfo
-	m.channelMu.Unlock()
-
-	return col2SealedSegmentChangeInfos{collectionID: segmentChangeInfos}, nil
+	return nil
 }
 
 func (m *MetaReplica) showSegmentInfos(collectionID UniqueID, partitionIDs []UniqueID) []*querypb.SegmentInfo {
@@ -798,10 +773,6 @@ func (m *MetaReplica) getSegmentInfosByNodeAndCollection(nodeID, collectionID in
 		}
 	}
 	return res
-}
-
-func (m *MetaReplica) saveSegmentInfo(segment *querypb.SegmentInfo) error {
-	return m.segmentsInfo.saveSegment(segment)
 }
 
 func (m *MetaReplica) getCollectionInfoByID(collectionID UniqueID) (*querypb.CollectionInfo, error) {
@@ -881,32 +852,6 @@ func (m *MetaReplica) setDmChannelInfos(dmChannelWatchInfos ...*querypb.DmChanne
 	return nil
 }
 
-// createQueryChannel creates topic names for search channel and search result channel
-// Search channel's suffix is fixed with "-0"
-// Search result channel's suffix is fixed with "-0"
-func (m *MetaReplica) createQueryChannel(collectionID UniqueID) *querypb.QueryChannelInfo {
-	allocatedQueryChannel := fmt.Sprintf("%s-0", Params.CommonCfg.QueryCoordSearch)
-	allocatedQueryResultChannel := fmt.Sprintf("%s-0", Params.CommonCfg.QueryCoordSearchResult)
-
-	log.Info("query coordinator is creating query channel",
-		zap.String("query channel name", allocatedQueryChannel),
-		zap.String("query result channel name", allocatedQueryResultChannel))
-
-	seekPosition := &internalpb.MsgPosition{
-		ChannelName: allocatedQueryChannel,
-	}
-	segmentInfos := m.showSegmentInfos(collectionID, nil)
-	info := &querypb.QueryChannelInfo{
-		CollectionID:         collectionID,
-		QueryChannel:         allocatedQueryChannel,
-		QueryResultChannel:   allocatedQueryResultChannel,
-		GlobalSealedSegments: segmentInfos,
-		SeekPosition:         seekPosition,
-	}
-
-	return info
-}
-
 // Get delta channel info for collection, so far all the collection share the same query channel 0
 func (m *MetaReplica) getDeltaChannelsByCollectionID(collectionID UniqueID) ([]*datapb.VchannelInfo, error) {
 	m.deltaChannelMu.RLock()
@@ -928,12 +873,6 @@ func (m *MetaReplica) setDeltaChannel(collectionID UniqueID, infos []*datapb.Vch
 		return err
 	}
 
-	_, ok := m.deltaChannelInfos[collectionID]
-	if ok {
-		log.Debug("delta channel already exist", zap.Any("collectionID", collectionID))
-		return nil
-	}
-
 	err := saveDeltaChannelInfo(collectionID, infos, m.getKvClient())
 	if err != nil {
 		log.Error("save delta channel info error", zap.Int64("collectionID", collectionID), zap.Error(err))
@@ -942,22 +881,6 @@ func (m *MetaReplica) setDeltaChannel(collectionID UniqueID, infos []*datapb.Vch
 	log.Info("save delta channel infos to meta", zap.Any("collectionID", collectionID))
 	m.deltaChannelInfos[collectionID] = infos
 	return nil
-}
-
-// Get Query channel info for collection, so far all the collection share the same query channel 0
-func (m *MetaReplica) getQueryChannelInfoByID(collectionID UniqueID) *querypb.QueryChannelInfo {
-	m.channelMu.Lock()
-	defer m.channelMu.Unlock()
-
-	var channelInfo *querypb.QueryChannelInfo
-	if info, ok := m.queryChannelInfos[collectionID]; ok {
-		channelInfo = proto.Clone(info).(*querypb.QueryChannelInfo)
-	} else {
-		channelInfo = m.createQueryChannel(collectionID)
-		m.queryChannelInfos[collectionID] = channelInfo
-	}
-
-	return proto.Clone(channelInfo).(*querypb.QueryChannelInfo)
 }
 
 func (m *MetaReplica) setLoadType(collectionID UniqueID, loadType querypb.LoadType) error {
@@ -1039,8 +962,7 @@ func (m *MetaReplica) getWatchedChannelsByNodeID(nodeID int64) *querypb.Unsubscr
 	// 1. find all the search/dmChannel/deltaChannel the node has watched
 	colID2DmChannels := make(map[UniqueID][]string)
 	colID2DeltaChannels := make(map[UniqueID][]string)
-	// TODO remove colID2QueryChannel since it's not used
-	colID2QueryChannel := make(map[UniqueID]string)
+
 	dmChannelInfos := m.getDmChannelInfosByNodeID(nodeID)
 	// get dmChannel/search channel the node has watched
 	for _, channelInfo := range dmChannelInfos {
@@ -1050,10 +972,6 @@ func (m *MetaReplica) getWatchedChannelsByNodeID(nodeID int64) *querypb.Unsubscr
 			colID2DmChannels[collectionID] = []string{}
 		}
 		colID2DmChannels[collectionID] = append(colID2DmChannels[collectionID], dmChannel)
-		if _, ok := colID2QueryChannel[collectionID]; !ok {
-			queryChannelInfo := m.getQueryChannelInfoByID(collectionID)
-			colID2QueryChannel[collectionID] = queryChannelInfo.QueryChannel
-		}
 	}
 	segmentInfos := m.getSegmentInfosByNode(nodeID)
 	colIDs := make(map[UniqueID]bool)
@@ -1076,10 +994,6 @@ func (m *MetaReplica) getWatchedChannelsByNodeID(nodeID int64) *querypb.Unsubscr
 			}
 			colID2DeltaChannels[collectionID] = deltaChannels
 		}
-		if _, ok := colID2QueryChannel[collectionID]; !ok {
-			queryChannelInfo := m.getQueryChannelInfoByID(collectionID)
-			colID2QueryChannel[collectionID] = queryChannelInfo.QueryChannel
-		}
 	}
 
 	// creating unsubscribeChannelInfo, which will be written to etcd
@@ -1089,9 +1003,6 @@ func (m *MetaReplica) getWatchedChannelsByNodeID(nodeID int64) *querypb.Unsubscr
 	}
 	for collectionID, channels := range colID2DeltaChannels {
 		colID2Channels[collectionID] = append(colID2Channels[collectionID], channels...)
-	}
-	for collectionID, channel := range colID2QueryChannel {
-		colID2Channels[collectionID] = append(colID2Channels[collectionID], channel)
 	}
 
 	unsubscribeChannelInfo := &querypb.UnsubscribeChannelInfo{
@@ -1207,22 +1118,6 @@ func (m *MetaReplica) updateShardLeader(replicaID UniqueID, dmChannel string, le
 	return m.replicas.UpdateShardLeader(replicaID, dmChannel, leaderID, leaderAddr, m.getKvClient())
 }
 
-//func (m *MetaReplica) printMeta() {
-//	m.RLock()
-//	defer m.RUnlock()
-//	for id, info := range m.collectionInfos {
-//		log.Debug("query coordinator MetaReplica: collectionInfo", zap.Int64("collectionID", id), zap.Any("info", info))
-//	}
-//
-//	for id, info := range m.segmentInfos {
-//		log.Debug("query coordinator MetaReplica: segmentInfo", zap.Int64("segmentID", id), zap.Any("info", info))
-//	}
-//
-//	for id, info := range m.queryChannelInfos {
-//		log.Debug("query coordinator MetaReplica: queryChannelInfo", zap.Int64("collectionID", id), zap.Any("info", info))
-//	}
-//}
-
 func saveGlobalCollectionInfo(collectionID UniqueID, info *querypb.CollectionInfo, kv kv.MetaKv) error {
 	infoBytes, err := proto.Marshal(info)
 	if err != nil {
@@ -1334,30 +1229,4 @@ func addNode2Segment(meta Meta, node UniqueID, replicas []*milvuspb.ReplicaInfo,
 	}
 
 	segment.NodeIds = append(segment.NodeIds, node)
-}
-
-// getDataSegmentInfosByIDs return the SegmentInfo details according to the given ids through RPC to datacoord
-func (m *MetaReplica) getDataSegmentInfosByIDs(segmentIds []int64) ([]*datapb.SegmentInfo, error) {
-	var segmentInfos []*datapb.SegmentInfo
-	infoResp, err := m.dataCoord.GetSegmentInfo(m.ctx, &datapb.GetSegmentInfoRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_SegmentInfo,
-			MsgID:     0,
-			Timestamp: 0,
-			SourceID:  Params.ProxyCfg.GetNodeID(),
-		},
-		SegmentIDs:       segmentIds,
-		IncludeUnHealthy: true,
-	})
-	if err != nil {
-		log.Error("Fail to get datapb.SegmentInfo by ids from datacoord", zap.Error(err))
-		return nil, err
-	}
-	if infoResp.GetStatus().ErrorCode != commonpb.ErrorCode_Success {
-		err = errors.New(infoResp.GetStatus().Reason)
-		log.Error("Fail to get datapb.SegmentInfo by ids from datacoord", zap.Error(err))
-		return nil, err
-	}
-	segmentInfos = infoResp.Infos
-	return segmentInfos, nil
 }

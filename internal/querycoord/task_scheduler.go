@@ -359,7 +359,7 @@ func (scheduler *TaskScheduler) unmarshalTask(taskID UniqueID, t string) (task, 
 		if err != nil {
 			return nil, err
 		}
-		fullReq, err := generateFullWatchDmChannelsRequest(scheduler.meta, &req)
+		fullReq, err := generateFullWatchDmChannelsRequest(scheduler.broker, &req)
 		if err != nil {
 			return nil, err
 		}
@@ -432,6 +432,7 @@ func (scheduler *TaskScheduler) unmarshalTask(taskID UniqueID, t string) (task, 
 
 // Enqueue pushs a trigger task to triggerTaskQueue and assigns task id
 func (scheduler *TaskScheduler) Enqueue(t task) error {
+	// TODO, loadbalance, handoff and other task may not want to be persisted
 	id, err := scheduler.taskIDAllocator()
 	if err != nil {
 		log.Error("allocator trigger taskID failed", zap.Error(err))
@@ -660,27 +661,13 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 						processInternalTaskFn(derivedInternalTasks, triggerTask)
 					}
 				}
+			}
 
-				//TODO::xige-16, judging the triggerCondition is ugly, the taskScheduler will be refactored soon
-				// if query node down, the loaded segment and watched dmChannel by the node should be balance to new querynode
-				// if triggerCondition == NodeDown, loadSegment and watchDmchannel request will keep reschedule until the success
-				// the node info has been deleted after assgining child task to triggerTask
-				// so it is necessary to update the meta of segment and dmchannel, or some data may be lost in meta
-				resultInfo := triggerTask.getResultInfo()
-				if resultInfo.ErrorCode != commonpb.ErrorCode_Success {
-					if !alreadyNotify {
-						triggerTask.notify(errors.New(resultInfo.Reason))
-						alreadyNotify = true
-					}
-					rollBackTasks := triggerTask.rollBack(scheduler.ctx)
-					log.Info("scheduleLoop: start rollBack after triggerTask failed",
-						zap.Int64("triggerTaskID", triggerTask.getTaskID()),
-						zap.Any("rollBackTasks", rollBackTasks),
-						zap.String("error", resultInfo.Reason))
-					// there is no need to save rollBacked internal task to etcd
-					// After queryCoord recover, it will retry failed childTask
-					// if childTask still execute failed, then reProduce rollBacked tasks
-					processInternalTaskFn(rollBackTasks, triggerTask)
+			// triggerTask may be LoadCollection, LoadPartitions, LoadBalance, Handoff
+			if triggerTask.getResultInfo().ErrorCode == commonpb.ErrorCode_Success || triggerTask.getTriggerCondition() == querypb.TriggerCondition_NodeDown {
+				err = updateSegmentInfoFromTask(scheduler.ctx, triggerTask, scheduler.meta)
+				if err != nil {
+					triggerTask.setResultInfo(err)
 				}
 			}
 
@@ -694,12 +681,21 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 				}
 			}
 
-			// triggerTask may be LoadCollection, LoadPartitions, LoadBalance, Handoff
-			if triggerTask.getResultInfo().ErrorCode == commonpb.ErrorCode_Success || triggerTask.getTriggerCondition() == querypb.TriggerCondition_NodeDown {
-				err = updateSegmentInfoFromTask(scheduler.ctx, triggerTask, scheduler.meta)
-				if err != nil {
-					triggerTask.setResultInfo(err)
+			resultInfo := triggerTask.getResultInfo()
+			if resultInfo.ErrorCode != commonpb.ErrorCode_Success {
+				if !alreadyNotify {
+					triggerTask.notify(errors.New(resultInfo.Reason))
+					alreadyNotify = true
 				}
+				rollBackTasks := triggerTask.rollBack(scheduler.ctx)
+				log.Info("scheduleLoop: start rollBack after triggerTask failed",
+					zap.Int64("triggerTaskID", triggerTask.getTaskID()),
+					zap.Any("rollBackTasks", rollBackTasks),
+					zap.String("error", resultInfo.Reason))
+				// there is no need to save rollBacked internal task to etcd
+				// After queryCoord recover, it will retry failed childTask
+				// if childTask still execute failed, then reProduce rollBacked tasks
+				processInternalTaskFn(rollBackTasks, triggerTask)
 			}
 
 			err = removeTaskFromKVFn(triggerTask)
@@ -925,37 +921,40 @@ func (scheduler *TaskScheduler) BindContext(ctx context.Context) (context.Contex
 func updateSegmentInfoFromTask(ctx context.Context, triggerTask task, meta Meta) error {
 	segmentInfosToSave := make(map[UniqueID][]*querypb.SegmentInfo)
 	segmentInfosToRemove := make(map[UniqueID][]*querypb.SegmentInfo)
-
-	//var sealedSegmentChangeInfos col2SealedSegmentChangeInfos
 	var err error
 	switch triggerTask.msgType() {
 	case commonpb.MsgType_ReleaseCollection:
 		// release all segmentInfo of the collection when release collection
 		req := triggerTask.(*releaseCollectionTask).ReleaseCollectionRequest
 		collectionID := req.CollectionID
-		_, err = meta.removeGlobalSealedSegInfos(collectionID, nil)
+		err = meta.removeGlobalSealedSegInfos(collectionID, nil)
 
 	case commonpb.MsgType_ReleasePartitions:
 		// release all segmentInfo of the partitions when release partitions
 		req := triggerTask.(*releasePartitionTask).ReleasePartitionsRequest
 		collectionID := req.CollectionID
-		segmentInfos := meta.showSegmentInfos(collectionID, req.PartitionIDs)
-		for _, info := range segmentInfos {
-			if info.CollectionID == collectionID {
-				if _, ok := segmentInfosToRemove[collectionID]; !ok {
-					segmentInfosToRemove[collectionID] = make([]*querypb.SegmentInfo, 0)
-				}
-				segmentInfosToRemove[collectionID] = append(segmentInfosToRemove[collectionID], info)
+		err = meta.removeGlobalSealedSegInfos(collectionID, req.PartitionIDs)
+
+	case commonpb.MsgType_HandoffSegments:
+		// remove released segments
+		req := triggerTask.(*handoffTask).HandoffSegmentsRequest
+		collectionID := req.SegmentInfos[0].CollectionID
+		offlineInfos := make([]*querypb.SegmentInfo, 0)
+		for _, releasedSegmentID := range req.ReleasedSegments {
+			info, err := meta.getSegmentInfoByID(releasedSegmentID)
+			if err != nil {
+				// might be a retry, this is no correct but so far we will take it
+				log.Warn("failed to find offline segment info while handoff, ignore it", zap.Int64("segmentID", releasedSegmentID), zap.Error(err))
+			} else {
+				offlineInfos = append(offlineInfos, info)
 			}
 		}
-		_, err = meta.removeGlobalSealedSegInfos(collectionID, req.PartitionIDs)
-
+		segmentInfosToRemove[collectionID] = offlineInfos
+		// still run default case to handle load segments
+		fallthrough
 	default:
 		// save new segmentInfo when load segment
-		var (
-			segments = make(map[UniqueID]*querypb.SegmentInfo)
-		)
-
+		segments := make(map[UniqueID]*querypb.SegmentInfo)
 		for _, childTask := range triggerTask.getChildTask() {
 			if childTask.msgType() == commonpb.MsgType_LoadSegments {
 				req := childTask.(*loadSegmentTask).LoadSegmentsRequest
@@ -1004,8 +1003,10 @@ func updateSegmentInfoFromTask(ctx context.Context, triggerTask task, meta Meta)
 
 		log.Info("update segment info",
 			zap.Int64("triggerTaskID", triggerTask.getTaskID()),
-			zap.Any("segment", segmentInfosToSave))
-		_, err = meta.saveGlobalSealedSegInfos(segmentInfosToSave)
+			zap.Any("segmentToSave", segmentInfosToSave),
+			zap.Any("segmentToRemove", segmentInfosToRemove),
+		)
+		err = meta.saveGlobalSealedSegInfos(segmentInfosToSave, segmentInfosToRemove)
 	}
 
 	// no need to rollback since etcd meta is not changed
@@ -1014,30 +1015,6 @@ func updateSegmentInfoFromTask(ctx context.Context, triggerTask task, meta Meta)
 	}
 
 	return nil
-}
-
-func reverseSealedSegmentChangeInfo(changeInfosMap map[UniqueID]*querypb.SealedSegmentsChangeInfo) map[UniqueID]*querypb.SealedSegmentsChangeInfo {
-	result := make(map[UniqueID]*querypb.SealedSegmentsChangeInfo)
-	for collectionID, changeInfos := range changeInfosMap {
-		segmentChangeInfos := &querypb.SealedSegmentsChangeInfo{
-			Base: &commonpb.MsgBase{
-				MsgType: commonpb.MsgType_SealedSegmentsChangeInfo,
-			},
-			Infos: []*querypb.SegmentChangeInfo{},
-		}
-		for _, info := range changeInfos.Infos {
-			changeInfo := &querypb.SegmentChangeInfo{
-				OnlineNodeID:    info.OfflineNodeID,
-				OnlineSegments:  info.OfflineSegments,
-				OfflineNodeID:   info.OnlineNodeID,
-				OfflineSegments: info.OnlineSegments,
-			}
-			segmentChangeInfos.Infos = append(segmentChangeInfos.Infos, changeInfo)
-		}
-		result[collectionID] = segmentChangeInfos
-	}
-
-	return result
 }
 
 // generateDerivedInternalTasks generate watchDeltaChannel and watchQueryChannel tasks

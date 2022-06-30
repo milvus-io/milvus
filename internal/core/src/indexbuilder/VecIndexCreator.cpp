@@ -139,7 +139,7 @@ VecIndexCreator::check_parameter(knowhere::Config& conf,
 
 template <typename T>
 std::optional<T>
-VecIndexCreator::get_config_by_name(std::string_view name) {
+VecIndexCreator::get_config_by_name(const std::string& name) {
     if (config_.contains(name)) {
         return knowhere::GetValueFromConfig<T>(config_, name);
     }

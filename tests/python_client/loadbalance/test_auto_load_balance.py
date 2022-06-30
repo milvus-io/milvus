@@ -1,10 +1,11 @@
 from time import sleep
 from pymilvus import connections, list_collections, utility
 from chaos.checker import (CreateChecker, InsertFlushChecker,
-                           SearchChecker, QueryChecker, IndexChecker, Op, assert_statistic)
+                           SearchChecker, QueryChecker, IndexChecker, Op)
 from common.milvus_sys import MilvusSys
 from utils.util_log import test_log as log
 from chaos import chaos_commons as cc
+from chaos.chaos_commons import assert_statistic
 from common.common_type import CaseLabel
 from common import common_func as cf
 from chaos import constants

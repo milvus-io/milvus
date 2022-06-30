@@ -9,7 +9,7 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
-
+from collections import defaultdict
 import random
 import numpy as np
 import time
@@ -69,9 +69,17 @@ def hello_milvus(collection_name):
     collection.create_index(field_name="float_vector", index_params=default_index)
     t1 = time.time()
     print(f"\nCreate index cost {t1 - t0:.4f} seconds")
+    print("\nGet replicas number")
+    try:
+        replicas_info = collection.get_replicas()
+        replica_number = len(replicas_info.groups)
+        print(f"\nReplicas number is {replica_number}")
+    except Exception as e:
+        print(str(e))
+        replica_number = 1
     print(f"\nload collection...")
     t0 = time.time()
-    collection.load()
+    collection.load(replica_number=replica_number)
     t1 = time.time()
     print(f"\nload collection cost {t1 - t0:.4f} seconds")
 
@@ -100,25 +108,30 @@ def hello_milvus(collection_name):
     sorted_res = sorted(res, key=lambda k: k['int64'])
     for r in sorted_res:
         print(r)
-    collection.release()
 
 
 parser = argparse.ArgumentParser(description='host ip')
-parser.add_argument('--host', type=str, default='10.96.77.209', help='host ip')
+parser.add_argument('--host', type=str, default='127.0.0.1', help='host ip')
 args = parser.parse_args()
 # add time stamp
 print(f"\nStart time: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))}")
 # create connection
 connections.connect(host=args.host, port="19530")
-print(f"\nList collections...")
-collection_list = list_collections()
-print(collection_list)
-# keep 10 collections with prefix "CreateChecker_", others will be skiped
+print("\nList collections...")
+all_collections = list_collections()
+print(all_collections)
+all_collections = [c_name for c_name in all_collections if "Checker" in c_name]
+m = defaultdict(list)
+for c_name in all_collections:
+    prefix = c_name.split("_")[0]
+    if len(m[prefix]) <= 5:
+        m[prefix].append(c_name)
+selected_collections = []
+for v in m.values():
+    selected_collections.extend(v)
+print("selected_collections is")
+print(selected_collections)
 cnt = 0
-for collection_name in collection_list:
-    if collection_name.startswith("CreateChecker_"):
-        cnt += 1
-    if collection_name.startswith("CreateChecker_") and cnt > 10:
-        continue
+for collection_name in selected_collections:
     print(f"check collection {collection_name}")
     hello_milvus(collection_name)

@@ -84,7 +84,7 @@ SegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
 
     auto index = std::dynamic_pointer_cast<knowhere::VecIndex>(info.index);
     AssertInfo(info.index_params.count("metric_type"), "Can't get metric_type in index_params");
-    auto metric_type_str = info.index_params.at("metric_type");
+    auto metric_type = info.index_params.at("metric_type");
     auto row_count = index->Count();
     AssertInfo(row_count > 0, "Index count is 0");
 
@@ -101,7 +101,7 @@ SegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
                        std::to_string(row_count_opt_.value()) + ")");
     }
     AssertInfo(!vector_indexings_.is_ready(field_id), "vec index is not ready");
-    vector_indexings_.append_field_indexing(field_id, GetMetricType(metric_type_str), index);
+    vector_indexings_.append_field_indexing(field_id, metric_type, index);
 
     set_bit(index_ready_bitset_, field_id, true);
     update_row_count(row_count);

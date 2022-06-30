@@ -322,7 +322,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                     search_params, default_limit,
                                     default_search_exp,
                                     check_task=CheckTasks.err_res,
-                                    check_items={"err_code": 0,
+                                    check_items={"err_code": 1,
                                                  "err_msg": message})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -850,6 +850,14 @@ class TestCollectionSearch(TestcaseBase):
     def _async(self, request):
         yield request.param
 
+    @pytest.fixture(scope="function", params=["JACCARD", "HAMMING", "TANIMOTO"])
+    def metrics(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=[False, True])
+    def is_flush(self, request):
+        yield request.param
+
     """
     ******************************************************************
     #  The following are valid base cases
@@ -857,7 +865,7 @@ class TestCollectionSearch(TestcaseBase):
     """
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_search_normal(self, nq, dim, auto_id):
+    def test_search_normal(self, nq, dim, auto_id, is_flush):
         """
         target: test search normal case
         method: create connection, collection, insert and search
@@ -866,7 +874,7 @@ class TestCollectionSearch(TestcaseBase):
         """
         # 1. initialize with data
         collection_w, _, _, insert_ids, time_stamp = \
-            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim)[0:5]
+            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_flush=is_flush)[0:5]
         # 2. search before insert time_stamp
         log.info("test_search_normal: searching collection %s" % collection_w.name)
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
@@ -1503,7 +1511,7 @@ class TestCollectionSearch(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index", ["BIN_FLAT", "BIN_IVF_FLAT"])
-    def test_search_binary_jaccard_flat_index(self, nq, dim, auto_id, _async, index):
+    def test_search_binary_jaccard_flat_index(self, nq, dim, auto_id, _async, index, is_flush):
         """
         target: search binary_collection, and check the result: distance
         method: compare the return distance value with value computed with JACCARD
@@ -1514,7 +1522,8 @@ class TestCollectionSearch(TestcaseBase):
                                                                                                   is_binary=True,
                                                                                                   auto_id=auto_id,
                                                                                                   dim=dim,
-                                                                                                  is_index=True)[0:5]
+                                                                                                  is_index=True,
+                                                                                                  is_flush=is_flush)[0:5]
         # 2. create index
         default_index = {"index_type": index, "params": {"nlist": 128}, "metric_type": "JACCARD"}
         collection_w.create_index("binary_vector", default_index)
@@ -1541,7 +1550,7 @@ class TestCollectionSearch(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index", ["BIN_FLAT", "BIN_IVF_FLAT"])
-    def test_search_binary_hamming_flat_index(self, nq, dim, auto_id, _async, index):
+    def test_search_binary_hamming_flat_index(self, nq, dim, auto_id, _async, index, is_flush):
         """
         target: search binary_collection, and check the result: distance
         method: compare the return distance value with value computed with HAMMING
@@ -1552,7 +1561,8 @@ class TestCollectionSearch(TestcaseBase):
                                                                                       is_binary=True,
                                                                                       auto_id=auto_id,
                                                                                       dim=dim,
-                                                                                      is_index=True)[0:4]
+                                                                                      is_index=True,
+                                                                                      is_flush=is_flush)[0:4]
         # 2. create index
         default_index = {"index_type": index, "params": {"nlist": 128}, "metric_type": "HAMMING"}
         collection_w.create_index("binary_vector", default_index)
@@ -1579,7 +1589,7 @@ class TestCollectionSearch(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.xfail(reason="issue 6843")
     @pytest.mark.parametrize("index", ["BIN_FLAT", "BIN_IVF_FLAT"])
-    def test_search_binary_tanimoto_flat_index(self, nq, dim, auto_id, _async, index):
+    def test_search_binary_tanimoto_flat_index(self, nq, dim, auto_id, _async, index, is_flush):
         """
         target: search binary_collection, and check the result: distance
         method: compare the return distance value with value computed with TANIMOTO
@@ -1590,7 +1600,8 @@ class TestCollectionSearch(TestcaseBase):
                                                                                       is_binary=True,
                                                                                       auto_id=auto_id,
                                                                                       dim=dim,
-                                                                                      is_index=True)[0:4]
+                                                                                      is_index=True,
+                                                                                      is_flush=is_flush)[0:4]
         log.info("auto_id= %s, _async= %s" % (auto_id, _async))
         # 2. create index
         default_index = {"index_type": index, "params": {"nlist": 128}, "metric_type": "TANIMOTO"}
@@ -1614,6 +1625,31 @@ class TestCollectionSearch(TestcaseBase):
             res.done()
             res = res.result()
         assert abs(res[0].distances[0] - min(distance_0, distance_1)) <= epsilon
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_binary_without_flush(self, metrics, auto_id):
+        """
+        target: test search without flush for binary data (no index)
+        method: create connection, collection, insert, load and search
+        expected: search successfully with limit(topK)
+        """
+        # 1. initialize a collection without data
+        collection_w = self.init_collection_general(prefix, is_binary=True, auto_id=auto_id)[0]
+        # 2. insert data
+        insert_ids = cf.insert_data(collection_w, default_nb, is_binary=True, auto_id=auto_id)[3]
+        # 3. load data
+        collection_w.load()
+        # 4. search
+        log.info("test_search_binary_without_flush: searching collection %s" % collection_w.name)
+        binary_vectors = cf.gen_binary_vectors(default_nq, default_dim)[1]
+        search_params = {"metric_type": metrics, "params": {"nprobe": 10}}
+        collection_w.search(binary_vectors[:default_nq], "binary_vector",
+                            search_params, default_limit,
+                            default_search_exp,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": insert_ids,
+                                         "limit": default_limit})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_travel_time_without_expression(self, auto_id):

@@ -14,24 +14,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# if ( APPLE )
 set( ROCKSDB_VERSION "6.27.3" )
 set( ROCKSDB_SOURCE_URL
         "https://github.com/facebook/rocksdb/archive/v${ROCKSDB_VERSION}.tar.gz")
-# else ()
-#     set( ROCKSDB_VERSION "6.15.2" )
-#     set( ROCKSDB_SOURCE_URL
-#             "https://github.com/facebook/rocksdb/archive/v${ROCKSDB_VERSION}.tar.gz")
-# endif ()
 
 macro( build_rocksdb )
     message( STATUS "Building ROCKSDB-${ROCKSDB_VERSION} from source" )
 
-    # if ( APPLE )
     set ( ROCKSDB_MD5 "e4a0625f0cec82060e62c81b787a1124" )
-    # else ()
-        # set ( ROCKSDB_MD5 "67f9e04fda62af551dd039c37b1808ac" )
-    # endif ()
 
     if ( EMBEDDED_MILVUS )
         message ( STATUS "Turning on fPIC while building embedded Milvus" )
@@ -80,4 +70,10 @@ macro( build_rocksdb )
 
 endmacro()
 
-build_rocksdb()
+if (MSYS)
+    message(STATUS "Using rocksdb form system")
+    configure_file(rocksdb-win.pc.in "${CMAKE_CURRENT_BINARY_DIR}/rocksdb.pc" @ONLY)
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/rocksdb.pc" DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig")
+else (MSYS)
+    build_rocksdb()
+endif (MSYS)

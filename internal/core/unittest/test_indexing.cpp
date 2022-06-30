@@ -307,17 +307,18 @@ TEST(Indexing, BinaryBruteForce) {
     int64_t topk = 5;
     int64_t round_decimal = 3;
     int64_t dim = 8192;
+    auto metric_type = knowhere::metric::JACCARD;
     auto result_count = topk * num_queries;
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField("vecbin", DataType::VECTOR_BINARY, dim, MetricType::METRIC_Jaccard);
+    auto vec_fid = schema->AddDebugField("vecbin", DataType::VECTOR_BINARY, dim, metric_type);
     auto i64_fid = schema->AddDebugField("age", DataType::INT64);
     auto dataset = DataGen(schema, N, 10);
     auto bin_vec = dataset.get_col<uint8_t>(vec_fid);
     auto query_data = 1024 * dim / 8 + bin_vec.data();
     query::dataset::SearchDataset search_dataset{
-        faiss::MetricType::METRIC_Jaccard,  //
-        num_queries,                        //
-        topk,                               //
+        metric_type,    //
+        num_queries,    //
+        topk,           //
         round_decimal,
         dim,        //
         query_data  //
