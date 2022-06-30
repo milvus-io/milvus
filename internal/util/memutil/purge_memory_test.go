@@ -12,6 +12,7 @@
 package metricsinfo
 
 import (
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -23,6 +24,16 @@ func TestPurgeMemory(t *testing.T) {
 	usedMem := metricsinfo.GetUsedMemoryCount()
 	assert.True(t, usedMem > 0)
 	maxBinsSize := uint64(float64(usedMem) * 0.2)
-	err := PurgeMemory(maxBinsSize)
+	_, err := PurgeMemory(maxBinsSize)
 	assert.NoError(t, err)
+
+	// do not malloc_trim
+	res, err := PurgeMemory(math.MaxUint64)
+	assert.NoError(t, err)
+	assert.False(t, res)
+
+	// do malloc_trim
+	res, err = PurgeMemory(0)
+	assert.NoError(t, err)
+	assert.True(t, res)
 }
