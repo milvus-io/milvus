@@ -344,5 +344,5 @@ jobs:
         if: ${{ ! success() }}
         uses: actions/upload-artifact@v2
         with:
-          name: helm-log-${{ matrix.mode }}-${{ matrix.task }}
+          name: helm-log-${{ matrix.mq_type }}-${{ matrix.mode }}-${{ matrix.task }}
           path: tests/python_client/deploy/k8s_logs
