@@ -57,6 +57,11 @@ const (
 	MaxSendSizeToEtcd = 200000
 )
 
+var (
+	ErrCollectionLoaded       = errors.New("CollectionLoaded")
+	ErrLoadParametersMismatch = errors.New("LoadParametersMismatch")
+)
+
 type taskState int
 
 const (
@@ -349,7 +354,51 @@ func (lct *loadCollectionTask) preExecute(ctx context.Context) error {
 
 	collectionID := lct.CollectionID
 	schema := lct.Schema
+
 	lct.setResultInfo(nil)
+
+	collectionInfo, err := lct.meta.getCollectionInfoByID(collectionID)
+	if err == nil {
+		// if collection has been loaded by load collection request, return success
+		if collectionInfo.LoadType == querypb.LoadType_LoadCollection {
+			if collectionInfo.ReplicaNumber != lct.ReplicaNumber {
+				msg := fmt.Sprintf("collection has already been loaded, and the number of replicas %v is not same as the request's %v. Should release first then reload with the new number of replicas",
+					collectionInfo.ReplicaNumber,
+					lct.ReplicaNumber)
+				log.Warn(msg,
+					zap.String("role", typeutil.QueryCoordRole),
+					zap.Int64("collectionID", collectionID),
+					zap.Int64("msgID", lct.Base.MsgID),
+					zap.Int32("collectionReplicaNumber", collectionInfo.ReplicaNumber),
+					zap.Int32("requestReplicaNumber", lct.ReplicaNumber))
+
+				lct.result = &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_IllegalArgument,
+					Reason:    msg,
+				}
+
+				return fmt.Errorf(msg+" [%w]", ErrLoadParametersMismatch)
+			}
+
+			return ErrCollectionLoaded
+		} else if collectionInfo.LoadType == querypb.LoadType_LoadPartition {
+			// if some partitions of the collection have been loaded by load partitions request, return error
+			// should release partitions first, then load collection again
+			err = fmt.Errorf("some partitions %v of collection %d has been loaded into QueryNode, please release partitions firstly",
+				collectionInfo.PartitionIDs, collectionID)
+			log.Warn("loadCollectionRequest failed",
+				zap.String("role", typeutil.QueryCoordRole),
+				zap.Int64("collectionID", collectionID),
+				zap.Int64s("loaded partitionIDs", collectionInfo.PartitionIDs),
+				zap.Int64("msgID", lct.Base.MsgID),
+				zap.Error(err))
+
+			lct.setResultInfo(err)
+			metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
+			return fmt.Errorf(err.Error()+" [%w]", ErrLoadParametersMismatch)
+		}
+	}
+
 	log.Info("start do loadCollectionTask",
 		zap.Int64("msgID", lct.getTaskID()),
 		zap.Int64("collectionID", collectionID),
@@ -555,11 +604,6 @@ func (lct *loadCollectionTask) postExecute(ctx context.Context) error {
 	collectionID := lct.CollectionID
 	if lct.getResultInfo().ErrorCode != commonpb.ErrorCode_Success {
 		lct.clearChildTasks()
-		err := lct.meta.releaseCollection(collectionID)
-		if err != nil {
-			log.Error("loadCollectionTask: occur error when release collection info from meta", zap.Int64("collectionID", collectionID), zap.Int64("msgID", lct.Base.MsgID), zap.Error(err))
-			panic(err)
-		}
 	}
 
 	log.Info("loadCollectionTask postExecute done",
@@ -793,8 +837,74 @@ func (lpt *loadPartitionTask) preExecute(context.Context) error {
 		lpt.ReplicaNumber = 1
 	}
 
-	collectionID := lpt.CollectionID
 	lpt.setResultInfo(nil)
+
+	collectionID := lpt.CollectionID
+	collectionInfo, err := lpt.meta.getCollectionInfoByID(collectionID)
+	if err == nil {
+		// if the collection has been loaded into memory by load collection request, return error
+		// should release collection first, then load partitions again
+		if collectionInfo.LoadType == querypb.LoadType_LoadCollection {
+			err = fmt.Errorf("collection %d has been loaded into QueryNode, please release collection firstly", collectionID)
+			lpt.setResultInfo(err)
+		} else if collectionInfo.LoadType == querypb.LoadType_LoadPartition {
+			if collectionInfo.ReplicaNumber != lpt.ReplicaNumber {
+				msg := fmt.Sprintf("partitions has already been loaded, and the number of replicas %v is not same as the request's %v. Should release first then reload with the new number of replicas",
+					collectionInfo.ReplicaNumber,
+					lpt.ReplicaNumber)
+				log.Warn(msg,
+					zap.String("role", typeutil.QueryCoordRole),
+					zap.Int64("collectionID", collectionID),
+					zap.Int64("msgID", lpt.Base.MsgID),
+					zap.Int32("collectionReplicaNumber", collectionInfo.ReplicaNumber),
+					zap.Int32("requestReplicaNumber", lpt.ReplicaNumber))
+
+				lpt.result = &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_IllegalArgument,
+					Reason:    msg,
+				}
+
+				return fmt.Errorf(msg+" [%w]", ErrLoadParametersMismatch)
+			}
+
+			for _, toLoadPartitionID := range lpt.PartitionIDs {
+				needLoad := true
+				for _, loadedPartitionID := range collectionInfo.PartitionIDs {
+					if toLoadPartitionID == loadedPartitionID {
+						needLoad = false
+						break
+					}
+				}
+				if needLoad {
+					// if new partitions need to be loaded, return error
+					// should release partitions first, then load partitions again
+					err = fmt.Errorf("some partitions %v of collection %d has been loaded into QueryNode, please release partitions firstly",
+						collectionInfo.PartitionIDs, collectionID)
+					lpt.setResultInfo(err)
+				}
+			}
+		}
+
+		if lpt.result.ErrorCode != commonpb.ErrorCode_Success {
+			log.Warn("loadPartitionRequest failed",
+				zap.String("role", typeutil.QueryCoordRole),
+				zap.Int64("collectionID", collectionID),
+				zap.Int64s("partitionIDs", lpt.PartitionIDs),
+				zap.Int64("msgID", lpt.Base.MsgID),
+				zap.Error(err))
+
+			return fmt.Errorf(err.Error()+" [%w]", ErrLoadParametersMismatch)
+		}
+
+		log.Info("loadPartitionRequest completed, all partitions to load have already been loaded into memory",
+			zap.String("role", typeutil.QueryCoordRole),
+			zap.Int64("collectionID", lpt.CollectionID),
+			zap.Int64s("partitionIDs", lpt.PartitionIDs),
+			zap.Int64("msgID", lpt.Base.MsgID))
+
+		return ErrCollectionLoaded
+	}
+
 	log.Info("start do loadPartitionTask",
 		zap.Int64("msgID", lpt.getTaskID()),
 		zap.Int64("collectionID", collectionID))
@@ -991,11 +1101,6 @@ func (lpt *loadPartitionTask) postExecute(ctx context.Context) error {
 	partitionIDs := lpt.PartitionIDs
 	if lpt.getResultInfo().ErrorCode != commonpb.ErrorCode_Success {
 		lpt.clearChildTasks()
-		err := lpt.meta.releaseCollection(collectionID)
-		if err != nil {
-			log.Error("loadPartitionTask: occur error when release collection info from meta", zap.Int64("collectionID", collectionID), zap.Int64("msgID", lpt.Base.MsgID), zap.Error(err))
-			panic(err)
-		}
 	}
 
 	log.Info("loadPartitionTask postExecute done",
