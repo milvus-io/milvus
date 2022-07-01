@@ -42,6 +42,11 @@ pipeline {
             defaultValue: 'master-latest'
         )
         string(
+            description: 'Wait Time after chaos test',
+            name: 'idel_time',
+            defaultValue: '1'
+        )
+        string(
             description: 'Etcd Image Repository',
             name: 'etcd_image_repository',
             defaultValue: "milvusdb/etcd"
@@ -237,8 +242,21 @@ pipeline {
                     }
                 }
             }
-        } 
+        }
+        stage ('Milvus Idle Time') {
 
+            steps {
+                container('main') {
+                    dir ('tests/python_client/chaos') {
+                        script {
+                        echo "sleep ${params.idel_time}m"
+                        sh "sleep ${params.idel_time}m"
+                        }
+                    }
+                }
+            }
+        }
+        
         stage ('run e2e test after chaos') {
             options {
               timeout(time: 5, unit: 'MINUTES')   // timeout on this stage
