@@ -164,8 +164,6 @@ func TestBaseTable_Pulsar(t *testing.T) {
 
 	address := baseParams.Get("_PulsarAddress")
 	assert.Equal(t, "pulsar://localhost:6650", address)
-	webAddress := baseParams.Get("_PulsarWebAddress")
-	assert.Equal(t, "http://localhost:80", webAddress)
 }
 
 func TestBaseTable_ConfDir(t *testing.T) {
