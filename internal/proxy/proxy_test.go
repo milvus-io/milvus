@@ -97,7 +97,7 @@ func runRootCoord(ctx context.Context, localMsg bool) *grpcrootcoord.Server {
 
 	wg.Add(1)
 	go func() {
-		rootcoord.Params.Init()
+		rootcoord.Params.InitOnce()
 		if !localMsg {
 			logutil.SetupLogger(&rootcoord.Params.Log)
 			defer log.Sync()
@@ -127,7 +127,7 @@ func runQueryCoord(ctx context.Context, localMsg bool) *grpcquerycoord.Server {
 
 	wg.Add(1)
 	go func() {
-		querycoord.Params.Init()
+		querycoord.Params.InitOnce()
 
 		if !localMsg {
 			logutil.SetupLogger(&querycoord.Params.Log)
@@ -159,7 +159,7 @@ func runQueryNode(ctx context.Context, localMsg bool, alias string) *grpcqueryno
 	wg.Add(1)
 	go func() {
 		querynode.Params.QueryNodeCfg.InitAlias(alias)
-		querynode.Params.Init()
+		querynode.Params.InitOnce()
 
 		if !localMsg {
 			logutil.SetupLogger(&querynode.Params.Log)
@@ -190,7 +190,7 @@ func runDataCoord(ctx context.Context, localMsg bool) *grpcdatacoordclient.Serve
 
 	wg.Add(1)
 	go func() {
-		datacoord.Params.Init()
+		datacoord.Params.InitOnce()
 
 		if !localMsg {
 			logutil.SetupLogger(&datacoord.Params.Log)
@@ -218,7 +218,7 @@ func runDataNode(ctx context.Context, localMsg bool, alias string) *grpcdatanode
 	wg.Add(1)
 	go func() {
 		datanode.Params.DataNodeCfg.InitAlias(alias)
-		datanode.Params.Init()
+		datanode.Params.InitOnce()
 
 		if !localMsg {
 			logutil.SetupLogger(&datanode.Params.Log)
@@ -249,7 +249,7 @@ func runIndexCoord(ctx context.Context, localMsg bool) *grpcindexcoord.Server {
 
 	wg.Add(1)
 	go func() {
-		indexcoord.Params.Init()
+		indexcoord.Params.InitOnce()
 
 		if !localMsg {
 			logutil.SetupLogger(&indexcoord.Params.Log)
@@ -281,7 +281,7 @@ func runIndexNode(ctx context.Context, localMsg bool, alias string) *grpcindexno
 	wg.Add(1)
 	go func() {
 		indexnode.Params.IndexNodeCfg.InitAlias(alias)
-		indexnode.Params.Init()
+		indexnode.Params.InitOnce()
 
 		if !localMsg {
 			logutil.SetupLogger(&indexnode.Params.Log)
@@ -412,7 +412,7 @@ func TestProxy(t *testing.T) {
 	factory := dependency.NewDefaultFactory(localMsg)
 	alias := "TestProxy"
 
-	Params.Init()
+	Params.InitOnce()
 	log.Info("Initialize parameter table of Proxy")
 
 	rc := runRootCoord(ctx, localMsg)

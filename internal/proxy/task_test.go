@@ -805,7 +805,7 @@ func TestTranslateOutputFields(t *testing.T) {
 }
 
 func TestCreateCollectionTask(t *testing.T) {
-	Params.Init()
+	Params.InitOnce()
 
 	rc := NewRootCoordMock()
 	rc.Start()
@@ -1086,7 +1086,7 @@ func TestCreateCollectionTask(t *testing.T) {
 }
 
 func TestDropCollectionTask(t *testing.T) {
-	Params.Init()
+	Params.InitOnce()
 
 	prefix := "TestDropCollectionTask"
 	dbName := ""
@@ -1159,7 +1159,7 @@ func TestDropCollectionTask(t *testing.T) {
 }
 
 func TestHasCollectionTask(t *testing.T) {
-	Params.Init()
+	Params.InitOnce()
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
@@ -1245,7 +1245,7 @@ func TestHasCollectionTask(t *testing.T) {
 }
 
 func TestDescribeCollectionTask(t *testing.T) {
-	Params.Init()
+	Params.InitOnce()
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
@@ -1308,7 +1308,7 @@ func TestDescribeCollectionTask(t *testing.T) {
 }
 
 func TestDescribeCollectionTask_ShardsNum1(t *testing.T) {
-	Params.Init()
+	Params.InitOnce()
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
@@ -1373,7 +1373,7 @@ func TestDescribeCollectionTask_ShardsNum1(t *testing.T) {
 }
 
 func TestDescribeCollectionTask_ShardsNum2(t *testing.T) {
-	Params.Init()
+	Params.InitOnce()
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
@@ -1439,7 +1439,7 @@ func TestDescribeCollectionTask_ShardsNum2(t *testing.T) {
 }
 
 func TestCreatePartitionTask(t *testing.T) {
-	Params.Init()
+	Params.InitOnce()
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
@@ -1486,7 +1486,7 @@ func TestCreatePartitionTask(t *testing.T) {
 }
 
 func TestDropPartitionTask(t *testing.T) {
-	Params.Init()
+	Params.InitOnce()
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
@@ -1533,7 +1533,7 @@ func TestDropPartitionTask(t *testing.T) {
 }
 
 func TestHasPartitionTask(t *testing.T) {
-	Params.Init()
+	Params.InitOnce()
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
@@ -1580,7 +1580,7 @@ func TestHasPartitionTask(t *testing.T) {
 }
 
 func TestShowPartitionsTask(t *testing.T) {
-	Params.Init()
+	Params.InitOnce()
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
@@ -1637,7 +1637,7 @@ func TestShowPartitionsTask(t *testing.T) {
 func TestTask_Int64PrimaryKey(t *testing.T) {
 	var err error
 
-	Params.Init()
+	Params.InitOnce()
 
 	rc := NewRootCoordMock()
 	rc.Start()
@@ -1891,7 +1891,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 func TestTask_VarCharPrimaryKey(t *testing.T) {
 	var err error
 
-	Params.Init()
+	Params.InitOnce()
 
 	rc := NewRootCoordMock()
 	rc.Start()
@@ -2146,7 +2146,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 }
 
 func TestCreateAlias_all(t *testing.T) {
-	Params.Init()
+	Params.InitOnce()
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
@@ -2188,7 +2188,7 @@ func TestCreateAlias_all(t *testing.T) {
 }
 
 func TestDropAlias_all(t *testing.T) {
-	Params.Init()
+	Params.InitOnce()
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
@@ -2227,7 +2227,7 @@ func TestDropAlias_all(t *testing.T) {
 }
 
 func TestAlterAlias_all(t *testing.T) {
-	Params.Init()
+	Params.InitOnce()
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()

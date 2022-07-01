@@ -112,7 +112,7 @@ func getValidSearchParams() []*commonpb.KeyValuePair {
 func TestSearchTask_PreExecute(t *testing.T) {
 	var err error
 
-	Params.Init()
+	Params.InitOnce()
 	var (
 		rc  = NewRootCoordMock()
 		qc  = NewQueryCoordMock()
@@ -321,7 +321,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 }
 
 func TestSearchTaskV2_Execute(t *testing.T) {
-	Params.Init()
+	Params.InitOnce()
 
 	var (
 		err error
@@ -383,7 +383,7 @@ func genSearchResultData(nq int64, topk int64, ids []int64, scores []float32) *s
 }
 
 func TestSearchTask_Ts(t *testing.T) {
-	Params.Init()
+	Params.InitOnce()
 	task := &searchTask{
 		SearchRequest: &internalpb.SearchRequest{},
 
