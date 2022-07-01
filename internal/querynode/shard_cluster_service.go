@@ -153,7 +153,7 @@ func (s *ShardClusterService) HandoffVChannelSegments(vchannel string, info *que
 	sc := raw.(*ShardCluster)
 	err := sc.HandoffSegments(info)
 	if err == nil {
-		log.Info("successfully handoff ", zap.String("channel", vchannel), zap.Any("segment", info))
+		log.Info("successfully handoff", zap.String("channel", vchannel), zap.Any("segment", info))
 	} else {
 		log.Warn("failed to handoff", zap.String("channel", vchannel), zap.Any("segment", info), zap.Error(err))
 	}
