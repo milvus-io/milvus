@@ -28,16 +28,17 @@ import (
 	"unsafe"
 )
 
-func PurgeMemory(maxBinsSize uint64) error {
+func PurgeMemory(maxBinsSize uint64) (bool, error) {
+	var res C.int32_t
 	cMaxBinsSize := C.uint64_t(maxBinsSize)
-	status := C.PurgeMemory(cMaxBinsSize)
+	status := C.PurgeMemory(cMaxBinsSize, &res)
 	if status.error_code == 0 {
-		return nil
+		return int32(res) > 0, nil
 	}
 	defer C.free(unsafe.Pointer(status.error_msg))
 
 	errorMsg := string(C.GoString(status.error_msg))
 	errorCode := int32(status.error_code)
 
-	return fmt.Errorf("PurgeMemory failed, errorCode = %d, errorMsg = %s", errorCode, errorMsg)
+	return false, fmt.Errorf("PurgeMemory failed, errorCode = %d, errorMsg = %s", errorCode, errorMsg)
 }

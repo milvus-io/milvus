@@ -198,8 +198,10 @@ serialize(const Message* msg) {
 //    auto run_times = 1000000;
 //    auto start = std::chrono::high_resolution_clock::now();
 //
+//    int32_t res;
 //    for (int i = 0; i < run_times; i++) {
-//        PurgeMemory(UINT64_MAX /*never malloc_trim*/);
+//        PurgeMemory(UINT64_MAX /*never malloc_trim*/, &res);
+//        assert(res == 0);
 //    }
 //
 //    auto stop = std::chrono::high_resolution_clock::now();
@@ -210,10 +212,13 @@ serialize(const Message* msg) {
 //}
 
 TEST(Common, Memory) {
-    auto res = PurgeMemory(UINT64_MAX /*never malloc_trim*/);
-    assert(res.error_code == Success);
-    res = PurgeMemory(0);
-    assert(res.error_code == Success);
+    int32_t res;
+    auto status = PurgeMemory(UINT64_MAX /*never malloc_trim*/, &res);
+    assert(res == 0);
+    assert(status.error_code == Success);
+    status = PurgeMemory(0 /*do malloc_trim*/, &res);
+    assert(res == 1);
+    assert(status.error_code == Success);
 }
 
 #endif

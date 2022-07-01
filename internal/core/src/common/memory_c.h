@@ -29,7 +29,7 @@ extern "C" {
  * ref: <https://sourceware.org/glibc/wiki/MallocInternals>
  */
 CStatus
-PurgeMemory(uint64_t max_bins_size);
+PurgeMemory(uint64_t max_bins_size, int32_t* res);
 
 #ifdef __cplusplus
 }
