@@ -28,7 +28,6 @@ import "C"
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -367,39 +366,50 @@ func (node *QueryNode) watchChangeInfo() {
 
 func (node *QueryNode) handleSealedSegmentsChangeInfo(info *querypb.SealedSegmentsChangeInfo) {
 	for _, line := range info.GetInfos() {
-		vchannel, err := validateChangeChannel(line)
-		if err != nil {
-			log.Warn("failed to validate vchannel for SegmentChangeInfo", zap.Error(err))
-			continue
-		}
+		result := splitSegmentsChange(line)
 
-		node.ShardClusterService.HandoffVChannelSegments(vchannel, line)
+		for vchannel, changeInfo := range result {
+			err := node.ShardClusterService.HandoffVChannelSegments(vchannel, changeInfo)
+			if err != nil {
+				log.Warn("failed to handle vchannel segments", zap.String("vchannel", vchannel))
+			}
+		}
 	}
 }
 
-func validateChangeChannel(info *querypb.SegmentChangeInfo) (string, error) {
-	if len(info.GetOnlineSegments()) == 0 && len(info.GetOfflineSegments()) == 0 {
-		return "", errors.New("SegmentChangeInfo with no segments info")
+// splitSegmentsChange returns rearranged segmentChangeInfo in vchannel dimension
+func splitSegmentsChange(changeInfo *querypb.SegmentChangeInfo) map[string]*querypb.SegmentChangeInfo {
+	result := make(map[string]*querypb.SegmentChangeInfo)
+
+	for _, segment := range changeInfo.GetOnlineSegments() {
+		dmlChannel := segment.GetDmChannel()
+		info, has := result[dmlChannel]
+		if !has {
+			info = &querypb.SegmentChangeInfo{
+				OnlineNodeID:  changeInfo.OnlineNodeID,
+				OfflineNodeID: changeInfo.OfflineNodeID,
+			}
+
+			result[dmlChannel] = info
+		}
+
+		info.OnlineSegments = append(info.OnlineSegments, segment)
 	}
 
-	var channelName string
+	for _, segment := range changeInfo.GetOfflineSegments() {
+		dmlChannel := segment.GetDmChannel()
+		info, has := result[dmlChannel]
+		if !has {
+			info = &querypb.SegmentChangeInfo{
+				OnlineNodeID:  changeInfo.OnlineNodeID,
+				OfflineNodeID: changeInfo.OfflineNodeID,
+			}
 
-	for _, segment := range info.GetOnlineSegments() {
-		if channelName == "" {
-			channelName = segment.GetDmChannel()
+			result[dmlChannel] = info
 		}
-		if segment.GetDmChannel() != channelName {
-			return "", fmt.Errorf("found multilple channel name in one SegmentChangeInfo, channel1: %s, channel 2:%s", channelName, segment.GetDmChannel())
-		}
-	}
-	for _, segment := range info.GetOfflineSegments() {
-		if channelName == "" {
-			channelName = segment.GetDmChannel()
-		}
-		if segment.GetDmChannel() != channelName {
-			return "", fmt.Errorf("found multilple channel name in one SegmentChangeInfo, channel1: %s, channel 2:%s", channelName, segment.GetDmChannel())
-		}
+
+		info.OfflineSegments = append(info.OfflineSegments, segment)
 	}
 
-	return channelName, nil
+	return result
 }
