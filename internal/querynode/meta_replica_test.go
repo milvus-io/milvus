@@ -253,6 +253,73 @@ func TestMetaReplica_segment(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("test getSegmentIDsByVChannel", func(t *testing.T) {
+		replica, err := genSimpleReplica()
+		assert.NoError(t, err)
+		defer replica.freeAll()
+
+		schema := genTestCollectionSchema()
+		collection := replica.addCollection(defaultCollectionID, schema)
+		replica.addPartition(defaultCollectionID, defaultPartitionID)
+		replica.addPartition(defaultCollectionID, defaultPartitionID+1)
+
+		segment1, err := newSegment(collection, UniqueID(1), defaultPartitionID, defaultCollectionID, "channel1", segmentTypeGrowing)
+		assert.NoError(t, err)
+		err = replica.setSegment(segment1)
+		assert.NoError(t, err)
+
+		segment2, err := newSegment(collection, UniqueID(2), defaultPartitionID+1, defaultCollectionID, "channel2", segmentTypeGrowing)
+		assert.NoError(t, err)
+		err = replica.setSegment(segment2)
+		assert.NoError(t, err)
+
+		segment3, err := newSegment(collection, UniqueID(3), defaultPartitionID+1, defaultCollectionID, "channel2", segmentTypeGrowing)
+		assert.NoError(t, err)
+		err = replica.setSegment(segment3)
+		assert.NoError(t, err)
+
+		segment4, err := newSegment(collection, UniqueID(4), defaultPartitionID, defaultCollectionID, "channel1", segmentTypeSealed)
+		assert.NoError(t, err)
+		err = replica.setSegment(segment4)
+		assert.NoError(t, err)
+
+		seg1, err := replica.getSegmentIDsByVChannel([]UniqueID{defaultPartitionID}, "channel1", segmentTypeGrowing)
+		assert.Equal(t, 1, len(seg1))
+		assert.NoError(t, err)
+		seg1, err = replica.getSegmentIDsByVChannel([]UniqueID{}, "channel1", segmentTypeGrowing)
+		assert.Equal(t, 1, len(seg1))
+		assert.NoError(t, err)
+		seg1, err = replica.getSegmentIDsByVChannel([]UniqueID{}, "channel1", segmentTypeSealed)
+		assert.Equal(t, 1, len(seg1))
+		assert.NoError(t, err)
+		seg1, err = replica.getSegmentIDsByVChannel(nil, "channel1", segmentTypeGrowing)
+		assert.Equal(t, 1, len(seg1))
+		assert.NoError(t, err)
+		seg1, err = replica.getSegmentIDsByVChannel([]UniqueID{defaultPartitionID}, "channel1", segmentTypeSealed)
+		assert.Equal(t, 1, len(seg1))
+		assert.NoError(t, err)
+		seg1, err = replica.getSegmentIDsByVChannel(nil, "channel1", segmentTypeSealed)
+		assert.Equal(t, 1, len(seg1))
+		assert.NoError(t, err)
+
+		seg0, err := replica.getSegmentIDsByVChannel([]UniqueID{defaultPartitionID}, "channel2", segmentTypeSealed)
+		assert.Equal(t, 0, len(seg0))
+		assert.NoError(t, err)
+		seg0, err = replica.getSegmentIDsByVChannel([]UniqueID{defaultPartitionID}, "channel2", segmentTypeGrowing)
+		assert.Equal(t, 0, len(seg0))
+		assert.NoError(t, err)
+
+		seg2, err := replica.getSegmentIDsByVChannel([]UniqueID{defaultPartitionID + 1}, "channel2", segmentTypeGrowing)
+		assert.Equal(t, 2, len(seg2))
+		assert.NoError(t, err)
+		seg2, err = replica.getSegmentIDsByVChannel([]UniqueID{}, "channel2", segmentTypeGrowing)
+		assert.Equal(t, 2, len(seg2))
+		assert.NoError(t, err)
+		seg2, err = replica.getSegmentIDsByVChannel(nil, "channel2", segmentTypeGrowing)
+		assert.Equal(t, 2, len(seg2))
+		assert.NoError(t, err)
+	})
 }
 
 func TestMetaReplica_freeAll(t *testing.T) {

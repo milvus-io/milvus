@@ -181,14 +181,16 @@ queryNode:
     enabled: true
     memoryLimit: 2147483648 # 2 GB, 2 * 1024 *1024 *1024
 
-  grouping:
-    enabled: true
+  scheduler:
     receiveChanSize: 10240
     unsolvedQueueSize: 10240
+    maxReadConcurrency: 0 # maximum concurrency of read task. if set to less or equal 0, it means no uppper limit.
+    cpuRatio: 10.0 # ratio used to estimate read task cpu usage.
+
+  grouping:
+    enabled: true
     maxNQ: 1000
     topKMergeRatio: 10.0
-
-
 
 indexCoord:
   address: localhost
