@@ -227,7 +227,10 @@ jobs:
         run: |
           yq -i ".kafka.enabled = false" cluster-values.yaml
           yq -i ".pulsar.enabled = false" cluster-values.yaml
+          yq -i ".kafka.enabled = false" cluster-values-second.yaml
+          yq -i ".pulsar.enabled = false" cluster-values-second.yaml
           yq -i ".${{ matrix.mq_type }}.enabled = true" cluster-values.yaml
+          yq -i ".${{ matrix.mq_type }}.enabled = true" cluster-values-second.yaml
           if [ ${{ matrix.mq_type }} == "kafka" ]; then
               yq -i ".kafka.enabled = true" standalone-values.yaml;
           fi
