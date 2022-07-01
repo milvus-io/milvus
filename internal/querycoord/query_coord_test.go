@@ -38,10 +38,12 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 )
 
@@ -353,11 +355,12 @@ func TestHandoffSegmentLoop(t *testing.T) {
 		waitTaskFinalState(handoffTask, taskExpired)
 	})
 
+	// genReleaseCollectionTask(baseCtx, queryCoord)
+	queryCoord.meta.releaseCollection(defaultCollectionID)
 	loadCollectionTask := genLoadCollectionTask(baseCtx, queryCoord)
 	err = queryCoord.scheduler.Enqueue(loadCollectionTask)
 	assert.Nil(t, err)
 	waitTaskFinalState(loadCollectionTask, taskExpired)
-	queryCoord.meta.setLoadType(defaultCollectionID, querypb.LoadType_LoadCollection)
 
 	t.Run("Test handoffGrowingSegment", func(t *testing.T) {
 		infos := queryCoord.meta.showSegmentInfos(defaultCollectionID, nil)
@@ -578,34 +581,35 @@ func TestLoadBalanceSegmentLoop(t *testing.T) {
 	assert.Nil(t, err)
 	waitTaskFinalState(loadCollectionTask, taskExpired)
 
-	partitionID := defaultPartitionID
-	for {
-		req := &querypb.LoadPartitionsRequest{
-			Base: &commonpb.MsgBase{
-				MsgType: commonpb.MsgType_LoadPartitions,
+	memoryStress := uint64(1 << 10)
+	queryNode1.getMetrics = func() (*milvuspb.GetMetricsResponse, error) {
+		nodeInfo := metricsinfo.QueryNodeInfos{
+			BaseComponentInfos: metricsinfo.BaseComponentInfos{
+				HardwareInfos: metricsinfo.HardwareMetrics{
+					Memory:      1 << 30,
+					MemoryUsage: memoryStress,
+				},
 			},
-			CollectionID:  defaultCollectionID,
-			PartitionIDs:  []UniqueID{partitionID},
-			Schema:        genDefaultCollectionSchema(false),
-			ReplicaNumber: 1,
 		}
-		baseTask := newBaseTask(baseCtx, querypb.TriggerCondition_GrpcRequest)
-		loadPartitionTask := &loadPartitionTask{
-			baseTask:              baseTask,
-			LoadPartitionsRequest: req,
-			broker:                queryCoord.broker,
-			cluster:               queryCoord.cluster,
-			meta:                  queryCoord.meta,
-		}
-		err = queryCoord.scheduler.Enqueue(loadPartitionTask)
-		assert.Nil(t, err)
-		waitTaskFinalState(loadPartitionTask, taskExpired)
+
+		nodeInfoResp, err := metricsinfo.MarshalComponentInfos(nodeInfo)
+		return &milvuspb.GetMetricsResponse{
+			Status:   &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			Response: nodeInfoResp,
+		}, err
+	}
+	for {
 		nodeInfo, err := queryCoord.cluster.GetNodeInfoByID(queryNode1.queryNodeID)
 		assert.Nil(t, err)
 		if nodeInfo.(*queryNode).memUsageRate >= Params.QueryCoordCfg.OverloadedMemoryThresholdPercentage {
+			log.Debug("memory stress kicks the threshold")
 			break
 		}
-		partitionID++
+
+		log.Debug("memory stress...",
+			zap.Uint64("stress", memoryStress),
+			zap.Float64("memoryUsage", nodeInfo.(*queryNode).memUsageRate))
+		memoryStress *= 2
 	}
 
 	queryNode2, err := startQueryNodeServer(baseCtx)

@@ -537,7 +537,9 @@ func (scheduler *TaskScheduler) processTask(t task) error {
 	span.LogFields(oplog.Int64("processTask: scheduler process PreExecute", t.getTaskID()))
 	err = t.preExecute(ctx)
 	if err != nil {
-		log.Warn("failed to preExecute task", zap.Error(err))
+		log.Error("failed to preExecute task",
+			zap.Error(err))
+		t.setResultInfo(err)
 		return err
 	}
 	taskInfoKey = fmt.Sprintf("%s/%d", taskInfoPrefix, t.getTaskID())
@@ -638,8 +640,35 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 			if triggerTask.getState() == taskUndo || triggerTask.getState() == taskDoing {
 				err = scheduler.processTask(triggerTask)
 				if err != nil {
-					log.Warn("scheduleLoop: process triggerTask failed", zap.Int64("triggerTaskID", triggerTask.getTaskID()), zap.Error(err))
-					alreadyNotify = false
+					// Checks in preExecute not passed,
+					// for only LoadCollection & LoadPartitions
+					if errors.Is(err, ErrCollectionLoaded) ||
+						errors.Is(err, ErrLoadParametersMismatch) {
+						log.Warn("scheduleLoop: preExecute failed",
+							zap.Int64("triggerTaskID", triggerTask.getTaskID()),
+							zap.Error(err))
+
+						triggerTask.setState(taskExpired)
+						if errors.Is(err, ErrLoadParametersMismatch) {
+							triggerTask.setState(taskFailed)
+						}
+
+						triggerTask.notify(err)
+
+						err = removeTaskFromKVFn(triggerTask)
+						if err != nil {
+							log.Error("scheduleLoop: error when remove trigger and internal tasks from etcd", zap.Int64("triggerTaskID", triggerTask.getTaskID()), zap.Error(err))
+							triggerTask.setResultInfo(err)
+						} else {
+							log.Info("scheduleLoop: trigger task done and delete from etcd", zap.Int64("triggerTaskID", triggerTask.getTaskID()))
+						}
+
+						triggerTask.finishContext()
+						continue
+					} else {
+						log.Warn("scheduleLoop: process triggerTask failed", zap.Int64("triggerTaskID", triggerTask.getTaskID()), zap.Error(err))
+						alreadyNotify = false
+					}
 				}
 			}
 			if triggerTask.msgType() != commonpb.MsgType_LoadCollection && triggerTask.msgType() != commonpb.MsgType_LoadPartitions {

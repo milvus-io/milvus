@@ -275,6 +275,12 @@ func (qs *queryNodeServerMock) GetMetrics(ctx context.Context, req *milvuspb.Get
 	if err != nil {
 		return nil, err
 	}
+
+	// check whether the memory usage has been set
+	if len(response.Response) > 0 {
+		return response, nil
+	}
+
 	if response.Status.ErrorCode != commonpb.ErrorCode_Success {
 		return nil, errors.New("query node do task failed")
 	}
