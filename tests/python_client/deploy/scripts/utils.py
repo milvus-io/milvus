@@ -157,8 +157,9 @@ def load_and_search(prefix, replicas=1):
         start_time = time.time()
         print(f"\nSearch...")
         # define output_fields of search result
+        v_search = vectors[:1]
         res = c.search(
-            vectors[:1], "float_vector", search_params, topK,
+            v_search, "float_vector", search_params, topK,
             "count > 500", output_fields=["count", "random_value"], timeout=120
         )
         end_time = time.time()
@@ -168,7 +169,9 @@ def load_and_search(prefix, replicas=1):
                 # Get value of the random value field for search result
                 print(hit, hit.entity.get("random_value"))
             ids = hits.ids
+            assert len(ids) == topK
             print(ids)
+        assert len(res) == len(v_search)
         print("search latency: %.4fs" % (end_time - start_time))
         t0 = time.time()
         expr = "count in [2,4,6,8]"
@@ -178,6 +181,7 @@ def load_and_search(prefix, replicas=1):
         for r in sorted_res:
             print(r)
         t1 = time.time()
+        assert len(res) == 4
         print("query latency: %.4fs" % (t1 - t0))
         # c.release()
         print("###########")
