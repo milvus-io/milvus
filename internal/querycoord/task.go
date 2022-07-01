@@ -2382,12 +2382,7 @@ func (lbt *loadBalanceTask) globalPostExecute(ctx context.Context) error {
 	}
 
 	for replicaID := range replicas {
-		shards := make([]string, 0, len(dmChannels))
-		for _, dmc := range dmChannels {
-			shards = append(shards, dmc.DmChannel)
-		}
-
-		err := syncReplicaSegments(lbt.ctx, lbt.meta, lbt.cluster, replicaID, shards...)
+		err := syncReplicaSegments(lbt.ctx, lbt.meta, lbt.cluster, replicaID)
 		if err != nil {
 			log.Error("loadBalanceTask: failed to sync segments distribution",
 				zap.Int64("collectionID", lbt.CollectionID),
