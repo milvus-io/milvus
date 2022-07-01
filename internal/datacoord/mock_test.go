@@ -97,7 +97,7 @@ func (kv *saveFailKV) MultiSave(kvs map[string]string) error {
 type removeFailKV struct{ kv.TxnKV }
 
 // Remove override behavior, inject error
-func (kv *removeFailKV) Remove(key string) error {
+func (kv *removeFailKV) MultiRemove(key []string) error {
 	return errors.New("mocked fail")
 }
 

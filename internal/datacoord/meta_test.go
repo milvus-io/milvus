@@ -18,8 +18,10 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/golang/protobuf/proto"
@@ -31,6 +33,161 @@ import (
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/stretchr/testify/assert"
 )
+
+type mockEtcdKv struct {
+	kv.TxnKV
+}
+
+func (mek *mockEtcdKv) LoadWithPrefix(key string) ([]string, []string, error) {
+	var val []byte
+	switch {
+	case strings.Contains(key, segmentPrefix):
+		segInfo := &datapb.SegmentInfo{ID: 1, Binlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log1")}}
+		val, _ = proto.Marshal(segInfo)
+	case strings.Contains(key, segmentBinlogPathPrefix):
+		segInfo := getFieldBinlogPaths(1, "binlog1")
+		val, _ = proto.Marshal(segInfo)
+	case strings.Contains(key, segmentDeltalogPathPrefix):
+		segInfo := getFieldBinlogPaths(1, "deltalog1")
+		val, _ = proto.Marshal(segInfo)
+	case strings.Contains(key, segmentStatslogPathPrefix):
+		segInfo := getFieldBinlogPaths(1, "statslog1")
+		val, _ = proto.Marshal(segInfo)
+	default:
+		return nil, nil, fmt.Errorf("invalid key")
+	}
+
+	return nil, []string{string(val)}, nil
+}
+
+type mockKvLoadSegmentError struct {
+	kv.TxnKV
+}
+
+func (mek *mockKvLoadSegmentError) LoadWithPrefix(key string) ([]string, []string, error) {
+	if strings.Contains(key, segmentPrefix) {
+		return nil, nil, fmt.Errorf("segment LoadWithPrefix error")
+	}
+	return nil, nil, nil
+}
+
+type mockKvLoadBinlogError struct {
+	kv.TxnKV
+}
+
+func (mek *mockKvLoadBinlogError) LoadWithPrefix(key string) ([]string, []string, error) {
+	var val []byte
+	switch {
+	case strings.Contains(key, segmentPrefix):
+		segInfo := &datapb.SegmentInfo{ID: 1, Binlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log1")}}
+		val, _ = proto.Marshal(segInfo)
+	case strings.Contains(key, segmentBinlogPathPrefix):
+		return nil, nil, fmt.Errorf("binlog LoadWithPrefix error")
+	}
+	return nil, []string{string(val)}, nil
+}
+
+type mockKvIllegalSegment struct {
+	kv.TxnKV
+}
+
+func (mek *mockKvIllegalSegment) LoadWithPrefix(key string) ([]string, []string, error) {
+	var val []byte
+	switch {
+	case strings.Contains(key, segmentPrefix):
+		val = []byte{'i', 'l', 'l', 'e', 'g', 'a', 'l'}
+	}
+
+	return nil, []string{string(val)}, nil
+}
+
+type mockKvIllegalBinlog struct {
+	kv.TxnKV
+}
+
+func (mek *mockKvIllegalBinlog) LoadWithPrefix(key string) ([]string, []string, error) {
+	var val []byte
+	switch {
+	case strings.Contains(key, segmentBinlogPathPrefix):
+		val = []byte{'i', 'l', 'l', 'e', 'g', 'a', 'l'}
+	}
+
+	return nil, []string{string(val)}, nil
+}
+
+type mockKvIllegalDeltalog struct {
+	kv.TxnKV
+}
+
+func (mek *mockKvIllegalDeltalog) LoadWithPrefix(key string) ([]string, []string, error) {
+	var val []byte
+	switch {
+	case strings.Contains(key, segmentDeltalogPathPrefix):
+		val = []byte{'i', 'l', 'l', 'e', 'g', 'a', 'l'}
+	}
+
+	return nil, []string{string(val)}, nil
+}
+
+type mockKvIllegalStatslog struct {
+	kv.TxnKV
+}
+
+func (mek *mockKvIllegalStatslog) LoadWithPrefix(key string) ([]string, []string, error) {
+	var val []byte
+	switch {
+	case strings.Contains(key, segmentStatslogPathPrefix):
+		val = []byte{'i', 'l', 'l', 'e', 'g', 'a', 'l'}
+	}
+
+	return nil, []string{string(val)}, nil
+}
+
+func TestMetaReloadFromKV(t *testing.T) {
+	t.Run("Test ReloadFromKV success", func(t *testing.T) {
+		fkv := &mockEtcdKv{}
+		_, err := newMeta(fkv)
+		assert.Nil(t, err)
+	})
+
+	// load segment error
+	t.Run("Test ReloadFromKV load segment fails", func(t *testing.T) {
+		fkv := &mockKvLoadSegmentError{}
+		_, err := newMeta(fkv)
+		assert.NotNil(t, err)
+	})
+
+	// illegal segment info
+	t.Run("Test ReloadFromKV unmarshal segment fails", func(t *testing.T) {
+		fkv := &mockKvIllegalSegment{}
+		_, err := newMeta(fkv)
+		assert.NotNil(t, err)
+	})
+
+	// load binlog error
+	t.Run("Test ReloadFromKV load binlog fails", func(t *testing.T) {
+		fkv := &mockKvLoadBinlogError{}
+		_, err := newMeta(fkv)
+		assert.NotNil(t, err)
+	})
+
+	// illegal binlog/deltalog/statslog info
+	t.Run("Test ReloadFromKV unmarshal binlog fails", func(t *testing.T) {
+		fkv := &mockKvIllegalBinlog{}
+		_, err := newMeta(fkv)
+		assert.NotNil(t, err)
+	})
+	t.Run("Test ReloadFromKV unmarshal deltalog fails", func(t *testing.T) {
+		fkv := &mockKvIllegalDeltalog{}
+		_, err := newMeta(fkv)
+		assert.NotNil(t, err)
+	})
+	t.Run("Test ReloadFromKV unmarshal statslog fails", func(t *testing.T) {
+		fkv := &mockKvIllegalStatslog{}
+		_, err := newMeta(fkv)
+		assert.NotNil(t, err)
+	})
+}
 
 func TestMeta_Basic(t *testing.T) {
 	const collID = UniqueID(0)

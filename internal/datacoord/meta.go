@@ -30,14 +30,19 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
 )
 
 const (
-	metaPrefix          = "datacoord-meta"
-	segmentPrefix       = metaPrefix + "/s"
-	channelRemovePrefix = metaPrefix + "/channel-removal"
+	metaPrefix                = "datacoord-meta"
+	segmentPrefix             = metaPrefix + "/s"
+	segmentBinlogPathPrefix   = metaPrefix + "/binlog"
+	segmentDeltalogPathPrefix = metaPrefix + "/deltalog"
+	segmentStatslogPathPrefix = metaPrefix + "/statslog"
+	channelRemovePrefix       = metaPrefix + "/channel-removal"
 
 	removeFlagTomestone = "removed"
 )
@@ -78,21 +83,69 @@ func (m *meta) reloadFromKV() error {
 	metrics.DataCoordNumStoredRows.WithLabelValues().Set(0)
 	numStoredRows := int64(0)
 	for _, value := range values {
+		// unmarshal segment
 		segmentInfo := &datapb.SegmentInfo{}
 		err = proto.Unmarshal([]byte(value), segmentInfo)
 		if err != nil {
 			return fmt.Errorf("DataCoord reloadFromKV UnMarshal datapb.SegmentInfo err:%w", err)
 		}
-		state := segmentInfo.GetState()
+		// unmarshal binlogs
+		binlogs, err := m.unmarshalBinlog(storage.InsertBinlog, segmentInfo.CollectionID, segmentInfo.PartitionID, segmentInfo.ID)
+		if err != nil {
+			return err
+		}
+		// unmarshal deltalogs
+		deltalogs, err := m.unmarshalBinlog(storage.DeleteBinlog, segmentInfo.CollectionID, segmentInfo.PartitionID, segmentInfo.ID)
+		if err != nil {
+			return err
+		}
+		// unmarshal deltalogs
+		statslogs, err := m.unmarshalBinlog(storage.StatsBinlog, segmentInfo.CollectionID, segmentInfo.PartitionID, segmentInfo.ID)
+		if err != nil {
+			return err
+		}
+		// update cache
+		segmentInfo.Binlogs = binlogs
+		segmentInfo.Deltalogs = deltalogs
+		segmentInfo.Statslogs = statslogs
 		m.segments.SetSegment(segmentInfo.GetID(), NewSegmentInfo(segmentInfo))
-		metrics.DataCoordNumSegments.WithLabelValues(state.String()).Inc()
-		if state == commonpb.SegmentState_Flushed {
+		metrics.DataCoordNumSegments.WithLabelValues(segmentInfo.GetState().String()).Inc()
+		if segmentInfo.GetState() == commonpb.SegmentState_Flushed {
 			numStoredRows += segmentInfo.GetNumOfRows()
 		}
 	}
 	metrics.DataCoordNumStoredRows.WithLabelValues().Set(float64(numStoredRows))
 	metrics.DataCoordNumStoredRowsCounter.WithLabelValues().Add(float64(numStoredRows))
 	return nil
+}
+
+func (m *meta) unmarshalBinlog(binlogType storage.BinlogType, collectionID, partitionID, segmentID UniqueID) ([]*datapb.FieldBinlog, error) {
+	// unmarshal binlog/deltalog/statslog
+	var binlogPrefix string
+	switch binlogType {
+	case storage.InsertBinlog:
+		binlogPrefix = buildFieldBinlogPathPrefix(collectionID, partitionID, segmentID)
+	case storage.DeleteBinlog:
+		binlogPrefix = buildFieldDeltalogPathPrefix(collectionID, partitionID, segmentID)
+	case storage.StatsBinlog:
+		binlogPrefix = buildFieldStatslogPathPrefix(collectionID, partitionID, segmentID)
+	default:
+		return nil, fmt.Errorf("invalid binlog type")
+	}
+	_, values, err := m.client.LoadWithPrefix(binlogPrefix)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]*datapb.FieldBinlog, len(values))
+	for i, value := range values {
+		fieldBinlog := &datapb.FieldBinlog{}
+		err = proto.Unmarshal([]byte(value), fieldBinlog)
+		if err != nil {
+			return nil, fmt.Errorf("unmarshal datapb.FieldBinlog err:%w", err)
+		}
+		result[i] = fieldBinlog
+	}
+	return result, nil
 }
 
 // AddCollection adds a collection into meta
@@ -379,12 +432,19 @@ func (m *meta) UpdateFlushSegmentsInfo(
 
 	kv := make(map[string]string)
 	for _, segment := range modSegments {
-		segBytes, err := proto.Marshal(segment.SegmentInfo)
+		// save binlogs separately
+		binlogKvs, err := buildBinlogKvPair(segment)
 		if err != nil {
-			return fmt.Errorf("dataCoord UpdateFlushSegmentsInfo segmentID:%d, marshal failed:%w", segment.GetID(), err)
+			return err
 		}
-		key := buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
-		kv[key] = string(segBytes)
+		kv = typeutil.MergeMap(binlogKvs, kv)
+
+		// save segment info (without binlogs)
+		k, v, err := m.marshal(segment)
+		if err != nil {
+			return err
+		}
+		kv[k] = v
 	}
 
 	if len(kv) == 0 {
@@ -863,6 +923,13 @@ func (m *meta) CompleteMergeCompaction(compactionLogs []*datapb.CompactionSegmen
 	}
 
 	if segment.NumOfRows > 0 {
+		// save binlogs separately
+		binlogKvs, err := buildBinlogKvPair(segment)
+		if err != nil {
+			return err
+		}
+		data = typeutil.MergeMap(binlogKvs, data)
+		// save segment info
 		k, v, err := m.marshal(segment)
 		if err != nil {
 			return err
@@ -883,6 +950,42 @@ func (m *meta) CompleteMergeCompaction(compactionLogs []*datapb.CompactionSegmen
 		m.segments.SetSegment(segment.GetID(), segment)
 	}
 	return nil
+}
+
+func buildBinlogKvPair(segment *SegmentInfo) (map[string]string, error) {
+	kv := make(map[string]string)
+
+	// binlog kv
+	for _, binlog := range segment.Binlogs {
+		binlogBytes, err := proto.Marshal(binlog)
+		if err != nil {
+			return nil, fmt.Errorf("marshal failed, collectionID:%d, segmentID:%d, fieldID:%d, error:%w", segment.CollectionID, segment.GetID(), binlog.FieldID, err)
+		}
+		key := buildFieldBinlogPath(segment.CollectionID, segment.PartitionID, segment.ID, binlog.FieldID)
+		kv[key] = string(binlogBytes)
+	}
+
+	// deltalog etcd kv
+	for _, deltalog := range segment.Deltalogs {
+		binlogBytes, err := proto.Marshal(deltalog)
+		if err != nil {
+			return nil, fmt.Errorf("marshal failed, collectionID:%d, segmentID:%d, fieldID:%d, error:%w", segment.CollectionID, segment.GetID(), deltalog.FieldID, err)
+		}
+		key := buildFieldDeltalogPath(segment.CollectionID, segment.PartitionID, segment.ID, deltalog.FieldID)
+		kv[key] = string(binlogBytes)
+	}
+
+	// statslog etcd kv
+	for _, statslog := range segment.Statslogs {
+		binlogBytes, err := proto.Marshal(statslog)
+		if err != nil {
+			return nil, fmt.Errorf("marshal failed, collectionID:%d, segmentID:%d, fieldID:%d, error:%w", segment.CollectionID, segment.GetID(), statslog.FieldID, err)
+		}
+		key := buildFieldStatslogPath(segment.CollectionID, segment.PartitionID, segment.ID, statslog.FieldID)
+		kv[key] = string(binlogBytes)
+	}
+
+	return kv, nil
 }
 
 func (m *meta) CompleteInnerCompaction(segmentBinlogs *datapb.CompactionSegmentBinlogs, result *datapb.CompactionResult) error {
@@ -995,24 +1098,37 @@ func (m *meta) updateDeltalogs(origin []*datapb.FieldBinlog, removes []*datapb.F
 }
 
 func (m *meta) marshal(segment *SegmentInfo) (string, string, error) {
-	segBytes, err := proto.Marshal(segment.SegmentInfo)
+	clonedSegment := segment.Clone()
+	clonedSegment.Binlogs = nil
+	clonedSegment.Deltalogs = nil
+	clonedSegment.Statslogs = nil
+	segBytes, err := proto.Marshal(clonedSegment.SegmentInfo)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to marshal segment info, %v", err)
 	}
-	key := buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
+	key := buildSegmentPath(clonedSegment.GetCollectionID(), clonedSegment.GetPartitionID(), clonedSegment.GetID())
 	return key, string(segBytes), nil
 }
 
 // saveSegmentInfo utility function saving segment info into kv store
 func (m *meta) saveSegmentInfo(segment *SegmentInfo) error {
-	segBytes, err := proto.Marshal(segment.SegmentInfo)
-	if err != nil {
-		log.Error("DataCoord saveSegmentInfo marshal failed", zap.Int64("segmentID", segment.GetID()), zap.Error(err))
-		return fmt.Errorf("DataCoord saveSegmentInfo segmentID:%d, marshal failed:%w", segment.GetID(), err)
-	}
 	kvs := make(map[string]string)
-	dataKey := buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
-	kvs[dataKey] = string(segBytes)
+
+	// save binlogs separately
+	binlogKvs, err := buildBinlogKvPair(segment)
+	if err != nil {
+		return err
+	}
+	kvs = typeutil.MergeMap(binlogKvs, kvs)
+
+	// save segment info
+	k, v, err := m.marshal(segment)
+	if err != nil {
+		return err
+	}
+	kvs[k] = v
+
+	// save handoff req if segment is flushed
 	if segment.State == commonpb.SegmentState_Flushed {
 		handoffSegmentInfo := &querypb.SegmentInfo{
 			SegmentID:           segment.ID,
@@ -1038,8 +1154,16 @@ func (m *meta) saveSegmentInfo(segment *SegmentInfo) error {
 // removeSegmentInfo utility function removing segment info from kv store
 // Note that nil parameter will cause panicking
 func (m *meta) removeSegmentInfo(segment *SegmentInfo) error {
-	key := buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
-	return m.client.Remove(key)
+	segKey := buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
+	keys := []string{segKey}
+	binlogKvs, err := buildBinlogKvPair(segment)
+	if err != nil {
+		return err
+	}
+	binlogKeys := typeutil.GetMapKeys(binlogKvs)
+	keys = append(keys, binlogKeys...)
+
+	return m.client.MultiRemove(keys)
 }
 
 // saveKvTxn batch save kvs
@@ -1050,6 +1174,30 @@ func (m *meta) saveKvTxn(kv map[string]string) error {
 // buildSegmentPath common logic mapping segment info to corresponding key in kv store
 func buildSegmentPath(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID) string {
 	return fmt.Sprintf("%s/%d/%d/%d", segmentPrefix, collectionID, partitionID, segmentID)
+}
+
+func buildFieldBinlogPath(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID, fieldID UniqueID) string {
+	return fmt.Sprintf("%s/%d/%d/%d/%d", segmentBinlogPathPrefix, collectionID, partitionID, segmentID, fieldID)
+}
+
+func buildFieldDeltalogPath(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID, fieldID UniqueID) string {
+	return fmt.Sprintf("%s/%d/%d/%d/%d", segmentDeltalogPathPrefix, collectionID, partitionID, segmentID, fieldID)
+}
+
+func buildFieldStatslogPath(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID, fieldID UniqueID) string {
+	return fmt.Sprintf("%s/%d/%d/%d/%d", segmentStatslogPathPrefix, collectionID, partitionID, segmentID, fieldID)
+}
+
+func buildFieldBinlogPathPrefix(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID) string {
+	return fmt.Sprintf("%s/%d/%d/%d", segmentBinlogPathPrefix, collectionID, partitionID, segmentID)
+}
+
+func buildFieldDeltalogPathPrefix(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID) string {
+	return fmt.Sprintf("%s/%d/%d/%d", segmentDeltalogPathPrefix, collectionID, partitionID, segmentID)
+}
+
+func buildFieldStatslogPathPrefix(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID) string {
+	return fmt.Sprintf("%s/%d/%d/%d", segmentStatslogPathPrefix, collectionID, partitionID, segmentID)
 }
 
 // buildQuerySegmentPath common logic mapping segment info to corresponding key of queryCoord in kv store
