@@ -104,6 +104,15 @@ func TestReduce_AllFunc(t *testing.T) {
 	deleteCollection(collection)
 }
 
+func TestReduce_deleteSearchResultDataBlobs(t *testing.T) {
+	t.Run("test purge memory", func(t *testing.T) {
+		bak := Params.CommonCfg.MemPurgeRatio
+		Params.CommonCfg.MemPurgeRatio = 0
+		deleteSearchResultDataBlobs(nil)
+		Params.CommonCfg.MemPurgeRatio = bak
+	})
+}
+
 func TestReduce_Invalid(t *testing.T) {
 	t.Run("nil plan", func(t *testing.T) {
 		plan := &SearchPlan{}
