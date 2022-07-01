@@ -128,6 +128,7 @@ class Checker:
 
     def terminate(self):
         self._keep_running = False
+        self.reset()
 
     def reset(self):
         self._succ = 0
@@ -215,7 +216,7 @@ class FlushChecker(Checker):
 
     def __init__(self, collection_name=None, flush=False, shards_num=2):
         if collection_name is None:
-            collection_name = cf.gen_unique_str("InsertChecker_")
+            collection_name = cf.gen_unique_str("FlushChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num)
         self._flush = flush
         self.initial_entities = self.c_wrap.num_entities
@@ -223,7 +224,7 @@ class FlushChecker(Checker):
     @trace()
     def flush(self):
         num_entities = self.c_wrap.num_entities
-        if num_entities == (self.initial_entities + constants.DELTA_PER_INS):
+        if num_entities >= (self.initial_entities + constants.DELTA_PER_INS):
             result = True
             self.initial_entities += constants.DELTA_PER_INS
         else:
