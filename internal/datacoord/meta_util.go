@@ -14,61 +14,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package querycoord
+package datacoord
 
-import (
-	"github.com/golang/protobuf/proto"
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"go.uber.org/zap"
-)
-
-// generateFullWatchDmChannelsRequest fill the WatchDmChannelsRequest by get segment infos from meta broker
-func generateFullWatchDmChannelsRequest(broker *globalMetaBroker, request *querypb.WatchDmChannelsRequest) (*querypb.WatchDmChannelsRequest, error) {
-	cloned := proto.Clone(request).(*querypb.WatchDmChannelsRequest)
-	vChannels := cloned.GetInfos()
-
-	// for upgrade compatibility from 2.0.2
-	for _, vChannel := range vChannels {
-		reviseVChannelInfo(vChannel)
-	}
-
-	// fill segmentInfos
-	segmentIds := make([]int64, 0)
-	for _, vChannel := range vChannels {
-		segmentIds = append(segmentIds, vChannel.FlushedSegmentIds...)
-		segmentIds = append(segmentIds, vChannel.UnflushedSegmentIds...)
-		segmentIds = append(segmentIds, vChannel.DroppedSegmentIds...)
-	}
-	segmentInfos, err := broker.getDataSegmentInfosByIDs(segmentIds)
-	if err != nil {
-		log.Error("Get Vchannel SegmentInfos failed", zap.Error(err))
-		return nil, err
-	}
-	segmentDict := make(map[int64]*datapb.SegmentInfo)
-	for _, info := range segmentInfos {
-		segmentDict[info.ID] = info
-	}
-	cloned.SegmentInfos = segmentDict
-
-	return cloned, err
-}
-
-// thinWatchDmChannelsRequest will return a thin version of WatchDmChannelsRequest
-// the thin version is used for storage because the complete version may be too large
-func thinWatchDmChannelsRequest(request *querypb.WatchDmChannelsRequest) *querypb.WatchDmChannelsRequest {
-	cloned := proto.Clone(request).(*querypb.WatchDmChannelsRequest)
-	cloned.SegmentInfos = make(map[int64]*datapb.SegmentInfo)
-	return cloned
-}
-
-// reviseWatchDeltaChannelsRequest will revise the WatchDeltaChannelsRequest for upgrade compatibility from 2.0.2
-func reviseWatchDeltaChannelsRequest(req *querypb.WatchDeltaChannelsRequest) {
-	for _, vChannel := range req.GetInfos() {
-		reviseVChannelInfo(vChannel)
-	}
-}
+import "github.com/milvus-io/milvus/internal/proto/datapb"
 
 // reviseVChannelInfo will revise the datapb.VchannelInfo for upgrade compatibility from 2.0.2
 func reviseVChannelInfo(vChannel *datapb.VchannelInfo) {

@@ -147,6 +147,7 @@ func (c *ChannelStore) Reload() error {
 		if err := proto.Unmarshal([]byte(v), cw); err != nil {
 			return err
 		}
+		reviseVChannelInfo(cw.GetVchan())
 
 		c.Add(nodeID)
 		channel := &channel{

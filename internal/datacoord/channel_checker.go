@@ -147,6 +147,7 @@ func parseWatchInfo(key string, data []byte) (*datapb.ChannelWatchInfo, error) {
 	if watchInfo.Vchan == nil {
 		return nil, fmt.Errorf("invalid event: ChannelWatchInfo with nil VChannelInfo, key: %s", key)
 	}
+	reviseVChannelInfo(watchInfo.GetVchan())
 
 	return &watchInfo, nil
 }
