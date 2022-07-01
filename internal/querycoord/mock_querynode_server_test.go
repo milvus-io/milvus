@@ -280,11 +280,13 @@ func (qs *queryNodeServerMock) GetMetrics(ctx context.Context, req *milvuspb.Get
 	}
 
 	totalMemUsage := uint64(0)
+	globalSegInfosMutex.RLock()
 	for _, info := range qs.segmentInfos {
 		if nodeIncluded(qs.queryNodeID, info.NodeIds) {
 			totalMemUsage += uint64(info.MemSize)
 		}
 	}
+	globalSegInfosMutex.RUnlock()
 	nodeInfos := metricsinfo.QueryNodeInfos{
 		BaseComponentInfos: metricsinfo.BaseComponentInfos{
 			Name: metricsinfo.ConstructComponentName(typeutil.QueryNodeRole, qs.queryNodeID),
