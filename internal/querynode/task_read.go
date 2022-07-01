@@ -34,7 +34,6 @@ type readTask interface {
 
 	Ctx() context.Context
 
-	GetTimeRecorder() *timerecord.TimeRecorder
 	GetCollectionID() UniqueID
 
 	Ready() (bool, error)
@@ -43,7 +42,7 @@ type readTask interface {
 	CPUUsage() int32
 	Timeout() bool
 
-	SetMaxCPUUSage(int32)
+	SetMaxCPUUsage(int32)
 	SetStep(step TaskStep)
 }
 
@@ -84,7 +83,7 @@ func (b *baseReadTask) OnEnqueue() error {
 	return nil
 }
 
-func (b *baseReadTask) SetMaxCPUUSage(cpu int32) {
+func (b *baseReadTask) SetMaxCPUUsage(cpu int32) {
 	b.maxCPU = cpu
 }
 
@@ -114,10 +113,6 @@ func (b *baseReadTask) Notify(err error) {
 // GetCollectionID return CollectionID.
 func (b *baseReadTask) GetCollectionID() UniqueID {
 	return b.CollectionID
-}
-
-func (b *baseReadTask) GetTimeRecorder() *timerecord.TimeRecorder {
-	return b.tr
 }
 
 func (b *baseReadTask) CanMergeWith(t readTask) bool {

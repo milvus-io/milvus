@@ -177,13 +177,24 @@ func (s *searchTask) Notify(err error) {
 }
 
 func (s *searchTask) estimateCPUUsage() {
+	var segmentNum int64
 	if s.DataScope == querypb.DataScope_Streaming {
 		// assume growing segments num is 5
-		s.cpu = int32(s.NQ) * 5 / 2
+		partitionIDs := s.iReq.GetPartitionIDs()
+		channel := s.req.GetDmlChannel()
+		segIDs, err := s.QS.metaReplica.getSegmentIDsByVChannel(partitionIDs, channel, segmentTypeGrowing)
+		if err != nil {
+			log.Error("searchTask estimateCPUUsage", zap.Error(err))
+		}
+		segmentNum = int64(len(segIDs))
+		if segmentNum <= 0 {
+			segmentNum = 1
+		}
 	} else if s.DataScope == querypb.DataScope_Historical {
-		segmentNum := int64(len(s.req.GetSegmentIDs()))
-		s.cpu = int32(s.NQ * segmentNum / 2)
+		segmentNum = int64(len(s.req.GetSegmentIDs()))
 	}
+	cpu := float64(s.NQ*segmentNum) * Params.QueryNodeCfg.CPURatio
+	s.cpu = int32(cpu)
 	if s.cpu <= 0 {
 		s.cpu = 5
 	} else if s.cpu > s.maxCPU {
