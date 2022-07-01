@@ -37,6 +37,8 @@ const (
 	DDLBinlog
 	// IndexFileBinlog BinlogType for index
 	IndexFileBinlog
+	// StatsBinlog BinlogType for stats data
+	StatsBinlog
 )
 const (
 	// MagicNumber used in binlog

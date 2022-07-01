@@ -40,7 +40,7 @@ import (
 
 func newMemoryMeta(allocator allocator) (*meta, error) {
 	memoryKV := memkv.NewMemoryKV()
-	return newMeta(memoryKV)
+	return newMeta(context.TODO(), memoryKV)
 }
 
 var _ allocator = (*MockAllocator)(nil)
@@ -97,7 +97,7 @@ func (kv *saveFailKV) MultiSave(kvs map[string]string) error {
 type removeFailKV struct{ kv.TxnKV }
 
 // Remove override behavior, inject error
-func (kv *removeFailKV) Remove(key string) error {
+func (kv *removeFailKV) MultiRemove(key []string) error {
 	return errors.New("mocked fail")
 }
 

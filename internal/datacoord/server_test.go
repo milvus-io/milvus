@@ -1174,7 +1174,7 @@ func TestSaveBinlogPaths(t *testing.T) {
 
 			svr.meta.AddCollection(&datapb.CollectionInfo{ID: 1})
 			err := svr.meta.AddSegment(&SegmentInfo{
-				SegmentInfo: &datapb.SegmentInfo{
+				Segment: &datapb.SegmentInfo{
 					ID:            1,
 					CollectionID:  1,
 					InsertChannel: "ch1",
@@ -1827,8 +1827,7 @@ func TestShouldDropChannel(t *testing.T) {
 	})
 
 	t.Run("channel in remove flag", func(t *testing.T) {
-		key := buildChannelRemovePath("ch1")
-		err := svr.meta.client.Save(key, removeFlagTomestone)
+		err := svr.meta.catalog.MarkChannelDeleted(context.TODO(), "ch1")
 		require.NoError(t, err)
 
 		assert.True(t, svr.handler.CheckShouldDropChannel("ch1"))
@@ -2627,7 +2626,7 @@ func TestDataCoordServer_SetSegmentState(t *testing.T) {
 		svr.meta.Lock()
 		func() {
 			defer svr.meta.Unlock()
-			svr.meta, _ = newMeta(&mockTxnKVext{})
+			svr.meta, _ = newMeta(context.TODO(), &mockTxnKVext{})
 		}()
 		defer closeTestServer(t, svr)
 		segment := &datapb.SegmentInfo{

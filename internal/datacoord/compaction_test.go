@@ -22,6 +22,7 @@ import (
 	"time"
 
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
+	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/stretchr/testify/assert"
@@ -153,7 +154,7 @@ func Test_compactionPlanHandler_completeCompaction(t *testing.T) {
 				},
 				nil,
 				&meta{
-					client: memkv.NewMemoryKV(),
+					catalog: &datacoord.Catalog{Txn: memkv.NewMemoryKV()},
 					segments: &SegmentsInfo{
 						map[int64]*SegmentInfo{
 							1: {SegmentInfo: &datapb.SegmentInfo{ID: 1, Binlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log1")}}},
@@ -202,7 +203,7 @@ func Test_compactionPlanHandler_completeCompaction(t *testing.T) {
 				},
 				nil,
 				&meta{
-					client: memkv.NewMemoryKV(),
+					catalog: &datacoord.Catalog{Txn: memkv.NewMemoryKV()},
 					segments: &SegmentsInfo{
 						map[int64]*SegmentInfo{
 
@@ -289,7 +290,7 @@ func Test_compactionPlanHandler_segment_is_referenced(t *testing.T) {
 				},
 				nil,
 				&meta{
-					client: memkv.NewMemoryKV(),
+					catalog: &datacoord.Catalog{Txn: memkv.NewMemoryKV()},
 					segments: &SegmentsInfo{
 						map[int64]*SegmentInfo{
 

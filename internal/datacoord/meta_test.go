@@ -18,19 +18,219 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/kv"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
+	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/stretchr/testify/assert"
 )
+
+type mockEtcdKv struct {
+	kv.TxnKV
+}
+
+func (mek *mockEtcdKv) LoadWithPrefix(key string) ([]string, []string, error) {
+	var val []byte
+	switch {
+	case strings.Contains(key, datacoord.SegmentPrefix):
+		segInfo := &datapb.SegmentInfo{ID: 1, Binlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log1")}}
+		val, _ = proto.Marshal(segInfo)
+	case strings.Contains(key, datacoord.SegmentBinlogPathPrefix):
+		segInfo := getFieldBinlogPaths(1, "binlog1")
+		val, _ = proto.Marshal(segInfo)
+	case strings.Contains(key, datacoord.SegmentDeltalogPathPrefix):
+		segInfo := getFieldBinlogPaths(1, "deltalog1")
+		val, _ = proto.Marshal(segInfo)
+	case strings.Contains(key, datacoord.SegmentStatslogPathPrefix):
+		segInfo := getFieldBinlogPaths(1, "statslog1")
+		val, _ = proto.Marshal(segInfo)
+	default:
+		return nil, nil, fmt.Errorf("invalid key")
+	}
+
+	return nil, []string{string(val)}, nil
+}
+
+type mockKvLoadSegmentError struct {
+	kv.TxnKV
+}
+
+func (mek *mockKvLoadSegmentError) LoadWithPrefix(key string) ([]string, []string, error) {
+	if strings.Contains(key, datacoord.SegmentPrefix) {
+		return nil, nil, fmt.Errorf("segment LoadWithPrefix error")
+	}
+	return nil, nil, nil
+}
+
+type mockKvLoadBinlogError struct {
+	kv.TxnKV
+}
+
+func (mek *mockKvLoadBinlogError) LoadWithPrefix(key string) ([]string, []string, error) {
+	var val []byte
+	switch {
+	case strings.Contains(key, datacoord.SegmentPrefix):
+		segInfo := &datapb.SegmentInfo{ID: 1, Deltalogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "delta_log_1")}}
+		val, _ = proto.Marshal(segInfo)
+	case strings.Contains(key, datacoord.SegmentBinlogPathPrefix):
+		return nil, nil, fmt.Errorf("LoadWithPrefix for binlogs error")
+	}
+	return nil, []string{string(val)}, nil
+}
+
+type mockKvLoadDeltaBinlogError struct {
+	kv.TxnKV
+}
+
+func (mek *mockKvLoadDeltaBinlogError) LoadWithPrefix(key string) ([]string, []string, error) {
+	var val []byte
+	switch {
+	case strings.Contains(key, datacoord.SegmentPrefix):
+		segInfo := &datapb.SegmentInfo{ID: 1, Binlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "binlog_1")}}
+		val, _ = proto.Marshal(segInfo)
+	case strings.Contains(key, datacoord.SegmentDeltalogPathPrefix):
+		return nil, nil, fmt.Errorf("LoadWithPrefix for deltalog error")
+	}
+	return nil, []string{string(val)}, nil
+}
+
+type mockKvLoadStatsBinlogError struct {
+	kv.TxnKV
+}
+
+func (mek *mockKvLoadStatsBinlogError) LoadWithPrefix(key string) ([]string, []string, error) {
+	var val []byte
+	switch {
+	case strings.Contains(key, datacoord.SegmentPrefix+"/"):
+		segInfo := &datapb.SegmentInfo{ID: 1, Binlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "binlog_1")}}
+		val, _ = proto.Marshal(segInfo)
+	case strings.Contains(key, datacoord.SegmentStatslogPathPrefix):
+		return nil, nil, fmt.Errorf("LoadWithPrefix for statslog error")
+	}
+	return nil, []string{string(val)}, nil
+}
+
+type mockKvIllegalSegment struct {
+	kv.TxnKV
+}
+
+func (mek *mockKvIllegalSegment) LoadWithPrefix(key string) ([]string, []string, error) {
+	var val []byte
+	switch {
+	case strings.Contains(key, datacoord.SegmentPrefix):
+		val = []byte{'i', 'l', 'l', 'e', 'g', 'a', 'l'}
+	}
+
+	return nil, []string{string(val)}, nil
+}
+
+type mockKvIllegalBinlog struct {
+	kv.TxnKV
+}
+
+func (mek *mockKvIllegalBinlog) LoadWithPrefix(key string) ([]string, []string, error) {
+	var val []byte
+	switch {
+	case strings.Contains(key, datacoord.SegmentBinlogPathPrefix):
+		val = []byte{'i', 'l', 'l', 'e', 'g', 'a', 'l'}
+	}
+
+	return nil, []string{string(val)}, nil
+}
+
+type mockKvIllegalDeltalog struct {
+	kv.TxnKV
+}
+
+func (mek *mockKvIllegalDeltalog) LoadWithPrefix(key string) ([]string, []string, error) {
+	var val []byte
+	switch {
+	case strings.Contains(key, datacoord.SegmentDeltalogPathPrefix):
+		val = []byte{'i', 'l', 'l', 'e', 'g', 'a', 'l'}
+	}
+
+	return nil, []string{string(val)}, nil
+}
+
+type mockKvIllegalStatslog struct {
+	kv.TxnKV
+}
+
+func (mek *mockKvIllegalStatslog) LoadWithPrefix(key string) ([]string, []string, error) {
+	var val []byte
+	switch {
+	case strings.Contains(key, datacoord.SegmentStatslogPathPrefix):
+		val = []byte{'i', 'l', 'l', 'e', 'g', 'a', 'l'}
+	}
+
+	return nil, []string{string(val)}, nil
+}
+
+func TestMetaReloadFromKV(t *testing.T) {
+	t.Run("Test ReloadFromKV success", func(t *testing.T) {
+		fkv := &mockEtcdKv{}
+		_, err := newMeta(context.TODO(), fkv)
+		assert.Nil(t, err)
+	})
+
+	// load segment error
+	t.Run("Test ReloadFromKV load segment fails", func(t *testing.T) {
+		fkv := &mockKvLoadSegmentError{}
+		_, err := newMeta(context.TODO(), fkv)
+		assert.NotNil(t, err)
+	})
+
+	// illegal segment info
+	t.Run("Test ReloadFromKV unmarshal segment fails", func(t *testing.T) {
+		fkv := &mockKvIllegalSegment{}
+		_, err := newMeta(context.TODO(), fkv)
+		assert.NotNil(t, err)
+	})
+
+	// load binlog/deltalog/statslog error
+	t.Run("Test ReloadFromKV load binlog fails", func(t *testing.T) {
+		fkv := &mockKvLoadBinlogError{}
+		_, err := newMeta(context.TODO(), fkv)
+		assert.NotNil(t, err)
+	})
+	t.Run("Test ReloadFromKV load deltalog fails", func(t *testing.T) {
+		fkv := &mockKvLoadDeltaBinlogError{}
+		_, err := newMeta(context.TODO(), fkv)
+		assert.NotNil(t, err)
+	})
+	t.Run("Test ReloadFromKV load statslog fails", func(t *testing.T) {
+		fkv := &mockKvLoadStatsBinlogError{}
+		_, err := newMeta(context.TODO(), fkv)
+		assert.NotNil(t, err)
+	})
+
+	// illegal binlog/deltalog/statslog info
+	t.Run("Test ReloadFromKV unmarshal binlog fails", func(t *testing.T) {
+		fkv := &mockKvIllegalBinlog{}
+		_, err := newMeta(context.TODO(), fkv)
+		assert.NotNil(t, err)
+	})
+	t.Run("Test ReloadFromKV unmarshal deltalog fails", func(t *testing.T) {
+		fkv := &mockKvIllegalDeltalog{}
+		_, err := newMeta(context.TODO(), fkv)
+		assert.NotNil(t, err)
+	})
+	t.Run("Test ReloadFromKV unmarshal statslog fails", func(t *testing.T) {
+		fkv := &mockKvIllegalStatslog{}
+		_, err := newMeta(context.TODO(), fkv)
+		assert.NotNil(t, err)
+	})
+}
 
 func TestMeta_Basic(t *testing.T) {
 	const collID = UniqueID(0)
@@ -135,14 +335,14 @@ func TestMeta_Basic(t *testing.T) {
 		// inject error for `Save`
 		memoryKV := memkv.NewMemoryKV()
 		fkv := &saveFailKV{TxnKV: memoryKV}
-		meta, err := newMeta(fkv)
+		meta, err := newMeta(context.TODO(), fkv)
 		assert.Nil(t, err)
 
 		err = meta.AddSegment(NewSegmentInfo(&datapb.SegmentInfo{}))
 		assert.NotNil(t, err)
 
 		fkv2 := &removeFailKV{TxnKV: memoryKV}
-		meta, err = newMeta(fkv2)
+		meta, err = newMeta(context.TODO(), fkv2)
 		assert.Nil(t, err)
 		// nil, since no segment yet
 		err = meta.DropSegment(0)
@@ -234,7 +434,7 @@ func TestGetUnFlushedSegments(t *testing.T) {
 
 func TestUpdateFlushSegmentsInfo(t *testing.T) {
 	t.Run("normal", func(t *testing.T) {
-		meta, err := newMeta(memkv.NewMemoryKV())
+		meta, err := newMeta(context.TODO(), memkv.NewMemoryKV())
 		assert.Nil(t, err)
 
 		segment1 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 1, State: commonpb.SegmentState_Growing, Binlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "binlog0")},
@@ -260,7 +460,7 @@ func TestUpdateFlushSegmentsInfo(t *testing.T) {
 	})
 
 	t.Run("update non-existed segment", func(t *testing.T) {
-		meta, err := newMeta(memkv.NewMemoryKV())
+		meta, err := newMeta(context.TODO(), memkv.NewMemoryKV())
 		assert.Nil(t, err)
 
 		err = meta.UpdateFlushSegmentsInfo(1, false, false, false, nil, nil, nil, nil, nil)
@@ -268,7 +468,7 @@ func TestUpdateFlushSegmentsInfo(t *testing.T) {
 	})
 
 	t.Run("update checkpoints and start position of non existed segment", func(t *testing.T) {
-		meta, err := newMeta(memkv.NewMemoryKV())
+		meta, err := newMeta(context.TODO(), memkv.NewMemoryKV())
 		assert.Nil(t, err)
 
 		segment1 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 1, State: commonpb.SegmentState_Growing}}
@@ -285,7 +485,7 @@ func TestUpdateFlushSegmentsInfo(t *testing.T) {
 	t.Run("test save etcd failed", func(t *testing.T) {
 		kv := memkv.NewMemoryKV()
 		failedKv := &saveFailKV{kv}
-		meta, err := newMeta(failedKv)
+		meta, err := newMeta(context.TODO(), failedKv)
 		assert.Nil(t, err)
 
 		segmentInfo := &SegmentInfo{
@@ -312,7 +512,8 @@ func TestUpdateFlushSegmentsInfo(t *testing.T) {
 }
 
 func TestSaveHandoffMeta(t *testing.T) {
-	meta, err := newMeta(memkv.NewMemoryKV())
+	kvClient := memkv.NewMemoryKV()
+	meta, err := newMeta(context.TODO(), kvClient)
 	assert.Nil(t, err)
 
 	info := &datapb.SegmentInfo{
@@ -323,10 +524,10 @@ func TestSaveHandoffMeta(t *testing.T) {
 		SegmentInfo: info,
 	}
 
-	err = meta.saveSegmentInfo(segmentInfo)
+	err = meta.catalog.AddSegment(context.TODO(), segmentInfo.SegmentInfo)
 	assert.Nil(t, err)
 
-	keys, _, err := meta.client.LoadWithPrefix(util.HandoffSegmentPrefix)
+	keys, _, err := kvClient.LoadWithPrefix(util.HandoffSegmentPrefix)
 	assert.Nil(t, err)
 	assert.Equal(t, 1, len(keys))
 	segmentID, err := strconv.ParseInt(filepath.Base(keys[0]), 10, 64)
@@ -444,7 +645,7 @@ func Test_meta_CompleteMergeCompaction(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := &meta{
-				client:      tt.fields.client,
+				catalog:     &datacoord.Catalog{Txn: tt.fields.client},
 				collections: tt.fields.collections,
 				segments:    tt.fields.segments,
 			}
@@ -566,7 +767,7 @@ func Test_meta_CompleteInnerCompaction(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := &meta{
-				client:      tt.fields.client,
+				catalog:     &datacoord.Catalog{Txn: tt.fields.client},
 				collections: tt.fields.collections,
 				segments:    tt.fields.segments,
 			}
@@ -620,7 +821,7 @@ func Test_meta_SetSegmentCompacting(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := &meta{
-				client:   tt.fields.client,
+				catalog:  &datacoord.Catalog{Txn: tt.fields.client},
 				segments: tt.fields.segments,
 			}
 			m.SetSegmentCompacting(tt.args.segmentID, tt.args.compacting)

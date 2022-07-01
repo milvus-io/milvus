@@ -34,10 +34,10 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/internal/metastore/db"
 	"github.com/milvus-io/milvus/internal/metastore/db/dao"
 	"github.com/milvus-io/milvus/internal/metastore/db/dbcore"
-	kvmetestore "github.com/milvus-io/milvus/internal/metastore/kv"
+	rootcoord2 "github.com/milvus-io/milvus/internal/metastore/db/rootcoord"
+	"github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/metrics"
 	ms "github.com/milvus-io/milvus/internal/mq/msgstream"
@@ -1157,7 +1157,7 @@ func (c *Core) Init() error {
 				return initError
 			}
 
-			var catalog metastore.Catalog
+			var catalog metastore.RootCoordCatalog
 			switch Params.MetaStoreCfg.MetaStoreType {
 			case util.MetaStoreTypeEtcd:
 				var metaKV kv.TxnKV
@@ -1167,13 +1167,13 @@ func (c *Core) Init() error {
 					return initError
 				}
 
-				var ss *kvmetestore.SuffixSnapshot
-				if ss, initError = kvmetestore.NewSuffixSnapshot(metaKV, "_ts", Params.EtcdCfg.MetaRootPath, "snapshots"); initError != nil {
+				var ss *rootcoord.SuffixSnapshot
+				if ss, initError = rootcoord.NewSuffixSnapshot(metaKV, "_ts", Params.EtcdCfg.MetaRootPath, "snapshots"); initError != nil {
 					log.Error("RootCoord failed to new suffixSnapshot", zap.Error(initError))
 					return initError
 				}
 
-				catalog = &kvmetestore.Catalog{Txn: metaKV, Snapshot: ss}
+				catalog = &rootcoord.Catalog{Txn: metaKV, Snapshot: ss}
 			case util.MetaStoreTypeMysql:
 				// connect to database
 				err := dbcore.Connect(&Params.DBCfg)
@@ -1181,7 +1181,7 @@ func (c *Core) Init() error {
 					return err
 				}
 
-				catalog = db.NewTableCatalog(dbcore.NewTxImpl(), dao.NewMetaDomain())
+				catalog = rootcoord2.NewTableCatalog(dbcore.NewTxImpl(), dao.NewMetaDomain())
 			default:
 				return fmt.Errorf("not supported meta store: %s", Params.MetaStoreCfg.MetaStoreType)
 			}

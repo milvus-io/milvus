@@ -1,4 +1,4 @@
-package kv
+package rootcoord
 
 const (
 	// ComponentPrefix prefix for rootcoord component

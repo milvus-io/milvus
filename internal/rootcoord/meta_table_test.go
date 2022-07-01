@@ -34,7 +34,7 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/metastore"
-	kvmetestore "github.com/milvus-io/milvus/internal/metastore/kv"
+	"github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
@@ -126,12 +126,12 @@ func generateMetaTable(t *testing.T) (*MetaTable, *mockTestKV, *mockTestTxnKV, f
 	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	require.Nil(t, err)
 
-	skv, err := kvmetestore.NewMetaSnapshot(etcdCli, rootPath, TimestampPrefix, 7)
+	skv, err := rootcoord.NewMetaSnapshot(etcdCli, rootPath, TimestampPrefix, 7)
 	assert.Nil(t, err)
 	assert.NotNil(t, skv)
 
 	txnkv := etcdkv.NewEtcdKV(etcdCli, rootPath)
-	_, err = NewMetaTable(context.TODO(), &kvmetestore.Catalog{Txn: txnkv, Snapshot: skv})
+	_, err = NewMetaTable(context.TODO(), &rootcoord.Catalog{Txn: txnkv, Snapshot: skv})
 	assert.Nil(t, err)
 	mockSnapshotKV := &mockTestKV{
 		SnapShotKV: skv,
@@ -150,7 +150,7 @@ func generateMetaTable(t *testing.T) (*MetaTable, *mockTestKV, *mockTestTxnKV, f
 		remove: func(key string) error { return txnkv.Remove(key) },
 	}
 
-	mockMt, err := NewMetaTable(context.TODO(), &kvmetestore.Catalog{Txn: mockTxnKV, Snapshot: mockSnapshotKV})
+	mockMt, err := NewMetaTable(context.TODO(), &rootcoord.Catalog{Txn: mockTxnKV, Snapshot: mockSnapshotKV})
 	assert.Nil(t, err)
 	return mockMt, mockSnapshotKV, mockTxnKV, func() {
 		etcdCli.Close()
@@ -194,11 +194,11 @@ func TestMetaTable(t *testing.T) {
 	require.Nil(t, err)
 	defer etcdCli.Close()
 
-	skv, err := kvmetestore.NewMetaSnapshot(etcdCli, rootPath, TimestampPrefix, 7)
+	skv, err := rootcoord.NewMetaSnapshot(etcdCli, rootPath, TimestampPrefix, 7)
 	assert.Nil(t, err)
 	assert.NotNil(t, skv)
 	txnKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
-	mt, err := NewMetaTable(context.TODO(), &kvmetestore.Catalog{Txn: txnKV, Snapshot: skv})
+	mt, err := NewMetaTable(context.TODO(), &rootcoord.Catalog{Txn: txnKV, Snapshot: skv})
 	assert.Nil(t, err)
 
 	collInfo := &model.Collection{
@@ -554,7 +554,7 @@ func TestMetaTable(t *testing.T) {
 		remove: func(key string) error { return txnkv.Remove(key) },
 	}
 
-	mt, err = NewMetaTable(context.TODO(), &kvmetestore.Catalog{Txn: mockTxnKV, Snapshot: mockKV})
+	mt, err = NewMetaTable(context.TODO(), &rootcoord.Catalog{Txn: mockTxnKV, Snapshot: mockKV})
 	assert.Nil(t, err)
 
 	wg.Add(1)
@@ -1206,9 +1206,9 @@ func TestRbacSelectRole(t *testing.T) {
 	assert.Equal(t, 2, len(results[0].Users))
 
 	mockTxnKV.loadWithPrefix = func(key string) ([]string, []string, error) {
-		if key == kvmetestore.RoleMappingPrefix {
+		if key == rootcoord.RoleMappingPrefix {
 			return []string{key + "/user1/role2", key + "/user2/role2", key + "/user1/role1", key + "/user2/role1"}, []string{"value1", "value2", "values3", "value4"}, nil
-		} else if key == kvmetestore.RolePrefix {
+		} else if key == rootcoord.RolePrefix {
 			return []string{key + "/role1", key + "/role2", key + "/role3"}, []string{"value1", "value2", "values3"}, nil
 		} else {
 			return []string{}, []string{}, fmt.Errorf("load with prefix error")
@@ -1266,14 +1266,14 @@ func TestRbacSelectUser(t *testing.T) {
 
 	mockTxnKV.loadWithPrefix = func(key string) ([]string, []string, error) {
 		logger.Debug("simfg", zap.String("key", key))
-		if strings.Contains(key, kvmetestore.RoleMappingPrefix) {
+		if strings.Contains(key, rootcoord.RoleMappingPrefix) {
 			if strings.Contains(key, "user1") {
 				return []string{key + "/role2", key + "/role1", key + "/role3"}, []string{"value1", "value4", "value2"}, nil
 			} else if strings.Contains(key, "user2") {
 				return []string{key + "/role2"}, []string{"value1"}, nil
 			}
 			return []string{}, []string{}, nil
-		} else if key == kvmetestore.CredentialPrefix {
+		} else if key == rootcoord.CredentialPrefix {
 			return []string{key + "/user1", key + "/user2", key + "/user3"}, []string{string(credentialInfoByte), string(credentialInfoByte), string(credentialInfoByte)}, nil
 		} else {
 			return []string{}, []string{}, fmt.Errorf("load with prefix error")
@@ -1562,11 +1562,11 @@ func TestMetaWithTimestamp(t *testing.T) {
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 
-	skv, err := kvmetestore.NewMetaSnapshot(etcdCli, rootPath, TimestampPrefix, 7)
+	skv, err := rootcoord.NewMetaSnapshot(etcdCli, rootPath, TimestampPrefix, 7)
 	assert.Nil(t, err)
 	assert.NotNil(t, skv)
 	txnKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
-	mt, err := NewMetaTable(context.TODO(), &kvmetestore.Catalog{Txn: txnKV, Snapshot: skv})
+	mt, err := NewMetaTable(context.TODO(), &rootcoord.Catalog{Txn: txnKV, Snapshot: skv})
 	assert.Nil(t, err)
 
 	collInfo := &model.Collection{
@@ -1726,16 +1726,16 @@ func TestFixIssue10540(t *testing.T) {
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 
-	skv, err := kvmetestore.NewMetaSnapshot(etcdCli, rootPath, TimestampPrefix, 7)
+	skv, err := rootcoord.NewMetaSnapshot(etcdCli, rootPath, TimestampPrefix, 7)
 	assert.Nil(t, err)
 	assert.NotNil(t, skv)
 	//txnKV := etcdkv.NewEtcdKVWithClient(etcdCli, rootPath)
 	txnKV := memkv.NewMemoryKV()
 	// compose rc7 legace tombstone cases
-	txnKV.Save(path.Join(kvmetestore.SegmentIndexMetaPrefix, "2"), string(kvmetestore.SuffixSnapshotTombstone))
-	txnKV.Save(path.Join(kvmetestore.IndexMetaPrefix, "3"), string(kvmetestore.SuffixSnapshotTombstone))
+	txnKV.Save(path.Join(rootcoord.SegmentIndexMetaPrefix, "2"), string(rootcoord.SuffixSnapshotTombstone))
+	txnKV.Save(path.Join(rootcoord.IndexMetaPrefix, "3"), string(rootcoord.SuffixSnapshotTombstone))
 
-	_, err = NewMetaTable(context.TODO(), &kvmetestore.Catalog{Txn: txnKV, Snapshot: skv})
+	_, err = NewMetaTable(context.TODO(), &rootcoord.Catalog{Txn: txnKV, Snapshot: skv})
 	assert.Nil(t, err)
 }
 
@@ -2075,7 +2075,7 @@ func TestMetaTable_AlignSegmentsMeta(t *testing.T) {
 		indexID   = UniqueID(1000)
 	)
 	mt := &MetaTable{
-		catalog: &kvmetestore.Catalog{
+		catalog: &rootcoord.Catalog{
 			Txn: &mockTestTxnKV{
 				multiRemove: func(keys []string) error {
 					return nil
@@ -2117,7 +2117,7 @@ func TestMetaTable_AlignSegmentsMeta(t *testing.T) {
 				return fmt.Errorf("error occurred")
 			},
 		}
-		mt.catalog = &kvmetestore.Catalog{Txn: txn}
+		mt.catalog = &rootcoord.Catalog{Txn: txn}
 		mt.AlignSegmentsMeta(collID, partID, map[UniqueID]struct{}{103: {}, 104: {}, 105: {}})
 	})
 }
@@ -2237,7 +2237,7 @@ func TestMetaTable_MarkIndexDeleted(t *testing.T) {
 
 type MockedCatalog struct {
 	mock.Mock
-	metastore.Catalog
+	metastore.RootCoordCatalog
 	alterIndexParamsVerification  func(ctx context.Context, oldIndex *model.Index, newIndex *model.Index, alterType metastore.AlterType)
 	createIndexParamsVerification func(ctx context.Context, col *model.Collection, index *model.Index)
 	dropIndexParamsVerification   func(ctx context.Context, collectionInfo *model.Collection, dropIdxID typeutil.UniqueID)

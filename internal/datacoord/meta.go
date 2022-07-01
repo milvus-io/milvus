@@ -18,41 +18,35 @@
 package datacoord
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/util"
 	"go.uber.org/zap"
-)
-
-const (
-	metaPrefix          = "datacoord-meta"
-	segmentPrefix       = metaPrefix + "/s"
-	channelRemovePrefix = metaPrefix + "/channel-removal"
-
-	removeFlagTomestone = "removed"
 )
 
 type meta struct {
 	sync.RWMutex
-	client      kv.TxnKV                            // client of a reliable kv service, i.e. etcd client
+	ctx         context.Context
+	catalog     metastore.DataCoordCatalog
 	collections map[UniqueID]*datapb.CollectionInfo // collection id to collection info
 	segments    *SegmentsInfo                       // segment id to segment info
 }
 
 // NewMeta creates meta from provided `kv.TxnKV`
-func newMeta(kv kv.TxnKV) (*meta, error) {
+func newMeta(ctx context.Context, kv kv.TxnKV) (*meta, error) {
 	mt := &meta{
-		client:      kv,
+		ctx:         ctx,
+		catalog:     &datacoord.Catalog{Txn: kv},
 		collections: make(map[UniqueID]*datapb.CollectionInfo),
 		segments:    NewSegmentsInfo(),
 	}
@@ -65,7 +59,7 @@ func newMeta(kv kv.TxnKV) (*meta, error) {
 
 // reloadFromKV loads meta from KV storage
 func (m *meta) reloadFromKV() error {
-	_, values, err := m.client.LoadWithPrefix(segmentPrefix)
+	segments, err := m.catalog.ListSegments(m.ctx)
 	if err != nil {
 		return err
 	}
@@ -77,17 +71,11 @@ func (m *meta) reloadFromKV() error {
 	metrics.DataCoordNumSegments.WithLabelValues(metrics.DropedSegmentLabel).Set(0)
 	metrics.DataCoordNumStoredRows.WithLabelValues().Set(0)
 	numStoredRows := int64(0)
-	for _, value := range values {
-		segmentInfo := &datapb.SegmentInfo{}
-		err = proto.Unmarshal([]byte(value), segmentInfo)
-		if err != nil {
-			return fmt.Errorf("DataCoord reloadFromKV UnMarshal datapb.SegmentInfo err:%w", err)
-		}
-		state := segmentInfo.GetState()
-		m.segments.SetSegment(segmentInfo.GetID(), NewSegmentInfo(segmentInfo))
-		metrics.DataCoordNumSegments.WithLabelValues(state.String()).Inc()
-		if state == commonpb.SegmentState_Flushed {
-			numStoredRows += segmentInfo.GetNumOfRows()
+	for _, segment := range segments {
+		m.segments.SetSegment(segment.ID, NewSegmentInfo(segment))
+		metrics.DataCoordNumSegments.WithLabelValues(segment.State.String()).Inc()
+		if segment.State == commonpb.SegmentState_Flushed {
+			numStoredRows += segment.NumOfRows
 		}
 	}
 	metrics.DataCoordNumStoredRows.WithLabelValues().Set(float64(numStoredRows))
@@ -171,7 +159,7 @@ func (m *meta) GetNumRowsOfCollection(collectionID UniqueID) int64 {
 func (m *meta) AddSegment(segment *SegmentInfo) error {
 	m.Lock()
 	defer m.Unlock()
-	if err := m.saveSegmentInfo(segment); err != nil {
+	if err := m.catalog.AddSegment(m.ctx, segment.SegmentInfo); err != nil {
 		return err
 	}
 	m.segments.SetSegment(segment.GetID(), segment)
@@ -187,7 +175,7 @@ func (m *meta) DropSegment(segmentID UniqueID) error {
 	if segment == nil {
 		return nil
 	}
-	if err := m.removeSegmentInfo(segment); err != nil {
+	if err := m.catalog.DropSegment(m.ctx, segment.SegmentInfo); err != nil {
 		return err
 	}
 	metrics.DataCoordNumSegments.WithLabelValues(metrics.DropedSegmentLabel).Inc()
@@ -231,7 +219,7 @@ func (m *meta) SetState(segmentID UniqueID, state commonpb.SegmentState) error {
 	m.segments.SetState(segmentID, state)
 	curSegInfo = m.segments.GetSegment(segmentID)
 	if curSegInfo != nil && isSegmentHealthy(curSegInfo) {
-		err := m.saveSegmentInfo(curSegInfo)
+		err := m.catalog.AlterSegments(m.ctx, []*datapb.SegmentInfo{curSegInfo.SegmentInfo})
 		if err == nil {
 			metrics.DataCoordNumSegments.WithLabelValues(oldState.String()).Dec()
 			metrics.DataCoordNumSegments.WithLabelValues(state.String()).Inc()
@@ -377,21 +365,11 @@ func (m *meta) UpdateFlushSegmentsInfo(
 		modSegments[cp.GetSegmentID()] = s
 	}
 
-	kv := make(map[string]string)
-	for _, segment := range modSegments {
-		segBytes, err := proto.Marshal(segment.SegmentInfo)
-		if err != nil {
-			return fmt.Errorf("dataCoord UpdateFlushSegmentsInfo segmentID:%d, marshal failed:%w", segment.GetID(), err)
-		}
-		key := buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
-		kv[key] = string(segBytes)
+	segments := make([]*datapb.SegmentInfo, 0, len(modSegments))
+	for _, seg := range modSegments {
+		segments = append(segments, seg.SegmentInfo)
 	}
-
-	if len(kv) == 0 {
-		return nil
-	}
-
-	if err := m.saveKvTxn(kv); err != nil {
+	if err := m.catalog.AlterSegments(m.ctx, segments); err != nil {
 		log.Error("failed to store flush segment info into Etcd", zap.Error(err))
 		return err
 	}
@@ -422,6 +400,7 @@ func (m *meta) UpdateDropChannelSegmentInfo(channel string, segments []*SegmentI
 	modSegments := make(map[UniqueID]*SegmentInfo)
 	originSegments := make(map[UniqueID]*SegmentInfo)
 
+	// save new segments flushed from buffer data
 	for _, seg2Drop := range segments {
 		segment := m.mergeDropSegment(seg2Drop)
 		if segment != nil {
@@ -429,7 +408,7 @@ func (m *meta) UpdateDropChannelSegmentInfo(channel string, segments []*SegmentI
 			modSegments[seg2Drop.GetID()] = segment
 		}
 	}
-	// set all channels of channel to dropped
+	// set existed segments of channel to Dropped
 	for _, seg := range m.segments.segments {
 		if seg.InsertChannel != channel {
 			continue
@@ -447,8 +426,7 @@ func (m *meta) UpdateDropChannelSegmentInfo(channel string, segments []*SegmentI
 	if err == nil {
 		for _, seg := range originSegments {
 			state := seg.GetState()
-			metrics.DataCoordNumSegments.WithLabelValues(
-				state.String()).Dec()
+			metrics.DataCoordNumSegments.WithLabelValues(state.String()).Dec()
 			if state == commonpb.SegmentState_Flushed {
 				metrics.DataCoordNumStoredRows.WithLabelValues().Sub(float64(seg.GetNumOfRows()))
 			}
@@ -540,60 +518,33 @@ func (m *meta) batchSaveDropSegments(channel string, modSegments map[int64]*Segm
 	return m.saveDropSegmentAndRemove(channel, modSegments, true)
 }
 
-func (m *meta) saveDropSegmentAndRemove(channel string, modSegments map[int64]*SegmentInfo, withFlag bool) error {
-	kv := make(map[string]string)
-	update := make([]*SegmentInfo, 0, maxOperationsPerTxn)
+func (m *meta) saveDropSegmentAndRemove(channel string, segments map[int64]*SegmentInfo, withFlag bool) error {
+	segmentMap := make(map[int64]*datapb.SegmentInfo)
+	for id, seg := range segments {
+		segmentMap[id] = seg.SegmentInfo
+	}
 
-	size := 0
-	for id, s := range modSegments {
-		key := buildSegmentPath(s.GetCollectionID(), s.GetPartitionID(), s.GetID())
-		delete(modSegments, id)
-		segBytes, err := proto.Marshal(s.SegmentInfo)
-		if err != nil {
-			return fmt.Errorf("DataCoord UpdateDropChannelSegmentInfo segmentID:%d, marshal failed:%w", s.GetID(), err)
-		}
-		kv[key] = string(segBytes)
-		update = append(update, s)
-		size += len(key) + len(segBytes)
-		if len(kv) == maxOperationsPerTxn || len(modSegments) == 1 || size >= maxBytesPerTxn {
-			break
-		}
+	// TODO: RootCoord supports read-write prohibit when dropping collection
+	// divides two api calls: save dropped segments & mark channel deleted
+	updateIDs, err := m.catalog.SaveDroppedSegmentsInBatch(m.ctx, segmentMap)
+	if err != nil {
+		return err
 	}
 	if withFlag {
-		// add removal flag into meta, preventing non-atomic removal channel failure
-		removalFlag := buildChannelRemovePath(channel)
-
-		kv[removalFlag] = removeFlagTomestone
-	}
-
-	err := m.saveKvTxn(kv)
-	if err != nil {
-		log.Warn("Failed to txn save segment info batch for DropChannel", zap.Error(err))
-		return err
+		err = m.catalog.MarkChannelDeleted(m.ctx, channel)
+		if err != nil {
+			return err
+		}
 	}
 
 	// update memory info
-	for _, s := range update {
-		m.segments.SetSegment(s.GetID(), s)
+	for _, id := range updateIDs {
+		m.segments.SetSegment(id, segments[id])
+		delete(segments, id)
 	}
-	metrics.DataCoordNumSegments.WithLabelValues(metrics.DropedSegmentLabel).Add(float64(len(update)))
+	metrics.DataCoordNumSegments.WithLabelValues(metrics.DropedSegmentLabel).Add(float64(len(updateIDs)))
+
 	return nil
-}
-
-// FinishRemoveChannel removes channel remove flag after whole procedure is finished
-func (m *meta) FinishRemoveChannel(channel string) error {
-	key := buildChannelRemovePath(channel)
-	return m.client.Remove(key)
-}
-
-// ChannelHasRemoveFlag
-func (m *meta) ChannelHasRemoveFlag(channel string) bool {
-	key := buildChannelRemovePath(channel)
-	v, err := m.client.Load(key)
-	if err != nil || v != removeFlagTomestone {
-		return false
-	}
-	return true
 }
 
 // ListSegmentFiles lists all segments' logs
@@ -742,7 +693,8 @@ func (m *meta) AddAllocation(segmentID UniqueID, allocation *Allocation) error {
 	defer m.Unlock()
 	m.segments.AddAllocation(segmentID, allocation)
 	if segInfo := m.segments.GetSegment(segmentID); segInfo != nil {
-		return m.saveSegmentInfo(segInfo)
+		// update segment LastExpireTime
+		return m.catalog.AlterSegments(m.ctx, []*datapb.SegmentInfo{segInfo.SegmentInfo})
 	}
 	return nil
 }
@@ -854,25 +806,12 @@ func (m *meta) CompleteMergeCompaction(compactionLogs []*datapb.CompactionSegmen
 		zap.Int64("NumOfRows", segmentInfo.NumOfRows),
 		zap.Any("compactionFrom", segmentInfo.CompactionFrom))
 
-	data := make(map[string]string)
-
+	modSegments := make([]*datapb.SegmentInfo, 0, len(segments))
 	for _, s := range segments {
-		k, v, err := m.marshal(s)
-		if err != nil {
-			return err
-		}
-		data[k] = v
+		modSegments = append(modSegments, s.SegmentInfo)
 	}
 
-	if segment.NumOfRows > 0 {
-		k, v, err := m.marshal(segment)
-		if err != nil {
-			return err
-		}
-		data[k] = v
-	}
-
-	if err := m.saveKvTxn(data); err != nil {
+	if err := m.catalog.AlterSegmentsAndAddNewSegment(m.ctx, modSegments, segment.SegmentInfo); err != nil {
 		return err
 	}
 
@@ -894,7 +833,7 @@ func (m *meta) CompleteInnerCompaction(segmentBinlogs *datapb.CompactionSegmentB
 	if segment := m.segments.GetSegment(segmentBinlogs.SegmentID); segment != nil {
 		// The compaction deletes the entire segment
 		if result.NumOfRows <= 0 {
-			err := m.removeSegmentInfo(segment)
+			err := m.catalog.DropSegment(m.ctx, segment.SegmentInfo)
 			if err != nil {
 				return err
 			}
@@ -907,7 +846,7 @@ func (m *meta) CompleteInnerCompaction(segmentBinlogs *datapb.CompactionSegmentB
 		cloned.Binlogs = m.updateBinlogs(cloned.GetBinlogs(), segmentBinlogs.GetFieldBinlogs(), result.GetInsertLogs())
 		cloned.Statslogs = m.updateBinlogs(cloned.GetStatslogs(), segmentBinlogs.GetField2StatslogPaths(), result.GetField2StatslogPaths())
 		cloned.Deltalogs = m.updateDeltalogs(cloned.GetDeltalogs(), segmentBinlogs.GetDeltalogs(), result.GetDeltalogs())
-		if err := m.saveSegmentInfo(cloned); err != nil {
+		if err := m.catalog.AlterSegments(m.ctx, []*datapb.SegmentInfo{cloned.SegmentInfo}); err != nil {
 			return err
 		}
 
@@ -994,74 +933,6 @@ func (m *meta) updateDeltalogs(origin []*datapb.FieldBinlog, removes []*datapb.F
 	}
 
 	return res
-}
-
-func (m *meta) marshal(segment *SegmentInfo) (string, string, error) {
-	segBytes, err := proto.Marshal(segment.SegmentInfo)
-	if err != nil {
-		return "", "", fmt.Errorf("failed to marshal segment info, %v", err)
-	}
-	key := buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
-	return key, string(segBytes), nil
-}
-
-// saveSegmentInfo utility function saving segment info into kv store
-func (m *meta) saveSegmentInfo(segment *SegmentInfo) error {
-	segBytes, err := proto.Marshal(segment.SegmentInfo)
-	if err != nil {
-		log.Error("DataCoord saveSegmentInfo marshal failed", zap.Int64("segmentID", segment.GetID()), zap.Error(err))
-		return fmt.Errorf("DataCoord saveSegmentInfo segmentID:%d, marshal failed:%w", segment.GetID(), err)
-	}
-	kvs := make(map[string]string)
-	dataKey := buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
-	kvs[dataKey] = string(segBytes)
-	if segment.State == commonpb.SegmentState_Flushed {
-		handoffSegmentInfo := &querypb.SegmentInfo{
-			SegmentID:           segment.ID,
-			CollectionID:        segment.CollectionID,
-			PartitionID:         segment.PartitionID,
-			DmChannel:           segment.InsertChannel,
-			SegmentState:        commonpb.SegmentState_Sealed,
-			CreatedByCompaction: segment.GetCreatedByCompaction(),
-			CompactionFrom:      segment.GetCompactionFrom(),
-		}
-		handoffSegBytes, err := proto.Marshal(handoffSegmentInfo)
-		if err != nil {
-			log.Error("DataCoord saveSegmentInfo marshal handoffSegInfo failed", zap.Int64("segmentID", segment.GetID()), zap.Error(err))
-			return fmt.Errorf("DataCoord saveSegmentInfo segmentID:%d, marshal handoffSegInfo failed:%w", segment.GetID(), err)
-		}
-		queryKey := buildQuerySegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
-		kvs[queryKey] = string(handoffSegBytes)
-	}
-
-	return m.client.MultiSave(kvs)
-}
-
-// removeSegmentInfo utility function removing segment info from kv store
-// Note that nil parameter will cause panicking
-func (m *meta) removeSegmentInfo(segment *SegmentInfo) error {
-	key := buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
-	return m.client.Remove(key)
-}
-
-// saveKvTxn batch save kvs
-func (m *meta) saveKvTxn(kv map[string]string) error {
-	return m.client.MultiSave(kv)
-}
-
-// buildSegmentPath common logic mapping segment info to corresponding key in kv store
-func buildSegmentPath(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID) string {
-	return fmt.Sprintf("%s/%d/%d/%d", segmentPrefix, collectionID, partitionID, segmentID)
-}
-
-// buildQuerySegmentPath common logic mapping segment info to corresponding key of queryCoord in kv store
-func buildQuerySegmentPath(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID) string {
-	return fmt.Sprintf("%s/%d/%d/%d", util.HandoffSegmentPrefix, collectionID, partitionID, segmentID)
-}
-
-// buildChannelRemovePat builds vchannel remove flag path
-func buildChannelRemovePath(channel string) string {
-	return fmt.Sprintf("%s/%s", channelRemovePrefix, channel)
 }
 
 // buildSegment utility function for compose datapb.SegmentInfo struct with provided info
