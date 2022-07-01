@@ -136,6 +136,9 @@ func syncReplicaSegments(ctx context.Context, meta Meta, cluster Cluster, replic
 
 	for _, shard := range replica.ShardReplicas {
 		if len(shards) > 0 && !isInShards(shard.DmChannelName, shards) {
+			log.Debug("skip this shard",
+				zap.Int64("replicaID", replicaID),
+				zap.String("shard", shard.DmChannelName))
 			continue
 		}
 
@@ -155,6 +158,12 @@ func syncReplicaSegments(ctx context.Context, meta Meta, cluster Cluster, replic
 
 		for i, j := 0, 0; i < len(segments); i = j {
 			node := getNodeInReplica(replica, segments[i].NodeIds)
+			if node < 0 {
+				log.Warn("syncReplicaSegments: no segment node in replica",
+					zap.Int64("replicaID", replicaID),
+					zap.Any("segment", segments[i]))
+			}
+
 			partition := segments[i].PartitionID
 
 			j++
@@ -207,7 +216,7 @@ func getNodeInReplica(replica *milvuspb.ReplicaInfo, nodes []UniqueID) UniqueID 
 		}
 	}
 
-	return 0
+	return -1
 }
 
 func removeFromSlice(origin []UniqueID, del ...UniqueID) []UniqueID {

@@ -182,6 +182,11 @@ func (m *MetaReplica) reloadFromKV() error {
 	if err := m.segmentsInfo.loadSegments(); err != nil {
 		return err
 	}
+	for id, segment := range m.segmentsInfo.segmentIDMap {
+		if _, ok := m.collectionInfos[segment.CollectionID]; !ok {
+			delete(m.segmentsInfo.segmentIDMap, id)
+		}
+	}
 
 	deltaChannelKeys, deltaChannelValues, err := m.getKvClient().LoadWithPrefix(deltaChannelMetaPrefix)
 	if err != nil {
@@ -523,6 +528,14 @@ func (m *MetaReplica) releaseCollection(collectionID UniqueID) error {
 	m.dmChannelMu.Unlock()
 
 	m.replicas.Remove(collection.ReplicaIds...)
+
+	m.segmentsInfo.mu.Lock()
+	for id, segment := range m.segmentsInfo.segmentIDMap {
+		if segment.CollectionID == collectionID {
+			delete(m.segmentsInfo.segmentIDMap, id)
+		}
+	}
+	m.segmentsInfo.mu.Unlock()
 
 	return nil
 }
@@ -1181,6 +1194,9 @@ func removeCollectionMeta(collectionID UniqueID, replicas []UniqueID, kv kv.Meta
 		replicaPrefix := fmt.Sprintf("%s/%d", ReplicaMetaPrefix, replicaID)
 		prefixes = append(prefixes, replicaPrefix)
 	}
+
+	prefixes = append(prefixes,
+		fmt.Sprintf("%s/%d", util.SegmentMetaPrefix, collectionID))
 
 	return kv.MultiRemoveWithPrefix(prefixes)
 }
