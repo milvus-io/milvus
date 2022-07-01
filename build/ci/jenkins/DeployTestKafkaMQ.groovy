@@ -264,7 +264,7 @@ pipeline {
             }
         }
 
-        stage ('Restart Milvus') {
+        stage ('Uninstall Milvus') {
             options {
               timeout(time: 15, unit: 'MINUTES')   // timeout on this stage
             }
@@ -272,10 +272,15 @@ pipeline {
                 container('main') {
                     dir ('tests/python_client/deploy') {
                         script {
-                            sh "kubectl delete pod -l app.kubernetes.io/instance=${env.RELEASE_NAME} --grace-period=0 --force"
-                            sh "kubectl delete pod -l release=${env.RELEASE_NAME} --grace-period=0 --force"
-                            sh "kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=${env.RELEASE_NAME} -n ${env.NAMESPACE} --timeout=360s"
-                            sh "kubectl wait --for=condition=Ready pod -l release=${env.RELEASE_NAME} -n ${env.NAMESPACE} --timeout=360s"
+                            if ("${params.milvus_mode}" == "standalone") {
+                                sh "kubectl delete pod -l app.kubernetes.io/instance=${env.RELEASE_NAME} --grace-period=0 --force"
+                                sh "kubectl delete pod -l release=${env.RELEASE_NAME} --grace-period=0 --force"
+                                sh "kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=${env.RELEASE_NAME} -n ${env.NAMESPACE} --timeout=360s"
+                                sh "kubectl wait --for=condition=Ready pod -l release=${env.RELEASE_NAME} -n ${env.NAMESPACE} --timeout=360s"
+                            }
+                            if ("${params.milvus_mode}" == "cluster") {
+                                sh "helm uninstall ${env.RELEASE_NAME}"
+                            }
                         }
                     }
                 }
@@ -304,12 +309,11 @@ pipeline {
                                     exit 1
                                 }
                             }
-
                             if ("${params.milvus_mode}" == "standalone") {
                                 sh "helm upgrade --wait --timeout 720s ${env.RELEASE_NAME} milvus/milvus  --set image.all.repository=${params.new_image_repository} --set image.all.tag=${new_image_tag_modified} -f standalone-values.yaml"    
                             }
                             if ("${params.milvus_mode}" == "cluster") {
-                                sh "helm upgrade --wait --timeout 720s ${env.RELEASE_NAME} milvus/milvus  --set image.all.repository=${params.new_image_repository} --set image.all.tag=${new_image_tag_modified} -f cluster-values.yaml"    
+                                sh "helm install --wait --timeout 720s ${env.RELEASE_NAME} milvus/milvus  --set image.all.repository=${params.new_image_repository} --set image.all.tag=${new_image_tag_modified} -f cluster-values.yaml"    
                             }
                             sh "kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=${env.RELEASE_NAME} -n ${env.NAMESPACE} --timeout=360s"
                             sh "kubectl wait --for=condition=Ready pod -l release=${env.RELEASE_NAME} -n ${env.NAMESPACE} --timeout=360s"                               
