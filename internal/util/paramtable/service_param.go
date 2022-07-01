@@ -21,10 +21,13 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/streamnative/pulsarctl/pkg/cmdutils"
 )
+
+var pulsarOnce sync.Once
 
 const (
 	// SuggestPulsarMaxMessageSize defines the maximum size of Pulsar message.
@@ -227,7 +230,9 @@ func (p *PulsarConfig) initWebAddress() {
 		panic(err)
 	}
 	p.WebAddress = addr
-	cmdutils.PulsarCtlConfig.WebServiceURL = p.WebAddress
+	pulsarOnce.Do(func() {
+		cmdutils.PulsarCtlConfig.WebServiceURL = p.WebAddress
+	})
 }
 
 func (p *PulsarConfig) initMaxMessageSize() {
