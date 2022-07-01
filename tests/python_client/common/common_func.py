@@ -409,6 +409,31 @@ def gen_search_param(index_type, metric_type="L2"):
     return search_params
 
 
+def gen_invalid_search_param(index_type, metric_type="L2"):
+    search_params = []
+    if index_type in ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_SQ8H", "IVF_PQ"] \
+            or index_type in ["BIN_FLAT", "BIN_IVF_FLAT"]:
+        for nprobe in [-1]:
+            ivf_search_params = {"metric_type": metric_type, "params": {"nprobe": nprobe}}
+            search_params.append(ivf_search_params)
+    elif index_type in ["HNSW", "RHNSW_FLAT", "RHNSW_PQ", "RHNSW_SQ"]:
+        for ef in [-1]:
+            hnsw_search_param = {"metric_type": metric_type, "params": {"ef": ef}}
+            search_params.append(hnsw_search_param)
+    elif index_type in ["NSG", "RNSG"]:
+        for search_length in [100, 300]:
+            nsg_search_param = {"metric_type": metric_type, "params": {"search_length": search_length}}
+            search_params.append(nsg_search_param)
+    elif index_type == "ANNOY":
+        for search_k in ["-1"]:
+            annoy_search_param = {"metric_type": metric_type, "params": {"search_k": search_k}}
+            search_params.append(annoy_search_param)
+    else:
+        log.error("Invalid index_type.")
+        raise Exception("Invalid index_type.")
+    return search_params
+
+
 def gen_all_type_fields():
     fields = []
     for k, v in DataType.__members__.items():
