@@ -101,10 +101,13 @@ FloatSearchBruteForce(const dataset::SearchDataset& dataset,
         faiss::float_maxheap_array_t buf{(size_t)num_queries, (size_t)topk, sub_qr.get_seg_offsets(),
                                          sub_qr.get_distances()};
         faiss::knn_L2sqr(query_data, chunk_data, dim, num_queries, size_per_chunk, &buf, nullptr, bitset);
-    } else {
+    } else if (metric_type == knowhere::metric::IP) {
         faiss::float_minheap_array_t buf{(size_t)num_queries, (size_t)topk, sub_qr.get_seg_offsets(),
                                          sub_qr.get_distances()};
         faiss::knn_inner_product(query_data, chunk_data, dim, num_queries, size_per_chunk, &buf, bitset);
+    } else {
+        std::string msg = "search not support metric type: " + metric_type;
+        PanicInfo(msg);
     }
     sub_qr.round_values();
     return sub_qr;
