@@ -195,6 +195,7 @@ func (qc *QueryCoord) Init() error {
 			log.Error("query coordinator init globalMetaBroker failed", zap.Error(initError))
 			return
 		}
+		qc.meta.setGlobalMetaBroker(qc.broker)
 
 		// init task scheduler
 		qc.scheduler, initError = newTaskScheduler(qc.loopCtx, qc.meta, qc.cluster, qc.kvClient, qc.broker, qc.idAllocator)

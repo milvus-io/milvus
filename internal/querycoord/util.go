@@ -243,17 +243,40 @@ func getReplicaAvailableMemory(cluster Cluster, replica *milvuspb.ReplicaInfo) u
 	return availableMemory
 }
 
-// func getShardLeaderByNodeID(meta Meta, replicaID UniqueID, dmChannel string) (UniqueID, error) {
-// 	replica, err := meta.getReplicaByID(replicaID)
-// 	if err != nil {
-// 		return 0, err
-// 	}
+func mergeWatchDeltaChannelInfo(infos []*datapb.VchannelInfo) []*datapb.VchannelInfo {
+	minPositions := make(map[string]int)
+	for index, info := range infos {
+		_, ok := minPositions[info.ChannelName]
+		if !ok {
+			minPositions[info.ChannelName] = index
+		}
+		minTimeStampIndex := minPositions[info.ChannelName]
+		if info.SeekPosition.GetTimestamp() < infos[minTimeStampIndex].SeekPosition.GetTimestamp() {
+			minPositions[info.ChannelName] = index
+		}
+	}
+	var result []*datapb.VchannelInfo
+	for _, index := range minPositions {
+		result = append(result, infos[index])
+	}
+	return result
+}
 
-// 	for _, shard := range replica.ShardReplicas {
-// 		if shard.DmChannelName == dmChannel {
-// 			return shard.LeaderID, nil
-// 		}
-// 	}
+func mergeDmChannelInfo(infos []*datapb.VchannelInfo) map[string]*datapb.VchannelInfo {
+	minPositions := make(map[string]*datapb.VchannelInfo)
+	for _, info := range infos {
+		if _, ok := minPositions[info.ChannelName]; !ok {
+			minPositions[info.ChannelName] = info
+			continue
+		}
+		minPositionInfo := minPositions[info.ChannelName]
+		if info.SeekPosition.GetTimestamp() < minPositionInfo.SeekPosition.GetTimestamp() {
+			minPositionInfo.SeekPosition = info.SeekPosition
+		}
+		minPositionInfo.DroppedSegmentIds = append(minPositionInfo.DroppedSegmentIds, info.DroppedSegmentIds...)
+		minPositionInfo.UnflushedSegmentIds = append(minPositionInfo.UnflushedSegmentIds, info.UnflushedSegmentIds...)
+		minPositionInfo.FlushedSegmentIds = append(minPositionInfo.FlushedSegmentIds, info.FlushedSegmentIds...)
+	}
 
-// 	return 0, fmt.Errorf("shard leader not found in replica %v and dm channel %s", replicaID, dmChannel)
-// }
+	return minPositions
+}

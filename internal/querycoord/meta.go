@@ -24,7 +24,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
-	"strings"
 	"sync"
 
 	"github.com/golang/protobuf/proto"
@@ -38,7 +37,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
-	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
@@ -84,6 +82,7 @@ type Meta interface {
 	setDmChannelInfos(channelInfos ...*querypb.DmChannelWatchInfo) error
 	getDmChannelNamesByCollectionID(CollectionID UniqueID) []string
 
+	setGlobalMetaBroker(broker *globalMetaBroker)
 	getDeltaChannelsByCollectionID(collectionID UniqueID) ([]*datapb.VchannelInfo, error)
 	setDeltaChannel(collectionID UniqueID, info []*datapb.VchannelInfo) error
 
@@ -124,7 +123,7 @@ type MetaReplica struct {
 	//partitionStates map[UniqueID]*querypb.PartitionStates
 	replicas *ReplicaInfos
 
-	dataCoord types.DataCoord
+	broker *globalMetaBroker
 }
 
 func newMeta(ctx context.Context, kv kv.MetaKv, factory dependency.Factory, idAllocator func() (UniqueID, error)) (Meta, error) {
@@ -181,24 +180,6 @@ func (m *MetaReplica) reloadFromKV() error {
 
 	if err := m.segmentsInfo.loadSegments(); err != nil {
 		return err
-	}
-
-	deltaChannelKeys, deltaChannelValues, err := m.getKvClient().LoadWithPrefix(deltaChannelMetaPrefix)
-	if err != nil {
-		return nil
-	}
-	for index, value := range deltaChannelValues {
-		pathStrings := strings.Split(deltaChannelKeys[index], "/")
-		collectionID, err := strconv.ParseInt(pathStrings[len(pathStrings)-2], 10, 64)
-		if err != nil {
-			return err
-		}
-		deltaChannelInfo := &datapb.VchannelInfo{}
-		err = proto.Unmarshal([]byte(value), deltaChannelInfo)
-		if err != nil {
-			return err
-		}
-		m.deltaChannelInfos[collectionID] = append(m.deltaChannelInfos[collectionID], deltaChannelInfo)
 	}
 
 	dmChannelKeys, dmChannelValues, err := m.getKvClient().LoadWithPrefix(dmChannelMetaPrefix)
@@ -860,7 +841,23 @@ func (m *MetaReplica) getDeltaChannelsByCollectionID(collectionID UniqueID) ([]*
 		return infos, nil
 	}
 
-	return nil, fmt.Errorf("delta channel not exist in meta, collectionID = %d", collectionID)
+	col, ok := m.collectionInfos[collectionID]
+	if !ok {
+		log.Error("get delta channel by collection id failed, collection id can not find",
+			zap.Int64("collectionID", collectionID))
+		return nil, fmt.Errorf("can't find collectionID: %d", collectionID)
+	}
+
+	_, mergedDeltaChannels, _, err := m.broker.getChannelInfoAndSegmentBinlogs(m.ctx, collectionID, col.PartitionIDs, false)
+	if err != nil {
+		return nil, err
+	}
+
+	if mergedDeltaChannels != nil {
+		return nil, fmt.Errorf("delta channel not exist in meta, collectionID = %d", collectionID)
+	}
+
+	return mergedDeltaChannels, nil
 }
 
 func (m *MetaReplica) setDeltaChannel(collectionID UniqueID, infos []*datapb.VchannelInfo) error {
@@ -873,12 +870,6 @@ func (m *MetaReplica) setDeltaChannel(collectionID UniqueID, infos []*datapb.Vch
 		return err
 	}
 
-	err := saveDeltaChannelInfo(collectionID, infos, m.getKvClient())
-	if err != nil {
-		log.Error("save delta channel info error", zap.Int64("collectionID", collectionID), zap.Error(err))
-		return err
-	}
-	log.Info("save delta channel infos to meta", zap.Any("collectionID", collectionID))
 	m.deltaChannelInfos[collectionID] = infos
 	return nil
 }
@@ -1118,6 +1109,10 @@ func (m *MetaReplica) updateShardLeader(replicaID UniqueID, dmChannel string, le
 	return m.replicas.UpdateShardLeader(replicaID, dmChannel, leaderID, leaderAddr, m.getKvClient())
 }
 
+func (m *MetaReplica) setGlobalMetaBroker(broker *globalMetaBroker) {
+	m.broker = broker
+}
+
 func saveGlobalCollectionInfo(collectionID UniqueID, info *querypb.CollectionInfo, kv kv.MetaKv) error {
 	infoBytes, err := proto.Marshal(info)
 	if err != nil {
@@ -1126,20 +1121,6 @@ func saveGlobalCollectionInfo(collectionID UniqueID, info *querypb.CollectionInf
 
 	key := fmt.Sprintf("%s/%d", collectionMetaPrefix, collectionID)
 	return kv.Save(key, string(infoBytes))
-}
-
-func saveDeltaChannelInfo(collectionID UniqueID, infos []*datapb.VchannelInfo, kv kv.MetaKv) error {
-	kvs := make(map[string]string)
-	for _, info := range infos {
-		infoBytes, err := proto.Marshal(info)
-		if err != nil {
-			return err
-		}
-
-		key := fmt.Sprintf("%s/%d/%s", deltaChannelMetaPrefix, collectionID, info.ChannelName)
-		kvs[key] = string(infoBytes)
-	}
-	return kv.MultiSave(kvs)
 }
 
 func saveDmChannelWatchInfos(infos []*querypb.DmChannelWatchInfo, kv kv.MetaKv) error {
@@ -1174,6 +1155,7 @@ func removeCollectionMeta(collectionID UniqueID, replicas []UniqueID, kv kv.Meta
 	dmChannelInfosPrefix := fmt.Sprintf("%s/%d", dmChannelMetaPrefix, collectionID)
 	prefixes = append(prefixes, dmChannelInfosPrefix)
 
+	// backward compatible
 	deltaChannelInfosPrefix := fmt.Sprintf("%s/%d", deltaChannelMetaPrefix, collectionID)
 	prefixes = append(prefixes, deltaChannelInfosPrefix)
 

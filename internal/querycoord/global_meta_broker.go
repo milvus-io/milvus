@@ -100,6 +100,56 @@ func (broker *globalMetaBroker) showPartitionIDs(ctx context.Context, collection
 	return showPartitionResponse.PartitionIDs, nil
 }
 
+func (broker *globalMetaBroker) getChannelInfoAndSegmentBinlogs(ctx context.Context, collectionID UniqueID,
+	partitionIDs []UniqueID, includeDmChannel bool) (map[string]*datapb.VchannelInfo, []*datapb.VchannelInfo, map[UniqueID]map[UniqueID]*datapb.SegmentBinlogs, error) {
+
+	partID2SegID2Binlogs := make(map[UniqueID]map[UniqueID]*datapb.SegmentBinlogs)
+	dmChannelInfos := make([]*datapb.VchannelInfo, 0)
+	deltaChannelInfos := make([]*datapb.VchannelInfo, 0)
+
+	for _, partitionID := range partitionIDs {
+		vChannelInfos, binlogs, err := broker.getRecoveryInfo(ctx, collectionID, partitionID)
+		if err != nil {
+			log.Error("loadPartitionTask: getRecoveryInfo failed",
+				zap.Int64("collectionID", collectionID),
+				zap.Int64("partitionID", partitionID),
+				zap.Error(err))
+			return nil, nil, nil, err
+		}
+
+		for _, segmentBingLog := range binlogs {
+			_, ok := partID2SegID2Binlogs[partitionID]
+			if !ok {
+				partID2SegID2Binlogs[partitionID] = make(map[UniqueID]*datapb.SegmentBinlogs)
+			}
+			partID2SegID2Binlogs[partitionID][segmentBingLog.SegmentID] = segmentBingLog
+		}
+
+		for _, info := range vChannelInfos {
+			deltaChannelInfo, err := generateWatchDeltaChannelInfo(info)
+			if err != nil {
+				log.Error("generate watch delta channel info failed",
+					zap.Int64("collectionID", collectionID),
+					zap.String("channelName", info.ChannelName),
+					zap.Error(err))
+				return nil, nil, nil, err
+			}
+			deltaChannelInfos = append(deltaChannelInfos, deltaChannelInfo)
+			if includeDmChannel {
+				dmChannelInfos = append(dmChannelInfos, info)
+			}
+		}
+	}
+
+	mergedDeltaChannels := mergeWatchDeltaChannelInfo(deltaChannelInfos)
+	if includeDmChannel {
+		mergedDmChannel := mergeDmChannelInfo(dmChannelInfos)
+		return mergedDmChannel, mergedDeltaChannels, partID2SegID2Binlogs, nil
+	}
+
+	return nil, mergedDeltaChannels, partID2SegID2Binlogs, nil
+}
+
 func (broker *globalMetaBroker) getRecoveryInfo(ctx context.Context, collectionID UniqueID, partitionID UniqueID) ([]*datapb.VchannelInfo, []*datapb.SegmentBinlogs, error) {
 	ctx2, cancel2 := context.WithTimeout(ctx, timeoutForRPC)
 	defer cancel2()
