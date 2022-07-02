@@ -163,7 +163,10 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 	defer func() {
 		if err != nil {
 			for _, vchannel := range vChannels {
-				w.node.ShardClusterService.releaseShardCluster(vchannel)
+				err := w.node.ShardClusterService.releaseShardCluster(vchannel)
+				if err != nil {
+					log.Info("release shard collection fail", zap.String("vchan", vchannel), zap.Error(err))
+				}
 			}
 		}
 	}()
@@ -340,7 +343,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 			// use pChannel to consume
 			err = fg.consumeFlowGraph(VPChannels[channel], consumeSubName)
 			if err != nil {
-				log.Error("msgStream as consumer failed for dmChannels", zap.Int64("collectionID", collectionID), zap.String("vChannel", channel))
+				log.Warn("msgStream as consumer failed for dmChannels", zap.Int64("collectionID", collectionID), zap.String("vChannel", channel), zap.Error(err))
 				break
 			}
 		}
@@ -351,7 +354,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 			pos.ChannelName = VPChannels[channel]
 			err = fg.seekQueryNodeFlowGraph(pos)
 			if err != nil {
-				log.Error("msgStream seek failed for dmChannels", zap.Int64("collectionID", collectionID), zap.String("vChannel", channel))
+				log.Warn("msgStream seek failed for dmChannels", zap.Int64("collectionID", collectionID), zap.String("vChannel", channel), zap.Error(err))
 				break
 			}
 		}

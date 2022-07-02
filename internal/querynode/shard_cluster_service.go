@@ -95,22 +95,10 @@ func (s *ShardClusterService) releaseShardCluster(vchannelName string) error {
 	if !ok {
 		return fmt.Errorf("ShardCluster of channel: %s does not exists", vchannelName)
 	}
-
+	log.Info("Close shard cluster", zap.Any("channel", vchannelName))
 	cs := raw.(*ShardCluster)
 	cs.Close()
 	return nil
-}
-
-// releaseCollection removes all shardCluster matching specified collectionID
-func (s *ShardClusterService) releaseCollection(collectionID int64) {
-	s.clusters.Range(func(k, v interface{}) bool {
-		cs := v.(*ShardCluster)
-		if cs.collectionID == collectionID {
-			s.releaseShardCluster(k.(string))
-		}
-		return true
-	})
-	log.Info("successfully release collection", zap.Int64("collectionID", collectionID))
 }
 
 // HandoffSegments dispatch segmentChangeInfo to related shardClusters

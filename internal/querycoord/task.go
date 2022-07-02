@@ -1554,7 +1554,7 @@ func (wdt *watchDmChannelTask) execute(ctx context.Context) error {
 
 	err := wdt.cluster.WatchDmChannels(wdt.ctx, wdt.NodeID, wdt.WatchDmChannelsRequest)
 	if err != nil {
-		log.Warn("watchDmChannelTask: watchDmChannel occur error", zap.Int64("taskID", wdt.getTaskID()))
+		log.Warn("watchDmChannelTask: watchDmChannel occur error", zap.Int64("taskID", wdt.getTaskID()), zap.Error(err))
 		wdt.setResultInfo(err)
 		return err
 	}
