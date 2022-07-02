@@ -126,7 +126,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, in *queryPb.WatchDmC
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    err.Error(),
 			}
-			log.Warn(err.Error())
+			log.Warn("watchDmChannelsTask WaitToFinish failed", zap.Int64("collectionID", in.CollectionID), zap.Error(err))
 			return status, nil
 		}
 		log.Info("watchDmChannelsTask WaitToFinish done", zap.Int64("collectionID", in.CollectionID), zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()))

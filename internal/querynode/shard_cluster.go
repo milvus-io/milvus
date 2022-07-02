@@ -177,7 +177,6 @@ func NewShardCluster(collectionID int64, replicaID int64, vchannelName string,
 }
 
 func (sc *ShardCluster) Close() {
-	log.Info("Close shard cluster")
 	sc.closeOnce.Do(func() {
 		sc.state.Store(int32(unavailable))
 		close(sc.closeCh)
