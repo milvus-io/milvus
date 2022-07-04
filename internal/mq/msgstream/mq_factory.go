@@ -18,8 +18,7 @@ package msgstream
 
 import (
 	"context"
-
-	"go.uber.org/zap"
+	"strings"
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/milvus-io/milvus/internal/log"
@@ -29,8 +28,11 @@ import (
 	rmqwrapper "github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper/rmq"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
+	"github.com/streamnative/pulsarctl/pkg/cli"
 	"github.com/streamnative/pulsarctl/pkg/cmdutils"
 	"github.com/streamnative/pulsarctl/pkg/pulsar/utils"
+
+	"go.uber.org/zap"
 )
 
 // PmsFactory is a pulsar msgstream factory that implemented Factory interface(msgstream.go)
@@ -87,6 +89,13 @@ func (f *PmsFactory) NewMsgStreamDisposer(ctx context.Context) func([]string, st
 			}
 			err = admin.Subscriptions().Delete(*topic, subname, true)
 			if err != nil {
+				pulsarErr, ok := err.(cli.Error)
+				if ok {
+					// subscription not found, ignore error
+					if strings.Contains(pulsarErr.Reason, "Subscription not found") {
+						return nil
+					}
+				}
 				log.Warn("failed to clean up subscriptions", zap.String("pulsar web", f.PulsarWebAddress),
 					zap.String("topic", channel), zap.Any("subname", subname), zap.Error(err))
 				// fallback to original way
