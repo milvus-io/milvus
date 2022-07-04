@@ -68,6 +68,7 @@ func getNumCPU() int {
 	if cur <= 0 {
 		cur = runtime.NumCPU()
 	}
+	log.Info("queryNode task scheduler get cpu num", zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()), zap.Int("cpuNum", cur))
 	return cur
 }
 
