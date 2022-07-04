@@ -400,7 +400,8 @@ func (lct *loadCollectionTask) preExecute(ctx context.Context) error {
 	}
 
 	log.Info("start do loadCollectionTask",
-		zap.Int64("msgID", lct.getTaskID()),
+		zap.Int64("taskID", lct.getTaskID()),
+		zap.Int64("msgID", lct.GetBase().GetMsgID()),
 		zap.Int64("collectionID", collectionID),
 		zap.Stringer("schema", schema),
 		zap.Int32("replicaNumber", lct.ReplicaNumber))
@@ -607,7 +608,8 @@ func (lct *loadCollectionTask) postExecute(ctx context.Context) error {
 	}
 
 	log.Info("loadCollectionTask postExecute done",
-		zap.Int64("msgID", lct.getTaskID()),
+		zap.Int64("taskID", lct.getTaskID()),
+		zap.Int64("msgID", lct.GetBase().GetMsgID()),
 		zap.Int64("collectionID", collectionID))
 	return nil
 }
@@ -617,6 +619,7 @@ func (lct *loadCollectionTask) globalPostExecute(ctx context.Context) error {
 	if err != nil {
 		log.Error("loadCollectionTask: failed to get collection info from meta",
 			zap.Int64("taskID", lct.getTaskID()),
+			zap.Int64("msgID", lct.GetBase().GetMsgID()),
 			zap.Int64("collectionID", lct.CollectionID),
 			zap.Error(err))
 
@@ -628,6 +631,7 @@ func (lct *loadCollectionTask) globalPostExecute(ctx context.Context) error {
 		if err != nil {
 			log.Error("loadCollectionTask: failed to sync replica segments to shard leader",
 				zap.Int64("taskID", lct.getTaskID()),
+				zap.Int64("msgID", lct.GetBase().GetMsgID()),
 				zap.Int64("collectionID", lct.CollectionID),
 				zap.Error(err))
 
@@ -725,7 +729,8 @@ func (rct *releaseCollectionTask) preExecute(context.Context) error {
 	collectionID := rct.CollectionID
 	rct.setResultInfo(nil)
 	log.Info("start do releaseCollectionTask",
-		zap.Int64("msgID", rct.getTaskID()),
+		zap.Int64("taskID", rct.getTaskID()),
+		zap.Int64("msgID", rct.GetBase().GetMsgID()),
 		zap.Int64("collectionID", collectionID))
 	return nil
 }
@@ -772,7 +777,8 @@ func (rct *releaseCollectionTask) execute(ctx context.Context) error {
 	}
 
 	log.Info("releaseCollectionTask Execute done",
-		zap.Int64("msgID", rct.getTaskID()),
+		zap.Int64("taskID", rct.getTaskID()),
+		zap.Int64("msgID", rct.GetBase().GetMsgID()),
 		zap.Int64("collectionID", collectionID),
 		zap.Int64("nodeID", rct.NodeID))
 	return nil
@@ -785,7 +791,8 @@ func (rct *releaseCollectionTask) postExecute(context.Context) error {
 	}
 
 	log.Info("releaseCollectionTask postExecute done",
-		zap.Int64("msgID", rct.getTaskID()),
+		zap.Int64("taskID", rct.getTaskID()),
+		zap.Int64("msgID", rct.GetBase().GetMsgID()),
 		zap.Int64("collectionID", collectionID),
 		zap.Int64("nodeID", rct.NodeID))
 	return nil
@@ -906,7 +913,8 @@ func (lpt *loadPartitionTask) preExecute(context.Context) error {
 	}
 
 	log.Info("start do loadPartitionTask",
-		zap.Int64("msgID", lpt.getTaskID()),
+		zap.Int64("taskID", lpt.getTaskID()),
+		zap.Int64("msgID", lpt.GetBase().GetMsgID()),
 		zap.Int64("collectionID", collectionID))
 	return nil
 }
@@ -1089,10 +1097,10 @@ func (lpt *loadPartitionTask) execute(ctx context.Context) error {
 	}
 
 	log.Info("loadPartitionTask Execute done",
-		zap.Int64("msgID", lpt.getTaskID()),
+		zap.Int64("taskID", lpt.getTaskID()),
+		zap.Int64("msgID", lpt.GetBase().GetMsgID()),
 		zap.Int64("collectionID", collectionID),
-		zap.Int64s("partitionIDs", partitionIDs),
-		zap.Int64("msgID", lpt.Base.MsgID))
+		zap.Int64s("partitionIDs", partitionIDs))
 	return nil
 }
 
@@ -1104,7 +1112,8 @@ func (lpt *loadPartitionTask) postExecute(ctx context.Context) error {
 	}
 
 	log.Info("loadPartitionTask postExecute done",
-		zap.Int64("msgID", lpt.getTaskID()),
+		zap.Int64("taskID", lpt.getTaskID()),
+		zap.Int64("msgID", lpt.GetBase().GetMsgID()),
 		zap.Int64("collectionID", collectionID),
 		zap.Int64s("partitionIDs", partitionIDs))
 	return nil
@@ -1234,7 +1243,8 @@ func (rpt *releasePartitionTask) preExecute(context.Context) error {
 	partitionIDs := rpt.PartitionIDs
 	rpt.setResultInfo(nil)
 	log.Info("start do releasePartitionTask",
-		zap.Int64("msgID", rpt.getTaskID()),
+		zap.Int64("taskID", rpt.getTaskID()),
+		zap.Int64("msgID", rpt.GetBase().GetMsgID()),
 		zap.Int64("collectionID", collectionID),
 		zap.Int64s("partitionIDs", partitionIDs))
 	return nil
@@ -1274,7 +1284,8 @@ func (rpt *releasePartitionTask) execute(ctx context.Context) error {
 	}
 
 	log.Info("releasePartitionTask Execute done",
-		zap.Int64("msgID", rpt.getTaskID()),
+		zap.Int64("taskID", rpt.getTaskID()),
+		zap.Int64("msgID", rpt.GetBase().GetMsgID()),
 		zap.Int64("collectionID", collectionID),
 		zap.Int64s("partitionIDs", partitionIDs),
 		zap.Int64("nodeID", rpt.NodeID))
@@ -1289,7 +1300,8 @@ func (rpt *releasePartitionTask) postExecute(context.Context) error {
 	}
 
 	log.Info("releasePartitionTask postExecute done",
-		zap.Int64("msgID", rpt.getTaskID()),
+		zap.Int64("taskID", rpt.getTaskID()),
+		zap.Int64("msgID", rpt.GetBase().GetMsgID()),
 		zap.Int64("collectionID", collectionID),
 		zap.Int64s("partitionIDs", partitionIDs),
 		zap.Int64("nodeID", rpt.NodeID))
@@ -1356,7 +1368,8 @@ func (lst *loadSegmentTask) preExecute(ctx context.Context) error {
 	log.Info("start do loadSegmentTask",
 		zap.Int64s("segmentIDs", segmentIDs),
 		zap.Int64("loaded nodeID", lst.DstNodeID),
-		zap.Int64("taskID", lst.getTaskID()))
+		zap.Int64("taskID", lst.getTaskID()),
+		zap.Int64("msgID", lst.GetBase().GetMsgID()))
 
 	if err := lst.broker.acquireSegmentsReferLock(ctx, lst.taskID, segmentIDs); err != nil {
 		log.Error("acquire reference lock on segments failed", zap.Int64s("segmentIDs", segmentIDs),
@@ -1377,7 +1390,8 @@ func (lst *loadSegmentTask) execute(ctx context.Context) error {
 	}
 
 	log.Info("loadSegmentTask Execute done",
-		zap.Int64("taskID", lst.getTaskID()))
+		zap.Int64("taskID", lst.getTaskID()),
+		zap.Int64("msgID", lst.GetBase().GetMsgID()))
 	return nil
 }
 
@@ -1391,7 +1405,8 @@ func (lst *loadSegmentTask) postExecute(context.Context) error {
 	}
 
 	log.Info("loadSegmentTask postExecute done",
-		zap.Int64("taskID", lst.getTaskID()))
+		zap.Int64("taskID", lst.getTaskID()),
+		zap.Int64("msgID", lst.GetBase().GetMsgID()))
 	return nil
 }
 
@@ -1466,7 +1481,8 @@ func (rst *releaseSegmentTask) preExecute(context.Context) error {
 	log.Info("start do releaseSegmentTask",
 		zap.Int64s("segmentIDs", segmentIDs),
 		zap.Int64("loaded nodeID", rst.NodeID),
-		zap.Int64("taskID", rst.getTaskID()))
+		zap.Int64("taskID", rst.getTaskID()),
+		zap.Int64("msgID", rst.GetBase().GetMsgID()))
 	return nil
 }
 
@@ -1482,7 +1498,8 @@ func (rst *releaseSegmentTask) execute(ctx context.Context) error {
 
 	log.Info("releaseSegmentTask Execute done",
 		zap.Int64s("segmentIDs", rst.SegmentIDs),
-		zap.Int64("taskID", rst.getTaskID()))
+		zap.Int64("taskID", rst.getTaskID()),
+		zap.Int64("msgID", rst.GetBase().GetMsgID()))
 	return nil
 }
 
@@ -1490,7 +1507,8 @@ func (rst *releaseSegmentTask) postExecute(context.Context) error {
 	segmentIDs := rst.SegmentIDs
 	log.Info("releaseSegmentTask postExecute done",
 		zap.Int64s("segmentIDs", segmentIDs),
-		zap.Int64("taskID", rst.getTaskID()))
+		zap.Int64("taskID", rst.getTaskID()),
+		zap.Int64("msgID", rst.GetBase().GetMsgID()))
 	return nil
 }
 
@@ -1545,7 +1563,8 @@ func (wdt *watchDmChannelTask) preExecute(context.Context) error {
 	log.Info("start do watchDmChannelTask",
 		zap.Strings("dmChannels", channels),
 		zap.Int64("loaded nodeID", wdt.NodeID),
-		zap.Int64("taskID", wdt.getTaskID()))
+		zap.Int64("taskID", wdt.getTaskID()),
+		zap.Int64("msgID", wdt.GetBase().GetMsgID()))
 	return nil
 }
 
@@ -1560,13 +1579,15 @@ func (wdt *watchDmChannelTask) execute(ctx context.Context) error {
 	}
 
 	log.Info("watchDmChannelsTask Execute done",
-		zap.Int64("taskID", wdt.getTaskID()))
+		zap.Int64("taskID", wdt.getTaskID()),
+		zap.Int64("msgID", wdt.GetBase().GetMsgID()))
 	return nil
 }
 
 func (wdt *watchDmChannelTask) postExecute(context.Context) error {
 	log.Info("watchDmChannelTask postExecute done",
-		zap.Int64("taskID", wdt.getTaskID()))
+		zap.Int64("taskID", wdt.getTaskID()),
+		zap.Int64("msgID", wdt.GetBase().GetMsgID()))
 	return nil
 }
 
@@ -1660,7 +1681,8 @@ func (wdt *watchDeltaChannelTask) preExecute(context.Context) error {
 	log.Info("start do watchDeltaChannelTask",
 		zap.Strings("deltaChannels", channels),
 		zap.Int64("loaded nodeID", wdt.NodeID),
-		zap.Int64("taskID", wdt.getTaskID()))
+		zap.Int64("taskID", wdt.getTaskID()),
+		zap.Int64("msgID", wdt.GetBase().GetMsgID()))
 	return nil
 }
 
@@ -1675,13 +1697,15 @@ func (wdt *watchDeltaChannelTask) execute(ctx context.Context) error {
 	}
 
 	log.Info("watchDeltaChannelsTask Execute done",
-		zap.Int64("taskID", wdt.getTaskID()))
+		zap.Int64("taskID", wdt.getTaskID()),
+		zap.Int64("msgID", wdt.GetBase().GetMsgID()))
 	return nil
 }
 
 func (wdt *watchDeltaChannelTask) postExecute(context.Context) error {
 	log.Info("watchDeltaChannelTask postExecute done",
-		zap.Int64("taskID", wdt.getTaskID()))
+		zap.Int64("taskID", wdt.getTaskID()),
+		zap.Int64("msgID", wdt.GetBase().GetMsgID()))
 	return nil
 }
 

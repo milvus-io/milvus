@@ -47,22 +47,22 @@ type deleteNode struct {
 
 // Name returns the name of deleteNode
 func (dNode *deleteNode) Name() string {
-	return "dNode"
+	return fmt.Sprintf("dNode-%s", dNode.channel)
 }
 
 // Operate handles input messages, do delete operations
 func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	if len(in) != 1 {
-		log.Warn("Invalid operate message input in deleteNode", zap.Int("input length", len(in)))
+		log.Warn("Invalid operate message input in deleteNode", zap.Int("input length", len(in)), zap.String("name", dNode.Name()))
 		return []Msg{}
 	}
 
 	dMsg, ok := in[0].(*deleteMsg)
 	if !ok {
 		if in[0] == nil {
-			log.Debug("type assertion failed for deleteMsg because it's nil")
+			log.Debug("type assertion failed for deleteMsg because it's nil", zap.String("name", dNode.Name()))
 		} else {
-			log.Warn("type assertion failed for deleteMsg", zap.String("name", reflect.TypeOf(in[0]).Name()))
+			log.Warn("type assertion failed for deleteMsg", zap.String("msgType", reflect.TypeOf(in[0]).Name()), zap.String("name", dNode.Name()))
 		}
 		return []Msg{}
 	}
