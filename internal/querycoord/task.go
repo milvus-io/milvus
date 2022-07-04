@@ -2159,7 +2159,10 @@ func (lbt *loadBalanceTask) processNodeDownLoadBalance(ctx context.Context) erro
 	}
 	for _, internalTask := range internalTasks {
 		lbt.addChildTask(internalTask)
-		log.Info("loadBalanceTask: add a childTask", zap.Int64("taskID", lbt.getTaskID()), zap.String("task type", internalTask.msgType().String()), zap.Any("task", internalTask))
+		log.Info("loadBalanceTask: add a childTask",
+			zap.Int64("taskID", lbt.getTaskID()),
+			zap.String("taskType", internalTask.msgType().String()),
+			zap.Int64("destNode", getDstNodeIDByTask(internalTask)))
 	}
 	log.Info("loadBalanceTask: assign child task done", zap.Int64("taskID", lbt.getTaskID()), zap.Int64s("sourceNodeIDs", lbt.SourceNodeIDs))
 
@@ -2333,7 +2336,9 @@ func (lbt *loadBalanceTask) processManualLoadBalance(ctx context.Context) error 
 	}
 	for _, internalTask := range internalTasks {
 		lbt.addChildTask(internalTask)
-		log.Info("loadBalanceTask: add a childTask", zap.String("task type", internalTask.msgType().String()), zap.Any("balance request", lbt.LoadBalanceRequest))
+		log.Info("loadBalanceTask: add a childTask",
+			zap.String("taskType", internalTask.msgType().String()),
+			zap.Any("request", lbt.LoadBalanceRequest))
 	}
 	log.Info("loadBalanceTask: assign child task done", zap.Any("balance request", lbt.LoadBalanceRequest))
 
