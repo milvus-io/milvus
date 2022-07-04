@@ -55,6 +55,52 @@ func (m *mockTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
+var _ readTask = (*mockReadTask)(nil)
+
+type mockReadTask struct {
+	mockTask
+	cpuUsage     int32
+	maxCPU       int32
+	collectionID UniqueID
+	ready        bool
+	canMerge     bool
+	timeout      bool
+	step         TaskStep
+	readyError   error
+}
+
+func (m *mockReadTask) GetCollectionID() UniqueID {
+	return m.collectionID
+}
+
+func (m *mockReadTask) Ready() (bool, error) {
+	return m.ready, m.readyError
+}
+
+func (m *mockReadTask) Merge(o readTask) {
+
+}
+
+func (m *mockReadTask) CPUUsage() int32 {
+	return m.cpuUsage
+}
+
+func (m *mockReadTask) Timeout() bool {
+	return m.timeout
+}
+
+func (m *mockReadTask) SetMaxCPUUsage(cpu int32) {
+	m.maxCPU = cpu
+}
+
+func (m *mockReadTask) SetStep(step TaskStep) {
+	m.step = step
+}
+
+func (m *mockReadTask) CanMergeWith(o readTask) bool {
+	return m.canMerge
+}
+
 func TestTaskScheduler(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
