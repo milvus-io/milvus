@@ -1084,7 +1084,7 @@ class TestCollectionOperation(TestcaseBase):
         partition_w1 = self.init_partition_wrap(collection_w)
         partition_w1.insert(cf.gen_default_list_data())
         collection_w.load()
-        error = {ct.err_code: 1, ct.err_msg: f'load the partition after load collection is not supported'}
+        error = {ct.err_code: 5, ct.err_msg: f'load the partition after load collection is not supported'}
         partition_w1.load(check_task=CheckTasks.err_res,
                           check_items=error)
 
