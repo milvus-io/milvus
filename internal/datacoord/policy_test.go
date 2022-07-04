@@ -18,12 +18,8 @@ package datacoord
 
 import (
 	"testing"
-	"time"
 
-	"github.com/golang/protobuf/proto"
-	"github.com/milvus-io/milvus/internal/kv"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/stretchr/testify/assert"
 	"stathat.com/c/consistent"
 )
@@ -362,67 +358,6 @@ func TestAverageReassignPolicy(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := AverageReassignPolicy(tt.args.store, tt.args.reassigns)
-			assert.EqualValues(t, tt.want, got)
-		})
-	}
-}
-
-func TestBgCheckWithMaxWatchDuration(t *testing.T) {
-	type watch struct {
-		nodeID int64
-		name   string
-		info   *datapb.ChannelWatchInfo
-	}
-	getKv := func(watchInfos []*watch) kv.TxnKV {
-		kv := memkv.NewMemoryKV()
-		for _, info := range watchInfos {
-			k := buildNodeChannelKey(info.nodeID, info.name)
-			v, _ := proto.Marshal(info.info)
-			kv.Save(k, string(v))
-		}
-		return kv
-	}
-
-	type args struct {
-		kv        kv.TxnKV
-		channels  []*NodeChannelInfo
-		timestamp time.Time
-	}
-
-	ts := time.Now()
-	tests := []struct {
-		name    string
-		args    args
-		want    []*NodeChannelInfo
-		wantErr error
-	}{
-		{
-			"test normal expiration",
-			args{
-				getKv([]*watch{{1, "chan1", &datapb.ChannelWatchInfo{StartTs: ts.Unix(), State: datapb.ChannelWatchState_Uncomplete}},
-					{1, "chan2", &datapb.ChannelWatchInfo{StartTs: ts.Unix(), State: datapb.ChannelWatchState_Complete}}}),
-				[]*NodeChannelInfo{{1, []*channel{{"chan1", 1}, {"chan2", 1}}}},
-				ts.Add(maxWatchDuration),
-			},
-			[]*NodeChannelInfo{{1, []*channel{{"chan1", 1}}}},
-			nil,
-		},
-		{
-			"test no expiration",
-			args{
-				getKv([]*watch{{1, "chan1", &datapb.ChannelWatchInfo{StartTs: ts.Unix(), State: datapb.ChannelWatchState_Uncomplete}}}),
-				[]*NodeChannelInfo{{1, []*channel{{"chan1", 1}}}},
-				ts.Add(maxWatchDuration).Add(-time.Second),
-			},
-			[]*NodeChannelInfo{},
-			nil,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			policy := BgCheckWithMaxWatchDuration(tt.args.kv)
-			got, err := policy(tt.args.channels, tt.args.timestamp)
-			assert.Equal(t, tt.wantErr, err)
 			assert.EqualValues(t, tt.want, got)
 		})
 	}

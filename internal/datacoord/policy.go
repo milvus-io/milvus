@@ -19,12 +19,8 @@ package datacoord
 import (
 	"sort"
 	"strconv"
-	"time"
 
-	"github.com/golang/protobuf/proto"
-	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"go.uber.org/zap"
 	"stathat.com/c/consistent"
 )
@@ -421,52 +417,6 @@ func AverageReassignPolicy(store ROChannelStore, reassigns []*NodeChannelInfo) C
 		ret = append(ret, update)
 	}
 	return ret
-}
-
-// ChannelBGChecker check nodes' channels and return the channels needed to be reallocated.
-type ChannelBGChecker func(channels []*NodeChannelInfo, ts time.Time) ([]*NodeChannelInfo, error)
-
-// EmptyBgChecker does nothing
-func EmptyBgChecker(channels []*NodeChannelInfo, ts time.Time) ([]*NodeChannelInfo, error) {
-	return nil, nil
-}
-
-// BgCheckWithMaxWatchDuration returns a ChannelBGChecker with the maxWatchDuration
-func BgCheckWithMaxWatchDuration(kv kv.TxnKV) ChannelBGChecker {
-	return func(channels []*NodeChannelInfo, ts time.Time) ([]*NodeChannelInfo, error) {
-		reAllocations := make([]*NodeChannelInfo, 0, len(channels))
-		for _, ch := range channels {
-			cinfo := &NodeChannelInfo{
-				NodeID:   ch.NodeID,
-				Channels: make([]*channel, 0),
-			}
-			for _, c := range ch.Channels {
-				k := buildNodeChannelKey(ch.NodeID, c.Name)
-				v, err := kv.Load(k)
-				if err != nil {
-					return nil, err
-				}
-				watchInfo := &datapb.ChannelWatchInfo{}
-				if err := proto.Unmarshal([]byte(v), watchInfo); err != nil {
-					return nil, err
-				}
-				// if a channel is not watched after maxWatchDuration,
-				// then we reallocate it to another node
-				if watchInfo.State == datapb.ChannelWatchState_Complete || watchInfo.State == datapb.ChannelWatchState_WatchSuccess {
-					continue
-				}
-				startTime := time.Unix(watchInfo.StartTs, 0)
-				d := ts.Sub(startTime)
-				if d >= maxWatchDuration {
-					cinfo.Channels = append(cinfo.Channels, c)
-				}
-			}
-			if len(cinfo.Channels) != 0 {
-				reAllocations = append(reAllocations, cinfo)
-			}
-		}
-		return reAllocations, nil
-	}
 }
 
 func formatNodeIDs(ids []int64) []string {

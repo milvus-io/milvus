@@ -567,7 +567,7 @@ func TestChannelManager(t *testing.T) {
 				bufferID: {bufferID, []*channel{}},
 			},
 		}
-		chManager.stateTimer.startOne(datapb.ChannelWatchState_ToRelease, "channel-1", 1, time.Now().Add(maxWatchDuration).UnixNano())
+		chManager.stateTimer.startOne(datapb.ChannelWatchState_ToRelease, "channel-1", 1, time.Now().Add(MaxWatchDuration).UnixNano())
 
 		err = chManager.DeleteNode(1)
 		assert.NoError(t, err)

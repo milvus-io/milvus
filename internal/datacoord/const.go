@@ -16,10 +16,13 @@
 
 package datacoord
 
+import "time"
+
 // segment reference lock
 const (
 	// segmentReferPrefix is the prefix of the segment reference lock path
 	segmentReferPrefix = "segmentRefer"
+	MaxWatchDuration   = 60 * time.Second
 )
 
 const (

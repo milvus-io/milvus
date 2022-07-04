@@ -35,11 +35,6 @@ import (
 	"stathat.com/c/consistent"
 )
 
-const (
-	bgCheckInterval  = 3 * time.Second
-	maxWatchDuration = 20 * time.Second
-)
-
 // ChannelManager manages the allocation and the balance between channels and data nodes.
 type ChannelManager struct {
 	ctx              context.Context
@@ -51,7 +46,6 @@ type ChannelManager struct {
 	deregisterPolicy DeregisterPolicy
 	assignPolicy     ChannelAssignPolicy
 	reassignPolicy   ChannelReassignPolicy
-	bgChecker        ChannelBGChecker
 	msgstreamFactory msgstream.Factory
 
 	stateChecker channelStateChecker
@@ -109,7 +103,6 @@ func NewChannelManager(
 	c.deregisterPolicy = c.factory.NewDeregisterPolicy()
 	c.assignPolicy = c.factory.NewAssignPolicy()
 	c.reassignPolicy = c.factory.NewReassignPolicy()
-	c.bgChecker = c.factory.NewBgChecker()
 	return c, nil
 }
 
@@ -231,42 +224,6 @@ func (c *ChannelManager) unwatchDroppedChannels() {
 				continue
 			}
 			c.h.FinishDropChannel(ch.Name)
-		}
-	}
-}
-
-// NOT USED.
-func (c *ChannelManager) bgCheckChannelsWork(ctx context.Context) {
-	timer := time.NewTicker(bgCheckInterval)
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-timer.C:
-			c.mu.Lock()
-
-			channels := c.store.GetNodesChannels()
-			reallocates, err := c.bgChecker(channels, time.Now())
-			if err != nil {
-				log.Warn("channel manager bg check failed", zap.Error(err))
-
-				c.mu.Unlock()
-				continue
-			}
-
-			updates := c.reassignPolicy(c.store, reallocates)
-			log.Info("channel manager bg check reassign", zap.Array("updates", updates))
-			for _, update := range updates {
-				if update.Type == Add {
-					c.fillChannelWatchInfo(update)
-				}
-			}
-
-			if err := c.store.Update(updates); err != nil {
-				log.Warn("channel store update error", zap.Error(err))
-			}
-
-			c.mu.Unlock()
 		}
 	}
 }
@@ -438,7 +395,7 @@ func (c *ChannelManager) fillChannelWatchInfo(op *ChannelOp) {
 			Vchan:     vcInfo,
 			StartTs:   time.Now().Unix(),
 			State:     datapb.ChannelWatchState_Uncomplete,
-			TimeoutTs: time.Now().Add(maxWatchDuration).UnixNano(),
+			TimeoutTs: time.Now().Add(MaxWatchDuration).UnixNano(),
 		}
 		op.ChannelWatchInfos = append(op.ChannelWatchInfos, info)
 	}
@@ -448,7 +405,7 @@ func (c *ChannelManager) fillChannelWatchInfo(op *ChannelOp) {
 func (c *ChannelManager) fillChannelWatchInfoWithState(op *ChannelOp, state datapb.ChannelWatchState) []string {
 	var channelsWithTimer = []string{}
 	startTs := time.Now().Unix()
-	timeoutTs := time.Now().Add(maxWatchDuration).UnixNano()
+	timeoutTs := time.Now().Add(MaxWatchDuration).UnixNano()
 	for _, ch := range op.Channels {
 		vcInfo := c.h.GetVChanPositions(ch.Name, ch.CollectionID, allPartitionID)
 		info := &datapb.ChannelWatchInfo{
@@ -783,40 +740,9 @@ func (c *ChannelManager) CleanupAndReassign(nodeID UniqueID, channelName string)
 		subName := fmt.Sprintf("%s-%d-%d", Params.CommonCfg.DataNodeSubName, nodeID, chToCleanUp.CollectionID)
 		pchannelName := funcutil.ToPhysicalChannel(channelName)
 		msgstream.UnsubscribeChannels(c.ctx, c.msgstreamFactory, subName, []string{pchannelName})
+		log.Info("Successfully unsubscribe channels", zap.String("chan", channelName))
 	}
-
-	reallocates := &NodeChannelInfo{nodeID, []*channel{chToCleanUp}}
-
-	if c.isMarkedDrop(channelName) {
-		if err := c.remove(nodeID, chToCleanUp); err != nil {
-			return fmt.Errorf("failed to remove watch info: %v,%s", chToCleanUp, err.Error())
-		}
-
-		log.Debug("try to cleanup removal flag ", zap.String("channel name", channelName))
-		c.h.FinishDropChannel(channelName)
-
-		log.Info("removed channel assignment", zap.Any("channel", chToCleanUp))
-		return nil
-	}
-
-	// Reassign policy won't choose the original node when a reassigning a channel.
-	updates := c.reassignPolicy(c.store, []*NodeChannelInfo{reallocates})
-	if len(updates) <= 0 {
-		// Skip the remove if reassign to the original node.
-		log.Warn("failed to reassign channel to other nodes, add channel to the original node",
-			zap.Int64("node ID", nodeID),
-			zap.String("channel name", channelName))
-		updates.Add(nodeID, []*channel{chToCleanUp})
-	} else {
-		if err := c.remove(nodeID, chToCleanUp); err != nil {
-			return fmt.Errorf("failed to remove watch info: %v,%s", chToCleanUp, err.Error())
-		}
-	}
-
-	log.Info("channel manager reassigning channels",
-		zap.Int64("old nodeID", nodeID),
-		zap.Array("updates", updates))
-	return c.updateWithTimer(updates, datapb.ChannelWatchState_ToWatch)
+	return c.Reassign(nodeID, channelName)
 }
 
 func (c *ChannelManager) getChannelByNodeAndName(nodeID UniqueID, channelName string) *channel {

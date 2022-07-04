@@ -35,12 +35,9 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
-	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
-
 	allocator2 "github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/datacoord"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
@@ -63,12 +60,12 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
 )
 
 const (
-	// RPCConnectionTimeout is used to set the timeout for rpc request
-	RPCConnectionTimeout = 30 * time.Second
-
 	// MetricRequestsTotal is used to count the num of total requests
 	MetricRequestsTotal = "total"
 
@@ -333,7 +330,7 @@ func (node *DataNode) handleWatchInfo(e *event, key string, data []byte) {
 	}
 
 	actualManager, loaded := node.eventManagerMap.LoadOrStore(e.vChanName, newChannelEventManager(
-		node.handlePutEvent, node.handleDeleteEvent, retryWatchInterval,
+		node.handlePutEvent, node.handleDeleteEvent, datacoord.MaxWatchDuration,
 	))
 	if !loaded {
 		actualManager.(*channelEventManager).Run()

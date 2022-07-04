@@ -26,8 +26,6 @@ import (
 	"go.uber.org/zap"
 )
 
-const retryWatchInterval = 20 * time.Second
-
 type event struct {
 	eventType int
 	vChanName string
