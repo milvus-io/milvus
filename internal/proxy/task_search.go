@@ -6,9 +6,6 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
-	"sync"
-
-	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
@@ -16,8 +13,8 @@ import (
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
+	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/types"
-
 	"github.com/milvus-io/milvus/internal/util/distance"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
@@ -338,7 +335,7 @@ func (t *searchTask) Execute(ctx context.Context) error {
 		return fmt.Errorf("fail to search on all shard leaders, err=%w", err)
 	}
 
-	log.Debug("Search Execute done.", zap.Int64("msgID", t.ID()))
+	log.Info("Search Execute done.", zap.Int64("msgID", t.ID()))
 	return nil
 }
 
@@ -350,28 +347,20 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 		tr.Elapse("done")
 	}()
 
-	wg := sync.WaitGroup{}
-	wg.Add(1)
-	go func() {
-		for {
-			select {
-			case <-t.TraceCtx().Done():
-				log.Debug("wait to finish timeout!", zap.Int64("msgID", t.ID()))
-				return
-			case <-t.runningGroupCtx.Done():
-				log.Debug("all searches are finished or canceled", zap.Int64("msgID", t.ID()))
-				close(t.resultBuf)
-				for res := range t.resultBuf {
-					t.toReduceResults = append(t.toReduceResults, res)
-					log.Debug("proxy receives one query result", zap.Int64("sourceID", res.GetBase().GetSourceID()), zap.Int64("msgID", t.ID()))
-				}
-				wg.Done()
-				return
-			}
+	select {
+	case <-t.TraceCtx().Done():
+		timeoutMsg := "search wait to finish timeout"
+		log.Warn(timeoutMsg, zap.Int64("msgID", t.ID()))
+		return errors.New(timeoutMsg)
+	case <-t.runningGroupCtx.Done():
+		log.Debug("all searches are finished or canceled", zap.Int64("msgID", t.ID()))
+		close(t.resultBuf)
+		for res := range t.resultBuf {
+			t.toReduceResults = append(t.toReduceResults, res)
+			log.Debug("proxy receives one query result", zap.Int64("sourceID", res.GetBase().GetSourceID()), zap.Int64("msgID", t.ID()))
 		}
-	}()
+	}
 
-	wg.Wait()
 	tr.Record("decodeResultStart")
 	validSearchResults, err := decodeSearchResults(t.toReduceResults)
 	if err != nil {

@@ -6,9 +6,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"sync"
-
-	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
@@ -16,6 +13,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
+	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
@@ -106,7 +104,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	log.Info("Validate collection name.", zap.Any("collectionName", collectionName),
+	log.Debug("Validate collection name.", zap.Any("collectionName", collectionName),
 		zap.Int64("msgID", t.ID()), zap.Any("requestType", "query"))
 
 	collID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
@@ -274,28 +272,19 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 	}()
 
 	var err error
-	wg := sync.WaitGroup{}
-	wg.Add(1)
-	go func() {
-		for {
-			select {
-			case <-t.TraceCtx().Done():
-				log.Warn("proxy", zap.Int64("Query: wait to finish failed, timeout!, msgID:", t.ID()))
-				return
-			case <-t.runningGroupCtx.Done():
-				log.Debug("all queries are finished or canceled", zap.Int64("msgID", t.ID()))
-				close(t.resultBuf)
-				for res := range t.resultBuf {
-					t.toReduceResults = append(t.toReduceResults, res)
-					log.Debug("proxy receives one query result", zap.Int64("sourceID", res.GetBase().GetSourceID()), zap.Any("msgID", t.ID()))
-				}
-				wg.Done()
-				return
-			}
+	select {
+	case <-t.TraceCtx().Done():
+		timeoutMsg := "query wait to finish timeout"
+		log.Warn(timeoutMsg, zap.Int64("msgID", t.ID()))
+		return errors.New(timeoutMsg)
+	case <-t.runningGroupCtx.Done():
+		log.Debug("all queries are finished or canceled", zap.Int64("msgID", t.ID()))
+		close(t.resultBuf)
+		for res := range t.resultBuf {
+			t.toReduceResults = append(t.toReduceResults, res)
+			log.Debug("proxy receives one query result", zap.Int64("sourceID", res.GetBase().GetSourceID()), zap.Any("msgID", t.ID()))
 		}
-	}()
-
-	wg.Wait()
+	}
 
 	metrics.ProxyDecodeResultLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), metrics.QueryLabel).Observe(0.0)
 	tr.Record("reduceResultStart")
