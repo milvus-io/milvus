@@ -275,7 +275,6 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                                     % invalid_search_field})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue 17935")
     def test_search_param_invalid_metric_type(self, get_invalid_metric_type):
         """
         target: test search with invalid parameter values
