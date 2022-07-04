@@ -627,7 +627,7 @@ func reduceSearchResultData(searchResultData []*schemapb.SearchResultData, nq in
 			zap.Int("result No.", i),
 			zap.Int64("nq", sData.NumQueries),
 			zap.Int64("topk", sData.TopK),
-			zap.Int64s("topks", sData.Topks),
+			zap.Any("len(topks)", len(sData.Topks)),
 			zap.Any("len(FieldsData)", len(sData.FieldsData)))
 		if err := checkSearchResultData(sData, nq, topk); err != nil {
 			log.Warn("invalid search results", zap.Error(err))

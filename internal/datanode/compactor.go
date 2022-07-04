@@ -555,6 +555,7 @@ func (t *compactionTask) compact() error {
 
 	log.Info("compaction done",
 		zap.Int64("planID", t.plan.GetPlanID()),
+		zap.Int64("targetSegmentID", targetSegID),
 		zap.Int("num of binlog paths", len(segPaths.inPaths)),
 		zap.Int("num of stats paths", len(segPaths.statsPaths)),
 		zap.Int("num of delta paths", len(segPaths.deltaInfo)),

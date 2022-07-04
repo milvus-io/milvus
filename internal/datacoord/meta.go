@@ -844,8 +844,13 @@ func (m *meta) CompleteMergeCompaction(compactionLogs []*datapb.CompactionSegmen
 		CreatedByCompaction: true,
 		CompactionFrom:      compactionFrom,
 	}
-
 	segment := NewSegmentInfo(segmentInfo)
+
+	log.Info("CompleteMergeCompaction", zap.Int64("segmentID", segmentInfo.ID),
+		zap.Int64("collectionID", segmentInfo.CollectionID),
+		zap.Int64("partitionID", segmentInfo.PartitionID),
+		zap.Int64("NumOfRows", segmentInfo.NumOfRows),
+		zap.Any("compactionFrom", segmentInfo.CompactionFrom))
 
 	data := make(map[string]string)
 
