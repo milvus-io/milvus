@@ -274,7 +274,8 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                          "err_msg": "Field %s doesn't exist in schema"
                                                     % invalid_search_field})
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue 17935")
     def test_search_param_invalid_metric_type(self, get_invalid_metric_type):
         """
         target: test search with invalid parameter values
@@ -293,7 +294,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             check_items={"err_code": 1,
                                          "err_msg": "metric type not found"})
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[:9],
                                  ct.default_index_params[:9]))
@@ -614,11 +615,10 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             check_items={"err_code": 1,
                                          "err_msg": "PartitonName: %s not found" % deleted_par_name})
 
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="issue 6731")
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("index, params",
-                             zip(ct.all_index_types[:9],
-                                 ct.default_index_params[:9]))
+                             zip(ct.all_index_types[1:9],
+                                 ct.default_index_params[1:9]))
     def test_search_different_index_invalid_params(self, index, params):
         """
         target: test search with different index
@@ -640,13 +640,13 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w.load()
         # 3. search
         log.info("test_search_different_index_invalid_params: Searching after creating index-%s" % index)
+        search_params = cf.gen_invalid_search_param(index)
         collection_w.search(vectors, default_search_field,
-                            default_search_params, default_limit,
+                            search_params[0], default_limit,
                             default_search_exp,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": default_nq,
-                                         "ids": insert_ids,
-                                         "limit": default_limit})
+                            check_task=CheckTasks.err_res,
+                            check_items={"err_code": 1,
+                                         "err_msg": "Search params check failed"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_index_partition_not_existed(self):
