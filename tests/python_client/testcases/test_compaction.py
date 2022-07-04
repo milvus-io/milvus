@@ -931,7 +931,7 @@ class TestCompactionOperation(TestcaseBase):
         collection_w = self.collection_insert_multi_segments_one_shard(prefix, num_of_segment=threshold)
 
         # Estimated auto-merging takes 30s
-        cost = 60
+        cost = 120
         collection_w.load()
         replicas = collection_w.get_replicas()[0]
         replica_num = len(replicas.groups)
@@ -1158,7 +1158,7 @@ class TestCompactionOperation(TestcaseBase):
         t = threading.Thread(target=do_index, args=())
         t.start()
         collection_w.compact()
-        collection_w.wait_for_compaction_completed(timeout=90)
+        collection_w.wait_for_compaction_completed(timeout=180)
         collection_w.get_compaction_plans()
 
         t.join()
