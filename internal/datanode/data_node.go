@@ -439,9 +439,6 @@ func (node *DataNode) BackGroundGC(vChannelCh <-chan string) {
 	}
 }
 
-// FilterThreshold is the start time ouf DataNode
-var FilterThreshold Timestamp
-
 // Start will update DataNode state to HEALTHY
 func (node *DataNode) Start() error {
 	if err := node.idAllocator.Start(); err != nil {
@@ -485,8 +482,6 @@ func (node *DataNode) Start() error {
 	if rep.Status.ErrorCode != commonpb.ErrorCode_Success || err != nil {
 		return errors.New("DataNode fail to start")
 	}
-
-	FilterThreshold = rep.GetTimestamp()
 
 	go node.BackGroundGC(node.clearSignal)
 

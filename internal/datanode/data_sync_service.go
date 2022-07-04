@@ -163,32 +163,6 @@ func (dsService *dataSyncService) clearGlobalFlushingCache() {
 	dsService.flushingSegCache.Remove(segments...)
 }
 
-// getSegmentInfos return the SegmentInfo details according to the given ids through RPC to datacoord
-func (dsService *dataSyncService) getSegmentInfos(segmentIds []int64) ([]*datapb.SegmentInfo, error) {
-	var segmentInfos []*datapb.SegmentInfo
-	infoResp, err := dsService.dataCoord.GetSegmentInfo(dsService.ctx, &datapb.GetSegmentInfoRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_SegmentInfo,
-			MsgID:     0,
-			Timestamp: 0,
-			SourceID:  Params.ProxyCfg.GetNodeID(),
-		},
-		SegmentIDs:       segmentIds,
-		IncludeUnHealthy: true,
-	})
-	if err != nil {
-		log.Error("Fail to get datapb.SegmentInfo by ids from datacoord", zap.Error(err))
-		return nil, err
-	}
-	if infoResp.GetStatus().ErrorCode != commonpb.ErrorCode_Success {
-		err = errors.New(infoResp.GetStatus().Reason)
-		log.Error("Fail to get datapb.SegmentInfo by ids from datacoord", zap.Error(err))
-		return nil, err
-	}
-	segmentInfos = infoResp.Infos
-	return segmentInfos, nil
-}
-
 // initNodes inits a TimetickedFlowGraph
 func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) error {
 	dsService.fg = flowgraph.NewTimeTickedFlowGraph(dsService.ctx)
@@ -208,6 +182,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 	}
 
 	futures := make([]*concurrency.Future, 0, len(unflushedSegmentInfos)+len(flushedSegmentInfos))
+
 	for _, us := range unflushedSegmentInfos {
 		if us.CollectionID != dsService.collectionID ||
 			us.GetInsertChannel() != vchanInfo.ChannelName {
@@ -220,10 +195,10 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 			continue
 		}
 
-		log.Info("Recover Segment NumOfRows form checkpoints",
-			zap.String("InsertChannel", us.GetInsertChannel()),
-			zap.Int64("SegmentID", us.GetID()),
-			zap.Int64("NumOfRows", us.GetNumOfRows()),
+		log.Info("recover growing segments form checkpoints",
+			zap.String("vChannelName", us.GetInsertChannel()),
+			zap.Int64("segmentID", us.GetID()),
+			zap.Int64("numRows", us.GetNumOfRows()),
 		)
 		var cp *segmentCheckPoint
 		if us.GetDmlPosition() != nil {
@@ -255,11 +230,10 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 			)
 			continue
 		}
-
-		log.Info("Recover Segment NumOfRows form checkpoints",
-			zap.String("InsertChannel", fs.GetInsertChannel()),
-			zap.Int64("SegmentID", fs.GetID()),
-			zap.Int64("NumOfRows", fs.GetNumOfRows()),
+		log.Info("recover sealed segments form checkpoints",
+			zap.String("vChannelName", fs.GetInsertChannel()),
+			zap.Int64("segmentID", fs.GetID()),
+			zap.Int64("numRows", fs.GetNumOfRows()),
 		)
 		// avoid closure capture iteration variable
 		segment := fs
@@ -294,7 +268,20 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 		return err
 	}
 
-	var ddNode Node = newDDNode(dsService.ctx, dsService.collectionID, vchanInfo, unflushedSegmentInfos, dsService.msFactory, dsService.compactor)
+	var ddNode Node
+	ddNode, err = newDDNode(
+		dsService.ctx,
+		dsService.collectionID,
+		vchanInfo.GetChannelName(),
+		vchanInfo.GetDroppedSegmentIds(),
+		flushedSegmentInfos,
+		unflushedSegmentInfos,
+		dsService.msFactory,
+		dsService.compactor)
+	if err != nil {
+		return err
+	}
+
 	var insertBufferNode Node
 	insertBufferNode, err = newInsertBufferNode(
 		dsService.ctx,
@@ -360,4 +347,30 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 		return err
 	}
 	return nil
+}
+
+// getSegmentInfos return the SegmentInfo details according to the given ids through RPC to datacoord
+func (dsService *dataSyncService) getSegmentInfos(segmentIDs []int64) ([]*datapb.SegmentInfo, error) {
+	var segmentInfos []*datapb.SegmentInfo
+	infoResp, err := dsService.dataCoord.GetSegmentInfo(dsService.ctx, &datapb.GetSegmentInfoRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_SegmentInfo,
+			MsgID:     0,
+			Timestamp: 0,
+			SourceID:  Params.ProxyCfg.GetNodeID(),
+		},
+		SegmentIDs:       segmentIDs,
+		IncludeUnHealthy: true,
+	})
+	if err != nil {
+		log.Error("Fail to get datapb.SegmentInfo by ids from datacoord", zap.Error(err))
+		return nil, err
+	}
+	if infoResp.GetStatus().ErrorCode != commonpb.ErrorCode_Success {
+		err = errors.New(infoResp.GetStatus().Reason)
+		log.Error("Fail to get datapb.SegmentInfo by ids from datacoord", zap.Error(err))
+		return nil, err
+	}
+	segmentInfos = infoResp.Infos
+	return segmentInfos, nil
 }
