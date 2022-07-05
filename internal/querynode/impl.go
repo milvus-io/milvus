@@ -519,6 +519,7 @@ func (node *QueryNode) Search(ctx context.Context, req *queryPb.SearchRequest) (
 	//from Proxy
 	cluster, ok := qs.clusterService.getShardCluster(req.GetDmlChannel())
 	if !ok {
+		failRet.Status.ErrorCode = commonpb.ErrorCode_NotShardLeader
 		failRet.Status.Reason = fmt.Sprintf("channel %s leader is not here", req.GetDmlChannel())
 		return failRet, nil
 	}
@@ -663,6 +664,7 @@ func (node *QueryNode) Query(ctx context.Context, req *queryPb.QueryRequest) (*i
 
 	cluster, ok := qs.clusterService.getShardCluster(req.GetDmlChannel())
 	if !ok {
+		failRet.Status.ErrorCode = commonpb.ErrorCode_NotShardLeader
 		failRet.Status.Reason = fmt.Sprintf("channel %s leader is not here", req.GetDmlChannel())
 		return failRet, nil
 	}
