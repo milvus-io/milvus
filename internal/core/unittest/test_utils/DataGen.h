@@ -281,6 +281,23 @@ CreatePlaceholderGroup(int64_t num_queries, int dim, int64_t seed = 42) {
 }
 
 inline auto
+CreatePlaceholderGroup(int64_t num_queries, int dim, const std::vector<float>& vecs) {
+    namespace ser = milvus::proto::common;
+    ser::PlaceholderGroup raw_group;
+    auto value = raw_group.add_placeholders();
+    value->set_tag("$0");
+    value->set_type(ser::PlaceholderType::FloatVector);
+    for (int i = 0; i < num_queries; ++i) {
+        std::vector<float> vec;
+        for (int d = 0; d < dim; ++d) {
+            vec.push_back(vecs[i*dim+d]);
+        }
+        value->add_values(vec.data(), vec.size() * sizeof(float));
+    }
+    return raw_group;
+}
+
+inline auto
 CreatePlaceholderGroupFromBlob(int64_t num_queries, int dim, const float* src) {
     namespace ser = milvus::proto::common;
     ser::PlaceholderGroup raw_group;
@@ -340,6 +357,20 @@ CreateBinaryPlaceholderGroupFromBlob(int64_t num_queries, int64_t dim, const uin
     return raw_group;
 }
 
+inline auto
+SearchResultToVector(const SearchResult& sr) {
+    int64_t num_queries = sr.total_nq_;
+    int64_t topk = sr.unity_topK_;
+    std::vector<std::pair<int, float>> result;
+    for (int q = 0; q < num_queries; ++q) {
+        for (int k = 0; k < topk; ++k) {
+            int index = q * topk + k;
+            result.emplace_back(std::make_pair(sr.seg_offsets_[index], sr.distances_[index]));
+        }
+    }
+    return result;
+}
+
 inline json
 SearchResultToJson(const SearchResult& sr) {
     int64_t num_queries = sr.total_nq_;
@@ -357,7 +388,7 @@ SearchResultToJson(const SearchResult& sr) {
 };
 
 inline void
-SealedLoadFieldData(const GeneratedData& dataset, SegmentSealed& seg) {
+SealedLoadFieldData(const GeneratedData& dataset, SegmentSealed& seg, const std::set<int64_t>& exclude_fields = {}) {
     auto row_count = dataset.row_ids_.size();
     {
         LoadFieldDataInfo info;
@@ -378,6 +409,10 @@ SealedLoadFieldData(const GeneratedData& dataset, SegmentSealed& seg) {
         seg.LoadFieldData(info);
     }
     for (auto field_data : dataset.raw_->fields_data()) {
+        int64_t field_id = field_data.field_id();
+        if (exclude_fields.find(field_id) != exclude_fields.end()) {
+            continue;
+        }
         LoadFieldDataInfo info;
         info.field_id = field_data.field_id();
         info.row_count = row_count;

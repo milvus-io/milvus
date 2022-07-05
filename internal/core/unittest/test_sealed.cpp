@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
+#include <boost/format.hpp>
 
 #include "knowhere/index/VecIndex.h"
 #include "knowhere/index/vector_index/IndexIVF.h"
@@ -528,4 +529,142 @@ TEST(Sealed, Delete) {
     ASSERT_EQ(reserved_offset, row_count);
     segment->Delete(reserved_offset, new_count, new_ids.get(),
                     reinterpret_cast<const Timestamp*>(new_timestamps.data()));
+}
+
+auto
+GenMaxFloatVecs(int N, int dim) {
+    std::vector<float> vecs;
+    for (int i = 0; i < N; i++) {
+        for (int j = 0; j < dim; j++) {
+            vecs.push_back(std::numeric_limits<float>::max());
+        }
+    }
+    return vecs;
+}
+
+auto
+GenRandomFloatVecs(int N, int dim) {
+    std::vector<float> vecs;
+    srand(time(NULL));
+    for (int i = 0; i < N; i++) {
+        for (int j = 0; j < dim; j++) {
+            vecs.push_back(static_cast<float>(rand()) / static_cast<float>(RAND_MAX));
+        }
+    }
+    return vecs;
+}
+
+auto
+GenQueryVecs(int N, int dim) {
+    std::vector<float> vecs;
+    for (int i = 0; i < N; i++) {
+        for (int j = 0; j < dim; j++) {
+            vecs.push_back(1);
+        }
+    }
+    return vecs;
+}
+
+auto
+transfer_to_fields_data(const std::vector<float>& vecs) {
+    auto arr = std::make_unique<DataArray>();
+    *(arr->mutable_vectors()->mutable_float_vector()->mutable_data()) = {vecs.begin(), vecs.end()};
+    return arr;
+}
+
+TEST(Sealed, BF) {
+    auto schema = std::make_shared<Schema>();
+    auto dim = 128;
+    auto metric_type = "L2";
+    auto fake_id = schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
+    auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
+    schema->set_primary_field_id(i64_fid);
+
+    int64_t N = 100000;
+    auto base = GenRandomFloatVecs(N, dim);
+    auto base_arr = transfer_to_fields_data(base);
+    base_arr->set_type(proto::schema::DataType::FloatVector);
+
+    LoadFieldDataInfo load_info{100, base_arr.get(), N};
+
+    auto dataset = DataGen(schema, N);
+    auto segment = CreateSealedSegment(schema);
+    std::cout << fake_id.get() << std::endl;
+    SealedLoadFieldData(dataset, *segment, {fake_id.get()});
+
+    segment->LoadFieldData(load_info);
+
+    auto topK = 1;
+    auto fmt = boost::format(R"(vector_anns: <
+                                            field_id: 100
+                                            query_info: <
+                                                topk: %1%
+                                                metric_type: "L2"
+                                                search_params: "{\"nprobe\": 10}"
+                                            >
+                                            placeholder_tag: "$0">
+                                            output_field_ids: 101)") %
+               topK;
+    auto serialized_expr_plan = fmt.str();
+    auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan.data());
+    auto plan = CreateSearchPlanByExpr(*schema, binary_plan.data(), binary_plan.size());
+
+    auto num_queries = 10;
+    auto query = GenQueryVecs(num_queries, dim);
+    auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, query);
+    auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+
+    auto result = segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
+    auto ves = SearchResultToVector(*result);
+    // first: offset, second: distance
+    EXPECT_GT(ves[0].first, 0);
+    EXPECT_LE(ves[0].first, N);
+    EXPECT_LE(ves[0].second, dim);
+}
+
+TEST(Sealed, BF_Overflow) {
+    auto schema = std::make_shared<Schema>();
+    auto dim = 128;
+    auto metric_type = "L2";
+    auto fake_id = schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
+    auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
+    schema->set_primary_field_id(i64_fid);
+
+    int64_t N = 10;
+    auto base = GenMaxFloatVecs(N, dim);
+    auto base_arr = transfer_to_fields_data(base);
+    base_arr->set_type(proto::schema::DataType::FloatVector);
+    LoadFieldDataInfo load_info{100, base_arr.get(), N};
+    auto dataset = DataGen(schema, N);
+    auto segment = CreateSealedSegment(schema);
+    std::cout<< fake_id.get() <<std::endl;
+    SealedLoadFieldData(dataset, *segment, {fake_id.get()});
+
+    segment->LoadFieldData(load_info);
+
+    auto topK = 1;
+    auto fmt = boost::format(R"(vector_anns: <
+                                            field_id: 100
+                                            query_info: <
+                                                topk: %1%
+                                                metric_type: "L2"
+                                                search_params: "{\"nprobe\": 10}"
+                                            >
+                                            placeholder_tag: "$0">
+                                            output_field_ids: 101)") %
+               topK;
+    auto serialized_expr_plan = fmt.str();
+    auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan.data());
+    auto plan = CreateSearchPlanByExpr(*schema, binary_plan.data(), binary_plan.size());
+
+    auto num_queries = 10;
+    auto query = GenQueryVecs(num_queries, dim);
+    auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, query);
+    auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+
+    auto result = segment->Search(plan.get(), ph_group.get(), MAX_TIMESTAMP);
+    auto ves = SearchResultToVector(*result);
+    for (int i = 0; i < num_queries; ++i) {
+        EXPECT_EQ(ves[0].first, -1);
+    }
 }
