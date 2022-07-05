@@ -2590,12 +2590,29 @@ func (lct *loadCollectionTask) Execute(ctx context.Context) (err error) {
 	if err != nil {
 		return err
 	}
+
+	// check if loaded
+	info, err := globalMetaCache.GetCollectionInfo(ctx, lct.CollectionName)
+	if err != nil {
+		return fmt.Errorf("GetCollectionInfo failed, collection = %s, err = %s", lct.CollectionName, err)
+	}
+	if info.isLoaded { // TODO: may not be thread safe
+		log.Debug("collection has been loaded",
+			zap.String("role", typeutil.ProxyRole),
+			zap.String("collectionName", lct.CollectionName),
+			zap.Int64("collectionID", collID),
+			zap.Int64("msgID", lct.GetBase().GetMsgID()))
+		lct.result = &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		}
+		return nil
+	}
+
 	lct.collectionID = collID
 	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, lct.CollectionName)
 	if err != nil {
 		return err
 	}
-
 	request := &querypb.LoadCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_LoadCollection,
