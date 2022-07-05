@@ -190,7 +190,6 @@ ReduceHelper::ReduceResultData(int slice_index) {
 
     // `search_records` records the search result offsets
     std::vector<std::vector<int64_t>> search_records(num_segments_);
-    std::unordered_set<milvus::PkType> pk_set;
     int64_t skip_dup_cnt = 0;
 
     // reduce search results
@@ -199,6 +198,9 @@ ReduceHelper::ReduceResultData(int slice_index) {
         std::vector<SearchResultPair> result_pairs;
         for (int i = 0; i < num_segments_; i++) {
             auto search_result = search_results_[i];
+            if (search_result->real_topK_per_nq_[qi] == 0) {
+                continue;
+            }
             auto base_offset = search_result->get_result_count(qi);
             auto primary_key = search_result->primary_keys_[base_offset];
             auto distance = search_result->distances_[base_offset];
@@ -206,11 +208,13 @@ ReduceHelper::ReduceResultData(int slice_index) {
                                       base_offset + search_result->real_topK_per_nq_[qi]);
         }
 
-        pk_set.clear();
+        // nq has no results for all segments
+        if (result_pairs.size() == 0) {
+            continue;
+        }
+        std::unordered_set<milvus::PkType> pk_set;
         int64_t last_nq_result_offset = result_offset;
-        int j = 0;
         while (result_offset - last_nq_result_offset < slice_topKs_[slice_index]) {
-            j++;
             std::sort(result_pairs.begin(), result_pairs.end(), std::greater<>());
             auto& pilot = result_pairs[0];
             auto index = pilot.segment_index_;
