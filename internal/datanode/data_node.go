@@ -79,8 +79,6 @@ const (
 	ConnectEtcdMaxRetryTime = 100
 )
 
-const illegalRequestErrStr = "Illegal request"
-
 // makes sure DataNode implements types.DataNode
 var _ types.DataNode = (*DataNode)(nil)
 
@@ -382,11 +380,9 @@ func (node *DataNode) handlePutEvent(watchInfo *datapb.ChannelWatchInfo, version
 		watchInfo.State = datapb.ChannelWatchState_WatchSuccess
 
 	case datapb.ChannelWatchState_ToRelease:
-		if node.tryToReleaseFlowgraph(vChanName) {
-			watchInfo.State = datapb.ChannelWatchState_ReleaseSuccess
-		} else {
-			watchInfo.State = datapb.ChannelWatchState_ReleaseFailure
-		}
+		// there is no reason why we release fail
+		node.tryToReleaseFlowgraph(vChanName)
+		watchInfo.State = datapb.ChannelWatchState_ReleaseSuccess
 	}
 
 	v, err := proto.Marshal(watchInfo)
@@ -394,32 +390,37 @@ func (node *DataNode) handlePutEvent(watchInfo *datapb.ChannelWatchInfo, version
 		return fmt.Errorf("fail to marshal watchInfo with state, vChanName: %s, state: %s ,err: %w", vChanName, watchInfo.State.String(), err)
 	}
 
-	k := path.Join(Params.DataNodeCfg.ChannelWatchSubPath, fmt.Sprintf("%d", Params.DataNodeCfg.GetNodeID()), vChanName)
+	key := path.Join(Params.DataNodeCfg.ChannelWatchSubPath, fmt.Sprintf("%d", Params.DataNodeCfg.GetNodeID()), vChanName)
 
-	log.Debug("handle put event: try to save result state", zap.String("key", k), zap.String("state", watchInfo.State.String()))
-	err = node.watchKv.CompareVersionAndSwap(k, version, string(v))
+	success, err := node.watchKv.CompareVersionAndSwap(key, version, string(v))
+	// etcd error, retrying
 	if err != nil {
-		return fmt.Errorf("fail to update watch state to etcd, vChanName: %s, state: %s, err: %w", vChanName, watchInfo.State.String(), err)
+		// flow graph will leak if not release, causing new datanode failed to subscribe
+		node.tryToReleaseFlowgraph(vChanName)
+		log.Warn("fail to update watch state to etcd", zap.String("vChanName", vChanName),
+			zap.String("state", watchInfo.State.String()), zap.Error(err))
+		return err
 	}
+	// etcd valid but the states updated.
+	if !success {
+		log.Info("handle put event: failed to compare version and swap, release flowgraph",
+			zap.String("key", key), zap.String("state", watchInfo.State.String()))
+		// flow graph will leak if not release, causing new datanode failed to subscribe
+		node.tryToReleaseFlowgraph(vChanName)
+		return nil
+	}
+	log.Info("handle put event successfully", zap.String("key", key), zap.String("state", watchInfo.State.String()))
 	return nil
 }
 
-func (node *DataNode) handleDeleteEvent(vChanName string) bool {
-	return node.tryToReleaseFlowgraph(vChanName)
+func (node *DataNode) handleDeleteEvent(vChanName string) {
+	node.tryToReleaseFlowgraph(vChanName)
 }
 
-// tryToReleaseFlowgraph tries to release a flowgraph, returns false if failed
-func (node *DataNode) tryToReleaseFlowgraph(vChanName string) bool {
-	success := true
-	defer func() {
-		if x := recover(); x != nil {
-			log.Error("release flowgraph panic", zap.String("vChanName", vChanName), zap.Any("recovered", x))
-			success = false
-		}
-	}()
+// tryToReleaseFlowgraph tries to release a flowgraph
+func (node *DataNode) tryToReleaseFlowgraph(vChanName string) {
 	node.flowgraphManager.release(vChanName)
 	log.Info("try to release flowgraph success", zap.String("vChanName", vChanName))
-	return success
 }
 
 // BackGroundGC runs in background to release datanode resources

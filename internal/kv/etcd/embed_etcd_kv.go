@@ -30,7 +30,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/kv"
-	kvi "github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 )
 
@@ -564,7 +563,7 @@ func (kv *EmbedEtcdKV) KeepAlive(id clientv3.LeaseID) (<-chan *clientv3.LeaseKee
 
 // CompareValueAndSwap compares the existing value with compare, and if they are
 // equal, the target is stored in etcd.
-func (kv *EmbedEtcdKV) CompareValueAndSwap(key, value, target string, opts ...clientv3.OpOption) error {
+func (kv *EmbedEtcdKV) CompareValueAndSwap(key, value, target string, opts ...clientv3.OpOption) (bool, error) {
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
 	resp, err := kv.client.Txn(ctx).If(
@@ -574,18 +573,14 @@ func (kv *EmbedEtcdKV) CompareValueAndSwap(key, value, target string, opts ...cl
 			value)).
 		Then(clientv3.OpPut(path.Join(kv.rootPath, key), target, opts...)).Commit()
 	if err != nil {
-		return err
+		return false, err
 	}
-	if !resp.Succeeded {
-		return kvi.NewCompareFailedError(fmt.Errorf("function CompareValueAndSwap error for compare is false for key: %s", key))
-	}
-
-	return nil
+	return resp.Succeeded, nil
 }
 
 // CompareValueAndSwapBytes compares the existing value with compare, and if they are
 // equal, the target is stored in etcd.
-func (kv *EmbedEtcdKV) CompareValueAndSwapBytes(key string, value, target []byte, opts ...clientv3.OpOption) error {
+func (kv *EmbedEtcdKV) CompareValueAndSwapBytes(key string, value, target []byte, opts ...clientv3.OpOption) (bool, error) {
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
 	resp, err := kv.client.Txn(ctx).If(
@@ -595,18 +590,14 @@ func (kv *EmbedEtcdKV) CompareValueAndSwapBytes(key string, value, target []byte
 			string(value))).
 		Then(clientv3.OpPut(path.Join(kv.rootPath, key), string(target), opts...)).Commit()
 	if err != nil {
-		return err
+		return false, err
 	}
-	if !resp.Succeeded {
-		return kvi.NewCompareFailedError(fmt.Errorf("function CompareValueAndSwapBytes error for compare is false for key: %s", key))
-	}
-
-	return nil
+	return resp.Succeeded, nil
 }
 
 // CompareVersionAndSwap compares the existing key-value's version with version, and if
 // they are equal, the target is stored in etcd.
-func (kv *EmbedEtcdKV) CompareVersionAndSwap(key string, version int64, target string, opts ...clientv3.OpOption) error {
+func (kv *EmbedEtcdKV) CompareVersionAndSwap(key string, version int64, target string, opts ...clientv3.OpOption) (bool, error) {
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
 	resp, err := kv.client.Txn(ctx).If(
@@ -616,18 +607,14 @@ func (kv *EmbedEtcdKV) CompareVersionAndSwap(key string, version int64, target s
 			version)).
 		Then(clientv3.OpPut(path.Join(kv.rootPath, key), target, opts...)).Commit()
 	if err != nil {
-		return err
+		return false, err
 	}
-	if !resp.Succeeded {
-		return kvi.NewCompareFailedError(fmt.Errorf("function CompareAndSwap error for compare is false for key: %s", key))
-	}
-
-	return nil
+	return resp.Succeeded, nil
 }
 
 // CompareVersionAndSwapBytes compares the existing key-value's version with version, and if
 // they are equal, the target is stored in etcd.
-func (kv *EmbedEtcdKV) CompareVersionAndSwapBytes(key string, version int64, target []byte, opts ...clientv3.OpOption) error {
+func (kv *EmbedEtcdKV) CompareVersionAndSwapBytes(key string, version int64, target []byte, opts ...clientv3.OpOption) (bool, error) {
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
 	resp, err := kv.client.Txn(ctx).If(
@@ -637,13 +624,9 @@ func (kv *EmbedEtcdKV) CompareVersionAndSwapBytes(key string, version int64, tar
 			version)).
 		Then(clientv3.OpPut(path.Join(kv.rootPath, key), string(target), opts...)).Commit()
 	if err != nil {
-		return err
+		return false, err
 	}
-	if !resp.Succeeded {
-		return kvi.NewCompareFailedError(fmt.Errorf("function CompareVersionAndSwapBytes error for compare is false for key: %s", key))
-	}
-
-	return nil
+	return resp.Succeeded, nil
 }
 
 func (kv *EmbedEtcdKV) GetConfig() embed.Config {

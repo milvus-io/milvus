@@ -196,8 +196,11 @@ func (it *IndexBuildTask) loadIndexMeta(ctx context.Context) (*indexpb.IndexMeta
 	return &indexMeta, source, nil
 }
 
-func (it *IndexBuildTask) updateTaskState(indexMeta *indexpb.IndexMeta) TaskState {
-	if indexMeta.Version > it.req.Version || indexMeta.State == commonpb.IndexState_Finished {
+func (it *IndexBuildTask) updateTaskState(indexMeta *indexpb.IndexMeta, err error) TaskState {
+	if err != nil {
+		log.Warn("IndexNode IndexBuildTask internal err, mark the task as retry", zap.Int64("buildID", it.req.IndexBuildID), zap.Error(err))
+		it.SetState(TaskStateRetry)
+	} else if indexMeta.Version > it.req.Version || indexMeta.State == commonpb.IndexState_Finished {
 		it.SetState(TaskStateAbandon)
 	} else if indexMeta.MarkDeleted {
 		it.SetState(TaskStateDeleted)
@@ -213,19 +216,15 @@ func (it *IndexBuildTask) saveIndexMeta(ctx context.Context) error {
 	fn := func() error {
 		indexMeta, version, err := it.loadIndexMeta(ctx)
 		if err != nil {
-			errMsg := fmt.Sprintf("IndexNode IndexBuildTask saveIndexMeta fail to load index meta, IndexBuildID=%d", indexMeta.IndexBuildID)
-			panic(errMsg)
+			log.Info("IndexNode IndexBuildTask saveIndexMeta fail to load index meta,", zap.Int64("build Id", indexMeta.IndexBuildID), zap.Error(err))
+			return err
 		}
-
-		if it.internalErr != nil {
-			log.Warn("IndexNode IndexBuildTask internal err is not nil, mark the task as retry",
-				zap.Int64("buildID", it.req.IndexBuildID))
-			it.SetState(TaskStateRetry)
-		}
-
-		taskState := it.updateTaskState(indexMeta)
-
-		if taskState == TaskStateDeleted {
+		taskState := it.updateTaskState(indexMeta, it.internalErr)
+		if taskState == TaskStateAbandon {
+			log.Warn("IndexNode IndexBuildTask saveIndexMeta success because task abandon", zap.String("TaskState", taskState.String()),
+				zap.Int64("IndexBuildID", indexMeta.IndexBuildID))
+			return nil
+		} else if taskState == TaskStateDeleted {
 			log.Info("IndexNode IndexBuildTask saveIndexMeta", zap.String("TaskState", taskState.String()),
 				zap.Int64("IndexBuildID", indexMeta.IndexBuildID))
 			indexMeta.State = commonpb.IndexState_Finished
@@ -252,14 +251,22 @@ func (it *IndexBuildTask) saveIndexMeta(ctx context.Context) error {
 		var metaValue []byte
 		metaValue, err = proto.Marshal(indexMeta)
 		if err != nil {
-			errMsg := fmt.Sprintf("IndexNode IndexBuildTask saveIndexMeta fail to marshal index meta, IndexBuildID=%d, err=%s",
-				indexMeta.IndexBuildID, err.Error())
-			panic(errMsg)
+			log.Warn("IndexNode IndexBuildTask saveIndexMeta fail to marshal index meta,", zap.Int64("build Id", indexMeta.IndexBuildID), zap.Error(err))
+			return err
 		}
 
 		strMetaValue := string(metaValue)
 
-		return it.etcdKV.CompareVersionAndSwap(it.req.MetaPath, version, strMetaValue)
+		success, err := it.etcdKV.CompareVersionAndSwap(it.req.MetaPath, version, strMetaValue)
+		if err != nil {
+			// TODO, we don't need to reload if it is just etcd error
+			log.Warn("failed to compare and swap in etcd", zap.Int64("buildID", it.req.IndexBuildID), zap.Error(err))
+			return err
+		}
+		if !success {
+			return fmt.Errorf("failed to save index meta in etcd, buildId: %d, source version: %d", it.req.IndexBuildID, version)
+		}
+		return nil
 	}
 
 	err := retry.Do(ctx, fn, retry.Attempts(3))
@@ -279,7 +286,7 @@ func (it *IndexBuildTask) PreExecute(ctx context.Context) error {
 		// assume that we can loadIndexMeta later...
 		return nil
 	}
-	it.updateTaskState(indexMeta)
+	it.updateTaskState(indexMeta, nil)
 	return nil
 }
 
