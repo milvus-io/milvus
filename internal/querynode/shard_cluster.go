@@ -301,6 +301,8 @@ func (sc *ShardCluster) SyncSegments(distribution []*querypb.ReplicaSegmentsInfo
 			})
 		}
 	}
+
+	allocations := sc.segments.Clone(filterNothing)
 	sc.mut.Unlock()
 
 	// notify handoff wait online if any
@@ -310,7 +312,7 @@ func (sc *ShardCluster) SyncSegments(distribution []*querypb.ReplicaSegmentsInfo
 
 	sc.mutVersion.Lock()
 	defer sc.mutVersion.Unlock()
-	version := NewShardClusterVersion(sc.nextVersionID.Inc(), sc.segments.Clone(filterNothing))
+	version := NewShardClusterVersion(sc.nextVersionID.Inc(), allocations)
 	sc.versions.Store(version.versionID, version)
 	sc.currentVersion = version
 }
