@@ -46,8 +46,8 @@ entity = gen_entities(1, is_normal=True)
 entities = gen_entities(default_nb, is_normal=True)
 raw_vectors, binary_entities = gen_binary_entities(default_nb)
 default_query, _ = gen_search_vectors_params(field_name, entities, default_top_k, nq)
-index_name1=cf.gen_unique_str("float")
-index_name2=cf.gen_unique_str("varhar")
+index_name1 = cf.gen_unique_str("float")
+index_name2 = cf.gen_unique_str("varhar")
 
 
 class TestCollectionSearchInvalid(TestcaseBase):

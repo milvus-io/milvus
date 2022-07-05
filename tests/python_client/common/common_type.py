@@ -186,6 +186,7 @@ class CheckTasks:
     check_search_results = "check_search_results"
     check_query_results = "check_query_results"
     check_query_empty = "check_query_empty"  # verify that query result is empty
+    check_query_not_empty = "check_query_not_empty"
     check_distance = "check_distance"
     check_delete_compact = "check_delete_compact"
     check_merge_compact = "check_merge_compact"

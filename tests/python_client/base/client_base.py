@@ -122,10 +122,10 @@ class TestcaseBase(Base):
                                       **kwargs)
         return partition_wrap
 
-    def init_collection_general(self, prefix, insert_data=False, nb=ct.default_nb,
+    def init_collection_general(self, prefix="test", insert_data=False, nb=ct.default_nb,
                                 partition_num=0, is_binary=False, is_all_data_type=False,
                                 auto_id=False, dim=ct.default_dim, is_index=False,
-                                primary_field=ct.default_int64_field_name, is_flush=True):
+                                primary_field=ct.default_int64_field_name, is_flush=True, name=None, **kwargs):
         """
         target: create specified collections
         method: 1. create collections (binary/non-binary, default/all data type, auto_id or not)
@@ -138,6 +138,8 @@ class TestcaseBase(Base):
         log.info("Test case of search interface: initialize before test case")
         self._connect()
         collection_name = cf.gen_unique_str(prefix)
+        if name is not None:
+            collection_name = name
         vectors = []
         binary_raw_vectors = []
         insert_ids = []
@@ -149,8 +151,7 @@ class TestcaseBase(Base):
         if is_all_data_type:
             default_schema = cf.gen_collection_schema_all_datatype(auto_id=auto_id, dim=dim, primary_field=primary_field)
         log.info("init_collection_general: collection creation")
-        collection_w = self.init_collection_wrap(name=collection_name,
-                                                 schema=default_schema)
+        collection_w = self.init_collection_wrap(name=collection_name, schema=default_schema, **kwargs)
         # 2 add extra partitions if specified (default is 1 partition named "_default")
         if partition_num > 0:
             cf.gen_partitions(collection_w, partition_num)
@@ -161,8 +162,6 @@ class TestcaseBase(Base):
             if is_flush:
                 assert collection_w.is_empty is False
                 assert collection_w.num_entities == nb
-            log.info("insert_data: inserted data into collection %s (num_entities: %s)"
-                     % (collection_w.name, nb))
             # This condition will be removed after auto index feature
             if not is_index:
                 collection_w.load()

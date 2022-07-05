@@ -112,7 +112,15 @@ def gen_default_collection_schema(description=ct.default_desc, primary_field=ct.
                                                                     primary_field=primary_field, auto_id=auto_id)
     return schema
 
-
+def gen_general_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name,
+                                  auto_id=False, is_binary=False, dim=ct.default_dim):
+    if is_binary:
+        fields = [gen_int64_field(), gen_float_field(), gen_string_field(), gen_binary_vec_field(dim=dim)]
+    else:
+        fields = [gen_int64_field(), gen_float_field(), gen_string_field(), gen_float_vec_field(dim=dim)]
+    schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
+                                                                    primary_field=primary_field, auto_id=auto_id)
+    return schema
 
 def gen_string_pk_default_collection_schema(description=ct.default_desc, primary_field=ct.default_string_field_name,
                                   auto_id=False, dim=ct.default_dim):
@@ -630,8 +638,7 @@ def insert_data(collection_w, nb=3000, is_binary=False, is_all_data_type=False,
     binary_raw_vectors = []
     insert_ids = []
     start = insert_offset
-    log.info("insert_data: inserting data into collection %s (num_entities: %s)"
-             % (collection_w.name, nb))
+    log.info(f"inserted {nb} data into collection {collection_w.name}")
     for i in range(num):
         default_data = gen_default_dataframe_data(nb // num, dim=dim, start=start)
         if is_binary:
