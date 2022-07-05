@@ -66,22 +66,22 @@ type deleteData struct {
 
 // Name returns the name of insertNode
 func (iNode *insertNode) Name() string {
-	return "iNode"
+	return fmt.Sprintf("iNode-%s", iNode.channel)
 }
 
 // Operate handles input messages, to execute insert operations
 func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	if len(in) != 1 {
-		log.Warn("Invalid operate message input in insertNode", zap.Int("input length", len(in)))
+		log.Warn("Invalid operate message input in insertNode", zap.Int("input length", len(in)), zap.String("name", iNode.Name()))
 		return []Msg{}
 	}
 
 	iMsg, ok := in[0].(*insertMsg)
 	if !ok {
 		if in[0] == nil {
-			log.Debug("type assertion failed for insertMsg because it's nil")
+			log.Debug("type assertion failed for insertMsg because it's nil", zap.String("name", iNode.Name()))
 		} else {
-			log.Warn("type assertion failed for insertMsg", zap.String("name", reflect.TypeOf(in[0]).Name()))
+			log.Warn("type assertion failed for insertMsg", zap.String("msgType", reflect.TypeOf(in[0]).Name()), zap.String("name", iNode.Name()))
 		}
 		return []Msg{}
 	}
