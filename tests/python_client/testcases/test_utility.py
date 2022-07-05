@@ -244,20 +244,22 @@ class TestUtilityParams(TestcaseBase):
                                            check_task=CheckTasks.err_res, check_items=err_msg)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="issue to be discussed")
     @pytest.mark.parametrize("partition_names", [[ct.default_tag], [ct.default_partition_name, ct.default_tag]])
     def test_loading_progress_not_existed_partitions(self, partition_names):
         """
         target: test loading progress with not existed partitions
         method: input all or part not existed partition names
-        expected: raise exception
+        expected: load progress shows successfully with "not_loaded_partitions"
         """
         collection_w = self.init_collection_general(prefix)[0]
         log.debug(collection_w.num_entities)
         collection_w.load()
-        err_msg = {ct.err_code: 1, ct.err_msg: f"partitionID of partitionName:{ct.default_tag} can not be found"}
-        self.utility_wrap.loading_progress(collection_w.name, partition_names,
-                                           check_task=CheckTasks.err_res, check_items=err_msg)
+        res = self.utility_wrap.loading_progress(collection_w.name, partition_names)[0]
+        load_progress = int(100*(len(partition_names)-1)/len(partition_names))
+        exp_res = {loading_progress: f'{load_progress}%', num_loaded_partitions: len(partition_names)-1,
+                   not_loaded_partitions: [ct.default_tag]}
+
+        assert res == exp_res
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_wait_for_loading_collection_not_existed(self):
