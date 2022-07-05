@@ -1044,7 +1044,7 @@ class TestCompactionOperation(TestcaseBase):
 
         # compact
         collection_w.compact()
-        collection_w.wait_for_compaction_completed(timeout=1)
+        collection_w.wait_for_compaction_completed()
         c_plans = collection_w.get_compaction_plans()[0]
 
         # Actually no merged
@@ -1074,7 +1074,7 @@ class TestCompactionOperation(TestcaseBase):
         # compact
         sleep(ct.compact_retention_duration + 1)
         collection_w.compact()
-        collection_w.wait_for_compaction_completed(timeout=1)
+        collection_w.wait_for_compaction_completed()
         collection_w.get_compaction_plans(check_task=CheckTasks.check_delete_compact,
                                           check_items={"plans_num": shards_num})
 
