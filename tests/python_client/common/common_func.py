@@ -386,11 +386,18 @@ def gen_invaild_search_params_type():
 
 def gen_search_param(index_type, metric_type="L2"):
     search_params = []
-    if index_type in ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_SQ8H", "IVF_PQ"] \
-            or index_type in ["BIN_FLAT", "BIN_IVF_FLAT"]:
+    if index_type in ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_SQ8H", "IVF_PQ"]:
         for nprobe in [64, 128]:
             ivf_search_params = {"metric_type": metric_type, "params": {"nprobe": nprobe}}
             search_params.append(ivf_search_params)
+    elif index_type in ["BIN_FLAT", "BIN_IVF_FLAT"]:
+        if metric_type not in ct.binary_metrics:
+            log.error("Metric type error: binary index only supports distance type in (%s)" % ct.binary_metrics)
+            # default metric type for binary index
+            metric_type = "JACCARD"
+        for nprobe in [64, 128]:
+            binary_search_params = {"metric_type": metric_type, "params": {"nprobe": nprobe}}
+            search_params.append(binary_search_params)
     elif index_type in ["HNSW", "RHNSW_FLAT", "RHNSW_PQ", "RHNSW_SQ"]:
         for ef in [64, 32768]:
             hnsw_search_param = {"metric_type": metric_type, "params": {"ef": ef}}
