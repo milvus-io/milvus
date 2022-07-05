@@ -519,4 +519,4 @@ print(f"\nList connections:")
 print(connections.list_connections())
 ```
 
-If you want to know more details of this case, please refer to [example_tls.py](https://github.com/milvus-io/pymilvus/blob/master/examples/example_tls.py).
+If you want to know more details of this case, please refer to [example_tls1.py](https://github.com/milvus-io/pymilvus/blob/master/examples/example_tls1.py) and [example_tls2.py](https://github.com/milvus-io/pymilvus/blob/master/examples/example_tls2.py).
