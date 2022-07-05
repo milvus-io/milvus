@@ -12,6 +12,7 @@
 #pragma once
 
 #include <limits>
+#include <utility>
 #include <vector>
 #include "common/Types.h"
 
@@ -20,12 +21,21 @@ namespace milvus::query {
 class SubSearchResult {
  public:
     SubSearchResult(int64_t num_queries, int64_t topk, const knowhere::MetricType& metric_type, int64_t round_decimal)
-        : metric_type_(metric_type),
-          num_queries_(num_queries),
+        : num_queries_(num_queries),
           topk_(topk),
+          round_decimal_(round_decimal),
+          metric_type_(metric_type),
           seg_offsets_(num_queries * topk, -1),
-          distances_(num_queries * topk, init_value(metric_type)),
-          round_decimal_(round_decimal) {
+          distances_(num_queries * topk, init_value(metric_type)) {
+    }
+
+    SubSearchResult(SubSearchResult&& other)
+        : num_queries_(other.num_queries_),
+          topk_(other.topk_),
+          round_decimal_(other.round_decimal_),
+          metric_type_(other.metric_type_),
+          seg_offsets_(std::move(other.seg_offsets_)),
+          distances_(std::move(other.distances_)) {
     }
 
  public:
@@ -87,9 +97,6 @@ class SubSearchResult {
 
     void
     round_values();
-
-    static SubSearchResult
-    merge(const SubSearchResult& left, const SubSearchResult& right);
 
     void
     merge(const SubSearchResult& sub_result);

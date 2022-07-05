@@ -99,7 +99,6 @@ FloatSearch(const segcore::SegmentGrowingImpl& segment,
         }
         final_qr.merge(sub_qr);
     }
-    current_chunk_id = max_chunk;
     results.distances_ = std::move(final_qr.mutable_distances());
     results.seg_offsets_ = std::move(final_qr.mutable_seg_offsets());
     results.unity_topK_ = topk;

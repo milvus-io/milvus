@@ -68,13 +68,6 @@ SubSearchResult::merge(const SubSearchResult& sub_result) {
     }
 }
 
-SubSearchResult
-SubSearchResult::merge(const SubSearchResult& left, const SubSearchResult& right) {
-    auto left_copy = left;
-    left_copy.merge(right);
-    return left_copy;
-}
-
 void
 SubSearchResult::round_values() {
     if (round_decimal_ == -1)
