@@ -40,22 +40,22 @@ type filterDeleteNode struct {
 
 // Name returns the name of filterDeleteNode
 func (fddNode *filterDeleteNode) Name() string {
-	return fmt.Sprintf("fdNode-%d", fddNode.collectionID)
+	return fmt.Sprintf("fdNode-%s", fddNode.channel)
 }
 
 // Operate handles input messages, to filter invalid delete messages
 func (fddNode *filterDeleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	if len(in) != 1 {
-		log.Warn("Invalid operate message input in filterDDNode", zap.Int("input length", len(in)))
+		log.Warn("Invalid operate message input in filterDDNode", zap.Int("input length", len(in)), zap.String("name", fddNode.Name()))
 		return []Msg{}
 	}
 
 	msgStreamMsg, ok := in[0].(*MsgStreamMsg)
 	if !ok {
 		if in[0] == nil {
-			log.Debug("type assertion failed for MsgStreamMsg because it's nil")
+			log.Debug("type assertion failed for MsgStreamMsg because it's nil", zap.String("name", fddNode.Name()))
 		} else {
-			log.Warn("type assertion failed for MsgStreamMsg", zap.String("name", reflect.TypeOf(in[0]).Name()))
+			log.Warn("type assertion failed for MsgStreamMsg", zap.String("msgType", reflect.TypeOf(in[0]).Name()), zap.String("name", fddNode.Name()))
 		}
 		return []Msg{}
 	}

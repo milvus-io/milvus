@@ -37,22 +37,22 @@ type serviceTimeNode struct {
 
 // Name returns the name of serviceTimeNode
 func (stNode *serviceTimeNode) Name() string {
-	return fmt.Sprintf("stNode-%d-%s", stNode.collectionID, stNode.vChannel)
+	return fmt.Sprintf("stNode-%s", stNode.vChannel)
 }
 
 // Operate handles input messages, to execute insert operations
 func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	if len(in) != 1 {
-		log.Warn("Invalid operate message input in serviceTimeNode, input length = ", zap.Int("input node", len(in)))
+		log.Warn("Invalid operate message input in serviceTimeNode, input length = ", zap.Int("input node", len(in)), zap.String("name", stNode.Name()))
 		return []Msg{}
 	}
 
 	serviceTimeMsg, ok := in[0].(*serviceTimeMsg)
 	if !ok {
 		if in[0] == nil {
-			log.Debug("type assertion failed for serviceTimeMsg because it's nil")
+			log.Debug("type assertion failed for serviceTimeMsg because it's nil", zap.String("name", stNode.Name()))
 		} else {
-			log.Warn("type assertion failed for serviceTimeMsg", zap.String("name", reflect.TypeOf(in[0]).Name()))
+			log.Warn("type assertion failed for serviceTimeMsg", zap.String("msgType", reflect.TypeOf(in[0]).Name()), zap.String("name", stNode.Name()))
 		}
 		return []Msg{}
 	}
