@@ -641,7 +641,8 @@ func (s *Server) getStaleSegmentsInfo(ch string) []*SegmentInfo {
 		return isSegmentHealthy(info) &&
 			info.GetInsertChannel() == ch &&
 			!info.lastFlushTime.IsZero() &&
-			time.Since(info.lastFlushTime).Minutes() >= segmentTimedFlushDuration
+			time.Since(info.lastFlushTime).Minutes() >= segmentTimedFlushDuration &&
+			info.GetNumOfRows() != 0
 	})
 }
 
