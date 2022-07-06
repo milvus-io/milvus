@@ -41,8 +41,8 @@ func TestGarbageCollector_Start(t *testing.T) {
 			removeWithPrefix: func(s string) error {
 				return nil
 			},
-			listWithPrefix: func(s string, recursive bool) ([]string, error) {
-				return []string{}, nil
+			listWithPrefix: func(s string, recursive bool) ([]string, []time.Time, error) {
+				return []string{}, []time.Time{}, nil
 			},
 			remove: func(s string) error {
 				return nil
@@ -83,11 +83,11 @@ func TestGarbageCollector_recycleUnusedIndexFiles(t *testing.T) {
 				removeWithPrefix: func(s string) error {
 					return fmt.Errorf("error")
 				},
-				listWithPrefix: func(s string, recursive bool) ([]string, error) {
+				listWithPrefix: func(s string, recursive bool) ([]string, []time.Time, error) {
 					if !recursive {
-						return []string{"a/b/1/", "a/b/2/"}, nil
+						return []string{"a/b/1/", "a/b/2/"}, []time.Time{{}, {}}, nil
 					}
-					return []string{"a/b/1/c", "a/b/2/d"}, nil
+					return []string{"a/b/1/c", "a/b/2/d"}, []time.Time{{}, {}}, nil
 				},
 				remove: func(s string) error {
 					return nil
@@ -130,11 +130,11 @@ func TestGarbageCollector_recycleUnusedIndexFiles(t *testing.T) {
 				removeWithPrefix: func(s string) error {
 					return nil
 				},
-				listWithPrefix: func(s string, recursive bool) ([]string, error) {
+				listWithPrefix: func(s string, recursive bool) ([]string, []time.Time, error) {
 					if !recursive {
-						return nil, fmt.Errorf("error")
+						return nil, nil, fmt.Errorf("error")
 					}
-					return []string{"a/b/1/c", "a/b/2/d"}, nil
+					return []string{"a/b/1/c", "a/b/2/d"}, []time.Time{{}, {}}, nil
 				},
 				remove: func(s string) error {
 					return nil
@@ -177,11 +177,11 @@ func TestGarbageCollector_recycleUnusedIndexFiles(t *testing.T) {
 				removeWithPrefix: func(s string) error {
 					return nil
 				},
-				listWithPrefix: func(s string, recursive bool) ([]string, error) {
+				listWithPrefix: func(s string, recursive bool) ([]string, []time.Time, error) {
 					if !recursive {
-						return []string{"a/b/c/"}, nil
+						return []string{"a/b/c/"}, []time.Time{{}}, nil
 					}
-					return []string{"a/b/1/c", "a/b/2/d"}, nil
+					return []string{"a/b/1/c", "a/b/2/d"}, []time.Time{{}, {}}, nil
 				},
 				remove: func(s string) error {
 					return nil
@@ -224,11 +224,11 @@ func TestGarbageCollector_recycleUnusedIndexFiles(t *testing.T) {
 				removeWithPrefix: func(s string) error {
 					return nil
 				},
-				listWithPrefix: func(s string, recursive bool) ([]string, error) {
+				listWithPrefix: func(s string, recursive bool) ([]string, []time.Time, error) {
 					if !recursive {
-						return []string{"a/b/1/"}, nil
+						return []string{"a/b/1/"}, []time.Time{{}}, nil
 					}
-					return nil, fmt.Errorf("error")
+					return nil, nil, fmt.Errorf("error")
 				},
 				remove: func(s string) error {
 					return nil
@@ -271,11 +271,11 @@ func TestGarbageCollector_recycleUnusedIndexFiles(t *testing.T) {
 				removeWithPrefix: func(s string) error {
 					return nil
 				},
-				listWithPrefix: func(s string, recursive bool) ([]string, error) {
+				listWithPrefix: func(s string, recursive bool) ([]string, []time.Time, error) {
 					if !recursive {
-						return []string{"a/b/1/"}, nil
+						return []string{"a/b/1/"}, []time.Time{{}}, nil
 					}
-					return []string{"a/b/1/c"}, nil
+					return []string{"a/b/1/c"}, []time.Time{{}}, nil
 				},
 				remove: func(s string) error {
 					return fmt.Errorf("error")
@@ -319,11 +319,11 @@ func TestGarbageCollector_recycleUnusedIndexFiles(t *testing.T) {
 				removeWithPrefix: func(s string) error {
 					return nil
 				},
-				listWithPrefix: func(s string, recursive bool) ([]string, error) {
+				listWithPrefix: func(s string, recursive bool) ([]string, []time.Time, error) {
 					if !recursive {
-						return []string{"a/b/1/"}, nil
+						return []string{"a/b/1/"}, []time.Time{{}}, nil
 					}
-					return []string{"a/b/1/c"}, nil
+					return []string{"a/b/1/c"}, []time.Time{{}}, nil
 				},
 				remove: func(s string) error {
 					return fmt.Errorf("error")
