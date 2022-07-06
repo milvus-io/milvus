@@ -81,3 +81,7 @@ venv/
 
 # docker compose volumes
 deployments/docker/*/volumes
+
+# rocksdb
+cwrapper_rocksdb_build/
+internal/kv/rocksdb/cwrapper/
