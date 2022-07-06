@@ -13,6 +13,7 @@ package storage
 
 import (
 	"io"
+	"time"
 
 	"golang.org/x/exp/mmap"
 )
@@ -41,7 +42,7 @@ type ChunkManager interface {
 	Reader(filePath string) (FileReader, error)
 	// MultiRead reads @filePath and returns content.
 	MultiRead(filePaths []string) ([][]byte, error)
-	ListWithPrefix(prefix string, recursive bool) ([]string, error)
+	ListWithPrefix(prefix string, recursive bool) ([]string, []time.Time, error)
 	// ReadWithPrefix reads files with same @prefix and returns contents.
 	ReadWithPrefix(prefix string) ([]string, [][]byte, error)
 	Mmap(filePath string) (*mmap.ReaderAt, error)

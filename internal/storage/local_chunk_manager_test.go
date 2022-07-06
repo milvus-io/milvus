@@ -392,14 +392,16 @@ func TestLocalCM(t *testing.T) {
 		assert.NoError(t, err)
 
 		pathPrefix := path.Join(testPrefix, "a")
-		r, err := testCM.ListWithPrefix(pathPrefix, true)
+		r, m, err := testCM.ListWithPrefix(pathPrefix, true)
 		assert.NoError(t, err)
 		assert.Equal(t, len(r), 2)
+		assert.Equal(t, len(m), 2)
 
 		testCM.RemoveWithPrefix(testPrefix)
-		r, err = testCM.ListWithPrefix(pathPrefix, true)
+		r, m, err = testCM.ListWithPrefix(pathPrefix, true)
 		assert.NoError(t, err)
 		assert.Equal(t, len(r), 0)
+		assert.Equal(t, len(m), 0)
 	})
 
 	t.Run("test ListWithPrefix", func(t *testing.T) {
@@ -425,27 +427,31 @@ func TestLocalCM(t *testing.T) {
 		err = testCM.Write(key, value)
 		assert.NoError(t, err)
 
-		dirs, err := testCM.ListWithPrefix(testPrefix+"/", false)
+		dirs, mods, err := testCM.ListWithPrefix(testPrefix+"/", false)
 		assert.Nil(t, err)
 		fmt.Println(dirs)
 		assert.Equal(t, 3, len(dirs))
+		assert.Equal(t, 3, len(mods))
 
 		testPrefix2 := path.Join(testPrefix, "a")
-		dirs, err = testCM.ListWithPrefix(testPrefix2, false)
+		dirs, mods, err = testCM.ListWithPrefix(testPrefix2, false)
 		assert.Nil(t, err)
 		assert.Equal(t, 2, len(dirs))
+		assert.Equal(t, 2, len(mods))
 
-		dirs, err = testCM.ListWithPrefix(testPrefix2, false)
+		dirs, mods, err = testCM.ListWithPrefix(testPrefix2, false)
 		assert.Nil(t, err)
 		assert.Equal(t, 2, len(dirs))
+		assert.Equal(t, 2, len(mods))
 
 		err = testCM.RemoveWithPrefix(testPrefix)
 		assert.NoError(t, err)
 
-		dirs, err = testCM.ListWithPrefix(testPrefix, false)
+		dirs, mods, err = testCM.ListWithPrefix(testPrefix, false)
 		assert.NoError(t, err)
 		fmt.Println(dirs)
 		// dir still exist
 		assert.Equal(t, 1, len(dirs))
+		assert.Equal(t, 1, len(mods))
 	})
 }
