@@ -4,7 +4,7 @@ int total_timeout_minutes = 120
 int e2e_timeout_seconds = 70 * 60
 def imageTag=''
 int case_timeout_seconds = 10 * 60
-def chart_version='3.0.19'
+def chart_version='3.0.27'
 pipeline {
     options {
         timestamps()
