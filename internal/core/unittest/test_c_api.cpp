@@ -87,6 +87,32 @@ generate_data(int N) {
     }
     return std::make_tuple(raw_data, timestamps, uids);
 }
+std::string
+generate_max_float_query_data(int all_nq, int max_float_nq) {
+    assert(max_float_nq <= all_nq);
+    namespace ser = milvus::proto::common;
+    int dim = DIM;
+    ser::PlaceholderGroup raw_group;
+    auto value = raw_group.add_placeholders();
+    value->set_tag("$0");
+    value->set_type(ser::PlaceholderType::FloatVector);
+    for (int i = 0; i < all_nq; ++i) {
+        std::vector<float> vec;
+        if (i < max_float_nq) {
+            for (int d = 0; d < dim; ++d) {
+                vec.push_back(std::numeric_limits<float>::max());
+            }
+        } else {
+            for (int d = 0; d < dim; ++d) {
+                vec.push_back(1);
+            }
+        }
+        value->add_values(vec.data(), vec.size() * sizeof(float));
+    }
+    auto blob = raw_group.SerializeAsString();
+    return blob;
+
+}
 
 std::string
 generate_query_data(int nq) {
@@ -1015,6 +1041,83 @@ CheckSearchResultDuplicate(const std::vector<CSearchResult>& results) {
     //     cnt += pk_set.size();
     // }
     // assert(cnt == topk * num_queries);
+}
+
+TEST(CApiTest, ReudceNullResult) {
+    auto collection = NewCollection(get_default_schema_config());
+    auto segment = NewSegment(collection, Growing, -1);
+    auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
+    int N = 10000;
+    auto dataset = DataGen(schema, N);
+    int64_t offset;
+
+    PreInsert(segment, N, &offset);
+    auto insert_data = serialize(dataset.raw_);
+    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
+                          insert_data.size());
+    assert(ins_res.error_code == Success);
+
+    const char* dsl_string = R"(
+    {
+        "bool": {
+            "vector": {
+                "fakevec": {
+                    "metric_type": "L2",
+                    "params": {
+                        "nprobe": 10
+                    },
+                    "query": "$0",
+                    "topk": 10,
+                    "round_decimal": 3
+               }
+            }
+        }
+   })";
+
+    int num_queries = 10;
+    int topK = 10;
+
+    auto blob = generate_max_float_query_data(num_queries, num_queries / 2);
+
+    void* plan = nullptr;
+    auto status = CreateSearchPlan(collection, dsl_string, &plan);
+    assert(status.error_code == Success);
+
+    void* placeholderGroup = nullptr;
+    status = ParsePlaceholderGroup(plan, blob.data(), blob.length(), &placeholderGroup);
+    assert(status.error_code == Success);
+
+    std::vector<CPlaceholderGroup> placeholderGroups;
+    placeholderGroups.push_back(placeholderGroup);
+    dataset.timestamps_.clear();
+    dataset.timestamps_.push_back(1);
+
+    {
+        auto slice_nqs = std::vector<int32_t>{10};
+        auto slice_topKs = std::vector<int32_t>{1};
+        std::vector<CSearchResult> results;
+        CSearchResult res;
+        status = Search(segment, plan, placeholderGroup, dataset.timestamps_[0], &res, -1);
+        assert(status.error_code == Success);
+        results.push_back(res);
+        CSearchResultDataBlobs cSearchResultData;
+        status = ReduceSearchResultsAndFillData(&cSearchResultData, plan, results.data(), results.size(),
+                                                slice_nqs.data(), slice_topKs.data(), slice_nqs.size());
+        assert(status.error_code == Success);
+    
+        auto search_result = (SearchResult*)results[0];
+        auto size = search_result->result_offsets_.size();
+        EXPECT_EQ(size, num_queries / 2);
+
+        DeleteSearchResult(res);
+
+    }
+
+    DeleteSearchPlan(plan);
+    DeletePlaceholderGroup(placeholderGroup);
+    DeleteCollection(collection);
+    DeleteSegment(segment);
+
 }
 
 TEST(CApiTest, ReduceRemoveDuplicates) {
