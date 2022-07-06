@@ -34,7 +34,7 @@ func TestChannelEventManager(t *testing.T) {
 			ran = true
 			ch <- struct{}{}
 			return nil
-		}, func(name string) bool { return true }, time.Millisecond*10)
+		}, func(name string) {}, time.Millisecond*10)
 
 		em.Run()
 		em.handleEvent(event{
@@ -56,7 +56,7 @@ func TestChannelEventManager(t *testing.T) {
 			ran = true
 			ch <- struct{}{}
 			return nil
-		}, func(name string) bool { return true }, time.Millisecond*10)
+		}, func(name string) {}, time.Millisecond*10)
 
 		em.Run()
 		em.handleEvent(event{
@@ -89,7 +89,7 @@ func TestChannelEventManager(t *testing.T) {
 			}
 
 			return errors.New("mocked error")
-		}, func(name string) bool { return true }, time.Millisecond*10)
+		}, func(name string) {}, time.Millisecond*10)
 
 		em.Run()
 		em.handleEvent(event{
@@ -107,7 +107,7 @@ func TestChannelEventManager(t *testing.T) {
 	t.Run("retry until timeout", func(t *testing.T) {
 		em := newChannelEventManager(func(info *datapb.ChannelWatchInfo, version int64) error {
 			return errors.New("mocked error")
-		}, func(name string) bool { return true }, time.Millisecond*100)
+		}, func(name string) {}, time.Millisecond*100)
 
 		ch := make(chan struct{}, 1)
 
@@ -136,7 +136,7 @@ func TestChannelEventManager(t *testing.T) {
 		ch := make(chan struct{}, 1)
 		em := newChannelEventManager(func(info *datapb.ChannelWatchInfo, version int64) error {
 			return errors.New("mocked error")
-		}, func(name string) bool { return true }, time.Millisecond*10)
+		}, func(name string) {}, time.Millisecond*10)
 
 		go func() {
 			ddl := time.Now().Add(time.Minute)
@@ -172,10 +172,9 @@ func TestChannelEventManager(t *testing.T) {
 			func(info *datapb.ChannelWatchInfo, version int64) error {
 				return errors.New("mocked error")
 			},
-			func(name string) bool {
+			func(name string) {
 				ran = true
 				ch <- struct{}{}
-				return true
 			},
 			time.Millisecond*10,
 		)
@@ -212,9 +211,7 @@ func TestChannelEventManager(t *testing.T) {
 				}
 				return errors.New("mocked error")
 			},
-			func(name string) bool {
-				return false
-			},
+			func(name string) {},
 			time.Millisecond*10)
 		em.Run()
 		em.handleEvent(event{
@@ -253,9 +250,7 @@ func TestChannelEventManager(t *testing.T) {
 				func(info *datapb.ChannelWatchInfo, version int64) error {
 					return errors.New("mocked error")
 				},
-				func(name string) bool {
-					return false
-				},
+				func(name string) {},
 				time.Millisecond*100,
 			)
 

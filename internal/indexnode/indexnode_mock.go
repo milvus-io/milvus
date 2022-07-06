@@ -19,6 +19,7 @@ package indexnode
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 
 	"go.uber.org/zap"
@@ -89,10 +90,14 @@ func (inm *Mock) buildIndexTask() {
 					if err != nil {
 						return err
 					}
-					err = inm.etcdKV.CompareVersionAndSwap(req.MetaPath, versions[0],
-						string(metaData))
+					success, err := inm.etcdKV.CompareVersionAndSwap(req.MetaPath, versions[0], string(metaData))
 					if err != nil {
+						// TODO, we don't need to reload if it is just etcd error
+						log.Warn("failed to compare and swap in etcd", zap.Int64("buildID", req.IndexBuildID), zap.Error(err))
 						return err
+					}
+					if !success {
+						return fmt.Errorf("failed to save index meta in etcd, buildId: %d, source version: %d", req.IndexBuildID, versions[0])
 					}
 					return nil
 				}
@@ -117,10 +122,15 @@ func (inm *Mock) buildIndexTask() {
 					if err != nil {
 						return err
 					}
-					err = inm.etcdKV.CompareVersionAndSwap(req.MetaPath, versions[0],
-						string(metaData))
+
+					success, err := inm.etcdKV.CompareVersionAndSwap(req.MetaPath, versions[0], string(metaData))
 					if err != nil {
+						// TODO, we don't need to reload if it is just etcd error
+						log.Warn("failed to compare and swap in etcd", zap.Int64("buildID", req.IndexBuildID), zap.Error(err))
 						return err
+					}
+					if !success {
+						return fmt.Errorf("failed to save index meta in etcd, buildId: %d, source version: %d", req.IndexBuildID, versions[0])
 					}
 
 					indexMeta2 := indexpb.IndexMeta{}
@@ -139,10 +149,14 @@ func (inm *Mock) buildIndexTask() {
 					if err != nil {
 						return err
 					}
-					err = inm.etcdKV.CompareVersionAndSwap(req.MetaPath, versions2[0],
-						string(metaData2))
+					success, err = inm.etcdKV.CompareVersionAndSwap(req.MetaPath, versions2[0], string(metaData2))
 					if err != nil {
+						// TODO, we don't need to reload if it is just etcd error
+						log.Warn("failed to compare and swap in etcd", zap.Int64("buildID", req.IndexBuildID), zap.Error(err))
 						return err
+					}
+					if !success {
+						return fmt.Errorf("failed to save index meta in etcd, buildId: %d, source version: %d", req.IndexBuildID, versions[0])
 					}
 					return nil
 				}
