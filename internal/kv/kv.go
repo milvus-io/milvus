@@ -73,8 +73,8 @@ type MetaKv interface {
 	SaveWithIgnoreLease(key, value string) error
 	Grant(ttl int64) (id clientv3.LeaseID, err error)
 	KeepAlive(id clientv3.LeaseID) (<-chan *clientv3.LeaseKeepAliveResponse, error)
-	CompareValueAndSwap(key, value, target string, opts ...clientv3.OpOption) error
-	CompareVersionAndSwap(key string, version int64, target string, opts ...clientv3.OpOption) error
+	CompareValueAndSwap(key, value, target string, opts ...clientv3.OpOption) (bool, error)
+	CompareVersionAndSwap(key string, version int64, target string, opts ...clientv3.OpOption) (bool, error)
 }
 
 // SnapShotKV is TxnKV for snapshot data. It must save timestamp.

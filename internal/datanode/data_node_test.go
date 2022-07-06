@@ -757,10 +757,9 @@ func TestWatchChannel(t *testing.T) {
 				chPut <- struct{}{}
 				return r
 			},
-			func(vChan string) bool {
+			func(vChan string) {
 				node.handleDeleteEvent(vChan)
 				chDel <- struct{}{}
-				return true
 			}, time.Millisecond*100,
 		)
 		node.eventManagerMap.Store(ch, m)
@@ -795,10 +794,9 @@ func TestWatchChannel(t *testing.T) {
 				chPut <- struct{}{}
 				return r
 			},
-			func(vChan string) bool {
+			func(vChan string) {
 				node.handleDeleteEvent(vChan)
 				chDel <- struct{}{}
-				return true
 			}, time.Millisecond*100,
 		)
 		node.eventManagerMap.Store(ch, m)
