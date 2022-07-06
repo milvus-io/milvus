@@ -92,7 +92,7 @@ func (tt *testTask) execute(ctx context.Context) error {
 			loadTask := &loadSegmentTask{
 				baseTask: &baseTask{
 					ctx:              tt.ctx,
-					condition:        newTaskCondition(tt.ctx),
+					condition:        newTaskCondition(),
 					triggerCondition: tt.triggerCondition,
 				},
 				LoadSegmentsRequest: req,
@@ -107,7 +107,7 @@ func (tt *testTask) execute(ctx context.Context) error {
 		childTask := &loadSegmentTask{
 			baseTask: &baseTask{
 				ctx:              tt.ctx,
-				condition:        newTaskCondition(tt.ctx),
+				condition:        newTaskCondition(),
 				triggerCondition: tt.triggerCondition,
 			},
 			LoadSegmentsRequest: &querypb.LoadSegmentsRequest{
@@ -126,7 +126,7 @@ func (tt *testTask) execute(ctx context.Context) error {
 		childTask := &watchDmChannelTask{
 			baseTask: &baseTask{
 				ctx:              tt.ctx,
-				condition:        newTaskCondition(tt.ctx),
+				condition:        newTaskCondition(),
 				triggerCondition: tt.triggerCondition,
 			},
 			WatchDmChannelsRequest: &querypb.WatchDmChannelsRequest{
@@ -165,7 +165,7 @@ func TestWatchQueryChannel_ClearEtcdInfoAfterAssignedNodeDown(t *testing.T) {
 	testTask := &testTask{
 		baseTask: baseTask{
 			ctx:              baseCtx,
-			condition:        newTaskCondition(baseCtx),
+			condition:        newTaskCondition(),
 			triggerCondition: querypb.TriggerCondition_GrpcRequest,
 		},
 		baseMsg: &commonpb.MsgBase{
@@ -498,7 +498,7 @@ func Test_saveInternalTaskToEtcd(t *testing.T) {
 	testTask := &testTask{
 		baseTask: baseTask{
 			ctx:              ctx,
-			condition:        newTaskCondition(ctx),
+			condition:        newTaskCondition(),
 			triggerCondition: querypb.TriggerCondition_GrpcRequest,
 			taskID:           100,
 		},
