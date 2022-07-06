@@ -42,8 +42,8 @@ import (
 // revision: The number of times IndexMeta has been changed in etcd. It's the same as Event.Kv.Version in etcd.
 // indexMeta: A structure that records the state of the index defined by proto.
 type Meta struct {
-	indexMeta *indexpb.IndexMeta
-	revision  int64
+	indexMeta    *indexpb.IndexMeta
+	indexVersion int64
 }
 
 // metaTable records the mapping of IndexBuildID to Meta.
@@ -91,8 +91,8 @@ func (mt *metaTable) reloadFromKV() error {
 		}
 
 		meta := &Meta{
-			indexMeta: &indexMeta,
-			revision:  versions[i],
+			indexMeta:    &indexMeta,
+			indexVersion: versions[i],
 		}
 		mt.indexBuildID2Meta[indexMeta.IndexBuildID] = *meta
 	}
@@ -107,15 +107,19 @@ func (mt *metaTable) saveIndexMeta(meta *Meta) error {
 		return err
 	}
 	key := path.Join(indexFilePrefix, strconv.FormatInt(meta.indexMeta.IndexBuildID, 10))
-	err = mt.client.CompareVersionAndSwap(key, meta.revision, string(value))
-	log.Debug("IndexCoord metaTable saveIndexMeta ", zap.String("key", key), zap.Error(err))
+	success, err := mt.client.CompareVersionAndSwap(key, meta.indexVersion, string(value))
 	if err != nil {
+		// TODO, we don't need to reload if it is just etcd error
+		log.Warn("failed to save index meta in etcd", zap.Int64("buildID", meta.indexMeta.IndexBuildID), zap.Error(err))
 		return err
 	}
-	meta.revision = meta.revision + 1
+	if !success {
+		log.Warn("failed to save index meta in etcd because version compare failure", zap.Int64("buildID", meta.indexMeta.IndexBuildID), zap.Any("index", meta.indexMeta))
+		return fmt.Errorf("failed to save index meta in etcd, buildId: %d, source version: %d", meta.indexMeta.IndexBuildID, meta.indexVersion)
+	}
+	meta.indexVersion = meta.indexVersion + 1
 	mt.indexBuildID2Meta[meta.indexMeta.IndexBuildID] = *meta
-	log.Debug("IndexCoord metaTable saveIndexMeta success", zap.Any("meta.revision", meta.revision))
-
+	log.Info("IndexCoord metaTable saveIndexMeta success", zap.Int64("buildID", meta.indexMeta.IndexBuildID), zap.Any("meta.revision", meta.indexVersion))
 	return nil
 }
 
@@ -141,8 +145,8 @@ func (mt *metaTable) reloadMeta(indexBuildID UniqueID) (*Meta, error) {
 	//	return nil, nil
 	//}
 	m := &Meta{
-		revision:  version[0],
-		indexMeta: im,
+		indexVersion: version[0],
+		indexMeta:    im,
 	}
 
 	return m, nil
@@ -165,7 +169,7 @@ func (mt *metaTable) AddIndex(indexBuildID UniqueID, req *indexpb.BuildIndexRequ
 			NodeID:       0,
 			Version:      0,
 		},
-		revision: 0,
+		indexVersion: 0,
 	}
 	metrics.IndexCoordIndexTaskCounter.WithLabelValues(metrics.UnissuedIndexTaskLabel).Inc()
 	return mt.saveIndexMeta(meta)
@@ -298,8 +302,8 @@ func (mt *metaTable) MarkIndexAsDeletedByBuildIDs(buildIDs []UniqueID) error {
 	for _, buildID := range buildIDs {
 		if meta, ok := mt.indexBuildID2Meta[buildID]; ok {
 			clonedMeta := &Meta{
-				indexMeta: proto.Clone(meta.indexMeta).(*indexpb.IndexMeta),
-				revision:  meta.revision,
+				indexMeta:    proto.Clone(meta.indexMeta).(*indexpb.IndexMeta),
+				indexVersion: meta.indexVersion,
 			}
 			clonedMeta.indexMeta.MarkDeleted = true
 			// marshal inside
@@ -439,10 +443,10 @@ func (mt *metaTable) GetUnusedIndexFiles(limit int) []Meta {
 	var metas []Meta
 	for _, meta := range mt.indexBuildID2Meta {
 		if meta.indexMeta.State == commonpb.IndexState_Finished && (meta.indexMeta.MarkDeleted || !meta.indexMeta.Recycled) {
-			metas = append(metas, Meta{indexMeta: proto.Clone(meta.indexMeta).(*indexpb.IndexMeta), revision: meta.revision})
+			metas = append(metas, Meta{indexMeta: proto.Clone(meta.indexMeta).(*indexpb.IndexMeta), indexVersion: meta.indexVersion})
 		}
 		if meta.indexMeta.State == commonpb.IndexState_Unissued && meta.indexMeta.MarkDeleted {
-			metas = append(metas, Meta{indexMeta: proto.Clone(meta.indexMeta).(*indexpb.IndexMeta), revision: meta.revision})
+			metas = append(metas, Meta{indexMeta: proto.Clone(meta.indexMeta).(*indexpb.IndexMeta), indexVersion: meta.indexVersion})
 		}
 		if len(metas) >= limit {
 			return metas
@@ -473,7 +477,7 @@ func (mt *metaTable) GetUnassignedTasks(onlineNodeIDs []int64) []Meta {
 			continue
 		}
 		if meta.indexMeta.State == commonpb.IndexState_Unissued {
-			metas = append(metas, Meta{indexMeta: proto.Clone(meta.indexMeta).(*indexpb.IndexMeta), revision: meta.revision})
+			metas = append(metas, Meta{indexMeta: proto.Clone(meta.indexMeta).(*indexpb.IndexMeta), indexVersion: meta.indexVersion})
 			continue
 		}
 		if meta.indexMeta.State == commonpb.IndexState_Finished || meta.indexMeta.State == commonpb.IndexState_Failed {
@@ -488,7 +492,7 @@ func (mt *metaTable) GetUnassignedTasks(onlineNodeIDs []int64) []Meta {
 		}
 		if !alive {
 			log.Info("Reassign because node no longer alive", zap.Any("onlineID", onlineNodeIDs), zap.Int64("nodeID", meta.indexMeta.NodeID))
-			metas = append(metas, Meta{indexMeta: proto.Clone(meta.indexMeta).(*indexpb.IndexMeta), revision: meta.revision})
+			metas = append(metas, Meta{indexMeta: proto.Clone(meta.indexMeta).(*indexpb.IndexMeta), indexVersion: meta.indexVersion})
 		}
 	}
 	return sortMetaPolicy(metas)
@@ -564,18 +568,18 @@ func (mt *metaTable) HasSameReq(req *indexpb.BuildIndexRequest) (bool, UniqueID)
 
 // LoadMetaFromETCD load the meta of specified indexBuildID from ETCD.
 // If the version of meta in memory is greater equal to the version in ETCD, no need to reload.
-func (mt *metaTable) LoadMetaFromETCD(indexBuildID int64, revision int64) bool {
+func (mt *metaTable) LoadMetaFromETCD(indexBuildID int64, indexVersion int64) bool {
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
 	meta, ok := mt.indexBuildID2Meta[indexBuildID]
 	log.Debug("IndexCoord metaTable LoadMetaFromETCD", zap.Int64("indexBuildID", indexBuildID),
-		zap.Int64("revision", revision), zap.Bool("ok", ok))
+		zap.Int64("indexVersion", indexVersion), zap.Bool("ok", ok))
 	if ok {
 		log.Debug("IndexCoord metaTable LoadMetaFromETCD",
-			zap.Int64("meta.revision", meta.revision),
-			zap.Int64("revision", revision))
+			zap.Int64("meta.indexVersion", meta.indexVersion),
+			zap.Int64("indexVersion", indexVersion))
 
-		if meta.revision >= revision {
+		if meta.indexVersion >= indexVersion {
 			return false
 		}
 	} else {

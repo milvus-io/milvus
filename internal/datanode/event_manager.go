@@ -40,7 +40,7 @@ type channelEventManager struct {
 	eventChan         chan event
 	closeChan         chan struct{}
 	handlePutEvent    func(watchInfo *datapb.ChannelWatchInfo, version int64) error // node.handlePutEvent
-	handleDeleteEvent func(vChanName string) bool                                   // node.handleDeleteEvent
+	handleDeleteEvent func(vChanName string)                                        // node.handleDeleteEvent
 	retryInterval     time.Duration
 }
 
@@ -50,7 +50,7 @@ const (
 )
 
 func newChannelEventManager(handlePut func(*datapb.ChannelWatchInfo, int64) error,
-	handleDel func(string) bool, retryInterval time.Duration) *channelEventManager {
+	handleDel func(string), retryInterval time.Duration) *channelEventManager {
 	return &channelEventManager{
 		eventChan:         make(chan event, 10),
 		closeChan:         make(chan struct{}),
@@ -130,9 +130,11 @@ func (e *channelEventManager) retryHandlePutEvent(event event) {
 			}
 
 			err = e.handlePutEvent(event.info, event.version)
-			if err == nil {
-				log.Info("retry to handle put event successfully",
-					zap.String("vChanName", event.vChanName))
+			if err != nil {
+				log.Warn("failed to handle put event", zap.String("vChanName", event.vChanName), zap.Error(err))
+				// no need to retry here,
+			} else {
+				log.Info("handle put event successfully", zap.String("vChanName", event.vChanName))
 				return
 			}
 		}

@@ -70,8 +70,8 @@ func TestMetaTable(t *testing.T) {
 
 	t.Run("saveIndexMeta", func(t *testing.T) {
 		meta := &Meta{
-			indexMeta: indexMeta1,
-			revision:  10,
+			indexMeta:    indexMeta1,
+			indexVersion: 10,
 		}
 		err = metaTable.saveIndexMeta(meta)
 		assert.NotNil(t, err)
