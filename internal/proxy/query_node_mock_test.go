@@ -39,13 +39,21 @@ type QueryNodeMock struct {
 
 	withSearchResult *internalpb.SearchResults
 	withQueryResult  *internalpb.RetrieveResults
+	queryError       error
+	searchError      error
 }
 
 func (m *QueryNodeMock) Search(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error) {
+	if m.searchError != nil {
+		return nil, m.searchError
+	}
 	return m.withSearchResult, nil
 }
 
 func (m *QueryNodeMock) Query(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
+	if m.queryError != nil {
+		return nil, m.queryError
+	}
 	return m.withQueryResult, nil
 }
 

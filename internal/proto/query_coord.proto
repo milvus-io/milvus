@@ -236,7 +236,7 @@ message ReleaseSegmentsRequest {
 
 message SearchRequest {
   internal.SearchRequest req = 1;
-  string dml_channel = 2;
+  repeated string dml_channels = 2;
   repeated int64 segmentIDs = 3;
   bool from_shard_leader = 4;
   DataScope scope = 5; // All, Streaming, Historical
@@ -244,7 +244,7 @@ message SearchRequest {
 
 message QueryRequest {
   internal.RetrieveRequest req = 1;
-  string dml_channel = 2;
+  repeated string dml_channels = 2;
   repeated int64 segmentIDs = 3;
   bool from_shard_leader = 4;
   DataScope scope = 5; // All, Streaming, Historical

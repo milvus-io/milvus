@@ -39,6 +39,10 @@ func TestQueryTask_all(t *testing.T) {
 
 		expr   = fmt.Sprintf("%s > 0", testInt64Field)
 		hitNum = 10
+
+		errPolicy = func(context.Context, *shardClientMgr, func(context.Context, int64, types.QueryNode, []string) error, map[string][]nodeInfo) error {
+			return fmt.Errorf("fake error")
+		}
 	)
 
 	mockCreator := func(ctx context.Context, address string) (types.QueryNode, error) {
@@ -125,10 +129,8 @@ func TestQueryTask_all(t *testing.T) {
 			CollectionName: collectionName,
 			Expr:           expr,
 		},
-		qc: qc,
-
-		queryShardPolicy: roundRobinPolicy,
-		shardMgr:         mgr,
+		qc:       qc,
+		shardMgr: mgr,
 	}
 
 	assert.NoError(t, task.OnEnqueue())
@@ -143,6 +145,11 @@ func TestQueryTask_all(t *testing.T) {
 	// after preExecute
 	assert.Greater(t, task.TimeoutTimestamp, typeutil.ZeroTimestamp)
 
+	task.ctx = ctx
+	task.queryShardPolicy = errPolicy
+	assert.Error(t, task.Execute(ctx))
+
+	task.queryShardPolicy = mergeRoundRobinPolicy
 	result1 := &internalpb.RetrieveResults{
 		Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_RetrieveResult},
 		Status: &commonpb.Status{
@@ -164,9 +171,27 @@ func TestQueryTask_all(t *testing.T) {
 		result1.FieldsData = append(result1.FieldsData, generateFieldData(dataType, fieldName, hitNum))
 	}
 
+	task.ctx = ctx
+	qn.queryError = fmt.Errorf("mock error")
+	assert.Error(t, task.Execute(ctx))
+
+	qn.queryError = nil
+	qn.withQueryResult = &internalpb.RetrieveResults{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_NotShardLeader,
+		},
+	}
+	assert.Equal(t, task.Execute(ctx), errInvalidShardLeaders)
+
+	qn.withQueryResult = &internalpb.RetrieveResults{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		},
+	}
+	assert.Error(t, task.Execute(ctx))
+
 	qn.withQueryResult = result1
 
-	task.ctx = ctx
 	assert.NoError(t, task.Execute(ctx))
 
 	assert.NoError(t, task.PostExecute(ctx))
