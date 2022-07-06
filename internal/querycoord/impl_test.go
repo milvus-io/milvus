@@ -595,7 +595,7 @@ func TestLoadBalanceTask(t *testing.T) {
 	loadBalanceTask := &loadBalanceTask{
 		baseTask: &baseTask{
 			ctx:              baseCtx,
-			condition:        newTaskCondition(baseCtx),
+			condition:        newTaskCondition(),
 			triggerCondition: querypb.TriggerCondition_NodeDown,
 		},
 		LoadBalanceRequest: loadBalanceSegment,

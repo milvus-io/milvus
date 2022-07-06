@@ -131,7 +131,7 @@ type baseTask struct {
 
 func newBaseTask(ctx context.Context, triggerType querypb.TriggerCondition) *baseTask {
 	childCtx, cancel := context.WithCancel(ctx)
-	condition := newTaskCondition(childCtx)
+	condition := newTaskCondition()
 
 	baseTask := &baseTask{
 		ctx:              childCtx,

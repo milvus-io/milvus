@@ -16,44 +16,26 @@
 
 package querycoord
 
-import (
-	"context"
-	"errors"
-)
-
 type condition interface {
 	waitToFinish() error
 	notify(err error)
-	Ctx() context.Context
 }
 
 type taskCondition struct {
 	done chan error
-	ctx  context.Context
 }
 
 func (tc *taskCondition) waitToFinish() error {
-	for {
-		select {
-		case <-tc.ctx.Done():
-			return errors.New("timeout")
-		case err := <-tc.done:
-			return err
-		}
-	}
+	err := <-tc.done
+	return err
 }
 
 func (tc *taskCondition) notify(err error) {
 	tc.done <- err
 }
 
-func (tc *taskCondition) Ctx() context.Context {
-	return tc.ctx
-}
-
-func newTaskCondition(ctx context.Context) *taskCondition {
+func newTaskCondition() *taskCondition {
 	return &taskCondition{
 		done: make(chan error, 1),
-		ctx:  ctx,
 	}
 }
