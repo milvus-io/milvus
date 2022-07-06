@@ -26,11 +26,7 @@ import (
 	"testing"
 	"time"
 
-	clientv3 "go.etcd.io/etcd/client/v3"
-
 	"github.com/golang/protobuf/proto"
-	"github.com/stretchr/testify/assert"
-
 	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -47,6 +43,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/stretchr/testify/assert"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 type proxyMock struct {
@@ -191,11 +189,9 @@ func TestGrpcService(t *testing.T) {
 	}
 
 	var binlogLock sync.Mutex
-	binlogPathArray := make([]string, 0, 16)
-	core.CallBuildIndexService = func(ctx context.Context, segID typeutil.UniqueID, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo, numRows int64) (typeutil.UniqueID, error) {
+	core.CallBuildIndexService = func(ctx context.Context, collID typeutil.UniqueID, segID typeutil.UniqueID, fieldID typeutil.UniqueID, idxInfo *etcdpb.IndexInfo) (typeutil.UniqueID, error) {
 		binlogLock.Lock()
 		defer binlogLock.Unlock()
-		binlogPathArray = append(binlogPathArray, binlog...)
 		return 2000, nil
 	}
 
@@ -621,11 +617,6 @@ func TestGrpcService(t *testing.T) {
 		collMeta, err = core.MetaTable.GetCollectionByName(collName, 0)
 		assert.Nil(t, err)
 		assert.Equal(t, 1, len(collMeta.FieldIndexes))
-
-		binlogLock.Lock()
-		defer binlogLock.Unlock()
-		assert.Equal(t, 3, len(binlogPathArray))
-		assert.ElementsMatch(t, binlogPathArray, []string{"file1", "file2", "file3"})
 
 		req.FieldName = "no field"
 		rsp, err = cli.CreateIndex(ctx, req)

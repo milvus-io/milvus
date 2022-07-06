@@ -40,7 +40,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
-	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
@@ -72,6 +71,13 @@ func TestIndexCoord(t *testing.T) {
 	err = ic.SetDataCoord(dcm)
 	assert.Nil(t, err)
 
+	rcm := &RootCoordMock{
+		Err:  false,
+		Fail: false,
+	}
+	err = ic.SetRootCoord(rcm)
+	assert.Nil(t, err)
+
 	ic.SetEtcdClient(etcdCli)
 	err = ic.Init()
 	assert.Nil(t, err)
@@ -93,18 +99,9 @@ func TestIndexCoord(t *testing.T) {
 	t.Run("create index without indexnodes", func(t *testing.T) {
 		indexID := int64(rand.Int())
 		req := &indexpb.BuildIndexRequest{
-			IndexID:   indexID,
-			DataPaths: []string{"NoIndexNode-1", "NoIndexNode-2"},
-			NumRows:   10,
-			TypeParams: []*commonpb.KeyValuePair{
-				{
-					Key:   "dim",
-					Value: "128",
-				},
-			},
-			FieldSchema: &schemapb.FieldSchema{
-				DataType: schemapb.DataType_FloatVector,
-			},
+			IndexID:      indexID,
+			FieldID:      1000,
+			CollectionID: 5000,
 		}
 		resp, err := ic.BuildIndex(ctx, req)
 		assert.Nil(t, err)
@@ -142,18 +139,9 @@ func TestIndexCoord(t *testing.T) {
 
 	t.Run("Create Index", func(t *testing.T) {
 		req := &indexpb.BuildIndexRequest{
-			IndexID:   indexID,
-			DataPaths: []string{"DataPath-1", "DataPath-2"},
-			NumRows:   0,
-			TypeParams: []*commonpb.KeyValuePair{
-				{
-					Key:   "dim",
-					Value: "128",
-				},
-			},
-			FieldSchema: &schemapb.FieldSchema{
-				DataType: schemapb.DataType_FloatVector,
-			},
+			IndexID:      indexID,
+			FieldID:      1000,
+			CollectionID: 5000,
 		}
 		resp, err := ic.BuildIndex(ctx, req)
 		assert.Nil(t, err)
@@ -167,18 +155,9 @@ func TestIndexCoord(t *testing.T) {
 		assert.Equal(t, "already have same index", resp2.Status.Reason)
 
 		req2 := &indexpb.BuildIndexRequest{
-			IndexID:   indexID,
-			DataPaths: []string{"DataPath-3", "DataPath-4"},
-			NumRows:   1000,
-			TypeParams: []*commonpb.KeyValuePair{
-				{
-					Key:   "dim",
-					Value: "128",
-				},
-			},
-			FieldSchema: &schemapb.FieldSchema{
-				DataType: schemapb.DataType_FloatVector,
-			},
+			IndexID:      indexID,
+			FieldID:      1000,
+			CollectionID: 5000,
 		}
 		resp3, err := ic.BuildIndex(ctx, req2)
 		assert.Nil(t, err)

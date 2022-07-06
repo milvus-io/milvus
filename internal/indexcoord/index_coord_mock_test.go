@@ -71,7 +71,6 @@ func TestIndexCoordMock(t *testing.T) {
 		req := &indexpb.BuildIndexRequest{
 			IndexBuildID: 0,
 			IndexID:      0,
-			DataPaths:    []string{},
 		}
 		resp, err := icm.BuildIndex(ctx, req)
 		assert.Nil(t, err)
@@ -166,7 +165,6 @@ func TestIndexCoordMockError(t *testing.T) {
 		req := &indexpb.BuildIndexRequest{
 			IndexBuildID: 0,
 			IndexID:      0,
-			DataPaths:    []string{},
 		}
 		resp, err := icm.BuildIndex(ctx, req)
 		assert.NotNil(t, err)
@@ -285,6 +283,56 @@ func TestDataCoordMock_Error(t *testing.T) {
 		resp, err = dcm.ReleaseSegmentLock(context.TODO(), &datapb.ReleaseSegmentLockRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+	})
+}
+
+func TestRootCoordMock_Error(t *testing.T) {
+	t.Run("Init", func(t *testing.T) {
+		rcm := &RootCoordMock{
+			Fail: true,
+			Err:  true,
+		}
+		err := rcm.Init()
+		assert.Error(t, err)
+	})
+
+	t.Run("Start", func(t *testing.T) {
+		rcm := &RootCoordMock{
+			Fail: true,
+			Err:  true,
+		}
+		err := rcm.Start()
+		assert.Error(t, err)
+	})
+
+	t.Run("GetComponentStates", func(t *testing.T) {
+		rcm := &RootCoordMock{
+			Fail: true,
+			Err:  true,
+		}
+		resp, err := rcm.GetComponentStates(context.TODO())
+		assert.Error(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.GetErrorCode())
+
+		rcm.Err = false
+		resp, err = rcm.GetComponentStates(context.TODO())
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.GetErrorCode())
+	})
+
+	t.Run("DescribeCollection", func(t *testing.T) {
+		rcm := &RootCoordMock{
+			Fail: true,
+			Err:  true,
+		}
+		resp, err := rcm.DescribeCollection(context.TODO(), &milvuspb.DescribeCollectionRequest{})
+		assert.Error(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+
+		rcm.Err = false
+		resp, err = rcm.DescribeCollection(context.TODO(), &milvuspb.DescribeCollectionRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
 	})
 }
 

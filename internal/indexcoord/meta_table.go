@@ -24,17 +24,14 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/milvus-io/milvus/internal/kv"
-
-	"github.com/milvus-io/milvus/internal/metrics"
-
-	"go.uber.org/zap"
-
 	"github.com/golang/protobuf/proto"
+	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/util/retry"
+	"go.uber.org/zap"
 )
 
 // Meta is used to record the state of the index.
@@ -528,40 +525,13 @@ func (mt *metaTable) HasSameReq(req *indexpb.BuildIndexRequest) (bool, UniqueID)
 		if meta.indexMeta.Req.IndexName != req.IndexName {
 			continue
 		}
-		if len(meta.indexMeta.Req.DataPaths) != len(req.DataPaths) {
-			continue
-		}
-		notEq := false
-		for i := range meta.indexMeta.Req.DataPaths {
-			if meta.indexMeta.Req.DataPaths[i] != req.DataPaths[i] {
-				notEq = true
-				break
-			}
-		}
-		if notEq {
-			continue
-		}
-		if len(meta.indexMeta.Req.TypeParams) != len(req.TypeParams) {
-			continue
-		}
-		notEq = false
-		for i := range meta.indexMeta.Req.TypeParams {
-			if meta.indexMeta.Req.TypeParams[i].Key != req.TypeParams[i].Key {
-				notEq = true
-				break
-			}
-			if meta.indexMeta.Req.TypeParams[i].Value != req.TypeParams[i].Value {
-				notEq = true
-				break
-			}
-		}
-		if notEq {
+		if meta.indexMeta.Req.FieldID != req.FieldID {
 			continue
 		}
 		if len(meta.indexMeta.Req.IndexParams) != len(req.IndexParams) {
 			continue
 		}
-		notEq = false
+		notEq := false
 		for i := range meta.indexMeta.Req.IndexParams {
 			if meta.indexMeta.Req.IndexParams[i].Key != req.IndexParams[i].Key {
 				notEq = true

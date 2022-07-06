@@ -1106,20 +1106,15 @@ func TestMetaTable_HasSameReq(t *testing.T) {
 					Req: &indexpb.BuildIndexRequest{
 						IndexID:   1,
 						IndexName: "index-1",
-						DataPaths: []string{"file1", "file2"},
-						TypeParams: []*commonpb.KeyValuePair{
-							{
-								Key:   "dim",
-								Value: "128",
-							},
-						},
 						IndexParams: []*commonpb.KeyValuePair{
 							{
 								Key:   "metric_type",
 								Value: "L2",
 							},
 						},
-						SegmentID: 2,
+						SegmentID:    2,
+						FieldID:      1000,
+						CollectionID: 5000,
 					},
 					MarkDeleted: true,
 				},
@@ -1155,59 +1150,29 @@ func TestMetaTable_HasSameReq(t *testing.T) {
 		SegmentID: 2,
 		IndexID:   1,
 		IndexName: "index-1",
-		DataPaths: []string{"file1", "file2"},
+		FieldID:   1001,
 	}
 	exist, buildID = mt.HasSameReq(req)
 	assert.False(t, exist)
 	assert.Equal(t, int64(0), buildID)
 
 	req = &indexpb.BuildIndexRequest{
-		SegmentID: 2,
-		IndexID:   1,
-		IndexName: "index-1",
-		DataPaths: []string{"file1", "file2"},
-		TypeParams: []*commonpb.KeyValuePair{
-			{
-				Key:   "dim",
-				Value: "128",
-			},
-			{
-				Key:   "param",
-				Value: "param",
-			},
-		},
+		SegmentID:    2,
+		IndexID:      1,
+		IndexName:    "index-1",
+		FieldID:      1000,
+		CollectionID: 5001,
 	}
 	exist, buildID = mt.HasSameReq(req)
 	assert.False(t, exist)
 	assert.Equal(t, int64(0), buildID)
 
 	req = &indexpb.BuildIndexRequest{
-		SegmentID: 2,
-		IndexID:   1,
-		IndexName: "index-1",
-		DataPaths: []string{"file1", "file2"},
-		TypeParams: []*commonpb.KeyValuePair{
-			{
-				Key:   "dim",
-				Value: "256",
-			},
-		},
-	}
-	exist, buildID = mt.HasSameReq(req)
-	assert.False(t, exist)
-	assert.Equal(t, int64(0), buildID)
-
-	req = &indexpb.BuildIndexRequest{
-		SegmentID: 2,
-		IndexID:   1,
-		IndexName: "index-1",
-		DataPaths: []string{"file1", "file2"},
-		TypeParams: []*commonpb.KeyValuePair{
-			{
-				Key:   "dim",
-				Value: "128",
-			},
-		},
+		SegmentID:    2,
+		IndexID:      1,
+		IndexName:    "index-1",
+		FieldID:      1000,
+		CollectionID: 5000,
 		IndexParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "metric_type",
@@ -1224,16 +1189,11 @@ func TestMetaTable_HasSameReq(t *testing.T) {
 	assert.Equal(t, int64(0), buildID)
 
 	req = &indexpb.BuildIndexRequest{
-		SegmentID: 2,
-		IndexID:   1,
-		IndexName: "index-1",
-		DataPaths: []string{"file1", "file2"},
-		TypeParams: []*commonpb.KeyValuePair{
-			{
-				Key:   "dim",
-				Value: "128",
-			},
-		},
+		SegmentID:    2,
+		IndexID:      1,
+		IndexName:    "index-1",
+		FieldID:      1000,
+		CollectionID: 5000,
 		IndexParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "metric_type",
@@ -1246,16 +1206,11 @@ func TestMetaTable_HasSameReq(t *testing.T) {
 	assert.Equal(t, int64(0), buildID)
 
 	req = &indexpb.BuildIndexRequest{
-		SegmentID: 2,
-		IndexID:   1,
-		IndexName: "index-1",
-		DataPaths: []string{"file1", "file2"},
-		TypeParams: []*commonpb.KeyValuePair{
-			{
-				Key:   "dim",
-				Value: "128",
-			},
-		},
+		SegmentID:    2,
+		IndexID:      1,
+		IndexName:    "index-1",
+		FieldID:      1000,
+		CollectionID: 5000,
 		IndexParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "metric_type",
@@ -1273,15 +1228,10 @@ func TestMetaTable_HasSameReq(t *testing.T) {
 				indexMeta: &indexpb.IndexMeta{
 					IndexBuildID: 1,
 					Req: &indexpb.BuildIndexRequest{
-						IndexID:   1,
-						IndexName: "index-1",
-						DataPaths: []string{"file1", "file2"},
-						TypeParams: []*commonpb.KeyValuePair{
-							{
-								Key:   "dim",
-								Value: "128",
-							},
-						},
+						IndexID:      1,
+						IndexName:    "index-1",
+						FieldID:      1000,
+						CollectionID: 5000,
 						IndexParams: []*commonpb.KeyValuePair{
 							{
 								Key:   "metric_type",
@@ -1295,16 +1245,11 @@ func TestMetaTable_HasSameReq(t *testing.T) {
 		},
 	}
 	req = &indexpb.BuildIndexRequest{
-		SegmentID: 2,
-		IndexID:   1,
-		IndexName: "index-1",
-		DataPaths: []string{"file1", "file2"},
-		TypeParams: []*commonpb.KeyValuePair{
-			{
-				Key:   "dim",
-				Value: "128",
-			},
-		},
+		SegmentID:    2,
+		IndexID:      1,
+		IndexName:    "index-1",
+		FieldID:      1000,
+		CollectionID: 5000,
 		IndexParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "metric_type",

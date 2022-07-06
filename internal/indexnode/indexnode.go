@@ -279,9 +279,9 @@ func (i *IndexNode) CreateIndex(ctx context.Context, request *indexpb.CreateInde
 		zap.Int64("IndexID", request.IndexID),
 		zap.Int64("Version", request.Version),
 		zap.String("MetaPath", request.MetaPath),
-		zap.Int("binlog paths num", len(request.DataPaths)),
 		zap.Any("TypeParams", request.TypeParams),
-		zap.Any("IndexParams", request.IndexParams))
+		zap.Any("IndexParams", request.IndexParams),
+		zap.Any("DataPaths", request.DataPaths))
 
 	sp, ctx2 := trace.StartSpanFromContextWithOperationName(i.loopCtx, "IndexNode-CreateIndex")
 	defer sp.Finish()

@@ -341,7 +341,6 @@ func (q *queryMock) ReleasePartitions(ctx context.Context, req *querypb.ReleaseP
 
 type indexMock struct {
 	types.IndexCoord
-	fileArray  []string
 	idxBuildID []int64
 	idxID      []int64
 	idxDropID  []int64
@@ -359,7 +358,6 @@ func (idx *indexMock) Start() error {
 func (idx *indexMock) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
 	idx.mutex.Lock()
 	defer idx.mutex.Unlock()
-	idx.fileArray = append(idx.fileArray, req.DataPaths...)
 	idx.idxBuildID = append(idx.idxBuildID, rand.Int63())
 	idx.idxID = append(idx.idxID, req.IndexID)
 	return &indexpb.BuildIndexResponse{
@@ -388,15 +386,6 @@ func (idx *indexMock) RemoveIndex(ctx context.Context, req *indexpb.RemoveIndexR
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
 	}, nil
-}
-
-func (idx *indexMock) getFileArray() []string {
-	idx.mutex.Lock()
-	defer idx.mutex.Unlock()
-
-	ret := make([]string, 0, len(idx.fileArray))
-	ret = append(ret, idx.fileArray...)
-	return ret
 }
 
 func (idx *indexMock) GetIndexStates(ctx context.Context, req *indexpb.GetIndexStatesRequest) (*indexpb.GetIndexStatesResponse, error) {
@@ -858,7 +847,6 @@ func TestRootCoord_Base(t *testing.T) {
 	assert.NoError(t, err)
 
 	im := &indexMock{
-		fileArray:  []string{},
 		idxBuildID: []int64{},
 		idxID:      []int64{},
 		idxDropID:  []int64{},
@@ -1295,16 +1283,7 @@ func TestRootCoord_Base(t *testing.T) {
 		rsp, err := core.CreateIndex(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, rsp.ErrorCode)
-		time.Sleep(100 * time.Millisecond)
-		files := im.getFileArray()
-		assert.Equal(t, 6*3, len(files))
-		assert.ElementsMatch(t, files,
-			[]string{"file0-100", "file1-100", "file2-100",
-				"file0-100", "file1-100", "file2-100",
-				"file0-100", "file1-100", "file2-100",
-				"file0-100", "file1-100", "file2-100",
-				"file0-100", "file1-100", "file2-100",
-				"file0-100", "file1-100", "file2-100"})
+
 		collMeta, err = core.MetaTable.GetCollectionByName(collName, 0)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(collMeta.FieldIndexes))
@@ -2895,7 +2874,6 @@ func TestRootCoord2(t *testing.T) {
 	assert.NoError(t, err)
 
 	im := &indexMock{
-		fileArray:  []string{},
 		idxBuildID: []int64{},
 		idxID:      []int64{},
 		idxDropID:  []int64{},
@@ -3083,7 +3061,7 @@ func TestCheckInit(t *testing.T) {
 	err = c.checkInit()
 	assert.Error(t, err)
 
-	c.CallBuildIndexService = func(ctx context.Context, segID UniqueID, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo, numRows int64) (typeutil.UniqueID, error) {
+	c.CallBuildIndexService = func(ctx context.Context, collID UniqueID, segID UniqueID, fieldID UniqueID, idxInfo *etcdpb.IndexInfo) (typeutil.UniqueID, error) {
 		return 0, nil
 	}
 	err = c.checkInit()
@@ -3179,7 +3157,6 @@ func TestCheckFlushedSegments(t *testing.T) {
 	assert.NoError(t, err)
 
 	im := &indexMock{
-		fileArray:  []string{},
 		idxBuildID: []int64{},
 		idxID:      []int64{},
 		idxDropID:  []int64{},
@@ -3286,8 +3263,7 @@ func TestCheckFlushedSegments(t *testing.T) {
 		core.MetaTable.indexID2Meta[indexID] = etcdpb.IndexInfo{
 			IndexID: indexID,
 		}
-		core.CallBuildIndexService = func(_ context.Context, segID UniqueID, binlog []string, field *schemapb.FieldSchema, idx *etcdpb.IndexInfo, numRows int64) (int64, error) {
-			assert.Equal(t, fieldID, field.FieldID)
+		core.CallBuildIndexService = func(_ context.Context, collID UniqueID, segID UniqueID, fieldID UniqueID, idx *etcdpb.IndexInfo) (int64, error) {
 			assert.Equal(t, indexID, idx.IndexID)
 			return -1, errors.New("build index build")
 		}
@@ -3295,7 +3271,7 @@ func TestCheckFlushedSegments(t *testing.T) {
 		core.checkFlushedSegments(ctx)
 
 		var indexBuildID int64 = 10001
-		core.CallBuildIndexService = func(_ context.Context, segID UniqueID, binlog []string, field *schemapb.FieldSchema, idx *etcdpb.IndexInfo, numRows int64) (int64, error) {
+		core.CallBuildIndexService = func(_ context.Context, collID UniqueID, segID UniqueID, fieldID UniqueID, idx *etcdpb.IndexInfo) (int64, error) {
 			return indexBuildID, nil
 		}
 		core.checkFlushedSegments(core.ctx)
@@ -3334,7 +3310,6 @@ func TestRootCoord_CheckZeroShardsNum(t *testing.T) {
 	assert.NoError(t, err)
 
 	im := &indexMock{
-		fileArray:  []string{},
 		idxBuildID: []int64{},
 		idxID:      []int64{},
 		idxDropID:  []int64{},

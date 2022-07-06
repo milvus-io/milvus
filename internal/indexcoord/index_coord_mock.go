@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/internal/kv"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -90,6 +91,10 @@ func (icm *Mock) SetEtcdClient(client *clientv3.Client) {
 }
 
 func (icm *Mock) SetDataCoord(dataCoord types.DataCoord) error {
+	return nil
+}
+
+func (icm *Mock) SetRootCoord(rootCoord types.RootCoord) error {
 	return nil
 }
 
@@ -320,6 +325,48 @@ func (dcm *DataCoordMock) GetComponentStates(ctx context.Context) (*internalpb.C
 	}, nil
 }
 
+func (dcm *DataCoordMock) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
+	if dcm.Err {
+		return &datapb.GetSegmentInfoResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "",
+			},
+		}, errors.New("an error occurred")
+	}
+	if dcm.Fail {
+		return &datapb.GetSegmentInfoResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "failure reason",
+			},
+		}, nil
+	}
+	return &datapb.GetSegmentInfoResponse{
+		Status: &commonpb.Status{
+			ErrorCode: 0,
+		},
+		Infos: []*datapb.SegmentInfo{
+			{
+				ID:        1,
+				NumOfRows: 10,
+				State:     commonpb.SegmentState_Flushed,
+				Binlogs: []*datapb.FieldBinlog{
+					{
+						FieldID: 0,
+						Binlogs: []*datapb.Binlog{
+							{
+								EntriesNum: 5,
+								LogPath:    "log1",
+							},
+						},
+					},
+				},
+			},
+		},
+	}, nil
+}
+
 func (dcm *DataCoordMock) AcquireSegmentLock(ctx context.Context, req *datapb.AcquireSegmentLockRequest) (*commonpb.Status, error) {
 	if dcm.Err {
 		return &commonpb.Status{
@@ -355,6 +402,110 @@ func (dcm *DataCoordMock) ReleaseSegmentLock(ctx context.Context, req *datapb.Re
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
+	}, nil
+}
+
+type RootCoordMock struct {
+	types.RootCoord
+
+	Fail bool
+	Err  bool
+}
+
+func (rcm *RootCoordMock) Init() error {
+	if rcm.Err || rcm.Fail {
+		return errors.New("RootCoord mock init failed")
+	}
+	return nil
+}
+
+func (rcm *RootCoordMock) Start() error {
+	if rcm.Err || rcm.Fail {
+		return errors.New("RootCoord mock start failed")
+	}
+	return nil
+}
+
+func (rcm *RootCoordMock) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+	if rcm.Err {
+		return &internalpb.ComponentStates{
+			State: &internalpb.ComponentInfo{
+				StateCode: internalpb.StateCode_Abnormal,
+			},
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "",
+			},
+		}, errors.New("RootCoord component state is not healthy")
+	}
+	if rcm.Fail {
+		return &internalpb.ComponentStates{
+			State: &internalpb.ComponentInfo{
+				StateCode: internalpb.StateCode_Abnormal,
+			},
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "",
+			},
+		}, nil
+	}
+	return &internalpb.ComponentStates{
+		State: &internalpb.ComponentInfo{
+			StateCode: internalpb.StateCode_Healthy,
+		},
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+	}, nil
+}
+
+func (rcm *RootCoordMock) DescribeCollection(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+	if rcm.Err {
+		return &milvuspb.DescribeCollectionResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "",
+			},
+		}, errors.New("an error occurred")
+	}
+	if rcm.Fail {
+		return &milvuspb.DescribeCollectionResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "failure reason",
+			},
+		}, nil
+	}
+	return &milvuspb.DescribeCollectionResponse{
+		Status: &commonpb.Status{
+			ErrorCode: 0,
+		},
+		Schema: &schemapb.CollectionSchema{
+			Name:        "test",
+			Description: "",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      UniqueID(1000),
+					Name:         "vec",
+					IsPrimaryKey: false,
+					DataType:     schemapb.DataType_BinaryVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   "dim",
+							Value: "128",
+						},
+					},
+					IndexParams: []*commonpb.KeyValuePair{
+						{
+							Key:   "metric_type",
+							Value: "JACCARD",
+						},
+					},
+				},
+			},
+		},
 	}, nil
 }
 

@@ -133,7 +133,7 @@ type Core struct {
 	CallGetRecoveryInfoService    func(ctx context.Context, collID, partID UniqueID) ([]*datapb.SegmentBinlogs, error)
 
 	//call index builder's client to build index, return build id or get index state.
-	CallBuildIndexService     func(ctx context.Context, segID UniqueID, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo, numRows int64) (typeutil.UniqueID, error)
+	CallBuildIndexService     func(ctx context.Context, collID UniqueID, segID UniqueID, fieldID UniqueID, idxInfo *etcdpb.IndexInfo) (typeutil.UniqueID, error)
 	CallDropIndexService      func(ctx context.Context, indexID typeutil.UniqueID) error
 	CallRemoveIndexService    func(ctx context.Context, buildIDs []UniqueID) error
 	CallGetIndexStatesService func(ctx context.Context, IndexBuildIDs []int64) ([]*indexpb.IndexInfo, error)
@@ -401,7 +401,7 @@ func (c *Core) recycleDroppedIndex() {
 	}
 }
 
-func (c *Core) createIndexForSegment(ctx context.Context, collID, partID, segID UniqueID, numRows int64, binlogs []*datapb.FieldBinlog) error {
+func (c *Core) createIndexForSegment(ctx context.Context, collID, partID, segID UniqueID, numRows int64) error {
 	collID2Meta, _, indexID2Meta := c.MetaTable.dupMeta()
 	collMeta, ok := collID2Meta[collID]
 	if !ok {
@@ -449,7 +449,7 @@ func (c *Core) createIndexForSegment(ctx context.Context, collID, partID, segID 
 			EnableIndex:  false,
 			CreateTime:   createTS,
 		}
-		buildID, err := c.BuildIndex(ctx, segID, numRows, binlogs, field, &indexMeta, false)
+		buildID, err := c.BuildIndex(ctx, collMeta.ID, segID, numRows, field, &indexMeta)
 		if err != nil {
 			log.Debug("build index failed",
 				zap.Int64("segmentID", segID),
@@ -498,7 +498,7 @@ func (c *Core) checkFlushedSegments(ctx context.Context) {
 			segIDs := make(map[UniqueID]struct{})
 			for _, segBinlog := range segBinlogs {
 				segIDs[segBinlog.GetSegmentID()] = struct{}{}
-				err = c.createIndexForSegment(ctx, collID, partID, segBinlog.GetSegmentID(), segBinlog.GetNumOfRows(), segBinlog.GetFieldBinlogs())
+				err = c.createIndexForSegment(ctx, collID, partID, segBinlog.GetSegmentID(), segBinlog.GetNumOfRows())
 				if err != nil {
 					log.Error("createIndexForSegment failed, wait to retry", zap.Int64("collID", collID),
 						zap.Int64("partID", partID), zap.Int64("segID", segBinlog.GetSegmentID()), zap.Error(err))
@@ -838,7 +838,7 @@ func (c *Core) SetIndexCoord(s types.IndexCoord) error {
 		}
 	}()
 
-	c.CallBuildIndexService = func(ctx context.Context, segID UniqueID, binlog []string, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo, numRows int64) (retID typeutil.UniqueID, retErr error) {
+	c.CallBuildIndexService = func(ctx context.Context, collID UniqueID, segID UniqueID, fieldID UniqueID, idxInfo *etcdpb.IndexInfo) (retID typeutil.UniqueID, retErr error) {
 		defer func() {
 			if err := recover(); err != nil {
 				retErr = fmt.Errorf("build index panic, msg = %v", err)
@@ -846,14 +846,12 @@ func (c *Core) SetIndexCoord(s types.IndexCoord) error {
 		}()
 		<-initCh
 		rsp, err := s.BuildIndex(ctx, &indexpb.BuildIndexRequest{
-			DataPaths:   binlog,
-			TypeParams:  field.TypeParams,
-			IndexParams: idxInfo.IndexParams,
-			IndexID:     idxInfo.IndexID,
-			IndexName:   idxInfo.IndexName,
-			NumRows:     numRows,
-			FieldSchema: field,
-			SegmentID:   segID,
+			IndexParams:  idxInfo.IndexParams,
+			IndexID:      idxInfo.IndexID,
+			IndexName:    idxInfo.IndexName,
+			SegmentID:    segID,
+			CollectionID: collID,
+			FieldID:      fieldID,
 		})
 		if err != nil {
 			return retID, err
@@ -1019,7 +1017,7 @@ func (c *Core) SetQueryCoord(s types.QueryCoord) error {
 }
 
 // BuildIndex will check row num and call build index service
-func (c *Core) BuildIndex(ctx context.Context, segID UniqueID, numRows int64, binlogs []*datapb.FieldBinlog, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo, isFlush bool) (typeutil.UniqueID, error) {
+func (c *Core) BuildIndex(ctx context.Context, collID UniqueID, segID UniqueID, numRows int64, field *schemapb.FieldSchema, idxInfo *etcdpb.IndexInfo) (typeutil.UniqueID, error) {
 	log.Debug("start build index", zap.String("index name", idxInfo.IndexName),
 		zap.String("field name", field.Name), zap.Int64("segment id", segID))
 	sp, ctx := trace.StartSpanFromContext(ctx)
@@ -1033,16 +1031,7 @@ func (c *Core) BuildIndex(ctx context.Context, segID UniqueID, numRows int64, bi
 	if numRows < Params.RootCoordCfg.MinSegmentSizeToEnableIndex {
 		log.Debug("num of rows is less than MinSegmentSizeToEnableIndex", zap.Int64("num rows", numRows))
 	} else {
-		binLogs := make([]string, 0)
-		for _, fieldBinLog := range binlogs {
-			if fieldBinLog.GetFieldID() == field.GetFieldID() {
-				for _, binLog := range fieldBinLog.GetBinlogs() {
-					binLogs = append(binLogs, binLog.LogPath)
-				}
-				break
-			}
-		}
-		bldID, err = c.CallBuildIndexService(ctx, segID, binLogs, field, idxInfo, numRows)
+		bldID, err = c.CallBuildIndexService(ctx, collID, segID, field.FieldID, idxInfo)
 	}
 
 	return bldID, err
@@ -2244,7 +2233,7 @@ func (c *Core) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlus
 	log.Info("SegmentFlushCompleted received", zap.Int64("msgID", in.Base.MsgID), zap.Int64("collID", in.Segment.CollectionID),
 		zap.Int64("partID", in.Segment.PartitionID), zap.Int64("segID", in.Segment.ID), zap.Int64s("compactFrom", in.Segment.CompactionFrom))
 
-	err = c.createIndexForSegment(ctx, in.Segment.CollectionID, in.Segment.PartitionID, in.Segment.ID, in.Segment.NumOfRows, in.Segment.Binlogs)
+	err = c.createIndexForSegment(ctx, in.Segment.CollectionID, in.Segment.PartitionID, in.Segment.ID, in.Segment.NumOfRows)
 	if err != nil {
 		log.Error("createIndexForSegment", zap.Int64("msgID", in.Base.MsgID), zap.Int64("collID", in.Segment.CollectionID),
 			zap.Int64("partID", in.Segment.PartitionID), zap.Int64("segID", in.Segment.ID), zap.Error(err))

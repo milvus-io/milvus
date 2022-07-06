@@ -24,13 +24,9 @@ import (
 	"sync"
 	"time"
 
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/keepalive"
-
 	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	dcc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
+	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	"github.com/milvus-io/milvus/internal/indexcoord"
 	ic "github.com/milvus-io/milvus/internal/indexcoord"
 	"github.com/milvus-io/milvus/internal/log"
@@ -45,6 +41,10 @@ import (
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
 )
 
 // Params contains parameters for indexcoord grpc server.
@@ -67,6 +67,7 @@ type Server struct {
 	etcdCli *clientv3.Client
 
 	dataCoord types.DataCoord
+	rootCoord types.RootCoord
 
 	closer io.Closer
 }
@@ -111,10 +112,6 @@ func (s *Server) init() error {
 		log.Error("IndexCoord", zap.Any("init error", err))
 		return err
 	}
-	if err := s.indexcoord.Init(); err != nil {
-		log.Error("IndexCoord", zap.Any("init error", err))
-		return err
-	}
 
 	// --- DataCoord ---
 	if s.dataCoord == nil {
@@ -142,6 +139,39 @@ func (s *Server) init() error {
 
 	if err := s.SetDataCoord(s.dataCoord); err != nil {
 		panic(err)
+	}
+
+	// --- set RootCoord client ---
+	if s.rootCoord == nil {
+		s.rootCoord, err = rcc.NewClient(s.loopCtx, ic.Params.EtcdCfg.MetaRootPath, s.etcdCli)
+		if err != nil {
+			log.Debug("IndexCoord try to new RootCoord client failed", zap.Error(err))
+			panic(err)
+		}
+		if err = s.rootCoord.Init(); err != nil {
+			log.Debug("IndexCoord RootCoordClient Init failed", zap.Error(err))
+			panic(err)
+		}
+		if err = s.rootCoord.Start(); err != nil {
+			log.Debug("IndexCoord RootCoordClient Start failed", zap.Error(err))
+			panic(err)
+		}
+		err = funcutil.WaitForComponentHealthy(s.loopCtx, s.rootCoord, "RootCoord", 1000000, time.Millisecond*200)
+		if err != nil {
+			log.Debug("IndexCoord wait for RootCoord ready failed", zap.Error(err))
+			panic(err)
+		}
+		log.Debug("IndexCoord rootCoord is ready")
+		if err = s.SetRootCoord(s.rootCoord); err != nil {
+			panic(err)
+		}
+	}
+
+	s.indexcoord.UpdateStateCode(internalpb.StateCode_Initializing)
+	log.Debug("IndexCoord init", zap.Any("stateCode", internalpb.StateCode_Initializing))
+	if err := s.indexcoord.Init(); err != nil {
+		log.Error("IndexCoord", zap.Any("init error", err))
+		return err
 	}
 
 	return nil
@@ -195,6 +225,12 @@ func (s *Server) SetClient(indexCoordClient types.IndexCoordComponent) error {
 func (s *Server) SetDataCoord(d types.DataCoord) error {
 	s.dataCoord = d
 	return s.indexcoord.SetDataCoord(d)
+}
+
+// SetRootCoord sets the RootCoord's client for IndexCoord component.
+func (s *Server) SetRootCoord(d types.RootCoord) error {
+	s.rootCoord = d
+	return s.indexcoord.SetRootCoord(d)
 }
 
 // GetComponentStates gets the component states of IndexCoord.

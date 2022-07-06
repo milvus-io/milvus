@@ -21,11 +21,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/milvus-io/milvus/internal/util/funcutil"
-
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
 // getDimension gets the dimension of data from building index request.

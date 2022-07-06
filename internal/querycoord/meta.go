@@ -38,7 +38,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
-	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
@@ -116,8 +115,6 @@ type MetaReplica struct {
 	segmentsInfo *segmentsInfo
 	//partitionStates map[UniqueID]*querypb.PartitionStates
 	replicas *ReplicaInfos
-
-	dataCoord types.DataCoord
 }
 
 func newMeta(ctx context.Context, kv kv.MetaKv, factory dependency.Factory, idAllocator func() (UniqueID, error)) (Meta, error) {

@@ -40,13 +40,8 @@ func createMetaTable() *metaTable {
 					NodeID:       1,
 					MarkDeleted:  true,
 					Req: &indexpb.BuildIndexRequest{
-						NumRows: 100,
-						TypeParams: []*commonpb.KeyValuePair{
-							{
-								Key:   "dim",
-								Value: "128",
-							},
-						},
+						FieldID:      1000,
+						CollectionID: 10000,
 					},
 				},
 			},
@@ -56,13 +51,8 @@ func createMetaTable() *metaTable {
 					State:        commonpb.IndexState_Unissued,
 					NodeID:       0,
 					Req: &indexpb.BuildIndexRequest{
-						NumRows: 100,
-						TypeParams: []*commonpb.KeyValuePair{
-							{
-								Key:   "dim",
-								Value: "128",
-							},
-						},
+						FieldID:      1000,
+						CollectionID: 10000,
 					},
 				},
 			},
@@ -72,13 +62,8 @@ func createMetaTable() *metaTable {
 					State:        commonpb.IndexState_Unissued,
 					NodeID:       1,
 					Req: &indexpb.BuildIndexRequest{
-						NumRows: 100,
-						TypeParams: []*commonpb.KeyValuePair{
-							{
-								Key:   "dim",
-								Value: "128",
-							},
-						},
+						FieldID:      1000,
+						CollectionID: 10000,
 					},
 				},
 			},
@@ -88,13 +73,8 @@ func createMetaTable() *metaTable {
 					State:        commonpb.IndexState_InProgress,
 					NodeID:       1,
 					Req: &indexpb.BuildIndexRequest{
-						NumRows: 100,
-						TypeParams: []*commonpb.KeyValuePair{
-							{
-								Key:   "dim",
-								Value: "128",
-							},
-						},
+						FieldID:      1000,
+						CollectionID: 10000,
 					},
 				},
 			},
@@ -104,13 +84,8 @@ func createMetaTable() *metaTable {
 					State:        commonpb.IndexState_InProgress,
 					NodeID:       3,
 					Req: &indexpb.BuildIndexRequest{
-						NumRows: 100,
-						TypeParams: []*commonpb.KeyValuePair{
-							{
-								Key:   "dim",
-								Value: "128",
-							},
-						},
+						FieldID:      1000,
+						CollectionID: 10000,
 					},
 				},
 			},
@@ -120,13 +95,8 @@ func createMetaTable() *metaTable {
 					State:        commonpb.IndexState_Finished,
 					NodeID:       2,
 					Req: &indexpb.BuildIndexRequest{
-						NumRows: 100,
-						TypeParams: []*commonpb.KeyValuePair{
-							{
-								Key:   "dim",
-								Value: "128",
-							},
-						},
+						FieldID:      1000,
+						CollectionID: 10000,
 					},
 				},
 			},
@@ -136,13 +106,8 @@ func createMetaTable() *metaTable {
 					State:        commonpb.IndexState_Failed,
 					NodeID:       0,
 					Req: &indexpb.BuildIndexRequest{
-						NumRows: 100,
-						TypeParams: []*commonpb.KeyValuePair{
-							{
-								Key:   "dim",
-								Value: "128",
-							},
-						},
+						FieldID:      1000,
+						CollectionID: 10000,
 					},
 				},
 			},
@@ -158,13 +123,23 @@ func createMetaTable() *metaTable {
 func TestIndexBuilder(t *testing.T) {
 	ctx := context.Background()
 
+	dataCoord := &DataCoordMock{
+		Fail: false,
+		Err:  false,
+	}
+	rootCoord := &RootCoordMock{
+		Fail: false,
+		Err:  false,
+	}
+	broker, err := newGlobalMetaBroker(ctx, dataCoord, rootCoord)
+	assert.NoError(t, err)
+
 	ic := &IndexCoord{
 		loopCtx:            ctx,
 		reqTimeoutInterval: time.Second * 5,
-		dataCoordClient: &DataCoordMock{
-			Fail: false,
-			Err:  false,
-		},
+		dataCoordClient:    dataCoord,
+		rootCoordClient:    rootCoord,
+		broker:             broker,
 		nodeManager: &NodeManager{
 			ctx: ctx,
 			nodeClients: map[UniqueID]types.IndexNode{
@@ -196,13 +171,8 @@ func TestIndexBuilder(t *testing.T) {
 				State:        commonpb.IndexState_Unissued,
 				NodeID:       0,
 				Req: &indexpb.BuildIndexRequest{
-					NumRows: 100,
-					TypeParams: []*commonpb.KeyValuePair{
-						{
-							Key:   "dim",
-							Value: "128",
-						},
-					},
+					FieldID:      1000,
+					CollectionID: 10000,
 				},
 			},
 		}

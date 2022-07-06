@@ -48,6 +48,8 @@ func TestIndexCoordinateServer(t *testing.T) {
 
 	dcm := &indexcoord.DataCoordMock{}
 	server.dataCoord = dcm
+	rcm := &indexcoord.RootCoordMock{}
+	server.rootCoord = rcm
 	err = server.Run()
 	assert.Nil(t, err)
 

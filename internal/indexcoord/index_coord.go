@@ -99,6 +99,8 @@ type IndexCoord struct {
 	reqTimeoutInterval time.Duration
 
 	dataCoordClient types.DataCoord
+	rootCoordClient types.RootCoord
+	broker          *globalMetaBroker
 
 	// Add callback functions at different stages
 	startCallbacks []func()
@@ -155,8 +157,6 @@ func (i *IndexCoord) Init() error {
 	var initErr error
 	Params.InitOnce()
 	i.initOnce.Do(func() {
-		i.UpdateStateCode(internalpb.StateCode_Initializing)
-		log.Debug("IndexCoord init", zap.Any("stateCode", i.stateCode.Load().(internalpb.StateCode)))
 
 		i.factory.Init(&Params)
 
@@ -230,6 +230,13 @@ func (i *IndexCoord) Init() error {
 		}
 		log.Debug("IndexCoord new minio chunkManager success")
 		i.chunkManager = chunkManager
+
+		// init globalMetaBroker
+		i.broker, err = newGlobalMetaBroker(i.loopCtx, i.dataCoordClient, i.rootCoordClient)
+		if err != nil {
+			log.Error("IndexCoord init globalMetaBroker failed", zap.Error(err))
+			return
+		}
 
 		i.garbageCollector = newGarbageCollector(i.loopCtx, i.metaTable, i.chunkManager)
 		i.sched, err = NewTaskScheduler(i.loopCtx, i.idAllocator, i.chunkManager, i.metaTable)
@@ -329,6 +336,16 @@ func (i *IndexCoord) SetDataCoord(dataCoord types.DataCoord) error {
 	return nil
 }
 
+// SetRootCoord sets root coordinator's client
+func (i *IndexCoord) SetRootCoord(rootCoord types.RootCoord) error {
+	if rootCoord == nil {
+		return errors.New("null RootCoord interface")
+	}
+
+	i.rootCoordClient = rootCoord
+	return nil
+}
+
 // UpdateStateCode updates the component state of IndexCoord.
 func (i *IndexCoord) UpdateStateCode(code internalpb.StateCode) {
 	i.stateCode.Store(code)
@@ -405,11 +422,11 @@ func (i *IndexCoord) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequ
 			},
 		}, err
 	}
+
 	log.Debug("IndexCoord building index ...", zap.Int64("segmentID", req.SegmentID),
+		zap.Int64("collectionID", req.CollectionID), zap.Int64("fieldID", req.FieldID),
 		zap.String("IndexName", req.IndexName), zap.Int64("IndexID", req.IndexID),
-		zap.Strings("DataPath", req.DataPaths), zap.Any("TypeParams", req.TypeParams),
-		zap.Any("IndexParams", req.IndexParams), zap.Int64("numRows", req.NumRows),
-		zap.Any("field type", req.FieldSchema.DataType))
+		zap.Any("IndexParams", req.IndexParams))
 
 	ret := &indexpb.BuildIndexResponse{
 		Status: &commonpb.Status{

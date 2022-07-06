@@ -365,6 +365,7 @@ type IndexCoordComponent interface {
 	SetEtcdClient(etcdClient *clientv3.Client)
 
 	SetDataCoord(dataCoor DataCoord) error
+	SetRootCoord(rootCoord RootCoord) error
 
 	// UpdateStateCode updates state code for IndexCoordComponent
 	//  `stateCode` is current statement of this IndexCoordComponent, indicating whether it's healthy.

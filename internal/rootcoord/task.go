@@ -1011,7 +1011,7 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 			EnableIndex:  false,
 			CreateTime:   createTS,
 		}
-		info.BuildID, err = t.core.BuildIndex(ctx, segID, segID2Binlog[segID].GetNumOfRows(), segID2Binlog[segID].GetFieldBinlogs(), &field, idxInfo, false)
+		info.BuildID, err = t.core.BuildIndex(ctx, collectionID, segID, segID2Binlog[segID].GetNumOfRows(), &field, idxInfo)
 		if err != nil {
 			return err
 		}

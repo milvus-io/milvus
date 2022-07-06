@@ -77,12 +77,14 @@ message BuildIndexRequest {
   int64 indexBuildID = 1;
   string index_name = 2;
   int64 indexID = 3;
-  repeated string data_paths = 5;
-  repeated common.KeyValuePair type_params = 6;
+  repeated string data_paths = 5 [deprecated = true]; // not saved in etcd
+  repeated common.KeyValuePair type_params = 6 [deprecated = true]; // not saved in etcd
   repeated common.KeyValuePair index_params = 7;
-  int64 num_rows = 8;
-  schema.FieldSchema field_schema = 9;
+  int64 num_rows = 8 [deprecated = true]; // not saved in etcd
+  schema.FieldSchema field_schema = 9 [deprecated = true]; // not saved in etcd
   int64 segmentID = 10;
+  int64 FieldID = 11;
+  int64 collectionID = 12;
 }
 
 message BuildIndexResponse {

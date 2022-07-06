@@ -18,6 +18,7 @@ package indexcoord
 
 import (
 	"context"
+	"fmt"
 	"path"
 	"strconv"
 	"sync"
@@ -26,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"go.uber.org/zap"
 )
 
@@ -154,6 +156,53 @@ func (ib *indexBuilder) schedule() {
 	}
 }
 
+func (ib *indexBuilder) toIndexBuildRequest(indexMeta *indexpb.IndexMeta) (*indexpb.CreateIndexRequest, error) {
+	// 1. populate: segment info from datacoord
+	segID := indexMeta.Req.SegmentID
+	segmentInfos, err := ib.ic.broker.getDataSegmentInfosByIDs([]UniqueID{segID})
+	if err != nil {
+		log.Error("get SegmentInfo failed", zap.Error(err))
+		return nil, fmt.Errorf("get SegmentInfo failed for segmentID %d", segID)
+	}
+
+	// 2. populate: field schema from rootcoord
+	collID := indexMeta.Req.CollectionID
+	fieldID := indexMeta.Req.FieldID
+	var fieldSchema *schemapb.FieldSchema
+	if collID == 0 { // for backward compatible
+		fieldSchema = indexMeta.Req.FieldSchema
+	} else {
+		fieldSchema, err = ib.ic.broker.getFieldSchemaByID(collID, fieldID)
+		if err != nil {
+			log.Error("get FieldSchema failed", zap.Error(err))
+			return nil, fmt.Errorf("get FieldSchema failed for fieldID %d, collID %d", fieldID, collID)
+		}
+	}
+
+	// get data paths
+	var dataPaths []string
+	for _, fieldBinlog := range segmentInfos[0].Binlogs {
+		if fieldBinlog.FieldID == fieldSchema.FieldID {
+			for _, binlog := range fieldBinlog.Binlogs {
+				dataPaths = append(dataPaths, binlog.LogPath)
+			}
+		}
+	}
+
+	req := &indexpb.CreateIndexRequest{
+		IndexBuildID: indexMeta.IndexBuildID,
+		IndexName:    indexMeta.Req.IndexName,
+		IndexID:      indexMeta.Req.IndexID,
+		Version:      indexMeta.IndexVersion + 1,
+		MetaPath:     path.Join(indexFilePrefix, strconv.FormatInt(indexMeta.IndexBuildID, 10)),
+		DataPaths:    dataPaths,
+		TypeParams:   fieldSchema.TypeParams,
+		IndexParams:  indexMeta.Req.IndexParams,
+	}
+
+	return req, nil
+}
+
 func (ib *indexBuilder) process(buildID UniqueID) {
 	state := ib.tasks[buildID]
 	log.Info("index task is processing", zap.Int64("buildID", buildID), zap.String("task state", state.String()))
@@ -181,16 +230,13 @@ func (ib *indexBuilder) process(buildID UniqueID) {
 			ib.tasks[buildID] = indexTaskRetry
 			return
 		}
-		req := &indexpb.CreateIndexRequest{
-			IndexBuildID: buildID,
-			IndexName:    meta.indexMeta.Req.IndexName,
-			IndexID:      meta.indexMeta.Req.IndexID,
-			Version:      meta.indexMeta.IndexVersion + 1,
-			MetaPath:     path.Join(indexFilePrefix, strconv.FormatInt(buildID, 10)),
-			DataPaths:    meta.indexMeta.Req.DataPaths,
-			TypeParams:   meta.indexMeta.Req.TypeParams,
-			IndexParams:  meta.indexMeta.Req.IndexParams,
+
+		req, err := ib.toIndexBuildRequest(meta.indexMeta)
+		if err != nil {
+			ib.tasks[buildID] = indexTaskRetry
+			return
 		}
+
 		if err := ib.ic.assignTask(client, req); err != nil {
 			// need to release lock then reassign, so set task state to retry
 			log.Error("index builder assign task to IndexNode failed", zap.Int64("buildID", buildID),
