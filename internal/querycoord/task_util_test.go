@@ -86,3 +86,41 @@ func TestThinWatchDmChannelsRequest(t *testing.T) {
 	thinReq := thinWatchDmChannelsRequest(watchDmChannelsRequest)
 	assert.Empty(t, thinReq.GetSegmentInfos())
 }
+
+func TestUpgradeCompatibility(t *testing.T) {
+	dataCoord := &dataCoordMock{}
+	ctx, cancel := context.WithCancel(context.Background())
+	handler, err := newGlobalMetaBroker(ctx, nil, dataCoord, nil, nil)
+	assert.Nil(t, err)
+
+	deltaChannel := &datapb.VchannelInfo{
+		CollectionID:        defaultCollectionID,
+		ChannelName:         "delta-channel1",
+		UnflushedSegments:   []*datapb.SegmentInfo{{ID: 1}},
+		FlushedSegments:     []*datapb.SegmentInfo{{ID: 2}},
+		DroppedSegments:     []*datapb.SegmentInfo{{ID: 3}},
+		UnflushedSegmentIds: []int64{1},
+	}
+
+	watchDmChannelsRequest := &querypb.WatchDmChannelsRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_WatchDmChannels,
+		},
+		Infos:  []*datapb.VchannelInfo{deltaChannel},
+		NodeID: 1,
+	}
+
+	fullWatchDmChannelsRequest, err := generateFullWatchDmChannelsRequest(handler, watchDmChannelsRequest)
+	assert.Nil(t, err)
+	assert.NotEmpty(t, fullWatchDmChannelsRequest.GetSegmentInfos())
+	vChannel := fullWatchDmChannelsRequest.GetInfos()[0]
+	assert.Equal(t, []*datapb.SegmentInfo{}, vChannel.GetUnflushedSegments())
+	assert.Equal(t, []*datapb.SegmentInfo{}, vChannel.GetFlushedSegments())
+	assert.Equal(t, []*datapb.SegmentInfo{}, vChannel.GetDroppedSegments())
+	assert.NotEmpty(t, vChannel.GetUnflushedSegmentIds())
+	assert.NotEmpty(t, vChannel.GetFlushedSegmentIds())
+	assert.NotEmpty(t, vChannel.GetDroppedSegmentIds())
+
+	assert.Equal(t, 1, len(vChannel.GetUnflushedSegmentIds()))
+	cancel()
+}

@@ -450,6 +450,7 @@ func BgCheckWithMaxWatchDuration(kv kv.TxnKV) ChannelBGChecker {
 				if err := proto.Unmarshal([]byte(v), watchInfo); err != nil {
 					return nil, err
 				}
+				reviseVChannelInfo(watchInfo.GetVchan())
 				// if a channel is not watched after maxWatchDuration,
 				// then we reallocate it to another node
 				if watchInfo.State == datapb.ChannelWatchState_Complete || watchInfo.State == datapb.ChannelWatchState_WatchSuccess {

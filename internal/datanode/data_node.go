@@ -357,6 +357,7 @@ func parsePutEventData(data []byte) (*datapb.ChannelWatchInfo, error) {
 	if watchInfo.Vchan == nil {
 		return nil, fmt.Errorf("invalid event: ChannelWatchInfo with nil VChannelInfo")
 	}
+	reviseVChannelInfo(watchInfo.GetVchan())
 	return &watchInfo, nil
 }
 

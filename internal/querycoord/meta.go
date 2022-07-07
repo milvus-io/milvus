@@ -203,6 +203,7 @@ func (m *MetaReplica) reloadFromKV() error {
 		if err != nil {
 			return err
 		}
+		reviseVChannelInfo(deltaChannelInfo)
 		m.deltaChannelInfos[collectionID] = append(m.deltaChannelInfos[collectionID], deltaChannelInfo)
 	}
 

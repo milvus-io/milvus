@@ -369,6 +369,97 @@ func TestReloadMetaFromKV(t *testing.T) {
 	assert.Equal(t, collectionInfo.CollectionID, replicas[0].CollectionID)
 }
 
+func TestVChannelInfoReadFromKVCompatible(t *testing.T) {
+	refreshParams()
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	assert.Nil(t, err)
+	defer etcdCli.Close()
+	kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
+	id := UniqueID(rand.Int31())
+	idAllocator := func() (UniqueID, error) {
+		newID := atomic.AddInt64(&id, 1)
+		return newID, nil
+	}
+	meta := &MetaReplica{
+		idAllocator:       idAllocator,
+		collectionInfos:   map[UniqueID]*querypb.CollectionInfo{},
+		dmChannelInfos:    map[string]*querypb.DmChannelWatchInfo{},
+		deltaChannelInfos: map[UniqueID][]*datapb.VchannelInfo{},
+		segmentsInfo:      newSegmentsInfo(kv),
+		replicas:          NewReplicaInfos(),
+	}
+	meta.setKvClient(kv)
+
+	kvs := make(map[string]string)
+	collectionInfo := &querypb.CollectionInfo{
+		CollectionID: defaultCollectionID,
+	}
+	collectionBlobs, err := proto.Marshal(collectionInfo)
+	assert.Nil(t, err)
+	collectionKey := fmt.Sprintf("%s/%d", collectionMetaPrefix, defaultCollectionID)
+	kvs[collectionKey] = string(collectionBlobs)
+
+	deltaChannel1 := &datapb.VchannelInfo{
+		CollectionID: defaultCollectionID,
+		ChannelName:  "delta-channel1",
+		FlushedSegments: []*datapb.SegmentInfo{{
+			ID:           1,
+			CollectionID: defaultCollectionID,
+		}},
+		UnflushedSegments: []*datapb.SegmentInfo{{
+			ID:           2,
+			CollectionID: defaultCollectionID,
+		}},
+		DroppedSegments: []*datapb.SegmentInfo{{
+			ID:           3,
+			CollectionID: defaultCollectionID,
+		}},
+	}
+	deltaChannel2 := &datapb.VchannelInfo{
+		CollectionID: defaultCollectionID,
+		ChannelName:  "delta-channel2",
+		FlushedSegments: []*datapb.SegmentInfo{{
+			ID:           4,
+			CollectionID: defaultCollectionID,
+		}},
+		UnflushedSegments: []*datapb.SegmentInfo{{
+			ID:           5,
+			CollectionID: defaultCollectionID,
+		}},
+		DroppedSegments: []*datapb.SegmentInfo{{
+			ID:           6,
+			CollectionID: defaultCollectionID,
+		}},
+	}
+
+	infos := []*datapb.VchannelInfo{deltaChannel1, deltaChannel2}
+	for _, info := range infos {
+		infoBytes, err := proto.Marshal(info)
+		assert.Nil(t, err)
+
+		key := fmt.Sprintf("%s/%d/%s", deltaChannelMetaPrefix, defaultCollectionID, info.ChannelName)
+		kvs[key] = string(infoBytes)
+	}
+
+	err = kv.MultiSave(kvs)
+	assert.Nil(t, err)
+
+	err = meta.reloadFromKV()
+	assert.Nil(t, err)
+
+	assert.Equal(t, 1, len(meta.collectionInfos))
+	collectionInfo, err = meta.getCollectionInfoByID(collectionInfo.CollectionID)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(collectionInfo.ReplicaIds))
+	assert.Equal(t, int32(1), collectionInfo.ReplicaNumber)
+
+	channels, err := meta.getDeltaChannelsByCollectionID(collectionInfo.CollectionID)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(channels[0].GetFlushedSegmentIds()))
+	assert.Equal(t, 1, len(channels[0].GetUnflushedSegmentIds()))
+	assert.Equal(t, 1, len(channels[0].GetDroppedSegmentIds()))
+}
+
 func TestSaveSegments(t *testing.T) {
 	refreshParams()
 	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
