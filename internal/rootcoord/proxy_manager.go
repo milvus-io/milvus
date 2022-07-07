@@ -152,7 +152,7 @@ func (p *proxyManager) handlePutEvent(e *clientv3.Event) error {
 	for _, f := range p.addSessionsFunc {
 		f(session)
 	}
-	metrics.RootCoordProxyCounter.WithLabelValues().Inc()
+	metrics.RootCoordProxyNum.WithLabelValues().Inc()
 	return nil
 }
 
@@ -165,7 +165,7 @@ func (p *proxyManager) handleDeleteEvent(e *clientv3.Event) error {
 	for _, f := range p.delSessionsFunc {
 		f(session)
 	}
-	metrics.RootCoordProxyCounter.WithLabelValues().Dec()
+	metrics.RootCoordProxyNum.WithLabelValues().Dec()
 	return nil
 }
 
@@ -230,5 +230,6 @@ func listProxyInEtcd(ctx context.Context, cli *clientv3.Client) (map[int64]*sess
 		}
 		sess[s.ServerID] = &s
 	}
+	metrics.RootCoordProxyNum.WithLabelValues().Set(float64(len(sess)))
 	return sess, nil
 }

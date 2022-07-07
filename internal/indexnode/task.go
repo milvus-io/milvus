@@ -386,7 +386,7 @@ func (it *IndexBuildTask) loadFieldData(ctx context.Context) (storage.FieldID, s
 		// In this case, it.internalErr is no longer nil and err does not need to be returned, otherwise it.err will also be assigned.
 		return storage.InvalidUniqueID, nil, err
 	}
-	loadVectorDuration := it.tr.RecordSpan()
+	loadVectorDuration := it.tr.RecordSpan().Milliseconds()
 	log.Debug("IndexNode load data success", zap.Int64("buildId", it.req.IndexBuildID))
 	it.tr.Record("load field data done")
 	metrics.IndexNodeLoadFieldLatency.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.GetNodeID(), 10)).Observe(float64(loadVectorDuration))
@@ -396,7 +396,8 @@ func (it *IndexBuildTask) loadFieldData(ctx context.Context) (storage.FieldID, s
 	if err2 != nil {
 		return storage.InvalidUniqueID, nil, err2
 	}
-	metrics.IndexNodeDecodeFieldLatency.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.GetNodeID(), 10)).Observe(float64(it.tr.RecordSpan()))
+	decodeDuration := it.tr.RecordSpan().Milliseconds()
+	metrics.IndexNodeDecodeFieldLatency.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.GetNodeID(), 10)).Observe(float64(decodeDuration))
 
 	if len(insertData.Data) != 1 {
 		return storage.InvalidUniqueID, nil, errors.New("we expect only one field in deserialized insert data")
@@ -452,7 +453,7 @@ func (it *IndexBuildTask) buildIndex(ctx context.Context) ([]*storage.Blob, erro
 			}
 		}
 
-		metrics.IndexNodeKnowhereBuildIndexLatency.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.GetNodeID(), 10)).Observe(float64(it.tr.RecordSpan()))
+		metrics.IndexNodeKnowhereBuildIndexLatency.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.GetNodeID(), 10)).Observe(float64(it.tr.RecordSpan().Milliseconds()))
 
 		it.tr.Record("build index done")
 	}
