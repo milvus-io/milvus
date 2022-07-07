@@ -21,90 +21,74 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/util/retry"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+
+	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
+	"github.com/milvus-io/milvus/internal/util/retry"
 )
 
-type mockFactory struct {
-	msgstream.Factory
-}
-
-func TestFlowGraph_DDNode_newDDNode(te *testing.T) {
+func TestFlowGraph_DDNode_newDDNode(t *testing.T) {
 	tests := []struct {
-		inCollID UniqueID
-
-		inFlushedSegs        []UniqueID
-		inFlushedChannelTs   Timestamp
-		inUnFlushedSegID     UniqueID
-		inUnFlushedChannelTs Timestamp
-
 		description string
+
+		inSealedSegs  []*datapb.SegmentInfo
+		inGrowingSegs []*datapb.SegmentInfo
 	}{
-		{UniqueID(1), []UniqueID{100, 101, 102}, 666666, 200, 666666,
-			"Input VchannelInfo with 3 flushed segs and 1 unflushed seg"},
-		{UniqueID(2), []UniqueID{103}, 666666, 200, 666666,
-			"Input VchannelInfo with 1 flushed seg and 1 unflushed seg"},
-		{UniqueID(3), []UniqueID{}, 666666, 200, 666666,
-			"Input VchannelInfo with 0 flushed segs and 1 unflushed seg"},
-		{UniqueID(3), []UniqueID{104}, 666666, 0, 0,
-			"Input VchannelInfo with 1 flushed seg and empty unflushed seg"},
+		{
+			"3 sealed segments and 1 growing segment",
+			[]*datapb.SegmentInfo{
+				getSegmentInfo(100, 10000),
+				getSegmentInfo(101, 10000),
+				getSegmentInfo(102, 10000)},
+			[]*datapb.SegmentInfo{
+				getSegmentInfo(200, 10000)},
+		},
+		{
+			"0 sealed segments and 0 growing segment",
+			[]*datapb.SegmentInfo{},
+			[]*datapb.SegmentInfo{},
+		},
 	}
 
+	var (
+		collectionID  = UniqueID(1)
+		channelName   = fmt.Sprintf("by-dev-rootcoord-dml-%s", t.Name())
+		droppedSegIDs = []UniqueID{}
+	)
+
 	for _, test := range tests {
-		te.Run(test.description, func(t *testing.T) {
-			di := &datapb.SegmentInfo{}
-
-			if test.inUnFlushedSegID != 0 {
-				di.ID = test.inUnFlushedSegID
-				di.DmlPosition = &internalpb.MsgPosition{Timestamp: test.inUnFlushedChannelTs}
-			}
-
-			var fi []*datapb.SegmentInfo
-			for _, id := range test.inFlushedSegs {
-				s := &datapb.SegmentInfo{ID: id}
-				fi = append(fi, s)
-			}
-
-			mmf := &mockMsgStreamFactory{
-				true, true,
-			}
-			ddNode := newDDNode(
+		t.Run(test.description, func(t *testing.T) {
+			mockFactory := &mockMsgStreamFactory{true, true}
+			ddNode, err := newDDNode(
 				context.Background(),
-				test.inCollID,
-				&datapb.VchannelInfo{
-					FlushedSegmentIds:   test.inFlushedSegs,
-					UnflushedSegmentIds: []int64{di.ID},
-					ChannelName:         "by-dev-rootcoord-dml-test",
-				},
-				[]*datapb.SegmentInfo{di},
-				mmf,
+				collectionID,
+				channelName,
+				droppedSegIDs,
+				test.inSealedSegs,
+				test.inGrowingSegs,
+				mockFactory,
 				newCompactionExecutor(),
 			)
+			require.NoError(t, err)
 			require.NotNil(t, ddNode)
-			assert.Equal(t, fmt.Sprintf("ddNode-%d-%s", ddNode.collectionID, ddNode.vchannelName), ddNode.Name())
-			assert.Equal(t, test.inCollID, ddNode.collectionID)
-			assert.Equal(t, len(test.inFlushedSegs), len(ddNode.flushedSegmentIDs))
-			assert.ElementsMatch(t, test.inFlushedSegs, ddNode.flushedSegmentIDs)
 
-			si, ok := ddNode.segID2SegInfo.Load(test.inUnFlushedSegID)
-			assert.True(t, ok)
-			assert.Equal(t, test.inUnFlushedSegID, si.(*datapb.SegmentInfo).GetID())
-			assert.Equal(t, test.inUnFlushedChannelTs, si.(*datapb.SegmentInfo).GetDmlPosition().GetTimestamp())
+			assert.Equal(t, fmt.Sprintf("ddNode-%d-%s", ddNode.collectionID, ddNode.vChannelName), ddNode.Name())
+
+			assert.Equal(t, len(test.inSealedSegs), len(ddNode.sealedSegInfo))
+			assert.Equal(t, len(test.inGrowingSegs), len(ddNode.growingSegInfo))
 		})
 	}
 }
 
-func TestFlowGraph_DDNode_Operate(to *testing.T) {
-	to.Run("Test DDNode Operate DropCollection Msg", func(te *testing.T) {
+func TestFlowGraph_DDNode_Operate(t *testing.T) {
+	t.Run("Test DDNode Operate DropCollection Msg", func(t *testing.T) {
 		// invalid inputs
 		invalidInTests := []struct {
 			in          []Msg
@@ -119,7 +103,7 @@ func TestFlowGraph_DDNode_Operate(to *testing.T) {
 		}
 
 		for _, test := range invalidInTests {
-			te.Run(test.description, func(t *testing.T) {
+			t.Run(test.description, func(t *testing.T) {
 				ddn := ddNode{}
 				rt := ddn.Operate(test.in)
 				assert.Empty(t, rt)
@@ -142,7 +126,7 @@ func TestFlowGraph_DDNode_Operate(to *testing.T) {
 		}
 
 		for _, test := range tests {
-			te.Run(test.description, func(t *testing.T) {
+			t.Run(test.description, func(t *testing.T) {
 				factory := dependency.NewDefaultFactory(true)
 				deltaStream, err := factory.NewMsgStream(context.Background())
 				assert.Nil(t, err)
@@ -152,7 +136,7 @@ func TestFlowGraph_DDNode_Operate(to *testing.T) {
 					ctx:                context.Background(),
 					collectionID:       test.ddnCollID,
 					deltaMsgStream:     deltaStream,
-					vchannelName:       "ddn_drop_msg",
+					vChannelName:       "ddn_drop_msg",
 					compactionExecutor: newCompactionExecutor(),
 				}
 
@@ -177,68 +161,32 @@ func TestFlowGraph_DDNode_Operate(to *testing.T) {
 		}
 	})
 
-	to.Run("Test DDNode Operate Insert Msg", func(te *testing.T) {
-		tests := []struct {
-			ddnCollID   UniqueID
-			inMsgCollID UniqueID
+	t.Run("Test DDNode Operate and filter insert msg", func(t *testing.T) {
+		factory := dependency.NewDefaultFactory(true)
+		deltaStream, err := factory.NewMsgStream(context.Background())
+		require.Nil(t, err)
+		deltaStream.SetRepackFunc(msgstream.DefaultRepackFunc)
+		deltaStream.AsProducer([]string{"DataNode-test-delta-channel-0"})
 
-			MsgEndTs  Timestamp
-			threshold Timestamp
-
-			ddnFlushedSegment UniqueID
-			inMsgSegID        UniqueID
-
-			expectedRtLen int
-			description   string
-		}{
-			{1, 1, 2000, 3000, 100, 100, 0,
-				"MsgEndTs(2000) < threshold(3000), inMsgSegID(100) IN ddnFlushedSeg {100}"},
-			{1, 1, 2000, 3000, 100, 200, 1,
-				"MsgEndTs(2000) < threshold(3000), inMsgSegID(200) NOT IN ddnFlushedSeg {100}"},
-			{1, 1, 4000, 3000, 100, 101, 1,
-				"Seg 101, MsgEndTs(4000) > FilterThreshold(3000)"},
-			{1, 1, 4000, 3000, 100, 200, 1,
-				"Seg 200, MsgEndTs(4000) > FilterThreshold(3000)"},
-			{1, 2, 4000, 3000, 100, 100, 0,
-				"inMsgCollID(2) != ddnCollID"},
+		var (
+			collectionID UniqueID = 1
+		)
+		// Prepare ddNode states
+		ddn := ddNode{
+			ctx:               context.Background(),
+			collectionID:      collectionID,
+			droppedSegmentIDs: []UniqueID{100},
+			deltaMsgStream:    deltaStream,
 		}
 
-		for _, test := range tests {
-			te.Run(test.description, func(t *testing.T) {
-				factory := dependency.NewDefaultFactory(true)
-				deltaStream, err := factory.NewMsgStream(context.Background())
-				assert.Nil(t, err)
-				deltaStream.SetRepackFunc(msgstream.DefaultRepackFunc)
-				deltaStream.AsProducer([]string{"DataNode-test-delta-channel-0"})
-				// Prepare ddNode states
-				ddn := ddNode{
-					ctx:               context.Background(),
-					flushedSegmentIDs: []int64{test.ddnFlushedSegment},
-					collectionID:      test.ddnCollID,
-					deltaMsgStream:    deltaStream,
-				}
-				FilterThreshold = test.threshold
+		tsMessages := []msgstream.TsMsg{getInsertMsg(100, 10000), getInsertMsg(200, 20000)}
+		var msgStreamMsg Msg = flowgraph.GenerateMsgStreamMsg(tsMessages, 0, 0, nil, nil)
 
-				// Prepare insert messages
-				var iMsg msgstream.TsMsg = &msgstream.InsertMsg{
-					BaseMsg: msgstream.BaseMsg{EndTimestamp: test.MsgEndTs},
-					InsertRequest: internalpb.InsertRequest{
-						Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_Insert},
-						CollectionID: test.inMsgCollID,
-						SegmentID:    test.inMsgSegID,
-					},
-				}
-				tsMessages := []msgstream.TsMsg{iMsg}
-				var msgStreamMsg Msg = flowgraph.GenerateMsgStreamMsg(tsMessages, 0, 0, nil, nil)
-
-				// Test
-				rt := ddn.Operate([]Msg{msgStreamMsg})
-				assert.Equal(t, test.expectedRtLen, len(rt[0].(*flowGraphMsg).insertMessages))
-			})
-		}
+		rt := ddn.Operate([]Msg{msgStreamMsg})
+		assert.Equal(t, 1, len(rt[0].(*flowGraphMsg).insertMessages))
 	})
 
-	to.Run("Test DDNode Operate Delete Msg", func(te *testing.T) {
+	t.Run("Test DDNode Operate Delete Msg", func(t *testing.T) {
 		tests := []struct {
 			ddnCollID   UniqueID
 			inMsgCollID UniqueID
@@ -253,7 +201,7 @@ func TestFlowGraph_DDNode_Operate(to *testing.T) {
 		}
 
 		for _, test := range tests {
-			te.Run(test.description, func(t *testing.T) {
+			t.Run(test.description, func(t *testing.T) {
 				factory := dependency.NewDefaultFactory(true)
 				deltaStream, err := factory.NewMsgStream(context.Background())
 				assert.Nil(t, err)
@@ -287,10 +235,10 @@ func TestFlowGraph_DDNode_Operate(to *testing.T) {
 		}
 	})
 
-	to.Run("Test forwardDeleteMsg failed", func(te *testing.T) {
+	t.Run("Test forwardDeleteMsg failed", func(t *testing.T) {
 		factory := dependency.NewDefaultFactory(true)
 		deltaStream, err := factory.NewMsgStream(context.Background())
-		assert.Nil(to, err)
+		assert.Nil(t, err)
 		deltaStream.SetRepackFunc(msgstream.DefaultRepackFunc)
 		// Prepare ddNode states
 		ddn := ddNode{
@@ -315,121 +263,231 @@ func TestFlowGraph_DDNode_Operate(to *testing.T) {
 
 		// Test
 		flowGraphRetryOpt = retry.Attempts(1)
-		assert.Panics(te, func() {
+		assert.Panics(t, func() {
 			ddn.Operate([]Msg{msgStreamMsg})
 		})
 	})
 }
 
-func TestFlowGraph_DDNode_filterMessages(te *testing.T) {
+func TestFlowGraph_DDNode_filterMessages(t *testing.T) {
 	tests := []struct {
-		ddnFlushedSegments []UniqueID
-		ddnSegID2Ts        map[UniqueID]Timestamp
-
-		inMsgSegID    UniqueID
-		inMsgSegEntTs Timestamp
-		expectedOut   bool
-
 		description string
+
+		droppedSegIDs  []UniqueID
+		sealedSegInfo  map[UniqueID]*datapb.SegmentInfo
+		growingSegInfo map[UniqueID]*datapb.SegmentInfo
+
+		inMsg    *msgstream.InsertMsg
+		expected bool
 	}{
-		{[]UniqueID{1, 2, 3}, map[UniqueID]Timestamp{4: 1000, 5: 2000}, 1, 1500, true,
-			"Seg 1 in flushedSegs {1, 2, 3}"},
-		{[]UniqueID{1, 2, 3}, map[UniqueID]Timestamp{4: 1000, 5: 2000}, 2, 1500, true,
-			"Seg 2 in flushedSegs {1, 2, 3}"},
-		{[]UniqueID{1, 2, 3}, map[UniqueID]Timestamp{4: 1000, 5: 2000}, 3, 1500, true,
-			"Seg 3 in flushedSegs {1, 2, 3}"},
-		{[]UniqueID{1, 2, 3}, map[UniqueID]Timestamp{4: 1000, 5: 2000}, 4, 1500, false,
-			"Seg 4, inMsgSegEntTs(1500) > SegCheckPoint(1000)"},
-		{[]UniqueID{1, 2, 3}, map[UniqueID]Timestamp{4: 1000, 5: 2000}, 4, 500, true,
-			"Seg 4, inMsgSegEntTs(500) <= SegCheckPoint(1000)"},
-		{[]UniqueID{1, 2, 3}, map[UniqueID]Timestamp{4: 1000, 5: 2000}, 4, 1000, true,
-			"Seg 4 inMsgSegEntTs(1000) <= SegCheckPoint(1000)"},
-		{[]UniqueID{1, 2, 3}, map[UniqueID]Timestamp{4: 1000, 5: 2000}, 5, 1500, true,
-			"Seg 5 inMsgSegEntTs(1500) <= SegCheckPoint(2000)"},
+		{"test dropped segments true",
+			[]UniqueID{100},
+			nil,
+			nil,
+			getInsertMsg(100, 10000),
+			true},
+		{"test dropped segments true 2",
+			[]UniqueID{100, 101, 102},
+			nil,
+			nil,
+			getInsertMsg(102, 10000),
+			true},
+		{"test sealed segments msgTs <= segmentTs true",
+			[]UniqueID{},
+			map[UniqueID]*datapb.SegmentInfo{
+				200: getSegmentInfo(200, 50000),
+				300: getSegmentInfo(300, 50000),
+			},
+			nil,
+			getInsertMsg(200, 10000),
+			true},
+		{"test sealed segments msgTs <= segmentTs true",
+			[]UniqueID{},
+			map[UniqueID]*datapb.SegmentInfo{
+				200: getSegmentInfo(200, 50000),
+				300: getSegmentInfo(300, 50000),
+			},
+			nil,
+			getInsertMsg(200, 50000),
+			true},
+		{"test sealed segments msgTs > segmentTs false",
+			[]UniqueID{},
+			map[UniqueID]*datapb.SegmentInfo{
+				200: getSegmentInfo(200, 50000),
+				300: getSegmentInfo(300, 50000),
+			},
+			nil,
+			getInsertMsg(222, 70000),
+			false},
+		{"test growing segments msgTs <= segmentTs true",
+			[]UniqueID{},
+			nil,
+			map[UniqueID]*datapb.SegmentInfo{
+				200: getSegmentInfo(200, 50000),
+				300: getSegmentInfo(300, 50000),
+			},
+			getInsertMsg(200, 10000),
+			true},
+		{"test growing segments msgTs > segmentTs false",
+			[]UniqueID{},
+			nil,
+			map[UniqueID]*datapb.SegmentInfo{
+				200: getSegmentInfo(200, 50000),
+				300: getSegmentInfo(300, 50000),
+			},
+			getInsertMsg(200, 70000),
+			false},
+		{"test not exist",
+			[]UniqueID{},
+			map[UniqueID]*datapb.SegmentInfo{
+				400: getSegmentInfo(500, 50000),
+				500: getSegmentInfo(400, 50000),
+			},
+			map[UniqueID]*datapb.SegmentInfo{
+				200: getSegmentInfo(200, 50000),
+				300: getSegmentInfo(300, 50000),
+			},
+			getInsertMsg(111, 70000),
+			false},
 	}
 
 	for _, test := range tests {
-		te.Run(test.description, func(t *testing.T) {
-			factory := dependency.NewDefaultFactory(true)
-			deltaStream, err := factory.NewMsgStream(context.Background())
-			assert.Nil(t, err)
+		t.Run(test.description, func(t *testing.T) {
 			// Prepare ddNode states
 			ddn := ddNode{
-				flushedSegmentIDs: test.ddnFlushedSegments,
-				deltaMsgStream:    deltaStream,
-			}
-
-			for k, v := range test.ddnSegID2Ts {
-				ddn.segID2SegInfo.Store(k, &datapb.SegmentInfo{DmlPosition: &internalpb.MsgPosition{Timestamp: v}})
-			}
-
-			// Prepare insert messages
-			var iMsg = &msgstream.InsertMsg{
-				BaseMsg: msgstream.BaseMsg{EndTimestamp: test.inMsgSegEntTs},
-				InsertRequest: internalpb.InsertRequest{
-					Base:      &commonpb.MsgBase{MsgType: commonpb.MsgType_Insert},
-					SegmentID: test.inMsgSegID,
-				},
+				droppedSegmentIDs: test.droppedSegIDs,
+				sealedSegInfo:     test.sealedSegInfo,
+				growingSegInfo:    test.growingSegInfo,
 			}
 
 			// Test
-			rt := ddn.filterFlushedSegmentInsertMessages(iMsg)
-			assert.Equal(t, test.expectedOut, rt)
-
-			si, ok := ddn.segID2SegInfo.Load(iMsg.GetSegmentID())
-			if !rt {
-				assert.False(t, ok)
-				assert.Nil(t, si)
-			}
+			got := ddn.tryToFilterSegmentInsertMessages(test.inMsg)
+			assert.Equal(t, test.expected, got)
 
 		})
 	}
-}
 
-func TestFlowGraph_DDNode_isFlushed(te *testing.T) {
-	tests := []struct {
-		influshedSegment []UniqueID
-		inSeg            UniqueID
+	t.Run("Test delete segment from sealed segments", func(t *testing.T) {
+		tests := []struct {
+			description string
+			segRemained bool
 
-		expectedOut bool
+			segTs Timestamp
+			msgTs Timestamp
 
-		description string
-	}{
-		{[]UniqueID{1, 2, 3}, 1, true,
-			"Input seg 1 in flushedSegs{1, 2, 3}"},
-		{[]UniqueID{1, 2, 3}, 2, true,
-			"Input seg 2 in flushedSegs{1, 2, 3}"},
-		{[]UniqueID{1, 2, 3}, 3, true,
-			"Input seg 3 in flushedSegs{1, 2, 3}"},
-		{[]UniqueID{1, 2, 3}, 4, false,
-			"Input seg 4 not in flushedSegs{1, 2, 3}"},
-		{[]UniqueID{}, 5, false,
-			"Input seg 5, no flushedSegs {}"},
-	}
-
-	for _, test := range tests {
-		te.Run(test.description, func(t *testing.T) {
-			fs := []*datapb.SegmentInfo{}
-			for _, id := range test.influshedSegment {
-				s := &datapb.SegmentInfo{ID: id}
-				fs = append(fs, s)
-			}
-			factory := dependency.NewDefaultFactory(true)
-			deltaStream, err := factory.NewMsgStream(context.Background())
-			assert.Nil(t, err)
-			ddn := &ddNode{flushedSegmentIDs: test.influshedSegment, deltaMsgStream: deltaStream}
-			assert.Equal(t, test.expectedOut, ddn.isFlushed(test.inSeg))
-		})
-	}
-}
-
-func TestFlowGraph_DDNode_isDropped(te *testing.T) {
-	genSegmentInfoByID := func(segmentID UniqueID) *datapb.SegmentInfo {
-		return &datapb.SegmentInfo{
-			ID: segmentID,
+			sealedSegInfo map[UniqueID]*datapb.SegmentInfo
+			inMsg         *msgstream.InsertMsg
+			msgFiltered   bool
+		}{
+			{"msgTs<segTs",
+				true,
+				50000,
+				10000,
+				map[UniqueID]*datapb.SegmentInfo{
+					100: getSegmentInfo(100, 50000),
+					101: getSegmentInfo(101, 50000)},
+				getInsertMsg(100, 10000),
+				true,
+			},
+			{"msgTs==segTs",
+				true,
+				50000,
+				10000,
+				map[UniqueID]*datapb.SegmentInfo{
+					100: getSegmentInfo(100, 50000),
+					101: getSegmentInfo(101, 50000)},
+				getInsertMsg(100, 50000),
+				true,
+			},
+			{"msgTs>segTs",
+				false,
+				50000,
+				10000,
+				map[UniqueID]*datapb.SegmentInfo{
+					100: getSegmentInfo(100, 70000),
+					101: getSegmentInfo(101, 50000)},
+				getInsertMsg(300, 60000),
+				false,
+			},
 		}
-	}
 
+		for _, test := range tests {
+			t.Run(test.description, func(t *testing.T) {
+				ddn := &ddNode{sealedSegInfo: test.sealedSegInfo}
+
+				got := ddn.tryToFilterSegmentInsertMessages(test.inMsg)
+				assert.Equal(t, test.msgFiltered, got)
+
+				if test.segRemained {
+					assert.Equal(t, 2, len(ddn.sealedSegInfo))
+				} else {
+					assert.Equal(t, 1, len(ddn.sealedSegInfo))
+				}
+
+				_, ok := ddn.sealedSegInfo[test.inMsg.GetSegmentID()]
+				assert.Equal(t, test.segRemained, ok)
+			})
+		}
+	})
+
+	t.Run("Test delete segment from growing segments", func(t *testing.T) {
+		tests := []struct {
+			description string
+			segRemained bool
+
+			growingSegInfo map[UniqueID]*datapb.SegmentInfo
+			inMsg          *msgstream.InsertMsg
+			msgFiltered    bool
+		}{
+			{"msgTs<segTs",
+				true,
+				map[UniqueID]*datapb.SegmentInfo{
+					100: getSegmentInfo(100, 50000),
+					101: getSegmentInfo(101, 50000)},
+				getInsertMsg(100, 10000),
+				true,
+			},
+			{"msgTs==segTs",
+				true,
+				map[UniqueID]*datapb.SegmentInfo{
+					100: getSegmentInfo(100, 50000),
+					101: getSegmentInfo(101, 50000)},
+				getInsertMsg(100, 50000),
+				true,
+			},
+			{"msgTs>segTs",
+				false,
+				map[UniqueID]*datapb.SegmentInfo{
+					100: getSegmentInfo(100, 50000),
+					101: getSegmentInfo(101, 50000)},
+				getInsertMsg(100, 60000),
+				false,
+			},
+		}
+
+		for _, test := range tests {
+			t.Run(test.description, func(t *testing.T) {
+				ddn := &ddNode{
+					growingSegInfo: test.growingSegInfo,
+				}
+
+				got := ddn.tryToFilterSegmentInsertMessages(test.inMsg)
+				assert.Equal(t, test.msgFiltered, got)
+
+				if test.segRemained {
+					assert.Equal(t, 2, len(ddn.growingSegInfo))
+				} else {
+					assert.Equal(t, 1, len(ddn.growingSegInfo))
+				}
+
+				_, ok := ddn.growingSegInfo[test.inMsg.GetSegmentID()]
+				assert.Equal(t, test.segRemained, ok)
+			})
+		}
+	})
+}
+
+func TestFlowGraph_DDNode_isDropped(t *testing.T) {
 	tests := []struct {
 		indroppedSegment []*datapb.SegmentInfo
 		inSeg            UniqueID
@@ -438,20 +496,20 @@ func TestFlowGraph_DDNode_isDropped(te *testing.T) {
 
 		description string
 	}{
-		{[]*datapb.SegmentInfo{genSegmentInfoByID(1), genSegmentInfoByID(2), genSegmentInfoByID(3)}, 1, true,
-			"Input seg 1 in droppedSegs{1, 2, 3}"},
-		{[]*datapb.SegmentInfo{genSegmentInfoByID(1), genSegmentInfoByID(2), genSegmentInfoByID(3)}, 2, true,
-			"Input seg 2 in droppedSegs{1, 2, 3}"},
-		{[]*datapb.SegmentInfo{genSegmentInfoByID(1), genSegmentInfoByID(2), genSegmentInfoByID(3)}, 3, true,
-			"Input seg 3 in droppedSegs{1, 2, 3}"},
-		{[]*datapb.SegmentInfo{genSegmentInfoByID(1), genSegmentInfoByID(2), genSegmentInfoByID(3)}, 4, false,
-			"Input seg 4 not in droppedSegs{1, 2, 3}"},
+		{[]*datapb.SegmentInfo{getSegmentInfo(1, 0), getSegmentInfo(2, 0), getSegmentInfo(3, 0)}, 1, true,
+			"Input seg 1 in droppedSegs{1,2,3}"},
+		{[]*datapb.SegmentInfo{getSegmentInfo(1, 0), getSegmentInfo(2, 0), getSegmentInfo(3, 0)}, 2, true,
+			"Input seg 2 in droppedSegs{1,2,3}"},
+		{[]*datapb.SegmentInfo{getSegmentInfo(1, 0), getSegmentInfo(2, 0), getSegmentInfo(3, 0)}, 3, true,
+			"Input seg 3 in droppedSegs{1,2,3}"},
+		{[]*datapb.SegmentInfo{getSegmentInfo(1, 0), getSegmentInfo(2, 0), getSegmentInfo(3, 0)}, 4, false,
+			"Input seg 4 not in droppedSegs{1,2,3}"},
 		{[]*datapb.SegmentInfo{}, 5, false,
 			"Input seg 5, no droppedSegs {}"},
 	}
 
 	for _, test := range tests {
-		te.Run(test.description, func(t *testing.T) {
+		t.Run(test.description, func(t *testing.T) {
 			dsIDs := []int64{}
 			for _, seg := range test.indroppedSegment {
 				dsIDs = append(dsIDs, seg.GetID())
@@ -463,4 +521,26 @@ func TestFlowGraph_DDNode_isDropped(te *testing.T) {
 			assert.Equal(t, test.expectedOut, ddn.isDropped(test.inSeg))
 		})
 	}
+}
+
+func getSegmentInfo(segmentID UniqueID, ts Timestamp) *datapb.SegmentInfo {
+	return &datapb.SegmentInfo{
+		ID:          segmentID,
+		DmlPosition: &internalpb.MsgPosition{Timestamp: ts},
+	}
+}
+
+func getInsertMsg(segmentID UniqueID, ts Timestamp) *msgstream.InsertMsg {
+	return &msgstream.InsertMsg{
+		BaseMsg: msgstream.BaseMsg{EndTimestamp: ts},
+		InsertRequest: internalpb.InsertRequest{
+			Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_Insert},
+			SegmentID:    segmentID,
+			CollectionID: 1,
+		},
+	}
+}
+
+type mockFactory struct {
+	msgstream.Factory
 }
