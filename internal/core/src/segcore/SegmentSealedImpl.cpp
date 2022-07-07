@@ -381,14 +381,7 @@ SegmentSealedImpl::vector_search(int64_t vec_count,
     auto vec_data = insert_record_.get_field_data_base(field_id);
     AssertInfo(vec_data->num_chunk() == 1, "num chunk not equal to 1 for sealed segment");
     auto chunk_data = vec_data->get_chunk_data(0);
-
-    auto sub_qr = [&] {
-        if (field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
-            return query::FloatSearchBruteForce(dataset, chunk_data, row_count, bitset);
-        } else {
-            return query::BinarySearchBruteForce(dataset, chunk_data, row_count, bitset);
-        }
-    }();
+    auto sub_qr = query::BruteForceSearch(dataset, chunk_data, row_count, bitset);
 
     SearchResult results;
     results.distances_ = std::move(sub_qr.mutable_distances());
