@@ -72,7 +72,3 @@ func (m *GrpcProxyClient) InvalidateCredentialCache(ctx context.Context, in *pro
 func (m *GrpcProxyClient) UpdateCredentialCache(ctx context.Context, in *proxypb.UpdateCredCacheRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }
-
-func (m *GrpcProxyClient) ClearCredUsersCache(ctx context.Context, in *internalpb.ClearCredUsersCacheRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.Err
-}

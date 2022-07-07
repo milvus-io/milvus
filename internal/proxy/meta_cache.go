@@ -65,8 +65,6 @@ type Cache interface {
 	GetCredentialInfo(ctx context.Context, username string) (*internalpb.CredentialInfo, error)
 	RemoveCredential(username string)
 	UpdateCredential(credInfo *internalpb.CredentialInfo)
-	GetCredUsernames(ctx context.Context) ([]string, error)
-	ClearCredUsers()
 }
 
 type collectionInfo struct {
@@ -106,12 +104,11 @@ type MetaCache struct {
 	rootCoord  types.RootCoord
 	queryCoord types.QueryCoord
 
-	collInfo         map[string]*collectionInfo
-	credMap          map[string]*internalpb.CredentialInfo // cache for credential, lazy load
-	credUsernameList []string                              // no need initialize when NewMetaCache
-	mu               sync.RWMutex
-	credMut          sync.RWMutex
-	shardMgr         *shardClientMgr
+	collInfo map[string]*collectionInfo
+	credMap  map[string]*internalpb.CredentialInfo // cache for credential, lazy load
+	mu       sync.RWMutex
+	credMut  sync.RWMutex
+	shardMgr *shardClientMgr
 }
 
 // globalMetaCache is singleton instance of Cache
@@ -523,20 +520,11 @@ func (m *MetaCache) GetCredentialInfo(ctx context.Context, username string) (*in
 	return credInfo, nil
 }
 
-func (m *MetaCache) ClearCredUsers() {
-	m.credMut.Lock()
-	defer m.credMut.Unlock()
-	// clear credUsernameList
-	m.credUsernameList = nil
-}
-
 func (m *MetaCache) RemoveCredential(username string) {
 	m.credMut.Lock()
 	defer m.credMut.Unlock()
 	// delete pair in credMap
 	delete(m.credMap, username)
-	// clear credUsernameList
-	m.credUsernameList = nil
 }
 
 func (m *MetaCache) UpdateCredential(credInfo *internalpb.CredentialInfo) {
@@ -551,34 +539,6 @@ func (m *MetaCache) UpdateCredential(credInfo *internalpb.CredentialInfo) {
 	m.credMap[username].Username = username
 	m.credMap[username].Sha256Password = credInfo.Sha256Password
 	m.credMap[username].EncryptedPassword = credInfo.EncryptedPassword
-}
-
-func (m *MetaCache) UpdateCredUsersListCache(usernames []string) {
-	m.credMut.Lock()
-	defer m.credMut.Unlock()
-	m.credUsernameList = usernames
-}
-
-func (m *MetaCache) GetCredUsernames(ctx context.Context) ([]string, error) {
-	m.credMut.RLock()
-	usernames := m.credUsernameList
-	m.credMut.RUnlock()
-
-	if usernames == nil {
-		req := &milvuspb.ListCredUsersRequest{
-			Base: &commonpb.MsgBase{
-				MsgType: commonpb.MsgType_ListCredUsernames,
-			},
-		}
-		resp, err := m.rootCoord.ListCredUsers(ctx, req)
-		if err != nil {
-			return nil, err
-		}
-		usernames = resp.Usernames
-		m.UpdateCredUsersListCache(usernames)
-	}
-
-	return usernames, nil
 }
 
 // GetShards update cache if withCache == false
