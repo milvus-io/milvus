@@ -23,7 +23,7 @@ type indexBuilder struct {
 
 	// TODO @xiaocai2333: use priority queue
 	tasks  map[int64]indexTaskState
-	notify chan bool
+	notify chan struct{}
 
 	ic *IndexCoord
 
@@ -39,7 +39,7 @@ func newIndexBuilder(ctx context.Context, ic *IndexCoord, metaTable *metaTable, 
 		meta:             metaTable,
 		ic:               ic,
 		tasks:            make(map[int64]indexTaskState, 1024),
-		notify:           make(chan bool, 1024),
+		notify:           make(chan struct{}, 1024),
 		scheduleDuration: time.Second * 10,
 	}
 	ib.reloadFromKV(aliveNodes)
@@ -104,7 +104,7 @@ func (ib *indexBuilder) enqueue(buildID UniqueID) {
 	defer ib.taskMutex.Unlock()
 	ib.tasks[buildID] = indexTaskInit
 	// why use false?
-	ib.notify <- false
+	ib.notify <- struct{}{}
 }
 
 func (ib *indexBuilder) schedule() {
@@ -206,7 +206,7 @@ func (ib *indexBuilder) process(buildID UniqueID) {
 			return
 		}
 		ib.tasks[buildID] = indexTaskInit
-		ib.notify <- false
+		ib.notify <- struct{}{}
 
 	case indexTaskDeleted:
 		if exist && meta.indexMeta.NodeID != 0 {
@@ -270,7 +270,7 @@ func (ib *indexBuilder) updateStateByMeta(meta *indexpb.IndexMeta) {
 
 	if meta.State == commonpb.IndexState_Finished || meta.State == commonpb.IndexState_Failed {
 		ib.tasks[meta.IndexBuildID] = indexTaskDone
-		ib.notify <- false
+		ib.notify <- struct{}{}
 		log.Info("this task has been finished", zap.Int64("buildID", meta.IndexBuildID),
 			zap.String("original state", state.String()), zap.String("finish or failed", meta.State.String()))
 		return
@@ -281,7 +281,7 @@ func (ib *indexBuilder) updateStateByMeta(meta *indexpb.IndexMeta) {
 	log.Info("this task need to retry", zap.Int64("buildID", meta.IndexBuildID),
 		zap.String("original state", state.String()), zap.String("index state", meta.State.String()),
 		zap.Int64("original nodeID", meta.NodeID))
-	ib.notify <- false
+	ib.notify <- struct{}{}
 }
 
 func (ib *indexBuilder) markTaskAsDeleted(buildID UniqueID) {
@@ -291,7 +291,7 @@ func (ib *indexBuilder) markTaskAsDeleted(buildID UniqueID) {
 	if _, ok := ib.tasks[buildID]; ok {
 		ib.tasks[buildID] = indexTaskDeleted
 	}
-	ib.notify <- false
+	ib.notify <- struct{}{}
 }
 
 func (ib *indexBuilder) nodeDown(nodeID UniqueID) {
@@ -304,7 +304,7 @@ func (ib *indexBuilder) nodeDown(nodeID UniqueID) {
 			ib.tasks[meta.indexMeta.IndexBuildID] = indexTaskRetry
 		}
 	}
-	ib.notify <- false
+	ib.notify <- struct{}{}
 }
 
 func (ib *indexBuilder) hasTask(buildID UniqueID) bool {
