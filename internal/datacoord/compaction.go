@@ -197,15 +197,17 @@ func (c *compactionPlanHandler) completeCompaction(result *datapb.CompactionResu
 	}
 
 	plan := c.plans[planID].plan
+	var err error
 	switch plan.GetType() {
 	case datapb.CompactionType_InnerCompaction:
-		if err := c.handleInnerCompactionResult(plan, result); err != nil {
+		if err = c.handleInnerCompactionResult(plan, result); err != nil {
 			return err
 		}
 	case datapb.CompactionType_MergeCompaction, datapb.CompactionType_MixCompaction:
-		if err := c.handleMergeCompactionResult(plan, result, func(segment *datapb.CompactionSegmentBinlogs) bool {
+		err = c.handleMergeCompactionResult(plan, result, func(segment *datapb.CompactionSegmentBinlogs) bool {
 			return !c.segRefer.HasSegmentLock(segment.SegmentID)
-		}); err != nil {
+		})
+		if err != nil && !errors.Is(err, errReferLock) {
 			return err
 		}
 	default:
@@ -213,6 +215,11 @@ func (c *compactionPlanHandler) completeCompaction(result *datapb.CompactionResu
 	}
 	c.plans[planID] = c.plans[planID].shadowClone(setState(completed), setResult(result))
 	c.executingTaskNum--
+	if errors.Is(err, errReferLock) {
+		// If the compaction cannot be completed because the segment has a reference lock, mark the plan state as completed.
+		log.Warn("compaction finish with segment has reference lock", zap.Int64("planID", planID))
+		return nil
+	}
 	if c.plans[planID].plan.GetType() == datapb.CompactionType_MergeCompaction ||
 		c.plans[planID].plan.GetType() == datapb.CompactionType_MixCompaction {
 		c.flushCh <- result.GetSegmentID()

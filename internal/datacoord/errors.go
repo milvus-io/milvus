@@ -32,6 +32,9 @@ var errNilResponse = errors.New("response is nil")
 var errNilStatusResponse = errors.New("response has nil status")
 var errUnknownResponseType = errors.New("unknown response type")
 
+// errors for segment has reference lock
+var errReferLock = errors.New("segment has reference lock")
+
 func msgDataCoordIsUnhealthy(coordID UniqueID) string {
 	return fmt.Sprintf("DataCoord %d is not ready", coordID)
 }

@@ -327,7 +327,7 @@ func Test_compactionPlanHandler_segment_is_referenced(t *testing.T) {
 				},
 			}
 			err := c.completeCompaction(tt.args.result)
-			assert.Equal(t, tt.wantErr, err != nil)
+			assert.Equal(t, tt.wantErr, err == nil)
 		})
 	}
 }
