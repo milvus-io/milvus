@@ -617,7 +617,7 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 		log.Info("flow graph flushSegment tasks triggered",
 			zap.Bool("flushed", flushed),
 			zap.Int64("collection ID", req.GetCollectionID()),
-			zap.Int64s("segments", segmentIDs))
+			zap.Int64s("segments sending to flush channel", flushedSeg))
 		return flushedSeg, noErr
 	}
 
