@@ -1882,16 +1882,17 @@ func TestShardCluster_HandoffSegments(t *testing.T) {
 			}, buildMockQueryNode)
 		defer sc.Close()
 
+		// init first version
 		sc.SyncSegments(segmentEventsToSyncInfo(nil), segmentStateLoaded)
 
-		// add rc to all segments
+		// add rc to current version
 		_, versionID := sc.segmentAllocations(nil)
 
 		sig := make(chan struct{})
 		go func() {
 			err := sc.HandoffSegments(&querypb.SegmentChangeInfo{
 				OnlineSegments: []*querypb.SegmentInfo{
-					{SegmentID: 1, NodeID: 2, CollectionID: collectionID, DmChannel: vchannelName, NodeIds: []UniqueID{1}},
+					{SegmentID: 1, NodeID: 2, CollectionID: collectionID, DmChannel: vchannelName, NodeIds: []UniqueID{2}},
 				},
 				OfflineSegments: []*querypb.SegmentInfo{
 					{SegmentID: 1, NodeID: 1, CollectionID: collectionID, DmChannel: vchannelName, NodeIds: []UniqueID{1}},
@@ -1910,7 +1911,7 @@ func TestShardCluster_HandoffSegments(t *testing.T) {
 		}
 		sc.finishUsage(versionID)
 
-		// wait for handoff appended into list
+		// after handoff, the version id shall be changed
 		assert.Eventually(t, func() bool {
 			sc.mut.RLock()
 			defer sc.mut.RUnlock()
@@ -1926,8 +1927,6 @@ func TestShardCluster_HandoffSegments(t *testing.T) {
 			}
 		}
 		sc.finishUsage(tmpVersionID)
-		// rc shall be 0 now
-		sc.finishUsage(versionID)
 
 		// wait handoff finished
 		<-sig
