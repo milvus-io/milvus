@@ -200,10 +200,10 @@ func (it *IndexBuildTask) updateTaskState(indexMeta *indexpb.IndexMeta, err erro
 	if err != nil {
 		log.Warn("IndexNode IndexBuildTask internal err, mark the task as retry", zap.Int64("buildID", it.req.IndexBuildID), zap.Error(err))
 		it.SetState(TaskStateRetry)
-	} else if indexMeta.Version > it.req.Version || indexMeta.State == commonpb.IndexState_Finished {
+	} else if indexMeta.IndexVersion > it.req.Version || indexMeta.State == commonpb.IndexState_Finished {
 		it.SetState(TaskStateAbandon)
 	} else if indexMeta.MarkDeleted {
-		it.SetState(TaskStateDeleted)
+		it.SetState(TaskStateAbandon)
 	}
 	return it.GetState()
 }
@@ -216,7 +216,7 @@ func (it *IndexBuildTask) saveIndexMeta(ctx context.Context) error {
 	fn := func() error {
 		indexMeta, version, err := it.loadIndexMeta(ctx)
 		if err != nil {
-			log.Info("IndexNode IndexBuildTask saveIndexMeta fail to load index meta,", zap.Int64("build Id", indexMeta.IndexBuildID), zap.Error(err))
+			log.Error("IndexNode IndexBuildTask saveIndexMeta fail to load index meta,", zap.Int64("build Id", indexMeta.IndexBuildID), zap.Error(err))
 			return err
 		}
 		taskState := it.updateTaskState(indexMeta, it.internalErr)
@@ -224,11 +224,9 @@ func (it *IndexBuildTask) saveIndexMeta(ctx context.Context) error {
 			log.Warn("IndexNode IndexBuildTask saveIndexMeta success because task abandon", zap.String("TaskState", taskState.String()),
 				zap.Int64("IndexBuildID", indexMeta.IndexBuildID))
 			return nil
-		} else if taskState == TaskStateDeleted {
-			log.Info("IndexNode IndexBuildTask saveIndexMeta", zap.String("TaskState", taskState.String()),
-				zap.Int64("IndexBuildID", indexMeta.IndexBuildID))
-			indexMeta.State = commonpb.IndexState_Finished
-		} else if taskState == TaskStateFailed {
+		}
+
+		if taskState == TaskStateFailed {
 			log.Error("IndexNode IndexBuildTask saveIndexMeta set indexMeta.state to IndexState_Failed",
 				zap.String("TaskState", taskState.String()),
 				zap.Int64("IndexBuildID", indexMeta.IndexBuildID), zap.Error(it.err))
@@ -348,6 +346,9 @@ func (it *IndexBuildTask) loadFieldData(ctx context.Context) (storage.FieldID, s
 	getValueByPath := func(path string) ([]byte, error) {
 		data, err := it.cm.Read(path)
 		if err != nil {
+			if errors.Is(err, ErrNoSuchKey) {
+				return nil, ErrNoSuchKey
+			}
 			return nil, err
 		}
 		return data, nil
@@ -523,9 +524,9 @@ func (it *IndexBuildTask) saveIndex(ctx context.Context, blobs []*storage.Blob) 
 				return err
 			}
 			//log.Debug("IndexNode Unmarshal indexMeta success ", zap.Any("meta", indexMeta))
-			if indexMeta.Version > it.req.Version {
+			if indexMeta.IndexVersion > it.req.Version {
 				log.Warn("IndexNode try saveIndexFile failed req.Version is low", zap.Any("req.Version", it.req.Version),
-					zap.Any("indexMeta.Version", indexMeta.Version))
+					zap.Any("indexMeta.Version", indexMeta.IndexVersion))
 				return errors.New("This task has been reassigned, check indexMeta.version and request ")
 			}
 			return it.cm.Write(savePath, blob.Value)
@@ -575,10 +576,15 @@ func (it *IndexBuildTask) Execute(ctx context.Context) error {
 	var blobs []*storage.Blob
 	blobs, err = it.buildIndex(ctx)
 	if err != nil {
-		it.SetState(TaskStateFailed)
-		log.Error("IndexNode IndexBuildTask Execute buildIndex failed",
-			zap.Int64("buildId", it.req.IndexBuildID),
-			zap.Error(err))
+		if errors.Is(err, ErrNoSuchKey) {
+			it.SetState(TaskStateFailed)
+			log.Error("IndexNode IndexBuildTask Execute buildIndex failed",
+				zap.Int64("buildId", it.req.IndexBuildID), zap.Error(err))
+			return err
+		}
+		it.SetState(TaskStateRetry)
+		log.Error("IndexNode IndexBuildTask Execute buildIndex failed, need to retry",
+			zap.Int64("buildId", it.req.IndexBuildID), zap.Error(err))
 		return err
 	}
 

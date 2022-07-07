@@ -138,7 +138,7 @@ func TestIndexNode(t *testing.T) {
 		indexMeta := &indexpb.IndexMeta{
 			IndexBuildID: indexBuildID1,
 			State:        commonpb.IndexState_InProgress,
-			Version:      1,
+			IndexVersion: 1,
 		}
 
 		value, err := proto.Marshal(indexMeta)
@@ -253,7 +253,7 @@ func TestIndexNode(t *testing.T) {
 		indexMeta := &indexpb.IndexMeta{
 			IndexBuildID: indexBuildID2,
 			State:        commonpb.IndexState_InProgress,
-			Version:      1,
+			IndexVersion: 1,
 		}
 
 		value, err := proto.Marshal(indexMeta)
@@ -365,7 +365,7 @@ func TestIndexNode(t *testing.T) {
 		indexMeta := &indexpb.IndexMeta{
 			IndexBuildID: indexBuildID1,
 			State:        commonpb.IndexState_InProgress,
-			Version:      1,
+			IndexVersion: 1,
 			MarkDeleted:  true,
 		}
 
@@ -412,7 +412,7 @@ func TestIndexNode(t *testing.T) {
 		err = proto.Unmarshal([]byte(strValue), &indexMetaTmp)
 		assert.Nil(t, err)
 		assert.Equal(t, true, indexMetaTmp.MarkDeleted)
-		assert.Equal(t, int64(1), indexMetaTmp.Version)
+		assert.Equal(t, int64(1), indexMetaTmp.IndexVersion)
 		//for indexMetaTmp.State != commonpb.IndexState_Finished {
 		//	time.Sleep(100 * time.Millisecond)
 		//	strValue, err := in.etcdKV.Load(metaPath3)
@@ -553,7 +553,7 @@ func TestCreateIndexFailed(t *testing.T) {
 		indexMeta := &indexpb.IndexMeta{
 			IndexBuildID: indexBuildID1,
 			State:        commonpb.IndexState_InProgress,
-			Version:      1,
+			IndexVersion: 1,
 		}
 
 		value, err := proto.Marshal(indexMeta)
@@ -671,7 +671,7 @@ func TestCreateIndexFailed(t *testing.T) {
 		indexMeta2 := &indexpb.IndexMeta{
 			IndexBuildID: indexBuildID2,
 			State:        commonpb.IndexState_InProgress,
-			Version:      1,
+			IndexVersion: 1,
 		}
 
 		value2, err := proto.Marshal(indexMeta2)

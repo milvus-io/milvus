@@ -237,6 +237,10 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 	return s.indexnode.CreateIndex(ctx, req)
 }
 
+func (s *Server) GetTaskSlots(ctx context.Context, req *indexpb.GetTaskSlotsRequest) (*indexpb.GetTaskSlotsResponse, error) {
+	return s.indexnode.GetTaskSlots(ctx, req)
+}
+
 // GetMetrics gets the metrics info of IndexNode.
 func (s *Server) GetMetrics(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return s.indexnode.GetMetrics(ctx, request)

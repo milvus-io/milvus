@@ -310,6 +310,7 @@ type IndexNode interface {
 	// CreateIndex receives request from IndexCoordinator to build an index.
 	// Index building is asynchronous, so when an index building request comes, IndexNode records the task and returns.
 	CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error)
+	GetTaskSlots(ctx context.Context, req *indexpb.GetTaskSlotsRequest) (*indexpb.GetTaskSlotsResponse, error)
 
 	// GetMetrics gets the metrics about IndexNode.
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)

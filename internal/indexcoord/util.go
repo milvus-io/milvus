@@ -19,6 +19,7 @@ package indexcoord
 import (
 	"errors"
 	"strconv"
+	"strings"
 
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 
@@ -82,4 +83,12 @@ func estimateIndexSizeByReq(req *indexpb.BuildIndexRequest) (uint64, error) {
 		return estimateIndexSize(dim, req.GetNumRows(), req.GetFieldSchema().GetDataType())
 	}
 	return estimateScalarIndexSize(req)
+}
+
+func parseBuildIDFromFilePath(key string) (UniqueID, error) {
+	ss := strings.Split(key, "/")
+	if strings.HasSuffix(key, "/") {
+		return strconv.ParseInt(ss[len(ss)-2], 10, 64)
+	}
+	return strconv.ParseInt(ss[len(ss)-1], 10, 64)
 }

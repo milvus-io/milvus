@@ -17,6 +17,7 @@
 package storage
 
 import (
+	"fmt"
 	"path"
 	"testing"
 
@@ -391,13 +392,60 @@ func TestLocalCM(t *testing.T) {
 		assert.NoError(t, err)
 
 		pathPrefix := path.Join(testPrefix, "a")
-		r, err := testCM.ListWithPrefix(pathPrefix)
+		r, err := testCM.ListWithPrefix(pathPrefix, true)
 		assert.NoError(t, err)
 		assert.Equal(t, len(r), 2)
 
 		testCM.RemoveWithPrefix(testPrefix)
-		r, err = testCM.ListWithPrefix(pathPrefix)
+		r, err = testCM.ListWithPrefix(pathPrefix, true)
 		assert.NoError(t, err)
 		assert.Equal(t, len(r), 0)
+	})
+
+	t.Run("test ListWithPrefix", func(t *testing.T) {
+		testPrefix := "prefix-ListWithPrefix"
+
+		testCM := NewLocalChunkManager(RootPath(localPath))
+		defer testCM.RemoveWithPrefix(testPrefix)
+
+		key := path.Join(testPrefix, "abc", "def")
+		value := []byte("a")
+		err := testCM.Write(key, value)
+		assert.NoError(t, err)
+
+		key = path.Join(testPrefix, "abc", "deg")
+		err = testCM.Write(key, value)
+		assert.NoError(t, err)
+
+		key = path.Join(testPrefix, "abd")
+		err = testCM.Write(key, value)
+		assert.NoError(t, err)
+
+		key = path.Join(testPrefix, "bcd")
+		err = testCM.Write(key, value)
+		assert.NoError(t, err)
+
+		dirs, err := testCM.ListWithPrefix(testPrefix+"/", false)
+		assert.Nil(t, err)
+		fmt.Println(dirs)
+		assert.Equal(t, 3, len(dirs))
+
+		testPrefix2 := path.Join(testPrefix, "a")
+		dirs, err = testCM.ListWithPrefix(testPrefix2, false)
+		assert.Nil(t, err)
+		assert.Equal(t, 2, len(dirs))
+
+		dirs, err = testCM.ListWithPrefix(testPrefix2, false)
+		assert.Nil(t, err)
+		assert.Equal(t, 2, len(dirs))
+
+		err = testCM.RemoveWithPrefix(testPrefix)
+		assert.NoError(t, err)
+
+		dirs, err = testCM.ListWithPrefix(testPrefix, false)
+		assert.NoError(t, err)
+		fmt.Println(dirs)
+		// dir still exist
+		assert.Equal(t, 1, len(dirs))
 	})
 }
