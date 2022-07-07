@@ -250,17 +250,13 @@ func TestIndexBuilder(t *testing.T) {
 
 		for {
 			ib.taskMutex.Lock()
-			if len(ib.tasks) == 1 {
+			if len(ib.tasks) == 1 && indexTaskInProgress == ib.tasks[5] {
 				ib.taskMutex.Unlock()
 				break
 			}
 			ib.taskMutex.Unlock()
 			time.Sleep(time.Second)
 		}
-
-		ib.taskMutex.RLock()
-		assert.Equal(t, indexTaskInProgress, ib.tasks[5])
-		ib.taskMutex.RUnlock()
 	})
 
 	ib.Stop()
