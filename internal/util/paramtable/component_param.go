@@ -1101,6 +1101,9 @@ type dataNodeConfig struct {
 	// etcd
 	ChannelWatchSubPath string
 
+	// io concurrency to fetch stats logs
+	IOConcurrency int
+
 	CreatedTime time.Time
 	UpdatedTime time.Time
 }
@@ -1114,6 +1117,7 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	p.initInsertBinlogRootPath()
 	p.initStatsBinlogRootPath()
 	p.initDeleteBinlogRootPath()
+	p.initIOConcurrency()
 
 	p.initChannelWatchPath()
 }
@@ -1162,6 +1166,10 @@ func (p *dataNodeConfig) initDeleteBinlogRootPath() {
 
 func (p *dataNodeConfig) initChannelWatchPath() {
 	p.ChannelWatchSubPath = "channelwatch"
+}
+
+func (p *dataNodeConfig) initIOConcurrency() {
+	p.IOConcurrency = p.Base.ParseIntWithDefault("dataNode.dataSync.ioConcurrency", 10)
 }
 
 func (p *dataNodeConfig) SetNodeID(id UniqueID) {
