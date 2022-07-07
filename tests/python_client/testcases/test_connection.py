@@ -897,8 +897,7 @@ class TestConnectUriInvalid(TestcaseBase):
 
         uri = "{}://{}:{}".format(protocol, host, port)
         self.connection_wrap.connect(alias=connect_name, uri=uri, check_task=ct.CheckTasks.err_res,
-                                     # return code -1
-                                     check_items={ct.err_code: 0})
+                                     check_items={ct.err_code: -1})
 
     @pytest.mark.tags(ct.CaseLabel.L2)
     @pytest.mark.parametrize("host", ["256.256.256.256", "10.1.0"])
@@ -913,8 +912,7 @@ class TestConnectUriInvalid(TestcaseBase):
 
         uri = "{}://{}:{}".format(protocol, host, port)
         self.connection_wrap.connect(alias=connect_name, uri=uri, check_task=ct.CheckTasks.err_res,
-                                     # return code 2
-                                     check_items={ct.err_code: 0})
+                                     check_items={ct.err_code: 2})
 
     @pytest.mark.tags(ct.CaseLabel.L2)
     @pytest.mark.parametrize("port", ["8080", "443", "0", "65536"])
@@ -929,8 +927,7 @@ class TestConnectUriInvalid(TestcaseBase):
 
         uri = "{}://{}:{}".format(protocol, host, port)
         self.connection_wrap.connect(alias=connect_name, uri=uri, check_task=ct.CheckTasks.err_res,
-                                     # return code 2
-                                     check_items={ct.err_code: 0})
+                                     check_items={ct.err_code: 2})
 
     @pytest.mark.tags(ct.CaseLabel.L2)
     @pytest.mark.parametrize("host", ["www.google.com"])
@@ -946,8 +943,7 @@ class TestConnectUriInvalid(TestcaseBase):
 
         uri = "{}://{}:{}".format(protocol, host, port)
         self.connection_wrap.connect(alias=connect_name, uri=uri, check_task=ct.CheckTasks.err_res,
-                                     # return code 2
-                                     check_items={ct.err_code: 0})
+                                     check_items={ct.err_code: 2})
 
 
 class TestConnectAddressInvalid(TestcaseBase):
@@ -965,8 +961,7 @@ class TestConnectAddressInvalid(TestcaseBase):
         """
         address = "{}:{}".format(host, port)
         self.connection_wrap.connect(alias=connect_name, address=address, check_task=ct.CheckTasks.err_res,
-                                     # return code 2
-                                     check_items={ct.err_code: 0})
+                                     check_items={ct.err_code: 2})
 
     @pytest.mark.tags(ct.CaseLabel.L2)
     @pytest.mark.parametrize("port", ["100", "65536"])
@@ -979,5 +974,4 @@ class TestConnectAddressInvalid(TestcaseBase):
         """
         address = "{}:{}".format(host, port)
         self.connection_wrap.connect(alias=connect_name, address=address, check_task=ct.CheckTasks.err_res,
-                                     # return code 2
-                                     check_items={ct.err_code: 0})
+                                     check_items={ct.err_code: 2})
