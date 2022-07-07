@@ -699,7 +699,7 @@ func TestQueryCoord_watchHandoffSegmentLoop(t *testing.T) {
 		time.Sleep(2 * time.Second)
 		for i := 1; i < 10; i++ {
 			k := path.Join(util.HandoffSegmentPrefix, strconv.Itoa(i))
-			_, err = etcdCli.Delete(ctx, k)
+			err = etcdKV.Remove(k)
 			assert.Nil(t, err)
 		}
 		cancel()
@@ -738,7 +738,7 @@ func TestQueryCoord_watchHandoffSegmentLoop(t *testing.T) {
 
 		for i := 1; i < 10; i++ {
 			k := path.Join(util.HandoffSegmentPrefix, strconv.Itoa(i))
-			_, err = etcdCli.Delete(ctx, k)
+			err = etcdKV.Remove(k)
 			assert.Nil(t, err)
 		}
 	})
