@@ -51,6 +51,7 @@ func (c *Cluster) Startup(ctx context.Context, nodes []*NodeInfo) error {
 	for _, node := range nodes {
 		currs = append(currs, node.NodeID)
 	}
+	metrics.DataCoordNumDataNodes.WithLabelValues().Set(float64((len(nodes))))
 	return c.channelManager.Startup(ctx, currs)
 }
 

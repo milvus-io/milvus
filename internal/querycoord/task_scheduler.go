@@ -89,7 +89,6 @@ func (queue *taskQueue) addTask(t task) {
 		queue.tasks.InsertAfter(t, e)
 		break
 	}
-
 	metrics.QueryCoordNumParentTasks.WithLabelValues().Inc()
 }
 
@@ -206,6 +205,8 @@ func (scheduler *TaskScheduler) reloadFromKV() error {
 		triggerTasks[taskID] = t
 	}
 
+	metrics.QueryCoordNumParentTasks.WithLabelValues().Set(float64(len(triggerTasks)))
+
 	activeTasks := make(map[int64]task)
 	for index := range activeTaskIDKeys {
 		taskID, err := strconv.ParseInt(filepath.Base(activeTaskIDKeys[index]), 10, 64)
@@ -218,6 +219,7 @@ func (scheduler *TaskScheduler) reloadFromKV() error {
 		}
 		activeTasks[taskID] = t
 	}
+	metrics.QueryCoordNumChildTasks.WithLabelValues().Set(float64(len(triggerTasks)))
 
 	taskInfos := make(map[int64]taskState)
 	for index := range taskInfoKeys {

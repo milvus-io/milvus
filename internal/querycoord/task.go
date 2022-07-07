@@ -560,6 +560,7 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 					lct.setResultInfo(err)
 					return err
 				}
+				metrics.QueryCoordNumChildTasks.WithLabelValues().Inc()
 				replica.ShardReplicas = append(replica.ShardReplicas, &milvuspb.ShardReplica{
 					LeaderID:      task.NodeID,
 					LeaderAddr:    nodeInfo.(*queryNode).address,
@@ -568,7 +569,6 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 			}
 			log.Info("loadCollectionTask: add a childTask", zap.Int64("collectionID", collectionID), zap.String("task type", internalTask.msgType().String()), zap.Int64("msgID", lct.Base.MsgID))
 		}
-		metrics.QueryCoordNumChildTasks.WithLabelValues().Add(float64(len(internalTasks)))
 		log.Info("loadCollectionTask: assign child task done", zap.Int64("collectionID", collectionID), zap.Int64("msgID", lct.Base.MsgID))
 	}
 
@@ -1060,7 +1060,7 @@ func (lpt *loadPartitionTask) execute(ctx context.Context) error {
 					lpt.setResultInfo(err)
 					return err
 				}
-
+				metrics.QueryCoordNumChildTasks.WithLabelValues().Inc()
 				replica.ShardReplicas = append(replica.ShardReplicas, &milvuspb.ShardReplica{
 					LeaderID:      task.NodeID,
 					LeaderAddr:    nodeInfo.(*queryNode).address,
@@ -1069,7 +1069,6 @@ func (lpt *loadPartitionTask) execute(ctx context.Context) error {
 			}
 			log.Info("loadPartitionTask: add a childTask", zap.Int64("collectionID", collectionID), zap.String("task type", internalTask.msgType().String()))
 		}
-		metrics.QueryCoordNumChildTasks.WithLabelValues().Add(float64(len(internalTasks)))
 		log.Info("loadPartitionTask: assign child task done", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", partitionIDs), zap.Int64("msgID", lpt.Base.MsgID))
 	}
 
