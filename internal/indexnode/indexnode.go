@@ -255,8 +255,8 @@ func (i *IndexNode) UpdateStateCode(code internalpb.StateCode) {
 }
 
 // SetEtcdClient assigns parameter client to its member etcdCli
-func (node *IndexNode) SetEtcdClient(client *clientv3.Client) {
-	node.etcdCli = client
+func (i *IndexNode) SetEtcdClient(client *clientv3.Client) {
+	i.etcdCli = client
 }
 
 func (i *IndexNode) isHealthy() bool {
@@ -315,6 +315,29 @@ func (i *IndexNode) CreateIndex(ctx context.Context, request *indexpb.CreateInde
 	log.Info("IndexNode successfully scheduled", zap.Int64("indexBuildID", request.IndexBuildID))
 
 	metrics.IndexNodeBuildIndexTaskCounter.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.GetNodeID(), 10), metrics.SuccessLabel).Inc()
+	return ret, nil
+}
+
+// GetTaskSlots gets how many task the IndexNode can still perform.
+func (i *IndexNode) GetTaskSlots(ctx context.Context, req *indexpb.GetTaskSlotsRequest) (*indexpb.GetTaskSlotsResponse, error) {
+	if i.stateCode.Load().(internalpb.StateCode) != internalpb.StateCode_Healthy {
+		return &indexpb.GetTaskSlotsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "state code is not healthy",
+			},
+		}, nil
+	}
+
+	log.Info("IndexNode GetTaskSlots received")
+	ret := &indexpb.GetTaskSlotsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+	}
+
+	ret.Slots = int64(i.sched.GetTaskSlots())
+	log.Info("IndexNode GetTaskSlots success", zap.Int64("slots", ret.Slots))
 	return ret, nil
 }
 

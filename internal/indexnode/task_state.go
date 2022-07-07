@@ -23,7 +23,6 @@ const (
 	TaskStateAbandon TaskState = 1
 	TaskStateRetry   TaskState = 2
 	TaskStateFailed  TaskState = 3
-	TaskStateDeleted TaskState = 4
 )
 
 var TaskStateNames = map[TaskState]string{

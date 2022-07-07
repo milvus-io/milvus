@@ -1194,6 +1194,8 @@ type indexCoordConfig struct {
 
 	IndexStorageRootPath string
 
+	GCInterval time.Duration
+
 	CreatedTime time.Time
 	UpdatedTime time.Time
 }
@@ -1202,6 +1204,7 @@ func (p *indexCoordConfig) init(base *BaseTable) {
 	p.Base = base
 
 	p.initIndexStorageRootPath()
+	p.initGCInterval()
 }
 
 // initIndexStorageRootPath initializes the root path of index files.
@@ -1211,6 +1214,10 @@ func (p *indexCoordConfig) initIndexStorageRootPath() {
 		panic(err)
 	}
 	p.IndexStorageRootPath = path.Join(rootPath, "index_files")
+}
+
+func (p *indexCoordConfig) initGCInterval() {
+	p.GCInterval = time.Duration(p.Base.ParseInt64WithDefault("indexCoord.gc.interval", 60*10)) * time.Second
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1227,6 +1234,7 @@ type indexNodeConfig struct {
 	Alias string
 
 	IndexStorageRootPath string
+	BuildParallel        int
 
 	CreatedTime time.Time
 	UpdatedTime time.Time
@@ -1236,6 +1244,7 @@ func (p *indexNodeConfig) init(base *BaseTable) {
 	p.Base = base
 	p.NodeID.Store(UniqueID(0))
 	p.initIndexStorageRootPath()
+	p.initBuildParallel()
 }
 
 // InitAlias initializes an alias for the IndexNode role.
@@ -1249,6 +1258,10 @@ func (p *indexNodeConfig) initIndexStorageRootPath() {
 		panic(err)
 	}
 	p.IndexStorageRootPath = path.Join(rootPath, "index_files")
+}
+
+func (p *indexNodeConfig) initBuildParallel() {
+	p.BuildParallel = p.Base.ParseIntWithDefault("indexNode.scheduler.buildParallel", 1)
 }
 
 func (p *indexNodeConfig) SetNodeID(id UniqueID) {

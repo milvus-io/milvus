@@ -191,6 +191,10 @@ func (mcm *MinioChunkManager) Read(filePath string) ([]byte, error) {
 
 	data, err := ioutil.ReadAll(object)
 	if err != nil {
+		errResponse := minio.ToErrorResponse(err)
+		if errResponse.Code == "NoSuchKey" {
+			return nil, errors.New("NoSuchKey")
+		}
 		log.Warn("failed to read object", zap.String("path", filePath), zap.Error(err))
 		return nil, err
 	}
@@ -215,7 +219,7 @@ func (mcm *MinioChunkManager) MultiRead(keys []string) ([][]byte, error) {
 }
 
 func (mcm *MinioChunkManager) ReadWithPrefix(prefix string) ([]string, [][]byte, error) {
-	objectsKeys, err := mcm.ListWithPrefix(prefix)
+	objectsKeys, err := mcm.ListWithPrefix(prefix, true)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -295,8 +299,8 @@ func (mcm *MinioChunkManager) RemoveWithPrefix(prefix string) error {
 	return nil
 }
 
-func (mcm *MinioChunkManager) ListWithPrefix(prefix string) ([]string, error) {
-	objects := mcm.Client.ListObjects(mcm.ctx, mcm.bucketName, minio.ListObjectsOptions{Prefix: prefix, Recursive: true})
+func (mcm *MinioChunkManager) ListWithPrefix(prefix string, recursive bool) ([]string, error) {
+	objects := mcm.Client.ListObjects(mcm.ctx, mcm.bucketName, minio.ListObjectsOptions{Prefix: prefix, Recursive: recursive})
 	var objectsKeys []string
 
 	for object := range objects {

@@ -187,6 +187,13 @@ func TestIndexNodeClient(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
+	t.Run("GetTaskSlots", func(t *testing.T) {
+		req := &indexpb.GetTaskSlotsRequest{}
+		resp, err := inc.GetTaskSlots(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
 	err = ins.Stop()
 	assert.Nil(t, err)
 

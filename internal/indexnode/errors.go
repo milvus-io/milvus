@@ -21,6 +21,10 @@ import (
 	"fmt"
 )
 
+var (
+	ErrNoSuchKey = errors.New("NoSuchKey")
+)
+
 // msgIndexNodeIsUnhealthy return a message tha IndexNode is not healthy.
 func msgIndexNodeIsUnhealthy(nodeID UniqueID) string {
 	return fmt.Sprintf("index node %d is not ready", nodeID)
