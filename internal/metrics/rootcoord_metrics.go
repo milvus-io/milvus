@@ -6,8 +6,8 @@ import (
 )
 
 var (
-	// RootCoordProxyCounter counts the num of registered proxy nodes
-	RootCoordProxyCounter = prometheus.NewGaugeVec(
+	// RootCoordProxyNum records the num of registered proxy nodes
+	RootCoordProxyNum = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.RootCoordRole,
@@ -130,7 +130,7 @@ var (
 
 //RegisterRootCoord registers RootCoord metrics
 func RegisterRootCoord(registry *prometheus.Registry) {
-	registry.Register(RootCoordProxyCounter)
+	registry.Register(RootCoordProxyNum)
 
 	// for time tick
 	registry.MustRegister(RootCoordInsertChannelTimeTick)

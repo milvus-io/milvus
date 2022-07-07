@@ -1529,7 +1529,6 @@ func (c *Core) CreateCollection(ctx context.Context, in *milvuspb.CreateCollecti
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("CreateCollection", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("CreateCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.RootCoordNumOfCollections.Inc()
 	return succStatus(), nil
 }
 
@@ -1561,7 +1560,6 @@ func (c *Core) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRe
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("DropCollection", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("DropCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.RootCoordNumOfCollections.Dec()
 	return succStatus(), nil
 }
 
@@ -1715,7 +1713,6 @@ func (c *Core) CreatePartition(ctx context.Context, in *milvuspb.CreatePartition
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("CreatePartition", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("CreatePartition").Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.RootCoordNumOfPartitions.WithLabelValues().Inc()
 	return succStatus(), nil
 }
 
@@ -1750,7 +1747,6 @@ func (c *Core) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequ
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("DropPartition", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("DropPartition").Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.RootCoordNumOfPartitions.WithLabelValues().Dec()
 	return succStatus(), nil
 }
 

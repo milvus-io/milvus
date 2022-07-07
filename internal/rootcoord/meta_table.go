@@ -29,6 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -98,6 +99,8 @@ type MetaTable struct {
 	segID2IndexMeta map[typeutil.UniqueID]map[typeutil.UniqueID]pb.SegmentIndexInfo // collection id/index_id/partition_id/segment_id -> meta
 	indexID2Meta    map[typeutil.UniqueID]pb.IndexInfo                              // collection id/index_id -> meta
 
+	partitionNum int
+
 	ddLock   sync.RWMutex
 	credLock sync.RWMutex
 }
@@ -125,6 +128,7 @@ func (mt *MetaTable) reloadFromKV() error {
 	mt.partID2SegID = make(map[typeutil.UniqueID]map[typeutil.UniqueID]bool)
 	mt.segID2IndexMeta = make(map[typeutil.UniqueID]map[typeutil.UniqueID]pb.SegmentIndexInfo)
 	mt.indexID2Meta = make(map[typeutil.UniqueID]pb.IndexInfo)
+	mt.partitionNum = 0
 
 	_, values, err := mt.snapshot.LoadWithPrefix(CollectionAliasMetaPrefix, 0)
 	if err != nil {
@@ -155,6 +159,7 @@ func (mt *MetaTable) reloadFromKV() error {
 		}
 		mt.collID2Meta[collInfo.ID] = collInfo
 		mt.collName2ID[collInfo.Schema.Name] = collInfo.ID
+		mt.partitionNum += len(collInfo.PartitionIDs)
 	}
 
 	_, values, err = mt.txn.LoadWithPrefix(SegmentIndexMetaPrefix)
@@ -210,6 +215,8 @@ func (mt *MetaTable) reloadFromKV() error {
 		mt.indexID2Meta[meta.IndexID] = meta
 	}
 
+	metrics.RootCoordNumOfCollections.Set(float64(len(mt.collID2Meta)))
+	metrics.RootCoordNumOfPartitions.WithLabelValues().Set(float64(mt.partitionNum))
 	log.Debug("reload meta table from KV successfully")
 	return nil
 }
@@ -236,6 +243,7 @@ func (mt *MetaTable) AddCollection(coll *pb.CollectionInfo, ts typeutil.Timestam
 		coll.PartitionCreatedTimestamps[0] = ts
 	}
 	mt.collID2Meta[coll.ID] = *coll
+	metrics.RootCoordNumOfCollections.Set(float64(len(mt.collID2Meta)))
 	mt.collName2ID[coll.Schema.Name] = coll.ID
 	for _, i := range idx {
 		mt.indexID2Meta[i.IndexID] = *i
@@ -286,6 +294,8 @@ func (mt *MetaTable) DeleteCollection(collID typeutil.UniqueID, ts typeutil.Time
 
 	delete(mt.collID2Meta, collID)
 	delete(mt.collName2ID, collMeta.Schema.Name)
+
+	metrics.RootCoordNumOfCollections.Set(float64(len(mt.collID2Meta)))
 
 	// update segID2IndexMeta
 	for partID := range collMeta.PartitionIDs {
@@ -561,6 +571,8 @@ func (mt *MetaTable) AddPartition(collID typeutil.UniqueID, partitionName string
 	coll.PartitionNames = append(coll.PartitionNames, partitionName)
 	coll.PartitionCreatedTimestamps = append(coll.PartitionCreatedTimestamps, ts)
 	mt.collID2Meta[collID] = coll
+	mt.partitionNum++
+	metrics.RootCoordNumOfPartitions.WithLabelValues().Set(float64(mt.partitionNum))
 
 	k1 := fmt.Sprintf("%s/%d", CollectionMetaPrefix, collID)
 	v1, err := proto.Marshal(&coll)
@@ -706,7 +718,8 @@ func (mt *MetaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 	collMeta.PartitionNames = pn
 	collMeta.PartitionCreatedTimestamps = pts
 	mt.collID2Meta[collID] = collMeta
-
+	mt.partitionNum--
+	metrics.RootCoordNumOfPartitions.WithLabelValues().Set(float64(mt.partitionNum))
 	// update segID2IndexMeta and partID2SegID
 	if segIDMap, ok := mt.partID2SegID[partID]; ok {
 		for segID := range segIDMap {
