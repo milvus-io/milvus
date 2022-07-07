@@ -2823,12 +2823,6 @@ func (c *Core) UpdateCredCache(ctx context.Context, credInfo *internalpb.Credent
 	return c.proxyClientManager.UpdateCredentialCache(ctx, &req)
 }
 
-// ClearCredUsersCache will call clear credential usernames cache
-func (c *Core) ClearCredUsersCache(ctx context.Context) error {
-	req := internalpb.ClearCredUsersCacheRequest{}
-	return c.proxyClientManager.ClearCredUsersCache(ctx, &req)
-}
-
 // CreateCredential create new user and password
 // 	1. decode ciphertext password to raw password
 // 	2. encrypt raw password
