@@ -196,6 +196,8 @@ func (c *compactionPlanHandler) completeCompaction(result *datapb.CompactionResu
 		return fmt.Errorf("plan %d's state is %v", planID, c.plans[planID].state)
 	}
 
+	c.plans[planID] = c.plans[planID].shadowClone(setState(completed), setResult(result))
+	c.executingTaskNum--
 	plan := c.plans[planID].plan
 	switch plan.GetType() {
 	case datapb.CompactionType_InnerCompaction:
@@ -211,8 +213,7 @@ func (c *compactionPlanHandler) completeCompaction(result *datapb.CompactionResu
 	default:
 		return errors.New("unknown compaction type")
 	}
-	c.plans[planID] = c.plans[planID].shadowClone(setState(completed), setResult(result))
-	c.executingTaskNum--
+
 	if c.plans[planID].plan.GetType() == datapb.CompactionType_MergeCompaction ||
 		c.plans[planID].plan.GetType() == datapb.CompactionType_MixCompaction {
 		c.flushCh <- result.GetSegmentID()

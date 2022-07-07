@@ -784,11 +784,22 @@ func (m *meta) CompleteMergeCompaction(compactionLogs []*datapb.CompactionSegmen
 	m.Lock()
 	defer m.Unlock()
 
+	var err error
+	defer func() {
+		if err != nil {
+			for _, cl := range compactionLogs {
+				if segment := m.segments.GetSegment(cl.GetSegmentID()); segment != nil {
+					m.SetSegmentCompacting(segment.GetID(), false)
+				}
+			}
+		}
+	}()
+
 	segments := make([]*SegmentInfo, 0, len(compactionLogs))
 	for _, cl := range compactionLogs {
 		if !canCompaction(cl) {
 			log.Warn("can not be compacted, segment has reference lock", zap.Int64("segmentID", cl.SegmentID))
-			return fmt.Errorf("can not be compacted, segment with ID %d has reference lock", cl.SegmentID)
+			return errReferLock
 		}
 		if segment := m.segments.GetSegment(cl.GetSegmentID()); segment != nil {
 			cloned := segment.Clone()
