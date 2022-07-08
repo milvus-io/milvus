@@ -461,7 +461,7 @@ func (mt *metaTable) GetIndexFilePathInfo(indexBuildID UniqueID) (*indexpb.Index
 	if meta.indexMeta.MarkDeleted {
 		return nil, fmt.Errorf("index not exists with ID = %d", indexBuildID)
 	}
-	if meta.indexMeta.State != commonpb.IndexState_Finished {
+	if meta.indexMeta.State != commonpb.IndexState_Finished && meta.indexMeta.State != commonpb.IndexState_Failed {
 		return nil, fmt.Errorf("index not finished with ID = %d", indexBuildID)
 	}
 	ret.IndexFilePaths = meta.indexMeta.IndexFilePaths
@@ -605,25 +605,10 @@ func (mt *metaTable) NeedUpdateMeta(m *Meta) bool {
 	return false
 }
 
-func (mt *metaTable) CanBeRecycledIndexFiles(buildID UniqueID) bool {
+func (mt *metaTable) HasBuildID(buildID UniqueID) bool {
 	mt.lock.RLock()
 	defer mt.lock.RUnlock()
 
-	meta, ok := mt.indexBuildID2Meta[buildID]
-	if !ok {
-		log.Debug("index meta not exist, can be recycled", zap.Int64("buildID", buildID))
-		return true
-	}
-	if meta.indexMeta.MarkDeleted {
-		log.Debug("index has been deleted, can be recycled", zap.Int64("buildID", buildID))
-		return true
-	}
-	if meta.indexMeta.State == commonpb.IndexState_Finished || meta.indexMeta.State == commonpb.IndexState_Failed {
-		log.Debug("index has been finished, can be recycled", zap.Int64("buildID", buildID),
-			zap.String("state", meta.indexMeta.State.String()))
-		return true
-	}
-	log.Debug("index meta can not be recycled", zap.Int64("buildID", buildID),
-		zap.Bool("deleted", meta.indexMeta.MarkDeleted), zap.String("state", meta.indexMeta.String()))
-	return false
+	_, ok := mt.indexBuildID2Meta[buildID]
+	return ok
 }
