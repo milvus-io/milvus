@@ -81,9 +81,6 @@ func Test_NewClient(t *testing.T) {
 
 		r8, err := client.UpdateCredentialCache(ctx, nil)
 		retCheck(retNotNil, r8, err)
-
-		r9, err := client.ClearCredUsersCache(ctx, nil)
-		retCheck(retNotNil, r9, err)
 	}
 
 	client.grpcClient = &mock.GRPCClientBase{
@@ -152,9 +149,6 @@ func Test_NewClient(t *testing.T) {
 
 	r8Timeout, err := client.UpdateCredentialCache(shortCtx, nil)
 	retCheck(r8Timeout, err)
-
-	r9Timeout, err := client.ClearCredUsersCache(shortCtx, nil)
-	retCheck(r9Timeout, err)
 
 	// cleanup
 	err = client.Stop()

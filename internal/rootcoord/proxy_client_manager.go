@@ -26,7 +26,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -202,32 +201,6 @@ func (p *proxyClientManager) UpdateCredentialCache(ctx context.Context, request 
 			}
 			if sta.ErrorCode != commonpb.ErrorCode_Success {
 				return fmt.Errorf("UpdateCredentialCache failed, proxyID = %d, err = %s", k, sta.Reason)
-			}
-			return nil
-		})
-	}
-	return group.Wait()
-}
-
-func (p *proxyClientManager) ClearCredUsersCache(ctx context.Context, request *internalpb.ClearCredUsersCacheRequest) error {
-	p.lock.Lock()
-	defer p.lock.Unlock()
-
-	if len(p.proxyClient) == 0 {
-		log.Warn("proxy client is empty, ClearCredUsersCache will not send to any client")
-		return nil
-	}
-
-	group := &errgroup.Group{}
-	for k, v := range p.proxyClient {
-		k, v := k, v
-		group.Go(func() error {
-			sta, err := v.ClearCredUsersCache(ctx, request)
-			if err != nil {
-				return fmt.Errorf("ClearCredUsersCache failed, proxyID = %d, err = %s", k, err)
-			}
-			if sta.ErrorCode != commonpb.ErrorCode_Success {
-				return fmt.Errorf("ClearCredUsersCache failed, proxyID = %d, err = %s", k, sta.Reason)
 			}
 			return nil
 		})

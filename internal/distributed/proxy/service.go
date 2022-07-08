@@ -817,10 +817,6 @@ func (s *Server) UpdateCredentialCache(ctx context.Context, request *proxypb.Upd
 	return s.proxy.UpdateCredentialCache(ctx, request)
 }
 
-func (s *Server) ClearCredUsersCache(ctx context.Context, request *internalpb.ClearCredUsersCacheRequest) (*commonpb.Status, error) {
-	return s.proxy.ClearCredUsersCache(ctx, request)
-}
-
 func (s *Server) CreateCredential(ctx context.Context, req *milvuspb.CreateCredentialRequest) (*commonpb.Status, error) {
 	return s.proxy.CreateCredential(ctx, req)
 }

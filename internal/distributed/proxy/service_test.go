@@ -788,10 +788,6 @@ func (m *MockProxy) UpdateCredentialCache(ctx context.Context, request *proxypb.
 	return nil, nil
 }
 
-func (m *MockProxy) ClearCredUsersCache(ctx context.Context, request *internalpb.ClearCredUsersCacheRequest) (*commonpb.Status, error) {
-	return nil, nil
-}
-
 func (m *MockProxy) CreateCredential(ctx context.Context, req *milvuspb.CreateCredentialRequest) (*commonpb.Status, error) {
 	return nil, nil
 }
@@ -1185,11 +1181,6 @@ func Test_NewServer(t *testing.T) {
 
 	t.Run("UpdateCredentialCache", func(t *testing.T) {
 		_, err := server.UpdateCredentialCache(ctx, nil)
-		assert.Nil(t, err)
-	})
-
-	t.Run("ClearCredUsersCache", func(t *testing.T) {
-		_, err := server.ClearCredUsersCache(ctx, nil)
 		assert.Nil(t, err)
 	})
 

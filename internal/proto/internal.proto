@@ -275,9 +275,6 @@ message ChannelTimeTickMsg {
   uint64 default_timestamp = 4;
 }
 
-message ClearCredUsersCacheRequest {
-}
-
 message CredentialInfo {
   string username = 1;
   // encrypted by bcrypt (for higher security level)

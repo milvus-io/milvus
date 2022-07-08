@@ -3742,23 +3742,6 @@ func (node *Proxy) UpdateCredentialCache(ctx context.Context, request *proxypb.U
 	}, nil
 }
 
-func (node *Proxy) ClearCredUsersCache(ctx context.Context, request *internalpb.ClearCredUsersCacheRequest) (*commonpb.Status, error) {
-	ctx = logutil.WithModule(ctx, moduleName)
-	logutil.Logger(ctx).Debug("received request to clear credential usernames cache",
-		zap.String("role", typeutil.ProxyRole))
-
-	if globalMetaCache != nil {
-		globalMetaCache.ClearCredUsers() // no need to return error, though credential may be not cached
-	}
-	logutil.Logger(ctx).Debug("complete to clear credential usernames cache",
-		zap.String("role", typeutil.ProxyRole))
-
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-		Reason:    "",
-	}, nil
-}
-
 func (node *Proxy) CreateCredential(ctx context.Context, req *milvuspb.CreateCredentialRequest) (*commonpb.Status, error) {
 	log.Debug("CreateCredential", zap.String("role", typeutil.RootCoordRole), zap.String("username", req.Username))
 	// validate params
@@ -3895,8 +3878,12 @@ func (node *Proxy) DeleteCredential(ctx context.Context, req *milvuspb.DeleteCre
 
 func (node *Proxy) ListCredUsers(ctx context.Context, req *milvuspb.ListCredUsersRequest) (*milvuspb.ListCredUsersResponse, error) {
 	log.Debug("ListCredUsers", zap.String("role", typeutil.RootCoordRole))
-	// get from cache
-	usernames, err := globalMetaCache.GetCredUsernames(ctx)
+	rootCoordReq := &milvuspb.ListCredUsersRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_ListCredUsernames,
+		},
+	}
+	resp, err := node.rootCoord.ListCredUsers(ctx, rootCoordReq)
 	if err != nil {
 		return &milvuspb.ListCredUsersResponse{
 			Status: &commonpb.Status{
@@ -3909,7 +3896,7 @@ func (node *Proxy) ListCredUsers(ctx context.Context, req *milvuspb.ListCredUser
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
-		Usernames: usernames,
+		Usernames: resp.Usernames,
 	}, nil
 }
 
