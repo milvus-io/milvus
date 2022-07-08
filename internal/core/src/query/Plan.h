@@ -48,4 +48,7 @@ CreateRetrievePlanByExpr(const Schema& schema, const void* serialized_expr_plan,
 int64_t
 GetTopK(const Plan*);
 
+int64_t
+GetFieldID(const Plan* plan);
+
 }  // namespace milvus::query
