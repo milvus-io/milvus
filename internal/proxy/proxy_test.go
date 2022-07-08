@@ -1172,18 +1172,6 @@ func TestProxy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 
-		// load the same collection, test loaded check
-		colInfo, err := globalMetaCache.GetCollectionInfo(ctx, collectionName)
-		assert.NoError(t, err)
-		colInfo.isLoaded = true
-		resp, err = proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
-			Base:           nil,
-			DbName:         dbName,
-			CollectionName: collectionName,
-		})
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-
 		// load other collection -> fail
 		resp, err = proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 			Base:           nil,
