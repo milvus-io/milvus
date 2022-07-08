@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include "common/CGoHelper.h"
 #include "pb/segcore.pb.h"
 #include "query/Plan.h"
 #include "segcore/Collection.h"
@@ -107,6 +108,17 @@ int64_t
 GetTopK(CSearchPlan plan) {
     auto res = milvus::query::GetTopK((milvus::query::Plan*)plan);
     return res;
+}
+
+CStatus
+GetFieldID(CSearchPlan plan, int64_t* field_id) {
+    try {
+        auto p = static_cast<const milvus::query::Plan*>(plan);
+        *field_id = milvus::query::GetFieldID(p);
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(UnexpectedError, strdup(e.what()));
+    }
 }
 
 const char*

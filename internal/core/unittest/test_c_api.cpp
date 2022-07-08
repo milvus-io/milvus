@@ -208,6 +208,46 @@ TEST(CApiTest, SegmentTest) {
     DeleteSegment(segment);
 }
 
+TEST(CApiTest, CPlan) {
+    std::string schema_string = generate_collection_schema("JACCARD", DIM, true);
+    auto collection = NewCollection(schema_string.c_str());
+
+    const char* dsl_string = R"(
+    {
+        "bool": {
+            "vector": {
+                "fakevec": {
+                    "metric_type": "L2",
+                    "params": {
+                        "nprobe": 10
+                    },
+                    "query": "$0",
+                    "topk": 10,
+                    "round_decimal": 3
+               }
+            }
+        }
+   })";
+
+    void* plan = nullptr;
+    auto status = CreateSearchPlan(collection, dsl_string, &plan);
+    assert(status.error_code == Success);
+
+    int64_t field_id = -1;
+    status = GetFieldID(plan, &field_id);
+    assert(status.error_code == Success);
+
+    auto col = static_cast<Collection*>(collection);
+    for (auto& [target_field_id, field_meta] : col->get_schema()->get_fields()) {
+        if (field_meta.is_vector()) {
+            assert(field_id == target_field_id.get());
+        }
+    }
+    assert(field_id != -1);
+
+    DeleteSearchPlan(plan);
+}
+
 template <typename Message>
 std::vector<uint8_t>
 serialize(const Message* msg) {
@@ -1104,7 +1144,7 @@ TEST(CApiTest, ReudceNullResult) {
         status = ReduceSearchResultsAndFillData(&cSearchResultData, plan, results.data(), results.size(),
                                                 slice_nqs.data(), slice_topKs.data(), slice_nqs.size());
         assert(status.error_code == Success);
-    
+
         auto search_result = (SearchResult*)results[0];
         auto size = search_result->result_offsets_.size();
         EXPECT_EQ(size, num_queries / 2);
