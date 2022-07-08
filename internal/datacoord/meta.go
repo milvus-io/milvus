@@ -171,10 +171,10 @@ func (m *meta) GetNumRowsOfCollection(collectionID UniqueID) int64 {
 func (m *meta) AddSegment(segment *SegmentInfo) error {
 	m.Lock()
 	defer m.Unlock()
-	m.segments.SetSegment(segment.GetID(), segment)
 	if err := m.saveSegmentInfo(segment); err != nil {
 		return err
 	}
+	m.segments.SetSegment(segment.GetID(), segment)
 	metrics.DataCoordNumSegments.WithLabelValues(segment.GetState().String()).Inc()
 	return nil
 }
