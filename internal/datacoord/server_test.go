@@ -2615,7 +2615,8 @@ func TestDataCoordServer_SetSegmentState(t *testing.T) {
 				Timestamp:   0,
 			},
 		}
-		svr.meta.AddSegment(NewSegmentInfo(segment))
+		err2 := svr.meta.AddSegment(NewSegmentInfo(segment))
+		assert.NotNil(t, err2)
 		// Set segment state.
 		svr.SetSegmentState(context.TODO(), &datapb.SetSegmentStateRequest{
 			SegmentId: 1000,
@@ -2634,7 +2635,7 @@ func TestDataCoordServer_SetSegmentState(t *testing.T) {
 		assert.Nil(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 		assert.EqualValues(t, 1, len(resp.States))
-		assert.EqualValues(t, commonpb.SegmentState_Flushed, resp.States[0].State)
+		assert.EqualValues(t, commonpb.SegmentState_NotExist, resp.States[0].State)
 	})
 
 	t.Run("with closed server", func(t *testing.T) {
