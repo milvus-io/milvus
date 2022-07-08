@@ -1,4 +1,5 @@
 run:
+  go: '1.18'
   skip-dirs:
     - build
     - configs

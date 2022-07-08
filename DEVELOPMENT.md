@@ -55,14 +55,14 @@ Here's a list of verified OS types where Milvus can successfully build and run:
 #### Prerequisites
 Linux systems (Recommend Ubuntu 18.04 or later):
 ```bash
-go: >= 1.16
+go: >= 1.18
 cmake: >= 3.18
 gcc: 7.5
 ```
 
 MacOS systems with x86_64 (Big Sur 11.5 or later recommended):
 ```bash
-go: >= 1.16
+go: >= 1.18
 cmake: >= 3.18
 llvm: >= 12
 ```
@@ -112,7 +112,7 @@ Confirm that your `GOPATH` and `GOBIN` environment variables are correctly set a
 ```shell
 $ go version
 ```
-Note: go >= 1.16 is required to build Milvus.
+Note: go >= 1.18 is required to build Milvus.
 
 #### Docker & Docker Compose
 
