@@ -19,9 +19,9 @@ RUN apt-get update && \
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
 
-COPY --from=openblas /usr/lib/libopenblas-r0.3.9.so /usr/lib/
+COPY --from=openblas /usr/lib/libopenblas-r0.3.10.so /usr/lib/
 
-RUN ln -s /usr/lib/libopenblas-r0.3.9.so /usr/lib/libopenblas.so.0 && \
+RUN ln -s /usr/lib/libopenblas-r0.3.10.so /usr/lib/libopenblas.so.0 && \
     ln -s /usr/lib/libopenblas.so.0 /usr/lib/libopenblas.so
 
 COPY ./bin/ /milvus/bin/

@@ -19,9 +19,9 @@ RUN yum install -y wget && \
     yum install -y libgomp libgfortran4 tbb-devel && \
     rm -rf /var/cache/yum/*
 
-COPY --from=openblas /usr/lib/libopenblas-r0.3.9.so /usr/lib/
+COPY --from=openblas /usr/lib/libopenblas-r0.3.10.so /usr/lib/
 
-RUN ln -s /usr/lib/libopenblas-r0.3.9.so /usr/lib/libopenblas.so.0 && \
+RUN ln -s /usr/lib/libopenblas-r0.3.10.so /usr/lib/libopenblas.so.0 && \
     ln -s /usr/lib/libopenblas.so.0 /usr/lib/libopenblas.so
 
 COPY ./bin/ /milvus/bin/

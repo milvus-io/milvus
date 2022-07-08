@@ -23,7 +23,7 @@ cp /usr/lib/x86_64-linux-gnu/libgfortran.so.4.0.0 milvus-deb/milvus/milvus-lib/l
 cp /usr/lib/x86_64-linux-gnu/libgomp.so.1.0.0 milvus-deb/milvus/milvus-lib/libgomp.so.1
 cp /usr/lib/x86_64-linux-gnu/libquadmath.so.0.0.0 milvus-deb/milvus/milvus-lib/libquadmath.so.0
 cp /usr/lib/x86_64-linux-gnu/libtbb.so.2 milvus-deb/milvus/milvus-lib/libtbb.so.2
-cp /usr/lib/libopenblas-r0.3.9.so milvus-deb/milvus/milvus-lib/libopenblas.so.0
+cp /usr/lib/libopenblas-r0.3.10.so milvus-deb/milvus/milvus-lib/libopenblas.so.0
 ## script
 cp -r scripts milvus-deb/milvus/
 ## config

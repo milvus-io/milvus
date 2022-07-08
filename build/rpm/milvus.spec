@@ -41,7 +41,7 @@ install -m 755 lib/libknowhere.so %{buildroot}/lib64/milvus/libknowhere.so
 install -m 755 lib/libmilvus_common.so %{buildroot}/lib64/milvus/libmilvus_common.so
 install -m 755 lib/libmilvus_indexbuilder.so %{buildroot}/lib64/milvus/libmilvus_indexbuilder.so
 install -m 755 lib/libmilvus_segcore.so %{buildroot}/lib64/milvus/libmilvus_segcore.so
-install -m 755 /usr/lib/libopenblas-r0.3.9.so %{buildroot}/lib64/milvus/libopenblas.so.0
+install -m 755 /usr/lib/libopenblas-r0.3.10.so %{buildroot}/lib64/milvus/libopenblas.so.0
 install -m 755 lib/libngt.so.1.12.0 %{buildroot}/lib64/milvus/libngt.so.1
 install -m 755 /usr/lib64/libgfortran.so.4.0.0 %{buildroot}/lib64/milvus/libgfortran.so.4
 
