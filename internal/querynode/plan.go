@@ -95,6 +95,7 @@ type searchRequest struct {
 	cPlaceholderGroup C.CPlaceholderGroup
 	timestamp         Timestamp
 	msgID             UniqueID
+	searchFieldID     UniqueID
 }
 
 func newSearchRequest(collection *Collection, req *querypb.SearchRequest, placeholderGrp []byte) (*searchRequest, error) {
@@ -129,11 +130,19 @@ func newSearchRequest(collection *Collection, req *querypb.SearchRequest, placeh
 		return nil, err
 	}
 
+	var fieldID C.int64_t
+	status = C.GetFieldID(plan.cSearchPlan, &fieldID)
+	if err = HandleCStatus(&status, "get fieldID from plan failed"); err != nil {
+		plan.delete()
+		return nil, err
+	}
+
 	ret := &searchRequest{
 		plan:              plan,
 		cPlaceholderGroup: cPlaceholderGroup,
 		timestamp:         req.Req.GetTravelTimestamp(),
 		msgID:             req.GetReq().GetBase().GetMsgID(),
+		searchFieldID:     int64(fieldID),
 	}
 
 	return ret, nil
