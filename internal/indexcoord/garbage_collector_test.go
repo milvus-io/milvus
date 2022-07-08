@@ -288,6 +288,54 @@ func TestGarbageCollector_recycleUnusedIndexFiles(t *testing.T) {
 		cancel()
 		gc.wg.Wait()
 	})
+
+	t.Run("meta mark deleted", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		gc := &garbageCollector{
+			ctx:            ctx,
+			cancel:         cancel,
+			wg:             sync.WaitGroup{},
+			gcFileDuration: time.Millisecond * 300,
+			gcMetaDuration: time.Millisecond * 300,
+			metaTable: &metaTable{
+				indexBuildID2Meta: map[UniqueID]*Meta{
+					1: {
+						indexMeta: &indexpb.IndexMeta{
+							IndexBuildID:   1,
+							IndexFilePaths: []string{"file1", "file2", "file3"},
+							State:          commonpb.IndexState_Finished,
+							MarkDeleted:    true,
+						},
+					},
+				},
+				client: &mockETCDKV{
+					remove: func(s string) error {
+						return nil
+					},
+				},
+			},
+			chunkManager: &chunkManagerMock{
+				removeWithPrefix: func(s string) error {
+					return nil
+				},
+				listWithPrefix: func(s string, recursive bool) ([]string, error) {
+					if !recursive {
+						return []string{"a/b/1/"}, nil
+					}
+					return []string{"a/b/1/c"}, nil
+				},
+				remove: func(s string) error {
+					return fmt.Errorf("error")
+				},
+			},
+		}
+
+		gc.wg.Add(1)
+		go gc.recycleUnusedIndexFiles()
+		time.Sleep(time.Second)
+		cancel()
+		gc.wg.Wait()
+	})
 }
 
 func TestIndexCoord_recycleUnusedMetaLoop(t *testing.T) {
