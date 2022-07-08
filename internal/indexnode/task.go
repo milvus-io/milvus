@@ -216,7 +216,7 @@ func (it *IndexBuildTask) saveIndexMeta(ctx context.Context) error {
 	fn := func() error {
 		indexMeta, version, err := it.loadIndexMeta(ctx)
 		if err != nil {
-			log.Error("IndexNode IndexBuildTask saveIndexMeta fail to load index meta,", zap.Int64("build Id", indexMeta.IndexBuildID), zap.Error(err))
+			log.Error("IndexNode IndexBuildTask saveIndexMeta fail to load index meta,", zap.Int64("build Id", it.req.IndexBuildID), zap.Error(err))
 			return err
 		}
 		taskState := it.updateTaskState(indexMeta, it.internalErr)

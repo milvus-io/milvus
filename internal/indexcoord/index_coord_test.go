@@ -476,8 +476,8 @@ func TestIndexCoord_GetIndexFilePaths(t *testing.T) {
 	t.Run("GetIndexFilePaths failed", func(t *testing.T) {
 		resp, err := ic.GetIndexFilePaths(context.Background(), &indexpb.GetIndexFilePathsRequest{IndexBuildIDs: []UniqueID{2}})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
-		assert.NotEqual(t, "", resp.Status.Reason)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, 0, len(resp.FilePaths[0].IndexFilePaths))
 	})
 
 	t.Run("set DataCoord with nil", func(t *testing.T) {
