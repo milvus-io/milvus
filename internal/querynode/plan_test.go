@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
 
 func TestPlan_Plan(t *testing.T) {
@@ -122,5 +123,25 @@ func TestPlan_PlaceholderGroup(t *testing.T) {
 	assert.Equal(t, int(numQueries), 2)
 
 	holder.delete()
+	deleteCollection(collection)
+}
+
+func TestPlan_newSearchRequest(t *testing.T) {
+	iReq, _ := genSearchRequest(defaultNQ, IndexHNSW, genTestCollectionSchema())
+	collection := newCollection(defaultCollectionID, genTestCollectionSchema())
+	req := &querypb.SearchRequest{
+		Req:             iReq,
+		DmlChannels:     []string{defaultDMLChannel},
+		SegmentIDs:      []UniqueID{defaultSegmentID},
+		FromShardLeader: true,
+		Scope:           querypb.DataScope_Historical,
+	}
+	searchReq, err := newSearchRequest(collection, req, req.Req.GetPlaceholderGroup())
+	assert.NoError(t, err)
+
+	assert.Equal(t, simpleFloatVecField.id, searchReq.searchFieldID)
+	assert.EqualValues(t, defaultNQ, searchReq.getNumOfQuery())
+
+	searchReq.delete()
 	deleteCollection(collection)
 }
