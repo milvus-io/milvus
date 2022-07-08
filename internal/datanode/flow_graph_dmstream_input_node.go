@@ -51,12 +51,12 @@ func newDmInputNode(ctx context.Context, seekPos *internalpb.MsgPosition, dmNode
 	if seekPos != nil {
 		seekPos.ChannelName = pchannelName
 		start := time.Now()
-		log.Info("datanode begin to seek", zap.String("physical channel", seekPos.GetChannelName()), zap.Int64("collection ID", dmNodeConfig.collectionID))
+		log.Info("datanode begin to seek", zap.ByteString("seek msgID", seekPos.GetMsgID()), zap.String("physical channel", seekPos.GetChannelName()), zap.Int64("collection ID", dmNodeConfig.collectionID))
 		err = insertStream.Seek([]*internalpb.MsgPosition{seekPos})
 		if err != nil {
 			return nil, err
 		}
-		log.Info("datanode seek successfully", zap.String("physical channel", seekPos.GetChannelName()), zap.Int64("collection ID", dmNodeConfig.collectionID), zap.Duration("elapse", time.Since(start)))
+		log.Info("datanode seek successfully", zap.ByteString("seek msgID", seekPos.GetMsgID()), zap.String("physical channel", seekPos.GetChannelName()), zap.Int64("collection ID", dmNodeConfig.collectionID), zap.Duration("elapse", time.Since(start)))
 	}
 
 	name := fmt.Sprintf("dmInputNode-data-%d-%s", dmNodeConfig.collectionID, dmNodeConfig.vChannelName)
