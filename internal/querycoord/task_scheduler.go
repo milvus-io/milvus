@@ -377,6 +377,7 @@ func (scheduler *TaskScheduler) unmarshalTask(taskID UniqueID, t string) (task, 
 		//TODO::trigger condition may be different
 		loadReq := querypb.WatchDeltaChannelsRequest{}
 		err = proto.Unmarshal([]byte(t), &loadReq)
+		reviseWatchDeltaChannelsRequest(&loadReq)
 		if err != nil {
 			return nil, err
 		}
