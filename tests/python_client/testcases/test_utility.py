@@ -767,15 +767,16 @@ class TestUtilityBase(TestcaseBase):
         """
         target: test loading progress without loading
         method: insert and flush data, call loading_progress without loading
-        expected: raise exception
+        expected: return successfully with 0%
         """
         collection_w = self.init_collection_wrap()
         df = cf.gen_default_dataframe_data()
         collection_w.insert(df)
         assert collection_w.num_entities == ct.default_nb
-        error = {ct.err_code: 1, ct.err_msg: {"has not been loaded into QueryNode"}}
-        self.utility_wrap.loading_progress(collection_w.name,
-                                           check_task=CheckTasks.err_res, check_items=error)
+        res = self.utility_wrap.loading_progress(collection_w.name)[0]
+        exp_res = {loading_progress: '0%', num_loaded_partitions: 0, not_loaded_partitions: ['_default']}
+
+        assert exp_res == res
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("nb", [ct.default_nb, 5000])
