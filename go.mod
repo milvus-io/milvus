@@ -3,6 +3,7 @@ module github.com/milvus-io/milvus
 go 1.16
 
 require (
+	github.com/99designs/keyring v1.2.1 // indirect
 	github.com/BurntSushi/toml v1.0.0
 	github.com/HdrHistogram/hdrhistogram-go v1.0.1 // indirect
 	github.com/StackExchange/wmi v1.2.1 // indirect
