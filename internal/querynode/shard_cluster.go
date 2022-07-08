@@ -821,7 +821,8 @@ func (sc *ShardCluster) Query(ctx context.Context, req *querypb.QueryRequest, wi
 	reqCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	var err error
+	var streamErr error
+	var historicalErr error
 	var resultMut sync.Mutex
 	results := make([]*internalpb.RetrieveResults, 0, len(segAllocs)+1) // count(nodes) + 1(growing)
 
@@ -830,14 +831,15 @@ func (sc *ShardCluster) Query(ctx context.Context, req *querypb.QueryRequest, wi
 	go func() {
 		defer wg.Done()
 
-		streamErr := withStreaming(reqCtx)
+		streamErr = withStreaming(reqCtx)
 		resultMut.Lock()
 		defer resultMut.Unlock()
 		if streamErr != nil {
 			cancel()
 			// not set cancel error
 			if !errors.Is(streamErr, context.Canceled) {
-				err = fmt.Errorf("stream operation failed: %w", streamErr)
+				streamErr = fmt.Errorf("stream query failed on nodeID %d, err = %w", Params.QueryNodeCfg.GetNodeID(), streamErr)
+				log.Error(streamErr.Error())
 			}
 		}
 	}()
@@ -860,7 +862,8 @@ func (sc *ShardCluster) Query(ctx context.Context, req *querypb.QueryRequest, wi
 			defer resultMut.Unlock()
 			if nodeErr != nil || partialResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 				cancel()
-				err = fmt.Errorf("Query %d failed, reason %s err %w", node.nodeID, partialResult.GetStatus().GetReason(), nodeErr)
+				historicalErr = fmt.Errorf("historical query failed on nodeID %d, reason = %s, err = %w", node.nodeID, partialResult.GetStatus().GetReason(), nodeErr)
+				log.Error(historicalErr.Error())
 				return
 			}
 			results = append(results, partialResult)
@@ -868,8 +871,16 @@ func (sc *ShardCluster) Query(ctx context.Context, req *querypb.QueryRequest, wi
 	}
 
 	wg.Wait()
-	if err != nil {
-		log.Error(err.Error())
+	if streamErr != nil && historicalErr == nil {
+		return nil, streamErr
+	}
+
+	if streamErr == nil && historicalErr != nil {
+		return nil, historicalErr
+	}
+
+	if streamErr != nil && historicalErr != nil {
+		err := errors.New(streamErr.Error() + ", " + historicalErr.Error())
 		return nil, err
 	}
 

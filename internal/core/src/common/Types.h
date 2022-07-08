@@ -22,6 +22,7 @@
 #include <utility>
 #include <vector>
 #include <tbb/concurrent_unordered_map.h>
+#include <tbb/concurrent_unordered_set.h>
 #include <boost/align/aligned_allocator.hpp>
 #include <boost/container/vector.hpp>
 #include <boost/dynamic_bitset.hpp>
@@ -71,7 +72,9 @@ using IdArray = proto::schema::IDs;
 using MetricType = faiss::MetricType;
 using InsertData = proto::segcore::InsertRecord;
 using PkType = std::variant<std::monostate, int64_t, std::string>;
-using Pk2OffsetType = tbb::concurrent_unordered_multimap<PkType, int64_t, std::hash<PkType>>;
+// tbb::concurrent_unordered_multimap equal_range too slow when multi repeated key
+// using Pk2OffsetType = tbb::concurrent_unordered_multimap<PkType, int64_t, std::hash<PkType>>;
+using Pk2OffsetType = tbb::concurrent_unordered_map<PkType, tbb::concurrent_unordered_set<int64_t>, std::hash<PkType>>;
 
 MetricType
 GetMetricType(const std::string& type);

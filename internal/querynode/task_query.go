@@ -54,7 +54,7 @@ func (q *queryTask) PreExecute(ctx context.Context) error {
 func (q *queryTask) queryOnStreaming() error {
 	// check ctx timeout
 	if !funcutil.CheckCtxValid(q.Ctx()) {
-		return errors.New("search context timeout")
+		return errors.New("query context timeout")
 	}
 
 	// check if collection has been released, check streaming since it's released first
@@ -78,10 +78,12 @@ func (q *queryTask) queryOnStreaming() error {
 	}
 	defer plan.delete()
 
+	log.Debug("start query on streaming", zap.Int64("msgID", q.ID()))
 	sResults, _, _, sErr := retrieveStreaming(q.QS.metaReplica, plan, q.CollectionID, q.iReq.GetPartitionIDs(), q.QS.channel, q.QS.vectorChunkManager)
 	if sErr != nil {
 		return sErr
 	}
+	log.Debug("query on streaming done", zap.Int64("msgID", q.ID()))
 
 	q.tr.RecordSpan()
 	mergedResult, err := mergeSegcoreRetrieveResults(sResults)
@@ -125,10 +127,12 @@ func (q *queryTask) queryOnHistorical() error {
 		return err
 	}
 	defer plan.delete()
+	log.Debug("start query on historical", zap.Int64("msgID", q.ID()))
 	retrieveResults, _, _, err := retrieveHistorical(q.QS.metaReplica, plan, q.CollectionID, nil, q.req.SegmentIDs, q.QS.vectorChunkManager)
 	if err != nil {
 		return err
 	}
+	log.Debug("query on historical done", zap.Int64("msgID", q.ID()))
 	mergedResult, err := mergeSegcoreRetrieveResults(retrieveResults)
 	if err != nil {
 		return err

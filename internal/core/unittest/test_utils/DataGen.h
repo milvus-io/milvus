@@ -290,7 +290,7 @@ CreatePlaceholderGroup(int64_t num_queries, int dim, const std::vector<float>& v
     for (int i = 0; i < num_queries; ++i) {
         std::vector<float> vec;
         for (int d = 0; d < dim; ++d) {
-            vec.push_back(vecs[i*dim+d]);
+            vec.push_back(vecs[i * dim + d]);
         }
         value->add_values(vec.data(), vec.size() * sizeof(float));
     }

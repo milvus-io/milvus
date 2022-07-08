@@ -111,7 +111,6 @@ generate_max_float_query_data(int all_nq, int max_float_nq) {
     }
     auto blob = raw_group.SerializeAsString();
     return blob;
-
 }
 
 std::string
@@ -1104,20 +1103,18 @@ TEST(CApiTest, ReudceNullResult) {
         status = ReduceSearchResultsAndFillData(&cSearchResultData, plan, results.data(), results.size(),
                                                 slice_nqs.data(), slice_topKs.data(), slice_nqs.size());
         assert(status.error_code == Success);
-    
+
         auto search_result = (SearchResult*)results[0];
         auto size = search_result->result_offsets_.size();
         EXPECT_EQ(size, num_queries / 2);
 
         DeleteSearchResult(res);
-
     }
 
     DeleteSearchPlan(plan);
     DeletePlaceholderGroup(placeholderGroup);
     DeleteCollection(collection);
     DeleteSegment(segment);
-
 }
 
 TEST(CApiTest, ReduceRemoveDuplicates) {
