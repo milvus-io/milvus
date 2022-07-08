@@ -166,6 +166,7 @@ func TestIndexBuilder(t *testing.T) {
 			Err:  false,
 		},
 		nodeManager: &NodeManager{
+			ctx: ctx,
 			nodeClients: map[UniqueID]types.IndexNode{
 				4: &indexnode.Mock{
 					Err:     false,
@@ -295,7 +296,9 @@ func TestIndexBuilder_Error(t *testing.T) {
 				Fail: false,
 				Err:  false,
 			},
-			nodeManager: &NodeManager{},
+			nodeManager: &NodeManager{
+				ctx: ctx,
+			},
 		}
 		mt := &metaTable{
 			indexBuildID2Meta: map[UniqueID]*Meta{
@@ -340,6 +343,7 @@ func TestIndexBuilder_Error(t *testing.T) {
 				Err:  false,
 			},
 			nodeManager: &NodeManager{
+				ctx: ctx,
 				nodeClients: map[UniqueID]types.IndexNode{
 					1: &indexnode.Mock{
 						Err:     false,
@@ -391,6 +395,7 @@ func TestIndexBuilder_Error(t *testing.T) {
 				Err:  true,
 			},
 			nodeManager: &NodeManager{
+				ctx: ctx,
 				nodeClients: map[UniqueID]types.IndexNode{
 					1: &indexnode.Mock{
 						Err:     false,
