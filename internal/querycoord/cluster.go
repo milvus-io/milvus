@@ -608,7 +608,7 @@ func (c *queryNodeCluster) RegisterNode(ctx context.Context, session *sessionuti
 			go node.start()
 		}
 		c.nodes[id] = node
-		metrics.QueryCoordNumQueryNodes.WithLabelValues().Inc()
+		metrics.QueryCoordNumQueryNodes.WithLabelValues().Set(float64(len(c.nodes)))
 		log.Info("registerNode: create a new QueryNode", zap.Int64("nodeID", id), zap.String("address", session.Address), zap.Any("state", state))
 		return nil
 	}
@@ -641,7 +641,7 @@ func (c *queryNodeCluster) RemoveNodeInfo(nodeID int64) error {
 	}
 
 	delete(c.nodes, nodeID)
-	metrics.QueryCoordNumQueryNodes.WithLabelValues().Dec()
+	metrics.QueryCoordNumQueryNodes.WithLabelValues().Set(float64(len(c.nodes)))
 	log.Info("removeNodeInfo: delete nodeInfo in cluster MetaReplica", zap.Int64("nodeID", nodeID))
 
 	return nil

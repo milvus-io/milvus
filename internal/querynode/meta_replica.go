@@ -568,7 +568,9 @@ func (replica *metaReplica) addSegmentPrivate(segmentID UniqueID, partitionID Un
 		return fmt.Errorf("unexpected segment type, segmentID = %d, segmentType = %s", segmentID, segType.String())
 	}
 
-	metrics.QueryNodeNumSegments.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Inc()
+	segmentNum := len(replica.growingSegments)
+	segmentNum += len(replica.sealedSegments)
+	metrics.QueryNodeNumSegments.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(segmentNum))
 	rowCount := segment.getRowCount()
 	if rowCount > 0 {
 		metrics.QueryNodeNumEntities.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Add(float64(rowCount))
@@ -627,7 +629,9 @@ func (replica *metaReplica) removeSegmentPrivate(segmentID UniqueID, segType seg
 		panic(fmt.Sprintf("unsupported segment type %s", segType.String()))
 	}
 
-	metrics.QueryNodeNumSegments.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Dec()
+	segmentNum := len(replica.growingSegments)
+	segmentNum += len(replica.sealedSegments)
+	metrics.QueryNodeNumSegments.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(segmentNum))
 	if rowCount > 0 {
 		metrics.QueryNodeNumEntities.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Sub(float64(rowCount))
 	}
