@@ -380,33 +380,31 @@ get_deleted_bitmap(int64_t del_barrier,
                    DeletedRecord& delete_record,
                    const InsertRecord& insert_record,
                    Timestamp query_timestamp) {
-    auto old = delete_record.get_lru_entry();
     // if insert_barrier and del_barrier have not changed, use cache data directly
-    if (old->bitmap_ptr->size() == insert_barrier) {
-        if (old->del_barrier == del_barrier) {
-            return old;
-        }
+    bool hit_cache = false;
+    int64_t old_del_barrier = 0;
+    auto current = delete_record.clone_lru_entry(insert_barrier, del_barrier, old_del_barrier, hit_cache);
+    if (hit_cache) {
+        return current;
     }
-
-    auto current = old->clone(insert_barrier);
-    current->del_barrier = del_barrier;
 
     auto bitmap = current->bitmap_ptr;
 
     int64_t start, end;
-    if (del_barrier < old->del_barrier) {
+    if (del_barrier < old_del_barrier) {
         // in this case, ts of delete record[current_del_barrier : old_del_barrier] > query_timestamp
         // so these deletion records do not take effect in query/search
         // so bitmap corresponding to those pks in delete record[current_del_barrier:old_del_barrier] wil be reset to 0
         // for example, current_del_barrier = 2, query_time = 120, the bitmap will be reset to [0, 1, 1, 0, 0, 0, 0, 0]
         start = del_barrier;
-        end = old->del_barrier;
+        end = old_del_barrier;
     } else {
         // the cache is not enough, so update bitmap using new pks in delete record[old_del_barrier:current_del_barrier]
         // for example, current_del_barrier = 4, query_time = 300, bitmap will be updated to [0, 1, 1, 0, 1, 1, 0, 0]
-        start = old->del_barrier;
+        start = old_del_barrier;
         end = del_barrier;
     }
+
     for (auto del_index = start; del_index < end; ++del_index) {
         // get pk in delete logs
         auto pk = delete_record.pks_[del_index];

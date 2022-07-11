@@ -633,7 +633,7 @@ TEST(Sealed, BF_Overflow) {
     LoadFieldDataInfo load_info{100, base_arr.get(), N};
     auto dataset = DataGen(schema, N);
     auto segment = CreateSealedSegment(schema);
-    std::cout<< fake_id.get() <<std::endl;
+    std::cout << fake_id.get() << std::endl;
     SealedLoadFieldData(dataset, *segment, {fake_id.get()});
 
     segment->LoadFieldData(load_info);

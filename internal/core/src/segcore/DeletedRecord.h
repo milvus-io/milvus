@@ -42,6 +42,21 @@ struct DeletedRecord {
         return lru_;
     }
 
+    std::shared_ptr<TmpBitmap>
+    clone_lru_entry(int64_t insert_barrier, int64_t del_barrier, int64_t& old_del_barrier, bool& hit_cache) {
+        std::shared_lock lck(shared_mutex_);
+        auto res = lru_->clone(insert_barrier);
+        old_del_barrier = lru_->del_barrier;
+
+        if (lru_->bitmap_ptr->size() == insert_barrier && lru_->del_barrier == del_barrier) {
+            hit_cache = true;
+        } else {
+            res->del_barrier = del_barrier;
+        }
+
+        return res;
+    }
+
     void
     insert_lru_entry(std::shared_ptr<TmpBitmap> new_entry, bool force = false) {
         std::lock_guard lck(shared_mutex_);
@@ -59,7 +74,6 @@ struct DeletedRecord {
     AckResponder ack_responder_;
     ConcurrentVector<Timestamp> timestamps_;
     ConcurrentVector<PkType> pks_;
-    int64_t record_size_ = 0;
 
  private:
     std::shared_ptr<TmpBitmap> lru_;

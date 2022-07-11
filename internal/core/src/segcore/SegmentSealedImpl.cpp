@@ -254,11 +254,10 @@ SegmentSealedImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
     auto timestamps = reinterpret_cast<const Timestamp*>(info.timestamps);
 
     // step 2: fill pks and timestamps
-    deleted_record_.pks_.set_data_raw(0, pks.data(), size);
-    deleted_record_.timestamps_.set_data_raw(0, timestamps, size);
-    deleted_record_.ack_responder_.AddSegment(0, size);
-    deleted_record_.reserved.fetch_add(size);
-    deleted_record_.record_size_ = size;
+    auto reserved_begin = deleted_record_.reserved.fetch_add(size);
+    deleted_record_.pks_.set_data_raw(reserved_begin, pks.data(), size);
+    deleted_record_.timestamps_.set_data_raw(reserved_begin, timestamps, size);
+    deleted_record_.ack_responder_.AddSegment(reserved_begin, reserved_begin + size);
 }
 
 // internal API: support scalar index only
