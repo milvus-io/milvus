@@ -565,29 +565,33 @@ func TestHandoffSegmentLoop(t *testing.T) {
 
 func TestLoadBalanceSegmentLoop(t *testing.T) {
 	refreshParams()
+	defer removeAllSession()
+
 	Params.QueryCoordCfg.BalanceIntervalSeconds = 10
 	baseCtx := context.Background()
 
 	queryCoord, err := startQueryCoord(baseCtx)
 	assert.Nil(t, err)
 	queryCoord.cluster.(*queryNodeCluster).segmentAllocator = shuffleSegmentsToQueryNode
+	defer queryCoord.Stop()
 
 	queryNode1, err := startQueryNodeServer(baseCtx)
 	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, queryNode1.queryNodeID)
+	defer queryNode1.stop()
 
 	loadCollectionTask := genLoadCollectionTask(baseCtx, queryCoord)
 	err = queryCoord.scheduler.Enqueue(loadCollectionTask)
 	assert.Nil(t, err)
 	waitTaskFinalState(loadCollectionTask, taskExpired)
 
-	memoryStress := uint64(1 << 10)
+	memory := uint64(1 << 30)
 	queryNode1.getMetrics = func() (*milvuspb.GetMetricsResponse, error) {
 		nodeInfo := metricsinfo.QueryNodeInfos{
 			BaseComponentInfos: metricsinfo.BaseComponentInfos{
 				HardwareInfos: metricsinfo.HardwareMetrics{
 					Memory:      1 << 30,
-					MemoryUsage: memoryStress,
+					MemoryUsage: memory - memory/10, // >= memory*0.9
 				},
 			},
 		}
@@ -598,23 +602,14 @@ func TestLoadBalanceSegmentLoop(t *testing.T) {
 			Response: nodeInfoResp,
 		}, err
 	}
-	for {
-		nodeInfo, err := queryCoord.cluster.GetNodeInfoByID(queryNode1.queryNodeID)
-		assert.Nil(t, err)
-		if nodeInfo.(*queryNode).memUsageRate >= Params.QueryCoordCfg.OverloadedMemoryThresholdPercentage {
-			log.Debug("memory stress kicks the threshold")
-			break
-		}
-
-		log.Debug("memory stress...",
-			zap.Uint64("stress", memoryStress),
-			zap.Float64("memoryUsage", nodeInfo.(*queryNode).memUsageRate))
-		memoryStress *= 2
-	}
+	nodeInfo, err := queryCoord.cluster.GetNodeInfoByID(queryNode1.queryNodeID)
+	assert.Nil(t, err)
+	assert.GreaterOrEqual(t, nodeInfo.(*queryNode).memUsageRate, Params.QueryCoordCfg.OverloadedMemoryThresholdPercentage)
 
 	queryNode2, err := startQueryNodeServer(baseCtx)
 	assert.Nil(t, err)
 	waitQueryNodeOnline(queryCoord.cluster, queryNode2.queryNodeID)
+	defer queryNode2.stop()
 
 	// if sealed has been balance to query node2, than balance work
 	for {
@@ -626,15 +621,12 @@ func TestLoadBalanceSegmentLoop(t *testing.T) {
 		})
 		assert.Nil(t, err)
 		if len(segmentInfos) > 0 {
+			queryNode1.getMetrics = returnSuccessGetMetricsResult
 			break
 		}
 
 		time.Sleep(time.Second)
 	}
-
-	queryCoord.Stop()
-	err = removeAllSession()
-	assert.Nil(t, err)
 }
 
 func TestQueryCoord_watchHandoffSegmentLoop(t *testing.T) {
