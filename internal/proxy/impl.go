@@ -2210,10 +2210,10 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 				// RowData: transfer column based request to this
 			},
 		},
-		rowIDAllocator: node.idAllocator,
-		segIDAssigner:  node.segAssigner,
-		chMgr:          node.chMgr,
-		chTicker:       node.chTicker,
+		idAllocator:   node.idAllocator,
+		segIDAssigner: node.segAssigner,
+		chMgr:         node.chMgr,
+		chTicker:      node.chTicker,
 	}
 
 	if len(it.PartitionName) <= 0 {
