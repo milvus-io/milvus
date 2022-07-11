@@ -405,10 +405,18 @@ get_deleted_bitmap(int64_t del_barrier,
         end = del_barrier;
     }
 
+    // Avoid invalid calculations when there are a lot of repeated delete pks
+    std::unordered_map<PkType, Timestamp> delete_timestamps;
     for (auto del_index = start; del_index < end; ++del_index) {
-        // get pk in delete logs
         auto pk = delete_record.pks_[del_index];
-        // find insert data which has same pk
+        auto timestamp = delete_record.timestamps_[del_index];
+
+        delete_timestamps[pk] = timestamp > delete_timestamps[pk] ? timestamp : delete_timestamps[pk];
+    }
+
+    for (auto iter = delete_timestamps.begin(); iter != delete_timestamps.end(); iter++) {
+        auto pk = iter->first;
+        auto delete_timestamp = iter->second;
         auto segOffsets = insert_record.search_pk(pk, insert_barrier);
         for (auto offset : segOffsets) {
             int64_t insert_row_offset = offset.get();
@@ -417,14 +425,14 @@ get_deleted_bitmap(int64_t del_barrier,
 
             // insert after delete with same pk, delete will not task effect on this insert record
             // and reset bitmap to 0
-            if (insert_record.timestamps_[insert_row_offset] > delete_record.timestamps_[del_index]) {
+            if (insert_record.timestamps_[insert_row_offset] > delete_timestamp) {
                 bitmap->reset(insert_row_offset);
                 continue;
             }
 
             // the deletion record do not take effect in search/query
             // and reset bitmap to 0
-            if (delete_record.timestamps_[del_index] > query_timestamp) {
+            if (delete_timestamp > query_timestamp) {
                 bitmap->reset(insert_row_offset);
                 continue;
             }
@@ -433,6 +441,7 @@ get_deleted_bitmap(int64_t del_barrier,
             bitmap->set(insert_row_offset);
         }
     }
+
     delete_record.insert_lru_entry(current);
     return current;
 }
