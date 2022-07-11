@@ -652,6 +652,7 @@ func (qc *QueryCoord) loadBalanceSegmentLoop() {
 						// the memoryUsageRate of the sourceNode is higher than other query node
 						sourceNodeID := availableNodeIDs[0]
 						dstNodeID := availableNodeIDs[len(availableNodeIDs)-1]
+
 						memUsageRateDiff := nodeID2MemUsageRate[sourceNodeID] - nodeID2MemUsageRate[dstNodeID]
 						if nodeID2MemUsageRate[sourceNodeID] <= Params.QueryCoordCfg.OverloadedMemoryThresholdPercentage &&
 							memUsageRateDiff <= Params.QueryCoordCfg.MemoryUsageMaxDifferencePercentage {
