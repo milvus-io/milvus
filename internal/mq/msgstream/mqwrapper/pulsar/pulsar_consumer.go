@@ -18,6 +18,7 @@ package pulsar
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 	"unsafe"
@@ -115,13 +116,14 @@ func (pc *Consumer) Close() {
 		// Unsubscribe for the consumer
 		fn := func() error {
 			err := pc.c.Unsubscribe()
-			if isPulsarError(err, pulsar.SubscriptionNotFound) || isPulsarError(err, pulsar.ConsumerNotFound) {
-				log.Warn("failed to find consumer, skip unsubscribe",
-					zap.String("subscription", pc.Subscription()),
-					zap.Error(err))
-				return nil
-			}
 			if err != nil {
+				// this is the hack due to pulsar didn't handle error as expected
+				if strings.Contains(err.Error(), "Consumer not found") {
+					log.Warn("failed to find consumer, skip unsubscribe",
+						zap.String("subscription", pc.Subscription()),
+						zap.Error(err))
+					return nil
+				}
 				return err
 			}
 			// only close if unsubscribe successfully
