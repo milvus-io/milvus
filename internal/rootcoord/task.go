@@ -223,7 +223,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		// lock for ddl operation
 		t.core.ddlLock.Lock()
 		defer t.core.ddlLock.Unlock()
-
+		// use addDdlTimeTick and removeDdlTimeTick to mark DDL operation in process
 		t.core.chanTimeTick.addDdlTimeTick(ts, reason)
 		// clear ddl timetick in all conditions
 		defer t.core.chanTimeTick.removeDdlTimeTick(ts, reason)
@@ -253,8 +253,6 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 			return fmt.Errorf("meta table add collection failed,error = %w", err)
 		}
 
-		// use addDdlTimeTick and removeDdlTimeTick to mark DDL operation in process
-		t.core.chanTimeTick.removeDdlTimeTick(ts, reason)
 		errTimeTick := t.core.SendTimeTick(ts, reason)
 		if errTimeTick != nil {
 			log.Warn("Failed to send timetick", zap.Error(errTimeTick))
@@ -347,7 +345,7 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		// lock for ddl operation
 		t.core.ddlLock.Lock()
 		defer t.core.ddlLock.Unlock()
-
+		// use addDdlTimeTick and removeDdlTimeTick to mark DDL operation in process
 		t.core.chanTimeTick.addDdlTimeTick(ts, reason)
 		// clear ddl timetick in all conditions
 		defer t.core.chanTimeTick.removeDdlTimeTick(ts, reason)
@@ -361,8 +359,6 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 			return err
 		}
 
-		// use addDdlTimeTick and removeDdlTimeTick to mark DDL operation in process
-		t.core.chanTimeTick.removeDdlTimeTick(ts, reason)
 		errTimeTick := t.core.SendTimeTick(ts, reason)
 		if errTimeTick != nil {
 			log.Warn("Failed to send timetick", zap.Error(errTimeTick))
@@ -562,7 +558,7 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 		// lock for ddl operation
 		t.core.ddlLock.Lock()
 		defer t.core.ddlLock.Unlock()
-
+		// use addDdlTimeTick and removeDdlTimeTick to mark DDL operation in process
 		t.core.chanTimeTick.addDdlTimeTick(ts, reason)
 		// clear ddl timetick in all conditions
 		defer t.core.chanTimeTick.removeDdlTimeTick(ts, reason)
@@ -576,8 +572,6 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 			return err
 		}
 
-		// use addDdlTimeTick and removeDdlTimeTick to mark DDL operation in process
-		t.core.chanTimeTick.removeDdlTimeTick(ts, reason)
 		errTimeTick := t.core.SendTimeTick(ts, reason)
 		if errTimeTick != nil {
 			log.Warn("Failed to send timetick", zap.Error(errTimeTick))
@@ -653,7 +647,7 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 		// lock for ddl operation
 		t.core.ddlLock.Lock()
 		defer t.core.ddlLock.Unlock()
-
+		// use addDdlTimeTick and removeDdlTimeTick to mark DDL operation in process
 		t.core.chanTimeTick.addDdlTimeTick(ts, reason)
 		// clear ddl timetick in all conditions
 		defer t.core.chanTimeTick.removeDdlTimeTick(ts, reason)
@@ -667,8 +661,6 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 			return err
 		}
 
-		// use addDdlTimeTick and removeDdlTimeTick to mark DDL operation in process
-		t.core.chanTimeTick.removeDdlTimeTick(ts, reason)
 		errTimeTick := t.core.SendTimeTick(ts, reason)
 		if errTimeTick != nil {
 			log.Warn("Failed to send timetick", zap.Error(errTimeTick))
