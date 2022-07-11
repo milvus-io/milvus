@@ -56,7 +56,6 @@ func setup() {
 func refreshParams() {
 	rand.Seed(time.Now().UnixNano())
 	suffix := "-test-query-Coord" + strconv.FormatInt(rand.Int63(), 10)
-	Params.CommonCfg.QueryNodeStats = Params.CommonCfg.QueryNodeStats + suffix
 	Params.CommonCfg.QueryCoordTimeTick = Params.CommonCfg.QueryCoordTimeTick + suffix
 	Params.EtcdCfg.MetaRootPath = Params.EtcdCfg.MetaRootPath + suffix
 	GlobalSegmentInfos = make(map[UniqueID]*querypb.SegmentInfo)

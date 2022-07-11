@@ -111,7 +111,6 @@ type commonConfig struct {
 	QueryCoordSearch       string
 	QueryCoordSearchResult string
 	QueryCoordTimeTick     string
-	QueryNodeStats         string
 	QueryNodeSubName       string
 
 	DataCoordStatistic   string
@@ -151,7 +150,6 @@ func (p *commonConfig) init(base *BaseTable) {
 	p.initQueryCoordSearch()
 	p.initQueryCoordSearchResult()
 	p.initQueryCoordTimeTick()
-	p.initQueryNodeStats()
 	p.initQueryNodeSubName()
 
 	p.initDataCoordStatistic()
@@ -274,14 +272,6 @@ func (p *commonConfig) initQueryCoordTimeTick() {
 }
 
 // --- querynode ---
-func (p *commonConfig) initQueryNodeStats() {
-	keys := []string{
-		"msgChannel.chanNamePrefix.queryNodeStats",
-		"common.chanNamePrefix.queryNodeStats",
-	}
-	p.QueryNodeStats = p.initChanNamePrefix(keys)
-}
-
 func (p *commonConfig) initQueryNodeSubName() {
 	keys := []string{
 		"msgChannel.subNamePrefix.queryNodeSubNamePrefix",

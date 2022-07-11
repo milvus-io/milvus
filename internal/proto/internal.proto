@@ -255,12 +255,6 @@ message SegmentStats {
   bool recently_modified = 4;
 }
 
-message QueryNodeStats {
-  common.MsgBase base = 1;
-  repeated SegmentStats seg_stats = 2;
-  repeated FieldStats field_stats = 3;
-}
-
 message MsgPosition {
   string channel_name = 1;
   bytes msgID = 2;
