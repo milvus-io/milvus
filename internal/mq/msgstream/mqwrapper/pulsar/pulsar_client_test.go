@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"math/rand"
 	"net/url"
@@ -585,42 +584,16 @@ func hackPulsarError(result pulsar.Result) *pulsar.Error {
 	// use unsafe to generate test case
 	/* #nosec G103 */
 	mpe := (*mPulsarError)(unsafe.Pointer(pe))
+	// this what we tested
+	if result == pulsar.ConsumerBusy {
+		mpe.msg = "server error: ConsumerBusy: Exclusive consumer is already connected"
+	}
+
+	if result == pulsar.ConsumerNotFound {
+		mpe.msg = "server error: MetadataError: Consumer not found"
+	}
 	mpe.result = result
 	return pe
-}
-
-func TestIsPulsarError(t *testing.T) {
-	type testCase struct {
-		err      error
-		results  []pulsar.Result
-		expected bool
-	}
-	cases := []testCase{
-		{
-			err:      errors.New(""),
-			results:  []pulsar.Result{},
-			expected: false,
-		},
-		{
-			err:      errors.New(""),
-			results:  []pulsar.Result{pulsar.ConnectError},
-			expected: false,
-		},
-		{
-			err:      hackPulsarError(pulsar.ConsumerBusy),
-			results:  []pulsar.Result{pulsar.ConnectError},
-			expected: false,
-		},
-		{
-			err:      hackPulsarError(pulsar.ConsumerBusy),
-			results:  []pulsar.Result{pulsar.ConnectError, pulsar.ConsumerBusy},
-			expected: true,
-		},
-	}
-
-	for _, tc := range cases {
-		assert.Equal(t, tc.expected, isPulsarError(tc.err, tc.results...))
-	}
 }
 
 type mockPulsarClient struct{}
