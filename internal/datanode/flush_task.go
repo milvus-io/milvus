@@ -120,7 +120,7 @@ func (t *flushTaskRunner) init(f notifyMetaFunc, postFunc taskPostFunc, signal <
 	})
 }
 
-// runFlushInsert executei flush insert task with once and retry
+// runFlushInsert executes flush insert task with once and retry
 func (t *flushTaskRunner) runFlushInsert(task flushInsertTask,
 	binlogs, statslogs map[UniqueID]*datapb.Binlog, flushed bool, dropped bool, pos *internalpb.MsgPosition, opts ...retry.Option) {
 	t.insertOnce.Do(func() {
@@ -129,6 +129,12 @@ func (t *flushTaskRunner) runFlushInsert(task flushInsertTask,
 		t.flushed = flushed
 		t.pos = pos
 		t.dropped = dropped
+		log.Debug("running flush insert task",
+			zap.Int64("segment ID", t.segmentID),
+			zap.Bool("flushed", flushed),
+			zap.Bool("dropped", dropped),
+			zap.Any("position", pos),
+		)
 		go func() {
 			err := retry.Do(context.Background(), func() error {
 				return task.flushInsertData()
@@ -208,6 +214,8 @@ func (t *flushTaskRunner) getFlushPack() *segmentFlushPack {
 		flushed:    t.flushed,
 		dropped:    t.dropped,
 	}
+	log.Debug("flush pack composed",
+		zap.Any("pack", pack))
 	if t.insertErr != nil || t.deleteErr != nil {
 		log.Warn("flush task error detected", zap.Error(t.insertErr), zap.Error(t.deleteErr))
 		pack.err = errors.New("execution failed")

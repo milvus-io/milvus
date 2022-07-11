@@ -117,7 +117,7 @@ func (q *orderFlushQueue) init() {
 }
 
 func (q *orderFlushQueue) getFlushTaskRunner(pos *internalpb.MsgPosition) *flushTaskRunner {
-	actual, loaded := q.working.LoadOrStore(string(pos.MsgID), newFlushTaskRunner(q.segmentID, q.injectCh))
+	actual, loaded := q.working.LoadOrStore(string(pos.GetMsgID()), newFlushTaskRunner(q.segmentID, q.injectCh))
 	t := actual.(*flushTaskRunner)
 	// not loaded means the task runner is new, do initializtion
 	if !loaded {
@@ -130,6 +130,10 @@ func (q *orderFlushQueue) getFlushTaskRunner(pos *internalpb.MsgPosition) *flush
 		t.init(q.notifyFunc, q.postTask, q.tailCh)
 		q.tailCh = t.finishSignal
 		q.tailMut.Unlock()
+		log.Debug("new flush task runner created and initialized",
+			zap.Int64("segment ID", q.segmentID),
+			zap.String("pos message ID", string(pos.GetMsgID())),
+		)
 	}
 	return t
 }
@@ -274,6 +278,12 @@ func (m *rendezvousFlushManager) getFlushQueue(segmentID UniqueID) *orderFlushQu
 }
 
 func (m *rendezvousFlushManager) handleInsertTask(segmentID UniqueID, task flushInsertTask, binlogs, statslogs map[UniqueID]*datapb.Binlog, flushed bool, dropped bool, pos *internalpb.MsgPosition) {
+	log.Debug("handling insert task",
+		zap.Int64("segment ID", segmentID),
+		zap.Bool("flushed", flushed),
+		zap.Bool("dropped", dropped),
+		zap.Any("position", pos),
+	)
 	// in dropping mode
 	if m.dropping.Load() {
 		r := &flushTaskRunner{
@@ -321,12 +331,11 @@ func (m *rendezvousFlushManager) handleDeleteTask(segmentID UniqueID, task flush
 	m.getFlushQueue(segmentID).enqueueDelFlush(task, deltaLogs, pos)
 }
 
-// notify flush manager insert buffer data
+// flushBufferData notifies flush manager insert buffer data.
+// This method will be retired on errors. Final errors will be propagated upstream and logged.
 func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID UniqueID, flushed bool,
 	dropped bool, pos *internalpb.MsgPosition) error {
-
 	tr := timerecord.NewTimeRecorder("flushDuration")
-
 	// empty flush
 	if data == nil || data.buffer == nil {
 		//m.getFlushQueue(segmentID).enqueueInsertFlush(&flushBufferInsertTask{},
