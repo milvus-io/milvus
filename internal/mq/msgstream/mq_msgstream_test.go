@@ -648,7 +648,6 @@ func TestStream_PulsarMsgStream_DefaultRepackFunc(t *testing.T) {
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_TimeTick, 1))
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Search, 2))
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_SearchResult, 3))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_QueryNodeStats, 4))
 
 	factory := ProtoUDFactory{}
 
@@ -1973,18 +1972,6 @@ func getTsMsg(msgType MsgType, reqID UniqueID) TsMsg {
 			TimeTickMsg: timeTickResult,
 		}
 		return timeTickMsg
-	case commonpb.MsgType_QueryNodeStats:
-		queryNodeSegStats := internalpb.QueryNodeStats{
-			Base: &commonpb.MsgBase{
-				MsgType:  commonpb.MsgType_QueryNodeStats,
-				SourceID: reqID,
-			},
-		}
-		queryNodeSegStatsMsg := &QueryNodeStatsMsg{
-			BaseMsg:        baseMsg,
-			QueryNodeStats: queryNodeSegStats,
-		}
-		return queryNodeSegStatsMsg
 	}
 	return nil
 }

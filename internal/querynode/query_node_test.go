@@ -19,10 +19,8 @@ package querynode
 import (
 	"context"
 	"io/ioutil"
-	"math/rand"
 	"net/url"
 	"os"
-	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -97,7 +95,6 @@ func newQueryNodeMock() *QueryNode {
 	replica := newCollectionReplica()
 	svr.metaReplica = replica
 	svr.dataSyncService = newDataSyncService(ctx, svr.metaReplica, tsReplica, factory)
-	svr.statsService = newStatsService(ctx, svr.metaReplica, factory)
 	svr.vectorStorage, err = factory.NewVectorStorageChunkManager(ctx)
 	if err != nil {
 		panic(err)
@@ -143,7 +140,6 @@ func startEmbedEtcdServer() (*embed.Etcd, error) {
 
 func TestMain(m *testing.M) {
 	setup()
-	Params.CommonCfg.QueryNodeStats = Params.CommonCfg.QueryNodeStats + strconv.Itoa(rand.Int())
 	// init embed etcd
 	var err error
 	embedetcdServer, err = startEmbedEtcdServer()

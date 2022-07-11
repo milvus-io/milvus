@@ -65,7 +65,6 @@ func (pudf *ProtoUDFactory) NewUnmarshalDispatcher() *ProtoUnmarshalDispatcher {
 	dropCollectionMsg := DropCollectionMsg{}
 	createPartitionMsg := CreatePartitionMsg{}
 	dropPartitionMsg := DropPartitionMsg{}
-	queryNodeSegStatsMsg := QueryNodeStatsMsg{}
 	dataNodeTtMsg := DataNodeTtMsg{}
 	sealedSegmentsChangeInfoMsg := SealedSegmentsChangeInfoMsg{}
 
@@ -78,7 +77,6 @@ func (pudf *ProtoUDFactory) NewUnmarshalDispatcher() *ProtoUnmarshalDispatcher {
 	p.TempMap[commonpb.MsgType_Retrieve] = retrieveMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_RetrieveResult] = retrieveResultMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_TimeTick] = timeTickMsg.Unmarshal
-	p.TempMap[commonpb.MsgType_QueryNodeStats] = queryNodeSegStatsMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_CreateCollection] = createCollectionMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_DropCollection] = dropCollectionMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_CreatePartition] = createPartitionMsg.Unmarshal

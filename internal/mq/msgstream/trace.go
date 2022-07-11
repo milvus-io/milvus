@@ -93,7 +93,6 @@ func allowTrace(in interface{}) bool {
 	switch res := in.(type) {
 	case TsMsg:
 		return !(res.Type() == commonpb.MsgType_TimeTick ||
-			res.Type() == commonpb.MsgType_QueryNodeStats ||
 			res.Type() == commonpb.MsgType_LoadIndex)
 	default:
 		return false

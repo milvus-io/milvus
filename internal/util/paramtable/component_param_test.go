@@ -91,9 +91,6 @@ func TestComponentParam(t *testing.T) {
 		t.Logf("querycoord timetick channel = %s", Params.QueryCoordTimeTick)
 
 		// -- querynode --
-		assert.Equal(t, Params.QueryNodeStats, "by-dev-query-node-stats")
-		t.Logf("querynode stats channel = %s", Params.QueryNodeStats)
-
 		assert.Equal(t, Params.QueryNodeSubName, "by-dev-queryNode")
 		t.Logf("querynode subname = %s", Params.QueryNodeSubName)
 

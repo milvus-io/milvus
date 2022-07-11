@@ -94,10 +94,6 @@ type QueryNode struct {
 	// dataSyncService
 	dataSyncService *dataSyncService
 
-	// internal services
-	//queryService *queryService
-	statsService *statsService
-
 	// segment loader
 	loader *segmentLoader
 
@@ -259,7 +255,6 @@ func (node *QueryNode) Start() error {
 
 	// start services
 	go node.watchChangeInfo()
-	//go node.statsService.start()
 
 	// create shardClusterService for shardLeader functions.
 	node.ShardClusterService = newShardClusterService(node.etcdCli, node.session, node)
