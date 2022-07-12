@@ -443,7 +443,7 @@ func TestHandoffSegmentLoop(t *testing.T) {
 		err = queryCoord.scheduler.Enqueue(handoffTask)
 		assert.Nil(t, err)
 
-		waitTaskFinalState(handoffTask, taskFailed)
+		waitTaskFinalState(handoffTask, taskExpired)
 	})
 
 	t.Run("Test handoffCompactionSegment", func(t *testing.T) {

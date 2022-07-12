@@ -1618,11 +1618,8 @@ func (wdt *watchDmChannelTask) reschedule(ctx context.Context) ([]task, error) {
 		wdt.excludeNodeIDs = []int64{}
 	}
 	wdt.excludeNodeIDs = append(wdt.excludeNodeIDs, wdt.NodeID)
-	wait2AssignTaskSuccess := false
-	if wdt.getParentTask().getTriggerCondition() == querypb.TriggerCondition_NodeDown {
-		wait2AssignTaskSuccess = true
-	}
-	reScheduledTasks, err := assignInternalTask(ctx, wdt.parentTask, wdt.meta, wdt.cluster, nil, watchDmChannelReqs, wait2AssignTaskSuccess, wdt.excludeNodeIDs, nil, wdt.ReplicaID, nil)
+
+	reScheduledTasks, err := assignInternalTask(ctx, wdt.parentTask, wdt.meta, wdt.cluster, nil, watchDmChannelReqs, false, wdt.excludeNodeIDs, nil, wdt.ReplicaID, nil)
 	if err != nil {
 		log.Error("watchDmChannel reschedule failed", zap.Int64("taskID", wdt.getTaskID()), zap.Int64s("excludeNodes", wdt.excludeNodeIDs), zap.Error(err))
 		return nil, err
@@ -1847,7 +1844,7 @@ func (ht *handoffTask) execute(ctx context.Context) error {
 				// we should copy a request because assignInternalTask will change DstNodeID of LoadSegmentRequest
 				clonedReq := proto.Clone(loadSegmentReq).(*querypb.LoadSegmentsRequest)
 				clonedReq.ReplicaID = replica.ReplicaID
-				tasks, err := assignInternalTask(ctx, ht, ht.meta, ht.cluster, []*querypb.LoadSegmentsRequest{clonedReq}, nil, true, nil, nil, replica.GetReplicaID(), ht.broker)
+				tasks, err := assignInternalTask(ctx, ht, ht.meta, ht.cluster, []*querypb.LoadSegmentsRequest{clonedReq}, nil, false, nil, nil, replica.GetReplicaID(), ht.broker)
 				if err != nil {
 					log.Error("handoffTask: assign child task failed", zap.Int64("collectionID", collectionID), zap.Int64("segmentID", segmentID), zap.Error(err))
 					ht.setResultInfo(err)
@@ -1859,11 +1856,6 @@ func (ht *handoffTask) execute(ctx context.Context) error {
 				ht.addChildTask(internalTask)
 				log.Info("handoffTask: add a childTask", zap.String("task type", internalTask.msgType().String()), zap.Int64("segmentID", segmentID))
 			}
-		} else {
-			err = fmt.Errorf("sealed segment has been exist on query node, segmentID is %d", segmentID)
-			log.Error("handoffTask: handoff segment failed", zap.Int64("segmentID", segmentID), zap.Error(err))
-			ht.setResultInfo(err)
-			return err
 		}
 	}
 
