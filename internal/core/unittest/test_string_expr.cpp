@@ -538,7 +538,7 @@ TEST(AlwaysTrueStringPlan, SearchWithOutputFields) {
         dim,       //
         query_ptr  //
     };
-    auto sub_result = FloatSearchBruteForce(search_dataset, vec_col.data(), N, nullptr);
+    auto sub_result = BruteForceSearch(search_dataset, vec_col.data(), N, nullptr);
 
     auto sr = segment->Search(plan.get(), ph_group.get(), time);
     segment->FillPrimaryKeys(plan.get(), *sr);
