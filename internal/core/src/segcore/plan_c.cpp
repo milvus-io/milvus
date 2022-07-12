@@ -77,11 +77,10 @@ ParsePlaceholderGroup(CSearchPlan c_plan,
                       const void* placeholder_group_blob,
                       const int64_t blob_size,
                       CPlaceholderGroup* res_placeholder_group) {
-    std::string blob_str((char*)placeholder_group_blob, blob_size);
     auto plan = (milvus::query::Plan*)c_plan;
 
     try {
-        auto res = milvus::query::ParsePlaceholderGroup(plan, blob_str);
+        auto res = milvus::query::ParsePlaceholderGroup(plan, (const uint8_t*)(placeholder_group_blob), blob_size);
 
         auto status = CStatus();
         status.error_code = Success;
