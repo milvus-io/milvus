@@ -128,6 +128,7 @@ pipeline {
                                                 --set etcd.metrics.enabled=true \
                                                 --set etcd.metrics.podMonitor.enabled=true \
                                                 --set etcd.nodeSelector.disk=fast \
+                                                --set indexCoordinator.gc.interval=1 \
                                                 --version ${chart_version} \
                                                 -f values/pr.yaml" 
                                                 """
