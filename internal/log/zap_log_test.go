@@ -113,14 +113,14 @@ func TestLog(t *testing.T) {
 		zap.Duration("duration", 10*time.Second),
 	)
 	ts.assertMessages(
-		`[INFO] [zap_log_test.go:65] ["failed to fetch URL"] [url=http://example.com] [attempt=3] [backoff=1s]`,
-		`[INFO] [zap_log_test.go:70] ["failed to \"fetch\" [URL]: http://example.com"]`,
-		`[DEBUG] [zap_log_test.go:71] ["Slow query"] [sql="SELECT * FROM TABLE\n\tWHERE ID=\"abc\""] [duration=1.3s] ["process keys"=1500]`,
-		`[INFO] [zap_log_test.go:77] [Welcome]`,
-		`[INFO] [zap_log_test.go:78] [欢迎]`,
-		`[WARN] [zap_log_test.go:79] [Type] [Counter=NaN] [Score=+Inf]`,
-		`[INFO] [zap_log_test.go:84] ["new connection"] [connID=1] [traceID=dse1121]`,
-		`[INFO] [zap_log_test.go:85] ["Testing typs"] [filed1=noquote] `+
+		`[INFO] [log/zap_log_test.go:65] ["failed to fetch URL"] [url=http://example.com] [attempt=3] [backoff=1s]`,
+		`[INFO] [log/zap_log_test.go:70] ["failed to \"fetch\" [URL]: http://example.com"]`,
+		`[DEBUG] [log/zap_log_test.go:71] ["Slow query"] [sql="SELECT * FROM TABLE\n\tWHERE ID=\"abc\""] [duration=1.3s] ["process keys"=1500]`,
+		`[INFO] [log/zap_log_test.go:77] [Welcome]`,
+		`[INFO] [log/zap_log_test.go:78] [欢迎]`,
+		`[WARN] [log/zap_log_test.go:79] [Type] [Counter=NaN] [Score=+Inf]`,
+		`[INFO] [log/zap_log_test.go:84] ["new connection"] [connID=1] [traceID=dse1121]`,
+		`[INFO] [log/zap_log_test.go:85] ["Testing typs"] [filed1=noquote] `+
 			`[filed2="in quote"] [urls="[http://mock1.com:2347,http://mock2.com:2432]"] `+
 			`[urls-peer="[t1,\"t2 fine\"]"] ["store ids"="[1,4,5]"] [object="{username=user1}"] `+
 			`[object2="{username=\"user 2\"}"] [binary="YWIxMjM="] ["is processed"=true] `+
@@ -164,9 +164,9 @@ func TestZapCaller(t *testing.T) {
 	}
 	expect := []string{
 		"server.go:132",
-		"coordinator.go:20",
-		"ztest_coordinator1.go:20",
-		"<unknown>",
+		"server/coordinator.go:20",
+		"\"z\\\\test_coordinator1.go:20\"",
+		"undefined",
 	}
 	conf := &Config{Level: "deug", File: FileLogConfig{}, DisableTimestamp: true}
 	enc := NewTextEncoder(conf).(*textEncoder)
@@ -191,8 +191,8 @@ func TestLogJSON(t *testing.T) {
 		"backoff", time.Second,
 	)
 	logger.With(zap.String("connID", "1"), zap.String("traceID", "dse1121")).Info("new connection")
-	ts.assertMessages("{\"level\":\"INFO\",\"caller\":\"zap_log_test.go:188\",\"message\":\"failed to fetch URL\",\"url\":\"http://example.com\",\"attempt\":3,\"backoff\":\"1s\"}",
-		"{\"level\":\"INFO\",\"caller\":\"zap_log_test.go:193\",\"message\":\"new connection\",\"connID\":\"1\",\"traceID\":\"dse1121\"}")
+	ts.assertMessages("{\"level\":\"INFO\",\"caller\":\"log/zap_log_test.go:188\",\"message\":\"failed to fetch URL\",\"url\":\"http://example.com\",\"attempt\":3,\"backoff\":\"1s\"}",
+		"{\"level\":\"INFO\",\"caller\":\"log/zap_log_test.go:193\",\"message\":\"new connection\",\"connID\":\"1\",\"traceID\":\"dse1121\"}")
 }
 
 func TestRotateLog(t *testing.T) {
