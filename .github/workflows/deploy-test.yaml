@@ -101,13 +101,13 @@ jobs:
       - name: Run first test
         timeout-minutes: 15
         shell: bash
-        working-directory: tests/python_client/deploy/scripts
+        working-directory: tests/python_client/deploy
         run: |
           if [ ${{ matrix.task }} == "reinstall" ]; then
-            python3 action_before_reinstall.py
+            python3 scripts/action_before_reinstall.py
           fi
           if [ ${{ matrix.task }} == "upgrade" ]; then
-            python3 action_before_upgrade.py
+            python3 scripts/action_before_upgrade.py
           fi
       - name: Milvus Idle Time
         timeout-minutes: 5
@@ -145,13 +145,13 @@ jobs:
       - name: Run second test
         timeout-minutes: 15
         shell: bash
-        working-directory: tests/python_client/deploy/scripts
+        working-directory: tests/python_client/deploy
         run: |
           if [ ${{ matrix.task }} == "reinstall" ]; then
-            python3 action_after_reinstall.py
+            python3 scripts/action_after_reinstall.py
           fi
           if [ ${{ matrix.task }} == "upgrade" ]; then
-            python3 action_after_upgrade.py
+            python3 scripts/action_after_upgrade.py
           fi
       - name: Export logs
         if: ${{ always() }}
