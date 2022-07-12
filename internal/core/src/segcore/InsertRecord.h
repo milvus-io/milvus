@@ -43,11 +43,12 @@ struct InsertRecord {
     std::vector<SegOffset>
     search_pk(const PkType pk, Timestamp timestamp) const {
         std::vector<SegOffset> res_offsets;
-        auto [iter_b, iter_e] = pk2offset_.equal_range(pk);
-        for (auto iter = iter_b; iter != iter_e; ++iter) {
-            auto offset = SegOffset(iter->second);
-            if (timestamps_[offset.get()] <= timestamp) {
-                res_offsets.push_back(offset);
+        auto offset_iter = pk2offset_.find(pk);
+        if (offset_iter != pk2offset_.end()) {
+            for (auto offset : offset_iter->second) {
+                if (timestamps_[offset] <= timestamp) {
+                    res_offsets.push_back(SegOffset(offset));
+                }
             }
         }
 
@@ -57,11 +58,12 @@ struct InsertRecord {
     std::vector<SegOffset>
     search_pk(const PkType pk, int64_t insert_barrier) const {
         std::vector<SegOffset> res_offsets;
-        auto [iter_b, iter_e] = pk2offset_.equal_range(pk);
-        for (auto iter = iter_b; iter != iter_e; ++iter) {
-            auto offset = SegOffset(iter->second);
-            if (offset.get() < insert_barrier) {
-                res_offsets.push_back(offset);
+        auto offset_iter = pk2offset_.find(pk);
+        if (offset_iter != pk2offset_.end()) {
+            for (auto offset : offset_iter->second) {
+                if (offset < insert_barrier) {
+                    res_offsets.push_back(SegOffset(offset));
+                }
             }
         }
 
@@ -70,7 +72,7 @@ struct InsertRecord {
 
     void
     insert_pk(const PkType pk, int64_t offset) {
-        pk2offset_.insert(std::make_pair(pk, offset));
+        pk2offset_[pk].insert(offset);
     }
 
     bool

@@ -54,7 +54,7 @@ func (q *queryTask) PreExecute(ctx context.Context) error {
 func (q *queryTask) queryOnStreaming() error {
 	// check ctx timeout
 	if !funcutil.CheckCtxValid(q.Ctx()) {
-		return errors.New("search context timeout")
+		return errors.New("query context timeout")
 	}
 
 	// check if collection has been released, check streaming since it's released first
