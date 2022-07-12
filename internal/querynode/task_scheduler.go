@@ -263,6 +263,24 @@ func (s *taskScheduler) executeReadTasks() {
 	defer s.wg.Done()
 	var taskWg sync.WaitGroup
 	defer taskWg.Wait()
+	timeoutErr := fmt.Errorf("deadline exceed")
+
+	executeFunc := func(t readTask) {
+		defer taskWg.Done()
+		if t.Timeout() {
+			t.Notify(timeoutErr)
+		} else {
+			s.processReadTask(t)
+		}
+		cpu := t.CPUUsage()
+		atomic.AddInt32(&s.readConcurrency, -1)
+		atomic.AddInt32(&s.cpuUsage, -cpu)
+		select {
+		case s.notifyChan <- struct{}{}:
+		default:
+		}
+	}
+
 	for {
 		select {
 		case <-s.ctx.Done():
@@ -273,33 +291,12 @@ func (s *taskScheduler) executeReadTasks() {
 				pendingTaskLen := len(s.executeReadTaskChan)
 				taskWg.Add(1)
 				atomic.AddInt32(&s.readConcurrency, int32(pendingTaskLen+1))
-				go func(t readTask) {
-					defer taskWg.Done()
-					s.processReadTask(t)
-					cpu := t.CPUUsage()
-					atomic.AddInt32(&s.readConcurrency, -1)
-					atomic.AddInt32(&s.cpuUsage, -cpu)
-					select {
-					case s.notifyChan <- struct{}{}:
-					default:
-					}
-				}(t)
+				go executeFunc(t)
 
 				for i := 0; i < pendingTaskLen; i++ {
 					taskWg.Add(1)
 					t := <-s.executeReadTaskChan
-					go func(t readTask) {
-						defer taskWg.Done()
-						s.processReadTask(t)
-						cpu := t.CPUUsage()
-						atomic.AddInt32(&s.readConcurrency, -1)
-						atomic.AddInt32(&s.cpuUsage, -cpu)
-						select {
-						case s.notifyChan <- struct{}{}:
-						default:
-
-						}
-					}(t)
+					go executeFunc(t)
 				}
 				//log.Debug("QueryNode taskScheduler executeReadTasks process tasks done", zap.Int("numOfTasks", pendingTaskLen+1))
 			} else {

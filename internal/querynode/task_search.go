@@ -209,6 +209,15 @@ func (s *searchTask) CPUUsage() int32 {
 	return s.cpu
 }
 
+func (s *searchTask) Timeout() bool {
+	timeout := !funcutil.CheckCtxValid(s.Ctx())
+	for _, t := range s.otherTasks {
+		timeout = timeout && !funcutil.CheckCtxValid(t.ctx)
+	}
+
+	return timeout
+}
+
 // reduceResults reduce search results
 func (s *searchTask) reduceResults(searchReq *searchRequest, results []*SearchResult) error {
 	isEmpty := len(results) == 0
