@@ -78,6 +78,8 @@ jobs:
         working-directory: tests/python_client
         run: |
           pip install -r requirements.txt --trusted-host https://test.pypi.org
+          sudo systemctl restart docker
+          sleep 30s
 
       - name: First Milvus deployment
         timeout-minutes: 15
@@ -161,6 +163,43 @@ jobs:
           docker-compose ps -a || true
           mkdir -p logs/second_deploy
           bash ../../../scripts/export_log_docker.sh ./logs/second_deploy || echo "export logs failed"
+
+      - name: Restart docker
+        timeout-minutes: 5
+        shell: bash
+        working-directory: tests/python_client/deploy/${{ matrix.mode }}
+        run: |
+          echo "restart docker service"
+          sudo systemctl restart docker
+          sleep 20s
+          docker-compose up -d
+          bash ../check_healthy.sh
+          docker-compose ps -a
+
+          echo "sleep 120s for the deployment to be ready after docker restart"
+          sleep 120s
+
+
+      - name: Run third test
+        timeout-minutes: 15
+        shell: bash
+        working-directory: tests/python_client/deploy
+        run: |
+          if [ ${{ matrix.task }} == "reinstall" ]; then
+            python3 scripts/action_after_reinstall.py
+          fi
+          if [ ${{ matrix.task }} == "upgrade" ]; then
+            python3 scripts/action_after_upgrade.py
+          fi
+      - name: Export logs
+        if: ${{ always() }}
+        shell: bash
+        working-directory: tests/python_client/deploy/${{ matrix.mode }}
+        run: |
+          docker-compose ps -a || true
+          mkdir -p logs/second_deploy
+          bash ../../../scripts/export_log_docker.sh ./logs/third_deploy || echo "export logs failed"      
+      
       - name: 'Send mail'
         if: ${{ failure() }}
         uses: dawidd6/action-send-mail@v3
