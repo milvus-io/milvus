@@ -191,6 +191,8 @@ func (s *SegmentInfo) Clone(opts ...SegmentInfoOption) *SegmentInfo {
 		currRows:      s.currRows,
 		allocations:   s.allocations,
 		lastFlushTime: s.lastFlushTime,
+		isCompacting:  s.isCompacting,
+		//cannot copy size, since binlog may be changed
 	}
 	for _, opt := range opts {
 		opt(cloned)
@@ -205,6 +207,8 @@ func (s *SegmentInfo) ShadowClone(opts ...SegmentInfoOption) *SegmentInfo {
 		currRows:      s.currRows,
 		allocations:   s.allocations,
 		lastFlushTime: s.lastFlushTime,
+		isCompacting:  s.isCompacting,
+		size:          s.size,
 	}
 
 	for _, opt := range opts {
