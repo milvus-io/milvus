@@ -466,43 +466,10 @@ func (c *queryNodeCluster) GetSegmentInfo(ctx context.Context, in *querypb.GetSe
 		}
 	}
 
-	// Fetch growing segments
-	c.RLock()
-	var wg sync.WaitGroup
-	cnt := len(c.nodes)
-	resChan := make(chan respTuple, cnt)
-	wg.Add(cnt)
-	for _, node := range c.nodes {
-		go func(node Node) {
-			defer wg.Done()
-			res, err := node.getSegmentInfo(ctx, in)
-			resChan <- respTuple{
-				res: res,
-				err: err,
-			}
-		}(node)
-	}
-	c.RUnlock()
-	wg.Wait()
-	close(resChan)
-
-	for tuple := range resChan {
-		if tuple.err != nil {
-			return nil, tuple.err
-		}
-
-		segments := tuple.res.GetInfos()
-		for _, segment := range segments {
-			if segment.SegmentState != commonpb.SegmentState_Sealed {
-				segmentInfos = append(segmentInfos, segment)
-			}
-		}
-	}
-
-	//TODO::update meta
 	return segmentInfos, nil
 }
 
+// Deprecated
 func (c *queryNodeCluster) GetSegmentInfoByNode(ctx context.Context, nodeID int64, in *querypb.GetSegmentInfoRequest) ([]*querypb.SegmentInfo, error) {
 	c.RLock()
 	node, ok := c.nodes[nodeID]

@@ -549,42 +549,17 @@ func TestGrpcRequest(t *testing.T) {
 		assert.Nil(t, err)
 	})
 
-	t.Run("Test GetSegmentInfoByNode", func(t *testing.T) {
+	t.Run("Test GetSegmentInfoNotExist", func(t *testing.T) {
 		getSegmentInfoReq := &querypb.GetSegmentInfoRequest{
 			Base: &commonpb.MsgBase{
 				MsgType: commonpb.MsgType_SegmentInfo,
 			},
 			CollectionID: defaultCollectionID,
-		}
-		_, err = cluster.GetSegmentInfoByNode(baseCtx, nodeID, getSegmentInfoReq)
-		assert.Nil(t, err)
-	})
-
-	node.getSegmentInfos = returnFailedGetSegmentInfoResult
-
-	t.Run("Test GetSegmentInfoFailed", func(t *testing.T) {
-		getSegmentInfoReq := &querypb.GetSegmentInfoRequest{
-			Base: &commonpb.MsgBase{
-				MsgType: commonpb.MsgType_SegmentInfo,
-			},
-			CollectionID: defaultCollectionID,
+			SegmentIDs:   []UniqueID{-1},
 		}
 		_, err = cluster.GetSegmentInfo(baseCtx, getSegmentInfoReq)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 	})
-
-	t.Run("Test GetSegmentInfoByNodeFailed", func(t *testing.T) {
-		getSegmentInfoReq := &querypb.GetSegmentInfoRequest{
-			Base: &commonpb.MsgBase{
-				MsgType: commonpb.MsgType_SegmentInfo,
-			},
-			CollectionID: defaultCollectionID,
-		}
-		_, err = cluster.GetSegmentInfoByNode(baseCtx, nodeID, getSegmentInfoReq)
-		assert.NotNil(t, err)
-	})
-
-	node.getSegmentInfos = returnSuccessGetSegmentInfoResult
 
 	t.Run("Test GetNodeInfoByID", func(t *testing.T) {
 		res, err := cluster.GetNodeInfoByID(nodeID)
