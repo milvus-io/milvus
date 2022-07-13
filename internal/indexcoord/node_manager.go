@@ -20,17 +20,14 @@ import (
 	"context"
 	"sync"
 
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
-
-	"github.com/milvus-io/milvus/internal/metrics"
-
-	"go.uber.org/zap"
-
 	grpcindexnodeclient "github.com/milvus-io/milvus/internal/distributed/indexnode/client"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
+	"go.uber.org/zap"
 )
 
 // NodeManager is used by IndexCoord to manage the client of IndexNode.
@@ -56,7 +53,7 @@ func NewNodeManager(ctx context.Context) *NodeManager {
 // setClient sets IndexNode client to node manager.
 func (nm *NodeManager) setClient(nodeID UniqueID, client types.IndexNode) error {
 	log.Debug("IndexCoord NodeManager setClient", zap.Int64("nodeID", nodeID))
-	defer log.Debug("IndexNode NodeManager setclient success", zap.Any("nodeID", nodeID))
+	defer log.Debug("IndexNode NodeManager setClient success", zap.Any("nodeID", nodeID))
 	item := &PQItem{
 		key:      nodeID,
 		priority: 0,
@@ -105,30 +102,69 @@ func (nm *NodeManager) AddNode(nodeID UniqueID, address string) error {
 
 // PeekClient peeks the client with the least load.
 func (nm *NodeManager) PeekClient(meta *Meta) (UniqueID, types.IndexNode) {
-	nm.lock.RLock()
-	defer nm.lock.RUnlock()
+	allClients := nm.GetAllClients()
 
-	if len(nm.nodeClients) == 0 {
+	if len(allClients) == 0 {
 		log.Error("there is no IndexNode online")
 		return -1, nil
 	}
-	for nodeID, client := range nm.nodeClients {
-		resp, err := client.GetTaskSlots(nm.ctx, &indexpb.GetTaskSlotsRequest{})
-		if err != nil {
-			log.Warn("get IndexNode slots failed", zap.Int64("nodeID", nodeID), zap.Error(err))
-			continue
-		}
-		if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
-			log.Warn("get IndexNode slots failed", zap.Int64("nodeID", nodeID),
-				zap.String("reason", resp.Status.Reason))
-			continue
-		}
-		if resp.Slots > 0 {
-			return nodeID, client
-		}
+
+	// Note: In order to quickly end other goroutines, an error is returned when the client is successfully selected
+	ctx, cancel := context.WithCancel(nm.ctx)
+	var (
+		peekNodeID = UniqueID(0)
+		nodeMutex  = sync.Mutex{}
+		wg         = sync.WaitGroup{}
+	)
+
+	for nodeID, client := range allClients {
+		nodeID := nodeID
+		client := client
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			resp, err := client.GetTaskSlots(ctx, &indexpb.GetTaskSlotsRequest{})
+			if err != nil {
+				log.Warn("get IndexNode slots failed", zap.Int64("nodeID", nodeID), zap.Error(err))
+				return
+			}
+			if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+				log.Warn("get IndexNode slots failed", zap.Int64("nodeID", nodeID),
+					zap.String("reason", resp.Status.Reason))
+				return
+			}
+			if resp.Slots > 0 {
+				nodeMutex.Lock()
+				defer nodeMutex.Unlock()
+				log.Info("peek client success", zap.Int64("nodeID", nodeID))
+				if peekNodeID == 0 {
+					peekNodeID = nodeID
+				}
+				cancel()
+				// Note: In order to quickly end other goroutines, an error is returned when the client is successfully selected
+				return
+			}
+		}()
+	}
+	wg.Wait()
+	cancel()
+	if peekNodeID != 0 {
+		return peekNodeID, allClients[peekNodeID]
 	}
 
 	return 0, nil
+}
+
+func (nm *NodeManager) GetAllClients() map[UniqueID]types.IndexNode {
+	nm.lock.RLock()
+	defer nm.lock.RUnlock()
+
+	allClients := make(map[UniqueID]types.IndexNode, len(nm.nodeClients))
+	for nodeID, client := range nm.nodeClients {
+		allClients[nodeID] = client
+	}
+
+	return allClients
 }
 
 // indexNodeGetMetricsResponse record the metrics information of IndexNode.

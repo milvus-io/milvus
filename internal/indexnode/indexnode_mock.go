@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/types"
+
 	"go.uber.org/zap"
 
 	"github.com/golang/protobuf/proto"
@@ -39,6 +41,7 @@ import (
 )
 
 // Mock is an alternative to IndexNode, it will return specific results based on specific parameters.
+// Deprecated, use MockIndexNode
 type Mock struct {
 	Build   bool
 	Failure bool
@@ -385,4 +388,24 @@ func getMockSystemInfoMetrics(
 		Response:      resp,
 		ComponentName: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, Params.IndexNodeCfg.GetNodeID()),
 	}, nil
+}
+
+type MockIndexNode struct {
+	types.IndexNode
+
+	CreateIndexMock  func(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error)
+	GetTaskSlotsMock func(ctx context.Context, req *indexpb.GetTaskSlotsRequest) (*indexpb.GetTaskSlotsResponse, error)
+	GetMetricsMock   func(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
+}
+
+func (min *MockIndexNode) CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
+	return min.CreateIndexMock(ctx, req)
+}
+
+func (min *MockIndexNode) GetTaskSlots(ctx context.Context, req *indexpb.GetTaskSlotsRequest) (*indexpb.GetTaskSlotsResponse, error) {
+	return min.GetTaskSlotsMock(ctx, req)
+}
+
+func (min *MockIndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	return min.GetMetricsMock(ctx, req)
 }
