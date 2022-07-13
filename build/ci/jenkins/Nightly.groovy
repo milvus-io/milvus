@@ -144,6 +144,7 @@ pipeline {
                                                     --set dataNode.replicas=2 \
                                                     --set dataCoordinator.gc.missingTolerance=86400 \
                                                     --set dataCoordinator.gc.dropTolerance=86400 \
+                                                    --set indexCoordinator.gc.interval=1 \
                                                     --version ${chart_version} \
                                                     -f values/${mqMode}.yaml \
                                                     -f values/nightly.yaml "
