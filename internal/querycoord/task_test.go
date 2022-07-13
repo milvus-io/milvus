@@ -18,6 +18,7 @@ package querycoord
 
 import (
 	"context"
+	"errors"
 	"math/rand"
 	"testing"
 	"time"
@@ -402,6 +403,53 @@ func Test_LoadCollectionAfterLoadPartition(t *testing.T) {
 	assert.Nil(t, err)
 }
 
+func TestLoadCollection_CheckLoadCollection(t *testing.T) {
+	refreshParams()
+	ctx := context.Background()
+	queryCoord, err := startQueryCoord(ctx)
+	assert.NoError(t, err)
+
+	node, err := startQueryNodeServer(ctx)
+	assert.NoError(t, err)
+	waitQueryNodeOnline(queryCoord.cluster, node.queryNodeID)
+
+	loadCollectionTask1 := genLoadCollectionTask(ctx, queryCoord)
+
+	err = checkLoadCollection(loadCollectionTask1.LoadCollectionRequest, loadCollectionTask1.meta)
+	assert.NoError(t, err) // Collection not loaded
+
+	err = queryCoord.scheduler.Enqueue(loadCollectionTask1)
+	assert.NoError(t, err)
+
+	err = loadCollectionTask1.waitToFinish()
+	assert.NoError(t, err)
+
+	loadCollectionTask2 := genLoadCollectionTask(ctx, queryCoord)
+	err = checkLoadCollection(loadCollectionTask2.LoadCollectionRequest, loadCollectionTask2.meta)
+	assert.Error(t, err) // Collection loaded
+	assert.True(t, errors.Is(err, ErrCollectionLoaded))
+
+	loadCollectionTask3 := genLoadCollectionTask(ctx, queryCoord)
+	loadCollectionTask3.ReplicaNumber++
+	err = checkLoadCollection(loadCollectionTask3.LoadCollectionRequest, loadCollectionTask3.meta)
+	assert.Error(t, err) // replica number mismatch
+	assert.True(t, errors.Is(err, ErrLoadParametersMismatch))
+
+	loadCollectionTask4 := genLoadCollectionTask(ctx, queryCoord)
+	err = loadCollectionTask4.meta.releaseCollection(loadCollectionTask4.CollectionID)
+	assert.NoError(t, err)
+	err = loadCollectionTask4.meta.addCollection(loadCollectionTask4.CollectionID, querypb.LoadType_LoadPartition, loadCollectionTask4.Schema)
+	assert.NoError(t, err)
+	err = checkLoadCollection(loadCollectionTask4.LoadCollectionRequest, loadCollectionTask4.meta)
+	assert.Error(t, err) // wrong load type, partition loaded before
+	assert.True(t, errors.Is(err, ErrLoadParametersMismatch))
+
+	node.stop()
+	queryCoord.Stop()
+	err = removeAllSession()
+	assert.NoError(t, err)
+}
+
 func Test_RepeatLoadCollection(t *testing.T) {
 	refreshParams()
 	ctx := context.Background()
@@ -516,6 +564,43 @@ func Test_LoadPartitionAssignTaskFail(t *testing.T) {
 	queryCoord.Stop()
 	err = removeAllSession()
 	assert.Nil(t, err)
+}
+
+func TestLoadPartition_CheckLoadPartition(t *testing.T) {
+	refreshParams()
+	ctx := context.Background()
+	queryCoord, err := startQueryCoord(ctx)
+	assert.NoError(t, err)
+
+	node, err := startQueryNodeServer(ctx)
+	assert.NoError(t, err)
+	waitQueryNodeOnline(queryCoord.cluster, node.queryNodeID)
+
+	loadPartitionTask1 := genLoadPartitionTask(ctx, queryCoord)
+	err = checkLoadPartition(loadPartitionTask1.LoadPartitionsRequest, loadPartitionTask1.meta)
+	assert.NoError(t, err) // partition not load
+
+	err = queryCoord.scheduler.Enqueue(loadPartitionTask1)
+	assert.NoError(t, err)
+
+	err = loadPartitionTask1.waitToFinish()
+	assert.NoError(t, err)
+
+	loadPartitionTask2 := genLoadPartitionTask(ctx, queryCoord)
+	err = checkLoadPartition(loadPartitionTask2.LoadPartitionsRequest, loadPartitionTask2.meta)
+	assert.Error(t, err) // partition loaded
+	assert.True(t, errors.Is(err, ErrCollectionLoaded))
+
+	loadPartitionTask3 := genLoadPartitionTask(ctx, queryCoord)
+	loadPartitionTask3.ReplicaNumber++
+	err = checkLoadPartition(loadPartitionTask3.LoadPartitionsRequest, loadPartitionTask3.meta)
+	assert.Error(t, err) // replica number mismatch
+	assert.True(t, errors.Is(err, ErrLoadParametersMismatch))
+
+	node.stop()
+	queryCoord.Stop()
+	err = removeAllSession()
+	assert.NoError(t, err)
 }
 
 func Test_LoadPartitionExecuteFail(t *testing.T) {
