@@ -90,7 +90,6 @@ class TestAutoLoadBalance(object):
             seg_distribution = cf.get_segment_distribution(seg_info)
             for k in seg_distribution.keys():
                 log.info(f"collection {c}'s segment distribution in node {k} is {seg_distribution[k]['sealed']}")
-                log.info(f"collection {c}'s growing segment distribution in node {k} is {seg_distribution[k]['growing']}")
         # first assert
         log.info("first assert")
         assert_statistic(self.health_checkers)
@@ -107,7 +106,6 @@ class TestAutoLoadBalance(object):
             seg_distribution = cf.get_segment_distribution(seg_info)
             for k in seg_distribution.keys():
                 log.info(f"collection {c}'s sealed segment distribution in node {k} is {seg_distribution[k]['sealed']}")
-                log.info(f"collection {c}'s growing segment distribution in node {k} is {seg_distribution[k]['growing']}")
         # second assert
         log.info("second assert")
         assert_statistic(self.health_checkers)
