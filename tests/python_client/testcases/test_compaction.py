@@ -118,11 +118,6 @@ class TestCompactionParams(TestcaseBase):
         c_plans = collection_w.get_compaction_plans()[0]
         assert len(c_plans.plans) == 0
 
-        collection_w.load()
-        segments_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
-        for segment_info in segments_info:
-            assert segment_info.state == SegmentState.Growing
-
     @pytest.mark.tags(CaseLabel.L2)
     def test_compact_empty_collection(self):
         """
