@@ -64,6 +64,11 @@ class SegmentGrowingImpl : public SegmentGrowing {
     std::string
     debug() const override;
 
+    int64_t
+    get_segment_id() const override {
+        return id_;
+    }
+
  public:
     const InsertRecord&
     get_insert_record() const {
