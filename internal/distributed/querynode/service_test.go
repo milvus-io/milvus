@@ -44,6 +44,7 @@ type MockQueryNode struct {
 	strResp    *milvuspb.StringResponse
 	infoResp   *querypb.GetSegmentInfoResponse
 	metricResp *milvuspb.GetMetricsResponse
+	StatsResp  *internalpb.GetStatisticsResponse
 	searchResp *internalpb.SearchResults
 	queryResp  *internalpb.RetrieveResults
 }
@@ -106,6 +107,10 @@ func (m *MockQueryNode) GetSegmentInfo(ctx context.Context, req *querypb.GetSegm
 
 func (m *MockQueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return m.metricResp, m.err
+}
+
+func (m *MockQueryNode) GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) (*internalpb.GetStatisticsResponse, error) {
+	return m.StatsResp, m.err
 }
 
 func (m *MockQueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error) {

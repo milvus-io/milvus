@@ -55,6 +55,28 @@ message TimeTickMsg {
   common.MsgBase base = 1;
 }
 
+message GetStatisticsRequest {
+  common.MsgBase base = 1;
+  // Not useful for now
+  int64 dbID = 2;
+  // The collection you want get statistics
+  int64 collectionID = 3;
+  // The partitions you want get statistics
+  repeated int64 partitionIDs = 4;
+  // timestamp of the statistics
+  uint64 travel_timestamp = 5;
+  uint64 guarantee_timestamp = 6;
+  uint64 timeout_timestamp = 7;
+}
+
+message GetStatisticsResponse {
+  common.MsgBase base = 1;
+  // Contain error_code and reason
+  common.Status status = 2;
+  // Collection statistics data. Contain pairs like {"row_count": "1"}
+  repeated common.KeyValuePair stats = 3;
+}
+
 message CreateCollectionRequest {
   common.MsgBase base = 1;
   string db_name = 2;

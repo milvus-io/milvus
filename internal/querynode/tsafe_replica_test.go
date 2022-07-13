@@ -49,4 +49,35 @@ func TestTSafeReplica(t *testing.T) {
 		err = replica.setTSafe(defaultDMLChannel, Timestamp(1000))
 		assert.Error(t, err)
 	})
+
+	t.Run("test listener", func(t *testing.T) {
+		replica := newTSafeReplica()
+
+		replica.addTSafe(defaultDMLChannel)
+
+		globalWatcher := replica.Watch()
+		channelWatcher := replica.WatchChannel(defaultDMLChannel)
+
+		timestamp := Timestamp(1000)
+		err := replica.setTSafe(defaultDMLChannel, timestamp)
+		assert.NoError(t, err)
+
+		select {
+		case <-globalWatcher.On():
+		default:
+			assert.Fail(t, "global watcher should be triggered")
+		}
+
+		select {
+		case <-channelWatcher.On():
+		default:
+			assert.Fail(t, "channel watcher should be triggered")
+		}
+
+		globalWatcher.Unregister()
+		channelWatcher.Unregister()
+		inst := replica.(*tSafeReplica)
+		assert.Len(t, inst.listeners[""], 0)
+		assert.Len(t, inst.listeners[defaultDMLChannel], 0)
+	})
 }

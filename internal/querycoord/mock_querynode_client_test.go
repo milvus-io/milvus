@@ -148,6 +148,10 @@ func (client *queryNodeClientMock) GetMetrics(ctx context.Context, req *milvuspb
 	return client.grpcClient.GetMetrics(ctx, req)
 }
 
+func (client *queryNodeClientMock) GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) (*internalpb.GetStatisticsResponse, error) {
+	return client.grpcClient.GetStatistics(ctx, req)
+}
+
 func (client *queryNodeClientMock) Search(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error) {
 	return client.grpcClient.Search(ctx, req)
 }

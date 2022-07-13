@@ -532,6 +532,48 @@ func TestImpl_searchWithDmlChannel(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestImpl_GetCollectionStatistics(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	node, err := genSimpleQueryNode(ctx)
+	defer node.Stop()
+	require.NoError(t, err)
+
+	req, err := genGetCollectionStatisticRequest()
+	require.NoError(t, err)
+
+	node.queryShardService.addQueryShard(defaultCollectionID, defaultDMLChannel, defaultReplicaID)
+
+	_, err = node.GetStatistics(ctx, &queryPb.GetStatisticsRequest{
+		Req:             req,
+		FromShardLeader: false,
+		DmlChannels:     []string{defaultDMLChannel},
+	})
+	assert.NoError(t, err)
+}
+
+func TestImpl_GetPartitionStatistics(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	node, err := genSimpleQueryNode(ctx)
+	defer node.Stop()
+	require.NoError(t, err)
+
+	req, err := genGetPartitionStatisticRequest()
+	require.NoError(t, err)
+
+	node.queryShardService.addQueryShard(defaultCollectionID, defaultDMLChannel, defaultReplicaID)
+
+	_, err = node.GetStatistics(ctx, &queryPb.GetStatisticsRequest{
+		Req:             req,
+		FromShardLeader: false,
+		DmlChannels:     []string{defaultDMLChannel},
+	})
+	assert.NoError(t, err)
+}
+
 func TestImpl_Query(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

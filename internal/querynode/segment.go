@@ -224,6 +224,18 @@ func deleteSegment(segment *Segment) {
 		zap.String("segmentType", segment.getType().String()))
 }
 
+func (s *Segment) getRealCount() int64 {
+	/*
+		int64_t
+		GetRealCount(CSegmentInterface c_segment);
+	*/
+	if s.segmentPtr == nil {
+		return -1
+	}
+	var rowCount = C.GetRealCount(s.segmentPtr)
+	return int64(rowCount)
+}
+
 func (s *Segment) getRowCount() int64 {
 	/*
 		long int

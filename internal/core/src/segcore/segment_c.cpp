@@ -125,9 +125,17 @@ GetRowCount(CSegmentInterface c_segment) {
 // TODO: segmentInterface implement get_deleted_count()
 int64_t
 GetDeletedCount(CSegmentInterface c_segment) {
-    auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
+    auto segment = reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
     auto deleted_count = segment->get_deleted_count();
     return deleted_count;
+}
+
+int64_t
+GetRealCount(CSegmentInterface c_segment) {
+    // not accurate, pk may exist in deleted record and not in insert record.
+    // return GetRowCount(c_segment) - GetDeletedCount(c_segment);
+    auto segment = reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
+    return segment->get_real_count();
 }
 
 //////////////////////////////    interfaces for growing segment    //////////////////////////////

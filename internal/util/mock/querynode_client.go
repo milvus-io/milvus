@@ -33,6 +33,10 @@ type QueryNodeClient struct {
 	Err        error
 }
 
+func (q QueryNodeClient) GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) (*internalpb.GetStatisticsResponse, error) {
+	return q.grpcClient.GetStatistics(ctx, req)
+}
+
 func (q QueryNodeClient) Init() error {
 	return nil
 }

@@ -174,7 +174,7 @@ message GetPartitionStatisticsRequest{
   common.MsgBase base = 1;
   int64 dbID = 2;
   int64 collectionID = 3;
-  int64 partitionID = 4;
+  repeated int64 partitionIDs = 4;
 }
 
 message GetPartitionStatisticsResponse {

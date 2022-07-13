@@ -402,7 +402,7 @@ func newSearchTask(ctx context.Context, src *querypb.SearchRequest) (*searchTask
 				id:   src.Req.Base.GetMsgID(),
 				ts:   src.Req.Base.GetTimestamp(),
 			},
-			DbID:               src.Req.GetReqID(),
+			DbID:               src.Req.GetDbID(),
 			CollectionID:       src.Req.GetCollectionID(),
 			TravelTimestamp:    src.Req.GetTravelTimestamp(),
 			GuaranteeTimestamp: src.Req.GetGuaranteeTimestamp(),

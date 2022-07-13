@@ -1509,6 +1509,23 @@ func genSimpleRetrievePlan(collection *Collection) (*RetrievePlan, error) {
 	return plan, err2
 }
 
+func genGetCollectionStatisticRequest() (*internalpb.GetStatisticsRequest, error) {
+	return &internalpb.GetStatisticsRequest{
+		Base:         genCommonMsgBase(commonpb.MsgType_GetCollectionStatistics),
+		DbID:         0,
+		CollectionID: defaultCollectionID,
+	}, nil
+}
+
+func genGetPartitionStatisticRequest() (*internalpb.GetStatisticsRequest, error) {
+	return &internalpb.GetStatisticsRequest{
+		Base:         genCommonMsgBase(commonpb.MsgType_GetPartitionStatistics),
+		DbID:         0,
+		CollectionID: defaultCollectionID,
+		PartitionIDs: []UniqueID{defaultPartitionID},
+	}, nil
+}
+
 func genSearchRequest(nq int64, indexType string, schema *schemapb.CollectionSchema) (*internalpb.SearchRequest, error) {
 	placeHolder, err := genPlaceHolderGroup(nq)
 	if err != nil {

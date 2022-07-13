@@ -33,6 +33,10 @@ type GrpcQueryNodeClient struct {
 	Err error
 }
 
+func (m *GrpcQueryNodeClient) GetStatistics(ctx context.Context, in *querypb.GetStatisticsRequest, opts ...grpc.CallOption) (*internalpb.GetStatisticsResponse, error) {
+	return &internalpb.GetStatisticsResponse{}, m.Err
+}
+
 func (m *GrpcQueryNodeClient) GetComponentStates(ctx context.Context, in *internalpb.GetComponentStatesRequest, opts ...grpc.CallOption) (*internalpb.ComponentStates, error) {
 	return &internalpb.ComponentStates{}, m.Err
 }

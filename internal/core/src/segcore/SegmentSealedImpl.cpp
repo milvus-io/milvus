@@ -323,6 +323,12 @@ SegmentSealedImpl::get_row_count() const {
     return row_count_opt_.value_or(0);
 }
 
+int64_t
+SegmentSealedImpl::get_deleted_count() const {
+    std::shared_lock lck(mutex_);
+    return deleted_record_.ack_responder_.GetAck();
+}
+
 const Schema&
 SegmentSealedImpl::get_schema() const {
     return *schema_;

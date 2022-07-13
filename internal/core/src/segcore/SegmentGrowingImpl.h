@@ -126,9 +126,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return insert_record_.ack_responder_.GetAck();
     }
 
-    ssize_t
+    int64_t
     get_deleted_count() const override {
-        return 0;
+        return deleted_record_.ack_responder_.GetAck();
     }
 
     int64_t

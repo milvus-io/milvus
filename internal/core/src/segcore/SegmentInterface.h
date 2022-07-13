@@ -62,6 +62,12 @@ class SegmentInterface {
     get_schema() const = 0;
 
     virtual int64_t
+    get_deleted_count() const = 0;
+
+    virtual int64_t
+    get_real_count() const = 0;
+
+    virtual int64_t
     PreDelete(int64_t size) = 0;
 
     virtual Status
@@ -114,6 +120,9 @@ class SegmentInternalInterface : public SegmentInterface {
 
     virtual std::string
     debug() const = 0;
+
+    int64_t
+    get_real_count() const override;
 
  public:
     virtual void
