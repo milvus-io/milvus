@@ -820,9 +820,7 @@ func (qc *QueryCoord) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmen
 
 	totalMemSize := int64(0)
 	totalNumRows := int64(0)
-	//TODO::get segment infos from MetaReplica
-	//segmentIDs := req.SegmentIDs
-	//segmentInfos, err := qs.MetaReplica.getSegmentInfos(segmentIDs)
+
 	segmentInfos, err := qc.cluster.GetSegmentInfo(ctx, req)
 	if err != nil {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
@@ -847,7 +845,9 @@ func (qc *QueryCoord) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmen
 		zap.Int64("collectionID", req.CollectionID),
 		zap.Int64("msgID", req.Base.MsgID),
 		zap.Int64("num rows", totalNumRows),
-		zap.Int64("memory size", totalMemSize))
+		zap.Int64("memory size", totalMemSize),
+		zap.Int("segmentNum", len(segmentInfos)))
+
 	return &querypb.GetSegmentInfoResponse{
 		Status: status,
 		Infos:  segmentInfos,
