@@ -137,7 +137,10 @@ func getSearchResultDataBlob(cSearchResultDataBlobs searchResultDataBlobs, blobI
 
 func deleteSearchResultDataBlobs(cSearchResultDataBlobs searchResultDataBlobs) {
 	C.DeleteSearchResultDataBlobs(cSearchResultDataBlobs)
-	// try to do a purgeMemory operation after DeleteSearchResultDataBlobs
+}
+
+func purgeMemoryAfterReduce() {
+	// try to do a purgeMemory operation after reduce
 	usedMem := metricsinfo.GetUsedMemoryCount()
 	if usedMem == 0 {
 		log.Error("Get 0 usedMemory when deleteSearchResultDataBlobs, which is unexpected")
