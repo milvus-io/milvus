@@ -345,37 +345,22 @@ func (lct *loadCollectionTask) updateTaskProcess() {
 	//this function shall just calculate intermediate progress
 }
 
-func (lct *loadCollectionTask) preExecute(ctx context.Context) error {
-	if lct.ReplicaNumber < 1 {
-		log.Warn("replicaNumber is less than 1 for load collection request, will set it to 1",
-			zap.Int32("replicaNumber", lct.ReplicaNumber))
-		lct.ReplicaNumber = 1
-	}
-
-	collectionID := lct.CollectionID
-	schema := lct.Schema
-
-	lct.setResultInfo(nil)
-
-	collectionInfo, err := lct.meta.getCollectionInfoByID(collectionID)
+func checkLoadCollection(req *querypb.LoadCollectionRequest, meta Meta) error {
+	collectionID := req.CollectionID
+	collectionInfo, err := meta.getCollectionInfoByID(collectionID)
 	if err == nil {
 		// if collection has been loaded by load collection request, return success
 		if collectionInfo.LoadType == querypb.LoadType_LoadCollection {
-			if collectionInfo.ReplicaNumber != lct.ReplicaNumber {
+			if collectionInfo.ReplicaNumber != req.ReplicaNumber {
 				msg := fmt.Sprintf("collection has already been loaded, and the number of replicas %v is not same as the request's %v. Should release first then reload with the new number of replicas",
 					collectionInfo.ReplicaNumber,
-					lct.ReplicaNumber)
+					req.ReplicaNumber)
 				log.Warn(msg,
 					zap.String("role", typeutil.QueryCoordRole),
 					zap.Int64("collectionID", collectionID),
-					zap.Int64("msgID", lct.Base.MsgID),
+					zap.Int64("msgID", req.Base.MsgID),
 					zap.Int32("collectionReplicaNumber", collectionInfo.ReplicaNumber),
-					zap.Int32("requestReplicaNumber", lct.ReplicaNumber))
-
-				lct.result = &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_IllegalArgument,
-					Reason:    msg,
-				}
+					zap.Int32("requestReplicaNumber", req.ReplicaNumber))
 
 				return fmt.Errorf(msg+" [%w]", ErrLoadParametersMismatch)
 			}
@@ -390,13 +375,33 @@ func (lct *loadCollectionTask) preExecute(ctx context.Context) error {
 				zap.String("role", typeutil.QueryCoordRole),
 				zap.Int64("collectionID", collectionID),
 				zap.Int64s("loaded partitionIDs", collectionInfo.PartitionIDs),
-				zap.Int64("msgID", lct.Base.MsgID),
+				zap.Int64("msgID", req.Base.MsgID),
 				zap.Error(err))
 
-			lct.setResultInfo(err)
 			metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
 			return fmt.Errorf(err.Error()+" [%w]", ErrLoadParametersMismatch)
 		}
+	}
+
+	return nil
+}
+
+func (lct *loadCollectionTask) preExecute(ctx context.Context) error {
+	if lct.ReplicaNumber < 1 {
+		log.Warn("replicaNumber is less than 1 for load collection request, will set it to 1",
+			zap.Int32("replicaNumber", lct.ReplicaNumber))
+		lct.ReplicaNumber = 1
+	}
+
+	collectionID := lct.CollectionID
+	schema := lct.Schema
+
+	lct.setResultInfo(nil)
+
+	err := checkLoadCollection(lct.LoadCollectionRequest, lct.meta)
+	if err != nil {
+		lct.setResultInfo(err)
+		return err
 	}
 
 	log.Info("start do loadCollectionTask",
@@ -837,44 +842,31 @@ func (lpt *loadPartitionTask) updateTaskProcess() {
 	//this function shall just calculate intermediate progress
 }
 
-func (lpt *loadPartitionTask) preExecute(context.Context) error {
-	if lpt.ReplicaNumber < 1 {
-		log.Warn("replicaNumber is less than 1 for load partitions request, will set it to 1",
-			zap.Int32("replicaNumber", lpt.ReplicaNumber))
-		lpt.ReplicaNumber = 1
-	}
-
-	lpt.setResultInfo(nil)
-
-	collectionID := lpt.CollectionID
-	collectionInfo, err := lpt.meta.getCollectionInfoByID(collectionID)
+func checkLoadPartition(req *querypb.LoadPartitionsRequest, meta Meta) error {
+	collectionID := req.CollectionID
+	collectionInfo, err := meta.getCollectionInfoByID(collectionID)
 	if err == nil {
 		// if the collection has been loaded into memory by load collection request, return error
 		// should release collection first, then load partitions again
 		if collectionInfo.LoadType == querypb.LoadType_LoadCollection {
 			err = fmt.Errorf("collection %d has been loaded into QueryNode, please release collection firstly", collectionID)
-			lpt.setResultInfo(err)
+			return fmt.Errorf(err.Error()+" [%w]", ErrLoadParametersMismatch)
 		} else if collectionInfo.LoadType == querypb.LoadType_LoadPartition {
-			if collectionInfo.ReplicaNumber != lpt.ReplicaNumber {
+			if collectionInfo.ReplicaNumber != req.ReplicaNumber {
 				msg := fmt.Sprintf("partitions has already been loaded, and the number of replicas %v is not same as the request's %v. Should release first then reload with the new number of replicas",
 					collectionInfo.ReplicaNumber,
-					lpt.ReplicaNumber)
+					req.ReplicaNumber)
 				log.Warn(msg,
 					zap.String("role", typeutil.QueryCoordRole),
 					zap.Int64("collectionID", collectionID),
-					zap.Int64("msgID", lpt.Base.MsgID),
+					zap.Int64("msgID", req.Base.MsgID),
 					zap.Int32("collectionReplicaNumber", collectionInfo.ReplicaNumber),
-					zap.Int32("requestReplicaNumber", lpt.ReplicaNumber))
-
-				lpt.result = &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_IllegalArgument,
-					Reason:    msg,
-				}
+					zap.Int32("requestReplicaNumber", req.ReplicaNumber))
 
 				return fmt.Errorf(msg+" [%w]", ErrLoadParametersMismatch)
 			}
 
-			for _, toLoadPartitionID := range lpt.PartitionIDs {
+			for _, toLoadPartitionID := range req.PartitionIDs {
 				needLoad := true
 				for _, loadedPartitionID := range collectionInfo.PartitionIDs {
 					if toLoadPartitionID == loadedPartitionID {
@@ -887,35 +879,42 @@ func (lpt *loadPartitionTask) preExecute(context.Context) error {
 					// should release partitions first, then load partitions again
 					err = fmt.Errorf("some partitions %v of collection %d has been loaded into QueryNode, please release partitions firstly",
 						collectionInfo.PartitionIDs, collectionID)
-					lpt.setResultInfo(err)
+					return fmt.Errorf(err.Error()+" [%w]", ErrLoadParametersMismatch)
 				}
 			}
 		}
 
-		if lpt.result.ErrorCode != commonpb.ErrorCode_Success {
-			log.Warn("loadPartitionRequest failed",
-				zap.String("role", typeutil.QueryCoordRole),
-				zap.Int64("collectionID", collectionID),
-				zap.Int64s("partitionIDs", lpt.PartitionIDs),
-				zap.Int64("msgID", lpt.Base.MsgID),
-				zap.Error(err))
-
-			return fmt.Errorf(err.Error()+" [%w]", ErrLoadParametersMismatch)
-		}
-
 		log.Info("loadPartitionRequest completed, all partitions to load have already been loaded into memory",
 			zap.String("role", typeutil.QueryCoordRole),
-			zap.Int64("collectionID", lpt.CollectionID),
-			zap.Int64s("partitionIDs", lpt.PartitionIDs),
-			zap.Int64("msgID", lpt.Base.MsgID))
+			zap.Int64("collectionID", req.CollectionID),
+			zap.Int64s("partitionIDs", req.PartitionIDs),
+			zap.Int64("msgID", req.Base.MsgID))
 
 		return ErrCollectionLoaded
+	}
+
+	return nil
+}
+
+func (lpt *loadPartitionTask) preExecute(context.Context) error {
+	if lpt.ReplicaNumber < 1 {
+		log.Warn("replicaNumber is less than 1 for load partitions request, will set it to 1",
+			zap.Int32("replicaNumber", lpt.ReplicaNumber))
+		lpt.ReplicaNumber = 1
+	}
+
+	lpt.setResultInfo(nil)
+
+	err := checkLoadPartition(lpt.LoadPartitionsRequest, lpt.meta)
+	if err != nil {
+		lpt.setResultInfo(err)
+		return err
 	}
 
 	log.Info("start do loadPartitionTask",
 		zap.Int64("taskID", lpt.getTaskID()),
 		zap.Int64("msgID", lpt.GetBase().GetMsgID()),
-		zap.Int64("collectionID", collectionID))
+		zap.Int64("collectionID", lpt.GetCollectionID()))
 	return nil
 }
 
