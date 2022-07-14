@@ -17,6 +17,7 @@
 package kv
 
 import (
+	"errors"
 	"strings"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -85,6 +86,9 @@ func (m *MockTxnKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, remova
 
 type MockMetaKV struct {
 	MockTxnKV
+
+	LoadWithPrefixMockErr      bool
+	SaveWithIgnoreLeaseMockErr bool
 }
 
 func (m *MockMetaKV) GetPath(key string) string {
@@ -92,6 +96,9 @@ func (m *MockMetaKV) GetPath(key string) string {
 }
 
 func (m *MockMetaKV) LoadWithPrefix(prefix string) ([]string, []string, error) {
+	if m.LoadWithPrefixMockErr {
+		return nil, nil, errors.New("mock err")
+	}
 	keys := make([]string, 0, len(m.InMemKv))
 	values := make([]string, 0, len(m.InMemKv))
 	for k, v := range m.InMemKv {
@@ -134,6 +141,9 @@ func (m *MockMetaKV) SaveWithLease(key, value string, id clientv3.LeaseID) error
 }
 
 func (m *MockMetaKV) SaveWithIgnoreLease(key, value string) error {
+	if m.SaveWithIgnoreLeaseMockErr {
+		return errors.New("mock error")
+	}
 	m.InMemKv[key] = value
 	log.Debug("Doing SaveWithIgnoreLease", zap.String("key", key))
 	return nil

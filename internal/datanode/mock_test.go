@@ -159,6 +159,9 @@ type RootCoordFactory struct {
 	collectionName string
 	collectionID   UniqueID
 	pkType         schemapb.DataType
+
+	ReportImportErr        bool
+	ReportImportNotSuccess bool
 }
 
 type DataCoordFactory struct {
@@ -175,6 +178,9 @@ type DataCoordFactory struct {
 
 	GetSegmentInfosError      bool
 	GetSegmentInfosNotSuccess bool
+
+	AddSegmentError      bool
+	AddSegmentNotSuccess bool
 }
 
 func (ds *DataCoordFactory) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error) {
@@ -973,6 +979,16 @@ func (m *RootCoordFactory) ReportImport(ctx context.Context, req *rootcoordpb.Im
 		if v := ctx.Value(ctxKey{}).(string); v == returnError {
 			return nil, fmt.Errorf("injected error")
 		}
+	}
+	if m.ReportImportErr {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		}, fmt.Errorf("mock error")
+	}
+	if m.ReportImportNotSuccess {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		}, nil
 	}
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,

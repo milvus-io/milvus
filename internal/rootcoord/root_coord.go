@@ -150,7 +150,7 @@ type Core struct {
 	CallWatchChannels func(ctx context.Context, collectionID int64, channelNames []string) error
 
 	//assign import task to data service
-	CallImportService func(ctx context.Context, req *datapb.ImportTaskRequest) *datapb.ImportTaskResponse
+	CallImportService func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error)
 
 	// Seals segments in collection cID, so they can get flushed later.
 	CallFlushOnCollection func(ctx context.Context, cID int64, segIDs []int64) error
@@ -735,7 +735,7 @@ func (c *Core) SetDataCoord(ctx context.Context, s types.DataCoord) error {
 		return nil
 	}
 
-	c.CallImportService = func(ctx context.Context, req *datapb.ImportTaskRequest) *datapb.ImportTaskResponse {
+	c.CallImportService = func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
 		resp := &datapb.ImportTaskResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_Success,
@@ -747,8 +747,8 @@ func (c *Core) SetDataCoord(ctx context.Context, s types.DataCoord) error {
 				resp.Status.Reason = "assign import task to data coord panic"
 			}
 		}()
-		resp, _ = s.Import(ctx, req)
-		return resp
+		resp, err := s.Import(ctx, req)
+		return resp, err
 	}
 
 	c.CallFlushOnCollection = func(ctx context.Context, cID int64, segIDs []int64) error {
@@ -2505,7 +2505,13 @@ func (c *Core) ReportImport(ctx context.Context, ir *rootcoordpb.ImportResult) (
 			}, nil
 		}
 		// Update task store with new segments.
-		c.importManager.appendTaskSegments(ir.GetTaskId(), ir.GetSegments())
+		if err := c.importManager.appendTaskSegments(ir.GetTaskId(), ir.GetSegments()); err != nil {
+			log.Error("failed to update task store with new segments", zap.Error(err))
+			return &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    fmt.Sprintf("failed to update task store with new segments %s", err.Error()),
+			}, nil
+		}
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		}, nil
@@ -2530,7 +2536,10 @@ func (c *Core) ReportImport(ctx context.Context, ir *rootcoordpb.ImportResult) (
 				zap.Int64("task ID", ir.GetTaskId()))
 
 		}()
-		c.importManager.sendOutTasks(c.importManager.ctx)
+		err := c.importManager.sendOutTasks(c.importManager.ctx)
+		if err != nil {
+			log.Error("fail to send out import task to datanodes")
+		}
 	}
 
 	// If task failed, send task to idle datanode

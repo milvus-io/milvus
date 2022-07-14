@@ -73,12 +73,21 @@ func TestImportManager_NewImportManager(t *testing.T) {
 	mockKv.SaveWithLease(BuildImportTaskKey(1), "value", 1)
 	mockKv.SaveWithLease(BuildImportTaskKey(2), string(taskInfo1), 2)
 	mockKv.SaveWithLease(BuildImportTaskKey(3), string(taskInfo2), 3)
-	fn := func(ctx context.Context, req *datapb.ImportTaskRequest) *datapb.ImportTaskResponse {
+
+	mockCallImportServiceErr := false
+	callImportServiceFn := func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
+		if mockCallImportServiceErr {
+			return &datapb.ImportTaskResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+				},
+			}, errors.New("mock err")
+		}
 		return &datapb.ImportTaskResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_Success,
 			},
-		}
+		}, nil
 	}
 
 	time.Sleep(1 * time.Second)
@@ -89,7 +98,7 @@ func TestImportManager_NewImportManager(t *testing.T) {
 		defer wg.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		mgr := newImportManager(ctx, mockKv, idAlloc, fn, nil)
+		mgr := newImportManager(ctx, mockKv, idAlloc, callImportServiceFn, nil)
 		assert.NotNil(t, mgr)
 		mgr.init(ctx)
 		var wgLoop sync.WaitGroup
@@ -106,7 +115,7 @@ func TestImportManager_NewImportManager(t *testing.T) {
 		defer wg.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
 		defer cancel()
-		mgr := newImportManager(ctx, mockKv, idAlloc, fn, nil)
+		mgr := newImportManager(ctx, mockKv, idAlloc, callImportServiceFn, nil)
 		assert.NotNil(t, mgr)
 		mgr.init(context.TODO())
 		var wgLoop sync.WaitGroup
@@ -119,11 +128,66 @@ func TestImportManager_NewImportManager(t *testing.T) {
 	})
 
 	wg.Add(1)
+	t.Run("importManager init fail because of loadFromTaskStore fail", func(t *testing.T) {
+		defer wg.Done()
+		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
+		defer cancel()
+		mgr := newImportManager(ctx, mockKv, idAlloc, callImportServiceFn, nil)
+		mockKv.LoadWithPrefixMockErr = true
+		defer func() {
+			mockKv.LoadWithPrefixMockErr = false
+		}()
+		assert.NotNil(t, mgr)
+		assert.Panics(t, func() {
+			mgr.init(context.TODO())
+		})
+	})
+
+	wg.Add(1)
+	t.Run("sendOutTasks fail", func(t *testing.T) {
+		defer wg.Done()
+		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
+		defer cancel()
+		mgr := newImportManager(ctx, mockKv, idAlloc, callImportServiceFn, nil)
+		mockKv.SaveWithIgnoreLeaseMockErr = true
+		defer func() {
+			mockKv.SaveWithIgnoreLeaseMockErr = false
+		}()
+		assert.NotNil(t, mgr)
+		mgr.init(context.TODO())
+	})
+
+	wg.Add(1)
+	t.Run("sendOutTasks fail", func(t *testing.T) {
+		defer wg.Done()
+		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
+		defer cancel()
+		mgr := newImportManager(ctx, mockKv, idAlloc, callImportServiceFn, nil)
+		assert.NotNil(t, mgr)
+		mgr.init(context.TODO())
+		func() {
+			mockKv.SaveWithIgnoreLeaseMockErr = true
+			defer func() {
+				mockKv.SaveWithIgnoreLeaseMockErr = false
+			}()
+			mgr.sendOutTasks(context.TODO())
+		}()
+
+		func() {
+			mockCallImportServiceErr = true
+			defer func() {
+				mockKv.SaveWithIgnoreLeaseMockErr = false
+			}()
+			mgr.sendOutTasks(context.TODO())
+		}()
+	})
+
+	wg.Add(1)
 	t.Run("pending task expired", func(t *testing.T) {
 		defer wg.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		mgr := newImportManager(ctx, mockKv, idAlloc, fn, nil)
+		mgr := newImportManager(ctx, mockKv, idAlloc, callImportServiceFn, nil)
 		assert.NotNil(t, mgr)
 		mgr.pendingTasks = append(mgr.pendingTasks, &datapb.ImportTaskInfo{
 			Id: 300,
@@ -147,7 +211,7 @@ func TestImportManager_NewImportManager(t *testing.T) {
 		defer wg.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		mgr := newImportManager(ctx, mockKv, idAlloc, fn, nil)
+		mgr := newImportManager(ctx, mockKv, idAlloc, callImportServiceFn, nil)
 		assert.NotNil(t, mgr)
 		mgr.init(ctx)
 		var wgLoop sync.WaitGroup
@@ -204,12 +268,12 @@ func TestImportManager_ImportJob(t *testing.T) {
 		},
 	}
 
-	fn := func(ctx context.Context, req *datapb.ImportTaskRequest) *datapb.ImportTaskResponse {
+	fn := func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
 		return &datapb.ImportTaskResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			},
-		}
+		}, nil
 	}
 
 	mgr = newImportManager(context.TODO(), mockKv, idAlloc, fn, nil)
@@ -222,12 +286,12 @@ func TestImportManager_ImportJob(t *testing.T) {
 	assert.Equal(t, 1, len(mgr.pendingTasks))
 	assert.Equal(t, 0, len(mgr.workingTasks))
 
-	fn = func(ctx context.Context, req *datapb.ImportTaskRequest) *datapb.ImportTaskResponse {
+	fn = func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
 		return &datapb.ImportTaskResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_Success,
 			},
-		}
+		}, nil
 	}
 
 	mgr = newImportManager(context.TODO(), mockKv, idAlloc, fn, nil)
@@ -241,20 +305,20 @@ func TestImportManager_ImportJob(t *testing.T) {
 	assert.Equal(t, 1, len(mgr.workingTasks))
 
 	count := 0
-	fn = func(ctx context.Context, req *datapb.ImportTaskRequest) *datapb.ImportTaskResponse {
+	fn = func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
 		if count >= 2 {
 			return &datapb.ImportTaskResponse{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				},
-			}
+			}, nil
 		}
 		count++
 		return &datapb.ImportTaskResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_Success,
 			},
-		}
+		}, nil
 	}
 
 	mgr = newImportManager(context.TODO(), mockKv, idAlloc, fn, nil)
@@ -308,7 +372,7 @@ func TestImportManager_AllDataNodesBusy(t *testing.T) {
 
 	dnList := []int64{1, 2, 3}
 	count := 0
-	fn := func(ctx context.Context, req *datapb.ImportTaskRequest) *datapb.ImportTaskResponse {
+	fn := func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
 		if count < len(dnList) {
 			count++
 			return &datapb.ImportTaskResponse{
@@ -316,13 +380,13 @@ func TestImportManager_AllDataNodesBusy(t *testing.T) {
 					ErrorCode: commonpb.ErrorCode_Success,
 				},
 				DatanodeId: dnList[count-1],
-			}
+			}, nil
 		}
 		return &datapb.ImportTaskResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			},
-		}
+		}, nil
 	}
 
 	mgr := newImportManager(context.TODO(), mockKv, idAlloc, fn, nil)
@@ -369,12 +433,12 @@ func TestImportManager_TaskState(t *testing.T) {
 	colID := int64(100)
 	mockKv := &kv.MockMetaKV{}
 	mockKv.InMemKv = make(map[string]string)
-	fn := func(ctx context.Context, req *datapb.ImportTaskRequest) *datapb.ImportTaskResponse {
+	fn := func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
 		return &datapb.ImportTaskResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_Success,
 			},
-		}
+		}, nil
 	}
 
 	rowReq := &milvuspb.ImportRequest{
@@ -439,12 +503,12 @@ func TestImportManager_AllocFail(t *testing.T) {
 	colID := int64(100)
 	mockKv := &kv.MockMetaKV{}
 	mockKv.InMemKv = make(map[string]string)
-	fn := func(ctx context.Context, req *datapb.ImportTaskRequest) *datapb.ImportTaskResponse {
+	fn := func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
 		return &datapb.ImportTaskResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_Success,
 			},
-		}
+		}, nil
 	}
 
 	rowReq := &milvuspb.ImportRequest{
@@ -475,12 +539,12 @@ func TestImportManager_ListAllTasks(t *testing.T) {
 	mockKv.InMemKv = make(map[string]string)
 
 	// reject some tasks so there are 3 tasks left in pending list
-	fn := func(ctx context.Context, req *datapb.ImportTaskRequest) *datapb.ImportTaskResponse {
+	fn := func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
 		return &datapb.ImportTaskResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			},
-		}
+		}, nil
 	}
 
 	rowReq := &milvuspb.ImportRequest{
@@ -502,12 +566,12 @@ func TestImportManager_ListAllTasks(t *testing.T) {
 	assert.Equal(t, int64(1), resp.Id)
 
 	// accept tasks to working list
-	mgr.callImportService = func(ctx context.Context, req *datapb.ImportTaskRequest) *datapb.ImportTaskResponse {
+	mgr.callImportService = func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
 		return &datapb.ImportTaskResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_Success,
 			},
-		}
+		}, nil
 	}
 
 	mgr.importJob(context.TODO(), rowReq, colID, 0)

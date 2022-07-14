@@ -182,7 +182,8 @@ func Test_Read(t *testing.T) {
 	{
 		filePath := TempFilesPath + "bool.npy"
 		data := []bool{true, false, true, false}
-		CreateNumpyFile(filePath, data)
+		err := CreateNumpyFile(filePath, data)
+		assert.Nil(t, err)
 
 		file, err := os.Open(filePath)
 		assert.Nil(t, err)
@@ -241,7 +242,8 @@ func Test_Read(t *testing.T) {
 	{
 		filePath := TempFilesPath + "uint8.npy"
 		data := []uint8{1, 2, 3, 4, 5, 6}
-		CreateNumpyFile(filePath, data)
+		err := CreateNumpyFile(filePath, data)
+		assert.Nil(t, err)
 
 		file, err := os.Open(filePath)
 		assert.Nil(t, err)
@@ -276,7 +278,8 @@ func Test_Read(t *testing.T) {
 	{
 		filePath := TempFilesPath + "int8.npy"
 		data := []int8{1, 2, 3, 4, 5, 6}
-		CreateNumpyFile(filePath, data)
+		err := CreateNumpyFile(filePath, data)
+		assert.Nil(t, err)
 
 		file, err := os.Open(filePath)
 		assert.Nil(t, err)
@@ -306,7 +309,8 @@ func Test_Read(t *testing.T) {
 	{
 		filePath := TempFilesPath + "int16.npy"
 		data := []int16{1, 2, 3, 4, 5, 6}
-		CreateNumpyFile(filePath, data)
+		err := CreateNumpyFile(filePath, data)
+		assert.Nil(t, err)
 
 		file, err := os.Open(filePath)
 		assert.Nil(t, err)
@@ -336,7 +340,8 @@ func Test_Read(t *testing.T) {
 	{
 		filePath := TempFilesPath + "int32.npy"
 		data := []int32{1, 2, 3, 4, 5, 6}
-		CreateNumpyFile(filePath, data)
+		err := CreateNumpyFile(filePath, data)
+		assert.Nil(t, err)
 
 		file, err := os.Open(filePath)
 		assert.Nil(t, err)
@@ -366,7 +371,8 @@ func Test_Read(t *testing.T) {
 	{
 		filePath := TempFilesPath + "int64.npy"
 		data := []int64{1, 2, 3, 4, 5, 6}
-		CreateNumpyFile(filePath, data)
+		err := CreateNumpyFile(filePath, data)
+		assert.Nil(t, err)
 
 		file, err := os.Open(filePath)
 		assert.Nil(t, err)
@@ -396,7 +402,8 @@ func Test_Read(t *testing.T) {
 	{
 		filePath := TempFilesPath + "float.npy"
 		data := []float32{1, 2, 3, 4, 5, 6}
-		CreateNumpyFile(filePath, data)
+		err := CreateNumpyFile(filePath, data)
+		assert.Nil(t, err)
 
 		file, err := os.Open(filePath)
 		assert.Nil(t, err)
@@ -426,7 +433,8 @@ func Test_Read(t *testing.T) {
 	{
 		filePath := TempFilesPath + "double.npy"
 		data := []float64{1, 2, 3, 4, 5, 6}
-		CreateNumpyFile(filePath, data)
+		err := CreateNumpyFile(filePath, data)
+		assert.Nil(t, err)
 
 		file, err := os.Open(filePath)
 		assert.Nil(t, err)
