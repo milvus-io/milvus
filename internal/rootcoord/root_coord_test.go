@@ -1579,6 +1579,22 @@ func TestRootCoord_Base(t *testing.T) {
 	})
 
 	wg.Add(1)
+	t.Run("report import illegal task", func(t *testing.T) {
+		defer wg.Done()
+		assert.NoError(t, err)
+		req := &rootcoordpb.ImportResult{
+			TaskId:   -1,
+			RowCount: 100,
+			Segments: []int64{1003, 1004, 1005},
+			State:    commonpb.ImportState_ImportPersisted,
+		}
+		rsp, err := core.ReportImport(context.WithValue(ctx, ctxKey{}, ""), req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UpdateImportTaskFailure, rsp.ErrorCode)
+		time.Sleep(500 * time.Millisecond)
+	})
+
+	wg.Add(1)
 	t.Run("report import update import task fail", func(t *testing.T) {
 		defer wg.Done()
 		// Case where report import request is nil.
@@ -3125,12 +3141,12 @@ func TestCheckInit(t *testing.T) {
 	err = c.checkInit()
 	assert.Error(t, err)
 
-	c.CallImportService = func(ctx context.Context, req *datapb.ImportTaskRequest) *datapb.ImportTaskResponse {
+	c.CallImportService = func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
 		return &datapb.ImportTaskResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_Success,
 			},
-		}
+		}, nil
 	}
 	err = c.checkInit()
 	assert.Error(t, err)

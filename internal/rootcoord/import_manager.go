@@ -83,14 +83,14 @@ type importManager struct {
 	startOnce sync.Once
 
 	idAllocator       func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error)
-	callImportService func(ctx context.Context, req *datapb.ImportTaskRequest) *datapb.ImportTaskResponse
+	callImportService func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error)
 	getCollectionName func(collID, partitionID typeutil.UniqueID) (string, string, error)
 }
 
 // newImportManager helper function to create a importManager
 func newImportManager(ctx context.Context, client kv.MetaKv,
 	idAlloc func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error),
-	importService func(ctx context.Context, req *datapb.ImportTaskRequest) *datapb.ImportTaskResponse,
+	importService func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error),
 	getCollectionName func(collID, partitionID typeutil.UniqueID) (string, string, error)) *importManager {
 	mgr := &importManager{
 		ctx:               ctx,
@@ -112,9 +112,14 @@ func newImportManager(ctx context.Context, client kv.MetaKv,
 func (m *importManager) init(ctx context.Context) {
 	m.startOnce.Do(func() {
 		// Read tasks from Etcd and save them as pending tasks or working tasks.
-		m.loadFromTaskStore()
+		if err := m.loadFromTaskStore(); err != nil {
+			log.Error("importManager init failed, read tasks from Etcd failed, about to panic")
+			panic(err)
+		}
 		// Send out tasks to dataCoord.
-		m.sendOutTasks(ctx)
+		if err := m.sendOutTasks(ctx); err != nil {
+			log.Error("importManager init failed, send out tasks to dataCoord failed")
+		}
 	})
 }
 
@@ -129,7 +134,10 @@ func (m *importManager) sendOutTasksLoop(wg *sync.WaitGroup) {
 			log.Debug("import manager context done, exit check sendOutTasksLoop")
 			return
 		case <-ticker.C:
-			m.sendOutTasks(m.ctx)
+			err := m.sendOutTasks(m.ctx)
+			if err != nil {
+				log.Error("importManager sendOutTasksLoop fail to send out tasks")
+			}
 		}
 	}
 }
@@ -161,6 +169,7 @@ func (m *importManager) sendOutTasks(ctx context.Context) error {
 
 	// Trigger Import() action to DataCoord.
 	for len(m.pendingTasks) > 0 {
+		log.Debug("try to send out pending tasks", zap.Int("task_number", len(m.pendingTasks)))
 		task := m.pendingTasks[0]
 		// TODO: Use ImportTaskInfo directly.
 		it := &datapb.ImportTask{
@@ -185,7 +194,7 @@ func (m *importManager) sendOutTasks(ctx context.Context) error {
 		}
 
 		// Send import task to dataCoord, which will then distribute the import task to dataNode.
-		resp := m.callImportService(ctx, &datapb.ImportTaskRequest{
+		resp, err := m.callImportService(ctx, &datapb.ImportTaskRequest{
 			ImportTask:   it,
 			WorkingNodes: busyNodeList,
 		})
@@ -196,6 +205,10 @@ func (m *importManager) sendOutTasks(ctx context.Context) error {
 				zap.String("cause", resp.GetStatus().GetReason()))
 			break
 		}
+		if err != nil {
+			log.Error("import task get error", zap.Error(err))
+			break
+		}
 
 		// Successfully assigned dataNode for the import task. Add task to working task list and update task store.
 		task.DatanodeId = resp.GetDatanodeId()
@@ -204,17 +217,22 @@ func (m *importManager) sendOutTasks(ctx context.Context) error {
 			zap.Int64("dataNode ID", task.GetDatanodeId()))
 		// Add new working dataNode to busyNodes.
 		m.busyNodes[resp.GetDatanodeId()] = true
-
-		func() {
+		err = func() error {
 			m.workingLock.Lock()
 			defer m.workingLock.Unlock()
-
 			log.Debug("import task added as working task", zap.Int64("task ID", it.TaskId))
 			task.State.StateCode = commonpb.ImportState_ImportPending
+			// first update the import task into meta store and then put it into working tasks
+			if err := m.updateImportTaskStore(task); err != nil {
+				log.Error("Fail to update import task to meta store")
+				return err
+			}
 			m.workingTasks[task.GetId()] = task
-			m.updateImportTaskStore(task)
+			return nil
 		}()
-
+		if err != nil {
+			return err
+		}
 		// Erase this task from head of pending list.
 		m.pendingTasks = append(m.pendingTasks[:0], m.pendingTasks[1:]...)
 	}
@@ -254,7 +272,7 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 		zap.String("collection name", req.GetCollectionName()),
 		zap.Int64("collection ID", cID),
 		zap.Int64("partition ID", pID))
-	err := func() (err error) {
+	err := func() error {
 		m.pendingLock.Lock()
 		defer m.pendingLock.Unlock()
 
@@ -268,7 +286,7 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 
 		// task queue size has a limit, return error if import request contains too many data files, and skip entire job
 		if capacity-length < taskCount {
-			err = fmt.Errorf("import task queue max size is %v, currently there are %v tasks is pending. Not able to execute this request with %v tasks", capacity, length, taskCount)
+			err := fmt.Errorf("import task queue max size is %v, currently there are %v tasks is pending. Not able to execute this request with %v tasks", capacity, length, taskCount)
 			log.Error(err.Error())
 			return err
 		}
@@ -309,7 +327,9 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 				taskList[i] = newTask.GetId()
 				log.Info("new task created as pending task", zap.Int64("task ID", newTask.GetId()))
 				m.pendingTasks = append(m.pendingTasks, newTask)
-				m.storeImportTask(newTask)
+				if storeImportTaskErr := m.storeImportTask(newTask); storeImportTaskErr != nil {
+					return storeImportTaskErr
+				}
 			}
 			log.Info("row-based import request processed", zap.Any("taskIDs", taskList))
 		} else {
@@ -337,7 +357,9 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 			resp.Tasks = append(resp.Tasks, newTask.GetId())
 			log.Info("new task created as pending task", zap.Int64("task ID", newTask.GetId()))
 			m.pendingTasks = append(m.pendingTasks, newTask)
-			m.storeImportTask(newTask)
+			if storeImportTaskErr := m.storeImportTask(newTask); storeImportTaskErr != nil {
+				return storeImportTaskErr
+			}
 			log.Info("column-based import request processed", zap.Int64("taskID", newTask.GetId()))
 		}
 		return nil
@@ -350,7 +372,9 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 			},
 		}
 	}
-	m.sendOutTasks(ctx)
+	if sendOutTasksErr := m.sendOutTasks(ctx); sendOutTasksErr != nil {
+		log.Error("fail to send out tasks", zap.Error(sendOutTasksErr))
+	}
 	return resp
 }
 
@@ -407,7 +431,10 @@ func (m *importManager) updateTaskState(ir *rootcoordpb.ImportResult) (*datapb.I
 			}
 		}
 		// Update task in task store.
-		m.updateImportTaskStore(v)
+		err := m.updateImportTaskStore(v)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	if !found {
@@ -423,6 +450,8 @@ func (m *importManager) getCollectionPartitionName(task *datapb.ImportTaskInfo, 
 		if err == nil {
 			resp.Infos = append(resp.Infos, &commonpb.KeyValuePair{Key: CollectionName, Value: colName})
 			resp.Infos = append(resp.Infos, &commonpb.KeyValuePair{Key: PartitionName, Value: partName})
+		} else {
+			log.Error("failed to getCollectionName", zap.Int64("collection_id", task.GetCollectionId()), zap.Int64("partition_id", task.GetPartitionId()), zap.Error(err))
 		}
 	}
 }
@@ -435,13 +464,15 @@ func (m *importManager) appendTaskSegments(taskID int64, segIDs []int64) error {
 
 	var v *datapb.ImportTaskInfo
 	m.workingLock.Lock()
+	defer m.workingLock.Unlock()
 	ok := false
 	if v, ok = m.workingTasks[taskID]; ok {
 		v.State.Segments = append(v.GetState().GetSegments(), segIDs...)
 		// Update task in task store.
-		m.updateImportTaskStore(v)
+		if err := m.updateImportTaskStore(v); err != nil {
+			return err
+		}
 	}
-	m.workingLock.Unlock()
 
 	if !ok {
 		log.Debug("import manager appending task segments failed", zap.Int64("task ID", taskID))
@@ -607,7 +638,9 @@ func (m *importManager) expireOldTasks(releaseLockFunc func(context.Context, int
 					log.Error("failed to release lock, about to panic!")
 					panic(err)
 				}
-				m.updateImportTaskStore(t)
+				if err = m.updateImportTaskStore(t); err != nil {
+					log.Error("failed to update import task to meta store, about to panic!")
+				}
 			}
 		}
 	}()
@@ -631,7 +664,9 @@ func (m *importManager) expireOldTasks(releaseLockFunc func(context.Context, int
 					log.Error("failed to release lock, about to panic!")
 					panic(err)
 				}
-				m.updateImportTaskStore(v)
+				if err = m.updateImportTaskStore(v); err != nil {
+					log.Error("failed to update import task to meta store, about to panic!")
+				}
 			}
 		}
 	}()
