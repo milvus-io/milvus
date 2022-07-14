@@ -763,3 +763,16 @@ func (c *Client) ListPolicy(ctx context.Context, req *internalpb.ListPolicyReque
 	}
 	return ret.(*internalpb.ListPolicyResponse), err
 }
+
+func (c *Client) GetImportFailedSegmentIDs(ctx context.Context, req *internalpb.GetImportFailedSegmentIDsRequest) (*internalpb.GetImportFailedSegmentIDsResponse, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.(rootcoordpb.RootCoordClient).GetImportFailedSegmentIDs(ctx, req)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return ret.(*internalpb.GetImportFailedSegmentIDsResponse), err
+}

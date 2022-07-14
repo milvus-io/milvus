@@ -27,6 +27,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/minio/minio-go/v7"
 	"go.uber.org/zap"
 )
@@ -55,6 +57,8 @@ type garbageCollector struct {
 	meta     *meta
 	segRefer *SegmentReferenceManager
 
+	rcc types.RootCoord
+
 	startOnce sync.Once
 	stopOnce  sync.Once
 	wg        sync.WaitGroup
@@ -62,13 +66,14 @@ type garbageCollector struct {
 }
 
 // newGarbageCollector create garbage collector with meta and option
-func newGarbageCollector(meta *meta, segRefer *SegmentReferenceManager, opt GcOption) *garbageCollector {
+func newGarbageCollector(meta *meta, segRefer *SegmentReferenceManager, rootCoordClient types.RootCoord, opt GcOption) *garbageCollector {
 	log.Info("GC with option", zap.Bool("enabled", opt.enabled), zap.Duration("interval", opt.checkInterval),
 		zap.Duration("missingTolerance", opt.missingTolerance), zap.Duration("dropTolerance", opt.dropTolerance))
 	return &garbageCollector{
 		meta:     meta,
 		segRefer: segRefer,
 		option:   opt,
+		rcc:      rootCoordClient,
 		closeCh:  make(chan struct{}),
 	}
 }
@@ -170,7 +175,35 @@ func (gc *garbageCollector) scan() {
 }
 
 func (gc *garbageCollector) clearEtcd() {
+	failedSegmentIDs := make([]int64, 0)
+	if gc.rcc == nil {
+		log.Warn("root coord client nil when garbage collecting")
+	} else {
+		req := &internalpb.GetImportFailedSegmentIDsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_GetImportFailedSegmentIDs,
+			},
+		}
+		ctx := context.Background()
+		rsp, err := gc.rcc.GetImportFailedSegmentIDs(ctx, req)
+		if err != nil {
+			log.Error("getImportFailedSegmentIDs failed", zap.String("error", err.Error()))
+		}
+		log.Debug("getImportFailedSegmentIDs from rootCoord succeed", zap.Int("IDNums", len(rsp.GetSegmentIDs())))
+		failedSegmentIDs = rsp.GetSegmentIDs()
+	}
+
+	failedSegmentIDsSet := make(map[int64]struct{})
+	for _, failedSegmentID := range failedSegmentIDs {
+		failedSegmentIDsSet[failedSegmentID] = struct{}{}
+	}
+
 	drops := gc.meta.SelectSegments(func(segment *SegmentInfo) bool {
+		_, failedSegmentFlag := failedSegmentIDsSet[segment.ID]
+		if failedSegmentFlag {
+			gc.meta.segments.SetState(segment.GetID(), commonpb.SegmentState_Dropped)
+			gc.meta.segments.SetDroppedAt(segment.GetID(), uint64(time.Now().UnixNano()))
+		}
 		return segment.GetState() == commonpb.SegmentState_Dropped && !gc.segRefer.HasSegmentLock(segment.ID)
 	})
 
@@ -187,7 +220,7 @@ func (gc *garbageCollector) clearEtcd() {
 
 func (gc *garbageCollector) isExpire(dropts Timestamp) bool {
 	droptime := time.Unix(0, int64(dropts))
-	return time.Since(droptime) > gc.option.dropTolerance
+	return time.Since(droptime) >= gc.option.dropTolerance
 }
 
 func getLogs(sinfo *SegmentInfo) []*datapb.Binlog {

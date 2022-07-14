@@ -55,8 +55,10 @@ func Test_garbageCollector_basic(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, segRefer)
 
+	mockRootCoord := newMockRootCoordService()
+
 	t.Run("normal gc", func(t *testing.T) {
-		gc := newGarbageCollector(meta, segRefer, GcOption{
+		gc := newGarbageCollector(meta, segRefer, mockRootCoord, GcOption{
 			cli:              cli,
 			enabled:          true,
 			checkInterval:    time.Millisecond * 10,
@@ -73,7 +75,7 @@ func Test_garbageCollector_basic(t *testing.T) {
 	})
 
 	t.Run("with nil cli", func(t *testing.T) {
-		gc := newGarbageCollector(meta, segRefer, GcOption{
+		gc := newGarbageCollector(meta, segRefer, mockRootCoord, GcOption{
 			cli:              nil,
 			enabled:          true,
 			checkInterval:    time.Millisecond * 10,
@@ -104,7 +106,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 	bucketName := `datacoord-ut` + strings.ToLower(funcutil.RandomString(8))
 	rootPath := `gc` + funcutil.RandomString(8)
 	//TODO change to Params
-	cli, inserts, stats, delta, others, err := initUtOSSEnv(bucketName, rootPath, 4)
+	cli, inserts, stats, delta, others, err := initUtOSSEnv(bucketName, rootPath, 5)
 	require.NoError(t, err)
 
 	mockAllocator := newMockAllocator()
@@ -117,6 +119,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 	segRefer, err := NewSegmentReferenceManager(etcdKV, nil)
 	assert.NoError(t, err)
 	assert.NotNil(t, segRefer)
+	mockRootCoord := newMockRootCoordService()
 
 	t.Run("key is reference", func(t *testing.T) {
 		segReferManager := &SegmentReferenceManager{
@@ -134,7 +137,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 				2: 1,
 			},
 		}
-		gc := newGarbageCollector(meta, segRefer, GcOption{
+		gc := newGarbageCollector(meta, segRefer, mockRootCoord, GcOption{
 			cli:              cli,
 			enabled:          true,
 			checkInterval:    time.Minute * 30,
@@ -156,7 +159,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 	})
 
 	t.Run("missing all but save tolerance", func(t *testing.T) {
-		gc := newGarbageCollector(meta, segRefer, GcOption{
+		gc := newGarbageCollector(meta, segRefer, mockRootCoord, GcOption{
 			cli:              cli,
 			enabled:          true,
 			checkInterval:    time.Minute * 30,
@@ -182,7 +185,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 		err = meta.AddSegment(segment)
 		require.NoError(t, err)
 
-		gc := newGarbageCollector(meta, segRefer, GcOption{
+		gc := newGarbageCollector(meta, segRefer, mockRootCoord, GcOption{
 			cli:              cli,
 			enabled:          true,
 			checkInterval:    time.Minute * 30,
@@ -211,7 +214,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 		err = meta.AddSegment(segment)
 		require.NoError(t, err)
 
-		gc := newGarbageCollector(meta, segRefer, GcOption{
+		gc := newGarbageCollector(meta, segRefer, mockRootCoord, GcOption{
 			cli:              cli,
 			enabled:          true,
 			checkInterval:    time.Minute * 30,
@@ -227,8 +230,46 @@ func Test_garbageCollector_scan(t *testing.T) {
 
 		gc.close()
 	})
+	t.Run("clear import failed segments", func(t *testing.T) {
+		segment := buildSegment(1, 10, ImportFailedSegmentID, "ch")
+		segment.State = commonpb.SegmentState_Importing
+		segment.Binlogs = []*datapb.FieldBinlog{getFieldBinlogPaths(0, inserts[0])}
+		segment.Statslogs = []*datapb.FieldBinlog{getFieldBinlogPaths(0, stats[0])}
+		segment.Deltalogs = []*datapb.FieldBinlog{getFieldBinlogPaths(0, delta[0])}
+		err = meta.AddSegment(segment)
+		require.NoError(t, err)
+
+		gc := newGarbageCollector(meta, segRefer, mockRootCoord, GcOption{
+			cli:              cli,
+			enabled:          true,
+			checkInterval:    time.Minute * 30,
+			missingTolerance: time.Hour * 24,
+			dropTolerance:    0,
+			bucketName:       bucketName,
+			rootPath:         rootPath,
+		})
+		gc.clearEtcd()
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, insertLogPrefix), inserts[1:])
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, statsLogPrefix), stats[1:])
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, deltaLogPrefix), delta[1:])
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, `indexes`), others)
+
+		gc.close()
+
+		gc2 := newGarbageCollector(meta, segRefer, nil, GcOption{
+			cli:              cli,
+			enabled:          true,
+			checkInterval:    time.Minute * 30,
+			missingTolerance: time.Hour * 24,
+			dropTolerance:    0,
+			bucketName:       bucketName,
+			rootPath:         rootPath,
+		})
+		gc2.clearEtcd()
+		gc2.close()
+	})
 	t.Run("missing gc all", func(t *testing.T) {
-		gc := newGarbageCollector(meta, segRefer, GcOption{
+		gc := newGarbageCollector(meta, segRefer, mockRootCoord, GcOption{
 			cli:              cli,
 			enabled:          true,
 			checkInterval:    time.Minute * 30,

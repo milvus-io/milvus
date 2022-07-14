@@ -729,3 +729,22 @@ func taskExpired(ti *datapb.ImportTaskInfo) bool {
 		ti.GetState().GetStateCode() != commonpb.ImportState_ImportCompleted &&
 		Params.RootCoordCfg.ImportTaskExpiration <= float64(time.Now().Unix()-ti.GetCreateTs())
 }
+
+func (m *importManager) GetImportFailedSegmentIDs() ([]int64, error) {
+	ret := make([]int64, 0)
+	m.pendingLock.RLock()
+	for _, importTaskInfo := range m.pendingTasks {
+		if importTaskInfo.State.StateCode == commonpb.ImportState_ImportFailed {
+			ret = append(ret, importTaskInfo.State.Segments...)
+		}
+	}
+	m.pendingLock.RUnlock()
+	m.workingLock.RLock()
+	for _, importTaskInfo := range m.workingTasks {
+		if importTaskInfo.State.StateCode == commonpb.ImportState_ImportFailed {
+			ret = append(ret, importTaskInfo.State.Segments...)
+		}
+	}
+	m.workingLock.RUnlock()
+	return ret, nil
+}

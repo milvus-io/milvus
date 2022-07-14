@@ -80,6 +80,10 @@ type Server struct {
 	closer io.Closer
 }
 
+func (s *Server) GetImportFailedSegmentIDs(ctx context.Context, request *internalpb.GetImportFailedSegmentIDsRequest) (*internalpb.GetImportFailedSegmentIDsResponse, error) {
+	return s.rootCoord.GetImportFailedSegmentIDs(ctx, request)
+}
+
 // CreateAlias creates an alias for specified collection.
 func (s *Server) CreateAlias(ctx context.Context, request *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
 	return s.rootCoord.CreateAlias(ctx, request)

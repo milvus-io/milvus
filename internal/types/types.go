@@ -687,6 +687,8 @@ type RootCoord interface {
 	ListCredUsers(ctx context.Context, req *milvuspb.ListCredUsersRequest) (*milvuspb.ListCredUsersResponse, error)
 	// GetCredential get credential by username
 	GetCredential(ctx context.Context, req *rootcoordpb.GetCredentialRequest) (*rootcoordpb.GetCredentialResponse, error)
+	// GetImportFailedSegmentIDs get import failed segment IDs
+	GetImportFailedSegmentIDs(ctx context.Context, req *internalpb.GetImportFailedSegmentIDsRequest) (*internalpb.GetImportFailedSegmentIDsResponse, error)
 }
 
 // RootCoordComponent is used by grpc server of RootCoord

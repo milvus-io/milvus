@@ -319,6 +319,9 @@ func Test_NewClient(t *testing.T) {
 	r36Timeout, err := client.InvalidateCollectionMetaCache(shortCtx, nil)
 	retCheck(r36Timeout, err)
 
+	r37Timeout, err := client.GetImportFailedSegmentIDs(shortCtx, nil)
+	retCheck(r37Timeout, err)
+
 	// clean up
 	err = client.Stop()
 	assert.Nil(t, err)

@@ -267,6 +267,10 @@ func TestImportManager_ImportJob(t *testing.T) {
 	}
 	resp = mgr.importJob(context.TODO(), rowReq, colID, 0)
 	assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+
+	segIDs, err := mgr.GetImportFailedSegmentIDs()
+	assert.True(t, len(segIDs) >= 0)
+	assert.Nil(t, err)
 }
 
 func TestImportManager_AllDataNodesBusy(t *testing.T) {

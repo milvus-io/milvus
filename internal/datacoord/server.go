@@ -383,10 +383,10 @@ func (s *Server) initGarbageCollection() error {
 		log.Info("local chunk manager init success")
 	}
 
-	s.garbageCollector = newGarbageCollector(s.meta, s.segReferManager, GcOption{
-		cli:      cli,
-		enabled:  Params.DataCoordCfg.EnableGarbageCollection,
-		rootPath: Params.MinioCfg.RootPath,
+	s.garbageCollector = newGarbageCollector(s.meta, s.segReferManager, s.rootCoordClient, GcOption{
+		cli:        cli,
+		enabled:    Params.DataCoordCfg.EnableGarbageCollection,
+		rootPath:   Params.MinioCfg.RootPath,
 
 		checkInterval:    Params.DataCoordCfg.GCInterval,
 		missingTolerance: Params.DataCoordCfg.GCMissingTolerance,

@@ -295,3 +295,12 @@ message ListPolicyResponse {
   common.Status status = 1;
   repeated string policy_infos = 2;
 }
+
+message GetImportFailedSegmentIDsRequest{
+  common.MsgBase base = 1;
+}
+
+message GetImportFailedSegmentIDsResponse{
+  common.Status status = 1;
+  repeated int64 segmentIDs = 2;
+}

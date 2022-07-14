@@ -135,6 +135,9 @@ service RootCoord {
     rpc OperatePrivilege(milvus.OperatePrivilegeRequest) returns (common.Status) {}
     rpc SelectGrant(milvus.SelectGrantRequest) returns (milvus.SelectGrantResponse) {}
     rpc ListPolicy(internal.ListPolicyRequest) returns (internal.ListPolicyResponse) {}
+
+    // TODO: move import manager to datacoord to remove this rpc
+    rpc GetImportFailedSegmentIDs(internal.GetImportFailedSegmentIDsRequest) returns (internal.GetImportFailedSegmentIDsResponse) {}
 }
 
 message AllocTimestampRequest {
