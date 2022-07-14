@@ -24,6 +24,8 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/kv"
+
 	"github.com/golang/protobuf/proto"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -123,5 +125,72 @@ func TestIndexBuildTask_Execute(t *testing.T) {
 		assert.ErrorIs(t, err, ErrNoSuchKey)
 		assert.Equal(t, TaskStateFailed, indexTask.state)
 
+	})
+}
+
+type mockETCDKV struct {
+	kv.MetaKv
+
+	loadWithPrefix2 func(key string) ([]string, []string, []int64, error)
+}
+
+func (mk *mockETCDKV) LoadWithPrefix2(key string) ([]string, []string, []int64, error) {
+	return mk.loadWithPrefix2(key)
+}
+
+func TestIndexBuildTask_loadIndexMeta(t *testing.T) {
+	t.Run("load empty meta", func(t *testing.T) {
+		indexTask := &IndexBuildTask{
+			etcdKV: &mockETCDKV{
+				loadWithPrefix2: func(key string) ([]string, []string, []int64, error) {
+					return []string{}, []string{}, []int64{}, nil
+				},
+			},
+			req: &indexpb.CreateIndexRequest{
+				IndexBuildID: 1,
+				DataPaths:    []string{"path1", "path2"},
+			},
+		}
+
+		indexMeta, revision, err := indexTask.loadIndexMeta(context.Background())
+		assert.NoError(t, err)
+		assert.Equal(t, int64(0), revision)
+		assert.Equal(t, TaskStateAbandon, indexTask.GetState())
+
+		indexTask.updateTaskState(indexMeta, nil)
+		assert.Equal(t, TaskStateAbandon, indexTask.GetState())
+	})
+}
+
+func TestIndexBuildTask_saveIndex(t *testing.T) {
+	t.Run("save index failed", func(t *testing.T) {
+		indexTask := &IndexBuildTask{
+			etcdKV: &mockETCDKV{
+				loadWithPrefix2: func(key string) ([]string, []string, []int64, error) {
+					return []string{}, []string{}, []int64{}, errors.New("error")
+				},
+			},
+			partitionID: 1,
+			segmentID:   1,
+			req: &indexpb.CreateIndexRequest{
+				IndexBuildID: 1,
+				DataPaths:    []string{"path1", "path2"},
+				Version:      1,
+			},
+		}
+
+		blobs := []*storage.Blob{
+			{
+				Key:   "key1",
+				Value: []byte("value1"),
+			},
+			{
+				Key:   "key2",
+				Value: []byte("value2"),
+			},
+		}
+
+		err := indexTask.saveIndex(context.Background(), blobs)
+		assert.Error(t, err)
 	})
 }
