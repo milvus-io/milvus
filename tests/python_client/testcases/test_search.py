@@ -1626,6 +1626,86 @@ class TestCollectionSearch(TestcaseBase):
         assert abs(res[0].distances[0] - min(distance_0, distance_1)) <= epsilon
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail(reason="issue 18283")
+    @pytest.mark.parametrize("index", ["BIN_FLAT"])
+    def test_search_binary_substructure_flat_index(self, nq, dim, auto_id, _async, index, is_flush):
+        """
+        target: search binary_collection, and check the result: distance
+        method: compare the return distance value with value computed with SUBSTRUCTURE
+        expected: the return distance equals to the computed value
+        """
+        # 1. initialize with binary data
+        collection_w, _, binary_raw_vector, insert_ids, time_stamp = self.init_collection_general(prefix, True, 2,
+                                                                                                  is_binary=True,
+                                                                                                  auto_id=auto_id,
+                                                                                                  dim=dim,
+                                                                                                  is_index=True,
+                                                                                                  is_flush=is_flush)[0:5]
+        # 2. create index
+        default_index = {"index_type": index, "params": {"nlist": 128}, "metric_type": "SUBSTRUCTURE"}
+        collection_w.create_index("binary_vector", default_index)
+        collection_w.load()
+        # 3. compute the distance
+        query_raw_vector, binary_vectors = cf.gen_binary_vectors(3000, dim)
+        distance_0 = cf.substructure(query_raw_vector[0], binary_raw_vector[0])
+        distance_1 = cf.substructure(query_raw_vector[0], binary_raw_vector[1])
+        # 4. search and compare the distance
+        search_params = {"metric_type": "SUBSTRUCTURE", "params": {"nprobe": 10}}
+        res = collection_w.search(binary_vectors[:nq], "binary_vector",
+                                  search_params, default_limit, "int64 >= 0",
+                                  _async=_async,
+                                  travel_timestamp=time_stamp,
+                                  check_task=CheckTasks.check_search_results,
+                                  check_items={"nq": nq,
+                                               "ids": insert_ids,
+                                               "limit": 2,
+                                               "_async": _async})[0]
+        if _async:
+            res.done()
+            res = res.result()
+        assert abs(res[0].distances[0] - min(distance_0, distance_1)) <= epsilon
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail(reason="issue 18283")
+    @pytest.mark.parametrize("index", ["BIN_FLAT"])
+    def test_search_binary_superstructure_flat_index(self, nq, dim, auto_id, _async, index, is_flush):
+        """
+        target: search binary_collection, and check the result: distance
+        method: compare the return distance value with value computed with SUPERSTRUCTURE
+        expected: the return distance equals to the computed value
+        """
+        # 1. initialize with binary data
+        collection_w, _, binary_raw_vector, insert_ids, time_stamp = self.init_collection_general(prefix, True, 2,
+                                                                                                  is_binary=True,
+                                                                                                  auto_id=auto_id,
+                                                                                                  dim=dim,
+                                                                                                  is_index=True,
+                                                                                                  is_flush=is_flush)[0:5]
+        # 2. create index
+        default_index = {"index_type": index, "params": {"nlist": 128}, "metric_type": "SUPERSTRUCTURE"}
+        collection_w.create_index("binary_vector", default_index)
+        collection_w.load()
+        # 3. compute the distance
+        query_raw_vector, binary_vectors = cf.gen_binary_vectors(3000, dim)
+        distance_0 = cf.superstructure(query_raw_vector[0], binary_raw_vector[0])
+        distance_1 = cf.superstructure(query_raw_vector[0], binary_raw_vector[1])
+        # 4. search and compare the distance
+        search_params = {"metric_type": "SUPERSTRUCTURE", "params": {"nprobe": 10}}
+        res = collection_w.search(binary_vectors[:nq], "binary_vector",
+                                  search_params, default_limit, "int64 >= 0",
+                                  _async=_async,
+                                  travel_timestamp=time_stamp,
+                                  check_task=CheckTasks.check_search_results,
+                                  check_items={"nq": nq,
+                                               "ids": insert_ids,
+                                               "limit": 2,
+                                               "_async": _async})[0]
+        if _async:
+            res.done()
+            res = res.result()
+        assert abs(res[0].distances[0] - min(distance_0, distance_1)) <= epsilon
+
+    @pytest.mark.tags(CaseLabel.L2)
     def test_search_binary_without_flush(self, metrics, auto_id):
         """
         target: test search without flush for binary data (no index)
