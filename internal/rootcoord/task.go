@@ -24,6 +24,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
+	model "github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -169,21 +170,6 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		}
 	}
 
-	collInfo := etcdpb.CollectionInfo{
-		ID:                         collID,
-		Schema:                     &schema,
-		PartitionIDs:               []typeutil.UniqueID{partID},
-		PartitionNames:             []string{Params.CommonCfg.DefaultPartitionName},
-		FieldIndexes:               make([]*etcdpb.FieldIndexInfo, 0, 16),
-		VirtualChannelNames:        vchanNames,
-		PhysicalChannelNames:       chanNames,
-		ShardsNum:                  t.Req.ShardsNum,
-		PartitionCreatedTimestamps: []uint64{0},
-		ConsistencyLevel:           t.Req.ConsistencyLevel,
-	}
-
-	idxInfo := make([]*etcdpb.IndexInfo, 0, 16)
-
 	// schema is modified (add RowIDField and TimestampField),
 	// so need Marshal again
 	schemaBytes, err := proto.Marshal(&schema)
@@ -218,6 +204,27 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		return fmt.Errorf("encodeDdOperation fail, error = %w", err)
 	}
 
+	collInfo := model.Collection{
+		CollectionID:         collID,
+		Name:                 schema.Name,
+		Description:          schema.Description,
+		AutoID:               schema.AutoID,
+		Fields:               model.UnmarshalFieldModels(schema.Fields),
+		VirtualChannelNames:  vchanNames,
+		PhysicalChannelNames: chanNames,
+		ShardsNum:            t.Req.ShardsNum,
+		ConsistencyLevel:     t.Req.ConsistencyLevel,
+		FieldIDToIndexID:     make([]common.Int64Tuple, 0, 16),
+		CreateTime:           ts,
+		Partitions: []*model.Partition{
+			{
+				PartitionID:               partID,
+				PartitionName:             Params.CommonCfg.DefaultPartitionName,
+				PartitionCreatedTimestamp: ts,
+			},
+		},
+	}
+
 	// use lambda function here to guarantee all resources to be released
 	createCollectionFn := func() error {
 		// lock for ddl operation
@@ -246,7 +253,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		}
 
 		// update meta table after send dd operation
-		if err = t.core.MetaTable.AddCollection(&collInfo, ts, idxInfo, ddOpStr); err != nil {
+		if err = t.core.MetaTable.AddCollection(&collInfo, ts, ddOpStr); err != nil {
 			t.core.chanTimeTick.removeDmlChannels(chanNames...)
 			t.core.chanTimeTick.removeDeltaChannels(deltaChanNames...)
 			// it's ok just to leave create collection message sent, datanode and querynode does't process CreateCollection logic
@@ -304,26 +311,26 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		DbName:         t.Req.DbName,
 		CollectionName: t.Req.CollectionName,
 		DbID:           0, //not used
-		CollectionID:   collMeta.ID,
+		CollectionID:   collMeta.CollectionID,
 	}
 
-	reason := fmt.Sprintf("drop collection %d", collMeta.ID)
+	reason := fmt.Sprintf("drop collection %d", collMeta.CollectionID)
 	ts, err := t.core.TSOAllocator(1)
 	if err != nil {
 		return fmt.Errorf("TSO alloc fail, error = %w", err)
 	}
 
 	//notify query service to release collection
-	if err = t.core.CallReleaseCollectionService(t.core.ctx, ts, 0, collMeta.ID); err != nil {
+	if err = t.core.CallReleaseCollectionService(t.core.ctx, ts, 0, collMeta.CollectionID); err != nil {
 		log.Error("Failed to CallReleaseCollectionService", zap.Error(err))
 		return err
 	}
 
 	// drop all indices
-	for _, fieldIndex := range collMeta.FieldIndexes {
-		if err := t.core.CallDropIndexService(t.core.ctx, fieldIndex.IndexID); err != nil {
+	for _, tuple := range collMeta.FieldIDToIndexID {
+		if err := t.core.CallDropIndexService(t.core.ctx, tuple.Value); err != nil {
 			log.Error("DropCollection CallDropIndexService fail", zap.String("collName", t.Req.CollectionName),
-				zap.Int64("indexID", fieldIndex.IndexID), zap.Error(err))
+				zap.Int64("indexID", tuple.Value), zap.Error(err))
 			return err
 		}
 	}
@@ -357,7 +364,7 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		}
 
 		// update meta table after send dd operation
-		if err = t.core.MetaTable.DeleteCollection(collMeta.ID, ts, ddOpStr); err != nil {
+		if err = t.core.MetaTable.DeleteCollection(collMeta.CollectionID, ts, ddOpStr); err != nil {
 			return err
 		}
 
@@ -391,7 +398,7 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 	}
 
 	// invalidate all the collection meta cache with the specified collectionID
-	err = t.core.ExpireMetaCache(ctx, nil, collMeta.ID, ts)
+	err = t.core.ExpireMetaCache(ctx, nil, collMeta.CollectionID, ts)
 	if err != nil {
 		return err
 	}
@@ -443,7 +450,7 @@ func (t *DescribeCollectionReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_DescribeCollection {
 		return fmt.Errorf("describe collection, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
 	}
-	var collInfo *etcdpb.CollectionInfo
+	var collInfo *model.Collection
 	var err error
 
 	if t.Req.CollectionName != "" {
@@ -458,8 +465,13 @@ func (t *DescribeCollectionReqTask) Execute(ctx context.Context) error {
 		}
 	}
 
-	t.Rsp.Schema = proto.Clone(collInfo.Schema).(*schemapb.CollectionSchema)
-	t.Rsp.CollectionID = collInfo.ID
+	t.Rsp.Schema = &schemapb.CollectionSchema{
+		Name:        collInfo.Name,
+		Description: collInfo.Description,
+		AutoID:      collInfo.AutoID,
+		Fields:      model.MarshalFieldModels(collInfo.Fields),
+	}
+	t.Rsp.CollectionID = collInfo.CollectionID
 	t.Rsp.VirtualChannelNames = collInfo.VirtualChannelNames
 	t.Rsp.PhysicalChannelNames = collInfo.PhysicalChannelNames
 	if collInfo.ShardsNum == 0 {
@@ -471,8 +483,8 @@ func (t *DescribeCollectionReqTask) Execute(ctx context.Context) error {
 	t.Rsp.CreatedTimestamp = collInfo.CreateTime
 	createdPhysicalTime, _ := tsoutil.ParseHybridTs(collInfo.CreateTime)
 	t.Rsp.CreatedUtcTimestamp = uint64(createdPhysicalTime)
-	t.Rsp.Aliases = t.core.MetaTable.ListAliases(collInfo.ID)
-	t.Rsp.StartPositions = collInfo.GetStartPositions()
+	t.Rsp.Aliases = t.core.MetaTable.ListAliases(collInfo.CollectionID)
+	t.Rsp.StartPositions = collInfo.StartPositions
 	t.Rsp.CollectionName = t.Rsp.Schema.Name
 	return nil
 }
@@ -500,7 +512,7 @@ func (t *ShowCollectionReqTask) Execute(ctx context.Context) error {
 	}
 	for name, meta := range coll {
 		t.Rsp.CollectionNames = append(t.Rsp.CollectionNames, name)
-		t.Rsp.CollectionIds = append(t.Rsp.CollectionIds, meta.ID)
+		t.Rsp.CollectionIds = append(t.Rsp.CollectionIds, meta.CollectionID)
 		t.Rsp.CreatedTimestamps = append(t.Rsp.CreatedTimestamps, meta.CreateTime)
 		physical, _ := tsoutil.ParseHybridTs(meta.CreateTime)
 		t.Rsp.CreatedUtcTimestamps = append(t.Rsp.CreatedUtcTimestamps, uint64(physical))
@@ -539,7 +551,7 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 		CollectionName: t.Req.CollectionName,
 		PartitionName:  t.Req.PartitionName,
 		DbID:           0, // todo, not used
-		CollectionID:   collMeta.ID,
+		CollectionID:   collMeta.CollectionID,
 		PartitionID:    partID,
 	}
 
@@ -572,7 +584,7 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 		}
 
 		// update meta table after send dd operation
-		if err = t.core.MetaTable.AddPartition(collMeta.ID, t.Req.PartitionName, partID, ts, ddOpStr); err != nil {
+		if err = t.core.MetaTable.AddPartition(collMeta.CollectionID, t.Req.PartitionName, partID, ts, ddOpStr); err != nil {
 			return err
 		}
 
@@ -590,7 +602,7 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 	}
 
 	// invalidate all the collection meta cache with the specified collectionID
-	err = t.core.ExpireMetaCache(ctx, nil, collMeta.ID, ts)
+	err = t.core.ExpireMetaCache(ctx, nil, collMeta.CollectionID, ts)
 	if err != nil {
 		return err
 	}
@@ -619,7 +631,7 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	partID, err := t.core.MetaTable.GetPartitionByName(collInfo.ID, t.Req.PartitionName, 0)
+	partID, err := t.core.MetaTable.GetPartitionByName(collInfo.CollectionID, t.Req.PartitionName, 0)
 	if err != nil {
 		return err
 	}
@@ -630,7 +642,7 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 		CollectionName: t.Req.CollectionName,
 		PartitionName:  t.Req.PartitionName,
 		DbID:           0, //todo,not used
-		CollectionID:   collInfo.ID,
+		CollectionID:   collInfo.CollectionID,
 		PartitionID:    partID,
 	}
 
@@ -663,7 +675,7 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 		}
 
 		// update meta table after send dd operation
-		if _, err = t.core.MetaTable.DeletePartition(collInfo.ID, t.Req.PartitionName, ts, ddOpStr); err != nil {
+		if _, err = t.core.MetaTable.DeletePartition(collInfo.CollectionID, t.Req.PartitionName, ts, ddOpStr); err != nil {
 			return err
 		}
 
@@ -681,7 +693,7 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 	}
 
 	// invalidate all the collection meta cache with the specified collectionID
-	err = t.core.ExpireMetaCache(ctx, nil, collInfo.ID, ts)
+	err = t.core.ExpireMetaCache(ctx, nil, collInfo.CollectionID, ts)
 	if err != nil {
 		return err
 	}
@@ -718,7 +730,7 @@ func (t *HasPartitionReqTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	t.HasPartition = t.core.MetaTable.HasPartition(coll.ID, t.Req.PartitionName, 0)
+	t.HasPartition = t.core.MetaTable.HasPartition(coll.CollectionID, t.Req.PartitionName, 0)
 	return nil
 }
 
@@ -739,7 +751,7 @@ func (t *ShowPartitionReqTask) Execute(ctx context.Context) error {
 	if t.Type() != commonpb.MsgType_ShowPartitions {
 		return fmt.Errorf("show partition, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
 	}
-	var coll *etcdpb.CollectionInfo
+	var coll *model.Collection
 	var err error
 	if t.Req.CollectionName == "" {
 		coll, err = t.core.MetaTable.GetCollectionByID(t.Req.CollectionID, 0)
@@ -749,12 +761,13 @@ func (t *ShowPartitionReqTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	t.Rsp.PartitionIDs = coll.PartitionIDs
-	t.Rsp.PartitionNames = coll.PartitionNames
-	t.Rsp.CreatedTimestamps = coll.PartitionCreatedTimestamps
-	t.Rsp.CreatedUtcTimestamps = make([]uint64, 0, len(coll.PartitionCreatedTimestamps))
-	for _, ts := range coll.PartitionCreatedTimestamps {
-		physical, _ := tsoutil.ParseHybridTs(ts)
+
+	for _, part := range coll.Partitions {
+		t.Rsp.PartitionIDs = append(t.Rsp.PartitionIDs, part.PartitionID)
+		t.Rsp.PartitionNames = append(t.Rsp.PartitionNames, part.PartitionName)
+		t.Rsp.CreatedTimestamps = append(t.Rsp.CreatedTimestamps, part.PartitionCreatedTimestamp)
+
+		physical, _ := tsoutil.ParseHybridTs(part.PartitionCreatedTimestamp)
 		t.Rsp.CreatedUtcTimestamps = append(t.Rsp.CreatedUtcTimestamps, uint64(physical))
 	}
 
@@ -785,7 +798,7 @@ func (t *DescribeSegmentReqTask) Execute(ctx context.Context) error {
 
 	segIDs, err := t.core.CallGetFlushedSegmentsService(ctx, t.Req.CollectionID, -1)
 	if err != nil {
-		log.Debug("Get flushed segment from data coord failed", zap.String("collection_name", coll.Schema.Name), zap.Error(err))
+		log.Debug("Get flushed segment from data coord failed", zap.String("collection_name", coll.Name), zap.Error(err))
 		return err
 	}
 
@@ -801,16 +814,16 @@ func (t *DescribeSegmentReqTask) Execute(ctx context.Context) error {
 		return fmt.Errorf("segment id %d not belong to collection id %d", t.Req.SegmentID, t.Req.CollectionID)
 	}
 	//TODO, get filed_id and index_name from request
-	segIdxInfo, err := t.core.MetaTable.GetSegmentIndexInfoByID(t.Req.SegmentID, -1, "")
+	index, err := t.core.MetaTable.GetSegmentIndexInfoByID(t.Req.SegmentID, -1, "")
 	log.Debug("RootCoord DescribeSegmentReqTask, MetaTable.GetSegmentIndexInfoByID", zap.Any("SegmentID", t.Req.SegmentID),
-		zap.Any("segIdxInfo", segIdxInfo), zap.Error(err))
+		zap.Any("index", index), zap.Error(err))
 	if err != nil {
 		return err
 	}
-	t.Rsp.IndexID = segIdxInfo.IndexID
-	t.Rsp.BuildID = segIdxInfo.BuildID
-	t.Rsp.EnableIndex = segIdxInfo.EnableIndex
-	t.Rsp.FieldID = segIdxInfo.FieldID
+	t.Rsp.IndexID = index.IndexID
+	t.Rsp.BuildID = index.SegmentIndexes[t.Req.SegmentID].BuildID
+	t.Rsp.EnableIndex = index.SegmentIndexes[t.Req.SegmentID].EnableIndex
+	t.Rsp.FieldID = index.FieldID
 	return nil
 }
 
@@ -836,8 +849,8 @@ func (t *ShowSegmentReqTask) Execute(ctx context.Context) error {
 		return err
 	}
 	exist := false
-	for _, partID := range coll.PartitionIDs {
-		if partID == t.Req.PartitionID {
+	for _, partition := range coll.Partitions {
+		if partition.PartitionID == t.Req.PartitionID {
 			exist = true
 			break
 		}
@@ -847,7 +860,7 @@ func (t *ShowSegmentReqTask) Execute(ctx context.Context) error {
 	}
 	segIDs, err := t.core.CallGetFlushedSegmentsService(ctx, t.Req.CollectionID, t.Req.PartitionID)
 	if err != nil {
-		log.Debug("Get flushed segments from data coord failed", zap.String("collection name", coll.Schema.Name), zap.Int64("partition id", t.Req.PartitionID), zap.Error(err))
+		log.Debug("Get flushed segments from data coord failed", zap.String("collection name", coll.Name), zap.Int64("partition id", t.Req.PartitionID), zap.Error(err))
 		return err
 	}
 
@@ -896,7 +909,7 @@ func (t *DescribeSegmentsReqTask) Execute(ctx context.Context) error {
 			t.Rsp.SegmentInfos[segID] = &rootcoordpb.SegmentInfos{
 				BaseInfo: &rootcoordpb.SegmentBaseInfo{
 					CollectionID: collectionID,
-					PartitionID:  0, // TODO: change this after MetaTable.partID2SegID been fixed.
+					PartitionID:  0, // TODO: change this after MetaTable.partID2IndexedSegID been fixed.
 					SegmentID:    segID,
 				},
 				IndexInfos:      nil,
@@ -904,34 +917,33 @@ func (t *DescribeSegmentsReqTask) Execute(ctx context.Context) error {
 			}
 		}
 
-		segmentInfo, err := t.core.MetaTable.GetSegmentIndexInfos(segID)
+		index, err := t.core.MetaTable.GetSegmentIndexInfos(segID)
 		if err != nil {
 			continue
 		}
 
-		for indexID, indexInfo := range segmentInfo {
-			t.Rsp.SegmentInfos[segID].IndexInfos =
-				append(t.Rsp.SegmentInfos[segID].IndexInfos,
-					&etcdpb.SegmentIndexInfo{
-						CollectionID: indexInfo.CollectionID,
-						PartitionID:  indexInfo.PartitionID,
-						SegmentID:    indexInfo.SegmentID,
-						FieldID:      indexInfo.FieldID,
-						IndexID:      indexInfo.IndexID,
-						BuildID:      indexInfo.BuildID,
-						EnableIndex:  indexInfo.EnableIndex,
-					})
-			extraIndexInfo, err := t.core.MetaTable.GetIndexByID(indexID)
-			if err != nil {
-				log.Warn("index not found in meta table, maybe index has been deleted",
-					zap.Error(err),
-					zap.Int64("indexID", indexID),
-					zap.Int64("collection", collectionID),
-					zap.Int64("segment", segID))
-				continue
-			}
-			t.Rsp.SegmentInfos[segID].ExtraIndexInfos[indexID] = extraIndexInfo
+		segIdxMeta, ok := index.SegmentIndexes[segID]
+		if !ok {
+			log.Error("requested segment index not found",
+				zap.Int64("collection", collectionID),
+				zap.Int64("indexID", index.IndexID),
+				zap.Int64("segment", segID))
+			return fmt.Errorf("segment index not found, collection: %d, segment: %d", collectionID, segID)
 		}
+
+		t.Rsp.SegmentInfos[segID].IndexInfos = append(
+			t.Rsp.SegmentInfos[segID].IndexInfos,
+			&etcdpb.SegmentIndexInfo{
+				CollectionID: index.CollectionID,
+				PartitionID:  segIdxMeta.Segment.PartitionID,
+				SegmentID:    segIdxMeta.Segment.SegmentID,
+				FieldID:      index.FieldID,
+				IndexID:      index.IndexID,
+				BuildID:      segIdxMeta.BuildID,
+				EnableIndex:  segIdxMeta.EnableIndex,
+			})
+
+		t.Rsp.SegmentInfos[segID].ExtraIndexInfos[index.IndexID] = model.MarshalIndexModel(&index)
 	}
 
 	return nil
@@ -962,11 +974,13 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
 	createTS, err := t.core.TSOAllocator(1)
 	if err != nil {
 		return err
 	}
-	idxInfo := &etcdpb.IndexInfo{
+
+	idxInfo := &model.Index{
 		IndexName:   indexName,
 		IndexID:     indexID,
 		IndexParams: t.Req.ExtraParams,
@@ -982,46 +996,61 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	segID2PartID, segID2Binlog, err := t.core.getSegments(ctx, collMeta.ID)
+	segID2PartID, segID2Binlog, err := t.core.getSegments(ctx, collMeta.CollectionID)
 	flushedSegs := make([]typeutil.UniqueID, 0, len(segID2PartID))
 	for k := range segID2PartID {
 		flushedSegs = append(flushedSegs, k)
 	}
 	if err != nil {
-		log.Debug("Get flushed segments from data coord failed", zap.String("collection_name", collMeta.Schema.Name), zap.Error(err))
+		log.Debug("get flushed segments from data coord failed", zap.String("collection_name", collMeta.Name), zap.Error(err))
 		return err
+	}
+
+	alreadyExists, err := t.core.MetaTable.AddIndex(t.Req.CollectionName, t.Req.FieldName, idxInfo, flushedSegs)
+	if err != nil {
+		log.Debug("add index into metastore failed", zap.Int64("collection_id", collMeta.CollectionID), zap.Int64("index_id", idxInfo.IndexID), zap.Error(err))
+		return err
+	}
+	// backward compatible with support create the same index
+	if alreadyExists {
+		return nil
 	}
 
 	segIDs, field, err := t.core.MetaTable.GetNotIndexedSegments(t.Req.CollectionName, t.Req.FieldName, idxInfo, flushedSegs)
 	if err != nil {
-		log.Debug("RootCoord CreateIndexReqTask metaTable.GetNotIndexedSegments", zap.Error(err))
+		log.Debug("get not indexed segments failed", zap.Int64("collection_id", collMeta.CollectionID), zap.Error(err))
 		return err
 	}
 
-	collectionID := collMeta.ID
-	cnt := 0
-
 	for _, segID := range segIDs {
-		info := etcdpb.SegmentIndexInfo{
-			CollectionID: collectionID,
-			PartitionID:  segID2PartID[segID],
-			SegmentID:    segID,
-			FieldID:      field.FieldID,
-			IndexID:      idxInfo.IndexID,
-			EnableIndex:  false,
-			CreateTime:   createTS,
+		segmentIndex := model.SegmentIndex{
+			Segment: model.Segment{
+				SegmentID:   segID,
+				PartitionID: segID2PartID[segID],
+			},
+			EnableIndex: false,
+			CreateTime:  createTS,
 		}
-		info.BuildID, err = t.core.BuildIndex(ctx, segID, segID2Binlog[segID].GetNumOfRows(), segID2Binlog[segID].GetFieldBinlogs(), &field, idxInfo, false)
+
+		segmentIndex.BuildID, err = t.core.BuildIndex(ctx, segID, segID2Binlog[segID].GetNumOfRows(), segID2Binlog[segID].GetFieldBinlogs(), &field, idxInfo, false)
 		if err != nil {
 			return err
 		}
-		if info.BuildID != 0 {
-			info.EnableIndex = true
+		if segmentIndex.BuildID != 0 {
+			segmentIndex.EnableIndex = true
 		}
-		if err := t.core.MetaTable.AddIndex(&info); err != nil {
-			log.Debug("Add index into meta table failed", zap.Int64("collection_id", collMeta.ID), zap.Int64("index_id", info.IndexID), zap.Int64("build_id", info.BuildID), zap.Error(err))
+
+		index := &model.Index{
+			CollectionID:   collMeta.CollectionID,
+			FieldID:        field.FieldID,
+			IndexID:        idxInfo.IndexID,
+			SegmentIndexes: map[int64]model.SegmentIndex{segID: segmentIndex},
 		}
-		cnt++
+
+		if err := t.core.MetaTable.AlterIndex(index); err != nil {
+			log.Error("alter index into meta table failed", zap.Int64("collection_id", collMeta.CollectionID), zap.Int64("index_id", index.IndexID), zap.Int64("build_id", segmentIndex.BuildID), zap.Error(err))
+			return err
+		}
 	}
 
 	return nil
