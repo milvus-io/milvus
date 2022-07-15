@@ -203,6 +203,42 @@ func (qc *QueryCoord) ShowCollections(ctx context.Context, req *querypb.ShowColl
 	}, nil
 }
 
+func handleLoadError(err error, loadType querypb.LoadType, msgID, collectionID UniqueID, partitionIDs []UniqueID) (*commonpb.Status, error) {
+	status := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}
+	if errors.Is(err, ErrCollectionLoaded) {
+		log.Info("collection or partitions has already been loaded, return load success directly",
+			zap.String("loadType", loadType.String()),
+			zap.String("role", typeutil.QueryCoordRole),
+			zap.Int64("collectionID", collectionID),
+			zap.Int64s("partitionIDs", partitionIDs),
+			zap.Int64("msgID", msgID))
+
+		metrics.QueryCoordLoadCount.WithLabelValues(metrics.SuccessLabel).Inc()
+		return status, nil
+	} else if errors.Is(err, ErrLoadParametersMismatch) {
+		status.ErrorCode = commonpb.ErrorCode_IllegalArgument
+		status.Reason = err.Error()
+
+		metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
+		return status, nil
+	} else {
+		log.Error("load collection or partitions to query nodes failed",
+			zap.String("loadType", loadType.String()),
+			zap.String("role", typeutil.QueryCoordRole),
+			zap.Int64("collectionID", collectionID),
+			zap.Int64s("partitionIDs", partitionIDs),
+			zap.Int64("msgID", msgID),
+			zap.Error(err))
+		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		status.Reason = err.Error()
+
+		metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
+		return status, nil
+	}
+}
+
 // LoadCollection loads all the sealed segments of this collection to queryNodes, and assigns watchDmChannelRequest to queryNodes
 func (qc *QueryCoord) LoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest) (*commonpb.Status, error) {
 	metrics.QueryCoordLoadCount.WithLabelValues(metrics.TotalLabel).Inc()
@@ -235,6 +271,19 @@ func (qc *QueryCoord) LoadCollection(ctx context.Context, req *querypb.LoadColle
 		cluster:               qc.cluster,
 		meta:                  qc.meta,
 	}
+
+	LastTaskType := qc.scheduler.triggerTaskQueue.willLoadOrRelease(req.GetCollectionID())
+	if LastTaskType == commonpb.MsgType_LoadCollection {
+		// collection will be loaded, remove idempotent loadCollection task, return success directly
+		return status, nil
+	}
+	if LastTaskType != commonpb.MsgType_ReleaseCollection {
+		err := checkLoadCollection(req, qc.meta)
+		if err != nil {
+			return handleLoadError(err, querypb.LoadType_LoadCollection, req.GetBase().GetMsgID(), req.GetCollectionID(), nil)
+		}
+	}
+
 	err := qc.scheduler.Enqueue(loadCollectionTask)
 	if err != nil {
 		log.Error("loadCollectionRequest failed to add execute task to scheduler",
@@ -251,32 +300,7 @@ func (qc *QueryCoord) LoadCollection(ctx context.Context, req *querypb.LoadColle
 
 	err = loadCollectionTask.waitToFinish()
 	if err != nil {
-		if errors.Is(err, ErrCollectionLoaded) {
-			log.Info("collection has already been loaded, return load success directly",
-				zap.String("role", typeutil.QueryCoordRole),
-				zap.Int64("collectionID", collectionID),
-				zap.Int64("msgID", req.Base.MsgID))
-
-			metrics.QueryCoordLoadCount.WithLabelValues(metrics.SuccessLabel).Inc()
-			return status, nil
-		} else if errors.Is(err, ErrLoadParametersMismatch) {
-			status.ErrorCode = commonpb.ErrorCode_IllegalArgument
-			status.Reason = err.Error()
-
-			metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
-			return status, nil
-		} else {
-			log.Error("load collection to query nodes failed",
-				zap.String("role", typeutil.QueryCoordRole),
-				zap.Int64("collectionID", collectionID),
-				zap.Int64("msgID", req.Base.MsgID),
-				zap.Error(err))
-			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-			status.Reason = err.Error()
-
-			metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
-			return status, nil
-		}
+		return handleLoadError(err, querypb.LoadType_LoadCollection, req.GetBase().GetMsgID(), req.GetCollectionID(), nil)
 	}
 
 	log.Info("loadCollectionRequest completed",
@@ -508,6 +532,19 @@ func (qc *QueryCoord) LoadPartitions(ctx context.Context, req *querypb.LoadParti
 		cluster:               qc.cluster,
 		meta:                  qc.meta,
 	}
+
+	LastTaskType := qc.scheduler.triggerTaskQueue.willLoadOrRelease(req.GetCollectionID())
+	if LastTaskType == commonpb.MsgType_LoadPartitions {
+		// partitions will be loaded, remove idempotent loadPartition task, return success directly
+		return status, nil
+	}
+	if LastTaskType != commonpb.MsgType_ReleasePartitions {
+		err := checkLoadPartition(req, qc.meta)
+		if err != nil {
+			return handleLoadError(err, querypb.LoadType_LoadPartition, req.GetBase().GetMsgID(), req.GetCollectionID(), req.GetPartitionIDs())
+		}
+	}
+
 	err := qc.scheduler.Enqueue(loadPartitionTask)
 	if err != nil {
 		log.Error("loadPartitionRequest failed to add execute task to scheduler",
@@ -525,34 +562,7 @@ func (qc *QueryCoord) LoadPartitions(ctx context.Context, req *querypb.LoadParti
 
 	err = loadPartitionTask.waitToFinish()
 	if err != nil {
-		if errors.Is(err, ErrCollectionLoaded) {
-			log.Info("loadPartitionRequest completed, all partitions to load have already been loaded into memory",
-				zap.String("role", typeutil.QueryCoordRole),
-				zap.Int64("collectionID", req.CollectionID),
-				zap.Int64s("partitionIDs", req.PartitionIDs),
-				zap.Int64("msgID", req.Base.MsgID))
-
-			metrics.QueryCoordLoadCount.WithLabelValues(metrics.SuccessLabel).Inc()
-			return status, nil
-		} else if errors.Is(err, ErrLoadParametersMismatch) {
-			status.ErrorCode = commonpb.ErrorCode_IllegalArgument
-			status.Reason = err.Error()
-
-			metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
-			return status, nil
-		} else {
-			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-			status.Reason = err.Error()
-			log.Error("loadPartitionRequest failed",
-				zap.String("role", typeutil.QueryCoordRole),
-				zap.Int64("collectionID", req.CollectionID),
-				zap.Int64s("partitionIDs", partitionIDs),
-				zap.Int64("msgID", req.Base.MsgID),
-				zap.Error(err))
-
-			metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
-			return status, nil
-		}
+		return handleLoadError(err, querypb.LoadType_LoadPartition, req.GetBase().GetMsgID(), req.GetCollectionID(), req.GetPartitionIDs())
 	}
 
 	log.Info("loadPartitionRequest completed",

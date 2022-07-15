@@ -64,6 +64,34 @@ func (queue *taskQueue) taskFull() bool {
 	return int64(queue.tasks.Len()) >= queue.maxTask
 }
 
+func (queue *taskQueue) willLoadOrRelease(collectionID UniqueID) commonpb.MsgType {
+	queue.Lock()
+	defer queue.Unlock()
+	// check the last task of this collection is load task or release task
+	for e := queue.tasks.Back(); e != nil; e = e.Prev() {
+		msgType := e.Value.(task).msgType()
+		switch msgType {
+		case commonpb.MsgType_LoadCollection:
+			if e.Value.(task).(*loadCollectionTask).GetCollectionID() == collectionID {
+				return msgType
+			}
+		case commonpb.MsgType_LoadPartitions:
+			if e.Value.(task).(*loadPartitionTask).GetCollectionID() == collectionID {
+				return msgType
+			}
+		case commonpb.MsgType_ReleaseCollection:
+			if e.Value.(task).(*releaseCollectionTask).GetCollectionID() == collectionID {
+				return msgType
+			}
+		case commonpb.MsgType_ReleasePartitions:
+			if e.Value.(task).(*releasePartitionTask).GetCollectionID() == collectionID {
+				return msgType
+			}
+		}
+	}
+	return commonpb.MsgType_Undefined
+}
+
 func (queue *taskQueue) addTask(t task) {
 	queue.Lock()
 	defer queue.Unlock()
