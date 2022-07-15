@@ -120,6 +120,7 @@ func (s *searchTask) searchOnStreaming() error {
 			zap.Int64("collectionID", s.CollectionID), zap.Error(sErr))
 		return sErr
 	}
+	defer purgeMemoryAfterReduce()
 	defer deleteSearchResults(partResults)
 	return s.reduceResults(searchReq, partResults)
 }
@@ -155,6 +156,7 @@ func (s *searchTask) searchOnHistorical() error {
 	if err != nil {
 		return err
 	}
+	defer purgeMemoryAfterReduce()
 	defer deleteSearchResults(partResults)
 	return s.reduceResults(searchReq, partResults)
 }

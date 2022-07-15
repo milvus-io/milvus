@@ -43,6 +43,7 @@ ParseMallocInfo() {
     size_t buffer_size;
     FILE* stream;
     stream = open_memstream(&mem_buffer, &buffer_size);
+    AssertInfo(stream, "null stream file when open_memstream");
     // malloc_info(0, stdout);
 
     /*
@@ -55,13 +56,15 @@ ParseMallocInfo() {
      *      <https://sourceware.org/glibc/wiki/MallocInternals>
      *      <https://code.woboq.org/userspace/glibc/malloc/malloc.c.html#5378>
      */
-    malloc_info(0, stream);
+    auto ret = malloc_info(0, stream);
+    AssertInfo(ret == 0, "malloc_info failed");
     fflush(stream);
 
     rapidxml::xml_document<> doc;  // character type defaults to char
     doc.parse<0>(mem_buffer);      // 0 means default parse flags
 
     rapidxml::xml_node<>* malloc_root_node = doc.first_node();
+    AssertInfo(malloc_root_node, "null malloc_root_node detected when ParseMallocInfo");
     auto total_fast_node = malloc_root_node->first_node()->next_sibling("total");
     AssertInfo(total_fast_node, "null total_fast_node detected when ParseMallocInfo");
     auto total_fast_size = std::stoul(total_fast_node->first_attribute("size")->value());
