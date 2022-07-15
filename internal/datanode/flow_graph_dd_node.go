@@ -134,6 +134,16 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 				fgMsg.dropCollection = true
 			}
 
+		case commonpb.MsgType_DropPartition:
+			dpMsg := msg.(*msgstream.DropPartitionMsg)
+			if dpMsg.GetCollectionID() == ddn.collectionID {
+				log.Info("drop partition msg received",
+					zap.Int64("collectionID", dpMsg.GetCollectionID()),
+					zap.Int64("partitionID", dpMsg.GetPartitionID()),
+					zap.String("vChanneName", ddn.vChannelName))
+				fgMsg.dropPartitions = append(fgMsg.dropPartitions, dpMsg.PartitionID)
+			}
+
 		case commonpb.MsgType_Insert:
 			imsg := msg.(*msgstream.InsertMsg)
 			if imsg.CollectionID != ddn.collectionID {

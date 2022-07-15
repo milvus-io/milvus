@@ -39,6 +39,7 @@ type flowGraphMsg struct {
 	//segmentsToFlush is the signal used by insertBufferNode to notify deleteNode to flush
 	segmentsToFlush []UniqueID
 	dropCollection  bool
+	dropPartitions  []UniqueID
 }
 
 func (fgMsg *flowGraphMsg) TimeTick() Timestamp {

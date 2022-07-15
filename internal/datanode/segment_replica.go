@@ -56,6 +56,7 @@ type Replica interface {
 
 	listAllSegmentIDs() []UniqueID
 	listNotFlushedSegmentIDs() []UniqueID
+	listPartitionSegments(partID UniqueID) []UniqueID
 	addNewSegment(segID, collID, partitionID UniqueID, channelName string, startPos, endPos *internalpb.MsgPosition) error
 	addNormalSegment(segID, collID, partitionID UniqueID, channelName string, numOfRows int64, statsBinlog []*datapb.FieldBinlog, cp *segmentCheckPoint, recoverTs Timestamp) error
 	filterSegments(channelName string, partitionID UniqueID) []*Segment
@@ -93,9 +94,8 @@ type Segment struct {
 	endPos     *internalpb.MsgPosition
 
 	pkFilter *bloom.BloomFilter //  bloom filter of pk inside a segment
-	// TODO silverxia, needs to change to interface to support `string` type PK
-	minPK primaryKey //	minimal pk value, shortcut for checking whether a pk is inside this segment
-	maxPK primaryKey //  maximal pk value, same above
+	minPK    primaryKey         //	minimal pk value, shortcut for checking whether a pk is inside this segment
+	maxPK    primaryKey         //  maximal pk value, same above
 }
 
 // SegmentReplica is the data replication of persistent data in datanode.
@@ -819,6 +819,33 @@ func (replica *SegmentReplica) listAllSegmentIDs() []UniqueID {
 
 	for _, seg := range replica.flushedSegments {
 		segIDs = append(segIDs, seg.segmentID)
+	}
+
+	return segIDs
+}
+
+func (replica *SegmentReplica) listPartitionSegments(partID UniqueID) []UniqueID {
+	replica.segMu.RLock()
+	defer replica.segMu.RUnlock()
+
+	var segIDs []UniqueID
+
+	for _, seg := range replica.newSegments {
+		if seg.partitionID == partID {
+			segIDs = append(segIDs, seg.segmentID)
+		}
+	}
+
+	for _, seg := range replica.normalSegments {
+		if seg.partitionID == partID {
+			segIDs = append(segIDs, seg.segmentID)
+		}
+	}
+
+	for _, seg := range replica.flushedSegments {
+		if seg.partitionID == partID {
+			segIDs = append(segIDs, seg.segmentID)
+		}
 	}
 
 	return segIDs

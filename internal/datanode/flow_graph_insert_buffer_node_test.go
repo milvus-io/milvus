@@ -636,6 +636,238 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 	})
 }
 
+func TestFlowGraphInsertBufferNode_DropPartition(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	partitionID := int64(1)
+
+	testPath := "/test/datanode/root/meta"
+	err := clearEtcd(testPath)
+	require.NoError(t, err)
+	Params.EtcdCfg.MetaRootPath = testPath
+
+	Factory := &MetaFactory{}
+	collMeta := Factory.GetCollectionMeta(UniqueID(0), "coll1", schemapb.DataType_Int64)
+	dataFactory := NewDataFactory()
+
+	mockRootCoord := &RootCoordFactory{
+		pkType: schemapb.DataType_Int64,
+	}
+
+	colRep := &SegmentReplica{
+		collectionID:    collMeta.ID,
+		newSegments:     make(map[UniqueID]*Segment),
+		normalSegments:  make(map[UniqueID]*Segment),
+		flushedSegments: make(map[UniqueID]*Segment),
+	}
+
+	colRep.metaService = newMetaService(mockRootCoord, collMeta.ID)
+
+	factory := dependency.NewDefaultFactory(true)
+
+	flushPacks := []*segmentFlushPack{}
+	fpMut := sync.Mutex{}
+	wg := sync.WaitGroup{}
+
+	cm := storage.NewLocalChunkManager(storage.RootPath(insertNodeTestDir))
+	defer cm.RemoveWithPrefix("")
+	fm := NewRendezvousFlushManager(NewAllocatorFactory(), cm, colRep, func(pack *segmentFlushPack) {
+		fpMut.Lock()
+		flushPacks = append(flushPacks, pack)
+		fpMut.Unlock()
+		colRep.listNewSegmentsStartPositions()
+		colRep.listSegmentsCheckPoints()
+		if pack.flushed || pack.dropped {
+			colRep.segmentFlushed(pack.segmentID)
+		}
+		wg.Done()
+	}, emptyFlushAndDropFunc)
+
+	flushChan := make(chan flushMsg, 100)
+	resendTTChan := make(chan resendTTMsg, 100)
+	c := &nodeConfig{
+		replica:      colRep,
+		msFactory:    factory,
+		allocator:    NewAllocatorFactory(),
+		vChannelName: "string",
+	}
+	iBNode, err := newInsertBufferNode(ctx, collMeta.ID, flushChan, resendTTChan, fm, newCache(), c)
+	require.NoError(t, err)
+
+	// Auto flush number of rows set to 2
+
+	inMsg := genFlowGraphInsertMsg("datanode-03-test-autoflush")
+	inMsg.insertMessages = dataFactory.GetMsgStreamInsertMsgs(2)
+	var iMsg flowgraph.Msg = &inMsg
+
+	t.Run("Only drop partition", func(t *testing.T) {
+		// iBNode.insertBuffer.maxSize = 2
+		tmp := Params.DataNodeCfg.FlushInsertBufferSize
+		Params.DataNodeCfg.FlushInsertBufferSize = 4 * 4
+		defer func() {
+			Params.DataNodeCfg.FlushInsertBufferSize = tmp
+		}()
+
+		for i := range inMsg.insertMessages {
+			inMsg.insertMessages[i].SegmentID = int64(i%2) + 1
+			inMsg.insertMessages[i].PartitionID = partitionID
+		}
+		inMsg.startPositions = []*internalpb.MsgPosition{{Timestamp: 100}}
+		inMsg.endPositions = []*internalpb.MsgPosition{{Timestamp: 123}}
+
+		type Test struct {
+			expectedSegID       UniqueID
+			expectedNumOfRows   int64
+			expectedStartPosTs  Timestamp
+			expectedEndPosTs    Timestamp
+			expectedCpNumOfRows int64
+			expectedCpPosTs     Timestamp
+		}
+
+		beforeAutoFlushTests := []Test{
+			// segID, numOfRow, startTs, endTs, cp.numOfRow, cp.Ts
+			{1, 1, 100, 123, 0, 100},
+			{2, 1, 100, 123, 0, 100},
+		}
+		iBNode.Operate([]flowgraph.Msg{iMsg})
+
+		require.Equal(t, 2, len(colRep.newSegments))
+		require.Equal(t, 0, len(colRep.normalSegments))
+		assert.Equal(t, 0, len(flushPacks))
+
+		for i, test := range beforeAutoFlushTests {
+			colRep.segMu.Lock()
+			seg, ok := colRep.newSegments[UniqueID(i+1)]
+			colRep.segMu.Unlock()
+			assert.True(t, ok)
+			assert.Equal(t, partitionID, seg.partitionID)
+			assert.Equal(t, test.expectedSegID, seg.segmentID)
+			assert.Equal(t, test.expectedNumOfRows, seg.numRows)
+			assert.Equal(t, test.expectedStartPosTs, seg.startPos.GetTimestamp())
+			assert.Equal(t, test.expectedCpNumOfRows, seg.checkPoint.numRows)
+			assert.Equal(t, test.expectedCpPosTs, seg.checkPoint.pos.GetTimestamp())
+		}
+
+		inMsg.insertMessages = nil
+		inMsg.startPositions = []*internalpb.MsgPosition{{Timestamp: 200}}
+		inMsg.endPositions = []*internalpb.MsgPosition{{Timestamp: 234}}
+		inMsg.dropPartitions = []int64{partitionID}
+		iMsg = &inMsg
+
+		// Triger drop paritition
+		output := iBNode.Operate([]flowgraph.Msg{iMsg})
+		fgm := output[0].(*flowGraphMsg)
+		wg.Add(len(fgm.segmentsToFlush))
+		t.Log("segments to flush", fgm.segmentsToFlush)
+
+		for _, im := range fgm.segmentsToFlush {
+			// send del done signal
+			err = fm.flushDelData(nil, im, fgm.endPositions[0])
+			assert.NoError(t, err)
+		}
+		wg.Wait()
+		require.Equal(t, 0, len(colRep.newSegments))
+		require.Equal(t, 0, len(colRep.normalSegments))
+		require.Equal(t, 2, len(colRep.flushedSegments))
+
+		assert.Equal(t, 2, len(flushPacks))
+		assert.Less(t, 0, len(flushPacks[0].insertLogs))
+		for _, flushPack := range flushPacks {
+			assert.True(t, flushPack.flushed)
+			assert.True(t, flushPack.dropped)
+		}
+
+	})
+	t.Run("drop partition with flush", func(t *testing.T) {
+
+		tmp := Params.DataNodeCfg.FlushInsertBufferSize
+		Params.DataNodeCfg.FlushInsertBufferSize = 4 * 4
+		defer func() {
+			Params.DataNodeCfg.FlushInsertBufferSize = tmp
+		}()
+
+		fpMut.Lock()
+		flushPacks = flushPacks[:0]
+		fpMut.Unlock()
+
+		inMsg := genFlowGraphInsertMsg("datanode-03-test-autoflush")
+		inMsg.insertMessages = dataFactory.GetMsgStreamInsertMsgs(2)
+
+		for i := range inMsg.insertMessages {
+			inMsg.insertMessages[i].SegmentID = UniqueID(10 + i)
+			inMsg.insertMessages[i].PartitionID = partitionID
+		}
+		inMsg.startPositions = []*internalpb.MsgPosition{{Timestamp: 300}}
+		inMsg.endPositions = []*internalpb.MsgPosition{{Timestamp: 323}}
+		var iMsg flowgraph.Msg = &inMsg
+
+		type Test struct {
+			expectedSegID       UniqueID
+			expectedNumOfRows   int64
+			expectedStartPosTs  Timestamp
+			expectedEndPosTs    Timestamp
+			expectedCpNumOfRows int64
+			expectedCpPosTs     Timestamp
+		}
+
+		beforeAutoFlushTests := []Test{
+			// segID, numOfRow, startTs, endTs, cp.numOfRow, cp.Ts
+			{10, 1, 300, 323, 0, 300},
+			{11, 1, 300, 323, 0, 300},
+		}
+		iBNode.Operate([]flowgraph.Msg{iMsg})
+
+		require.Equal(t, 2, len(colRep.newSegments))
+		require.Equal(t, 0, len(colRep.normalSegments))
+		assert.Equal(t, 0, len(flushPacks))
+
+		for _, test := range beforeAutoFlushTests {
+			colRep.segMu.Lock()
+			seg, ok := colRep.newSegments[test.expectedSegID]
+			colRep.segMu.Unlock()
+			assert.True(t, ok)
+			assert.Equal(t, partitionID, seg.partitionID)
+			assert.Equal(t, test.expectedSegID, seg.segmentID)
+			assert.Equal(t, test.expectedNumOfRows, seg.numRows)
+			assert.Equal(t, test.expectedStartPosTs, seg.startPos.GetTimestamp())
+			assert.Equal(t, test.expectedCpNumOfRows, seg.checkPoint.numRows)
+			assert.Equal(t, test.expectedCpPosTs, seg.checkPoint.pos.GetTimestamp())
+		}
+
+		inMsg.startPositions = []*internalpb.MsgPosition{{Timestamp: 400}}
+		inMsg.endPositions = []*internalpb.MsgPosition{{Timestamp: 434}}
+		inMsg.dropPartitions = []int64{partitionID}
+
+		// trigger manual flush
+		flushChan <- flushMsg{
+			segmentID: 10,
+			flushed:   true,
+		}
+
+		// trigger auto flush since buffer full
+		output := iBNode.Operate([]flowgraph.Msg{iMsg})
+		fgm := output[0].(*flowGraphMsg)
+		wg.Add(len(fgm.segmentsToFlush))
+		for _, im := range fgm.segmentsToFlush {
+			// send del done signal
+			err = fm.flushDelData(nil, im, fgm.endPositions[0])
+			assert.NoError(t, err)
+		}
+		wg.Wait()
+		require.Equal(t, 0, len(colRep.newSegments))
+		require.Equal(t, 0, len(colRep.normalSegments))
+		require.Equal(t, 4, len(colRep.flushedSegments))
+
+		assert.Equal(t, 4, len(flushPacks))
+		for _, pack := range flushPacks {
+			assert.True(t, pack.flushed)
+			assert.True(t, pack.dropped)
+		}
+	})
+
+}
+
 // CompactedRootCoord has meta info compacted at ts
 type CompactedRootCoord struct {
 	types.RootCoord
