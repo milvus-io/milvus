@@ -161,6 +161,59 @@ func TestFlowGraph_DDNode_Operate(t *testing.T) {
 		}
 	})
 
+	t.Run("Test DDNode Operate DropPartition Msg", func(t *testing.T) {
+		// valid inputs
+		tests := []struct {
+			ddnCollID UniqueID
+
+			msgCollID    UniqueID
+			msgPartID    UniqueID
+			expectOutput []UniqueID
+
+			description string
+		}{
+			{1, 1, 101, []UniqueID{101},
+				"DropCollectionMsg collID == ddNode collID"},
+			{1, 2, 101, []UniqueID{},
+				"DropCollectionMsg collID != ddNode collID"},
+		}
+
+		for _, test := range tests {
+			t.Run(test.description, func(t *testing.T) {
+				factory := dependency.NewDefaultFactory(true)
+				deltaStream, err := factory.NewMsgStream(context.Background())
+				assert.Nil(t, err)
+				deltaStream.SetRepackFunc(msgstream.DefaultRepackFunc)
+				deltaStream.AsProducer([]string{"DataNode-test-delta-channel-0"})
+				ddn := ddNode{
+					ctx:                context.Background(),
+					collectionID:       test.ddnCollID,
+					deltaMsgStream:     deltaStream,
+					vChannelName:       "ddn_drop_msg",
+					compactionExecutor: newCompactionExecutor(),
+				}
+
+				var dropPartMsg msgstream.TsMsg = &msgstream.DropPartitionMsg{
+					DropPartitionRequest: internalpb.DropPartitionRequest{
+						Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_DropPartition},
+						CollectionID: test.msgCollID,
+						PartitionID:  test.msgPartID,
+					},
+				}
+				tsMessages := []msgstream.TsMsg{dropPartMsg}
+				var msgStreamMsg Msg = flowgraph.GenerateMsgStreamMsg(tsMessages, 0, 0, nil, nil)
+
+				rt := ddn.Operate([]Msg{msgStreamMsg})
+
+				assert.NotEmpty(t, rt)
+				fgMsg, ok := rt[0].(*flowGraphMsg)
+				assert.True(t, ok)
+				assert.ElementsMatch(t, test.expectOutput, fgMsg.dropPartitions)
+
+			})
+		}
+	})
+
 	t.Run("Test DDNode Operate and filter insert msg", func(t *testing.T) {
 		factory := dependency.NewDefaultFactory(true)
 		deltaStream, err := factory.NewMsgStream(context.Background())
