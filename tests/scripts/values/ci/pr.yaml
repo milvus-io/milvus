@@ -1,0 +1,166 @@
+metrics:
+  serviceMonitor:
+    enabled: true
+proxy:
+  resources:
+    requests:
+      cpu: "0.3"
+      memory: "256Mi"
+
+rootCoordinator:
+  resources:
+    requests:
+      cpu: "0.3"
+      memory: "256Mi"
+
+queryCoordinator:
+  resources:
+    requests:
+      cpu: "0.4"
+      memory: "100Mi"
+
+queryNode:
+  resources:
+    requests:
+      cpu: "2"
+      memory: "500Mi"
+indexCoordinator:
+  resources:
+    requests:
+      cpu: "0.1"
+      memory: "50Mi"
+indexNode:
+  resources:
+    requests:
+      cpu: "4"
+      memory: "500Mi"
+
+dataCoordinator:
+  resources:
+    requests:
+      cpu: "0.1"
+      memory: "50Mi"
+
+dataNode:
+  resources:
+    requests:
+      cpu: "0.5"
+      memory: "500Mi"
+
+pulsar:
+  proxy:
+    configData:
+      PULSAR_MEM: >
+        -Xms2048m -Xmx2048m
+      PULSAR_GC: >
+        -XX:MaxDirectMemorySize=2048m
+      httpNumThreads: "50"
+    resources:
+      requests:
+        cpu: "1"
+        memory: "2Gi"
+  # Resources for the websocket proxy
+    wsResources:
+      requests:
+        memory: "512Mi"
+        cpu: "0.3"
+  broker:
+    resources:
+      requests:
+        cpu: "1.5"
+        memory: "4Gi"
+    configData:
+      PULSAR_MEM: >
+        -Xms4096m
+        -Xmx4096m
+        -XX:MaxDirectMemorySize=8192m
+      PULSAR_GC: >
+        -Dio.netty.leakDetectionLevel=disabled
+        -Dio.netty.recycler.linkCapacity=1024
+        -XX:+ParallelRefProcEnabled
+        -XX:+UnlockExperimentalVMOptions
+        -XX:+DoEscapeAnalysis
+        -XX:ParallelGCThreads=32
+        -XX:ConcGCThreads=32
+        -XX:G1NewSizePercent=50
+        -XX:+DisableExplicitGC
+        -XX:-ResizePLAB
+        -XX:+ExitOnOutOfMemoryError
+      maxMessageSize: "104857600"
+      defaultRetentionTimeInMinutes: "10080"
+      defaultRetentionSizeInMB: "8192"
+      backlogQuotaDefaultLimitGB: "8"
+      backlogQuotaDefaultRetentionPolicy: producer_exception
+
+  bookkeeper:
+    configData:
+      PULSAR_MEM: >
+        -Xms4096m
+        -Xmx4096m
+        -XX:MaxDirectMemorySize=8192m
+      PULSAR_GC: >
+        -Dio.netty.leakDetectionLevel=disabled
+        -Dio.netty.recycler.linkCapacity=1024
+        -XX:+UseG1GC -XX:MaxGCPauseMillis=10
+        -XX:+ParallelRefProcEnabled
+        -XX:+UnlockExperimentalVMOptions
+        -XX:+DoEscapeAnalysis
+        -XX:ParallelGCThreads=32
+        -XX:ConcGCThreads=32
+        -XX:G1NewSizePercent=50
+        -XX:+DisableExplicitGC
+        -XX:-ResizePLAB
+        -XX:+ExitOnOutOfMemoryError
+        -XX:+PerfDisableSharedMem
+        -XX:+PrintGCDetails
+      nettyMaxFrameSizeBytes: "104867840"
+    resources:
+      requests:
+        cpu: 1
+        memory: "4Gi"
+
+  bastion:
+    resources:
+      requests:
+        cpu: "0.3"
+        memory: "50Mi"
+
+  autorecovery:
+    resources:
+      requests:
+        cpu: "1"
+        memory: "512Mi"
+
+  zookeeper:
+    configData:
+      PULSAR_MEM: >
+        -Xms1024m
+        -Xmx1024m
+      PULSAR_GC: >
+         -Dcom.sun.management.jmxremote
+         -Djute.maxbuffer=10485760
+         -XX:+ParallelRefProcEnabled
+         -XX:+UnlockExperimentalVMOptions
+         -XX:+DoEscapeAnalysis
+         -XX:+DisableExplicitGC
+         -XX:+PerfDisableSharedMem
+         -Dzookeeper.forceSync=no
+    resources:
+      requests:
+        cpu: "0.3"
+        memory: "1Gi"
+etcd:
+  resources:
+    requests:
+      cpu: "0.1"
+      memory: "100Mi"
+minio:
+  resources:
+    requests:
+      cpu: "0.3"
+      memory: "512Mi"
+standalone:
+  resources:
+    requests:
+      cpu: "1"
+      memory: "3.5Gi"

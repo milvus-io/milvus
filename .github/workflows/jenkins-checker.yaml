@@ -7,6 +7,7 @@ on:
     # file paths to consider in the event. Optional; defaults to all.
     paths:
       - 'build/ci/jenkins/**.groovy'
+      - 'ci/jenkins/**.groovy'
       - '.github/workflows/jenkins-checker.yaml'
 jobs:
   check-jenkinsfile:
@@ -18,13 +19,12 @@ jobs:
       - name: Validate Jenkinsfile
         shell: bash
         run: |
-          JENKINS_URL=https://ci.milvus.io:18080/jenkins
-          # JENKINS_CRUMB is needed if your Jenkins controller has CRSF protection enabled as it should
-          JENKINS_CRUMB=`curl "$JENKINS_URL/crumbIssuer/api/xml?xpath=concat(//crumbRequestField,\":\",//crumb)"`
-
           function validate(){
             local file_path=${1:-Jenkinsfile}
-            response=$(curl --max-time 10 --retry 5 --retry-delay 0 --retry-max-time 40  -X POST -H $JENKINS_CRUMB -F "jenkinsfile=<${file_path}" $JENKINS_URL/pipeline-model-converter/validate)
+            local jenkins_url=${2:-"https://ci.milvus.io:18080/jenkins"}
+       
+            JENKINS_CRUMB=`curl "${jenkins_url}/crumbIssuer/api/xml?xpath=concat(//crumbRequestField,\":\",//crumb)"`
+            response=$(curl --max-time 10 --retry 5 --retry-delay 0 --retry-max-time 40  -X POST -H $JENKINS_CRUMB -F "jenkinsfile=<${file_path}" ${jenkins_url}/pipeline-model-converter/validate)
             
             if [[ ${response} =~ "Error"  ]]
             then
@@ -34,24 +34,28 @@ jobs:
                 exit 1  
             fi
           }
+          function validate_path(){
+            local path=${1}
+            local jenkins_url=${2}
 
-          for file in build/ci/jenkins/*
-          do
-              if [ -f "$file"  ] 
-              then 
-                  echo "$file"
-                  file_name=$(basename "$file")
-
-                  if echo "${file_name}" | grep -q -E '\.groovy$'
-                  then 
-                      echo "Validate groovy file ${file_name}"
-                      validate $file
-                  elif [[ "${file_name}" == "Jenkinsfile" ]]
-                  then
-                      echo "Validate Jenkinsfile"
-                      validate $file    
-                  fi
-              fi
-          done
-          
+            for file in ${path}
+            do
+                if [ -f "$file"  ] 
+                then 
+                    # echo "$file"
+                    file_name=$(basename "$file")
+                    if echo "${file_name}" | grep -q -E '\.groovy$'
+                    then 
+                        # echo "Validate groovy file ${file_name}"
+                        validate $file ${jenkins_url}
+                    elif [[ "${file_name}" == "Jenkinsfile" ]]
+                    then
+                        # echo "Validate Jenkinsfile"
+                        validate $file ${jenkins_url} 
+                    fi
+                fi
+            done
+          }
+          validate_path "build/ci/jenkins/*" "https://ci.milvus.io:18080/jenkins/"
+          validate_path "ci/jenkins/*" "https://jenkins.milvus.io:18080/"
     
