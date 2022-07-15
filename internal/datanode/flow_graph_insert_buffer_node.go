@@ -315,6 +315,35 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 			}
 		}
 
+		mergeFlushTask := func(segmentID UniqueID, setupTask func(task *flushTask)) {
+			// Merge auto & manual flush tasks with the same segment ID.
+			dup := false
+			for i, task := range flushTaskList {
+				if task.segmentID == segmentID {
+					log.Info("merging flush task, updating flushed flag",
+						zap.Int64("segment ID", segmentID))
+					setupTask(&flushTaskList[i])
+					dup = true
+					break
+				}
+			}
+			// Load buffer and create new flush task if there's no existing flush task for this segment.
+			if !dup {
+				bd, ok := ibNode.insertBuffer.Load(segmentID)
+				var buf *BufferData
+				if ok {
+					buf = bd.(*BufferData)
+				}
+				task := flushTask{
+					buffer:    buf,
+					segmentID: segmentID,
+					dropped:   false,
+				}
+				setupTask(&task)
+				flushTaskList = append(flushTaskList, task)
+			}
+		}
+
 		// Manual Flush
 		select {
 		case fmsg := <-ibNode.flushChan:
@@ -324,33 +353,27 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 				zap.Bool("flushed", fmsg.flushed),
 				zap.String("v-channel name", ibNode.channelName),
 			)
-			// Merge auto & manual flush tasks with the same segment ID.
-			dup := false
-			for i, task := range flushTaskList {
-				if task.segmentID == fmsg.segmentID {
-					log.Info("merging flush task, updating flushed flag",
-						zap.Int64("segment ID", fmsg.segmentID),
-						zap.Bool("flushed", fmsg.flushed))
-					flushTaskList[i].flushed = fmsg.flushed
-					dup = true
-					break
-				}
-			}
-			// Load buffer and create new flush task if there's no existing flush task for this segment.
-			if !dup {
-				bd, ok := ibNode.insertBuffer.Load(fmsg.segmentID)
-				var buf *BufferData
-				if ok {
-					buf = bd.(*BufferData)
-				}
-				flushTaskList = append(flushTaskList, flushTask{
-					buffer:    buf,
-					segmentID: fmsg.segmentID,
-					flushed:   fmsg.flushed,
-					dropped:   false,
+			mergeFlushTask(fmsg.segmentID, func(task *flushTask) {
+				task.flushed = fmsg.flushed
+			})
+		default:
+		}
+
+		// process drop partition
+		for _, partitionDrop := range fgMsg.dropPartitions {
+			segmentIDs := ibNode.replica.listPartitionSegments(partitionDrop)
+			log.Info("(Drop Partition) process drop partition",
+				zap.Int64("collectionID", ibNode.replica.getCollectionID()),
+				zap.Int64("partitionID", partitionDrop),
+				zap.Int64s("segmentIDs", segmentIDs),
+				zap.String("v-channel name", ibNode.channelName),
+			)
+			for _, segID := range segmentIDs {
+				mergeFlushTask(segID, func(task *flushTask) {
+					task.flushed = true
+					task.dropped = true
 				})
 			}
-		default:
 		}
 	}
 
