@@ -17,6 +17,7 @@ type config struct {
 	attempts     uint
 	sleep        time.Duration
 	maxSleepTime time.Duration
+	stopWith     []error
 }
 
 func newDefaultConfig() *config {
@@ -57,5 +58,12 @@ func MaxSleepTime(maxSleepTime time.Duration) Option {
 		} else {
 			c.maxSleepTime = maxSleepTime
 		}
+	}
+}
+
+// StopWith sets the error type to stop retry function with.
+func StopWith(errs ...error) Option {
+	return func(c *config) {
+		c.stopWith = append(c.stopWith, errs...)
 	}
 }

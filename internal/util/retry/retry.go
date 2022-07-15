@@ -13,6 +13,7 @@ package retry
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"go.uber.org/zap"
@@ -41,7 +42,12 @@ func Do(ctx context.Context, fn func() error, opts ...Option) error {
 
 			el = append(el, err)
 
+			// checks explicitly defined UnRecoverable error
 			if ok := IsUnRecoverable(err); ok {
+				return el
+			}
+			// checks stop is caller defined stop list
+			if isStopError(c, err) {
 				return el
 			}
 
@@ -65,6 +71,16 @@ func Do(ctx context.Context, fn func() error, opts ...Option) error {
 
 type unrecoverableError struct {
 	error
+}
+
+// isStopError checks err is or wraps some stop error.
+func isStopError(c *config, err error) bool {
+	for _, se := range c.stopWith {
+		if errors.Is(err, se) {
+			return true
+		}
+	}
+	return false
 }
 
 // Unrecoverable method wrap an error to unrecoverableError. This will make retry

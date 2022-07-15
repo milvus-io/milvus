@@ -13,6 +13,7 @@ package retry
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -127,4 +128,48 @@ func TestContextCancel(t *testing.T) {
 	err := Do(ctx, testFn)
 	assert.NotNil(t, err)
 	fmt.Println(err)
+}
+
+func TestWithStop(t *testing.T) {
+	ctx := context.Background()
+
+	errTarget := errors.New("retry target error")
+
+	t.Run("successfully done", func(t *testing.T) {
+		err := Do(ctx, func() error { return nil }, StopWith(errTarget))
+		assert.NoError(t, err)
+	})
+
+	t.Run("return stop error", func(t *testing.T) {
+		count := 0
+		err := Do(ctx, func() error {
+			count++
+			return errTarget
+		}, StopWith(errTarget))
+		assert.Error(t, err)
+		// only execute once
+		assert.Equal(t, 1, count)
+	})
+
+	t.Run("return stop error wrapped", func(t *testing.T) {
+		count := 0
+		err := Do(ctx, func() error {
+			count++
+			return fmt.Errorf("wrap err %w", errTarget)
+		}, StopWith(errTarget))
+		assert.Error(t, err)
+		// only execute once
+		assert.Equal(t, 1, count)
+	})
+
+	t.Run("return non-stop error", func(t *testing.T) {
+		count := 0
+		err := Do(ctx, func() error {
+			count++
+			return errors.New("non stop error")
+		}, StopWith(errTarget), MaxSleepTime(time.Millisecond), Attempts(5))
+		assert.Error(t, err)
+		assert.Equal(t, 5, count)
+	})
+
 }
