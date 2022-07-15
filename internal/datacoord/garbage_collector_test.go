@@ -284,9 +284,9 @@ func initUtOSSEnv(bucket, root string, n int) (cli *minio.Client, inserts []stri
 	content := []byte("test")
 	for i := 0; i < n; i++ {
 		reader := bytes.NewReader(content)
-		token := path.Join(funcutil.RandomString(8), funcutil.RandomString(8), strconv.Itoa(i), funcutil.RandomString(8), funcutil.RandomString(8))
+		token := path.Join(funcutil.RandomString(8), strconv.Itoa(i), strconv.Itoa(i), funcutil.RandomString(8), funcutil.RandomString(8))
 		if i == 1 {
-			token = path.Join(funcutil.RandomString(8), funcutil.RandomString(8), strconv.Itoa(i), funcutil.RandomString(8))
+			token = path.Join(funcutil.RandomString(8), strconv.Itoa(i), strconv.Itoa(i), funcutil.RandomString(8))
 		}
 		// insert
 		filePath := path.Join(root, insertLogPrefix, token)
