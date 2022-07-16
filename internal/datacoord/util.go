@@ -19,8 +19,6 @@ package datacoord
 import (
 	"context"
 	"errors"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -86,10 +84,4 @@ func getCompactTime(ctx context.Context, allocator allocator) (*compactTime, err
 	}
 	// no expiration time
 	return &compactTime{ttRetentionLogic, 0}, nil
-}
-
-func parseSegmentIDByBinlog(path string) (UniqueID, error) {
-	// binlog path should consist of "files/insertLog/collID/partID/segID/fieldID/fileName"
-	keyStr := strings.Split(path, "/")
-	return strconv.ParseInt(keyStr[len(keyStr)-3], 10, 64)
 }
