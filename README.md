@@ -423,7 +423,7 @@ Contributions to Milvus are welcome from everyone. See [Guidelines for Contribut
 
 ## Documentation
 
-For guidance on installation, development, deployment, and administration, check out [Milvus Docs](https://milvus.io/docs).
+For guidance on installation, development, deployment, and administration, check out [Milvus Docs](https://milvus.io/docs). For technical milestones and enhancement proposals, check out milvus confluence [https://wiki.lfaidata.foundation/display/MIL/Milvus+Home]
 
 ### SDK
 
