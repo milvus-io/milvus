@@ -23,9 +23,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/util/dependency"
-	"github.com/milvus-io/milvus/internal/util/etcd"
-
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 
@@ -281,9 +278,12 @@ func waitTaskFinalState(t task, state taskState) {
 			break
 		}
 
-		log.Debug("task state not match	es",
+		log.Debug("task state not matches",
+			zap.Int64("task ID", t.getTaskID()),
 			zap.Int("actual", int(currentState)),
 			zap.Int("expected", int(state)))
+
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 
@@ -661,6 +661,7 @@ func Test_LoadPartitionExecuteFailAfterLoadCollection(t *testing.T) {
 
 func Test_ReleaseCollectionExecuteFail(t *testing.T) {
 	refreshParams()
+	Params.QueryCoordCfg.RetryInterval = int64(100 * time.Millisecond)
 	ctx := context.Background()
 	queryCoord, err := startQueryCoord(ctx)
 	assert.Nil(t, err)
@@ -677,6 +678,7 @@ func Test_ReleaseCollectionExecuteFail(t *testing.T) {
 	releaseCollectionTask := genReleaseCollectionTask(ctx, queryCoord)
 	notify := make(chan struct{})
 	go func() {
+		time.Sleep(100 * time.Millisecond)
 		waitTaskFinalState(releaseCollectionTask, taskDone)
 		node.setRPCInterface(&node.releaseCollection, returnSuccessResult)
 		waitTaskFinalState(releaseCollectionTask, taskExpired)
@@ -1442,85 +1444,6 @@ func TestUpdateTaskProcessWhenWatchDmChannel(t *testing.T) {
 	collectionInfo, err = queryCoord.meta.getCollectionInfoByID(defaultCollectionID)
 	assert.NoError(t, err)
 	assert.Equal(t, int64(100), collectionInfo.InMemoryPercentage)
-
-	err = removeAllSession()
-	assert.Nil(t, err)
-}
-
-func startMockCoord(ctx context.Context) (*QueryCoord, error) {
-	factory := dependency.NewDefaultFactory(true)
-
-	coord, err := NewQueryCoordTest(ctx, factory)
-	if err != nil {
-		return nil, err
-	}
-
-	rootCoord := newRootCoordMock(ctx)
-	rootCoord.createCollection(defaultCollectionID)
-	rootCoord.createPartition(defaultCollectionID, defaultPartitionID)
-
-	dataCoord := &dataCoordMock{
-		collections:         make([]UniqueID, 0),
-		col2DmChannels:      make(map[UniqueID][]*datapb.VchannelInfo),
-		partitionID2Segment: make(map[UniqueID][]UniqueID),
-		Segment2Binlog:      make(map[UniqueID]*datapb.SegmentBinlogs),
-		baseSegmentID:       defaultSegmentID,
-		channelNumPerCol:    defaultChannelNum,
-		segmentState:        commonpb.SegmentState_Flushed,
-		errLevel:            1,
-		segmentRefCount:     make(map[int64]int),
-	}
-	indexCoord, err := newIndexCoordMock(queryCoordTestDir)
-	if err != nil {
-		return nil, err
-	}
-
-	coord.SetRootCoord(rootCoord)
-	coord.SetDataCoord(dataCoord)
-	coord.SetIndexCoord(indexCoord)
-	etcd, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	if err != nil {
-		return nil, err
-	}
-	coord.SetEtcdClient(etcd)
-	err = coord.Init()
-	if err != nil {
-		return nil, err
-	}
-	err = coord.Start()
-	if err != nil {
-		return nil, err
-	}
-	err = coord.Register()
-	if err != nil {
-		return nil, err
-	}
-	return coord, nil
-}
-
-func Test_LoadSegment(t *testing.T) {
-	refreshParams()
-	ctx := context.Background()
-	queryCoord, err := startMockCoord(ctx)
-	assert.Nil(t, err)
-
-	node1, err := startQueryNodeServer(ctx)
-	assert.Nil(t, err)
-
-	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
-
-	loadSegmentTask := genLoadSegmentTask(ctx, queryCoord, node1.queryNodeID)
-
-	loadCollectionTask := loadSegmentTask.parentTask
-	queryCoord.scheduler.triggerTaskQueue.addTask(loadCollectionTask)
-
-	// 1. Acquire segment reference lock failed, and reschedule task.
-	// 2. Acquire segment reference lock successfully, but release reference lock failed, and retry release the lock.
-	// 3. Release segment reference lock successfully, and task done.
-	waitTaskFinalState(loadSegmentTask, taskDone)
-
-	err = queryCoord.Stop()
-	assert.Nil(t, err)
 
 	err = removeAllSession()
 	assert.Nil(t, err)

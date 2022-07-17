@@ -76,7 +76,8 @@ type HandoffHandler struct {
 
 	taskMutex sync.Mutex
 	tasks     map[int64]*HandOffTask
-	notify    chan bool
+	notify    chan struct{}
+	closed    bool
 
 	meta      Meta
 	scheduler *TaskScheduler
@@ -96,7 +97,7 @@ func newHandoffHandler(ctx context.Context, client kv.MetaKv, meta Meta, cluster
 		client: client,
 
 		tasks:  make(map[int64]*HandOffTask, 1024),
-		notify: make(chan bool, 1024),
+		notify: make(chan struct{}, 1024),
 
 		meta:      meta,
 		scheduler: scheduler,
@@ -119,8 +120,11 @@ func (handler *HandoffHandler) Start() {
 }
 
 func (handler *HandoffHandler) Stop() {
-	handler.cancel()
+	handler.taskMutex.Lock()
+	handler.closed = true
 	close(handler.notify)
+	handler.taskMutex.Unlock()
+	handler.cancel()
 	handler.wg.Wait()
 }
 
@@ -193,15 +197,19 @@ func (handler *HandoffHandler) verifyRequest(req *querypb.SegmentInfo) (bool, *q
 func (handler *HandoffHandler) enqueue(req *querypb.SegmentInfo) {
 	handler.taskMutex.Lock()
 	defer handler.taskMutex.Unlock()
+	if handler.closed {
+		return
+	}
 	handler.tasks[req.SegmentID] = &HandOffTask{
 		req, handoffTaskInit, false,
 	}
-	handler.notify <- false
+	handler.notify <- struct{}{}
 }
 
 func (handler *HandoffHandler) schedule() {
 	defer handler.wg.Done()
-	timer := time.NewTimer(time.Second * 5)
+	ticker := time.NewTicker(time.Second * 5)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-handler.ctx.Done():
@@ -209,17 +217,21 @@ func (handler *HandoffHandler) schedule() {
 		case _, ok := <-handler.notify:
 			if ok {
 				handler.taskMutex.Lock()
+				if len(handler.tasks) != 0 {
+					log.Info("handoff task scheduled: ", zap.Int("task number", len(handler.tasks)))
+					for segmentID := range handler.tasks {
+						handler.process(segmentID)
+					}
+				}
+				handler.taskMutex.Unlock()
+			}
+		case <-ticker.C:
+			handler.taskMutex.Lock()
+			if len(handler.tasks) != 0 {
 				log.Info("handoff task scheduled: ", zap.Int("task number", len(handler.tasks)))
 				for segmentID := range handler.tasks {
 					handler.process(segmentID)
 				}
-				handler.taskMutex.Unlock()
-			}
-		case <-timer.C:
-			handler.taskMutex.Lock()
-			log.Info("handoff task scheduled: ", zap.Int("task number", len(handler.tasks)))
-			for segmentID := range handler.tasks {
-				handler.process(segmentID)
 			}
 			handler.taskMutex.Unlock()
 		}
@@ -228,6 +240,9 @@ func (handler *HandoffHandler) schedule() {
 
 // must hold the lock
 func (handler *HandoffHandler) process(segmentID int64) error {
+	if handler.closed {
+		return nil
+	}
 	task := handler.tasks[segmentID]
 	// if task is cancel and success, clean up
 	switch task.state {
@@ -267,7 +282,7 @@ func (handler *HandoffHandler) process(segmentID int64) error {
 				task.segmentInfo, handoffTaskReady, true,
 			}
 			handler.tasks[task.segmentInfo.SegmentID] = task
-			handler.notify <- false
+			handler.notify <- struct{}{}
 			log.Info("HandoffHandler: enqueue indexed segments", zap.Int64("segmentID", task.segmentInfo.SegmentID))
 		}
 
