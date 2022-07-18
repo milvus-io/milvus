@@ -42,41 +42,44 @@ ParseMallocInfo() {
     char* mem_buffer;
     size_t buffer_size;
     FILE* stream;
+
     stream = open_memstream(&mem_buffer, &buffer_size);
     AssertInfo(stream, "null stream file when open_memstream");
-    // malloc_info(0, stdout);
+    try {
+        /*
+         * The malloc_info() function exports an XML string that describes
+         * the current state of the memory-allocation implementation in the caller.
+         * The exported XML string includes information about `fast` and `rest`.
+         * According to the implementation of glibc, `fast` calculates ths size of all the
+         * fastbins, and `rest` calculates the size of all the bins except fastbins.
+         * ref: <https://man7.org/linux/man-pages/man3/malloc_info.3.html>
+         *      <https://sourceware.org/glibc/wiki/MallocInternals>
+         *      <https://code.woboq.org/userspace/glibc/malloc/malloc.c.html#5378>
+         */
+        auto ret = malloc_info(0, stream);
+        AssertInfo(ret == 0, "malloc_info failed");
+        fflush(stream);
 
-    /*
-     * The malloc_info() function exports an XML string that describes
-     * the current state of the memory-allocation implementation in the caller.
-     * The exported XML string includes information about `fast` and `rest`.
-     * According to the implementation of glibc, `fast` calculates ths size of all the
-     * fastbins, and `rest` calculates the size of all the bins except fastbins.
-     * ref: <https://man7.org/linux/man-pages/man3/malloc_info.3.html>
-     *      <https://sourceware.org/glibc/wiki/MallocInternals>
-     *      <https://code.woboq.org/userspace/glibc/malloc/malloc.c.html#5378>
-     */
-    auto ret = malloc_info(0, stream);
-    AssertInfo(ret == 0, "malloc_info failed");
-    fflush(stream);
+        rapidxml::xml_document<> doc;  // character type defaults to char
+        doc.parse<0>(mem_buffer);      // 0 means default parse flags
 
-    rapidxml::xml_document<> doc;  // character type defaults to char
-    doc.parse<0>(mem_buffer);      // 0 means default parse flags
+        rapidxml::xml_node<>* malloc_root_node = doc.first_node();
+        AssertInfo(malloc_root_node, "null malloc_root_node detected when ParseMallocInfo");
+        auto total_fast_node = malloc_root_node->first_node()->next_sibling("total");
+        AssertInfo(total_fast_node, "null total_fast_node detected when ParseMallocInfo");
+        auto total_fast_size = std::stoul(total_fast_node->first_attribute("size")->value());
 
-    rapidxml::xml_node<>* malloc_root_node = doc.first_node();
-    AssertInfo(malloc_root_node, "null malloc_root_node detected when ParseMallocInfo");
-    auto total_fast_node = malloc_root_node->first_node()->next_sibling("total");
-    AssertInfo(total_fast_node, "null total_fast_node detected when ParseMallocInfo");
-    auto total_fast_size = std::stoul(total_fast_node->first_attribute("size")->value());
-
-    auto total_rest_node = total_fast_node->next_sibling("total");
-    AssertInfo(total_fast_node, "null total_rest_node detected when ParseMallocInfo");
-    auto total_rest_size = std::stoul(total_rest_node->first_attribute("size")->value());
-
-    fclose(stream);
-    free(mem_buffer);
-
-    return total_fast_size + total_rest_size;
+        auto total_rest_node = total_fast_node->next_sibling("total");
+        AssertInfo(total_fast_node, "null total_rest_node detected when ParseMallocInfo");
+        auto total_rest_size = std::stoul(total_rest_node->first_attribute("size")->value());
+        fclose(stream);
+        free(mem_buffer);
+        return total_fast_size + total_rest_size;
+    } catch (std::exception& e) {
+        fclose(stream);
+        free(mem_buffer);
+        throw e;
+    }
 #else
     return 0;  // malloc_trim is unnecessary
 #endif
