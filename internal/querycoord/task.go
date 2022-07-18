@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/golang/protobuf/proto"
@@ -37,24 +38,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-)
-
-const timeoutForRPC = 10 * time.Second
-
-const (
-	triggerTaskPrefix     = "queryCoord-triggerTask"
-	activeTaskPrefix      = "queryCoord-activeTask"
-	taskInfoPrefix        = "queryCoord-taskInfo"
-	loadBalanceInfoPrefix = "queryCoord-loadBalanceInfo"
-)
-
-const (
-	// MaxRetryNum is the maximum number of times that each task can be retried
-	MaxRetryNum = 5
-	// MaxSendSizeToEtcd is the default limit size of etcd messages that can be sent and received
-	// MaxSendSizeToEtcd = 2097152
-	// Limit size of every loadSegmentReq to 200k
-	MaxSendSizeToEtcd = 200000
 )
 
 var (
@@ -115,9 +98,7 @@ type baseTask struct {
 	resultMu   sync.RWMutex
 	state      taskState
 	stateMu    sync.RWMutex
-	retryCount int
-	retryMu    sync.RWMutex
-	//sync.RWMutex
+	retryCount int32
 
 	taskID           UniqueID
 	triggerCondition querypb.TriggerCondition
@@ -138,7 +119,7 @@ func newBaseTask(ctx context.Context, triggerType querypb.TriggerCondition) *bas
 		cancel:           cancel,
 		condition:        condition,
 		state:            taskUndo,
-		retryCount:       MaxRetryNum,
+		retryCount:       Params.QueryCoordCfg.RetryNum,
 		triggerCondition: triggerType,
 		childTasks:       []task{},
 		timeRecorder:     timerecord.NewTimeRecorder("QueryCoordBaseTask"),
@@ -147,7 +128,7 @@ func newBaseTask(ctx context.Context, triggerType querypb.TriggerCondition) *bas
 	return baseTask
 }
 
-func newBaseTaskWithRetry(ctx context.Context, triggerType querypb.TriggerCondition, retryCount int) *baseTask {
+func newBaseTaskWithRetry(ctx context.Context, triggerType querypb.TriggerCondition, retryCount int32) *baseTask {
 	baseTask := newBaseTask(ctx, triggerType)
 	baseTask.retryCount = retryCount
 	return baseTask
@@ -252,16 +233,11 @@ func (bt *baseTask) setState(state taskState) {
 }
 
 func (bt *baseTask) isRetryable() bool {
-	bt.retryMu.RLock()
-	defer bt.retryMu.RUnlock()
-	return bt.retryCount > 0
+	return atomic.LoadInt32(&bt.retryCount) > 0
 }
 
 func (bt *baseTask) reduceRetryCount() {
-	bt.retryMu.Lock()
-	defer bt.retryMu.Unlock()
-
-	bt.retryCount--
+	atomic.AddInt32(&bt.retryCount, -1)
 }
 
 func (bt *baseTask) setResultInfo(err error) {
@@ -733,7 +709,7 @@ func (rct *releaseCollectionTask) updateTaskProcess() {
 func (rct *releaseCollectionTask) preExecute(context.Context) error {
 	collectionID := rct.CollectionID
 	rct.setResultInfo(nil)
-	log.Info("start do releaseCollectionTask",
+	log.Info("pre execute releaseCollectionTask",
 		zap.Int64("taskID", rct.getTaskID()),
 		zap.Int64("msgID", rct.GetBase().GetMsgID()),
 		zap.Int64("collectionID", collectionID))
@@ -767,14 +743,14 @@ func (rct *releaseCollectionTask) execute(ctx context.Context) error {
 			}
 
 			rct.addChildTask(releaseCollectionTask)
-			log.Info("releaseCollectionTask: add a releaseCollectionTask to releaseCollectionTask's childTask", zap.Any("task", releaseCollectionTask))
+			log.Info("releaseCollectionTask: add a releaseCollectionTask to releaseCollectionTask's childTask", zap.Any("task", releaseCollectionTask), zap.Int64("NodeID", nodeID))
 		}
 	} else {
 		// If the node crashed or be offline, the loaded segments are lost
 		defer rct.reduceRetryCount()
 		err := rct.cluster.ReleaseCollection(ctx, rct.NodeID, rct.ReleaseCollectionRequest)
 		if err != nil {
-			log.Warn("releaseCollectionTask: release collection end, node occur error", zap.Int64("collectionID", collectionID), zap.Int64("nodeID", rct.NodeID))
+			log.Warn("releaseCollectionTask: release collection end, node occur error", zap.Int64("collectionID", collectionID), zap.Int64("nodeID", rct.NodeID), zap.Error(err))
 			// after release failed, the task will always redo
 			// if the query node happens to be down, the node release was judged to have succeeded
 			return err

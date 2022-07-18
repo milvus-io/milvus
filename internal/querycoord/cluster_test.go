@@ -369,7 +369,7 @@ func TestReloadClusterFromKV(t *testing.T) {
 		clusterSession.Init(typeutil.QueryCoordRole, Params.QueryCoordCfg.Address, true, false)
 		clusterSession.Register()
 		factory := dependency.NewDefaultFactory(true)
-		handler, err := newChannelUnsubscribeHandler(ctx, kv, factory)
+		cleaner, err := NewChannelCleaner(ctx, kv, factory)
 		assert.Nil(t, err)
 		id := UniqueID(rand.Int31())
 		idAllocator := func() (UniqueID, error) {
@@ -381,7 +381,7 @@ func TestReloadClusterFromKV(t *testing.T) {
 
 		cluster := &queryNodeCluster{
 			client:      kv,
-			handler:     handler,
+			cleaner:     cleaner,
 			clusterMeta: meta,
 			nodes:       make(map[int64]Node),
 			newNodeFn:   newQueryNodeTest,
@@ -439,7 +439,7 @@ func TestGrpcRequest(t *testing.T) {
 	err = meta.setDeltaChannel(defaultCollectionID, deltaChannelInfo)
 	assert.Nil(t, err)
 
-	handler, err := newChannelUnsubscribeHandler(baseCtx, kv, factory)
+	cleaner, err := NewChannelCleaner(baseCtx, kv, factory)
 	assert.Nil(t, err)
 
 	var cluster Cluster = &queryNodeCluster{
@@ -447,7 +447,7 @@ func TestGrpcRequest(t *testing.T) {
 		cancel:      cancel,
 		client:      kv,
 		clusterMeta: meta,
-		handler:     handler,
+		cleaner:     cleaner,
 		nodes:       make(map[int64]Node),
 		newNodeFn:   newQueryNodeTest,
 		session:     clusterSession,
@@ -599,7 +599,7 @@ func TestSetNodeState(t *testing.T) {
 	meta, err := newMeta(baseCtx, kv, factory, idAllocator)
 	assert.Nil(t, err)
 
-	handler, err := newChannelUnsubscribeHandler(baseCtx, kv, factory)
+	cleaner, err := NewChannelCleaner(baseCtx, kv, factory)
 	assert.Nil(t, err)
 
 	cluster := &queryNodeCluster{
@@ -607,7 +607,7 @@ func TestSetNodeState(t *testing.T) {
 		cancel:      cancel,
 		client:      kv,
 		clusterMeta: meta,
-		handler:     handler,
+		cleaner:     cleaner,
 		nodes:       make(map[int64]Node),
 		newNodeFn:   newQueryNodeTest,
 		session:     clusterSession,
@@ -637,7 +637,7 @@ func TestSetNodeState(t *testing.T) {
 	nodeInfo, err := cluster.GetNodeInfoByID(node.queryNodeID)
 	assert.Nil(t, err)
 	cluster.setNodeState(node.queryNodeID, nodeInfo, offline)
-	assert.Equal(t, 1, len(handler.downNodeChan))
+	assert.Equal(t, 1, len(cleaner.tasks))
 
 	node.stop()
 	removeAllSession()

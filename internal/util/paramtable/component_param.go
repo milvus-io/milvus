@@ -588,6 +588,10 @@ type queryCoordConfig struct {
 	CreatedTime time.Time
 	UpdatedTime time.Time
 
+	//---- Task ---
+	RetryNum      int32
+	RetryInterval int64
+
 	//---- Handoff ---
 	AutoHandoff bool
 
@@ -601,6 +605,11 @@ type queryCoordConfig struct {
 func (p *queryCoordConfig) init(base *BaseTable) {
 	p.Base = base
 	p.NodeID.Store(UniqueID(0))
+
+	//---- Task ---
+	p.initTaskRetryNum()
+	p.initTaskRetryInterval()
+
 	//---- Handoff ---
 	p.initAutoHandoff()
 
@@ -609,6 +618,14 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	p.initOverloadedMemoryThresholdPercentage()
 	p.initBalanceIntervalSeconds()
 	p.initMemoryUsageMaxDifferencePercentage()
+}
+
+func (p *queryCoordConfig) initTaskRetryNum() {
+	p.RetryNum = p.Base.ParseInt32WithDefault("queryCoord.task.retrynum", 5)
+}
+
+func (p *queryCoordConfig) initTaskRetryInterval() {
+	p.RetryInterval = p.Base.ParseInt64WithDefault("queryCoord.task.retryinterval", int64(10*time.Second))
 }
 
 func (p *queryCoordConfig) initAutoHandoff() {
