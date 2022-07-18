@@ -22,6 +22,9 @@ def pytest_addoption(parser):
     parser.addoption("--host", action="store", default="localhost", help="service's ip")
     parser.addoption("--service", action="store", default="", help="service address")
     parser.addoption("--port", action="store", default=19530, help="service's port")
+    parser.addoption("--user", action="store", default="", help="user name for connection")
+    parser.addoption("--password", action="store", default="", help="password for connection")
+    parser.addoption("--secure", action="store", default=False, help="secure for connection")
     parser.addoption("--http_port", action="store", default=19121, help="http's port")
     parser.addoption("--handler", action="store", default="GRPC", help="handler of request")
     parser.addoption("--tag", action="store", default="all", help="only run tests matching the tag.")
@@ -55,6 +58,21 @@ def service(request):
 @pytest.fixture
 def port(request):
     return request.config.getoption("--port")
+
+
+@pytest.fixture
+def user(request):
+    return request.config.getoption("--user")
+
+
+@pytest.fixture
+def password(request):
+    return request.config.getoption("--password")
+
+
+@pytest.fixture
+def secure(request):
+    return request.config.getoption("--secure")
 
 
 @pytest.fixture
@@ -153,6 +171,9 @@ def initialize_env(request):
     host = request.config.getoption("--host")
     port = request.config.getoption("--port")
     handler = request.config.getoption("--handler")
+    user = request.config.getoption("--user")
+    password = request.config.getoption("--password")
+    secure = request.config.getoption("--secure")
     clean_log = request.config.getoption("--clean_log")
     replica_num = request.config.getoption("--replica_num")
 
@@ -167,7 +188,7 @@ def initialize_env(request):
 
     log.info("#" * 80)
     log.info("[initialize_milvus] Log cleaned up, start testing...")
-    param_info.prepare_param_info(host, port, handler, replica_num)
+    param_info.prepare_param_info(host, port, handler, replica_num, user, password, secure)
 
 
 @pytest.fixture(params=ct.get_invalid_strs)

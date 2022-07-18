@@ -88,8 +88,13 @@ class TestcaseBase(Base):
 
     def _connect(self):
         """ Add a connection and create the connect """
-        res, is_succ = self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, host=cf.param_info.param_host,
-                                                    port=cf.param_info.param_port)
+        if cf.param_info.param_user and cf.param_info.param_password:
+            res, is_succ = self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, host=cf.param_info.param_host,
+                                                        port=cf.param_info.param_port, user=cf.param_info.param_user,
+                                                        password=cf.param_info.param_password, secure=cf.param_info.param_secure)
+        else:
+            res, is_succ = self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, host=cf.param_info.param_host,
+                                                        port=cf.param_info.param_port)
         return res
 
     def init_collection_wrap(self, name=None, schema=None, shards_num=2, check_task=None, check_items=None, **kwargs):
