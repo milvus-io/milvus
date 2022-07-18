@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/kv"
 	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
@@ -783,7 +784,7 @@ func (rmq *rocksmq) Seek(topicName string, groupName string, msgID UniqueID) err
 	/* Step I: Check if key exists */
 	ll, ok := topicMu.Load(topicName)
 	if !ok {
-		return fmt.Errorf("topic name = %s not exist", topicName)
+		return fmt.Errorf("Topic %s not exist, %w", topicName, mqwrapper.ErrTopicNotExist)
 	}
 	lock, ok := ll.(*sync.Mutex)
 	if !ok {

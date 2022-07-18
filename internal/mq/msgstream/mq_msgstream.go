@@ -884,6 +884,10 @@ func (ms *MqTtMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
 		err = consumer.Seek(seekMsgID, true)
 		if err != nil {
 			log.Warn("Failed to seek", zap.String("channel", mp.ChannelName), zap.Error(err))
+			// stop retry if consumer topic not exist
+			if errors.Is(err, mqwrapper.ErrTopicNotExist) {
+				return retry.Unrecoverable(err)
+			}
 			return err
 		}
 		log.Info("MsgStream seek finished", zap.String("channel", mp.ChannelName))
