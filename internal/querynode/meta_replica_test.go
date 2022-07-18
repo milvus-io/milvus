@@ -189,6 +189,18 @@ func TestMetaReplica_segment(t *testing.T) {
 		}
 	})
 
+	t.Run("test add duplicated segment", func(t *testing.T) {
+		replica, err := genSimpleReplica()
+		assert.NoError(t, err)
+		defer replica.freeAll()
+
+		err = replica.addSegment(defaultSegmentID, defaultPartitionID, defaultCollectionID, "", segmentTypeGrowing)
+		assert.NoError(t, err)
+
+		err = replica.addSegment(defaultSegmentID, defaultPartitionID, defaultCollectionID, "", segmentTypeGrowing)
+		assert.Error(t, err)
+	})
+
 	t.Run("test invalid segment type", func(t *testing.T) {
 		replica, err := genSimpleReplica()
 		assert.NoError(t, err)
