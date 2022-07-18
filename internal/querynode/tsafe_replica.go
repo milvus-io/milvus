@@ -32,7 +32,8 @@ type TSafeReplicaInterface interface {
 	setTSafe(vChannel Channel, timestamp Timestamp) error
 	addTSafe(vChannel Channel)
 	removeTSafe(vChannel Channel)
-	Watch() <-chan struct{}
+	Watch() Listener
+	WatchChannel(channel Channel) Listener
 }
 
 type tSafe struct {
@@ -75,13 +76,31 @@ func newTSafe(channel Channel) *tSafe {
 
 // tSafeReplica implements `TSafeReplicaInterface` interface.
 type tSafeReplica struct {
-	mu         sync.Mutex         // guards tSafes
-	tSafes     map[Channel]*tSafe // map[DMLChannel|deltaChannel]*tSafe
-	notifyChan chan struct{}
+	mu        sync.Mutex              // guards tSafes
+	tSafes    map[Channel]*tSafe      // map[DMLChannel|deltaChannel]*tSafe
+	listeners map[Channel][]*listener // map[DMLChannel|deltaChannel][]*listener, key "" means all channels.
 }
 
-func (t *tSafeReplica) Watch() <-chan struct{} {
-	return t.notifyChan
+// since notifyAll called by setTSafe, no need to lock
+func (t *tSafeReplica) notifyAll(channel Channel) {
+	for _, l := range t.listeners[""] {
+		l.nonBlockingNotify()
+	}
+	for _, l := range t.listeners[channel] {
+		l.nonBlockingNotify()
+	}
+}
+
+func (t *tSafeReplica) Watch() Listener {
+	return t.WatchChannel("")
+}
+
+func (t *tSafeReplica) WatchChannel(channel Channel) Listener {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	l := newListener(t, channel)
+	t.listeners[channel] = append(t.listeners[channel], l)
+	return l
 }
 
 func (t *tSafeReplica) getTSafe(vChannel Channel) (Timestamp, error) {
@@ -102,11 +121,7 @@ func (t *tSafeReplica) setTSafe(vChannel Channel, timestamp Timestamp) error {
 		return fmt.Errorf("set tSafe failed, err = %w", err)
 	}
 	ts.set(timestamp)
-	select {
-	case t.notifyChan <- struct{}{}:
-	default:
-
-	}
+	t.notifyAll(vChannel)
 	return nil
 }
 
@@ -136,13 +151,68 @@ func (t *tSafeReplica) removeTSafe(vChannel Channel) {
 	if ok {
 		tsafe.close()
 	}
+	for _, l := range t.listeners[vChannel] {
+		l.unregister()
+	}
 	delete(t.tSafes, vChannel)
+	delete(t.listeners, vChannel)
 }
 
 func newTSafeReplica() TSafeReplicaInterface {
 	var replica TSafeReplicaInterface = &tSafeReplica{
-		tSafes:     make(map[string]*tSafe),
-		notifyChan: make(chan struct{}, 1),
+		tSafes:    make(map[string]*tSafe),
+		listeners: make(map[string][]*listener),
 	}
 	return replica
+}
+
+type Listener interface {
+	On() <-chan struct{}
+	Unregister()
+}
+
+type listener struct {
+	tsafe   *tSafeReplica
+	channel Channel
+	ch      chan struct{}
+}
+
+func (l *listener) On() <-chan struct{} {
+	return l.ch
+}
+
+func (l *listener) Unregister() {
+	l.tsafe.mu.Lock()
+	defer l.tsafe.mu.Unlock()
+	l.unregister()
+}
+
+// unregister remove the listener from the tSafeReplica without lock
+func (l *listener) unregister() {
+	for i, listen := range l.tsafe.listeners[l.channel] {
+		if l == listen {
+			close(l.ch)
+			l.tsafe.listeners[l.channel] = append(l.tsafe.listeners[l.channel][:i], l.tsafe.listeners[l.channel][i+1:]...)
+			break
+		}
+	}
+}
+
+func (l *listener) nonBlockingNotify() {
+	select {
+	case l.ch <- struct{}{}:
+	default:
+	}
+}
+
+//func (l *listener) blockingNotify() {
+//	l.ch <- struct{}{}
+//}
+
+func newListener(tsafe *tSafeReplica, channel Channel) *listener {
+	return &listener{
+		tsafe:   tsafe,
+		channel: channel,
+		ch:      make(chan struct{}, 1),
+	}
 }

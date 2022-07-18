@@ -711,6 +711,115 @@ func (node *Proxy) DescribeCollection(ctx context.Context, request *milvuspb.Des
 	return dct.result, nil
 }
 
+// GetStatistics get the statistics, such as `num_rows`.
+// WARNING: It is an experimental API
+func (node *Proxy) GetStatistics(ctx context.Context, request *milvuspb.GetStatisticsRequest) (*milvuspb.GetStatisticsResponse, error) {
+	if !node.checkHealthy() {
+		return &milvuspb.GetStatisticsResponse{
+			Status: unhealthyStatus(),
+		}, nil
+	}
+
+	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-GetCollectionStatistics")
+	defer sp.Finish()
+	traceID, _, _ := trace.InfoFromSpan(sp)
+	method := "GetStatistics"
+	tr := timerecord.NewTimeRecorder(method)
+
+	g := &getStatisticsTask{
+		request:   request,
+		Condition: NewTaskCondition(ctx),
+		ctx:       ctx,
+		tr:        tr,
+		dc:        node.dataCoord,
+		qc:        node.queryCoord,
+		shardMgr:  node.shardMgr,
+	}
+
+	log.Debug(
+		rpcReceived(method),
+		zap.String("traceID", traceID),
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+		zap.Strings("partitions", request.PartitionNames))
+
+	if err := node.sched.ddQueue.Enqueue(g); err != nil {
+		log.Warn(
+			rpcFailedToEnqueue(method),
+			zap.Error(err),
+			zap.String("traceID", traceID),
+			zap.String("role", typeutil.ProxyRole),
+			zap.String("db", request.DbName),
+			zap.String("collection", request.CollectionName),
+			zap.Strings("partitions", request.PartitionNames))
+
+		metrics.ProxyDQLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
+			metrics.AbandonLabel).Inc()
+
+		return &milvuspb.GetStatisticsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+		}, nil
+	}
+
+	log.Debug(
+		rpcEnqueued(method),
+		zap.String("traceID", traceID),
+		zap.String("role", typeutil.ProxyRole),
+		zap.Int64("msgID", g.ID()),
+		zap.Uint64("BeginTS", g.BeginTs()),
+		zap.Uint64("EndTS", g.EndTs()),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+		zap.Strings("partitions", request.PartitionNames))
+
+	if err := g.WaitToFinish(); err != nil {
+		log.Warn(
+			rpcFailedToWaitToFinish(method),
+			zap.Error(err),
+			zap.String("traceID", traceID),
+			zap.String("role", typeutil.ProxyRole),
+			zap.Int64("MsgID", g.ID()),
+			zap.Uint64("BeginTS", g.BeginTs()),
+			zap.Uint64("EndTS", g.EndTs()),
+			zap.String("db", request.DbName),
+			zap.String("collection", request.CollectionName),
+			zap.Strings("partitions", request.PartitionNames))
+
+		metrics.ProxyDQLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
+			metrics.TotalLabel).Inc()
+		metrics.ProxyDQLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
+			metrics.FailLabel).Inc()
+
+		return &milvuspb.GetStatisticsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+		}, nil
+	}
+
+	log.Debug(
+		rpcDone(method),
+		zap.String("traceID", traceID),
+		zap.String("role", typeutil.ProxyRole),
+		zap.Int64("msgID", g.ID()),
+		zap.Uint64("BeginTS", g.BeginTs()),
+		zap.Uint64("EndTS", g.EndTs()),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName))
+
+	metrics.ProxyDQLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
+		metrics.TotalLabel).Inc()
+	metrics.ProxyDQLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
+		metrics.SuccessLabel).Inc()
+	metrics.ProxyDQLReqLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return g.result, nil
+}
+
 // GetCollectionStatistics get the collection statistics, such as `num_rows`.
 func (node *Proxy) GetCollectionStatistics(ctx context.Context, request *milvuspb.GetCollectionStatisticsRequest) (*milvuspb.GetCollectionStatisticsResponse, error) {
 	if !node.checkHealthy() {
@@ -732,14 +841,16 @@ func (node *Proxy) GetCollectionStatistics(ctx context.Context, request *milvusp
 		dataCoord:                      node.dataCoord,
 	}
 
-	log.Debug("GetCollectionStatistics received",
+	log.Debug(
+		rpcReceived(method),
 		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName))
 
 	if err := node.sched.ddQueue.Enqueue(g); err != nil {
-		log.Warn("GetCollectionStatistics failed to enqueue",
+		log.Warn(
+			rpcFailedToEnqueue(method),
 			zap.Error(err),
 			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
@@ -757,17 +868,19 @@ func (node *Proxy) GetCollectionStatistics(ctx context.Context, request *milvusp
 		}, nil
 	}
 
-	log.Debug("GetCollectionStatistics enqueued",
+	log.Debug(
+		rpcEnqueued(method),
 		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
-		zap.Int64("MsgID", g.ID()),
+		zap.Int64("msgID", g.ID()),
 		zap.Uint64("BeginTS", g.BeginTs()),
 		zap.Uint64("EndTS", g.EndTs()),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName))
 
 	if err := g.WaitToFinish(); err != nil {
-		log.Warn("GetCollectionStatistics failed to WaitToFinish",
+		log.Warn(
+			rpcFailedToWaitToFinish(method),
 			zap.Error(err),
 			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
@@ -790,10 +903,11 @@ func (node *Proxy) GetCollectionStatistics(ctx context.Context, request *milvusp
 		}, nil
 	}
 
-	log.Debug("GetCollectionStatistics done",
+	log.Debug(
+		rpcDone(method),
 		zap.String("traceID", traceID),
 		zap.String("role", typeutil.ProxyRole),
-		zap.Int64("MsgID", g.ID()),
+		zap.Int64("msgID", g.ID()),
 		zap.Uint64("BeginTS", g.BeginTs()),
 		zap.Uint64("EndTS", g.EndTs()),
 		zap.String("db", request.DbName),
@@ -1409,6 +1523,8 @@ func (node *Proxy) GetPartitionStatistics(ctx context.Context, request *milvuspb
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-GetPartitionStatistics")
 	defer sp.Finish()
 	traceID, _, _ := trace.InfoFromSpan(sp)
+	method := "GetPartitionStatistics"
+	tr := timerecord.NewTimeRecorder(method)
 
 	g := &getPartitionStatisticsTask{
 		ctx:                           ctx,
@@ -1416,9 +1532,6 @@ func (node *Proxy) GetPartitionStatistics(ctx context.Context, request *milvuspb
 		GetPartitionStatisticsRequest: request,
 		dataCoord:                     node.dataCoord,
 	}
-
-	method := "GetPartitionStatistics"
-	tr := timerecord.NewTimeRecorder(method)
 
 	log.Debug(
 		rpcReceived(method),

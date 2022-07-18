@@ -468,7 +468,7 @@ func TestGetPartitionStatistics(t *testing.T) {
 
 		req := &datapb.GetPartitionStatisticsRequest{
 			CollectionID: 0,
-			PartitionID:  0,
+			PartitionIDs: []int64{0},
 		}
 		resp, err := svr.GetPartitionStatistics(context.Background(), req)
 		assert.Nil(t, err)

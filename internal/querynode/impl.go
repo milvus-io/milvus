@@ -18,6 +18,7 @@ package querynode
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -88,6 +89,191 @@ func (node *QueryNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.Stri
 			Reason:    "",
 		},
 	}, nil
+}
+
+func (node *QueryNode) GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) (*internalpb.GetStatisticsResponse, error) {
+	log.Debug("received GetStatisticsRequest",
+		zap.Int64("msgID", req.GetReq().GetBase().GetMsgID()),
+		zap.Strings("vChannels", req.GetDmlChannels()),
+		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
+		zap.Uint64("guaranteeTimestamp", req.GetReq().GetGuaranteeTimestamp()),
+		zap.Uint64("timeTravel", req.GetReq().GetTravelTimestamp()))
+
+	failRet := &internalpb.GetStatisticsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		},
+	}
+	toReduceResults := make([]*internalpb.GetStatisticsResponse, 0)
+	runningGp, runningCtx := errgroup.WithContext(ctx)
+	mu := &sync.Mutex{}
+	for _, ch := range req.GetDmlChannels() {
+		ch := ch
+		req := &querypb.GetStatisticsRequest{
+			Req:             req.Req,
+			DmlChannels:     []string{ch},
+			SegmentIDs:      req.SegmentIDs,
+			FromShardLeader: req.FromShardLeader,
+			Scope:           req.Scope,
+		}
+		runningGp.Go(func() error {
+			ret, err := node.getStatisticsWithDmlChannel(runningCtx, req, ch)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				failRet.Status.Reason = err.Error()
+				failRet.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+				return err
+			}
+			if ret.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+				failRet.Status.Reason = ret.Status.Reason
+				failRet.Status.ErrorCode = ret.Status.ErrorCode
+				return fmt.Errorf("%s", ret.Status.Reason)
+			}
+			toReduceResults = append(toReduceResults, ret)
+			return nil
+		})
+	}
+	if err := runningGp.Wait(); err != nil {
+		return failRet, nil
+	}
+	ret, err := reduceStatisticResponse(toReduceResults)
+	if err != nil {
+		failRet.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		failRet.Status.Reason = err.Error()
+		return failRet, nil
+	}
+	return ret, nil
+}
+
+func (node *QueryNode) getStatisticsWithDmlChannel(ctx context.Context, req *queryPb.GetStatisticsRequest, dmlChannel string) (*internalpb.GetStatisticsResponse, error) {
+	failRet := &internalpb.GetStatisticsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		},
+	}
+
+	if !node.isHealthy() {
+		failRet.Status.Reason = msgQueryNodeIsUnhealthy(Params.QueryNodeCfg.GetNodeID())
+		return failRet, nil
+	}
+
+	msgID := req.GetReq().GetBase().GetMsgID()
+	log.Debug("received GetStatisticRequest",
+		zap.Int64("msgID", msgID),
+		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
+		zap.String("vChannel", dmlChannel),
+		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
+		zap.Uint64("guaranteeTimestamp", req.GetReq().GetGuaranteeTimestamp()),
+		zap.Uint64("timeTravel", req.GetReq().GetTravelTimestamp()))
+
+	if node.queryShardService == nil {
+		failRet.Status.Reason = "queryShardService is nil"
+		return failRet, nil
+	}
+
+	qs, err := node.queryShardService.getQueryShard(dmlChannel)
+	if err != nil {
+		log.Warn("get statistics failed, failed to get query shard",
+			zap.Int64("msgID", msgID),
+			zap.String("dml channel", dmlChannel),
+			zap.Error(err))
+		failRet.Status.ErrorCode = commonpb.ErrorCode_NotShardLeader
+		failRet.Status.Reason = err.Error()
+		return failRet, nil
+	}
+
+	log.Debug("start do statistics",
+		zap.Int64("msgID", msgID),
+		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
+		zap.String("vChannel", dmlChannel),
+		zap.Int64s("segmentIDs", req.GetSegmentIDs()))
+	tr := timerecord.NewTimeRecorder("")
+
+	waitCanDo := func(ctx context.Context) error {
+		l := node.tSafeReplica.WatchChannel(dmlChannel)
+		defer l.Unregister()
+		for {
+			select {
+			case <-l.On():
+				serviceTime, err := qs.getServiceableTime(dmlChannel)
+				if err != nil {
+					return err
+				}
+				guaranteeTs := req.GetReq().GetGuaranteeTimestamp()
+				if guaranteeTs <= serviceTime {
+					return nil
+				}
+			case <-ctx.Done():
+				return errors.New("get statistics context timeout")
+			}
+		}
+	}
+
+	if req.FromShardLeader {
+		historicalTask := newStatistics(ctx, req, querypb.DataScope_Historical, qs, waitCanDo)
+		err := historicalTask.Execute(ctx)
+		if err != nil {
+			failRet.Status.Reason = err.Error()
+			return failRet, nil
+		}
+
+		tr.Elapse(fmt.Sprintf("do statistics done, msgID = %d, fromSharedLeader = %t, vChannel = %s, segmentIDs = %v",
+			msgID, req.GetFromShardLeader(), dmlChannel, req.GetSegmentIDs()))
+		failRet.Status.ErrorCode = commonpb.ErrorCode_Success
+		return historicalTask.Ret, nil
+	}
+
+	// from Proxy
+
+	cluster, ok := qs.clusterService.getShardCluster(dmlChannel)
+	if !ok {
+		failRet.Status.ErrorCode = commonpb.ErrorCode_NotShardLeader
+		failRet.Status.Reason = fmt.Sprintf("channel %s leader is not here", dmlChannel)
+		return failRet, nil
+	}
+
+	statisticCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var results []*internalpb.GetStatisticsResponse
+	var streamingResult *internalpb.GetStatisticsResponse
+	var errCluster error
+
+	withStreaming := func(ctx context.Context) error {
+		streamingTask := newStatistics(ctx, req, querypb.DataScope_Streaming, qs, waitCanDo)
+		err := streamingTask.Execute(ctx)
+		if err != nil {
+			return err
+		}
+		streamingResult = streamingTask.Ret
+		return nil
+	}
+
+	// shard leader dispatches request to its shard cluster
+	results, errCluster = cluster.GetStatistics(statisticCtx, req, withStreaming)
+	if errCluster != nil {
+		log.Warn("get statistics on cluster failed", zap.Int64("msgID", msgID), zap.Int64("collectionID", req.Req.GetCollectionID()), zap.Error(errCluster))
+		failRet.Status.Reason = errCluster.Error()
+		return failRet, nil
+	}
+
+	tr.Elapse(fmt.Sprintf("start reduce statistic result, msgID = %d, fromSharedLeader = %t, vChannel = %s, segmentIDs = %v",
+		msgID, req.GetFromShardLeader(), dmlChannel, req.GetSegmentIDs()))
+
+	results = append(results, streamingResult)
+	ret, err := reduceStatisticResponse(results)
+	if err != nil {
+		failRet.Status.Reason = err.Error()
+		return failRet, nil
+	}
+	log.Debug("reduce statistic result done", zap.Int64("msgID", msgID), zap.Any("results", ret))
+
+	tr.Elapse(fmt.Sprintf("do statistics done, msgID = %d, fromSharedLeader = %t, vChannel = %s, segmentIDs = %v",
+		msgID, req.GetFromShardLeader(), dmlChannel, req.GetSegmentIDs()))
+
+	failRet.Status.ErrorCode = commonpb.ErrorCode_Success
+	return ret, nil
 }
 
 // WatchDmChannels create consumers on dmChannels to receive Incremental data，which is the important part of real-time query

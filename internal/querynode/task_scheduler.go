@@ -180,6 +180,8 @@ func (s *taskScheduler) tryEvictUnsolvedReadTask(headCount int) {
 
 func (s *taskScheduler) scheduleReadTasks() {
 	defer s.wg.Done()
+	l := s.tSafeReplica.Watch()
+	defer l.Unregister()
 	for {
 		select {
 		case <-s.ctx.Done():
@@ -210,7 +212,7 @@ func (s *taskScheduler) scheduleReadTasks() {
 				log.Warn(errMsg)
 				return
 			}
-		case <-s.tSafeReplica.Watch():
+		case <-l.On():
 			s.tryMergeReadTasks()
 			s.popAndAddToExecute()
 		}

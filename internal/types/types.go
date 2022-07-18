@@ -1219,6 +1219,7 @@ type QueryNode interface {
 	ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest) (*commonpb.Status, error)
 	GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error)
 
+	GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) (*internalpb.GetStatisticsResponse, error)
 	Search(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error)
 	Query(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error)
 	SyncReplicaSegments(ctx context.Context, req *querypb.SyncReplicaSegmentsRequest) (*commonpb.Status, error)

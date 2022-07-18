@@ -431,12 +431,10 @@ SealedCreator(SchemaPtr schema, const GeneratedData& dataset) {
 inline knowhere::VecIndexPtr
 GenVecIndexing(int64_t N, int64_t dim, const float* vec) {
     // {knowhere::IndexParams::nprobe, 10},
-    auto conf = knowhere::Config{
-        {knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
-        {knowhere::meta::DIM, dim},
-        {knowhere::indexparam::NLIST, 1024},
-        {knowhere::meta::DEVICE_ID, 0}
-    };
+    auto conf = knowhere::Config{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+                                 {knowhere::meta::DIM, dim},
+                                 {knowhere::indexparam::NLIST, 1024},
+                                 {knowhere::meta::DEVICE_ID, 0}};
     auto database = knowhere::GenDataset(N, dim, vec);
     auto indexing = std::make_shared<knowhere::IVF>();
     indexing->Train(database, conf);
@@ -472,6 +470,41 @@ translate_text_plan_to_binary_plan(const char* text_plan) {
     std::memcpy(ret.data(), binary_plan.c_str(), binary_plan.size());
 
     return ret;
+}
+
+inline auto
+GenTss(int64_t num, int64_t begin_ts) {
+    std::vector<Timestamp> tss(num, 0);
+    std::iota(tss.begin(), tss.end(), begin_ts);
+    return tss;
+}
+
+inline auto
+GenPKs(int64_t num, int64_t begin_pk) {
+    auto arr = std::make_unique<milvus::proto::schema::LongArray>();
+    for (int64_t i = 0; i < num; i++) {
+        arr->add_data(begin_pk + i);
+    }
+    auto ids = std::make_shared<IdArray>();
+    ids->set_allocated_int_id(arr.release());
+    return ids;
+}
+
+template <typename Iter>
+inline auto
+GenPKs(const Iter begin, const Iter end) {
+    auto arr = std::make_unique<milvus::proto::schema::LongArray>();
+    for (auto it = begin; it != end; it++) {
+        arr->add_data(*it);
+    }
+    auto ids = std::make_shared<IdArray>();
+    ids->set_allocated_int_id(arr.release());
+    return ids;
+}
+
+inline auto
+GenPKs(const std::vector<int64_t>& pks) {
+    return GenPKs(pks.begin(), pks.end());
 }
 
 }  // namespace milvus::segcore

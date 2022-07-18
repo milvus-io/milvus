@@ -101,6 +101,9 @@ func Test_NewClient(t *testing.T) {
 
 		r16, err := client.SyncReplicaSegments(ctx, nil)
 		retCheck(retNotNil, r16, err)
+
+		r17, err := client.GetStatistics(ctx, nil)
+		retCheck(retNotNil, r17, err)
 	}
 
 	client.grpcClient = &mock.GRPCClientBase{

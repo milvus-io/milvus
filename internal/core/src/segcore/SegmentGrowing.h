@@ -45,7 +45,7 @@ class SegmentGrowing : public SegmentInternalInterface {
     // Delete(int64_t reserved_offset, int64_t size, const int64_t* row_ids, const Timestamp* timestamps) = 0;
 
  public:
-    virtual ssize_t
+    virtual int64_t
     get_deleted_count() const = 0;
 };
 

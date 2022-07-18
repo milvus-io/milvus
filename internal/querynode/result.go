@@ -19,6 +19,9 @@ package querynode
 import (
 	"fmt"
 	"math"
+	"strconv"
+
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 
 	"go.uber.org/zap"
 
@@ -30,6 +33,45 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
+
+func reduceStatisticResponse(results []*internalpb.GetStatisticsResponse) (*internalpb.GetStatisticsResponse, error) {
+	mergedResults := map[string]interface{}{
+		"row_count": int64(0),
+	}
+	fieldMethod := map[string]func(string) error{
+		"row_count": func(str string) error {
+			count, err := strconv.ParseInt(str, 10, 64)
+			if err != nil {
+				return err
+			}
+			mergedResults["row_count"] = mergedResults["row_count"].(int64) + count
+			return nil
+		},
+	}
+
+	for _, partialResult := range results {
+		for _, pair := range partialResult.Stats {
+			fn, ok := fieldMethod[pair.Key]
+			if !ok {
+				return nil, fmt.Errorf("unknown statistic field: %s", pair.Key)
+			}
+			if err := fn(pair.Value); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	stringMap := make(map[string]string)
+	for k, v := range mergedResults {
+		stringMap[k] = fmt.Sprint(v)
+	}
+
+	ret := &internalpb.GetStatisticsResponse{
+		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		Stats:  funcutil.Map2KeyValuePair(stringMap),
+	}
+	return ret, nil
+}
 
 func reduceSearchResults(results []*internalpb.SearchResults, nq int64, topk int64, metricType string) (*internalpb.SearchResults, error) {
 	searchResultData, err := decodeSearchResults(results)

@@ -265,6 +265,39 @@ message ReleaseCollectionRequest {
 }
 
 /**
+* Get statistics like row_count.
+* WARNING: This API is experimental and not useful for now.
+*/
+message GetStatisticsRequest {
+  option (common.privilege_ext_obj) = {
+    resource_type: Collection
+    resource_privilege: PrivilegeRead
+    resource_name_index: 3
+  };
+  // Not useful for now
+  common.MsgBase base = 1;
+  // Not useful for now
+  string db_name = 2;
+  // The collection name you want get statistics
+  string collection_name = 3;
+  // The partition names you want get statistics, empty for all partitions
+  repeated string partition_names = 4;
+  // Not useful for now, reserved for future
+  uint64 guarantee_timestamp = 5;
+}
+
+/**
+* Will return statistics in stats field like [{key:"row_count",value:"1"}]
+* WARNING: This API is experimental and not useful for now.
+*/
+message GetStatisticsResponse {
+  // Contain error_code and reason
+  common.Status status = 1;
+  // Collection statistics data
+  repeated common.KeyValuePair stats = 2;
+}
+
+/**
 * Get collection statistics like row_count.
 */
 message GetCollectionStatisticsRequest {
@@ -295,7 +328,7 @@ message GetCollectionStatisticsResponse {
 * This is for ShowCollectionsRequest type field.
 */
 enum ShowType {
-  // Will return all colloections
+  // Will return all collections
   All = 0;
   // Will return loaded collections with their inMemory_percentages
   InMemory = 1;

@@ -264,7 +264,8 @@ func (s *Server) GetCollectionStatistics(ctx context.Context, req *datapb.GetCol
 	return resp, nil
 }
 
-// GetPartitionStatistics returns statistics for parition
+// GetPartitionStatistics returns statistics for partition
+// if partID is empty, return statistics for all partitions of the collection
 // for now only row count is returned
 func (s *Server) GetPartitionStatistics(ctx context.Context, req *datapb.GetPartitionStatisticsRequest) (*datapb.GetPartitionStatisticsResponse, error) {
 	resp := &datapb.GetPartitionStatisticsResponse{
@@ -276,9 +277,17 @@ func (s *Server) GetPartitionStatistics(ctx context.Context, req *datapb.GetPart
 		resp.Status.Reason = serverNotServingErrMsg
 		return resp, nil
 	}
-	nums := s.meta.GetNumRowsOfPartition(req.CollectionID, req.PartitionID)
+	nums := int64(0)
+	if len(req.GetPartitionIDs()) == 0 {
+		nums = s.meta.GetNumRowsOfCollection(req.CollectionID)
+	}
+	for _, partID := range req.GetPartitionIDs() {
+		num := s.meta.GetNumRowsOfPartition(req.CollectionID, partID)
+		nums += num
+	}
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	resp.Stats = append(resp.Stats, &commonpb.KeyValuePair{Key: "row_count", Value: strconv.FormatInt(nums, 10)})
+	logutil.Logger(ctx).Debug("success to get partition statistics", zap.Any("response", resp))
 	return resp, nil
 }
 

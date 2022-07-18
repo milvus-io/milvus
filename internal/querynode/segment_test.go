@@ -246,7 +246,7 @@ func TestSegment_getDeletedCount(t *testing.T) {
 
 	var deletedCount = segment.getDeletedCount()
 	// TODO: assert.Equal(t, deletedCount, len(ids))
-	assert.Equal(t, deletedCount, int64(0))
+	assert.Equal(t, deletedCount, int64(len(pks)))
 
 	deleteCollection(collection)
 

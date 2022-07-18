@@ -37,10 +37,19 @@ type QueryNodeMock struct {
 
 	state atomic.Value // internal.StateCode
 
-	withSearchResult *internalpb.SearchResults
-	withQueryResult  *internalpb.RetrieveResults
-	queryError       error
-	searchError      error
+	withStatisticsResponse *internalpb.GetStatisticsResponse
+	withSearchResult       *internalpb.SearchResults
+	withQueryResult        *internalpb.RetrieveResults
+	queryError             error
+	searchError            error
+	statisticsError        error
+}
+
+func (m *QueryNodeMock) GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) (*internalpb.GetStatisticsResponse, error) {
+	if m.statisticsError != nil {
+		return nil, m.statisticsError
+	}
+	return m.withStatisticsResponse, nil
 }
 
 func (m *QueryNodeMock) Search(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error) {
