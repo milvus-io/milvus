@@ -59,6 +59,7 @@ func refreshParams() {
 	Params.CommonCfg.QueryCoordTimeTick = Params.CommonCfg.QueryCoordTimeTick + suffix
 	Params.EtcdCfg.MetaRootPath = Params.EtcdCfg.MetaRootPath + suffix
 	GlobalSegmentInfos = make(map[UniqueID]*querypb.SegmentInfo)
+	Params.QueryCoordCfg.RetryInterval = int64(1 * time.Millisecond)
 }
 
 func TestMain(m *testing.M) {
@@ -565,10 +566,8 @@ func TestHandoffSegmentLoop(t *testing.T) {
 func TestLoadBalanceSegmentLoop(t *testing.T) {
 	refreshParams()
 	defer removeAllSession()
-
 	Params.QueryCoordCfg.BalanceIntervalSeconds = 10
 	baseCtx := context.Background()
-
 	queryCoord, err := startQueryCoord(baseCtx)
 	assert.Nil(t, err)
 	queryCoord.cluster.(*queryNodeCluster).segmentAllocator = shuffleSegmentsToQueryNode
@@ -623,8 +622,7 @@ func TestLoadBalanceSegmentLoop(t *testing.T) {
 			queryNode1.getMetrics = returnSuccessGetMetricsResult
 			break
 		}
-
-		time.Sleep(time.Second)
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 

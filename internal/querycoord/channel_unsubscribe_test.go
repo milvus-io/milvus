@@ -49,9 +49,10 @@ func Test_HandlerReloadFromKV(t *testing.T) {
 	assert.Nil(t, err)
 
 	factory := dependency.NewDefaultFactory(true)
-	handler, err := newChannelUnsubscribeHandler(baseCtx, kv, factory)
+	cleaner, err := NewChannelCleaner(baseCtx, kv, factory)
 	assert.Nil(t, err)
-	assert.Equal(t, 1, len(handler.downNodeChan))
+
+	assert.False(t, cleaner.isNodeChannelCleanHandled(defaultQueryNodeID))
 
 	cancel()
 }
@@ -64,7 +65,7 @@ func Test_AddUnsubscribeChannelInfo(t *testing.T) {
 	defer etcdCli.Close()
 	kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 	factory := dependency.NewDefaultFactory(true)
-	handler, err := newChannelUnsubscribeHandler(baseCtx, kv, factory)
+	cleaner, err := NewChannelCleaner(baseCtx, kv, factory)
 	assert.Nil(t, err)
 
 	collectionChannels := &querypb.UnsubscribeChannels{
@@ -76,14 +77,12 @@ func Test_AddUnsubscribeChannelInfo(t *testing.T) {
 		CollectionChannels: []*querypb.UnsubscribeChannels{collectionChannels},
 	}
 
-	handler.addUnsubscribeChannelInfo(unsubscribeChannelInfo)
-	frontValue := handler.channelInfos.Front()
-	assert.NotNil(t, frontValue)
-	assert.Equal(t, defaultQueryNodeID, frontValue.Value.(*querypb.UnsubscribeChannelInfo).NodeID)
+	cleaner.addUnsubscribeChannelInfo(unsubscribeChannelInfo)
+	assert.Equal(t, len(cleaner.tasks), 1)
 
 	// repeat nodeID which has down
-	handler.addUnsubscribeChannelInfo(unsubscribeChannelInfo)
-	assert.Equal(t, 1, len(handler.downNodeChan))
+	cleaner.addUnsubscribeChannelInfo(unsubscribeChannelInfo)
+	assert.Equal(t, len(cleaner.tasks), 1)
 
 	cancel()
 }
@@ -96,7 +95,7 @@ func Test_HandleChannelUnsubscribeLoop(t *testing.T) {
 	defer etcdCli.Close()
 	kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 	factory := dependency.NewDefaultFactory(true)
-	handler, err := newChannelUnsubscribeHandler(baseCtx, kv, factory)
+	handler, err := NewChannelCleaner(baseCtx, kv, factory)
 	assert.Nil(t, err)
 
 	collectionChannels := &querypb.UnsubscribeChannels{
@@ -116,7 +115,7 @@ func Test_HandleChannelUnsubscribeLoop(t *testing.T) {
 	handler.start()
 
 	for {
-		_, err = kv.Load(channelInfoKey)
+		_, err := kv.Load(channelInfoKey)
 		if err != nil {
 			break
 		}

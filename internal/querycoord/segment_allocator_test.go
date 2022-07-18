@@ -52,14 +52,14 @@ func TestShuffleSegmentsToQueryNode(t *testing.T) {
 	}
 	meta, err := newMeta(baseCtx, kv, factory, idAllocator)
 	assert.Nil(t, err)
-	handler, err := newChannelUnsubscribeHandler(baseCtx, kv, factory)
+	cleaner, err := NewChannelCleaner(baseCtx, kv, factory)
 	assert.Nil(t, err)
 	cluster := &queryNodeCluster{
 		ctx:         baseCtx,
 		cancel:      cancel,
 		client:      kv,
 		clusterMeta: meta,
-		handler:     handler,
+		cleaner:     cleaner,
 		nodes:       make(map[int64]Node),
 		newNodeFn:   newQueryNodeTest,
 		session:     clusterSession,

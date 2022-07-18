@@ -44,13 +44,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
-const (
-	collectionMetaPrefix   = "queryCoord-collectionMeta"
-	dmChannelMetaPrefix    = "queryCoord-dmChannelWatchInfo"
-	deltaChannelMetaPrefix = "queryCoord-deltaChannel"
-	ReplicaMetaPrefix      = "queryCoord-ReplicaMeta"
-)
-
 type col2SegmentInfos = map[UniqueID][]*querypb.SegmentInfo
 type col2SealedSegmentChangeInfos = map[UniqueID]*querypb.SealedSegmentsChangeInfo
 
@@ -537,7 +530,7 @@ func (m *MetaReplica) releaseCollection(collectionID UniqueID) error {
 		}
 	}
 	m.segmentsInfo.mu.Unlock()
-
+	log.Info("successfully release collection from meta", zap.Int64("collectionID", collectionID))
 	return nil
 }
 

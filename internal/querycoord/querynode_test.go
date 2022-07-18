@@ -286,6 +286,7 @@ func TestSealedSegmentChangeAfterQueryNodeStop(t *testing.T) {
 		if recoverDone {
 			break
 		}
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	queryCoord.Stop()
