@@ -555,7 +555,8 @@ func (replica *metaReplica) addSegmentPrivate(segmentID UniqueID, partitionID Un
 		return err
 	}
 	if ok {
-		return nil
+		return fmt.Errorf("segment has been existed, "+
+			"segmentID = %d, collectionID = %d, segmentType = %s", segmentID, segment.collectionID, segType.String())
 	}
 	partition.addSegmentID(segmentID, segType)
 
