@@ -18,12 +18,18 @@ class ParamInfo:
         self.param_host = ""
         self.param_port = ""
         self.param_handler = ""
+        self.param_user = ""
+        self.param_password = ""
+        self.param_secure = False
         self.param_replica_num = ct.default_replica_num
 
-    def prepare_param_info(self, host, port, handler, replica_num):
+    def prepare_param_info(self, host, port, handler, replica_num, user, password, secure):
         self.param_host = host
         self.param_port = port
         self.param_handler = handler
+        self.param_user = user
+        self.param_password = password
+        self.param_secure = secure
         self.param_replica_num = replica_num
 
 
