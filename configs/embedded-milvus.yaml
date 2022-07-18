@@ -206,7 +206,7 @@ dataCoord:
     clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
     clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
   enableCompaction: true # Enable data segment compression
-  enableGarbageCollection: false
+  enableGarbageCollection: true
 
   segment:
     maxSize: 512 # Maximum size of a segment in MB
