@@ -555,10 +555,24 @@ func TestFlushNotifyFunc(t *testing.T) {
 		})
 	})
 
-	t.Run("datacoord Save fails", func(t *testing.T) {
+	t.Run("datacoord save fails", func(t *testing.T) {
 		dataCoord.SaveBinlogPathStatus = commonpb.ErrorCode_UnexpectedError
 		assert.Panics(t, func() {
 			notifyFunc(&segmentFlushPack{})
+		})
+	})
+
+	t.Run("normal segment not found", func(t *testing.T) {
+		dataCoord.SaveBinlogPathStatus = commonpb.ErrorCode_SegmentNotFound
+		assert.Panics(t, func() {
+			notifyFunc(&segmentFlushPack{flushed: true})
+		})
+	})
+
+	t.Run("stale segment not found", func(t *testing.T) {
+		dataCoord.SaveBinlogPathStatus = commonpb.ErrorCode_SegmentNotFound
+		assert.NotPanics(t, func() {
+			notifyFunc(&segmentFlushPack{flushed: false})
 		})
 	})
 
