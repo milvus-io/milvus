@@ -56,7 +56,7 @@ func newIndexBuilder(ctx context.Context, ic *IndexCoord, metaTable *metaTable, 
 		ic:               ic,
 		tasks:            make(map[int64]indexTaskState, 1024),
 		notify:           make(chan struct{}, 1024),
-		scheduleDuration: time.Second * 10,
+		scheduleDuration: time.Second * 1,
 	}
 	ib.reloadFromKV(aliveNodes)
 	return ib
@@ -143,9 +143,10 @@ func (ib *indexBuilder) schedule() {
 				}
 				ib.taskMutex.Unlock()
 			}
-		// !ok means indexBuild is closed.
+		// !ok means indexBuilder is closed.
 		case <-ticker.C:
 			ib.taskMutex.Lock()
+			log.Info("index builder task schedule", zap.Int("task num", len(ib.tasks)))
 			for buildID := range ib.tasks {
 				ib.process(buildID)
 			}
