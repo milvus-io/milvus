@@ -547,7 +547,7 @@ func TestImportManager_TaskState(t *testing.T) {
 	state = &rootcoordpb.ImportResult{
 		TaskId:   2,
 		RowCount: 1000,
-		State:    commonpb.ImportState_ImportCompleted,
+		State:    commonpb.ImportState_ImportPersisted,
 		Infos: []*commonpb.KeyValuePair{
 			{
 				Key:   "key1",
@@ -567,7 +567,7 @@ func TestImportManager_TaskState(t *testing.T) {
 	assert.Equal(t, int64(0), ti.GetPartitionId())
 	assert.Equal(t, true, ti.GetRowBased())
 	assert.Equal(t, []string{"f2"}, ti.GetFiles())
-	assert.Equal(t, commonpb.ImportState_ImportCompleted, ti.GetState().GetStateCode())
+	assert.Equal(t, commonpb.ImportState_ImportPersisted, ti.GetState().GetStateCode())
 	assert.Equal(t, int64(1000), ti.GetState().GetRowCount())
 
 	resp := mgr.getTaskState(10000)
@@ -575,7 +575,7 @@ func TestImportManager_TaskState(t *testing.T) {
 
 	resp = mgr.getTaskState(2)
 	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-	assert.Equal(t, commonpb.ImportState_ImportCompleted, resp.State)
+	assert.Equal(t, commonpb.ImportState_ImportPersisted, resp.State)
 
 	resp = mgr.getTaskState(1)
 	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)

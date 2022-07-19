@@ -172,61 +172,13 @@ func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate b
 			log.Info("import wrapper:  row-based file ", zap.Any("filePath", filePath), zap.Any("fileType", fileType))
 
 			if fileType == JSONFileExt {
-				err := func() error {
-					tr := timerecord.NewTimeRecorder("json row-based parser: " + filePath)
-
-					// for minio storage, chunkManager will download file into local memory
-					// for local storage, chunkManager open the file directly
-					file, err := p.chunkManager.Reader(filePath)
-					if err != nil {
-						return err
-					}
-					defer file.Close()
-					tr.Record("open reader")
-
-					// report file process state
-					p.importResult.State = commonpb.ImportState_ImportDownloaded
-					reportErr := p.reportFunc(p.importResult)
-					if reportErr != nil {
-						log.Warn("fail to report import state to root coord", zap.Error(err))
-					}
-					// parse file
-					reader := bufio.NewReader(file)
-					parser := NewJSONParser(p.ctx, p.collectionSchema)
-					var consumer *JSONRowConsumer
-					if !onlyValidate {
-						flushFunc := func(fields map[storage.FieldID]storage.FieldData, shardNum int) error {
-							p.printFieldsDataInfo(fields, "import wrapper: prepare to flush segment", filePaths)
-							return p.callFlushFunc(fields, shardNum)
-						}
-						consumer = NewJSONRowConsumer(p.collectionSchema, p.rowIDAllocator, p.shardNum, p.segmentSize, flushFunc)
-					}
-					validator := NewJSONRowValidator(p.collectionSchema, consumer)
-					err = parser.ParseRows(reader, validator)
-					if err != nil {
-						return err
-					}
-
-					// for row-based files, auto-id is generated within JSONRowConsumer
-					if consumer != nil {
-						p.importResult.AutoIds = append(p.importResult.AutoIds, consumer.IDRange()...)
-					}
-
-					// report file process state
-					p.importResult.State = commonpb.ImportState_ImportParsed
-					reportErr = p.reportFunc(p.importResult)
-					if reportErr != nil {
-						log.Warn("fail to report import state to root coord", zap.Error(err))
-					}
-					tr.Record("parsed")
-					return nil
-				}()
-
+				err = p.parseRowBasedJSON(filePath, onlyValidate)
 				if err != nil {
 					log.Error("import error: "+err.Error(), zap.String("filePath", filePath))
 					return err
 				}
 			}
+			// no need to check else, since the fileValidation() already do this
 		}
 	} else {
 		// parse and consume column-based files
@@ -274,111 +226,24 @@ func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate b
 		// parse/validate/consume data
 		for i := 0; i < len(filePaths); i++ {
 			filePath := filePaths[i]
-			fileName, fileType := getFileNameAndExt(filePath)
+			_, fileType := getFileNameAndExt(filePath)
 			log.Info("import wrapper:  column-based file ", zap.Any("filePath", filePath), zap.Any("fileType", fileType))
 
 			if fileType == JSONFileExt {
-				err := func() error {
-					tr := timerecord.NewTimeRecorder("json column-based parser: " + filePath)
-
-					// for minio storage, chunkManager will download file into local memory
-					// for local storage, chunkManager open the file directly
-					file, err := p.chunkManager.Reader(filePath)
-					if err != nil {
-						return err
-					}
-					defer file.Close()
-					tr.Record("open reader")
-
-					// report file process state
-					p.importResult.State = commonpb.ImportState_ImportDownloaded
-					reportErr := p.reportFunc(p.importResult)
-					if reportErr != nil {
-						log.Warn("fail to report import state to root coord", zap.Error(err))
-					}
-					// parse file
-					reader := bufio.NewReader(file)
-					parser := NewJSONParser(p.ctx, p.collectionSchema)
-					var consumer *JSONColumnConsumer
-					if !onlyValidate {
-						consumer = NewJSONColumnConsumer(p.collectionSchema, combineFunc)
-					}
-					validator := NewJSONColumnValidator(p.collectionSchema, consumer)
-
-					err = parser.ParseColumns(reader, validator)
-					if err != nil {
-						return err
-					}
-
-					// report file process state
-					p.importResult.State = commonpb.ImportState_ImportParsed
-					reportErr = p.reportFunc(p.importResult)
-					if reportErr != nil {
-						log.Warn("fail to report import state to root coord", zap.Error(err))
-					}
-					tr.Record("parsed")
-					return nil
-				}()
-
+				err = p.parseColumnBasedJSON(filePath, onlyValidate, combineFunc)
 				if err != nil {
 					log.Error("import error: "+err.Error(), zap.String("filePath", filePath))
 					return err
 				}
 			} else if fileType == NumpyFileExt {
-				err := func() error {
-					tr := timerecord.NewTimeRecorder("numpy parser: " + filePath)
-
-					// for minio storage, chunkManager will download file into local memory
-					// for local storage, chunkManager open the file directly
-					file, err := p.chunkManager.Reader(filePath)
-					if err != nil {
-						return err
-					}
-					defer file.Close()
-					tr.Record("open reader")
-
-					// report file process state
-					p.importResult.State = commonpb.ImportState_ImportDownloaded
-					reportErr := p.reportFunc(p.importResult)
-					if reportErr != nil {
-						log.Warn("fail to report import state to root coord", zap.Error(err))
-					}
-					var id storage.FieldID
-					for _, field := range p.collectionSchema.Fields {
-						if field.GetName() == fileName {
-							id = field.GetFieldID()
-						}
-					}
-
-					// the numpy parser return a storage.FieldData, here construct a map[string]storage.FieldData to combine
-					flushFunc := func(field storage.FieldData) error {
-						fields := make(map[storage.FieldID]storage.FieldData)
-						fields[id] = field
-						return combineFunc(fields)
-					}
-
-					// for numpy file, we say the file name(without extension) is the filed name
-					parser := NewNumpyParser(p.ctx, p.collectionSchema, flushFunc)
-					err = parser.Parse(file, fileName, onlyValidate)
-					if err != nil {
-						return err
-					}
-
-					// report file process state
-					p.importResult.State = commonpb.ImportState_ImportParsed
-					reportErr = p.reportFunc(p.importResult)
-					if reportErr != nil {
-						log.Warn("fail to report import state to root coord", zap.Error(err))
-					}
-					tr.Record("parsed")
-					return nil
-				}()
+				err = p.parseColumnBasedNumpy(filePath, onlyValidate, combineFunc)
 
 				if err != nil {
 					log.Error("import error: "+err.Error(), zap.String("filePath", filePath))
 					return err
 				}
 			}
+			// no need to check else, since the fileValidation() already do this
 		}
 
 		// split fields data into segments
@@ -400,6 +265,121 @@ func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate b
 		log.Warn("fail to report import state to root coord", zap.Error(err))
 		return reportErr
 	}
+	return nil
+}
+
+func (p *ImportWrapper) parseRowBasedJSON(filePath string, onlyValidate bool) error {
+	tr := timerecord.NewTimeRecorder("json row-based parser: " + filePath)
+
+	// for minio storage, chunkManager will download file into local memory
+	// for local storage, chunkManager open the file directly
+	file, err := p.chunkManager.Reader(filePath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	// parse file
+	reader := bufio.NewReader(file)
+	parser := NewJSONParser(p.ctx, p.collectionSchema)
+	var consumer *JSONRowConsumer
+	if !onlyValidate {
+		flushFunc := func(fields map[storage.FieldID]storage.FieldData, shardID int) error {
+			var filePaths = []string{filePath}
+			p.printFieldsDataInfo(fields, "import wrapper: prepare to flush segment", filePaths)
+			return p.callFlushFunc(fields, shardID)
+		}
+		consumer = NewJSONRowConsumer(p.collectionSchema, p.rowIDAllocator, p.shardNum, p.segmentSize, flushFunc)
+	}
+	validator := NewJSONRowValidator(p.collectionSchema, consumer)
+	err = parser.ParseRows(reader, validator)
+	if err != nil {
+		return err
+	}
+
+	// for row-based files, auto-id is generated within JSONRowConsumer
+	if consumer != nil {
+		p.importResult.AutoIds = append(p.importResult.AutoIds, consumer.IDRange()...)
+	}
+
+	tr.Elapse("parsed")
+	return nil
+}
+
+func (p *ImportWrapper) parseColumnBasedJSON(filePath string, onlyValidate bool,
+	combineFunc func(fields map[storage.FieldID]storage.FieldData) error) error {
+	tr := timerecord.NewTimeRecorder("json column-based parser: " + filePath)
+
+	// for minio storage, chunkManager will download file into local memory
+	// for local storage, chunkManager open the file directly
+	file, err := p.chunkManager.Reader(filePath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	// parse file
+	reader := bufio.NewReader(file)
+	parser := NewJSONParser(p.ctx, p.collectionSchema)
+	var consumer *JSONColumnConsumer
+	if !onlyValidate {
+		consumer = NewJSONColumnConsumer(p.collectionSchema, combineFunc)
+	}
+	validator := NewJSONColumnValidator(p.collectionSchema, consumer)
+
+	err = parser.ParseColumns(reader, validator)
+	if err != nil {
+		return err
+	}
+
+	tr.Elapse("parsed")
+	return nil
+}
+
+func (p *ImportWrapper) parseColumnBasedNumpy(filePath string, onlyValidate bool,
+	combineFunc func(fields map[storage.FieldID]storage.FieldData) error) error {
+	tr := timerecord.NewTimeRecorder("numpy parser: " + filePath)
+
+	fileName, _ := getFileNameAndExt(filePath)
+
+	// for minio storage, chunkManager will download file into local memory
+	// for local storage, chunkManager open the file directly
+	file, err := p.chunkManager.Reader(filePath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	var id storage.FieldID
+	var found = false
+	for _, field := range p.collectionSchema.Fields {
+		if field.GetName() == fileName {
+			id = field.GetFieldID()
+			found = true
+			break
+		}
+	}
+
+	// if the numpy file name is not mapping to a field name, ignore it
+	if !found {
+		return nil
+	}
+
+	// the numpy parser return a storage.FieldData, here construct a map[string]storage.FieldData to combine
+	flushFunc := func(field storage.FieldData) error {
+		fields := make(map[storage.FieldID]storage.FieldData)
+		fields[id] = field
+		return combineFunc(fields)
+	}
+
+	// for numpy file, we say the file name(without extension) is the filed name
+	parser := NewNumpyParser(p.ctx, p.collectionSchema, flushFunc)
+	err = parser.Parse(file, fileName, onlyValidate)
+	if err != nil {
+		return err
+	}
+
+	tr.Elapse("parsed")
 	return nil
 }
 

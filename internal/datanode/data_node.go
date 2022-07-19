@@ -1055,14 +1055,14 @@ func (node *DataNode) AddImportSegment(ctx context.Context, req *datapb.AddImpor
 }
 
 func importFlushReqFunc(node *DataNode, req *datapb.ImportTaskRequest, res *rootcoordpb.ImportResult, schema *schemapb.CollectionSchema, ts Timestamp) importutil.ImportFlushFunc {
-	return func(fields map[storage.FieldID]storage.FieldData, shardNum int) error {
-		if shardNum >= len(req.GetImportTask().GetChannelNames()) {
-			log.Error("import task returns invalid shard number",
-				zap.Int("shard num", shardNum),
+	return func(fields map[storage.FieldID]storage.FieldData, shardID int) error {
+		if shardID >= len(req.GetImportTask().GetChannelNames()) {
+			log.Error("import task returns invalid shard ID",
+				zap.Int("shard ID", shardID),
 				zap.Int("# of channels", len(req.GetImportTask().GetChannelNames())),
 				zap.Any("channel names", req.GetImportTask().GetChannelNames()),
 			)
-			return fmt.Errorf("syncSegmentID Failed: invalid shard number %d", shardNum)
+			return fmt.Errorf("syncSegmentID Failed: invalid shard ID %d", shardID)
 		}
 
 		tr := timerecord.NewTimeRecorder("import callback function")
@@ -1077,10 +1077,10 @@ func importFlushReqFunc(node *DataNode, req *datapb.ImportTaskRequest, res *root
 		}
 
 		// ask DataCoord to alloc a new segment
-		log.Info("import task flush segment", zap.Any("ChannelNames", req.ImportTask.ChannelNames), zap.Int("shardNum", shardNum))
+		log.Info("import task flush segment", zap.Any("ChannelNames", req.ImportTask.ChannelNames), zap.Int("shardID", shardID))
 		segReqs := []*datapb.SegmentIDRequest{
 			{
-				ChannelName:  req.ImportTask.ChannelNames[shardNum],
+				ChannelName:  req.ImportTask.ChannelNames[shardID],
 				Count:        uint32(rowNum),
 				CollectionID: req.GetImportTask().GetCollectionId(),
 				PartitionID:  req.GetImportTask().GetPartitionId(),
@@ -1163,8 +1163,8 @@ func importFlushReqFunc(node *DataNode, req *datapb.ImportTaskRequest, res *root
 			kvs[key] = blob.Value[:]
 			field2Insert[fieldID] = &datapb.Binlog{
 				EntriesNum:    data.size,
-				TimestampFrom: 0, //TODO: give proper value
-				TimestampTo:   0, //TODO: give proper value
+				TimestampFrom: ts,
+				TimestampTo:   ts,
 				LogPath:       key,
 				LogSize:       int64(len(blob.Value)),
 			}

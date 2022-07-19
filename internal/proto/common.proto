@@ -269,14 +269,11 @@ enum ConsistencyLevel {
 }
 
 enum ImportState {
-    ImportPending = 0;
-    ImportFailed = 1;
-    ImportStarted = 2;
-    ImportDownloaded = 3;
-    ImportParsed = 4;
-    ImportPersisted = 5;
-    ImportCompleted = 6;
-    ImportAllocSegment = 10;
+    ImportPending = 0;       // the task in in pending list of rootCoord, waiting to be executed
+    ImportFailed = 1;        // the task failed for some reason, get detail reason from GetImportStateResponse.infos
+    ImportStarted = 2;       // the task has been sent to datanode to execute
+    ImportPersisted = 5;     // all data files have been parsed and data already persisted
+    ImportAllocSegment = 10; // internal useage, no need to expose in sdk
 }
 
 enum ResourceType {

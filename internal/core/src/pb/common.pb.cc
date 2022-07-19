@@ -441,23 +441,21 @@ const char descriptor_table_protodef_common_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "ate\022\021\n\rUndefiedState\020\000\022\r\n\tExecuting\020\001\022\r\n"
   "\tCompleted\020\002*X\n\020ConsistencyLevel\022\n\n\006Stro"
   "ng\020\000\022\013\n\007Session\020\001\022\013\n\007Bounded\020\002\022\016\n\nEventu"
-  "ally\020\003\022\016\n\nCustomized\020\004*\257\001\n\013ImportState\022\021"
-  "\n\rImportPending\020\000\022\020\n\014ImportFailed\020\001\022\021\n\rI"
-  "mportStarted\020\002\022\024\n\020ImportDownloaded\020\003\022\020\n\014"
-  "ImportParsed\020\004\022\023\n\017ImportPersisted\020\005\022\023\n\017I"
-  "mportCompleted\020\006\022\026\n\022ImportAllocSegment\020\n"
-  "*\036\n\014ResourceType\022\016\n\nCollection\020\000*\335\001\n\021Res"
-  "ourcePrivilege\022\020\n\014PrivilegeAll\020\000\022\023\n\017Priv"
-  "ilegeCreate\020\001\022\021\n\rPrivilegeDrop\020\002\022\022\n\016Priv"
-  "ilegeAlter\020\003\022\021\n\rPrivilegeRead\020\004\022\021\n\rPrivi"
-  "legeLoad\020\005\022\024\n\020PrivilegeRelease\020\006\022\024\n\020Priv"
-  "ilegeCompact\020\007\022\023\n\017PrivilegeInsert\020\010\022\023\n\017P"
-  "rivilegeDelete\020\t:^\n\021privilege_ext_obj\022\037."
-  "google.protobuf.MessageOptions\030\351\007 \001(\0132!."
-  "milvus.proto.common.PrivilegeExtBW\n\016io.m"
-  "ilvus.grpcB\013CommonProtoP\001Z3github.com/mi"
-  "lvus-io/milvus/internal/proto/commonpb\240\001"
-  "\001b\006proto3"
+  "ally\020\003\022\016\n\nCustomized\020\004*r\n\013ImportState\022\021\n"
+  "\rImportPending\020\000\022\020\n\014ImportFailed\020\001\022\021\n\rIm"
+  "portStarted\020\002\022\023\n\017ImportPersisted\020\005\022\026\n\022Im"
+  "portAllocSegment\020\n*\036\n\014ResourceType\022\016\n\nCo"
+  "llection\020\000*\335\001\n\021ResourcePrivilege\022\020\n\014Priv"
+  "ilegeAll\020\000\022\023\n\017PrivilegeCreate\020\001\022\021\n\rPrivi"
+  "legeDrop\020\002\022\022\n\016PrivilegeAlter\020\003\022\021\n\rPrivil"
+  "egeRead\020\004\022\021\n\rPrivilegeLoad\020\005\022\024\n\020Privileg"
+  "eRelease\020\006\022\024\n\020PrivilegeCompact\020\007\022\023\n\017Priv"
+  "ilegeInsert\020\010\022\023\n\017PrivilegeDelete\020\t:^\n\021pr"
+  "ivilege_ext_obj\022\037.google.protobuf.Messag"
+  "eOptions\030\351\007 \001(\0132!.milvus.proto.common.Pr"
+  "ivilegeExtBW\n\016io.milvus.grpcB\013CommonProt"
+  "oP\001Z3github.com/milvus-io/milvus/interna"
+  "l/proto/commonpb\240\001\001b\006proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_common_2eproto_deps[1] = {
   &::descriptor_table_google_2fprotobuf_2fdescriptor_2eproto,
@@ -478,7 +476,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_com
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_common_2eproto_once;
 static bool descriptor_table_common_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_common_2eproto = {
-  &descriptor_table_common_2eproto_initialized, descriptor_table_protodef_common_2eproto, "common.proto", 4769,
+  &descriptor_table_common_2eproto_initialized, descriptor_table_protodef_common_2eproto, "common.proto", 4707,
   &descriptor_table_common_2eproto_once, descriptor_table_common_2eproto_sccs, descriptor_table_common_2eproto_deps, 11, 1,
   schemas, file_default_instances, TableStruct_common_2eproto::offsets,
   file_level_metadata_common_2eproto, 11, file_level_enum_descriptors_common_2eproto, file_level_service_descriptors_common_2eproto,
@@ -747,10 +745,7 @@ bool ImportState_IsValid(int value) {
     case 0:
     case 1:
     case 2:
-    case 3:
-    case 4:
     case 5:
-    case 6:
     case 10:
       return true;
     default:

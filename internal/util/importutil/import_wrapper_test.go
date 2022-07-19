@@ -470,6 +470,7 @@ func Test_ImportColumnBased_numpy(t *testing.T) {
 	err = cm.Write(filePath, content)
 	assert.NoError(t, err)
 
+	importResult.State = commonpb.ImportState_ImportStarted
 	wrapper = NewImportWrapper(ctx, sampleSchema(), 2, 1, idAllocator, cm, flushFunc, importResult, reportFunc)
 	files = make([]string, 0)
 	files = append(files, filePath)
