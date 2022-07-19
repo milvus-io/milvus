@@ -452,24 +452,26 @@ func (m *importManager) updateTaskState(ir *rootcoordpb.ImportResult) (*datapb.I
 			return nil, errors.New("trying to update an already failed task " + strconv.FormatInt(ir.GetTaskId(), 10))
 		}
 		found = true
-		v.State.StateCode = ir.GetState()
-		v.State.Segments = ir.GetSegments()
-		v.State.RowCount = ir.GetRowCount()
-		v.State.RowIds = ir.AutoIds
+		// Meta persist should be done before memory objs change.
+		toPersistImportTaskInfo := cloneImportTaskInfo(v)
+		toPersistImportTaskInfo.State.StateCode = ir.GetState()
+		toPersistImportTaskInfo.State.Segments = ir.GetSegments()
+		toPersistImportTaskInfo.State.RowCount = ir.GetRowCount()
+		toPersistImportTaskInfo.State.RowIds = ir.AutoIds
 		for _, kv := range ir.GetInfos() {
 			if kv.GetKey() == FailedReason {
-				v.State.ErrorMessage = kv.GetValue()
+				toPersistImportTaskInfo.State.ErrorMessage = kv.GetValue()
 				break
 			}
 		}
-		// TODO(@wayblink): Update Etcd before memory.
 		// Update task in task store.
-		if err := m.persistTaskInfo(v); err != nil {
+		if err := m.persistTaskInfo(toPersistImportTaskInfo); err != nil {
 			log.Error("failed to update import task",
 				zap.Int64("task ID", v.GetId()),
 				zap.Error(err))
 			return nil, err
 		}
+		m.workingTasks[ir.GetTaskId()] = toPersistImportTaskInfo
 	}
 
 	if !found {
@@ -502,15 +504,17 @@ func (m *importManager) appendTaskSegments(taskID int64, segIDs []int64) error {
 	defer m.workingLock.Unlock()
 	ok := false
 	if v, ok = m.workingTasks[taskID]; ok {
-		v.State.Segments = append(v.GetState().GetSegments(), segIDs...)
+		// Meta persist should be done before memory objs change.
+		toPersistImportTaskInfo := cloneImportTaskInfo(v)
+		toPersistImportTaskInfo.State.Segments = append(v.GetState().GetSegments(), segIDs...)
 		// Update task in task store.
-		// TODO(@wayblink): Update Etcd before memory.
 		if err := m.persistTaskInfo(v); err != nil {
 			log.Error("failed to update import task",
 				zap.Int64("task ID", v.GetId()),
 				zap.Error(err))
 			return err
 		}
+		m.workingTasks[taskID] = toPersistImportTaskInfo
 	}
 
 	if !ok {
@@ -821,4 +825,22 @@ func (m *importManager) GetImportFailedSegmentIDs() ([]int64, error) {
 	}
 	m.workingLock.RUnlock()
 	return ret, nil
+}
+
+func cloneImportTaskInfo(taskInfo *datapb.ImportTaskInfo) *datapb.ImportTaskInfo {
+	cloned := &datapb.ImportTaskInfo{
+		Id:            taskInfo.GetId(),
+		DatanodeId:    taskInfo.GetDatanodeId(),
+		CollectionId:  taskInfo.GetCollectionId(),
+		PartitionId:   taskInfo.GetPartitionId(),
+		ChannelNames:  taskInfo.GetChannelNames(),
+		Bucket:        taskInfo.GetBucket(),
+		RowBased:      taskInfo.GetRowBased(),
+		Files:         taskInfo.GetFiles(),
+		CreateTs:      taskInfo.GetCreateTs(),
+		State:         taskInfo.GetState(),
+		DataQueryable: taskInfo.GetDataQueryable(),
+		DataIndexed:   taskInfo.GetDataIndexed(),
+	}
+	return cloned
 }
