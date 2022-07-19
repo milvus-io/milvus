@@ -49,30 +49,33 @@ func TestImportManager_NewImportManager(t *testing.T) {
 		return globalCount, 0, nil
 	}
 	Params.RootCoordCfg.ImportTaskSubPath = "test_import_task"
-	Params.RootCoordCfg.ImportTaskExpiration = 100
+	Params.RootCoordCfg.ImportTaskExpiration = 50
+	Params.RootCoordCfg.ImportTaskRetention = 200
 	checkPendingTasksInterval = 100
 	expireOldTasksInterval = 100
 	mockKv := &kv.MockMetaKV{}
-	mockKv.InMemKv = make(map[string]string)
+	mockKv.InMemKv = sync.Map{}
 	ti1 := &datapb.ImportTaskInfo{
 		Id: 100,
 		State: &datapb.ImportTaskState{
 			StateCode: commonpb.ImportState_ImportPending,
 		},
+		CreateTs: time.Now().Unix() - 100,
 	}
 	ti2 := &datapb.ImportTaskInfo{
 		Id: 200,
 		State: &datapb.ImportTaskState{
 			StateCode: commonpb.ImportState_ImportPersisted,
 		},
+		CreateTs: time.Now().Unix() - 100,
 	}
 	taskInfo1, err := proto.Marshal(ti1)
 	assert.NoError(t, err)
 	taskInfo2, err := proto.Marshal(ti2)
 	assert.NoError(t, err)
-	mockKv.SaveWithLease(BuildImportTaskKey(1), "value", 1)
-	mockKv.SaveWithLease(BuildImportTaskKey(2), string(taskInfo1), 2)
-	mockKv.SaveWithLease(BuildImportTaskKey(3), string(taskInfo2), 3)
+	mockKv.Save(BuildImportTaskKey(1), "value")
+	mockKv.Save(BuildImportTaskKey(100), string(taskInfo1))
+	mockKv.Save(BuildImportTaskKey(200), string(taskInfo2))
 
 	mockCallImportServiceErr := false
 	callImportServiceFn := func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
@@ -89,9 +92,6 @@ func TestImportManager_NewImportManager(t *testing.T) {
 			},
 		}, nil
 	}
-
-	time.Sleep(1 * time.Second)
-
 	var wg sync.WaitGroup
 	wg.Add(1)
 	t.Run("working task expired", func(t *testing.T) {
@@ -100,12 +100,14 @@ func TestImportManager_NewImportManager(t *testing.T) {
 		defer cancel()
 		mgr := newImportManager(ctx, mockKv, idAlloc, callImportServiceFn, nil)
 		assert.NotNil(t, mgr)
-		mgr.init(ctx)
+		assert.NoError(t, mgr.loadFromTaskStore())
 		var wgLoop sync.WaitGroup
 		wgLoop.Add(2)
+		assert.Equal(t, 1, len(mgr.workingTasks))
 		mgr.expireOldTasksLoop(&wgLoop, func(ctx context.Context, int64 int64, int64s []int64) error {
 			return nil
 		})
+		assert.Equal(t, 0, len(mgr.workingTasks))
 		mgr.sendOutTasksLoop(&wgLoop)
 		wgLoop.Wait()
 	})
@@ -149,9 +151,9 @@ func TestImportManager_NewImportManager(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
 		defer cancel()
 		mgr := newImportManager(ctx, mockKv, idAlloc, callImportServiceFn, nil)
-		mockKv.SaveWithIgnoreLeaseMockErr = true
+		mockKv.SaveMockErr = true
 		defer func() {
-			mockKv.SaveWithIgnoreLeaseMockErr = false
+			mockKv.SaveMockErr = false
 		}()
 		assert.NotNil(t, mgr)
 		mgr.init(context.TODO())
@@ -166,9 +168,9 @@ func TestImportManager_NewImportManager(t *testing.T) {
 		assert.NotNil(t, mgr)
 		mgr.init(context.TODO())
 		func() {
-			mockKv.SaveWithIgnoreLeaseMockErr = true
+			mockKv.SaveMockErr = true
 			defer func() {
-				mockKv.SaveWithIgnoreLeaseMockErr = false
+				mockKv.SaveMockErr = false
 			}()
 			mgr.sendOutTasks(context.TODO())
 		}()
@@ -176,7 +178,7 @@ func TestImportManager_NewImportManager(t *testing.T) {
 		func() {
 			mockCallImportServiceErr = true
 			defer func() {
-				mockKv.SaveWithIgnoreLeaseMockErr = false
+				mockKv.SaveMockErr = false
 			}()
 			mgr.sendOutTasks(context.TODO())
 		}()
@@ -194,14 +196,16 @@ func TestImportManager_NewImportManager(t *testing.T) {
 			State: &datapb.ImportTaskState{
 				StateCode: commonpb.ImportState_ImportPending,
 			},
-			CreateTs: time.Now().Unix() - 10,
+			CreateTs: time.Now().Unix() + 1,
 		})
-		mgr.loadFromTaskStore()
+		assert.NoError(t, mgr.loadFromTaskStore())
 		var wgLoop sync.WaitGroup
 		wgLoop.Add(2)
+		assert.Equal(t, 2, len(mgr.pendingTasks))
 		mgr.expireOldTasksLoop(&wgLoop, func(ctx context.Context, int64 int64, int64s []int64) error {
 			return nil
 		})
+		assert.Equal(t, 1, len(mgr.pendingTasks))
 		mgr.sendOutTasksLoop(&wgLoop)
 		wgLoop.Wait()
 	})
@@ -220,11 +224,94 @@ func TestImportManager_NewImportManager(t *testing.T) {
 			return nil
 		})
 		mgr.sendOutTasksLoop(&wgLoop)
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 		wgLoop.Wait()
 	})
 
 	wg.Wait()
+}
+
+func TestImportManager_TestEtcdCleanUp(t *testing.T) {
+	var countLock sync.RWMutex
+	var globalCount = typeutil.UniqueID(0)
+
+	var idAlloc = func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
+		countLock.Lock()
+		defer countLock.Unlock()
+		globalCount++
+		return globalCount, 0, nil
+	}
+	Params.RootCoordCfg.ImportTaskSubPath = "test_import_task"
+	Params.RootCoordCfg.ImportTaskExpiration = 50
+	Params.RootCoordCfg.ImportTaskRetention = 200
+	checkPendingTasksInterval = 100
+	expireOldTasksInterval = 100
+	mockKv := &kv.MockMetaKV{}
+	mockKv.InMemKv = sync.Map{}
+	ti1 := &datapb.ImportTaskInfo{
+		Id: 100,
+		State: &datapb.ImportTaskState{
+			StateCode: commonpb.ImportState_ImportPending,
+		},
+		CreateTs: time.Now().Unix() - 500,
+	}
+	ti2 := &datapb.ImportTaskInfo{
+		Id: 200,
+		State: &datapb.ImportTaskState{
+			StateCode: commonpb.ImportState_ImportPersisted,
+		},
+		CreateTs: time.Now().Unix() - 500,
+	}
+	ti3 := &datapb.ImportTaskInfo{
+		Id: 300,
+		State: &datapb.ImportTaskState{
+			StateCode: commonpb.ImportState_ImportPersisted,
+		},
+		CreateTs: time.Now().Unix() - 100,
+	}
+	taskInfo3, err := proto.Marshal(ti3)
+	assert.NoError(t, err)
+	taskInfo1, err := proto.Marshal(ti1)
+	assert.NoError(t, err)
+	taskInfo2, err := proto.Marshal(ti2)
+	assert.NoError(t, err)
+	mockKv.Save(BuildImportTaskKey(100), string(taskInfo1))
+	mockKv.Save(BuildImportTaskKey(200), string(taskInfo2))
+	mockKv.Save(BuildImportTaskKey(300), string(taskInfo3))
+
+	mockCallImportServiceErr := false
+	callImportServiceFn := func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
+		if mockCallImportServiceErr {
+			return &datapb.ImportTaskResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+				},
+			}, errors.New("mock err")
+		}
+		return &datapb.ImportTaskResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+		}, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	mgr := newImportManager(ctx, mockKv, idAlloc, callImportServiceFn, nil)
+	assert.NotNil(t, mgr)
+	assert.NoError(t, mgr.loadFromTaskStore())
+	var wgLoop sync.WaitGroup
+	wgLoop.Add(2)
+	keys, _, _ := mockKv.LoadWithPrefix("")
+	// All 3 tasks are stored in Etcd.
+	assert.Equal(t, 3, len(keys))
+	mgr.expireOldTasksLoop(&wgLoop, func(ctx context.Context, int64 int64, int64s []int64) error {
+		return nil
+	})
+	keys, _, _ = mockKv.LoadWithPrefix("")
+	// task 1 and task 2 have passed retention period.
+	assert.Equal(t, 1, len(keys))
+	mgr.sendOutTasksLoop(&wgLoop)
 }
 
 func TestImportManager_ImportJob(t *testing.T) {
@@ -240,7 +327,7 @@ func TestImportManager_ImportJob(t *testing.T) {
 	Params.RootCoordCfg.ImportTaskSubPath = "test_import_task"
 	colID := int64(100)
 	mockKv := &kv.MockMetaKV{}
-	mockKv.InMemKv = make(map[string]string)
+	mockKv.InMemKv = sync.Map{}
 	mgr := newImportManager(context.TODO(), mockKv, idAlloc, nil, nil)
 	resp := mgr.importJob(context.TODO(), nil, colID, 0)
 	assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
@@ -350,7 +437,7 @@ func TestImportManager_AllDataNodesBusy(t *testing.T) {
 	Params.RootCoordCfg.ImportTaskSubPath = "test_import_task"
 	colID := int64(100)
 	mockKv := &kv.MockMetaKV{}
-	mockKv.InMemKv = make(map[string]string)
+	mockKv.InMemKv = sync.Map{}
 	rowReq := &milvuspb.ImportRequest{
 		CollectionName: "c1",
 		PartitionName:  "p1",
@@ -432,7 +519,7 @@ func TestImportManager_TaskState(t *testing.T) {
 	Params.RootCoordCfg.ImportTaskSubPath = "test_import_task"
 	colID := int64(100)
 	mockKv := &kv.MockMetaKV{}
-	mockKv.InMemKv = make(map[string]string)
+	mockKv.InMemKv = sync.Map{}
 	fn := func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
 		return &datapb.ImportTaskResponse{
 			Status: &commonpb.Status{
@@ -502,7 +589,7 @@ func TestImportManager_AllocFail(t *testing.T) {
 	Params.RootCoordCfg.ImportTaskSubPath = "test_import_task"
 	colID := int64(100)
 	mockKv := &kv.MockMetaKV{}
-	mockKv.InMemKv = make(map[string]string)
+	mockKv.InMemKv = sync.Map{}
 	fn := func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
 		return &datapb.ImportTaskResponse{
 			Status: &commonpb.Status{
@@ -536,7 +623,7 @@ func TestImportManager_ListAllTasks(t *testing.T) {
 	Params.RootCoordCfg.ImportTaskSubPath = "test_import_task"
 	colID := int64(100)
 	mockKv := &kv.MockMetaKV{}
-	mockKv.InMemKv = make(map[string]string)
+	mockKv.InMemKv = sync.Map{}
 
 	// reject some tasks so there are 3 tasks left in pending list
 	fn := func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {

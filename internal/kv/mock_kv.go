@@ -19,6 +19,7 @@ package kv
 import (
 	"errors"
 	"strings"
+	"sync"
 
 	"github.com/milvus-io/milvus/internal/log"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -26,12 +27,12 @@ import (
 )
 
 type MockBaseKV struct {
-	InMemKv map[string]string
+	InMemKv sync.Map
 }
 
 func (m *MockBaseKV) Load(key string) (string, error) {
-	if val, ok := m.InMemKv[key]; ok {
-		return val, nil
+	if val, ok := m.InMemKv.Load(key); ok {
+		return val.(string), nil
 	}
 	return "", nil
 }
@@ -45,7 +46,9 @@ func (m *MockBaseKV) LoadWithPrefix(key string) ([]string, []string, error) {
 }
 
 func (m *MockBaseKV) Save(key string, value string) error {
-	panic("not implemented") // TODO: Implement
+	m.InMemKv.Store(key, value)
+	log.Debug("doing Save", zap.String("key", key))
+	return nil
 }
 
 func (m *MockBaseKV) MultiSave(kvs map[string]string) error {
@@ -53,7 +56,9 @@ func (m *MockBaseKV) MultiSave(kvs map[string]string) error {
 }
 
 func (m *MockBaseKV) Remove(key string) error {
-	panic("not implemented") // TODO: Implement
+	m.InMemKv.Delete(key)
+	log.Debug("doing Remove", zap.String("key", key))
+	return nil
 }
 
 func (m *MockBaseKV) MultiRemove(keys []string) error {
@@ -87,8 +92,8 @@ func (m *MockTxnKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, remova
 type MockMetaKV struct {
 	MockTxnKV
 
-	LoadWithPrefixMockErr      bool
-	SaveWithIgnoreLeaseMockErr bool
+	LoadWithPrefixMockErr bool
+	SaveMockErr           bool
 }
 
 func (m *MockMetaKV) GetPath(key string) string {
@@ -99,14 +104,15 @@ func (m *MockMetaKV) LoadWithPrefix(prefix string) ([]string, []string, error) {
 	if m.LoadWithPrefixMockErr {
 		return nil, nil, errors.New("mock err")
 	}
-	keys := make([]string, 0, len(m.InMemKv))
-	values := make([]string, 0, len(m.InMemKv))
-	for k, v := range m.InMemKv {
-		if strings.HasPrefix(k, prefix) {
-			keys = append(keys, k)
-			values = append(values, v)
+	keys := make([]string, 0)
+	values := make([]string, 0)
+	m.InMemKv.Range(func(key, value interface{}) bool {
+		if strings.HasPrefix(key.(string), prefix) {
+			keys = append(keys, key.(string))
+			values = append(values, value.(string))
 		}
-	}
+		return true
+	})
 	return keys, values, nil
 }
 
@@ -135,16 +141,16 @@ func (m *MockMetaKV) WatchWithRevision(key string, revision int64) clientv3.Watc
 }
 
 func (m *MockMetaKV) SaveWithLease(key, value string, id clientv3.LeaseID) error {
-	m.InMemKv[key] = value
+	m.InMemKv.Store(key, value)
 	log.Debug("Doing SaveWithLease", zap.String("key", key))
 	return nil
 }
 
 func (m *MockMetaKV) SaveWithIgnoreLease(key, value string) error {
-	if m.SaveWithIgnoreLeaseMockErr {
+	if m.SaveMockErr {
 		return errors.New("mock error")
 	}
-	m.InMemKv[key] = value
+	m.InMemKv.Store(key, value)
 	log.Debug("Doing SaveWithIgnoreLease", zap.String("key", key))
 	return nil
 }
