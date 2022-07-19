@@ -13,6 +13,7 @@
 #include <boost/format.hpp>
 
 #include "knowhere/index/vector_index/IndexIVF.h"
+#include "knowhere/index/vector_index/IndexHNSW.h"
 #include "knowhere/index/vector_index/VecIndex.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "segcore/SegmentSealedImpl.h"
@@ -124,6 +125,9 @@ TEST(Sealed, without_predicate) {
     std::cout << "post_result" << std::endl;
     std::cout << post_result.dump(1);
     // ASSERT_EQ(ref_result.dump(1), post_result.dump(1));
+
+    sr = sealed_segment->Search(plan.get(), ph_group.get(), 0);
+    EXPECT_EQ(sr->get_total_result_count(), 0);
 }
 
 TEST(Sealed, with_predicate) {
@@ -220,6 +224,119 @@ TEST(Sealed, with_predicate) {
         ASSERT_EQ(sr->distances_[offset], 0.0);
     }
 }
+
+TEST(Sealed, with_predicate_filter_all) {
+    using namespace milvus::query;
+    using namespace milvus::segcore;
+    auto schema = std::make_shared<Schema>();
+    auto dim = 16;
+    auto topK = 5;
+    auto metric_type = MetricType::METRIC_L2;
+    auto fake_id = schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
+    auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
+    schema->set_primary_field_id(i64_fid);
+    std::string dsl = R"({
+        "bool": {
+            "must": [
+            {
+                "range": {
+                    "counter": {
+                        "GE": 42000,
+                        "LT": 41999
+                    }
+                }
+            },
+            {
+                "vector": {
+                    "fakevec": {
+                        "metric_type": "L2",
+                        "params": {
+                            "nprobe": 10
+                        },
+                        "query": "$0",
+                        "topk": 5,
+                        "round_decimal": 6
+                    }
+                }
+            }
+            ]
+        }
+    })";
+
+    auto N = ROW_COUNT;
+
+    auto dataset = DataGen(schema, N);
+    auto vec_col = dataset.get_col<float>(fake_id);
+    auto query_ptr = vec_col.data() + 42000 * dim;
+    auto plan = CreatePlan(*schema, dsl);
+    auto num_queries = 5;
+    auto ph_group_raw = CreatePlaceholderGroupFromBlob(num_queries, 16, query_ptr);
+    auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+
+    Timestamp time = 10000000;
+    std::vector<const PlaceholderGroup*> ph_group_arr = {ph_group.get()};
+
+    auto ivf_indexing = std::make_shared<knowhere::IVF>();
+
+    auto ivf_conf = knowhere::Config{{knowhere::meta::DIM, dim},
+                                 {knowhere::meta::TOPK, topK},
+                                 {knowhere::IndexParams::nlist, 100},
+                                 {knowhere::IndexParams::nprobe, 10},
+                                 {knowhere::Metric::TYPE, knowhere::Metric::L2},
+                                 {knowhere::meta::DEVICEID, 0}};
+
+    auto database = knowhere::GenDataset(N, dim, vec_col.data());
+    ivf_indexing->Train(database, ivf_conf);
+    ivf_indexing->AddWithoutIds(database, ivf_conf);
+
+    EXPECT_EQ(ivf_indexing->Count(), N);
+    EXPECT_EQ(ivf_indexing->Dim(), dim);
+
+    LoadIndexInfo load_info;
+    load_info.field_id = fake_id.get();
+    load_info.index = ivf_indexing;
+    load_info.index_params["metric_type"] = "L2";
+
+    // load index for vec field, load raw data for scalar filed
+    auto ivf_sealed_segment = SealedCreator(schema, dataset);
+    ivf_sealed_segment->DropFieldData(fake_id);
+    ivf_sealed_segment->LoadIndex(load_info);
+
+    auto sr = ivf_sealed_segment->Search(plan.get(), ph_group.get(), time);
+    EXPECT_EQ(sr->get_total_result_count(), 0);
+
+    auto hnsw_conf = knowhere::Config{{knowhere::meta::DIM, dim},
+                                 {knowhere::meta::TOPK, topK},
+				{knowhere::IndexParams::M, 16},   
+				{knowhere::IndexParams::efConstruction, 200},
+            			{knowhere::IndexParams::ef, 200}, 
+                                 {knowhere::Metric::TYPE, knowhere::Metric::L2},
+                                 {knowhere::meta::DEVICEID, 0}};
+
+
+    auto hnsw_indexing = std::make_shared<knowhere::IndexHNSW>();
+
+    hnsw_indexing->Train(database, hnsw_conf);
+    hnsw_indexing->AddWithoutIds(database, hnsw_conf);
+
+    EXPECT_EQ(hnsw_indexing->Count(), N);
+    EXPECT_EQ(hnsw_indexing->Dim(), dim);
+
+    LoadIndexInfo hnsw_load_info;
+    hnsw_load_info.field_id = fake_id.get();
+    hnsw_load_info.index = hnsw_indexing;
+    hnsw_load_info.index_params["metric_type"] = "L2";
+
+    // load index for vec field, load raw data for scalar filed
+    auto hnsw_sealed_segment = SealedCreator(schema, dataset);
+    hnsw_sealed_segment ->DropFieldData(fake_id);
+    hnsw_sealed_segment ->LoadIndex(hnsw_load_info);
+
+    auto sr2 = hnsw_sealed_segment->Search(plan.get(), ph_group.get(), time);
+    EXPECT_EQ(sr2->get_total_result_count(), 0);
+
+}
+
 
 TEST(Sealed, LoadFieldData) {
     auto dim = 16;
@@ -616,6 +733,9 @@ TEST(Sealed, BF) {
     EXPECT_GT(ves[0].first, 0);
     EXPECT_LE(ves[0].first, N);
     EXPECT_LE(ves[0].second, dim);
+
+    auto result2 = segment->Search(plan.get(), ph_group.get(), 0);
+    EXPECT_EQ(result2->get_total_result_count(), 0);
 }
 
 TEST(Sealed, BF_Overflow) {

@@ -98,6 +98,11 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
     segment->mask_with_timestamps(bitset_holder, timestamp_);
 
     segment->mask_with_delete(bitset_holder, active_count, timestamp_);
+    // if bitset_holder is all 1's, we got empty result
+    if (bitset_holder.count() == bitset_holder.size()) {
+        search_result_opt_ = empty_search_result(num_queries, node.search_info_);
+        return;
+    }
     BitsetView final_view = bitset_holder;
     segment->vector_search(active_count, node.search_info_, src_data, num_queries, timestamp_, final_view,
                            search_result);
@@ -128,6 +133,12 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
     segment->mask_with_timestamps(bitset_holder, timestamp_);
 
     segment->mask_with_delete(bitset_holder, active_count, timestamp_);
+    // if bitset_holder is all 1's, we got empty result
+    if (bitset_holder.count() == bitset_holder.size()) {
+        retrieve_result_opt_ = std::move(retrieve_result);
+        return;
+    }
+
     BitsetView final_view = bitset_holder;
     auto seg_offsets = segment->search_ids(final_view, timestamp_);
     retrieve_result.result_offsets_.assign((int64_t*)seg_offsets.data(),
