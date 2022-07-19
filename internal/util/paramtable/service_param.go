@@ -17,14 +17,17 @@
 package paramtable
 
 import (
+	"net/url"
 	"os"
 	"path"
 	"strconv"
 	"strings"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/streamnative/pulsarctl/pkg/cmdutils"
+	"go.uber.org/zap"
 )
 
 var pulsarOnce sync.Once
@@ -124,7 +127,7 @@ func (p *EtcdConfig) initDataDir() {
 }
 
 func (p *EtcdConfig) initEndpoints() {
-	endpoints, err := p.Base.Load("_EtcdEndpoints")
+	endpoints, err := p.Base.Load("etcd.endpoints")
 	if err != nil {
 		panic(err)
 	}
@@ -217,19 +220,25 @@ func (p *PulsarConfig) init(base *BaseTable) {
 }
 
 func (p *PulsarConfig) initAddress() {
-	addr, err := p.Base.Load("_PulsarAddress")
-	if err != nil {
-		panic(err)
+	addr := p.Base.LoadWithDefault("pulsar.address", "localhost")
+	// for compatible
+	if strings.Contains(addr, ":") {
+		p.Address = addr
+	} else {
+		port := p.Base.LoadWithDefault("pulsar.port", "6650")
+		p.Address = "pulsar://" + addr + ":" + port
 	}
-	p.Address = addr
 }
 
 func (p *PulsarConfig) initWebAddress() {
-	addr, err := p.Base.Load("_PulsarWebAddress")
+	pulsarURL, err := url.ParseRequestURI(p.Address)
 	if err != nil {
-		panic(err)
+		p.WebAddress = ""
+		log.Info("failed to parse pulsar config, assume pulsar not used", zap.Error(err))
+	} else {
+		webport := p.Base.LoadWithDefault("pulsar.webport", "80")
+		p.WebAddress = "http://" + pulsarURL.Hostname() + ":" + webport
 	}
-	p.WebAddress = addr
 	pulsarOnce.Do(func() {
 		cmdutils.PulsarCtlConfig.WebServiceURL = p.WebAddress
 	})
@@ -269,11 +278,7 @@ func (k *KafkaConfig) init(base *BaseTable) {
 }
 
 func (k *KafkaConfig) initAddress() {
-	addr, err := k.Base.Load("_KafkaBrokerList")
-	if err != nil {
-		panic(err)
-	}
-	k.Address = addr
+	k.Address = k.Base.LoadWithDefault("kafka.brokerList", "")
 }
 
 func (k *KafkaConfig) initSaslUsername() {
@@ -307,11 +312,7 @@ func (p *RocksmqConfig) init(base *BaseTable) {
 }
 
 func (p *RocksmqConfig) initPath() {
-	path, err := p.Base.Load("_RocksmqPath")
-	if err != nil {
-		panic(err)
-	}
-	p.Path = path
+	p.Path = p.Base.LoadWithDefault("rocksmq.path", "")
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -343,11 +344,17 @@ func (p *MinioConfig) init(base *BaseTable) {
 }
 
 func (p *MinioConfig) initAddress() {
-	endpoint, err := p.Base.Load("_MinioAddress")
+	host, err := p.Base.Load("minio.Address")
 	if err != nil {
 		panic(err)
 	}
-	p.Address = endpoint
+	// for compatible
+	if strings.Contains(host, ":") {
+		p.Address = host
+	} else {
+		port := p.Base.LoadWithDefault("minio.port", "9000")
+		p.Address = host + ":" + port
+	}
 }
 
 func (p *MinioConfig) initAccessKeyID() {
