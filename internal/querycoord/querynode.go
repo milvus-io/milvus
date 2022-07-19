@@ -369,7 +369,7 @@ func (qn *queryNode) getNodeInfo() (Node, error) {
 
 func (qn *queryNode) syncReplicaSegments(ctx context.Context, in *querypb.SyncReplicaSegmentsRequest) error {
 	if !qn.isOnline() {
-		return errors.New("ReleaseSegments: queryNode is offline")
+		return errors.New("SyncSegments: queryNode is offline")
 	}
 
 	status, err := qn.client.SyncReplicaSegments(ctx, in)
