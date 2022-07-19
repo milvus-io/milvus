@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
@@ -224,13 +225,15 @@ func TestNewQueryNode(t *testing.T) {
 func TestReleaseCollectionOnOfflineNode(t *testing.T) {
 	refreshParams()
 	baseCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 	kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 
 	node, err := newQueryNode(baseCtx, "test", 100, kv)
-	assert.Nil(t, err)
+	require.Nil(t, err)
+	defer node.stop()
 
 	node.setState(offline)
 	req := &querypb.ReleaseCollectionRequest{
@@ -242,8 +245,31 @@ func TestReleaseCollectionOnOfflineNode(t *testing.T) {
 
 	err = node.releaseCollection(baseCtx, req)
 	assert.Nil(t, err)
+}
 
-	cancel()
+func TestSyncReplicaSegmentsOnOfflineNode(t *testing.T) {
+	refreshParams()
+	baseCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	assert.Nil(t, err)
+	defer etcdCli.Close()
+	kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
+
+	node, err := newQueryNode(baseCtx, "test", 101, kv)
+	require.Nil(t, err)
+	defer node.stop()
+
+	node.setState(offline)
+	req := &querypb.ReleaseCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_ReleaseCollection,
+		},
+		CollectionID: defaultCollectionID,
+	}
+
+	err = node.releaseCollection(baseCtx, req)
+	assert.Nil(t, err)
 }
 
 func TestSealedSegmentChangeAfterQueryNodeStop(t *testing.T) {
