@@ -1038,7 +1038,7 @@ func (p *dataCoordConfig) initGlobalCompactionInterval() {
 
 // -- GC --
 func (p *dataCoordConfig) initEnableGarbageCollection() {
-	p.EnableGarbageCollection = p.Base.ParseBool("dataCoord.enableGarbageCollection", false)
+	p.EnableGarbageCollection = p.Base.ParseBool("dataCoord.enableGarbageCollection", true)
 }
 
 func (p *dataCoordConfig) initGCInterval() {

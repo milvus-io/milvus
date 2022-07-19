@@ -209,7 +209,7 @@ dataCoord:
   address: localhost
   port: 13333
   enableCompaction: true # Enable data segment compression
-  enableGarbageCollection: false
+  enableGarbageCollection: true
 
   segment:
     maxSize: 512 # Maximum size of a segment in MB
