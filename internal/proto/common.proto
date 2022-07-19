@@ -57,6 +57,7 @@ enum ErrorCode {
     ListPolicyFailure = 44;
     NotShardLeader = 45;
     NoReplicaAvailable = 46;
+    SegmentNotFound = 47;
 
     // internal error code.
     DDRequestRace = 1000;

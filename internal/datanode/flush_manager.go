@@ -18,6 +18,7 @@ package datanode
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path"
 	"strconv"
@@ -799,6 +800,16 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 				return fmt.Errorf(err.Error())
 			}
 
+			// Segment not found during stale segment flush. Segment might get compacted already.
+			// Stop retry and still proceed to the end, ignoring this error.
+			if !pack.flushed && rsp.GetErrorCode() == commonpb.ErrorCode_SegmentNotFound {
+				log.Warn("stale segment not found, could be compacted",
+					zap.Int64("segment ID", pack.segmentID))
+				log.Warn("failed to SaveBinlogPaths",
+					zap.Int64("segment ID", pack.segmentID),
+					zap.Error(errors.New(rsp.GetReason())))
+				return nil
+			}
 			// meta error, datanode handles a virtual channel does not belong here
 			if rsp.GetErrorCode() == commonpb.ErrorCode_MetaFailed {
 				log.Warn("meta error found, skip sync and start to drop virtual channel", zap.String("channel", dsService.vchannelName))
@@ -811,11 +822,12 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 			return nil
 		}, opts...)
 		if err != nil {
-			log.Warn("failed to SaveBinlogPaths", zap.Error(err))
+			log.Warn("failed to SaveBinlogPaths",
+				zap.Int64("segment ID", pack.segmentID),
+				zap.Error(err))
 			// TODO change to graceful stop
 			panic(err)
 		}
-
 		if pack.flushed || pack.dropped {
 			dsService.replica.segmentFlushed(pack.segmentID)
 		}
