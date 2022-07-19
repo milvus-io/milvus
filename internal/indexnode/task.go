@@ -468,6 +468,12 @@ func (it *IndexBuildTask) buildIndex(ctx context.Context) ([]*storage.Blob, erro
 	}
 	it.tr.Record("index serialize done")
 
+	// use serialized size before encoding
+	it.serializedSize = 0
+	for _, blob := range indexBlobs {
+		it.serializedSize += uint64(len(blob.Value))
+	}
+
 	// early release index for gc, and we can ensure that Delete is idempotent.
 	if err := it.index.Delete(); err != nil {
 		log.Error("IndexNode IndexBuildTask Execute CIndexDelete failed",
@@ -499,10 +505,6 @@ func (it *IndexBuildTask) buildIndex(ctx context.Context) ([]*storage.Blob, erro
 
 func (it *IndexBuildTask) saveIndex(ctx context.Context, blobs []*storage.Blob) error {
 	blobCnt := len(blobs)
-	it.serializedSize = 0
-	for i := range blobs {
-		it.serializedSize += uint64(len(blobs[i].Value))
-	}
 
 	getSavePathByKey := func(key string) string {
 		return path.Join(Params.IndexNodeCfg.IndexStorageRootPath, strconv.Itoa(int(it.req.IndexBuildID)), strconv.Itoa(int(it.req.Version)),
