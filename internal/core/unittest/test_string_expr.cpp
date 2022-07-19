@@ -531,9 +531,9 @@ TEST(AlwaysTrueStringPlan, SearchWithOutputFields) {
     std::vector<const PlaceholderGroup*> ph_group_arr = {ph_group.get()};
 
     query::dataset::SearchDataset search_dataset{
-        knowhere::metric::L2,   //
-        num_queries,            //
-        topk,                   //
+        knowhere::metric::L2,  //
+        num_queries,           //
+        topk,                  //
         round_decimal,
         dim,       //
         query_ptr  //
