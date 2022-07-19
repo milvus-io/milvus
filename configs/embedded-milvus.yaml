@@ -170,7 +170,7 @@ queryNode:
       maxParallelism: 1024 # Maximum number of tasks executed in parallel in the flowgraph
   # Segcore will divide a segment into multiple chunks.
   segcore:
-    chunkRows: 32768 # The number of vectors in a chunk.
+    chunkRows: 1024 # The number of vectors in a chunk.
 
   cache:
     enabled: true
