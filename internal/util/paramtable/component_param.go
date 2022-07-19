@@ -791,7 +791,7 @@ func (p *queryNodeConfig) initFlowGraphMaxParallelism() {
 }
 
 func (p *queryNodeConfig) initSmallIndexParams() {
-	p.ChunkRows = p.Base.ParseInt64WithDefault("queryNode.segcore.chunkRows", 32768)
+	p.ChunkRows = p.Base.ParseInt64WithDefault("queryNode.segcore.chunkRows", 1024)
 	if p.ChunkRows < 1024 {
 		log.Warn("chunk rows can not be less than 1024, force set to 1024", zap.Any("current", p.ChunkRows))
 		p.ChunkRows = 1024
