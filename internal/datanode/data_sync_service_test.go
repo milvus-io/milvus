@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
 var dataSyncServiceTestDir = "/tmp/milvus_test/data_sync_service"
@@ -467,4 +468,33 @@ func TestClearGlobalFlushingCache(t *testing.T) {
 	assert.False(t, cache.checkIfCached(2))
 	assert.False(t, cache.checkIfCached(3))
 	assert.True(t, cache.checkIfCached(4))
+}
+
+func TestGetDmlChannelPositionByBroadcast(t *testing.T) {
+	delay := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
+	ctx, cancel := context.WithDeadline(context.Background(), delay)
+	defer cancel()
+	factory := dependency.NewDefaultFactory(true)
+
+	dataCoord := &DataCoordFactory{}
+	dsService := &dataSyncService{
+		dataCoord: dataCoord,
+		msFactory: factory,
+	}
+
+	dmlChannelName := "fake-by-dev-rootcoord-dml-channel-test-getDmlChannelPositionByBroadcast"
+	deltaChannelName, err := funcutil.ConvertChannelName(dmlChannelName, Params.CommonCfg.RootCoordDml, Params.CommonCfg.RootCoordDelta)
+	assert.NoError(t, err)
+
+	insertStream, _ := factory.NewMsgStream(ctx)
+	insertStream.AsProducer([]string{dmlChannelName})
+
+	var insertMsgStream = insertStream
+	insertMsgStream.Start()
+
+	ids, err := dsService.getDmlChannelPositionByBroadcast(ctx, dmlChannelName, 0)
+	assert.NoError(t, err)
+	assert.NotNil(t, ids)
+	id := ids[deltaChannelName]
+	assert.NotNil(t, id)
 }

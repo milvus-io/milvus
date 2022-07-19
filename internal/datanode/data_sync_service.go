@@ -28,10 +28,12 @@ import (
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/concurrency"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
 // dataSyncService controls a flowgraph for a specific collection
@@ -389,4 +391,65 @@ func (dsService *dataSyncService) getSegmentInfos(segmentIDs []int64) ([]*datapb
 	}
 	segmentInfos = infoResp.Infos
 	return segmentInfos, nil
+}
+
+func (dsService *dataSyncService) getDmlChannelPositionByBroadcast(ctx context.Context, channelName string, ts uint64) (map[string][]byte, error) {
+	msgPack := msgstream.MsgPack{}
+	baseMsg := msgstream.BaseMsg{
+		Ctx:            ctx,
+		BeginTimestamp: ts,
+		EndTimestamp:   ts,
+		HashValues:     []uint32{0},
+	}
+	msg := &msgstream.InsertMsg{
+		BaseMsg: baseMsg,
+		InsertRequest: internalpb.InsertRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_TimeTick,
+				MsgID:     0,
+				Timestamp: ts,
+				SourceID:  Params.DataNodeCfg.GetNodeID(),
+			},
+		},
+	}
+	msgPack.Msgs = append(msgPack.Msgs, msg)
+	return dsService.broadcastMarkDmlChannel(ctx, channelName, &msgPack)
+}
+
+func (dsService *dataSyncService) broadcastMarkDmlChannel(ctx context.Context, chanName string, pack *msgstream.MsgPack) (map[string][]byte, error) {
+	pChannelName := funcutil.ToPhysicalChannel(chanName)
+	log.Info("ddNode convert vChannel to pChannel",
+		zap.String("vChannelName", chanName),
+		zap.String("pChannelName", pChannelName),
+	)
+
+	deltaChannelName, err := funcutil.ConvertChannelName(pChannelName, Params.CommonCfg.RootCoordDml, Params.CommonCfg.RootCoordDelta)
+	if err != nil {
+		return nil, err
+	}
+
+	dmlStream, err := dsService.msFactory.NewMsgStream(ctx)
+	if err != nil {
+		return nil, err
+	}
+	dmlStream.SetRepackFunc(msgstream.DefaultRepackFunc)
+	dmlStream.AsProducer([]string{deltaChannelName})
+	dmlStream.Start()
+	defer dmlStream.Close()
+
+	result := make(map[string][]byte)
+
+	ids, err := dmlStream.BroadcastMark(pack)
+	if err != nil {
+		log.Error("BroadcastMark failed", zap.Error(err), zap.String("chanName", chanName))
+		return result, err
+	}
+	for cn, idList := range ids {
+		// idList should have length 1, just flat by iteration
+		for _, id := range idList {
+			result[cn] = id.Serialize()
+		}
+	}
+
+	return result, nil
 }
