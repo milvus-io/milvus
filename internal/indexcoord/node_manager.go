@@ -102,8 +102,8 @@ func (nm *NodeManager) AddNode(nodeID UniqueID, address string) error {
 
 // PeekClient peeks the client with the least load.
 func (nm *NodeManager) PeekClient(meta *Meta) (UniqueID, types.IndexNode) {
+	log.Info("IndexCoord peek client")
 	allClients := nm.GetAllClients()
-
 	if len(allClients) == 0 {
 		log.Error("there is no IndexNode online")
 		return -1, nil
@@ -149,9 +149,11 @@ func (nm *NodeManager) PeekClient(meta *Meta) (UniqueID, types.IndexNode) {
 	wg.Wait()
 	cancel()
 	if peekNodeID != 0 {
+		log.Info("IndexCoord peek client success", zap.Int64("nodeID", peekNodeID))
 		return peekNodeID, allClients[peekNodeID]
 	}
 
+	log.Warn("IndexCoord peek client fail")
 	return 0, nil
 }
 
