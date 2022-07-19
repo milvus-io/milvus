@@ -349,6 +349,11 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID Uni
 	if err != nil {
 		return err
 	}
+	// get memory size of buffer data
+	fieldMemorySize := make(map[int64]int)
+	for fieldID, fieldData := range data.buffer.Data {
+		fieldMemorySize[fieldID] = fieldData.GetMemorySize()
+	}
 
 	// encode data and convert output data
 	inCodec := storage.NewInsertCodec(meta)
@@ -385,7 +390,7 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID Uni
 			TimestampFrom: 0, //TODO
 			TimestampTo:   0, //TODO,
 			LogPath:       key,
-			LogSize:       int64(len(blob.Value)),
+			LogSize:       int64(fieldMemorySize[fieldID]),
 		}
 		field2Logidx[fieldID] = logidx
 	}
