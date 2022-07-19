@@ -231,10 +231,10 @@ func TestComponentParam(t *testing.T) {
 
 		// test query side config
 		chunkRows := Params.ChunkRows
-		assert.Equal(t, int64(32768), chunkRows)
+		assert.Equal(t, int64(1024), chunkRows)
 
 		nlist := Params.SmallIndexNlist
-		assert.Equal(t, int64(256), nlist)
+		assert.Equal(t, int64(128), nlist)
 
 		nprobe := Params.SmallIndexNProbe
 		assert.Equal(t, int64(16), nprobe)
