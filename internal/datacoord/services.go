@@ -349,8 +349,8 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	segment := s.meta.GetSegment(segmentID)
 
 	if segment == nil {
-		FailResponse(resp, fmt.Sprintf("failed to get segment %d", segmentID))
 		log.Error("failed to get segment", zap.Int64("segmentID", segmentID))
+		failResponseWithCode(resp, commonpb.ErrorCode_SegmentNotFound, fmt.Sprintf("failed to get segment %d", segmentID))
 		return resp, nil
 	}
 
@@ -358,7 +358,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	if !req.GetImporting() {
 		channel := segment.GetInsertChannel()
 		if !s.channelManager.Match(nodeID, channel) {
-			FailResponse(resp, fmt.Sprintf("channel %s is not watched on node %d", channel, nodeID))
+			failResponse(resp, fmt.Sprintf("channel %s is not watched on node %d", channel, nodeID))
 			resp.ErrorCode = commonpb.ErrorCode_MetaFailed
 			log.Warn("node is not matched with channel", zap.String("channel", channel), zap.Int64("nodeID", nodeID))
 			return resp, nil
@@ -437,7 +437,7 @@ func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 	// validate
 	nodeID := req.GetBase().GetSourceID()
 	if !s.channelManager.Match(nodeID, channel) {
-		FailResponse(resp.Status, fmt.Sprintf("channel %s is not watched on node %d", channel, nodeID))
+		failResponse(resp.Status, fmt.Sprintf("channel %s is not watched on node %d", channel, nodeID))
 		resp.Status.ErrorCode = commonpb.ErrorCode_MetaFailed
 		log.Warn("node is not matched with channel", zap.String("channel", channel), zap.Int64("nodeID", nodeID))
 		return resp, nil
