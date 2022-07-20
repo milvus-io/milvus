@@ -15,7 +15,6 @@ set(COMMON_SRC
         Schema.cpp
         SystemProperty.cpp
         vector_index_c.cpp
-        memory_c.cpp
         )
 
 add_library(milvus_common SHARED ${COMMON_SRC})

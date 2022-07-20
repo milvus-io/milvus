@@ -28,9 +28,6 @@ void
 DeleteCollection(CCollection collection) {
     auto col = (milvus::segcore::Collection*)collection;
     delete col;
-#ifdef __linux__
-    malloc_trim(0);
-#endif
 }
 
 const char*

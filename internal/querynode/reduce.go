@@ -25,11 +25,6 @@ package querynode
 import "C"
 import (
 	"fmt"
-	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/internal/log"
-	memutil "github.com/milvus-io/milvus/internal/util/memutil"
-	metricsinfo "github.com/milvus-io/milvus/internal/util/metricsinfo"
 )
 
 type sliceInfo struct {
@@ -137,26 +132,6 @@ func getSearchResultDataBlob(cSearchResultDataBlobs searchResultDataBlobs, blobI
 
 func deleteSearchResultDataBlobs(cSearchResultDataBlobs searchResultDataBlobs) {
 	C.DeleteSearchResultDataBlobs(cSearchResultDataBlobs)
-}
-
-func purgeMemoryAfterReduce() {
-	// try to do a purgeMemory operation after reduce
-	usedMem := metricsinfo.GetUsedMemoryCount()
-	if usedMem == 0 {
-		log.Error("Get 0 usedMemory when deleteSearchResultDataBlobs, which is unexpected")
-		return
-	}
-	maxBinsSize := uint64(float64(usedMem) * Params.CommonCfg.MemPurgeRatio)
-	released, err := memutil.PurgeMemory(maxBinsSize)
-	if err != nil {
-		log.Error(err.Error())
-	}
-	if released {
-		log.Info("purge memory done, memory was released back to the system successfully",
-			zap.Uint64("usedMem", usedMem),
-			zap.Float64("memPurgeRatio", Params.CommonCfg.MemPurgeRatio),
-			zap.Uint64("maxBinsSize", maxBinsSize))
-	}
 }
 
 func deleteSearchResults(results []*SearchResult) {

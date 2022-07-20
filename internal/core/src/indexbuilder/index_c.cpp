@@ -50,9 +50,6 @@ DeleteIndex(CIndex index) {
         AssertInfo(index, "failed to delete index, passed index was null");
         auto cIndex = reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(index);
         delete cIndex;
-#ifdef __linux__
-        malloc_trim(0);
-#endif
         status.error_code = Success;
         status.error_msg = "";
     } catch (std::exception& e) {
