@@ -19,7 +19,6 @@
 #include <unordered_set>
 
 #include "common/LoadInfo.h"
-#include "common/memory_c.h"
 #include "knowhere/index/VecIndexFactory.h"
 #include "knowhere/index/vector_index/IndexIVFPQ.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
@@ -258,37 +257,6 @@ serialize(const Message* msg) {
     assert(ok);
     return ret;
 }
-
-#ifdef __linux__
-
-// TEST(Common, Memory_benchmark) {
-//    auto run_times = 1000000;
-//    auto start = std::chrono::high_resolution_clock::now();
-//
-//    int32_t res;
-//    for (int i = 0; i < run_times; i++) {
-//        PurgeMemory(UINT64_MAX /*never malloc_trim*/, &res);
-//        assert(res == 0);
-//    }
-//
-//    auto stop = std::chrono::high_resolution_clock::now();
-//    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
-//
-//    std::cout << run_times << " times taken by PurgeMemory: " << duration.count() << " milliseconds" << std::endl;
-//    // 1000000 times taken by PurgeMemory: 8307 milliseconds
-//}
-
-TEST(Common, Memory) {
-    int32_t res;
-    auto status = PurgeMemory(UINT64_MAX /*never malloc_trim*/, &res);
-    assert(res == 0);
-    assert(status.error_code == Success);
-    status = PurgeMemory(0 /*do malloc_trim*/, &res);
-    assert(res == 1);
-    assert(status.error_code == Success);
-}
-
-#endif
 
 TEST(CApiTest, InsertTest) {
     auto c_collection = NewCollection(get_default_schema_config());

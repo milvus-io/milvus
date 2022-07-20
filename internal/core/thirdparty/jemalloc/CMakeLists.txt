@@ -46,13 +46,7 @@ endif ()
 list(APPEND
         JEMALLOC_CONFIGURE_COMMAND
         "--prefix=${JEMALLOC_PREFIX}"
-        "--libdir=${JEMALLOC_LIB_DIR}"
-        "--with-jemalloc-prefix=je_milvus_"
-        "--with-private-namespace=je_milvus_private_"
-        "--without-export"
-        # See https://github.com/jemalloc/jemalloc/issues/1237
-        "--disable-initial-exec-tls"
-        ${EP_LOG_OPTIONS})
+        "--libdir=${JEMALLOC_LIB_DIR}")
 if (CMAKE_BUILD_TYPE EQUAL "DEBUG")
     # Enable jemalloc debug checks when Milvus itself has debugging enabled
     list(APPEND JEMALLOC_CONFIGURE_COMMAND "--enable-debug")
