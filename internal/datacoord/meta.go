@@ -801,11 +801,13 @@ func (m *meta) CompleteMergeCompaction(compactionLogs []*datapb.CompactionSegmen
 
 	var startPosition, dmlPosition *internalpb.MsgPosition
 	for _, s := range segments {
-		if dmlPosition == nil || s.GetDmlPosition().Timestamp < dmlPosition.Timestamp {
+		if dmlPosition == nil ||
+			s.GetDmlPosition() != nil && s.GetDmlPosition().GetTimestamp() < dmlPosition.GetTimestamp() {
 			dmlPosition = s.GetDmlPosition()
 		}
 
-		if startPosition == nil || s.GetStartPosition().Timestamp < startPosition.Timestamp {
+		if startPosition == nil ||
+			s.GetStartPosition() != nil && s.GetStartPosition().GetTimestamp() < startPosition.GetTimestamp() {
 			startPosition = s.GetStartPosition()
 		}
 	}
