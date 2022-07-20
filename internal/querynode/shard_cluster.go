@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"sync"
 
 	"go.uber.org/atomic"
@@ -179,7 +180,7 @@ func NewShardCluster(collectionID int64, replicaID int64, vchannelName string,
 func (sc *ShardCluster) Close() {
 	log.Info("Close shard cluster")
 	sc.closeOnce.Do(func() {
-		sc.state.Store(int32(unavailable))
+		sc.updateShardClusterState(unavailable)
 		close(sc.closeCh)
 	})
 }
@@ -242,7 +243,7 @@ func (sc *ShardCluster) removeNode(evt nodeEvent) {
 		if segment.nodeID == evt.nodeID {
 			segment.state = segmentStateOffline
 			sc.segments[id] = segment
-			sc.state.Store(int32(unavailable))
+			sc.updateShardClusterState(unavailable)
 		}
 	}
 	// ignore leader process here
@@ -424,15 +425,28 @@ func (sc *ShardCluster) selectNodeInReplica(nodeIDs []int64) (int64, bool) {
 	return 0, false
 }
 
+func (sc *ShardCluster) updateShardClusterState(state shardClusterState) {
+	old := sc.state.Load()
+	sc.state.Store(int32(state))
+
+	pc, _, _, _ := runtime.Caller(1)
+	callerName := runtime.FuncForPC(pc).Name()
+
+	log.Info("Shard Cluster update state", zap.Int64("collectionID", sc.collectionID),
+		zap.Int64("replicaID", sc.replicaID), zap.String("channel", sc.vchannelName),
+		zap.Int32("old state", old), zap.Int32("new state", int32(state)),
+		zap.String("caller", callerName))
+}
+
 // healthCheck iterate all segments to to check cluster could provide service.
 func (sc *ShardCluster) healthCheck() {
 	for _, segment := range sc.segments {
 		if segment.state != segmentStateLoaded { // TODO check hand-off or load balance
-			sc.state.Store(int32(unavailable))
+			sc.updateShardClusterState(unavailable)
 			return
 		}
 	}
-	sc.state.Store(int32(available))
+	sc.updateShardClusterState(available)
 }
 
 // watchNodes handles node events.
