@@ -2425,19 +2425,6 @@ func (lbt *loadBalanceTask) globalPostExecute(ctx context.Context) error {
 		zap.Int("segmentNum", len(segments)))
 
 	wg := errgroup.Group{}
-	// Remove offline nodes from replica
-	for replicaID := range replicas {
-		replicaID := replicaID
-		wg.Go(func() error {
-			log.Debug("remove offline nodes from replica",
-				zap.Int64("taskID", lbt.taskID),
-				zap.Int64("replicaID", replicaID),
-				zap.Int64s("offlineNodes", lbt.SourceNodeIDs))
-
-			return lbt.meta.applyReplicaBalancePlan(
-				NewRemoveBalancePlan(replicaID, lbt.SourceNodeIDs...))
-		})
-	}
 
 	// Remove offline nodes from dmChannels
 	for _, dmChannel := range dmChannels {
@@ -2457,7 +2444,7 @@ func (lbt *loadBalanceTask) globalPostExecute(ctx context.Context) error {
 			log.Info("remove offline nodes from dmChannel",
 				zap.Int64("taskID", lbt.getTaskID()),
 				zap.String("dmChannel", dmChannel.DmChannel),
-				zap.Int64s("nodeIds", dmChannel.NodeIds))
+				zap.Int64s("left nodeIds", dmChannel.NodeIds))
 
 			return nil
 		})
@@ -2503,11 +2490,11 @@ func (lbt *loadBalanceTask) globalPostExecute(ctx context.Context) error {
 		}
 	}
 
-	err := wg.Wait()
-	if err != nil {
+	if err := wg.Wait(); err != nil {
 		return err
 	}
 
+	// sync segment
 	for replicaID := range replicas {
 		err := syncReplicaSegments(lbt.ctx, lbt.meta, lbt.cluster, replicaID)
 		if err != nil {
@@ -2517,6 +2504,24 @@ func (lbt *loadBalanceTask) globalPostExecute(ctx context.Context) error {
 				zap.Error(err))
 			return err
 		}
+	}
+
+	// Remove offline nodes from replica
+	for replicaID := range replicas {
+		replicaID := replicaID
+		wg.Go(func() error {
+			log.Debug("remove offline nodes from replica",
+				zap.Int64("taskID", lbt.taskID),
+				zap.Int64("replicaID", replicaID),
+				zap.Int64s("offlineNodes", lbt.SourceNodeIDs))
+
+			return lbt.meta.applyReplicaBalancePlan(
+				NewRemoveBalancePlan(replicaID, lbt.SourceNodeIDs...))
+		})
+	}
+
+	if err := wg.Wait(); err != nil {
+		return err
 	}
 
 	for _, offlineNodeID := range lbt.SourceNodeIDs {
