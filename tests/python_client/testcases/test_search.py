@@ -1631,9 +1631,10 @@ class TestCollectionSearch(TestcaseBase):
         """
         target: search binary_collection, and check the result: distance
         method: compare the return distance value with value computed with SUBSTRUCTURE.
-                (1) The returned limit(topK) are impacted by dimension (dim) of data.
+                (1) The returned limit(topK) are impacted by dimension (dim) of data
                 (2) Searched topK is smaller than set limit when dim is large
-                (3) it does not support "BIN_IVF_FLAT" index
+                (3) It does not support "BIN_IVF_FLAT" index
+                (4) Only two values for distance: 0 and 1, 0 means hits, 1 means not
         expected: the return distance equals to the computed value
         """
         # 1. initialize with binary data
@@ -1646,12 +1647,8 @@ class TestCollectionSearch(TestcaseBase):
         default_index = {"index_type": index, "params": {"nlist": 128}, "metric_type": "SUBSTRUCTURE"}
         collection_w.create_index("binary_vector", default_index)
         collection_w.load()
-        # 3. compute the distance
-        query_raw_vector, binary_vectors = cf.gen_binary_vectors(nq, dim)
-        distance_min = 1
-        for binary_raw in binary_raw_vector:
-            distance = cf.substructure(query_raw_vector[0], binary_raw)
-            distance_min = min(distance, distance_min)
+        # 3. generate search vectors
+        _, binary_vectors = cf.gen_binary_vectors(nq, dim)
         # 4. search and compare the distance
         search_params = {"metric_type": "SUBSTRUCTURE", "params": {"nprobe": 10}}
         res = collection_w.search(binary_vectors[:nq], "binary_vector",
@@ -1666,7 +1663,7 @@ class TestCollectionSearch(TestcaseBase):
         if _async:
             res.done()
             res = res.result()
-        assert abs(res[0].distances[0] - distance_min) <= epsilon
+        assert res[0].distances[0] == 0.0
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index", ["BIN_FLAT"])
@@ -1674,9 +1671,10 @@ class TestCollectionSearch(TestcaseBase):
         """
         target: search binary_collection, and check the result: distance
         method: compare the return distance value with value computed with SUPERSTRUCTURE
-                (1) The returned limit(topK) are impacted by dimension (dim) of data.
+                (1) The returned limit(topK) are impacted by dimension (dim) of data
                 (2) Searched topK is smaller than set limit when dim is large
-                (3) it does not support "BIN_IVF_FLAT" index
+                (3) It does not support "BIN_IVF_FLAT" index
+                (4) Only two values for distance: 0 and 1, 0 means hits, 1 means not
         expected: the return distance equals to the computed value
         """
         # 1. initialize with binary data
@@ -1689,12 +1687,8 @@ class TestCollectionSearch(TestcaseBase):
         default_index = {"index_type": index, "params": {"nlist": 128}, "metric_type": "SUPERSTRUCTURE"}
         collection_w.create_index("binary_vector", default_index)
         collection_w.load()
-        # 3. compute the distance
-        query_raw_vector, binary_vectors = cf.gen_binary_vectors(nq, dim)
-        distance_min = 1
-        for binary_raw in binary_raw_vector:
-            distance = cf.superstructure(query_raw_vector[0], binary_raw)
-            distance_min = min(distance, distance_min)
+        # 3. generate search vectors
+        _, binary_vectors = cf.gen_binary_vectors(nq, dim)
         # 4. search and compare the distance
         search_params = {"metric_type": "SUPERSTRUCTURE", "params": {"nprobe": 10}}
         res = collection_w.search(binary_vectors[:nq], "binary_vector",
@@ -1709,7 +1703,7 @@ class TestCollectionSearch(TestcaseBase):
         if _async:
             res.done()
             res = res.result()
-        assert abs(res[0].distances[0] - distance_min) <= epsilon
+        assert res[0].distances[0] == 0.0
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_binary_without_flush(self, metrics, auto_id):
