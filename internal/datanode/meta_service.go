@@ -46,31 +46,13 @@ func newMetaService(rc types.RootCoord, collectionID UniqueID) *metaService {
 	}
 }
 
-// TODO: Replace with getCollectionInfo below.
 // getCollectionSchema get collection schema with provided collection id at specified timestamp.
 func (mService *metaService) getCollectionSchema(ctx context.Context, collID UniqueID, timestamp Timestamp) (*schemapb.CollectionSchema, error) {
-	req := &milvuspb.DescribeCollectionRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_DescribeCollection,
-			MsgID:     0, //GOOSE TODO
-			Timestamp: 0, // GOOSE TODO
-			SourceID:  Params.DataNodeCfg.GetNodeID(),
-		},
-		DbName:       "default", // GOOSE TODO
-		CollectionID: collID,
-		TimeStamp:    timestamp,
+	response, err := mService.getCollectionInfo(ctx, collID, timestamp)
+	if response != nil {
+		return response.GetSchema(), err
 	}
-
-	response, err := mService.rootCoord.DescribeCollection(ctx, req)
-	if err != nil {
-		return nil, fmt.Errorf("grpc error when describe collection %v from rootcoord: %s", collID, err.Error())
-	}
-
-	if response.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return nil, fmt.Errorf("describe collection %v from rootcoord wrong: %s", collID, response.GetStatus().GetReason())
-	}
-
-	return response.GetSchema(), nil
+	return nil, err
 }
 
 // getCollectionInfo get collection info with provided collection id at specified timestamp.
