@@ -131,14 +131,14 @@ func newParallelConfig() parallelConfig {
 	return parallelConfig{Params.DataNodeCfg.FlowGraphMaxQueueLength, Params.DataNodeCfg.FlowGraphMaxParallelism}
 }
 
-// start starts the flowgraph in datasyncservice
+// start starts the flow graph in datasyncservice
 func (dsService *dataSyncService) start() {
 	if dsService.fg != nil {
-		log.Info("dataSyncService starting flowgraph", zap.Int64("collectionID", dsService.collectionID),
+		log.Info("dataSyncService starting flow graph", zap.Int64("collectionID", dsService.collectionID),
 			zap.String("vChanName", dsService.vchannelName))
 		dsService.fg.Start()
 	} else {
-		log.Warn("dataSyncService starting flowgraph is nil", zap.Int64("collectionID", dsService.collectionID),
+		log.Warn("dataSyncService starting flow graph is nil", zap.Int64("collectionID", dsService.collectionID),
 			zap.String("vChanName", dsService.vchannelName))
 	}
 }
@@ -351,7 +351,6 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 
 // getSegmentInfos return the SegmentInfo details according to the given ids through RPC to datacoord
 func (dsService *dataSyncService) getSegmentInfos(segmentIDs []int64) ([]*datapb.SegmentInfo, error) {
-	var segmentInfos []*datapb.SegmentInfo
 	infoResp, err := dsService.dataCoord.GetSegmentInfo(dsService.ctx, &datapb.GetSegmentInfoRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_SegmentInfo,
@@ -371,6 +370,5 @@ func (dsService *dataSyncService) getSegmentInfos(segmentIDs []int64) ([]*datapb
 		log.Error("Fail to get datapb.SegmentInfo by ids from datacoord", zap.Error(err))
 		return nil, err
 	}
-	segmentInfos = infoResp.Infos
-	return segmentInfos, nil
+	return infoResp.Infos, nil
 }

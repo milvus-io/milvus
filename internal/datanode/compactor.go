@@ -168,12 +168,12 @@ func (t *compactionTask) mergeDeltalogs(dBlobs map[UniqueID][]*Blob, timetravelT
 
 			dbuff.delData.Append(pk, ts)
 
-			if Timestamp(ts) < dbuff.TimestampFrom {
-				dbuff.TimestampFrom = Timestamp(ts)
+			if ts < dbuff.TimestampFrom {
+				dbuff.TimestampFrom = ts
 			}
 
-			if Timestamp(ts) > dbuff.TimestampTo {
-				dbuff.TimestampTo = Timestamp(ts)
+			if ts > dbuff.TimestampTo {
+				dbuff.TimestampTo = ts
 			}
 		}
 	}
@@ -181,7 +181,7 @@ func (t *compactionTask) mergeDeltalogs(dBlobs map[UniqueID][]*Blob, timetravelT
 	dbuff.updateSize(dbuff.delData.RowCount)
 	log.Debug("mergeDeltalogs end", zap.Int64("PlanID", t.getPlanID()),
 		zap.Int("number of pks to compact in insert logs", len(pk2ts)),
-		zap.Any("elapse in ms", nano2Milli(time.Since(mergeStart))))
+		zap.Float64("elapse in ms", nano2Milli(time.Since(mergeStart))))
 
 	return pk2ts, dbuff, nil
 }
@@ -310,7 +310,7 @@ func (t *compactionTask) merge(mergeItr iterator, delta map[primaryKey]Timestamp
 
 	log.Debug("merge end", zap.Int64("planID", t.getPlanID()), zap.Int64("remaining insert numRows", numRows),
 		zap.Int64("expired entities", expired),
-		zap.Any("elapse in ms", nano2Milli(time.Since(mergeStart))))
+		zap.Float64("elapse in ms", nano2Milli(time.Since(mergeStart))))
 	return iDatas, numRows, nil
 }
 
@@ -347,7 +347,7 @@ func (t *compactionTask) compact() error {
 		targetSegID = t.plan.GetSegmentBinlogs()[0].GetSegmentID()
 	}
 
-	log.Debug("compaction start", zap.Int64("planID", t.plan.GetPlanID()), zap.Any("timeout in seconds", t.plan.GetTimeoutInSeconds()))
+	log.Debug("compaction start", zap.Int64("planID", t.plan.GetPlanID()), zap.Int32("timeout in seconds", t.plan.GetTimeoutInSeconds()))
 	segIDs := make([]UniqueID, 0, len(t.plan.GetSegmentBinlogs()))
 	for _, s := range t.plan.GetSegmentBinlogs() {
 		segIDs = append(segIDs, s.GetSegmentID())
@@ -370,7 +370,7 @@ func (t *compactionTask) compact() error {
 	<-ti.Injected()
 	injectEnd := time.Now()
 	defer func() {
-		log.Debug("inject elapse in ms", zap.Int64("planID", t.plan.GetPlanID()), zap.Any("elapse", nano2Milli(injectEnd.Sub(injectStart))))
+		log.Debug("inject elapse in ms", zap.Int64("planID", t.plan.GetPlanID()), zap.Float64("elapse", nano2Milli(injectEnd.Sub(injectStart))))
 	}()
 
 	var (
@@ -463,7 +463,7 @@ func (t *compactionTask) compact() error {
 	err = g.Wait()
 	downloadEnd := time.Now()
 	defer func() {
-		log.Debug("download elapse in ms", zap.Int64("planID", t.plan.GetPlanID()), zap.Any("elapse", nano2Milli(downloadEnd.Sub(downloadStart))))
+		log.Debug("download elapse in ms", zap.Int64("planID", t.plan.GetPlanID()), zap.Float64("elapse", nano2Milli(downloadEnd.Sub(downloadStart))))
 	}()
 
 	if err != nil {
@@ -493,7 +493,7 @@ func (t *compactionTask) compact() error {
 
 	uploadEnd := time.Now()
 	defer func() {
-		log.Debug("upload elapse in ms", zap.Int64("planID", t.plan.GetPlanID()), zap.Any("elapse", nano2Milli(uploadEnd.Sub(uploadStart))))
+		log.Debug("upload elapse in ms", zap.Int64("planID", t.plan.GetPlanID()), zap.Float64("elapse", nano2Milli(uploadEnd.Sub(uploadStart))))
 	}()
 
 	for _, fbl := range segPaths.deltaInfo {
@@ -526,7 +526,7 @@ func (t *compactionTask) compact() error {
 	}
 	rpcEnd := time.Now()
 	defer func() {
-		log.Debug("rpc elapse in ms", zap.Int64("planID", t.plan.GetPlanID()), zap.Any("elapse", nano2Milli(rpcEnd.Sub(rpcStart))))
+		log.Debug("rpc elapse in ms", zap.Int64("planID", t.plan.GetPlanID()), zap.Float64("elapse", nano2Milli(rpcEnd.Sub(rpcStart))))
 	}()
 
 	//  Compaction I: update pk range.
@@ -550,7 +550,7 @@ func (t *compactionTask) compact() error {
 	ti.injectDone(true)
 	uninjectEnd := time.Now()
 	defer func() {
-		log.Debug("uninject elapse in ms", zap.Int64("planID", t.plan.GetPlanID()), zap.Any("elapse", nano2Milli(uninjectEnd.Sub(uninjectStart))))
+		log.Debug("uninject elapse in ms", zap.Int64("planID", t.plan.GetPlanID()), zap.Float64("elapse", nano2Milli(uninjectEnd.Sub(uninjectStart))))
 	}()
 
 	log.Info("compaction done",
@@ -561,7 +561,7 @@ func (t *compactionTask) compact() error {
 		zap.Int("num of delta paths", len(segPaths.deltaInfo)),
 	)
 
-	log.Info("overall elapse in ms", zap.Int64("planID", t.plan.GetPlanID()), zap.Any("elapse", nano2Milli(time.Since(compactStart))))
+	log.Info("overall elapse in ms", zap.Int64("planID", t.plan.GetPlanID()), zap.Float64("elapse", nano2Milli(time.Since(compactStart))))
 	metrics.DataNodeCompactionLatency.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID())).Observe(float64(t.tr.ElapseSpan().Milliseconds()))
 
 	return nil

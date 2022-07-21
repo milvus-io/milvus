@@ -298,14 +298,7 @@ func (replica *SegmentReplica) listCompactedSegmentIDs() map[UniqueID][]UniqueID
 	compactedTo2From := make(map[UniqueID][]UniqueID)
 
 	for segID, seg := range replica.compactedSegments {
-		var from []UniqueID
-		from, ok := compactedTo2From[seg.compactedTo]
-		if !ok {
-			from = []UniqueID{}
-		}
-
-		from = append(from, segID)
-		compactedTo2From[seg.compactedTo] = from
+		compactedTo2From[seg.compactedTo] = append(compactedTo2From[seg.compactedTo], segID)
 	}
 
 	return compactedTo2From
