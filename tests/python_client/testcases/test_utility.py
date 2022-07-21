@@ -243,8 +243,7 @@ class TestUtilityParams(TestcaseBase):
         self.utility_wrap.loading_progress(collection_w.name, partition_names,
                                            check_task=CheckTasks.err_res, check_items=err_msg)
 
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="issue to be discussed")
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("partition_names", [[ct.default_tag], [ct.default_partition_name, ct.default_tag]])
     def test_loading_progress_not_existed_partitions(self, partition_names):
         """
@@ -255,7 +254,7 @@ class TestUtilityParams(TestcaseBase):
         collection_w = self.init_collection_general(prefix)[0]
         log.debug(collection_w.num_entities)
         collection_w.load()
-        err_msg = {ct.err_code: 1, ct.err_msg: f"partitionID of partitionName:{ct.default_tag} can not be found"}
+        err_msg = {ct.err_code: -1, ct.err_msg: f"Partitions not exist: [{ct.default_tag}]"}
         self.utility_wrap.loading_progress(collection_w.name, partition_names,
                                            check_task=CheckTasks.err_res, check_items=err_msg)
 
@@ -768,15 +767,16 @@ class TestUtilityBase(TestcaseBase):
         """
         target: test loading progress without loading
         method: insert and flush data, call loading_progress without loading
-        expected: raise exception
+        expected: return successfully with 0%
         """
         collection_w = self.init_collection_wrap()
         df = cf.gen_default_dataframe_data()
         collection_w.insert(df)
         assert collection_w.num_entities == ct.default_nb
-        error = {ct.err_code: 1, ct.err_msg: {"has not been loaded into QueryNode"}}
-        self.utility_wrap.loading_progress(collection_w.name,
-                                           check_task=CheckTasks.err_res, check_items=error)
+        res = self.utility_wrap.loading_progress(collection_w.name)[0]
+        exp_res = {loading_progress: '0%', num_loaded_partitions: 0, not_loaded_partitions: ['_default']}
+
+        assert exp_res == res
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("nb", [ct.default_nb, 5000])
@@ -829,13 +829,14 @@ class TestUtilityBase(TestcaseBase):
         """
         target: test loading progress after release
         method: insert and flush data, call loading_progress after release
-        expected: raise exception
+        expected: return successfully with 0%
         """
         collection_w = self.init_collection_general(prefix, insert_data=True)[0]
         collection_w.release()
-        error = {ct.err_code: 1, ct.err_msg: {"has not been loaded into QueryNode"}}
-        self.utility_wrap.loading_progress(collection_w.name,
-                                           check_task=CheckTasks.err_res, check_items=error)
+        res = self.utility_wrap.loading_progress(collection_w.name)[0]
+        exp_res = {loading_progress: '0%', num_loaded_partitions: 0, not_loaded_partitions: ['_default']}
+
+        assert exp_res == res
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_loading_progress_with_release_partition(self):
