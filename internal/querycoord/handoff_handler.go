@@ -201,7 +201,7 @@ func (handler *HandoffHandler) enqueue(req *querypb.SegmentInfo) {
 
 func (handler *HandoffHandler) schedule() {
 	defer handler.wg.Done()
-	timer := time.NewTimer(time.Second * 5)
+	timer := time.NewTicker(time.Second * 5)
 	for {
 		select {
 		case <-handler.ctx.Done():
@@ -209,17 +209,21 @@ func (handler *HandoffHandler) schedule() {
 		case _, ok := <-handler.notify:
 			if ok {
 				handler.taskMutex.Lock()
-				log.Info("handoff task scheduled: ", zap.Int("task number", len(handler.tasks)))
-				for segmentID := range handler.tasks {
-					handler.process(segmentID)
+				if len(handler.tasks) != 0 {
+					log.Info("handoff task scheduled: ", zap.Int("task number", len(handler.tasks)))
+					for segmentID := range handler.tasks {
+						handler.process(segmentID)
+					}
 				}
 				handler.taskMutex.Unlock()
 			}
 		case <-timer.C:
 			handler.taskMutex.Lock()
-			log.Info("handoff task scheduled: ", zap.Int("task number", len(handler.tasks)))
-			for segmentID := range handler.tasks {
-				handler.process(segmentID)
+			if len(handler.tasks) != 0 {
+				log.Info("handoff task scheduled: ", zap.Int("task number", len(handler.tasks)))
+				for segmentID := range handler.tasks {
+					handler.process(segmentID)
+				}
 			}
 			handler.taskMutex.Unlock()
 		}
