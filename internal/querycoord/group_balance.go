@@ -2,6 +2,9 @@ package querycoord
 
 import (
 	"sort"
+
+	"github.com/milvus-io/milvus/internal/log"
+	"go.uber.org/zap"
 )
 
 type Balancer interface {
@@ -55,6 +58,7 @@ func (b *replicaBalancer) AddNode(nodeID int64) ([]*balancePlan, error) {
 	for _, c := range collections {
 		replicas, err := b.meta.getReplicasByCollectionID(c.GetCollectionID())
 		if err != nil {
+			log.Error("find collection ID with no replica info", zap.Int64("collectionID", c.GetCollectionID()))
 			return nil, err
 		}
 		if len(replicas) == 0 {
