@@ -918,7 +918,7 @@ func (qc *QueryCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 	log.Debug("getMetricsRequest received",
 		zap.String("role", typeutil.QueryCoordRole),
 		zap.String("req", req.Request),
-		zap.Int64("msgID", req.Base.MsgID))
+		zap.Int64("msgID", req.GetBase().GetMsgID()))
 
 	getMetricsResponse := &milvuspb.GetMetricsResponse{
 		Status: &commonpb.Status{
@@ -930,7 +930,7 @@ func (qc *QueryCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 	if qc.stateCode.Load() != internalpb.StateCode_Healthy {
 		err := errors.New("QueryCoord is not healthy")
 		getMetricsResponse.Status.Reason = err.Error()
-		log.Warn("getMetrics failed", zap.String("role", typeutil.QueryCoordRole), zap.Int64("msgID", req.Base.MsgID), zap.Error(err))
+		log.Warn("getMetrics failed", zap.String("role", typeutil.QueryCoordRole), zap.Int64("msgID", req.GetBase().GetMsgID()), zap.Error(err))
 		return getMetricsResponse, nil
 	}
 
@@ -946,7 +946,7 @@ func (qc *QueryCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 
 	log.Debug("getMetrics",
 		zap.String("role", typeutil.QueryCoordRole),
-		zap.Int64("msgID", req.Base.MsgID),
+		zap.Int64("msgID", req.GetBase().GetMsgID()),
 		zap.String("metric_type", metricType))
 
 	if metricType == metricsinfo.SystemInfoMetrics {
@@ -960,13 +960,13 @@ func (qc *QueryCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 
 		log.Debug("failed to get system info metrics from cache, recompute instead",
 			zap.String("role", typeutil.QueryCoordRole),
-			zap.Int64("msgID", req.Base.MsgID))
+			zap.Int64("msgID", req.GetBase().GetMsgID()))
 
 		metrics, err := getSystemInfoMetrics(ctx, req, qc)
 		if err != nil {
 			log.Error("getSystemInfoMetrics failed",
 				zap.String("role", typeutil.QueryCoordRole),
-				zap.Int64("msgID", req.Base.MsgID),
+				zap.Int64("msgID", req.GetBase().GetMsgID()),
 				zap.Error(err))
 			getMetricsResponse.Status.Reason = err.Error()
 			return getMetricsResponse, nil
@@ -988,7 +988,7 @@ func (qc *QueryCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 	log.Warn("getMetrics failed",
 		zap.String("role", typeutil.QueryCoordRole),
 		zap.String("req", req.Request),
-		zap.Int64("msgID", req.Base.MsgID),
+		zap.Int64("msgID", req.GetBase().GetMsgID()),
 		zap.Error(err))
 
 	return getMetricsResponse, nil
