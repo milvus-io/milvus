@@ -1,0 +1,11 @@
+- name: querynode
+  docker_container:
+    name: querynode
+    image: "{{image}}"
+    command: "milvus run querynode"
+    env:
+      ETCD_ENDPOINTS: "{{ETCD_ENDPOINTS}}"
+      MINIO_ADDRESS: "{{MINIO_ADDRESS}}"
+      PULSAR_ADDRESS: "{{PULSAR_ADDRESS}}"
+      METRICS_PORT: "9091"
+    network_mode: "{{nodes_network}}" #Use the network which defined as variable in Inventory.

@@ -1,0 +1,13 @@
+---
+- name: Install Docker Dependencies 
+  yum: name={{ item }} state=latest update_cache=yes
+  with_items:
+    - yum-utils
+    - device-mapper-persistent-data
+    - lvm2
+  tags: docker
+
+- name: Install docker
+  command:  pip3 install docker
+  changed_when: false
+  tags: docker
