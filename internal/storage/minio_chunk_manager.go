@@ -23,15 +23,15 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-
-	"github.com/minio/minio-go/v7"
-	"github.com/minio/minio-go/v7/pkg/credentials"
-	"go.uber.org/zap"
-	"golang.org/x/exp/mmap"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/errorutil"
 	"github.com/milvus-io/milvus/internal/util/retry"
+	"github.com/minio/minio-go/v7"
+	"github.com/minio/minio-go/v7/pkg/credentials"
+	"go.uber.org/zap"
+	"golang.org/x/exp/mmap"
 )
 
 // MinioChunkManager is responsible for read and write data stored in minio.
@@ -104,6 +104,12 @@ func newMinioChunkManagerWithConfig(ctx context.Context, c *config) (*MinioChunk
 	}
 	log.Info("minio chunk manager init success.", zap.String("bucketname", c.bucketName), zap.String("root", c.rootPath))
 	return mcm, nil
+}
+
+// SetVar set the variable value of mcm
+func (mcm *MinioChunkManager) SetVar(ctx context.Context, bucketName string) {
+	mcm.ctx = ctx
+	mcm.bucketName = bucketName
 }
 
 // Path returns the path of minio data if exists.
@@ -219,7 +225,7 @@ func (mcm *MinioChunkManager) MultiRead(keys []string) ([][]byte, error) {
 }
 
 func (mcm *MinioChunkManager) ReadWithPrefix(prefix string) ([]string, [][]byte, error) {
-	objectsKeys, err := mcm.ListWithPrefix(prefix, true)
+	objectsKeys, _, err := mcm.ListWithPrefix(prefix, true)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -299,16 +305,18 @@ func (mcm *MinioChunkManager) RemoveWithPrefix(prefix string) error {
 	return nil
 }
 
-func (mcm *MinioChunkManager) ListWithPrefix(prefix string, recursive bool) ([]string, error) {
+func (mcm *MinioChunkManager) ListWithPrefix(prefix string, recursive bool) ([]string, []time.Time, error) {
 	objects := mcm.Client.ListObjects(mcm.ctx, mcm.bucketName, minio.ListObjectsOptions{Prefix: prefix, Recursive: recursive})
 	var objectsKeys []string
+	var modTimes []time.Time
 
 	for object := range objects {
 		if object.Err != nil {
 			log.Warn("failed to list with prefix", zap.String("prefix", prefix), zap.Error(object.Err))
-			return nil, object.Err
+			return nil, nil, object.Err
 		}
 		objectsKeys = append(objectsKeys, object.Key)
+		modTimes = append(modTimes, object.LastModified)
 	}
-	return objectsKeys, nil
+	return objectsKeys, modTimes, nil
 }

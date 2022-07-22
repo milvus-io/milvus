@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"strconv"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/kv"
 
@@ -421,7 +422,7 @@ type chunkManagerMock struct {
 	storage.ChunkManager
 
 	removeWithPrefix func(string) error
-	listWithPrefix   func(string, bool) ([]string, error)
+	listWithPrefix   func(string, bool) ([]string, []time.Time, error)
 	remove           func(string) error
 }
 
@@ -429,7 +430,7 @@ func (cmm *chunkManagerMock) RemoveWithPrefix(prefix string) error {
 	return cmm.removeWithPrefix(prefix)
 }
 
-func (cmm *chunkManagerMock) ListWithPrefix(prefix string, recursive bool) ([]string, error) {
+func (cmm *chunkManagerMock) ListWithPrefix(prefix string, recursive bool) ([]string, []time.Time, error) {
 	return cmm.listWithPrefix(prefix, recursive)
 }
 

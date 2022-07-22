@@ -28,6 +28,7 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/minio/minio-go/v7"
@@ -61,7 +62,6 @@ func Test_garbageCollector_basic(t *testing.T) {
 			checkInterval:    time.Millisecond * 10,
 			missingTolerance: time.Hour * 24,
 			dropTolerance:    time.Hour * 24,
-			bucketName:       bucketName,
 			rootPath:         rootPath,
 		})
 		gc.start()
@@ -79,7 +79,6 @@ func Test_garbageCollector_basic(t *testing.T) {
 			checkInterval:    time.Millisecond * 10,
 			missingTolerance: time.Hour * 24,
 			dropTolerance:    time.Hour * 24,
-			bucketName:       bucketName,
 			rootPath:         rootPath,
 		})
 		assert.NotPanics(t, func() {
@@ -141,16 +140,15 @@ func Test_garbageCollector_scan(t *testing.T) {
 			checkInterval:    time.Minute * 30,
 			missingTolerance: time.Hour * 24,
 			dropTolerance:    time.Hour * 24,
-			bucketName:       bucketName,
 			rootPath:         rootPath,
 		})
 		gc.segRefer = segReferManager
 		gc.scan()
 
-		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, insertLogPrefix), inserts)
-		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, statsLogPrefix), stats)
-		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, deltaLogPrefix), delta)
-		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, `indexes`), others)
+		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, insertLogPrefix), inserts)
+		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, statsLogPrefix), stats)
+		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, deltaLogPrefix), delta)
+		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, `indexes`), others)
 
 		err = gc.segRefer.ReleaseSegmentsLock(1, 1)
 		assert.NoError(t, err)
@@ -164,15 +162,14 @@ func Test_garbageCollector_scan(t *testing.T) {
 			checkInterval:    time.Minute * 30,
 			missingTolerance: time.Hour * 24,
 			dropTolerance:    time.Hour * 24,
-			bucketName:       bucketName,
 			rootPath:         rootPath,
 		})
 		gc.scan()
 
-		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, insertLogPrefix), inserts)
-		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, statsLogPrefix), stats)
-		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, deltaLogPrefix), delta)
-		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, `indexes`), others)
+		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, insertLogPrefix), inserts)
+		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, statsLogPrefix), stats)
+		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, deltaLogPrefix), delta)
+		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, `indexes`), others)
 
 		gc.close()
 	})
@@ -191,15 +188,14 @@ func Test_garbageCollector_scan(t *testing.T) {
 			checkInterval:    time.Minute * 30,
 			missingTolerance: time.Hour * 24,
 			dropTolerance:    time.Hour * 24,
-			bucketName:       bucketName,
 			rootPath:         rootPath,
 		})
 		gc.start()
 		gc.scan()
-		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, insertLogPrefix), inserts)
-		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, statsLogPrefix), stats)
-		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, deltaLogPrefix), delta)
-		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, `indexes`), others)
+		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, insertLogPrefix), inserts)
+		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, statsLogPrefix), stats)
+		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, deltaLogPrefix), delta)
+		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, `indexes`), others)
 
 		gc.close()
 	})
@@ -221,14 +217,13 @@ func Test_garbageCollector_scan(t *testing.T) {
 			checkInterval:    time.Minute * 30,
 			missingTolerance: time.Hour * 24,
 			dropTolerance:    0,
-			bucketName:       bucketName,
 			rootPath:         rootPath,
 		})
 		gc.clearEtcd()
-		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, insertLogPrefix), inserts[1:])
-		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, statsLogPrefix), stats[1:])
-		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, deltaLogPrefix), delta[1:])
-		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, `indexes`), others)
+		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, insertLogPrefix), inserts[1:])
+		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, statsLogPrefix), stats[1:])
+		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, deltaLogPrefix), delta[1:])
+		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, `indexes`), others)
 
 		gc.close()
 	})
@@ -239,27 +234,26 @@ func Test_garbageCollector_scan(t *testing.T) {
 			checkInterval:    time.Minute * 30,
 			missingTolerance: 0,
 			dropTolerance:    0,
-			bucketName:       bucketName,
 			rootPath:         rootPath,
 		})
 		gc.start()
 		gc.scan()
 		gc.clearEtcd()
-		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, insertLogPrefix), []string{})
-		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, statsLogPrefix), []string{})
-		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, deltaLogPrefix), []string{})
-		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, `indexes`), others)
+		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, insertLogPrefix), []string{})
+		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, statsLogPrefix), []string{})
+		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, deltaLogPrefix), []string{})
+		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, `indexes`), others)
 
 		gc.close()
 	})
 
-	cleanupOSS(cli, bucketName, rootPath)
+	cleanupOSS(cli.Client, bucketName, rootPath)
 }
 
 // initialize unit test sso env
-func initUtOSSEnv(bucket, root string, n int) (cli *minio.Client, inserts []string, stats []string, delta []string, other []string, err error) {
+func initUtOSSEnv(bucket, root string, n int) (mcm *storage.MinioChunkManager, inserts []string, stats []string, delta []string, other []string, err error) {
 	Params.Init()
-	cli, err = minio.New(Params.MinioCfg.Address, &minio.Options{
+	cli, err := minio.New(Params.MinioCfg.Address, &minio.Options{
 		Creds:  credentials.NewStaticV4(Params.MinioCfg.AccessKeyID, Params.MinioCfg.SecretAccessKey, ""),
 		Secure: Params.MinioCfg.UseSSL,
 	})
@@ -319,7 +313,11 @@ func initUtOSSEnv(bucket, root string, n int) (cli *minio.Client, inserts []stri
 		}
 		other = append(other, info.Key)
 	}
-	return cli, inserts, stats, delta, other, nil
+	mcm = &storage.MinioChunkManager{
+		Client: cli,
+	}
+	mcm.SetVar(context.TODO(), bucket)
+	return mcm, inserts, stats, delta, other, nil
 }
 
 func cleanupOSS(cli *minio.Client, bucket, root string) {
