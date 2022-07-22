@@ -228,13 +228,10 @@ func (kc *Consumer) GetLatestMsgID() (mqwrapper.MessageID, error) {
 func (kc *Consumer) Close() {
 	kc.closeOnce.Do(func() {
 		start := time.Now()
-
-		// FIXME we should not use goroutine to close consumer, it will be fix after pr https://github.com/confluentinc/confluent-kafka-go/pull/757
-		go kc.c.Close()
-
+		kc.c.Close()
 		cost := time.Since(start).Milliseconds()
-		if cost > 500 {
-			log.Debug("kafka consumer is closed ", zap.Any("topic", kc.topic), zap.String("groupID", kc.groupID), zap.Int64("time cost(ms)", cost))
+		if cost > 200 {
+			log.Warn("close consumer costs too long time", zap.Any("topic", kc.topic), zap.String("groupID", kc.groupID), zap.Int64("time(ms)", cost))
 		}
 	})
 }
