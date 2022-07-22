@@ -93,6 +93,9 @@ type Meta interface {
 	getReplicasByNodeID(nodeID int64) ([]*milvuspb.ReplicaInfo, error)
 	applyReplicaBalancePlan(p *balancePlan) error
 	updateShardLeader(replicaID UniqueID, dmChannel string, leaderID UniqueID, leaderAddr string) error
+
+	// patch 2.0.2 flawed segment meta
+	patchSegmentInfo(ctx context.Context, dc types.DataCoord) error
 }
 
 // MetaReplica records the current load information on all querynodes
@@ -147,6 +150,55 @@ func newMeta(ctx context.Context, kv kv.MetaKv, factory dependency.Factory, idAl
 	}
 
 	return m, nil
+}
+
+func (m *MetaReplica) patchSegmentInfo(ctx context.Context, dc types.DataCoord) error {
+	segments := m.segmentsInfo.getSegments()
+
+	var flawedSegments []UniqueID
+	for _, segment := range segments {
+		if segment.GetDmChannel() == "" {
+			flawedSegments = append(flawedSegments, segment.GetSegmentID())
+		}
+	}
+
+	if len(flawedSegments) == 0 {
+		log.Debug("no flawed segment meta found")
+		return nil
+	}
+
+	resp, err := dc.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_SegmentInfo,
+		},
+		SegmentIDs:       flawedSegments,
+		IncludeUnHealthy: true,
+	})
+
+	if err != nil {
+		log.Warn("failed to GetSegmentInfo from DataCoord", zap.Int64s("segmentIDs", flawedSegments), zap.Error(err))
+		return err
+	}
+	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		log.Warn("GetSegmentInfo from DataCoord returns error", zap.Int64s("segmentIDs", flawedSegments), zap.Int64("code", int64(resp.GetStatus().GetErrorCode())), zap.String("reason", resp.GetStatus().GetReason()))
+		return fmt.Errorf("Failed to re-sync flawed segments: %s", resp.GetStatus().GetReason())
+	}
+
+	for _, info := range resp.GetInfos() {
+		segment, err := m.getSegmentInfoByID(info.ID)
+		if err != nil {
+			log.Warn("failed to find original patched segment", zap.Int64("segmentID", info.ID), zap.Error(err))
+			return err
+		}
+		segment.DmChannel = info.InsertChannel
+		err = m.segmentsInfo.saveSegment(segment)
+		if err != nil {
+			log.Warn("failed to save patched segment", zap.Int64("segmentID", segment.SegmentID), zap.Error(err))
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (m *MetaReplica) reloadFromKV() error {

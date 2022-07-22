@@ -166,6 +166,13 @@ func (qc *QueryCoord) Init() error {
 			return
 		}
 
+		// patch SegmentMeta from 2.0.2, with segment dml channel not set
+		initError = qc.meta.patchSegmentInfo(qc.loopCtx, qc.dataCoordClient)
+		if initError != nil {
+			log.Error("query coordinator patch segment meta failed", zap.Error(initError))
+			return
+		}
+
 		// init channelUnsubscribeHandler
 		qc.channelCleaner, initError = NewChannelCleaner(qc.loopCtx, qc.kvClient, qc.factory)
 		if initError != nil {
