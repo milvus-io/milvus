@@ -137,16 +137,20 @@ def load_and_search(prefix, replicas=1):
     for col_name in col_list:
         c = Collection(name=col_name)
         print(f"collection name: {col_name}")
-        print("release collection")
-        c.release()
         print("load collection")
-        t0 = time.time()
         if replicas == 1:
+            t0 = time.time()
             c.load()
+            print(f"load time: {time.time() - t0:.4f}")
         if replicas > 1:
+            print("release collection before load if replicas > 1")
+            t0 = time.time()
+            c.release()
+            print(f"release time: {time.time() - t0:.4f}")
+            t0 = time.time()
             c.load(replica_number=replicas)
+            print(f"load time: {time.time() - t0:.4f}")
             print(c.get_replicas())
-        print(f"load time: {time.time() - t0:.4f}")
         topK = 5
         vectors = [[1.0 for _ in range(128)] for _ in range(3000)]
         index_name = col_name.replace(prefix, "")
