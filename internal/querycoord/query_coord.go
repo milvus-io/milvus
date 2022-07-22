@@ -163,6 +163,16 @@ func (qc *QueryCoord) Init() error {
 			log.Error("query coordinator init meta failed", zap.Error(initError))
 			return
 		}
+		meta, ok := qc.meta.(*MetaReplica)
+		if !ok {
+			panic("QueryCoord qc.meta assertion of MetaReplica error")
+		}
+
+		meta.dataCoord = qc.dataCoordClient
+		fixErr := meta.fixSegmentInfoDMChannel()
+		if fixErr != nil {
+			log.Error("QueryCoord newMeta fixSegmentInfoDMChannel failed", zap.Error(fixErr))
+		}
 
 		// init channelUnsubscribeHandler
 		qc.handler, initError = newChannelUnsubscribeHandler(qc.loopCtx, qc.kvClient, qc.factory)
