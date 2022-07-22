@@ -311,3 +311,13 @@ message ListPolicyResponse {
   common.Status status = 1;
   repeated string policy_infos = 2;
 }
+
+message ShowConfigurationsRequest {
+  common.MsgBase base = 1;
+  string pattern = 2;
+}
+
+message ShowConfigurationsResponse {
+  common.Status status = 1;
+  repeated common.KeyValuePair configuations = 2; 
+}
