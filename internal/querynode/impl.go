@@ -684,7 +684,7 @@ func (node *QueryNode) searchWithDmlChannel(ctx context.Context, req *queryPb.Se
 
 	defer func() {
 		if failRet.Status.ErrorCode != commonpb.ErrorCode_Success {
-			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.QueryLabel, metrics.FailLabel).Inc()
+			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.SearchLabel, metrics.FailLabel).Inc()
 		}
 	}()
 	if !node.isHealthy() {
