@@ -6,18 +6,15 @@ import (
 	"testing"
 
 	"github.com/golang/protobuf/proto"
-
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
-
-	"github.com/milvus-io/milvus/internal/proto/schemapb"
-
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
 func TestDescribeSegmentReqTask_Type(t *testing.T) {
@@ -72,48 +69,53 @@ func TestDescribeSegmentsReqTask_Execute(t *testing.T) {
 		return []typeutil.UniqueID{segID}, nil
 	}
 	c.MetaTable = &MetaTable{
-		segID2IndexMeta: map[typeutil.UniqueID]map[typeutil.UniqueID]etcdpb.SegmentIndexInfo{},
+		segID2IndexID: make(map[typeutil.UniqueID]typeutil.UniqueID, 1),
 	}
 	assert.NoError(t, tsk.Execute(context.Background()))
 
-	// index not found in meta. no return error
+	// index not found in meta
 	c.MetaTable = &MetaTable{
-		segID2IndexMeta: map[typeutil.UniqueID]map[typeutil.UniqueID]etcdpb.SegmentIndexInfo{
-			segID: {
-				indexID: {
-					CollectionID: collID,
-					PartitionID:  partID,
-					SegmentID:    segID,
-					FieldID:      fieldID,
-					IndexID:      indexID,
-					BuildID:      buildID,
-					EnableIndex:  true,
+		segID2IndexID: map[typeutil.UniqueID]typeutil.UniqueID{segID: indexID},
+		indexID2Meta: map[typeutil.UniqueID]*model.Index{
+			indexID: {
+				CollectionID: collID,
+				FieldID:      fieldID,
+				IndexID:      indexID,
+				SegmentIndexes: map[int64]model.SegmentIndex{
+					segID + 1: {
+						Segment: model.Segment{
+							SegmentID:   segID,
+							PartitionID: partID,
+						},
+						BuildID:     buildID,
+						EnableIndex: true,
+					},
 				},
 			},
 		},
 	}
-	assert.NoError(t, tsk.Execute(context.Background()))
+	assert.Error(t, tsk.Execute(context.Background()))
 
 	// success.
 	c.MetaTable = &MetaTable{
-		segID2IndexMeta: map[typeutil.UniqueID]map[typeutil.UniqueID]etcdpb.SegmentIndexInfo{
-			segID: {
-				indexID: {
-					CollectionID: collID,
-					PartitionID:  partID,
-					SegmentID:    segID,
-					FieldID:      fieldID,
-					IndexID:      indexID,
-					BuildID:      buildID,
-					EnableIndex:  true,
-				},
-			},
-		},
-		indexID2Meta: map[typeutil.UniqueID]etcdpb.IndexInfo{
+		segID2IndexID: map[typeutil.UniqueID]typeutil.UniqueID{segID: indexID},
+		indexID2Meta: map[typeutil.UniqueID]*model.Index{
 			indexID: {
-				IndexName:   indexName,
-				IndexID:     indexID,
-				IndexParams: nil,
+				CollectionID: collID,
+				FieldID:      fieldID,
+				IndexID:      indexID,
+				IndexName:    indexName,
+				IndexParams:  nil,
+				SegmentIndexes: map[int64]model.SegmentIndex{
+					segID: {
+						Segment: model.Segment{
+							SegmentID:   segID,
+							PartitionID: partID,
+						},
+						BuildID:     buildID,
+						EnableIndex: true,
+					},
+				},
 			},
 		},
 	}

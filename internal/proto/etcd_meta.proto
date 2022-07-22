@@ -5,11 +5,7 @@ option go_package="github.com/milvus-io/milvus/internal/proto/etcdpb";
 import "common.proto";
 import "schema.proto";
 
-message ProxyMeta {
-  int64 ID = 1;
-  common.Address address = 2;
-  repeated string result_channelIDs = 3;
-}
+// this proto only used to describe object that will persist into etcd
 
 message IndexInfo {
   string index_name = 1;
@@ -28,15 +24,25 @@ message CollectionInfo {
   int64 ID = 1;
   schema.CollectionSchema schema = 2;
   uint64 create_time = 3;
+  // deprecate
   repeated int64 partitionIDs = 4;
+  // deprecate
   repeated string partitionNames = 5;
   repeated FieldIndexInfo field_indexes = 6;
   repeated string virtual_channel_names = 7;
   repeated string physical_channel_names = 8;
+  // deprecate
   repeated uint64 partition_created_timestamps = 9;
   int32 shards_num = 10;
   repeated common.KeyDataPair start_positions = 11;
   common.ConsistencyLevel consistency_level = 12;
+  repeated PartitionInfo partitions = 13;
+}
+
+message PartitionInfo {
+  int64 partitionID = 1;
+  string partitionName = 2;
+  uint64 partition_created_timestamp = 3;
 }
 
 message SegmentIndexInfo {
@@ -50,6 +56,7 @@ message SegmentIndexInfo {
   uint64 create_time = 8;
 }
 
+// TODO move to proto files of interprocess communication
 message CollectionMeta {
   int64 ID=1;
   schema.CollectionSchema schema=2;
@@ -57,4 +64,14 @@ message CollectionMeta {
   repeated int64 segmentIDs=4;
   repeated string partition_tags=5;
   repeated int64 partitionIDs=6;
+}
+
+message CredentialInfo {
+  string username = 1;
+  // encrypted by bcrypt (for higher security level)
+  string encrypted_password = 2;
+  string tenant = 3;
+  bool is_super = 4;
+  // encrypted by sha256 (for good performance in cache mapping)
+  string sha256_password = 5;
 }
