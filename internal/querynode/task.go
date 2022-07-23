@@ -23,6 +23,7 @@ import (
 	"runtime/debug"
 
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -417,15 +418,15 @@ func (w *watchDeltaChannelsTask) Execute(ctx context.Context) error {
 		vChannel2SeekPosition[v] = info.SeekPosition
 	}
 	log.Info("Starting WatchDeltaChannels ...",
-		zap.Any("collectionID", collectionID),
-		zap.Any("vDeltaChannels", vDeltaChannels),
-		zap.Any("pChannels", pDeltaChannels),
+		zap.Int64("collectionID", collectionID),
+		zap.Strings("vDeltaChannels", vDeltaChannels),
+		zap.Strings("pChannels", pDeltaChannels),
 	)
 	if len(VPDeltaChannels) != len(vDeltaChannels) {
 		return errors.New("get physical channels failed, illegal channel length, collectionID = " + fmt.Sprintln(collectionID))
 	}
 	log.Info("Get physical channels done",
-		zap.Any("collectionID", collectionID),
+		zap.Int64("collectionID", collectionID),
 	)
 
 	if hasColl := w.node.metaReplica.hasCollection(collectionID); !hasColl {
@@ -442,20 +443,29 @@ func (w *watchDeltaChannelsTask) Execute(ctx context.Context) error {
 		return err
 	}
 	consumeSubName := funcutil.GenChannelSubName(Params.CommonCfg.QueryNodeSubName, collectionID, Params.QueryNodeCfg.GetNodeID())
+
+	runningGroup, groupCtx := errgroup.WithContext(w.ctx)
 	// channels as consumer
 	for channel, fg := range channel2FlowGraph {
-		// use pChannel to consume
-		err = fg.consumeFlowGraphFromLatest(VPDeltaChannels[channel], consumeSubName)
-		if err != nil {
-			log.Error("msgStream as consumer failed for deltaChannels", zap.Int64("collectionID", collectionID), zap.Strings("vDeltaChannels", vDeltaChannels))
-			break
-		}
-		err = w.node.loader.FromDmlCPLoadDelete(w.ctx, collectionID, vChannel2SeekPosition[channel])
-		if err != nil {
-			log.Error("watchDeltaChannelsTask from dml cp load delete failed", zap.Int64("collectionID", collectionID), zap.Strings("vDeltaChannels", vDeltaChannels))
-			break
-		}
+		channel := channel
+		fg := fg
+		runningGroup.Go(func() error {
+			// use pChannel to consume
+			err := fg.consumeFlowGraphFromLatest(VPDeltaChannels[channel], consumeSubName)
+			if err != nil {
+				log.Error("msgStream as consumer failed for deltaChannels", zap.Int64("collectionID", collectionID), zap.Strings("vDeltaChannels", vDeltaChannels))
+				return err
+			}
+			err = w.node.loader.FromDmlCPLoadDelete(groupCtx, collectionID, vChannel2SeekPosition[channel])
+			if err != nil {
+				log.Error("watchDeltaChannelsTask from dml cp load delete failed", zap.Int64("collectionID", collectionID), zap.Strings("vDeltaChannels", vDeltaChannels))
+				return err
+			}
+			return nil
+		})
 	}
+	err = runningGroup.Wait()
+
 	if err != nil {
 		log.Warn("watchDeltaChannel, add flowGraph for deltaChannel failed", zap.Int64("collectionID", collectionID), zap.Strings("vDeltaChannels", vDeltaChannels), zap.Error(err))
 		for _, fg := range channel2FlowGraph {
