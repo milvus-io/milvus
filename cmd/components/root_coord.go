@@ -20,13 +20,12 @@ import (
 	"context"
 	"io"
 
+	rc "github.com/milvus-io/milvus/internal/distributed/rootcoord"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/dependency"
-
 	"github.com/opentracing/opentracing-go"
-
-	rc "github.com/milvus-io/milvus/internal/distributed/rootcoord"
+	"go.uber.org/zap"
 )
 
 // RootCoord implements RoodCoord grpc server
@@ -53,6 +52,7 @@ func NewRootCoord(ctx context.Context, factory dependency.Factory) (*RootCoord, 
 // Run starts service
 func (rc *RootCoord) Run() error {
 	if err := rc.svr.Run(); err != nil {
+		log.Error("RootCoord starts error", zap.Error(err))
 		return err
 	}
 	log.Debug("RootCoord successfully started")

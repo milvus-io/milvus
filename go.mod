@@ -5,6 +5,7 @@ go 1.16
 require (
 	github.com/99designs/keyring v1.2.1 // indirect
 	github.com/BurntSushi/toml v1.0.0
+	github.com/DATA-DOG/go-sqlmock v1.5.0 // indirect
 	github.com/HdrHistogram/hdrhistogram-go v1.0.1 // indirect
 	github.com/StackExchange/wmi v1.2.1 // indirect
 	github.com/antlr/antlr4/runtime/Go/antlr v0.0.0-20210826220005-b48c857c3a0e
@@ -25,6 +26,7 @@ require (
 	github.com/google/btree v1.0.1
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/jarcoal/httpmock v1.0.8
+	github.com/jmoiron/sqlx v1.3.5 // indirect
 	github.com/klauspost/compress v1.14.2
 	github.com/lingdor/stackerror v0.0.0-20191119040541-976d8885ed76
 	github.com/minio/minio-go/v7 v7.0.10

@@ -18,20 +18,26 @@ package rootcoord
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
+	// Register mysql driver
+	_ "github.com/go-sql-driver/mysql"
 	"github.com/milvus-io/milvus/internal/common"
-
+	"github.com/milvus-io/milvus/internal/db"
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metastore"
 	kvmetestore "github.com/milvus-io/milvus/internal/metastore/kv"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/metastore/table"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/util"
+	"github.com/milvus-io/milvus/internal/util/contextutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
 )
@@ -83,18 +89,40 @@ type MetaTable struct {
 	credLock sync.RWMutex
 }
 
+// TODO using factory once dependency of tnx and snap are removed
+func newCatalog(txn kv.TxnKV, snap kv.SnapShotKV) (metastore.Catalog, error) {
+	var catalog metastore.Catalog
+	if Params.MetaStoreCfg.MetaStoreType == util.MetaStoreTypeEtcd {
+		catalog = &kvmetestore.Catalog{Txn: txn, Snapshot: snap}
+	} else if Params.MetaStoreCfg.MetaStoreType == util.MetaStoreTypeMysql {
+		conn, err := db.Open(&Params.DBCfg)
+		if err != nil {
+			log.Error("fail connecting to db", zap.Any("error", err))
+			return nil, err
+		}
+		catalog = &table.Catalog{DB: conn}
+	} else {
+		return nil, errors.New("not supported meta store: " + Params.MetaStoreCfg.MetaStoreType)
+	}
+	return catalog, nil
+}
+
 // NewMetaTable creates meta table for rootcoord, which stores all in-memory information
 // for collection, partition, segment, index etc.
 func NewMetaTable(ctx context.Context, txn kv.TxnKV, snap kv.SnapShotKV) (*MetaTable, error) {
+	catalog, err := newCatalog(txn, snap)
+	if err != nil {
+		return nil, err
+	}
 	mt := &MetaTable{
-		ctx:      ctx,
+		ctx:      contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName),
 		txn:      txn,
 		snapshot: snap,
-		catalog:  &kvmetestore.Catalog{Txn: txn, Snapshot: snap},
+		catalog:  catalog,
 		ddLock:   sync.RWMutex{},
 		credLock: sync.RWMutex{},
 	}
-	err := mt.reloadFromCatalog()
+	err = mt.reloadFromCatalog()
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +137,7 @@ func (mt *MetaTable) reloadFromCatalog() error {
 	mt.segID2IndexID = make(map[typeutil.UniqueID]typeutil.UniqueID)
 	mt.indexID2Meta = make(map[typeutil.UniqueID]*model.Index)
 
-	collAliases, err := mt.catalog.ListAliases(mt.ctx)
+	collAliases, err := mt.catalog.ListAliases(mt.ctx, 0)
 	if err != nil {
 		return err
 	}
@@ -686,7 +714,7 @@ func (mt *MetaTable) DropIndex(collName, fieldName, indexName string) (typeutil.
 	col.FieldIDToIndexID = fieldIDToIndexID
 
 	// update metastore
-	err = mt.catalog.DropIndex(mt.ctx, &col, dropIdxID, 0)
+	err = mt.catalog.DropIndex(mt.ctx, &col, dropIdxID)
 	if err != nil {
 		return 0, false, err
 	}
@@ -872,7 +900,7 @@ func (mt *MetaTable) RecycleDroppedIndex() error {
 
 				// update metastore
 				newColMeta := colMeta
-				if err := mt.catalog.DropIndex(mt.ctx, &newColMeta, dropIdxID, 0); err != nil {
+				if err := mt.catalog.DropIndex(mt.ctx, &newColMeta, dropIdxID); err != nil {
 					return err
 				}
 

@@ -23,6 +23,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/streamnative/pulsarctl/pkg/cmdutils"
 )
@@ -41,7 +43,9 @@ type ServiceParam struct {
 	BaseTable
 
 	LocalStorageCfg LocalStorageConfig
+	MetaStoreCfg    MetaStoreConfig
 	EtcdCfg         EtcdConfig
+	DBCfg           MetaDBConfig
 	PulsarCfg       PulsarConfig
 	KafkaCfg        KafkaConfig
 	RocksmqCfg      RocksmqConfig
@@ -52,7 +56,12 @@ func (p *ServiceParam) Init() {
 	p.BaseTable.Init()
 
 	p.LocalStorageCfg.init(&p.BaseTable)
+	p.MetaStoreCfg.init(&p.BaseTable)
 	p.EtcdCfg.init(&p.BaseTable)
+	if p.MetaStoreCfg.MetaStoreType == util.MetaStoreTypeMysql {
+		log.Debug("Mysql protocol is used as meta store")
+		p.DBCfg.init(&p.BaseTable)
+	}
 	p.PulsarCfg.init(&p.BaseTable)
 	p.KafkaCfg.init(&p.BaseTable)
 	p.RocksmqCfg.init(&p.BaseTable)
@@ -196,6 +205,97 @@ func (p *LocalStorageConfig) init(base *BaseTable) {
 
 func (p *LocalStorageConfig) initPath() {
 	p.Path = p.Base.LoadWithDefault("localStorage.path", "/var/lib/milvus/data")
+}
+
+type MetaStoreConfig struct {
+	Base *BaseTable
+
+	MetaStoreType string
+}
+
+func (p *MetaStoreConfig) init(base *BaseTable) {
+	p.Base = base
+	p.initMetaStoreType()
+}
+
+func (p *MetaStoreConfig) initMetaStoreType() {
+	p.MetaStoreType = p.Base.LoadWithDefault("metastore.type", util.MetaStoreTypeEtcd)
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// --- meta db ---
+type MetaDBConfig struct {
+	Base *BaseTable
+
+	Username     string
+	Password     string
+	Address      string
+	Port         int
+	DBName       string
+	MaxOpenConns int
+	MaxIdleConns int
+}
+
+func (p *MetaDBConfig) init(base *BaseTable) {
+	p.Base = base
+	p.LoadCfgToMemory()
+}
+
+func (p *MetaDBConfig) LoadCfgToMemory() {
+	p.initUsername()
+	p.initPassword()
+	p.initAddress()
+	p.initPort()
+	p.initDbName()
+	p.initMaxOpenConns()
+	p.initMaxIdleConns()
+}
+
+func (p *MetaDBConfig) initUsername() {
+	username, err := p.Base.Load("mysql.username")
+	if err != nil {
+		panic(err)
+	}
+	p.Username = username
+}
+
+func (p *MetaDBConfig) initPassword() {
+	password, err := p.Base.Load("mysql.password")
+	if err != nil {
+		panic(err)
+	}
+	p.Password = password
+}
+
+func (p *MetaDBConfig) initAddress() {
+	address, err := p.Base.Load("mysql.address")
+	if err != nil {
+		panic(err)
+	}
+	p.Address = address
+}
+
+func (p *MetaDBConfig) initPort() {
+	port := p.Base.ParseIntWithDefault("mysql.port", 3306)
+	p.Port = port
+}
+
+func (p *MetaDBConfig) initDbName() {
+	dbName, err := p.Base.Load("mysql.dbName")
+	if err != nil {
+		panic(err)
+	}
+	p.DBName = dbName
+}
+
+func (p *MetaDBConfig) initMaxOpenConns() {
+	maxOpenConns := p.Base.ParseIntWithDefault("mysql.maxOpenConns", 20)
+	p.MaxOpenConns = maxOpenConns
+}
+
+func (p *MetaDBConfig) initMaxIdleConns() {
+	maxIdleConns := p.Base.ParseIntWithDefault("mysql.maxIdleConns", 5)
+	p.MaxIdleConns = maxIdleConns
 }
 
 ///////////////////////////////////////////////////////////////////////////////

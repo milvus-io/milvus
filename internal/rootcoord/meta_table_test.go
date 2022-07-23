@@ -26,14 +26,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/common"
-
-	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/stretchr/testify/mock"
-
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
+	"github.com/milvus-io/milvus/internal/metastore"
 	kvmetestore "github.com/milvus-io/milvus/internal/metastore/kv"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -43,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -106,6 +105,68 @@ func (m *mockTestTxnKV) Remove(key string) error {
 
 func (m *mockTestTxnKV) MultiRemove(keys []string) error {
 	return m.multiRemove(keys)
+}
+
+func Test_MockKV(t *testing.T) {
+	Params.Init()
+	k1 := &mockTestKV{}
+	kt := &mockTestTxnKV{}
+	prefix := make(map[string][]string)
+	k1.loadWithPrefix = func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
+		if val, ok := prefix[key]; ok {
+			return nil, val, nil
+		}
+		return nil, nil, fmt.Errorf("load prefix error")
+	}
+	kt.loadWithPrefix = func(key string) ([]string, []string, error) {
+		if val, ok := prefix[key]; ok {
+			return nil, val, nil
+		}
+		return nil, nil, fmt.Errorf("load prefix error")
+	}
+
+	_, err := NewMetaTable(context.TODO(), kt, k1)
+	assert.NotNil(t, err)
+	assert.EqualError(t, err, "load prefix error")
+
+	// collection
+	prefix[kvmetestore.CollectionMetaPrefix] = []string{"collection-meta"}
+	_, err = NewMetaTable(context.TODO(), kt, k1)
+	assert.NotNil(t, err)
+
+	value, err := proto.Marshal(&pb.CollectionInfo{Schema: &schemapb.CollectionSchema{}})
+	assert.Nil(t, err)
+	prefix[kvmetestore.CollectionMetaPrefix] = []string{string(value)}
+	_, err = NewMetaTable(context.TODO(), kt, k1)
+	assert.NotNil(t, err)
+
+	// segment index
+	prefix[kvmetestore.SegmentIndexMetaPrefix] = []string{"segment-index-meta"}
+	_, err = NewMetaTable(context.TODO(), kt, k1)
+	assert.NotNil(t, err)
+
+	value, err = proto.Marshal(&pb.SegmentIndexInfo{})
+	assert.Nil(t, err)
+	prefix[kvmetestore.SegmentIndexMetaPrefix] = []string{string(value)}
+	_, err = NewMetaTable(context.TODO(), kt, k1)
+	assert.NotNil(t, err)
+
+	prefix[kvmetestore.SegmentIndexMetaPrefix] = []string{string(value), string(value)}
+	_, err = NewMetaTable(context.TODO(), kt, k1)
+	assert.NotNil(t, err)
+	assert.EqualError(t, err, "load prefix error")
+
+	// index
+	prefix[kvmetestore.IndexMetaPrefix] = []string{"index-meta"}
+	_, err = NewMetaTable(context.TODO(), kt, k1)
+	assert.NotNil(t, err)
+
+	value, err = proto.Marshal(&pb.IndexInfo{})
+	assert.Nil(t, err)
+	prefix[kvmetestore.IndexMetaPrefix] = []string{string(value)}
+	_, err = NewMetaTable(context.TODO(), kt, k1)
+	assert.NotNil(t, err)
+	assert.EqualError(t, err, "load prefix error")
 }
 
 func TestMetaTable(t *testing.T) {
@@ -1716,7 +1777,7 @@ type MockedCatalog struct {
 	metastore.Catalog
 	alterIndexParamsVerification  func(ctx context.Context, oldIndex *model.Index, newIndex *model.Index, alterType metastore.AlterType)
 	createIndexParamsVerification func(ctx context.Context, col *model.Collection, index *model.Index)
-	dropIndexParamsVerification   func(ctx context.Context, collectionInfo *model.Collection, dropIdxID typeutil.UniqueID, ts typeutil.Timestamp)
+	dropIndexParamsVerification   func(ctx context.Context, collectionInfo *model.Collection, dropIdxID typeutil.UniqueID)
 }
 
 func (mc *MockedCatalog) ListCollections(ctx context.Context, ts typeutil.Timestamp) (map[string]*model.Collection, error) {
@@ -1729,7 +1790,7 @@ func (mc *MockedCatalog) ListIndexes(ctx context.Context) ([]*model.Index, error
 	return args.Get(0).([]*model.Index), nil
 }
 
-func (mc *MockedCatalog) ListAliases(ctx context.Context) ([]*model.Collection, error) {
+func (mc *MockedCatalog) ListAliases(ctx context.Context, ts typeutil.Timestamp) ([]*model.Collection, error) {
 	args := mc.Called()
 	return args.Get(0).([]*model.Collection), nil
 }
@@ -1759,9 +1820,9 @@ func (mc *MockedCatalog) CreateIndex(ctx context.Context, col *model.Collection,
 }
 
 func (mc *MockedCatalog) DropIndex(ctx context.Context, collectionInfo *model.Collection,
-	dropIdxID typeutil.UniqueID, ts typeutil.Timestamp) error {
+	dropIdxID typeutil.UniqueID) error {
 	if mc.dropIndexParamsVerification != nil {
-		mc.dropIndexParamsVerification(ctx, collectionInfo, dropIdxID, ts)
+		mc.dropIndexParamsVerification(ctx, collectionInfo, dropIdxID)
 	}
 
 	args := mc.Called()
@@ -2109,7 +2170,7 @@ func TestMetaTable_RecycleDroppedIndex(t *testing.T) {
 
 	mc := &MockedCatalog{}
 	mc.On("DropIndex").Return(nil)
-	mc.dropIndexParamsVerification = func(ctx context.Context, collectionInfo *model.Collection, dropIdxID typeutil.UniqueID, ts typeutil.Timestamp) {
+	mc.dropIndexParamsVerification = func(ctx context.Context, collectionInfo *model.Collection, dropIdxID typeutil.UniqueID) {
 		assert.NotNil(t, collectionInfo)
 		assert.Equal(t, int64(1), dropIdxID)
 		assert.Equal(t, int64(1), collectionInfo.CollectionID)

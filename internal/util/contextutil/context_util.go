@@ -14,21 +14,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package util
+package contextutil
 
-// Meta Prefix consts
+import "context"
+
+type ctxKey int
+
 const (
-	SegmentMetaPrefix    = "queryCoord-segmentMeta"
-	ChangeInfoMetaPrefix = "queryCoord-sealedSegmentChangeInfo"
-	HandoffSegmentPrefix = "querycoord-handoff"
-	HeaderAuthorize      = "authorization"
-	// HeaderSourceID identify requests from Milvus members and client requests
-	HeaderSourceID = "sourceId"
-	// MemberCredID id for Milvus members (data/index/query node/coord component)
-	MemberCredID        = "@@milvus-member@@"
-	CredentialSeperator = ":"
-	UserRoot            = "root"
-	DefaultRootPassword = "Milvus"
-	MetaStoreTypeEtcd   = "etcd"
-	MetaStoreTypeMysql  = "mysql"
+	ctxKeyTenantID ctxKey = iota
 )
+
+// WithTenantID creates a new context that has tenantID injected.
+func WithTenantID(ctx context.Context, tenantID string) context.Context {
+	return context.WithValue(ctx, ctxKeyTenantID, tenantID)
+}
+
+// TenantID tries to retrieve tenantID from the given context.
+// If it doesn't exist, an empty string is returned.
+func TenantID(ctx context.Context) string {
+	if requestID, ok := ctx.Value(ctxKeyTenantID).(string); ok {
+		return requestID
+	}
+
+	return ""
+}

@@ -21,13 +21,13 @@ type Catalog interface {
 	CreateIndex(ctx context.Context, col *model.Collection, index *model.Index) error
 	// AlterIndex newIndex only contains updated parts
 	AlterIndex(ctx context.Context, oldIndex *model.Index, newIndex *model.Index, alterType AlterType) error
-	DropIndex(ctx context.Context, collectionInfo *model.Collection, dropIdxID typeutil.UniqueID, ts typeutil.Timestamp) error
+	DropIndex(ctx context.Context, collectionInfo *model.Collection, dropIdxID typeutil.UniqueID) error
 	ListIndexes(ctx context.Context) ([]*model.Index, error)
 
 	CreateAlias(ctx context.Context, collection *model.Collection, ts typeutil.Timestamp) error
 	DropAlias(ctx context.Context, collectionID typeutil.UniqueID, alias string, ts typeutil.Timestamp) error
 	AlterAlias(ctx context.Context, collection *model.Collection, ts typeutil.Timestamp) error
-	ListAliases(ctx context.Context) ([]*model.Collection, error)
+	ListAliases(ctx context.Context, ts typeutil.Timestamp) ([]*model.Collection, error)
 
 	GetCredential(ctx context.Context, username string) (*model.Credential, error)
 	CreateCredential(ctx context.Context, credential *model.Credential) error

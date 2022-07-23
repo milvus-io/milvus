@@ -10,11 +10,10 @@ import (
 	"reflect"
 	"strconv"
 
-	"github.com/milvus-io/milvus/internal/metastore"
-
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -342,7 +341,7 @@ func (kc *Catalog) DropPartition(ctx context.Context, collectionInfo *model.Coll
 	return nil
 }
 
-func (kc *Catalog) DropIndex(ctx context.Context, collectionInfo *model.Collection, dropIdxID typeutil.UniqueID, ts typeutil.Timestamp) error {
+func (kc *Catalog) DropIndex(ctx context.Context, collectionInfo *model.Collection, dropIdxID typeutil.UniqueID) error {
 	collMeta := model.MarshalCollectionModel(collectionInfo)
 	k := path.Join(CollectionMetaPrefix, strconv.FormatInt(collectionInfo.CollectionID, 10))
 	v, err := proto.Marshal(collMeta)
@@ -442,8 +441,8 @@ func (kc *Catalog) ListCollections(ctx context.Context, ts typeutil.Timestamp) (
 	return colls, nil
 }
 
-func (kc *Catalog) ListAliases(ctx context.Context) ([]*model.Collection, error) {
-	_, values, err := kc.Snapshot.LoadWithPrefix(CollectionAliasMetaPrefix, 0)
+func (kc *Catalog) ListAliases(ctx context.Context, ts typeutil.Timestamp) ([]*model.Collection, error) {
+	_, values, err := kc.Snapshot.LoadWithPrefix(CollectionAliasMetaPrefix, ts)
 	if err != nil {
 		log.Error("get aliases meta fail", zap.String("prefix", CollectionAliasMetaPrefix), zap.Error(err))
 		return nil, err

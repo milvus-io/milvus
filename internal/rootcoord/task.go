@@ -24,7 +24,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
-	model "github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
