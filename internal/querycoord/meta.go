@@ -190,9 +190,16 @@ func (m *MetaReplica) fixSegmentInfoDMChannel() error {
 	}
 
 	for _, newInfo := range infoResp.Infos {
-		curInfo, ok := m.segmentsInfo.segmentIDMap[newInfo.GetID()]
-		if ok {
-			curInfo.DmChannel = newInfo.GetInsertChannel()
+		segment, err := m.getSegmentInfoByID(newInfo.GetID())
+		if err != nil {
+			log.Warn("failed to find original patched segment", zap.Int64("segmentID", newInfo.GetID()), zap.Error(err))
+			return err
+		}
+		segment.DmChannel = newInfo.GetInsertChannel()
+		err = m.segmentsInfo.saveSegment(segment)
+		if err != nil {
+			log.Warn("failed to save patched segment", zap.Int64("segmentID", newInfo.GetID()), zap.Error(err))
+			return err
 		}
 	}
 	return nil
