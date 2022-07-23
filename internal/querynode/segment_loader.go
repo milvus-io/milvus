@@ -24,7 +24,6 @@ import (
 	"runtime"
 	"runtime/debug"
 	"strconv"
-	"sync"
 
 	"github.com/panjf2000/ants/v2"
 	"go.uber.org/zap"
@@ -665,7 +664,6 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 	delData := &deleteData{
 		deleteIDs:        make(map[UniqueID][]primaryKey),
 		deleteTimestamps: make(map[UniqueID][]Timestamp),
-		deleteOffset:     make(map[UniqueID]int64),
 	}
 
 	log.Info("start read delta msg from seek position to last position",
@@ -730,42 +728,16 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 			continue
 		}
 		offset := segment.segmentPreDelete(len(pks))
-		delData.deleteOffset[segmentID] = offset
+		timestamps := delData.deleteTimestamps[segmentID]
+		err = segment.segmentDelete(offset, pks, timestamps)
+		if err != nil {
+			log.Warn("QueryNode: segment delete failed", zap.Int64("segment", segmentID), zap.Error(err))
+			return err
+		}
 	}
 
-	wg := sync.WaitGroup{}
-	for segmentID := range delData.deleteOffset {
-		wg.Add(1)
-		go deletePk(loader.metaReplica, delData, segmentID, &wg)
-	}
-	wg.Wait()
 	log.Info("from dml check point load done", zap.Any("msg id", position.GetMsgID()))
 	return nil
-}
-
-func deletePk(replica ReplicaInterface, deleteData *deleteData, segmentID UniqueID, wg *sync.WaitGroup) {
-	defer wg.Done()
-	log.Debug("QueryNode::iNode::delete", zap.Any("SegmentID", segmentID))
-	targetSegment, err := replica.getSegmentByID(segmentID, segmentTypeSealed)
-	if err != nil {
-		log.Error(err.Error())
-		return
-	}
-
-	if targetSegment.segmentType != segmentTypeSealed {
-		return
-	}
-
-	ids := deleteData.deleteIDs[segmentID]
-	timestamps := deleteData.deleteTimestamps[segmentID]
-	offset := deleteData.deleteOffset[segmentID]
-
-	err = targetSegment.segmentDelete(offset, ids, timestamps)
-	if err != nil {
-		log.Warn("QueryNode: targetSegmentDelete failed", zap.Error(err))
-		return
-	}
-	log.Debug("Do delete done", zap.Int("len", len(deleteData.deleteIDs[segmentID])), zap.Int64("segmentID", segmentID), zap.Any("segmentType", targetSegment.segmentType))
 }
 
 // JoinIDPath joins ids to path format.
