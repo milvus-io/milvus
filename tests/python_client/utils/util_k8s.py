@@ -8,6 +8,22 @@ from kubernetes import client, config
 from kubernetes.client.rest import ApiException
 from common.milvus_sys import MilvusSys
 from utils.util_log import test_log as log
+from common.common_type import in_cluster_env
+
+
+def init_k8s_client_config():
+    """
+    init kubernetes client config
+    """
+    try:
+        in_cluster = os.getenv(in_cluster_env, default='False')
+        # log.debug(f"env variable IN_CLUSTER: {in_cluster}")
+        if in_cluster.lower() == 'true':
+            config.load_incluster_config()
+        else:
+            config.load_kube_config()
+    except Exception as e:
+        raise Exception(e)
 
 
 def wait_pods_ready(namespace, label_selector, expected_num=None, timeout=360):
@@ -29,7 +45,7 @@ def wait_pods_ready(namespace, label_selector, expected_num=None, timeout=360):
     :example:
             >>> wait_pods_ready("default", "app.kubernetes.io/instance=scale-query", expected_num=9)
     """
-    config.load_kube_config()
+    init_k8s_client_config()
     api_instance = client.CoreV1Api()
     try:
         all_pos_ready_flag = False
@@ -77,7 +93,7 @@ def get_pod_list(namespace, label_selector):
     :example:
             >>> get_pod_list("chaos-testing", "app.kubernetes.io/instance=test-proxy-pod-failure, component=proxy")
     """
-    config.load_kube_config()
+    init_k8s_client_config()
     api_instance = client.CoreV1Api()
     try:
         api_response = api_instance.list_namespaced_pod(namespace=namespace, label_selector=label_selector)
@@ -169,7 +185,7 @@ def get_milvus_instance_name(namespace, host, port="19530"):
         # get all pods which label is app.kubernetes.io/name=milvus and component=querynode
         ip_name_pairs = get_pod_ip_name_pairs(namespace, "app.kubernetes.io/name=milvus, component=querynode")
         pod_name = ip_name_pairs[query_node_ip]
-    config.load_kube_config()
+    init_k8s_client_config()
     api_instance = client.CoreV1Api()
     try:
         api_response = api_instance.read_namespaced_pod(namespace=namespace, name=pod_name)
@@ -218,7 +234,7 @@ def export_pod_logs(namespace, label_selector, release_name=None):
 
 
 def read_pod_log(namespace, label_selector, release_name):
-    config.load_kube_config()
+    init_k8s_client_config()
     items = get_pod_list(namespace, label_selector=label_selector)
 
     try:
