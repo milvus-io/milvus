@@ -1,7 +1,11 @@
 from __future__ import print_function
+
+import os
+
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
 from utils.util_log import test_log as log
+from common.common_type import in_cluster_env
 
 _GROUP = 'milvus.io'
 _VERSION = 'v1alpha1'
@@ -18,10 +22,17 @@ class CustomResourceOperations(object):
         else:
             self.plural = kind.lower()
 
+        # init k8s client config
+        in_cluster = os.getenv(in_cluster_env, default='False')
+        log.debug(f"env variable IN_CLUSTER: {in_cluster}")
+        if in_cluster.lower() == 'true':
+            config.load_incluster_config()
+        else:
+            config.load_kube_config()
+
     def create(self, body):
         """create or apply a custom resource in k8s"""
         pretty = 'true'
-        config.load_kube_config()
         api_instance = client.CustomObjectsApi()
         try:
             api_response = api_instance.create_namespaced_custom_object(self.group, self.version, self.namespace,
@@ -36,7 +47,6 @@ class CustomResourceOperations(object):
         """delete or uninstall a custom resource in k8s"""
         print(metadata_name)
         try:
-            config.load_kube_config()
             api_instance = client.CustomObjectsApi()
             api_response = api_instance.delete_namespaced_custom_object(self.group, self.version, self.namespace,
                                                                         self.plural,
@@ -49,7 +59,6 @@ class CustomResourceOperations(object):
 
     def patch(self, metadata_name, body):
         """patch a custom resource in k8s"""
-        config.load_kube_config()
         api_instance = client.CustomObjectsApi()
         try:
             api_response = api_instance.patch_namespaced_custom_object(self.group, self.version, self.namespace,
@@ -66,7 +75,6 @@ class CustomResourceOperations(object):
         """list all the customer resources in k8s"""
         pretty = 'true'
         try:
-            config.load_kube_config()
             api_instance = client.CustomObjectsApi()
             api_response = api_instance.list_namespaced_custom_object(self.group, self.version, self.namespace,
                                                                       plural=self.plural, pretty=pretty)
@@ -79,7 +87,6 @@ class CustomResourceOperations(object):
     def get(self, metadata_name):
         """get a customer resources by name in k8s"""
         try:
-            config.load_kube_config()
             api_instance = client.CustomObjectsApi()
             api_response = api_instance.get_namespaced_custom_object(self.group, self.version,
                                                                      self.namespace, self.plural,
