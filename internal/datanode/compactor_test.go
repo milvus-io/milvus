@@ -259,9 +259,8 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 
 			mitr := storage.NewMergeIterator([]iterator{iitr})
 
-			pk := newInt64PrimaryKey(1)
-			dm := map[primaryKey]Timestamp{
-				pk: 10000,
+			dm := map[interface{}]Timestamp{
+				1: 10000,
 			}
 
 			ct := &compactionTask{}
@@ -289,7 +288,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 
 			mitr := storage.NewMergeIterator([]iterator{iitr})
 
-			dm := map[primaryKey]Timestamp{}
+			dm := map[interface{}]Timestamp{}
 
 			ct := &compactionTask{}
 			idata, numOfRow, err := ct.merge(mitr, dm, meta.GetSchema(), ct.GetCurrentTime())
@@ -311,10 +310,8 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			require.NoError(t, err)
 
 			mitr := storage.NewMergeIterator([]iterator{iitr})
-
-			pk := newInt64PrimaryKey(1)
-			dm := map[primaryKey]Timestamp{
-				pk: 10000,
+			dm := map[interface{}]Timestamp{
+				1: 10000,
 			}
 
 			ct := &compactionTask{}
