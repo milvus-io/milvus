@@ -571,6 +571,7 @@ func (s *Server) handleTimetickMessage(ctx context.Context, ttMsg *msgstream.Dat
 	ch := ttMsg.GetChannelName()
 	ts := ttMsg.GetTimestamp()
 	physical, _ := tsoutil.ParseTS(ts)
+	log.Debug("handleTimetickMessage triggered", zap.String("channel_name", ch), zap.Uint64("timestamp", ts), zap.String("physical_time", physical.String()))
 	if time.Since(physical).Minutes() > 1 {
 		// if lag behind, log every 1 mins about
 		log.RatedWarn(60.0, "time tick lag behind for more than 1 minutes", zap.String("channel", ch), zap.Time("timetick", physical))
