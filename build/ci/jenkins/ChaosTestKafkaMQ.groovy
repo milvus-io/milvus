@@ -34,7 +34,7 @@ pipeline {
         string(
             description: 'Image Repository',
             name: 'image_repository',
-            defaultValue: 'registry.milvus.io/milvus/milvus'
+            defaultValue: 'harbor.milvus.io/dockerhub/milvusdb/milvus'
         )
         string(
             description: 'Image Tag',
@@ -142,14 +142,15 @@ pipeline {
                             sh "echo ${params.chaos_type}"
                             sh "helm repo add milvus https://milvus-io.github.io/milvus-helm"
                             sh "helm repo update"
-                            if ("${params.pod_name}" == "standalone"){
+                            def pod_name = "${params.pod_name}"
+                            if (pod_name.contains("standalone")){
                                 sh"""
                                 IMAGE_TAG="${image_tag_modified}" \
                                 REPOSITORY="${params.image_repository}" \
                                 RELEASE_NAME="${env.RELEASE_NAME}" \
                                 bash install_milvus_standalone.sh
                                 """    
-                            }else{   
+                            }else{
                                 sh"""
                                 IMAGE_TAG="${image_tag_modified}" \
                                 REPOSITORY="${params.image_repository}" \
@@ -217,11 +218,11 @@ pipeline {
 
                         if ("${params.chaos_task}" == "chaos-test"){
                             def host = sh(returnStdout: true, script: "kubectl get svc/${env.RELEASE_NAME}-milvus -o jsonpath=\"{.spec.clusterIP}\"").trim()
-                            sh "pytest -s -v test_chaos.py --host $host --log-cli-level=INFO --capture=no || echo 'chaos test fail' "
+                            sh "timeout 14m pytest -s -v test_chaos.py --host $host --log-cli-level=INFO --capture=no || echo 'chaos test fail' "
                         }
                         if ("${params.chaos_task}" == "data-consist-test"){
                             def host = sh(returnStdout: true, script: "kubectl get svc/${env.RELEASE_NAME}-milvus -o jsonpath=\"{.spec.clusterIP}\"").trim()
-                            sh "pytest -s -v test_chaos_data_consist.py --host $host --log-cli-level=INFO --capture=no || echo 'chaos test fail' "                           
+                            sh "timeout 14m pytest -s -v test_chaos_data_consist.py --host $host --log-cli-level=INFO --capture=no || echo 'chaos test fail' "                           
                         }
                         echo "chaos test done"
                         sh "kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=${env.RELEASE_NAME} -n ${env.NAMESPACE} --timeout=360s"

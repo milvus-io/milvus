@@ -41,7 +41,7 @@ pipeline {
         string(
             description: 'New Image Repository',
             name: 'new_image_repository',
-            defaultValue: 'registry.milvus.io/milvus/milvus'
+            defaultValue: 'harbor.milvus.io/dockerhub/milvusdb/milvus'
         )
         string(
             description: 'New Version Image Tag',
