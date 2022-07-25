@@ -7,7 +7,7 @@ metadata:
 spec:
   containers:
   - name: main
-    image: registry.milvus.io/test/krte:dev-4
+    image: harbor.milvus.io/qa/krte:dev-4
     command:
     - cat
     tty: true
@@ -19,17 +19,12 @@ spec:
         memory: 4Gi
         cpu: 2.0
     volumeMounts:
-    - name: qa-kubeconfig
-      mountPath: /root/.kube/
-  - name: jnlp
-    image: jenkins/inbound-agent:4.11-1-jdk8
-    resources:
-      limits: {}
-      requests:
-        memory: 256Mi
-        cpu: 100m
+    - mountPath: /root/.kube/config
+      name: kubeconfig
+      subPath: config
   volumes:
-  - name: qa-kubeconfig
-    secret:
-      secretName: qa-kubeconfig
-  serviceAccountName: account-milvus-test
+  - configMap:
+      defaultMode: 420
+      name: qa-kubeconfig
+    name: kubeconfig
+  serviceAccountName: qa-chaos-admin
