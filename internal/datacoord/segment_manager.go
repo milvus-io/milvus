@@ -475,7 +475,7 @@ func (s *SegmentManager) GetFlushableSegments(ctx context.Context, channel strin
 			ret = append(ret, id)
 		}
 	}
-
+	log.Debug("GetFlushableSegments", zap.Int("all_segment_num", len(s.segments)), zap.Int("flushable_segment_num", len(ret)))
 	return ret, nil
 }
 
