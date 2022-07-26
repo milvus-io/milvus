@@ -47,6 +47,7 @@ class TestProxyScale:
         data_config = {
             'metadata.namespace': constants.NAMESPACE,
             'metadata.name': release_name,
+            'spec.mode': 'cluster',
             'spec.components.image': image,
             'spec.components.proxy.serviceType': 'LoadBalancer',
             'spec.components.proxy.replicas': 1,
