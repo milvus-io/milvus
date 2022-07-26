@@ -7,13 +7,12 @@ option go_package = "github.com/milvus-io/milvus/internal/proto/indexpb";
 import "common.proto";
 import "internal.proto";
 import "milvus.proto";
-import "schema.proto";
 
 service IndexCoord {
   rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
   rpc GetTimeTickChannel(internal.GetTimeTickChannelRequest) returns(milvus.StringResponse) {}
   rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
-  rpc BuildIndex(BuildIndexRequest) returns (BuildIndexResponse){}
+  rpc BuildIndex(BuildIndexRequest) returns (common.Status){}
   rpc GetIndexStates(GetIndexStatesRequest) returns (GetIndexStatesResponse) {}
   rpc GetIndexFilePaths(GetIndexFilePathsRequest) returns (GetIndexFilePathsResponse){}
   rpc DropIndex(DropIndexRequest) returns (common.Status) {}
@@ -34,6 +33,32 @@ service IndexNode {
   rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
 }
 
+message FieldIndex {
+  int64 collectionID = 1;
+  int64 partitionID = 2;
+  int64 fieldID = 3;
+  int64 indexID = 4;
+  string index_name = 5;
+  repeated common.KeyValuePair type_params = 6;
+  repeated common.KeyValuePair index_params = 7;
+}
+
+message SegmentIndex {
+    int64 collectionID = 1;
+//    int64 partitionID = 2;
+    int64 segmentID = 3;
+    int64 num_rows = 4;
+    int64 indexID = 5;
+    int64 buildID = 6;
+    int64 nodeID = 7;
+    common.IndexState state = 8;
+    int64 index_version = 9;
+    string index_files_paths = 10;
+    bool deleted = 11;
+    uint64 create_time = 12;
+    uint64 serialize_size = 13;
+}
+
 message RegisterNodeRequest {
   common.MsgBase base = 1;
   common.Address address = 2;
@@ -49,17 +74,9 @@ message GetIndexStatesRequest {
   repeated int64 indexBuildIDs = 1;
 }
 
-message IndexInfo {
-  common.IndexState state = 1;
-  int64 indexBuildID = 2;
-  int64 indexID = 3;
-  string index_name = 4;
-  string reason = 5;
-}
-
 message GetIndexStatesResponse {
   common.Status status = 1;
-  repeated IndexInfo states = 2;
+  common.IndexState state = 2;
 }
 
 message CreateIndexRequest {
@@ -74,24 +91,16 @@ message CreateIndexRequest {
 }
 
 message BuildIndexRequest {
-  int64 indexBuildID = 1;
-  string index_name = 2;
-  int64 indexID = 3;
-  repeated string data_paths = 5;
-  repeated common.KeyValuePair type_params = 6;
-  repeated common.KeyValuePair index_params = 7;
-  int64 num_rows = 8;
-  schema.FieldSchema field_schema = 9;
-  int64 segmentID = 10;
-}
-
-message BuildIndexResponse {
-  common.Status status = 1;
-  int64 indexBuildID = 2;
+  int64 collectionID = 1;
+  int64 fieldID = 2;
+  string index_name = 3;
+  repeated common.KeyValuePair type_params = 4;
+  repeated common.KeyValuePair index_params = 5;
 }
 
 message GetIndexFilePathsRequest {
-  repeated int64 indexBuildIDs = 1;
+  repeated int64 segmentIDs = 1;
+  string index_name = 2;
 }
 
 message IndexFilePathInfo {
@@ -106,21 +115,10 @@ message GetIndexFilePathsResponse {
   repeated IndexFilePathInfo file_paths = 2;
 }
 
-message IndexMeta {
-  int64 indexBuildID = 1;
-  common.IndexState state = 2;
-  string fail_reason = 3;
-  BuildIndexRequest req = 4;
-  repeated string index_file_paths = 5;
-  bool mark_deleted = 6;
-  int64 nodeID = 7;
-  int64 index_version = 8;
-  bool recycled = 9;
-  uint64 serialize_size = 10;
-}
-
 message DropIndexRequest {
-  int64 indexID = 1;
+  int64 collectionID = 1;
+  int64 fieldID = 2;
+  string index_name = 3;
 }
 
 message RemoveIndexRequest {

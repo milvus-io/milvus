@@ -46,14 +46,14 @@ type Meta struct {
 }
 
 // metaTable records the mapping of IndexBuildID to Meta.
-type metaTable struct {
-	client            kv.MetaKv          // client of a reliable kv service, i.e. etcd client
-	indexBuildID2Meta map[UniqueID]*Meta // index build id to index meta
-
-	etcdRevision int64
-
-	lock sync.RWMutex
-}
+//type metaTable struct {
+//	client            kv.MetaKv          // client of a reliable kv service, i.e. etcd client
+//	indexBuildID2Meta map[UniqueID]*Meta // index build id to index meta
+//
+//	etcdRevision int64
+//
+//	lock sync.RWMutex
+//}
 
 // NewMetaTable is used to create a new meta table.
 func NewMetaTable(kv kv.MetaKv) (*metaTable, error) {
@@ -100,26 +100,26 @@ func (mt *metaTable) reloadFromKV() error {
 
 // saveIndexMeta saves the index meta to ETCD.
 // metaTable.lock.Lock() before call this function
-func (mt *metaTable) saveIndexMeta(meta *Meta) error {
-	value, err := proto.Marshal(meta.indexMeta)
-	if err != nil {
-		return err
-	}
-	key := path.Join(indexFilePrefix, strconv.FormatInt(meta.indexMeta.IndexBuildID, 10))
-	success, err := mt.client.CompareVersionAndSwap(key, meta.etcdVersion, string(value))
-	if err != nil {
-		log.Warn("failed to save index meta in etcd", zap.Int64("buildID", meta.indexMeta.IndexBuildID), zap.Error(err))
-		return err
-	}
-	if !success {
-		log.Warn("failed to save index meta in etcd because version compare failure", zap.Int64("buildID", meta.indexMeta.IndexBuildID), zap.Any("index", meta.indexMeta))
-		return ErrCompareVersion
-	}
-	meta.etcdVersion = meta.etcdVersion + 1
-	mt.indexBuildID2Meta[meta.indexMeta.IndexBuildID] = meta
-	log.Info("IndexCoord metaTable saveIndexMeta success", zap.Int64("buildID", meta.indexMeta.IndexBuildID), zap.Int64("meta.revision", meta.etcdVersion))
-	return nil
-}
+//func (mt *metaTable) saveIndexMeta(meta *Meta) error {
+//	value, err := proto.Marshal(meta.indexMeta)
+//	if err != nil {
+//		return err
+//	}
+//	key := path.Join(indexFilePrefix, strconv.FormatInt(meta.indexMeta.IndexBuildID, 10))
+//	success, err := mt.client.CompareVersionAndSwap(key, meta.etcdVersion, string(value))
+//	if err != nil {
+//		log.Warn("failed to save index meta in etcd", zap.Int64("buildID", meta.indexMeta.IndexBuildID), zap.Error(err))
+//		return err
+//	}
+//	if !success {
+//		log.Warn("failed to save index meta in etcd because version compare failure", zap.Int64("buildID", meta.indexMeta.IndexBuildID), zap.Any("index", meta.indexMeta))
+//		return ErrCompareVersion
+//	}
+//	meta.etcdVersion = meta.etcdVersion + 1
+//	mt.indexBuildID2Meta[meta.indexMeta.IndexBuildID] = meta
+//	log.Info("IndexCoord metaTable saveIndexMeta success", zap.Int64("buildID", meta.indexMeta.IndexBuildID), zap.Int64("meta.revision", meta.etcdVersion))
+//	return nil
+//}
 
 // reloadMeta reloads the index meta corresponding indexBuildID from ETCD.
 func (mt *metaTable) reloadMeta(indexBuildID UniqueID) (*Meta, error) {
@@ -161,35 +161,35 @@ func (mt *metaTable) GetAllIndexMeta() map[int64]*indexpb.IndexMeta {
 }
 
 // AddIndex adds the index meta corresponding the indexBuildID to meta table.
-func (mt *metaTable) AddIndex(indexBuildID UniqueID, req *indexpb.BuildIndexRequest) error {
-	mt.lock.Lock()
-	defer mt.lock.Unlock()
-	_, ok := mt.indexBuildID2Meta[indexBuildID]
-	log.Debug("IndexCoord metaTable AddIndex", zap.Int64("indexBuildID", indexBuildID), zap.Bool(" index already exist", ok))
-	if ok {
-		log.Info("index already exists", zap.Int64("buildID", indexBuildID), zap.Int64("indexID", req.IndexID))
-		return nil
-	}
-	meta := &Meta{
-		indexMeta: &indexpb.IndexMeta{
-			State:        commonpb.IndexState_Unissued,
-			IndexBuildID: indexBuildID,
-			Req:          req,
-			NodeID:       0,
-			IndexVersion: 0,
-		},
-		etcdVersion: 0,
-	}
-	metrics.IndexCoordIndexTaskCounter.WithLabelValues(metrics.UnissuedIndexTaskLabel).Inc()
-	if err := mt.saveIndexMeta(meta); err != nil {
-		// no need to reload, no reason to compare version fail
-		log.Error("IndexCoord metaTable save index meta failed", zap.Int64("buildID", indexBuildID),
-			zap.Int64("indexID", req.IndexID), zap.Error(err))
-		return err
-	}
-	log.Info("IndexCoord metaTable AddIndex success", zap.Int64("buildID", indexBuildID))
-	return nil
-}
+//func (mt *metaTable) AddIndex(indexBuildID UniqueID, req *indexpb.BuildIndexRequest) error {
+//	mt.lock.Lock()
+//	defer mt.lock.Unlock()
+//	_, ok := mt.indexBuildID2Meta[indexBuildID]
+//	log.Debug("IndexCoord metaTable AddIndex", zap.Int64("indexBuildID", indexBuildID), zap.Bool(" index already exist", ok))
+//	if ok {
+//		log.Info("index already exists", zap.Int64("buildID", indexBuildID), zap.Int64("indexID", req.IndexID))
+//		return nil
+//	}
+//	meta := &Meta{
+//		indexMeta: &indexpb.IndexMeta{
+//			State:        commonpb.IndexState_Unissued,
+//			IndexBuildID: indexBuildID,
+//			Req:          req,
+//			NodeID:       0,
+//			IndexVersion: 0,
+//		},
+//		etcdVersion: 0,
+//	}
+//	metrics.IndexCoordIndexTaskCounter.WithLabelValues(metrics.UnissuedIndexTaskLabel).Inc()
+//	if err := mt.saveIndexMeta(meta); err != nil {
+//		// no need to reload, no reason to compare version fail
+//		log.Error("IndexCoord metaTable save index meta failed", zap.Int64("buildID", indexBuildID),
+//			zap.Int64("indexID", req.IndexID), zap.Error(err))
+//		return err
+//	}
+//	log.Info("IndexCoord metaTable AddIndex success", zap.Int64("buildID", indexBuildID))
+//	return nil
+//}
 
 func (mt *metaTable) updateMeta(buildID UniqueID, updateFunc func(m *Meta) error) error {
 	meta, ok := mt.indexBuildID2Meta[buildID]
@@ -513,76 +513,76 @@ func (mt *metaTable) GetDeletedMetas() []*indexpb.IndexMeta {
 	return metas
 }
 
-// HasSameReq determine whether there are same indexing tasks.
-func (mt *metaTable) HasSameReq(req *indexpb.BuildIndexRequest) (bool, UniqueID) {
-	mt.lock.RLock()
-	defer mt.lock.RUnlock()
-
-	for _, meta := range mt.indexBuildID2Meta {
-		if req.GetSegmentID() != meta.indexMeta.Req.GetSegmentID() {
-			continue
-		}
-		if meta.indexMeta.Req.IndexID != req.IndexID {
-			continue
-		}
-		if meta.indexMeta.Req.IndexName != req.IndexName {
-			continue
-		}
-		if len(meta.indexMeta.Req.DataPaths) != len(req.DataPaths) {
-			continue
-		}
-		notEq := false
-		for i := range meta.indexMeta.Req.DataPaths {
-			if meta.indexMeta.Req.DataPaths[i] != req.DataPaths[i] {
-				notEq = true
-				break
-			}
-		}
-		if notEq {
-			continue
-		}
-		if len(meta.indexMeta.Req.TypeParams) != len(req.TypeParams) {
-			continue
-		}
-		notEq = false
-		for i := range meta.indexMeta.Req.TypeParams {
-			if meta.indexMeta.Req.TypeParams[i].Key != req.TypeParams[i].Key {
-				notEq = true
-				break
-			}
-			if meta.indexMeta.Req.TypeParams[i].Value != req.TypeParams[i].Value {
-				notEq = true
-				break
-			}
-		}
-		if notEq {
-			continue
-		}
-		if len(meta.indexMeta.Req.IndexParams) != len(req.IndexParams) {
-			continue
-		}
-		notEq = false
-		for i := range meta.indexMeta.Req.IndexParams {
-			if meta.indexMeta.Req.IndexParams[i].Key != req.IndexParams[i].Key {
-				notEq = true
-				break
-			}
-			if meta.indexMeta.Req.IndexParams[i].Value != req.IndexParams[i].Value {
-				notEq = true
-				break
-			}
-		}
-		if notEq {
-			continue
-		}
-		if meta.indexMeta.MarkDeleted {
-			continue
-		}
-		return true, meta.indexMeta.IndexBuildID
-	}
-
-	return false, 0
-}
+//// HasSameReq determine whether there are same indexing tasks.
+//func (mt *metaTable) HasSameReq(req *indexpb.BuildIndexRequest) (bool, UniqueID) {
+//	mt.lock.RLock()
+//	defer mt.lock.RUnlock()
+//
+//	for _, meta := range mt.indexBuildID2Meta {
+//		if req.GetSegmentID() != meta.indexMeta.Req.GetSegmentID() {
+//			continue
+//		}
+//		if meta.indexMeta.Req.IndexID != req.IndexID {
+//			continue
+//		}
+//		if meta.indexMeta.Req.IndexName != req.IndexName {
+//			continue
+//		}
+//		if len(meta.indexMeta.Req.DataPaths) != len(req.DataPaths) {
+//			continue
+//		}
+//		notEq := false
+//		for i := range meta.indexMeta.Req.DataPaths {
+//			if meta.indexMeta.Req.DataPaths[i] != req.DataPaths[i] {
+//				notEq = true
+//				break
+//			}
+//		}
+//		if notEq {
+//			continue
+//		}
+//		if len(meta.indexMeta.Req.TypeParams) != len(req.TypeParams) {
+//			continue
+//		}
+//		notEq = false
+//		for i := range meta.indexMeta.Req.TypeParams {
+//			if meta.indexMeta.Req.TypeParams[i].Key != req.TypeParams[i].Key {
+//				notEq = true
+//				break
+//			}
+//			if meta.indexMeta.Req.TypeParams[i].Value != req.TypeParams[i].Value {
+//				notEq = true
+//				break
+//			}
+//		}
+//		if notEq {
+//			continue
+//		}
+//		if len(meta.indexMeta.Req.IndexParams) != len(req.IndexParams) {
+//			continue
+//		}
+//		notEq = false
+//		for i := range meta.indexMeta.Req.IndexParams {
+//			if meta.indexMeta.Req.IndexParams[i].Key != req.IndexParams[i].Key {
+//				notEq = true
+//				break
+//			}
+//			if meta.indexMeta.Req.IndexParams[i].Value != req.IndexParams[i].Value {
+//				notEq = true
+//				break
+//			}
+//		}
+//		if notEq {
+//			continue
+//		}
+//		if meta.indexMeta.MarkDeleted {
+//			continue
+//		}
+//		return true, meta.indexMeta.IndexBuildID
+//	}
+//
+//	return false, 0
+//}
 
 // NeedUpdateMeta update the meta of specified indexBuildID.
 // If the version of meta in memory is greater equal to the version in put event, no need to update.

@@ -17,11 +17,15 @@
 package indexcoord
 
 const (
-	indexSizeFactor = 6
-	indexFilePrefix = "indexes"
+	indexSizeFactor      = 6
+	oldIndexFilePrefix   = "indexes"
+	segmentIndexPrefix   = "segment-index"
+	fieldIndexPrefix     = "field-index"
+	flushedSegmentPrefix = "flushed-segment"
 )
 
 const (
 	// IndexAddTaskName is the name of the operation to add index task.
-	IndexAddTaskName = "IndexAddTask"
+	IndexAddTaskName    = "IndexAddTask"
+	CreateIndexTaskName = "CreateIndexTask"
 )

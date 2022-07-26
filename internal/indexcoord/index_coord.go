@@ -27,6 +27,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util"
+
 	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 
 	"github.com/golang/protobuf/proto"
@@ -78,16 +80,19 @@ type IndexCoord struct {
 
 	eventChan <-chan *sessionutil.SessionEvent
 
-	idAllocator *allocator.GlobalIDAllocator
+	idAllocator  *allocator.GlobalIDAllocator
+	tsoAllocator *tso.GlobalTSOAllocator
 
 	factory      dependency.Factory
 	etcdCli      *clientv3.Client
+	etcdKV       *etcdkv.EtcdKV
 	chunkManager storage.ChunkManager
 
-	metaTable        *metaTable
-	nodeManager      *NodeManager
-	indexBuilder     *indexBuilder
-	garbageCollector *garbageCollector
+	metaTable             *metaTable
+	nodeManager           *NodeManager
+	indexBuilder          *indexBuilder
+	garbageCollector      *garbageCollector
+	flushedSegmentWatcher *flushedSegmentWatcher
 
 	metricsCacheManager *metricsinfo.MetricsCacheManager
 
@@ -169,7 +174,8 @@ func (i *IndexCoord) Init() error {
 
 		connectEtcdFn := func() error {
 			etcdKV := etcdkv.NewEtcdKV(i.etcdCli, Params.EtcdCfg.MetaRootPath)
-			metaTable, err := NewMetaTable(etcdKV)
+			i.etcdKV = etcdKV
+			metaTable, err := NewMetaTable(i.etcdKV)
 			if err != nil {
 				return err
 			}
@@ -183,6 +189,13 @@ func (i *IndexCoord) Init() error {
 			initErr = err
 			return
 		}
+
+		tsoAllocator := tso.NewGlobalTSOAllocator("timestamp", i.etcdKV)
+		if err = tsoAllocator.Initialize(); err != nil {
+			initErr = err
+			return
+		}
+		i.tsoAllocator = tsoAllocator
 
 		log.Debug("IndexCoord try to connect etcd success")
 		i.nodeManager = NewNodeManager(i.loopCtx)
@@ -393,44 +406,32 @@ func (i *IndexCoord) GetStatisticsChannel(ctx context.Context) (*milvuspb.String
 // Index building is asynchronous, so when an index building request comes, an IndexBuildID is assigned to the task and
 // the task is recorded in Meta. The background process assignTaskLoop will find this task and assign it to IndexNode for
 // execution.
-func (i *IndexCoord) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
+func (i *IndexCoord) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*commonpb.Status, error) {
 	if !i.isHealthy() {
 		errMsg := "IndexCoord is not healthy"
 		err := errors.New(errMsg)
 		log.Warn(errMsg)
-		return &indexpb.BuildIndexResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    errMsg,
-			},
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    errMsg,
 		}, err
 	}
-	log.Debug("IndexCoord building index ...", zap.Int64("segmentID", req.SegmentID),
-		zap.String("IndexName", req.IndexName), zap.Int64("IndexID", req.IndexID),
-		zap.Strings("DataPath", req.DataPaths), zap.Any("TypeParams", req.TypeParams),
-		zap.Any("IndexParams", req.IndexParams), zap.Int64("numRows", req.NumRows),
-		zap.Any("field type", req.FieldSchema.DataType))
+	log.Debug("IndexCoord receive build index request", zap.Int64("CollectionID", req.CollectionID),
+		zap.String("IndexName", req.IndexName), zap.Int64("fieldID", req.FieldID),
+		zap.Any("TypeParams", req.TypeParams),
+		zap.Any("IndexParams", req.IndexParams))
 
-	ret := &indexpb.BuildIndexResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		},
-		IndexBuildID: 0,
+	ret := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_UnexpectedError,
 	}
 
-	metrics.IndexCoordIndexRequestCounter.WithLabelValues(metrics.TotalLabel).Inc()
-
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "IndexCoord-BuildIndex")
-	defer sp.Finish()
-	hasIndex, indexBuildID := i.metaTable.HasSameReq(req)
+	hasIndex := i.metaTable.HasSameReq(req)
 	if hasIndex {
-		log.Debug("IndexCoord has same index", zap.Int64("buildID", indexBuildID), zap.Int64("segmentID", req.SegmentID))
-		return &indexpb.BuildIndexResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-				Reason:    "already have same index",
-			},
-			IndexBuildID: indexBuildID,
+		log.Debug("IndexCoord has same index", zap.Int64("collectionID", req.CollectionID),
+			zap.Int64("fieldID", req.FieldID), zap.String("indexName", req.IndexName))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "already have same index",
 		}, nil
 	}
 
@@ -828,7 +829,7 @@ func (i *IndexCoord) watchMetaLoop() {
 			}
 			if err := resp.Err(); err != nil {
 				if err == v3rpc.ErrCompacted {
-					newMetaTable, err2 := NewMetaTable(i.metaTable.client)
+					newMetaTable, err2 := NewMetaTable(i.etcdKV)
 					if err2 != nil {
 						log.Error("Constructing new meta table fails when etcd has a compaction error",
 							zap.String("path", indexFilePrefix), zap.String("etcd error", err.Error()), zap.Error(err2))
@@ -935,4 +936,110 @@ func (i *IndexCoord) assignTask(builderClient types.IndexNode, req *indexpb.Crea
 		return errors.New(resp.Reason)
 	}
 	return nil
+}
+
+func (i *IndexCoord) createIndex(segIdx *indexpb.SegmentIndex) error {
+	log.Info("create index for flushed segment", zap.Int64("segID", segIdx.SegmentID))
+	hasIndex, indexBuildID := i.metaTable.AlreadyBuiltIndex(segIdx)
+	if hasIndex {
+		log.Debug("IndexCoord has same index", zap.Int64("buildID", indexBuildID), zap.Int64("segmentID", segIdx.SegmentID))
+		return nil
+	}
+
+	t := &IndexAddTask{
+		BaseTask: BaseTask{
+			ctx:   i.loopCtx,
+			done:  make(chan error),
+			table: i.metaTable,
+		},
+		segmentIndex: segIdx,
+		idAllocator:  i.idAllocator,
+	}
+
+	metrics.IndexCoordIndexRequestCounter.WithLabelValues(metrics.TotalLabel).Inc()
+
+	err := i.sched.IndexAddQueue.Enqueue(t)
+	if err != nil {
+		metrics.IndexCoordIndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
+		log.Error("IndexCoord createIndex enqueue failed", zap.Int64("segID", segIdx.SegmentID), zap.Error(err))
+		return err
+	}
+	log.Debug("IndexCoord createIndex Enqueue successfully", zap.Int64("segID", segIdx.SegmentID),
+		zap.Int64("IndexBuildID", t.segmentIndex.BuildID))
+
+	err = t.WaitToFinish()
+	if err != nil {
+		log.Error("IndexCoord scheduler index task failed", zap.Int64("buildID", t.segmentIndex.BuildID))
+		metrics.IndexCoordIndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
+		return err
+	}
+	i.indexBuilder.enqueue(t.segmentIndex.BuildID)
+
+	return nil
+}
+
+func (i *IndexCoord) watchFlushedSegmentLoop() {
+	log.Info("IndexCoord start watching flushed segments...")
+	defer i.loopWg.Done()
+
+	watchChan := i.etcdKV.WatchWithRevision(util.HandoffSegmentPrefix, i.flushedSegmentWatcher.etcdRevision+1)
+	for {
+		select {
+		case <-i.loopCtx.Done():
+			log.Warn("IndexCoord context done, exit...")
+			return
+		case resp, ok := <-watchChan:
+			if !ok {
+				log.Warn("IndexCoord watch flush segments loop failed because watch channel closed")
+				return
+			}
+			if err := resp.Err(); err != nil {
+				if err == v3rpc.ErrCompacted {
+					newfsw, err2 := newFlushSegmentWatcher(i.loopCtx, i.etcdKV)
+					if err2 != nil {
+						log.Error("Constructing flushed segment watcher fails when etcd has a compaction error",
+							zap.String("etcd error", err.Error()), zap.Error(err2))
+						panic("failed to handle etcd request, exit..")
+					}
+					i.flushedSegmentWatcher = newfsw
+					i.loopWg.Add(1)
+					go i.watchMetaLoop()
+					return
+				}
+				log.Error("received error event from flushed segment watcher",
+					zap.String("prefix", flushedSegmentPrefix), zap.Error(err))
+				panic("failed to handle etcd request, exit..")
+			}
+			events := resp.Events
+			for _, event := range events {
+				switch event.Type {
+				case mvccpb.PUT:
+					segmentInfo := &datapb.SegmentInfo{}
+					if err := proto.Unmarshal(event.Kv.Value, segmentInfo); err != nil {
+						log.Error("watchFlushedSegmentLoop unmarshal fail", zap.Error(err))
+						continue
+					}
+					log.Debug("watchFlushedSegmentLoop watch event", zap.Int64("segID", segmentInfo.ID),
+						zap.Int64("collID", segmentInfo.CollectionID), zap.Int64("num rows", segmentInfo.NumOfRows),
+						zap.Int64s("compactForm", segmentInfo.CompactionFrom))
+
+					segmentIndexes := i.metaTable.ConstructIndexes(segmentInfo)
+					if len(segmentIndexes) == 0 {
+						log.Info("segment no need to index", zap.Int64("segmentID", segmentInfo.ID))
+						continue
+					}
+					for _, segmentIndex := range segmentIndexes {
+						if err := i.createIndex(segmentIndex); err != nil {
+							log.Error("IndexCoord create index for flushed segment fail", zap.Int64("segID", segmentInfo.ID))
+							//TODO @xiaocai2333: panic?
+							continue
+						}
+					}
+
+				case mvccpb.DELETE:
+					log.Info("the segment info has been deleted", zap.String("key", string(event.Kv.Key)))
+				}
+			}
+		}
+	}
 }

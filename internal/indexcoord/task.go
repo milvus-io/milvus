@@ -20,6 +20,8 @@ import (
 	"context"
 	"errors"
 
+	"github.com/milvus-io/milvus/internal/tso"
+
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -73,11 +75,78 @@ func (bt *BaseTask) Notify(err error) {
 	bt.done <- err
 }
 
-// IndexAddTask is used to record the information of the index tasks.
-type IndexAddTask struct {
+// CreateIndexTask is used to create an index on field.
+type CreateIndexTask struct {
 	BaseTask
 	req          *indexpb.BuildIndexRequest
-	indexBuildID UniqueID
+	indexID      UniqueID
+	createTs     uint64
+	idAllocator  *allocator.GlobalIDAllocator
+	tsoAllocator *tso.GlobalTSOAllocator
+}
+
+// Ctx returns the context of the index task.
+func (cit *CreateIndexTask) Ctx() context.Context {
+	return cit.ctx
+}
+
+// ID returns the id of the index task.
+func (cit *CreateIndexTask) ID() UniqueID {
+	return cit.id
+}
+
+// SetID sets the id for index tasks.
+func (cit *CreateIndexTask) SetID(ID UniqueID) {
+	cit.BaseTask.setID(ID)
+}
+
+// Name returns the task name.
+func (cit *CreateIndexTask) Name() string {
+	return CreateIndexTaskName
+}
+
+// OnEnqueue assigns the indexBuildID to index task.
+func (cit *CreateIndexTask) OnEnqueue() error {
+	var err error
+	cit.indexID, err = cit.idAllocator.AllocOne()
+	if err != nil {
+		return err
+	}
+	cit.createTs, err = cit.tsoAllocator.AllocOne()
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// PreExecute do nothing.
+func (cit *CreateIndexTask) PreExecute(ctx context.Context) error {
+	log.Info("IndexCoord IndexAddTask PreExecute", zap.Int64("collectionID", cit.req.CollectionID),
+		zap.Int64("fieldID", cit.req.FieldID), zap.String("indexName", cit.req.IndexName))
+	return nil
+}
+
+// Execute adds the index task to meta table.
+func (cit *CreateIndexTask) Execute(ctx context.Context) error {
+	log.Info("IndexCoord IndexAddTask Execute", zap.Int64("collectionID", cit.req.CollectionID),
+		zap.Int64("fieldID", cit.req.FieldID), zap.String("indexName", cit.req.IndexName))
+	err := cit.table.CreateIndex(cit.indexID, cit.req, cit.createTs)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// PostExecute does nothing here.
+func (it *IndexAddTask) PostExecute(ctx context.Context) error {
+	log.Info("IndexCoord IndexAddTask PostExecute", zap.Int64("IndexBuildID", it.segmentIndex.BuildID))
+	return nil
+}
+
+// IndexAddTask is used to record index task on segment.
+type IndexAddTask struct {
+	BaseTask
+	segmentIndex *indexpb.SegmentIndex
 	idAllocator  *allocator.GlobalIDAllocator
 }
 
@@ -104,7 +173,7 @@ func (it *IndexAddTask) Name() string {
 // OnEnqueue assigns the indexBuildID to index task.
 func (it *IndexAddTask) OnEnqueue() error {
 	var err error
-	it.indexBuildID, err = it.idAllocator.AllocOne()
+	it.segmentIndex.BuildID, err = it.idAllocator.AllocOne()
 	if err != nil {
 		return err
 	}
@@ -113,15 +182,14 @@ func (it *IndexAddTask) OnEnqueue() error {
 
 // PreExecute sets the indexBuildID to index task request.
 func (it *IndexAddTask) PreExecute(ctx context.Context) error {
-	log.Debug("IndexCoord IndexAddTask PreExecute", zap.Any("IndexBuildID", it.indexBuildID))
-	it.req.IndexBuildID = it.indexBuildID
+	log.Info("IndexCoord IndexAddTask PreExecute", zap.Int64("IndexBuildID", it.segmentIndex.BuildID))
 	return nil
 }
 
 // Execute adds the index task to meta table.
 func (it *IndexAddTask) Execute(ctx context.Context) error {
-	log.Debug("IndexCoord IndexAddTask Execute", zap.Any("IndexBuildID", it.indexBuildID))
-	err := it.table.AddIndex(it.indexBuildID, it.req)
+	log.Info("IndexCoord IndexAddTask Execute", zap.Int64("IndexBuildID", it.segmentIndex.BuildID))
+	err := it.table.AddIndex(it.segmentIndex)
 	if err != nil {
 		return err
 	}
@@ -130,6 +198,6 @@ func (it *IndexAddTask) Execute(ctx context.Context) error {
 
 // PostExecute does nothing here.
 func (it *IndexAddTask) PostExecute(ctx context.Context) error {
-	log.Debug("IndexCoord IndexAddTask PostExecute", zap.Any("IndexBuildID", it.indexBuildID))
+	log.Info("IndexCoord IndexAddTask PostExecute", zap.Int64("IndexBuildID", it.segmentIndex.BuildID))
 	return nil
 }
