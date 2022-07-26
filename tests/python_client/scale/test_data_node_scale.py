@@ -40,6 +40,7 @@ class TestDataNodeScale:
 
         data_config = {
             'metadata.namespace': constants.NAMESPACE,
+            'spec.mode': 'cluster',
             'metadata.name': release_name,
             'spec.components.image': image,
             'spec.components.proxy.serviceType': 'LoadBalancer',

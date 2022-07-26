@@ -38,6 +38,7 @@ class TestIndexNodeScale:
         expand_replicas = 2
         data_config = {
             'metadata.namespace': constants.NAMESPACE,
+            'spec.mode': 'cluster',
             'metadata.name': release_name,
             'spec.components.image': image,
             'spec.components.proxy.serviceType': 'LoadBalancer',
@@ -131,6 +132,7 @@ class TestIndexNodeScale:
         data_config = {
             'metadata.namespace': constants.NAMESPACE,
             'metadata.name': release_name,
+            'spec.mode': 'cluster',
             'spec.components.image': image,
             'spec.components.proxy.serviceType': 'LoadBalancer',
             'spec.components.indexNode.replicas': 2,

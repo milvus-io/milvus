@@ -43,6 +43,7 @@ class TestQueryNodeScale:
         image = f'{constants.IMAGE_REPOSITORY}:{image_tag}'
         query_config = {
             'metadata.namespace': constants.NAMESPACE,
+            'spec.mode': 'cluster',
             'metadata.name': release_name,
             'spec.components.image': image,
             'spec.components.proxy.serviceType': 'LoadBalancer',
@@ -157,6 +158,7 @@ class TestQueryNodeScale:
         query_config = {
             'metadata.namespace': constants.NAMESPACE,
             'metadata.name': release_name,
+            'spec.mode': 'cluster',
             'spec.components.image': image,
             'spec.components.proxy.serviceType': 'LoadBalancer',
             'spec.components.queryNode.replicas': 5,
@@ -179,7 +181,7 @@ class TestQueryNodeScale:
 
             # insert 10 sealed segments
             for i in range(5):
-                df = cf.gen_default_dataframe_data(start=i * nb)
+                df = cf.gen_default_dataframe_data(nb=nb, start=i * nb)
                 collection_w.insert(df)
                 assert collection_w.num_entities == (i + 1) * nb
 
@@ -236,6 +238,7 @@ class TestQueryNodeScale:
         query_config = {
             'metadata.namespace': constants.NAMESPACE,
             'metadata.name': release_name,
+            'spec.mode': 'cluster',
             'spec.components.image': image,
             'spec.components.proxy.serviceType': 'LoadBalancer',
             'spec.components.queryNode.replicas': 2,
