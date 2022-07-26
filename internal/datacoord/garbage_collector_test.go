@@ -245,9 +245,11 @@ func Test_garbageCollector_scan(t *testing.T) {
 		gc.start()
 		gc.scan()
 		gc.clearEtcd()
-		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, insertLogPrefix), []string{})
-		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, statsLogPrefix), []string{})
-		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, deltaLogPrefix), []string{})
+
+		// bad path shall remains since datacoord cannot determine file is garbage or not if path is not valid
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, insertLogPrefix), inserts[1:2])
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, statsLogPrefix), stats[1:2])
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, deltaLogPrefix), delta[1:2])
 		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, `indexes`), others)
 
 		gc.close()
@@ -284,6 +286,8 @@ func initUtOSSEnv(bucket, root string, n int) (cli *minio.Client, inserts []stri
 	content := []byte("test")
 	for i := 0; i < n; i++ {
 		reader := bytes.NewReader(content)
+		// collID/partID/segID/fieldID/fileName
+		// [str]/id/id/string/string
 		token := path.Join(funcutil.RandomString(8), strconv.Itoa(i), strconv.Itoa(i), funcutil.RandomString(8), funcutil.RandomString(8))
 		if i == 1 {
 			token = path.Join(funcutil.RandomString(8), strconv.Itoa(i), strconv.Itoa(i), funcutil.RandomString(8))
