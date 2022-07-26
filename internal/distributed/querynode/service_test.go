@@ -80,10 +80,6 @@ func (m *MockQueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchD
 	return m.status, m.err
 }
 
-func (m *MockQueryNode) WatchDeltaChannels(ctx context.Context, req *querypb.WatchDeltaChannelsRequest) (*commonpb.Status, error) {
-	return m.status, m.err
-}
-
 func (m *MockQueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) (*commonpb.Status, error) {
 	return m.status, m.err
 }

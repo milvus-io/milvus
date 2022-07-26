@@ -29,7 +29,6 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -47,12 +46,7 @@ type Node interface {
 	releasePartitions(ctx context.Context, in *querypb.ReleasePartitionsRequest) error
 
 	watchDmChannels(ctx context.Context, in *querypb.WatchDmChannelsRequest) error
-	watchDeltaChannels(ctx context.Context, in *querypb.WatchDeltaChannelsRequest) error
 	syncReplicaSegments(ctx context.Context, in *querypb.SyncReplicaSegmentsRequest) error
-	//removeDmChannel(collectionID UniqueID, channels []string) error
-
-	hasWatchedDeltaChannel(collectionID UniqueID) bool
-
 	setState(state nodeState)
 	getState() nodeState
 	isOnline() bool
@@ -75,9 +69,8 @@ type queryNode struct {
 	kvClient *etcdkv.EtcdKV
 
 	sync.RWMutex
-	watchedDeltaChannels map[UniqueID][]*datapb.VchannelInfo
-	state                nodeState
-	stateLock            sync.RWMutex
+	state     nodeState
+	stateLock sync.RWMutex
 
 	totalMem     uint64
 	memUsage     uint64
@@ -86,7 +79,6 @@ type queryNode struct {
 }
 
 func newQueryNode(ctx context.Context, address string, id UniqueID, kv *etcdkv.EtcdKV) (Node, error) {
-	watchedDeltaChannels := make(map[UniqueID][]*datapb.VchannelInfo)
 	childCtx, cancel := context.WithCancel(ctx)
 	client, err := nodeclient.NewClient(childCtx, address)
 	if err != nil {
@@ -94,14 +86,13 @@ func newQueryNode(ctx context.Context, address string, id UniqueID, kv *etcdkv.E
 		return nil, err
 	}
 	node := &queryNode{
-		ctx:                  childCtx,
-		cancel:               cancel,
-		id:                   id,
-		address:              address,
-		client:               client,
-		kvClient:             kv,
-		watchedDeltaChannels: watchedDeltaChannels,
-		state:                disConnect,
+		ctx:      childCtx,
+		cancel:   cancel,
+		id:       id,
+		address:  address,
+		client:   client,
+		kvClient: kv,
+		state:    disConnect,
 	}
 
 	return node, nil
@@ -127,28 +118,10 @@ func (qn *queryNode) start() error {
 }
 
 func (qn *queryNode) stop() {
-	//qn.stateLock.Lock()
-	//defer qn.stateLock.Unlock()
-	//qn.state = offline
 	if qn.client != nil {
 		qn.client.Stop()
 	}
 	qn.cancel()
-}
-
-func (qn *queryNode) hasWatchedDeltaChannel(collectionID UniqueID) bool {
-	qn.RLock()
-	defer qn.RUnlock()
-
-	_, ok := qn.watchedDeltaChannels[collectionID]
-	return ok
-}
-
-func (qn *queryNode) setDeltaChannelInfo(collectionID int64, infos []*datapb.VchannelInfo) {
-	qn.Lock()
-	defer qn.Unlock()
-
-	qn.watchedDeltaChannels[collectionID] = infos
 }
 
 func (qn *queryNode) setState(state nodeState) {
@@ -196,22 +169,6 @@ func (qn *queryNode) watchDmChannels(ctx context.Context, in *querypb.WatchDmCha
 	return nil
 }
 
-func (qn *queryNode) watchDeltaChannels(ctx context.Context, in *querypb.WatchDeltaChannelsRequest) error {
-	if !qn.isOnline() {
-		return errors.New("WatchDeltaChannels: queryNode is offline")
-	}
-
-	status, err := qn.client.WatchDeltaChannels(qn.ctx, in)
-	if err != nil {
-		return err
-	}
-	if status.ErrorCode != commonpb.ErrorCode_Success {
-		return errors.New(status.Reason)
-	}
-	qn.setDeltaChannelInfo(in.CollectionID, in.Infos)
-	return err
-}
-
 func (qn *queryNode) releaseCollection(ctx context.Context, in *querypb.ReleaseCollectionRequest) error {
 	if !qn.isOnline() {
 		log.Warn("ReleaseCollection: the QueryNode has been offline, the release request is no longer needed", zap.Int64("nodeID", qn.id))
@@ -225,11 +182,6 @@ func (qn *queryNode) releaseCollection(ctx context.Context, in *querypb.ReleaseC
 	if status.ErrorCode != commonpb.ErrorCode_Success {
 		return errors.New(status.Reason)
 	}
-
-	qn.Lock()
-	delete(qn.watchedDeltaChannels, in.CollectionID)
-	qn.Unlock()
-
 	return nil
 }
 

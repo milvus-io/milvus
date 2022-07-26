@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -117,7 +118,7 @@ func (ms *mqMsgStream) AsProducer(channels []string) {
 			ms.producerChannels = append(ms.producerChannels, channel)
 			return nil
 		}
-		err := retry.Do(context.TODO(), fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200), retry.MaxSleepTime(5*time.Second))
+		err := retry.Do(context.TODO(), fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200), retry.MaxSleepTime(2*time.Second))
 		if err != nil {
 			errMsg := "Failed to create producer " + channel + ", error = " + err.Error()
 			panic(errMsg)
@@ -167,7 +168,7 @@ func (ms *mqMsgStream) AsConsumerWithPosition(channels []string, subName string,
 			return nil
 		}
 		// TODO if know the former subscribe is invalid, should we use pulsarctl to accelerate recovery speed
-		err := retry.Do(context.TODO(), fn, retry.Attempts(50), retry.Sleep(time.Millisecond*200), retry.MaxSleepTime(5*time.Second))
+		err := retry.Do(context.TODO(), fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200), retry.MaxSleepTime(2*time.Second))
 		if err != nil {
 			errMsg := "Failed to create consumer " + channel + ", error = " + err.Error()
 			panic(errMsg)
@@ -883,7 +884,10 @@ func (ms *MqTtMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
 		log.Info("MsgStream begin to seek start msg: ", zap.String("channel", mp.ChannelName), zap.Any("MessageID", seekMsgID))
 		err = consumer.Seek(seekMsgID, true)
 		if err != nil {
-			log.Warn("Failed to seek", zap.String("channel", mp.ChannelName), zap.Error(err))
+			// if topic not exist
+			if strings.Contains(err.Error(), "not exist") {
+				return retry.Unrecoverable(err)
+			}
 			return err
 		}
 		log.Info("MsgStream seek finished", zap.String("channel", mp.ChannelName))
@@ -899,9 +903,10 @@ func (ms *MqTtMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
 		if len(mp.MsgID) == 0 {
 			return fmt.Errorf("when msgID's length equal to 0, please use AsConsumer interface")
 		}
-		err = retry.Do(context.TODO(), fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200), retry.MaxSleepTime(5*time.Second))
+		err = retry.Do(context.TODO(), fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200), retry.MaxSleepTime(2*time.Second))
 		if err != nil {
-			return fmt.Errorf("failed to seek, error %s", err.Error())
+			log.Warn("failed to seek", zap.Error(err))
+			return err
 		}
 		ms.addConsumer(consumer, mp.ChannelName)
 		ms.chanMsgPos[consumer] = (proto.Clone(mp)).(*MsgPosition)

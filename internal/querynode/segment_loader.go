@@ -24,7 +24,6 @@ import (
 	"runtime"
 	"runtime/debug"
 	"strconv"
-	"sync"
 
 	"github.com/panjf2000/ants/v2"
 	"go.uber.org/zap"
@@ -80,6 +79,7 @@ func (loader *segmentLoader) LoadSegment(req *querypb.LoadSegmentsRequest, segme
 	segmentNum := len(req.Infos)
 
 	if segmentNum == 0 {
+		log.Warn("find no valid segment target, skip load segment", zap.Any("request", req))
 		return nil
 	}
 
@@ -143,7 +143,7 @@ func (loader *segmentLoader) LoadSegment(req *querypb.LoadSegmentsRequest, segme
 		newSegments[segmentID] = segment
 	}
 
-	loadSegmentFunc := func(idx int) error {
+	loadFileFunc := func(idx int) error {
 		loadInfo := req.Infos[idx]
 		collectionID := loadInfo.CollectionID
 		partitionID := loadInfo.PartitionID
@@ -151,7 +151,7 @@ func (loader *segmentLoader) LoadSegment(req *querypb.LoadSegmentsRequest, segme
 		segment := newSegments[segmentID]
 
 		tr := timerecord.NewTimeRecorder("loadDurationPerSegment")
-		err := loader.loadSegmentInternal(segment, loadInfo)
+		err := loader.loadFiles(segment, loadInfo)
 		if err != nil {
 			log.Error("load segment failed when load data into memory",
 				zap.Int64("collectionID", collectionID),
@@ -173,8 +173,7 @@ func (loader *segmentLoader) LoadSegment(req *querypb.LoadSegmentsRequest, segme
 		zap.Int("segmentNum", segmentNum),
 		zap.Int("concurrencyLevel", concurrencyLevel))
 	err = funcutil.ProcessFuncParallel(segmentNum,
-		concurrencyLevel,
-		loadSegmentFunc, "loadSegmentFunc")
+		concurrencyLevel, loadFileFunc, "loadSegmentFunc")
 	if err != nil {
 		segmentGC()
 		return err
@@ -198,7 +197,7 @@ func (loader *segmentLoader) LoadSegment(req *querypb.LoadSegmentsRequest, segme
 	return nil
 }
 
-func (loader *segmentLoader) loadSegmentInternal(segment *Segment,
+func (loader *segmentLoader) loadFiles(segment *Segment,
 	loadInfo *querypb.SegmentLoadInfo) error {
 	collectionID := loadInfo.CollectionID
 	partitionID := loadInfo.PartitionID
@@ -630,7 +629,7 @@ func (loader *segmentLoader) loadDeltaLogs(segment *Segment, deltaLogs []*datapb
 }
 
 func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collectionID int64, position *internalpb.MsgPosition) error {
-	log.Info("from dml check point load delete", zap.Any("position", position), zap.Any("msg id", position.MsgID))
+	log.Info("from dml check point load delete", zap.Any("position", position))
 	stream, err := loader.factory.NewMsgStream(ctx)
 	if err != nil {
 		return err
@@ -669,7 +668,7 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 	}
 
 	log.Info("start read delta msg from seek position to last position",
-		zap.Int64("Collection ID", collectionID), zap.String("channel", pChannelName))
+		zap.Int64("Collection ID", collectionID), zap.String("channel", pChannelName), zap.Any("seek pos", position), zap.Any("last msg", lastMsgID))
 	hasMore := true
 	for hasMore {
 		select {
@@ -731,41 +730,16 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 		}
 		offset := segment.segmentPreDelete(len(pks))
 		delData.deleteOffset[segmentID] = offset
+		timestamps := delData.deleteTimestamps[segmentID]
+		err = segment.segmentDelete(offset, pks, timestamps)
+		if err != nil {
+			log.Warn("QueryNode: segment delete failed", zap.Int64("segment", segmentID), zap.Error(err))
+			return err
+		}
 	}
 
-	wg := sync.WaitGroup{}
-	for segmentID := range delData.deleteOffset {
-		wg.Add(1)
-		go deletePk(loader.metaReplica, delData, segmentID, &wg)
-	}
-	wg.Wait()
 	log.Info("from dml check point load done", zap.Any("msg id", position.GetMsgID()))
 	return nil
-}
-
-func deletePk(replica ReplicaInterface, deleteData *deleteData, segmentID UniqueID, wg *sync.WaitGroup) {
-	defer wg.Done()
-	log.Debug("QueryNode::iNode::delete", zap.Any("SegmentID", segmentID))
-	targetSegment, err := replica.getSegmentByID(segmentID, segmentTypeSealed)
-	if err != nil {
-		log.Error(err.Error())
-		return
-	}
-
-	if targetSegment.segmentType != segmentTypeSealed {
-		return
-	}
-
-	ids := deleteData.deleteIDs[segmentID]
-	timestamps := deleteData.deleteTimestamps[segmentID]
-	offset := deleteData.deleteOffset[segmentID]
-
-	err = targetSegment.segmentDelete(offset, ids, timestamps)
-	if err != nil {
-		log.Warn("QueryNode: targetSegmentDelete failed", zap.Error(err))
-		return
-	}
-	log.Debug("Do delete done", zap.Int("len", len(deleteData.deleteIDs[segmentID])), zap.Int64("segmentID", segmentID), zap.Any("segmentType", targetSegment.segmentType))
 }
 
 // JoinIDPath joins ids to path format.
@@ -806,6 +780,8 @@ func (loader *segmentLoader) checkSegmentSize(collectionID UniqueID, segmentLoad
 	loadingUsage := usedMemAfterLoad + uint64(
 		float64(maxSegmentSize)*float64(concurrency)*Params.QueryNodeCfg.LoadMemoryUsageFactor)
 	log.Debug("predict memory usage while loading (in MiB)",
+		zap.Int64("collectionID", collectionID),
+		zap.Int("concurrency", concurrency),
 		zap.Uint64("usage", toMB(loadingUsage)),
 		zap.Uint64("usageAfterLoad", toMB(usedMemAfterLoad)))
 

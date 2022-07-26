@@ -59,11 +59,6 @@ func (m *QueryNodeMock) WatchDmChannels(ctx context.Context, req *querypb.WatchD
 }
 
 // TODO
-func (m *QueryNodeMock) WatchDeltaChannels(ctx context.Context, req *querypb.WatchDeltaChannelsRequest) (*commonpb.Status, error) {
-	return nil, nil
-}
-
-// TODO
 func (m *QueryNodeMock) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) (*commonpb.Status, error) {
 	return nil, nil
 }

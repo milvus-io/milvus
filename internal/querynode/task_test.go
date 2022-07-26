@@ -21,10 +21,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/apache/pulsar-client-go/pulsar"
-	"github.com/stretchr/testify/assert"
-
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
+	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper/rmq"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -32,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestTask_watchDmChannelsTask(t *testing.T) {
@@ -268,93 +267,6 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 	})
 }
 
-func TestTask_watchDeltaChannelsTask(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	genWatchDeltaChannelsRequest := func() *querypb.WatchDeltaChannelsRequest {
-		req := &querypb.WatchDeltaChannelsRequest{
-			Base:         genCommonMsgBase(commonpb.MsgType_WatchDeltaChannels),
-			CollectionID: defaultCollectionID,
-		}
-		return req
-	}
-
-	t.Run("test timestamp", func(t *testing.T) {
-		timestamp := Timestamp(1000)
-		task := watchDeltaChannelsTask{
-			baseTask: baseTask{
-				ts: timestamp,
-			},
-			req: genWatchDeltaChannelsRequest(),
-		}
-		resT := task.Timestamp()
-		assert.Equal(t, timestamp, resT)
-	})
-
-	t.Run("test OnEnqueue", func(t *testing.T) {
-		task := watchDeltaChannelsTask{
-			req: genWatchDeltaChannelsRequest(),
-		}
-		err := task.OnEnqueue()
-		assert.NoError(t, err)
-		task.req.Base = nil
-		err = task.OnEnqueue()
-		assert.NoError(t, err)
-	})
-
-	t.Run("test execute", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
-		assert.NoError(t, err)
-
-		task := watchDeltaChannelsTask{
-			req:  genWatchDeltaChannelsRequest(),
-			node: node,
-		}
-		task.ctx = ctx
-		task.req.Infos = []*datapb.VchannelInfo{
-			{
-				CollectionID: defaultCollectionID,
-				ChannelName:  defaultDeltaChannel,
-				SeekPosition: &internalpb.MsgPosition{
-					ChannelName: defaultDMLChannel,
-					MsgID:       pulsar.EarliestMessageID().Serialize(),
-					MsgGroup:    defaultSubName,
-					Timestamp:   0,
-				},
-			},
-		}
-		err = task.Execute(ctx)
-		assert.NoError(t, err)
-	})
-
-	t.Run("test execute without init collection", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
-		assert.NoError(t, err)
-
-		task := watchDeltaChannelsTask{
-			req:  genWatchDeltaChannelsRequest(),
-			node: node,
-		}
-		task.ctx = ctx
-		task.req.Infos = []*datapb.VchannelInfo{
-			{
-				CollectionID: defaultCollectionID,
-				ChannelName:  defaultDeltaChannel,
-				SeekPosition: &internalpb.MsgPosition{
-					ChannelName: defaultDeltaChannel,
-					MsgID:       []byte{1, 2, 3, 4, 5, 6, 7, 8},
-					MsgGroup:    defaultSubName,
-					Timestamp:   0,
-				},
-			},
-		}
-		task.req.CollectionID++
-		err = task.Execute(ctx)
-		assert.Error(t, err)
-	})
-}
-
 func TestTask_loadSegmentsTask(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -373,7 +285,8 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 		timestamp := Timestamp(1000)
 		task := loadSegmentsTask{
 			baseTask: baseTask{
-				ts: timestamp,
+				ts:  timestamp,
+				ctx: ctx,
 			},
 			req: genLoadEmptySegmentsRequest(),
 		}
@@ -383,6 +296,9 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 
 	t.Run("test OnEnqueue", func(t *testing.T) {
 		task := loadSegmentsTask{
+			baseTask: baseTask{
+				ctx: ctx,
+			},
 			req: genLoadEmptySegmentsRequest(),
 		}
 		err := task.OnEnqueue()
@@ -416,6 +332,9 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 		}
 
 		task := loadSegmentsTask{
+			baseTask: baseTask{
+				ctx: ctx,
+			},
 			req:  req,
 			node: node,
 		}
@@ -426,6 +345,8 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 	t.Run("test repeated load", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
+
+		node.metaReplica.removeSegment(defaultSegmentID, segmentTypeSealed)
 
 		fieldBinlog, statsLog, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
 		assert.NoError(t, err)
@@ -445,6 +366,9 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 		}
 
 		task := loadSegmentsTask{
+			baseTask: baseTask{
+				ctx: ctx,
+			},
 			req:  req,
 			node: node,
 		}
@@ -555,6 +479,9 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 		}
 
 		task := loadSegmentsTask{
+			baseTask: baseTask{
+				ctx: ctx,
+			},
 			req:  req,
 			node: node,
 		}
@@ -583,6 +510,9 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 		assert.NoError(t, err)
 
 		task := loadSegmentsTask{
+			baseTask: baseTask{
+				ctx: ctx,
+			},
 			req:  genLoadEmptySegmentsRequest(),
 			node: node,
 		}
@@ -602,6 +532,94 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 		err = task.Execute(ctx)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "OOM")
+	})
+}
+
+func TestTask_loadSegmentsTaskLoadDelta(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	schema := genTestCollectionSchema()
+
+	t.Run("test repeated load delta channel", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+		vDmChannel := "by-dev-rootcoord-dml-test_2_2021v2"
+
+		segmentLoadInfo := &querypb.SegmentLoadInfo{
+			SegmentID:    UniqueID(1000),
+			PartitionID:  defaultPartitionID,
+			CollectionID: defaultCollectionID,
+		}
+		loadReq := &querypb.LoadSegmentsRequest{
+			Base:   genCommonMsgBase(commonpb.MsgType_LoadSegments),
+			Schema: schema,
+			Infos:  []*querypb.SegmentLoadInfo{segmentLoadInfo},
+			DeltaPositions: []*internalpb.MsgPosition{
+				{
+					ChannelName: vDmChannel,
+					MsgID:       rmq.SerializeRmqID(0),
+					Timestamp:   100,
+				},
+			},
+		}
+
+		task := loadSegmentsTask{
+			baseTask: baseTask{
+				ctx: ctx,
+			},
+			req:  loadReq,
+			node: node,
+		}
+		// execute loadSegmentsTask twice
+		err = task.PreExecute(ctx)
+		assert.NoError(t, err)
+		err = task.Execute(ctx)
+		assert.NoError(t, err)
+		// expected only one segment in replica
+		num := node.metaReplica.getSegmentNum(segmentTypeSealed)
+		assert.Equal(t, 2, num)
+
+		// load second segments with same channel
+		loadReq = &querypb.LoadSegmentsRequest{
+			Base:   genCommonMsgBase(commonpb.MsgType_LoadSegments),
+			Schema: schema,
+			Infos: []*querypb.SegmentLoadInfo{
+				{
+					SegmentID:    UniqueID(1001),
+					PartitionID:  defaultPartitionID,
+					CollectionID: defaultCollectionID,
+				},
+			},
+			DeltaPositions: []*internalpb.MsgPosition{
+				{
+					ChannelName: vDmChannel,
+					MsgID:       rmq.SerializeRmqID(0),
+					Timestamp:   100,
+				},
+			},
+		}
+
+		task = loadSegmentsTask{
+			baseTask: baseTask{
+				ctx: ctx,
+			},
+			req:  loadReq,
+			node: node,
+		}
+		// execute loadSegmentsTask twice
+		err = task.PreExecute(ctx)
+		assert.NoError(t, err)
+		err = task.Execute(ctx)
+		assert.NoError(t, err)
+
+		num = node.metaReplica.getSegmentNum(segmentTypeSealed)
+		assert.Equal(t, 3, num)
+
+		ok := node.queryShardService.hasQueryShard(vDmChannel)
+		assert.True(t, ok)
+
+		assert.Equal(t, len(node.dataSyncService.dmlChannel2FlowGraph), 0)
+		assert.Equal(t, len(node.dataSyncService.deltaChannel2FlowGraph), 1)
 	})
 }
 

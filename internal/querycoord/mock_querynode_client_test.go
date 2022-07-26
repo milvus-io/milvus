@@ -26,7 +26,6 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -43,7 +42,6 @@ type queryNodeClientMock struct {
 }
 
 func newQueryNodeTest(ctx context.Context, address string, id UniqueID, kv *etcdkv.EtcdKV) (Node, error) {
-	watchedDeltaChannels := make(map[UniqueID][]*datapb.VchannelInfo)
 	childCtx, cancel := context.WithCancel(ctx)
 	client, err := newQueryNodeClientMock(childCtx, address)
 	if err != nil {
@@ -51,13 +49,12 @@ func newQueryNodeTest(ctx context.Context, address string, id UniqueID, kv *etcd
 		return nil, err
 	}
 	node := &queryNode{
-		ctx:                  childCtx,
-		cancel:               cancel,
-		id:                   id,
-		address:              address,
-		client:               client,
-		kvClient:             kv,
-		watchedDeltaChannels: watchedDeltaChannels,
+		ctx:      childCtx,
+		cancel:   cancel,
+		id:       id,
+		address:  address,
+		client:   client,
+		kvClient: kv,
 	}
 
 	return node, nil
@@ -118,10 +115,6 @@ func (client *queryNodeClientMock) GetStatisticsChannel(ctx context.Context) (*m
 
 func (client *queryNodeClientMock) WatchDmChannels(ctx context.Context, req *querypb.WatchDmChannelsRequest) (*commonpb.Status, error) {
 	return client.grpcClient.WatchDmChannels(ctx, req)
-}
-
-func (client *queryNodeClientMock) WatchDeltaChannels(ctx context.Context, req *querypb.WatchDeltaChannelsRequest) (*commonpb.Status, error) {
-	return client.grpcClient.WatchDeltaChannels(ctx, req)
 }
 
 func (client *queryNodeClientMock) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) (*commonpb.Status, error) {
