@@ -78,6 +78,7 @@ if [[ "${MILVUS_CLUSTER_ENABLED}" == "true" ]]; then
                                --set cluster.enabled="${MILVUS_CLUSTER_ENABLED}" \
                                --set service.type="${MILVUS_SERVICE_TYPE}" \
                                --set pulsar.broker.replicaCount=2 \
+                               --set mysql.enabled=true  \
                                --namespace "${MILVUS_HELM_NAMESPACE}" \
                                "${MILVUS_HELM_RELEASE_NAME}" \
                                ${@:-} "${MILVUS_HELM_CHART_PATH}"
@@ -91,6 +92,7 @@ else
                                --set minio.mode=standalone \
                                --set etcd.replicaCount=1 \
                                --set service.type="${MILVUS_SERVICE_TYPE}" \
+                               --set mysql.enabled=true --set mysql.architecture=standalone \
                                --namespace "${MILVUS_HELM_NAMESPACE}" \
                                "${MILVUS_HELM_RELEASE_NAME}" \
                                ${@:-} "${MILVUS_HELM_CHART_PATH}"
