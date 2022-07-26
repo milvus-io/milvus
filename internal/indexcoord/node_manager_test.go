@@ -158,5 +158,8 @@ func TestNodeManager_PeekClient(t *testing.T) {
 		nodeID, client := nm.PeekClient(&Meta{})
 		assert.NotNil(t, client)
 		assert.Contains(t, []UniqueID{8, 9}, nodeID)
+
+		nodeIDs := nm.ListAllNodes()
+		assert.Equal(t, 9, len(nodeIDs))
 	})
 }

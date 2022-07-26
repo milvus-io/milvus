@@ -54,7 +54,6 @@ func newIndexBuilder(ctx context.Context, ic *IndexCoord, metaTable *metaTable, 
 		cancel:           cancel,
 		meta:             metaTable,
 		ic:               ic,
-		tasks:            make(map[int64]indexTaskState, 1024),
 		notify:           make(chan struct{}, 1024),
 		scheduleDuration: time.Second * 1,
 	}
@@ -74,6 +73,10 @@ func (ib *indexBuilder) Stop() {
 }
 
 func (ib *indexBuilder) reloadFromKV(aliveNodes []UniqueID) {
+	ib.taskMutex.Lock()
+	defer ib.taskMutex.Unlock()
+	ib.tasks = make(map[int64]indexTaskState, 1024)
+
 	metas := ib.meta.GetAllIndexMeta()
 	for build, indexMeta := range metas {
 		// deleted, need to release lock and clean meta

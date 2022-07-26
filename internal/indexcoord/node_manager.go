@@ -169,6 +169,18 @@ func (nm *NodeManager) GetAllClients() map[UniqueID]types.IndexNode {
 	return allClients
 }
 
+func (nm *NodeManager) ListAllNodes() []UniqueID {
+	nm.lock.RLock()
+	defer nm.lock.RUnlock()
+
+	nodeIDs := make([]UniqueID, 0)
+	for nodeID := range nm.nodeClients {
+		nodeIDs = append(nodeIDs, nodeID)
+	}
+
+	return nodeIDs
+}
+
 // indexNodeGetMetricsResponse record the metrics information of IndexNode.
 type indexNodeGetMetricsResponse struct {
 	resp *milvuspb.GetMetricsResponse
