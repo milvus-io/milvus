@@ -12,9 +12,11 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 )
 
 func TestDescribeSegmentReqTask_Type(t *testing.T) {
@@ -144,6 +146,44 @@ func TestCreateCollectionReqTask_Execute_hasSystemFields(t *testing.T) {
 	marshaledSchema, err := proto.Marshal(schema)
 	assert.NoError(t, err)
 	task := &CreateCollectionReqTask{
+		Req: &milvuspb.CreateCollectionRequest{
+			Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+			CollectionName: "test",
+			Schema:         marshaledSchema,
+		},
+	}
+	err = task.Execute(context.Background())
+	assert.Error(t, err)
+}
+
+func TestCreateCollectionReqTask_ChannelMismatch(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Name: "test", Fields: []*schemapb.FieldSchema{{Name: "f1"}}}
+	marshaledSchema, err := proto.Marshal(schema)
+	assert.NoError(t, err)
+	msFactory := dependency.NewDefaultFactory(true)
+
+	Params.Init()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	core, err := NewCore(ctx, msFactory)
+	assert.NoError(t, err)
+	core.IDAllocator = func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
+		return 0, 0, nil
+	}
+	core.chanTimeTick = newTimeTickSync(core.ctx, 1, core.factory, nil)
+	core.TSOAllocator = func(count uint32) (typeutil.Timestamp, error) {
+		return 0, nil
+	}
+	core.SendDdCreateCollectionReq = func(context.Context, *internalpb.CreateCollectionRequest, []string) (map[string][]byte, error) {
+		return map[string][]byte{}, nil
+	}
+
+	// set RootCoordDml="" to trigger a error for code coverage
+	Params.CommonCfg.RootCoordDml = ""
+	task := &CreateCollectionReqTask{
+		baseReqTask: baseReqTask{
+			core: core,
+		},
 		Req: &milvuspb.CreateCollectionRequest{
 			Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
 			CollectionName: "test",
