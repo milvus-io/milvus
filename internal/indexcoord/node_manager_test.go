@@ -54,4 +54,7 @@ func TestNodeManager_PeekClient(t *testing.T) {
 	nodeID2, client2 := nm.PeekClient(meta)
 	assert.Equal(t, int64(0), nodeID2)
 	assert.Nil(t, client2)
+
+	nodeIDs := nm.ListAllNodes()
+	assert.Equal(t, 1, len(nodeIDs))
 }

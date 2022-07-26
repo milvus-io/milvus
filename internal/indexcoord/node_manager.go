@@ -131,6 +131,18 @@ func (nm *NodeManager) PeekClient(meta *Meta) (UniqueID, types.IndexNode) {
 	return 0, nil
 }
 
+func (nm *NodeManager) ListAllNodes() []UniqueID {
+	nm.lock.RLock()
+	defer nm.lock.RUnlock()
+
+	nodeIDs := make([]UniqueID, 0)
+	for nodeID := range nm.nodeClients {
+		nodeIDs = append(nodeIDs, nodeID)
+	}
+
+	return nodeIDs
+}
+
 // indexNodeGetMetricsResponse record the metrics information of IndexNode.
 type indexNodeGetMetricsResponse struct {
 	resp *milvuspb.GetMetricsResponse

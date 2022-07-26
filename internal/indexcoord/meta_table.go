@@ -71,6 +71,8 @@ func NewMetaTable(kv kv.MetaKv) (*metaTable, error) {
 
 // reloadFromKV reloads the index meta from ETCD.
 func (mt *metaTable) reloadFromKV() error {
+	mt.lock.Lock()
+	defer mt.lock.Unlock()
 	mt.indexBuildID2Meta = make(map[UniqueID]*Meta)
 	key := indexFilePrefix
 	log.Debug("IndexCoord metaTable LoadWithPrefix ", zap.String("prefix", key))
