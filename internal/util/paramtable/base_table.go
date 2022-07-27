@@ -202,6 +202,10 @@ func (gp *BaseTable) Get(key string) string {
 	return value
 }
 
+func (gp *BaseTable) GetByPattern(pattern string) map[string]string {
+	return gp.mgr.GetConfigsByPattern(pattern)
+}
+
 // For compatible reason, only visiable for Test
 func (gp *BaseTable) Remove(key string) error {
 	gp.mgr.DeleteConfig(key)
@@ -308,7 +312,6 @@ func (gp *BaseTable) ParseIntWithDefault(key string, defaultValue int) int {
 }
 
 // package methods
-
 // ConvertRangeToIntRange converts a range of strings to a range of ints.
 func ConvertRangeToIntRange(rangeStr, sep string) []int {
 	items := strings.Split(rangeStr, sep)

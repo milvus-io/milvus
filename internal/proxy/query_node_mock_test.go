@@ -123,3 +123,6 @@ func (m *QueryNodeMock) GetStatisticsChannel(ctx context.Context) (*milvuspb.Str
 func (m *QueryNodeMock) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	return nil, nil
 }
+func (m *QueryNodeMock) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+	return nil, nil
+}

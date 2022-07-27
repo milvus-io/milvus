@@ -16,7 +16,9 @@
 
 package typeutil
 
-import "strings"
+import (
+	"strings"
+)
 
 // AddOne add one to last byte in string, on empty string return empty
 // it helps with key iteration upper bound
