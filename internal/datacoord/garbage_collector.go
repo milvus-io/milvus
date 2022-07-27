@@ -138,7 +138,7 @@ func (gc *garbageCollector) scan() {
 				continue
 			}
 
-			segmentID, err := storage.ParseSegmentIDByBinlog(infoKey)
+			segmentID, err := storage.ParseSegmentIDByBinlog(infoKey, gc.option.rootPath)
 			if err != nil {
 				log.Error("parse segment id error", zap.String("infoKey", infoKey), zap.Error(err))
 				continue
