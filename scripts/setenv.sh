@@ -39,10 +39,14 @@ case "${unameOut}" in
     Linux*)     
       export PKG_CONFIG_PATH="${PKG_CONFIG_PATH}:$ROOT_DIR/internal/core/output/lib/pkgconfig:$ROOT_DIR/internal/core/output/lib64/pkgconfig"
       export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:$ROOT_DIR/internal/core/output/lib:$ROOT_DIR/internal/core/output/lib64"
+      export CGO_CFLAGS="-I$ROOT_DIR/internal/core/output/include"
+      export CGO_LDFLAGS="-L$ROOT_DIR/internal/core/output/lib -L$ROOT_DIR/internal/core/output/lib64 -lrocksdb -lstdc++ -lm -lz -lzstd"
       export RPATH=$LD_LIBRARY_PATH;;
     Darwin*)    
       export PKG_CONFIG_PATH="${PKG_CONFIG_PATH}:$ROOT_DIR/internal/core/output/lib/pkgconfig"
       export DYLD_LIBRARY_PATH=$ROOT_DIR/internal/core/output/lib
+      export CGO_CFLAGS="-I$ROOT_DIR/internal/core/output/include"
+      export CGO_LDFLAGS="-L$ROOT_DIR/internal/core/output/lib -lrocksdb -lstdc++ -lm -lz -lzstd"
       export RPATH=$DYLD_LIBRARY_PATH;;
     MINGW*)          
       extra_path=$(cygpath -w "$ROOT_DIR/internal/core/output/lib")

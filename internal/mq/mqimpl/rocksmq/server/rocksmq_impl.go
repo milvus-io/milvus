@@ -56,7 +56,7 @@ const (
 
 	kvSuffix = "_meta_kv"
 
-	//  topic_begin_id/topicName
+	// topic_begin_id/topicName
 	// topic begin id record a topic is valid, create when topic is created, cleaned up on destroy topic
 	TopicIDTitle = "topic_id/"
 
@@ -167,6 +167,8 @@ func NewRocksMQ(params paramtable.BaseTable, name string, idAllocator allocator.
 	optsKV.IncreaseParallelism(parallelism)
 	// enable back ground flush
 	optsKV.SetMaxBackgroundFlushes(1)
+	// enable compression
+	optsKV.SetCompression(gorocksdb.ZSTDCompression)
 
 	// finish rocks KV
 	kvName := name + kvSuffix
@@ -185,6 +187,8 @@ func NewRocksMQ(params paramtable.BaseTable, name string, idAllocator allocator.
 	optsStore.IncreaseParallelism(parallelism)
 	// enable back ground flush
 	optsStore.SetMaxBackgroundFlushes(1)
+	// enable compression
+	optsKV.SetCompression(gorocksdb.ZSTDCompression)
 
 	db, err := gorocksdb.OpenDb(optsStore, name)
 	if err != nil {

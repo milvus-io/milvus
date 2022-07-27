@@ -339,6 +339,8 @@ common:
   # Valid values: [auto, avx512, avx2, avx, sse4_2]
   # This configuration is only used by querynode and indexnode, it selects CPU instruction set for Searching and Index-building.
   simdType: auto
+
+  ## index file size when we store index file.
   indexSliceSize: 16 # MB
 
   # please adjust in embedded Milvus: local

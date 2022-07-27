@@ -1,10 +1,12 @@
 libdir=/mingw64/lib
 includedir=/mingw64/include
+zstd_library=@ZSTD_LIBRARY@
+zstd_include_dir=@ZSTD_INCLUDE_DIR@
 
 Name: Rocksdb
 Description: Rocksdb
 Version: @ROCKSDB_VERSION@
 
-Libs: -L${libdir} -lrocksdb
-Libs.private: -lz -lbz2
-Cflags: -I${includedir}
+Libs: -L${libdir} -L${zstd_library} -lrocksdb
+Libs.private: -lz -lbz2 -lzstd
+Cflags: -I${includedir} -I${zstd_include_dir}
