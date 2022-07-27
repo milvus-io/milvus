@@ -27,6 +27,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/types"
+
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/stretchr/testify/assert"
@@ -379,7 +381,7 @@ func TestIndexCoord_watchMetaLoop(t *testing.T) {
 				return watchChan
 			},
 			loadWithRevisionAndVersions: func(s string) ([]string, []string, []int64, int64, error) {
-				return []string{}, []string{}, []int64{}, 0, nil
+				return []string{}, []string{}, []int64{}, 1, nil
 			},
 		}
 		mt = &metaTable{
@@ -388,10 +390,28 @@ func TestIndexCoord_watchMetaLoop(t *testing.T) {
 			etcdRevision:      0,
 			lock:              sync.RWMutex{},
 		}
+		nm := &NodeManager{
+			nodeClients: map[UniqueID]types.IndexNode{},
+			lock:        sync.RWMutex{},
+			ctx:         ctx,
+		}
+		ib := newIndexBuilder(ctx, ic, mt, []UniqueID{})
 		ic.metaTable = mt
+		ic.nodeManager = nm
+		ic.indexBuilder = ib
 		ic.loopWg.Add(1)
 		watchChan <- clientv3.WatchResponse{CompactRevision: 10}
 		go ic.watchMetaLoop()
+		for {
+			ic.metaTable.lock.RLock()
+			if ic.metaTable.etcdRevision >= 1 {
+				ic.metaTable.lock.RUnlock()
+				break
+			}
+			ic.metaTable.lock.RUnlock()
+			time.Sleep(100 * time.Millisecond)
+		}
+
 		cancel()
 		ic.loopWg.Wait()
 	})

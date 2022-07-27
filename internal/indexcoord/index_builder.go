@@ -57,7 +57,7 @@ func newIndexBuilder(ctx context.Context, ic *IndexCoord, metaTable *metaTable, 
 		notify:           make(chan struct{}, 1024),
 		scheduleDuration: time.Second * 10,
 	}
-	ib.reloadFromKV(aliveNodes)
+	ib.refreshTasks(aliveNodes)
 	return ib
 }
 
@@ -72,7 +72,7 @@ func (ib *indexBuilder) Stop() {
 	ib.wg.Wait()
 }
 
-func (ib *indexBuilder) reloadFromKV(aliveNodes []UniqueID) {
+func (ib *indexBuilder) refreshTasks(aliveNodes []UniqueID) {
 	ib.taskMutex.Lock()
 	defer ib.taskMutex.Unlock()
 	ib.tasks = make(map[int64]indexTaskState, 1024)

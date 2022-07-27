@@ -834,7 +834,7 @@ func (i *IndexCoord) watchMetaLoop() {
 							zap.String("path", indexFilePrefix), zap.String("etcd error", err.Error()), zap.Error(internalErr))
 						panic("failed to handle etcd request, exit..")
 					}
-					i.indexBuilder.reloadFromKV(i.nodeManager.ListAllNodes())
+					i.indexBuilder.refreshTasks(i.nodeManager.ListAllNodes())
 					i.loopWg.Add(1)
 					go i.watchMetaLoop()
 					return
