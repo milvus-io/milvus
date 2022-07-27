@@ -165,6 +165,16 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		deltaChanNames[i] = t.core.chanTimeTick.getDeltaChannelName()
 		deltaChanName, err1 := funcutil.ConvertChannelName(chanNames[i], Params.CommonCfg.RootCoordDml, Params.CommonCfg.RootCoordDelta)
 		if err1 != nil || deltaChanName != deltaChanNames[i] {
+			err1Msg := ""
+			if err1 != nil {
+				err1Msg = err1.Error()
+			}
+			log.Debug("dmlChanName deltaChanName mismatch detail", zap.Int32("i", i),
+				zap.String("vchanName", vchanNames[i]),
+				zap.String("phsicalChanName", chanNames[i]),
+				zap.String("deltaChanName", deltaChanNames[i]),
+				zap.String("converted_deltaChanName", deltaChanName),
+				zap.String("err", err1Msg))
 			return fmt.Errorf("dmlChanName %s and deltaChanName %s mis-match", chanNames[i], deltaChanNames[i])
 		}
 	}
