@@ -132,6 +132,10 @@ func (gc *garbageCollector) scan() {
 			Prefix:    prefix,
 			Recursive: true,
 		}) {
+			if info.Err != nil {
+				log.Warn("failed to list objects", zap.String("prefix", prefix), zap.Error(info.Err))
+				continue
+			}
 			total++
 			_, has := filesMap[info.Key]
 			if has {
@@ -139,7 +143,7 @@ func (gc *garbageCollector) scan() {
 				continue
 			}
 
-			segmentID, err := storage.ParseSegmentIDByBinlog(info.Key)
+			segmentID, err := storage.ParseSegmentIDByBinlog(gc.option.rootPath, info.Key)
 			if err != nil {
 				log.Error("parse segment id error", zap.String("infoKey", info.Key), zap.Error(err))
 				continue
