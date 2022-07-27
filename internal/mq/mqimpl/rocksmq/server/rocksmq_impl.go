@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
-	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 
 	"github.com/tecbot/gorocksdb"
@@ -56,7 +55,7 @@ const (
 
 	kvSuffix = "_meta_kv"
 
-	//  topic_begin_id/topicName
+	// topic_begin_id/topicName
 	// topic begin id record a topic is valid, create when topic is created, cleaned up on destroy topic
 	TopicIDTitle = "topic_id/"
 
@@ -113,19 +112,6 @@ func checkRetention() bool {
 	return RocksmqRetentionTimeInSecs != -1 || RocksmqRetentionSizeInMB != -1
 }
 
-func getNowTs(idAllocator allocator.GIDAllocator) (int64, error) {
-	err := idAllocator.UpdateID()
-	if err != nil {
-		return 0, err
-	}
-	newID, err := idAllocator.AllocOne()
-	if err != nil {
-		return 0, err
-	}
-	nowTs, _ := tsoutil.ParseTS(uint64(newID))
-	return nowTs.Unix(), err
-}
-
 var topicMu = sync.Map{}
 
 type rocksmq struct {
@@ -180,6 +166,8 @@ func NewRocksMQ(params paramtable.BaseTable, name string, idAllocator allocator.
 	optsKV.IncreaseParallelism(parallelism)
 	// enable back ground flush
 	optsKV.SetMaxBackgroundFlushes(1)
+	// enable compression
+	optsKV.SetCompression(gorocksdb.ZSTDCompression)
 
 	// finish rocks KV
 	kvName := name + kvSuffix
@@ -198,6 +186,8 @@ func NewRocksMQ(params paramtable.BaseTable, name string, idAllocator allocator.
 	optsStore.IncreaseParallelism(parallelism)
 	// enable back ground flush
 	optsStore.SetMaxBackgroundFlushes(1)
+	// enable compression
+	optsKV.SetCompression(gorocksdb.ZSTDCompression)
 
 	db, err := gorocksdb.OpenDb(optsStore, name)
 	if err != nil {

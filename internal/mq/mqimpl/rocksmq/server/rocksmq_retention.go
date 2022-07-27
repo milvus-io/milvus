@@ -27,10 +27,10 @@ import (
 )
 
 // RocksmqRetentionTimeInMinutes is the time of retention
-var RocksmqRetentionTimeInSecs int64 = 10080 * 60
+var RocksmqRetentionTimeInSecs int64 = 4320 * 60
 
 // RocksmqRetentionSizeInMB is the size of retention
-var RocksmqRetentionSizeInMB int64 = 8192
+var RocksmqRetentionSizeInMB int64 = 2048
 
 // Const value that used to convert unit
 const (
@@ -354,7 +354,8 @@ func DeleteMessages(db *gorocksdb.DB, topic string, startID, endID UniqueID) err
 	if err != nil {
 		return err
 	}
-
+	// compact force trigger data
+	go db.CompactRange(gorocksdb.Range{Start: []byte(startKey), Limit: []byte(endKey)})
 	log.Debug("Delete message for topic", zap.String("topic", topic), zap.Int64("startID", startID), zap.Int64("endID", endID))
 	return nil
 }

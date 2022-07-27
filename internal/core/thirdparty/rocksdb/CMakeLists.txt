@@ -37,6 +37,7 @@ macro( build_rocksdb )
          "-DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}"
          "-DROCKSDB_INSTALL_ON_WINDOWS=ON"
          "-DFAIL_ON_WARNINGS=OFF"
+         "-DWITH_ZSTD=ON"
          ${FPIC_ARG}
          #This is used to solve 'illegal instruction' problem in some machine
          "-DPORTABLE=ON"
@@ -59,6 +60,16 @@ macro( build_rocksdb )
     if( NOT IS_DIRECTORY ${INSTALL_DIR}/include )
         file( MAKE_DIRECTORY "${INSTALL_DIR}/include" )
     endif()
+
+    find_path(ZSTD_INCLUDE_DIR
+      NAMES zstd.h
+      HINTS ${zstd_ROOT_DIR}/include)
+
+    find_library(ZSTD_LIBRARY
+      NAMES zstd
+      HINTS ${zstd_ROOT_DIR}/lib)
+    message ( STATUS "FIND ZSTD LIBRARY ${ZSTD_LIBRARY}" )
+    message ( STATUS "FIND ZSTD INCLUDE ${ZSTD_INCLUDE_DIR}" )
 
     milvus_add_pkg_config("rocksdb")
     add_library( rocksdb STATIC IMPORTED )

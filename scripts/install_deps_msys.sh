@@ -24,7 +24,8 @@ pacmanInstall()
     mingw-w64-x86_64-diffutils \
     mingw-w64-x86_64-arrow \
     mingw-w64-x86_64-go \
-    mingw-w64-x86_64-rocksdb
+    mingw-w64-x86_64-rocksdb \
+    libzstd-devel
 }
 
 updateKey()
