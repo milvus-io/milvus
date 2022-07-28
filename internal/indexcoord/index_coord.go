@@ -21,11 +21,12 @@ import (
 	"errors"
 	"math/rand"
 	"os"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/milvus-io/milvus/internal/metastore/model"
 
 	"github.com/milvus-io/milvus/internal/util"
 
@@ -75,8 +76,9 @@ type IndexCoord struct {
 	loopCancel func()
 	loopWg     sync.WaitGroup
 
-	sched   *TaskScheduler
-	session *sessionutil.Session
+	sched    *TaskScheduler
+	session  *sessionutil.Session
+	serverID UniqueID
 
 	eventChan <-chan *sessionutil.SessionEvent
 
@@ -152,6 +154,7 @@ func (i *IndexCoord) initSession() error {
 	}
 	i.session.Init(typeutil.IndexCoordRole, Params.IndexCoordCfg.Address, true, true)
 	Params.SetLogger(i.session.ServerID)
+	i.serverID = i.session.ServerID
 	return nil
 }
 
@@ -270,9 +273,6 @@ func (i *IndexCoord) Start() error {
 
 		i.loopWg.Add(1)
 		go i.watchNodeLoop()
-
-		i.loopWg.Add(1)
-		go i.watchMetaLoop()
 
 		startErr = i.sched.Start()
 
@@ -435,50 +435,37 @@ func (i *IndexCoord) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequ
 		}, nil
 	}
 
-	t := &IndexAddTask{
+	t := &CreateIndexTask{
 		BaseTask: BaseTask{
 			ctx:   ctx,
 			done:  make(chan error),
 			table: i.metaTable,
 		},
-		req:         req,
-		idAllocator: i.idAllocator,
+		dataCoordClient:  i.dataCoordClient,
+		indexCoordClient: i,
+		req:              req,
+		idAllocator:      i.idAllocator,
+		tsoAllocator:     i.tsoAllocator,
 	}
 
-	var cancel func()
-	t.ctx, cancel = context.WithTimeout(ctx, i.reqTimeoutInterval)
-	defer cancel()
-
-	fn := func() error {
-		select {
-		case <-ctx.Done():
-			return errors.New("IndexAddQueue enqueue timeout")
-		default:
-			return i.sched.IndexAddQueue.Enqueue(t)
-		}
-	}
-	err := fn()
+	err := i.sched.IndexAddQueue.Enqueue(t)
 	if err != nil {
-		ret.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-		ret.Status.Reason = err.Error()
-		metrics.IndexCoordIndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
+		ret.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		ret.Reason = err.Error()
 		return ret, nil
 	}
-	log.Debug("IndexCoord BuildIndex Enqueue successfully", zap.Int64("IndexBuildID", t.indexBuildID))
+	log.Debug("IndexCoord create index enqueue successfully", zap.Int64("IndexID", t.indexID))
 
 	err = t.WaitToFinish()
 	if err != nil {
-		log.Error("IndexCoord scheduler index task failed", zap.Int64("IndexBuildID", t.indexBuildID))
-		ret.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-		ret.Status.Reason = err.Error()
-		metrics.IndexCoordIndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
+		log.Error("IndexCoord scheduler creating index task fail", zap.Int64("collectionID", req.CollectionID),
+			zap.Int64("fieldID", req.FieldID), zap.String("indexName", req.IndexName))
+		ret.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		ret.Reason = err.Error()
 		return ret, nil
 	}
-	i.indexBuilder.enqueue(t.indexBuildID)
-	sp.SetTag("IndexCoord-IndexBuildID", strconv.FormatInt(t.indexBuildID, 10))
-	ret.Status.ErrorCode = commonpb.ErrorCode_Success
-	ret.IndexBuildID = t.indexBuildID
-	metrics.IndexCoordIndexRequestCounter.WithLabelValues(metrics.SuccessLabel).Inc()
+
+	ret.ErrorCode = commonpb.ErrorCode_Success
 	return ret, nil
 }
 
@@ -572,46 +559,6 @@ func (i *IndexCoord) DropIndex(ctx context.Context, req *indexpb.DropIndexReques
 	}()
 
 	log.Debug("IndexCoord DropIndex success", zap.Int64("IndexID", req.IndexID))
-	return ret, nil
-}
-
-func (i *IndexCoord) RemoveIndex(ctx context.Context, req *indexpb.RemoveIndexRequest) (*commonpb.Status, error) {
-	log.Info("IndexCoord receive RemoveIndex", zap.Int64s("buildIDs", req.BuildIDs))
-
-	if !i.isHealthy() {
-		errMsg := "IndexCoord is not healthy"
-		log.Warn(errMsg)
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    errMsg,
-		}, nil
-	}
-
-	sp, _ := trace.StartSpanFromContextWithOperationName(ctx, "IndexCoord-RemoveIndex")
-	defer sp.Finish()
-
-	ret := &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}
-
-	err := i.metaTable.MarkIndexAsDeletedByBuildIDs(req.GetBuildIDs())
-	// no need do this. IndexNode finds that the task has been deleted, still changes the task status to finished, and writes back to etcd
-	//defer func() {
-	//	for nodeID, taskNum := range nodeTasks {
-	//		i.nodeManager.pq.IncPriority(nodeID, -1*taskNum)
-	//	}
-	//}()
-	if err != nil {
-		log.Error("IndexCoord MarkIndexAsDeletedByBuildIDs failed", zap.Int64s("buildIDs", req.GetBuildIDs()),
-			zap.Error(err))
-		ret.ErrorCode = commonpb.ErrorCode_UnexpectedError
-		ret.Reason = err.Error()
-		return ret, nil
-	}
-	for _, buildID := range req.BuildIDs {
-		i.indexBuilder.markTaskAsDeleted(buildID)
-	}
-
 	return ret, nil
 }
 
@@ -809,70 +756,6 @@ func (i *IndexCoord) watchNodeLoop() {
 	}
 }
 
-// watchMetaLoop is used to monitor whether the Meta in etcd has been changed.
-func (i *IndexCoord) watchMetaLoop() {
-	ctx, cancel := context.WithCancel(i.loopCtx)
-
-	defer cancel()
-	defer i.loopWg.Done()
-	log.Debug("IndexCoord watchMetaLoop start")
-
-	watchChan := i.metaTable.client.WatchWithRevision(indexFilePrefix, i.metaTable.etcdRevision)
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case resp, ok := <-watchChan:
-			if !ok {
-				log.Warn("index coord watch meta loop failed because watch channel closed")
-				return
-			}
-			if err := resp.Err(); err != nil {
-				if err == v3rpc.ErrCompacted {
-					newMetaTable, err2 := NewMetaTable(i.etcdKV)
-					if err2 != nil {
-						log.Error("Constructing new meta table fails when etcd has a compaction error",
-							zap.String("path", indexFilePrefix), zap.String("etcd error", err.Error()), zap.Error(err2))
-						panic("failed to handle etcd request, exit..")
-					}
-					i.metaTable = newMetaTable
-					i.loopWg.Add(1)
-					go i.watchMetaLoop()
-					return
-				}
-				log.Error("received error event from etcd watcher", zap.String("path", indexFilePrefix), zap.Error(err))
-				panic("failed to handle etcd request, exit..")
-			}
-			for _, event := range resp.Events {
-				eventRevision := event.Kv.Version
-				indexMeta := &indexpb.IndexMeta{}
-				err := proto.Unmarshal(event.Kv.Value, indexMeta)
-				indexBuildID := indexMeta.IndexBuildID
-				if err != nil {
-					log.Warn("IndexCoord unmarshal indexMeta failed", zap.Int64("IndexBuildID", indexBuildID),
-						zap.Error(err))
-					continue
-				}
-				switch event.Type {
-				case mvccpb.PUT:
-					log.Debug("IndexCoord watchMetaLoop", zap.Int64("IndexBuildID", indexBuildID),
-						zap.Int64("revision", eventRevision), zap.Any("indexMeta", indexMeta))
-					meta := &Meta{indexMeta: indexMeta, etcdVersion: eventRevision}
-					if i.metaTable.NeedUpdateMeta(meta) {
-						log.Info("IndexCoord meta table update meta, update task state",
-							zap.Int64("buildID", meta.indexMeta.IndexBuildID))
-						// nothing to do, release reference lock.
-						i.indexBuilder.updateStateByMeta(meta.indexMeta)
-					}
-				case mvccpb.DELETE:
-					// why indexBuildID is zero in delete event?
-					log.Info("IndexCoord watchMetaLoop DELETE", zap.String("The meta has been deleted of key", string(event.Kv.Key)))
-				}
-			}
-		}
-	}
-}
-
 func (i *IndexCoord) tryAcquireSegmentReferLock(ctx context.Context, buildID UniqueID, nodeID UniqueID, segIDs []UniqueID) error {
 	// IndexCoord use buildID instead of taskID.
 	log.Info("try to acquire segment reference lock", zap.Int64("buildID", buildID),
@@ -938,9 +821,9 @@ func (i *IndexCoord) assignTask(builderClient types.IndexNode, req *indexpb.Crea
 	return nil
 }
 
-func (i *IndexCoord) createIndex(segIdx *indexpb.SegmentIndex) error {
+func (i *IndexCoord) createIndex(segIdx *model.SegmentIndex) error {
 	log.Info("create index for flushed segment", zap.Int64("segID", segIdx.SegmentID))
-	hasIndex, indexBuildID := i.metaTable.AlreadyBuiltIndex(segIdx)
+	hasIndex, indexBuildID := i.metaTable.CheckBuiltIndex(segIdx)
 	if hasIndex {
 		log.Debug("IndexCoord has same index", zap.Int64("buildID", indexBuildID), zap.Int64("segmentID", segIdx.SegmentID))
 		return nil
@@ -994,16 +877,16 @@ func (i *IndexCoord) watchFlushedSegmentLoop() {
 				return
 			}
 			if err := resp.Err(); err != nil {
+				log.Warn("IndexCoord watchFlushedSegmentLoo receive etcd compacted error")
 				if err == v3rpc.ErrCompacted {
-					newfsw, err2 := newFlushSegmentWatcher(i.loopCtx, i.etcdKV)
-					if err2 != nil {
+					i.flushedSegmentWatcher, err = newFlushSegmentWatcher(i.loopCtx, i.etcdKV)
+					if err != nil {
 						log.Error("Constructing flushed segment watcher fails when etcd has a compaction error",
-							zap.String("etcd error", err.Error()), zap.Error(err2))
+							zap.String("etcd error", err.Error()), zap.Error(err))
 						panic("failed to handle etcd request, exit..")
 					}
-					i.flushedSegmentWatcher = newfsw
 					i.loopWg.Add(1)
-					go i.watchMetaLoop()
+					go i.watchFlushedSegmentLoop()
 					return
 				}
 				log.Error("received error event from flushed segment watcher",
@@ -1019,23 +902,25 @@ func (i *IndexCoord) watchFlushedSegmentLoop() {
 						log.Error("watchFlushedSegmentLoop unmarshal fail", zap.Error(err))
 						continue
 					}
+
 					log.Debug("watchFlushedSegmentLoop watch event", zap.Int64("segID", segmentInfo.ID),
 						zap.Int64("collID", segmentInfo.CollectionID), zap.Int64("num rows", segmentInfo.NumOfRows),
 						zap.Int64s("compactForm", segmentInfo.CompactionFrom))
 
-					segmentIndexes := i.metaTable.ConstructIndexes(segmentInfo)
+					log.Info("create index for flushed segment", zap.Int64("segID", segmentInfo.ID))
+					segmentIndexes := i.metaTable.BuildIndexes(segmentInfo)
 					if len(segmentIndexes) == 0 {
 						log.Info("segment no need to index", zap.Int64("segmentID", segmentInfo.ID))
 						continue
 					}
-					for _, segmentIndex := range segmentIndexes {
-						if err := i.createIndex(segmentIndex); err != nil {
-							log.Error("IndexCoord create index for flushed segment fail", zap.Int64("segID", segmentInfo.ID))
-							//TODO @xiaocai2333: panic?
+					for _, segIdx := range segmentIndexes {
+						err := i.createIndex(segIdx)
+						if err != nil {
+							log.Error("IndexCoord create index for segment fail", zap.Int64("segID", segmentInfo.ID))
+							// TODO @xiaocai2333: panic?
 							continue
 						}
 					}
-
 				case mvccpb.DELETE:
 					log.Info("the segment info has been deleted", zap.String("key", string(event.Kv.Key)))
 				}

@@ -22,131 +22,15 @@ import (
 	"fmt"
 	"path"
 	"strconv"
-	"sync"
 
-	"github.com/milvus-io/milvus/internal/kv"
-
-	"github.com/milvus-io/milvus/internal/metrics"
-
-	"go.uber.org/zap"
-
-	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/util/retry"
+	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 )
-
-// Meta is used to record the state of the index.
-// revision: The number of times IndexMeta has been changed in etcd. It's the same as Event.Kv.Version in etcd.
-// indexMeta: A structure that records the state of the index defined by proto.
-type Meta struct {
-	indexMeta   *indexpb.IndexMeta
-	etcdVersion int64
-}
-
-// metaTable records the mapping of IndexBuildID to Meta.
-//type metaTable struct {
-//	client            kv.MetaKv          // client of a reliable kv service, i.e. etcd client
-//	indexBuildID2Meta map[UniqueID]*Meta // index build id to index meta
-//
-//	etcdRevision int64
-//
-//	lock sync.RWMutex
-//}
-
-// NewMetaTable is used to create a new meta table.
-func NewMetaTable(kv kv.MetaKv) (*metaTable, error) {
-	mt := &metaTable{
-		client: kv,
-		lock:   sync.RWMutex{},
-	}
-	err := mt.reloadFromKV()
-	if err != nil {
-		return nil, err
-	}
-
-	return mt, nil
-}
-
-// reloadFromKV reloads the index meta from ETCD.
-func (mt *metaTable) reloadFromKV() error {
-	mt.indexBuildID2Meta = make(map[UniqueID]*Meta)
-	key := indexFilePrefix
-	log.Debug("IndexCoord metaTable LoadWithPrefix ", zap.String("prefix", key))
-
-	_, values, versions, revision, err := mt.client.LoadWithRevisionAndVersions(key)
-	if err != nil {
-		return err
-	}
-
-	mt.etcdRevision = revision
-
-	for i := 0; i < len(values); i++ {
-		indexMeta := indexpb.IndexMeta{}
-		err = proto.Unmarshal([]byte(values[i]), &indexMeta)
-		if err != nil {
-			return fmt.Errorf("IndexCoord metaTable reloadFromKV UnmarshalText indexpb.IndexMeta err:%w", err)
-		}
-
-		meta := &Meta{
-			indexMeta:   &indexMeta,
-			etcdVersion: versions[i],
-		}
-		mt.indexBuildID2Meta[indexMeta.IndexBuildID] = meta
-	}
-	return nil
-}
-
-// saveIndexMeta saves the index meta to ETCD.
-// metaTable.lock.Lock() before call this function
-//func (mt *metaTable) saveIndexMeta(meta *Meta) error {
-//	value, err := proto.Marshal(meta.indexMeta)
-//	if err != nil {
-//		return err
-//	}
-//	key := path.Join(indexFilePrefix, strconv.FormatInt(meta.indexMeta.IndexBuildID, 10))
-//	success, err := mt.client.CompareVersionAndSwap(key, meta.etcdVersion, string(value))
-//	if err != nil {
-//		log.Warn("failed to save index meta in etcd", zap.Int64("buildID", meta.indexMeta.IndexBuildID), zap.Error(err))
-//		return err
-//	}
-//	if !success {
-//		log.Warn("failed to save index meta in etcd because version compare failure", zap.Int64("buildID", meta.indexMeta.IndexBuildID), zap.Any("index", meta.indexMeta))
-//		return ErrCompareVersion
-//	}
-//	meta.etcdVersion = meta.etcdVersion + 1
-//	mt.indexBuildID2Meta[meta.indexMeta.IndexBuildID] = meta
-//	log.Info("IndexCoord metaTable saveIndexMeta success", zap.Int64("buildID", meta.indexMeta.IndexBuildID), zap.Int64("meta.revision", meta.etcdVersion))
-//	return nil
-//}
-
-// reloadMeta reloads the index meta corresponding indexBuildID from ETCD.
-func (mt *metaTable) reloadMeta(indexBuildID UniqueID) (*Meta, error) {
-	key := path.Join(indexFilePrefix, strconv.FormatInt(indexBuildID, 10))
-	_, values, version, err := mt.client.LoadWithPrefix2(key)
-	log.Debug("IndexCoord reloadMeta mt.client.LoadWithPrefix2", zap.Any("indexBuildID", indexBuildID), zap.Error(err))
-	if err != nil {
-		return nil, err
-	}
-
-	if len(values) == 0 {
-		log.Error("IndexCoord reload Meta", zap.Any("indexBuildID", indexBuildID), zap.Error(errors.New("meta doesn't exist in KV")))
-		return nil, errors.New("meta doesn't exist in KV")
-	}
-	im := &indexpb.IndexMeta{}
-	err = proto.Unmarshal([]byte(values[0]), im)
-	if err != nil {
-		return nil, err
-	}
-	m := &Meta{
-		etcdVersion: version[0],
-		indexMeta:   im,
-	}
-
-	log.Debug("reload meta from etcd success", zap.Int64("buildID", indexBuildID), zap.Any("indexMeta", im))
-	return m, nil
-}
 
 func (mt *metaTable) GetAllIndexMeta() map[int64]*indexpb.IndexMeta {
 	mt.lock.RLock()

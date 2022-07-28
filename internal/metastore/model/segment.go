@@ -2,13 +2,15 @@ package model
 
 import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 )
 
 type Segment struct {
 	SegmentID           int64
+	CollectionID        int64
 	PartitionID         int64
 	NumRows             int64
+	BinLogs             []string
 	MemSize             int64
 	DmChannel           string
 	CompactionFrom      []int64
@@ -21,32 +23,58 @@ type Segment struct {
 
 type SegmentIndex struct {
 	Segment
-	EnableIndex    bool
-	CreateTime     uint64
+	IndexID        int64
 	BuildID        int64
-	IndexSize      uint64
+	NodeID         int64
+	State          commonpb.IndexState
+	IndexVersion   int64
+	IsDeleted      bool
+	CreateTime     uint64
 	IndexFilePaths []string
+	IndexSize      uint64
 }
 
-func UnmarshalSegmentIndexModel(segIndex *pb.SegmentIndexInfo) *Index {
+func UnmarshalSegmentIndexModel(segIndex *indexpb.SegmentIndex) *SegmentIndex {
 	if segIndex == nil {
 		return nil
 	}
 
-	return &Index{
-		CollectionID: segIndex.CollectionID,
-		SegmentIndexes: map[int64]SegmentIndex{
-			segIndex.SegmentID: {
-				Segment: Segment{
-					SegmentID:   segIndex.SegmentID,
-					PartitionID: segIndex.PartitionID,
-				},
-				BuildID:     segIndex.BuildID,
-				EnableIndex: segIndex.EnableIndex,
-				CreateTime:  segIndex.CreateTime,
-			},
+	return &SegmentIndex{
+		Segment: Segment{
+			SegmentID:    segIndex.SegmentID,
+			CollectionID: segIndex.CollectionID,
+			PartitionID:  segIndex.PartitionID,
+			NumRows:      segIndex.NumRows,
 		},
-		FieldID: segIndex.FieldID,
-		IndexID: segIndex.IndexID,
+		IndexID:        segIndex.IndexID,
+		BuildID:        segIndex.BuildID,
+		NodeID:         segIndex.NodeID,
+		IndexVersion:   segIndex.IndexVersion,
+		IsDeleted:      segIndex.Deleted,
+		CreateTime:     segIndex.CreateTime,
+		IndexFilePaths: segIndex.IndexFilesPaths,
+		IndexSize:      segIndex.SerializeSize,
+	}
+}
+
+func MarshalSegmentIndexModel(segIdx *SegmentIndex) *indexpb.SegmentIndex {
+	if segIdx == nil {
+		return nil
+	}
+
+	return &indexpb.SegmentIndex{
+		CollectionID:    segIdx.CollectionID,
+		PartitionID:     segIdx.PartitionID,
+		SegmentID:       segIdx.SegmentID,
+		NumRows:         segIdx.NumRows,
+		IndexID:         segIdx.IndexID,
+		BuildID:         segIdx.BuildID,
+		NodeID:          segIdx.NodeID,
+		State:           segIdx.State,
+		IndexVersion:    segIdx.IndexVersion,
+		IndexFilesPaths: segIdx.IndexFilePaths,
+		Deleted:         segIdx.IsDeleted,
+		CreateTime:      segIdx.CreateTime,
+		SerializeSize:   segIdx.IndexSize,
 	}
 }

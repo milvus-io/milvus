@@ -2,22 +2,23 @@ package model
 
 import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 )
 
 type Index struct {
-	CollectionID   int64
-	FieldID        int64
-	IndexID        int64
-	IndexName      string
-	IsDeleted      bool
-	CreateTime     uint64
-	IndexParams    []*commonpb.KeyValuePair
-	SegmentIndexes map[int64]SegmentIndex //segmentID -> segmentIndex
-	Extra          map[string]string
+	CollectionID int64
+	FieldID      int64
+	IndexID      int64
+	IndexName    string
+	IsDeleted    bool
+	CreateTime   uint64
+	TypeParams   []*commonpb.KeyValuePair
+	IndexParams  []*commonpb.KeyValuePair
+	//SegmentIndexes map[int64]SegmentIndex //segmentID -> segmentIndex
+	//Extra          map[string]string
 }
 
-func UnmarshalIndexModel(indexInfo *pb.IndexInfo) *Index {
+func UnmarshalIndexModel(indexInfo *indexpb.FieldIndex) *Index {
 	if indexInfo == nil {
 		return nil
 	}
@@ -31,17 +32,20 @@ func UnmarshalIndexModel(indexInfo *pb.IndexInfo) *Index {
 	}
 }
 
-func MarshalIndexModel(index *Index) *pb.IndexInfo {
+func MarshalIndexModel(index *Index) *indexpb.FieldIndex {
 	if index == nil {
 		return nil
 	}
 
-	return &pb.IndexInfo{
-		IndexName:   index.IndexName,
-		IndexID:     index.IndexID,
-		IndexParams: index.IndexParams,
-		Deleted:     index.IsDeleted,
-		CreateTime:  index.CreateTime,
+	return &indexpb.FieldIndex{
+		CollectionID: index.CollectionID,
+		FieldID:      index.FieldID,
+		IndexID:      index.IndexID,
+		IndexName:    index.IndexName,
+		TypeParams:   index.TypeParams,
+		IndexParams:  index.IndexParams,
+		Deleted:      index.IsDeleted,
+		CreateTime:   index.CreateTime,
 	}
 }
 

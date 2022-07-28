@@ -35,17 +35,19 @@ service IndexNode {
 
 message FieldIndex {
   int64 collectionID = 1;
-  int64 partitionID = 2;
+//  int64 partitionID = 2;
   int64 fieldID = 3;
   int64 indexID = 4;
   string index_name = 5;
   repeated common.KeyValuePair type_params = 6;
   repeated common.KeyValuePair index_params = 7;
+  bool deleted = 8;
+  uint64 create_time = 9;
 }
 
 message SegmentIndex {
     int64 collectionID = 1;
-//    int64 partitionID = 2;
+    int64 partitionID = 2;
     int64 segmentID = 3;
     int64 num_rows = 4;
     int64 indexID = 5;
@@ -53,7 +55,7 @@ message SegmentIndex {
     int64 nodeID = 7;
     common.IndexState state = 8;
     int64 index_version = 9;
-    string index_files_paths = 10;
+    repeated string index_files_paths = 10;
     bool deleted = 11;
     uint64 create_time = 12;
     uint64 serialize_size = 13;
