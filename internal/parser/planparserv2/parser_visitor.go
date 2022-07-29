@@ -569,7 +569,8 @@ func (v *ParserVisitor) VisitRange(ctx *parser.RangeContext) interface{} {
 		}
 	case schemapb.DataType_Bool:
 		return fmt.Errorf("invalid range operations on boolean expr")
-	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32, schemapb.DataType_Int64:
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32, schemapb.DataType_Int64,
+		schemapb.DataType_UInt8, schemapb.DataType_UInt16, schemapb.DataType_UInt32, schemapb.DataType_UInt64:
 		if !IsInteger(lowerValue) || !IsInteger(upperValue) {
 			return fmt.Errorf("invalid range operations")
 		}
@@ -653,7 +654,8 @@ func (v *ParserVisitor) VisitReverseRange(ctx *parser.ReverseRangeContext) inter
 		}
 	case schemapb.DataType_Bool:
 		return fmt.Errorf("invalid range operations on boolean expr")
-	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32, schemapb.DataType_Int64:
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32, schemapb.DataType_Int64,
+		schemapb.DataType_UInt8, schemapb.DataType_UInt16, schemapb.DataType_UInt32, schemapb.DataType_UInt64:
 		if !IsInteger(lowerValue) || !IsInteger(upperValue) {
 			return fmt.Errorf("invalid range operations")
 		}

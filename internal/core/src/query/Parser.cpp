@@ -107,6 +107,14 @@ Parser::ParseRangeNode(const Json& out_body) {
             return ParseRangeNodeImpl<int32_t>(field_name, body);
         case DataType::INT64:
             return ParseRangeNodeImpl<int64_t>(field_name, body);
+        case DataType::UINT8:
+            return ParseRangeNodeImpl<uint8_t>(field_name, body);
+        case DataType::UINT16:
+            return ParseRangeNodeImpl<uint16_t>(field_name, body);
+        case DataType::UINT32:
+            return ParseRangeNodeImpl<uint32_t>(field_name, body);
+        case DataType::UINT64:
+            return ParseRangeNodeImpl<uint64_t>(field_name, body);
         case DataType::FLOAT:
             return ParseRangeNodeImpl<float>(field_name, body);
         case DataType::DOUBLE:
@@ -162,6 +170,18 @@ Parser::ParseTermNode(const Json& out_body) {
         }
         case DataType::INT64: {
             return ParseTermNodeImpl<int64_t>(field_name, body);
+        }
+        case DataType::UINT8: {
+            return ParseTermNodeImpl<uint8_t>(field_name, body);
+        }
+        case DataType::UINT16: {
+            return ParseTermNodeImpl<uint16_t>(field_name, body);
+        }
+        case DataType::UINT32: {
+            return ParseTermNodeImpl<uint32_t>(field_name, body);
+        }
+        case DataType::UINT64: {
+            return ParseTermNodeImpl<uint64_t>(field_name, body);
         }
         case DataType::FLOAT: {
             return ParseTermNodeImpl<float>(field_name, body);

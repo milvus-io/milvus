@@ -178,6 +178,34 @@ func TestPrintBinlogFiles(t *testing.T) {
 					Description:  "description_11",
 					DataType:     schemapb.DataType_FloatVector,
 				},
+				{
+					FieldID:      110,
+					Name:         "field_uint8",
+					IsPrimaryKey: false,
+					Description:  "description_12",
+					DataType:     schemapb.DataType_UInt8,
+				},
+				{
+					FieldID:      111,
+					Name:         "field_uint16",
+					IsPrimaryKey: false,
+					Description:  "description_13",
+					DataType:     schemapb.DataType_UInt16,
+				},
+				{
+					FieldID:      112,
+					Name:         "field_uint32",
+					IsPrimaryKey: false,
+					Description:  "description_14",
+					DataType:     schemapb.DataType_UInt32,
+				},
+				{
+					FieldID:      113,
+					Name:         "field_uint64",
+					IsPrimaryKey: false,
+					Description:  "description_15",
+					DataType:     schemapb.DataType_UInt64,
+				},
 			},
 		},
 	}
@@ -234,6 +262,22 @@ func TestPrintBinlogFiles(t *testing.T) {
 				Data:    []float32{0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
 				Dim:     8,
 			},
+			110: &UInt8FieldData{
+				NumRows: []int64{2},
+				Data:    []uint8{3, 4},
+			},
+			111: &UInt16FieldData{
+				NumRows: []int64{2},
+				Data:    []uint16{3, 4},
+			},
+			112: &UInt32FieldData{
+				NumRows: []int64{2},
+				Data:    []uint32{3, 4},
+			},
+			113: &UInt64FieldData{
+				NumRows: []int64{2},
+				Data:    []uint64{3, 4},
+			},
 		},
 	}
 
@@ -288,6 +332,22 @@ func TestPrintBinlogFiles(t *testing.T) {
 				NumRows: []int64{2},
 				Data:    []float32{0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
 				Dim:     8,
+			},
+			110: &UInt8FieldData{
+				NumRows: []int64{2},
+				Data:    []uint8{1, 2},
+			},
+			111: &UInt16FieldData{
+				NumRows: []int64{2},
+				Data:    []uint16{1, 2},
+			},
+			112: &UInt32FieldData{
+				NumRows: []int64{2},
+				Data:    []uint32{1, 2},
+			},
+			113: &UInt64FieldData{
+				NumRows: []int64{2},
+				Data:    []uint64{1, 2},
 			},
 		},
 	}

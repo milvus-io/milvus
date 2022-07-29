@@ -71,6 +71,18 @@ func (ds *DataSorter) Swap(i, j int) {
 		case schemapb.DataType_Int64:
 			data := singleData.(*Int64FieldData).Data
 			data[i], data[j] = data[j], data[i]
+		case schemapb.DataType_UInt8:
+			data := singleData.(*UInt8FieldData).Data
+			data[i], data[j] = data[j], data[i]
+		case schemapb.DataType_UInt16:
+			data := singleData.(*UInt16FieldData).Data
+			data[i], data[j] = data[j], data[i]
+		case schemapb.DataType_UInt32:
+			data := singleData.(*UInt32FieldData).Data
+			data[i], data[j] = data[j], data[i]
+		case schemapb.DataType_UInt64:
+			data := singleData.(*UInt64FieldData).Data
+			data[i], data[j] = data[j], data[i]
 		case schemapb.DataType_Float:
 			data := singleData.(*FloatFieldData).Data
 			data[i], data[j] = data[j], data[i]

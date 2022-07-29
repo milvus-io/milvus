@@ -55,7 +55,7 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 
 		p, err := b.upload(context.TODO(), 1, 10, []*InsertData{iData}, []byte{}, dData, meta)
 		assert.NoError(t, err)
-		assert.Equal(t, 12, len(p.inPaths))
+		assert.Equal(t, 16, len(p.inPaths))
 		assert.Equal(t, 1, len(p.statsPaths))
 		assert.Equal(t, 1, len(p.inPaths[0].GetBinlogs()))
 		assert.Equal(t, 1, len(p.statsPaths[0].GetBinlogs()))
@@ -63,7 +63,7 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 
 		p, err = b.upload(context.TODO(), 1, 10, []*InsertData{iData, iData}, []byte{}, dData, meta)
 		assert.NoError(t, err)
-		assert.Equal(t, 12, len(p.inPaths))
+		assert.Equal(t, 16, len(p.inPaths))
 		assert.Equal(t, 1, len(p.statsPaths))
 		assert.Equal(t, 2, len(p.inPaths[0].GetBinlogs()))
 		assert.Equal(t, 1, len(p.statsPaths[0].GetBinlogs()))
@@ -73,7 +73,7 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 
 		in, err := b.uploadInsertLog(ctx, 1, 10, iData, meta)
 		assert.NoError(t, err)
-		assert.Equal(t, 12, len(in))
+		assert.Equal(t, 16, len(in))
 		assert.Equal(t, 1, len(in[0].GetBinlogs()))
 
 		stats, err := b.uploadStatsLog(ctx, 1, 10, []byte{}, meta)
@@ -350,8 +350,8 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 					return
 				}
 				assert.NoError(t, err)
-				assert.Equal(t, 12, len(pin))
-				assert.Equal(t, 12, len(kvs))
+				assert.Equal(t, 16, len(pin))
+				assert.Equal(t, 16, len(kvs))
 
 				log.Debug("test paths",
 					zap.Any("kvs no.", len(kvs)),

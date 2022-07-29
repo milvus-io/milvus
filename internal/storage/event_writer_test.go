@@ -90,6 +90,39 @@ func TestEventWriter(t *testing.T) {
 	insertEvent.Close()
 }
 
+func TestUEventWriter(t *testing.T) {
+	insertEvent, err := newInsertEventWriter(schemapb.DataType_UInt32)
+	assert.Nil(t, err)
+	insertEvent.Close()
+
+	insertEvent, err = newInsertEventWriter(schemapb.DataType_UInt32)
+	assert.Nil(t, err)
+	defer insertEvent.Close()
+
+	err = insertEvent.AddUInt64ToPayload([]uint64{1, 1})
+	assert.NotNil(t, err)
+	err = insertEvent.AddUInt32ToPayload([]uint32{1, 2, 3})
+	assert.Nil(t, err)
+	nums, err := insertEvent.GetPayloadLengthFromWriter()
+	assert.Nil(t, err)
+	assert.EqualValues(t, 3, nums)
+	err = insertEvent.Finish()
+	assert.Nil(t, err)
+	length, err := insertEvent.GetMemoryUsageInBytes()
+	assert.Nil(t, err)
+	assert.EqualValues(t, length, insertEvent.EventLength)
+	err = insertEvent.AddUInt32ToPayload([]uint32{1})
+	assert.NotNil(t, err)
+	buffer := new(bytes.Buffer)
+	insertEvent.SetEventTimestamp(100, 200)
+	err = insertEvent.Write(buffer)
+	assert.Nil(t, err)
+	length, err = insertEvent.GetMemoryUsageInBytes()
+	assert.Nil(t, err)
+	assert.EqualValues(t, length, buffer.Len())
+	insertEvent.Close()
+}
+
 func TestReadMagicNumber(t *testing.T) {
 	var err error
 	buf := bytes.Buffer{}

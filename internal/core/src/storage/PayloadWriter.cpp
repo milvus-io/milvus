@@ -76,9 +76,12 @@ PayloadWriter::finish() {
     auto table = arrow::Table::Make(schema_, {array});
     output_ = std::make_shared<storage::PayloadOutputStream>();
     auto mem_pool = arrow::default_memory_pool();
-    ast = parquet::arrow::WriteTable(
-        *table, mem_pool, output_, 1024 * 1024 * 1024,
-        parquet::WriterProperties::Builder().compression(arrow::Compression::ZSTD)->compression_level(3)->build());
+    ast = parquet::arrow::WriteTable(*table, mem_pool, output_, 1024 * 1024 * 1024,
+                                     parquet::WriterProperties::Builder()
+                                         .compression(arrow::Compression::ZSTD)
+                                         ->compression_level(3)
+                                         ->version(parquet::ParquetVersion::PARQUET_2_4)
+                                         ->build());
     AssertInfo(ast.ok(), "write data to output stream failed");
 }
 
