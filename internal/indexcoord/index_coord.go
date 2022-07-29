@@ -19,6 +19,7 @@ package indexcoord
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/rand"
 	"os"
 	"sync"
@@ -55,7 +56,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -378,18 +378,6 @@ func (i *IndexCoord) GetComponentStates(ctx context.Context) (*internalpb.Compon
 	return ret, nil
 }
 
-// GetTimeTickChannel gets the time tick channel of IndexCoord.
-func (i *IndexCoord) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	log.Debug("get IndexCoord time tick channel ...")
-	return &milvuspb.StringResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
-		Value: "",
-	}, nil
-}
-
 // GetStatisticsChannel gets the statistics channel of IndexCoord.
 func (i *IndexCoord) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	log.Debug("get IndexCoord statistics channel ...")
@@ -406,7 +394,7 @@ func (i *IndexCoord) GetStatisticsChannel(ctx context.Context) (*milvuspb.String
 // Index building is asynchronous, so when an index building request comes, an IndexBuildID is assigned to the task and
 // the task is recorded in Meta. The background process assignTaskLoop will find this task and assign it to IndexNode for
 // execution.
-func (i *IndexCoord) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*commonpb.Status, error) {
+func (i *IndexCoord) BuildIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
 	if !i.isHealthy() {
 		errMsg := "IndexCoord is not healthy"
 		err := errors.New(errMsg)
@@ -471,7 +459,9 @@ func (i *IndexCoord) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequ
 
 // GetIndexStates gets the index states from IndexCoord.
 func (i *IndexCoord) GetIndexStates(ctx context.Context, req *indexpb.GetIndexStatesRequest) (*indexpb.GetIndexStatesResponse, error) {
-	log.Debug("IndexCoord get index states", zap.Int64s("IndexBuildIDs", req.IndexBuildIDs))
+	log.Info("IndexCoord get index state", zap.Int64("collectionID", req.CollectionID),
+		zap.Int64("fieldID", req.FieldID), zap.String("indexName", req.IndexName))
+
 	if !i.isHealthy() {
 		errMsg := "IndexCoord is not healthy"
 		log.Warn(errMsg)
@@ -482,48 +472,46 @@ func (i *IndexCoord) GetIndexStates(ctx context.Context, req *indexpb.GetIndexSt
 			},
 		}, nil
 	}
-	sp, _ := trace.StartSpanFromContextWithOperationName(ctx, "IndexCoord-BuildIndex")
-	defer sp.Finish()
-	var (
-		cntNone       = 0
-		cntUnissued   = 0
-		cntInprogress = 0
-		cntFinished   = 0
-		cntFailed     = 0
-	)
-	indexStates := i.metaTable.GetIndexStates(req.IndexBuildIDs)
-	for _, state := range indexStates {
-		switch state.State {
-		case commonpb.IndexState_IndexStateNone:
-			cntNone++
-		case commonpb.IndexState_Unissued:
-			cntUnissued++
-		case commonpb.IndexState_InProgress:
-			cntInprogress++
-		case commonpb.IndexState_Finished:
-			cntFinished++
-		case commonpb.IndexState_Failed:
-			cntFailed++
-		}
-	}
-	log.Debug("IndexCoord get index states success",
-		zap.Int("total", len(indexStates)), zap.Int("None", cntNone), zap.Int("Unissued", cntUnissued),
-		zap.Int("InProgress", cntInprogress), zap.Int("Finished", cntFinished), zap.Int("Failed", cntFailed))
 
+	indexID, createTs := i.metaTable.GetIndexIDByName(req.CollectionID, req.FieldID, req.IndexName)
+	if indexID == 0 {
+		errMsg := fmt.Sprintf("there is no index on collection: %d with the index name: %s", req.CollectionID, req.IndexName)
+		log.Error("IndexCoord get index state fail", zap.Int64("collectionID", req.CollectionID),
+			zap.Int64("fieldID", req.FieldID), zap.String("indexName", req.IndexName), zap.String("fail reason", errMsg))
+		return &indexpb.GetIndexStatesResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    errMsg,
+			},
+		}, nil
+	}
+
+	indexStates := i.metaTable.GetIndexStates(indexID, createTs)
 	ret := &indexpb.GetIndexStatesResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
-		States: indexStates,
+		State: commonpb.IndexState_Finished,
 	}
+	for _, state := range indexStates {
+		if state.IndexState != commonpb.IndexState_Finished {
+			ret.State = state.IndexState
+			ret.FailReason = state.FailReason
+			break
+		}
+	}
+	log.Info("IndexCoord get index state success", zap.Int64("collectionID", req.CollectionID),
+		zap.Int64("fieldID", req.FieldID), zap.String("indexName", req.IndexName),
+		zap.String("state", ret.State.String()))
 	return ret, nil
 }
 
-// DropIndex deletes indexes based on IndexID. One IndexID corresponds to the index of an entire column. A column is
+// DropIndex deletes indexes based on IndexName. One IndexName corresponds to the index of an entire column. A column is
 // divided into many segments, and each segment corresponds to an IndexBuildID. IndexCoord uses IndexBuildID to record
-// index tasks. Therefore, when DropIndex, delete all tasks corresponding to IndexBuildID corresponding to IndexID.
+// index tasks.
 func (i *IndexCoord) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
-	log.Debug("IndexCoord DropIndex", zap.Int64("IndexID", req.IndexID))
+	log.Info("IndexCoord DropIndex", zap.Int64("collectionID", req.CollectionID),
+		zap.Int64("fieldID", req.FieldID), zap.String("indexName", req.IndexName))
 	if !i.isHealthy() {
 		errMsg := "IndexCoord is not healthy"
 		log.Warn(errMsg)
@@ -532,39 +520,30 @@ func (i *IndexCoord) DropIndex(ctx context.Context, req *indexpb.DropIndexReques
 			Reason:    errMsg,
 		}, nil
 	}
-	sp, _ := trace.StartSpanFromContextWithOperationName(ctx, "IndexCoord-BuildIndex")
-	defer sp.Finish()
 
 	ret := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}
-	buildIDs, err := i.metaTable.MarkIndexAsDeleted(req.IndexID)
+
+	indexID, _ := i.metaTable.GetIndexIDByName(req.CollectionID, req.FieldID, req.IndexName)
+	if indexID == 0 {
+		log.Warn(fmt.Sprintf("there is no index on collection: %d with the index name: %s", req.CollectionID, req.IndexName))
+		return ret, nil
+	}
+	err := i.metaTable.MarkIndexAsDeleted(req.CollectionID, indexID)
 	if err != nil {
 		ret.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		ret.Reason = err.Error()
 		return ret, nil
 	}
-	log.Info("these buildIDs has been deleted", zap.Int64("indexID", req.IndexID), zap.Int64s("buildIDs", buildIDs))
-	for _, buildID := range buildIDs {
-		i.indexBuilder.markTaskAsDeleted(buildID)
-	}
 
-	defer func() {
-		go func() {
-			unissuedIndexBuildIDs := i.sched.IndexAddQueue.tryToRemoveUselessIndexAddTask(req.IndexID)
-			for _, indexBuildID := range unissuedIndexBuildIDs {
-				i.metaTable.DeleteIndex(indexBuildID)
-			}
-		}()
-	}()
-
-	log.Debug("IndexCoord DropIndex success", zap.Int64("IndexID", req.IndexID))
+	log.Info("IndexCoord DropIndex success", zap.Int64("indexID", indexID))
 	return ret, nil
 }
 
 // GetIndexFilePaths gets the index file paths from IndexCoord.
 func (i *IndexCoord) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error) {
-	log.Debug("IndexCoord GetIndexFilePaths", zap.Int("number of IndexBuildIds", len(req.IndexBuildIDs)))
+	log.Debug("IndexCoord GetIndexFilePaths", zap.String("indexName", req.IndexName), zap.Int64s("segmentIDs", req.SegmentIDs))
 	if !i.isHealthy() {
 		errMsg := "IndexCoord is not healthy"
 		log.Warn(errMsg)
@@ -576,14 +555,24 @@ func (i *IndexCoord) GetIndexFilePaths(ctx context.Context, req *indexpb.GetInde
 			FilePaths: nil,
 		}, nil
 	}
-	sp, _ := trace.StartSpanFromContextWithOperationName(ctx, "IndexCoord-BuildIndex")
-	defer sp.Finish()
-	var indexPaths []*indexpb.IndexFilePathInfo
 
-	for _, buildID := range req.IndexBuildIDs {
-		indexPathInfo, err := i.metaTable.GetIndexFilePathInfo(buildID)
+	indexID, _ := i.metaTable.GetIndexIDByName(req.CollectionID, req.FieldID, req.IndexName)
+	if indexID == 0 {
+		errMsg := fmt.Sprintf("there is no index on collection: %d with the index name: %s", req.CollectionID, req.IndexName)
+		log.Error("IndexCoord get index state fail", zap.Int64("collectionID", req.CollectionID),
+			zap.Int64("fieldID", req.FieldID), zap.String("indexName", req.IndexName), zap.String("fail reason", errMsg))
+		return &indexpb.GetIndexFilePathsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    errMsg,
+			},
+		}, nil
+	}
+	var indexPaths []*indexpb.IndexFilePathInfo
+	for _, segID := range req.SegmentIDs {
+		indexPathInfo, err := i.metaTable.GetIndexFilePathInfo(segID, indexID)
 		if err != nil {
-			log.Warn("IndexCoord GetIndexFilePaths failed", zap.Int64("indexBuildID", buildID), zap.Error(err))
+			log.Error("IndexCoord GetIndexFilePaths fail", zap.Int64("segmentID", segID), zap.Error(err))
 			return &indexpb.GetIndexFilePathsResponse{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -600,7 +589,8 @@ func (i *IndexCoord) GetIndexFilePaths(ctx context.Context, req *indexpb.GetInde
 		},
 		FilePaths: indexPaths,
 	}
-	log.Debug("IndexCoord GetIndexFilePaths ", zap.Int("indexBuildIDs num", len(req.IndexBuildIDs)), zap.Int("file path num", len(ret.FilePaths)))
+	log.Info("IndexCoord GetIndexFilePaths ", zap.Int("segIDs num", len(req.SegmentIDs)),
+		zap.Int("file path num", len(ret.FilePaths)))
 
 	return ret, nil
 }
@@ -805,7 +795,7 @@ func (i *IndexCoord) tryReleaseSegmentReferLock(ctx context.Context, buildID Uni
 
 // assignTask sends the index task to the IndexNode, it has a timeout interval, if the IndexNode doesn't respond within
 // the interval, it is considered that the task sending failed.
-func (i *IndexCoord) assignTask(builderClient types.IndexNode, req *indexpb.CreateIndexRequest) error {
+func (i *IndexCoord) assignTask(builderClient types.IndexNode, req *indexpb.BuildIndexRequest) error {
 	ctx, cancel := context.WithTimeout(i.loopCtx, i.reqTimeoutInterval)
 	defer cancel()
 	resp, err := builderClient.CreateIndex(ctx, req)
@@ -857,6 +847,7 @@ func (i *IndexCoord) createIndex(segIdx *model.SegmentIndex) error {
 		return err
 	}
 	i.indexBuilder.enqueue(t.segmentIndex.BuildID)
+	metrics.IndexCoordIndexRequestCounter.WithLabelValues(metrics.SuccessLabel).Inc()
 
 	return nil
 }

@@ -305,11 +305,11 @@ type DataCoordComponent interface {
 // IndexNode is the interface `indexnode` package implements
 type IndexNode interface {
 	Component
-	TimeTickProvider
+	//TimeTickProvider
 
-	// CreateIndex receives request from IndexCoordinator to build an index.
+	// BuildIndex receives request from IndexCoordinator to build an index.
 	// Index building is asynchronous, so when an index building request comes, IndexNode records the task and returns.
-	CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error)
+	BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*commonpb.Status, error)
 	GetTaskSlots(ctx context.Context, req *indexpb.GetTaskSlotsRequest) (*indexpb.GetTaskSlotsResponse, error)
 
 	// GetMetrics gets the metrics about IndexNode.
@@ -331,13 +331,13 @@ type IndexNodeComponent interface {
 // IndexCoord is the interface `indexcoord` package implements
 type IndexCoord interface {
 	Component
-	TimeTickProvider
+	//TimeTickProvider
 
 	// BuildIndex receives request from RootCoordinator to build an index.
 	// Index building is asynchronous, so when an index building request comes, an IndexBuildID is assigned to the task and
 	// the task is recorded in Meta. The background process assignTaskLoop will find this task and assign it to IndexNode for
 	// execution.
-	BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error)
+	BuildIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error)
 
 	// DropIndex deletes indexes based on IndexID. One IndexID corresponds to the index of an entire column. A column is
 	// divided into many segments, and each segment corresponds to an IndexBuildID. IndexCoord uses IndexBuildID to record
@@ -352,9 +352,6 @@ type IndexCoord interface {
 
 	// GetMetrics gets the metrics about IndexCoord.
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
-
-	// RemoveIndex removes the index on specify segments.
-	RemoveIndex(ctx context.Context, req *indexpb.RemoveIndexRequest) (*commonpb.Status, error)
 }
 
 // IndexCoordComponent is used by grpc server of IndexCoord

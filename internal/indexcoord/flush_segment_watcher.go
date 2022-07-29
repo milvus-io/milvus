@@ -61,6 +61,7 @@ func newFlushSegmentWatcher(ctx context.Context, kv kv.MetaKv) (*flushedSegmentW
 
 func (fsw *flushedSegmentWatcher) reloadFromKV() error {
 	log.Info("flushSegmentWatcher reloadFromKV")
+	fsw.flushedSegments = make(map[UniqueID]*datapb.SegmentInfo)
 	_, values, version, err := fsw.kvClient.LoadWithRevision(flushedSegmentPrefix)
 	if err != nil {
 		log.Error("flushSegmentWatcher reloadFromKV fail", zap.String("prefix", flushedSegmentPrefix), zap.Error(err))

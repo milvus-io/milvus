@@ -1,6 +1,7 @@
 package model
 
 import (
+	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 )
@@ -97,4 +98,23 @@ func MergeIndexModel(a *Index, b *Index) *Index {
 	}
 
 	return &newIdx
+}
+
+func CloneIndex(index *Index) *Index {
+	clonedIndex := &Index{
+		CollectionID: index.CollectionID,
+		FieldID:      index.FieldID,
+		IndexID:      index.IndexID,
+		IndexName:    index.IndexName,
+		IsDeleted:    index.IsDeleted,
+		CreateTime:   index.CreateTime,
+		TypeParams:   make([]*commonpb.KeyValuePair, len(index.TypeParams)),
+		IndexParams:  make([]*commonpb.KeyValuePair, len(index.IndexParams)),
+	}
+	for i, param := range index.TypeParams {
+		clonedIndex.TypeParams[i] = proto.Clone(param).(*commonpb.KeyValuePair)
+	}
+	for i, param := range index.IndexParams {
+		clonedIndex.IndexParams[i] = proto.Clone(param).(*commonpb.KeyValuePair)
+	}
 }

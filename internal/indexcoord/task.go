@@ -86,7 +86,7 @@ type CreateIndexTask struct {
 	BaseTask
 	dataCoordClient  types.DataCoord
 	indexCoordClient *IndexCoord
-	req              *indexpb.BuildIndexRequest
+	req              *indexpb.CreateIndexRequest
 	indexID          UniqueID
 	createTs         uint64
 	idAllocator      *allocator.GlobalIDAllocator

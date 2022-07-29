@@ -137,12 +137,12 @@ func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 }
 
 // CreateIndex sends the build index request to IndexNode.
-func (c *Client) CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
+func (c *Client) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*commonpb.Status, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(indexpb.IndexNodeClient).CreateIndex(ctx, req)
+		return client.(indexpb.IndexNodeClient).BuildIndex(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err

@@ -20,6 +20,8 @@ import (
 	"context"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/metastore/model"
+
 	grpcindexnodeclient "github.com/milvus-io/milvus/internal/distributed/indexnode/client"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
@@ -101,7 +103,7 @@ func (nm *NodeManager) AddNode(nodeID UniqueID, address string) error {
 }
 
 // PeekClient peeks the client with the least load.
-func (nm *NodeManager) PeekClient(meta *Meta) (UniqueID, types.IndexNode) {
+func (nm *NodeManager) PeekClient(meta *model.SegmentIndex) (UniqueID, types.IndexNode) {
 	log.Info("IndexCoord peek client")
 	allClients := nm.GetAllClients()
 	if len(allClients) == 0 {

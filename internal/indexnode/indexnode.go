@@ -264,9 +264,9 @@ func (i *IndexNode) isHealthy() bool {
 	return code == internalpb.StateCode_Healthy
 }
 
-// CreateIndex receives request from IndexCoordinator to build an index.
+// BuildIndex receives request from IndexCoordinator to build an index.
 // Index building is asynchronous, so when an index building request comes, IndexNode records the task and returns.
-func (i *IndexNode) CreateIndex(ctx context.Context, request *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
+func (i *IndexNode) BuildIndex(ctx context.Context, request *indexpb.BuildIndexRequest) (*commonpb.Status, error) {
 	if i.stateCode.Load().(internalpb.StateCode) != internalpb.StateCode_Healthy {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -274,11 +274,9 @@ func (i *IndexNode) CreateIndex(ctx context.Context, request *indexpb.CreateInde
 		}, nil
 	}
 	log.Info("IndexNode building index ...",
+		zap.Int64("clusterID", request.ClusterID),
 		zap.Int64("IndexBuildID", request.IndexBuildID),
-		zap.String("IndexName", request.IndexName),
-		zap.Int64("IndexID", request.IndexID),
-		zap.Int64("Version", request.Version),
-		zap.String("MetaPath", request.MetaPath),
+		zap.Int64("Version", request.IndexVersion),
 		zap.Int("binlog paths num", len(request.DataPaths)),
 		zap.Any("TypeParams", request.TypeParams),
 		zap.Any("IndexParams", request.IndexParams))

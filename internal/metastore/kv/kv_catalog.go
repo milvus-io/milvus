@@ -352,28 +352,26 @@ func (kc *Catalog) DropPartition(ctx context.Context, collectionInfo *model.Coll
 	return nil
 }
 
-func (kc *Catalog) DropIndex(ctx context.Context, collectionInfo *model.Collection, dropIdxID typeutil.UniqueID, ts typeutil.Timestamp) error {
-	collMeta := model.MarshalCollectionModel(collectionInfo)
-	k := path.Join(CollectionMetaPrefix, strconv.FormatInt(collectionInfo.CollectionID, 10))
-	v, err := proto.Marshal(collMeta)
+func (kc *Catalog) DropIndex(collID typeutil.UniqueID, dropIdxID typeutil.UniqueID) error {
+	key := path.Join(FieldIndexPrefix, strconv.FormatInt(collID, 10),
+		strconv.FormatInt(dropIdxID, 10))
+
+	err := kc.Txn.Remove(key)
 	if err != nil {
-		log.Error("drop index marshal fail", zap.String("key", k), zap.Error(err))
+		log.Error("drop collection index meta fail", zap.Int64("collectionID", collID),
+			zap.Int64("indexID", dropIdxID), zap.Error(err))
 		return err
 	}
 
-	saveMeta := map[string]string{k: string(v)}
+	return nil
+}
 
-	delMeta := []string{
-		fmt.Sprintf("%s/%d/%d", SegmentIndexMetaPrefix, collectionInfo.CollectionID, dropIdxID),
-		fmt.Sprintf("%s/%d/%d", IndexMetaPrefix, collectionInfo.CollectionID, dropIdxID),
-	}
+func (kc *Catalog) DropSegmentIndex(buildID typeutil.UniqueID) error {
+	key := path.Join(SegmentIndexPrefix, strconv.FormatInt(buildID, 10))
 
-	err = kc.Txn.MultiSaveAndRemoveWithPrefix(saveMeta, delMeta)
+	err := kc.Txn.Remove(key)
 	if err != nil {
-		log.Error("drop partition update meta fail",
-			zap.Int64("collectionID", collectionInfo.CollectionID),
-			zap.Int64("indexID", dropIdxID),
-			zap.Error(err))
+		log.Error("drop segment index meta fail", zap.Int64("buildID", buildID), zap.Error(err))
 		return err
 	}
 

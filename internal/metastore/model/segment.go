@@ -26,7 +26,8 @@ type SegmentIndex struct {
 	IndexID        int64
 	BuildID        int64
 	NodeID         int64
-	State          commonpb.IndexState
+	IndexState     commonpb.IndexState
+	FailReason     string
 	IndexVersion   int64
 	IsDeleted      bool
 	CreateTime     uint64
@@ -49,6 +50,8 @@ func UnmarshalSegmentIndexModel(segIndex *indexpb.SegmentIndex) *SegmentIndex {
 		IndexID:        segIndex.IndexID,
 		BuildID:        segIndex.BuildID,
 		NodeID:         segIndex.NodeID,
+		IndexState:     segIndex.State,
+		FailReason:     segIndex.FailReason,
 		IndexVersion:   segIndex.IndexVersion,
 		IsDeleted:      segIndex.Deleted,
 		CreateTime:     segIndex.CreateTime,
@@ -70,11 +73,34 @@ func MarshalSegmentIndexModel(segIdx *SegmentIndex) *indexpb.SegmentIndex {
 		IndexID:         segIdx.IndexID,
 		BuildID:         segIdx.BuildID,
 		NodeID:          segIdx.NodeID,
-		State:           segIdx.State,
+		State:           segIdx.IndexState,
+		FailReason:      segIdx.FailReason,
 		IndexVersion:    segIdx.IndexVersion,
 		IndexFilesPaths: segIdx.IndexFilePaths,
 		Deleted:         segIdx.IsDeleted,
 		CreateTime:      segIdx.CreateTime,
 		SerializeSize:   segIdx.IndexSize,
+	}
+}
+
+func CloneSegmentIndex(segIndex *SegmentIndex) *SegmentIndex {
+	return &SegmentIndex{
+		Segment: Segment{
+			SegmentID:    segIndex.SegmentID,
+			CollectionID: segIndex.CollectionID,
+			PartitionID:  segIndex.PartitionID,
+			NumRows:      segIndex.NumRows,
+			BinLogs:      segIndex.BinLogs,
+		},
+		IndexID:        segIndex.IndexID,
+		BuildID:        segIndex.BuildID,
+		NodeID:         segIndex.NodeID,
+		IndexState:     segIndex.IndexState,
+		FailReason:     segIndex.FailReason,
+		IndexVersion:   segIndex.IndexVersion,
+		IsDeleted:      segIndex.IsDeleted,
+		CreateTime:     segIndex.CreateTime,
+		IndexFilePaths: segIndex.IndexFilePaths,
+		IndexSize:      segIndex.IndexSize,
 	}
 }

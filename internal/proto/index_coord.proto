@@ -10,13 +10,12 @@ import "milvus.proto";
 
 service IndexCoord {
   rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
-  rpc GetTimeTickChannel(internal.GetTimeTickChannelRequest) returns(milvus.StringResponse) {}
   rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
-  rpc BuildIndex(BuildIndexRequest) returns (common.Status){}
+  rpc CreateIndex(CreateIndexRequest) returns (common.Status){}
   rpc GetIndexStates(GetIndexStatesRequest) returns (GetIndexStatesResponse) {}
   rpc GetIndexFilePaths(GetIndexFilePathsRequest) returns (GetIndexFilePathsResponse){}
   rpc DropIndex(DropIndexRequest) returns (common.Status) {}
-  rpc RemoveIndex(RemoveIndexRequest) returns (common.Status) {}
+//  rpc RemoveIndex(RemoveIndexRequest) returns (common.Status) {}
 
   // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
   rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
@@ -24,9 +23,7 @@ service IndexCoord {
 
 service IndexNode {
   rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
-  rpc GetTimeTickChannel(internal.GetTimeTickChannelRequest) returns(milvus.StringResponse) {}
-  rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
-  rpc CreateIndex(CreateIndexRequest) returns (common.Status){}
+  rpc BuildIndex(BuildIndexRequest) returns (common.Status){}
   rpc GetTaskSlots(GetTaskSlotsRequest) returns (GetTaskSlotsResponse){}
 
   // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
@@ -53,12 +50,13 @@ message SegmentIndex {
     int64 indexID = 5;
     int64 buildID = 6;
     int64 nodeID = 7;
-    common.IndexState state = 8;
-    int64 index_version = 9;
-    repeated string index_files_paths = 10;
-    bool deleted = 11;
-    uint64 create_time = 12;
-    uint64 serialize_size = 13;
+  int64 index_version = 8;
+  common.IndexState state = 9;
+    string fail_reason = 10;
+    repeated string index_files_paths = 11;
+    bool deleted = 12;
+    uint64 create_time = 13;
+    uint64 serialize_size = 14;
 }
 
 message RegisterNodeRequest {
@@ -73,26 +71,18 @@ message RegisterNodeResponse {
 }
 
 message GetIndexStatesRequest {
-  repeated int64 indexBuildIDs = 1;
+  int64 collectionID = 1;
+  int64 fieldID = 2;
+  string index_name = 3;
 }
 
 message GetIndexStatesResponse {
   common.Status status = 1;
   common.IndexState state = 2;
+  string fail_reason = 3;
 }
 
 message CreateIndexRequest {
-  int64 indexBuildID = 1;
-  string index_name = 2;
-  int64 indexID = 3;
-  int64 version = 4;
-  string meta_path = 5;
-  repeated string data_paths = 6;
-  repeated common.KeyValuePair type_params = 7;
-  repeated common.KeyValuePair index_params = 8;
-}
-
-message BuildIndexRequest {
   int64 collectionID = 1;
   int64 fieldID = 2;
   string index_name = 3;
@@ -101,13 +91,15 @@ message BuildIndexRequest {
 }
 
 message GetIndexFilePathsRequest {
-  repeated int64 segmentIDs = 1;
-  string index_name = 2;
+  int64 collectionID = 1;
+  int64 fieldID = 2;
+  repeated int64 segmentIDs = 3;
+  string index_name = 4;
 }
 
 message IndexFilePathInfo {
   common.Status status = 1;
-  int64 indexBuildID = 2;
+  int64 segmentID = 2;
   repeated string index_file_paths = 3;
   uint64 serialized_size = 4;
 }
@@ -123,8 +115,13 @@ message DropIndexRequest {
   string index_name = 3;
 }
 
-message RemoveIndexRequest {
-  repeated int64 buildIDs = 1;
+message BuildIndexRequest {
+  int64 clusterID = 1;
+  int64 indexBuildID = 2;
+  int64 index_version = 3;
+  repeated string data_paths = 4;
+  repeated common.KeyValuePair type_params = 5;
+  repeated common.KeyValuePair index_params = 6;
 }
 
 message GetTaskSlotsRequest {
