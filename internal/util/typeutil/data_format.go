@@ -143,6 +143,20 @@ func TransferColumnBasedDataToRowBasedData(schema *schemapb.CollectionSchema, co
 				if err != nil {
 					return nil, err
 				}
+			case *schemapb.ScalarField_UintData:
+				err := appendScalarField(&data, &rowNum, func() interface{} {
+					return scalarField.GetUintData().Data
+				})
+				if err != nil {
+					return nil, err
+				}
+			case *schemapb.ScalarField_UlongData:
+				err := appendScalarField(&data, &rowNum, func() interface{} {
+					return scalarField.GetUlongData().Data
+				})
+				if err != nil {
+					return nil, err
+				}
 			case *schemapb.ScalarField_FloatData:
 				err := appendScalarField(&data, &rowNum, func() interface{} {
 					return scalarField.GetFloatData().Data
@@ -228,6 +242,18 @@ func parseToRowData(data [][]any, dTypes []schemapb.DataType, rowNum int) ([]*co
 				err = binary.Write(&buffer, endian, d)
 			case schemapb.DataType_Int64:
 				d := data[j][i].(int64)
+				err = binary.Write(&buffer, endian, d)
+			case schemapb.DataType_UInt8:
+				d := uint8(data[j][i].(uint32))
+				err = binary.Write(&buffer, endian, d)
+			case schemapb.DataType_UInt16:
+				d := uint16(data[j][i].(uint32))
+				err = binary.Write(&buffer, endian, d)
+			case schemapb.DataType_UInt32:
+				d := data[j][i].(uint32)
+				err = binary.Write(&buffer, endian, d)
+			case schemapb.DataType_UInt64:
+				d := data[j][i].(uint64)
 				err = binary.Write(&buffer, endian, d)
 			case schemapb.DataType_Float:
 				d := data[j][i].(float32)

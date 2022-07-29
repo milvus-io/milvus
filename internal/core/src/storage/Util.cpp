@@ -89,6 +89,26 @@ AddPayloadToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder, const Pay
             add_numeric_payload<int64_t, arrow::Int64Builder>(builder, int64_data, length);
             break;
         }
+        case DataType::UINT8: {
+            auto uint8_data = reinterpret_cast<uint8_t*>(raw_data);
+            add_numeric_payload<uint8_t, arrow::UInt8Builder>(builder, uint8_data, length);
+            break;
+        }
+        case DataType::UINT16: {
+            auto uint16_data = reinterpret_cast<uint16_t*>(raw_data);
+            add_numeric_payload<uint16_t, arrow::UInt16Builder>(builder, uint16_data, length);
+            break;
+        }
+        case DataType::UINT32: {
+            auto uint32_data = reinterpret_cast<uint32_t*>(raw_data);
+            add_numeric_payload<uint32_t, arrow::UInt32Builder>(builder, uint32_data, length);
+            break;
+        }
+        case DataType::UINT64: {
+            auto uint64_data = reinterpret_cast<uint64_t*>(raw_data);
+            add_numeric_payload<uint64_t, arrow::UInt64Builder>(builder, uint64_data, length);
+            break;
+        }
         case DataType::FLOAT: {
             auto float_data = reinterpret_cast<float*>(raw_data);
             add_numeric_payload<float, arrow::FloatBuilder>(builder, float_data, length);
@@ -141,6 +161,18 @@ CreateArrowBuilder(DataType data_type) {
         case DataType::INT64: {
             return std::make_shared<arrow::Int64Builder>();
         }
+        case DataType::UINT8: {
+            return std::make_shared<arrow::UInt8Builder>();
+        }
+        case DataType::UINT16: {
+            return std::make_shared<arrow::UInt16Builder>();
+        }
+        case DataType::UINT32: {
+            return std::make_shared<arrow::UInt32Builder>();
+        }
+        case DataType::UINT64: {
+            return std::make_shared<arrow::UInt64Builder>();
+        }
         case DataType::FLOAT: {
             return std::make_shared<arrow::FloatBuilder>();
         }
@@ -192,6 +224,18 @@ CreateArrowSchema(DataType data_type) {
         case DataType::INT64: {
             return arrow::schema({arrow::field("val", arrow::int64())});
         }
+        case DataType::UINT8: {
+            return arrow::schema({arrow::field("val", arrow::uint8())});
+        }
+        case DataType::UINT16: {
+            return arrow::schema({arrow::field("val", arrow::uint16())});
+        }
+        case DataType::UINT32: {
+            return arrow::schema({arrow::field("val", arrow::uint32())});
+        }
+        case DataType::UINT64: {
+            return arrow::schema({arrow::field("val", arrow::uint64())});
+        }
         case DataType::FLOAT: {
             return arrow::schema({arrow::field("val", arrow::float32())});
         }
@@ -239,6 +283,14 @@ GetPayloadSize(const Payload* payload) {
             return payload->rows * sizeof(int32_t);
         case DataType::INT64:
             return payload->rows * sizeof(int64_t);
+        case DataType::UINT8:
+            return payload->rows * sizeof(uint8_t);
+        case DataType::UINT16:
+            return payload->rows * sizeof(uint16_t);
+        case DataType::UINT32:
+            return payload->rows * sizeof(uint32_t);
+        case DataType::UINT64:
+            return payload->rows * sizeof(uint64_t);
         case DataType::FLOAT:
             return payload->rows * sizeof(float);
         case DataType::DOUBLE:
@@ -277,6 +329,26 @@ GetRawValuesFromArrowArray(std::shared_ptr<arrow::Array> data, DataType data_typ
         case DataType::INT64: {
             AssertInfo(data->type()->id() == arrow::Type::type::INT64, "inconsistent data type");
             auto array = std::dynamic_pointer_cast<arrow::Int64Array>(data);
+            return reinterpret_cast<const uint8_t*>(array->raw_values());
+        }
+        case DataType::UINT8: {
+            AssertInfo(data->type()->id() == arrow::Type::type::UINT8, "inconsistent data type");
+            auto array = std::dynamic_pointer_cast<arrow::UInt8Array>(data);
+            return reinterpret_cast<const uint8_t*>(array->raw_values());
+        }
+        case DataType::UINT16: {
+            AssertInfo(data->type()->id() == arrow::Type::type::UINT16, "inconsistent data type");
+            auto array = std::dynamic_pointer_cast<arrow::UInt16Array>(data);
+            return reinterpret_cast<const uint8_t*>(array->raw_values());
+        }
+        case DataType::UINT32: {
+            AssertInfo(data->type()->id() == arrow::Type::type::UINT32, "inconsistent data type");
+            auto array = std::dynamic_pointer_cast<arrow::UInt32Array>(data);
+            return reinterpret_cast<const uint8_t*>(array->raw_values());
+        }
+        case DataType::UINT64: {
+            AssertInfo(data->type()->id() == arrow::Type::type::UINT64, "inconsistent data type");
+            auto array = std::dynamic_pointer_cast<arrow::UInt64Array>(data);
             return reinterpret_cast<const uint8_t*>(array->raw_values());
         }
         case DataType::FLOAT: {

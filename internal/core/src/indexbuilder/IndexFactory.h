@@ -49,6 +49,10 @@ class IndexFactory {
             case DataType::INT16:
             case DataType::INT32:
             case DataType::INT64:
+            case DataType::UINT8:
+            case DataType::UINT16:
+            case DataType::UINT32:
+            case DataType::UINT64:
             case DataType::FLOAT:
             case DataType::DOUBLE:
             case DataType::VARCHAR:

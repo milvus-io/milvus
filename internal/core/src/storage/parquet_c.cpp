@@ -91,6 +91,30 @@ AddInt64ToPayload(CPayloadWriter payloadWriter, int64_t* values, int length) {
 }
 
 extern "C" CStatus
+AddUInt8ToPayload(CPayloadWriter payloadWriter, uint8_t* values, int length) {
+    auto raw_data_info = Payload{milvus::DataType::UINT8, reinterpret_cast<const uint8_t*>(values), length};
+    return AddValuesToPayload(payloadWriter, raw_data_info);
+}
+
+extern "C" CStatus
+AddUInt16ToPayload(CPayloadWriter payloadWriter, uint16_t* values, int length) {
+    auto raw_data_info = Payload{milvus::DataType::UINT16, reinterpret_cast<const uint8_t*>(values), length};
+    return AddValuesToPayload(payloadWriter, raw_data_info);
+}
+
+extern "C" CStatus
+AddUInt32ToPayload(CPayloadWriter payloadWriter, uint32_t* values, int length) {
+    auto raw_data_info = Payload{milvus::DataType::UINT32, reinterpret_cast<const uint8_t*>(values), length};
+    return AddValuesToPayload(payloadWriter, raw_data_info);
+}
+
+extern "C" CStatus
+AddUInt64ToPayload(CPayloadWriter payloadWriter, uint64_t* values, int length) {
+    auto raw_data_info = Payload{milvus::DataType::UINT64, reinterpret_cast<const uint8_t*>(values), length};
+    return AddValuesToPayload(payloadWriter, raw_data_info);
+}
+
+extern "C" CStatus
 AddFloatToPayload(CPayloadWriter payloadWriter, float* values, int length) {
     auto raw_data_info = Payload{milvus::DataType::FLOAT, reinterpret_cast<const uint8_t*>(values), length};
     return AddValuesToPayload(payloadWriter, raw_data_info);
@@ -188,6 +212,10 @@ NewPayloadReader(int columnType, uint8_t* buffer, int64_t buf_size) {
         case milvus::DataType::INT16:
         case milvus::DataType::INT32:
         case milvus::DataType::INT64:
+        case milvus::DataType::UINT8:
+        case milvus::DataType::UINT16:
+        case milvus::DataType::UINT32:
+        case milvus::DataType::UINT64:
         case milvus::DataType::FLOAT:
         case milvus::DataType::DOUBLE:
         case milvus::DataType::STRING:
@@ -200,7 +228,6 @@ NewPayloadReader(int columnType, uint8_t* buffer, int64_t buf_size) {
             return nullptr;
         }
     }
-
     auto p = std::make_unique<PayloadReader>(buffer, buf_size, column_type);
     return reinterpret_cast<CPayloadReader>(p.release());
 }
@@ -265,6 +292,62 @@ GetInt64FromPayload(CPayloadReader payloadReader, int64_t** values, int* length)
         auto ret = p->get_payload();
         auto raw_data = const_cast<uint8_t*>(ret->raw_data);
         *values = reinterpret_cast<int64_t*>(raw_data);
+        *length = ret->rows;
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(UnexpectedError, e.what());
+    }
+}
+
+extern "C" CStatus
+GetUInt8FromPayload(CPayloadReader payloadReader, uint8_t** values, int* length) {
+    try {
+        auto p = reinterpret_cast<PayloadReader*>(payloadReader);
+        auto ret = p->get_payload();
+        auto raw_data = const_cast<uint8_t*>(ret->raw_data);
+        *values = reinterpret_cast<uint8_t*>(raw_data);
+        *length = ret->rows;
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(UnexpectedError, e.what());
+    }
+}
+
+extern "C" CStatus
+GetUInt16FromPayload(CPayloadReader payloadReader, uint16_t** values, int* length) {
+    try {
+        auto p = reinterpret_cast<PayloadReader*>(payloadReader);
+        auto ret = p->get_payload();
+        auto raw_data = const_cast<uint8_t*>(ret->raw_data);
+        *values = reinterpret_cast<uint16_t*>(raw_data);
+        *length = ret->rows;
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(UnexpectedError, e.what());
+    }
+}
+
+extern "C" CStatus
+GetUInt32FromPayload(CPayloadReader payloadReader, uint32_t** values, int* length) {
+    try {
+        auto p = reinterpret_cast<PayloadReader*>(payloadReader);
+        auto ret = p->get_payload();
+        auto raw_data = const_cast<uint8_t*>(ret->raw_data);
+        *values = reinterpret_cast<uint32_t*>(raw_data);
+        *length = ret->rows;
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(UnexpectedError, e.what());
+    }
+}
+
+extern "C" CStatus
+GetUInt64FromPayload(CPayloadReader payloadReader, uint64_t** values, int* length) {
+    try {
+        auto p = reinterpret_cast<PayloadReader*>(payloadReader);
+        auto ret = p->get_payload();
+        auto raw_data = const_cast<uint8_t*>(ret->raw_data);
+        *values = reinterpret_cast<uint64_t*>(raw_data);
         *length = ret->rows;
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {

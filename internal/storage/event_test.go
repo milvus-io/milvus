@@ -255,6 +255,70 @@ func TestInsertEvent(t *testing.T) {
 			[]int64{1, 2, 3, 4, 5, 6})
 	})
 
+	t.Run("insert_uint8", func(t *testing.T) {
+		w, err := newInsertEventWriter(schemapb.DataType_UInt8)
+		assert.Nil(t, err)
+		insertT(t, schemapb.DataType_UInt8, w,
+			func(w *insertEventWriter) error {
+				return w.AddDataToPayload([]uint8{1, 2, 3})
+			},
+			func(w *insertEventWriter) error {
+				return w.AddDataToPayload([]uint8{4, 5, 6})
+			},
+			func(w *insertEventWriter) error {
+				return w.AddDataToPayload([]uint{1, 2, 3, 4, 5})
+			},
+			[]uint8{1, 2, 3, 4, 5, 6})
+	})
+
+	t.Run("insert_uint16", func(t *testing.T) {
+		w, err := newInsertEventWriter(schemapb.DataType_UInt16)
+		assert.Nil(t, err)
+		insertT(t, schemapb.DataType_UInt16, w,
+			func(w *insertEventWriter) error {
+				return w.AddDataToPayload([]uint16{1, 2, 3})
+			},
+			func(w *insertEventWriter) error {
+				return w.AddDataToPayload([]uint16{4, 5, 6})
+			},
+			func(w *insertEventWriter) error {
+				return w.AddDataToPayload([]uint{1, 2, 3, 4, 5})
+			},
+			[]uint16{1, 2, 3, 4, 5, 6})
+	})
+
+	t.Run("insert_uint32", func(t *testing.T) {
+		w, err := newInsertEventWriter(schemapb.DataType_UInt32)
+		assert.Nil(t, err)
+		insertT(t, schemapb.DataType_UInt32, w,
+			func(w *insertEventWriter) error {
+				return w.AddDataToPayload([]uint32{1, 2, 3})
+			},
+			func(w *insertEventWriter) error {
+				return w.AddDataToPayload([]uint32{4, 5, 6})
+			},
+			func(w *insertEventWriter) error {
+				return w.AddDataToPayload([]uint{1, 2, 3, 4, 5})
+			},
+			[]uint32{1, 2, 3, 4, 5, 6})
+	})
+
+	t.Run("insert_uint64", func(t *testing.T) {
+		w, err := newInsertEventWriter(schemapb.DataType_UInt64)
+		assert.Nil(t, err)
+		insertT(t, schemapb.DataType_UInt64, w,
+			func(w *insertEventWriter) error {
+				return w.AddDataToPayload([]uint64{1, 2, 3})
+			},
+			func(w *insertEventWriter) error {
+				return w.AddDataToPayload([]uint64{4, 5, 6})
+			},
+			func(w *insertEventWriter) error {
+				return w.AddDataToPayload([]uint{1, 2, 3, 4, 5})
+			},
+			[]uint64{1, 2, 3, 4, 5, 6})
+	})
+
 	t.Run("insert_float32", func(t *testing.T) {
 		w, err := newInsertEventWriter(schemapb.DataType_Float)
 		assert.Nil(t, err)

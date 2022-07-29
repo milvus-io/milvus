@@ -20,6 +20,7 @@
 #include "storage/parquet_c.h"
 #include "storage/PayloadReader.h"
 #include "storage/PayloadWriter.h"
+#include "storage/Util.h"
 
 namespace wrapper = milvus::storage;
 
@@ -122,7 +123,7 @@ TEST(storage, boolean) {
 #define NUMERIC_TEST(TEST_NAME, COLUMN_TYPE, DATA_TYPE, ADD_FUNC, GET_FUNC, ARRAY_TYPE) \
     TEST(wrapper, TEST_NAME) {                                                          \
         auto payload = NewPayloadWriter(COLUMN_TYPE);                                   \
-        DATA_TYPE data[] = {-1, 1, -100, 100};                                          \
+        DATA_TYPE data[] = {DATA_TYPE(-1), 1, 101, 100};                                \
                                                                                         \
         auto st = ADD_FUNC(payload, data, 4);                                           \
         ASSERT_EQ(st.error_code, ErrorCode::Success);                                   \
@@ -156,6 +157,13 @@ NUMERIC_TEST(int8, int(milvus::DataType::INT8), int8_t, AddInt8ToPayload, GetInt
 NUMERIC_TEST(int16, int(milvus::DataType::INT16), int16_t, AddInt16ToPayload, GetInt16FromPayload, arrow::Int16Array)
 NUMERIC_TEST(int32, int(milvus::DataType::INT32), int32_t, AddInt32ToPayload, GetInt32FromPayload, arrow::Int32Array)
 NUMERIC_TEST(int64, int(milvus::DataType::INT64), int64_t, AddInt64ToPayload, GetInt64FromPayload, arrow::Int64Array)
+NUMERIC_TEST(uint8, int(milvus::DataType::UINT8), uint8_t, AddUInt8ToPayload, GetUInt8FromPayload, arrow::UInt8Array)
+NUMERIC_TEST(
+    uint16, int(milvus::DataType::UINT16), uint16_t, AddUInt16ToPayload, GetUInt16FromPayload, arrow::UInt16Array)
+NUMERIC_TEST(
+    uint32, int(milvus::DataType::UINT32), uint32_t, AddUInt32ToPayload, GetUInt32FromPayload, arrow::UInt32Array)
+NUMERIC_TEST(
+    uint64, int(milvus::DataType::UINT64), uint64_t, AddUInt64ToPayload, GetUInt64FromPayload, arrow::UInt64Array)
 NUMERIC_TEST(float32, int(milvus::DataType::FLOAT), float, AddFloatToPayload, GetFloatFromPayload, arrow::FloatArray)
 NUMERIC_TEST(
     float64, int(milvus::DataType::DOUBLE), double, AddDoubleToPayload, GetDoubleFromPayload, arrow::DoubleArray)

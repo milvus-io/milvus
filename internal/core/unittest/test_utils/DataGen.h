@@ -87,6 +87,19 @@ struct GeneratedData {
                     std::copy_n(src_data, raw_->num_rows(), ret.data());
                     break;
                 }
+                case DataType::UINT8:
+                case DataType::UINT16:
+                case DataType::UINT32: {
+                    auto src_data =
+                        reinterpret_cast<const uint32_t*>(target_field_data.scalars().uint_data().data().data());
+                    std::copy_n(src_data, raw_->num_rows(), ret.data());
+                    break;
+                }
+                case DataType::UINT64: {
+                    auto src_data = reinterpret_cast<const T*>(target_field_data.scalars().ulong_data().data().data());
+                    std::copy_n(src_data, raw_->num_rows(), ret.data());
+                    break;
+                }
                 case DataType::FLOAT: {
                     auto src_data = reinterpret_cast<const T*>(target_field_data.scalars().float_data().data().data());
                     std::copy_n(src_data, raw_->num_rows(), ret.data());
@@ -208,6 +221,38 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42, uint64_t ts_offset = 0,
             }
             case DataType::INT8: {
                 vector<int8_t> data(N);
+                for (auto& x : data) {
+                    x = er() % (2 * N);
+                }
+                insert_cols(data, N, field_meta);
+                break;
+            }
+            case DataType::UINT64: {
+                vector<uint64_t> data(N);
+                for (int i = 0; i < N; i++) {
+                    data[i] = i / repeat_count;
+                }
+                insert_cols(data, N, field_meta);
+                break;
+            }
+            case DataType::UINT32: {
+                vector<uint> data(N);
+                for (auto& x : data) {
+                    x = er() % (2 * N);
+                }
+                insert_cols(data, N, field_meta);
+                break;
+            }
+            case DataType::UINT16: {
+                vector<uint16_t> data(N);
+                for (auto& x : data) {
+                    x = er() % (2 * N);
+                }
+                insert_cols(data, N, field_meta);
+                break;
+            }
+            case DataType::UINT8: {
+                vector<uint8_t> data(N);
                 for (auto& x : data) {
                     x = er() % (2 * N);
                 }
