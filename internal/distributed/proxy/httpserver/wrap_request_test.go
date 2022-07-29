@@ -112,6 +112,67 @@ func TestFieldData_AsSchemapb(t *testing.T) {
 		_, err := fieldData.AsSchemapb()
 		assert.Error(t, err)
 	})
+	t.Run("uint8_ok", func(t *testing.T) {
+		fieldData := FieldData{
+			Type:  schemapb.DataType_UInt8,
+			Field: []interface{}{1, 2, 3},
+		}
+		raw, _ := json.Marshal(fieldData)
+		json.Unmarshal(raw, &fieldData)
+		_, err := fieldData.AsSchemapb()
+		assert.NoError(t, err)
+	})
+	t.Run("uint8_error", func(t *testing.T) {
+		fieldData := FieldData{
+			Type:  schemapb.DataType_UInt8,
+			Field: []interface{}{"a", "b", "c"},
+		}
+		raw, _ := json.Marshal(fieldData)
+		json.Unmarshal(raw, &fieldData)
+		_, err := fieldData.AsSchemapb()
+		assert.Error(t, err)
+	})
+	t.Run("uint32_ok", func(t *testing.T) {
+		fieldData := FieldData{
+			Type:  schemapb.DataType_UInt32,
+			Field: []interface{}{1, 2, 3},
+		}
+		raw, _ := json.Marshal(fieldData)
+		json.Unmarshal(raw, &fieldData)
+		_, err := fieldData.AsSchemapb()
+		assert.NoError(t, err)
+	})
+	t.Run("uint32_error", func(t *testing.T) {
+		fieldData := FieldData{
+			Type:  schemapb.DataType_UInt32,
+			Field: []interface{}{"a", "b", "c"},
+		}
+		raw, _ := json.Marshal(fieldData)
+		json.Unmarshal(raw, &fieldData)
+		_, err := fieldData.AsSchemapb()
+		assert.Error(t, err)
+	})
+	t.Run("uint64_ok", func(t *testing.T) {
+		fieldData := FieldData{
+			Type:  schemapb.DataType_UInt64,
+			Field: []interface{}{1, 2, 3},
+		}
+		raw, _ := json.Marshal(fieldData)
+		json.Unmarshal(raw, &fieldData)
+		_, err := fieldData.AsSchemapb()
+		assert.NoError(t, err)
+	})
+	t.Run("uint64_error", func(t *testing.T) {
+		fieldData := FieldData{
+			Type:  schemapb.DataType_UInt64,
+			Field: []interface{}{"a", "b", "c"},
+		}
+		raw, _ := json.Marshal(fieldData)
+		json.Unmarshal(raw, &fieldData)
+		_, err := fieldData.AsSchemapb()
+		assert.Error(t, err)
+	})
+
 	t.Run("float_ok", func(t *testing.T) {
 		fieldData := FieldData{
 			Type:  schemapb.DataType_Float,

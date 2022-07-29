@@ -236,7 +236,7 @@ def gen_primary_field():
 def gen_single_filter_fields():
     fields = []
     for data_type in DataType:
-        if data_type in [DataType.INT32, DataType.INT64, DataType.FLOAT, DataType.DOUBLE]:
+        if data_type in [DataType.INT32, DataType.INT64,DataType.UINT32, DataType.UINT64, DataType.FLOAT, DataType.DOUBLE]:
             fields.append({"name": data_type.name, "type": data_type})
     return fields
 
@@ -365,7 +365,7 @@ def gen_entities_by_fields(fields, nb, dim, ids=None):
     for field in fields:
         if field.get("is_primary", False) and ids:
             field_value = ids
-        elif field["type"] in [DataType.INT32, DataType.INT64]:
+        elif field["type"] in [DataType.INT32, DataType.INT64,DataType.UINT32, DataType.UINT64]:
             field_value = [1 for i in range(nb)]
         elif field["type"] in [DataType.FLOAT, DataType.DOUBLE]:
             field_value = [3.0 for i in range(nb)]

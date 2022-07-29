@@ -81,6 +81,10 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			{true, schemapb.DataType_Int16, []interface{}{int16(1), int16(2)}, "valid int16"},
 			{true, schemapb.DataType_Int32, []interface{}{int32(1), int32(2)}, "valid int32"},
 			{true, schemapb.DataType_Int64, []interface{}{int64(1), int64(2)}, "valid int64"},
+			{true, schemapb.DataType_UInt8, []interface{}{uint8(1), uint8(2)}, "valid uint8"},
+			{true, schemapb.DataType_UInt16, []interface{}{uint16(1), uint16(2)}, "valid uint16"},
+			{true, schemapb.DataType_UInt32, []interface{}{uint32(1), uint32(2)}, "valid uint32"},
+			{true, schemapb.DataType_UInt64, []interface{}{uint64(1), uint64(2)}, "valid uint64"},
 			{true, schemapb.DataType_Float, []interface{}{float32(1), float32(2)}, "valid float32"},
 			{true, schemapb.DataType_Double, []interface{}{float64(1), float64(2)}, "valid float64"},
 			{true, schemapb.DataType_VarChar, []interface{}{"test1", "test2"}, "valid varChar"},
@@ -91,6 +95,11 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			{false, schemapb.DataType_Int16, []interface{}{nil, nil}, "invalid int16"},
 			{false, schemapb.DataType_Int32, []interface{}{nil, nil}, "invalid int32"},
 			{false, schemapb.DataType_Int64, []interface{}{nil, nil}, "invalid int64"},
+			{false, schemapb.DataType_UInt8, []interface{}{nil, nil}, "invalid uint8"},
+			{false, schemapb.DataType_UInt16, []interface{}{nil, nil}, "invalid uint16"},
+			{false, schemapb.DataType_UInt32, []interface{}{nil, nil}, "invalid uint32"},
+			{false, schemapb.DataType_UInt64, []interface{}{nil, nil}, "invalid uint64"},
+
 			{false, schemapb.DataType_Float, []interface{}{nil, nil}, "invalid float32"},
 			{false, schemapb.DataType_Double, []interface{}{nil, nil}, "invalid float64"},
 			{false, schemapb.DataType_VarChar, []interface{}{nil, nil}, "invalid varChar"},
@@ -505,7 +514,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 
 			cpaths, err := mockbIO.upload(context.TODO(), c.segID, c.parID, []*InsertData{iData}, dData, meta)
 			require.NoError(t, err)
-			require.Equal(t, 12, len(cpaths.inPaths))
+			require.Equal(t, 16, len(cpaths.inPaths))
 			segBinlogs := []*datapb.CompactionSegmentBinlogs{
 				{
 					SegmentID:           c.segID,
@@ -680,11 +689,11 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 
 			cpaths1, err := mockbIO.upload(context.TODO(), c.segID1, c.parID, []*InsertData{iData1}, dData1, meta)
 			require.NoError(t, err)
-			require.Equal(t, 12, len(cpaths1.inPaths))
+			require.Equal(t, 16, len(cpaths1.inPaths))
 
 			cpaths2, err := mockbIO.upload(context.TODO(), c.segID2, c.parID, []*InsertData{iData2}, dData2, meta)
 			require.NoError(t, err)
-			require.Equal(t, 12, len(cpaths2.inPaths))
+			require.Equal(t, 16, len(cpaths2.inPaths))
 
 			plan := &datapb.CompactionPlan{
 				PlanID: 10080,
@@ -812,11 +821,11 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 
 		cpaths1, err := mockbIO.upload(context.TODO(), segID1, partID, []*InsertData{iData1}, dData1, meta)
 		require.NoError(t, err)
-		require.Equal(t, 12, len(cpaths1.inPaths))
+		require.Equal(t, 16, len(cpaths1.inPaths))
 
 		cpaths2, err := mockbIO.upload(context.TODO(), segID2, partID, []*InsertData{iData2}, dData2, meta)
 		require.NoError(t, err)
-		require.Equal(t, 12, len(cpaths2.inPaths))
+		require.Equal(t, 16, len(cpaths2.inPaths))
 
 		plan := &datapb.CompactionPlan{
 			PlanID: 20080,

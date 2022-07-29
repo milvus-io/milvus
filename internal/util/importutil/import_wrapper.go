@@ -433,6 +433,36 @@ func (p *ImportWrapper) appendFunc(schema *schemapb.FieldSchema) func(src storag
 			arr.NumRows[0]++
 			return nil
 		}
+
+	case schemapb.DataType_UInt8:
+		return func(src storage.FieldData, n int, target storage.FieldData) error {
+			arr := target.(*storage.UInt8FieldData)
+			arr.Data = append(arr.Data, src.GetRow(n).(uint8))
+			arr.NumRows[0]++
+			return nil
+		}
+	case schemapb.DataType_UInt16:
+		return func(src storage.FieldData, n int, target storage.FieldData) error {
+			arr := target.(*storage.UInt16FieldData)
+			arr.Data = append(arr.Data, src.GetRow(n).(uint16))
+			arr.NumRows[0]++
+			return nil
+		}
+	case schemapb.DataType_UInt32:
+		return func(src storage.FieldData, n int, target storage.FieldData) error {
+			arr := target.(*storage.UInt32FieldData)
+			arr.Data = append(arr.Data, src.GetRow(n).(uint32))
+			arr.NumRows[0]++
+			return nil
+		}
+	case schemapb.DataType_UInt64:
+		return func(src storage.FieldData, n int, target storage.FieldData) error {
+			arr := target.(*storage.UInt64FieldData)
+			arr.Data = append(arr.Data, src.GetRow(n).(uint64))
+			arr.NumRows[0]++
+			return nil
+		}
+
 	case schemapb.DataType_BinaryVector:
 		return func(src storage.FieldData, n int, target storage.FieldData) error {
 			arr := target.(*storage.BinaryVectorFieldData)

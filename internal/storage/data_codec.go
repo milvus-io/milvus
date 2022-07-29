@@ -132,6 +132,22 @@ type Int64FieldData struct {
 	NumRows []int64
 	Data    []int64
 }
+type UInt8FieldData struct {
+	NumRows []int64
+	Data    []uint8
+}
+type UInt16FieldData struct {
+	NumRows []int64
+	Data    []uint16
+}
+type UInt32FieldData struct {
+	NumRows []int64
+	Data    []uint32
+}
+type UInt64FieldData struct {
+	NumRows []int64
+	Data    []uint64
+}
 type FloatFieldData struct {
 	NumRows []int64
 	Data    []float32
@@ -156,11 +172,17 @@ type FloatVectorFieldData struct {
 }
 
 // RowNum implements FieldData.RowNum
-func (data *BoolFieldData) RowNum() int         { return len(data.Data) }
-func (data *Int8FieldData) RowNum() int         { return len(data.Data) }
-func (data *Int16FieldData) RowNum() int        { return len(data.Data) }
-func (data *Int32FieldData) RowNum() int        { return len(data.Data) }
-func (data *Int64FieldData) RowNum() int        { return len(data.Data) }
+func (data *BoolFieldData) RowNum() int  { return len(data.Data) }
+func (data *Int8FieldData) RowNum() int  { return len(data.Data) }
+func (data *Int16FieldData) RowNum() int { return len(data.Data) }
+func (data *Int32FieldData) RowNum() int { return len(data.Data) }
+func (data *Int64FieldData) RowNum() int { return len(data.Data) }
+
+func (data *UInt8FieldData) RowNum() int  { return len(data.Data) }
+func (data *UInt16FieldData) RowNum() int { return len(data.Data) }
+func (data *UInt32FieldData) RowNum() int { return len(data.Data) }
+func (data *UInt64FieldData) RowNum() int { return len(data.Data) }
+
 func (data *FloatFieldData) RowNum() int        { return len(data.Data) }
 func (data *DoubleFieldData) RowNum() int       { return len(data.Data) }
 func (data *StringFieldData) RowNum() int       { return len(data.Data) }
@@ -173,6 +195,11 @@ func (data *Int8FieldData) GetRow(i int) interface{}   { return data.Data[i] }
 func (data *Int16FieldData) GetRow(i int) interface{}  { return data.Data[i] }
 func (data *Int32FieldData) GetRow(i int) interface{}  { return data.Data[i] }
 func (data *Int64FieldData) GetRow(i int) interface{}  { return data.Data[i] }
+func (data *UInt8FieldData) GetRow(i int) interface{}  { return data.Data[i] }
+func (data *UInt16FieldData) GetRow(i int) interface{} { return data.Data[i] }
+func (data *UInt32FieldData) GetRow(i int) interface{} { return data.Data[i] }
+func (data *UInt64FieldData) GetRow(i int) interface{} { return data.Data[i] }
+
 func (data *FloatFieldData) GetRow(i int) interface{}  { return data.Data[i] }
 func (data *DoubleFieldData) GetRow(i int) interface{} { return data.Data[i] }
 func (data *StringFieldData) GetRow(i int) interface{} { return data.Data[i] }
@@ -210,6 +237,26 @@ func (data *Int32FieldData) GetMemorySize() int {
 
 // GetMemorySize implements FieldData.GetMemorySize
 func (data *Int64FieldData) GetMemorySize() int {
+	return binary.Size(data.NumRows) + binary.Size(data.Data)
+}
+
+// GetMemorySize implements FieldData.GetMemorySize
+func (data *UInt8FieldData) GetMemorySize() int {
+	return binary.Size(data.NumRows) + binary.Size(data.Data)
+}
+
+// GetMemorySize implements FieldData.GetMemorySize
+func (data *UInt16FieldData) GetMemorySize() int {
+	return binary.Size(data.NumRows) + binary.Size(data.Data)
+}
+
+// GetMemorySize implements FieldData.GetMemorySize
+func (data *UInt32FieldData) GetMemorySize() int {
+	return binary.Size(data.NumRows) + binary.Size(data.Data)
+}
+
+// GetMemorySize implements FieldData.GetMemorySize
+func (data *UInt64FieldData) GetMemorySize() int {
 	return binary.Size(data.NumRows) + binary.Size(data.Data)
 }
 
@@ -346,6 +393,38 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 				return nil, nil, err
 			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*Int64FieldData).GetMemorySize()))
+		case schemapb.DataType_UInt8:
+			err = eventWriter.AddUInt8ToPayload(singleData.(*UInt8FieldData).Data)
+			if err != nil {
+				eventWriter.Close()
+				writer.Close()
+				return nil, nil, err
+			}
+			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*UInt8FieldData).GetMemorySize()))
+		case schemapb.DataType_UInt16:
+			err = eventWriter.AddUInt16ToPayload(singleData.(*UInt16FieldData).Data)
+			if err != nil {
+				eventWriter.Close()
+				writer.Close()
+				return nil, nil, err
+			}
+			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*UInt16FieldData).GetMemorySize()))
+		case schemapb.DataType_UInt32:
+			err = eventWriter.AddUInt32ToPayload(singleData.(*UInt32FieldData).Data)
+			if err != nil {
+				eventWriter.Close()
+				writer.Close()
+				return nil, nil, err
+			}
+			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*UInt32FieldData).GetMemorySize()))
+		case schemapb.DataType_UInt64:
+			err = eventWriter.AddUInt64ToPayload(singleData.(*UInt64FieldData).Data)
+			if err != nil {
+				eventWriter.Close()
+				writer.Close()
+				return nil, nil, err
+			}
+			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*UInt64FieldData).GetMemorySize()))
 		case schemapb.DataType_Float:
 			err = eventWriter.AddFloatToPayload(singleData.(*FloatFieldData).Data)
 			if err != nil {
@@ -592,6 +671,90 @@ func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int
 				totalLength += len(singleData)
 				int64FieldData.NumRows = append(int64FieldData.NumRows, int64(len(singleData)))
 				insertData.Data[fieldID] = int64FieldData
+
+			case schemapb.DataType_UInt8:
+				singleData, err := eventReader.GetUInt8FromPayload()
+				if err != nil {
+					eventReader.Close()
+					binlogReader.Close()
+					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, err
+				}
+
+				if insertData.Data[fieldID] == nil {
+					insertData.Data[fieldID] = &UInt8FieldData{
+						NumRows: make([]int64, 0),
+						Data:    make([]uint8, 0, rowNum),
+					}
+				}
+				uint8FieldData := insertData.Data[fieldID].(*UInt8FieldData)
+
+				uint8FieldData.Data = append(uint8FieldData.Data, singleData...)
+				totalLength += len(singleData)
+				uint8FieldData.NumRows = append(uint8FieldData.NumRows, int64(len(singleData)))
+				insertData.Data[fieldID] = uint8FieldData
+
+			case schemapb.DataType_UInt16:
+				singleData, err := eventReader.GetUInt16FromPayload()
+				if err != nil {
+					eventReader.Close()
+					binlogReader.Close()
+					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, err
+				}
+
+				if insertData.Data[fieldID] == nil {
+					insertData.Data[fieldID] = &UInt16FieldData{
+						NumRows: make([]int64, 0),
+						Data:    make([]uint16, 0, rowNum),
+					}
+				}
+				uint16FieldData := insertData.Data[fieldID].(*UInt16FieldData)
+
+				uint16FieldData.Data = append(uint16FieldData.Data, singleData...)
+				totalLength += len(singleData)
+				uint16FieldData.NumRows = append(uint16FieldData.NumRows, int64(len(singleData)))
+				insertData.Data[fieldID] = uint16FieldData
+
+			case schemapb.DataType_UInt32:
+				singleData, err := eventReader.GetUInt32FromPayload()
+				if err != nil {
+					eventReader.Close()
+					binlogReader.Close()
+					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, err
+				}
+
+				if insertData.Data[fieldID] == nil {
+					insertData.Data[fieldID] = &UInt32FieldData{
+						NumRows: make([]int64, 0),
+						Data:    make([]uint32, 0, rowNum),
+					}
+				}
+				uint32FieldData := insertData.Data[fieldID].(*UInt32FieldData)
+
+				uint32FieldData.Data = append(uint32FieldData.Data, singleData...)
+				totalLength += len(singleData)
+				uint32FieldData.NumRows = append(uint32FieldData.NumRows, int64(len(singleData)))
+				insertData.Data[fieldID] = uint32FieldData
+
+			case schemapb.DataType_UInt64:
+				singleData, err := eventReader.GetUInt64FromPayload()
+				if err != nil {
+					eventReader.Close()
+					binlogReader.Close()
+					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, err
+				}
+
+				if insertData.Data[fieldID] == nil {
+					insertData.Data[fieldID] = &UInt64FieldData{
+						NumRows: make([]int64, 0),
+						Data:    make([]uint64, 0, rowNum),
+					}
+				}
+				uint64FieldData := insertData.Data[fieldID].(*UInt64FieldData)
+
+				uint64FieldData.Data = append(uint64FieldData.Data, singleData...)
+				totalLength += len(singleData)
+				uint64FieldData.NumRows = append(uint64FieldData.NumRows, int64(len(singleData)))
+				insertData.Data[fieldID] = uint64FieldData
 
 			case schemapb.DataType_Float:
 				singleData, err := eventReader.GetFloatFromPayload()

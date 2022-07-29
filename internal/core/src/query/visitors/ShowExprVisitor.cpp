@@ -122,6 +122,14 @@ ShowExprVisitor::visit(TermExpr& expr) {
                 return TermExtract<int32_t>(expr);
             case DataType::INT64:
                 return TermExtract<int64_t>(expr);
+            case DataType::UINT8:
+                return TermExtract<uint8_t>(expr);
+            case DataType::UINT16:
+                return TermExtract<uint16_t>(expr);
+            case DataType::UINT32:
+                return TermExtract<uint32_t>(expr);
+            case DataType::UINT64:
+                return TermExtract<uint64_t>(expr);
             case DataType::DOUBLE:
                 return TermExtract<double>(expr);
             case DataType::FLOAT:
@@ -174,6 +182,18 @@ ShowExprVisitor::visit(UnaryRangeExpr& expr) {
         case DataType::INT64:
             json_opt_ = UnaryRangeExtract<int64_t>(expr);
             return;
+        case DataType::UINT8:
+            json_opt_ = UnaryRangeExtract<uint8_t>(expr);
+            return;
+        case DataType::UINT16:
+            json_opt_ = UnaryRangeExtract<uint16_t>(expr);
+            return;
+        case DataType::UINT32:
+            json_opt_ = UnaryRangeExtract<uint32_t>(expr);
+            return;
+        case DataType::UINT64:
+            json_opt_ = UnaryRangeExtract<uint64_t>(expr);
+            return;
         case DataType::DOUBLE:
             json_opt_ = UnaryRangeExtract<double>(expr);
             return;
@@ -221,6 +241,18 @@ ShowExprVisitor::visit(BinaryRangeExpr& expr) {
             return;
         case DataType::INT64:
             json_opt_ = BinaryRangeExtract<int64_t>(expr);
+            return;
+        case DataType::UINT8:
+            json_opt_ = BinaryRangeExtract<uint8_t>(expr);
+            return;
+        case DataType::UINT16:
+            json_opt_ = BinaryRangeExtract<uint16_t>(expr);
+            return;
+        case DataType::UINT32:
+            json_opt_ = BinaryRangeExtract<uint32_t>(expr);
+            return;
+        case DataType::UINT64:
+            json_opt_ = BinaryRangeExtract<uint64_t>(expr);
             return;
         case DataType::DOUBLE:
             json_opt_ = BinaryRangeExtract<double>(expr);
@@ -285,6 +317,18 @@ ShowExprVisitor::visit(BinaryArithOpEvalRangeExpr& expr) {
             return;
         case DataType::INT64:
             json_opt_ = BinaryArithOpEvalRangeExtract<int64_t>(expr);
+            return;
+        case DataType::UINT8:
+            json_opt_ = BinaryArithOpEvalRangeExtract<uint8_t>(expr);
+            return;
+        case DataType::UINT16:
+            json_opt_ = BinaryArithOpEvalRangeExtract<uint16_t>(expr);
+            return;
+        case DataType::UINT32:
+            json_opt_ = BinaryArithOpEvalRangeExtract<uint32_t>(expr);
+            return;
+        case DataType::UINT64:
+            json_opt_ = BinaryArithOpEvalRangeExtract<uint64_t>(expr);
             return;
         case DataType::DOUBLE:
             json_opt_ = BinaryArithOpEvalRangeExtract<double>(expr);

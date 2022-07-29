@@ -219,6 +219,30 @@ var simpleVarCharField = constFieldParam{
 	fieldName: "varCharField",
 }
 
+var simpleUInt8Field = constFieldParam{
+	id:        110,
+	dataType:  schemapb.DataType_UInt8,
+	fieldName: "uint8Field",
+}
+
+var simpleUInt16Field = constFieldParam{
+	id:        111,
+	dataType:  schemapb.DataType_UInt16,
+	fieldName: "uint16Field",
+}
+
+var simpleUInt32Field = constFieldParam{
+	id:        112,
+	dataType:  schemapb.DataType_UInt32,
+	fieldName: "uint32Field",
+}
+
+var simpleUInt64Field = constFieldParam{
+	id:        113,
+	dataType:  schemapb.DataType_UInt64,
+	fieldName: "uint64Field",
+}
+
 var uidField = constFieldParam{
 	id:        rowIDFieldID,
 	dataType:  schemapb.DataType_Int64,
@@ -509,6 +533,9 @@ func genTestCollectionSchema(pkTypes ...schemapb.DataType) *schemapb.CollectionS
 	fieldInt8 := genConstantFieldSchema(simpleInt8Field)
 	fieldInt16 := genConstantFieldSchema(simpleInt16Field)
 	fieldInt32 := genConstantFieldSchema(simpleInt32Field)
+	fieldUInt8 := genConstantFieldSchema(simpleUInt8Field)
+	fieldUInt16 := genConstantFieldSchema(simpleUInt16Field)
+	fieldUInt32 := genConstantFieldSchema(simpleUInt32Field)
 	fieldFloat := genConstantFieldSchema(simpleFloatField)
 	fieldDouble := genConstantFieldSchema(simpleDoubleField)
 	floatVecFieldSchema := genVectorFieldSchema(simpleFloatVecField)
@@ -535,6 +562,9 @@ func genTestCollectionSchema(pkTypes ...schemapb.DataType) *schemapb.CollectionS
 			fieldInt8,
 			fieldInt16,
 			fieldInt32,
+			fieldUInt8,
+			fieldUInt16,
+			fieldUInt32,
 			fieldFloat,
 			fieldDouble,
 			floatVecFieldSchema,
@@ -664,6 +694,38 @@ func generateInt64Array(numRows int) []int64 {
 	return ret
 }
 
+func generateUInt8Array(numRows int) []uint8 {
+	ret := make([]uint8, 0, numRows)
+	for i := 0; i < numRows; i++ {
+		ret = append(ret, uint8(rand.Int()))
+	}
+	return ret
+}
+
+func generateUInt16Array(numRows int) []uint16 {
+	ret := make([]uint16, 0, numRows)
+	for i := 0; i < numRows; i++ {
+		ret = append(ret, uint16(rand.Int()))
+	}
+	return ret
+}
+
+func generateUInt32Array(numRows int) []uint32 {
+	ret := make([]uint32, 0, numRows)
+	for i := 0; i < numRows; i++ {
+		ret = append(ret, uint32(i))
+	}
+	return ret
+}
+
+func generateUInt64Array(numRows int) []uint64 {
+	ret := make([]uint64, 0, numRows)
+	for i := 0; i < numRows; i++ {
+		ret = append(ret, uint64(i))
+	}
+	return ret
+}
+
 func generateFloat32Array(numRows int) []float32 {
 	ret := make([]float32, 0, numRows)
 	for i := 0; i < numRows; i++ {
@@ -770,6 +832,51 @@ func newScalarFieldData(dType schemapb.DataType, fieldName string, numRows int) 
 				},
 			},
 		}
+	case schemapb.DataType_UInt8:
+		ret.FieldId = simpleUInt8Field.id
+		ret.Field = &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_UintData{
+					UintData: &schemapb.UIntArray{
+						Data: generateUInt32Array(numRows),
+					},
+				},
+			},
+		}
+	case schemapb.DataType_UInt16:
+		ret.FieldId = simpleUInt16Field.id
+		ret.Field = &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_UintData{
+					UintData: &schemapb.UIntArray{
+						Data: generateUInt32Array(numRows),
+					},
+				},
+			},
+		}
+	case schemapb.DataType_UInt32:
+		ret.FieldId = simpleUInt32Field.id
+		ret.Field = &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_UintData{
+					UintData: &schemapb.UIntArray{
+						Data: generateUInt32Array(numRows),
+					},
+				},
+			},
+		}
+	case schemapb.DataType_UInt64:
+		ret.FieldId = simpleUInt64Field.id
+		ret.Field = &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_UlongData{
+					UlongData: &schemapb.ULongArray{
+						Data: generateUInt64Array(numRows),
+					},
+				},
+			},
+		}
+
 	case schemapb.DataType_Float:
 		ret.FieldId = simpleFloatField.id
 		ret.Field = &schemapb.FieldData_Scalars{
@@ -888,6 +995,26 @@ func genInsertData(msgLength int, schema *schemapb.CollectionSchema) (*storage.I
 				NumRows: []int64{int64(msgLength)},
 				Data:    generateInt64Array(msgLength),
 			}
+		case schemapb.DataType_UInt8:
+			insertData.Data[f.FieldID] = &storage.UInt8FieldData{
+				NumRows: []int64{int64(msgLength)},
+				Data:    generateUInt8Array(msgLength),
+			}
+		case schemapb.DataType_UInt16:
+			insertData.Data[f.FieldID] = &storage.UInt16FieldData{
+				NumRows: []int64{int64(msgLength)},
+				Data:    generateUInt16Array(msgLength),
+			}
+		case schemapb.DataType_UInt32:
+			insertData.Data[f.FieldID] = &storage.UInt32FieldData{
+				NumRows: []int64{int64(msgLength)},
+				Data:    generateUInt32Array(msgLength),
+			}
+		case schemapb.DataType_UInt64:
+			insertData.Data[f.FieldID] = &storage.UInt64FieldData{
+				NumRows: []int64{int64(msgLength)},
+				Data:    generateUInt64Array(msgLength),
+			}
 		case schemapb.DataType_Float:
 			insertData.Data[f.FieldID] = &storage.FloatFieldData{
 				NumRows: []int64{int64(msgLength)},
@@ -963,6 +1090,14 @@ func genSimpleInsertMsg(schema *schemapb.CollectionSchema, numRows int) (*msgstr
 			fieldsData = append(fieldsData, newScalarFieldData(f.DataType, simpleInt32Field.fieldName, numRows))
 		case schemapb.DataType_Int64:
 			fieldsData = append(fieldsData, newScalarFieldData(f.DataType, simpleInt64Field.fieldName, numRows))
+		case schemapb.DataType_UInt8:
+			fieldsData = append(fieldsData, newScalarFieldData(f.DataType, simpleUInt8Field.fieldName, numRows))
+		case schemapb.DataType_UInt16:
+			fieldsData = append(fieldsData, newScalarFieldData(f.DataType, simpleUInt16Field.fieldName, numRows))
+		case schemapb.DataType_UInt32:
+			fieldsData = append(fieldsData, newScalarFieldData(f.DataType, simpleUInt32Field.fieldName, numRows))
+		case schemapb.DataType_UInt64:
+			fieldsData = append(fieldsData, newScalarFieldData(f.DataType, simpleUInt64Field.fieldName, numRows))
 		case schemapb.DataType_Float:
 			fieldsData = append(fieldsData, newScalarFieldData(f.DataType, simpleFloatField.fieldName, numRows))
 		case schemapb.DataType_Double:
@@ -1796,6 +1931,38 @@ func genFieldData(fieldName string, fieldID int64, fieldType schemapb.DataType, 
 			},
 			FieldId: fieldID,
 		}
+
+	case schemapb.DataType_UInt32:
+		fieldData = &schemapb.FieldData{
+			Type:      schemapb.DataType_UInt32,
+			FieldName: fieldName,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_UintData{
+						UintData: &schemapb.UIntArray{
+							Data: fieldValue.([]uint32),
+						},
+					},
+				},
+			},
+			FieldId: fieldID,
+		}
+	case schemapb.DataType_UInt64:
+		fieldData = &schemapb.FieldData{
+			Type:      schemapb.DataType_UInt64,
+			FieldName: fieldName,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_UlongData{
+						UlongData: &schemapb.ULongArray{
+							Data: fieldValue.([]uint64),
+						},
+					},
+				},
+			},
+			FieldId: fieldID,
+		}
+
 	case schemapb.DataType_Float:
 		fieldData = &schemapb.FieldData{
 			Type:      schemapb.DataType_Float,

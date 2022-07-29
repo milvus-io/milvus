@@ -640,6 +640,66 @@ func interface2FieldData(schemaDataType schemapb.DataType, content []interface{}
 		}
 		rst = data
 
+	case schemapb.DataType_UInt8:
+		var data = &storage.UInt8FieldData{
+			NumRows: numOfRows,
+			Data:    make([]uint8, 0, len(content)),
+		}
+
+		for _, c := range content {
+			r, ok := c.(uint8)
+			if !ok {
+				return nil, errTransferType
+			}
+			data.Data = append(data.Data, r)
+		}
+		rst = data
+
+	case schemapb.DataType_UInt16:
+		var data = &storage.UInt16FieldData{
+			NumRows: numOfRows,
+			Data:    make([]uint16, 0, len(content)),
+		}
+
+		for _, c := range content {
+			r, ok := c.(uint16)
+			if !ok {
+				return nil, errTransferType
+			}
+			data.Data = append(data.Data, r)
+		}
+		rst = data
+
+	case schemapb.DataType_UInt32:
+		var data = &storage.UInt32FieldData{
+			NumRows: numOfRows,
+			Data:    make([]uint32, 0, len(content)),
+		}
+
+		for _, c := range content {
+			r, ok := c.(uint32)
+			if !ok {
+				return nil, errTransferType
+			}
+			data.Data = append(data.Data, r)
+		}
+		rst = data
+
+	case schemapb.DataType_UInt64:
+		var data = &storage.UInt64FieldData{
+			NumRows: numOfRows,
+			Data:    make([]uint64, 0, len(content)),
+		}
+
+		for _, c := range content {
+			r, ok := c.(uint64)
+			if !ok {
+				return nil, errTransferType
+			}
+			data.Data = append(data.Data, r)
+		}
+		rst = data
+
 	case schemapb.DataType_Float:
 		var data = &storage.FloatFieldData{
 			NumRows: numOfRows,

@@ -148,6 +148,20 @@ func TransferColumnBasedDataToRowBasedData(schema *schemapb.CollectionSchema, co
 				if err != nil {
 					return nil, err
 				}
+			case *schemapb.ScalarField_UintData:
+				err := appendScalarField(&datas, &rowNum, func() interface{} {
+					return scalarField.GetUintData().Data
+				})
+				if err != nil {
+					return nil, err
+				}
+			case *schemapb.ScalarField_UlongData:
+				err := appendScalarField(&datas, &rowNum, func() interface{} {
+					return scalarField.GetUlongData().Data
+				})
+				if err != nil {
+					return nil, err
+				}
 			case *schemapb.ScalarField_FloatData:
 				err := appendScalarField(&datas, &rowNum, func() interface{} {
 					return scalarField.GetFloatData().Data
@@ -229,6 +243,18 @@ func TransferColumnBasedDataToRowBasedData(schema *schemapb.CollectionSchema, co
 				err = writeToBuffer(&buffer, endian, d)
 			case schemapb.DataType_Int64:
 				d := datas[j][i].(int64)
+				err = writeToBuffer(&buffer, endian, d)
+			case schemapb.DataType_UInt8:
+				d := uint8(datas[j][i].(uint32))
+				err = writeToBuffer(&buffer, endian, d)
+			case schemapb.DataType_UInt16:
+				d := uint16(datas[j][i].(uint32))
+				err = writeToBuffer(&buffer, endian, d)
+			case schemapb.DataType_UInt32:
+				d := datas[j][i].(uint32)
+				err = writeToBuffer(&buffer, endian, d)
+			case schemapb.DataType_UInt64:
+				d := datas[j][i].(uint64)
 				err = writeToBuffer(&buffer, endian, d)
 			case schemapb.DataType_Float:
 				d := datas[j][i].(float32)

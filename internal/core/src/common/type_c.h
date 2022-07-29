@@ -47,6 +47,11 @@ enum CDataType {
     Int32 = 4,
     Int64 = 5,
 
+    UInt8 = 6,
+    UInt16 = 7,
+    UInt32 = 8,
+    UInt64 = 9,
+
     Float = 10,
     Double = 11,
 

@@ -66,6 +66,13 @@ func Test_ReadError(t *testing.T) {
 		assert.NotNil(t, err)
 		_, err = adapter.ReadInt64(1)
 		assert.NotNil(t, err)
+		_, err = adapter.ReadUint16(1)
+		assert.NotNil(t, err)
+		_, err = adapter.ReadUint32(1)
+		assert.NotNil(t, err)
+		_, err = adapter.ReadUint64(1)
+		assert.NotNil(t, err)
+
 		_, err = adapter.ReadFloat32(1)
 		assert.NotNil(t, err)
 		_, err = adapter.ReadFloat64(1)
@@ -150,6 +157,42 @@ func Test_ReadError(t *testing.T) {
 	}
 
 	{
+		adapter.npyReader.Header.Descr.Type = "u2"
+		data, err := adapter.ReadUint16(1)
+		assert.Nil(t, data)
+		assert.NotNil(t, err)
+
+		adapter.npyReader.Header.Descr.Type = "dummy"
+		data, err = adapter.ReadUint16(1)
+		assert.Nil(t, data)
+		assert.NotNil(t, err)
+	}
+
+	{
+		adapter.npyReader.Header.Descr.Type = "u4"
+		data, err := adapter.ReadUint32(1)
+		assert.Nil(t, data)
+		assert.NotNil(t, err)
+
+		adapter.npyReader.Header.Descr.Type = "dummy"
+		data, err = adapter.ReadUint32(1)
+		assert.Nil(t, data)
+		assert.NotNil(t, err)
+	}
+
+	{
+		adapter.npyReader.Header.Descr.Type = "u8"
+		data, err := adapter.ReadUint64(1)
+		assert.Nil(t, data)
+		assert.NotNil(t, err)
+
+		adapter.npyReader.Header.Descr.Type = "dummy"
+		data, err = adapter.ReadUint64(1)
+		assert.Nil(t, data)
+		assert.NotNil(t, err)
+	}
+
+	{
 		adapter.npyReader.Header.Descr.Type = "f4"
 		data, err := adapter.ReadFloat32(1)
 		assert.Nil(t, data)
@@ -228,6 +271,18 @@ func Test_Read(t *testing.T) {
 		resi8, err := adapter.ReadInt64(len(data))
 		assert.NotNil(t, err)
 		assert.Nil(t, resi8)
+
+		resu2, err := adapter.ReadUint16(len(data))
+		assert.NotNil(t, err)
+		assert.Nil(t, resu2)
+
+		resu4, err := adapter.ReadUint32(len(data))
+		assert.NotNil(t, err)
+		assert.Nil(t, resu4)
+
+		resu8, err := adapter.ReadUint64(len(data))
+		assert.NotNil(t, err)
+		assert.Nil(t, resu8)
 
 		resf4, err := adapter.ReadFloat32(len(data))
 		assert.NotNil(t, err)
@@ -389,6 +444,96 @@ func Test_Read(t *testing.T) {
 		assert.Equal(t, data[len(data)-1], res[0])
 
 		res, err = adapter.ReadInt64(len(data))
+		assert.NotNil(t, err)
+		assert.Nil(t, res)
+	}
+
+	{
+		filePath := TempFilesPath + "uint16.npy"
+		data := []uint16{1, 2, 3, 4, 5, 6}
+		CreateNumpyFile(filePath, data)
+
+		file, err := os.Open(filePath)
+		assert.Nil(t, err)
+		defer file.Close()
+
+		adapter, err := NewNumpyAdapter(file)
+		assert.Nil(t, err)
+
+		res, err := adapter.ReadUint16(len(data) - 1)
+		assert.Nil(t, err)
+		assert.Equal(t, len(data)-1, len(res))
+
+		for i := 0; i < len(res); i++ {
+			assert.Equal(t, data[i], res[i])
+		}
+
+		res, err = adapter.ReadUint16(len(data))
+		assert.Nil(t, err)
+		assert.Equal(t, 1, len(res))
+		assert.Equal(t, data[len(data)-1], res[0])
+
+		res, err = adapter.ReadUint16(len(data))
+		assert.NotNil(t, err)
+		assert.Nil(t, res)
+	}
+
+	{
+		filePath := TempFilesPath + "uint32.npy"
+		data := []uint32{1, 2, 3, 4, 5, 6}
+		CreateNumpyFile(filePath, data)
+
+		file, err := os.Open(filePath)
+		assert.Nil(t, err)
+		defer file.Close()
+
+		adapter, err := NewNumpyAdapter(file)
+		assert.Nil(t, err)
+
+		res, err := adapter.ReadUint32(len(data) - 1)
+		assert.Nil(t, err)
+		assert.Equal(t, len(data)-1, len(res))
+
+		for i := 0; i < len(res); i++ {
+			assert.Equal(t, data[i], res[i])
+		}
+
+		res, err = adapter.ReadUint32(len(data))
+		assert.Nil(t, err)
+		assert.Equal(t, 1, len(res))
+		assert.Equal(t, data[len(data)-1], res[0])
+
+		res, err = adapter.ReadUint32(len(data))
+		assert.NotNil(t, err)
+		assert.Nil(t, res)
+	}
+
+	{
+		filePath := TempFilesPath + "uint64.npy"
+		data := []uint64{1, 2, 3, 4, 5, 6}
+		CreateNumpyFile(filePath, data)
+
+		file, err := os.Open(filePath)
+		assert.Nil(t, err)
+		defer file.Close()
+
+		adapter, err := NewNumpyAdapter(file)
+		assert.Nil(t, err)
+
+		res, err := adapter.ReadUint64(len(data) - 1)
+		assert.Nil(t, err)
+		assert.Equal(t, len(data)-1, len(res))
+
+		for i := 0; i < len(res); i++ {
+			assert.Equal(t, data[i], res[i])
+		}
+
+		res, err = adapter.ReadUint64(len(data))
+		assert.Nil(t, err)
+		assert.Equal(t, 1, len(res))
+		assert.Equal(t, data[len(data)-1], res[0])
+
+		res, err = adapter.ReadUint64(len(data))
 		assert.NotNil(t, err)
 		assert.Nil(t, res)
 	}

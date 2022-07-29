@@ -50,6 +50,24 @@ VectorBase::set_data_raw(ssize_t element_offset,
         case DataType::INT64: {
             return set_data_raw(element_offset, data->scalars().long_data().data().data(), element_count);
         }
+        case DataType::UINT8: {
+            auto src_data = data->scalars().uint_data().data();
+            std::vector<uint8_t> data_raw(src_data.size());
+            std::copy_n(src_data.data(), src_data.size(), data_raw.data());
+            return set_data_raw(element_offset, data_raw.data(), element_count);
+        }
+        case DataType::UINT16: {
+            auto src_data = data->scalars().uint_data().data();
+            std::vector<uint16_t> data_raw(src_data.size());
+            std::copy_n(src_data.data(), src_data.size(), data_raw.data());
+            return set_data_raw(element_offset, data_raw.data(), element_count);
+        }
+        case DataType::UINT32: {
+            return set_data_raw(element_offset, data->scalars().uint_data().data().data(), element_count);
+        }
+        case DataType::UINT64: {
+            return set_data_raw(element_offset, data->scalars().ulong_data().data().data(), element_count);
+        }
         case DataType::FLOAT: {
             return set_data_raw(element_offset, data->scalars().float_data().data().data(), element_count);
         }
@@ -101,6 +119,24 @@ VectorBase::fill_chunk_data(ssize_t element_count, const DataArray* data, const 
         }
         case DataType::INT64: {
             return fill_chunk_data(data->scalars().long_data().data().data(), element_count);
+        }
+        case DataType::UINT8: {
+            auto src_data = data->scalars().uint_data().data();
+            std::vector<uint8_t> data_raw(src_data.size());
+            std::copy_n(src_data.data(), src_data.size(), data_raw.data());
+            return fill_chunk_data(data_raw.data(), element_count);
+        }
+        case DataType::UINT16: {
+            auto src_data = data->scalars().uint_data().data();
+            std::vector<uint16_t> data_raw(src_data.size());
+            std::copy_n(src_data.data(), src_data.size(), data_raw.data());
+            return fill_chunk_data(data_raw.data(), element_count);
+        }
+        case DataType::UINT32: {
+            return fill_chunk_data(data->scalars().uint_data().data().data(), element_count);
+        }
+        case DataType::UINT64: {
+            return fill_chunk_data(data->scalars().ulong_data().data().data(), element_count);
         }
         case DataType::FLOAT: {
             return fill_chunk_data(data->scalars().float_data().data().data(), element_count);

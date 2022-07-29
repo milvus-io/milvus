@@ -49,6 +49,30 @@ func UnsafeReadInt64(buf []byte, idx int) int64 {
 }
 
 /* #nosec G103 */
+func UnsafeReadUInt8(buf []byte, idx int) uint8 {
+	ptr := unsafe.Pointer(&(buf[idx]))
+	return *((*uint8)(ptr))
+}
+
+/* #nosec G103 */
+func UnsafeReadUInt16(buf []byte, idx int) uint16 {
+	ptr := unsafe.Pointer(&(buf[idx]))
+	return *((*uint16)(ptr))
+}
+
+/* #nosec G103 */
+func UnsafeReadUInt32(buf []byte, idx int) uint32 {
+	ptr := unsafe.Pointer(&(buf[idx]))
+	return *((*uint32)(ptr))
+}
+
+/* #nosec G103 */
+func UnsafeReadUInt64(buf []byte, idx int) uint64 {
+	ptr := unsafe.Pointer(&(buf[idx]))
+	return *((*uint64)(ptr))
+}
+
+/* #nosec G103 */
 func UnsafeReadFloat32(buf []byte, idx int) float32 {
 	ptr := unsafe.Pointer(&(buf[idx]))
 	return *((*float32)(ptr))

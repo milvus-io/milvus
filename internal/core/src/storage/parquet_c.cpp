@@ -16,6 +16,7 @@
 
 #include "storage/parquet_c.h"
 #include "storage/PayloadStream.h"
+#include <iostream>
 
 static const char*
 ErrorMsg(const std::string& msg) {
@@ -64,6 +65,30 @@ NewPayloadWriter(int columnType) {
             p->columnType = ColumnType::INT64;
             p->builder = std::make_shared<arrow::Int64Builder>();
             p->schema = arrow::schema({arrow::field("val", arrow::int64())});
+            break;
+        }
+        case ColumnType::UINT8: {
+            p->columnType = ColumnType::UINT8;
+            p->builder = std::make_shared<arrow::UInt8Builder>();
+            p->schema = arrow::schema({arrow::field("val", arrow::uint8())});
+            break;
+        }
+        case ColumnType::UINT16: {
+            p->columnType = ColumnType::UINT16;
+            p->builder = std::make_shared<arrow::UInt16Builder>();
+            p->schema = arrow::schema({arrow::field("val", arrow::uint16())});
+            break;
+        }
+        case ColumnType::UINT32: {
+            p->columnType = ColumnType::UINT32;
+            p->builder = std::make_shared<arrow::UInt32Builder>();
+            p->schema = arrow::schema({arrow::field("val", arrow::uint32())});
+            break;
+        }
+        case ColumnType::UINT64: {
+            p->columnType = ColumnType::UINT64;
+            p->builder = std::make_shared<arrow::UInt64Builder>();
+            p->schema = arrow::schema({arrow::field("val", arrow::uint64())});
             break;
         }
         case ColumnType::FLOAT: {
@@ -159,6 +184,26 @@ AddInt32ToPayload(CPayloadWriter payloadWriter, int32_t* values, int length) {
 extern "C" CStatus
 AddInt64ToPayload(CPayloadWriter payloadWriter, int64_t* values, int length) {
     return AddValuesToPayload<int64_t, arrow::Int64Builder>(payloadWriter, values, length);
+}
+
+extern "C" CStatus
+AddUInt8ToPayload(CPayloadWriter payloadWriter, uint8_t* values, int length) {
+    return AddValuesToPayload<uint8_t, arrow::UInt8Builder>(payloadWriter, values, length);
+}
+
+extern "C" CStatus
+AddUInt16ToPayload(CPayloadWriter payloadWriter, uint16_t* values, int length) {
+    return AddValuesToPayload<uint16_t, arrow::UInt16Builder>(payloadWriter, values, length);
+}
+
+extern "C" CStatus
+AddUInt32ToPayload(CPayloadWriter payloadWriter, uint32_t* values, int length) {
+    return AddValuesToPayload<uint32_t, arrow::UInt32Builder>(payloadWriter, values, length);
+}
+
+extern "C" CStatus
+AddUInt64ToPayload(CPayloadWriter payloadWriter, uint64_t* values, int length) {
+    return AddValuesToPayload<uint64_t, arrow::UInt64Builder>(payloadWriter, values, length);
 }
 
 extern "C" CStatus
@@ -396,6 +441,10 @@ NewPayloadReader(int columnType, uint8_t* buffer, int64_t buf_size) {
         case ColumnType::INT16:
         case ColumnType::INT32:
         case ColumnType::INT64:
+        case ColumnType::UINT8:
+        case ColumnType::UINT16:
+        case ColumnType::UINT32:
+        case ColumnType::UINT64:
         case ColumnType::FLOAT:
         case ColumnType::DOUBLE:
         case ColumnType::STRING:
@@ -472,6 +521,26 @@ GetInt32FromPayload(CPayloadReader payloadReader, int32_t** values, int* length)
 extern "C" CStatus
 GetInt64FromPayload(CPayloadReader payloadReader, int64_t** values, int* length) {
     return GetValuesFromPayload<int64_t, arrow::Int64Array>(payloadReader, values, length);
+}
+
+extern "C" CStatus
+GetUInt8FromPayload(CPayloadReader payloadReader, uint8_t** values, int* length) {
+    return GetValuesFromPayload<uint8_t, arrow::UInt8Array>(payloadReader, values, length);
+}
+
+extern "C" CStatus
+GetUInt16FromPayload(CPayloadReader payloadReader, uint16_t** values, int* length) {
+    return GetValuesFromPayload<uint16_t, arrow::UInt16Array>(payloadReader, values, length);
+}
+
+extern "C" CStatus
+GetUInt32FromPayload(CPayloadReader payloadReader, uint32_t** values, int* length) {
+    return GetValuesFromPayload<uint32_t, arrow::UInt32Array>(payloadReader, values, length);
+}
+
+extern "C" CStatus
+GetUInt64FromPayload(CPayloadReader payloadReader, uint64_t** values, int* length) {
+    return GetValuesFromPayload<uint64_t, arrow::UInt64Array>(payloadReader, values, length);
 }
 
 extern "C" CStatus

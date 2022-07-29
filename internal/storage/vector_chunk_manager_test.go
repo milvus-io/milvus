@@ -76,6 +76,14 @@ func initMeta() *etcdpb.CollectionMeta {
 					Description:  "description_11",
 					DataType:     schemapb.DataType_FloatVector,
 				},
+
+				{
+					FieldID:      110,
+					Name:         "field_uint8",
+					IsPrimaryKey: false,
+					Description:  "description_6",
+					DataType:     schemapb.DataType_UInt8,
+				},
 			},
 		},
 	}
@@ -107,6 +115,11 @@ func initBinlogFile(schema *etcdpb.CollectionMeta) []*Blob {
 				NumRows: []int64{2},
 				Data:    []float32{0, 1, 2, 3, 4, 5, 6, 7, 0, 111, 222, 333, 444, 555, 777, 666},
 				Dim:     8,
+			},
+
+			110: &UInt8FieldData{
+				NumRows: []int64{2},
+				Data:    []uint8{3, 4},
 			},
 		},
 	}

@@ -49,6 +49,10 @@ class IndexFactory {
             case proto::schema::Int16:
             case proto::schema::Int32:
             case proto::schema::Int64:
+            case proto::schema::UInt8:
+            case proto::schema::UInt16:
+            case proto::schema::UInt32:
+            case proto::schema::UInt64:
             case proto::schema::Float:
             case proto::schema::Double:
             case proto::schema::VarChar:

@@ -35,6 +35,10 @@ getStandardSchema() {
     schema->AddDebugField("Int32Field", DataType::INT32);
     schema->AddDebugField("Int16Field", DataType::INT16);
     schema->AddDebugField("Int8Field", DataType::INT8);
+    schema->AddDebugField("UInt64Field", DataType::UINT64);
+    schema->AddDebugField("UInt32Field", DataType::UINT32);
+    schema->AddDebugField("UInt16Field", DataType::UINT16);
+    schema->AddDebugField("UInt8Field", DataType::UINT8);
     schema->AddDebugField("DoubleField", DataType::DOUBLE);
     schema->AddDebugField("FloatField", DataType::FLOAT);
     return schema;
@@ -58,7 +62,11 @@ INSTANTIATE_TEST_CASE_P(InstName,
                             std::make_tuple("Int64Field"),   //
                             std::make_tuple("Int32Field"),   //
                             std::make_tuple("Int16Field"),   //
-                            std::make_tuple("Int8Field")     //
+                            std::make_tuple("Int8Field"),    //
+                            std::make_tuple("UInt64Field"),   //
+                            std::make_tuple("UInt32Field"),   //
+                            std::make_tuple("UInt16Field"),   //
+                            std::make_tuple("UInt8Field")     //
                             ));
 
 TEST_P(PlanProtoTest, Range) {

@@ -162,6 +162,14 @@ func TestSegmentLoader_loadSegmentFieldsData(t *testing.T) {
 			schema.Fields = append(schema.Fields, genConstantFieldSchema(simpleInt32Field))
 		case schemapb.DataType_Int64:
 			schema.Fields = append(schema.Fields, genConstantFieldSchema(simpleInt64Field))
+		case schemapb.DataType_UInt8:
+			schema.Fields = append(schema.Fields, genConstantFieldSchema(simpleUInt8Field))
+		case schemapb.DataType_UInt16:
+			schema.Fields = append(schema.Fields, genConstantFieldSchema(simpleUInt16Field))
+		case schemapb.DataType_UInt32:
+			schema.Fields = append(schema.Fields, genConstantFieldSchema(simpleUInt32Field))
+		case schemapb.DataType_UInt64:
+			schema.Fields = append(schema.Fields, genConstantFieldSchema(simpleUInt64Field))
 		case schemapb.DataType_Float:
 			schema.Fields = append(schema.Fields, genConstantFieldSchema(simpleFloatField))
 		case schemapb.DataType_Double:
@@ -199,6 +207,11 @@ func TestSegmentLoader_loadSegmentFieldsData(t *testing.T) {
 		runLoadSegmentFieldData(schemapb.DataType_Int8, schemapb.DataType_Int64)
 		runLoadSegmentFieldData(schemapb.DataType_Int16, schemapb.DataType_Int64)
 		runLoadSegmentFieldData(schemapb.DataType_Int32, schemapb.DataType_Int64)
+
+		runLoadSegmentFieldData(schemapb.DataType_UInt8, schemapb.DataType_Int64)
+		runLoadSegmentFieldData(schemapb.DataType_UInt16, schemapb.DataType_Int64)
+		runLoadSegmentFieldData(schemapb.DataType_UInt32, schemapb.DataType_Int64)
+
 		runLoadSegmentFieldData(schemapb.DataType_Float, schemapb.DataType_Int64)
 		runLoadSegmentFieldData(schemapb.DataType_Double, schemapb.DataType_Int64)
 		//runLoadSegmentFieldData(schemapb.DataType_VarChar)

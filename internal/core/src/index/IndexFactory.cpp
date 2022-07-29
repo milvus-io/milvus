@@ -28,6 +28,14 @@ IndexFactory::CreateIndex(CDataType dtype, const std::string& index_type) {
             return CreateIndex<int32_t>(index_type);
         case Int64:
             return CreateIndex<int64_t>(index_type);
+        case UInt8:
+            return CreateIndex<uint8_t>(index_type);
+        case UInt16:
+            return CreateIndex<uint16_t>(index_type);
+        case UInt32:
+            return CreateIndex<uint32_t>(index_type);
+        case UInt64:
+            return CreateIndex<uint64_t>(index_type);
         case Float:
             return CreateIndex<float>(index_type);
         case Double:

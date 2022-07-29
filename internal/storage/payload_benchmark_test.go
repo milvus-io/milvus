@@ -97,6 +97,61 @@ func BenchmarkPayloadReader_Int64(b *testing.B) {
 	})
 }
 
+func BenchmarkPayloadReader_UInt32(b *testing.B) {
+	w, _ := NewPayloadWriter(schemapb.DataType_UInt32)
+	defer w.ReleasePayloadWriter()
+	data := make([]uint32, 0, numElements)
+	for i := 0; i < numElements; i++ {
+		data = append(data, uint32(rand.Int31n(1000)))
+	}
+	w.AddUInt32ToPayload(data)
+	w.FinishPayloadWriter()
+	buffer, _ := w.GetPayloadBufferFromWriter()
+
+	b.Run("cgo reader", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			r, _ := NewPayloadReaderCgo(schemapb.DataType_UInt32, buffer)
+			r.GetUInt32FromPayload()
+			r.ReleasePayloadReader()
+		}
+	})
+
+	b.Run("go reader", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			r, _ := NewPayloadReader(schemapb.DataType_UInt32, buffer)
+			r.GetUInt32FromPayload()
+			r.ReleasePayloadReader()
+		}
+	})
+}
+
+func BenchmarkPayloadReader_UInt64(b *testing.B) {
+	w, _ := NewPayloadWriter(schemapb.DataType_UInt64)
+	defer w.ReleasePayloadWriter()
+	data := make([]uint64, 0, numElements)
+	for i := 0; i < numElements; i++ {
+		data = append(data, uint64(rand.Int63n(1000)))
+	}
+	w.AddUInt64ToPayload(data)
+	w.FinishPayloadWriter()
+	buffer, _ := w.GetPayloadBufferFromWriter()
+
+	b.Run("cgo reader", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			r, _ := NewPayloadReaderCgo(schemapb.DataType_UInt64, buffer)
+			r.GetUInt64FromPayload()
+			r.ReleasePayloadReader()
+		}
+	})
+
+	b.Run("go reader", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			r, _ := NewPayloadReader(schemapb.DataType_UInt64, buffer)
+			r.GetUInt64FromPayload()
+			r.ReleasePayloadReader()
+		}
+	})
+}
 func BenchmarkPayloadReader_Float32(b *testing.B) {
 	w, _ := NewPayloadWriter(schemapb.DataType_Float)
 	defer w.ReleasePayloadWriter()

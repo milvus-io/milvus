@@ -2050,6 +2050,7 @@ class TestCollectionSearch(TestcaseBase):
         log.info("test_search_expression_all_data_type: Searching collection %s" % collection_w.name)
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         search_exp = "int64 >= 0 && int32 >= 0 && int16 >= 0 " \
+                     "uint64 >= 0 && uint32 >= 0 && uint16 >= 0 uint8 >= 0" \
                      "&& int8 >= 0 && float >= 0 && double >= 0"
         res = collection_w.search(vectors[:nq], default_search_field,
                                   default_search_params, default_limit,

@@ -306,11 +306,11 @@ func Test_JSONRowConsumer(t *testing.T) {
 
 	reader := strings.NewReader(`{
 		"rows":[
-			{"field_bool": true, "field_int8": 10, "field_int16": 101, "field_int32": 1001, "field_int64": 10001, "field_float": 3.14, "field_double": 1.56, "field_string": "hello world", "field_binary_vector": [254, 0], "field_float_vector": [1.1, 1.2, 1.3, 1.4]},
-			{"field_bool": false, "field_int8": 11, "field_int16": 102, "field_int32": 1002, "field_int64": 10002, "field_float": 3.15, "field_double": 2.56, "field_string": "hello world", "field_binary_vector": [253, 0], "field_float_vector": [2.1, 2.2, 2.3, 2.4]},
-			{"field_bool": true, "field_int8": 12, "field_int16": 103, "field_int32": 1003, "field_int64": 10003, "field_float": 3.16, "field_double": 3.56, "field_string": "hello world", "field_binary_vector": [252, 0], "field_float_vector": [3.1, 3.2, 3.3, 3.4]},
-			{"field_bool": false, "field_int8": 13, "field_int16": 104, "field_int32": 1004, "field_int64": 10004, "field_float": 3.17, "field_double": 4.56, "field_string": "hello world", "field_binary_vector": [251, 0], "field_float_vector": [4.1, 4.2, 4.3, 4.4]},
-			{"field_bool": true, "field_int8": 14, "field_int16": 105, "field_int32": 1005, "field_int64": 10005, "field_float": 3.18, "field_double": 5.56, "field_string": "hello world", "field_binary_vector": [250, 0], "field_float_vector": [5.1, 5.2, 5.3, 5.4]}
+			{"field_bool": true, "field_int8": 10, "field_int16": 101, "field_int32": 1001, "field_int64": 10001, "field_uint8": 15, "field_uint16": 106, "field_uint32": 1006, "field_uint64": 10006, "field_float": 3.14, "field_double": 1.56, "field_string": "hello world", "field_binary_vector": [254, 0], "field_float_vector": [1.1, 1.2, 1.3, 1.4]},
+			{"field_bool": false, "field_int8": 11, "field_int16": 102, "field_int32": 1002, "field_int64": 10002, "field_uint8": 16, "field_uint16": 107, "field_uint32": 1007, "field_uint64": 10007, "field_float": 3.15, "field_double": 2.56, "field_string": "hello world", "field_binary_vector": [253, 0], "field_float_vector": [2.1, 2.2, 2.3, 2.4]},
+			{"field_bool": true, "field_int8": 12, "field_int16": 103, "field_int32": 1003, "field_int64": 10003, "field_uint8": 17, "field_uint16": 108, "field_uint32": 1008, "field_uint64": 10008, "field_float": 3.16, "field_double": 3.56, "field_string": "hello world", "field_binary_vector": [252, 0], "field_float_vector": [3.1, 3.2, 3.3, 3.4]},
+			{"field_bool": false, "field_int8": 13, "field_int16": 104, "field_int32": 1004, "field_int64": 10004, "field_uint8": 18, "field_uint16": 109, "field_uint32": 1009, "field_uint64": 10009, "field_float": 3.17, "field_double": 4.56, "field_string": "hello world", "field_binary_vector": [251, 0], "field_float_vector": [4.1, 4.2, 4.3, 4.4]},
+			{"field_bool": true, "field_int8": 14, "field_int16": 105, "field_int32": 1005, "field_int64": 10005, "field_uint8": 19, "field_uint16": 110, "field_uint32": 1010, "field_uint64": 10010, "field_float": 3.18, "field_double": 5.56, "field_string": "hello world", "field_binary_vector": [250, 0], "field_float_vector": [5.1, 5.2, 5.3, 5.4]}
 		]
 	}`)
 
@@ -480,6 +480,10 @@ func Test_JSONColumnConsumer(t *testing.T) {
 		"field_int16": [100, 101, 102, 103, 104],
 		"field_int32": [1000, 1001, 1002, 1003, 1004],
 		"field_int64": [10000, 10001, 10002, 10003, 10004],
+		"field_uint8": [10, 11, 12, 13, 14],
+		"field_uint16": [100, 101, 102, 103, 104],
+		"field_uint32": [1000, 1001, 1002, 1003, 1004],
+		"field_uint64": [10000, 10001, 10002, 10003, 10004],
 		"field_float": [3.14, 3.15, 3.16, 3.17, 3.18],
 		"field_double": [5.1, 5.2, 5.3, 5.4, 5.5],
 		"field_string": ["a", "b", "c", "d", "e"],

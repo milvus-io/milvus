@@ -47,6 +47,10 @@ const (
 	StringField       = 107
 	BinaryVectorField = 108
 	FloatVectorField  = 109
+	UInt8Field        = 110
+	UInt16Field       = 111
+	UInt32Field       = 112
+	UInt64Field       = 113
 )
 
 func TestInsertCodec(t *testing.T) {
@@ -108,6 +112,34 @@ func TestInsertCodec(t *testing.T) {
 					IsPrimaryKey: false,
 					Description:  "int64",
 					DataType:     schemapb.DataType_Int64,
+				},
+				{
+					FieldID:      UInt8Field,
+					Name:         "field_uint8",
+					IsPrimaryKey: false,
+					Description:  "uint8",
+					DataType:     schemapb.DataType_UInt8,
+				},
+				{
+					FieldID:      UInt16Field,
+					Name:         "field_uint16",
+					IsPrimaryKey: false,
+					Description:  "uint16",
+					DataType:     schemapb.DataType_UInt16,
+				},
+				{
+					FieldID:      UInt32Field,
+					Name:         "field_uint32",
+					IsPrimaryKey: false,
+					Description:  "uint32",
+					DataType:     schemapb.DataType_UInt32,
+				},
+				{
+					FieldID:      UInt64Field,
+					Name:         "field_uint64",
+					IsPrimaryKey: false,
+					Description:  "uint64",
+					DataType:     schemapb.DataType_UInt64,
 				},
 				{
 					FieldID:      FloatField,
@@ -178,6 +210,23 @@ func TestInsertCodec(t *testing.T) {
 				NumRows: []int64{2},
 				Data:    []int64{3, 4},
 			},
+			UInt8Field: &UInt8FieldData{
+				NumRows: []int64{2},
+				Data:    []uint8{3, 4},
+			},
+			UInt16Field: &UInt16FieldData{
+				NumRows: []int64{2},
+				Data:    []uint16{3, 4},
+			},
+			UInt32Field: &UInt32FieldData{
+				NumRows: []int64{2},
+				Data:    []uint32{3, 4},
+			},
+			UInt64Field: &UInt64FieldData{
+				NumRows: []int64{2},
+				Data:    []uint64{3, 4},
+			},
+
 			FloatField: &FloatFieldData{
 				NumRows: []int64{2},
 				Data:    []float32{3, 4},
@@ -233,6 +282,22 @@ func TestInsertCodec(t *testing.T) {
 				NumRows: []int64{2},
 				Data:    []int64{1, 2},
 			},
+			UInt8Field: &UInt8FieldData{
+				NumRows: []int64{2},
+				Data:    []uint8{1, 2},
+			},
+			UInt16Field: &UInt16FieldData{
+				NumRows: []int64{2},
+				Data:    []uint16{1, 2},
+			},
+			UInt32Field: &UInt32FieldData{
+				NumRows: []int64{2},
+				Data:    []uint32{1, 2},
+			},
+			UInt64Field: &UInt64FieldData{
+				NumRows: []int64{2},
+				Data:    []uint64{1, 2},
+			},
 			FloatField: &FloatFieldData{
 				NumRows: []int64{2},
 				Data:    []float32{1, 2},
@@ -267,6 +332,10 @@ func TestInsertCodec(t *testing.T) {
 			Int16Field:        &Int16FieldData{[]int64{}, []int16{}},
 			Int32Field:        &Int32FieldData{[]int64{}, []int32{}},
 			Int64Field:        &Int64FieldData{[]int64{}, []int64{}},
+			UInt8Field:        &UInt8FieldData{[]int64{}, []uint8{}},
+			UInt16Field:       &UInt16FieldData{[]int64{}, []uint16{}},
+			UInt32Field:       &UInt32FieldData{[]int64{}, []uint32{}},
+			UInt64Field:       &UInt64FieldData{[]int64{}, []uint64{}},
 			FloatField:        &FloatFieldData{[]int64{}, []float32{}},
 			DoubleField:       &DoubleFieldData{[]int64{}, []float64{}},
 			StringField:       &StringFieldData{[]int64{}, []string{}},
@@ -304,6 +373,10 @@ func TestInsertCodec(t *testing.T) {
 	assert.Equal(t, []int64{2, 2}, resultData.Data[Int16Field].(*Int16FieldData).NumRows)
 	assert.Equal(t, []int64{2, 2}, resultData.Data[Int32Field].(*Int32FieldData).NumRows)
 	assert.Equal(t, []int64{2, 2}, resultData.Data[Int64Field].(*Int64FieldData).NumRows)
+	assert.Equal(t, []int64{2, 2}, resultData.Data[UInt8Field].(*UInt8FieldData).NumRows)
+	assert.Equal(t, []int64{2, 2}, resultData.Data[UInt16Field].(*UInt16FieldData).NumRows)
+	assert.Equal(t, []int64{2, 2}, resultData.Data[UInt32Field].(*UInt32FieldData).NumRows)
+	assert.Equal(t, []int64{2, 2}, resultData.Data[UInt64Field].(*UInt64FieldData).NumRows)
 	assert.Equal(t, []int64{2, 2}, resultData.Data[FloatField].(*FloatFieldData).NumRows)
 	assert.Equal(t, []int64{2, 2}, resultData.Data[DoubleField].(*DoubleFieldData).NumRows)
 	assert.Equal(t, []int64{2, 2}, resultData.Data[StringField].(*StringFieldData).NumRows)
@@ -316,6 +389,10 @@ func TestInsertCodec(t *testing.T) {
 	assert.Equal(t, []int16{1, 2, 3, 4}, resultData.Data[Int16Field].(*Int16FieldData).Data)
 	assert.Equal(t, []int32{1, 2, 3, 4}, resultData.Data[Int32Field].(*Int32FieldData).Data)
 	assert.Equal(t, []int64{1, 2, 3, 4}, resultData.Data[Int64Field].(*Int64FieldData).Data)
+	assert.Equal(t, []uint8{1, 2, 3, 4}, resultData.Data[UInt8Field].(*UInt8FieldData).Data)
+	assert.Equal(t, []uint16{1, 2, 3, 4}, resultData.Data[UInt16Field].(*UInt16FieldData).Data)
+	assert.Equal(t, []uint32{1, 2, 3, 4}, resultData.Data[UInt32Field].(*UInt32FieldData).Data)
+	assert.Equal(t, []uint64{1, 2, 3, 4}, resultData.Data[UInt64Field].(*UInt64FieldData).Data)
 	assert.Equal(t, []float32{1, 2, 3, 4}, resultData.Data[FloatField].(*FloatFieldData).Data)
 	assert.Equal(t, []float64{1, 2, 3, 4}, resultData.Data[DoubleField].(*DoubleFieldData).Data)
 	assert.Equal(t, []string{"1", "2", "3", "4"}, resultData.Data[StringField].(*StringFieldData).Data)

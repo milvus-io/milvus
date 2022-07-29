@@ -52,6 +52,19 @@ func (r *PayloadReader) GetDataFromPayload() (interface{}, int, error) {
 	case schemapb.DataType_Int64:
 		val, err := r.GetInt64FromPayload()
 		return val, 0, err
+
+	case schemapb.DataType_UInt8:
+		val, err := r.GetUInt8FromPayload()
+		return val, 0, err
+	case schemapb.DataType_UInt16:
+		val, err := r.GetUInt16FromPayload()
+		return val, 0, err
+	case schemapb.DataType_UInt32:
+		val, err := r.GetUInt32FromPayload()
+		return val, 0, err
+	case schemapb.DataType_UInt64:
+		val, err := r.GetUInt64FromPayload()
+		return val, 0, err
 	case schemapb.DataType_Float:
 		val, err := r.GetFloatFromPayload()
 		return val, 0, err
@@ -212,6 +225,106 @@ func (r *PayloadReader) GetInt64FromPayload() ([]int64, error) {
 		return nil, fmt.Errorf("expect %d rows, but got total = %d and valuesRead = %d", r.numRows, total, valuesRead)
 	}
 	return values, nil
+}
+
+func (r *PayloadReader) GetUInt8FromPayload() ([]uint8, error) {
+	if r.colType != schemapb.DataType_UInt8 {
+		return nil, fmt.Errorf("failed to get uint8 from datatype %v", r.colType.String())
+	}
+
+	reader, ok := r.reader.RowGroup(0).Column(0).(*file.Int32ColumnChunkReader)
+	if !ok {
+		return nil, fmt.Errorf("expect type *file.UInt32(8)ColumnChunkReader, but got %T", r.reader.RowGroup(0).Column(0))
+	}
+	values := make([]int32, r.numRows)
+	total, valuesRead, err := reader.ReadBatch(r.numRows, values, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	if total != r.numRows || int64(valuesRead) != r.numRows {
+		return nil, fmt.Errorf("expect %d rows, but got total = %d and valuesRead = %d", r.numRows, total, valuesRead)
+	}
+
+	ret := make([]uint8, r.numRows)
+	for i := int64(0); i < r.numRows; i++ {
+		ret[i] = uint8(values[i])
+	}
+	return ret, nil
+}
+
+func (r *PayloadReader) GetUInt16FromPayload() ([]uint16, error) {
+	if r.colType != schemapb.DataType_UInt16 {
+		return nil, fmt.Errorf("failed to get uint16 from datatype %v", r.colType.String())
+	}
+
+	reader, ok := r.reader.RowGroup(0).Column(0).(*file.Int32ColumnChunkReader)
+	if !ok {
+		return nil, fmt.Errorf("expect type *file.UInt32(16)ColumnChunkReader, but got %T", r.reader.RowGroup(0).Column(0))
+	}
+	values := make([]int32, r.numRows)
+	total, valuesRead, err := reader.ReadBatch(r.numRows, values, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	if total != r.numRows || int64(valuesRead) != r.numRows {
+		return nil, fmt.Errorf("expect %d rows, but got total = %d and valuesRead = %d", r.numRows, total, valuesRead)
+	}
+
+	ret := make([]uint16, r.numRows)
+	for i := int64(0); i < r.numRows; i++ {
+		ret[i] = uint16(values[i])
+	}
+	return ret, nil
+}
+
+func (r *PayloadReader) GetUInt32FromPayload() ([]uint32, error) {
+	if r.colType != schemapb.DataType_UInt32 {
+		return nil, fmt.Errorf("failed to get uint32 from datatype %v", r.colType.String())
+	}
+
+	reader, ok := r.reader.RowGroup(0).Column(0).(*file.Int64ColumnChunkReader)
+	if !ok {
+		fmt.Println("uint32")
+		return nil, fmt.Errorf("expect type *file.UInt64(32)ColumnChunkReader, but got %T", r.reader.RowGroup(0).Column(0))
+	}
+	values := make([]int64, r.numRows)
+	total, valuesRead, err := reader.ReadBatch(r.numRows, values, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	if total != r.numRows || int64(valuesRead) != r.numRows {
+		return nil, fmt.Errorf("expect %d rows, but got total = %d and valuesRead = %d", r.numRows, total, valuesRead)
+	}
+
+	ret := make([]uint32, r.numRows)
+	for i := int64(0); i < r.numRows; i++ {
+		ret[i] = uint32(values[i])
+	}
+	return ret, nil
+}
+
+func (r *PayloadReader) GetUInt64FromPayload() ([]uint64, error) {
+	if r.colType != schemapb.DataType_UInt64 {
+		return nil, fmt.Errorf("failed to get uint64 from datatype %v", r.colType.String())
+	}
+	reader, ok := r.reader.RowGroup(0).Column(0).(*file.Int64ColumnChunkReader)
+	if !ok {
+		return nil, fmt.Errorf("expect type *file.UInt64(64)ColumnChunkReader, but got %T", r.reader.RowGroup(0).Column(0))
+	}
+
+	values := make([]int64, r.numRows)
+	total, valuesRead, err := reader.ReadBatch(r.numRows, values, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	if total != r.numRows || int64(valuesRead) != r.numRows {
+		return nil, fmt.Errorf("expect %d rows, but got total = %d and valuesRead = %d", r.numRows, total, valuesRead)
+	}
+	ret := make([]uint64, r.numRows)
+	for i := int64(0); i < r.numRows; i++ {
+		ret[i] = uint64(values[i])
+	}
+	return ret, nil
 }
 
 func (r *PayloadReader) GetFloatFromPayload() ([]float32, error) {

@@ -49,7 +49,7 @@ struct TableStruct_schema_2eproto {
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::AuxillaryParseTableField aux[]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
-  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[14]
+  static const ::PROTOBUF_NAMESPACE_ID::internal::ParseTable schema[16]
     PROTOBUF_SECTION_VARIABLE(protodesc_cold);
   static const ::PROTOBUF_NAMESPACE_ID::internal::FieldMetadata field_metadata[];
   static const ::PROTOBUF_NAMESPACE_ID::internal::SerializationTable serialization_table[];
@@ -98,6 +98,12 @@ extern SearchResultDataDefaultTypeInternal _SearchResultData_default_instance_;
 class StringArray;
 class StringArrayDefaultTypeInternal;
 extern StringArrayDefaultTypeInternal _StringArray_default_instance_;
+class UIntArray;
+class UIntArrayDefaultTypeInternal;
+extern UIntArrayDefaultTypeInternal _UIntArray_default_instance_;
+class ULongArray;
+class ULongArrayDefaultTypeInternal;
+extern ULongArrayDefaultTypeInternal _ULongArray_default_instance_;
 class VectorField;
 class VectorFieldDefaultTypeInternal;
 extern VectorFieldDefaultTypeInternal _VectorField_default_instance_;
@@ -118,6 +124,8 @@ template<> ::milvus::proto::schema::LongArray* Arena::CreateMaybeMessage<::milvu
 template<> ::milvus::proto::schema::ScalarField* Arena::CreateMaybeMessage<::milvus::proto::schema::ScalarField>(Arena*);
 template<> ::milvus::proto::schema::SearchResultData* Arena::CreateMaybeMessage<::milvus::proto::schema::SearchResultData>(Arena*);
 template<> ::milvus::proto::schema::StringArray* Arena::CreateMaybeMessage<::milvus::proto::schema::StringArray>(Arena*);
+template<> ::milvus::proto::schema::UIntArray* Arena::CreateMaybeMessage<::milvus::proto::schema::UIntArray>(Arena*);
+template<> ::milvus::proto::schema::ULongArray* Arena::CreateMaybeMessage<::milvus::proto::schema::ULongArray>(Arena*);
 template<> ::milvus::proto::schema::VectorField* Arena::CreateMaybeMessage<::milvus::proto::schema::VectorField>(Arena*);
 PROTOBUF_NAMESPACE_CLOSE
 namespace milvus {
@@ -131,6 +139,10 @@ enum DataType : int {
   Int16 = 3,
   Int32 = 4,
   Int64 = 5,
+  UInt8 = 6,
+  UInt16 = 7,
+  UInt32 = 8,
+  UInt64 = 9,
   Float = 10,
   Double = 11,
   String = 20,
@@ -949,6 +961,282 @@ class LongArray :
 };
 // -------------------------------------------------------------------
 
+class UIntArray :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.schema.UIntArray) */ {
+ public:
+  UIntArray();
+  virtual ~UIntArray();
+
+  UIntArray(const UIntArray& from);
+  UIntArray(UIntArray&& from) noexcept
+    : UIntArray() {
+    *this = ::std::move(from);
+  }
+
+  inline UIntArray& operator=(const UIntArray& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline UIntArray& operator=(UIntArray&& from) noexcept {
+    if (GetArenaNoVirtual() == from.GetArenaNoVirtual()) {
+      if (this != &from) InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
+    return GetDescriptor();
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
+    return GetMetadataStatic().descriptor;
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
+    return GetMetadataStatic().reflection;
+  }
+  static const UIntArray& default_instance();
+
+  static void InitAsDefaultInstance();  // FOR INTERNAL USE ONLY
+  static inline const UIntArray* internal_default_instance() {
+    return reinterpret_cast<const UIntArray*>(
+               &_UIntArray_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    5;
+
+  friend void swap(UIntArray& a, UIntArray& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(UIntArray* other) {
+    if (other == this) return;
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  inline UIntArray* New() const final {
+    return CreateMaybeMessage<UIntArray>(nullptr);
+  }
+
+  UIntArray* New(::PROTOBUF_NAMESPACE_ID::Arena* arena) const final {
+    return CreateMaybeMessage<UIntArray>(arena);
+  }
+  void CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void CopyFrom(const UIntArray& from);
+  void MergeFrom(const UIntArray& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  #if GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  #else
+  bool MergePartialFromCodedStream(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedInputStream* input) final;
+  #endif  // GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  void SerializeWithCachedSizes(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream* output) const final;
+  ::PROTOBUF_NAMESPACE_ID::uint8* InternalSerializeWithCachedSizesToArray(
+      ::PROTOBUF_NAMESPACE_ID::uint8* target) const final;
+  int GetCachedSize() const final { return _cached_size_.Get(); }
+
+  private:
+  inline void SharedCtor();
+  inline void SharedDtor();
+  void SetCachedSize(int size) const final;
+  void InternalSwap(UIntArray* other);
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "milvus.proto.schema.UIntArray";
+  }
+  private:
+  inline ::PROTOBUF_NAMESPACE_ID::Arena* GetArenaNoVirtual() const {
+    return nullptr;
+  }
+  inline void* MaybeArenaPtr() const {
+    return nullptr;
+  }
+  public:
+
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  private:
+  static ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadataStatic() {
+    ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&::descriptor_table_schema_2eproto);
+    return ::descriptor_table_schema_2eproto.file_level_metadata[kIndexInFileMessages];
+  }
+
+  public:
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kDataFieldNumber = 1,
+  };
+  // repeated uint32 data = 1;
+  int data_size() const;
+  void clear_data();
+  ::PROTOBUF_NAMESPACE_ID::uint32 data(int index) const;
+  void set_data(int index, ::PROTOBUF_NAMESPACE_ID::uint32 value);
+  void add_data(::PROTOBUF_NAMESPACE_ID::uint32 value);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint32 >&
+      data() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint32 >*
+      mutable_data();
+
+  // @@protoc_insertion_point(class_scope:milvus.proto.schema.UIntArray)
+ private:
+  class _Internal;
+
+  ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint32 > data_;
+  mutable std::atomic<int> _data_cached_byte_size_;
+  mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  friend struct ::TableStruct_schema_2eproto;
+};
+// -------------------------------------------------------------------
+
+class ULongArray :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.schema.ULongArray) */ {
+ public:
+  ULongArray();
+  virtual ~ULongArray();
+
+  ULongArray(const ULongArray& from);
+  ULongArray(ULongArray&& from) noexcept
+    : ULongArray() {
+    *this = ::std::move(from);
+  }
+
+  inline ULongArray& operator=(const ULongArray& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline ULongArray& operator=(ULongArray&& from) noexcept {
+    if (GetArenaNoVirtual() == from.GetArenaNoVirtual()) {
+      if (this != &from) InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
+    return GetDescriptor();
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
+    return GetMetadataStatic().descriptor;
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
+    return GetMetadataStatic().reflection;
+  }
+  static const ULongArray& default_instance();
+
+  static void InitAsDefaultInstance();  // FOR INTERNAL USE ONLY
+  static inline const ULongArray* internal_default_instance() {
+    return reinterpret_cast<const ULongArray*>(
+               &_ULongArray_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    6;
+
+  friend void swap(ULongArray& a, ULongArray& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(ULongArray* other) {
+    if (other == this) return;
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  inline ULongArray* New() const final {
+    return CreateMaybeMessage<ULongArray>(nullptr);
+  }
+
+  ULongArray* New(::PROTOBUF_NAMESPACE_ID::Arena* arena) const final {
+    return CreateMaybeMessage<ULongArray>(arena);
+  }
+  void CopyFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void MergeFrom(const ::PROTOBUF_NAMESPACE_ID::Message& from) final;
+  void CopyFrom(const ULongArray& from);
+  void MergeFrom(const ULongArray& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  #if GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  #else
+  bool MergePartialFromCodedStream(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedInputStream* input) final;
+  #endif  // GOOGLE_PROTOBUF_ENABLE_EXPERIMENTAL_PARSER
+  void SerializeWithCachedSizes(
+      ::PROTOBUF_NAMESPACE_ID::io::CodedOutputStream* output) const final;
+  ::PROTOBUF_NAMESPACE_ID::uint8* InternalSerializeWithCachedSizesToArray(
+      ::PROTOBUF_NAMESPACE_ID::uint8* target) const final;
+  int GetCachedSize() const final { return _cached_size_.Get(); }
+
+  private:
+  inline void SharedCtor();
+  inline void SharedDtor();
+  void SetCachedSize(int size) const final;
+  void InternalSwap(ULongArray* other);
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "milvus.proto.schema.ULongArray";
+  }
+  private:
+  inline ::PROTOBUF_NAMESPACE_ID::Arena* GetArenaNoVirtual() const {
+    return nullptr;
+  }
+  inline void* MaybeArenaPtr() const {
+    return nullptr;
+  }
+  public:
+
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  private:
+  static ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadataStatic() {
+    ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&::descriptor_table_schema_2eproto);
+    return ::descriptor_table_schema_2eproto.file_level_metadata[kIndexInFileMessages];
+  }
+
+  public:
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kDataFieldNumber = 1,
+  };
+  // repeated uint64 data = 1;
+  int data_size() const;
+  void clear_data();
+  ::PROTOBUF_NAMESPACE_ID::uint64 data(int index) const;
+  void set_data(int index, ::PROTOBUF_NAMESPACE_ID::uint64 value);
+  void add_data(::PROTOBUF_NAMESPACE_ID::uint64 value);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint64 >&
+      data() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint64 >*
+      mutable_data();
+
+  // @@protoc_insertion_point(class_scope:milvus.proto.schema.ULongArray)
+ private:
+  class _Internal;
+
+  ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint64 > data_;
+  mutable std::atomic<int> _data_cached_byte_size_;
+  mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  friend struct ::TableStruct_schema_2eproto;
+};
+// -------------------------------------------------------------------
+
 class FloatArray :
     public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.schema.FloatArray) */ {
  public:
@@ -991,7 +1279,7 @@ class FloatArray :
                &_FloatArray_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    5;
+    7;
 
   friend void swap(FloatArray& a, FloatArray& b) {
     a.Swap(&b);
@@ -1129,7 +1417,7 @@ class DoubleArray :
                &_DoubleArray_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    6;
+    8;
 
   friend void swap(DoubleArray& a, DoubleArray& b) {
     a.Swap(&b);
@@ -1267,7 +1555,7 @@ class BytesArray :
                &_BytesArray_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    7;
+    9;
 
   friend void swap(BytesArray& a, BytesArray& b) {
     a.Swap(&b);
@@ -1410,7 +1698,7 @@ class StringArray :
                &_StringArray_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    8;
+    10;
 
   friend void swap(StringArray& a, StringArray& b) {
     a.Swap(&b);
@@ -1555,6 +1843,8 @@ class ScalarField :
     kDoubleData = 5,
     kStringData = 6,
     kBytesData = 7,
+    kUintData = 8,
+    kUlongData = 9,
     DATA_NOT_SET = 0,
   };
 
@@ -1564,7 +1854,7 @@ class ScalarField :
                &_ScalarField_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    9;
+    11;
 
   friend void swap(ScalarField& a, ScalarField& b) {
     a.Swap(&b);
@@ -1642,6 +1932,8 @@ class ScalarField :
     kDoubleDataFieldNumber = 5,
     kStringDataFieldNumber = 6,
     kBytesDataFieldNumber = 7,
+    kUintDataFieldNumber = 8,
+    kUlongDataFieldNumber = 9,
   };
   // .milvus.proto.schema.BoolArray bool_data = 1;
   bool has_bool_data() const;
@@ -1699,6 +1991,22 @@ class ScalarField :
   ::milvus::proto::schema::BytesArray* mutable_bytes_data();
   void set_allocated_bytes_data(::milvus::proto::schema::BytesArray* bytes_data);
 
+  // .milvus.proto.schema.UIntArray uint_data = 8;
+  bool has_uint_data() const;
+  void clear_uint_data();
+  const ::milvus::proto::schema::UIntArray& uint_data() const;
+  ::milvus::proto::schema::UIntArray* release_uint_data();
+  ::milvus::proto::schema::UIntArray* mutable_uint_data();
+  void set_allocated_uint_data(::milvus::proto::schema::UIntArray* uint_data);
+
+  // .milvus.proto.schema.ULongArray ulong_data = 9;
+  bool has_ulong_data() const;
+  void clear_ulong_data();
+  const ::milvus::proto::schema::ULongArray& ulong_data() const;
+  ::milvus::proto::schema::ULongArray* release_ulong_data();
+  ::milvus::proto::schema::ULongArray* mutable_ulong_data();
+  void set_allocated_ulong_data(::milvus::proto::schema::ULongArray* ulong_data);
+
   void clear_data();
   DataCase data_case() const;
   // @@protoc_insertion_point(class_scope:milvus.proto.schema.ScalarField)
@@ -1711,6 +2019,8 @@ class ScalarField :
   void set_has_double_data();
   void set_has_string_data();
   void set_has_bytes_data();
+  void set_has_uint_data();
+  void set_has_ulong_data();
 
   inline bool has_data() const;
   inline void clear_has_data();
@@ -1725,6 +2035,8 @@ class ScalarField :
     ::milvus::proto::schema::DoubleArray* double_data_;
     ::milvus::proto::schema::StringArray* string_data_;
     ::milvus::proto::schema::BytesArray* bytes_data_;
+    ::milvus::proto::schema::UIntArray* uint_data_;
+    ::milvus::proto::schema::ULongArray* ulong_data_;
   } data_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   ::PROTOBUF_NAMESPACE_ID::uint32 _oneof_case_[1];
@@ -1781,7 +2093,7 @@ class VectorField :
                &_VectorField_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    10;
+    12;
 
   friend void swap(VectorField& a, VectorField& b) {
     a.Swap(&b);
@@ -1956,7 +2268,7 @@ class FieldData :
                &_FieldData_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    11;
+    13;
 
   friend void swap(FieldData& a, FieldData& b) {
     a.Swap(&b);
@@ -2145,7 +2457,7 @@ class IDs :
                &_IDs_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    12;
+    14;
 
   friend void swap(IDs& a, IDs& b) {
     a.Swap(&b);
@@ -2301,7 +2613,7 @@ class SearchResultData :
                &_SearchResultData_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    13;
+    15;
 
   friend void swap(SearchResultData& a, SearchResultData& b) {
     a.Swap(&b);
@@ -2923,6 +3235,74 @@ LongArray::mutable_data() {
 
 // -------------------------------------------------------------------
 
+// UIntArray
+
+// repeated uint32 data = 1;
+inline int UIntArray::data_size() const {
+  return data_.size();
+}
+inline void UIntArray::clear_data() {
+  data_.Clear();
+}
+inline ::PROTOBUF_NAMESPACE_ID::uint32 UIntArray::data(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.schema.UIntArray.data)
+  return data_.Get(index);
+}
+inline void UIntArray::set_data(int index, ::PROTOBUF_NAMESPACE_ID::uint32 value) {
+  data_.Set(index, value);
+  // @@protoc_insertion_point(field_set:milvus.proto.schema.UIntArray.data)
+}
+inline void UIntArray::add_data(::PROTOBUF_NAMESPACE_ID::uint32 value) {
+  data_.Add(value);
+  // @@protoc_insertion_point(field_add:milvus.proto.schema.UIntArray.data)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint32 >&
+UIntArray::data() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.schema.UIntArray.data)
+  return data_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint32 >*
+UIntArray::mutable_data() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.schema.UIntArray.data)
+  return &data_;
+}
+
+// -------------------------------------------------------------------
+
+// ULongArray
+
+// repeated uint64 data = 1;
+inline int ULongArray::data_size() const {
+  return data_.size();
+}
+inline void ULongArray::clear_data() {
+  data_.Clear();
+}
+inline ::PROTOBUF_NAMESPACE_ID::uint64 ULongArray::data(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.schema.ULongArray.data)
+  return data_.Get(index);
+}
+inline void ULongArray::set_data(int index, ::PROTOBUF_NAMESPACE_ID::uint64 value) {
+  data_.Set(index, value);
+  // @@protoc_insertion_point(field_set:milvus.proto.schema.ULongArray.data)
+}
+inline void ULongArray::add_data(::PROTOBUF_NAMESPACE_ID::uint64 value) {
+  data_.Add(value);
+  // @@protoc_insertion_point(field_add:milvus.proto.schema.ULongArray.data)
+}
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint64 >&
+ULongArray::data() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.schema.ULongArray.data)
+  return data_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::uint64 >*
+ULongArray::mutable_data() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.schema.ULongArray.data)
+  return &data_;
+}
+
+// -------------------------------------------------------------------
+
 // FloatArray
 
 // repeated float data = 1;
@@ -3416,6 +3796,88 @@ inline ::milvus::proto::schema::BytesArray* ScalarField::mutable_bytes_data() {
   }
   // @@protoc_insertion_point(field_mutable:milvus.proto.schema.ScalarField.bytes_data)
   return data_.bytes_data_;
+}
+
+// .milvus.proto.schema.UIntArray uint_data = 8;
+inline bool ScalarField::has_uint_data() const {
+  return data_case() == kUintData;
+}
+inline void ScalarField::set_has_uint_data() {
+  _oneof_case_[0] = kUintData;
+}
+inline void ScalarField::clear_uint_data() {
+  if (has_uint_data()) {
+    delete data_.uint_data_;
+    clear_has_data();
+  }
+}
+inline ::milvus::proto::schema::UIntArray* ScalarField::release_uint_data() {
+  // @@protoc_insertion_point(field_release:milvus.proto.schema.ScalarField.uint_data)
+  if (has_uint_data()) {
+    clear_has_data();
+      ::milvus::proto::schema::UIntArray* temp = data_.uint_data_;
+    data_.uint_data_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::milvus::proto::schema::UIntArray& ScalarField::uint_data() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.schema.ScalarField.uint_data)
+  return has_uint_data()
+      ? *data_.uint_data_
+      : *reinterpret_cast< ::milvus::proto::schema::UIntArray*>(&::milvus::proto::schema::_UIntArray_default_instance_);
+}
+inline ::milvus::proto::schema::UIntArray* ScalarField::mutable_uint_data() {
+  if (!has_uint_data()) {
+    clear_data();
+    set_has_uint_data();
+    data_.uint_data_ = CreateMaybeMessage< ::milvus::proto::schema::UIntArray >(
+        GetArenaNoVirtual());
+  }
+  // @@protoc_insertion_point(field_mutable:milvus.proto.schema.ScalarField.uint_data)
+  return data_.uint_data_;
+}
+
+// .milvus.proto.schema.ULongArray ulong_data = 9;
+inline bool ScalarField::has_ulong_data() const {
+  return data_case() == kUlongData;
+}
+inline void ScalarField::set_has_ulong_data() {
+  _oneof_case_[0] = kUlongData;
+}
+inline void ScalarField::clear_ulong_data() {
+  if (has_ulong_data()) {
+    delete data_.ulong_data_;
+    clear_has_data();
+  }
+}
+inline ::milvus::proto::schema::ULongArray* ScalarField::release_ulong_data() {
+  // @@protoc_insertion_point(field_release:milvus.proto.schema.ScalarField.ulong_data)
+  if (has_ulong_data()) {
+    clear_has_data();
+      ::milvus::proto::schema::ULongArray* temp = data_.ulong_data_;
+    data_.ulong_data_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::milvus::proto::schema::ULongArray& ScalarField::ulong_data() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.schema.ScalarField.ulong_data)
+  return has_ulong_data()
+      ? *data_.ulong_data_
+      : *reinterpret_cast< ::milvus::proto::schema::ULongArray*>(&::milvus::proto::schema::_ULongArray_default_instance_);
+}
+inline ::milvus::proto::schema::ULongArray* ScalarField::mutable_ulong_data() {
+  if (!has_ulong_data()) {
+    clear_data();
+    set_has_ulong_data();
+    data_.ulong_data_ = CreateMaybeMessage< ::milvus::proto::schema::ULongArray >(
+        GetArenaNoVirtual());
+  }
+  // @@protoc_insertion_point(field_mutable:milvus.proto.schema.ScalarField.ulong_data)
+  return data_.ulong_data_;
 }
 
 inline bool ScalarField::has_data() const {
@@ -4030,6 +4492,10 @@ SearchResultData::mutable_topks() {
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------

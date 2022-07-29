@@ -58,6 +58,31 @@ GetDType<int64_t>() {
 
 template <>
 inline CDataType
+GetDType<uint8_t>() {
+    return UInt8;
+}
+
+template <>
+inline CDataType
+GetDType<uint16_t>() {
+    return UInt16;
+}
+
+template <>
+inline CDataType
+GetDType<uint32_t>() {
+    return UInt32;
+}
+
+template <>
+inline CDataType
+GetDType<uint64_t>() {
+    return UInt64;
+}
+//
+
+template <>
+inline CDataType
 GetDType<float>() {
     return Float;
 }

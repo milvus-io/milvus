@@ -69,6 +69,35 @@ func GenDataset(data storage.FieldData) *Dataset {
 				keyRawArr: f.Data,
 			},
 		}
+	case *storage.UInt8FieldData:
+		return &Dataset{
+			DType: schemapb.DataType_UInt8,
+			Data: map[string]interface{}{
+				keyRawArr: f.Data,
+			},
+		}
+	case *storage.UInt16FieldData:
+		return &Dataset{
+			DType: schemapb.DataType_UInt16,
+			Data: map[string]interface{}{
+				keyRawArr: f.Data,
+			},
+		}
+	case *storage.UInt32FieldData:
+		return &Dataset{
+			DType: schemapb.DataType_UInt32,
+			Data: map[string]interface{}{
+				keyRawArr: f.Data,
+			},
+		}
+	case *storage.UInt64FieldData:
+		return &Dataset{
+			DType: schemapb.DataType_UInt64,
+			Data: map[string]interface{}{
+				keyRawArr: f.Data,
+			},
+		}
+
 	case *storage.FloatFieldData:
 		return &Dataset{
 			DType: schemapb.DataType_Float,

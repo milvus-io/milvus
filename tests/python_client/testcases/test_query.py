@@ -242,6 +242,9 @@ class TestQueryParams(TestcaseBase):
             ct.default_int64_field_name: pd.Series(data=[i for i in range(ct.default_nb)]),
             ct.default_int32_field_name: pd.Series(data=[np.int32(i) for i in range(ct.default_nb)], dtype="int32"),
             ct.default_int16_field_name: pd.Series(data=[np.int16(i) for i in range(ct.default_nb)], dtype="int16"),
+            ct.default_uint64_field_name: pd.Series(data=[np.uint64(i) for i in range(ct.default_nb)], dtype="uint64"),
+            ct.default_uint32_field_name: pd.Series(data=[np.uint32(i) for i in range(ct.default_nb)], dtype="uint32"),
+            ct.default_uint16_field_name: pd.Series(data=[np.uint16(i) for i in range(ct.default_nb)], dtype="uint16"),
             ct.default_float_field_name: pd.Series(data=[np.float32(i) for i in range(ct.default_nb)], dtype="float32"),
             ct.default_double_field_name: pd.Series(data=[np.double(i) for i in range(ct.default_nb)], dtype="double"),
             ct.default_string_field_name: pd.Series(data=[str(i) for i in range(ct.default_nb)], dtype="string"),
@@ -254,6 +257,7 @@ class TestQueryParams(TestcaseBase):
 
         # query by non_primary non_vector scalar field
         non_primary_field = [ct.default_int32_field_name, ct.default_int16_field_name,
+                             ct.default_uint64_field_name, ct.default_uint32_field_name, ct.default_uint16_field_name,
                              ct.default_float_field_name, ct.default_double_field_name, ct.default_string_field_name]
 
         # exp res: first two rows and all fields expect last vec field
@@ -549,8 +553,9 @@ class TestQueryParams(TestcaseBase):
         collection_w, df, _, insert_ids = self.init_collection_general(prefix, True, nb=10,
                                                                        is_all_data_type=True)[0:4]
         all_fields = [ct.default_int64_field_name, ct.default_int32_field_name, ct.default_int16_field_name,
-                      ct.default_int8_field_name, ct.default_bool_field_name, ct.default_float_field_name,
-                      ct.default_double_field_name, ct.default_string_field_name, ct.default_float_vec_field_name]
+                      ct.default_int8_field_name, ct.default_uint64_field_name, ct.default_uint32_field_name,
+                      ct.default_uint16_field_name, ct.default_uint8_field_name, ct.default_bool_field_name,
+                      ct.default_float_field_name, ct.default_double_field_name, ct.default_string_field_name, ct.default_float_vec_field_name]
         res = df[0].iloc[:2].to_dict('records')
         collection_w.load()
         actual_res, _ = collection_w.query(default_term_expr, output_fields=all_fields,

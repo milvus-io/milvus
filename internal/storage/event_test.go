@@ -246,6 +246,62 @@ func TestInsertEvent(t *testing.T) {
 			[]int64{1, 2, 3, 4, 5, 6})
 	})
 
+	t.Run("insert_uint8", func(t *testing.T) {
+		insertT(t, schemapb.DataType_UInt8,
+			func(w *insertEventWriter) error {
+				return w.AddDataToPayload([]uint8{1, 2, 3})
+			},
+			func(w *insertEventWriter) error {
+				return w.AddDataToPayload([]uint8{4, 5, 6})
+			},
+			func(w *insertEventWriter) error {
+				return w.AddDataToPayload([]uint{1, 2, 3, 4, 5})
+			},
+			[]uint8{1, 2, 3, 4, 5, 6})
+	})
+
+	t.Run("insert_uint16", func(t *testing.T) {
+		insertT(t, schemapb.DataType_UInt16,
+			func(w *insertEventWriter) error {
+				return w.AddDataToPayload([]uint16{1, 2, 3})
+			},
+			func(w *insertEventWriter) error {
+				return w.AddDataToPayload([]uint16{4, 5, 6})
+			},
+			func(w *insertEventWriter) error {
+				return w.AddDataToPayload([]uint{1, 2, 3, 4, 5})
+			},
+			[]uint16{1, 2, 3, 4, 5, 6})
+	})
+
+	t.Run("insert_uint32", func(t *testing.T) {
+		insertT(t, schemapb.DataType_UInt32,
+			func(w *insertEventWriter) error {
+				return w.AddDataToPayload([]uint32{1, 2, 3})
+			},
+			func(w *insertEventWriter) error {
+				return w.AddDataToPayload([]uint32{4, 5, 6})
+			},
+			func(w *insertEventWriter) error {
+				return w.AddDataToPayload([]uint{1, 2, 3, 4, 5})
+			},
+			[]uint32{1, 2, 3, 4, 5, 6})
+	})
+
+	t.Run("insert_uint64", func(t *testing.T) {
+		insertT(t, schemapb.DataType_UInt64,
+			func(w *insertEventWriter) error {
+				return w.AddDataToPayload([]uint64{1, 2, 3})
+			},
+			func(w *insertEventWriter) error {
+				return w.AddDataToPayload([]uint64{4, 5, 6})
+			},
+			func(w *insertEventWriter) error {
+				return w.AddDataToPayload([]uint{1, 2, 3, 4, 5})
+			},
+			[]uint64{1, 2, 3, 4, 5, 6})
+	})
+
 	t.Run("insert_float32", func(t *testing.T) {
 		insertT(t, schemapb.DataType_Float,
 			func(w *insertEventWriter) error {
@@ -473,6 +529,61 @@ func TestDeleteEvent(t *testing.T) {
 			[]int64{1, 2, 3, 4, 5, 6})
 	})
 
+	t.Run("delete_uint8", func(t *testing.T) {
+		deleteT(t, schemapb.DataType_UInt8,
+			func(w *deleteEventWriter) error {
+				return w.AddDataToPayload([]uint8{1, 2, 3})
+			},
+			func(w *deleteEventWriter) error {
+				return w.AddDataToPayload([]uint8{4, 5, 6})
+			},
+			func(w *deleteEventWriter) error {
+				return w.AddDataToPayload([]uint{1, 2, 3, 4, 5})
+			},
+			[]uint8{1, 2, 3, 4, 5, 6})
+	})
+
+	t.Run("delete_uint16", func(t *testing.T) {
+		deleteT(t, schemapb.DataType_UInt16,
+			func(w *deleteEventWriter) error {
+				return w.AddDataToPayload([]uint16{1, 2, 3})
+			},
+			func(w *deleteEventWriter) error {
+				return w.AddDataToPayload([]uint16{4, 5, 6})
+			},
+			func(w *deleteEventWriter) error {
+				return w.AddDataToPayload([]uint{1, 2, 3, 4, 5})
+			},
+			[]uint16{1, 2, 3, 4, 5, 6})
+	})
+
+	t.Run("delete_uint32", func(t *testing.T) {
+		deleteT(t, schemapb.DataType_UInt32,
+			func(w *deleteEventWriter) error {
+				return w.AddDataToPayload([]uint32{1, 2, 3})
+			},
+			func(w *deleteEventWriter) error {
+				return w.AddDataToPayload([]uint32{4, 5, 6})
+			},
+			func(w *deleteEventWriter) error {
+				return w.AddDataToPayload([]uint{1, 2, 3, 4, 5})
+			},
+			[]uint32{1, 2, 3, 4, 5, 6})
+	})
+
+	t.Run("delete_uint64", func(t *testing.T) {
+		deleteT(t, schemapb.DataType_UInt64,
+			func(w *deleteEventWriter) error {
+				return w.AddDataToPayload([]uint64{1, 2, 3})
+			},
+			func(w *deleteEventWriter) error {
+				return w.AddDataToPayload([]uint64{4, 5, 6})
+			},
+			func(w *deleteEventWriter) error {
+				return w.AddDataToPayload([]uint{1, 2, 3, 4, 5})
+			},
+			[]uint64{1, 2, 3, 4, 5, 6})
+	})
 	t.Run("delete_float32", func(t *testing.T) {
 		deleteT(t, schemapb.DataType_Float,
 			func(w *deleteEventWriter) error {

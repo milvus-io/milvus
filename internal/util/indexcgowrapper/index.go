@@ -103,6 +103,14 @@ func (index *CgoIndex) Build(dataset *Dataset) error {
 		return index.buildInt32Index(dataset)
 	case schemapb.DataType_Int64:
 		return index.buildInt64Index(dataset)
+	case schemapb.DataType_UInt8:
+		return index.buildUInt8Index(dataset)
+	case schemapb.DataType_UInt16:
+		return index.buildUInt16Index(dataset)
+	case schemapb.DataType_UInt32:
+		return index.buildUInt32Index(dataset)
+	case schemapb.DataType_UInt64:
+		return index.buildUInt64Index(dataset)
 	case schemapb.DataType_Float:
 		return index.buildFloatIndex(dataset)
 	case schemapb.DataType_Double:
@@ -164,6 +172,30 @@ func (index *CgoIndex) buildInt32Index(dataset *Dataset) error {
 
 func (index *CgoIndex) buildInt64Index(dataset *Dataset) error {
 	data := dataset.Data[keyRawArr].([]int64)
+	status := C.BuildScalarIndex(index.indexPtr, (C.int64_t)(len(data)), unsafe.Pointer(&data[0]))
+	return HandleCStatus(&status, "failed to build scalar index")
+}
+
+func (index *CgoIndex) buildUInt8Index(dataset *Dataset) error {
+	data := dataset.Data[keyRawArr].([]uint8)
+	status := C.BuildScalarIndex(index.indexPtr, (C.int64_t)(len(data)), unsafe.Pointer(&data[0]))
+	return HandleCStatus(&status, "failed to build scalar index")
+}
+
+func (index *CgoIndex) buildUInt16Index(dataset *Dataset) error {
+	data := dataset.Data[keyRawArr].([]uint16)
+	status := C.BuildScalarIndex(index.indexPtr, (C.int64_t)(len(data)), unsafe.Pointer(&data[0]))
+	return HandleCStatus(&status, "failed to build scalar index")
+}
+
+func (index *CgoIndex) buildUInt32Index(dataset *Dataset) error {
+	data := dataset.Data[keyRawArr].([]uint32)
+	status := C.BuildScalarIndex(index.indexPtr, (C.int64_t)(len(data)), unsafe.Pointer(&data[0]))
+	return HandleCStatus(&status, "failed to build scalar index")
+}
+
+func (index *CgoIndex) buildUInt64Index(dataset *Dataset) error {
+	data := dataset.Data[keyRawArr].([]uint64)
 	status := C.BuildScalarIndex(index.indexPtr, (C.int64_t)(len(data)), unsafe.Pointer(&data[0]))
 	return HandleCStatus(&status, "failed to build scalar index")
 }

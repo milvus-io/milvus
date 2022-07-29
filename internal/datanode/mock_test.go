@@ -410,6 +410,38 @@ func (mf *MetaFactory) GetFieldSchema() []*schemapb.FieldSchema {
 			},
 			IndexParams: []*commonpb.KeyValuePair{},
 		},
+		{
+			FieldID:     110,
+			Name:        "uint8_field",
+			Description: "field 110",
+			DataType:    schemapb.DataType_UInt8,
+			TypeParams:  []*commonpb.KeyValuePair{},
+			IndexParams: []*commonpb.KeyValuePair{},
+		},
+		{
+			FieldID:     111,
+			Name:        "uint16_field",
+			Description: "field 111",
+			DataType:    schemapb.DataType_UInt16,
+			TypeParams:  []*commonpb.KeyValuePair{},
+			IndexParams: []*commonpb.KeyValuePair{},
+		},
+		{
+			FieldID:     112,
+			Name:        "uint32_field",
+			Description: "field 112",
+			DataType:    schemapb.DataType_UInt32,
+			TypeParams:  []*commonpb.KeyValuePair{},
+			IndexParams: []*commonpb.KeyValuePair{},
+		},
+		{
+			FieldID:     113,
+			Name:        "uint64_field",
+			Description: "field 113",
+			DataType:    schemapb.DataType_UInt64,
+			TypeParams:  []*commonpb.KeyValuePair{},
+			IndexParams: []*commonpb.KeyValuePair{},
+		},
 	}
 
 	return fields
@@ -477,6 +509,38 @@ func GenRowData() (rawData []byte) {
 		panic(err)
 	}
 	rawData = append(rawData, bint64.Bytes()...)
+
+	// uint8
+	var dataUInt8 uint8 = 100
+	ubint8 := new(bytes.Buffer)
+	if err := binary.Write(ubint8, common.Endian, dataUInt8); err != nil {
+		panic(err)
+	}
+	rawData = append(rawData, ubint8.Bytes()...)
+
+	// uint16
+	var dataUInt16 uint16 = 200
+	ubint16 := new(bytes.Buffer)
+	if err := binary.Write(ubint16, common.Endian, dataUInt16); err != nil {
+		panic(err)
+	}
+	rawData = append(rawData, ubint16.Bytes()...)
+
+	// uint32
+	var dataUInt32 uint32 = 300
+	ubint32 := new(bytes.Buffer)
+	if err := binary.Write(ubint32, common.Endian, dataUInt32); err != nil {
+		panic(err)
+	}
+	rawData = append(rawData, ubint32.Bytes()...)
+
+	// uint64
+	var dataUInt64 uint64 = 400
+	ubint64 := new(bytes.Buffer)
+	if err := binary.Write(ubint64, common.Endian, dataUInt64); err != nil {
+		panic(err)
+	}
+	rawData = append(rawData, ubint64.Bytes()...)
 
 	// float32
 	var datafloat float32 = 1.1
@@ -625,6 +689,78 @@ func GenColumnData() (fieldsData []*schemapb.FieldData) {
 		},
 	}
 	fieldsData = append(fieldsData, int64FieldData)
+
+	// uint8
+	uint8Data := []uint32{100}
+	uint8FieldData := &schemapb.FieldData{
+		Type:      schemapb.DataType_UInt8,
+		FieldName: "uint8_field",
+		FieldId:   110,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_UintData{
+					UintData: &schemapb.UIntArray{
+						Data: uint8Data,
+					},
+				},
+			},
+		},
+	}
+	fieldsData = append(fieldsData, uint8FieldData)
+
+	// uint16
+	uint16Data := []uint32{200}
+	uint16FieldData := &schemapb.FieldData{
+		Type:      schemapb.DataType_UInt16,
+		FieldName: "uint16_field",
+		FieldId:   111,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_UintData{
+					UintData: &schemapb.UIntArray{
+						Data: uint16Data,
+					},
+				},
+			},
+		},
+	}
+	fieldsData = append(fieldsData, uint16FieldData)
+
+	// uint32
+	uint32Data := []uint32{300}
+	uint32FieldData := &schemapb.FieldData{
+		Type:      schemapb.DataType_UInt32,
+		FieldName: "uint32_field",
+		FieldId:   112,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_UintData{
+					UintData: &schemapb.UIntArray{
+						Data: uint32Data,
+					},
+				},
+			},
+		},
+	}
+	fieldsData = append(fieldsData, uint32FieldData)
+
+	// uint64
+	uint64Data := []uint64{400}
+	uint64FieldData := &schemapb.FieldData{
+		Type:      schemapb.DataType_UInt64,
+		FieldName: "uint64_field",
+		FieldId:   113,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_UlongData{
+					UlongData: &schemapb.ULongArray{
+						Data: uint64Data,
+					},
+				},
+			},
+		},
+	}
+	fieldsData = append(fieldsData, uint64FieldData)
 
 	// float
 	floatData := []float32{1.1}
@@ -1066,6 +1202,22 @@ func genInsertData() *InsertData {
 				NumRows: []int64{2},
 				Data:    []string{"test1", "test2"},
 			},
+			110: &s.UInt8FieldData{
+				NumRows: []int64{2},
+				Data:    []uint8{5, 6},
+			},
+			111: &s.UInt16FieldData{
+				NumRows: []int64{2},
+				Data:    []uint16{7, 8},
+			},
+			112: &s.UInt32FieldData{
+				NumRows: []int64{2},
+				Data:    []uint32{9, 10},
+			},
+			113: &s.UInt64FieldData{
+				NumRows: []int64{2},
+				Data:    []uint64{1, 2},
+			},
 		}}
 }
 
@@ -1122,6 +1274,22 @@ func genEmptyInsertData() *InsertData {
 				NumRows: []int64{0},
 				Data:    []string{},
 			},
+			110: &s.UInt8FieldData{
+				NumRows: []int64{0},
+				Data:    []uint8{},
+			},
+			111: &s.UInt16FieldData{
+				NumRows: []int64{0},
+				Data:    []uint16{},
+			},
+			112: &s.UInt32FieldData{
+				NumRows: []int64{0},
+				Data:    []uint32{},
+			},
+			113: &s.UInt64FieldData{
+				NumRows: []int64{0},
+				Data:    []uint64{},
+			},
 		}}
 }
 
@@ -1177,6 +1345,22 @@ func genInsertDataWithExpiredTS() *InsertData {
 			109: &s.StringFieldData{
 				NumRows: []int64{2},
 				Data:    []string{"test1", "test2"},
+			},
+			110: &s.UInt8FieldData{
+				NumRows: []int64{2},
+				Data:    []uint8{5, 6},
+			},
+			111: &s.UInt16FieldData{
+				NumRows: []int64{2},
+				Data:    []uint16{7, 8},
+			},
+			112: &s.UInt32FieldData{
+				NumRows: []int64{2},
+				Data:    []uint32{9, 10},
+			},
+			113: &s.UInt64FieldData{
+				NumRows: []int64{2},
+				Data:    []uint64{1, 2},
 			},
 		}}
 }

@@ -87,6 +87,29 @@ def gen_int64_field(name=ct.default_int64_field_name, description=ct.default_des
                                                                is_primary=is_primary, **kwargs)
     return int64_field
 
+def gen_uint8_field(name=ct.default_uint8_field_name, description=ct.default_desc, is_primary=False, **kwargs):
+    uint8_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.UINT8, description=description,
+                                                              is_primary=is_primary, **kwargs)
+    return uint8_field
+
+
+def gen_uint16_field(name=ct.default_uint16_field_name, description=ct.default_desc, is_primary=False, **kwargs):
+    uint16_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.UINT16, description=description,
+                                                               is_primary=is_primary, **kwargs)
+    return uint16_field
+
+
+def gen_uint32_field(name=ct.default_uint32_field_name, description=ct.default_desc, is_primary=False, **kwargs):
+    uint32_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.UINT32, description=description,
+                                                               is_primary=is_primary, **kwargs)
+    return uint32_field
+
+
+def gen_uint64_field(name=ct.default_uint64_field_name, description=ct.default_desc, is_primary=False, **kwargs):
+    uint64_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.UINT64, description=description,
+                                                               is_primary=is_primary, **kwargs)
+    return uint64_field
+
 
 def gen_float_field(name=ct.default_float_field_name, is_primary=False, description=ct.default_desc):
     float_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.FLOAT, description=description,
@@ -147,6 +170,7 @@ def gen_collection_schema_all_datatype(description=ct.default_desc,
                                        primary_field=ct.default_int64_field_name,
                                        auto_id=False, dim=ct.default_dim):
     fields = [gen_int64_field(), gen_int32_field(), gen_int16_field(), gen_int8_field(),
+              gen_uint64_field(), gen_uint32_field(), gen_uint16_field(), gen_uint8_field(),
               gen_bool_field(), gen_float_field(), gen_double_field(), gen_string_field(), gen_float_vec_field(dim=dim)]
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
                                                                     primary_field=primary_field, auto_id=auto_id)
@@ -276,6 +300,10 @@ def gen_dataframe_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0):
     int32_values = pd.Series(data=[np.int32(i) for i in range(start, start + nb)], dtype="int32")
     int16_values = pd.Series(data=[np.int16(i) for i in range(start, start + nb)], dtype="int16")
     int8_values = pd.Series(data=[np.int8(i) for i in range(start, start + nb)], dtype="int8")
+    uint64_values = pd.Series(data=[np.uint64(i) for i in range(start, start + nb)], dtype="uint64")
+    uint32_values = pd.Series(data=[np.uint32(i) for i in range(start, start + nb)], dtype="uint32")
+    uint16_values = pd.Series(data=[np.uint16(i) for i in range(start, start + nb)], dtype="uint16")
+    uint8_values = pd.Series(data=[np.uint8(i) for i in range(start, start + nb)], dtype="uint8")
     bool_values = pd.Series(data=[np.bool(i) for i in range(start, start + nb)], dtype="bool")
     float_values = pd.Series(data=[np.float32(i) for i in range(start, start + nb)], dtype="float32")
     double_values = pd.Series(data=[np.double(i) for i in range(start, start + nb)], dtype="double")
@@ -286,6 +314,10 @@ def gen_dataframe_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0):
         ct.default_int32_field_name: int32_values,
         ct.default_int16_field_name: int16_values,
         ct.default_int8_field_name: int8_values,
+        ct.default_uint64_field_name: uint64_values,
+        ct.default_uint32_field_name: uint32_values,
+        ct.default_uint16_field_name: uint16_values,
+        ct.default_uint8_field_name: uint8_values,
         ct.default_bool_field_name: bool_values,
         ct.default_float_field_name: float_values,
         ct.default_double_field_name: double_values,
@@ -367,7 +399,7 @@ def gen_simple_index():
 
 def gen_invalid_field_types():
     field_types = [
-        6,
+        12,
         1.0,
         [[]],
         {},

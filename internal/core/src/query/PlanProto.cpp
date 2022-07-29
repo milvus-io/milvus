@@ -237,6 +237,18 @@ ProtoParser::ParseUnaryRangeExpr(const proto::plan::UnaryRangeExpr& expr_pb) {
             case DataType::INT64: {
                 return ExtractUnaryRangeExprImpl<int64_t>(field_id, data_type, expr_pb);
             }
+            case DataType::UINT8: {
+                return ExtractUnaryRangeExprImpl<uint8_t>(field_id, data_type, expr_pb);
+            }
+            case DataType::UINT16: {
+                return ExtractUnaryRangeExprImpl<uint16_t>(field_id, data_type, expr_pb);
+            }
+            case DataType::UINT32: {
+                return ExtractUnaryRangeExprImpl<uint32_t>(field_id, data_type, expr_pb);
+            }
+            case DataType::UINT64: {
+                return ExtractUnaryRangeExprImpl<uint64_t>(field_id, data_type, expr_pb);
+            }
             case DataType::FLOAT: {
                 return ExtractUnaryRangeExprImpl<float>(field_id, data_type, expr_pb);
             }
@@ -278,6 +290,19 @@ ProtoParser::ParseBinaryRangeExpr(const proto::plan::BinaryRangeExpr& expr_pb) {
             case DataType::INT64: {
                 return ExtractBinaryRangeExprImpl<int64_t>(field_id, data_type, expr_pb);
             }
+            case DataType::UINT8: {
+                return ExtractBinaryRangeExprImpl<uint8_t>(field_id, data_type, expr_pb);
+            }
+            case DataType::UINT16: {
+                return ExtractBinaryRangeExprImpl<uint16_t>(field_id, data_type, expr_pb);
+            }
+            case DataType::UINT32: {
+                return ExtractBinaryRangeExprImpl<uint32_t>(field_id, data_type, expr_pb);
+            }
+            case DataType::UINT64: {
+                return ExtractBinaryRangeExprImpl<uint64_t>(field_id, data_type, expr_pb);
+            }
+
             case DataType::FLOAT: {
                 return ExtractBinaryRangeExprImpl<float>(field_id, data_type, expr_pb);
             }
@@ -343,6 +368,18 @@ ProtoParser::ParseTermExpr(const proto::plan::TermExpr& expr_pb) {
             case DataType::INT64: {
                 return ExtractTermExprImpl<int64_t>(field_id, data_type, expr_pb);
             }
+            case DataType::UINT8: {
+                return ExtractTermExprImpl<uint8_t>(field_id, data_type, expr_pb);
+            }
+            case DataType::UINT16: {
+                return ExtractTermExprImpl<uint16_t>(field_id, data_type, expr_pb);
+            }
+            case DataType::UINT32: {
+                return ExtractTermExprImpl<uint32_t>(field_id, data_type, expr_pb);
+            }
+            case DataType::UINT64: {
+                return ExtractTermExprImpl<uint64_t>(field_id, data_type, expr_pb);
+            }
             case DataType::FLOAT: {
                 return ExtractTermExprImpl<float>(field_id, data_type, expr_pb);
             }
@@ -396,6 +433,18 @@ ProtoParser::ParseBinaryArithOpEvalRangeExpr(const proto::plan::BinaryArithOpEva
             }
             case DataType::INT64: {
                 return ExtractBinaryArithOpEvalRangeExprImpl<int64_t>(field_id, data_type, expr_pb);
+            }
+            case DataType::UINT8: {
+                return ExtractBinaryArithOpEvalRangeExprImpl<uint8_t>(field_id, data_type, expr_pb);
+            }
+            case DataType::UINT16: {
+                return ExtractBinaryArithOpEvalRangeExprImpl<uint16_t>(field_id, data_type, expr_pb);
+            }
+            case DataType::UINT32: {
+                return ExtractBinaryArithOpEvalRangeExprImpl<uint32_t>(field_id, data_type, expr_pb);
+            }
+            case DataType::UINT64: {
+                return ExtractBinaryArithOpEvalRangeExprImpl<uint64_t>(field_id, data_type, expr_pb);
             }
             case DataType::FLOAT: {
                 return ExtractBinaryArithOpEvalRangeExprImpl<float>(field_id, data_type, expr_pb);

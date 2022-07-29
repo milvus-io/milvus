@@ -106,6 +106,30 @@ CreateScalarDataArrayFrom(const void* data_raw, int64_t count, const FieldMeta& 
             obj->mutable_data()->Add(data, data + count);
             break;
         }
+        case DataType::UINT8: {
+            auto data = reinterpret_cast<const uint8_t*>(data_raw);
+            auto obj = scalar_array->mutable_uint_data();
+            obj->mutable_data()->Add(data, data + count);
+            break;
+        }
+        case DataType::UINT16: {
+            auto data = reinterpret_cast<const uint16_t*>(data_raw);
+            auto obj = scalar_array->mutable_uint_data();
+            obj->mutable_data()->Add(data, data + count);
+            break;
+        }
+        case DataType::UINT32: {
+            auto data = reinterpret_cast<const uint32_t*>(data_raw);
+            auto obj = scalar_array->mutable_uint_data();
+            obj->mutable_data()->Add(data, data + count);
+            break;
+        }
+        case DataType::UINT64: {
+            auto data = reinterpret_cast<const uint64_t*>(data_raw);
+            auto obj = scalar_array->mutable_ulong_data();
+            obj->mutable_data()->Add(data, data + count);
+            break;
+        }
         case DataType::FLOAT: {
             auto data = reinterpret_cast<const float*>(data_raw);
             auto obj = scalar_array->mutable_float_data();
@@ -230,6 +254,20 @@ MergeDataArray(std::vector<std::pair<milvus::SearchResult*, int64_t>>& result_of
                 *(obj->mutable_data()->Add()) = data[src_offset];
                 continue;
             }
+            case DataType::UINT8:
+            case DataType::UINT16:
+            case DataType::UINT32: {
+                auto data = src_field_data->scalars().uint_data().data().data();
+                auto obj = scalar_array->mutable_uint_data();
+                *(obj->mutable_data()->Add()) = data[src_offset];
+                continue;
+            }
+            case DataType::UINT64: {
+                auto data = src_field_data->scalars().ulong_data().data().data();
+                auto obj = scalar_array->mutable_ulong_data();
+                *(obj->mutable_data()->Add()) = data[src_offset];
+                continue;
+            }
             case DataType::FLOAT: {
                 auto data = src_field_data->scalars().float_data().data().data();
                 auto obj = scalar_array->mutable_float_data();
@@ -322,6 +360,50 @@ ReverseDataFromIndex(const knowhere::Index* index,
                 raw_data[i] = ptr->Reverse_Lookup(seg_offsets[i]);
             }
             auto obj = scalar_array->mutable_long_data();
+            *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
+            break;
+        }
+        case DataType::UINT8: {
+            using IndexType = scalar::ScalarIndex<uint8_t>;
+            auto ptr = dynamic_cast<const IndexType*>(index);
+            std::vector<uint8_t> raw_data(count);
+            for (int64_t i = 0; i < count; ++i) {
+                raw_data[i] = ptr->Reverse_Lookup(seg_offsets[i]);
+            }
+            auto obj = scalar_array->mutable_uint_data();
+            *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
+            break;
+        }
+        case DataType::UINT16: {
+            using IndexType = scalar::ScalarIndex<uint16_t>;
+            auto ptr = dynamic_cast<const IndexType*>(index);
+            std::vector<uint16_t> raw_data(count);
+            for (int64_t i = 0; i < count; ++i) {
+                raw_data[i] = ptr->Reverse_Lookup(seg_offsets[i]);
+            }
+            auto obj = scalar_array->mutable_uint_data();
+            *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
+            break;
+        }
+        case DataType::UINT32: {
+            using IndexType = scalar::ScalarIndex<uint32_t>;
+            auto ptr = dynamic_cast<const IndexType*>(index);
+            std::vector<uint32_t> raw_data(count);
+            for (int64_t i = 0; i < count; ++i) {
+                raw_data[i] = ptr->Reverse_Lookup(seg_offsets[i]);
+            }
+            auto obj = scalar_array->mutable_uint_data();
+            *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
+            break;
+        }
+        case DataType::UINT64: {
+            using IndexType = scalar::ScalarIndex<uint64_t>;
+            auto ptr = dynamic_cast<const IndexType*>(index);
+            std::vector<uint64_t> raw_data(count);
+            for (int64_t i = 0; i < count; ++i) {
+                raw_data[i] = ptr->Reverse_Lookup(seg_offsets[i]);
+            }
+            auto obj = scalar_array->mutable_ulong_data();
             *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
             break;
         }

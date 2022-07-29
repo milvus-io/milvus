@@ -459,6 +459,22 @@ ExecExprVisitor::visit(UnaryRangeExpr& expr) {
             res = ExecUnaryRangeVisitorDispatcher<int64_t>(expr);
             break;
         }
+        case DataType::UINT8: {
+            res = ExecUnaryRangeVisitorDispatcher<uint8_t>(expr);
+            break;
+        }
+        case DataType::UINT16: {
+            res = ExecUnaryRangeVisitorDispatcher<uint16_t>(expr);
+            break;
+        }
+        case DataType::UINT32: {
+            res = ExecUnaryRangeVisitorDispatcher<uint32_t>(expr);
+            break;
+        }
+        case DataType::UINT64: {
+            res = ExecUnaryRangeVisitorDispatcher<uint64_t>(expr);
+            break;
+        }
         case DataType::FLOAT: {
             res = ExecUnaryRangeVisitorDispatcher<float>(expr);
             break;
@@ -499,6 +515,22 @@ ExecExprVisitor::visit(BinaryArithOpEvalRangeExpr& expr) {
         }
         case DataType::INT64: {
             res = ExecBinaryArithOpEvalRangeVisitorDispatcher<int64_t>(expr);
+            break;
+        }
+        case DataType::UINT8: {
+            res = ExecBinaryArithOpEvalRangeVisitorDispatcher<uint8_t>(expr);
+            break;
+        }
+        case DataType::UINT16: {
+            res = ExecBinaryArithOpEvalRangeVisitorDispatcher<uint16_t>(expr);
+            break;
+        }
+        case DataType::UINT32: {
+            res = ExecBinaryArithOpEvalRangeVisitorDispatcher<uint32_t>(expr);
+            break;
+        }
+        case DataType::UINT64: {
+            res = ExecBinaryArithOpEvalRangeVisitorDispatcher<uint64_t>(expr);
             break;
         }
         case DataType::FLOAT: {
@@ -543,6 +575,23 @@ ExecExprVisitor::visit(BinaryRangeExpr& expr) {
             res = ExecBinaryRangeVisitorDispatcher<int64_t>(expr);
             break;
         }
+        case DataType::UINT8: {
+            res = ExecBinaryRangeVisitorDispatcher<uint8_t>(expr);
+            break;
+        }
+        case DataType::UINT16: {
+            res = ExecBinaryRangeVisitorDispatcher<uint16_t>(expr);
+            break;
+        }
+        case DataType::UINT32: {
+            res = ExecBinaryRangeVisitorDispatcher<uint32_t>(expr);
+            break;
+        }
+        case DataType::UINT64: {
+            res = ExecBinaryRangeVisitorDispatcher<uint64_t>(expr);
+            break;
+        }
+
         case DataType::FLOAT: {
             res = ExecBinaryRangeVisitorDispatcher<float>(expr);
             break;
@@ -579,7 +628,8 @@ struct relational {
 template <typename Op>
 auto
 ExecExprVisitor::ExecCompareExprDispatcher(CompareExpr& expr, Op op) -> BitsetType {
-    using number = boost::variant<bool, int8_t, int16_t, int32_t, int64_t, float, double, std::string>;
+    using number = boost::variant<bool, int8_t, int16_t, int32_t, int64_t, uint8_t, uint16_t, uint32_t, uint64_t, float,
+                                  double, std::string>;
     auto size_per_chunk = segment_.size_per_chunk();
     auto num_chunk = upper_div(row_count_, size_per_chunk);
     std::deque<BitsetType> bitsets;
@@ -647,6 +697,46 @@ ExecExprVisitor::ExecCompareExprDispatcher(CompareExpr& expr, Op op) -> BitsetTy
                     } else {
                         // for case, sealed segment has loaded index for scalar field instead of raw data
                         auto& indexing = segment_.chunk_scalar_index<int64_t>(field_id, chunk_id);
+                        return [&indexing](int i) -> const number { return indexing.Reverse_Lookup(i); };
+                    }
+                }
+                case DataType::UINT8: {
+                    if (chunk_id < data_barrier) {
+                        auto chunk_data = segment_.chunk_data<uint8_t>(field_id, chunk_id).data();
+                        return [chunk_data](int i) -> const number { return chunk_data[i]; };
+                    } else {
+                        // for case, sealed segment has loaded index for scalar field instead of raw data
+                        auto& indexing = segment_.chunk_scalar_index<uint8_t>(field_id, chunk_id);
+                        return [&indexing](int i) -> const number { return indexing.Reverse_Lookup(i); };
+                    }
+                }
+                case DataType::UINT16: {
+                    if (chunk_id < data_barrier) {
+                        auto chunk_data = segment_.chunk_data<uint16_t>(field_id, chunk_id).data();
+                        return [chunk_data](int i) -> const number { return chunk_data[i]; };
+                    } else {
+                        // for case, sealed segment has loaded index for scalar field instead of raw data
+                        auto& indexing = segment_.chunk_scalar_index<uint16_t>(field_id, chunk_id);
+                        return [&indexing](int i) -> const number { return indexing.Reverse_Lookup(i); };
+                    }
+                }
+                case DataType::UINT32: {
+                    if (chunk_id < data_barrier) {
+                        auto chunk_data = segment_.chunk_data<uint32_t>(field_id, chunk_id).data();
+                        return [chunk_data](int i) -> const number { return chunk_data[i]; };
+                    } else {
+                        // for case, sealed segment has loaded index for scalar field instead of raw data
+                        auto& indexing = segment_.chunk_scalar_index<uint32_t>(field_id, chunk_id);
+                        return [&indexing](int i) -> const number { return indexing.Reverse_Lookup(i); };
+                    }
+                }
+                case DataType::UINT64: {
+                    if (chunk_id < data_barrier) {
+                        auto chunk_data = segment_.chunk_data<uint64_t>(field_id, chunk_id).data();
+                        return [chunk_data](int i) -> const number { return chunk_data[i]; };
+                    } else {
+                        // for case, sealed segment has loaded index for scalar field instead of raw data
+                        auto& indexing = segment_.chunk_scalar_index<uint64_t>(field_id, chunk_id);
                         return [&indexing](int i) -> const number { return indexing.Reverse_Lookup(i); };
                     }
                 }
@@ -866,6 +956,23 @@ ExecExprVisitor::visit(TermExpr& expr) {
             res = ExecTermVisitorImpl<int64_t>(expr);
             break;
         }
+        case DataType::UINT8: {
+            res = ExecTermVisitorImpl<uint8_t>(expr);
+            break;
+        }
+        case DataType::UINT16: {
+            res = ExecTermVisitorImpl<uint16_t>(expr);
+            break;
+        }
+        case DataType::UINT32: {
+            res = ExecTermVisitorImpl<uint32_t>(expr);
+            break;
+        }
+        case DataType::UINT64: {
+            res = ExecTermVisitorImpl<uint64_t>(expr);
+            break;
+        }
+
         case DataType::FLOAT: {
             res = ExecTermVisitorImpl<float>(expr);
             break;

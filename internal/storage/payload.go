@@ -40,6 +40,10 @@ type PayloadWriterInterface interface {
 	AddInt16ToPayload(msgs []int16) error
 	AddInt32ToPayload(msgs []int32) error
 	AddInt64ToPayload(msgs []int64) error
+	AddUInt8ToPayload(msgs []uint8) error
+	AddUInt16ToPayload(msgs []uint16) error
+	AddUInt32ToPayload(msgs []uint32) error
+	AddUInt64ToPayload(msgs []uint64) error
 	AddFloatToPayload(msgs []float32) error
 	AddDoubleToPayload(msgs []float64) error
 	AddOneStringToPayload(msgs string) error
@@ -61,6 +65,10 @@ type PayloadReaderInterface interface {
 	GetInt16FromPayload() ([]int16, error)
 	GetInt32FromPayload() ([]int32, error)
 	GetInt64FromPayload() ([]int64, error)
+	GetUInt8FromPayload() ([]uint8, error)
+	GetUInt16FromPayload() ([]uint16, error)
+	GetUInt32FromPayload() ([]uint32, error)
+	GetUInt64FromPayload() ([]uint64, error)
 	GetFloatFromPayload() ([]float32, error)
 	GetDoubleFromPayload() ([]float64, error)
 	GetStringFromPayload() ([]string, error)
@@ -121,6 +129,31 @@ func (w *PayloadWriter) AddDataToPayload(msgs interface{}, dim ...int) error {
 				return errors.New("incorrect data type")
 			}
 			return w.AddInt64ToPayload(val)
+		case schemapb.DataType_UInt8:
+			val, ok := msgs.([]uint8)
+			if !ok {
+				return errors.New("incorrect data type")
+			}
+			return w.AddUInt8ToPayload(val)
+		case schemapb.DataType_UInt16:
+			val, ok := msgs.([]uint16)
+			if !ok {
+				return errors.New("incorrect data type")
+			}
+			return w.AddUInt16ToPayload(val)
+		case schemapb.DataType_UInt32:
+			val, ok := msgs.([]uint32)
+			if !ok {
+				return errors.New("incorrect data type")
+			}
+			return w.AddUInt32ToPayload(val)
+		case schemapb.DataType_UInt64:
+			val, ok := msgs.([]uint64)
+			if !ok {
+				return errors.New("incorrect data type")
+			}
+			return w.AddUInt64ToPayload(val)
+
 		case schemapb.DataType_Float:
 			val, ok := msgs.([]float32)
 			if !ok {
@@ -240,6 +273,57 @@ func (w *PayloadWriter) AddInt64ToPayload(msgs []int64) error {
 
 	status := C.AddInt64ToPayload(w.payloadWriterPtr, cMsgs, cLength)
 	return HandleCStatus(&status, "AddInt64ToPayload failed")
+}
+
+func (w *PayloadWriter) AddUInt8ToPayload(msgs []uint8) error {
+	length := len(msgs)
+	if length <= 0 {
+		return errors.New("can't add empty msgs into payload")
+	}
+	cMsgs := (*C.uint8_t)(unsafe.Pointer(&msgs[0]))
+	cLength := C.int(length)
+
+	status := C.AddUInt8ToPayload(w.payloadWriterPtr, cMsgs, cLength)
+	return HandleCStatus(&status, "AddUInt8ToPayload failed")
+}
+
+func (w *PayloadWriter) AddUInt16ToPayload(msgs []uint16) error {
+	length := len(msgs)
+	if length <= 0 {
+		return errors.New("can't add empty msgs into payload")
+	}
+
+	cMsgs := (*C.uint16_t)(unsafe.Pointer(&msgs[0]))
+	cLength := C.int(length)
+
+	status := C.AddUInt16ToPayload(w.payloadWriterPtr, cMsgs, cLength)
+	return HandleCStatus(&status, "AddUInt16ToPayload failed")
+}
+
+func (w *PayloadWriter) AddUInt32ToPayload(msgs []uint32) error {
+	length := len(msgs)
+	if length <= 0 {
+		return errors.New("can't add empty msgs into payload")
+	}
+
+	cMsgs := (*C.uint32_t)(unsafe.Pointer(&msgs[0]))
+	cLength := C.int(length)
+
+	status := C.AddUInt32ToPayload(w.payloadWriterPtr, cMsgs, cLength)
+	return HandleCStatus(&status, "AddUInt32ToPayload failed")
+}
+
+func (w *PayloadWriter) AddUInt64ToPayload(msgs []uint64) error {
+	length := len(msgs)
+	if length <= 0 {
+		return errors.New("can't add empty msgs into payload")
+	}
+
+	cMsgs := (*C.uint64_t)(unsafe.Pointer(&msgs[0]))
+	cLength := C.int(length)
+
+	status := C.AddUInt64ToPayload(w.payloadWriterPtr, cMsgs, cLength)
+	return HandleCStatus(&status, "AddUInt64ToPayload failed")
 }
 
 func (w *PayloadWriter) AddFloatToPayload(msgs []float32) error {

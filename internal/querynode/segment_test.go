@@ -93,7 +93,9 @@ func TestSegment_deleteSegment(t *testing.T) {
 		s, err := genSimpleSealedSegment(defaultMsgLength)
 		assert.NoError(t, err)
 		s.segmentPtr = nil
+		fmt.Println("delete before segment")
 		deleteSegment(s)
+		fmt.Println("delete after segment")
 	})
 }
 
@@ -908,6 +910,90 @@ func Test_fillInt64FieldData(t *testing.T) {
 	assert.Error(t, fillInt64FieldData(m, path, f, index, offset, endian))
 }
 
+func Test_fillUInt8FieldData(t *testing.T) {
+	var m storage.ChunkManager
+
+	offset := int64(100)
+	m = newMockChunkManager(withDefaultReadAt())
+
+	f := newScalarFieldData(schemapb.DataType_UInt8, simpleUInt8Field.fieldName, 1)
+
+	path := funcutil.GenRandomStr()
+	index := 0
+	endian := common.Endian
+
+	assert.NoError(t, fillUInt8FieldData(m, path, f, index, offset, endian))
+
+	m = newMockChunkManager(withReadAtErr())
+	assert.Error(t, fillUInt8FieldData(m, path, f, index, offset, endian))
+
+	m = newMockChunkManager(withReadAtEmptyContent())
+	assert.Error(t, fillUInt8FieldData(m, path, f, index, offset, endian))
+}
+
+func Test_fillUInt16FieldData(t *testing.T) {
+	var m storage.ChunkManager
+
+	offset := int64(100)
+	m = newMockChunkManager(withDefaultReadAt())
+
+	f := newScalarFieldData(schemapb.DataType_UInt16, simpleUInt64Field.fieldName, 1)
+
+	path := funcutil.GenRandomStr()
+	index := 0
+	endian := common.Endian
+
+	assert.NoError(t, fillUInt16FieldData(m, path, f, index, offset, endian))
+
+	m = newMockChunkManager(withReadAtErr())
+	assert.Error(t, fillUInt16FieldData(m, path, f, index, offset, endian))
+
+	m = newMockChunkManager(withReadAtEmptyContent())
+	assert.Error(t, fillUInt16FieldData(m, path, f, index, offset, endian))
+}
+
+func Test_fillUInt32FieldData(t *testing.T) {
+	var m storage.ChunkManager
+
+	offset := int64(100)
+	m = newMockChunkManager(withDefaultReadAt())
+
+	f := newScalarFieldData(schemapb.DataType_UInt32, simpleUInt32Field.fieldName, 1)
+
+	path := funcutil.GenRandomStr()
+	index := 0
+	endian := common.Endian
+
+	assert.NoError(t, fillUInt32FieldData(m, path, f, index, offset, endian))
+
+	m = newMockChunkManager(withReadAtErr())
+	assert.Error(t, fillUInt32FieldData(m, path, f, index, offset, endian))
+
+	m = newMockChunkManager(withReadAtEmptyContent())
+	assert.Error(t, fillUInt32FieldData(m, path, f, index, offset, endian))
+}
+
+func Test_fillUInt64FieldData(t *testing.T) {
+	var m storage.ChunkManager
+
+	offset := int64(100)
+	m = newMockChunkManager(withDefaultReadAt())
+
+	f := newScalarFieldData(schemapb.DataType_UInt64, simpleUInt64Field.fieldName, 1)
+
+	path := funcutil.GenRandomStr()
+	index := 0
+	endian := common.Endian
+
+	assert.NoError(t, fillUInt64FieldData(m, path, f, index, offset, endian))
+
+	m = newMockChunkManager(withReadAtErr())
+	assert.Error(t, fillUInt64FieldData(m, path, f, index, offset, endian))
+
+	m = newMockChunkManager(withReadAtEmptyContent())
+	assert.Error(t, fillUInt64FieldData(m, path, f, index, offset, endian))
+}
+
 func Test_fillFloatFieldData(t *testing.T) {
 	var m storage.ChunkManager
 
@@ -962,6 +1048,10 @@ func Test_fillFieldData(t *testing.T) {
 		newScalarFieldData(schemapb.DataType_Int16, simpleInt16Field.fieldName, 1),
 		newScalarFieldData(schemapb.DataType_Int32, simpleInt32Field.fieldName, 1),
 		newScalarFieldData(schemapb.DataType_Int64, simpleInt64Field.fieldName, 1),
+		newScalarFieldData(schemapb.DataType_UInt8, simpleUInt8Field.fieldName, 1),
+		newScalarFieldData(schemapb.DataType_UInt16, simpleUInt16Field.fieldName, 1),
+		newScalarFieldData(schemapb.DataType_UInt32, simpleUInt32Field.fieldName, 1),
+		newScalarFieldData(schemapb.DataType_UInt64, simpleUInt64Field.fieldName, 1),
 		newScalarFieldData(schemapb.DataType_Float, simpleFloatField.fieldName, 1),
 		newScalarFieldData(schemapb.DataType_Double, simpleDoubleField.fieldName, 1),
 	}

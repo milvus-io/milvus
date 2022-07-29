@@ -3438,6 +3438,10 @@ TEST(CApiTest, RetriveScalarFieldFromSealedSegmentWithIndex) {
     auto i16_fid = schema->AddDebugField("age16", DataType::INT16);
     auto i32_fid = schema->AddDebugField("age32", DataType::INT32);
     auto i64_fid = schema->AddDebugField("age64", DataType::INT64);
+    auto u8_fid = schema->AddDebugField("ageu8", DataType::UINT8);
+    auto u16_fid = schema->AddDebugField("ageu16", DataType::UINT16);
+    auto u32_fid = schema->AddDebugField("ageu32", DataType::UINT32);
+    auto u64_fid = schema->AddDebugField("ageu64", DataType::UINT64);
     auto float_fid = schema->AddDebugField("age_float", DataType::FLOAT);
     auto double_fid = schema->AddDebugField("age_double", DataType::DOUBLE);
     schema->set_primary_field_id(i64_fid);
@@ -3478,7 +3482,7 @@ TEST(CApiTest, RetriveScalarFieldFromSealedSegmentWithIndex) {
     load_index_info.index = std::shared_ptr<milvus::scalar::ScalarIndexSort<int8_t>>(age8_index.release());
     segment->LoadIndex(load_index_info);
 
-    // load index for 16 field
+    // load index for int16 field
     auto age16_col = raw_data.get_col<int16_t>(i16_fid);
     GenScalarIndexing(N, age16_col.data());
     auto age16_index = milvus::scalar::CreateScalarIndexSort<int16_t>();
@@ -3506,6 +3510,46 @@ TEST(CApiTest, RetriveScalarFieldFromSealedSegmentWithIndex) {
     load_index_info.field_id = i64_fid.get();
     load_index_info.field_type = Int64;
     load_index_info.index = std::shared_ptr<milvus::scalar::ScalarIndexSort<int64_t>>(age64_index.release());
+    segment->LoadIndex(load_index_info);
+
+    // load index for uint8 field
+    auto ageu8_col = raw_data.get_col<uint8_t>(u8_fid);
+    GenScalarIndexing(N, ageu8_col.data());
+    auto ageu8_index = milvus::scalar::CreateScalarIndexSort<uint8_t>();
+    ageu8_index->Build(N, ageu8_col.data());
+    load_index_info.field_id = u8_fid.get();
+    load_index_info.field_type = UInt8;
+    load_index_info.index = std::shared_ptr<milvus::scalar::ScalarIndexSort<uint8_t>>(ageu8_index.release());
+    segment->LoadIndex(load_index_info);
+
+    // load index for uint16 field
+    auto ageu16_col = raw_data.get_col<uint16_t>(u16_fid);
+    GenScalarIndexing(N, ageu16_col.data());
+    auto ageu16_index = milvus::scalar::CreateScalarIndexSort<uint16_t>();
+    ageu16_index->Build(N, ageu16_col.data());
+    load_index_info.field_id = u16_fid.get();
+    load_index_info.field_type = UInt16;
+    load_index_info.index = std::shared_ptr<milvus::scalar::ScalarIndexSort<uint16_t>>(ageu16_index.release());
+    segment->LoadIndex(load_index_info);
+
+    // load index for uint32 field
+    auto ageu32_col = raw_data.get_col<uint32_t>(u32_fid);
+    GenScalarIndexing(N, ageu32_col.data());
+    auto ageu32_index = milvus::scalar::CreateScalarIndexSort<uint32_t>();
+    ageu32_index->Build(N, ageu32_col.data());
+    load_index_info.field_id = u32_fid.get();
+    load_index_info.field_type = UInt32;
+    load_index_info.index = std::shared_ptr<milvus::scalar::ScalarIndexSort<uint32_t>>(ageu32_index.release());
+    segment->LoadIndex(load_index_info);
+
+    // load index for uint64 field
+    auto ageu64_col = raw_data.get_col<uint64_t>(u64_fid);
+    GenScalarIndexing(N, ageu64_col.data());
+    auto ageu64_index = milvus::scalar::CreateScalarIndexSort<uint64_t>();
+    ageu64_index->Build(N, ageu64_col.data());
+    load_index_info.field_id = u64_fid.get();
+    load_index_info.field_type = UInt64;
+    load_index_info.index = std::shared_ptr<milvus::scalar::ScalarIndexSort<uint64_t>>(ageu64_index.release());
     segment->LoadIndex(load_index_info);
 
     // load index for float field
@@ -3564,6 +3608,22 @@ TEST(CApiTest, RetriveScalarFieldFromSealedSegmentWithIndex) {
             }
             case proto::schema::DataType::Int64: {
                 ASSERT_EQ(iter->scalars().long_data().data(0), age64_col[0]);
+                break;
+            }
+            case proto::schema::DataType::UInt8: {
+                ASSERT_EQ(iter->scalars().uint_data().data(0), ageu8_col[0]);
+                break;
+            }
+            case proto::schema::DataType::UInt16: {
+                ASSERT_EQ(iter->scalars().uint_data().data(0), ageu16_col[0]);
+                break;
+            }
+            case proto::schema::DataType::UInt32: {
+                ASSERT_EQ(iter->scalars().uint_data().data(0), ageu32_col[0]);
+                break;
+            }
+            case proto::schema::DataType::UInt64: {
+                ASSERT_EQ(iter->scalars().ulong_data().data(0), ageu64_col[0]);
                 break;
             }
             case proto::schema::DataType::Float: {

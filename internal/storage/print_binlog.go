@@ -261,6 +261,40 @@ func printPayloadValues(colType schemapb.DataType, reader PayloadReaderInterface
 		for i, v := range val {
 			fmt.Printf("\t\t%d : %d\n", i, v)
 		}
+
+	case schemapb.DataType_UInt8:
+		val, err := reader.GetUInt8FromPayload()
+		if err != nil {
+			return err
+		}
+		for i, v := range val {
+			fmt.Printf("\t\t%d : %d\n", i, v)
+		}
+	case schemapb.DataType_UInt16:
+		val, err := reader.GetUInt16FromPayload()
+		if err != nil {
+			return err
+		}
+		for i, v := range val {
+			fmt.Printf("\t\t%d : %d\n", i, v)
+		}
+	case schemapb.DataType_UInt32:
+		val, err := reader.GetUInt32FromPayload()
+		if err != nil {
+			return err
+		}
+		for i, v := range val {
+			fmt.Printf("\t\t%d : %d\n", i, v)
+		}
+	case schemapb.DataType_UInt64:
+		val, err := reader.GetUInt64FromPayload()
+		if err != nil {
+			return err
+		}
+		for i, v := range val {
+			fmt.Printf("\t\t%d : %d\n", i, v)
+		}
+
 	case schemapb.DataType_Float:
 		val, err := reader.GetFloatFromPayload()
 		if err != nil {

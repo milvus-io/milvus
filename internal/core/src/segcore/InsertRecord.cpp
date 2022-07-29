@@ -51,6 +51,22 @@ InsertRecord::InsertRecord(const Schema& schema, int64_t size_per_chunk)
                 this->append_field_data<int64_t>(field_id, size_per_chunk);
                 break;
             }
+            case DataType::UINT8: {
+                this->append_field_data<uint8_t>(field_id, size_per_chunk);
+                break;
+            }
+            case DataType::UINT16: {
+                this->append_field_data<uint16_t>(field_id, size_per_chunk);
+                break;
+            }
+            case DataType::UINT32: {
+                this->append_field_data<uint32_t>(field_id, size_per_chunk);
+                break;
+            }
+            case DataType::UINT64: {
+                this->append_field_data<uint64_t>(field_id, size_per_chunk);
+                break;
+            }
             case DataType::FLOAT: {
                 this->append_field_data<float>(field_id, size_per_chunk);
                 break;

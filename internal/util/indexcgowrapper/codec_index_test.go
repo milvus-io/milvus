@@ -63,6 +63,38 @@ func generateInt64Array(numRows int) []int64 {
 	return ret
 }
 
+func generateUInt8Array(numRows int) []uint8 {
+	ret := make([]uint8, 0, numRows)
+	for i := 0; i < numRows; i++ {
+		ret = append(ret, uint8(rand.Int()))
+	}
+	return ret
+}
+
+func generateUInt16Array(numRows int) []uint16 {
+	ret := make([]uint16, 0, numRows)
+	for i := 0; i < numRows; i++ {
+		ret = append(ret, uint16(rand.Int()))
+	}
+	return ret
+}
+
+func generateUInt32Array(numRows int) []uint32 {
+	ret := make([]uint32, 0, numRows)
+	for i := 0; i < numRows; i++ {
+		ret = append(ret, uint32(rand.Int()))
+	}
+	return ret
+}
+
+func generateUInt64Array(numRows int) []uint64 {
+	ret := make([]uint64, 0, numRows)
+	for i := 0; i < numRows; i++ {
+		ret = append(ret, uint64(rand.Int()))
+	}
+	return ret
+}
+
 func generateFloat32Array(numRows int) []float32 {
 	ret := make([]float32, 0, numRows)
 	for i := 0; i < numRows; i++ {
@@ -127,6 +159,22 @@ func genFieldData(dtype schemapb.DataType, numRows, dim int) storage.FieldData {
 	case schemapb.DataType_Int64:
 		return &storage.Int64FieldData{
 			Data: generateInt64Array(numRows),
+		}
+	case schemapb.DataType_UInt8:
+		return &storage.UInt8FieldData{
+			Data: generateUInt8Array(numRows),
+		}
+	case schemapb.DataType_UInt16:
+		return &storage.UInt16FieldData{
+			Data: generateUInt16Array(numRows),
+		}
+	case schemapb.DataType_UInt32:
+		return &storage.UInt32FieldData{
+			Data: generateUInt32Array(numRows),
+		}
+	case schemapb.DataType_UInt64:
+		return &storage.UInt64FieldData{
+			Data: generateUInt64Array(numRows),
 		}
 	case schemapb.DataType_Float:
 		return &storage.FloatFieldData{
@@ -255,6 +303,14 @@ func genTypedIndexCase(dtype schemapb.DataType) []indexTestCase {
 		return genScalarIndexCases(dtype)
 	case schemapb.DataType_Int64:
 		return genScalarIndexCases(dtype)
+	case schemapb.DataType_UInt8:
+		return genScalarIndexCases(dtype)
+	case schemapb.DataType_UInt16:
+		return genScalarIndexCases(dtype)
+	case schemapb.DataType_UInt32:
+		return genScalarIndexCases(dtype)
+	case schemapb.DataType_UInt64:
+		return genScalarIndexCases(dtype)
 	case schemapb.DataType_Float:
 		return genScalarIndexCases(dtype)
 	case schemapb.DataType_Double:
@@ -279,6 +335,10 @@ func genIndexCase() []indexTestCase {
 		schemapb.DataType_Int16,
 		schemapb.DataType_Int32,
 		schemapb.DataType_Int64,
+		schemapb.DataType_UInt8,
+		schemapb.DataType_UInt16,
+		schemapb.DataType_UInt32,
+		schemapb.DataType_UInt64,
 		schemapb.DataType_Float,
 		schemapb.DataType_Double,
 		schemapb.DataType_String,

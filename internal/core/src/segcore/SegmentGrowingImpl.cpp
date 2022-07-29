@@ -235,6 +235,26 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id, const int64_t* seg_offsets,
             bulk_subscript_impl<int64_t>(*vec_ptr, seg_offsets, count, output.data());
             return CreateScalarDataArrayFrom(output.data(), count, field_meta);
         }
+        case DataType::UINT8: {
+            FixedVector<bool> output(count);
+            bulk_subscript_impl<uint8_t>(*vec_ptr, seg_offsets, count, output.data());
+            return CreateScalarDataArrayFrom(output.data(), count, field_meta);
+        }
+        case DataType::UINT16: {
+            FixedVector<uint16_t> output(count);
+            bulk_subscript_impl<uint16_t>(*vec_ptr, seg_offsets, count, output.data());
+            return CreateScalarDataArrayFrom(output.data(), count, field_meta);
+        }
+        case DataType::UINT32: {
+            FixedVector<uint32_t> output(count);
+            bulk_subscript_impl<uint32_t>(*vec_ptr, seg_offsets, count, output.data());
+            return CreateScalarDataArrayFrom(output.data(), count, field_meta);
+        }
+        case DataType::UINT64: {
+            FixedVector<uint64_t> output(count);
+            bulk_subscript_impl<uint64_t>(*vec_ptr, seg_offsets, count, output.data());
+            return CreateScalarDataArrayFrom(output.data(), count, field_meta);
+        }
         case DataType::FLOAT: {
             FixedVector<float> output(count);
             bulk_subscript_impl<float>(*vec_ptr, seg_offsets, count, output.data());

@@ -64,13 +64,13 @@ func EstimateSizePerRecord(schema *schemapb.CollectionSchema) (int, error) {
 	res := 0
 	for _, fs := range schema.Fields {
 		switch fs.DataType {
-		case schemapb.DataType_Bool, schemapb.DataType_Int8:
+		case schemapb.DataType_Bool, schemapb.DataType_Int8, schemapb.DataType_UInt8:
 			res++
-		case schemapb.DataType_Int16:
+		case schemapb.DataType_Int16, schemapb.DataType_UInt16:
 			res += 2
-		case schemapb.DataType_Int32, schemapb.DataType_Float:
+		case schemapb.DataType_Int32, schemapb.DataType_Float, schemapb.DataType_UInt32:
 			res += 4
-		case schemapb.DataType_Int64, schemapb.DataType_Double:
+		case schemapb.DataType_Int64, schemapb.DataType_Double, schemapb.DataType_UInt64:
 			res += 8
 		case schemapb.DataType_VarChar:
 			maxLengthPerRow, err := GetAvgLengthOfVarLengthField(fs)
@@ -109,13 +109,13 @@ func EstimateEntitySize(fieldsData []*schemapb.FieldData, rowOffset int) (int, e
 	res := 0
 	for _, fs := range fieldsData {
 		switch fs.GetType() {
-		case schemapb.DataType_Bool, schemapb.DataType_Int8:
+		case schemapb.DataType_Bool, schemapb.DataType_Int8, schemapb.DataType_UInt8:
 			res++
-		case schemapb.DataType_Int16:
+		case schemapb.DataType_Int16, schemapb.DataType_UInt16:
 			res += 2
-		case schemapb.DataType_Int32, schemapb.DataType_Float:
+		case schemapb.DataType_Int32, schemapb.DataType_Float, schemapb.DataType_UInt32:
 			res += 4
-		case schemapb.DataType_Int64, schemapb.DataType_Double:
+		case schemapb.DataType_Int64, schemapb.DataType_Double, schemapb.DataType_UInt64:
 			res += 8
 		case schemapb.DataType_VarChar:
 			if rowOffset >= len(fs.GetScalars().GetStringData().GetData()) {
@@ -226,7 +226,9 @@ func IsVectorType(dataType schemapb.DataType) bool {
 func IsIntegerType(dataType schemapb.DataType) bool {
 	switch dataType {
 	case schemapb.DataType_Int8, schemapb.DataType_Int16,
-		schemapb.DataType_Int32, schemapb.DataType_Int64:
+		schemapb.DataType_Int32, schemapb.DataType_Int64,
+		schemapb.DataType_UInt8, schemapb.DataType_UInt16,
+		schemapb.DataType_UInt32, schemapb.DataType_UInt64:
 		return true
 	default:
 		return false
@@ -314,6 +316,26 @@ func AppendFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData, idx i
 					}
 				} else {
 					dstScalar.GetLongData().Data = append(dstScalar.GetLongData().Data, srcScalar.LongData.Data[idx])
+				}
+			case *schemapb.ScalarField_UintData:
+				if dstScalar.GetUintData() == nil {
+					dstScalar.Data = &schemapb.ScalarField_UintData{
+						UintData: &schemapb.UIntArray{
+							Data: []uint32{srcScalar.UintData.Data[idx]},
+						},
+					}
+				} else {
+					dstScalar.GetUintData().Data = append(dstScalar.GetUintData().Data, srcScalar.UintData.Data[idx])
+				}
+			case *schemapb.ScalarField_UlongData:
+				if dstScalar.GetUlongData() == nil {
+					dstScalar.Data = &schemapb.ScalarField_UlongData{
+						UlongData: &schemapb.ULongArray{
+							Data: []uint64{srcScalar.UlongData.Data[idx]},
+						},
+					}
+				} else {
+					dstScalar.GetUlongData().Data = append(dstScalar.GetUlongData().Data, srcScalar.UlongData.Data[idx])
 				}
 			case *schemapb.ScalarField_FloatData:
 				if dstScalar.GetFloatData() == nil {
@@ -446,6 +468,26 @@ func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) {
 					}
 				} else {
 					dstScalar.GetLongData().Data = append(dstScalar.GetLongData().Data, srcScalar.LongData.Data...)
+				}
+			case *schemapb.ScalarField_UintData:
+				if dstScalar.GetUintData() == nil {
+					dstScalar.Data = &schemapb.ScalarField_UintData{
+						UintData: &schemapb.UIntArray{
+							Data: srcScalar.UintData.Data,
+						},
+					}
+				} else {
+					dstScalar.GetUintData().Data = append(dstScalar.GetUintData().Data, srcScalar.UintData.Data...)
+				}
+			case *schemapb.ScalarField_UlongData:
+				if dstScalar.GetUlongData() == nil {
+					dstScalar.Data = &schemapb.ScalarField_UlongData{
+						UlongData: &schemapb.ULongArray{
+							Data: srcScalar.UlongData.Data,
+						},
+					}
+				} else {
+					dstScalar.GetUlongData().Data = append(dstScalar.GetUlongData().Data, srcScalar.UlongData.Data...)
 				}
 			case *schemapb.ScalarField_FloatData:
 				if dstScalar.GetFloatData() == nil {

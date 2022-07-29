@@ -125,7 +125,7 @@ TEST(wrapper, boolean) {
 #define NUMERIC_TEST(TEST_NAME, COLUMN_TYPE, DATA_TYPE, ADD_FUNC, GET_FUNC, ARRAY_TYPE) \
     TEST(wrapper, TEST_NAME) {                                                          \
         auto payload = NewPayloadWriter(COLUMN_TYPE);                                   \
-        DATA_TYPE data[] = {-1, 1, -100, 100};                                          \
+        DATA_TYPE data[] = {0, 1, 101, 100};                                          \
                                                                                         \
         auto st = ADD_FUNC(payload, data, 4);                                           \
         ASSERT_EQ(st.error_code, ErrorCode::SUCCESS);                                   \
@@ -142,6 +142,7 @@ TEST(wrapper, boolean) {
         int length;                                                                     \
         st = GET_FUNC(reader, &values, &length);                                        \
         ASSERT_EQ(st.error_code, ErrorCode::SUCCESS);                                   \
+        printf("GET_FUNC error_code %d\n",st.error_code);              \
         ASSERT_NE(values, nullptr);                                                     \
         ASSERT_EQ(length, 4);                                                           \
         length = GetPayloadLengthFromReader(reader);                                    \
@@ -159,6 +160,10 @@ NUMERIC_TEST(int8, ColumnType::INT8, int8_t, AddInt8ToPayload, GetInt8FromPayloa
 NUMERIC_TEST(int16, ColumnType::INT16, int16_t, AddInt16ToPayload, GetInt16FromPayload, arrow::Int16Array)
 NUMERIC_TEST(int32, ColumnType::INT32, int32_t, AddInt32ToPayload, GetInt32FromPayload, arrow::Int32Array)
 NUMERIC_TEST(int64, ColumnType::INT64, int64_t, AddInt64ToPayload, GetInt64FromPayload, arrow::Int64Array)
+NUMERIC_TEST(uint8, ColumnType::UINT8, uint8_t, AddUInt8ToPayload, GetUInt8FromPayload, arrow::UInt8Array)
+NUMERIC_TEST(uint16, ColumnType::UINT16, uint16_t, AddUInt16ToPayload, GetUInt16FromPayload, arrow::UInt16Array)
+NUMERIC_TEST(uint32, ColumnType::UINT32, uint32_t, AddUInt32ToPayload, GetUInt32FromPayload, arrow::UInt32Array)
+NUMERIC_TEST(uint64, ColumnType::UINT64, uint64_t, AddUInt64ToPayload, GetUInt64FromPayload, arrow::UInt64Array)
 NUMERIC_TEST(float32, ColumnType::FLOAT, float, AddFloatToPayload, GetFloatFromPayload, arrow::FloatArray)
 NUMERIC_TEST(float64, ColumnType::DOUBLE, double, AddDoubleToPayload, GetDoubleFromPayload, arrow::DoubleArray)
 

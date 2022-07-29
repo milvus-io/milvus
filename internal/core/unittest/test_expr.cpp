@@ -741,7 +741,7 @@ TEST(Expr, TestCompareWithScalarIndexMaris) {
     load_index_info.field_type = VarChar;
     load_index_info.index = std::shared_ptr<milvus::scalar::ScalarIndexSort<std::string>>(str2_index.release());
     seg->LoadIndex(load_index_info);
-
+    //
     ExecExprVisitor visitor(*seg, seg->get_row_count(), MAX_TIMESTAMP);
     for (auto [clause, ref_func] : testcases) {
         auto dsl_string =
@@ -795,6 +795,34 @@ TEST(Expr, TestBinaryArithOpEvalRange) {
             }
         })",
          [](int64_t v) { return (v / 2) == 1000; }, DataType::INT64},
+        {R"("EQ": {
+            "ADD": {
+                "right_operand": 4,
+                "value": 8
+            }
+        })",
+         [](uint8_t v) { return (v + 4) == 8; }, DataType::UINT8},
+        {R"("EQ": {
+            "SUB": {
+                "right_operand": 500,
+                "value": 1500
+            }
+        })",
+         [](uint16_t v) { return (v - 500) == 1500; }, DataType::UINT16},
+        {R"("EQ": {
+            "MUL": {
+                "right_operand": 2,
+                "value": 4000
+            }
+        })",
+         [](uint32_t v) { return (v * 2) == 4000; }, DataType::UINT32},
+        {R"("EQ": {
+            "DIV": {
+                "right_operand": 2,
+                "value": 1000
+            }
+        })",
+         [](uint64_t v) { return (v / 2) == 1000; }, DataType::UINT64},
         {R"("EQ": {
             "MOD": {
                 "right_operand": 100,
@@ -859,6 +887,34 @@ TEST(Expr, TestBinaryArithOpEvalRange) {
             }
         })",
          [](int64_t v) { return (v + 500) != 2500; }, DataType::INT64},
+        {R"("NE": {
+            "MUL": {
+                "right_operand": 2,
+                "value": 2
+            }
+        })",
+         [](uint8_t v) { return (v * 2) != 2; }, DataType::UINT8},
+        {R"("NE": {
+            "DIV": {
+                "right_operand": 2,
+                "value": 1000
+            }
+        })",
+         [](uint16_t v) { return (v / 2) != 1000; }, DataType::UINT16},
+        {R"("NE": {
+            "MOD": {
+                "right_operand": 100,
+                "value": 0
+            }
+        })",
+         [](uint32_t v) { return (v % 100) != 0; }, DataType::UINT32},
+        {R"("NE": {
+            "ADD": {
+                "right_operand": 500,
+                "value": 2500
+            }
+        })",
+         [](uint64_t v) { return (v + 500) != 2500; }, DataType::UINT64},
     };
 
     std::string dsl_string_tmp = R"({
@@ -906,6 +962,26 @@ TEST(Expr, TestBinaryArithOpEvalRange) {
             @@@@
         })";
 
+    std::string dsl_string_uint8 = R"(
+        "ageu8": {
+            @@@@
+        })";
+
+    std::string dsl_string_uint16 = R"(
+        "ageu16": {
+            @@@@
+        })";
+
+    std::string dsl_string_uint32 = R"(
+        "ageu32": {
+            @@@@
+        })";
+
+    std::string dsl_string_uint64 = R"(
+        "ageu64": {
+            @@@@
+        })";
+
     std::string dsl_string_float = R"(
         "age_float": {
             @@@@
@@ -922,6 +998,10 @@ TEST(Expr, TestBinaryArithOpEvalRange) {
     auto i16_fid = schema->AddDebugField("age16", DataType::INT16);
     auto i32_fid = schema->AddDebugField("age32", DataType::INT32);
     auto i64_fid = schema->AddDebugField("age64", DataType::INT64);
+    auto u8_fid = schema->AddDebugField("ageu8", DataType::UINT8);
+    auto u16_fid = schema->AddDebugField("ageu16", DataType::UINT16);
+    auto u32_fid = schema->AddDebugField("ageu32", DataType::UINT32);
+    auto u64_fid = schema->AddDebugField("ageu64", DataType::UINT64);
     auto float_fid = schema->AddDebugField("age_float", DataType::FLOAT);
     auto double_fid = schema->AddDebugField("age_double", DataType::DOUBLE);
     schema->set_primary_field_id(i64_fid);
@@ -932,6 +1012,10 @@ TEST(Expr, TestBinaryArithOpEvalRange) {
     std::vector<int16_t> age16_col;
     std::vector<int32_t> age32_col;
     std::vector<int64_t> age64_col;
+    std::vector<uint8_t> ageu8_col;
+    std::vector<uint16_t> ageu16_col;
+    std::vector<uint32_t> ageu32_col;
+    std::vector<uint64_t> ageu64_col;
     std::vector<float> age_float_col;
     std::vector<double> age_double_col;
     int num_iters = 100;
@@ -942,6 +1026,10 @@ TEST(Expr, TestBinaryArithOpEvalRange) {
         auto new_age16_col = raw_data.get_col<int16_t>(i16_fid);
         auto new_age32_col = raw_data.get_col<int32_t>(i32_fid);
         auto new_age64_col = raw_data.get_col<int64_t>(i64_fid);
+        auto new_ageu8_col = raw_data.get_col<uint8_t>(u8_fid);
+        auto new_ageu16_col = raw_data.get_col<uint16_t>(u16_fid);
+        auto new_ageu32_col = raw_data.get_col<uint32_t>(u32_fid);
+        auto new_ageu64_col = raw_data.get_col<uint64_t>(u64_fid);
         auto new_age_float_col = raw_data.get_col<float>(float_fid);
         auto new_age_double_col = raw_data.get_col<double>(double_fid);
 
@@ -949,6 +1037,10 @@ TEST(Expr, TestBinaryArithOpEvalRange) {
         age16_col.insert(age16_col.end(), new_age16_col.begin(), new_age16_col.end());
         age32_col.insert(age32_col.end(), new_age32_col.begin(), new_age32_col.end());
         age64_col.insert(age64_col.end(), new_age64_col.begin(), new_age64_col.end());
+        ageu8_col.insert(ageu8_col.end(), new_ageu8_col.begin(), new_ageu8_col.end());
+        ageu16_col.insert(ageu16_col.end(), new_ageu16_col.begin(), new_ageu16_col.end());
+        ageu32_col.insert(ageu32_col.end(), new_ageu32_col.begin(), new_ageu32_col.end());
+        ageu64_col.insert(ageu64_col.end(), new_ageu64_col.begin(), new_ageu64_col.end());
         age_float_col.insert(age_float_col.end(), new_age_float_col.begin(), new_age_float_col.end());
         age_double_col.insert(age_double_col.end(), new_age_double_col.begin(), new_age_double_col.end());
 
@@ -969,6 +1061,14 @@ TEST(Expr, TestBinaryArithOpEvalRange) {
             dsl_string.replace(loc, 5, dsl_string_int32);
         } else if (dtype == DataType::INT64) {
             dsl_string.replace(loc, 5, dsl_string_int64);
+        } else if (dtype == DataType::UINT8) {
+            dsl_string.replace(loc, 5, dsl_string_uint8);
+        } else if (dtype == DataType::UINT16) {
+            dsl_string.replace(loc, 5, dsl_string_uint16);
+        } else if (dtype == DataType::UINT32) {
+            dsl_string.replace(loc, 5, dsl_string_uint32);
+        } else if (dtype == DataType::UINT64) {
+            dsl_string.replace(loc, 5, dsl_string_uint64); 
         } else if (dtype == DataType::FLOAT) {
             dsl_string.replace(loc, 5, dsl_string_float);
         } else if (dtype == DataType::DOUBLE) {
@@ -998,6 +1098,22 @@ TEST(Expr, TestBinaryArithOpEvalRange) {
                 ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
             } else if (dtype == DataType::INT64) {
                 auto val = age64_col[i];
+                auto ref = ref_func(val);
+                ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
+            } else if (dtype == DataType::UINT8) {
+                auto val = ageu8_col[i];
+                auto ref = ref_func(val);
+                ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
+            } else if (dtype == DataType::UINT16) {
+                auto val = ageu16_col[i];
+                auto ref = ref_func(val);
+                ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
+            } else if (dtype == DataType::UINT32) {
+                auto val = ageu32_col[i];
+                auto ref = ref_func(val);
+                ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
+            } else if (dtype == DataType::UINT64) {
+                auto val = ageu64_col[i];
                 auto ref = ref_func(val);
                 ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
             } else if (dtype == DataType::FLOAT) {
@@ -1181,6 +1297,42 @@ TEST(Expr, TestBinaryArithOpEvalRangeWithScalarSortIndex) {
                 int64_val: 1000
             >)",
          [](int64_t v) { return (v / 2) == 1000; }, DataType::INT64},
+        {R"(arith_op: Add
+            right_operand: <
+                int64_val: 4
+            >
+            op: Equal
+            value: <
+                int64_val: 8
+            >)",
+         [](uint8_t v) { return (v + 4) == 8; }, DataType::UINT8},
+        {R"(arith_op: Sub
+            right_operand: <
+                int64_val: 500
+            >
+            op: Equal
+            value: <
+                int64_val: 1500
+            >)",
+         [](uint16_t v) { return (v - 500) == 1500; }, DataType::UINT16},
+        {R"(arith_op: Mul
+            right_operand: <
+                int64_val: 2
+            >
+            op: Equal
+            value: <
+                int64_val: 4000
+            >)",
+         [](uint32_t v) { return (v * 2) == 4000; }, DataType::UINT32},
+        {R"(arith_op: Div
+            right_operand: <
+                int64_val: 2
+            >
+            op: Equal
+            value: <
+                int64_val: 1000
+            >)",
+         [](uint64_t v) { return (v / 2) == 1000; }, DataType::UINT64},
         {R"(arith_op: Mod
             right_operand: <
                 int64_val: 100
@@ -1262,6 +1414,43 @@ TEST(Expr, TestBinaryArithOpEvalRangeWithScalarSortIndex) {
                 int64_val: 2000
             >)",
          [](int64_t v) { return (v + 500) != 2000; }, DataType::INT64},
+        {R"(arith_op: Mul
+            right_operand: <
+                int64_val: 2
+            >
+            op: NotEqual
+            value: <
+                int64_val: 2
+            >)",
+         [](uint8_t v) { return (v * 2) != 2; }, DataType::UINT8},
+        {R"(arith_op: Div
+            right_operand: <
+                int64_val: 2
+            >
+            op: NotEqual
+            value: <
+                int64_val: 2000
+            >)",
+         [](uint16_t v) { return (v / 2) != 2000; }, DataType::UINT16},
+        {R"(arith_op: Mod
+            right_operand: <
+                int64_val: 100
+            >
+            op: NotEqual
+            value: <
+                int64_val: 1
+            >)",
+         [](uint32_t v) { return (v % 100) != 1; }, DataType::UINT32},
+        {R"(arith_op: Add
+            right_operand: <
+                int64_val: 500
+            >
+            op: NotEqual
+            value: <
+                int64_val: 2000
+            >)",
+         [](uint64_t v) { return (v + 500) != 2000; }, DataType::UINT64},
+    
     };
 
     std::string serialized_expr_plan = R"(vector_anns: <
@@ -1293,6 +1482,10 @@ TEST(Expr, TestBinaryArithOpEvalRangeWithScalarSortIndex) {
     auto i16_fid = schema->AddDebugField("age16", DataType::INT16);
     auto i32_fid = schema->AddDebugField("age32", DataType::INT32);
     auto i64_fid = schema->AddDebugField("age64", DataType::INT64);
+    auto u8_fid = schema->AddDebugField("ageu8", DataType::UINT8);
+    auto u16_fid = schema->AddDebugField("ageu16", DataType::UINT16);
+    auto u32_fid = schema->AddDebugField("ageu32", DataType::UINT32);
+    auto u64_fid = schema->AddDebugField("ageu64", DataType::UINT64);
     auto float_fid = schema->AddDebugField("age_float", DataType::FLOAT);
     auto double_fid = schema->AddDebugField("age_double", DataType::DOUBLE);
     schema->set_primary_field_id(i64_fid);
@@ -1346,6 +1539,50 @@ TEST(Expr, TestBinaryArithOpEvalRangeWithScalarSortIndex) {
     load_index_info.index = std::shared_ptr<milvus::scalar::ScalarIndexSort<int64_t>>(age64_index.release());
     seg->LoadIndex(load_index_info);
 
+    // load index for uint8 field
+    auto ageu8_col = raw_data.get_col<uint8_t>(u8_fid);
+    ageu8_col[0] = 4;
+    GenScalarIndexing(N, ageu8_col.data());
+    auto ageu8_index = milvus::scalar::CreateScalarIndexSort<uint8_t>();
+    ageu8_index->Build(N, ageu8_col.data());
+    load_index_info.field_id = u8_fid.get();
+    load_index_info.field_type = UInt8;
+    load_index_info.index = std::shared_ptr<milvus::scalar::ScalarIndexSort<uint8_t>>(ageu8_index.release());
+    seg->LoadIndex(load_index_info);
+
+    // load index for 16 field
+    auto ageu16_col = raw_data.get_col<uint16_t>(u16_fid);
+    ageu16_col[0] = 2000;
+    GenScalarIndexing(N, ageu16_col.data());
+    auto ageu16_index = milvus::scalar::CreateScalarIndexSort<uint16_t>();
+    ageu16_index->Build(N, ageu16_col.data());
+    load_index_info.field_id = u16_fid.get();
+    load_index_info.field_type = UInt16;
+    load_index_info.index = std::shared_ptr<milvus::scalar::ScalarIndexSort<uint16_t>>(ageu16_index.release());
+    seg->LoadIndex(load_index_info);
+
+    // load index for uint32 field
+    auto ageu32_col = raw_data.get_col<uint32_t>(u32_fid);
+    ageu32_col[0] = 2000;
+    GenScalarIndexing(N, ageu32_col.data());
+    auto ageu32_index = milvus::scalar::CreateScalarIndexSort<uint32_t>();
+    ageu32_index->Build(N, ageu32_col.data());
+    load_index_info.field_id = u32_fid.get();
+    load_index_info.field_type = UInt32;
+    load_index_info.index = std::shared_ptr<milvus::scalar::ScalarIndexSort<uint32_t>>(ageu32_index.release());
+    seg->LoadIndex(load_index_info);
+
+    // load index for uint64 field
+    auto ageu64_col = raw_data.get_col<uint64_t>(u64_fid);
+    ageu64_col[0] = 2000;
+    GenScalarIndexing(N, ageu64_col.data());
+    auto ageu64_index = milvus::scalar::CreateScalarIndexSort<uint64_t>();
+    ageu64_index->Build(N, ageu64_col.data());
+    load_index_info.field_id = u64_fid.get();
+    load_index_info.field_type = UInt64;
+    load_index_info.index = std::shared_ptr<milvus::scalar::ScalarIndexSort<uint64_t>>(ageu64_index.release());
+    seg->LoadIndex(load_index_info);
+
     // load index for float field
     auto age_float_col = raw_data.get_col<float>(float_fid);
     age_float_col[0] = 2000;
@@ -1390,6 +1627,18 @@ TEST(Expr, TestBinaryArithOpEvalRangeWithScalarSortIndex) {
         } else if (dtype == DataType::INT64) {
             expr = boost::format(expr_plan) % vec_fid.get() % i64_fid.get() %
                    proto::schema::DataType_Name(int(DataType::INT64));
+        } else if (dtype == DataType::UINT8) {
+            expr = boost::format(expr_plan) % vec_fid.get() % u8_fid.get() %
+                   proto::schema::DataType_Name(int(DataType::UINT8));
+        } else if (dtype == DataType::UINT16) {
+            expr = boost::format(expr_plan) % vec_fid.get() % u16_fid.get() %
+                   proto::schema::DataType_Name(int(DataType::UINT16));
+        } else if (dtype == DataType::UINT32) {
+            expr = boost::format(expr_plan) % vec_fid.get() % u32_fid.get() %
+                   proto::schema::DataType_Name(int(DataType::UINT32));
+        } else if (dtype == DataType::UINT64) {
+            expr = boost::format(expr_plan) % vec_fid.get() % u64_fid.get() %
+                   proto::schema::DataType_Name(int(DataType::UINT64));
         } else if (dtype == DataType::FLOAT) {
             expr = boost::format(expr_plan) % vec_fid.get() % float_fid.get() %
                    proto::schema::DataType_Name(int(DataType::FLOAT));
@@ -1422,6 +1671,22 @@ TEST(Expr, TestBinaryArithOpEvalRangeWithScalarSortIndex) {
                 ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
             } else if (dtype == DataType::INT64) {
                 auto val = age64_col[i];
+                auto ref = ref_func(val);
+                ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
+            } else if (dtype == DataType::UINT8) {
+                auto val = ageu8_col[i];
+                auto ref = ref_func(val);
+                ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
+            } else if (dtype == DataType::UINT16) {
+                auto val = ageu16_col[i];
+                auto ref = ref_func(val);
+                ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
+            } else if (dtype == DataType::UINT32) {
+                auto val = ageu32_col[i];
+                auto ref = ref_func(val);
+                ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
+            } else if (dtype == DataType::UINT64) {
+                auto val = ageu64_col[i];
                 auto ref = ref_func(val);
                 ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
             } else if (dtype == DataType::FLOAT) {

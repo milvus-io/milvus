@@ -303,6 +303,24 @@ func TestValidateFieldType(t *testing.T) {
 			dt:       schemapb.DataType_Int64,
 			validate: true,
 		},
+		//
+		{
+			dt:       schemapb.DataType_UInt8,
+			validate: true,
+		},
+		{
+			dt:       schemapb.DataType_UInt16,
+			validate: true,
+		},
+		{
+			dt:       schemapb.DataType_UInt32,
+			validate: true,
+		},
+		{
+			dt:       schemapb.DataType_UInt64,
+			validate: true,
+		},
+		//
 		{
 			dt:       schemapb.DataType_Float,
 			validate: true,

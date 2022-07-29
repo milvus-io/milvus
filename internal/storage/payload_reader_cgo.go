@@ -58,6 +58,18 @@ func (r *PayloadReaderCgo) GetDataFromPayload() (interface{}, int, error) {
 	case schemapb.DataType_Int64:
 		val, err := r.GetInt64FromPayload()
 		return val, 0, err
+	case schemapb.DataType_UInt8:
+		val, err := r.GetUInt8FromPayload()
+		return val, 0, err
+	case schemapb.DataType_UInt16:
+		val, err := r.GetUInt16FromPayload()
+		return val, 0, err
+	case schemapb.DataType_UInt32:
+		val, err := r.GetUInt32FromPayload()
+		return val, 0, err
+	case schemapb.DataType_UInt64:
+		val, err := r.GetUInt64FromPayload()
+		return val, 0, err
 	case schemapb.DataType_Float:
 		val, err := r.GetFloatFromPayload()
 		return val, 0, err
@@ -183,6 +195,75 @@ func (r *PayloadReaderCgo) GetInt64FromPayload() ([]int64, error) {
 	}
 
 	slice := (*[1 << 28]int64)(unsafe.Pointer(cMsg))[:cSize:cSize]
+	return slice, nil
+}
+
+// GetUInt8FromPayload returns uint8 slice from payload
+func (r *PayloadReaderCgo) GetUInt8FromPayload() ([]uint8, error) {
+	if r.colType != schemapb.DataType_UInt8 {
+		return nil, errors.New("incorrect data type")
+	}
+
+	var cMsg *C.uint8_t
+	var cSize C.int
+
+	status := C.GetUInt8FromPayload(r.payloadReaderPtr, &cMsg, &cSize)
+	if err := HandleCStatus(&status, "GetUInt8FromPayload failed"); err != nil {
+		return nil, err
+	}
+
+	slice := (*[1 << 28]uint8)(unsafe.Pointer(cMsg))[:cSize:cSize]
+	return slice, nil
+}
+
+func (r *PayloadReaderCgo) GetUInt16FromPayload() ([]uint16, error) {
+	if r.colType != schemapb.DataType_UInt16 {
+		return nil, errors.New("incorrect data type")
+	}
+
+	var cMsg *C.uint16_t
+	var cSize C.int
+
+	status := C.GetUInt16FromPayload(r.payloadReaderPtr, &cMsg, &cSize)
+	if err := HandleCStatus(&status, "GetUInt16FromPayload failed"); err != nil {
+		return nil, err
+	}
+
+	slice := (*[1 << 28]uint16)(unsafe.Pointer(cMsg))[:cSize:cSize]
+	return slice, nil
+}
+
+func (r *PayloadReaderCgo) GetUInt32FromPayload() ([]uint32, error) {
+	if r.colType != schemapb.DataType_UInt32 {
+		return nil, errors.New("incorrect data type")
+	}
+
+	var cMsg *C.uint32_t
+	var cSize C.int
+
+	status := C.GetUInt32FromPayload(r.payloadReaderPtr, &cMsg, &cSize)
+	if err := HandleCStatus(&status, "GetUInt32FromPayload failed"); err != nil {
+		return nil, err
+	}
+
+	slice := (*[1 << 28]uint32)(unsafe.Pointer(cMsg))[:cSize:cSize]
+	return slice, nil
+}
+
+func (r *PayloadReaderCgo) GetUInt64FromPayload() ([]uint64, error) {
+	if r.colType != schemapb.DataType_UInt64 {
+		return nil, errors.New("incorrect data type")
+	}
+
+	var cMsg *C.uint64_t
+	var cSize C.int
+
+	status := C.GetUInt64FromPayload(r.payloadReaderPtr, &cMsg, &cSize)
+	if err := HandleCStatus(&status, "GetUInt64FromPayload failed"); err != nil {
+		return nil, err
+	}
+
+	slice := (*[1 << 28]uint64)(unsafe.Pointer(cMsg))[:cSize:cSize]
 	return slice, nil
 }
 

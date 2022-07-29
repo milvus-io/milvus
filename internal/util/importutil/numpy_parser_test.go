@@ -34,6 +34,12 @@ func Test_ConvertNumpyType(t *testing.T) {
 	checkFunc([]string{"i2", "<i2", "|i2", ">i2", "int16"}, schemapb.DataType_Int16)
 	checkFunc([]string{"i4", "<i4", "|i4", ">i4", "int32"}, schemapb.DataType_Int32)
 	checkFunc([]string{"i8", "<i8", "|i8", ">i8", "int64"}, schemapb.DataType_Int64)
+
+	//checkFunc([]string{"u1", "<u1", "|u1","uint8"}, schemapb.DataType_UInt8)
+	checkFunc([]string{"u2", "<u2", "|u2", ">u2", "uint16"}, schemapb.DataType_UInt16)
+	checkFunc([]string{"u4", "<u4", "|u4", ">u4", "uint32"}, schemapb.DataType_UInt32)
+	checkFunc([]string{"u8", "<u8", "|u8", ">u8", "uint64"}, schemapb.DataType_UInt64)
+
 	checkFunc([]string{"f4", "<f4", "|f4", ">f4", "float32"}, schemapb.DataType_Float)
 	checkFunc([]string{"f8", "<f8", "|f8", ">f8", "float64"}, schemapb.DataType_Double)
 
@@ -396,6 +402,62 @@ func Test_Parse(t *testing.T) {
 		return nil
 	}
 	checkFunc(data5, "field_int64", flushFunc)
+
+	// scalar uint8
+	data11 := []uint8{1, 2, 3, 4, 5}
+	flushFunc = func(field storage.FieldData) error {
+		assert.NotNil(t, field)
+		assert.Equal(t, len(data11), field.RowNum())
+
+		for i := 0; i < len(data11); i++ {
+			assert.Equal(t, data11[i], field.GetRow(i))
+		}
+
+		return nil
+	}
+	checkFunc(data11, "field_uint8", flushFunc)
+
+	// scalar uint16
+	data12 := []uint16{1, 2, 3, 4, 5}
+	flushFunc = func(field storage.FieldData) error {
+		assert.NotNil(t, field)
+		assert.Equal(t, len(data12), field.RowNum())
+
+		for i := 0; i < len(data12); i++ {
+			assert.Equal(t, data12[i], field.GetRow(i))
+		}
+
+		return nil
+	}
+	checkFunc(data12, "field_uint16", flushFunc)
+
+	// scalar uint32
+	data13 := []uint32{1, 2, 3, 4, 5}
+	flushFunc = func(field storage.FieldData) error {
+		assert.NotNil(t, field)
+		assert.Equal(t, len(data13), field.RowNum())
+
+		for i := 0; i < len(data13); i++ {
+			assert.Equal(t, data13[i], field.GetRow(i))
+		}
+
+		return nil
+	}
+	checkFunc(data13, "field_uint32", flushFunc)
+
+	// scalar uint64
+	data14 := []uint64{1, 2, 3, 4, 5}
+	flushFunc = func(field storage.FieldData) error {
+		assert.NotNil(t, field)
+		assert.Equal(t, len(data14), field.RowNum())
+
+		for i := 0; i < len(data14); i++ {
+			assert.Equal(t, data14[i], field.GetRow(i))
+		}
+
+		return nil
+	}
+	checkFunc(data5, "field_uint64", flushFunc)
 
 	// scalar float
 	data6 := []float32{1, 2, 3, 4, 5}

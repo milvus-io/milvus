@@ -143,6 +143,14 @@ CreateIndex(const FieldMeta& field_meta, const SegcoreConfig& segcore_config) {
             return std::make_unique<ScalarFieldIndexing<int32_t>>(field_meta, segcore_config);
         case DataType::INT64:
             return std::make_unique<ScalarFieldIndexing<int64_t>>(field_meta, segcore_config);
+        case DataType::UINT8:
+            return std::make_unique<ScalarFieldIndexing<uint8_t>>(field_meta, segcore_config);
+        case DataType::UINT16:
+            return std::make_unique<ScalarFieldIndexing<uint16_t>>(field_meta, segcore_config);
+        case DataType::UINT32:
+            return std::make_unique<ScalarFieldIndexing<uint32_t>>(field_meta, segcore_config);
+        case DataType::UINT64:
+            return std::make_unique<ScalarFieldIndexing<uint64_t>>(field_meta, segcore_config);
         case DataType::FLOAT:
             return std::make_unique<ScalarFieldIndexing<float>>(field_meta, segcore_config);
         case DataType::DOUBLE:

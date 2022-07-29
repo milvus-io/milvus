@@ -272,6 +272,46 @@ func readInt64Array(blobReaders []io.Reader) []int64 {
 	return ret
 }
 
+func readUInt8Array(blobReaders []io.Reader) []uint8 {
+	ret := make([]uint8, 0)
+	for _, r := range blobReaders {
+		var v uint8
+		ReadBinary(r, &v, schemapb.DataType_UInt8)
+		ret = append(ret, v)
+	}
+	return ret
+}
+
+func readUInt16Array(blobReaders []io.Reader) []uint16 {
+	ret := make([]uint16, 0)
+	for _, r := range blobReaders {
+		var v uint16
+		ReadBinary(r, &v, schemapb.DataType_UInt16)
+		ret = append(ret, v)
+	}
+	return ret
+}
+
+func readUInt32Array(blobReaders []io.Reader) []uint32 {
+	ret := make([]uint32, 0)
+	for _, r := range blobReaders {
+		var v uint32
+		ReadBinary(r, &v, schemapb.DataType_UInt32)
+		ret = append(ret, v)
+	}
+	return ret
+}
+
+func readUInt64Array(blobReaders []io.Reader) []uint64 {
+	ret := make([]uint64, 0)
+	for _, r := range blobReaders {
+		var v uint64
+		ReadBinary(r, &v, schemapb.DataType_UInt64)
+		ret = append(ret, v)
+	}
+	return ret
+}
+
 func readFloatArray(blobReaders []io.Reader) []float32 {
 	ret := make([]float32, 0)
 	for _, r := range blobReaders {
@@ -375,6 +415,45 @@ func RowBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *schemap
 				}
 			default:
 				fieldData.Data = readInt64Array(blobReaders)
+			}
+
+		case schemapb.DataType_UInt8:
+			idata.Data[field.FieldID] = &UInt8FieldData{
+				NumRows: []int64{int64(msg.NRows())},
+				Data:    readUInt8Array(blobReaders),
+			}
+
+		case schemapb.DataType_UInt16:
+			idata.Data[field.FieldID] = &UInt16FieldData{
+				NumRows: []int64{int64(msg.NRows())},
+				Data:    readUInt16Array(blobReaders),
+			}
+
+		case schemapb.DataType_UInt32:
+			idata.Data[field.FieldID] = &UInt32FieldData{
+				NumRows: []int64{int64(msg.NRows())},
+				Data:    readUInt32Array(blobReaders),
+			}
+
+		case schemapb.DataType_UInt64:
+			idata.Data[field.FieldID] = &UInt64FieldData{
+				NumRows: []int64{int64(msg.NRows())},
+				Data:    nil,
+			}
+
+			fieldData := idata.Data[field.FieldID].(*UInt64FieldData)
+			switch field.FieldID {
+			case 0: // rowIDs
+				//fieldData.Data = append(fieldData.Data, msg.RowIDs...)
+				for _, ids := range msg.RowIDs {
+					fieldData.Data = append(fieldData.Data, uint64(ids))
+				}
+			case 1: // Timestamps
+				//for _, ts := range msg.Timestamps {
+				fieldData.Data = append(fieldData.Data, msg.Timestamps...)
+				//}
+			default:
+				fieldData.Data = readUInt64Array(blobReaders)
 			}
 
 		case schemapb.DataType_Float:
@@ -519,6 +598,72 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 
 			idata.Data[field.FieldID] = fieldData
 
+		case schemapb.DataType_UInt8:
+			srcData := srcFields[field.FieldID].GetScalars().GetUintData().GetData()
+
+			fieldData := &UInt8FieldData{
+				NumRows: []int64{int64(msg.NRows())},
+				Data:    make([]uint8, 0, len(srcData)),
+			}
+			uint8SrcData := make([]uint8, len(srcData))
+			for i := 0; i < len(srcData); i++ {
+				uint8SrcData[i] = uint8(srcData[i])
+			}
+			fieldData.Data = append(fieldData.Data, uint8SrcData...)
+
+			idata.Data[field.FieldID] = fieldData
+
+		case schemapb.DataType_UInt16:
+			srcData := srcFields[field.FieldID].GetScalars().GetUintData().GetData()
+
+			fieldData := &UInt16FieldData{
+				NumRows: []int64{int64(msg.NRows())},
+				Data:    make([]uint16, 0, len(srcData)),
+			}
+			uint16SrcData := make([]uint16, len(srcData))
+			for i := 0; i < len(srcData); i++ {
+				uint16SrcData[i] = uint16(srcData[i])
+			}
+			fieldData.Data = append(fieldData.Data, uint16SrcData...)
+
+			idata.Data[field.FieldID] = fieldData
+
+		case schemapb.DataType_UInt32:
+			srcData := srcFields[field.FieldID].GetScalars().GetUintData().GetData()
+
+			fieldData := &UInt32FieldData{
+				NumRows: []int64{int64(msg.NRows())},
+				Data:    make([]uint32, 0, len(srcData)),
+			}
+			fieldData.Data = append(fieldData.Data, srcData...)
+
+			idata.Data[field.FieldID] = fieldData
+
+		case schemapb.DataType_UInt64:
+			fieldData := &UInt64FieldData{
+				NumRows: []int64{int64(msg.NRows())},
+				Data:    make([]uint64, 0),
+			}
+
+			switch field.FieldID {
+			case 0: // rowIDs
+				fieldData.Data = make([]uint64, 0, len(msg.RowIDs))
+				for _, IDs := range msg.RowIDs {
+					fieldData.Data = append(fieldData.Data, uint64(IDs))
+				}
+			case 1: // Timestamps
+				fieldData.Data = make([]uint64, 0, len(msg.Timestamps))
+				//for _, ts := range msg.Timestamps {
+				fieldData.Data = append(fieldData.Data, msg.Timestamps...)
+				//}
+			default:
+				srcData := srcFields[field.FieldID].GetScalars().GetUlongData().GetData()
+				fieldData.Data = make([]uint64, 0, len(srcData))
+				fieldData.Data = append(fieldData.Data, srcData...)
+			}
+
+			idata.Data[field.FieldID] = fieldData
+
 		case schemapb.DataType_Float:
 			srcData := srcFields[field.FieldID].GetScalars().GetFloatData().GetData()
 
@@ -628,6 +773,58 @@ func mergeInt64Field(data *InsertData, fid FieldID, field *Int64FieldData) {
 	fieldData.NumRows[0] += int64(field.RowNum())
 }
 
+func mergeUInt8Field(data *InsertData, fid FieldID, field *UInt8FieldData) {
+	if _, ok := data.Data[fid]; !ok {
+		fieldData := &UInt8FieldData{
+			NumRows: []int64{0},
+			Data:    nil,
+		}
+		data.Data[fid] = fieldData
+	}
+	fieldData := data.Data[fid].(*UInt8FieldData)
+	fieldData.Data = append(fieldData.Data, field.Data...)
+	fieldData.NumRows[0] += int64(field.RowNum())
+}
+
+func mergeUInt16Field(data *InsertData, fid FieldID, field *UInt16FieldData) {
+	if _, ok := data.Data[fid]; !ok {
+		fieldData := &UInt16FieldData{
+			NumRows: []int64{0},
+			Data:    nil,
+		}
+		data.Data[fid] = fieldData
+	}
+	fieldData := data.Data[fid].(*UInt16FieldData)
+	fieldData.Data = append(fieldData.Data, field.Data...)
+	fieldData.NumRows[0] += int64(field.RowNum())
+}
+
+func mergeUInt32Field(data *InsertData, fid FieldID, field *UInt32FieldData) {
+	if _, ok := data.Data[fid]; !ok {
+		fieldData := &UInt32FieldData{
+			NumRows: []int64{0},
+			Data:    nil,
+		}
+		data.Data[fid] = fieldData
+	}
+	fieldData := data.Data[fid].(*UInt32FieldData)
+	fieldData.Data = append(fieldData.Data, field.Data...)
+	fieldData.NumRows[0] += int64(field.RowNum())
+}
+
+func mergeUInt64Field(data *InsertData, fid FieldID, field *UInt64FieldData) {
+	if _, ok := data.Data[fid]; !ok {
+		fieldData := &UInt64FieldData{
+			NumRows: []int64{0},
+			Data:    nil,
+		}
+		data.Data[fid] = fieldData
+	}
+	fieldData := data.Data[fid].(*UInt64FieldData)
+	fieldData.Data = append(fieldData.Data, field.Data...)
+	fieldData.NumRows[0] += int64(field.RowNum())
+}
+
 func mergeFloatField(data *InsertData, fid FieldID, field *FloatFieldData) {
 	if _, ok := data.Data[fid]; !ok {
 		fieldData := &FloatFieldData{
@@ -711,6 +908,16 @@ func MergeFieldData(data *InsertData, fid FieldID, field FieldData) {
 		mergeInt32Field(data, fid, field)
 	case *Int64FieldData:
 		mergeInt64Field(data, fid, field)
+
+	case *UInt8FieldData:
+		mergeUInt8Field(data, fid, field)
+	case *UInt16FieldData:
+		mergeUInt16Field(data, fid, field)
+	case *UInt32FieldData:
+		mergeUInt32Field(data, fid, field)
+	case *UInt64FieldData:
+		mergeUInt64Field(data, fid, field)
+
 	case *FloatFieldData:
 		mergeFloatField(data, fid, field)
 	case *DoubleFieldData:
@@ -824,6 +1031,16 @@ func FieldDataToBytes(endian binary.ByteOrder, fieldData FieldData) ([]byte, err
 		return binaryWrite(endian, field.Data)
 	case *Int64FieldData:
 		return binaryWrite(endian, field.Data)
+
+	case *UInt8FieldData:
+		return binaryWrite(endian, field.Data)
+	case *UInt16FieldData:
+		return binaryWrite(endian, field.Data)
+	case *UInt32FieldData:
+		return binaryWrite(endian, field.Data)
+	case *UInt64FieldData:
+		return binaryWrite(endian, field.Data)
+
 	case *FloatFieldData:
 		return binaryWrite(endian, field.Data)
 	case *DoubleFieldData:
@@ -916,6 +1133,72 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 					},
 				},
 			}
+
+		case *UInt8FieldData:
+			uint32Data := make([]uint32, len(rawData.Data))
+			for index, v := range rawData.Data {
+				uint32Data[index] = uint32(v)
+			}
+			fieldData = &schemapb.FieldData{
+				Type:    schemapb.DataType_UInt8,
+				FieldId: fieldID,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_UintData{
+							UintData: &schemapb.UIntArray{
+								Data: uint32Data,
+							},
+						},
+					},
+				},
+			}
+		case *UInt16FieldData:
+			uint32Data := make([]uint32, len(rawData.Data))
+			for index, v := range rawData.Data {
+				uint32Data[index] = uint32(v)
+			}
+			fieldData = &schemapb.FieldData{
+				Type:    schemapb.DataType_UInt16,
+				FieldId: fieldID,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_UintData{
+							UintData: &schemapb.UIntArray{
+								Data: uint32Data,
+							},
+						},
+					},
+				},
+			}
+		case *UInt32FieldData:
+			fieldData = &schemapb.FieldData{
+				Type:    schemapb.DataType_UInt32,
+				FieldId: fieldID,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_UintData{
+							UintData: &schemapb.UIntArray{
+								Data: rawData.Data,
+							},
+						},
+					},
+				},
+			}
+		case *UInt64FieldData:
+			fieldData = &schemapb.FieldData{
+				Type:    schemapb.DataType_UInt64,
+				FieldId: fieldID,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_UlongData{
+							UlongData: &schemapb.ULongArray{
+								Data: rawData.Data,
+							},
+						},
+					},
+				},
+			}
+
 		case *FloatFieldData:
 			fieldData = &schemapb.FieldData{
 				Type:    schemapb.DataType_Float,

@@ -20,7 +20,10 @@ enum DataType {
   Int16 = 3;
   Int32 = 4;
   Int64 = 5;
-
+  UInt8 = 6;
+  UInt16 = 7;
+  UInt32 = 8;
+  UInt64 = 9;
   Float = 10;
   Double = 11;
 
@@ -67,6 +70,14 @@ message LongArray {
   repeated int64 data = 1;
 }
 
+message UIntArray {
+  repeated uint32 data = 1;
+}
+
+message ULongArray {
+  repeated uint64 data = 1;
+}
+
 message FloatArray {
   repeated float data = 1;
 }
@@ -93,6 +104,8 @@ message ScalarField {
     DoubleArray double_data = 5;
     StringArray string_data = 6;
     BytesArray bytes_data = 7;
+    UIntArray uint_data = 8;
+    ULongArray ulong_data = 9;
   }
 }
 

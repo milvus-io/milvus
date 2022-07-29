@@ -48,6 +48,14 @@ AddInt32ToPayload(CPayloadWriter payloadWriter, int32_t* values, int length);
 CStatus
 AddInt64ToPayload(CPayloadWriter payloadWriter, int64_t* values, int length);
 CStatus
+AddUInt8ToPayload(CPayloadWriter payloadWriter, uint8_t* values, int length);
+CStatus
+AddUInt16ToPayload(CPayloadWriter payloadWriter, uint16_t* values, int length);
+CStatus
+AddUInt32ToPayload(CPayloadWriter payloadWriter, uint32_t* values, int length);
+CStatus
+AddUInt64ToPayload(CPayloadWriter payloadWriter, uint64_t* values, int length);
+CStatus
 AddFloatToPayload(CPayloadWriter payloadWriter, float* values, int length);
 CStatus
 AddDoubleToPayload(CPayloadWriter payloadWriter, double* values, int length);
@@ -81,6 +89,14 @@ CStatus
 GetInt32FromPayload(CPayloadReader payloadReader, int32_t** values, int* length);
 CStatus
 GetInt64FromPayload(CPayloadReader payloadReader, int64_t** values, int* length);
+CStatus
+GetUInt8FromPayload(CPayloadReader payloadReader, uint8_t** values, int* length);
+CStatus
+GetUInt16FromPayload(CPayloadReader payloadReader, uint16_t** values, int* length);
+CStatus
+GetUInt32FromPayload(CPayloadReader payloadReader, uint32_t** values, int* length);
+CStatus
+GetUInt64FromPayload(CPayloadReader payloadReader, uint64_t** values, int* length);
 CStatus
 GetFloatFromPayload(CPayloadReader payloadReader, float** values, int* length);
 CStatus

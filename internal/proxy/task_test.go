@@ -53,6 +53,8 @@ const (
 	testBoolField        = "bool"
 	testInt32Field       = "int32"
 	testInt64Field       = "int64"
+	testUInt32Field      = "uint32"
+	testUInt64Field      = "uint64"
 	testFloatField       = "float"
 	testDoubleField      = "double"
 	testVarCharField     = "varChar"
@@ -143,7 +145,7 @@ func constructCollectionSchemaByDataType(collectionName string, fieldName2DataTy
 }
 
 func constructCollectionSchemaWithAllType(
-	boolField, int32Field, int64Field, floatField, doubleField string,
+	boolField, int32Field, int64Field, floatField, doubleField, uint32Field, uint64Field string,
 	floatVecField, binaryVecField string,
 	dim int,
 	collectionName string,
@@ -175,6 +177,26 @@ func constructCollectionSchemaWithAllType(
 		IsPrimaryKey: true,
 		Description:  "",
 		DataType:     schemapb.DataType_Int64,
+		TypeParams:   nil,
+		IndexParams:  nil,
+		AutoID:       false,
+	}
+	u32 := &schemapb.FieldSchema{
+		FieldID:      0,
+		Name:         uint32Field,
+		IsPrimaryKey: false,
+		Description:  "",
+		DataType:     schemapb.DataType_UInt32,
+		TypeParams:   nil,
+		IndexParams:  nil,
+		AutoID:       false,
+	}
+	u64 := &schemapb.FieldSchema{
+		FieldID:      0,
+		Name:         uint64Field,
+		IsPrimaryKey: true,
+		Description:  "",
+		DataType:     schemapb.DataType_UInt64,
 		TypeParams:   nil,
 		IndexParams:  nil,
 		AutoID:       false,
@@ -239,6 +261,8 @@ func constructCollectionSchemaWithAllType(
 				b,
 				i32,
 				i64,
+				u32,
+				u64,
 				f,
 				d,
 				fVec,
@@ -255,6 +279,8 @@ func constructCollectionSchemaWithAllType(
 			b,
 			i32,
 			i64,
+			u32,
+			u64,
 			f,
 			d,
 			fVec,

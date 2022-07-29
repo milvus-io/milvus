@@ -97,15 +97,28 @@ func TestSortFieldDataList(t *testing.T) {
 		Data:    []int64{7, 8, 9},
 	}
 
-	ls := fieldDataList{
-		IDs:   []FieldID{1, 3, 2},
-		datas: []FieldData{f1, f3, f2},
+	f4 := &UInt16FieldData{
+		NumRows: nil,
+		Data:    []uint16{1, 2, 3},
+	}
+	f5 := &UInt32FieldData{
+		NumRows: nil,
+		Data:    []uint32{4, 5, 6},
+	}
+	f6 := &UInt64FieldData{
+		NumRows: nil,
+		Data:    []uint64{7, 8, 9},
 	}
 
-	assert.Equal(t, 3, ls.Len())
+	ls := fieldDataList{
+		IDs:   []FieldID{1, 3, 2, 4, 5, 6},
+		datas: []FieldData{f1, f3, f2, f4, f5, f6},
+	}
+
+	assert.Equal(t, 6, ls.Len())
 	sortFieldDataList(ls)
-	assert.ElementsMatch(t, []FieldID{1, 2, 3}, ls.IDs)
-	assert.ElementsMatch(t, []FieldData{f1, f2, f3}, ls.datas)
+	assert.ElementsMatch(t, []FieldID{1, 2, 3, 4, 5, 6}, ls.IDs)
+	assert.ElementsMatch(t, []FieldData{f1, f2, f3, f4, f5, f6}, ls.datas)
 }
 
 func TestTransferColumnBasedInsertDataToRowBased(t *testing.T) {
@@ -175,6 +188,19 @@ func TestTransferColumnBasedInsertDataToRowBased(t *testing.T) {
 		Data: []float32{0, 0, 0},
 	}
 
+	f11 := &UInt8FieldData{
+		Data: []uint8{0, 0xf, 0x1f},
+	}
+	f12 := &UInt16FieldData{
+		Data: []uint16{0, 0xff, 0x1fff},
+	}
+	f13 := &UInt32FieldData{
+		Data: []uint32{0, 0xffff, 0x1fffffff},
+	}
+	f14 := &UInt64FieldData{
+		Data: []uint64{0, 0xffffffff, 0x1fffffffffffffff},
+	}
+
 	data.Data[101] = f1
 	data.Data[102] = f2
 	data.Data[103] = f3
@@ -186,6 +212,10 @@ func TestTransferColumnBasedInsertDataToRowBased(t *testing.T) {
 	data.Data[109] = f9
 	data.Data[110] = f10
 
+	data.Data[111] = f11
+	data.Data[112] = f12
+	data.Data[113] = f13
+	data.Data[114] = f14
 	utss, rowIds, rows, err := TransferColumnBasedInsertDataToRowBased(data)
 	assert.NoError(t, err)
 	assert.ElementsMatch(t, []uint64{1, 2, 3}, utss)
@@ -207,6 +237,11 @@ func TestTransferColumnBasedInsertDataToRowBased(t *testing.T) {
 				// b + 1, // "1"
 				1,          // 1
 				0, 0, 0, 0, // 0
+
+				0,    // 0
+				0, 0, // 0
+				0, 0, 0, 0, // 0
+				0, 0, 0, 0, 0, 0, 0, 0, // 0
 			},
 			rows[0].Value)
 		assert.ElementsMatch(t,
@@ -221,6 +256,11 @@ func TestTransferColumnBasedInsertDataToRowBased(t *testing.T) {
 				// b + 2, // "2"
 				2,          // 2
 				0, 0, 0, 0, // 0
+
+				0xf,     // 0xf
+				0, 0xff, // 0xff
+				0, 0, 0xff, 0xff, // 0xffff
+				0, 0, 0, 0, 0xff, 0xff, 0xff, 0xff, // 0xffffffff
 			},
 			rows[1].Value)
 		assert.ElementsMatch(t,
@@ -235,6 +275,11 @@ func TestTransferColumnBasedInsertDataToRowBased(t *testing.T) {
 				// b + 3, // "3"
 				3,          // 3
 				0, 0, 0, 0, // 0
+
+				0x1f,       // 0x1f
+				0xff, 0x1f, // 0x1fff
+				0xff, 0xff, 0xff, 0x1f, // 0x1fffffff
+				0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x1f, // 0x1fffffffffffffff
 			},
 			rows[2].Value)
 	}
@@ -285,6 +330,12 @@ func TestReadBinary(t *testing.T) {
 			// b + 3, // "3"
 			3, // 3
 			// 0, 0, 0, 0, // 0
+
+			0x1f,       // 0x1f
+			0xff, 0x1f, // 0x1fff
+			0xff, 0xff, 0xff, 0x1f, // 0x1fffffff
+			0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x1f, // 0x1fffffffffffffff
+
 		},
 	)
 
@@ -313,6 +364,22 @@ func TestReadBinary(t *testing.T) {
 		ReadBinary(reader, &bvec, schemapb.DataType_BinaryVector)
 		assert.Equal(t, []byte{3}, bvec)
 
+		var u8 uint8
+		ReadBinary(reader, &u8, schemapb.DataType_UInt8)
+		assert.Equal(t, uint8(0x1f), u8)
+
+		var u16 uint16
+		ReadBinary(reader, &u16, schemapb.DataType_UInt16)
+		assert.Equal(t, uint16(0x1fff), u16)
+
+		var u32 uint32
+		ReadBinary(reader, &u32, schemapb.DataType_UInt32)
+		assert.Equal(t, uint32(0x1fffffff), u32)
+
+		var u64 uint64
+		ReadBinary(reader, &u64, schemapb.DataType_UInt64)
+		assert.Equal(t, uint64(0x1fffffffffffffff), u64)
+
 		// should print error here, no content in reader.
 		ReadBinary(reader, &bvec, schemapb.DataType_BinaryVector)
 	}
@@ -339,6 +406,18 @@ func genAllFieldsSchema(fVecDim, bVecDim int) (schema *schemapb.CollectionSchema
 			},
 			{
 				DataType: schemapb.DataType_Int32,
+			},
+			{
+				DataType: schemapb.DataType_UInt8,
+			},
+			{
+				DataType: schemapb.DataType_UInt16,
+			},
+			{
+				DataType: schemapb.DataType_UInt32,
+			},
+			{
+				DataType: schemapb.DataType_UInt64,
 			},
 			{
 				DataType: schemapb.DataType_Float,
@@ -435,6 +514,22 @@ func generateInt64Array(numRows int) []int64 {
 	return ret
 }
 
+func generateUInt32Array(numRows int) []uint32 {
+	ret := make([]uint32, 0, numRows)
+	for i := 0; i < numRows; i++ {
+		ret = append(ret, uint32(rand.Int()))
+	}
+	return ret
+}
+
+func generateUInt64Array(numRows int) []uint64 {
+	ret := make([]uint64, 0, numRows)
+	for i := 0; i < numRows; i++ {
+		ret = append(ret, uint64(rand.Int()))
+	}
+	return ret
+}
+
 func generateFloat32Array(numRows int) []float32 {
 	ret := make([]float32, 0, numRows)
 	for i := 0; i < numRows; i++ {
@@ -495,6 +590,28 @@ func genRowWithAllFields(fVecDim, bVecDim int) (blob *commonpb.Blob, pk int64, r
 			_ = binary.Write(&buffer, common.Endian, pk)
 			ret.Value = append(ret.Value, buffer.Bytes()...)
 			row = append(row, pk)
+
+		case schemapb.DataType_UInt8:
+			data := uint8(rand.Int())
+			_ = binary.Write(&buffer, common.Endian, data)
+			ret.Value = append(ret.Value, buffer.Bytes()...)
+			row = append(row, data)
+		case schemapb.DataType_UInt16:
+			data := uint16(rand.Int())
+			_ = binary.Write(&buffer, common.Endian, data)
+			ret.Value = append(ret.Value, buffer.Bytes()...)
+			row = append(row, data)
+		case schemapb.DataType_UInt32:
+			data := uint32(rand.Int())
+			_ = binary.Write(&buffer, common.Endian, data)
+			ret.Value = append(ret.Value, buffer.Bytes()...)
+			row = append(row, data)
+		case schemapb.DataType_UInt64:
+			//pk = int64(rand.Int())
+			data := uint64(rand.Int())
+			_ = binary.Write(&buffer, common.Endian, data)
+			ret.Value = append(ret.Value, buffer.Bytes()...)
+			row = append(row, data)
 		case schemapb.DataType_Float:
 			data := rand.Float32()
 			_ = binary.Write(&buffer, common.Endian, data)
@@ -675,6 +792,88 @@ func genColumnBasedInsertMsg(schema *schemapb.CollectionSchema, numRows, fVecDim
 				columns[idx] = append(columns[idx], d)
 			}
 			pks = data
+
+		case schemapb.DataType_UInt8:
+			data := generateUInt32Array(numRows)
+			f := &schemapb.FieldData{
+				Type:      field.DataType,
+				FieldName: field.Name,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_UintData{
+							UintData: &schemapb.UIntArray{
+								Data: data,
+							},
+						},
+					},
+				},
+				FieldId: field.FieldID,
+			}
+			msg.FieldsData = append(msg.FieldsData, f)
+			for _, d := range data {
+				columns[idx] = append(columns[idx], uint8(d))
+			}
+		case schemapb.DataType_UInt16:
+			data := generateUInt32Array(numRows)
+			f := &schemapb.FieldData{
+				Type:      field.DataType,
+				FieldName: field.Name,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_UintData{
+							UintData: &schemapb.UIntArray{
+								Data: data,
+							},
+						},
+					},
+				},
+				FieldId: field.FieldID,
+			}
+			msg.FieldsData = append(msg.FieldsData, f)
+			for _, d := range data {
+				columns[idx] = append(columns[idx], uint16(d))
+			}
+		case schemapb.DataType_UInt32:
+			data := generateUInt32Array(numRows)
+			f := &schemapb.FieldData{
+				Type:      field.DataType,
+				FieldName: field.Name,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_UintData{
+							UintData: &schemapb.UIntArray{
+								Data: data,
+							},
+						},
+					},
+				},
+				FieldId: field.FieldID,
+			}
+			msg.FieldsData = append(msg.FieldsData, f)
+			for _, d := range data {
+				columns[idx] = append(columns[idx], d)
+			}
+		case schemapb.DataType_UInt64:
+			data := generateUInt64Array(numRows)
+			f := &schemapb.FieldData{
+				Type:      field.DataType,
+				FieldName: field.Name,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_UlongData{
+							UlongData: &schemapb.ULongArray{
+								Data: data,
+							},
+						},
+					},
+				},
+				FieldId: field.FieldID,
+			}
+			msg.FieldsData = append(msg.FieldsData, f)
+			for _, d := range data {
+				columns[idx] = append(columns[idx], d)
+			}
+			//pks = data
 		case schemapb.DataType_Float:
 			data := generateFloat32Array(numRows)
 			f := &schemapb.FieldData{
@@ -864,6 +1063,23 @@ func TestMergeInsertData(t *testing.T) {
 				NumRows: []int64{1},
 				Data:    []int64{1},
 			},
+
+			UInt8Field: &UInt8FieldData{
+				NumRows: []int64{1},
+				Data:    []uint8{1},
+			},
+			UInt16Field: &UInt16FieldData{
+				NumRows: []int64{1},
+				Data:    []uint16{1},
+			},
+			UInt32Field: &UInt32FieldData{
+				NumRows: []int64{1},
+				Data:    []uint32{1},
+			},
+			UInt64Field: &UInt64FieldData{
+				NumRows: []int64{1},
+				Data:    []uint64{1},
+			},
 			FloatField: &FloatFieldData{
 				NumRows: []int64{1},
 				Data:    []float32{0},
@@ -918,6 +1134,23 @@ func TestMergeInsertData(t *testing.T) {
 			Int64Field: &Int64FieldData{
 				NumRows: []int64{1},
 				Data:    []int64{2},
+			},
+
+			UInt8Field: &UInt8FieldData{
+				NumRows: []int64{1},
+				Data:    []uint8{2},
+			},
+			UInt16Field: &UInt16FieldData{
+				NumRows: []int64{1},
+				Data:    []uint16{2},
+			},
+			UInt32Field: &UInt32FieldData{
+				NumRows: []int64{1},
+				Data:    []uint32{2},
+			},
+			UInt64Field: &UInt64FieldData{
+				NumRows: []int64{1},
+				Data:    []uint64{2},
 			},
 			FloatField: &FloatFieldData{
 				NumRows: []int64{1},
@@ -981,6 +1214,26 @@ func TestMergeInsertData(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, []int64{2}, f.(*Int64FieldData).NumRows)
 	assert.Equal(t, []int64{1, 2}, f.(*Int64FieldData).Data)
+
+	f, ok = merged.Data[UInt8Field]
+	assert.True(t, ok)
+	assert.Equal(t, []int64{2}, f.(*UInt8FieldData).NumRows)
+	assert.Equal(t, []uint8{1, 2}, f.(*UInt8FieldData).Data)
+
+	f, ok = merged.Data[UInt16Field]
+	assert.True(t, ok)
+	assert.Equal(t, []int64{2}, f.(*UInt16FieldData).NumRows)
+	assert.Equal(t, []uint16{1, 2}, f.(*UInt16FieldData).Data)
+
+	f, ok = merged.Data[UInt32Field]
+	assert.True(t, ok)
+	assert.Equal(t, []int64{2}, f.(*UInt32FieldData).NumRows)
+	assert.Equal(t, []uint32{1, 2}, f.(*UInt32FieldData).Data)
+
+	f, ok = merged.Data[UInt64Field]
+	assert.True(t, ok)
+	assert.Equal(t, []int64{2}, f.(*UInt64FieldData).NumRows)
+	assert.Equal(t, []uint64{1, 2}, f.(*UInt64FieldData).Data)
 
 	f, ok = merged.Data[FloatField]
 	assert.True(t, ok)
@@ -1149,6 +1402,38 @@ func TestFieldDataToBytes(t *testing.T) {
 	err = binaryRead(endian, bs, receiver)
 	assert.NoError(t, err)
 	assert.ElementsMatch(t, f6.Data, receiver)
+
+	f11 := &UInt8FieldData{Data: []uint8{0, 1}}
+	bs, err = FieldDataToBytes(endian, f11)
+	assert.NoError(t, err)
+	receiver = make([]uint8, 2)
+	err = binaryRead(endian, bs, receiver)
+	assert.NoError(t, err)
+	assert.ElementsMatch(t, f11.Data, receiver)
+
+	f12 := &UInt16FieldData{Data: []uint16{0, 1}}
+	bs, err = FieldDataToBytes(endian, f12)
+	assert.NoError(t, err)
+	receiver = make([]uint16, 2)
+	err = binaryRead(endian, bs, receiver)
+	assert.NoError(t, err)
+	assert.ElementsMatch(t, f12.Data, receiver)
+
+	f13 := &UInt32FieldData{Data: []uint32{0, 1}}
+	bs, err = FieldDataToBytes(endian, f13)
+	assert.NoError(t, err)
+	receiver = make([]uint32, 2)
+	err = binaryRead(endian, bs, receiver)
+	assert.NoError(t, err)
+	assert.ElementsMatch(t, f13.Data, receiver)
+
+	f14 := &UInt64FieldData{Data: []uint64{0, 1}}
+	bs, err = FieldDataToBytes(endian, f14)
+	assert.NoError(t, err)
+	receiver = make([]uint64, 2)
+	err = binaryRead(endian, bs, receiver)
+	assert.NoError(t, err)
+	assert.ElementsMatch(t, f14.Data, receiver)
 
 	// in fact, hard to compare float point value.
 

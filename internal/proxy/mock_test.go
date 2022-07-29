@@ -407,6 +407,29 @@ func generateFieldData(dataType schemapb.DataType, fieldName string, numRows int
 				},
 			},
 		}
+	case schemapb.DataType_UInt32:
+		fieldData.FieldName = testUInt32Field
+		fieldData.Field = &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_UintData{
+					UintData: &schemapb.UIntArray{
+						Data: generateUInt32Array(numRows),
+					},
+				},
+			},
+		}
+	case schemapb.DataType_UInt64:
+		fieldData.FieldName = testUInt64Field
+		fieldData.Field = &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_UlongData{
+					UlongData: &schemapb.ULongArray{
+						Data: generateUint64Array(numRows),
+					},
+				},
+			},
+		}
+	//
 	case schemapb.DataType_Float:
 		fieldData.FieldName = testFloatField
 		fieldData.Field = &schemapb.FieldData_Scalars{
@@ -505,6 +528,30 @@ func generateInt64Array(numRows int) []int64 {
 	ret := make([]int64, 0, numRows)
 	for i := 0; i < numRows; i++ {
 		ret = append(ret, int64(rand.Int()))
+	}
+	return ret
+}
+
+func generateUInt8Array(numRows int) []uint8 {
+	ret := make([]uint8, 0, numRows)
+	for i := 0; i < numRows; i++ {
+		ret = append(ret, uint8(rand.Int()))
+	}
+	return ret
+}
+
+func generateUInt16Array(numRows int) []uint16 {
+	ret := make([]uint16, 0, numRows)
+	for i := 0; i < numRows; i++ {
+		ret = append(ret, uint16(rand.Int()))
+	}
+	return ret
+}
+
+func generateUInt32Array(numRows int) []uint32 {
+	ret := make([]uint32, 0, numRows)
+	for i := 0; i < numRows; i++ {
+		ret = append(ret, rand.Uint32())
 	}
 	return ret
 }
@@ -615,6 +662,46 @@ func newScalarFieldData(fieldSchema *schemapb.FieldSchema, fieldName string, num
 				Data: &schemapb.ScalarField_LongData{
 					LongData: &schemapb.LongArray{
 						Data: generateInt64Array(numRows),
+					},
+				},
+			},
+		}
+	case schemapb.DataType_UInt8:
+		ret.Field = &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_UintData{
+					UintData: &schemapb.UIntArray{
+						Data: generateUInt32Array(numRows),
+					},
+				},
+			},
+		}
+	case schemapb.DataType_UInt16:
+		ret.Field = &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_UintData{
+					UintData: &schemapb.UIntArray{
+						Data: generateUInt32Array(numRows),
+					},
+				},
+			},
+		}
+	case schemapb.DataType_UInt32:
+		ret.Field = &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_UintData{
+					UintData: &schemapb.UIntArray{
+						Data: generateUInt32Array(numRows),
+					},
+				},
+			},
+		}
+	case schemapb.DataType_UInt64:
+		ret.Field = &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_UlongData{
+					UlongData: &schemapb.ULongArray{
+						Data: generateUint64Array(numRows),
 					},
 				},
 			},

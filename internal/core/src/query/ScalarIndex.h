@@ -51,6 +51,14 @@ generate_scalar_index(SpanBase data, DataType data_type) {
             return generate_scalar_index(Span<int32_t>(data));
         case DataType::INT64:
             return generate_scalar_index(Span<int64_t>(data));
+        case DataType::UINT8:
+            return generate_scalar_index(Span<uint8_t>(data));
+        case DataType::UINT16:
+            return generate_scalar_index(Span<uint16_t>(data));
+        case DataType::UINT32:
+            return generate_scalar_index(Span<uint32_t>(data));
+        case DataType::UINT64:
+            return generate_scalar_index(Span<uint64_t>(data));
         case DataType::FLOAT:
             return generate_scalar_index(Span<float>(data));
         case DataType::DOUBLE:

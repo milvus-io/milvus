@@ -149,6 +149,46 @@ func (f FieldData) AsSchemapb() (*schemapb.FieldData, error) {
 				},
 			},
 		}
+	case schemapb.DataType_UInt8, schemapb.DataType_UInt16, schemapb.DataType_UInt32:
+		if len(raw) > 0 {
+			_, ok := raw[0].(float64)
+			if !ok {
+				return nil, newTypeError(raw[0])
+			}
+		}
+		data := make([]uint32, len(raw))
+		for i, v := range raw {
+			data[i] = uint32(v.(float64))
+		}
+		ret.Field = &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_UintData{
+					UintData: &schemapb.UIntArray{
+						Data: data,
+					},
+				},
+			},
+		}
+	case schemapb.DataType_UInt64:
+		if len(raw) > 0 {
+			_, ok := raw[0].(float64)
+			if !ok {
+				return nil, newTypeError(raw[0])
+			}
+		}
+		data := make([]uint64, len(raw))
+		for i, v := range raw {
+			data[i] = uint64(v.(float64))
+		}
+		ret.Field = &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_UlongData{
+					UlongData: &schemapb.ULongArray{
+						Data: data,
+					},
+				},
+			},
+		}
 	case schemapb.DataType_Float:
 		if len(raw) > 0 {
 			_, ok := raw[0].(float64)

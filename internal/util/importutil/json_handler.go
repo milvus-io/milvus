@@ -147,6 +147,40 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 				field.(*storage.Int64FieldData).NumRows[0]++
 				return nil
 			}
+
+		case schemapb.DataType_UInt8:
+			validators[schema.GetFieldID()].validateFunc = numericValidator
+			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
+				value := uint8(obj.(float64))
+				field.(*storage.UInt8FieldData).Data = append(field.(*storage.UInt8FieldData).Data, value)
+				field.(*storage.UInt8FieldData).NumRows[0]++
+				return nil
+			}
+		case schemapb.DataType_UInt16:
+			validators[schema.GetFieldID()].validateFunc = numericValidator
+			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
+				value := uint16(obj.(float64))
+				field.(*storage.UInt16FieldData).Data = append(field.(*storage.UInt16FieldData).Data, value)
+				field.(*storage.UInt16FieldData).NumRows[0]++
+				return nil
+			}
+		case schemapb.DataType_UInt32:
+			validators[schema.GetFieldID()].validateFunc = numericValidator
+			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
+				value := uint32(obj.(float64))
+				field.(*storage.UInt32FieldData).Data = append(field.(*storage.UInt32FieldData).Data, value)
+				field.(*storage.UInt32FieldData).NumRows[0]++
+				return nil
+			}
+		case schemapb.DataType_UInt64:
+			validators[schema.GetFieldID()].validateFunc = numericValidator
+			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
+				value := uint64(obj.(float64))
+				field.(*storage.UInt64FieldData).Data = append(field.(*storage.UInt64FieldData).Data, value)
+				field.(*storage.UInt64FieldData).NumRows[0]++
+				return nil
+			}
+
 		case schemapb.DataType_BinaryVector:
 			dim, err := getFieldDimension(schema)
 			if err != nil {
@@ -454,6 +488,28 @@ func initSegmentData(collectionSchema *schemapb.CollectionSchema) map[storage.Fi
 				Data:    make([]int64, 0),
 				NumRows: []int64{0},
 			}
+
+		case schemapb.DataType_UInt8:
+			segmentData[schema.GetFieldID()] = &storage.UInt8FieldData{
+				Data:    make([]uint8, 0),
+				NumRows: []int64{0},
+			}
+		case schemapb.DataType_UInt16:
+			segmentData[schema.GetFieldID()] = &storage.UInt16FieldData{
+				Data:    make([]uint16, 0),
+				NumRows: []int64{0},
+			}
+		case schemapb.DataType_UInt32:
+			segmentData[schema.GetFieldID()] = &storage.UInt32FieldData{
+				Data:    make([]uint32, 0),
+				NumRows: []int64{0},
+			}
+		case schemapb.DataType_UInt64:
+			segmentData[schema.GetFieldID()] = &storage.UInt64FieldData{
+				Data:    make([]uint64, 0),
+				NumRows: []int64{0},
+			}
+
 		case schemapb.DataType_BinaryVector:
 			dim, _ := getFieldDimension(schema)
 			segmentData[schema.GetFieldID()] = &storage.BinaryVectorFieldData{

@@ -316,6 +316,10 @@ func GetNumRowOfFieldData(fieldData *schemapb.FieldData) (uint64, error) {
 			fieldNumRows = getNumRowsOfScalarField(scalarField.GetIntData().Data)
 		case *schemapb.ScalarField_LongData:
 			fieldNumRows = getNumRowsOfScalarField(scalarField.GetLongData().Data)
+		case *schemapb.ScalarField_UintData:
+			fieldNumRows = getNumRowsOfScalarField(scalarField.GetUintData().Data)
+		case *schemapb.ScalarField_UlongData:
+			fieldNumRows = getNumRowsOfScalarField(scalarField.GetUlongData().Data)
 		case *schemapb.ScalarField_FloatData:
 			fieldNumRows = getNumRowsOfScalarField(scalarField.GetFloatData().Data)
 		case *schemapb.ScalarField_DoubleData:

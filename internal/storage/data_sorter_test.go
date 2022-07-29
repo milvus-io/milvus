@@ -120,6 +120,34 @@ func TestDataSorter(t *testing.T) {
 					Description:  "description_11",
 					DataType:     schemapb.DataType_FloatVector,
 				},
+				{
+					FieldID:      110,
+					Name:         "field_uint8",
+					IsPrimaryKey: false,
+					Description:  "description_12",
+					DataType:     schemapb.DataType_UInt8,
+				},
+				{
+					FieldID:      111,
+					Name:         "field_uint16",
+					IsPrimaryKey: false,
+					Description:  "description_13",
+					DataType:     schemapb.DataType_UInt16,
+				},
+				{
+					FieldID:      112,
+					Name:         "field_uint32",
+					IsPrimaryKey: false,
+					Description:  "description_14",
+					DataType:     schemapb.DataType_UInt32,
+				},
+				{
+					FieldID:      113,
+					Name:         "field_uint64",
+					IsPrimaryKey: false,
+					Description:  "description_15",
+					DataType:     schemapb.DataType_UInt64,
+				},
 			},
 		},
 	}
@@ -177,6 +205,22 @@ func TestDataSorter(t *testing.T) {
 				Data:    []float32{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23},
 				Dim:     8,
 			},
+			110: &UInt8FieldData{
+				NumRows: []int64{3},
+				Data:    []uint8{3, 4, 5},
+			},
+			111: &UInt16FieldData{
+				NumRows: []int64{3},
+				Data:    []uint16{3, 4, 5},
+			},
+			112: &UInt32FieldData{
+				NumRows: []int64{3},
+				Data:    []uint32{3, 4, 5},
+			},
+			113: &UInt64FieldData{
+				NumRows: []int64{3},
+				Data:    []uint64{3, 4, 5},
+			},
 		},
 	}
 
@@ -233,6 +277,10 @@ func TestDataSorter(t *testing.T) {
 	assert.Equal(t, []int16{5, 3, 4}, dataSorter.InsertData.Data[102].(*Int16FieldData).Data)
 	assert.Equal(t, []int32{5, 3, 4}, dataSorter.InsertData.Data[103].(*Int32FieldData).Data)
 	assert.Equal(t, []int64{5, 3, 4}, dataSorter.InsertData.Data[104].(*Int64FieldData).Data)
+	assert.Equal(t, []uint8{5, 3, 4}, dataSorter.InsertData.Data[110].(*UInt8FieldData).Data)
+	assert.Equal(t, []uint16{5, 3, 4}, dataSorter.InsertData.Data[111].(*UInt16FieldData).Data)
+	assert.Equal(t, []uint32{5, 3, 4}, dataSorter.InsertData.Data[112].(*UInt32FieldData).Data)
+	assert.Equal(t, []uint64{5, 3, 4}, dataSorter.InsertData.Data[113].(*UInt64FieldData).Data)
 	assert.Equal(t, []float32{5, 3, 4}, dataSorter.InsertData.Data[105].(*FloatFieldData).Data)
 	assert.Equal(t, []float64{5, 3, 4}, dataSorter.InsertData.Data[106].(*DoubleFieldData).Data)
 	assert.Equal(t, []string{"5", "3", "4"}, dataSorter.InsertData.Data[107].(*StringFieldData).Data)
