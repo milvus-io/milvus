@@ -11,6 +11,9 @@ pull_request_rules:
           - dco-passed
         add:
           - needs-dco
+      comment:
+        message: |
+          @{{author}} Thanks for your contribution. Please submit with DCO, see the contributing guide https://github.com/milvus-io/milvus/blob/master/CONTRIBUTING.md#developer-certificate-of-origin-dco.
 
   - name: Add dco-passed label when DCO check passed
     conditions:
