@@ -23,7 +23,7 @@
 set -x
 
 
-MILVUS_HELM_REPO="https://github.com/milvus-io/milvus-helm.git"
+MILVUS_HELM_REPO="${MILVUS_HELM_REPO:-https://milvus-io.github.io/milvus-helm/}"
 MILVUS_HELM_RELEASE_NAME="${MILVUS_HELM_RELEASE_NAME:-milvus-testing}"
 MILVUS_CLUSTER_ENABLED="${MILVUS_CLUSTER_ENABLED:-false}"
 MILVUS_IMAGE_REPO="${MILVUS_IMAGE_REPO:-milvusdb/milvus}"
@@ -54,15 +54,9 @@ if [[ -n "${DISABLE_KIND:-}" ]]; then
   MILVUS_SERVICE_TYPE="ClusterIP"
 fi
 
-# Get Milvus Chart from git
-# if [[ ! -d "${MILVUS_HELM_CHART_PATH:-}" ]]; then
-#   TMP_DIR="$(mktemp -d)"
-#   git clone --depth=1 -b "${MILVUS_HELM_BRANCH:-master}" "${MILVUS_HELM_REPO}" "${TMP_DIR}"
-#   MILVUS_HELM_CHART_PATH="${TMP_DIR}/charts/milvus"
-# fi
 
 # Use helm repo to install milvus charts 
-helm repo add milvus https://milvus-io.github.io/milvus-helm/
+helm repo add milvus ${MILVUS_HELM_REPO}
 helm repo update
 MILVUS_HELM_CHART_PATH="milvus/milvus"
 
