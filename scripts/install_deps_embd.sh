@@ -25,7 +25,7 @@ function install_linux_deps() {
       # install OpenBLAS, this could take a while.
       wget https://github.com/xianyi/OpenBLAS/archive/v0.3.9.tar.gz && \
           tar zxvf v0.3.9.tar.gz && cd OpenBLAS-0.3.9 && \
-          sudo make TARGET=CORE2 DYNAMIC_ARCH=1 DYNAMIC_OLDER=1 USE_THREAD=0 USE_OPENMP=0 FC=gfortran CC=gcc COMMON_OPT="-O3 -g -fPIC" FCOMMON_OPT="-O3 -g -fPIC -frecursive" NMAX="NUM_THREADS=128" LIBPREFIX="libopenblas" LAPACKE="NO_LAPACKE=1" INTERFACE64=0 NO_STATIC=1 && \
+          sudo make TARGET=CORE2 DYNAMIC_ARCH=1 DYNAMIC_OLDER=1 USE_THREAD=0 USE_OPENMP=0 FC=gfortran CC=gcc COMMON_OPT="-O3 -g -fPIC" FCOMMON_OPT="-O3 -g -fPIC -frecursive" NMAX="NUM_THREADS=128" LIBPREFIX="libopenblas" INTERFACE64=0 NO_STATIC=1 && \
           sudo make PREFIX=/usr NO_STATIC=1 install && \
           cd .. && rm -rf OpenBLAS-0.3.9 && rm v0.3.9.tar.gz
   elif [[ -x "$(command -v yum)" ]]; then
@@ -45,7 +45,7 @@ function install_linux_deps() {
       source "/etc/profile.d/devtoolset-7.sh" && \
           wget https://github.com/xianyi/OpenBLAS/archive/v0.3.9.tar.gz && \
           tar zxvf v0.3.9.tar.gz && cd OpenBLAS-0.3.9 && \
-          make TARGET=CORE2 DYNAMIC_ARCH=1 DYNAMIC_OLDER=1 USE_THREAD=0 USE_OPENMP=0 FC=gfortran CC=gcc COMMON_OPT="-O3 -g -fPIC" FCOMMON_OPT="-O3 -g -fPIC -frecursive" NMAX="NUM_THREADS=128" LIBPREFIX="libopenblas" LAPACKE="NO_LAPACKE=1" INTERFACE64=0 NO_STATIC=1 && \
+          make TARGET=CORE2 DYNAMIC_ARCH=1 DYNAMIC_OLDER=1 USE_THREAD=0 USE_OPENMP=0 FC=gfortran CC=gcc COMMON_OPT="-O3 -g -fPIC" FCOMMON_OPT="-O3 -g -fPIC -frecursive" NMAX="NUM_THREADS=128" LIBPREFIX="libopenblas" INTERFACE64=0 NO_STATIC=1 && \
           make PREFIX=/usr NO_STATIC=1 install && \
           cd .. && rm -rf OpenBLAS-0.3.9 && rm v0.3.9.tar.gz
 
