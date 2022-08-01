@@ -202,10 +202,6 @@ func TestComponentParam(t *testing.T) {
 		})
 	})
 
-	t.Run("test queryCoordConfig", func(t *testing.T) {
-		//Params := CParams.QueryCoordCfg
-	})
-
 	t.Run("test queryNodeConfig", func(t *testing.T) {
 		Params := CParams.QueryNodeCfg
 

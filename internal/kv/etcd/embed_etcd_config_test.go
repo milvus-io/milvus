@@ -31,12 +31,13 @@ import (
 func TestEtcdConfigLoad(te *testing.T) {
 	os.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode)
 	param := new(paramtable.ServiceParam)
-	param.Init()
-	param.BaseTable.Save("etcd.use.embed", "true")
+
+	os.Setenv("etcd.use.embed", "true")
 	// TODO, not sure if the relative path works for ci environment
-	param.BaseTable.Save("etcd.config.path", "../../../configs/advanced/etcd.yaml")
-	param.BaseTable.Save("etcd.data.dir", "etcd.test.data.dir")
-	param.EtcdCfg.LoadCfgToMemory()
+	os.Setenv("etcd.config.path", "../../../configs/advanced/etcd.yaml")
+	os.Setenv("etcd.data.dir", "etcd.test.data.dir")
+
+	param.Init()
 	//clean up data
 	defer func() {
 		os.RemoveAll("etcd.test.data.dir")

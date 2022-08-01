@@ -29,7 +29,6 @@ SCRIPTS_DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
 MILVUS_CORE_DIR="${SCRIPTS_DIR}/../internal/core"
 CORE_INSTALL_PREFIX="${MILVUS_CORE_DIR}/output"
 UNITTEST_DIRS=("${CORE_INSTALL_PREFIX}/unittest")
-CWRAPPER_UNITTEST="${SCRIPTS_DIR}/../internal/storage/cwrapper/output/wrapper_test"
 
 # currently core will install target lib to "internal/core/output/lib"
 if [ -d "${CORE_INSTALL_PREFIX}/lib" ]; then
