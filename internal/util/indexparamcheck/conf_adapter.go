@@ -204,7 +204,7 @@ func (adapter *IVFPQConfAdapter) checkPQParams(params map[string]string) bool {
 		return false
 	}
 	m, err := strconv.Atoi(mStr)
-	if err != nil { // invalid m
+	if err != nil || m == 0 { // invalid m
 		return false
 	}
 
