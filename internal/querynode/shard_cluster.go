@@ -102,13 +102,20 @@ type shardSegmentInfo struct {
 	inUse       int32
 }
 
+// Closable interface for close.
+type Closable interface {
+	Close()
+}
+
 // ShardNodeDetector provides method to detect node events
 type ShardNodeDetector interface {
+	Closable
 	watchNodes(collectionID int64, replicaID int64, vchannelName string) ([]nodeEvent, <-chan nodeEvent)
 }
 
 // ShardSegmentDetector provides method to detect segment events
 type ShardSegmentDetector interface {
+	Closable
 	watchSegments(collectionID int64, replicaID int64, vchannelName string) ([]segmentEvent, <-chan segmentEvent)
 }
 
@@ -181,6 +188,13 @@ func (sc *ShardCluster) Close() {
 	log.Info("Close shard cluster")
 	sc.closeOnce.Do(func() {
 		sc.updateShardClusterState(unavailable)
+		if sc.nodeDetector != nil {
+			sc.nodeDetector.Close()
+		}
+		if sc.segmentDetector != nil {
+			sc.segmentDetector.Close()
+		}
+
 		close(sc.closeCh)
 	})
 }
