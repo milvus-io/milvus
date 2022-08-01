@@ -147,7 +147,7 @@ pipeline {
                                 kubernetes {
                                     inheritFrom 'default'
                                     defaultContainer 'main'
-                                    yamlFile 'ci/jenkins/pod/rte.yaml'
+                                    yamlFile 'ci/jenkins/pod/e2e.yaml'
                                     customWorkspace '/home/jenkins/agent/workspace'
                                 }
                         }
