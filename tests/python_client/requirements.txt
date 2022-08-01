@@ -33,3 +33,6 @@ protobuf==3.17.1
 
 # for bulk load test
 minio==7.1.5
+
+# for benchmark
+h5py==3.1.0
