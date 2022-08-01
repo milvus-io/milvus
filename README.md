@@ -71,21 +71,21 @@ Check the requirements first.
 
 Linux systems (Ubuntu 18.04 or later recommended):
 ```bash
-go: >= 1.16
+go: >= 1.18
 cmake: >= 3.18
 gcc: 7.5
 ```
 
 MacOS systems with x86_64 (Big Sur 11.5 or later recommended):
 ```bash
-go: >= 1.16
+go: >= 1.18
 cmake: >= 3.18
 llvm: >= 12
 ```
 
 MacOS systems with Apple Silicon (Monterey 12.0.1 or later recommended):
 ```bash
-go: >= 1.17 (Arch=ARM64)
+go: >= 1.18 (Arch=ARM64)
 cmake: >= 3.18
 llvm: >= 13
 ```
