@@ -27,7 +27,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
 	"go.uber.org/zap"
 )
@@ -125,7 +124,7 @@ func (nm *NodeManager) PeekClient(meta *model.SegmentIndex) (UniqueID, types.Ind
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			resp, err := client.GetTaskSlots(ctx, &indexpb.GetTaskSlotsRequest{})
+			resp, err := client.GetJobNum(ctx, &indexpb.GetJobNumRequest{})
 			if err != nil {
 				log.Warn("get IndexNode slots failed", zap.Int64("nodeID", nodeID), zap.Error(err))
 				return
@@ -135,7 +134,7 @@ func (nm *NodeManager) PeekClient(meta *model.SegmentIndex) (UniqueID, types.Ind
 					zap.String("reason", resp.Status.Reason))
 				return
 			}
-			if resp.Slots > 0 {
+			if resp.TaskSlots > 0 {
 				nodeMutex.Lock()
 				defer nodeMutex.Unlock()
 				log.Info("peek client success", zap.Int64("nodeID", nodeID))
@@ -171,28 +170,36 @@ func (nm *NodeManager) GetAllClients() map[UniqueID]types.IndexNode {
 	return allClients
 }
 
-// indexNodeGetMetricsResponse record the metrics information of IndexNode.
-type indexNodeGetMetricsResponse struct {
-	resp *milvuspb.GetMetricsResponse
-	err  error
-}
-
-// getMetrics get metrics information of all IndexNode.
-func (nm *NodeManager) getMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) []indexNodeGetMetricsResponse {
-	var clients []types.IndexNode
+func (nm *NodeManager) GetClientByID(nodeID UniqueID) (types.IndexNode, bool) {
 	nm.lock.RLock()
-	for _, node := range nm.nodeClients {
-		clients = append(clients, node)
-	}
-	nm.lock.RUnlock()
+	defer nm.lock.RUnlock()
 
-	ret := make([]indexNodeGetMetricsResponse, 0, len(nm.nodeClients))
-	for _, node := range clients {
-		resp, err := node.GetMetrics(ctx, req)
-		ret = append(ret, indexNodeGetMetricsResponse{
-			resp: resp,
-			err:  err,
-		})
-	}
-	return ret
+	client, ok := nm.nodeClients[nodeID]
+	return client, ok
 }
+
+//// indexNodeGetMetricsResponse record the metrics information of IndexNode.
+//type indexNodeGetMetricsResponse struct {
+//	resp *milvuspb.GetMetricsResponse
+//	err  error
+//}
+//
+//// getMetrics get metrics information of all IndexNode.
+//func (nm *NodeManager) getMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) []indexNodeGetMetricsResponse {
+//	var clients []types.IndexNode
+//	nm.lock.RLock()
+//	for _, node := range nm.nodeClients {
+//		clients = append(clients, node)
+//	}
+//	nm.lock.RUnlock()
+//
+//	ret := make([]indexNodeGetMetricsResponse, 0, len(nm.nodeClients))
+//	for _, node := range clients {
+//		resp, err := node.GetMetrics(ctx, req)
+//		ret = append(ret, indexNodeGetMetricsResponse{
+//			resp: resp,
+//			err:  err,
+//		})
+//	}
+//	return ret
+//}

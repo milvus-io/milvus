@@ -19,6 +19,8 @@ package types
 import (
 	"context"
 
+	"google.golang.org/grpc"
+
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -309,11 +311,16 @@ type IndexNode interface {
 
 	// BuildIndex receives request from IndexCoordinator to build an index.
 	// Index building is asynchronous, so when an index building request comes, IndexNode records the task and returns.
-	BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*commonpb.Status, error)
-	GetTaskSlots(ctx context.Context, req *indexpb.GetTaskSlotsRequest) (*indexpb.GetTaskSlotsResponse, error)
+	//BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*commonpb.Status, error)
+	//GetTaskSlots(ctx context.Context, req *indexpb.GetTaskSlotsRequest) (*indexpb.GetTaskSlotsResponse, error)
+	//
+	//// GetMetrics gets the metrics about IndexNode.
+	//GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 
-	// GetMetrics gets the metrics about IndexNode.
-	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
+	CreateJob(ctx context.Context, req *indexpb.CreateJobRequest) (*commonpb.Status, error)
+	QueryJobs(ctx context.Context, in *indexpb.QueryJobsRequest) (*indexpb.QueryJobsResponse, error)
+	DropJobs(ctx context.Context, in *indexpb.DropJobsRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	GetJobNum(ctx context.Context, in *indexpb.GetJobNumRequest, opts ...grpc.CallOption) (*indexpb.GetJobNumResponse, error)
 }
 
 // IndexNodeComponent is used by grpc server of IndexNode

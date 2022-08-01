@@ -36,12 +36,14 @@ type indexBuilder struct {
 	wg                   sync.WaitGroup
 	taskMutex            sync.RWMutex
 	inProgressTaskMutex  sync.RWMutex
+	finishTaskMutex      sync.RWMutex
 	scheduleDuration     time.Duration
 	getTaskStateDuration time.Duration
 
 	// TODO @xiaocai2333: use priority queue
 	tasks           map[int64]indexTaskState
-	inProgressTasks map[int64]struct{}
+	inProgressTasks map[int64]map[int64]struct{}
+	finishedTasks   map[int64]map[int64]struct{}
 	notify          chan struct{}
 
 	ic *IndexCoord
@@ -58,6 +60,8 @@ func newIndexBuilder(ctx context.Context, ic *IndexCoord, metaTable *metaTable, 
 		meta:             metaTable,
 		ic:               ic,
 		tasks:            make(map[int64]indexTaskState, 1024),
+		inProgressTasks:  make(map[int64]map[int64]struct{}, 1024),
+		finishedTasks:    make(map[int64]struct{}),
 		notify:           make(chan struct{}, 1),
 		scheduleDuration: time.Second * 1,
 	}
@@ -68,6 +72,12 @@ func newIndexBuilder(ctx context.Context, ic *IndexCoord, metaTable *metaTable, 
 func (ib *indexBuilder) Start() {
 	ib.wg.Add(1)
 	go ib.schedule()
+
+	ib.wg.Add(1)
+	go ib.getTasksState()
+
+	ib.wg.Add(1)
+	go ib.finishTask()
 }
 
 func (ib *indexBuilder) Stop() {
@@ -198,14 +208,17 @@ func (ib *indexBuilder) process(buildID UniqueID) {
 			ib.tasks[buildID] = indexTaskRetry
 			return
 		}
-		req := &indexpb.BuildIndexRequest{
+		req := &indexpb.CreateJobRequest{
 			// TODO @xiaocai2333: set clusterID
-			ClusterID:    0,
-			IndexBuildID: buildID,
-			IndexVersion: meta.IndexVersion + 1,
-			DataPaths:    meta.BinLogs,
-			TypeParams:   typeParams,
-			IndexParams:  indexParams,
+			ClusterID:        0,
+			StorageAccessKey: "",
+			BucketName:       "",
+			StoragePrefix:    "",
+			BuildID:          buildID,
+			DataPaths:        meta.BinLogs,
+			IndexVersion:     meta.IndexVersion + 1,
+			IndexParams:      indexParams,
+			TypeParams:       typeParams,
 		}
 		if err := ib.ic.assignTask(client, req); err != nil {
 			// need to release lock then reassign, so set task state to retry
@@ -224,7 +237,7 @@ func (ib *indexBuilder) process(buildID UniqueID) {
 		}
 		ib.tasks[buildID] = indexTaskInProgress
 		ib.inProgressTaskMutex.Lock()
-		ib.inProgressTasks[buildID] = struct{}{}
+		ib.inProgressTasks[nodeID][buildID] = struct{}{}
 		ib.inProgressTaskMutex.Unlock()
 
 	case indexTaskDone:
@@ -269,13 +282,92 @@ func (ib *indexBuilder) getTasksState() {
 			log.Warn("index builder ctx done")
 			return
 		case <-ticker.C:
-			buildIDs := make([]UniqueID, 0)
+			processTasks := make(map[int64][]int64)
 			ib.inProgressTaskMutex.RLock()
-			for buildID := range ib.inProgressTasks {
-				buildIDs = append(buildIDs, buildID)
+			for nodeID, buildIDs := range ib.inProgressTasks {
+				for buildID := range buildIDs {
+					processTasks[nodeID] = append(processTasks[nodeID], buildID)
+				}
 			}
 			ib.inProgressTaskMutex.RUnlock()
-			// TODO @xiaocai2333: QueryJobs from indexNode
+			for nodeID, buildIDs := range processTasks {
+				client, exist := ib.ic.nodeManager.GetClientByID(nodeID)
+				if exist {
+					response, err := client.QueryJobs(ib.ctx, &indexpb.QueryJobsRequest{
+						ClusterID: 0,
+						BuildIDs:  buildIDs,
+					})
+					if err != nil {
+						log.Error("IndexCoord get jobs info from IndexNode fail", zap.Int64("nodeID", nodeID),
+							zap.Error(err))
+						continue
+					}
+					if response.Status.ErrorCode != commonpb.ErrorCode_Success {
+						log.Error("IndexCoord get jobs info from IndexNode fail", zap.Int64("nodeID", nodeID),
+							zap.Int64s("buildIDs", buildIDs), zap.String("fail reason", response.Status.Reason))
+						continue
+					}
+					for _, info := range response.IndexInfos {
+						if info.State == commonpb.IndexState_Failed || info.State == commonpb.IndexState_Finished {
+							log.Info("this task has been finished", zap.Int64("buildID", info.BuildID),
+								zap.String("index state", info.State.String()))
+							if err := ib.meta.FinishTask(info.BuildID, info.State, info.IndexFiles); err != nil {
+								log.Error("IndexCoord update index state fail", zap.Int64("buildID", info.BuildID),
+									zap.String("index state", info.State.String()), zap.Error(err))
+								continue
+							}
+							ib.taskMutex.Lock()
+							ib.tasks[info.BuildID] = indexTaskDone
+							ib.notify <- struct{}{}
+							ib.taskMutex.Unlock()
+							ib.inProgressTaskMutex.Lock()
+							delete(ib.inProgressTasks[nodeID], info.BuildID)
+							ib.inProgressTaskMutex.Unlock()
+						}
+						if info.State == commonpb.IndexState_Retry {
+							ib.taskMutex.Lock()
+							ib.tasks[info.BuildID] = indexTaskRetry
+							ib.notify <- struct{}{}
+							ib.taskMutex.Unlock()
+							ib.inProgressTaskMutex.Lock()
+							delete(ib.inProgressTasks[nodeID], info.BuildID)
+							ib.inProgressTaskMutex.Unlock()
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+func (ib *indexBuilder) finishTask() {
+	log.Info("index builder get tasks state loop start")
+	defer ib.wg.Done()
+	ticker := time.NewTicker(ib.getTaskStateDuration)
+	for {
+		select {
+		case <-ib.ctx.Done():
+			log.Warn("index builder ctx done")
+			return
+		case <-ticker.C:
+			finishTasks := make(map[int64][]int64)
+			ib.finishTaskMutex.RLock()
+			for nodeID, buildIDs := range ib.finishedTasks {
+				for buildID := range buildIDs {
+					finishTasks[nodeID] = append(finishTasks[nodeID], buildID)
+				}
+			}
+			ib.finishTaskMutex.RUnlock()
+
+			for nodeID, buildIDs := range finishTasks {
+				client, exist := ib.ic.nodeManager.GetClientByID(nodeID)
+				if exist {
+					resp, err := client.DropJobs(ib.ctx, &indexpb.DropJobsRequest{ClusterID: 0, BuildIDs: buildIDs})
+					if err != nil {
+						log.Error("IndexCoord drop jobs fail", zap.Int64(""))
+					}
+				}
+			}
 		}
 	}
 }

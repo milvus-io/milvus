@@ -795,10 +795,10 @@ func (i *IndexCoord) tryReleaseSegmentReferLock(ctx context.Context, buildID Uni
 
 // assignTask sends the index task to the IndexNode, it has a timeout interval, if the IndexNode doesn't respond within
 // the interval, it is considered that the task sending failed.
-func (i *IndexCoord) assignTask(builderClient types.IndexNode, req *indexpb.BuildIndexRequest) error {
+func (i *IndexCoord) assignTask(builderClient types.IndexNode, req *indexpb.CreateJobRequest) error {
 	ctx, cancel := context.WithTimeout(i.loopCtx, i.reqTimeoutInterval)
 	defer cancel()
-	resp, err := builderClient.CreateIndex(ctx, req)
+	resp, err := builderClient.CreateJob(ctx, req)
 	if err != nil {
 		log.Error("IndexCoord assignmentTasksLoop builderClient.CreateIndex failed", zap.Error(err))
 		return err

@@ -767,14 +767,15 @@ func (mt *metaTable) ResetNodeID(buildID UniqueID) error {
 	mt.segmentIndexLock.Lock()
 	defer mt.segmentIndexLock.Unlock()
 
+	updateFunc := func(sedIdx *model.SegmentIndex) error {
+		sedIdx.NodeID = 0
+		return mt.saveSegmentIndexMeta(sedIdx)
+	}
 	segIdx, ok := mt.buildID2SegmentIndex[buildID]
 	if !ok {
 		return fmt.Errorf("there is no index with buildID: %d", buildID)
 	}
-	clonedSegIndex := model.CloneSegmentIndex(segIdx)
-	clonedSegIndex.NodeID = 0
-
-	return mt.saveSegmentIndexMeta(clonedSegIndex)
+	return mt.updateSegIndexMeta(segIdx, updateFunc)
 }
 
 // ResetMeta resets the nodeID and index state of the index meta  corresponding the buildID.
@@ -786,9 +787,28 @@ func (mt *metaTable) ResetMeta(buildID UniqueID) error {
 	if !ok {
 		return fmt.Errorf("there is no index with buildID: %d", buildID)
 	}
-	clonedSegIndex := model.CloneSegmentIndex(segIdx)
-	clonedSegIndex.NodeID = 0
-	clonedSegIndex.IndexState = commonpb.IndexState_Unissued
+	updateFunc := func(sedIdx *model.SegmentIndex) error {
+		sedIdx.NodeID = 0
+		segIdx.IndexState = commonpb.IndexState_Unissued
+		return mt.saveSegmentIndexMeta(sedIdx)
+	}
 
-	return mt.saveSegmentIndexMeta(clonedSegIndex)
+	return mt.updateSegIndexMeta(segIdx, updateFunc)
+}
+
+func (mt *metaTable) FinishTask(buildID UniqueID, state commonpb.IndexState, filePaths []string) error {
+	mt.segmentIndexLock.Lock()
+	defer mt.segmentIndexLock.Unlock()
+
+	segIdx, ok := mt.buildID2SegmentIndex[buildID]
+	if !ok {
+		return fmt.Errorf("there is no index with buildID: %d", buildID)
+	}
+	updateFunc := func(segIdx *model.SegmentIndex) error {
+		segIdx.IndexState = state
+		segIdx.IndexFilePaths = filePaths
+		return mt.saveSegmentIndexMeta(segIdx)
+	}
+
+	return mt.updateSegIndexMeta(segIdx, updateFunc)
 }

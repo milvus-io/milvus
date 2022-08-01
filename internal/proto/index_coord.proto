@@ -21,13 +21,20 @@ service IndexCoord {
   rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
 }
 
-service IndexNode {
-  rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
-  rpc BuildIndex(BuildIndexRequest) returns (common.Status){}
-  rpc GetTaskSlots(GetTaskSlotsRequest) returns (GetTaskSlotsResponse){}
+//service IndexNode {
+//  rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
+//  rpc BuildIndex(BuildIndexRequest) returns (common.Status){}
+//  rpc GetTaskSlots(GetTaskSlotsRequest) returns (GetTaskSlotsResponse){}
+//
+//  // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
+//  rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
+//}
 
-  // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
-  rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
+service IndexNode {
+    rpc CreateJob(CreateJobRequest) returns (common.Status) {}
+    rpc QueryJobs(QueryJobsRequest) returns (QueryJobsResponse) {}
+    rpc DropJobs(DropJobsRequest) returns (common.Status) {}
+    rpc GetJobNum(GetJobNumRequest) returns (GetJobNumResponse) {}
 }
 
 message FieldIndex {
@@ -131,4 +138,59 @@ message GetTaskSlotsRequest {
 message GetTaskSlotsResponse {
   common.Status status = 1;
   int64 slots = 2;
+}
+
+message CreateJobRequest {
+  int64 clusterID = 1;
+  string storage_access_key = 2;
+  string bucket_name = 3;
+  string storage_prefix = 4;
+  int64 buildID = 5;
+  repeated string data_paths = 6;
+  int64 index_version = 7;
+  repeated common.KeyValuePair index_params = 8;
+  repeated common.KeyValuePair type_params = 9;
+}
+
+message QueryJobsRequest {
+  int64 clusterID = 1;
+  repeated int64 buildIDs = 2;
+}
+
+message IndexInfo {
+  int64 buildID = 1;
+  common.IndexState state = 2;
+  repeated string index_files = 3;
+}
+
+message QueryJobsResponse {
+  common.Status status = 1;
+  int64 clusterID = 2;
+  repeated IndexInfo index_infos = 3;
+}
+
+message DropJobsRequest {
+  int64 clusterID = 1;
+  repeated int64 buildIDs = 2;
+}
+
+message GetJobNumRequest {
+
+}
+
+message JobInfo {
+  int64 num_rows = 1;
+  int64 dim = 2;
+  int64 start_time = 3;
+  int64 end_time = 4;
+  repeated common.KeyValuePair index_params = 5;
+  int64 podID = 6;
+}
+message GetJobNumResponse {
+  common.Status status = 1;
+  int64 total_job_num = 2;
+  int64 in_progress_job_num = 3;
+  int64 enqueue_job_num = 4;
+  int64 task_slots = 5;
+  repeated JobInfo job_infos = 6;
 }
