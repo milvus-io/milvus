@@ -32,7 +32,7 @@ indexCoordinator:
 indexNode:
   resources:
     requests:
-      cpu: "4"
+      cpu: "1"
       memory: "500Mi"
 
 dataCoordinator:
