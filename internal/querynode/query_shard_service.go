@@ -50,7 +50,7 @@ type queryShardService struct {
 
 func newQueryShardService(ctx context.Context, metaReplica ReplicaInterface, tSafeReplica TSafeReplicaInterface, clusterService *ShardClusterService, factory dependency.Factory, scheduler *taskScheduler) (*queryShardService, error) {
 	// TODO we don't need the local chunk manager any more
-	localChunkManager := storage.NewLocalChunkManager(storage.RootPath(Params.LocalStorageCfg.Path))
+	localChunkManager := storage.NewLocalChunkManager(storage.RootPath(Params.LocalStorageCfg.Path.GetValue()))
 	remoteChunkManager, err := factory.NewPersistentStorageChunkManager(ctx)
 	if err != nil {
 		log.Ctx(ctx).Warn("failed to init remote chunk manager", zap.Error(err))

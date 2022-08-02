@@ -164,14 +164,14 @@ func (i *IndexNode) initKnowhere() {
 	cThreadCoreCoefficient := C.int64_t(Params.CommonCfg.ThreadCoreCoefficient)
 	C.InitThreadCoreCoefficient(cThreadCoreCoefficient)
 
-	cCpuNum := C.int(hardware.GetCPUNum())
-	C.InitCpuNum(cCpuNum)
+	cCPUNum := C.int(hardware.GetCPUNum())
+	C.InitCpuNum(cCPUNum)
 
 	initcore.InitLocalStorageConfig(Params)
 }
 
 func (i *IndexNode) initSession() error {
-	i.session = sessionutil.NewSession(i.loopCtx, Params.EtcdCfg.MetaRootPath, i.etcdCli)
+	i.session = sessionutil.NewSession(i.loopCtx, Params.EtcdCfg.MetaRootPath.GetValue(), i.etcdCli)
 	if i.session == nil {
 		return errors.New("failed to initialize session")
 	}

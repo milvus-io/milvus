@@ -104,7 +104,6 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 	if !node.checkHealthy() {
 		return unhealthyStatus(), nil
 	}
-
 	ctx = logutil.WithModule(ctx, moduleName)
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-InvalidateCollectionMetaCache")
 	defer sp.Finish()

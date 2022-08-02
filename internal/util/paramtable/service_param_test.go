@@ -23,137 +23,123 @@ func TestServiceParam(t *testing.T) {
 	SParams.Init()
 
 	t.Run("test etcdConfig", func(t *testing.T) {
-		Params := SParams.EtcdCfg
+		Params := &SParams.EtcdCfg
 
-		assert.NotZero(t, len(Params.Endpoints))
-		t.Logf("etcd endpoints = %s", Params.Endpoints)
+		assert.NotZero(t, len(Params.Endpoints.GetAsStrings()))
+		t.Logf("etcd endpoints = %s", Params.Endpoints.GetAsStrings())
 
 		assert.NotEqual(t, Params.MetaRootPath, "")
-		t.Logf("meta root path = %s", Params.MetaRootPath)
+		t.Logf("meta root path = %s", Params.MetaRootPath.GetValue())
 
 		assert.NotEqual(t, Params.KvRootPath, "")
-		t.Logf("kv root path = %s", Params.KvRootPath)
+		t.Logf("kv root path = %s", Params.KvRootPath.GetValue())
 
-		assert.NotNil(t, Params.EtcdUseSSL)
-		t.Logf("use ssl = %t", Params.EtcdUseSSL)
+		assert.NotNil(t, Params.EtcdUseSSL.GetAsBool())
+		t.Logf("use ssl = %t", Params.EtcdUseSSL.GetAsBool())
 
-		assert.NotEmpty(t, Params.EtcdTLSKey)
-		t.Logf("tls key = %s", Params.EtcdTLSKey)
+		assert.NotEmpty(t, Params.EtcdTLSKey.GetValue())
+		t.Logf("tls key = %s", Params.EtcdTLSKey.GetValue())
 
-		assert.NotEmpty(t, Params.EtcdTLSCACert)
-		t.Logf("tls CACert = %s", Params.EtcdTLSCACert)
+		assert.NotEmpty(t, Params.EtcdTLSCACert.GetValue())
+		t.Logf("tls CACert = %s", Params.EtcdTLSCACert.GetValue())
 
-		assert.NotEmpty(t, Params.EtcdTLSCert)
-		t.Logf("tls cert = %s", Params.EtcdTLSCert)
+		assert.NotEmpty(t, Params.EtcdTLSCert.GetValue())
+		t.Logf("tls cert = %s", Params.EtcdTLSCert.GetValue())
 
-		assert.NotEmpty(t, Params.EtcdTLSMinVersion)
-		t.Logf("tls minVersion = %s", Params.EtcdTLSMinVersion)
+		assert.NotEmpty(t, Params.EtcdTLSMinVersion.GetValue())
+		t.Logf("tls minVersion = %s", Params.EtcdTLSMinVersion.GetValue())
 
 		// test UseEmbedEtcd
-		Params.Base.Save("etcd.use.embed", "true")
+		t.Setenv("etcd.use.embed", "true")
 		t.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.ClusterDeployMode)
-		assert.Panics(t, func() { Params.initUseEmbedEtcd() })
+		assert.Panics(t, func() { SParams.Init() })
 
 		t.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode)
-		Params.LoadCfgToMemory()
+		t.Setenv("etcd.use.embed", "false")
+		SParams.Init()
 	})
 
 	t.Run("test pulsarConfig", func(t *testing.T) {
 		{
-			Params := SParams.PulsarCfg
-			assert.NotEqual(t, Params.Address, "")
-			t.Logf("pulsar address = %s", Params.Address)
-			assert.Equal(t, Params.MaxMessageSize, SuggestPulsarMaxMessageSize)
+			assert.NotEqual(t, SParams.PulsarCfg.Address.GetValue(), "")
+			t.Logf("pulsar address = %s", SParams.PulsarCfg.Address.GetValue())
+			assert.Equal(t, SParams.PulsarCfg.MaxMessageSize.GetAsInt(), SuggestPulsarMaxMessageSize)
 		}
 
 		address := "pulsar://localhost:6650"
 		{
-			Params := SParams.PulsarCfg
 			SParams.BaseTable.Save("pulsar.address", address)
-			Params.initAddress()
-			assert.Equal(t, Params.Address, address)
+			assert.Equal(t, SParams.PulsarCfg.Address.GetValue(), address)
 		}
 
 		{
-			Params := SParams.PulsarCfg
 			SParams.BaseTable.Save("pulsar.address", "localhost")
 			SParams.BaseTable.Save("pulsar.port", "6650")
-			Params.initAddress()
-			assert.Equal(t, Params.Address, address)
+			assert.Equal(t, SParams.PulsarCfg.Address.GetValue(), address)
 		}
 	})
 
 	t.Run("test pulsar web config", func(t *testing.T) {
-		Params := SParams.PulsarCfg
-		assert.NotEqual(t, Params.Address, "")
+		assert.NotEqual(t, SParams.PulsarCfg.Address.GetValue(), "")
 
 		{
-			Params.initWebAddress()
-			assert.NotEqual(t, Params.WebAddress, "")
+			assert.NotEqual(t, SParams.PulsarCfg.WebAddress.GetValue(), "")
 		}
 
 		{
-			Params.Address = Params.Address + "invalid"
-			Params.initWebAddress()
-			assert.Equal(t, Params.WebAddress, "")
+			SParams.BaseTable.Save(SParams.PulsarCfg.Address.Key, "u\\invalid")
+			assert.Equal(t, SParams.PulsarCfg.WebAddress.GetValue(), "")
 		}
 
 		{
-			Params.Address = ""
-			Params.initWebAddress()
-			assert.Equal(t, Params.WebAddress, "")
+			SParams.BaseTable.Save(SParams.PulsarCfg.Address.Key, "")
+			assert.Equal(t, SParams.PulsarCfg.WebAddress.GetValue(), "")
 		}
 	})
 
 	t.Run("test pulsar auth config", func(t *testing.T) {
 		Params := SParams.PulsarCfg
 
-		Params.initAuthPlugin()
-		assert.Equal(t, "", Params.AuthPlugin)
-
-		Params.initAuthParams()
-		assert.Equal(t, "", Params.AuthParams)
+		assert.Equal(t, "", Params.AuthPlugin.GetValue())
+		assert.Equal(t, "", Params.AuthParams.GetValue())
 	})
 
 	t.Run("test pulsar tenant/namespace config", func(t *testing.T) {
 		Params := SParams.PulsarCfg
 
-		Params.initTenant()
-		assert.Equal(t, "public", Params.Tenant)
-
-		Params.initNamespace()
-		assert.Equal(t, "default", Params.Namespace)
+		assert.Equal(t, "public", Params.Tenant.GetValue())
+		assert.Equal(t, "default", Params.Namespace.GetValue())
 	})
 
 	t.Run("test rocksmqConfig", func(t *testing.T) {
-		Params := SParams.RocksmqCfg
+		Params := &SParams.RocksmqCfg
 
-		assert.NotEqual(t, Params.Path, "")
-		t.Logf("rocksmq path = %s", Params.Path)
+		assert.NotEqual(t, Params.Path.GetValue(), "")
+		t.Logf("rocksmq path = %s", Params.Path.GetValue())
 	})
 
 	t.Run("test minioConfig", func(t *testing.T) {
-		Params := SParams.MinioCfg
+		Params := &SParams.MinioCfg
 
-		addr := Params.Address
+		addr := Params.Address.GetValue()
 		equal := addr == "localhost:9000" || addr == "minio:9000"
 		assert.Equal(t, equal, true)
-		t.Logf("minio address = %s", Params.Address)
+		t.Logf("minio address = %s", Params.Address.GetValue())
 
-		assert.Equal(t, Params.AccessKeyID, "minioadmin")
+		assert.Equal(t, Params.AccessKeyID.GetValue(), "minioadmin")
 
-		assert.Equal(t, Params.SecretAccessKey, "minioadmin")
+		assert.Equal(t, Params.SecretAccessKey.GetValue(), "minioadmin")
 
-		assert.Equal(t, Params.UseSSL, false)
+		assert.Equal(t, Params.UseSSL.GetAsBool(), false)
 
-		assert.Equal(t, Params.UseIAM, false)
+		assert.Equal(t, Params.UseIAM.GetAsBool(), false)
 
-		assert.Equal(t, Params.CloudProvider, "aws")
+		assert.Equal(t, Params.CloudProvider.GetValue(), "aws")
 
-		assert.Equal(t, Params.IAMEndpoint, "")
+		assert.Equal(t, Params.IAMEndpoint.GetValue(), "")
 
-		t.Logf("Minio BucketName = %s", Params.BucketName)
+		t.Logf("Minio BucketName = %s", Params.BucketName.GetValue())
 
-		t.Logf("Minio rootpath = %s", Params.RootPath)
+		t.Logf("Minio rootpath = %s", Params.RootPath.GetValue())
 	})
 }

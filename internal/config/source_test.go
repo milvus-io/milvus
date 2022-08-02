@@ -24,12 +24,12 @@ import (
 
 func TestLoadFromFileSource(t *testing.T) {
 	t.Run("file not exist", func(t *testing.T) {
-		fs := NewFileSource("file_not_exist.yaml")
+		fs := NewFileSource(&FileInfo{"file_not_exist.yaml", -1})
 		err := fs.loadFromFile()
 		assert.Error(t, err, "cannot access config file: file_not_exist.yaml")
 	})
 	t.Run("file type not support", func(t *testing.T) {
-		fs := NewFileSource("../../go.mod")
+		fs := NewFileSource(&FileInfo{"../../go.mod", -1})
 		err := fs.loadFromFile()
 		assert.Error(t, err)
 	})

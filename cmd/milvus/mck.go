@@ -226,7 +226,7 @@ func (c *mck) connectEctd() {
 		log.Fatal("failed to connect to etcd", zap.Error(err))
 	}
 
-	rootPath := getConfigValue(c.ectdRootPath, c.params.EtcdCfg.MetaRootPath, "ectd_root_path")
+	rootPath := getConfigValue(c.ectdRootPath, c.params.EtcdCfg.MetaRootPath.GetValue(), "ectd_root_path")
 	c.etcdKV = etcdkv.NewEtcdKV(etcdCli, rootPath)
 	log.Info("Etcd root path", zap.String("root_path", rootPath))
 }

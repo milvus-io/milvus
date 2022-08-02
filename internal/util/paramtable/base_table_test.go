@@ -29,7 +29,7 @@ func TestMain(m *testing.M) {
 
 func TestBaseTable_GetConfigSubSet(t *testing.T) {
 	prefix := "rootcoord."
-	configs := baseParams.mgr.Configs()
+	configs := baseParams.mgr.GetConfigs()
 
 	configsWithPrefix := make(map[string]string)
 	for k, v := range configs {

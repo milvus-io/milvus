@@ -47,18 +47,18 @@ func NewKafkaClientInstanceWithConfigMap(config kafka.ConfigMap, extraConsumerCo
 }
 
 func NewKafkaClientInstanceWithConfig(config *paramtable.KafkaConfig) *kafkaClient {
-	kafkaConfig := getBasicConfig(config.Address)
+	kafkaConfig := getBasicConfig(config.Address.GetValue())
 
-	if (config.SaslUsername == "" && config.SaslPassword != "") ||
-		(config.SaslUsername != "" && config.SaslPassword == "") {
+	if (config.SaslUsername.GetValue() == "" && config.SaslPassword.GetValue() != "") ||
+		(config.SaslUsername.GetValue() != "" && config.SaslPassword.GetValue() == "") {
 		panic("enable security mode need config username and password at the same time!")
 	}
 
-	if config.SaslUsername != "" && config.SaslPassword != "" {
-		kafkaConfig.SetKey("sasl.mechanisms", config.SaslMechanisms)
-		kafkaConfig.SetKey("security.protocol", config.SecurityProtocol)
-		kafkaConfig.SetKey("sasl.username", config.SaslUsername)
-		kafkaConfig.SetKey("sasl.password", config.SaslPassword)
+	if config.SaslUsername.GetValue() != "" && config.SaslPassword.GetValue() != "" {
+		kafkaConfig.SetKey("sasl.mechanisms", config.SaslMechanisms.GetValue())
+		kafkaConfig.SetKey("security.protocol", config.SecurityProtocol.GetValue())
+		kafkaConfig.SetKey("sasl.username", config.SaslUsername.GetValue())
+		kafkaConfig.SetKey("sasl.password", config.SaslPassword.GetValue())
 	}
 
 	specExtraConfig := func(config map[string]string) kafka.ConfigMap {
@@ -69,7 +69,7 @@ func NewKafkaClientInstanceWithConfig(config *paramtable.KafkaConfig) *kafkaClie
 		return kafkaConfigMap
 	}
 
-	return NewKafkaClientInstanceWithConfigMap(kafkaConfig, specExtraConfig(config.ConsumerExtraConfig), specExtraConfig(config.ProducerExtraConfig))
+	return NewKafkaClientInstanceWithConfigMap(kafkaConfig, specExtraConfig(config.ConsumerExtraConfig.GetValue()), specExtraConfig(config.ProducerExtraConfig.GetValue()))
 
 }
 

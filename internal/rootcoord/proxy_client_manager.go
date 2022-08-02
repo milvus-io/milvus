@@ -76,8 +76,8 @@ func (p *proxyClientManager) AddProxyClient(session *sessionutil.Session) {
 	go p.connect(session)
 }
 
-// GetProxyNumber returns number of proxy clients.
-func (p *proxyClientManager) GetProxyNumber() int {
+// GetProxyCount returns number of proxy clients.
+func (p *proxyClientManager) GetProxyCount() int {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 

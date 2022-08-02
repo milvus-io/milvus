@@ -21,7 +21,6 @@ import (
 	"os"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -43,14 +42,13 @@ func TestPmsFactory(t *testing.T) {
 }
 
 func TestPmsFactoryWithAuth(t *testing.T) {
-	config := &paramtable.PulsarConfig{
-		Address:        Params.PulsarCfg.Address,
-		WebAddress:     Params.PulsarCfg.WebAddress,
-		MaxMessageSize: Params.PulsarCfg.MaxMessageSize,
-		AuthPlugin:     "token",
-		AuthParams:     "{\"token\":\"fake_token\"}",
-	}
-
+	config := &Params.PulsarCfg
+	Params.Save(Params.PulsarCfg.AuthPlugin.Key, "token")
+	Params.Save(Params.PulsarCfg.AuthParams.Key, "token:fake_token")
+	defer func() {
+		Params.Save(Params.PulsarCfg.AuthPlugin.Key, "")
+		Params.Save(Params.PulsarCfg.AuthParams.Key, "")
+	}()
 	pmsFactory := NewPmsFactory(config)
 
 	ctx := context.Background()
@@ -63,7 +61,7 @@ func TestPmsFactoryWithAuth(t *testing.T) {
 	_, err = pmsFactory.NewQueryMsgStream(ctx)
 	assert.Nil(t, err)
 
-	config.AuthParams = ""
+	Params.Save(Params.PulsarCfg.AuthParams.Key, "")
 	pmsFactory = NewPmsFactory(config)
 
 	ctx = context.Background()

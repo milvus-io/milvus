@@ -23,7 +23,7 @@ func newEtcdBasedBackend(cfg *configs.MilvusConfig) (*etcdBasedBackend, error) {
 	if err != nil {
 		return nil, err
 	}
-	txn := etcdkv.NewEtcdKV(etcdCli, cfg.EtcdCfg.MetaRootPath)
+	txn := etcdkv.NewEtcdKV(etcdCli, cfg.EtcdCfg.MetaRootPath.GetValue())
 	b := &etcdBasedBackend{cfg: cfg, etcdCli: etcdCli, txn: txn}
 	return b, nil
 }

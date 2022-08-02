@@ -100,7 +100,7 @@ func (s *Server) init() error {
 	if s.indexCoord == nil {
 		var err error
 		log.Debug("create IndexCoord client for DataCoord")
-		s.indexCoord, err = icc.NewClient(s.ctx, Params.EtcdCfg.MetaRootPath, etcdCli)
+		s.indexCoord, err = icc.NewClient(s.ctx, Params.EtcdCfg.MetaRootPath.GetValue(), etcdCli)
 		if err != nil {
 			log.Warn("failed to create IndexCoord client for DataCoord", zap.Error(err))
 			return err

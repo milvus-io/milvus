@@ -14,18 +14,18 @@ type ChunkManagerFactory struct {
 
 func NewChunkManagerFactoryWithParam(params *paramtable.ComponentParam) *ChunkManagerFactory {
 	if params.CommonCfg.StorageType == "local" {
-		return NewChunkManagerFactory("local", RootPath(params.LocalStorageCfg.Path))
+		return NewChunkManagerFactory("local", RootPath(params.LocalStorageCfg.Path.GetValue()))
 	}
 	return NewChunkManagerFactory("minio",
-		RootPath(params.MinioCfg.RootPath),
-		Address(params.MinioCfg.Address),
-		AccessKeyID(params.MinioCfg.AccessKeyID),
-		SecretAccessKeyID(params.MinioCfg.SecretAccessKey),
-		UseSSL(params.MinioCfg.UseSSL),
-		BucketName(params.MinioCfg.BucketName),
-		UseIAM(params.MinioCfg.UseIAM),
-		CloudProvider(params.MinioCfg.CloudProvider),
-		IAMEndpoint(params.MinioCfg.IAMEndpoint),
+		RootPath(params.MinioCfg.RootPath.GetValue()),
+		Address(params.MinioCfg.Address.GetValue()),
+		AccessKeyID(params.MinioCfg.AccessKeyID.GetValue()),
+		SecretAccessKeyID(params.MinioCfg.SecretAccessKey.GetValue()),
+		UseSSL(params.MinioCfg.UseSSL.GetAsBool()),
+		BucketName(params.MinioCfg.BucketName.GetValue()),
+		UseIAM(params.MinioCfg.UseIAM.GetAsBool()),
+		CloudProvider(params.MinioCfg.CloudProvider.GetValue()),
+		IAMEndpoint(params.MinioCfg.IAMEndpoint.GetValue()),
 		CreateBucket(true))
 }
 

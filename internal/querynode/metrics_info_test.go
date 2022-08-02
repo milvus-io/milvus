@@ -42,7 +42,7 @@ func TestGetSystemInfoMetrics(t *testing.T) {
 	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.NoError(t, err)
 	defer etcdCli.Close()
-	node.session = sessionutil.NewSession(node.queryNodeLoopCtx, Params.EtcdCfg.MetaRootPath, etcdCli)
+	node.session = sessionutil.NewSession(node.queryNodeLoopCtx, Params.EtcdCfg.MetaRootPath.GetValue(), etcdCli)
 
 	req := &milvuspb.GetMetricsRequest{
 		Base: genCommonMsgBase(commonpb.MsgType_WatchQueryChannels, node.session.ServerID),
@@ -70,7 +70,7 @@ func TestGetComponentConfigurationsFailed(t *testing.T) {
 	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.NoError(t, err)
 	defer etcdCli.Close()
-	node.session = sessionutil.NewSession(node.queryNodeLoopCtx, Params.EtcdCfg.MetaRootPath, etcdCli)
+	node.session = sessionutil.NewSession(node.queryNodeLoopCtx, Params.EtcdCfg.MetaRootPath.GetValue(), etcdCli)
 
 	req := &internalpb.ShowConfigurationsRequest{
 		Base:    genCommonMsgBase(commonpb.MsgType_WatchQueryChannels, node.session.ServerID),

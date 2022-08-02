@@ -108,9 +108,9 @@ func (suite *ServiceSuite) SetupSuite() {
 
 func (suite *ServiceSuite) SetupTest() {
 	config := params.GenerateEtcdConfig()
-	cli, err := etcd.GetEtcdClient(&config)
+	cli, err := etcd.GetEtcdClient(config)
 	suite.Require().NoError(err)
-	suite.kv = etcdkv.NewEtcdKV(cli, config.MetaRootPath)
+	suite.kv = etcdkv.NewEtcdKV(cli, config.MetaRootPath.GetValue())
 
 	suite.store = meta.NewMetaStore(suite.kv)
 	suite.dist = meta.NewDistributionManager()
@@ -135,7 +135,7 @@ func (suite *ServiceSuite) SetupTest() {
 	suite.server = &Server{
 		kv:                  suite.kv,
 		store:               suite.store,
-		session:             sessionutil.NewSession(context.Background(), Params.EtcdCfg.MetaRootPath, cli),
+		session:             sessionutil.NewSession(context.Background(), Params.EtcdCfg.MetaRootPath.GetValue(), cli),
 		metricsCacheManager: metricsinfo.NewMetricsCacheManager(),
 		dist:                suite.dist,
 		meta:                suite.meta,

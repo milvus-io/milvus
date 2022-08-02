@@ -49,11 +49,11 @@ import (
 
 func TestMockEtcd(t *testing.T) {
 	Params.InitOnce()
-	Params.EtcdCfg.MetaRootPath = "indexcoord-mock"
+	Params.BaseTable.Save("etcd.rootPath", "/test/datanode/root/indexcoord-mock")
 
 	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.NoError(t, err)
-	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
+	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath.GetValue())
 
 	mockEtcd := NewMockEtcdKVWithReal(etcdKV)
 	key := "foo"
@@ -94,7 +94,7 @@ func TestMockEtcd(t *testing.T) {
 
 func testIndexCoord(t *testing.T) {
 	ctx := context.Background()
-	Params.EtcdCfg.MetaRootPath = "indexcoord-ut"
+	Params.BaseTable.Save("etcd.rootPath", "/test/datanode/root/indexcoord-ut")
 
 	// first start an IndexNode
 	inm0 := indexnode.NewIndexNodeMock()
@@ -495,13 +495,14 @@ func testIndexCoord(t *testing.T) {
 	err = ic.Stop()
 	assert.NoError(t, err)
 
-	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
+	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath.GetValue())
 	err = etcdKV.RemoveWithPrefix("")
 	assert.NoError(t, err)
 }
 
 func TestIndexCoord_DisableActiveStandby(t *testing.T) {
 	Params.InitOnce()
+	indexnode.Params.InitOnce()
 	Params.IndexCoordCfg.EnableActiveStandby = false
 	testIndexCoord(t)
 }
@@ -509,6 +510,7 @@ func TestIndexCoord_DisableActiveStandby(t *testing.T) {
 // make sure the main functions work well when EnableActiveStandby=true
 func TestIndexCoord_EnableActiveStandby(t *testing.T) {
 	Params.InitOnce()
+	indexnode.Params.InitOnce()
 	Params.IndexCoordCfg.EnableActiveStandby = true
 	testIndexCoord(t)
 }
