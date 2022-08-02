@@ -46,6 +46,7 @@ float_field_desc = "float type field"
 float_vec_field_desc = "float vector type field"
 binary_vec_field_desc = "binary vector type field"
 max_dim = 32768
+min_dim = 1
 gracefulTime = 1
 default_nlist = 128
 compact_segment_num_threshold = 4
