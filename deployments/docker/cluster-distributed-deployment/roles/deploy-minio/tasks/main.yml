@@ -1,0 +1,20 @@
+- name: minio volume
+  docker_volume:
+    name: minio_volume
+
+- name: "minio"
+  docker_container:
+    name: minio
+    image: minio/minio:RELEASE.2022-03-17T06-34-49Z
+    env:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    volumes:
+      - minio_volume:/data
+    command: minio server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    network_mode: "{{dependencies_network}}" #Use the network which defined as variable in Inventory.
