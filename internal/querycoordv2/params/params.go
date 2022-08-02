@@ -34,12 +34,13 @@ var (
 
 // GenerateEtcdConfig returns a etcd config with a random root path,
 // NOTE: for test only
-func GenerateEtcdConfig() paramtable.EtcdConfig {
-	config := Params.EtcdCfg
+func GenerateEtcdConfig() *paramtable.EtcdConfig {
+	config := &Params.EtcdCfg
 	rand.Seed(time.Now().UnixNano())
 	suffix := "-test-querycoord" + strconv.FormatInt(rand.Int63(), 10)
-	config.MetaRootPath = config.MetaRootPath + suffix
-	return config
+
+	Params.BaseTable.Save("etcd.rootPath", config.MetaRootPath.GetValue()+suffix)
+	return &Params.EtcdCfg
 }
 
 func RandomMetaRootPath() string {

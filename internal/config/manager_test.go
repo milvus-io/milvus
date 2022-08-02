@@ -25,11 +25,11 @@ import (
 
 func TestAllConfigFromManager(t *testing.T) {
 	mgr, _ := Init()
-	all := mgr.Configs()
+	all := mgr.GetConfigs()
 	assert.Equal(t, 0, len(all))
 
 	mgr, _ = Init(WithEnvSource(formatKey))
-	all = mgr.Configs()
+	all = mgr.GetConfigs()
 	assert.Less(t, 0, len(all))
 }
 

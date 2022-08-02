@@ -57,11 +57,10 @@ func TestConfigFromRemote(t *testing.T) {
 	t.Setenv("TMP_KEY", "1")
 	t.Setenv("log.level", "info")
 	mgr, _ := Init(WithEnvSource(formatKey),
-		WithFilesSource("../../configs/milvus.yaml"),
+		WithFilesSource(&FileInfo{"../../configs/milvus.yaml", -1}),
 		WithEtcdSource(&EtcdInfo{
 			Endpoints:       []string{cfg.ACUrls[0].Host},
 			KeyPrefix:       "test",
-			RefreshMode:     ModeInterval,
 			RefreshInterval: 10 * time.Millisecond,
 		}))
 	ctx := context.Background()

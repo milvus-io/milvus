@@ -101,15 +101,15 @@ func (p *ComponentParam) SetLogConfig(role string) {
 }
 
 func (p *ComponentParam) RocksmqEnable() bool {
-	return p.RocksmqCfg.Path != ""
+	return p.RocksmqCfg.Path.GetValue() != ""
 }
 
 func (p *ComponentParam) PulsarEnable() bool {
-	return p.PulsarCfg.Address != ""
+	return p.PulsarCfg.Address.GetValue() != ""
 }
 
 func (p *ComponentParam) KafkaEnable() bool {
-	return p.KafkaCfg.Address != ""
+	return p.KafkaCfg.Address.GetValue() != ""
 }
 
 // /////////////////////////////////////////////////////////////////////////////

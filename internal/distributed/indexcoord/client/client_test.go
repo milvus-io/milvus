@@ -52,13 +52,13 @@ func TestIndexCoordClient(t *testing.T) {
 		address = addr
 	}
 	icm.CallRegister = func() error {
-		session := sessionutil.NewSession(context.Background(), indexcoord.Params.EtcdCfg.MetaRootPath, etcdCli)
+		session := sessionutil.NewSession(context.Background(), indexcoord.Params.EtcdCfg.MetaRootPath.GetValue(), etcdCli)
 		session.Init(typeutil.IndexCoordRole, address, true, false)
 		session.Register()
 		return err
 	}
 	icm.CallStop = func() error {
-		etcdKV := etcdkv.NewEtcdKV(etcdCli, indexcoord.Params.EtcdCfg.MetaRootPath)
+		etcdKV := etcdkv.NewEtcdKV(etcdCli, indexcoord.Params.EtcdCfg.MetaRootPath.GetValue())
 		err = etcdKV.RemoveWithPrefix("session/" + typeutil.IndexCoordRole)
 		return err
 	}
@@ -76,7 +76,7 @@ func TestIndexCoordClient(t *testing.T) {
 	//
 	//etcdCli, err := etcd.GetEtcdClient(&indexcoord.Params.EtcdCfg)
 	//assert.NoError(t, err)
-	icc, err := NewClient(ctx, indexcoord.Params.EtcdCfg.MetaRootPath, etcdCli)
+	icc, err := NewClient(ctx, indexcoord.Params.EtcdCfg.MetaRootPath.GetValue(), etcdCli)
 	assert.NoError(t, err)
 	assert.NotNil(t, icc)
 

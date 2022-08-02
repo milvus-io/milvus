@@ -23,6 +23,7 @@ import (
 	"path"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/assert"
 )
@@ -30,12 +31,13 @@ import (
 var Params paramtable.ServiceParam
 
 func TestEtcd(t *testing.T) {
+	t.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode)
+	t.Setenv("ETCD_USE_EMBED", "true")
 	Params.Init()
-	Params.EtcdCfg.UseEmbedEtcd = true
-	Params.EtcdCfg.DataDir = "/tmp/data"
+	Params.BaseTable.Save("etcd.data.dir", "/tmp/data")
 	err := InitEtcdServer(&Params.EtcdCfg)
 	assert.NoError(t, err)
-	defer os.RemoveAll(Params.EtcdCfg.DataDir)
+	defer os.RemoveAll(Params.EtcdCfg.DataDir.GetValue())
 	defer StopEtcdServer()
 
 	etcdCli, err := GetEtcdClient(&Params.EtcdCfg)
@@ -50,26 +52,26 @@ func TestEtcd(t *testing.T) {
 	assert.False(t, resp.Count < 1)
 	assert.Equal(t, string(resp.Kvs[0].Value), "value")
 
-	Params.EtcdCfg.UseEmbedEtcd = false
-	Params.EtcdCfg.EtcdUseSSL = true
-	Params.EtcdCfg.EtcdTLSMinVersion = "1.3"
-	Params.EtcdCfg.EtcdTLSCACert = "../../../configs/cert/ca.pem"
-	Params.EtcdCfg.EtcdTLSCert = "../../../configs/cert/client.pem"
-	Params.EtcdCfg.EtcdTLSKey = "../../../configs/cert/client.key"
-	etcdCli, err = GetEtcdClient(&Params.EtcdCfg)
+	t.Setenv("ETCD_USE_EMBED", "false")
+	Params.Init()
+	Params.BaseTable.Save("etcd.ssl.enabled", "true")
+	Params.BaseTable.Save("etcd.ssl.tlsMinVersion", "1.3")
+	Params.BaseTable.Save("etcd.ssl.tlsCACert", "../../../configs/cert/ca.pem")
+	Params.BaseTable.Save("etcd.ssl.tlsCert", "../../../configs/cert/client.pem")
+	Params.BaseTable.Save("etcd.ssl.tlsKey", "../../../configs/cert/client.key")
 	assert.NoError(t, err)
 
-	Params.EtcdCfg.EtcdTLSMinVersion = "some not right word"
+	Params.BaseTable.Save("etcd.ssl.tlsMinVersion", "some not right word")
 	etcdCli, err = GetEtcdClient(&Params.EtcdCfg)
 	assert.NotNil(t, err)
 
-	Params.EtcdCfg.EtcdTLSMinVersion = "1.2"
-	Params.EtcdCfg.EtcdTLSCACert = "wrong/file"
+	Params.BaseTable.Save("etcd.ssl.tlsMinVersion", "1.2")
+	Params.BaseTable.Save("etcd.ssl.tlsCACert", "wrong/file")
 	etcdCli, err = GetEtcdClient(&Params.EtcdCfg)
 	assert.NotNil(t, err)
 
-	Params.EtcdCfg.EtcdTLSCACert = "../../../configs/cert/ca.pem"
-	Params.EtcdCfg.EtcdTLSCert = "wrong/file"
+	Params.BaseTable.Save("etcd.ssl.tlsCACert", "../../../configs/cert/ca.pem")
+	Params.BaseTable.Save("etcd.ssl.tlsCert", "wrong/file")
 	assert.NotNil(t, err)
 
 }

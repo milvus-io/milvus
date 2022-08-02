@@ -276,19 +276,19 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 		var storageConfig *indexpb.StorageConfig
 		if Params.CommonCfg.StorageType == "local" {
 			storageConfig = &indexpb.StorageConfig{
-				RootPath:    Params.LocalStorageCfg.Path,
+				RootPath:    Params.LocalStorageCfg.Path.GetValue(),
 				StorageType: Params.CommonCfg.StorageType,
 			}
 		} else {
 			storageConfig = &indexpb.StorageConfig{
-				Address:         Params.MinioCfg.Address,
-				AccessKeyID:     Params.MinioCfg.AccessKeyID,
-				SecretAccessKey: Params.MinioCfg.SecretAccessKey,
-				UseSSL:          Params.MinioCfg.UseSSL,
-				BucketName:      Params.MinioCfg.BucketName,
-				RootPath:        Params.MinioCfg.RootPath,
-				UseIAM:          Params.MinioCfg.UseIAM,
-				IAMEndpoint:     Params.MinioCfg.IAMEndpoint,
+				Address:         Params.MinioCfg.Address.GetValue(),
+				AccessKeyID:     Params.MinioCfg.AccessKeyID.GetValue(),
+				SecretAccessKey: Params.MinioCfg.SecretAccessKey.GetValue(),
+				UseSSL:          Params.MinioCfg.UseSSL.GetAsBool(),
+				BucketName:      Params.MinioCfg.BucketName.GetValue(),
+				RootPath:        Params.MinioCfg.RootPath.GetValue(),
+				UseIAM:          Params.MinioCfg.UseIAM.GetAsBool(),
+				IAMEndpoint:     Params.MinioCfg.IAMEndpoint.GetValue(),
 				StorageType:     Params.CommonCfg.StorageType,
 			}
 		}

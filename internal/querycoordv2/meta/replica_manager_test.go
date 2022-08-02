@@ -51,9 +51,9 @@ func (suite *ReplicaManagerSuite) SetupSuite() {
 func (suite *ReplicaManagerSuite) SetupTest() {
 	var err error
 	config := GenerateEtcdConfig()
-	cli, err := etcd.GetEtcdClient(&config)
+	cli, err := etcd.GetEtcdClient(config)
 	suite.Require().NoError(err)
-	suite.kv = etcdkv.NewEtcdKV(cli, config.MetaRootPath)
+	suite.kv = etcdkv.NewEtcdKV(cli, config.MetaRootPath.GetValue())
 	suite.store = NewMetaStore(suite.kv)
 
 	suite.idAllocator = RandomIncrementIDAllocator()

@@ -26,10 +26,10 @@ func GetEmbedEtcdClient() (*clientv3.Client, error) {
 
 // InitEtcdServer initializes embedded etcd server singleton.
 func InitEtcdServer(etcdCfg *paramtable.EtcdConfig) error {
-	if etcdCfg.UseEmbedEtcd {
+	if etcdCfg.UseEmbedEtcd.GetAsBool() {
 		var initError error
 		initOnce.Do(func() {
-			path := etcdCfg.ConfigPath
+			path := etcdCfg.ConfigPath.GetValue()
 			var cfg *embed.Config
 			if len(path) > 0 {
 				cfgFromFile, err := embed.ConfigFromFile(path)
@@ -40,16 +40,16 @@ func InitEtcdServer(etcdCfg *paramtable.EtcdConfig) error {
 			} else {
 				cfg = embed.NewConfig()
 			}
-			cfg.Dir = etcdCfg.DataDir
-			cfg.LogOutputs = []string{etcdCfg.EtcdLogPath}
-			cfg.LogLevel = etcdCfg.EtcdLogLevel
+			cfg.Dir = etcdCfg.DataDir.GetValue()
+			cfg.LogOutputs = []string{etcdCfg.EtcdLogPath.GetValue()}
+			cfg.LogLevel = etcdCfg.EtcdLogLevel.GetValue()
 			e, err := embed.StartEtcd(cfg)
 			if err != nil {
 				log.Error("failed to init embedded Etcd server", zap.Error(err))
 				initError = err
 			}
 			etcdServer = e
-			log.Info("finish init Etcd config", zap.String("path", path), zap.String("data", etcdCfg.DataDir))
+			log.Info("finish init Etcd config", zap.String("path", path), zap.String("data", etcdCfg.DataDir.GetValue()))
 		})
 		return initError
 	}

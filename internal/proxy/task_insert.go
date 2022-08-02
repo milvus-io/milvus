@@ -256,7 +256,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 }
 
 func (it *insertTask) assignSegmentID(channelNames []string) (*msgstream.MsgPack, error) {
-	threshold := Params.PulsarCfg.MaxMessageSize
+	threshold := Params.PulsarCfg.MaxMessageSize.GetAsInt()
 
 	result := &msgstream.MsgPack{
 		BeginTs: it.BeginTs(),

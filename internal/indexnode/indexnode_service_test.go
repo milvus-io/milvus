@@ -20,14 +20,14 @@ import (
 
 func genStorageConfig() *indexpb.StorageConfig {
 	return &indexpb.StorageConfig{
-		Address:         Params.MinioCfg.Address,
-		AccessKeyID:     Params.MinioCfg.AccessKeyID,
-		SecretAccessKey: Params.MinioCfg.SecretAccessKey,
-		BucketName:      Params.MinioCfg.BucketName,
-		RootPath:        Params.MinioCfg.RootPath,
-		IAMEndpoint:     Params.MinioCfg.IAMEndpoint,
-		UseSSL:          Params.MinioCfg.UseSSL,
-		UseIAM:          Params.MinioCfg.UseIAM,
+		Address:         Params.MinioCfg.Address.GetValue(),
+		AccessKeyID:     Params.MinioCfg.AccessKeyID.GetValue(),
+		SecretAccessKey: Params.MinioCfg.SecretAccessKey.GetValue(),
+		BucketName:      Params.MinioCfg.BucketName.GetValue(),
+		RootPath:        Params.MinioCfg.RootPath.GetValue(),
+		IAMEndpoint:     Params.MinioCfg.IAMEndpoint.GetValue(),
+		UseSSL:          Params.MinioCfg.UseSSL.GetAsBool(),
+		UseIAM:          Params.MinioCfg.UseIAM.GetAsBool(),
 	}
 }
 

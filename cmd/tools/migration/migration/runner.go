@@ -81,7 +81,7 @@ func (r *Runner) initEtcdCli() {
 func (r *Runner) init() {
 	r.initEtcdCli()
 
-	r.session = sessionutil.NewSession(r.ctx, r.cfg.EtcdCfg.MetaRootPath, r.etcdCli,
+	r.session = sessionutil.NewSession(r.ctx, r.cfg.EtcdCfg.MetaRootPath.GetValue(), r.etcdCli,
 		sessionutil.WithCustomConfigEnable(), sessionutil.WithSessionTTL(60), sessionutil.WithSessionRetryTimes(30))
 	// address not important here.
 	address := time.Now().String()

@@ -29,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/storage/gcp"
 	"github.com/milvus-io/milvus/internal/util/errorutil"
-	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -39,6 +38,11 @@ import (
 
 var (
 	ErrNoSuchKey = errors.New("NoSuchKey")
+)
+
+const (
+	CloudProviderGCP = "gcp"
+	CloudProviderAWS = "aws"
 )
 
 func WrapErrNoSuchKey(key string) error {
@@ -74,7 +78,7 @@ func newMinioChunkManagerWithConfig(ctx context.Context, c *config) (*MinioChunk
 	var newMinioFn = minio.New
 
 	switch c.cloudProvider {
-	case paramtable.CloudProviderGCP:
+	case CloudProviderGCP:
 		newMinioFn = gcp.NewMinioClient
 		if !c.useIAM {
 			creds = credentials.NewStaticV2(c.accessKeyID, c.secretAccessKeyID, "")

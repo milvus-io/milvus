@@ -298,20 +298,35 @@ func TestKafkaClient_MsgSerializAndDeserialize(t *testing.T) {
 }
 
 func TestKafkaClient_NewKafkaClientInstanceWithConfig(t *testing.T) {
-	config1 := &paramtable.KafkaConfig{Address: "addr", SaslPassword: "password"}
+	config1 := &paramtable.KafkaConfig{
+		Address:      paramtable.ParamItem{Formatter: func(originValue string) string { return "addr" }},
+		SaslPassword: paramtable.ParamItem{Formatter: func(originValue string) string { return "password" }},
+	}
 	assert.Panics(t, func() { NewKafkaClientInstanceWithConfig(config1) })
 
-	config2 := &paramtable.KafkaConfig{Address: "addr", SaslUsername: "username"}
+	config2 := &paramtable.KafkaConfig{
+		Address:      paramtable.ParamItem{Formatter: func(originValue string) string { return "addr" }},
+		SaslUsername: paramtable.ParamItem{Formatter: func(originValue string) string { return "username" }},
+	}
 	assert.Panics(t, func() { NewKafkaClientInstanceWithConfig(config2) })
 
-	config3 := &paramtable.KafkaConfig{Address: "addr", SaslUsername: "username", SaslPassword: "password"}
+	config3 := &paramtable.KafkaConfig{
+		Address:      paramtable.ParamItem{Formatter: func(originValue string) string { return "addr" }},
+		SaslUsername: paramtable.ParamItem{Formatter: func(originValue string) string { return "username" }},
+		SaslPassword: paramtable.ParamItem{Formatter: func(originValue string) string { return "password" }},
+	}
 	client := NewKafkaClientInstanceWithConfig(config3)
 	assert.NotNil(t, client)
 	assert.NotNil(t, client.basicConfig)
 
 	consumerConfig := make(map[string]string)
 	consumerConfig["client.id"] = "dc"
-	config4 := &paramtable.KafkaConfig{Address: "addr", SaslUsername: "username", SaslPassword: "password", ConsumerExtraConfig: consumerConfig}
+	config4 := &paramtable.KafkaConfig{
+		Address:             paramtable.ParamItem{Formatter: func(originValue string) string { return "addr" }},
+		SaslUsername:        paramtable.ParamItem{Formatter: func(originValue string) string { return "username" }},
+		SaslPassword:        paramtable.ParamItem{Formatter: func(originValue string) string { return "password" }},
+		ConsumerExtraConfig: paramtable.ParamGroup{GetFunc: func() map[string]string { return consumerConfig }},
+	}
 	client4 := NewKafkaClientInstanceWithConfig(config4)
 	assert.Equal(t, "dc", client4.consumerConfig["client.id"])
 
@@ -322,7 +337,12 @@ func TestKafkaClient_NewKafkaClientInstanceWithConfig(t *testing.T) {
 
 	producerConfig := make(map[string]string)
 	producerConfig["client.id"] = "dc1"
-	config5 := &paramtable.KafkaConfig{Address: "addr", SaslUsername: "username", SaslPassword: "password", ProducerExtraConfig: producerConfig}
+	config5 := &paramtable.KafkaConfig{
+		Address:             paramtable.ParamItem{Formatter: func(originValue string) string { return "addr" }},
+		SaslUsername:        paramtable.ParamItem{Formatter: func(originValue string) string { return "username" }},
+		SaslPassword:        paramtable.ParamItem{Formatter: func(originValue string) string { return "password" }},
+		ProducerExtraConfig: paramtable.ParamGroup{GetFunc: func() map[string]string { return producerConfig }},
+	}
 	client5 := NewKafkaClientInstanceWithConfig(config5)
 	assert.Equal(t, "dc1", client5.producerConfig["client.id"])
 

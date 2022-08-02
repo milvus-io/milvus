@@ -180,7 +180,7 @@ func (s *Server) init() error {
 
 	if s.newDataCoordClient != nil {
 		log.Debug("RootCoord start to create DataCoord client")
-		dataCoord := s.newDataCoordClient(rootcoord.Params.EtcdCfg.MetaRootPath, s.etcdCli)
+		dataCoord := s.newDataCoordClient(rootcoord.Params.EtcdCfg.MetaRootPath.GetValue(), s.etcdCli)
 		if err := s.rootCoord.SetDataCoord(s.ctx, dataCoord); err != nil {
 			panic(err)
 		}
@@ -188,7 +188,7 @@ func (s *Server) init() error {
 	}
 	if s.newIndexCoordClient != nil {
 		log.Debug("RootCoord start to create IndexCoord client")
-		indexCoord := s.newIndexCoordClient(rootcoord.Params.EtcdCfg.MetaRootPath, s.etcdCli)
+		indexCoord := s.newIndexCoordClient(rootcoord.Params.EtcdCfg.MetaRootPath.GetValue(), s.etcdCli)
 		if err := s.rootCoord.SetIndexCoord(indexCoord); err != nil {
 			panic(err)
 		}
@@ -196,7 +196,7 @@ func (s *Server) init() error {
 	}
 	if s.newQueryCoordClient != nil {
 		log.Debug("RootCoord start to create QueryCoord client")
-		queryCoord := s.newQueryCoordClient(rootcoord.Params.EtcdCfg.MetaRootPath, s.etcdCli)
+		queryCoord := s.newQueryCoordClient(rootcoord.Params.EtcdCfg.MetaRootPath.GetValue(), s.etcdCli)
 		if err := s.rootCoord.SetQueryCoord(queryCoord); err != nil {
 			panic(err)
 		}

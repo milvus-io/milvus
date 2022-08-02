@@ -917,7 +917,7 @@ func TestServer_watchQueryCoord(t *testing.T) {
 	Params.Init()
 	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.Nil(t, err)
-	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
+	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath.GetValue())
 	assert.NotNil(t, etcdKV)
 	factory := dependency.NewDefaultFactory(true)
 	svr := CreateServer(context.TODO(), factory)
@@ -2937,7 +2937,7 @@ func TestDataCoord_Import(t *testing.T) {
 
 	t.Run("no datanode available", func(t *testing.T) {
 		svr := newTestServer(t, nil)
-		Params.MinioCfg.Address = "minio:9000"
+		Params.BaseTable.Save("minio.address", "minio:9000")
 		resp, err := svr.Import(svr.ctx, &datapb.ImportTaskRequest{
 			ImportTask: &datapb.ImportTask{
 				CollectionId: 100,
@@ -3188,7 +3188,7 @@ func newTestServer(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 
 	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.Nil(t, err)
-	sessKey := path.Join(Params.EtcdCfg.MetaRootPath, sessionutil.DefaultServiceRoot)
+	sessKey := path.Join(Params.EtcdCfg.MetaRootPath.GetValue(), sessionutil.DefaultServiceRoot)
 	_, err = etcdCli.Delete(context.Background(), sessKey, clientv3.WithPrefix())
 	assert.Nil(t, err)
 
@@ -3227,7 +3227,7 @@ func newTestServerWithMeta(t *testing.T, receiveCh chan any, meta *meta, opts ..
 
 	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.Nil(t, err)
-	sessKey := path.Join(Params.EtcdCfg.MetaRootPath, sessionutil.DefaultServiceRoot)
+	sessKey := path.Join(Params.EtcdCfg.MetaRootPath.GetValue(), sessionutil.DefaultServiceRoot)
 	_, err = etcdCli.Delete(context.Background(), sessKey, clientv3.WithPrefix())
 	assert.Nil(t, err)
 
@@ -3275,15 +3275,15 @@ func newTestServer2(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 
 	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.Nil(t, err)
-	sessKey := path.Join(Params.EtcdCfg.MetaRootPath, sessionutil.DefaultServiceRoot)
+	sessKey := path.Join(Params.EtcdCfg.MetaRootPath.GetValue(), sessionutil.DefaultServiceRoot)
 	_, err = etcdCli.Delete(context.Background(), sessKey, clientv3.WithPrefix())
 	assert.Nil(t, err)
 
-	icSession := sessionutil.NewSession(context.Background(), Params.EtcdCfg.MetaRootPath, etcdCli)
+	icSession := sessionutil.NewSession(context.Background(), Params.EtcdCfg.MetaRootPath.GetValue(), etcdCli)
 	icSession.Init(typeutil.IndexCoordRole, "localhost:31000", true, true)
 	icSession.Register()
 
-	qcSession := sessionutil.NewSession(context.Background(), Params.EtcdCfg.MetaRootPath, etcdCli)
+	qcSession := sessionutil.NewSession(context.Background(), Params.EtcdCfg.MetaRootPath.GetValue(), etcdCli)
 	qcSession.Init(typeutil.QueryCoordRole, "localhost:19532", true, true)
 	qcSession.Register()
 
@@ -3392,7 +3392,7 @@ func Test_initServiceDiscovery(t *testing.T) {
 	})
 	assert.Nil(t, err)
 
-	qcSession := sessionutil.NewSession(context.Background(), Params.EtcdCfg.MetaRootPath, server.etcdCli)
+	qcSession := sessionutil.NewSession(context.Background(), Params.EtcdCfg.MetaRootPath.GetValue(), server.etcdCli)
 	qcSession.Init(typeutil.QueryCoordRole, "localhost:19532", true, true)
 	qcSession.Register()
 	req := &datapb.AcquireSegmentLockRequest{
@@ -3403,7 +3403,7 @@ func Test_initServiceDiscovery(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
 
-	sessKey := path.Join(Params.EtcdCfg.MetaRootPath, sessionutil.DefaultServiceRoot, typeutil.QueryCoordRole)
+	sessKey := path.Join(Params.EtcdCfg.MetaRootPath.GetValue(), sessionutil.DefaultServiceRoot, typeutil.QueryCoordRole)
 	_, err = server.etcdCli.Delete(context.Background(), sessKey, clientv3.WithPrefix())
 	assert.Nil(t, err)
 
@@ -3421,7 +3421,9 @@ func Test_newChunkManagerFactory(t *testing.T) {
 	Params.DataCoordCfg.EnableGarbageCollection = true
 
 	t.Run("err_minio_bad_address", func(t *testing.T) {
-		Params.MinioCfg.Address = "host:9000:bad"
+		os.Setenv("minio.address", "host:9000:bad")
+		defer os.Unsetenv("minio.address")
+		Params.Init()
 		storageCli, err := server.newChunkManagerFactory()
 		assert.Nil(t, storageCli)
 		assert.Error(t, err)
@@ -3454,7 +3456,9 @@ func Test_initGarbageCollection(t *testing.T) {
 	})
 	t.Run("err_minio_bad_address", func(t *testing.T) {
 		Params.CommonCfg.StorageType = "minio"
-		Params.MinioCfg.Address = "host:9000:bad"
+		os.Setenv("minio.address", "host:9000:bad")
+		defer os.Unsetenv("minio.address")
+		Params.Init()
 		storageCli, err := server.newChunkManagerFactory()
 		assert.Nil(t, storageCli)
 		assert.Error(t, err)
@@ -3469,7 +3473,7 @@ func testDataCoordBase(t *testing.T, opts ...Option) *Server {
 
 	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.Nil(t, err)
-	sessKey := path.Join(Params.EtcdCfg.MetaRootPath, sessionutil.DefaultServiceRoot)
+	sessKey := path.Join(Params.EtcdCfg.MetaRootPath.GetValue(), sessionutil.DefaultServiceRoot)
 	_, err = etcdCli.Delete(context.Background(), sessKey, clientv3.WithPrefix())
 	assert.Nil(t, err)
 
