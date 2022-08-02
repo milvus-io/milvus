@@ -28,7 +28,6 @@ import (
 	"time"
 
 	"github.com/minio/minio-go/v7"
-	"github.com/minio/minio-go/v7/pkg/credentials"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
@@ -42,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
@@ -353,39 +353,40 @@ func (s *Server) stopCompactionTrigger() {
 }
 
 func (s *Server) initGarbageCollection() error {
-	var cli *minio.Client
+	var cli storage.ChunkManager
 	var err error
-	if Params.DataCoordCfg.EnableGarbageCollection {
-		var creds *credentials.Credentials
-		if Params.MinioCfg.UseIAM {
-			creds = credentials.NewIAM(Params.MinioCfg.IAMEndpoint)
-		} else {
-			creds = credentials.NewStaticV4(Params.MinioCfg.AccessKeyID, Params.MinioCfg.SecretAccessKey, "")
-		}
-		// TODO: We call minio.New in different places with same procedures to call several functions.
-		// We should abstract this to a focade function to avoid applying changes to only one place.
-		cli, err = minio.New(Params.MinioCfg.Address, &minio.Options{
-			Creds:  creds,
-			Secure: Params.MinioCfg.UseSSL,
-		})
+	if Params.CommonCfg.StorageType == "minio" {
+		chunkManagerFactory := storage.NewChunkManagerFactory("local", "minio",
+			storage.RootPath(Params.LocalStorageCfg.Path),
+			storage.Address(Params.MinioCfg.Address),
+			storage.AccessKeyID(Params.MinioCfg.AccessKeyID),
+			storage.SecretAccessKeyID(Params.MinioCfg.SecretAccessKey),
+			storage.UseSSL(Params.MinioCfg.UseSSL),
+			storage.BucketName(Params.MinioCfg.BucketName),
+			storage.UseIAM(Params.MinioCfg.UseIAM),
+			storage.IAMEndpoint(Params.MinioCfg.IAMEndpoint),
+			storage.CreateBucket(true))
+		cli, err = chunkManagerFactory.NewVectorStorageChunkManager(s.ctx)
 		if err != nil {
-			return fmt.Errorf("failed to create minio client: %v", err)
-		}
-		// retry times shall be two, just to prevent
-		// 1. bucket not exists
-		// 2. bucket is created by other componnent
-		// 3. datacoord try to create but failed with bucket already exists error
-		err = retry.Do(s.ctx, getCheckBucketFn(cli), retry.Attempts(2))
-		if err != nil {
+			log.Error("minio chunk manager init failed", zap.String("error", err.Error()))
 			return err
 		}
+		log.Info("minio chunk manager init success", zap.String("bucketname", Params.MinioCfg.BucketName))
+	} else if Params.CommonCfg.StorageType == "local" {
+		chunkManagerFactory := storage.NewChunkManagerFactory("local", "local",
+			storage.RootPath(Params.LocalStorageCfg.Path))
+		cli, err = chunkManagerFactory.NewVectorStorageChunkManager(s.ctx)
+		if err != nil {
+			log.Error("local chunk manager init failed", zap.String("error", err.Error()))
+			return err
+		}
+		log.Info("local chunk manager init success")
 	}
 
 	s.garbageCollector = newGarbageCollector(s.meta, s.segReferManager, GcOption{
-		cli:        cli,
-		enabled:    Params.DataCoordCfg.EnableGarbageCollection,
-		bucketName: Params.MinioCfg.BucketName,
-		rootPath:   Params.MinioCfg.RootPath,
+		cli:      cli,
+		enabled:  Params.DataCoordCfg.EnableGarbageCollection,
+		rootPath: Params.MinioCfg.RootPath,
 
 		checkInterval:    Params.DataCoordCfg.GCInterval,
 		missingTolerance: Params.DataCoordCfg.GCMissingTolerance,

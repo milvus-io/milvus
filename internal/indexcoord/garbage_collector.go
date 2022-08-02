@@ -109,7 +109,7 @@ func (gc *garbageCollector) recycleUnusedIndexFiles() {
 		case <-ticker.C:
 			prefix := Params.IndexNodeCfg.IndexStorageRootPath + "/"
 			// list dir first
-			keys, err := gc.chunkManager.ListWithPrefix(prefix, false)
+			keys, _, err := gc.chunkManager.ListWithPrefix(prefix, false)
 			if err != nil {
 				log.Error("IndexCoord garbageCollector recycleUnusedIndexFiles list keys from chunk manager failed", zap.Error(err))
 				continue
@@ -146,7 +146,7 @@ func (gc *garbageCollector) recycleUnusedIndexFiles() {
 				for _, file := range indexInfo.IndexFilePaths {
 					filesMap[file] = true
 				}
-				files, err := gc.chunkManager.ListWithPrefix(key, true)
+				files, _, err := gc.chunkManager.ListWithPrefix(key, true)
 				if err != nil {
 					log.Warn("IndexCoord garbageCollector recycleUnusedIndexFiles list files failed",
 						zap.Int64("buildID", buildID), zap.String("prefix", key), zap.Error(err))

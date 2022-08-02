@@ -26,6 +26,7 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
@@ -35,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 )
@@ -644,4 +646,229 @@ func MockSaveSegments(segmentNum int) col2SegmentInfos {
 	saves[defaultCollectionID] = segments
 
 	return saves
+}
+
+type mockKV struct {
+	kv.MetaKv
+	mock.Mock
+}
+
+func (m *mockKV) Save(k, v string) error {
+	args := m.Called(k, v)
+	return args.Error(0)
+}
+
+type mockDataCoord struct {
+	types.DataCoord
+	mock.Mock
+}
+
+func (m *mockDataCoord) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
+	args := m.Called(ctx, req)
+	return args.Get(0).(*datapb.GetSegmentInfoResponse), args.Error(1)
+}
+
+func TestFixSegmentInfoDmlChannel(t *testing.T) {
+
+	t.Run("No flawed segments", func(t *testing.T) {
+		mkv := &mockKV{}
+		dc := &mockDataCoord{}
+
+		meta := &MetaReplica{
+			ctx:             context.Background(),
+			collectionInfos: map[UniqueID]*querypb.CollectionInfo{},
+			dmChannelInfos:  map[string]*querypb.DmChannelWatchInfo{},
+			segmentsInfo:    newSegmentsInfo(mkv),
+			replicas:        NewReplicaInfos(),
+			client:          mkv,
+			dataCoord:       dc,
+		}
+
+		mkv.Test(t)
+		dc.Test(t)
+		meta.segmentsInfo.segmentIDMap[1] = &querypb.SegmentInfo{SegmentID: 1, DmChannel: "dml_channel_01"}
+
+		err := meta.fixSegmentInfoDMChannel()
+		assert.NoError(t, err)
+
+		mkv.Mock.AssertNotCalled(t, "Save", mock.AnythingOfType("string"), mock.AnythingOfType("string"))
+		dc.Mock.AssertNotCalled(t, "GetSegmentInfo", mock.Anything, mock.Anything)
+	})
+
+	t.Run("with flawed segments", func(t *testing.T) {
+		mkv := &mockKV{}
+		dc := &mockDataCoord{}
+
+		meta := &MetaReplica{
+			ctx:             context.Background(),
+			collectionInfos: map[UniqueID]*querypb.CollectionInfo{},
+			dmChannelInfos:  map[string]*querypb.DmChannelWatchInfo{},
+			segmentsInfo:    newSegmentsInfo(mkv),
+			replicas:        NewReplicaInfos(),
+			client:          mkv,
+			dataCoord:       dc,
+		}
+
+		mkv.Test(t)
+		dc.Test(t)
+		meta.segmentsInfo.segmentIDMap[1] = &querypb.SegmentInfo{SegmentID: 1, DmChannel: ""}
+
+		mkv.On("Save", mock.Anything, mock.Anything).Return(nil)
+		dc.On("GetSegmentInfo", context.Background(), &datapb.GetSegmentInfoRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_SegmentInfo,
+			},
+			SegmentIDs:       []UniqueID{1},
+			IncludeUnHealthy: true,
+		}).Return(&datapb.GetSegmentInfoResponse{
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			Infos: []*datapb.SegmentInfo{
+				{ID: 1, InsertChannel: "dml_channel_01"},
+			},
+		}, nil)
+
+		err := meta.fixSegmentInfoDMChannel()
+		assert.NoError(t, err)
+
+		info, err := meta.getSegmentInfoByID(1)
+		assert.NoError(t, err)
+		assert.NotEqual(t, "", info.DmChannel)
+	})
+
+	t.Run("GetSegmentInfo_error", func(t *testing.T) {
+		mkv := &mockKV{}
+		dc := &mockDataCoord{}
+
+		meta := &MetaReplica{
+			ctx:             context.Background(),
+			collectionInfos: map[UniqueID]*querypb.CollectionInfo{},
+			dmChannelInfos:  map[string]*querypb.DmChannelWatchInfo{},
+			segmentsInfo:    newSegmentsInfo(mkv),
+			replicas:        NewReplicaInfos(),
+			client:          mkv,
+			dataCoord:       dc,
+		}
+
+		mkv.Test(t)
+		dc.Test(t)
+		meta.segmentsInfo.segmentIDMap[1] = &querypb.SegmentInfo{SegmentID: 1, DmChannel: ""}
+
+		mkv.On("Save", mock.Anything, mock.Anything).Return(nil)
+		dc.On("GetSegmentInfo", context.Background(), &datapb.GetSegmentInfoRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_SegmentInfo,
+			},
+			SegmentIDs:       []UniqueID{1},
+			IncludeUnHealthy: true,
+		}).Return((*datapb.GetSegmentInfoResponse)(nil), errors.New("mock"))
+
+		err := meta.fixSegmentInfoDMChannel()
+		assert.Error(t, err)
+	})
+
+	t.Run("GetSegmentInfo_fail", func(t *testing.T) {
+		mkv := &mockKV{}
+		dc := &mockDataCoord{}
+
+		meta := &MetaReplica{
+			ctx:             context.Background(),
+			collectionInfos: map[UniqueID]*querypb.CollectionInfo{},
+			dmChannelInfos:  map[string]*querypb.DmChannelWatchInfo{},
+			segmentsInfo:    newSegmentsInfo(mkv),
+			replicas:        NewReplicaInfos(),
+			client:          mkv,
+			dataCoord:       dc,
+		}
+
+		mkv.Test(t)
+		dc.Test(t)
+		meta.segmentsInfo.segmentIDMap[1] = &querypb.SegmentInfo{SegmentID: 1, DmChannel: ""}
+
+		mkv.On("Save", mock.Anything, mock.Anything).Return(nil)
+		dc.On("GetSegmentInfo", context.Background(), &datapb.GetSegmentInfoRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_SegmentInfo,
+			},
+			SegmentIDs:       []UniqueID{1},
+			IncludeUnHealthy: true,
+		}).Return(&datapb.GetSegmentInfoResponse{
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_SegmentNotFound},
+		}, nil)
+
+		err := meta.fixSegmentInfoDMChannel()
+		assert.Error(t, err)
+	})
+
+	t.Run("segments patched not found", func(t *testing.T) {
+		mkv := &mockKV{}
+		dc := &mockDataCoord{}
+
+		meta := &MetaReplica{
+			ctx:             context.Background(),
+			collectionInfos: map[UniqueID]*querypb.CollectionInfo{},
+			dmChannelInfos:  map[string]*querypb.DmChannelWatchInfo{},
+			segmentsInfo:    newSegmentsInfo(mkv),
+			replicas:        NewReplicaInfos(),
+			client:          mkv,
+			dataCoord:       dc,
+		}
+
+		mkv.Test(t)
+		dc.Test(t)
+		meta.segmentsInfo.segmentIDMap[1] = &querypb.SegmentInfo{SegmentID: 1, DmChannel: ""}
+
+		mkv.On("Save", mock.Anything, mock.Anything).Return(nil)
+		dc.On("GetSegmentInfo", context.Background(), &datapb.GetSegmentInfoRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_SegmentInfo,
+			},
+			SegmentIDs:       []UniqueID{1},
+			IncludeUnHealthy: true,
+		}).Return(&datapb.GetSegmentInfoResponse{
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			Infos: []*datapb.SegmentInfo{
+				{ID: 2, InsertChannel: "dml_channel_01"},
+			},
+		}, nil)
+
+		err := meta.fixSegmentInfoDMChannel()
+		assert.Error(t, err)
+	})
+
+	t.Run("save patched segment failed", func(t *testing.T) {
+		mkv := &mockKV{}
+		dc := &mockDataCoord{}
+
+		meta := &MetaReplica{
+			ctx:             context.Background(),
+			collectionInfos: map[UniqueID]*querypb.CollectionInfo{},
+			dmChannelInfos:  map[string]*querypb.DmChannelWatchInfo{},
+			segmentsInfo:    newSegmentsInfo(mkv),
+			replicas:        NewReplicaInfos(),
+			client:          mkv,
+			dataCoord:       dc,
+		}
+
+		mkv.Test(t)
+		dc.Test(t)
+		meta.segmentsInfo.segmentIDMap[1] = &querypb.SegmentInfo{SegmentID: 1, DmChannel: ""}
+
+		mkv.On("Save", mock.Anything, mock.Anything).Return(errors.New("mocked"))
+		dc.On("GetSegmentInfo", context.Background(), &datapb.GetSegmentInfoRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_SegmentInfo,
+			},
+			SegmentIDs:       []UniqueID{1},
+			IncludeUnHealthy: true,
+		}).Return(&datapb.GetSegmentInfoResponse{
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			Infos: []*datapb.SegmentInfo{
+				{ID: 1, InsertChannel: "dml_channel_01"},
+			},
+		}, nil)
+
+		err := meta.fixSegmentInfoDMChannel()
+		assert.Error(t, err)
+	})
+
 }

@@ -7,9 +7,12 @@ from common.cus_resource_opts import CustomResourceOperations as CusResource
 
 template_yaml = os.path.join(os.path.dirname(__file__), 'template/default.yaml')
 MILVUS_GRP = 'milvus.io'
-MILVUS_VER = 'v1alpha1'
-MILVUS_PLURAL = 'milvusclusters'
-MILVUS_KIND = 'MilvusCluster'
+# MILVUS_VER = 'v1alpha1'
+MILVUS_VER = 'v1beta1'
+# MILVUS_PLURAL = 'milvusclusters'
+MILVUS_PLURAL = 'milvuses'
+# MILVUS_KIND = 'MilvusCluster'
+MILVUS_KIND = 'Milvus'
 
 
 class MilvusOperator(object):

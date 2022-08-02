@@ -34,6 +34,7 @@ type PrimaryKey interface {
 	MarshalJSON() ([]byte, error)
 	UnmarshalJSON(data []byte) error
 	SetValue(interface{}) error
+	GetValue() interface{}
 	Type() schemapb.DataType
 }
 
@@ -147,6 +148,10 @@ func (ip *Int64PrimaryKey) Type() schemapb.DataType {
 	return schemapb.DataType_Int64
 }
 
+func (ip *Int64PrimaryKey) GetValue() interface{} {
+	return ip.Value
+}
+
 type BaseStringPrimaryKey struct {
 	Value string
 }
@@ -197,6 +202,10 @@ func (sp *BaseStringPrimaryKey) SetValue(data interface{}) error {
 
 	sp.Value = value
 	return nil
+}
+
+func (sp *BaseStringPrimaryKey) GetValue() interface{} {
+	return sp.Value
 }
 
 type VarCharPrimaryKey struct {

@@ -17,7 +17,6 @@ pipeline {
     }
     agent {
             kubernetes {
-                label 'milvus-e2e-test-pipeline'
                 inheritFrom 'default'
                 defaultContainer 'main'
                 yamlFile 'ci/jenkins/pod/rte.yaml'
@@ -114,6 +113,7 @@ pipeline {
                                             withCredentials([usernamePassword(credentialsId: "${env.CI_DOCKER_CREDENTIAL_ID}", usernameVariable: 'CI_REGISTRY_USERNAME', passwordVariable: 'CI_REGISTRY_PASSWORD')]){
                                                 sh """
                                                 MILVUS_CLUSTER_ENABLED=${clusterEnabled} \
+                                                MILVUS_HELM_REPO="http://nexus-nexus-repository-manager.nexus:8081/repository/milvus-proxy" \
                                                 TAG=${imageTag}\
                                                 ./e2e-k8s.sh \
                                                 --skip-export-logs \
@@ -145,10 +145,9 @@ pipeline {
                         }
                         agent {
                                 kubernetes {
-                                    label 'milvus-e2e-test-pr'
                                     inheritFrom 'default'
                                     defaultContainer 'main'
-                                    yamlFile 'ci/jenkins/pod/rte.yaml'
+                                    yamlFile 'ci/jenkins/pod/e2e.yaml'
                                     customWorkspace '/home/jenkins/agent/workspace'
                                 }
                         }

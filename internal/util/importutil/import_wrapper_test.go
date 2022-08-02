@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
@@ -58,8 +59,8 @@ func (mc *MockChunkManager) MultiRead(filePaths []string) ([][]byte, error) {
 	return nil, nil
 }
 
-func (mc *MockChunkManager) ListWithPrefix(prefix string, recursive bool) ([]string, error) {
-	return nil, nil
+func (mc *MockChunkManager) ListWithPrefix(prefix string, recursive bool) ([]string, []time.Time, error) {
+	return nil, nil, nil
 }
 
 func (mc *MockChunkManager) ReadWithPrefix(prefix string) ([]string, [][]byte, error) {

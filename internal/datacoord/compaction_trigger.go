@@ -253,7 +253,12 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) {
 				continue
 			}
 
-			log.Info("time cost of generating global compaction", zap.Int64("planID", plan.PlanID), zap.Any("time cost", time.Since(start).Milliseconds()),
+			segIDs := make(map[int64][]*datapb.FieldBinlog, len(plan.SegmentBinlogs))
+			for _, seg := range plan.SegmentBinlogs {
+				segIDs[seg.SegmentID] = seg.Deltalogs
+			}
+
+			log.Info("time cost of generating global compaction", zap.Any("segID2DeltaLogs", segIDs), zap.Int64("planID", plan.PlanID), zap.Any("time cost", time.Since(start).Milliseconds()),
 				zap.Int64("collectionID", signal.collectionID), zap.String("channel", group.channelName), zap.Int64("partitionID", group.partitionID))
 		}
 	}
