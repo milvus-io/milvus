@@ -1,4 +1,16 @@
 ---
+- name: Install Packages
+  yum: name={{ item }} state=latest update_cache=yes
+  with_items:
+    - ntp
+    - tcpdump
+    - python3
+    - wget
+    - openssl
+    - curl
+    - python3-pip
+  when: ansible_distribution == 'CentOS' or ansible_distribution == 'Red Hat Enterprise Linux'
+
 - name: Install Packages 
   apt: name={{ item }} state=latest update_cache=yes
   with_items:
@@ -9,5 +21,4 @@
     - openssl
     - curl
     - python3-pip
-
-
+  when: ansible_distribution == 'Debian' or ansible_distribution == 'Ubuntu'
