@@ -251,7 +251,7 @@ func TestKafkaClient_ConsumeFromLatest(t *testing.T) {
 }
 
 func TestKafkaClient_EarliestMessageID(t *testing.T) {
-	kafkaAddress, _ := Params.Load("_KafkaBrokerList")
+	kafkaAddress := Params.Get("kafka.brokerList")
 	kc := NewKafkaClientInstance(kafkaAddress)
 	defer kc.Close()
 
@@ -260,7 +260,7 @@ func TestKafkaClient_EarliestMessageID(t *testing.T) {
 }
 
 func TestKafkaClient_MsgSerializAndDeserialize(t *testing.T) {
-	kafkaAddress, _ := Params.Load("_KafkaBrokerList")
+	kafkaAddress := Params.Get("kafka.brokerList")
 	kc := NewKafkaClientInstance(kafkaAddress)
 	defer kc.Close()
 
@@ -292,7 +292,7 @@ func TestKafkaClient_NewKafkaClientInstanceWithConfig(t *testing.T) {
 }
 
 func createKafkaClient(t *testing.T) *kafkaClient {
-	kafkaAddress, _ := Params.Load("_KafkaBrokerList")
+	kafkaAddress := Params.Get("kafka.brokerList")
 	kc := NewKafkaClientInstance(kafkaAddress)
 	assert.NotNil(t, kc)
 	return kc

@@ -142,7 +142,7 @@ func testKafkaConsumerProduceData(t *testing.T, topic string, data []int) {
 }
 
 func createConfig(groupID string) *kafka.ConfigMap {
-	kafkaAddress, _ := Params.Load("_KafkaBrokerList")
+	kafkaAddress := Params.Get("kafka.brokerList")
 	return &kafka.ConfigMap{
 		"bootstrap.servers":        kafkaAddress,
 		"group.id":                 groupID,

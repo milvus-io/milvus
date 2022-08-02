@@ -92,8 +92,11 @@ func TestBaseTable_Pulsar(t *testing.T) {
 	os.Setenv("PULSAR_ADDRESS", "pulsar://localhost:6650")
 	baseParams.Init()
 
-	address := baseParams.Get("_PulsarAddress")
+	address := baseParams.Get("pulsar.address")
 	assert.Equal(t, "pulsar://localhost:6650", address)
+
+	port := baseParams.Get("pulsar.port")
+	assert.NotEqual(t, "", port)
 }
 
 // func TestBaseTable_ConfDir(t *testing.T) {
