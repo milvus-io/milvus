@@ -18,6 +18,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -60,6 +61,26 @@ func (m *Manager) GetConfig(key string) (string, error) {
 		return "", fmt.Errorf("key not found: %s", key)
 	}
 	return m.getConfigValueBySource(realKey, sourceName)
+}
+
+//GetConfigsByPattern returns key values that matched pattern
+func (m *Manager) GetConfigsByPattern(pattern string) map[string]string {
+	m.RLock()
+	defer m.RLock()
+	matchedConfig := make(map[string]string)
+	pattern = strings.ToLower(pattern)
+	for key, value := range m.keySourceMap {
+		result := strings.HasPrefix(key, pattern)
+
+		if result {
+			sValue, err := m.getConfigValueBySource(key, value)
+			if err != nil {
+				continue
+			}
+			matchedConfig[key] = sValue
+		}
+	}
+	return matchedConfig
 }
 
 // Configs returns all the key values
