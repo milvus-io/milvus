@@ -86,7 +86,6 @@ func (gp *BaseTable) GlobalInitWithYaml(yaml string) {
 
 // Init initializes the param table.
 func (gp *BaseTable) Init() {
-	var err error
 	formatter := func(key string) string {
 		ret := strings.ToLower(key)
 		ret = strings.TrimPrefix(ret, "milvus.")
@@ -95,6 +94,13 @@ func (gp *BaseTable) Init() {
 		ret = strings.ReplaceAll(ret, ".", "")
 		return ret
 	}
+	gp.initConfigsFromLocal(formatter)
+	gp.initConfigsFromRemote(formatter)
+	gp.InitLogCfg()
+}
+
+func (gp *BaseTable) initConfigsFromLocal(formatter func(key string) string) {
+	var err error
 	gp.mgr, err = config.Init(config.WithEnvSource(formatter))
 	if err != nil {
 		return
@@ -107,8 +113,9 @@ func (gp *BaseTable) Init() {
 		log.Warn("init baseTable with file failed", zap.String("configFile", configFilePath), zap.Error(err))
 		return
 	}
-	defer gp.InitLogCfg()
+}
 
+func (gp *BaseTable) initConfigsFromRemote(formatter func(key string) string) {
 	endpoints, err := gp.mgr.GetConfig("etcd.endpoints")
 	if err != nil {
 		log.Info("cannot find etcd.endpoints")
@@ -119,6 +126,8 @@ func (gp *BaseTable) Init() {
 		log.Info("cannot find etcd.rootPath")
 		return
 	}
+
+	configFilePath := gp.configDir + "/" + defaultYaml
 	gp.mgr, err = config.Init(config.WithEnvSource(formatter),
 		config.WithFilesSource(configFilePath),
 		config.WithEtcdSource(&config.EtcdInfo{
@@ -400,125 +409,3 @@ func (gp *BaseTable) SetLogger(id UniqueID) {
 		gp.LogCfgFunc(gp.Log)
 	}
 }
-
-// func (gp *BaseTable) loadKafkaConfig() {
-// 	brokerList := os.Getenv("KAFKA_BROKER_LIST")
-// 	if brokerList == "" {
-// 		brokerList = gp.Get("kafka.brokerList")
-// 	}
-// 	gp.Save("_KafkaBrokerList", brokerList)
-// }
-
-// func (gp *BaseTable) loadPulsarConfig() {
-// 	pulsarAddress := os.Getenv("PULSAR_ADDRESS")
-// 	if pulsarAddress == "" {
-// 		pulsarHost := gp.Get("pulsar.address")
-// 		port := gp.Get("pulsar.port")
-// 		if len(pulsarHost) != 0 && len(port) != 0 {
-// 			pulsarAddress = "pulsar://" + pulsarHost + ":" + port
-// 		}
-// 	}
-// 	gp.Save("_PulsarAddress", pulsarAddress)
-
-// 	// parse pulsar address to find the host
-// 	pulsarURL, err := url.ParseRequestURI(pulsarAddress)
-// 	if err != nil {
-// 		gp.Save("_PulsarWebAddress", "")
-// 		log.Info("failed to parse pulsar config, assume pulsar not used", zap.Error(err))
-// 		return
-// 	}
-// 	webport := gp.LoadWithDefault("pulsar.webport", "80")
-// 	pulsarWebAddress := "http://" + pulsarURL.Hostname() + ":" + webport
-// 	gp.Save("_PulsarWebAddress", pulsarWebAddress)
-// 	log.Info("Pulsar config", zap.String("pulsar url", pulsarAddress), zap.String("pulsar web url", pulsarWebAddress))
-// }
-
-// func (gp *BaseTable) loadRocksMQConfig() {
-// 	rocksmqPath := os.Getenv("ROCKSMQ_PATH")
-// 	if rocksmqPath == "" {
-// 		rocksmqPath = gp.Get("rocksmq.path")
-// 	}
-// 	gp.Save("_RocksmqPath", rocksmqPath)
-// }
-
-// func (gp *BaseTable) loadMQConfig() {
-// 	gp.loadPulsarConfig()
-// 	gp.loadKafkaConfig()
-// 	gp.loadRocksMQConfig()
-// }
-
-// func (gp *BaseTable) loadEtcdConfig() {
-// 	etcdEndpoints := os.Getenv("ETCD_ENDPOINTS")
-// 	if etcdEndpoints == "" {
-// 		etcdEndpoints = gp.LoadWithDefault("etcd.endpoints", DefaultEtcdEndpoints)
-// 	}
-// 	gp.Save("_EtcdEndpoints", etcdEndpoints)
-// }
-
-// func (gp *BaseTable) loadMinioConfig() {
-// 	minioAddress := os.Getenv("MINIO_ADDRESS")
-// 	if minioAddress == "" {
-// 		minioHost := gp.LoadWithDefault("minio.address", DefaultMinioHost)
-// 		port := gp.LoadWithDefault("minio.port", DefaultMinioPort)
-// 		minioAddress = minioHost + ":" + port
-// 	}
-// 	gp.Save("_MinioAddress", minioAddress)
-
-// 	minioAccessKey := os.Getenv("MINIO_ACCESS_KEY")
-// 	if minioAccessKey == "" {
-// 		minioAccessKey = gp.LoadWithDefault("minio.accessKeyID", DefaultMinioAccessKey)
-// 	}
-// 	gp.Save("_MinioAccessKeyID", minioAccessKey)
-
-// 	minioSecretKey := os.Getenv("MINIO_SECRET_KEY")
-// 	if minioSecretKey == "" {
-// 		minioSecretKey = gp.LoadWithDefault("minio.secretAccessKey", DefaultMinioSecretAccessKey)
-// 	}
-// 	gp.Save("_MinioSecretAccessKey", minioSecretKey)
-
-// 	minioUseSSL := os.Getenv("MINIO_USE_SSL")
-// 	if minioUseSSL == "" {
-// 		minioUseSSL = gp.LoadWithDefault("minio.useSSL", DefaultMinioUseSSL)
-// 	}
-// 	gp.Save("_MinioUseSSL", minioUseSSL)
-
-// 	minioBucketName := os.Getenv("MINIO_BUCKET_NAME")
-// 	if minioBucketName == "" {
-// 		minioBucketName = gp.LoadWithDefault("minio.bucketName", DefaultMinioBucketName)
-// 	}
-// 	gp.Save("_MinioBucketName", minioBucketName)
-
-// 	minioUseIAM := os.Getenv("MINIO_USE_IAM")
-// 	if minioUseIAM == "" {
-// 		minioUseIAM = gp.LoadWithDefault("minio.useIAM", DefaultMinioUseIAM)
-// 	}
-// 	gp.Save("_MinioUseIAM", minioUseIAM)
-
-// 	minioIAMEndpoint := os.Getenv("MINIO_IAM_ENDPOINT")
-// 	if minioIAMEndpoint == "" {
-// 		minioIAMEndpoint = gp.LoadWithDefault("minio.iamEndpoint", DefaultMinioIAMEndpoint)
-// 	}
-// 	gp.Save("_MinioIAMEndpoint", minioIAMEndpoint)
-// }
-
-// func (gp *BaseTable) loadDataNodeConfig() {
-// 	insertBufferFlushSize := os.Getenv("DATA_NODE_IBUFSIZE")
-// 	if insertBufferFlushSize == "" {
-// 		insertBufferFlushSize = gp.LoadWithDefault("datanode.flush.insertBufSize", DefaultInsertBufferSize)
-// 	}
-// 	gp.Save("_DATANODE_INSERTBUFSIZE", insertBufferFlushSize)
-// }
-
-// func (gp *BaseTable) loadOtherEnvs() {
-// 	// try to load environment start with ENV_PREFIX
-// 	for _, e := range os.Environ() {
-// 		parts := strings.SplitN(e, "=", 2)
-// 		if strings.Contains(parts[0], DefaultEnvPrefix) {
-// 			parts := strings.SplitN(e, "=", 2)
-// 			// remove the ENV PREFIX and use the rest as key
-// 			keyParts := strings.SplitAfterN(parts[0], ".", 2)
-// 			// mem kv throw no errors
-// 			gp.Save(keyParts[1], parts[1])
-// 		}
-// 	}
-// }

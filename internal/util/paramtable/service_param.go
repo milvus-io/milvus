@@ -220,17 +220,23 @@ func (p *PulsarConfig) init(base *BaseTable) {
 }
 
 func (p *PulsarConfig) initAddress() {
-	addr := p.Base.LoadWithDefault("pulsar.address", "localhost")
-	// for compatible
-	if strings.Contains(addr, ":") {
-		p.Address = addr
-	} else {
-		port := p.Base.LoadWithDefault("pulsar.port", "6650")
-		p.Address = "pulsar://" + addr + ":" + port
+	pulsarHost := p.Base.LoadWithDefault("pulsar.address", "")
+	if strings.Contains(pulsarHost, ":") {
+		p.Address = pulsarHost
+		return
+	}
+
+	port := p.Base.LoadWithDefault("pulsar.port", "")
+	if len(pulsarHost) != 0 && len(port) != 0 {
+		p.Address = "pulsar://" + pulsarHost + ":" + port
 	}
 }
 
 func (p *PulsarConfig) initWebAddress() {
+	if p.Address == "" {
+		return
+	}
+
 	pulsarURL, err := url.ParseRequestURI(p.Address)
 	if err != nil {
 		p.WebAddress = ""
@@ -358,7 +364,7 @@ func (p *MinioConfig) initAddress() {
 }
 
 func (p *MinioConfig) initAccessKeyID() {
-	keyID, err := p.Base.Load("_MinioAccessKeyID")
+	keyID, err := p.Base.Load("minio.accessKeyID")
 	if err != nil {
 		panic(err)
 	}
@@ -366,7 +372,7 @@ func (p *MinioConfig) initAccessKeyID() {
 }
 
 func (p *MinioConfig) initSecretAccessKey() {
-	key, err := p.Base.Load("_MinioSecretAccessKey")
+	key, err := p.Base.Load("minio.secretAccessKey")
 	if err != nil {
 		panic(err)
 	}
@@ -374,7 +380,7 @@ func (p *MinioConfig) initSecretAccessKey() {
 }
 
 func (p *MinioConfig) initUseSSL() {
-	usessl, err := p.Base.Load("_MinioUseSSL")
+	usessl, err := p.Base.Load("minio.useSSL")
 	if err != nil {
 		panic(err)
 	}
@@ -382,7 +388,7 @@ func (p *MinioConfig) initUseSSL() {
 }
 
 func (p *MinioConfig) initBucketName() {
-	bucketName, err := p.Base.Load("_MinioBucketName")
+	bucketName, err := p.Base.Load("minio.bucketName")
 	if err != nil {
 		panic(err)
 	}

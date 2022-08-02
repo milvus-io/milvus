@@ -32,7 +32,7 @@ import (
 )
 
 func TestPulsarConsumer_Subscription(t *testing.T) {
-	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	pulsarAddress := getPulsarAddress()
 	pc, err := NewClient(pulsar.ClientOptions{URL: pulsarAddress})
 	assert.Nil(t, err)
 	defer pc.Close()
@@ -64,7 +64,7 @@ func Test_PatchEarliestMessageID(t *testing.T) {
 }
 
 func TestComsumeCompressedMessage(t *testing.T) {
-	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	pulsarAddress := getPulsarAddress()
 	pc, err := NewClient(pulsar.ClientOptions{URL: pulsarAddress})
 	assert.Nil(t, err)
 	defer pc.Close()
@@ -112,7 +112,7 @@ func TestComsumeCompressedMessage(t *testing.T) {
 }
 
 func TestPulsarConsumer_Close(t *testing.T) {
-	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	pulsarAddress := getPulsarAddress()
 	pc, err := NewClient(pulsar.ClientOptions{URL: pulsarAddress})
 	assert.Nil(t, err)
 
@@ -139,7 +139,7 @@ func TestPulsarConsumer_Close(t *testing.T) {
 func TestPulsarClientCloseUnsubscribeError(t *testing.T) {
 	topic := "TestPulsarClientCloseUnsubscribeError"
 	subName := "test"
-	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	pulsarAddress := getPulsarAddress()
 
 	client, err := pulsar.NewClient(pulsar.ClientOptions{URL: pulsarAddress})
 	defer client.Close()
@@ -191,7 +191,7 @@ func TestPulsarClientCloseUnsubscribeError(t *testing.T) {
 func TestPulsarClientUnsubscribeTwice(t *testing.T) {
 	topic := "TestPulsarClientUnsubscribeTwice"
 	subName := "test"
-	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	pulsarAddress := getPulsarAddress()
 
 	client, err := pulsar.NewClient(pulsar.ClientOptions{URL: pulsarAddress})
 	defer client.Close()

@@ -27,7 +27,7 @@ import (
 )
 
 func TestPulsarProducer(t *testing.T) {
-	pulsarAddress, _ := Params.Load("_PulsarAddress")
+	pulsarAddress := getPulsarAddress()
 	pc, err := NewClient(pulsar.ClientOptions{URL: pulsarAddress})
 	defer pc.Close()
 	assert.NoError(t, err)
