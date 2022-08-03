@@ -395,15 +395,11 @@ type rootCoordConfig struct {
 	Address string
 	Port    int
 
-	DmlChannelNum                   int64
-	MaxPartitionNum                 int64
-	MinSegmentSizeToEnableIndex     int64
-	ImportTaskExpiration            float64
-	ImportTaskRetention             float64
-	ImportSegmentStateCheckInterval float64
-	ImportSegmentStateWaitLimit     float64
-	ImportIndexCheckInterval        float64
-	ImportIndexWaitLimit            float64
+	DmlChannelNum               int64
+	MaxPartitionNum             int64
+	MinSegmentSizeToEnableIndex int64
+	ImportTaskExpiration        float64
+	ImportTaskRetention         float64
 
 	// --- ETCD Path ---
 	ImportTaskSubPath string
@@ -419,10 +415,6 @@ func (p *rootCoordConfig) init(base *BaseTable) {
 	p.MinSegmentSizeToEnableIndex = p.Base.ParseInt64WithDefault("rootCoord.minSegmentSizeToEnableIndex", 1024)
 	p.ImportTaskExpiration = p.Base.ParseFloatWithDefault("rootCoord.importTaskExpiration", 15*60)
 	p.ImportTaskRetention = p.Base.ParseFloatWithDefault("rootCoord.importTaskRetention", 24*60*60)
-	p.ImportSegmentStateCheckInterval = p.Base.ParseFloatWithDefault("rootCoord.importSegmentStateCheckInterval", 10)
-	p.ImportSegmentStateWaitLimit = p.Base.ParseFloatWithDefault("rootCoord.importSegmentStateWaitLimit", 60)
-	p.ImportIndexCheckInterval = p.Base.ParseFloatWithDefault("rootCoord.importIndexCheckInterval", 10)
-	p.ImportIndexWaitLimit = p.Base.ParseFloatWithDefault("rootCoord.importIndexWaitLimit", 10*60)
 	p.ImportTaskSubPath = "importtask"
 }
 

@@ -96,14 +96,6 @@ rootCoord:
   # seconds (24 hours).
   # Note: If default value is to be changed, change also the default in: internal/util/paramtable/component_param.go
   importTaskRetention: 86400
-  # (in seconds) During index building phase of an import task, Milvus will check the building status of a task's
-  # segments' indices every `importIndexCheckInterval` seconds. Default 300 seconds (5 minutes).
-  # Note: If default value is to be changed, change also the default in: internal/util/paramtable/component_param.go
-  importIndexCheckInterval: 300
-  # (in seconds) Maximum time to wait before pushing flushed segments online (make them searchable) during importing.
-  # Default 1200 seconds (20 minutes).
-  # Note: If default value is to be changed, change also the default in: internal/util/paramtable/component_param.go
-  importIndexWaitLimit: 1200
 
 # Related configuration of proxy, used to validate client requests and reduce the returned results.
 proxy:

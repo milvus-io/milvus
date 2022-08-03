@@ -111,22 +111,6 @@ rootCoord:
   # seconds (24 hours).
   # Note: If default value is to be changed, change also the default in: internal/util/paramtable/component_param.go
   importTaskRetention: 86400
-  # (in seconds) Check an import task's segment loading state in queryNodes every `importSegmentStateCheckInterval`
-  # seconds. Default 10 seconds.
-  # Note: If default value is to be changed, change also the default in: internal/util/paramtable/component_param.go
-  importSegmentStateCheckInterval: 10
-  # (in seconds) Maximum time to wait for segments in a single import task to be loaded in queryNodes.
-  # Default 60 seconds (1 minute).
-  # Note: If default value is to be changed, change also the default in: internal/util/paramtable/component_param.go
-  importSegmentStateWaitLimit: 60
-  # (in seconds) Check the building status of a task's segments' indices every `importIndexCheckInterval` seconds.
-  # Default 10 seconds.
-  # Note: If default value is to be changed, change also the default in: internal/util/paramtable/component_param.go
-  importIndexCheckInterval: 10
-  # (in seconds) Maximum time to wait for indices to be built on a single import task's segments.
-  # Default 600 seconds (10 minutes).
-  # Note: If default value is to be changed, change also the default in: internal/util/paramtable/component_param.go
-  importIndexWaitLimit: 600
 
 # Related configuration of proxy, used to validate client requests and reduce the returned results.
 proxy:

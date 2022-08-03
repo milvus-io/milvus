@@ -233,12 +233,6 @@ func TestGrpcService(t *testing.T) {
 	core.CallImportService = func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
 		return nil, nil
 	}
-	core.CallAddSegRefLock = func(context.Context, int64, []int64) error {
-		return nil
-	}
-	core.CallReleaseSegRefLock = func(context.Context, int64, []int64) error {
-		return nil
-	}
 
 	err = svr.start()
 	assert.Nil(t, err)

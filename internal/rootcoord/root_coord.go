@@ -144,9 +144,6 @@ type Core struct {
 	CallReleaseCollectionService func(ctx context.Context, ts typeutil.Timestamp, dbID, collectionID typeutil.UniqueID) error
 	CallReleasePartitionService  func(ctx context.Context, ts typeutil.Timestamp, dbID, collectionID typeutil.UniqueID, partitionIDs []typeutil.UniqueID) error
 
-	// Communicates with queryCoord service for segments info.
-	CallGetSegmentInfoService func(ctx context.Context, collectionID int64, segIDs []int64) (*querypb.GetSegmentInfoResponse, error)
-
 	CallWatchChannels func(ctx context.Context, collectionID int64, channelNames []string) error
 
 	//assign import task to data service
@@ -154,12 +151,6 @@ type Core struct {
 
 	// Seals segments in collection cID, so they can get flushed later.
 	CallFlushOnCollection func(ctx context.Context, cID int64, segIDs []int64) error
-
-	// CallAddSegRefLock triggers AcquireSegmentLock method on DataCoord.
-	CallAddSegRefLock func(ctx context.Context, taskID int64, segIDs []int64) (retErr error)
-
-	// CallReleaseSegRefLock triggers ReleaseSegmentLock method on DataCoord.
-	CallReleaseSegRefLock func(ctx context.Context, taskID int64, segIDs []int64) (retErr error)
 
 	//Proxy manager
 	proxyManager *proxyManager
@@ -299,12 +290,6 @@ func (c *Core) checkInit() error {
 	}
 	if c.CallImportService == nil {
 		return fmt.Errorf("callImportService is nil")
-	}
-	if c.CallAddSegRefLock == nil {
-		return fmt.Errorf("callAddSegRefLock is nil")
-	}
-	if c.CallReleaseSegRefLock == nil {
-		return fmt.Errorf("callReleaseSegRefLock is nil")
 	}
 
 	return nil
@@ -771,54 +756,6 @@ func (c *Core) SetDataCoord(ctx context.Context, s types.DataCoord) error {
 		return nil
 	}
 
-	c.CallAddSegRefLock = func(ctx context.Context, taskID int64, segIDs []int64) (retErr error) {
-		defer func() {
-			if err := recover(); err != nil {
-				retErr = fmt.Errorf("add seg ref lock panic, msg = %v", err)
-			}
-		}()
-		<-initCh
-		log.Info("acquiring seg lock",
-			zap.Int64s("segment IDs", segIDs),
-			zap.Int64("node ID", c.session.ServerID))
-		resp, _ := s.AcquireSegmentLock(ctx, &datapb.AcquireSegmentLockRequest{
-			SegmentIDs: segIDs,
-			NodeID:     c.session.ServerID,
-			TaskID:     taskID,
-		})
-		if resp.GetErrorCode() != commonpb.ErrorCode_Success {
-			return fmt.Errorf("failed to acquire segment lock %s", resp.GetReason())
-		}
-		log.Info("acquire seg lock succeed",
-			zap.Int64s("segment IDs", segIDs),
-			zap.Int64("node ID", c.session.ServerID))
-		return nil
-	}
-
-	c.CallReleaseSegRefLock = func(ctx context.Context, taskID int64, segIDs []int64) (retErr error) {
-		defer func() {
-			if err := recover(); err != nil {
-				retErr = fmt.Errorf("release seg ref lock panic, msg = %v", err)
-			}
-		}()
-		<-initCh
-		log.Info("releasing seg lock",
-			zap.Int64s("segment IDs", segIDs),
-			zap.Int64("node ID", c.session.ServerID))
-		resp, _ := s.ReleaseSegmentLock(ctx, &datapb.ReleaseSegmentLockRequest{
-			SegmentIDs: segIDs,
-			NodeID:     c.session.ServerID,
-			TaskID:     taskID,
-		})
-		if resp.GetErrorCode() != commonpb.ErrorCode_Success {
-			return fmt.Errorf("failed to release segment lock %s", resp.GetReason())
-		}
-		log.Info("release seg lock succeed",
-			zap.Int64s("segment IDs", segIDs),
-			zap.Int64("node ID", c.session.ServerID))
-		return nil
-	}
-
 	return nil
 }
 
@@ -997,23 +934,6 @@ func (c *Core) SetQueryCoord(s types.QueryCoord) error {
 			return fmt.Errorf("releasePartitions from query service failed, error = %s", rsp.Reason)
 		}
 		return nil
-	}
-	c.CallGetSegmentInfoService = func(ctx context.Context, collectionID int64, segIDs []int64) (retResp *querypb.GetSegmentInfoResponse, retErr error) {
-		defer func() {
-			if err := recover(); err != nil {
-				retErr = fmt.Errorf("call segment info service panic, msg = %v", err)
-			}
-		}()
-		<-initCh
-		resp, err := s.GetSegmentInfo(ctx, &querypb.GetSegmentInfoRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:  commonpb.MsgType_GetSegmentState,
-				SourceID: c.session.ServerID,
-			},
-			CollectionID: collectionID,
-			SegmentIDs:   segIDs,
-		})
-		return resp, err
 	}
 	return nil
 }
@@ -1423,7 +1343,7 @@ func (c *Core) Start() error {
 		go c.tsLoop()
 		go c.chanTimeTick.startWatch(&c.wg)
 		go c.checkFlushedSegmentsLoop()
-		go c.importManager.expireOldTasksLoop(&c.wg, c.CallReleaseSegRefLock)
+		go c.importManager.expireOldTasksLoop(&c.wg)
 		go c.importManager.sendOutTasksLoop(&c.wg)
 		go c.recycleDroppedIndex()
 		Params.RootCoordCfg.CreatedTime = time.Now()
@@ -2491,31 +2411,6 @@ func (c *Core) ReportImport(ctx context.Context, ir *rootcoordpb.ImportResult) (
 	if code, ok := c.checkHealthy(); !ok {
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+internalpb.StateCode_name[int32(code)]), nil
 	}
-	// Special case for ImportState_ImportAllocSegment state, where we shall only add segment ref lock and do no other
-	// operations.
-	// TODO: This is inelegant and must get re-structured.
-	if ir.GetState() == commonpb.ImportState_ImportAllocSegment {
-		// Lock the segments, so we don't lose track of them when compaction happens.
-		// Note that these locks will be unlocked in c.postImportPersistLoop() -> checkSegmentLoadedLoop().
-		if err := c.CallAddSegRefLock(ctx, ir.GetTaskId(), ir.GetSegments()); err != nil {
-			log.Error("failed to acquire segment ref lock", zap.Error(err))
-			return &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    fmt.Sprintf("failed to acquire segment ref lock %s", err.Error()),
-			}, nil
-		}
-		// Update task store with new segments.
-		if err := c.importManager.appendTaskSegments(ir.GetTaskId(), ir.GetSegments()); err != nil {
-			log.Error("failed to update task store with new segments", zap.Error(err))
-			return &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    fmt.Sprintf("failed to update task store with new segments %s", err.Error()),
-			}, nil
-		}
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		}, nil
-	}
 	// Upon receiving ReportImport request, update the related task's state in task store.
 	ti, err := c.importManager.updateTaskState(ir)
 	if err != nil {
@@ -2544,15 +2439,7 @@ func (c *Core) ReportImport(ctx context.Context, ir *rootcoordpb.ImportResult) (
 
 	// If task failed, send task to idle datanode
 	if ir.GetState() == commonpb.ImportState_ImportFailed {
-		// Release segments when task fails.
-		log.Info("task failed, release segment ref locks")
-		err := retry.Do(ctx, func() error {
-			return c.CallReleaseSegRefLock(ctx, ir.GetTaskId(), ir.GetSegments())
-		}, retry.Attempts(100))
-		if err != nil {
-			log.Error("failed to release lock, about to panic!")
-			panic(err)
-		}
+		log.Info("task failed, resending import task")
 		resendTaskFunc()
 	}
 
@@ -2566,243 +2453,15 @@ func (c *Core) ReportImport(ctx context.Context, ir *rootcoordpb.ImportResult) (
 		}, nil
 	}
 
-	// Look up collection name on collection ID.
-	var colName string
-	var colMeta *etcdpb.CollectionInfo
-	if colMeta, err = c.MetaTable.GetCollectionByID(ti.GetCollectionId(), 0); err != nil {
-		log.Error("failed to get collection name",
-			zap.Int64("collection ID", ti.GetCollectionId()),
-			zap.Error(err))
-		// In some unexpected cases, user drop collection when bulkload task still in pending list, the datanode become idle.
-		// If we directly return, the pending tasks will remain in pending list. So we call resendTaskFunc() to push next pending task to idle datanode.
-		resendTaskFunc()
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_CollectionNameNotFound,
-			Reason:    "failed to get collection name for collection ID" + strconv.FormatInt(ti.GetCollectionId(), 10),
-		}, nil
-	}
-	colName = colMeta.GetSchema().GetName()
-
 	// When DataNode has done its thing, remove it from the busy node list. And send import task again
 	resendTaskFunc()
 
 	// Flush all import data segments.
 	c.CallFlushOnCollection(ctx, ti.GetCollectionId(), ir.GetSegments())
-	// Check if data are "queryable" and if indices are built on all segments.
-	go c.postImportPersistLoop(c.ctx, ir.GetTaskId(), ti.GetCollectionId(), colName, ir.GetSegments())
 
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}, nil
-}
-
-// CountCompleteIndex checks indexing status of the given segments.
-// It returns an error if error occurs. It also returns a boolean indicating whether indexing is done (or if no index
-// is needed).
-func (c *Core) CountCompleteIndex(ctx context.Context, collectionName string, collectionID UniqueID,
-	allSegmentIDs []UniqueID) (bool, error) {
-	// Note: Index name is always Params.CommonCfg.DefaultIndexName in current Milvus designs as of today.
-	indexName := Params.CommonCfg.DefaultIndexName
-
-	// Retrieve index status and detailed index information.
-	describeIndexReq := &milvuspb.DescribeIndexRequest{
-		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_DescribeIndex,
-		},
-		CollectionName: collectionName,
-		IndexName:      indexName,
-	}
-	indexDescriptionResp, err := c.DescribeIndex(ctx, describeIndexReq)
-	if err != nil {
-		return false, err
-	}
-	if len(indexDescriptionResp.GetIndexDescriptions()) == 0 {
-		log.Info("no index needed for collection, consider indexing done",
-			zap.Int64("collection ID", collectionID))
-		return true, nil
-	}
-	log.Debug("got index description",
-		zap.Any("index description", indexDescriptionResp))
-
-	// Check if the target index name exists.
-	matchIndexID := int64(-1)
-	foundIndexID := false
-	for _, desc := range indexDescriptionResp.GetIndexDescriptions() {
-		if desc.GetIndexName() == indexName {
-			matchIndexID = desc.GetIndexID()
-			foundIndexID = true
-			break
-		}
-	}
-	if !foundIndexID {
-		return false, fmt.Errorf("no index is created")
-	}
-	log.Debug("found match index ID",
-		zap.Int64("match index ID", matchIndexID))
-
-	getIndexStatesRequest := &indexpb.GetIndexStatesRequest{
-		IndexBuildIDs: make([]UniqueID, 0),
-	}
-
-	// Fetch index build IDs from segments.
-	var seg2Check []UniqueID
-	for _, segmentID := range allSegmentIDs {
-		describeSegmentRequest := &milvuspb.DescribeSegmentRequest{
-			Base: &commonpb.MsgBase{
-				MsgType: commonpb.MsgType_DescribeSegment,
-			},
-			CollectionID: collectionID,
-			SegmentID:    segmentID,
-		}
-		segmentDesc, _ := c.DescribeSegment(ctx, describeSegmentRequest)
-		if segmentDesc.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-			// Describe failed, since the segment could get compacted, simply log and ignore the error.
-			log.Error("failed to describe segment",
-				zap.Int64("collection ID", collectionID),
-				zap.Int64("segment ID", segmentID),
-				zap.String("error", segmentDesc.GetStatus().GetReason()))
-		}
-		if segmentDesc.GetIndexID() == matchIndexID {
-			if segmentDesc.GetEnableIndex() {
-				seg2Check = append(seg2Check, segmentID)
-				getIndexStatesRequest.IndexBuildIDs = append(getIndexStatesRequest.GetIndexBuildIDs(), segmentDesc.GetBuildID())
-			}
-		}
-	}
-	if len(getIndexStatesRequest.GetIndexBuildIDs()) == 0 {
-		log.Info("none index build IDs returned, perhaps no index is needed",
-			zap.String("collection name", collectionName),
-			zap.Int64("collection ID", collectionID))
-		return true, nil
-	}
-
-	log.Debug("working on GetIndexState",
-		zap.Int("# of IndexBuildIDs", len(getIndexStatesRequest.GetIndexBuildIDs())))
-
-	states, err := c.CallGetIndexStatesService(ctx, getIndexStatesRequest.GetIndexBuildIDs())
-	if err != nil {
-		log.Error("failed to get index state in checkSegmentIndexStates", zap.Error(err))
-		return false, err
-	}
-
-	// Count the # of segments with finished index.
-	ct := 0
-	for _, s := range states {
-		if s.State == commonpb.IndexState_Finished {
-			ct++
-		}
-	}
-	log.Info("segment indexing state checked",
-		zap.Int64s("segments checked", seg2Check),
-		zap.Int("# of checked segment", len(seg2Check)),
-		zap.Int("# of segments with complete index", ct),
-		zap.String("collection name", collectionName),
-		zap.Int64("collection ID", collectionID),
-	)
-	return len(seg2Check) == ct, nil
-}
-
-func (c *Core) postImportPersistLoop(ctx context.Context, taskID int64, colID int64, colName string, segIDs []UniqueID) {
-	// Loop and check if segments are loaded in queryNodes.
-	c.wg.Add(1)
-	go c.checkSegmentLoadedLoop(ctx, taskID, colID, segIDs)
-	// Check if collection has any indexed fields. If so, start a loop to check segments' index states.
-	if colMeta, err := c.MetaTable.GetCollectionByID(colID, 0); err != nil {
-		log.Error("failed to find meta for collection",
-			zap.Int64("collection ID", colID),
-			zap.Error(err))
-	} else if len(colMeta.GetFieldIndexes()) == 0 {
-		log.Info("no index field found for collection", zap.Int64("collection ID", colID))
-	} else {
-		log.Info("start checking index state", zap.Int64("collection ID", colID))
-		c.wg.Add(1)
-		go c.checkCompleteIndexLoop(ctx, taskID, colID, colName, segIDs)
-	}
-}
-
-// checkSegmentLoadedLoop loops and checks if all segments in `segIDs` are loaded in queryNodes.
-func (c *Core) checkSegmentLoadedLoop(ctx context.Context, taskID int64, colID int64, segIDs []UniqueID) {
-	defer c.wg.Done()
-	ticker := time.NewTicker(time.Duration(Params.RootCoordCfg.ImportSegmentStateCheckInterval*1000) * time.Millisecond)
-	defer ticker.Stop()
-	expireTicker := time.NewTicker(time.Duration(Params.RootCoordCfg.ImportSegmentStateWaitLimit*1000) * time.Millisecond)
-	defer expireTicker.Stop()
-	defer func() {
-		log.Info("we are done checking segment loading state, release segment ref locks")
-		err := retry.Do(ctx, func() error {
-			return c.CallReleaseSegRefLock(ctx, taskID, segIDs)
-		}, retry.Attempts(100))
-		if err != nil {
-			log.Error("failed to release lock, about to panic!")
-			panic(err)
-		}
-	}()
-	for {
-		select {
-		case <-c.ctx.Done():
-			log.Info("(in check segment loaded loop) context done, exiting checkSegmentLoadedLoop")
-			return
-		case <-ticker.C:
-			resp, err := c.CallGetSegmentInfoService(ctx, colID, segIDs)
-			log.Debug("(in check segment loaded loop)",
-				zap.Int64("task ID", taskID),
-				zap.Int64("collection ID", colID),
-				zap.Int64s("segment IDs expected", segIDs),
-				zap.Int("# of segments found", len(resp.GetInfos())))
-			if err != nil {
-				log.Warn("(in check segment loaded loop) failed to call get segment info on queryCoord",
-					zap.Int64("task ID", taskID),
-					zap.Int64("collection ID", colID),
-					zap.Int64s("segment IDs", segIDs))
-			} else if len(resp.GetInfos()) == len(segIDs) {
-				// Check if all segment info are loaded in queryNodes.
-				log.Info("(in check segment loaded loop) all import data segments loaded in queryNodes",
-					zap.Int64("task ID", taskID),
-					zap.Int64("collection ID", colID),
-					zap.Int64s("segment IDs", segIDs))
-				c.importManager.setTaskDataQueryable(taskID)
-				return
-			}
-		case <-expireTicker.C:
-			log.Warn("(in check segment loaded loop) segments still not loaded after max wait time",
-				zap.Int64("task ID", taskID),
-				zap.Int64("collection ID", colID),
-				zap.Int64s("segment IDs", segIDs))
-			return
-		}
-	}
-}
-
-// checkCompleteIndexLoop loops and checks if all indices are built for an import task's segments.
-func (c *Core) checkCompleteIndexLoop(ctx context.Context, taskID int64, colID int64, colName string, segIDs []UniqueID) {
-	defer c.wg.Done()
-	ticker := time.NewTicker(time.Duration(Params.RootCoordCfg.ImportIndexCheckInterval*1000) * time.Millisecond)
-	defer ticker.Stop()
-	expireTicker := time.NewTicker(time.Duration(Params.RootCoordCfg.ImportIndexWaitLimit*1000) * time.Millisecond)
-	defer expireTicker.Stop()
-	for {
-		select {
-		case <-c.ctx.Done():
-			log.Info("(in check complete index loop) context done, exiting checkCompleteIndexLoop")
-			return
-		case <-ticker.C:
-			if done, err := c.CountCompleteIndex(ctx, colName, colID, segIDs); err == nil && done {
-				log.Info("(in check complete index loop) indices are built or no index needed",
-					zap.Int64("task ID", taskID))
-				c.importManager.setTaskDataIndexed(taskID)
-				return
-			} else if err != nil {
-				log.Error("(in check complete index loop) an error occurs",
-					zap.Error(err))
-			}
-		case <-expireTicker.C:
-			log.Warn("(in check complete index loop) indexing is taken too long",
-				zap.Int64("task ID", taskID),
-				zap.Int64("collection ID", colID),
-				zap.Int64s("segment IDs", segIDs))
-			return
-		}
-	}
 }
 
 // ExpireCredCache will call invalidate credential cache

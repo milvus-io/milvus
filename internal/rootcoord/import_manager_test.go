@@ -58,7 +58,7 @@ func TestImportManager_NewImportManager(t *testing.T) {
 	ti1 := &datapb.ImportTaskInfo{
 		Id: 100,
 		State: &datapb.ImportTaskState{
-			StateCode: commonpb.ImportState_ImportPending,
+			StateCode: commonpb.ImportState_ImportStarted,
 		},
 		CreateTs: time.Now().Unix() - 100,
 	}
@@ -103,10 +103,8 @@ func TestImportManager_NewImportManager(t *testing.T) {
 		assert.NoError(t, mgr.loadFromTaskStore())
 		var wgLoop sync.WaitGroup
 		wgLoop.Add(2)
-		assert.Equal(t, 1, len(mgr.workingTasks))
-		mgr.expireOldTasksLoop(&wgLoop, func(ctx context.Context, int64 int64, int64s []int64) error {
-			return nil
-		})
+		assert.Equal(t, 2, len(mgr.workingTasks))
+		mgr.expireOldTasksLoop(&wgLoop)
 		assert.Equal(t, 0, len(mgr.workingTasks))
 		mgr.sendOutTasksLoop(&wgLoop)
 		wgLoop.Wait()
@@ -122,9 +120,7 @@ func TestImportManager_NewImportManager(t *testing.T) {
 		mgr.init(context.TODO())
 		var wgLoop sync.WaitGroup
 		wgLoop.Add(2)
-		mgr.expireOldTasksLoop(&wgLoop, func(ctx context.Context, int64 int64, int64s []int64) error {
-			return nil
-		})
+		mgr.expireOldTasksLoop(&wgLoop)
 		mgr.sendOutTasksLoop(&wgLoop)
 		wgLoop.Wait()
 	})
@@ -198,13 +194,18 @@ func TestImportManager_NewImportManager(t *testing.T) {
 			},
 			CreateTs: time.Now().Unix() + 1,
 		})
+		mgr.pendingTasks = append(mgr.pendingTasks, &datapb.ImportTaskInfo{
+			Id: 400,
+			State: &datapb.ImportTaskState{
+				StateCode: commonpb.ImportState_ImportPending,
+			},
+			CreateTs: time.Now().Unix() - 100,
+		})
 		assert.NoError(t, mgr.loadFromTaskStore())
 		var wgLoop sync.WaitGroup
 		wgLoop.Add(2)
 		assert.Equal(t, 2, len(mgr.pendingTasks))
-		mgr.expireOldTasksLoop(&wgLoop, func(ctx context.Context, int64 int64, int64s []int64) error {
-			return nil
-		})
+		mgr.expireOldTasksLoop(&wgLoop)
 		assert.Equal(t, 1, len(mgr.pendingTasks))
 		mgr.sendOutTasksLoop(&wgLoop)
 		wgLoop.Wait()
@@ -220,9 +221,7 @@ func TestImportManager_NewImportManager(t *testing.T) {
 		mgr.init(ctx)
 		var wgLoop sync.WaitGroup
 		wgLoop.Add(2)
-		mgr.expireOldTasksLoop(&wgLoop, func(ctx context.Context, int64 int64, int64s []int64) error {
-			return nil
-		})
+		mgr.expireOldTasksLoop(&wgLoop)
 		mgr.sendOutTasksLoop(&wgLoop)
 		time.Sleep(100 * time.Millisecond)
 		wgLoop.Wait()
@@ -305,9 +304,7 @@ func TestImportManager_TestEtcdCleanUp(t *testing.T) {
 	keys, _, _ := mockKv.LoadWithPrefix("")
 	// All 3 tasks are stored in Etcd.
 	assert.Equal(t, 3, len(keys))
-	mgr.expireOldTasksLoop(&wgLoop, func(ctx context.Context, int64 int64, int64s []int64) error {
-		return nil
-	})
+	mgr.expireOldTasksLoop(&wgLoop)
 	keys, _, _ = mockKv.LoadWithPrefix("")
 	// task 1 and task 2 have passed retention period.
 	assert.Equal(t, 1, len(keys))
@@ -579,7 +576,7 @@ func TestImportManager_TaskState(t *testing.T) {
 
 	resp = mgr.getTaskState(1)
 	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-	assert.Equal(t, commonpb.ImportState_ImportPending, resp.State)
+	assert.Equal(t, commonpb.ImportState_ImportStarted, resp.State)
 }
 
 func TestImportManager_AllocFail(t *testing.T) {

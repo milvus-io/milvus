@@ -2616,7 +2616,10 @@ func TestDataCoord_Import(t *testing.T) {
 	t.Run("normal case", func(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
-
+		svr.sessionManager.AddSession(&NodeInfo{
+			NodeID:  0,
+			Address: "localhost:8080",
+		})
 		err := svr.channelManager.AddNode(0)
 		assert.Nil(t, err)
 		err = svr.channelManager.Watch(&channel{"ch1", 0})
