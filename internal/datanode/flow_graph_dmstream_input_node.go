@@ -34,8 +34,8 @@ import (
 //  flowgraph ddNode.
 func newDmInputNode(ctx context.Context, seekPos *internalpb.MsgPosition, dmNodeConfig *nodeConfig) (*flowgraph.InputNode, error) {
 	// subName should be unique, since pchannelName is shared among several collections
-	//	consumeSubName := Params.MsgChannelSubName + "-" + strconv.FormatInt(collID, 10)
-	consumeSubName := fmt.Sprintf("%s-%d-%d", Params.CommonCfg.DataNodeSubName, Params.DataNodeCfg.GetNodeID(), dmNodeConfig.collectionID)
+	// use vchannel in case of reuse pchannel for same collection
+	consumeSubName := fmt.Sprintf("%s-%d-%s", Params.CommonCfg.DataNodeSubName, Params.DataNodeCfg.GetNodeID(), dmNodeConfig.vChannelName)
 	insertStream, err := dmNodeConfig.msFactory.NewTtMsgStream(ctx)
 	if err != nil {
 		return nil, err
