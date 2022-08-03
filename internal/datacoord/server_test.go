@@ -3008,7 +3008,7 @@ func Test_initGarbageCollection(t *testing.T) {
 		Params.MinioCfg.Address = "host:9000:bad"
 		err := server.initGarbageCollection()
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to create minio client")
+		assert.Contains(t, err.Error(), "too many colons in address")
 	})
 
 	// mock CheckBucketFn
@@ -3026,6 +3026,12 @@ func Test_initGarbageCollection(t *testing.T) {
 	})
 	t.Run("iam_ok", func(t *testing.T) {
 		Params.MinioCfg.UseIAM = true
+		err := server.initGarbageCollection()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "404 Not Found")
+	})
+	t.Run("local storage init", func(t *testing.T) {
+		Params.CommonCfg.StorageType = "local"
 		err := server.initGarbageCollection()
 		assert.NoError(t, err)
 	})
