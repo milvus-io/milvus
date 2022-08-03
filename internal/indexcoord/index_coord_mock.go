@@ -277,11 +277,16 @@ func (cmm *ChunkManagerMock) RemoveWithPrefix(prefix string) error {
 type mockETCDKV struct {
 	kv.MetaKv
 
+	save                        func(string, string) error
 	remove                      func(string) error
 	watchWithRevision           func(string, int64) clientv3.WatchChan
 	loadWithRevisionAndVersions func(string) ([]string, []string, []int64, int64, error)
 	compareVersionAndSwap       func(key string, version int64, target string, opts ...clientv3.OpOption) (bool, error)
 	loadWithPrefix2             func(key string) ([]string, []string, []int64, error)
+}
+
+func (mk *mockETCDKV) Save(key string, value string) error {
+	return mk.save(key, value)
 }
 
 func (mk *mockETCDKV) Remove(key string) error {

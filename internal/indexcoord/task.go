@@ -138,7 +138,16 @@ func (cit *CreateIndexTask) PreExecute(ctx context.Context) error {
 func (cit *CreateIndexTask) Execute(ctx context.Context) error {
 	log.Info("IndexCoord CreateIndexTask Execute", zap.Int64("collectionID", cit.req.CollectionID),
 		zap.Int64("fieldID", cit.req.FieldID), zap.String("indexName", cit.req.IndexName))
-	cit.table.SetIndex(cit.indexID, cit.req, cit.createTs)
+	index := &model.Index{
+		CollectionID: cit.req.CollectionID,
+		FieldID:      cit.req.FieldID,
+		IndexID:      cit.indexID,
+		IndexName:    cit.req.IndexName,
+		TypeParams:   cit.req.TypeParams,
+		IndexParams:  cit.req.IndexParams,
+		CreateTime:   cit.createTs,
+	}
+	cit.table.SetIndex(index)
 	// Get flushed segments
 	flushedSegments, err := cit.dataCoordClient.GetFlushedSegments(cit.ctx, &datapb.GetFlushedSegmentsRequest{
 		Base: &commonpb.MsgBase{

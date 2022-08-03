@@ -17,6 +17,7 @@
 package indexcoord
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 
@@ -34,7 +35,7 @@ import (
 
 // metaTable maintains index-related information
 type metaTable struct {
-	catalog          catalog.Catalog
+	catalog          *catalog.Catalog
 	indexLock        sync.RWMutex
 	segmentIndexLock sync.RWMutex
 
@@ -49,7 +50,7 @@ type metaTable struct {
 // NewMetaTable is used to create a new meta table.
 func NewMetaTable(kv kv.MetaKv) (*metaTable, error) {
 	mt := &metaTable{
-		catalog: catalog.Catalog{
+		catalog: &catalog.Catalog{
 			Txn: kv,
 		},
 		indexLock:        sync.RWMutex{},
@@ -195,45 +196,27 @@ func (mt *metaTable) GetIndexParams(collID, indexID UniqueID) ([]*commonpb.KeyVa
 	return indexParams, nil
 }
 
-func (mt *metaTable) SetIndex(indexID int64, req *indexpb.CreateIndexRequest, createTs uint64) {
+func (mt *metaTable) SetIndex(index *model.Index) {
 	mt.indexLock.Lock()
 	defer mt.indexLock.Unlock()
 
-	index := &model.Index{
-		CollectionID: req.CollectionID,
-		FieldID:      req.FieldID,
-		IndexID:      indexID,
-		IndexName:    req.IndexName,
-		TypeParams:   req.TypeParams,
-		IndexParams:  req.IndexParams,
-		CreateTime:   createTs,
-	}
-	mt.collectionIndexes[req.CollectionID][indexID] = index
+	mt.collectionIndexes[index.CollectionID][index.IndexID] = index
 }
 
-func (mt *metaTable) CreateIndex(indexID int64, req *indexpb.CreateIndexRequest, createTs uint64) error {
+func (mt *metaTable) CreateIndex(index *model.Index) error {
 	mt.indexLock.Lock()
 	defer mt.indexLock.RLock()
-	log.Info("IndexCoord metaTable CreateIndex", zap.Int64("collectionID", req.CollectionID),
-		zap.Int64("fieldID", req.FieldID), zap.Int64("indexID", indexID), zap.String("indexName", req.IndexName))
+	log.Info("IndexCoord metaTable CreateIndex", zap.Int64("collectionID", index.CollectionID),
+		zap.Int64("fieldID", index.FieldID), zap.Int64("indexID", index.IndexID), zap.String("indexName", index.IndexName))
 
-	index := &model.Index{
-		CollectionID: req.CollectionID,
-		FieldID:      req.FieldID,
-		IndexID:      indexID,
-		IndexName:    req.IndexName,
-		TypeParams:   req.TypeParams,
-		IndexParams:  req.IndexParams,
-		CreateTime:   createTs,
-	}
 	if err := mt.saveFieldIndexMeta(index); err != nil {
-		log.Error("IndexCoord metaTable CreateIndex save meta fail", zap.Int64("collectionID", req.CollectionID),
-			zap.Int64("fieldID", req.FieldID), zap.Int64("indexID", indexID),
-			zap.String("indexName", req.IndexName), zap.Error(err))
+		log.Error("IndexCoord metaTable CreateIndex save meta fail", zap.Int64("collectionID", index.CollectionID),
+			zap.Int64("fieldID", index.FieldID), zap.Int64("indexID", index.IndexID),
+			zap.String("indexName", index.IndexName), zap.Error(err))
 		return err
 	}
-	log.Info("IndexCoord metaTable CreateIndex success", zap.Int64("collectionID", req.CollectionID),
-		zap.Int64("fieldID", req.FieldID), zap.Int64("indexID", indexID), zap.String("indexName", req.IndexName))
+	log.Info("IndexCoord metaTable CreateIndex success", zap.Int64("collectionID", index.CollectionID),
+		zap.Int64("fieldID", index.FieldID), zap.Int64("indexID", index.IndexID), zap.String("indexName", index.IndexName))
 	return nil
 }
 
@@ -316,13 +299,14 @@ func (mt *metaTable) BuildIndex(buildID UniqueID) error {
 
 	updateFunc := func(segIdx *model.SegmentIndex) error {
 		if segIdx.IsDeleted {
-			log.Warn("index has been marked deleted, no need to build index", zap.Int64("BuildID", segIdx.BuildID))
-			return nil
+			errMsg := fmt.Sprintf("index has been marked deleted, no need to build index with ID: %d", segIdx.BuildID)
+			log.Warn(errMsg, zap.Int64("BuildID", segIdx.BuildID))
+			return errors.New(errMsg)
 		}
 		if segIdx.IndexState == commonpb.IndexState_Finished || segIdx.IndexState == commonpb.IndexState_Failed {
-			log.Warn("index has been finished, no need to set InProgress state", zap.Int64("BuildID", segIdx.BuildID),
-				zap.String("state", segIdx.IndexState.String()))
-			return nil
+			errMsg := fmt.Sprintf("index has been finished, no need to build index with ID: %d", segIdx.BuildID)
+			log.Warn(errMsg, zap.Int64("BuildID", segIdx.BuildID), zap.String("state", segIdx.IndexState.String()))
+			return errors.New(errMsg)
 		}
 		segIdx.IndexState = commonpb.IndexState_InProgress
 
@@ -338,6 +322,7 @@ func (mt *metaTable) BuildIndex(buildID UniqueID) error {
 	return mt.updateSegIndexMeta(segIdx, updateFunc)
 }
 
+// GetIndexesForCollection gets all indexes info with the specified collection.
 func (mt *metaTable) GetIndexesForCollection(collID UniqueID) []*model.Index {
 	mt.indexLock.RLock()
 	defer mt.indexLock.RUnlock()
