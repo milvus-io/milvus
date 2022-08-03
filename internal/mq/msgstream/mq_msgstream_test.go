@@ -29,6 +29,8 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/confluentinc/confluent-kafka-go/kafka"
+
 	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
 	"go.uber.org/atomic"
 
@@ -53,6 +55,15 @@ var Params paramtable.ComponentParam
 
 func TestMain(m *testing.M) {
 	Params.Init()
+	mockKafkaCluster, err := kafka.NewMockCluster(1)
+	defer mockKafkaCluster.Close()
+	if err != nil {
+		fmt.Printf("Failed to create MockCluster: %s\n", err)
+		os.Exit(1)
+	}
+	broker := mockKafkaCluster.BootstrapServers()
+	Params.Save("kafka.brokerList", broker)
+
 	exitCode := m.Run()
 	os.Exit(exitCode)
 }
@@ -64,6 +75,12 @@ func getPulsarAddress() string {
 		return "pulsar://" + pulsarHost + ":" + port
 	}
 	panic("invalid pulsar address")
+}
+
+func getKafkaBrokerList() string {
+	brokerList := Params.Get("kafka.brokerList")
+	log.Printf("kafka broker list: %s", brokerList)
+	return brokerList
 }
 
 type fixture struct {

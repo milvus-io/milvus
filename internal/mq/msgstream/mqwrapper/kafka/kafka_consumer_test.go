@@ -95,8 +95,8 @@ func TestKafkaConsumer_GetLatestMsgID(t *testing.T) {
 	defer consumer.Close()
 
 	latestMsgID, err := consumer.GetLatestMsgID()
-	assert.Nil(t, latestMsgID)
-	assert.NotNil(t, err)
+	assert.Equal(t, int64(0), latestMsgID.(*kafkaID).messageID)
+	assert.Nil(t, err)
 
 	data := []int{111, 222, 333}
 	testKafkaConsumerProduceData(t, topic, data)
@@ -129,6 +129,12 @@ func TestKafkaConsumer_ConsumeFromLatest(t *testing.T) {
 	assert.Equal(t, 555, BytesToInt(msg.Payload()))
 }
 
+func TestKafkaConsumer_createKafkaConsumer(t *testing.T) {
+	consumer := &Consumer{config: &kafka.ConfigMap{}}
+	err := consumer.createKafkaConsumer()
+	assert.NotNil(t, err)
+}
+
 func testKafkaConsumerProduceData(t *testing.T, topic string, data []int) {
 	ctx := context.Background()
 	kc := createKafkaClient(t)
@@ -138,11 +144,11 @@ func testKafkaConsumerProduceData(t *testing.T, topic string, data []int) {
 
 	produceData(ctx, t, producer, data)
 
-	time.Sleep(5 * time.Second)
+	producer.(*kafkaProducer).p.Flush(500)
 }
 
 func createConfig(groupID string) *kafka.ConfigMap {
-	kafkaAddress := Params.Get("kafka.brokerList")
+	kafkaAddress := getKafkaBrokerList()
 	return &kafka.ConfigMap{
 		"bootstrap.servers":        kafkaAddress,
 		"group.id":                 groupID,
