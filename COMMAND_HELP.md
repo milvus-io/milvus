@@ -8,5 +8,5 @@
 
 |  Command                 |    Description                                                             |
 | -------------------------|----------------------------------------------------------------------------|
-|  /run-checks             |  Trigger Jenkins Job for e2e tests.                                         |
+|  /run-cpu-e2e           |  Trigger Jenkins Job for e2e tests based on cpu.                                         |
 | rerun ut    |  Trigger failed github workflow jobs, including code checker & unit tests.  |
