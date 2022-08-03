@@ -1,0 +1,77 @@
+name: Code Checker
+# TODO: do not trigger action for some document file update
+
+# This workflow is triggered on pushes or pull request to the repository.
+on:
+  push:
+    # branches:
+    #   - master
+  pull_request:
+    # file paths to consider in the event. Optional; defaults to all.
+    paths:
+      - 'scripts/**'
+      - 'internal/**'
+      - 'cmd/**'
+      - 'build/**'
+      - '.github/workflows/code-checker.yaml'
+      - '.env'
+      - docker-compose.yml
+      - Makefile
+      - '!**.md'
+      - '!build/ci/jenkins/**'
+      # FIXME(wxyu): not need to run code check, update the ci-passed rules and remove these two lines
+      - go.mod
+      - go.sum
+
+jobs:
+  ubuntu:
+    name:  Code Checker MacOS 12
+    runs-on: macos-12
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Mac Cache Third Party
+        uses: actions/cache@v3
+        with:
+          path: |
+            /tmp/thirdparty 
+            cmake_build/3rdparty_download/download
+          key: macos-thirdparty-${{ hashFiles('internal/core/thirdparty/**') }}
+          restore-keys: macos-thirdparty-
+      - name: Mac Cache CCache Volumes
+        uses: actions/cache@v3
+        with:
+          path: /var/tmp/ccache
+          key: macos-ccache-${{ hashFiles('internal/core/**') }}
+          restore-keys: macos-ccache-
+      - name: Setup Go environment
+        uses: actions/setup-go@v2.2.0
+        if: ${{  matrix.os == 'macos-11' }}
+        with:
+          go-version: '~1.18.1'
+      - name: Mac Cache Go Mod Volumes
+        uses: actions/cache@v3
+        with:
+          path: ~/go/pkg/mod
+          key: macos-go-mod-${{ hashFiles('**/go.sum') }}
+          restore-keys: macos-go-mod-
+      - name: Code Check
+        if: ${{  matrix.os == 'macos-11' }}
+        env:
+          CCACHE_DIR: /var/tmp/ccache
+          CCACHE_COMPILERCHECK: content
+          CCACHE_COMPRESS: 1
+          CCACHE_COMPRESSLEVEL: 5
+          CCACHE_MAXSIZE: 2G
+          CUSTOM_THIRDPARTY_PATH: /tmp/thirdparty          
+        run: |
+          if [[ ! -d "/var/tmp/ccache" ]];then
+            mkdir -p /var/tmp/ccache
+          fi
+          brew install boost libomp ninja tbb openblas ccache
+          if [[ ! -d "/usr/local/opt/llvm" ]]; then
+            ln -s /usr/local/opt/llvm@13 /usr/local/opt/llvm
+          fi
+          make install && sh scripts/collect_arrow_dep.sh -f /tmp/thirdparty
+
