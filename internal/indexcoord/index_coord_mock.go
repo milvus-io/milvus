@@ -19,7 +19,6 @@ package indexcoord
 import (
 	"context"
 	"errors"
-	"strconv"
 	"time"
 
 	"github.com/milvus-io/milvus/internal/kv"
@@ -29,7 +28,6 @@ import (
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
@@ -151,118 +149,6 @@ func (icm *Mock) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringRespon
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
 		Value: "",
-	}, nil
-}
-
-// BuildIndex receives a building index request, and return success, if Param `Failure` is true, it will return an error.
-func (icm *Mock) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
-	if icm.Failure {
-		return &indexpb.BuildIndexResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			},
-			IndexBuildID: 0,
-		}, errors.New("IndexCoordinate BuildIndex error")
-	}
-	return &indexpb.BuildIndexResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-		IndexBuildID: 0,
-	}, nil
-}
-
-// DropIndex receives a dropping index request, and return success, if Param `Failure` is true, it will return an error.
-func (icm *Mock) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
-	if icm.Failure {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		}, errors.New("IndexCoordinate DropIndex failed")
-	}
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}, nil
-}
-
-// GetIndexStates gets the indexes states, if Param `Failure` is true, it will return an error.
-// Under normal circumstances the state of each index is `IndexState_Finished`.
-func (icm *Mock) GetIndexStates(ctx context.Context, req *indexpb.GetIndexStatesRequest) (*indexpb.GetIndexStatesResponse, error) {
-	if icm.Failure {
-		return &indexpb.GetIndexStatesResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			},
-		}, errors.New("IndexCoordinate GetIndexStates failed")
-	}
-	states := make([]*indexpb.IndexInfo, len(req.IndexBuildIDs))
-	for i := range states {
-		states[i] = &indexpb.IndexInfo{
-			IndexBuildID: req.IndexBuildIDs[i],
-			State:        commonpb.IndexState_Finished,
-			IndexID:      0,
-		}
-	}
-	return &indexpb.GetIndexStatesResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-		States: states,
-	}, nil
-}
-
-// GetIndexFilePaths gets the index file paths, if Param `Failure` is true, it will return an error.
-func (icm *Mock) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error) {
-	if icm.Failure {
-		return &indexpb.GetIndexFilePathsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			},
-		}, errors.New("IndexCoordinate GetIndexFilePaths failed")
-	}
-	filePaths := make([]*indexpb.IndexFilePathInfo, len(req.IndexBuildIDs))
-	for i := range filePaths {
-		filePaths[i] = &indexpb.IndexFilePathInfo{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
-			IndexBuildID:   req.IndexBuildIDs[i],
-			IndexFilePaths: []string{strconv.FormatInt(req.IndexBuildIDs[i], 10)},
-		}
-	}
-	return &indexpb.GetIndexFilePathsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-		FilePaths: filePaths,
-	}, nil
-}
-
-// GetMetrics gets the metrics of mocked IndexCoord, if Param `Failure` is true, it will return an error.
-func (icm *Mock) GetMetrics(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	if icm.Failure {
-		return &milvuspb.GetMetricsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			},
-		}, errors.New("IndexCoordinate GetMetrics failed")
-	}
-	return &milvuspb.GetMetricsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-		Response:      "",
-		ComponentName: "IndexCoord",
-	}, nil
-}
-
-func (icm *Mock) RemoveIndex(ctx context.Context, request *indexpb.RemoveIndexRequest) (*commonpb.Status, error) {
-	if icm.Failure {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		}, errors.New("IndexCoordinator RemoveIndex failed")
-	}
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
 	}, nil
 }
 

@@ -21,6 +21,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/metastore/model"
+
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
@@ -38,12 +44,24 @@ type flushedSegmentWatcher struct {
 	wg               sync.WaitGroup
 	taskMutex        sync.RWMutex
 	scheduleDuration time.Duration
+	notify           chan struct{}
 
 	etcdRevision int64
 	watchChan    clientv3.WatchChan
 
-	meta            *metaTable
-	flushedSegments map[UniqueID]*datapb.SegmentInfo
+	meta    *metaTable
+	builder *indexBuilder
+	ic      *IndexCoord
+	// segmentID -> indexID -> flushedSegmentTask, if there is no index or no need to build index, indexID is zero.
+	flushedSegments map[UniqueID]map[UniqueID]*flushedSegmentTask
+}
+
+type flushedSegmentTask struct {
+	handoffTask *indexpb.HandoffTask
+	indexID     UniqueID
+	fieldID     UniqueID
+	// just use init, inProgress, Done
+	state indexTaskState
 }
 
 func newFlushSegmentWatcher(ctx context.Context, kv kv.MetaKv) (*flushedSegmentWatcher, error) {
@@ -59,9 +77,56 @@ func newFlushSegmentWatcher(ctx context.Context, kv kv.MetaKv) (*flushedSegmentW
 	return fsw, nil
 }
 
+func (fsw *flushedSegmentWatcher) constructTask(segmentInfo *datapb.SegmentInfo) {
+	fieldIndexes := fsw.meta.GetIndexesForCollection(segmentInfo.CollectionID)
+	if segmentInfo.NumOfRows < Params.IndexCoordCfg.MinSegmentNumRowsToEnableIndex || len(fieldIndexes) == 0 {
+		log.Warn("segemnt no need to build index", zap.Int64("segmentID", segmentInfo.ID),
+			zap.Int64("num of rows", segmentInfo.NumOfRows), zap.Int("collection indexes num", len(fieldIndexes)))
+		fsw.flushedSegments[segmentInfo.ID][0] = &flushedSegmentTask{
+			handoffTask: &indexpb.HandoffTask{
+				SegmentInfo: segmentInfo,
+			},
+			state: indexTaskDone,
+		}
+		fsw.notify <- struct{}{}
+		return
+	}
+	for _, index := range fieldIndexes {
+		fsw.flushedSegments[segmentInfo.ID][index.IndexID] = &flushedSegmentTask{
+			handoffTask: &indexpb.HandoffTask{
+				SegmentInfo: segmentInfo,
+				IndexInfo: &indexpb.IndexInfo{
+					CollectionID: segmentInfo.CollectionID,
+					FieldID:      index.FieldID,
+					IndexName:    index.IndexName,
+					TypeParams:   index.TypeParams,
+					IndexParams:  index.IndexParams,
+				},
+			},
+			state: indexTaskInit,
+		}
+		hasIndex, _ := fsw.meta.CheckBuiltIndex(segmentInfo.ID, index.IndexID)
+		if hasIndex {
+			state := fsw.meta.GetIndexState(segmentInfo.ID, index.IndexID)
+			switch state {
+			case commonpb.IndexState_IndexStateNone:
+				fsw.flushedSegments[segmentInfo.ID][index.IndexID].state = indexTaskInit
+
+			case commonpb.IndexState_InProgress, commonpb.IndexState_Unissued, commonpb.IndexState_Retry:
+				fsw.flushedSegments[segmentInfo.ID][index.IndexID].state = indexTaskInProgress
+
+			case commonpb.IndexState_Finished, commonpb.IndexState_Failed:
+				fsw.flushedSegments[segmentInfo.ID][index.IndexID].state = indexTaskDone
+
+			}
+		}
+	}
+	return
+}
+
 func (fsw *flushedSegmentWatcher) reloadFromKV() error {
 	log.Info("flushSegmentWatcher reloadFromKV")
-	fsw.flushedSegments = make(map[UniqueID]*datapb.SegmentInfo)
+	fsw.flushedSegments = make(map[UniqueID]map[UniqueID]*flushedSegmentTask)
 	_, values, version, err := fsw.kvClient.LoadWithRevision(flushedSegmentPrefix)
 	if err != nil {
 		log.Error("flushSegmentWatcher reloadFromKV fail", zap.String("prefix", flushedSegmentPrefix), zap.Error(err))
@@ -73,7 +138,7 @@ func (fsw *flushedSegmentWatcher) reloadFromKV() error {
 			log.Error("flushSegmentWatcher unmarshal segment info fail", zap.Error(err))
 			return err
 		}
-		fsw.flushedSegments[segmentInfo.ID] = segmentInfo
+		fsw.constructTask(segmentInfo)
 	}
 	fsw.etcdRevision = version
 	return nil
@@ -93,7 +158,7 @@ func (fsw *flushedSegmentWatcher) enqueue(segmentInfo *datapb.SegmentInfo) {
 	fsw.taskMutex.Lock()
 	defer fsw.taskMutex.Unlock()
 
-	fsw.flushedSegments[segmentInfo.ID] = segmentInfo
+	fsw.constructTask(segmentInfo)
 }
 
 func (fsw *flushedSegmentWatcher) scheduler() {
@@ -110,16 +175,54 @@ func (fsw *flushedSegmentWatcher) scheduler() {
 			return
 		case <-ticker.C:
 			fsw.taskMutex.Lock()
-			for _, segmentInfo := range fsw.flushedSegments {
-				fsw.process(segmentInfo)
+			for _, tasks := range fsw.flushedSegments {
+				for _, t := range tasks {
+					fsw.process(t)
+				}
 			}
 			fsw.taskMutex.Unlock()
 		}
 	}
 }
 
-func (fsw *flushedSegmentWatcher) process(segmentInfo *datapb.SegmentInfo) {
+func (fsw *flushedSegmentWatcher) process(task *flushedSegmentTask) {
 	// check if the segment needs index?
 
+	switch task.state {
+	case indexTaskInit:
+		//get binLogs
+		binLogs := make([]string, 0)
+		for _, fieldBinLog := range task.handoffTask.SegmentInfo.GetBinlogs() {
+			if fieldBinLog.GetFieldID() == task.fieldID {
+				for _, binLog := range fieldBinLog.GetBinlogs() {
+					binLogs = append(binLogs, binLog.LogPath)
+				}
+				break
+			}
+		}
+		segIdx := &model.SegmentIndex{
+			Segment: model.Segment{
+				SegmentID:    task.handoffTask.SegmentInfo.ID,
+				CollectionID: task.handoffTask.SegmentInfo.CollectionID,
+				PartitionID:  task.handoffTask.SegmentInfo.PartitionID,
+				NumRows:      task.handoffTask.SegmentInfo.NumOfRows,
+				BinLogs:      binLogs,
+			},
+		}
+
+		//create index task for metaTable
+		// send to indexBuilder
+		if err := fsw.ic.createIndex(segIdx); err != nil {
+			log.Warn("IndexCoord create index for segment fail", zap.Int64("segID", task.handoffTask.SegmentInfo.ID),
+				zap.Int64("indexID", task.indexID), zap.Error(err))
+			return
+		}
+
+	case indexTaskInProgress:
+
+		return
+	case indexTaskDone:
+		// TODO @xiaocai2333: send hand off event to etcd, and remove flushed segment from etcd.
+	}
 	// buildIndex
 }

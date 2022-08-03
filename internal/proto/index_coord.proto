@@ -7,6 +7,7 @@ option go_package = "github.com/milvus-io/milvus/internal/proto/indexpb";
 import "common.proto";
 import "internal.proto";
 import "milvus.proto";
+import "data_coord.proto";
 
 service IndexCoord {
   rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
@@ -15,6 +16,7 @@ service IndexCoord {
   rpc GetIndexStates(GetIndexStatesRequest) returns (GetIndexStatesResponse) {}
   rpc GetIndexFilePaths(GetIndexFilePathsRequest) returns (GetIndexFilePathsResponse){}
   rpc DropIndex(DropIndexRequest) returns (common.Status) {}
+  rpc DescribeIndex(DescribeIndexRequest) returns (DescribeIndexResponse) {}
 //  rpc RemoveIndex(RemoveIndexRequest) returns (common.Status) {}
 
   // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
@@ -37,14 +39,17 @@ service IndexNode {
     rpc GetJobNum(GetJobNumRequest) returns (GetJobNumResponse) {}
 }
 
-message FieldIndex {
+message IndexInfo {
   int64 collectionID = 1;
-//  int64 partitionID = 2;
-  int64 fieldID = 3;
-  int64 indexID = 4;
-  string index_name = 5;
-  repeated common.KeyValuePair type_params = 6;
-  repeated common.KeyValuePair index_params = 7;
+  int64 fieldID = 2;
+  string index_name = 3;
+  repeated common.KeyValuePair type_params = 4;
+  repeated common.KeyValuePair index_params = 5;
+}
+
+message FieldIndex {
+  IndexInfo index_info = 1;
+  int64 indexID = 2;
   bool deleted = 8;
   uint64 create_time = 9;
 }
@@ -57,13 +62,18 @@ message SegmentIndex {
     int64 indexID = 5;
     int64 buildID = 6;
     int64 nodeID = 7;
-  int64 index_version = 8;
-  common.IndexState state = 9;
+    int64 index_version = 8;
+    common.IndexState state = 9;
     string fail_reason = 10;
     repeated string index_files_paths = 11;
     bool deleted = 12;
     uint64 create_time = 13;
     uint64 serialize_size = 14;
+}
+
+message HandoffTask {
+  data.SegmentInfo segment_info = 1;
+  IndexInfo index_info = 2;
 }
 
 message RegisterNodeRequest {
@@ -122,6 +132,15 @@ message DropIndexRequest {
   string index_name = 3;
 }
 
+message DescribeIndexRequest {
+  int64 collectionID = 1;
+}
+
+message DescribeIndexResponse {
+  int64 collectionID = 1;
+  repeated IndexInfo index_infos = 2;
+}
+
 message BuildIndexRequest {
   int64 clusterID = 1;
   int64 indexBuildID = 2;
@@ -157,7 +176,7 @@ message QueryJobsRequest {
   repeated int64 buildIDs = 2;
 }
 
-message IndexInfo {
+message IndexStateInfo {
   int64 buildID = 1;
   common.IndexState state = 2;
   repeated string index_files = 3;
@@ -166,7 +185,7 @@ message IndexInfo {
 message QueryJobsResponse {
   common.Status status = 1;
   int64 clusterID = 2;
-  repeated IndexInfo index_infos = 3;
+  repeated IndexStateInfo index_infos = 3;
 }
 
 message DropJobsRequest {
@@ -186,6 +205,7 @@ message JobInfo {
   repeated common.KeyValuePair index_params = 5;
   int64 podID = 6;
 }
+
 message GetJobNumResponse {
   common.Status status = 1;
   int64 total_job_num = 2;

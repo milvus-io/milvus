@@ -813,7 +813,7 @@ func (i *IndexCoord) assignTask(builderClient types.IndexNode, req *indexpb.Crea
 
 func (i *IndexCoord) createIndex(segIdx *model.SegmentIndex) error {
 	log.Info("create index for flushed segment", zap.Int64("segID", segIdx.SegmentID))
-	hasIndex, indexBuildID := i.metaTable.CheckBuiltIndex(segIdx)
+	hasIndex, indexBuildID := i.metaTable.CheckBuiltIndex(segIdx.SegmentID, segIdx.IndexID)
 	if hasIndex {
 		log.Debug("IndexCoord has same index", zap.Int64("buildID", indexBuildID), zap.Int64("segmentID", segIdx.SegmentID))
 		return nil
@@ -897,21 +897,7 @@ func (i *IndexCoord) watchFlushedSegmentLoop() {
 					log.Debug("watchFlushedSegmentLoop watch event", zap.Int64("segID", segmentInfo.ID),
 						zap.Int64("collID", segmentInfo.CollectionID), zap.Int64("num rows", segmentInfo.NumOfRows),
 						zap.Int64s("compactForm", segmentInfo.CompactionFrom))
-
-					log.Info("create index for flushed segment", zap.Int64("segID", segmentInfo.ID))
-					segmentIndexes := i.metaTable.BuildIndexes(segmentInfo)
-					if len(segmentIndexes) == 0 {
-						log.Info("segment no need to index", zap.Int64("segmentID", segmentInfo.ID))
-						continue
-					}
-					for _, segIdx := range segmentIndexes {
-						err := i.createIndex(segIdx)
-						if err != nil {
-							log.Error("IndexCoord create index for segment fail", zap.Int64("segID", segmentInfo.ID))
-							// TODO @xiaocai2333: panic?
-							continue
-						}
-					}
+					// TODO @xiaocai2333: enqueue to flushedSegment
 				case mvccpb.DELETE:
 					log.Info("the segment info has been deleted", zap.String("key", string(event.Kv.Key)))
 				}

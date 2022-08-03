@@ -29,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 )
 
@@ -339,38 +338,52 @@ func (mt *metaTable) BuildIndex(buildID UniqueID) error {
 	return mt.updateSegIndexMeta(segIdx, updateFunc)
 }
 
-func (mt *metaTable) BuildIndexes(segmentInfo *datapb.SegmentInfo) []*model.SegmentIndex {
+func (mt *metaTable) GetIndexesForCollection(collID UniqueID) []*model.Index {
 	mt.indexLock.RLock()
 	defer mt.indexLock.RUnlock()
 
-	segmentIndexes := make([]*model.SegmentIndex, 0)
-	if segmentInfo.NumOfRows < Params.IndexCoordCfg.MinSegmentNumRowsToEnableIndex {
-		return segmentIndexes
-	}
-
-	for indexID, index := range mt.collectionIndexes[segmentInfo.CollectionID] {
-		binLogs := make([]string, 0)
-		for _, fieldBinLog := range segmentInfo.GetBinlogs() {
-			if fieldBinLog.GetFieldID() == index.FieldID {
-				for _, binLog := range fieldBinLog.GetBinlogs() {
-					binLogs = append(binLogs, binLog.LogPath)
-				}
-				break
-			}
+	indexInfos := make([]*model.Index, 0)
+	for _, index := range mt.collectionIndexes[collID] {
+		if index.IsDeleted {
+			continue
 		}
-		segmentIndexes = append(segmentIndexes, &model.SegmentIndex{
-			Segment: model.Segment{
-				CollectionID: segmentInfo.CollectionID,
-				PartitionID:  segmentInfo.PartitionID,
-				SegmentID:    segmentInfo.ID,
-				NumRows:      segmentInfo.NumOfRows,
-				BinLogs:      binLogs,
-			},
-			IndexID: indexID,
-		})
+		indexInfos = append(indexInfos, model.CloneIndex(index))
 	}
-	return segmentIndexes
+	return indexInfos
 }
+
+//func (mt *metaTable) BuildIndexes(segmentInfo *datapb.SegmentInfo) []*model.SegmentIndex {
+//	mt.indexLock.RLock()
+//	defer mt.indexLock.RUnlock()
+//
+//	segmentIndexes := make([]*model.SegmentIndex, 0)
+//	if segmentInfo.NumOfRows < Params.IndexCoordCfg.MinSegmentNumRowsToEnableIndex {
+//		return segmentIndexes
+//	}
+//
+//	for indexID, index := range mt.collectionIndexes[segmentInfo.CollectionID] {
+//		binLogs := make([]string, 0)
+//		for _, fieldBinLog := range segmentInfo.GetBinlogs() {
+//			if fieldBinLog.GetFieldID() == index.FieldID {
+//				for _, binLog := range fieldBinLog.GetBinlogs() {
+//					binLogs = append(binLogs, binLog.LogPath)
+//				}
+//				break
+//			}
+//		}
+//		segmentIndexes = append(segmentIndexes, &model.SegmentIndex{
+//			Segment: model.Segment{
+//				CollectionID: segmentInfo.CollectionID,
+//				PartitionID:  segmentInfo.PartitionID,
+//				SegmentID:    segmentInfo.ID,
+//				NumRows:      segmentInfo.NumOfRows,
+//				BinLogs:      binLogs,
+//			},
+//			IndexID: indexID,
+//		})
+//	}
+//	return segmentIndexes
+//}
 
 // HasSameReq determine whether there are same indexing tasks.
 func (mt *metaTable) HasSameReq(req *indexpb.CreateIndexRequest) bool {
@@ -434,15 +447,15 @@ func (mt *metaTable) HasSameReq(req *indexpb.CreateIndexRequest) bool {
 	return false
 }
 
-func (mt *metaTable) CheckBuiltIndex(segIdx *model.SegmentIndex) (bool, UniqueID) {
+func (mt *metaTable) CheckBuiltIndex(segmentID, indexID UniqueID) (bool, UniqueID) {
 	mt.segmentIndexLock.RLock()
 	defer mt.segmentIndexLock.RUnlock()
 
-	if _, ok := mt.segmentIndexes[segIdx.SegmentID]; !ok {
+	if _, ok := mt.segmentIndexes[segmentID]; !ok {
 		return false, 0
 	}
 
-	if index, ok := mt.segmentIndexes[segIdx.SegmentID][segIdx.IndexID]; ok {
+	if index, ok := mt.segmentIndexes[segmentID][indexID]; ok {
 		return true, index.BuildID
 	}
 
@@ -470,7 +483,7 @@ func (mt *metaTable) GetIndexIDByName(collID, fieldID int64, indexName string) (
 	return indexID, createTs
 }
 
-// GetIndexStates gets the index states from meta table.
+// GetIndexStates gets the index states for indexID from meta table.
 func (mt *metaTable) GetIndexStates(indexID int64, createTs uint64) []*model.SegmentIndex {
 	log.Debug("IndexCoord get index from meta table", zap.Int64("indexID", indexID))
 
@@ -524,6 +537,19 @@ func (mt *metaTable) GetIndexStates(indexID int64, createTs uint64) []*model.Seg
 		zap.Int("InProgress", cntInProgress), zap.Int("Finished", cntFinished), zap.Int("Failed", cntFailed))
 
 	return segIndexStates
+}
+
+func (mt *metaTable) GetIndexState(segmentID UniqueID, indexID UniqueID) commonpb.IndexState {
+	mt.segmentIndexLock.RLock()
+	defer mt.segmentIndexLock.RUnlock()
+
+	if segIdxes, ok := mt.segmentIndexes[segmentID]; ok {
+		if segIdx, ok := segIdxes[indexID]; ok {
+			return segIdx.IndexState
+		}
+	}
+
+	return commonpb.IndexState_IndexStateNone
 }
 
 // MarkIndexAsDeleted will mark the corresponding index as deleted, and recycleUnusedIndexFiles will recycle these tasks.
