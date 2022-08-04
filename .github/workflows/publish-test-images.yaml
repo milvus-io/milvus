@@ -84,7 +84,7 @@ jobs:
           title: '[automated] Update Pytest image changes'
           body: |
             Update Pytest image changes
-
+            See changes: https://github.com/milvus-io/milvus/commit/${{ github.sha }}
             Signed-off-by: ${{ github.actor }} ${{ github.actor }}@users.noreply.github.com
       - name: Check outputs
         if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
