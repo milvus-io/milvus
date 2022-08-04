@@ -17,8 +17,8 @@ type Catalog interface {
 	CollectionExists(ctx context.Context, collectionID typeutil.UniqueID, ts typeutil.Timestamp) bool
 	DropCollection(ctx context.Context, collectionInfo *model.Collection, ts typeutil.Timestamp) error
 
-	CreatePartition(ctx context.Context, coll *model.Collection, ts typeutil.Timestamp) error
-	DropPartition(ctx context.Context, collectionInfo *model.Collection, partitionID typeutil.UniqueID, ts typeutil.Timestamp) error
+	CreatePartition(ctx context.Context, partition *model.Partition, ts typeutil.Timestamp) error
+	DropPartition(ctx context.Context, collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, ts typeutil.Timestamp) error
 
 	CreateIndex(ctx context.Context, col *model.Collection, index *model.Index) error
 	// AlterIndex newIndex only contains updated parts
@@ -26,10 +26,10 @@ type Catalog interface {
 	DropIndex(ctx context.Context, collectionInfo *model.Collection, dropIdxID typeutil.UniqueID, ts typeutil.Timestamp) error
 	ListIndexes(ctx context.Context) ([]*model.Index, error)
 
-	CreateAlias(ctx context.Context, collection *model.Collection, ts typeutil.Timestamp) error
-	DropAlias(ctx context.Context, collectionID typeutil.UniqueID, alias string, ts typeutil.Timestamp) error
-	AlterAlias(ctx context.Context, collection *model.Collection, ts typeutil.Timestamp) error
-	ListAliases(ctx context.Context) ([]*model.Collection, error)
+	CreateAlias(ctx context.Context, alias *model.Alias, ts typeutil.Timestamp) error
+	DropAlias(ctx context.Context, alias string, ts typeutil.Timestamp) error
+	AlterAlias(ctx context.Context, alias *model.Alias, ts typeutil.Timestamp) error
+	ListAliases(ctx context.Context, ts typeutil.Timestamp) ([]*model.Alias, error)
 
 	GetCredential(ctx context.Context, username string) (*model.Credential, error)
 	CreateCredential(ctx context.Context, credential *model.Credential) error

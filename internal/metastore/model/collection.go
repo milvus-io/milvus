@@ -22,7 +22,7 @@ type Collection struct {
 	StartPositions       []*commonpb.KeyDataPair
 	CreateTime           uint64
 	ConsistencyLevel     commonpb.ConsistencyLevel
-	Aliases              []string
+	Aliases              []string          // TODO: deprecate this.
 	Extra                map[string]string // extra kvs
 }
 
@@ -53,24 +53,12 @@ func UnmarshalCollectionModel(coll *pb.CollectionInfo) *Collection {
 	}
 
 	// backward compatible for deprecated fields
-	var partitions []*Partition
-	if len(coll.Partitions) != 0 {
-		partitions = make([]*Partition, len(coll.Partitions))
-		for idx, partition := range coll.Partitions {
-			partitions[idx] = &Partition{
-				PartitionID:               partition.GetPartitionID(),
-				PartitionName:             partition.GetPartitionName(),
-				PartitionCreatedTimestamp: partition.GetPartitionCreatedTimestamp(),
-			}
-		}
-	} else {
-		partitions = make([]*Partition, len(coll.PartitionIDs))
-		for idx := range coll.PartitionIDs {
-			partitions[idx] = &Partition{
-				PartitionID:               coll.PartitionIDs[idx],
-				PartitionName:             coll.PartitionNames[idx],
-				PartitionCreatedTimestamp: coll.PartitionCreatedTimestamps[idx],
-			}
+	partitions := make([]*Partition, len(coll.PartitionIDs))
+	for idx := range coll.PartitionIDs {
+		partitions[idx] = &Partition{
+			PartitionID:               coll.PartitionIDs[idx],
+			PartitionName:             coll.PartitionNames[idx],
+			PartitionCreatedTimestamp: coll.PartitionCreatedTimestamps[idx],
 		}
 	}
 
@@ -87,7 +75,7 @@ func UnmarshalCollectionModel(coll *pb.CollectionInfo) *Collection {
 		Name:                 coll.Schema.Name,
 		Description:          coll.Schema.Description,
 		AutoID:               coll.Schema.AutoID,
-		Fields:               UnmarshalFieldModels(coll.Schema.Fields),
+		Fields:               UnmarshalFieldModels(coll.GetSchema().GetFields()),
 		Partitions:           partitions,
 		FieldIDToIndexID:     filedIDToIndexIDs,
 		VirtualChannelNames:  coll.VirtualChannelNames,
@@ -99,29 +87,17 @@ func UnmarshalCollectionModel(coll *pb.CollectionInfo) *Collection {
 	}
 }
 
+// MarshalCollectionModel marshal only collection-related information.
+// partitions, aliases and fields won't be marshaled. They should be written to newly path.
 func MarshalCollectionModel(coll *Collection) *pb.CollectionInfo {
 	if coll == nil {
 		return nil
 	}
 
-	fields := make([]*schemapb.FieldSchema, len(coll.Fields))
-	for idx, field := range coll.Fields {
-		fields[idx] = &schemapb.FieldSchema{
-			FieldID:      field.FieldID,
-			Name:         field.Name,
-			IsPrimaryKey: field.IsPrimaryKey,
-			Description:  field.Description,
-			DataType:     field.DataType,
-			TypeParams:   field.TypeParams,
-			IndexParams:  field.IndexParams,
-			AutoID:       field.AutoID,
-		}
-	}
 	collSchema := &schemapb.CollectionSchema{
 		Name:        coll.Name,
 		Description: coll.Description,
 		AutoID:      coll.AutoID,
-		Fields:      fields,
 	}
 
 	partitions := make([]*pb.PartitionInfo, len(coll.Partitions))
@@ -140,10 +116,10 @@ func MarshalCollectionModel(coll *Collection) *pb.CollectionInfo {
 			IndexID: tuple.Value,
 		}
 	}
+
 	return &pb.CollectionInfo{
 		ID:                   coll.CollectionID,
 		Schema:               collSchema,
-		Partitions:           partitions,
 		FieldIndexes:         fieldIndexes,
 		CreateTime:           coll.CreateTime,
 		VirtualChannelNames:  coll.VirtualChannelNames,

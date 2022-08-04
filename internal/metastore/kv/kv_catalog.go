@@ -28,13 +28,84 @@ import (
 	"go.uber.org/zap"
 )
 
+// prefix/collection/collection_id 					-> CollectionInfo
+// prefix/partitions/collection_id/partition_id		-> PartitionInfo
+// prefix/aliases/alias_name						-> AliasInfo
+// prefix/fields/collection_id/field_id				-> FieldSchema
 type Catalog struct {
 	Txn      kv.TxnKV
 	Snapshot kv.SnapShotKV
 }
 
+func buildCollectionKey(collectionID typeutil.UniqueID) string {
+	return fmt.Sprintf("%s/%d", CollectionMetaPrefix, collectionID)
+}
+
+func buildPartitionPrefix(collectionID typeutil.UniqueID) string {
+	return fmt.Sprintf("%s/%d", PartitionMetaPrefix, collectionID)
+}
+
+func buildPartitionKey(collectionID, partitionID typeutil.UniqueID) string {
+	return fmt.Sprintf("%s/%d", buildPartitionPrefix(collectionID), partitionID)
+}
+
+func buildFieldPrefix(collectionID typeutil.UniqueID) string {
+	return fmt.Sprintf("%s/%d", FieldMetaPrefix, collectionID)
+}
+
+func buildFieldKey(collectionID typeutil.UniqueID, fieldID int64) string {
+	return fmt.Sprintf("%s/%d", buildFieldPrefix(collectionID), fieldID)
+}
+
+func buildAliasKey(aliasName string) string {
+	return fmt.Sprintf("%s/%s", AliasMetaPrefix, aliasName)
+}
+
+func buildKvs(keys, values []string) (map[string]string, error) {
+	if len(keys) != len(values) {
+		return nil, fmt.Errorf("length of keys (%d) and values (%d) are not equal", len(keys), len(values))
+	}
+	ret := make(map[string]string, len(keys))
+	for i, k := range keys {
+		_, ok := ret[k]
+		if ok {
+			return nil, fmt.Errorf("duplicated key was found: %s", k)
+		}
+		ret[k] = values[i]
+	}
+	return ret, nil
+}
+
+// TODO: atomicity should be promised outside.
+func batchSave(snapshot kv.SnapShotKV, maxTxnNum int, kvs map[string]string, ts typeutil.Timestamp) error {
+	keys := make([]string, 0, len(kvs))
+	values := make([]string, 0, len(kvs))
+	for k, v := range kvs {
+		keys = append(keys, k)
+		values = append(values, v)
+	}
+	min := func(a, b int) int {
+		if a < b {
+			return a
+		}
+		return b
+	}
+	for i := 0; i < len(kvs); i = i + maxTxnNum {
+		end := min(i+maxTxnNum, len(keys))
+		batch, err := buildKvs(keys[i:end], values[i:end])
+		if err != nil {
+			return err
+		}
+		// TODO: atomicity is not promised. Garbage will be generated.
+		if err := snapshot.MultiSave(batch, ts); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (kc *Catalog) CreateCollection(ctx context.Context, coll *model.Collection, ts typeutil.Timestamp) error {
-	k1 := fmt.Sprintf("%s/%d", CollectionMetaPrefix, coll.CollectionID)
+	k1 := buildCollectionKey(coll.CollectionID)
 	collInfo := model.MarshalCollectionModel(coll)
 	v1, err := proto.Marshal(collInfo)
 	if err != nil {
@@ -42,46 +113,100 @@ func (kc *Catalog) CreateCollection(ctx context.Context, coll *model.Collection,
 		return err
 	}
 
-	// save ddOpStr into etcd
 	kvs := map[string]string{k1: string(v1)}
-	for k, v := range coll.Extra {
-		kvs[k] = v
+
+	// save partition info to newly path.
+	for _, partition := range coll.Partitions {
+		k := buildPartitionKey(coll.CollectionID, partition.PartitionID)
+		partitionInfo := model.MarshalPartitionModel(partition)
+		v, err := proto.Marshal(partitionInfo)
+		if err != nil {
+			return err
+		}
+		kvs[k] = string(v)
 	}
 
-	err = kc.Snapshot.MultiSave(kvs, ts)
-	if err != nil {
-		log.Error("create collection persist meta fail", zap.String("key", k1), zap.Error(err))
-		return err
+	// no default aliases will be created.
+
+	// save fields info to newly path.
+	for _, field := range coll.Fields {
+		k := buildFieldKey(coll.CollectionID, field.FieldID)
+		fieldInfo := model.MarshalFieldModel(field)
+		v, err := proto.Marshal(fieldInfo)
+		if err != nil {
+			return err
+		}
+		kvs[k] = string(v)
 	}
 
-	return nil
+	// TODO: atomicity should be promised outside.
+	maxTxnNum := 64
+	return batchSave(kc.Snapshot, maxTxnNum, kvs, ts)
 }
 
-func (kc *Catalog) CreatePartition(ctx context.Context, coll *model.Collection, ts typeutil.Timestamp) error {
-	k1 := fmt.Sprintf("%s/%d", CollectionMetaPrefix, coll.CollectionID)
-	collInfo := model.MarshalCollectionModel(coll)
-	v1, err := proto.Marshal(collInfo)
+func (kc *Catalog) loadCollection(ctx context.Context, collectionID typeutil.UniqueID, ts typeutil.Timestamp) (*pb.CollectionInfo, error) {
+	collKey := buildCollectionKey(collectionID)
+	collVal, err := kc.Snapshot.Load(collKey, ts)
 	if err != nil {
-		log.Error("create partition marshal fail", zap.String("key", k1), zap.Error(err))
+		log.Error("get collection meta fail", zap.String("key", collKey), zap.Error(err))
+		return nil, err
+	}
+
+	collMeta := &pb.CollectionInfo{}
+	err = proto.Unmarshal([]byte(collVal), collMeta)
+	return collMeta, err
+}
+
+func partitionVersionAfter210(collMeta *pb.CollectionInfo) bool {
+	return len(collMeta.GetPartitionIDs()) <= 0 &&
+		len(collMeta.GetPartitionNames()) <= 0 &&
+		len(collMeta.GetPartitionCreatedTimestamps()) <= 0
+}
+
+func partitionExistByID(collMeta *pb.CollectionInfo, partitionID typeutil.UniqueID) bool {
+	return funcutil.SliceContain(collMeta.GetPartitionIDs(), partitionID)
+}
+
+func partitionExistByName(collMeta *pb.CollectionInfo, partitionName string) bool {
+	return funcutil.SliceContain(collMeta.GetPartitionNames(), partitionName)
+}
+
+func (kc *Catalog) CreatePartition(ctx context.Context, partition *model.Partition, ts typeutil.Timestamp) error {
+	collMeta, err := kc.loadCollection(ctx, partition.CollectionID, ts)
+	if err != nil {
 		return err
 	}
 
-	kvs := map[string]string{k1: string(v1)}
-	err = kc.Snapshot.MultiSave(kvs, ts)
-	if err != nil {
-		log.Error("create partition persist meta fail", zap.String("key", k1), zap.Error(err))
-		return err
+	if partitionVersionAfter210(collMeta) {
+		// save to newly path.
+		k := buildPartitionKey(partition.CollectionID, partition.PartitionID)
+		partitionInfo := model.MarshalPartitionModel(partition)
+		v, err := proto.Marshal(partitionInfo)
+		if err != nil {
+			return err
+		}
+		return kc.Snapshot.Save(k, string(v), ts)
 	}
 
-	// save ddOpStr into etcd
-	err = kc.Txn.MultiSave(coll.Extra)
-	if err != nil {
-		// will not panic, missing create msg
-		log.Warn("create partition persist ddop meta fail", zap.Int64("collectionID", coll.CollectionID), zap.Error(err))
-		return err
+	if partitionExistByID(collMeta, partition.PartitionID) {
+		return fmt.Errorf("partition already exist: %d", partition.PartitionID)
 	}
 
-	return nil
+	if partitionExistByName(collMeta, partition.PartitionName) {
+		return fmt.Errorf("partition already exist: %s", partition.PartitionName)
+	}
+
+	// keep consistent with older version, otherwise it's hard to judge where to find partitions.
+	collMeta.PartitionIDs = append(collMeta.PartitionIDs, partition.PartitionID)
+	collMeta.PartitionNames = append(collMeta.PartitionNames, partition.PartitionName)
+	collMeta.PartitionCreatedTimestamps = append(collMeta.PartitionCreatedTimestamps, partition.PartitionCreatedTimestamp)
+
+	k := buildCollectionKey(partition.CollectionID)
+	v, err := proto.Marshal(collMeta)
+	if err != nil {
+		return err
+	}
+	return kc.Snapshot.Save(k, string(v), ts)
 }
 
 func (kc *Catalog) CreateIndex(ctx context.Context, col *model.Collection, index *model.Index) error {
@@ -192,21 +317,16 @@ func (kc *Catalog) AlterIndex(ctx context.Context, oldIndex *model.Index, newInd
 	}
 }
 
-func (kc *Catalog) CreateAlias(ctx context.Context, collection *model.Collection, ts typeutil.Timestamp) error {
-	k := fmt.Sprintf("%s/%s", CollectionAliasMetaPrefix, collection.Aliases[0])
-	v, err := proto.Marshal(&pb.CollectionInfo{ID: collection.CollectionID, Schema: &schemapb.CollectionSchema{Name: collection.Aliases[0]}})
+func (kc *Catalog) CreateAlias(ctx context.Context, alias *model.Alias, ts typeutil.Timestamp) error {
+	oldKBefore210 := fmt.Sprintf("%s/%s", CollectionAliasMetaPrefix, alias.Name)
+	k := buildAliasKey(alias.Name)
+	aliasInfo := model.MarshalAliasModel(alias)
+	v, err := proto.Marshal(aliasInfo)
 	if err != nil {
-		log.Error("create alias marshal fail", zap.String("key", k), zap.Error(err))
 		return err
 	}
-
-	err = kc.Snapshot.Save(k, string(v), ts)
-	if err != nil {
-		log.Error("create alias persist meta fail", zap.String("key", k), zap.Error(err))
-		return err
-	}
-
-	return nil
+	kvs := map[string]string{k: string(v)}
+	return kc.Snapshot.MultiSaveAndRemoveWithPrefix(kvs, []string{oldKBefore210}, ts)
 }
 
 func (kc *Catalog) CreateCredential(ctx context.Context, credential *model.Credential) error {
@@ -226,22 +346,73 @@ func (kc *Catalog) CreateCredential(ctx context.Context, credential *model.Crede
 	return nil
 }
 
-func (kc *Catalog) GetCollectionByID(ctx context.Context, collectionID typeutil.UniqueID, ts typeutil.Timestamp) (*model.Collection, error) {
-	collKey := fmt.Sprintf("%s/%d", CollectionMetaPrefix, collectionID)
-	collVal, err := kc.Snapshot.Load(collKey, ts)
+func (kc *Catalog) listPartitionsAfter210(ctx context.Context, collectionID typeutil.UniqueID, ts typeutil.Timestamp) ([]*model.Partition, error) {
+	prefix := buildPartitionPrefix(collectionID)
+	_, values, err := kc.Snapshot.LoadWithPrefix(prefix, ts)
 	if err != nil {
-		log.Error("get collection meta fail", zap.String("key", collKey), zap.Error(err))
 		return nil, err
 	}
+	partitions := make([]*model.Partition, 0, len(values))
+	for _, v := range values {
+		partitionMeta := &pb.PartitionInfo{}
+		err := proto.Unmarshal([]byte(v), partitionMeta)
+		if err != nil {
+			return nil, err
+		}
+		partitions = append(partitions, model.UnmarshalPartitionModel(partitionMeta))
+	}
+	return partitions, nil
+}
 
-	collMeta := &pb.CollectionInfo{}
-	err = proto.Unmarshal([]byte(collVal), collMeta)
+func fieldVersionAfter210(collMeta *pb.CollectionInfo) bool {
+	return len(collMeta.GetSchema().GetFields()) <= 0
+}
+
+func (kc *Catalog) listFieldsAfter210(ctx context.Context, collectionID typeutil.UniqueID, ts typeutil.Timestamp) ([]*model.Field, error) {
+	prefix := buildFieldPrefix(collectionID)
+	_, values, err := kc.Snapshot.LoadWithPrefix(prefix, ts)
+	if err != nil {
+		return nil, err
+	}
+	fields := make([]*model.Field, 0, len(values))
+	for _, v := range values {
+		partitionMeta := &schemapb.FieldSchema{}
+		err := proto.Unmarshal([]byte(v), partitionMeta)
+		if err != nil {
+			return nil, err
+		}
+		fields = append(fields, model.UnmarshalFieldModel(partitionMeta))
+	}
+	return fields, nil
+}
+
+func (kc *Catalog) GetCollectionByID(ctx context.Context, collectionID typeutil.UniqueID, ts typeutil.Timestamp) (*model.Collection, error) {
+	collKey := buildCollectionKey(collectionID)
+	collMeta, err := kc.loadCollection(ctx, collectionID, ts)
 	if err != nil {
 		log.Error("collection meta marshal fail", zap.String("key", collKey), zap.Error(err))
 		return nil, err
 	}
 
-	return model.UnmarshalCollectionModel(collMeta), nil
+	collection := model.UnmarshalCollectionModel(collMeta)
+
+	if !partitionVersionAfter210(collMeta) && !fieldVersionAfter210(collMeta) {
+		return collection, nil
+	}
+
+	partitions, err := kc.listPartitionsAfter210(ctx, collectionID, ts)
+	if err != nil {
+		return nil, err
+	}
+	collection.Partitions = partitions
+
+	fields, err := kc.listFieldsAfter210(ctx, collectionID, ts)
+	if err != nil {
+		return nil, err
+	}
+	collection.Fields = fields
+
+	return collection, nil
 }
 
 func (kc *Catalog) CollectionExists(ctx context.Context, collectionID typeutil.UniqueID, ts typeutil.Timestamp) bool {
@@ -266,8 +437,8 @@ func (kc *Catalog) GetCredential(ctx context.Context, username string) (*model.C
 	return &model.Credential{Username: username, EncryptedPassword: credentialInfo.EncryptedPassword}, nil
 }
 
-func (kc *Catalog) AlterAlias(ctx context.Context, collection *model.Collection, ts typeutil.Timestamp) error {
-	return kc.CreateAlias(ctx, collection, ts)
+func (kc *Catalog) AlterAlias(ctx context.Context, alias *model.Alias, ts typeutil.Timestamp) error {
+	return kc.CreateAlias(ctx, alias, ts)
 }
 
 func (kc *Catalog) DropCollection(ctx context.Context, collectionInfo *model.Collection, ts typeutil.Timestamp) error {
@@ -306,45 +477,45 @@ func (kc *Catalog) DropCollection(ctx context.Context, collectionInfo *model.Col
 	return nil
 }
 
-func (kc *Catalog) DropPartition(ctx context.Context, collectionInfo *model.Collection, partitionID typeutil.UniqueID, ts typeutil.Timestamp) error {
-	collMeta := model.MarshalCollectionModel(collectionInfo)
-	k := path.Join(CollectionMetaPrefix, strconv.FormatInt(collectionInfo.CollectionID, 10))
+func dropPartition(collMeta *pb.CollectionInfo, partitionID typeutil.UniqueID) {
+	if collMeta == nil {
+		return
+	}
+
+	{
+		loc := -1
+		for idx, pid := range collMeta.GetPartitionIDs() {
+			if pid == partitionID {
+				loc = idx
+				break
+			}
+		}
+		if loc != -1 {
+			collMeta.PartitionIDs = append(collMeta.GetPartitionIDs()[:loc], collMeta.GetPartitionIDs()[loc+1:]...)
+			collMeta.PartitionNames = append(collMeta.GetPartitionNames()[:loc], collMeta.GetPartitionNames()[loc+1:]...)
+			collMeta.PartitionCreatedTimestamps = append(collMeta.GetPartitionCreatedTimestamps()[:loc], collMeta.GetPartitionCreatedTimestamps()[loc+1:]...)
+		}
+	}
+}
+
+func (kc *Catalog) DropPartition(ctx context.Context, collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, ts typeutil.Timestamp) error {
+	collMeta, err := kc.loadCollection(ctx, collectionID, ts)
+	if err != nil {
+		return err
+	}
+
+	if partitionVersionAfter210(collMeta) {
+		k := buildPartitionKey(collectionID, partitionID)
+		return kc.Snapshot.MultiSaveAndRemoveWithPrefix(nil, []string{k}, ts)
+	}
+
+	k := buildCollectionKey(collectionID)
+	dropPartition(collMeta, partitionID)
 	v, err := proto.Marshal(collMeta)
 	if err != nil {
-		log.Error("drop partition marshal fail", zap.String("key", k), zap.Error(err))
 		return err
 	}
-
-	err = kc.Snapshot.Save(k, string(v), ts)
-	if err != nil {
-		log.Error("drop partition update collection meta fail",
-			zap.Int64("collectionID", collectionInfo.CollectionID),
-			zap.Int64("partitionID", partitionID),
-			zap.Error(err))
-		return err
-	}
-
-	var delMetaKeys []string
-	for _, idxInfo := range collMeta.FieldIndexes {
-		k := fmt.Sprintf("%s/%d/%d/%d", SegmentIndexMetaPrefix, collMeta.ID, idxInfo.IndexID, partitionID)
-		delMetaKeys = append(delMetaKeys, k)
-	}
-
-	// Txn operation
-	metaTxn := map[string]string{}
-	for k, v := range collectionInfo.Extra {
-		metaTxn[k] = v
-	}
-	err = kc.Txn.MultiSaveAndRemoveWithPrefix(metaTxn, delMetaKeys)
-	if err != nil {
-		log.Warn("drop partition update meta fail",
-			zap.Int64("collectionID", collectionInfo.CollectionID),
-			zap.Int64("partitionID", partitionID),
-			zap.Error(err))
-		return err
-	}
-
-	return nil
+	return kc.Snapshot.Save(k, string(v), ts)
 }
 
 func (kc *Catalog) DropIndex(ctx context.Context, collectionInfo *model.Collection, dropIdxID typeutil.UniqueID, ts typeutil.Timestamp) error {
@@ -386,19 +557,10 @@ func (kc *Catalog) DropCredential(ctx context.Context, username string) error {
 	return nil
 }
 
-func (kc *Catalog) DropAlias(ctx context.Context, collectionID typeutil.UniqueID, alias string, ts typeutil.Timestamp) error {
-	delMetakeys := []string{
-		fmt.Sprintf("%s/%s", CollectionAliasMetaPrefix, alias),
-	}
-
-	meta := make(map[string]string)
-	err := kc.Snapshot.MultiSaveAndRemoveWithPrefix(meta, delMetakeys, ts)
-	if err != nil {
-		log.Error("drop alias update meta fail", zap.String("alias", alias), zap.Error(err))
-		return err
-	}
-
-	return nil
+func (kc *Catalog) DropAlias(ctx context.Context, alias string, ts typeutil.Timestamp) error {
+	oldKBefore210 := fmt.Sprintf("%s/%s", CollectionAliasMetaPrefix, alias)
+	k := buildAliasKey(alias)
+	return kc.Snapshot.MultiSaveAndRemoveWithPrefix(nil, []string{k, oldKBefore210}, ts)
 }
 
 func (kc *Catalog) GetCollectionByName(ctx context.Context, collectionName string, ts typeutil.Timestamp) (*model.Collection, error) {
@@ -416,7 +578,8 @@ func (kc *Catalog) GetCollectionByName(ctx context.Context, collectionName strin
 			continue
 		}
 		if colMeta.Schema.Name == collectionName {
-			return model.UnmarshalCollectionModel(&colMeta), nil
+			// compatibility handled by kc.GetCollectionByID.
+			return kc.GetCollectionByID(ctx, colMeta.GetID(), ts)
 		}
 	}
 
@@ -441,31 +604,71 @@ func (kc *Catalog) ListCollections(ctx context.Context, ts typeutil.Timestamp) (
 			log.Warn("unmarshal collection info failed", zap.Error(err))
 			continue
 		}
-		colls[collMeta.Schema.Name] = model.UnmarshalCollectionModel(&collMeta)
+		collection, err := kc.GetCollectionByID(ctx, collMeta.GetID(), ts)
+		if err != nil {
+			return nil, err
+		}
+		colls[collMeta.Schema.Name] = collection
 	}
 
 	return colls, nil
 }
 
-func (kc *Catalog) ListAliases(ctx context.Context) ([]*model.Collection, error) {
-	_, values, err := kc.Snapshot.LoadWithPrefix(CollectionAliasMetaPrefix, 0)
+func (kc *Catalog) listAliasesBefore210(ctx context.Context, ts typeutil.Timestamp) ([]*model.Alias, error) {
+	_, values, err := kc.Snapshot.LoadWithPrefix(CollectionAliasMetaPrefix, ts)
 	if err != nil {
-		log.Error("get aliases meta fail", zap.String("prefix", CollectionAliasMetaPrefix), zap.Error(err))
 		return nil, err
 	}
-
-	var colls []*model.Collection
+	// aliases before 210 stored by CollectionInfo.
+	aliases := make([]*model.Alias, 0, len(values))
 	for _, value := range values {
-		aliasInfo := pb.CollectionInfo{}
-		err = proto.Unmarshal([]byte(value), &aliasInfo)
+		coll := &pb.CollectionInfo{}
+		err := proto.Unmarshal([]byte(value), coll)
 		if err != nil {
-			log.Warn("unmarshal aliases failed", zap.Error(err))
-			continue
+			return nil, err
 		}
-		colls = append(colls, model.UnmarshalCollectionModel(&aliasInfo))
+		aliases = append(aliases, &model.Alias{
+			Name:         coll.GetSchema().GetName(),
+			CollectionID: coll.GetID(),
+			CreatedTime:  0, // not accurate.
+		})
 	}
+	return aliases, nil
+}
 
-	return colls, nil
+func (kc *Catalog) listAliasesAfter210(ctx context.Context, ts typeutil.Timestamp) ([]*model.Alias, error) {
+	_, values, err := kc.Snapshot.LoadWithPrefix(AliasMetaPrefix, ts)
+	if err != nil {
+		return nil, err
+	}
+	// aliases after 210 stored by AliasInfo.
+	aliases := make([]*model.Alias, 0, len(values))
+	for _, value := range values {
+		info := &pb.AliasInfo{}
+		err := proto.Unmarshal([]byte(value), info)
+		if err != nil {
+			return nil, err
+		}
+		aliases = append(aliases, &model.Alias{
+			Name:         info.GetAliasName(),
+			CollectionID: info.GetCollectionId(),
+			CreatedTime:  info.GetCreatedTime(),
+		})
+	}
+	return aliases, nil
+}
+
+func (kc *Catalog) ListAliases(ctx context.Context, ts typeutil.Timestamp) ([]*model.Alias, error) {
+	aliases1, err := kc.listAliasesBefore210(ctx, ts)
+	if err != nil {
+		return nil, err
+	}
+	aliases2, err := kc.listAliasesAfter210(ctx, ts)
+	if err != nil {
+		return nil, err
+	}
+	aliases := append(aliases1, aliases2...)
+	return aliases, nil
 }
 
 func (kc *Catalog) listSegmentIndexes(ctx context.Context) (map[int64]*model.Index, error) {

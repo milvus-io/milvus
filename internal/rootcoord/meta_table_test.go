@@ -632,7 +632,12 @@ func TestMetaTable(t *testing.T) {
 		mockKV.multiSave = func(kvs map[string]string, ts typeutil.Timestamp) error {
 			return fmt.Errorf("multi save error")
 		}
+		tmpSaveFunc := mockKV.save
+		mockKV.save = func(key, value string, ts typeutil.Timestamp) error {
+			return errors.New("mock")
+		}
 		assert.Error(t, mt.AddPartition(coll.CollectionID, "no-part", 22, ts, ""))
+		mockKV.save = tmpSaveFunc
 		//err = mt.AddPartition(coll.CollectionID, "no-part", 22, ts, nil)
 		//assert.NotNil(t, err)
 		//assert.EqualError(t, err, "multi save error")
@@ -2240,9 +2245,9 @@ func (mc *MockedCatalog) ListIndexes(ctx context.Context) ([]*model.Index, error
 	return args.Get(0).([]*model.Index), nil
 }
 
-func (mc *MockedCatalog) ListAliases(ctx context.Context) ([]*model.Collection, error) {
+func (mc *MockedCatalog) ListAliases(ctx context.Context, ts typeutil.Timestamp) ([]*model.Alias, error) {
 	args := mc.Called()
-	return args.Get(0).([]*model.Collection), nil
+	return args.Get(0).([]*model.Alias), nil
 }
 
 func (mc *MockedCatalog) AlterIndex(ctx context.Context, oldIndex *model.Index, newIndex *model.Index, alterType metastore.AlterType) error {
@@ -2356,7 +2361,16 @@ func TestMetaTable_ReloadFromKV(t *testing.T) {
 
 	alias2 := *collInfo
 	alias2.Name = collInfo.Aliases[1]
-	mc.On("ListAliases").Return([]*model.Collection{&alias1, &alias2}, nil)
+	mc.On("ListAliases").Return([]*model.Alias{
+		{
+			CollectionID: collInfo.CollectionID,
+			Name:         collInfo.Aliases[0],
+		},
+		{
+			CollectionID: collInfo.CollectionID,
+			Name:         collInfo.Aliases[1],
+		},
+	}, nil)
 
 	mt := &MetaTable{}
 	mt.catalog = mc

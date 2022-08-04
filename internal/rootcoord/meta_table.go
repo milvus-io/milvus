@@ -111,7 +111,7 @@ func (mt *MetaTable) reloadFromCatalog() error {
 	mt.segID2IndexID = make(map[typeutil.UniqueID]typeutil.UniqueID)
 	mt.indexID2Meta = make(map[typeutil.UniqueID]*model.Index)
 
-	collAliases, err := mt.catalog.ListAliases(mt.ctx)
+	collAliases, err := mt.catalog.ListAliases(mt.ctx, 0)
 	if err != nil {
 		return err
 	}
@@ -389,14 +389,15 @@ func (mt *MetaTable) AddPartition(collID typeutil.UniqueID, partitionName string
 		// no necessary to check created timestamp
 	}
 
-	coll.Partitions = append(coll.Partitions,
-		&model.Partition{
-			PartitionID:               partitionID,
-			PartitionName:             partitionName,
-			PartitionCreatedTimestamp: ts,
-		})
+	partition := &model.Partition{
+		PartitionID:               partitionID,
+		PartitionName:             partitionName,
+		PartitionCreatedTimestamp: ts,
+		CollectionID:              collID,
+	}
+	coll.Partitions = append(coll.Partitions, partition)
 
-	if err := mt.catalog.CreatePartition(mt.ctx, &coll, ts); err != nil {
+	if err := mt.catalog.CreatePartition(mt.ctx, partition, ts); err != nil {
 		return err
 	}
 
@@ -507,7 +508,7 @@ func (mt *MetaTable) DeletePartition(collID typeutil.UniqueID, partitionName str
 	}
 
 	col.Partitions = parts
-	if err := mt.catalog.DropPartition(mt.ctx, &col, partID, ts); err != nil {
+	if err := mt.catalog.DropPartition(mt.ctx, col.CollectionID, partID, ts); err != nil {
 		return 0, err
 	}
 
@@ -1230,11 +1231,12 @@ func (mt *MetaTable) AddAlias(collectionAlias string, collectionName string, ts 
 		return fmt.Errorf("aliased collection name does not exist, name = %s", collectionName)
 	}
 
-	coll := &model.Collection{
+	alias := &model.Alias{
 		CollectionID: id,
-		Aliases:      []string{collectionAlias},
+		Name:         collectionAlias,
+		CreatedTime:  ts,
 	}
-	if err := mt.catalog.CreateAlias(mt.ctx, coll, ts); err != nil {
+	if err := mt.catalog.CreateAlias(mt.ctx, alias, ts); err != nil {
 		return err
 	}
 
@@ -1246,12 +1248,13 @@ func (mt *MetaTable) AddAlias(collectionAlias string, collectionName string, ts 
 func (mt *MetaTable) DropAlias(collectionAlias string, ts typeutil.Timestamp) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
-	collectionID, ok := mt.collAlias2ID[collectionAlias]
+	// TODO: drop alias should be idempotent.
+	_, ok := mt.collAlias2ID[collectionAlias]
 	if !ok {
 		return fmt.Errorf("alias does not exist, alias = %s", collectionAlias)
 	}
 
-	if err := mt.catalog.DropAlias(mt.ctx, collectionID, collectionAlias, ts); err != nil {
+	if err := mt.catalog.DropAlias(mt.ctx, collectionAlias, ts); err != nil {
 		return err
 	}
 	delete(mt.collAlias2ID, collectionAlias)
@@ -1271,12 +1274,12 @@ func (mt *MetaTable) AlterAlias(collectionAlias string, collectionName string, t
 		return fmt.Errorf("aliased collection name does not exist, name = %s", collectionName)
 	}
 
-	coll := &model.Collection{
+	alias := &model.Alias{
 		CollectionID: id,
-		Aliases:      []string{collectionAlias},
+		Name:         collectionAlias,
+		CreatedTime:  ts,
 	}
-
-	if err := mt.catalog.AlterAlias(mt.ctx, coll, ts); err != nil {
+	if err := mt.catalog.AlterAlias(mt.ctx, alias, ts); err != nil {
 		return err
 	}
 	mt.collAlias2ID[collectionAlias] = id
