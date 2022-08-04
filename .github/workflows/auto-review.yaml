@@ -1,0 +1,43 @@
+name: Auto Review
+on:  
+  pull_request:
+    paths:
+      - 'scripts/**'
+      - 'internal/**'
+      - 'cmd/**'
+      - 'build/**'
+      - '.github/workflows/auto-review.yaml'
+      - '.env'
+      - docker-compose.yml
+      - Makefile
+      - '!**.md'
+      - '!build/ci/jenkins/**'
+      # FIXME(wxyu): not need to run code check, update the ci-passed rules and remove these two lines
+      - go.mod
+      - go.sum 
+jobs:
+  staticcheck:
+    name: staticcheck
+    runs-on: ubuntu-latest
+    steps:
+      # checkout code
+       - name: Is Organization Member
+        shell: bash
+        id: is_organization_member
+        run: |
+          response_code=$(curl -sIL -w %{http_code} -H "Authorization: token ${{ secrets.REVIEW_TOKEN }}" -H "Accept: application/vnd.github.v3+json" \
+          -o /dev/null https://api.github.com/orgs/${GITHUB_REPOSITORY_OWNER}/members/${{ github.event.sender.login }})
+          echo " response code is ${response_code} "
+
+      - uses: actions/checkout@v3
+      # If you want to use the specific version of Go,
+      # you need actions/setup-go@v3 action.
+      - uses: actions/setup-go@v3
+        with:
+          go-version: '~1.18.1'
+      # run staticcheck
+      - uses: reviewdog/action-staticcheck@v1.7.0
+        with:
+          # Change reviewdog reporter if you need [github-pr-check,github-check,github-pr-review].
+          github_token: ${{ secrets.REVIEW_TOKEN }}
+          reporter: github-pr-review
