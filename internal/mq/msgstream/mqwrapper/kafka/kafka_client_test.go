@@ -157,7 +157,7 @@ func Consume3(ctx context.Context, t *testing.T, kc *kafkaClient, topic string, 
 
 			consumer.Ack(msg)
 			(*total)++
-			log.Info("Consume3 RECV", zap.Any("v", BytesToInt(msg.Payload())))
+			log.Info("Consume3 RECV", zap.Any("v", BytesToInt(msg.Payload())), zap.Int("total", *total))
 		}
 	}
 }
@@ -350,5 +350,7 @@ func produceData(ctx context.Context, t *testing.T, producer mqwrapper.Producer,
 		msgIDs = append(msgIDs, msgID)
 		assert.Nil(t, err)
 	}
+
+	producer.(*kafkaProducer).p.Flush(500)
 	return msgIDs
 }
