@@ -170,6 +170,7 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 			ot.UnaryServerInterceptor(opts...),
 			grpc_auth.UnaryServerInterceptor(proxy.AuthenticationInterceptor),
+			proxy.UnaryServerInterceptor(proxy.PrivilegeInterceptor),
 		)),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
 			ot.StreamServerInterceptor(opts...),
@@ -833,47 +834,34 @@ func (s *Server) ListCredUsers(ctx context.Context, req *milvuspb.ListCredUsersR
 	return s.proxy.ListCredUsers(ctx, req)
 }
 
-func (s *Server) CreateRole(ctx context.Context, request *milvuspb.CreateRoleRequest) (*commonpb.Status, error) {
-	//TODO implement me
-	panic("implement me")
+func (s *Server) CreateRole(ctx context.Context, req *milvuspb.CreateRoleRequest) (*commonpb.Status, error) {
+	return s.proxy.CreateRole(ctx, req)
 }
 
-func (s *Server) DropRole(ctx context.Context, request *milvuspb.DropRoleRequest) (*commonpb.Status, error) {
-	//TODO implement me
-	panic("implement me")
+func (s *Server) DropRole(ctx context.Context, req *milvuspb.DropRoleRequest) (*commonpb.Status, error) {
+	return s.proxy.DropRole(ctx, req)
 }
 
-func (s *Server) OperateUserRole(ctx context.Context, request *milvuspb.OperateUserRoleRequest) (*commonpb.Status, error) {
-	//TODO implement me
-	panic("implement me")
+func (s *Server) OperateUserRole(ctx context.Context, req *milvuspb.OperateUserRoleRequest) (*commonpb.Status, error) {
+	return s.proxy.OperateUserRole(ctx, req)
 }
 
-func (s *Server) SelectRole(ctx context.Context, request *milvuspb.SelectRoleRequest) (*milvuspb.SelectRoleResponse, error) {
-	//TODO implement me
-	panic("implement me")
+func (s *Server) SelectRole(ctx context.Context, req *milvuspb.SelectRoleRequest) (*milvuspb.SelectRoleResponse, error) {
+	return s.proxy.SelectRole(ctx, req)
 }
 
-func (s *Server) SelectUser(ctx context.Context, request *milvuspb.SelectUserRequest) (*milvuspb.SelectUserResponse, error) {
-	//TODO implement me
-	panic("implement me")
+func (s *Server) SelectUser(ctx context.Context, req *milvuspb.SelectUserRequest) (*milvuspb.SelectUserResponse, error) {
+	return s.proxy.SelectUser(ctx, req)
 }
 
-func (s *Server) SelectResource(ctx context.Context, request *milvuspb.SelectResourceRequest) (*milvuspb.SelectResourceResponse, error) {
-	//TODO implement me
-	panic("implement me")
+func (s *Server) OperatePrivilege(ctx context.Context, req *milvuspb.OperatePrivilegeRequest) (*commonpb.Status, error) {
+	return s.proxy.OperatePrivilege(ctx, req)
 }
 
-func (s *Server) OperatePrivilege(ctx context.Context, request *milvuspb.OperatePrivilegeRequest) (*commonpb.Status, error) {
-	//TODO implement me
-	panic("implement me")
+func (s *Server) SelectGrant(ctx context.Context, req *milvuspb.SelectGrantRequest) (*milvuspb.SelectGrantResponse, error) {
+	return s.proxy.SelectGrant(ctx, req)
 }
 
-func (s *Server) SelectGrant(ctx context.Context, request *milvuspb.SelectGrantRequest) (*milvuspb.SelectGrantResponse, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (s *Server) RefreshPolicyInfoCache(ctx context.Context, request *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error) {
-	//TODO implement me
-	panic("implement me")
+func (s *Server) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error) {
+	return s.proxy.RefreshPolicyInfoCache(ctx, req)
 }

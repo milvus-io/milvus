@@ -131,7 +131,6 @@ service RootCoord {
     rpc OperateUserRole(milvus.OperateUserRoleRequest) returns (common.Status) {}
     rpc SelectRole(milvus.SelectRoleRequest) returns (milvus.SelectRoleResponse) {}
     rpc SelectUser(milvus.SelectUserRequest) returns (milvus.SelectUserResponse) {}
-    rpc SelectResource(milvus.SelectResourceRequest) returns (milvus.SelectResourceResponse) {}
     rpc OperatePrivilege(milvus.OperatePrivilegeRequest) returns (common.Status) {}
     rpc SelectGrant(milvus.SelectGrantRequest) returns (milvus.SelectGrantResponse) {}
     rpc ListPolicy(internal.ListPolicyRequest) returns (internal.ListPolicyResponse) {}

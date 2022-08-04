@@ -310,6 +310,7 @@ message ListPolicyResponse {
   // Contain error_code and reason
   common.Status status = 1;
   repeated string policy_infos = 2;
+  repeated string user_roles = 3;
 }
 
 message ShowConfigurationsRequest {

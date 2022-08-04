@@ -830,7 +830,7 @@ func TestHasCollectionTask(t *testing.T) {
 	defer qc.Stop()
 	ctx := context.Background()
 	mgr := newShardClientMgr()
-	InitMetaCache(rc, qc, mgr)
+	InitMetaCache(ctx, rc, qc, mgr)
 	prefix := "TestHasCollectionTask"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
@@ -916,7 +916,7 @@ func TestDescribeCollectionTask(t *testing.T) {
 	defer qc.Stop()
 	ctx := context.Background()
 	mgr := newShardClientMgr()
-	InitMetaCache(rc, qc, mgr)
+	InitMetaCache(ctx, rc, qc, mgr)
 	prefix := "TestDescribeCollectionTask"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
@@ -979,7 +979,7 @@ func TestDescribeCollectionTask_ShardsNum1(t *testing.T) {
 	defer qc.Stop()
 	ctx := context.Background()
 	mgr := newShardClientMgr()
-	InitMetaCache(rc, qc, mgr)
+	InitMetaCache(ctx, rc, qc, mgr)
 	prefix := "TestDescribeCollectionTask"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
@@ -1044,7 +1044,7 @@ func TestDescribeCollectionTask_ShardsNum2(t *testing.T) {
 	defer qc.Stop()
 	ctx := context.Background()
 	mgr := newShardClientMgr()
-	InitMetaCache(rc, qc, mgr)
+	InitMetaCache(ctx, rc, qc, mgr)
 	prefix := "TestDescribeCollectionTask"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
@@ -1311,7 +1311,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 	ctx := context.Background()
 
 	mgr := newShardClientMgr()
-	err = InitMetaCache(rc, qc, mgr)
+	err = InitMetaCache(ctx, rc, qc, mgr)
 	assert.NoError(t, err)
 
 	shardsNum := int32(2)
@@ -1565,7 +1565,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 	ctx := context.Background()
 
 	mgr := newShardClientMgr()
-	err = InitMetaCache(rc, qc, mgr)
+	err = InitMetaCache(ctx, rc, qc, mgr)
 	assert.NoError(t, err)
 
 	shardsNum := int32(2)

@@ -478,62 +478,63 @@ inline bool ImportState_Parse(
   return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<ImportState>(
     ImportState_descriptor(), name, value);
 }
-enum ResourceType : int {
+enum ObjectType : int {
   Collection = 0,
-  ResourceType_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
-  ResourceType_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
+  Global = 1,
+  ObjectType_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
+  ObjectType_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
 };
-bool ResourceType_IsValid(int value);
-constexpr ResourceType ResourceType_MIN = Collection;
-constexpr ResourceType ResourceType_MAX = Collection;
-constexpr int ResourceType_ARRAYSIZE = ResourceType_MAX + 1;
+bool ObjectType_IsValid(int value);
+constexpr ObjectType ObjectType_MIN = Collection;
+constexpr ObjectType ObjectType_MAX = Global;
+constexpr int ObjectType_ARRAYSIZE = ObjectType_MAX + 1;
 
-const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* ResourceType_descriptor();
+const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* ObjectType_descriptor();
 template<typename T>
-inline const std::string& ResourceType_Name(T enum_t_value) {
-  static_assert(::std::is_same<T, ResourceType>::value ||
+inline const std::string& ObjectType_Name(T enum_t_value) {
+  static_assert(::std::is_same<T, ObjectType>::value ||
     ::std::is_integral<T>::value,
-    "Incorrect type passed to function ResourceType_Name.");
+    "Incorrect type passed to function ObjectType_Name.");
   return ::PROTOBUF_NAMESPACE_ID::internal::NameOfEnum(
-    ResourceType_descriptor(), enum_t_value);
+    ObjectType_descriptor(), enum_t_value);
 }
-inline bool ResourceType_Parse(
-    const std::string& name, ResourceType* value) {
-  return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<ResourceType>(
-    ResourceType_descriptor(), name, value);
+inline bool ObjectType_Parse(
+    const std::string& name, ObjectType* value) {
+  return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<ObjectType>(
+    ObjectType_descriptor(), name, value);
 }
-enum ResourcePrivilege : int {
+enum ObjectPrivilege : int {
   PrivilegeAll = 0,
-  PrivilegeCreate = 1,
-  PrivilegeDrop = 2,
-  PrivilegeAlter = 3,
-  PrivilegeRead = 4,
+  PrivilegeCreateCollection = 1,
+  PrivilegeDropCollection = 2,
+  PrivilegeDescribeCollection = 3,
+  PrivilegeShowCollections = 4,
   PrivilegeLoad = 5,
   PrivilegeRelease = 6,
-  PrivilegeCompact = 7,
+  PrivilegeCompaction = 7,
   PrivilegeInsert = 8,
   PrivilegeDelete = 9,
-  ResourcePrivilege_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
-  ResourcePrivilege_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
+  ObjectPrivilege_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
+  ObjectPrivilege_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
 };
-bool ResourcePrivilege_IsValid(int value);
-constexpr ResourcePrivilege ResourcePrivilege_MIN = PrivilegeAll;
-constexpr ResourcePrivilege ResourcePrivilege_MAX = PrivilegeDelete;
-constexpr int ResourcePrivilege_ARRAYSIZE = ResourcePrivilege_MAX + 1;
+bool ObjectPrivilege_IsValid(int value);
+constexpr ObjectPrivilege ObjectPrivilege_MIN = PrivilegeAll;
+constexpr ObjectPrivilege ObjectPrivilege_MAX = PrivilegeDelete;
+constexpr int ObjectPrivilege_ARRAYSIZE = ObjectPrivilege_MAX + 1;
 
-const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* ResourcePrivilege_descriptor();
+const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* ObjectPrivilege_descriptor();
 template<typename T>
-inline const std::string& ResourcePrivilege_Name(T enum_t_value) {
-  static_assert(::std::is_same<T, ResourcePrivilege>::value ||
+inline const std::string& ObjectPrivilege_Name(T enum_t_value) {
+  static_assert(::std::is_same<T, ObjectPrivilege>::value ||
     ::std::is_integral<T>::value,
-    "Incorrect type passed to function ResourcePrivilege_Name.");
+    "Incorrect type passed to function ObjectPrivilege_Name.");
   return ::PROTOBUF_NAMESPACE_ID::internal::NameOfEnum(
-    ResourcePrivilege_descriptor(), enum_t_value);
+    ObjectPrivilege_descriptor(), enum_t_value);
 }
-inline bool ResourcePrivilege_Parse(
-    const std::string& name, ResourcePrivilege* value) {
-  return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<ResourcePrivilege>(
-    ResourcePrivilege_descriptor(), name, value);
+inline bool ObjectPrivilege_Parse(
+    const std::string& name, ObjectPrivilege* value) {
+  return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<ObjectPrivilege>(
+    ObjectPrivilege_descriptor(), name, value);
 }
 // ===================================================================
 
@@ -2108,33 +2109,33 @@ class PrivilegeExt :
   // accessors -------------------------------------------------------
 
   enum : int {
-    kResourceTypeFieldNumber = 1,
-    kResourcePrivilegeFieldNumber = 2,
-    kResourceNameIndexFieldNumber = 3,
+    kObjectTypeFieldNumber = 1,
+    kObjectPrivilegeFieldNumber = 2,
+    kObjectNameIndexFieldNumber = 3,
   };
-  // .milvus.proto.common.ResourceType resource_type = 1;
-  void clear_resource_type();
-  ::milvus::proto::common::ResourceType resource_type() const;
-  void set_resource_type(::milvus::proto::common::ResourceType value);
+  // .milvus.proto.common.ObjectType object_type = 1;
+  void clear_object_type();
+  ::milvus::proto::common::ObjectType object_type() const;
+  void set_object_type(::milvus::proto::common::ObjectType value);
 
-  // .milvus.proto.common.ResourcePrivilege resource_privilege = 2;
-  void clear_resource_privilege();
-  ::milvus::proto::common::ResourcePrivilege resource_privilege() const;
-  void set_resource_privilege(::milvus::proto::common::ResourcePrivilege value);
+  // .milvus.proto.common.ObjectPrivilege object_privilege = 2;
+  void clear_object_privilege();
+  ::milvus::proto::common::ObjectPrivilege object_privilege() const;
+  void set_object_privilege(::milvus::proto::common::ObjectPrivilege value);
 
-  // int32 resource_name_index = 3;
-  void clear_resource_name_index();
-  ::PROTOBUF_NAMESPACE_ID::int32 resource_name_index() const;
-  void set_resource_name_index(::PROTOBUF_NAMESPACE_ID::int32 value);
+  // int32 object_name_index = 3;
+  void clear_object_name_index();
+  ::PROTOBUF_NAMESPACE_ID::int32 object_name_index() const;
+  void set_object_name_index(::PROTOBUF_NAMESPACE_ID::int32 value);
 
   // @@protoc_insertion_point(class_scope:milvus.proto.common.PrivilegeExt)
  private:
   class _Internal;
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
-  int resource_type_;
-  int resource_privilege_;
-  ::PROTOBUF_NAMESPACE_ID::int32 resource_name_index_;
+  int object_type_;
+  int object_privilege_;
+  ::PROTOBUF_NAMESPACE_ID::int32 object_name_index_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_common_2eproto;
 };
@@ -2947,46 +2948,46 @@ inline void DMLMsgHeader::set_allocated_shardname(std::string* shardname) {
 
 // PrivilegeExt
 
-// .milvus.proto.common.ResourceType resource_type = 1;
-inline void PrivilegeExt::clear_resource_type() {
-  resource_type_ = 0;
+// .milvus.proto.common.ObjectType object_type = 1;
+inline void PrivilegeExt::clear_object_type() {
+  object_type_ = 0;
 }
-inline ::milvus::proto::common::ResourceType PrivilegeExt::resource_type() const {
-  // @@protoc_insertion_point(field_get:milvus.proto.common.PrivilegeExt.resource_type)
-  return static_cast< ::milvus::proto::common::ResourceType >(resource_type_);
+inline ::milvus::proto::common::ObjectType PrivilegeExt::object_type() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.common.PrivilegeExt.object_type)
+  return static_cast< ::milvus::proto::common::ObjectType >(object_type_);
 }
-inline void PrivilegeExt::set_resource_type(::milvus::proto::common::ResourceType value) {
+inline void PrivilegeExt::set_object_type(::milvus::proto::common::ObjectType value) {
   
-  resource_type_ = value;
-  // @@protoc_insertion_point(field_set:milvus.proto.common.PrivilegeExt.resource_type)
+  object_type_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.common.PrivilegeExt.object_type)
 }
 
-// .milvus.proto.common.ResourcePrivilege resource_privilege = 2;
-inline void PrivilegeExt::clear_resource_privilege() {
-  resource_privilege_ = 0;
+// .milvus.proto.common.ObjectPrivilege object_privilege = 2;
+inline void PrivilegeExt::clear_object_privilege() {
+  object_privilege_ = 0;
 }
-inline ::milvus::proto::common::ResourcePrivilege PrivilegeExt::resource_privilege() const {
-  // @@protoc_insertion_point(field_get:milvus.proto.common.PrivilegeExt.resource_privilege)
-  return static_cast< ::milvus::proto::common::ResourcePrivilege >(resource_privilege_);
+inline ::milvus::proto::common::ObjectPrivilege PrivilegeExt::object_privilege() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.common.PrivilegeExt.object_privilege)
+  return static_cast< ::milvus::proto::common::ObjectPrivilege >(object_privilege_);
 }
-inline void PrivilegeExt::set_resource_privilege(::milvus::proto::common::ResourcePrivilege value) {
+inline void PrivilegeExt::set_object_privilege(::milvus::proto::common::ObjectPrivilege value) {
   
-  resource_privilege_ = value;
-  // @@protoc_insertion_point(field_set:milvus.proto.common.PrivilegeExt.resource_privilege)
+  object_privilege_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.common.PrivilegeExt.object_privilege)
 }
 
-// int32 resource_name_index = 3;
-inline void PrivilegeExt::clear_resource_name_index() {
-  resource_name_index_ = 0;
+// int32 object_name_index = 3;
+inline void PrivilegeExt::clear_object_name_index() {
+  object_name_index_ = 0;
 }
-inline ::PROTOBUF_NAMESPACE_ID::int32 PrivilegeExt::resource_name_index() const {
-  // @@protoc_insertion_point(field_get:milvus.proto.common.PrivilegeExt.resource_name_index)
-  return resource_name_index_;
+inline ::PROTOBUF_NAMESPACE_ID::int32 PrivilegeExt::object_name_index() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.common.PrivilegeExt.object_name_index)
+  return object_name_index_;
 }
-inline void PrivilegeExt::set_resource_name_index(::PROTOBUF_NAMESPACE_ID::int32 value) {
+inline void PrivilegeExt::set_object_name_index(::PROTOBUF_NAMESPACE_ID::int32 value) {
   
-  resource_name_index_ = value;
-  // @@protoc_insertion_point(field_set:milvus.proto.common.PrivilegeExt.resource_name_index)
+  object_name_index_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.common.PrivilegeExt.object_name_index)
 }
 
 #ifdef __GNUC__
@@ -3066,15 +3067,15 @@ template <>
 inline const EnumDescriptor* GetEnumDescriptor< ::milvus::proto::common::ImportState>() {
   return ::milvus::proto::common::ImportState_descriptor();
 }
-template <> struct is_proto_enum< ::milvus::proto::common::ResourceType> : ::std::true_type {};
+template <> struct is_proto_enum< ::milvus::proto::common::ObjectType> : ::std::true_type {};
 template <>
-inline const EnumDescriptor* GetEnumDescriptor< ::milvus::proto::common::ResourceType>() {
-  return ::milvus::proto::common::ResourceType_descriptor();
+inline const EnumDescriptor* GetEnumDescriptor< ::milvus::proto::common::ObjectType>() {
+  return ::milvus::proto::common::ObjectType_descriptor();
 }
-template <> struct is_proto_enum< ::milvus::proto::common::ResourcePrivilege> : ::std::true_type {};
+template <> struct is_proto_enum< ::milvus::proto::common::ObjectPrivilege> : ::std::true_type {};
 template <>
-inline const EnumDescriptor* GetEnumDescriptor< ::milvus::proto::common::ResourcePrivilege>() {
-  return ::milvus::proto::common::ResourcePrivilege_descriptor();
+inline const EnumDescriptor* GetEnumDescriptor< ::milvus::proto::common::ObjectPrivilege>() {
+  return ::milvus::proto::common::ObjectPrivilege_descriptor();
 }
 
 PROTOBUF_NAMESPACE_CLOSE

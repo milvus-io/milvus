@@ -712,19 +712,6 @@ func (c *Client) SelectUser(ctx context.Context, req *milvuspb.SelectUserRequest
 	return ret.(*milvuspb.SelectUserResponse), err
 }
 
-func (c *Client) SelectResource(ctx context.Context, req *milvuspb.SelectResourceRequest) (*milvuspb.SelectResourceResponse, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
-		if !funcutil.CheckCtxValid(ctx) {
-			return nil, ctx.Err()
-		}
-		return client.(rootcoordpb.RootCoordClient).SelectResource(ctx, req)
-	})
-	if err != nil {
-		return nil, err
-	}
-	return ret.(*milvuspb.SelectResourceResponse), err
-}
-
 func (c *Client) OperatePrivilege(ctx context.Context, req *milvuspb.OperatePrivilegeRequest) (*commonpb.Status, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
