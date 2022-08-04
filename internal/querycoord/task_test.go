@@ -190,12 +190,14 @@ func genWatchDmChannelTask(ctx context.Context, queryCoord *QueryCoord, nodeID i
 	queryCoord.meta.addCollection(defaultCollectionID, querypb.LoadType_LoadCollection, schema)
 	return watchDmChannelTask
 }
+
 func genLoadSegmentTask(ctx context.Context, queryCoord *QueryCoord, nodeID int64) *loadSegmentTask {
 	schema := genDefaultCollectionSchema(false)
 	segmentInfo := &querypb.SegmentLoadInfo{
-		SegmentID:    defaultSegmentID,
-		PartitionID:  defaultPartitionID,
-		CollectionID: defaultCollectionID,
+		SegmentID:     defaultSegmentID,
+		PartitionID:   defaultPartitionID,
+		CollectionID:  defaultCollectionID,
+		InsertChannel: "by-dev-rootcoord-dml_1_2021v1",
 	}
 	req := &querypb.LoadSegmentsRequest{
 		Base: &commonpb.MsgBase{
@@ -246,29 +248,18 @@ func genLoadSegmentTask(ctx context.Context, queryCoord *QueryCoord, nodeID int6
 	loadSegmentTask.setParentTask(parentTask)
 
 	queryCoord.meta.addCollection(defaultCollectionID, querypb.LoadType_LoadCollection, schema)
-	return loadSegmentTask
-}
 
-func genWatchDeltaChannelTask(ctx context.Context, queryCoord *QueryCoord, nodeID int64) *watchDeltaChannelTask {
-	req := &querypb.WatchDeltaChannelsRequest{
-		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_WatchDeltaChannels,
-		},
-		NodeID:       nodeID,
-		CollectionID: defaultCollectionID,
-		LoadMeta: &querypb.LoadMetaInfo{
-			LoadType:     querypb.LoadType_LoadCollection,
+	deltaChannelInfo := []*datapb.VchannelInfo{
+		{
 			CollectionID: defaultCollectionID,
-			PartitionIDs: []int64{defaultPartitionID},
+			ChannelName:  "by-dev-rootcoord-delta_1_2021v1",
+			SeekPosition: &internalpb.MsgPosition{
+				ChannelName: "by-dev-rootcoord-dml_1",
+			},
 		},
 	}
-	baseTask := newBaseTask(ctx, querypb.TriggerCondition_GrpcRequest)
-	baseTask.taskID = 300
-	return &watchDeltaChannelTask{
-		baseTask:                  baseTask,
-		WatchDeltaChannelsRequest: req,
-		cluster:                   queryCoord.cluster,
-	}
+	queryCoord.meta.setDeltaChannel(defaultCollectionID, deltaChannelInfo)
+	return loadSegmentTask
 }
 
 func waitTaskFinalState(t task, state taskState) {
@@ -1399,9 +1390,6 @@ func TestUpdateTaskProcessWhenLoadSegment(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, int64(0), collectionInfo.InMemoryPercentage)
 
-	watchDeltaChannel := genWatchDeltaChannelTask(ctx, queryCoord, node1.queryNodeID)
-	watchDeltaChannel.setParentTask(loadCollectionTask)
-	queryCoord.scheduler.processTask(watchDeltaChannel)
 	collectionInfo, err = queryCoord.meta.getCollectionInfoByID(defaultCollectionID)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(0), collectionInfo.InMemoryPercentage)

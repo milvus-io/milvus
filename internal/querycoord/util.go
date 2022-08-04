@@ -21,7 +21,6 @@ import (
 	"sort"
 
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -79,34 +78,6 @@ func getFieldSizeFromFieldBinlog(fieldBinlog *datapb.FieldBinlog) int64 {
 
 	return fieldSize
 
-}
-
-func getDstNodeIDByTask(t task) int64 {
-	var nodeID int64
-	switch t.msgType() {
-	case commonpb.MsgType_LoadSegments:
-		loadSegment := t.(*loadSegmentTask)
-		nodeID = loadSegment.DstNodeID
-	case commonpb.MsgType_WatchDmChannels:
-		watchDmChannel := t.(*watchDmChannelTask)
-		nodeID = watchDmChannel.NodeID
-	case commonpb.MsgType_WatchDeltaChannels:
-		watchDeltaChannel := t.(*watchDeltaChannelTask)
-		nodeID = watchDeltaChannel.NodeID
-	case commonpb.MsgType_ReleaseCollection:
-		releaseCollection := t.(*releaseCollectionTask)
-		nodeID = releaseCollection.NodeID
-	case commonpb.MsgType_ReleasePartitions:
-		releasePartition := t.(*releasePartitionTask)
-		nodeID = releasePartition.NodeID
-	case commonpb.MsgType_ReleaseSegments:
-		releaseSegment := t.(*releaseSegmentTask)
-		nodeID = releaseSegment.NodeID
-	default:
-		//TODO::
-	}
-
-	return nodeID
 }
 
 // syncReplicaSegments syncs the segments distribution of replica to shard leaders

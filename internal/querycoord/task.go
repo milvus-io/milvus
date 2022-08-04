@@ -1359,7 +1359,7 @@ func (lst *loadSegmentTask) execute(ctx context.Context) error {
 
 	err := lst.cluster.LoadSegments(ctx, lst.DstNodeID, lst.LoadSegmentsRequest)
 	if err != nil {
-		log.Warn("loadSegmentTask: loadSegment occur error", zap.Int64("taskID", lst.getTaskID()))
+		log.Warn("loadSegmentTask: loadSegment occur error", zap.Int64("taskID", lst.getTaskID()), zap.Error(err))
 		lst.setResultInfo(err)
 		return err
 	}
@@ -1604,84 +1604,6 @@ func (wdt *watchDmChannelTask) reschedule(ctx context.Context) ([]task, error) {
 	}
 
 	return reScheduledTasks, nil
-}
-
-type watchDeltaChannelTask struct {
-	*baseTask
-	*querypb.WatchDeltaChannelsRequest
-	cluster Cluster
-}
-
-func (wdt *watchDeltaChannelTask) msgBase() *commonpb.MsgBase {
-	return wdt.Base
-}
-
-func (wdt *watchDeltaChannelTask) marshal() ([]byte, error) {
-	return proto.Marshal(wdt.WatchDeltaChannelsRequest)
-}
-
-func (wdt *watchDeltaChannelTask) isValid() bool {
-	online, err := wdt.cluster.IsOnline(wdt.NodeID)
-	if err != nil {
-		return false
-	}
-
-	return wdt.ctx != nil && online
-}
-
-func (wdt *watchDeltaChannelTask) msgType() commonpb.MsgType {
-	return wdt.Base.MsgType
-}
-
-func (wdt *watchDeltaChannelTask) timestamp() Timestamp {
-	return wdt.Base.Timestamp
-}
-
-func (wdt *watchDeltaChannelTask) updateTaskProcess() {
-	parentTask := wdt.getParentTask()
-	if parentTask == nil {
-		log.Warn("watchDeltaChannel: parentTask should not be nil")
-		return
-	}
-	parentTask.updateTaskProcess()
-}
-
-func (wdt *watchDeltaChannelTask) preExecute(context.Context) error {
-	channelInfos := wdt.Infos
-	channels := make([]string, 0)
-	for _, info := range channelInfos {
-		channels = append(channels, info.ChannelName)
-	}
-	wdt.setResultInfo(nil)
-	log.Info("start do watchDeltaChannelTask",
-		zap.Strings("deltaChannels", channels),
-		zap.Int64("loaded nodeID", wdt.NodeID),
-		zap.Int64("taskID", wdt.getTaskID()),
-		zap.Int64("msgID", wdt.GetBase().GetMsgID()))
-	return nil
-}
-
-func (wdt *watchDeltaChannelTask) execute(ctx context.Context) error {
-	defer wdt.reduceRetryCount()
-
-	err := wdt.cluster.WatchDeltaChannels(wdt.ctx, wdt.NodeID, wdt.WatchDeltaChannelsRequest)
-	if err != nil {
-		log.Warn("watchDeltaChannelTask: watchDeltaChannel occur error", zap.Int64("taskID", wdt.getTaskID()), zap.Error(err))
-		wdt.setResultInfo(err)
-		return err
-	}
-
-	log.Info("watchDeltaChannelsTask Execute done",
-		zap.Int64("taskID", wdt.getTaskID()),
-		zap.Int64("msgID", wdt.GetBase().GetMsgID()))
-	return nil
-}
-
-func (wdt *watchDeltaChannelTask) postExecute(context.Context) error {
-	log.Info("watchDeltaChannelTask postExecute done",
-		zap.Int64("taskID", wdt.getTaskID()),
-		zap.Int64("msgID", wdt.GetBase().GetMsgID()))
-	return nil
 }
 
 //****************************handoff task********************************//
@@ -2160,8 +2082,7 @@ func (lbt *loadBalanceTask) processNodeDownLoadBalance(ctx context.Context) erro
 		lbt.addChildTask(internalTask)
 		log.Info("loadBalanceTask: add a childTask",
 			zap.Int64("taskID", lbt.getTaskID()),
-			zap.String("taskType", internalTask.msgType().String()),
-			zap.Int64("destNode", getDstNodeIDByTask(internalTask)))
+			zap.Any("task", internalTask))
 	}
 	log.Info("loadBalanceTask: assign child task done", zap.Int64("taskID", lbt.getTaskID()), zap.Int64s("sourceNodeIDs", lbt.SourceNodeIDs))
 
@@ -2630,13 +2551,13 @@ func mergeWatchDeltaChannelInfo(infos []*datapb.VchannelInfo) []*datapb.Vchannel
 		}
 	}
 	var result []*datapb.VchannelInfo
-	for _, index := range minPositions {
+	for channel, index := range minPositions {
 		result = append(result, infos[index])
+		log.Info("merge delta channels finished", zap.String("channel", channel),
+			zap.Any("merged info", infos[index]),
+		)
 	}
-	log.Info("merge delta channels finished",
-		zap.Any("origin info length", len(infos)),
-		zap.Any("merged info length", len(result)),
-	)
+
 	return result
 }
 

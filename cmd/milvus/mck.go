@@ -624,21 +624,8 @@ func (c *mck) unmarshalTask(taskID int64, t string) (string, []int64, []int64, e
 		log.Info("WatchDmChannels", zap.String("detail", fmt.Sprintf("+%v", loadReq)))
 		return "WatchDmChannels", removeRepeatElement(partitionIDs), removeRepeatElement(segmentIDs), nil
 	case commonpb.MsgType_WatchDeltaChannels:
-		loadReq := querypb.WatchDeltaChannelsRequest{}
-		err = proto.Unmarshal([]byte(t), &loadReq)
-		if err != nil {
-			return errReturn(taskID, "WatchDeltaChannelsRequest", err)
-		}
-		var partitionIDs []int64
-		var segmentIDs []int64
-		if loadReq.LoadMeta != nil {
-			partitionIDs = append(partitionIDs, loadReq.LoadMeta.PartitionIDs...)
-		}
-		pids, sids := c.extractVchannelInfo(taskID, loadReq.Infos)
-		partitionIDs = append(partitionIDs, pids...)
-		segmentIDs = append(segmentIDs, sids...)
-		log.Info("WatchDeltaChannels", zap.String("detail", fmt.Sprintf("+%v", loadReq)))
-		return "WatchDeltaChannels", removeRepeatElement(partitionIDs), removeRepeatElement(segmentIDs), nil
+		log.Warn("legacy WatchDeltaChannels type found, ignore")
+		return "WatchQueryChannels", emptyInt64(), emptyInt64(), nil
 	case commonpb.MsgType_WatchQueryChannels:
 		log.Warn("legacy WatchQueryChannels type found, ignore")
 		return "WatchQueryChannels", emptyInt64(), emptyInt64(), nil

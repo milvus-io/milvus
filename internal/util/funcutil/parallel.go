@@ -48,12 +48,10 @@ func ProcessFuncParallel(total, maxParallel int, f ProcessFunc, fname string) er
 
 	t := time.Now()
 	defer func() {
-		log.Debug(fname, zap.Any("time cost", time.Since(t)))
+		log.Debug(fname, zap.Any("total", total), zap.Any("time cost", time.Since(t)))
 	}()
 
 	nPerBatch := (total + maxParallel - 1) / maxParallel
-	log.Debug(fname, zap.Any("total", total))
-	log.Debug(fname, zap.Any("nPerBatch", nPerBatch))
 
 	quit := make(chan bool)
 	errc := make(chan error)
@@ -104,8 +102,6 @@ func ProcessFuncParallel(total, maxParallel int, f ProcessFunc, fname string) er
 
 		routineNum++
 	}
-
-	log.Debug(fname, zap.Any("NumOfGoRoutines", routineNum))
 
 	if routineNum <= 0 {
 		return nil

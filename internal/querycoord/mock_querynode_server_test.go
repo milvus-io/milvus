@@ -207,10 +207,6 @@ func (qs *queryNodeServerMock) WatchDmChannels(ctx context.Context, req *querypb
 	return qs.watchDmChannels()
 }
 
-func (qs *queryNodeServerMock) WatchDeltaChannels(ctx context.Context, req *querypb.WatchDeltaChannelsRequest) (*commonpb.Status, error) {
-	return qs.watchDeltaChannels()
-}
-
 func (qs *queryNodeServerMock) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) (*commonpb.Status, error) {
 	sizePerRecord, err := typeutil.EstimateSizePerRecord(req.Schema)
 	if err != nil {
