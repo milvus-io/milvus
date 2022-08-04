@@ -495,18 +495,8 @@ func TestGrpcRequest(t *testing.T) {
 			CollectionID: defaultCollectionID,
 		}
 		err := cluster.LoadSegments(baseCtx, nodeID, loadSegmentReq)
-		assert.Equal(t, 0, len(loadSegmentReq.DeltaPositions))
+		assert.Equal(t, 1, len(loadSegmentReq.DeltaPositions))
 		assert.Nil(t, err)
-	})
-
-	t.Run("Test WatchDeletaChannel", func(t *testing.T) {
-		watchDeltaChannelReq := &querypb.WatchDeltaChannelsRequest{
-			CollectionID: defaultCollectionID,
-			Infos:        deltaChannelInfo,
-		}
-		err := cluster.WatchDeltaChannels(baseCtx, nodeID, watchDeltaChannelReq)
-		assert.Nil(t, err)
-		assert.Equal(t, true, cluster.HasWatchedDeltaChannel(baseCtx, nodeID, defaultCollectionID))
 	})
 
 	t.Run("Test LoadSegmentsAfterWatchDeltaChannel", func(t *testing.T) {

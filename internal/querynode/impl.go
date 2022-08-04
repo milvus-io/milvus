@@ -138,58 +138,6 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, in *queryPb.WatchDmC
 	return waitFunc()
 }
 
-// WatchDeltaChannels create consumers on dmChannels to receive Incremental data，which is the important part of real-time query
-func (node *QueryNode) WatchDeltaChannels(ctx context.Context, in *queryPb.WatchDeltaChannelsRequest) (*commonpb.Status, error) {
-	code := node.stateCode.Load().(internalpb.StateCode)
-	if code != internalpb.StateCode_Healthy {
-		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeCfg.GetNodeID())
-		status := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}
-		return status, nil
-	}
-	dct := &watchDeltaChannelsTask{
-		baseTask: baseTask{
-			ctx:  ctx,
-			done: make(chan error),
-		},
-		req:  in,
-		node: node,
-	}
-
-	err := node.scheduler.queue.Enqueue(dct)
-	if err != nil {
-		status := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}
-		log.Warn(err.Error())
-		return status, nil
-	}
-
-	log.Info("watchDeltaChannelsTask Enqueue done", zap.Int64("collectionID", in.CollectionID), zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()))
-
-	waitFunc := func() (*commonpb.Status, error) {
-		err = dct.WaitToFinish()
-		if err != nil {
-			status := &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			}
-			log.Warn(err.Error())
-			return status, nil
-		}
-
-		log.Info("watchDeltaChannelsTask WaitToFinish done", zap.Int64("collectionID", in.CollectionID), zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()))
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		}, nil
-	}
-
-	return waitFunc()
-}
-
 // LoadSegments load historical data into query node, historical data can be vector data or index
 func (node *QueryNode) LoadSegments(ctx context.Context, in *queryPb.LoadSegmentsRequest) (*commonpb.Status, error) {
 	code := node.stateCode.Load().(internalpb.StateCode)

@@ -63,13 +63,6 @@ func thinWatchDmChannelsRequest(request *querypb.WatchDmChannelsRequest) *queryp
 	return cloned
 }
 
-// reviseWatchDeltaChannelsRequest will revise the WatchDeltaChannelsRequest for upgrade compatibility from 2.0.2
-func reviseWatchDeltaChannelsRequest(req *querypb.WatchDeltaChannelsRequest) {
-	for _, vChannel := range req.GetInfos() {
-		reviseVChannelInfo(vChannel)
-	}
-}
-
 // reviseVChannelInfo will revise the datapb.VchannelInfo for upgrade compatibility from 2.0.2
 func reviseVChannelInfo(vChannel *datapb.VchannelInfo) {
 	removeDuplicateSegmentIDFn := func(ids []int64) []int64 {

@@ -65,10 +65,6 @@ func (q QueryNodeClient) WatchDmChannels(ctx context.Context, req *querypb.Watch
 	return q.grpcClient.WatchDmChannels(ctx, req)
 }
 
-func (q QueryNodeClient) WatchDeltaChannels(ctx context.Context, req *querypb.WatchDeltaChannelsRequest) (*commonpb.Status, error) {
-	return q.grpcClient.WatchDeltaChannels(ctx, req)
-}
-
 func (q QueryNodeClient) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) (*commonpb.Status, error) {
 	return q.grpcClient.LoadSegments(ctx, req)
 }

@@ -1204,7 +1204,6 @@ type QueryNode interface {
 	TimeTickProvider
 
 	WatchDmChannels(ctx context.Context, req *querypb.WatchDmChannelsRequest) (*commonpb.Status, error)
-	WatchDeltaChannels(ctx context.Context, req *querypb.WatchDeltaChannelsRequest) (*commonpb.Status, error)
 	// LoadSegments notifies QueryNode to load the sealed segments from storage. The load tasks are sync to this
 	// rpc, QueryNode will return after all the sealed segments are loaded.
 	//

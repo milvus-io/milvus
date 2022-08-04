@@ -402,19 +402,7 @@ func (scheduler *TaskScheduler) unmarshalTask(taskID UniqueID, t string) (task, 
 		}
 		newTask = watchDmChannelTask
 	case commonpb.MsgType_WatchDeltaChannels:
-		//TODO::trigger condition may be different
-		loadReq := querypb.WatchDeltaChannelsRequest{}
-		err = proto.Unmarshal([]byte(t), &loadReq)
-		reviseWatchDeltaChannelsRequest(&loadReq)
-		if err != nil {
-			return nil, err
-		}
-		watchDeltaChannelTask := &watchDeltaChannelTask{
-			baseTask:                  baseTask,
-			WatchDeltaChannelsRequest: &loadReq,
-			cluster:                   scheduler.cluster,
-		}
-		newTask = watchDeltaChannelTask
+		log.Warn("legacy WatchDeltaChannels type found, ignore")
 	case commonpb.MsgType_WatchQueryChannels:
 		//Deprecated WatchQueryChannel
 		log.Warn("legacy WatchQueryChannels type found, ignore")
@@ -515,8 +503,6 @@ func (scheduler *TaskScheduler) processTask(t task) error {
 				protoSize = proto.Size(childTask.(*loadSegmentTask).LoadSegmentsRequest)
 			case commonpb.MsgType_WatchDmChannels:
 				protoSize = proto.Size(childTask.(*watchDmChannelTask).WatchDmChannelsRequest)
-			case commonpb.MsgType_WatchDeltaChannels:
-				protoSize = proto.Size(childTask.(*watchDeltaChannelTask).WatchDeltaChannelsRequest)
 			default:
 				//TODO::
 			}
@@ -710,17 +696,6 @@ func (scheduler *TaskScheduler) scheduleLoop() {
 			if len(childTasks) != 0 {
 				// include loadSegment, watchDmChannel, releaseCollection, releasePartition, releaseSegment
 				processInternalTaskFn(childTasks, triggerTask)
-				if triggerTask.getResultInfo().ErrorCode == commonpb.ErrorCode_Success {
-					// derivedInternalTasks include watchDeltaChannel, watchQueryChannel
-					// derivedInternalTasks generate from loadSegment and watchDmChannel reqs
-					derivedInternalTasks, err := generateDerivedInternalTasks(triggerTask, scheduler.meta, scheduler.cluster)
-					if err != nil {
-						log.Error("scheduleLoop: generate derived watchDeltaChannel and watchcQueryChannel tasks failed", zap.Int64("triggerTaskID", triggerTask.getTaskID()), zap.Error(err))
-						triggerTask.setResultInfo(err)
-					} else {
-						processInternalTaskFn(derivedInternalTasks, triggerTask)
-					}
-				}
 			}
 
 			// triggerTask may be LoadCollection, LoadPartitions, LoadBalance, Handoff
@@ -1075,58 +1050,4 @@ func updateSegmentInfoFromTask(ctx context.Context, triggerTask task, meta Meta)
 	}
 
 	return nil
-}
-
-// generateDerivedInternalTasks generate watchDeltaChannel and watchQueryChannel tasks
-func generateDerivedInternalTasks(triggerTask task, meta Meta, cluster Cluster) ([]task, error) {
-	var derivedInternalTasks []task
-	watchDeltaChannelInfo := make(map[int64]map[UniqueID]UniqueID)
-	addChannelWatchInfoFn := func(nodeID int64, collectionID UniqueID, replicaID UniqueID, watchInfo map[int64]map[UniqueID]UniqueID) {
-		if _, ok := watchInfo[nodeID]; !ok {
-			watchInfo[nodeID] = make(map[UniqueID]UniqueID)
-		}
-
-		watchInfo[nodeID][collectionID] = replicaID
-	}
-
-	for _, childTask := range triggerTask.getChildTask() {
-		if childTask.msgType() == commonpb.MsgType_LoadSegments {
-			loadSegmentTask := childTask.(*loadSegmentTask)
-			collectionID := loadSegmentTask.CollectionID
-			replicaID := loadSegmentTask.GetReplicaID()
-			nodeID := loadSegmentTask.DstNodeID
-			if !cluster.HasWatchedDeltaChannel(triggerTask.traceCtx(), nodeID, collectionID) {
-				addChannelWatchInfoFn(nodeID, collectionID, replicaID, watchDeltaChannelInfo)
-			}
-		}
-	}
-
-	for nodeID, collectionIDs := range watchDeltaChannelInfo {
-		for collectionID, replicaID := range collectionIDs {
-			deltaChannelInfo, err := meta.getDeltaChannelsByCollectionID(collectionID)
-			if err != nil {
-				return nil, err
-			}
-			msgBase := proto.Clone(triggerTask.msgBase()).(*commonpb.MsgBase)
-			msgBase.MsgType = commonpb.MsgType_WatchDeltaChannels
-			watchDeltaRequest := &querypb.WatchDeltaChannelsRequest{
-				Base:         msgBase,
-				CollectionID: collectionID,
-				Infos:        deltaChannelInfo,
-
-				ReplicaId: replicaID,
-			}
-			watchDeltaRequest.NodeID = nodeID
-			baseTask := newBaseTask(triggerTask.traceCtx(), triggerTask.getTriggerCondition())
-			baseTask.setParentTask(triggerTask)
-			watchDeltaTask := &watchDeltaChannelTask{
-				baseTask:                  baseTask,
-				WatchDeltaChannelsRequest: watchDeltaRequest,
-				cluster:                   cluster,
-			}
-			derivedInternalTasks = append(derivedInternalTasks, watchDeltaTask)
-		}
-	}
-
-	return derivedInternalTasks, nil
 }

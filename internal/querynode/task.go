@@ -90,12 +90,6 @@ type watchDmChannelsTask struct {
 	node *QueryNode
 }
 
-type watchDeltaChannelsTask struct {
-	baseTask
-	req  *queryPb.WatchDeltaChannelsRequest
-	node *QueryNode
-}
-
 type loadSegmentsTask struct {
 	baseTask
 	req  *queryPb.LoadSegmentsRequest
@@ -386,9 +380,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 
 	// add tsafe watch in query shard if exists
 	for _, dmlChannel := range vChannels {
-		if !w.node.queryShardService.hasQueryShard(dmlChannel) {
-			w.node.queryShardService.addQueryShard(collectionID, dmlChannel, w.req.GetReplicaID())
-		}
+		w.node.queryShardService.addQueryShard(collectionID, dmlChannel, w.req.GetReplicaID())
 	}
 
 	// start flow graphs
@@ -400,71 +392,49 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 	return nil
 }
 
-// watchDeltaChannelsTask
-func (w *watchDeltaChannelsTask) Execute(ctx context.Context) error {
-	collectionID := w.req.CollectionID
-
-	// get all vChannels
-	vDeltaChannels := make([]Channel, 0)
-	pDeltaChannels := make([]Channel, 0)
-	VPDeltaChannels := make(map[string]string) // map[vChannel]pChannel
-	vChannel2SeekPosition := make(map[string]*internalpb.MsgPosition)
-	for _, info := range w.req.Infos {
-		v := info.ChannelName
-		p := funcutil.ToPhysicalChannel(info.ChannelName)
-		vDeltaChannels = append(vDeltaChannels, v)
+// internal helper function to subscribe delta channel
+func (l *loadSegmentsTask) watchDeltaChannel(vchanName []string) error {
+	collectionID := l.req.CollectionID
+	var vDeltaChannels, pDeltaChannels []string
+	VPDeltaChannels := make(map[string]string)
+	for _, v := range vchanName {
+		dc, err := funcutil.ConvertChannelName(v, Params.CommonCfg.RootCoordDml, Params.CommonCfg.RootCoordDelta)
+		if err != nil {
+			log.Warn("watchDeltaChannels, failed to convert deltaChannel from dmlChannel", zap.String("DmlChannel", v), zap.Error(err))
+			return err
+		}
+		p := funcutil.ToPhysicalChannel(dc)
+		vDeltaChannels = append(vDeltaChannels, dc)
 		pDeltaChannels = append(pDeltaChannels, p)
-		VPDeltaChannels[v] = p
-		vChannel2SeekPosition[v] = info.SeekPosition
+		VPDeltaChannels[dc] = p
 	}
 	log.Info("Starting WatchDeltaChannels ...",
 		zap.Int64("collectionID", collectionID),
-		zap.Strings("vDeltaChannels", vDeltaChannels),
-		zap.Strings("pChannels", pDeltaChannels),
-	)
-	if len(VPDeltaChannels) != len(vDeltaChannels) {
-		return errors.New("get physical channels failed, illegal channel length, collectionID = " + fmt.Sprintln(collectionID))
-	}
-	log.Info("Get physical channels done",
-		zap.Int64("collectionID", collectionID),
+		zap.Any("channels", VPDeltaChannels),
 	)
 
-	if hasColl := w.node.metaReplica.hasCollection(collectionID); !hasColl {
-		return fmt.Errorf("cannot find collection with collectionID, %d", collectionID)
-	}
-	coll, err := w.node.metaReplica.getCollectionByID(collectionID)
+	coll, err := l.node.metaReplica.getCollectionByID(collectionID)
 	if err != nil {
 		return err
 	}
 
-	channel2FlowGraph, err := w.node.dataSyncService.addFlowGraphsForDeltaChannels(collectionID, vDeltaChannels)
+	channel2FlowGraph, err := l.node.dataSyncService.addFlowGraphsForDeltaChannels(collectionID, vDeltaChannels)
 	if err != nil {
 		log.Warn("watchDeltaChannel, add flowGraph for deltaChannel failed", zap.Int64("collectionID", collectionID), zap.Strings("vDeltaChannels", vDeltaChannels), zap.Error(err))
 		return err
 	}
 	consumeSubName := funcutil.GenChannelSubName(Params.CommonCfg.QueryNodeSubName, collectionID, Params.QueryNodeCfg.GetNodeID())
 
-	runningGroup, groupCtx := errgroup.WithContext(w.ctx)
 	// channels as consumer
 	for channel, fg := range channel2FlowGraph {
-		channel := channel
-		fg := fg
-		runningGroup.Go(func() error {
-			// use pChannel to consume
-			err := fg.consumeFlowGraphFromLatest(VPDeltaChannels[channel], consumeSubName)
-			if err != nil {
-				log.Error("msgStream as consumer failed for deltaChannels", zap.Int64("collectionID", collectionID), zap.Strings("vDeltaChannels", vDeltaChannels))
-				return err
-			}
-			err = w.node.loader.FromDmlCPLoadDelete(groupCtx, collectionID, vChannel2SeekPosition[channel])
-			if err != nil {
-				log.Error("watchDeltaChannelsTask from dml cp load delete failed", zap.Int64("collectionID", collectionID), zap.Strings("vDeltaChannels", vDeltaChannels))
-				return err
-			}
-			return nil
-		})
+		pchannel := VPDeltaChannels[channel]
+		// use pChannel to consume
+		err = fg.consumeFlowGraphFromLatest(pchannel, consumeSubName)
+		if err != nil {
+			log.Error("msgStream as consumer failed for deltaChannels", zap.Int64("collectionID", collectionID), zap.Strings("vDeltaChannels", vDeltaChannels))
+			break
+		}
 	}
-	err = runningGroup.Wait()
 
 	if err != nil {
 		log.Warn("watchDeltaChannel, add flowGraph for deltaChannel failed", zap.Int64("collectionID", collectionID), zap.Strings("vDeltaChannels", vDeltaChannels), zap.Error(err))
@@ -475,7 +445,7 @@ func (w *watchDeltaChannelsTask) Execute(ctx context.Context) error {
 		for channel := range channel2FlowGraph {
 			gcChannels = append(gcChannels, channel)
 		}
-		w.node.dataSyncService.removeFlowGraphsByDeltaChannels(gcChannels)
+		l.node.dataSyncService.removeFlowGraphsByDeltaChannels(gcChannels)
 		return err
 	}
 
@@ -487,18 +457,20 @@ func (w *watchDeltaChannelsTask) Execute(ctx context.Context) error {
 
 	// create tSafe
 	for _, channel := range vDeltaChannels {
-		w.node.tSafeReplica.addTSafe(channel)
+		l.node.tSafeReplica.addTSafe(channel)
 	}
 
-	// add tsafe watch in query shard if exists
+	// add tsafe watch in query shard if exists, we find no way to handle it if query shard not exist
 	for _, channel := range vDeltaChannels {
 		dmlChannel, err := funcutil.ConvertChannelName(channel, Params.CommonCfg.RootCoordDelta, Params.CommonCfg.RootCoordDml)
 		if err != nil {
-			log.Warn("failed to convert delta channel to dml", zap.String("channel", channel), zap.Error(err))
-			continue
+			log.Error("failed to convert delta channel to dml", zap.String("channel", channel), zap.Error(err))
+			panic(err)
 		}
-		if !w.node.queryShardService.hasQueryShard(dmlChannel) {
-			w.node.queryShardService.addQueryShard(collectionID, dmlChannel, w.req.GetReplicaId())
+		err = l.node.queryShardService.addQueryShard(collectionID, dmlChannel, l.req.GetReplicaID())
+		if err != nil {
+			log.Error("failed to add shard Service to query shard", zap.String("channel", channel), zap.Error(err))
+			panic(err)
 		}
 	}
 
@@ -512,7 +484,6 @@ func (w *watchDeltaChannelsTask) Execute(ctx context.Context) error {
 }
 
 // loadSegmentsTask
-
 func (l *loadSegmentsTask) PreExecute(ctx context.Context) error {
 	log.Info("LoadSegmentTask PreExecute start", zap.Int64("msgID", l.req.Base.MsgID))
 	var err error
@@ -536,7 +507,7 @@ func (l *loadSegmentsTask) PreExecute(ctx context.Context) error {
 		if !has {
 			filteredInfos = append(filteredInfos, info)
 		} else {
-			log.Debug("ignore segment that is already loaded", zap.Int64("segmentID", info.SegmentID))
+			log.Debug("ignore segment that is already loaded", zap.Int64("collectionID", info.SegmentID), zap.Int64("segmentID", info.SegmentID))
 		}
 	}
 	l.req.Infos = filteredInfos
@@ -545,37 +516,51 @@ func (l *loadSegmentsTask) PreExecute(ctx context.Context) error {
 }
 
 func (l *loadSegmentsTask) Execute(ctx context.Context) error {
-	// TODO: support db
 	log.Info("LoadSegmentTask Execute start", zap.Int64("msgID", l.req.Base.MsgID))
 	err := l.node.loader.LoadSegment(l.req, segmentTypeSealed)
 	if err != nil {
-		log.Warn(err.Error())
+		log.Warn("failed to load segment", zap.Int64("collectionID", l.req.CollectionID),
+			zap.Int64("replicaID", l.req.ReplicaID), zap.Error(err))
+		return err
+	}
+	vchanName := make([]string, 0)
+	for _, deltaPosition := range l.req.DeltaPositions {
+		vchanName = append(vchanName, deltaPosition.ChannelName)
+	}
+	// TODO delta channel need to released 1. if other watchDeltaChannel fail 2. when segment release
+	err = l.watchDeltaChannel(vchanName)
+	if err != nil {
+		// roll back
+		for _, segment := range l.req.Infos {
+			l.node.metaReplica.removeSegment(segment.SegmentID, segmentTypeSealed)
+		}
+		log.Warn("failed to watch Delta channel while load segment", zap.Int64("collectionID", l.req.CollectionID),
+			zap.Int64("replicaID", l.req.ReplicaID), zap.Error(err))
 		return err
 	}
 
-	// reload delete log from cp to latest position
+	runningGroup, groupCtx := errgroup.WithContext(l.ctx)
 	for _, deltaPosition := range l.req.DeltaPositions {
-		err = l.node.loader.FromDmlCPLoadDelete(ctx, l.req.CollectionID, deltaPosition)
-		if err != nil {
-			for _, segment := range l.req.Infos {
-				l.node.metaReplica.removeSegment(segment.SegmentID, segmentTypeSealed)
-			}
-			log.Warn("LoadSegmentTask from delta check point load delete failed", zap.Int64("msgID", l.req.Base.MsgID), zap.Error(err))
-			return err
+		pos := deltaPosition
+		runningGroup.Go(func() error {
+			// reload data from dml channel
+			return l.node.loader.FromDmlCPLoadDelete(groupCtx, l.req.CollectionID, pos)
+		})
+	}
+	err = runningGroup.Wait()
+	if err != nil {
+		for _, segment := range l.req.Infos {
+			l.node.metaReplica.removeSegment(segment.SegmentID, segmentTypeSealed)
 		}
+		log.Warn("failed to load delete data while load segment", zap.Int64("collectionID", l.req.CollectionID),
+			zap.Int64("replicaID", l.req.ReplicaID), zap.Error(err))
+		return err
 	}
 
-	log.Info("LoadSegmentTask Execute done", zap.Int64("msgID", l.req.Base.MsgID))
+	log.Info("LoadSegmentTask Execute done", zap.Int64("collectionID", l.req.CollectionID),
+		zap.Int64("replicaID", l.req.ReplicaID), zap.Int64("msgID", l.req.Base.MsgID))
 	return nil
 }
-
-type ReplicaType int
-
-const (
-	replicaNone ReplicaType = iota
-	replicaStreaming
-	replicaHistorical
-)
 
 func (r *releaseCollectionTask) Execute(ctx context.Context) error {
 	log.Info("Execute release collection task", zap.Any("collectionID", r.req.CollectionID))
