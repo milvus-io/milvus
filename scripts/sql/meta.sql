@@ -1,8 +1,11 @@
 -- create database
-CREATE DATABASE if not exists milvus_meta;
+CREATE DATABASE if not exists milvus_meta CHARACTER SET utf8mb4;
 
 /*
- create tables
+ create tables script
+
+ Notices:
+    id, tenant_id, is_deleted, created_at, updated_at are 5 common columns for all collections.
  */
 
 -- collections
@@ -13,7 +16,7 @@ CREATE TABLE if not exists milvus_meta.collections (
     collection_name VARCHAR(128),
     description VARCHAR(2048) DEFAULT NULL,
     auto_id BOOL DEFAULT FALSE,
-    num_shards INT,
+    shards_num INT,
     start_position VARCHAR(2048),
     consistency_level INT,
     ts BIGINT UNSIGNED DEFAULT 0,
@@ -46,6 +49,7 @@ CREATE TABLE if not exists milvus_meta.collection_channels (
     virtual_channel_name VARCHAR(256) NOT NULL,
     physical_channel_name VARCHAR(256) NOT NULL,
     removed BOOL DEFAULT FALSE,
+    ts BIGINT UNSIGNED DEFAULT 0,
     is_deleted BOOL DEFAULT FALSE,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP on update current_timestamp,
@@ -156,6 +160,7 @@ CREATE TABLE if not exists milvus_meta.segment_indexes (
     index_id BIGINT NOT NULL,
     index_build_id BIGINT,
     enable_index BOOL NOT NULL,
+    index_file_paths VARCHAR(4096),
     index_size BIGINT UNSIGNED,
     `version` INT UNSIGNED,
     is_deleted BOOL DEFAULT FALSE COMMENT 'as mark_deleted',
@@ -197,5 +202,5 @@ CREATE TABLE if not exists milvus_meta.credential_users (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP on update current_timestamp,
     PRIMARY KEY (id),
-    INDEX idx_tenant_id_username (tenant_id, username)
+    UNIQUE (tenant_id, username, is_deleted)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

@@ -18,25 +18,20 @@ package rootcoord
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 
 	// Register mysql driver
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/milvus-io/milvus/internal/common"
-	"github.com/milvus-io/milvus/internal/db"
-	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metastore"
 	kvmetestore "github.com/milvus-io/milvus/internal/metastore/kv"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/metastore/table"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
-	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/contextutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
@@ -73,10 +68,8 @@ const (
 
 // MetaTable store all rootCoord meta info
 type MetaTable struct {
-	ctx      context.Context
-	txn      kv.TxnKV      // client of a reliable txnkv service, i.e. etcd client
-	snapshot kv.SnapShotKV // client of a reliable snapshotkv service, i.e. etcd client
-	catalog  metastore.Catalog
+	ctx     context.Context
+	catalog metastore.Catalog
 
 	collID2Meta         map[typeutil.UniqueID]model.Collection           // collection id -> collection meta
 	collName2ID         map[string]typeutil.UniqueID                     // collection name to collection id
@@ -89,40 +82,16 @@ type MetaTable struct {
 	credLock sync.RWMutex
 }
 
-// TODO using factory once dependency of tnx and snap are removed
-func newCatalog(txn kv.TxnKV, snap kv.SnapShotKV) (metastore.Catalog, error) {
-	var catalog metastore.Catalog
-	if Params.MetaStoreCfg.MetaStoreType == util.MetaStoreTypeEtcd {
-		catalog = &kvmetestore.Catalog{Txn: txn, Snapshot: snap}
-	} else if Params.MetaStoreCfg.MetaStoreType == util.MetaStoreTypeMysql {
-		conn, err := db.Open(&Params.DBCfg)
-		if err != nil {
-			log.Error("fail connecting to db", zap.Any("error", err))
-			return nil, err
-		}
-		catalog = &table.Catalog{DB: conn}
-	} else {
-		return nil, errors.New("not supported meta store: " + Params.MetaStoreCfg.MetaStoreType)
-	}
-	return catalog, nil
-}
-
 // NewMetaTable creates meta table for rootcoord, which stores all in-memory information
 // for collection, partition, segment, index etc.
-func NewMetaTable(ctx context.Context, txn kv.TxnKV, snap kv.SnapShotKV) (*MetaTable, error) {
-	catalog, err := newCatalog(txn, snap)
-	if err != nil {
-		return nil, err
-	}
+func NewMetaTable(ctx context.Context, catalog metastore.Catalog) (*MetaTable, error) {
 	mt := &MetaTable{
 		ctx:      contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName),
-		txn:      txn,
-		snapshot: snap,
 		catalog:  catalog,
 		ddLock:   sync.RWMutex{},
 		credLock: sync.RWMutex{},
 	}
-	err = mt.reloadFromCatalog()
+	err := mt.reloadFromCatalog()
 	if err != nil {
 		return nil, err
 	}

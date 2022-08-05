@@ -22,10 +22,13 @@ require (
 	github.com/go-basic/ipv4 v1.0.0
 	github.com/go-sql-driver/mysql v1.6.0 // indirect
 	github.com/gofrs/flock v0.8.1
+	github.com/gohouse/converter v0.0.3 // indirect
+	github.com/golang/mock v1.6.0 // indirect
 	github.com/golang/protobuf v1.5.2
 	github.com/google/btree v1.0.1
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/jarcoal/httpmock v1.0.8
+	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/jmoiron/sqlx v1.3.5 // indirect
 	github.com/klauspost/compress v1.14.2
 	github.com/lingdor/stackerror v0.0.0-20191119040541-976d8885ed76
@@ -60,6 +63,8 @@ require (
 	google.golang.org/grpc v1.46.0
 	google.golang.org/grpc/examples v0.0.0-20220617181431-3e7b97febc7f
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
+	gorm.io/driver/mysql v1.3.5 // indirect
+	gorm.io/gorm v1.23.8 // indirect
 	stathat.com/c/consistent v1.0.0
 )
 

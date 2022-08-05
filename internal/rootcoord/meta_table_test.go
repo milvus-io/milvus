@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/etcd"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -125,46 +126,46 @@ func Test_MockKV(t *testing.T) {
 		return nil, nil, fmt.Errorf("load prefix error")
 	}
 
-	_, err := NewMetaTable(context.TODO(), kt, k1)
+	_, err := NewMetaTable(context.TODO(), &kvmetestore.Catalog{Txn: kt, Snapshot: k1})
 	assert.NotNil(t, err)
 	assert.EqualError(t, err, "load prefix error")
 
 	// collection
 	prefix[kvmetestore.CollectionMetaPrefix] = []string{"collection-meta"}
-	_, err = NewMetaTable(context.TODO(), kt, k1)
+	_, err = NewMetaTable(context.TODO(), &kvmetestore.Catalog{Txn: kt, Snapshot: k1})
 	assert.NotNil(t, err)
 
 	value, err := proto.Marshal(&pb.CollectionInfo{Schema: &schemapb.CollectionSchema{}})
 	assert.Nil(t, err)
 	prefix[kvmetestore.CollectionMetaPrefix] = []string{string(value)}
-	_, err = NewMetaTable(context.TODO(), kt, k1)
+	_, err = NewMetaTable(context.TODO(), &kvmetestore.Catalog{Txn: kt, Snapshot: k1})
 	assert.NotNil(t, err)
 
 	// segment index
 	prefix[kvmetestore.SegmentIndexMetaPrefix] = []string{"segment-index-meta"}
-	_, err = NewMetaTable(context.TODO(), kt, k1)
+	_, err = NewMetaTable(context.TODO(), &kvmetestore.Catalog{Txn: kt, Snapshot: k1})
 	assert.NotNil(t, err)
 
 	value, err = proto.Marshal(&pb.SegmentIndexInfo{})
 	assert.Nil(t, err)
 	prefix[kvmetestore.SegmentIndexMetaPrefix] = []string{string(value)}
-	_, err = NewMetaTable(context.TODO(), kt, k1)
+	_, err = NewMetaTable(context.TODO(), &kvmetestore.Catalog{Txn: kt, Snapshot: k1})
 	assert.NotNil(t, err)
 
 	prefix[kvmetestore.SegmentIndexMetaPrefix] = []string{string(value), string(value)}
-	_, err = NewMetaTable(context.TODO(), kt, k1)
+	_, err = NewMetaTable(context.TODO(), &kvmetestore.Catalog{Txn: kt, Snapshot: k1})
 	assert.NotNil(t, err)
 	assert.EqualError(t, err, "load prefix error")
 
 	// index
 	prefix[kvmetestore.IndexMetaPrefix] = []string{"index-meta"}
-	_, err = NewMetaTable(context.TODO(), kt, k1)
+	_, err = NewMetaTable(context.TODO(), &kvmetestore.Catalog{Txn: kt, Snapshot: k1})
 	assert.NotNil(t, err)
 
 	value, err = proto.Marshal(&pb.IndexInfo{})
 	assert.Nil(t, err)
 	prefix[kvmetestore.IndexMetaPrefix] = []string{string(value)}
-	_, err = NewMetaTable(context.TODO(), kt, k1)
+	_, err = NewMetaTable(context.TODO(), &kvmetestore.Catalog{Txn: kt, Snapshot: k1})
 	assert.NotNil(t, err)
 	assert.EqualError(t, err, "load prefix error")
 }
@@ -210,7 +211,7 @@ func TestMetaTable(t *testing.T) {
 	assert.Nil(t, err)
 	assert.NotNil(t, skv)
 	txnKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
-	mt, err := NewMetaTable(context.TODO(), txnKV, skv)
+	mt, err := NewMetaTable(context.TODO(), &kvmetestore.Catalog{Txn: txnKV, Snapshot: skv})
 	assert.Nil(t, err)
 
 	collInfo := &model.Collection{
@@ -259,6 +260,14 @@ func TestMetaTable(t *testing.T) {
 				PartitionName:             Params.CommonCfg.DefaultPartitionName,
 				PartitionCreatedTimestamp: 0,
 			},
+		},
+		VirtualChannelNames: []string{
+			fmt.Sprintf("dmChannel_%dv%d", collID, 0),
+			fmt.Sprintf("dmChannel_%dv%d", collID, 1),
+		},
+		PhysicalChannelNames: []string{
+			funcutil.ToPhysicalChannel(fmt.Sprintf("dmChannel_%dv%d", collID, 0)),
+			funcutil.ToPhysicalChannel(fmt.Sprintf("dmChannel_%dv%d", collID, 1)),
 		},
 	}
 
@@ -548,7 +557,7 @@ func TestMetaTable(t *testing.T) {
 		},
 	}
 	mockTxnKV := &mockTestTxnKV{
-		TxnKV:          mt.txn,
+		TxnKV:          txnkv,
 		loadWithPrefix: func(key string) ([]string, []string, error) { return txnkv.LoadWithPrefix(key) },
 		save:           func(key, value string) error { return txnkv.Save(key, value) },
 		multiSave:      func(kvs map[string]string) error { return txnkv.MultiSave(kvs) },
@@ -558,7 +567,7 @@ func TestMetaTable(t *testing.T) {
 		remove: func(key string) error { return txnkv.Remove(key) },
 	}
 
-	mt, err = NewMetaTable(context.TODO(), mockTxnKV, mockKV)
+	mt, err = NewMetaTable(context.TODO(), &kvmetestore.Catalog{Txn: mockTxnKV, Snapshot: mockKV})
 	assert.Nil(t, err)
 
 	wg.Add(1)
@@ -1105,7 +1114,7 @@ func TestMetaWithTimestamp(t *testing.T) {
 	assert.Nil(t, err)
 	assert.NotNil(t, skv)
 	txnKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
-	mt, err := NewMetaTable(context.TODO(), txnKV, skv)
+	mt, err := NewMetaTable(context.TODO(), &kvmetestore.Catalog{Txn: txnKV, Snapshot: skv})
 	assert.Nil(t, err)
 
 	collInfo := &model.Collection{
@@ -1274,7 +1283,7 @@ func TestFixIssue10540(t *testing.T) {
 	txnKV.Save(path.Join(kvmetestore.SegmentIndexMetaPrefix, "2"), string(kvmetestore.SuffixSnapshotTombstone))
 	txnKV.Save(path.Join(kvmetestore.IndexMetaPrefix, "3"), string(kvmetestore.SuffixSnapshotTombstone))
 
-	_, err = NewMetaTable(context.TODO(), txnKV, skv)
+	_, err = NewMetaTable(context.TODO(), &kvmetestore.Catalog{Txn: txnKV, Snapshot: skv})
 	assert.Nil(t, err)
 }
 
@@ -1614,9 +1623,11 @@ func TestMetaTable_AlignSegmentsMeta(t *testing.T) {
 		indexID   = UniqueID(1000)
 	)
 	mt := &MetaTable{
-		txn: &mockTestTxnKV{
-			multiRemove: func(keys []string) error {
-				return nil
+		catalog: &kvmetestore.Catalog{
+			Txn: &mockTestTxnKV{
+				multiRemove: func(keys []string) error {
+					return nil
+				},
 			},
 		},
 		collID2Meta: map[typeutil.UniqueID]model.Collection{
@@ -1654,7 +1665,7 @@ func TestMetaTable_AlignSegmentsMeta(t *testing.T) {
 				return fmt.Errorf("error occurred")
 			},
 		}
-		mt.txn = txn
+		mt.catalog = &kvmetestore.Catalog{Txn: txn}
 		mt.AlignSegmentsMeta(collID, partID, map[UniqueID]struct{}{103: {}, 104: {}, 105: {}})
 	})
 }
