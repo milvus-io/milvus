@@ -2169,10 +2169,6 @@ func TestProxy(t *testing.T) {
 			}
 		}
 		createCredentialReq := constructCreateCredentialRequest()
-		// permission deny
-		invalidCtx := GetContext(context.Background(), "foo:12345")
-		_, err := proxy.CreateCredential(invalidCtx, createCredentialReq)
-		assert.Error(t, err)
 		// success
 		resp, err := proxy.CreateCredential(ctx, createCredentialReq)
 		assert.NoError(t, err)
@@ -2311,10 +2307,6 @@ func TestProxy(t *testing.T) {
 			}
 		}
 		delCredReq := constructDelCredRequest()
-		// permission deny
-		invalidCtx := GetContext(context.Background(), "foo:12345")
-		_, err := proxy.DeleteCredential(invalidCtx, delCredReq)
-		assert.Error(t, err)
 
 		deleteResp, err := proxy.DeleteCredential(ctx, delCredReq)
 		assert.NoError(t, err)
@@ -3177,10 +3169,6 @@ func TestProxy(t *testing.T) {
 	cancel()
 }
 
-func getNotRootCtx() context.Context {
-	return GetContext(context.Background(), "foo:12345")
-}
-
 func testProxyRole(ctx context.Context, t *testing.T, proxy *Proxy) {
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -3192,9 +3180,6 @@ func testProxyRole(ctx context.Context, t *testing.T, proxy *Proxy) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 
 		entity.Name = "unit_test"
-		_, err := proxy.CreateRole(getNotRootCtx(), &milvuspb.CreateRoleRequest{Entity: entity})
-		assert.Error(t, err)
-
 		resp, _ = proxy.CreateRole(ctx, &milvuspb.CreateRoleRequest{Entity: entity})
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 
@@ -3225,28 +3210,16 @@ func testProxyRole(ctx context.Context, t *testing.T, proxy *Proxy) {
 				ObjectName: "col1",
 				Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Collection.String()},
 				Role:       &milvuspb.RoleEntity{Name: roleName},
-				Grantor:    &milvuspb.GrantorEntity{Privilege: &milvuspb.PrivilegeEntity{Name: util.Load.String()}},
+				Grantor:    &milvuspb.GrantorEntity{Privilege: &milvuspb.PrivilegeEntity{Name: util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeLoad.String())}},
 			},
 		}
 		privilegeResp, _ := proxy.OperatePrivilege(ctx, privilegeRequest)
 		assert.Equal(t, commonpb.ErrorCode_Success, privilegeResp.ErrorCode)
 
-		_, err := proxy.SelectUser(context.Background(), &milvuspb.SelectUserRequest{User: &milvuspb.UserEntity{Name: username}, IncludeRoleInfo: true})
-		assert.Error(t, err)
-
-		_, err = proxy.SelectUser(getNotRootCtx(), &milvuspb.SelectUserRequest{User: &milvuspb.UserEntity{Name: username}, IncludeRoleInfo: true})
-		assert.Error(t, err)
-
 		userResp, _ := proxy.SelectUser(ctx, &milvuspb.SelectUserRequest{User: &milvuspb.UserEntity{Name: username}, IncludeRoleInfo: true})
 		assert.Equal(t, commonpb.ErrorCode_Success, userResp.Status.ErrorCode)
 		roleNumOfUser := len(userResp.Results[0].Roles)
 
-		_, err = proxy.OperateUserRole(getNotRootCtx(), &milvuspb.OperateUserRoleRequest{
-			Username: username,
-			RoleName: roleName,
-			Type:     milvuspb.OperateUserRoleType_AddUserToRole,
-		})
-		assert.Error(t, err)
 		roleResp, _ = proxy.OperateUserRole(ctx, &milvuspb.OperateUserRoleRequest{
 			Username: username,
 			RoleName: roleName,
@@ -3260,9 +3233,6 @@ func testProxyRole(ctx context.Context, t *testing.T, proxy *Proxy) {
 		privilegeRequest.Type = milvuspb.OperatePrivilegeType_Revoke
 		privilegeResp, _ = proxy.OperatePrivilege(ctx, privilegeRequest)
 		assert.Equal(t, commonpb.ErrorCode_Success, privilegeResp.ErrorCode)
-
-		_, err = proxy.DropRole(getNotRootCtx(), &milvuspb.DropRoleRequest{RoleName: roleName})
-		assert.Error(t, err)
 
 		roleResp, _ = proxy.DropRole(ctx, &milvuspb.DropRoleRequest{RoleName: roleName})
 		assert.Equal(t, commonpb.ErrorCode_Success, roleResp.ErrorCode)
@@ -3303,9 +3273,6 @@ func testProxyRole(ctx context.Context, t *testing.T, proxy *Proxy) {
 		defer wg.Done()
 
 		_, err := proxy.SelectRole(ctx, &milvuspb.SelectRoleRequest{Role: &milvuspb.RoleEntity{Name: "  "}})
-		assert.Error(t, err)
-
-		_, err = proxy.SelectRole(getNotRootCtx(), &milvuspb.SelectRoleRequest{Role: &milvuspb.RoleEntity{Name: "  "}})
 		assert.Error(t, err)
 
 		resp, _ := proxy.SelectRole(ctx, &milvuspb.SelectRoleRequest{})
@@ -3428,7 +3395,8 @@ func testProxyPrivilege(ctx context.Context, t *testing.T, proxy *Proxy) {
 		resp, _ = proxy.OperatePrivilege(ctx, req)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 
-		req.Entity.Grantor.Privilege.Name = util.All.String()
+		req.Entity.Grantor.Privilege.Name = util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeAll.String())
+
 		resp, _ = proxy.OperatePrivilege(ctx, req)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 
@@ -3449,9 +3417,7 @@ func testProxyPrivilege(ctx context.Context, t *testing.T, proxy *Proxy) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 
 		req.Entity.Role = &milvuspb.RoleEntity{Name: "admin"}
-		_, err := proxy.OperatePrivilege(getNotRootCtx(), req)
-		assert.Error(t, err)
-		_, err = proxy.OperatePrivilege(context.Background(), req)
+		_, err := proxy.OperatePrivilege(context.Background(), req)
 		assert.Error(t, err)
 
 		resp, _ = proxy.OperatePrivilege(ctx, req)
@@ -3460,8 +3426,7 @@ func testProxyPrivilege(ctx context.Context, t *testing.T, proxy *Proxy) {
 		req.Entity.Grantor.Privilege.Name = "not existed"
 		resp, _ = proxy.OperatePrivilege(ctx, req)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-		req.Entity.Grantor.Privilege.Name = util.All.String()
-
+		req.Entity.Grantor.Privilege.Name = util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeAll.String())
 		req.Entity.Object.Name = "not existed"
 		resp, _ = proxy.OperatePrivilege(ctx, req)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
@@ -3477,7 +3442,7 @@ func testProxyPrivilege(ctx context.Context, t *testing.T, proxy *Proxy) {
 				Role:       &milvuspb.RoleEntity{Name: "public"},
 				Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Collection.String()},
 				ObjectName: "col1",
-				Grantor:    &milvuspb.GrantorEntity{Privilege: &milvuspb.PrivilegeEntity{Name: util.Load.String()}},
+				Grantor:    &milvuspb.GrantorEntity{Privilege: &milvuspb.PrivilegeEntity{Name: util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeLoad.String())}},
 			},
 			Type: milvuspb.OperatePrivilegeType_Grant,
 		}
@@ -3510,8 +3475,6 @@ func testProxyPrivilege(ctx context.Context, t *testing.T, proxy *Proxy) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, results.Status.ErrorCode)
 
 		selectReq.Entity.Role = &milvuspb.RoleEntity{Name: "public"}
-		_, err = proxy.SelectGrant(getNotRootCtx(), selectReq)
-		assert.Error(t, err)
 
 		results, _ = proxy.SelectGrant(ctx, selectReq)
 		assert.Equal(t, commonpb.ErrorCode_Success, results.Status.ErrorCode)
@@ -3564,7 +3527,7 @@ func testProxyPrivilegeFail(ctx context.Context, t *testing.T, proxy *Proxy, rea
 				Role:       &milvuspb.RoleEntity{Name: "admin"},
 				ObjectName: "col1",
 				Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Collection.String()},
-				Grantor:    &milvuspb.GrantorEntity{Privilege: &milvuspb.PrivilegeEntity{Name: util.All.String()}},
+				Grantor:    &milvuspb.GrantorEntity{Privilege: &milvuspb.PrivilegeEntity{Name: util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeAll.String())}},
 			},
 		})
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)

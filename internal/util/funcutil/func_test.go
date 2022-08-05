@@ -539,7 +539,11 @@ func TestUserRoleCache(t *testing.T) {
 	user, role := "foo", "root"
 	cache := EncodeUserRoleCache(user, role)
 	assert.Equal(t, fmt.Sprintf("%s/%s", user, role), cache)
-	u, r := DecodeUserRoleCache(cache)
+	u, r, err := DecodeUserRoleCache(cache)
 	assert.Equal(t, user, u)
 	assert.Equal(t, role, r)
+	assert.NoError(t, err)
+
+	_, _, err = DecodeUserRoleCache("foo")
+	assert.Error(t, err)
 }

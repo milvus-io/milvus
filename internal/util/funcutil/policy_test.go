@@ -44,12 +44,36 @@ func Test_GetPrivilegeExtObj(t *testing.T) {
 }
 
 func Test_GetResourceName(t *testing.T) {
-	request := &milvuspb.HasCollectionRequest{
-		DbName:         "test",
-		CollectionName: "col1",
+	{
+		request := &milvuspb.HasCollectionRequest{
+			DbName:         "test",
+			CollectionName: "col1",
+		}
+		assert.Equal(t, "*", GetObjectName(request, 0))
+		assert.Equal(t, "col1", GetObjectName(request, 3))
 	}
-	assert.Equal(t, "*", GetResourceName(request, 0))
-	assert.Equal(t, "col1", GetResourceName(request, 3))
+
+	{
+		request := &milvuspb.SelectUserRequest{
+			User: &milvuspb.UserEntity{Name: "test"},
+		}
+		assert.Equal(t, "test", GetObjectName(request, 2))
+
+		request = &milvuspb.SelectUserRequest{}
+		assert.Equal(t, "*", GetObjectName(request, 2))
+	}
+
+}
+
+func Test_GetResourceNames(t *testing.T) {
+	request := &milvuspb.FlushRequest{
+		DbName:          "test",
+		CollectionNames: []string{"col1", "col2"},
+	}
+	assert.Equal(t, 0, len(GetObjectNames(request, 0)))
+	assert.Equal(t, 0, len(GetObjectNames(request, 2)))
+	names := GetObjectNames(request, 3)
+	assert.Equal(t, 2, len(names))
 }
 
 func Test_PolicyForPrivilege(t *testing.T) {

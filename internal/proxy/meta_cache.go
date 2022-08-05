@@ -670,7 +670,11 @@ func (m *MetaCache) InitPolicyInfo(info []string, userRoles []string) {
 
 	m.privilegeInfos = util.StringSet(info)
 	for _, userRole := range userRoles {
-		user, role := funcutil.DecodeUserRoleCache(userRole)
+		user, role, err := funcutil.DecodeUserRoleCache(userRole)
+		if err != nil {
+			log.Warn("invalid user-role key", zap.String("user-role", userRole), zap.Error(err))
+			continue
+		}
 		if m.userToRoles[user] == nil {
 			m.userToRoles[user] = make(map[string]struct{})
 		}
@@ -705,13 +709,19 @@ func (m *MetaCache) RefreshPolicyInfo(op typeutil.CacheOp) error {
 	case typeutil.CacheRevokePrivilege:
 		delete(m.privilegeInfos, op.OpKey)
 	case typeutil.CacheAddUserToRole:
-		user, role := funcutil.DecodeUserRoleCache(op.OpKey)
+		user, role, err := funcutil.DecodeUserRoleCache(op.OpKey)
+		if err != nil {
+			return fmt.Errorf("invalid opKey, fail to decode, op_type: %d, op_key: %s", int(op.OpType), op.OpKey)
+		}
 		if m.userToRoles[user] == nil {
 			m.userToRoles[user] = make(map[string]struct{})
 		}
 		m.userToRoles[user][role] = struct{}{}
 	case typeutil.CacheRemoveUserFromRole:
-		user, role := funcutil.DecodeUserRoleCache(op.OpKey)
+		user, role, err := funcutil.DecodeUserRoleCache(op.OpKey)
+		if err != nil {
+			return fmt.Errorf("invalid opKey, fail to decode, op_type: %d, op_key: %s", int(op.OpType), op.OpKey)
+		}
 		if m.userToRoles[user] != nil {
 			delete(m.userToRoles[user], role)
 		}
