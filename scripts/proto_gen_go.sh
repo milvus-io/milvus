@@ -51,7 +51,7 @@ mkdir -p indexpb
 mkdir -p datapb
 mkdir -p querypb
 mkdir -p planpb
-
+mkdir -p indexnodepb
 mkdir -p querypbv2
 
 ${protoc} --proto_path="${GOOGLE_PROTO_DIR}" --proto_path=. --go_out=plugins=grpc,paths=source_relative:./commonpb common.proto
@@ -69,6 +69,7 @@ ${protoc} --proto_path="${GOOGLE_PROTO_DIR}" --proto_path=. --go_out=plugins=grp
 ${protoc} --proto_path="${GOOGLE_PROTO_DIR}" --proto_path=. --go_out=plugins=grpc,paths=source_relative:./querypb query_coord.proto
 ${protoc} --proto_path="${GOOGLE_PROTO_DIR}" --proto_path=. --go_out=plugins=grpc,paths=source_relative:./planpb plan.proto
 ${protoc} --proto_path="${GOOGLE_PROTO_DIR}" --proto_path=. --go_out=plugins=grpc,paths=source_relative:./segcorepb segcore.proto
+${protoc} --proto_path="${GOOGLE_PROTO_DIR}" --proto_path=. --go_out=plugins=grpc,paths=source_relative:./indexnodepb index_node.proto
 ${protoc} --proto_path="${GOOGLE_PROTO_DIR}" --proto_path=. --go_out=plugins=grpc,paths=source_relative:./querypbv2 query_coordv2.proto
 
 popd
