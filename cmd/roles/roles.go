@@ -367,9 +367,12 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 		Params.Init()
 
 		if Params.RocksmqEnable() {
-			path, _ := Params.Load("_RocksmqPath")
-			err := rocksmqimpl.InitRocksMQ(path)
+			path, err := Params.Load("rocksmq.path")
 			if err != nil {
+				panic(err)
+			}
+
+			if err = rocksmqimpl.InitRocksMQ(path); err != nil {
 				panic(err)
 			}
 			defer stopRocksmq()

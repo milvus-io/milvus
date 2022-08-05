@@ -152,20 +152,6 @@ func (c *Client) WatchDmChannels(ctx context.Context, req *querypb.WatchDmChanne
 	return ret.(*commonpb.Status), err
 }
 
-// WatchDeltaChannels watches the channels about data manipulation.
-func (c *Client) WatchDeltaChannels(ctx context.Context, req *querypb.WatchDeltaChannelsRequest) (*commonpb.Status, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
-		if !funcutil.CheckCtxValid(ctx) {
-			return nil, ctx.Err()
-		}
-		return client.(querypb.QueryNodeClient).WatchDeltaChannels(ctx, req)
-	})
-	if err != nil || ret == nil {
-		return nil, err
-	}
-	return ret.(*commonpb.Status), err
-}
-
 // LoadSegments loads the segments to search.
 func (c *Client) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) (*commonpb.Status, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
@@ -276,6 +262,21 @@ func (c *Client) SyncReplicaSegments(ctx context.Context, req *querypb.SyncRepli
 		return nil, err
 	}
 	return ret.(*commonpb.Status), err
+}
+
+// ShowConfigurations gets specified configurations para of QueryNode
+func (c *Client) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.(querypb.QueryNodeClient).ShowConfigurations(ctx, req)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+
+	return ret.(*internalpb.ShowConfigurationsResponse), err
 }
 
 // GetMetrics gets the metrics information of QueryNode.

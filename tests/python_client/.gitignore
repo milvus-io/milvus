@@ -6,6 +6,7 @@
 **/docker-compose.yml
 .idea
 *.html
+*.hdf5
 
 .python-version
 __pycache__

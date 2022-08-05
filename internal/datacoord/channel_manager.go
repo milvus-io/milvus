@@ -403,7 +403,8 @@ func (c *ChannelManager) unsubAttempt(ncInfo *NodeChannelInfo) {
 
 	nodeID := ncInfo.NodeID
 	for _, ch := range ncInfo.Channels {
-		subName := fmt.Sprintf("%s-%d-%d", Params.CommonCfg.DataNodeSubName, nodeID, ch.CollectionID)
+		// align to datanode subname, using vchannel name
+		subName := fmt.Sprintf("%s-%d-%s", Params.CommonCfg.DataNodeSubName, nodeID, ch.Name)
 		pchannelName := funcutil.ToPhysicalChannel(ch.Name)
 		msgstream.UnsubscribeChannels(c.ctx, c.msgstreamFactory, subName, []string{pchannelName})
 	}

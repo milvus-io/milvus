@@ -20,6 +20,9 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/milvus-io/milvus/internal/log"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/common"
 
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -29,6 +32,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
+
+var logger = log.L().WithOptions(zap.Fields(zap.String("role", typeutil.RootCoordRole)))
 
 // EqualKeyPairArray check whether 2 KeyValuePairs are equal
 func EqualKeyPairArray(p1 []*commonpb.KeyValuePair, p2 []*commonpb.KeyValuePair) bool {

@@ -31,6 +31,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+
 	"go.uber.org/zap"
 
 	"github.com/go-basic/ipv4"
@@ -366,4 +368,43 @@ func IsGrpcErr(err error) bool {
 		}
 		err = errors.Unwrap(err)
 	}
+}
+
+func IsEmptyString(str string) bool {
+	return strings.TrimSpace(str) == ""
+}
+
+func HandleTenantForEtcdKey(prefix string, tenant string, key string) string {
+	res := prefix
+	if tenant != "" {
+		res += "/" + tenant
+	}
+	if key != "" {
+		res += "/" + key
+	}
+	return res
+}
+
+func IsRevoke(operateType milvuspb.OperatePrivilegeType) bool {
+	return operateType == milvuspb.OperatePrivilegeType_Revoke
+}
+
+func IsGrant(operateType milvuspb.OperatePrivilegeType) bool {
+	return operateType == milvuspb.OperatePrivilegeType_Grant
+}
+
+// IsKeyNotExistError Judging by the error message whether the key does not exist or not for the ectd server
+func IsKeyNotExistError(err error) bool {
+	return strings.Contains(err.Error(), "there is no value on key")
+}
+
+func EncodeUserRoleCache(user string, role string) string {
+	return fmt.Sprintf("%s/%s", user, role)
+}
+
+func DecodeUserRoleCache(cache string) (string, string) {
+	index := strings.LastIndex(cache, "/")
+	user := cache[:index]
+	role := cache[index+1:]
+	return user, role
 }

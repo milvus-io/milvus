@@ -75,7 +75,7 @@ func (q *queryShardService) addQueryShard(collectionID UniqueID, channel Channel
 	q.queryShardsMu.Lock()
 	defer q.queryShardsMu.Unlock()
 	if _, ok := q.queryShards[channel]; ok {
-		return errors.New(fmt.Sprintln("query shard(channel) ", channel, " already exists"))
+		return nil
 	}
 	qs, err := newQueryShard(
 		q.ctx,

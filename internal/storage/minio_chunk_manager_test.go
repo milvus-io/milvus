@@ -20,7 +20,10 @@ import (
 	"context"
 	"path"
 	"strconv"
+	"strings"
 	"testing"
+
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -28,7 +31,7 @@ import (
 
 // TODO: NewMinioChunkManager is deprecated. Rewrite this unittest.
 func newMinIOChunkManager(ctx context.Context, bucketName string) (*MinioChunkManager, error) {
-	endPoint, _ := Params.Load("_MinioAddress")
+	endPoint := getMinioAddress()
 	accessKeyID, _ := Params.Load("minio.accessKeyID")
 	secretAccessKey, _ := Params.Load("minio.secretAccessKey")
 	useSSLStr, _ := Params.Load("minio.useSSL")
@@ -45,6 +48,16 @@ func newMinIOChunkManager(ctx context.Context, bucketName string) (*MinioChunkMa
 	)
 	return client, err
 }
+
+func getMinioAddress() string {
+	minioHost := Params.LoadWithDefault("minio.address", paramtable.DefaultMinioHost)
+	if strings.Contains(minioHost, ":") {
+		return minioHost
+	}
+	port := Params.LoadWithDefault("minio.port", paramtable.DefaultMinioPort)
+	return minioHost + ":" + port
+}
+
 func TestMinIOCMFail(t *testing.T) {
 	ctx := context.Background()
 	endPoint, _ := Params.Load("9.9.9.9")

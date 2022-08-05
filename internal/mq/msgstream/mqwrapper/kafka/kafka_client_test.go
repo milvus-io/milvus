@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/confluentinc/confluent-kafka-go/kafka"
+
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
@@ -22,9 +24,26 @@ var Params paramtable.BaseTable
 
 func TestMain(m *testing.M) {
 	Params.Init()
+	mockCluster, err := kafka.NewMockCluster(1)
+	defer mockCluster.Close()
+	if err != nil {
+		fmt.Printf("Failed to create MockCluster: %s\n", err)
+		os.Exit(1)
+	}
+
+	broker := mockCluster.BootstrapServers()
+	Params.Save("kafka.brokerList", broker)
+
 	exitCode := m.Run()
 	os.Exit(exitCode)
 }
+
+func getKafkaBrokerList() string {
+	brokerList := Params.Get("kafka.brokerList")
+	log.Info("get kafka broker list.", zap.String("address", brokerList))
+	return brokerList
+}
+
 func IntToBytes(n int) []byte {
 	tmp := int32(n)
 	bytesBuffer := bytes.NewBuffer([]byte{})
@@ -138,7 +157,7 @@ func Consume3(ctx context.Context, t *testing.T, kc *kafkaClient, topic string, 
 
 			consumer.Ack(msg)
 			(*total)++
-			log.Info("Consume3 RECV", zap.Any("v", BytesToInt(msg.Payload())))
+			log.Info("Consume3 RECV", zap.Any("v", BytesToInt(msg.Payload())), zap.Int("total", *total))
 		}
 	}
 }
@@ -251,7 +270,7 @@ func TestKafkaClient_ConsumeFromLatest(t *testing.T) {
 }
 
 func TestKafkaClient_EarliestMessageID(t *testing.T) {
-	kafkaAddress, _ := Params.Load("_KafkaBrokerList")
+	kafkaAddress := getKafkaBrokerList()
 	kc := NewKafkaClientInstance(kafkaAddress)
 	defer kc.Close()
 
@@ -260,7 +279,7 @@ func TestKafkaClient_EarliestMessageID(t *testing.T) {
 }
 
 func TestKafkaClient_MsgSerializAndDeserialize(t *testing.T) {
-	kafkaAddress, _ := Params.Load("_KafkaBrokerList")
+	kafkaAddress := getKafkaBrokerList()
 	kc := NewKafkaClientInstance(kafkaAddress)
 	defer kc.Close()
 
@@ -292,7 +311,7 @@ func TestKafkaClient_NewKafkaClientInstanceWithConfig(t *testing.T) {
 }
 
 func createKafkaClient(t *testing.T) *kafkaClient {
-	kafkaAddress, _ := Params.Load("_KafkaBrokerList")
+	kafkaAddress := getKafkaBrokerList()
 	kc := NewKafkaClientInstance(kafkaAddress)
 	assert.NotNil(t, kc)
 	return kc
@@ -331,5 +350,7 @@ func produceData(ctx context.Context, t *testing.T, producer mqwrapper.Producer,
 		msgIDs = append(msgIDs, msgID)
 		assert.Nil(t, err)
 	}
+
+	producer.(*kafkaProducer).p.Flush(500)
 	return msgIDs
 }

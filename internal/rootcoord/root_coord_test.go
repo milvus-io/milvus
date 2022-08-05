@@ -146,6 +146,12 @@ func (p *proxyMock) InvalidateCredentialCache(ctx context.Context, request *prox
 	}, nil
 }
 
+func (p *proxyMock) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}, nil
+}
+
 type dataMock struct {
 	types.DataCoord
 	randVal int
@@ -790,6 +796,7 @@ func TestRootCoordInitData(t *testing.T) {
 			return fmt.Errorf("save error")
 		},
 		remove: func(key string) error { return txnKV.Remove(key) },
+		load:   func(key string) (string, error) { return txnKV.Load(key) },
 	}
 	//mt.txn = mockTxnKV
 	mt.catalog = &kvmetestore.Catalog{Txn: mockTxnKV, Snapshot: snapshotKV}
@@ -3579,4 +3586,62 @@ func TestCore_GetIndexState(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.GetErrorCode())
 	})
+}
+
+func TestCore_Rbac(t *testing.T) {
+	ctx := context.Background()
+	c := &Core{
+		ctx: ctx,
+	}
+
+	// not healthy.
+	c.stateCode.Store(internalpb.StateCode_Abnormal)
+
+	{
+		resp, err := c.CreateRole(ctx, &milvuspb.CreateRoleRequest{})
+		assert.NotNil(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	}
+
+	{
+		resp, err := c.DropRole(ctx, &milvuspb.DropRoleRequest{})
+		assert.NotNil(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	}
+
+	{
+		resp, err := c.OperateUserRole(ctx, &milvuspb.OperateUserRoleRequest{})
+		assert.NotNil(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	}
+
+	{
+		resp, err := c.SelectRole(ctx, &milvuspb.SelectRoleRequest{})
+		assert.NotNil(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	}
+
+	{
+		resp, err := c.SelectUser(ctx, &milvuspb.SelectUserRequest{})
+		assert.NotNil(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	}
+
+	{
+		resp, err := c.OperatePrivilege(ctx, &milvuspb.OperatePrivilegeRequest{})
+		assert.NotNil(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	}
+
+	{
+		resp, err := c.SelectGrant(ctx, &milvuspb.SelectGrantRequest{})
+		assert.NotNil(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	}
+
+	{
+		resp, err := c.ListPolicy(ctx, &internalpb.ListPolicyRequest{})
+		assert.NotNil(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	}
 }

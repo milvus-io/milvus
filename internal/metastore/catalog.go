@@ -3,6 +3,8 @@ package metastore
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -33,6 +35,16 @@ type Catalog interface {
 	CreateCredential(ctx context.Context, credential *model.Credential) error
 	DropCredential(ctx context.Context, username string) error
 	ListCredentials(ctx context.Context) ([]string, error)
+
+	CreateRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error
+	DropRole(ctx context.Context, tenant string, roleName string) error
+	OperateUserRole(ctx context.Context, tenant string, userEntity *milvuspb.UserEntity, roleEntity *milvuspb.RoleEntity, operateType milvuspb.OperateUserRoleType) error
+	SelectRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error)
+	SelectUser(ctx context.Context, tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool) ([]*milvuspb.UserResult, error)
+	OperatePrivilege(ctx context.Context, tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error
+	SelectGrant(ctx context.Context, tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error)
+	ListPolicy(ctx context.Context, tenant string) ([]string, error)
+	ListUserRole(ctx context.Context, tenant string) ([]string, error)
 
 	Close()
 }

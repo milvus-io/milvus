@@ -370,15 +370,8 @@ SegmentSealedImpl::vector_search(int64_t vec_count,
         PanicInfo("Field Data is not loaded");
     }
 
-    query::dataset::SearchDataset dataset;
-    dataset.query_data = query_data;
-    dataset.num_queries = query_count;
-    // if(field_meta.is)
-    dataset.metric_type = search_info.metric_type_;
-    dataset.topk = search_info.topk_;
-    dataset.dim = field_meta.get_dim();
-    dataset.round_decimal = search_info.round_decimal_;
-
+    query::dataset::SearchDataset dataset{search_info.metric_type_,   query_count,          search_info.topk_,
+                                          search_info.round_decimal_, field_meta.get_dim(), query_data};
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));
     AssertInfo(row_count_opt_.has_value(), "Can't get row count value");
@@ -388,13 +381,10 @@ SegmentSealedImpl::vector_search(int64_t vec_count,
     auto chunk_data = vec_data->get_chunk_data(0);
     auto sub_qr = query::BruteForceSearch(dataset, chunk_data, row_count, bitset);
 
-    SearchResult results;
-    results.distances_ = std::move(sub_qr.mutable_distances());
-    results.seg_offsets_ = std::move(sub_qr.mutable_seg_offsets());
-    results.unity_topK_ = dataset.topk;
-    results.total_nq_ = dataset.num_queries;
-
-    output = std::move(results);
+    output.distances_ = std::move(sub_qr.mutable_distances());
+    output.seg_offsets_ = std::move(sub_qr.mutable_seg_offsets());
+    output.unity_topK_ = dataset.topk;
+    output.total_nq_ = dataset.num_queries;
 }
 
 void

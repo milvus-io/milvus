@@ -123,7 +123,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 	defer rc.Stop()
 	require.NoError(t, err)
 	mgr := newShardClientMgr()
-	err = InitMetaCache(rc, qc, mgr)
+	err = InitMetaCache(ctx, rc, qc, mgr)
 	require.NoError(t, err)
 
 	err = qc.Start()
@@ -335,7 +335,7 @@ func TestSearchTaskV2_Execute(t *testing.T) {
 	require.NoError(t, err)
 	defer rc.Stop()
 	mgr := newShardClientMgr()
-	err = InitMetaCache(rc, qc, mgr)
+	err = InitMetaCache(ctx, rc, qc, mgr)
 	require.NoError(t, err)
 
 	err = qc.Start()
@@ -442,7 +442,7 @@ func TestSearchTaskWithInvalidRoundDecimal(t *testing.T) {
 	//
 	// ctx := context.Background()
 	//
-	// err = InitMetaCache(rc)
+	// err = InitMetaCache(ctx, rc)
 	// assert.NoError(t, err)
 	//
 	// shardsNum := int32(2)
@@ -685,7 +685,7 @@ func TestSearchTaskV2_all(t *testing.T) {
 	//
 	// ctx := context.Background()
 	//
-	// err = InitMetaCache(rc)
+	// err = InitMetaCache(ctx, rc)
 	// assert.NoError(t, err)
 	//
 	// shardsNum := int32(2)
@@ -930,7 +930,7 @@ func TestSearchTaskV2_7803_reduce(t *testing.T) {
 	//
 	// ctx := context.Background()
 	//
-	// err = InitMetaCache(rc)
+	// err = InitMetaCache(ctx, rc)
 	// assert.NoError(t, err)
 	//
 	// shardsNum := int32(2)
@@ -1619,7 +1619,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 	qc.Start()
 	defer qc.Stop()
 
-	err = InitMetaCache(rc, qc, mgr)
+	err = InitMetaCache(ctx, rc, qc, mgr)
 	assert.NoError(t, err)
 
 	fieldName2Types := map[string]schemapb.DataType{

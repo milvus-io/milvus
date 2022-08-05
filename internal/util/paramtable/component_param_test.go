@@ -200,10 +200,16 @@ func TestComponentParam(t *testing.T) {
 			Params.Base.Save("proxy.maxTaskNum", "-asdf")
 			Params.initMaxTaskNum()
 		})
-	})
 
-	t.Run("test queryCoordConfig", func(t *testing.T) {
-		//Params := CParams.QueryCoordCfg
+		shouldPanic(t, "proxy.maxUserNum", func() {
+			Params.Base.Save("proxy.maxUserNum", "abc")
+			Params.initMaxUserNum()
+		})
+
+		shouldPanic(t, "proxy.maxRoleNum", func() {
+			Params.Base.Save("proxy.maxRoleNum", "abc")
+			Params.initMaxRoleNum()
+		})
 	})
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {

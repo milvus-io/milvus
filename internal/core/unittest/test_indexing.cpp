@@ -312,9 +312,9 @@ TEST(Indexing, BinaryBruteForce) {
     auto bin_vec = dataset.get_col<uint8_t>(vec_fid);
     auto query_data = 1024 * dim / 8 + bin_vec.data();
     query::dataset::SearchDataset search_dataset{
-        metric_type,    //
-        num_queries,    //
-        topk,           //
+        metric_type,  //
+        num_queries,  //
+        topk,         //
         round_decimal,
         dim,        //
         query_data  //

@@ -1,0 +1,17 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: test-etcd-pod-failure
+  namespace: chaos-testing
+spec:
+  selector:
+    namespaces:
+      - chaos-testing
+    labelSelectors:
+      app.kubernetes.io/instance: milvus-chaos
+      app.kubernetes.io/name: etcd
+  mode: fixed
+  value: "1"
+  action: pod-failure
+  duration: 2m
+  gracePeriod: 0

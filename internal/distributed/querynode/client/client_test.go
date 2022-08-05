@@ -90,9 +90,6 @@ func Test_NewClient(t *testing.T) {
 		r12, err := client.GetMetrics(ctx, nil)
 		retCheck(retNotNil, r12, err)
 
-		r13, err := client.WatchDeltaChannels(ctx, nil)
-		retCheck(retNotNil, r13, err)
-
 		r14, err := client.Search(ctx, nil)
 		retCheck(retNotNil, r14, err)
 
@@ -104,6 +101,9 @@ func Test_NewClient(t *testing.T) {
 
 		r17, err := client.GetStatistics(ctx, nil)
 		retCheck(retNotNil, r17, err)
+
+		r18, err := client.ShowConfigurations(ctx, nil)
+		retCheck(retNotNil, r18, err)
 	}
 
 	client.grpcClient = &mock.GRPCClientBase{

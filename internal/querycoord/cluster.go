@@ -58,8 +58,6 @@ type Cluster interface {
 
 	// Channel
 	WatchDmChannels(ctx context.Context, nodeID int64, in *querypb.WatchDmChannelsRequest) error
-	WatchDeltaChannels(ctx context.Context, nodeID int64, in *querypb.WatchDeltaChannelsRequest) error
-	HasWatchedDeltaChannel(ctx context.Context, nodeID int64, collectionID UniqueID) bool
 
 	// Node
 	RegisterNode(ctx context.Context, session *sessionutil.Session, id UniqueID, state nodeState) error
@@ -209,48 +207,44 @@ func (c *queryNodeCluster) LoadSegments(ctx context.Context, nodeID int64, in *q
 
 	if targetNode != nil {
 		collectionID := in.CollectionID
-		// if node has watched the collection's deltaChannel
-		// then the node should recover part delete log from dmChanel
-		if c.HasWatchedDeltaChannel(ctx, nodeID, collectionID) {
-			// get all deltaChannelInfo of the collection from meta
-			deltaChannelInfos, err := c.clusterMeta.getDeltaChannelsByCollectionID(collectionID)
+		// get all deltaChannelInfo of the collection from meta
+		deltaChannelInfos, err := c.clusterMeta.getDeltaChannelsByCollectionID(collectionID)
+		if err != nil {
+			// this case should not happen
+			// deltaChannelInfos should have been set to meta before executing child tasks
+			log.Error("loadSegments: failed to get deltaChannelInfo from meta", zap.Error(err))
+			return err
+		}
+		deltaChannel2Info := make(map[string]*datapb.VchannelInfo, len(deltaChannelInfos))
+		for _, info := range deltaChannelInfos {
+			deltaChannel2Info[info.ChannelName] = info
+		}
+
+		// check delta channel which should be reloaded
+		reloadDeltaChannels := make(map[string]struct{})
+		for _, segment := range in.Infos {
+			// convert vChannel to deltaChannel
+			deltaChannelName, err := funcutil.ConvertChannelName(segment.InsertChannel, Params.CommonCfg.RootCoordDml, Params.CommonCfg.RootCoordDelta)
 			if err != nil {
-				// this case should not happen
-				// deltaChannelInfos should have been set to meta before executing child tasks
-				log.Error("loadSegments: failed to get deltaChannelInfo from meta", zap.Error(err))
 				return err
 			}
-			deltaChannel2Info := make(map[string]*datapb.VchannelInfo, len(deltaChannelInfos))
-			for _, info := range deltaChannelInfos {
-				deltaChannel2Info[info.ChannelName] = info
-			}
 
-			// check delta channel which should be reloaded
-			reloadDeltaChannels := make(map[string]struct{})
-			for _, segment := range in.Infos {
-				// convert vChannel to deltaChannel
-				deltaChannelName, err := funcutil.ConvertChannelName(segment.InsertChannel, Params.CommonCfg.RootCoordDml, Params.CommonCfg.RootCoordDelta)
-				if err != nil {
-					return err
-				}
+			reloadDeltaChannels[deltaChannelName] = struct{}{}
+		}
 
-				reloadDeltaChannels[deltaChannelName] = struct{}{}
-			}
-
-			in.DeltaPositions = make([]*internalpb.MsgPosition, 0)
-			for deltaChannelName := range reloadDeltaChannels {
-				if info, ok := deltaChannel2Info[deltaChannelName]; ok {
-					in.DeltaPositions = append(in.DeltaPositions, info.SeekPosition)
-				} else {
-					// this case should not happen
-					err = fmt.Errorf("loadSegments: can't find deltaChannelInfo, channel name = %s", deltaChannelName)
-					log.Error(err.Error())
-					return err
-				}
+		in.DeltaPositions = make([]*internalpb.MsgPosition, 0)
+		for deltaChannelName := range reloadDeltaChannels {
+			if info, ok := deltaChannel2Info[deltaChannelName]; ok {
+				in.DeltaPositions = append(in.DeltaPositions, info.SeekPosition)
+			} else {
+				// this case should not happen
+				err = fmt.Errorf("loadSegments: can't find deltaChannelInfo, channel name = %s", deltaChannelName)
+				log.Error(err.Error())
+				return err
 			}
 		}
 
-		err := targetNode.loadSegments(ctx, in)
+		err = targetNode.loadSegments(ctx, in)
 		if err != nil {
 			log.Warn("loadSegments: queryNode load segments error", zap.Int64("nodeID", nodeID), zap.String("error info", err.Error()))
 			return err
@@ -326,33 +320,6 @@ func (c *queryNodeCluster) WatchDmChannels(ctx context.Context, nodeID int64, in
 		return nil
 	}
 	return fmt.Errorf("watchDmChannels: can't find QueryNode by nodeID, nodeID = %d", nodeID)
-}
-
-func (c *queryNodeCluster) WatchDeltaChannels(ctx context.Context, nodeID int64, in *querypb.WatchDeltaChannelsRequest) error {
-	c.RLock()
-	var targetNode Node
-	if node, ok := c.nodes[nodeID]; ok {
-		targetNode = node
-	}
-	c.RUnlock()
-
-	if targetNode != nil {
-		err := targetNode.watchDeltaChannels(ctx, in)
-		if err != nil {
-			return err
-		}
-
-		return nil
-	}
-
-	return fmt.Errorf("watchDeltaChannels: can't find QueryNode by nodeID, nodeID = %d", nodeID)
-}
-
-func (c *queryNodeCluster) HasWatchedDeltaChannel(ctx context.Context, nodeID int64, collectionID UniqueID) bool {
-	c.RLock()
-	defer c.RUnlock()
-
-	return c.nodes[nodeID].hasWatchedDeltaChannel(collectionID)
 }
 
 func (c *queryNodeCluster) ReleaseCollection(ctx context.Context, nodeID int64, in *querypb.ReleaseCollectionRequest) error {

@@ -17,6 +17,7 @@
 package paramtable
 
 import (
+	"net/url"
 	"os"
 	"path"
 	"strconv"
@@ -27,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/streamnative/pulsarctl/pkg/cmdutils"
+	"go.uber.org/zap"
 )
 
 var pulsarOnce sync.Once
@@ -133,7 +135,7 @@ func (p *EtcdConfig) initDataDir() {
 }
 
 func (p *EtcdConfig) initEndpoints() {
-	endpoints, err := p.Base.Load("_EtcdEndpoints")
+	endpoints, err := p.Base.Load("etcd.endpoints")
 	if err != nil {
 		panic(err)
 	}
@@ -317,19 +319,31 @@ func (p *PulsarConfig) init(base *BaseTable) {
 }
 
 func (p *PulsarConfig) initAddress() {
-	addr, err := p.Base.Load("_PulsarAddress")
-	if err != nil {
-		panic(err)
+	pulsarHost := p.Base.LoadWithDefault("pulsar.address", "")
+	if strings.Contains(pulsarHost, ":") {
+		p.Address = pulsarHost
+		return
 	}
-	p.Address = addr
+
+	port := p.Base.LoadWithDefault("pulsar.port", "")
+	if len(pulsarHost) != 0 && len(port) != 0 {
+		p.Address = "pulsar://" + pulsarHost + ":" + port
+	}
 }
 
 func (p *PulsarConfig) initWebAddress() {
-	addr, err := p.Base.Load("_PulsarWebAddress")
-	if err != nil {
-		panic(err)
+	if p.Address == "" {
+		return
 	}
-	p.WebAddress = addr
+
+	pulsarURL, err := url.ParseRequestURI(p.Address)
+	if err != nil {
+		p.WebAddress = ""
+		log.Info("failed to parse pulsar config, assume pulsar not used", zap.Error(err))
+	} else {
+		webport := p.Base.LoadWithDefault("pulsar.webport", "80")
+		p.WebAddress = "http://" + pulsarURL.Hostname() + ":" + webport
+	}
 	pulsarOnce.Do(func() {
 		cmdutils.PulsarCtlConfig.WebServiceURL = p.WebAddress
 	})
@@ -369,11 +383,7 @@ func (k *KafkaConfig) init(base *BaseTable) {
 }
 
 func (k *KafkaConfig) initAddress() {
-	addr, err := k.Base.Load("_KafkaBrokerList")
-	if err != nil {
-		panic(err)
-	}
-	k.Address = addr
+	k.Address = k.Base.LoadWithDefault("kafka.brokerList", "")
 }
 
 func (k *KafkaConfig) initSaslUsername() {
@@ -407,11 +417,7 @@ func (p *RocksmqConfig) init(base *BaseTable) {
 }
 
 func (p *RocksmqConfig) initPath() {
-	path, err := p.Base.Load("_RocksmqPath")
-	if err != nil {
-		panic(err)
-	}
-	p.Path = path
+	p.Path = p.Base.LoadWithDefault("rocksmq.path", "")
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -443,15 +449,21 @@ func (p *MinioConfig) init(base *BaseTable) {
 }
 
 func (p *MinioConfig) initAddress() {
-	endpoint, err := p.Base.Load("_MinioAddress")
+	host, err := p.Base.Load("minio.Address")
 	if err != nil {
 		panic(err)
 	}
-	p.Address = endpoint
+	// for compatible
+	if strings.Contains(host, ":") {
+		p.Address = host
+	} else {
+		port := p.Base.LoadWithDefault("minio.port", "9000")
+		p.Address = host + ":" + port
+	}
 }
 
 func (p *MinioConfig) initAccessKeyID() {
-	keyID, err := p.Base.Load("_MinioAccessKeyID")
+	keyID, err := p.Base.Load("minio.accessKeyID")
 	if err != nil {
 		panic(err)
 	}
@@ -459,7 +471,7 @@ func (p *MinioConfig) initAccessKeyID() {
 }
 
 func (p *MinioConfig) initSecretAccessKey() {
-	key, err := p.Base.Load("_MinioSecretAccessKey")
+	key, err := p.Base.Load("minio.secretAccessKey")
 	if err != nil {
 		panic(err)
 	}
@@ -467,7 +479,7 @@ func (p *MinioConfig) initSecretAccessKey() {
 }
 
 func (p *MinioConfig) initUseSSL() {
-	usessl, err := p.Base.Load("_MinioUseSSL")
+	usessl, err := p.Base.Load("minio.useSSL")
 	if err != nil {
 		panic(err)
 	}
@@ -475,7 +487,7 @@ func (p *MinioConfig) initUseSSL() {
 }
 
 func (p *MinioConfig) initBucketName() {
-	bucketName, err := p.Base.Load("_MinioBucketName")
+	bucketName, err := p.Base.Load("minio.bucketName")
 	if err != nil {
 		panic(err)
 	}

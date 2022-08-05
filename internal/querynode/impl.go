@@ -325,58 +325,6 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, in *queryPb.WatchDmC
 	return waitFunc()
 }
 
-// WatchDeltaChannels create consumers on dmChannels to receive Incremental data，which is the important part of real-time query
-func (node *QueryNode) WatchDeltaChannels(ctx context.Context, in *queryPb.WatchDeltaChannelsRequest) (*commonpb.Status, error) {
-	code := node.stateCode.Load().(internalpb.StateCode)
-	if code != internalpb.StateCode_Healthy {
-		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeCfg.GetNodeID())
-		status := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}
-		return status, nil
-	}
-	dct := &watchDeltaChannelsTask{
-		baseTask: baseTask{
-			ctx:  ctx,
-			done: make(chan error),
-		},
-		req:  in,
-		node: node,
-	}
-
-	err := node.scheduler.queue.Enqueue(dct)
-	if err != nil {
-		status := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}
-		log.Warn(err.Error())
-		return status, nil
-	}
-
-	log.Info("watchDeltaChannelsTask Enqueue done", zap.Int64("collectionID", in.CollectionID), zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()))
-
-	waitFunc := func() (*commonpb.Status, error) {
-		err = dct.WaitToFinish()
-		if err != nil {
-			status := &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			}
-			log.Warn(err.Error())
-			return status, nil
-		}
-
-		log.Info("watchDeltaChannelsTask WaitToFinish done", zap.Int64("collectionID", in.CollectionID), zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()))
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		}, nil
-	}
-
-	return waitFunc()
-}
-
 // LoadSegments load historical data into query node, historical data can be vector data or index
 func (node *QueryNode) LoadSegments(ctx context.Context, in *queryPb.LoadSegmentsRequest) (*commonpb.Status, error) {
 	code := node.stateCode.Load().(internalpb.StateCode)
@@ -1049,12 +997,32 @@ func (node *QueryNode) SyncReplicaSegments(ctx context.Context, req *querypb.Syn
 	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
 }
 
+//ShowConfigurations returns the configurations of queryNode matching req.Pattern
+func (node *QueryNode) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+	if !node.isHealthy() {
+		log.Warn("QueryNode.ShowConfigurations failed",
+			zap.Int64("nodeId", Params.QueryNodeCfg.GetNodeID()),
+			zap.String("req", req.Pattern),
+			zap.Error(errQueryNodeIsUnhealthy(Params.QueryNodeCfg.GetNodeID())))
+
+		return &internalpb.ShowConfigurationsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    msgQueryNodeIsUnhealthy(Params.QueryNodeCfg.GetNodeID()),
+			},
+			Configuations: nil,
+		}, nil
+	}
+
+	return getComponentConfigurations(ctx, req), nil
+}
+
 // GetMetrics return system infos of the query node, such as total memory, memory usage, cpu usage ...
 // TODO(dragondriver): cache the Metrics and set a retention to the cache
 func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	if !node.isHealthy() {
 		log.Warn("QueryNode.GetMetrics failed",
-			zap.Int64("node_id", Params.QueryNodeCfg.GetNodeID()),
+			zap.Int64("nodeId", Params.QueryNodeCfg.GetNodeID()),
 			zap.String("req", req.Request),
 			zap.Error(errQueryNodeIsUnhealthy(Params.QueryNodeCfg.GetNodeID())))
 
@@ -1070,7 +1038,7 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 	metricType, err := metricsinfo.ParseMetricType(req.Request)
 	if err != nil {
 		log.Warn("QueryNode.GetMetrics failed to parse metric type",
-			zap.Int64("node_id", Params.QueryNodeCfg.GetNodeID()),
+			zap.Int64("nodeId", Params.QueryNodeCfg.GetNodeID()),
 			zap.String("req", req.Request),
 			zap.Error(err))
 
@@ -1087,9 +1055,9 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 		metrics, err := getSystemInfoMetrics(ctx, req, node)
 		if err != nil {
 			log.Warn("QueryNode.GetMetrics failed",
-				zap.Int64("node_id", Params.QueryNodeCfg.GetNodeID()),
+				zap.Int64("nodeId", Params.QueryNodeCfg.GetNodeID()),
 				zap.String("req", req.Request),
-				zap.String("metric_type", metricType),
+				zap.String("metricType", metricType),
 				zap.Error(err))
 		}
 
@@ -1097,9 +1065,9 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 	}
 
 	log.Debug("QueryNode.GetMetrics failed, request metric type is not implemented yet",
-		zap.Int64("node_id", Params.QueryNodeCfg.GetNodeID()),
+		zap.Int64("nodeId", Params.QueryNodeCfg.GetNodeID()),
 		zap.String("req", req.Request),
-		zap.String("metric_type", metricType))
+		zap.String("metricType", metricType))
 
 	return &milvuspb.GetMetricsResponse{
 		Status: &commonpb.Status{

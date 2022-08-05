@@ -15,7 +15,7 @@ import (
 )
 
 func TestKafkaProducer_SendSuccess(t *testing.T) {
-	kafkaAddress, _ := Params.Load("_KafkaBrokerList")
+	kafkaAddress := getKafkaBrokerList()
 	kc := NewKafkaClientInstance(kafkaAddress)
 	defer kc.Close()
 	assert.NotNil(t, kc)
@@ -42,7 +42,7 @@ func TestKafkaProducer_SendSuccess(t *testing.T) {
 }
 
 func TestKafkaProducer_SendFail(t *testing.T) {
-	kafkaAddress, _ := Params.Load("_KafkaBrokerList")
+	kafkaAddress := getKafkaBrokerList()
 	{
 
 		deliveryChan := make(chan kafka.Event, 1)

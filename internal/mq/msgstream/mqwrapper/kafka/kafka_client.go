@@ -34,6 +34,10 @@ func NewKafkaClientInstance(address string) *kafkaClient {
 	return &kafkaClient{basicConfig: config}
 }
 
+func NewKafkaClientInstanceWithConfigMap(config kafka.ConfigMap) *kafkaClient {
+	return &kafkaClient{basicConfig: config}
+}
+
 func NewKafkaClientInstanceWithConfig(config *paramtable.KafkaConfig) *kafkaClient {
 	kafkaConfig := getBasicConfig(config.Address)
 

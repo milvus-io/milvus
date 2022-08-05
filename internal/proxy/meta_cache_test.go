@@ -22,11 +22,14 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
@@ -40,6 +43,8 @@ type MockRootCoordClientInterface struct {
 	types.RootCoord
 	Error       bool
 	AccessCount int
+
+	listPolicy func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error)
 }
 
 type MockQueryCoordClientInterface struct {
@@ -178,6 +183,17 @@ func (m *MockRootCoordClientInterface) ListCredUsers(ctx context.Context, req *m
 	}, nil
 }
 
+func (m *MockRootCoordClientInterface) ListPolicy(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+	if m.listPolicy != nil {
+		return m.listPolicy(ctx, in)
+	}
+	return &internalpb.ListPolicyResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+	}, nil
+}
+
 func (m *MockQueryCoordClientInterface) ShowCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
 	if m.Error {
 		return nil, errors.New("mocked error")
@@ -199,7 +215,7 @@ func TestMetaCache_GetCollection(t *testing.T) {
 	rootCoord := &MockRootCoordClientInterface{}
 	queryCoord := &MockQueryCoordClientInterface{}
 	mgr := newShardClientMgr()
-	err := InitMetaCache(rootCoord, queryCoord, mgr)
+	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
 	assert.Nil(t, err)
 
 	id, err := globalMetaCache.GetCollectionID(ctx, "collection1")
@@ -247,7 +263,7 @@ func TestMetaCache_GetCollectionFailure(t *testing.T) {
 	rootCoord := &MockRootCoordClientInterface{}
 	queryCoord := &MockQueryCoordClientInterface{}
 	mgr := newShardClientMgr()
-	err := InitMetaCache(rootCoord, queryCoord, mgr)
+	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
 	assert.Nil(t, err)
 	rootCoord.Error = true
 
@@ -278,7 +294,7 @@ func TestMetaCache_GetNonExistCollection(t *testing.T) {
 	rootCoord := &MockRootCoordClientInterface{}
 	queryCoord := &MockQueryCoordClientInterface{}
 	mgr := newShardClientMgr()
-	err := InitMetaCache(rootCoord, queryCoord, mgr)
+	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
 	assert.Nil(t, err)
 
 	id, err := globalMetaCache.GetCollectionID(ctx, "collection3")
@@ -294,7 +310,7 @@ func TestMetaCache_GetPartitionID(t *testing.T) {
 	rootCoord := &MockRootCoordClientInterface{}
 	queryCoord := &MockQueryCoordClientInterface{}
 	mgr := newShardClientMgr()
-	err := InitMetaCache(rootCoord, queryCoord, mgr)
+	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
 	assert.Nil(t, err)
 
 	id, err := globalMetaCache.GetPartitionID(ctx, "collection1", "par1")
@@ -316,7 +332,7 @@ func TestMetaCache_GetPartitionError(t *testing.T) {
 	rootCoord := &MockRootCoordClientInterface{}
 	queryCoord := &MockQueryCoordClientInterface{}
 	mgr := newShardClientMgr()
-	err := InitMetaCache(rootCoord, queryCoord, mgr)
+	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
 	assert.Nil(t, err)
 
 	// Test the case where ShowPartitionsResponse is not aligned
@@ -344,16 +360,17 @@ func TestMetaCache_GetPartitionError(t *testing.T) {
 }
 
 func TestMetaCache_GetShards(t *testing.T) {
+	var (
+		ctx            = context.Background()
+		collectionName = "collection1"
+	)
+
 	rootCoord := &MockRootCoordClientInterface{}
 	qc := NewQueryCoordMock()
 	shardMgr := newShardClientMgr()
-	err := InitMetaCache(rootCoord, qc, shardMgr)
+	err := InitMetaCache(ctx, rootCoord, qc, shardMgr)
 	require.Nil(t, err)
 
-	var (
-		ctx            = context.TODO()
-		collectionName = "collection1"
-	)
 	qc.Init()
 	qc.Start()
 	defer qc.Stop()
@@ -391,16 +408,17 @@ func TestMetaCache_GetShards(t *testing.T) {
 }
 
 func TestMetaCache_ClearShards(t *testing.T) {
-	rootCoord := &MockRootCoordClientInterface{}
-	qc := NewQueryCoordMock()
-	mgr := newShardClientMgr()
-	err := InitMetaCache(rootCoord, qc, mgr)
-	require.Nil(t, err)
-
 	var (
 		ctx            = context.TODO()
 		collectionName = "collection1"
 	)
+
+	rootCoord := &MockRootCoordClientInterface{}
+	qc := NewQueryCoordMock()
+	mgr := newShardClientMgr()
+	err := InitMetaCache(ctx, rootCoord, qc, mgr)
+	require.Nil(t, err)
+
 	qc.Init()
 	qc.Start()
 	defer qc.Stop()
@@ -429,7 +447,88 @@ func TestMetaCache_ClearShards(t *testing.T) {
 		assert.Error(t, err)
 		assert.Empty(t, shards)
 	})
+}
 
+func TestMetaCache_PolicyInfo(t *testing.T) {
+	client := &MockRootCoordClientInterface{}
+	qc := &MockQueryCoordClientInterface{}
+	mgr := newShardClientMgr()
+
+	t.Run("InitMetaCache", func(t *testing.T) {
+		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+			return nil, fmt.Errorf("mock error")
+		}
+		err := InitMetaCache(context.Background(), client, qc, mgr)
+		assert.NotNil(t, err)
+
+		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+			return &internalpb.ListPolicyResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+				},
+				PolicyInfos: []string{"policy1", "policy2", "policy3"},
+			}, nil
+		}
+		err = InitMetaCache(context.Background(), client, qc, mgr)
+		assert.Nil(t, err)
+	})
+
+	t.Run("GetPrivilegeInfo", func(t *testing.T) {
+		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+			return &internalpb.ListPolicyResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+				},
+				PolicyInfos: []string{"policy1", "policy2", "policy3"},
+				UserRoles:   []string{funcutil.EncodeUserRoleCache("foo", "role1"), funcutil.EncodeUserRoleCache("foo", "role2"), funcutil.EncodeUserRoleCache("foo2", "role2")},
+			}, nil
+		}
+		err := InitMetaCache(context.Background(), client, qc, mgr)
+		assert.Nil(t, err)
+		policyInfos := globalMetaCache.GetPrivilegeInfo(context.Background())
+		assert.Equal(t, 3, len(policyInfos))
+		roles := globalMetaCache.GetUserRole("foo")
+		assert.Equal(t, 2, len(roles))
+	})
+
+	t.Run("GetPrivilegeInfo", func(t *testing.T) {
+		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+			return &internalpb.ListPolicyResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+				},
+				PolicyInfos: []string{"policy1", "policy2", "policy3"},
+				UserRoles:   []string{funcutil.EncodeUserRoleCache("foo", "role1"), funcutil.EncodeUserRoleCache("foo", "role2"), funcutil.EncodeUserRoleCache("foo2", "role2")},
+			}, nil
+		}
+		err := InitMetaCache(context.Background(), client, qc, mgr)
+		assert.Nil(t, err)
+
+		err = globalMetaCache.RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheGrantPrivilege, OpKey: "policyX"})
+		assert.Nil(t, err)
+		policyInfos := globalMetaCache.GetPrivilegeInfo(context.Background())
+		assert.Equal(t, 4, len(policyInfos))
+
+		err = globalMetaCache.RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheRevokePrivilege, OpKey: "policyX"})
+		assert.Nil(t, err)
+		policyInfos = globalMetaCache.GetPrivilegeInfo(context.Background())
+		assert.Equal(t, 3, len(policyInfos))
+
+		err = globalMetaCache.RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheAddUserToRole, OpKey: funcutil.EncodeUserRoleCache("foo", "role3")})
+		assert.Nil(t, err)
+		roles := globalMetaCache.GetUserRole("foo")
+		assert.Equal(t, 3, len(roles))
+
+		err = globalMetaCache.RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheRemoveUserFromRole, OpKey: funcutil.EncodeUserRoleCache("foo", "role3")})
+		assert.Nil(t, err)
+		roles = globalMetaCache.GetUserRole("foo")
+		assert.Equal(t, 2, len(roles))
+
+		err = globalMetaCache.RefreshPolicyInfo(typeutil.CacheOp{OpType: typeutil.CacheGrantPrivilege, OpKey: ""})
+		assert.NotNil(t, err)
+		err = globalMetaCache.RefreshPolicyInfo(typeutil.CacheOp{OpType: 100, OpKey: "policyX"})
+		assert.NotNil(t, err)
+	})
 }
 
 func TestMetaCache_LoadCache(t *testing.T) {
@@ -437,7 +536,7 @@ func TestMetaCache_LoadCache(t *testing.T) {
 	rootCoord := &MockRootCoordClientInterface{}
 	queryCoord := &MockQueryCoordClientInterface{}
 	mgr := newShardClientMgr()
-	err := InitMetaCache(rootCoord, queryCoord, mgr)
+	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
 	assert.Nil(t, err)
 
 	t.Run("test IsCollectionLoaded", func(t *testing.T) {
@@ -481,7 +580,7 @@ func TestMetaCache_RemoveCollection(t *testing.T) {
 	rootCoord := &MockRootCoordClientInterface{}
 	queryCoord := &MockQueryCoordClientInterface{}
 	shardMgr := newShardClientMgr()
-	err := InitMetaCache(rootCoord, queryCoord, shardMgr)
+	err := InitMetaCache(ctx, rootCoord, queryCoord, shardMgr)
 	assert.Nil(t, err)
 
 	info, err := globalMetaCache.GetCollectionInfo(ctx, "collection1")

@@ -76,11 +76,6 @@ func (m *QueryNodeMock) WatchDmChannels(ctx context.Context, req *querypb.WatchD
 }
 
 // TODO
-func (m *QueryNodeMock) WatchDeltaChannels(ctx context.Context, req *querypb.WatchDeltaChannelsRequest) (*commonpb.Status, error) {
-	return nil, nil
-}
-
-// TODO
 func (m *QueryNodeMock) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) (*commonpb.Status, error) {
 	return nil, nil
 }
@@ -121,5 +116,8 @@ func (m *QueryNodeMock) GetStatisticsChannel(ctx context.Context) (*milvuspb.Str
 	return nil, nil
 }
 func (m *QueryNodeMock) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+	return nil, nil
+}
+func (m *QueryNodeMock) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
 	return nil, nil
 }

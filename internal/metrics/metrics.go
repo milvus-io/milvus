@@ -72,6 +72,7 @@ const (
 	queryTypeLabelName       = "query_type"
 	segmentStateLabelName    = "segment_state"
 	usernameLabelName        = "username"
+	rolenameLabelName        = "role_name"
 	cacheNameLabelName       = "cache_name"
 	cacheStateLabelName      = "cache_state"
 )

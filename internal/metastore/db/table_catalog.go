@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/db/dbmodel"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/contextutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
@@ -758,6 +759,51 @@ func (tc *Catalog) ListCredentials(ctx context.Context) ([]string, error) {
 	}
 
 	return usernames, nil
+}
+
+func (tc *Catalog) CreateRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (tc *Catalog) DropRole(ctx context.Context, tenant string, roleName string) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (tc *Catalog) OperateUserRole(ctx context.Context, tenant string, userEntity *milvuspb.UserEntity, roleEntity *milvuspb.RoleEntity, operateType milvuspb.OperateUserRoleType) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (tc *Catalog) SelectRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (tc *Catalog) SelectUser(ctx context.Context, tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool) ([]*milvuspb.UserResult, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (tc *Catalog) OperatePrivilege(ctx context.Context, tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (tc *Catalog) SelectGrant(ctx context.Context, tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (tc *Catalog) ListPolicy(ctx context.Context, tenant string) ([]string, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (tc *Catalog) ListUserRole(ctx context.Context, tenant string) ([]string, error) {
+	//TODO implement me
+	panic("implement me")
 }
 
 func (tc *Catalog) Close() {

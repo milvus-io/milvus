@@ -69,10 +69,6 @@ func (q QueryNodeClient) WatchDmChannels(ctx context.Context, req *querypb.Watch
 	return q.grpcClient.WatchDmChannels(ctx, req)
 }
 
-func (q QueryNodeClient) WatchDeltaChannels(ctx context.Context, req *querypb.WatchDeltaChannelsRequest) (*commonpb.Status, error) {
-	return q.grpcClient.WatchDeltaChannels(ctx, req)
-}
-
 func (q QueryNodeClient) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) (*commonpb.Status, error) {
 	return q.grpcClient.LoadSegments(ctx, req)
 }
@@ -107,4 +103,8 @@ func (q QueryNodeClient) SyncReplicaSegments(ctx context.Context, req *querypb.S
 
 func (q QueryNodeClient) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return q.grpcClient.GetMetrics(ctx, req)
+}
+
+func (q QueryNodeClient) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+	return q.grpcClient.ShowConfigurations(ctx, req)
 }

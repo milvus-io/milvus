@@ -365,27 +365,6 @@ func TestUnMarshalTask(t *testing.T) {
 		assert.Nil(t, task2)
 	})
 
-	t.Run("Test watchDeltaChannelTask", func(t *testing.T) {
-		watchTask := &watchDeltaChannelTask{
-			WatchDeltaChannelsRequest: &querypb.WatchDeltaChannelsRequest{
-				Base: &commonpb.MsgBase{
-					MsgType: commonpb.MsgType_WatchDeltaChannels,
-				},
-			},
-		}
-		blobs, err := watchTask.marshal()
-		assert.Nil(t, err)
-		err = kv.Save("testMarshalWatchDeltaChannel", string(blobs))
-		assert.Nil(t, err)
-		defer kv.RemoveWithPrefix("testMarshalWatchDeltaChannel")
-		value, err := kv.Load("testMarshalWatchDeltaChannel")
-		assert.Nil(t, err)
-
-		task, err := taskScheduler.unmarshalTask(1007, value)
-		assert.Nil(t, err)
-		assert.Equal(t, task.msgType(), commonpb.MsgType_WatchDeltaChannels)
-	})
-
 	t.Run("Test loadBalanceTask", func(t *testing.T) {
 		loadBalanceTask := &loadBalanceTask{
 			LoadBalanceRequest: &querypb.LoadBalanceRequest{
@@ -523,49 +502,6 @@ func Test_saveInternalTaskToEtcd(t *testing.T) {
 		err = queryCoord.scheduler.processTask(testTask)
 		assert.Nil(t, err)
 	})
-}
-
-func Test_generateDerivedInternalTasks(t *testing.T) {
-	refreshParams()
-	baseCtx := context.Background()
-	queryCoord, err := startQueryCoord(baseCtx)
-	assert.Nil(t, err)
-	node1, err := startQueryNodeServer(baseCtx)
-	assert.Nil(t, err)
-	waitQueryNodeOnline(queryCoord.cluster, node1.queryNodeID)
-	vChannelInfos, _, err := queryCoord.broker.getRecoveryInfo(baseCtx, defaultCollectionID, defaultPartitionID)
-	assert.NoError(t, err)
-	deltaChannelInfos := make([]*datapb.VchannelInfo, len(vChannelInfos))
-	for i, info := range vChannelInfos {
-		deltaInfo, err := generateWatchDeltaChannelInfo(info)
-		assert.NoError(t, err)
-		deltaChannelInfos[i] = deltaInfo
-	}
-
-	queryCoord.meta.setDeltaChannel(defaultCollectionID, deltaChannelInfos)
-
-	loadCollectionTask := genLoadCollectionTask(baseCtx, queryCoord)
-	loadSegmentTask := genLoadSegmentTask(baseCtx, queryCoord, node1.queryNodeID)
-	loadCollectionTask.addChildTask(loadSegmentTask)
-	loadSegmentTask.setParentTask(loadCollectionTask)
-	watchDmChannelTask := genWatchDmChannelTask(baseCtx, queryCoord, node1.queryNodeID)
-	loadCollectionTask.addChildTask(watchDmChannelTask)
-	watchDmChannelTask.setParentTask(loadCollectionTask)
-
-	derivedTasks, err := generateDerivedInternalTasks(loadCollectionTask, queryCoord.meta, queryCoord.cluster)
-	assert.Nil(t, err)
-	assert.Equal(t, 1, len(derivedTasks))
-	for _, internalTask := range derivedTasks {
-		matchType := internalTask.msgType() == commonpb.MsgType_WatchDeltaChannels
-		assert.Equal(t, true, matchType)
-		if internalTask.msgType() == commonpb.MsgType_WatchDeltaChannels {
-			assert.Equal(t, node1.queryNodeID, internalTask.(*watchDeltaChannelTask).NodeID)
-		}
-	}
-
-	queryCoord.Stop()
-	err = removeAllSession()
-	assert.Nil(t, err)
 }
 
 func TestTaskScheduler_BindContext(t *testing.T) {

@@ -21,8 +21,6 @@ import (
 	"fmt"
 	"sync"
 
-	// Register mysql driver
-	_ "github.com/go-sql-driver/mysql"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -33,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/contextutil"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
 )
@@ -1346,4 +1345,89 @@ func (mt *MetaTable) getSegIdxMetaBySegID(segID int64) (model.SegmentIndex, erro
 	}
 
 	return segmentIdx, nil
+}
+
+// CreateRole create role
+func (mt *MetaTable) CreateRole(tenant string, entity *milvuspb.RoleEntity) error {
+	if funcutil.IsEmptyString(entity.Name) {
+		return fmt.Errorf("the role name in the role info is empty")
+	}
+	return mt.catalog.CreateRole(mt.ctx, tenant, entity)
+}
+
+// DropRole drop role info
+func (mt *MetaTable) DropRole(tenant string, roleName string) error {
+	return mt.catalog.DropRole(mt.ctx, tenant, roleName)
+}
+
+// OperateUserRole operate the relationship between a user and a role, including adding a user to a role and removing a user from a role
+func (mt *MetaTable) OperateUserRole(tenant string, userEntity *milvuspb.UserEntity, roleEntity *milvuspb.RoleEntity, operateType milvuspb.OperateUserRoleType) error {
+	if funcutil.IsEmptyString(userEntity.Name) {
+		return fmt.Errorf("username in the user entity is empty")
+	}
+	if funcutil.IsEmptyString(roleEntity.Name) {
+		return fmt.Errorf("role name in the role entity is empty")
+	}
+
+	return mt.catalog.OperateUserRole(mt.ctx, tenant, userEntity, roleEntity, operateType)
+}
+
+// SelectRole select role.
+// Enter the role condition by the entity param. And this param is nil, which means selecting all roles.
+// Get all users that are added to the role by setting the includeUserInfo param to true.
+func (mt *MetaTable) SelectRole(tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
+	return mt.catalog.SelectRole(mt.ctx, tenant, entity, includeUserInfo)
+}
+
+// SelectUser select user.
+// Enter the user condition by the entity param. And this param is nil, which means selecting all users.
+// Get all roles that are added the user to by setting the includeRoleInfo param to true.
+func (mt *MetaTable) SelectUser(tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool) ([]*milvuspb.UserResult, error) {
+	return mt.catalog.SelectUser(mt.ctx, tenant, entity, includeRoleInfo)
+}
+
+// OperatePrivilege grant or revoke privilege by setting the operateType param
+func (mt *MetaTable) OperatePrivilege(tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error {
+	if funcutil.IsEmptyString(entity.ObjectName) {
+		return fmt.Errorf("the object name in the grant entity is empty")
+	}
+	if entity.Object == nil || funcutil.IsEmptyString(entity.Object.Name) {
+		return fmt.Errorf("the object entity in the grant entity is invalid")
+	}
+	if entity.Role == nil || funcutil.IsEmptyString(entity.Role.Name) {
+		return fmt.Errorf("the role entity in the grant entity is invalid")
+	}
+	if entity.Grantor == nil {
+		return fmt.Errorf("the grantor in the grant entity is empty")
+	}
+	if entity.Grantor.Privilege == nil || funcutil.IsEmptyString(entity.Grantor.Privilege.Name) {
+		return fmt.Errorf("the privilege name in the grant entity is empty")
+	}
+	if entity.Grantor.User == nil || funcutil.IsEmptyString(entity.Grantor.User.Name) {
+		return fmt.Errorf("the grantor name in the grant entity is empty")
+	}
+	if !funcutil.IsRevoke(operateType) && !funcutil.IsGrant(operateType) {
+		return fmt.Errorf("the operate type in the grant entity is invalid")
+	}
+
+	return mt.catalog.OperatePrivilege(mt.ctx, tenant, entity, operateType)
+}
+
+// SelectGrant select grant
+// The principal entity MUST be not empty in the grant entity
+// The resource entity and the resource name are optional, and the two params should be not empty together when you select some grants about the resource kind.
+func (mt *MetaTable) SelectGrant(tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error) {
+	var entities []*milvuspb.GrantEntity
+	if entity.Role == nil || funcutil.IsEmptyString(entity.Role.Name) {
+		return entities, fmt.Errorf("the role entity in the grant entity is invalid")
+	}
+	return mt.catalog.SelectGrant(mt.ctx, tenant, entity)
+}
+
+func (mt *MetaTable) ListPolicy(tenant string) ([]string, error) {
+	return mt.catalog.ListPolicy(mt.ctx, tenant)
+}
+
+func (mt *MetaTable) ListUserRole(tenant string) ([]string, error) {
+	return mt.catalog.ListUserRole(mt.ctx, tenant)
 }

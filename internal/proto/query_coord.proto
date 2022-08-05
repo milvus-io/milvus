@@ -41,7 +41,6 @@ service QueryNode {
   rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
 
   rpc WatchDmChannels(WatchDmChannelsRequest) returns (common.Status) {}
-  rpc WatchDeltaChannels(WatchDeltaChannelsRequest) returns (common.Status) {}
   rpc LoadSegments(LoadSegmentsRequest) returns (common.Status) {}
   rpc ReleaseCollection(ReleaseCollectionRequest) returns (common.Status) {}
   rpc ReleasePartitions(ReleasePartitionsRequest) returns (common.Status) {}
@@ -53,6 +52,7 @@ service QueryNode {
   rpc Search(SearchRequest) returns (internal.SearchResults) {}
   rpc Query(QueryRequest) returns (internal.RetrieveResults) {}
 
+  rpc ShowConfigurations(internal.ShowConfigurationsRequest) returns (internal.ShowConfigurationsResponse){}
   // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
   rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
 }
@@ -182,15 +182,6 @@ message WatchDmChannelsRequest {
   LoadMetaInfo load_meta = 8;
   int64 replicaID = 9;
   map<int64, data.SegmentInfo> segment_infos = 10;
-}
-
-message WatchDeltaChannelsRequest {
-  common.MsgBase base = 1;
-  int64 nodeID = 2;
-  int64 collectionID = 3;
-  repeated data.VchannelInfo infos = 4;
-  int64 replica_id = 5;
-  LoadMetaInfo load_meta = 9;
 }
 
 message SegmentLoadInfo {
