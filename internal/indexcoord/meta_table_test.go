@@ -477,12 +477,107 @@ func TestMetaTable_GetIndexesForCollection(t *testing.T) {
 		},
 	}
 	mt := constructMetaTable(&catalog.Catalog{Txn: kv})
-	indexes := mt.GetIndexesForCollection(collID)
+	indexes := mt.GetIndexesForCollection(collID, "")
 	assert.Equal(t, 1, len(indexes))
 
 	err := mt.MarkIndexAsDeleted(collID, indexID)
 	assert.NoError(t, err)
 
-	indexes2 := mt.GetIndexesForCollection(collID)
+	indexes2 := mt.GetIndexesForCollection(collID, "")
 	assert.Equal(t, 0, len(indexes2))
+}
+
+func TestMetaTable_HasSameReq(t *testing.T) {
+	req := &indexpb.CreateIndexRequest{
+		CollectionID: collID,
+		FieldID:      fieldID,
+		IndexName:    indexName,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   "dim",
+				Value: "128",
+			},
+		},
+		IndexParams: []*commonpb.KeyValuePair{
+			{
+				Key:   "nprobe",
+				Value: "16",
+			},
+		},
+	}
+	kv := &mockETCDKV{
+		save: func(s string, s2 string) error {
+			return nil
+		},
+	}
+
+	mt := constructMetaTable(&catalog.Catalog{Txn: kv})
+	exist := mt.HasSameReq(req)
+	assert.True(t, exist)
+
+	req.FieldID = fieldID + 1
+	exist = mt.HasSameReq(req)
+	assert.False(t, exist)
+
+	req.FieldID = fieldID
+	req.IndexName = "indexName2"
+	exist = mt.HasSameReq(req)
+	assert.False(t, exist)
+
+	req.IndexName = indexName
+	req.TypeParams = []*commonpb.KeyValuePair{
+		{
+			Key:   "dim",
+			Value: "128",
+		},
+		{
+			Key:   "type",
+			Value: "float",
+		},
+	}
+	exist = mt.HasSameReq(req)
+	assert.False(t, exist)
+
+	req.TypeParams = []*commonpb.KeyValuePair{
+		{
+			Key:   "dim",
+			Value: "256",
+		},
+	}
+	exist = mt.HasSameReq(req)
+	assert.False(t, exist)
+
+	req.TypeParams = []*commonpb.KeyValuePair{
+		{
+			Key:   "dim",
+			Value: "128",
+		},
+	}
+	req.IndexParams = []*commonpb.KeyValuePair{
+		{
+			Key:   "nprobe",
+			Value: "16",
+		},
+		{
+			Key:   "type",
+			Value: "FLAT",
+		},
+	}
+	exist = mt.HasSameReq(req)
+	assert.False(t, exist)
+
+	req.IndexParams = []*commonpb.KeyValuePair{
+		{
+			Key:   "nprobe",
+			Value: "32",
+		},
+	}
+	exist = mt.HasSameReq(req)
+	assert.False(t, exist)
+
+	err := mt.MarkIndexAsDeleted(collID, indexID)
+	assert.Nil(t, err)
+
+	exist = mt.HasSameReq(req)
+	assert.False(t, exist)
 }

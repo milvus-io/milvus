@@ -58,6 +58,7 @@ type flushedSegmentWatcher struct {
 
 type flushedSegmentTask struct {
 	handoffTask *indexpb.HandoffTask
+	segID       UniqueID
 	indexID     UniqueID
 	fieldID     UniqueID
 	// just use init, inProgress, Done
@@ -78,7 +79,7 @@ func newFlushSegmentWatcher(ctx context.Context, kv kv.MetaKv) (*flushedSegmentW
 }
 
 func (fsw *flushedSegmentWatcher) constructTask(segmentInfo *datapb.SegmentInfo) {
-	fieldIndexes := fsw.meta.GetIndexesForCollection(segmentInfo.CollectionID)
+	fieldIndexes := fsw.meta.GetIndexesForCollection(segmentInfo.CollectionID, "")
 	if segmentInfo.NumOfRows < Params.IndexCoordCfg.MinSegmentNumRowsToEnableIndex || len(fieldIndexes) == 0 {
 		log.Warn("segemnt no need to build index", zap.Int64("segmentID", segmentInfo.ID),
 			zap.Int64("num of rows", segmentInfo.NumOfRows), zap.Int("collection indexes num", len(fieldIndexes)))
@@ -217,6 +218,7 @@ func (fsw *flushedSegmentWatcher) process(task *flushedSegmentTask) {
 				zap.Int64("indexID", task.indexID), zap.Error(err))
 			return
 		}
+		fsw.flushedSegments[task.segID][task.indexID].state = indexTaskInProgress
 
 	case indexTaskInProgress:
 

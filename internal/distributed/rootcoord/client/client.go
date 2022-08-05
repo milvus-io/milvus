@@ -20,8 +20,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
-
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -330,19 +328,6 @@ func (c *Client) DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRe
 		return nil, err
 	}
 	return ret.(*milvuspb.DescribeIndexResponse), err
-}
-
-func (c *Client) GetIndexState(ctx context.Context, in *milvuspb.GetIndexStateRequest) (*indexpb.GetIndexStatesResponse, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
-		if !funcutil.CheckCtxValid(ctx) {
-			return nil, ctx.Err()
-		}
-		return client.(rootcoordpb.RootCoordClient).GetIndexState(ctx, in)
-	})
-	if err != nil || ret == nil {
-		return nil, err
-	}
-	return ret.(*indexpb.GetIndexStatesResponse), err
 }
 
 // AllocTimestamp global timestamp allocator

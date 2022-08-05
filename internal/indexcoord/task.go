@@ -138,6 +138,10 @@ func (cit *CreateIndexTask) PreExecute(ctx context.Context) error {
 func (cit *CreateIndexTask) Execute(ctx context.Context) error {
 	log.Info("IndexCoord CreateIndexTask Execute", zap.Int64("collectionID", cit.req.CollectionID),
 		zap.Int64("fieldID", cit.req.FieldID), zap.String("indexName", cit.req.IndexName))
+	hasIndex, indexID := cit.table.HasSameReq(cit.req)
+	if hasIndex {
+		cit.indexID = indexID
+	}
 	index := &model.Index{
 		CollectionID: cit.req.CollectionID,
 		FieldID:      cit.req.FieldID,
@@ -199,7 +203,7 @@ func (cit *CreateIndexTask) Execute(ctx context.Context) error {
 		}
 	}
 
-	err = cit.table.CreateIndex(cit.indexID, cit.req, cit.createTs)
+	err = cit.table.CreateIndex(index)
 	if err != nil {
 		log.Error("IndexCoord create index fail", zap.Int64("collectionID", cit.req.CollectionID),
 			zap.Int64("fieldID", cit.req.FieldID), zap.String("indexName", cit.req.IndexName), zap.Error(err))

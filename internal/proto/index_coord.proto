@@ -13,11 +13,12 @@ service IndexCoord {
   rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
   rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
   rpc CreateIndex(CreateIndexRequest) returns (common.Status){}
-  rpc GetIndexStates(GetIndexStatesRequest) returns (GetIndexStatesResponse) {}
-  rpc GetIndexFilePaths(GetIndexFilePathsRequest) returns (GetIndexFilePathsResponse){}
+  rpc GetIndexState(GetIndexStateRequest) returns (GetIndexStateResponse) {}
+  rpc GetSegmentIndexState(GetSegmentIndexStateRequest) returns (GetSegmentIndexStateResponse) {}
+  rpc GetIndexInfos(GetIndexFilePathsRequest) returns (GetIndexFilePathsResponse){}
   rpc DropIndex(DropIndexRequest) returns (common.Status) {}
   rpc DescribeIndex(DescribeIndexRequest) returns (DescribeIndexResponse) {}
-//  rpc RemoveIndex(RemoveIndexRequest) returns (common.Status) {}
+  rpc GetIndexBuildProgress(GetIndexBuildProgressRequest) returns (GetIndexBuildProgressResponse) {}
 
   // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
   rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
@@ -43,15 +44,15 @@ message IndexInfo {
   int64 collectionID = 1;
   int64 fieldID = 2;
   string index_name = 3;
-  repeated common.KeyValuePair type_params = 4;
-  repeated common.KeyValuePair index_params = 5;
+  int64 indexID = 4;
+  repeated common.KeyValuePair type_params = 5;
+  repeated common.KeyValuePair index_params = 6;
 }
 
 message FieldIndex {
   IndexInfo index_info = 1;
-  int64 indexID = 2;
-  bool deleted = 8;
-  uint64 create_time = 9;
+  bool deleted = 2;
+  uint64 create_time = 3;
 }
 
 message SegmentIndex {
@@ -87,16 +88,32 @@ message RegisterNodeResponse {
   internal.InitParams init_params = 2;
 }
 
-message GetIndexStatesRequest {
+message GetIndexStateRequest {
   int64 collectionID = 1;
-  int64 fieldID = 2;
-  string index_name = 3;
+  string index_name = 2;
 }
 
-message GetIndexStatesResponse {
+message GetIndexStateResponse {
   common.Status status = 1;
   common.IndexState state = 2;
   string fail_reason = 3;
+}
+
+message GetSegmentIndexStateRequest {
+  int64 collectionID = 1;
+  string index_name = 2;
+  repeated int64 segmentIDs = 3;
+}
+
+message SegmentIndexState {
+  int64 segmentID = 1;
+  common.IndexState state = 2;
+  string fail_reason = 3;
+}
+
+message GetSegmentIndexStateResponse {
+  common.Status status = 1;
+  repeated SegmentIndexState states = 2;
 }
 
 message CreateIndexRequest {
@@ -109,36 +126,53 @@ message CreateIndexRequest {
 
 message GetIndexFilePathsRequest {
   int64 collectionID = 1;
-  int64 fieldID = 2;
-  repeated int64 segmentIDs = 3;
-  string index_name = 4;
+  repeated int64 segmentIDs = 2;
+  string index_name = 3;
 }
 
 message IndexFilePathInfo {
   common.Status status = 1;
   int64 segmentID = 2;
-  repeated string index_file_paths = 3;
-  uint64 serialized_size = 4;
+  string index_name = 3;
+  repeated string index_file_paths = 4;
+  uint64 serialized_size = 5;
 }
 
 message GetIndexFilePathsResponse {
   common.Status status = 1;
-  repeated IndexFilePathInfo file_paths = 2;
+  bool enable_index = 2;
+  repeated IndexFilePathInfo file_paths = 3;
 }
 
 message DropIndexRequest {
   int64 collectionID = 1;
-  int64 fieldID = 2;
   string index_name = 3;
+  int64 fieldID = 2;
+}
+
+message DropCollectionRequest {
+  int64 collectionID = 1;
 }
 
 message DescribeIndexRequest {
   int64 collectionID = 1;
+  string index_name = 2;
 }
 
 message DescribeIndexResponse {
-  int64 collectionID = 1;
+  common.Status status = 1;
   repeated IndexInfo index_infos = 2;
+}
+
+message GetIndexBuildProgressRequest {
+  int64 collectionID = 1;
+  string index_name = 2;
+}
+
+message GetIndexBuildProgressResponse {
+  common.Status status = 1;
+  int64 indexed_rows = 2;
+  int64 total_rows = 3;
 }
 
 message BuildIndexRequest {

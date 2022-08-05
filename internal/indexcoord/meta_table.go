@@ -17,9 +17,12 @@
 package indexcoord
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sync"
+
+	"github.com/milvus-io/milvus/internal/metastore"
 
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
@@ -35,7 +38,7 @@ import (
 
 // metaTable maintains index-related information
 type metaTable struct {
-	catalog          *catalog.Catalog
+	catalog          metastore.Catalog
 	indexLock        sync.RWMutex
 	segmentIndexLock sync.RWMutex
 
@@ -72,23 +75,23 @@ func (mt *metaTable) reloadFromKV() error {
 
 	// load field indexes
 	log.Info("IndexCoord metaTable reloadFromKV load indexes")
-	fieldIndexes, err := mt.catalog.ListIndexes()
+	fieldIndexes, err := mt.catalog.ListIndexes(context.Background())
 	if err != nil {
 		log.Error("IndexCoord metaTable reloadFromKV load field indexes fail", zap.Error(err))
 		return err
 	}
-	segmentIndxes, err := mt.catalog.ListSegmentIndexes()
+	segmentIndxes, err := mt.catalog.ListSegmentIndexes(context.Background())
 	if err != nil {
 		log.Error("IndexCoord metaTable reloadFromKV load segment indexes fail", zap.Error(err))
 		return err
 	}
 
-	for indexID, fieldIndex := range fieldIndexes {
-		mt.collectionIndexes[fieldIndex.CollectionID][indexID] = fieldIndex
+	for _, fieldIndex := range fieldIndexes {
+		mt.collectionIndexes[fieldIndex.CollectionID][fieldIndex.IndexID] = fieldIndex
 	}
-	for buildID, segIdx := range segmentIndxes {
+	for _, segIdx := range segmentIndxes {
 		mt.segmentIndexes[segIdx.SegmentID][segIdx.IndexID] = segIdx
-		mt.buildID2SegmentIndex[buildID] = segIdx
+		mt.buildID2SegmentIndex[segIdx.BuildID] = segIdx
 	}
 
 	log.Info("IndexCoord metaTable reloadFromKV success")
@@ -96,7 +99,7 @@ func (mt *metaTable) reloadFromKV() error {
 }
 
 func (mt *metaTable) saveFieldIndexMeta(index *model.Index) error {
-	err := mt.catalog.CreateIndex(index)
+	err := mt.catalog.CreateIndex(context.Background(), index)
 	if err != nil {
 		log.Error("failed to save index meta in etcd", zap.Int64("buildID", index.CollectionID),
 			zap.Int64("fieldID", index.FieldID), zap.Int64("indexID", index.IndexID), zap.Error(err))
@@ -110,7 +113,7 @@ func (mt *metaTable) saveFieldIndexMeta(index *model.Index) error {
 // saveSegmentIndexMeta saves the index meta to ETCD.
 // metaTable.lock.Lock() before call this function
 func (mt *metaTable) saveSegmentIndexMeta(segIdx *model.SegmentIndex) error {
-	err := mt.catalog.CreateSegmentIndex(segIdx)
+	err := mt.catalog.CreateSegmentIndex(context.Background(), segIdx)
 	if err != nil {
 		log.Error("failed to save index meta in etcd", zap.Int64("buildID", segIdx.BuildID), zap.Error(err))
 		return err
@@ -323,7 +326,7 @@ func (mt *metaTable) BuildIndex(buildID UniqueID) error {
 }
 
 // GetIndexesForCollection gets all indexes info with the specified collection.
-func (mt *metaTable) GetIndexesForCollection(collID UniqueID) []*model.Index {
+func (mt *metaTable) GetIndexesForCollection(collID UniqueID, indexName string) []*model.Index {
 	mt.indexLock.RLock()
 	defer mt.indexLock.RUnlock()
 
@@ -332,7 +335,9 @@ func (mt *metaTable) GetIndexesForCollection(collID UniqueID) []*model.Index {
 		if index.IsDeleted {
 			continue
 		}
-		indexInfos = append(indexInfos, model.CloneIndex(index))
+		if indexName == "" || indexName == index.IndexName {
+			indexInfos = append(indexInfos, model.CloneIndex(index))
+		}
 	}
 	return indexInfos
 }
@@ -371,7 +376,7 @@ func (mt *metaTable) GetIndexesForCollection(collID UniqueID) []*model.Index {
 //}
 
 // HasSameReq determine whether there are same indexing tasks.
-func (mt *metaTable) HasSameReq(req *indexpb.CreateIndexRequest) bool {
+func (mt *metaTable) HasSameReq(req *indexpb.CreateIndexRequest) (bool, UniqueID) {
 	mt.indexLock.RLock()
 	defer mt.indexLock.RUnlock()
 
@@ -426,10 +431,10 @@ func (mt *metaTable) HasSameReq(req *indexpb.CreateIndexRequest) bool {
 		log.Debug("IndexCoord has same index", zap.Int64("collectionID", req.CollectionID),
 			zap.Int64("fieldID", req.FieldID), zap.String("indexName", req.IndexName),
 			zap.Int64("indexID", fieldIndex.IndexID))
-		return true
+		return true, fieldIndex.IndexID
 	}
 
-	return false
+	return false, 0
 }
 
 func (mt *metaTable) CheckBuiltIndex(segmentID, indexID UniqueID) (bool, UniqueID) {
@@ -447,32 +452,45 @@ func (mt *metaTable) CheckBuiltIndex(segmentID, indexID UniqueID) (bool, UniqueI
 	return false, 0
 }
 
-func (mt *metaTable) GetIndexIDByName(collID, fieldID int64, indexName string) (int64, uint64) {
+func (mt *metaTable) GetIndexIDByName(collID int64, indexName string) map[int64]uint64 {
 	mt.indexLock.RLock()
 	defer mt.indexLock.RUnlock()
-	indexID := int64(0)
-	createTs := uint64(0)
+	indexID2CreateTs := make(map[int64]uint64)
 
 	fieldIndexes, ok := mt.collectionIndexes[collID]
 	if !ok {
-		return 0, 0
+		return indexID2CreateTs
 	}
 
 	for _, index := range fieldIndexes {
-		if !index.IsDeleted && index.FieldID == fieldID && index.IndexName == indexName {
-			indexID = index.IndexID
-			createTs = index.CreateTime
-			break
+		if !index.IsDeleted && (indexName == "" || index.IndexName == indexName) {
+			indexID2CreateTs[index.IndexID] = index.CreateTime
 		}
 	}
-	return indexID, createTs
+	return indexID2CreateTs
+}
+
+func (mt *metaTable) GetIndexNameByID(collID, indexID UniqueID) string {
+	mt.indexLock.RLock()
+	defer mt.indexLock.RUnlock()
+	if fieldIndexes, ok := mt.collectionIndexes[collID]; ok {
+		if index, ok := fieldIndexes[indexID]; ok {
+			return index.IndexName
+		}
+	}
+	return ""
+}
+
+type IndexState struct {
+	state      commonpb.IndexState
+	failReason string
 }
 
 // GetIndexStates gets the index states for indexID from meta table.
-func (mt *metaTable) GetIndexStates(indexID int64, createTs uint64) []*model.SegmentIndex {
+func (mt *metaTable) GetIndexStates(indexID int64, createTs uint64) []*IndexState {
 	log.Debug("IndexCoord get index from meta table", zap.Int64("indexID", indexID))
 
-	segIndexStates := make([]*model.SegmentIndex, 0)
+	segIndexStates := make([]*IndexState, 0)
 	var (
 		cntNone       = 0
 		cntUnissued   = 0
@@ -484,7 +502,7 @@ func (mt *metaTable) GetIndexStates(indexID int64, createTs uint64) []*model.Seg
 	mt.segmentIndexLock.RLock()
 	defer mt.segmentIndexLock.RUnlock()
 
-	for segID, indexID2SegIdx := range mt.segmentIndexes {
+	for _, indexID2SegIdx := range mt.segmentIndexes {
 		segIdx, ok := indexID2SegIdx[indexID]
 		if !ok {
 			continue
@@ -508,12 +526,9 @@ func (mt *metaTable) GetIndexStates(indexID int64, createTs uint64) []*model.Seg
 		case commonpb.IndexState_Failed:
 			cntFailed++
 		}
-		segIndexStates = append(segIndexStates, &model.SegmentIndex{
-			Segment: model.Segment{
-				SegmentID: segID,
-			},
-			IndexState: segIdx.IndexState,
-			FailReason: segIdx.FailReason,
+		segIndexStates = append(segIndexStates, &IndexState{
+			state:      segIdx.IndexState,
+			failReason: segIdx.FailReason,
 		})
 	}
 
@@ -524,22 +539,50 @@ func (mt *metaTable) GetIndexStates(indexID int64, createTs uint64) []*model.Seg
 	return segIndexStates
 }
 
-func (mt *metaTable) GetIndexState(segmentID UniqueID, indexID UniqueID) commonpb.IndexState {
+func (mt *metaTable) GetSegmentIndexState(segmentID UniqueID, indexID UniqueID) IndexState {
 	mt.segmentIndexLock.RLock()
 	defer mt.segmentIndexLock.RUnlock()
 
 	if segIdxes, ok := mt.segmentIndexes[segmentID]; ok {
-		if segIdx, ok := segIdxes[indexID]; ok {
-			return segIdx.IndexState
+		if segIdx, ok := segIdxes[indexID]; ok && !segIdx.IsDeleted {
+			return IndexState{
+				state:      segIdx.IndexState,
+				failReason: segIdx.FailReason,
+			}
 		}
 	}
 
-	return commonpb.IndexState_IndexStateNone
+	return IndexState{
+		state:      commonpb.IndexState_IndexStateNone,
+		failReason: "there is no index",
+	}
+}
+
+func (mt *metaTable) DropIndex(collID UniqueID, indexName string) error {
+	log.Info("IndexCoord metaTable DropIndex", zap.Int64("collID", collID), zap.String("indexName", indexName))
+
+	mt.indexLock.Lock()
+	defer mt.indexLock.Unlock()
+	indexes, ok := mt.collectionIndexes[collID]
+	if !ok {
+		return nil
+	}
+	deletedIndexes := make([]*model.Index, 0)
+	for _, index := range indexes {
+		if indexName == "" || indexName == index.IndexName {
+			clonedIndex := model.CloneIndex(index)
+			clonedIndex.IsDeleted = true
+			deletedIndexes = append(deletedIndexes, clonedIndex)
+		}
+	}
+
+	return mt.catalog.AlterIndex(context.Background(), deletedIndexes)
 }
 
 // MarkIndexAsDeleted will mark the corresponding index as deleted, and recycleUnusedIndexFiles will recycle these tasks.
-func (mt *metaTable) MarkIndexAsDeleted(collID, indexID UniqueID) error {
-	log.Info("IndexCoord metaTable MarkIndexAsDeleted", zap.Int64("collID", collID), zap.Int64("indexID", indexID))
+func (mt *metaTable) MarkIndexAsDeleted(collID UniqueID, indexIDs []UniqueID) error {
+	log.Info("IndexCoord metaTable MarkIndexAsDeleted", zap.Int64("collID", collID),
+		zap.Int64s("indexIDs", indexIDs))
 
 	mt.indexLock.Lock()
 	defer mt.indexLock.Unlock()
@@ -548,20 +591,24 @@ func (mt *metaTable) MarkIndexAsDeleted(collID, indexID UniqueID) error {
 	if !ok {
 		return nil
 	}
-	index, ok := fieldIndexes[indexID]
-	if !ok {
-		return nil
+	clonedIndexes := make([]*model.Index, 0)
+	for _, indexID := range indexIDs {
+		index, ok := fieldIndexes[indexID]
+		if !ok {
+			continue
+		}
+		clonedIndex := model.CloneIndex(index)
+		clonedIndex.IsDeleted = true
+		clonedIndexes = append(clonedIndexes, clonedIndex)
 	}
-	clonedIndex := model.CloneIndex(index)
-	clonedIndex.IsDeleted = true
-
-	if err := mt.saveFieldIndexMeta(clonedIndex); err != nil {
+	err := mt.catalog.AlterIndex(context.Background(), clonedIndexes)
+	if err != nil {
 		log.Error("IndexCoord metaTable MarkIndexAsDeleted fail", zap.Int64("collID", collID),
-			zap.Int64("indexID", indexID), zap.Error(err))
+			zap.Int64s("indexIDs", indexIDs), zap.Error(err))
 		return err
 	}
 
-	log.Info("IndexCoord metaTable MarkIndexAsDeleted success", zap.Int64("collID", collID), zap.Int64("indexID", indexID))
+	log.Info("IndexCoord metaTable MarkIndexAsDeleted success", zap.Int64("collID", collID), zap.Int64s("indexIDs", indexIDs))
 	return nil
 }
 
@@ -722,7 +769,7 @@ func (mt *metaTable) RemoveIndex(collID, indexID UniqueID) error {
 	mt.indexLock.Lock()
 	defer mt.indexLock.Unlock()
 
-	err := mt.catalog.DropIndex(collID, indexID)
+	err := mt.catalog.DropIndex(context.Background(), collID, indexID, mt.collectionIndexes[collID][indexID].CreateTime)
 	if err != nil {
 		return err
 	}

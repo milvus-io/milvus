@@ -26,14 +26,11 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	model "github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
-	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
 )
 
@@ -328,7 +325,7 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 
 	// drop all indices
 	for _, tuple := range collMeta.FieldIDToIndexID {
-		if err := t.core.CallDropIndexService(t.core.ctx, tuple.Value); err != nil {
+		if err := t.core.CallDropCollectionIndexService(t.core.ctx, tuple.Value); err != nil {
 			log.Error("DropCollection CallDropIndexService fail", zap.String("collName", t.Req.CollectionName),
 				zap.Int64("indexID", tuple.Value), zap.Error(err))
 			return err
@@ -775,57 +772,57 @@ func (t *ShowPartitionReqTask) Execute(ctx context.Context) error {
 }
 
 // DescribeSegmentReqTask describe segment request task
-type DescribeSegmentReqTask struct {
-	baseReqTask
-	Req *milvuspb.DescribeSegmentRequest
-	Rsp *milvuspb.DescribeSegmentResponse //TODO,return repeated segment id in the future
-}
-
-// Type return msg type
-func (t *DescribeSegmentReqTask) Type() commonpb.MsgType {
-	return t.Req.Base.MsgType
-}
-
-// Execute task execution
-func (t *DescribeSegmentReqTask) Execute(ctx context.Context) error {
-	if t.Type() != commonpb.MsgType_DescribeSegment {
-		return fmt.Errorf("describe segment, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
-	}
-	coll, err := t.core.MetaTable.GetCollectionByID(t.Req.CollectionID, 0)
-	if err != nil {
-		return err
-	}
-
-	segIDs, err := t.core.CallGetFlushedSegmentsService(ctx, t.Req.CollectionID, -1)
-	if err != nil {
-		log.Debug("Get flushed segment from data coord failed", zap.String("collection_name", coll.Name), zap.Error(err))
-		return err
-	}
-
-	// check if segment id exists
-	exist := false
-	for _, id := range segIDs {
-		if id == t.Req.SegmentID {
-			exist = true
-			break
-		}
-	}
-	if !exist {
-		return fmt.Errorf("segment id %d not belong to collection id %d", t.Req.SegmentID, t.Req.CollectionID)
-	}
-	//TODO, get filed_id and index_name from request
-	index, err := t.core.MetaTable.GetSegmentIndexInfoByID(t.Req.SegmentID, -1, "")
-	log.Debug("RootCoord DescribeSegmentReqTask, MetaTable.GetSegmentIndexInfoByID", zap.Any("SegmentID", t.Req.SegmentID),
-		zap.Any("index", index), zap.Error(err))
-	if err != nil {
-		return err
-	}
-	t.Rsp.IndexID = index.IndexID
-	t.Rsp.BuildID = index.SegmentIndexes[t.Req.SegmentID].BuildID
-	t.Rsp.EnableIndex = index.SegmentIndexes[t.Req.SegmentID].EnableIndex
-	t.Rsp.FieldID = index.FieldID
-	return nil
-}
+//type DescribeSegmentReqTask struct {
+//	baseReqTask
+//	Req *milvuspb.DescribeSegmentRequest
+//	Rsp *milvuspb.DescribeSegmentResponse //TODO,return repeated segment id in the future
+//}
+//
+//// Type return msg type
+//func (t *DescribeSegmentReqTask) Type() commonpb.MsgType {
+//	return t.Req.Base.MsgType
+//}
+//
+//// Execute task execution
+//func (t *DescribeSegmentReqTask) Execute(ctx context.Context) error {
+//	if t.Type() != commonpb.MsgType_DescribeSegment {
+//		return fmt.Errorf("describe segment, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
+//	}
+//	coll, err := t.core.MetaTable.GetCollectionByID(t.Req.CollectionID, 0)
+//	if err != nil {
+//		return err
+//	}
+//
+//	segIDs, err := t.core.CallGetFlushedSegmentsService(ctx, t.Req.CollectionID, -1)
+//	if err != nil {
+//		log.Debug("Get flushed segment from data coord failed", zap.String("collection_name", coll.Name), zap.Error(err))
+//		return err
+//	}
+//
+//	// check if segment id exists
+//	exist := false
+//	for _, id := range segIDs {
+//		if id == t.Req.SegmentID {
+//			exist = true
+//			break
+//		}
+//	}
+//	if !exist {
+//		return fmt.Errorf("segment id %d not belong to collection id %d", t.Req.SegmentID, t.Req.CollectionID)
+//	}
+//	//TODO, get filed_id and index_name from request
+//	index, err := t.core.MetaTable.GetSegmentIndexInfoByID(t.Req.SegmentID, -1, "")
+//	log.Debug("RootCoord DescribeSegmentReqTask, MetaTable.GetSegmentIndexInfoByID", zap.Any("SegmentID", t.Req.SegmentID),
+//		zap.Any("index", index), zap.Error(err))
+//	if err != nil {
+//		return err
+//	}
+//	t.Rsp.IndexID = index.IndexID
+//	t.Rsp.BuildID = index.SegmentIndexes[t.Req.SegmentID].BuildID
+//	t.Rsp.EnableIndex = index.SegmentIndexes[t.Req.SegmentID].EnableIndex
+//	t.Rsp.FieldID = index.FieldID
+//	return nil
+//}
 
 // ShowSegmentReqTask show segment request task
 type ShowSegmentReqTask struct {
@@ -868,253 +865,86 @@ func (t *ShowSegmentReqTask) Execute(ctx context.Context) error {
 	return nil
 }
 
-type DescribeSegmentsReqTask struct {
-	baseReqTask
-	Req *rootcoordpb.DescribeSegmentsRequest
-	Rsp *rootcoordpb.DescribeSegmentsResponse
-}
-
-func (t *DescribeSegmentsReqTask) Type() commonpb.MsgType {
-	return t.Req.GetBase().GetMsgType()
-}
-
-func (t *DescribeSegmentsReqTask) Execute(ctx context.Context) error {
-	collectionID := t.Req.GetCollectionID()
-	segIDs, err := t.core.CallGetFlushedSegmentsService(ctx, collectionID, -1)
-	if err != nil {
-		log.Error("failed to get flushed segments",
-			zap.Error(err),
-			zap.Int64("collection", collectionID))
-		return err
-	}
-
-	t.Rsp.CollectionID = collectionID
-	t.Rsp.SegmentInfos = make(map[typeutil.UniqueID]*rootcoordpb.SegmentInfos)
-
-	segIDsMap := make(map[typeutil.UniqueID]struct{})
-	for _, segID := range segIDs {
-		segIDsMap[segID] = struct{}{}
-	}
-
-	for _, segID := range t.Req.SegmentIDs {
-		if _, ok := segIDsMap[segID]; !ok {
-			log.Warn("requested segment not found",
-				zap.Int64("collection", collectionID),
-				zap.Int64("segment", segID))
-			return fmt.Errorf("segment not found, collection: %d, segment: %d",
-				collectionID, segID)
-		}
-
-		if _, ok := t.Rsp.SegmentInfos[segID]; !ok {
-			t.Rsp.SegmentInfos[segID] = &rootcoordpb.SegmentInfos{
-				BaseInfo: &rootcoordpb.SegmentBaseInfo{
-					CollectionID: collectionID,
-					PartitionID:  0, // TODO: change this after MetaTable.partID2IndexedSegID been fixed.
-					SegmentID:    segID,
-				},
-				IndexInfos:      nil,
-				ExtraIndexInfos: make(map[typeutil.UniqueID]*etcdpb.IndexInfo),
-			}
-		}
-
-		index, err := t.core.MetaTable.GetSegmentIndexInfos(segID)
-		if err != nil {
-			continue
-		}
-
-		segIdxMeta, ok := index.SegmentIndexes[segID]
-		if !ok {
-			log.Error("requested segment index not found",
-				zap.Int64("collection", collectionID),
-				zap.Int64("indexID", index.IndexID),
-				zap.Int64("segment", segID))
-			return fmt.Errorf("segment index not found, collection: %d, segment: %d", collectionID, segID)
-		}
-
-		t.Rsp.SegmentInfos[segID].IndexInfos = append(
-			t.Rsp.SegmentInfos[segID].IndexInfos,
-			&etcdpb.SegmentIndexInfo{
-				CollectionID: index.CollectionID,
-				PartitionID:  segIdxMeta.Segment.PartitionID,
-				SegmentID:    segIdxMeta.Segment.SegmentID,
-				FieldID:      index.FieldID,
-				IndexID:      index.IndexID,
-				BuildID:      segIdxMeta.BuildID,
-				EnableIndex:  segIdxMeta.EnableIndex,
-			})
-
-		t.Rsp.SegmentInfos[segID].ExtraIndexInfos[index.IndexID] = model.MarshalIndexModel(&index)
-	}
-
-	return nil
-}
-
-// CreateIndexReqTask create index request task
-type CreateIndexReqTask struct {
-	baseReqTask
-	Req *milvuspb.CreateIndexRequest
-}
-
-// Type return msg type
-func (t *CreateIndexReqTask) Type() commonpb.MsgType {
-	return t.Req.Base.MsgType
-}
-
-// Execute task execution
-func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
-	if t.Type() != commonpb.MsgType_CreateIndex {
-		return fmt.Errorf("create index, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
-	}
-	indexName := t.Req.GetIndexName()
-	if len(indexName) <= 0 {
-		indexName = Params.CommonCfg.DefaultIndexName //TODO, get name from request
-	}
-	indexID, _, err := t.core.IDAllocator(1)
-	log.Debug("RootCoord CreateIndexReqTask", zap.Any("indexID", indexID), zap.Error(err))
-	if err != nil {
-		return err
-	}
-
-	createTS, err := t.core.TSOAllocator(1)
-	if err != nil {
-		return err
-	}
-
-	idxInfo := &model.Index{
-		IndexName:   indexName,
-		IndexID:     indexID,
-		IndexParams: t.Req.ExtraParams,
-		CreateTime:  createTS,
-	}
-	log.Info("create index for collection",
-		zap.String("collection", t.Req.GetCollectionName()),
-		zap.String("field", t.Req.GetFieldName()),
-		zap.String("index", indexName),
-		zap.Int64("index_id", indexID),
-		zap.Any("params", t.Req.GetExtraParams()))
-	collMeta, err := t.core.MetaTable.GetCollectionByName(t.Req.CollectionName, 0)
-	if err != nil {
-		return err
-	}
-	segID2PartID, segID2Binlog, err := t.core.getSegments(ctx, collMeta.CollectionID)
-	flushedSegs := make([]typeutil.UniqueID, 0, len(segID2PartID))
-	for k := range segID2PartID {
-		flushedSegs = append(flushedSegs, k)
-	}
-	if err != nil {
-		log.Debug("get flushed segments from data coord failed", zap.String("collection_name", collMeta.Name), zap.Error(err))
-		return err
-	}
-
-	alreadyExists, err := t.core.MetaTable.AddIndex(t.Req.CollectionName, t.Req.FieldName, idxInfo, flushedSegs)
-	if err != nil {
-		log.Debug("add index into metastore failed", zap.Int64("collection_id", collMeta.CollectionID), zap.Int64("index_id", idxInfo.IndexID), zap.Error(err))
-		return err
-	}
-	// backward compatible with support create the same index
-	if alreadyExists {
-		return nil
-	}
-
-	segIDs, field, err := t.core.MetaTable.GetNotIndexedSegments(t.Req.CollectionName, t.Req.FieldName, idxInfo, flushedSegs)
-	if err != nil {
-		log.Debug("get not indexed segments failed", zap.Int64("collection_id", collMeta.CollectionID), zap.Error(err))
-		return err
-	}
-
-	for _, segID := range segIDs {
-		segmentIndex := model.SegmentIndex{
-			Segment: model.Segment{
-				SegmentID:   segID,
-				PartitionID: segID2PartID[segID],
-			},
-			EnableIndex: false,
-			CreateTime:  createTS,
-		}
-
-		segmentIndex.BuildID, err = t.core.BuildIndex(ctx, segID, segID2Binlog[segID].GetNumOfRows(), segID2Binlog[segID].GetFieldBinlogs(), &field, idxInfo, false)
-		if err != nil {
-			return err
-		}
-		if segmentIndex.BuildID != 0 {
-			segmentIndex.EnableIndex = true
-		}
-
-		index := &model.Index{
-			CollectionID:   collMeta.CollectionID,
-			FieldID:        field.FieldID,
-			IndexID:        idxInfo.IndexID,
-			SegmentIndexes: map[int64]model.SegmentIndex{segID: segmentIndex},
-		}
-
-		if err := t.core.MetaTable.AlterIndex(index); err != nil {
-			log.Error("alter index into meta table failed", zap.Int64("collection_id", collMeta.CollectionID), zap.Int64("index_id", index.IndexID), zap.Int64("build_id", segmentIndex.BuildID), zap.Error(err))
-			return err
-		}
-	}
-
-	return nil
-}
-
-// DescribeIndexReqTask describe index request task
-type DescribeIndexReqTask struct {
-	baseReqTask
-	Req *milvuspb.DescribeIndexRequest
-	Rsp *milvuspb.DescribeIndexResponse
-}
-
-// Type return msg type
-func (t *DescribeIndexReqTask) Type() commonpb.MsgType {
-	return t.Req.Base.MsgType
-}
-
-// Execute task execution
-func (t *DescribeIndexReqTask) Execute(ctx context.Context) error {
-	if t.Type() != commonpb.MsgType_DescribeIndex {
-		return fmt.Errorf("describe index, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
-	}
-	coll, idx, err := t.core.MetaTable.GetIndexByName(t.Req.CollectionName, t.Req.IndexName)
-	if err != nil {
-		return err
-	}
-	for _, i := range idx {
-		f, err := GetFieldSchemaByIndexID(&coll, typeutil.UniqueID(i.IndexID))
-		if err != nil {
-			log.Warn("Get field schema by index id failed", zap.String("collection name", t.Req.CollectionName), zap.String("index name", t.Req.IndexName), zap.Error(err))
-			continue
-		}
-		desc := &milvuspb.IndexDescription{
-			IndexName: i.IndexName,
-			Params:    i.IndexParams,
-			IndexID:   i.IndexID,
-			FieldName: f.Name,
-		}
-		t.Rsp.IndexDescriptions = append(t.Rsp.IndexDescriptions, desc)
-	}
-	return nil
-}
-
-// DropIndexReqTask drop index request task
-type DropIndexReqTask struct {
-	baseReqTask
-	Req *milvuspb.DropIndexRequest
-}
-
-// Type return msg type
-func (t *DropIndexReqTask) Type() commonpb.MsgType {
-	return t.Req.Base.MsgType
-}
-
-// Execute task execution
-func (t *DropIndexReqTask) Execute(ctx context.Context) error {
-	if t.Type() != commonpb.MsgType_DropIndex {
-		return fmt.Errorf("drop index, msg type = %s", commonpb.MsgType_name[int32(t.Type())])
-	}
-	if err := t.core.MetaTable.MarkIndexDeleted(t.Req.CollectionName, t.Req.FieldName, t.Req.IndexName); err != nil {
-		return err
-	}
-	return nil
-}
+//type DescribeSegmentsReqTask struct {
+//	baseReqTask
+//	Req *rootcoordpb.DescribeSegmentsRequest
+//	Rsp *rootcoordpb.DescribeSegmentsResponse
+//}
+//
+//func (t *DescribeSegmentsReqTask) Type() commonpb.MsgType {
+//	return t.Req.GetBase().GetMsgType()
+//}
+//
+//func (t *DescribeSegmentsReqTask) Execute(ctx context.Context) error {
+//	collectionID := t.Req.GetCollectionID()
+//	segIDs, err := t.core.CallGetFlushedSegmentsService(ctx, collectionID, -1)
+//	if err != nil {
+//		log.Error("failed to get flushed segments",
+//			zap.Error(err),
+//			zap.Int64("collection", collectionID))
+//		return err
+//	}
+//
+//	t.Rsp.CollectionID = collectionID
+//	t.Rsp.SegmentInfos = make(map[typeutil.UniqueID]*rootcoordpb.SegmentInfos)
+//
+//	segIDsMap := make(map[typeutil.UniqueID]struct{})
+//	for _, segID := range segIDs {
+//		segIDsMap[segID] = struct{}{}
+//	}
+//
+//	for _, segID := range t.Req.SegmentIDs {
+//		if _, ok := segIDsMap[segID]; !ok {
+//			log.Warn("requested segment not found",
+//				zap.Int64("collection", collectionID),
+//				zap.Int64("segment", segID))
+//			return fmt.Errorf("segment not found, collection: %d, segment: %d",
+//				collectionID, segID)
+//		}
+//
+//		if _, ok := t.Rsp.SegmentInfos[segID]; !ok {
+//			t.Rsp.SegmentInfos[segID] = &rootcoordpb.SegmentInfos{
+//				BaseInfo: &rootcoordpb.SegmentBaseInfo{
+//					CollectionID: collectionID,
+//					PartitionID:  0, // TODO: change this after MetaTable.partID2IndexedSegID been fixed.
+//					SegmentID:    segID,
+//				},
+//				IndexInfos:      nil,
+//				ExtraIndexInfos: make(map[typeutil.UniqueID]*etcdpb.IndexInfo),
+//			}
+//		}
+//
+//		index, err := t.core.MetaTable.GetSegmentIndexInfos(segID)
+//		if err != nil {
+//			continue
+//		}
+//
+//		segIdxMeta, ok := index.SegmentIndexes[segID]
+//		if !ok {
+//			log.Error("requested segment index not found",
+//				zap.Int64("collection", collectionID),
+//				zap.Int64("indexID", index.IndexID),
+//				zap.Int64("segment", segID))
+//			return fmt.Errorf("segment index not found, collection: %d, segment: %d", collectionID, segID)
+//		}
+//
+//		t.Rsp.SegmentInfos[segID].IndexInfos = append(
+//			t.Rsp.SegmentInfos[segID].IndexInfos,
+//			&etcdpb.SegmentIndexInfo{
+//				CollectionID: index.CollectionID,
+//				PartitionID:  segIdxMeta.Segment.PartitionID,
+//				SegmentID:    segIdxMeta.Segment.SegmentID,
+//				FieldID:      index.FieldID,
+//				IndexID:      index.IndexID,
+//				BuildID:      segIdxMeta.BuildID,
+//				EnableIndex:  segIdxMeta.EnableIndex,
+//			})
+//
+//		t.Rsp.SegmentInfos[segID].ExtraIndexInfos[index.IndexID] = model.MarshalIndexModel(&index)
+//	}
+//
+//	return nil
+//}
 
 // CreateAliasReqTask create alias request task
 type CreateAliasReqTask struct {

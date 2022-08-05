@@ -1130,11 +1130,13 @@ func (spt *showPartitionsTask) PostExecute(ctx context.Context) error {
 type createIndexTask struct {
 	Condition
 	*milvuspb.CreateIndexRequest
-	ctx       context.Context
-	rootCoord types.RootCoord
-	result    *commonpb.Status
+	ctx        context.Context
+	rootCoord  types.RootCoord
+	indexCoord types.IndexCoord
+	result     *commonpb.Status
 
 	collectionID UniqueID
+	fieldSchema  *schemapb.FieldSchema
 }
 
 func (cit *createIndexTask) TraceCtx() context.Context {
@@ -1288,6 +1290,7 @@ func (cit *createIndexTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	cit.fieldSchema = field
 
 	// check index param, not accurate, only some static rules
 	indexParams, err := parseIndexParams(cit.GetExtraParams())
@@ -1301,7 +1304,15 @@ func (cit *createIndexTask) PreExecute(ctx context.Context) error {
 
 func (cit *createIndexTask) Execute(ctx context.Context) error {
 	var err error
-	cit.result, err = cit.rootCoord.CreateIndex(ctx, cit.CreateIndexRequest)
+	req := &indexpb.CreateIndexRequest{
+		CollectionID: cit.collectionID,
+		FieldID:      cit.fieldSchema.GetFieldID(),
+		IndexName:    cit.GetIndexName(),
+		TypeParams:   cit.fieldSchema.GetTypeParams(),
+		IndexParams:  cit.GetExtraParams(),
+	}
+	cit.result, err = cit.indexCoord.CreateIndex(ctx, req)
+	//cit.result, err = cit.rootCoord.CreateIndex(ctx, cit.CreateIndexRequest)
 	if cit.result == nil {
 		return errors.New("get collection statistics resp is nil")
 	}
@@ -1318,9 +1329,9 @@ func (cit *createIndexTask) PostExecute(ctx context.Context) error {
 type describeIndexTask struct {
 	Condition
 	*milvuspb.DescribeIndexRequest
-	ctx       context.Context
-	rootCoord types.RootCoord
-	result    *milvuspb.DescribeIndexResponse
+	ctx        context.Context
+	indexCoord types.IndexCoord
+	result     *milvuspb.DescribeIndexResponse
 
 	collectionID UniqueID
 }
@@ -1376,11 +1387,38 @@ func (dit *describeIndexTask) PreExecute(ctx context.Context) error {
 }
 
 func (dit *describeIndexTask) Execute(ctx context.Context) error {
-	var err error
-	dit.result, err = dit.rootCoord.DescribeIndex(ctx, dit.DescribeIndexRequest)
-	if dit.result == nil {
-		return errors.New("get collection statistics resp is nil")
+	schema, err := globalMetaCache.GetCollectionSchema(ctx, dit.GetCollectionName())
+	if err != nil {
+		log.Error("failed to get collection schema", zap.Error(err))
+		return fmt.Errorf("failed to get collection schema: %s", err)
 	}
+	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
+	if err != nil {
+		log.Error("failed to parse collection schema", zap.Error(err))
+		return fmt.Errorf("failed to parse collection schema: %s", err)
+	}
+
+	resp, err := dit.indexCoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{CollectionID: dit.collectionID})
+	if err != nil || resp == nil {
+		return err
+	}
+	dit.result.Status = resp.GetStatus()
+	for _, indexInfo := range resp.IndexInfos {
+		// TODO @xiaocai2333: get fieldName by fieldID
+		field, err := schemaHelper.GetFieldFromID(indexInfo.FieldID)
+		if err != nil {
+			log.Error("failed to get collection field", zap.Error(err))
+			return fmt.Errorf("failed to get collection field: %d", indexInfo.FieldID)
+		}
+
+		dit.result.IndexDescriptions = append(dit.result.IndexDescriptions, &milvuspb.IndexDescription{
+			IndexName: indexInfo.GetIndexName(),
+			IndexID:   indexInfo.GetIndexID(),
+			FieldName: field.Name,
+			Params:    indexInfo.GetIndexParams(),
+		})
+	}
+
 	if dit.result.Status.ErrorCode != commonpb.ErrorCode_Success {
 		return errors.New(dit.result.Status.Reason)
 	}
@@ -1395,8 +1433,8 @@ type dropIndexTask struct {
 	Condition
 	ctx context.Context
 	*milvuspb.DropIndexRequest
-	rootCoord types.RootCoord
-	result    *commonpb.Status
+	indexCoord types.IndexCoord
+	result     *commonpb.Status
 
 	collectionID UniqueID
 }
@@ -1464,7 +1502,10 @@ func (dit *dropIndexTask) PreExecute(ctx context.Context) error {
 
 func (dit *dropIndexTask) Execute(ctx context.Context) error {
 	var err error
-	dit.result, err = dit.rootCoord.DropIndex(ctx, dit.DropIndexRequest)
+	dit.result, err = dit.indexCoord.DropIndex(ctx, &indexpb.DropIndexRequest{
+		CollectionID: dit.collectionID,
+		IndexName:    dit.IndexName,
+	})
 	if dit.result == nil {
 		return errors.New("drop index resp is nil")
 	}
@@ -1546,154 +1587,22 @@ func (gibpt *getIndexBuildProgressTask) Execute(ctx context.Context) error {
 	}
 	gibpt.collectionID = collectionID
 
-	showPartitionRequest := &milvuspb.ShowPartitionsRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_ShowPartitions,
-			MsgID:     gibpt.Base.MsgID,
-			Timestamp: gibpt.Base.Timestamp,
-			SourceID:  Params.ProxyCfg.GetNodeID(),
-		},
-		DbName:         gibpt.DbName,
-		CollectionName: collectionName,
-		CollectionID:   collectionID,
-	}
-	partitions, err := gibpt.rootCoord.ShowPartitions(ctx, showPartitionRequest)
-	if err != nil {
-		return err
-	}
-
 	if gibpt.IndexName == "" {
 		gibpt.IndexName = Params.CommonCfg.DefaultIndexName
 	}
 
-	describeIndexReq := &milvuspb.DescribeIndexRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_DescribeIndex,
-			MsgID:     gibpt.Base.MsgID,
-			Timestamp: gibpt.Base.Timestamp,
-			SourceID:  Params.ProxyCfg.GetNodeID(),
-		},
-		DbName:         gibpt.DbName,
-		CollectionName: gibpt.CollectionName,
-		//		IndexName:      gibpt.IndexName,
-	}
-
-	indexDescriptionResp, err2 := gibpt.rootCoord.DescribeIndex(ctx, describeIndexReq)
-	if err2 != nil {
-		return err2
-	}
-
-	matchIndexID := int64(-1)
-	foundIndexID := false
-	for _, desc := range indexDescriptionResp.IndexDescriptions {
-		if desc.IndexName == gibpt.IndexName {
-			matchIndexID = desc.IndexID
-			foundIndexID = true
-			break
-		}
-	}
-	if !foundIndexID {
-		return fmt.Errorf("no index is created")
-	}
-
-	var allSegmentIDs []UniqueID
-	for _, partitionID := range partitions.PartitionIDs {
-		showSegmentsRequest := &milvuspb.ShowSegmentsRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_ShowSegments,
-				MsgID:     gibpt.Base.MsgID,
-				Timestamp: gibpt.Base.Timestamp,
-				SourceID:  Params.ProxyCfg.GetNodeID(),
-			},
-			CollectionID: collectionID,
-			PartitionID:  partitionID,
-		}
-		segments, err := gibpt.rootCoord.ShowSegments(ctx, showSegmentsRequest)
-		if err != nil {
-			return err
-		}
-		if segments.Status.ErrorCode != commonpb.ErrorCode_Success {
-			return errors.New(segments.Status.Reason)
-		}
-		allSegmentIDs = append(allSegmentIDs, segments.SegmentIDs...)
-	}
-
-	getIndexStatesRequest := &indexpb.GetIndexStatesRequest{
-		IndexBuildIDs: make([]UniqueID, 0),
-	}
-
-	buildIndexMap := make(map[int64]int64)
-	for _, segmentID := range allSegmentIDs {
-		describeSegmentRequest := &milvuspb.DescribeSegmentRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_DescribeSegment,
-				MsgID:     gibpt.Base.MsgID,
-				Timestamp: gibpt.Base.Timestamp,
-				SourceID:  Params.ProxyCfg.GetNodeID(),
-			},
-			CollectionID: collectionID,
-			SegmentID:    segmentID,
-		}
-		segmentDesc, err := gibpt.rootCoord.DescribeSegment(ctx, describeSegmentRequest)
-		if err != nil {
-			return err
-		}
-		if segmentDesc.IndexID == matchIndexID {
-			if segmentDesc.EnableIndex {
-				getIndexStatesRequest.IndexBuildIDs = append(getIndexStatesRequest.IndexBuildIDs, segmentDesc.BuildID)
-				buildIndexMap[segmentID] = segmentDesc.BuildID
-			}
-		}
-	}
-
-	states, err := gibpt.indexCoord.GetIndexStates(ctx, getIndexStatesRequest)
-	if err != nil {
-		return err
-	}
-
-	if states.Status.ErrorCode != commonpb.ErrorCode_Success {
-		gibpt.result = &milvuspb.GetIndexBuildProgressResponse{
-			Status: states.Status,
-		}
-	}
-
-	buildFinishMap := make(map[int64]bool)
-	for _, state := range states.States {
-		if state.State == commonpb.IndexState_Finished {
-			buildFinishMap[state.IndexBuildID] = true
-		}
-	}
-
-	infoResp, err := gibpt.dataCoord.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_SegmentInfo,
-			MsgID:     0,
-			Timestamp: 0,
-			SourceID:  Params.ProxyCfg.GetNodeID(),
-		},
-		SegmentIDs: allSegmentIDs,
+	resp, err := gibpt.indexCoord.GetIndexBuildProgress(ctx, &indexpb.GetIndexBuildProgressRequest{
+		CollectionID: collectionID,
+		IndexName:    gibpt.IndexName,
 	})
 	if err != nil {
 		return err
 	}
 
-	total := int64(0)
-	indexed := int64(0)
-
-	for _, info := range infoResp.Infos {
-		total += info.NumOfRows
-		if buildFinishMap[buildIndexMap[info.ID]] {
-			indexed += info.NumOfRows
-		}
-	}
-
 	gibpt.result = &milvuspb.GetIndexBuildProgressResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
-		TotalRows:   total,
-		IndexedRows: indexed,
+		Status:      resp.Status,
+		TotalRows:   resp.GetTotalRows(),
+		IndexedRows: resp.GetIndexedRows(),
 	}
 
 	return nil
@@ -1767,7 +1676,15 @@ func (gist *getIndexStateTask) Execute(ctx context.Context) error {
 	if gist.IndexName == "" {
 		gist.IndexName = Params.CommonCfg.DefaultIndexName
 	}
-	states, err := gist.rootCoord.GetIndexState(ctx, gist.GetIndexStateRequest)
+	collectionID, err := globalMetaCache.GetCollectionID(ctx, gist.CollectionName)
+	if err != nil {
+		return err
+	}
+
+	state, err := gist.indexCoord.GetIndexState(ctx, &indexpb.GetIndexStateRequest{
+		CollectionID: collectionID,
+		IndexName:    gist.IndexName,
+	})
 	if err != nil {
 		return err
 	}
@@ -1777,32 +1694,9 @@ func (gist *getIndexStateTask) Execute(ctx context.Context) error {
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
 		},
-		State:      commonpb.IndexState_Finished,
-		FailReason: "",
+		State:      state.GetState(),
+		FailReason: state.GetFailReason(),
 	}
-
-	if states.Status.ErrorCode != commonpb.ErrorCode_Success {
-		gist.result = &milvuspb.GetIndexStateResponse{
-			Status: states.Status,
-			State:  commonpb.IndexState_Failed,
-		}
-		return nil
-	}
-
-	for _, state := range states.States {
-		if state.State == commonpb.IndexState_IndexStateNone {
-			continue
-		}
-		if state.State != commonpb.IndexState_Finished {
-			gist.result = &milvuspb.GetIndexStateResponse{
-				Status:     states.Status,
-				State:      state.State,
-				FailReason: state.Reason,
-			}
-			return nil
-		}
-	}
-
 	return nil
 }
 

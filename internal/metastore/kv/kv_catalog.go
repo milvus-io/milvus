@@ -4,15 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"path"
-	"reflect"
 	"strconv"
 
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
-
-	"github.com/milvus-io/milvus/internal/metastore"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/kv"
@@ -81,25 +77,23 @@ func (kc *Catalog) CreatePartition(ctx context.Context, coll *model.Collection, 
 	return nil
 }
 
-func (kc *Catalog) CreateIndex(index *model.Index) error {
+func (kc *Catalog) CreateIndex(ctx context.Context, index *model.Index) error {
+	key := path.Join(FieldIndexPrefix, strconv.FormatInt(index.CollectionID, 10),
+		strconv.FormatInt(index.IndexID, 10))
+
 	value, err := proto.Marshal(model.MarshalIndexModel(index))
 	if err != nil {
 		return err
 	}
 
-	key := path.Join(FieldIndexPrefix, strconv.FormatInt(index.CollectionID, 10),
-		strconv.FormatInt(index.IndexID, 10))
-
 	err = kc.Txn.Save(key, string(value))
 	if err != nil {
-		log.Error("failed to save index meta in etcd", zap.Int64("buildID", index.CollectionID),
-			zap.Int64("fieldID", index.FieldID), zap.Int64("indexID", index.IndexID), zap.Error(err))
 		return err
 	}
 	return nil
 }
 
-func (kc *Catalog) CreateSegmentIndex(segIdx *model.SegmentIndex) error {
+func (kc *Catalog) CreateSegmentIndex(ctx context.Context, segIdx *model.SegmentIndex) error {
 	value, err := proto.Marshal(model.MarshalSegmentIndexModel(segIdx))
 	if err != nil {
 		return err
@@ -114,87 +108,99 @@ func (kc *Catalog) CreateSegmentIndex(segIdx *model.SegmentIndex) error {
 	return nil
 }
 
-func (kc *Catalog) alterAddIndex(ctx context.Context, oldIndex *model.Index, newIndex *model.Index) error {
-	kvs := make(map[string]string, len(newIndex.SegmentIndexes))
-	for segID, newSegIdx := range newIndex.SegmentIndexes {
-		oldSegIdx, ok := oldIndex.SegmentIndexes[segID]
-		if !ok || !reflect.DeepEqual(oldSegIdx, newSegIdx) {
-			segment := newSegIdx.Segment
-			k := fmt.Sprintf("%s/%d/%d/%d/%d", SegmentIndexMetaPrefix, newIndex.CollectionID, newIndex.IndexID, segment.PartitionID, segment.SegmentID)
-			segIdxInfo := &pb.SegmentIndexInfo{
-				CollectionID: newIndex.CollectionID,
-				PartitionID:  segment.PartitionID,
-				SegmentID:    segment.SegmentID,
-				BuildID:      newSegIdx.BuildID,
-				EnableIndex:  newSegIdx.EnableIndex,
-				CreateTime:   newSegIdx.CreateTime,
-				FieldID:      newIndex.FieldID,
-				IndexID:      newIndex.IndexID,
-			}
+func (kc *Catalog) AlterIndex(ctx context.Context, indexes []*model.Index) error {
+	kvs := make(map[string]string)
+	for _, index := range indexes {
+		key := path.Join(FieldIndexPrefix, strconv.FormatInt(index.CollectionID, 10),
+			strconv.FormatInt(index.IndexID, 10))
 
-			v, err := proto.Marshal(segIdxInfo)
-			if err != nil {
-				log.Error("alter index marshal fail", zap.String("key", k), zap.Error(err))
-				return err
-			}
-
-			kvs[k] = string(v)
-		}
-	}
-
-	if oldIndex.CreateTime != newIndex.CreateTime || oldIndex.IsDeleted != newIndex.IsDeleted {
-		idxPb := model.MarshalIndexModel(newIndex)
-		k := fmt.Sprintf("%s/%d/%d", IndexMetaPrefix, newIndex.CollectionID, newIndex.IndexID)
-		v, err := proto.Marshal(idxPb)
+		value, err := proto.Marshal(model.MarshalIndexModel(index))
 		if err != nil {
-			log.Error("alter index marshal fail", zap.String("key", k), zap.Error(err))
 			return err
 		}
 
-		kvs[k] = string(v)
+		kvs[key] = string(value)
 	}
+	return kc.Txn.MultiSave(kvs)
+}
 
-	if len(kvs) == 0 {
-		return nil
-	}
-
-	err := kc.Txn.MultiSave(kvs)
+func (kc *Catalog) ListSegmentIndexes(ctx context.Context) ([]*model.SegmentIndex, error) {
+	_, values, err := kc.Txn.LoadWithPrefix(SegmentIndexPrefix)
 	if err != nil {
-		log.Error("alter add index persist meta fail", zap.Any("segmentIndex", newIndex.SegmentIndexes), zap.Error(err))
+		log.Error("list segment index meta fail", zap.String("prefix", SegmentIndexPrefix), zap.Error(err))
+		return nil, err
+	}
+
+	segIndexes := make([]*model.SegmentIndex, len(values))
+	for _, value := range values {
+		if bytes.Equal([]byte(value), SuffixSnapshotTombstone) {
+			// backward compatibility, IndexMeta used to be in SnapshotKV
+			continue
+		}
+		segmentIndexInfo := &indexpb.SegmentIndex{}
+		err = proto.Unmarshal([]byte(value), segmentIndexInfo)
+		if err != nil {
+			log.Warn("unmarshal segment index info failed", zap.Error(err))
+			continue
+		}
+
+		segIndexes = append(segIndexes, model.UnmarshalSegmentIndexModel(segmentIndexInfo))
+	}
+
+	return segIndexes, nil
+}
+
+func (kc *Catalog) ListIndexes(ctx context.Context) ([]*model.Index, error) {
+	_, values, err := kc.Txn.LoadWithPrefix(FieldIndexPrefix)
+	if err != nil {
+		log.Error("list index meta fail", zap.String("prefix", FieldIndexPrefix), zap.Error(err))
+		return nil, err
+	}
+
+	indexes := make([]*model.Index, 0)
+	for _, value := range values {
+		if bytes.Equal([]byte(value), SuffixSnapshotTombstone) {
+			// backward compatibility, IndexMeta used to be in SnapshotKV
+			continue
+		}
+		meta := &indexpb.FieldIndex{}
+		err = proto.Unmarshal([]byte(value), meta)
+		if err != nil {
+			log.Warn("unmarshal index info failed", zap.Error(err))
+			continue
+		}
+
+		index := model.UnmarshalIndexModel(meta)
+		indexes[meta.IndexInfo.IndexID] = index
+	}
+
+	return indexes, nil
+}
+
+func (kc *Catalog) DropIndex(ctx context.Context, collID typeutil.UniqueID, dropIdxID typeutil.UniqueID, ts typeutil.Timestamp) error {
+	key := path.Join(FieldIndexPrefix, strconv.FormatInt(collID, 10),
+		strconv.FormatInt(dropIdxID, 10))
+
+	err := kc.Txn.Remove(key)
+	if err != nil {
+		log.Error("drop collection index meta fail", zap.Int64("collectionID", collID),
+			zap.Int64("indexID", dropIdxID), zap.Error(err))
 		return err
 	}
 
 	return nil
 }
 
-func (kc *Catalog) alterDeleteIndex(ctx context.Context, oldIndex *model.Index, newIndex *model.Index) error {
-	delKeys := make([]string, len(newIndex.SegmentIndexes))
-	for _, segIdx := range newIndex.SegmentIndexes {
-		delKeys = append(delKeys, fmt.Sprintf("%s/%d/%d/%d/%d",
-			SegmentIndexMetaPrefix, newIndex.CollectionID, newIndex.IndexID, segIdx.PartitionID, segIdx.SegmentID))
-	}
+func (kc *Catalog) DropSegmentIndex(buildID typeutil.UniqueID) error {
+	key := path.Join(SegmentIndexPrefix, strconv.FormatInt(buildID, 10))
 
-	if len(delKeys) == 0 {
-		return nil
-	}
-
-	if err := kc.Txn.MultiRemove(delKeys); err != nil {
-		log.Error("alter delete index persist meta fail", zap.Any("keys", delKeys), zap.Error(err))
+	err := kc.Txn.Remove(key)
+	if err != nil {
+		log.Error("drop segment index meta fail", zap.Int64("buildID", buildID), zap.Error(err))
 		return err
 	}
 
 	return nil
-}
-
-func (kc *Catalog) AlterIndex(ctx context.Context, oldIndex *model.Index, newIndex *model.Index, alterType metastore.AlterType) error {
-	switch alterType {
-	case metastore.ADD:
-		return kc.alterAddIndex(ctx, oldIndex, newIndex)
-	case metastore.DELETE:
-		return kc.alterDeleteIndex(ctx, oldIndex, newIndex)
-	default:
-		return errors.New("Unknown alter type:" + fmt.Sprintf("%d", alterType))
-	}
 }
 
 func (kc *Catalog) CreateAlias(ctx context.Context, collection *model.Collection, ts typeutil.Timestamp) error {
@@ -297,12 +303,12 @@ func (kc *Catalog) DropCollection(ctx context.Context, collectionInfo *model.Col
 		kvs[k] = v
 	}
 
-	delMetaKeysTxn := []string{
-		fmt.Sprintf("%s/%d", SegmentIndexMetaPrefix, collectionInfo.CollectionID),
-		fmt.Sprintf("%s/%d", IndexMetaPrefix, collectionInfo.CollectionID),
-	}
+	//delMetaKeysTxn := []string{
+	//	fmt.Sprintf("%s/%d", SegmentIndexMetaPrefix, collectionInfo.CollectionID),
+	//	fmt.Sprintf("%s/%d", IndexMetaPrefix, collectionInfo.CollectionID),
+	//}
 
-	err = kc.Txn.MultiSaveAndRemoveWithPrefix(kvs, delMetaKeysTxn)
+	err = kc.Txn.MultiSave(kvs)
 	if err != nil {
 		log.Warn("drop collection update meta fail", zap.Int64("collectionID", collectionInfo.CollectionID), zap.Error(err))
 		return err
@@ -330,10 +336,10 @@ func (kc *Catalog) DropPartition(ctx context.Context, collectionInfo *model.Coll
 	}
 
 	var delMetaKeys []string
-	for _, idxInfo := range collMeta.FieldIndexes {
-		k := fmt.Sprintf("%s/%d/%d/%d", SegmentIndexMetaPrefix, collMeta.ID, idxInfo.IndexID, partitionID)
-		delMetaKeys = append(delMetaKeys, k)
-	}
+	//for _, idxInfo := range collMeta.FieldIndexes {
+	//	k := fmt.Sprintf("%s/%d/%d/%d", SegmentIndexMetaPrefix, collMeta.ID, idxInfo.IndexID, partitionID)
+	//	delMetaKeys = append(delMetaKeys, k)
+	//}
 
 	// Txn operation
 	metaTxn := map[string]string{}
@@ -346,32 +352,6 @@ func (kc *Catalog) DropPartition(ctx context.Context, collectionInfo *model.Coll
 			zap.Int64("collectionID", collectionInfo.CollectionID),
 			zap.Int64("partitionID", partitionID),
 			zap.Error(err))
-		return err
-	}
-
-	return nil
-}
-
-func (kc *Catalog) DropIndex(collID typeutil.UniqueID, dropIdxID typeutil.UniqueID) error {
-	key := path.Join(FieldIndexPrefix, strconv.FormatInt(collID, 10),
-		strconv.FormatInt(dropIdxID, 10))
-
-	err := kc.Txn.Remove(key)
-	if err != nil {
-		log.Error("drop collection index meta fail", zap.Int64("collectionID", collID),
-			zap.Int64("indexID", dropIdxID), zap.Error(err))
-		return err
-	}
-
-	return nil
-}
-
-func (kc *Catalog) DropSegmentIndex(buildID typeutil.UniqueID) error {
-	key := path.Join(SegmentIndexPrefix, strconv.FormatInt(buildID, 10))
-
-	err := kc.Txn.Remove(key)
-	if err != nil {
-		log.Error("drop segment index meta fail", zap.Int64("buildID", buildID), zap.Error(err))
 		return err
 	}
 
@@ -469,63 +449,6 @@ func (kc *Catalog) ListAliases(ctx context.Context) ([]*model.Collection, error)
 	}
 
 	return colls, nil
-}
-
-func (kc *Catalog) ListSegmentIndexes() (map[int64]*model.SegmentIndex, error) {
-	_, values, err := kc.Txn.LoadWithPrefix(SegmentIndexPrefix)
-	if err != nil {
-		log.Error("list segment index meta fail", zap.String("prefix", SegmentIndexPrefix), zap.Error(err))
-		return nil, err
-	}
-
-	segIndexes := make(map[int64]*model.SegmentIndex, len(values))
-	for _, value := range values {
-		if bytes.Equal([]byte(value), SuffixSnapshotTombstone) {
-			// backward compatibility, IndexMeta used to be in SnapshotKV
-			continue
-		}
-		segmentIndexInfo := &indexpb.SegmentIndex{}
-		err = proto.Unmarshal([]byte(value), segmentIndexInfo)
-		if err != nil {
-			log.Warn("unmarshal segment index info failed", zap.Error(err))
-			continue
-		}
-
-		segIndex := model.UnmarshalSegmentIndexModel(segmentIndexInfo)
-		segIndexes[segmentIndexInfo.BuildID] = segIndex
-	}
-
-	return segIndexes, nil
-}
-
-func (kc *Catalog) ListIndexes() (map[int64]*model.Index, error) {
-	_, values, err := kc.Txn.LoadWithPrefix(FieldIndexPrefix)
-	if err != nil {
-		log.Error("list index meta fail", zap.String("prefix", FieldIndexPrefix), zap.Error(err))
-		return nil, err
-	}
-
-	indexes := make(map[int64]*model.Index, len(values))
-	for _, value := range values {
-		if bytes.Equal([]byte(value), SuffixSnapshotTombstone) {
-			// backward compatibility, IndexMeta used to be in SnapshotKV
-			continue
-		}
-		meta := &indexpb.FieldIndex{}
-		err = proto.Unmarshal([]byte(value), meta)
-		if err != nil {
-			log.Warn("unmarshal index info failed", zap.Error(err))
-			continue
-		}
-
-		index := model.UnmarshalIndexModel(meta)
-		if _, ok := indexes[meta.IndexID]; ok {
-			log.Warn("duplicated index id exists in index meta", zap.Int64("index id", meta.IndexID))
-		}
-		indexes[meta.IndexID] = index
-	}
-
-	return indexes, nil
 }
 
 func (kc *Catalog) ListCredentials(ctx context.Context) ([]string, error) {
