@@ -41,6 +41,7 @@ ignore:
   - "docs/.*"
   - "**/*.pb.go"
   - "**/*.proto"
+  - "internal/metastore/db/dbmodel/mocks/.*"
 
 
 
