@@ -96,6 +96,7 @@ target_link_libraries(all_tests
         milvus_segcore
         milvus_indexbuilder
         pthread
+        wasmtime
         )
 
 install(TARGETS all_tests DESTINATION unittest)

@@ -203,6 +203,11 @@ enum MsgType {
     GetRecoveryInfo = 602;
     GetSegmentState = 603;
 
+    /* FUNCTION */
+    CreateFunction = 700;
+    DropFunction = 701;
+    GetFunctionInfo = 702;
+
     /* SYSTEM CONTROL */
     TimeTick = 1200;
     QueryNodeStats = 1201; // GOOSE TODO: Remove kQueryNodeStats

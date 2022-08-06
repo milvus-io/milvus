@@ -1311,6 +1311,167 @@ func (c *Core) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (
 	}, nil
 }
 
+// CreateFunction create function
+func (c *Core) CreateFunction(ctx context.Context, in *milvuspb.CreateFunctionRequest) (*commonpb.Status, error) {
+	if code, ok := c.checkHealthy(); !ok {
+		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+internalpb.StateCode_name[int32(code)]), nil
+	}
+	metrics.RootCoordDDLReqCounter.WithLabelValues("CreateFunction", metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder("CreateFunction")
+
+	log.Info("received request to create function", zap.String("role", typeutil.RootCoordRole),
+		zap.String("function name", in.GetFunctionName()), zap.String("wat body base64", in.GetWatBodyBase64()),
+		zap.String("argument types", string(in.GetArgTypes())),
+		zap.Int64("msgID", in.GetBase().GetMsgID()))
+
+	t := &createFunctionTask{
+		baseTask: baseTask{
+			ctx:  ctx,
+			core: c,
+			done: make(chan error, 1),
+		},
+		Req: in,
+	}
+
+	if err := c.scheduler.AddTask(t); err != nil {
+		log.Error("failed to enqueue request to create function", zap.String("role", typeutil.RootCoordRole),
+			zap.Error(err),
+			zap.String("function name", in.GetFunctionName()), zap.String("wat body base64", in.GetWatBodyBase64()),
+			zap.String("argument types", string(in.GetArgTypes())),
+			zap.Int64("msgID", in.GetBase().GetMsgID()))
+
+		metrics.RootCoordDDLReqCounter.WithLabelValues("CreateFunction", metrics.FailLabel).Inc()
+		return failStatus(commonpb.ErrorCode_UnexpectedError, err.Error()), nil
+	}
+
+	if err := t.WaitToFinish(); err != nil {
+		log.Error("failed to create function", zap.String("role", typeutil.RootCoordRole),
+			zap.Error(err),
+			zap.String("function name", in.GetFunctionName()), zap.String("wat body base64", in.GetWatBodyBase64()),
+			zap.String("argument types", string(in.GetArgTypes())),
+			zap.Int64("msgID", in.GetBase().GetMsgID()), zap.Uint64("ts", t.GetTs()))
+
+		metrics.RootCoordDDLReqCounter.WithLabelValues("CreateFunction", metrics.FailLabel).Inc()
+		return failStatus(commonpb.ErrorCode_UnexpectedError, err.Error()), nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues("CreateFunction", metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues("CreateFunction").Observe(float64(tr.ElapseSpan().Milliseconds()))
+
+	log.Info("done to create function", zap.String("role", typeutil.RootCoordRole),
+		zap.String("function name", in.GetFunctionName()), zap.String("wat body base64", in.GetWatBodyBase64()),
+		zap.String("argument types", string(in.GetArgTypes())),
+		zap.Int64("msgID", in.GetBase().GetMsgID()))
+
+	return succStatus(), nil
+}
+
+// DropFunction drop function
+func (c *Core) DropFunction(ctx context.Context, in *milvuspb.DropFunctionRequest) (*commonpb.Status, error) {
+	if code, ok := c.checkHealthy(); !ok {
+		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+internalpb.StateCode_name[int32(code)]), nil
+	}
+	metrics.RootCoordDDLReqCounter.WithLabelValues("DropFunction", metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder("DropFunction")
+
+	log.Info("received request to drop function", zap.String("role", typeutil.RootCoordRole),
+		zap.String("function name", in.GetFunctionName()),
+		zap.Int64("msgID", in.GetBase().GetMsgID()))
+
+	t := &dropFunctionTask{
+		baseTask: baseTask{
+			ctx:  ctx,
+			core: c,
+			done: make(chan error, 1),
+		},
+		Req: in,
+	}
+
+	if err := c.scheduler.AddTask(t); err != nil {
+		log.Error("failed to enqueue request to drop function", zap.String("role", typeutil.RootCoordRole),
+			zap.Error(err),
+			zap.String("function name", in.GetFunctionName()),
+			zap.Int64("msgID", in.GetBase().GetMsgID()))
+
+		metrics.RootCoordDDLReqCounter.WithLabelValues("DropFunction", metrics.FailLabel).Inc()
+		return failStatus(commonpb.ErrorCode_UnexpectedError, err.Error()), nil
+	}
+
+	if err := t.WaitToFinish(); err != nil {
+		log.Error("failed to drop function", zap.String("role", typeutil.RootCoordRole),
+			zap.Error(err),
+			zap.String("function name", in.GetFunctionName()),
+			zap.Int64("msgID", in.GetBase().GetMsgID()), zap.Uint64("ts", t.GetTs()))
+
+		metrics.RootCoordDDLReqCounter.WithLabelValues("DropFunction", metrics.FailLabel).Inc()
+		return failStatus(commonpb.ErrorCode_UnexpectedError, err.Error()), nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues("DropFunction", metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues("DropFunction").Observe(float64(tr.ElapseSpan().Milliseconds()))
+
+	log.Info("done to drop function", zap.String("role", typeutil.RootCoordRole),
+		zap.String("function name", in.GetFunctionName()),
+		zap.Int64("msgID", in.GetBase().GetMsgID()))
+
+	return succStatus(), nil
+}
+
+func (c *Core) GetFunctionInfo(ctx context.Context, in *rootcoordpb.GetFunctionInfoRequest) (*rootcoordpb.GetFunctionInfoResponse, error) {
+	if code, ok := c.checkHealthy(); !ok {
+		return &rootcoordpb.GetFunctionInfoResponse{
+			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+internalpb.StateCode_name[int32(code)]),
+		}, nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues("GetFunctionInfo", metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder("GetFunctionInfo")
+
+	log.Info("received request to get function information", zap.String("role", typeutil.RootCoordRole),
+		zap.String("function name", in.GetFunctionName()), zap.Int64("msgID", in.GetBase().GetMsgID()))
+
+	t := &getFunctionInfoTask{
+		baseTask: baseTask{
+			ctx:  ctx,
+			core: c,
+			done: make(chan error, 1),
+		},
+		Req: in,
+		Rsp: &rootcoordpb.GetFunctionInfoResponse{},
+	}
+
+	if err := c.scheduler.AddTask(t); err != nil {
+		log.Error("failed to enqueue request to create function", zap.String("role", typeutil.RootCoordRole),
+			zap.Error(err),
+			zap.String("function name", in.GetFunctionName()), zap.Int64("msgID", in.GetBase().GetMsgID()))
+
+		metrics.RootCoordDDLReqCounter.WithLabelValues("GetFunctionInfo", metrics.FailLabel).Inc()
+		return &rootcoordpb.GetFunctionInfoResponse{
+			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "GetFunctionInfo failed: "+err.Error()),
+		}, nil
+	}
+
+	if err := t.WaitToFinish(); err != nil {
+		log.Error("failed to create function", zap.String("role", typeutil.RootCoordRole),
+			zap.Error(err),
+			zap.String("function name", in.GetFunctionName()),
+			zap.Int64("msgID", in.GetBase().GetMsgID()), zap.Uint64("ts", t.GetTs()))
+
+		metrics.RootCoordDDLReqCounter.WithLabelValues("CreateFunction", metrics.FailLabel).Inc()
+		return &rootcoordpb.GetFunctionInfoResponse{
+			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "GetFunctionInfo failed: "+err.Error()),
+		}, nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues("GetFunctionInfo", metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues("GetFunctionInfo").Observe(float64(tr.ElapseSpan().Milliseconds()))
+
+	log.Info("done to get function information", zap.String("role", typeutil.RootCoordRole),
+		zap.String("function name", in.GetFunctionName()), zap.Int64("msgID", in.GetBase().GetMsgID()))
+
+	return t.Rsp, nil
+}
+
 // CreateAlias create collection alias
 func (c *Core) CreateAlias(ctx context.Context, in *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
 	if code, ok := c.checkHealthy(); !ok {

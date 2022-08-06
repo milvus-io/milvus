@@ -709,6 +709,16 @@ func (s *Server) LoadBalance(ctx context.Context, request *milvuspb.LoadBalanceR
 	return s.proxy.LoadBalance(ctx, request)
 }
 
+// CreateFunction notifies Proxy to create function
+func (s *Server) CreateFunction(ctx context.Context, request *milvuspb.CreateFunctionRequest) (*commonpb.Status, error) {
+	return s.proxy.CreateFunction(ctx, request)
+}
+
+// DropFunction notifies Proxy to drop function
+func (s *Server) DropFunction(ctx context.Context, request *milvuspb.DropFunctionRequest) (*commonpb.Status, error) {
+	return s.proxy.DropFunction(ctx, request)
+}
+
 // CreateAlias notifies Proxy to create alias
 func (s *Server) CreateAlias(ctx context.Context, request *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
 	return s.proxy.CreateAlias(ctx, request)

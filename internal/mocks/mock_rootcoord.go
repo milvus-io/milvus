@@ -313,6 +313,53 @@ func (_c *RootCoord_CreateCredential_Call) Return(_a0 *commonpb.Status, _a1 erro
 	return _c
 }
 
+// CreateFunction provides a mock function with given fields: ctx, req
+func (_m *RootCoord) CreateFunction(ctx context.Context, req *milvuspb.CreateFunctionRequest) (*commonpb.Status, error) {
+	ret := _m.Called(ctx, req)
+
+	var r0 *commonpb.Status
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CreateFunctionRequest) *commonpb.Status); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.CreateFunctionRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// RootCoord_CreateFunction_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateFunction'
+type RootCoord_CreateFunction_Call struct {
+	*mock.Call
+}
+
+// CreateFunction is a helper method to define mock.On call
+//  - ctx context.Context
+//  - req *milvuspb.CreateFunctionRequest
+func (_e *RootCoord_Expecter) CreateFunction(ctx interface{}, req interface{}) *RootCoord_CreateFunction_Call {
+	return &RootCoord_CreateFunction_Call{Call: _e.mock.On("CreateFunction", ctx, req)}
+}
+
+func (_c *RootCoord_CreateFunction_Call) Run(run func(ctx context.Context, req *milvuspb.CreateFunctionRequest)) *RootCoord_CreateFunction_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.CreateFunctionRequest))
+	})
+	return _c
+}
+
+func (_c *RootCoord_CreateFunction_Call) Return(_a0 *commonpb.Status, _a1 error) *RootCoord_CreateFunction_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
 // CreatePartition provides a mock function with given fields: ctx, req
 func (_m *RootCoord) CreatePartition(ctx context.Context, req *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
 	ret := _m.Called(ctx, req)
@@ -595,6 +642,53 @@ func (_c *RootCoord_DropCollection_Call) Return(_a0 *commonpb.Status, _a1 error)
 	return _c
 }
 
+// DropFunction provides a mock function with given fields: ctx, request
+func (_m *RootCoord) DropFunction(ctx context.Context, request *milvuspb.DropFunctionRequest) (*commonpb.Status, error) {
+	ret := _m.Called(ctx, request)
+
+	var r0 *commonpb.Status
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DropFunctionRequest) *commonpb.Status); ok {
+		r0 = rf(ctx, request)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DropFunctionRequest) error); ok {
+		r1 = rf(ctx, request)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// RootCoord_DropFunction_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropFunction'
+type RootCoord_DropFunction_Call struct {
+	*mock.Call
+}
+
+// DropFunction is a helper method to define mock.On call
+//  - ctx context.Context
+//  - request *milvuspb.DropFunctionRequest
+func (_e *RootCoord_Expecter) DropFunction(ctx interface{}, request interface{}) *RootCoord_DropFunction_Call {
+	return &RootCoord_DropFunction_Call{Call: _e.mock.On("DropFunction", ctx, request)}
+}
+
+func (_c *RootCoord_DropFunction_Call) Run(run func(ctx context.Context, request *milvuspb.DropFunctionRequest)) *RootCoord_DropFunction_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.DropFunctionRequest))
+	})
+	return _c
+}
+
+func (_c *RootCoord_DropFunction_Call) Return(_a0 *commonpb.Status, _a1 error) *RootCoord_DropFunction_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
 // DropPartition provides a mock function with given fields: ctx, req
 func (_m *RootCoord) DropPartition(ctx context.Context, req *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
 	ret := _m.Called(ctx, req)
@@ -778,6 +872,53 @@ func (_c *RootCoord_GetCredential_Call) Run(run func(ctx context.Context, req *r
 }
 
 func (_c *RootCoord_GetCredential_Call) Return(_a0 *rootcoordpb.GetCredentialResponse, _a1 error) *RootCoord_GetCredential_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+// GetFunctionInfo provides a mock function with given fields: ctx, request
+func (_m *RootCoord) GetFunctionInfo(ctx context.Context, request *rootcoordpb.GetFunctionInfoRequest) (*rootcoordpb.GetFunctionInfoResponse, error) {
+	ret := _m.Called(ctx, request)
+
+	var r0 *rootcoordpb.GetFunctionInfoResponse
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.GetFunctionInfoRequest) *rootcoordpb.GetFunctionInfoResponse); ok {
+		r0 = rf(ctx, request)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*rootcoordpb.GetFunctionInfoResponse)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(context.Context, *rootcoordpb.GetFunctionInfoRequest) error); ok {
+		r1 = rf(ctx, request)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// RootCoord_GetFunctionInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetFunctionInfo'
+type RootCoord_GetFunctionInfo_Call struct {
+	*mock.Call
+}
+
+// GetFunctionInfo is a helper method to define mock.On call
+//  - ctx context.Context
+//  - request *rootcoordpb.GetFunctionInfoRequest
+func (_e *RootCoord_Expecter) GetFunctionInfo(ctx interface{}, request interface{}) *RootCoord_GetFunctionInfo_Call {
+	return &RootCoord_GetFunctionInfo_Call{Call: _e.mock.On("GetFunctionInfo", ctx, request)}
+}
+
+func (_c *RootCoord_GetFunctionInfo_Call) Run(run func(ctx context.Context, request *rootcoordpb.GetFunctionInfoRequest)) *RootCoord_GetFunctionInfo_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*rootcoordpb.GetFunctionInfoRequest))
+	})
+	return _c
+}
+
+func (_c *RootCoord_GetFunctionInfo_Call) Return(_a0 *rootcoordpb.GetFunctionInfoResponse, _a1 error) *RootCoord_GetFunctionInfo_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }

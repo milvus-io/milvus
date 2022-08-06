@@ -132,6 +132,7 @@ func TestQueryTask_all(t *testing.T) {
 			Expr:           expr,
 		},
 		qc:       qc,
+		rc:       rc,
 		shardMgr: mgr,
 	}
 

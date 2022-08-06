@@ -9,6 +9,7 @@ import "internal.proto";
 import "proxy.proto";
 //import "data_coord.proto";
 import "etcd_meta.proto";
+import "schema.proto";
 
 service RootCoord {
   rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
@@ -133,6 +134,11 @@ service RootCoord {
     rpc OperatePrivilege(milvus.OperatePrivilegeRequest) returns (common.Status) {}
     rpc SelectGrant(milvus.SelectGrantRequest) returns (milvus.SelectGrantResponse) {}
     rpc ListPolicy(internal.ListPolicyRequest) returns (internal.ListPolicyResponse) {}
+
+    // user defined function
+    rpc CreateFunction(milvus.CreateFunctionRequest) returns (common.Status){}
+    rpc DropFunction(milvus.DropFunctionRequest) returns (common.Status){}
+    rpc GetFunctionInfo(GetFunctionInfoRequest) returns (GetFunctionInfoResponse){}
 }
 
 message AllocTimestampRequest {
@@ -210,3 +216,22 @@ message GetCredentialResponse {
   string password = 3;
 }
 
+message GetFunctionInfoRequest {
+  common.MsgBase base = 1;
+  // The unique function name in rootcoord.(Required)
+  string function_name = 2;
+}
+
+message GetFunctionInfoResponse {
+  common.Status status = 1;
+  FunctionInfo info = 2;
+}
+
+message FunctionInfo {
+  // The unique function name in rootcoord.(Required)
+  string function_name = 2;
+  // wat file after base64.(Required)
+  string wat_body_base64 = 3;
+  // list of function parameter types.(Required)
+  repeated schema.DataType arg_types = 4;
+}

@@ -7,6 +7,7 @@ expr:
 	| StringLiteral											                # String
 	| Identifier											                # Identifier
 	| '(' expr ')'											                # Parens
+    | UDF StringLiteral ('[' expr (',' expr)* ','? ']')                     # Udf
 	| expr LIKE StringLiteral                                               # Like
 	| expr POW expr											                # Power
 	| op = (ADD | SUB | BNOT | NOT) expr					                # Unary
@@ -24,7 +25,8 @@ expr:
 	| expr BXOR expr										                # BitXor
 	| expr BOR expr											                # BitOr
 	| expr AND expr											                # LogicalAnd
-	| expr OR expr											                # LogicalOr;
+	| expr OR expr											                # LogicalOr
+	;
 
 // typeName: ty = (BOOL | INT8 | INT16 | INT32 | INT64 | FLOAT | DOUBLE);
 
@@ -44,6 +46,8 @@ EQ: '==';
 NE: '!=';
 
 LIKE: 'like' | 'LIKE';
+
+UDF: 'udf' | 'UDF';
 
 ADD: '+';
 SUB: '-';

@@ -111,6 +111,21 @@ type RootCoordMock struct {
 	lastTsMtx sync.Mutex
 }
 
+func (coord *RootCoordMock) CreateFunction(ctx context.Context, req *milvuspb.CreateFunctionRequest) (*commonpb.Status, error) {
+	//TODO (ziyu wang) implement me
+	panic("implement me")
+}
+
+func (coord *RootCoordMock) DropFunction(ctx context.Context, req *milvuspb.DropFunctionRequest) (*commonpb.Status, error) {
+	//TODO (ziyu wang) implement me
+	panic("implement me")
+}
+
+func (coord *RootCoordMock) GetFunctionInfo(ctx context.Context, req *rootcoordpb.GetFunctionInfoRequest) (*rootcoordpb.GetFunctionInfoResponse, error) {
+	//TODO (ziyu wang) implement me
+	panic("implement me")
+}
+
 func (coord *RootCoordMock) CreateAlias(ctx context.Context, req *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
 	code := coord.state.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {

@@ -59,6 +59,8 @@ func (v *ShowExprVisitor) VisitExpr(expr *planpb.Expr) interface{} {
 		js["expr"] = v.VisitValueExpr(realExpr.ValueExpr)
 	case *planpb.Expr_ColumnExpr:
 		js["expr"] = v.VisitColumnExpr(realExpr.ColumnExpr)
+	case *planpb.Expr_UdfExpr:
+		js["expr"] = v.VisitUdfExpr(realExpr.UdfExpr)
 	default:
 		js["expr"] = ""
 	}
@@ -152,6 +154,27 @@ func (v *ShowExprVisitor) VisitColumnExpr(expr *planpb.ColumnExpr) interface{} {
 	js := make(map[string]interface{})
 	js["expr_type"] = "column"
 	js["column_info"] = extractColumnInfo(expr.GetInfo())
+	return js
+}
+
+func (v *ShowExprVisitor) VisitUdfExpr(expr *planpb.UdfExpr) interface{} {
+	js := make(map[string]interface{})
+	js["expr_type"] = "udf"
+	js["udf_func_name"] = expr.GetUdfFuncName()
+	udfArgs := make([]interface{}, 0, len(expr.UdfParams))
+	for _, v := range expr.UdfParams {
+		col := v.GetColumnInfo()
+		if col != nil {
+			udfArgs = append(udfArgs, extractColumnInfo(col))
+		}
+		val := v.GetValue()
+		if val != nil {
+			udfArgs = append(udfArgs, extractGenericValue(val))
+		}
+	}
+	js["udf_args"] = udfArgs
+	js["wasm_body"] = expr.GetWasmBody()
+	js["arg_types"] = expr.GetArgTypes()
 	return js
 }
 

@@ -1,8 +1,11 @@
 package planparserv2
 
 import (
+	"fmt"
 	"sync"
 	"testing"
+
+	"github.com/golang/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 
@@ -534,4 +537,50 @@ func Test_handleExpr_17126(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+// test udf expr
+func TestExpr_UDF(t *testing.T) {
+	schema := newTestSchema()
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	exprStrs := []string{
+		`UDF "funcName" [2]`,
+		`UDF "funcName" [Int8Field]`,
+		`UDF "funcName" [DoubleField, 2]`,
+		`UDF "funcName" [Int8Field, Int8Field]`,
+		`UDF "funcName" [Int8Field, 2, Int16Field, 4]`,
+	}
+
+	for _, exprStr := range exprStrs {
+		expr, err := ParseExpr(helper, exprStr)
+		assert.NoError(t, err, exprStr)
+		marshaledProtoPlan := proto.MarshalTextString(expr)
+		fmt.Printf(marshaledProtoPlan)
+		ShowExpr(expr)
+	}
+	//marshaledProtoPlan1 := proto.MarshalTextString(exprStr1)
+	//fmt.Printf(marshaledProtoPlan1)
+}
+
+// test udf expr
+func TestExprTextString_UDF(t *testing.T) {
+	schema := newTestSchema()
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	assert.NoError(t, err)
+
+	exprStrs := []string{
+		`UDF "funcName" [DoubleField, 2]`,
+		`UDF "less_than" [Int64Field, 2000]`,
+		`UDF "multiple_columns" [Int8Field, Int16Field, Int32Field, Int64Field, 2000]`,
+	}
+
+	for _, exprStr := range exprStrs {
+		expr, err := ParseExpr(helper, exprStr)
+		assert.NoError(t, err, exprStr)
+		marshaledProtoPlan := proto.MarshalTextString(expr)
+		fmt.Printf(marshaledProtoPlan)
+		ShowExpr(expr)
+	}
 }

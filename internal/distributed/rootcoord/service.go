@@ -491,3 +491,15 @@ func (s *Server) SelectGrant(ctx context.Context, request *milvuspb.SelectGrantR
 func (s *Server) ListPolicy(ctx context.Context, request *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
 	return s.rootCoord.ListPolicy(ctx, request)
 }
+
+func (s *Server) CreateFunction(ctx context.Context, request *milvuspb.CreateFunctionRequest) (*commonpb.Status, error) {
+	return s.rootCoord.CreateFunction(ctx, request)
+}
+
+func (s *Server) DropFunction(ctx context.Context, request *milvuspb.DropFunctionRequest) (*commonpb.Status, error) {
+	return s.rootCoord.DropFunction(ctx, request)
+}
+
+func (s *Server) GetFunctionInfo(ctx context.Context, request *rootcoordpb.GetFunctionInfoRequest) (*rootcoordpb.GetFunctionInfoResponse, error) {
+	return s.rootCoord.GetFunctionInfo(ctx, request)
+}

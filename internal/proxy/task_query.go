@@ -42,6 +42,7 @@ type queryTask struct {
 	result         *milvuspb.QueryResults
 	request        *milvuspb.QueryRequest
 	qc             types.QueryCoord
+	rc             types.RootCoord
 	ids            *schemapb.IDs
 	collectionName string
 	queryParams    *queryParams
@@ -223,7 +224,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		return fmt.Errorf("query expression is empty")
 	}
 
-	plan, err := planparserv2.CreateRetrievePlan(schema, t.request.Expr)
+	plan, err := planparserv2.CreateRetrievePlan(schema, t.request.Expr, planparserv2.ParserVisitorWithRootCoord(t.rc))
 	if err != nil {
 		return err
 	}
