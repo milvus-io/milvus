@@ -8,8 +8,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/util/retry"
 
-	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
-
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -130,48 +128,48 @@ func (broker *globalMetaBroker) getRecoveryInfo(ctx context.Context, collectionI
 	return recoveryInfo.Channels, recoveryInfo.Binlogs, nil
 }
 
-func (broker *globalMetaBroker) getIndexBuildID(ctx context.Context, collectionID UniqueID, segmentID UniqueID) (bool, int64, error) {
-	req := &milvuspb.DescribeSegmentRequest{
-		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_DescribeSegment,
-		},
-		CollectionID: collectionID,
-		SegmentID:    segmentID,
-	}
-	ctx2, cancel2 := context.WithTimeout(ctx, timeoutForRPC)
-	defer cancel2()
-	response, err := broker.rootCoord.DescribeSegment(ctx2, req)
-	if err != nil {
-		log.Error("describe segment from rootCoord failed",
-			zap.Int64("collectionID", collectionID),
-			zap.Int64("segmentID", segmentID),
-			zap.Error(err))
-		return false, 0, err
-	}
-	if response.Status.ErrorCode != commonpb.ErrorCode_Success {
-		err = errors.New(response.Status.Reason)
-		log.Error("describe segment from rootCoord failed",
-			zap.Int64("collectionID", collectionID),
-			zap.Int64("segmentID", segmentID),
-			zap.Error(err))
-		return false, 0, err
-	}
-
-	if !response.EnableIndex {
-		log.Info("describe segment from rootCoord successfully",
-			zap.Int64("collectionID", collectionID),
-			zap.Int64("segmentID", segmentID),
-			zap.Bool("enableIndex", false))
-		return false, 0, nil
-	}
-
-	log.Info("describe segment from rootCoord successfully",
-		zap.Int64("collectionID", collectionID),
-		zap.Int64("segmentID", segmentID),
-		zap.Bool("enableIndex", true),
-		zap.Int64("buildID", response.BuildID))
-	return true, response.BuildID, nil
-}
+//func (broker *globalMetaBroker) getIndexBuildID(ctx context.Context, collectionID UniqueID, segmentID UniqueID) (bool, int64, error) {
+//	req := &milvuspb.DescribeSegmentRequest{
+//		Base: &commonpb.MsgBase{
+//			MsgType: commonpb.MsgType_DescribeSegment,
+//		},
+//		CollectionID: collectionID,
+//		SegmentID:    segmentID,
+//	}
+//	ctx2, cancel2 := context.WithTimeout(ctx, timeoutForRPC)
+//	defer cancel2()
+//	response, err := broker.rootCoord.DescribeSegment(ctx2, req)
+//	if err != nil {
+//		log.Error("describe segment from rootCoord failed",
+//			zap.Int64("collectionID", collectionID),
+//			zap.Int64("segmentID", segmentID),
+//			zap.Error(err))
+//		return false, 0, err
+//	}
+//	if response.Status.ErrorCode != commonpb.ErrorCode_Success {
+//		err = errors.New(response.Status.Reason)
+//		log.Error("describe segment from rootCoord failed",
+//			zap.Int64("collectionID", collectionID),
+//			zap.Int64("segmentID", segmentID),
+//			zap.Error(err))
+//		return false, 0, err
+//	}
+//
+//	if !response.EnableIndex {
+//		log.Info("describe segment from rootCoord successfully",
+//			zap.Int64("collectionID", collectionID),
+//			zap.Int64("segmentID", segmentID),
+//			zap.Bool("enableIndex", false))
+//		return false, 0, nil
+//	}
+//
+//	log.Info("describe segment from rootCoord successfully",
+//		zap.Int64("collectionID", collectionID),
+//		zap.Int64("segmentID", segmentID),
+//		zap.Bool("enableIndex", true),
+//		zap.Int64("buildID", response.BuildID))
+//	return true, response.BuildID, nil
+//}
 
 func (broker *globalMetaBroker) getIndexFilePaths(ctx context.Context, indexName string, segmentIDs []int64) (*indexpb.GetIndexInfoResponse, error) {
 	indexFilePathRequest := &indexpb.GetIndexInfoRequest{
@@ -302,28 +300,28 @@ func (broker *globalMetaBroker) loadIndexExtraInfo(ctx context.Context, fieldPat
 	return nil, errors.New("failed to load index extra info")
 }
 
-func (broker *globalMetaBroker) describeSegments(ctx context.Context, collectionID UniqueID, segmentIDs []UniqueID) (*rootcoordpb.DescribeSegmentsResponse, error) {
-	resp, err := broker.rootCoord.DescribeSegments(ctx, &rootcoordpb.DescribeSegmentsRequest{
-		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_DescribeSegments,
-		},
-		CollectionID: collectionID,
-		SegmentIDs:   segmentIDs,
-	})
-	if err != nil {
-		log.Error("failed to describe segments",
-			zap.Int64("collection", collectionID),
-			zap.Int64s("segments", segmentIDs),
-			zap.Error(err))
-		return nil, err
-	}
-
-	log.Info("describe segments successfully",
-		zap.Int64("collection", collectionID),
-		zap.Int64s("segments", segmentIDs))
-
-	return resp, nil
-}
+//func (broker *globalMetaBroker) describeSegments(ctx context.Context, collectionID UniqueID, segmentIDs []UniqueID) (*rootcoordpb.DescribeSegmentsResponse, error) {
+//	resp, err := broker.rootCoord.DescribeSegments(ctx, &rootcoordpb.DescribeSegmentsRequest{
+//		Base: &commonpb.MsgBase{
+//			MsgType: commonpb.MsgType_DescribeSegments,
+//		},
+//		CollectionID: collectionID,
+//		SegmentIDs:   segmentIDs,
+//	})
+//	if err != nil {
+//		log.Error("failed to describe segments",
+//			zap.Int64("collection", collectionID),
+//			zap.Int64s("segments", segmentIDs),
+//			zap.Error(err))
+//		return nil, err
+//	}
+//
+//	log.Info("describe segments successfully",
+//		zap.Int64("collection", collectionID),
+//		zap.Int64s("segments", segmentIDs))
+//
+//	return resp, nil
+//}
 
 // return: segment_id -> segment_index_infos
 func (broker *globalMetaBroker) getFullIndexInfos(ctx context.Context, collectionID UniqueID, segmentID UniqueID) ([]*querypb.FieldIndexInfo, error) {

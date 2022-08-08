@@ -35,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus/internal/indexnode"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/indexnodepb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
@@ -223,33 +222,28 @@ func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComp
 	return s.indexnode.GetComponentStates(ctx)
 }
 
-// GetTimeTickChannel gets the time tick channel of IndexNode.
-func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
-	return s.indexnode.GetTimeTickChannel(ctx)
-}
-
 // GetStatisticsChannel gets the statistics channel of IndexNode.
 func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
 	return s.indexnode.GetStatisticsChannel(ctx)
 }
 
 // CreateJob sends the create index request to IndexNode.
-func (s *Server) CreateJob(ctx context.Context, req *indexnodepb.CreateJobRequest) (*commonpb.Status, error) {
+func (s *Server) CreateJob(ctx context.Context, req *indexpb.CreateJobRequest) (*commonpb.Status, error) {
 	return s.indexnode.CreateJob(ctx, req)
 }
 
 // QueryJobs querys index jobs statues
-func (s *Server) QueryJobs(ctx context.Context, req *indexnodepb.QueryJobsRequest) (*indexnodepb.QueryJobsRespond, error) {
+func (s *Server) QueryJobs(ctx context.Context, req *indexpb.QueryJobsRequest) (*indexpb.QueryJobsResponse, error) {
 	return s.indexnode.QueryJobs(ctx, req)
 }
 
 // DropJobs drops index build jobs
-func (s *Server) DropJobs(ctx context.Context, req *indexnodepb.DropJobsRequest) (*commonpb.Status, error) {
+func (s *Server) DropJobs(ctx context.Context, req *indexpb.DropJobsRequest) (*commonpb.Status, error) {
 	return s.indexnode.DropJobs(ctx, req)
 }
 
 // GetJobNum gets indexnode's job statisctics
-func (s *Server) GetJobNum(ctx context.Context, req *indexnodepb.GetJobNumRequest) (*indexnodepb.GetJobNumRespond, error) {
+func (s *Server) GetJobNum(ctx context.Context, req *indexpb.GetJobNumRequest) (*indexpb.GetJobNumResponse, error) {
 	return s.indexnode.GetJobNum(ctx, req)
 }
 

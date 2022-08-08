@@ -125,11 +125,10 @@ message GetIndexInfoRequest {
 }
 
 message IndexFilePathInfo {
-  common.Status status = 1;
-  int64 segmentID = 2;
-  string index_name = 3;
-  repeated string index_file_paths = 4;
-  uint64 serialized_size = 5;
+  int64 segmentID = 1;
+  string index_name = 2;
+  repeated string index_file_paths = 3;
+  uint64 serialized_size = 4;
 }
 
 message GetIndexInfoResponse {
@@ -167,24 +166,6 @@ message GetIndexBuildProgressResponse {
   common.Status status = 1;
   int64 indexed_rows = 2;
   int64 total_rows = 3;
-}
-
-message BuildIndexRequest {
-  int64 clusterID = 1;
-  int64 indexBuildID = 2;
-  int64 index_version = 3;
-  repeated string data_paths = 4;
-  repeated common.KeyValuePair type_params = 5;
-  repeated common.KeyValuePair index_params = 6;
-}
-
-message GetTaskSlotsRequest {
-
-}
-
-message GetTaskSlotsResponse {
-  common.Status status = 1;
-  int64 slots = 2;
 }
 
 message CreateJobRequest {

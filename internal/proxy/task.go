@@ -1303,6 +1303,9 @@ func (cit *createIndexTask) PreExecute(ctx context.Context) error {
 }
 
 func (cit *createIndexTask) Execute(ctx context.Context) error {
+	log.Debug("proxy create index", zap.Int64("collID", cit.collectionID), zap.Int64("fieldID", cit.fieldSchema.GetFieldID()),
+		zap.String("indexName", cit.GetIndexName()), zap.Any("typeParams", cit.fieldSchema.GetTypeParams()),
+		zap.Any("indexParams", cit.GetExtraParams()))
 	var err error
 	req := &indexpb.CreateIndexRequest{
 		CollectionID: cit.collectionID,
@@ -1402,9 +1405,12 @@ func (dit *describeIndexTask) Execute(ctx context.Context) error {
 	if err != nil || resp == nil {
 		return err
 	}
+	dit.result = &milvuspb.DescribeIndexResponse{}
 	dit.result.Status = resp.GetStatus()
+	if dit.result.Status.ErrorCode != commonpb.ErrorCode_Success {
+		return errors.New(dit.result.Status.Reason)
+	}
 	for _, indexInfo := range resp.IndexInfos {
-		// TODO @xiaocai2333: get fieldName by fieldID
 		field, err := schemaHelper.GetFieldFromID(indexInfo.FieldID)
 		if err != nil {
 			log.Error("failed to get collection field", zap.Error(err))
@@ -1417,10 +1423,6 @@ func (dit *describeIndexTask) Execute(ctx context.Context) error {
 			FieldName: field.Name,
 			Params:    indexInfo.GetIndexParams(),
 		})
-	}
-
-	if dit.result.Status.ErrorCode != commonpb.ErrorCode_Success {
-		return errors.New(dit.result.Status.Reason)
 	}
 	return err
 }

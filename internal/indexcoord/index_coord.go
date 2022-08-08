@@ -176,13 +176,8 @@ func (i *IndexCoord) Init() error {
 		}
 
 		connectEtcdFn := func() error {
-			etcdKV := etcdkv.NewEtcdKV(i.etcdCli, Params.EtcdCfg.MetaRootPath)
-			i.etcdKV = etcdKV
-			metaTable, err := NewMetaTable(i.etcdKV)
-			if err != nil {
-				return err
-			}
-			i.metaTable = metaTable
+			i.etcdKV = etcdkv.NewEtcdKV(i.etcdCli, Params.EtcdCfg.MetaRootPath)
+			i.metaTable, err = NewMetaTable(i.etcdKV)
 			return err
 		}
 		log.Debug("IndexCoord try to connect etcd")

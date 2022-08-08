@@ -19,13 +19,13 @@ package indexnode
 import (
 	"context"
 
-	"google.golang.org/grpc"
-
-	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -34,10 +34,126 @@ import (
 type Mock struct {
 	types.IndexNode
 
+	CallInit                 func() error
+	CallStart                func() error
+	CallStop                 func() error
+	CallGetComponentStates   func(ctx context.Context) (*internalpb.ComponentStates, error)
+	CallGetStatisticsChannel func(ctx context.Context) (*milvuspb.StringResponse, error)
+	CallRegister             func() error
+
+	CallSetEtcdClient   func(etcdClient *clientv3.Client)
+	CallUpdateStateCode func(stateCode internalpb.StateCode)
+
 	createJob func(ctx context.Context, req *indexpb.CreateJobRequest) (*commonpb.Status, error)
 	queryJobs func(ctx context.Context, in *indexpb.QueryJobsRequest) (*indexpb.QueryJobsResponse, error)
-	dropJobs  func(ctx context.Context, in *indexpb.DropJobsRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
-	getJobNum func(ctx context.Context, in *indexpb.GetJobNumRequest, opts ...grpc.CallOption) (*indexpb.GetJobNumResponse, error)
+	dropJobs  func(ctx context.Context, in *indexpb.DropJobsRequest) (*commonpb.Status, error)
+	getJobNum func(ctx context.Context, in *indexpb.GetJobNumRequest) (*indexpb.GetJobNumResponse, error)
+}
+
+func NewIndexNodeMock() *Mock {
+	return &Mock{
+		CallInit: func() error {
+			return nil
+		},
+		CallStart: func() error {
+			return nil
+		},
+		CallRegister: func() error {
+			return nil
+		},
+		CallStop: func() error {
+			return nil
+		},
+		CallSetEtcdClient: func(etcdClient *clientv3.Client) {
+			return
+		},
+		CallUpdateStateCode: func(stateCode internalpb.StateCode) {
+			return
+		},
+		CallGetComponentStates: func(ctx context.Context) (*internalpb.ComponentStates, error) {
+			return &internalpb.ComponentStates{
+				State: &internalpb.ComponentInfo{
+					NodeID:    1,
+					Role:      typeutil.IndexCoordRole,
+					StateCode: internalpb.StateCode_Healthy,
+				},
+				SubcomponentStates: nil,
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+				},
+			}, nil
+		},
+		CallGetStatisticsChannel: func(ctx context.Context) (*milvuspb.StringResponse, error) {
+			return &milvuspb.StringResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+				},
+			}, nil
+		},
+		createJob: func(ctx context.Context, req *indexpb.CreateJobRequest) (*commonpb.Status, error) {
+			return &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			}, nil
+		},
+		queryJobs: func(ctx context.Context, in *indexpb.QueryJobsRequest) (*indexpb.QueryJobsResponse, error) {
+			indexInfos := make([]*indexpb.IndexTaskInfo, 0)
+			for _, buildID := range in.BuildIDs {
+				indexInfos = append(indexInfos, &indexpb.IndexTaskInfo{
+					BuildID:    buildID,
+					State:      commonpb.IndexState_Finished,
+					IndexFiles: []string{"file1", "file2"},
+				})
+			}
+			return &indexpb.QueryJobsResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+				},
+				ClusterID:  in.ClusterID,
+				IndexInfos: indexInfos,
+			}, nil
+		},
+		dropJobs: func(ctx context.Context, in *indexpb.DropJobsRequest) (*commonpb.Status, error) {
+			return &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			}, nil
+		},
+		getJobNum: func(ctx context.Context, in *indexpb.GetJobNumRequest) (*indexpb.GetJobNumResponse, error) {
+			return &indexpb.GetJobNumResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+				},
+				TotalJobNum:      1,
+				EnqueueJobNum:    0,
+				InProgressJobNum: 1,
+				TaskSlots:        1,
+				JobInfos: []*indexpb.JobInfo{
+					{
+						NumRows:   1024,
+						Dim:       128,
+						StartTime: 1,
+						EndTime:   10,
+						PodID:     1,
+					},
+				},
+			}, nil
+		},
+	}
+}
+
+func (m *Mock) Init() error {
+	return m.CallInit()
+}
+
+func (m *Mock) Start() error {
+	return m.CallStart()
+}
+
+func (m *Mock) Stop() error {
+	return m.CallStop()
+}
+
+func (m *Mock) Register() error {
+	return m.CallRegister()
 }
 
 func (m *Mock) CreateJob(ctx context.Context, req *indexpb.CreateJobRequest) (*commonpb.Status, error) {
@@ -96,24 +212,4 @@ func getMockSystemInfoMetrics(
 		Response:      resp,
 		ComponentName: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, Params.IndexNodeCfg.GetNodeID()),
 	}, nil
-}
-
-type MockIndexNode struct {
-	types.IndexNode
-
-	CreateIndexMock  func(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error)
-	GetTaskSlotsMock func(ctx context.Context, req *indexpb.GetTaskSlotsRequest) (*indexpb.GetTaskSlotsResponse, error)
-	GetMetricsMock   func(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
-}
-
-func (min *MockIndexNode) CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
-	return min.CreateIndexMock(ctx, req)
-}
-
-func (min *MockIndexNode) GetTaskSlots(ctx context.Context, req *indexpb.GetTaskSlotsRequest) (*indexpb.GetTaskSlotsResponse, error) {
-	return min.GetTaskSlotsMock(ctx, req)
-}
-
-func (min *MockIndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	return min.GetMetricsMock(ctx, req)
 }

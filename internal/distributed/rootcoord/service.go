@@ -414,18 +414,18 @@ func (s *Server) UpdateChannelTimeTick(ctx context.Context, in *internalpb.Chann
 }
 
 // DescribeSegment gets meta info of the segment
-func (s *Server) DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error) {
-	return s.rootCoord.DescribeSegment(ctx, in)
-}
+//func (s *Server) DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error) {
+//	return s.rootCoord.DescribeSegment(ctx, in)
+//}
 
 // ShowSegments gets all segments
 func (s *Server) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error) {
 	return s.rootCoord.ShowSegments(ctx, in)
 }
 
-func (s *Server) DescribeSegments(ctx context.Context, in *rootcoordpb.DescribeSegmentsRequest) (*rootcoordpb.DescribeSegmentsResponse, error) {
-	return s.rootCoord.DescribeSegments(ctx, in)
-}
+//func (s *Server) DescribeSegments(ctx context.Context, in *rootcoordpb.DescribeSegmentsRequest) (*rootcoordpb.DescribeSegmentsResponse, error) {
+//	return s.rootCoord.DescribeSegments(ctx, in)
+//}
 
 // ReleaseDQLMessageStream notifies RootCoord to release and close the search message stream of specific collection.
 func (s *Server) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {

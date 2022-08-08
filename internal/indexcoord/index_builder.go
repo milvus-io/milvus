@@ -21,12 +21,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/metastore/model"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
-	"go.uber.org/zap"
 )
 
 type indexBuilder struct {
@@ -155,9 +155,11 @@ func (ib *indexBuilder) schedule() {
 		// !ok means indexBuilder is closed.
 		case <-ticker.C:
 			ib.taskMutex.Lock()
-			log.Info("index builder task schedule", zap.Int("task num", len(ib.tasks)))
-			for buildID := range ib.tasks {
-				ib.process(buildID)
+			if len(ib.tasks) > 0 {
+				log.Info("index builder task schedule", zap.Int("task num", len(ib.tasks)))
+				for buildID := range ib.tasks {
+					ib.process(buildID)
+				}
 			}
 			ib.taskMutex.Unlock()
 		}

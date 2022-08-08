@@ -173,7 +173,11 @@ func (cit *CreateIndexTask) Execute(ctx context.Context) error {
 		SegmentIDs:       flushedSegments.Segments,
 		IncludeUnHealthy: true,
 	})
+
 	for _, segmentInfo := range segmentsInfo.Infos {
+		if segmentInfo.State != commonpb.SegmentState_Flushed {
+			continue
+		}
 		binLogs := make([]string, 0)
 		for _, fieldBinLog := range segmentInfo.GetBinlogs() {
 			if fieldBinLog.GetFieldID() == cit.req.FieldID {

@@ -223,7 +223,7 @@ func (s *Server) GetSegmentIndexState(ctx context.Context, req *indexpb.GetSegme
 
 // GetIndexInfos gets the index file paths from IndexCoord.
 func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoRequest) (*indexpb.GetIndexInfoResponse, error) {
-	return s.indexcoord.GetIndexFilePaths(ctx, req)
+	return s.indexcoord.GetIndexInfos(ctx, req)
 }
 
 // DescribeIndex gets all indexes of the collection.

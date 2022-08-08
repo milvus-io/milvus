@@ -383,7 +383,7 @@ type IndexCoordComponent interface {
 	// SetEtcdClient set etcd client for IndexCoordComponent
 	SetEtcdClient(etcdClient *clientv3.Client)
 
-	SetDataCoord(dataCoor DataCoord) error
+	SetDataCoord(dataCoord DataCoord) error
 
 	// UpdateStateCode updates state code for IndexCoordComponent
 	//  `stateCode` is current statement of this IndexCoordComponent, indicating whether it's healthy.
@@ -600,7 +600,7 @@ type RootCoord interface {
 	// The `Status` in response struct `DescribeSegmentResponse` indicates if this operation is processed successfully or fail cause;
 	// segment index information is filled in `IndexID`, `BuildID` and `EnableIndex`.
 	// error is always nil
-	DescribeSegment(ctx context.Context, req *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error)
+	//DescribeSegment(ctx context.Context, req *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error)
 
 	// ShowSegments notifies RootCoord to list all segment ids in the collection or partition
 	//
@@ -612,7 +612,7 @@ type RootCoord interface {
 	// error is always nil
 	ShowSegments(ctx context.Context, req *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error)
 
-	DescribeSegments(ctx context.Context, in *rootcoordpb.DescribeSegmentsRequest) (*rootcoordpb.DescribeSegmentsResponse, error)
+	//DescribeSegments(ctx context.Context, in *rootcoordpb.DescribeSegmentsRequest) (*rootcoordpb.DescribeSegmentsResponse, error)
 
 	// ReleaseDQLMessageStream notifies RootCoord to release and close the search message stream of specific collection.
 	//
