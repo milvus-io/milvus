@@ -173,15 +173,15 @@ func (broker *globalMetaBroker) getIndexBuildID(ctx context.Context, collectionI
 	return true, response.BuildID, nil
 }
 
-func (broker *globalMetaBroker) getIndexFilePaths(ctx context.Context, indexName string, segmentIDs []int64) (*indexpb.GetIndexFilePathsResponse, error) {
-	indexFilePathRequest := &indexpb.GetIndexFilePathsRequest{
+func (broker *globalMetaBroker) getIndexFilePaths(ctx context.Context, indexName string, segmentIDs []int64) (*indexpb.GetIndexInfoResponse, error) {
+	indexFilePathRequest := &indexpb.GetIndexInfoRequest{
 		SegmentIDs: segmentIDs,
 		IndexName:  indexName,
 	}
 
 	ctx3, cancel3 := context.WithTimeout(ctx, timeoutForRPC)
 	defer cancel3()
-	pathResponse, err := broker.indexCoord.GetIndexFilePaths(ctx3, indexFilePathRequest)
+	pathResponse, err := broker.indexCoord.GetIndexInfos(ctx3, indexFilePathRequest)
 	if err != nil {
 		log.Error("get index info from indexCoord failed", zap.Int64s("segmentIDs", segmentIDs),
 			zap.String("indexName", indexName), zap.Error(err))

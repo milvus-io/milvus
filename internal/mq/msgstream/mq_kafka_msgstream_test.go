@@ -36,7 +36,7 @@ import (
 
 //	 Note: kafka does not support get all data when consuming from the earliest position again.
 //func TestStream_KafkaTtMsgStream_NoSeek(t *testing.T) {
-//	kafkaAddress, _ := Params.Load("_KafkaBrokerList")
+//	kafkaAddress := Params.Get("kafka.brokerList")
 //	c1 := funcutil.RandomString(8)
 //	producerChannels := []string{c1}
 //	consumerChannels := []string{c1}
@@ -109,7 +109,7 @@ func skipTest(t *testing.T) {
 func TestStream_KafkaMsgStream_SeekToLast(t *testing.T) {
 	skipTest(t)
 
-	kafkaAddress, _ := Params.Load("_KafkaBrokerList")
+	kafkaAddress := Params.Get("kafka.brokerList")
 	c := funcutil.RandomString(8)
 	producerChannels := []string{c}
 	consumerChannels := []string{c}
@@ -186,7 +186,7 @@ func TestStream_KafkaMsgStream_SeekToLast(t *testing.T) {
 func TestStream_KafkaTtMsgStream_Seek(t *testing.T) {
 	skipTest(t)
 
-	kafkaAddress, _ := Params.Load("_KafkaBrokerList")
+	kafkaAddress := Params.Get("kafka.brokerList")
 	c1 := funcutil.RandomString(8)
 	producerChannels := []string{c1}
 	consumerChannels := []string{c1}
@@ -300,7 +300,7 @@ func TestStream_KafkaTtMsgStream_Seek(t *testing.T) {
 func TestStream_KafkaTtMsgStream_1(t *testing.T) {
 	skipTest(t)
 
-	kafkaAddress, _ := Params.Load("_KafkaBrokerList")
+	kafkaAddress := Params.Get("kafka.brokerList")
 	c1 := funcutil.RandomString(8)
 	c2 := funcutil.RandomString(8)
 	p1Channels := []string{c1}
@@ -347,7 +347,7 @@ func TestStream_KafkaTtMsgStream_1(t *testing.T) {
 func TestStream_KafkaTtMsgStream_2(t *testing.T) {
 	skipTest(t)
 
-	kafkaAddress, _ := Params.Load("_KafkaBrokerList")
+	kafkaAddress := Params.Get("kafka.brokerList")
 	c1 := funcutil.RandomString(8)
 	c2 := funcutil.RandomString(8)
 	p1Channels := []string{c1}
@@ -405,7 +405,7 @@ func TestStream_KafkaTtMsgStream_2(t *testing.T) {
 func TestStream_KafkaTtMsgStream_DataNodeTimetickMsgstream(t *testing.T) {
 	skipTest(t)
 
-	kafkaAddress, _ := Params.Load("_KafkaBrokerList")
+	kafkaAddress := Params.Get("kafka.brokerList")
 	c1 := funcutil.RandomString(8)
 	p1Channels := []string{c1}
 	consumerChannels := []string{c1}

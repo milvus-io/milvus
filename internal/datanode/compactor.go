@@ -133,12 +133,12 @@ func (t *compactionTask) getChannelName() string {
 	return t.plan.GetChannel()
 }
 
-func (t *compactionTask) mergeDeltalogs(dBlobs map[UniqueID][]*Blob, timetravelTs Timestamp) (map[primaryKey]Timestamp, *DelDataBuf, error) {
+func (t *compactionTask) mergeDeltalogs(dBlobs map[UniqueID][]*Blob, timetravelTs Timestamp) (map[interface{}]Timestamp, *DelDataBuf, error) {
 	mergeStart := time.Now()
 	dCodec := storage.NewDeleteCodec()
 
 	var (
-		pk2ts = make(map[primaryKey]Timestamp)
+		pk2ts = make(map[interface{}]Timestamp)
 		dbuff = &DelDataBuf{
 			delData: &DeleteData{
 				Pks: make([]primaryKey, 0),
@@ -162,7 +162,7 @@ func (t *compactionTask) mergeDeltalogs(dBlobs map[UniqueID][]*Blob, timetravelT
 			ts := dData.Tss[i]
 
 			if timetravelTs != Timestamp(0) && dData.Tss[i] <= timetravelTs {
-				pk2ts[pk] = ts
+				pk2ts[pk.GetValue()] = ts
 				continue
 			}
 
@@ -191,7 +191,7 @@ func nano2Milli(nano time.Duration) float64 {
 	return float64(nano) / float64(time.Millisecond)
 }
 
-func (t *compactionTask) merge(mergeItr iterator, delta map[primaryKey]Timestamp, schema *schemapb.CollectionSchema, currentTs Timestamp) ([]*InsertData, int64, error) {
+func (t *compactionTask) merge(mergeItr iterator, delta map[interface{}]Timestamp, schema *schemapb.CollectionSchema, currentTs Timestamp) ([]*InsertData, int64, error) {
 	mergeStart := time.Now()
 
 	var (
@@ -207,12 +207,10 @@ func (t *compactionTask) merge(mergeItr iterator, delta map[primaryKey]Timestamp
 	)
 
 	isDeletedValue := func(v *storage.Value) bool {
-		for pk, ts := range delta {
-			if pk.EQ(v.PK) && uint64(v.Timestamp) <= ts {
-				return true
-			}
+		ts, ok := delta[v.PK.GetValue()]
+		if ok && uint64(v.Timestamp) <= ts {
+			return true
 		}
-
 		return false
 	}
 

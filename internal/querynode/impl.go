@@ -1049,12 +1049,32 @@ func (node *QueryNode) SyncReplicaSegments(ctx context.Context, req *querypb.Syn
 	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
 }
 
+//ShowConfigurations returns the configurations of queryNode matching req.Pattern
+func (node *QueryNode) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+	if !node.isHealthy() {
+		log.Warn("QueryNode.ShowConfigurations failed",
+			zap.Int64("nodeId", Params.QueryNodeCfg.GetNodeID()),
+			zap.String("req", req.Pattern),
+			zap.Error(errQueryNodeIsUnhealthy(Params.QueryNodeCfg.GetNodeID())))
+
+		return &internalpb.ShowConfigurationsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    msgQueryNodeIsUnhealthy(Params.QueryNodeCfg.GetNodeID()),
+			},
+			Configuations: nil,
+		}, nil
+	}
+
+	return getComponentConfigurations(ctx, req), nil
+}
+
 // GetMetrics return system infos of the query node, such as total memory, memory usage, cpu usage ...
 // TODO(dragondriver): cache the Metrics and set a retention to the cache
 func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	if !node.isHealthy() {
 		log.Warn("QueryNode.GetMetrics failed",
-			zap.Int64("node_id", Params.QueryNodeCfg.GetNodeID()),
+			zap.Int64("nodeId", Params.QueryNodeCfg.GetNodeID()),
 			zap.String("req", req.Request),
 			zap.Error(errQueryNodeIsUnhealthy(Params.QueryNodeCfg.GetNodeID())))
 
@@ -1070,7 +1090,7 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 	metricType, err := metricsinfo.ParseMetricType(req.Request)
 	if err != nil {
 		log.Warn("QueryNode.GetMetrics failed to parse metric type",
-			zap.Int64("node_id", Params.QueryNodeCfg.GetNodeID()),
+			zap.Int64("nodeId", Params.QueryNodeCfg.GetNodeID()),
 			zap.String("req", req.Request),
 			zap.Error(err))
 
@@ -1087,9 +1107,9 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 		metrics, err := getSystemInfoMetrics(ctx, req, node)
 		if err != nil {
 			log.Warn("QueryNode.GetMetrics failed",
-				zap.Int64("node_id", Params.QueryNodeCfg.GetNodeID()),
+				zap.Int64("nodeId", Params.QueryNodeCfg.GetNodeID()),
 				zap.String("req", req.Request),
-				zap.String("metric_type", metricType),
+				zap.String("metricType", metricType),
 				zap.Error(err))
 		}
 
@@ -1097,9 +1117,9 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 	}
 
 	log.Debug("QueryNode.GetMetrics failed, request metric type is not implemented yet",
-		zap.Int64("node_id", Params.QueryNodeCfg.GetNodeID()),
+		zap.Int64("nodeId", Params.QueryNodeCfg.GetNodeID()),
 		zap.String("req", req.Request),
-		zap.String("metric_type", metricType))
+		zap.String("metricType", metricType))
 
 	return &milvuspb.GetMetricsResponse{
 		Status: &commonpb.Status{

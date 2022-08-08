@@ -63,10 +63,12 @@ jobs:
           sed -i "s#^IMAGE_TAG=.*#IMAGE_TAG=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}#g" ./tests/docker/.env
           sed -i "s#^LATEST_IMAGE_TAG=.*#LATEST_IMAGE_TAG=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}#g" ./tests/docker/.env
           sed -i "s#pytest:.*#pytest:${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}#g" ./build/ci/jenkins/pod/rte.yaml
+          sed -i "s#pytest:.*#pytest:${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}#g" ./ci/jenkins/pod/rte.yaml
           git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add ./tests/docker/.env
           git add ./build/ci/jenkins/pod/rte.yaml
+          git add ./ci/jenkins/pod/rte.yaml
           git commit -m "Update Pytest image changes"
       - name: Create Pull Request
         id: cpr

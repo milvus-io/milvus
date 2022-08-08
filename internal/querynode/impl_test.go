@@ -320,6 +320,47 @@ func TestImpl_isHealthy(t *testing.T) {
 	assert.True(t, isHealthy)
 }
 
+func TestImpl_ShowConfigurations(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	assert.NoError(t, err)
+	defer etcdCli.Close()
+
+	t.Run("test ShowConfigurations", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+		node.session = sessionutil.NewSession(node.queryNodeLoopCtx, Params.EtcdCfg.MetaRootPath, etcdCli)
+
+		pattern := "Cache"
+		req := &internalpb.ShowConfigurationsRequest{
+			Base:    genCommonMsgBase(commonpb.MsgType_WatchQueryChannels),
+			Pattern: pattern,
+		}
+
+		reqs, err := node.ShowConfigurations(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, reqs.Status.ErrorCode, commonpb.ErrorCode_Success)
+	})
+
+	t.Run("test ShowConfigurations node failed", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+		node.session = sessionutil.NewSession(node.queryNodeLoopCtx, Params.EtcdCfg.MetaRootPath, etcdCli)
+		node.UpdateStateCode(internalpb.StateCode_Abnormal)
+
+		pattern := "Cache"
+		req := &internalpb.ShowConfigurationsRequest{
+			Base:    genCommonMsgBase(commonpb.MsgType_WatchQueryChannels),
+			Pattern: pattern,
+		}
+
+		reqs, err := node.ShowConfigurations(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, reqs.Status.ErrorCode, commonpb.ErrorCode_UnexpectedError)
+	})
+}
+
 func TestImpl_GetMetrics(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

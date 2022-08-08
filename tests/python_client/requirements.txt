@@ -8,7 +8,7 @@ pytest-repeat==0.8.0
 allure-pytest==2.7.0
 pytest-print==0.2.1
 pytest-level==0.1.1
-pytest-xdist==2.2.1
+pytest-xdist==2.5.0
 pymilvus==2.1.0.dev103
 pytest-rerunfailures==9.1.1
 git+https://github.com/Projectplace/pytest-tags
@@ -19,7 +19,7 @@ pytest-html==3.1.1
 delayed-assert
 kubernetes==17.17.0
 PyYAML==5.4.1
-pytest-sugar==0.9.4
+pytest-sugar==0.9.5
 pytest-reportportal==5.0.10
 pytest-parallel
 pytest-random-order
@@ -33,3 +33,6 @@ protobuf==3.17.1
 
 # for bulk load test
 minio==7.1.5
+
+# for benchmark
+h5py==3.1.0

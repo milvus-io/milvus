@@ -1137,7 +1137,12 @@ func (p *dataNodeConfig) initFlowGraphMaxParallelism() {
 }
 
 func (p *dataNodeConfig) initFlushInsertBufferSize() {
-	p.FlushInsertBufferSize = p.Base.ParseInt64("_DATANODE_INSERTBUFSIZE")
+	bufferSize := p.Base.LoadWithDefault2([]string{"DATA_NODE_IBUFSIZE", "datanode.flush.insertBufSize"}, "0")
+	bs, err := strconv.ParseInt(bufferSize, 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	p.FlushInsertBufferSize = bs
 }
 
 func (p *dataNodeConfig) initInsertBinlogRootPath() {

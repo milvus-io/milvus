@@ -208,7 +208,7 @@ func (ib *indexBuilder) process(buildID UniqueID) {
 			ClusterID:        0,
 			StorageAccessKey: "",
 			BucketName:       "",
-			StoragePrefix:    "",
+			IndexFilePrefix:  "",
 			BuildID:          buildID,
 			DataPaths:        meta.BinLogs,
 			IndexVersion:     meta.IndexVersion + 1,

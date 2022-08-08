@@ -217,8 +217,12 @@ func (s *Server) GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRe
 	return s.indexcoord.GetIndexState(ctx, req)
 }
 
-// GetIndexFilePaths gets the index file paths from IndexCoord.
-func (s *Server) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error) {
+func (s *Server) GetSegmentIndexState(ctx context.Context, req *indexpb.GetSegmentIndexStateRequest) (*indexpb.GetSegmentIndexStateResponse, error) {
+	return s.indexcoord.GetSegmentIndexState(ctx, req)
+}
+
+// GetIndexInfos gets the index file paths from IndexCoord.
+func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoRequest) (*indexpb.GetIndexInfoResponse, error) {
 	return s.indexcoord.GetIndexFilePaths(ctx, req)
 }
 
@@ -230,6 +234,10 @@ func (s *Server) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRe
 // DropIndex sends the drop index request to IndexCoord.
 func (s *Server) DropIndex(ctx context.Context, request *indexpb.DropIndexRequest) (*commonpb.Status, error) {
 	return s.indexcoord.DropIndex(ctx, request)
+}
+
+func (s *Server) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetIndexBuildProgressRequest) (*indexpb.GetIndexBuildProgressResponse, error) {
+	return s.indexcoord.GetIndexBuildProgress(ctx, req)
 }
 
 // GetMetrics gets the metrics info of IndexCoord.

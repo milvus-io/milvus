@@ -29,11 +29,8 @@ func TestGetServerIDConcurrently(t *testing.T) {
 	ctx := context.Background()
 	Params.Init()
 
-	endpoints, err := Params.Load("_EtcdEndpoints")
+	endpoints := Params.LoadWithDefault("etcd.endpoints", paramtable.DefaultEtcdEndpoints)
 	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
-	if err != nil {
-		panic(err)
-	}
 
 	etcdEndpoints := strings.Split(endpoints, ",")
 	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
@@ -76,10 +73,7 @@ func TestInit(t *testing.T) {
 	ctx := context.Background()
 	Params.Init()
 
-	endpoints, err := Params.Load("_EtcdEndpoints")
-	if err != nil {
-		panic(err)
-	}
+	endpoints := Params.LoadWithDefault("etcd.endpoints", paramtable.DefaultEtcdEndpoints)
 	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
 
 	etcdEndpoints := strings.Split(endpoints, ",")
@@ -106,11 +100,7 @@ func TestUpdateSessions(t *testing.T) {
 	ctx := context.Background()
 	Params.Init()
 
-	endpoints, err := Params.Load("_EtcdEndpoints")
-	if err != nil {
-		panic(err)
-	}
-
+	endpoints := Params.LoadWithDefault("etcd.endpoints", paramtable.DefaultEtcdEndpoints)
 	etcdEndpoints := strings.Split(endpoints, ",")
 	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
 	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
@@ -224,9 +214,7 @@ func TestWatcherHandleWatchResp(t *testing.T) {
 	ctx := context.Background()
 	Params.Init()
 
-	endpoints, err := Params.Load("_EtcdEndpoints")
-	require.NoError(t, err)
-
+	endpoints := Params.LoadWithDefault("etcd.endpoints", paramtable.DefaultEtcdEndpoints)
 	etcdEndpoints := strings.Split(endpoints, ",")
 	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
 
@@ -375,10 +363,7 @@ func TestSessionRevoke(t *testing.T) {
 	ctx := context.Background()
 	Params.Init()
 
-	endpoints, err := Params.Load("_EtcdEndpoints")
-	if err != nil {
-		panic(err)
-	}
+	endpoints := Params.LoadWithDefault("etcd.endpoints", paramtable.DefaultEtcdEndpoints)
 	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
 
 	etcdEndpoints := strings.Split(endpoints, ",")

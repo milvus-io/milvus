@@ -108,8 +108,8 @@ func (fsw *flushedSegmentWatcher) constructTask(segmentInfo *datapb.SegmentInfo)
 		}
 		hasIndex, _ := fsw.meta.CheckBuiltIndex(segmentInfo.ID, index.IndexID)
 		if hasIndex {
-			state := fsw.meta.GetIndexState(segmentInfo.ID, index.IndexID)
-			switch state {
+			state := fsw.meta.GetSegmentIndexState(segmentInfo.ID, index.IndexID)
+			switch state.state {
 			case commonpb.IndexState_IndexStateNone:
 				fsw.flushedSegments[segmentInfo.ID][index.IndexID].state = indexTaskInit
 

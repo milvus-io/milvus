@@ -15,7 +15,7 @@ service IndexCoord {
   rpc CreateIndex(CreateIndexRequest) returns (common.Status){}
   rpc GetIndexState(GetIndexStateRequest) returns (GetIndexStateResponse) {}
   rpc GetSegmentIndexState(GetSegmentIndexStateRequest) returns (GetSegmentIndexStateResponse) {}
-  rpc GetIndexInfos(GetIndexFilePathsRequest) returns (GetIndexFilePathsResponse){}
+  rpc GetIndexInfos(GetIndexInfoRequest) returns (GetIndexInfoResponse){}
   rpc DropIndex(DropIndexRequest) returns (common.Status) {}
   rpc DescribeIndex(DescribeIndexRequest) returns (DescribeIndexResponse) {}
   rpc GetIndexBuildProgress(GetIndexBuildProgressRequest) returns (GetIndexBuildProgressResponse) {}
@@ -24,20 +24,14 @@ service IndexCoord {
   rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
 }
 
-//service IndexNode {
-//  rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
-//  rpc BuildIndex(BuildIndexRequest) returns (common.Status){}
-//  rpc GetTaskSlots(GetTaskSlotsRequest) returns (GetTaskSlotsResponse){}
-//
-//  // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
-//  rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
-//}
-
 service IndexNode {
-    rpc CreateJob(CreateJobRequest) returns (common.Status) {}
-    rpc QueryJobs(QueryJobsRequest) returns (QueryJobsResponse) {}
-    rpc DropJobs(DropJobsRequest) returns (common.Status) {}
-    rpc GetJobNum(GetJobNumRequest) returns (GetJobNumResponse) {}
+  rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
+  rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
+  rpc CreateJob(CreateJobRequest) returns (common.Status) {}
+  rpc QueryJobs(QueryJobsRequest) returns (QueryJobsResponse) {}
+  rpc DropJobs(DropJobsRequest) returns (common.Status) {}
+  rpc GetJobNum(GetJobNumRequest) returns (GetJobNumResponse) {}
+  rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
 }
 
 message IndexInfo {
@@ -124,7 +118,7 @@ message CreateIndexRequest {
   repeated common.KeyValuePair index_params = 5;
 }
 
-message GetIndexFilePathsRequest {
+message GetIndexInfoRequest {
   int64 collectionID = 1;
   repeated int64 segmentIDs = 2;
   string index_name = 3;
@@ -138,7 +132,7 @@ message IndexFilePathInfo {
   uint64 serialized_size = 5;
 }
 
-message GetIndexFilePathsResponse {
+message GetIndexInfoResponse {
   common.Status status = 1;
   bool enable_index = 2;
   repeated IndexFilePathInfo file_paths = 3;
@@ -195,14 +189,16 @@ message GetTaskSlotsResponse {
 
 message CreateJobRequest {
   int64 clusterID = 1;
-  string storage_access_key = 2;
-  string bucket_name = 3;
-  string storage_prefix = 4;
-  int64 buildID = 5;
-  repeated string data_paths = 6;
-  int64 index_version = 7;
-  repeated common.KeyValuePair index_params = 8;
-  repeated common.KeyValuePair type_params = 9;
+  string index_file_prefix = 2;
+  int64 buildID = 3;
+  repeated string data_paths = 4;
+  int64 index_version = 5;
+  int64 indexID = 6;
+  string index_name = 7;
+  string bucket_name = 8;
+  string storage_access_key = 9;
+  repeated common.KeyValuePair index_params = 10;
+  repeated common.KeyValuePair type_params = 11;
 }
 
 message QueryJobsRequest {
@@ -210,7 +206,7 @@ message QueryJobsRequest {
   repeated int64 buildIDs = 2;
 }
 
-message IndexStateInfo {
+message IndexTaskInfo {
   int64 buildID = 1;
   common.IndexState state = 2;
   repeated string index_files = 3;
@@ -219,16 +215,12 @@ message IndexStateInfo {
 message QueryJobsResponse {
   common.Status status = 1;
   int64 clusterID = 2;
-  repeated IndexStateInfo index_infos = 3;
+  repeated IndexTaskInfo index_infos = 3;
 }
 
 message DropJobsRequest {
   int64 clusterID = 1;
   repeated int64 buildIDs = 2;
-}
-
-message GetJobNumRequest {
-
 }
 
 message JobInfo {
@@ -238,6 +230,9 @@ message JobInfo {
   int64 end_time = 4;
   repeated common.KeyValuePair index_params = 5;
   int64 podID = 6;
+}
+
+message GetJobNumRequest {
 }
 
 message GetJobNumResponse {

@@ -315,10 +315,18 @@ type IndexNode interface {
 	//// GetMetrics gets the metrics about IndexNode.
 	//GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 
-	CreateJob(ctx context.Context, req *indexpb.CreateJobRequest) (*commonpb.Status, error)
-	QueryJobs(ctx context.Context, req *indexpb.QueryJobsRequest) (*indexpb.QueryJobsResponse, error)
-	DropJobs(ctx context.Context, req *indexpb.DropJobsRequest) (*commonpb.Status, error)
-	GetJobNum(ctx context.Context, req *indexpb.GetJobNumRequest) (*indexpb.GetJobNumResponse, error)
+	// CreateJob receive index building job from indexcoord. Notes that index building is asynchronous, task is recorded
+	// in indexnode and then request is finished.
+	CreateJob(context.Context, *indexpb.CreateJobRequest) (*commonpb.Status, error)
+	// QueryJobs returns states of index building jobs specified by BuildIDs. There are four states of index building task
+	// Unissued, InProgress, Finished, Failed
+	QueryJobs(context.Context, *indexpb.QueryJobsRequest) (*indexpb.QueryJobsResponse, error)
+	// DropJobs cancel index building jobs specified by BuildIDs. Notes that dropping task may have finished.
+	DropJobs(context.Context, *indexpb.DropJobsRequest) (*commonpb.Status, error)
+	// GetJobNum returns metrics of indexnode, including available job queue info, available task slots and finished job infos.
+	GetJobNum(context.Context, *indexpb.GetJobNumRequest) (*indexpb.GetJobNumResponse, error)
+	// GetMetrics gets the metrics about IndexNode.
+	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 }
 
 // IndexNodeComponent is used by grpc server of IndexNode
@@ -350,8 +358,8 @@ type IndexCoord interface {
 	// GetSegmentIndexState gets the index state of the segments in the request from RootCoord.
 	GetSegmentIndexState(ctx context.Context, req *indexpb.GetSegmentIndexStateRequest) (*indexpb.GetSegmentIndexStateResponse, error)
 
-	// GetIndexFilePaths gets the index files of the IndexBuildIDs in the request from RootCoordinator.
-	GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error)
+	// GetIndexInfos gets the index files of the IndexBuildIDs in the request from RootCoordinator.
+	GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoRequest) (*indexpb.GetIndexInfoResponse, error)
 
 	// DescribeIndex describe the index info of the collection.
 	DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error)
@@ -1235,6 +1243,7 @@ type QueryNode interface {
 	Query(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error)
 	SyncReplicaSegments(ctx context.Context, req *querypb.SyncReplicaSegmentsRequest) (*commonpb.Status, error)
 
+	ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error)
 	// GetMetrics gets the metrics about QueryNode.
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 }

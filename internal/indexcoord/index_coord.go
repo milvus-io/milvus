@@ -606,13 +606,13 @@ func (i *IndexCoord) DropIndex(ctx context.Context, req *indexpb.DropIndexReques
 	return ret, nil
 }
 
-// GetIndexFilePaths gets the index file paths from IndexCoord.
-func (i *IndexCoord) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error) {
+// GetIndexInfos gets the index file paths from IndexCoord.
+func (i *IndexCoord) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoRequest) (*indexpb.GetIndexInfoResponse, error) {
 	log.Debug("IndexCoord GetIndexFilePaths", zap.String("indexName", req.IndexName), zap.Int64s("segmentIDs", req.SegmentIDs))
 	if !i.isHealthy() {
 		errMsg := "IndexCoord is not healthy"
 		log.Warn(errMsg)
-		return &indexpb.GetIndexFilePathsResponse{
+		return &indexpb.GetIndexInfoResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    errMsg,
@@ -625,7 +625,7 @@ func (i *IndexCoord) GetIndexFilePaths(ctx context.Context, req *indexpb.GetInde
 	if len(indexID2CreateTs) == 0 {
 		log.Warn("there is no index", zap.Int64("collectionID", req.CollectionID),
 			zap.String("indexName", req.IndexName))
-		return &indexpb.GetIndexFilePathsResponse{
+		return &indexpb.GetIndexInfoResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_Success,
 			},
@@ -639,7 +639,7 @@ func (i *IndexCoord) GetIndexFilePaths(ctx context.Context, req *indexpb.GetInde
 			indexPathInfo, err := i.metaTable.GetIndexFilePathInfo(segID, indexID)
 			if err != nil {
 				log.Error("IndexCoord GetIndexFilePaths fail", zap.Int64("segmentID", segID), zap.Error(err))
-				return &indexpb.GetIndexFilePathsResponse{
+				return &indexpb.GetIndexInfoResponse{
 					Status: &commonpb.Status{
 						ErrorCode: commonpb.ErrorCode_UnexpectedError,
 						Reason:    err.Error(),
@@ -651,7 +651,7 @@ func (i *IndexCoord) GetIndexFilePaths(ctx context.Context, req *indexpb.GetInde
 		}
 	}
 
-	ret := &indexpb.GetIndexFilePathsResponse{
+	ret := &indexpb.GetIndexInfoResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},

@@ -24,8 +24,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
-
 	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -35,7 +33,6 @@ import (
 	pnc "github.com/milvus-io/milvus/internal/distributed/proxy/client"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
@@ -383,23 +380,23 @@ func (s *Server) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitions
 }
 
 // CreateIndex index builder service
-func (s *Server) CreateIndex(ctx context.Context, in *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
-	return s.rootCoord.CreateIndex(ctx, in)
-}
-
-// DropIndex drops the index.
-func (s *Server) DropIndex(ctx context.Context, in *milvuspb.DropIndexRequest) (*commonpb.Status, error) {
-	return s.rootCoord.DropIndex(ctx, in)
-}
-
-// DescribeIndex get the index information for the specified index name.
-func (s *Server) DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
-	return s.rootCoord.DescribeIndex(ctx, in)
-}
-
-func (s *Server) GetIndexState(ctx context.Context, in *milvuspb.GetIndexStateRequest) (*indexpb.GetIndexStatesResponse, error) {
-	return s.rootCoord.GetIndexState(ctx, in)
-}
+//func (s *Server) CreateIndex(ctx context.Context, in *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
+//	return s.rootCoord.CreateIndex(ctx, in)
+//}
+//
+//// DropIndex drops the index.
+//func (s *Server) DropIndex(ctx context.Context, in *milvuspb.DropIndexRequest) (*commonpb.Status, error) {
+//	return s.rootCoord.DropIndex(ctx, in)
+//}
+//
+//// DescribeIndex get the index information for the specified index name.
+//func (s *Server) DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
+//	return s.rootCoord.DescribeIndex(ctx, in)
+//}
+//
+//func (s *Server) GetIndexState(ctx context.Context, in *milvuspb.GetIndexStateRequest) (*indexpb.GetIndexStatesResponse, error) {
+//	return s.rootCoord.GetIndexState(ctx, in)
+//}
 
 // AllocTimestamp global timestamp allocator
 func (s *Server) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error) {
@@ -440,10 +437,10 @@ func (s *Server) InvalidateCollectionMetaCache(ctx context.Context, in *proxypb.
 	return s.rootCoord.InvalidateCollectionMetaCache(ctx, in)
 }
 
-// SegmentFlushCompleted notifies RootCoord that specified segment has been flushed.
-func (s *Server) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlushCompletedMsg) (*commonpb.Status, error) {
-	return s.rootCoord.SegmentFlushCompleted(ctx, in)
-}
+//// SegmentFlushCompleted notifies RootCoord that specified segment has been flushed.
+//func (s *Server) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlushCompletedMsg) (*commonpb.Status, error) {
+//	return s.rootCoord.SegmentFlushCompleted(ctx, in)
+//}
 
 // GetMetrics gets the metrics of RootCoord.
 func (s *Server) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {

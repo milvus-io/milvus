@@ -278,6 +278,21 @@ func (c *Client) SyncReplicaSegments(ctx context.Context, req *querypb.SyncRepli
 	return ret.(*commonpb.Status), err
 }
 
+// ShowConfigurations gets specified configurations para of QueryNode
+func (c *Client) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.(querypb.QueryNodeClient).ShowConfigurations(ctx, req)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+
+	return ret.(*internalpb.ShowConfigurationsResponse), err
+}
+
 // GetMetrics gets the metrics information of QueryNode.
 func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {

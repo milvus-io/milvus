@@ -312,6 +312,11 @@ func (s *Server) SyncReplicaSegments(ctx context.Context, req *querypb.SyncRepli
 	return s.querynode.SyncReplicaSegments(ctx, req)
 }
 
+// ShowConfigurations gets specified configurations para of QueryNode
+func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+	return s.querynode.ShowConfigurations(ctx, req)
+}
+
 // GetMetrics gets the metrics information of QueryNode.
 func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return s.querynode.GetMetrics(ctx, req)

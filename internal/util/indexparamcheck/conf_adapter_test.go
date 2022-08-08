@@ -138,6 +138,9 @@ func TestIVFPQConfAdapter_CheckTrain(t *testing.T) {
 	invalidParamsM[IndexMode] = GPUMode
 	invalidParamsM[DIM] = strconv.Itoa(65536)
 
+	invalidParamsMzero := copyParams(validParams)
+	invalidParamsMzero[IVFM] = "0"
+
 	cases := []struct {
 		params map[string]string
 		want   bool
@@ -152,6 +155,7 @@ func TestIVFPQConfAdapter_CheckTrain(t *testing.T) {
 		{invalidParamsWithoutIVF, false},
 		{invalidParamsIVF, false},
 		{invalidParamsM, false},
+		{invalidParamsMzero, false},
 	}
 
 	adapter := newIVFPQConfAdapter()

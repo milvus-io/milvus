@@ -158,22 +158,8 @@ func (c *Client) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 	return ret.(*commonpb.Status), err
 }
 
-// DropIndex sends the drop index request to IndexCoord.
-func (c *Client) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
-		if !funcutil.CheckCtxValid(ctx) {
-			return nil, ctx.Err()
-		}
-		return client.(indexpb.IndexCoordClient).DropIndex(ctx, req)
-	})
-	if err != nil || ret == nil {
-		return nil, err
-	}
-	return ret.(*commonpb.Status), err
-}
-
-// GetIndexStates gets the index states from IndexCoord.
-func (c *Client) GetIndexStates(ctx context.Context, req *indexpb.GetIndexStateRequest) (*indexpb.GetIndexStateResponse, error) {
+// GetIndexState gets the index states from IndexCoord.
+func (c *Client) GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRequest) (*indexpb.GetIndexStateResponse, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -186,18 +172,32 @@ func (c *Client) GetIndexStates(ctx context.Context, req *indexpb.GetIndexStateR
 	return ret.(*indexpb.GetIndexStateResponse), err
 }
 
-// GetIndexFilePaths gets the index file paths from IndexCoord.
-func (c *Client) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error) {
+// GetSegmentIndexState gets the index states from IndexCoord.
+func (c *Client) GetSegmentIndexState(ctx context.Context, req *indexpb.GetSegmentIndexStateRequest) (*indexpb.GetSegmentIndexStateResponse, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(indexpb.IndexCoordClient).GetIndexFilePaths(ctx, req)
+		return client.(indexpb.IndexCoordClient).GetSegmentIndexState(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
 	}
-	return ret.(*indexpb.GetIndexFilePathsResponse), err
+	return ret.(*indexpb.GetSegmentIndexStateResponse), err
+}
+
+// GetIndexInfos gets the index file paths from IndexCoord.
+func (c *Client) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoRequest) (*indexpb.GetIndexInfoResponse, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.(indexpb.IndexCoordClient).GetIndexInfos(ctx, req)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+	return ret.(*indexpb.GetIndexInfoResponse), err
 }
 
 // DescribeIndex describe the index info of the collection.
@@ -212,6 +212,34 @@ func (c *Client) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRe
 		return nil, err
 	}
 	return ret.(*indexpb.DescribeIndexResponse), err
+}
+
+// GetIndexBuildProgress describe the progress of the index.
+func (c *Client) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetIndexBuildProgressRequest) (*indexpb.GetIndexBuildProgressResponse, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.(indexpb.IndexCoordClient).GetIndexBuildProgress(ctx, req)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+	return ret.(*indexpb.GetIndexBuildProgressResponse), err
+}
+
+// DropIndex sends the drop index request to IndexCoord.
+func (c *Client) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.(indexpb.IndexCoordClient).DropIndex(ctx, req)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+	return ret.(*commonpb.Status), err
 }
 
 // GetMetrics gets the metrics info of IndexCoord.
