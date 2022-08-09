@@ -11,12 +11,12 @@ on:
       old_image_tag:
         description: The old image tag to use for the deploy test
         required: true
-        default: 'latest'
+        default: 'v2.1.0'
 
       previous_release_version:
         description: The previous release version to use for the deploy test
         required: true
-        default: 'v2.0.2'
+        default: 'v2.1.0'
 
       new_image_repo:
         description: The image repository name to use for the deploy test
@@ -80,6 +80,12 @@ jobs:
           pip install -r requirements.txt --trusted-host https://test.pypi.org
           sudo systemctl restart docker
           sleep 30s
+      - name: Download dataset
+        shell: bash
+        working-directory: tests/python_client/assets/ann_hdf5
+        run: |
+          echo "Downloading dataset..."
+          bash download.sh
 
       - name: First Milvus deployment
         timeout-minutes: 15
@@ -105,12 +111,14 @@ jobs:
         shell: bash
         working-directory: tests/python_client/deploy
         run: |
+          python scripts/first_recall_test.py
           if [ ${{ matrix.task }} == "reinstall" ]; then
             python3 scripts/action_before_reinstall.py
           fi
           if [ ${{ matrix.task }} == "upgrade" ]; then
             python3 scripts/action_before_upgrade.py
           fi
+          
       - name: Milvus Idle Time
         timeout-minutes: 5
         shell: bash
@@ -149,6 +157,7 @@ jobs:
         shell: bash
         working-directory: tests/python_client/deploy
         run: |
+          python scripts/second_recall_test.py
           if [ ${{ matrix.task }} == "reinstall" ]; then
             python3 scripts/action_after_reinstall.py
           fi
@@ -185,6 +194,7 @@ jobs:
         shell: bash
         working-directory: tests/python_client/deploy
         run: |
+          python scripts/second_recall_test.py
           if [ ${{ matrix.task }} == "reinstall" ]; then
             python3 scripts/action_after_reinstall.py
           fi

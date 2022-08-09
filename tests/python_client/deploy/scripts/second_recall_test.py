@@ -16,7 +16,7 @@ def read_benchmark_hdf5(file_path):
 
 
 dim = 128
-TIMEOUT = 100
+TIMEOUT = 200
 
 
 def search_test(host="127.0.0.1"):
