@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"runtime"
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -29,6 +30,7 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -36,11 +38,15 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
+	"github.com/milvus-io/milvus/internal/util/concurrency"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
 //-------------------------------------------------------------------------------------- constructor and destructor
 func TestSegment_newSegment(t *testing.T) {
+	pool, err := concurrency.NewPool(runtime.GOMAXPROCS(0))
+	require.NoError(t, err)
+
 	collectionID := UniqueID(0)
 	schema := genTestCollectionSchema()
 	collectionMeta := genCollectionMeta(collectionID, schema)
@@ -49,7 +55,7 @@ func TestSegment_newSegment(t *testing.T) {
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing)
+	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, pool)
 	assert.Nil(t, err)
 	assert.Equal(t, segmentID, segment.segmentID)
 	deleteSegment(segment)
@@ -59,12 +65,15 @@ func TestSegment_newSegment(t *testing.T) {
 		_, err = newSegment(collection,
 			defaultSegmentID,
 			defaultPartitionID,
-			collectionID, "", 100)
+			collectionID, "", 100, pool)
 		assert.Error(t, err)
 	})
 }
 
 func TestSegment_deleteSegment(t *testing.T) {
+	pool, err := concurrency.NewPool(runtime.GOMAXPROCS(0))
+	require.NoError(t, err)
+
 	collectionID := UniqueID(0)
 	schema := genTestCollectionSchema()
 	collectionMeta := genCollectionMeta(collectionID, schema)
@@ -73,7 +82,7 @@ func TestSegment_deleteSegment(t *testing.T) {
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing)
+	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, pool)
 	assert.Equal(t, segmentID, segment.segmentID)
 	assert.Nil(t, err)
 
@@ -90,6 +99,9 @@ func TestSegment_deleteSegment(t *testing.T) {
 
 //-------------------------------------------------------------------------------------- stats functions
 func TestSegment_getRowCount(t *testing.T) {
+	pool, err := concurrency.NewPool(runtime.GOMAXPROCS(0))
+	require.NoError(t, err)
+
 	collectionID := UniqueID(0)
 	schema := genTestCollectionSchema()
 
@@ -97,7 +109,7 @@ func TestSegment_getRowCount(t *testing.T) {
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing)
+	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, pool)
 	assert.Equal(t, segmentID, segment.segmentID)
 	assert.Nil(t, err)
 
@@ -132,6 +144,9 @@ func TestSegment_getRowCount(t *testing.T) {
 }
 
 func TestSegment_retrieve(t *testing.T) {
+	pool, err := concurrency.NewPool(runtime.GOMAXPROCS(0))
+	require.NoError(t, err)
+
 	collectionID := UniqueID(0)
 	schema := genTestCollectionSchema()
 
@@ -139,7 +154,7 @@ func TestSegment_retrieve(t *testing.T) {
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing)
+	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, pool)
 	assert.Equal(t, segmentID, segment.segmentID)
 	assert.Nil(t, err)
 
@@ -211,6 +226,9 @@ func TestSegment_retrieve(t *testing.T) {
 }
 
 func TestSegment_getDeletedCount(t *testing.T) {
+	pool, err := concurrency.NewPool(runtime.GOMAXPROCS(0))
+	require.NoError(t, err)
+
 	collectionID := UniqueID(0)
 	schema := genTestCollectionSchema()
 
@@ -218,7 +236,7 @@ func TestSegment_getDeletedCount(t *testing.T) {
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing)
+	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, pool)
 	assert.Equal(t, segmentID, segment.segmentID)
 	assert.Nil(t, err)
 
@@ -260,6 +278,9 @@ func TestSegment_getDeletedCount(t *testing.T) {
 }
 
 func TestSegment_getMemSize(t *testing.T) {
+	pool, err := concurrency.NewPool(runtime.GOMAXPROCS(0))
+	require.NoError(t, err)
+
 	collectionID := UniqueID(0)
 	schema := genTestCollectionSchema()
 
@@ -267,7 +288,7 @@ func TestSegment_getMemSize(t *testing.T) {
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing)
+	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, pool)
 	assert.Equal(t, segmentID, segment.segmentID)
 	assert.Nil(t, err)
 
@@ -296,13 +317,16 @@ func TestSegment_getMemSize(t *testing.T) {
 
 //-------------------------------------------------------------------------------------- dm & search functions
 func TestSegment_segmentInsert(t *testing.T) {
+	pool, err := concurrency.NewPool(runtime.GOMAXPROCS(0))
+	require.NoError(t, err)
+
 	collectionID := UniqueID(0)
 	schema := genTestCollectionSchema()
 
 	collection := newCollection(collectionID, schema)
 	assert.Equal(t, collection.ID(), collectionID)
 	segmentID := UniqueID(0)
-	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing)
+	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, pool)
 	assert.Equal(t, segmentID, segment.segmentID)
 	assert.Nil(t, err)
 
@@ -340,13 +364,16 @@ func TestSegment_segmentInsert(t *testing.T) {
 }
 
 func TestSegment_segmentDelete(t *testing.T) {
+	pool, err := concurrency.NewPool(runtime.GOMAXPROCS(0))
+	require.NoError(t, err)
+
 	collectionID := UniqueID(0)
 	schema := genTestCollectionSchema()
 	collection := newCollection(collectionID, schema)
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing)
+	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, pool)
 	assert.Equal(t, segmentID, segment.segmentID)
 	assert.Nil(t, err)
 
@@ -436,13 +463,16 @@ func TestSegment_segmentSearch(t *testing.T) {
 
 //-------------------------------------------------------------------------------------- preDm functions
 func TestSegment_segmentPreInsert(t *testing.T) {
+	pool, err := concurrency.NewPool(runtime.GOMAXPROCS(0))
+	require.NoError(t, err)
+
 	collectionID := UniqueID(0)
 	schema := genTestCollectionSchema()
 	collection := newCollection(collectionID, schema)
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing)
+	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, pool)
 	assert.Equal(t, segmentID, segment.segmentID)
 	assert.Nil(t, err)
 
@@ -455,13 +485,16 @@ func TestSegment_segmentPreInsert(t *testing.T) {
 }
 
 func TestSegment_segmentPreDelete(t *testing.T) {
+	pool, err := concurrency.NewPool(runtime.GOMAXPROCS(0))
+	require.NoError(t, err)
+
 	collectionID := UniqueID(0)
 	schema := genTestCollectionSchema()
 	collection := newCollection(collectionID, schema)
 	assert.Equal(t, collection.ID(), collectionID)
 
 	segmentID := UniqueID(0)
-	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing)
+	segment, err := newSegment(collection, segmentID, defaultPartitionID, collectionID, "", segmentTypeGrowing, pool)
 	assert.Equal(t, segmentID, segment.segmentID)
 	assert.Nil(t, err)
 
@@ -487,6 +520,9 @@ func TestSegment_segmentPreDelete(t *testing.T) {
 }
 
 func TestSegment_segmentLoadDeletedRecord(t *testing.T) {
+	pool, err := concurrency.NewPool(runtime.GOMAXPROCS(0))
+	require.NoError(t, err)
+
 	fieldParam := constFieldParam{
 		id:       100,
 		dataType: schemapb.DataType_Int64,
@@ -505,7 +541,8 @@ func TestSegment_segmentLoadDeletedRecord(t *testing.T) {
 		defaultPartitionID,
 		defaultCollectionID,
 		defaultDMLChannel,
-		segmentTypeSealed)
+		segmentTypeSealed,
+		pool)
 	assert.Nil(t, err)
 	ids := []int64{1, 2, 3}
 	pks := make([]primaryKey, 0)
@@ -574,6 +611,9 @@ func TestSegment_indexInfo(t *testing.T) {
 }
 
 func TestSegment_BasicMetrics(t *testing.T) {
+	pool, err := concurrency.NewPool(runtime.GOMAXPROCS(0))
+	require.NoError(t, err)
+
 	schema := genTestCollectionSchema()
 	collection := newCollection(defaultCollectionID, schema)
 	segment, err := newSegment(collection,
@@ -581,7 +621,8 @@ func TestSegment_BasicMetrics(t *testing.T) {
 		defaultPartitionID,
 		defaultCollectionID,
 		defaultDMLChannel,
-		segmentTypeSealed)
+		segmentTypeSealed,
+		pool)
 	assert.Nil(t, err)
 
 	t.Run("test id binlog row size", func(t *testing.T) {
@@ -620,6 +661,8 @@ func TestSegment_BasicMetrics(t *testing.T) {
 func TestSegment_fillIndexedFieldsData(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	pool, err := concurrency.NewPool(runtime.GOMAXPROCS(0))
+	require.NoError(t, err)
 
 	schema := genTestCollectionSchema()
 	collection := newCollection(defaultCollectionID, schema)
@@ -628,7 +671,8 @@ func TestSegment_fillIndexedFieldsData(t *testing.T) {
 		defaultPartitionID,
 		defaultCollectionID,
 		defaultDMLChannel,
-		segmentTypeSealed)
+		segmentTypeSealed,
+		pool)
 	assert.Nil(t, err)
 
 	vecCM, err := genVectorChunkManager(ctx, collection)
