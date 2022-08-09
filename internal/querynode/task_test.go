@@ -21,6 +21,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper/rmq"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -30,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestTask_watchDmChannelsTask(t *testing.T) {
@@ -746,6 +748,28 @@ func TestTask_releasePartitionTask(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("test isAllPartitionsReleased", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		task := releasePartitionsTask{
+			req:  genReleasePartitionsRequest(),
+			node: node,
+		}
+
+		coll, err := node.metaReplica.getCollectionByID(defaultCollectionID)
+		require.NoError(t, err)
+
+		assert.False(t, task.isAllPartitionsReleased(nil))
+		assert.True(t, task.isAllPartitionsReleased(coll))
+		node.metaReplica.addPartition(defaultCollectionID, -1)
+		assert.False(t, task.isAllPartitionsReleased(coll))
+		node.metaReplica.removePartition(defaultPartitionID)
+		node.metaReplica.removePartition(-1)
+
+		assert.True(t, task.isAllPartitionsReleased(coll))
+	})
+
 	t.Run("test execute", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
@@ -776,7 +800,37 @@ func TestTask_releasePartitionTask(t *testing.T) {
 		assert.NoError(t, err)
 
 		err = task.Execute(ctx)
-		assert.Error(t, err)
+		assert.NoError(t, err)
+	})
+
+	t.Run("test execute no partition", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		task := releasePartitionsTask{
+			req:  genReleasePartitionsRequest(),
+			node: node,
+		}
+		err = node.metaReplica.removePartition(defaultPartitionID)
+		assert.NoError(t, err)
+
+		err = task.Execute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("test execute non-exist partition", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		req := genReleasePartitionsRequest()
+		req.PartitionIDs = []int64{-1}
+		task := releasePartitionsTask{
+			req:  req,
+			node: node,
+		}
+
+		err = task.Execute(ctx)
+		assert.NoError(t, err)
 	})
 
 	t.Run("test execute remove deltaVChannel", func(t *testing.T) {
