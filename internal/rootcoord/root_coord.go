@@ -752,7 +752,9 @@ func (c *Core) SetDataCoord(ctx context.Context, s types.DataCoord) error {
 		if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
 			return errors.New(resp.Status.Reason)
 		}
-		log.Info("flush on collection succeed", zap.Int64("collection ID", cID))
+		log.Info("flush on collection succeed, segments sealed",
+			zap.Int64("collection ID", cID),
+			zap.Int64s("segments", segIDs))
 		return nil
 	}
 

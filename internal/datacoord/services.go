@@ -398,8 +398,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		s.segmentManager.DropSegment(ctx, req.SegmentID)
 		s.flushCh <- req.SegmentID
 
-		// Not triggering compaction immediately in import case.
-		if !req.GetImporting() && Params.DataCoordCfg.EnableCompaction {
+		if Params.DataCoordCfg.EnableCompaction {
 			cctx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
 			defer cancel()
 

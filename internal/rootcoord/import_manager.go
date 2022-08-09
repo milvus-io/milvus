@@ -618,7 +618,7 @@ func (m *importManager) yieldTaskInfo(tID int64) error {
 	return nil
 }
 
-// expireOldTasks marks expires tasks as failed.
+// expireOldTasks removes expired tasks from memory.
 func (m *importManager) expireOldTasksFromMem() {
 	// Expire old pending tasks, if any.
 	func() {
