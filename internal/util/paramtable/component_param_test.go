@@ -13,7 +13,6 @@ package paramtable
 
 import (
 	"math"
-	"os"
 	"path"
 	"testing"
 	"time"
@@ -214,17 +213,6 @@ func TestComponentParam(t *testing.T) {
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {
 		Params := CParams.QueryNodeCfg
-
-		cacheSize := Params.CacheSize
-		assert.Equal(t, int64(32), cacheSize)
-		err := os.Setenv("CACHE_SIZE", "2")
-		assert.NoError(t, err)
-		Params.initCacheSize()
-		assert.Equal(t, int64(2), Params.CacheSize)
-		err = os.Setenv("CACHE_SIZE", "32")
-		assert.NoError(t, err)
-		Params.initCacheSize()
-		assert.Equal(t, int64(32), Params.CacheSize)
 
 		interval := Params.StatsPublishInterval
 		assert.Equal(t, 1000, interval)
