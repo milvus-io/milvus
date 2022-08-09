@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/indexnode"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/indexnodepb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
@@ -232,13 +233,24 @@ func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetSt
 	return s.indexnode.GetStatisticsChannel(ctx)
 }
 
-// CreateIndex sends the create index request to IndexNode.
-func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
-	return s.indexnode.CreateIndex(ctx, req)
+// CreateJob sends the create index request to IndexNode.
+func (s *Server) CreateJob(ctx context.Context, req *indexnodepb.CreateJobRequest) (*commonpb.Status, error) {
+	return s.indexnode.CreateJob(ctx, req)
 }
 
-func (s *Server) GetTaskSlots(ctx context.Context, req *indexpb.GetTaskSlotsRequest) (*indexpb.GetTaskSlotsResponse, error) {
-	return s.indexnode.GetTaskSlots(ctx, req)
+// QueryJobs querys index jobs statues
+func (s *Server) QueryJobs(ctx context.Context, req *indexnodepb.QueryJobsRequest) (*indexnodepb.QueryJobsRespond, error) {
+	return s.indexnode.QueryJobs(ctx, req)
+}
+
+// DropJobs drops index build jobs
+func (s *Server) DropJobs(ctx context.Context, req *indexnodepb.DropJobsRequest) (*commonpb.Status, error) {
+	return s.indexnode.DropJobs(ctx, req)
+}
+
+// GetJobNum gets indexnode's job statisctics
+func (s *Server) GetJobStats(ctx context.Context, req *indexnodepb.GetJobStatsRequest) (*indexnodepb.GetJobStatsRespond, error) {
+	return s.indexnode.GetJobStats(ctx, req)
 }
 
 // GetMetrics gets the metrics info of IndexNode.

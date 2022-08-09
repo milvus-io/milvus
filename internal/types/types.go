@@ -19,10 +19,9 @@ package types
 import (
 	"context"
 
-	clientv3 "go.etcd.io/etcd/client/v3"
-
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexnodepb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
@@ -30,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 // TimeTickProvider is the interface all services implement
@@ -307,10 +307,16 @@ type IndexNode interface {
 	Component
 	TimeTickProvider
 
-	// CreateIndex receives request from IndexCoordinator to build an index.
-	// Index building is asynchronous, so when an index building request comes, IndexNode records the task and returns.
-	CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error)
-	GetTaskSlots(ctx context.Context, req *indexpb.GetTaskSlotsRequest) (*indexpb.GetTaskSlotsResponse, error)
+	// CreateJob receive index building job from indexcoord. Notes that index building is asynchronous, task is recorded
+	// in indexnode and then request is finished.
+	CreateJob(context.Context, *indexnodepb.CreateJobRequest) (*commonpb.Status, error)
+	// QueryJobs returns states of index building jobs specified by BuildIDs. There are four states of index building task
+	// Unissued, InProgress, Finished, Failed
+	QueryJobs(context.Context, *indexnodepb.QueryJobsRequest) (*indexnodepb.QueryJobsRespond, error)
+	// DropJobs cancel index building jobs specified by BuildIDs. Notes that dropping task may have finished.
+	DropJobs(context.Context, *indexnodepb.DropJobsRequest) (*commonpb.Status, error)
+	// GetJobStats returns metrics of indexnode, including available job queue info, available task slots and finished job infos.
+	GetJobStats(context.Context, *indexnodepb.GetJobStatsRequest) (*indexnodepb.GetJobStatsRespond, error)
 
 	// GetMetrics gets the metrics about IndexNode.
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
