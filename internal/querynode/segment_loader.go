@@ -61,6 +61,8 @@ type segmentLoader struct {
 
 	ioPool  *concurrency.Pool
 	cpuPool *concurrency.Pool
+	// cgoPool for all cgo invocation
+	cgoPool *concurrency.Pool
 
 	factory msgstream.Factory
 }
@@ -141,7 +143,7 @@ func (loader *segmentLoader) LoadSegment(req *querypb.LoadSegmentsRequest, segme
 			return err
 		}
 
-		segment, err := newSegment(collection, segmentID, partitionID, collectionID, vChannelID, segmentType)
+		segment, err := newSegment(collection, segmentID, partitionID, collectionID, vChannelID, segmentType, loader.cgoPool)
 		if err != nil {
 			log.Error("load segment failed when create new segment",
 				zap.Int64("collectionID", collectionID),
@@ -815,7 +817,8 @@ func newSegmentLoader(
 	metaReplica ReplicaInterface,
 	etcdKV *etcdkv.EtcdKV,
 	cm storage.ChunkManager,
-	factory msgstream.Factory) *segmentLoader {
+	factory msgstream.Factory,
+	pool *concurrency.Pool) *segmentLoader {
 
 	cpuNum := runtime.GOMAXPROCS(0)
 	// This error is not nil only if the options of creating pool is invalid
@@ -850,6 +853,7 @@ func newSegmentLoader(
 		// init them later
 		ioPool:  ioPool,
 		cpuPool: cpuPool,
+		cgoPool: pool,
 
 		factory: factory,
 	}

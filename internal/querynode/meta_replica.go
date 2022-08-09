@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/util/concurrency"
 )
 
 // ReplicaInterface specifies all the methods that the Collection object needs to implement in QueryNode.
@@ -130,6 +131,8 @@ type metaReplica struct {
 	sealedSegments  map[UniqueID]*Segment
 
 	excludedSegments map[UniqueID][]*datapb.SegmentInfo // map[collectionID]segmentIDs
+
+	cgoPool *concurrency.Pool
 }
 
 // getSegmentsMemSize get the memory size in bytes of all the Segments
@@ -535,7 +538,7 @@ func (replica *metaReplica) addSegment(segmentID UniqueID, partitionID UniqueID,
 	if err != nil {
 		return err
 	}
-	seg, err := newSegment(collection, segmentID, partitionID, collectionID, vChannelID, segType)
+	seg, err := newSegment(collection, segmentID, partitionID, collectionID, vChannelID, segType, replica.cgoPool)
 	if err != nil {
 		return err
 	}
@@ -756,7 +759,7 @@ func (replica *metaReplica) freeAll() {
 }
 
 // newCollectionReplica returns a new ReplicaInterface
-func newCollectionReplica() ReplicaInterface {
+func newCollectionReplica(pool *concurrency.Pool) ReplicaInterface {
 	var replica ReplicaInterface = &metaReplica{
 		collections:     make(map[UniqueID]*Collection),
 		partitions:      make(map[UniqueID]*Partition),
@@ -764,6 +767,7 @@ func newCollectionReplica() ReplicaInterface {
 		sealedSegments:  make(map[UniqueID]*Segment),
 
 		excludedSegments: make(map[UniqueID][]*datapb.SegmentInfo),
+		cgoPool:          pool,
 	}
 
 	return replica
