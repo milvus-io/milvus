@@ -2762,7 +2762,8 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
 
     auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
     for (int i = 0; i < num_queries; ++i) {
-        auto offset = search_result_on_bigIndex->get_result_count(i);
+        ASSERT_EQ(search_result_on_bigIndex->lims_.size(), search_result_on_bigIndex->total_nq_ + 1);
+        auto offset = search_result_on_bigIndex->lims_[i];
         ASSERT_EQ(search_result_on_bigIndex->seg_offsets_[offset], 42000 + i);
         ASSERT_EQ(search_result_on_bigIndex->distances_[offset], search_result_on_raw_index->distances_[i * TOPK]);
     }
@@ -2927,7 +2928,8 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
 
     auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
     for (int i = 0; i < num_queries; ++i) {
-        auto offset = search_result_on_bigIndex->get_result_count(i);
+        ASSERT_EQ(search_result_on_bigIndex->lims_.size(), search_result_on_bigIndex->total_nq_ + 1);
+        auto offset = search_result_on_bigIndex->lims_[i];
         ASSERT_EQ(search_result_on_bigIndex->seg_offsets_[offset], 42000 + i);
         ASSERT_EQ(search_result_on_bigIndex->distances_[offset], search_result_on_raw_index->distances_[i * TOPK]);
     }

@@ -35,21 +35,11 @@ struct SearchResult {
 
     int64_t
     get_total_result_count() const {
-        int64_t count = 0;
-        for (auto topk : real_topK_per_nq_) {
-            count += topk;
+        if (lims_.empty()) {
+            return 0;
         }
-        return count;
-    }
-
-    int64_t
-    get_result_count(int nq_offset) const {
-        AssertInfo(nq_offset <= real_topK_per_nq_.size(), "wrong nq offset when get real search result count");
-        int64_t count = 0;
-        for (auto i = 0; i < nq_offset; i++) {
-            count += real_topK_per_nq_[i];
-        }
-        return count;
+        AssertInfo(lims_.size() == total_nq_ + 1, "wrong lims_ size");
+        return lims_[total_nq_];
     }
 
  public:
@@ -74,7 +64,7 @@ struct SearchResult {
     std::map<FieldId, std::unique_ptr<milvus::DataArray>> output_fields_data_;
 
     // used for reduce, filter invalid pk, get real topks count
-    std::vector<int64_t> real_topK_per_nq_;
+    std::vector<size_t> lims_;
 };
 
 using SearchResultPtr = std::shared_ptr<SearchResult>;
