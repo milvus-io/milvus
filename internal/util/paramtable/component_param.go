@@ -13,7 +13,6 @@ package paramtable
 
 import (
 	"math"
-	"os"
 	"path"
 	"strconv"
 	"strings"
@@ -702,8 +701,6 @@ type queryNodeConfig struct {
 	QueryNodeIP   string
 	QueryNodePort int64
 	NodeID        atomic.Value
-	// TODO: remove cacheSize
-	CacheSize int64 // deprecated
 
 	FlowGraphMaxQueueLength int32
 	FlowGraphMaxParallelism int32
@@ -741,7 +738,6 @@ type queryNodeConfig struct {
 func (p *queryNodeConfig) init(base *BaseTable) {
 	p.Base = base
 	p.NodeID.Store(UniqueID(0))
-	p.initCacheSize()
 
 	p.initFlowGraphMaxQueueLength()
 	p.initFlowGraphMaxParallelism()
@@ -768,27 +764,6 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 // InitAlias initializes an alias for the QueryNode role.
 func (p *queryNodeConfig) InitAlias(alias string) {
 	p.Alias = alias
-}
-
-func (p *queryNodeConfig) initCacheSize() {
-	defer log.Debug("init cacheSize", zap.Any("cacheSize (GB)", p.CacheSize))
-
-	const defaultCacheSize = 32 // GB
-	p.CacheSize = defaultCacheSize
-
-	var err error
-	cacheSize := os.Getenv("CACHE_SIZE")
-	if cacheSize == "" {
-		cacheSize, err = p.Base.Load("queryNode.cacheSize")
-		if err != nil {
-			return
-		}
-	}
-	value, err := strconv.ParseInt(cacheSize, 10, 64)
-	if err != nil {
-		return
-	}
-	p.CacheSize = value
 }
 
 // advanced params
