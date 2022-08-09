@@ -31,6 +31,7 @@ package log
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 	"sync/atomic"
 
@@ -55,6 +56,12 @@ func init() {
 
 	r := utils.NewRateLimiter(1.0, 60.0)
 	_globalR.Store(r)
+
+	updateLoglLevel := func(w http.ResponseWriter, req *http.Request) {
+		_globalP.Load().(*ZapProperties).Level.ServeHTTP(w, req)
+	}
+
+	http.HandleFunc("/log/level", updateLoglLevel)
 }
 
 // InitLogger initializes a zap logger.
