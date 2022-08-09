@@ -30,9 +30,11 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/concurrency"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSegmentLoader_loadSegment(t *testing.T) {
@@ -128,6 +130,9 @@ func TestSegmentLoader_loadSegmentFieldsData(t *testing.T) {
 		loader := node.loader
 		assert.NotNil(t, loader)
 
+		pool, err := concurrency.NewPool(runtime.GOMAXPROCS(0))
+		require.NoError(t, err)
+
 		var fieldPk *schemapb.FieldSchema
 		switch pkType {
 		case schemapb.DataType_Int64:
@@ -175,7 +180,8 @@ func TestSegmentLoader_loadSegmentFieldsData(t *testing.T) {
 			defaultPartitionID,
 			defaultCollectionID,
 			defaultDMLChannel,
-			segmentTypeSealed)
+			segmentTypeSealed,
+			pool)
 		assert.Nil(t, err)
 
 		binlog, _, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
@@ -328,7 +334,7 @@ func TestSegmentLoader_testLoadGrowing(t *testing.T) {
 		collection, err := node.metaReplica.getCollectionByID(defaultCollectionID)
 		assert.NoError(t, err)
 
-		segment, err := newSegment(collection, defaultSegmentID+1, defaultPartitionID, defaultCollectionID, defaultDMLChannel, segmentTypeGrowing)
+		segment, err := newSegment(collection, defaultSegmentID+1, defaultPartitionID, defaultCollectionID, defaultDMLChannel, segmentTypeGrowing, loader.cgoPool)
 		assert.Nil(t, err)
 
 		insertData, err := genInsertData(defaultMsgLength, collection.schema)
@@ -357,7 +363,7 @@ func TestSegmentLoader_testLoadGrowing(t *testing.T) {
 		collection, err := node.metaReplica.getCollectionByID(defaultCollectionID)
 		assert.NoError(t, err)
 
-		segment, err := newSegment(collection, defaultSegmentID+1, defaultPartitionID, defaultCollectionID, defaultDMLChannel, segmentTypeGrowing)
+		segment, err := newSegment(collection, defaultSegmentID+1, defaultPartitionID, defaultCollectionID, defaultDMLChannel, segmentTypeGrowing, node.loader.cgoPool)
 		assert.Nil(t, err)
 
 		insertData, err := genInsertData(defaultMsgLength, collection.schema)
