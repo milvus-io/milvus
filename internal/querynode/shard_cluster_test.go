@@ -38,6 +38,8 @@ func (m *mockNodeDetector) watchNodes(collectionID int64, replicaID int64, vchan
 	return m.initNodes, m.evtCh
 }
 
+func (m *mockNodeDetector) Close() {}
+
 type mockSegmentDetector struct {
 	initSegments []segmentEvent
 	evtCh        chan segmentEvent
@@ -46,6 +48,8 @@ type mockSegmentDetector struct {
 func (m *mockSegmentDetector) watchSegments(collectionID int64, replicaID int64, vchannelName string) ([]segmentEvent, <-chan segmentEvent) {
 	return m.initSegments, m.evtCh
 }
+
+func (m *mockSegmentDetector) Close() {}
 
 type mockShardQueryNode struct {
 	searchResult          *internalpb.SearchResults
