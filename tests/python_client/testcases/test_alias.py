@@ -241,8 +241,8 @@ class TestAliasOperation(TestcaseBase):
         
         # assert insert data
         pytest.assume(insert_data_flag is True and
-                      collection_alias.num_entities == ct.default_nb and
-                      collection_w.num_entities == ct.default_nb)            
+                      collection_w.num_entities == ct.default_nb and
+                      collection_alias.num_entities == ct.default_nb)
 
         # create index by alias
         default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}

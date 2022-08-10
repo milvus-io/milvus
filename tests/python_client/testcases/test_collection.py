@@ -1381,6 +1381,7 @@ class TestCollectionDataframe(TestcaseBase):
         res, _ = self.collection_wrap.construct_from_dataframe(cf.gen_unique_str(prefix), df,
                                                                primary_field=ct.default_int64_field_name, auto_id=False)
         collection_w = res[0]
+        collection_w.flush()
         assert collection_w.num_entities == nb
         mutation_res = res[1]
         assert mutation_res.primary_keys == df[ct.default_int64_field_name].values.tolist()
