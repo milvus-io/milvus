@@ -111,9 +111,11 @@ ReduceHelper::Reduce() {
 
 void
 ReduceHelper::Marshal() {
+#if 0
     std::vector<int64_t> real_topK_per_nq(total_nq_);
     for (auto search_result : search_results_) {
-        AssertInfo(search_result->lims_.size() == total_nq_ + 1, "incorrect lims_ size in search result");
+        AssertInfo(search_result->lims_.size() == search_result->total_nq_ + 1,
+                   "incorrect lims_ size in search result");
         for (int j = 0; j < total_nq_; j++) {
             real_topK_per_nq[j] += search_result->lims_[j + 1] - search_result->lims_[j];
         }
@@ -126,6 +128,29 @@ ReduceHelper::Marshal() {
             result_slice_offsets[i] += real_topK_per_nq[j];
         }
     }
+#else
+    // example:
+    //  ----------------------------------
+    //           nq0     nq1     nq2
+    //   sr0    topk00  topk01  topk02
+    //   sr1    topk10  topk11  topk12
+    //  ----------------------------------
+    // then:
+    // result_slice_offsets[] = {
+    //      0,
+    //      (topk00 + topk10),
+    //      (topk00 + topk01 + topk10 + topk11),
+    //      (topk00 + topk01 + topk01 + topk10 + topk11 + topk12),
+    // }
+    auto result_slice_offsets = std::vector<int64_t>(nq_slice_offsets_.size(), 0);
+    for (auto search_result : search_results_) {
+        AssertInfo(search_result->lims_.size() == search_result->total_nq_ + 1,
+                   "incorrect lims_ size in search result");
+        for (int i = 1; i < nq_slice_offsets_.size(); i++) {
+            result_slice_offsets[i] += search_result->lims_[nq_slice_offsets_[i]];
+        }
+    }
+#endif
     AssertInfo(result_slice_offsets[num_slices_] <= total_nq_ * unify_topK_,
                "illegal result_slice_offsets when Marshal, result_slice_offsets[last] = " +
                    std::to_string(result_slice_offsets[num_slices_]) + ", total_nq = " + std::to_string(total_nq_) +
