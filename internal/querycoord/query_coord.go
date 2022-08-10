@@ -369,8 +369,8 @@ func (qc *QueryCoord) watchNodeLoop() {
 	offlineNodes := qc.cluster.OfflineNodeIDs()
 	if len(offlineNodes) != 0 {
 		log.Warn("find querynode down while coord not alive", zap.Any("nodeIDs", offlineNodes))
-		for node := range offlineNodes {
-			qc.offlineNodesChan <- UniqueID(node)
+		for _, node := range offlineNodes {
+			qc.offlineNodesChan <- node
 		}
 	}
 
