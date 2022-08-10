@@ -20,10 +20,33 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
+
+//getComponentConfigurations returns the configurations of queryNode matching req.Pattern
+func getComponentConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) *internalpb.ShowConfigurationsResponse {
+	prefix := "indexnode."
+	matchedConfig := Params.IndexNodeCfg.Base.GetByPattern(prefix + req.Pattern)
+	configList := make([]*commonpb.KeyValuePair, 0, len(matchedConfig))
+	for key, value := range matchedConfig {
+		configList = append(configList,
+			&commonpb.KeyValuePair{
+				Key:   key,
+				Value: value,
+			})
+	}
+
+	return &internalpb.ShowConfigurationsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+		Configuations: configList,
+	}
+}
 
 // TODO(dragondriver): maybe IndexNode should be an interface so that we can mock it in the test cases
 func getSystemInfoMetrics(

@@ -913,6 +913,28 @@ func (qc *QueryCoord) LoadBalance(ctx context.Context, req *querypb.LoadBalanceR
 	return status, nil
 }
 
+//ShowConfigurations returns the configurations of queryCoord matching req.Pattern
+func (qc *QueryCoord) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+	log.Debug("ShowConfigurations received",
+		zap.String("role", typeutil.QueryCoordRole),
+		zap.String("pattern", req.Pattern),
+		zap.Int64("msgID", req.GetBase().GetMsgID()))
+
+	if qc.stateCode.Load() != internalpb.StateCode_Healthy {
+		err := errors.New("QueryCoord is not healthy")
+		log.Warn("ShowConfigurations failed", zap.String("role", typeutil.QueryCoordRole), zap.Int64("msgID", req.GetBase().GetMsgID()), zap.Error(err))
+		return &internalpb.ShowConfigurationsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+			Configuations: nil,
+		}, nil
+	}
+
+	return getComponentConfigurations(ctx, req), nil
+}
+
 // GetMetrics returns all the queryCoord's metrics
 func (qc *QueryCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	log.Debug("getMetricsRequest received",

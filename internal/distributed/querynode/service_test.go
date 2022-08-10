@@ -226,6 +226,7 @@ func Test_NewServer(t *testing.T) {
 		strResp:    &milvuspb.StringResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}},
 		infoResp:   &querypb.GetSegmentInfoResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}},
 		metricResp: &milvuspb.GetMetricsResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}},
+		configResp: &internalpb.ShowConfigurationsResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}},
 	}
 	server.querynode = mqn
 

@@ -90,6 +90,10 @@ func (m *GrpcDataCoordClient) GetFlushedSegments(ctx context.Context, in *datapb
 	return &datapb.GetFlushedSegmentsResponse{}, m.Err
 }
 
+func (m *GrpcDataCoordClient) ShowConfigurations(ctx context.Context, in *internalpb.ShowConfigurationsRequest, opts ...grpc.CallOption) (*internalpb.ShowConfigurationsResponse, error) {
+	return &internalpb.ShowConfigurationsResponse{}, m.Err
+}
+
 func (m *GrpcDataCoordClient) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest, opts ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error) {
 	return &milvuspb.GetMetricsResponse{}, m.Err
 }

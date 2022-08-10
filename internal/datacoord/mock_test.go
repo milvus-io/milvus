@@ -177,6 +177,15 @@ func (c *mockDataNodeClient) ResendSegmentStats(ctx context.Context, req *datapb
 	}, nil
 }
 
+func (c *mockDataNodeClient) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+	return &internalpb.ShowConfigurationsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+	}, nil
+}
+
 func (c *mockDataNodeClient) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	// TODO(dragondriver): change the id, though it's not important in ut
 	nodeID := UniqueID(c.id)
@@ -442,6 +451,15 @@ func (m *mockRootCoordService) SegmentFlushCompleted(ctx context.Context, in *da
 }
 func (m *mockRootCoordService) AddNewSegment(ctx context.Context, in *datapb.SegmentMsg) (*commonpb.Status, error) {
 	panic("not implemented") // TODO: Implement
+}
+
+func (m *mockRootCoordService) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+	return &internalpb.ShowConfigurationsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+	}, nil
 }
 
 func (m *mockRootCoordService) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {

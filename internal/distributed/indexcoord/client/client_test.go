@@ -132,6 +132,15 @@ func TestIndexCoordClient(t *testing.T) {
 		assert.Equal(t, len(req.IndexBuildIDs), len(resp.FilePaths))
 	})
 
+	t.Run("ShowConfigurations", func(t *testing.T) {
+		req := &internalpb.ShowConfigurationsRequest{
+			Pattern: "",
+		}
+		resp, err := icc.ShowConfigurations(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
 	t.Run("GetMetrics", func(t *testing.T) {
 		req := &milvuspb.GetMetricsRequest{}
 		resp, err := icc.GetMetrics(ctx, req)

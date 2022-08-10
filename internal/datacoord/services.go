@@ -715,6 +715,27 @@ func (s *Server) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedS
 	return resp, nil
 }
 
+//ShowConfigurations returns the configurations of DataCoord matching req.Pattern
+func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+	log.Debug("DataCoord.ShowConfigurations", zap.String("pattern", req.Pattern))
+	if s.isClosed() {
+		log.Warn("DataCoord.ShowConfigurations failed",
+			zap.Int64("nodeId", Params.DataCoordCfg.GetNodeID()),
+			zap.String("req", req.Pattern),
+			zap.Error(errDataCoordIsUnhealthy(Params.DataCoordCfg.GetNodeID())))
+
+		return &internalpb.ShowConfigurationsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    msgDataCoordIsUnhealthy(Params.DataCoordCfg.GetNodeID()),
+			},
+			Configuations: nil,
+		}, nil
+	}
+
+	return getComponentConfigurations(ctx, req), nil
+}
+
 // GetMetrics returns DataCoord metrics info
 // it may include SystemMetrics, Topology metrics, etc.
 func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {

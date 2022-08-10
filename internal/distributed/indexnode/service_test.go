@@ -84,6 +84,15 @@ func TestIndexNodeServer(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
+	t.Run("ShowConfigurations", func(t *testing.T) {
+		req := &internalpb.ShowConfigurationsRequest{
+			Pattern: "",
+		}
+		resp, err := server.ShowConfigurations(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
 	t.Run("GetMetrics", func(t *testing.T) {
 		req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
 		assert.Nil(t, err)

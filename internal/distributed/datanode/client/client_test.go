@@ -85,6 +85,9 @@ func Test_NewClient(t *testing.T) {
 
 		r9, err := client.AddSegment(ctx, nil)
 		retCheck(retNotNil, r9, err)
+
+		r10, err := client.ShowConfigurations(ctx, nil)
+		retCheck(retNotNil, r10, err)
 	}
 
 	client.grpcClient = &mock.GRPCClientBase{

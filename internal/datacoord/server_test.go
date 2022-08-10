@@ -921,6 +921,35 @@ func TestServer_watchRootCoord(t *testing.T) {
 	assert.True(t, closed)
 }
 
+func TestServer_ShowConfigurations(t *testing.T) {
+	svr := newTestServer(t, nil)
+	defer closeTestServer(t, svr)
+	pattern := "Port"
+	req := &internalpb.ShowConfigurationsRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_WatchQueryChannels,
+			MsgID:   rand.Int63(),
+		},
+		Pattern: pattern,
+	}
+
+	// server is closed
+	stateSave := atomic.LoadInt64(&svr.isServing)
+	atomic.StoreInt64(&svr.isServing, ServerStateInitializing)
+	resp, err := svr.ShowConfigurations(svr.ctx, req)
+	assert.Nil(t, err)
+	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+
+	// normal case
+	atomic.StoreInt64(&svr.isServing, stateSave)
+
+	resp, err = svr.ShowConfigurations(svr.ctx, req)
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	assert.Equal(t, 1, len(resp.Configuations))
+	assert.Equal(t, "datacoord.port", resp.Configuations[0].Key)
+}
+
 func TestServer_GetMetrics(t *testing.T) {
 	svr := newTestServer(t, nil)
 	defer closeTestServer(t, svr)

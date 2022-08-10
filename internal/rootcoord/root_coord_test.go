@@ -2528,6 +2528,33 @@ func TestRootCoord_Base(t *testing.T) {
 	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 
 	wg.Add(1)
+	t.Run("show configurations", func(t *testing.T) {
+		defer wg.Done()
+		pattern := "Port"
+		req := &internalpb.ShowConfigurationsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_WatchQueryChannels,
+				MsgID:   rand.Int63(),
+			},
+			Pattern: pattern,
+		}
+		//server is closed
+		stateSave := core.stateCode.Load().(internalpb.StateCode)
+		core.UpdateStateCode(internalpb.StateCode_Abnormal)
+		resp, err := core.ShowConfigurations(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+		core.UpdateStateCode(stateSave)
+
+		//normal case
+		resp, err = core.ShowConfigurations(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, 1, len(resp.Configuations))
+		assert.Equal(t, "rootcoord.port", resp.Configuations[0].Key)
+	})
+
+	wg.Add(1)
 	t.Run("get metrics", func(t *testing.T) {
 		defer wg.Done()
 		// not healthy

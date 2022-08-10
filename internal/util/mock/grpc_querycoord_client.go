@@ -82,6 +82,10 @@ func (m *GrpcQueryCoordClient) LoadBalance(ctx context.Context, in *querypb.Load
 	return &commonpb.Status{}, m.Err
 }
 
+func (m *GrpcQueryCoordClient) ShowConfigurations(ctx context.Context, in *internalpb.ShowConfigurationsRequest, opts ...grpc.CallOption) (*internalpb.ShowConfigurationsResponse, error) {
+	return &internalpb.ShowConfigurationsResponse{}, m.Err
+}
+
 func (m *GrpcQueryCoordClient) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest, opts ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error) {
 	return &milvuspb.GetMetricsResponse{}, m.Err
 }

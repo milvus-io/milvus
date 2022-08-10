@@ -38,6 +38,8 @@ type queryCoordShowCollectionsFuncType func(ctx context.Context, request *queryp
 
 type queryCoordShowPartitionsFuncType func(ctx context.Context, request *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error)
 
+type queryCoordShowConfigurationsFuncType func(ctx context.Context, request *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error)
+
 func SetQueryCoordShowCollectionsFunc(f queryCoordShowCollectionsFuncType) QueryCoordMockOption {
 	return func(mock *QueryCoordMock) {
 		mock.showCollectionsFunc = f
@@ -60,9 +62,10 @@ type QueryCoordMock struct {
 	inMemoryPercentages []int64
 	colMtx              sync.RWMutex
 
-	showCollectionsFunc queryCoordShowCollectionsFuncType
-	getMetricsFunc      getMetricsFuncType
-	showPartitionsFunc  queryCoordShowPartitionsFuncType
+	showConfigurationsFunc queryCoordShowConfigurationsFuncType
+	showCollectionsFunc    queryCoordShowCollectionsFuncType
+	getMetricsFunc         getMetricsFuncType
+	showPartitionsFunc     queryCoordShowPartitionsFuncType
 
 	statisticsChannel string
 	timeTickChannel   string
@@ -306,6 +309,29 @@ func (coord *QueryCoordMock) LoadBalance(ctx context.Context, req *querypb.LoadB
 	}
 
 	panic("implement me")
+}
+
+func (coord *QueryCoordMock) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+	if !coord.healthy() {
+		return &internalpb.ShowConfigurationsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "unhealthy",
+			},
+		}, nil
+	}
+
+	if coord.showConfigurationsFunc != nil {
+		return coord.showConfigurationsFunc(ctx, req)
+	}
+
+	return &internalpb.ShowConfigurationsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "not implemented",
+		},
+	}, nil
+
 }
 
 func (coord *QueryCoordMock) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {

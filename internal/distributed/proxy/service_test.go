@@ -218,6 +218,10 @@ func (m *MockRootCoord) SegmentFlushCompleted(ctx context.Context, in *datapb.Se
 	return nil, nil
 }
 
+func (m *MockRootCoord) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+	return nil, nil
+}
+
 func (m *MockRootCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return nil, nil
 }
@@ -335,6 +339,10 @@ func (m *MockIndexCoord) GetIndexFilePaths(ctx context.Context, req *indexpb.Get
 	return nil, nil
 }
 
+func (m *MockIndexCoord) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+	return nil, nil
+}
+
 func (m *MockIndexCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return nil, nil
 }
@@ -444,6 +452,10 @@ func (m *MockQueryCoord) GetShardLeaders(ctx context.Context, req *querypb.GetSh
 	return nil, nil
 }
 
+func (m *MockQueryCoord) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+	return nil, nil
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type MockDataCoord struct {
 	MockBase
@@ -515,6 +527,10 @@ func (m *MockDataCoord) GetRecoveryInfo(ctx context.Context, req *datapb.GetReco
 }
 
 func (m *MockDataCoord) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error) {
+	return nil, nil
+}
+
+func (m *MockDataCoord) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
 	return nil, nil
 }
 

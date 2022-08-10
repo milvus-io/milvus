@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math/rand"
 	"testing"
 	"time"
 
@@ -377,6 +378,23 @@ func TestGrpcTask(t *testing.T) {
 		})
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, res.ErrorCode)
 		assert.Nil(t, err)
+	})
+
+	t.Run("Test ShowConfigurations", func(t *testing.T) {
+		pattern := "Port"
+		req := &internalpb.ShowConfigurationsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_WatchQueryChannels,
+				MsgID:   rand.Int63(),
+			},
+			Pattern: pattern,
+		}
+
+		resp, err := queryCoord.ShowConfigurations(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, 1, len(resp.Configuations))
+		assert.Equal(t, "querycoord.port", resp.Configuations[0].Key)
 	})
 
 	t.Run("Test GetMetrics", func(t *testing.T) {
@@ -759,6 +777,21 @@ func TestGrpcTaskBeforeHealthy(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, states.Status.ErrorCode)
 		assert.Equal(t, internalpb.StateCode_Abnormal, states.State.StateCode)
 		assert.Nil(t, err)
+	})
+
+	t.Run("Test ShowConfigurations", func(t *testing.T) {
+		pattern := ""
+		req := &internalpb.ShowConfigurationsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_WatchQueryChannels,
+				MsgID:   rand.Int63(),
+			},
+			Pattern: pattern,
+		}
+
+		resp, err := unHealthyCoord.ShowConfigurations(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
 	})
 
 	t.Run("Test GetMetrics", func(t *testing.T) {

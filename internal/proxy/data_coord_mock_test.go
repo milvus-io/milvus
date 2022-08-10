@@ -35,10 +35,10 @@ type DataCoordMock struct {
 
 	state atomic.Value // internal.StateCode
 
-	getMetricsFunc getMetricsFuncType
-
-	statisticsChannel string
-	timeTickChannel   string
+	getMetricsFunc         getMetricsFuncType
+	showConfigurationsFunc showConfigurationsFuncType
+	statisticsChannel      string
+	timeTickChannel        string
 }
 
 func (coord *DataCoordMock) updateState(state internalpb.StateCode) {
@@ -156,6 +156,28 @@ func (coord *DataCoordMock) SaveBinlogPaths(ctx context.Context, req *datapb.Sav
 
 func (coord *DataCoordMock) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error) {
 	panic("implement me")
+}
+
+func (coord *DataCoordMock) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+	if !coord.healthy() {
+		return &internalpb.ShowConfigurationsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "unhealthy",
+			},
+		}, nil
+	}
+
+	if coord.showConfigurationsFunc != nil {
+		return coord.showConfigurationsFunc(ctx, req)
+	}
+
+	return &internalpb.ShowConfigurationsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "not implemented",
+		},
+	}, nil
 }
 
 func (coord *DataCoordMock) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {

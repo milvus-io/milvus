@@ -657,6 +657,27 @@ func (i *IndexCoord) GetIndexFilePaths(ctx context.Context, req *indexpb.GetInde
 	return ret, nil
 }
 
+//ShowConfigurations returns the configurations of indexCoord matching req.Pattern
+func (i *IndexCoord) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+	log.Debug("IndexCoord.ShowConfigurations", zap.String("pattern", req.Pattern))
+	if !i.isHealthy() {
+		log.Warn("IndexCoord.ShowConfigurations failed",
+			zap.Int64("nodeId", i.session.ServerID),
+			zap.String("req", req.Pattern),
+			zap.Error(errIndexCoordIsUnhealthy(Params.QueryNodeCfg.GetNodeID())))
+
+		return &internalpb.ShowConfigurationsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    msgIndexCoordIsUnhealthy(Params.QueryNodeCfg.GetNodeID()),
+			},
+			Configuations: nil,
+		}, nil
+	}
+
+	return getComponentConfigurations(ctx, req), nil
+}
+
 // GetMetrics gets the metrics info of IndexCoord.
 func (i *IndexCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	log.Debug("IndexCoord.GetMetrics",

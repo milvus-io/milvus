@@ -18,6 +18,7 @@ package indexnode
 
 import (
 	"context"
+	"math/rand"
 	"strconv"
 	"testing"
 
@@ -75,6 +76,22 @@ func TestIndexNodeMock(t *testing.T) {
 		resp, err := inm.CreateIndex(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	t.Run("ShowConfigurations", func(t *testing.T) {
+		pattern := ""
+		req := &internalpb.ShowConfigurationsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_WatchQueryChannels,
+				MsgID:   rand.Int63(),
+			},
+			Pattern: pattern,
+		}
+
+		resp, err := inm.ShowConfigurations(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+
 	})
 
 	t.Run("GetMetrics", func(t *testing.T) {

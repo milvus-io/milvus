@@ -696,6 +696,27 @@ func (node *DataNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.Strin
 	}, nil
 }
 
+//ShowConfigurations returns the configurations of DataNode matching req.Pattern
+func (node *DataNode) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+	log.Debug("DataNode.ShowConfigurations", zap.String("pattern", req.Pattern))
+	if !node.isHealthy() {
+		log.Warn("DataNode.ShowConfigurations failed",
+			zap.Int64("nodeId", Params.QueryNodeCfg.GetNodeID()),
+			zap.String("req", req.Pattern),
+			zap.Error(errDataNodeIsUnhealthy(Params.QueryNodeCfg.GetNodeID())))
+
+		return &internalpb.ShowConfigurationsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    msgDataNodeIsUnhealthy(Params.QueryNodeCfg.GetNodeID()),
+			},
+			Configuations: nil,
+		}, nil
+	}
+
+	return getComponentConfigurations(ctx, req), nil
+}
+
 // GetMetrics return datanode metrics
 // TODO(dragondriver): cache the Metrics and set a retention to the cache
 func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {

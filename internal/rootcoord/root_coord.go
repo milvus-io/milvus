@@ -2346,6 +2346,18 @@ func (c *Core) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlus
 	return succStatus(), nil
 }
 
+//ShowConfigurations returns the configurations of RootCoord matching req.Pattern
+func (c *Core) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+	if code, ok := c.checkHealthy(); !ok {
+		return &internalpb.ShowConfigurationsResponse{
+			Status:        failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+internalpb.StateCode_name[int32(code)]),
+			Configuations: nil,
+		}, nil
+	}
+
+	return getComponentConfigurations(ctx, req), nil
+}
+
 // GetMetrics get metrics
 func (c *Core) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	if code, ok := c.checkHealthy(); !ok {
