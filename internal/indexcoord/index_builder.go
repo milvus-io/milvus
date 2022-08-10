@@ -166,7 +166,7 @@ func (ib *indexBuilder) process(buildID UniqueID) {
 		// if all IndexNodes are executing task, wait for one of them to finish the task.
 		nodeID, client := ib.ic.nodeManager.PeekClient(meta)
 		if client == nil {
-			log.Error("index builder peek client error, there is no available")
+			log.RatedDebug(30, "index builder peek client error, there is no available")
 			return
 		}
 		// update version and set nodeID
