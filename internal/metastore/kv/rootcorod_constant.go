@@ -7,6 +7,10 @@ const (
 	// CollectionMetaPrefix prefix for collection meta
 	CollectionMetaPrefix = ComponentPrefix + "/collection"
 
+	PartitionMetaPrefix = ComponentPrefix + "/partitions"
+	AliasMetaPrefix     = ComponentPrefix + "/aliases"
+	FieldMetaPrefix     = ComponentPrefix + "/fields"
+
 	// SegmentIndexMetaPrefix prefix for segment index meta
 	SegmentIndexMetaPrefix = ComponentPrefix + "/segment-index"
 

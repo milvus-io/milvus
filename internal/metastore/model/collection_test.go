@@ -87,35 +87,6 @@ var (
 		StartPositions:       startPositions,
 		ConsistencyLevel:     commonpb.ConsistencyLevel_Strong,
 	}
-
-	newColPb = &pb.CollectionInfo{
-		ID: colID,
-		Schema: &schemapb.CollectionSchema{
-			Name:        colName,
-			Description: "none",
-			AutoID:      false,
-			Fields:      []*schemapb.FieldSchema{filedSchemaPb},
-		},
-		CreateTime: 1,
-		Partitions: []*pb.PartitionInfo{
-			{
-				PartitionID:               partID,
-				PartitionName:             partName,
-				PartitionCreatedTimestamp: 1,
-			},
-		},
-		FieldIndexes: []*pb.FieldIndexInfo{
-			{
-				FiledID: fieldID,
-				IndexID: indexID,
-			},
-		},
-		VirtualChannelNames:  []string{"vch"},
-		PhysicalChannelNames: []string{"pch"},
-		ShardsNum:            1,
-		StartPositions:       startPositions,
-		ConsistencyLevel:     commonpb.ConsistencyLevel_Strong,
-	}
 )
 
 func TestUnmarshalCollectionModel(t *testing.T) {
@@ -123,16 +94,9 @@ func TestUnmarshalCollectionModel(t *testing.T) {
 	ret.TenantID = tenantID
 	assert.Equal(t, ret, colModel)
 
-	ret = UnmarshalCollectionModel(newColPb)
-	ret.TenantID = tenantID
-	assert.Equal(t, ret, colModel)
-
 	assert.Nil(t, UnmarshalCollectionModel(nil))
 }
 
 func TestMarshalCollectionModel(t *testing.T) {
-	ret := MarshalCollectionModel(colModel)
-	assert.Equal(t, ret, newColPb)
-
 	assert.Nil(t, MarshalCollectionModel(nil))
 }

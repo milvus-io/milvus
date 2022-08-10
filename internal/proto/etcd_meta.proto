@@ -36,13 +36,19 @@ message CollectionInfo {
   int32 shards_num = 10;
   repeated common.KeyDataPair start_positions = 11;
   common.ConsistencyLevel consistency_level = 12;
-  repeated PartitionInfo partitions = 13;
 }
 
 message PartitionInfo {
   int64 partitionID = 1;
   string partitionName = 2;
   uint64 partition_created_timestamp = 3;
+  int64 collection_id = 4;
+}
+
+message AliasInfo {
+  string alias_name = 1;
+  int64 collection_id = 2;
+  uint64 created_time = 3;
 }
 
 message SegmentIndexInfo {
