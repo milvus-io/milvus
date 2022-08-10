@@ -21,6 +21,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/common"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -138,8 +140,8 @@ func (gc *garbageCollector) scan() {
 				continue
 			}
 
-			segmentID, err := storage.ParseSegmentIDByBinlog(infoKey)
-			if err != nil {
+			segmentID, err := storage.ParseSegmentIDByBinlog(gc.option.rootPath, infoKey)
+			if err != nil && !common.IsIgnorableError(err) {
 				log.Error("parse segment id error", zap.String("infoKey", infoKey), zap.Error(err))
 				continue
 			}
