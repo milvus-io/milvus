@@ -385,11 +385,6 @@ func IsGrant(operateType milvuspb.OperatePrivilegeType) bool {
 	return operateType == milvuspb.OperatePrivilegeType_Grant
 }
 
-// IsKeyNotExistError Judging by the error message whether the key does not exist or not for the ectd server
-func IsKeyNotExistError(err error) bool {
-	return strings.Contains(err.Error(), "there is no value on key")
-}
-
 func EncodeUserRoleCache(user string, role string) string {
 	return fmt.Sprintf("%s/%s", user, role)
 }

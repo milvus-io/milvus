@@ -3279,6 +3279,10 @@ func testProxyRole(ctx context.Context, t *testing.T, proxy *Proxy) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 		roleNum := len(resp.Results)
 
+		resp, _ = proxy.SelectRole(ctx, &milvuspb.SelectRoleRequest{Role: &milvuspb.RoleEntity{Name: "not_existed"}})
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, 0, len(resp.Results))
+
 		roleName := "unit_test"
 		roleResp, _ := proxy.CreateRole(ctx, &milvuspb.CreateRoleRequest{Entity: &milvuspb.RoleEntity{Name: roleName}})
 		assert.Equal(t, commonpb.ErrorCode_Success, roleResp.ErrorCode)
@@ -3306,7 +3310,8 @@ func testProxyRole(ctx context.Context, t *testing.T, proxy *Proxy) {
 
 		entity.Name = "not_existed"
 		resp, _ = proxy.SelectUser(ctx, &milvuspb.SelectUserRequest{User: entity})
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, 0, len(resp.Results))
 
 		entity.Name = "root"
 		resp, _ = proxy.SelectUser(ctx, &milvuspb.SelectUserRequest{User: entity})

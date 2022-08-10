@@ -1351,7 +1351,7 @@ func TestRbacOperatePrivilege(t *testing.T) {
 	assert.NotNil(t, err)
 
 	mockTxnKV.load = func(key string) (string, error) {
-		return "fail", fmt.Errorf("there is no value on key = %s", key)
+		return "fail", common.NewKeyNotExistError(key)
 	}
 	err = mt.OperatePrivilege(util.DefaultTenant, entity, milvuspb.OperatePrivilegeType_Grant)
 	assert.Nil(t, err)

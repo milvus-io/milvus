@@ -16,6 +16,8 @@
 
 package common
 
+import "fmt"
+
 type IgnorableError struct {
 	msg string
 }
@@ -33,4 +35,23 @@ func NewIgnorableError(err error) error {
 func IsIgnorableError(err error) bool {
 	_, ok := err.(*IgnorableError)
 	return ok
+}
+
+var _ error = &KeyNotExistError{}
+
+func NewKeyNotExistError(key string) error {
+	return &KeyNotExistError{key: key}
+}
+
+func IsKeyNotExistError(err error) bool {
+	_, ok := err.(*KeyNotExistError)
+	return ok
+}
+
+type KeyNotExistError struct {
+	key string
+}
+
+func (k *KeyNotExistError) Error() string {
+	return fmt.Sprintf("there is no value on key = %s", k.key)
 }
