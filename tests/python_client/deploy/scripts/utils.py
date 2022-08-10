@@ -61,6 +61,7 @@ def get_collections(prefix, check=False):
     # list entities if collections
     for name in col_list:
         c = Collection(name=name)
+        c.flush()
         num_entities = c.num_entities
         print(f"{name}: {num_entities}")
         if check:

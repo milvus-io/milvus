@@ -58,6 +58,7 @@ def milvus_recall_test(host='127.0.0.1'):
 
     t0 = time.time()
     print(f"\nGet collection entities...")
+    collection.flush()
     print(collection.num_entities)
     t1 = time.time()
     print(f"\nGet collection entities cost {t1 - t0:.4f} seconds")
