@@ -10,6 +10,8 @@ import (
 	"reflect"
 	"strconv"
 
+	"github.com/milvus-io/milvus/internal/common"
+
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
@@ -777,7 +779,7 @@ func (kc *Catalog) OperatePrivilege(ctx context.Context, tenant string, entity *
 		if funcutil.IsRevoke(operateType) {
 			return err
 		}
-		if !funcutil.IsKeyNotExistError(err) {
+		if !common.IsKeyNotExistError(err) {
 			return err
 		}
 		curGrantPrivilegeEntity.Entities = append(curGrantPrivilegeEntity.Entities, &milvuspb.GrantorEntity{

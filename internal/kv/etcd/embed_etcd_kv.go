@@ -24,6 +24,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/common"
+
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/v3client"
@@ -199,7 +201,7 @@ func (kv *EmbedEtcdKV) Load(key string) (string, error) {
 		return "", err
 	}
 	if resp.Count <= 0 {
-		return "", fmt.Errorf("there is no value on key = %s", key)
+		return "", common.NewKeyNotExistError(key)
 	}
 
 	return string(resp.Kvs[0].Value), nil
@@ -215,7 +217,7 @@ func (kv *EmbedEtcdKV) LoadBytes(key string) ([]byte, error) {
 		return nil, err
 	}
 	if resp.Count <= 0 {
-		return nil, fmt.Errorf("there is no value on key = %s", key)
+		return nil, common.NewKeyNotExistError(key)
 	}
 
 	return resp.Kvs[0].Value, nil

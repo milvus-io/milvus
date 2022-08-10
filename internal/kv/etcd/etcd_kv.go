@@ -22,6 +22,8 @@ import (
 	"path"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/common"
+
 	"github.com/milvus-io/milvus/internal/log"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
@@ -179,7 +181,7 @@ func (kv *EtcdKV) Load(key string) (string, error) {
 		return "", err
 	}
 	if resp.Count <= 0 {
-		return "", fmt.Errorf("there is no value on key = %s", key)
+		return "", common.NewKeyNotExistError(key)
 	}
 	CheckElapseAndWarn(start, "Slow etcd operation load")
 	return string(resp.Kvs[0].Value), nil
@@ -196,7 +198,7 @@ func (kv *EtcdKV) LoadBytes(key string) ([]byte, error) {
 		return []byte{}, err
 	}
 	if resp.Count <= 0 {
-		return []byte{}, fmt.Errorf("there is no value on key = %s", key)
+		return []byte{}, common.NewKeyNotExistError(key)
 	}
 	CheckElapseAndWarn(start, "Slow etcd operation load")
 	return resp.Kvs[0].Value, nil

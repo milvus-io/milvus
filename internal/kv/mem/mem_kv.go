@@ -17,9 +17,10 @@
 package memkv
 
 import (
-	"fmt"
 	"strings"
 	"sync"
+
+	"github.com/milvus-io/milvus/internal/common"
 
 	"github.com/google/btree"
 )
@@ -81,7 +82,7 @@ func (kv *MemoryKV) Load(key string) (string, error) {
 	defer kv.RUnlock()
 	item := kv.tree.Get(memoryKVItem{key: key})
 	if item == nil {
-		return "", fmt.Errorf("invalid key: %s", key)
+		return "", common.NewKeyNotExistError(key)
 	}
 	return item.(memoryKVItem).value.String(), nil
 }
@@ -92,7 +93,7 @@ func (kv *MemoryKV) LoadBytes(key string) ([]byte, error) {
 	defer kv.RUnlock()
 	item := kv.tree.Get(memoryKVItem{key: key})
 	if item == nil {
-		return []byte{}, fmt.Errorf("invalid key: %s", key)
+		return []byte{}, common.NewKeyNotExistError(key)
 	}
 	return item.(memoryKVItem).value.ByteSlice(), nil
 }

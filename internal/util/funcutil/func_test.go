@@ -530,11 +530,6 @@ func TestIsGrant(t *testing.T) {
 	assert.Equal(t, false, IsGrant(milvuspb.OperatePrivilegeType_Revoke))
 }
 
-func TestIsKeyNotExistError(t *testing.T) {
-	assert.Equal(t, true, IsKeyNotExistError(fmt.Errorf("there is no value on key = %s", "foo")))
-	assert.Equal(t, false, IsKeyNotExistError(fmt.Errorf("err: key = %s", "fooo")))
-}
-
 func TestUserRoleCache(t *testing.T) {
 	user, role := "foo", "root"
 	cache := EncodeUserRoleCache(user, role)

@@ -3086,7 +3086,7 @@ func (c *Core) CreateRole(ctx context.Context, in *milvuspb.CreateRoleRequest) (
 		errMsg := "role already exists:" + entity.Name
 		return failStatus(commonpb.ErrorCode_CreateRoleFailure, errMsg), errors.New(errMsg)
 	}
-	if !funcutil.IsKeyNotExistError(err) {
+	if !common.IsKeyNotExistError(err) {
 		return failStatus(commonpb.ErrorCode_CreateRoleFailure, err.Error()), err
 	}
 
@@ -3241,6 +3241,11 @@ func (c *Core) SelectRole(ctx context.Context, in *milvuspb.SelectRoleRequest) (
 		if _, err := c.MetaTable.SelectRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: in.Role.Name}, false); err != nil {
 			errMsg := "fail to select the role to check the role name"
 			logger.Error(errMsg, zap.String("role_name", in.Role.Name), zap.Error(err))
+			if common.IsKeyNotExistError(err) {
+				return &milvuspb.SelectRoleResponse{
+					Status: succStatus(),
+				}, nil
+			}
 			return &milvuspb.SelectRoleResponse{
 				Status: failStatus(commonpb.ErrorCode_SelectRoleFailure, errMsg),
 			}, err
@@ -3282,6 +3287,11 @@ func (c *Core) SelectUser(ctx context.Context, in *milvuspb.SelectUserRequest) (
 		if _, err := c.MetaTable.SelectUser(util.DefaultTenant, &milvuspb.UserEntity{Name: in.User.Name}, false); err != nil {
 			errMsg := "fail to select the user to check the username"
 			logger.Error(errMsg, zap.String("username", in.User.Name), zap.Error(err))
+			if common.IsKeyNotExistError(err) {
+				return &milvuspb.SelectUserResponse{
+					Status: succStatus(),
+				}, nil
+			}
 			return &milvuspb.SelectUserResponse{
 				Status: failStatus(commonpb.ErrorCode_SelectUserFailure, errMsg),
 			}, err
