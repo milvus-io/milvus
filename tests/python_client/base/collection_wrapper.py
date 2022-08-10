@@ -53,10 +53,12 @@ class ApiCollectionWrapper:
 
     @property
     def is_empty(self):
+        self.flush()
         return self.collection.is_empty
 
     @property
     def num_entities(self):
+        self.flush()
         return self.collection.num_entities
 
     @property
@@ -120,22 +122,33 @@ class ApiCollectionWrapper:
                                        **kwargs).run()
         return res, check_result
 
+    # @trace()
+    # def flush(self, check_task=None, check_items=None, **kwargs):
+    #     #TODO:currently, flush is not supported by sdk in milvus
+    #     timeout = kwargs.get("timeout", TIMEOUT)
+    #
+    #     @timeout_decorator.timeout(timeout, timeout_exception=TimeoutError)
+    #     def _flush():
+    #         res = self.collection.num_entities
+    #         return res
+    #     try:
+    #         res = _flush()
+    #         return res, True
+    #     except TimeoutError as e:
+    #         log.error(f"flush timeout error: {e}")
+    #         res = None
+    #         return res, False
+
     @trace()
     def flush(self, check_task=None, check_items=None, **kwargs):
-        #TODO:currently, flush is not supported by sdk in milvus
         timeout = kwargs.get("timeout", TIMEOUT)
-        
-        @timeout_decorator.timeout(timeout, timeout_exception=TimeoutError)
-        def _flush():
-            res = self.collection.num_entities
-            return res        
-        try:
-            res = _flush()
-            return res, True
-        except TimeoutError as e:
-            log.error(f"flush timeout error: {e}")
-            res = None
-            return res, False
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.collection.flush], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task,
+                                       check_items, check, **kwargs).run()
+        return res, check_result
 
     @trace()
     def search(self, data, anns_field, param, limit, expr=None,

@@ -35,10 +35,12 @@ class ApiPartitionWrapper:
 
     @property
     def is_empty(self):
+        self.flush()
         return self.partition.is_empty if self.partition else None
 
     @property
     def num_entities(self):
+        self.flush()
         return self.partition.num_entities if self.partition else None
 
     def drop(self, check_task=None, check_items=None, **kwargs):
@@ -68,6 +70,17 @@ class ApiPartitionWrapper:
 
         func_name = sys._getframe().f_code.co_name
         res, succ = api_request([self.partition.release], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task,
+                                       check_items, is_succ=succ,
+                                       **kwargs).run()
+        return res, check_result
+
+    def flush(self, check_task=None, check_items=None, **kwargs):
+        timeout = kwargs.get("timeout", TIMEOUT)
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, succ = api_request([self.partition.flush], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task,
                                        check_items, is_succ=succ,
                                        **kwargs).run()

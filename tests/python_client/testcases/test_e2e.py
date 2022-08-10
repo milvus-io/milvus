@@ -33,9 +33,9 @@ class TestE2e(TestcaseBase):
 
         # flush
         t0 = time.time()
-        num_entities, check_result = collection_w.flush(timeout=180)
+        _, check_result = collection_w.flush(timeout=180)
         assert check_result
-        assert num_entities == len(data[0]) + entities
+        assert collection_w.num_entities == len(data[0]) + entities
         tt = time.time() - t0
         entities = collection_w.num_entities
         log.info(f"assert flush: {tt}, entities: {entities}")
