@@ -264,13 +264,15 @@ func (it *IndexAddTask) OnEnqueue() error {
 
 // PreExecute sets the indexBuildID to index task request.
 func (it *IndexAddTask) PreExecute(ctx context.Context) error {
-	log.Info("IndexCoord IndexAddTask PreExecute", zap.Int64("IndexBuildID", it.segmentIndex.BuildID))
+	log.Info("IndexCoord IndexAddTask PreExecute", zap.Int64("segID", it.segmentIndex.SegmentID),
+		zap.Int64("IndexBuildID", it.segmentIndex.BuildID))
 	return nil
 }
 
 // Execute adds the index task to meta table.
 func (it *IndexAddTask) Execute(ctx context.Context) error {
-	log.Info("IndexCoord IndexAddTask Execute", zap.Int64("IndexBuildID", it.segmentIndex.BuildID))
+	log.Info("IndexCoord IndexAddTask Execute", zap.Int64("segID", it.segmentIndex.SegmentID),
+		zap.Int64("IndexBuildID", it.segmentIndex.BuildID))
 	err := it.table.AddIndex(it.segmentIndex)
 	if err != nil {
 		return err
@@ -280,6 +282,7 @@ func (it *IndexAddTask) Execute(ctx context.Context) error {
 
 // PostExecute does nothing here.
 func (it *IndexAddTask) PostExecute(ctx context.Context) error {
-	log.Info("IndexCoord IndexAddTask PostExecute", zap.Int64("IndexBuildID", it.segmentIndex.BuildID))
+	log.Info("IndexCoord IndexAddTask PostExecute", zap.Int64("segID", it.segmentIndex.SegmentID),
+		zap.Int64("IndexBuildID", it.segmentIndex.BuildID))
 	return nil
 }

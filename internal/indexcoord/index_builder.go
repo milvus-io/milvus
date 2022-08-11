@@ -63,7 +63,7 @@ func newIndexBuilder(ctx context.Context, ic *IndexCoord, metaTable *metaTable, 
 		tasks:  make(map[int64]indexTaskState, 1024),
 		//inProgressTasks:  make(map[int64]map[int64]struct{}, 1024),
 		//finishedTasks:    make(map[int64]struct{}),
-		notify:           make(chan struct{}, 1),
+		notify:           make(chan struct{}, 10),
 		scheduleDuration: time.Second * 1,
 	}
 	ib.reloadFromKV(aliveNodes)

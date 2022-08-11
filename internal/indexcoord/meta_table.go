@@ -267,7 +267,9 @@ func (mt *metaTable) AddIndex(segIndex *model.SegmentIndex) error {
 	defer mt.segmentIndexLock.Unlock()
 
 	buildID := segIndex.BuildID
-	log.Info("IndexCoord metaTable AddIndex", zap.Int64("buildID", buildID))
+	log.Info("IndexCoord metaTable AddIndex", zap.Int64("collID", segIndex.CollectionID),
+		zap.Int64("segID", segIndex.SegmentID), zap.Int64("indexID", segIndex.IndexID),
+		zap.Int64("buildID", buildID))
 
 	_, ok := mt.buildID2SegmentIndex[buildID]
 	if ok {
@@ -283,7 +285,9 @@ func (mt *metaTable) AddIndex(segIndex *model.SegmentIndex) error {
 			zap.Int64("indexID", segIndex.IndexID), zap.Error(err))
 		return err
 	}
-	log.Info("IndexCoord metaTable AddIndex success", zap.Int64("buildID", buildID))
+	log.Info("IndexCoord metaTable AddIndex success", zap.Int64("collID", segIndex.CollectionID),
+		zap.Int64("segID", segIndex.SegmentID), zap.Int64("indexID", segIndex.IndexID),
+		zap.Int64("buildID", buildID))
 	return nil
 }
 
@@ -297,6 +301,7 @@ func (mt *metaTable) NeedIndex(buildID UniqueID) bool {
 	indexID, collID := segIdx.IndexID, segIdx.CollectionID
 	mt.segmentIndexLock.RUnlock()
 	mt.indexLock.RLock()
+	defer mt.indexLock.RUnlock()
 
 	fieldIndexes, ok := mt.collectionIndexes[collID]
 	if !ok {
