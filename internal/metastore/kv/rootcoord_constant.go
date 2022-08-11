@@ -13,6 +13,10 @@ const (
 
 	// SegmentIndexMetaPrefix prefix for segment index meta
 	SegmentIndexMetaPrefix = ComponentPrefix + "/segment-index"
+
+	// IndexMetaPrefix prefix for index meta
+	IndexMetaPrefix = ComponentPrefix + "/index"
+
 	// SegmentIndexPrefix prefix for segment index meta
 	SegmentIndexPrefix = "segment-index"
 

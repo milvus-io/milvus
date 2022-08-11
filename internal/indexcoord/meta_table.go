@@ -316,17 +316,17 @@ func (mt *metaTable) NeedIndex(buildID UniqueID) bool {
 
 func (mt *metaTable) canIndex(segIdx *model.SegmentIndex) bool {
 	if segIdx.IsDeleted {
-		log.Warn("Index has been deleted", zap.Int64("buildID", segIdx.BuildID))
+		log.Debug("Index has been deleted", zap.Int64("buildID", segIdx.BuildID))
 		return false
 	}
 
 	if segIdx.NodeID != 0 {
-		log.Warn("IndexCoord metaTable BuildIndex, but indexMeta's NodeID is not zero",
+		log.Debug("IndexCoord metaTable BuildIndex, but indexMeta's NodeID is not zero",
 			zap.Int64("buildID", segIdx.BuildID), zap.Int64("nodeID", segIdx.NodeID))
 		return false
 	}
 	if segIdx.IndexState != commonpb.IndexState_Unissued {
-		log.Warn("IndexCoord metaTable BuildIndex, but indexMeta's state is not unissued",
+		log.Debug("IndexCoord metaTable BuildIndex, but indexMeta's state is not unissued",
 			zap.Int64("buildID", segIdx.BuildID), zap.String("state", segIdx.IndexState.String()))
 		return false
 	}
@@ -334,10 +334,12 @@ func (mt *metaTable) canIndex(segIdx *model.SegmentIndex) bool {
 }
 
 // UpdateVersion updates the version and nodeID of the index meta, whenever the task is built once, the version will be updated once.
+
 func (mt *metaTable) UpdateVersion(buildID UniqueID, nodeID UniqueID) error {
 	mt.segmentIndexLock.Lock()
 	defer mt.segmentIndexLock.Unlock()
 
+	log.Debug("IndexCoord metaTable UpdateVersion receive", zap.Int64("buildID", buildID), zap.Int64("nodeID", nodeID))
 	segIdx, ok := mt.buildID2SegmentIndex[buildID]
 	if !ok {
 		return fmt.Errorf("there is no index with buildID: %d", buildID)

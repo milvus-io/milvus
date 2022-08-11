@@ -18,28 +18,25 @@ package rootcoord
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand"
 	"os"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
-
-	"github.com/milvus-io/milvus/internal/util/errorutil"
-	"github.com/milvus-io/milvus/internal/util/funcutil"
-
-	"github.com/golang/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/metastore/db"
+	"github.com/milvus-io/milvus/internal/metastore/db/dao"
+	"github.com/milvus-io/milvus/internal/metastore/db/dbcore"
 	kvmetestore "github.com/milvus-io/milvus/internal/metastore/kv"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/metrics"
@@ -57,6 +54,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/crypto"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/errorutil"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
@@ -990,19 +989,37 @@ func (c *Core) Init() error {
 				log.Error("RootCoord failed to new EtcdKV for MetaKV", zap.Any("reason", initError))
 				return initError
 			}
-			var metaKV kv.TxnKV
-			metaKV, initError = c.kvBaseCreate(Params.EtcdCfg.MetaRootPath)
-			if initError != nil {
-				log.Error("RootCoord failed to new EtcdKV", zap.Any("reason", initError))
-				return initError
+
+			var catalog metastore.Catalog
+			switch Params.MetaStoreCfg.MetaStoreType {
+			case util.MetaStoreTypeEtcd:
+				var metaKV kv.TxnKV
+				metaKV, initError = c.kvBaseCreate(Params.EtcdCfg.MetaRootPath)
+				if initError != nil {
+					log.Error("RootCoord failed to new EtcdKV", zap.Any("reason", initError))
+					return initError
+				}
+
+				var ss *kvmetestore.SuffixSnapshot
+				if ss, initError = kvmetestore.NewSuffixSnapshot(metaKV, "_ts", Params.EtcdCfg.MetaRootPath, "snapshots"); initError != nil {
+					log.Error("RootCoord failed to new suffixSnapshot", zap.Error(initError))
+					return initError
+				}
+
+				catalog = &kvmetestore.Catalog{Txn: metaKV, Snapshot: ss}
+			case util.MetaStoreTypeMysql:
+				// connect to database
+				err := dbcore.Connect(&Params.DBCfg)
+				if err != nil {
+					return err
+				}
+
+				catalog = db.NewTableCatalog(dbcore.NewTxImpl(), dao.NewMetaDomain())
+			default:
+				return fmt.Errorf("not supported meta store: %s", Params.MetaStoreCfg.MetaStoreType)
 			}
 
-			var ss *kvmetestore.SuffixSnapshot
-			if ss, initError = kvmetestore.NewSuffixSnapshot(metaKV, "_ts", Params.EtcdCfg.MetaRootPath, "snapshots"); initError != nil {
-				log.Error("RootCoord failed to new suffixSnapshot", zap.Error(initError))
-				return initError
-			}
-			if c.MetaTable, initError = NewMetaTable(c.ctx, metaKV, ss); initError != nil {
+			if c.MetaTable, initError = NewMetaTable(c.ctx, catalog); initError != nil {
 				log.Error("RootCoord failed to new MetaTable", zap.Any("reason", initError))
 				return initError
 			}
@@ -1160,132 +1177,6 @@ func (c *Core) initRbac() (initError error) {
 	return nil
 }
 
-func (c *Core) reSendDdMsg(ctx context.Context, force bool) error {
-	if !force {
-		flag, err := c.MetaTable.txn.Load(DDMsgSendPrefix)
-		if err != nil {
-			// TODO, this is super ugly hack but our kv interface does not support loadWithExist
-			// leave it for later
-			if strings.Contains(err.Error(), "there is no value on key") {
-				log.Debug("skip reSendDdMsg with no dd-msg-send key")
-				return nil
-			}
-			return err
-		}
-		value, err := strconv.ParseBool(flag)
-		if err != nil {
-			return err
-		}
-		if value {
-			log.Debug("skip reSendDdMsg with dd-msg-send set to true")
-			return nil
-		}
-	}
-
-	ddOpStr, err := c.MetaTable.txn.Load(DDOperationPrefix)
-	if err != nil {
-		log.Debug("DdOperation key does not exist")
-		return nil
-	}
-	var ddOp DdOperation
-	if err = json.Unmarshal([]byte(ddOpStr), &ddOp); err != nil {
-		return err
-	}
-
-	invalidateCache := false
-	var ts typeutil.Timestamp
-	var collName string
-	var collectionID UniqueID
-
-	switch ddOp.Type {
-	// TODO remove create collection resend
-	// since create collection needs a start position to succeed
-	case CreateCollectionDDType:
-		var ddReq = internalpb.CreateCollectionRequest{}
-		if err = proto.Unmarshal(ddOp.Body, &ddReq); err != nil {
-			return err
-		}
-		if _, err := c.MetaTable.GetCollectionByName(ddReq.CollectionName, 0); err != nil {
-			if _, err = c.SendDdCreateCollectionReq(ctx, &ddReq, ddReq.PhysicalChannelNames); err != nil {
-				return err
-			}
-		} else {
-			log.Debug("collection has been created, skip re-send CreateCollection",
-				zap.String("collection name", collName))
-		}
-	case DropCollectionDDType:
-		var ddReq = internalpb.DropCollectionRequest{}
-		if err = proto.Unmarshal(ddOp.Body, &ddReq); err != nil {
-			return err
-		}
-		ts = ddReq.Base.Timestamp
-		collName = ddReq.CollectionName
-		if collInfo, err := c.MetaTable.GetCollectionByName(ddReq.CollectionName, 0); err == nil {
-			if err = c.SendDdDropCollectionReq(ctx, &ddReq, collInfo.PhysicalChannelNames); err != nil {
-				return err
-			}
-			invalidateCache = true
-			collectionID = ddReq.CollectionID
-		} else {
-			log.Debug("collection has been removed, skip re-send DropCollection",
-				zap.String("collection name", collName))
-		}
-	case CreatePartitionDDType:
-		var ddReq = internalpb.CreatePartitionRequest{}
-		if err = proto.Unmarshal(ddOp.Body, &ddReq); err != nil {
-			return err
-		}
-		ts = ddReq.Base.Timestamp
-		collName = ddReq.CollectionName
-		collInfo, err := c.MetaTable.GetCollectionByName(ddReq.CollectionName, 0)
-		if err != nil {
-			return err
-		}
-		if _, err = c.MetaTable.GetPartitionByName(collInfo.CollectionID, ddReq.PartitionName, 0); err != nil {
-			if err = c.SendDdCreatePartitionReq(ctx, &ddReq, collInfo.PhysicalChannelNames); err != nil {
-				return err
-			}
-			invalidateCache = true
-			collectionID = ddReq.CollectionID
-		} else {
-			log.Debug("partition has been created, skip re-send CreatePartition",
-				zap.String("collection name", collName), zap.String("partition name", ddReq.PartitionName))
-		}
-	case DropPartitionDDType:
-		var ddReq = internalpb.DropPartitionRequest{}
-		if err = proto.Unmarshal(ddOp.Body, &ddReq); err != nil {
-			return err
-		}
-		ts = ddReq.Base.Timestamp
-		collName = ddReq.CollectionName
-		collInfo, err := c.MetaTable.GetCollectionByName(ddReq.CollectionName, 0)
-		if err != nil {
-			return err
-		}
-		if _, err = c.MetaTable.GetPartitionByName(collInfo.CollectionID, ddReq.PartitionName, 0); err == nil {
-			if err = c.SendDdDropPartitionReq(ctx, &ddReq, collInfo.PhysicalChannelNames); err != nil {
-				return err
-			}
-			invalidateCache = true
-			collectionID = ddReq.CollectionID
-		} else {
-			log.Debug("partition has been removed, skip re-send DropPartition",
-				zap.String("collection name", collName), zap.String("partition name", ddReq.PartitionName))
-		}
-	default:
-		return fmt.Errorf("invalid DdOperation %s", ddOp.Type)
-	}
-
-	if invalidateCache {
-		if err = c.ExpireMetaCache(ctx, nil, collectionID, ts); err != nil {
-			return err
-		}
-	}
-
-	// Update DDOperation in etcd
-	return c.MetaTable.txn.Save(DDMsgSendPrefix, strconv.FormatBool(true))
-}
-
 func (c *Core) getCollectionName(collID, partitionID typeutil.UniqueID) (string, string, error) {
 	colName, err := c.MetaTable.GetCollectionNameByID(collID)
 	if err != nil {
@@ -1319,10 +1210,7 @@ func (c *Core) Start() error {
 			// you can not just stuck here,
 			panic(err)
 		}
-		if err := c.reSendDdMsg(c.ctx, false); err != nil {
-			log.Fatal("RootCoord Start reSendDdMsg failed", zap.Error(err))
-			panic(err)
-		}
+
 		c.wg.Add(5)
 		go c.startTimeTickLoop()
 		go c.tsLoop()

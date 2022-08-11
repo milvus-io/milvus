@@ -651,7 +651,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 		CollectionID: collectionID,
 	})
 	if err = VerifyResponse(dresp, err); err != nil {
-		log.Error("get collection info from master failed",
+		log.Error("get collection info from rootcoord failed",
 			zap.Int64("collectionID", collectionID),
 			zap.Error(err))
 

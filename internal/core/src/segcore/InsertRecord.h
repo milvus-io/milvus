@@ -42,6 +42,7 @@ struct InsertRecord {
 
     std::vector<SegOffset>
     search_pk(const PkType pk, Timestamp timestamp) const {
+        std::shared_lock lck(shared_mutex_);
         std::vector<SegOffset> res_offsets;
         auto offset_iter = pk2offset_.find(pk);
         if (offset_iter != pk2offset_.end()) {
@@ -57,6 +58,7 @@ struct InsertRecord {
 
     std::vector<SegOffset>
     search_pk(const PkType pk, int64_t insert_barrier) const {
+        std::shared_lock lck(shared_mutex_);
         std::vector<SegOffset> res_offsets;
         auto offset_iter = pk2offset_.find(pk);
         if (offset_iter != pk2offset_.end()) {
@@ -72,11 +74,13 @@ struct InsertRecord {
 
     void
     insert_pk(const PkType pk, int64_t offset) {
-        pk2offset_[pk].insert(offset);
+        std::lock_guard lck(shared_mutex_);
+        pk2offset_[pk].emplace_back(offset);
     }
 
     bool
     empty_pks() const {
+        std::shared_lock lck(shared_mutex_);
         return pk2offset_.empty();
     }
 
@@ -133,6 +137,7 @@ struct InsertRecord {
  private:
     //    std::vector<std::unique_ptr<VectorBase>> fields_data_;
     std::unordered_map<FieldId, std::unique_ptr<VectorBase>> fields_data_;
+    mutable std::shared_mutex shared_mutex_;
 };
 
 }  // namespace milvus::segcore

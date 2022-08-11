@@ -5,6 +5,7 @@ go 1.18
 require (
 	github.com/99designs/keyring v1.2.1 // indirect
 	github.com/BurntSushi/toml v1.0.0
+	github.com/DATA-DOG/go-sqlmock v1.5.0 // indirect
 	github.com/HdrHistogram/hdrhistogram-go v1.0.1 // indirect
 	github.com/StackExchange/wmi v1.2.1 // indirect
 	github.com/antlr/antlr4/runtime/Go/antlr v0.0.0-20210826220005-b48c857c3a0e
@@ -24,6 +25,7 @@ require (
 	github.com/google/btree v1.0.1
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/jarcoal/httpmock v1.0.8
+	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/klauspost/compress v1.14.2
 	github.com/lingdor/stackerror v0.0.0-20191119040541-976d8885ed76
 	github.com/minio/minio-go/v7 v7.0.10
@@ -53,6 +55,8 @@ require (
 	google.golang.org/grpc/examples v0.0.0-20220617181431-3e7b97febc7f
 	google.golang.org/protobuf v1.28.0
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
+	gorm.io/driver/mysql v1.3.5 // indirect
+	gorm.io/gorm v1.23.8 // indirect
 	stathat.com/c/consistent v1.0.0
 )
 
@@ -90,6 +94,7 @@ require (
 	github.com/go-playground/locales v0.13.0 // indirect
 	github.com/go-playground/universal-translator v0.17.0 // indirect
 	github.com/go-playground/validator/v10 v10.4.1 // indirect
+	github.com/go-sql-driver/mysql v1.6.0 // indirect
 	github.com/goccy/go-json v0.7.10 // indirect
 	github.com/godbus/dbus v0.0.0-20190726142602-4481cbc300e2 // indirect
 	github.com/godbus/dbus/v5 v5.0.4 // indirect
@@ -102,6 +107,7 @@ require (
 	github.com/gsterjov/go-libsecret v0.0.0-20161001094733-a6f4afe4910c // indirect
 	github.com/hashicorp/hcl v1.0.0 // indirect
 	github.com/inconshreveable/mousetrap v1.0.0 // indirect
+	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jonboulle/clockwork v0.2.2 // indirect
 	github.com/json-iterator/go v1.1.11 // indirect
 	github.com/klauspost/asmfmt v1.3.1 // indirect

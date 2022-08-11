@@ -548,6 +548,34 @@ func (kc *Catalog) DropPartition(ctx context.Context, collectionID typeutil.Uniq
 	return kc.Snapshot.Save(k, string(v), ts)
 }
 
+//func (kc *Catalog) DropIndex(ctx context.Context, collectionInfo *model.Collection, dropIdxID typeutil.UniqueID) error {
+//	collMeta := model.MarshalCollectionModel(collectionInfo)
+//	k := path.Join(CollectionMetaPrefix, strconv.FormatInt(collectionInfo.CollectionID, 10))
+//	v, err := proto.Marshal(collMeta)
+//	if err != nil {
+//		log.Error("drop index marshal fail", zap.String("key", k), zap.Error(err))
+//		return err
+//	}
+//
+//	saveMeta := map[string]string{k: string(v)}
+//
+//	delMeta := []string{
+//		fmt.Sprintf("%s/%d/%d", SegmentIndexMetaPrefix, collectionInfo.CollectionID, dropIdxID),
+//		fmt.Sprintf("%s/%d/%d", IndexMetaPrefix, collectionInfo.CollectionID, dropIdxID),
+//	}
+//
+//	err = kc.Txn.MultiSaveAndRemoveWithPrefix(saveMeta, delMeta)
+//	if err != nil {
+//		log.Error("drop partition update meta fail",
+//			zap.Int64("collectionID", collectionInfo.CollectionID),
+//			zap.Int64("indexID", dropIdxID),
+//			zap.Error(err))
+//		return err
+//	}
+//
+//	return nil
+//}
+
 func (kc *Catalog) DropCredential(ctx context.Context, username string) error {
 	k := fmt.Sprintf("%s/%s", CredentialPrefix, username)
 	err := kc.Txn.Remove(k)

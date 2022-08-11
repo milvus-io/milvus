@@ -21,6 +21,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <unordered_map>
 #include <tbb/concurrent_unordered_map.h>
 #include <tbb/concurrent_unordered_set.h>
 #include <boost/align/aligned_allocator.hpp>
@@ -73,7 +74,7 @@ using InsertData = proto::segcore::InsertRecord;
 using PkType = std::variant<std::monostate, int64_t, std::string>;
 // tbb::concurrent_unordered_multimap equal_range too slow when multi repeated key
 // using Pk2OffsetType = tbb::concurrent_unordered_multimap<PkType, int64_t, std::hash<PkType>>;
-using Pk2OffsetType = tbb::concurrent_unordered_map<PkType, tbb::concurrent_unordered_set<int64_t>, std::hash<PkType>>;
+using Pk2OffsetType = std::unordered_map<PkType, std::vector<int64_t>, std::hash<PkType>>;
 
 inline bool
 IsPrimaryKeyDataType(DataType data_type) {

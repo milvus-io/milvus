@@ -28,30 +28,27 @@ import (
 	"testing"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/golang/protobuf/proto"
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
-	"github.com/milvus-io/milvus/internal/util"
-
 	"github.com/milvus-io/milvus/internal/common"
-
-	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/stretchr/testify/mock"
-
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
+	"github.com/milvus-io/milvus/internal/metastore"
 	kvmetestore "github.com/milvus-io/milvus/internal/metastore/kv"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/etcd"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 type mockTestKV struct {
@@ -134,16 +131,16 @@ func generateMetaTable(t *testing.T) (*MetaTable, *mockTestKV, *mockTestTxnKV, f
 	assert.NotNil(t, skv)
 
 	txnkv := etcdkv.NewEtcdKV(etcdCli, rootPath)
-	mt, err := NewMetaTable(context.TODO(), txnkv, skv)
+	_, err = NewMetaTable(context.TODO(), &kvmetestore.Catalog{Txn: txnkv, Snapshot: skv})
 	assert.Nil(t, err)
 	mockSnapshotKV := &mockTestKV{
-		SnapShotKV: mt.snapshot,
+		SnapShotKV: skv,
 		loadWithPrefix: func(key string, ts typeutil.Timestamp) ([]string, []string, error) {
 			return skv.LoadWithPrefix(key, ts)
 		},
 	}
 	mockTxnKV := &mockTestTxnKV{
-		TxnKV:          mt.txn,
+		TxnKV:          txnkv,
 		loadWithPrefix: func(key string) ([]string, []string, error) { return txnkv.LoadWithPrefix(key) },
 		save:           func(key, value string) error { return txnkv.Save(key, value) },
 		multiSave:      func(kvs map[string]string) error { return txnkv.MultiSave(kvs) },
@@ -153,7 +150,7 @@ func generateMetaTable(t *testing.T) (*MetaTable, *mockTestKV, *mockTestTxnKV, f
 		remove: func(key string) error { return txnkv.Remove(key) },
 	}
 
-	mockMt, err := NewMetaTable(context.TODO(), mockTxnKV, mockSnapshotKV)
+	mockMt, err := NewMetaTable(context.TODO(), &kvmetestore.Catalog{Txn: mockTxnKV, Snapshot: mockSnapshotKV})
 	assert.Nil(t, err)
 	return mockMt, mockSnapshotKV, mockTxnKV, func() {
 		etcdCli.Close()
@@ -201,7 +198,7 @@ func TestMetaTable(t *testing.T) {
 	assert.Nil(t, err)
 	assert.NotNil(t, skv)
 	txnKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
-	mt, err := NewMetaTable(context.TODO(), txnKV, skv)
+	mt, err := NewMetaTable(context.TODO(), &kvmetestore.Catalog{Txn: txnKV, Snapshot: skv})
 	assert.Nil(t, err)
 
 	collInfo := &model.Collection{
@@ -250,6 +247,14 @@ func TestMetaTable(t *testing.T) {
 				PartitionName:             Params.CommonCfg.DefaultPartitionName,
 				PartitionCreatedTimestamp: 0,
 			},
+		},
+		VirtualChannelNames: []string{
+			fmt.Sprintf("dmChannel_%dv%d", collID, 0),
+			fmt.Sprintf("dmChannel_%dv%d", collID, 1),
+		},
+		PhysicalChannelNames: []string{
+			funcutil.ToPhysicalChannel(fmt.Sprintf("dmChannel_%dv%d", collID, 0)),
+			funcutil.ToPhysicalChannel(fmt.Sprintf("dmChannel_%dv%d", collID, 1)),
 		},
 	}
 
@@ -539,7 +544,7 @@ func TestMetaTable(t *testing.T) {
 		},
 	}
 	mockTxnKV := &mockTestTxnKV{
-		TxnKV:          mt.txn,
+		TxnKV:          txnkv,
 		loadWithPrefix: func(key string) ([]string, []string, error) { return txnkv.LoadWithPrefix(key) },
 		save:           func(key, value string) error { return txnkv.Save(key, value) },
 		multiSave:      func(kvs map[string]string) error { return txnkv.MultiSave(kvs) },
@@ -549,7 +554,7 @@ func TestMetaTable(t *testing.T) {
 		remove: func(key string) error { return txnkv.Remove(key) },
 	}
 
-	mt, err = NewMetaTable(context.TODO(), mockTxnKV, mockKV)
+	mt, err = NewMetaTable(context.TODO(), &kvmetestore.Catalog{Txn: mockTxnKV, Snapshot: mockKV})
 	assert.Nil(t, err)
 
 	wg.Add(1)
@@ -1560,7 +1565,7 @@ func TestMetaWithTimestamp(t *testing.T) {
 	assert.Nil(t, err)
 	assert.NotNil(t, skv)
 	txnKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
-	mt, err := NewMetaTable(context.TODO(), txnKV, skv)
+	mt, err := NewMetaTable(context.TODO(), &kvmetestore.Catalog{Txn: txnKV, Snapshot: skv})
 	assert.Nil(t, err)
 
 	collInfo := &model.Collection{
@@ -1729,7 +1734,7 @@ func TestFixIssue10540(t *testing.T) {
 	txnKV.Save(path.Join(kvmetestore.SegmentIndexMetaPrefix, "2"), string(kvmetestore.SuffixSnapshotTombstone))
 	txnKV.Save(path.Join(kvmetestore.IndexMetaPrefix, "3"), string(kvmetestore.SuffixSnapshotTombstone))
 
-	_, err = NewMetaTable(context.TODO(), txnKV, skv)
+	_, err = NewMetaTable(context.TODO(), &kvmetestore.Catalog{Txn: txnKV, Snapshot: skv})
 	assert.Nil(t, err)
 }
 
@@ -2069,9 +2074,11 @@ func TestMetaTable_AlignSegmentsMeta(t *testing.T) {
 		indexID   = UniqueID(1000)
 	)
 	mt := &MetaTable{
-		txn: &mockTestTxnKV{
-			multiRemove: func(keys []string) error {
-				return nil
+		catalog: &kvmetestore.Catalog{
+			Txn: &mockTestTxnKV{
+				multiRemove: func(keys []string) error {
+					return nil
+				},
 			},
 		},
 		collID2Meta: map[typeutil.UniqueID]model.Collection{
@@ -2109,7 +2116,7 @@ func TestMetaTable_AlignSegmentsMeta(t *testing.T) {
 				return fmt.Errorf("error occurred")
 			},
 		}
-		mt.txn = txn
+		mt.catalog = &kvmetestore.Catalog{Txn: txn}
 		mt.AlignSegmentsMeta(collID, partID, map[UniqueID]struct{}{103: {}, 104: {}, 105: {}})
 	})
 }
@@ -2232,7 +2239,7 @@ type MockedCatalog struct {
 	metastore.Catalog
 	alterIndexParamsVerification  func(ctx context.Context, oldIndex *model.Index, newIndex *model.Index, alterType metastore.AlterType)
 	createIndexParamsVerification func(ctx context.Context, col *model.Collection, index *model.Index)
-	dropIndexParamsVerification   func(ctx context.Context, collectionInfo *model.Collection, dropIdxID typeutil.UniqueID, ts typeutil.Timestamp)
+	dropIndexParamsVerification   func(ctx context.Context, collectionInfo *model.Collection, dropIdxID typeutil.UniqueID)
 }
 
 func (mc *MockedCatalog) ListCollections(ctx context.Context, ts typeutil.Timestamp) (map[string]*model.Collection, error) {
@@ -2275,9 +2282,9 @@ func (mc *MockedCatalog) CreateIndex(ctx context.Context, col *model.Collection,
 }
 
 func (mc *MockedCatalog) DropIndex(ctx context.Context, collectionInfo *model.Collection,
-	dropIdxID typeutil.UniqueID, ts typeutil.Timestamp) error {
+	dropIdxID typeutil.UniqueID) error {
 	if mc.dropIndexParamsVerification != nil {
-		mc.dropIndexParamsVerification(ctx, collectionInfo, dropIdxID, ts)
+		mc.dropIndexParamsVerification(ctx, collectionInfo, dropIdxID)
 	}
 
 	args := mc.Called()
@@ -2634,7 +2641,7 @@ func TestMetaTable_RecycleDroppedIndex(t *testing.T) {
 
 	mc := &MockedCatalog{}
 	mc.On("DropIndex").Return(nil)
-	mc.dropIndexParamsVerification = func(ctx context.Context, collectionInfo *model.Collection, dropIdxID typeutil.UniqueID, ts typeutil.Timestamp) {
+	mc.dropIndexParamsVerification = func(ctx context.Context, collectionInfo *model.Collection, dropIdxID typeutil.UniqueID) {
 		assert.NotNil(t, collectionInfo)
 		assert.Equal(t, int64(1), dropIdxID)
 		assert.Equal(t, int64(1), collectionInfo.CollectionID)

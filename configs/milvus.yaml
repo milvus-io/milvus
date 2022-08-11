@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Related configuration of etcd, used to store Milvus metadata.
+# Related configuration of etcd, used to store Milvus metadata & service discovery.
 etcd:
   endpoints:
     - localhost:2379
@@ -47,6 +47,22 @@ etcd:
     # We recommend using version 1.2 and above
     tlsMinVersion: 1.3
 
+# Default value: etcd
+# Valid values: [etcd, mysql]
+metastore:
+  type: etcd
+
+# Related configuration of mysql, used to store Milvus metadata.
+mysql:
+  username: root
+  password: 11111111
+  address: localhost
+  port: 3306
+  dbName: milvus_meta
+  driverName: mysql
+  maxOpenConns: 20
+  maxIdleConns: 5
+
 # please adjust in embedded Milvus: /tmp/milvus/data/
 localStorage:
   path: /var/lib/milvus/data/
@@ -62,10 +78,10 @@ minio:
   rootPath: files # The root path where the message is stored in MinIO/S3
   # Whether to use AWS IAM role to access S3 instead of access/secret keys
   # For more infomation, refer to https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_use.html
-  useIAM: false 
-  # Custom endpoint for fetch IAM role credentials. 
+  useIAM: false
+  # Custom endpoint for fetch IAM role credentials.
   # Leave it empty if you want to use AWS default endpoint
-  iamEndpoint: "" 
+  iamEndpoint: ""
 
 # Milvus supports three MQ: rocksmq(based on RockDB), Pulsar and Kafka, which should be reserved in config what you use.
 # There is a note about enabling priority if we config multiple mq in this file

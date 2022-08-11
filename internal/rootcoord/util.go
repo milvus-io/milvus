@@ -100,11 +100,6 @@ func EncodeDdOperation(m proto.Message, ddType string) (string, error) {
 	return string(ddOpByte), nil
 }
 
-// DecodeDdOperation deserialize string to DdOperation
-func DecodeDdOperation(str string, ddOp *DdOperation) error {
-	return json.Unmarshal([]byte(str), ddOp)
-}
-
 // EncodeMsgPositions serialize []*MsgPosition into string
 func EncodeMsgPositions(msgPositions []*msgstream.MsgPosition) (string, error) {
 	if len(msgPositions) == 0 {
