@@ -104,6 +104,11 @@ func TestInvalidFileConfig(t *testing.T) {
 
 	_, _, err := InitLogger(conf)
 	assert.Equal(t, "can't use directory as log file name", err.Error())
+
+	// invalid level
+	conf = &Config{Level: "debuge", DisableTimestamp: true}
+	_, _, err = InitLogger(conf)
+	assert.Error(t, err)
 }
 
 func TestLevelGetterAndSetter(t *testing.T) {
@@ -234,4 +239,71 @@ func TestRatedLog(t *testing.T) {
 	success = RatedInfo(3.0, "test")
 	assert.True(t, success)
 	Sync()
+}
+
+func TestLeveledLogger(t *testing.T) {
+	ts := newTestLogSpy(t)
+	conf := &Config{Level: "debug", DisableTimestamp: true, DisableCaller: true}
+	logger, _, _ := InitTestLogger(ts, conf)
+	replaceLeveledLoggers(logger)
+
+	debugL().Debug("DEBUG LOG")
+	debugL().Info("INFO LOG")
+	debugL().Warn("WARN LOG")
+	debugL().Error("ERROR LOG")
+	Sync()
+
+	ts.assertMessageContainAny(`[DEBUG] ["DEBUG LOG"]`)
+	ts.assertMessageContainAny(`[INFO] ["INFO LOG"]`)
+	ts.assertMessageContainAny(`[WARN] ["WARN LOG"]`)
+	ts.assertMessageContainAny(`[ERROR] ["ERROR LOG"]`)
+
+	ts.CleanBuffer()
+
+	infoL().Debug("DEBUG LOG")
+	infoL().Info("INFO LOG")
+	infoL().Warn("WARN LOG")
+	infoL().Error("ERROR LOG")
+	Sync()
+
+	ts.assertMessagesNotContains(`[DEBUG] ["DEBUG LOG"]`)
+	ts.assertMessageContainAny(`[INFO] ["INFO LOG"]`)
+	ts.assertMessageContainAny(`[WARN] ["WARN LOG"]`)
+	ts.assertMessageContainAny(`[ERROR] ["ERROR LOG"]`)
+	ts.CleanBuffer()
+
+	warnL().Debug("DEBUG LOG")
+	warnL().Info("INFO LOG")
+	warnL().Warn("WARN LOG")
+	warnL().Error("ERROR LOG")
+	Sync()
+
+	ts.assertMessagesNotContains(`[DEBUG] ["DEBUG LOG"]`)
+	ts.assertMessagesNotContains(`[INFO] ["INFO LOG"]`)
+	ts.assertMessageContainAny(`[WARN] ["WARN LOG"]`)
+	ts.assertMessageContainAny(`[ERROR] ["ERROR LOG"]`)
+	ts.CleanBuffer()
+
+	errorL().Debug("DEBUG LOG")
+	errorL().Info("INFO LOG")
+	errorL().Warn("WARN LOG")
+	errorL().Error("ERROR LOG")
+	Sync()
+
+	ts.assertMessagesNotContains(`[DEBUG] ["DEBUG LOG"]`)
+	ts.assertMessagesNotContains(`[INFO] ["INFO LOG"]`)
+	ts.assertMessagesNotContains(`[WARN] ["WARN LOG"]`)
+	ts.assertMessageContainAny(`[ERROR] ["ERROR LOG"]`)
+
+	ts.CleanBuffer()
+
+	ctx := withLogLevel(context.TODO(), zapcore.DPanicLevel)
+	assert.Equal(t, Ctx(ctx).Logger, L())
+
+	// set invalid level
+	orgLevel := GetLevel()
+	SetLevel(zapcore.FatalLevel + 1)
+	assert.Equal(t, ctxL(), L())
+	SetLevel(orgLevel)
+
 }

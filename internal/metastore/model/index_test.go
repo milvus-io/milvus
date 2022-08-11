@@ -7,13 +7,12 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 var (
-	indexID     = typeutil.UniqueID(1)
-	indexName   = "idx"
-	indexParams = []*commonpb.KeyValuePair{
+	indexID     int64 = 1
+	indexName         = "idx"
+	indexParams       = []*commonpb.KeyValuePair{
 		{
 			Key:   "field110-i1",
 			Value: "field110-v1",

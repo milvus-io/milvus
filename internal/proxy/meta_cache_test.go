@@ -394,12 +394,12 @@ func TestMetaCache_GetShards(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotEmpty(t, shards)
 		assert.Equal(t, 1, len(shards))
-
 		assert.Equal(t, 3, len(shards["channel-1"]))
 
 		// get from cache
 		qc.validShardLeaders = false
 		shards, err = globalMetaCache.GetShards(ctx, true, collectionName)
+
 		assert.NoError(t, err)
 		assert.NotEmpty(t, shards)
 		assert.Equal(t, 1, len(shards))

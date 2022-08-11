@@ -31,7 +31,7 @@ func TestHistorical_statistic(t *testing.T) {
 		his, err := genSimpleReplicaWithSealSegment(ctx)
 		assert.NoError(t, err)
 
-		_, _, _, err = statisticHistorical(his, defaultCollectionID, nil, []UniqueID{defaultSegmentID})
+		_, _, _, err = statisticHistorical(context.TODO(), his, defaultCollectionID, nil, []UniqueID{defaultSegmentID})
 		assert.NoError(t, err)
 	})
 
@@ -42,7 +42,7 @@ func TestHistorical_statistic(t *testing.T) {
 		err = his.removeCollection(defaultCollectionID)
 		assert.NoError(t, err)
 
-		_, _, _, err = statisticHistorical(his, defaultCollectionID, nil, nil)
+		_, _, _, err = statisticHistorical(context.TODO(), his, defaultCollectionID, nil, nil)
 		assert.Error(t, err)
 	})
 
@@ -53,7 +53,7 @@ func TestHistorical_statistic(t *testing.T) {
 		err = his.removeCollection(defaultCollectionID)
 		assert.NoError(t, err)
 
-		_, _, _, err = statisticHistorical(his, defaultCollectionID, []UniqueID{defaultPartitionID}, nil)
+		_, _, _, err = statisticHistorical(context.TODO(), his, defaultCollectionID, []UniqueID{defaultPartitionID}, nil)
 		assert.Error(t, err)
 	})
 
@@ -68,7 +68,7 @@ func TestHistorical_statistic(t *testing.T) {
 		err = his.removePartition(defaultPartitionID)
 		assert.NoError(t, err)
 
-		_, _, _, err = statisticHistorical(his, defaultCollectionID, nil, nil)
+		_, _, _, err = statisticHistorical(context.TODO(), his, defaultCollectionID, nil, nil)
 		assert.Error(t, err)
 	})
 
@@ -79,7 +79,7 @@ func TestHistorical_statistic(t *testing.T) {
 		err = his.removePartition(defaultPartitionID)
 		assert.NoError(t, err)
 
-		res, _, ids, err := statisticHistorical(his, defaultCollectionID, nil, nil)
+		res, _, ids, err := statisticHistorical(context.TODO(), his, defaultCollectionID, nil, nil)
 		assert.Equal(t, 0, len(res))
 		assert.Equal(t, 0, len(ids))
 		assert.NoError(t, err)
@@ -91,7 +91,7 @@ func TestStreaming_statistics(t *testing.T) {
 		streaming, err := genSimpleReplicaWithGrowingSegment()
 		assert.NoError(t, err)
 
-		res, _, _, err := statisticStreaming(streaming,
+		res, _, _, err := statisticStreaming(context.TODO(), streaming,
 			defaultCollectionID,
 			[]UniqueID{defaultPartitionID},
 			defaultDMLChannel)
@@ -103,7 +103,7 @@ func TestStreaming_statistics(t *testing.T) {
 		streaming, err := genSimpleReplicaWithGrowingSegment()
 		assert.NoError(t, err)
 
-		res, _, _, err := statisticStreaming(streaming,
+		res, _, _, err := statisticStreaming(context.TODO(), streaming,
 			defaultCollectionID,
 			[]UniqueID{defaultPartitionID},
 			defaultDMLChannel)
@@ -122,7 +122,7 @@ func TestStreaming_statistics(t *testing.T) {
 		err = streaming.removePartition(defaultPartitionID)
 		assert.NoError(t, err)
 
-		res, _, _, err := statisticStreaming(streaming,
+		res, _, _, err := statisticStreaming(context.TODO(), streaming,
 			defaultCollectionID,
 			[]UniqueID{defaultPartitionID},
 			defaultDMLChannel)
@@ -142,7 +142,7 @@ func TestStreaming_statistics(t *testing.T) {
 		err = streaming.removePartition(defaultPartitionID)
 		assert.NoError(t, err)
 
-		_, _, _, err = statisticStreaming(streaming,
+		_, _, _, err = statisticStreaming(context.TODO(), streaming,
 			defaultCollectionID,
 			[]UniqueID{defaultPartitionID},
 			defaultDMLChannel)
@@ -156,7 +156,7 @@ func TestStreaming_statistics(t *testing.T) {
 		err = streaming.removePartition(defaultPartitionID)
 		assert.NoError(t, err)
 
-		res, _, _, err := statisticStreaming(streaming,
+		res, _, _, err := statisticStreaming(context.TODO(), streaming,
 			defaultCollectionID,
 			[]UniqueID{},
 			defaultDMLChannel)

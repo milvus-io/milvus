@@ -85,7 +85,8 @@ func (s *searchTask) init() error {
 // TODO: merge searchOnStreaming and searchOnHistorical?
 func (s *searchTask) searchOnStreaming() error {
 	// check ctx timeout
-	if !funcutil.CheckCtxValid(s.Ctx()) {
+	ctx := s.Ctx()
+	if !funcutil.CheckCtxValid(ctx) {
 		return errors.New("search context timeout")
 	}
 
@@ -102,7 +103,7 @@ func (s *searchTask) searchOnStreaming() error {
 	s.QS.collection.RLock() // locks the collectionPtr
 	defer s.QS.collection.RUnlock()
 	if _, released := s.QS.collection.getReleaseTime(); released {
-		log.Debug("collection release before search", zap.Int64("msgID", s.ID()),
+		log.Ctx(ctx).Debug("collection release before search", zap.Int64("msgID", s.ID()),
 			zap.Int64("collectionID", s.CollectionID))
 		return fmt.Errorf("retrieve failed, collection has been released, collectionID = %d", s.CollectionID)
 	}
@@ -113,20 +114,20 @@ func (s *searchTask) searchOnStreaming() error {
 	}
 	defer searchReq.delete()
 
-	// TODO add context
-	partResults, _, _, sErr := searchStreaming(s.QS.metaReplica, searchReq, s.CollectionID, s.iReq.GetPartitionIDs(), s.req.GetDmlChannels()[0])
+	partResults, _, _, sErr := searchStreaming(ctx, s.QS.metaReplica, searchReq, s.CollectionID, s.iReq.GetPartitionIDs(), s.req.GetDmlChannels()[0])
 	if sErr != nil {
-		log.Debug("failed to search streaming data", zap.Int64("msgID", s.ID()),
+		log.Ctx(ctx).Warn("failed to search streaming data", zap.Int64("msgID", s.ID()),
 			zap.Int64("collectionID", s.CollectionID), zap.Error(sErr))
 		return sErr
 	}
 	defer deleteSearchResults(partResults)
-	return s.reduceResults(searchReq, partResults)
+	return s.reduceResults(ctx, searchReq, partResults)
 }
 
 func (s *searchTask) searchOnHistorical() error {
 	// check ctx timeout
-	if !funcutil.CheckCtxValid(s.Ctx()) {
+	ctx := s.Ctx()
+	if !funcutil.CheckCtxValid(ctx) {
 		return errors.New("search context timeout")
 	}
 
@@ -139,7 +140,7 @@ func (s *searchTask) searchOnHistorical() error {
 	s.QS.collection.RLock() // locks the collectionPtr
 	defer s.QS.collection.RUnlock()
 	if _, released := s.QS.collection.getReleaseTime(); released {
-		log.Debug("collection release before search", zap.Int64("msgID", s.ID()),
+		log.Ctx(ctx).Warn("collection release before search", zap.Int64("msgID", s.ID()),
 			zap.Int64("collectionID", s.CollectionID))
 		return fmt.Errorf("retrieve failed, collection has been released, collectionID = %d", s.CollectionID)
 	}
@@ -151,12 +152,12 @@ func (s *searchTask) searchOnHistorical() error {
 	}
 	defer searchReq.delete()
 
-	partResults, _, _, err := searchHistorical(s.QS.metaReplica, searchReq, s.CollectionID, nil, segmentIDs)
+	partResults, _, _, err := searchHistorical(ctx, s.QS.metaReplica, searchReq, s.CollectionID, nil, segmentIDs)
 	if err != nil {
 		return err
 	}
 	defer deleteSearchResults(partResults)
-	return s.reduceResults(searchReq, partResults)
+	return s.reduceResults(ctx, searchReq, partResults)
 }
 
 func (s *searchTask) Execute(ctx context.Context) error {
@@ -217,7 +218,7 @@ func (s *searchTask) CPUUsage() int32 {
 }
 
 // reduceResults reduce search results
-func (s *searchTask) reduceResults(searchReq *searchRequest, results []*SearchResult) error {
+func (s *searchTask) reduceResults(ctx context.Context, searchReq *searchRequest, results []*SearchResult) error {
 	isEmpty := len(results) == 0
 	cnt := 1 + len(s.otherTasks)
 	var t *searchTask
@@ -227,7 +228,7 @@ func (s *searchTask) reduceResults(searchReq *searchRequest, results []*SearchRe
 		numSegment := int64(len(results))
 		blobs, err := reduceSearchResultsAndFillData(searchReq.plan, results, numSegment, sInfo.sliceNQs, sInfo.sliceTopKs)
 		if err != nil {
-			log.Debug("marshal for historical results error", zap.Int64("msgID", s.ID()), zap.Error(err))
+			log.Ctx(ctx).Warn("marshal for historical results error", zap.Int64("msgID", s.ID()), zap.Error(err))
 			return err
 		}
 		defer deleteSearchResultDataBlobs(blobs)
@@ -235,7 +236,7 @@ func (s *searchTask) reduceResults(searchReq *searchRequest, results []*SearchRe
 		for i := 0; i < cnt; i++ {
 			blob, err := getSearchResultDataBlob(blobs, i)
 			if err != nil {
-				log.Debug("getSearchResultDataBlob for historical results error", zap.Int64("msgID", s.ID()),
+				log.Ctx(ctx).Warn("getSearchResultDataBlob for historical results error", zap.Int64("msgID", s.ID()),
 					zap.Error(err))
 				return err
 			}

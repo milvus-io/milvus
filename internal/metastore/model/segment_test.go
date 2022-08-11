@@ -4,13 +4,12 @@ import (
 	"testing"
 
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
 )
 
 var (
-	segmentID = typeutil.UniqueID(1)
-	buildID   = typeutil.UniqueID(1)
+	segmentID int64 = 1
+	buildID   int64 = 1
 
 	segmentIdxPb = &pb.SegmentIndexInfo{
 		CollectionID: colID,

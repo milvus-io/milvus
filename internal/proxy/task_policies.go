@@ -40,7 +40,7 @@ func groupShardleadersWithSameQueryNode(
 	// check if all leaders were checked
 	for dml, idx := range nexts {
 		if idx >= len(shard2leaders[dml]) {
-			log.Warn("no shard leaders were available",
+			log.Ctx(ctx).Warn("no shard leaders were available",
 				zap.String("channel", dml),
 				zap.String("leaders", fmt.Sprintf("%v", shard2leaders[dml])))
 			if e, ok := errSet[dml]; ok {
@@ -59,7 +59,7 @@ func groupShardleadersWithSameQueryNode(
 		if _, ok := qnSet[nodeInfo.nodeID]; !ok {
 			qn, err := mgr.GetClient(ctx, nodeInfo.nodeID)
 			if err != nil {
-				log.Warn("failed to get shard leader", zap.Int64("nodeID", nodeInfo.nodeID), zap.Error(err))
+				log.Ctx(ctx).Warn("failed to get shard leader", zap.Int64("nodeID", nodeInfo.nodeID), zap.Error(err))
 				// if get client failed, just record error and wait for next round to get client and do query
 				errSet[dml] = err
 				continue
@@ -111,7 +111,7 @@ func mergeRoundRobinPolicy(
 			go func() {
 				defer wg.Done()
 				if err := query(ctx, nodeID, qn, channels); err != nil {
-					log.Warn("failed to do query with node", zap.Int64("nodeID", nodeID),
+					log.Ctx(ctx).Warn("failed to do query with node", zap.Int64("nodeID", nodeID),
 						zap.Strings("dmlChannels", channels), zap.Error(err))
 					mu.Lock()
 					defer mu.Unlock()
@@ -138,7 +138,7 @@ func mergeRoundRobinPolicy(
 					nextSet[dml] = dml2leaders[dml][idx].nodeID
 				}
 			}
-			log.Warn("retry another query node with round robin", zap.Any("Nexts", nextSet))
+			log.Ctx(ctx).Warn("retry another query node with round robin", zap.Any("Nexts", nextSet))
 		}
 	}
 	return nil

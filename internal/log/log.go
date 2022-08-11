@@ -33,6 +33,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sync"
 	"sync/atomic"
 
 	"errors"
@@ -45,12 +46,20 @@ import (
 )
 
 var _globalL, _globalP, _globalS, _globalR atomic.Value
+
+var (
+	_globalLevelLogger sync.Map
+)
+
 var rateLimiter *utils.ReconfigurableRateLimiter
 
 func init() {
 	l, p := newStdLogger()
+
+	replaceLeveledLoggers(l)
 	_globalL.Store(l)
 	_globalP.Store(p)
+
 	s := _globalL.Load().(*zap.Logger).Sugar()
 	_globalS.Store(s)
 
@@ -80,7 +89,19 @@ func InitLogger(cfg *Config, opts ...zap.Option) (*zap.Logger, *ZapProperties, e
 		}
 		output = stdOut
 	}
-	return InitLoggerWithWriteSyncer(cfg, output, opts...)
+	debugCfg := *cfg
+	debugCfg.Level = "debug"
+	debugL, r, err := InitLoggerWithWriteSyncer(&debugCfg, output, opts...)
+	if err != nil {
+		return nil, nil, err
+	}
+	replaceLeveledLoggers(debugL)
+	level := zapcore.DebugLevel
+	if err := level.UnmarshalText([]byte(cfg.Level)); err != nil {
+		return nil, nil, err
+	}
+	r.Level.SetLevel(level)
+	return debugL.WithOptions(zap.IncreaseLevel(level), zap.AddCallerSkip(1)), r, nil
 }
 
 // InitTestLogger initializes a logger for unit tests
@@ -136,7 +157,7 @@ func initFileLog(cfg *FileLogConfig) (*lumberjack.Logger, error) {
 
 func newStdLogger() (*zap.Logger, *ZapProperties) {
 	conf := &Config{Level: "debug", File: FileLogConfig{}}
-	lg, r, _ := InitLogger(conf, zap.AddCallerSkip(1))
+	lg, r, _ := InitLogger(conf)
 	return lg, r
 }
 
@@ -157,6 +178,40 @@ func R() *utils.ReconfigurableRateLimiter {
 	return _globalR.Load().(*utils.ReconfigurableRateLimiter)
 }
 
+func ctxL() *zap.Logger {
+	level := _globalP.Load().(*ZapProperties).Level.Level()
+	l, ok := _globalLevelLogger.Load(level)
+	if !ok {
+		return L()
+	}
+	return l.(*zap.Logger)
+}
+
+func debugL() *zap.Logger {
+	v, _ := _globalLevelLogger.Load(zapcore.DebugLevel)
+	return v.(*zap.Logger)
+}
+
+func infoL() *zap.Logger {
+	v, _ := _globalLevelLogger.Load(zapcore.InfoLevel)
+	return v.(*zap.Logger)
+}
+
+func warnL() *zap.Logger {
+	v, _ := _globalLevelLogger.Load(zapcore.WarnLevel)
+	return v.(*zap.Logger)
+}
+
+func errorL() *zap.Logger {
+	v, _ := _globalLevelLogger.Load(zapcore.ErrorLevel)
+	return v.(*zap.Logger)
+}
+
+func fatalL() *zap.Logger {
+	v, _ := _globalLevelLogger.Load(zapcore.FatalLevel)
+	return v.(*zap.Logger)
+}
+
 // ReplaceGlobals replaces the global Logger and SugaredLogger.
 // It's safe for concurrent use.
 func ReplaceGlobals(logger *zap.Logger, props *ZapProperties) {
@@ -165,11 +220,31 @@ func ReplaceGlobals(logger *zap.Logger, props *ZapProperties) {
 	_globalP.Store(props)
 }
 
+func replaceLeveledLoggers(debugLogger *zap.Logger) {
+	levels := []zapcore.Level{zapcore.DebugLevel, zapcore.InfoLevel, zapcore.WarnLevel, zapcore.ErrorLevel,
+		zapcore.DPanicLevel, zapcore.PanicLevel, zapcore.FatalLevel}
+	for _, level := range levels {
+		levelL := debugLogger.WithOptions(zap.IncreaseLevel(level))
+		_globalLevelLogger.Store(level, levelL)
+	}
+}
+
 // Sync flushes any buffered log entries.
 func Sync() error {
-	err := L().Sync()
-	if err != nil {
+	if err := L().Sync(); err != nil {
 		return err
 	}
-	return S().Sync()
+	if err := S().Sync(); err != nil {
+		return err
+	}
+	var reterr error
+	_globalLevelLogger.Range(func(key, val interface{}) bool {
+		l := val.(*zap.Logger)
+		if err := l.Sync(); err != nil {
+			reterr = err
+			return false
+		}
+		return true
+	})
+	return reterr
 }

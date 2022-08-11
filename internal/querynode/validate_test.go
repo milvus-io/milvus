@@ -30,35 +30,35 @@ func TestQueryShardHistorical_validateSegmentIDs(t *testing.T) {
 	t.Run("test normal validate", func(t *testing.T) {
 		his, err := genSimpleReplicaWithSealSegment(ctx)
 		assert.NoError(t, err)
-		_, _, err = validateOnHistoricalReplica(his, defaultCollectionID, []UniqueID{defaultPartitionID}, []UniqueID{defaultSegmentID})
+		_, _, err = validateOnHistoricalReplica(context.TODO(), his, defaultCollectionID, []UniqueID{defaultPartitionID}, []UniqueID{defaultSegmentID})
 		assert.NoError(t, err)
 	})
 
 	t.Run("test normal validate2", func(t *testing.T) {
 		his, err := genSimpleReplicaWithSealSegment(ctx)
 		assert.NoError(t, err)
-		_, _, err = validateOnHistoricalReplica(his, defaultCollectionID, []UniqueID{}, []UniqueID{defaultSegmentID})
+		_, _, err = validateOnHistoricalReplica(context.TODO(), his, defaultCollectionID, []UniqueID{}, []UniqueID{defaultSegmentID})
 		assert.NoError(t, err)
 	})
 
 	t.Run("test validate non-existent collection", func(t *testing.T) {
 		his, err := genSimpleReplicaWithSealSegment(ctx)
 		assert.NoError(t, err)
-		_, _, err = validateOnHistoricalReplica(his, defaultCollectionID+1, []UniqueID{defaultPartitionID}, []UniqueID{defaultSegmentID})
+		_, _, err = validateOnHistoricalReplica(context.TODO(), his, defaultCollectionID+1, []UniqueID{defaultPartitionID}, []UniqueID{defaultSegmentID})
 		assert.Error(t, err)
 	})
 
 	t.Run("test validate non-existent partition", func(t *testing.T) {
 		his, err := genSimpleReplicaWithSealSegment(ctx)
 		assert.NoError(t, err)
-		_, _, err = validateOnHistoricalReplica(his, defaultCollectionID, []UniqueID{defaultPartitionID + 1}, []UniqueID{defaultSegmentID})
+		_, _, err = validateOnHistoricalReplica(context.TODO(), his, defaultCollectionID, []UniqueID{defaultPartitionID + 1}, []UniqueID{defaultSegmentID})
 		assert.Error(t, err)
 	})
 
 	t.Run("test validate non-existent segment", func(t *testing.T) {
 		his, err := genSimpleReplicaWithSealSegment(ctx)
 		assert.NoError(t, err)
-		_, _, err = validateOnHistoricalReplica(his, defaultCollectionID, []UniqueID{defaultPartitionID}, []UniqueID{defaultSegmentID + 1})
+		_, _, err = validateOnHistoricalReplica(context.TODO(), his, defaultCollectionID, []UniqueID{defaultPartitionID}, []UniqueID{defaultSegmentID + 1})
 		assert.Error(t, err)
 	})
 
@@ -79,7 +79,7 @@ func TestQueryShardHistorical_validateSegmentIDs(t *testing.T) {
 		assert.NoError(t, err)
 		// Scenario: search for a segment (segmentID = defaultSegmentID + 1, partitionID = defaultPartitionID+1)
 		// that does not belong to defaultPartition
-		_, _, err = validateOnHistoricalReplica(his, defaultCollectionID, []UniqueID{defaultPartitionID}, []UniqueID{defaultSegmentID + 1})
+		_, _, err = validateOnHistoricalReplica(context.TODO(), his, defaultCollectionID, []UniqueID{defaultPartitionID}, []UniqueID{defaultSegmentID + 1})
 		assert.Error(t, err)
 	})
 
@@ -88,7 +88,7 @@ func TestQueryShardHistorical_validateSegmentIDs(t *testing.T) {
 		assert.NoError(t, err)
 		err = his.removePartition(defaultPartitionID)
 		assert.NoError(t, err)
-		_, _, err = validateOnHistoricalReplica(his, defaultCollectionID, []UniqueID{}, []UniqueID{defaultSegmentID})
+		_, _, err = validateOnHistoricalReplica(context.TODO(), his, defaultCollectionID, []UniqueID{}, []UniqueID{defaultSegmentID})
 		assert.Error(t, err)
 	})
 
@@ -100,7 +100,7 @@ func TestQueryShardHistorical_validateSegmentIDs(t *testing.T) {
 		col.setLoadType(loadTypePartition)
 		err = his.removePartition(defaultPartitionID)
 		assert.NoError(t, err)
-		_, _, err = validateOnHistoricalReplica(his, defaultCollectionID, []UniqueID{}, []UniqueID{defaultSegmentID})
+		_, _, err = validateOnHistoricalReplica(context.TODO(), his, defaultCollectionID, []UniqueID{}, []UniqueID{defaultSegmentID})
 		assert.Error(t, err)
 	})
 
@@ -112,7 +112,7 @@ func TestQueryShardHistorical_validateSegmentIDs(t *testing.T) {
 		col.setLoadType(loadTypeCollection)
 		err = his.removePartition(defaultPartitionID)
 		assert.NoError(t, err)
-		_, _, err = validateOnHistoricalReplica(his, defaultCollectionID, []UniqueID{}, []UniqueID{defaultSegmentID})
+		_, _, err = validateOnHistoricalReplica(context.TODO(), his, defaultCollectionID, []UniqueID{}, []UniqueID{defaultSegmentID})
 		assert.NoError(t, err)
 	})
 }

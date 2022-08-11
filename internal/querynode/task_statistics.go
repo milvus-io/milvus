@@ -34,7 +34,8 @@ type statistics struct {
 
 func (s *statistics) statisticOnStreaming() error {
 	// check ctx timeout
-	if !funcutil.CheckCtxValid(s.ctx) {
+	ctx := s.ctx
+	if !funcutil.CheckCtxValid(ctx) {
 		return errors.New("get statistics context timeout")
 	}
 
@@ -47,14 +48,15 @@ func (s *statistics) statisticOnStreaming() error {
 	s.qs.collection.RLock() // locks the collectionPtr
 	defer s.qs.collection.RUnlock()
 	if _, released := s.qs.collection.getReleaseTime(); released {
-		log.Debug("collection release before do statistics", zap.Int64("msgID", s.id),
+		log.Ctx(ctx).Warn("collection release before do statistics", zap.Int64("msgID", s.id),
 			zap.Int64("collectionID", s.iReq.GetCollectionID()))
 		return fmt.Errorf("statistic failed, collection has been released, collectionID = %d", s.iReq.GetCollectionID())
 	}
 
-	results, _, _, err := statisticStreaming(s.qs.metaReplica, s.iReq.GetCollectionID(), s.iReq.GetPartitionIDs(), s.req.GetDmlChannels()[0])
+	results, _, _, err := statisticStreaming(ctx, s.qs.metaReplica, s.iReq.GetCollectionID(),
+		s.iReq.GetPartitionIDs(), s.req.GetDmlChannels()[0])
 	if err != nil {
-		log.Debug("failed to statistic on streaming data", zap.Int64("msgID", s.id),
+		log.Ctx(ctx).Warn("failed to statistic on streaming data", zap.Int64("msgID", s.id),
 			zap.Int64("collectionID", s.iReq.GetCollectionID()), zap.Error(err))
 		return err
 	}
@@ -63,7 +65,8 @@ func (s *statistics) statisticOnStreaming() error {
 
 func (s *statistics) statisticOnHistorical() error {
 	// check ctx timeout
-	if !funcutil.CheckCtxValid(s.ctx) {
+	ctx := s.ctx
+	if !funcutil.CheckCtxValid(ctx) {
 		return errors.New("get statistics context timeout")
 	}
 
@@ -76,13 +79,13 @@ func (s *statistics) statisticOnHistorical() error {
 	s.qs.collection.RLock() // locks the collectionPtr
 	defer s.qs.collection.RUnlock()
 	if _, released := s.qs.collection.getReleaseTime(); released {
-		log.Debug("collection release before do statistics", zap.Int64("msgID", s.id),
+		log.Ctx(ctx).Debug("collection release before do statistics", zap.Int64("msgID", s.id),
 			zap.Int64("collectionID", s.iReq.GetCollectionID()))
 		return fmt.Errorf("statistic failed, collection has been released, collectionID = %d", s.iReq.GetCollectionID())
 	}
 
 	segmentIDs := s.req.GetSegmentIDs()
-	results, _, _, err := statisticHistorical(s.qs.metaReplica, s.iReq.GetCollectionID(), s.iReq.GetPartitionIDs(), segmentIDs)
+	results, _, _, err := statisticHistorical(ctx, s.qs.metaReplica, s.iReq.GetCollectionID(), s.iReq.GetPartitionIDs(), segmentIDs)
 	if err != nil {
 		return err
 	}

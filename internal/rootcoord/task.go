@@ -286,6 +286,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		return err
 	}
 
+	log.NewMetaLogger().WithCollectionMeta(&collInfo).WithOperation(log.CreateCollection).WithTSO(ts).Info()
 	return nil
 }
 
@@ -411,6 +412,8 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		return err
 	}
 
+	log.NewMetaLogger().WithCollectionID(collMeta.CollectionID).
+		WithCollectionName(collMeta.Name).WithTSO(ts).WithOperation(log.DropCollection).Info()
 	return nil
 }
 
@@ -614,6 +617,8 @@ func (t *CreatePartitionReqTask) Execute(ctx context.Context) error {
 		return err
 	}
 
+	log.NewMetaLogger().WithCollectionName(collMeta.Name).WithCollectionID(collMeta.CollectionID).
+		WithPartitionID(partID).WithPartitionName(t.Req.PartitionName).WithTSO(ts).WithOperation(log.CreatePartition).Info()
 	return nil
 }
 
@@ -711,6 +716,8 @@ func (t *DropPartitionReqTask) Execute(ctx context.Context) error {
 	//	return err
 	//}
 
+	log.NewMetaLogger().WithCollectionID(collInfo.CollectionID).WithCollectionName(collInfo.Name).
+		WithPartitionName(t.Req.PartitionName).WithTSO(ts).WithOperation(log.DropCollection).Info()
 	return nil
 }
 
@@ -1058,6 +1065,11 @@ func (t *CreateIndexReqTask) Execute(ctx context.Context) error {
 		}
 	}
 
+	idxMeta, err := t.core.MetaTable.GetIndexByID(indexID)
+	if err == nil {
+		log.NewMetaLogger().WithIndexMeta(idxMeta).WithOperation(log.CreateIndex).WithTSO(createTS).Info()
+	}
+
 	return nil
 }
 
@@ -1118,6 +1130,15 @@ func (t *DropIndexReqTask) Execute(ctx context.Context) error {
 	if err := t.core.MetaTable.MarkIndexDeleted(t.Req.CollectionName, t.Req.FieldName, t.Req.IndexName); err != nil {
 		return err
 	}
+	deleteTS, err := t.core.TSOAllocator(1)
+	if err != nil {
+		return err
+	}
+	log.NewMetaLogger().WithCollectionName(t.Req.CollectionName).
+		WithFieldName(t.Req.FieldName).
+		WithIndexName(t.Req.IndexName).
+		WithOperation(log.DropIndex).WithTSO(deleteTS).Info()
+
 	return nil
 }
 
@@ -1147,6 +1168,7 @@ func (t *CreateAliasReqTask) Execute(ctx context.Context) error {
 		return fmt.Errorf("meta table add alias failed, error = %w", err)
 	}
 
+	log.NewMetaLogger().WithCollectionName(t.Req.CollectionName).WithAlias(t.Req.Alias).WithTSO(ts).WithOperation(log.CreateCollectionAlias).Info()
 	return nil
 }
 
@@ -1176,7 +1198,12 @@ func (t *DropAliasReqTask) Execute(ctx context.Context) error {
 		return fmt.Errorf("meta table drop alias failed, error = %w", err)
 	}
 
-	return t.core.ExpireMetaCache(ctx, []string{t.Req.Alias}, InvalidCollectionID, ts)
+	if err := t.core.ExpireMetaCache(ctx, []string{t.Req.Alias}, InvalidCollectionID, ts); err != nil {
+		return err
+	}
+
+	log.NewMetaLogger().WithAlias(t.Req.Alias).WithOperation(log.DropCollectionAlias).WithTSO(ts).Info()
+	return nil
 }
 
 // AlterAliasReqTask alter alias request task
@@ -1205,5 +1232,11 @@ func (t *AlterAliasReqTask) Execute(ctx context.Context) error {
 		return fmt.Errorf("meta table alter alias failed, error = %w", err)
 	}
 
-	return t.core.ExpireMetaCache(ctx, []string{t.Req.Alias}, InvalidCollectionID, ts)
+	if err := t.core.ExpireMetaCache(ctx, []string{t.Req.Alias}, InvalidCollectionID, ts); err != nil {
+		return nil
+	}
+
+	log.NewMetaLogger().WithCollectionName(t.Req.CollectionName).
+		WithAlias(t.Req.Alias).WithOperation(log.AlterCollectionAlias).WithTSO(ts).Info()
+	return nil
 }

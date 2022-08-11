@@ -30,6 +30,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 
+	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 
 	"github.com/milvus-io/milvus/internal/indexnode"
@@ -42,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -108,8 +110,12 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 		grpc.KeepaliveParams(kasp),
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize),
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize),
-		grpc.UnaryInterceptor(ot.UnaryServerInterceptor(opts...)),
-		grpc.StreamInterceptor(ot.StreamServerInterceptor(opts...)))
+		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
+			ot.UnaryServerInterceptor(opts...),
+			logutil.UnaryTraceLoggerInterceptor)),
+		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
+			ot.StreamServerInterceptor(opts...),
+			logutil.StreamTraceLoggerInterceptor)))
 	indexpb.RegisterIndexNodeServer(s.grpcServer, s)
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
 	if err := s.grpcServer.Serve(lis); err != nil {
