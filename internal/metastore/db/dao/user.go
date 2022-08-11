@@ -53,7 +53,7 @@ func (s *userDb) Insert(in *dbmodel.User) error {
 }
 
 func (s *userDb) MarkDeletedByUsername(tenantID string, username string) error {
-	err := s.db.Model(&dbmodel.Index{}).Where("tenant_id = ? AND username = ?", tenantID, username).Update("is_deleted", true).Error
+	err := s.db.Model(&dbmodel.User{}).Where("tenant_id = ? AND username = ?", tenantID, username).Update("is_deleted", true).Error
 	if err != nil {
 		log.Error("update credential_users is_deleted=true failed", zap.String("tenant", tenantID), zap.String("username", username), zap.Error(err))
 		return err

@@ -144,7 +144,7 @@ func TestUser_MarkDeletedByUsername(t *testing.T) {
 
 	// expectation
 	mock.ExpectBegin()
-	mock.ExpectExec("UPDATE `indexes` SET `is_deleted`=?,`updated_at`=? WHERE tenant_id = ? AND username = ?").
+	mock.ExpectExec("UPDATE `credential_users` SET `is_deleted`=?,`updated_at`=? WHERE tenant_id = ? AND username = ?").
 		WithArgs(true, AnyTime{}, tenantID, username).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
@@ -159,7 +159,7 @@ func TestUser_MarkDeletedByUsername_Error(t *testing.T) {
 
 	// expectation
 	mock.ExpectBegin()
-	mock.ExpectExec("UPDATE `indexes` SET `is_deleted`=?,`updated_at`=? WHERE tenant_id = ? AND username = ?").
+	mock.ExpectExec("UPDATE `credential_users` SET `is_deleted`=?,`updated_at`=? WHERE tenant_id = ? AND username = ?").
 		WithArgs(true, AnyTime{}, tenantID, username).
 		WillReturnError(errors.New("test error"))
 	mock.ExpectRollback()
