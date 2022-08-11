@@ -521,6 +521,8 @@ class TestCompactionOperation(TestcaseBase):
         while True:
             sleep(5)
             segment_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
+            print("segment_info ", segment_info)
+            print("c_plans", c_plans.plans)
             if len(segment_info) != 0 and segment_info[0].segmentID == c_plans.plans[0].target:
                 log.debug(segment_info)
                 break
