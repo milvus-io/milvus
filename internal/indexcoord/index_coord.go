@@ -420,6 +420,11 @@ func (i *IndexCoord) CreateIndex(ctx context.Context, req *indexpb.CreateIndexRe
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
 	}
 
+	if !i.metaTable.CanCreateIndex(req) {
+		ret.Reason = "CreateIndex failed: index already exist, but parameters are inconsistent"
+		return ret, nil
+	}
+
 	t := &CreateIndexTask{
 		BaseTask: BaseTask{
 			ctx:   ctx,

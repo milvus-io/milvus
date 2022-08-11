@@ -409,6 +409,73 @@ func (mt *metaTable) GetIndexesForCollection(collID UniqueID, indexName string) 
 	return indexInfos
 }
 
+func (mt *metaTable) CanCreateIndex(req *indexpb.CreateIndexRequest) bool {
+	mt.indexLock.RLock()
+	defer mt.indexLock.RUnlock()
+
+	indexes, ok := mt.collectionIndexes[req.CollectionID]
+	if !ok {
+		return true
+	}
+	for _, index := range indexes {
+		if req.IndexName == index.IndexName {
+			if !mt.checkParams(index, req) {
+				return false
+			}
+			return true
+		}
+	}
+	return true
+}
+
+func (mt *metaTable) checkParams(fieldIndex *model.Index, req *indexpb.CreateIndexRequest) bool {
+	if fieldIndex.IsDeleted {
+		return false
+	}
+	if fieldIndex.FieldID != req.FieldID {
+		return false
+	}
+
+	if len(fieldIndex.TypeParams) != len(req.TypeParams) {
+		return false
+	}
+	notEq := false
+	for _, param1 := range fieldIndex.TypeParams {
+		exist := false
+		for _, param2 := range req.TypeParams {
+			if param2.Key == param1.Key && param2.Value == param1.Value {
+				exist = true
+			}
+		}
+		if !exist {
+			notEq = true
+			break
+		}
+	}
+	if notEq {
+		return false
+	}
+	if len(fieldIndex.IndexParams) != len(req.IndexParams) {
+		return false
+	}
+	for _, param1 := range fieldIndex.IndexParams {
+		exist := false
+		for _, param2 := range req.IndexParams {
+			if param2.Key == param1.Key && param2.Value == param1.Value {
+				exist = true
+			}
+		}
+		if !exist {
+			notEq = true
+			break
+		}
+	}
+	if notEq {
+		return false
+	}
+	return true
+}
+
 // HasSameReq determine whether there are same indexing tasks.
 func (mt *metaTable) HasSameReq(req *indexpb.CreateIndexRequest) (bool, UniqueID) {
 	mt.indexLock.RLock()
