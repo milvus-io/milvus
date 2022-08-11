@@ -703,8 +703,16 @@ func (i *IndexCoord) DescribeIndex(ctx context.Context, req *indexpb.DescribeInd
 		}, nil
 	}
 
-	indexInfos := make([]*indexpb.IndexInfo, 0)
 	indexes := i.metaTable.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
+	if len(indexes) == 0 {
+		return &indexpb.DescribeIndexResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_IndexNotExist,
+				Reason:    "index not exist",
+			},
+		}, nil
+	}
+	indexInfos := make([]*indexpb.IndexInfo, 0)
 	for _, index := range indexes {
 		indexInfos = append(indexInfos, &indexpb.IndexInfo{
 			CollectionID: index.CollectionID,
