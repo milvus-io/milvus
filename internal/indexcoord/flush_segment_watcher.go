@@ -182,7 +182,7 @@ func (fsw *flushedSegmentWatcher) process(task *flushedSegmentTask) {
 	segID := task.segmentInfo.SegmentID
 	switch task.state {
 	case indexTaskWait:
-		if err := fsw.constructTask(task.segmentInfo); err != nil {
+		if err := fsw.constructTask(task); err != nil {
 			log.Error("IndexCoord flushedSegmentWatcher construct task fail", zap.Int64("segID", segID),
 				zap.Int64s("compactFrom", task.segmentInfo.CompactionFrom), zap.Error(err))
 			return
@@ -190,6 +190,7 @@ func (fsw *flushedSegmentWatcher) process(task *flushedSegmentTask) {
 		fsw.flushedSegments[segID][-1].state = indexTaskDone
 		return
 	case indexTaskInit:
+		log.Debug("debug for init ", zap.Any("task", task.segmentInfo), zap.Any("binlog", task.binLogs))
 		createTs, err := fsw.ic.tsoAllocator.AllocOne()
 		if err != nil {
 			log.Warn("IndexCoord flushedSegmentWatcher alloc timestamp fail", zap.Error(err))
@@ -262,39 +263,40 @@ func (fsw *flushedSegmentWatcher) process(task *flushedSegmentTask) {
 	}
 }
 
-func (fsw *flushedSegmentWatcher) constructTask(segmentInfo *querypb.SegmentInfo) error {
-	buildIDs, err := fsw.meta.MarkSegmentsIndexAsDeleted(segmentInfo.CompactionFrom)
+func (fsw *flushedSegmentWatcher) constructTask(t *flushedSegmentTask) error {
+	buildIDs, err := fsw.meta.MarkSegmentsIndexAsDeleted(t.segmentInfo.CompactionFrom)
 	if err != nil {
-		log.Error("IndexCoord mark compacted segments' index fail", zap.Int64("segID", segmentInfo.SegmentID),
-			zap.Int64s("compactFrom", segmentInfo.CompactionFrom), zap.Error(err))
+		log.Error("IndexCoord mark compacted segments' index fail", zap.Int64("segID", t.segmentInfo.SegmentID),
+			zap.Int64s("compactFrom", t.segmentInfo.CompactionFrom), zap.Error(err))
 		return err
 	}
 	for _, buildID := range buildIDs {
 		fsw.builder.markTaskAsDeleted(buildID)
 	}
 
-	fieldIndexes := fsw.meta.GetIndexesForCollection(segmentInfo.CollectionID, "")
-	if segmentInfo.NumRows < Params.IndexCoordCfg.MinSegmentNumRowsToEnableIndex || len(fieldIndexes) == 0 {
-		log.Warn("segment no need to build index", zap.Int64("segmentID", segmentInfo.SegmentID),
-			zap.Int64("num of rows", segmentInfo.NumRows), zap.Int("collection indexes num", len(fieldIndexes)))
-		fsw.flushedSegments[segmentInfo.SegmentID][0] = &flushedSegmentTask{
-			segmentInfo: segmentInfo,
+	fieldIndexes := fsw.meta.GetIndexesForCollection(t.segmentInfo.CollectionID, "")
+	if t.segmentInfo.NumRows < Params.IndexCoordCfg.MinSegmentNumRowsToEnableIndex || len(fieldIndexes) == 0 {
+		log.Warn("segment no need to build index", zap.Int64("segmentID", t.segmentInfo.SegmentID),
+			zap.Int64("num of rows", t.segmentInfo.NumRows), zap.Int("collection indexes num", len(fieldIndexes)))
+		fsw.flushedSegments[t.segmentInfo.SegmentID][0] = &flushedSegmentTask{
+			segmentInfo: t.segmentInfo,
 			state:       indexTaskDone,
+			binLogs:     t.binLogs,
 			initTask:    false,
 		}
 		fsw.notify <- struct{}{}
 		return nil
 	}
 	for _, index := range fieldIndexes {
-		fsw.flushedSegments[segmentInfo.SegmentID][index.IndexID] = &flushedSegmentTask{
+		fsw.flushedSegments[t.segmentInfo.SegmentID][index.IndexID] = &flushedSegmentTask{
 			segmentInfo: &querypb.SegmentInfo{
-				SegmentID:           segmentInfo.SegmentID,
-				CollectionID:        segmentInfo.CollectionID,
-				PartitionID:         segmentInfo.PartitionID,
-				NumRows:             segmentInfo.NumRows,
-				CompactionFrom:      segmentInfo.CompactionFrom,
-				CreatedByCompaction: segmentInfo.CreatedByCompaction,
-				SegmentState:        segmentInfo.SegmentState,
+				SegmentID:           t.segmentInfo.SegmentID,
+				CollectionID:        t.segmentInfo.CollectionID,
+				PartitionID:         t.segmentInfo.PartitionID,
+				NumRows:             t.segmentInfo.NumRows,
+				CompactionFrom:      t.segmentInfo.CompactionFrom,
+				CreatedByCompaction: t.segmentInfo.CreatedByCompaction,
+				SegmentState:        t.segmentInfo.SegmentState,
 				EnableIndex:         true,
 				IndexName:           index.IndexName,
 				IndexID:             index.IndexID,
@@ -308,20 +310,21 @@ func (fsw *flushedSegmentWatcher) constructTask(segmentInfo *querypb.SegmentInfo
 					},
 				},
 			},
-			state: indexTaskInit,
+			state:   indexTaskInit,
+			binLogs: t.binLogs,
 		}
-		hasIndex, _ := fsw.meta.CheckBuiltIndex(segmentInfo.SegmentID, index.IndexID)
+		hasIndex, _ := fsw.meta.CheckBuiltIndex(t.segmentInfo.SegmentID, index.IndexID)
 		if hasIndex {
-			state := fsw.meta.GetSegmentIndexState(segmentInfo.SegmentID, index.IndexID)
+			state := fsw.meta.GetSegmentIndexState(t.segmentInfo.SegmentID, index.IndexID)
 			switch state.state {
 			case commonpb.IndexState_IndexStateNone:
-				fsw.flushedSegments[segmentInfo.SegmentID][index.IndexID].state = indexTaskInit
+				fsw.flushedSegments[t.segmentInfo.SegmentID][index.IndexID].state = indexTaskInit
 
 			case commonpb.IndexState_InProgress, commonpb.IndexState_Unissued, commonpb.IndexState_Retry:
-				fsw.flushedSegments[segmentInfo.SegmentID][index.IndexID].state = indexTaskInProgress
+				fsw.flushedSegments[t.segmentInfo.SegmentID][index.IndexID].state = indexTaskInProgress
 
 			case commonpb.IndexState_Finished, commonpb.IndexState_Failed:
-				fsw.flushedSegments[segmentInfo.SegmentID][index.IndexID].state = indexTaskDone
+				fsw.flushedSegments[t.segmentInfo.SegmentID][index.IndexID].state = indexTaskDone
 			default:
 				// can not to here
 			}
