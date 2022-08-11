@@ -21,11 +21,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/milvus-io/milvus/internal/util/funcutil"
-
 	"github.com/milvus-io/milvus/internal/common"
-
-	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metastore"
 	kvmetestore "github.com/milvus-io/milvus/internal/metastore/kv"
@@ -34,6 +30,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/util/contextutil"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
 )
@@ -69,10 +67,8 @@ const (
 
 // MetaTable store all rootCoord meta info
 type MetaTable struct {
-	ctx      context.Context
-	txn      kv.TxnKV      // client of a reliable txnkv service, i.e. etcd client
-	snapshot kv.SnapShotKV // client of a reliable snapshotkv service, i.e. etcd client
-	catalog  metastore.Catalog
+	ctx     context.Context
+	catalog metastore.Catalog
 
 	collID2Meta         map[typeutil.UniqueID]model.Collection           // collection id -> collection meta
 	collName2ID         map[string]typeutil.UniqueID                     // collection name to collection id
@@ -81,20 +77,16 @@ type MetaTable struct {
 	segID2IndexID       map[typeutil.UniqueID]typeutil.UniqueID          // segment_id -> index_id
 	indexID2Meta        map[typeutil.UniqueID]*model.Index               // collection id/index_id -> meta
 
-	ddLock   sync.RWMutex
-	credLock sync.RWMutex
+	ddLock sync.RWMutex
 }
 
 // NewMetaTable creates meta table for rootcoord, which stores all in-memory information
 // for collection, partition, segment, index etc.
-func NewMetaTable(ctx context.Context, txn kv.TxnKV, snap kv.SnapShotKV) (*MetaTable, error) {
+func NewMetaTable(ctx context.Context, catalog metastore.Catalog) (*MetaTable, error) {
 	mt := &MetaTable{
-		ctx:      ctx,
-		txn:      txn,
-		snapshot: snap,
-		catalog:  &kvmetestore.Catalog{Txn: txn, Snapshot: snap},
-		ddLock:   sync.RWMutex{},
-		credLock: sync.RWMutex{},
+		ctx:     contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName),
+		catalog: catalog,
+		ddLock:  sync.RWMutex{},
 	}
 	err := mt.reloadFromCatalog()
 	if err != nil {
@@ -689,7 +681,7 @@ func (mt *MetaTable) DropIndex(collName, fieldName, indexName string) (typeutil.
 	col.FieldIDToIndexID = fieldIDToIndexID
 
 	// update metastore
-	err = mt.catalog.DropIndex(mt.ctx, &col, dropIdxID, 0)
+	err = mt.catalog.DropIndex(mt.ctx, &col, dropIdxID)
 	if err != nil {
 		return 0, false, err
 	}
@@ -875,7 +867,7 @@ func (mt *MetaTable) RecycleDroppedIndex() error {
 
 				// update metastore
 				newColMeta := colMeta
-				if err := mt.catalog.DropIndex(mt.ctx, &newColMeta, dropIdxID, 0); err != nil {
+				if err := mt.catalog.DropIndex(mt.ctx, &newColMeta, dropIdxID); err != nil {
 					return err
 				}
 

@@ -788,10 +788,10 @@ func TestRootCoordInitData(t *testing.T) {
 	assert.NotNil(t, snapshotKV)
 	assert.NoError(t, err)
 	txnKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
-	mt, err := NewMetaTable(context.TODO(), txnKV, snapshotKV)
+	mt, err := NewMetaTable(context.TODO(), &kvmetestore.Catalog{Txn: txnKV, Snapshot: snapshotKV})
 	assert.NoError(t, err)
 	mockTxnKV := &mockTestTxnKV{
-		TxnKV: mt.txn,
+		TxnKV: txnKV,
 		save: func(key, value string) error {
 			return fmt.Errorf("save error")
 		},
@@ -1030,9 +1030,6 @@ func TestRootCoord_Base(t *testing.T) {
 		status, err = core.CreateCollection(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
-
-		err = core.reSendDdMsg(core.ctx, true)
-		assert.NoError(t, err)
 	})
 
 	wg.Add(1)
@@ -1164,9 +1161,6 @@ func TestRootCoord_Base(t *testing.T) {
 
 		assert.Equal(t, 1, len(pnm.GetCollIDs()))
 		assert.Equal(t, collMeta.CollectionID, pnm.GetCollIDs()[0])
-
-		err = core.reSendDdMsg(core.ctx, true)
-		assert.NoError(t, err)
 	})
 
 	wg.Add(1)
@@ -1804,9 +1798,6 @@ func TestRootCoord_Base(t *testing.T) {
 
 		assert.Equal(t, 2, len(pnm.GetCollIDs()))
 		assert.Equal(t, collMeta.CollectionID, pnm.GetCollIDs()[1])
-
-		err = core.reSendDdMsg(core.ctx, true)
-		assert.NoError(t, err)
 	})
 
 	wg.Add(1)
@@ -1881,9 +1872,6 @@ func TestRootCoord_Base(t *testing.T) {
 		collIDs = pnm.GetCollIDs()
 		assert.Equal(t, 3, len(collIDs))
 		assert.Equal(t, collMeta.CollectionID, collIDs[2])
-
-		err = core.reSendDdMsg(core.ctx, true)
-		assert.NoError(t, err)
 	})
 
 	wg.Add(1)

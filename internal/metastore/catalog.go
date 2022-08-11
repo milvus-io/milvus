@@ -23,7 +23,7 @@ type Catalog interface {
 	CreateIndex(ctx context.Context, col *model.Collection, index *model.Index) error
 	// AlterIndex newIndex only contains updated parts
 	AlterIndex(ctx context.Context, oldIndex *model.Index, newIndex *model.Index, alterType AlterType) error
-	DropIndex(ctx context.Context, collectionInfo *model.Collection, dropIdxID typeutil.UniqueID, ts typeutil.Timestamp) error
+	DropIndex(ctx context.Context, collectionInfo *model.Collection, dropIdxID typeutil.UniqueID) error
 	ListIndexes(ctx context.Context) ([]*model.Index, error)
 
 	CreateAlias(ctx context.Context, alias *model.Alias, ts typeutil.Timestamp) error
