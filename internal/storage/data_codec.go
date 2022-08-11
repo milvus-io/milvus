@@ -286,6 +286,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 	startTs := ts[0]
 	endTs := ts[len(ts)-1]
 
+	// sort insert data by rowID
 	dataSorter := &DataSorter{
 		InsertCodec: insertCodec,
 		InsertData:  data,
