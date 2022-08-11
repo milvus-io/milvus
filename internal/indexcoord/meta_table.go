@@ -272,17 +272,17 @@ func (mt *metaTable) GetMeta(buildID UniqueID) (*Meta, bool) {
 func (mt *metaTable) canIndex(buildID int64) bool {
 	meta := mt.indexBuildID2Meta[buildID]
 	if meta.indexMeta.MarkDeleted {
-		log.Warn("Index has been deleted", zap.Int64("buildID", buildID))
+		log.Debug("Index has been deleted", zap.Int64("buildID", buildID))
 		return false
 	}
 
 	if meta.indexMeta.NodeID != 0 {
-		log.Error("IndexCoord metaTable BuildIndex, but indexMeta's NodeID is not zero",
+		log.Debug("IndexCoord metaTable BuildIndex, but indexMeta's NodeID is not zero",
 			zap.Int64("buildID", buildID), zap.Int64("nodeID", meta.indexMeta.NodeID))
 		return false
 	}
 	if meta.indexMeta.State != commonpb.IndexState_Unissued {
-		log.Error("IndexCoord metaTable BuildIndex, but indexMeta's state is not unissued",
+		log.Debug("IndexCoord metaTable BuildIndex, but indexMeta's state is not unissued",
 			zap.Int64("buildID", buildID), zap.String("state", meta.indexMeta.State.String()))
 		return false
 	}
@@ -303,7 +303,6 @@ func (mt *metaTable) UpdateVersion(indexBuildID UniqueID, nodeID UniqueID) error
 		return mt.saveIndexMeta(m)
 	}
 	if err := mt.updateMeta(indexBuildID, updateFunc); err != nil {
-		log.Error("IndexCoord metaTable UpdateVersion fail", zap.Int64("buildID", indexBuildID), zap.Error(err))
 		return err
 	}
 	log.Info("IndexCoord metaTable UpdateVersion success", zap.Int64("IndexBuildId", indexBuildID),
