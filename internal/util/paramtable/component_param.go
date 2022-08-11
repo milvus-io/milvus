@@ -1195,7 +1195,8 @@ type indexCoordConfig struct {
 	Address string
 	Port    int
 
-	IndexStorageRootPath string
+	IndexStorageRootPath           string
+	MinSegmentNumRowsToEnableIndex int64
 
 	GCInterval time.Duration
 
@@ -1217,6 +1218,10 @@ func (p *indexCoordConfig) initIndexStorageRootPath() {
 		panic(err)
 	}
 	p.IndexStorageRootPath = path.Join(rootPath, "index_files")
+}
+
+func (p *indexCoordConfig) initMinSegmentNumRowsToEnableIndex() {
+	p.MinSegmentNumRowsToEnableIndex = p.Base.ParseInt64WithDefault("indexCoord.minSegmentNumRowsToEnableIndex", 1024)
 }
 
 func (p *indexCoordConfig) initGCInterval() {

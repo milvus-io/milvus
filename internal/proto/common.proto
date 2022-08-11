@@ -69,6 +69,7 @@ enum IndexState {
     InProgress = 2;
     Finished = 3;
     Failed = 4;
+    Retry = 5;
 }
 
 enum SegmentState {

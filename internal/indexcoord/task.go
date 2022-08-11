@@ -20,6 +20,14 @@ import (
 	"context"
 	"errors"
 
+	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
+
+	"github.com/milvus-io/milvus/internal/types"
+
+	"github.com/milvus-io/milvus/internal/tso"
+
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -73,11 +81,154 @@ func (bt *BaseTask) Notify(err error) {
 	bt.done <- err
 }
 
-// IndexAddTask is used to record the information of the index tasks.
+// CreateIndexTask is used to create an index on field.
+type CreateIndexTask struct {
+	BaseTask
+	dataCoordClient  types.DataCoord
+	indexCoordClient *IndexCoord
+	req              *indexpb.CreateIndexRequest
+	indexID          UniqueID
+	createTs         uint64
+	idAllocator      *allocator.GlobalIDAllocator
+	tsoAllocator     *tso.GlobalTSOAllocator
+}
+
+// Ctx returns the context of the index task.
+func (cit *CreateIndexTask) Ctx() context.Context {
+	return cit.ctx
+}
+
+// ID returns the id of the index task.
+func (cit *CreateIndexTask) ID() UniqueID {
+	return cit.id
+}
+
+// SetID sets the id for index tasks.
+func (cit *CreateIndexTask) SetID(ID UniqueID) {
+	cit.BaseTask.setID(ID)
+}
+
+// Name returns the task name.
+func (cit *CreateIndexTask) Name() string {
+	return CreateIndexTaskName
+}
+
+// OnEnqueue assigns the indexBuildID to index task.
+func (cit *CreateIndexTask) OnEnqueue() error {
+	var err error
+	cit.indexID, err = cit.idAllocator.AllocOne()
+	if err != nil {
+		return err
+	}
+	cit.createTs, err = cit.tsoAllocator.AllocOne()
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// PreExecute do nothing.
+func (cit *CreateIndexTask) PreExecute(ctx context.Context) error {
+	log.Info("IndexCoord CreateIndexTask PreExecute", zap.Int64("collectionID", cit.req.CollectionID),
+		zap.Int64("fieldID", cit.req.FieldID), zap.String("indexName", cit.req.IndexName))
+	return nil
+}
+
+// Execute adds the index task to meta table.
+func (cit *CreateIndexTask) Execute(ctx context.Context) error {
+	log.Info("IndexCoord CreateIndexTask Execute", zap.Int64("collectionID", cit.req.CollectionID),
+		zap.Int64("fieldID", cit.req.FieldID), zap.String("indexName", cit.req.IndexName))
+	hasIndex, indexID := cit.table.HasSameReq(cit.req)
+	if hasIndex {
+		cit.indexID = indexID
+	}
+	index := &model.Index{
+		CollectionID: cit.req.CollectionID,
+		FieldID:      cit.req.FieldID,
+		IndexID:      cit.indexID,
+		IndexName:    cit.req.IndexName,
+		TypeParams:   cit.req.TypeParams,
+		IndexParams:  cit.req.IndexParams,
+		CreateTime:   cit.createTs,
+	}
+	cit.table.SetIndex(index)
+	// Get flushed segments
+	flushedSegments, err := cit.dataCoordClient.GetFlushedSegments(cit.ctx, &datapb.GetFlushedSegmentsRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   0,
+			MsgID:     cit.indexID,
+			Timestamp: cit.createTs,
+			SourceID:  cit.indexCoordClient.serverID,
+		},
+		CollectionID: cit.req.CollectionID,
+		PartitionID:  -1,
+	})
+	if err != nil {
+		log.Error("IndexCoord get flushed segments from datacoord fail", zap.Int64("collectionID", cit.req.CollectionID),
+			zap.Int64("fieldID", cit.req.FieldID), zap.String("indexName", cit.req.IndexName), zap.Error(err))
+		return err
+	}
+
+	log.Debug("IndexCoord get flushed segment from DataCoord success", zap.Int64("collectionID", cit.req.CollectionID),
+		zap.Int64s("flushed segments", flushedSegments.Segments))
+	segmentsInfo, err := cit.dataCoordClient.GetSegmentInfo(cit.ctx, &datapb.GetSegmentInfoRequest{
+		SegmentIDs:       flushedSegments.Segments,
+		IncludeUnHealthy: true,
+	})
+
+	for _, segmentInfo := range segmentsInfo.Infos {
+		if segmentInfo.State != commonpb.SegmentState_Flushed {
+			continue
+		}
+		binLogs := make([]string, 0)
+		for _, fieldBinLog := range segmentInfo.GetBinlogs() {
+			if fieldBinLog.GetFieldID() == cit.req.FieldID {
+				for _, binLog := range fieldBinLog.GetBinlogs() {
+					binLogs = append(binLogs, binLog.LogPath)
+				}
+				break
+			}
+		}
+
+		segIdx := &model.SegmentIndex{
+			Segment: model.Segment{
+				SegmentID:    segmentInfo.ID,
+				CollectionID: segmentInfo.CollectionID,
+				PartitionID:  segmentInfo.PartitionID,
+				NumRows:      segmentInfo.NumOfRows,
+				BinLogs:      binLogs,
+			},
+			IndexID:    cit.indexID,
+			CreateTime: cit.createTs,
+		}
+		if err = cit.indexCoordClient.createIndexForSegment(segIdx); err != nil {
+			log.Error("IndexCoord create index on segment fail", zap.Int64("collectionID", cit.req.CollectionID),
+				zap.Int64("fieldID", cit.req.FieldID), zap.String("indexName", cit.req.IndexName),
+				zap.Int64("segmentID", segIdx.SegmentID), zap.Error(err))
+			return err
+		}
+	}
+
+	err = cit.table.CreateIndex(index)
+	if err != nil {
+		log.Error("IndexCoord create index fail", zap.Int64("collectionID", cit.req.CollectionID),
+			zap.Int64("fieldID", cit.req.FieldID), zap.String("indexName", cit.req.IndexName), zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+// PostExecute does nothing here.
+func (cit *CreateIndexTask) PostExecute(ctx context.Context) error {
+	log.Info("IndexCoord CreateIndexTask PostExecute", zap.Int64("collectionID", cit.req.CollectionID),
+		zap.Int64("fieldID", cit.req.FieldID), zap.String("indexName", cit.req.IndexName))
+	return nil
+}
+
+// IndexAddTask is used to record index task on segment.
 type IndexAddTask struct {
 	BaseTask
-	req          *indexpb.BuildIndexRequest
-	indexBuildID UniqueID
+	segmentIndex *model.SegmentIndex
 	idAllocator  *allocator.GlobalIDAllocator
 }
 
@@ -104,7 +255,7 @@ func (it *IndexAddTask) Name() string {
 // OnEnqueue assigns the indexBuildID to index task.
 func (it *IndexAddTask) OnEnqueue() error {
 	var err error
-	it.indexBuildID, err = it.idAllocator.AllocOne()
+	it.segmentIndex.BuildID, err = it.idAllocator.AllocOne()
 	if err != nil {
 		return err
 	}
@@ -113,15 +264,14 @@ func (it *IndexAddTask) OnEnqueue() error {
 
 // PreExecute sets the indexBuildID to index task request.
 func (it *IndexAddTask) PreExecute(ctx context.Context) error {
-	log.Debug("IndexCoord IndexAddTask PreExecute", zap.Any("IndexBuildID", it.indexBuildID))
-	it.req.IndexBuildID = it.indexBuildID
+	log.Info("IndexCoord IndexAddTask PreExecute", zap.Int64("IndexBuildID", it.segmentIndex.BuildID))
 	return nil
 }
 
 // Execute adds the index task to meta table.
 func (it *IndexAddTask) Execute(ctx context.Context) error {
-	log.Debug("IndexCoord IndexAddTask Execute", zap.Any("IndexBuildID", it.indexBuildID))
-	err := it.table.AddIndex(it.indexBuildID, it.req)
+	log.Info("IndexCoord IndexAddTask Execute", zap.Int64("IndexBuildID", it.segmentIndex.BuildID))
+	err := it.table.AddIndex(it.segmentIndex)
 	if err != nil {
 		return err
 	}
@@ -130,6 +280,6 @@ func (it *IndexAddTask) Execute(ctx context.Context) error {
 
 // PostExecute does nothing here.
 func (it *IndexAddTask) PostExecute(ctx context.Context) error {
-	log.Debug("IndexCoord IndexAddTask PostExecute", zap.Any("IndexBuildID", it.indexBuildID))
+	log.Info("IndexCoord IndexAddTask PostExecute", zap.Int64("IndexBuildID", it.segmentIndex.BuildID))
 	return nil
 }

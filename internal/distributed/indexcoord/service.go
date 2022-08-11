@@ -202,24 +202,33 @@ func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComp
 	return s.indexcoord.GetComponentStates(ctx)
 }
 
-// GetTimeTickChannel gets the time tick channel of IndexCoord.
-func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
-	return s.indexcoord.GetTimeTickChannel(ctx)
-}
-
 // GetStatisticsChannel gets the statistics channel of IndexCoord.
 func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
 	return s.indexcoord.GetStatisticsChannel(ctx)
 }
 
-// BuildIndex sends the build index request to IndexCoord.
-func (s *Server) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
-	return s.indexcoord.BuildIndex(ctx, req)
+// CreateIndex sends the build index request to IndexCoord.
+func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
+	return s.indexcoord.CreateIndex(ctx, req)
 }
 
-// GetIndexStates gets the index states from IndexCoord.
-func (s *Server) GetIndexStates(ctx context.Context, req *indexpb.GetIndexStatesRequest) (*indexpb.GetIndexStatesResponse, error) {
-	return s.indexcoord.GetIndexStates(ctx, req)
+// GetIndexState gets the index states from IndexCoord.
+func (s *Server) GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRequest) (*indexpb.GetIndexStateResponse, error) {
+	return s.indexcoord.GetIndexState(ctx, req)
+}
+
+func (s *Server) GetSegmentIndexState(ctx context.Context, req *indexpb.GetSegmentIndexStateRequest) (*indexpb.GetSegmentIndexStateResponse, error) {
+	return s.indexcoord.GetSegmentIndexState(ctx, req)
+}
+
+// GetIndexInfos gets the index file paths from IndexCoord.
+func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoRequest) (*indexpb.GetIndexInfoResponse, error) {
+	return s.indexcoord.GetIndexInfos(ctx, req)
+}
+
+// DescribeIndex gets all indexes of the collection.
+func (s *Server) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error) {
+	return s.indexcoord.DescribeIndex(ctx, req)
 }
 
 // DropIndex sends the drop index request to IndexCoord.
@@ -227,13 +236,8 @@ func (s *Server) DropIndex(ctx context.Context, request *indexpb.DropIndexReques
 	return s.indexcoord.DropIndex(ctx, request)
 }
 
-func (s *Server) RemoveIndex(ctx context.Context, req *indexpb.RemoveIndexRequest) (*commonpb.Status, error) {
-	return s.indexcoord.RemoveIndex(ctx, req)
-}
-
-// GetIndexFilePaths gets the index file paths from IndexCoord.
-func (s *Server) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error) {
-	return s.indexcoord.GetIndexFilePaths(ctx, req)
+func (s *Server) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetIndexBuildProgressRequest) (*indexpb.GetIndexBuildProgressResponse, error) {
+	return s.indexcoord.GetIndexBuildProgress(ctx, req)
 }
 
 // GetMetrics gets the metrics info of IndexCoord.

@@ -20,6 +20,8 @@ import (
 	"context"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/metastore/model"
+
 	grpcindexnodeclient "github.com/milvus-io/milvus/internal/distributed/indexnode/client"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
@@ -51,7 +53,7 @@ func NewNodeManager(ctx context.Context) *NodeManager {
 }
 
 // setClient sets IndexNode client to node manager.
-func (nm *NodeManager) setClient(nodeID UniqueID, client types.IndexNode) error {
+func (nm *NodeManager) setClient(nodeID UniqueID, client types.IndexNode) {
 	log.Debug("IndexCoord NodeManager setClient", zap.Int64("nodeID", nodeID))
 	defer log.Debug("IndexNode NodeManager setClient success", zap.Any("nodeID", nodeID))
 	item := &PQItem{
@@ -64,7 +66,6 @@ func (nm *NodeManager) setClient(nodeID UniqueID, client types.IndexNode) error 
 	nm.nodeClients[nodeID] = client
 	nm.lock.Unlock()
 	nm.pq.Push(item)
-	return nil
 }
 
 // RemoveNode removes the unused client of IndexNode.
@@ -97,11 +98,12 @@ func (nm *NodeManager) AddNode(nodeID UniqueID, address string) error {
 		return err
 	}
 	metrics.IndexCoordIndexNodeNum.WithLabelValues().Inc()
-	return nm.setClient(nodeID, nodeClient)
+	nm.setClient(nodeID, nodeClient)
+	return nil
 }
 
 // PeekClient peeks the client with the least load.
-func (nm *NodeManager) PeekClient(meta *Meta) (UniqueID, types.IndexNode) {
+func (nm *NodeManager) PeekClient(meta *model.SegmentIndex) (UniqueID, types.IndexNode) {
 	log.Info("IndexCoord peek client")
 	allClients := nm.GetAllClients()
 	if len(allClients) == 0 {
@@ -123,7 +125,7 @@ func (nm *NodeManager) PeekClient(meta *Meta) (UniqueID, types.IndexNode) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			resp, err := client.GetTaskSlots(ctx, &indexpb.GetTaskSlotsRequest{})
+			resp, err := client.GetJobNum(ctx, &indexpb.GetJobNumRequest{})
 			if err != nil {
 				log.Warn("get IndexNode slots failed", zap.Int64("nodeID", nodeID), zap.Error(err))
 				return
@@ -133,7 +135,7 @@ func (nm *NodeManager) PeekClient(meta *Meta) (UniqueID, types.IndexNode) {
 					zap.String("reason", resp.Status.Reason))
 				return
 			}
-			if resp.Slots > 0 {
+			if resp.TaskSlots > 0 {
 				nodeMutex.Lock()
 				defer nodeMutex.Unlock()
 				log.Info("peek client success", zap.Int64("nodeID", nodeID))
@@ -167,6 +169,14 @@ func (nm *NodeManager) GetAllClients() map[UniqueID]types.IndexNode {
 	}
 
 	return allClients
+}
+
+func (nm *NodeManager) GetClientByID(nodeID UniqueID) (types.IndexNode, bool) {
+	nm.lock.RLock()
+	defer nm.lock.RUnlock()
+
+	client, ok := nm.nodeClients[nodeID]
+	return client, ok
 }
 
 // indexNodeGetMetricsResponse record the metrics information of IndexNode.

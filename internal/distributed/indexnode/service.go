@@ -222,23 +222,29 @@ func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComp
 	return s.indexnode.GetComponentStates(ctx)
 }
 
-// GetTimeTickChannel gets the time tick channel of IndexNode.
-func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
-	return s.indexnode.GetTimeTickChannel(ctx)
-}
-
 // GetStatisticsChannel gets the statistics channel of IndexNode.
 func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
 	return s.indexnode.GetStatisticsChannel(ctx)
 }
 
-// CreateIndex sends the create index request to IndexNode.
-func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
-	return s.indexnode.CreateIndex(ctx, req)
+// CreateJob sends the create index request to IndexNode.
+func (s *Server) CreateJob(ctx context.Context, req *indexpb.CreateJobRequest) (*commonpb.Status, error) {
+	return s.indexnode.CreateJob(ctx, req)
 }
 
-func (s *Server) GetTaskSlots(ctx context.Context, req *indexpb.GetTaskSlotsRequest) (*indexpb.GetTaskSlotsResponse, error) {
-	return s.indexnode.GetTaskSlots(ctx, req)
+// QueryJobs querys index jobs statues
+func (s *Server) QueryJobs(ctx context.Context, req *indexpb.QueryJobsRequest) (*indexpb.QueryJobsResponse, error) {
+	return s.indexnode.QueryJobs(ctx, req)
+}
+
+// DropJobs drops index build jobs
+func (s *Server) DropJobs(ctx context.Context, req *indexpb.DropJobsRequest) (*commonpb.Status, error) {
+	return s.indexnode.DropJobs(ctx, req)
+}
+
+// GetJobNum gets indexnode's job statisctics
+func (s *Server) GetJobNum(ctx context.Context, req *indexpb.GetJobNumRequest) (*indexpb.GetJobNumResponse, error) {
+	return s.indexnode.GetJobNum(ctx, req)
 }
 
 // GetMetrics gets the metrics info of IndexNode.

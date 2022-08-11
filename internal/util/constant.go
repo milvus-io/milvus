@@ -26,6 +26,7 @@ import (
 const (
 	SegmentMetaPrefix    = "queryCoord-segmentMeta"
 	ChangeInfoMetaPrefix = "queryCoord-sealedSegmentChangeInfo"
+	FlushedSegmentPrefix = "flushed-segment"
 	HandoffSegmentPrefix = "querycoord-handoff"
 	HeaderAuthorize      = "authorization"
 	// HeaderSourceID identify requests from Milvus members and client requests

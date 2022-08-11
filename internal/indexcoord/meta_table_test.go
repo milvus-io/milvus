@@ -18,26 +18,63 @@ package indexcoord
 
 import (
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/golang/protobuf/proto"
+
+	catalog "github.com/milvus-io/milvus/internal/metastore/kv"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/stretchr/testify/assert"
-	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
-func TestMetaTable_NewMetaTable(t *testing.T) {
+var (
+	collID    = UniqueID(100)
+	partID    = UniqueID(200)
+	segID     = UniqueID(300)
+	indexID   = UniqueID(400)
+	buildID   = UniqueID(500)
+	fieldID   = UniqueID(600)
+	nodeID    = UniqueID(700)
+	invalidID = UniqueID(999)
+
+	indexName = "index"
+)
+
+func TestNewMetaTable(t *testing.T) {
+	segIdx := &indexpb.SegmentIndex{
+		CollectionID: collID,
+		PartitionID:  partID,
+		SegmentID:    segID,
+		NumRows:      1024,
+		IndexID:      indexID,
+		BuildID:      buildID,
+		NodeID:       0,
+		IndexVersion: 1,
+		State:        commonpb.IndexState_InProgress,
+	}
+	value1, err := proto.Marshal(segIdx)
+	assert.NoError(t, err)
+
+	index := &indexpb.FieldIndex{
+		IndexInfo: &indexpb.IndexInfo{
+			CollectionID: collID,
+			FieldID:      fieldID,
+			IndexName:    indexName,
+		},
+	}
+	value2, err := proto.Marshal(index)
+	assert.NoError(t, err)
+
 	t.Run("success", func(t *testing.T) {
-		indexMeta := &indexpb.IndexMeta{
-			IndexBuildID: 1,
-			State:        commonpb.IndexState_Unissued,
-		}
-		value, err := proto.Marshal(indexMeta)
-		assert.NoError(t, err)
 		kv := &mockETCDKV{
-			loadWithRevisionAndVersions: func(s string) ([]string, []string, []int64, int64, error) {
-				return []string{"1"}, []string{string(value)}, []int64{1}, 1, nil
+			loadWithPrefix: func(key string) ([]string, []string, error) {
+				if key == segmentIndexPrefix {
+					return []string{"1"}, []string{string(value1)}, nil
+				}
+				return []string{"1"}, []string{string(value2)}, nil
 			},
 		}
 		mt, err := NewMetaTable(kv)
@@ -45,10 +82,10 @@ func TestMetaTable_NewMetaTable(t *testing.T) {
 		assert.NotNil(t, mt)
 	})
 
-	t.Run("LoadWithRevisionAndVersions error", func(t *testing.T) {
+	t.Run("load collection index error", func(t *testing.T) {
 		kv := &mockETCDKV{
-			loadWithRevisionAndVersions: func(s string) ([]string, []string, []int64, int64, error) {
-				return nil, nil, nil, 0, errors.New("error")
+			loadWithPrefix: func(key string) ([]string, []string, error) {
+				return []string{}, []string{}, errors.New("error occurred")
 			},
 		}
 		mt, err := NewMetaTable(kv)
@@ -56,1152 +93,408 @@ func TestMetaTable_NewMetaTable(t *testing.T) {
 		assert.Nil(t, mt)
 	})
 
-	t.Run("Unmarshal error", func(t *testing.T) {
+	t.Run("load segment index error", func(t *testing.T) {
 		kv := &mockETCDKV{
-			loadWithRevisionAndVersions: func(s string) ([]string, []string, []int64, int64, error) {
-				return []string{"1"}, []string{"invalid_string"}, []int64{1}, 1, nil
+			loadWithPrefix: func(s string) ([]string, []string, error) {
+				if s == fieldIndexPrefix {
+					return []string{"1"}, []string{string(value2)}, nil
+				}
+				return nil, nil, errors.New("error")
 			},
 		}
 		mt, err := NewMetaTable(kv)
 		assert.Error(t, err)
 		assert.Nil(t, mt)
 	})
+}
+
+func constructMetaTable(catalog *catalog.Catalog) *metaTable {
+	return &metaTable{
+		catalog:          catalog,
+		indexLock:        sync.RWMutex{},
+		segmentIndexLock: sync.RWMutex{},
+		collectionIndexes: map[UniqueID]map[UniqueID]*model.Index{
+			collID: {
+				indexID: &model.Index{
+					CollectionID: collID,
+					FieldID:      fieldID,
+					IndexID:      indexID,
+					IndexName:    indexName,
+					IsDeleted:    false,
+					CreateTime:   0,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   "dim",
+							Value: "128",
+						},
+					},
+					IndexParams: []*commonpb.KeyValuePair{
+						{
+							Key:   "nprobe",
+							Value: "16",
+						},
+					},
+				},
+			},
+		},
+		segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
+			segID: {
+				indexID: &model.SegmentIndex{
+					Segment: model.Segment{
+						SegmentID:    segID,
+						CollectionID: collID,
+						PartitionID:  partID,
+						NumRows:      1024,
+					},
+					IndexID:        indexID,
+					BuildID:        buildID,
+					NodeID:         0,
+					IndexState:     commonpb.IndexState_Finished,
+					FailReason:     "",
+					IndexVersion:   0,
+					IsDeleted:      false,
+					CreateTime:     0,
+					IndexFilePaths: nil,
+					IndexSize:      0,
+				},
+			},
+		},
+		buildID2SegmentIndex: map[UniqueID]*model.SegmentIndex{
+			buildID: {
+				Segment: model.Segment{
+					SegmentID:    segID,
+					CollectionID: collID,
+					PartitionID:  partID,
+					NumRows:      1024,
+				},
+				IndexID:        indexID,
+				BuildID:        buildID,
+				NodeID:         0,
+				IndexState:     commonpb.IndexState_Finished,
+				FailReason:     "",
+				IndexVersion:   0,
+				IsDeleted:      false,
+				CreateTime:     0,
+				IndexFilePaths: nil,
+				IndexSize:      0,
+			},
+		},
+	}
 }
 
 func TestMetaTable_GetAllIndexMeta(t *testing.T) {
-	mt := metaTable{
-		indexBuildID2Meta: map[UniqueID]*Meta{
-			1: {
-				indexMeta: &indexpb.IndexMeta{
-					IndexBuildID: 1,
-					State:        commonpb.IndexState_Unissued,
-				},
-			},
-			2: {
-				indexMeta: &indexpb.IndexMeta{
-					IndexBuildID: 2,
-					State:        commonpb.IndexState_Finished,
-					MarkDeleted:  true,
-				},
-			},
-		},
-	}
-
-	metas := mt.GetAllIndexMeta()
-	assert.Equal(t, 2, len(metas))
-}
-
-func TestMetaTable_AddIndex(t *testing.T) {
-	t.Run("success", func(t *testing.T) {
-		mt := &metaTable{
-			client: &mockETCDKV{
-				compareVersionAndSwap: func(key string, version int64, target string, opts ...clientv3.OpOption) (bool, error) {
-					return true, nil
-				},
-			},
-			indexBuildID2Meta: make(map[int64]*Meta),
-		}
-
-		req := &indexpb.BuildIndexRequest{
-			IndexID: 1,
-		}
-		err := mt.AddIndex(1, req)
-		assert.NoError(t, err)
-
-		err = mt.AddIndex(1, req)
-		assert.NoError(t, err)
-	})
-
-	t.Run("save meta fail", func(t *testing.T) {
-		mt := &metaTable{
-			client: &mockETCDKV{
-				compareVersionAndSwap: func(key string, version int64, target string, opts ...clientv3.OpOption) (bool, error) {
-					return true, errors.New("error")
-				},
-			},
-			indexBuildID2Meta: make(map[int64]*Meta),
-		}
-
-		req := &indexpb.BuildIndexRequest{
-			IndexID: 1,
-		}
-		err := mt.AddIndex(1, req)
-		assert.Error(t, err)
-	})
-}
-
-func TestMetaTable_ResetNodeID(t *testing.T) {
-	mt := metaTable{
-		client: &mockETCDKV{
-			compareVersionAndSwap: func(key string, version int64, target string, opts ...clientv3.OpOption) (bool, error) {
-				return true, nil
-			},
-		},
-		indexBuildID2Meta: map[UniqueID]*Meta{
-			1: {
-				indexMeta: &indexpb.IndexMeta{
-					IndexBuildID: 1,
-					NodeID:       2,
-				},
-			},
-		},
-	}
-
-	t.Run("success", func(t *testing.T) {
-		err := mt.ResetNodeID(1)
-		assert.NoError(t, err)
-	})
-
-	t.Run("index not exist", func(t *testing.T) {
-		err := mt.ResetNodeID(2)
-		assert.Error(t, err)
-	})
-
-	t.Run("save meta fail, reload fail", func(t *testing.T) {
-		mk := &mockETCDKV{
-			compareVersionAndSwap: func(key string, version int64, target string, opts ...clientv3.OpOption) (bool, error) {
-				return true, errors.New("error occurred")
-			},
-			loadWithPrefix2: func(key string) ([]string, []string, []int64, error) {
-				return nil, nil, nil, errors.New("error occurred")
-			},
-		}
-		mt.client = mk
-		err := mt.ResetNodeID(1)
-		assert.Error(t, err)
-	})
-
-	t.Run("save meta fail", func(t *testing.T) {
-		mk := &mockETCDKV{
-			compareVersionAndSwap: func(key string, version int64, target string, opts ...clientv3.OpOption) (bool, error) {
-				return true, errors.New("error occurred")
-			},
-			loadWithPrefix2: func(key string) ([]string, []string, []int64, error) {
-				v, _ := proto.Marshal(&indexpb.IndexMeta{
-					IndexBuildID: 1,
-					NodeID:       1,
-				})
-				return nil, []string{string(v)}, []int64{1}, nil
-			},
-		}
-		mt.client = mk
-		err := mt.ResetNodeID(1)
-		assert.Error(t, err)
-	})
-
-	t.Run("compare version fail", func(t *testing.T) {
-		mk := &mockETCDKV{
-			compareVersionAndSwap: func(key string, version int64, target string, opts ...clientv3.OpOption) (bool, error) {
-				return false, nil
-			},
-			loadWithPrefix2: func(key string) ([]string, []string, []int64, error) {
-				v, _ := proto.Marshal(&indexpb.IndexMeta{
-					IndexBuildID: 1,
-					NodeID:       1,
-				})
-				return nil, []string{string(v)}, []int64{1}, nil
-			},
-		}
-		mt.client = mk
-		err := mt.ResetNodeID(1)
-		assert.Error(t, err)
-	})
+	mt := constructMetaTable(&catalog.Catalog{})
+	segIndexes := mt.GetAllIndexMeta()
+	assert.Equal(t, 1, len(segIndexes))
 }
 
 func TestMetaTable_GetMeta(t *testing.T) {
-	mt := metaTable{
-		indexBuildID2Meta: map[UniqueID]*Meta{
-			1: {
-				indexMeta: &indexpb.IndexMeta{
-					IndexBuildID: 1,
-					NodeID:       2,
-				},
-			},
-		},
-	}
+	mt := constructMetaTable(&catalog.Catalog{})
+	segIdx, exist := mt.GetMeta(buildID)
+	assert.NotNil(t, segIdx)
+	assert.True(t, exist)
 
-	meta, ok := mt.GetMeta(1)
-	assert.True(t, ok)
-	assert.Equal(t, int64(1), meta.indexMeta.IndexBuildID)
+	segIdx2, exist2 := mt.GetMeta(invalidID)
+	assert.Nil(t, segIdx2)
+	assert.False(t, exist2)
 }
 
-func TestMetaTable_UpdateVersion(t *testing.T) {
+func TestMetaTable_GetTypeParams(t *testing.T) {
+	mt := constructMetaTable(&catalog.Catalog{})
+	typeParams1, err1 := mt.GetTypeParams(collID, indexID)
+	assert.NoError(t, err1)
+	assert.Equal(t, 1, len(typeParams1))
+
+	typeParams2, err2 := mt.GetTypeParams(invalidID, indexID)
+	assert.Error(t, err2)
+	assert.Nil(t, typeParams2)
+
+	typeParams3, err3 := mt.GetTypeParams(collID, invalidID)
+	assert.Error(t, err3)
+	assert.Nil(t, typeParams3)
+}
+
+func TestMetaTable_GetIndexParams(t *testing.T) {
+	mt := constructMetaTable(&catalog.Catalog{})
+	indexParams1, err1 := mt.GetIndexParams(collID, indexID)
+	assert.NoError(t, err1)
+	assert.Equal(t, 1, len(indexParams1))
+
+	indexParams2, err2 := mt.GetIndexParams(invalidID, indexID)
+	assert.Error(t, err2)
+	assert.Nil(t, indexParams2)
+
+	indexParams3, err3 := mt.GetIndexParams(collID, invalidID)
+	assert.Error(t, err3)
+	assert.Nil(t, indexParams3)
+}
+
+func TestMetaTable_SetIndex(t *testing.T) {
+	mt := constructMetaTable(&catalog.Catalog{})
+	newIndexID := indexID + 1
+	index := &model.Index{
+		CollectionID: collID,
+		FieldID:      fieldID,
+		IndexID:      newIndexID,
+		IndexName:    "index_name2",
+		TypeParams:   []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}},
+		IndexParams:  []*commonpb.KeyValuePair{{Key: "nprobe", Value: "32"}},
+		IsDeleted:    false,
+		CreateTime:   0,
+	}
+	mt.SetIndex(index)
+	_, ok := mt.collectionIndexes[collID][newIndexID]
+	assert.True(t, ok)
+}
+
+func TestMetaTable_CreateIndex(t *testing.T) {
+	newIndexID := indexID + 2
+
+	index := &model.Index{
+		CollectionID: collID,
+		FieldID:      fieldID,
+		IndexID:      newIndexID,
+		IndexName:    "index_name3",
+		TypeParams:   []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}},
+		IndexParams:  []*commonpb.KeyValuePair{{Key: "nprobe", Value: "32"}},
+		IsDeleted:    false,
+		CreateTime:   0,
+	}
 	t.Run("success", func(t *testing.T) {
-		mt := metaTable{
-			indexBuildID2Meta: map[UniqueID]*Meta{
-				1: {
-					indexMeta: &indexpb.IndexMeta{
-						IndexBuildID: 1,
-						NodeID:       0,
-						State:        commonpb.IndexState_Unissued,
-					},
-				},
-			},
-			client: &mockETCDKV{
-				compareVersionAndSwap: func(key string, version int64, target string, opts ...clientv3.OpOption) (bool, error) {
-					return true, nil
-				},
+		kv := &mockETCDKV{
+			save: func(s string, s2 string) error {
+				return nil
 			},
 		}
-		err := mt.UpdateVersion(1, 1)
+		mt := constructMetaTable(&catalog.Catalog{Txn: kv})
+		err := mt.CreateIndex(index)
+		assert.NoError(t, err)
+	})
+	t.Run("save failed", func(t *testing.T) {
+		kv := &mockETCDKV{
+			save: func(s string, s2 string) error {
+				return errors.New("error")
+			},
+		}
+		mt := constructMetaTable(&catalog.Catalog{Txn: kv})
+		err := mt.CreateIndex(index)
+		assert.Error(t, err)
+	})
+}
+
+func TestMetaTable_AddIndex(t *testing.T) {
+	newBuildID := buildID + 2
+	segIdx := &model.SegmentIndex{
+		Segment:        model.Segment{},
+		IndexID:        indexID,
+		BuildID:        newBuildID,
+		NodeID:         0,
+		IndexState:     commonpb.IndexState_IndexStateNone,
+		FailReason:     "",
+		IndexVersion:   0,
+		IsDeleted:      false,
+		CreateTime:     0,
+		IndexFilePaths: nil,
+		IndexSize:      0,
+	}
+
+	t.Run("success", func(t *testing.T) {
+		kv := &mockETCDKV{
+			save: func(s string, s2 string) error {
+				return nil
+			},
+		}
+		mt := constructMetaTable(&catalog.Catalog{Txn: kv})
+		err := mt.AddIndex(segIdx)
+		assert.NoError(t, err)
+
+		_, ok := mt.buildID2SegmentIndex[newBuildID]
+		assert.True(t, ok)
+
+		err = mt.AddIndex(segIdx)
 		assert.NoError(t, err)
 	})
 
-	t.Run("index meta not exist", func(t *testing.T) {
-		mt := metaTable{
-			indexBuildID2Meta: map[UniqueID]*Meta{
-				1: {
-					indexMeta: &indexpb.IndexMeta{
-						IndexBuildID: 1,
-						NodeID:       0,
-						State:        commonpb.IndexState_Unissued,
-					},
-				},
-			},
-			client: &mockETCDKV{
-				compareVersionAndSwap: func(key string, version int64, target string, opts ...clientv3.OpOption) (bool, error) {
-					return false, nil
-				},
+	t.Run("save failed", func(t *testing.T) {
+		kv := &mockETCDKV{
+			save: func(s string, s2 string) error {
+				return errors.New("error")
 			},
 		}
-		err := mt.UpdateVersion(2, 1)
+		mt := constructMetaTable(&catalog.Catalog{Txn: kv})
+		err := mt.AddIndex(segIdx)
+		assert.Error(t, err)
+	})
+}
+
+func TestMetaTable_UpdateVersion(t *testing.T) {
+	newBuildID := buildID + 3
+	segIdx := &model.SegmentIndex{
+		Segment:        model.Segment{},
+		IndexID:        indexID,
+		BuildID:        newBuildID,
+		NodeID:         0,
+		IndexState:     commonpb.IndexState_IndexStateNone,
+		FailReason:     "",
+		IndexVersion:   0,
+		IsDeleted:      false,
+		CreateTime:     0,
+		IndexFilePaths: nil,
+		IndexSize:      0,
+	}
+	t.Run("success", func(t *testing.T) {
+		kv := &mockETCDKV{
+			save: func(s string, s2 string) error {
+				return nil
+			},
+		}
+		mt := constructMetaTable(&catalog.Catalog{Txn: kv})
+		err := mt.AddIndex(segIdx)
+		assert.NoError(t, err)
+
+		err = mt.UpdateVersion(newBuildID, nodeID)
+		assert.NoError(t, err)
+	})
+
+	t.Run("fail", func(t *testing.T) {
+		kv := &mockETCDKV{
+			save: func(s string, s2 string) error {
+				return nil
+			},
+		}
+		mt := constructMetaTable(&catalog.Catalog{Txn: kv})
+
+		err := mt.UpdateVersion(newBuildID+1, nodeID)
+		assert.Error(t, err)
+
+		err = mt.AddIndex(segIdx)
+		assert.NoError(t, err)
+
+		err = mt.UpdateVersion(newBuildID, nodeID)
+		assert.NoError(t, err)
+
+		err = mt.UpdateVersion(newBuildID, nodeID)
+		assert.Error(t, err)
+
+		err = mt.MarkSegIndexAsDeleted(newBuildID)
+		assert.NoError(t, err)
+
+		err = mt.UpdateVersion(newBuildID, nodeID)
+		assert.Error(t, err)
+
+		err = mt.UpdateVersion(buildID, nodeID)
 		assert.Error(t, err)
 	})
 
-	t.Run("can not index", func(t *testing.T) {
-		mt := metaTable{
-			indexBuildID2Meta: map[UniqueID]*Meta{
-				1: {
-					indexMeta: &indexpb.IndexMeta{
-						IndexBuildID: 1,
-						NodeID:       0,
-						State:        commonpb.IndexState_Unissued,
-						MarkDeleted:  true,
-					},
-				},
-			},
-			client: &mockETCDKV{
-				compareVersionAndSwap: func(key string, version int64, target string, opts ...clientv3.OpOption) (bool, error) {
-					return true, nil
-				},
+	t.Run("save etcd fail", func(t *testing.T) {
+		kv := &mockETCDKV{
+			save: func(s string, s2 string) error {
+				return nil
 			},
 		}
-		err := mt.UpdateVersion(1, 1)
-		assert.Error(t, err)
+		mt := constructMetaTable(&catalog.Catalog{Txn: kv})
 
-		mt = metaTable{
-			indexBuildID2Meta: map[UniqueID]*Meta{
-				1: {
-					indexMeta: &indexpb.IndexMeta{
-						IndexBuildID: 1,
-						NodeID:       1,
-						State:        commonpb.IndexState_InProgress,
-					},
-				},
-			},
-			client: &mockETCDKV{
-				compareVersionAndSwap: func(key string, version int64, target string, opts ...clientv3.OpOption) (bool, error) {
-					return true, nil
-				},
-			},
-		}
-		err = mt.UpdateVersion(1, 2)
-		assert.Error(t, err)
+		err := mt.AddIndex(segIdx)
+		assert.NoError(t, err)
 
-		mt = metaTable{
-			indexBuildID2Meta: map[UniqueID]*Meta{
-				1: {
-					indexMeta: &indexpb.IndexMeta{
-						IndexBuildID: 1,
-						NodeID:       0,
-						State:        commonpb.IndexState_Finished,
-					},
-				},
-			},
-			client: &mockETCDKV{
-				compareVersionAndSwap: func(key string, version int64, target string, opts ...clientv3.OpOption) (bool, error) {
-					return true, nil
-				},
-			},
-		}
-		err = mt.UpdateVersion(1, 2)
-		assert.Error(t, err)
-	})
-
-	t.Run("save meta fail", func(t *testing.T) {
-		mt := metaTable{
-			indexBuildID2Meta: map[UniqueID]*Meta{
-				1: {
-					indexMeta: &indexpb.IndexMeta{
-						IndexBuildID: 1,
-						NodeID:       0,
-						State:        commonpb.IndexState_Unissued,
-					},
-				},
-			},
-			client: &mockETCDKV{
-				compareVersionAndSwap: func(key string, version int64, target string, opts ...clientv3.OpOption) (bool, error) {
-					return true, errors.New("error")
-				},
-			},
+		kv.save = func(s string, s2 string) error {
+			return errors.New("error")
 		}
 
-		err := mt.UpdateVersion(1, 1)
-		assert.Error(t, err)
-	})
-
-	t.Run("compare version fail load success", func(t *testing.T) {
-		mt := metaTable{
-			indexBuildID2Meta: map[UniqueID]*Meta{
-				1: {
-					indexMeta: &indexpb.IndexMeta{
-						IndexBuildID: 1,
-						NodeID:       0,
-						State:        commonpb.IndexState_Unissued,
-					},
-				},
-			},
-			client: &mockETCDKV{
-				compareVersionAndSwap: func(key string, version int64, target string, opts ...clientv3.OpOption) (bool, error) {
-					return false, nil
-				},
-				loadWithPrefix2: func(key string) ([]string, []string, []int64, error) {
-					indexMeta := &indexpb.IndexMeta{
-						IndexBuildID: 1,
-						NodeID:       0,
-						State:        commonpb.IndexState_Unissued,
-					}
-					v, _ := proto.Marshal(indexMeta)
-					return []string{"1"}, []string{string(v)}, []int64{1}, nil
-				},
-			},
-		}
-
-		err := mt.UpdateVersion(1, 1)
-		assert.Error(t, err)
-	})
-
-	t.Run("compare version fail load fail", func(t *testing.T) {
-		mt := metaTable{
-			indexBuildID2Meta: map[UniqueID]*Meta{
-				1: {
-					indexMeta: &indexpb.IndexMeta{
-						IndexBuildID: 1,
-						NodeID:       0,
-						State:        commonpb.IndexState_Unissued,
-					},
-				},
-			},
-			client: &mockETCDKV{
-				compareVersionAndSwap: func(key string, version int64, target string, opts ...clientv3.OpOption) (bool, error) {
-					return false, nil
-				},
-				loadWithPrefix2: func(key string) ([]string, []string, []int64, error) {
-					return nil, nil, nil, errors.New("error")
-				},
-			},
-		}
-
-		err := mt.UpdateVersion(1, 1)
+		err = mt.UpdateVersion(newBuildID, nodeID)
 		assert.Error(t, err)
 	})
 }
 
 func TestMetaTable_BuildIndex(t *testing.T) {
-	t.Run("success", func(t *testing.T) {
-		mt := metaTable{
-			indexBuildID2Meta: map[UniqueID]*Meta{
-				1: {
-					indexMeta: &indexpb.IndexMeta{
-						IndexBuildID: 1,
-						NodeID:       1,
-						State:        commonpb.IndexState_Unissued,
-					},
-				},
-			},
-			client: &mockETCDKV{
-				compareVersionAndSwap: func(key string, version int64, target string, opts ...clientv3.OpOption) (bool, error) {
-					return true, nil
-				},
+	newBuildID := buildID + 4
+	segIdx := &model.SegmentIndex{
+		Segment:        model.Segment{},
+		IndexID:        indexID,
+		BuildID:        newBuildID,
+		NodeID:         0,
+		IndexState:     commonpb.IndexState_IndexStateNone,
+		FailReason:     "",
+		IndexVersion:   0,
+		IsDeleted:      false,
+		CreateTime:     0,
+		IndexFilePaths: nil,
+		IndexSize:      0,
+	}
+	t.Run("success and fail", func(t *testing.T) {
+		kv := &mockETCDKV{
+			save: func(s string, s2 string) error {
+				return nil
 			},
 		}
+		mt := constructMetaTable(&catalog.Catalog{Txn: kv})
 
-		err := mt.BuildIndex(1)
+		err := mt.AddIndex(segIdx)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.IndexState_InProgress, mt.indexBuildID2Meta[1].indexMeta.State)
-	})
 
-	t.Run("index meta not exist", func(t *testing.T) {
-		mt := metaTable{
-			indexBuildID2Meta: map[UniqueID]*Meta{
-				1: {
-					indexMeta: &indexpb.IndexMeta{
-						IndexBuildID: 1,
-						NodeID:       1,
-						State:        commonpb.IndexState_Unissued,
-					},
-				},
-			},
-		}
+		err = mt.UpdateVersion(newBuildID, nodeID)
+		assert.NoError(t, err)
 
-		err := mt.BuildIndex(2)
+		err = mt.BuildIndex(newBuildID)
+		assert.NoError(t, err)
+
+		err = mt.BuildIndex(newBuildID + 1)
+		assert.Error(t, err)
+
+		err = mt.BuildIndex(buildID)
+		assert.Error(t, err)
+
+		err = mt.MarkSegIndexAsDeleted(newBuildID)
+		assert.NoError(t, err)
+
+		err = mt.BuildIndex(newBuildID)
 		assert.Error(t, err)
 	})
 
-	t.Run("index meta marked deleted", func(t *testing.T) {
-		mt := metaTable{
-			indexBuildID2Meta: map[UniqueID]*Meta{
-				1: {
-					indexMeta: &indexpb.IndexMeta{
-						IndexBuildID: 1,
-						NodeID:       1,
-						State:        commonpb.IndexState_Unissued,
-						MarkDeleted:  true,
-					},
-				},
+	t.Run("etcd save fail", func(t *testing.T) {
+		kv := &mockETCDKV{
+			save: func(s string, s2 string) error {
+				return errors.New("error")
 			},
 		}
+		mt := constructMetaTable(&catalog.Catalog{Txn: kv})
 
-		err := mt.BuildIndex(2)
+		err := mt.AddIndex(segIdx)
 		assert.Error(t, err)
-	})
 
-	t.Run("save meta fail", func(t *testing.T) {
-		mt := metaTable{
-			indexBuildID2Meta: map[UniqueID]*Meta{
-				1: {
-					indexMeta: &indexpb.IndexMeta{
-						IndexBuildID: 1,
-						NodeID:       1,
-						State:        commonpb.IndexState_Unissued,
-					},
-				},
-			},
-			client: &mockETCDKV{
-				compareVersionAndSwap: func(key string, version int64, target string, opts ...clientv3.OpOption) (bool, error) {
-					return true, errors.New("error")
-				},
-			},
-		}
-
-		err := mt.BuildIndex(1)
+		err = mt.UpdateVersion(newBuildID, nodeID)
 		assert.Error(t, err)
-	})
 
-	t.Run("compare version fail load success", func(t *testing.T) {
-		mt := metaTable{
-			indexBuildID2Meta: map[UniqueID]*Meta{
-				1: {
-					indexMeta: &indexpb.IndexMeta{
-						IndexBuildID: 1,
-						NodeID:       1,
-						State:        commonpb.IndexState_Unissued,
-					},
-				},
-			},
-			client: &mockETCDKV{
-				compareVersionAndSwap: func(key string, version int64, target string, opts ...clientv3.OpOption) (bool, error) {
-					return false, nil
-				},
-				loadWithPrefix2: func(key string) ([]string, []string, []int64, error) {
-					indexMeta := &indexpb.IndexMeta{
-						IndexBuildID: 1,
-						NodeID:       1,
-						State:        commonpb.IndexState_Unissued,
-					}
-					v, _ := proto.Marshal(indexMeta)
-					return []string{"1"}, []string{string(v)}, []int64{1}, nil
-				},
-			},
-		}
-
-		err := mt.BuildIndex(1)
-		assert.Error(t, err)
-	})
-
-	t.Run("compare version fail load fail", func(t *testing.T) {
-		mt := metaTable{
-			indexBuildID2Meta: map[UniqueID]*Meta{
-				1: {
-					indexMeta: &indexpb.IndexMeta{
-						IndexBuildID: 1,
-						NodeID:       1,
-						State:        commonpb.IndexState_Unissued,
-					},
-				},
-			},
-			client: &mockETCDKV{
-				compareVersionAndSwap: func(key string, version int64, target string, opts ...clientv3.OpOption) (bool, error) {
-					return false, nil
-				},
-				loadWithPrefix2: func(key string) ([]string, []string, []int64, error) {
-					return nil, nil, nil, errors.New("error")
-				},
-			},
-		}
-
-		err := mt.BuildIndex(1)
+		err = mt.BuildIndex(newBuildID)
 		assert.Error(t, err)
 	})
 }
 
-func TestMetaTable_GetMetasByNodeID(t *testing.T) {
-	mt := metaTable{
-		indexBuildID2Meta: map[UniqueID]*Meta{
-			1: {
-				indexMeta: &indexpb.IndexMeta{
-					IndexBuildID: 1,
-					NodeID:       1,
-					State:        commonpb.IndexState_Unissued,
-					MarkDeleted:  true,
-				},
-			},
-			2: {
-				indexMeta: &indexpb.IndexMeta{
-					IndexBuildID: 2,
-					NodeID:       1,
-					State:        commonpb.IndexState_Finished,
-				},
-			},
+func TestMetaTable_GetIndexesForCollection(t *testing.T) {
+	kv := &mockETCDKV{
+		save: func(s string, s2 string) error {
+			return nil
+		},
+		multiSave: func(m map[string]string) error {
+			return nil
 		},
 	}
-	metas := mt.GetMetasByNodeID(1)
-	assert.Equal(t, 1, len(metas))
-}
+	mt := constructMetaTable(&catalog.Catalog{Txn: kv})
+	indexes := mt.GetIndexesForCollection(collID, "")
+	assert.Equal(t, 1, len(indexes))
 
-func TestMetaTable_MarkIndexAsDeleted(t *testing.T) {
-	t.Run("success", func(t *testing.T) {
-		mt := metaTable{
-			indexBuildID2Meta: map[UniqueID]*Meta{
-				1: {
-					indexMeta: &indexpb.IndexMeta{
-						IndexBuildID: 1,
-						NodeID:       1,
-						Req: &indexpb.BuildIndexRequest{
-							IndexID: 1,
-						},
-						State:       commonpb.IndexState_Unissued,
-						MarkDeleted: true,
-					},
-				},
-				2: {
-					indexMeta: &indexpb.IndexMeta{
-						IndexBuildID: 2,
-						NodeID:       1,
-						Req: &indexpb.BuildIndexRequest{
-							IndexID: 1,
-						},
-						State: commonpb.IndexState_Finished,
-					},
-				},
-			},
-			client: &mockETCDKV{
-				compareVersionAndSwap: func(key string, version int64, target string, opts ...clientv3.OpOption) (bool, error) {
-					return true, nil
-				},
-			},
-		}
+	err := mt.MarkIndexAsDeleted(collID, []UniqueID{indexID})
+	assert.NoError(t, err)
 
-		buildIDs, err := mt.MarkIndexAsDeleted(1)
-		assert.NoError(t, err)
-		assert.Equal(t, 2, len(buildIDs))
-	})
-
-	t.Run("save fail", func(t *testing.T) {
-		mt := metaTable{
-			indexBuildID2Meta: map[UniqueID]*Meta{
-				1: {
-					indexMeta: &indexpb.IndexMeta{
-						IndexBuildID: 1,
-						NodeID:       1,
-						Req: &indexpb.BuildIndexRequest{
-							IndexID: 1,
-						},
-						State:       commonpb.IndexState_Unissued,
-						MarkDeleted: true,
-					},
-				},
-				2: {
-					indexMeta: &indexpb.IndexMeta{
-						IndexBuildID: 2,
-						NodeID:       1,
-						Req: &indexpb.BuildIndexRequest{
-							IndexID: 1,
-						},
-						State: commonpb.IndexState_Finished,
-					},
-				},
-			},
-			client: &mockETCDKV{
-				compareVersionAndSwap: func(key string, version int64, target string, opts ...clientv3.OpOption) (bool, error) {
-					return true, errors.New("error")
-				},
-			},
-		}
-
-		buildIDs, err := mt.MarkIndexAsDeleted(1)
-		assert.Error(t, err)
-		assert.Equal(t, 0, len(buildIDs))
-	})
-	t.Run("compare version fail load success", func(t *testing.T) {
-		mt := metaTable{
-			indexBuildID2Meta: map[UniqueID]*Meta{
-				1: {
-					indexMeta: &indexpb.IndexMeta{
-						IndexBuildID: 1,
-						NodeID:       1,
-						Req: &indexpb.BuildIndexRequest{
-							IndexID: 1,
-						},
-						State:       commonpb.IndexState_Unissued,
-						MarkDeleted: true,
-					},
-				},
-				2: {
-					indexMeta: &indexpb.IndexMeta{
-						IndexBuildID: 2,
-						NodeID:       1,
-						Req: &indexpb.BuildIndexRequest{
-							IndexID: 1,
-						},
-						State: commonpb.IndexState_Finished,
-					},
-				},
-			},
-			client: &mockETCDKV{
-				compareVersionAndSwap: func(key string, version int64, target string, opts ...clientv3.OpOption) (bool, error) {
-					return false, nil
-				},
-				loadWithPrefix2: func(key string) ([]string, []string, []int64, error) {
-					indexMeta := &indexpb.IndexMeta{
-						IndexBuildID: 1,
-						NodeID:       1,
-						Req: &indexpb.BuildIndexRequest{
-							IndexID: 1,
-						},
-						State: commonpb.IndexState_Unissued,
-					}
-					v, err := proto.Marshal(indexMeta)
-					return []string{"1"}, []string{string(v)}, []int64{1}, err
-				},
-			},
-		}
-
-		buildIDs, err := mt.MarkIndexAsDeleted(1)
-		assert.Error(t, err)
-		assert.Equal(t, 0, len(buildIDs))
-	})
-
-	t.Run("compare version fail load fail", func(t *testing.T) {
-		mt := metaTable{
-			indexBuildID2Meta: map[UniqueID]*Meta{
-				1: {
-					indexMeta: &indexpb.IndexMeta{
-						IndexBuildID: 1,
-						NodeID:       1,
-						Req: &indexpb.BuildIndexRequest{
-							IndexID: 1,
-						},
-						State:       commonpb.IndexState_Unissued,
-						MarkDeleted: true,
-					},
-				},
-				2: {
-					indexMeta: &indexpb.IndexMeta{
-						IndexBuildID: 2,
-						NodeID:       1,
-						Req: &indexpb.BuildIndexRequest{
-							IndexID: 1,
-						},
-						State: commonpb.IndexState_Finished,
-					},
-				},
-			},
-			client: &mockETCDKV{
-				compareVersionAndSwap: func(key string, version int64, target string, opts ...clientv3.OpOption) (bool, error) {
-					return false, nil
-				},
-				loadWithPrefix2: func(key string) ([]string, []string, []int64, error) {
-					return []string{}, []string{}, []int64{}, errors.New("error")
-				},
-			},
-		}
-
-		buildIDs, err := mt.MarkIndexAsDeleted(1)
-		assert.Error(t, err)
-		assert.Equal(t, 0, len(buildIDs))
-	})
-}
-
-func TestMetaTable_MarkIndexAsDeletedByBuildIDs(t *testing.T) {
-	t.Run("success", func(t *testing.T) {
-		mt := metaTable{
-			indexBuildID2Meta: map[UniqueID]*Meta{
-				1: {
-					indexMeta: &indexpb.IndexMeta{
-						IndexBuildID: 1,
-						NodeID:       1,
-						Req: &indexpb.BuildIndexRequest{
-							IndexID: 1,
-						},
-						State:       commonpb.IndexState_Unissued,
-						MarkDeleted: true,
-					},
-				},
-				2: {
-					indexMeta: &indexpb.IndexMeta{
-						IndexBuildID: 2,
-						NodeID:       1,
-						Req: &indexpb.BuildIndexRequest{
-							IndexID: 1,
-						},
-						State: commonpb.IndexState_Finished,
-					},
-				},
-			},
-			client: &mockETCDKV{
-				compareVersionAndSwap: func(key string, version int64, target string, opts ...clientv3.OpOption) (bool, error) {
-					return true, nil
-				},
-			},
-		}
-
-		err := mt.MarkIndexAsDeletedByBuildIDs([]UniqueID{1, 2})
-		assert.NoError(t, err)
-	})
-
-	t.Run("save fail", func(t *testing.T) {
-		mt := metaTable{
-			indexBuildID2Meta: map[UniqueID]*Meta{
-				1: {
-					indexMeta: &indexpb.IndexMeta{
-						IndexBuildID: 1,
-						NodeID:       1,
-						Req: &indexpb.BuildIndexRequest{
-							IndexID: 1,
-						},
-						State:       commonpb.IndexState_Unissued,
-						MarkDeleted: true,
-					},
-				},
-				2: {
-					indexMeta: &indexpb.IndexMeta{
-						IndexBuildID: 2,
-						NodeID:       1,
-						Req: &indexpb.BuildIndexRequest{
-							IndexID: 1,
-						},
-						State: commonpb.IndexState_Finished,
-					},
-				},
-			},
-			client: &mockETCDKV{
-				compareVersionAndSwap: func(key string, version int64, target string, opts ...clientv3.OpOption) (bool, error) {
-					return true, errors.New("error")
-				},
-			},
-		}
-
-		err := mt.MarkIndexAsDeletedByBuildIDs([]UniqueID{1, 2})
-		assert.Error(t, err)
-	})
-
-	t.Run("compare version fail load success", func(t *testing.T) {
-		mt := metaTable{
-			indexBuildID2Meta: map[UniqueID]*Meta{
-				1: {
-					indexMeta: &indexpb.IndexMeta{
-						IndexBuildID: 1,
-						NodeID:       1,
-						Req: &indexpb.BuildIndexRequest{
-							IndexID: 1,
-						},
-						State:       commonpb.IndexState_Unissued,
-						MarkDeleted: true,
-					},
-				},
-				2: {
-					indexMeta: &indexpb.IndexMeta{
-						IndexBuildID: 2,
-						NodeID:       1,
-						Req: &indexpb.BuildIndexRequest{
-							IndexID: 1,
-						},
-						State: commonpb.IndexState_Finished,
-					},
-				},
-			},
-			client: &mockETCDKV{
-				compareVersionAndSwap: func(key string, version int64, target string, opts ...clientv3.OpOption) (bool, error) {
-					return false, nil
-				},
-				loadWithPrefix2: func(key string) ([]string, []string, []int64, error) {
-					indexMeta := &indexpb.IndexMeta{
-						IndexBuildID: 1,
-						NodeID:       1,
-						Req: &indexpb.BuildIndexRequest{
-							IndexID: 1,
-						},
-						State: commonpb.IndexState_Unissued,
-					}
-					v, err := proto.Marshal(indexMeta)
-					return []string{"1"}, []string{string(v)}, []int64{1}, err
-				},
-			},
-		}
-
-		err := mt.MarkIndexAsDeletedByBuildIDs([]UniqueID{1, 2})
-		assert.Error(t, err)
-	})
-
-	t.Run("compare fail load fail", func(t *testing.T) {
-		mt := metaTable{
-			indexBuildID2Meta: map[UniqueID]*Meta{
-				1: {
-					indexMeta: &indexpb.IndexMeta{
-						IndexBuildID: 1,
-						NodeID:       1,
-						Req: &indexpb.BuildIndexRequest{
-							IndexID: 1,
-						},
-						State:       commonpb.IndexState_Unissued,
-						MarkDeleted: true,
-					},
-				},
-				2: {
-					indexMeta: &indexpb.IndexMeta{
-						IndexBuildID: 2,
-						NodeID:       1,
-						Req: &indexpb.BuildIndexRequest{
-							IndexID: 1,
-						},
-						State: commonpb.IndexState_Finished,
-					},
-				},
-			},
-			client: &mockETCDKV{
-				compareVersionAndSwap: func(key string, version int64, target string, opts ...clientv3.OpOption) (bool, error) {
-					return false, nil
-				},
-				loadWithPrefix2: func(key string) ([]string, []string, []int64, error) {
-					return []string{}, []string{}, []int64{}, errors.New("error")
-				},
-			},
-		}
-
-		err := mt.MarkIndexAsDeletedByBuildIDs([]UniqueID{1, 2})
-		assert.Error(t, err)
-	})
-}
-
-func TestMetaTable_GetIndexStates(t *testing.T) {
-	mt := metaTable{
-		indexBuildID2Meta: map[UniqueID]*Meta{
-			1: {
-				indexMeta: &indexpb.IndexMeta{
-					IndexBuildID: 1,
-					IndexVersion: 1,
-					NodeID:       1,
-					State:        commonpb.IndexState_Unissued,
-					Req: &indexpb.BuildIndexRequest{
-						IndexID: 1,
-					},
-				},
-			},
-			2: {
-				indexMeta: &indexpb.IndexMeta{
-					IndexBuildID: 2,
-					IndexVersion: 2,
-					NodeID:       2,
-					State:        commonpb.IndexState_InProgress,
-					Req: &indexpb.BuildIndexRequest{
-						IndexID: 1,
-					},
-				},
-			},
-			3: {
-				indexMeta: &indexpb.IndexMeta{
-					IndexBuildID: 3,
-					IndexVersion: 2,
-					NodeID:       3,
-					State:        commonpb.IndexState_Finished,
-					MarkDeleted:  true,
-					Req: &indexpb.BuildIndexRequest{
-						IndexID: 1,
-					},
-				},
-			},
-		},
-	}
-
-	states := mt.GetIndexStates([]UniqueID{1, 2, 3, 4})
-	assert.Equal(t, 4, len(states))
-}
-
-func TestMetaTable_GetIndexFilePathInfo(t *testing.T) {
-	t.Run("success", func(t *testing.T) {
-		mt := metaTable{
-			indexBuildID2Meta: map[UniqueID]*Meta{
-				1: {
-					indexMeta: &indexpb.IndexMeta{
-						IndexBuildID:   1,
-						IndexVersion:   1,
-						NodeID:         1,
-						State:          commonpb.IndexState_Finished,
-						IndexFilePaths: []string{"file1", "file2", "file3"},
-					},
-				},
-			},
-		}
-		info, err := mt.GetIndexFilePathInfo(1)
-		assert.NoError(t, err)
-		assert.ElementsMatch(t, []string{"file1", "file2", "file3"}, info.IndexFilePaths)
-	})
-
-	t.Run("index meta not exist", func(t *testing.T) {
-		mt := metaTable{
-			indexBuildID2Meta: map[UniqueID]*Meta{
-				1: {
-					indexMeta: &indexpb.IndexMeta{
-						IndexBuildID:   1,
-						IndexVersion:   1,
-						NodeID:         1,
-						State:          commonpb.IndexState_Finished,
-						IndexFilePaths: []string{"file1", "file2", "file3"},
-					},
-				},
-			},
-		}
-		info, err := mt.GetIndexFilePathInfo(2)
-		assert.Error(t, err)
-		assert.Nil(t, info)
-	})
-
-	t.Run("index meta deleted", func(t *testing.T) {
-		mt := metaTable{
-			indexBuildID2Meta: map[UniqueID]*Meta{
-				1: {
-					indexMeta: &indexpb.IndexMeta{
-						IndexBuildID:   1,
-						IndexVersion:   1,
-						NodeID:         1,
-						State:          commonpb.IndexState_Finished,
-						IndexFilePaths: []string{"file1", "file2", "file3"},
-						MarkDeleted:    true,
-					},
-				},
-			},
-		}
-		info, err := mt.GetIndexFilePathInfo(1)
-		assert.Error(t, err)
-		assert.Nil(t, info)
-	})
-
-	t.Run("index meta not finished", func(t *testing.T) {
-		mt := metaTable{
-			indexBuildID2Meta: map[UniqueID]*Meta{
-				1: {
-					indexMeta: &indexpb.IndexMeta{
-						IndexBuildID: 1,
-						IndexVersion: 1,
-						NodeID:       1,
-						State:        commonpb.IndexState_InProgress,
-					},
-				},
-			},
-		}
-		info, err := mt.GetIndexFilePathInfo(1)
-		assert.Error(t, err)
-		assert.Nil(t, info)
-	})
-}
-
-func TestMetaTable_DeleteIndex(t *testing.T) {
-	t.Run("success", func(t *testing.T) {
-		mt := metaTable{
-			indexBuildID2Meta: map[UniqueID]*Meta{
-				1: {
-					indexMeta: &indexpb.IndexMeta{
-						IndexBuildID: 1,
-						IndexVersion: 1,
-						NodeID:       1,
-						State:        commonpb.IndexState_InProgress,
-					},
-				},
-			},
-			client: &mockETCDKV{
-				remove: func(s string) error {
-					return nil
-				},
-			},
-		}
-		err := mt.DeleteIndex(1)
-		assert.NoError(t, err)
-	})
-
-	t.Run("remove meta fail", func(t *testing.T) {
-		mt := metaTable{
-			indexBuildID2Meta: map[UniqueID]*Meta{
-				1: {
-					indexMeta: &indexpb.IndexMeta{
-						IndexBuildID: 1,
-						IndexVersion: 1,
-						NodeID:       1,
-						State:        commonpb.IndexState_InProgress,
-					},
-				},
-			},
-			client: &mockETCDKV{
-				remove: func(s string) error {
-					return errors.New("error")
-				},
-			},
-		}
-		err := mt.DeleteIndex(1)
-		assert.Error(t, err)
-	})
-}
-
-func TestMetaTable_GetBuildID2IndexFiles(t *testing.T) {
-	mt := metaTable{
-		indexBuildID2Meta: map[UniqueID]*Meta{
-			1: {
-				indexMeta: &indexpb.IndexMeta{
-					IndexFilePaths: []string{"file1", "file2"},
-				},
-			},
-		},
-	}
-
-	indexFiles := mt.GetBuildID2IndexFiles()
-	assert.Equal(t, 1, len(indexFiles))
-	assert.ElementsMatch(t, []string{"file1", "file2"}, indexFiles[1])
-}
-
-func TestMetaTable_GetDeletedMetas(t *testing.T) {
-	mt := metaTable{
-		indexBuildID2Meta: map[UniqueID]*Meta{
-			1: {
-				indexMeta: &indexpb.IndexMeta{
-					MarkDeleted: true,
-				},
-			},
-			2: {
-				indexMeta: &indexpb.IndexMeta{
-					MarkDeleted: true,
-				},
-			},
-		},
-	}
-	deletedMeta := mt.GetDeletedMetas()
-	assert.Equal(t, 2, len(deletedMeta))
+	indexes2 := mt.GetIndexesForCollection(collID, "")
+	assert.Equal(t, 0, len(indexes2))
 }
 
 func TestMetaTable_HasSameReq(t *testing.T) {
-	mt := metaTable{
-		indexBuildID2Meta: map[UniqueID]*Meta{
-			1: {
-				indexMeta: &indexpb.IndexMeta{
-					IndexBuildID: 1,
-					Req: &indexpb.BuildIndexRequest{
-						IndexID:   1,
-						IndexName: "index-1",
-						DataPaths: []string{"file1", "file2"},
-						TypeParams: []*commonpb.KeyValuePair{
-							{
-								Key:   "dim",
-								Value: "128",
-							},
-						},
-						IndexParams: []*commonpb.KeyValuePair{
-							{
-								Key:   "metric_type",
-								Value: "L2",
-							},
-						},
-						SegmentID: 2,
-					},
-					MarkDeleted: true,
-				},
-			},
-		},
-	}
-
-	req := &indexpb.BuildIndexRequest{
-		SegmentID: 3,
-	}
-	exist, buildID := mt.HasSameReq(req)
-	assert.False(t, exist)
-	assert.Equal(t, int64(0), buildID)
-
-	req = &indexpb.BuildIndexRequest{
-		SegmentID: 2,
-		IndexID:   2,
-	}
-	exist, buildID = mt.HasSameReq(req)
-	assert.False(t, exist)
-	assert.Equal(t, int64(0), buildID)
-
-	req = &indexpb.BuildIndexRequest{
-		SegmentID: 2,
-		IndexID:   1,
-		IndexName: "index-2",
-	}
-	exist, buildID = mt.HasSameReq(req)
-	assert.False(t, exist)
-	assert.Equal(t, int64(0), buildID)
-
-	req = &indexpb.BuildIndexRequest{
-		SegmentID: 2,
-		IndexID:   1,
-		IndexName: "index-1",
-		DataPaths: []string{"file1", "file2"},
-	}
-	exist, buildID = mt.HasSameReq(req)
-	assert.False(t, exist)
-	assert.Equal(t, int64(0), buildID)
-
-	req = &indexpb.BuildIndexRequest{
-		SegmentID: 2,
-		IndexID:   1,
-		IndexName: "index-1",
-		DataPaths: []string{"file1", "file2"},
-		TypeParams: []*commonpb.KeyValuePair{
-			{
-				Key:   "dim",
-				Value: "128",
-			},
-			{
-				Key:   "param",
-				Value: "param",
-			},
-		},
-	}
-	exist, buildID = mt.HasSameReq(req)
-	assert.False(t, exist)
-	assert.Equal(t, int64(0), buildID)
-
-	req = &indexpb.BuildIndexRequest{
-		SegmentID: 2,
-		IndexID:   1,
-		IndexName: "index-1",
-		DataPaths: []string{"file1", "file2"},
-		TypeParams: []*commonpb.KeyValuePair{
-			{
-				Key:   "dim",
-				Value: "256",
-			},
-		},
-	}
-	exist, buildID = mt.HasSameReq(req)
-	assert.False(t, exist)
-	assert.Equal(t, int64(0), buildID)
-
-	req = &indexpb.BuildIndexRequest{
-		SegmentID: 2,
-		IndexID:   1,
-		IndexName: "index-1",
-		DataPaths: []string{"file1", "file2"},
+	req := &indexpb.CreateIndexRequest{
+		CollectionID: collID,
+		FieldID:      fieldID,
+		IndexName:    indexName,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -1210,149 +503,131 @@ func TestMetaTable_HasSameReq(t *testing.T) {
 		},
 		IndexParams: []*commonpb.KeyValuePair{
 			{
-				Key:   "metric_type",
-				Value: "L2",
-			},
-			{
-				Key:   "dim",
-				Value: "128",
+				Key:   "nprobe",
+				Value: "16",
 			},
 		},
 	}
-	exist, buildID = mt.HasSameReq(req)
-	assert.False(t, exist)
-	assert.Equal(t, int64(0), buildID)
+	kv := &mockETCDKV{
+		save: func(s string, s2 string) error {
+			return nil
+		},
+		multiSave: func(m map[string]string) error {
+			return nil
+		},
+	}
 
-	req = &indexpb.BuildIndexRequest{
-		SegmentID: 2,
-		IndexID:   1,
-		IndexName: "index-1",
-		DataPaths: []string{"file1", "file2"},
-		TypeParams: []*commonpb.KeyValuePair{
-			{
-				Key:   "dim",
-				Value: "128",
-			},
-		},
-		IndexParams: []*commonpb.KeyValuePair{
-			{
-				Key:   "metric_type",
-				Value: "IP",
-			},
-		},
-	}
-	exist, buildID = mt.HasSameReq(req)
-	assert.False(t, exist)
-	assert.Equal(t, int64(0), buildID)
-
-	req = &indexpb.BuildIndexRequest{
-		SegmentID: 2,
-		IndexID:   1,
-		IndexName: "index-1",
-		DataPaths: []string{"file1", "file2"},
-		TypeParams: []*commonpb.KeyValuePair{
-			{
-				Key:   "dim",
-				Value: "128",
-			},
-		},
-		IndexParams: []*commonpb.KeyValuePair{
-			{
-				Key:   "metric_type",
-				Value: "L2",
-			},
-		},
-	}
-	exist, buildID = mt.HasSameReq(req)
-	assert.False(t, exist)
-	assert.Equal(t, int64(0), buildID)
-
-	mt = metaTable{
-		indexBuildID2Meta: map[UniqueID]*Meta{
-			1: {
-				indexMeta: &indexpb.IndexMeta{
-					IndexBuildID: 1,
-					Req: &indexpb.BuildIndexRequest{
-						IndexID:   1,
-						IndexName: "index-1",
-						DataPaths: []string{"file1", "file2"},
-						TypeParams: []*commonpb.KeyValuePair{
-							{
-								Key:   "dim",
-								Value: "128",
-							},
-						},
-						IndexParams: []*commonpb.KeyValuePair{
-							{
-								Key:   "metric_type",
-								Value: "L2",
-							},
-						},
-						SegmentID: 2,
-					},
-				},
-			},
-		},
-	}
-	req = &indexpb.BuildIndexRequest{
-		SegmentID: 2,
-		IndexID:   1,
-		IndexName: "index-1",
-		DataPaths: []string{"file1", "file2"},
-		TypeParams: []*commonpb.KeyValuePair{
-			{
-				Key:   "dim",
-				Value: "128",
-			},
-		},
-		IndexParams: []*commonpb.KeyValuePair{
-			{
-				Key:   "metric_type",
-				Value: "L2",
-			},
-		},
-	}
-	exist, buildID = mt.HasSameReq(req)
+	mt := constructMetaTable(&catalog.Catalog{Txn: kv})
+	exist, existIndexID := mt.HasSameReq(req)
 	assert.True(t, exist)
-	assert.Equal(t, int64(1), buildID)
+	assert.Equal(t, indexID, existIndexID)
+
+	req.FieldID = fieldID + 1
+	exist, existIndexID = mt.HasSameReq(req)
+	assert.False(t, exist)
+	assert.Zero(t, existIndexID)
+
+	req.FieldID = fieldID
+	req.IndexName = "indexName2"
+	exist, existIndexID = mt.HasSameReq(req)
+	assert.False(t, exist)
+	assert.Zero(t, existIndexID)
+
+	req.IndexName = indexName
+	req.TypeParams = []*commonpb.KeyValuePair{
+		{
+			Key:   "dim",
+			Value: "128",
+		},
+		{
+			Key:   "type",
+			Value: "float",
+		},
+	}
+	exist, existIndexID = mt.HasSameReq(req)
+	assert.False(t, exist)
+	assert.Zero(t, existIndexID)
+
+	req.TypeParams = []*commonpb.KeyValuePair{
+		{
+			Key:   "dim",
+			Value: "256",
+		},
+	}
+	exist, existIndexID = mt.HasSameReq(req)
+	assert.False(t, exist)
+	assert.Zero(t, existIndexID)
+
+	req.TypeParams = []*commonpb.KeyValuePair{
+		{
+			Key:   "dim",
+			Value: "128",
+		},
+	}
+	req.IndexParams = []*commonpb.KeyValuePair{
+		{
+			Key:   "nprobe",
+			Value: "16",
+		},
+		{
+			Key:   "type",
+			Value: "FLAT",
+		},
+	}
+	exist, existIndexID = mt.HasSameReq(req)
+	assert.False(t, exist)
+	assert.Zero(t, existIndexID)
+
+	req.IndexParams = []*commonpb.KeyValuePair{
+		{
+			Key:   "nprobe",
+			Value: "32",
+		},
+	}
+	exist, existIndexID = mt.HasSameReq(req)
+	assert.False(t, exist)
+	assert.Zero(t, existIndexID)
+
+	err := mt.MarkIndexAsDeleted(collID, []UniqueID{indexID})
+	assert.Nil(t, err)
+
+	exist, existIndexID = mt.HasSameReq(req)
+	assert.False(t, exist)
+	assert.Zero(t, existIndexID)
 }
 
-func TestMetaTable_NeedUpdateMeta(t *testing.T) {
-	mt := metaTable{
-		indexBuildID2Meta: map[UniqueID]*Meta{
-			1: {
-				indexMeta: &indexpb.IndexMeta{
-					IndexBuildID: 1,
-					State:        commonpb.IndexState_Unissued,
-				},
-				etcdVersion: 1,
-			},
-		},
-	}
+func TestMetaTable_CheckBuiltIndex(t *testing.T) {
+	mt := constructMetaTable(&catalog.Catalog{})
+	exist, buildID2 := mt.CheckBuiltIndex(segID, indexID)
+	assert.True(t, exist)
+	assert.Equal(t, buildID, buildID2)
 
-	t.Run("index not exist", func(t *testing.T) {
-		meta := &Meta{
-			indexMeta: &indexpb.IndexMeta{
-				IndexBuildID: 2,
-				State:        commonpb.IndexState_Finished,
-			},
-		}
-		update := mt.NeedUpdateMeta(meta)
-		assert.False(t, update)
-	})
+	exist, buildID2 = mt.CheckBuiltIndex(segID+1, indexID)
+	assert.False(t, exist)
+	assert.Zero(t, buildID2)
 
-	t.Run("update", func(t *testing.T) {
-		meta := &Meta{
-			indexMeta: &indexpb.IndexMeta{
-				IndexBuildID: 1,
-				State:        commonpb.IndexState_Finished,
-			},
-			etcdVersion: 2,
-		}
-		update := mt.NeedUpdateMeta(meta)
-		assert.True(t, update)
+	exist, buildID2 = mt.CheckBuiltIndex(segID, indexID+1)
+	assert.False(t, exist)
+	assert.Zero(t, buildID2)
+}
 
-		update = mt.NeedUpdateMeta(meta)
-		assert.False(t, update)
-	})
+func TestMetaTable_GetIndexIDByName(t *testing.T) {
+	mt := constructMetaTable(&catalog.Catalog{})
+	indexID2CreateTs := mt.GetIndexIDByName(collID, indexName)
+	assert.Equal(t, 1, len(indexID2CreateTs))
+
+	indexID2CreateTs = mt.GetIndexIDByName(collID, "name2")
+	assert.Equal(t, 0, len(indexID2CreateTs))
+
+	indexID2CreateTs = mt.GetIndexIDByName(collID+1, "name3")
+	assert.Equal(t, 0, len(indexID2CreateTs))
+}
+
+func TestMetaTable_GetIndexNameByID(t *testing.T) {
+	mt := constructMetaTable(&catalog.Catalog{})
+	name := mt.GetIndexNameByID(collID, indexID)
+	assert.Equal(t, indexName, name)
+
+	name = mt.GetIndexNameByID(collID, indexID+1)
+	assert.Equal(t, "", name)
 }

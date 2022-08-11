@@ -1739,6 +1739,7 @@ func (node *Proxy) CreateIndex(ctx context.Context, request *milvuspb.CreateInde
 		Condition:          NewTaskCondition(ctx),
 		CreateIndexRequest: request,
 		rootCoord:          node.rootCoord,
+		indexCoord:         node.indexCoord,
 	}
 
 	method := "CreateIndex"
@@ -1846,7 +1847,7 @@ func (node *Proxy) DescribeIndex(ctx context.Context, request *milvuspb.Describe
 		ctx:                  ctx,
 		Condition:            NewTaskCondition(ctx),
 		DescribeIndexRequest: request,
-		rootCoord:            node.rootCoord,
+		indexCoord:           node.indexCoord,
 	}
 
 	method := "DescribeIndex"
@@ -1962,7 +1963,7 @@ func (node *Proxy) DropIndex(ctx context.Context, request *milvuspb.DropIndexReq
 		ctx:              ctx,
 		Condition:        NewTaskCondition(ctx),
 		DropIndexRequest: request,
-		rootCoord:        node.rootCoord,
+		indexCoord:       node.indexCoord,
 	}
 
 	method := "DropIndex"

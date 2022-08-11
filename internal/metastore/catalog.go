@@ -20,11 +20,14 @@ type Catalog interface {
 	CreatePartition(ctx context.Context, partition *model.Partition, ts typeutil.Timestamp) error
 	DropPartition(ctx context.Context, collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, ts typeutil.Timestamp) error
 
-	CreateIndex(ctx context.Context, col *model.Collection, index *model.Index) error
-	// AlterIndex newIndex only contains updated parts
-	AlterIndex(ctx context.Context, oldIndex *model.Index, newIndex *model.Index, alterType AlterType) error
-	DropIndex(ctx context.Context, collectionInfo *model.Collection, dropIdxID typeutil.UniqueID, ts typeutil.Timestamp) error
+	CreateIndex(ctx context.Context, index *model.Index) error
+	CreateSegmentIndex(ctx context.Context, segIdx *model.SegmentIndex) error
+	AlterIndex(ctx context.Context, indexes []*model.Index) error
+	AlterSegmentIndex(ctx context.Context, segIdxes []*model.SegmentIndex) error
 	ListIndexes(ctx context.Context) ([]*model.Index, error)
+	ListSegmentIndexes(ctx context.Context) ([]*model.SegmentIndex, error)
+	DropIndex(ctx context.Context, collID typeutil.UniqueID, dropIdxID typeutil.UniqueID, ts typeutil.Timestamp) error
+	DropSegmentIndex(ctx context.Context, collID, partID, segID, buildID typeutil.UniqueID) error
 
 	CreateAlias(ctx context.Context, alias *model.Alias, ts typeutil.Timestamp) error
 	DropAlias(ctx context.Context, alias string, ts typeutil.Timestamp) error

@@ -211,7 +211,11 @@ func (srm *SegmentReferenceManager) HasSegmentLock(segID UniqueID) bool {
 	defer srm.lock.RUnlock()
 
 	if _, ok := srm.segmentReferCnt[segID]; !ok {
+		log.Debug("segment has reference lock?", zap.Bool("has", false))
+
 		return false
 	}
+	log.Debug("segment has reference lock?", zap.Bool("has", true))
+
 	return true
 }

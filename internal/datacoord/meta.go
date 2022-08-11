@@ -29,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util"
 	"go.uber.org/zap"
 )
@@ -1016,16 +1015,16 @@ func (m *meta) saveSegmentInfo(segment *SegmentInfo) error {
 	dataKey := buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
 	kvs[dataKey] = string(segBytes)
 	if segment.State == commonpb.SegmentState_Flushed {
-		handoffSegmentInfo := &querypb.SegmentInfo{
-			SegmentID:           segment.ID,
-			CollectionID:        segment.CollectionID,
-			PartitionID:         segment.PartitionID,
-			DmChannel:           segment.InsertChannel,
-			SegmentState:        commonpb.SegmentState_Sealed,
-			CreatedByCompaction: segment.GetCreatedByCompaction(),
-			CompactionFrom:      segment.GetCompactionFrom(),
-		}
-		handoffSegBytes, err := proto.Marshal(handoffSegmentInfo)
+		//handoffSegmentInfo := &querypb.SegmentInfo{
+		//	SegmentID:           segment.ID,
+		//	CollectionID:        segment.CollectionID,
+		//	PartitionID:         segment.PartitionID,
+		//	DmChannel:           segment.InsertChannel,
+		//	SegmentState:        commonpb.SegmentState_Sealed,
+		//	CreatedByCompaction: segment.GetCreatedByCompaction(),
+		//	CompactionFrom:      segment.GetCompactionFrom(),
+		//}
+		handoffSegBytes, err := proto.Marshal(segment.SegmentInfo)
 		if err != nil {
 			log.Error("DataCoord saveSegmentInfo marshal handoffSegInfo failed", zap.Int64("segmentID", segment.GetID()), zap.Error(err))
 			return fmt.Errorf("DataCoord saveSegmentInfo segmentID:%d, marshal handoffSegInfo failed:%w", segment.GetID(), err)
@@ -1056,7 +1055,7 @@ func buildSegmentPath(collectionID UniqueID, partitionID UniqueID, segmentID Uni
 
 // buildQuerySegmentPath common logic mapping segment info to corresponding key of queryCoord in kv store
 func buildQuerySegmentPath(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID) string {
-	return fmt.Sprintf("%s/%d/%d/%d", util.HandoffSegmentPrefix, collectionID, partitionID, segmentID)
+	return fmt.Sprintf("%s/%d/%d/%d", util.FlushedSegmentPrefix, collectionID, partitionID, segmentID)
 }
 
 // buildChannelRemovePat builds vchannel remove flag path

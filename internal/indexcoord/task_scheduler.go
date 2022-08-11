@@ -178,10 +178,10 @@ func (queue *IndexAddTaskQueue) tryToRemoveUselessIndexAddTask(indexID UniqueID)
 		if !ok {
 			continue
 		}
-		if indexAddTask.req.IndexID == indexID {
+		if indexAddTask.segmentIndex.IndexID == indexID {
 			queue.unissuedTasks.Remove(e)
 			indexAddTask.Notify(nil)
-			indexBuildIDs = append(indexBuildIDs, indexAddTask.req.IndexBuildID)
+			indexBuildIDs = append(indexBuildIDs, indexAddTask.segmentIndex.BuildID)
 		}
 	}
 

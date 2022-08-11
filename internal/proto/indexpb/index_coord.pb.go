@@ -8,9 +8,9 @@ import (
 	fmt "fmt"
 	proto "github.com/golang/protobuf/proto"
 	commonpb "github.com/milvus-io/milvus/internal/proto/commonpb"
+	datapb "github.com/milvus-io/milvus/internal/proto/datapb"
 	internalpb "github.com/milvus-io/milvus/internal/proto/internalpb"
 	milvuspb "github.com/milvus-io/milvus/internal/proto/milvuspb"
-	schemapb "github.com/milvus-io/milvus/internal/proto/schemapb"
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
@@ -28,6 +28,330 @@ var _ = math.Inf
 // proto package needs to be updated.
 const _ = proto.ProtoPackageIsVersion3 // please upgrade the proto package
 
+type IndexInfo struct {
+	CollectionID         int64                    `protobuf:"varint,1,opt,name=collectionID,proto3" json:"collectionID,omitempty"`
+	FieldID              int64                    `protobuf:"varint,2,opt,name=fieldID,proto3" json:"fieldID,omitempty"`
+	IndexName            string                   `protobuf:"bytes,3,opt,name=index_name,json=indexName,proto3" json:"index_name,omitempty"`
+	IndexID              int64                    `protobuf:"varint,4,opt,name=indexID,proto3" json:"indexID,omitempty"`
+	TypeParams           []*commonpb.KeyValuePair `protobuf:"bytes,5,rep,name=type_params,json=typeParams,proto3" json:"type_params,omitempty"`
+	IndexParams          []*commonpb.KeyValuePair `protobuf:"bytes,6,rep,name=index_params,json=indexParams,proto3" json:"index_params,omitempty"`
+	XXX_NoUnkeyedLiteral struct{}                 `json:"-"`
+	XXX_unrecognized     []byte                   `json:"-"`
+	XXX_sizecache        int32                    `json:"-"`
+}
+
+func (m *IndexInfo) Reset()         { *m = IndexInfo{} }
+func (m *IndexInfo) String() string { return proto.CompactTextString(m) }
+func (*IndexInfo) ProtoMessage()    {}
+func (*IndexInfo) Descriptor() ([]byte, []int) {
+	return fileDescriptor_f9e019eb3fda53c2, []int{0}
+}
+
+func (m *IndexInfo) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_IndexInfo.Unmarshal(m, b)
+}
+func (m *IndexInfo) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_IndexInfo.Marshal(b, m, deterministic)
+}
+func (m *IndexInfo) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_IndexInfo.Merge(m, src)
+}
+func (m *IndexInfo) XXX_Size() int {
+	return xxx_messageInfo_IndexInfo.Size(m)
+}
+func (m *IndexInfo) XXX_DiscardUnknown() {
+	xxx_messageInfo_IndexInfo.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_IndexInfo proto.InternalMessageInfo
+
+func (m *IndexInfo) GetCollectionID() int64 {
+	if m != nil {
+		return m.CollectionID
+	}
+	return 0
+}
+
+func (m *IndexInfo) GetFieldID() int64 {
+	if m != nil {
+		return m.FieldID
+	}
+	return 0
+}
+
+func (m *IndexInfo) GetIndexName() string {
+	if m != nil {
+		return m.IndexName
+	}
+	return ""
+}
+
+func (m *IndexInfo) GetIndexID() int64 {
+	if m != nil {
+		return m.IndexID
+	}
+	return 0
+}
+
+func (m *IndexInfo) GetTypeParams() []*commonpb.KeyValuePair {
+	if m != nil {
+		return m.TypeParams
+	}
+	return nil
+}
+
+func (m *IndexInfo) GetIndexParams() []*commonpb.KeyValuePair {
+	if m != nil {
+		return m.IndexParams
+	}
+	return nil
+}
+
+type FieldIndex struct {
+	IndexInfo            *IndexInfo `protobuf:"bytes,1,opt,name=index_info,json=indexInfo,proto3" json:"index_info,omitempty"`
+	Deleted              bool       `protobuf:"varint,2,opt,name=deleted,proto3" json:"deleted,omitempty"`
+	CreateTime           uint64     `protobuf:"varint,3,opt,name=create_time,json=createTime,proto3" json:"create_time,omitempty"`
+	XXX_NoUnkeyedLiteral struct{}   `json:"-"`
+	XXX_unrecognized     []byte     `json:"-"`
+	XXX_sizecache        int32      `json:"-"`
+}
+
+func (m *FieldIndex) Reset()         { *m = FieldIndex{} }
+func (m *FieldIndex) String() string { return proto.CompactTextString(m) }
+func (*FieldIndex) ProtoMessage()    {}
+func (*FieldIndex) Descriptor() ([]byte, []int) {
+	return fileDescriptor_f9e019eb3fda53c2, []int{1}
+}
+
+func (m *FieldIndex) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_FieldIndex.Unmarshal(m, b)
+}
+func (m *FieldIndex) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_FieldIndex.Marshal(b, m, deterministic)
+}
+func (m *FieldIndex) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_FieldIndex.Merge(m, src)
+}
+func (m *FieldIndex) XXX_Size() int {
+	return xxx_messageInfo_FieldIndex.Size(m)
+}
+func (m *FieldIndex) XXX_DiscardUnknown() {
+	xxx_messageInfo_FieldIndex.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_FieldIndex proto.InternalMessageInfo
+
+func (m *FieldIndex) GetIndexInfo() *IndexInfo {
+	if m != nil {
+		return m.IndexInfo
+	}
+	return nil
+}
+
+func (m *FieldIndex) GetDeleted() bool {
+	if m != nil {
+		return m.Deleted
+	}
+	return false
+}
+
+func (m *FieldIndex) GetCreateTime() uint64 {
+	if m != nil {
+		return m.CreateTime
+	}
+	return 0
+}
+
+type SegmentIndex struct {
+	CollectionID         int64               `protobuf:"varint,1,opt,name=collectionID,proto3" json:"collectionID,omitempty"`
+	PartitionID          int64               `protobuf:"varint,2,opt,name=partitionID,proto3" json:"partitionID,omitempty"`
+	SegmentID            int64               `protobuf:"varint,3,opt,name=segmentID,proto3" json:"segmentID,omitempty"`
+	NumRows              int64               `protobuf:"varint,4,opt,name=num_rows,json=numRows,proto3" json:"num_rows,omitempty"`
+	IndexID              int64               `protobuf:"varint,5,opt,name=indexID,proto3" json:"indexID,omitempty"`
+	BuildID              int64               `protobuf:"varint,6,opt,name=buildID,proto3" json:"buildID,omitempty"`
+	NodeID               int64               `protobuf:"varint,7,opt,name=nodeID,proto3" json:"nodeID,omitempty"`
+	IndexVersion         int64               `protobuf:"varint,8,opt,name=index_version,json=indexVersion,proto3" json:"index_version,omitempty"`
+	State                commonpb.IndexState `protobuf:"varint,9,opt,name=state,proto3,enum=milvus.proto.common.IndexState" json:"state,omitempty"`
+	FailReason           string              `protobuf:"bytes,10,opt,name=fail_reason,json=failReason,proto3" json:"fail_reason,omitempty"`
+	IndexFilesPaths      []string            `protobuf:"bytes,11,rep,name=index_files_paths,json=indexFilesPaths,proto3" json:"index_files_paths,omitempty"`
+	Deleted              bool                `protobuf:"varint,12,opt,name=deleted,proto3" json:"deleted,omitempty"`
+	CreateTime           uint64              `protobuf:"varint,13,opt,name=create_time,json=createTime,proto3" json:"create_time,omitempty"`
+	SerializeSize        uint64              `protobuf:"varint,14,opt,name=serialize_size,json=serializeSize,proto3" json:"serialize_size,omitempty"`
+	XXX_NoUnkeyedLiteral struct{}            `json:"-"`
+	XXX_unrecognized     []byte              `json:"-"`
+	XXX_sizecache        int32               `json:"-"`
+}
+
+func (m *SegmentIndex) Reset()         { *m = SegmentIndex{} }
+func (m *SegmentIndex) String() string { return proto.CompactTextString(m) }
+func (*SegmentIndex) ProtoMessage()    {}
+func (*SegmentIndex) Descriptor() ([]byte, []int) {
+	return fileDescriptor_f9e019eb3fda53c2, []int{2}
+}
+
+func (m *SegmentIndex) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_SegmentIndex.Unmarshal(m, b)
+}
+func (m *SegmentIndex) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_SegmentIndex.Marshal(b, m, deterministic)
+}
+func (m *SegmentIndex) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_SegmentIndex.Merge(m, src)
+}
+func (m *SegmentIndex) XXX_Size() int {
+	return xxx_messageInfo_SegmentIndex.Size(m)
+}
+func (m *SegmentIndex) XXX_DiscardUnknown() {
+	xxx_messageInfo_SegmentIndex.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_SegmentIndex proto.InternalMessageInfo
+
+func (m *SegmentIndex) GetCollectionID() int64 {
+	if m != nil {
+		return m.CollectionID
+	}
+	return 0
+}
+
+func (m *SegmentIndex) GetPartitionID() int64 {
+	if m != nil {
+		return m.PartitionID
+	}
+	return 0
+}
+
+func (m *SegmentIndex) GetSegmentID() int64 {
+	if m != nil {
+		return m.SegmentID
+	}
+	return 0
+}
+
+func (m *SegmentIndex) GetNumRows() int64 {
+	if m != nil {
+		return m.NumRows
+	}
+	return 0
+}
+
+func (m *SegmentIndex) GetIndexID() int64 {
+	if m != nil {
+		return m.IndexID
+	}
+	return 0
+}
+
+func (m *SegmentIndex) GetBuildID() int64 {
+	if m != nil {
+		return m.BuildID
+	}
+	return 0
+}
+
+func (m *SegmentIndex) GetNodeID() int64 {
+	if m != nil {
+		return m.NodeID
+	}
+	return 0
+}
+
+func (m *SegmentIndex) GetIndexVersion() int64 {
+	if m != nil {
+		return m.IndexVersion
+	}
+	return 0
+}
+
+func (m *SegmentIndex) GetState() commonpb.IndexState {
+	if m != nil {
+		return m.State
+	}
+	return commonpb.IndexState_IndexStateNone
+}
+
+func (m *SegmentIndex) GetFailReason() string {
+	if m != nil {
+		return m.FailReason
+	}
+	return ""
+}
+
+func (m *SegmentIndex) GetIndexFilesPaths() []string {
+	if m != nil {
+		return m.IndexFilesPaths
+	}
+	return nil
+}
+
+func (m *SegmentIndex) GetDeleted() bool {
+	if m != nil {
+		return m.Deleted
+	}
+	return false
+}
+
+func (m *SegmentIndex) GetCreateTime() uint64 {
+	if m != nil {
+		return m.CreateTime
+	}
+	return 0
+}
+
+func (m *SegmentIndex) GetSerializeSize() uint64 {
+	if m != nil {
+		return m.SerializeSize
+	}
+	return 0
+}
+
+type HandoffTask struct {
+	SegmentInfo          *datapb.SegmentInfo `protobuf:"bytes,1,opt,name=segment_info,json=segmentInfo,proto3" json:"segment_info,omitempty"`
+	IndexInfo            *IndexInfo          `protobuf:"bytes,2,opt,name=index_info,json=indexInfo,proto3" json:"index_info,omitempty"`
+	XXX_NoUnkeyedLiteral struct{}            `json:"-"`
+	XXX_unrecognized     []byte              `json:"-"`
+	XXX_sizecache        int32               `json:"-"`
+}
+
+func (m *HandoffTask) Reset()         { *m = HandoffTask{} }
+func (m *HandoffTask) String() string { return proto.CompactTextString(m) }
+func (*HandoffTask) ProtoMessage()    {}
+func (*HandoffTask) Descriptor() ([]byte, []int) {
+	return fileDescriptor_f9e019eb3fda53c2, []int{3}
+}
+
+func (m *HandoffTask) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_HandoffTask.Unmarshal(m, b)
+}
+func (m *HandoffTask) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_HandoffTask.Marshal(b, m, deterministic)
+}
+func (m *HandoffTask) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_HandoffTask.Merge(m, src)
+}
+func (m *HandoffTask) XXX_Size() int {
+	return xxx_messageInfo_HandoffTask.Size(m)
+}
+func (m *HandoffTask) XXX_DiscardUnknown() {
+	xxx_messageInfo_HandoffTask.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_HandoffTask proto.InternalMessageInfo
+
+func (m *HandoffTask) GetSegmentInfo() *datapb.SegmentInfo {
+	if m != nil {
+		return m.SegmentInfo
+	}
+	return nil
+}
+
+func (m *HandoffTask) GetIndexInfo() *IndexInfo {
+	if m != nil {
+		return m.IndexInfo
+	}
+	return nil
+}
+
 type RegisterNodeRequest struct {
 	Base                 *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
 	Address              *commonpb.Address `protobuf:"bytes,2,opt,name=address,proto3" json:"address,omitempty"`
@@ -41,7 +365,7 @@ func (m *RegisterNodeRequest) Reset()         { *m = RegisterNodeRequest{} }
 func (m *RegisterNodeRequest) String() string { return proto.CompactTextString(m) }
 func (*RegisterNodeRequest) ProtoMessage()    {}
 func (*RegisterNodeRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_f9e019eb3fda53c2, []int{0}
+	return fileDescriptor_f9e019eb3fda53c2, []int{4}
 }
 
 func (m *RegisterNodeRequest) XXX_Unmarshal(b []byte) error {
@@ -95,7 +419,7 @@ func (m *RegisterNodeResponse) Reset()         { *m = RegisterNodeResponse{} }
 func (m *RegisterNodeResponse) String() string { return proto.CompactTextString(m) }
 func (*RegisterNodeResponse) ProtoMessage()    {}
 func (*RegisterNodeResponse) Descriptor() ([]byte, []int) {
-	return fileDescriptor_f9e019eb3fda53c2, []int{1}
+	return fileDescriptor_f9e019eb3fda53c2, []int{5}
 }
 
 func (m *RegisterNodeResponse) XXX_Unmarshal(b []byte) error {
@@ -130,157 +454,259 @@ func (m *RegisterNodeResponse) GetInitParams() *internalpb.InitParams {
 	return nil
 }
 
-type GetIndexStatesRequest struct {
-	IndexBuildIDs        []int64  `protobuf:"varint,1,rep,packed,name=indexBuildIDs,proto3" json:"indexBuildIDs,omitempty"`
+type GetIndexStateRequest struct {
+	CollectionID         int64    `protobuf:"varint,1,opt,name=collectionID,proto3" json:"collectionID,omitempty"`
+	IndexName            string   `protobuf:"bytes,2,opt,name=index_name,json=indexName,proto3" json:"index_name,omitempty"`
 	XXX_NoUnkeyedLiteral struct{} `json:"-"`
 	XXX_unrecognized     []byte   `json:"-"`
 	XXX_sizecache        int32    `json:"-"`
 }
 
-func (m *GetIndexStatesRequest) Reset()         { *m = GetIndexStatesRequest{} }
-func (m *GetIndexStatesRequest) String() string { return proto.CompactTextString(m) }
-func (*GetIndexStatesRequest) ProtoMessage()    {}
-func (*GetIndexStatesRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_f9e019eb3fda53c2, []int{2}
+func (m *GetIndexStateRequest) Reset()         { *m = GetIndexStateRequest{} }
+func (m *GetIndexStateRequest) String() string { return proto.CompactTextString(m) }
+func (*GetIndexStateRequest) ProtoMessage()    {}
+func (*GetIndexStateRequest) Descriptor() ([]byte, []int) {
+	return fileDescriptor_f9e019eb3fda53c2, []int{6}
 }
 
-func (m *GetIndexStatesRequest) XXX_Unmarshal(b []byte) error {
-	return xxx_messageInfo_GetIndexStatesRequest.Unmarshal(m, b)
+func (m *GetIndexStateRequest) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_GetIndexStateRequest.Unmarshal(m, b)
 }
-func (m *GetIndexStatesRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_GetIndexStatesRequest.Marshal(b, m, deterministic)
+func (m *GetIndexStateRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_GetIndexStateRequest.Marshal(b, m, deterministic)
 }
-func (m *GetIndexStatesRequest) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_GetIndexStatesRequest.Merge(m, src)
+func (m *GetIndexStateRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_GetIndexStateRequest.Merge(m, src)
 }
-func (m *GetIndexStatesRequest) XXX_Size() int {
-	return xxx_messageInfo_GetIndexStatesRequest.Size(m)
+func (m *GetIndexStateRequest) XXX_Size() int {
+	return xxx_messageInfo_GetIndexStateRequest.Size(m)
 }
-func (m *GetIndexStatesRequest) XXX_DiscardUnknown() {
-	xxx_messageInfo_GetIndexStatesRequest.DiscardUnknown(m)
+func (m *GetIndexStateRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_GetIndexStateRequest.DiscardUnknown(m)
 }
 
-var xxx_messageInfo_GetIndexStatesRequest proto.InternalMessageInfo
+var xxx_messageInfo_GetIndexStateRequest proto.InternalMessageInfo
 
-func (m *GetIndexStatesRequest) GetIndexBuildIDs() []int64 {
+func (m *GetIndexStateRequest) GetCollectionID() int64 {
 	if m != nil {
-		return m.IndexBuildIDs
-	}
-	return nil
-}
-
-type IndexInfo struct {
-	State                commonpb.IndexState `protobuf:"varint,1,opt,name=state,proto3,enum=milvus.proto.common.IndexState" json:"state,omitempty"`
-	IndexBuildID         int64               `protobuf:"varint,2,opt,name=indexBuildID,proto3" json:"indexBuildID,omitempty"`
-	IndexID              int64               `protobuf:"varint,3,opt,name=indexID,proto3" json:"indexID,omitempty"`
-	IndexName            string              `protobuf:"bytes,4,opt,name=index_name,json=indexName,proto3" json:"index_name,omitempty"`
-	Reason               string              `protobuf:"bytes,5,opt,name=reason,proto3" json:"reason,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}            `json:"-"`
-	XXX_unrecognized     []byte              `json:"-"`
-	XXX_sizecache        int32               `json:"-"`
-}
-
-func (m *IndexInfo) Reset()         { *m = IndexInfo{} }
-func (m *IndexInfo) String() string { return proto.CompactTextString(m) }
-func (*IndexInfo) ProtoMessage()    {}
-func (*IndexInfo) Descriptor() ([]byte, []int) {
-	return fileDescriptor_f9e019eb3fda53c2, []int{3}
-}
-
-func (m *IndexInfo) XXX_Unmarshal(b []byte) error {
-	return xxx_messageInfo_IndexInfo.Unmarshal(m, b)
-}
-func (m *IndexInfo) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_IndexInfo.Marshal(b, m, deterministic)
-}
-func (m *IndexInfo) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_IndexInfo.Merge(m, src)
-}
-func (m *IndexInfo) XXX_Size() int {
-	return xxx_messageInfo_IndexInfo.Size(m)
-}
-func (m *IndexInfo) XXX_DiscardUnknown() {
-	xxx_messageInfo_IndexInfo.DiscardUnknown(m)
-}
-
-var xxx_messageInfo_IndexInfo proto.InternalMessageInfo
-
-func (m *IndexInfo) GetState() commonpb.IndexState {
-	if m != nil {
-		return m.State
-	}
-	return commonpb.IndexState_IndexStateNone
-}
-
-func (m *IndexInfo) GetIndexBuildID() int64 {
-	if m != nil {
-		return m.IndexBuildID
+		return m.CollectionID
 	}
 	return 0
 }
 
-func (m *IndexInfo) GetIndexID() int64 {
-	if m != nil {
-		return m.IndexID
-	}
-	return 0
-}
-
-func (m *IndexInfo) GetIndexName() string {
+func (m *GetIndexStateRequest) GetIndexName() string {
 	if m != nil {
 		return m.IndexName
 	}
 	return ""
 }
 
-func (m *IndexInfo) GetReason() string {
-	if m != nil {
-		return m.Reason
-	}
-	return ""
+type GetIndexStateResponse struct {
+	Status               *commonpb.Status    `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	State                commonpb.IndexState `protobuf:"varint,2,opt,name=state,proto3,enum=milvus.proto.common.IndexState" json:"state,omitempty"`
+	FailReason           string              `protobuf:"bytes,3,opt,name=fail_reason,json=failReason,proto3" json:"fail_reason,omitempty"`
+	XXX_NoUnkeyedLiteral struct{}            `json:"-"`
+	XXX_unrecognized     []byte              `json:"-"`
+	XXX_sizecache        int32               `json:"-"`
 }
 
-type GetIndexStatesResponse struct {
-	Status               *commonpb.Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
-	States               []*IndexInfo     `protobuf:"bytes,2,rep,name=states,proto3" json:"states,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}         `json:"-"`
-	XXX_unrecognized     []byte           `json:"-"`
-	XXX_sizecache        int32            `json:"-"`
+func (m *GetIndexStateResponse) Reset()         { *m = GetIndexStateResponse{} }
+func (m *GetIndexStateResponse) String() string { return proto.CompactTextString(m) }
+func (*GetIndexStateResponse) ProtoMessage()    {}
+func (*GetIndexStateResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_f9e019eb3fda53c2, []int{7}
 }
 
-func (m *GetIndexStatesResponse) Reset()         { *m = GetIndexStatesResponse{} }
-func (m *GetIndexStatesResponse) String() string { return proto.CompactTextString(m) }
-func (*GetIndexStatesResponse) ProtoMessage()    {}
-func (*GetIndexStatesResponse) Descriptor() ([]byte, []int) {
-	return fileDescriptor_f9e019eb3fda53c2, []int{4}
+func (m *GetIndexStateResponse) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_GetIndexStateResponse.Unmarshal(m, b)
+}
+func (m *GetIndexStateResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_GetIndexStateResponse.Marshal(b, m, deterministic)
+}
+func (m *GetIndexStateResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_GetIndexStateResponse.Merge(m, src)
+}
+func (m *GetIndexStateResponse) XXX_Size() int {
+	return xxx_messageInfo_GetIndexStateResponse.Size(m)
+}
+func (m *GetIndexStateResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_GetIndexStateResponse.DiscardUnknown(m)
 }
 
-func (m *GetIndexStatesResponse) XXX_Unmarshal(b []byte) error {
-	return xxx_messageInfo_GetIndexStatesResponse.Unmarshal(m, b)
-}
-func (m *GetIndexStatesResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_GetIndexStatesResponse.Marshal(b, m, deterministic)
-}
-func (m *GetIndexStatesResponse) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_GetIndexStatesResponse.Merge(m, src)
-}
-func (m *GetIndexStatesResponse) XXX_Size() int {
-	return xxx_messageInfo_GetIndexStatesResponse.Size(m)
-}
-func (m *GetIndexStatesResponse) XXX_DiscardUnknown() {
-	xxx_messageInfo_GetIndexStatesResponse.DiscardUnknown(m)
-}
+var xxx_messageInfo_GetIndexStateResponse proto.InternalMessageInfo
 
-var xxx_messageInfo_GetIndexStatesResponse proto.InternalMessageInfo
-
-func (m *GetIndexStatesResponse) GetStatus() *commonpb.Status {
+func (m *GetIndexStateResponse) GetStatus() *commonpb.Status {
 	if m != nil {
 		return m.Status
 	}
 	return nil
 }
 
-func (m *GetIndexStatesResponse) GetStates() []*IndexInfo {
+func (m *GetIndexStateResponse) GetState() commonpb.IndexState {
+	if m != nil {
+		return m.State
+	}
+	return commonpb.IndexState_IndexStateNone
+}
+
+func (m *GetIndexStateResponse) GetFailReason() string {
+	if m != nil {
+		return m.FailReason
+	}
+	return ""
+}
+
+type GetSegmentIndexStateRequest struct {
+	CollectionID         int64    `protobuf:"varint,1,opt,name=collectionID,proto3" json:"collectionID,omitempty"`
+	IndexName            string   `protobuf:"bytes,2,opt,name=index_name,json=indexName,proto3" json:"index_name,omitempty"`
+	SegmentIDs           []int64  `protobuf:"varint,3,rep,packed,name=segmentIDs,proto3" json:"segmentIDs,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
+}
+
+func (m *GetSegmentIndexStateRequest) Reset()         { *m = GetSegmentIndexStateRequest{} }
+func (m *GetSegmentIndexStateRequest) String() string { return proto.CompactTextString(m) }
+func (*GetSegmentIndexStateRequest) ProtoMessage()    {}
+func (*GetSegmentIndexStateRequest) Descriptor() ([]byte, []int) {
+	return fileDescriptor_f9e019eb3fda53c2, []int{8}
+}
+
+func (m *GetSegmentIndexStateRequest) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_GetSegmentIndexStateRequest.Unmarshal(m, b)
+}
+func (m *GetSegmentIndexStateRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_GetSegmentIndexStateRequest.Marshal(b, m, deterministic)
+}
+func (m *GetSegmentIndexStateRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_GetSegmentIndexStateRequest.Merge(m, src)
+}
+func (m *GetSegmentIndexStateRequest) XXX_Size() int {
+	return xxx_messageInfo_GetSegmentIndexStateRequest.Size(m)
+}
+func (m *GetSegmentIndexStateRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_GetSegmentIndexStateRequest.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_GetSegmentIndexStateRequest proto.InternalMessageInfo
+
+func (m *GetSegmentIndexStateRequest) GetCollectionID() int64 {
+	if m != nil {
+		return m.CollectionID
+	}
+	return 0
+}
+
+func (m *GetSegmentIndexStateRequest) GetIndexName() string {
+	if m != nil {
+		return m.IndexName
+	}
+	return ""
+}
+
+func (m *GetSegmentIndexStateRequest) GetSegmentIDs() []int64 {
+	if m != nil {
+		return m.SegmentIDs
+	}
+	return nil
+}
+
+type SegmentIndexState struct {
+	SegmentID            int64               `protobuf:"varint,1,opt,name=segmentID,proto3" json:"segmentID,omitempty"`
+	State                commonpb.IndexState `protobuf:"varint,2,opt,name=state,proto3,enum=milvus.proto.common.IndexState" json:"state,omitempty"`
+	FailReason           string              `protobuf:"bytes,3,opt,name=fail_reason,json=failReason,proto3" json:"fail_reason,omitempty"`
+	XXX_NoUnkeyedLiteral struct{}            `json:"-"`
+	XXX_unrecognized     []byte              `json:"-"`
+	XXX_sizecache        int32               `json:"-"`
+}
+
+func (m *SegmentIndexState) Reset()         { *m = SegmentIndexState{} }
+func (m *SegmentIndexState) String() string { return proto.CompactTextString(m) }
+func (*SegmentIndexState) ProtoMessage()    {}
+func (*SegmentIndexState) Descriptor() ([]byte, []int) {
+	return fileDescriptor_f9e019eb3fda53c2, []int{9}
+}
+
+func (m *SegmentIndexState) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_SegmentIndexState.Unmarshal(m, b)
+}
+func (m *SegmentIndexState) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_SegmentIndexState.Marshal(b, m, deterministic)
+}
+func (m *SegmentIndexState) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_SegmentIndexState.Merge(m, src)
+}
+func (m *SegmentIndexState) XXX_Size() int {
+	return xxx_messageInfo_SegmentIndexState.Size(m)
+}
+func (m *SegmentIndexState) XXX_DiscardUnknown() {
+	xxx_messageInfo_SegmentIndexState.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_SegmentIndexState proto.InternalMessageInfo
+
+func (m *SegmentIndexState) GetSegmentID() int64 {
+	if m != nil {
+		return m.SegmentID
+	}
+	return 0
+}
+
+func (m *SegmentIndexState) GetState() commonpb.IndexState {
+	if m != nil {
+		return m.State
+	}
+	return commonpb.IndexState_IndexStateNone
+}
+
+func (m *SegmentIndexState) GetFailReason() string {
+	if m != nil {
+		return m.FailReason
+	}
+	return ""
+}
+
+type GetSegmentIndexStateResponse struct {
+	Status               *commonpb.Status     `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	States               []*SegmentIndexState `protobuf:"bytes,2,rep,name=states,proto3" json:"states,omitempty"`
+	XXX_NoUnkeyedLiteral struct{}             `json:"-"`
+	XXX_unrecognized     []byte               `json:"-"`
+	XXX_sizecache        int32                `json:"-"`
+}
+
+func (m *GetSegmentIndexStateResponse) Reset()         { *m = GetSegmentIndexStateResponse{} }
+func (m *GetSegmentIndexStateResponse) String() string { return proto.CompactTextString(m) }
+func (*GetSegmentIndexStateResponse) ProtoMessage()    {}
+func (*GetSegmentIndexStateResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_f9e019eb3fda53c2, []int{10}
+}
+
+func (m *GetSegmentIndexStateResponse) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_GetSegmentIndexStateResponse.Unmarshal(m, b)
+}
+func (m *GetSegmentIndexStateResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_GetSegmentIndexStateResponse.Marshal(b, m, deterministic)
+}
+func (m *GetSegmentIndexStateResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_GetSegmentIndexStateResponse.Merge(m, src)
+}
+func (m *GetSegmentIndexStateResponse) XXX_Size() int {
+	return xxx_messageInfo_GetSegmentIndexStateResponse.Size(m)
+}
+func (m *GetSegmentIndexStateResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_GetSegmentIndexStateResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_GetSegmentIndexStateResponse proto.InternalMessageInfo
+
+func (m *GetSegmentIndexStateResponse) GetStatus() *commonpb.Status {
+	if m != nil {
+		return m.Status
+	}
+	return nil
+}
+
+func (m *GetSegmentIndexStateResponse) GetStates() []*SegmentIndexState {
 	if m != nil {
 		return m.States
 	}
@@ -288,14 +714,11 @@ func (m *GetIndexStatesResponse) GetStates() []*IndexInfo {
 }
 
 type CreateIndexRequest struct {
-	IndexBuildID         int64                    `protobuf:"varint,1,opt,name=indexBuildID,proto3" json:"indexBuildID,omitempty"`
-	IndexName            string                   `protobuf:"bytes,2,opt,name=index_name,json=indexName,proto3" json:"index_name,omitempty"`
-	IndexID              int64                    `protobuf:"varint,3,opt,name=indexID,proto3" json:"indexID,omitempty"`
-	Version              int64                    `protobuf:"varint,4,opt,name=version,proto3" json:"version,omitempty"`
-	MetaPath             string                   `protobuf:"bytes,5,opt,name=meta_path,json=metaPath,proto3" json:"meta_path,omitempty"`
-	DataPaths            []string                 `protobuf:"bytes,6,rep,name=data_paths,json=dataPaths,proto3" json:"data_paths,omitempty"`
-	TypeParams           []*commonpb.KeyValuePair `protobuf:"bytes,7,rep,name=type_params,json=typeParams,proto3" json:"type_params,omitempty"`
-	IndexParams          []*commonpb.KeyValuePair `protobuf:"bytes,8,rep,name=index_params,json=indexParams,proto3" json:"index_params,omitempty"`
+	CollectionID         int64                    `protobuf:"varint,1,opt,name=collectionID,proto3" json:"collectionID,omitempty"`
+	FieldID              int64                    `protobuf:"varint,2,opt,name=fieldID,proto3" json:"fieldID,omitempty"`
+	IndexName            string                   `protobuf:"bytes,3,opt,name=index_name,json=indexName,proto3" json:"index_name,omitempty"`
+	TypeParams           []*commonpb.KeyValuePair `protobuf:"bytes,4,rep,name=type_params,json=typeParams,proto3" json:"type_params,omitempty"`
+	IndexParams          []*commonpb.KeyValuePair `protobuf:"bytes,5,rep,name=index_params,json=indexParams,proto3" json:"index_params,omitempty"`
 	XXX_NoUnkeyedLiteral struct{}                 `json:"-"`
 	XXX_unrecognized     []byte                   `json:"-"`
 	XXX_sizecache        int32                    `json:"-"`
@@ -305,7 +728,7 @@ func (m *CreateIndexRequest) Reset()         { *m = CreateIndexRequest{} }
 func (m *CreateIndexRequest) String() string { return proto.CompactTextString(m) }
 func (*CreateIndexRequest) ProtoMessage()    {}
 func (*CreateIndexRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_f9e019eb3fda53c2, []int{5}
+	return fileDescriptor_f9e019eb3fda53c2, []int{11}
 }
 
 func (m *CreateIndexRequest) XXX_Unmarshal(b []byte) error {
@@ -326,9 +749,16 @@ func (m *CreateIndexRequest) XXX_DiscardUnknown() {
 
 var xxx_messageInfo_CreateIndexRequest proto.InternalMessageInfo
 
-func (m *CreateIndexRequest) GetIndexBuildID() int64 {
+func (m *CreateIndexRequest) GetCollectionID() int64 {
 	if m != nil {
-		return m.IndexBuildID
+		return m.CollectionID
+	}
+	return 0
+}
+
+func (m *CreateIndexRequest) GetFieldID() int64 {
+	if m != nil {
+		return m.FieldID
 	}
 	return 0
 }
@@ -338,34 +768,6 @@ func (m *CreateIndexRequest) GetIndexName() string {
 		return m.IndexName
 	}
 	return ""
-}
-
-func (m *CreateIndexRequest) GetIndexID() int64 {
-	if m != nil {
-		return m.IndexID
-	}
-	return 0
-}
-
-func (m *CreateIndexRequest) GetVersion() int64 {
-	if m != nil {
-		return m.Version
-	}
-	return 0
-}
-
-func (m *CreateIndexRequest) GetMetaPath() string {
-	if m != nil {
-		return m.MetaPath
-	}
-	return ""
-}
-
-func (m *CreateIndexRequest) GetDataPaths() []string {
-	if m != nil {
-		return m.DataPaths
-	}
-	return nil
 }
 
 func (m *CreateIndexRequest) GetTypeParams() []*commonpb.KeyValuePair {
@@ -382,210 +784,76 @@ func (m *CreateIndexRequest) GetIndexParams() []*commonpb.KeyValuePair {
 	return nil
 }
 
-type BuildIndexRequest struct {
-	IndexBuildID         int64                    `protobuf:"varint,1,opt,name=indexBuildID,proto3" json:"indexBuildID,omitempty"`
-	IndexName            string                   `protobuf:"bytes,2,opt,name=index_name,json=indexName,proto3" json:"index_name,omitempty"`
-	IndexID              int64                    `protobuf:"varint,3,opt,name=indexID,proto3" json:"indexID,omitempty"`
-	DataPaths            []string                 `protobuf:"bytes,5,rep,name=data_paths,json=dataPaths,proto3" json:"data_paths,omitempty"`
-	TypeParams           []*commonpb.KeyValuePair `protobuf:"bytes,6,rep,name=type_params,json=typeParams,proto3" json:"type_params,omitempty"`
-	IndexParams          []*commonpb.KeyValuePair `protobuf:"bytes,7,rep,name=index_params,json=indexParams,proto3" json:"index_params,omitempty"`
-	NumRows              int64                    `protobuf:"varint,8,opt,name=num_rows,json=numRows,proto3" json:"num_rows,omitempty"`
-	FieldSchema          *schemapb.FieldSchema    `protobuf:"bytes,9,opt,name=field_schema,json=fieldSchema,proto3" json:"field_schema,omitempty"`
-	SegmentID            int64                    `protobuf:"varint,10,opt,name=segmentID,proto3" json:"segmentID,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}                 `json:"-"`
-	XXX_unrecognized     []byte                   `json:"-"`
-	XXX_sizecache        int32                    `json:"-"`
+type GetIndexInfoRequest struct {
+	CollectionID         int64    `protobuf:"varint,1,opt,name=collectionID,proto3" json:"collectionID,omitempty"`
+	SegmentIDs           []int64  `protobuf:"varint,2,rep,packed,name=segmentIDs,proto3" json:"segmentIDs,omitempty"`
+	IndexName            string   `protobuf:"bytes,3,opt,name=index_name,json=indexName,proto3" json:"index_name,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
 }
 
-func (m *BuildIndexRequest) Reset()         { *m = BuildIndexRequest{} }
-func (m *BuildIndexRequest) String() string { return proto.CompactTextString(m) }
-func (*BuildIndexRequest) ProtoMessage()    {}
-func (*BuildIndexRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_f9e019eb3fda53c2, []int{6}
+func (m *GetIndexInfoRequest) Reset()         { *m = GetIndexInfoRequest{} }
+func (m *GetIndexInfoRequest) String() string { return proto.CompactTextString(m) }
+func (*GetIndexInfoRequest) ProtoMessage()    {}
+func (*GetIndexInfoRequest) Descriptor() ([]byte, []int) {
+	return fileDescriptor_f9e019eb3fda53c2, []int{12}
 }
 
-func (m *BuildIndexRequest) XXX_Unmarshal(b []byte) error {
-	return xxx_messageInfo_BuildIndexRequest.Unmarshal(m, b)
+func (m *GetIndexInfoRequest) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_GetIndexInfoRequest.Unmarshal(m, b)
 }
-func (m *BuildIndexRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_BuildIndexRequest.Marshal(b, m, deterministic)
+func (m *GetIndexInfoRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_GetIndexInfoRequest.Marshal(b, m, deterministic)
 }
-func (m *BuildIndexRequest) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_BuildIndexRequest.Merge(m, src)
+func (m *GetIndexInfoRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_GetIndexInfoRequest.Merge(m, src)
 }
-func (m *BuildIndexRequest) XXX_Size() int {
-	return xxx_messageInfo_BuildIndexRequest.Size(m)
+func (m *GetIndexInfoRequest) XXX_Size() int {
+	return xxx_messageInfo_GetIndexInfoRequest.Size(m)
 }
-func (m *BuildIndexRequest) XXX_DiscardUnknown() {
-	xxx_messageInfo_BuildIndexRequest.DiscardUnknown(m)
+func (m *GetIndexInfoRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_GetIndexInfoRequest.DiscardUnknown(m)
 }
 
-var xxx_messageInfo_BuildIndexRequest proto.InternalMessageInfo
+var xxx_messageInfo_GetIndexInfoRequest proto.InternalMessageInfo
 
-func (m *BuildIndexRequest) GetIndexBuildID() int64 {
+func (m *GetIndexInfoRequest) GetCollectionID() int64 {
 	if m != nil {
-		return m.IndexBuildID
+		return m.CollectionID
 	}
 	return 0
 }
 
-func (m *BuildIndexRequest) GetIndexName() string {
+func (m *GetIndexInfoRequest) GetSegmentIDs() []int64 {
+	if m != nil {
+		return m.SegmentIDs
+	}
+	return nil
+}
+
+func (m *GetIndexInfoRequest) GetIndexName() string {
 	if m != nil {
 		return m.IndexName
 	}
 	return ""
 }
 
-func (m *BuildIndexRequest) GetIndexID() int64 {
-	if m != nil {
-		return m.IndexID
-	}
-	return 0
-}
-
-func (m *BuildIndexRequest) GetDataPaths() []string {
-	if m != nil {
-		return m.DataPaths
-	}
-	return nil
-}
-
-func (m *BuildIndexRequest) GetTypeParams() []*commonpb.KeyValuePair {
-	if m != nil {
-		return m.TypeParams
-	}
-	return nil
-}
-
-func (m *BuildIndexRequest) GetIndexParams() []*commonpb.KeyValuePair {
-	if m != nil {
-		return m.IndexParams
-	}
-	return nil
-}
-
-func (m *BuildIndexRequest) GetNumRows() int64 {
-	if m != nil {
-		return m.NumRows
-	}
-	return 0
-}
-
-func (m *BuildIndexRequest) GetFieldSchema() *schemapb.FieldSchema {
-	if m != nil {
-		return m.FieldSchema
-	}
-	return nil
-}
-
-func (m *BuildIndexRequest) GetSegmentID() int64 {
-	if m != nil {
-		return m.SegmentID
-	}
-	return 0
-}
-
-type BuildIndexResponse struct {
-	Status               *commonpb.Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
-	IndexBuildID         int64            `protobuf:"varint,2,opt,name=indexBuildID,proto3" json:"indexBuildID,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}         `json:"-"`
-	XXX_unrecognized     []byte           `json:"-"`
-	XXX_sizecache        int32            `json:"-"`
-}
-
-func (m *BuildIndexResponse) Reset()         { *m = BuildIndexResponse{} }
-func (m *BuildIndexResponse) String() string { return proto.CompactTextString(m) }
-func (*BuildIndexResponse) ProtoMessage()    {}
-func (*BuildIndexResponse) Descriptor() ([]byte, []int) {
-	return fileDescriptor_f9e019eb3fda53c2, []int{7}
-}
-
-func (m *BuildIndexResponse) XXX_Unmarshal(b []byte) error {
-	return xxx_messageInfo_BuildIndexResponse.Unmarshal(m, b)
-}
-func (m *BuildIndexResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_BuildIndexResponse.Marshal(b, m, deterministic)
-}
-func (m *BuildIndexResponse) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_BuildIndexResponse.Merge(m, src)
-}
-func (m *BuildIndexResponse) XXX_Size() int {
-	return xxx_messageInfo_BuildIndexResponse.Size(m)
-}
-func (m *BuildIndexResponse) XXX_DiscardUnknown() {
-	xxx_messageInfo_BuildIndexResponse.DiscardUnknown(m)
-}
-
-var xxx_messageInfo_BuildIndexResponse proto.InternalMessageInfo
-
-func (m *BuildIndexResponse) GetStatus() *commonpb.Status {
-	if m != nil {
-		return m.Status
-	}
-	return nil
-}
-
-func (m *BuildIndexResponse) GetIndexBuildID() int64 {
-	if m != nil {
-		return m.IndexBuildID
-	}
-	return 0
-}
-
-type GetIndexFilePathsRequest struct {
-	IndexBuildIDs        []int64  `protobuf:"varint,1,rep,packed,name=indexBuildIDs,proto3" json:"indexBuildIDs,omitempty"`
+type IndexFilePathInfo struct {
+	SegmentID            int64    `protobuf:"varint,1,opt,name=segmentID,proto3" json:"segmentID,omitempty"`
+	IndexName            string   `protobuf:"bytes,2,opt,name=index_name,json=indexName,proto3" json:"index_name,omitempty"`
+	IndexFilePaths       []string `protobuf:"bytes,3,rep,name=index_file_paths,json=indexFilePaths,proto3" json:"index_file_paths,omitempty"`
+	SerializedSize       uint64   `protobuf:"varint,4,opt,name=serialized_size,json=serializedSize,proto3" json:"serialized_size,omitempty"`
 	XXX_NoUnkeyedLiteral struct{} `json:"-"`
 	XXX_unrecognized     []byte   `json:"-"`
 	XXX_sizecache        int32    `json:"-"`
-}
-
-func (m *GetIndexFilePathsRequest) Reset()         { *m = GetIndexFilePathsRequest{} }
-func (m *GetIndexFilePathsRequest) String() string { return proto.CompactTextString(m) }
-func (*GetIndexFilePathsRequest) ProtoMessage()    {}
-func (*GetIndexFilePathsRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_f9e019eb3fda53c2, []int{8}
-}
-
-func (m *GetIndexFilePathsRequest) XXX_Unmarshal(b []byte) error {
-	return xxx_messageInfo_GetIndexFilePathsRequest.Unmarshal(m, b)
-}
-func (m *GetIndexFilePathsRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_GetIndexFilePathsRequest.Marshal(b, m, deterministic)
-}
-func (m *GetIndexFilePathsRequest) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_GetIndexFilePathsRequest.Merge(m, src)
-}
-func (m *GetIndexFilePathsRequest) XXX_Size() int {
-	return xxx_messageInfo_GetIndexFilePathsRequest.Size(m)
-}
-func (m *GetIndexFilePathsRequest) XXX_DiscardUnknown() {
-	xxx_messageInfo_GetIndexFilePathsRequest.DiscardUnknown(m)
-}
-
-var xxx_messageInfo_GetIndexFilePathsRequest proto.InternalMessageInfo
-
-func (m *GetIndexFilePathsRequest) GetIndexBuildIDs() []int64 {
-	if m != nil {
-		return m.IndexBuildIDs
-	}
-	return nil
-}
-
-type IndexFilePathInfo struct {
-	Status               *commonpb.Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
-	IndexBuildID         int64            `protobuf:"varint,2,opt,name=indexBuildID,proto3" json:"indexBuildID,omitempty"`
-	IndexFilePaths       []string         `protobuf:"bytes,3,rep,name=index_file_paths,json=indexFilePaths,proto3" json:"index_file_paths,omitempty"`
-	SerializedSize       uint64           `protobuf:"varint,4,opt,name=serialized_size,json=serializedSize,proto3" json:"serialized_size,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}         `json:"-"`
-	XXX_unrecognized     []byte           `json:"-"`
-	XXX_sizecache        int32            `json:"-"`
 }
 
 func (m *IndexFilePathInfo) Reset()         { *m = IndexFilePathInfo{} }
 func (m *IndexFilePathInfo) String() string { return proto.CompactTextString(m) }
 func (*IndexFilePathInfo) ProtoMessage()    {}
 func (*IndexFilePathInfo) Descriptor() ([]byte, []int) {
-	return fileDescriptor_f9e019eb3fda53c2, []int{9}
+	return fileDescriptor_f9e019eb3fda53c2, []int{13}
 }
 
 func (m *IndexFilePathInfo) XXX_Unmarshal(b []byte) error {
@@ -606,18 +874,18 @@ func (m *IndexFilePathInfo) XXX_DiscardUnknown() {
 
 var xxx_messageInfo_IndexFilePathInfo proto.InternalMessageInfo
 
-func (m *IndexFilePathInfo) GetStatus() *commonpb.Status {
+func (m *IndexFilePathInfo) GetSegmentID() int64 {
 	if m != nil {
-		return m.Status
-	}
-	return nil
-}
-
-func (m *IndexFilePathInfo) GetIndexBuildID() int64 {
-	if m != nil {
-		return m.IndexBuildID
+		return m.SegmentID
 	}
 	return 0
+}
+
+func (m *IndexFilePathInfo) GetIndexName() string {
+	if m != nil {
+		return m.IndexName
+	}
+	return ""
 }
 
 func (m *IndexFilePathInfo) GetIndexFilePaths() []string {
@@ -634,166 +902,65 @@ func (m *IndexFilePathInfo) GetSerializedSize() uint64 {
 	return 0
 }
 
-type GetIndexFilePathsResponse struct {
+type GetIndexInfoResponse struct {
 	Status               *commonpb.Status     `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
-	FilePaths            []*IndexFilePathInfo `protobuf:"bytes,2,rep,name=file_paths,json=filePaths,proto3" json:"file_paths,omitempty"`
+	EnableIndex          bool                 `protobuf:"varint,2,opt,name=enable_index,json=enableIndex,proto3" json:"enable_index,omitempty"`
+	FilePaths            []*IndexFilePathInfo `protobuf:"bytes,3,rep,name=file_paths,json=filePaths,proto3" json:"file_paths,omitempty"`
 	XXX_NoUnkeyedLiteral struct{}             `json:"-"`
 	XXX_unrecognized     []byte               `json:"-"`
 	XXX_sizecache        int32                `json:"-"`
 }
 
-func (m *GetIndexFilePathsResponse) Reset()         { *m = GetIndexFilePathsResponse{} }
-func (m *GetIndexFilePathsResponse) String() string { return proto.CompactTextString(m) }
-func (*GetIndexFilePathsResponse) ProtoMessage()    {}
-func (*GetIndexFilePathsResponse) Descriptor() ([]byte, []int) {
-	return fileDescriptor_f9e019eb3fda53c2, []int{10}
+func (m *GetIndexInfoResponse) Reset()         { *m = GetIndexInfoResponse{} }
+func (m *GetIndexInfoResponse) String() string { return proto.CompactTextString(m) }
+func (*GetIndexInfoResponse) ProtoMessage()    {}
+func (*GetIndexInfoResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_f9e019eb3fda53c2, []int{14}
 }
 
-func (m *GetIndexFilePathsResponse) XXX_Unmarshal(b []byte) error {
-	return xxx_messageInfo_GetIndexFilePathsResponse.Unmarshal(m, b)
+func (m *GetIndexInfoResponse) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_GetIndexInfoResponse.Unmarshal(m, b)
 }
-func (m *GetIndexFilePathsResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_GetIndexFilePathsResponse.Marshal(b, m, deterministic)
+func (m *GetIndexInfoResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_GetIndexInfoResponse.Marshal(b, m, deterministic)
 }
-func (m *GetIndexFilePathsResponse) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_GetIndexFilePathsResponse.Merge(m, src)
+func (m *GetIndexInfoResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_GetIndexInfoResponse.Merge(m, src)
 }
-func (m *GetIndexFilePathsResponse) XXX_Size() int {
-	return xxx_messageInfo_GetIndexFilePathsResponse.Size(m)
+func (m *GetIndexInfoResponse) XXX_Size() int {
+	return xxx_messageInfo_GetIndexInfoResponse.Size(m)
 }
-func (m *GetIndexFilePathsResponse) XXX_DiscardUnknown() {
-	xxx_messageInfo_GetIndexFilePathsResponse.DiscardUnknown(m)
+func (m *GetIndexInfoResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_GetIndexInfoResponse.DiscardUnknown(m)
 }
 
-var xxx_messageInfo_GetIndexFilePathsResponse proto.InternalMessageInfo
+var xxx_messageInfo_GetIndexInfoResponse proto.InternalMessageInfo
 
-func (m *GetIndexFilePathsResponse) GetStatus() *commonpb.Status {
+func (m *GetIndexInfoResponse) GetStatus() *commonpb.Status {
 	if m != nil {
 		return m.Status
 	}
 	return nil
 }
 
-func (m *GetIndexFilePathsResponse) GetFilePaths() []*IndexFilePathInfo {
+func (m *GetIndexInfoResponse) GetEnableIndex() bool {
+	if m != nil {
+		return m.EnableIndex
+	}
+	return false
+}
+
+func (m *GetIndexInfoResponse) GetFilePaths() []*IndexFilePathInfo {
 	if m != nil {
 		return m.FilePaths
 	}
 	return nil
 }
 
-type IndexMeta struct {
-	IndexBuildID         int64               `protobuf:"varint,1,opt,name=indexBuildID,proto3" json:"indexBuildID,omitempty"`
-	State                commonpb.IndexState `protobuf:"varint,2,opt,name=state,proto3,enum=milvus.proto.common.IndexState" json:"state,omitempty"`
-	FailReason           string              `protobuf:"bytes,3,opt,name=fail_reason,json=failReason,proto3" json:"fail_reason,omitempty"`
-	Req                  *BuildIndexRequest  `protobuf:"bytes,4,opt,name=req,proto3" json:"req,omitempty"`
-	IndexFilePaths       []string            `protobuf:"bytes,5,rep,name=index_file_paths,json=indexFilePaths,proto3" json:"index_file_paths,omitempty"`
-	MarkDeleted          bool                `protobuf:"varint,6,opt,name=mark_deleted,json=markDeleted,proto3" json:"mark_deleted,omitempty"`
-	NodeID               int64               `protobuf:"varint,7,opt,name=nodeID,proto3" json:"nodeID,omitempty"`
-	IndexVersion         int64               `protobuf:"varint,8,opt,name=index_version,json=indexVersion,proto3" json:"index_version,omitempty"`
-	Recycled             bool                `protobuf:"varint,9,opt,name=recycled,proto3" json:"recycled,omitempty"`
-	SerializeSize        uint64              `protobuf:"varint,10,opt,name=serialize_size,json=serializeSize,proto3" json:"serialize_size,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}            `json:"-"`
-	XXX_unrecognized     []byte              `json:"-"`
-	XXX_sizecache        int32               `json:"-"`
-}
-
-func (m *IndexMeta) Reset()         { *m = IndexMeta{} }
-func (m *IndexMeta) String() string { return proto.CompactTextString(m) }
-func (*IndexMeta) ProtoMessage()    {}
-func (*IndexMeta) Descriptor() ([]byte, []int) {
-	return fileDescriptor_f9e019eb3fda53c2, []int{11}
-}
-
-func (m *IndexMeta) XXX_Unmarshal(b []byte) error {
-	return xxx_messageInfo_IndexMeta.Unmarshal(m, b)
-}
-func (m *IndexMeta) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_IndexMeta.Marshal(b, m, deterministic)
-}
-func (m *IndexMeta) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_IndexMeta.Merge(m, src)
-}
-func (m *IndexMeta) XXX_Size() int {
-	return xxx_messageInfo_IndexMeta.Size(m)
-}
-func (m *IndexMeta) XXX_DiscardUnknown() {
-	xxx_messageInfo_IndexMeta.DiscardUnknown(m)
-}
-
-var xxx_messageInfo_IndexMeta proto.InternalMessageInfo
-
-func (m *IndexMeta) GetIndexBuildID() int64 {
-	if m != nil {
-		return m.IndexBuildID
-	}
-	return 0
-}
-
-func (m *IndexMeta) GetState() commonpb.IndexState {
-	if m != nil {
-		return m.State
-	}
-	return commonpb.IndexState_IndexStateNone
-}
-
-func (m *IndexMeta) GetFailReason() string {
-	if m != nil {
-		return m.FailReason
-	}
-	return ""
-}
-
-func (m *IndexMeta) GetReq() *BuildIndexRequest {
-	if m != nil {
-		return m.Req
-	}
-	return nil
-}
-
-func (m *IndexMeta) GetIndexFilePaths() []string {
-	if m != nil {
-		return m.IndexFilePaths
-	}
-	return nil
-}
-
-func (m *IndexMeta) GetMarkDeleted() bool {
-	if m != nil {
-		return m.MarkDeleted
-	}
-	return false
-}
-
-func (m *IndexMeta) GetNodeID() int64 {
-	if m != nil {
-		return m.NodeID
-	}
-	return 0
-}
-
-func (m *IndexMeta) GetIndexVersion() int64 {
-	if m != nil {
-		return m.IndexVersion
-	}
-	return 0
-}
-
-func (m *IndexMeta) GetRecycled() bool {
-	if m != nil {
-		return m.Recycled
-	}
-	return false
-}
-
-func (m *IndexMeta) GetSerializeSize() uint64 {
-	if m != nil {
-		return m.SerializeSize
-	}
-	return 0
-}
-
 type DropIndexRequest struct {
-	IndexID              int64    `protobuf:"varint,1,opt,name=indexID,proto3" json:"indexID,omitempty"`
+	CollectionID         int64    `protobuf:"varint,1,opt,name=collectionID,proto3" json:"collectionID,omitempty"`
+	IndexName            string   `protobuf:"bytes,3,opt,name=index_name,json=indexName,proto3" json:"index_name,omitempty"`
+	FieldID              int64    `protobuf:"varint,2,opt,name=fieldID,proto3" json:"fieldID,omitempty"`
 	XXX_NoUnkeyedLiteral struct{} `json:"-"`
 	XXX_unrecognized     []byte   `json:"-"`
 	XXX_sizecache        int32    `json:"-"`
@@ -803,7 +970,7 @@ func (m *DropIndexRequest) Reset()         { *m = DropIndexRequest{} }
 func (m *DropIndexRequest) String() string { return proto.CompactTextString(m) }
 func (*DropIndexRequest) ProtoMessage()    {}
 func (*DropIndexRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_f9e019eb3fda53c2, []int{12}
+	return fileDescriptor_f9e019eb3fda53c2, []int{15}
 }
 
 func (m *DropIndexRequest) XXX_Unmarshal(b []byte) error {
@@ -824,227 +991,1017 @@ func (m *DropIndexRequest) XXX_DiscardUnknown() {
 
 var xxx_messageInfo_DropIndexRequest proto.InternalMessageInfo
 
-func (m *DropIndexRequest) GetIndexID() int64 {
+func (m *DropIndexRequest) GetCollectionID() int64 {
 	if m != nil {
-		return m.IndexID
+		return m.CollectionID
 	}
 	return 0
 }
 
-type RemoveIndexRequest struct {
-	BuildIDs             []int64  `protobuf:"varint,1,rep,packed,name=buildIDs,proto3" json:"buildIDs,omitempty"`
-	XXX_NoUnkeyedLiteral struct{} `json:"-"`
-	XXX_unrecognized     []byte   `json:"-"`
-	XXX_sizecache        int32    `json:"-"`
-}
-
-func (m *RemoveIndexRequest) Reset()         { *m = RemoveIndexRequest{} }
-func (m *RemoveIndexRequest) String() string { return proto.CompactTextString(m) }
-func (*RemoveIndexRequest) ProtoMessage()    {}
-func (*RemoveIndexRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_f9e019eb3fda53c2, []int{13}
-}
-
-func (m *RemoveIndexRequest) XXX_Unmarshal(b []byte) error {
-	return xxx_messageInfo_RemoveIndexRequest.Unmarshal(m, b)
-}
-func (m *RemoveIndexRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_RemoveIndexRequest.Marshal(b, m, deterministic)
-}
-func (m *RemoveIndexRequest) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_RemoveIndexRequest.Merge(m, src)
-}
-func (m *RemoveIndexRequest) XXX_Size() int {
-	return xxx_messageInfo_RemoveIndexRequest.Size(m)
-}
-func (m *RemoveIndexRequest) XXX_DiscardUnknown() {
-	xxx_messageInfo_RemoveIndexRequest.DiscardUnknown(m)
-}
-
-var xxx_messageInfo_RemoveIndexRequest proto.InternalMessageInfo
-
-func (m *RemoveIndexRequest) GetBuildIDs() []int64 {
+func (m *DropIndexRequest) GetIndexName() string {
 	if m != nil {
-		return m.BuildIDs
+		return m.IndexName
 	}
-	return nil
+	return ""
 }
 
-type GetTaskSlotsRequest struct {
+func (m *DropIndexRequest) GetFieldID() int64 {
+	if m != nil {
+		return m.FieldID
+	}
+	return 0
+}
+
+type DropCollectionRequest struct {
+	CollectionID         int64    `protobuf:"varint,1,opt,name=collectionID,proto3" json:"collectionID,omitempty"`
 	XXX_NoUnkeyedLiteral struct{} `json:"-"`
 	XXX_unrecognized     []byte   `json:"-"`
 	XXX_sizecache        int32    `json:"-"`
 }
 
-func (m *GetTaskSlotsRequest) Reset()         { *m = GetTaskSlotsRequest{} }
-func (m *GetTaskSlotsRequest) String() string { return proto.CompactTextString(m) }
-func (*GetTaskSlotsRequest) ProtoMessage()    {}
-func (*GetTaskSlotsRequest) Descriptor() ([]byte, []int) {
-	return fileDescriptor_f9e019eb3fda53c2, []int{14}
+func (m *DropCollectionRequest) Reset()         { *m = DropCollectionRequest{} }
+func (m *DropCollectionRequest) String() string { return proto.CompactTextString(m) }
+func (*DropCollectionRequest) ProtoMessage()    {}
+func (*DropCollectionRequest) Descriptor() ([]byte, []int) {
+	return fileDescriptor_f9e019eb3fda53c2, []int{16}
 }
 
-func (m *GetTaskSlotsRequest) XXX_Unmarshal(b []byte) error {
-	return xxx_messageInfo_GetTaskSlotsRequest.Unmarshal(m, b)
+func (m *DropCollectionRequest) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_DropCollectionRequest.Unmarshal(m, b)
 }
-func (m *GetTaskSlotsRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_GetTaskSlotsRequest.Marshal(b, m, deterministic)
+func (m *DropCollectionRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_DropCollectionRequest.Marshal(b, m, deterministic)
 }
-func (m *GetTaskSlotsRequest) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_GetTaskSlotsRequest.Merge(m, src)
+func (m *DropCollectionRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_DropCollectionRequest.Merge(m, src)
 }
-func (m *GetTaskSlotsRequest) XXX_Size() int {
-	return xxx_messageInfo_GetTaskSlotsRequest.Size(m)
+func (m *DropCollectionRequest) XXX_Size() int {
+	return xxx_messageInfo_DropCollectionRequest.Size(m)
 }
-func (m *GetTaskSlotsRequest) XXX_DiscardUnknown() {
-	xxx_messageInfo_GetTaskSlotsRequest.DiscardUnknown(m)
+func (m *DropCollectionRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_DropCollectionRequest.DiscardUnknown(m)
 }
 
-var xxx_messageInfo_GetTaskSlotsRequest proto.InternalMessageInfo
+var xxx_messageInfo_DropCollectionRequest proto.InternalMessageInfo
 
-type GetTaskSlotsResponse struct {
+func (m *DropCollectionRequest) GetCollectionID() int64 {
+	if m != nil {
+		return m.CollectionID
+	}
+	return 0
+}
+
+type DescribeIndexRequest struct {
+	CollectionID         int64    `protobuf:"varint,1,opt,name=collectionID,proto3" json:"collectionID,omitempty"`
+	IndexName            string   `protobuf:"bytes,2,opt,name=index_name,json=indexName,proto3" json:"index_name,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
+}
+
+func (m *DescribeIndexRequest) Reset()         { *m = DescribeIndexRequest{} }
+func (m *DescribeIndexRequest) String() string { return proto.CompactTextString(m) }
+func (*DescribeIndexRequest) ProtoMessage()    {}
+func (*DescribeIndexRequest) Descriptor() ([]byte, []int) {
+	return fileDescriptor_f9e019eb3fda53c2, []int{17}
+}
+
+func (m *DescribeIndexRequest) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_DescribeIndexRequest.Unmarshal(m, b)
+}
+func (m *DescribeIndexRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_DescribeIndexRequest.Marshal(b, m, deterministic)
+}
+func (m *DescribeIndexRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_DescribeIndexRequest.Merge(m, src)
+}
+func (m *DescribeIndexRequest) XXX_Size() int {
+	return xxx_messageInfo_DescribeIndexRequest.Size(m)
+}
+func (m *DescribeIndexRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_DescribeIndexRequest.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_DescribeIndexRequest proto.InternalMessageInfo
+
+func (m *DescribeIndexRequest) GetCollectionID() int64 {
+	if m != nil {
+		return m.CollectionID
+	}
+	return 0
+}
+
+func (m *DescribeIndexRequest) GetIndexName() string {
+	if m != nil {
+		return m.IndexName
+	}
+	return ""
+}
+
+type DescribeIndexResponse struct {
 	Status               *commonpb.Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
-	Slots                int64            `protobuf:"varint,2,opt,name=slots,proto3" json:"slots,omitempty"`
+	IndexInfos           []*IndexInfo     `protobuf:"bytes,2,rep,name=index_infos,json=indexInfos,proto3" json:"index_infos,omitempty"`
 	XXX_NoUnkeyedLiteral struct{}         `json:"-"`
 	XXX_unrecognized     []byte           `json:"-"`
 	XXX_sizecache        int32            `json:"-"`
 }
 
-func (m *GetTaskSlotsResponse) Reset()         { *m = GetTaskSlotsResponse{} }
-func (m *GetTaskSlotsResponse) String() string { return proto.CompactTextString(m) }
-func (*GetTaskSlotsResponse) ProtoMessage()    {}
-func (*GetTaskSlotsResponse) Descriptor() ([]byte, []int) {
-	return fileDescriptor_f9e019eb3fda53c2, []int{15}
+func (m *DescribeIndexResponse) Reset()         { *m = DescribeIndexResponse{} }
+func (m *DescribeIndexResponse) String() string { return proto.CompactTextString(m) }
+func (*DescribeIndexResponse) ProtoMessage()    {}
+func (*DescribeIndexResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_f9e019eb3fda53c2, []int{18}
 }
 
-func (m *GetTaskSlotsResponse) XXX_Unmarshal(b []byte) error {
-	return xxx_messageInfo_GetTaskSlotsResponse.Unmarshal(m, b)
+func (m *DescribeIndexResponse) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_DescribeIndexResponse.Unmarshal(m, b)
 }
-func (m *GetTaskSlotsResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_GetTaskSlotsResponse.Marshal(b, m, deterministic)
+func (m *DescribeIndexResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_DescribeIndexResponse.Marshal(b, m, deterministic)
 }
-func (m *GetTaskSlotsResponse) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_GetTaskSlotsResponse.Merge(m, src)
+func (m *DescribeIndexResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_DescribeIndexResponse.Merge(m, src)
 }
-func (m *GetTaskSlotsResponse) XXX_Size() int {
-	return xxx_messageInfo_GetTaskSlotsResponse.Size(m)
+func (m *DescribeIndexResponse) XXX_Size() int {
+	return xxx_messageInfo_DescribeIndexResponse.Size(m)
 }
-func (m *GetTaskSlotsResponse) XXX_DiscardUnknown() {
-	xxx_messageInfo_GetTaskSlotsResponse.DiscardUnknown(m)
+func (m *DescribeIndexResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_DescribeIndexResponse.DiscardUnknown(m)
 }
 
-var xxx_messageInfo_GetTaskSlotsResponse proto.InternalMessageInfo
+var xxx_messageInfo_DescribeIndexResponse proto.InternalMessageInfo
 
-func (m *GetTaskSlotsResponse) GetStatus() *commonpb.Status {
+func (m *DescribeIndexResponse) GetStatus() *commonpb.Status {
 	if m != nil {
 		return m.Status
 	}
 	return nil
 }
 
-func (m *GetTaskSlotsResponse) GetSlots() int64 {
+func (m *DescribeIndexResponse) GetIndexInfos() []*IndexInfo {
 	if m != nil {
-		return m.Slots
+		return m.IndexInfos
+	}
+	return nil
+}
+
+type GetIndexBuildProgressRequest struct {
+	CollectionID         int64    `protobuf:"varint,1,opt,name=collectionID,proto3" json:"collectionID,omitempty"`
+	IndexName            string   `protobuf:"bytes,2,opt,name=index_name,json=indexName,proto3" json:"index_name,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
+}
+
+func (m *GetIndexBuildProgressRequest) Reset()         { *m = GetIndexBuildProgressRequest{} }
+func (m *GetIndexBuildProgressRequest) String() string { return proto.CompactTextString(m) }
+func (*GetIndexBuildProgressRequest) ProtoMessage()    {}
+func (*GetIndexBuildProgressRequest) Descriptor() ([]byte, []int) {
+	return fileDescriptor_f9e019eb3fda53c2, []int{19}
+}
+
+func (m *GetIndexBuildProgressRequest) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_GetIndexBuildProgressRequest.Unmarshal(m, b)
+}
+func (m *GetIndexBuildProgressRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_GetIndexBuildProgressRequest.Marshal(b, m, deterministic)
+}
+func (m *GetIndexBuildProgressRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_GetIndexBuildProgressRequest.Merge(m, src)
+}
+func (m *GetIndexBuildProgressRequest) XXX_Size() int {
+	return xxx_messageInfo_GetIndexBuildProgressRequest.Size(m)
+}
+func (m *GetIndexBuildProgressRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_GetIndexBuildProgressRequest.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_GetIndexBuildProgressRequest proto.InternalMessageInfo
+
+func (m *GetIndexBuildProgressRequest) GetCollectionID() int64 {
+	if m != nil {
+		return m.CollectionID
 	}
 	return 0
 }
 
+func (m *GetIndexBuildProgressRequest) GetIndexName() string {
+	if m != nil {
+		return m.IndexName
+	}
+	return ""
+}
+
+type GetIndexBuildProgressResponse struct {
+	Status               *commonpb.Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	IndexedRows          int64            `protobuf:"varint,2,opt,name=indexed_rows,json=indexedRows,proto3" json:"indexed_rows,omitempty"`
+	TotalRows            int64            `protobuf:"varint,3,opt,name=total_rows,json=totalRows,proto3" json:"total_rows,omitempty"`
+	XXX_NoUnkeyedLiteral struct{}         `json:"-"`
+	XXX_unrecognized     []byte           `json:"-"`
+	XXX_sizecache        int32            `json:"-"`
+}
+
+func (m *GetIndexBuildProgressResponse) Reset()         { *m = GetIndexBuildProgressResponse{} }
+func (m *GetIndexBuildProgressResponse) String() string { return proto.CompactTextString(m) }
+func (*GetIndexBuildProgressResponse) ProtoMessage()    {}
+func (*GetIndexBuildProgressResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_f9e019eb3fda53c2, []int{20}
+}
+
+func (m *GetIndexBuildProgressResponse) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_GetIndexBuildProgressResponse.Unmarshal(m, b)
+}
+func (m *GetIndexBuildProgressResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_GetIndexBuildProgressResponse.Marshal(b, m, deterministic)
+}
+func (m *GetIndexBuildProgressResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_GetIndexBuildProgressResponse.Merge(m, src)
+}
+func (m *GetIndexBuildProgressResponse) XXX_Size() int {
+	return xxx_messageInfo_GetIndexBuildProgressResponse.Size(m)
+}
+func (m *GetIndexBuildProgressResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_GetIndexBuildProgressResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_GetIndexBuildProgressResponse proto.InternalMessageInfo
+
+func (m *GetIndexBuildProgressResponse) GetStatus() *commonpb.Status {
+	if m != nil {
+		return m.Status
+	}
+	return nil
+}
+
+func (m *GetIndexBuildProgressResponse) GetIndexedRows() int64 {
+	if m != nil {
+		return m.IndexedRows
+	}
+	return 0
+}
+
+func (m *GetIndexBuildProgressResponse) GetTotalRows() int64 {
+	if m != nil {
+		return m.TotalRows
+	}
+	return 0
+}
+
+type StorageConfig struct {
+	Address              string   `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	AccessKeyID          string   `protobuf:"bytes,2,opt,name=access_keyID,json=accessKeyID,proto3" json:"access_keyID,omitempty"`
+	SecretAccessKey      string   `protobuf:"bytes,3,opt,name=secret_access_key,json=secretAccessKey,proto3" json:"secret_access_key,omitempty"`
+	UseSSL               bool     `protobuf:"varint,4,opt,name=useSSL,proto3" json:"useSSL,omitempty"`
+	BucketName           string   `protobuf:"bytes,5,opt,name=bucket_name,json=bucketName,proto3" json:"bucket_name,omitempty"`
+	RootPath             string   `protobuf:"bytes,6,opt,name=root_path,json=rootPath,proto3" json:"root_path,omitempty"`
+	UseIAM               bool     `protobuf:"varint,7,opt,name=useIAM,proto3" json:"useIAM,omitempty"`
+	IAMEndpoint          string   `protobuf:"bytes,8,opt,name=IAMEndpoint,proto3" json:"IAMEndpoint,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
+}
+
+func (m *StorageConfig) Reset()         { *m = StorageConfig{} }
+func (m *StorageConfig) String() string { return proto.CompactTextString(m) }
+func (*StorageConfig) ProtoMessage()    {}
+func (*StorageConfig) Descriptor() ([]byte, []int) {
+	return fileDescriptor_f9e019eb3fda53c2, []int{21}
+}
+
+func (m *StorageConfig) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_StorageConfig.Unmarshal(m, b)
+}
+func (m *StorageConfig) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_StorageConfig.Marshal(b, m, deterministic)
+}
+func (m *StorageConfig) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_StorageConfig.Merge(m, src)
+}
+func (m *StorageConfig) XXX_Size() int {
+	return xxx_messageInfo_StorageConfig.Size(m)
+}
+func (m *StorageConfig) XXX_DiscardUnknown() {
+	xxx_messageInfo_StorageConfig.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_StorageConfig proto.InternalMessageInfo
+
+func (m *StorageConfig) GetAddress() string {
+	if m != nil {
+		return m.Address
+	}
+	return ""
+}
+
+func (m *StorageConfig) GetAccessKeyID() string {
+	if m != nil {
+		return m.AccessKeyID
+	}
+	return ""
+}
+
+func (m *StorageConfig) GetSecretAccessKey() string {
+	if m != nil {
+		return m.SecretAccessKey
+	}
+	return ""
+}
+
+func (m *StorageConfig) GetUseSSL() bool {
+	if m != nil {
+		return m.UseSSL
+	}
+	return false
+}
+
+func (m *StorageConfig) GetBucketName() string {
+	if m != nil {
+		return m.BucketName
+	}
+	return ""
+}
+
+func (m *StorageConfig) GetRootPath() string {
+	if m != nil {
+		return m.RootPath
+	}
+	return ""
+}
+
+func (m *StorageConfig) GetUseIAM() bool {
+	if m != nil {
+		return m.UseIAM
+	}
+	return false
+}
+
+func (m *StorageConfig) GetIAMEndpoint() string {
+	if m != nil {
+		return m.IAMEndpoint
+	}
+	return ""
+}
+
+type CreateJobRequest struct {
+	ClusterID            int64                    `protobuf:"varint,1,opt,name=clusterID,proto3" json:"clusterID,omitempty"`
+	IndexFilePrefix      string                   `protobuf:"bytes,2,opt,name=index_file_prefix,json=indexFilePrefix,proto3" json:"index_file_prefix,omitempty"`
+	BuildID              int64                    `protobuf:"varint,3,opt,name=buildID,proto3" json:"buildID,omitempty"`
+	DataPaths            []string                 `protobuf:"bytes,4,rep,name=data_paths,json=dataPaths,proto3" json:"data_paths,omitempty"`
+	IndexVersion         int64                    `protobuf:"varint,5,opt,name=index_version,json=indexVersion,proto3" json:"index_version,omitempty"`
+	IndexID              int64                    `protobuf:"varint,6,opt,name=indexID,proto3" json:"indexID,omitempty"`
+	IndexName            string                   `protobuf:"bytes,7,opt,name=index_name,json=indexName,proto3" json:"index_name,omitempty"`
+	StorageConfig        *StorageConfig           `protobuf:"bytes,8,opt,name=storage_config,json=storageConfig,proto3" json:"storage_config,omitempty"`
+	IndexParams          []*commonpb.KeyValuePair `protobuf:"bytes,9,rep,name=index_params,json=indexParams,proto3" json:"index_params,omitempty"`
+	TypeParams           []*commonpb.KeyValuePair `protobuf:"bytes,10,rep,name=type_params,json=typeParams,proto3" json:"type_params,omitempty"`
+	XXX_NoUnkeyedLiteral struct{}                 `json:"-"`
+	XXX_unrecognized     []byte                   `json:"-"`
+	XXX_sizecache        int32                    `json:"-"`
+}
+
+func (m *CreateJobRequest) Reset()         { *m = CreateJobRequest{} }
+func (m *CreateJobRequest) String() string { return proto.CompactTextString(m) }
+func (*CreateJobRequest) ProtoMessage()    {}
+func (*CreateJobRequest) Descriptor() ([]byte, []int) {
+	return fileDescriptor_f9e019eb3fda53c2, []int{22}
+}
+
+func (m *CreateJobRequest) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_CreateJobRequest.Unmarshal(m, b)
+}
+func (m *CreateJobRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_CreateJobRequest.Marshal(b, m, deterministic)
+}
+func (m *CreateJobRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_CreateJobRequest.Merge(m, src)
+}
+func (m *CreateJobRequest) XXX_Size() int {
+	return xxx_messageInfo_CreateJobRequest.Size(m)
+}
+func (m *CreateJobRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_CreateJobRequest.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_CreateJobRequest proto.InternalMessageInfo
+
+func (m *CreateJobRequest) GetClusterID() int64 {
+	if m != nil {
+		return m.ClusterID
+	}
+	return 0
+}
+
+func (m *CreateJobRequest) GetIndexFilePrefix() string {
+	if m != nil {
+		return m.IndexFilePrefix
+	}
+	return ""
+}
+
+func (m *CreateJobRequest) GetBuildID() int64 {
+	if m != nil {
+		return m.BuildID
+	}
+	return 0
+}
+
+func (m *CreateJobRequest) GetDataPaths() []string {
+	if m != nil {
+		return m.DataPaths
+	}
+	return nil
+}
+
+func (m *CreateJobRequest) GetIndexVersion() int64 {
+	if m != nil {
+		return m.IndexVersion
+	}
+	return 0
+}
+
+func (m *CreateJobRequest) GetIndexID() int64 {
+	if m != nil {
+		return m.IndexID
+	}
+	return 0
+}
+
+func (m *CreateJobRequest) GetIndexName() string {
+	if m != nil {
+		return m.IndexName
+	}
+	return ""
+}
+
+func (m *CreateJobRequest) GetStorageConfig() *StorageConfig {
+	if m != nil {
+		return m.StorageConfig
+	}
+	return nil
+}
+
+func (m *CreateJobRequest) GetIndexParams() []*commonpb.KeyValuePair {
+	if m != nil {
+		return m.IndexParams
+	}
+	return nil
+}
+
+func (m *CreateJobRequest) GetTypeParams() []*commonpb.KeyValuePair {
+	if m != nil {
+		return m.TypeParams
+	}
+	return nil
+}
+
+type QueryJobsRequest struct {
+	ClusterID            int64    `protobuf:"varint,1,opt,name=clusterID,proto3" json:"clusterID,omitempty"`
+	BuildIDs             []int64  `protobuf:"varint,2,rep,packed,name=buildIDs,proto3" json:"buildIDs,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
+}
+
+func (m *QueryJobsRequest) Reset()         { *m = QueryJobsRequest{} }
+func (m *QueryJobsRequest) String() string { return proto.CompactTextString(m) }
+func (*QueryJobsRequest) ProtoMessage()    {}
+func (*QueryJobsRequest) Descriptor() ([]byte, []int) {
+	return fileDescriptor_f9e019eb3fda53c2, []int{23}
+}
+
+func (m *QueryJobsRequest) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_QueryJobsRequest.Unmarshal(m, b)
+}
+func (m *QueryJobsRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_QueryJobsRequest.Marshal(b, m, deterministic)
+}
+func (m *QueryJobsRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_QueryJobsRequest.Merge(m, src)
+}
+func (m *QueryJobsRequest) XXX_Size() int {
+	return xxx_messageInfo_QueryJobsRequest.Size(m)
+}
+func (m *QueryJobsRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_QueryJobsRequest.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_QueryJobsRequest proto.InternalMessageInfo
+
+func (m *QueryJobsRequest) GetClusterID() int64 {
+	if m != nil {
+		return m.ClusterID
+	}
+	return 0
+}
+
+func (m *QueryJobsRequest) GetBuildIDs() []int64 {
+	if m != nil {
+		return m.BuildIDs
+	}
+	return nil
+}
+
+type IndexTaskInfo struct {
+	BuildID              int64               `protobuf:"varint,1,opt,name=buildID,proto3" json:"buildID,omitempty"`
+	State                commonpb.IndexState `protobuf:"varint,2,opt,name=state,proto3,enum=milvus.proto.common.IndexState" json:"state,omitempty"`
+	IndexFiles           []string            `protobuf:"bytes,3,rep,name=index_files,json=indexFiles,proto3" json:"index_files,omitempty"`
+	XXX_NoUnkeyedLiteral struct{}            `json:"-"`
+	XXX_unrecognized     []byte              `json:"-"`
+	XXX_sizecache        int32               `json:"-"`
+}
+
+func (m *IndexTaskInfo) Reset()         { *m = IndexTaskInfo{} }
+func (m *IndexTaskInfo) String() string { return proto.CompactTextString(m) }
+func (*IndexTaskInfo) ProtoMessage()    {}
+func (*IndexTaskInfo) Descriptor() ([]byte, []int) {
+	return fileDescriptor_f9e019eb3fda53c2, []int{24}
+}
+
+func (m *IndexTaskInfo) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_IndexTaskInfo.Unmarshal(m, b)
+}
+func (m *IndexTaskInfo) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_IndexTaskInfo.Marshal(b, m, deterministic)
+}
+func (m *IndexTaskInfo) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_IndexTaskInfo.Merge(m, src)
+}
+func (m *IndexTaskInfo) XXX_Size() int {
+	return xxx_messageInfo_IndexTaskInfo.Size(m)
+}
+func (m *IndexTaskInfo) XXX_DiscardUnknown() {
+	xxx_messageInfo_IndexTaskInfo.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_IndexTaskInfo proto.InternalMessageInfo
+
+func (m *IndexTaskInfo) GetBuildID() int64 {
+	if m != nil {
+		return m.BuildID
+	}
+	return 0
+}
+
+func (m *IndexTaskInfo) GetState() commonpb.IndexState {
+	if m != nil {
+		return m.State
+	}
+	return commonpb.IndexState_IndexStateNone
+}
+
+func (m *IndexTaskInfo) GetIndexFiles() []string {
+	if m != nil {
+		return m.IndexFiles
+	}
+	return nil
+}
+
+type QueryJobsResponse struct {
+	Status               *commonpb.Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	ClusterID            int64            `protobuf:"varint,2,opt,name=clusterID,proto3" json:"clusterID,omitempty"`
+	IndexInfos           []*IndexTaskInfo `protobuf:"bytes,3,rep,name=index_infos,json=indexInfos,proto3" json:"index_infos,omitempty"`
+	XXX_NoUnkeyedLiteral struct{}         `json:"-"`
+	XXX_unrecognized     []byte           `json:"-"`
+	XXX_sizecache        int32            `json:"-"`
+}
+
+func (m *QueryJobsResponse) Reset()         { *m = QueryJobsResponse{} }
+func (m *QueryJobsResponse) String() string { return proto.CompactTextString(m) }
+func (*QueryJobsResponse) ProtoMessage()    {}
+func (*QueryJobsResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_f9e019eb3fda53c2, []int{25}
+}
+
+func (m *QueryJobsResponse) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_QueryJobsResponse.Unmarshal(m, b)
+}
+func (m *QueryJobsResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_QueryJobsResponse.Marshal(b, m, deterministic)
+}
+func (m *QueryJobsResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_QueryJobsResponse.Merge(m, src)
+}
+func (m *QueryJobsResponse) XXX_Size() int {
+	return xxx_messageInfo_QueryJobsResponse.Size(m)
+}
+func (m *QueryJobsResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_QueryJobsResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_QueryJobsResponse proto.InternalMessageInfo
+
+func (m *QueryJobsResponse) GetStatus() *commonpb.Status {
+	if m != nil {
+		return m.Status
+	}
+	return nil
+}
+
+func (m *QueryJobsResponse) GetClusterID() int64 {
+	if m != nil {
+		return m.ClusterID
+	}
+	return 0
+}
+
+func (m *QueryJobsResponse) GetIndexInfos() []*IndexTaskInfo {
+	if m != nil {
+		return m.IndexInfos
+	}
+	return nil
+}
+
+type DropJobsRequest struct {
+	ClusterID            int64    `protobuf:"varint,1,opt,name=clusterID,proto3" json:"clusterID,omitempty"`
+	BuildIDs             []int64  `protobuf:"varint,2,rep,packed,name=buildIDs,proto3" json:"buildIDs,omitempty"`
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
+}
+
+func (m *DropJobsRequest) Reset()         { *m = DropJobsRequest{} }
+func (m *DropJobsRequest) String() string { return proto.CompactTextString(m) }
+func (*DropJobsRequest) ProtoMessage()    {}
+func (*DropJobsRequest) Descriptor() ([]byte, []int) {
+	return fileDescriptor_f9e019eb3fda53c2, []int{26}
+}
+
+func (m *DropJobsRequest) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_DropJobsRequest.Unmarshal(m, b)
+}
+func (m *DropJobsRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_DropJobsRequest.Marshal(b, m, deterministic)
+}
+func (m *DropJobsRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_DropJobsRequest.Merge(m, src)
+}
+func (m *DropJobsRequest) XXX_Size() int {
+	return xxx_messageInfo_DropJobsRequest.Size(m)
+}
+func (m *DropJobsRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_DropJobsRequest.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_DropJobsRequest proto.InternalMessageInfo
+
+func (m *DropJobsRequest) GetClusterID() int64 {
+	if m != nil {
+		return m.ClusterID
+	}
+	return 0
+}
+
+func (m *DropJobsRequest) GetBuildIDs() []int64 {
+	if m != nil {
+		return m.BuildIDs
+	}
+	return nil
+}
+
+type JobInfo struct {
+	NumRows              int64                    `protobuf:"varint,1,opt,name=num_rows,json=numRows,proto3" json:"num_rows,omitempty"`
+	Dim                  int64                    `protobuf:"varint,2,opt,name=dim,proto3" json:"dim,omitempty"`
+	StartTime            int64                    `protobuf:"varint,3,opt,name=start_time,json=startTime,proto3" json:"start_time,omitempty"`
+	EndTime              int64                    `protobuf:"varint,4,opt,name=end_time,json=endTime,proto3" json:"end_time,omitempty"`
+	IndexParams          []*commonpb.KeyValuePair `protobuf:"bytes,5,rep,name=index_params,json=indexParams,proto3" json:"index_params,omitempty"`
+	PodID                int64                    `protobuf:"varint,6,opt,name=podID,proto3" json:"podID,omitempty"`
+	XXX_NoUnkeyedLiteral struct{}                 `json:"-"`
+	XXX_unrecognized     []byte                   `json:"-"`
+	XXX_sizecache        int32                    `json:"-"`
+}
+
+func (m *JobInfo) Reset()         { *m = JobInfo{} }
+func (m *JobInfo) String() string { return proto.CompactTextString(m) }
+func (*JobInfo) ProtoMessage()    {}
+func (*JobInfo) Descriptor() ([]byte, []int) {
+	return fileDescriptor_f9e019eb3fda53c2, []int{27}
+}
+
+func (m *JobInfo) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_JobInfo.Unmarshal(m, b)
+}
+func (m *JobInfo) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_JobInfo.Marshal(b, m, deterministic)
+}
+func (m *JobInfo) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_JobInfo.Merge(m, src)
+}
+func (m *JobInfo) XXX_Size() int {
+	return xxx_messageInfo_JobInfo.Size(m)
+}
+func (m *JobInfo) XXX_DiscardUnknown() {
+	xxx_messageInfo_JobInfo.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_JobInfo proto.InternalMessageInfo
+
+func (m *JobInfo) GetNumRows() int64 {
+	if m != nil {
+		return m.NumRows
+	}
+	return 0
+}
+
+func (m *JobInfo) GetDim() int64 {
+	if m != nil {
+		return m.Dim
+	}
+	return 0
+}
+
+func (m *JobInfo) GetStartTime() int64 {
+	if m != nil {
+		return m.StartTime
+	}
+	return 0
+}
+
+func (m *JobInfo) GetEndTime() int64 {
+	if m != nil {
+		return m.EndTime
+	}
+	return 0
+}
+
+func (m *JobInfo) GetIndexParams() []*commonpb.KeyValuePair {
+	if m != nil {
+		return m.IndexParams
+	}
+	return nil
+}
+
+func (m *JobInfo) GetPodID() int64 {
+	if m != nil {
+		return m.PodID
+	}
+	return 0
+}
+
+type GetJobNumRequest struct {
+	XXX_NoUnkeyedLiteral struct{} `json:"-"`
+	XXX_unrecognized     []byte   `json:"-"`
+	XXX_sizecache        int32    `json:"-"`
+}
+
+func (m *GetJobNumRequest) Reset()         { *m = GetJobNumRequest{} }
+func (m *GetJobNumRequest) String() string { return proto.CompactTextString(m) }
+func (*GetJobNumRequest) ProtoMessage()    {}
+func (*GetJobNumRequest) Descriptor() ([]byte, []int) {
+	return fileDescriptor_f9e019eb3fda53c2, []int{28}
+}
+
+func (m *GetJobNumRequest) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_GetJobNumRequest.Unmarshal(m, b)
+}
+func (m *GetJobNumRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_GetJobNumRequest.Marshal(b, m, deterministic)
+}
+func (m *GetJobNumRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_GetJobNumRequest.Merge(m, src)
+}
+func (m *GetJobNumRequest) XXX_Size() int {
+	return xxx_messageInfo_GetJobNumRequest.Size(m)
+}
+func (m *GetJobNumRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_GetJobNumRequest.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_GetJobNumRequest proto.InternalMessageInfo
+
+type GetJobNumResponse struct {
+	Status               *commonpb.Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	TotalJobNum          int64            `protobuf:"varint,2,opt,name=total_job_num,json=totalJobNum,proto3" json:"total_job_num,omitempty"`
+	InProgressJobNum     int64            `protobuf:"varint,3,opt,name=in_progress_job_num,json=inProgressJobNum,proto3" json:"in_progress_job_num,omitempty"`
+	EnqueueJobNum        int64            `protobuf:"varint,4,opt,name=enqueue_job_num,json=enqueueJobNum,proto3" json:"enqueue_job_num,omitempty"`
+	TaskSlots            int64            `protobuf:"varint,5,opt,name=task_slots,json=taskSlots,proto3" json:"task_slots,omitempty"`
+	JobInfos             []*JobInfo       `protobuf:"bytes,6,rep,name=job_infos,json=jobInfos,proto3" json:"job_infos,omitempty"`
+	XXX_NoUnkeyedLiteral struct{}         `json:"-"`
+	XXX_unrecognized     []byte           `json:"-"`
+	XXX_sizecache        int32            `json:"-"`
+}
+
+func (m *GetJobNumResponse) Reset()         { *m = GetJobNumResponse{} }
+func (m *GetJobNumResponse) String() string { return proto.CompactTextString(m) }
+func (*GetJobNumResponse) ProtoMessage()    {}
+func (*GetJobNumResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_f9e019eb3fda53c2, []int{29}
+}
+
+func (m *GetJobNumResponse) XXX_Unmarshal(b []byte) error {
+	return xxx_messageInfo_GetJobNumResponse.Unmarshal(m, b)
+}
+func (m *GetJobNumResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return xxx_messageInfo_GetJobNumResponse.Marshal(b, m, deterministic)
+}
+func (m *GetJobNumResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_GetJobNumResponse.Merge(m, src)
+}
+func (m *GetJobNumResponse) XXX_Size() int {
+	return xxx_messageInfo_GetJobNumResponse.Size(m)
+}
+func (m *GetJobNumResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_GetJobNumResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_GetJobNumResponse proto.InternalMessageInfo
+
+func (m *GetJobNumResponse) GetStatus() *commonpb.Status {
+	if m != nil {
+		return m.Status
+	}
+	return nil
+}
+
+func (m *GetJobNumResponse) GetTotalJobNum() int64 {
+	if m != nil {
+		return m.TotalJobNum
+	}
+	return 0
+}
+
+func (m *GetJobNumResponse) GetInProgressJobNum() int64 {
+	if m != nil {
+		return m.InProgressJobNum
+	}
+	return 0
+}
+
+func (m *GetJobNumResponse) GetEnqueueJobNum() int64 {
+	if m != nil {
+		return m.EnqueueJobNum
+	}
+	return 0
+}
+
+func (m *GetJobNumResponse) GetTaskSlots() int64 {
+	if m != nil {
+		return m.TaskSlots
+	}
+	return 0
+}
+
+func (m *GetJobNumResponse) GetJobInfos() []*JobInfo {
+	if m != nil {
+		return m.JobInfos
+	}
+	return nil
+}
+
 func init() {
+	proto.RegisterType((*IndexInfo)(nil), "milvus.proto.index.IndexInfo")
+	proto.RegisterType((*FieldIndex)(nil), "milvus.proto.index.FieldIndex")
+	proto.RegisterType((*SegmentIndex)(nil), "milvus.proto.index.SegmentIndex")
+	proto.RegisterType((*HandoffTask)(nil), "milvus.proto.index.HandoffTask")
 	proto.RegisterType((*RegisterNodeRequest)(nil), "milvus.proto.index.RegisterNodeRequest")
 	proto.RegisterType((*RegisterNodeResponse)(nil), "milvus.proto.index.RegisterNodeResponse")
-	proto.RegisterType((*GetIndexStatesRequest)(nil), "milvus.proto.index.GetIndexStatesRequest")
-	proto.RegisterType((*IndexInfo)(nil), "milvus.proto.index.IndexInfo")
-	proto.RegisterType((*GetIndexStatesResponse)(nil), "milvus.proto.index.GetIndexStatesResponse")
+	proto.RegisterType((*GetIndexStateRequest)(nil), "milvus.proto.index.GetIndexStateRequest")
+	proto.RegisterType((*GetIndexStateResponse)(nil), "milvus.proto.index.GetIndexStateResponse")
+	proto.RegisterType((*GetSegmentIndexStateRequest)(nil), "milvus.proto.index.GetSegmentIndexStateRequest")
+	proto.RegisterType((*SegmentIndexState)(nil), "milvus.proto.index.SegmentIndexState")
+	proto.RegisterType((*GetSegmentIndexStateResponse)(nil), "milvus.proto.index.GetSegmentIndexStateResponse")
 	proto.RegisterType((*CreateIndexRequest)(nil), "milvus.proto.index.CreateIndexRequest")
-	proto.RegisterType((*BuildIndexRequest)(nil), "milvus.proto.index.BuildIndexRequest")
-	proto.RegisterType((*BuildIndexResponse)(nil), "milvus.proto.index.BuildIndexResponse")
-	proto.RegisterType((*GetIndexFilePathsRequest)(nil), "milvus.proto.index.GetIndexFilePathsRequest")
+	proto.RegisterType((*GetIndexInfoRequest)(nil), "milvus.proto.index.GetIndexInfoRequest")
 	proto.RegisterType((*IndexFilePathInfo)(nil), "milvus.proto.index.IndexFilePathInfo")
-	proto.RegisterType((*GetIndexFilePathsResponse)(nil), "milvus.proto.index.GetIndexFilePathsResponse")
-	proto.RegisterType((*IndexMeta)(nil), "milvus.proto.index.IndexMeta")
+	proto.RegisterType((*GetIndexInfoResponse)(nil), "milvus.proto.index.GetIndexInfoResponse")
 	proto.RegisterType((*DropIndexRequest)(nil), "milvus.proto.index.DropIndexRequest")
-	proto.RegisterType((*RemoveIndexRequest)(nil), "milvus.proto.index.RemoveIndexRequest")
-	proto.RegisterType((*GetTaskSlotsRequest)(nil), "milvus.proto.index.GetTaskSlotsRequest")
-	proto.RegisterType((*GetTaskSlotsResponse)(nil), "milvus.proto.index.GetTaskSlotsResponse")
+	proto.RegisterType((*DropCollectionRequest)(nil), "milvus.proto.index.DropCollectionRequest")
+	proto.RegisterType((*DescribeIndexRequest)(nil), "milvus.proto.index.DescribeIndexRequest")
+	proto.RegisterType((*DescribeIndexResponse)(nil), "milvus.proto.index.DescribeIndexResponse")
+	proto.RegisterType((*GetIndexBuildProgressRequest)(nil), "milvus.proto.index.GetIndexBuildProgressRequest")
+	proto.RegisterType((*GetIndexBuildProgressResponse)(nil), "milvus.proto.index.GetIndexBuildProgressResponse")
+	proto.RegisterType((*StorageConfig)(nil), "milvus.proto.index.StorageConfig")
+	proto.RegisterType((*CreateJobRequest)(nil), "milvus.proto.index.CreateJobRequest")
+	proto.RegisterType((*QueryJobsRequest)(nil), "milvus.proto.index.QueryJobsRequest")
+	proto.RegisterType((*IndexTaskInfo)(nil), "milvus.proto.index.IndexTaskInfo")
+	proto.RegisterType((*QueryJobsResponse)(nil), "milvus.proto.index.QueryJobsResponse")
+	proto.RegisterType((*DropJobsRequest)(nil), "milvus.proto.index.DropJobsRequest")
+	proto.RegisterType((*JobInfo)(nil), "milvus.proto.index.JobInfo")
+	proto.RegisterType((*GetJobNumRequest)(nil), "milvus.proto.index.GetJobNumRequest")
+	proto.RegisterType((*GetJobNumResponse)(nil), "milvus.proto.index.GetJobNumResponse")
 }
 
 func init() { proto.RegisterFile("index_coord.proto", fileDescriptor_f9e019eb3fda53c2) }
 
 var fileDescriptor_f9e019eb3fda53c2 = []byte{
-	// 1176 bytes of a gzipped FileDescriptorProto
-	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xec, 0x57, 0xcd, 0x6e, 0xdb, 0x46,
-	0x10, 0x0e, 0x4d, 0x5b, 0x3f, 0x23, 0xc5, 0x8d, 0x37, 0x3f, 0x60, 0x94, 0x04, 0x51, 0x98, 0xa4,
-	0x51, 0x8b, 0x44, 0x0e, 0x94, 0xa6, 0x3d, 0x15, 0x68, 0x6d, 0x21, 0x86, 0x50, 0x24, 0x30, 0xd6,
-	0x46, 0x0e, 0x05, 0x0a, 0x61, 0x2d, 0x8e, 0xec, 0x85, 0xf9, 0x23, 0x73, 0x57, 0x4e, 0xed, 0x73,
-	0xaf, 0x45, 0x6f, 0xcd, 0x23, 0xf4, 0x11, 0x7a, 0xec, 0x33, 0xf4, 0x79, 0x7a, 0x29, 0xb8, 0x5c,
-	0x52, 0xa4, 0x44, 0xd9, 0x72, 0x5d, 0xf7, 0xd4, 0x1b, 0x67, 0xf6, 0x9b, 0x9f, 0xfd, 0x76, 0x66,
-	0x76, 0x09, 0x6b, 0xdc, 0x77, 0xf0, 0xc7, 0xfe, 0x20, 0x08, 0x42, 0xa7, 0x3d, 0x0a, 0x03, 0x19,
-	0x10, 0xe2, 0x71, 0xf7, 0x78, 0x2c, 0x62, 0xa9, 0xad, 0xd6, 0x1b, 0xf5, 0x41, 0xe0, 0x79, 0x81,
-	0x1f, 0xeb, 0x1a, 0xab, 0xdc, 0x97, 0x18, 0xfa, 0xcc, 0xd5, 0x72, 0x3d, 0x6b, 0xd1, 0xa8, 0x8b,
-	0xc1, 0x01, 0x7a, 0x2c, 0x96, 0xec, 0x8f, 0x06, 0xdc, 0xa4, 0xb8, 0xcf, 0x85, 0xc4, 0xf0, 0x5d,
-	0xe0, 0x20, 0xc5, 0xa3, 0x31, 0x0a, 0x49, 0x5e, 0xc2, 0xf2, 0x1e, 0x13, 0x68, 0x19, 0x4d, 0xa3,
-	0x55, 0xeb, 0xdc, 0x6f, 0xe7, 0x82, 0xea, 0x68, 0x6f, 0xc5, 0xfe, 0x06, 0x13, 0x48, 0x15, 0x92,
-	0x7c, 0x09, 0x65, 0xe6, 0x38, 0x21, 0x0a, 0x61, 0x2d, 0x9d, 0x61, 0xf4, 0x6d, 0x8c, 0xa1, 0x09,
-	0x98, 0xdc, 0x81, 0x92, 0x1f, 0x38, 0xd8, 0xeb, 0x5a, 0x66, 0xd3, 0x68, 0x99, 0x54, 0x4b, 0xf6,
-	0x2f, 0x06, 0xdc, 0xca, 0x67, 0x26, 0x46, 0x81, 0x2f, 0x90, 0xbc, 0x82, 0x92, 0x90, 0x4c, 0x8e,
-	0x85, 0x4e, 0xee, 0x5e, 0x61, 0x9c, 0x1d, 0x05, 0xa1, 0x1a, 0x4a, 0x36, 0xa0, 0xc6, 0x7d, 0x2e,
-	0xfb, 0x23, 0x16, 0x32, 0x2f, 0xc9, 0xf0, 0x51, 0x7b, 0x8a, 0x4b, 0x4d, 0x5b, 0xcf, 0xe7, 0x72,
-	0x5b, 0x01, 0x29, 0xf0, 0xf4, 0xdb, 0xfe, 0x1a, 0x6e, 0x6f, 0xa1, 0xec, 0x45, 0x8c, 0x47, 0xde,
-	0x51, 0x24, 0x64, 0x3d, 0x81, 0xeb, 0xea, 0x1c, 0x36, 0xc6, 0xdc, 0x75, 0x7a, 0xdd, 0x28, 0x31,
-	0xb3, 0x65, 0xd2, 0xbc, 0xd2, 0xfe, 0xdd, 0x80, 0xaa, 0x32, 0xee, 0xf9, 0xc3, 0x80, 0xbc, 0x86,
-	0x95, 0x28, 0xb5, 0x98, 0xe1, 0xd5, 0xce, 0xc3, 0xc2, 0x4d, 0x4c, 0x62, 0xd1, 0x18, 0x4d, 0x6c,
-	0xa8, 0x67, 0xbd, 0xaa, 0x8d, 0x98, 0x34, 0xa7, 0x23, 0x16, 0x94, 0x95, 0x9c, 0x52, 0x9a, 0x88,
-	0xe4, 0x01, 0x40, 0x5c, 0x50, 0x3e, 0xf3, 0xd0, 0x5a, 0x6e, 0x1a, 0xad, 0x2a, 0xad, 0x2a, 0xcd,
-	0x3b, 0xe6, 0x61, 0x74, 0x14, 0x21, 0x32, 0x11, 0xf8, 0xd6, 0x8a, 0x5a, 0xd2, 0x92, 0xfd, 0x93,
-	0x01, 0x77, 0xa6, 0x77, 0x7e, 0x99, 0xc3, 0x78, 0x1d, 0x1b, 0x61, 0x74, 0x0e, 0x66, 0xab, 0xd6,
-	0x79, 0xd0, 0x9e, 0xad, 0xe9, 0x76, 0x4a, 0x15, 0xd5, 0x60, 0xfb, 0xcf, 0x25, 0x20, 0x9b, 0x21,
-	0x32, 0x89, 0x6a, 0x2d, 0x61, 0x7f, 0x9a, 0x12, 0xa3, 0x80, 0x92, 0xfc, 0xc6, 0x97, 0xa6, 0x37,
-	0x3e, 0x9f, 0x31, 0x0b, 0xca, 0xc7, 0x18, 0x0a, 0x1e, 0xf8, 0x8a, 0x2e, 0x93, 0x26, 0x22, 0xb9,
-	0x07, 0x55, 0x0f, 0x25, 0xeb, 0x8f, 0x98, 0x3c, 0xd0, 0x7c, 0x55, 0x22, 0xc5, 0x36, 0x93, 0x07,
-	0x51, 0x3c, 0x87, 0xe9, 0x45, 0x61, 0x95, 0x9a, 0x66, 0x14, 0x2f, 0xd2, 0x44, 0xab, 0xaa, 0x1a,
-	0xe5, 0xc9, 0x08, 0x93, 0x6a, 0x2c, 0x2b, 0x16, 0x1e, 0x15, 0x52, 0xf7, 0x1d, 0x9e, 0xbc, 0x67,
-	0xee, 0x18, 0xb7, 0x19, 0x0f, 0x29, 0x44, 0x56, 0x71, 0x35, 0x92, 0xae, 0xde, 0x76, 0xe2, 0xa4,
-	0xb2, 0xa8, 0x93, 0x9a, 0x32, 0xd3, 0x35, 0xfd, 0xd1, 0x84, 0xb5, 0x98, 0xa4, 0xff, 0x8c, 0xd2,
-	0x3c, 0x37, 0x2b, 0xe7, 0x70, 0x53, 0xfa, 0x37, 0xb8, 0x29, 0xff, 0x13, 0x6e, 0xc8, 0x5d, 0xa8,
-	0xf8, 0x63, 0xaf, 0x1f, 0x06, 0x1f, 0x22, 0x76, 0xd5, 0x1e, 0xfc, 0xb1, 0x47, 0x83, 0x0f, 0x82,
-	0x6c, 0x42, 0x7d, 0xc8, 0xd1, 0x75, 0xfa, 0xf1, 0x30, 0xb5, 0xaa, 0xaa, 0xf8, 0x9b, 0xf9, 0x00,
-	0x7a, 0xd0, 0xbe, 0x89, 0x80, 0x3b, 0xea, 0x9b, 0xd6, 0x86, 0x13, 0x81, 0xdc, 0x87, 0xaa, 0xc0,
-	0x7d, 0x0f, 0x7d, 0xd9, 0xeb, 0x5a, 0xa0, 0x02, 0x4c, 0x14, 0xb6, 0x07, 0x24, 0x7b, 0x30, 0x97,
-	0xe9, 0xb7, 0x05, 0x86, 0x86, 0xfd, 0x0d, 0x58, 0x49, 0x8b, 0xbf, 0xe1, 0x2e, 0xaa, 0xb3, 0xb8,
-	0xd8, 0x7c, 0xfb, 0xc3, 0x80, 0xb5, 0x9c, 0xbd, 0x9a, 0x73, 0x57, 0x95, 0x30, 0x69, 0xc1, 0x8d,
-	0xf8, 0x8c, 0x87, 0xdc, 0x45, 0x5d, 0x4c, 0xa6, 0x2a, 0xa6, 0x55, 0x9e, 0xdb, 0x05, 0x79, 0x06,
-	0x9f, 0x08, 0x0c, 0x39, 0x73, 0xf9, 0x29, 0x3a, 0x7d, 0xc1, 0x4f, 0xe3, 0xd1, 0xb7, 0x4c, 0x57,
-	0x27, 0xea, 0x1d, 0x7e, 0x8a, 0xf6, 0xaf, 0x06, 0xdc, 0x2d, 0x20, 0xe1, 0x32, 0xd4, 0x77, 0x01,
-	0x32, 0xf9, 0xc5, 0xe3, 0xee, 0xe9, 0xdc, 0x71, 0x97, 0x65, 0x8e, 0x56, 0x87, 0x49, 0x0a, 0xf6,
-	0xcf, 0xa6, 0xbe, 0x3a, 0xde, 0xa2, 0x64, 0x0b, 0x75, 0x67, 0x7a, 0xbd, 0x2c, 0x5d, 0xe8, 0x7a,
-	0x79, 0x08, 0xb5, 0x21, 0xe3, 0x6e, 0x5f, 0x5f, 0x03, 0xa6, 0xea, 0x6a, 0x88, 0x54, 0x54, 0x69,
-	0xc8, 0x57, 0x60, 0x86, 0x78, 0xa4, 0xf8, 0x9b, 0xb3, 0x91, 0x99, 0x69, 0x42, 0x23, 0x8b, 0xc2,
-	0xe3, 0x5a, 0x29, 0x3c, 0xae, 0x47, 0x50, 0xf7, 0x58, 0x78, 0xd8, 0x77, 0xd0, 0x45, 0x89, 0x8e,
-	0x55, 0x6a, 0x1a, 0xad, 0x0a, 0xad, 0x45, 0xba, 0x6e, 0xac, 0xca, 0xbc, 0x19, 0xca, 0xd9, 0x37,
-	0x03, 0x79, 0xac, 0x0b, 0xb5, 0x9f, 0xcc, 0xec, 0x4a, 0x86, 0x9a, 0xf7, 0x7a, 0x70, 0x37, 0xa0,
-	0x12, 0xe2, 0xe0, 0x64, 0xe0, 0xa2, 0xa3, 0xfa, 0xb6, 0x42, 0x53, 0x99, 0x3c, 0x85, 0x49, 0x4d,
-	0xc4, 0x95, 0x02, 0xaa, 0x52, 0xae, 0xa7, 0x5a, 0x55, 0x28, 0xcf, 0xe1, 0x46, 0x37, 0x0c, 0x46,
-	0xb9, 0x99, 0x99, 0x19, 0x78, 0x46, 0x6e, 0xe0, 0xd9, 0x2f, 0x81, 0x50, 0xf4, 0x82, 0xe3, 0xfc,
-	0xb5, 0xd5, 0x80, 0xca, 0x5e, 0xbe, 0x9f, 0x52, 0xd9, 0xbe, 0x0d, 0x37, 0xb7, 0x50, 0xee, 0x32,
-	0x71, 0xb8, 0xe3, 0x06, 0x32, 0xe9, 0x43, 0x9b, 0xc1, 0xad, 0xbc, 0xfa, 0x32, 0x95, 0x79, 0x0b,
-	0x56, 0x44, 0xe4, 0x45, 0x37, 0x57, 0x2c, 0x74, 0x7e, 0x2b, 0x03, 0xa8, 0x34, 0x37, 0xa3, 0x27,
-	0x27, 0x19, 0x01, 0xd9, 0x42, 0xb9, 0x19, 0x78, 0xa3, 0xc0, 0x47, 0x5f, 0xc6, 0x97, 0x3f, 0x79,
-	0x39, 0xe7, 0xdd, 0x34, 0x0b, 0xd5, 0x99, 0x37, 0x3e, 0x9d, 0x63, 0x31, 0x05, 0xb7, 0xaf, 0x11,
-	0x4f, 0x45, 0xdc, 0xe5, 0x1e, 0xee, 0xf2, 0xc1, 0xe1, 0xe6, 0x01, 0xf3, 0x7d, 0x74, 0xcf, 0x8a,
-	0x38, 0x05, 0x4d, 0x22, 0x3e, 0xce, 0x5b, 0x68, 0x61, 0x47, 0x86, 0xdc, 0xdf, 0x4f, 0x88, 0xb3,
-	0xaf, 0x91, 0x23, 0x45, 0x69, 0x14, 0x9d, 0x0b, 0xc9, 0x07, 0x22, 0x09, 0xd8, 0x99, 0x1f, 0x70,
-	0x06, 0x7c, 0xc1, 0x90, 0x3f, 0x00, 0x4c, 0x7a, 0x84, 0x2c, 0xd6, 0x43, 0xb3, 0x04, 0x4e, 0xc3,
-	0x52, 0xf7, 0x1c, 0x56, 0xf3, 0x6f, 0x35, 0xf2, 0x59, 0x91, 0x6d, 0xe1, 0x4b, 0xb6, 0xf1, 0xf9,
-	0x22, 0xd0, 0x34, 0x54, 0x08, 0x6b, 0x33, 0xe3, 0x92, 0x3c, 0x3f, 0xcb, 0xc5, 0xf4, 0xd5, 0xd2,
-	0x78, 0xb1, 0x20, 0x3a, 0x8d, 0xb9, 0x0d, 0xd5, 0xb4, 0xf5, 0xc8, 0x93, 0x22, 0xeb, 0xe9, 0xce,
-	0x6c, 0x9c, 0xd5, 0x0e, 0xf6, 0x35, 0xb2, 0x0b, 0xb5, 0x4c, 0x7b, 0x92, 0x42, 0xa6, 0x67, 0xfb,
-	0xf7, 0x3c, 0xaf, 0x7d, 0x80, 0x2d, 0x94, 0x6f, 0x51, 0x86, 0x7c, 0x20, 0xa6, 0x9d, 0x6a, 0x61,
-	0x02, 0x48, 0x9c, 0x3e, 0x3b, 0x17, 0x97, 0x10, 0xd1, 0xf9, 0x6b, 0x59, 0xdf, 0x09, 0xd1, 0xcf,
-	0xd1, 0xff, 0x8d, 0x7a, 0x05, 0x8d, 0xba, 0x0b, 0xb5, 0xcc, 0xef, 0x46, 0x71, 0x61, 0xcc, 0xfe,
-	0x8f, 0x9c, 0x57, 0x18, 0x03, 0xa8, 0x67, 0x87, 0x38, 0x79, 0x36, 0xa7, 0x03, 0xa6, 0xa7, 0x7f,
-	0xa3, 0x75, 0x3e, 0x30, 0x4d, 0xfd, 0xaa, 0xab, 0x6f, 0xe3, 0x8b, 0xef, 0x3b, 0xfb, 0x5c, 0x1e,
-	0x8c, 0xf7, 0xa2, 0xfd, 0xad, 0xc7, 0xc8, 0x17, 0x3c, 0xd0, 0x5f, 0xeb, 0xc9, 0x31, 0xac, 0x2b,
-	0x4f, 0xeb, 0x2a, 0xd7, 0xd1, 0xde, 0x5e, 0x49, 0x89, 0xaf, 0xfe, 0x0e, 0x00, 0x00, 0xff, 0xff,
-	0x71, 0x98, 0x62, 0xf8, 0xd7, 0x10, 0x00, 0x00,
+	// 1891 bytes of a gzipped FileDescriptorProto
+	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xe4, 0x59, 0xcd, 0x6f, 0x23, 0x49,
+	0x15, 0x9f, 0xb6, 0xf3, 0xe1, 0x7e, 0xb6, 0xf3, 0x51, 0x33, 0x83, 0xbc, 0x9e, 0xc9, 0x6e, 0xa6,
+	0x87, 0x99, 0x31, 0x48, 0x9b, 0x0c, 0x59, 0x40, 0x48, 0x7c, 0x48, 0x49, 0xcc, 0x66, 0x3d, 0xb3,
+	0x89, 0x42, 0x7b, 0xb4, 0x12, 0x7b, 0x69, 0xb5, 0xdd, 0xe5, 0x4c, 0xed, 0xd8, 0x55, 0x9e, 0xae,
+	0xea, 0xdd, 0xc9, 0x20, 0x21, 0x38, 0x20, 0x81, 0xb4, 0x02, 0x89, 0x03, 0x5c, 0xb8, 0xc1, 0x09,
+	0xc4, 0x8d, 0xff, 0x81, 0x0b, 0x7f, 0x06, 0xff, 0x05, 0x17, 0x54, 0x1f, 0xdd, 0xee, 0x6e, 0xb7,
+	0xe3, 0x24, 0x0e, 0x5c, 0xf6, 0xe6, 0x7a, 0xf5, 0xaa, 0x5e, 0xd5, 0x7b, 0xbf, 0x7a, 0xef, 0xf7,
+	0xda, 0xb0, 0x49, 0x68, 0x80, 0xdf, 0x78, 0x7d, 0xc6, 0xc2, 0x60, 0x67, 0x1c, 0x32, 0xc1, 0x10,
+	0x1a, 0x91, 0xe1, 0xe7, 0x11, 0xd7, 0xa3, 0x1d, 0x35, 0xdf, 0xac, 0xf5, 0xd9, 0x68, 0xc4, 0xa8,
+	0x96, 0x35, 0xd7, 0x08, 0x15, 0x38, 0xa4, 0xfe, 0xd0, 0x8c, 0x6b, 0xe9, 0x15, 0xcd, 0x8d, 0xc0,
+	0x17, 0x7e, 0x7a, 0x47, 0xe7, 0xcb, 0x12, 0xd8, 0x1d, 0xb9, 0x4f, 0x87, 0x0e, 0x18, 0x72, 0xa0,
+	0xd6, 0x67, 0xc3, 0x21, 0xee, 0x0b, 0xc2, 0x68, 0xa7, 0xdd, 0xb0, 0xb6, 0xad, 0x56, 0xd9, 0xcd,
+	0xc8, 0x50, 0x03, 0x56, 0x07, 0x04, 0x0f, 0x83, 0x4e, 0xbb, 0x51, 0x52, 0xd3, 0xf1, 0x10, 0x6d,
+	0x01, 0xe8, 0x23, 0x53, 0x7f, 0x84, 0x1b, 0xe5, 0x6d, 0xab, 0x65, 0xbb, 0xb6, 0x92, 0x9c, 0xf8,
+	0x23, 0x2c, 0x17, 0xaa, 0x41, 0xa7, 0xdd, 0x58, 0xd2, 0x0b, 0xcd, 0x10, 0x1d, 0x40, 0x55, 0x9c,
+	0x8f, 0xb1, 0x37, 0xf6, 0x43, 0x7f, 0xc4, 0x1b, 0xcb, 0xdb, 0xe5, 0x56, 0x75, 0xef, 0xc1, 0x4e,
+	0xe6, 0xb2, 0xe6, 0x96, 0xcf, 0xf1, 0xf9, 0x27, 0xfe, 0x30, 0xc2, 0xa7, 0x3e, 0x09, 0x5d, 0x90,
+	0xab, 0x4e, 0xd5, 0x22, 0xd4, 0x86, 0x9a, 0x36, 0x6e, 0x36, 0x59, 0xb9, 0xec, 0x26, 0x55, 0xb5,
+	0x4c, 0xef, 0xe2, 0xfc, 0xca, 0x02, 0xf8, 0x50, 0x5d, 0x47, 0x0a, 0xd1, 0x0f, 0xe2, 0x1b, 0x11,
+	0x3a, 0x60, 0xca, 0x1b, 0xd5, 0xbd, 0xad, 0x9d, 0xe9, 0x20, 0xec, 0x24, 0x2e, 0x34, 0x17, 0x56,
+	0xde, 0x6c, 0xc0, 0x6a, 0x80, 0x87, 0x58, 0xe0, 0x40, 0x79, 0xaa, 0xe2, 0xc6, 0x43, 0xf4, 0x1e,
+	0x54, 0xfb, 0x21, 0xf6, 0x05, 0xf6, 0x04, 0x31, 0xae, 0x5a, 0x72, 0x41, 0x8b, 0x5e, 0x90, 0x11,
+	0x76, 0xfe, 0x5d, 0x86, 0x5a, 0x17, 0x9f, 0x8d, 0x30, 0x15, 0xfa, 0x24, 0x97, 0x89, 0xcc, 0x36,
+	0x54, 0xc7, 0x7e, 0x28, 0x88, 0x51, 0xd1, 0xd1, 0x49, 0x8b, 0xd0, 0x7d, 0xb0, 0xb9, 0xd9, 0xb5,
+	0xad, 0xac, 0x96, 0xdd, 0x89, 0x00, 0xbd, 0x03, 0x15, 0x1a, 0x8d, 0xbc, 0x90, 0x7d, 0xc1, 0xe3,
+	0x08, 0xd1, 0x68, 0xe4, 0xb2, 0x2f, 0x78, 0x3a, 0x76, 0xcb, 0xd9, 0xd8, 0x35, 0x60, 0xb5, 0x17,
+	0x11, 0x05, 0x87, 0x15, 0x3d, 0x63, 0x86, 0xe8, 0x6b, 0xb0, 0x42, 0x59, 0x80, 0x3b, 0xed, 0xc6,
+	0xaa, 0x9a, 0x30, 0x23, 0xf4, 0x10, 0xea, 0xda, 0xa9, 0x9f, 0xe3, 0x90, 0x13, 0x46, 0x1b, 0x15,
+	0x7d, 0x17, 0x25, 0xfc, 0x44, 0xcb, 0xd0, 0x77, 0x60, 0x99, 0x0b, 0x5f, 0xe0, 0x86, 0xbd, 0x6d,
+	0xb5, 0xd6, 0xf6, 0xde, 0x2b, 0x8c, 0xa3, 0x72, 0x4d, 0x57, 0xaa, 0xb9, 0x5a, 0x5b, 0x3a, 0x76,
+	0xe0, 0x93, 0xa1, 0x17, 0x62, 0x9f, 0x33, 0xda, 0x00, 0x85, 0x41, 0x90, 0x22, 0x57, 0x49, 0xd0,
+	0x37, 0xe3, 0x67, 0x35, 0x20, 0x43, 0xcc, 0xbd, 0xb1, 0x2f, 0x5e, 0xf2, 0x46, 0x75, 0xbb, 0xdc,
+	0xb2, 0xdd, 0x75, 0x35, 0xf1, 0xa1, 0x94, 0x9f, 0x4a, 0x71, 0x3a, 0x7e, 0xb5, 0x0b, 0xe3, 0x57,
+	0xcf, 0xc7, 0x0f, 0x3d, 0x82, 0x35, 0x8e, 0x43, 0xe2, 0x0f, 0xc9, 0x5b, 0xec, 0x71, 0xf2, 0x16,
+	0x37, 0xd6, 0x94, 0x4e, 0x3d, 0x91, 0x76, 0xc9, 0x5b, 0xec, 0xfc, 0xd6, 0x82, 0xea, 0x47, 0x3e,
+	0x0d, 0xd8, 0x60, 0xf0, 0xc2, 0xe7, 0xaf, 0xd0, 0x3e, 0xd4, 0x4c, 0x38, 0xd2, 0x88, 0x7b, 0x37,
+	0x7b, 0x79, 0xf9, 0x86, 0x77, 0x12, 0x70, 0x0c, 0x98, 0x5b, 0xe5, 0x93, 0x41, 0x0e, 0xb2, 0xa5,
+	0xab, 0x41, 0xd6, 0xf9, 0xa3, 0x05, 0xb7, 0x5d, 0x7c, 0x46, 0xb8, 0xc0, 0xe1, 0x09, 0x0b, 0xb0,
+	0x8b, 0x5f, 0x47, 0x98, 0x0b, 0xf4, 0x14, 0x96, 0x7a, 0x3e, 0xc7, 0xe6, 0x40, 0xf7, 0x0b, 0xa3,
+	0x71, 0xcc, 0xcf, 0x0e, 0x7c, 0x8e, 0x5d, 0xa5, 0x89, 0xbe, 0x0b, 0xab, 0x7e, 0x10, 0x84, 0x98,
+	0x73, 0x73, 0x88, 0xe2, 0x45, 0xfb, 0x5a, 0xc7, 0x8d, 0x95, 0x53, 0xa8, 0x29, 0xa7, 0x51, 0xe3,
+	0xfc, 0xce, 0x82, 0x3b, 0xd9, 0x93, 0xf1, 0x31, 0xa3, 0x1c, 0xa3, 0x0f, 0x60, 0x45, 0xc6, 0x3e,
+	0xe2, 0xe6, 0x70, 0xf7, 0x0a, 0xed, 0x74, 0x95, 0x8a, 0x6b, 0x54, 0x65, 0xc6, 0x21, 0x94, 0x88,
+	0x38, 0x59, 0xe8, 0x13, 0x3e, 0xc8, 0xbb, 0xc9, 0x64, 0xd2, 0x0e, 0x25, 0x42, 0xe7, 0x07, 0x17,
+	0x48, 0xf2, 0xdb, 0xf9, 0x29, 0xdc, 0x39, 0xc2, 0x22, 0x85, 0x41, 0xe3, 0xab, 0xcb, 0x3c, 0xd5,
+	0x6c, 0xaa, 0x2c, 0xe5, 0x52, 0xa5, 0xf3, 0x17, 0x0b, 0xee, 0xe6, 0xf6, 0x5e, 0xe4, 0xb6, 0xc9,
+	0x63, 0x2a, 0x2d, 0xf2, 0x98, 0xca, 0xf9, 0xc7, 0xe4, 0xfc, 0xc2, 0x82, 0x7b, 0x47, 0x58, 0xa4,
+	0x13, 0xd5, 0x0d, 0x7b, 0x02, 0xbd, 0x0b, 0x90, 0x24, 0x28, 0xde, 0x28, 0x6f, 0x97, 0x5b, 0x65,
+	0x37, 0x25, 0x71, 0x7e, 0x63, 0xc1, 0xe6, 0x94, 0xfd, 0x6c, 0x9e, 0xb3, 0xf2, 0x79, 0xee, 0x7f,
+	0xe5, 0x8e, 0xdf, 0x5b, 0x70, 0xbf, 0xd8, 0x1d, 0x8b, 0x04, 0xef, 0x87, 0x7a, 0x11, 0x96, 0x28,
+	0x95, 0x25, 0xed, 0x51, 0xd1, 0x63, 0x9e, 0xb6, 0x69, 0x16, 0x39, 0xff, 0xb1, 0x00, 0x1d, 0xaa,
+	0xc4, 0xa4, 0x26, 0xaf, 0x12, 0x9a, 0x6b, 0x57, 0xfa, 0x5c, 0x3d, 0x5f, 0xba, 0x89, 0x7a, 0xbe,
+	0x7c, 0xad, 0x7a, 0xfe, 0x06, 0x6e, 0xc7, 0xef, 0x48, 0xa5, 0xba, 0x2b, 0xdc, 0x3e, 0x8b, 0xbc,
+	0x52, 0x1e, 0x79, 0x73, 0x7c, 0xe0, 0xfc, 0xd9, 0x82, 0xcd, 0x4e, 0x5c, 0x50, 0x64, 0x3d, 0x51,
+	0xd9, 0xf9, 0x62, 0x60, 0xce, 0x79, 0x0b, 0x2d, 0xd8, 0x98, 0xd4, 0x2e, 0x53, 0xba, 0xca, 0xaa,
+	0x74, 0xad, 0x91, 0xb4, 0x25, 0x8e, 0x9e, 0xc0, 0x7a, 0x52, 0x68, 0x02, 0x5d, 0x7f, 0x96, 0x54,
+	0xfd, 0x99, 0x54, 0xa5, 0x40, 0x15, 0xa0, 0x7f, 0x58, 0x93, 0x24, 0xa6, 0x1d, 0xb4, 0x08, 0x54,
+	0x1f, 0x40, 0x0d, 0x53, 0xbf, 0x37, 0xc4, 0x9e, 0x3a, 0x8f, 0x61, 0x3d, 0x55, 0x2d, 0xd3, 0x3c,
+	0xa6, 0x0d, 0x90, 0x3b, 0xfd, 0x0c, 0x44, 0x4f, 0xf9, 0xce, 0xb5, 0x07, 0xf1, 0xfd, 0x1c, 0x06,
+	0x1b, 0xed, 0x90, 0x8d, 0xaf, 0x8c, 0xe8, 0xf9, 0x0c, 0xb5, 0x18, 0xf0, 0xce, 0xf7, 0xe1, 0xae,
+	0x34, 0x78, 0x98, 0x6c, 0x76, 0x05, 0xab, 0xb2, 0x50, 0xb4, 0x31, 0xef, 0x87, 0xa4, 0x87, 0x17,
+	0x3c, 0xf1, 0x54, 0xa1, 0xf8, 0xd2, 0x82, 0xbb, 0xb9, 0xbd, 0x17, 0x09, 0xe0, 0x8f, 0xa0, 0x3a,
+	0x21, 0x0f, 0x71, 0xc2, 0x99, 0xc3, 0x1e, 0x20, 0x61, 0x0f, 0xdc, 0xf1, 0x55, 0x02, 0x54, 0x73,
+	0x07, 0x92, 0x05, 0x9e, 0x86, 0xec, 0x4c, 0x95, 0xf7, 0x9b, 0xbb, 0xf1, 0x1f, 0x2c, 0xd8, 0x9a,
+	0x61, 0x63, 0x41, 0xe8, 0x2a, 0x1b, 0x38, 0xd0, 0xfc, 0xd7, 0x90, 0x67, 0x23, 0x53, 0x1c, 0x78,
+	0x0b, 0x40, 0x30, 0xe1, 0x0f, 0xb5, 0x82, 0x61, 0xcf, 0x4a, 0x22, 0xa7, 0x9d, 0x5f, 0x97, 0xa0,
+	0xde, 0x15, 0x2c, 0xf4, 0xcf, 0xf0, 0x21, 0xa3, 0x03, 0x72, 0x26, 0xe1, 0x14, 0x53, 0x20, 0x4b,
+	0x5d, 0x23, 0x21, 0x39, 0x0f, 0xa0, 0xe6, 0xf7, 0xfb, 0x98, 0x73, 0xef, 0x15, 0x3e, 0x37, 0x68,
+	0xb3, 0xdd, 0xaa, 0x96, 0x3d, 0x97, 0x22, 0x49, 0x54, 0x39, 0xee, 0x87, 0x58, 0x78, 0x13, 0x4d,
+	0x83, 0xd8, 0x75, 0x3d, 0xb1, 0x1f, 0x6b, 0x4b, 0xce, 0x14, 0x71, 0xdc, 0xed, 0x7e, 0xac, 0x5e,
+	0x79, 0xc5, 0x35, 0x23, 0x59, 0xb1, 0x7a, 0x51, 0xff, 0x15, 0x16, 0xda, 0x97, 0xcb, 0xba, 0x62,
+	0x69, 0x91, 0x02, 0xfc, 0x3d, 0xb0, 0x43, 0xc6, 0x84, 0x7a, 0x8d, 0x8a, 0xbe, 0xdb, 0x6e, 0x45,
+	0x0a, 0xe4, 0x2b, 0x33, 0xbb, 0x76, 0xf6, 0x8f, 0x15, 0x7f, 0xd7, 0xbb, 0x76, 0xf6, 0x8f, 0x65,
+	0x9b, 0xd1, 0xd9, 0x3f, 0xfe, 0x31, 0x0d, 0xc6, 0x8c, 0x50, 0xa1, 0xd8, 0xbb, 0xed, 0xa6, 0x45,
+	0xce, 0x3f, 0xcb, 0xb0, 0xa1, 0x6b, 0xce, 0x33, 0xd6, 0x8b, 0x63, 0x7f, 0x1f, 0xec, 0xfe, 0x30,
+	0x92, 0xf4, 0x6d, 0x92, 0xfa, 0x12, 0x41, 0x96, 0x97, 0x7b, 0xe3, 0x10, 0x0f, 0xc8, 0x1b, 0xe3,
+	0x96, 0x09, 0x2f, 0x3f, 0x55, 0xe2, 0x74, 0xcb, 0x51, 0xce, 0xb6, 0x1c, 0x5b, 0x00, 0xaa, 0xc3,
+	0xd5, 0xd9, 0x65, 0x49, 0xe5, 0x46, 0x5b, 0x4a, 0x74, 0x5a, 0x9c, 0xea, 0x3c, 0x96, 0x0b, 0x3a,
+	0x8f, 0x54, 0xab, 0xb3, 0x92, 0x6d, 0x75, 0xb2, 0xc8, 0x5c, 0xcd, 0x67, 0x8f, 0x8f, 0x60, 0x8d,
+	0xeb, 0xf8, 0x7b, 0x7d, 0x05, 0x00, 0xe5, 0x9a, 0x02, 0x5a, 0xa9, 0x0a, 0x76, 0x1a, 0x29, 0x6e,
+	0x9d, 0x67, 0x80, 0x93, 0xaf, 0x7d, 0xf6, 0x75, 0x6a, 0x5f, 0xbe, 0x0a, 0xc3, 0x35, 0xaa, 0xb0,
+	0xf3, 0x31, 0x6c, 0xfc, 0x24, 0xc2, 0xe1, 0xf9, 0x33, 0xd6, 0xe3, 0x97, 0x0b, 0x64, 0x13, 0x2a,
+	0x26, 0x1a, 0x71, 0xd1, 0x4c, 0xc6, 0xce, 0x2f, 0x2d, 0xa8, 0xab, 0x87, 0x2b, 0x9b, 0x9d, 0xb8,
+	0x45, 0x8e, 0x43, 0x69, 0x65, 0x43, 0x79, 0x7d, 0x92, 0x96, 0xea, 0xef, 0x4c, 0x79, 0x84, 0x49,
+	0x67, 0xe7, 0xfc, 0xd5, 0x82, 0xcd, 0xd4, 0x95, 0x16, 0xc9, 0x19, 0x19, 0x47, 0x94, 0xf2, 0x8e,
+	0x38, 0xc8, 0xe6, 0xd2, 0x72, 0x91, 0xfb, 0x53, 0xb9, 0x34, 0x76, 0x49, 0x26, 0x9f, 0x3e, 0x87,
+	0x75, 0x59, 0x76, 0x6e, 0xc6, 0xfb, 0xff, 0xb2, 0x60, 0xf5, 0x19, 0xeb, 0x29, 0xbf, 0xa7, 0x5b,
+	0x7d, 0x2b, 0xdb, 0xea, 0x6f, 0x40, 0x39, 0x20, 0x23, 0x73, 0x1f, 0xf9, 0x53, 0xe2, 0x9e, 0x0b,
+	0x3f, 0x14, 0x93, 0x8f, 0x15, 0x92, 0xb5, 0x48, 0x89, 0xea, 0x75, 0xdf, 0x81, 0x0a, 0xa6, 0x81,
+	0x9e, 0x34, 0x9f, 0x0d, 0x30, 0x0d, 0xd4, 0xd4, 0x8d, 0x90, 0x38, 0x74, 0x07, 0x96, 0xc7, 0x6c,
+	0xf2, 0x81, 0x41, 0x0f, 0x1c, 0x04, 0x1b, 0x47, 0x58, 0x3c, 0x63, 0xbd, 0x93, 0x68, 0x64, 0x9c,
+	0xe3, 0xfc, 0xa9, 0x04, 0x9b, 0x29, 0xe1, 0x22, 0xc1, 0x75, 0xa0, 0xae, 0xb3, 0xfd, 0x67, 0xac,
+	0xe7, 0xd1, 0x28, 0x76, 0x48, 0x55, 0x09, 0xb5, 0x01, 0xf4, 0x3e, 0xdc, 0x26, 0xd4, 0x1b, 0x9b,
+	0x02, 0x94, 0x68, 0x6a, 0x0f, 0x6d, 0x10, 0x1a, 0x97, 0x26, 0xa3, 0xfe, 0x18, 0xd6, 0x31, 0x7d,
+	0x1d, 0xe1, 0x08, 0x27, 0xaa, 0xda, 0x5f, 0x75, 0x23, 0x36, 0x7a, 0xb2, 0xd0, 0xf8, 0xfc, 0x95,
+	0xc7, 0x87, 0x4c, 0x70, 0x93, 0xa3, 0x6c, 0x29, 0xe9, 0x4a, 0x01, 0xfa, 0x1e, 0xd8, 0x72, 0xb9,
+	0x86, 0x95, 0xfe, 0xcc, 0x75, 0xaf, 0x08, 0x56, 0x26, 0xd6, 0x6e, 0xe5, 0x33, 0xfd, 0x83, 0xef,
+	0xfd, 0xbd, 0x02, 0xa0, 0xc0, 0x76, 0xc8, 0x58, 0x18, 0xa0, 0x31, 0xa0, 0x23, 0x2c, 0x0e, 0xd9,
+	0x68, 0xcc, 0x28, 0xa6, 0x42, 0xbd, 0x23, 0x8e, 0x9e, 0xce, 0xe8, 0x82, 0xa7, 0x55, 0x8d, 0xd7,
+	0x9b, 0x8f, 0x67, 0xac, 0xc8, 0xa9, 0x3b, 0xb7, 0xd0, 0x6b, 0xc5, 0x36, 0xe5, 0x90, 0x70, 0x41,
+	0xfa, 0xfc, 0xf0, 0xa5, 0x4f, 0x29, 0x1e, 0xa2, 0xbd, 0xd9, 0x36, 0xa7, 0x94, 0x63, 0xab, 0x0f,
+	0xb3, 0x6b, 0xcc, 0xa0, 0x2b, 0x42, 0x42, 0xcf, 0xe2, 0xd0, 0x3b, 0xb7, 0xd0, 0x0b, 0xa8, 0xa6,
+	0xda, 0x1f, 0xf4, 0xb8, 0xc8, 0x53, 0xd3, 0xfd, 0x51, 0xf3, 0x22, 0x8c, 0x38, 0xb7, 0xd0, 0x00,
+	0xea, 0x99, 0xfe, 0x1c, 0xb5, 0x8a, 0xf6, 0x2d, 0xfa, 0x3c, 0xd0, 0xfc, 0xc6, 0x25, 0x34, 0x93,
+	0xd3, 0xff, 0x4c, 0x3b, 0x6c, 0xaa, 0xc1, 0xdd, 0x9d, 0xb1, 0xc9, 0xac, 0x56, 0xbc, 0xf9, 0xf4,
+	0xf2, 0x0b, 0x12, 0xe3, 0xc1, 0xe4, 0x92, 0x0a, 0x3f, 0xe8, 0xc9, 0x45, 0x47, 0x4f, 0xf5, 0x57,
+	0xcd, 0xd6, 0x7c, 0xc5, 0xc4, 0xca, 0x29, 0xd8, 0x09, 0x97, 0x47, 0x5f, 0x2f, 0x5a, 0x98, 0xa7,
+	0xfa, 0x97, 0x08, 0x4e, 0x86, 0x13, 0x17, 0x07, 0xa7, 0x88, 0x92, 0x17, 0x07, 0xa7, 0x90, 0x60,
+	0x3b, 0xb7, 0xd0, 0xcf, 0x27, 0x1f, 0x69, 0x32, 0x4c, 0x14, 0x3d, 0xbd, 0xe8, 0xfa, 0x45, 0xc4,
+	0xb8, 0xf9, 0xad, 0x2b, 0xac, 0x48, 0xec, 0x7b, 0x00, 0x47, 0x58, 0x1c, 0x63, 0x11, 0x92, 0x3e,
+	0xcf, 0x23, 0xdb, 0x0c, 0x26, 0x0a, 0xb1, 0xa9, 0x27, 0x73, 0xf5, 0x62, 0x03, 0x7b, 0x7f, 0x5b,
+	0x36, 0x7f, 0x0e, 0x9c, 0xb0, 0x00, 0x7f, 0x35, 0xd2, 0xc5, 0x29, 0xd8, 0x09, 0x73, 0x2d, 0x46,
+	0x63, 0x9e, 0xd8, 0xce, 0x43, 0xe3, 0xa7, 0x60, 0x27, 0x7c, 0xa3, 0x78, 0xc7, 0x3c, 0xc3, 0x6a,
+	0x3e, 0x9a, 0xa3, 0x95, 0x9c, 0xf6, 0x04, 0x2a, 0x31, 0x3f, 0x40, 0x0f, 0x67, 0x3d, 0x9d, 0xf4,
+	0xce, 0xf3, 0xcf, 0x9a, 0x94, 0xcf, 0xe2, 0xb3, 0xe6, 0x4b, 0x6e, 0xf1, 0x59, 0xa7, 0x6a, 0xf0,
+	0xff, 0x01, 0xad, 0x07, 0xdf, 0xfe, 0x74, 0xef, 0x8c, 0x88, 0x97, 0x51, 0x4f, 0x5e, 0x6b, 0x57,
+	0x6b, 0xbe, 0x4f, 0x98, 0xf9, 0xb5, 0x1b, 0xa3, 0x64, 0x57, 0xed, 0xb4, 0xab, 0x0e, 0x3a, 0xee,
+	0xf5, 0x56, 0xd4, 0xf0, 0x83, 0xff, 0x06, 0x00, 0x00, 0xff, 0xff, 0x0e, 0xa9, 0x0a, 0xa6, 0x6e,
+	0x1b, 0x00, 0x00,
 }
 
 // Reference imports to suppress errors if they are not otherwise used.
@@ -1060,13 +2017,14 @@ const _ = grpc.SupportPackageIsVersion4
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://godoc.org/google.golang.org/grpc#ClientConn.NewStream.
 type IndexCoordClient interface {
 	GetComponentStates(ctx context.Context, in *internalpb.GetComponentStatesRequest, opts ...grpc.CallOption) (*internalpb.ComponentStates, error)
-	GetTimeTickChannel(ctx context.Context, in *internalpb.GetTimeTickChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error)
 	GetStatisticsChannel(ctx context.Context, in *internalpb.GetStatisticsChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error)
-	BuildIndex(ctx context.Context, in *BuildIndexRequest, opts ...grpc.CallOption) (*BuildIndexResponse, error)
-	GetIndexStates(ctx context.Context, in *GetIndexStatesRequest, opts ...grpc.CallOption) (*GetIndexStatesResponse, error)
-	GetIndexFilePaths(ctx context.Context, in *GetIndexFilePathsRequest, opts ...grpc.CallOption) (*GetIndexFilePathsResponse, error)
+	CreateIndex(ctx context.Context, in *CreateIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	GetIndexState(ctx context.Context, in *GetIndexStateRequest, opts ...grpc.CallOption) (*GetIndexStateResponse, error)
+	GetSegmentIndexState(ctx context.Context, in *GetSegmentIndexStateRequest, opts ...grpc.CallOption) (*GetSegmentIndexStateResponse, error)
+	GetIndexInfos(ctx context.Context, in *GetIndexInfoRequest, opts ...grpc.CallOption) (*GetIndexInfoResponse, error)
 	DropIndex(ctx context.Context, in *DropIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
-	RemoveIndex(ctx context.Context, in *RemoveIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	DescribeIndex(ctx context.Context, in *DescribeIndexRequest, opts ...grpc.CallOption) (*DescribeIndexResponse, error)
+	GetIndexBuildProgress(ctx context.Context, in *GetIndexBuildProgressRequest, opts ...grpc.CallOption) (*GetIndexBuildProgressResponse, error)
 	// https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
 	GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest, opts ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error)
 }
@@ -1088,15 +2046,6 @@ func (c *indexCoordClient) GetComponentStates(ctx context.Context, in *internalp
 	return out, nil
 }
 
-func (c *indexCoordClient) GetTimeTickChannel(ctx context.Context, in *internalpb.GetTimeTickChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error) {
-	out := new(milvuspb.StringResponse)
-	err := c.cc.Invoke(ctx, "/milvus.proto.index.IndexCoord/GetTimeTickChannel", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (c *indexCoordClient) GetStatisticsChannel(ctx context.Context, in *internalpb.GetStatisticsChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error) {
 	out := new(milvuspb.StringResponse)
 	err := c.cc.Invoke(ctx, "/milvus.proto.index.IndexCoord/GetStatisticsChannel", in, out, opts...)
@@ -1106,27 +2055,36 @@ func (c *indexCoordClient) GetStatisticsChannel(ctx context.Context, in *interna
 	return out, nil
 }
 
-func (c *indexCoordClient) BuildIndex(ctx context.Context, in *BuildIndexRequest, opts ...grpc.CallOption) (*BuildIndexResponse, error) {
-	out := new(BuildIndexResponse)
-	err := c.cc.Invoke(ctx, "/milvus.proto.index.IndexCoord/BuildIndex", in, out, opts...)
+func (c *indexCoordClient) CreateIndex(ctx context.Context, in *CreateIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, "/milvus.proto.index.IndexCoord/CreateIndex", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *indexCoordClient) GetIndexStates(ctx context.Context, in *GetIndexStatesRequest, opts ...grpc.CallOption) (*GetIndexStatesResponse, error) {
-	out := new(GetIndexStatesResponse)
-	err := c.cc.Invoke(ctx, "/milvus.proto.index.IndexCoord/GetIndexStates", in, out, opts...)
+func (c *indexCoordClient) GetIndexState(ctx context.Context, in *GetIndexStateRequest, opts ...grpc.CallOption) (*GetIndexStateResponse, error) {
+	out := new(GetIndexStateResponse)
+	err := c.cc.Invoke(ctx, "/milvus.proto.index.IndexCoord/GetIndexState", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *indexCoordClient) GetIndexFilePaths(ctx context.Context, in *GetIndexFilePathsRequest, opts ...grpc.CallOption) (*GetIndexFilePathsResponse, error) {
-	out := new(GetIndexFilePathsResponse)
-	err := c.cc.Invoke(ctx, "/milvus.proto.index.IndexCoord/GetIndexFilePaths", in, out, opts...)
+func (c *indexCoordClient) GetSegmentIndexState(ctx context.Context, in *GetSegmentIndexStateRequest, opts ...grpc.CallOption) (*GetSegmentIndexStateResponse, error) {
+	out := new(GetSegmentIndexStateResponse)
+	err := c.cc.Invoke(ctx, "/milvus.proto.index.IndexCoord/GetSegmentIndexState", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *indexCoordClient) GetIndexInfos(ctx context.Context, in *GetIndexInfoRequest, opts ...grpc.CallOption) (*GetIndexInfoResponse, error) {
+	out := new(GetIndexInfoResponse)
+	err := c.cc.Invoke(ctx, "/milvus.proto.index.IndexCoord/GetIndexInfos", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1142,9 +2100,18 @@ func (c *indexCoordClient) DropIndex(ctx context.Context, in *DropIndexRequest, 
 	return out, nil
 }
 
-func (c *indexCoordClient) RemoveIndex(ctx context.Context, in *RemoveIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	out := new(commonpb.Status)
-	err := c.cc.Invoke(ctx, "/milvus.proto.index.IndexCoord/RemoveIndex", in, out, opts...)
+func (c *indexCoordClient) DescribeIndex(ctx context.Context, in *DescribeIndexRequest, opts ...grpc.CallOption) (*DescribeIndexResponse, error) {
+	out := new(DescribeIndexResponse)
+	err := c.cc.Invoke(ctx, "/milvus.proto.index.IndexCoord/DescribeIndex", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *indexCoordClient) GetIndexBuildProgress(ctx context.Context, in *GetIndexBuildProgressRequest, opts ...grpc.CallOption) (*GetIndexBuildProgressResponse, error) {
+	out := new(GetIndexBuildProgressResponse)
+	err := c.cc.Invoke(ctx, "/milvus.proto.index.IndexCoord/GetIndexBuildProgress", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1163,13 +2130,14 @@ func (c *indexCoordClient) GetMetrics(ctx context.Context, in *milvuspb.GetMetri
 // IndexCoordServer is the server API for IndexCoord service.
 type IndexCoordServer interface {
 	GetComponentStates(context.Context, *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error)
-	GetTimeTickChannel(context.Context, *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error)
 	GetStatisticsChannel(context.Context, *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error)
-	BuildIndex(context.Context, *BuildIndexRequest) (*BuildIndexResponse, error)
-	GetIndexStates(context.Context, *GetIndexStatesRequest) (*GetIndexStatesResponse, error)
-	GetIndexFilePaths(context.Context, *GetIndexFilePathsRequest) (*GetIndexFilePathsResponse, error)
+	CreateIndex(context.Context, *CreateIndexRequest) (*commonpb.Status, error)
+	GetIndexState(context.Context, *GetIndexStateRequest) (*GetIndexStateResponse, error)
+	GetSegmentIndexState(context.Context, *GetSegmentIndexStateRequest) (*GetSegmentIndexStateResponse, error)
+	GetIndexInfos(context.Context, *GetIndexInfoRequest) (*GetIndexInfoResponse, error)
 	DropIndex(context.Context, *DropIndexRequest) (*commonpb.Status, error)
-	RemoveIndex(context.Context, *RemoveIndexRequest) (*commonpb.Status, error)
+	DescribeIndex(context.Context, *DescribeIndexRequest) (*DescribeIndexResponse, error)
+	GetIndexBuildProgress(context.Context, *GetIndexBuildProgressRequest) (*GetIndexBuildProgressResponse, error)
 	// https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
 	GetMetrics(context.Context, *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 }
@@ -1181,26 +2149,29 @@ type UnimplementedIndexCoordServer struct {
 func (*UnimplementedIndexCoordServer) GetComponentStates(ctx context.Context, req *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetComponentStates not implemented")
 }
-func (*UnimplementedIndexCoordServer) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetTimeTickChannel not implemented")
-}
 func (*UnimplementedIndexCoordServer) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetStatisticsChannel not implemented")
 }
-func (*UnimplementedIndexCoordServer) BuildIndex(ctx context.Context, req *BuildIndexRequest) (*BuildIndexResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method BuildIndex not implemented")
+func (*UnimplementedIndexCoordServer) CreateIndex(ctx context.Context, req *CreateIndexRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateIndex not implemented")
 }
-func (*UnimplementedIndexCoordServer) GetIndexStates(ctx context.Context, req *GetIndexStatesRequest) (*GetIndexStatesResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetIndexStates not implemented")
+func (*UnimplementedIndexCoordServer) GetIndexState(ctx context.Context, req *GetIndexStateRequest) (*GetIndexStateResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetIndexState not implemented")
 }
-func (*UnimplementedIndexCoordServer) GetIndexFilePaths(ctx context.Context, req *GetIndexFilePathsRequest) (*GetIndexFilePathsResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetIndexFilePaths not implemented")
+func (*UnimplementedIndexCoordServer) GetSegmentIndexState(ctx context.Context, req *GetSegmentIndexStateRequest) (*GetSegmentIndexStateResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetSegmentIndexState not implemented")
+}
+func (*UnimplementedIndexCoordServer) GetIndexInfos(ctx context.Context, req *GetIndexInfoRequest) (*GetIndexInfoResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetIndexInfos not implemented")
 }
 func (*UnimplementedIndexCoordServer) DropIndex(ctx context.Context, req *DropIndexRequest) (*commonpb.Status, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DropIndex not implemented")
 }
-func (*UnimplementedIndexCoordServer) RemoveIndex(ctx context.Context, req *RemoveIndexRequest) (*commonpb.Status, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method RemoveIndex not implemented")
+func (*UnimplementedIndexCoordServer) DescribeIndex(ctx context.Context, req *DescribeIndexRequest) (*DescribeIndexResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DescribeIndex not implemented")
+}
+func (*UnimplementedIndexCoordServer) GetIndexBuildProgress(ctx context.Context, req *GetIndexBuildProgressRequest) (*GetIndexBuildProgressResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetIndexBuildProgress not implemented")
 }
 func (*UnimplementedIndexCoordServer) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetMetrics not implemented")
@@ -1228,24 +2199,6 @@ func _IndexCoord_GetComponentStates_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
-func _IndexCoord_GetTimeTickChannel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(internalpb.GetTimeTickChannelRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(IndexCoordServer).GetTimeTickChannel(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/milvus.proto.index.IndexCoord/GetTimeTickChannel",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(IndexCoordServer).GetTimeTickChannel(ctx, req.(*internalpb.GetTimeTickChannelRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _IndexCoord_GetStatisticsChannel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(internalpb.GetStatisticsChannelRequest)
 	if err := dec(in); err != nil {
@@ -1264,56 +2217,74 @@ func _IndexCoord_GetStatisticsChannel_Handler(srv interface{}, ctx context.Conte
 	return interceptor(ctx, in, info, handler)
 }
 
-func _IndexCoord_BuildIndex_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(BuildIndexRequest)
+func _IndexCoord_CreateIndex_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateIndexRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(IndexCoordServer).BuildIndex(ctx, in)
+		return srv.(IndexCoordServer).CreateIndex(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/milvus.proto.index.IndexCoord/BuildIndex",
+		FullMethod: "/milvus.proto.index.IndexCoord/CreateIndex",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(IndexCoordServer).BuildIndex(ctx, req.(*BuildIndexRequest))
+		return srv.(IndexCoordServer).CreateIndex(ctx, req.(*CreateIndexRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _IndexCoord_GetIndexStates_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetIndexStatesRequest)
+func _IndexCoord_GetIndexState_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetIndexStateRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(IndexCoordServer).GetIndexStates(ctx, in)
+		return srv.(IndexCoordServer).GetIndexState(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/milvus.proto.index.IndexCoord/GetIndexStates",
+		FullMethod: "/milvus.proto.index.IndexCoord/GetIndexState",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(IndexCoordServer).GetIndexStates(ctx, req.(*GetIndexStatesRequest))
+		return srv.(IndexCoordServer).GetIndexState(ctx, req.(*GetIndexStateRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _IndexCoord_GetIndexFilePaths_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetIndexFilePathsRequest)
+func _IndexCoord_GetSegmentIndexState_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetSegmentIndexStateRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(IndexCoordServer).GetIndexFilePaths(ctx, in)
+		return srv.(IndexCoordServer).GetSegmentIndexState(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/milvus.proto.index.IndexCoord/GetIndexFilePaths",
+		FullMethod: "/milvus.proto.index.IndexCoord/GetSegmentIndexState",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(IndexCoordServer).GetIndexFilePaths(ctx, req.(*GetIndexFilePathsRequest))
+		return srv.(IndexCoordServer).GetSegmentIndexState(ctx, req.(*GetSegmentIndexStateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IndexCoord_GetIndexInfos_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetIndexInfoRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IndexCoordServer).GetIndexInfos(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/milvus.proto.index.IndexCoord/GetIndexInfos",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IndexCoordServer).GetIndexInfos(ctx, req.(*GetIndexInfoRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1336,20 +2307,38 @@ func _IndexCoord_DropIndex_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
-func _IndexCoord_RemoveIndex_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(RemoveIndexRequest)
+func _IndexCoord_DescribeIndex_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DescribeIndexRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(IndexCoordServer).RemoveIndex(ctx, in)
+		return srv.(IndexCoordServer).DescribeIndex(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/milvus.proto.index.IndexCoord/RemoveIndex",
+		FullMethod: "/milvus.proto.index.IndexCoord/DescribeIndex",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(IndexCoordServer).RemoveIndex(ctx, req.(*RemoveIndexRequest))
+		return srv.(IndexCoordServer).DescribeIndex(ctx, req.(*DescribeIndexRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IndexCoord_GetIndexBuildProgress_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetIndexBuildProgressRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IndexCoordServer).GetIndexBuildProgress(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/milvus.proto.index.IndexCoord/GetIndexBuildProgress",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IndexCoordServer).GetIndexBuildProgress(ctx, req.(*GetIndexBuildProgressRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1381,32 +2370,36 @@ var _IndexCoord_serviceDesc = grpc.ServiceDesc{
 			Handler:    _IndexCoord_GetComponentStates_Handler,
 		},
 		{
-			MethodName: "GetTimeTickChannel",
-			Handler:    _IndexCoord_GetTimeTickChannel_Handler,
-		},
-		{
 			MethodName: "GetStatisticsChannel",
 			Handler:    _IndexCoord_GetStatisticsChannel_Handler,
 		},
 		{
-			MethodName: "BuildIndex",
-			Handler:    _IndexCoord_BuildIndex_Handler,
+			MethodName: "CreateIndex",
+			Handler:    _IndexCoord_CreateIndex_Handler,
 		},
 		{
-			MethodName: "GetIndexStates",
-			Handler:    _IndexCoord_GetIndexStates_Handler,
+			MethodName: "GetIndexState",
+			Handler:    _IndexCoord_GetIndexState_Handler,
 		},
 		{
-			MethodName: "GetIndexFilePaths",
-			Handler:    _IndexCoord_GetIndexFilePaths_Handler,
+			MethodName: "GetSegmentIndexState",
+			Handler:    _IndexCoord_GetSegmentIndexState_Handler,
+		},
+		{
+			MethodName: "GetIndexInfos",
+			Handler:    _IndexCoord_GetIndexInfos_Handler,
 		},
 		{
 			MethodName: "DropIndex",
 			Handler:    _IndexCoord_DropIndex_Handler,
 		},
 		{
-			MethodName: "RemoveIndex",
-			Handler:    _IndexCoord_RemoveIndex_Handler,
+			MethodName: "DescribeIndex",
+			Handler:    _IndexCoord_DescribeIndex_Handler,
+		},
+		{
+			MethodName: "GetIndexBuildProgress",
+			Handler:    _IndexCoord_GetIndexBuildProgress_Handler,
 		},
 		{
 			MethodName: "GetMetrics",
@@ -1422,11 +2415,11 @@ var _IndexCoord_serviceDesc = grpc.ServiceDesc{
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://godoc.org/google.golang.org/grpc#ClientConn.NewStream.
 type IndexNodeClient interface {
 	GetComponentStates(ctx context.Context, in *internalpb.GetComponentStatesRequest, opts ...grpc.CallOption) (*internalpb.ComponentStates, error)
-	GetTimeTickChannel(ctx context.Context, in *internalpb.GetTimeTickChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error)
 	GetStatisticsChannel(ctx context.Context, in *internalpb.GetStatisticsChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error)
-	CreateIndex(ctx context.Context, in *CreateIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
-	GetTaskSlots(ctx context.Context, in *GetTaskSlotsRequest, opts ...grpc.CallOption) (*GetTaskSlotsResponse, error)
-	// https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
+	CreateJob(ctx context.Context, in *CreateJobRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	QueryJobs(ctx context.Context, in *QueryJobsRequest, opts ...grpc.CallOption) (*QueryJobsResponse, error)
+	DropJobs(ctx context.Context, in *DropJobsRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
+	GetJobNum(ctx context.Context, in *GetJobNumRequest, opts ...grpc.CallOption) (*GetJobNumResponse, error)
 	GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest, opts ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error)
 }
 
@@ -1447,15 +2440,6 @@ func (c *indexNodeClient) GetComponentStates(ctx context.Context, in *internalpb
 	return out, nil
 }
 
-func (c *indexNodeClient) GetTimeTickChannel(ctx context.Context, in *internalpb.GetTimeTickChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error) {
-	out := new(milvuspb.StringResponse)
-	err := c.cc.Invoke(ctx, "/milvus.proto.index.IndexNode/GetTimeTickChannel", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (c *indexNodeClient) GetStatisticsChannel(ctx context.Context, in *internalpb.GetStatisticsChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error) {
 	out := new(milvuspb.StringResponse)
 	err := c.cc.Invoke(ctx, "/milvus.proto.index.IndexNode/GetStatisticsChannel", in, out, opts...)
@@ -1465,18 +2449,36 @@ func (c *indexNodeClient) GetStatisticsChannel(ctx context.Context, in *internal
 	return out, nil
 }
 
-func (c *indexNodeClient) CreateIndex(ctx context.Context, in *CreateIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+func (c *indexNodeClient) CreateJob(ctx context.Context, in *CreateJobRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	out := new(commonpb.Status)
-	err := c.cc.Invoke(ctx, "/milvus.proto.index.IndexNode/CreateIndex", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/milvus.proto.index.IndexNode/CreateJob", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *indexNodeClient) GetTaskSlots(ctx context.Context, in *GetTaskSlotsRequest, opts ...grpc.CallOption) (*GetTaskSlotsResponse, error) {
-	out := new(GetTaskSlotsResponse)
-	err := c.cc.Invoke(ctx, "/milvus.proto.index.IndexNode/GetTaskSlots", in, out, opts...)
+func (c *indexNodeClient) QueryJobs(ctx context.Context, in *QueryJobsRequest, opts ...grpc.CallOption) (*QueryJobsResponse, error) {
+	out := new(QueryJobsResponse)
+	err := c.cc.Invoke(ctx, "/milvus.proto.index.IndexNode/QueryJobs", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *indexNodeClient) DropJobs(ctx context.Context, in *DropJobsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	out := new(commonpb.Status)
+	err := c.cc.Invoke(ctx, "/milvus.proto.index.IndexNode/DropJobs", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *indexNodeClient) GetJobNum(ctx context.Context, in *GetJobNumRequest, opts ...grpc.CallOption) (*GetJobNumResponse, error) {
+	out := new(GetJobNumResponse)
+	err := c.cc.Invoke(ctx, "/milvus.proto.index.IndexNode/GetJobNum", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1495,11 +2497,11 @@ func (c *indexNodeClient) GetMetrics(ctx context.Context, in *milvuspb.GetMetric
 // IndexNodeServer is the server API for IndexNode service.
 type IndexNodeServer interface {
 	GetComponentStates(context.Context, *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error)
-	GetTimeTickChannel(context.Context, *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error)
 	GetStatisticsChannel(context.Context, *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error)
-	CreateIndex(context.Context, *CreateIndexRequest) (*commonpb.Status, error)
-	GetTaskSlots(context.Context, *GetTaskSlotsRequest) (*GetTaskSlotsResponse, error)
-	// https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
+	CreateJob(context.Context, *CreateJobRequest) (*commonpb.Status, error)
+	QueryJobs(context.Context, *QueryJobsRequest) (*QueryJobsResponse, error)
+	DropJobs(context.Context, *DropJobsRequest) (*commonpb.Status, error)
+	GetJobNum(context.Context, *GetJobNumRequest) (*GetJobNumResponse, error)
 	GetMetrics(context.Context, *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 }
 
@@ -1510,17 +2512,20 @@ type UnimplementedIndexNodeServer struct {
 func (*UnimplementedIndexNodeServer) GetComponentStates(ctx context.Context, req *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetComponentStates not implemented")
 }
-func (*UnimplementedIndexNodeServer) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetTimeTickChannel not implemented")
-}
 func (*UnimplementedIndexNodeServer) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetStatisticsChannel not implemented")
 }
-func (*UnimplementedIndexNodeServer) CreateIndex(ctx context.Context, req *CreateIndexRequest) (*commonpb.Status, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method CreateIndex not implemented")
+func (*UnimplementedIndexNodeServer) CreateJob(ctx context.Context, req *CreateJobRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateJob not implemented")
 }
-func (*UnimplementedIndexNodeServer) GetTaskSlots(ctx context.Context, req *GetTaskSlotsRequest) (*GetTaskSlotsResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetTaskSlots not implemented")
+func (*UnimplementedIndexNodeServer) QueryJobs(ctx context.Context, req *QueryJobsRequest) (*QueryJobsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method QueryJobs not implemented")
+}
+func (*UnimplementedIndexNodeServer) DropJobs(ctx context.Context, req *DropJobsRequest) (*commonpb.Status, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DropJobs not implemented")
+}
+func (*UnimplementedIndexNodeServer) GetJobNum(ctx context.Context, req *GetJobNumRequest) (*GetJobNumResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetJobNum not implemented")
 }
 func (*UnimplementedIndexNodeServer) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetMetrics not implemented")
@@ -1548,24 +2553,6 @@ func _IndexNode_GetComponentStates_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
-func _IndexNode_GetTimeTickChannel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(internalpb.GetTimeTickChannelRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(IndexNodeServer).GetTimeTickChannel(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/milvus.proto.index.IndexNode/GetTimeTickChannel",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(IndexNodeServer).GetTimeTickChannel(ctx, req.(*internalpb.GetTimeTickChannelRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _IndexNode_GetStatisticsChannel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(internalpb.GetStatisticsChannelRequest)
 	if err := dec(in); err != nil {
@@ -1584,38 +2571,74 @@ func _IndexNode_GetStatisticsChannel_Handler(srv interface{}, ctx context.Contex
 	return interceptor(ctx, in, info, handler)
 }
 
-func _IndexNode_CreateIndex_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(CreateIndexRequest)
+func _IndexNode_CreateJob_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateJobRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(IndexNodeServer).CreateIndex(ctx, in)
+		return srv.(IndexNodeServer).CreateJob(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/milvus.proto.index.IndexNode/CreateIndex",
+		FullMethod: "/milvus.proto.index.IndexNode/CreateJob",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(IndexNodeServer).CreateIndex(ctx, req.(*CreateIndexRequest))
+		return srv.(IndexNodeServer).CreateJob(ctx, req.(*CreateJobRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _IndexNode_GetTaskSlots_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetTaskSlotsRequest)
+func _IndexNode_QueryJobs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(QueryJobsRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(IndexNodeServer).GetTaskSlots(ctx, in)
+		return srv.(IndexNodeServer).QueryJobs(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/milvus.proto.index.IndexNode/GetTaskSlots",
+		FullMethod: "/milvus.proto.index.IndexNode/QueryJobs",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(IndexNodeServer).GetTaskSlots(ctx, req.(*GetTaskSlotsRequest))
+		return srv.(IndexNodeServer).QueryJobs(ctx, req.(*QueryJobsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IndexNode_DropJobs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DropJobsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IndexNodeServer).DropJobs(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/milvus.proto.index.IndexNode/DropJobs",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IndexNodeServer).DropJobs(ctx, req.(*DropJobsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IndexNode_GetJobNum_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetJobNumRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IndexNodeServer).GetJobNum(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/milvus.proto.index.IndexNode/GetJobNum",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IndexNodeServer).GetJobNum(ctx, req.(*GetJobNumRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1647,20 +2670,24 @@ var _IndexNode_serviceDesc = grpc.ServiceDesc{
 			Handler:    _IndexNode_GetComponentStates_Handler,
 		},
 		{
-			MethodName: "GetTimeTickChannel",
-			Handler:    _IndexNode_GetTimeTickChannel_Handler,
-		},
-		{
 			MethodName: "GetStatisticsChannel",
 			Handler:    _IndexNode_GetStatisticsChannel_Handler,
 		},
 		{
-			MethodName: "CreateIndex",
-			Handler:    _IndexNode_CreateIndex_Handler,
+			MethodName: "CreateJob",
+			Handler:    _IndexNode_CreateJob_Handler,
 		},
 		{
-			MethodName: "GetTaskSlots",
-			Handler:    _IndexNode_GetTaskSlots_Handler,
+			MethodName: "QueryJobs",
+			Handler:    _IndexNode_QueryJobs_Handler,
+		},
+		{
+			MethodName: "DropJobs",
+			Handler:    _IndexNode_DropJobs_Handler,
+		},
+		{
+			MethodName: "GetJobNum",
+			Handler:    _IndexNode_GetJobNum_Handler,
 		},
 		{
 			MethodName: "GetMetrics",

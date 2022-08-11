@@ -167,9 +167,11 @@ func SetupLogger(cfg *log.Config) {
 	})
 }
 
-type logKey int
+type logKey struct{}
 
-const logCtxKey logKey = iota
+var (
+	logCtxKey = logKey{}
+)
 
 // WithField adds given kv field to the logger in ctx
 func WithField(ctx context.Context, key string, value string) context.Context {
@@ -179,6 +181,14 @@ func WithField(ctx context.Context, key string, value string) context.Context {
 	}
 
 	return context.WithValue(ctx, logCtxKey, logger.With(zap.String(key, value)))
+}
+
+func WithFields(ctx context.Context, fields ...zap.Field) context.Context {
+	logger := log.L()
+	if ctxLogger, ok := ctx.Value(logCtxKey).(*zap.Logger); ok {
+		logger = ctxLogger
+	}
+	return context.WithValue(ctx, logCtxKey, logger.With(fields...))
 }
 
 // WithReqID adds given reqID field to the logger in ctx
