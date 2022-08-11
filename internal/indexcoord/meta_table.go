@@ -418,11 +418,19 @@ func (mt *metaTable) CanCreateIndex(req *indexpb.CreateIndexRequest) bool {
 		return true
 	}
 	for _, index := range indexes {
+		if index.IsDeleted {
+			continue
+		}
 		if req.IndexName == index.IndexName {
 			if !mt.checkParams(index, req) {
 				return false
 			}
 			return true
+		} else {
+			if req.FieldID == index.FieldID {
+				// creating multiple indexes on same field is not supported
+				return false
+			}
 		}
 	}
 	return true
@@ -432,6 +440,11 @@ func (mt *metaTable) checkParams(fieldIndex *model.Index, req *indexpb.CreateInd
 	if fieldIndex.IsDeleted {
 		return false
 	}
+
+	if fieldIndex.IndexName != req.IndexName {
+		return false
+	}
+
 	if fieldIndex.FieldID != req.FieldID {
 		return false
 	}
@@ -482,51 +495,7 @@ func (mt *metaTable) HasSameReq(req *indexpb.CreateIndexRequest) (bool, UniqueID
 	defer mt.indexLock.RUnlock()
 
 	for _, fieldIndex := range mt.collectionIndexes[req.CollectionID] {
-		if fieldIndex.IsDeleted {
-			continue
-		}
-		if fieldIndex.FieldID != req.FieldID {
-			continue
-		}
-		if fieldIndex.IndexName != req.IndexName {
-			continue
-		}
-
-		if len(fieldIndex.TypeParams) != len(req.TypeParams) {
-			continue
-		}
-		notEq := false
-		for _, param1 := range fieldIndex.TypeParams {
-			exist := false
-			for _, param2 := range req.TypeParams {
-				if param2.Key == param1.Key && param2.Value == param1.Value {
-					exist = true
-				}
-			}
-			if !exist {
-				notEq = true
-				break
-			}
-		}
-		if notEq {
-			continue
-		}
-		if len(fieldIndex.IndexParams) != len(req.IndexParams) {
-			continue
-		}
-		for _, param1 := range fieldIndex.IndexParams {
-			exist := false
-			for _, param2 := range req.IndexParams {
-				if param2.Key == param1.Key && param2.Value == param1.Value {
-					exist = true
-				}
-			}
-			if !exist {
-				notEq = true
-				break
-			}
-		}
-		if notEq {
+		if !mt.checkParams(fieldIndex, req) {
 			continue
 		}
 		log.Debug("IndexCoord has same index", zap.Int64("collectionID", req.CollectionID),
