@@ -395,7 +395,7 @@ func (qc *QueryCoord) allocateNode(nodeID int64) error {
 	}
 	for _, p := range plans {
 		if err := qc.meta.applyReplicaBalancePlan(p); err != nil {
-			log.Warn("failed to apply balance plan", zap.Error(err), zap.Any("plan", p))
+			return err
 		}
 	}
 	return nil
@@ -430,8 +430,15 @@ func (qc *QueryCoord) handleNodeEvent(ctx context.Context) {
 					continue
 				}
 				go func(serverID int64) {
-					if err := qc.allocateNode(serverID); err != nil {
-						log.Error("unable to allcoate node", zap.Int64("nodeID", serverID), zap.Error(err))
+					for {
+						// retry forever, or crash.
+						// we should apply replica asyncly
+						err := qc.allocateNode(serverID)
+						if err != nil {
+							log.Error("unable to allocate node", zap.Int64("nodeID", serverID), zap.Error(err))
+							continue
+						}
+						break
 					}
 				}(serverID)
 				qc.metricsCacheManager.InvalidateSystemInfoMetrics()
