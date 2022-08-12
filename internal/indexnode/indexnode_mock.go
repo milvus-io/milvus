@@ -49,7 +49,8 @@ type Mock struct {
 	CallDropJobs  func(ctx context.Context, in *indexpb.DropJobsRequest) (*commonpb.Status, error)
 	CallGetJobNum func(ctx context.Context, in *indexpb.GetJobNumRequest) (*indexpb.GetJobNumResponse, error)
 
-	CallGetMetrics func(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
+	CallGetMetrics         func(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
+	CallShowConfigurations func(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error)
 }
 
 func NewIndexNodeMock() *Mock {
@@ -179,6 +180,11 @@ func (m *Mock) GetJobNum(ctx context.Context, req *indexpb.GetJobNumRequest) (*i
 
 func (m *Mock) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return m.CallGetMetrics(ctx, req)
+}
+
+//ShowConfigurations returns the configurations of Mock indexNode matching req.Pattern
+func (m *Mock) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+	return m.CallShowConfigurations(ctx, req)
 }
 
 func getMockSystemInfoMetrics(

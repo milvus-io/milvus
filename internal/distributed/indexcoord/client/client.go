@@ -242,6 +242,21 @@ func (c *Client) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (
 	return ret.(*commonpb.Status), err
 }
 
+// ShowConfigurations gets specified configurations para of IndexCoord
+func (c *Client) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.(indexpb.IndexCoordClient).ShowConfigurations(ctx, req)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+
+	return ret.(*internalpb.ShowConfigurationsResponse), err
+}
+
 // GetMetrics gets the metrics info of IndexCoord.
 func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {

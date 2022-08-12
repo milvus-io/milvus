@@ -287,6 +287,34 @@ func TestDataNode(t *testing.T) {
 			zap.String("response", resp.Response))
 	})
 
+	t.Run("Test ShowConfigurations", func(t *testing.T) {
+		pattern := "Port"
+		req := &internalpb.ShowConfigurationsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_WatchQueryChannels,
+				MsgID:   rand.Int63(),
+			},
+			Pattern: pattern,
+		}
+
+		//test closed server
+		node := &DataNode{}
+		node.session = &sessionutil.Session{ServerID: 1}
+		node.State.Store(internalpb.StateCode_Abnormal)
+
+		resp, err := node.ShowConfigurations(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+		node.State.Store(internalpb.StateCode_Healthy)
+
+		resp, err = node.ShowConfigurations(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+
+		assert.Equal(t, 1, len(resp.Configuations))
+		assert.Equal(t, "datanode.port", resp.Configuations[0].Key)
+	})
+
 	t.Run("Test GetMetrics", func(t *testing.T) {
 		node := &DataNode{}
 		node.session = &sessionutil.Session{ServerID: 1}

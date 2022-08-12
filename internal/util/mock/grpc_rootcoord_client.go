@@ -179,6 +179,10 @@ func (m *GrpcRootCoordClient) SegmentFlushCompleted(ctx context.Context, in *dat
 	return &commonpb.Status{}, m.Err
 }
 
+func (m *GrpcRootCoordClient) ShowConfigurations(ctx context.Context, in *internalpb.ShowConfigurationsRequest, opts ...grpc.CallOption) (*internalpb.ShowConfigurationsResponse, error) {
+	return &internalpb.ShowConfigurationsResponse{}, m.Err
+}
+
 func (m *GrpcRootCoordClient) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest, opts ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error) {
 	return &milvuspb.GetMetricsResponse{}, m.Err
 }

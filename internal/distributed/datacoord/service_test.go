@@ -48,6 +48,7 @@ type MockDataCoord struct {
 	partStatResp         *datapb.GetPartitionStatisticsResponse
 	recoverResp          *datapb.GetRecoveryInfoResponse
 	flushSegResp         *datapb.GetFlushedSegmentsResponse
+	configResp           *internalpb.ShowConfigurationsResponse
 	metricResp           *milvuspb.GetMetricsResponse
 	compactionStateResp  *milvuspb.GetCompactionStateResponse
 	manualCompactionResp *milvuspb.ManualCompactionResponse
@@ -136,6 +137,10 @@ func (m *MockDataCoord) GetRecoveryInfo(ctx context.Context, req *datapb.GetReco
 
 func (m *MockDataCoord) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error) {
 	return m.flushSegResp, m.err
+}
+
+func (m *MockDataCoord) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+	return m.configResp, m.err
 }
 
 func (m *MockDataCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
@@ -328,6 +333,15 @@ func Test_NewServer(t *testing.T) {
 			flushSegResp: &datapb.GetFlushedSegmentsResponse{},
 		}
 		resp, err := server.GetFlushedSegments(ctx, nil)
+		assert.Nil(t, err)
+		assert.NotNil(t, resp)
+	})
+
+	t.Run("ShowConfigurations", func(t *testing.T) {
+		server.dataCoord = &MockDataCoord{
+			configResp: &internalpb.ShowConfigurationsResponse{},
+		}
+		resp, err := server.ShowConfigurations(ctx, nil)
 		assert.Nil(t, err)
 		assert.NotNil(t, resp)
 	})

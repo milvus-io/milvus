@@ -381,3 +381,83 @@ func (i *IndexNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringR
 func (i *IndexNode) GetNodeID() int64 {
 	return Params.IndexNodeCfg.GetNodeID()
 }
+
+//ShowConfigurations returns the configurations of indexNode matching req.Pattern
+func (i *IndexNode) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+	if !i.isHealthy() {
+		log.Warn("IndexNode.ShowConfigurations failed",
+			zap.Int64("nodeId", Params.IndexNodeCfg.GetNodeID()),
+			zap.String("req", req.Pattern),
+			zap.Error(errIndexNodeIsUnhealthy(Params.IndexNodeCfg.GetNodeID())))
+
+		return &internalpb.ShowConfigurationsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    msgIndexNodeIsUnhealthy(Params.IndexNodeCfg.GetNodeID()),
+			},
+			Configuations: nil,
+		}, nil
+	}
+
+	return getComponentConfigurations(ctx, req), nil
+}
+
+//// GetMetrics gets the metrics info of IndexNode.
+//// TODO(dragondriver): cache the Metrics and set a retention to the cache
+//func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+//	if !i.isHealthy() {
+//		log.Warn("IndexNode.GetMetrics failed",
+//			zap.Int64("node_id", Params.IndexNodeCfg.GetNodeID()),
+//			zap.String("req", req.Request),
+//			zap.Error(errIndexNodeIsUnhealthy(Params.IndexNodeCfg.GetNodeID())))
+//
+//		return &milvuspb.GetMetricsResponse{
+//			Status: &commonpb.Status{
+//				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+//				Reason:    msgIndexNodeIsUnhealthy(Params.IndexNodeCfg.GetNodeID()),
+//			},
+//			Response: "",
+//		}, nil
+//	}
+//
+//	metricType, err := metricsinfo.ParseMetricType(req.Request)
+//	if err != nil {
+//		log.Warn("IndexNode.GetMetrics failed to parse metric type",
+//			zap.Int64("node_id", Params.IndexNodeCfg.GetNodeID()),
+//			zap.String("req", req.Request),
+//			zap.Error(err))
+//
+//		return &milvuspb.GetMetricsResponse{
+//			Status: &commonpb.Status{
+//				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+//				Reason:    err.Error(),
+//			},
+//			Response: "",
+//		}, nil
+//	}
+//
+//	if metricType == metricsinfo.SystemInfoMetrics {
+//		metrics, err := getSystemInfoMetrics(ctx, req, i)
+//
+//		log.Debug("IndexNode.GetMetrics",
+//			zap.Int64("node_id", Params.IndexNodeCfg.GetNodeID()),
+//			zap.String("req", req.Request),
+//			zap.String("metric_type", metricType),
+//			zap.Error(err))
+//
+//		return metrics, nil
+//	}
+//
+//	log.Warn("IndexNode.GetMetrics failed, request metric type is not implemented yet",
+//		zap.Int64("node_id", Params.IndexNodeCfg.GetNodeID()),
+//		zap.String("req", req.Request),
+//		zap.String("metric_type", metricType))
+//
+//	return &milvuspb.GetMetricsResponse{
+//		Status: &commonpb.Status{
+//			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+//			Reason:    metricsinfo.MsgUnimplementedMetric,
+//		},
+//		Response: "",
+//	}, nil
+//}

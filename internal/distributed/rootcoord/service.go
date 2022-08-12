@@ -442,6 +442,11 @@ func (s *Server) InvalidateCollectionMetaCache(ctx context.Context, in *proxypb.
 //	return s.rootCoord.SegmentFlushCompleted(ctx, in)
 //}
 
+// ShowConfigurations gets specified configurations para of RootCoord
+func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+	return s.rootCoord.ShowConfigurations(ctx, req)
+}
+
 // GetMetrics gets the metrics of RootCoord.
 func (s *Server) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return s.rootCoord.GetMetrics(ctx, in)

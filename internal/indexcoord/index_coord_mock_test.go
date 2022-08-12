@@ -16,6 +16,20 @@
 
 package indexcoord
 
+//import (
+//	"context"
+//	"testing"
+//
+//	"github.com/milvus-io/milvus/internal/proto/datapb"
+//
+//	"github.com/milvus-io/milvus/internal/proto/commonpb"
+//	"github.com/milvus-io/milvus/internal/proto/indexpb"
+//	"github.com/milvus-io/milvus/internal/proto/internalpb"
+//	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+//	"github.com/milvus-io/milvus/internal/util/etcd"
+//	"github.com/stretchr/testify/assert"
+//)
+//
 //func TestIndexCoordMock(t *testing.T) {
 //	Params.Init()
 //	icm := Mock{}
@@ -91,6 +105,15 @@ package indexcoord
 //		assert.Nil(t, err)
 //		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 //		assert.Equal(t, len(req.IndexBuildIDs), len(resp.FilePaths))
+//	})
+//
+//	t.Run("ShowConfigurations", func(t *testing.T) {
+//		req := &internalpb.ShowConfigurationsRequest{
+//			Pattern: "",
+//		}
+//		resp, err := icm.ShowConfigurations(ctx, req)
+//		assert.Nil(t, err)
+//		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 //	})
 //
 //	t.Run("GetMetrics", func(t *testing.T) {

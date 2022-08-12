@@ -338,9 +338,9 @@ func TestImpl_ShowConfigurations(t *testing.T) {
 			Pattern: pattern,
 		}
 
-		reqs, err := node.ShowConfigurations(ctx, req)
+		resp, err := node.ShowConfigurations(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, reqs.Status.ErrorCode, commonpb.ErrorCode_Success)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
 	t.Run("test ShowConfigurations node failed", func(t *testing.T) {

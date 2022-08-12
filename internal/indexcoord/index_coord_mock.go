@@ -56,6 +56,7 @@ type Mock struct {
 	CallDescribeIndex         func(ctx context.Context, req *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error)
 	CallGetIndexBuildProgress func(ctx context.Context, req *indexpb.GetIndexBuildProgressRequest) (*indexpb.GetIndexBuildProgressResponse, error)
 	CallDropIndex             func(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error)
+	CallShowConfigurations    func(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error)
 	CallGetMetrics            func(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 }
 
@@ -127,6 +128,10 @@ func (m *Mock) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetIndexB
 
 func (m *Mock) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
 	return m.CallDropIndex(ctx, req)
+}
+
+func (m *Mock) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+	return m.CallShowConfigurations(ctx, req)
 }
 
 func (m *Mock) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
@@ -247,6 +252,13 @@ func NewIndexCoordMock() *Mock {
 		CallDropIndex: func(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
 			return &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_Success,
+			}, nil
+		},
+		CallShowConfigurations: func(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+			return &internalpb.ShowConfigurationsResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+				},
 			}, nil
 		},
 		CallGetMetrics: func(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {

@@ -18,6 +18,7 @@ package indexcoord
 
 import (
 	"context"
+	"math/rand"
 	"testing"
 	"time"
 
@@ -194,6 +195,22 @@ func TestIndexCoord(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(resp.IndexInfos))
 	})
+	t.Run("Showconfigurations, port", func(t *testing.T) {
+		pattern := "Port"
+		req := &internalpb.ShowConfigurationsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_WatchQueryChannels,
+				MsgID:   rand.Int63(),
+			},
+			Pattern: pattern,
+		}
+
+		resp, err := ic.ShowConfigurations(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, 1, len(resp.Configuations))
+		assert.Equal(t, "indexcoord.port", resp.Configuations[0].Key)
+	})
 
 	t.Run("GetIndexBuildProgress", func(t *testing.T) {
 		req := &indexpb.GetIndexBuildProgressRequest{
@@ -329,6 +346,21 @@ func TestIndexCoord_UnHealthy(t *testing.T) {
 		resp, err := ic.DropIndex(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.ErrorCode)
+	})
+
+	t.Run("ShowConfigurations when indexcoord is not healthy", func(t *testing.T) {
+		pattern := ""
+		req := &internalpb.ShowConfigurationsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_WatchQueryChannels,
+				MsgID:   rand.Int63(),
+			},
+			Pattern: pattern,
+		}
+
+		resp, err := ic.ShowConfigurations(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
 	})
 
 	t.Run("GetMetrics", func(t *testing.T) {

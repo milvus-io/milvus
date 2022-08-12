@@ -318,6 +318,19 @@ func TestGrpcService(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, rsp.ErrorCode)
 	})
 
+	t.Run("show configurations", func(t *testing.T) {
+		req := &internalpb.ShowConfigurationsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_WatchQueryChannels,
+				MsgID:   rand.Int63(),
+			},
+			Pattern: "",
+		}
+		rsp, err := svr.ShowConfigurations(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, rsp.Status.ErrorCode)
+	})
+
 	t.Run("get metrics", func(t *testing.T) {
 		req := &milvuspb.GetMetricsRequest{}
 		rsp, err := svr.GetMetrics(ctx, req)

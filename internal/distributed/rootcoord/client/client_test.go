@@ -232,6 +232,10 @@ func Test_NewClient(t *testing.T) {
 			r, err := client.ListPolicy(ctx, nil)
 			retCheck(retNotNil, r, err)
 		}
+		{
+			r, err := client.ShowConfigurations(ctx, nil)
+			retCheck(retNotNil, r, err)
+		}
 	}
 
 	client.grpcClient = &mock.GRPCClientBase{

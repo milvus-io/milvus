@@ -381,6 +381,11 @@ func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceReques
 	return s.queryCoord.LoadBalance(ctx, req)
 }
 
+// ShowConfigurations gets specified configurations para of QueryCoord
+func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+	return s.queryCoord.ShowConfigurations(ctx, req)
+}
+
 // GetMetrics gets the metrics information of QueryCoord.
 func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return s.queryCoord.GetMetrics(ctx, req)

@@ -345,6 +345,11 @@ func (s *Server) FlushSegments(ctx context.Context, req *datapb.FlushSegmentsReq
 	return s.datanode.FlushSegments(ctx, req)
 }
 
+// ShowConfigurations gets specified configurations para of DataNode
+func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+	return s.datanode.ShowConfigurations(ctx, req)
+}
+
 // GetMetrics gets the metrics info of Datanode.
 func (s *Server) GetMetrics(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return s.datanode.GetMetrics(ctx, request)

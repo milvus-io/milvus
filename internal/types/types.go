@@ -64,6 +64,8 @@ type DataNode interface {
 	//     Log an info log if a segment is under flushing
 	FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest) (*commonpb.Status, error)
 
+	// ShowConfigurations gets specified configurations para of DataNode
+	ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error)
 	// GetMetrics gets the metrics about DataNode.
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 	// Compaction will add a compaction task according to the request plan
@@ -243,6 +245,8 @@ type DataCoord interface {
 	// error is returned only when some communication issue occurs
 	GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error)
 
+	// ShowConfigurations gets specified configurations para of DataCoord
+	ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error)
 	// GetMetrics gets the metrics about DataCoord.
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 	// CompleteCompaction completes a compaction with the result
@@ -325,6 +329,8 @@ type IndexNode interface {
 	DropJobs(context.Context, *indexpb.DropJobsRequest) (*commonpb.Status, error)
 	// GetJobNum returns metrics of indexnode, including available job queue info, available task slots and finished job infos.
 	GetJobNum(context.Context, *indexpb.GetJobNumRequest) (*indexpb.GetJobNumResponse, error)
+
+	ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error)
 	// GetMetrics gets the metrics about IndexNode.
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 }
@@ -371,6 +377,15 @@ type IndexCoord interface {
 	// divided into many segments, and each segment corresponds to an IndexBuildID. IndexCoord uses IndexBuildID to record
 	// index tasks. Therefore, when DropIndex is called, delete all tasks corresponding to IndexBuildID corresponding to IndexID.
 	DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error)
+
+	//// GetIndexStates gets the index states of the IndexBuildIDs in the request from RootCoordinator.
+	//GetIndexStates(ctx context.Context, req *indexpb.GetIndexStatesRequest) (*indexpb.GetIndexStatesResponse, error)
+	//
+	//// GetIndexFilePaths gets the index files of the IndexBuildIDs in the request from RootCoordinator.
+	//GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error)
+
+	// ShowConfigurations gets specified configurations para of IndexCoord
+	ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error)
 
 	// GetMetrics gets the metrics about IndexCoord.
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
@@ -654,6 +669,8 @@ type RootCoord interface {
 	// to build index for this segment.
 	//SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlushCompletedMsg) (*commonpb.Status, error)
 
+	// ShowConfigurations gets specified configurations para of RootCoord
+	ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error)
 	// GetMetrics notifies RootCoord to collect metrics for specified component
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 
@@ -1293,6 +1310,7 @@ type QueryCoord interface {
 	GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error)
 	LoadBalance(ctx context.Context, req *querypb.LoadBalanceRequest) (*commonpb.Status, error)
 
+	ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error)
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 
 	GetReplicas(ctx context.Context, req *milvuspb.GetReplicasRequest) (*milvuspb.GetReplicasResponse, error)

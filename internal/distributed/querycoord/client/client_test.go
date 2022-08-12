@@ -110,6 +110,9 @@ func Test_NewClient(t *testing.T) {
 
 		r18, err := client.GetShardLeaders(ctx, nil)
 		retCheck(retNotNil, r18, err)
+
+		r19, err := client.ShowConfigurations(ctx, nil)
+		retCheck(retNotNil, r19, err)
 	}
 
 	client.grpcClient = &mock.GRPCClientBase{

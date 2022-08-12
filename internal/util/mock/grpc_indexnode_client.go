@@ -49,6 +49,10 @@ func (m *GrpcIndexNodeClient) CreateIndex(ctx context.Context, in *indexpb.Creat
 	return &commonpb.Status{}, m.Err
 }
 
+func (m *GrpcIndexNodeClient) ShowConfigurations(ctx context.Context, in *internalpb.ShowConfigurationsRequest, opts ...grpc.CallOption) (*internalpb.ShowConfigurationsResponse, error) {
+	return &internalpb.ShowConfigurationsResponse{}, m.Err
+}
+
 func (m *GrpcIndexNodeClient) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest, opts ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error) {
 	return &milvuspb.GetMetricsResponse{}, m.Err
 }
