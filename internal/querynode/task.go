@@ -170,8 +170,12 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 	for _, info := range w.req.Infos {
 		for _, ufInfoID := range info.GetUnflushedSegmentIds() {
 			// unFlushed segment may not have binLogs, skip loading
-			ufInfo := w.req.SegmentInfos[ufInfoID]
-			if len(ufInfo.Binlogs) > 0 {
+			ufInfo := w.req.GetSegmentInfos()[ufInfoID]
+			if ufInfo == nil {
+				log.Warn("an unflushed segment is not found in segment infos",
+					zap.Int64("segment ID", ufInfoID))
+			}
+			if len(ufInfo.GetBinlogs()) > 0 {
 				unFlushedSegments = append(unFlushedSegments, &queryPb.SegmentLoadInfo{
 					SegmentID:     ufInfo.ID,
 					PartitionID:   ufInfo.PartitionID,
@@ -182,7 +186,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 					Deltalogs:     ufInfo.Deltalogs,
 					InsertChannel: ufInfo.InsertChannel,
 				})
-				unFlushedSegmentIDs = append(unFlushedSegmentIDs, ufInfo.ID)
+				unFlushedSegmentIDs = append(unFlushedSegmentIDs, ufInfo.GetID())
 			}
 		}
 	}
