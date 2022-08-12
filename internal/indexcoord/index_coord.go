@@ -654,6 +654,7 @@ func (i *IndexCoord) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInf
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
+		SegmentInfo: map[int64]*indexpb.SegmentInfo{},
 	}
 
 	for _, segID := range req.SegmentIDs {
