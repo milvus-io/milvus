@@ -39,7 +39,8 @@ type IndexCoordMock struct {
 
 	state atomic.Value // internal.StateCode
 
-	getMetricsFunc getMetricsFuncType
+	showConfigurationsFunc showConfigurationsFuncType
+	getMetricsFunc         getMetricsFuncType
 
 	statisticsChannel string
 	timeTickChannel   string
@@ -157,6 +158,28 @@ func (coord *IndexCoordMock) GetIndexFilePaths(ctx context.Context, req *indexpb
 			Reason:    "",
 		},
 		FilePaths: nil,
+	}, nil
+}
+
+func (coord *IndexCoordMock) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+	if !coord.healthy() {
+		return &internalpb.ShowConfigurationsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "unhealthy",
+			},
+		}, nil
+	}
+
+	if coord.showConfigurationsFunc != nil {
+		return coord.showConfigurationsFunc(ctx, req)
+	}
+
+	return &internalpb.ShowConfigurationsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "not implemented",
+		},
 	}, nil
 }
 

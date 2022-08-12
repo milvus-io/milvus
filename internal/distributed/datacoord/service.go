@@ -286,6 +286,11 @@ func (s *Server) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedS
 	return s.dataCoord.GetFlushedSegments(ctx, req)
 }
 
+// ShowConfigurations gets specified configurations para of DataCoord
+func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+	return s.dataCoord.ShowConfigurations(ctx, req)
+}
+
 // GetMetrics gets metrics of data coordinator and datanodes
 func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return s.dataCoord.GetMetrics(ctx, req)

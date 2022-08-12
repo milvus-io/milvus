@@ -268,6 +268,29 @@ func (inm *Mock) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 	}, nil
 }
 
+//ShowConfigurations returns the configurations of Mock indexNode matching req.Pattern
+func (inm *Mock) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+	if inm.Err {
+		return &internalpb.ShowConfigurationsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			},
+			Configuations: nil,
+		}, errors.New("IndexNode Configurations failed")
+	}
+
+	if inm.Failure {
+		return &internalpb.ShowConfigurationsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			},
+			Configuations: nil,
+		}, errors.New("IndexNode Configurations failed")
+	}
+
+	return getComponentConfigurations(ctx, req), nil
+}
+
 // GetMetrics gets the metrics of mocked IndexNode, if the internal member `Failure` is true, it will return an error.
 func (inm *Mock) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	if inm.Err {

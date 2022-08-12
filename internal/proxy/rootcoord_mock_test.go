@@ -100,6 +100,7 @@ type RootCoordMock struct {
 
 	describeCollectionFunc describeCollectionFuncType
 	showPartitionsFunc     showPartitionsFuncType
+	showConfigurationsFunc showConfigurationsFuncType
 	getMetricsFunc         getMetricsFuncType
 
 	// TODO(dragondriver): index-related
@@ -939,6 +940,28 @@ func (coord *RootCoordMock) SegmentFlushCompleted(ctx context.Context, in *datap
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
+	}, nil
+}
+
+func (coord *RootCoordMock) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+	if !coord.healthy() {
+		return &internalpb.ShowConfigurationsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "unhealthy",
+			},
+		}, nil
+	}
+
+	if coord.getMetricsFunc != nil {
+		return coord.showConfigurationsFunc(ctx, req)
+	}
+
+	return &internalpb.ShowConfigurationsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "not implemented",
+		},
 	}, nil
 }
 

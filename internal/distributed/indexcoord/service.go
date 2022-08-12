@@ -236,6 +236,11 @@ func (s *Server) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFil
 	return s.indexcoord.GetIndexFilePaths(ctx, req)
 }
 
+// ShowConfigurations gets specified configurations para of IndexCoord
+func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+	return s.indexcoord.ShowConfigurations(ctx, req)
+}
+
 // GetMetrics gets the metrics info of IndexCoord.
 func (s *Server) GetMetrics(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return s.indexcoord.GetMetrics(ctx, request)

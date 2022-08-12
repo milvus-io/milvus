@@ -22,6 +22,7 @@ package indexnode
 import (
 	"container/list"
 	"context"
+	"math/rand"
 	"path"
 	"strconv"
 	"testing"
@@ -450,6 +451,23 @@ func TestIndexNode(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
+	t.Run("ShowConfigurations", func(t *testing.T) {
+		pattern := "Port"
+		req := &internalpb.ShowConfigurationsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_WatchQueryChannels,
+				MsgID:   rand.Int63(),
+			},
+			Pattern: pattern,
+		}
+
+		resp, err := in.ShowConfigurations(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, 1, len(resp.Configuations))
+		assert.Equal(t, "indexnode.port", resp.Configuations[0].Key)
+	})
+
 	t.Run("GetMetrics_system_info", func(t *testing.T) {
 		req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
 		assert.Nil(t, err)
@@ -780,6 +798,12 @@ func TestIndexNode_Error(t *testing.T) {
 		status, err := in.CreateIndex(ctx, &indexpb.CreateIndexRequest{})
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+	})
+
+	t.Run("ShowConfigurations", func(t *testing.T) {
+		resp, err := in.ShowConfigurations(ctx, &internalpb.ShowConfigurationsRequest{Pattern: ""})
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
 	})
 
 	t.Run("GetMetrics", func(t *testing.T) {

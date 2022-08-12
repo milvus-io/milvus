@@ -46,6 +46,7 @@ type MockQueryCoord struct {
 	showpartResp     *querypb.ShowPartitionsResponse
 	partResp         *querypb.GetPartitionStatesResponse
 	infoResp         *querypb.GetSegmentInfoResponse
+	configResp       *internalpb.ShowConfigurationsResponse
 	metricResp       *milvuspb.GetMetricsResponse
 	replicasResp     *milvuspb.GetReplicasResponse
 	shardLeadersResp *querypb.GetShardLeadersResponse
@@ -133,6 +134,10 @@ func (m *MockQueryCoord) GetSegmentInfo(ctx context.Context, req *querypb.GetSeg
 
 func (m *MockQueryCoord) LoadBalance(ctx context.Context, req *querypb.LoadBalanceRequest) (*commonpb.Status, error) {
 	return m.status, m.err
+}
+
+func (m *MockQueryCoord) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+	return m.configResp, m.err
 }
 
 func (m *MockQueryCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
@@ -265,6 +270,7 @@ func Test_NewServer(t *testing.T) {
 		showpartResp: &querypb.ShowPartitionsResponse{},
 		partResp:     &querypb.GetPartitionStatesResponse{},
 		infoResp:     &querypb.GetSegmentInfoResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}},
+		configResp:   &internalpb.ShowConfigurationsResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}},
 		metricResp:   &milvuspb.GetMetricsResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}},
 	}
 

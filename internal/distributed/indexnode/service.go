@@ -241,6 +241,11 @@ func (s *Server) GetTaskSlots(ctx context.Context, req *indexpb.GetTaskSlotsRequ
 	return s.indexnode.GetTaskSlots(ctx, req)
 }
 
+// ShowConfigurations gets specified configurations para of IndexNode
+func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+	return s.indexnode.ShowConfigurations(ctx, req)
+}
+
 // GetMetrics gets the metrics info of IndexNode.
 func (s *Server) GetMetrics(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return s.indexnode.GetMetrics(ctx, request)

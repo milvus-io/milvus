@@ -45,6 +45,7 @@ type MockDataNode struct {
 	stopErr    error
 	regErr     error
 	strResp    *milvuspb.StringResponse
+	configResp *internalpb.ShowConfigurationsResponse
 	metricResp *milvuspb.GetMetricsResponse
 	resendResp *datapb.ResendSegmentStatsResponse
 }
@@ -99,6 +100,10 @@ func (m *MockDataNode) WatchDmChannels(ctx context.Context, req *datapb.WatchDmC
 
 func (m *MockDataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest) (*commonpb.Status, error) {
 	return m.status, m.err
+}
+
+func (m *MockDataNode) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+	return m.configResp, m.err
 }
 
 func (m *MockDataNode) GetMetrics(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
@@ -239,6 +244,15 @@ func Test_NewServer(t *testing.T) {
 		states, err := server.FlushSegments(ctx, nil)
 		assert.NotNil(t, err)
 		assert.NotNil(t, states)
+	})
+
+	t.Run("ShowConfigurations", func(t *testing.T) {
+		server.datanode = &MockDataNode{
+			configResp: &internalpb.ShowConfigurationsResponse{},
+		}
+		resp, err := server.ShowConfigurations(ctx, nil)
+		assert.Nil(t, err)
+		assert.NotNil(t, resp)
 	})
 
 	t.Run("GetMetrics", func(t *testing.T) {

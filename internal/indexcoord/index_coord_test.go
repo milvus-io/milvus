@@ -222,6 +222,23 @@ func TestIndexCoord(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
+	t.Run("Showconfigurations, port", func(t *testing.T) {
+		pattern := "Port"
+		req := &internalpb.ShowConfigurationsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_WatchQueryChannels,
+				MsgID:   rand.Int63(),
+			},
+			Pattern: pattern,
+		}
+
+		resp, err := ic.ShowConfigurations(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, 1, len(resp.Configuations))
+		assert.Equal(t, "indexcoord.port", resp.Configuations[0].Key)
+	})
+
 	t.Run("GetMetrics, system info", func(t *testing.T) {
 		req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
 		assert.Nil(t, err)
@@ -242,6 +259,22 @@ func TestIndexCoord(t *testing.T) {
 		resp, err := ic.GetStatisticsChannel(ctx)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("ShowConfigurations when indexcoord is not healthy", func(t *testing.T) {
+		ic.UpdateStateCode(internalpb.StateCode_Abnormal)
+		pattern := ""
+		req := &internalpb.ShowConfigurationsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_WatchQueryChannels,
+				MsgID:   rand.Int63(),
+			},
+			Pattern: pattern,
+		}
+
+		resp, err := ic.ShowConfigurations(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
 	})
 
 	t.Run("GetMetrics when indexcoord is not healthy", func(t *testing.T) {
