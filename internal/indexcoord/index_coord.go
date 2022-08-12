@@ -647,46 +647,43 @@ func (i *IndexCoord) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInf
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    msgIndexCoordIsUnhealthy(i.serverID),
 			},
-			FilePaths: nil,
+			SegmentInfo: nil,
 		}, nil
 	}
-
-	indexID2CreateTs := i.metaTable.GetIndexIDByName(req.CollectionID, req.IndexName)
-	if len(indexID2CreateTs) == 0 {
-		log.Warn("there is no index", zap.Int64("collectionID", req.CollectionID),
-			zap.String("indexName", req.IndexName))
-		return &indexpb.GetIndexInfoResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
-			EnableIndex: false,
-			FilePaths:   nil,
-		}, nil
-	}
-	var indexPaths []*indexpb.IndexFilePathInfo
-	for _, segID := range req.SegmentIDs {
-		for indexID := range indexID2CreateTs {
-			indexPathInfo, err := i.metaTable.GetIndexFilePathInfo(segID, indexID)
-			if err != nil {
-				log.Debug("IndexCoord GetIndexFilePaths fail", zap.Int64("segmentID", segID), zap.Error(err))
-				continue
-			}
-			indexPathInfo.FieldID = i.metaTable.GetFieldIDByIndexID(req.CollectionID, indexID)
-			indexPathInfo.IndexName = i.metaTable.GetIndexNameByID(req.CollectionID, indexID)
-			indexPathInfo.IndexParams = i.metaTable.GetIndexParams(req.CollectionID, indexID)
-			indexPaths = append(indexPaths, indexPathInfo)
-		}
-	}
-
 	ret := &indexpb.GetIndexInfoResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
-		EnableIndex: true,
-		FilePaths:   indexPaths,
 	}
+
+	for _, segID := range req.SegmentIDs {
+		segIdxes := i.metaTable.GetSegmentIndexes(segID)
+		ret.SegmentInfo[segID] = &indexpb.SegmentInfo{
+			CollectionID: req.CollectionID,
+			SegmentID:    segID,
+			EnableIndex:  false,
+			IndexInfos:   make([]*indexpb.IndexFilePathInfo, 0),
+		}
+		if len(segIdxes) != 0 {
+			ret.SegmentInfo[segID].EnableIndex = true
+			for _, segIdx := range segIdxes {
+				ret.SegmentInfo[segID].IndexInfos = append(ret.SegmentInfo[segID].IndexInfos,
+					&indexpb.IndexFilePathInfo{
+						SegmentID:      segID,
+						FieldID:        i.metaTable.GetFieldIDByIndexID(segIdx.CollectionID, segIdx.IndexID),
+						IndexID:        segIdx.IndexID,
+						BuildID:        segIdx.BuildID,
+						IndexName:      i.metaTable.GetIndexNameByID(segIdx.CollectionID, segIdx.IndexID),
+						IndexParams:    i.metaTable.GetIndexParams(segIdx.CollectionID, segIdx.IndexID),
+						IndexFilePaths: segIdx.IndexFilePaths,
+						SerializedSize: segIdx.IndexSize,
+					})
+			}
+		}
+	}
+
 	log.Info("IndexCoord GetIndexFilePaths ", zap.Int("segIDs num", len(req.SegmentIDs)),
-		zap.Int("file path num", len(ret.FilePaths)))
+		zap.Int("file path num", len(ret.SegmentInfo)))
 
 	return ret, nil
 }

@@ -139,10 +139,16 @@ message IndexFilePathInfo {
   uint64 serialized_size = 8;
 }
 
+message SegmentInfo {
+  int64 collectionID = 1;
+  int64 segmentID = 2;
+  bool enable_index = 3;
+  repeated IndexFilePathInfo index_infos = 4;
+}
+
 message GetIndexInfoResponse {
   common.Status status = 1;
-  bool enable_index = 2;
-  repeated IndexFilePathInfo file_paths = 3;
+  map<int64, SegmentInfo> segment_info = 2;
 }
 
 message DropIndexRequest {

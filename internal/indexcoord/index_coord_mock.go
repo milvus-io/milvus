@@ -219,8 +219,6 @@ func NewIndexCoordMock() *Mock {
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_Success,
 				},
-				EnableIndex: true,
-				FilePaths:   filePaths,
 			}, nil
 		},
 		CallDescribeIndex: func(ctx context.Context, req *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error) {

@@ -619,6 +619,19 @@ func (mt *metaTable) GetIndexStates(indexID int64, createTs uint64) []*IndexStat
 	return segIndexStates
 }
 
+func (mt *metaTable) GetSegmentIndexes(segID UniqueID) []*model.SegmentIndex {
+	mt.segmentIndexLock.RLock()
+	defer mt.segmentIndexLock.RUnlock()
+
+	segIndexInfos := make([]*model.SegmentIndex, 0)
+	if segIndexes, ok := mt.segmentIndexes[segID]; ok {
+		for _, segIdx := range segIndexes {
+			segIndexInfos = append(segIndexInfos, model.CloneSegmentIndex(segIdx))
+		}
+	}
+	return segIndexInfos
+}
+
 func (mt *metaTable) GetSegmentIndexState(segmentID UniqueID, indexID UniqueID) IndexState {
 	mt.segmentIndexLock.RLock()
 	defer mt.segmentIndexLock.RUnlock()

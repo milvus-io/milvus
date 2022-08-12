@@ -325,26 +325,74 @@ func (broker *globalMetaBroker) loadIndexExtraInfo(ctx context.Context, fieldPat
 //}
 
 // return: segment_id -> segment_index_infos
-func (broker *globalMetaBroker) getFullIndexInfos(ctx context.Context, collectionID UniqueID, segmentID UniqueID) ([]*querypb.FieldIndexInfo, error) {
-	ret := make([]*querypb.FieldIndexInfo, 0)
-	resp, err := broker.getIndexFilePaths(ctx, collectionID, "", []UniqueID{segmentID})
+//func (broker *globalMetaBroker) getFullIndexInfos(ctx context.Context, collectionID UniqueID, segmentID UniqueID) ([]*querypb.FieldIndexInfo, error) {
+//	ret := make([]*querypb.FieldIndexInfo, 0)
+//	resp, err := broker.getIndexFilePaths(ctx, collectionID, "", []UniqueID{segmentID})
+//	if err != nil {
+//		log.Warn("failed to get index file paths", zap.Int64("collection", collectionID),
+//			zap.Int64("segmentID", segmentID), zap.Error(err))
+//		return nil, err
+//	}
+//	if resp.EnableIndex {
+//		for _, indexInfo := range resp.FilePaths {
+//			ret = append(ret, &querypb.FieldIndexInfo{
+//				FieldID:        indexInfo.FieldID,
+//				EnableIndex:    true,
+//				IndexName:      indexInfo.IndexName,
+//				IndexID:        indexInfo.IndexID,
+//				BuildID:        indexInfo.BuildID,
+//				IndexParams:    indexInfo.IndexParams,
+//				IndexFilePaths: indexInfo.IndexFilePaths,
+//				IndexSize:      int64(indexInfo.SerializedSize),
+//			})
+//		}
+//	}
+//
+//	return ret, nil
+//}
+
+// return: segment_id -> segment_index_infos
+func (broker *globalMetaBroker) getFullIndexInfos(ctx context.Context, collectionID UniqueID, segmentIDs []UniqueID) (map[UniqueID][]*querypb.FieldIndexInfo, error) {
+	resp, err := broker.getIndexFilePaths(ctx, collectionID, "", segmentIDs)
 	if err != nil {
 		log.Warn("failed to get index file paths", zap.Int64("collection", collectionID),
-			zap.Int64("segmentID", segmentID), zap.Error(err))
+			zap.Int64s("segmentIDs", segmentIDs), zap.Error(err))
 		return nil, err
 	}
-	if resp.EnableIndex {
-		for _, indexInfo := range resp.FilePaths {
-			ret = append(ret, &querypb.FieldIndexInfo{
-				FieldID:        indexInfo.FieldID,
+
+	ret := make(map[UniqueID][]*querypb.FieldIndexInfo)
+	for _, segmentID := range segmentIDs {
+		infos, ok := resp.GetSegmentInfo()[segmentID]
+		if !ok {
+			log.Warn("segment not found",
+				zap.Int64("collection", collectionID),
+				zap.Int64("segment", segmentID))
+			return nil, fmt.Errorf("segment not found, collection: %d, segment: %d", collectionID, segmentID)
+		}
+
+		if _, ok := ret[segmentID]; !ok {
+			ret[segmentID] = make([]*querypb.FieldIndexInfo, 0, len(infos.IndexInfos))
+		}
+
+		for _, info := range infos.IndexInfos {
+			//extraInfo, ok := infos.GetExtraIndexInfos()[info.IndexID]
+			indexInfo := &querypb.FieldIndexInfo{
+				FieldID:        info.FieldID,
 				EnableIndex:    true,
-				IndexName:      indexInfo.IndexName,
-				IndexID:        indexInfo.IndexID,
-				BuildID:        indexInfo.BuildID,
-				IndexParams:    indexInfo.IndexParams,
-				IndexFilePaths: indexInfo.IndexFilePaths,
-				IndexSize:      int64(indexInfo.SerializedSize),
-			})
+				IndexName:      info.IndexName,
+				IndexID:        info.IndexID,
+				BuildID:        info.BuildID,
+				IndexParams:    info.IndexParams,
+				IndexFilePaths: info.IndexFilePaths,
+				IndexSize:      int64(info.SerializedSize),
+			}
+
+			if len(info.IndexFilePaths) <= 0 {
+				log.Warn("index not ready", zap.Int64("index_build_id", info.BuildID))
+				return nil, fmt.Errorf("index not ready, index build id: %d", info.BuildID)
+			}
+
+			ret[segmentID] = append(ret[segmentID], indexInfo)
 		}
 	}
 
@@ -352,7 +400,14 @@ func (broker *globalMetaBroker) getFullIndexInfos(ctx context.Context, collectio
 }
 
 func (broker *globalMetaBroker) getIndexInfo(ctx context.Context, collectionID UniqueID, segmentID UniqueID, schema *schemapb.CollectionSchema) ([]*querypb.FieldIndexInfo, error) {
-	return broker.getFullIndexInfos(ctx, collectionID, segmentID)
+	segmentIndexInfos, err := broker.getFullIndexInfos(ctx, collectionID, []UniqueID{segmentID})
+	if err != nil {
+		return nil, err
+	}
+	if infos, ok := segmentIndexInfos[segmentID]; ok {
+		return infos, nil
+	}
+	return nil, fmt.Errorf("failed to get segment index infos, collection: %d, segment: %d", collectionID, segmentID)
 }
 
 func (broker *globalMetaBroker) generateSegmentLoadInfo(ctx context.Context,
