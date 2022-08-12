@@ -197,79 +197,79 @@ func (broker *globalMetaBroker) getIndexFilePaths(ctx context.Context, collID Un
 	return pathResponse, nil
 }
 
-func (broker *globalMetaBroker) parseIndexInfo(ctx context.Context, segmentID UniqueID, indexInfo *querypb.FieldIndexInfo) error {
-	resp, err := broker.getIndexFilePaths(ctx, 0, indexInfo.IndexName, []UniqueID{segmentID})
-	if err != nil {
-		return err
-	}
-	if !resp.EnableIndex {
-		log.Debug(fmt.Sprintf("fieldID %d of segment %d don't has index", indexInfo.FieldID, segmentID))
-		return nil
-	}
-
-	if len(resp.FilePaths) != 1 {
-		err = fmt.Errorf("illegal index file paths, there should be only one vector column,  segmentID = %d, fieldID = %d", segmentID, indexInfo.FieldID)
-		log.Error(err.Error())
-		return err
-	}
-
-	fieldPathInfo := resp.FilePaths[0]
-	if len(fieldPathInfo.IndexFilePaths) == 0 {
-		err = fmt.Errorf("empty index paths, segmentID = %d, fieldID = %d", segmentID, indexInfo.FieldID)
-		log.Error(err.Error())
-		return err
-	}
-
-	indexInfo.IndexFilePaths = fieldPathInfo.IndexFilePaths
-	indexInfo.IndexSize = int64(fieldPathInfo.SerializedSize)
-
-	log.Debug("get indexFilePath info from indexCoord success", zap.Int64("segmentID", segmentID),
-		zap.Int64("fieldID", indexInfo.FieldID), zap.Strings("indexPaths", fieldPathInfo.IndexFilePaths))
-
-	indexCodec := storage.NewIndexFileBinlogCodec()
-	for _, indexFilePath := range fieldPathInfo.IndexFilePaths {
-		// get index params when detecting indexParamPrefix
-		if path.Base(indexFilePath) == storage.IndexParamsKey {
-			indexPiece, err := broker.cm.Read(indexFilePath)
-			if err != nil {
-				log.Error("load index params file failed",
-					zap.Int64("segmentID", segmentID),
-					zap.Int64("fieldID", indexInfo.FieldID),
-					zap.String("index params filePath", indexFilePath),
-					zap.Error(err))
-				return err
-			}
-			_, indexParams, indexName, indexID, err := indexCodec.Deserialize([]*storage.Blob{{Key: storage.IndexParamsKey, Value: indexPiece}})
-			if err != nil {
-				log.Error("deserialize index params file failed",
-					zap.Int64("segmentID", segmentID),
-					zap.Int64("fieldID", indexInfo.FieldID),
-					zap.String("index params filePath", indexFilePath),
-					zap.Error(err))
-				return err
-			}
-			if len(indexParams) <= 0 {
-				err = fmt.Errorf("cannot find index param, segmentID = %d, fieldID = %d, indexFilePath = %s", segmentID, indexInfo.FieldID, indexFilePath)
-				log.Error(err.Error())
-				return err
-			}
-			indexInfo.IndexName = indexName
-			indexInfo.IndexID = indexID
-			indexInfo.IndexParams = funcutil.Map2KeyValuePair(indexParams)
-			break
-		}
-	}
-
-	if len(indexInfo.IndexParams) == 0 {
-		err = fmt.Errorf("no index params in Index file, segmentID = %d, fieldID = %d, indexPaths = %v", segmentID, indexInfo.FieldID, fieldPathInfo.IndexFilePaths)
-		log.Error(err.Error())
-		return err
-	}
-
-	log.Info("set index info  success", zap.Int64("segmentID", segmentID), zap.Int64("fieldID", indexInfo.FieldID))
-
-	return nil
-}
+//func (broker *globalMetaBroker) parseIndexInfo(ctx context.Context, segmentID UniqueID, indexInfo *querypb.FieldIndexInfo) error {
+//	resp, err := broker.getIndexFilePaths(ctx, 0, indexInfo.IndexName, []UniqueID{segmentID})
+//	if err != nil {
+//		return err
+//	}
+//	if !resp.EnableIndex {
+//		log.Debug(fmt.Sprintf("fieldID %d of segment %d don't has index", indexInfo.FieldID, segmentID))
+//		return nil
+//	}
+//
+//	if len(resp.FilePaths) != 1 {
+//		err = fmt.Errorf("illegal index file paths, there should be only one vector column,  segmentID = %d, fieldID = %d", segmentID, indexInfo.FieldID)
+//		log.Error(err.Error())
+//		return err
+//	}
+//
+//	fieldPathInfo := resp.FilePaths[0]
+//	if len(fieldPathInfo.IndexFilePaths) == 0 {
+//		err = fmt.Errorf("empty index paths, segmentID = %d, fieldID = %d", segmentID, indexInfo.FieldID)
+//		log.Error(err.Error())
+//		return err
+//	}
+//
+//	indexInfo.IndexFilePaths = fieldPathInfo.IndexFilePaths
+//	indexInfo.IndexSize = int64(fieldPathInfo.SerializedSize)
+//
+//	log.Debug("get indexFilePath info from indexCoord success", zap.Int64("segmentID", segmentID),
+//		zap.Int64("fieldID", indexInfo.FieldID), zap.Strings("indexPaths", fieldPathInfo.IndexFilePaths))
+//
+//	indexCodec := storage.NewIndexFileBinlogCodec()
+//	for _, indexFilePath := range fieldPathInfo.IndexFilePaths {
+//		// get index params when detecting indexParamPrefix
+//		if path.Base(indexFilePath) == storage.IndexParamsKey {
+//			indexPiece, err := broker.cm.Read(indexFilePath)
+//			if err != nil {
+//				log.Error("load index params file failed",
+//					zap.Int64("segmentID", segmentID),
+//					zap.Int64("fieldID", indexInfo.FieldID),
+//					zap.String("index params filePath", indexFilePath),
+//					zap.Error(err))
+//				return err
+//			}
+//			_, indexParams, indexName, indexID, err := indexCodec.Deserialize([]*storage.Blob{{Key: storage.IndexParamsKey, Value: indexPiece}})
+//			if err != nil {
+//				log.Error("deserialize index params file failed",
+//					zap.Int64("segmentID", segmentID),
+//					zap.Int64("fieldID", indexInfo.FieldID),
+//					zap.String("index params filePath", indexFilePath),
+//					zap.Error(err))
+//				return err
+//			}
+//			if len(indexParams) <= 0 {
+//				err = fmt.Errorf("cannot find index param, segmentID = %d, fieldID = %d, indexFilePath = %s", segmentID, indexInfo.FieldID, indexFilePath)
+//				log.Error(err.Error())
+//				return err
+//			}
+//			indexInfo.IndexName = indexName
+//			indexInfo.IndexID = indexID
+//			indexInfo.IndexParams = funcutil.Map2KeyValuePair(indexParams)
+//			break
+//		}
+//	}
+//
+//	if len(indexInfo.IndexParams) == 0 {
+//		err = fmt.Errorf("no index params in Index file, segmentID = %d, fieldID = %d, indexPaths = %v", segmentID, indexInfo.FieldID, fieldPathInfo.IndexFilePaths)
+//		log.Error(err.Error())
+//		return err
+//	}
+//
+//	log.Info("set index info  success", zap.Int64("segmentID", segmentID), zap.Int64("fieldID", indexInfo.FieldID))
+//
+//	return nil
+//}
 
 // Better to let index params key appear in the file paths first.
 func (broker *globalMetaBroker) loadIndexExtraInfo(ctx context.Context, fieldPathInfo *indexpb.IndexFilePathInfo) (*extraIndexInfo, error) {
