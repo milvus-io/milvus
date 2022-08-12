@@ -1,3 +1,7 @@
+- name: minio volume
+  docker_volume:
+    name: minio_volume
+
 - name: "minio"
   docker_container:
     name: minio
@@ -5,9 +9,9 @@
     env:
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
-    command: "minio server /minio_data"
-    # volumes:
-    #   - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/minio:/minio_data
+    volumes:
+      - minio_volume:/data
+    command: minio server /data --console-address ":9001"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
       interval: 30s
