@@ -203,12 +203,7 @@ func (ib *indexBuilder) process(buildID UniqueID) {
 			ib.tasks[buildID] = indexTaskRetry
 			return
 		}
-		indexParams, err := ib.meta.GetIndexParams(meta.CollectionID, meta.IndexID)
-		if err != nil {
-			log.Warn("get index params fail", zap.Int64("buildID", buildID), zap.Error(err))
-			ib.tasks[buildID] = indexTaskRetry
-			return
-		}
+		indexParams := ib.meta.GetIndexParams(meta.CollectionID, meta.IndexID)
 		req := &indexpb.CreateJobRequest{
 			// TODO @xiaocai2333: set clusterID
 			ClusterID: 0,

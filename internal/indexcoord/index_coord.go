@@ -673,6 +673,7 @@ func (i *IndexCoord) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInf
 			}
 			indexPathInfo.FieldID = i.metaTable.GetFieldIDByIndexID(req.CollectionID, indexID)
 			indexPathInfo.IndexName = i.metaTable.GetIndexNameByID(req.CollectionID, indexID)
+			indexPathInfo.IndexParams = i.metaTable.GetIndexParams(req.CollectionID, indexID)
 			indexPaths = append(indexPaths, indexPathInfo)
 		}
 	}

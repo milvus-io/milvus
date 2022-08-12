@@ -216,17 +216,17 @@ func (mt *metaTable) GetTypeParams(collID, indexID UniqueID) ([]*commonpb.KeyVal
 	return typeParams, nil
 }
 
-func (mt *metaTable) GetIndexParams(collID, indexID UniqueID) ([]*commonpb.KeyValuePair, error) {
+func (mt *metaTable) GetIndexParams(collID, indexID UniqueID) []*commonpb.KeyValuePair {
 	mt.indexLock.RLock()
 	defer mt.indexLock.RUnlock()
 
 	fieldIndexes, ok := mt.collectionIndexes[collID]
 	if !ok {
-		return nil, fmt.Errorf("there is no index on collection: %d", collID)
+		return nil
 	}
 	index, ok := fieldIndexes[indexID]
 	if !ok {
-		return nil, fmt.Errorf("there is no index on collection: %d with indexID: %d", collID, indexID)
+		return nil
 	}
 	indexParams := make([]*commonpb.KeyValuePair, len(index.IndexParams))
 
@@ -234,7 +234,7 @@ func (mt *metaTable) GetIndexParams(collID, indexID UniqueID) ([]*commonpb.KeyVa
 		indexParams[i] = proto.Clone(param).(*commonpb.KeyValuePair)
 	}
 
-	return indexParams, nil
+	return indexParams
 }
 
 func (mt *metaTable) SetIndex(index *model.Index) {
