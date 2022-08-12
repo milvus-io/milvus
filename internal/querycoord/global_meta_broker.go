@@ -333,27 +333,15 @@ func (broker *globalMetaBroker) getFullIndexInfos(ctx context.Context, collectio
 			zap.Int64("segmentID", segmentID), zap.Error(err))
 		return nil, err
 	}
-	if !resp.EnableIndex {
-		ret = append(ret, &querypb.FieldIndexInfo{
-			FieldID:        0,
-			EnableIndex:    false,
-			IndexName:      "",
-			IndexID:        0,
-			BuildID:        0,
-			IndexParams:    nil,
-			IndexFilePaths: nil,
-			IndexSize:      0,
-		})
-		return ret, nil
-	} else {
+	if resp.EnableIndex {
 		for _, indexInfo := range resp.FilePaths {
 			ret = append(ret, &querypb.FieldIndexInfo{
-				FieldID:        0,
+				FieldID:        indexInfo.FieldID,
 				EnableIndex:    true,
 				IndexName:      indexInfo.IndexName,
-				IndexID:        0,
-				BuildID:        0,
-				IndexParams:    nil,
+				IndexID:        indexInfo.IndexID,
+				BuildID:        indexInfo.BuildID,
+				IndexParams:    indexInfo.IndexParams,
 				IndexFilePaths: indexInfo.IndexFilePaths,
 				IndexSize:      int64(indexInfo.SerializedSize),
 			})

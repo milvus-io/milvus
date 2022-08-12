@@ -540,6 +540,18 @@ func (mt *metaTable) GetIndexIDByName(collID int64, indexName string) map[int64]
 	return indexID2CreateTs
 }
 
+func (mt *metaTable) GetFieldIDByIndexID(collID, indexID UniqueID) UniqueID {
+	mt.indexLock.RLock()
+	defer mt.indexLock.RUnlock()
+
+	if fieldIndexes, ok := mt.collectionIndexes[collID]; ok {
+		if index, ok := fieldIndexes[indexID]; ok {
+			return index.FieldID
+		}
+	}
+	return 0
+}
+
 func (mt *metaTable) GetIndexNameByID(collID, indexID UniqueID) string {
 	mt.indexLock.RLock()
 	defer mt.indexLock.RUnlock()
@@ -792,6 +804,7 @@ func (mt *metaTable) GetIndexFilePathInfo(segID, indexID UniqueID) (*indexpb.Ind
 	defer mt.segmentIndexLock.RUnlock()
 	ret := &indexpb.IndexFilePathInfo{
 		SegmentID: segID,
+		IndexID:   indexID,
 	}
 
 	segIndexes, ok := mt.segmentIndexes[segID]
@@ -806,6 +819,7 @@ func (mt *metaTable) GetIndexFilePathInfo(segID, indexID UniqueID) (*indexpb.Ind
 		return nil, fmt.Errorf("the index state is not finish on segment: %d, index state = %s", segID, segIdx.IndexState.String())
 	}
 
+	ret.BuildID = segIdx.BuildID
 	ret.IndexFilePaths = segIdx.IndexFilePaths
 	ret.SerializedSize = segIdx.IndexSize
 

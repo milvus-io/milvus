@@ -664,18 +664,14 @@ func (i *IndexCoord) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInf
 		}, nil
 	}
 	var indexPaths []*indexpb.IndexFilePathInfo
-	for indexID := range indexID2CreateTs {
-		for _, segID := range req.SegmentIDs {
+	for _, segID := range req.SegmentIDs {
+		for indexID := range indexID2CreateTs {
 			indexPathInfo, err := i.metaTable.GetIndexFilePathInfo(segID, indexID)
 			if err != nil {
-				log.Error("IndexCoord GetIndexFilePaths fail", zap.Int64("segmentID", segID), zap.Error(err))
-				return &indexpb.GetIndexInfoResponse{
-					Status: &commonpb.Status{
-						ErrorCode: commonpb.ErrorCode_UnexpectedError,
-						Reason:    err.Error(),
-					},
-				}, nil
+				log.Debug("IndexCoord GetIndexFilePaths fail", zap.Int64("segmentID", segID), zap.Error(err))
+				continue
 			}
+			indexPathInfo.FieldID = i.metaTable.GetFieldIDByIndexID(req.CollectionID, indexID)
 			indexPathInfo.IndexName = i.metaTable.GetIndexNameByID(req.CollectionID, indexID)
 			indexPaths = append(indexPaths, indexPathInfo)
 		}

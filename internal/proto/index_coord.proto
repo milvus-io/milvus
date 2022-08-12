@@ -130,9 +130,13 @@ message GetIndexInfoRequest {
 
 message IndexFilePathInfo {
   int64 segmentID = 1;
-  string index_name = 2;
-  repeated string index_file_paths = 3;
-  uint64 serialized_size = 4;
+  int64 fieldID = 2;
+  int64 indexID = 3;
+  int64 buildID = 4;
+  string index_name = 5;
+  repeated common.KeyValuePair index_params = 6;
+  repeated string index_file_paths = 7;
+  uint64 serialized_size = 8;
 }
 
 message GetIndexInfoResponse {
