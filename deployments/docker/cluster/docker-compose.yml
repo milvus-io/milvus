@@ -73,6 +73,7 @@ services:
       PULSAR_ADDRESS: pulsar://pulsar:6650
     ports:
       - "19530:19530"
+      - "9091:9091"
 
   querycoord:
     container_name: milvus-querycoord
