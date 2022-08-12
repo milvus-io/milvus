@@ -303,7 +303,7 @@ func (fsw *flushedSegmentWatcher) constructTask(t *flushedSegmentTask) error {
 				IndexInfos: []*querypb.FieldIndexInfo{
 					{
 						FieldID:     index.FieldID,
-						EnableIndex: false,
+						EnableIndex: true,
 						IndexName:   index.IndexName,
 						IndexID:     index.IndexID,
 						IndexParams: index.IndexParams,

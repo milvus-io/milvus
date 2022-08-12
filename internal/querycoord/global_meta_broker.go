@@ -171,10 +171,11 @@ func (broker *globalMetaBroker) getRecoveryInfo(ctx context.Context, collectionI
 //	return true, response.BuildID, nil
 //}
 
-func (broker *globalMetaBroker) getIndexFilePaths(ctx context.Context, indexName string, segmentIDs []int64) (*indexpb.GetIndexInfoResponse, error) {
+func (broker *globalMetaBroker) getIndexFilePaths(ctx context.Context, collID UniqueID, indexName string, segmentIDs []int64) (*indexpb.GetIndexInfoResponse, error) {
 	indexFilePathRequest := &indexpb.GetIndexInfoRequest{
-		SegmentIDs: segmentIDs,
-		IndexName:  indexName,
+		CollectionID: collID,
+		SegmentIDs:   segmentIDs,
+		IndexName:    indexName,
 	}
 
 	ctx3, cancel3 := context.WithTimeout(ctx, timeoutForRPC)
@@ -197,7 +198,7 @@ func (broker *globalMetaBroker) getIndexFilePaths(ctx context.Context, indexName
 }
 
 func (broker *globalMetaBroker) parseIndexInfo(ctx context.Context, segmentID UniqueID, indexInfo *querypb.FieldIndexInfo) error {
-	resp, err := broker.getIndexFilePaths(ctx, indexInfo.IndexName, []UniqueID{segmentID})
+	resp, err := broker.getIndexFilePaths(ctx, 0, indexInfo.IndexName, []UniqueID{segmentID})
 	if err != nil {
 		return err
 	}
@@ -326,7 +327,7 @@ func (broker *globalMetaBroker) loadIndexExtraInfo(ctx context.Context, fieldPat
 // return: segment_id -> segment_index_infos
 func (broker *globalMetaBroker) getFullIndexInfos(ctx context.Context, collectionID UniqueID, segmentID UniqueID) ([]*querypb.FieldIndexInfo, error) {
 	ret := make([]*querypb.FieldIndexInfo, 0)
-	resp, err := broker.getIndexFilePaths(ctx, "", []UniqueID{segmentID})
+	resp, err := broker.getIndexFilePaths(ctx, collectionID, "", []UniqueID{segmentID})
 	if err != nil {
 		log.Warn("failed to get index file paths", zap.Int64("collection", collectionID),
 			zap.Int64("segmentID", segmentID), zap.Error(err))
