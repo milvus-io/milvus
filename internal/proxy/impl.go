@@ -2657,6 +2657,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 		sentSize := proto.Size(qt.result)
 		metrics.ProxyReadReqSendBytes.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10)).Add(float64(sentSize))
 	}
+	log.Debug("search done", zap.Int64s("topks", qt.result.Results.Topks))
 	return qt.result, nil
 }
 

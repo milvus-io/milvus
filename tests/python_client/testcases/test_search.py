@@ -1879,6 +1879,9 @@ class TestCollectionSearch(TestcaseBase):
 
         # 3. search with expression
         log.info("test_search_with_expression: searching with expression: %s" % expression)
+        print("__________*****************************************************")
+        print("nb ", nb)
+        print("filter_ids ", len(filter_ids))
         vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
         search_res, _ = collection_w.search(vectors[:default_nq], default_search_field,
                                             default_search_params, nb, expression,

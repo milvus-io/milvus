@@ -1216,6 +1216,7 @@ func (p *indexCoordConfig) init(base *BaseTable) {
 
 	p.initIndexStorageRootPath()
 	p.initGCInterval()
+	p.initMinSegmentNumRowsToEnableIndex()
 }
 
 // initIndexStorageRootPath initializes the root path of index files.

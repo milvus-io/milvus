@@ -966,6 +966,10 @@ func (i *IndexCoord) assignTask(builderClient types.IndexNode, req *indexpb.Crea
 func (i *IndexCoord) createIndexForSegment(segIdx *model.SegmentIndex) error {
 	log.Info("create index for flushed segment", zap.Int64("collID", segIdx.CollectionID),
 		zap.Int64("segID", segIdx.SegmentID), zap.Int64("numRows", segIdx.NumRows))
+	if segIdx.NumRows < Params.IndexCoordCfg.MinSegmentNumRowsToEnableIndex {
+		log.Debug("no need tp build index")
+		return nil
+	}
 
 	hasIndex, indexBuildID := i.metaTable.CheckBuiltIndex(segIdx.SegmentID, segIdx.IndexID)
 	if hasIndex {
