@@ -350,7 +350,7 @@ func (fsw *flushedSegmentWatcher) writeHandoffSegment(t *flushedSegmentTask) err
 	}
 
 	log.Info("IndexCoord write handoff task success", zap.Int64("collID", t.segmentInfo.CollectionID),
-		zap.Int64("partID", t.segmentInfo.PartitionID), zap.Int64("segID", t.segmentInfo.SegmentID))
+		zap.Int64("partID", t.segmentInfo.PartitionID), zap.Int64("segID", t.segmentInfo.SegmentID), zap.Any("segmentInfo", t.segmentInfo))
 	return nil
 }
 

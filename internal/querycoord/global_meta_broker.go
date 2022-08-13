@@ -427,12 +427,14 @@ func (broker *globalMetaBroker) generateSegmentLoadInfo(ctx context.Context,
 		Deltalogs:     segmentBinlog.Deltalogs,
 		InsertChannel: segmentBinlog.InsertChannel,
 	}
+	log.Warn("querycoord generateSegmentLoadInfo", zap.Any("set index", setIndex), zap.Any("segmentLoadInfo", segmentLoadInfo))
 	if setIndex {
 		// if index not exist, load binlog to query node
 		indexInfo, err := broker.getIndexInfo(ctx, collectionID, segmentID, schema)
 		if err == nil {
 			segmentLoadInfo.IndexInfos = indexInfo
 		}
+		log.Warn("querycoord debug generateSegmentLoadInfo", zap.Any("indexInfo", indexInfo))
 	}
 
 	// set the estimate segment size to segmentLoadInfo
