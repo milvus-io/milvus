@@ -1306,13 +1306,21 @@ func (cit *createIndexTask) Execute(ctx context.Context) error {
 	log.Debug("proxy create index", zap.Int64("collID", cit.collectionID), zap.Int64("fieldID", cit.fieldSchema.GetFieldID()),
 		zap.String("indexName", cit.GetIndexName()), zap.Any("typeParams", cit.fieldSchema.GetTypeParams()),
 		zap.Any("indexParams", cit.GetExtraParams()))
+	indexParams := cit.GetExtraParams()
+	if !typeutil.IsVectorType(cit.fieldSchema.DataType) {
+		if cit.fieldSchema.DataType == schemapb.DataType_VarChar {
+			indexParams = []*commonpb.KeyValuePair{{Key: "index_type", Value: DefaultStringIndexType}}
+		}else {
+			indexParams = []*commonpb.KeyValuePair{{Key: "index_type", Value: DefaultIndexType}}
+		}
+	}
 	var err error
 	req := &indexpb.CreateIndexRequest{
 		CollectionID: cit.collectionID,
 		FieldID:      cit.fieldSchema.GetFieldID(),
 		IndexName:    cit.GetIndexName(),
 		TypeParams:   cit.fieldSchema.GetTypeParams(),
-		IndexParams:  cit.GetExtraParams(),
+		IndexParams:  indexParams,
 	}
 	cit.result, err = cit.indexCoord.CreateIndex(ctx, req)
 	//cit.result, err = cit.rootCoord.CreateIndex(ctx, cit.CreateIndexRequest)

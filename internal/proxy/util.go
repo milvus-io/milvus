@@ -46,6 +46,13 @@ const enableMultipleVectorFields = false
 // maximum length of variable-length strings
 const maxVarCharLengthKey = "max_length"
 const defaultMaxVarCharLength = 65535
+const (
+	// DefaultIndexType name of default index type for scalar field
+        DefaultIndexType = "STL_SORT"
+
+        // DefaultStringIndexType name of default index type for varChar/string field
+        DefaultStringIndexType = "Trie"
+)
 
 var logger = log.L().WithOptions(zap.Fields(zap.String("role", typeutil.ProxyRole)))
 
