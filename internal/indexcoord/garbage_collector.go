@@ -44,7 +44,7 @@ func newGarbageCollector(ctx context.Context, meta *metaTable, chunkManager stor
 		ctx:            ctx,
 		cancel:         cancel,
 		gcFileDuration: Params.IndexCoordCfg.GCInterval,
-		gcMetaDuration: time.Second * 10,
+		gcMetaDuration: time.Minute,
 		metaTable:      meta,
 		chunkManager:   chunkManager,
 	}
@@ -162,6 +162,7 @@ func (gc *garbageCollector) recycleUnusedIndexFiles() {
 				continue
 			}
 			for _, key := range keys {
+				log.Debug("indexFiles keys", zap.String("key", key))
 				buildID, err := parseBuildIDFromFilePath(key)
 				if err != nil {
 					log.Error("IndexCoord garbageCollector recycleUnusedIndexFiles parseIndexFileKey", zap.String("key", key), zap.Error(err))
