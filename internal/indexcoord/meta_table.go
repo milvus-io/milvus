@@ -21,19 +21,20 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-
-	"github.com/milvus-io/milvus/internal/metastore"
+	"time"
 
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metastore"
 	catalog "github.com/milvus-io/milvus/internal/metastore/kv"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
 )
 
 // metaTable maintains index-related information
@@ -440,15 +441,15 @@ func (mt *metaTable) IsExpire(buildID UniqueID) bool {
 	mt.segmentIndexLock.RLock()
 	defer mt.segmentIndexLock.RUnlock()
 
-	// segIdx, ok := mt.buildID2SegmentIndex[buildID]
-	// if !ok {
-	// 	return true
-	// }
+	segIdx, ok := mt.buildID2SegmentIndex[buildID]
+	if !ok {
+		return true
+	}
 
-	// pTs, _ := tsoutil.ParseTS(segIdx.CreateTime)
-	// if time.Since(pTs) > time.Minute*10 {
-	// 	return true
-	// }
+	pTs, _ := tsoutil.ParseTS(segIdx.CreateTime)
+	if time.Since(pTs) > time.Minute*10 {
+		return true
+	}
 	return false
 }
 
