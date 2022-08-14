@@ -20,9 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"sync"
-	"time"
 
 	"github.com/milvus-io/milvus/internal/metastore"
 
@@ -442,15 +440,15 @@ func (mt *metaTable) IsExpire(buildID UniqueID) bool {
 	mt.segmentIndexLock.RLock()
 	defer mt.segmentIndexLock.RUnlock()
 
-	segIdx, ok := mt.buildID2SegmentIndex[buildID]
-	if !ok {
-		return true
-	}
+	// segIdx, ok := mt.buildID2SegmentIndex[buildID]
+	// if !ok {
+	// 	return true
+	// }
 
-	pTs, _ := tsoutil.ParseTS(segIdx.CreateTime)
-	if time.Since(pTs) > time.Minute*10 {
-		return true
-	}
+	// pTs, _ := tsoutil.ParseTS(segIdx.CreateTime)
+	// if time.Since(pTs) > time.Minute*10 {
+	// 	return true
+	// }
 	return false
 }
 
