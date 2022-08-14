@@ -617,7 +617,7 @@ func (i *IndexCoord) GetIndexBuildProgress(ctx context.Context, req *indexpb.Get
 	}
 
 	log.Debug("IndexCoord get index build progress success", zap.Int64("collID", req.CollectionID),
-		zap.Int64("totalRows", totalRows), zap.Int64("indexRows", indexRows), zap.Int("seg num", len(resp.GetBinlogs())))
+		zap.Int64("totalRows", totalRows), zap.Int64("indexRows", indexRows), zap.Int("seg num", len(resp.Infos)))
 	return &indexpb.GetIndexBuildProgressResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
