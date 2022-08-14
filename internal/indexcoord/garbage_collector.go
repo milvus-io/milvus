@@ -188,8 +188,8 @@ func (gc *garbageCollector) recycleUnusedIndexFiles() {
 					continue
 				}
 				log.Info("index meta can be recycled, recycle index files", zap.Int64("buildID", buildID))
-				indexFilePaths := gc.metaTable.GetIndexFilePathByBuildID(buildID)
-				if err != nil {
+				canRecycle, indexFilePaths := gc.metaTable.GetIndexFilePathByBuildID(buildID)
+				if !canRecycle {
 					// Even if the index is marked as deleted, the index file will not be recycled, wait for the next gc,
 					// and delete all index files about the buildID at one time.
 					log.Warn("IndexCoord garbageCollector get index files fail", zap.Int64("buildID", buildID),

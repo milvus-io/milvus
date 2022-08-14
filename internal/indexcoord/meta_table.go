@@ -857,23 +857,23 @@ func (mt *metaTable) GetIndexFilePathInfo(segID, indexID UniqueID) (*indexpb.Ind
 	return ret, nil
 }
 
-func (mt *metaTable) GetIndexFilePathByBuildID(buildID UniqueID) []string {
+func (mt *metaTable) GetIndexFilePathByBuildID(buildID UniqueID) (bool, []string) {
 	mt.segmentIndexLock.RLock()
 	defer mt.segmentIndexLock.RUnlock()
 	log.Debug("IndexCoord get index file path from meta table", zap.Int64("buildID", buildID))
 
 	segIdx, ok := mt.buildID2SegmentIndex[buildID]
 	if !ok || segIdx.IsDeleted {
-		return []string{}
+		return false, []string{}
 	}
 
-	if segIdx.IndexState != commonpb.IndexState_Finished {
-		return []string{}
+	if segIdx.IndexState != commonpb.IndexState_Finished && segIdx.IndexState != commonpb.IndexState_Failed {
+		return false, []string{}
 	}
 
 	log.Debug("IndexCoord get index file path success", zap.Int64("buildID", buildID),
 		zap.Strings("index files num", segIdx.IndexFilePaths))
-	return segIdx.IndexFilePaths
+	return true, segIdx.IndexFilePaths
 }
 
 func (mt *metaTable) IsIndexDeleted(collID, indexID UniqueID) bool {
