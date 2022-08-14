@@ -669,14 +669,11 @@ func (mt *metaTable) GetSegmentIndexState(segmentID UniqueID, indexID UniqueID) 
 }
 
 // GetIndexBuildProgress gets the index progress for indexID from meta table.
-func (mt *metaTable) GetIndexBuildProgress(indexID int64, createTs uint64) (int64, int64) {
+func (mt *metaTable) GetIndexBuildProgress(indexID int64, createTs uint64) (int64) {
 	mt.segmentIndexLock.RLock()
 	defer mt.segmentIndexLock.RUnlock()
 
-	var (
-		totalRows = int64(0)
-		indexRows = int64(0)
-	)
+	indexRows := int64(0)
 
 	for _, indexID2SegIdx := range mt.segmentIndexes {
 		segIdx, ok := indexID2SegIdx[indexID]
@@ -691,16 +688,15 @@ func (mt *metaTable) GetIndexBuildProgress(indexID int64, createTs uint64) (int6
 			continue
 		}
 
-		totalRows += segIdx.NumRows
 		if segIdx.IndexState == commonpb.IndexState_Finished {
 			indexRows += segIdx.NumRows
 		}
 	}
 
 	log.Debug("IndexCoord get index states success", zap.Int64("indexID", indexID),
-		zap.Int64("totalRows", totalRows), zap.Int64("indexRows", indexRows))
+		zap.Int64("indexRows", indexRows))
 
-	return totalRows, indexRows
+	return indexRows
 }
 
 //func (mt *metaTable) DropIndex(collID UniqueID, indexName string) error {

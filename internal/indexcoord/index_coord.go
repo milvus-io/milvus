@@ -570,6 +570,23 @@ func (i *IndexCoord) GetIndexBuildProgress(ctx context.Context, req *indexpb.Get
 		}, nil
 	}
 
+	resp, err := i.dataCoordClient.GetRecoveryInfo(ctx, &datapb.GetRecoveryInfoRequest{
+		CollectionID: req.CollectionID,
+		PartitionID:  -1,
+	})
+	if err != nil {
+		return &indexpb.GetIndexBuildProgressResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			},
+		}, err
+	}
+	totalRows, indexRows := int64(0), int64(0)
+
+	for _, seg := range resp.GetBinlogs() {
+		totalRows += seg.NumOfRows
+	}
+
 	indexID2CreateTs := i.metaTable.GetIndexIDByName(req.CollectionID, req.IndexName)
 	if len(indexID2CreateTs) != 1 {
 		errMsg := fmt.Sprintf("there is no index on collection: %d with the index name: %s", req.CollectionID, req.IndexName)
@@ -583,9 +600,8 @@ func (i *IndexCoord) GetIndexBuildProgress(ctx context.Context, req *indexpb.Get
 		}, nil
 	}
 
-	totalRows, indexRows := int64(0), int64(0)
 	for indexID, createTs := range indexID2CreateTs {
-		totalRows, indexRows = i.metaTable.GetIndexBuildProgress(indexID, createTs)
+		indexRows = i.metaTable.GetIndexBuildProgress(indexID, createTs)
 		break
 	}
 
