@@ -570,7 +570,7 @@ func (i *IndexCoord) GetIndexBuildProgress(ctx context.Context, req *indexpb.Get
 		}, nil
 	}
 
-	resp, err := i.dataCoordClient.GetRecoveryInfo(ctx, &datapb.GetRecoveryInfoRequest{
+	flushSegments, err := i.dataCoordClient.GetFlushedSegments(ctx, &datapb.GetFlushedSegmentsRequest{
 		CollectionID: req.CollectionID,
 		PartitionID:  -1,
 	})
@@ -581,9 +581,20 @@ func (i *IndexCoord) GetIndexBuildProgress(ctx context.Context, req *indexpb.Get
 			},
 		}, err
 	}
+
+	resp, err := i.dataCoordClient.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
+		SegmentIDs: flushSegments.Segments,
+	})
+	if err != nil {
+		return &indexpb.GetIndexBuildProgressResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			},
+		}, err
+	}
 	totalRows, indexRows := int64(0), int64(0)
 
-	for _, seg := range resp.GetBinlogs() {
+	for _, seg := range resp.Infos {
 		totalRows += seg.NumOfRows
 	}
 
@@ -605,6 +616,8 @@ func (i *IndexCoord) GetIndexBuildProgress(ctx context.Context, req *indexpb.Get
 		break
 	}
 
+	log.Debug("IndexCoord get index build progress success", zap.Int64("collID", req.CollectionID),
+		zap.Int64("totalRows", totalRows), zap.Int64("indexRows", indexRows), zap.Int("seg num", len(resp.GetBinlogs())))
 	return &indexpb.GetIndexBuildProgressResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
