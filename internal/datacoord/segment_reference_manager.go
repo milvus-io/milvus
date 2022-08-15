@@ -109,7 +109,7 @@ func (srm *SegmentReferenceManager) AddSegmentsLock(taskID int64, segIDs []Uniqu
 	for _, segID := range segIDs {
 		srm.segmentReferCnt[segID]++
 	}
-	log.Info("add reference lock on segments successfully", zap.Int64s("segIDs", segIDs), zap.Int64("nodeID", nodeID))
+	log.Info("add reference lock on segments successfully", zap.Int64("taskID", taskID), zap.Int64s("segIDs", segIDs), zap.Int64("nodeID", nodeID))
 	return nil
 }
 
