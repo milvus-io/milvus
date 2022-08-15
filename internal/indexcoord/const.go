@@ -24,7 +24,7 @@ const (
 	flushedSegmentPrefix = "flushed-segment"
 	handoffSegmentPrefix = "querycoord-handoff"
 
-	indexFilePrefix = "index"
+	indexFileVersionPrefix = "2"
 )
 
 const (
