@@ -3197,6 +3197,9 @@ func testProxyRole(ctx context.Context, t *testing.T, proxy *Proxy) {
 		resp, _ := proxy.DropRole(ctx, &milvuspb.DropRoleRequest{RoleName: " "})
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 
+		resp, _ = proxy.DropRole(ctx, &milvuspb.DropRoleRequest{RoleName: "public"})
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
 		username := "root"
 		roleName := "unit_test"
 
@@ -3294,10 +3297,16 @@ func testProxyRole(ctx context.Context, t *testing.T, proxy *Proxy) {
 		roleResp, _ = proxy.DropRole(ctx, &milvuspb.DropRoleRequest{RoleName: roleName})
 		assert.Equal(t, commonpb.ErrorCode_Success, roleResp.ErrorCode)
 
+		opResp, _ := proxy.OperateUserRole(ctx, &milvuspb.OperateUserRoleRequest{Username: "root", RoleName: "admin"})
+		assert.Equal(t, commonpb.ErrorCode_Success, opResp.ErrorCode)
+
 		resp, _ = proxy.SelectRole(ctx, &milvuspb.SelectRoleRequest{Role: &milvuspb.RoleEntity{Name: "admin"}, IncludeUserInfo: true})
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 		assert.NotEqual(t, 0, len(resp.Results))
 		assert.NotEqual(t, 0, len(resp.Results[0].Users))
+
+		opResp, _ = proxy.OperateUserRole(ctx, &milvuspb.OperateUserRoleRequest{Username: "root", RoleName: "admin", Type: milvuspb.OperateUserRoleType_RemoveUserFromRole})
+		assert.Equal(t, commonpb.ErrorCode_Success, opResp.ErrorCode)
 	})
 
 	wg.Add(1)
@@ -3318,10 +3327,16 @@ func testProxyRole(ctx context.Context, t *testing.T, proxy *Proxy) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 		assert.NotEqual(t, 0, len(resp.Results))
 
+		opResp, _ := proxy.OperateUserRole(ctx, &milvuspb.OperateUserRoleRequest{Username: "root", RoleName: "admin"})
+		assert.Equal(t, commonpb.ErrorCode_Success, opResp.ErrorCode)
+
 		resp, _ = proxy.SelectUser(ctx, &milvuspb.SelectUserRequest{User: entity, IncludeRoleInfo: true})
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 		assert.NotEqual(t, 0, len(resp.Results))
 		assert.NotEqual(t, 0, len(resp.Results[0].Roles))
+
+		opResp, _ = proxy.OperateUserRole(ctx, &milvuspb.OperateUserRoleRequest{Username: "root", RoleName: "admin", Type: milvuspb.OperateUserRoleType_RemoveUserFromRole})
+		assert.Equal(t, commonpb.ErrorCode_Success, opResp.ErrorCode)
 	})
 
 	wg.Wait()
@@ -3504,6 +3519,38 @@ func testProxyPrivilege(ctx context.Context, t *testing.T, proxy *Proxy) {
 
 		req.Type = milvuspb.OperatePrivilegeType_Revoke
 		resp, _ = proxy.OperatePrivilege(ctx, req)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		roleReq.Type = milvuspb.OperatePrivilegeType_Revoke
+		resp, _ = proxy.OperatePrivilege(ctx, roleReq)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		roleReq = &milvuspb.OperatePrivilegeRequest{
+			Entity: &milvuspb.GrantEntity{
+				Role:       &milvuspb.RoleEntity{Name: "public"},
+				Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Collection.String()},
+				ObjectName: "col1",
+				Grantor:    &milvuspb.GrantorEntity{Privilege: &milvuspb.PrivilegeEntity{Name: util.AnyWord}},
+			},
+			Type: milvuspb.OperatePrivilegeType_Grant,
+		}
+		resp, _ = proxy.OperatePrivilege(ctx, roleReq)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		roleReq.Type = milvuspb.OperatePrivilegeType_Revoke
+		resp, _ = proxy.OperatePrivilege(ctx, roleReq)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		roleReq = &milvuspb.OperatePrivilegeRequest{
+			Entity: &milvuspb.GrantEntity{
+				Role:       &milvuspb.RoleEntity{Name: "public"},
+				Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Global.String()},
+				ObjectName: "col1",
+				Grantor:    &milvuspb.GrantorEntity{Privilege: &milvuspb.PrivilegeEntity{Name: util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeManageOwnership.String())}},
+			},
+			Type: milvuspb.OperatePrivilegeType_Grant,
+		}
+		resp, _ = proxy.OperatePrivilege(ctx, roleReq)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 
 		roleReq.Type = milvuspb.OperatePrivilegeType_Revoke

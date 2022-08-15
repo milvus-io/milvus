@@ -4095,6 +4095,13 @@ func (node *Proxy) DropRole(ctx context.Context, req *milvuspb.DropRoleRequest) 
 			Reason:    err.Error(),
 		}, err
 	}
+	if IsDefaultRole(req.RoleName) {
+		errMsg := fmt.Sprintf("the role[%s] is a default role, which can't be droped", req.RoleName)
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_IllegalArgument,
+			Reason:    errMsg,
+		}, errors.New(errMsg)
+	}
 	result, err := node.rootCoord.DropRole(ctx, req)
 	if err != nil {
 		logger.Error("fail to drop role", zap.String("role_name", req.RoleName), zap.Error(err))

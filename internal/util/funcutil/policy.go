@@ -3,6 +3,8 @@ package funcutil
 import (
 	"fmt"
 
+	"github.com/milvus-io/milvus/internal/util"
+
 	"github.com/golang/protobuf/descriptor"
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/log"
@@ -10,10 +12,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/reflect/protoreflect"
-)
-
-const (
-	AnyObjectName = "*"
 )
 
 func GetVersion(m proto.GeneratedMessage) (string, error) {
@@ -56,7 +54,7 @@ func GetPrivilegeExtObj(m proto.GeneratedMessage) (commonpb.PrivilegeExt, error)
 // GetObjectName get object name from the grpc message according to the filed index. The filed is a string.
 func GetObjectName(m proto.GeneratedMessage, index int32) string {
 	if index <= 0 {
-		return AnyObjectName
+		return util.AnyWord
 	}
 	msg := proto.MessageReflect(proto.MessageV1(m))
 	msgDesc := msg.Descriptor()
@@ -66,7 +64,7 @@ func GetObjectName(m proto.GeneratedMessage, index int32) string {
 		userDesc := user.Descriptor()
 		value = user.Get(userDesc.Fields().ByNumber(protoreflect.FieldNumber(1)))
 		if value.String() == "" {
-			return AnyObjectName
+			return util.AnyWord
 		}
 	}
 	return value.String()

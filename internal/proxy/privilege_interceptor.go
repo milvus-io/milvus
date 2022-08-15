@@ -36,7 +36,7 @@ p = sub, obj, act
 e = some(where (p.eft == allow))
 
 [matchers]
-m = r.sub == p.sub && globMatch(p.obj, r.obj) && globMatch(p.act, r.act) || r.sub == "admin" || r.act == "All"
+m = r.sub == p.sub && globMatch(r.obj, p.obj) && globMatch(r.act, p.act) || r.sub == "admin" || r.act == "All"
 `
 	ModelKey = "casbin"
 )
@@ -82,6 +82,9 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 	if err != nil {
 		log.Error("GetCurUserFromContext fail", zap.Error(err))
 		return ctx, err
+	}
+	if username == util.UserRoot {
+		return ctx, nil
 	}
 	roleNames, err := GetRole(username)
 	if err != nil {
