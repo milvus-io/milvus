@@ -539,17 +539,19 @@ class TestQueryParams(TestcaseBase):
         assert set(res[0].keys()) == {ct.default_int64_field_name, ct.default_float_field_name}
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue 18624")
     def test_query_output_all_fields(self):
         """
         target: test query with none output field
         method: query with output field=None
         expected: return all fields
         """
-        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
-        df = cf.gen_default_dataframe_data()
-        collection_w.insert(df)
-        assert collection_w.num_entities == ct.default_nb
-        all_fields = [ct.default_int64_field_name, ct.default_float_field_name, ct.default_string_field_name, ct.default_float_vec_field_name]
+        # 1. initialize with data
+        collection_w, df, _, insert_ids = self.init_collection_general(prefix, True, nb=10,
+                                                                       is_all_data_type=True)[0:4]
+        all_fields = [ct.default_int64_field_name, ct.default_int32_field_name, ct.default_int16_field_name,
+                      ct.default_int8_field_name, ct.default_bool_field_name, ct.default_float_field_name,
+                      ct.default_double_field_name, ct.default_string_field_name, ct.default_float_vec_field_name]
         res = df.iloc[:2].to_dict('records')
         collection_w.load()
         actual_res, _ = collection_w.query(default_term_expr, output_fields=all_fields,
