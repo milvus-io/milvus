@@ -23,10 +23,10 @@ binary_field_name = default_binary_vec_field_name
 default_search_exp = "int64 >= 0"
 default_term_expr = f'{ct.default_int64_field_name} in [0, 1]'
 
-prefix = "test_reinstall"
+prefix = "deploy_test"
 
 
-class TestActionBeforeReinstall(TestDeployBase):
+class TestActionFirstDeployment(TestDeployBase):
     """ Test case of action before reinstall """
 
     def teardown_method(self, method):
@@ -36,21 +36,31 @@ class TestActionBeforeReinstall(TestDeployBase):
         log.info("skip drop collection")
 
     @pytest.mark.tags(CaseLabel.L3)
-    def test_task_all_empty(self):
+    @pytest.mark.parametrize("index_type", ["HNSW","BIN_IVF_FLAT"])
+    def test_task_all_empty(self,index_type):
         """
         before reinstall: create collection
         """
-        name = cf.gen_unique_str(prefix)
-        self.init_collection_general(insert_data=False, name=name)[0]
+        name = ""
+        for k,v in locals().items():
+            if k in ["self", "name"]:
+                continue
+            name += f"_{k}_{v}"
+        name = prefix + name + "_" + "empty"
+        is_binary = False
+        if "BIN" in name:
+            is_binary = True
+        self.init_collection_general(insert_data=False, is_binary=is_binary, name=name)[0]
+
 
     @pytest.mark.tags(CaseLabel.L3)
-    @pytest.mark.parametrize("replica_number", [1])
-    @pytest.mark.parametrize("is_compacted", ["is_compacted"])
-    @pytest.mark.parametrize("is_deleted", ["is_deleted"])
+    @pytest.mark.parametrize("replica_number", [0, 1, 2])
+    @pytest.mark.parametrize("is_compacted", ["is_compacted", "not_compacted"])
+    @pytest.mark.parametrize("is_deleted", ["is_deleted", "not_deleted"])
     @pytest.mark.parametrize("is_string_indexed", ["is_string_indexed", "not_string_indexed"])
     @pytest.mark.parametrize("is_vector_indexed", ["is_vector_indexed", "not_vector_indexed"])
     @pytest.mark.parametrize("segment_status", ["only_growing", "only_sealed", "all"])
-    @pytest.mark.parametrize("index_type", ["IVF_FLAT"]) #"IVF_FLAT", "HNSW", "BIN_IVF_FLAT"
+    @pytest.mark.parametrize("index_type", ["HNSW", "BIN_IVF_FLAT"]) #"IVF_FLAT", "HNSW", "BIN_IVF_FLAT"
     def test_task_all(self, index_type, is_compacted,
                       segment_status, is_vector_indexed, is_string_indexed, replica_number, is_deleted, data_size):
         """
@@ -62,6 +72,7 @@ class TestActionBeforeReinstall(TestDeployBase):
                 continue
             name += f"_{k}_{v}"
         name = prefix + name
+        log.info(f"collection name: {name}")
         self._connect()
         ms = MilvusSys()
         if len(ms.query_nodes) < replica_number:
@@ -98,7 +109,7 @@ class TestActionBeforeReinstall(TestDeployBase):
             collection_w.load(replica_number=replica_number)
 
         # delete data for growing segment
-        delete_expr = f"{ct.default_int64_field_name} in [0,1,2,3,4,5,6,7,8,9]"
+        delete_expr = f"{ct.default_int64_field_name} in {[i for i in range(0,10)]}"
         if is_deleted == "is_deleted":
             collection_w.delete(expr=delete_expr)
 
@@ -118,14 +129,16 @@ class TestActionBeforeReinstall(TestDeployBase):
         if segment_status == "only_growing":
             pytest.skip(
                 "already get growing segment, skip subsequent operations")
-
         # insert with flush multiple times to generate multiple sealed segment
-        for i in range(2):
+        for i in range(5):
             self.init_collection_general(insert_data=True, is_binary=is_binary, nb=data_size,
                                          is_flush=False, is_index=True, name=name)
+            # at this step, all segment are sealed
             collection_w.flush()
-
-
+        # delete data for sealed segment and before index
+        delete_expr = f"{ct.default_int64_field_name} in {[i for i in range(10,20)]}"
+        if is_deleted == "is_deleted":
+            collection_w.delete(expr=delete_expr)       
         # params for creating index
         if is_binary:
             default_index_field = ct.default_binary_vec_field_name
@@ -144,12 +157,13 @@ class TestActionBeforeReinstall(TestDeployBase):
             collection_w.create_index(
                 default_string_field_name, default_string_index_params, index_name=default_string_index_name)
 
-        # delete data for sealed segment
-        delete_expr = f"{ct.default_int64_field_name} in [10,11,12,13,14,15,16,17,18,19]"
+        # delete data for sealed segment and afer index
+        delete_expr = f"{ct.default_int64_field_name} in {[i for i in range(20,30)]}"
         if is_deleted == "is_deleted":
             collection_w.delete(expr=delete_expr)
         if is_compacted == "is_compacted":
             collection_w.compact()
+        # get growing segment before reload
         if segment_status == "all":
             self.init_collection_general(insert_data=True, is_binary=is_binary, nb=3000,
                                          is_flush=False, is_index=True, name=name)
@@ -158,7 +172,7 @@ class TestActionBeforeReinstall(TestDeployBase):
             collection_w.release()
             collection_w.load(replica_number=replica_number)
 
-        # insert data to get growing segment
+        # insert data to get growing segment after reload
         if segment_status == "all":
             self.init_collection_general(insert_data=True, is_binary=is_binary, nb=3000,
                                          is_flush=False, is_index=True, name=name)
