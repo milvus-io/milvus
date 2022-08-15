@@ -27,24 +27,36 @@ type Collection struct {
 }
 
 func (c Collection) Clone() *Collection {
-	return &Collection{
-		TenantID:             c.TenantID,
-		CollectionID:         c.CollectionID,
-		Name:                 c.Name,
-		Description:          c.Description,
-		AutoID:               c.AutoID,
-		Fields:               c.Fields,
-		Partitions:           c.Partitions,
-		FieldIDToIndexID:     c.FieldIDToIndexID,
-		VirtualChannelNames:  c.VirtualChannelNames,
-		PhysicalChannelNames: c.PhysicalChannelNames,
-		ShardsNum:            c.ShardsNum,
-		ConsistencyLevel:     c.ConsistencyLevel,
-		CreateTime:           c.CreateTime,
-		StartPositions:       c.StartPositions,
-		Aliases:              c.Aliases,
-		Extra:                c.Extra,
+	clone := &Collection{
+		TenantID:         c.TenantID,
+		CollectionID:     c.CollectionID,
+		Name:             c.Name,
+		Description:      c.Description,
+		AutoID:           c.AutoID,
+		ShardsNum:        c.ShardsNum,
+		ConsistencyLevel: c.ConsistencyLevel,
+		CreateTime:       c.CreateTime,
+		Extra:            c.Extra,
 	}
+
+	clone.Partitions = make([]*Partition, 0, len(c.Partitions))
+	for _, partition := range c.Partitions {
+		clone.Partitions = append(clone.Partitions, partition.Clone())
+	}
+
+	clone.Fields = make([]*Field, 0, len(c.Fields))
+	for _, field := range c.Fields {
+		clone.Fields = append(clone.Fields, field.Clone())
+	}
+
+	clone.FieldIDToIndexID = common.CloneInt64Tuples(c.FieldIDToIndexID)
+	clone.VirtualChannelNames = common.CloneStringList(c.VirtualChannelNames)
+	clone.PhysicalChannelNames = common.CloneStringList(c.PhysicalChannelNames)
+	clone.StartPositions = common.CloneKeyDataPairs(c.StartPositions)
+	clone.Aliases = common.CloneStringList(c.Aliases)
+	clone.Extra = common.CloneS2S(c.Extra)
+
+	return clone
 }
 
 func UnmarshalCollectionModel(coll *pb.CollectionInfo) *Collection {

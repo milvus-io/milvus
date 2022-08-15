@@ -1,6 +1,9 @@
 package model
 
-import pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
+import (
+	"github.com/milvus-io/milvus/internal/common"
+	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
+)
 
 type Partition struct {
 	PartitionID               int64
@@ -8,6 +11,17 @@ type Partition struct {
 	PartitionCreatedTimestamp uint64
 	Extra                     map[string]string
 	CollectionID              int64
+}
+
+func (p Partition) Clone() *Partition {
+	clone := &Partition{
+		PartitionID:               p.PartitionID,
+		PartitionName:             p.PartitionName,
+		PartitionCreatedTimestamp: p.PartitionCreatedTimestamp,
+		Extra:                     common.CloneS2S(p.Extra),
+		CollectionID:              p.CollectionID,
+	}
+	return clone
 }
 
 func MarshalPartitionModel(partition *Partition) *pb.PartitionInfo {

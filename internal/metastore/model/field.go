@@ -1,6 +1,7 @@
 package model
 
 import (
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
@@ -14,6 +15,20 @@ type Field struct {
 	TypeParams   []*commonpb.KeyValuePair
 	IndexParams  []*commonpb.KeyValuePair
 	AutoID       bool
+}
+
+func (f Field) Clone() *Field {
+	clone := &Field{
+		FieldID:      f.FieldID,
+		Name:         f.Name,
+		IsPrimaryKey: f.IsPrimaryKey,
+		Description:  f.Description,
+		DataType:     f.DataType,
+		TypeParams:   common.CloneKeyValuePairs(f.TypeParams),
+		IndexParams:  common.CloneKeyValuePairs(f.IndexParams),
+		AutoID:       f.AutoID,
+	}
+	return clone
 }
 
 func MarshalFieldModel(field *Field) *schemapb.FieldSchema {
