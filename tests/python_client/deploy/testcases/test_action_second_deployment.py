@@ -5,7 +5,7 @@ from common.common_type import CaseLabel, CheckTasks
 from common.milvus_sys import MilvusSys
 from utils.util_pymilvus import *
 from deploy.base import TestDeployBase
-from deploy.common import gen_index_param, gen_search_param, get_all_collections
+from deploy.common import gen_index_param, gen_search_param, get_collections
 from utils.util_log import test_log as log
 
 
@@ -25,12 +25,11 @@ default_term_expr = f'{ct.default_int64_field_name} in [0, 1]'
 
 
 
-
-class TestActionBeforeReinstall(TestDeployBase):
+class TestActionSecondDeployment(TestDeployBase):
     """ Test case of action before reinstall """
 
-    @pytest.fixture(scope="function", params=get_all_collections())
-    def collection_name(self, request):
+    @pytest.fixture(scope="function", params=get_collections())
+    def all_collection_name(self, request):
         if request.param == [] or request.param == "":
             pytest.skip("The collection name is invalid")
         yield request.param
@@ -42,27 +41,25 @@ class TestActionBeforeReinstall(TestDeployBase):
         log.info("skip drop collection")
 
     @pytest.mark.tags(CaseLabel.L3)
-    def test_check(self, collection_name, data_size):
+    def test_check(self, all_collection_name, data_size):
         """
         before reinstall: create collection
         """
         self._connect()
         ms = MilvusSys()
-        name = collection_name
+        name = all_collection_name
+        is_binary = False
+        if "BIN" in name:
+            is_binary = True
         collection_w = self.init_collection_general(
-            insert_data=False, name=name, active_trace=True)[0]
+            insert_data=False, name=name, is_binary=is_binary, active_trace=True)[0]
         schema = collection_w.schema
         data_type = [field.dtype.name for field in schema.fields]
         field_name = [field.name for field in schema.fields]
         type_field_map = dict(zip(data_type,field_name))
-        is_binary = False
-        
-        if "BINARY_VECTOR" in data_type:
-            is_binary = True
-        
         if is_binary:
             default_index_field = ct.default_binary_vec_field_name
-            vector_index_type = "BIN_FLAT"
+            vector_index_type = "BIN_IVF_FLAT"
         else:
             default_index_field = ct.default_float_vec_field_name
             vector_index_type = "IVF_FLAT"       
@@ -102,30 +99,48 @@ class TestActionBeforeReinstall(TestDeployBase):
         if replicas_loaded == 0:
             collection_w.load()
         
-        # search and query    
+        # search and query
+        if "empty" in name:
+            # if the collection is empty, the search result should be empty, so no need to check            
+            check_task = None
+        else:
+            check_task = CheckTasks.check_search_results
+        
         collection_w.search(vectors_to_search[:default_nq], default_search_field,
                             search_params, default_limit,
                             default_search_exp,
                             output_fields=[ct.default_int64_field_name],
-                            check_task=CheckTasks.check_search_results,
+                            check_task=check_task,
                             check_items={"nq": default_nq,
                                         "limit": default_limit})
+        if "empty" in name:
+            check_task = None
+        else:
+            check_task = CheckTasks.check_query_not_empty
         collection_w.query(default_term_expr, output_fields=[ct.default_int64_field_name],
-                        check_task=CheckTasks.check_query_not_empty)
+                        check_task=check_task)
 
         # flush
         collection_w.num_entities
 
         # search and query
+        if "empty" in name:
+            check_task = None
+        else:
+            check_task = CheckTasks.check_search_results
         collection_w.search(vectors_to_search[:default_nq], default_search_field,
                             search_params, default_limit,
                             default_search_exp,
                             output_fields=[ct.default_int64_field_name],
-                            check_task=CheckTasks.check_search_results,
+                            check_task=check_task,
                             check_items={"nq": default_nq,
                                         "limit": default_limit})
+        if "empty" in name:
+            check_task = None
+        else:
+            check_task = CheckTasks.check_query_not_empty
         collection_w.query(default_term_expr, output_fields=[ct.default_int64_field_name],
-                        check_task=CheckTasks.check_query_not_empty)
+                        check_task=check_task)
         
         # insert data and flush
         for i in range(2):
