@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 var deleteNodeTestDir = "/tmp/milvus_test/deleteNode"
@@ -425,4 +426,45 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 			delNode.Operate([]flowgraph.Msg{fgMsg})
 		})
 	})
+}
+
+func TestFlowGraphDeleteNode_showDelBuf(t *testing.T) {
+	cm := storage.NewLocalChunkManager(storage.RootPath(deleteNodeTestDir))
+	defer cm.RemoveWithPrefix("")
+
+	fm := NewRendezvousFlushManager(NewAllocatorFactory(), cm, &mockReplica{}, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	chanName := "datanode-test-FlowGraphDeletenode-showDelBuf"
+	testPath := "/test/datanode/root/meta"
+	assert.NoError(t, clearEtcd(testPath))
+	Params.EtcdCfg.MetaRootPath = testPath
+	Params.DataNodeCfg.DeleteBinlogRootPath = testPath
+
+	c := &nodeConfig{
+		replica:      &mockReplica{},
+		allocator:    NewAllocatorFactory(),
+		vChannelName: chanName,
+	}
+	delNode, err := newDeleteNode(ctx, fm, make(chan string, 1), c)
+	require.NoError(t, err)
+
+	tests := []struct {
+		seg     UniqueID
+		numRows int64
+	}{
+		{111, 10},
+		{112, 10},
+		{113, 1},
+	}
+
+	for _, test := range tests {
+		delBuf := newDelDataBuf()
+		delBuf.updateSize(test.numRows)
+		delNode.delBuf.Store(test.seg, delBuf)
+	}
+
+	delNode.showDelBuf([]UniqueID{111, 112, 113}, 100)
 }
