@@ -291,11 +291,6 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 	return s.dataCoord.GetMetrics(ctx, req)
 }
 
-// CompleteCompaction completes a compaction with the result
-func (s *Server) CompleteCompaction(ctx context.Context, req *datapb.CompactionResult) (*commonpb.Status, error) {
-	return s.dataCoord.CompleteCompaction(ctx, req)
-}
-
 // ManualCompaction triggers a compaction for a collection
 func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompactionRequest) (*milvuspb.ManualCompactionResponse, error) {
 	return s.dataCoord.ManualCompaction(ctx, req)

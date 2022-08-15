@@ -801,7 +801,6 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 		ds.replica,
 		ds.flushManager,
 		ds.idAllocator,
-		node.dataCoord,
 		req,
 	)
 
@@ -809,6 +808,42 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
+	}, nil
+}
+
+// GetCompactionState called by DataCoord
+// return status of all compaction plans
+func (node *DataNode) GetCompactionState(ctx context.Context, req *datapb.CompactionStateRequest) (*datapb.CompactionStateResponse, error) {
+	log.Info("DataNode.GetCompactionState")
+	if !node.isHealthy() {
+		return &datapb.CompactionStateResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "DataNode is unhealthy",
+			},
+		}, nil
+	}
+	results := make([]*datapb.CompactionStateResult, 0)
+	node.compactionExecutor.executing.Range(func(k, v interface{}) bool {
+		results = append(results, &datapb.CompactionStateResult{
+			State:  commonpb.CompactionState_Executing,
+			PlanID: k.(UniqueID),
+		})
+		return true
+	})
+	node.compactionExecutor.completed.Range(func(k, v interface{}) bool {
+		results = append(results, &datapb.CompactionStateResult{
+			State:  commonpb.CompactionState_Completed,
+			PlanID: k.(UniqueID),
+			Result: v.(*datapb.CompactionResult),
+		})
+		node.compactionExecutor.completed.Delete(k)
+		return true
+	})
+	log.Debug("Compaction results", zap.Any("results", results))
+	return &datapb.CompactionStateResponse{
+		Status:  &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		Results: results,
 	}, nil
 }
 

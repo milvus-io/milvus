@@ -36,7 +36,6 @@ service DataCoord {
 
   // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
   rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
-  rpc CompleteCompaction(CompactionResult) returns (common.Status) {}
   rpc ManualCompaction(milvus.ManualCompactionRequest) returns (milvus.ManualCompactionResponse) {}
   rpc GetCompactionState(milvus.GetCompactionStateRequest) returns (milvus.GetCompactionStateResponse) {}
   rpc GetCompactionStateWithPlans(milvus.GetCompactionPlansRequest) returns (milvus.GetCompactionPlansResponse) {}
@@ -58,14 +57,16 @@ service DataCoord {
 
 service DataNode {
   rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
-  rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
+  rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns (milvus.StringResponse) {}
 
   rpc WatchDmChannels(WatchDmChannelsRequest) returns (common.Status) {}
   rpc FlushSegments(FlushSegmentsRequest) returns(common.Status) {}
 
   // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
   rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
+
   rpc Compaction(CompactionPlan) returns (common.Status) {}
+  rpc GetCompactionState(CompactionStateRequest) returns (CompactionStateResponse) {}
 
   // https://wiki.lfaidata.foundation/display/MIL/MEP+24+--+Support+bulk+load
   rpc Import(ImportTaskRequest) returns(common.Status) {}
@@ -391,6 +392,10 @@ enum CompactionType {
   MixCompaction = 3;
 }
 
+message CompactionStateRequest {
+  common.MsgBase base = 1;
+}
+
 message CompactionSegmentBinlogs {
   int64 segmentID = 1;
   repeated FieldBinlog fieldBinlogs = 2;
@@ -416,6 +421,17 @@ message CompactionResult {
   repeated FieldBinlog insert_logs = 4;
   repeated FieldBinlog field2StatslogPaths = 5;
   repeated FieldBinlog deltalogs = 6;
+}
+
+message CompactionStateResult {
+  int64 planID = 1;
+  common.CompactionState state = 2;
+  CompactionResult result = 3;
+}
+
+message CompactionStateResponse {
+  common.Status status = 1;
+  repeated CompactionStateResult results = 2;
 }
 
 // Deprecated

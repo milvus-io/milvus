@@ -2063,6 +2063,10 @@ func TestGetCompactionState(t *testing.T) {
 						{state: executing},
 						{state: completed},
 						{state: completed},
+						{state: failed, plan: &datapb.CompactionPlan{PlanID: 1}},
+						{state: timeout, plan: &datapb.CompactionPlan{PlanID: 2}},
+						{state: timeout},
+						{state: timeout},
 						{state: timeout},
 					}
 				},
@@ -2075,7 +2079,8 @@ func TestGetCompactionState(t *testing.T) {
 		assert.Equal(t, commonpb.CompactionState_Executing, resp.GetState())
 		assert.EqualValues(t, 3, resp.GetExecutingPlanNo())
 		assert.EqualValues(t, 2, resp.GetCompletedPlanNo())
-		assert.EqualValues(t, 1, resp.GetTimeoutPlanNo())
+		assert.EqualValues(t, 1, resp.GetFailedPlanNo())
+		assert.EqualValues(t, 4, resp.GetTimeoutPlanNo())
 	})
 
 	t.Run("with closed server", func(t *testing.T) {
@@ -2086,50 +2091,6 @@ func TestGetCompactionState(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
 		assert.Equal(t, msgDataCoordIsUnhealthy(Params.DataCoordCfg.GetNodeID()), resp.GetStatus().GetReason())
-	})
-}
-
-func TestCompleteCompaction(t *testing.T) {
-	Params.DataCoordCfg.EnableCompaction = true
-	t.Run("test complete compaction successfully", func(t *testing.T) {
-		svr := &Server{}
-		svr.isServing = ServerStateHealthy
-
-		svr.compactionHandler = &mockCompactionHandler{
-			methods: map[string]interface{}{
-				"completeCompaction": func(result *datapb.CompactionResult) error {
-					return nil
-				},
-			},
-		}
-		status, err := svr.CompleteCompaction(context.TODO(), &datapb.CompactionResult{})
-		assert.Nil(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
-	})
-
-	t.Run("test complete compaction failure", func(t *testing.T) {
-		svr := &Server{}
-		svr.isServing = ServerStateHealthy
-		svr.compactionHandler = &mockCompactionHandler{
-			methods: map[string]interface{}{
-				"completeCompaction": func(result *datapb.CompactionResult) error {
-					return errors.New("mock error")
-				},
-			},
-		}
-		status, err := svr.CompleteCompaction(context.TODO(), &datapb.CompactionResult{})
-		assert.Nil(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
-	})
-
-	t.Run("with closed server", func(t *testing.T) {
-		svr := &Server{}
-		svr.isServing = ServerStateStopped
-
-		resp, err := svr.CompleteCompaction(context.Background(), &datapb.CompactionResult{})
-		assert.Nil(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
-		assert.Equal(t, msgDataCoordIsUnhealthy(Params.DataCoordCfg.GetNodeID()), resp.GetReason())
 	})
 }
 

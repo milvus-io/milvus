@@ -838,6 +838,10 @@ class TestCompactionOperation(TestcaseBase):
         # create collection shard_num=1, insert 11 segments, each with one entity
         collection_w = self.collection_insert_multi_segments_one_shard(prefix, num_of_segment=num_of_segment)
 
+        # waiting for auto compaction finished
+        collection_w.collection.compaction_id = 0
+        collection_w.wait_for_compaction_completed()
+
         collection_w.compact()
         collection_w.wait_for_compaction_completed()
         c_plans, _ = collection_w.get_compaction_plans(check_task=CheckTasks.check_merge_compact, check_items={"segment_num": 2})

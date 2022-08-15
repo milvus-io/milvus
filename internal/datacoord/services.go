@@ -782,38 +782,6 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 	}, nil
 }
 
-// CompleteCompaction completes a compaction with the result
-func (s *Server) CompleteCompaction(ctx context.Context, req *datapb.CompactionResult) (*commonpb.Status, error) {
-	log.Info("receive complete compaction request", zap.Int64("planID", req.PlanID), zap.Int64("segmentID", req.GetSegmentID()))
-
-	resp := &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_UnexpectedError,
-	}
-
-	if s.isClosed() {
-		log.Warn("failed to complete compaction", zap.Int64("planID", req.PlanID),
-			zap.Error(errDataCoordIsUnhealthy(Params.DataCoordCfg.GetNodeID())))
-
-		resp.Reason = msgDataCoordIsUnhealthy(Params.DataCoordCfg.GetNodeID())
-		return resp, nil
-	}
-
-	if !Params.DataCoordCfg.EnableCompaction {
-		resp.Reason = "compaction disabled"
-		return resp, nil
-	}
-
-	if err := s.compactionHandler.completeCompaction(req); err != nil {
-		log.Error("failed to complete compaction", zap.Int64("planID", req.PlanID), zap.Error(err))
-		resp.Reason = err.Error()
-		return resp, nil
-	}
-
-	log.Info("success to complete compaction", zap.Int64("planID", req.PlanID))
-	resp.ErrorCode = commonpb.ErrorCode_Success
-	return resp, nil
-}
-
 // ManualCompaction triggers a compaction for a collection
 func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompactionRequest) (*milvuspb.ManualCompactionResponse, error) {
 	log.Info("received manual compaction", zap.Int64("collectionID", req.GetCollectionID()))
@@ -878,15 +846,16 @@ func (s *Server) GetCompactionState(ctx context.Context, req *milvuspb.GetCompac
 	}
 
 	tasks := s.compactionHandler.getCompactionTasksBySignalID(req.GetCompactionID())
-	state, executingCnt, completedCnt, timeoutCnt := getCompactionState(tasks)
+	state, executingCnt, completedCnt, failedCnt, timeoutCnt := getCompactionState(tasks)
 
 	resp.State = state
 	resp.ExecutingPlanNo = int64(executingCnt)
 	resp.CompletedPlanNo = int64(completedCnt)
 	resp.TimeoutPlanNo = int64(timeoutCnt)
+	resp.FailedPlanNo = int64(failedCnt)
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	log.Info("success to get compaction state", zap.Any("state", state), zap.Int("executing", executingCnt),
-		zap.Int("completed", completedCnt), zap.Int("timeout", timeoutCnt))
+		zap.Int("completed", completedCnt), zap.Int("failed", failedCnt), zap.Int("timeout", timeoutCnt))
 	return resp, nil
 }
 
@@ -914,7 +883,7 @@ func (s *Server) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.
 		resp.MergeInfos = append(resp.MergeInfos, getCompactionMergeInfo(task))
 	}
 
-	state, _, _, _ := getCompactionState(tasks)
+	state, _, _, _, _ := getCompactionState(tasks)
 
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	resp.State = state
@@ -940,13 +909,19 @@ func getCompactionMergeInfo(task *compactionTask) *milvuspb.CompactionMergeInfo 
 	}
 }
 
-func getCompactionState(tasks []*compactionTask) (state commonpb.CompactionState, executingCnt, completedCnt, timeoutCnt int) {
+func getCompactionState(tasks []*compactionTask) (state commonpb.CompactionState, executingCnt, completedCnt, failedCnt, timeoutCnt int) {
+	if len(tasks) == 0 {
+		state = commonpb.CompactionState_Executing
+		return
+	}
 	for _, t := range tasks {
 		switch t.state {
 		case executing:
 			executingCnt++
 		case completed:
 			completedCnt++
+		case failed:
+			failedCnt++
 		case timeout:
 			timeoutCnt++
 		}
