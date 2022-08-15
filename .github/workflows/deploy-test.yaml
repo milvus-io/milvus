@@ -56,7 +56,7 @@ jobs:
         env:
           DEFAULT_OLD_IMAGE_REPO: "milvusdb/milvus"
           DEFAULT_OLD_IMAGE_TAG: "latest"
-          DEFAULT_PREVIOUS_RELEASE_VERSION: "v2.0.2"
+          DEFAULT_PREVIOUS_RELEASE_VERSION: "v2.1.0"
           DEFAULT_NEW_IMAGE_REPO: "milvusdb/milvus"
           DEFAULT_NEW_IMAGE_TAG: "master-latest"
         run: |
