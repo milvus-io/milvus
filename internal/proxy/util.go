@@ -638,18 +638,20 @@ func ValidateRoleName(entity string) error {
 	return validateName(entity, "role name")
 }
 
-func ValidateObjectName(entity string) error {
-	entity = strings.TrimSpace(entity)
-	if entity == "" {
-		return fmt.Errorf("objectName should not be empty")
+func IsDefaultRole(roleName string) bool {
+	for _, defaultRole := range util.DefaultRoles {
+		if defaultRole == roleName {
+			return true
+		}
 	}
+	return false
+}
 
-	if int64(len(entity)) > Params.ProxyCfg.MaxNameLength {
-		msg := fmt.Sprintf("invalid object name: %s. The length of resource name must be less than %s characters",
-			entity, strconv.FormatInt(Params.ProxyCfg.MaxNameLength, 10))
-		return errors.New(msg)
+func ValidateObjectName(entity string) error {
+	if util.IsAnyWord(entity) {
+		return nil
 	}
-	return nil
+	return validateName(entity, "role name")
 }
 
 func ValidateObjectType(entity string) error {
@@ -665,6 +667,9 @@ func ValidatePrincipalType(entity string) error {
 }
 
 func ValidatePrivilege(entity string) error {
+	if util.IsAnyWord(entity) {
+		return nil
+	}
 	return validateName(entity, "Privilege")
 }
 

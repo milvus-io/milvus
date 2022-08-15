@@ -65,6 +65,12 @@ func TestPrivilegeInterceptor(t *testing.T) {
 		})
 		assert.NotNil(t, err)
 
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "root:123456"), &milvuspb.LoadCollectionRequest{
+			DbName:         "db_test",
+			CollectionName: "col1",
+		})
+		assert.Nil(t, err)
+
 		err = InitMetaCache(ctx, client, queryCoord, mgr)
 		assert.Nil(t, err)
 		_, err = PrivilegeInterceptor(ctx, &milvuspb.HasCollectionRequest{

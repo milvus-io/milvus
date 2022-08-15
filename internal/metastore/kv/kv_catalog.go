@@ -1049,13 +1049,18 @@ func (kc *Catalog) SelectGrant(ctx context.Context, tenant string, entity *milvu
 			return err
 		}
 		for _, grantorEntity := range grantPrivilegeEntity.Entities {
+			privilegeName := util.PrivilegeNameForAPI(grantorEntity.Privilege.Name)
+			if grantorEntity.Privilege.Name == util.AnyWord {
+				privilegeName = util.AnyWord
+			}
+
 			entities = append(entities, &milvuspb.GrantEntity{
 				Role:       &milvuspb.RoleEntity{Name: entity.Role.Name},
 				Object:     &milvuspb.ObjectEntity{Name: object},
 				ObjectName: objectName,
 				Grantor: &milvuspb.GrantorEntity{
 					User:      &milvuspb.UserEntity{Name: grantorEntity.User.Name},
-					Privilege: &milvuspb.PrivilegeEntity{Name: util.PrivilegeNameForAPI(grantorEntity.Privilege.Name)},
+					Privilege: &milvuspb.PrivilegeEntity{Name: privilegeName},
 				},
 			})
 		}

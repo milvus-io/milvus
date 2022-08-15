@@ -665,6 +665,13 @@ func TestValidateName(t *testing.T) {
 	}
 	assert.NotNil(t, ValidateObjectName(" "))
 	assert.NotNil(t, ValidateObjectName(string(longName)))
+	assert.Nil(t, ValidateObjectName("*"))
+}
+
+func TestIsDefaultRole(t *testing.T) {
+	assert.Equal(t, true, IsDefaultRole(util.RoleAdmin))
+	assert.Equal(t, true, IsDefaultRole(util.RolePublic))
+	assert.Equal(t, false, IsDefaultRole("manager"))
 }
 
 func GetContext(ctx context.Context, originValue string) context.Context {

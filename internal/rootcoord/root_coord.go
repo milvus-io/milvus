@@ -1298,14 +1298,6 @@ func (c *Core) initRbac() (initError error) {
 		return
 	}
 
-	// create default rolemapping, root -> admin
-	if initError = c.MetaTable.OperateUserRole(util.DefaultTenant,
-		&milvuspb.UserEntity{Name: util.UserRoot},
-		&milvuspb.RoleEntity{Name: util.RoleAdmin},
-		milvuspb.OperateUserRoleType_AddUserToRole); initError != nil {
-		return
-	}
-
 	// grant privileges for the public role
 	globalPrivileges := []string{
 		commonpb.ObjectPrivilege_PrivilegeDescribeCollection.String(),
@@ -1319,7 +1311,7 @@ func (c *Core) initRbac() (initError error) {
 		if initError = c.MetaTable.OperatePrivilege(util.DefaultTenant, &milvuspb.GrantEntity{
 			Role:       &milvuspb.RoleEntity{Name: util.RolePublic},
 			Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Global.String()},
-			ObjectName: funcutil.AnyObjectName,
+			ObjectName: util.AnyWord,
 			Grantor: &milvuspb.GrantorEntity{
 				User:      &milvuspb.UserEntity{Name: util.RoleAdmin},
 				Privilege: &milvuspb.PrivilegeEntity{Name: globalPrivilege},
@@ -1332,7 +1324,7 @@ func (c *Core) initRbac() (initError error) {
 		if initError = c.MetaTable.OperatePrivilege(util.DefaultTenant, &milvuspb.GrantEntity{
 			Role:       &milvuspb.RoleEntity{Name: util.RolePublic},
 			Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Collection.String()},
-			ObjectName: funcutil.AnyObjectName,
+			ObjectName: util.AnyWord,
 			Grantor: &milvuspb.GrantorEntity{
 				User:      &milvuspb.UserEntity{Name: util.RoleAdmin},
 				Privilege: &milvuspb.PrivilegeEntity{Name: collectionPrivilege},
@@ -3241,10 +3233,13 @@ func (c *Core) isValidGrantor(entity *milvuspb.GrantorEntity, object string) err
 	if entity.Privilege == nil {
 		return fmt.Errorf("the privilege entity in the grantor entity is nil")
 	}
+	if util.IsAnyWord(entity.Privilege.Name) {
+		return nil
+	}
 	if privilegeName := util.PrivilegeNameForMetastore(entity.Privilege.Name); privilegeName == "" {
 		return fmt.Errorf("the privilege name in the privilege entity is invalid, current value: %s", entity.Privilege.Name)
 	}
-	privileges, ok := util.GetObjectPrivileges()[object]
+	privileges, ok := util.ObjectPrivileges[object]
 	if !ok {
 		return fmt.Errorf("the object type is invalid, current value: %s", object)
 	}
@@ -3291,10 +3286,12 @@ func (c *Core) OperatePrivilege(ctx context.Context, in *milvuspb.OperatePrivile
 	}
 
 	logger.Debug("before PrivilegeNameForMetastore", zap.String("privilege", in.Entity.Grantor.Privilege.Name))
-	in.Entity.Grantor.Privilege.Name = util.PrivilegeNameForMetastore(in.Entity.Grantor.Privilege.Name)
+	if !util.IsAnyWord(in.Entity.Grantor.Privilege.Name) {
+		in.Entity.Grantor.Privilege.Name = util.PrivilegeNameForMetastore(in.Entity.Grantor.Privilege.Name)
+	}
 	logger.Debug("after PrivilegeNameForMetastore", zap.String("privilege", in.Entity.Grantor.Privilege.Name))
 	if in.Entity.Object.Name == commonpb.ObjectType_Global.String() {
-		in.Entity.ObjectName = funcutil.AnyObjectName
+		in.Entity.ObjectName = util.AnyWord
 	}
 	if err := c.MetaTable.OperatePrivilege(util.DefaultTenant, in.Entity, in.Type); err != nil {
 		errMsg := "fail to operate the privilege"

@@ -1434,6 +1434,7 @@ func TestRbacSelectGrant(t *testing.T) {
 	grantPrivilegeEntity := &milvuspb.GrantPrivilegeEntity{Entities: []*milvuspb.GrantorEntity{
 		{User: &milvuspb.UserEntity{Name: "aaa"}, Privilege: &milvuspb.PrivilegeEntity{Name: "111"}},
 		{User: &milvuspb.UserEntity{Name: "bbb"}, Privilege: &milvuspb.PrivilegeEntity{Name: "222"}},
+		{User: &milvuspb.UserEntity{Name: "ccc"}, Privilege: &milvuspb.PrivilegeEntity{Name: "*"}},
 	}}
 	grantPrivilegeEntityByte, _ := proto.Marshal(grantPrivilegeEntity)
 
@@ -1448,7 +1449,7 @@ func TestRbacSelectGrant(t *testing.T) {
 	}
 	results, err := mt.SelectGrant(util.DefaultTenant, entity)
 	assert.Nil(t, err)
-	assert.Equal(t, 2, len(results))
+	assert.Equal(t, 3, len(results))
 
 	mockTxnKV.load = func(key string) (string, error) {
 		return "", fmt.Errorf("load error")
@@ -1468,7 +1469,7 @@ func TestRbacSelectGrant(t *testing.T) {
 	entity.Object = nil
 	results, err = mt.SelectGrant(util.DefaultTenant, entity)
 	assert.Nil(t, err)
-	assert.Equal(t, 3, len(results))
+	assert.Equal(t, 4, len(results))
 
 	mockTxnKV.loadWithPrefix = func(key string) ([]string, []string, error) {
 		return nil, nil, fmt.Errorf("load with prefix error")

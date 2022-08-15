@@ -43,28 +43,13 @@ const (
 	RolePublic          = "public"
 
 	PrivilegeWord = "Privilege"
+	AnyWord       = "*"
 )
 
-// StringSet convert array to map for conveniently check if the array contains an element
-func StringSet(strings []string) map[string]struct{} {
-	stringsMap := make(map[string]struct{})
-	for _, str := range strings {
-		stringsMap[str] = struct{}{}
-	}
-	return stringsMap
-}
+var (
+	DefaultRoles = []string{RoleAdmin, RolePublic}
 
-func StringList(stringMap map[string]struct{}) []string {
-	strs := make([]string, 0, len(stringMap))
-	for k := range stringMap {
-		strs = append(strs, k)
-	}
-	return strs
-}
-
-// GetObjectPrivileges get the mapping between object types and privileges. This kind of data is constant and doesn't support to CRUD
-func GetObjectPrivileges() map[string][]string {
-	return map[string][]string{
+	ObjectPrivileges = map[string][]string{
 		commonpb.ObjectType_Collection.String(): {
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeLoad.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeRelease.String()),
@@ -99,6 +84,23 @@ func GetObjectPrivileges() map[string][]string {
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeSelectUser.String()),
 		},
 	}
+)
+
+// StringSet convert array to map for conveniently check if the array contains an element
+func StringSet(strings []string) map[string]struct{} {
+	stringsMap := make(map[string]struct{})
+	for _, str := range strings {
+		stringsMap[str] = struct{}{}
+	}
+	return stringsMap
+}
+
+func StringList(stringMap map[string]struct{}) []string {
+	strs := make([]string, 0, len(stringMap))
+	for k := range stringMap {
+		strs = append(strs, k)
+	}
+	return strs
 }
 
 // MetaStore2API convert meta-store's privilege name to api's
@@ -122,4 +124,8 @@ func PrivilegeNameForMetastore(name string) string {
 		return ""
 	}
 	return dbPrivilege
+}
+
+func IsAnyWord(word string) bool {
+	return word == AnyWord
 }
