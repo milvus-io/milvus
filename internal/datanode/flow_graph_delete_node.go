@@ -105,7 +105,7 @@ func (dn *deleteNode) Close() {
 	log.Info("Flowgraph Delete Node closing")
 }
 
-func (dn *deleteNode) bufferDeleteMsg(msg *msgstream.DeleteMsg, tr TimeRange) error {
+func (dn *deleteNode) bufferDeleteMsg(msg *msgstream.DeleteMsg, tr TimeRange) ([]UniqueID, error) {
 	log.Debug("bufferDeleteMsg", zap.Any("primary keys", msg.PrimaryKeys), zap.String("vChannelName", dn.channelName))
 
 	// Update delBuf for merged segments
@@ -129,11 +129,14 @@ func (dn *deleteNode) bufferDeleteMsg(msg *msgstream.DeleteMsg, tr TimeRange) er
 	primaryKeys := storage.ParseIDs2PrimaryKeys(msg.PrimaryKeys)
 	segIDToPks, segIDToTss := dn.filterSegmentByPK(msg.PartitionID, primaryKeys, msg.Timestamps)
 
+	segIDs := make([]UniqueID, 0, len(segIDToPks))
 	for segID, pks := range segIDToPks {
+		segIDs = append(segIDs, segID)
+
 		rows := len(pks)
 		tss, ok := segIDToTss[segID]
 		if !ok || rows != len(tss) {
-			return fmt.Errorf("primary keys and timestamp's element num mis-match, segmentID = %d", segID)
+			return nil, fmt.Errorf("primary keys and timestamp's element num mis-match, segmentID = %d", segID)
 		}
 
 		var delDataBuf *DelDataBuf
@@ -164,22 +167,17 @@ func (dn *deleteNode) bufferDeleteMsg(msg *msgstream.DeleteMsg, tr TimeRange) er
 		dn.delBuf.Store(segID, delDataBuf)
 	}
 
-	return nil
+	return segIDs, nil
 }
 
-func (dn *deleteNode) showDelBuf() {
-	segments := dn.replica.filterSegments(dn.channelName, common.InvalidPartitionID)
-	for _, seg := range segments {
-		segID := seg.segmentID
+func (dn *deleteNode) showDelBuf(segIDs []UniqueID, ts Timestamp) {
+	for _, segID := range segIDs {
 		if v, ok := dn.delBuf.Load(segID); ok {
 			delDataBuf, _ := v.(*DelDataBuf)
 			log.Debug("delta buffer status",
+				zap.Uint64("timestamp", ts),
 				zap.Int64("segment ID", segID),
 				zap.Int64("entries", delDataBuf.GetEntriesNum()),
-				zap.String("vChannel", dn.channelName))
-		} else {
-			log.Debug("segment not exist",
-				zap.Int64("segment ID", segID),
 				zap.String("vChannel", dn.channelName))
 		}
 	}
@@ -211,22 +209,24 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 		msg.SetTraceCtx(ctx)
 	}
 
+	var segIDs []UniqueID
 	for i, msg := range fgMsg.deleteMessages {
 		traceID, _, _ := trace.InfoFromSpan(spans[i])
 		log.Info("Buffer delete request in DataNode", zap.String("traceID", traceID))
 
-		err := dn.bufferDeleteMsg(msg, fgMsg.timeRange)
+		tmpSegIDs, err := dn.bufferDeleteMsg(msg, fgMsg.timeRange)
 		if err != nil {
 			// error occurs only when deleteMsg is misaligned, should not happen
 			err = fmt.Errorf("buffer delete msg failed, err = %s", err)
 			log.Error(err.Error())
 			panic(err)
 		}
+		segIDs = append(segIDs, tmpSegIDs...)
 	}
 
-	// show all data in dn.delBuf
+	// show changed segment's status in dn.delBuf of a certain ts
 	if len(fgMsg.deleteMessages) != 0 {
-		dn.showDelBuf()
+		dn.showDelBuf(segIDs, fgMsg.timeRange.timestampMax)
 	}
 
 	// handle flush
