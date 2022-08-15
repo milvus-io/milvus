@@ -98,7 +98,9 @@ ReduceHelper::Reduce() {
             search_result->distances_ = std::move(distances);
             search_result->seg_offsets_ = std::move(seg_offsets);
         }
-        search_result->real_topK_per_nq_ = std::move(final_real_topKs_[i]);
+        search_result->topk_per_nq_prefix_sum_.resize(final_real_topKs_[i].size() + 1);
+        std::partial_sum(final_real_topKs_[i].begin(), final_real_topKs_[i].end(),
+                         search_result->topk_per_nq_prefix_sum_.begin() + 1);
     }
 
     // fill target entry
@@ -110,20 +112,29 @@ ReduceHelper::Reduce() {
 
 void
 ReduceHelper::Marshal() {
-    std::vector<int64_t> real_topK_per_nq(total_nq_);
+    // example:
+    //  ----------------------------------
+    //           nq0     nq1     nq2
+    //   sr0    topk00  topk01  topk02
+    //   sr1    topk10  topk11  topk12
+    //  ----------------------------------
+    // then:
+    // result_slice_offsets[] = {
+    //      0,
+    //                                      == sr0->topk_per_nq_prefix_sum_[0] + sr1->topk_per_nq_prefix_sum_[0]
+    //      ((topk00) + (topk10)),
+    //                                      == sr0->topk_per_nq_prefix_sum_[1] + sr1->topk_per_nq_prefix_sum_[1]
+    //      ((topk00 + topk01) + (topk10 + topk11)),
+    //                                      == sr0->topk_per_nq_prefix_sum_[2] + sr1->topk_per_nq_prefix_sum_[2]
+    //      ((topk00 + topk01 + topk02) + (topk10 + topk11 + topk12)),
+    //                                      == sr0->topk_per_nq_prefix_sum_[3] + sr1->topk_per_nq_prefix_sum_[3]
+    // }
+    auto result_slice_offsets = std::vector<int64_t>(nq_slice_offsets_.size(), 0);
     for (auto search_result : search_results_) {
-        AssertInfo(search_result->real_topK_per_nq_.size() == total_nq_,
-                   "incorrect real_topK_per_nq_ size in search result");
-        for (int j = 0; j < total_nq_; j++) {
-            real_topK_per_nq[j] += search_result->real_topK_per_nq_[j];
-        }
-    }
-
-    auto result_slice_offsets = std::vector<int64_t>(nq_slice_offsets_.size());
-    for (int i = 1; i < nq_slice_offsets_.size(); i++) {
-        result_slice_offsets[i] = result_slice_offsets[i - 1];
-        for (auto j = nq_slice_offsets_[i - 1]; j < nq_slice_offsets_[i]; j++) {
-            result_slice_offsets[i] += real_topK_per_nq[j];
+        AssertInfo(search_result->topk_per_nq_prefix_sum_.size() == search_result->total_nq_ + 1,
+                   "incorrect topk_per_nq_prefix_sum_ size in search result");
+        for (int i = 1; i < nq_slice_offsets_.size(); i++) {
+            result_slice_offsets[i] += search_result->topk_per_nq_prefix_sum_[nq_slice_offsets_[i]];
         }
     }
     AssertInfo(result_slice_offsets[num_slices_] <= total_nq_ * unify_topK_,
@@ -169,7 +180,8 @@ ReduceHelper::FilterInvalidSearchResult(SearchResult* search_result) {
 
     search_result->distances_ = std::move(distances);
     search_result->seg_offsets_ = std::move(seg_offsets);
-    search_result->real_topK_per_nq_ = std::move(real_topks);
+    search_result->topk_per_nq_prefix_sum_.resize(nq + 1);
+    std::partial_sum(real_topks.begin(), real_topks.end(), search_result->topk_per_nq_prefix_sum_.begin() + 1);
 }
 
 void
@@ -198,14 +210,14 @@ ReduceHelper::ReduceResultData(int slice_index) {
         std::vector<SearchResultPair> result_pairs;
         for (int i = 0; i < num_segments_; i++) {
             auto search_result = search_results_[i];
-            if (search_result->real_topK_per_nq_[qi] == 0) {
+            if (search_result->topk_per_nq_prefix_sum_[qi + 1] - search_result->topk_per_nq_prefix_sum_[qi] == 0) {
                 continue;
             }
-            auto base_offset = search_result->get_result_count(qi);
+            auto base_offset = search_result->topk_per_nq_prefix_sum_[qi];
             auto primary_key = search_result->primary_keys_[base_offset];
             auto distance = search_result->distances_[base_offset];
             result_pairs.emplace_back(primary_key, distance, search_result, i, base_offset,
-                                      base_offset + search_result->real_topK_per_nq_[qi]);
+                                      search_result->topk_per_nq_prefix_sum_[qi + 1]);
         }
 
         // nq has no results for all segments
@@ -303,8 +315,8 @@ ReduceHelper::GetSearchResultDataSlice(int slice_index_, int64_t result_count) {
                 continue;
             }
 
-            auto result_start = search_result->get_result_count(nq_offset);
-            auto result_end = result_start + search_result->real_topK_per_nq_[nq_offset];
+            auto result_start = search_result->topk_per_nq_prefix_sum_[nq_offset];
+            auto result_end = search_result->topk_per_nq_prefix_sum_[nq_offset + 1];
             for (auto offset = result_start; offset < result_end; offset++) {
                 auto loc = search_result->result_offsets_[offset];
                 AssertInfo(loc < result_count && loc >= 0,
@@ -333,7 +345,8 @@ ReduceHelper::GetSearchResultDataSlice(int slice_index_, int64_t result_count) {
                 result_pairs[loc] = std::make_pair(search_result, offset);
             }
 
-            topK_count += search_result->real_topK_per_nq_[nq_offset];
+            topK_count += search_result->topk_per_nq_prefix_sum_[nq_offset + 1] -
+                          search_result->topk_per_nq_prefix_sum_[nq_offset];
         }
 
         // update result topKs
