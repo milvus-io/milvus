@@ -908,6 +908,7 @@ message GetCompactionStateResponse {
   int64 executingPlanNo = 3;
   int64 timeoutPlanNo = 4;
   int64 completedPlanNo = 5;
+  int64 failedPlanNo = 6;
 }
 
 message GetCompactionPlansRequest {

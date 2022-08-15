@@ -436,18 +436,18 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 		}
 
 		emptyTask.plan = plan
-		err := emptyTask.compact()
+		_, err := emptyTask.compact()
 		assert.Error(t, err)
 
 		plan.Type = datapb.CompactionType_InnerCompaction
 		plan.SegmentBinlogs = emptySegmentBinlogs
-		err = emptyTask.compact()
+		_, err = emptyTask.compact()
 		assert.Error(t, err)
 
 		plan.Type = datapb.CompactionType_MergeCompaction
 		emptyTask.allocatorInterface = invalidAlloc
 		plan.SegmentBinlogs = notEmptySegmentBinlogs
-		err = emptyTask.compact()
+		_, err = emptyTask.compact()
 		assert.Error(t, err)
 
 		emptyTask.stop()
@@ -490,7 +490,6 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 			rc := &RootCoordFactory{
 				pkType: c.pkType,
 			}
-			dc := &DataCoordFactory{}
 			mockfm := &mockFlushManager{}
 			mockbIO := &binlogIO{cm, alloc}
 			replica, err := newReplica(context.TODO(), rc, cm, c.colID)
@@ -527,12 +526,12 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 
 			ctx, cancel := context.WithCancel(context.TODO())
 			cancel()
-			canceledTask := newCompactionTask(ctx, mockbIO, mockbIO, replica, mockfm, alloc, dc, plan)
-			err = canceledTask.compact()
+			canceledTask := newCompactionTask(ctx, mockbIO, mockbIO, replica, mockfm, alloc, plan)
+			_, err = canceledTask.compact()
 			assert.Error(t, err)
 
-			task := newCompactionTask(context.TODO(), mockbIO, mockbIO, replica, mockfm, alloc, dc, plan)
-			err = task.compact()
+			task := newCompactionTask(context.TODO(), mockbIO, mockbIO, replica, mockfm, alloc, plan)
+			_, err = task.compact()
 			assert.NoError(t, err)
 
 			updates, err := replica.getSegmentStatisticsUpdates(c.segID)
@@ -558,7 +557,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 			require.NoError(t, err)
 			plan.PlanID++
 
-			err = task.compact()
+			_, err = task.compact()
 			assert.NoError(t, err)
 			// The segment should be removed
 			assert.False(t, replica.hasSegment(c.segID, true))
@@ -578,7 +577,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 				},
 			}
 			plan.SegmentBinlogs = segmentBinlogsWithEmptySegment
-			err = task.compact()
+			_, err = task.compact()
 			assert.Error(t, err)
 
 			plan.SegmentBinlogs = segBinlogs
@@ -591,7 +590,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 			plan.PlanID++
 
 			plan.Timetravel = Timestamp(10000)
-			err = task.compact()
+			_, err = task.compact()
 			assert.NoError(t, err)
 
 			updates, err = replica.getSegmentStatisticsUpdates(c.segID)
@@ -607,7 +606,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 			plan.PlanID++
 
 			mockfm.sleepSeconds = plan.TimeoutInSeconds + int32(1)
-			err = task.compact()
+			_, err = task.compact()
 			assert.Error(t, err)
 		}
 	})
@@ -654,7 +653,6 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 			rc := &RootCoordFactory{
 				pkType: c.pkType,
 			}
-			dc := &DataCoordFactory{}
 			mockfm := &mockFlushManager{}
 			mockKv := memkv.NewMemoryKV()
 			mockbIO := &binlogIO{cm, alloc}
@@ -712,8 +710,8 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 			}
 
 			alloc.random = false // generated ID = 19530
-			task := newCompactionTask(context.TODO(), mockbIO, mockbIO, replica, mockfm, alloc, dc, plan)
-			err = task.compact()
+			task := newCompactionTask(context.TODO(), mockbIO, mockbIO, replica, mockfm, alloc, plan)
+			_, err = task.compact()
 			assert.NoError(t, err)
 
 			assert.False(t, replica.hasSegment(c.segID1, true))
@@ -737,7 +735,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 			require.True(t, replica.hasSegment(c.segID2, true))
 			require.False(t, replica.hasSegment(19530, true))
 
-			err = task.compact()
+			_, err = task.compact()
 			assert.NoError(t, err)
 
 			assert.False(t, replica.hasSegment(c.segID1, true))
@@ -761,7 +759,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 			require.True(t, replica.hasSegment(c.segID2, true))
 			require.False(t, replica.hasSegment(19530, true))
 
-			err = task.compact()
+			_, err = task.compact()
 			assert.NoError(t, err)
 
 			assert.False(t, replica.hasSegment(c.segID1, true))
@@ -783,7 +781,6 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 		rc := &RootCoordFactory{
 			pkType: schemapb.DataType_Int64,
 		}
-		dc := &DataCoordFactory{}
 		mockfm := &mockFlushManager{}
 		mockbIO := &binlogIO{cm, alloc}
 		replica, err := newReplica(context.TODO(), rc, cm, collID)
@@ -845,8 +842,8 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 		}
 
 		alloc.random = false // generated ID = 19530
-		task := newCompactionTask(context.TODO(), mockbIO, mockbIO, replica, mockfm, alloc, dc, plan)
-		err = task.compact()
+		task := newCompactionTask(context.TODO(), mockbIO, mockbIO, replica, mockfm, alloc, plan)
+		_, err = task.compact()
 		assert.NoError(t, err)
 
 		assert.False(t, replica.hasSegment(segID1, true))

@@ -382,15 +382,6 @@ func Test_NewServer(t *testing.T) {
 		assert.NotNil(t, resp)
 	})
 
-	t.Run("CompleteCompaction", func(t *testing.T) {
-		server.dataCoord = &MockDataCoord{
-			status: &commonpb.Status{},
-		}
-		resp, err := server.CompleteCompaction(ctx, nil)
-		assert.Nil(t, err)
-		assert.NotNil(t, resp)
-	})
-
 	t.Run("ManualCompaction", func(t *testing.T) {
 		server.dataCoord = &MockDataCoord{
 			manualCompactionResp: &milvuspb.ManualCompactionResponse{},

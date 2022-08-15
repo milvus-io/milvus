@@ -88,6 +88,9 @@ func Test_NewClient(t *testing.T) {
 
 		r10, err := client.ShowConfigurations(ctx, nil)
 		retCheck(retNotNil, r10, err)
+
+		r11, err := client.GetCompactionState(ctx, nil)
+		retCheck(retNotNil, r11, err)
 	}
 
 	client.grpcClient = &mock.GRPCClientBase{
