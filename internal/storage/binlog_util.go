@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/milvus-io/milvus/internal/common"
 )
 
 // ParseSegmentIDByBinlog parse segment id from binlog paths
@@ -22,8 +24,12 @@ func ParseSegmentIDByBinlog(rootPath, path string) (UniqueID, error) {
 
 	// binlog path should consist of "[log_type]/collID/partID/segID/fieldID/fileName"
 	keyStr := strings.Split(p, "/")
-	if len(keyStr) != 6 {
-		return 0, fmt.Errorf("%s is not a valid binlog path", path)
+	if len(keyStr) == 5 {
+		return 0, common.NewIgnorableError(fmt.Errorf("%s does not contains a file name", path))
 	}
-	return strconv.ParseInt(keyStr[len(keyStr)-3], 10, 64)
+
+	if len(keyStr) == 6 {
+		return strconv.ParseInt(keyStr[len(keyStr)-3], 10, 64)
+	}
+	return 0, fmt.Errorf("%s is not a valid binlog path", path)
 }
