@@ -6,7 +6,7 @@ metadata:
 spec:
   containers:
   - name: milvus-test
-    image: harbor.milvus.io/qa/krte:dev-4
+    image: harbor.milvus.io/qa/fouram:1.1
 #    image: dockerhub-mirror-sh.zilliz.cc/milvusdb/pytest:20211209-cef343f
     command:
     - cat
