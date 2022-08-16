@@ -845,6 +845,118 @@ class TestConnect(TestcaseBase):
         address = "{}:{}".format(host, port)
         self.connection_wrap.connect(alias=connect_name, address=address, check_task=ct.CheckTasks.ccr)
 
+    @pytest.mark.tags(ct.CaseLabel.L3)
+    @pytest.mark.parametrize("connect_name", [DefaultConfig.DEFAULT_USING])
+    def test_connect_with_default_user_password(self, host, port, connect_name):
+        """
+        target: test the user and password parameter to get a normal connection
+        method: get a connection with the user and password parameter
+        expected: connected is True
+        """
+        self.connection_wrap.connect(alias=connect_name, host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        res = self.utility_wrap.list_collections()[0]
+        assert len(res) == 0
+
+    @pytest.mark.tags(ct.CaseLabel.L3)
+    def test_user_password_when_create_credential(self,host, port):
+        """
+        target: test the credential creation with user and password
+        method: create credential with the default user and password parameter
+        expected: connected is True
+        """
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        user = "nico"
+        password = "wertyu567"
+        self.utility_wrap.create_user(user=user, password=password)
+        self.connection_wrap.connect(host=host, port=port, user=user, password=password,
+                                     check_task=ct.CheckTasks.ccr)
+        self.utility_wrap.list_collections()
+
+    @pytest.mark.tags(ct.CaseLabel.L3)
+    @pytest.mark.parametrize("old_password", ["abc1234"])
+    @pytest.mark.parametrize("new_password", ["abc12345"])
+    def test_user_old_password_when_reset_password(self, host, port, old_password, new_password):
+        """
+        target: test the password reset with old password
+        method: get a connection with user and corresponding old password
+        expected: connected is True
+        """
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        user = "robot2048"
+        self.utility_wrap.create_user(user=user, password=old_password)
+        self.utility_wrap.reset_password(user=user, old_password=old_password, new_password=new_password)
+        self.connection_wrap.connect(host=host, port=port, user=user,
+                                     password=new_password, check_task=ct.CheckTasks.ccr)
+        self.utility_wrap.list_collections()
+
+    @pytest.mark.tags(ct.CaseLabel.L3)
+    def test_list_cred_users(self, host, port):
+        """
+        target: test the user list created successfully
+        method: get a list of users
+        expected: list all users
+        """
+        #1. default user login
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+
+        #2. create 2 users
+        self.utility_wrap.create_user(user="user1", password="abc123")
+        self.utility_wrap.create_user(user="user2", password="abc123")
+
+        #3. list all users
+        res = self.utility_wrap.list_usernames()[0]
+        assert "user1" in res and "user2" in res
+
+    @pytest.mark.tags(ct.CaseLabel.L3)
+    @pytest.mark.parametrize("connect_name", [DefaultConfig.DEFAULT_USING])
+    def test_user_when_delete_credential(self,host, port,connect_name):
+        """
+        target: test deleting credential with user
+        method: delete credential with username and connect with the wrong user then list collections
+        expected: deleted successfully
+        """
+        user = "xiaoai"
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        self.utility_wrap.create_user(user=user, password="abc123")
+        self.utility_wrap.delete_user(user=user)
+        self.connection_wrap.disconnect(alias=connect_name)
+        self.connection_wrap.connect(host=host, port=port, user=user,
+                                     password="abc123", check_task=ct.CheckTasks.ccr)
+        self.utility_wrap.list_collections(check_task=ct.CheckTasks.err_res,
+                                           check_items={ct.err_code: 1})
+
+    @pytest.mark.tags(ct.CaseLabel.L3)
+    def test_user_invalid_when_delete_credential(self, host, port):
+        """
+        target: test the nonexistant user when deleting credential
+        method: delete a credential with user wrong
+        excepted: delete is true
+        """
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        self.utility_wrap.delete_user(user="asdfghj")
+
+    @pytest.mark.tags(ct.CaseLabel.L3)
+    def test_delete_all_users(self, host, port):
+        """
+        target: delete the users that created for test
+        method: delete the users in list_usernames except root
+        excepted: delete is true
+        """
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        res = self.utility_wrap.list_usernames()[0]
+        for user in res:
+            if user != "root":
+                self.utility_wrap.delete_user(user=user)
+        res = self.utility_wrap.list_usernames()[0]
+        assert len(res) == 1
+
 
 class TestConnectIPInvalid(TestcaseBase):
     """
@@ -975,3 +1087,176 @@ class TestConnectAddressInvalid(TestcaseBase):
         address = "{}:{}".format(host, port)
         self.connection_wrap.connect(alias=connect_name, address=address, check_task=ct.CheckTasks.err_res,
                                      check_items={ct.err_code: 2})
+
+
+class TestConnectUserPasswordInvalid(TestcaseBase):
+    """
+    Test connect server with user and password , the result should be failed
+    """
+
+    @pytest.mark.tags(ct.CaseLabel.L3)
+    @pytest.mark.parametrize("port", ["19530"])
+    def test_connect_without_user_password_after_authorization_enabled(self, host, port):
+        """
+        target: test connect without user password after authorization enabled
+        method: connect without parameters of user and password
+        excepted: connected is false
+        """
+        self.connection_wrap.connect(host=host, port=port, check_task=ct.CheckTasks.ccr)
+        self.utility_wrap.list_collections(check_task=ct.CheckTasks.err_res,
+                                           check_items={ct.err_code: 1})
+
+    @pytest.mark.tags(ct.CaseLabel.L3)
+    @pytest.mark.parametrize("user", ["qwertyuiopasdfghjklzxcvbnmqwertyui", "@*-.-*", "alisd/"])
+    def test_user_invalid_when_create_credential(self, host, port, user):
+        """
+        target: test the user when create credential
+        method: make the length of user beyond standard
+        excepted: the creation is false
+        """
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        self.utility_wrap.create_user(user=user, password=ct.default_password,
+                                      check_task=ct.CheckTasks.err_res,
+                                      check_items={ct.err_code: 5})
+
+    @pytest.mark.tags(ct.CaseLabel.L3)
+    @pytest.mark.parametrize("user", ["alice123w"])
+    def test_existed_user_when_create_credentiall(self, host, port, user):
+        """
+        target: test the user when create credential
+        method: create a credential, and then create a credential with the same user
+        excepted: the creation is false
+        """
+        # 1.default user login
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+
+        # 2.create the first credential successfully
+        self.utility_wrap.create_user(user=user, password=ct.default_password)
+
+        # 3.create the second credential with the same user
+        self.utility_wrap.create_user(user=user, password=ct.default_password,
+                                      check_task=ct.CheckTasks.err_res, check_items={ct.err_code: 29})
+
+    @pytest.mark.tags(ct.CaseLabel.L3)
+    @pytest.mark.parametrize("password", ["12345"])
+    def test_password_length_invalid_when_create_credential(self, host, port, password):
+        """
+        target: test the password when create credential
+        method: make the length of user exceed the limitation [6, 256]
+        excepted: the creation is false
+        """
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        user = "alice"
+        self.utility_wrap.create_user(user=user, password=password,
+                                      check_task=ct.CheckTasks.err_res, check_items={ct.err_code: 5})
+
+    @pytest.mark.tags(ct.CaseLabel.L3)
+    @pytest.mark.parametrize("user", ["alice3333"])
+    def test_connect_with_invalid_user_connection(self, host, port, user):
+        """
+        target: test the nonexistent to connect
+        method: connect with the nonexistent user
+        excepted: connected is false
+        """
+        self.connection_wrap.connect(host=host, port=port, user=user, password="abc123",
+                                     check_task=ct.CheckTasks.ccr)
+        self.utility_wrap.list_collections(check_task=ct.CheckTasks.err_res,
+                                           check_items={ct.err_code: 1})
+
+    @pytest.mark.tags(ct.CaseLabel.L3)
+    @pytest.mark.parametrize("user", ["anny015"])
+    @pytest.mark.parametrize("password", ["qwaszx0"])
+    @pytest.mark.parametrize("connect_name", [DefaultConfig.DEFAULT_USING])
+    def test_connect_with_password_invalid(self, host, port, user, password, connect_name):
+        """
+        target: test the wrong password when connecting
+        method: connect with the wrong password
+        excepted: connected is false
+        """
+        # 1.default user login
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+
+        # 2.create a credential
+        self.utility_wrap.create_user(user=user, password=password)
+
+        # 3.connect with the created user and wrong password
+        self.connection_wrap.connect(host=host, port=port, user=user, password=ct.default_password)
+        self.utility_wrap.list_collections(check_task=ct.CheckTasks.err_res,
+                                           check_items={ct.err_code: 1})
+
+    @pytest.mark.tags(ct.CaseLabel.L3)
+    @pytest.mark.parametrize("user", ["hobo89"])
+    @pytest.mark.parametrize("old_password", ["qwaszx0"])
+    @pytest.mark.parametrize("new_password", ["qwaszx1"])
+    def test_user_invalid_when_reset_password(self, host, port, user, old_password, new_password):
+        """
+        target: test the wrong user when resetting password
+        method: create a credential, and then reset the password with wrong user
+        excepted: reset is false
+        """
+        # 1.default user login
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+
+        # 2.create a credential
+        self.utility_wrap.create_user(user=user, password=old_password)
+
+        # 3.reset password with the wrong user
+        self.utility_wrap.reset_password(user="hobo", old_password=old_password, new_password=new_password,
+                                         check_task=ct.CheckTasks.err_res,
+                                         check_items={ct.err_code: 30})
+
+    @pytest.mark.tags(ct.CaseLabel.L3)
+    @pytest.mark.parametrize("user", ["demo"])
+    @pytest.mark.parametrize("old_password", ["qwaszx0"])
+    @pytest.mark.parametrize("new_password", ["12345"])
+    def test_new_password_invalid_when_reset_password(self, host, port, user, old_password, new_password):
+        """
+        target: test the new password when resetting password
+        method: create a credential, and then set a wrong new password
+        excepted: reset is false
+        """
+        # 1.default user login
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+
+        # 2.create a credential
+        self.utility_wrap.create_user(user=user, password=old_password)
+
+        # 3.reset password with the wrong new password
+        self.utility_wrap.reset_password(user=user, old_password=old_password, new_password=new_password,
+                                         check_task=ct.CheckTasks.err_res,
+                                         check_items={ct.err_code: 5})
+
+    @pytest.mark.tags(ct.CaseLabel.L3)
+    @pytest.mark.parametrize("user", ["genny"])
+    @pytest.mark.parametrize("old_password", ["qwaszx0"])
+    @pytest.mark.parametrize("new_password", ["123456"])
+    def test_old_password_invalid_when_reset_password(self, host, port, user, old_password, new_password):
+        """
+        target: test the old password when resetting password
+        method: create a credential, and then reset with a wrong old password
+        excepted: reset is false
+        """
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        self.utility_wrap.create_user(user=user, password=old_password)
+        self.utility_wrap.reset_password(user=user, old_password="waszx0", new_password=new_password,
+                                         check_task=ct.CheckTasks.err_res,
+                                         check_items={ct.err_code: 30})
+
+    @pytest.mark.tags(ct.CaseLabel.L3)
+    def test_delete_root_when_delete_credential(self, host, port):
+        """
+        target: test deleting user root when deleting credential
+        method: connect and then delete the user root
+        excepted: delete is false
+        """
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        self.utility_wrap.delete_user(user=ct.default_user, check_task=ct.CheckTasks.err_res,
+                                      check_items={ct.err_code: 31})

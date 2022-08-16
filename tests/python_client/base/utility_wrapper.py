@@ -226,4 +226,28 @@ class ApiUtilityWrapper:
         res, _ = api_request([self.ut.mkts_from_hybridts, hybridts, milliseconds, delta])
         return res
 
+    def create_user(self, user, password, using="default", check_task=None, check_items=None):
+        func_name = sys._getframe().f_code.co_name
+        res, is_succ = api_request([self.ut.create_user, user, password, using])
+        check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,using=using).run()
+        return res, check_result
 
+    def list_usernames(self, using="default", check_task=None, check_items=None):
+        func_name = sys._getframe().f_code.co_name
+        res, is_succ = api_request([self.ut.list_usernames, using])
+        check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
+                                       using=using).run()
+        return res, check_result
+
+    def reset_password(self, user, old_password, new_password, check_task=None, check_items=None):
+        func_name = sys._getframe().f_code.co_name
+        res, is_succ = api_request([self.ut.reset_password, user, old_password, new_password])
+        check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ).run()
+        return res, check_result
+
+    def delete_user(self, user, using="default", check_task=None, check_items=None):
+        func_name = sys._getframe().f_code.co_name
+        res, is_succ = api_request([self.ut.delete_user, user, using])
+        check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
+                                       using=using).run()
+        return res, check_result
