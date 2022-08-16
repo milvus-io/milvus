@@ -25,6 +25,8 @@ static int dim = 768;
 const auto schema = []() {
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
+    auto i64_fid = schema->AddDebugField("age", DataType::INT64);
+    schema->set_primary_field_id(i64_fid);
     return schema;
 }();
 
@@ -40,7 +42,8 @@ const auto plan = [] {
                             "nprobe": 10
                         },
                         "query": "$0",
-                        "topk": 5
+                        "topk": 5,
+                        "round_decimal": -1
                     }
                 }
             }
@@ -109,6 +112,7 @@ Search_Sealed(benchmark::State& state) {
         info.index_params["index_type"] = "IVF";
         info.index_params["index_mode"] = "CPU";
         info.index_params["metric_type"] = knowhere::metric::L2;
+        segment->DropFieldData(milvus::FieldId(100));
         segment->LoadIndex(info);
     }
     Timestamp time = 10000000;
