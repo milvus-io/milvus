@@ -307,9 +307,12 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 		var info *SegmentInfo
 		if req.IncludeUnHealthy {
 			info = s.meta.GetAllSegment(id)
-			if info != nil {
-				infos = append(infos, info.SegmentInfo)
+			if info == nil {
+				log.Warn("failed to get segment, this may have been cleaned", zap.Int64("segmentID", id))
+				resp.Status.Reason = fmt.Sprintf("failed to get segment %d", id)
+				return resp, nil
 			}
+			infos = append(infos, info.SegmentInfo)
 		} else {
 			info = s.meta.GetSegment(id)
 			if info == nil {
