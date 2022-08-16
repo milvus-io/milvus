@@ -2020,7 +2020,8 @@ class TestCollectionSearch(TestcaseBase):
                                   default_search_params, default_limit,
                                   search_exp, _async=_async,
                                   output_fields=[default_int64_field_name,
-                                                 default_float_field_name],
+                                                 default_float_field_name,
+                                                 default_bool_field_name],
                                   check_task=CheckTasks.check_search_results,
                                   check_items={"nq": nq,
                                                "ids": insert_ids,
@@ -2030,7 +2031,8 @@ class TestCollectionSearch(TestcaseBase):
             res.done()
             res = res.result()
         assert len(res[0][0].entity._row_data) != 0
-        assert (default_int64_field_name and default_float_field_name) in res[0][0].entity._row_data
+        assert (default_int64_field_name and default_float_field_name and default_bool_field_name) \
+               in res[0][0].entity._row_data
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_with_output_fields_empty(self, nb, nq, dim, auto_id, _async):
