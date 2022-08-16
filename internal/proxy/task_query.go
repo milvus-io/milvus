@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 
 	"github.com/golang/protobuf/proto"
@@ -53,35 +54,47 @@ type queryTask struct {
 
 // translateOutputFields translates output fields name to output fields id.
 func translateToOutputFieldIDs(outputFields []string, schema *schemapb.CollectionSchema) ([]UniqueID, error) {
-	outputFieldIDs := make([]UniqueID, 0, len(outputFields))
+	outputFieldIDs := make([]UniqueID, 0, len(outputFields)+1)
 	if len(outputFields) == 0 {
 		for _, field := range schema.Fields {
-			if field.FieldID >= 100 && field.DataType != schemapb.DataType_FloatVector && field.DataType != schemapb.DataType_BinaryVector {
+			if field.FieldID >= common.StartOfUserFieldID && field.DataType != schemapb.DataType_FloatVector && field.DataType != schemapb.DataType_BinaryVector {
 				outputFieldIDs = append(outputFieldIDs, field.FieldID)
 			}
 		}
 	} else {
-		addPrimaryKey := false
+		var pkFieldID UniqueID
+		for _, field := range schema.Fields {
+			if field.IsPrimaryKey {
+				pkFieldID = field.FieldID
+			}
+		}
 		for _, reqField := range outputFields {
-			findField := false
+			var fieldFound bool
 			for _, field := range schema.Fields {
 				if reqField == field.Name {
-					if field.IsPrimaryKey {
-						addPrimaryKey = true
-					}
-					findField = true
 					outputFieldIDs = append(outputFieldIDs, field.FieldID)
-				} else {
-					if field.IsPrimaryKey && !addPrimaryKey {
-						outputFieldIDs = append(outputFieldIDs, field.FieldID)
-						addPrimaryKey = true
-					}
+					fieldFound = true
+					break
 				}
 			}
-			if !findField {
+			if !fieldFound {
 				return nil, fmt.Errorf("field %s not exist", reqField)
 			}
 		}
+
+		// pk field needs to be in output field list
+		var pkFound bool
+		for _, outputField := range outputFieldIDs {
+			if outputField == pkFieldID {
+				pkFound = true
+				break
+			}
+		}
+
+		if !pkFound {
+			outputFieldIDs = append(outputFieldIDs, pkFieldID)
+		}
+
 	}
 	return outputFieldIDs, nil
 }
