@@ -1166,6 +1166,12 @@ func (qc *QueryCoord) GetShardLeaders(ctx context.Context, req *querypb.GetShard
 
 	// check if there are enough available distinct shards
 	if len(shardLeaderLists) != len(shardNames) {
+		log.Warn("no replica available",
+			zap.String("role", typeutil.QueryCoordRole),
+			zap.Int64("collectionID", req.CollectionID),
+			zap.Any("replicasLists", shardLeaderLists),
+			zap.Any("replicaNames", shardNames))
+
 		return &querypb.GetShardLeadersResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_NoReplicaAvailable,
