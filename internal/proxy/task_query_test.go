@@ -196,3 +196,145 @@ func TestQueryTask_all(t *testing.T) {
 
 	assert.NoError(t, task.PostExecute(ctx))
 }
+
+func Test_translateToOutputFieldIDs(t *testing.T) {
+	type testCases struct {
+		name          string
+		outputFields  []string
+		schema        *schemapb.CollectionSchema
+		expectedError bool
+		expectedIDs   []int64
+	}
+
+	cases := []testCases{
+		{
+			name:         "empty output fields",
+			outputFields: []string{},
+			schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID: common.RowIDField,
+						Name:    common.RowIDFieldName,
+					},
+					{
+						FieldID:      100,
+						Name:         "ID",
+						IsPrimaryKey: true,
+					},
+					{
+						FieldID: 101,
+						Name:    "Vector",
+					},
+				},
+			},
+			expectedError: false,
+			expectedIDs:   []int64{100, 101},
+		},
+		{
+			name:         "nil output fields",
+			outputFields: nil,
+			schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID: common.RowIDField,
+						Name:    common.RowIDFieldName,
+					},
+					{
+						FieldID:      100,
+						Name:         "ID",
+						IsPrimaryKey: true,
+					},
+					{
+						FieldID: 101,
+						Name:    "Vector",
+					},
+				},
+			},
+			expectedError: false,
+			expectedIDs:   []int64{100, 101},
+		},
+		{
+			name:         "full list",
+			outputFields: []string{"ID", "Vector"},
+			schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID: common.RowIDField,
+						Name:    common.RowIDFieldName,
+					},
+					{
+						FieldID:      100,
+						Name:         "ID",
+						IsPrimaryKey: true,
+					},
+					{
+						FieldID: 101,
+						Name:    "Vector",
+					},
+				},
+			},
+			expectedError: false,
+			expectedIDs:   []int64{100, 101},
+		},
+		{
+			name:         "vector only",
+			outputFields: []string{"Vector"},
+			schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID: common.RowIDField,
+						Name:    common.RowIDFieldName,
+					},
+					{
+						FieldID:      100,
+						Name:         "ID",
+						IsPrimaryKey: true,
+					},
+					{
+						FieldID: 101,
+						Name:    "Vector",
+					},
+				},
+			},
+			expectedError: false,
+			expectedIDs:   []int64{101, 100},
+		},
+		{
+			name:         "with field not exist",
+			outputFields: []string{"ID", "Vector", "Extra"},
+			schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID: common.RowIDField,
+						Name:    common.RowIDFieldName,
+					},
+					{
+						FieldID:      100,
+						Name:         "ID",
+						IsPrimaryKey: true,
+					},
+					{
+						FieldID: 101,
+						Name:    "Vector",
+					},
+				},
+			},
+			expectedError: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ids, err := translateToOutputFieldIDs(tc.outputFields, tc.schema)
+			if tc.expectedError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				require.Equal(t, len(tc.expectedIDs), len(ids))
+				for idx, expectedID := range tc.expectedIDs {
+					assert.Equal(t, expectedID, ids[idx])
+				}
+			}
+		})
+	}
+}
