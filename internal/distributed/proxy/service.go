@@ -39,7 +39,6 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/gin-gonic/gin"
-	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	"github.com/opentracing/opentracing-go"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -162,20 +161,19 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 	}
 	log.Debug("Proxy server already listen on tcp", zap.Int("port", grpcPort))
 
-	opts := trace.GetInterceptorOpts()
 	grpcOpts := []grpc.ServerOption{
 		grpc.KeepaliveEnforcementPolicy(kaep),
 		grpc.KeepaliveParams(kasp),
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize),
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
-			ot.UnaryServerInterceptor(opts...),
+			trace.UnaryServerInterceptor(),
 			grpc_auth.UnaryServerInterceptor(proxy.AuthenticationInterceptor),
 			proxy.UnaryServerInterceptor(proxy.PrivilegeInterceptor),
 			logutil.UnaryTraceLoggerInterceptor,
 		)),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
-			ot.StreamServerInterceptor(opts...),
+			trace.StreamServerInterceptor(),
 			grpc_auth.StreamServerInterceptor(proxy.AuthenticationInterceptor),
 			logutil.StreamTraceLoggerInterceptor)),
 	}
@@ -255,19 +253,18 @@ func (s *Server) startInternalGrpc(grpcPort int, errChan chan error) {
 	}
 	log.Debug("Proxy internal server already listen on tcp", zap.Int("port", grpcPort))
 
-	opts := trace.GetInterceptorOpts()
 	s.grpcInternalServer = grpc.NewServer(
 		grpc.KeepaliveEnforcementPolicy(kaep),
 		grpc.KeepaliveParams(kasp),
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize),
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
-			ot.UnaryServerInterceptor(opts...),
+			trace.UnaryServerInterceptor(),
 			grpc_auth.UnaryServerInterceptor(proxy.AuthenticationInterceptor),
 			logutil.UnaryTraceLoggerInterceptor,
 		)),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
-			ot.StreamServerInterceptor(opts...),
+			trace.StreamServerInterceptor(),
 			grpc_auth.StreamServerInterceptor(proxy.AuthenticationInterceptor),
 			logutil.StreamTraceLoggerInterceptor,
 		)),
@@ -323,7 +320,7 @@ func (s *Server) init() error {
 	log.Debug("init Proxy's parameter table done", zap.String("internal address", Params.GetInternalAddress()), zap.String("external address", Params.GetAddress()))
 
 	serviceName := fmt.Sprintf("Proxy ip: %s, port: %d", Params.IP, Params.Port)
-	closer := trace.InitTracing(serviceName)
+	closer := trace.InitTracing("Proxy", &Params.BaseTable, fmt.Sprintf("%s:%d", Params.IP, Params.Port))
 	s.closer = closer
 	log.Debug("init Proxy's tracer done", zap.String("service name", serviceName))
 

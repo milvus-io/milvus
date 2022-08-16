@@ -164,8 +164,8 @@ func (it *insertTask) checkPrimaryFieldData() error {
 }
 
 func (it *insertTask) PreExecute(ctx context.Context) error {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(it.ctx, "Proxy-Insert-PreExecute")
-	defer sp.Finish()
+	ctx, sp := trace.StartSpanFromContextWithOperationName(it.ctx, "proxy.insert.preExecute")
+	defer sp.End()
 
 	it.result = &milvuspb.MutationResult{
 		Status: &commonpb.Status{
@@ -403,8 +403,8 @@ func (it *insertTask) assignSegmentID(channelNames []string) (*msgstream.MsgPack
 }
 
 func (it *insertTask) Execute(ctx context.Context) error {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(it.ctx, "Proxy-Insert-Execute")
-	defer sp.Finish()
+	ctx, sp := trace.StartSpanFromContextWithOperationName(it.ctx, "proxy.insert.execute")
+	defer sp.End()
 
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute insert %d", it.ID()))
 	defer tr.Elapse("insert execute done")

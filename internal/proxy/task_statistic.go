@@ -95,8 +95,8 @@ func (g *getStatisticsTask) PreExecute(ctx context.Context) error {
 	// g.TravelTimestamp = g.request.GetTravelTimestamp()
 	g.GuaranteeTimestamp = g.request.GetGuaranteeTimestamp()
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(g.TraceCtx(), "Proxy-GetStatistics-PreExecute")
-	defer sp.Finish()
+	ctx, sp := trace.StartSpanFromContextWithOperationName(g.TraceCtx(), "proxy.getStatistics.pre-execute")
+	defer sp.End()
 
 	if g.statisticShardPolicy == nil {
 		g.statisticShardPolicy = mergeRoundRobinPolicy
@@ -156,8 +156,8 @@ func (g *getStatisticsTask) PreExecute(ctx context.Context) error {
 }
 
 func (g *getStatisticsTask) Execute(ctx context.Context) error {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(g.TraceCtx(), "Proxy-GetStatistics-Execute")
-	defer sp.Finish()
+	ctx, sp := trace.StartSpanFromContextWithOperationName(g.TraceCtx(), "proxy.getStatistics.execute")
+	defer sp.End()
 	if g.fromQueryNode {
 		// if request get statistics of collection which is full loaded into query node
 		// then we need not pass partition ids params
@@ -181,8 +181,8 @@ func (g *getStatisticsTask) Execute(ctx context.Context) error {
 }
 
 func (g *getStatisticsTask) PostExecute(ctx context.Context) error {
-	sp, _ := trace.StartSpanFromContextWithOperationName(g.TraceCtx(), "Proxy-GetStatistic-PostExecute")
-	defer sp.Finish()
+	_, sp := trace.StartSpanFromContextWithOperationName(g.TraceCtx(), "proxy.getStatistics.post-execute")
+	defer sp.End()
 	tr := timerecord.NewTimeRecorder("getStatisticTask PostExecute")
 	defer func() {
 		tr.Elapse("done")

@@ -20,6 +20,7 @@ import (
 	"container/list"
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 
 	"go.uber.org/zap"
@@ -28,8 +29,6 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/trace"
-	"github.com/opentracing/opentracing-go"
-	oplog "github.com/opentracing/opentracing-go/log"
 )
 
 // TaskQueue is a queue used to store tasks.
@@ -237,36 +236,33 @@ func (sched *TaskScheduler) scheduleIndexAddTask() task {
 //}
 
 func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
-	span, ctx := trace.StartSpanFromContext(t.Ctx(),
-		opentracing.Tags{
-			"Type": t.Name(),
-		})
-	defer span.Finish()
-	span.LogFields(oplog.String("scheduler process PreExecute", t.Name()))
+	ctx, span := trace.StartSpanFromContextWithOperationName(t.Ctx(), fmt.Sprintf("indexcoord.%s", t.Name()))
+	defer span.End()
+	span.AddEvent("pre-execute")
 	err := t.PreExecute(ctx)
 
 	defer func() {
 		t.Notify(err)
 	}()
 	if err != nil {
-		trace.LogError(span, err)
+		span.RecordError(err)
 		return
 	}
 
-	span.LogFields(oplog.String("scheduler process AddActiveTask", t.Name()))
+	span.AddEvent("add-active-task")
 	q.AddActiveTask(t)
 	defer func() {
-		span.LogFields(oplog.String("scheduler process PopActiveTask", t.Name()))
+		span.AddEvent("pop-active-task")
 		q.PopActiveTask(t.ID())
 	}()
 
-	span.LogFields(oplog.String("scheduler process Execute", t.Name()))
+	span.AddEvent("execute")
 	err = t.Execute(ctx)
 	if err != nil {
-		trace.LogError(span, err)
+		span.RecordError(err)
 		return
 	}
-	span.LogFields(oplog.String("scheduler process PostExecute", t.Name()))
+	span.AddEvent("post-execute")
 	err = t.PostExecute(ctx)
 }
 

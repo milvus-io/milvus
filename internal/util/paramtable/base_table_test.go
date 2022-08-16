@@ -287,3 +287,29 @@ func Test_SetLogger(t *testing.T) {
 		assert.Equal(t, true, grpclog.V(2))
 	})
 }
+
+func TestBaseTable_Opentelemetry(t *testing.T) {
+
+	var (
+		baseTbl           = &BaseTable{}
+		sampleOutputKey   = "opentelemetry.sampleFile"
+		jaegerEndpointKey = "opentelemetry.jaegerEndpoint"
+		sampleFracKey     = "opentelemetry.sampleFraction"
+		jaegerExampleEp   = "http://localhost:14268/api/traces"
+		devKey            = "opentelemetry.development"
+	)
+	baseTbl.Init()
+
+	sampleFile := baseTbl.Get(sampleOutputKey)
+	sampleFraction := baseTbl.ParseFloat(sampleFracKey)
+	jaegerEndpoint := baseTbl.Get(jaegerEndpointKey)
+	development := baseTbl.ParseBool(devKey, false)
+	assert.Equal(t, "stdout", sampleFile)
+	assert.Equal(t, 1.0, sampleFraction)
+	assert.Equal(t, "", jaegerEndpoint)
+	assert.True(t, development)
+
+	assert.Nil(t, baseTbl.Save(jaegerEndpointKey, jaegerExampleEp))
+	jaegerEndpoint = baseTbl.Get(jaegerEndpointKey)
+	assert.Equal(t, jaegerExampleEp, jaegerEndpoint)
+}

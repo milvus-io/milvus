@@ -21,7 +21,6 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -77,9 +76,9 @@ func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		return []Msg{}
 	}
 
-	var spans []opentracing.Span
+	var spans []*trace.Span
 	for _, msg := range dMsg.deleteMessages {
-		sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+		ctx, sp := trace.StartSpanFromContextWithOperationName(msg.TraceCtx(), "querynode.dn.operate")
 		spans = append(spans, sp)
 		msg.SetTraceCtx(ctx)
 	}
@@ -106,7 +105,7 @@ func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			zap.Any("segmentNum", dNode.metaReplica.getSegmentNum(segmentTypeSealed)),
 			zap.Any("traceID", traceID),
 		)
-
+		spans[i].RecordInt64Pairs([]string{"collection", "num_rows"}, []int64{delMsg.CollectionID, delMsg.NumRows})
 		if dNode.metaReplica.getSegmentNum(segmentTypeSealed) != 0 {
 			err := processDeleteMessages(dNode.metaReplica, segmentTypeSealed, delMsg, delData)
 			if err != nil {
@@ -152,7 +151,7 @@ func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		timeRange: dMsg.timeRange,
 	}
 	for _, sp := range spans {
-		sp.Finish()
+		sp.End()
 	}
 
 	return []Msg{res}

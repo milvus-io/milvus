@@ -18,6 +18,7 @@ package grpcindexcoord
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"strconv"
@@ -30,7 +31,6 @@ import (
 	"google.golang.org/grpc/keepalive"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
-	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	dcc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
 	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	"github.com/milvus-io/milvus/internal/indexcoord"
@@ -97,7 +97,7 @@ func (s *Server) init() error {
 	indexcoord.Params.IndexCoordCfg.Address = Params.GetAddress()
 	indexcoord.Params.IndexCoordCfg.Port = Params.Port
 
-	closer := trace.InitTracing("IndexCoord")
+	closer := trace.InitTracing("IndexCoord", &Params.BaseTable, fmt.Sprintf("%s:%d", Params.IP, Params.Port))
 	s.closer = closer
 
 	etcdCli, err := etcd.GetEtcdClient(&indexcoord.Params.EtcdCfg)
@@ -313,17 +313,16 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	ctx, cancel := context.WithCancel(s.loopCtx)
 	defer cancel()
 
-	opts := trace.GetInterceptorOpts()
 	s.grpcServer = grpc.NewServer(
 		grpc.KeepaliveEnforcementPolicy(kaep),
 		grpc.KeepaliveParams(kasp),
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize),
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
-			ot.UnaryServerInterceptor(opts...),
+			trace.UnaryServerInterceptor(),
 			logutil.UnaryTraceLoggerInterceptor)),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
-			ot.StreamServerInterceptor(opts...),
+			trace.StreamServerInterceptor(),
 			logutil.StreamTraceLoggerInterceptor)))
 	indexpb.RegisterIndexCoordServer(s.grpcServer, s)
 

@@ -69,8 +69,8 @@ func (s *Server) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 // these segments will be flushed only after the Flush policy is fulfilled
 func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error) {
 	log.Info("receive flush request", zap.Int64("dbID", req.GetDbID()), zap.Int64("collectionID", req.GetCollectionID()))
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "DataCoord-Flush")
-	defer sp.Finish()
+	ctx, sp := trace.StartSpanFromContextWithOperationName(ctx, "datacoord.flush")
+	defer sp.End()
 	resp := &datapb.FlushResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -89,6 +89,8 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 		resp.Status.Reason = fmt.Sprintf("failed to flush %d, %s", req.CollectionID, err)
 		return resp, nil
 	}
+	sp.RecordInt64s("seal segments", sealedSegments)
+	sp.RecordInt64("collection", req.GetCollectionID())
 	log.Info("flush response with segments",
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Any("segments", sealedSegments))

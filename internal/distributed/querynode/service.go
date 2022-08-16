@@ -26,7 +26,6 @@ import (
 	"time"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
-	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -100,7 +99,7 @@ func (s *Server) init() error {
 	qn.Params.QueryNodeCfg.QueryNodePort = int64(Params.Port)
 	//qn.Params.QueryNodeID = Params.QueryNodeID
 
-	closer := trace.InitTracing(fmt.Sprintf("query_node ip: %s, port: %d", Params.IP, Params.Port))
+	closer := trace.InitTracing("QueryNode", &Params.BaseTable, fmt.Sprintf("%s:%d", Params.IP, Params.Port))
 	s.closer = closer
 
 	log.Debug("QueryNode", zap.Int("port", Params.Port))
@@ -175,17 +174,16 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 		return
 	}
 
-	opts := trace.GetInterceptorOpts()
 	s.grpcServer = grpc.NewServer(
 		grpc.KeepaliveEnforcementPolicy(kaep),
 		grpc.KeepaliveParams(kasp),
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize),
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
-			ot.UnaryServerInterceptor(opts...),
+			trace.UnaryServerInterceptor(),
 			logutil.UnaryTraceLoggerInterceptor)),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
-			ot.StreamServerInterceptor(opts...),
+			trace.StreamServerInterceptor(),
 			logutil.StreamTraceLoggerInterceptor)))
 	querypb.RegisterQueryNodeServer(s.grpcServer, s)
 

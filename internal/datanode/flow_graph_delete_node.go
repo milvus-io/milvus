@@ -23,7 +23,6 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/common"
@@ -137,10 +136,10 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 		return []Msg{}
 	}
 
-	var spans []opentracing.Span
+	var spans []*trace.Span
 	for _, msg := range fgMsg.deleteMessages {
-		sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
-		spans = append(spans, sp)
+		ctx, span := trace.StartSpanFromContextWithOperationName(msg.TraceCtx(), "datanode.delnode.operate")
+		spans = append(spans, span)
 		msg.SetTraceCtx(ctx)
 	}
 
@@ -163,6 +162,8 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 			panic(err)
 		}
 		segIDs = append(segIDs, tmpSegIDs...)
+		spans[i].RecordInt64Pairs([]string{"collection", "partition"}, []int64{msg.CollectionID, msg.PartitionID})
+		spans[i].RecordInt64("delete_rows", msg.DeleteRequest.NumRows)
 	}
 
 	// display changed segment's status in dn.delBuf of a certain ts
@@ -203,7 +204,7 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 	}
 
 	for _, sp := range spans {
-		sp.Finish()
+		sp.End()
 	}
 	return nil
 }

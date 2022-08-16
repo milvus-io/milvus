@@ -1,0 +1,72 @@
+syntax = "proto3";
+package milvus.proto.feder;
+
+option go_package = "github.com/milvus-io/milvus/internal/proto/federpb";
+
+import "common.proto";
+import "schema.proto";
+
+message CollectionMetaDetail {
+    int64 collectionID = 1;
+    repeated schema.Field fields = 3;
+    map<int64, string> field2indexType = 4;
+    repeated int64 segmentID_list = 5;
+}
+
+message SegmentIndexMetaDetail {
+    int64 segmentID = 1;
+    int64 index_size = 2;
+    int64 rows = 3;
+    uint64 create_time = 4;
+    repeated schema.FieldData primary_keys = 5;
+}
+
+message DescribeCollectionDetailRequest {
+    string collectionName = 1;
+}
+
+message DescribeCollectionDetailResponse {
+    common.Status status = 1;
+    CollectionMeta meta_data = 2;
+}
+
+message DescribeSegmentIndexDetailRequest {
+    int64 collectionID = 1;
+    repeated int64 segments = 2;
+}
+
+message DescribeSegmentIndexDetailResponse {
+    common.Status status = 1;
+    repeated SegmentIndexMeta meta_data = 2;
+}
+
+enum IndexType {
+    IVF_FLAT = 0;
+    HNSW = 1;
+}
+
+message IVFFlatRecord {
+    int64 clusterID = 1;
+    repeated int64 primary_keys = 2;
+    repeated float scores = 3;
+}
+
+message HSNWRecord {
+    int64 level = 1;
+    map<int64, schema.LongArray> links = 2;
+    map<int64, schema.FloatArray> scores = 3;
+}
+
+message SearchedRecords {
+    int64 segmentID = 1;
+    IndexType index_type = 2;
+    bytes records = 3;
+}
+
+service FederService {
+    rpc DescribeCollectionDetail(DescribeCollectionRequest) returns DescribeCollectionResponse {}
+    rpc DescribeSegmentIndexDetail(DescribeSegmentIndexRequest) returns DescribeSegmentIndexResponse {}
+}
+
+
+

@@ -27,7 +27,6 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -36,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/trace"
-	oplog "github.com/opentracing/opentracing-go/log"
 )
 
 // taskQueue is used to cache triggerTasks
@@ -555,17 +553,13 @@ func (scheduler *TaskScheduler) processTask(t task) error {
 		return nil
 	}
 
-	span, ctx := trace.StartSpanFromContext(t.traceCtx(),
-		opentracing.Tags{
-			"Type": t.msgType(),
-			"ID":   t.getTaskID(),
-		})
+	ctx, span := trace.StartSpanFromContextWithOperationName(t.traceCtx(), fmt.Sprintf("querycoord.%s", t.msgType()))
 	var err error
-	defer span.Finish()
+	defer span.End()
 
 	defer func() {
 		//task postExecute
-		span.LogFields(oplog.Int64("processTask: scheduler process PostExecute", t.getTaskID()))
+		span.AddEvent("post-execute")
 		t.postExecute(ctx)
 	}()
 
@@ -574,7 +568,7 @@ func (scheduler *TaskScheduler) processTask(t task) error {
 	ctx, _ = scheduler.BindContext(ctx)
 
 	// task preExecute
-	span.LogFields(oplog.Int64("processTask: scheduler process PreExecute", t.getTaskID()))
+	span.AddEvent("pre-execute")
 	err = t.preExecute(ctx)
 	if err != nil {
 		log.Error("failed to preExecute task", zap.Int64("taskID", t.getTaskID()), zap.Error(err))
@@ -584,7 +578,7 @@ func (scheduler *TaskScheduler) processTask(t task) error {
 	taskInfoKey = fmt.Sprintf("%s/%d", taskInfoPrefix, t.getTaskID())
 	err = scheduler.client.Save(taskInfoKey, strconv.Itoa(int(taskDoing)))
 	if err != nil {
-		trace.LogError(span, err)
+		span.RecordError(err)
 		log.Warn("failed to save task info ", zap.Int64("taskID", t.getTaskID()), zap.Error(err))
 		t.setResultInfo(err)
 		return err
@@ -592,17 +586,17 @@ func (scheduler *TaskScheduler) processTask(t task) error {
 	t.setState(taskDoing)
 
 	// task execute
-	span.LogFields(oplog.Int64("processTask: scheduler process Execute", t.getTaskID()))
+	span.AddEvent("execute")
 	err = t.execute(ctx)
 	if err != nil {
 		log.Warn("failed to execute task", zap.Int64("taskID", t.getTaskID()), zap.Error(err))
-		trace.LogError(span, err)
+		span.RecordError(err)
 		return err
 	}
 	err = updateKVFn(t)
 	if err != nil {
 		log.Warn("failed to update kv", zap.Int64("taskID", t.getTaskID()), zap.Error(err))
-		trace.LogError(span, err)
+		span.RecordError(err)
 		t.setResultInfo(err)
 		return err
 	}

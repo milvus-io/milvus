@@ -27,6 +27,7 @@ import "C"
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"math/rand"
 	"os"
@@ -189,7 +190,7 @@ func (i *IndexNode) Init() error {
 		}
 
 		log.Debug("IndexNode NewMinIOKV succeeded")
-		i.closer = trace.InitTracing("index_node")
+		i.closer = trace.InitTracing("IndexNode", &Params.BaseTable, fmt.Sprintf("%s:%d", Params.IndexNodeCfg.IP, Params.IndexNodeCfg.Port))
 
 		i.initKnowhere()
 	})

@@ -170,8 +170,8 @@ func getNq(req *milvuspb.SearchRequest) (int64, error) {
 }
 
 func (t *searchTask) PreExecute(ctx context.Context) error {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(t.TraceCtx(), "Proxy-Search-PreExecute")
-	defer sp.Finish()
+	ctx, sp := trace.StartSpanFromContextWithOperationName(t.TraceCtx(), "proxy.search.preExecute")
+	defer sp.End()
 
 	if t.searchShardPolicy == nil {
 		t.searchShardPolicy = mergeRoundRobinPolicy
@@ -290,8 +290,8 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 }
 
 func (t *searchTask) Execute(ctx context.Context) error {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(t.TraceCtx(), "Proxy-Search-Execute")
-	defer sp.Finish()
+	ctx, sp := trace.StartSpanFromContextWithOperationName(t.TraceCtx(), "proxy.search.execute")
+	defer sp.End()
 
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute search %d", t.ID()))
 	defer tr.CtxElapse(ctx, "done")
@@ -325,8 +325,8 @@ func (t *searchTask) Execute(ctx context.Context) error {
 }
 
 func (t *searchTask) PostExecute(ctx context.Context) error {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(t.TraceCtx(), "Proxy-Search-PostExecute")
-	defer sp.Finish()
+	ctx, sp := trace.StartSpanFromContextWithOperationName(t.TraceCtx(), "proxy.search.post-execute")
+	defer sp.End()
 	tr := timerecord.NewTimeRecorder("searchTask PostExecute")
 	defer func() {
 		tr.CtxElapse(ctx, "done")

@@ -22,7 +22,6 @@ import (
 	"reflect"
 	"sync/atomic"
 
-	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/common"
@@ -94,9 +93,9 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 		return []Msg{}
 	}
 
-	var spans []opentracing.Span
+	var spans []*trace.Span
 	for _, msg := range msMsg.TsMessages() {
-		sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+		ctx, sp := trace.StartSpanFromContextWithOperationName(msg.TraceCtx(), "datanode.ddnode.operate")
 		spans = append(spans, sp)
 		msg.SetTraceCtx(ctx)
 	}
@@ -120,7 +119,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 	}
 
 	var forwardMsgs []msgstream.TsMsg
-	for _, msg := range msMsg.TsMessages() {
+	for i, msg := range msMsg.TsMessages() {
 		switch msg.Type() {
 		case commonpb.MsgType_DropCollection:
 			if msg.(*msgstream.DropCollectionMsg).GetCollectionID() == ddn.collectionID {
@@ -132,6 +131,9 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 				log.Info("Stop compaction of vChannel", zap.String("vChannelName", ddn.vChannelName))
 				ddn.compactionExecutor.stopExecutingtaskByVChannelName(ddn.vChannelName)
 				fgMsg.dropCollection = true
+				spans[i].RecordString("msg_type", "drop-collection")
+				spans[i].RecordInt64("collection", ddn.collectionID)
+				spans[i].RecordString("vchannel", ddn.vChannelName)
 			}
 
 		case commonpb.MsgType_DropPartition:
@@ -142,6 +144,9 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 					zap.Int64("partitionID", dpMsg.GetPartitionID()),
 					zap.String("vChanneName", ddn.vChannelName))
 				fgMsg.dropPartitions = append(fgMsg.dropPartitions, dpMsg.PartitionID)
+				spans[i].RecordString("msg_type", "drop-partition")
+				spans[i].RecordInt64Pairs([]string{"collection", "partition"}, []int64{dpMsg.GetCollectionID(), dpMsg.GetPartitionID()})
+				spans[i].RecordString("vChannel", ddn.vChannelName)
 			}
 
 		case commonpb.MsgType_Insert:
@@ -166,7 +171,9 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 				zap.Int("numRows", len(imsg.GetRowIDs())),
 				zap.String("vChannelName", ddn.vChannelName))
 			fgMsg.insertMessages = append(fgMsg.insertMessages, imsg)
-
+			spans[i].RecordString("msg_type", "insert")
+			spans[i].RecordInt("insert_rows", len(imsg.GetRowIDs()))
+			spans[i].RecordString("vchannel", ddn.vChannelName)
 		case commonpb.MsgType_Delete:
 			dmsg := msg.(*msgstream.DeleteMsg)
 			log.Debug("DDNode receive delete messages",
@@ -183,6 +190,9 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 				continue
 			}
 			fgMsg.deleteMessages = append(fgMsg.deleteMessages, dmsg)
+			spans[i].RecordString("msg_type", "delete")
+			spans[i].RecordInt64("delete_rows", dmsg.NumRows)
+			spans[i].RecordString("vchannel", ddn.vChannelName)
 		}
 	}
 	err := retry.Do(ddn.ctx, func() error {
@@ -200,7 +210,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 	fgMsg.endPositions = append(fgMsg.endPositions, msMsg.EndPositions()...)
 
 	for _, sp := range spans {
-		sp.Finish()
+		sp.End()
 	}
 
 	return []Msg{&fgMsg}

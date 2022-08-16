@@ -13,14 +13,14 @@ package trace
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"os"
 	"testing"
 
-	"github.com/opentracing/opentracing-go"
-	oplog "github.com/opentracing/opentracing-go/log"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/assert"
+	"go.opentelemetry.io/otel/baggage"
+	"go.uber.org/zap/zapcore"
+	"google.golang.org/grpc/metadata"
 )
 
 type simpleStruct struct {
@@ -29,107 +29,84 @@ type simpleStruct struct {
 }
 
 func TestMain(m *testing.M) {
-	closer := InitTracing("test")
+	baseTbl := paramtable.BaseTable{}
+	baseTbl.Init()
+	closer := InitTracing("test", &baseTbl, "")
 	defer closer.Close()
 	os.Exit(m.Run())
 }
 
-func TestInit(t *testing.T) {
-	cfg := initFromEnv("test")
-	assert.NotNil(t, cfg)
+func TestInjectAndExtract(t *testing.T) {
+	t.Run("inject and extract grpc trace", func(t *testing.T) {
+		md := metadata.New(map[string]string{
+			"log_level":         zapcore.FatalLevel.String(),
+			"client_request_id": "test-request-id",
+		})
+		ctx := metadata.NewOutgoingContext(context.TODO(), md)
+
+		data := make(map[string]string)
+		InjectContextToPulsarMsgProperties(ctx, data)
+		assert.Equal(t, "fatal", data["log_level"])
+		assert.Equal(t, "test-request-id", data["client_request_id"])
+
+		newctx := ExtractContextFromProperties(context.TODO(), data)
+
+		newmd, ok := metadata.FromIncomingContext(newctx)
+		assert.True(t, ok)
+		assert.Equal(t, []string{"fatal"}, newmd.Get("log_level"))
+		assert.Equal(t, []string{"test-request-id"}, newmd.Get("client_request_id"))
+	})
+
+	t.Run("inject and extract baggage", func(t *testing.T) {
+		property, err := baggage.NewKeyValueProperty("prop_key", "prop_val")
+		assert.Nil(t, err)
+		member, err := baggage.NewMember("mem_key", "mem_val", property)
+		assert.Nil(t, err)
+		b, err := baggage.New(member)
+		assert.Nil(t, err)
+
+		ctx := baggage.ContextWithBaggage(context.TODO(), b)
+		data := make(map[string]string)
+		InjectContextToPulsarMsgProperties(ctx, data)
+		assert.Equal(t, "mem_key=mem_val;prop_key=prop_val", data["baggage"])
+
+		newctx := ExtractContextFromProperties(ctx, data)
+		newb := baggage.FromContext(newctx)
+
+		assert.Equal(t, b, newb)
+	})
 }
 
-func TestTracing(t *testing.T) {
-	// context normally can be propagated through func params
-	ctx := context.Background()
+func TestCallerInfo(t *testing.T) {
+	fnName, loc := callerInfo(2)
 
-	//start span
-	//default use function name for operation name
-	sp, ctx := StartSpanFromContext(ctx)
-	id, sampled, found := InfoFromContext(ctx)
-	fmt.Printf("traceID = %s, sampled = %t, found = %t", id, sampled, found)
-	sp.SetTag("tag1", "tag1")
-	// use self-defined operation name for span
-	// sp, ctx := StartSpanFromContextWithOperationName(ctx, "self-defined name")
-	defer sp.Finish()
+	assert.Equal(t, "github.com/milvus-io/milvus/internal/util/trace.TestCallerInfo", fnName)
+	assert.Equal(t, "util_test.go:81", loc)
 
-	ss := &simpleStruct{
-		name:  "name",
-		value: "value",
-	}
-	sp.LogFields(oplog.String("key", "value"), oplog.Object("key", ss))
+	fnName, loc = callfn()
+	assert.Equal(t, "github.com/milvus-io/milvus/internal/util/trace.callfn", fnName)
+	assert.Equal(t, "util_test.go:96", loc)
 
-	err := caller(ctx)
-
-	if err != nil {
-		LogError(sp, err) //LogError do something error log in trace and returns origin error.
-	}
-
+	fnName, loc = callerInfo(100)
+	assert.Equal(t, "unknown", fnName)
+	assert.Equal(t, "unknown", loc)
 }
 
-func caller(ctx context.Context) error {
-	for i := 0; i < 2; i++ {
-		// if span starts in a loop, defer is not allowed.
-		// manually call span.Finish() if error occurs or one loop ends
-		sp, _ := StartSpanFromContextWithOperationName(ctx, fmt.Sprintf("test:%d", i))
-		sp.SetTag(fmt.Sprintf("tags:%d", i), fmt.Sprintf("tags:%d", i))
-
-		var err error
-		if i == 1 {
-			err = errors.New("test")
-		}
-
-		if err != nil {
-			LogError(sp, err)
-			sp.Finish()
-			return nil
-		}
-
-		sp.Finish()
-	}
-	return nil
+func callfn() (string, string) {
+	return callerInfo(2)
 }
 
-func TestInject(t *testing.T) {
-	// context normally can be propagated through func params
-	ctx := context.Background()
+func TestTraceIDFromContext(t *testing.T) {
+	ctx, span := StartSpanFromContextWithOperationName(context.TODO(), "test")
+	assert.NotNil(t, span)
 
-	//start span
-	//default use function name for operation name
-	sp, ctx := StartSpanFromContext(ctx)
-	id, sampled, found := InfoFromContext(ctx)
-	fmt.Printf("traceID = %s, sampled = %t, found = %t", id, sampled, found)
-	pp := PropertiesReaderWriter{PpMap: map[string]string{}}
-	InjectContextToPulsarMsgProperties(sp.Context(), pp.PpMap)
-	tracer := opentracing.GlobalTracer()
-	sc, _ := tracer.Extract(opentracing.TextMap, pp)
-	assert.NotNil(t, sc)
+	spanctx := span.SpanContext()
+	trace0, sampled, ok := InfoFromContext(ctx)
+	assert.True(t, ok && sampled)
+	trace1, sampled2, ok2 := InfoFromSpan(span)
+	assert.True(t, ok2 && sampled2)
 
-}
-
-func TestTraceError(t *testing.T) {
-	// context normally can be propagated through func params
-	sp, ctx := StartSpanFromContext(nil)
-	assert.Nil(t, ctx)
-	assert.NotNil(t, sp)
-
-	sp, ctx = StartSpanFromContextWithOperationName(nil, "test")
-	assert.Nil(t, ctx)
-	assert.NotNil(t, sp)
-
-	//Will Cause span log error
-	StartSpanFromContextWithOperationNameWithSkip(context.Background(), "test", 10000)
-
-	//Will Cause span log error
-	StartSpanFromContextWithSkip(context.Background(), 10000)
-
-	id, sampled, found := InfoFromSpan(nil)
-	assert.Equal(t, id, "")
-	assert.Equal(t, sampled, false)
-	assert.Equal(t, found, false)
-
-	id, sampled, found = InfoFromContext(nil)
-	assert.Equal(t, id, "")
-	assert.Equal(t, sampled, false)
-	assert.Equal(t, found, false)
+	assert.True(t, len(trace0) > 0)
+	assert.Equal(t, trace0, trace1, "Trace0: %s, Trace1: %s", trace0, trace1)
+	assert.Equal(t, spanctx.TraceID().String(), trace0)
 }

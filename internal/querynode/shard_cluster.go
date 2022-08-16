@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/errorutil"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -832,11 +833,17 @@ func (sc *ShardCluster) GetStatistics(ctx context.Context, req *querypb.GetStati
 
 // Search preforms search operation on shard cluster.
 func (sc *ShardCluster) Search(ctx context.Context, req *querypb.SearchRequest, withStreaming withStreaming) ([]*internalpb.SearchResults, error) {
+	ctx, span := trace.StartSpanFromContextWithOperationName(ctx, "shardcluster.search")
+	defer span.End()
 	if !sc.serviceable() {
-		return nil, fmt.Errorf("ShardCluster for %s replicaID %d is no available", sc.vchannelName, sc.replicaID)
+		err := fmt.Errorf("ShardCluster for %s replicaID %d is no available", sc.vchannelName, sc.replicaID)
+		span.RecordError(err)
+		return nil, err
 	}
 	if !funcutil.SliceContain(req.GetDmlChannels(), sc.vchannelName) {
-		return nil, fmt.Errorf("ShardCluster for %s does not match request channels :%v", sc.vchannelName, req.GetDmlChannels())
+		err := fmt.Errorf("ShardCluster for %s does not match request channels :%v", sc.vchannelName, req.GetDmlChannels())
+		span.RecordError(err)
+		return nil, err
 	}
 
 	// get node allocation and maintains the inUse reference count
@@ -859,13 +866,16 @@ func (sc *ShardCluster) Search(ctx context.Context, req *querypb.SearchRequest, 
 
 	// detect corresponding streaming search is done
 	wg.Add(1)
+	span.AddEvent("search growing channel")
 	go func() {
+		defer span.AddEvent("search growing channel done")
 		defer wg.Done()
 
 		streamErr := withStreaming(reqCtx)
 		resultMut.Lock()
 		defer resultMut.Unlock()
 		if streamErr != nil {
+			span.RecordError(fmt.Errorf("search growing channel failed: %v", streamErr))
 			cancel()
 			// not set cancel error
 			if !errors.Is(streamErr, context.Canceled) {
@@ -888,12 +898,16 @@ func (sc *ShardCluster) Search(ctx context.Context, req *querypb.SearchRequest, 
 			return nil, fmt.Errorf("ShardCluster for %s replicaID %d is no available", sc.vchannelName, sc.replicaID)
 		}
 		wg.Add(1)
+		span.AddEvent(fmt.Sprintf("search sealed segments, node: %d, segments: %#v", nodeID, segments))
+		nID, segs := nodeID, segments[:]
 		go func() {
 			defer wg.Done()
+			defer span.AddEvent(fmt.Sprintf("search sealed segments done, node: %d, segments: %#v", nID, segs))
 			partialResult, nodeErr := node.client.Search(reqCtx, nodeReq)
 			resultMut.Lock()
 			defer resultMut.Unlock()
 			if nodeErr != nil || partialResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+				span.RecordError(fmt.Errorf("node error: %v, search failed reason: %s", nodeErr, partialResult.GetStatus().GetReason()))
 				cancel()
 				// not set cancel error
 				if !errors.Is(nodeErr, context.Canceled) {
@@ -916,13 +930,19 @@ func (sc *ShardCluster) Search(ctx context.Context, req *querypb.SearchRequest, 
 
 // Query performs query operation on shard cluster.
 func (sc *ShardCluster) Query(ctx context.Context, req *querypb.QueryRequest, withStreaming withStreaming) ([]*internalpb.RetrieveResults, error) {
+	ctx, span := trace.StartSpanFromContextWithOperationName(ctx, "shardcluster.query")
+	defer span.End()
 	if !sc.serviceable() {
-		return nil, fmt.Errorf("ShardCluster for %s replicaID %d is no available", sc.vchannelName, sc.replicaID)
+		err := fmt.Errorf("ShardCluster for %s replicaID %d is no available", sc.vchannelName, sc.replicaID)
+		span.RecordError(err)
+		return nil, err
 	}
 
 	// handles only the dml channel part, segment ids is dispatch by cluster itself
 	if !funcutil.SliceContain(req.GetDmlChannels(), sc.vchannelName) {
-		return nil, fmt.Errorf("ShardCluster for %s does not match to request channels :%v", sc.vchannelName, req.GetDmlChannels())
+		err := fmt.Errorf("ShardCluster for %s does not match to request channels :%v", sc.vchannelName, req.GetDmlChannels())
+		span.RecordError(err)
+		return nil, err
 	}
 
 	// get node allocation and maintains the inUse reference count
@@ -940,13 +960,15 @@ func (sc *ShardCluster) Query(ctx context.Context, req *querypb.QueryRequest, wi
 
 	// detect corresponding streaming query is done
 	wg.Add(1)
+	span.AddEvent("query growing channel")
 	go func() {
 		defer wg.Done()
-
+		defer span.AddEvent("query growing channel done")
 		streamErr := withStreaming(reqCtx)
 		resultMut.Lock()
 		defer resultMut.Unlock()
 		if streamErr != nil {
+			span.RecordError(fmt.Errorf("query growing channel failed: %v", streamErr))
 			cancel()
 			// not set cancel error
 			if !errors.Is(streamErr, context.Canceled) {
@@ -969,12 +991,16 @@ func (sc *ShardCluster) Query(ctx context.Context, req *querypb.QueryRequest, wi
 			return nil, fmt.Errorf("SharcCluster for %s replicaID %d is no available", sc.vchannelName, sc.replicaID)
 		}
 		wg.Add(1)
+		span.AddEvent(fmt.Sprintf("query segments, node: %d, segments: %#v", nodeID, segments))
+		nID, segs := nodeID, segments[:]
 		go func() {
 			defer wg.Done()
+			defer span.AddEvent(fmt.Sprintf("query segments done, node: %d, segments: %#v", nID, segs))
 			partialResult, nodeErr := node.client.Query(reqCtx, nodeReq)
 			resultMut.Lock()
 			defer resultMut.Unlock()
 			if nodeErr != nil || partialResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+				span.RecordError(fmt.Errorf("node error: %v, query failed reason: %s", nodeErr, partialResult.GetStatus().GetReason()))
 				cancel()
 				err = fmt.Errorf("Query %d failed, reason %s err %w", node.nodeID, partialResult.GetStatus().GetReason(), nodeErr)
 				return

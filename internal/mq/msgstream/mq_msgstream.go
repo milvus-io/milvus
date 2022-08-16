@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
+	oteltrace "go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -35,7 +36,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/opentracing/opentracing-go"
 )
 
 var _ MsgStream = (*mqMsgStream)(nil)
@@ -277,7 +277,7 @@ func (ms *mqMsgStream) Produce(msgPack *MsgPack) error {
 
 			msg := &mqwrapper.ProducerMessage{Payload: m, Properties: map[string]string{}}
 
-			trace.InjectContextToPulsarMsgProperties(sp.Context(), msg.Properties)
+			trace.InjectContextToPulsarMsgProperties(spanCtx, msg.Properties)
 
 			ms.producerLock.Lock()
 			if _, err := ms.producers[channel].Send(
@@ -285,11 +285,11 @@ func (ms *mqMsgStream) Produce(msgPack *MsgPack) error {
 				msg,
 			); err != nil {
 				ms.producerLock.Unlock()
-				trace.LogError(sp, err)
-				sp.Finish()
+				sp.RecordError(err)
+				sp.End()
 				return err
 			}
-			sp.Finish()
+			sp.End()
 			ms.producerLock.Unlock()
 		}
 	}
@@ -343,7 +343,7 @@ func (ms *mqMsgStream) ProduceMark(msgPack *MsgPack) (map[string][]MessageID, er
 
 			msg := &mqwrapper.ProducerMessage{Payload: m, Properties: map[string]string{}}
 
-			trace.InjectContextToPulsarMsgProperties(sp.Context(), msg.Properties)
+			trace.InjectContextToPulsarMsgProperties(spanCtx, msg.Properties)
 
 			ms.producerLock.Lock()
 			id, err := ms.producers[channel].Send(
@@ -352,12 +352,12 @@ func (ms *mqMsgStream) ProduceMark(msgPack *MsgPack) (map[string][]MessageID, er
 			)
 			if err != nil {
 				ms.producerLock.Unlock()
-				trace.LogError(sp, err)
-				sp.Finish()
+				sp.RecordError(err)
+				sp.End()
 				return ids, err
 			}
 			ids[channel] = append(ids[channel], id)
-			sp.Finish()
+			sp.End()
 			ms.producerLock.Unlock()
 		}
 	}
@@ -386,7 +386,7 @@ func (ms *mqMsgStream) Broadcast(msgPack *MsgPack) error {
 
 		msg := &mqwrapper.ProducerMessage{Payload: m, Properties: map[string]string{}}
 
-		trace.InjectContextToPulsarMsgProperties(sp.Context(), msg.Properties)
+		trace.InjectContextToPulsarMsgProperties(spanCtx, msg.Properties)
 
 		ms.producerLock.Lock()
 		for _, producer := range ms.producers {
@@ -395,13 +395,13 @@ func (ms *mqMsgStream) Broadcast(msgPack *MsgPack) error {
 				msg,
 			); err != nil {
 				ms.producerLock.Unlock()
-				trace.LogError(sp, err)
-				sp.Finish()
+				sp.RecordError(err)
+				sp.End()
 				return err
 			}
 		}
 		ms.producerLock.Unlock()
-		sp.Finish()
+		sp.End()
 	}
 	return nil
 }
@@ -428,21 +428,21 @@ func (ms *mqMsgStream) BroadcastMark(msgPack *MsgPack) (map[string][]MessageID, 
 
 		msg := &mqwrapper.ProducerMessage{Payload: m, Properties: map[string]string{}}
 
-		trace.InjectContextToPulsarMsgProperties(sp.Context(), msg.Properties)
+		trace.InjectContextToPulsarMsgProperties(spanCtx, msg.Properties)
 
 		ms.producerLock.Lock()
 		for channel, producer := range ms.producers {
 			id, err := producer.Send(spanCtx, msg)
 			if err != nil {
 				ms.producerLock.Unlock()
-				trace.LogError(sp, err)
-				sp.Finish()
+				sp.RecordError(err)
+				sp.End()
 				return ids, err
 			}
 			ids[channel] = append(ids[channel], id)
 		}
 		ms.producerLock.Unlock()
-		sp.Finish()
+		sp.End()
 	}
 	return ids, nil
 }
@@ -508,7 +508,7 @@ func (ms *mqMsgStream) receiveMsg(consumer mqwrapper.Consumer) {
 
 			sp, ok := ExtractFromPulsarMsgProperties(tsMsg, msg.Properties())
 			if ok {
-				tsMsg.SetTraceCtx(opentracing.ContextWithSpan(context.Background(), sp))
+				tsMsg.SetTraceCtx(oteltrace.ContextWithSpan(context.TODO(), sp))
 			}
 
 			msgPack := MsgPack{
@@ -522,7 +522,7 @@ func (ms *mqMsgStream) receiveMsg(consumer mqwrapper.Consumer) {
 				return
 			}
 
-			sp.Finish()
+			sp.End()
 		}
 	}
 }
@@ -815,7 +815,7 @@ func (ms *MqTtMsgStream) consumeToTtMsg(consumer mqwrapper.Consumer) {
 
 			sp, ok := ExtractFromPulsarMsgProperties(tsMsg, msg.Properties())
 			if ok {
-				tsMsg.SetTraceCtx(opentracing.ContextWithSpan(context.Background(), sp))
+				tsMsg.SetTraceCtx(oteltrace.ContextWithSpan(context.TODO(), sp))
 			}
 
 			ms.chanMsgBufMutex.Lock()
@@ -826,10 +826,10 @@ func (ms *MqTtMsgStream) consumeToTtMsg(consumer mqwrapper.Consumer) {
 				ms.chanTtMsgTimeMutex.Lock()
 				ms.chanTtMsgTime[consumer] = tsMsg.(*TimeTickMsg).Base.Timestamp
 				ms.chanTtMsgTimeMutex.Unlock()
-				sp.Finish()
+				sp.End()
 				return
 			}
-			sp.Finish()
+			sp.End()
 		}
 	}
 }

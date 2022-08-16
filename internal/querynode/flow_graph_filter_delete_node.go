@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -64,9 +63,9 @@ func (fddNode *filterDeleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		return []Msg{}
 	}
 
-	var spans []opentracing.Span
+	var spans []*trace.Span
 	for _, msg := range msgStreamMsg.TsMessages() {
-		sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+		ctx, sp := trace.StartSpanFromContextWithOperationName(msg.TraceCtx(), "querynode.fdel.operate")
 		spans = append(spans, sp)
 		msg.SetTraceCtx(ctx)
 	}
@@ -87,7 +86,7 @@ func (fddNode *filterDeleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	collection.RLock()
 	defer collection.RUnlock()
 
-	for _, msg := range msgStreamMsg.TsMessages() {
+	for i, msg := range msgStreamMsg.TsMessages() {
 		switch msg.Type() {
 		case commonpb.MsgType_Delete:
 			resMsg, err := fddNode.filterInvalidDeleteMessage(msg.(*msgstream.DeleteMsg), collection.getLoadType())
@@ -100,7 +99,9 @@ func (fddNode *filterDeleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			if resMsg != nil {
 				dMsg.deleteMessages = append(dMsg.deleteMessages, resMsg)
 			}
+
 		default:
+			spans[i].RecordError(fmt.Errorf("invalid message type: %s", msg.Type()))
 			log.Warn("invalid message type in filterDeleteNode",
 				zap.String("message type", msg.Type().String()),
 				zap.Int64("collection", fddNode.collectionID),
@@ -109,7 +110,7 @@ func (fddNode *filterDeleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	}
 	var res Msg = &dMsg
 	for _, sp := range spans {
-		sp.Finish()
+		sp.End()
 	}
 	return []Msg{res}
 }
@@ -120,9 +121,9 @@ func (fddNode *filterDeleteNode) filterInvalidDeleteMessage(msg *msgstream.Delet
 		return nil, fmt.Errorf("CheckAligned failed, err = %s", err)
 	}
 
-	sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+	ctx, sp := trace.StartSpanFromContextWithOperationName(msg.TraceCtx(), "filter-invalid-delete-msg")
 	msg.SetTraceCtx(ctx)
-	defer sp.Finish()
+	defer sp.End()
 
 	if msg.CollectionID != fddNode.collectionID {
 		return nil, nil
@@ -142,6 +143,7 @@ func (fddNode *filterDeleteNode) filterInvalidDeleteMessage(msg *msgstream.Delet
 			return nil, nil
 		}
 	}
+	sp.RecordBool("filtered", false)
 	return msg, nil
 }
 

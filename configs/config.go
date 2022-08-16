@@ -61,6 +61,7 @@ type Config struct {
 	SkipQueryChannelRecover   bool             `toml:"skip-query-channel-recover" json:"skip-query-channel-recover"`
 	Metrics                   Metrics          `toml:"" json:"metrics"`
 	GarbageCollector          GarbageCollector `toml:"gc" json:"gc"`
+	OpenTelemetry             OpenTelemetry    `toml:"opentelemetry" json:"opentelemetry"`
 }
 
 type Etcd struct {
@@ -187,6 +188,13 @@ type Metrics struct {
 	GoVersion    string `toml:"" json:"go-version"`
 }
 
+type OpenTelemetry struct {
+	SampleFile     string  `toml:"" json:"sample-file"`
+	JaegerEndpoint string  `toml:"" json:"jaeger-endpoint"`
+	SampleFraction float64 `toml:"" json:"sample-fraction"`
+	Development    bool    `toml:"" json:"development"`
+}
+
 var defaultCfg = Config{
 	Etcd: Etcd{
 		Endpoints: []string{"localhost:2379"},
@@ -299,6 +307,11 @@ var defaultCfg = Config{
 		Interval:             3600,
 		MissedFileTolerance:  86400,
 		DroppedFileTolerance: 86400,
+	},
+	OpenTelemetry: OpenTelemetry{
+		SampleFile:     "stdout",
+		SampleFraction: 1.0,
+		Development:    true,
 	},
 }
 

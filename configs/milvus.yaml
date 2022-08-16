@@ -296,6 +296,10 @@ tls:
   serverKeyPath: configs/cert/server.key
   caPemPath: configs/cert/ca.pem
 
+opentelemetry:
+  sampleFraction: 1.0
+  development: true
+  sampleFile: stdout
 
 common:
   # Channel name generation rule: ${namePrefix}-${ChannelIdx}

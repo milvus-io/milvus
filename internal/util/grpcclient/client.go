@@ -22,13 +22,13 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc/backoff"
 
 	"github.com/milvus-io/milvus/internal/util"
 
 	"github.com/milvus-io/milvus/internal/util/crypto"
 
-	grpcopentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
@@ -141,7 +141,6 @@ func (c *ClientBase) connect(ctx context.Context) error {
 		return err
 	}
 
-	opts := trace.GetInterceptorOpts()
 	dialContext, cancel := context.WithTimeout(ctx, c.DialTimeout)
 
 	// refer to https://github.com/grpc/grpc-proto/blob/master/grpc/service_config/service_config.proto
@@ -166,8 +165,8 @@ func (c *ClientBase) connect(ctx context.Context) error {
 			grpc.MaxCallRecvMsgSize(c.ClientMaxRecvSize),
 			grpc.MaxCallSendMsgSize(c.ClientMaxSendSize),
 		),
-		grpc.WithUnaryInterceptor(grpcopentracing.UnaryClientInterceptor(opts...)),
-		grpc.WithStreamInterceptor(grpcopentracing.StreamClientInterceptor(opts...)),
+		grpc.WithUnaryInterceptor(otelgrpc.UnaryClientInterceptor()),
+		grpc.WithStreamInterceptor(otelgrpc.StreamClientInterceptor()),
 		grpc.WithDefaultServiceConfig(retryPolicy),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
 			Time:                c.KeepAliveTime,

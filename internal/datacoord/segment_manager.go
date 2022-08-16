@@ -223,8 +223,8 @@ func (s *SegmentManager) loadSegmentsFromMeta() {
 // AllocSegment allocate segment per request collcation, partication, channel and rows
 func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID,
 	partitionID UniqueID, channelName string, requestRows int64) ([]*Allocation, error) {
-	sp, _ := trace.StartSpanFromContext(ctx)
-	defer sp.Finish()
+	ctx, sp := trace.StartSpanFromContextWithOperationName(ctx, "alloc-segment")
+	defer sp.End()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -273,7 +273,8 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 			return nil, err
 		}
 	}
-
+	sp.RecordInt("newly_allocated", len(newSegmentAllocations))
+	sp.RecordInt("existed_segments", len(existedSegmentAllocations))
 	allocations := append(newSegmentAllocations, existedSegmentAllocations...)
 	return allocations, nil
 }
@@ -351,8 +352,8 @@ func (s *SegmentManager) genExpireTs(ctx context.Context) (Timestamp, error) {
 
 func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID UniqueID, partitionID UniqueID,
 	channelName string, segmentState commonpb.SegmentState) (*SegmentInfo, error) {
-	sp, _ := trace.StartSpanFromContext(ctx)
-	defer sp.Finish()
+	ctx, sp := trace.StartSpanFromContextWithOperationName(ctx, "open-segment")
+	defer sp.End()
 	id, err := s.allocator.allocID(ctx)
 	if err != nil {
 		log.Error("failed to open new segment while allocID", zap.Error(err))
@@ -385,7 +386,8 @@ func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID Unique
 		zap.Int64("SegmentID", segmentInfo.ID),
 		zap.Int("Rows", maxNumOfRows),
 		zap.String("Channel", segmentInfo.InsertChannel))
-
+	sp.RecordInt64Pairs([]string{"segment", "collection", "partition", "max_row"}, []int64{id, collectionID, partitionID, int64(maxNumOfRows)})
+	sp.RecordString("insert_channel", channelName)
 	return segment, s.helper.afterCreateSegment(segmentInfo)
 }
 
@@ -399,8 +401,8 @@ func (s *SegmentManager) estimateMaxNumOfRows(collectionID UniqueID) (int, error
 
 // DropSegment drop the segment from manager.
 func (s *SegmentManager) DropSegment(ctx context.Context, segmentID UniqueID) {
-	sp, _ := trace.StartSpanFromContext(ctx)
-	defer sp.Finish()
+	_, sp := trace.StartSpanFromContextWithOperationName(ctx, "drop-segment")
+	defer sp.End()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i, id := range s.segments {
@@ -418,12 +420,13 @@ func (s *SegmentManager) DropSegment(ctx context.Context, segmentID UniqueID) {
 	for _, allocation := range segment.allocations {
 		putAllocation(allocation)
 	}
+	sp.RecordInt64("segment", segmentID)
 }
 
 // SealAllSegments seals all segments of collection with collectionID and return sealed segments
 func (s *SegmentManager) SealAllSegments(ctx context.Context, collectionID UniqueID, segIDs []UniqueID) ([]UniqueID, error) {
-	sp, _ := trace.StartSpanFromContext(ctx)
-	defer sp.Finish()
+	_, sp := trace.StartSpanFromContextWithOperationName(ctx, "seal-segment")
+	defer sp.End()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var ret []UniqueID
@@ -449,6 +452,7 @@ func (s *SegmentManager) SealAllSegments(ctx context.Context, collectionID Uniqu
 		}
 		ret = append(ret, id)
 	}
+	sp.RecordInt64s("segments", ret)
 	return ret, nil
 }
 
@@ -456,8 +460,8 @@ func (s *SegmentManager) SealAllSegments(ctx context.Context, collectionID Uniqu
 func (s *SegmentManager) GetFlushableSegments(ctx context.Context, channel string, t Timestamp) ([]UniqueID, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	sp, _ := trace.StartSpanFromContext(ctx)
-	defer sp.Finish()
+	_, sp := trace.StartSpanFromContextWithOperationName(ctx, "get-flushable-segments")
+	defer sp.End()
 	// TODO:move tryToSealSegment and dropEmptySealedSegment outside
 	if err := s.tryToSealSegment(t, channel); err != nil {
 		return nil, err
@@ -475,6 +479,8 @@ func (s *SegmentManager) GetFlushableSegments(ctx context.Context, channel strin
 			ret = append(ret, id)
 		}
 	}
+	sp.RecordInt64s("segments", ret)
+	sp.RecordString("channel", channel)
 
 	return ret, nil
 }

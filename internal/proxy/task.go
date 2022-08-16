@@ -2330,6 +2330,8 @@ func getPrimaryKeysFromExpr(schema *schemapb.CollectionSchema, expr string) (res
 }
 
 func (dt *deleteTask) PreExecute(ctx context.Context) error {
+	ctx, sp := trace.StartSpanFromContextWithOperationName(dt.ctx, "proxy.delete.pre-execute")
+	defer sp.End()
 	dt.Base.MsgType = commonpb.MsgType_Delete
 	dt.Base.SourceID = Params.ProxyCfg.GetNodeID()
 
@@ -2404,8 +2406,8 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 }
 
 func (dt *deleteTask) Execute(ctx context.Context) (err error) {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(dt.ctx, "Proxy-Delete-Execute")
-	defer sp.Finish()
+	ctx, sp := trace.StartSpanFromContextWithOperationName(dt.ctx, "proxy.delete.execute")
+	defer sp.End()
 
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute delete %d", dt.ID()))
 

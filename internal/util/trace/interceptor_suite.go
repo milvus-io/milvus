@@ -18,10 +18,19 @@ package trace
 
 import (
 	"context"
+	"strings"
 
-	grpc_opentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
-	"github.com/opentracing/opentracing-go"
+	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/baggage"
+	"go.opentelemetry.io/otel/codes"
+	semconv "go.opentelemetry.io/otel/semconv/v1.12.0"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/peer"
+	"google.golang.org/grpc/status"
 )
 
 // InterceptorSuite contains client option and server option
@@ -40,12 +49,105 @@ var (
 	}
 )
 
-// GetInterceptorOpts returns the Option of gRPC open-tracing
-func GetInterceptorOpts() []grpc_opentracing.Option {
-	tracer := opentracing.GlobalTracer()
-	opts := []grpc_opentracing.Option{
-		grpc_opentracing.WithTracer(tracer),
-		grpc_opentracing.WithFilterFunc(filterFunc),
+func UnaryServerInterceptor() grpc.UnaryServerInterceptor {
+	return func(
+		ctx context.Context,
+		req interface{},
+		info *grpc.UnaryServerInfo,
+		handler grpc.UnaryHandler,
+	) (interface{}, error) {
+		if !filterFunc(ctx, info.FullMethod) {
+			return handler(ctx, req)
+		}
+		requestMeta, _ := metadata.FromIncomingContext(ctx)
+		metadataCopy := requestMeta.Copy()
+
+		bags, spanCtx := otelgrpc.Extract(ctx, &metadataCopy)
+		ctx = baggage.ContextWithBaggage(ctx, bags)
+		peerAddr := ""
+		if p, ok := peer.FromContext(ctx); ok {
+			peerAddr = p.Addr.String()
+		}
+
+		name, attrs := parseFullMethod(info.FullMethod)
+		if peerAddr != "" {
+			attrs = append(attrs, attribute.String("rpc.peer", peerAddr))
+		}
+		attrs = append(attrs, attribute.String("traceID", spanCtx.TraceID().String()))
+
+		ctx, span := DefaultTracer().Start(
+			trace.ContextWithRemoteSpanContext(ctx, spanCtx),
+			name,
+			trace.WithSpanKind(trace.SpanKindServer), trace.WithAttributes(attrs...),
+		)
+		defer span.End()
+
+		resp, err := handler(ctx, req)
+		if err != nil {
+			s, _ := status.FromError(err)
+			span.SetStatus(codes.Error, s.Message())
+			span.SetAttributes(attribute.Int64("rpc.errcode", int64(s.Code())))
+		} else {
+			span.SetAttributes(attribute.Int64("rpc.errorcode", int64(grpc.Code(nil))))
+		}
+
+		return resp, err
 	}
-	return opts
+}
+
+func StreamServerInterceptor() grpc.StreamServerInterceptor {
+	return func(
+		srv interface{},
+		ss grpc.ServerStream,
+		info *grpc.StreamServerInfo,
+		handler grpc.StreamHandler,
+	) error {
+		ctx := ss.Context()
+		if !filterFunc(ctx, info.FullMethod) {
+			return handler(srv, ss)
+		}
+		requestMeta, _ := metadata.FromIncomingContext(ctx)
+		metadataCopy := requestMeta.Copy()
+
+		bags, spanCtx := otelgrpc.Extract(ctx, &metadataCopy)
+		ctx = baggage.ContextWithBaggage(ctx, bags)
+
+		peerAddr := ""
+		if p, ok := peer.FromContext(ctx); ok {
+			peerAddr = p.Addr.String()
+		}
+		name, attrs := parseFullMethod(info.FullMethod)
+		if peerAddr != "" {
+			attrs = append(attrs, attribute.String("rpc.peer", peerAddr))
+		}
+		attrs = append(attrs, attribute.String("traceID", spanCtx.TraceID().String()))
+
+		ctx, span := DefaultTracer().Start(
+			trace.ContextWithRemoteSpanContext(ctx, spanCtx),
+			name,
+			trace.WithSpanKind(trace.SpanKindServer),
+			trace.WithAttributes(attrs...),
+		)
+		defer span.End()
+		wrappedStream := grpc_middleware.WrapServerStream(ss)
+		wrappedStream.WrappedContext = ctx
+		return handler(srv, wrappedStream)
+	}
+}
+
+func parseFullMethod(fullMethod string) (string, []attribute.KeyValue) {
+	name := strings.TrimLeft(fullMethod, "/")
+	parts := strings.SplitN(name, "/", 2)
+	if len(parts) != 2 {
+		return name, []attribute.KeyValue(nil)
+	}
+
+	var attrs []attribute.KeyValue
+	if service := parts[0]; service != "" {
+		attrs = append(attrs, semconv.RPCServiceKey.String(service))
+	}
+	if method := parts[1]; method != "" {
+		attrs = append(attrs, semconv.RPCMethodKey.String(method))
+	}
+	return name, attrs
 }

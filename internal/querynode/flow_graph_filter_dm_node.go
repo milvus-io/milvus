@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -64,9 +63,9 @@ func (fdmNode *filterDmNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		return []Msg{}
 	}
 
-	var spans []opentracing.Span
+	var spans []*trace.Span
 	for _, msg := range msgStreamMsg.TsMessages() {
-		sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+		ctx, sp := trace.StartSpanFromContextWithOperationName(msg.TraceCtx(), "querynode.fdm.operate")
 		spans = append(spans, sp)
 		msg.SetTraceCtx(ctx)
 	}
@@ -102,6 +101,8 @@ func (fdmNode *filterDmNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			}
 			if resMsg != nil {
 				iMsg.insertMessages = append(iMsg.insertMessages, resMsg)
+				spans[i].RecordString("msg_type", "insert")
+				spans[i].RecordInt64Pairs([]string{"collection", "partition", "num_rows"}, []int64{resMsg.CollectionID, resMsg.PartitionID, int64(resMsg.NumRows)})
 			}
 		case commonpb.MsgType_Delete:
 			resMsg, err := fdmNode.filterInvalidDeleteMessage(msg.(*msgstream.DeleteMsg), collection.getLoadType())
@@ -113,8 +114,11 @@ func (fdmNode *filterDmNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			}
 			if resMsg != nil {
 				iMsg.deleteMessages = append(iMsg.deleteMessages, resMsg)
+				spans[i].RecordString("msg_type", "delete")
+				spans[i].RecordInt64Pairs([]string{"collection", "partition", "num_rows"}, []int64{resMsg.CollectionID, resMsg.PartitionID, resMsg.NumRows})
 			}
 		default:
+			spans[i].RecordError(fmt.Errorf("invalid msg type: %s", msg.Type()))
 			log.Warn("invalid message type in filterDmNode",
 				zap.String("message type", msg.Type().String()),
 				zap.Int64("collection", fdmNode.collectionID),
@@ -124,7 +128,7 @@ func (fdmNode *filterDmNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 	var res Msg = &iMsg
 	for _, sp := range spans {
-		sp.Finish()
+		sp.End()
 	}
 	return []Msg{res}
 }
@@ -143,9 +147,9 @@ func (fdmNode *filterDmNode) filterInvalidDeleteMessage(msg *msgstream.DeleteMsg
 		return nil, nil
 	}
 
-	sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+	ctx, sp := trace.StartSpanFromContextWithOperationName(msg.TraceCtx(), "filter-invalid-delete-msg")
 	msg.SetTraceCtx(ctx)
-	defer sp.Finish()
+	defer sp.End()
 
 	if msg.CollectionID != fdmNode.collectionID {
 		// filter out msg which not belongs to the current collection
@@ -158,7 +162,7 @@ func (fdmNode *filterDmNode) filterInvalidDeleteMessage(msg *msgstream.DeleteMsg
 			return nil, nil
 		}
 	}
-
+	sp.RecordBool("filtered", false)
 	return msg, nil
 }
 
@@ -176,9 +180,9 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 		return nil, nil
 	}
 
-	sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+	ctx, sp := trace.StartSpanFromContextWithOperationName(msg.TraceCtx(), "filter-invalid-insert-msg")
 	msg.SetTraceCtx(ctx)
-	defer sp.Finish()
+	defer sp.End()
 
 	// check if the collection from message is target collection
 	if msg.CollectionID != fdmNode.collectionID {
@@ -220,7 +224,7 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 			return nil, nil
 		}
 	}
-
+	sp.RecordBool("filtered", false)
 	return msg, nil
 }
 

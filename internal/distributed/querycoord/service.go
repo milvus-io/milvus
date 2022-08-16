@@ -18,6 +18,7 @@ package grpcquerycoord
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"strconv"
@@ -25,7 +26,6 @@ import (
 	"time"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
-	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -115,7 +115,7 @@ func (s *Server) init() error {
 	qc.Params.QueryCoordCfg.Address = Params.GetAddress()
 	qc.Params.QueryCoordCfg.Port = Params.Port
 
-	closer := trace.InitTracing("querycoord")
+	closer := trace.InitTracing("QueryCoord", &Params.BaseTable, fmt.Sprintf("%s:%d", Params.IP, Params.Port))
 	s.closer = closer
 
 	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
@@ -255,17 +255,16 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	ctx, cancel := context.WithCancel(s.loopCtx)
 	defer cancel()
 
-	opts := trace.GetInterceptorOpts()
 	s.grpcServer = grpc.NewServer(
 		grpc.KeepaliveEnforcementPolicy(kaep),
 		grpc.KeepaliveParams(kasp),
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize),
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
-			ot.UnaryServerInterceptor(opts...),
+			trace.UnaryServerInterceptor(),
 			logutil.UnaryTraceLoggerInterceptor)),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
-			ot.StreamServerInterceptor(opts...),
+			trace.StreamServerInterceptor(),
 			logutil.StreamTraceLoggerInterceptor)))
 	querypb.RegisterQueryCoordServer(s.grpcServer, s)
 

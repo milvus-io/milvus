@@ -49,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"github.com/milvus-io/milvus/internal/util/trace"
 )
 
 var Params paramtable.ComponentParam
@@ -63,7 +64,7 @@ func TestMain(m *testing.M) {
 	}
 	broker := mockKafkaCluster.BootstrapServers()
 	Params.Save("kafka.brokerList", broker)
-
+	trace.InitTracing("mq-test", &Params.BaseTable, "")
 	exitCode := m.Run()
 	os.Exit(exitCode)
 }

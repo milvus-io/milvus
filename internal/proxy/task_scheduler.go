@@ -28,8 +28,6 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/util/trace"
-	"github.com/opentracing/opentracing-go"
-	oplog "github.com/opentracing/opentracing-go/log"
 )
 
 type taskQueue interface {
@@ -432,22 +430,18 @@ func (sched *taskScheduler) getTaskByReqID(reqID UniqueID) task {
 }
 
 func (sched *taskScheduler) processTask(t task, q taskQueue) {
-	span, ctx := trace.StartSpanFromContext(t.TraceCtx(),
-		opentracing.Tags{
-			"Type": t.Name(),
-			"ID":   t.ID(),
-		})
-	defer span.Finish()
+	ctx, span := trace.StartSpanFromContextWithOperationName(t.TraceCtx(), fmt.Sprintf("proxy.%s", t.Name()))
+	defer span.End()
 	traceID, _, _ := trace.InfoFromSpan(span)
 
-	span.LogFields(oplog.Int64("scheduler process AddActiveTask", t.ID()))
+	span.AddEvent("add-active-task")
 	q.AddActiveTask(t)
 
 	defer func() {
-		span.LogFields(oplog.Int64("scheduler process PopActiveTask", t.ID()))
+		span.AddEvent("pop-active-task")
 		q.PopActiveTask(t.ID())
 	}()
-	span.LogFields(oplog.Int64("scheduler process PreExecute", t.ID()))
+	span.AddEvent("pre-execute")
 
 	err := t.PreExecute(ctx)
 
@@ -455,26 +449,26 @@ func (sched *taskScheduler) processTask(t task, q taskQueue) {
 		t.Notify(err)
 	}()
 	if err != nil {
-		trace.LogError(span, err)
+		span.RecordError(err)
 		log.Error("Failed to pre-execute task: "+err.Error(),
 			zap.String("traceID", traceID))
 		return
 	}
 
-	span.LogFields(oplog.Int64("scheduler process Execute", t.ID()))
+	span.AddEvent("execute")
 	err = t.Execute(ctx)
 	if err != nil {
-		trace.LogError(span, err)
+		span.RecordError(err)
 		log.Error("Failed to execute task: "+err.Error(),
 			zap.String("traceID", traceID))
 		return
 	}
 
-	span.LogFields(oplog.Int64("scheduler process PostExecute", t.ID()))
+	span.AddEvent("post-execute")
 	err = t.PostExecute(ctx)
 
 	if err != nil {
-		trace.LogError(span, err)
+		span.RecordError(err)
 		log.Error("Failed to post-execute task: "+err.Error(),
 			zap.String("traceID", traceID))
 		return

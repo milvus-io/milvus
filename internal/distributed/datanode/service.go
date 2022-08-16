@@ -27,7 +27,6 @@ import (
 	"time"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
-	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -130,17 +129,16 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 		return
 	}
 
-	opts := trace.GetInterceptorOpts()
 	s.grpcServer = grpc.NewServer(
 		grpc.KeepaliveEnforcementPolicy(kaep),
 		grpc.KeepaliveParams(kasp),
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize),
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
-			ot.UnaryServerInterceptor(opts...),
+			trace.UnaryServerInterceptor(),
 			logutil.UnaryTraceLoggerInterceptor)),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
-			ot.StreamServerInterceptor(opts...),
+			trace.StreamServerInterceptor(),
 			logutil.StreamTraceLoggerInterceptor)))
 	datapb.RegisterDataNodeServer(s.grpcServer, s)
 
@@ -239,7 +237,7 @@ func (s *Server) init() error {
 	}
 	s.etcdCli = etcdCli
 	s.SetEtcdClient(s.etcdCli)
-	closer := trace.InitTracing(fmt.Sprintf("data_node ip: %s, port: %d", Params.IP, Params.Port))
+	closer := trace.InitTracing("DataNode", &Params.BaseTable, fmt.Sprintf("%s:%d", Params.IP, Params.Port))
 	s.closer = closer
 	addr := Params.IP + ":" + strconv.Itoa(Params.Port)
 	log.Debug("DataNode address", zap.String("address", addr))

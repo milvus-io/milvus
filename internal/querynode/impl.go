@@ -35,6 +35,7 @@ import (
 	queryPb "github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
+	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -568,6 +569,8 @@ func (node *QueryNode) isHealthy() bool {
 
 // Search performs replica search tasks.
 func (node *QueryNode) Search(ctx context.Context, req *queryPb.SearchRequest) (*internalpb.SearchResults, error) {
+	ctx, span := trace.StartSpanFromContextWithOperationName(ctx, "querynode.search")
+	defer span.End()
 	log.Ctx(ctx).Debug("Received SearchRequest",
 		zap.Int64("msgID", req.GetReq().GetBase().GetMsgID()),
 		zap.Strings("vChannels", req.GetDmlChannels()),
@@ -580,9 +583,15 @@ func (node *QueryNode) Search(ctx context.Context, req *queryPb.SearchRequest) (
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
 	}
+	defer func() {
+		if failRet.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+			span.RecordError(fmt.Errorf("%s", failRet.GetStatus().GetReason()))
+		}
+	}()
 	toReduceResults := make([]*internalpb.SearchResults, 0)
 	runningGp, runningCtx := errgroup.WithContext(ctx)
 	mu := &sync.Mutex{}
+	span.RecordStrings("dml-channels", req.GetDmlChannels())
 	for _, ch := range req.GetDmlChannels() {
 		ch := ch
 		req := &querypb.SearchRequest{
@@ -623,6 +632,10 @@ func (node *QueryNode) Search(ctx context.Context, req *queryPb.SearchRequest) (
 }
 
 func (node *QueryNode) searchWithDmlChannel(ctx context.Context, req *queryPb.SearchRequest, dmlChannel string) (*internalpb.SearchResults, error) {
+	ctx, span := trace.StartSpanFromContextWithOperationName(ctx, "querynode.search-with-dmlchannel")
+	defer span.End()
+	span.RecordString("dml-channel", dmlChannel)
+	span.RecordInt64Pairs([]string{"NQ", "TopK"}, []int64{req.Req.Nq, req.Req.Topk})
 	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.SearchLabel, metrics.TotalLabel).Inc()
 	failRet := &internalpb.SearchResults{
 		Status: &commonpb.Status{
@@ -633,6 +646,7 @@ func (node *QueryNode) searchWithDmlChannel(ctx context.Context, req *queryPb.Se
 	defer func() {
 		if failRet.Status.ErrorCode != commonpb.ErrorCode_Success {
 			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.SearchLabel, metrics.FailLabel).Inc()
+			span.RecordError(fmt.Errorf("%s", failRet.Status.GetReason()))
 		}
 	}()
 	if !node.isHealthy() {
@@ -775,6 +789,9 @@ func (node *QueryNode) searchWithDmlChannel(ctx context.Context, req *queryPb.Se
 }
 
 func (node *QueryNode) queryWithDmlChannel(ctx context.Context, req *queryPb.QueryRequest, dmlChannel string) (*internalpb.RetrieveResults, error) {
+	ctx, span := trace.StartSpanFromContextWithOperationName(ctx, "querynode.query-with-dml-channel")
+	defer span.End()
+	span.RecordString("dml-channel", dmlChannel)
 	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.QueryLabel, metrics.TotalLabel).Inc()
 	failRet := &internalpb.RetrieveResults{
 		Status: &commonpb.Status{
@@ -785,6 +802,7 @@ func (node *QueryNode) queryWithDmlChannel(ctx context.Context, req *queryPb.Que
 	defer func() {
 		if failRet.Status.ErrorCode != commonpb.ErrorCode_Success {
 			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.SearchLabel, metrics.FailLabel).Inc()
+			span.RecordError(fmt.Errorf("%s", failRet.GetStatus().GetReason()))
 		}
 	}()
 	if !node.isHealthy() {
@@ -917,6 +935,9 @@ func (node *QueryNode) queryWithDmlChannel(ctx context.Context, req *queryPb.Que
 
 // Query performs replica query tasks.
 func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
+	ctx, span := trace.StartSpanFromContextWithOperationName(ctx, "querynode.query")
+	defer span.End()
+	span.RecordStrings("dml-channels", req.GetDmlChannels())
 	log.Ctx(ctx).Debug("Received QueryRequest", zap.Int64("msgID", req.GetReq().GetBase().GetMsgID()),
 		zap.Strings("vChannels", req.GetDmlChannels()),
 		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
@@ -928,7 +949,11 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
 	}
-
+	defer func() {
+		if failRet.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+			span.RecordError(fmt.Errorf("%s", failRet.GetStatus().GetReason()))
+		}
+	}()
 	toMergeResults := make([]*internalpb.RetrieveResults, 0)
 	runningGp, runningCtx := errgroup.WithContext(ctx)
 	mu := &sync.Mutex{}

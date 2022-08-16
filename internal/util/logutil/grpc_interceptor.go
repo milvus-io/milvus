@@ -5,7 +5,7 @@ import (
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/util/trace"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
@@ -15,6 +15,10 @@ const (
 	logLevelRPCMetaKey = "log_level"
 	clientRequestIDKey = "client_request_id"
 )
+
+func init() {
+	propgateKeys = append(propgateKeys, logLevelRPCMetaKey, clientRequestIDKey)
+}
 
 // UnaryTraceLoggerInterceptor adds a traced logger in unary rpc call ctx
 func UnaryTraceLoggerInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
@@ -69,10 +73,28 @@ func withLevelAndTrace(ctx context.Context) context.Context {
 		}
 	}
 	if traceID == "" {
-		traceID, _, _ = trace.InfoFromContext(newctx)
+		traceID = getTraceID(newctx)
 	}
 	if traceID != "" {
 		newctx = log.WithTraceID(newctx, traceID)
 	}
 	return newctx
+}
+
+func getTraceID(ctx context.Context) string {
+	spanctx := trace.SpanContextFromContext(ctx)
+	if spanctx.HasTraceID() {
+		return spanctx.TraceID().String()
+	}
+	return ""
+}
+
+func GetClientRequestID(ctx context.Context) string {
+	if md, ok := metadata.FromIncomingContext(ctx); ok {
+		requestID := md.Get(clientRequestIDKey)
+		if len(requestID) >= 1 {
+			return requestID[0]
+		}
+	}
+	return ""
 }

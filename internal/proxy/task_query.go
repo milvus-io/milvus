@@ -19,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
+	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 
@@ -100,6 +101,8 @@ func translateToOutputFieldIDs(outputFields []string, schema *schemapb.Collectio
 }
 
 func (t *queryTask) PreExecute(ctx context.Context) error {
+	ctx, span := trace.StartSpanFromContextWithOperationName(ctx, "proxy.search.preExecute")
+	defer span.End()
 	if t.queryShardPolicy == nil {
 		t.queryShardPolicy = mergeRoundRobinPolicy
 	}
@@ -227,6 +230,9 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 }
 
 func (t *queryTask) Execute(ctx context.Context) error {
+	ctx, span := trace.StartSpanFromContextWithOperationName(ctx, "proxy.query.execute")
+	defer span.End()
+	span.RecordString("collection", t.collectionName)
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute query %d", t.ID()))
 	defer tr.CtxElapse(ctx, "done")
 
@@ -260,6 +266,8 @@ func (t *queryTask) Execute(ctx context.Context) error {
 }
 
 func (t *queryTask) PostExecute(ctx context.Context) error {
+	ctx, span := trace.StartSpanFromContextWithOperationName(ctx, "proxy.query.postExecute")
+	defer span.End()
 	tr := timerecord.NewTimeRecorder("queryTask PostExecute")
 	defer func() {
 		tr.CtxElapse(ctx, "done")

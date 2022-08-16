@@ -159,8 +159,8 @@ func (node *Proxy) CreateCollection(ctx context.Context, request *milvuspb.Creat
 		return unhealthyStatus(), nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-CreateCollection")
-	defer sp.Finish()
+	ctx, sp := trace.StartSpanFromContextWithOperationName(ctx, "proxy.create-collection")
+	defer sp.End()
 	traceID, _, _ := trace.InfoFromSpan(sp)
 	method := "CreateCollection"
 	tr := timerecord.NewTimeRecorder(method)
@@ -254,7 +254,7 @@ func (node *Proxy) CreateCollection(ctx context.Context, request *milvuspb.Creat
 		zap.Int("len(schema)", lenOfSchema),
 		zap.Int32("shards_num", request.ShardsNum),
 		zap.String("consistency_level", request.ConsistencyLevel.String()))
-
+	sp.RecordString("collection", request.CollectionName)
 	metrics.ProxyDDLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method, metrics.SuccessLabel).Inc()
 	metrics.ProxyDDLReqLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return cct.result, nil
@@ -266,8 +266,8 @@ func (node *Proxy) DropCollection(ctx context.Context, request *milvuspb.DropCol
 		return unhealthyStatus(), nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-DropCollection")
-	defer sp.Finish()
+	ctx, sp := trace.StartSpanFromContextWithOperationName(ctx, "proxy.drop-collection")
+	defer sp.End()
 	traceID, _, _ := trace.InfoFromSpan(sp)
 	method := "DropCollection"
 	tr := timerecord.NewTimeRecorder(method)
@@ -338,7 +338,7 @@ func (node *Proxy) DropCollection(ctx context.Context, request *milvuspb.DropCol
 		zap.Uint64("EndTs", dct.EndTs()),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName))
-
+	sp.RecordString("collection", request.CollectionName)
 	metrics.ProxyDDLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method, metrics.SuccessLabel).Inc()
 	metrics.ProxyDDLReqLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return dct.result, nil
@@ -352,8 +352,8 @@ func (node *Proxy) HasCollection(ctx context.Context, request *milvuspb.HasColle
 		}, nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-HasCollection")
-	defer sp.Finish()
+	ctx, sp := trace.StartSpanFromContextWithOperationName(ctx, "proxy.has-collection")
+	defer sp.End()
 	traceID, _, _ := trace.InfoFromSpan(sp)
 	method := "HasCollection"
 	tr := timerecord.NewTimeRecorder(method)
@@ -429,7 +429,8 @@ func (node *Proxy) HasCollection(ctx context.Context, request *milvuspb.HasColle
 		zap.Uint64("EndTS", hct.EndTs()),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName))
-
+	sp.RecordString("collection", request.CollectionName)
+	sp.RecordBool("exist", hct.result.GetValue())
 	metrics.ProxyDQLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
 		metrics.SuccessLabel).Inc()
 	metrics.ProxyDQLReqLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
@@ -442,8 +443,8 @@ func (node *Proxy) LoadCollection(ctx context.Context, request *milvuspb.LoadCol
 		return unhealthyStatus(), nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-LoadCollection")
-	defer sp.Finish()
+	ctx, sp := trace.StartSpanFromContextWithOperationName(ctx, "proxy.load-collection")
+	defer sp.End()
 	traceID, _, _ := trace.InfoFromSpan(sp)
 	method := "LoadCollection"
 	tr := timerecord.NewTimeRecorder(method)
@@ -515,7 +516,8 @@ func (node *Proxy) LoadCollection(ctx context.Context, request *milvuspb.LoadCol
 		zap.Uint64("EndTS", lct.EndTs()),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName))
-
+	sp.RecordString("collection", request.CollectionName)
+	sp.RecordInt("replica", int(request.ReplicaNumber))
 	metrics.ProxyDMLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
 		metrics.TotalLabel).Inc()
 	metrics.ProxyDMLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
@@ -530,8 +532,8 @@ func (node *Proxy) ReleaseCollection(ctx context.Context, request *milvuspb.Rele
 		return unhealthyStatus(), nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-ReleaseCollection")
-	defer sp.Finish()
+	ctx, sp := trace.StartSpanFromContextWithOperationName(ctx, "proxy.release-collection")
+	defer sp.End()
 	traceID, _, _ := trace.InfoFromSpan(sp)
 	method := "ReleaseCollection"
 	tr := timerecord.NewTimeRecorder(method)
@@ -609,7 +611,7 @@ func (node *Proxy) ReleaseCollection(ctx context.Context, request *milvuspb.Rele
 		zap.Uint64("EndTS", rct.EndTs()),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName))
-
+	sp.RecordString("collection", request.CollectionName)
 	metrics.ProxyDMLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
 		metrics.TotalLabel).Inc()
 	metrics.ProxyDMLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
@@ -626,8 +628,8 @@ func (node *Proxy) DescribeCollection(ctx context.Context, request *milvuspb.Des
 		}, nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-DescribeCollection")
-	defer sp.Finish()
+	ctx, sp := trace.StartSpanFromContextWithOperationName(ctx, "proxy.describe-collection")
+	defer sp.End()
 	traceID, _, _ := trace.InfoFromSpan(sp)
 	method := "DescribeCollection"
 	tr := timerecord.NewTimeRecorder(method)
@@ -722,8 +724,8 @@ func (node *Proxy) GetStatistics(ctx context.Context, request *milvuspb.GetStati
 		}, nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-GetCollectionStatistics")
-	defer sp.Finish()
+	ctx, sp := trace.StartSpanFromContextWithOperationName(ctx, "proxy.get-statistics")
+	defer sp.End()
 	traceID, _, _ := trace.InfoFromSpan(sp)
 	method := "GetStatistics"
 	tr := timerecord.NewTimeRecorder(method)
@@ -830,8 +832,8 @@ func (node *Proxy) GetCollectionStatistics(ctx context.Context, request *milvusp
 		}, nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-GetCollectionStatistics")
-	defer sp.Finish()
+	ctx, sp := trace.StartSpanFromContextWithOperationName(ctx, "proxy.get-collection-statistics")
+	defer sp.End()
 	traceID, _, _ := trace.InfoFromSpan(sp)
 	method := "GetCollectionStatistics"
 	tr := timerecord.NewTimeRecorder(method)
@@ -1021,8 +1023,8 @@ func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.Create
 		return unhealthyStatus(), nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-CreatePartition")
-	defer sp.Finish()
+	ctx, sp := trace.StartSpanFromContextWithOperationName(ctx, "proxy.create-partition")
+	defer sp.End()
 	traceID, _, _ := trace.InfoFromSpan(sp)
 	method := "CreatePartition"
 	tr := timerecord.NewTimeRecorder(method)
@@ -1104,7 +1106,8 @@ func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.Create
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.String("partition", request.PartitionName))
-
+	sp.RecordString("collection", request.CollectionName)
+	sp.RecordString("partition", request.PartitionName)
 	metrics.ProxyDDLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method, metrics.SuccessLabel).Inc()
 	metrics.ProxyDDLReqLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return cpt.result, nil
@@ -1116,8 +1119,8 @@ func (node *Proxy) DropPartition(ctx context.Context, request *milvuspb.DropPart
 		return unhealthyStatus(), nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-DropPartition")
-	defer sp.Finish()
+	ctx, sp := trace.StartSpanFromContextWithOperationName(ctx, "proxy.drop-partition")
+	defer sp.End()
 	traceID, _, _ := trace.InfoFromSpan(sp)
 	method := "DropPartition"
 	tr := timerecord.NewTimeRecorder(method)
@@ -1199,7 +1202,8 @@ func (node *Proxy) DropPartition(ctx context.Context, request *milvuspb.DropPart
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.String("partition", request.PartitionName))
-
+	sp.RecordString("collection", request.CollectionName)
+	sp.RecordString("partition", request.PartitionName)
 	metrics.ProxyDDLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method, metrics.SuccessLabel).Inc()
 	metrics.ProxyDDLReqLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return dpt.result, nil
@@ -1213,8 +1217,8 @@ func (node *Proxy) HasPartition(ctx context.Context, request *milvuspb.HasPartit
 		}, nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-HasPartition")
-	defer sp.Finish()
+	ctx, sp := trace.StartSpanFromContextWithOperationName(ctx, "proxy.has-partition")
+	defer sp.End()
 	traceID, _, _ := trace.InfoFromSpan(sp)
 	method := "HasPartition"
 	tr := timerecord.NewTimeRecorder(method)
@@ -1319,8 +1323,8 @@ func (node *Proxy) LoadPartitions(ctx context.Context, request *milvuspb.LoadPar
 		return unhealthyStatus(), nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-LoadPartitions")
-	defer sp.Finish()
+	ctx, sp := trace.StartSpanFromContextWithOperationName(ctx, "proxy.load-partitions")
+	defer sp.End()
 	traceID, _, _ := trace.InfoFromSpan(sp)
 	method := "LoadPartitions"
 	tr := timerecord.NewTimeRecorder(method)
@@ -1404,7 +1408,8 @@ func (node *Proxy) LoadPartitions(ctx context.Context, request *milvuspb.LoadPar
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.Any("partitions", request.PartitionNames))
-
+	sp.RecordString("collection", request.CollectionName)
+	sp.RecordStrings("partitions", request.PartitionNames)
 	metrics.ProxyDMLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
 		metrics.TotalLabel).Inc()
 	metrics.ProxyDMLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
@@ -1419,8 +1424,8 @@ func (node *Proxy) ReleasePartitions(ctx context.Context, request *milvuspb.Rele
 		return unhealthyStatus(), nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-ReleasePartitions")
-	defer sp.Finish()
+	ctx, sp := trace.StartSpanFromContextWithOperationName(ctx, "proxy.release-partitions")
+	defer sp.End()
 	traceID, _, _ := trace.InfoFromSpan(sp)
 
 	rpt := &releasePartitionsTask{
@@ -1505,7 +1510,8 @@ func (node *Proxy) ReleasePartitions(ctx context.Context, request *milvuspb.Rele
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.Any("partitions", request.PartitionNames))
-
+	sp.RecordString("collection", request.CollectionName)
+	sp.RecordStrings("partions", request.PartitionNames)
 	metrics.ProxyDMLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
 		metrics.TotalLabel).Inc()
 	metrics.ProxyDMLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
@@ -1522,8 +1528,8 @@ func (node *Proxy) GetPartitionStatistics(ctx context.Context, request *milvuspb
 		}, nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-GetPartitionStatistics")
-	defer sp.Finish()
+	ctx, sp := trace.StartSpanFromContextWithOperationName(ctx, "proxy.get-partition-statistics")
+	defer sp.End()
 	traceID, _, _ := trace.InfoFromSpan(sp)
 	method := "GetPartitionStatistics"
 	tr := timerecord.NewTimeRecorder(method)
@@ -1628,8 +1634,8 @@ func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPar
 		}, nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-ShowPartitions")
-	defer sp.Finish()
+	ctx, sp := trace.StartSpanFromContextWithOperationName(ctx, "proxy.show-partitions")
+	defer sp.End()
 	traceID, _, _ := trace.InfoFromSpan(sp)
 
 	spt := &showPartitionsTask{
@@ -1730,8 +1736,8 @@ func (node *Proxy) CreateIndex(ctx context.Context, request *milvuspb.CreateInde
 		return unhealthyStatus(), nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-ShowPartitions")
-	defer sp.Finish()
+	ctx, sp := trace.StartSpanFromContextWithOperationName(ctx, "proxy.create-index")
+	defer sp.End()
 	traceID, _, _ := trace.InfoFromSpan(sp)
 
 	cit := &createIndexTask{
@@ -1822,7 +1828,7 @@ func (node *Proxy) CreateIndex(ctx context.Context, request *milvuspb.CreateInde
 		zap.String("collection", request.CollectionName),
 		zap.String("field", request.FieldName),
 		zap.Any("extra_params", request.ExtraParams))
-
+	sp.RecordStringPairs([]string{"collection", "field", "index"}, []string{request.CollectionName, request.FieldName, request.IndexName})
 	metrics.ProxyDMLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
 		metrics.TotalLabel).Inc()
 	metrics.ProxyDMLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
@@ -1839,8 +1845,8 @@ func (node *Proxy) DescribeIndex(ctx context.Context, request *milvuspb.Describe
 		}, nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-DescribeIndex")
-	defer sp.Finish()
+	ctx, sp := trace.StartSpanFromContextWithOperationName(ctx, "proxy.describe-index")
+	defer sp.End()
 	traceID, _, _ := trace.InfoFromSpan(sp)
 
 	dit := &describeIndexTask{
@@ -1955,8 +1961,8 @@ func (node *Proxy) DropIndex(ctx context.Context, request *milvuspb.DropIndexReq
 		return unhealthyStatus(), nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-DropIndex")
-	defer sp.Finish()
+	ctx, sp := trace.StartSpanFromContextWithOperationName(ctx, "proxy.drop-index")
+	defer sp.End()
 	traceID, _, _ := trace.InfoFromSpan(sp)
 
 	dit := &dropIndexTask{
@@ -2045,7 +2051,7 @@ func (node *Proxy) DropIndex(ctx context.Context, request *milvuspb.DropIndexReq
 		zap.String("collection", request.CollectionName),
 		zap.String("field", request.FieldName),
 		zap.String("index name", request.IndexName))
-
+	sp.RecordStringPairs([]string{"collection", "field", "index"}, []string{request.CollectionName, request.FieldName, request.IndexName})
 	metrics.ProxyDMLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
 		metrics.TotalLabel).Inc()
 	metrics.ProxyDMLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
@@ -2063,8 +2069,8 @@ func (node *Proxy) GetIndexBuildProgress(ctx context.Context, request *milvuspb.
 		}, nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-GetIndexBuildProgress")
-	defer sp.Finish()
+	ctx, sp := trace.StartSpanFromContextWithOperationName(ctx, "proxy.get-index-build-progress")
+	defer sp.End()
 	traceID, _, _ := trace.InfoFromSpan(sp)
 
 	gibpt := &getIndexBuildProgressTask{
@@ -2176,8 +2182,8 @@ func (node *Proxy) GetIndexState(ctx context.Context, request *milvuspb.GetIndex
 		}, nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-Insert")
-	defer sp.Finish()
+	ctx, sp := trace.StartSpanFromContextWithOperationName(ctx, "proxy.get-index-state")
+	defer sp.End()
 	traceID, _, _ := trace.InfoFromSpan(sp)
 
 	dipt := &getIndexStateTask{
@@ -2272,7 +2278,8 @@ func (node *Proxy) GetIndexState(ctx context.Context, request *milvuspb.GetIndex
 		zap.String("collection", request.CollectionName),
 		zap.String("field", request.FieldName),
 		zap.String("index name", request.IndexName))
-
+	sp.RecordStringPairs([]string{"collection", "field", "index"}, []string{request.CollectionName, request.FieldName, request.IndexName})
+	sp.RecordString("state", dipt.result.GetState().String())
 	metrics.ProxyDQLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
 		metrics.TotalLabel).Inc()
 	metrics.ProxyDQLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
@@ -2283,8 +2290,8 @@ func (node *Proxy) GetIndexState(ctx context.Context, request *milvuspb.GetIndex
 
 // Insert insert records into collection.
 func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) (*milvuspb.MutationResult, error) {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-Insert")
-	defer sp.Finish()
+	ctx, sp := trace.StartSpanFromContextWithOperationName(ctx, "proxy.insert")
+	defer sp.End()
 	traceID, _, _ := trace.InfoFromSpan(sp)
 	log.Info("Start processing insert request in Proxy", zap.String("traceID", traceID))
 	defer log.Info("Finish processing insert request in Proxy", zap.String("traceID", traceID))
@@ -2402,7 +2409,8 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 
 	// InsertCnt always equals to the number of entities in the request
 	it.result.InsertCnt = int64(request.NumRows)
-
+	sp.RecordStringPairs([]string{"collection", "partition"}, []string{request.CollectionName, request.PartitionName})
+	sp.RecordInt64("insert_rows", it.result.InsertCnt)
 	metrics.ProxyDMLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
 		metrics.SuccessLabel).Inc()
 	successCnt := it.result.InsertCnt - int64(len(it.result.ErrIndex))
@@ -2413,8 +2421,8 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 
 // Delete delete records from collection, then these records cannot be searched.
 func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) (*milvuspb.MutationResult, error) {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-Delete")
-	defer sp.Finish()
+	ctx, sp := trace.StartSpanFromContextWithOperationName(ctx, "proxy.delete")
+	defer sp.End()
 	traceID, _, _ := trace.InfoFromSpan(sp)
 	log.Info("Start processing delete request in Proxy", zap.String("traceID", traceID))
 	defer log.Info("Finish processing delete request in Proxy", zap.String("traceID", traceID))
@@ -2500,7 +2508,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 			},
 		}, nil
 	}
-
+	sp.RecordStringPairs([]string{"collection", "partition", "expr"}, []string{request.CollectionName, request.PartitionName, request.Expr})
 	metrics.ProxyDMLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
 		metrics.SuccessLabel).Inc()
 	metrics.ProxyMutationLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), metrics.DeleteLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
@@ -2519,8 +2527,8 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	metrics.ProxyDQLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
 		metrics.TotalLabel).Inc()
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-Search")
-	defer sp.Finish()
+	ctx, sp := trace.StartSpanFromContextWithOperationName(ctx, "proxy.search")
+	defer sp.End()
 
 	qt := &searchTask{
 		ctx:       ctx,
@@ -2640,6 +2648,10 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 		zap.Uint64("travel_timestamp", travelTs),
 		zap.Uint64("guarantee_timestamp", guaranteeTs))
 
+	sp.RecordString("collection", request.CollectionName)
+	sp.RecordStrings("partitions", request.PartitionNames)
+	sp.RecordInt64("guarantee_timestamp", int64(guaranteeTs))
+	sp.RecordAnyIgnoreErr("search_params", request.SearchParams)
 	metrics.ProxyDQLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
 		metrics.SuccessLabel).Inc()
 	metrics.ProxySearchVectors.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10)).Add(float64(qt.result.GetResults().GetNumQueries()))
@@ -2667,8 +2679,8 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 		return resp, nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-Flush")
-	defer sp.Finish()
+	ctx, sp := trace.StartSpanFromContextWithOperationName(ctx, "proxy.flush")
+	defer sp.End()
 	traceID, _, _ := trace.InfoFromSpan(sp)
 
 	ft := &flushTask{
@@ -2742,7 +2754,7 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 		zap.Uint64("EndTs", ft.EndTs()),
 		zap.String("db", request.DbName),
 		zap.Any("collections", request.CollectionNames))
-
+	sp.RecordStrings("collections", request.CollectionNames)
 	metrics.ProxyDDLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method, metrics.SuccessLabel).Inc()
 	metrics.ProxyDDLReqLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return ft.result, nil
@@ -2756,8 +2768,8 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		}, nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-Query")
-	defer sp.Finish()
+	ctx, sp := trace.StartSpanFromContextWithOperationName(ctx, "proxy.query")
+	defer sp.End()
 	tr := timerecord.NewTimeRecorder("Query")
 
 	qt := &queryTask{
@@ -2851,7 +2863,8 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.Any("partitions", request.PartitionNames))
-
+	sp.RecordStringPairs([]string{"collection", "expr"}, []string{request.CollectionName, request.Expr})
+	sp.RecordStrings("partitions", request.PartitionNames)
 	metrics.ProxyDQLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
 		metrics.SuccessLabel).Inc()
 
@@ -2873,8 +2886,8 @@ func (node *Proxy) CreateAlias(ctx context.Context, request *milvuspb.CreateAlia
 		return unhealthyStatus(), nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-CreateAlias")
-	defer sp.Finish()
+	ctx, sp := trace.StartSpanFromContextWithOperationName(ctx, "proxy.create-alias")
+	defer sp.End()
 	traceID, _, _ := trace.InfoFromSpan(sp)
 
 	cat := &CreateAliasTask{
@@ -2955,7 +2968,7 @@ func (node *Proxy) CreateAlias(ctx context.Context, request *milvuspb.CreateAlia
 		zap.String("db", request.DbName),
 		zap.String("alias", request.Alias),
 		zap.String("collection", request.CollectionName))
-
+	sp.RecordStringPairs([]string{"collection", "alias"}, []string{request.CollectionName, request.Alias})
 	metrics.ProxyDDLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method, metrics.SuccessLabel).Inc()
 	metrics.ProxyDDLReqLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return cat.result, nil
@@ -2967,8 +2980,8 @@ func (node *Proxy) DropAlias(ctx context.Context, request *milvuspb.DropAliasReq
 		return unhealthyStatus(), nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-DropAlias")
-	defer sp.Finish()
+	ctx, sp := trace.StartSpanFromContextWithOperationName(ctx, "proxy.drop-alias")
+	defer sp.End()
 	traceID, _, _ := trace.InfoFromSpan(sp)
 
 	dat := &DropAliasTask{
@@ -3044,7 +3057,7 @@ func (node *Proxy) DropAlias(ctx context.Context, request *milvuspb.DropAliasReq
 		zap.Uint64("EndTs", dat.EndTs()),
 		zap.String("db", request.DbName),
 		zap.String("alias", request.Alias))
-
+	sp.RecordString("alias", request.Alias)
 	metrics.ProxyDDLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method, metrics.SuccessLabel).Inc()
 	metrics.ProxyDDLReqLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return dat.result, nil
@@ -3056,8 +3069,8 @@ func (node *Proxy) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasR
 		return unhealthyStatus(), nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-AlterAlias")
-	defer sp.Finish()
+	ctx, sp := trace.StartSpanFromContextWithOperationName(ctx, "proxy.alter-alias")
+	defer sp.End()
 	traceID, _, _ := trace.InfoFromSpan(sp)
 
 	aat := &AlterAliasTask{
@@ -3138,7 +3151,7 @@ func (node *Proxy) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasR
 		zap.String("db", request.DbName),
 		zap.String("alias", request.Alias),
 		zap.String("collection", request.CollectionName))
-
+	sp.RecordStringPairs([]string{"collection", "alias"}, []string{request.CollectionName, request.Alias})
 	metrics.ProxyDDLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method, metrics.SuccessLabel).Inc()
 	metrics.ProxyDDLReqLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return aat.result, nil
@@ -3152,8 +3165,8 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 		}, nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-CalcDistance")
-	defer sp.Finish()
+	ctx, sp := trace.StartSpanFromContextWithOperationName(ctx, "proxy.calc-distance")
+	defer sp.End()
 	traceID, _, _ := trace.InfoFromSpan(sp)
 
 	query := func(ids *milvuspb.VectorIDs) (*milvuspb.QueryResults, error) {

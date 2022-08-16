@@ -20,8 +20,6 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/util/trace"
-	"github.com/opentracing/opentracing-go"
-	oplog "github.com/opentracing/opentracing-go/log"
 	"go.uber.org/zap"
 )
 
@@ -72,10 +70,10 @@ func (inNode *InputNode) Operate(in []Msg) []Msg {
 	if msgPack == nil {
 		return nil
 	}
-	var spans []opentracing.Span
+	var spans []*trace.Span
 	for _, msg := range msgPack.Msgs {
-		sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
-		sp.LogFields(oplog.String("input_node name", inNode.Name()))
+		ctx, sp := trace.StartSpanFromContextWithOperationName(msg.TraceCtx(), "in.operate")
+		sp.RecordString("input_node", inNode.name)
 		spans = append(spans, sp)
 		msg.SetTraceCtx(ctx)
 	}
@@ -89,7 +87,7 @@ func (inNode *InputNode) Operate(in []Msg) []Msg {
 	}
 
 	for _, span := range spans {
-		span.Finish()
+		span.End()
 	}
 
 	return []Msg{msgStreamMsg}

@@ -24,7 +24,6 @@ import (
 	"sync"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/opentracing/opentracing-go"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
@@ -157,7 +156,6 @@ func (ibNode *insertBufferNode) Close() {
 }
 
 func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
-	// log.Debug("InsertBufferNode Operating")
 
 	if len(in) != 1 {
 		log.Error("Invalid operate message input in insertBufferNode", zap.Int("input length", len(in)))
@@ -178,9 +176,9 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 		ibNode.flushManager.startDropping()
 	}
 
-	var spans []opentracing.Span
+	var spans []*trace.Span
 	for _, msg := range fgMsg.insertMessages {
-		sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+		ctx, sp := trace.StartSpanFromContextWithOperationName(msg.TraceCtx(), "datanode.in.operate")
 		spans = append(spans, sp)
 		msg.SetTraceCtx(ctx)
 	}
@@ -219,7 +217,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 	}
 
 	// insert messages -> buffer
-	for _, msg := range fgMsg.insertMessages {
+	for i, msg := range fgMsg.insertMessages {
 		err := ibNode.bufferInsertMsg(msg, endPositions[0])
 		if err != nil {
 			// error occurs when missing schema info or data is misaligned, should not happen
@@ -227,6 +225,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 			log.Error(err.Error())
 			panic(err)
 		}
+		spans[i].RecordInt64Pairs([]string{"collection", "partition", "insert_rows"}, []int64{msg.CollectionID, msg.PartitionID, int64(msg.NumRows)})
 	}
 
 	// Find and return the smaller input
@@ -431,7 +430,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 	}
 
 	for _, sp := range spans {
-		sp.Finish()
+		sp.End()
 	}
 
 	// send delete msg to DeleteNode

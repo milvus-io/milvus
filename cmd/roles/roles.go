@@ -389,7 +389,7 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 	}
 
 	if os.Getenv(metricsinfo.DeployModeEnvKey) == metricsinfo.StandaloneDeployMode {
-		closer := trace.InitTracing("standalone")
+		closer := trace.InitTracing("standalone", &Params.BaseTable, "")
 		if closer != nil {
 			defer closer.Close()
 		}

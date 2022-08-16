@@ -41,10 +41,10 @@ func (i *IndexNode) CreateJob(ctx context.Context, req *indexpb.CreateJobRequest
 		zap.Strings("DataPaths", req.DataPaths),
 		zap.Any("TypeParams", req.TypeParams),
 		zap.Any("IndexParams", req.IndexParams))
-	sp, _ := trace.StartSpanFromContextWithOperationName(ctx, "IndexNode-CreateIndex")
-	defer sp.Finish()
-	sp.SetTag("IndexBuildID", strconv.FormatInt(req.BuildID, 10))
-	sp.SetTag("ClusterID", strconv.FormatInt(req.ClusterID, 10))
+	_, sp := trace.StartSpanFromContextWithOperationName(ctx, "IndexNode-CreateIndex")
+	defer sp.End()
+	sp.RecordInt64("buildID", req.BuildID)
+	sp.RecordInt64("clusterID", req.ClusterID)
 	metrics.IndexNodeBuildIndexTaskCounter.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.GetNodeID(), 10), metrics.TotalLabel).Inc()
 	taskCtx := logutil.WithModule(i.loopCtx, typeutil.IndexNodeRole)
 
