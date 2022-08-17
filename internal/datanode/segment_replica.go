@@ -41,12 +41,16 @@ const (
 	maxBloomFalsePositive float64 = 0.005
 )
 
-type primaryKey = storage.PrimaryKey
-type int64PrimaryKey = storage.Int64PrimaryKey
-type varCharPrimaryKey = storage.VarCharPrimaryKey
+type (
+	primaryKey        = storage.PrimaryKey
+	int64PrimaryKey   = storage.Int64PrimaryKey
+	varCharPrimaryKey = storage.VarCharPrimaryKey
+)
 
-var newInt64PrimaryKey = storage.NewInt64PrimaryKey
-var newVarCharPrimaryKey = storage.NewVarCharPrimaryKey
+var (
+	newInt64PrimaryKey   = storage.NewInt64PrimaryKey
+	newVarCharPrimaryKey = storage.NewVarCharPrimaryKey
+)
 
 // Replica is DataNode unique replication
 type Replica interface {
