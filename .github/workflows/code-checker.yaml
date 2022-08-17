@@ -131,7 +131,7 @@ jobs:
           key: ${{ runner.os }}-ccache-${{ hashFiles('internal/core/**') }}
           restore-keys: ${{ runner.os }}-ccache-
       - name: Configure Toolchain
-        uses: msys2/setup-msys2@v2.10.3
+        uses: msys2/setup-msys2@v2.12.0
         with:
           msystem: mingw64
       - name: Install Deps
@@ -147,4 +147,5 @@ jobs:
           CCACHE_MAXSIZE: 2G
           CCACHE_DIR: ${{ github.workspace }}/.ccache
         run: |
+          go version
           mingw32-make verifiers build-go
