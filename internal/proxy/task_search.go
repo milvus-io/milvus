@@ -95,7 +95,7 @@ func parseQueryInfo(searchParamsPair []*commonpb.KeyValuePair) (*planpb.QueryInf
 	}
 	topK, err := strconv.Atoi(topKStr)
 	if err != nil {
-		return nil, errors.New(TopKKey + " " + topKStr + " is not invalid")
+		return nil, fmt.Errorf("%s [%s] is invalid", TopKKey, topKStr)
 	}
 
 	metricType, err := funcutil.GetAttrByKeyFromRepeatedKV(MetricTypeKey, searchParamsPair)
@@ -114,11 +114,11 @@ func parseQueryInfo(searchParamsPair []*commonpb.KeyValuePair) (*planpb.QueryInf
 	}
 	roundDecimal, err := strconv.Atoi(roundDecimalStr)
 	if err != nil {
-		return nil, errors.New(RoundDecimalKey + " " + roundDecimalStr + " is not invalid")
+		return nil, fmt.Errorf("%s [%s] is invalid, should be -1 or an integer in range [0, 6]", RoundDecimalKey, roundDecimalStr)
 	}
 
 	if roundDecimal != -1 && (roundDecimal > 6 || roundDecimal < 0) {
-		return nil, errors.New(RoundDecimalKey + " " + roundDecimalStr + " is not invalid")
+		return nil, fmt.Errorf("%s [%s] is invalid, should be -1 or an integer in range [0, 6]", RoundDecimalKey, roundDecimalStr)
 	}
 
 	return &planpb.QueryInfo{
