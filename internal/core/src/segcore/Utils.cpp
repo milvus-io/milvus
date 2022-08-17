@@ -77,7 +77,7 @@ CreateScalarDataArrayFrom(const void* data_raw, int64_t count, const FieldMeta& 
     auto scalar_array = data_array->mutable_scalars();
     switch (data_type) {
         case DataType::BOOL: {
-            auto data = reinterpret_cast<const double*>(data_raw);
+            auto data = reinterpret_cast<const bool*>(data_raw);
             auto obj = scalar_array->mutable_bool_data();
             obj->mutable_data()->Add(data, data + count);
             break;
