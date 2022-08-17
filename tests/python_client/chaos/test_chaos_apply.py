@@ -60,7 +60,7 @@ class TestChaosApply:
         log.info(connections.get_connection_addr('default'))
         release_name = self.release_name
         chaos_config = gen_experiment_config(
-            f"{str(Path(__file__).absolute().parent)}/chaos_objects/{chaos_type}/chaos_{target_component}_{chaos_type}.yaml")
+            f"{str(Path(__file__).absolute().parent)}/chaos_objects/{chaos_type.replace('-', '_')}/chaos_{target_component}_{chaos_type.replace('-', '_')}.yaml")
         chaos_config['metadata']['name'] = f"test-{target_component}-{chaos_type.replace('_','-')}-{int(time.time())}"
         chaos_config['metadata']['namespace'] = self.chaos_ns
         meta_name = chaos_config.get('metadata', None).get('name', None)
