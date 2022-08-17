@@ -105,26 +105,138 @@ func (dn *deleteNode) Close() {
 	log.Info("Flowgraph Delete Node closing")
 }
 
-func (dn *deleteNode) bufferDeleteMsg(msg *msgstream.DeleteMsg, tr TimeRange) ([]UniqueID, error) {
-	log.Debug("bufferDeleteMsg", zap.Any("primary keys", msg.PrimaryKeys), zap.String("vChannelName", dn.channelName))
+func (dn *deleteNode) showDelBuf(segIDs []UniqueID, ts Timestamp) {
+	for _, segID := range segIDs {
+		if v, ok := dn.delBuf.Load(segID); ok {
+			delDataBuf, _ := v.(*DelDataBuf)
+			log.Debug("delta buffer status",
+				zap.Uint64("timestamp", ts),
+				zap.Int64("segment ID", segID),
+				zap.Int64("entries", delDataBuf.GetEntriesNum()),
+				zap.String("vChannel", dn.channelName))
+		}
+	}
+}
 
-	// Update delBuf for merged segments
-	compactedTo2From := dn.replica.listCompactedSegmentIDs()
-	for compactedTo, compactedFrom := range compactedTo2From {
-		compactToDelBuff := newDelDataBuf()
-		for _, segID := range compactedFrom {
-			value, loaded := dn.delBuf.LoadAndDelete(segID)
-			if loaded {
-				compactToDelBuff.updateFromBuf(value.(*DelDataBuf))
+// Operate implementing flowgraph.Node, performs delete data process
+func (dn *deleteNode) Operate(in []Msg) []Msg {
+	//log.Debug("deleteNode Operating")
+
+	if len(in) != 1 {
+		log.Error("Invalid operate message input in deleteNode", zap.Int("input length", len(in)))
+		return nil
+	}
+
+	fgMsg, ok := in[0].(*flowGraphMsg)
+	if !ok {
+		if in[0] == nil {
+			log.Debug("type assertion failed for flowGraphMsg because it's nil")
+		} else {
+			log.Warn("type assertion failed for flowGraphMsg", zap.String("name", reflect.TypeOf(in[0]).Name()))
+		}
+		return []Msg{}
+	}
+
+	var spans []opentracing.Span
+	for _, msg := range fgMsg.deleteMessages {
+		sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+		spans = append(spans, sp)
+		msg.SetTraceCtx(ctx)
+	}
+
+	// update compacted segment before operation
+	if len(fgMsg.deleteMessages) > 0 || len(fgMsg.segmentsToFlush) > 0 {
+		dn.updateCompactedSegments()
+	}
+
+	// process delete messages
+	var segIDs []UniqueID
+	for i, msg := range fgMsg.deleteMessages {
+		traceID, _, _ := trace.InfoFromSpan(spans[i])
+		log.Info("Buffer delete request in DataNode", zap.String("traceID", traceID))
+
+		tmpSegIDs, err := dn.bufferDeleteMsg(msg, fgMsg.timeRange)
+		if err != nil {
+			// error occurs only when deleteMsg is misaligned, should not happen
+			err = fmt.Errorf("buffer delete msg failed, err = %s", err)
+			log.Error(err.Error())
+			panic(err)
+		}
+		segIDs = append(segIDs, tmpSegIDs...)
+	}
+
+	// display changed segment's status in dn.delBuf of a certain ts
+	if len(fgMsg.deleteMessages) != 0 {
+		dn.showDelBuf(segIDs, fgMsg.timeRange.timestampMax)
+	}
+
+	// process flush messages
+	if len(fgMsg.segmentsToFlush) > 0 {
+		log.Debug("DeleteNode receives flush message",
+			zap.Int64s("segIDs", fgMsg.segmentsToFlush),
+			zap.String("vChannelName", dn.channelName))
+		for _, segmentToFlush := range fgMsg.segmentsToFlush {
+			buf, ok := dn.delBuf.Load(segmentToFlush)
+			if !ok {
+				// no related delta data to flush, send empty buf to complete flush life-cycle
+				dn.flushManager.flushDelData(nil, segmentToFlush, fgMsg.endPositions[0])
+			} else {
+				err := retry.Do(dn.ctx, func() error {
+					return dn.flushManager.flushDelData(buf.(*DelDataBuf), segmentToFlush, fgMsg.endPositions[0])
+				}, flowGraphRetryOpt)
+				if err != nil {
+					err = fmt.Errorf("failed to flush delete data, err = %s", err)
+					log.Error(err.Error())
+					panic(err)
+				}
+				// remove delete buf
+				dn.delBuf.Delete(segmentToFlush)
 			}
 		}
-		dn.delBuf.Store(compactedTo, compactToDelBuff)
-		dn.replica.removeSegments(compactedFrom...)
-		log.Debug("update delBuf for merged segments",
+	}
+
+	// process drop collection message, delete node shall notify flush manager all data are cleared and send signal to DataSyncService cleaner
+	if fgMsg.dropCollection {
+		dn.flushManager.notifyAllFlushed()
+		log.Debug("DeleteNode notifies BackgroundGC to release vchannel", zap.String("vChannelName", dn.channelName))
+		dn.clearSignal <- dn.channelName
+	}
+
+	for _, sp := range spans {
+		sp.Finish()
+	}
+	return nil
+}
+
+// update delBuf for compacted segments
+func (dn *deleteNode) updateCompactedSegments() {
+	compactedTo2From := dn.replica.listCompactedSegmentIDs()
+	for compactedTo, compactedFrom := range compactedTo2From {
+		var compactToDelBuff *DelDataBuf
+		delBuf, loaded := dn.delBuf.Load(compactedTo)
+		if !loaded {
+			compactToDelBuff = newDelDataBuf()
+		} else {
+			compactToDelBuff = delBuf.(*DelDataBuf)
+		}
+
+		for _, segID := range compactedFrom {
+			if value, loaded := dn.delBuf.LoadAndDelete(segID); loaded {
+				compactToDelBuff.updateFromBuf(value.(*DelDataBuf))
+				dn.delBuf.Store(compactedTo, compactToDelBuff)
+
+			}
+		}
+		log.Debug("update delBuf for compacted segments",
 			zap.Int64("compactedTo segmentID", compactedTo),
 			zap.Int64s("compactedFrom segmentIDs", compactedFrom),
 		)
+		dn.replica.removeSegments(compactedFrom...)
 	}
+}
+
+func (dn *deleteNode) bufferDeleteMsg(msg *msgstream.DeleteMsg, tr TimeRange) ([]UniqueID, error) {
+	log.Debug("bufferDeleteMsg", zap.Any("primary keys", msg.PrimaryKeys), zap.String("vChannelName", dn.channelName))
 
 	primaryKeys := storage.ParseIDs2PrimaryKeys(msg.PrimaryKeys)
 	segIDToPks, segIDToTss := dn.filterSegmentByPK(msg.PartitionID, primaryKeys, msg.Timestamps)
@@ -168,103 +280,6 @@ func (dn *deleteNode) bufferDeleteMsg(msg *msgstream.DeleteMsg, tr TimeRange) ([
 	}
 
 	return segIDs, nil
-}
-
-func (dn *deleteNode) showDelBuf(segIDs []UniqueID, ts Timestamp) {
-	for _, segID := range segIDs {
-		if v, ok := dn.delBuf.Load(segID); ok {
-			delDataBuf, _ := v.(*DelDataBuf)
-			log.Debug("delta buffer status",
-				zap.Uint64("timestamp", ts),
-				zap.Int64("segment ID", segID),
-				zap.Int64("entries", delDataBuf.GetEntriesNum()),
-				zap.String("vChannel", dn.channelName))
-		}
-	}
-}
-
-// Operate implementing flowgraph.Node, performs delete data process
-func (dn *deleteNode) Operate(in []Msg) []Msg {
-	//log.Debug("deleteNode Operating")
-
-	if len(in) != 1 {
-		log.Error("Invalid operate message input in deleteNode", zap.Int("input length", len(in)))
-		return nil
-	}
-
-	fgMsg, ok := in[0].(*flowGraphMsg)
-	if !ok {
-		if in[0] == nil {
-			log.Debug("type assertion failed for flowGraphMsg because it's nil")
-		} else {
-			log.Warn("type assertion failed for flowGraphMsg", zap.String("name", reflect.TypeOf(in[0]).Name()))
-		}
-		return []Msg{}
-	}
-
-	var spans []opentracing.Span
-	for _, msg := range fgMsg.deleteMessages {
-		sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
-		spans = append(spans, sp)
-		msg.SetTraceCtx(ctx)
-	}
-
-	var segIDs []UniqueID
-	for i, msg := range fgMsg.deleteMessages {
-		traceID, _, _ := trace.InfoFromSpan(spans[i])
-		log.Info("Buffer delete request in DataNode", zap.String("traceID", traceID))
-
-		tmpSegIDs, err := dn.bufferDeleteMsg(msg, fgMsg.timeRange)
-		if err != nil {
-			// error occurs only when deleteMsg is misaligned, should not happen
-			err = fmt.Errorf("buffer delete msg failed, err = %s", err)
-			log.Error(err.Error())
-			panic(err)
-		}
-		segIDs = append(segIDs, tmpSegIDs...)
-	}
-
-	// show changed segment's status in dn.delBuf of a certain ts
-	if len(fgMsg.deleteMessages) != 0 {
-		dn.showDelBuf(segIDs, fgMsg.timeRange.timestampMax)
-	}
-
-	// handle flush
-	if len(fgMsg.segmentsToFlush) > 0 {
-		log.Debug("DeleteNode receives flush message",
-			zap.Int64s("segIDs", fgMsg.segmentsToFlush),
-			zap.String("vChannelName", dn.channelName))
-		for _, segmentToFlush := range fgMsg.segmentsToFlush {
-			buf, ok := dn.delBuf.Load(segmentToFlush)
-			if !ok {
-				// no related delta data to flush, send empty buf to complete flush life-cycle
-				dn.flushManager.flushDelData(nil, segmentToFlush, fgMsg.endPositions[0])
-			} else {
-				err := retry.Do(dn.ctx, func() error {
-					return dn.flushManager.flushDelData(buf.(*DelDataBuf), segmentToFlush, fgMsg.endPositions[0])
-				}, flowGraphRetryOpt)
-				if err != nil {
-					err = fmt.Errorf("failed to flush delete data, err = %s", err)
-					log.Error(err.Error())
-					panic(err)
-				}
-				// remove delete buf
-				dn.delBuf.Delete(segmentToFlush)
-			}
-		}
-	}
-
-	// drop collection signal, delete node shall notify flush manager all data are cleared and send signal to DataSyncService cleaner
-	if fgMsg.dropCollection {
-		dn.flushManager.notifyAllFlushed()
-		log.Debug("DeleteNode notifies BackgroundGC to release vchannel", zap.String("vChannelName", dn.channelName))
-		dn.clearSignal <- dn.channelName
-	}
-
-	for _, sp := range spans {
-		sp.Finish()
-	}
-	return nil
 }
 
 // filterSegmentByPK returns the bloom filter check result.
