@@ -1,3 +1,12 @@
+from yaml import full_load
+
+
+def gen_experiment_config(yaml):
+    """load the yaml file of chaos experiment"""
+    with open(yaml) as f:
+        _config = full_load(f)
+        f.close()
+    return _config
 
 
 def findkeys(node, kv):
@@ -24,6 +33,21 @@ def update_key_value(node, modify_k, modify_v):
             node[modify_k] = modify_v
         for j in node.values():
             update_key_value(j, modify_k, modify_v)
+    return node
+
+
+def update_key_name(node, modify_k, modify_k_new):
+    # update the name of modify_k to modify_k_new
+    if isinstance(node, list):
+        for i in node:
+            update_key_name(i, modify_k, modify_k_new)
+    elif isinstance(node, dict):
+        if modify_k in node:
+            value_backup = node[modify_k]
+            del node[modify_k]
+            node[modify_k_new] = value_backup
+        for j in node.values():
+            update_key_name(j, modify_k, modify_k_new)
     return node
 
 
