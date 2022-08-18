@@ -474,7 +474,14 @@ def gen_normal_expressions():
         "int64 == 0 || int64 == 1 || int64 == 2",
         "0 < int64 < 400",
         "500 <= int64 < 1000",
-        "200+300 < int64 <= 500+500"
+        "200+300 < int64 <= 500+500",
+        "int64 in [300/2, 900%40, -10*30+800, 2048/2%200, (100+200)*2]",
+        "float in [+3**6, 2**10/2]",
+        "(int64 % 100 == 0) && int64 < 500",
+        "float <= 4**5/2 && float > 500-1 && float != 500/2+260",
+        "int64 > 400 && int64 < 200",
+        "float < -2**8",
+        "(int64 + 1) == 3 || int64 * 2 == 64 || float == 10**2"
     ]
     return expressions
 
@@ -510,7 +517,13 @@ def gen_normal_expressions_field(field):
         f"{field} == 0 || {field} == 1 || {field} == 2",
         f"0 < {field} < 400",
         f"500 <= {field} <= 1000",
-        f"200+300 <= {field} <= 500+500"
+        f"200+300 <= {field} <= 500+500",
+        f"{field} in [300/2, 900%40, -10*30+800, 2048/2%200, (100+200)*2]",
+        f"{field} in [+3**6, 2**10/2]",
+        f"{field} <= 4**5/2 && {field} > 500-1 && {field} != 500/2+260",
+        f"{field} > 400 && {field} < 200",
+        f"{field} < -2**8",
+        f"({field} + 1) == 3 || {field} * 2 == 64 || {field} == 10**2"
     ]
     return expressions
 
