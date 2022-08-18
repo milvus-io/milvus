@@ -28,7 +28,6 @@ import (
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
@@ -48,8 +47,7 @@ type timetickSync struct {
 	ctx      context.Context
 	sourceID typeutil.UniqueID
 
-	dmlChannels   *dmlChannels // used for insert
-	deltaChannels *dmlChannels // used for delete
+	dmlChannels *dmlChannels // used for insert
 
 	lock           sync.Mutex
 	sess2ChanTsMap map[typeutil.UniqueID]*chanTsMsg
@@ -89,33 +87,18 @@ func (c *chanTsMsg) getTimetick(channelName string) typeutil.Timestamp {
 func newTimeTickSync(ctx context.Context, sourceID int64, factory msgstream.Factory, chanMap map[typeutil.UniqueID][]string) *timetickSync {
 	// initialize dml channels used for insert
 	dmlChannels := newDmlChannels(ctx, factory, Params.CommonCfg.RootCoordDml, Params.RootCoordCfg.DmlChannelNum)
-	// initialize delta channels used for delete, share Params.DmlChannelNum with dmlChannels
-	deltaChannels := newDmlChannels(ctx, factory, Params.CommonCfg.RootCoordDelta, Params.RootCoordCfg.DmlChannelNum)
 
 	// recover physical channels for all collections
 	for collID, chanNames := range chanMap {
 		dmlChannels.addChannels(chanNames...)
-		log.Debug("recover physical channels", zap.Int64("collID", collID), zap.Any("physical channels", chanNames))
-
-		var err error
-		deltaChanNames := make([]string, len(chanNames))
-		for i, chanName := range chanNames {
-			deltaChanNames[i], err = funcutil.ConvertChannelName(chanName, Params.CommonCfg.RootCoordDml, Params.CommonCfg.RootCoordDelta)
-			if err != nil {
-				log.Error("failed to convert dml channel name to delta channel name", zap.String("chanName", chanName))
-				panic("invalid dml channel name " + chanName)
-			}
-		}
-		deltaChannels.addChannels(deltaChanNames...)
-		log.Debug("recover delta channels", zap.Int64("collID", collID), zap.Any("delta channels", deltaChanNames))
+		log.Debug("recover physical channels", zap.Int64("collID", collID), zap.Strings("physical channels", chanNames))
 	}
 
 	return &timetickSync{
 		ctx:      ctx,
 		sourceID: sourceID,
 
-		dmlChannels:   dmlChannels,
-		deltaChannels: deltaChannels,
+		dmlChannels: dmlChannels,
 
 		lock:           sync.Mutex{},
 		sess2ChanTsMap: make(map[typeutil.UniqueID]*chanTsMsg),
@@ -384,9 +367,9 @@ func (t *timetickSync) getSessionNum() int {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// GetDmlChannelName return a valid dml channel name
-func (t *timetickSync) getDmlChannelName() string {
-	return t.dmlChannels.getChannelName()
+// getDmlChannelNames returns list of channel names.
+func (t *timetickSync) getDmlChannelNames(count int) []string {
+	return t.dmlChannels.getChannelNames(count)
 }
 
 // GetDmlChannelNum return the num of dml channels
@@ -417,22 +400,6 @@ func (t *timetickSync) broadcastDmlChannels(chanNames []string, pack *msgstream.
 // BroadcastMarkDmlChannels broadcasts msg pack into dml channels
 func (t *timetickSync) broadcastMarkDmlChannels(chanNames []string, pack *msgstream.MsgPack) (map[string][]byte, error) {
 	return t.dmlChannels.broadcastMark(chanNames, pack)
-}
-
-///////////////////////////////////////////////////////////////////////////////
-// GetDeltaChannelName return a valid delta channel name
-func (t *timetickSync) getDeltaChannelName() string {
-	return t.deltaChannels.getChannelName()
-}
-
-// AddDeltaChannels add delta channels
-func (t *timetickSync) addDeltaChannels(names ...string) {
-	t.deltaChannels.addChannels(names...)
-}
-
-// RemoveDeltaChannels remove delta channels
-func (t *timetickSync) removeDeltaChannels(names ...string) {
-	t.deltaChannels.removeChannels(names...)
 }
 
 func minTimeTick(tt ...typeutil.Timestamp) typeutil.Timestamp {

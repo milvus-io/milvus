@@ -156,26 +156,18 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		zap.Int64("default partition id", partID))
 
 	vchanNames := make([]string, t.Req.ShardsNum)
-	chanNames := make([]string, t.Req.ShardsNum)
 	deltaChanNames := make([]string, t.Req.ShardsNum)
-	for i := int32(0); i < t.Req.ShardsNum; i++ {
-		vchanNames[i] = fmt.Sprintf("%s_%dv%d", t.core.chanTimeTick.getDmlChannelName(), collID, i)
-		chanNames[i] = funcutil.ToPhysicalChannel(vchanNames[i])
 
-		deltaChanNames[i] = t.core.chanTimeTick.getDeltaChannelName()
-		deltaChanName, err1 := funcutil.ConvertChannelName(chanNames[i], Params.CommonCfg.RootCoordDml, Params.CommonCfg.RootCoordDelta)
-		if err1 != nil || deltaChanName != deltaChanNames[i] {
-			err1Msg := ""
-			if err1 != nil {
-				err1Msg = err1.Error()
-			}
-			log.Debug("dmlChanName deltaChanName mismatch detail", zap.Int32("i", i),
-				zap.String("vchanName", vchanNames[i]),
-				zap.String("phsicalChanName", chanNames[i]),
-				zap.String("deltaChanName", deltaChanNames[i]),
-				zap.String("converted_deltaChanName", deltaChanName),
-				zap.String("err", err1Msg))
-			return fmt.Errorf("dmlChanName %s and deltaChanName %s mis-match", chanNames[i], deltaChanNames[i])
+	//physical channel names
+	chanNames := t.core.chanTimeTick.getDmlChannelNames(int(t.Req.ShardsNum))
+	for i := int32(0); i < t.Req.ShardsNum; i++ {
+		vchanNames[i] = fmt.Sprintf("%s_%dv%d", chanNames[i], collID, i)
+		deltaChanNames[i], err = funcutil.ConvertChannelName(chanNames[i], Params.CommonCfg.RootCoordDml, Params.CommonCfg.RootCoordDelta)
+		if err != nil {
+			log.Warn("failed to generate delta channel name",
+				zap.String("dmlChannelName", chanNames[i]),
+				zap.Error(err))
+			return fmt.Errorf("failed to generate delta channel name from %s, %w", chanNames[i], err)
 		}
 	}
 
@@ -247,9 +239,6 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		// add dml channel before send dd msg
 		t.core.chanTimeTick.addDmlChannels(chanNames...)
 
-		// also add delta channels
-		t.core.chanTimeTick.addDeltaChannels(deltaChanNames...)
-
 		ids, err := t.core.SendDdCreateCollectionReq(ctx, &ddCollReq, chanNames)
 		if err != nil {
 			return fmt.Errorf("send dd create collection req failed, error = %w", err)
@@ -264,7 +253,6 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		// update meta table after send dd operation
 		if err = t.core.MetaTable.AddCollection(&collInfo, ts, ddOpStr); err != nil {
 			t.core.chanTimeTick.removeDmlChannels(chanNames...)
-			t.core.chanTimeTick.removeDeltaChannels(deltaChanNames...)
 			// it's ok just to leave create collection message sent, datanode and querynode does't process CreateCollection logic
 			return fmt.Errorf("meta table add collection failed,error = %w", err)
 		}
@@ -390,14 +378,6 @@ func (t *DropCollectionReqTask) Execute(ctx context.Context) error {
 		// remove dml channel after send dd msg
 		t.core.chanTimeTick.removeDmlChannels(collMeta.PhysicalChannelNames...)
 
-		// remove delta channels
-		deltaChanNames := make([]string, len(collMeta.PhysicalChannelNames))
-		for i, chanName := range collMeta.PhysicalChannelNames {
-			if deltaChanNames[i], err = funcutil.ConvertChannelName(chanName, Params.CommonCfg.RootCoordDml, Params.CommonCfg.RootCoordDelta); err != nil {
-				return err
-			}
-		}
-		t.core.chanTimeTick.removeDeltaChannels(deltaChanNames...)
 		return nil
 	}
 

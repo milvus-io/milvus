@@ -141,27 +141,18 @@ func TestDmlChannels(t *testing.T) {
 	assert.Panics(t, func() { dml.broadcastMark([]string{randStr}, nil) })
 	assert.Panics(t, func() { dml.removeChannels(randStr) })
 
-	// dml_xxx_0 => {chanName0, chanName2}
-	// dml_xxx_1 => {chanName1}
-	chanName0 := dml.getChannelName()
-	dml.addChannels(chanName0)
-	assert.Equal(t, 1, dml.getChannelNum())
-
-	chanName1 := dml.getChannelName()
-	dml.addChannels(chanName1)
+	chans0 := dml.getChannelNames(2)
+	dml.addChannels(chans0...)
 	assert.Equal(t, 2, dml.getChannelNum())
 
-	chanName2 := dml.getChannelName()
-	dml.addChannels(chanName2)
+	chans1 := dml.getChannelNames(1)
+	dml.addChannels(chans1...)
 	assert.Equal(t, 2, dml.getChannelNum())
 
-	dml.removeChannels(chanName0)
+	dml.removeChannels(chans1...)
 	assert.Equal(t, 2, dml.getChannelNum())
 
-	dml.removeChannels(chanName1)
-	assert.Equal(t, 1, dml.getChannelNum())
-
-	dml.removeChannels(chanName0)
+	dml.removeChannels(chans0...)
 	assert.Equal(t, 0, dml.getChannelNum())
 }
 
@@ -179,7 +170,7 @@ func TestDmChannelsFailure(t *testing.T) {
 		defer wg.Done()
 		mockFactory := &FailMessageStreamFactory{errBroadcast: true}
 		dml := newDmlChannels(context.TODO(), mockFactory, "test-newdmlchannel-root", 1)
-		chanName0 := dml.getChannelName()
+		chanName0 := dml.getChannelNames(1)[0]
 		dml.addChannels(chanName0)
 		require.Equal(t, 1, dml.getChannelNum())
 

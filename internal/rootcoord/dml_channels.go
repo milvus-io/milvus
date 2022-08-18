@@ -179,14 +179,27 @@ func newDmlChannels(ctx context.Context, factory msgstream.Factory, chanNamePref
 	return d
 }
 
-func (d *dmlChannels) getChannelName() string {
+func (d *dmlChannels) getChannelNames(count int) []string {
+	if count > len(d.channelsHeap) {
+		return nil
+	}
 	d.mut.Lock()
 	defer d.mut.Unlock()
-	// get first item from heap
-	item := d.channelsHeap[0]
-	item.BookUsage()
-	heap.Fix(&d.channelsHeap, 0)
-	return genChannelName(d.namePrefix, item.idx)
+	// get next count items from heap
+	items := make([]*dmlMsgStream, 0, count)
+	result := make([]string, 0, count)
+	for i := 0; i < count; i++ {
+		item := heap.Pop(&d.channelsHeap).(*dmlMsgStream)
+		item.BookUsage()
+		items = append(items, item)
+		result = append(result, genChannelName(d.namePrefix, item.idx))
+	}
+
+	for _, item := range items {
+		heap.Push(&d.channelsHeap, item)
+	}
+
+	return result
 }
 
 func (d *dmlChannels) listChannels() []string {
