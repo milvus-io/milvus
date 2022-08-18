@@ -14,7 +14,7 @@ CREATE TABLE if not exists milvus_meta.collections (
     id     BIGINT NOT NULL AUTO_INCREMENT,
     tenant_id VARCHAR(128) DEFAULT NULL,
     collection_id BIGINT NOT NULL,
-    collection_name VARCHAR(128),
+    collection_name VARCHAR(256),
     description VARCHAR(2048) DEFAULT NULL,
     auto_id BOOL DEFAULT FALSE,
     shards_num INT,
@@ -25,8 +25,7 @@ CREATE TABLE if not exists milvus_meta.collections (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP on update current_timestamp,
     PRIMARY KEY (id),
-    UNIQUE (tenant_id, collection_id, ts),
-    INDEX idx_collection_id_ts (collection_id, ts)
+    UNIQUE KEY uk_tenant_id_collection_id_ts (tenant_id, collection_id, ts)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- collection aliases
@@ -40,9 +39,8 @@ CREATE TABLE if not exists milvus_meta.collection_aliases (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP on update current_timestamp,
     PRIMARY KEY (id),
-    UNIQUE (tenant_id, collection_alias, ts),
-    INDEX idx_tenant_id_collection_id_ts (tenant_id, collection_id, ts),
-    INDEX idx_collection_id_ts (collection_id, ts)
+    UNIQUE KEY uk_tenant_id_collection_alias_ts (tenant_id, collection_alias, ts),
+    INDEX idx_tenant_id_collection_id_ts (tenant_id, collection_id, ts)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- channels
@@ -58,9 +56,8 @@ CREATE TABLE if not exists milvus_meta.collection_channels (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP on update current_timestamp,
     PRIMARY KEY (id),
-    UNIQUE (tenant_id, collection_id, virtual_channel_name, ts),
-    INDEX idx_tenant_id_collection_id_ts (tenant_id, collection_id, ts),
-    INDEX idx_collection_id_ts (collection_id, ts)
+    UNIQUE KEY uk_tenant_id_collection_id_virtual_channel_name_ts (tenant_id, collection_id, virtual_channel_name, ts),
+    INDEX idx_tenant_id_collection_id_ts (tenant_id, collection_id, ts)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- fields
@@ -68,7 +65,7 @@ CREATE TABLE if not exists milvus_meta.field_schemas (
     id     BIGINT NOT NULL AUTO_INCREMENT,
     tenant_id VARCHAR(128) DEFAULT NULL,
     field_id BIGINT NOT NULL,
-    field_name VARCHAR(128) NOT NULL,
+    field_name VARCHAR(256) NOT NULL,
     is_primary_key BOOL NOT NULL,
     description VARCHAR(2048) DEFAULT NULL,
     data_type INT UNSIGNED NOT NULL,
@@ -81,9 +78,8 @@ CREATE TABLE if not exists milvus_meta.field_schemas (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP on update current_timestamp,
     PRIMARY KEY (id),
-    UNIQUE (tenant_id, collection_id, field_name, ts),
-    INDEX idx_tenant_id_collection_id_field_id_ts (tenant_id, collection_id, field_id, ts),
-    INDEX idx_collection_id_field_id_ts (collection_id, field_id, ts)
+    UNIQUE KEY uk_tenant_id_collection_id_field_name_ts (tenant_id, collection_id, field_name, ts),
+    INDEX idx_tenant_id_collection_id_field_id_ts (tenant_id, collection_id, field_id, ts)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- partitions
@@ -91,7 +87,7 @@ CREATE TABLE if not exists milvus_meta.`partitions` (
     id BIGINT NOT NULL AUTO_INCREMENT,
     tenant_id VARCHAR(128) DEFAULT NULL,
     partition_id     BIGINT NOT NULL,
-    partition_name     VARCHAR(128),
+    partition_name     VARCHAR(256),
     partition_created_timestamp bigint unsigned,
     collection_id     BIGINT NOT NULL,
     ts BIGINT UNSIGNED DEFAULT 0,
@@ -99,9 +95,8 @@ CREATE TABLE if not exists milvus_meta.`partitions` (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP on update current_timestamp,
     PRIMARY KEY (id),
-    UNIQUE (tenant_id, collection_id, partition_name, ts),
-    INDEX idx_tenant_id_collection_id_partition_id_ts (tenant_id, collection_id, partition_id, ts),
-    INDEX idx_collection_id_partition_id_ts (collection_id, partition_id, ts)
+    UNIQUE KEY uk_tenant_id_collection_id_partition_name_ts (tenant_id, collection_id, partition_name, ts),
+    INDEX idx_tenant_id_collection_id_partition_id_ts (tenant_id, collection_id, partition_id, ts)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- indexes
@@ -111,16 +106,14 @@ CREATE TABLE if not exists milvus_meta.`indexes` (
     field_id BIGINT NOT NULL,
     collection_id BIGINT NOT NULL,
     index_id BIGINT NOT NULL,
-    index_name VARCHAR(128),
+    index_name VARCHAR(256),
     index_params VARCHAR(2048),
     create_time bigint unsigned,
     is_deleted BOOL DEFAULT FALSE,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP on update current_timestamp,
     PRIMARY KEY (id),
-    UNIQUE (tenant_id, collection_id, index_name),
-    INDEX idx_tenant_id_collection_id_index_id (tenant_id, collection_id, index_id),
-    INDEX idx_collection_id_index_id (collection_id, index_id)
+    INDEX idx_tenant_id_collection_id_index_id (tenant_id, collection_id, index_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- index file paths
@@ -133,8 +126,7 @@ CREATE TABLE if not exists milvus_meta.index_file_paths (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP on update current_timestamp,
     PRIMARY KEY (id),
-    INDEX idx_tenant_id_index_build_id (tenant_id, index_build_id),
-    INDEX idx_index_build_id (index_build_id)
+    INDEX idx_tenant_id_index_build_id (tenant_id, index_build_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- segments
@@ -158,8 +150,7 @@ CREATE TABLE if not exists milvus_meta.segments (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP on update current_timestamp,
     PRIMARY KEY (id),
-    INDEX idx_tenant_id_collection_id_segment_id (tenant_id, collection_id, segment_id),
-    INDEX idx_collection_id_segment_id (collection_id, segment_id)
+    INDEX idx_tenant_id_collection_id_segment_id (tenant_id, collection_id, segment_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- segment indexes
@@ -182,9 +173,8 @@ CREATE TABLE if not exists milvus_meta.segment_indexes (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP on update current_timestamp,
     PRIMARY KEY (id),
-    UNIQUE (tenant_id, segment_id, index_id),
-    INDEX idx_tenant_id_collection_id_segment_id_index_id (tenant_id, collection_id, segment_id, index_id),
-    INDEX idx_collection_id_segment_id_index_id (collection_id, segment_id, index_id)
+    UNIQUE KEY uk_tenant_id_segment_id_index_id (tenant_id, segment_id, index_id),
+    INDEX idx_tenant_id_collection_id_segment_id_index_id (tenant_id, collection_id, segment_id, index_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- binlog files info
@@ -204,8 +194,7 @@ CREATE TABLE if not exists milvus_meta.binlogs (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP on update current_timestamp,
     PRIMARY KEY (id),
-    INDEX idx_tenant_id_segment_id_log_type (tenant_id, segment_id, log_type),
-    INDEX idx_segment_id_log_type (segment_id, log_type)
+    INDEX idx_tenant_id_segment_id_log_type (tenant_id, segment_id, log_type)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- users
@@ -219,6 +208,5 @@ CREATE TABLE if not exists milvus_meta.credential_users (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP on update current_timestamp,
     PRIMARY KEY (id),
-    INDEX idx_tenant_id_username (tenant_id, username),
-    INDEX idx_username (username)
+    INDEX idx_tenant_id_username (tenant_id, username)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

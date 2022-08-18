@@ -26,6 +26,12 @@ def init_k8s_client_config():
         raise Exception(e)
 
 
+def get_current_namespace():
+    config.load_kube_config()
+    ns = config.list_kube_config_contexts()[1]["context"]["namespace"]
+    return ns
+
+
 def wait_pods_ready(namespace, label_selector, expected_num=None, timeout=360):
     """
     wait pods with label selector all ready
@@ -155,7 +161,7 @@ def get_querynode_id_pod_pairs(namespace, label_selector):
     return querynode_id_pod_pair
 
 
-def get_milvus_instance_name(namespace, host, port="19530"):
+def get_milvus_instance_name(namespace, host="127.0.0.1", port="19530", milvus_sys=None):
     """
     get milvus instance name after connection
 
@@ -172,20 +178,17 @@ def get_milvus_instance_name(namespace, host, port="19530"):
             "milvus-multi-querynode"
 
     """
-    connections.add_connection(_default={"host": host, "port": port})
-    connections.connect(alias='_default')
-    ms = MilvusSys()
+    if milvus_sys is None:
+        connections.add_connection(_default={"host": host, "port": port})
+        connections.connect(alias='_default')
+        ms = MilvusSys()
+    else:
+        ms = milvus_sys
     query_node_ip = ms.query_nodes[0]["infos"]['hardware_infos']["ip"].split(":")[0]
-    pod_name = ""
-    if ms.deploy_mode == "STANDALONE":
-        # get all pods which label is app.kubernetes.io/name=milvus and component=standalone
-        ip_name_pairs = get_pod_ip_name_pairs(namespace, "app.kubernetes.io/name=milvus, component=standalone")
-        pod_name = ip_name_pairs[query_node_ip]
-    if ms.deploy_mode == "DISTRIBUTED":
-        # get all pods which label is app.kubernetes.io/name=milvus and component=querynode
-        ip_name_pairs = get_pod_ip_name_pairs(namespace, "app.kubernetes.io/name=milvus, component=querynode")
-        pod_name = ip_name_pairs[query_node_ip]
-    init_k8s_client_config()
+    ip_name_pairs = get_pod_ip_name_pairs(namespace, "app.kubernetes.io/name=milvus")
+    pod_name = ip_name_pairs[query_node_ip]
+    
+    config.load_kube_config()
     api_instance = client.CoreV1Api()
     try:
         api_response = api_instance.read_namespaced_pod(namespace=namespace, name=pod_name)
@@ -194,6 +197,36 @@ def get_milvus_instance_name(namespace, host, port="19530"):
         raise Exception(str(e))
     milvus_instance_name = api_response.metadata.labels["app.kubernetes.io/instance"]
     return milvus_instance_name
+
+
+def get_milvus_deploy_tool(namespace, milvus_sys):
+    """
+    get milvus instance name after connection
+    :param namespace: the namespace where the release
+    :type namespace: str
+    :param milvus_sys: milvus_sys
+    :type namespace: MilvusSys
+    :example:
+            >>> deploy_tool = get_milvus_deploy_tool("chaos-testing", milvus_sys)
+            "helm"
+    """
+    ms = milvus_sys
+    query_node_ip = ms.query_nodes[0]["infos"]['hardware_infos']["ip"].split(":")[0]
+    ip_name_pairs = get_pod_ip_name_pairs(namespace, "app.kubernetes.io/name=milvus")
+    pod_name = ip_name_pairs[query_node_ip]
+    config.load_kube_config()
+    api_instance = client.CoreV1Api()
+    try:
+        api_response = api_instance.read_namespaced_pod(namespace=namespace, name=pod_name)
+    except ApiException as e:
+        log.error("Exception when calling CoreV1Api->list_namespaced_pod: %s\n" % e)
+        raise Exception(str(e))
+    if ("app.kubernetes.io/managed-by" in api_response.metadata.labels and
+        api_response.metadata.labels["app.kubernetes.io/managed-by"] == "milvus-operator"):
+        deploy_tool = "milvus-operator"
+    else:
+        deploy_tool = "helm"
+    return deploy_tool
 
 
 def export_pod_logs(namespace, label_selector, release_name=None):

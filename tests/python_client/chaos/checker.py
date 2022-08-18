@@ -214,11 +214,10 @@ class InsertFlushChecker(Checker):
 class FlushChecker(Checker):
     """check flush operations in a dependent thread"""
 
-    def __init__(self, collection_name=None, flush=False, shards_num=2):
+    def __init__(self, collection_name=None, shards_num=2):
         if collection_name is None:
             collection_name = cf.gen_unique_str("FlushChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num)
-        self._flush = flush
         self.initial_entities = self.c_wrap.num_entities
 
     @trace()
