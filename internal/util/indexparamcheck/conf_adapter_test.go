@@ -461,6 +461,9 @@ func TestRHNSWPQConfAdapter_CheckTrain(t *testing.T) {
 	invalidParamsPQM := copyParams(validParams)
 	invalidParamsPQM[PQM] = "NAN"
 
+	invalidParamsPQMZero := copyParams(validParams)
+	invalidParamsPQMZero[PQM] = "0"
+
 	cases := []struct {
 		params map[string]string
 		want   bool
@@ -473,6 +476,7 @@ func TestRHNSWPQConfAdapter_CheckTrain(t *testing.T) {
 		{invalidMParamsMax, false},
 		{invalidParamsWithoutPQM, false},
 		{invalidParamsPQM, false},
+		{invalidParamsPQMZero, false},
 	}
 
 	adapter := newRHNSWPQConfAdapter()
