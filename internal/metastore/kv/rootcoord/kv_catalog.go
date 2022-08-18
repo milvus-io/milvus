@@ -784,14 +784,35 @@ func (kc *Catalog) ListCredentials(ctx context.Context) ([]string, error) {
 	return usernames, nil
 }
 
-func (kc *Catalog) CreateRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error {
-	k := funcutil.HandleTenantForEtcdKey(RolePrefix, tenant, entity.Name)
-	err := kc.Txn.Save(k, "")
-	if err != nil {
-		log.Error("fail to create role", zap.String("key", k), zap.Error(err))
+func (kc *Catalog) save(k string) error {
+	var err error
+	if _, err = kc.Txn.Load(k); err != nil && !common.IsKeyNotExistError(err) {
 		return err
 	}
-	return nil
+	if err == nil {
+		return common.NewIgnorableError(fmt.Errorf("the key[%s] is existed", k))
+	}
+	return kc.Txn.Save(k, "")
+}
+
+func (kc *Catalog) remove(k string) error {
+	var err error
+	if _, err = kc.Txn.Load(k); err != nil {
+		return err
+	}
+	if common.IsKeyNotExistError(err) {
+		return common.NewIgnorableError(fmt.Errorf("the key[%s] isn't existed", k))
+	}
+	return kc.Txn.Remove(k)
+}
+
+func (kc *Catalog) CreateRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error {
+	k := funcutil.HandleTenantForEtcdKey(RolePrefix, tenant, entity.Name)
+	err := kc.save(k)
+	if err != nil {
+		log.Error("fail to save the role", zap.String("key", k), zap.Error(err))
+	}
+	return err
 }
 
 func (kc *Catalog) DropRole(ctx context.Context, tenant string, roleName string) error {
@@ -804,18 +825,18 @@ func (kc *Catalog) DropRole(ctx context.Context, tenant string, roleName string)
 	return nil
 }
 
-func (kc *Catalog) OperateUserRole(ctx context.Context, tenant string, userEntity *milvuspb.UserEntity, roleEntity *milvuspb.RoleEntity, operateType milvuspb.OperateUserRoleType) error {
+func (kc *Catalog) AlterUserRole(ctx context.Context, tenant string, userEntity *milvuspb.UserEntity, roleEntity *milvuspb.RoleEntity, operateType milvuspb.OperateUserRoleType) error {
 	k := funcutil.HandleTenantForEtcdKey(RoleMappingPrefix, tenant, fmt.Sprintf("%s/%s", userEntity.Name, roleEntity.Name))
 	var err error
 	if operateType == milvuspb.OperateUserRoleType_AddUserToRole {
-		err = kc.Txn.Save(k, "")
+		err = kc.save(k)
 		if err != nil {
-			log.Error("fail to add user to role", zap.String("key", k), zap.Error(err))
+			log.Error("fail to save the user-role", zap.String("key", k), zap.Error(err))
 		}
 	} else if operateType == milvuspb.OperateUserRoleType_RemoveUserFromRole {
-		err = kc.Txn.Remove(k)
+		err = kc.remove(k)
 		if err != nil {
-			log.Error("fail to remove user from role", zap.String("key", k), zap.Error(err))
+			log.Error("fail to remove the user-role", zap.String("key", k), zap.Error(err))
 		}
 	} else {
 		err = fmt.Errorf("invalid operate user role type, operate type: %d", operateType)
@@ -823,7 +844,7 @@ func (kc *Catalog) OperateUserRole(ctx context.Context, tenant string, userEntit
 	return err
 }
 
-func (kc *Catalog) SelectRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
+func (kc *Catalog) ListRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
 	var results []*milvuspb.RoleResult
 
 	roleToUsers := make(map[string][]string)
@@ -927,7 +948,7 @@ func (kc *Catalog) getUserResult(tenant string, username string, includeRoleInfo
 	return result, nil
 }
 
-func (kc *Catalog) SelectUser(ctx context.Context, tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool) ([]*milvuspb.UserResult, error) {
+func (kc *Catalog) ListUser(ctx context.Context, tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool) ([]*milvuspb.UserResult, error) {
 	var (
 		usernames []string
 		err       error
@@ -967,7 +988,7 @@ func (kc *Catalog) SelectUser(ctx context.Context, tenant string, entity *milvus
 	return results, nil
 }
 
-func (kc *Catalog) OperatePrivilege(ctx context.Context, tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error {
+func (kc *Catalog) AlterGrant(ctx context.Context, tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error {
 	privilegeName := entity.Grantor.Privilege.Name
 	k := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, fmt.Sprintf("%s/%s/%s", entity.Role.Name, entity.Object.Name, entity.ObjectName))
 
@@ -976,6 +997,9 @@ func (kc *Catalog) OperatePrivilege(ctx context.Context, tenant string, entity *
 	if err != nil {
 		log.Warn("fail to load grant privilege entity", zap.String("key", k), zap.Any("type", operateType), zap.Error(err))
 		if funcutil.IsRevoke(operateType) {
+			if common.IsKeyNotExistError(err) {
+				return common.NewIgnorableError(fmt.Errorf("the grant[%s] isn't existed", k))
+			}
 			return err
 		}
 		if !common.IsKeyNotExistError(err) {
@@ -1007,9 +1031,9 @@ func (kc *Catalog) OperatePrivilege(ctx context.Context, tenant string, entity *
 				User:      &milvuspb.UserEntity{Name: entity.Grantor.User.Name},
 			})
 		} else if isExisted && funcutil.IsGrant(operateType) {
-			return nil
+			return common.NewIgnorableError(fmt.Errorf("the privilege[%s] is granted", privilegeName))
 		} else if !isExisted && funcutil.IsRevoke(operateType) {
-			return fmt.Errorf("fail to revoke the privilege because the privilege isn't granted for the role, key: /%s", k)
+			return common.NewIgnorableError(fmt.Errorf("the privilege[%s] isn't granted", privilegeName))
 		} else if isExisted && funcutil.IsRevoke(operateType) {
 			curGrantPrivilegeEntity.Entities = append(curGrantPrivilegeEntity.Entities[:dropIndex], curGrantPrivilegeEntity.Entities[dropIndex+1:]...)
 		}
@@ -1037,7 +1061,7 @@ func (kc *Catalog) OperatePrivilege(ctx context.Context, tenant string, entity *
 	return nil
 }
 
-func (kc *Catalog) SelectGrant(ctx context.Context, tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error) {
+func (kc *Catalog) ListGrant(ctx context.Context, tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error) {
 	var entities []*milvuspb.GrantEntity
 
 	var k string

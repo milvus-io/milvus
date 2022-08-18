@@ -78,6 +78,22 @@ func (_m *IMetaDomain) FieldDb(ctx context.Context) dbmodel.IFieldDb {
 	return r0
 }
 
+// GrantDb provides a mock function with given fields: ctx
+func (_m *IMetaDomain) GrantDb(ctx context.Context) dbmodel.IGrantDb {
+	ret := _m.Called(ctx)
+
+	var r0 dbmodel.IGrantDb
+	if rf, ok := ret.Get(0).(func(context.Context) dbmodel.IGrantDb); ok {
+		r0 = rf(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(dbmodel.IGrantDb)
+		}
+	}
+
+	return r0
+}
+
 // IndexDb provides a mock function with given fields: ctx
 func (_m *IMetaDomain) IndexDb(ctx context.Context) dbmodel.IIndexDb {
 	ret := _m.Called(ctx)
@@ -110,6 +126,22 @@ func (_m *IMetaDomain) PartitionDb(ctx context.Context) dbmodel.IPartitionDb {
 	return r0
 }
 
+// RoleDb provides a mock function with given fields: ctx
+func (_m *IMetaDomain) RoleDb(ctx context.Context) dbmodel.IRoleDb {
+	ret := _m.Called(ctx)
+
+	var r0 dbmodel.IRoleDb
+	if rf, ok := ret.Get(0).(func(context.Context) dbmodel.IRoleDb); ok {
+		r0 = rf(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(dbmodel.IRoleDb)
+		}
+	}
+
+	return r0
+}
+
 // SegmentIndexDb provides a mock function with given fields: ctx
 func (_m *IMetaDomain) SegmentIndexDb(ctx context.Context) dbmodel.ISegmentIndexDb {
 	ret := _m.Called(ctx)
@@ -136,6 +168,22 @@ func (_m *IMetaDomain) UserDb(ctx context.Context) dbmodel.IUserDb {
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(dbmodel.IUserDb)
+		}
+	}
+
+	return r0
+}
+
+// UserRoleDb provides a mock function with given fields: ctx
+func (_m *IMetaDomain) UserRoleDb(ctx context.Context) dbmodel.IUserRoleDb {
+	ret := _m.Called(ctx)
+
+	var r0 dbmodel.IUserRoleDb
+	if rf, ok := ret.Get(0).(func(context.Context) dbmodel.IUserRoleDb); ok {
+		r0 = rf(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(dbmodel.IUserRoleDb)
 		}
 	}
 

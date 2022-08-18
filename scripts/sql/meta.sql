@@ -210,3 +210,43 @@ CREATE TABLE if not exists milvus_meta.credential_users (
     PRIMARY KEY (id),
     INDEX idx_tenant_id_username (tenant_id, username)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- role
+CREATE TABLE if not exists milvus_meta.role (
+    id     BIGINT NOT NULL AUTO_INCREMENT,
+    tenant_id VARCHAR(128) DEFAULT NULL,
+    name VARCHAR(128) NOT NULL,
+    is_deleted BOOL NOT NULL DEFAULT false,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP on update current_timestamp,
+    INDEX idx_role_tenant_name (tenant_id, name),
+    PRIMARY KEY (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- user-role
+CREATE TABLE if not exists milvus_meta.user_role (
+    id     BIGINT NOT NULL AUTO_INCREMENT,
+    tenant_id VARCHAR(128) DEFAULT NULL,
+    user_id     BIGINT NOT NULL,
+    role_id     BIGINT NOT NULL,
+    is_deleted BOOL NOT NULL DEFAULT false,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP on update current_timestamp,
+    INDEX idx_role_mapping_tenant_user_role (tenant_id, user_id, role_id),
+    PRIMARY KEY (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- grant
+CREATE TABLE if not exists milvus_meta.grant (
+    id     BIGINT NOT NULL AUTO_INCREMENT,
+    tenant_id VARCHAR(128) DEFAULT NULL,
+    role_id     BIGINT NOT NULL,
+    object VARCHAR(128) NOT NULL,
+    object_name VARCHAR(128) NOT NULL,
+    detail TEXT NOT NULL,
+    is_deleted BOOL NOT NULL DEFAULT false,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP on update current_timestamp,
+    INDEX idx_grant_principal_resource_tenant (tenant_id, role_id, object, object_name),
+    PRIMARY KEY (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

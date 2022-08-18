@@ -49,16 +49,16 @@ func (_m *IUserDb) Insert(in *dbmodel.User) error {
 	return r0
 }
 
-// ListUsername provides a mock function with given fields: tenantID
-func (_m *IUserDb) ListUsername(tenantID string) ([]string, error) {
+// ListUser provides a mock function with given fields: tenantID
+func (_m *IUserDb) ListUser(tenantID string) ([]*dbmodel.User, error) {
 	ret := _m.Called(tenantID)
 
-	var r0 []string
-	if rf, ok := ret.Get(0).(func(string) []string); ok {
+	var r0 []*dbmodel.User
+	if rf, ok := ret.Get(0).(func(string) []*dbmodel.User); ok {
 		r0 = rf(tenantID)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]string)
+			r0 = ret.Get(0).([]*dbmodel.User)
 		}
 	}
 

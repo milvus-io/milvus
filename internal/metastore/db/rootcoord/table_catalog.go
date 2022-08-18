@@ -8,6 +8,10 @@ import (
 	"reflect"
 	"runtime"
 
+	"github.com/milvus-io/milvus/internal/common"
+
+	"github.com/milvus-io/milvus/internal/util"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/db/dbmodel"
@@ -763,57 +767,292 @@ func (tc *Catalog) DropCredential(ctx context.Context, username string) error {
 func (tc *Catalog) ListCredentials(ctx context.Context) ([]string, error) {
 	tenantID := contextutil.TenantID(ctx)
 
-	usernames, err := tc.metaDomain.UserDb(ctx).ListUsername(tenantID)
+	users, err := tc.metaDomain.UserDb(ctx).ListUser(tenantID)
 	if err != nil {
 		return nil, err
 	}
-
+	var usernames []string
+	for _, user := range users {
+		usernames = append(usernames, user.Username)
+	}
 	return usernames, nil
 }
 
 func (tc *Catalog) CreateRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error {
-	//TODO implement me
-	return nil
+	var err error
+	if _, err = tc.GetRoleIDByName(ctx, tenant, entity.Name); err != nil && !common.IsKeyNotExistError(err) {
+		return err
+	}
+	if err == nil {
+		return common.NewIgnorableError(fmt.Errorf("the role[%s] has existed", entity.Name))
+	}
+	return tc.metaDomain.RoleDb(ctx).Insert(&dbmodel.Role{
+		Base: dbmodel.Base{TenantID: tenant},
+		Name: entity.Name,
+	})
 }
 
 func (tc *Catalog) DropRole(ctx context.Context, tenant string, roleName string) error {
-	//TODO implement me
-	return nil
+	return tc.metaDomain.RoleDb(ctx).Delete(tenant, roleName)
 }
 
-func (tc *Catalog) OperateUserRole(ctx context.Context, tenant string, userEntity *milvuspb.UserEntity, roleEntity *milvuspb.RoleEntity, operateType milvuspb.OperateUserRoleType) error {
-	//TODO implement me
-	return nil
+func (tc *Catalog) GetRoleIDByName(ctx context.Context, tenant string, name string) (int64, error) {
+	var (
+		roles []*dbmodel.Role
+		err   error
+	)
+
+	if roles, err = tc.metaDomain.RoleDb(ctx).GetRoles(tenant, name); err != nil {
+		return 0, err
+	}
+	if len(roles) < 1 {
+		return 0, common.NewKeyNotExistError(fmt.Sprintf("%s/%s", tenant, name))
+	}
+	return roles[0].ID, nil
 }
 
-func (tc *Catalog) SelectRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
-	//TODO implement me
-	return nil, nil
+func (tc *Catalog) AlterUserRole(ctx context.Context, tenant string, userEntity *milvuspb.UserEntity, roleEntity *milvuspb.RoleEntity, operateType milvuspb.OperateUserRoleType) error {
+	var (
+		user      *dbmodel.User
+		roleID    int64
+		userRole  *dbmodel.UserRole
+		userRoles []*dbmodel.UserRole
+		err       error
+	)
+	if user, err = tc.metaDomain.UserDb(ctx).GetByUsername(tenant, userEntity.Name); err != nil {
+		log.Error("fail to get userID by the username", zap.String("username", userEntity.Name), zap.Error(err))
+		return err
+	}
+	if roleID, err = tc.GetRoleIDByName(ctx, tenant, roleEntity.Name); err != nil {
+		log.Error("fail to get roleID by the role name", zap.String("role_name", roleEntity.Name), zap.Error(err))
+		return err
+	}
+	userRole = &dbmodel.UserRole{Base: dbmodel.Base{TenantID: tenant}, UserID: user.ID, RoleID: roleID}
+	userRoles, err = tc.metaDomain.UserRoleDb(ctx).GetUserRoles(userRole.TenantID, userRole.UserID, userRole.RoleID)
+	if err != nil {
+		return err
+	}
+	switch operateType {
+	case milvuspb.OperateUserRoleType_AddUserToRole:
+		if len(userRoles) > 0 {
+			return common.NewIgnorableError(fmt.Errorf("the user-role[%s-%s] is existed", userEntity.Name, roleEntity.Name))
+		}
+		return tc.metaDomain.UserRoleDb(ctx).Insert(userRole)
+	case milvuspb.OperateUserRoleType_RemoveUserFromRole:
+		if len(userRoles) < 1 {
+			return common.NewIgnorableError(fmt.Errorf("the user-role[%s-%s] isn't existed", userEntity.Name, roleEntity.Name))
+		}
+		return tc.metaDomain.UserRoleDb(ctx).Delete(userRole.TenantID, userRole.UserID, userRole.RoleID)
+	default:
+		err = fmt.Errorf("invalid operate type: %d", operateType)
+		log.Error("error: ", zap.Error(err))
+		return err
+	}
 }
 
-func (tc *Catalog) SelectUser(ctx context.Context, tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool) ([]*milvuspb.UserResult, error) {
-	//TODO implement me
-	return nil, nil
+func (tc *Catalog) ListRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
+	var (
+		roleName string
+		roles    []*dbmodel.Role
+		results  []*milvuspb.RoleResult
+		err      error
+	)
+	if entity != nil {
+		roleName = entity.Name
+	}
+	roles, err = tc.metaDomain.RoleDb(ctx).GetRoles(tenant, roleName)
+	if err != nil {
+		return nil, err
+	}
+	for _, role := range roles {
+		var users []*milvuspb.UserEntity
+		var userRoles []*dbmodel.UserRole
+		if includeUserInfo {
+			if userRoles, err = tc.metaDomain.UserRoleDb(ctx).GetUserRoles(tenant, 0, role.ID); err != nil {
+				return nil, err
+			}
+			for _, userRole := range userRoles {
+				users = append(users, &milvuspb.UserEntity{Name: userRole.User.Username})
+			}
+		}
+		results = append(results, &milvuspb.RoleResult{
+			Role:  role.Unmarshal(),
+			Users: users,
+		})
+	}
+	if !funcutil.IsEmptyString(roleName) && len(results) == 0 {
+		return nil, common.NewKeyNotExistError(fmt.Sprintf("%s/%s", tenant, roleName))
+	}
+	return results, nil
 }
 
-func (tc *Catalog) OperatePrivilege(ctx context.Context, tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error {
-	//TODO implement me
-	return nil
+func (tc *Catalog) ListUser(ctx context.Context, tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool) ([]*milvuspb.UserResult, error) {
+	var (
+		users    []*dbmodel.User
+		results  []*milvuspb.UserResult
+		username string
+		err      error
+	)
+	if entity != nil {
+		var user *dbmodel.User
+		username = entity.Name
+		if user, err = tc.metaDomain.UserDb(ctx).GetByUsername(tenant, username); err != nil {
+			return nil, err
+		}
+		users = append(users, user)
+	} else {
+		if users, err = tc.metaDomain.UserDb(ctx).ListUser(tenant); err != nil {
+			return nil, err
+		}
+	}
+	for _, user := range users {
+		var roles []*milvuspb.RoleEntity
+		var userRoles []*dbmodel.UserRole
+		if includeRoleInfo {
+			if userRoles, err = tc.metaDomain.UserRoleDb(ctx).GetUserRoles(tenant, user.ID, 0); err != nil {
+				return nil, err
+			}
+			for _, userRole := range userRoles {
+				roles = append(roles, &milvuspb.RoleEntity{Name: userRole.Role.Name})
+			}
+		}
+		results = append(results, &milvuspb.UserResult{
+			User:  &milvuspb.UserEntity{Name: user.Username},
+			Roles: roles,
+		})
+	}
+	return results, nil
 }
 
-func (tc *Catalog) SelectGrant(ctx context.Context, tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error) {
-	//TODO implement me
-	return nil, nil
+func (tc *Catalog) AlterGrant(ctx context.Context, tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error {
+	var (
+		roleID int64
+		detail string
+		err    error
+	)
+
+	if roleID, err = tc.GetRoleIDByName(ctx, tenant, entity.Role.Name); err != nil {
+		return err
+	}
+	switch operateType {
+	case milvuspb.OperatePrivilegeType_Revoke:
+		return tc.metaDomain.GrantDb(ctx).
+			Delete(tenant, roleID, entity.Object.Name, entity.ObjectName, entity.Grantor.Privilege.Name)
+	case milvuspb.OperatePrivilegeType_Grant:
+		if detail, err = dbmodel.EncodeGrantDetail("", entity.Grantor.User.Name, entity.Grantor.Privilege.Name, true); err != nil {
+			log.Error("fail to encode grant detail", zap.String("tenant", tenant), zap.Any("entity", entity), zap.Error(err))
+			return err
+		}
+		return tc.metaDomain.GrantDb(ctx).Insert(&dbmodel.Grant{
+			Base:       dbmodel.Base{TenantID: tenant},
+			RoleID:     roleID,
+			Object:     entity.Object.Name,
+			ObjectName: entity.ObjectName,
+			Detail:     detail,
+		})
+	default:
+		err = fmt.Errorf("invalid operate type: %d", operateType)
+		log.Error("error: ", zap.Error(err))
+		return err
+	}
+}
+
+func (tc *Catalog) ListGrant(ctx context.Context, tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error) {
+	var (
+		roleID        int64
+		object        string
+		objectName    string
+		grants        []*dbmodel.Grant
+		grantEntities []*milvuspb.GrantEntity
+		details       [][]string
+		privilegeName string
+		err           error
+	)
+	if !funcutil.IsEmptyString(entity.ObjectName) && entity.Object != nil && !funcutil.IsEmptyString(entity.Object.Name) {
+		object = entity.Object.Name
+		objectName = entity.ObjectName
+	}
+	if roleID, err = tc.GetRoleIDByName(ctx, tenant, entity.Role.Name); err != nil {
+		log.Error("fail to get roleID by the role name", zap.String("role_name", entity.Role.Name), zap.Error(err))
+		return nil, err
+	}
+	if grants, err = tc.metaDomain.GrantDb(ctx).GetGrants(tenant, roleID, object, objectName); err != nil {
+		return nil, err
+	}
+	for _, grant := range grants {
+		if details, err = dbmodel.DecodeGrantDetail(grant.Detail); err != nil {
+			log.Error("fail to decode grant detail", zap.Any("detail", grant.Detail), zap.Error(err))
+			return nil, err
+		}
+		for _, detail := range details {
+			if len(detail) != 2 {
+				log.Error("invalid operateDetail", zap.Any("detail", detail))
+				return nil, fmt.Errorf("invalid operateDetail: [%s], decode result: %+v", grant.Detail, details)
+			}
+			privilegeName = util.PrivilegeNameForAPI(detail[1])
+			if detail[1] == util.AnyWord {
+				privilegeName = util.AnyWord
+			}
+			grantEntities = append(grantEntities, &milvuspb.GrantEntity{
+				Role:       &milvuspb.RoleEntity{Name: grant.Role.Name},
+				Object:     &milvuspb.ObjectEntity{Name: grant.Object},
+				ObjectName: grant.ObjectName,
+				Grantor: &milvuspb.GrantorEntity{
+					User:      &milvuspb.UserEntity{Name: detail[0]},
+					Privilege: &milvuspb.PrivilegeEntity{Name: privilegeName},
+				},
+			})
+		}
+	}
+	if !funcutil.IsEmptyString(object) && !funcutil.IsEmptyString(objectName) && len(grantEntities) == 0 {
+		return nil, common.NewKeyNotExistError(fmt.Sprintf("%s/%s/%s/%s", tenant, entity.Role.Name, object, objectName))
+	}
+	return grantEntities, nil
 }
 
 func (tc *Catalog) ListPolicy(ctx context.Context, tenant string) ([]string, error) {
-	//TODO implement me
-	return nil, nil
+	var (
+		grants   []*dbmodel.Grant
+		details  [][]string
+		policies []string
+		err      error
+	)
+	if grants, err = tc.metaDomain.GrantDb(ctx).GetGrants(tenant, 0, "", ""); err != nil {
+		return nil, err
+	}
+	for _, grant := range grants {
+		if details, err = dbmodel.DecodeGrantDetail(grant.Detail); err != nil {
+			log.Error("fail to decode grant detail", zap.Any("detail", grant.Detail), zap.Error(err))
+			return nil, err
+		}
+		for _, detail := range details {
+			if len(detail) != 2 {
+				log.Error("invalid operateDetail", zap.String("tenant", tenant), zap.Strings("detail", detail))
+				return nil, fmt.Errorf("invalid operateDetail: %+v", detail)
+			}
+			policies = append(policies,
+				funcutil.PolicyForPrivilege(grant.Role.Name, grant.Object, grant.ObjectName, detail[1]))
+		}
+	}
+
+	return policies, nil
 }
 
 func (tc *Catalog) ListUserRole(ctx context.Context, tenant string) ([]string, error) {
-	//TODO implement me
-	return nil, nil
+	var (
+		userRoleStrs []string
+		userRoles    []*dbmodel.UserRole
+		err          error
+	)
+
+	if userRoles, err = tc.metaDomain.UserRoleDb(ctx).GetUserRoles(tenant, 0, 0); err != nil {
+		return nil, err
+	}
+	for _, userRole := range userRoles {
+		userRoleStrs = append(userRoleStrs, funcutil.EncodeUserRoleCache(userRole.User.Username, userRole.Role.Name))
+	}
+
+	return userRoleStrs, nil
 }
 
 func (tc *Catalog) Close() {

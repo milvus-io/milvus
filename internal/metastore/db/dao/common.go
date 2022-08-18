@@ -44,3 +44,15 @@ func (*metaDomain) SegmentIndexDb(ctx context.Context) dbmodel.ISegmentIndexDb {
 func (*metaDomain) UserDb(ctx context.Context) dbmodel.IUserDb {
 	return &userDb{dbcore.GetDB(ctx)}
 }
+
+func (d *metaDomain) RoleDb(ctx context.Context) dbmodel.IRoleDb {
+	return &roleDb{dbcore.GetDB(ctx)}
+}
+
+func (d *metaDomain) UserRoleDb(ctx context.Context) dbmodel.IUserRoleDb {
+	return &userRoleDb{dbcore.GetDB(ctx)}
+}
+
+func (d *metaDomain) GrantDb(ctx context.Context) dbmodel.IGrantDb {
+	return &grantDb{dbcore.GetDB(ctx)}
+}

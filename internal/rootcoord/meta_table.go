@@ -1370,21 +1370,21 @@ func (mt *MetaTable) OperateUserRole(tenant string, userEntity *milvuspb.UserEnt
 		return fmt.Errorf("role name in the role entity is empty")
 	}
 
-	return mt.catalog.OperateUserRole(mt.ctx, tenant, userEntity, roleEntity, operateType)
+	return mt.catalog.AlterUserRole(mt.ctx, tenant, userEntity, roleEntity, operateType)
 }
 
 // SelectRole select role.
 // Enter the role condition by the entity param. And this param is nil, which means selecting all roles.
 // Get all users that are added to the role by setting the includeUserInfo param to true.
 func (mt *MetaTable) SelectRole(tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error) {
-	return mt.catalog.SelectRole(mt.ctx, tenant, entity, includeUserInfo)
+	return mt.catalog.ListRole(mt.ctx, tenant, entity, includeUserInfo)
 }
 
 // SelectUser select user.
 // Enter the user condition by the entity param. And this param is nil, which means selecting all users.
 // Get all roles that are added the user to by setting the includeRoleInfo param to true.
 func (mt *MetaTable) SelectUser(tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool) ([]*milvuspb.UserResult, error) {
-	return mt.catalog.SelectUser(mt.ctx, tenant, entity, includeRoleInfo)
+	return mt.catalog.ListUser(mt.ctx, tenant, entity, includeRoleInfo)
 }
 
 // OperatePrivilege grant or revoke privilege by setting the operateType param
@@ -1411,7 +1411,7 @@ func (mt *MetaTable) OperatePrivilege(tenant string, entity *milvuspb.GrantEntit
 		return fmt.Errorf("the operate type in the grant entity is invalid")
 	}
 
-	return mt.catalog.OperatePrivilege(mt.ctx, tenant, entity, operateType)
+	return mt.catalog.AlterGrant(mt.ctx, tenant, entity, operateType)
 }
 
 // SelectGrant select grant
@@ -1422,7 +1422,7 @@ func (mt *MetaTable) SelectGrant(tenant string, entity *milvuspb.GrantEntity) ([
 	if entity.Role == nil || funcutil.IsEmptyString(entity.Role.Name) {
 		return entities, fmt.Errorf("the role entity in the grant entity is invalid")
 	}
-	return mt.catalog.SelectGrant(mt.ctx, tenant, entity)
+	return mt.catalog.ListGrant(mt.ctx, tenant, entity)
 }
 
 func (mt *MetaTable) ListPolicy(tenant string) ([]string, error) {

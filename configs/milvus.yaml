@@ -55,7 +55,7 @@ metastore:
 # Related configuration of mysql, used to store Milvus metadata.
 mysql:
   username: root
-  password: 11111111
+  password: 123456
   address: localhost
   port: 3306
   dbName: milvus_meta

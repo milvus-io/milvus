@@ -1087,8 +1087,23 @@ func TestRbacCreateRole(t *testing.T) {
 	mockTxnKV.save = func(key, value string) error {
 		return nil
 	}
+	mockTxnKV.load = func(key string) (string, error) {
+		return "", common.NewKeyNotExistError(key)
+	}
 	err = mt.CreateRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: "role1"})
 	assert.Nil(t, err)
+
+	mockTxnKV.load = func(key string) (string, error) {
+		return "", fmt.Errorf("load error")
+	}
+	err = mt.CreateRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: "role1"})
+	assert.NotNil(t, err)
+
+	mockTxnKV.load = func(key string) (string, error) {
+		return "", nil
+	}
+	err = mt.CreateRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: "role1"})
+	assert.Equal(t, true, common.IsIgnorableError(err))
 
 	mockTxnKV.save = func(key, value string) error {
 		return fmt.Errorf("save error")
@@ -1134,6 +1149,9 @@ func TestRbacOperateRole(t *testing.T) {
 	err = mt.OperateUserRole(util.DefaultTenant, &milvuspb.UserEntity{Name: "user"}, &milvuspb.RoleEntity{Name: "role"}, milvuspb.OperateUserRoleType(100))
 	assert.NotNil(t, err)
 
+	mockTxnKV.load = func(key string) (string, error) {
+		return "", common.NewKeyNotExistError(key)
+	}
 	err = mt.OperateUserRole(util.DefaultTenant, &milvuspb.UserEntity{Name: "user"}, &milvuspb.RoleEntity{Name: "role"}, milvuspb.OperateUserRoleType_AddUserToRole)
 	assert.Nil(t, err)
 
@@ -1145,6 +1163,9 @@ func TestRbacOperateRole(t *testing.T) {
 
 	mockTxnKV.remove = func(key string) error {
 		return nil
+	}
+	mockTxnKV.load = func(key string) (string, error) {
+		return "", nil
 	}
 	err = mt.OperateUserRole(util.DefaultTenant, &milvuspb.UserEntity{Name: "user"}, &milvuspb.RoleEntity{Name: "role"}, milvuspb.OperateUserRoleType_RemoveUserFromRole)
 	assert.Nil(t, err)
@@ -1369,11 +1390,10 @@ func TestRbacOperatePrivilege(t *testing.T) {
 		return string(grantPrivilegeEntityByte), nil
 	}
 	err = mt.OperatePrivilege(util.DefaultTenant, entity, milvuspb.OperatePrivilegeType_Grant)
-	assert.Nil(t, err)
+	assert.Equal(t, true, common.IsIgnorableError(err))
 	entity.Grantor.Privilege = &milvuspb.PrivilegeEntity{Name: commonpb.ObjectPrivilege_PrivilegeRelease.String()}
 	err = mt.OperatePrivilege(util.DefaultTenant, entity, milvuspb.OperatePrivilegeType_Revoke)
-	assert.NotNil(t, err)
-	entity.Grantor.Privilege = &milvuspb.PrivilegeEntity{Name: commonpb.ObjectPrivilege_PrivilegeLoad.String()}
+	assert.Equal(t, true, common.IsIgnorableError(err))
 	grantPrivilegeEntity = &milvuspb.GrantPrivilegeEntity{Entities: []*milvuspb.GrantorEntity{
 		{User: &milvuspb.UserEntity{Name: "user2"}, Privilege: &milvuspb.PrivilegeEntity{Name: commonpb.ObjectPrivilege_PrivilegeLoad.String()}},
 	}}
@@ -1383,6 +1403,13 @@ func TestRbacOperatePrivilege(t *testing.T) {
 	}
 	err = mt.OperatePrivilege(util.DefaultTenant, entity, milvuspb.OperatePrivilegeType_Grant)
 	assert.Nil(t, err)
+	grantPrivilegeEntity = &milvuspb.GrantPrivilegeEntity{Entities: []*milvuspb.GrantorEntity{
+		{User: &milvuspb.UserEntity{Name: "user2"}, Privilege: &milvuspb.PrivilegeEntity{Name: commonpb.ObjectPrivilege_PrivilegeRelease.String()}},
+	}}
+	mockTxnKV.load = func(key string) (string, error) {
+		grantPrivilegeEntityByte, _ := proto.Marshal(grantPrivilegeEntity)
+		return string(grantPrivilegeEntityByte), nil
+	}
 	mockTxnKV.remove = func(key string) error {
 		return fmt.Errorf("remove error")
 	}

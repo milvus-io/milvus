@@ -4,11 +4,11 @@ import (
 	"context"
 	"strings"
 
+	"google.golang.org/grpc/metadata"
+
 	"github.com/milvus-io/milvus/internal/util"
 
 	"github.com/milvus-io/milvus/internal/util/crypto"
-
-	"google.golang.org/grpc/metadata"
 )
 
 // validAuth validates the authentication

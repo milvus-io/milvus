@@ -44,6 +44,9 @@ var (
 	indexTestDb     dbmodel.IIndexDb
 	segIndexTestDb  dbmodel.ISegmentIndexDb
 	userTestDb      dbmodel.IUserDb
+	roleTestDb      dbmodel.IRoleDb
+	userRoleTestDb  dbmodel.IUserRoleDb
+	grantTestDb     dbmodel.IGrantDb
 )
 
 // TestMain is the first function executed in current package, we will do some initial here
@@ -51,6 +54,7 @@ func TestMain(m *testing.M) {
 	var (
 		db  *sql.DB
 		err error
+		ctx = context.TODO()
 	)
 
 	// setting sql MUST exact match
@@ -70,14 +74,17 @@ func TestMain(m *testing.M) {
 	// set mocked database
 	dbcore.SetGlobalDB(DB)
 
-	collTestDb = NewMetaDomain().CollectionDb(context.TODO())
-	aliasTestDb = NewMetaDomain().CollAliasDb(context.TODO())
-	channelTestDb = NewMetaDomain().CollChannelDb(context.TODO())
-	fieldTestDb = NewMetaDomain().FieldDb(context.TODO())
-	partitionTestDb = NewMetaDomain().PartitionDb(context.TODO())
-	indexTestDb = NewMetaDomain().IndexDb(context.TODO())
-	segIndexTestDb = NewMetaDomain().SegmentIndexDb(context.TODO())
-	userTestDb = NewMetaDomain().UserDb(context.TODO())
+	collTestDb = NewMetaDomain().CollectionDb(ctx)
+	aliasTestDb = NewMetaDomain().CollAliasDb(ctx)
+	channelTestDb = NewMetaDomain().CollChannelDb(ctx)
+	fieldTestDb = NewMetaDomain().FieldDb(ctx)
+	partitionTestDb = NewMetaDomain().PartitionDb(ctx)
+	indexTestDb = NewMetaDomain().IndexDb(ctx)
+	segIndexTestDb = NewMetaDomain().SegmentIndexDb(ctx)
+	userTestDb = NewMetaDomain().UserDb(ctx)
+	roleTestDb = NewMetaDomain().RoleDb(ctx)
+	userRoleTestDb = NewMetaDomain().UserRoleDb(ctx)
+	grantTestDb = NewMetaDomain().GrantDb(ctx)
 
 	// m.Run entry for executing tests
 	os.Exit(m.Run())
@@ -391,4 +398,25 @@ type AnyTime struct{}
 func (a AnyTime) Match(v driver.Value) bool {
 	_, ok := v.(time.Time)
 	return ok
+}
+
+func GetBase() dbmodel.Base {
+	return dbmodel.Base{
+		TenantID:  tenantID,
+		IsDeleted: false,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+}
+
+func SuccessExec(f func()) {
+	mock.ExpectBegin()
+	f()
+	mock.ExpectCommit()
+}
+
+func ErrorExec(f func()) {
+	mock.ExpectBegin()
+	f()
+	mock.ExpectRollback()
 }

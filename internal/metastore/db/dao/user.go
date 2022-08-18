@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/milvus-io/milvus/internal/common"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metastore/db/dbmodel"
 	"go.uber.org/zap"
@@ -20,7 +22,7 @@ func (s *userDb) GetByUsername(tenantID string, username string) (*dbmodel.User,
 	err := s.db.Model(&dbmodel.User{}).Where("tenant_id = ? AND username = ? AND is_deleted = false", tenantID, username).Take(&r).Error
 
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, fmt.Errorf("user %s not found", username)
+		return nil, common.NewKeyNotExistError(fmt.Sprintf("%s/%s", tenantID, username))
 	}
 	if err != nil {
 		log.Error("get user by username failed", zap.String("tenant", tenantID), zap.String("username", username), zap.Error(err))
@@ -30,16 +32,16 @@ func (s *userDb) GetByUsername(tenantID string, username string) (*dbmodel.User,
 	return r, nil
 }
 
-func (s *userDb) ListUsername(tenantID string) ([]string, error) {
-	var usernames []string
+func (s *userDb) ListUser(tenantID string) ([]*dbmodel.User, error) {
+	var users []*dbmodel.User
 
-	err := s.db.Model(&dbmodel.User{}).Select("username").Where("tenant_id = ? AND is_deleted = false", tenantID).Find(&usernames).Error
+	err := s.db.Model(&dbmodel.User{}).Where("tenant_id = ? AND is_deleted = false", tenantID).Find(&users).Error
 	if err != nil {
-		log.Error("list usernames failed", zap.String("tenant", tenantID), zap.Error(err))
+		log.Error("list user failed", zap.String("tenant", tenantID), zap.Error(err))
 		return nil, err
 	}
 
-	return usernames, nil
+	return users, nil
 }
 
 func (s *userDb) Insert(in *dbmodel.User) error {
