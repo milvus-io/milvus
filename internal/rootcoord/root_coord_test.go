@@ -528,10 +528,9 @@ func createCollectionInMeta(dbName, collName string, core *Core, shardsNum int32
 	}
 
 	vchanNames := make([]string, t.ShardsNum)
-	chanNames := make([]string, t.ShardsNum)
+	chanNames := core.chanTimeTick.getDmlChannelNames(int(t.ShardsNum))
 	for i := int32(0); i < t.ShardsNum; i++ {
-		vchanNames[i] = fmt.Sprintf("%s_%dv%d", core.chanTimeTick.getDmlChannelName(), collID, i)
-		chanNames[i] = funcutil.ToPhysicalChannel(vchanNames[i])
+		vchanNames[i] = fmt.Sprintf("%s_%dv%d", chanNames[i], collID, i)
 	}
 
 	collInfo := etcdpb.CollectionInfo{
@@ -2335,15 +2334,11 @@ func TestRootCoord_Base(t *testing.T) {
 		assert.NoError(t, err)
 		time.Sleep(100 * time.Millisecond)
 
-		cn0 := core.chanTimeTick.getDmlChannelName()
-		cn1 := core.chanTimeTick.getDmlChannelName()
-		cn2 := core.chanTimeTick.getDmlChannelName()
-		core.chanTimeTick.addDmlChannels(cn0, cn1, cn2)
-
-		dn0 := core.chanTimeTick.getDeltaChannelName()
-		dn1 := core.chanTimeTick.getDeltaChannelName()
-		dn2 := core.chanTimeTick.getDeltaChannelName()
-		core.chanTimeTick.addDeltaChannels(dn0, dn1, dn2)
+		cns := core.chanTimeTick.getDmlChannelNames(3)
+		cn0 := cns[0]
+		cn1 := cns[1]
+		cn2 := cns[2]
+		core.chanTimeTick.addDmlChannels(cns...)
 
 		// wait for local channel reported
 		for {
