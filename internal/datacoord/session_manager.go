@@ -95,6 +95,18 @@ func (c *SessionManager) DeleteSession(node *NodeInfo) {
 	}
 }
 
+// getLiveNodeIDs returns IDs of all live DataNodes.
+func (c *SessionManager) getLiveNodeIDs() []int64 {
+	c.sessions.RLock()
+	defer c.sessions.RUnlock()
+
+	ret := make([]int64, 0, len(c.sessions.data))
+	for id := range c.sessions.data {
+		ret = append(ret, id)
+	}
+	return ret
+}
+
 // GetSessions gets all node sessions
 func (c *SessionManager) GetSessions() []*Session {
 	c.sessions.RLock()
