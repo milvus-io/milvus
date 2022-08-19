@@ -75,9 +75,8 @@ func getSystemInfoMetrics(
 				BaseComponentInfos: metricsinfo.BaseComponentInfos{
 					HasError:    true,
 					ErrorReason: nodeMetrics.err.Error(),
-					// Name doesn't matter here because we can't get it when error occurs, using address as the Name?
-					Name: "",
-					ID:   int64(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
+					Name:        metricsinfo.ConstructComponentName(typeutil.QueryNodeRole, nodeMetrics.nodeID),
+					ID:          int64(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
 				},
 			})
 			continue
