@@ -27,6 +27,20 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+func TestBaseTable_GetConfigSubSet(t *testing.T) {
+	err1 := baseParams.Save("a.b", "1")
+	assert.Nil(t, err1)
+
+	err2 := baseParams.Save("a.c", "2")
+	assert.Nil(t, err2)
+
+	subSet := baseParams.GetConfigSubSet("a")
+
+	assert.Equal(t, len(subSet), 3)
+	assert.Equal(t, subSet["b"], "1")
+	assert.Equal(t, subSet["c"], "2")
+}
+
 func TestBaseTable_SaveAndLoad(t *testing.T) {
 	err1 := baseParams.Save("int", "10")
 	assert.Nil(t, err1)
