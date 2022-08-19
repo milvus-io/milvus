@@ -1,5 +1,6 @@
 from yaml import full_load
-
+import json
+from utils.util_log import test_log as log
 
 def gen_experiment_config(yaml):
     """load the yaml file of chaos experiment"""
@@ -49,6 +50,17 @@ def update_key_name(node, modify_k, modify_k_new):
         for j in node.values():
             update_key_name(j, modify_k, modify_k_new)
     return node
+
+
+def get_collections():
+    try:
+        with open("/tmp/ci_logs/all_collections.json", "r") as f:
+            data = json.load(f)
+            collections = data["all"]
+    except Exception as e:
+        log.error(f"get_all_collections error: {e}")
+        return []
+    return collections
 
 
 if __name__ == "__main__":
