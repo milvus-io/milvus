@@ -308,7 +308,7 @@ func (s *Server) Start() error {
 	// data from all DataNode.
 	// This will prevent DataCoord from missing out any important segment stats
 	// data while offline.
-	log.Info("DataNode (re)starts successfully and re-collecting segment stats from DataNodes")
+	log.Info("DataCoord (re)starts successfully and re-collecting segment stats from DataNodes")
 	s.reCollectSegmentStats(s.ctx)
 
 	return nil
@@ -621,6 +621,16 @@ func (s *Server) handleTimetickMessage(ctx context.Context, ttMsg *msgstream.Dat
 
 func (s *Server) updateSegmentStatistics(stats []*datapb.SegmentStats) {
 	for _, stat := range stats {
+		// Log if # of rows is updated.
+		if s.meta.GetAllSegment(stat.GetSegmentID()) != nil &&
+			s.meta.GetAllSegment(stat.GetSegmentID()).GetNumOfRows() != stat.GetNumRows() {
+			log.Debug("Updating segment number of rows",
+				zap.Int64("segment ID", stat.GetSegmentID()),
+				zap.Int64("old value", s.meta.GetAllSegment(stat.GetSegmentID()).GetNumOfRows()),
+				zap.Int64("new value", stat.GetNumRows()),
+				zap.Any("seg info", s.meta.GetSegment(stat.GetSegmentID())),
+			)
+		}
 		s.meta.SetCurrentRows(stat.GetSegmentID(), stat.GetNumRows())
 	}
 }
@@ -958,7 +968,7 @@ func (s *Server) reCollectSegmentStats(ctx context.Context) {
 		log.Error("null channel manager found, which should NOT happen in non-testing environment")
 		return
 	}
-	nodes := s.channelManager.store.GetNodes()
+	nodes := s.sessionManager.getLiveNodeIDs()
 	log.Info("re-collecting segment stats from DataNodes",
 		zap.Int64s("DataNode IDs", nodes))
 	for _, node := range nodes {
