@@ -93,9 +93,12 @@ func parseQueryInfo(searchParamsPair []*commonpb.KeyValuePair) (*planpb.QueryInf
 	if err != nil {
 		return nil, errors.New(TopKKey + " not found in search_params")
 	}
-	topK, err := strconv.Atoi(topKStr)
+	topK, err := strconv.ParseInt(topKStr, 0, 64)
 	if err != nil {
 		return nil, fmt.Errorf("%s [%s] is invalid", TopKKey, topKStr)
+	}
+	if err := validateTopK(topK); err != nil {
+		return nil, fmt.Errorf("invalid limit, %w", err)
 	}
 
 	metricType, err := funcutil.GetAttrByKeyFromRepeatedKV(MetricTypeKey, searchParamsPair)
@@ -112,7 +115,7 @@ func parseQueryInfo(searchParamsPair []*commonpb.KeyValuePair) (*planpb.QueryInf
 	if err != nil {
 		roundDecimalStr = "-1"
 	}
-	roundDecimal, err := strconv.Atoi(roundDecimalStr)
+	roundDecimal, err := strconv.ParseInt(roundDecimalStr, 0, 64)
 	if err != nil {
 		return nil, fmt.Errorf("%s [%s] is invalid, should be -1 or an integer in range [0, 6]", RoundDecimalKey, roundDecimalStr)
 	}
@@ -122,10 +125,10 @@ func parseQueryInfo(searchParamsPair []*commonpb.KeyValuePair) (*planpb.QueryInf
 	}
 
 	return &planpb.QueryInfo{
-		Topk:         int64(topK),
+		Topk:         topK,
 		MetricType:   metricType,
 		SearchParams: searchParams,
-		RoundDecimal: int64(roundDecimal),
+		RoundDecimal: roundDecimal,
 	}, nil
 }
 
@@ -242,6 +245,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		t.SearchRequest.OutputFieldsId = outputFieldIDs
 		plan.OutputFieldIds = outputFieldIDs
 
+		t.SearchRequest.Topk = queryInfo.GetTopk()
 		t.SearchRequest.MetricType = queryInfo.GetMetricType()
 		t.SearchRequest.DslType = commonpb.DslType_BoolExprV1
 		t.SearchRequest.SerializedExprPlan, err = proto.Marshal(plan)
@@ -249,10 +253,6 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 			return err
 		}
 
-		t.SearchRequest.Topk = queryInfo.GetTopk()
-		if err := validateTopK(queryInfo.GetTopk()); err != nil {
-			return err
-		}
 		log.Ctx(ctx).Debug("Proxy::searchTask::PreExecute", zap.Int64("msgID", t.ID()),
 			zap.Int64s("plan.OutputFieldIds", plan.GetOutputFieldIds()),
 			zap.String("plan", plan.String())) // may be very large if large term passed.
@@ -646,18 +646,6 @@ func reduceSearchResultData(ctx context.Context, searchResultData []*schemapb.Se
 //		log.Debug("", zap.Int("i", i), zap.Int64("id", data.Ids.GetIntId().Data[i]), zap.Float32("score", data.Scores[i]))
 //	}
 //}
-
-// func printSearchResult(partialSearchResult *internalpb.SearchResults) {
-//     for i := 0; i < len(partialSearchResult.Hits); i++ {
-//         testHits := milvuspb.Hits{}
-//         err := proto.Unmarshal(partialSearchResult.Hits[i], &testHits)
-//         if err != nil {
-//             panic(err)
-//         }
-//         fmt.Println(testHits.IDs)
-//         fmt.Println(testHits.Scores)
-//     }
-// }
 
 func (t *searchTask) TraceCtx() context.Context {
 	return t.ctx
