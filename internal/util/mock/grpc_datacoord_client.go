@@ -144,3 +144,11 @@ func (m *GrpcDataCoordClient) ReleaseSegmentLock(ctx context.Context, req *datap
 func (m *GrpcDataCoordClient) SaveImportSegment(ctx context.Context, in *datapb.SaveImportSegmentRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }
+
+func (m *GrpcDataCoordClient) CompleteBulkLoad(context.Context, *datapb.CompleteBulkLoadRequest, ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
+func (m *GrpcDataCoordClient) UnsetIsImportingState(context.Context, *datapb.UnsetIsImportingStateRequest, ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}

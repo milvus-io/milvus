@@ -118,6 +118,14 @@ func (coord *DataCoordMock) SaveImportSegment(ctx context.Context, req *datapb.S
 	panic("implement me")
 }
 
+func (coord *DataCoordMock) CompleteBulkLoad(context.Context, *datapb.CompleteBulkLoadRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
+func (coord *DataCoordMock) UnsetIsImportingState(context.Context, *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
 func (coord *DataCoordMock) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error) {
 	panic("implement me")
 }

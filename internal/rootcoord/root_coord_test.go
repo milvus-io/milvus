@@ -809,6 +809,8 @@ func TestRootCoord_Base(t *testing.T) {
 	coreFactory := dependency.NewDefaultFactory(true)
 	Params.Init()
 	Params.RootCoordCfg.DmlChannelNum = TestDMLChannelNum
+	Params.RootCoordCfg.ImportIndexCheckInterval = 0.1
+	Params.RootCoordCfg.ImportIndexWaitLimit = 0.2
 	core, err := NewCore(context.WithValue(ctx, ctxKey{}, ""), coreFactory)
 	assert.NoError(t, err)
 	randVal := rand.Int()
@@ -1568,21 +1570,6 @@ func TestRootCoord_Base(t *testing.T) {
 		resp, err := core.ReportImport(context.WithValue(ctx, ctxKey{}, ""), nil)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UpdateImportTaskFailure, resp.ErrorCode)
-	})
-
-	wg.Add(1)
-	t.Run("report import with alloc seg state", func(t *testing.T) {
-		defer wg.Done()
-		req := &rootcoordpb.ImportResult{
-			TaskId:   1,
-			RowCount: 100,
-			Segments: []int64{1000, 1001, 1002},
-			State:    commonpb.ImportState_ImportAllocSegment,
-		}
-		resp, err := core.ReportImport(context.WithValue(ctx, ctxKey{}, ""), req)
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-		time.Sleep(500 * time.Millisecond)
 	})
 
 	wg.Add(1)

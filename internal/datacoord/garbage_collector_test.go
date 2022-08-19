@@ -245,14 +245,13 @@ func Test_garbageCollector_scan(t *testing.T) {
 			checkInterval:    time.Minute * 30,
 			missingTolerance: time.Hour * 24,
 			dropTolerance:    0,
-			bucketName:       bucketName,
 			rootPath:         rootPath,
 		})
 		gc.clearEtcd()
-		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, insertLogPrefix), inserts[1:])
-		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, statsLogPrefix), stats[1:])
-		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, deltaLogPrefix), delta[1:])
-		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, `indexes`), others)
+		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, insertLogPrefix), inserts[1:])
+		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, statsLogPrefix), stats[1:])
+		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, deltaLogPrefix), delta[1:])
+		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, `indexes`), others)
 
 		gc.close()
 
@@ -262,7 +261,6 @@ func Test_garbageCollector_scan(t *testing.T) {
 			checkInterval:    time.Minute * 30,
 			missingTolerance: time.Hour * 24,
 			dropTolerance:    0,
-			bucketName:       bucketName,
 			rootPath:         rootPath,
 		})
 		gc2.clearEtcd()

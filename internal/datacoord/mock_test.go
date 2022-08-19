@@ -261,6 +261,10 @@ func (m *mockRootCoordService) GetImportFailedSegmentIDs(ctx context.Context, re
 	}, nil
 }
 
+func (m *mockRootCoordService) CheckSegmentIndexReady(context.Context, *internalpb.CheckSegmentIndexReadyRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
 func (m *mockRootCoordService) CreateAlias(ctx context.Context, req *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
 	panic("implement me")
 }

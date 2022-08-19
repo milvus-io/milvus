@@ -776,3 +776,16 @@ func (c *Client) GetImportFailedSegmentIDs(ctx context.Context, req *internalpb.
 	}
 	return ret.(*internalpb.GetImportFailedSegmentIDsResponse), err
 }
+
+func (c *Client) CheckSegmentIndexReady(ctx context.Context, req *internalpb.CheckSegmentIndexReadyRequest) (*commonpb.Status, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.(rootcoordpb.RootCoordClient).CheckSegmentIndexReady(ctx, req)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return ret.(*commonpb.Status), err
+}

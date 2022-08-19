@@ -112,9 +112,6 @@ func TestVerifyResponse(t *testing.T) {
 }
 
 func Test_getCompactTime(t *testing.T) {
-	Params.Init()
-	Params.CommonCfg.RetentionDuration = 43200 // 5 days
-
 	tFixed := time.Date(2021, 11, 15, 0, 0, 0, 0, time.Local)
 	tBefore := tFixed.Add(-time.Duration(Params.CommonCfg.RetentionDuration) * time.Second)
 

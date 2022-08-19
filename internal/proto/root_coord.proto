@@ -138,6 +138,7 @@ service RootCoord {
 
     // TODO: move import manager to datacoord to remove this rpc
     rpc GetImportFailedSegmentIDs(internal.GetImportFailedSegmentIDsRequest) returns (internal.GetImportFailedSegmentIDsResponse) {}
+    rpc CheckSegmentIndexReady(internal.CheckSegmentIndexReadyRequest) returns (common.Status) {}
 }
 
 message AllocTimestampRequest {

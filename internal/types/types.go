@@ -292,6 +292,12 @@ type DataCoord interface {
 	// SaveImportSegment saves the import segment binlog paths data and then looks for the right DataNode to add the
 	// segment to that DataNode.
 	SaveImportSegment(ctx context.Context, req *datapb.SaveImportSegmentRequest) (*commonpb.Status, error)
+
+	// CompleteBulkLoad is the DataCoord side work for a complete bulk load operation.
+	CompleteBulkLoad(ctx context.Context, req *datapb.CompleteBulkLoadRequest) (*commonpb.Status, error)
+
+	// UnsetIsImportingState unsets the `isImport` state of the given segments so that they can get compacted normally.
+	UnsetIsImportingState(ctx context.Context, req *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error)
 }
 
 // DataCoordComponent defines the interface of DataCoord component.
@@ -689,6 +695,8 @@ type RootCoord interface {
 	GetCredential(ctx context.Context, req *rootcoordpb.GetCredentialRequest) (*rootcoordpb.GetCredentialResponse, error)
 	// GetImportFailedSegmentIDs get import failed segment IDs
 	GetImportFailedSegmentIDs(ctx context.Context, req *internalpb.GetImportFailedSegmentIDsRequest) (*internalpb.GetImportFailedSegmentIDsResponse, error)
+	// CheckSegmentIndexReady checks if indexes have been successfully built on the given segments.
+	CheckSegmentIndexReady(ctx context.Context, req *internalpb.CheckSegmentIndexReadyRequest) (*commonpb.Status, error)
 }
 
 // RootCoordComponent is used by grpc server of RootCoord
@@ -1168,6 +1176,9 @@ type ProxyComponent interface {
 	// the `tasks` in `ImportResponse` return an id list of tasks.
 	// error is always nil
 	Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error)
+
+	// CompleteImport implements the second phase of a bulk load operation.
+	CompleteImport(ctx context.Context, req *milvuspb.CompleteImportRequest) (*commonpb.Status, error)
 
 	// Check import task state from datanode
 	//

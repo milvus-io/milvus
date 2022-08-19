@@ -765,6 +765,7 @@ func (mt *MetaTable) AddIndex(segIdxInfo *pb.SegmentIndexInfo) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
+	log.Info("adding segment index info", zap.Any("segment index info", segIdxInfo))
 	if idxInfo, ok := mt.indexID2Meta[segIdxInfo.IndexID]; !ok || idxInfo.GetDeleted() {
 		log.Error("index id not found or has been deleted", zap.Int64("indexID", segIdxInfo.IndexID))
 		return fmt.Errorf("index id = %d not found", segIdxInfo.IndexID)

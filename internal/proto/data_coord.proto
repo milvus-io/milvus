@@ -59,6 +59,8 @@ service DataCoord {
   rpc ReleaseSegmentLock(ReleaseSegmentLockRequest) returns (common.Status) {}
 
   rpc SaveImportSegment(SaveImportSegmentRequest) returns(common.Status) {}
+  rpc CompleteBulkLoad(CompleteBulkLoadRequest) returns(common.Status) {}
+  rpc UnsetIsImportingState(UnsetIsImportingStateRequest) returns(common.Status) {}
 }
 
 service DataNode {
@@ -562,6 +564,18 @@ message SaveImportSegmentRequest {
   int64 partition_id = 5;
   int64 row_num = 6;
   SaveBinlogPathsRequest save_binlog_path_req = 7;
+}
+
+message CompleteBulkLoadRequest {
+  common.MsgBase base = 1;
+  int64 task_id = 2;                    // ID of the import task that needs to be completed.
+  int64 collection_id = 3;              // Collection ID of the import task.
+  repeated int64 segment_ids = 4;       // Segment IDs of the bulk load task.
+}
+
+message UnsetIsImportingStateRequest {
+  common.MsgBase base = 1;
+  repeated int64 segment_ids = 2;       // IDs of segments whose `isImport` states need to be unset.
 }
 
 message SegmentReferenceLock {

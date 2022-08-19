@@ -400,6 +400,8 @@ type rootCoordConfig struct {
 	MinSegmentSizeToEnableIndex int64
 	ImportTaskExpiration        float64
 	ImportTaskRetention         float64
+	ImportIndexCheckInterval    float64
+	ImportIndexWaitLimit        float64
 
 	// --- ETCD Path ---
 	ImportTaskSubPath string
@@ -416,6 +418,8 @@ func (p *rootCoordConfig) init(base *BaseTable) {
 	p.ImportTaskExpiration = p.Base.ParseFloatWithDefault("rootCoord.importTaskExpiration", 15*60)
 	p.ImportTaskRetention = p.Base.ParseFloatWithDefault("rootCoord.importTaskRetention", 24*60*60)
 	p.ImportTaskSubPath = "importtask"
+	p.ImportIndexCheckInterval = p.Base.ParseFloatWithDefault("rootCoord.importIndexCheckInterval", 10)
+	p.ImportIndexWaitLimit = p.Base.ParseFloatWithDefault("rootCoord.importIndexWaitLimit", 10*60)
 }
 
 ///////////////////////////////////////////////////////////////////////////////

@@ -152,6 +152,9 @@ type Core struct {
 	// Seals segments in collection cID, so they can get flushed later.
 	CallFlushOnCollection func(ctx context.Context, cID int64, segIDs []int64) error
 
+	// Calls DataCoord's UnsetIsImportState call.
+	CallUnsetIsImportState func(taskID int64) error
+
 	//Proxy manager
 	proxyManager *proxyManager
 
@@ -387,6 +390,11 @@ func (c *Core) recycleDroppedIndex() {
 }
 
 func (c *Core) createIndexForSegment(ctx context.Context, collID, partID, segID UniqueID, numRows int64, binlogs []*datapb.FieldBinlog) error {
+	log.Info("creating index for segment",
+		zap.Int64("collection ID", collID),
+		zap.Int64("partition ID", partID),
+		zap.Int64("segment ID", segID),
+		zap.Int64("# of rows", numRows))
 	collID2Meta, _, indexID2Meta := c.MetaTable.dupMeta()
 	collMeta, ok := collID2Meta[collID]
 	if !ok {
@@ -444,6 +452,7 @@ func (c *Core) createIndexForSegment(ctx context.Context, collID, partID, segID 
 		}
 		// if buildID == 0, means it's no need to build index.
 		if buildID != 0 {
+			log.Debug("no need to build index for segment", zap.Int64("segment ID", segID))
 			segIndexInfo.BuildID = buildID
 			segIndexInfo.EnableIndex = true
 		}
@@ -462,6 +471,11 @@ func (c *Core) createIndexForSegment(ctx context.Context, collID, partID, segID 
 			return err
 		}
 	}
+	log.Info("successfully build index on segment",
+		zap.Int64("collection ID", collID),
+		zap.Int64("partition ID", partID),
+		zap.Int64("segment ID", segID),
+		zap.Int64("# of rows", numRows))
 	return nil
 }
 
@@ -758,6 +772,27 @@ func (c *Core) SetDataCoord(ctx context.Context, s types.DataCoord) error {
 		return nil
 	}
 
+	c.CallUnsetIsImportState = func(taskID int64) error {
+		getImportResp, err := c.GetImportState(c.ctx, &milvuspb.GetImportStateRequest{
+			Task: taskID,
+		})
+		if err != nil {
+			log.Warn(fmt.Sprintf("an error occurred while completing bulk load %s", err.Error()))
+			return err
+		}
+		if getImportResp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+			log.Warn(fmt.Sprintf("an error occurred while completing bulk load %s", getImportResp.GetStatus().GetReason()))
+			return errors.New(getImportResp.GetStatus().GetReason())
+		}
+		// Ignoring return value as it will always succeed.
+		log.Debug("calling UnsetIsImportingState on DataCoord",
+			zap.Int64s("segment IDs", getImportResp.GetSegmentIds()))
+		s.UnsetIsImportingState(ctx, &datapb.UnsetIsImportingStateRequest{
+			SegmentIds: getImportResp.GetSegmentIds(),
+		})
+		return nil
+	}
+
 	return nil
 }
 
@@ -839,7 +874,7 @@ func (c *Core) SetIndexCoord(s types.IndexCoord) error {
 		log.Debug("got index states", zap.String("get index state result", res.String()))
 		if res.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 			log.Error("Get index states failed.",
-				zap.String("error_code", res.GetStatus().GetErrorCode().String()),
+				zap.String("error code", res.GetStatus().GetErrorCode().String()),
 				zap.String("reason", res.GetStatus().GetReason()))
 			return nil, fmt.Errorf(res.GetStatus().GetErrorCode().String())
 		}
@@ -1149,6 +1184,7 @@ func (c *Core) Init() error {
 			c.impTaskKv,
 			c.IDAllocator,
 			c.CallImportService,
+			c.CallUnsetIsImportState,
 			c.getCollectionName,
 		)
 		c.importManager.init(c.ctx)
@@ -2413,6 +2449,20 @@ func (c *Core) ReportImport(ctx context.Context, ir *rootcoordpb.ImportResult) (
 	if code, ok := c.checkHealthy(); !ok {
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+internalpb.StateCode_name[int32(code)]), nil
 	}
+	// If setting ImportState_ImportCompleted, simply update the state and return directly.
+	if ir.GetState() == commonpb.ImportState_ImportCompleted {
+		if err := c.importManager.setCompleteImportState(ir.GetTaskId()); err != nil {
+			errMsg := "failed to set import task as ImportState_ImportCompleted"
+			log.Error(errMsg, zap.Error(err))
+			return &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    fmt.Sprintf("%s %s", errMsg, err.Error()),
+			}, nil
+		}
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		}, nil
+	}
 	// Upon receiving ReportImport request, update the related task's state in task store.
 	ti, err := c.importManager.updateTaskState(ir)
 	if err != nil {
@@ -2658,4 +2708,185 @@ func (c *Core) GetImportFailedSegmentIDs(ctx context.Context, req *internalpb.Ge
 		Status:     succStatus(),
 		SegmentIDs: segmentIds,
 	}, nil
+}
+
+func (c *Core) CheckSegmentIndexReady(ctx context.Context, req *internalpb.CheckSegmentIndexReadyRequest) (*commonpb.Status, error) {
+	log.Info("start checking segments index ready states",
+		zap.Int64("task ID", req.GetTaskID()),
+		zap.Int64("col ID", req.GetColID()),
+		zap.Int64s("segment IDs", req.GetSegIDs()))
+	// Look up collection name on collection ID.
+	var colName string
+	var colMeta *etcdpb.CollectionInfo
+	var err error
+	if colMeta, err = c.MetaTable.GetCollectionByID(req.GetColID(), 0); err != nil {
+		log.Error("failed to get collection name",
+			zap.Int64("collection ID", req.GetColID()),
+			zap.Error(err))
+		// In some unexpected cases, user drop collection when bulk load task still in pending list, the datanode become idle.
+		// If we directly return, the pending tasks will remain in pending list. So we call resendTaskFunc() to push next pending task to idle datanode.
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_CollectionNameNotFound,
+			Reason:    "failed to get collection name for collection ID" + strconv.FormatInt(req.GetColID(), 10),
+		}, nil
+	}
+	colName = colMeta.GetSchema().GetName()
+	// Check if collection has any indexed fields. If so, start a loop to check segments' index states.
+	if colMeta, err := c.MetaTable.GetCollectionByID(req.GetColID(), 0); err != nil {
+		log.Error("failed to find meta for collection",
+			zap.Int64("collection ID", req.GetColID()),
+			zap.Error(err))
+	} else if len(colMeta.GetFieldIndexes()) == 0 {
+		log.Info("no index field found for collection", zap.Int64("collection ID", req.GetColID()))
+	} else {
+		log.Info("start checking index state", zap.Int64("collection ID", req.GetColID()))
+		ticker := time.NewTicker(time.Duration(Params.RootCoordCfg.ImportIndexCheckInterval*1000) * time.Millisecond)
+		defer ticker.Stop()
+		expireTicker := time.NewTicker(time.Duration(Params.RootCoordCfg.ImportIndexWaitLimit*1000) * time.Millisecond)
+		defer expireTicker.Stop()
+		for {
+			select {
+			case <-c.ctx.Done():
+				log.Info("(in check segment index ready loop) context done, exiting CheckSegmentIndexReady loop")
+				return &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UnexpectedError,
+					Reason:    "check complete index context done",
+				}, nil
+			case <-ticker.C:
+				if done, err := c.countCompleteIndex(ctx, colName, req.GetColID(), req.GetSegIDs()); err == nil && done {
+					log.Info("(in check segment index ready loop) indexes are built or no index needed",
+						zap.Int64("task ID", req.GetTaskID()))
+					return &commonpb.Status{
+						ErrorCode: commonpb.ErrorCode_Success,
+					}, nil
+				} else if err != nil {
+					log.Error("(in check segment index ready loop) an error occurs",
+						zap.Error(err))
+				}
+			case <-expireTicker.C:
+				log.Warn("(in check segment index ready loop) indexing is taken too long",
+					zap.Int64("task ID", req.GetTaskID()),
+					zap.Int64("collection ID", req.GetColID()),
+					zap.Int64s("segment IDs", req.GetSegIDs()))
+				return &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UnexpectedError,
+					Reason:    "index building is taking too long",
+				}, nil
+			}
+		}
+	}
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		Reason:    "unexpected return when checking segment index ready states",
+	}, nil
+}
+
+// CountCompleteIndex checks indexing status of the given segments.
+// It returns an error if error occurs. It also returns a boolean indicating whether all indexes are built on the given
+// segments.
+func (c *Core) countCompleteIndex(ctx context.Context, collectionName string, collectionID UniqueID,
+	allSegmentIDs []UniqueID) (bool, error) {
+	// Note: Index name is always Params.CommonCfg.DefaultIndexName in current Milvus designs as of today.
+	indexName := Params.CommonCfg.DefaultIndexName
+
+	// Retrieve index status and detailed index information.
+	describeIndexReq := &milvuspb.DescribeIndexRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_DescribeIndex,
+		},
+		CollectionName: collectionName,
+		IndexName:      indexName,
+	}
+	indexDescriptionResp, err := c.DescribeIndex(ctx, describeIndexReq)
+	if err != nil {
+		return false, err
+	}
+	if len(indexDescriptionResp.GetIndexDescriptions()) == 0 {
+		log.Info("no index needed for collection, consider indexing done",
+			zap.Int64("collection ID", collectionID))
+		return true, nil
+	}
+	log.Debug("got index description",
+		zap.Any("index description", indexDescriptionResp))
+
+	// Check if the target index name exists.
+	matchIndexID := int64(-1)
+	foundIndexID := false
+	for _, desc := range indexDescriptionResp.GetIndexDescriptions() {
+		if desc.GetIndexName() == indexName {
+			matchIndexID = desc.GetIndexID()
+			foundIndexID = true
+			break
+		}
+	}
+	if !foundIndexID {
+		return false, fmt.Errorf("no index is created")
+	}
+	log.Debug("found match index ID",
+		zap.Int64("match index ID", matchIndexID))
+
+	getIndexStatesRequest := &indexpb.GetIndexStatesRequest{
+		IndexBuildIDs: make([]UniqueID, 0),
+	}
+
+	// Fetch index build IDs from segments.
+	var seg2Check []UniqueID
+	for _, segmentID := range allSegmentIDs {
+		describeSegmentRequest := &milvuspb.DescribeSegmentRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_DescribeSegment,
+			},
+			CollectionID: collectionID,
+			SegmentID:    segmentID,
+		}
+		segmentDesc, err := c.DescribeSegment(ctx, describeSegmentRequest)
+		if err != nil {
+			log.Error("failed to describe segment", zap.Error(err))
+			return true, nil
+		}
+		if segmentDesc.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+			// Describe failed, since the segment could get compacted, simply log and ignore the error.
+			log.Error("failed to describe segment",
+				zap.Int64("collection ID", collectionID),
+				zap.Int64("segment ID", segmentID),
+				zap.String("error", segmentDesc.GetStatus().GetReason()))
+		}
+		if segmentDesc.GetIndexID() == matchIndexID {
+			if segmentDesc.GetEnableIndex() {
+				seg2Check = append(seg2Check, segmentID)
+				getIndexStatesRequest.IndexBuildIDs = append(getIndexStatesRequest.GetIndexBuildIDs(), segmentDesc.GetBuildID())
+			}
+		}
+	}
+	if len(getIndexStatesRequest.GetIndexBuildIDs()) == 0 {
+		log.Info("no index build IDs returned, perhaps no index is needed",
+			zap.String("collection name", collectionName),
+			zap.Int64("collection ID", collectionID))
+		//return true, nil
+	}
+
+	log.Debug("working on GetIndexState",
+		zap.Int("# of IndexBuildIDs", len(getIndexStatesRequest.GetIndexBuildIDs())))
+
+	states, err := c.CallGetIndexStatesService(ctx, getIndexStatesRequest.GetIndexBuildIDs())
+	if err != nil {
+		log.Error("failed to get index state in checkSegmentIndexStates", zap.Error(err))
+		return false, err
+	}
+
+	// Count the # of segments with finished index.
+	ct := 0
+	for _, s := range states {
+		if s.State == commonpb.IndexState_Finished {
+			ct++
+		}
+	}
+	log.Info("segment indexing state checked",
+		zap.Int64s("segments checked", seg2Check),
+		zap.Int("# of checked segment", len(seg2Check)),
+		zap.Int("# of segments with complete index", ct),
+		zap.String("collection name", collectionName),
+		zap.Int64("collection ID", collectionID),
+	)
+	return len(seg2Check) == ct, nil
 }

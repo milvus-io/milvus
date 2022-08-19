@@ -455,13 +455,13 @@ enum ImportState : int {
   ImportFailed = 1,
   ImportStarted = 2,
   ImportPersisted = 5,
-  ImportAllocSegment = 10,
+  ImportCompleted = 6,
   ImportState_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
   ImportState_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
 };
 bool ImportState_IsValid(int value);
 constexpr ImportState ImportState_MIN = ImportPending;
-constexpr ImportState ImportState_MAX = ImportAllocSegment;
+constexpr ImportState ImportState_MAX = ImportCompleted;
 constexpr int ImportState_ARRAYSIZE = ImportState_MAX + 1;
 
 const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* ImportState_descriptor();

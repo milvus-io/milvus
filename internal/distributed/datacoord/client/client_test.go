@@ -135,6 +135,9 @@ func Test_NewClient(t *testing.T) {
 
 		r27, err := client.SaveImportSegment(ctx, nil)
 		retCheck(retNotNil, r27, err)
+
+		r28, err := client.CompleteCompaction(ctx, nil)
+		retCheck(retNotNil, r28, err)
 	}
 
 	client.grpcClient = &mock.GRPCClientBase{

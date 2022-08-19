@@ -31,36 +31,38 @@ import (
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type MockDataCoord struct {
-	states               *internalpb.ComponentStates
-	status               *commonpb.Status
-	err                  error
-	initErr              error
-	startErr             error
-	stopErr              error
-	regErr               error
-	strResp              *milvuspb.StringResponse
-	infoResp             *datapb.GetSegmentInfoResponse
-	flushResp            *datapb.FlushResponse
-	assignResp           *datapb.AssignSegmentIDResponse
-	segStateResp         *datapb.GetSegmentStatesResponse
-	binResp              *datapb.GetInsertBinlogPathsResponse
-	colStatResp          *datapb.GetCollectionStatisticsResponse
-	partStatResp         *datapb.GetPartitionStatisticsResponse
-	recoverResp          *datapb.GetRecoveryInfoResponse
-	flushSegResp         *datapb.GetFlushedSegmentsResponse
-	metricResp           *milvuspb.GetMetricsResponse
-	compactionStateResp  *milvuspb.GetCompactionStateResponse
-	manualCompactionResp *milvuspb.ManualCompactionResponse
-	compactionPlansResp  *milvuspb.GetCompactionPlansResponse
-	watchChannelsResp    *datapb.WatchChannelsResponse
-	getFlushStateResp    *milvuspb.GetFlushStateResponse
-	dropVChanResp        *datapb.DropVirtualChannelResponse
-	setSegmentStateResp  *datapb.SetSegmentStateResponse
-	importResp           *datapb.ImportTaskResponse
-	updateSegStatResp    *commonpb.Status
-	acquireSegLockResp   *commonpb.Status
-	releaseSegLockResp   *commonpb.Status
-	addSegmentResp       *commonpb.Status
+	states                    *internalpb.ComponentStates
+	status                    *commonpb.Status
+	err                       error
+	initErr                   error
+	startErr                  error
+	stopErr                   error
+	regErr                    error
+	strResp                   *milvuspb.StringResponse
+	infoResp                  *datapb.GetSegmentInfoResponse
+	flushResp                 *datapb.FlushResponse
+	assignResp                *datapb.AssignSegmentIDResponse
+	segStateResp              *datapb.GetSegmentStatesResponse
+	binResp                   *datapb.GetInsertBinlogPathsResponse
+	colStatResp               *datapb.GetCollectionStatisticsResponse
+	partStatResp              *datapb.GetPartitionStatisticsResponse
+	recoverResp               *datapb.GetRecoveryInfoResponse
+	flushSegResp              *datapb.GetFlushedSegmentsResponse
+	metricResp                *milvuspb.GetMetricsResponse
+	compactionStateResp       *milvuspb.GetCompactionStateResponse
+	manualCompactionResp      *milvuspb.ManualCompactionResponse
+	compactionPlansResp       *milvuspb.GetCompactionPlansResponse
+	watchChannelsResp         *datapb.WatchChannelsResponse
+	getFlushStateResp         *milvuspb.GetFlushStateResponse
+	dropVChanResp             *datapb.DropVirtualChannelResponse
+	setSegmentStateResp       *datapb.SetSegmentStateResponse
+	importResp                *datapb.ImportTaskResponse
+	updateSegStatResp         *commonpb.Status
+	acquireSegLockResp        *commonpb.Status
+	releaseSegLockResp        *commonpb.Status
+	addSegmentResp            *commonpb.Status
+	completeBulkLoadResp      *commonpb.Status
+	unsetIsImportingStateResp *commonpb.Status
 }
 
 func (m *MockDataCoord) Init() error {
@@ -192,6 +194,14 @@ func (m *MockDataCoord) ReleaseSegmentLock(ctx context.Context, req *datapb.Rele
 
 func (m *MockDataCoord) SaveImportSegment(ctx context.Context, req *datapb.SaveImportSegmentRequest) (*commonpb.Status, error) {
 	return m.addSegmentResp, m.err
+}
+
+func (m *MockDataCoord) CompleteBulkLoad(context.Context, *datapb.CompleteBulkLoadRequest) (*commonpb.Status, error) {
+	return m.completeBulkLoadResp, m.err
+}
+
+func (m *MockDataCoord) UnsetIsImportingState(context.Context, *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error) {
+	return m.unsetIsImportingStateResp, m.err
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -448,13 +458,35 @@ func Test_NewServer(t *testing.T) {
 		assert.NotNil(t, resp)
 	})
 
-	t.Run("add segment", func(t *testing.T) {
+	t.Run("save import segment", func(t *testing.T) {
 		server.dataCoord = &MockDataCoord{
 			addSegmentResp: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_Success,
 			},
 		}
 		resp, err := server.SaveImportSegment(ctx, nil)
+		assert.Nil(t, err)
+		assert.NotNil(t, resp)
+	})
+
+	t.Run("complete bulk load", func(t *testing.T) {
+		server.dataCoord = &MockDataCoord{
+			completeBulkLoadResp: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+		}
+		resp, err := server.CompleteBulkLoad(ctx, nil)
+		assert.Nil(t, err)
+		assert.NotNil(t, resp)
+	})
+
+	t.Run("unset isImporting state", func(t *testing.T) {
+		server.dataCoord = &MockDataCoord{
+			unsetIsImportingStateResp: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+		}
+		resp, err := server.UnsetIsImportingState(ctx, nil)
 		assert.Nil(t, err)
 		assert.NotNil(t, resp)
 	})

@@ -24,19 +24,22 @@ import (
 	"sync/atomic"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/trace"
+	"go.uber.org/zap"
 )
+
+var ImportFlushedCheckInterval = 5 * time.Second
+var ImportFlushedWaitLimit = 2 * time.Minute
 
 // checks whether server in Healthy State
 func (s *Server) isClosed() bool {
@@ -398,7 +401,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		s.segmentManager.DropSegment(ctx, req.SegmentID)
 		s.flushCh <- req.SegmentID
 
-		if Params.DataCoordCfg.EnableCompaction {
+		if !req.Importing && Params.DataCoordCfg.EnableCompaction {
 			cctx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
 			defer cancel()
 
@@ -1205,6 +1208,56 @@ func (s *Server) SaveImportSegment(ctx context.Context, req *datapb.SaveImportSe
 		}, nil
 	}
 	log.Info("succeed to add segment", zap.Int64("DataNode ID", nodeID), zap.Any("add segment req", req))
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}, nil
+}
+
+func (s *Server) CompleteBulkLoad(ctx context.Context, req *datapb.CompleteBulkLoadRequest) (*commonpb.Status, error) {
+	log.Info("received CompleteBulkLoad request", zap.Int64("task ID", req.GetTaskId()))
+	// Check index status.
+	checkIndexStatus, err := s.rootCoordClient.CheckSegmentIndexReady(ctx, &internalpb.CheckSegmentIndexReadyRequest{
+		TaskID: req.GetTaskId(),
+		ColID:  req.GetCollectionId(),
+		SegIDs: req.GetSegmentIds(),
+	})
+	if err != nil {
+		log.Warn(fmt.Sprintf("failed to wait for all index build to complete %s, but continue anyway", err.Error()))
+	}
+	if checkIndexStatus.ErrorCode != commonpb.ErrorCode_Success {
+		log.Warn(fmt.Sprintf("failed to wait for all index build to complete %s, but continue anyway", checkIndexStatus.Reason))
+	}
+
+	// Update import task state to `ImportState_ImportCompleted`.
+	// Retry on errors.
+	err = retry.Do(s.ctx, func() error {
+		status, err := s.rootCoordClient.ReportImport(ctx, &rootcoordpb.ImportResult{
+			TaskId: req.GetTaskId(),
+			State:  commonpb.ImportState_ImportCompleted,
+		})
+		return VerifyResponse(status, err)
+	}, retry.Attempts(20))
+	if err != nil {
+		log.Error("failed to report import, we are not able to update the import task state",
+			zap.Int64("task ID", req.GetTaskId()),
+			zap.Error(err))
+	}
+	// Remove the `isImport` states of these segments, no matter index building check succeeded, timed up or failed.
+	s.UnsetIsImportingState(ctx, &datapb.UnsetIsImportingStateRequest{
+		SegmentIds: req.GetSegmentIds(),
+	})
+
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}, nil
+}
+
+// UnsetIsImportingState unsets the isImporting states of the given segments.
+func (s *Server) UnsetIsImportingState(ctx context.Context, req *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error) {
+	log.Info("unsetting isImport state of segments", zap.Int64s("segments", req.GetSegmentIds()))
+	for _, segID := range req.GetSegmentIds() {
+		s.meta.SetSegmentIsImporting(segID, false)
+	}
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}, nil

@@ -84,6 +84,10 @@ func (s *Server) GetImportFailedSegmentIDs(ctx context.Context, request *interna
 	return s.rootCoord.GetImportFailedSegmentIDs(ctx, request)
 }
 
+func (s *Server) CheckSegmentIndexReady(ctx context.Context, req *internalpb.CheckSegmentIndexReadyRequest) (*commonpb.Status, error) {
+	return s.rootCoord.CheckSegmentIndexReady(ctx, req)
+}
+
 // CreateAlias creates an alias for specified collection.
 func (s *Server) CreateAlias(ctx context.Context, request *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
 	return s.rootCoord.CreateAlias(ctx, request)

@@ -300,6 +300,13 @@ message GetImportFailedSegmentIDsRequest{
   common.MsgBase base = 1;
 }
 
+message CheckSegmentIndexReadyRequest{
+  common.MsgBase base = 1;
+  int64 taskID = 2;
+  int64 colID = 3;
+  repeated int64 segIDs = 4;
+}
+
 message GetImportFailedSegmentIDsResponse{
   common.Status status = 1;
   repeated int64 segmentIDs = 2;

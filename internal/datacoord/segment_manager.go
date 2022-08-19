@@ -340,7 +340,12 @@ func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID Unique
 		MaxRowNum:      int64(maxNumOfRows),
 		LastExpireTime: 0,
 	}
-	segment := NewSegmentInfo(segmentInfo)
+	var segment *SegmentInfo
+	if segmentState == commonpb.SegmentState_Importing {
+		segment = NewImportSegmentInfo(segmentInfo)
+	} else {
+		segment = NewSegmentInfo(segmentInfo)
+	}
 	if err := s.meta.AddSegment(segment); err != nil {
 		return nil, err
 	}

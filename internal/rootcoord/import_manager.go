@@ -81,29 +81,32 @@ type importManager struct {
 
 	startOnce sync.Once
 
-	idAllocator       func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error)
-	callImportService func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error)
-	getCollectionName func(collID, partitionID typeutil.UniqueID) (string, string, error)
+	idAllocator            func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error)
+	callImportService      func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error)
+	getCollectionName      func(collID, partitionID typeutil.UniqueID) (string, string, error)
+	callUnsetIsImportState func(taskID int64) error
 }
 
 // newImportManager helper function to create a importManager
 func newImportManager(ctx context.Context, client kv.MetaKv,
 	idAlloc func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error),
 	importService func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error),
+	unsetIsImportState func(taskID int64) error,
 	getCollectionName func(collID, partitionID typeutil.UniqueID) (string, string, error)) *importManager {
 	mgr := &importManager{
-		ctx:               ctx,
-		taskStore:         client,
-		pendingTasks:      make([]*datapb.ImportTaskInfo, 0, MaxPendingCount), // currently task queue max size is 32
-		workingTasks:      make(map[int64]*datapb.ImportTaskInfo),
-		busyNodes:         make(map[int64]bool),
-		pendingLock:       sync.RWMutex{},
-		workingLock:       sync.RWMutex{},
-		busyNodesLock:     sync.RWMutex{},
-		lastReqID:         0,
-		idAllocator:       idAlloc,
-		callImportService: importService,
-		getCollectionName: getCollectionName,
+		ctx:                    ctx,
+		taskStore:              client,
+		pendingTasks:           make([]*datapb.ImportTaskInfo, 0, MaxPendingCount), // currently task queue max size is 32
+		workingTasks:           make(map[int64]*datapb.ImportTaskInfo),
+		busyNodes:              make(map[int64]bool),
+		pendingLock:            sync.RWMutex{},
+		workingLock:            sync.RWMutex{},
+		busyNodesLock:          sync.RWMutex{},
+		lastReqID:              0,
+		idAllocator:            idAlloc,
+		callImportService:      importService,
+		callUnsetIsImportState: unsetIsImportState,
+		getCollectionName:      getCollectionName,
 	}
 	return mgr
 }
@@ -454,6 +457,37 @@ func (m *importManager) updateTaskState(ir *rootcoordpb.ImportResult) (*datapb.I
 	return v, nil
 }
 
+// setCompleteImportState set the task state as `ImportState_ImportCompleted`.
+func (m *importManager) setCompleteImportState(taskID int64) error {
+	log.Debug("trying to set import task as ImportState_ImportCompleted", zap.Int64("taskID", taskID))
+
+	found := false
+	var v *datapb.ImportTaskInfo
+	m.workingLock.Lock()
+	defer m.workingLock.Unlock()
+	ok := false
+	if v, ok = m.workingTasks[taskID]; ok {
+		// If the task has already been marked failed. Prevent further state updating and return an error.
+		if v.GetState().GetStateCode() == commonpb.ImportState_ImportFailed {
+			return errors.New("trying to complete an already failed task " + strconv.FormatInt(taskID, 10))
+		}
+		found = true
+		// Meta persist should be done before memory objs change.
+		toPersistImportTaskInfo := cloneImportTaskInfo(v)
+		toPersistImportTaskInfo.State.StateCode = commonpb.ImportState_ImportCompleted
+		// Update task in task store.
+		if err := m.persistTaskInfo(toPersistImportTaskInfo); err != nil {
+			return err
+		}
+		m.workingTasks[taskID] = toPersistImportTaskInfo
+	}
+
+	if !found {
+		return errors.New("failed to complete import task, ID not found: " + strconv.FormatInt(taskID, 10))
+	}
+	return nil
+}
+
 func (m *importManager) getCollectionPartitionName(task *datapb.ImportTaskInfo, resp *milvuspb.GetImportStateResponse) {
 	if m.getCollectionName != nil {
 		colName, partName, err := m.getCollectionName(task.GetCollectionId(), task.GetPartitionId())
@@ -464,37 +498,6 @@ func (m *importManager) getCollectionPartitionName(task *datapb.ImportTaskInfo, 
 			log.Error("failed to getCollectionName", zap.Int64("collection_id", task.GetCollectionId()), zap.Int64("partition_id", task.GetPartitionId()), zap.Error(err))
 		}
 	}
-}
-
-// appendTaskSegments updates the task's segment lists by adding `segIDs` to it.
-func (m *importManager) appendTaskSegments(taskID int64, segIDs []int64) error {
-	log.Debug("import manager appending task segments",
-		zap.Int64("task ID", taskID),
-		zap.Int64s("segment ID", segIDs))
-
-	var v *datapb.ImportTaskInfo
-	m.workingLock.Lock()
-	defer m.workingLock.Unlock()
-	ok := false
-	if v, ok = m.workingTasks[taskID]; ok {
-		// Meta persist should be done before memory objs change.
-		toPersistImportTaskInfo := cloneImportTaskInfo(v)
-		toPersistImportTaskInfo.State.Segments = append(v.GetState().GetSegments(), segIDs...)
-		// Update task in task store.
-		if err := m.persistTaskInfo(v); err != nil {
-			log.Error("failed to update import task",
-				zap.Int64("task ID", v.GetId()),
-				zap.Error(err))
-			return err
-		}
-		m.workingTasks[taskID] = toPersistImportTaskInfo
-	}
-
-	if !ok {
-		log.Debug("import manager appending task segments failed", zap.Int64("task ID", taskID))
-		return errors.New("failed to update import task, ID not found: " + strconv.FormatInt(taskID, 10))
-	}
-	return nil
 }
 
 // getTaskState looks for task with the given ID and returns its import state.
@@ -518,6 +521,7 @@ func (m *importManager) getTaskState(tID int64) *milvuspb.GetImportStateResponse
 					ErrorCode: commonpb.ErrorCode_Success,
 				}
 				resp.Id = tID
+				resp.CollectionId = t.CollectionId
 				resp.State = commonpb.ImportState_ImportPending
 				resp.Infos = append(resp.Infos, &commonpb.KeyValuePair{Key: Files, Value: strings.Join(t.GetFiles(), ",")})
 				m.getCollectionPartitionName(t, resp)
@@ -542,6 +546,8 @@ func (m *importManager) getTaskState(tID int64) *milvuspb.GetImportStateResponse
 			resp.State = v.GetState().GetStateCode()
 			resp.RowCount = v.GetState().GetRowCount()
 			resp.IdList = v.GetState().GetRowIds()
+			resp.CollectionId = v.GetCollectionId()
+			resp.SegmentIds = v.GetState().GetSegments()
 			resp.Infos = append(resp.Infos, &commonpb.KeyValuePair{Key: Files, Value: strings.Join(v.GetFiles(), ",")})
 			resp.Infos = append(resp.Infos, &commonpb.KeyValuePair{
 				Key:   FailedReason,
@@ -647,6 +653,8 @@ func (m *importManager) expireOldTasksFromMem() {
 		for _, v := range m.workingTasks {
 			if taskExpired(v) {
 				log.Info("a working task has expired", zap.Int64("task ID", v.GetId()))
+				// Unset `isImport` flag of the bulk load segments.
+				m.callUnsetIsImportState(v.GetId())
 				// Remove this task from memory.
 				delete(m.workingTasks, v.GetId())
 			}
@@ -674,6 +682,8 @@ func (m *importManager) expireOldTasksFromEtcd() {
 		if taskPastRetention(ti) {
 			log.Info("an import task has passed retention period and will be removed from Etcd",
 				zap.Int64("task ID", ti.GetId()))
+			// Unset `isImport` flag of the bulk load segments.
+			m.callUnsetIsImportState(ti.GetId())
 			if err = m.yieldTaskInfo(ti.GetId()); err != nil {
 				log.Error("failed to remove import task from Etcd",
 					zap.Int64("task ID", ti.GetId()),
@@ -719,11 +729,12 @@ func (m *importManager) listAllTasks() []*milvuspb.GetImportStateResponse {
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_Success,
 				},
-				Infos:    make([]*commonpb.KeyValuePair, 0),
-				Id:       v.GetId(),
-				State:    v.GetState().GetStateCode(),
-				RowCount: v.GetState().GetRowCount(),
-				IdList:   v.GetState().GetRowIds(),
+				Infos:      make([]*commonpb.KeyValuePair, 0),
+				Id:         v.GetId(),
+				State:      v.GetState().GetStateCode(),
+				RowCount:   v.GetState().GetRowCount(),
+				IdList:     v.GetState().GetRowIds(),
+				SegmentIds: v.GetState().GetSegments(),
 			}
 			resp.Infos = append(resp.Infos, &commonpb.KeyValuePair{Key: Files, Value: strings.Join(v.GetFiles(), ",")})
 			resp.Infos = append(resp.Infos, &commonpb.KeyValuePair{

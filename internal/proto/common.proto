@@ -273,7 +273,7 @@ enum ImportState {
     ImportFailed = 1;        // the task failed for some reason, get detail reason from GetImportStateResponse.infos
     ImportStarted = 2;       // the task has been sent to datanode to execute
     ImportPersisted = 5;     // all data files have been parsed and data already persisted
-    ImportAllocSegment = 10; // internal useage, no need to expose in sdk
+    ImportCompleted = 6;     // all indexes are successfully built and segments are able to be compacted as normal.
 }
 
 enum ResourceType {

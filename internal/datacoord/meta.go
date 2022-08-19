@@ -778,6 +778,14 @@ func (m *meta) SetSegmentCompacting(segmentID UniqueID, compacting bool) {
 	m.segments.SetIsCompacting(segmentID, compacting)
 }
 
+// SetSegmentIsImporting sets the importing state for a segment.
+func (m *meta) SetSegmentIsImporting(segmentID UniqueID, importing bool) {
+	m.Lock()
+	defer m.Unlock()
+
+	m.segments.SetIsImporting(segmentID, importing)
+}
+
 func (m *meta) CompleteMergeCompaction(compactionLogs []*datapb.CompactionSegmentBinlogs, result *datapb.CompactionResult,
 	canCompaction func(segment *datapb.CompactionSegmentBinlogs) bool) error {
 	m.Lock()

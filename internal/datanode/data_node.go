@@ -1189,8 +1189,8 @@ func importFlushReqFunc(node *DataNode, req *datapb.ImportTaskRequest, res *root
 			kvs[key] = blob.Value
 			field2Stats[fieldID] = &datapb.Binlog{
 				EntriesNum:    data.size,
-				TimestampFrom: 0, //TODO: give proper value
-				TimestampTo:   0, //TODO: give proper value
+				TimestampFrom: ts,
+				TimestampTo:   ts,
 				LogPath:       key,
 				LogSize:       int64(len(blob.Value)),
 			}
@@ -1210,26 +1210,6 @@ func importFlushReqFunc(node *DataNode, req *datapb.ImportTaskRequest, res *root
 		}
 		for k, v := range field2Stats {
 			fieldStats = append(fieldStats, &datapb.FieldBinlog{FieldID: k, Binlogs: []*datapb.Binlog{v}})
-		}
-
-		// ReportImport with the new segment so RootCoord can add segment ref lock onto it.
-		// Fail-open.
-		status, err := node.rootCoord.ReportImport(context.Background(), &rootcoordpb.ImportResult{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
-			TaskId:     req.GetImportTask().TaskId,
-			DatanodeId: Params.DataNodeCfg.GetNodeID(),
-			State:      commonpb.ImportState_ImportAllocSegment,
-			Segments:   []int64{segmentID},
-		})
-		if err != nil {
-			log.Error("failed to report import on new segment", zap.Error(err))
-			return err
-		}
-		if status.GetErrorCode() != commonpb.ErrorCode_Success {
-			log.Error("failed to report import on new segment", zap.String("reason", status.GetReason()))
-			return fmt.Errorf("failed to report import on new segment: %s", status.GetReason())
 		}
 
 		log.Info("adding segment to the correct DataNode flow graph and saving binlog paths")
