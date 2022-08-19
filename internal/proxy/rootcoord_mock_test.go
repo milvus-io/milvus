@@ -1089,6 +1089,7 @@ type DescribeSegmentsFunc func(ctx context.Context, request *rootcoordpb.Describ
 type ImportFunc func(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error)
 type DropCollectionFunc func(ctx context.Context, request *milvuspb.DropCollectionRequest) (*commonpb.Status, error)
 type GetIndexStateFunc func(ctx context.Context, request *milvuspb.GetIndexStateRequest) (*indexpb.GetIndexStatesResponse, error)
+type GetGetCredentialFunc func(ctx context.Context, req *rootcoordpb.GetCredentialRequest) (*rootcoordpb.GetCredentialResponse, error)
 
 type mockRootCoord struct {
 	types.RootCoord
@@ -1100,6 +1101,14 @@ type mockRootCoord struct {
 	ImportFunc
 	DropCollectionFunc
 	GetIndexStateFunc
+	GetGetCredentialFunc
+}
+
+func (m *mockRootCoord) GetCredential(ctx context.Context, request *rootcoordpb.GetCredentialRequest) (*rootcoordpb.GetCredentialResponse, error) {
+	if m.GetGetCredentialFunc != nil {
+		return m.GetGetCredentialFunc(ctx, request)
+	}
+	return nil, errors.New("mock")
 }
 
 func (m *mockRootCoord) DescribeCollection(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
