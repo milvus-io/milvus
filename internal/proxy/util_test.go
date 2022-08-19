@@ -23,6 +23,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util"
@@ -720,4 +724,48 @@ func TestGetRole(t *testing.T) {
 	roles, err = GetRole("foo")
 	assert.Nil(t, err)
 	assert.Equal(t, 1, len(roles))
+}
+
+func TestPasswordVerify(t *testing.T) {
+	username := "user-test00"
+	password := "PasswordVerify"
+
+	// credential does not exist within cache
+	credCache := make(map[string]*internalpb.CredentialInfo, 0)
+	invokedCount := 0
+
+	mockedRootCoord := newMockRootCoord()
+	mockedRootCoord.GetGetCredentialFunc = func(ctx context.Context, req *rootcoordpb.GetCredentialRequest) (*rootcoordpb.GetCredentialResponse, error) {
+		invokedCount++
+		return nil, fmt.Errorf("get cred not found credential")
+	}
+
+	metaCache := &MetaCache{
+		credMap:   credCache,
+		rootCoord: mockedRootCoord,
+	}
+	ret, ok := credCache[username]
+	assert.False(t, ok)
+	assert.Nil(t, ret)
+	assert.False(t, passwordVerify(context.TODO(), username, password, metaCache))
+	assert.Equal(t, 1, invokedCount)
+
+	// Sha256Password has not been filled into cache during establish connection firstly
+	encryptedPwd, err := crypto.PasswordEncrypt(password)
+	assert.Nil(t, err)
+	credCache[username] = &internalpb.CredentialInfo{
+		Username:          username,
+		EncryptedPassword: encryptedPwd,
+	}
+	assert.True(t, passwordVerify(context.TODO(), username, password, metaCache))
+	ret, ok = credCache[username]
+	assert.True(t, ok)
+	assert.NotNil(t, ret)
+	assert.Equal(t, username, ret.Username)
+	assert.NotNil(t, ret.Sha256Password)
+	assert.Equal(t, 1, invokedCount)
+
+	// Sha256Password already exists within cache
+	assert.True(t, passwordVerify(context.TODO(), username, password, metaCache))
+	assert.Equal(t, 1, invokedCount)
 }

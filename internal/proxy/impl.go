@@ -3950,16 +3950,8 @@ func (node *Proxy) UpdateCredential(ctx context.Context, req *milvuspb.UpdateCre
 			Reason:    err.Error(),
 		}, nil
 	}
-	// check old password is correct
-	oldCredInfo, err := globalMetaCache.GetCredentialInfo(ctx, req.Username)
-	if err != nil {
-		log.Error("found no credential", zap.String("username", req.Username), zap.Error(err))
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UpdateCredentialFailure,
-			Reason:    "found no credential:" + req.Username,
-		}, nil
-	}
-	if !crypto.PasswordVerify(rawOldPassword, oldCredInfo) {
+
+	if !passwordVerify(ctx, req.Username, rawOldPassword, globalMetaCache) {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UpdateCredentialFailure,
 			Reason:    "old password is not correct:" + req.Username,

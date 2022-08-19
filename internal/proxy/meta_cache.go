@@ -536,7 +536,6 @@ func (m *MetaCache) GetCredentialInfo(ctx context.Context, username string) (*in
 			Username:          resp.Username,
 			EncryptedPassword: resp.Password,
 		}
-		m.UpdateCredential(credInfo)
 	}
 
 	return credInfo, nil
@@ -552,15 +551,15 @@ func (m *MetaCache) RemoveCredential(username string) {
 func (m *MetaCache) UpdateCredential(credInfo *internalpb.CredentialInfo) {
 	m.credMut.Lock()
 	defer m.credMut.Unlock()
-	// update credMap
 	username := credInfo.Username
 	_, ok := m.credMap[username]
 	if !ok {
 		m.credMap[username] = &internalpb.CredentialInfo{}
 	}
+
+	// Do not cache encrypted password content
 	m.credMap[username].Username = username
 	m.credMap[username].Sha256Password = credInfo.Sha256Password
-	m.credMap[username].EncryptedPassword = credInfo.EncryptedPassword
 }
 
 // GetShards update cache if withCache == false

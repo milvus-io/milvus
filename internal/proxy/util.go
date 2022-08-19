@@ -24,6 +24,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"go.uber.org/zap"
 
@@ -700,4 +702,33 @@ func GetRole(username string) ([]string, error) {
 		return []string{}, ErrProxyNotReady()
 	}
 	return globalMetaCache.GetUserRole(username), nil
+}
+
+// PasswordVerify verify password
+func passwordVerify(ctx context.Context, username, rawPwd string, globalMetaCache Cache) bool {
+	// it represents the cache miss if Sha256Password is empty within credInfo, which shall be updated first connection.
+	// meanwhile, generating Sha256Password depends on raw password and encrypted password will not cache.
+	credInfo, err := globalMetaCache.GetCredentialInfo(ctx, username)
+	if err != nil {
+		log.Error("found no credential", zap.String("username", username), zap.Error(err))
+		return false
+	}
+
+	// hit cache
+	sha256Pwd := crypto.SHA256(rawPwd, credInfo.Username)
+	if credInfo.Sha256Password != "" {
+		return sha256Pwd == credInfo.Sha256Password
+	}
+
+	// miss cache, verify against encrypted password from etcd
+	if err := bcrypt.CompareHashAndPassword([]byte(credInfo.EncryptedPassword), []byte(rawPwd)); err != nil {
+		log.Error("Verify password failed", zap.Error(err))
+		return false
+	}
+
+	// update cache after miss cache
+	credInfo.Sha256Password = sha256Pwd
+	log.Debug("get credential miss cache, update cache with", zap.Any("credential", credInfo))
+	globalMetaCache.UpdateCredential(credInfo)
+	return true
 }
