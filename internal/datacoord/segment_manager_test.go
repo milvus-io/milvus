@@ -24,6 +24,7 @@ import (
 	"time"
 
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
+	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
@@ -491,7 +492,7 @@ func TestTryToSealSegment(t *testing.T) {
 		mockAllocator := newMockAllocator()
 		memoryKV := memkv.NewMemoryKV()
 		fkv := &saveFailKV{TxnKV: memoryKV}
-		meta, err := newMeta(memoryKV)
+		meta, err := newMeta(context.TODO(), memoryKV)
 
 		assert.Nil(t, err)
 
@@ -504,7 +505,7 @@ func TestTryToSealSegment(t *testing.T) {
 		assert.Nil(t, err)
 		assert.EqualValues(t, 1, len(allocations))
 
-		segmentManager.meta.client = fkv
+		segmentManager.meta.catalog = &datacoord.Catalog{Txn: fkv}
 
 		ts, err := segmentManager.allocator.allocTimestamp(context.Background())
 		assert.Nil(t, err)
@@ -517,7 +518,7 @@ func TestTryToSealSegment(t *testing.T) {
 		mockAllocator := newMockAllocator()
 		memoryKV := memkv.NewMemoryKV()
 		fkv := &saveFailKV{TxnKV: memoryKV}
-		meta, err := newMeta(memoryKV)
+		meta, err := newMeta(context.TODO(), memoryKV)
 
 		assert.Nil(t, err)
 
@@ -530,7 +531,7 @@ func TestTryToSealSegment(t *testing.T) {
 		assert.Nil(t, err)
 		assert.EqualValues(t, 1, len(allocations))
 
-		segmentManager.meta.client = fkv
+		segmentManager.meta.catalog = &datacoord.Catalog{Txn: fkv}
 
 		ts, err := segmentManager.allocator.allocTimestamp(context.Background())
 		assert.Nil(t, err)

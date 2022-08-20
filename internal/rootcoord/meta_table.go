@@ -24,7 +24,7 @@ import (
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metastore"
-	kvmetestore "github.com/milvus-io/milvus/internal/metastore/kv"
+	"github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -38,13 +38,13 @@ import (
 
 const (
 	// TimestampPrefix prefix for timestamp
-	TimestampPrefix = kvmetestore.ComponentPrefix + "/timestamp"
+	TimestampPrefix = rootcoord.ComponentPrefix + "/timestamp"
 
 	// DDOperationPrefix prefix for DD operation
-	DDOperationPrefix = kvmetestore.ComponentPrefix + "/dd-operation"
+	DDOperationPrefix = rootcoord.ComponentPrefix + "/dd-operation"
 
 	// DDMsgSendPrefix prefix to indicate whether DD msg has been send
-	DDMsgSendPrefix = kvmetestore.ComponentPrefix + "/dd-msg-send"
+	DDMsgSendPrefix = rootcoord.ComponentPrefix + "/dd-msg-send"
 
 	// CreateCollectionDDType name of DD type for create collection
 	CreateCollectionDDType = "CreateCollection"
@@ -68,7 +68,7 @@ const (
 // MetaTable store all rootCoord meta info
 type MetaTable struct {
 	ctx     context.Context
-	catalog metastore.Catalog
+	catalog metastore.RootCoordCatalog
 
 	collID2Meta         map[typeutil.UniqueID]model.Collection           // collection id -> collection meta
 	collName2ID         map[string]typeutil.UniqueID                     // collection name to collection id
@@ -82,7 +82,7 @@ type MetaTable struct {
 
 // NewMetaTable creates meta table for rootcoord, which stores all in-memory information
 // for collection, partition, segment, index etc.
-func NewMetaTable(ctx context.Context, catalog metastore.Catalog) (*MetaTable, error) {
+func NewMetaTable(ctx context.Context, catalog metastore.RootCoordCatalog) (*MetaTable, error) {
 	mt := &MetaTable{
 		ctx:     contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName),
 		catalog: catalog,

@@ -166,11 +166,11 @@ func (h *ServerHandler) CheckShouldDropChannel(channel string) bool {
 			}
 		}
 		return false*/
-	return h.s.meta.ChannelHasRemoveFlag(channel)
+	return h.s.meta.catalog.IsChannelDropped(h.s.ctx, channel)
 }
 
 // FinishDropChannel cleans up the remove flag for channels
 // this function is a wrapper of server.meta.FinishDropChannel
 func (h *ServerHandler) FinishDropChannel(channel string) {
-	h.s.meta.FinishRemoveChannel(channel)
+	h.s.meta.catalog.DropChannel(h.s.ctx, channel)
 }
