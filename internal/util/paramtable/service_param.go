@@ -38,6 +38,8 @@ const (
 	SuggestPulsarMaxMessageSize = 5 * 1024 * 1024
 	defaultEtcdLogLevel         = "info"
 	defaultEtcdLogPath          = "stdout"
+	KafkaProducerConfigPrefix   = "kafka.producer."
+	KafkaConsumerConfigPrefix   = "kafka.consumer."
 )
 
 // ServiceParam is used to quickly and easily access all basic service configurations.
@@ -365,12 +367,14 @@ func (p *PulsarConfig) initMaxMessageSize() {
 
 // --- kafka ---
 type KafkaConfig struct {
-	Base             *BaseTable
-	Address          string
-	SaslUsername     string
-	SaslPassword     string
-	SaslMechanisms   string
-	SecurityProtocol string
+	Base                *BaseTable
+	Address             string
+	SaslUsername        string
+	SaslPassword        string
+	SaslMechanisms      string
+	SecurityProtocol    string
+	ConsumerExtraConfig map[string]string
+	ProducerExtraConfig map[string]string
 }
 
 func (k *KafkaConfig) init(base *BaseTable) {
@@ -380,6 +384,7 @@ func (k *KafkaConfig) init(base *BaseTable) {
 	k.initSaslPassword()
 	k.initSaslMechanisms()
 	k.initSecurityProtocol()
+	k.initExtraKafkaConfig()
 }
 
 func (k *KafkaConfig) initAddress() {
@@ -400,6 +405,11 @@ func (k *KafkaConfig) initSaslMechanisms() {
 
 func (k *KafkaConfig) initSecurityProtocol() {
 	k.SecurityProtocol = k.Base.LoadWithDefault("kafka.securityProtocol", "SASL_SSL")
+}
+
+func (k *KafkaConfig) initExtraKafkaConfig() {
+	k.ConsumerExtraConfig = k.Base.GetConfigSubSet(KafkaConsumerConfigPrefix)
+	k.ProducerExtraConfig = k.Base.GetConfigSubSet(KafkaProducerConfigPrefix)
 }
 
 ///////////////////////////////////////////////////////////////////////////////

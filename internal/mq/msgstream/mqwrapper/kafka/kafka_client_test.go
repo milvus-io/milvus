@@ -308,6 +308,29 @@ func TestKafkaClient_NewKafkaClientInstanceWithConfig(t *testing.T) {
 	client := NewKafkaClientInstanceWithConfig(config3)
 	assert.NotNil(t, client)
 	assert.NotNil(t, client.basicConfig)
+
+	consumerConfig := make(map[string]string)
+	consumerConfig["client.id"] = "dc"
+	config4 := &paramtable.KafkaConfig{Address: "addr", SaslUsername: "username", SaslPassword: "password", ConsumerExtraConfig: consumerConfig}
+	client4 := NewKafkaClientInstanceWithConfig(config4)
+	assert.Equal(t, "dc", client4.consumerConfig["client.id"])
+
+	newConsumerConfig := client4.newConsumerConfig("test", 0)
+	clientID, err := newConsumerConfig.Get("client.id", "")
+	assert.Nil(t, err)
+	assert.Equal(t, "dc", clientID)
+
+	producerConfig := make(map[string]string)
+	producerConfig["client.id"] = "dc1"
+	config5 := &paramtable.KafkaConfig{Address: "addr", SaslUsername: "username", SaslPassword: "password", ProducerExtraConfig: producerConfig}
+	client5 := NewKafkaClientInstanceWithConfig(config5)
+	assert.Equal(t, "dc1", client5.producerConfig["client.id"])
+
+	newProducerConfig := client5.newProducerConfig()
+	pClientID, err := newProducerConfig.Get("client.id", "")
+	assert.Nil(t, err)
+	assert.Equal(t, pClientID, "dc1")
+
 }
 
 func createKafkaClient(t *testing.T) *kafkaClient {
