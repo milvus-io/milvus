@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/logutil"
@@ -60,8 +61,9 @@ type ChannelManager struct {
 }
 
 type channel struct {
-	Name         string
-	CollectionID UniqueID
+	Name           string
+	CollectionID   UniqueID
+	StartPositions []*commonpb.KeyDataPair
 }
 
 // ChannelManagerOpt is to set optional parameters in channel manager.
@@ -434,7 +436,7 @@ func (c *ChannelManager) Watch(ch *channel) error {
 // fillChannelWatchInfo updates the channel op by filling in channel watch info.
 func (c *ChannelManager) fillChannelWatchInfo(op *ChannelOp) {
 	for _, ch := range op.Channels {
-		vcInfo := c.h.GetVChanPositions(ch.Name, ch.CollectionID, allPartitionID)
+		vcInfo := c.h.GetVChanPositions(ch, allPartitionID)
 		info := &datapb.ChannelWatchInfo{
 			Vchan:     vcInfo,
 			StartTs:   time.Now().Unix(),
@@ -451,7 +453,7 @@ func (c *ChannelManager) fillChannelWatchInfoWithState(op *ChannelOp, state data
 	startTs := time.Now().Unix()
 	timeoutTs := time.Now().Add(maxWatchDuration).UnixNano()
 	for _, ch := range op.Channels {
-		vcInfo := c.h.GetVChanPositions(ch.Name, ch.CollectionID, allPartitionID)
+		vcInfo := c.h.GetVChanPositions(ch, allPartitionID)
 		info := &datapb.ChannelWatchInfo{
 			Vchan:     vcInfo,
 			StartTs:   startTs,

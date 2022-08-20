@@ -100,7 +100,7 @@ func TestClusterCreate(t *testing.T) {
 		assert.Nil(t, err)
 
 		channels := channelManager.GetChannels()
-		assert.EqualValues(t, []*NodeChannelInfo{{1, []*channel{{"channel1", 1}}}}, channels)
+		assert.EqualValues(t, []*NodeChannelInfo{{1, []*channel{{Name: "channel1", CollectionID: 1}}}}, channels)
 	})
 
 	t.Run("remove all nodes and restart with other nodes", func(t *testing.T) {

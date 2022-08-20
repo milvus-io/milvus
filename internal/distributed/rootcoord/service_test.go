@@ -177,7 +177,7 @@ func TestGrpcService(t *testing.T) {
 		}, nil
 	}
 
-	core.CallWatchChannels = func(ctx context.Context, collectionID int64, channelNames []string) error {
+	core.CallWatchChannels = func(ctx context.Context, collectionID int64, channelNames []string, startPositions []*commonpb.KeyDataPair) error {
 		return nil
 	}
 

@@ -429,6 +429,7 @@ message SegmentFieldBinlogMeta {
 message WatchChannelsRequest {
   int64 collectionID = 1;
   repeated string channelNames = 2;
+  repeated common.KeyDataPair start_positions = 3;
 }
 
 message WatchChannelsResponse {

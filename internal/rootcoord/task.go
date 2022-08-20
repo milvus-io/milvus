@@ -270,7 +270,7 @@ func (t *CreateCollectionReqTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	if err = t.core.CallWatchChannels(ctx, collID, vchanNames); err != nil {
+	if err = t.core.CallWatchChannels(ctx, collID, vchanNames, collInfo.StartPositions); err != nil {
 		return err
 	}
 

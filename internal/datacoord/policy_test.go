@@ -41,7 +41,7 @@ func fillEmptyPosition(operations ChannelOpSet) {
 func TestBufferChannelAssignPolicy(t *testing.T) {
 	kv := memkv.NewMemoryKV()
 
-	channels := []*channel{{"chan1", 1}}
+	channels := []*channel{{Name: "chan1", CollectionID: 1}}
 	store := &ChannelStore{
 		store:        kv,
 		channelsInfo: map[int64]*NodeChannelInfo{bufferID: {bufferID, channels}},
@@ -60,8 +60,8 @@ func TestConsistentHashRegisterPolicy(t *testing.T) {
 	t.Run("first register", func(t *testing.T) {
 		kv := memkv.NewMemoryKV()
 		channels := []*channel{
-			{"chan1", 1},
-			{"chan2", 2},
+			{Name: "chan1", CollectionID: 1},
+			{Name: "chan2", CollectionID: 2},
 		}
 		store := &ChannelStore{
 			store:        kv,
@@ -82,8 +82,8 @@ func TestConsistentHashRegisterPolicy(t *testing.T) {
 		kv := memkv.NewMemoryKV()
 
 		channels := []*channel{
-			{"chan1", 1},
-			{"chan2", 2},
+			{Name: "chan1", CollectionID: 1},
+			{Name: "chan2", CollectionID: 2},
 		}
 
 		store := &ChannelStore{
@@ -121,9 +121,9 @@ func TestAverageAssignPolicy(t *testing.T) {
 					memkv.NewMemoryKV(),
 					map[int64]*NodeChannelInfo{},
 				},
-				[]*channel{{"chan1", 1}},
+				[]*channel{{Name: "chan1", CollectionID: 1}},
 			},
-			[]*ChannelOp{{Add, bufferID, []*channel{{"chan1", 1}}, nil}},
+			[]*ChannelOp{{Add, bufferID, []*channel{{Name: "chan1", CollectionID: 1}}, nil}},
 		},
 		{
 			"test watch same channel",
@@ -131,10 +131,10 @@ func TestAverageAssignPolicy(t *testing.T) {
 				&ChannelStore{
 					memkv.NewMemoryKV(),
 					map[int64]*NodeChannelInfo{
-						1: {1, []*channel{{"chan1", 1}}},
+						1: {1, []*channel{{Name: "chan1", CollectionID: 1}}},
 					},
 				},
-				[]*channel{{"chan1", 1}},
+				[]*channel{{Name: "chan1", CollectionID: 1}},
 			},
 			nil,
 		},
@@ -144,13 +144,13 @@ func TestAverageAssignPolicy(t *testing.T) {
 				&ChannelStore{
 					memkv.NewMemoryKV(),
 					map[int64]*NodeChannelInfo{
-						1: {1, []*channel{{"chan1", 1}, {"chan2", 1}}},
-						2: {2, []*channel{{"chan3", 1}}},
+						1: {1, []*channel{{Name: "chan1", CollectionID: 1}, {Name: "chan2", CollectionID: 1}}},
+						2: {2, []*channel{{Name: "chan3", CollectionID: 1}}},
 					},
 				},
-				[]*channel{{"chan4", 1}},
+				[]*channel{{Name: "chan4", CollectionID: 1}},
 			},
-			[]*ChannelOp{{Add, 2, []*channel{{"chan4", 1}}, nil}},
+			[]*ChannelOp{{Add, 2, []*channel{{Name: "chan4", CollectionID: 1}}, nil}},
 		},
 	}
 	for _, tt := range tests {
@@ -180,9 +180,9 @@ func TestConsistentHashChannelAssignPolicy(t *testing.T) {
 					memkv.NewMemoryKV(),
 					map[int64]*NodeChannelInfo{},
 				},
-				[]*channel{{"chan1", 1}},
+				[]*channel{{Name: "chan1", CollectionID: 1}},
 			},
-			[]*ChannelOp{{Add, bufferID, []*channel{{"chan1", 1}}, nil}},
+			[]*ChannelOp{{Add, bufferID, []*channel{{Name: "chan1", CollectionID: 1}}, nil}},
 		},
 		{
 			"test watch same channel",
@@ -191,10 +191,10 @@ func TestConsistentHashChannelAssignPolicy(t *testing.T) {
 				&ChannelStore{
 					memkv.NewMemoryKV(),
 					map[int64]*NodeChannelInfo{
-						1: {1, []*channel{{"chan1", 1}, {"chan2", 1}}},
+						1: {1, []*channel{{Name: "chan1", CollectionID: 1}, {Name: "chan2", CollectionID: 1}}},
 					},
 				},
-				[]*channel{{"chan1", 1}},
+				[]*channel{{Name: "chan1", CollectionID: 1}},
 			},
 			nil,
 		},
@@ -206,9 +206,9 @@ func TestConsistentHashChannelAssignPolicy(t *testing.T) {
 					memkv.NewMemoryKV(),
 					map[int64]*NodeChannelInfo{1: {1, nil}, 2: {2, nil}, 3: {3, nil}},
 				},
-				[]*channel{{"chan1", 1}, {"chan2", 1}, {"chan3", 1}},
+				[]*channel{{Name: "chan1", CollectionID: 1}, {Name: "chan2", CollectionID: 1}, {Name: "chan3", CollectionID: 1}},
 			},
-			[]*ChannelOp{{Add, 2, []*channel{{"chan1", 1}}, nil}, {Add, 1, []*channel{{"chan2", 1}}, nil}, {Add, 3, []*channel{{"chan3", 1}}, nil}},
+			[]*ChannelOp{{Add, 2, []*channel{{Name: "chan1", CollectionID: 1}}, nil}, {Add, 1, []*channel{{Name: "chan2", CollectionID: 1}}, nil}, {Add, 3, []*channel{{Name: "chan3", CollectionID: 1}}, nil}},
 		},
 	}
 	for _, tt := range tests {
@@ -239,12 +239,12 @@ func TestAvgAssignUnregisteredChannels(t *testing.T) {
 				&ChannelStore{
 					memkv.NewMemoryKV(),
 					map[int64]*NodeChannelInfo{
-						1: {1, []*channel{{"chan1", 1}}},
+						1: {1, []*channel{{Name: "chan1", CollectionID: 1}}},
 					},
 				},
 				1,
 			},
-			[]*ChannelOp{{Delete, 1, []*channel{{"chan1", 1}}, nil}, {Add, bufferID, []*channel{{"chan1", 1}}, nil}},
+			[]*ChannelOp{{Delete, 1, []*channel{{Name: "chan1", CollectionID: 1}}, nil}, {Add, bufferID, []*channel{{Name: "chan1", CollectionID: 1}}, nil}},
 		},
 		{
 			"test rebalance channels after deregister",
@@ -252,14 +252,14 @@ func TestAvgAssignUnregisteredChannels(t *testing.T) {
 				&ChannelStore{
 					memkv.NewMemoryKV(),
 					map[int64]*NodeChannelInfo{
-						1: {1, []*channel{{"chan1", 1}}},
-						2: {2, []*channel{{"chan2", 1}}},
+						1: {1, []*channel{{Name: "chan1", CollectionID: 1}}},
+						2: {2, []*channel{{Name: "chan2", CollectionID: 1}}},
 						3: {3, []*channel{}},
 					},
 				},
 				2,
 			},
-			[]*ChannelOp{{Delete, 2, []*channel{{"chan2", 1}}, nil}, {Add, 3, []*channel{{"chan2", 1}}, nil}},
+			[]*ChannelOp{{Delete, 2, []*channel{{Name: "chan2", CollectionID: 1}}, nil}, {Add, 3, []*channel{{Name: "chan2", CollectionID: 1}}, nil}},
 		},
 	}
 	for _, tt := range tests {
@@ -288,12 +288,12 @@ func TestConsistentHashDeregisterPolicy(t *testing.T) {
 				&ChannelStore{
 					memkv.NewMemoryKV(),
 					map[int64]*NodeChannelInfo{
-						1: {1, []*channel{{"chan1", 1}}},
+						1: {1, []*channel{{Name: "chan1", CollectionID: 1}}},
 					},
 				},
 				1,
 			},
-			[]*ChannelOp{{Delete, 1, []*channel{{"chan1", 1}}, nil}, {Add, bufferID, []*channel{{"chan1", 1}}, nil}},
+			[]*ChannelOp{{Delete, 1, []*channel{{Name: "chan1", CollectionID: 1}}, nil}, {Add, bufferID, []*channel{{Name: "chan1", CollectionID: 1}}, nil}},
 		},
 		{
 			"rebalance after deregister",
@@ -302,14 +302,14 @@ func TestConsistentHashDeregisterPolicy(t *testing.T) {
 				&ChannelStore{
 					memkv.NewMemoryKV(),
 					map[int64]*NodeChannelInfo{
-						1: {1, []*channel{{"chan2", 1}}},
-						2: {2, []*channel{{"chan1", 1}}},
-						3: {3, []*channel{{"chan3", 1}}},
+						1: {1, []*channel{{Name: "chan2", CollectionID: 1}}},
+						2: {2, []*channel{{Name: "chan1", CollectionID: 1}}},
+						3: {3, []*channel{{Name: "chan3", CollectionID: 1}}},
 					},
 				},
 				2,
 			},
-			[]*ChannelOp{{Delete, 2, []*channel{{"chan1", 1}}, nil}, {Add, 1, []*channel{{"chan1", 1}}, nil}},
+			[]*ChannelOp{{Delete, 2, []*channel{{Name: "chan1", CollectionID: 1}}, nil}, {Add, 1, []*channel{{Name: "chan1", CollectionID: 1}}, nil}},
 		},
 	}
 	for _, tt := range tests {
@@ -337,10 +337,10 @@ func TestAverageReassignPolicy(t *testing.T) {
 				&ChannelStore{
 					memkv.NewMemoryKV(),
 					map[int64]*NodeChannelInfo{
-						1: {1, []*channel{{"chan1", 1}}},
+						1: {1, []*channel{{Name: "chan1", CollectionID: 1}}},
 					},
 				},
-				[]*NodeChannelInfo{{1, []*channel{{"chan1", 1}}}},
+				[]*NodeChannelInfo{{1, []*channel{{Name: "chan1", CollectionID: 1}}}},
 			},
 			nil,
 		},
@@ -350,13 +350,13 @@ func TestAverageReassignPolicy(t *testing.T) {
 				&ChannelStore{
 					memkv.NewMemoryKV(),
 					map[int64]*NodeChannelInfo{
-						1: {1, []*channel{{"chan1", 1}, {"chan2", 1}}},
+						1: {1, []*channel{{Name: "chan1", CollectionID: 1}, {Name: "chan2", CollectionID: 1}}},
 						2: {2, []*channel{}},
 					},
 				},
-				[]*NodeChannelInfo{{1, []*channel{{"chan1", 1}, {"chan2", 1}}}},
+				[]*NodeChannelInfo{{1, []*channel{{Name: "chan1", CollectionID: 1}, {Name: "chan2", CollectionID: 1}}}},
 			},
-			[]*ChannelOp{{Delete, 1, []*channel{{"chan1", 1}, {"chan2", 1}}, nil}, {Add, 2, []*channel{{"chan1", 1}, {"chan2", 1}}, nil}},
+			[]*ChannelOp{{Delete, 1, []*channel{{Name: "chan1", CollectionID: 1}, {Name: "chan2", CollectionID: 1}}, nil}, {Add, 2, []*channel{{Name: "chan1", CollectionID: 1}, {Name: "chan2", CollectionID: 1}}, nil}},
 		},
 	}
 	for _, tt := range tests {
@@ -401,17 +401,17 @@ func TestBgCheckWithMaxWatchDuration(t *testing.T) {
 			args{
 				getKv([]*watch{{1, "chan1", &datapb.ChannelWatchInfo{StartTs: ts.Unix(), State: datapb.ChannelWatchState_Uncomplete}},
 					{1, "chan2", &datapb.ChannelWatchInfo{StartTs: ts.Unix(), State: datapb.ChannelWatchState_Complete}}}),
-				[]*NodeChannelInfo{{1, []*channel{{"chan1", 1}, {"chan2", 1}}}},
+				[]*NodeChannelInfo{{1, []*channel{{Name: "chan1", CollectionID: 1}, {Name: "chan2", CollectionID: 1}}}},
 				ts.Add(maxWatchDuration),
 			},
-			[]*NodeChannelInfo{{1, []*channel{{"chan1", 1}}}},
+			[]*NodeChannelInfo{{1, []*channel{{Name: "chan1", CollectionID: 1}}}},
 			nil,
 		},
 		{
 			"test no expiration",
 			args{
 				getKv([]*watch{{1, "chan1", &datapb.ChannelWatchInfo{StartTs: ts.Unix(), State: datapb.ChannelWatchState_Uncomplete}}}),
-				[]*NodeChannelInfo{{1, []*channel{{"chan1", 1}}}},
+				[]*NodeChannelInfo{{1, []*channel{{Name: "chan1", CollectionID: 1}}}},
 				ts.Add(maxWatchDuration).Add(-time.Second),
 			},
 			[]*NodeChannelInfo{},
@@ -455,7 +455,7 @@ func TestAvgAssignRegisterPolicy(t *testing.T) {
 				&ChannelStore{
 					memkv.NewMemoryKV(),
 					map[int64]*NodeChannelInfo{
-						bufferID: {bufferID, []*channel{{"ch1", 1}}},
+						bufferID: {bufferID, []*channel{{Name: "ch1", CollectionID: 1}}},
 					},
 				},
 				1,
@@ -464,12 +464,12 @@ func TestAvgAssignRegisterPolicy(t *testing.T) {
 				{
 					Type:     Delete,
 					NodeID:   bufferID,
-					Channels: []*channel{{"ch1", 1}},
+					Channels: []*channel{{Name: "ch1", CollectionID: 1}},
 				},
 				{
 					Type:     Add,
 					NodeID:   1,
-					Channels: []*channel{{"ch1", 1}},
+					Channels: []*channel{{Name: "ch1", CollectionID: 1}},
 				},
 			},
 		},
@@ -479,7 +479,7 @@ func TestAvgAssignRegisterPolicy(t *testing.T) {
 				&ChannelStore{
 					memkv.NewMemoryKV(),
 					map[int64]*NodeChannelInfo{
-						1: {1, []*channel{{"ch1", 1}, {"ch2", 1}}},
+						1: {1, []*channel{{Name: "ch1", CollectionID: 1}, {Name: "ch2", CollectionID: 1}}},
 					},
 				},
 				3,
@@ -488,7 +488,7 @@ func TestAvgAssignRegisterPolicy(t *testing.T) {
 				{
 					Type:     Add,
 					NodeID:   1,
-					Channels: []*channel{{"ch1", 1}},
+					Channels: []*channel{{Name: "ch1", CollectionID: 1}},
 				},
 			},
 		},
@@ -498,8 +498,8 @@ func TestAvgAssignRegisterPolicy(t *testing.T) {
 				&ChannelStore{
 					memkv.NewMemoryKV(),
 					map[int64]*NodeChannelInfo{
-						1: {1, []*channel{{"ch1", 1}}},
-						2: {2, []*channel{{"ch3", 1}}},
+						1: {1, []*channel{{Name: "ch1", CollectionID: 1}}},
+						2: {2, []*channel{{Name: "ch3", CollectionID: 1}}},
 					},
 				},
 				3,
@@ -512,7 +512,7 @@ func TestAvgAssignRegisterPolicy(t *testing.T) {
 				&ChannelStore{
 					memkv.NewMemoryKV(),
 					map[int64]*NodeChannelInfo{
-						1: {1, []*channel{{"ch1", 1}, {"ch2", 1}, {"ch3", 1}}},
+						1: {1, []*channel{{Name: "ch1", CollectionID: 1}, {Name: "ch2", CollectionID: 1}, {Name: "ch3", CollectionID: 1}}},
 						2: {2, []*channel{}},
 					},
 				},
@@ -522,7 +522,7 @@ func TestAvgAssignRegisterPolicy(t *testing.T) {
 				{
 					Type:     Add,
 					NodeID:   1,
-					Channels: []*channel{{"ch1", 1}},
+					Channels: []*channel{{Name: "ch1", CollectionID: 1}},
 				},
 			},
 		},

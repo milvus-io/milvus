@@ -30,7 +30,7 @@ import (
 // Handler handles some channel method for ChannelManager
 type Handler interface {
 	// GetVChanPositions gets the information recovery needed of a channel
-	GetVChanPositions(channel string, collectionID UniqueID, partitionID UniqueID) *datapb.VchannelInfo
+	GetVChanPositions(channel *channel, partitionID UniqueID) *datapb.VchannelInfo
 	CheckShouldDropChannel(channel string) bool
 	FinishDropChannel(channel string)
 }
@@ -46,13 +46,13 @@ func newServerHandler(s *Server) *ServerHandler {
 }
 
 // GetVChanPositions gets vchannel latest postitions with provided dml channel names
-func (h *ServerHandler) GetVChanPositions(channel string, collectionID UniqueID, partitionID UniqueID) *datapb.VchannelInfo {
+func (h *ServerHandler) GetVChanPositions(channel *channel, partitionID UniqueID) *datapb.VchannelInfo {
 	// cannot use GetSegmentsByChannel since dropped segments are needed here
 	segments := h.s.meta.SelectSegments(func(s *SegmentInfo) bool {
-		return s.InsertChannel == channel
+		return s.InsertChannel == channel.Name
 	})
 	log.Info("GetSegmentsByChannel",
-		zap.Any("collectionID", collectionID),
+		zap.Any("collectionID", channel.CollectionID),
 		zap.Any("channel", channel),
 		zap.Any("numOfSegments", len(segments)),
 	)
@@ -90,15 +90,20 @@ func (h *ServerHandler) GetVChanPositions(channel string, collectionID UniqueID,
 	}
 	// use collection start position when segment position is not found
 	if seekPosition == nil {
-		collection := h.GetCollection(h.s.ctx, collectionID)
-		if collection != nil {
-			seekPosition = getCollectionStartPosition(channel, collection)
+		if channel.StartPositions == nil {
+			collection := h.GetCollection(h.s.ctx, channel.CollectionID)
+			if collection != nil {
+				seekPosition = getCollectionStartPosition(channel.Name, collection)
+			}
+		} else {
+			// use passed start positions, skip to ask rootcoord.
+			seekPosition = toMsgPosition(channel.Name, channel.StartPositions)
 		}
 	}
 
 	return &datapb.VchannelInfo{
-		CollectionID:        collectionID,
-		ChannelName:         channel,
+		CollectionID:        channel.CollectionID,
+		ChannelName:         channel.Name,
 		SeekPosition:        seekPosition,
 		FlushedSegmentIds:   flushedIds,
 		UnflushedSegmentIds: unflushedIds,
@@ -107,7 +112,11 @@ func (h *ServerHandler) GetVChanPositions(channel string, collectionID UniqueID,
 }
 
 func getCollectionStartPosition(channel string, collectionInfo *datapb.CollectionInfo) *internalpb.MsgPosition {
-	for _, sp := range collectionInfo.GetStartPositions() {
+	return toMsgPosition(channel, collectionInfo.GetStartPositions())
+}
+
+func toMsgPosition(channel string, startPositions []*commonpb.KeyDataPair) *internalpb.MsgPosition {
+	for _, sp := range startPositions {
 		if sp.GetKey() != funcutil.ToPhysicalChannel(channel) {
 			continue
 		}

@@ -149,7 +149,7 @@ type Core struct {
 	// Communicates with queryCoord service for segments info.
 	CallGetSegmentInfoService func(ctx context.Context, collectionID int64, segIDs []int64) (*querypb.GetSegmentInfoResponse, error)
 
-	CallWatchChannels func(ctx context.Context, collectionID int64, channelNames []string) error
+	CallWatchChannels func(ctx context.Context, collectionID int64, channelNames []string, startPositions []*commonpb.KeyDataPair) error
 
 	//assign import task to data service
 	CallImportService func(ctx context.Context, req *datapb.ImportTaskRequest) *datapb.ImportTaskResponse
@@ -724,7 +724,7 @@ func (c *Core) SetDataCoord(ctx context.Context, s types.DataCoord) error {
 		return resp.Binlogs, nil
 	}
 
-	c.CallWatchChannels = func(ctx context.Context, collectionID int64, channelNames []string) (retErr error) {
+	c.CallWatchChannels = func(ctx context.Context, collectionID int64, channelNames []string, startPositions []*commonpb.KeyDataPair) (retErr error) {
 		defer func() {
 			if err := recover(); err != nil {
 				retErr = fmt.Errorf("watch channels panic, msg = %v", err)
@@ -732,8 +732,9 @@ func (c *Core) SetDataCoord(ctx context.Context, s types.DataCoord) error {
 		}()
 		<-initCh
 		req := &datapb.WatchChannelsRequest{
-			CollectionID: collectionID,
-			ChannelNames: channelNames,
+			CollectionID:   collectionID,
+			ChannelNames:   channelNames,
+			StartPositions: startPositions,
 		}
 		rsp, err := s.WatchChannels(ctx, req)
 		if err != nil {

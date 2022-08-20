@@ -662,7 +662,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 	channels := dresp.GetVirtualChannelNames()
 	channelInfos := make([]*datapb.VchannelInfo, 0, len(channels))
 	for _, c := range channels {
-		channelInfo := s.handler.GetVChanPositions(c, collectionID, partitionID)
+		channelInfo := s.handler.GetVChanPositions(&channel{Name: c, CollectionID: collectionID}, partitionID)
 		channelInfos = append(channelInfos, channelInfo)
 		log.Debug("datacoord append channelInfo in GetRecoveryInfo",
 			zap.Any("collectionID", collectionID),
@@ -1010,8 +1010,9 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 	}
 	for _, channelName := range req.GetChannelNames() {
 		ch := &channel{
-			Name:         channelName,
-			CollectionID: req.GetCollectionID(),
+			Name:           channelName,
+			CollectionID:   req.GetCollectionID(),
+			StartPositions: req.GetStartPositions(),
 		}
 		err := s.channelManager.Watch(ch)
 		if err != nil {
