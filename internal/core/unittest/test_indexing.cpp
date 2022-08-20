@@ -144,14 +144,14 @@ TEST(Indexing, Naive) {
                                                                          knowhere::IndexMode::MODE_CPU);
 
     auto conf = knowhere::Config{
+        {knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
         {knowhere::meta::DIM, DIM},
         {knowhere::meta::TOPK, TOPK},
-        {knowhere::IndexParams::nlist, 100},
-        {knowhere::IndexParams::nprobe, 4},
-        {knowhere::IndexParams::m, 4},
-        {knowhere::IndexParams::nbits, 8},
-        {knowhere::Metric::TYPE, knowhere::Metric::L2},
-        {knowhere::meta::DEVICEID, 0},
+        {knowhere::indexparam::NLIST, 100},
+        {knowhere::indexparam::NPROBE, 4},
+        {knowhere::indexparam::M, 4},
+        {knowhere::indexparam::NBITS, 8},
+        {knowhere::meta::DEVICE_ID, 0},
     };
 
     //    auto ds = knowhere::GenDataset(N, DIM, raw_data.data());
@@ -199,8 +199,8 @@ TEST(Indexing, Naive) {
     BitsetView view = bitmap;
     auto query_ds = knowhere::GenDataset(1, DIM, raw_data.data());
     auto final = index->Query(query_ds, conf, view);
-    auto ids = final->Get<idx_t*>(knowhere::meta::IDS);
-    auto distances = final->Get<float*>(knowhere::meta::DISTANCE);
+    auto ids = knowhere::GetDatasetIDs(final);
+    auto distances = knowhere::GetDatasetDistance(final);
     for (int i = 0; i < TOPK; ++i) {
         if (ids[i] < N / 2) {
             std::cout << "WRONG: ";
@@ -221,12 +221,14 @@ TEST(Indexing, IVFFlat) {
     auto [raw_data, timestamps, uids] = generate_data<DIM>(N);
     std::cout << "generate data: " << timer.get_step_seconds() << " seconds" << std::endl;
     auto indexing = std::make_shared<knowhere::IVF>();
-    auto conf = knowhere::Config{{knowhere::meta::DIM, DIM},
-                                 {knowhere::meta::TOPK, TOPK},
-                                 {knowhere::IndexParams::nlist, NLIST},
-                                 {knowhere::IndexParams::nprobe, NPROBE},
-                                 {knowhere::Metric::TYPE, knowhere::Metric::L2},
-                                 {knowhere::meta::DEVICEID, 0}};
+    auto conf = knowhere::Config{
+            {knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+            {knowhere::meta::DIM, DIM},
+            {knowhere::meta::TOPK, TOPK},
+            {knowhere::indexparam::NLIST, NLIST},
+            {knowhere::indexparam::NPROBE, NPROBE},
+            {knowhere::meta::DEVICE_ID, 0}
+    };
 
     auto database = knowhere::GenDataset(N, DIM, raw_data.data());
     std::cout << "init ivf " << timer.get_step_seconds() << " seconds" << std::endl;
@@ -242,8 +244,8 @@ TEST(Indexing, IVFFlat) {
     auto result = indexing->Query(dataset, conf, nullptr);
     std::cout << "query ivf " << timer.get_step_seconds() << " seconds" << std::endl;
 
-    auto ids = result->Get<int64_t*>(knowhere::meta::IDS);
-    auto dis = result->Get<float*>(knowhere::meta::DISTANCE);
+    auto ids = knowhere::GetDatasetIDs(result);
+    auto dis = knowhere::GetDatasetDistance(result);
     for (int i = 0; i < std::min(NQ * TOPK, 100); ++i) {
         std::cout << ids[i] << "->" << dis[i] << std::endl;
     }
@@ -261,12 +263,14 @@ TEST(Indexing, IVFFlatNM) {
     auto [raw_data, timestamps, uids] = generate_data<DIM>(N);
     std::cout << "generate data: " << timer.get_step_seconds() << " seconds" << std::endl;
     auto indexing = std::make_shared<knowhere::IVF_NM>();
-    auto conf = knowhere::Config{{knowhere::meta::DIM, DIM},
-                                 {knowhere::meta::TOPK, TOPK},
-                                 {knowhere::IndexParams::nlist, NLIST},
-                                 {knowhere::IndexParams::nprobe, NPROBE},
-                                 {knowhere::Metric::TYPE, knowhere::Metric::L2},
-                                 {knowhere::meta::DEVICEID, 0}};
+    auto conf = knowhere::Config{
+            {knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+            {knowhere::meta::DIM, DIM},
+            {knowhere::meta::TOPK, TOPK},
+            {knowhere::indexparam::NLIST, NLIST},
+            {knowhere::indexparam::NPROBE, NPROBE},
+            {knowhere::meta::DEVICE_ID, 0}
+    };
 
     auto database = knowhere::GenDataset(N, DIM, raw_data.data());
     std::cout << "init ivf_nm " << timer.get_step_seconds() << " seconds" << std::endl;
@@ -275,7 +279,6 @@ TEST(Indexing, IVFFlatNM) {
     indexing->AddWithoutIds(database, conf);
     std::cout << "insert ivf_nm " << timer.get_step_seconds() << " seconds" << std::endl;
 
-    indexing->SetIndexSize(NQ * DIM * sizeof(float));
     knowhere::BinarySet bs = indexing->Serialize(conf);
 
     knowhere::BinaryPtr bptr = std::make_shared<knowhere::Binary>();
@@ -291,8 +294,8 @@ TEST(Indexing, IVFFlatNM) {
     auto result = indexing->Query(dataset, conf, nullptr);
     std::cout << "query ivf_nm " << timer.get_step_seconds() << " seconds" << std::endl;
 
-    auto ids = result->Get<int64_t*>(knowhere::meta::IDS);
-    auto dis = result->Get<float*>(knowhere::meta::DISTANCE);
+    auto ids = knowhere::GetDatasetIDs(result);
+    auto dis = knowhere::GetDatasetDistance(result);
     for (int i = 0; i < std::min(NQ * TOPK, 100); ++i) {
         std::cout << ids[i] << "->" << dis[i] << std::endl;
     }
@@ -304,23 +307,24 @@ TEST(Indexing, BinaryBruteForce) {
     int64_t topk = 5;
     int64_t round_decimal = 3;
     int64_t dim = 8192;
+    auto metric_type = knowhere::metric::JACCARD;
     auto result_count = topk * num_queries;
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField("vecbin", DataType::VECTOR_BINARY, dim, MetricType::METRIC_Jaccard);
+    auto vec_fid = schema->AddDebugField("vecbin", DataType::VECTOR_BINARY, dim, metric_type);
     auto i64_fid = schema->AddDebugField("age", DataType::INT64);
     auto dataset = DataGen(schema, N, 10);
     auto bin_vec = dataset.get_col<uint8_t>(vec_fid);
     auto query_data = 1024 * dim / 8 + bin_vec.data();
     query::dataset::SearchDataset search_dataset{
-        faiss::MetricType::METRIC_Jaccard,  //
-        num_queries,                        //
-        topk,                               //
+        metric_type,    //
+        num_queries,    //
+        topk,           //
         round_decimal,
         dim,        //
         query_data  //
     };
 
-    auto sub_result = query::BinarySearchBruteForce(search_dataset, bin_vec.data(), N, nullptr);
+    auto sub_result = query::BruteForceSearch(search_dataset, bin_vec.data(), N, nullptr);
 
     SearchResult sr;
     sr.total_nq_ = num_queries;

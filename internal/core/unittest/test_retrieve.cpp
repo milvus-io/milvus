@@ -48,7 +48,7 @@ TEST(Retrieve, AutoID) {
     auto schema = std::make_shared<Schema>();
     auto fid_64 = schema->AddDebugField("i64", DataType::INT64);
     auto DIM = 16;
-    auto fid_vec = schema->AddDebugField("vector_64", DataType::VECTOR_FLOAT, DIM, MetricType::METRIC_L2);
+    auto fid_vec = schema->AddDebugField("vector_64", DataType::VECTOR_FLOAT, DIM, knowhere::metric::L2);
     schema->set_primary_field_id(fid_64);
 
     int64_t N = 100;
@@ -98,7 +98,7 @@ TEST(Retrieve, AutoID2) {
     auto schema = std::make_shared<Schema>();
     auto fid_64 = schema->AddDebugField("i64", DataType::INT64);
     auto DIM = 16;
-    auto fid_vec = schema->AddDebugField("vector_64", DataType::VECTOR_FLOAT, DIM, MetricType::METRIC_L2);
+    auto fid_vec = schema->AddDebugField("vector_64", DataType::VECTOR_FLOAT, DIM, knowhere::metric::L2);
     schema->set_primary_field_id(fid_64);
 
     int64_t N = 100;
@@ -143,7 +143,7 @@ TEST(Retrieve, NotExist) {
     auto schema = std::make_shared<Schema>();
     auto fid_64 = schema->AddDebugField("i64", DataType::INT64);
     auto DIM = 16;
-    auto fid_vec = schema->AddDebugField("vector_64", DataType::VECTOR_FLOAT, DIM, MetricType::METRIC_L2);
+    auto fid_vec = schema->AddDebugField("vector_64", DataType::VECTOR_FLOAT, DIM, knowhere::metric::L2);
     schema->set_primary_field_id(fid_64);
 
     int64_t N = 100;
@@ -191,7 +191,7 @@ TEST(Retrieve, Empty) {
     auto schema = std::make_shared<Schema>();
     auto fid_64 = schema->AddDebugField("i64", DataType::INT64);
     auto DIM = 16;
-    auto fid_vec = schema->AddDebugField("vector_64", DataType::VECTOR_FLOAT, DIM, MetricType::METRIC_L2);
+    auto fid_vec = schema->AddDebugField("vector_64", DataType::VECTOR_FLOAT, DIM, knowhere::metric::L2);
     schema->set_primary_field_id(fid_64);
 
     int64_t N = 100;
@@ -226,7 +226,7 @@ TEST(Retrieve, LargeTimestamp) {
     auto schema = std::make_shared<Schema>();
     auto fid_64 = schema->AddDebugField("i64", DataType::INT64);
     auto DIM = 16;
-    auto fid_vec = schema->AddDebugField("vector_64", DataType::VECTOR_FLOAT, DIM, MetricType::METRIC_L2);
+    auto fid_vec = schema->AddDebugField("vector_64", DataType::VECTOR_FLOAT, DIM, knowhere::metric::L2);
     schema->set_primary_field_id(fid_64);
 
     int64_t N = 100;
@@ -276,7 +276,7 @@ TEST(Retrieve, Delete) {
     auto schema = std::make_shared<Schema>();
     auto fid_64 = schema->AddDebugField("i64", DataType::INT64);
     auto DIM = 16;
-    auto fid_vec = schema->AddDebugField("vector_64", DataType::VECTOR_FLOAT, DIM, MetricType::METRIC_L2);
+    auto fid_vec = schema->AddDebugField("vector_64", DataType::VECTOR_FLOAT, DIM, knowhere::metric::L2);
     schema->set_primary_field_id(fid_64);
 
     int64_t N = 10;

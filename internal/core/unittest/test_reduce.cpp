@@ -25,7 +25,7 @@ TEST(Reduce, SubQueryResult) {
     int64_t iteration = 50;
     int64_t round_decimal = 3;
     constexpr int64_t limit = 100000000L;
-    auto metric_type = MetricType::METRIC_L2;
+    auto metric_type = knowhere::metric::L2;
     using queue_type = std::priority_queue<int64_t>;
 
     std::vector<queue_type> ref_results(num_queries);
@@ -77,7 +77,7 @@ TEST(Reduce, SubSearchResultDesc) {
     int64_t round_decimal = 3;
     constexpr int64_t limit = 100000000L;
     constexpr int64_t init_value = 0;
-    auto metric_type = MetricType::METRIC_INNER_PRODUCT;
+    auto metric_type = knowhere::metric::IP;
     using queue_type = std::priority_queue<int64_t, std::vector<int64_t>, std::greater<int64_t>>;
 
     std::vector<queue_type> ref_results(num_queries);

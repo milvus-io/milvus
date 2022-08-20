@@ -39,7 +39,7 @@ class StringIndexBaseTest : public ::testing::Test {
 
     void
     TearDown() override {
-        delete[](char*)(str_ds->Get<const void*>(knowhere::meta::TENSOR));
+        delete[](char*)(knowhere::GetDatasetTensor(str_ds));
     }
 
  protected:

@@ -11,7 +11,6 @@
 
 set(COMMON_SRC
         Schema.cpp
-        Types.cpp
         SystemProperty.cpp
         vector_index_c.cpp
         memory_c.cpp

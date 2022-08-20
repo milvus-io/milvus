@@ -21,7 +21,7 @@ namespace milvus::query {
 namespace dataset {
 
 struct SearchDataset {
-    MetricType metric_type;
+    knowhere::MetricType metric_type;
     int64_t num_queries;
     int64_t topk;
     int64_t round_decimal;

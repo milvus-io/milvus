@@ -30,8 +30,8 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
     auto& indexing_nonconst = const_cast<knowhere::VecIndex&>(indexing);
     auto ans = indexing_nonconst.Query(dataset, search_conf, bitset);
 
-    auto dis = ans->Get<float*>(knowhere::meta::DISTANCE);
-    auto uids = ans->Get<int64_t*>(knowhere::meta::IDS);
+    auto dis = knowhere::GetDatasetDistance(ans);
+    auto uids = knowhere::GetDatasetIDs(ans);
 
     SubSearchResult sub_qr(num_queries, topK, metric_type, round_decimal);
     std::copy_n(dis, num_queries * topK, sub_qr.get_distances());

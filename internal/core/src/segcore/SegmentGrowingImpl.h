@@ -30,7 +30,6 @@
 #include "SegmentGrowing.h"
 
 #include "exceptions/EasyAssert.h"
-#include "knowhere/index/vector_index/VecIndex.h"
 #include "query/PlanNode.h"
 #include "query/deprecated/GeneralQuery.h"
 #include "utils/Status.h"

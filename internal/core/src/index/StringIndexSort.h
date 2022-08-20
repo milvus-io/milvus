@@ -13,9 +13,10 @@
 #include <vector>
 #include <string>
 
+#include "common/Utils.h"
 #include "index/ScalarIndexSort.h"
 #include "index/StringIndex.h"
-#include "common/Utils.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 
 namespace milvus::scalar {
 // TODO: should inherit from StringIndex?
@@ -23,8 +24,8 @@ class StringIndexSort : public ScalarIndexSort<std::string> {
  public:
     void
     BuildWithDataset(const DatasetPtr& dataset) override {
-        auto size = dataset->Get<int64_t>(knowhere::meta::ROWS);
-        auto data = dataset->Get<const void*>(knowhere::meta::TENSOR);
+        auto size = knowhere::GetDatasetRows(dataset);
+        auto data = knowhere::GetDatasetTensor(dataset);
         proto::schema::StringArray arr;
         arr.ParseFromArray(data, size);
 

@@ -38,14 +38,14 @@ InferIndexType(const Json& search_params) {
     // ngtpanng / ngtonng -> max_search_edges / epsilon
     static const std::map<std::string, knowhere::IndexType> key_list = [] {
         std::map<std::string, knowhere::IndexType> list;
-        namespace ip = knowhere::IndexParams;
+        namespace ip = knowhere::indexparam;
         namespace ie = knowhere::IndexEnum;
-        list.emplace(ip::nprobe, ie::INDEX_FAISS_IVFFLAT);
+        list.emplace(ip::NPROBE, ie::INDEX_FAISS_IVFFLAT);
 #ifdef MILVUS_SUPPORT_NSG
         list.emplace(ip::search_length, ie::INDEX_NSG);
 #endif
-        list.emplace(ip::ef, ie::INDEX_HNSW);
-        list.emplace(ip::search_k, ie::INDEX_ANNOY);
+        list.emplace(ip::EF, ie::INDEX_HNSW);
+        list.emplace(ip::SEARCH_K, ie::INDEX_ANNOY);
 #ifdef MILVUS_SUPPORT_NGT
         list.emplace(ip::max_search_edges, ie::INDEX_NGTONNG);
         list.emplace(ip::epsilon, ie::INDEX_NGTONNG);
@@ -64,9 +64,9 @@ InferIndexType(const Json& search_params) {
 
 static knowhere::IndexType
 InferBinaryIndexType(const Json& search_params) {
-    namespace ip = knowhere::IndexParams;
+    namespace ip = knowhere::indexparam;
     namespace ie = knowhere::IndexEnum;
-    if (search_params.contains(ip::nprobe)) {
+    if (search_params.contains(ip::NPROBE)) {
         return ie::INDEX_FAISS_BIN_IVFFLAT;
     } else {
         return ie::INDEX_FAISS_BIN_IDMAP;
@@ -82,7 +82,7 @@ VerifyPlanNodeVisitor::visit(FloatVectorANNS& node) {
 
     // mock the api, topk will be passed from placeholder
     auto params_copy = search_params;
-    params_copy[knowhere::meta::TOPK] = 10;
+    knowhere::SetMetaTopk(params_copy, 10);
 
     // NOTE: the second parameter is not checked in knowhere, may be redundant
     auto passed = adapter->CheckSearch(params_copy, inferred_type, index_mode);
@@ -100,7 +100,7 @@ VerifyPlanNodeVisitor::visit(BinaryVectorANNS& node) {
 
     // mock the api, topk will be passed from placeholder
     auto params_copy = search_params;
-    params_copy[knowhere::meta::TOPK] = 10;
+    knowhere::SetMetaTopk(params_copy, 10);
 
     // NOTE: the second parameter is not checked in knowhere, may be redundant
     auto passed = adapter->CheckSearch(params_copy, inferred_type, index_mode);

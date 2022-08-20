@@ -29,8 +29,8 @@ namespace spb = proto::schema;
 static SchemaPtr
 getStandardSchema() {
     auto schema = std::make_shared<Schema>();
-    schema->AddDebugField("FloatVectorField", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
-    schema->AddDebugField("BinaryVectorField", DataType::VECTOR_BINARY, 16, MetricType::METRIC_Jaccard);
+    schema->AddDebugField("FloatVectorField", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    schema->AddDebugField("BinaryVectorField", DataType::VECTOR_BINARY, 16, knowhere::metric::JACCARD);
     schema->AddDebugField("Int64Field", DataType::INT64);
     schema->AddDebugField("Int32Field", DataType::INT32);
     schema->AddDebugField("Int16Field", DataType::INT16);
