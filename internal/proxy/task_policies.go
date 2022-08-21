@@ -14,7 +14,8 @@ import (
 
 // type pickShardPolicy func(ctx context.Context, mgr *shardClientMgr, query func(UniqueID, types.QueryNode) error, leaders []nodeInfo) error
 
-type pickShardPolicy func(context.Context, *shardClientMgr, func(context.Context, UniqueID, types.QueryNode, []string) error, map[string][]nodeInfo) error
+type RequestAction func(context.Context, UniqueID, types.QueryNode, []string) error
+type pickShardPolicy func(context.Context, *shardClientMgr, RequestAction, map[string][]nodeInfo) error
 
 var (
 	errBegin               = errors.New("begin error")
@@ -89,7 +90,7 @@ func groupShardleadersWithSameQueryNode(
 func mergeRoundRobinPolicy(
 	ctx context.Context,
 	mgr *shardClientMgr,
-	query func(context.Context, UniqueID, types.QueryNode, []string) error,
+	query RequestAction,
 	dml2leaders map[string][]nodeInfo) error {
 	nexts := make(map[string]int)
 	errSet := make(map[string]error) // record err for dml channels

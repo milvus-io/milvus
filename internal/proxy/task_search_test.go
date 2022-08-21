@@ -1539,7 +1539,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 
 		shardsNum      = int32(2)
 		collectionName = t.Name() + funcutil.GenRandomStr()
-		errPolicy      = func(context.Context, *shardClientMgr, func(context.Context, int64, types.QueryNode, []string) error, map[string][]nodeInfo) error {
+		errPolicy      = func(context.Context, *shardClientMgr, RequestAction, map[string][]nodeInfo) error {
 			return fmt.Errorf("fake error")
 		}
 	)

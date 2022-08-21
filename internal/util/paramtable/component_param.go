@@ -438,6 +438,7 @@ type proxyConfig struct {
 	MaxFieldNum              int64
 	MaxShardNum              int32
 	MaxDimension             int64
+	SearchQueryNodeDirectly  bool
 	GinLogging               bool
 	MaxUserNum               int
 	MaxRoleNum               int
@@ -586,6 +587,10 @@ func (p *proxyConfig) initMaxRoleNum() {
 		panic(err)
 	}
 	p.MaxRoleNum = int(maxRoleNum)
+}
+
+func (p *proxyConfig) initSearchQueryNodeDirectly() {
+	p.SearchQueryNodeDirectly = p.Base.ParseBool("proxy.searchQuerynodeDirectly", false)
 }
 
 ///////////////////////////////////////////////////////////////////////////////

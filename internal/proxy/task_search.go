@@ -303,7 +303,16 @@ func (t *searchTask) Execute(ctx context.Context) error {
 		}
 		t.resultBuf = make(chan *internalpb.SearchResults, len(shard2Leaders))
 		t.toReduceResults = make([]*internalpb.SearchResults, 0, len(shard2Leaders))
-		if err := t.searchShardPolicy(ctx, t.shardMgr, t.searchShard, shard2Leaders); err != nil {
+		neadSearchDirectly := Params.ProxyCfg.SearchQueryNodeDirectly
+
+		var searchFunc RequestAction
+		if neadSearchDirectly {
+			searchFunc = t.searchDirectly
+		} else {
+			searchFunc = t.searchShard
+		}
+
+		if err := t.searchShardPolicy(ctx, t.shardMgr, searchFunc, shard2Leaders); err != nil {
 			log.Warn("failed to do search", zap.Error(err), zap.String("Shards", fmt.Sprintf("%v", shard2Leaders)))
 			return err
 		}
@@ -407,11 +416,20 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
+func (t *searchTask) searchDirectly(ctx context.Context, nodeID int64, qn types.QueryNode, channelIDs []string) error {
+	return t.doSearch(ctx, nodeID, qn, channelIDs, false)
+}
+
 func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.QueryNode, channelIDs []string) error {
+	return t.doSearch(ctx, nodeID, qn, channelIDs, true)
+}
+
+func (t *searchTask) doSearch(ctx context.Context, nodeID int64, qn types.QueryNode, channelIDs []string, fromShardLeader bool) error {
 	req := &querypb.SearchRequest{
-		Req:         t.SearchRequest,
-		DmlChannels: channelIDs,
-		Scope:       querypb.DataScope_All,
+		Req:             t.SearchRequest,
+		DmlChannels:     channelIDs,
+		Scope:           querypb.DataScope_All,
+		FromShardLeader: fromShardLeader,
 	}
 	result, err := qn.Search(ctx, req)
 	if err != nil {
