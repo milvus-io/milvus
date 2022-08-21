@@ -319,7 +319,7 @@ common:
 
   defaultPartitionName: "_default"  # default partition name for a collection
   defaultIndexName: "_default_idx"  # default index name
-  retentionDuration: 432000 # 5 days in seconds
+  retentionDuration: 86400 # time travel reserved time, insert/delete will not be cleaned in this period. 1 days in seconds
   entityExpiration:  -1     # Entity expiration in seconds, CAUTION make sure entityExpiration >= retentionDuration and -1 means never expire
 
   gracefulTime: 5000 # milliseconds. it represents the interval (in ms) by which the request arrival time needs to be subtracted in the case of Bounded Consistency.
