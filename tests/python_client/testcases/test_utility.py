@@ -1993,8 +1993,21 @@ class TestUtilityInvalidUserPassword(TestcaseBase):
         """
         self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
                                      password=ct.default_password, check_task=ct.CheckTasks.ccr)
+
+        # add user and bind to role
+        user = cf.gen_unique_str(prefix)
+        password = cf.gen_unique_str(prefix)
+        r_name = cf.gen_unique_str(prefix)
+        u, _ = self.utility_wrap.create_user(user=user, password=password)
+
+        self.utility_wrap.init_role(r_name)
+        self.utility_wrap.create_role()
+        self.utility_wrap.role_add_user(user)
+
+        # get roles
         role_groups, _ = self.utility_wrap.list_roles(False)
 
+        # drop roles
         for role_group in role_groups.groups:
             if role_group.role_name not in ['admin', 'public']:
                 self.utility_wrap.init_role(role_group.role_name)
@@ -2006,14 +2019,15 @@ class TestUtilityInvalidUserPassword(TestcaseBase):
         assert len(role_groups.groups) == 2
 
     @pytest.mark.tags(CaseLabel.L3)
-    def test_role_list_user(self, host, port):
+    def test_role_list_user_with_root_user(self, host, port):
         """
         target: check list user
         method: check list user with root
-        expected: assert root bind to admin and public role
+        expected: assert list user success, and root has no roles
         """
         self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
                                      password=ct.default_password, check_task=ct.CheckTasks.ccr)
+
         user_info, _ = self.utility_wrap.list_user("root", True)
         user_item = user_info.groups[0]
         assert len(user_item.roles) == 0
@@ -2022,14 +2036,35 @@ class TestUtilityInvalidUserPassword(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L3)
     def test_role_list_users(self, host, port):
         """
-        target: check list user
-        method: check list user with root
-        expected: assert root bind to admin and public role
+        target: check list users
+        method: check list users con
+        expected: assert list users success
         """
         self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
                                      password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        # add user and bind to role
+        user = cf.gen_unique_str(prefix)
+        password = cf.gen_unique_str(prefix)
+        r_name = cf.gen_unique_str(prefix)
+        u, _ = self.utility_wrap.create_user(user=user, password=password)
+
+        self.utility_wrap.init_role(r_name)
+        self.utility_wrap.create_role()
+        self.utility_wrap.role_add_user(user)
+
+        # get users
         user_info, _ = self.utility_wrap.list_users(True)
-        assert len(user_info.groups) > 0
+
+        # check root user and new user
+        root_exist = False
+        new_user_exist = False
+        for user_item in user_info.groups:
+            if user_item.username == "root" and len(user_item.roles) == 0:
+                root_exist = True
+            if user_item.username == user and user_item.roles[0] == r_name:
+                new_user_exist = True
+        assert root_exist
+        assert new_user_exist
 
     @pytest.mark.tags(CaseLabel.L3)
     def test_create_role(self, host, port):
@@ -2180,9 +2215,6 @@ class TestUtilityInvalidUserPassword(TestcaseBase):
         collection_w2 = self.init_collection_wrap(name=c_name_2)
         collection_w2.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
-        # tear down
-        self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
-
     @pytest.mark.tags(CaseLabel.L3)
     def test_role_revoke_collection_insert(self, host, port):
         """
@@ -2253,44 +2285,10 @@ class TestUtilityInvalidUserPassword(TestcaseBase):
 
         # grant user privilege
         self.utility_wrap.init_role(r_name)
-        self.utility_wrap.role_grant("Collection", c_name, "Load")
-        self.utility_wrap.role_grant("Collection", c_name, "Release")
-        self.utility_wrap.role_grant("Collection", c_name, "Compaction")
-        self.utility_wrap.role_grant("Collection", c_name, "Insert")
-        self.utility_wrap.role_grant("Collection", c_name, "Delete")
-        self.utility_wrap.role_grant("Collection", c_name, "GetStatistics")
-        self.utility_wrap.role_grant("Collection", c_name, "CreateIndex")
-        self.utility_wrap.role_grant("Collection", c_name, "IndexDetail")
-        self.utility_wrap.role_grant("Collection", c_name, "DropIndex")
-        self.utility_wrap.role_grant("Collection", c_name, "Search")
-        self.utility_wrap.role_grant("Collection", c_name, "Flush")
-        self.utility_wrap.role_grant("Collection", c_name, "Query")
-        self.utility_wrap.role_grant("Collection", c_name, "LoadBalance")
-        self.utility_wrap.role_grant("Collection", c_name, "Import")
-        self.utility_wrap.role_grant("Global", "*", "All")
-        self.utility_wrap.role_grant("Global", "*", "CreateCollection")
-        self.utility_wrap.role_grant("Global", "*", "DropCollection")
-        self.utility_wrap.role_grant("Global", "*", "DescribeCollection")
-        self.utility_wrap.role_grant("Global", "*", "ShowCollections")
-        self.utility_wrap.role_grant("Global", "*", "CreateOwnership")
-        self.utility_wrap.role_grant("Global", "*", "DropOwnership")
-        self.utility_wrap.role_grant("Global", "*", "SelectOwnership")
-        self.utility_wrap.role_grant("Global", "*", "ManageOwnership")
-        self.utility_wrap.role_grant("User", "*", "UpdateUser")
-        self.utility_wrap.role_grant("User", "*", "SelectUser")
+        grant_list = cf.gen_grant_list(c_name)
+        for grant_item in grant_list:
+            self.utility_wrap.role_grant(grant_item["object"], grant_item["object_name"], grant_item["privilege"])
 
         # list grants
         g_list, _ = self.utility_wrap.role_list_grants()
-        assert len(g_list.groups) == 25
-
-        # tear down
-        role_groups, _ = self.utility_wrap.list_roles(False)
-        for role_group in role_groups.groups:
-            if role_group.role_name not in ['admin', 'public']:
-                self.utility_wrap.init_role(role_group.role_name)
-                g_list, _ = self.utility_wrap.role_list_grants()
-                for g in g_list.groups:
-                    self.utility_wrap.role_revoke(g.object, g.object_name, g.privilege)
-                self.utility_wrap.role_drop()
-        role_groups, _ = self.utility_wrap.list_roles(False)
-        assert len(role_groups.groups) == 2
+        assert len(g_list.groups) == len(grant_list)

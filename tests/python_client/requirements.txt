@@ -9,7 +9,7 @@ allure-pytest==2.7.0
 pytest-print==0.2.1
 pytest-level==0.1.1
 pytest-xdist==2.5.0
-pymilvus==2.2.0.dev8
+pymilvus==2.2.0.dev19
 pytest-rerunfailures==9.1.1
 git+https://github.com/Projectplace/pytest-tags
 ndg-httpsclient
@@ -29,7 +29,7 @@ python-benedict==0.24.3
 timeout-decorator==0.5.0
 
 # version need to be consistent with protobuf used in pymilvus
-protobuf==3.17.1
+protobuf==4.21.5
 
 # for bulk load test
 minio==7.1.5
