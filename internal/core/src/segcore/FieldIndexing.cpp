@@ -48,14 +48,13 @@ VectorFieldIndexing::get_build_params() const {
     // TODO
     auto type_opt = field_meta_.get_metric_type();
     AssertInfo(type_opt.has_value(), "Metric type of field meta doesn't have value");
-    auto metric_type = type_opt.value();
-    auto type_name = MetricTypeToName(metric_type);
+    auto& metric_type = type_opt.value();
     auto& config = segcore_config_.at(metric_type);
     auto base_params = config.build_params;
 
     AssertInfo(base_params.count("nlist"), "Can't get nlist from index params");
-    base_params[knowhere::meta::DIM] = field_meta_.get_dim();
-    base_params[knowhere::Metric::TYPE] = type_name;
+    knowhere::SetMetaDim(base_params, field_meta_.get_dim());
+    knowhere::SetMetaMetricType(base_params, metric_type);
 
     return base_params;
 }
@@ -65,14 +64,13 @@ VectorFieldIndexing::get_search_params(int top_K) const {
     // TODO
     auto type_opt = field_meta_.get_metric_type();
     AssertInfo(type_opt.has_value(), "Metric type of field meta doesn't have value");
-    auto metric_type = type_opt.value();
-    auto type_name = MetricTypeToName(metric_type);
+    auto& metric_type = type_opt.value();
     auto& config = segcore_config_.at(metric_type);
 
     auto base_params = config.search_params;
     AssertInfo(base_params.count("nprobe"), "Can't get nprobe from base params");
-    base_params[knowhere::meta::TOPK] = top_K;
-    base_params[knowhere::Metric::TYPE] = type_name;
+    knowhere::SetMetaTopk(base_params, top_K);
+    knowhere::SetMetaMetricType(base_params, metric_type);
 
     return base_params;
 }

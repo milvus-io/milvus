@@ -16,9 +16,9 @@
 #include <string>
 #include <vector>
 
-#include "knowhere/index/vector_index/VecIndex.h"
-#include "knowhere/common/BinarySet.h"
 #include "indexbuilder/IndexCreatorBase.h"
+#include "knowhere/common/BinarySet.h"
+#include "knowhere/index/VecIndex.h"
 
 namespace milvus::indexbuilder {
 
@@ -74,7 +74,7 @@ class VecIndexCreator : public IndexCreatorBase {
 
     template <typename T>
     std::optional<T>
-    get_config_by_name(std::string name);
+    get_config_by_name(const std::string& name);
 
     void
     StoreRawData(const knowhere::DatasetPtr& dataset);

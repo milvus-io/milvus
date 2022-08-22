@@ -200,7 +200,7 @@ Parser::ParseVecNode(const Json& out_body) {
         }
     }();
     vec_node->search_info_.topk_ = topk;
-    vec_node->search_info_.metric_type_ = GetMetricType(vec_info.at("metric_type"));
+    vec_node->search_info_.metric_type_ = vec_info.at("metric_type");
     vec_node->search_info_.search_params_ = vec_info.at("params");
     vec_node->search_info_.field_id_ = field_id;
     vec_node->search_info_.round_decimal_ = vec_info.at("round_decimal");

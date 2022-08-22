@@ -14,14 +14,15 @@
 #include <google/protobuf/text_format.h>
 
 #include "exceptions/EasyAssert.h"
-#include "pb/index_cgo_msg.pb.h"
 #include "indexbuilder/VecIndexCreator.h"
 #include "indexbuilder/utils.h"
 #include "knowhere/common/Timer.h"
-#include "knowhere/common/Utils.h"
+#include "knowhere/index/VecIndex.h"
+#include "knowhere/index/VecIndexFactory.h"
 #include "knowhere/index/vector_index/ConfAdapterMgr.h"
-#include "knowhere/index/vector_index/VecIndexFactory.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
+#include "pb/index_cgo_msg.pb.h"
 
 namespace milvus::indexbuilder {
 
@@ -61,50 +62,52 @@ VecIndexCreator::parse_impl(const std::string& serialized_params_str, knowhere::
     auto stof_closure = [](const std::string& s) -> float { return std::stof(s); };
 
     /***************************** meta *******************************/
+    check_parameter<int>(conf, knowhere::meta::SLICE_SIZE, stoi_closure, std::optional{4});
     check_parameter<int>(conf, knowhere::meta::DIM, stoi_closure, std::nullopt);
     check_parameter<int>(conf, knowhere::meta::TOPK, stoi_closure, std::nullopt);
 
     /***************************** IVF Params *******************************/
-    check_parameter<int>(conf, knowhere::IndexParams::nprobe, stoi_closure, std::nullopt);
-    check_parameter<int>(conf, knowhere::IndexParams::nlist, stoi_closure, std::nullopt);
-    check_parameter<int>(conf, knowhere::IndexParams::m, stoi_closure, std::nullopt);
-    check_parameter<int>(conf, knowhere::IndexParams::nbits, stoi_closure, std::nullopt);
-
-    /************************** NSG Parameter **************************/
-    check_parameter<int>(conf, knowhere::IndexParams::knng, stoi_closure, std::nullopt);
-    check_parameter<int>(conf, knowhere::IndexParams::search_length, stoi_closure, std::nullopt);
-    check_parameter<int>(conf, knowhere::IndexParams::out_degree, stoi_closure, std::nullopt);
-    check_parameter<int>(conf, knowhere::IndexParams::candidate, stoi_closure, std::nullopt);
-
-    /************************** HNSW Params *****************************/
-    check_parameter<int>(conf, knowhere::IndexParams::efConstruction, stoi_closure, std::nullopt);
-    check_parameter<int>(conf, knowhere::IndexParams::M, stoi_closure, std::nullopt);
-    check_parameter<int>(conf, knowhere::IndexParams::ef, stoi_closure, std::nullopt);
-
-    /************************** Annoy Params *****************************/
-    check_parameter<int>(conf, knowhere::IndexParams::n_trees, stoi_closure, std::nullopt);
-    check_parameter<int>(conf, knowhere::IndexParams::search_k, stoi_closure, std::nullopt);
+    check_parameter<int>(conf, knowhere::indexparam::NPROBE, stoi_closure, std::nullopt);
+    check_parameter<int>(conf, knowhere::indexparam::NLIST, stoi_closure, std::nullopt);
+    check_parameter<int>(conf, knowhere::indexparam::M, stoi_closure, std::nullopt);
+    check_parameter<int>(conf, knowhere::indexparam::NBITS, stoi_closure, std::nullopt);
 
     /************************** PQ Params *****************************/
-    check_parameter<int>(conf, knowhere::IndexParams::PQM, stoi_closure, std::nullopt);
+    check_parameter<int>(conf, knowhere::indexparam::PQ_M, stoi_closure, std::nullopt);
 
+#ifdef MILVUS_SUPPORT_NSG
+    /************************** NSG Parameter **************************/
+    check_parameter<int>(conf, knowhere::indexparam::KNNG, stoi_closure, std::nullopt);
+    check_parameter<int>(conf, knowhere::indexparam::SEARCH_LENGTH, stoi_closure, std::nullopt);
+    check_parameter<int>(conf, knowhere::indexparam::OUT_DEGREE, stoi_closure, std::nullopt);
+    check_parameter<int>(conf, knowhere::indexparam::CANDIDATE, stoi_closure, std::nullopt);
+#endif
+
+    /************************** HNSW Params *****************************/
+    check_parameter<int>(conf, knowhere::indexparam::EFCONSTRUCTION, stoi_closure, std::nullopt);
+    check_parameter<int>(conf, knowhere::indexparam::HNSW_M, stoi_closure, std::nullopt);
+    check_parameter<int>(conf, knowhere::indexparam::EF, stoi_closure, std::nullopt);
+
+    /************************** Annoy Params *****************************/
+    check_parameter<int>(conf, knowhere::indexparam::N_TREES, stoi_closure, std::nullopt);
+    check_parameter<int>(conf, knowhere::indexparam::SEARCH_K, stoi_closure, std::nullopt);
+
+#ifdef MILVUS_SUPPORT_NGT
     /************************** NGT Params *****************************/
-    check_parameter<int>(conf, knowhere::IndexParams::edge_size, stoi_closure, std::nullopt);
+    check_parameter<int>(conf, knowhere::indexparam::EDGE_SIZE, stoi_closure, std::nullopt);
 
     /************************** NGT Search Params *****************************/
-    check_parameter<float>(conf, knowhere::IndexParams::epsilon, stof_closure, std::nullopt);
-    check_parameter<int>(conf, knowhere::IndexParams::max_search_edges, stoi_closure, std::nullopt);
+    check_parameter<float>(conf, knowhere::indexparam::EPSILON, stof_closure, std::nullopt);
+    check_parameter<int>(conf, knowhere::indexparam::MAX_SEARCH_EDGES, stoi_closure, std::nullopt);
 
     /************************** NGT_PANNG Params *****************************/
-    check_parameter<int>(conf, knowhere::IndexParams::forcedly_pruned_edge_size, stoi_closure, std::nullopt);
-    check_parameter<int>(conf, knowhere::IndexParams::selectively_pruned_edge_size, stoi_closure, std::nullopt);
+    check_parameter<int>(conf, knowhere::indexparam::FORCEDLY_PRUNED_EDGE_SIZE, stoi_closure, std::nullopt);
+    check_parameter<int>(conf, knowhere::indexparam::SELECTIVELY_PRUNED_EDGE_SIZE, stoi_closure, std::nullopt);
 
     /************************** NGT_ONNG Params *****************************/
-    check_parameter<int>(conf, knowhere::IndexParams::outgoing_edge_size, stoi_closure, std::nullopt);
-    check_parameter<int>(conf, knowhere::IndexParams::incoming_edge_size, stoi_closure, std::nullopt);
-
-    /************************** Serialize Params *******************************/
-    check_parameter<int>(conf, knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, stoi_closure, std::optional{4});
+    check_parameter<int>(conf, knowhere::indexparam::OUTGOING_EDGE_SIZE, stoi_closure, std::nullopt);
+    check_parameter<int>(conf, knowhere::indexparam::INCOMING_EDGE_SIZE, stoi_closure, std::nullopt);
+#endif
 }
 
 void
@@ -136,9 +139,9 @@ VecIndexCreator::check_parameter(knowhere::Config& conf,
 
 template <typename T>
 std::optional<T>
-VecIndexCreator::get_config_by_name(std::string name) {
+VecIndexCreator::get_config_by_name(const std::string& name) {
     if (config_.contains(name)) {
-        return {config_[name].get<T>()};
+        return knowhere::GetValueFromConfig<T>(config_, name);
     }
     return std::nullopt;
 }
@@ -154,10 +157,10 @@ void
 VecIndexCreator::BuildWithoutIds(const knowhere::DatasetPtr& dataset) {
     auto index_type = get_index_type();
     auto index_mode = get_index_mode();
-    config_[knowhere::meta::ROWS] = dataset->Get<int64_t>(knowhere::meta::ROWS);
+    knowhere::SetMetaRows(config_, knowhere::GetDatasetRows(dataset));
     if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFPQ) {
-        if (!config_.contains(knowhere::IndexParams::nbits)) {
-            config_[knowhere::IndexParams::nbits] = 8;
+        if (!config_.contains(knowhere::indexparam::NBITS)) {
+            knowhere::SetIndexParamNbits(config_, 8);
         }
     }
     auto conf_adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_type);
@@ -187,14 +190,12 @@ VecIndexCreator::BuildWithoutIds(const knowhere::DatasetPtr& dataset) {
 
 void
 VecIndexCreator::BuildWithIds(const knowhere::DatasetPtr& dataset) {
-    AssertInfo(dataset->data().find(knowhere::meta::IDS) != dataset->data().end(),
-               "[VecIndexCreator]Can't find ids field in dataset");
     auto index_type = get_index_type();
     auto index_mode = get_index_mode();
-    config_[knowhere::meta::ROWS] = dataset->Get<int64_t>(knowhere::meta::ROWS);
+    knowhere::SetMetaRows(config_, knowhere::GetDatasetRows(dataset));
     if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFPQ) {
-        if (!config_.contains(knowhere::IndexParams::nbits)) {
-            config_[knowhere::IndexParams::nbits] = 8;
+        if (!config_.contains(knowhere::indexparam::NBITS)) {
+            knowhere::SetIndexParamNbits(config_, 8);
         }
     }
     auto conf_adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_type);
@@ -212,9 +213,9 @@ void
 VecIndexCreator::StoreRawData(const knowhere::DatasetPtr& dataset) {
     auto index_type = get_index_type();
     if (is_in_nm_list(index_type)) {
-        auto tensor = dataset->Get<const void*>(knowhere::meta::TENSOR);
-        auto row_num = dataset->Get<int64_t>(knowhere::meta::ROWS);
-        auto dim = dataset->Get<int64_t>(knowhere::meta::DIM);
+        auto tensor = knowhere::GetDatasetTensor(dataset);
+        auto row_num = knowhere::GetDatasetRows(dataset);
+        auto dim = knowhere::GetDatasetDim(dataset);
         int64_t data_size;
         if (is_in_bin_list(index_type)) {
             data_size = dim / 8 * row_num;
@@ -268,15 +269,15 @@ VecIndexCreator::get_index_type() {
 
 std::string
 VecIndexCreator::get_metric_type() {
-    auto type = get_config_by_name<std::string>(knowhere::Metric::TYPE);
+    auto type = get_config_by_name<std::string>(knowhere::meta::METRIC_TYPE);
     if (type.has_value()) {
         return type.value();
     } else {
         auto index_type = get_index_type();
         if (is_in_bin_list(index_type)) {
-            return knowhere::Metric::JACCARD;
+            return knowhere::metric::JACCARD;
         } else {
-            return knowhere::Metric::L2;
+            return knowhere::metric::L2;
         }
     }
 }
@@ -293,8 +294,8 @@ VecIndexCreator::get_index_mode() {
 
 int64_t
 VecIndexCreator::get_index_file_slice_size() {
-    if (config_.contains(knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE)) {
-        return config_[knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE].get<int64_t>();
+    if (knowhere::CheckKeyInConfig(config_, knowhere::meta::SLICE_SIZE)) {
+        return knowhere::GetMetaSliceSize(config_);
     }
     return knowhere::index_file_slice_size;  // by default
 }
@@ -322,10 +323,10 @@ VecIndexCreator::QueryImpl(const knowhere::DatasetPtr& dataset, const knowhere::
     }
 
     auto res = index_->Query(dataset, conf, nullptr);
-    auto ids = res->Get<int64_t*>(knowhere::meta::IDS);
-    auto distances = res->Get<float*>(knowhere::meta::DISTANCE);
-    auto nq = dataset->Get<int64_t>(knowhere::meta::ROWS);
-    auto k = config_[knowhere::meta::TOPK].get<int64_t>();
+    auto ids = knowhere::GetDatasetIDs(res);
+    auto distances = knowhere::GetDatasetDistance(res);
+    auto nq = knowhere::GetDatasetRows(dataset);
+    auto k = knowhere::GetMetaTopk(config_);
 
     auto query_res = std::make_unique<VecIndexCreator::QueryResult>();
     query_res->nq = nq;

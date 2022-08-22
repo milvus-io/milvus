@@ -53,12 +53,12 @@ ShowPlanNodeVisitor::visit(FloatVectorANNS& node) {
     assert(!ret_);
     auto& info = node.search_info_;
     Json json_body{
-        {"node_type", "FloatVectorANNS"},                      //
-        {"metric_type", MetricTypeToName(info.metric_type_)},  //
-        {"field_id_", info.field_id_.get()},                   //
-        {"topk", info.topk_},                                  //
-        {"search_params", info.search_params_},                //
-        {"placeholder_tag", node.placeholder_tag_},            //
+        {"node_type", "FloatVectorANNS"},            //
+        {"metric_type", info.metric_type_},          //
+        {"field_id_", info.field_id_.get()},         //
+        {"topk", info.topk_},                        //
+        {"search_params", info.search_params_},      //
+        {"placeholder_tag", node.placeholder_tag_},  //
     };
     if (node.predicate_.has_value()) {
         ShowExprVisitor expr_show;
@@ -75,12 +75,12 @@ ShowPlanNodeVisitor::visit(BinaryVectorANNS& node) {
     assert(!ret_);
     auto& info = node.search_info_;
     Json json_body{
-        {"node_type", "BinaryVectorANNS"},                     //
-        {"metric_type", MetricTypeToName(info.metric_type_)},  //
-        {"field_id_", info.field_id_.get()},                   //
-        {"topk", info.topk_},                                  //
-        {"search_params", info.search_params_},                //
-        {"placeholder_tag", node.placeholder_tag_},            //
+        {"node_type", "BinaryVectorANNS"},           //
+        {"metric_type", info.metric_type_},          //
+        {"field_id_", info.field_id_.get()},         //
+        {"topk", info.topk_},                        //
+        {"search_params", info.search_params_},      //
+        {"placeholder_tag", node.placeholder_tag_},  //
     };
     if (node.predicate_.has_value()) {
         ShowExprVisitor expr_show;

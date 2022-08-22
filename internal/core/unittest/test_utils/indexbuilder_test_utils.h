@@ -16,21 +16,19 @@
 #include <limits>
 #include <cmath>
 #include <google/protobuf/text_format.h>
-#include <knowhere/common/MetricType.h>
-#include <knowhere/index/vector_index/helpers/IndexParameter.h>
-#include <knowhere/index/vector_index/adapter/VectorAdapter.h>
-#include <knowhere/index/vector_index/VecIndexFactory.h>
-#include <index/ScalarIndex.h>
-#include <index/StringIndex.h>
 
-#include "pb/index_cgo_msg.pb.h"
-
-#include "indexbuilder/VecIndexCreator.h"
-#include "indexbuilder/index_c.h"
 #include "DataGen.h"
-#include "indexbuilder/utils.h"
-#include "indexbuilder/helper.h"
+#include "index/ScalarIndex.h"
+#include "index/StringIndex.h"
 #include "indexbuilder/ScalarIndexCreator.h"
+#include "indexbuilder/VecIndexCreator.h"
+#include "indexbuilder/helper.h"
+#include "indexbuilder/index_c.h"
+#include "indexbuilder/utils.h"
+#include "knowhere/index/VecIndexFactory.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
+#include "pb/index_cgo_msg.pb.h"
 
 constexpr int64_t DIM = 8;
 constexpr int64_t NQ = 10;
@@ -52,164 +50,169 @@ auto
 generate_conf(const knowhere::IndexType& index_type, const knowhere::MetricType& metric_type) {
     if (index_type == knowhere::IndexEnum::INDEX_FAISS_IDMAP) {
         return knowhere::Config{
+            {knowhere::meta::SLICE_SIZE, knowhere::index_file_slice_size},
+            {knowhere::meta::METRIC_TYPE, metric_type},
             {knowhere::meta::DIM, DIM},
             {knowhere::meta::TOPK, K},
-            {knowhere::Metric::TYPE, metric_type},
-            {knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, knowhere::index_file_slice_size},
         };
     } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFPQ) {
         return knowhere::Config{
+            {knowhere::meta::SLICE_SIZE, knowhere::index_file_slice_size},
+            {knowhere::meta::METRIC_TYPE, metric_type},
             {knowhere::meta::DIM, DIM},
             {knowhere::meta::TOPK, K},
-            {knowhere::IndexParams::nlist, 16},
-            {knowhere::IndexParams::nprobe, 4},
-            {knowhere::IndexParams::m, 4},
-            {knowhere::IndexParams::nbits, 8},
-            {knowhere::Metric::TYPE, metric_type},
-            {knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, knowhere::index_file_slice_size},
+            {knowhere::indexparam::NLIST, 16},
+            {knowhere::indexparam::NPROBE, 4},
+            {knowhere::indexparam::M, 4},
+            {knowhere::indexparam::NBITS, 8},
         };
     } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT) {
         return knowhere::Config{
+            {knowhere::meta::SLICE_SIZE, knowhere::index_file_slice_size},
+            {knowhere::meta::METRIC_TYPE, metric_type},
             {knowhere::meta::DIM, DIM},
             {knowhere::meta::TOPK, K},
-            {knowhere::IndexParams::nlist, 16},
-            {knowhere::IndexParams::nprobe, 4},
-            {knowhere::Metric::TYPE, metric_type},
-            {knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, knowhere::index_file_slice_size},
+            {knowhere::indexparam::NLIST, 16},
+            {knowhere::indexparam::NPROBE, 4},
 #ifdef MILVUS_GPU_VERSION
-            {knowhere::meta::DEVICEID, DEVICEID},
+            {knowhere::meta::DEVICE_ID, DEVICEID},
 #endif
         };
     } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8) {
         return knowhere::Config{
+            {knowhere::meta::SLICE_SIZE, knowhere::index_file_slice_size},
+            {knowhere::meta::METRIC_TYPE, metric_type},
             {knowhere::meta::DIM, DIM},
             {knowhere::meta::TOPK, K},
-            {knowhere::IndexParams::nlist, 16},
-            {knowhere::IndexParams::nprobe, 4},
-            {knowhere::IndexParams::nbits, 8},
-            {knowhere::Metric::TYPE, metric_type},
-            {knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, knowhere::index_file_slice_size},
+            {knowhere::indexparam::NLIST, 16},
+            {knowhere::indexparam::NPROBE, 4},
+            {knowhere::indexparam::NBITS, 8},
 #ifdef MILVUS_GPU_VERSION
-            {knowhere::meta::DEVICEID, DEVICEID},
+            {knowhere::meta::DEVICE_ID, DEVICEID},
 #endif
         };
     } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT) {
         return knowhere::Config{
+            {knowhere::meta::SLICE_SIZE, knowhere::index_file_slice_size},
+            {knowhere::meta::METRIC_TYPE, metric_type},
             {knowhere::meta::DIM, DIM},
             {knowhere::meta::TOPK, K},
-            {knowhere::IndexParams::nlist, 16},
-            {knowhere::IndexParams::nprobe, 4},
-            {knowhere::IndexParams::m, 4},
-            {knowhere::IndexParams::nbits, 8},
-            {knowhere::Metric::TYPE, metric_type},
-            {knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, knowhere::index_file_slice_size},
+            {knowhere::indexparam::NLIST, 16},
+            {knowhere::indexparam::NPROBE, 4},
+            {knowhere::indexparam::M, 4},
+            {knowhere::indexparam::NBITS, 8},
         };
     } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP) {
         return knowhere::Config{
+            {knowhere::meta::SLICE_SIZE, knowhere::index_file_slice_size},
+            {knowhere::meta::METRIC_TYPE, metric_type},
             {knowhere::meta::DIM, DIM},
             {knowhere::meta::TOPK, K},
-            {knowhere::Metric::TYPE, metric_type},
         };
 #ifdef MILVUS_SUPPORT_NSG
     } else if (index_type == knowhere::IndexEnum::INDEX_NSG) {
         return knowhere::Config{
+            {knowhere::meta::METRIC_TYPE, metric_type},
             {knowhere::meta::DIM, DIM},
-            {knowhere::IndexParams::nlist, 163},
             {knowhere::meta::TOPK, K},
-            {knowhere::IndexParams::nprobe, 8},
-            {knowhere::IndexParams::knng, 20},
-            {knowhere::IndexParams::search_length, 40},
-            {knowhere::IndexParams::out_degree, 30},
-            {knowhere::IndexParams::candidate, 100},
-            {knowhere::Metric::TYPE, metric_type},
+            {knowhere::indexparam::NLIST, 163},
+            {knowhere::indexparam::NPROBE, 8},
+            {knowhere::indexparam::KNNG, 20},
+            {knowhere::indexparam::SEARCH_LENGTH, 40},
+            {knowhere::indexparam::OUT_DEGREE, 30},
+            {knowhere::indexparam::CANDIDATE, 100},
         };
 #endif
 #ifdef MILVUS_SUPPORT_SPTAG
     } else if (index_type == knowhere::IndexEnum::INDEX_SPTAG_KDT_RNT) {
         return knowhere::Config{
+            {knowhere::meta::SLICE_SIZE, knowhere::index_file_slice_size},
+            {knowhere::meta::METRIC_TYPE, metric_type},
             {knowhere::meta::DIM, DIM},
-            // {knowhere::meta::TOPK, 10},
-            {knowhere::Metric::TYPE, metric_type},
-            {knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, knowhere::index_file_slice_size},
+            {knowhere::meta::TOPK, 10},
         };
     } else if (index_type == knowhere::IndexEnum::INDEX_SPTAG_BKT_RNT) {
         return knowhere::Config{
+            {knowhere::meta::SLICE_SIZE, knowhere::index_file_slice_size},
+            {knowhere::meta::METRIC_TYPE, metric_type},
             {knowhere::meta::DIM, DIM},
-            // {knowhere::meta::TOPK, 10},
-            {knowhere::Metric::TYPE, metric_type},
-            {knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, knowhere::index_file_slice_size},
+            {knowhere::meta::TOPK, 10},
         };
 #endif
     } else if (index_type == knowhere::IndexEnum::INDEX_HNSW) {
         return knowhere::Config{
-            {knowhere::meta::DIM, DIM},       {knowhere::meta::TOPK, K},
-            {knowhere::IndexParams::M, 16},   {knowhere::IndexParams::efConstruction, 200},
-            {knowhere::IndexParams::ef, 200}, {knowhere::Metric::TYPE, metric_type},
+            {knowhere::meta::SLICE_SIZE, knowhere::index_file_slice_size},
+            {knowhere::meta::METRIC_TYPE, metric_type},
+            {knowhere::meta::DIM, DIM},
+            {knowhere::meta::TOPK, K},
+            {knowhere::indexparam::HNSW_M, 16},
+            {knowhere::indexparam::EFCONSTRUCTION, 200},
+            {knowhere::indexparam::EF, 200},
         };
     } else if (index_type == knowhere::IndexEnum::INDEX_ANNOY) {
         return knowhere::Config{
+            {knowhere::meta::SLICE_SIZE, knowhere::index_file_slice_size},
+            {knowhere::meta::METRIC_TYPE, metric_type},
             {knowhere::meta::DIM, DIM},
             {knowhere::meta::TOPK, K},
-            {knowhere::IndexParams::n_trees, 4},
-            {knowhere::IndexParams::search_k, 100},
-            {knowhere::Metric::TYPE, metric_type},
-            {knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, knowhere::index_file_slice_size},
+            {knowhere::indexparam::N_TREES, 4},
+            {knowhere::indexparam::SEARCH_K, 100},
         };
     } else if (index_type == knowhere::IndexEnum::INDEX_RHNSWFlat) {
         return knowhere::Config{
+            {knowhere::meta::SLICE_SIZE, knowhere::index_file_slice_size},
+            {knowhere::meta::METRIC_TYPE, metric_type},
             {knowhere::meta::DIM, DIM},
             {knowhere::meta::TOPK, K},
-            {knowhere::IndexParams::M, 16},
-            {knowhere::IndexParams::efConstruction, 200},
-            {knowhere::IndexParams::ef, 200},
-            {knowhere::Metric::TYPE, metric_type},
-            {knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, knowhere::index_file_slice_size},
+            {knowhere::indexparam::HNSW_M, 16},
+            {knowhere::indexparam::EFCONSTRUCTION, 200},
+            {knowhere::indexparam::EF, 200},
         };
     } else if (index_type == knowhere::IndexEnum::INDEX_RHNSWPQ) {
         return knowhere::Config{
+            {knowhere::meta::SLICE_SIZE, knowhere::index_file_slice_size},
+            {knowhere::meta::METRIC_TYPE, metric_type},
             {knowhere::meta::DIM, DIM},
             {knowhere::meta::TOPK, K},
-            {knowhere::IndexParams::M, 16},
-            {knowhere::IndexParams::efConstruction, 200},
-            {knowhere::IndexParams::ef, 200},
-            {knowhere::Metric::TYPE, metric_type},
-            {knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, knowhere::index_file_slice_size},
-            {knowhere::IndexParams::PQM, 8},
+            {knowhere::indexparam::HNSW_M, 16},
+            {knowhere::indexparam::EFCONSTRUCTION, 200},
+            {knowhere::indexparam::EF, 200},
+            {knowhere::indexparam::PQ_M, 8},
         };
     } else if (index_type == knowhere::IndexEnum::INDEX_RHNSWSQ) {
         return knowhere::Config{
+            {knowhere::meta::SLICE_SIZE, knowhere::index_file_slice_size},
+            {knowhere::meta::METRIC_TYPE, metric_type},
             {knowhere::meta::DIM, DIM},
             {knowhere::meta::TOPK, K},
-            {knowhere::IndexParams::M, 16},
-            {knowhere::IndexParams::efConstruction, 200},
-            {knowhere::IndexParams::ef, 200},
-            {knowhere::Metric::TYPE, metric_type},
-            {knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, knowhere::index_file_slice_size},
+            {knowhere::indexparam::HNSW_M, 16},
+            {knowhere::indexparam::EFCONSTRUCTION, 200},
+            {knowhere::indexparam::EF, 200},
         };
 #ifdef MILVUS_SUPPORT_NGT
     } else if (index_type == knowhere::IndexEnum::INDEX_NGTPANNG) {
         return knowhere::Config{
+            {knowhere::meta::SLICE_SIZE, knowhere::index_file_slice_size},
+            {knowhere::meta::METRIC_TYPE, metric_type},
             {knowhere::meta::DIM, DIM},
             {knowhere::meta::TOPK, K},
-            {knowhere::Metric::TYPE, metric_type},
-            {knowhere::IndexParams::edge_size, 10},
-            {knowhere::IndexParams::epsilon, 0.1},
-            {knowhere::IndexParams::max_search_edges, 50},
-            {knowhere::IndexParams::forcedly_pruned_edge_size, 60},
-            {knowhere::IndexParams::selectively_pruned_edge_size, 30},
-            {knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, knowhere::index_file_slice_size},
+            {knowhere::indexparam::EDGE_SIZE, 10},
+            {knowhere::indexparam::EPSILON, 0.1},
+            {knowhere::indexparam::MAX_SEARCH_EDGES, 50},
+            {knowhere::indexparam::FORCEDLY_PRUNED_EDGE_SIZE, 60},
+            {knowhere::indexparam::SELECTIVELY_PRUNED_EDGE_SIZE, 30},
         };
     } else if (index_type == knowhere::IndexEnum::INDEX_NGTONNG) {
         return knowhere::Config{
+            {knowhere::meta::SLICE_SIZE, knowhere::index_file_slice_size},
+            {knowhere::meta::METRIC_TYPE, metric_type},
             {knowhere::meta::DIM, DIM},
             {knowhere::meta::TOPK, K},
-            {knowhere::Metric::TYPE, metric_type},
-            {knowhere::IndexParams::edge_size, 20},
-            {knowhere::IndexParams::epsilon, 0.1},
-            {knowhere::IndexParams::max_search_edges, 50},
-            {knowhere::IndexParams::outgoing_edge_size, 5},
-            {knowhere::IndexParams::incoming_edge_size, 40},
-            {knowhere::INDEX_FILE_SLICE_SIZE_IN_MEGABYTE, knowhere::index_file_slice_size},
+            {knowhere::indexparam::EDGE_SIZE, 20},
+            {knowhere::indexparam::EPSILON, 0.1},
+            {knowhere::indexparam::MAX_SEARCH_EDGES, 50},
+            {knowhere::indexparam::OUTGOING_EDGE_SIZE, 5},
+            {knowhere::indexparam::INCOMING_EDGE_SIZE, 40},
         };
 #endif
     }
@@ -241,12 +244,11 @@ generate_params(const knowhere::IndexType& index_type, const knowhere::MetricTyp
 auto
 GenDataset(int64_t N, const knowhere::MetricType& metric_type, bool is_binary, int64_t dim = DIM) {
     auto schema = std::make_shared<milvus::Schema>();
-    auto faiss_metric_type = knowhere::GetMetricType(metric_type);
     if (!is_binary) {
-        schema->AddDebugField("fakevec", milvus::DataType::VECTOR_FLOAT, dim, faiss_metric_type);
+        schema->AddDebugField("fakevec", milvus::DataType::VECTOR_FLOAT, dim, metric_type);
         return milvus::segcore::DataGen(schema, N);
     } else {
-        schema->AddDebugField("fakebinvec", milvus::DataType::VECTOR_BINARY, dim, faiss_metric_type);
+        schema->AddDebugField("fakebinvec", milvus::DataType::VECTOR_BINARY, dim, metric_type);
         return milvus::segcore::DataGen(schema, N);
     }
 }
@@ -312,9 +314,9 @@ CountDistance(
     if (point_a == nullptr || point_b == nullptr) {
         return std::numeric_limits<float>::max();
     }
-    if (metric == knowhere::Metric::L2) {
+    if (metric == knowhere::metric::L2) {
         return L2(static_cast<const float*>(point_a), static_cast<const float*>(point_b), dim);
-    } else if (metric == knowhere::Metric::JACCARD) {
+    } else if (metric == knowhere::metric::JACCARD) {
         return Jaccard(static_cast<const uint8_t*>(point_a), static_cast<const uint8_t*>(point_b), dim);
     } else {
         return std::numeric_limits<float>::max();
@@ -327,9 +329,9 @@ CheckDistances(const QueryResultPtr& result,
                const knowhere::DatasetPtr& query_dataset,
                const knowhere::MetricType& metric,
                const float threshold = 1.0e-5) {
-    auto base_vecs = base_dataset->Get<float*>(knowhere::meta::TENSOR);
-    auto query_vecs = query_dataset->Get<float*>(knowhere::meta::TENSOR);
-    auto dim = base_dataset->Get<int64_t>(knowhere::meta::DIM);
+    auto base_vecs = (float*)knowhere::GetDatasetTensor(base_dataset);
+    auto query_vecs = (float*)knowhere::GetDatasetTensor(query_dataset);
+    auto dim = knowhere::GetDatasetDim(base_dataset);
     auto nq = result->nq;
     auto k = result->topk;
     for (auto i = 0; i < nq; i++) {

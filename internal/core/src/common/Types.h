@@ -30,7 +30,7 @@
 #include <NamedType/named_type.hpp>
 #include <variant>
 
-#include "knowhere/common/MetricType.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "pb/schema.pb.h"
 #include "pb/segcore.pb.h"
 #include "pb/plan.pb.h"
@@ -70,21 +70,16 @@ using ScalarArray = proto::schema::ScalarField;
 using DataArray = proto::schema::FieldData;
 using VectorArray = proto::schema::VectorField;
 using IdArray = proto::schema::IDs;
-using MetricType = faiss::MetricType;
 using InsertData = proto::segcore::InsertRecord;
 using PkType = std::variant<std::monostate, int64_t, std::string>;
 // tbb::concurrent_unordered_multimap equal_range too slow when multi repeated key
 // using Pk2OffsetType = tbb::concurrent_unordered_multimap<PkType, int64_t, std::hash<PkType>>;
 using Pk2OffsetType = std::unordered_map<PkType, std::vector<int64_t>, std::hash<PkType>>;
 
-MetricType
-GetMetricType(const std::string& type);
-
-std::string
-MetricTypeToName(MetricType metric_type);
-
-bool
-IsPrimaryKeyDataType(DataType data_type);
+inline bool
+IsPrimaryKeyDataType(DataType data_type) {
+    return data_type == DataType::INT64 || data_type == DataType::VARCHAR;
+}
 
 // NOTE: dependent type
 // used at meta-template programming
