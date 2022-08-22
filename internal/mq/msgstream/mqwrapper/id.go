@@ -24,4 +24,6 @@ type MessageID interface {
 	AtEarliestPosition() bool
 
 	LessOrEqualThan(msgID []byte) (bool, error)
+
+	Equal(msgID []byte) (bool, error)
 }
