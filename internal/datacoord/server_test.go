@@ -30,6 +30,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/minio/minio-go/v7"
 
@@ -1079,7 +1080,7 @@ func TestSaveBinlogPaths(t *testing.T) {
 
 		err := svr.channelManager.AddNode(0)
 		assert.Nil(t, err)
-		err = svr.channelManager.Watch(&channel{"ch1", 0})
+		err = svr.channelManager.Watch(&channel{Name: "ch1", CollectionID: 0})
 		assert.Nil(t, err)
 
 		ctx := context.Background()
@@ -1142,7 +1143,7 @@ func TestSaveBinlogPaths(t *testing.T) {
 		defer closeTestServer(t, svr)
 		err := svr.channelManager.AddNode(0)
 		require.Nil(t, err)
-		err = svr.channelManager.Watch(&channel{"ch1", 0})
+		err = svr.channelManager.Watch(&channel{Name: "ch1", CollectionID: 0})
 		require.Nil(t, err)
 		s := &datapb.SegmentInfo{
 			ID:            1,
@@ -1185,7 +1186,7 @@ func TestSaveBinlogPaths(t *testing.T) {
 
 			err = svr.channelManager.AddNode(0)
 			assert.Nil(t, err)
-			err = svr.channelManager.Watch(&channel{"ch1", 1})
+			err = svr.channelManager.Watch(&channel{Name: "ch1", CollectionID: 1})
 			assert.Nil(t, err)
 
 			_, err = svr.SaveBinlogPaths(context.TODO(), &datapb.SaveBinlogPathsRequest{
@@ -1248,7 +1249,7 @@ func TestDropVirtualChannel(t *testing.T) {
 
 		err := svr.channelManager.AddNode(0)
 		require.Nil(t, err)
-		err = svr.channelManager.Watch(&channel{"ch1", 0})
+		err = svr.channelManager.Watch(&channel{Name: "ch1", CollectionID: 0})
 		require.Nil(t, err)
 
 		ctx := context.Background()
@@ -1321,7 +1322,7 @@ func TestDropVirtualChannel(t *testing.T) {
 
 		<-spyCh
 
-		err = svr.channelManager.Watch(&channel{"ch1", 0})
+		err = svr.channelManager.Watch(&channel{Name: "ch1", CollectionID: 0})
 		require.Nil(t, err)
 
 		//resend
@@ -1336,7 +1337,7 @@ func TestDropVirtualChannel(t *testing.T) {
 		defer closeTestServer(t, svr)
 		err := svr.channelManager.AddNode(0)
 		require.Nil(t, err)
-		err = svr.channelManager.Watch(&channel{"ch1", 0})
+		err = svr.channelManager.Watch(&channel{Name: "ch1", CollectionID: 0})
 		require.Nil(t, err)
 
 		resp, err := svr.DropVirtualChannel(context.Background(), &datapb.DropVirtualChannelRequest{
@@ -1661,13 +1662,13 @@ func TestGetVChannelPos(t *testing.T) {
 	assert.Nil(t, err)
 
 	t.Run("get unexisted channel", func(t *testing.T) {
-		vchan := svr.handler.GetVChanPositions("chx1", 0, allPartitionID)
+		vchan := svr.handler.GetVChanPositions(&channel{Name: "chx1", CollectionID: 0}, allPartitionID)
 		assert.Empty(t, vchan.UnflushedSegmentIds)
 		assert.Empty(t, vchan.FlushedSegmentIds)
 	})
 
 	t.Run("get existed channel", func(t *testing.T) {
-		vchan := svr.handler.GetVChanPositions("ch1", 0, allPartitionID)
+		vchan := svr.handler.GetVChanPositions(&channel{Name: "ch1", CollectionID: 0}, allPartitionID)
 		assert.EqualValues(t, 1, len(vchan.FlushedSegmentIds))
 		assert.EqualValues(t, 1, vchan.FlushedSegmentIds[0])
 		assert.EqualValues(t, 2, len(vchan.UnflushedSegmentIds))
@@ -1675,7 +1676,7 @@ func TestGetVChannelPos(t *testing.T) {
 	})
 
 	t.Run("empty collection", func(t *testing.T) {
-		infos := svr.handler.GetVChanPositions("ch0_suffix", 1, allPartitionID)
+		infos := svr.handler.GetVChanPositions(&channel{Name: "ch0_suffix", CollectionID: 1}, allPartitionID)
 		assert.EqualValues(t, 1, infos.CollectionID)
 		assert.EqualValues(t, 0, len(infos.FlushedSegmentIds))
 		assert.EqualValues(t, 0, len(infos.UnflushedSegmentIds))
@@ -1683,11 +1684,24 @@ func TestGetVChannelPos(t *testing.T) {
 	})
 
 	t.Run("filter partition", func(t *testing.T) {
-		infos := svr.handler.GetVChanPositions("ch1", 0, 1)
+		infos := svr.handler.GetVChanPositions(&channel{Name: "ch1", CollectionID: 0}, 1)
 		assert.EqualValues(t, 0, infos.CollectionID)
 		assert.EqualValues(t, 0, len(infos.FlushedSegmentIds))
 		assert.EqualValues(t, 1, len(infos.UnflushedSegmentIds))
 		assert.EqualValues(t, []byte{11, 12, 13}, infos.SeekPosition.MsgID)
+	})
+
+	t.Run("empty collection with passed positions", func(t *testing.T) {
+		vchannel := "ch_no_segment_1"
+		pchannel := funcutil.ToPhysicalChannel(vchannel)
+		infos := svr.handler.GetVChanPositions(&channel{
+			Name:           vchannel,
+			CollectionID:   0,
+			StartPositions: []*commonpb.KeyDataPair{{Key: pchannel, Data: []byte{14, 15, 16}}},
+		}, allPartitionID)
+		assert.EqualValues(t, 0, infos.CollectionID)
+		assert.EqualValues(t, vchannel, infos.ChannelName)
+		assert.EqualValues(t, []byte{14, 15, 16}, infos.SeekPosition.MsgID)
 	})
 }
 
@@ -1995,7 +2009,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 
 		err = svr.channelManager.AddNode(0)
 		assert.Nil(t, err)
-		err = svr.channelManager.Watch(&channel{"ch1", 0})
+		err = svr.channelManager.Watch(&channel{Name: "ch1", CollectionID: 0})
 		assert.Nil(t, err)
 
 		sResp, err := svr.SaveBinlogPaths(context.TODO(), binlogReq)
@@ -2686,7 +2700,7 @@ func TestDataCoord_Import(t *testing.T) {
 
 		err := svr.channelManager.AddNode(0)
 		assert.Nil(t, err)
-		err = svr.channelManager.Watch(&channel{"ch1", 0})
+		err = svr.channelManager.Watch(&channel{Name: "ch1", CollectionID: 0})
 		assert.Nil(t, err)
 
 		resp, err := svr.Import(svr.ctx, &datapb.ImportTaskRequest{
@@ -2706,7 +2720,7 @@ func TestDataCoord_Import(t *testing.T) {
 
 		err := svr.channelManager.AddNode(0)
 		assert.Nil(t, err)
-		err = svr.channelManager.Watch(&channel{"ch1", 0})
+		err = svr.channelManager.Watch(&channel{Name: "ch1", CollectionID: 0})
 		assert.Nil(t, err)
 
 		resp, err := svr.Import(svr.ctx, &datapb.ImportTaskRequest{
@@ -2811,7 +2825,7 @@ func TestDataCoord_AddSegment(t *testing.T) {
 
 		err := svr.channelManager.AddNode(110)
 		assert.Nil(t, err)
-		err = svr.channelManager.Watch(&channel{"ch1", 100})
+		err = svr.channelManager.Watch(&channel{Name: "ch1", CollectionID: 100})
 		assert.Nil(t, err)
 
 		status, err := svr.AddSegment(context.TODO(), &datapb.AddSegmentRequest{
@@ -2831,7 +2845,7 @@ func TestDataCoord_AddSegment(t *testing.T) {
 
 		err := svr.channelManager.AddNode(110)
 		assert.Nil(t, err)
-		err = svr.channelManager.Watch(&channel{"ch1", 100})
+		err = svr.channelManager.Watch(&channel{Name: "ch1", CollectionID: 100})
 		assert.Nil(t, err)
 
 		status, err := svr.AddSegment(context.TODO(), &datapb.AddSegmentRequest{

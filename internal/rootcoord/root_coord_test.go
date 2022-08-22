@@ -3077,7 +3077,7 @@ func TestCheckInit(t *testing.T) {
 	err = c.checkInit()
 	assert.Error(t, err)
 
-	c.CallWatchChannels = func(ctx context.Context, collectionID int64, channelNames []string) error {
+	c.CallWatchChannels = func(ctx context.Context, collectionID int64, channelNames []string, startPositions []*commonpb.KeyDataPair) error {
 		return nil
 	}
 	err = c.checkInit()

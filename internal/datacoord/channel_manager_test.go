@@ -116,7 +116,7 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 		}()
 
 		chManager.AddNode(nodeID)
-		chManager.Watch(&channel{channel1, collectionID})
+		chManager.Watch(&channel{Name: channel1, CollectionID: collectionID})
 
 		key := path.Join(prefix, strconv.FormatInt(nodeID, 10), channel1)
 		waitAndStore(t, metakv, key, datapb.ChannelWatchState_ToWatch, datapb.ChannelWatchState_WatchSuccess)
@@ -143,7 +143,7 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 		}()
 
 		chManager.AddNode(nodeID)
-		chManager.Watch(&channel{channel1, collectionID})
+		chManager.Watch(&channel{Name: channel1, CollectionID: collectionID})
 
 		key := path.Join(prefix, strconv.FormatInt(nodeID, 10), channel1)
 		waitAndStore(t, metakv, key, datapb.ChannelWatchState_ToWatch, datapb.ChannelWatchState_WatchFailure)
@@ -171,7 +171,7 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 		}()
 
 		chManager.AddNode(nodeID)
-		chManager.Watch(&channel{channel1, collectionID})
+		chManager.Watch(&channel{Name: channel1, CollectionID: collectionID})
 
 		// simulating timeout behavior of startOne, cuz 20s is a long wait
 		e := &ackEvent{
@@ -210,7 +210,7 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 			store: metakv,
 			channelsInfo: map[int64]*NodeChannelInfo{
 				nodeID: {nodeID, []*channel{
-					{channel1, collectionID},
+					{Name: channel1, CollectionID: collectionID},
 				}},
 				oldNode: {oldNode, []*channel{}},
 			},
@@ -252,7 +252,7 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 			store: metakv,
 			channelsInfo: map[int64]*NodeChannelInfo{
 				nodeID: {nodeID, []*channel{
-					{channel1, collectionID},
+					{Name: channel1, CollectionID: collectionID},
 				}},
 			},
 		}
@@ -295,7 +295,7 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 			store: metakv,
 			channelsInfo: map[int64]*NodeChannelInfo{
 				nodeID: {nodeID, []*channel{
-					{channel1, collectionID},
+					{Name: channel1, CollectionID: collectionID},
 				}},
 				oldNode: {oldNode, []*channel{}},
 			},
@@ -340,7 +340,7 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 			store: metakv,
 			channelsInfo: map[int64]*NodeChannelInfo{
 				nodeID: {nodeID, []*channel{
-					{channel1, collectionID},
+					{Name: channel1, CollectionID: collectionID},
 				}},
 			},
 		}
@@ -385,8 +385,8 @@ func TestChannelManager(t *testing.T) {
 			store: metakv,
 			channelsInfo: map[int64]*NodeChannelInfo{
 				nodeID: {nodeID, []*channel{
-					{channel1, collectionID},
-					{channel2, collectionID},
+					{Name: channel1, CollectionID: collectionID},
+					{Name: channel2, CollectionID: collectionID},
 				}},
 			},
 		}
@@ -399,7 +399,7 @@ func TestChannelManager(t *testing.T) {
 		assert.False(t, chManager.Match(nodeToAdd, channel1))
 		assert.False(t, chManager.Match(nodeToAdd, channel2))
 
-		err = chManager.Watch(&channel{"channel-3", collectionID})
+		err = chManager.Watch(&channel{Name: "channel-3", CollectionID: collectionID})
 		assert.NoError(t, err)
 
 		assert.True(t, chManager.Match(nodeToAdd, "channel-3"))
@@ -423,8 +423,8 @@ func TestChannelManager(t *testing.T) {
 			store: metakv,
 			channelsInfo: map[int64]*NodeChannelInfo{
 				bufferID: {bufferID, []*channel{
-					{channel1, collectionID},
-					{channel2, collectionID},
+					{Name: channel1, CollectionID: collectionID},
+					{Name: channel2, CollectionID: collectionID},
 				}},
 			},
 		}
@@ -441,7 +441,7 @@ func TestChannelManager(t *testing.T) {
 		assert.True(t, chManager.Match(nodeID, channel1))
 		assert.True(t, chManager.Match(nodeID, channel2))
 
-		err = chManager.Watch(&channel{"channel-3", collectionID})
+		err = chManager.Watch(&channel{Name: "channel-3", CollectionID: collectionID})
 		assert.NoError(t, err)
 
 		waitAndCheckState(t, metakv, datapb.ChannelWatchState_ToWatch, nodeID, "channel-3", collectionID)
@@ -460,13 +460,13 @@ func TestChannelManager(t *testing.T) {
 		chManager, err := NewChannelManager(metakv, newMockHandler())
 		require.NoError(t, err)
 
-		err = chManager.Watch(&channel{bufferCh, collectionID})
+		err = chManager.Watch(&channel{Name: bufferCh, CollectionID: collectionID})
 		assert.NoError(t, err)
 
 		waitAndCheckState(t, metakv, datapb.ChannelWatchState_ToWatch, bufferID, bufferCh, collectionID)
 
 		chManager.store.Add(nodeID)
-		err = chManager.Watch(&channel{chanToAdd, collectionID})
+		err = chManager.Watch(&channel{Name: chanToAdd, CollectionID: collectionID})
 		assert.NoError(t, err)
 		waitAndCheckState(t, metakv, datapb.ChannelWatchState_ToWatch, nodeID, chanToAdd, collectionID)
 
@@ -486,7 +486,7 @@ func TestChannelManager(t *testing.T) {
 		chManager.store = &ChannelStore{
 			store: metakv,
 			channelsInfo: map[int64]*NodeChannelInfo{
-				nodeID: {nodeID, []*channel{{channelName, collectionID}}},
+				nodeID: {nodeID, []*channel{{Name: channelName, CollectionID: collectionID}}},
 			},
 		}
 
@@ -518,7 +518,7 @@ func TestChannelManager(t *testing.T) {
 		// prepare tests
 		for _, test := range tests {
 			chManager.store.Add(test.nodeID)
-			ops := getOpsWithWatchInfo(test.nodeID, &channel{test.chName, collectionID})
+			ops := getOpsWithWatchInfo(test.nodeID, &channel{Name: test.chName, CollectionID: collectionID})
 			err = chManager.store.Update(ops)
 			require.NoError(t, err)
 
@@ -562,8 +562,8 @@ func TestChannelManager(t *testing.T) {
 			store: metakv,
 			channelsInfo: map[int64]*NodeChannelInfo{
 				1: {1, []*channel{
-					{"channel-1", collectionID},
-					{"channel-2", collectionID}}},
+					{Name: "channel-1", CollectionID: collectionID},
+					{Name: "channel-2", CollectionID: collectionID}}},
 				bufferID: {bufferID, []*channel{}},
 			},
 		}
@@ -598,7 +598,7 @@ func TestChannelManager(t *testing.T) {
 		// prepare tests
 		for _, test := range tests {
 			chManager.store.Add(test.nodeID)
-			ops := getOpsWithWatchInfo(test.nodeID, &channel{test.chName, collectionID})
+			ops := getOpsWithWatchInfo(test.nodeID, &channel{Name: test.chName, CollectionID: collectionID})
 			err = chManager.store.Update(ops)
 			require.NoError(t, err)
 
@@ -652,7 +652,7 @@ func TestChannelManager(t *testing.T) {
 		chManager.store = &ChannelStore{
 			store: metakv,
 			channelsInfo: map[int64]*NodeChannelInfo{
-				nodeID: {nodeID, []*channel{{channelName, collectionID}}},
+				nodeID: {nodeID, []*channel{{Name: channelName, CollectionID: collectionID}}},
 			},
 		}
 		ch = chManager.getChannelByNodeAndName(nodeID, channelName)
@@ -683,7 +683,7 @@ func TestChannelManager(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				ops := getReleaseOp(nodeID, &channel{channelName, collectionID})
+				ops := getReleaseOp(nodeID, &channel{Name: channelName, CollectionID: collectionID})
 				for _, op := range ops {
 					chs := chManager.fillChannelWatchInfoWithState(op, test.inState)
 					assert.Equal(t, 1, len(chs))
@@ -708,7 +708,7 @@ func TestChannelManager(t *testing.T) {
 		require.NoError(t, err)
 		chManager.store.Add(nodeID)
 
-		opSet := getReleaseOp(nodeID, &channel{channelName, collectionID})
+		opSet := getReleaseOp(nodeID, &channel{Name: channelName, CollectionID: collectionID})
 
 		chManager.updateWithTimer(opSet, datapb.ChannelWatchState_ToWatch)
 		chManager.stateTimer.removeTimers([]string{channelName})
@@ -783,7 +783,7 @@ func TestChannelManager_Reload(t *testing.T) {
 			chManager.store = &ChannelStore{
 				store: metakv,
 				channelsInfo: map[int64]*NodeChannelInfo{
-					nodeID: {nodeID, []*channel{{channelName, collectionID}}}},
+					nodeID: {nodeID, []*channel{{Name: channelName, CollectionID: collectionID}}}},
 			}
 
 			data, err := proto.Marshal(getWatchInfoWithState(datapb.ChannelWatchState_WatchFailure, collectionID, channelName))
@@ -805,7 +805,7 @@ func TestChannelManager_Reload(t *testing.T) {
 			chManager.store = &ChannelStore{
 				store: metakv,
 				channelsInfo: map[int64]*NodeChannelInfo{
-					nodeID: {nodeID, []*channel{{channelName, collectionID}}}},
+					nodeID: {nodeID, []*channel{{Name: channelName, CollectionID: collectionID}}}},
 			}
 
 			require.NoError(t, err)
@@ -831,7 +831,7 @@ func TestChannelManager_Reload(t *testing.T) {
 			chManager.store = &ChannelStore{
 				store: metakv,
 				channelsInfo: map[int64]*NodeChannelInfo{
-					nodeID: {nodeID, []*channel{{channelName, collectionID}}},
+					nodeID: {nodeID, []*channel{{Name: channelName, CollectionID: collectionID}}},
 					999:    {999, []*channel{}},
 				},
 			}
@@ -863,8 +863,8 @@ func TestChannelManager_Reload(t *testing.T) {
 		cm.store = &ChannelStore{
 			store: metakv,
 			channelsInfo: map[int64]*NodeChannelInfo{
-				1: {1, []*channel{{"channel1", 1}}},
-				2: {2, []*channel{{"channel2", 1}}},
+				1: {1, []*channel{{Name: "channel1", CollectionID: 1}}},
+				2: {2, []*channel{{Name: "channel2", CollectionID: 1}}},
 			},
 		}
 
@@ -918,9 +918,9 @@ func TestChannelManager_BalanceBehaviour(t *testing.T) {
 			store: metakv,
 			channelsInfo: map[int64]*NodeChannelInfo{
 				1: {1, []*channel{
-					{"channel-1", collectionID},
-					{"channel-2", collectionID},
-					{"channel-3", collectionID}}}},
+					{Name: "channel-1", CollectionID: collectionID},
+					{Name: "channel-2", CollectionID: collectionID},
+					{Name: "channel-3", CollectionID: collectionID}}}},
 		}
 
 		var (
@@ -962,7 +962,7 @@ func TestChannelManager_BalanceBehaviour(t *testing.T) {
 		assert.True(t, chManager.Match(2, "channel-1"))
 
 		chManager.AddNode(3)
-		chManager.Watch(&channel{"channel-4", collectionID})
+		chManager.Watch(&channel{Name: "channel-4", CollectionID: collectionID})
 		key = path.Join(prefix, "3", "channel-4")
 		waitAndStore(t, metakv, key, datapb.ChannelWatchState_ToWatch, datapb.ChannelWatchState_WatchSuccess)
 
@@ -1022,7 +1022,7 @@ func TestChannelManager_RemoveChannel(t *testing.T) {
 						1: {
 							NodeID: 1,
 							Channels: []*channel{
-								{"ch1", 1},
+								{Name: "ch1", CollectionID: 1},
 							},
 						},
 					},

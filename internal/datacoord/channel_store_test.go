@@ -83,7 +83,7 @@ func genNodeChannelInfos(id int64, num int) *NodeChannelInfo {
 	channels := make([]*channel, 0, num)
 	for i := 0; i < num; i++ {
 		name := fmt.Sprintf("ch%d", i)
-		channels = append(channels, &channel{name, 1})
+		channels = append(channels, &channel{Name: name, CollectionID: 1})
 	}
 	return &NodeChannelInfo{
 		NodeID:   id,
@@ -97,7 +97,7 @@ func genChannelOperations(from, to int64, num int) ChannelOpSet {
 	channelWatchInfos := make([]*datapb.ChannelWatchInfo, 0, num)
 	for i := 0; i < num; i++ {
 		name := fmt.Sprintf("ch%d", i)
-		channels = append(channels, &channel{name, 1})
+		channels = append(channels, &channel{Name: name, CollectionID: 1})
 		channelWatchInfos = append(channelWatchInfos, &datapb.ChannelWatchInfo{})
 	}
 
