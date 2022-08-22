@@ -720,3 +720,30 @@ def percent_to_int(string):
         new_int = int(string.strip("%"))
 
     return new_int
+
+def gen_grant_list(collection_name):
+    grant_list = [{"object": "Collection", "object_name": collection_name, "privilege": "Load"},
+                  {"object": "Collection", "object_name": collection_name, "privilege": "Release"},
+                  {"object": "Collection", "object_name": collection_name, "privilege": "Compaction"},
+                  {"object": "Collection", "object_name": collection_name, "privilege": "Delete"},
+                  {"object": "Collection", "object_name": collection_name, "privilege": "GetStatistics"},
+                  {"object": "Collection", "object_name": collection_name, "privilege": "CreateIndex"},
+                  {"object": "Collection", "object_name": collection_name, "privilege": "IndexDetail"},
+                  {"object": "Collection", "object_name": collection_name, "privilege": "DropIndex"},
+                  {"object": "Collection", "object_name": collection_name, "privilege": "Search"},
+                  {"object": "Collection", "object_name": collection_name, "privilege": "Flush"},
+                  {"object": "Collection", "object_name": collection_name, "privilege": "Query"},
+                  {"object": "Collection", "object_name": collection_name, "privilege": "LoadBalance"},
+                  {"object": "Collection", "object_name": collection_name, "privilege": "Import"},
+                  {"object": "Global", "object_name": "*", "privilege": "All"},
+                  {"object": "Global", "object_name": "*", "privilege": "CreateCollection"},
+                  {"object": "Global", "object_name": "*", "privilege": "DropCollection"},
+                  {"object": "Global", "object_name": "*", "privilege": "DescribeCollection"},
+                  {"object": "Global", "object_name": "*", "privilege": "ShowCollections"},
+                  {"object": "Global", "object_name": "*", "privilege": "CreateOwnership"},
+                  {"object": "Global", "object_name": "*", "privilege": "DropOwnership"},
+                  {"object": "Global", "object_name": "*", "privilege": "SelectOwnership"},
+                  {"object": "Global", "object_name": "*", "privilege": "ManageOwnership"},
+                  {"object": "User", "object_name": "*", "privilege": "UpdateUser"},
+                  {"object": "User", "object_name": "*", "privilege": "SelectUser"}]
+    return grant_list

@@ -29,7 +29,7 @@ python-benedict==0.24.3
 timeout-decorator==0.5.0
 
 # version need to be consistent with protobuf used in pymilvus
-protobuf==3.17.1
+protobuf==4.21.5
 
 # for bulk load test
 minio==7.1.5
