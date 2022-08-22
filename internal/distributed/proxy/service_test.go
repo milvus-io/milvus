@@ -784,10 +784,6 @@ func (m *MockProxy) Import(ctx context.Context, req *milvuspb.ImportRequest) (*m
 	return nil, nil
 }
 
-func (m *MockProxy) CompleteImport(context.Context, *milvuspb.CompleteImportRequest) (*commonpb.Status, error) {
-	return nil, nil
-}
-
 func (m *MockProxy) GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
 	return nil, nil
 }

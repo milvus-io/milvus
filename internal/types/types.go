@@ -1177,9 +1177,6 @@ type ProxyComponent interface {
 	// error is always nil
 	Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error)
 
-	// CompleteImport implements the second phase of a bulk load operation.
-	CompleteImport(ctx context.Context, req *milvuspb.CompleteImportRequest) (*commonpb.Status, error)
-
 	// Check import task state from datanode
 	//
 	// ctx is the context to control request deadline and cancellation

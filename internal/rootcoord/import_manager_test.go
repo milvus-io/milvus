@@ -701,14 +701,10 @@ func TestImportManager_getCollectionPartitionName(t *testing.T) {
 		},
 	}
 
-	task := &datapb.ImportTaskInfo{
-		CollectionId: 1,
-		PartitionId:  2,
-	}
 	resp := &milvuspb.GetImportStateResponse{
 		Infos: make([]*commonpb.KeyValuePair, 0),
 	}
-	mgr.getCollectionPartitionName(task, resp)
+	mgr.getCollectionPartitionName(1, 2, resp)
 	assert.Equal(t, "c1", resp.Infos[0].Value)
 	assert.Equal(t, "p1", resp.Infos[1].Value)
 }

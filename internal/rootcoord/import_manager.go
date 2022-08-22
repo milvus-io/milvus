@@ -488,14 +488,17 @@ func (m *importManager) setCompleteImportState(taskID int64) error {
 	return nil
 }
 
-func (m *importManager) getCollectionPartitionName(task *datapb.ImportTaskInfo, resp *milvuspb.GetImportStateResponse) {
+func (m *importManager) getCollectionPartitionName(colID, partID int64, resp *milvuspb.GetImportStateResponse) {
 	if m.getCollectionName != nil {
-		colName, partName, err := m.getCollectionName(task.GetCollectionId(), task.GetPartitionId())
+		colName, partName, err := m.getCollectionName(colID, partID)
 		if err == nil {
 			resp.Infos = append(resp.Infos, &commonpb.KeyValuePair{Key: CollectionName, Value: colName})
 			resp.Infos = append(resp.Infos, &commonpb.KeyValuePair{Key: PartitionName, Value: partName})
 		} else {
-			log.Error("failed to getCollectionName", zap.Int64("collection_id", task.GetCollectionId()), zap.Int64("partition_id", task.GetPartitionId()), zap.Error(err))
+			log.Error("failed to getCollectionName",
+				zap.Int64("collection ID", colID),
+				zap.Int64("partition ID", partID),
+				zap.Error(err))
 		}
 	}
 }
@@ -514,7 +517,6 @@ func (m *importManager) getTaskState(tID int64) *milvuspb.GetImportStateResponse
 	found := false
 	func() {
 		m.pendingLock.Lock()
-		defer m.pendingLock.Unlock()
 		for _, t := range m.pendingTasks {
 			if tID == t.Id {
 				resp.Status = &commonpb.Status{
@@ -524,10 +526,19 @@ func (m *importManager) getTaskState(tID int64) *milvuspb.GetImportStateResponse
 				resp.CollectionId = t.CollectionId
 				resp.State = commonpb.ImportState_ImportPending
 				resp.Infos = append(resp.Infos, &commonpb.KeyValuePair{Key: Files, Value: strings.Join(t.GetFiles(), ",")})
-				m.getCollectionPartitionName(t, resp)
+				colID := t.GetCollectionId()
+				partID := t.GetPartitionId()
+				// Release lock early to prevent deadlock.
+				m.pendingLock.Unlock()
+				// TODO: Here and below, we don't need to look up collection/partition name in every internal calls.
+				m.getCollectionPartitionName(colID, partID, resp)
 				found = true
 				break
 			}
+		}
+		if !found {
+			// Release the lock.
+			m.pendingLock.Unlock()
 		}
 	}()
 	if found {
@@ -536,7 +547,6 @@ func (m *importManager) getTaskState(tID int64) *milvuspb.GetImportStateResponse
 
 	func() {
 		m.workingLock.Lock()
-		defer m.workingLock.Unlock()
 		if v, ok := m.workingTasks[tID]; ok {
 			found = true
 			resp.Status = &commonpb.Status{
@@ -553,7 +563,14 @@ func (m *importManager) getTaskState(tID int64) *milvuspb.GetImportStateResponse
 				Key:   FailedReason,
 				Value: v.GetState().GetErrorMessage(),
 			})
-			m.getCollectionPartitionName(v, resp)
+			colID := v.GetCollectionId()
+			partID := v.GetPartitionId()
+			// Release lock early to prevent deadlock.
+			m.workingLock.Unlock()
+			m.getCollectionPartitionName(colID, partID, resp)
+		}
+		if !found {
+			m.workingLock.Unlock()
 		}
 	}()
 	if found {
@@ -654,7 +671,11 @@ func (m *importManager) expireOldTasksFromMem() {
 			if taskExpired(v) {
 				log.Info("a working task has expired", zap.Int64("task ID", v.GetId()))
 				// Unset `isImport` flag of the bulk load segments.
-				m.callUnsetIsImportState(v.GetId())
+				taskID := v.GetId()
+				m.workingLock.Unlock()
+				m.callUnsetIsImportState(taskID)
+				// Re-lock.
+				m.workingLock.Lock()
 				// Remove this task from memory.
 				delete(m.workingTasks, v.GetId())
 			}
@@ -715,7 +736,13 @@ func (m *importManager) listAllTasks() []*milvuspb.GetImportStateResponse {
 				State: commonpb.ImportState_ImportPending,
 			}
 			resp.Infos = append(resp.Infos, &commonpb.KeyValuePair{Key: Files, Value: strings.Join(t.GetFiles(), ",")})
-			m.getCollectionPartitionName(t, resp)
+			colID := t.GetCollectionId()
+			partID := t.GetPartitionId()
+			// Release lock early.
+			m.pendingLock.Unlock()
+			m.getCollectionPartitionName(colID, partID, resp)
+			// Re-lock.
+			m.pendingLock.Lock()
 			tasks = append(tasks, resp)
 		}
 		log.Info("tasks in pending list", zap.Int("count", len(m.pendingTasks)))
@@ -741,7 +768,13 @@ func (m *importManager) listAllTasks() []*milvuspb.GetImportStateResponse {
 				Key:   FailedReason,
 				Value: v.GetState().GetErrorMessage(),
 			})
-			m.getCollectionPartitionName(v, resp)
+			colID := v.GetCollectionId()
+			partID := v.GetPartitionId()
+			// Release lock early.
+			m.workingLock.Unlock()
+			m.getCollectionPartitionName(colID, partID, resp)
+			// Re-lock.
+			m.workingLock.Lock()
 			tasks = append(tasks, resp)
 		}
 		log.Info("tasks in working list", zap.Int("count", len(m.workingTasks)))

@@ -49,7 +49,7 @@ import (
 const moduleName = "Proxy"
 
 var CheckTaskPersistedInterval = 5 * time.Second
-var CheckTaskPersistedWaitLimit = 60 * time.Second
+var CheckTaskPersistedWaitLimit = 300 * time.Second
 
 // UpdateStateCode updates the state code of Proxy.
 func (node *Proxy) UpdateStateCode(code internalpb.StateCode) {
@@ -3648,66 +3648,32 @@ func (node *Proxy) Import(ctx context.Context, req *milvuspb.ImportRequest) (*mi
 		resp.Status.Reason = err.Error()
 		return resp, nil
 	}
-
-	//log.Info("running complete bulk load")
-	//for _, taskID := range respFromRC.GetTasks() {
-	//	s, err := node.CompleteImport(ctx, &milvuspb.CompleteImportRequest{
-	//		TaskId: taskID,
-	//	})
-	//	log.Info("complete import status", zap.Any("status", s))
-	//	log.Info("complete import err", zap.Error(err))
-	//}
-	//time.Sleep(30 * time.Second)
-	//for _, taskID := range respFromRC.GetTasks() {
-	//	resp, _ := node.GetImportState(ctx, &milvuspb.GetImportStateRequest{
-	//		Task: taskID,
-	//	})
-	//	log.Info("@@@@@@@ FINAL STATE", zap.Any("state", resp.GetState()))
-	//}
+	log.Info("import complete, now completing import", zap.Int64s("task IDs", respFromRC.GetTasks()))
+	for _, taskID := range respFromRC.GetTasks() {
+		go node.completeImport(taskID)
+	}
 	return respFromRC, nil
 }
 
-// CompleteImport is the second phase method call of a single bulk load operation. It returns immediately. In the
-// background, it waits until all bulk load segments indexes are successfully built. It will then update all segments
-func (node *Proxy) CompleteImport(ctx context.Context, req *milvuspb.CompleteImportRequest) (*commonpb.Status, error) {
-	log.Info("received complete import request",
-		zap.Int64("task ID", req.GetTaskId()))
-	if !node.checkHealthy() {
-		log.Warn("proxy not healthy")
-		return unhealthyStatus(), nil
-	}
-
+func (node *Proxy) completeImport(taskID int64) {
 	// First check if the import task has turned into persisted state. Returns an error status if not after retrying.
 	// This could take a few or tens of seconds.
-	getImportResp, err := node.checkImportTaskPersisted(req.GetTaskId())
+	getImportResp, err := node.checkImportTaskPersisted(taskID)
 	if err != nil {
-		log.Error("task not persisted yet",
-			zap.Int64("task ID", req.GetTaskId()),
+		log.Error("task not persisted yet after wait limit",
+			zap.Int64("wait limit", int64(CheckTaskPersistedWaitLimit.Seconds())),
+			zap.Int64("task ID", taskID),
 			zap.Any("current task state", getImportResp.GetState()))
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    "task not persisted yet, please try again later",
-		}, nil
-	}
-	if getImportResp.GetState() == commonpb.ImportState_ImportCompleted {
-		log.Info("task already complete",
-			zap.Int64("task ID", req.GetTaskId()))
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		}, nil
+		return
 	}
 
 	// Start background process of complete bulk load operation.
 	// Ignoring complete bulk load return status.
-	go node.dataCoord.CompleteBulkLoad(node.ctx, &datapb.CompleteBulkLoadRequest{
-		TaskId:       req.GetTaskId(),
+	node.dataCoord.CompleteBulkLoad(node.ctx, &datapb.CompleteBulkLoadRequest{
+		TaskId:       taskID,
 		CollectionId: getImportResp.GetCollectionId(),
 		SegmentIds:   getImportResp.GetSegmentIds(),
 	})
-
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}, nil
 }
 
 // GetImportState checks import task state from RootCoord.

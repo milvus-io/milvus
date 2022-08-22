@@ -754,10 +754,6 @@ func (s *Server) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milv
 	return s.proxy.Import(ctx, req)
 }
 
-func (s *Server) CompleteImport(ctx context.Context, req *milvuspb.CompleteImportRequest) (*commonpb.Status, error) {
-	return s.proxy.CompleteImport(ctx, req)
-}
-
 func (s *Server) GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
 	return s.proxy.GetImportState(ctx, req)
 }
