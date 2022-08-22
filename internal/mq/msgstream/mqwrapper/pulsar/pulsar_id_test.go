@@ -72,6 +72,30 @@ func TestLessOrEqualThan(t *testing.T) {
 	assert.False(t, ret)
 }
 
+func TestPulsarID_Equal(t *testing.T) {
+	msg1 := pulsar.EarliestMessageID()
+	pid1 := &pulsarID{
+		messageID: msg1,
+	}
+
+	msg2 := pulsar.LatestMessageID()
+	pid2 := &pulsarID{
+		messageID: msg2,
+	}
+
+	{
+		ret, err := pid1.Equal(pid1.Serialize())
+		assert.Nil(t, err)
+		assert.True(t, ret)
+	}
+
+	{
+		ret, err := pid1.Equal(pid2.Serialize())
+		assert.Nil(t, err)
+		assert.False(t, ret)
+	}
+}
+
 func Test_SerializePulsarMsgID(t *testing.T) {
 	mid := pulsar.EarliestMessageID()
 
