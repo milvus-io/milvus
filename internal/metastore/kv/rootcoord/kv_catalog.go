@@ -344,6 +344,10 @@ func (kc *Catalog) CreateCredential(ctx context.Context, credential *model.Crede
 	return nil
 }
 
+func (kc *Catalog) AlterCredential(ctx context.Context, credential *model.Credential) error {
+	return kc.CreateCredential(ctx, credential)
+}
+
 func (kc *Catalog) listPartitionsAfter210(ctx context.Context, collectionID typeutil.UniqueID, ts typeutil.Timestamp) ([]*model.Partition, error) {
 	prefix := buildPartitionPrefix(collectionID)
 	_, values, err := kc.Snapshot.LoadWithPrefix(prefix, ts)

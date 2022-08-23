@@ -1315,20 +1315,21 @@ func (mt *MetaTable) AddCredential(credInfo *internalpb.CredentialInfo) error {
 	return mt.catalog.CreateCredential(mt.ctx, credential)
 }
 
-// UpdateCredential update credential
-func (mt *MetaTable) UpdateCredential(credInfo *internalpb.CredentialInfo) error {
-	mt.permissionLock.Lock()
-	defer mt.permissionLock.Unlock()
+// AlterCredential update credential
+func (mt *MetaTable) AlterCredential(credInfo *internalpb.CredentialInfo) error {
+	if credInfo.Username == "" {
+		return fmt.Errorf("username is empty")
+	}
 
 	credential := &model.Credential{
 		Username:          credInfo.Username,
 		EncryptedPassword: credInfo.EncryptedPassword,
 	}
-	return mt.catalog.CreateCredential(mt.ctx, credential)
+	return mt.catalog.AlterCredential(mt.ctx, credential)
 }
 
 // GetCredential get credential by username
-func (mt *MetaTable) getCredential(username string) (*internalpb.CredentialInfo, error) {
+func (mt *MetaTable) GetCredential(username string) (*internalpb.CredentialInfo, error) {
 	credential, err := mt.catalog.GetCredential(mt.ctx, username)
 	return model.MarshalCredentialModel(credential), err
 }

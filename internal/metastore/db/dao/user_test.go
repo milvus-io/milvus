@@ -177,3 +177,35 @@ func TestUser_MarkDeletedByUsername_Error(t *testing.T) {
 	err := userTestDb.MarkDeletedByUsername(tenantID, username)
 	assert.Error(t, err)
 }
+
+func TestUser_UpdatePassword(t *testing.T) {
+	username := "test_username_1"
+	encryptedPassword := "test_encrypted_password_1"
+
+	// expectation
+	mock.ExpectBegin()
+	mock.ExpectExec("UPDATE `credential_users` SET `encrypted_password`=?,`updated_at`=? WHERE tenant_id = ? AND username = ?").
+		WithArgs(encryptedPassword, AnyTime{}, tenantID, username).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	// actual
+	err := userTestDb.UpdatePassword(tenantID, username, encryptedPassword)
+	assert.Nil(t, err)
+}
+
+func TestUser_UpdatePassword_Error(t *testing.T) {
+	username := "test_username_1"
+	encryptedPassword := "test_encrypted_password_1"
+
+	// expectation
+	mock.ExpectBegin()
+	mock.ExpectExec("UPDATE `credential_users` SET `encrypted_password`=?,`updated_at`=? WHERE tenant_id = ? AND username = ?").
+		WithArgs(encryptedPassword, AnyTime{}, tenantID, username).
+		WillReturnError(errors.New("test error"))
+	mock.ExpectRollback()
+
+	// actual
+	err := userTestDb.UpdatePassword(tenantID, username, encryptedPassword)
+	assert.Error(t, err)
+}

@@ -753,6 +753,17 @@ func (tc *Catalog) CreateCredential(ctx context.Context, credential *model.Crede
 	return nil
 }
 
+func (tc *Catalog) AlterCredential(ctx context.Context, credential *model.Credential) error {
+	tenantID := contextutil.TenantID(ctx)
+
+	err := tc.metaDomain.UserDb(ctx).UpdatePassword(tenantID, credential.Username, credential.EncryptedPassword)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (tc *Catalog) DropCredential(ctx context.Context, username string) error {
 	tenantID := contextutil.TenantID(ctx)
 
