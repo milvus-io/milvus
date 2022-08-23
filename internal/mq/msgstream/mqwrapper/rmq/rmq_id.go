@@ -41,7 +41,7 @@ func (rid *rmqID) AtEarliestPosition() bool {
 
 func (rid *rmqID) LessOrEqualThan(msgID []byte) (bool, error) {
 	rMsgID := DeserializeRmqID(msgID)
-	return rid.messageID < rMsgID, nil
+	return rid.messageID <= rMsgID, nil
 }
 
 // SerializeRmqID is used to serialize a message ID to byte array
