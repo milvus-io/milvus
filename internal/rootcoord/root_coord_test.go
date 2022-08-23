@@ -794,8 +794,9 @@ func TestRootCoordInitData(t *testing.T) {
 		save: func(key, value string) error {
 			return fmt.Errorf("save error")
 		},
-		remove: func(key string) error { return txnKV.Remove(key) },
-		load:   func(key string) (string, error) { return txnKV.Load(key) },
+		remove:         func(key string) error { return txnKV.Remove(key) },
+		load:           func(key string) (string, error) { return txnKV.Load(key) },
+		loadWithPrefix: func(key string) ([]string, []string, error) { return txnKV.LoadWithPrefix(key) },
 	}
 	//mt.txn = mockTxnKV
 	mt.catalog = &rootcoord.Catalog{Txn: mockTxnKV, Snapshot: snapshotKV}
