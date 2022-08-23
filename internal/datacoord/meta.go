@@ -502,48 +502,27 @@ func (m *meta) mergeDropSegment(seg2Drop *SegmentInfo) *SegmentInfo {
 //   since the flag is not marked so DataNode can re-consume the drop collection msg
 // 2. when failure occurs between save meta and unwatch channel, the removal flag shall be check before let datanode watch this channel
 func (m *meta) batchSaveDropSegments(channel string, modSegments map[int64]*SegmentInfo) error {
-
-	// the limitation of etcd operations number per transaction is 128, since segment number might be enormous so we shall split
-	// all save operations into batches
-
-	// since the removal flag shall always be with the last batch, so the last batch shall be maxOperationNumber - 1
-	for len(modSegments) > maxOperationsPerTxn-1 {
-		err := m.saveDropSegmentAndRemove(channel, modSegments, false)
-		if err != nil {
-			return err
-		}
-	}
-
-	// removal flag should be saved with last batch
-	return m.saveDropSegmentAndRemove(channel, modSegments, true)
-}
-
-func (m *meta) saveDropSegmentAndRemove(channel string, segments map[int64]*SegmentInfo, withFlag bool) error {
-	segmentMap := make(map[int64]*datapb.SegmentInfo)
-	for id, seg := range segments {
-		segmentMap[id] = seg.SegmentInfo
-	}
-
 	// TODO: RootCoord supports read-write prohibit when dropping collection
 	// divides two api calls: save dropped segments & mark channel deleted
-	updateIDs, err := m.catalog.SaveDroppedSegmentsInBatch(m.ctx, segmentMap)
+	segments := make([]*datapb.SegmentInfo, 0)
+	for _, seg := range modSegments {
+		segments = append(segments, seg.SegmentInfo)
+	}
+	err := m.catalog.SaveDroppedSegmentsInBatch(m.ctx, segments)
 	if err != nil {
 		return err
 	}
-	if withFlag {
-		err = m.catalog.MarkChannelDeleted(m.ctx, channel)
-		if err != nil {
-			return err
-		}
+
+	if err = m.catalog.MarkChannelDeleted(m.ctx, channel); err != nil {
+		return err
 	}
 
 	// update memory info
-	for _, id := range updateIDs {
-		m.segments.SetSegment(id, segments[id])
-		delete(segments, id)
+	for id, segment := range modSegments {
+		m.segments.SetSegment(id, segment)
 	}
-	metrics.DataCoordNumSegments.WithLabelValues(metrics.DropedSegmentLabel).Add(float64(len(updateIDs)))
 
+	metrics.DataCoordNumSegments.WithLabelValues(metrics.DropedSegmentLabel).Add(float64(len(segments)))
 	return nil
 }
 

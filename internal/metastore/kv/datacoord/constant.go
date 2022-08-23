@@ -25,6 +25,7 @@ const (
 	ChannelRemovePrefix       = MetaPrefix + "/channel-removal"
 
 	RemoveFlagTomestone = "removed"
-	MaxOperationsPerTxn = 64
-	MaxBytesPerTxn      = 1024 * 1024
+
+	maxOperationsPerTxn = 64
+	maxBytesPerTxn      = 1024 * 1024
 )

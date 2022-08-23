@@ -63,7 +63,7 @@ type DataCoordCatalog interface {
 	AlterSegments(ctx context.Context, segments []*datapb.SegmentInfo) error
 	// AlterSegmentsAndAddNewSegment for transaction
 	AlterSegmentsAndAddNewSegment(ctx context.Context, segments []*datapb.SegmentInfo, newSegment *datapb.SegmentInfo) error
-	SaveDroppedSegmentsInBatch(ctx context.Context, modSegments map[int64]*datapb.SegmentInfo) ([]int64, error)
+	SaveDroppedSegmentsInBatch(ctx context.Context, segments []*datapb.SegmentInfo) error
 	DropSegment(ctx context.Context, segment *datapb.SegmentInfo) error
 	MarkChannelDeleted(ctx context.Context, channel string) error
 	IsChannelDropped(ctx context.Context, channel string) bool
