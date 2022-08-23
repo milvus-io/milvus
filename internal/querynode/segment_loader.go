@@ -664,7 +664,8 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 		return err
 	}
 
-	if lastMsgID.AtEarliestPosition() {
+	reachLatest, _ := lastMsgID.Equal(position.MsgID)
+	if reachLatest || lastMsgID.AtEarliestPosition() {
 		log.Info("there is no more delta msg", zap.Int64("Collection ID", collectionID), zap.String("channel", pChannelName))
 		return nil
 	}
