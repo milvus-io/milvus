@@ -194,6 +194,7 @@ class CheckTasks:
     check_distance = "check_distance"
     check_delete_compact = "check_delete_compact"
     check_merge_compact = "check_merge_compact"
+    check_role_property = "check_role_property"
 
 
 class BulkLoadStates:

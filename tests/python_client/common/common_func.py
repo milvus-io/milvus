@@ -13,6 +13,7 @@ from utils.util_log import test_log as log
 
 """" Methods of processing data """
 
+
 class ParamInfo:
     def __init__(self):
         self.param_host = ""
@@ -54,10 +55,14 @@ def gen_bool_field(name=ct.default_bool_field_name, description=ct.default_desc,
                                                               is_primary=is_primary, **kwargs)
     return bool_field
 
-def gen_string_field(name=ct.default_string_field_name, description=ct.default_desc, is_primary=False, max_length=ct.default_length, **kwargs):
-    string_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.VARCHAR, description=description, max_length=max_length, 
-                                                              is_primary=is_primary, **kwargs)
+
+def gen_string_field(name=ct.default_string_field_name, description=ct.default_desc, is_primary=False,
+                     max_length=ct.default_length, **kwargs):
+    string_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.VARCHAR,
+                                                                description=description, max_length=max_length,
+                                                                is_primary=is_primary, **kwargs)
     return string_field
+
 
 def gen_int8_field(name=ct.default_int8_field_name, description=ct.default_desc, is_primary=False, **kwargs):
     int8_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.INT8, description=description,
@@ -118,6 +123,7 @@ def gen_default_collection_schema(description=ct.default_desc, primary_field=ct.
                                                                     primary_field=primary_field, auto_id=auto_id)
     return schema
 
+
 def gen_general_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name,
                                   auto_id=False, is_binary=False, dim=ct.default_dim):
     if is_binary:
@@ -128,8 +134,9 @@ def gen_general_collection_schema(description=ct.default_desc, primary_field=ct.
                                                                     primary_field=primary_field, auto_id=auto_id)
     return schema
 
+
 def gen_string_pk_default_collection_schema(description=ct.default_desc, primary_field=ct.default_string_field_name,
-                                  auto_id=False, dim=ct.default_dim):
+                                            auto_id=False, dim=ct.default_dim):
     fields = [gen_int64_field(), gen_float_field(), gen_string_field(), gen_float_vec_field(dim=dim)]
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
                                                                     primary_field=primary_field, auto_id=auto_id)
@@ -162,15 +169,16 @@ def gen_default_binary_collection_schema(description=ct.default_desc, primary_fi
 
 
 def gen_schema_multi_vector_fields(vec_fields):
-    fields = [gen_int64_field(), gen_float_field(),gen_string_field(), gen_float_vec_field()]
+    fields = [gen_int64_field(), gen_float_field(), gen_string_field(), gen_float_vec_field()]
     fields.extend(vec_fields)
     primary_field = ct.default_int64_field_name
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=ct.default_desc,
                                                                     primary_field=primary_field, auto_id=False)
     return schema
 
+
 def gen_schema_multi_string_fields(string_fields):
-    fields =[gen_int64_field(), gen_float_field(),gen_string_field(),gen_float_vec_field()]
+    fields = [gen_int64_field(), gen_float_field(), gen_string_field(), gen_float_vec_field()]
     fields.extend(string_fields)
     primary_field = ct.default_int64_field_name
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=ct.default_desc,
@@ -178,16 +186,16 @@ def gen_schema_multi_string_fields(string_fields):
     return schema
 
 
-
 def gen_vectors(nb, dim):
     vectors = [[random.random() for _ in range(dim)] for _ in range(nb)]
     vectors = preprocessing.normalize(vectors, axis=1, norm='l2')
     return vectors.tolist()
 
+
 def gen_string(nb):
     string_values = [str(random.random()) for _ in range(nb)]
     return string_values
-    
+
 
 def gen_binary_vectors(num, dim):
     raw_vectors = []
@@ -238,6 +246,7 @@ def gen_dataframe_multi_vec_fields(vec_fields, nb=ct.default_nb):
             vec_values = gen_binary_vectors(nb, dim)[1]
         df[field.name] = vec_values
     return df
+
 
 def gen_dataframe_multi_string_fields(string_fields, nb=ct.default_nb):
     """
@@ -495,17 +504,18 @@ def gen_normal_string_expressions(field):
         f"{field} == \"0\"|| {field} == \"1\"|| {field} ==\"2\"",
         f"{field} != \"0\"",
         f"{field} not in [\"0\", \"1\", \"2\"]",
-        f"{field} in [\"0\", \"1\", \"2\"]"    
+        f"{field} in [\"0\", \"1\", \"2\"]"
     ]
     return expressions
+
 
 def gen_invaild_string_expressions():
     expressions = [
         "varchar in [0,  \"1\"]",
-        "varchar not in [\"0\", 1, 2]"    
+        "varchar not in [\"0\", 1, 2]"
     ]
     return expressions
-    
+
 
 def gen_normal_expressions_field(field):
     expressions = [
@@ -705,6 +715,7 @@ def get_segment_distribution(res):
 
     return segment_distribution
 
+
 def percent_to_int(string):
     """
     transform percent(0%--100%) to int
@@ -720,3 +731,31 @@ def percent_to_int(string):
         new_int = int(string.strip("%"))
 
     return new_int
+
+
+def gen_grant_list(collection_name):
+    grant_list = [{"object": "Collection", "object_name": collection_name, "privilege": "Load"},
+                  {"object": "Collection", "object_name": collection_name, "privilege": "Release"},
+                  {"object": "Collection", "object_name": collection_name, "privilege": "Compaction"},
+                  {"object": "Collection", "object_name": collection_name, "privilege": "Delete"},
+                  {"object": "Collection", "object_name": collection_name, "privilege": "GetStatistics"},
+                  {"object": "Collection", "object_name": collection_name, "privilege": "CreateIndex"},
+                  {"object": "Collection", "object_name": collection_name, "privilege": "IndexDetail"},
+                  {"object": "Collection", "object_name": collection_name, "privilege": "DropIndex"},
+                  {"object": "Collection", "object_name": collection_name, "privilege": "Search"},
+                  {"object": "Collection", "object_name": collection_name, "privilege": "Flush"},
+                  {"object": "Collection", "object_name": collection_name, "privilege": "Query"},
+                  {"object": "Collection", "object_name": collection_name, "privilege": "LoadBalance"},
+                  {"object": "Collection", "object_name": collection_name, "privilege": "Import"},
+                  {"object": "Global", "object_name": "*", "privilege": "All"},
+                  {"object": "Global", "object_name": "*", "privilege": "CreateCollection"},
+                  {"object": "Global", "object_name": "*", "privilege": "DropCollection"},
+                  {"object": "Global", "object_name": "*", "privilege": "DescribeCollection"},
+                  {"object": "Global", "object_name": "*", "privilege": "ShowCollections"},
+                  {"object": "Global", "object_name": "*", "privilege": "CreateOwnership"},
+                  {"object": "Global", "object_name": "*", "privilege": "DropOwnership"},
+                  {"object": "Global", "object_name": "*", "privilege": "SelectOwnership"},
+                  {"object": "Global", "object_name": "*", "privilege": "ManageOwnership"},
+                  {"object": "User", "object_name": "*", "privilege": "UpdateUser"},
+                  {"object": "User", "object_name": "*", "privilege": "SelectUser"}]
+    return grant_list
