@@ -39,14 +39,14 @@ func roundRobinPolicy(ctx context.Context, mgr *shardClientMgr, query func(Uniqu
 	for err != nil && current < replicaNum {
 		currentID := leaders[current].nodeID
 		if err != errBegin {
-			log.Warn("retry with another QueryNode",
+			log.Ctx(ctx).Warn("retry with another QueryNode",
 				zap.Int("retries numbers", current),
 				zap.Int64("nodeID", currentID))
 		}
 
 		qn, err = mgr.GetClient(ctx, leaders[current].nodeID)
 		if err != nil {
-			log.Warn("fail to get valid QueryNode", zap.Int64("nodeID", currentID),
+			log.Ctx(ctx).Warn("fail to get valid QueryNode", zap.Int64("nodeID", currentID),
 				zap.Error(err))
 			current++
 			continue
@@ -54,7 +54,7 @@ func roundRobinPolicy(ctx context.Context, mgr *shardClientMgr, query func(Uniqu
 
 		err = query(currentID, qn)
 		if err != nil {
-			log.Warn("fail to Query with shard leader",
+			log.Ctx(ctx).Warn("fail to Query with shard leader",
 				zap.Int64("nodeID", currentID),
 				zap.Error(err))
 		}
@@ -62,7 +62,7 @@ func roundRobinPolicy(ctx context.Context, mgr *shardClientMgr, query func(Uniqu
 	}
 
 	if current == replicaNum && err != nil {
-		log.Warn("no shard leaders available",
+		log.Ctx(ctx).Warn("no shard leaders available",
 			zap.String("leaders", fmt.Sprintf("%v", leaders)), zap.Error(err))
 		// needs to return the error from query
 		return err

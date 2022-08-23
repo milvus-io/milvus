@@ -84,7 +84,7 @@ func benchmarkQueryCollectionSearch(nq int64, b *testing.B) {
 	searchReq, err := newSearchRequest(collection, queryReq, queryReq.Req.GetPlaceholderGroup())
 	assert.NoError(b, err)
 	for j := 0; j < 10000; j++ {
-		_, _, _, err := searchHistorical(queryShardObj.metaReplica, searchReq, defaultCollectionID, nil, queryReq.GetSegmentIDs())
+		_, _, _, err := searchHistorical(context.TODO(), queryShardObj.metaReplica, searchReq, defaultCollectionID, nil, queryReq.GetSegmentIDs())
 		assert.NoError(b, err)
 	}
 
@@ -108,7 +108,7 @@ func benchmarkQueryCollectionSearch(nq int64, b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for j := int64(0); j < benchmarkMaxNQ/nq; j++ {
-			_, _, _, err := searchHistorical(queryShardObj.metaReplica, searchReq, defaultCollectionID, nil, queryReq.GetSegmentIDs())
+			_, _, _, err := searchHistorical(context.TODO(), queryShardObj.metaReplica, searchReq, defaultCollectionID, nil, queryReq.GetSegmentIDs())
 			assert.NoError(b, err)
 		}
 	}
@@ -153,7 +153,7 @@ func benchmarkQueryCollectionSearchIndex(nq int64, indexType string, b *testing.
 
 	searchReq, _ := genSearchPlanAndRequests(collection, indexType, nq)
 	for j := 0; j < 10000; j++ {
-		_, _, _, err := searchHistorical(queryShardObj.metaReplica, searchReq, defaultCollectionID, nil, []UniqueID{defaultSegmentID})
+		_, _, _, err := searchHistorical(context.TODO(), queryShardObj.metaReplica, searchReq, defaultCollectionID, nil, []UniqueID{defaultSegmentID})
 		assert.NoError(b, err)
 	}
 
@@ -178,7 +178,7 @@ func benchmarkQueryCollectionSearchIndex(nq int64, indexType string, b *testing.
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for j := 0; j < benchmarkMaxNQ/int(nq); j++ {
-			_, _, _, err := searchHistorical(queryShardObj.metaReplica, searchReq, defaultCollectionID, nil, []UniqueID{defaultSegmentID})
+			_, _, _, err := searchHistorical(context.TODO(), queryShardObj.metaReplica, searchReq, defaultCollectionID, nil, []UniqueID{defaultSegmentID})
 			assert.NoError(b, err)
 		}
 	}

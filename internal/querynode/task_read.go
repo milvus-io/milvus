@@ -131,6 +131,7 @@ func (b *baseReadTask) Timeout() bool {
 }
 
 func (b *baseReadTask) Ready() (bool, error) {
+	ctx := b.Ctx()
 	if b.Timeout() {
 		return false, fmt.Errorf("deadline exceed")
 	}
@@ -144,7 +145,7 @@ func (b *baseReadTask) Ready() (bool, error) {
 	}
 
 	if _, released := b.QS.collection.getReleaseTime(); released {
-		log.Debug("collection release before search", zap.Int64("collectionID", b.CollectionID))
+		log.Ctx(ctx).Debug("collection release before search", zap.Int64("collectionID", b.CollectionID))
 		return false, fmt.Errorf("collection has been released, taskID = %d, collectionID = %d", b.ID(), b.CollectionID)
 	}
 
@@ -158,7 +159,7 @@ func (b *baseReadTask) Ready() (bool, error) {
 	if guaranteeTs > serviceTime {
 		return false, nil
 	}
-	log.Debug("query msg can do",
+	log.Ctx(ctx).Debug("query msg can do",
 		zap.Any("collectionID", b.CollectionID),
 		zap.Any("sm.GuaranteeTimestamp", gt),
 		zap.Any("serviceTime", st),

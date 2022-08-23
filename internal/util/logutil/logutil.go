@@ -141,7 +141,7 @@ var once sync.Once
 func SetupLogger(cfg *log.Config) {
 	once.Do(func() {
 		// Initialize logger.
-		logger, p, err := log.InitLogger(cfg, zap.AddStacktrace(zap.ErrorLevel), zap.AddCallerSkip(1))
+		logger, p, err := log.InitLogger(cfg, zap.AddStacktrace(zap.ErrorLevel))
 		if err == nil {
 			log.ReplaceGlobals(logger, p)
 		} else {
@@ -167,54 +167,10 @@ func SetupLogger(cfg *log.Config) {
 	})
 }
 
-type logKey int
-
-const logCtxKey logKey = iota
-
-// WithField adds given kv field to the logger in ctx
-func WithField(ctx context.Context, key string, value string) context.Context {
-	logger := log.L()
-	if ctxLogger, ok := ctx.Value(logCtxKey).(*zap.Logger); ok {
-		logger = ctxLogger
-	}
-
-	return context.WithValue(ctx, logCtxKey, logger.With(zap.String(key, value)))
-}
-
-// WithReqID adds given reqID field to the logger in ctx
-func WithReqID(ctx context.Context, reqID int64) context.Context {
-	logger := log.L()
-	if ctxLogger, ok := ctx.Value(logCtxKey).(*zap.Logger); ok {
-		logger = ctxLogger
-	}
-
-	return context.WithValue(ctx, logCtxKey, logger.With(zap.Int64("reqID", reqID)))
-}
-
-// WithModule adds given module field to the logger in ctx
-func WithModule(ctx context.Context, module string) context.Context {
-	logger := log.L()
-	if ctxLogger, ok := ctx.Value(logCtxKey).(*zap.Logger); ok {
-		logger = ctxLogger
-	}
-
-	return context.WithValue(ctx, logCtxKey, logger.With(zap.String("module", module)))
-}
-
-func WithLogger(ctx context.Context, logger *zap.Logger) context.Context {
-	if logger == nil {
-		logger = log.L()
-	}
-	return context.WithValue(ctx, logCtxKey, logger)
-}
-
 func Logger(ctx context.Context) *zap.Logger {
-	if ctxLogger, ok := ctx.Value(logCtxKey).(*zap.Logger); ok {
-		return ctxLogger
-	}
-	return log.L()
+	return log.Ctx(ctx).Logger
 }
 
-func BgLogger() *zap.Logger {
-	return log.L()
+func WithModule(ctx context.Context, module string) context.Context {
+	return log.WithModule(ctx, module)
 }

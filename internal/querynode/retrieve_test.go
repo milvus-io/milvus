@@ -17,6 +17,7 @@
 package querynode
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -49,7 +50,7 @@ func TestStreaming_retrieve(t *testing.T) {
 	assert.NoError(t, err)
 
 	t.Run("test retrieve", func(t *testing.T) {
-		res, _, ids, err := retrieveStreaming(streaming, plan,
+		res, _, ids, err := retrieveStreaming(context.TODO(), streaming, plan,
 			defaultCollectionID,
 			[]UniqueID{defaultPartitionID},
 			defaultDMLChannel,
@@ -61,7 +62,7 @@ func TestStreaming_retrieve(t *testing.T) {
 
 	t.Run("test empty partition", func(t *testing.T) {
 
-		res, _, ids, err := retrieveStreaming(streaming, plan,
+		res, _, ids, err := retrieveStreaming(context.TODO(), streaming, plan,
 			defaultCollectionID,
 			nil,
 			defaultDMLChannel,

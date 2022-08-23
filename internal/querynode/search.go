@@ -17,6 +17,7 @@
 package querynode
 
 import (
+	"context"
 	"fmt"
 	"sync"
 
@@ -28,7 +29,7 @@ import (
 
 // searchOnSegments performs search on listed segments
 // all segment ids are validated before calling this function
-func searchOnSegments(replica ReplicaInterface, segType segmentType, searchReq *searchRequest, segIDs []UniqueID) ([]*SearchResult, error) {
+func searchOnSegments(ctx context.Context, replica ReplicaInterface, segType segmentType, searchReq *searchRequest, segIDs []UniqueID) ([]*SearchResult, error) {
 	// results variables
 	searchResults := make([]*SearchResult, len(segIDs))
 	errs := make([]error, len(segIDs))
@@ -72,31 +73,31 @@ func searchOnSegments(replica ReplicaInterface, segType segmentType, searchReq *
 // if segIDs is not specified, it will search on all the historical segments speficied by partIDs.
 // if segIDs is specified, it will only search on the segments specified by the segIDs.
 // if partIDs is empty, it means all the partitions of the loaded collection or all the partitions loaded.
-func searchHistorical(replica ReplicaInterface, searchReq *searchRequest, collID UniqueID, partIDs []UniqueID, segIDs []UniqueID) ([]*SearchResult, []UniqueID, []UniqueID, error) {
+func searchHistorical(ctx context.Context, replica ReplicaInterface, searchReq *searchRequest, collID UniqueID, partIDs []UniqueID, segIDs []UniqueID) ([]*SearchResult, []UniqueID, []UniqueID, error) {
 	var err error
 	var searchResults []*SearchResult
 	var searchSegmentIDs []UniqueID
 	var searchPartIDs []UniqueID
-	searchPartIDs, searchSegmentIDs, err = validateOnHistoricalReplica(replica, collID, partIDs, segIDs)
+	searchPartIDs, searchSegmentIDs, err = validateOnHistoricalReplica(ctx, replica, collID, partIDs, segIDs)
 	if err != nil {
 		return searchResults, searchSegmentIDs, searchPartIDs, err
 	}
-	searchResults, err = searchOnSegments(replica, segmentTypeSealed, searchReq, searchSegmentIDs)
+	searchResults, err = searchOnSegments(ctx, replica, segmentTypeSealed, searchReq, searchSegmentIDs)
 	return searchResults, searchPartIDs, searchSegmentIDs, err
 }
 
 // searchStreaming will search all the target segments in streaming
 // if partIDs is empty, it means all the partitions of the loaded collection or all the partitions loaded.
-func searchStreaming(replica ReplicaInterface, searchReq *searchRequest, collID UniqueID, partIDs []UniqueID, vChannel Channel) ([]*SearchResult, []UniqueID, []UniqueID, error) {
+func searchStreaming(ctx context.Context, replica ReplicaInterface, searchReq *searchRequest, collID UniqueID, partIDs []UniqueID, vChannel Channel) ([]*SearchResult, []UniqueID, []UniqueID, error) {
 	var err error
 	var searchResults []*SearchResult
 	var searchPartIDs []UniqueID
 	var searchSegmentIDs []UniqueID
 
-	searchPartIDs, searchSegmentIDs, err = validateOnStreamReplica(replica, collID, partIDs, vChannel)
+	searchPartIDs, searchSegmentIDs, err = validateOnStreamReplica(ctx, replica, collID, partIDs, vChannel)
 	if err != nil {
 		return searchResults, searchSegmentIDs, searchPartIDs, err
 	}
-	searchResults, err = searchOnSegments(replica, segmentTypeGrowing, searchReq, searchSegmentIDs)
+	searchResults, err = searchOnSegments(ctx, replica, segmentTypeGrowing, searchReq, searchSegmentIDs)
 	return searchResults, searchPartIDs, searchSegmentIDs, err
 }

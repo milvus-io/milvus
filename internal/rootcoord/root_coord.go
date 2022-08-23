@@ -1615,7 +1615,7 @@ func (c *Core) DescribeCollection(ctx context.Context, in *milvuspb.DescribeColl
 	}
 	tr := timerecord.NewTimeRecorder("DescribeCollection")
 
-	log.Debug("DescribeCollection", zap.String("role", typeutil.RootCoordRole),
+	log.Ctx(ctx).Debug("DescribeCollection", zap.String("role", typeutil.RootCoordRole),
 		zap.String("collection name", in.CollectionName), zap.Int64("id", in.CollectionID), zap.Int64("msgID", in.Base.MsgID))
 	t := &DescribeCollectionReqTask{
 		baseReqTask: baseReqTask{
@@ -1627,14 +1627,14 @@ func (c *Core) DescribeCollection(ctx context.Context, in *milvuspb.DescribeColl
 	}
 	err := executeTask(t)
 	if err != nil {
-		log.Error("DescribeCollection failed", zap.String("role", typeutil.RootCoordRole),
+		log.Ctx(ctx).Warn("DescribeCollection failed", zap.String("role", typeutil.RootCoordRole),
 			zap.String("collection name", in.CollectionName), zap.Int64("id", in.CollectionID), zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues("DescribeCollection", metrics.FailLabel).Inc()
 		return &milvuspb.DescribeCollectionResponse{
 			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "DescribeCollection failed: "+err.Error()),
 		}, nil
 	}
-	log.Debug("DescribeCollection success", zap.String("role", typeutil.RootCoordRole),
+	log.Ctx(ctx).Debug("DescribeCollection success", zap.String("role", typeutil.RootCoordRole),
 		zap.String("collection name", in.CollectionName), zap.Int64("id", in.CollectionID), zap.Int64("msgID", in.Base.MsgID))
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("DescribeCollection", metrics.SuccessLabel).Inc()
