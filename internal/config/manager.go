@@ -66,7 +66,7 @@ func (m *Manager) GetConfig(key string) (string, error) {
 //GetConfigsByPattern returns key values that matched pattern
 func (m *Manager) GetConfigsByPattern(pattern string) map[string]string {
 	m.RLock()
-	defer m.RLock()
+	defer m.RUnlock()
 	matchedConfig := make(map[string]string)
 	pattern = strings.ToLower(pattern)
 	for key, value := range m.keySourceMap {
@@ -86,7 +86,7 @@ func (m *Manager) GetConfigsByPattern(pattern string) map[string]string {
 // Configs returns all the key values
 func (m *Manager) Configs() map[string]string {
 	m.RLock()
-	defer m.RLock()
+	defer m.RUnlock()
 	config := make(map[string]string)
 
 	for key, value := range m.keySourceMap {
