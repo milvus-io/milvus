@@ -58,8 +58,8 @@ VecIndexCreator::parse_impl(const std::string& serialized_params_str, knowhere::
         conf[key] = value;
     }
 
-    auto stoi_closure = [](const std::string_view& s) -> int { return std::stoi(std::string(s)); };
-    auto stof_closure = [](const std::string_view& s) -> float { return std::stof(std::string(s)); };
+    auto stoi_closure = [](const std::string& s) -> int { return std::stoi(s); };
+    auto stof_closure = [](const std::string& s) -> float { return std::stof(s); };
 
     /***************************** meta *******************************/
     check_parameter<int>(conf, knowhere::meta::SLICE_SIZE, stoi_closure, std::optional{4});
@@ -124,16 +124,16 @@ VecIndexCreator::parse() {
 template <typename T>
 void
 VecIndexCreator::check_parameter(knowhere::Config& conf,
-                                 const std::string_view& key,
+                                 const std::string& key,
                                  std::function<T(std::string)> fn,
                                  std::optional<T> default_v) {
     if (!conf.contains(key)) {
         if (default_v.has_value()) {
-            conf[std::string(key)] = default_v.value();
+            conf[key] = default_v.value();
         }
     } else {
-        auto value = conf[std::string(key)];
-        conf[std::string(key)] = fn(value);
+        auto value = conf[key];
+        conf[key] = fn(value);
     }
 }
 
@@ -264,7 +264,7 @@ VecIndexCreator::get_index_type() {
     // knowhere bug here
     // the index_type of all ivf-based index will change to ivf flat after loaded
     auto type = get_config_by_name<std::string>("index_type");
-    return type.has_value() ? type.value() : std::string(knowhere::IndexEnum::INDEX_FAISS_IVFPQ);
+    return type.has_value() ? type.value() : knowhere::IndexEnum::INDEX_FAISS_IVFPQ;
 }
 
 std::string
@@ -275,9 +275,9 @@ VecIndexCreator::get_metric_type() {
     } else {
         auto index_type = get_index_type();
         if (is_in_bin_list(index_type)) {
-            return std::string(knowhere::metric::JACCARD);
+            return knowhere::metric::JACCARD;
         } else {
-            return std::string(knowhere::metric::L2);
+            return knowhere::metric::L2;
         }
     }
 }
