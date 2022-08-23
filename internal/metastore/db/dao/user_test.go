@@ -62,33 +62,42 @@ func TestUser_GetByUsername_Error(t *testing.T) {
 }
 
 func TestUser_ListUsername(t *testing.T) {
-	var usernames = []string{
-		"test_username_1",
-		"test_username_2",
-	}
+	var (
+		usernames = []string{
+			"test_username_1",
+			"test_username_2",
+		}
+		user = &dbmodel.User{
+			TenantID:          tenantID,
+			EncryptedPassword: "xxx",
+			IsSuper:           false,
+		}
+	)
 
 	// expectation
-	mock.ExpectQuery("SELECT `username` FROM `credential_users` WHERE tenant_id = ? AND is_deleted = false").
+	mock.ExpectQuery("SELECT * FROM `credential_users` WHERE tenant_id = ? AND is_deleted = false").
 		WithArgs(tenantID).
 		WillReturnRows(
-			sqlmock.NewRows([]string{"username"}).
-				AddRow(usernames[0]).
-				AddRow(usernames[1]))
+			sqlmock.NewRows([]string{"tenant_id", "username", "encrypted_password", "is_super"}).
+				AddRow(user.TenantID, usernames[0], user.EncryptedPassword, user.IsSuper).
+				AddRow(user.TenantID, usernames[1], user.EncryptedPassword, user.IsSuper))
 
 	// actual
-	res, err := userTestDb.ListUsername(tenantID)
+	res, err := userTestDb.ListUser(tenantID)
 	assert.Nil(t, err)
-	assert.Equal(t, usernames, res)
+	assert.Equal(t, 2, len(res))
+	assert.Equal(t, usernames[0], res[0].Username)
+	assert.Equal(t, usernames[1], res[1].Username)
 }
 
 func TestUser_ListUsername_Error(t *testing.T) {
 	// expectation
-	mock.ExpectQuery("SELECT `username` FROM `credential_users` WHERE tenant_id = ? AND is_deleted = false").
+	mock.ExpectQuery("SELECT * FROM `credential_users` WHERE tenant_id = ? AND is_deleted = false").
 		WithArgs(tenantID).
 		WillReturnError(errors.New("test error"))
 
 	// actual
-	res, err := userTestDb.ListUsername(tenantID)
+	res, err := userTestDb.ListUser(tenantID)
 	assert.Nil(t, res)
 	assert.Error(t, err)
 }

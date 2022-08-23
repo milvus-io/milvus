@@ -8,12 +8,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/common"
+
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/db/dbmodel"
 	"github.com/milvus-io/milvus/internal/metastore/db/dbmodel/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/contextutil"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
@@ -52,6 +55,9 @@ var (
 	aliasDbMock       *mocks.ICollAliasDb
 	segIndexDbMock    *mocks.ISegmentIndexDb
 	userDbMock        *mocks.IUserDb
+	roleDbMock        *mocks.IRoleDb
+	userRoleDbMock    *mocks.IUserRoleDb
+	grantDbMock       *mocks.IGrantDb
 
 	mockCatalog *Catalog
 )
@@ -68,6 +74,9 @@ func TestMain(m *testing.M) {
 	aliasDbMock = &mocks.ICollAliasDb{}
 	segIndexDbMock = &mocks.ISegmentIndexDb{}
 	userDbMock = &mocks.IUserDb{}
+	roleDbMock = &mocks.IRoleDb{}
+	userRoleDbMock = &mocks.IUserRoleDb{}
+	grantDbMock = &mocks.IGrantDb{}
 
 	metaDomainMock = &mocks.IMetaDomain{}
 	metaDomainMock.On("CollectionDb", ctx).Return(collDbMock)
@@ -78,6 +87,9 @@ func TestMain(m *testing.M) {
 	metaDomainMock.On("CollAliasDb", ctx).Return(aliasDbMock)
 	metaDomainMock.On("SegmentIndexDb", ctx).Return(segIndexDbMock)
 	metaDomainMock.On("UserDb", ctx).Return(userDbMock)
+	metaDomainMock.On("RoleDb", ctx).Return(roleDbMock)
+	metaDomainMock.On("UserRoleDb", ctx).Return(userRoleDbMock)
+	metaDomainMock.On("GrantDb", ctx).Return(grantDbMock)
 
 	mockCatalog = mockMetaCatalog(metaDomainMock)
 
@@ -1348,21 +1360,24 @@ func TestTableCatalog_DropCredential_MarkUserDeletedError(t *testing.T) {
 }
 
 func TestTableCatalog_ListCredentials(t *testing.T) {
-	usernames := []string{username}
+	user := &dbmodel.User{
+		Username:          username,
+		EncryptedPassword: password,
+	}
 
 	// expectation
-	userDbMock.On("ListUsername", tenantID).Return(usernames, nil).Once()
+	userDbMock.On("ListUser", tenantID).Return([]*dbmodel.User{user}, nil).Once()
 
 	// actual
 	res, gotErr := mockCatalog.ListCredentials(ctx)
 	require.NoError(t, gotErr)
-	require.Equal(t, usernames, res)
+	require.Equal(t, []string{username}, res)
 }
 
 func TestTableCatalog_ListCredentials_SelectUsernamesError(t *testing.T) {
 	// expectation
 	errTest := errors.New("test error")
-	userDbMock.On("ListUsername", tenantID).Return(nil, errTest).Once()
+	userDbMock.On("ListUser", tenantID).Return(nil, errTest).Once()
 
 	// actual
 	res, gotErr := mockCatalog.ListCredentials(ctx)
@@ -1371,55 +1386,715 @@ func TestTableCatalog_ListCredentials_SelectUsernamesError(t *testing.T) {
 }
 
 func TestTableCatalog_CreateRole(t *testing.T) {
-	//TODO implement me
-	gotErr := mockCatalog.CreateRole(ctx, tenantID, nil)
-	require.Nil(t, gotErr)
+	var (
+		roleName = "foo"
+		err      error
+	)
+
+	roleDbMock.On("GetRoles", tenantID, roleName).Return([]*dbmodel.Role{}, nil).Once()
+	roleDbMock.On("Insert", mock.Anything).Return(nil).Once()
+	err = mockCatalog.CreateRole(ctx, tenantID, &milvuspb.RoleEntity{Name: roleName})
+	require.NoError(t, err)
+}
+
+func TestTableCatalog_CreateRole_Error(t *testing.T) {
+	var (
+		roleName = "foo"
+		err      error
+	)
+	roleDbMock.On("GetRoles", tenantID, roleName).Return(nil, errors.New("test error")).Once()
+	err = mockCatalog.CreateRole(ctx, tenantID, &milvuspb.RoleEntity{Name: roleName})
+	require.Error(t, err)
+
+	roleDbMock.On("GetRoles", tenantID, roleName).Return([]*dbmodel.Role{{Base: dbmodel.Base{ID: 1}}}, nil).Once()
+	err = mockCatalog.CreateRole(ctx, tenantID, &milvuspb.RoleEntity{Name: roleName})
+	require.Equal(t, true, common.IsIgnorableError(err))
+
+	roleDbMock.On("GetRoles", tenantID, roleName).Return([]*dbmodel.Role{}, nil).Once()
+	roleDbMock.On("Insert", mock.Anything).Return(errors.New("test error")).Once()
+	err = mockCatalog.CreateRole(ctx, tenantID, &milvuspb.RoleEntity{Name: roleName})
+	require.Error(t, err)
 }
 
 func TestTableCatalog_DropRole(t *testing.T) {
-	//TODO implement me
-	gotErr := mockCatalog.DropRole(ctx, tenantID, "")
-	require.Nil(t, gotErr)
+	var (
+		roleName = "foo"
+		err      error
+	)
+
+	roleDbMock.On("Delete", tenantID, roleName).Return(nil).Once()
+	err = mockCatalog.DropRole(ctx, tenantID, roleName)
+	require.NoError(t, err)
 }
 
-func TestTableCatalog_OperateUserRole(t *testing.T) {
-	//TODO implement me
-	gotErr := mockCatalog.OperateUserRole(ctx, tenantID, nil, nil, milvuspb.OperateUserRoleType_AddUserToRole)
-	require.Nil(t, gotErr)
+func TestTableCatalog_DropRole_Error(t *testing.T) {
+	var (
+		roleName = "foo"
+		err      error
+	)
+
+	roleDbMock.On("Delete", tenantID, roleName).Return(errors.New("test error")).Once()
+	err = mockCatalog.DropRole(ctx, tenantID, roleName)
+	require.Error(t, err)
 }
 
-func TestTableCatalog_SelectRole(t *testing.T) {
-	//TODO implement me
-	_, gotErr := mockCatalog.SelectRole(ctx, tenantID, nil, false)
-	require.Nil(t, gotErr)
+func TestTableCatalog_AlterUserRole(t *testing.T) {
+	var (
+		username = "foo"
+		userID   = 100
+		roleName = "fo"
+		roleID   = 10
+		err      error
+	)
+
+	userDbMock.On("GetByUsername", tenantID, username).Return(&dbmodel.User{ID: int64(userID)}, nil).Once()
+	roleDbMock.On("GetRoles", tenantID, roleName).Return([]*dbmodel.Role{{Base: dbmodel.Base{ID: int64(roleID)}}}, nil).Once()
+	userRoleDbMock.On("GetUserRoles", tenantID, int64(userID), int64(roleID)).Return([]*dbmodel.UserRole{}, nil).Once()
+	userRoleDbMock.On("Insert", mock.Anything).Return(nil).Once()
+
+	err = mockCatalog.AlterUserRole(ctx, tenantID, &milvuspb.UserEntity{Name: username}, &milvuspb.RoleEntity{Name: roleName}, milvuspb.OperateUserRoleType_AddUserToRole)
+	require.NoError(t, err)
 }
 
-func TestTableCatalog_SelectUser(t *testing.T) {
-	//TODO implement me
-	_, gotErr := mockCatalog.SelectUser(ctx, tenantID, nil, false)
-	require.Nil(t, gotErr)
+func TestTableCatalog_AlterUserRole_GetUserIDError(t *testing.T) {
+	var (
+		username = "foo"
+		roleName = "fo"
+		err      error
+	)
+
+	userDbMock.On("GetByUsername", tenantID, username).Return(nil, errors.New("test error")).Once()
+	err = mockCatalog.AlterUserRole(ctx, tenantID, &milvuspb.UserEntity{Name: username}, &milvuspb.RoleEntity{Name: roleName}, milvuspb.OperateUserRoleType_AddUserToRole)
+	require.Error(t, err)
 }
 
-func TestTableCatalog_OperatePrivilege(t *testing.T) {
-	//TODO implement me
-	gotErr := mockCatalog.OperatePrivilege(ctx, tenantID, nil, milvuspb.OperatePrivilegeType_Revoke)
-	require.Nil(t, gotErr)
+func TestTableCatalog_AlterUserRole_GetRoleIDError(t *testing.T) {
+	var (
+		username = "foo"
+		userID   = 100
+		roleName = "fo"
+		err      error
+	)
+
+	userDbMock.On("GetByUsername", tenantID, username).Return(&dbmodel.User{ID: int64(userID)}, nil).Once()
+	roleDbMock.On("GetRoles", tenantID, roleName).Return(nil, errors.New("test error")).Once()
+	err = mockCatalog.AlterUserRole(ctx, tenantID, &milvuspb.UserEntity{Name: username}, &milvuspb.RoleEntity{Name: roleName}, milvuspb.OperateUserRoleType_AddUserToRole)
+	require.Error(t, err)
 }
 
-func TestTableCatalog_SelectGrant(t *testing.T) {
-	//TODO implement me
-	_, gotErr := mockCatalog.SelectGrant(ctx, tenantID, nil)
-	require.Nil(t, gotErr)
+func TestTableCatalog_AlterUserRole_GetUserRoleError(t *testing.T) {
+	var (
+		username = "foo"
+		userID   = 100
+		roleName = "fo"
+		roleID   = 10
+		err      error
+	)
+
+	userDbMock.On("GetByUsername", tenantID, username).Return(&dbmodel.User{ID: int64(userID)}, nil).Once()
+	roleDbMock.On("GetRoles", tenantID, roleName).Return([]*dbmodel.Role{{Base: dbmodel.Base{ID: int64(roleID)}}}, nil).Once()
+	userRoleDbMock.On("GetUserRoles", tenantID, int64(userID), int64(roleID)).Return([]*dbmodel.UserRole{}, errors.New("test error")).Once()
+	err = mockCatalog.AlterUserRole(ctx, tenantID, &milvuspb.UserEntity{Name: username}, &milvuspb.RoleEntity{Name: roleName}, milvuspb.OperateUserRoleType_AddUserToRole)
+	require.Error(t, err)
+}
+
+func TestTableCatalog_AlterUserRole_RepeatUserRole(t *testing.T) {
+	var (
+		username = "foo"
+		userID   = 100
+		roleName = "fo"
+		roleID   = 10
+		err      error
+	)
+
+	userDbMock.On("GetByUsername", tenantID, username).Return(&dbmodel.User{ID: int64(userID)}, nil).Once()
+	roleDbMock.On("GetRoles", tenantID, roleName).Return([]*dbmodel.Role{{Base: dbmodel.Base{ID: int64(roleID)}}}, nil).Once()
+	userRoleDbMock.On("GetUserRoles", tenantID, int64(userID), int64(roleID)).Return([]*dbmodel.UserRole{{}}, nil).Once()
+	err = mockCatalog.AlterUserRole(ctx, tenantID, &milvuspb.UserEntity{Name: username}, &milvuspb.RoleEntity{Name: roleName}, milvuspb.OperateUserRoleType_AddUserToRole)
+	require.Error(t, err)
+	require.Equal(t, true, common.IsIgnorableError(err))
+}
+
+func TestTableCatalog_AlterUserRole_InsertError(t *testing.T) {
+	var (
+		username = "foo"
+		userID   = 100
+		roleName = "fo"
+		roleID   = 10
+		err      error
+	)
+
+	userDbMock.On("GetByUsername", tenantID, username).Return(&dbmodel.User{ID: int64(userID)}, nil).Once()
+	roleDbMock.On("GetRoles", tenantID, roleName).Return([]*dbmodel.Role{{Base: dbmodel.Base{ID: int64(roleID)}}}, nil).Once()
+	userRoleDbMock.On("GetUserRoles", tenantID, int64(userID), int64(roleID)).Return([]*dbmodel.UserRole{}, nil).Once()
+	userRoleDbMock.On("Insert", mock.Anything).Return(errors.New("test error")).Once()
+
+	err = mockCatalog.AlterUserRole(ctx, tenantID, &milvuspb.UserEntity{Name: username}, &milvuspb.RoleEntity{Name: roleName}, milvuspb.OperateUserRoleType_AddUserToRole)
+	require.Error(t, err)
+}
+
+func TestTableCatalog_AlterUserRole_Delete(t *testing.T) {
+	var (
+		username = "foo"
+		userID   = 100
+		roleName = "fo"
+		roleID   = 10
+		err      error
+	)
+
+	userDbMock.On("GetByUsername", tenantID, username).Return(&dbmodel.User{ID: int64(userID)}, nil).Once()
+	roleDbMock.On("GetRoles", tenantID, roleName).Return([]*dbmodel.Role{{Base: dbmodel.Base{ID: int64(roleID)}}}, nil).Once()
+	userRoleDbMock.On("GetUserRoles", tenantID, int64(userID), int64(roleID)).Return([]*dbmodel.UserRole{{}}, nil).Once()
+	userRoleDbMock.On("Delete", tenantID, int64(userID), int64(roleID)).Return(nil).Once()
+
+	err = mockCatalog.AlterUserRole(ctx, tenantID, &milvuspb.UserEntity{Name: username}, &milvuspb.RoleEntity{Name: roleName}, milvuspb.OperateUserRoleType_RemoveUserFromRole)
+	require.NoError(t, err)
+}
+
+func TestTableCatalog_AlterUserRole_DeleteError(t *testing.T) {
+	var (
+		username = "foo"
+		userID   = 100
+		roleName = "fo"
+		roleID   = 10
+		err      error
+	)
+
+	userDbMock.On("GetByUsername", tenantID, username).Return(&dbmodel.User{ID: int64(userID)}, nil).Once()
+	roleDbMock.On("GetRoles", tenantID, roleName).Return([]*dbmodel.Role{{Base: dbmodel.Base{ID: int64(roleID)}}}, nil).Once()
+	userRoleDbMock.On("GetUserRoles", tenantID, int64(userID), int64(roleID)).Return([]*dbmodel.UserRole{}, nil).Once()
+
+	err = mockCatalog.AlterUserRole(ctx, tenantID, &milvuspb.UserEntity{Name: username}, &milvuspb.RoleEntity{Name: roleName}, milvuspb.OperateUserRoleType_RemoveUserFromRole)
+	require.Error(t, err)
+	require.True(t, common.IsIgnorableError(err))
+
+	userDbMock.On("GetByUsername", tenantID, username).Return(&dbmodel.User{ID: int64(userID)}, nil).Once()
+	roleDbMock.On("GetRoles", tenantID, roleName).Return([]*dbmodel.Role{{Base: dbmodel.Base{ID: int64(roleID)}}}, nil).Once()
+	userRoleDbMock.On("GetUserRoles", tenantID, int64(userID), int64(roleID)).Return([]*dbmodel.UserRole{{}}, nil).Once()
+	userRoleDbMock.On("Delete", tenantID, int64(userID), int64(roleID)).Return(errors.New("test error")).Once()
+
+	err = mockCatalog.AlterUserRole(ctx, tenantID, &milvuspb.UserEntity{Name: username}, &milvuspb.RoleEntity{Name: roleName}, milvuspb.OperateUserRoleType_RemoveUserFromRole)
+	require.Error(t, err)
+}
+
+func TestTableCatalog_AlterUserRole_InvalidType(t *testing.T) {
+	var (
+		username = "foo"
+		userID   = 100
+		roleName = "fo"
+		roleID   = 10
+		err      error
+	)
+
+	userDbMock.On("GetByUsername", tenantID, username).Return(&dbmodel.User{ID: int64(userID)}, nil).Once()
+	roleDbMock.On("GetRoles", tenantID, roleName).Return([]*dbmodel.Role{{Base: dbmodel.Base{ID: int64(roleID)}}}, nil).Once()
+	userRoleDbMock.On("GetUserRoles", tenantID, int64(userID), int64(roleID)).Return([]*dbmodel.UserRole{{}}, nil).Once()
+
+	err = mockCatalog.AlterUserRole(ctx, tenantID, &milvuspb.UserEntity{Name: username}, &milvuspb.RoleEntity{Name: roleName}, 100)
+	require.Error(t, err)
+}
+
+func TestTableCatalog_ListRole_AllRole(t *testing.T) {
+	var (
+		roleName1 = "foo1"
+		roleName2 = "foo2"
+		result    []*milvuspb.RoleResult
+		err       error
+	)
+
+	roleDbMock.On("GetRoles", tenantID, "").Return([]*dbmodel.Role{{Name: roleName1}, {Name: roleName2}}, nil).Once()
+
+	result, err = mockCatalog.ListRole(ctx, tenantID, nil, false)
+	require.NoError(t, err)
+	require.Equal(t, 2, len(result))
+	require.Equal(t, roleName1, result[0].Role.Name)
+}
+
+func TestTableCatalog_ListRole_AllRole_IncludeUserInfo(t *testing.T) {
+	var (
+		roleName1 = "foo1"
+		username1 = "fo1"
+		username2 = "fo2"
+		roleName2 = "foo2"
+		result    []*milvuspb.RoleResult
+		err       error
+	)
+
+	roleDbMock.On("GetRoles", tenantID, "").Return([]*dbmodel.Role{{Base: dbmodel.Base{ID: 1}, Name: roleName1}, {Base: dbmodel.Base{ID: 10}, Name: roleName2}}, nil).Once()
+	userRoleDbMock.On("GetUserRoles", tenantID, int64(0), int64(1)).Return([]*dbmodel.UserRole{{User: dbmodel.User{Username: username1}}, {User: dbmodel.User{Username: username2}}}, nil).Once()
+	userRoleDbMock.On("GetUserRoles", tenantID, int64(0), int64(10)).Return([]*dbmodel.UserRole{}, nil).Once()
+
+	result, err = mockCatalog.ListRole(ctx, tenantID, nil, true)
+	require.NoError(t, err)
+	require.Equal(t, 2, len(result))
+	require.Equal(t, roleName1, result[0].Role.Name)
+	require.Equal(t, 2, len(result[0].Users))
+	require.Equal(t, username1, result[0].Users[0].Name)
+	require.Equal(t, username2, result[0].Users[1].Name)
+	require.Equal(t, roleName2, result[1].Role.Name)
+}
+
+func TestTableCatalog_ListRole_AllRole_Empty(t *testing.T) {
+	var (
+		result []*milvuspb.RoleResult
+		err    error
+	)
+
+	roleDbMock.On("GetRoles", tenantID, "").Return([]*dbmodel.Role{}, nil).Once()
+
+	result, err = mockCatalog.ListRole(ctx, tenantID, nil, false)
+	require.NoError(t, err)
+	require.Equal(t, 0, len(result))
+}
+
+func TestTableCatalog_ListRole_OneRole(t *testing.T) {
+	var (
+		roleName1 = "foo1"
+		result    []*milvuspb.RoleResult
+		err       error
+	)
+
+	roleDbMock.On("GetRoles", tenantID, roleName1).Return([]*dbmodel.Role{{Name: roleName1}}, nil).Once()
+
+	result, err = mockCatalog.ListRole(ctx, tenantID, &milvuspb.RoleEntity{Name: roleName1}, false)
+	require.NoError(t, err)
+	require.Equal(t, 1, len(result))
+	require.Equal(t, roleName1, result[0].Role.Name)
+}
+
+func TestTableCatalog_ListRole_OneRole_IncludeUserInfo(t *testing.T) {
+	var (
+		roleName1 = "foo1"
+		username1 = "fo1"
+		username2 = "fo2"
+		result    []*milvuspb.RoleResult
+		err       error
+	)
+
+	roleDbMock.On("GetRoles", tenantID, roleName1).Return([]*dbmodel.Role{{Base: dbmodel.Base{ID: 1}, Name: roleName1}}, nil).Once()
+	userRoleDbMock.On("GetUserRoles", tenantID, int64(0), int64(1)).Return([]*dbmodel.UserRole{{User: dbmodel.User{Username: username1}}, {User: dbmodel.User{Username: username2}}}, nil).Once()
+
+	result, err = mockCatalog.ListRole(ctx, tenantID, &milvuspb.RoleEntity{Name: roleName1}, true)
+	require.NoError(t, err)
+	require.Equal(t, 1, len(result))
+	require.Equal(t, roleName1, result[0].Role.Name)
+	require.Equal(t, 2, len(result[0].Users))
+	require.Equal(t, username1, result[0].Users[0].Name)
+	require.Equal(t, username2, result[0].Users[1].Name)
+}
+
+func TestTableCatalog_ListRole_OneRole_Empty(t *testing.T) {
+	var (
+		roleName = "foo"
+		err      error
+	)
+
+	roleDbMock.On("GetRoles", tenantID, roleName).Return([]*dbmodel.Role{}, nil).Once()
+
+	_, err = mockCatalog.ListRole(ctx, tenantID, &milvuspb.RoleEntity{Name: roleName}, false)
+	require.Error(t, err)
+}
+
+func TestTableCatalog_ListRole_GetRolesError(t *testing.T) {
+	roleDbMock.On("GetRoles", tenantID, "").Return(nil, errors.New("test error")).Once()
+
+	_, err := mockCatalog.ListRole(ctx, tenantID, nil, false)
+	require.Error(t, err)
+}
+
+func TestTableCatalog_ListRole_GetUserRolesError(t *testing.T) {
+	roleDbMock.On("GetRoles", tenantID, "").Return([]*dbmodel.Role{{Base: dbmodel.Base{ID: 1}, Name: "foo"}}, nil).Once()
+	userRoleDbMock.On("GetUserRoles", tenantID, int64(0), int64(1)).Return(nil, errors.New("test error")).Once()
+	_, err := mockCatalog.ListRole(ctx, tenantID, nil, true)
+	require.Error(t, err)
+}
+
+func TestTableCatalog_ListUser_AllUser(t *testing.T) {
+	var (
+		username1 = "foo1"
+		username2 = "foo2"
+		result    []*milvuspb.UserResult
+		err       error
+	)
+
+	userDbMock.On("ListUser", tenantID).Return([]*dbmodel.User{{Username: username1}, {Username: username2}}, nil).Once()
+
+	result, err = mockCatalog.ListUser(ctx, tenantID, nil, false)
+	require.NoError(t, err)
+	require.Equal(t, 2, len(result))
+	require.Equal(t, username1, result[0].User.Name)
+}
+
+func TestTableCatalog_ListUser_AllUser_IncludeRoleInfo(t *testing.T) {
+	var (
+		roleName1 = "foo1"
+		username1 = "fo1"
+		username2 = "fo2"
+		roleName2 = "foo2"
+		result    []*milvuspb.UserResult
+		err       error
+	)
+
+	userDbMock.On("ListUser", tenantID).Return([]*dbmodel.User{{ID: 1, Username: username1}, {ID: 10, Username: username2}}, nil).Once()
+	userRoleDbMock.On("GetUserRoles", tenantID, int64(1), int64(0)).Return([]*dbmodel.UserRole{{Role: dbmodel.Role{Name: roleName1}}, {Role: dbmodel.Role{Name: roleName2}}}, nil).Once()
+	userRoleDbMock.On("GetUserRoles", tenantID, int64(10), int64(0)).Return([]*dbmodel.UserRole{}, nil).Once()
+
+	result, err = mockCatalog.ListUser(ctx, tenantID, nil, true)
+	require.NoError(t, err)
+	require.Equal(t, 2, len(result))
+	require.Equal(t, username1, result[0].User.Name)
+	require.Equal(t, 2, len(result[0].Roles))
+	require.Equal(t, roleName1, result[0].Roles[0].Name)
+	require.Equal(t, roleName2, result[0].Roles[1].Name)
+	require.Equal(t, username2, result[1].User.Name)
+}
+
+func TestTableCatalog_ListUser_AllUser_Empty(t *testing.T) {
+	var (
+		result []*milvuspb.UserResult
+		err    error
+	)
+
+	userDbMock.On("ListUser", tenantID).Return([]*dbmodel.User{}, nil).Once()
+
+	result, err = mockCatalog.ListUser(ctx, tenantID, nil, false)
+	require.NoError(t, err)
+	require.Equal(t, 0, len(result))
+}
+
+func TestTableCatalog_ListUser_OneUser(t *testing.T) {
+	var (
+		username1 = "foo1"
+		result    []*milvuspb.UserResult
+		err       error
+	)
+
+	userDbMock.On("GetByUsername", tenantID, username1).Return(&dbmodel.User{Username: username1}, nil).Once()
+
+	result, err = mockCatalog.ListUser(ctx, tenantID, &milvuspb.UserEntity{Name: username1}, false)
+	require.NoError(t, err)
+	require.Equal(t, 1, len(result))
+	require.Equal(t, username1, result[0].User.Name)
+}
+
+func TestTableCatalog_ListUser_OneUser_IncludeRoleInfo(t *testing.T) {
+	var (
+		roleName1 = "foo1"
+		roleName2 = "foo1"
+		username1 = "fo1"
+		result    []*milvuspb.UserResult
+		err       error
+	)
+
+	userDbMock.On("GetByUsername", tenantID, username1).Return(&dbmodel.User{ID: 1, Username: username1}, nil).Once()
+	userRoleDbMock.On("GetUserRoles", tenantID, int64(1), int64(0)).
+		Return([]*dbmodel.UserRole{{Role: dbmodel.Role{Name: roleName1}}, {Role: dbmodel.Role{Name: roleName2}}}, nil).Once()
+
+	result, err = mockCatalog.ListUser(ctx, tenantID, &milvuspb.UserEntity{Name: username1}, true)
+	require.NoError(t, err)
+	require.Equal(t, 1, len(result))
+	require.Equal(t, username1, result[0].User.Name)
+	require.Equal(t, 2, len(result[0].Roles))
+	require.Equal(t, roleName1, result[0].Roles[0].Name)
+	require.Equal(t, roleName2, result[0].Roles[1].Name)
+}
+
+func TestTableCatalog_ListUser_ListUserError(t *testing.T) {
+	userDbMock.On("ListUser", tenantID).Return(nil, errors.New("test error")).Once()
+
+	_, err := mockCatalog.ListUser(ctx, tenantID, nil, false)
+	require.Error(t, err)
+}
+
+func TestTableCatalog_ListUser_GetByUsernameError(t *testing.T) {
+	var (
+		username1 = "foo"
+		err       error
+	)
+
+	userDbMock.On("GetByUsername", tenantID, username1).Return(nil, errors.New("test error")).Once()
+
+	_, err = mockCatalog.ListUser(ctx, tenantID, &milvuspb.UserEntity{Name: username1}, false)
+	require.Error(t, err)
+}
+
+func TestTableCatalog_ListUser_GetUserRolesError(t *testing.T) {
+	var (
+		username1 = "foo"
+		err       error
+	)
+
+	userDbMock.On("GetByUsername", tenantID, username1).Return(&dbmodel.User{ID: 1, Username: username1}, nil).Once()
+	userRoleDbMock.On("GetUserRoles", tenantID, int64(1), int64(0)).Return(nil, errors.New("test error")).Once()
+
+	_, err = mockCatalog.ListUser(ctx, tenantID, &milvuspb.UserEntity{Name: username1}, true)
+	require.Error(t, err)
+}
+
+func TestTableCatalog_AlterPrivilege_Revoke(t *testing.T) {
+	var (
+		grant *milvuspb.GrantEntity
+		err   error
+	)
+	grant = &milvuspb.GrantEntity{
+		Role:       &milvuspb.RoleEntity{Name: "foo"},
+		Object:     &milvuspb.ObjectEntity{Name: "Collection"},
+		ObjectName: "col1",
+		Grantor: &milvuspb.GrantorEntity{
+			User:      &milvuspb.UserEntity{Name: "foo"},
+			Privilege: &milvuspb.PrivilegeEntity{Name: "PrivilegeLoad"},
+		},
+	}
+	roleDbMock.On("GetRoles", tenantID, grant.Role.Name).Return([]*dbmodel.Role{{Base: dbmodel.Base{ID: 1}}}, nil).Once()
+	grantDbMock.On("Delete", tenantID, int64(1), grant.Object.Name, grant.ObjectName, grant.Grantor.Privilege.Name).Return(nil).Once()
+
+	err = mockCatalog.AlterGrant(ctx, tenantID, grant, milvuspb.OperatePrivilegeType_Revoke)
+	require.NoError(t, err)
+}
+
+func TestTableCatalog_AlterPrivilege_Grant(t *testing.T) {
+	var (
+		grant *milvuspb.GrantEntity
+		err   error
+	)
+	grant = &milvuspb.GrantEntity{
+		Role:       &milvuspb.RoleEntity{Name: "foo"},
+		Object:     &milvuspb.ObjectEntity{Name: "Collection"},
+		ObjectName: "col1",
+		Grantor: &milvuspb.GrantorEntity{
+			User:      &milvuspb.UserEntity{Name: "foo"},
+			Privilege: &milvuspb.PrivilegeEntity{Name: "PrivilegeLoad"},
+		},
+	}
+	roleDbMock.On("GetRoles", tenantID, grant.Role.Name).Return([]*dbmodel.Role{{Base: dbmodel.Base{ID: 1}}}, nil).Once()
+	grantDbMock.On("Insert", mock.Anything).Return(nil).Once()
+
+	err = mockCatalog.AlterGrant(ctx, tenantID, grant, milvuspb.OperatePrivilegeType_Grant)
+	require.NoError(t, err)
+}
+
+func TestTableCatalog_AlterPrivilege_InvalidType(t *testing.T) {
+	var (
+		roleName = "foo"
+		err      error
+	)
+
+	roleDbMock.On("GetRoles", tenantID, roleName).Return([]*dbmodel.Role{{Base: dbmodel.Base{ID: 1}}}, nil).Once()
+	err = mockCatalog.AlterGrant(ctx, tenantID, &milvuspb.GrantEntity{Role: &milvuspb.RoleEntity{Name: roleName}}, 100)
+	require.Error(t, err)
+}
+
+func TestTableCatalog_ListGrant(t *testing.T) {
+	var (
+		grant   *milvuspb.GrantEntity
+		grants  []*dbmodel.Grant
+		entites []*milvuspb.GrantEntity
+		err     error
+	)
+
+	grant = &milvuspb.GrantEntity{
+		Role:       &milvuspb.RoleEntity{Name: "foo"},
+		Object:     &milvuspb.ObjectEntity{Name: "Collection"},
+		ObjectName: "col1",
+	}
+	grants = []*dbmodel.Grant{
+		{
+			Role:       dbmodel.Role{Name: "foo"},
+			Object:     "Collection",
+			ObjectName: "col1",
+			Detail:     "[[\"admin\",\"PrivilegeIndexDetail\"],[\"admin\",\"PrivilegeLoad\"],[\"admin\",\"*\"]]",
+		},
+	}
+	roleDbMock.On("GetRoles", tenantID, grant.Role.Name).Return([]*dbmodel.Role{{Base: dbmodel.Base{ID: 1}}}, nil).Once()
+	grantDbMock.On("GetGrants", tenantID, int64(1), grant.Object.Name, grant.ObjectName).Return(grants, nil).Once()
+
+	entites, err = mockCatalog.ListGrant(ctx, tenantID, grant)
+	require.NoError(t, err)
+	require.Equal(t, 3, len(entites))
+}
+
+func TestTableCatalog_ListGrant_GetRolesError(t *testing.T) {
+	var (
+		grant *milvuspb.GrantEntity
+		err   error
+	)
+	grant = &milvuspb.GrantEntity{
+		Role:       &milvuspb.RoleEntity{Name: "foo"},
+		Object:     &milvuspb.ObjectEntity{Name: "Collection"},
+		ObjectName: "col1",
+	}
+	roleDbMock.On("GetRoles", tenantID, grant.Role.Name).Return(nil, errors.New("test error")).Once()
+	_, err = mockCatalog.ListGrant(ctx, tenantID, grant)
+	require.Error(t, err)
+}
+
+func TestTableCatalog_ListGrant_GetGrantError(t *testing.T) {
+	var (
+		grant *milvuspb.GrantEntity
+		err   error
+	)
+	grant = &milvuspb.GrantEntity{
+		Role:       &milvuspb.RoleEntity{Name: "foo"},
+		Object:     &milvuspb.ObjectEntity{Name: "Collection"},
+		ObjectName: "col1",
+	}
+	roleDbMock.On("GetRoles", tenantID, grant.Role.Name).Return([]*dbmodel.Role{{Base: dbmodel.Base{ID: 1}}}, nil).Once()
+	grantDbMock.On("GetGrants", tenantID, int64(1), grant.Object.Name, grant.ObjectName).Return(nil, errors.New("test error")).Once()
+	_, err = mockCatalog.ListGrant(ctx, tenantID, grant)
+	require.Error(t, err)
+}
+
+func TestTableCatalog_ListGrant_DecodeError(t *testing.T) {
+	var (
+		grant  *milvuspb.GrantEntity
+		grants []*dbmodel.Grant
+		err    error
+	)
+	grant = &milvuspb.GrantEntity{
+		Role:       &milvuspb.RoleEntity{Name: "foo"},
+		Object:     &milvuspb.ObjectEntity{Name: "Collection"},
+		ObjectName: "col1",
+	}
+	grants = []*dbmodel.Grant{
+		{
+			Role:       dbmodel.Role{Name: "foo"},
+			Object:     "Collection",
+			ObjectName: "col1",
+			Detail:     "decode error",
+		},
+	}
+	roleDbMock.On("GetRoles", tenantID, grant.Role.Name).Return([]*dbmodel.Role{{Base: dbmodel.Base{ID: 1}}}, nil).Once()
+	grantDbMock.On("GetGrants", tenantID, int64(1), grant.Object.Name, grant.ObjectName).Return(grants, nil).Once()
+
+	_, err = mockCatalog.ListGrant(ctx, tenantID, grant)
+	require.Error(t, err)
+}
+
+func TestTableCatalog_ListGrant_DetailLenError(t *testing.T) {
+	var (
+		grant  *milvuspb.GrantEntity
+		grants []*dbmodel.Grant
+		err    error
+	)
+	grant = &milvuspb.GrantEntity{
+		Role:       &milvuspb.RoleEntity{Name: "foo"},
+		Object:     &milvuspb.ObjectEntity{Name: "Collection"},
+		ObjectName: "col1",
+	}
+	grants = []*dbmodel.Grant{
+		{
+			Role:       dbmodel.Role{Name: "foo"},
+			Object:     "Collection",
+			ObjectName: "col1",
+			Detail:     "[[\"admin\"]]",
+		},
+	}
+	roleDbMock.On("GetRoles", tenantID, grant.Role.Name).Return([]*dbmodel.Role{{Base: dbmodel.Base{ID: 1}}}, nil).Once()
+	grantDbMock.On("GetGrants", tenantID, int64(1), grant.Object.Name, grant.ObjectName).Return(grants, nil).Once()
+
+	_, err = mockCatalog.ListGrant(ctx, tenantID, grant)
+	require.Error(t, err)
 }
 
 func TestTableCatalog_ListPolicy(t *testing.T) {
-	//TODO implement me
-	_, gotErr := mockCatalog.ListPolicy(ctx, tenantID)
-	require.Nil(t, gotErr)
+	var (
+		grant    *milvuspb.GrantEntity
+		grants   []*dbmodel.Grant
+		policies []string
+		err      error
+	)
+
+	grant = &milvuspb.GrantEntity{
+		Role:       &milvuspb.RoleEntity{Name: "foo"},
+		Object:     &milvuspb.ObjectEntity{Name: "Collection"},
+		ObjectName: "col1",
+	}
+	grants = []*dbmodel.Grant{
+		{
+			Role:       dbmodel.Role{Name: "foo"},
+			Object:     "Collection",
+			ObjectName: "col1",
+			Detail:     "[[\"admin\",\"PrivilegeIndexDetail\"]]",
+		},
+	}
+	grantDbMock.On("GetGrants", tenantID, int64(0), "", "").Return(grants, nil).Once()
+
+	policies, err = mockCatalog.ListPolicy(ctx, tenantID)
+	require.NoError(t, err)
+	require.Equal(t, 1, len(policies))
+	require.Equal(t, funcutil.PolicyForPrivilege(grant.Role.Name, grant.Object.Name, grant.ObjectName, "PrivilegeIndexDetail"), policies[0])
+}
+
+func TestTableCatalog_ListPolicy_GetGrantsError(t *testing.T) {
+	grantDbMock.On("GetGrants", tenantID, int64(0), "", "").Return(nil, errors.New("test error")).Once()
+
+	_, err := mockCatalog.ListPolicy(ctx, tenantID)
+	require.Error(t, err)
+}
+
+func TestTableCatalog_ListPolicy_DetailLenError(t *testing.T) {
+	var (
+		grants []*dbmodel.Grant
+		err    error
+	)
+
+	grants = []*dbmodel.Grant{
+		{
+			Role:       dbmodel.Role{Name: "foo"},
+			Object:     "Collection",
+			ObjectName: "col1",
+			Detail:     "decode error",
+		},
+	}
+	grantDbMock.On("GetGrants", tenantID, int64(0), "", "").Return(grants, nil).Once()
+
+	_, err = mockCatalog.ListPolicy(ctx, tenantID)
+	require.Error(t, err)
+}
+
+func TestTableCatalog_ListPolicy_DecodeError(t *testing.T) {
+	var (
+		grants []*dbmodel.Grant
+		err    error
+	)
+
+	grants = []*dbmodel.Grant{
+		{
+			Role:       dbmodel.Role{Name: "foo"},
+			Object:     "Collection",
+			ObjectName: "col1",
+			Detail:     "[[\"admin\"]]",
+		},
+	}
+	grantDbMock.On("GetGrants", tenantID, int64(0), "", "").Return(grants, nil).Once()
+
+	_, err = mockCatalog.ListPolicy(ctx, tenantID)
+	require.Error(t, err)
 }
 
 func TestTableCatalog_ListUserRole(t *testing.T) {
-	//TODO implement me
-	_, gotErr := mockCatalog.ListUserRole(ctx, tenantID)
-	require.Nil(t, gotErr)
+	var (
+		username1 = "foo1"
+		username2 = "foo2"
+		roleName1 = "fo1"
+		roleName2 = "fo2"
+		userRoles []string
+		err       error
+	)
+
+	userRoleDbMock.On("GetUserRoles", tenantID, int64(0), int64(0)).Return([]*dbmodel.UserRole{
+		{User: dbmodel.User{Username: username1}, Role: dbmodel.Role{Name: roleName1}},
+		{User: dbmodel.User{Username: username2}, Role: dbmodel.Role{Name: roleName2}},
+	}, nil).Once()
+
+	userRoles, err = mockCatalog.ListUserRole(ctx, tenantID)
+	require.NoError(t, err)
+	require.Equal(t, 2, len(userRoles))
+	require.Equal(t, funcutil.EncodeUserRoleCache(username1, roleName1), userRoles[0])
+}
+
+func TestTableCatalog_ListUserRole_Error(t *testing.T) {
+	userRoleDbMock.On("GetUserRoles", tenantID, int64(0), int64(0)).Return(nil, errors.New("test error")).Once()
+	_, err := mockCatalog.ListUserRole(ctx, tenantID)
+	require.Error(t, err)
 }

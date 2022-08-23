@@ -12,8 +12,18 @@ type IMetaDomain interface {
 	IndexDb(ctx context.Context) IIndexDb
 	SegmentIndexDb(ctx context.Context) ISegmentIndexDb
 	UserDb(ctx context.Context) IUserDb
+	RoleDb(ctx context.Context) IRoleDb
+	UserRoleDb(ctx context.Context) IUserRoleDb
+	GrantDb(ctx context.Context) IGrantDb
 }
 
 type ITransaction interface {
 	Transaction(ctx context.Context, fn func(txCtx context.Context) error) error
+}
+
+func GetCommonCondition(tenant string, isDelete bool) map[string]interface{} {
+	return map[string]interface{}{
+		"tenant_id":  tenant,
+		"is_deleted": isDelete,
+	}
 }
