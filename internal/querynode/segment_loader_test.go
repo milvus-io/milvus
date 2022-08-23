@@ -23,6 +23,10 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -32,9 +36,6 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/concurrency"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/require"
 )
 
 func TestSegmentLoader_loadSegment(t *testing.T) {
@@ -588,6 +589,7 @@ func TestSegmentLoader_testFromDmlCPLoadDelete(t *testing.T) {
 	{
 		mockMsg := &mockMsgID{}
 		mockMsg.On("AtEarliestPosition").Return(false, nil)
+		mockMsg.On("Equal", mock.AnythingOfType("string")).Return(false, nil)
 		testSeekFailWhenConsumingDeltaMsg(ctx, t, position, mockMsg)
 	}
 
@@ -595,6 +597,15 @@ func TestSegmentLoader_testFromDmlCPLoadDelete(t *testing.T) {
 	{
 		mockMsg := &mockMsgID{}
 		mockMsg.On("AtEarliestPosition").Return(true, nil)
+		mockMsg.On("Equal", mock.AnythingOfType("string")).Return(false, nil)
+		assert.Nil(t, testConsumingDeltaMsg(ctx, t, position, true, mockMsg))
+	}
+
+	// test already reach latest position
+	{
+		mockMsg := &mockMsgID{}
+		mockMsg.On("AtEarliestPosition").Return(false, nil)
+		mockMsg.On("Equal", mock.AnythingOfType("string")).Return(true, nil)
 		assert.Nil(t, testConsumingDeltaMsg(ctx, t, position, true, mockMsg))
 	}
 
@@ -602,6 +613,7 @@ func TestSegmentLoader_testFromDmlCPLoadDelete(t *testing.T) {
 	{
 		mockMsg := &mockMsgID{}
 		mockMsg.On("AtEarliestPosition").Return(false, nil)
+		mockMsg.On("Equal", mock.AnythingOfType("string")).Return(false, nil)
 		mockMsg.On("LessOrEqualThan", mock.AnythingOfType("string")).Return(true, nil)
 		assert.Nil(t, testConsumingDeltaMsg(ctx, t, position, true, mockMsg))
 	}
@@ -610,6 +622,7 @@ func TestSegmentLoader_testFromDmlCPLoadDelete(t *testing.T) {
 	{
 		mockMsg := &mockMsgID{}
 		mockMsg.On("AtEarliestPosition").Return(false, nil)
+		mockMsg.On("Equal", mock.AnythingOfType("string")).Return(false, nil)
 		mockMsg.On("LessOrEqualThan", mock.AnythingOfType("string")).Return(true, errors.New(""))
 		assert.NotNil(t, testConsumingDeltaMsg(ctx, t, position, true, mockMsg))
 	}
@@ -618,6 +631,7 @@ func TestSegmentLoader_testFromDmlCPLoadDelete(t *testing.T) {
 	{
 		mockMsg := &mockMsgID{}
 		mockMsg.On("AtEarliestPosition").Return(false, nil)
+		mockMsg.On("Equal", mock.AnythingOfType("string")).Return(false, nil)
 		mockMsg.On("LessOrEqualThan", mock.AnythingOfType("string")).Return(true, errors.New(""))
 		assert.NotNil(t, testConsumingDeltaMsg(ctx, t, position, false, mockMsg))
 	}
@@ -682,6 +696,15 @@ func (m2 *mockMsgID) AtEarliestPosition() bool {
 }
 
 func (m2 *mockMsgID) LessOrEqualThan(msgID []byte) (bool, error) {
+	args := m2.Called()
+	ret := args.Get(0)
+	if args.Get(1) != nil {
+		return false, args.Get(1).(error)
+	}
+	return ret.(bool), nil
+}
+
+func (m2 *mockMsgID) Equal(msgID []byte) (bool, error) {
 	args := m2.Called()
 	ret := args.Get(0)
 	if args.Get(1) != nil {
