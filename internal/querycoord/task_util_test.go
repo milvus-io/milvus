@@ -27,8 +27,8 @@ import (
 )
 
 func TestGenerateFullWatchDmChannelsRequest(t *testing.T) {
-	dataCoord := &dataCoordMock{}
 	ctx, cancel := context.WithCancel(context.Background())
+	dataCoord := newDataCoordMock(ctx)
 	handler, err := newGlobalMetaBroker(ctx, nil, dataCoord, nil, nil)
 	assert.Nil(t, err)
 
@@ -46,12 +46,12 @@ func TestGenerateFullWatchDmChannelsRequest(t *testing.T) {
 		NodeID: 1,
 	}
 
-	fullWatchDmChannelsRequest, err := generateFullWatchDmChannelsRequest(handler, watchDmChannelsRequest)
+	fullWatchDmChannelsRequest, err := generateFullWatchDmChannelsRequest(ctx, handler, watchDmChannelsRequest)
 	assert.Nil(t, err)
 	assert.NotEmpty(t, fullWatchDmChannelsRequest.GetSegmentInfos())
 
 	dataCoord.returnError = true
-	fullWatchDmChannelsRequest2, err := generateFullWatchDmChannelsRequest(handler, watchDmChannelsRequest)
+	fullWatchDmChannelsRequest2, err := generateFullWatchDmChannelsRequest(ctx, handler, watchDmChannelsRequest)
 	assert.Error(t, err)
 	assert.Empty(t, fullWatchDmChannelsRequest2.GetSegmentInfos())
 
@@ -88,8 +88,8 @@ func TestThinWatchDmChannelsRequest(t *testing.T) {
 }
 
 func TestUpgradeCompatibility(t *testing.T) {
-	dataCoord := &dataCoordMock{}
 	ctx, cancel := context.WithCancel(context.Background())
+	dataCoord := newDataCoordMock(ctx)
 	handler, err := newGlobalMetaBroker(ctx, nil, dataCoord, nil, nil)
 	assert.Nil(t, err)
 
@@ -110,7 +110,7 @@ func TestUpgradeCompatibility(t *testing.T) {
 		NodeID: 1,
 	}
 
-	fullWatchDmChannelsRequest, err := generateFullWatchDmChannelsRequest(handler, watchDmChannelsRequest)
+	fullWatchDmChannelsRequest, err := generateFullWatchDmChannelsRequest(ctx, handler, watchDmChannelsRequest)
 	assert.Nil(t, err)
 	assert.NotEmpty(t, fullWatchDmChannelsRequest.GetSegmentInfos())
 	vChannel := fullWatchDmChannelsRequest.GetInfos()[0]
@@ -122,5 +122,37 @@ func TestUpgradeCompatibility(t *testing.T) {
 	assert.NotEmpty(t, vChannel.GetDroppedSegmentIds())
 
 	assert.Equal(t, 1, len(vChannel.GetUnflushedSegmentIds()))
+	cancel()
+}
+
+func TestGetMissSegment(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	dataCoord := newDataCoordMock(ctx)
+	broker, err := newGlobalMetaBroker(ctx, nil, dataCoord, nil, nil)
+	assert.Nil(t, err)
+
+	vChannels, _, err := broker.getRecoveryInfo(ctx, defaultCollectionID, 0)
+	assert.Nil(t, err)
+
+	watchDmChannelsRequest := &querypb.WatchDmChannelsRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_WatchDmChannels,
+		},
+		CollectionID: defaultCollectionID,
+		PartitionIDs: []int64{1},
+		Infos:        vChannels,
+		NodeID:       1,
+		LoadMeta: &querypb.LoadMetaInfo{
+			LoadType:     querypb.LoadType_LoadCollection,
+			CollectionID: defaultCollectionID,
+			PartitionIDs: []int64{1},
+		},
+	}
+
+	// inject certain number of error
+	dataCoord.returnErrorCount.Store(3)
+
+	_, err = generateFullWatchDmChannelsRequest(ctx, broker, watchDmChannelsRequest)
+	assert.NoError(t, err)
 	cancel()
 }

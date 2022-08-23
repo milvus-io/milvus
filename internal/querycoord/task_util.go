@@ -17,21 +17,67 @@
 package querycoord
 
 import (
+	"context"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"go.uber.org/zap"
 )
 
 // generateFullWatchDmChannelsRequest fill the WatchDmChannelsRequest by get segment infos from meta broker
-func generateFullWatchDmChannelsRequest(broker *globalMetaBroker, request *querypb.WatchDmChannelsRequest) (*querypb.WatchDmChannelsRequest, error) {
+func generateFullWatchDmChannelsRequest(ctx context.Context, broker *globalMetaBroker, request *querypb.WatchDmChannelsRequest) (*querypb.WatchDmChannelsRequest, error) {
 	cloned := proto.Clone(request).(*querypb.WatchDmChannelsRequest)
 	vChannels := cloned.GetInfos()
 
 	// for upgrade compatibility from 2.0.2
 	for _, vChannel := range vChannels {
 		reviseVChannelInfo(vChannel)
+	}
+
+	vChannelDict := make(map[string]bool, len(vChannels))
+	for _, info := range vChannels {
+		vChannelDict[info.ChannelName] = true
+	}
+	var segmentInfos []*datapb.SegmentInfo
+
+	// if the return segmentInfos is less than required, this may because the segment is compacted.
+	// refresh the vchannels and segmentInfos needed.
+	retryFunc := func() error {
+		newVChannels := make([]*datapb.VchannelInfo, 0)
+		newSegmentIds := make([]int64, 0)
+
+		newVChannelDict := make(map[string]bool)
+		for _, partitionID := range request.GetLoadMeta().GetPartitionIDs() {
+			partitionVChannels, _, err := broker.getRecoveryInfo(ctx, request.GetCollectionID(), partitionID)
+			if err != nil {
+				log.Error("GetRecoveryInfo failed, retrying...", zap.Error(err))
+				return err
+			}
+			for _, vchannel := range partitionVChannels {
+				if vChannelDict[vchannel.GetChannelName()] && !newVChannelDict[vchannel.GetChannelName()] {
+					newVChannels = append(newVChannels, vchannel)
+					newVChannelDict[vchannel.GetChannelName()] = true
+				}
+			}
+		}
+
+		for _, vChannel := range newVChannels {
+			newSegmentIds = append(newSegmentIds, vChannel.FlushedSegmentIds...)
+			newSegmentIds = append(newSegmentIds, vChannel.UnflushedSegmentIds...)
+			newSegmentIds = append(newSegmentIds, vChannel.DroppedSegmentIds...)
+		}
+		newSegmentInfos, err := broker.getDataSegmentInfosByIDs(ctx, newSegmentIds)
+		if err != nil {
+			log.Error("Get Vchannel SegmentInfos failed, retrying...", zap.Error(err))
+			return err
+		}
+
+		cloned.Infos = newVChannels
+		segmentInfos = newSegmentInfos
+		return nil
 	}
 
 	// fill segmentInfos
@@ -41,18 +87,24 @@ func generateFullWatchDmChannelsRequest(broker *globalMetaBroker, request *query
 		segmentIds = append(segmentIds, vChannel.UnflushedSegmentIds...)
 		segmentIds = append(segmentIds, vChannel.DroppedSegmentIds...)
 	}
-	segmentInfos, err := broker.getDataSegmentInfosByIDs(segmentIds)
+	segmentInfos, err := broker.getDataSegmentInfosByIDs(ctx, segmentIds)
+
 	if err != nil {
 		log.Error("Get Vchannel SegmentInfos failed", zap.Error(err))
-		return nil, err
+		retryErr := retry.Do(ctx, retryFunc, retry.Attempts(20))
+		if retryErr != nil {
+			log.Error("Get Vchannel SegmentInfos failed after retry", zap.Error(retryErr))
+			return nil, retryErr
+		}
 	}
+
 	segmentDict := make(map[int64]*datapb.SegmentInfo)
 	for _, info := range segmentInfos {
 		segmentDict[info.ID] = info
 	}
 	cloned.SegmentInfos = segmentDict
 
-	return cloned, err
+	return cloned, nil
 }
 
 // thinWatchDmChannelsRequest will return a thin version of WatchDmChannelsRequest

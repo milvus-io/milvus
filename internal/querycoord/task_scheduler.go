@@ -389,7 +389,7 @@ func (scheduler *TaskScheduler) unmarshalTask(taskID UniqueID, t string) (task, 
 		if err != nil {
 			return nil, err
 		}
-		fullReq, err := generateFullWatchDmChannelsRequest(scheduler.broker, &req)
+		fullReq, err := generateFullWatchDmChannelsRequest(baseTask.traceCtx(), scheduler.broker, &req)
 		if err != nil {
 			return nil, err
 		}

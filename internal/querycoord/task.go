@@ -538,7 +538,7 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 				ReplicaID: replica.GetReplicaID(),
 			}
 
-			fullWatchRequest, err := generateFullWatchDmChannelsRequest(lct.broker, watchRequest)
+			fullWatchRequest, err := generateFullWatchDmChannelsRequest(ctx, lct.broker, watchRequest)
 			if err != nil {
 				lct.setResultInfo(err)
 				return err
@@ -1032,7 +1032,7 @@ func (lpt *loadPartitionTask) execute(ctx context.Context) error {
 				ReplicaID: replica.GetReplicaID(),
 			}
 
-			fullWatchRequest, err := generateFullWatchDmChannelsRequest(lpt.broker, watchRequest)
+			fullWatchRequest, err := generateFullWatchDmChannelsRequest(ctx, lpt.broker, watchRequest)
 			if err != nil {
 				lpt.setResultInfo(err)
 				return err
@@ -2082,7 +2082,7 @@ func (lbt *loadBalanceTask) processNodeDownLoadBalance(ctx context.Context) erro
 						watchRequest.PartitionIDs = toRecoverPartitionIDs
 					}
 
-					fullWatchRequest, err := generateFullWatchDmChannelsRequest(lbt.broker, watchRequest)
+					fullWatchRequest, err := generateFullWatchDmChannelsRequest(ctx, lbt.broker, watchRequest)
 					if err != nil {
 						lbt.setResultInfo(err)
 						return err
