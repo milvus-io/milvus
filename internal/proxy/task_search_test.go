@@ -1420,7 +1420,7 @@ func Test_reduceSearchResultData_int(t *testing.T) {
 		},
 	}
 
-	reduced, err := reduceSearchResultData(results, int64(nq), int64(topk), distance.L2, schemapb.DataType_Int64)
+	reduced, err := reduceSearchResultData(context.TODO(), results, int64(nq), int64(topk), distance.L2, schemapb.DataType_Int64)
 	assert.NoError(t, err)
 	assert.ElementsMatch(t, []int64{3, 4, 7, 8, 11, 12}, reduced.GetResults().GetIds().GetIntId().GetData())
 	// hard to compare floating point value.
@@ -1459,7 +1459,7 @@ func Test_reduceSearchResultData_str(t *testing.T) {
 		},
 	}
 
-	reduced, err := reduceSearchResultData(results, int64(nq), int64(topk), distance.L2, schemapb.DataType_VarChar)
+	reduced, err := reduceSearchResultData(context.TODO(), results, int64(nq), int64(topk), distance.L2, schemapb.DataType_VarChar)
 	assert.NoError(t, err)
 	assert.ElementsMatch(t, []string{"3", "4", "7", "8", "11", "12"}, reduced.GetResults().GetIds().GetStrId().GetData())
 	// hard to compare floating point value.

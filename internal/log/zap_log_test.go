@@ -292,6 +292,10 @@ func (t *testLogSpy) FailNow() {
 	t.TB.FailNow()
 }
 
+func (t *testLogSpy) CleanBuffer() {
+	t.Messages = []string{}
+}
+
 func (t *testLogSpy) Logf(format string, args ...interface{}) {
 	// Log messages are in the format,
 	//
@@ -319,4 +323,41 @@ func (t *testLogSpy) assertMessagesNotContains(msg string) {
 	for _, actualMsg := range t.Messages {
 		assert.NotContains(t.TB, actualMsg, msg)
 	}
+}
+
+func (t *testLogSpy) assertLastMessageContains(msg string) {
+	if len(t.Messages) == 0 {
+		assert.Error(t.TB, fmt.Errorf("empty message"))
+	}
+	assert.Contains(t.TB, t.Messages[len(t.Messages)-1], msg)
+}
+
+func (t *testLogSpy) assertLastMessageNotContains(msg string) {
+	if len(t.Messages) == 0 {
+		assert.Error(t.TB, fmt.Errorf("empty message"))
+	}
+	assert.NotContains(t.TB, t.Messages[len(t.Messages)-1], msg)
+}
+
+func (t *testLogSpy) assertMessageContainAny(msg string) {
+	found := false
+	for _, actualMsg := range t.Messages {
+		if strings.Contains(actualMsg, msg) {
+			found = true
+		}
+	}
+	assert.True(t, found, "can't found any message contain `%s`, all messages: %v", msg, fmtMsgs(t.Messages))
+}
+
+func fmtMsgs(messages []string) string {
+	builder := strings.Builder{}
+	builder.WriteString("[")
+	for i, msg := range messages {
+		if i == len(messages)-1 {
+			builder.WriteString(fmt.Sprintf("`%s]`", msg))
+		} else {
+			builder.WriteString(fmt.Sprintf("`%s`, ", msg))
+		}
+	}
+	return builder.String()
 }

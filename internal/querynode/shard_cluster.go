@@ -761,9 +761,9 @@ func (sc *ShardCluster) Search(ctx context.Context, req *querypb.SearchRequest, 
 	segAllocs, versionID := sc.segmentAllocations(req.GetReq().GetPartitionIDs())
 	defer sc.finishUsage(versionID)
 
-	log.Debug("cluster segment distribution", zap.Int("len", len(segAllocs)))
+	log.Ctx(ctx).Debug("cluster segment distribution", zap.Int("len", len(segAllocs)))
 	for nodeID, segmentIDs := range segAllocs {
-		log.Debug("segments distribution", zap.Int64("nodeID", nodeID), zap.Int64s("segments", segmentIDs))
+		log.Ctx(ctx).Debug("segments distribution", zap.Int64("nodeID", nodeID), zap.Int64s("segments", segmentIDs))
 	}
 
 	// concurrent visiting nodes
@@ -822,7 +822,7 @@ func (sc *ShardCluster) Search(ctx context.Context, req *querypb.SearchRequest, 
 
 	wg.Wait()
 	if err != nil {
-		log.Error("failed to do search", zap.Any("req", req), zap.Error(err))
+		log.Ctx(ctx).Warn("failed to do search", zap.Any("req", req), zap.Error(err))
 		return nil, err
 	}
 

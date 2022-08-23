@@ -398,7 +398,7 @@ func (qc *QueryCoord) ReleaseCollection(ctx context.Context, req *querypb.Releas
 // ShowPartitions return all the partitions that have been loaded
 func (qc *QueryCoord) ShowPartitions(ctx context.Context, req *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
 	collectionID := req.CollectionID
-	log.Info("show partitions start",
+	log.Ctx(ctx).Debug("show partitions start",
 		zap.String("role", typeutil.QueryCoordRole),
 		zap.Int64("collectionID", collectionID),
 		zap.Int64s("partitionIDs", req.PartitionIDs),
@@ -410,7 +410,7 @@ func (qc *QueryCoord) ShowPartitions(ctx context.Context, req *querypb.ShowParti
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		err := errors.New("QueryCoord is not healthy")
 		status.Reason = err.Error()
-		log.Error("show partition failed", zap.Int64("msgID", req.Base.MsgID), zap.Error(err))
+		log.Ctx(ctx).Warn("show partition failed", zap.Int64("msgID", req.Base.MsgID), zap.Error(err))
 		return &querypb.ShowPartitionsResponse{
 			Status: status,
 		}, nil
@@ -421,7 +421,7 @@ func (qc *QueryCoord) ShowPartitions(ctx context.Context, req *querypb.ShowParti
 		err = fmt.Errorf("collection %d has not been loaded into QueryNode", collectionID)
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		status.Reason = err.Error()
-		log.Warn("show partitions failed",
+		log.Ctx(ctx).Warn("show partitions failed",
 			zap.String("role", typeutil.QueryCoordRole),
 			zap.Int64("collectionID", collectionID),
 			zap.Int64("msgID", req.Base.MsgID), zap.Error(err))
@@ -440,7 +440,7 @@ func (qc *QueryCoord) ShowPartitions(ctx context.Context, req *querypb.ShowParti
 		for _, id := range inMemoryPartitionIDs {
 			inMemoryPercentages = append(inMemoryPercentages, ID2PartitionState[id].InMemoryPercentage)
 		}
-		log.Info("show partitions end",
+		log.Ctx(ctx).Debug("show partitions end",
 			zap.String("role", typeutil.QueryCoordRole),
 			zap.Int64("collectionID", collectionID),
 			zap.Int64("msgID", req.Base.MsgID),
@@ -457,7 +457,7 @@ func (qc *QueryCoord) ShowPartitions(ctx context.Context, req *querypb.ShowParti
 			err = fmt.Errorf("partition %d of collection %d has not been loaded into QueryNode", id, collectionID)
 			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 			status.Reason = err.Error()
-			log.Warn("show partitions failed",
+			log.Ctx(ctx).Warn("show partitions failed",
 				zap.String("role", typeutil.QueryCoordRole),
 				zap.Int64("collectionID", collectionID),
 				zap.Int64("partitionID", id),
@@ -470,7 +470,7 @@ func (qc *QueryCoord) ShowPartitions(ctx context.Context, req *querypb.ShowParti
 		inMemoryPercentages = append(inMemoryPercentages, ID2PartitionState[id].InMemoryPercentage)
 	}
 
-	log.Info("show partitions end",
+	log.Ctx(ctx).Debug("show partitions end",
 		zap.String("role", typeutil.QueryCoordRole),
 		zap.Int64("collectionID", collectionID),
 		zap.Int64s("partitionIDs", req.PartitionIDs),

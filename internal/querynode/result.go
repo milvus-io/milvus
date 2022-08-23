@@ -17,6 +17,7 @@
 package querynode
 
 import (
+	"context"
 	"fmt"
 	"math"
 
@@ -31,24 +32,24 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
-func reduceSearchResults(results []*internalpb.SearchResults, nq int64, topk int64, metricType string) (*internalpb.SearchResults, error) {
+func reduceSearchResults(ctx context.Context, results []*internalpb.SearchResults, nq int64, topk int64, metricType string) (*internalpb.SearchResults, error) {
 	searchResultData, err := decodeSearchResults(results)
 	if err != nil {
-		log.Warn("shard leader decode search results errors", zap.Error(err))
+		log.Ctx(ctx).Warn("shard leader decode search results errors", zap.Error(err))
 		return nil, err
 	}
-	log.Debug("shard leader get valid search results", zap.Int("numbers", len(searchResultData)))
+	log.Ctx(ctx).Debug("shard leader get valid search results", zap.Int("numbers", len(searchResultData)))
 
 	for i, sData := range searchResultData {
-		log.Debug("reduceSearchResultData",
+		log.Ctx(ctx).Debug("reduceSearchResultData",
 			zap.Int("result No.", i),
 			zap.Int64("nq", sData.NumQueries),
 			zap.Int64("topk", sData.TopK))
 	}
 
-	reducedResultData, err := reduceSearchResultData(searchResultData, nq, topk)
+	reducedResultData, err := reduceSearchResultData(ctx, searchResultData, nq, topk)
 	if err != nil {
-		log.Warn("shard leader reduce errors", zap.Error(err))
+		log.Ctx(ctx).Warn("shard leader reduce errors", zap.Error(err))
 		return nil, err
 	}
 	searchResults, err := encodeSearchResultData(reducedResultData, nq, topk, metricType)
@@ -68,7 +69,7 @@ func reduceSearchResults(results []*internalpb.SearchResults, nq int64, topk int
 	return searchResults, nil
 }
 
-func reduceSearchResultData(searchResultData []*schemapb.SearchResultData, nq int64, topk int64) (*schemapb.SearchResultData, error) {
+func reduceSearchResultData(ctx context.Context, searchResultData []*schemapb.SearchResultData, nq int64, topk int64) (*schemapb.SearchResultData, error) {
 	if len(searchResultData) == 0 {
 		return &schemapb.SearchResultData{
 			NumQueries: nq,
@@ -132,7 +133,7 @@ func reduceSearchResultData(searchResultData []*schemapb.SearchResultData, nq in
 		// }
 		ret.Topks = append(ret.Topks, j)
 	}
-	log.Debug("skip duplicated search result", zap.Int64("count", skipDupCnt))
+	log.Ctx(ctx).Debug("skip duplicated search result", zap.Int64("count", skipDupCnt))
 	return ret, nil
 }
 
@@ -192,7 +193,7 @@ func encodeSearchResultData(searchResultData *schemapb.SearchResultData, nq int6
 }
 
 // TODO: largely based on function mergeSegcoreRetrieveResults, need rewriting
-func mergeInternalRetrieveResults(retrieveResults []*internalpb.RetrieveResults) (*internalpb.RetrieveResults, error) {
+func mergeInternalRetrieveResults(ctx context.Context, retrieveResults []*internalpb.RetrieveResults) (*internalpb.RetrieveResults, error) {
 	var ret *internalpb.RetrieveResults
 	var skipDupCnt int64
 	var idSet = make(map[interface{}]struct{})
@@ -212,7 +213,7 @@ func mergeInternalRetrieveResults(retrieveResults []*internalpb.RetrieveResults)
 		}
 
 		if len(ret.FieldsData) != len(rr.FieldsData) {
-			log.Warn("mismatch FieldData in RetrieveResults")
+			log.Ctx(ctx).Warn("mismatch FieldData in RetrieveResults")
 			return nil, fmt.Errorf("mismatch FieldData in RetrieveResults")
 		}
 
@@ -241,7 +242,7 @@ func mergeInternalRetrieveResults(retrieveResults []*internalpb.RetrieveResults)
 	return ret, nil
 }
 
-func mergeSegcoreRetrieveResults(retrieveResults []*segcorepb.RetrieveResults) (*segcorepb.RetrieveResults, error) {
+func mergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcorepb.RetrieveResults) (*segcorepb.RetrieveResults, error) {
 	var ret *segcorepb.RetrieveResults
 	var skipDupCnt int64
 	var idSet = make(map[interface{}]struct{})
@@ -277,7 +278,7 @@ func mergeSegcoreRetrieveResults(retrieveResults []*segcorepb.RetrieveResults) (
 			}
 		}
 	}
-	log.Debug("skip duplicated query result", zap.Int64("count", skipDupCnt))
+	log.Ctx(ctx).Debug("skip duplicated query result", zap.Int64("count", skipDupCnt))
 
 	// not found, return default values indicating not result found
 	if ret == nil {

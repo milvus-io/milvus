@@ -48,7 +48,6 @@ import (
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/healthz"
-	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/trace"
@@ -238,7 +237,7 @@ func (mr *MilvusRoles) runDataCoord(ctx context.Context, localMsg bool) *compone
 
 		factory := dependency.NewFactory(localMsg)
 
-		dctx := logutil.WithModule(ctx, "DataCoord")
+		dctx := log.WithModule(ctx, "DataCoord")
 		var err error
 		ds, err = components.NewDataCoord(dctx, factory)
 		if err != nil {
@@ -403,7 +402,7 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 
 	var pn *components.Proxy
 	if mr.EnableProxy {
-		pctx := logutil.WithModule(ctx, "Proxy")
+		pctx := log.WithModule(ctx, "Proxy")
 		pn = mr.runProxy(pctx, local, alias)
 		if pn != nil {
 			defer pn.Stop()
