@@ -149,6 +149,41 @@ func TestDataNode(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, stat.Status.ErrorCode)
 	})
 
+	t.Run("Test GetCompactionState", func(t *testing.T) {
+		node.compactionExecutor.executing.Store(int64(3), 0)
+		node.compactionExecutor.executing.Store(int64(2), 0)
+		node.compactionExecutor.completed.Store(int64(1), &datapb.CompactionResult{
+			PlanID:    1,
+			SegmentID: 10,
+		})
+		stat, err := node.GetCompactionState(node.ctx, nil)
+		assert.NoError(t, err)
+
+		assert.Equal(t, 3, len(stat.GetResults()))
+
+		cnt := 0
+		for _, v := range stat.GetResults() {
+			if v.GetState() == commonpb.CompactionState_Completed {
+				cnt++
+			}
+		}
+		assert.Equal(t, 1, cnt)
+
+		cnt = 0
+		node.compactionExecutor.completed.Range(func(k, v interface{}) bool {
+			cnt++
+			return true
+		})
+		assert.Equal(t, 0, cnt)
+	})
+
+	t.Run("Test GetCompactionState unhealthy", func(t *testing.T) {
+		node.UpdateStateCode(internalpb.StateCode_Abnormal)
+		resp, _ := node.GetCompactionState(ctx, nil)
+		assert.Equal(t, "DataNode is unhealthy", resp.GetStatus().GetReason())
+		node.UpdateStateCode(internalpb.StateCode_Healthy)
+	})
+
 	t.Run("Test FlushSegments", func(t *testing.T) {
 		dmChannelName := "fake-by-dev-rootcoord-dml-channel-test-FlushSegments"
 

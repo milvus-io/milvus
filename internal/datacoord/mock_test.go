@@ -118,9 +118,11 @@ func newTestSchema() *schemapb.CollectionSchema {
 }
 
 type mockDataNodeClient struct {
-	id    int64
-	state internalpb.StateCode
-	ch    chan interface{}
+	id                  int64
+	state               internalpb.StateCode
+	ch                  chan interface{}
+	compactionStateResp *datapb.CompactionStateResponse
+	compactionResp      *commonpb.Status
 }
 
 func newMockDataNodeClient(id int64, ch chan interface{}) (*mockDataNodeClient, error) {
@@ -212,8 +214,19 @@ func (c *mockDataNodeClient) GetMetrics(ctx context.Context, req *milvuspb.GetMe
 func (c *mockDataNodeClient) Compaction(ctx context.Context, req *datapb.CompactionPlan) (*commonpb.Status, error) {
 	if c.ch != nil {
 		c.ch <- struct{}{}
+		if c.compactionResp != nil {
+			return c.compactionResp, nil
+		}
+		return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
+	}
+	if c.compactionResp != nil {
+		return c.compactionResp, nil
 	}
 	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError, Reason: "not implemented"}, nil
+}
+
+func (c *mockDataNodeClient) GetCompactionState(ctx context.Context, req *datapb.CompactionStateRequest) (*datapb.CompactionStateResponse, error) {
+	return c.compactionStateResp, nil
 }
 
 func (c *mockDataNodeClient) Import(ctx context.Context, in *datapb.ImportTaskRequest) (*commonpb.Status, error) {
@@ -537,15 +550,15 @@ func (h *mockCompactionHandler) execCompactionPlan(signal *compactionSignal, pla
 	panic("not implemented")
 }
 
-// completeCompaction record the result of a compaction
-func (h *mockCompactionHandler) completeCompaction(result *datapb.CompactionResult) error {
-	if f, ok := h.methods["completeCompaction"]; ok {
-		if ff, ok := f.(func(result *datapb.CompactionResult) error); ok {
-			return ff(result)
-		}
-	}
-	panic("not implemented")
-}
+// // completeCompaction record the result of a compaction
+// func (h *mockCompactionHandler) completeCompaction(result *datapb.CompactionResult) error {
+// 	if f, ok := h.methods["completeCompaction"]; ok {
+// 		if ff, ok := f.(func(result *datapb.CompactionResult) error); ok {
+// 			return ff(result)
+// 		}
+// 	}
+// 	panic("not implemented")
+// }
 
 // getCompaction return compaction task. If planId does not exist, return nil.
 func (h *mockCompactionHandler) getCompaction(planID int64) *compactionTask {
@@ -558,7 +571,7 @@ func (h *mockCompactionHandler) getCompaction(planID int64) *compactionTask {
 }
 
 // expireCompaction set the compaction state to expired
-func (h *mockCompactionHandler) expireCompaction(ts Timestamp) error {
+func (h *mockCompactionHandler) updateCompaction(ts Timestamp) error {
 	if f, ok := h.methods["expireCompaction"]; ok {
 		if ff, ok := f.(func(ts Timestamp) error); ok {
 			return ff(ts)

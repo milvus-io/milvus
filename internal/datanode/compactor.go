@@ -27,12 +27,10 @@ import (
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
@@ -55,7 +53,7 @@ type iterator = storage.Iterator
 type compactor interface {
 	start()
 	complete()
-	compact() error
+	compact() (*datapb.CompactionResult, error)
 	stop()
 	getPlanID() UniqueID
 	getCollection() UniqueID
@@ -73,7 +71,6 @@ type compactionTask struct {
 	flushManager
 	allocatorInterface
 
-	dc   types.DataCoord
 	plan *datapb.CompactionPlan
 
 	ctx    context.Context
@@ -93,7 +90,6 @@ func newCompactionTask(
 	replica Replica,
 	fm flushManager,
 	alloc allocatorInterface,
-	dc types.DataCoord,
 	plan *datapb.CompactionPlan) *compactionTask {
 
 	ctx1, cancel := context.WithCancel(ctx)
@@ -106,7 +102,6 @@ func newCompactionTask(
 		Replica:            replica,
 		flushManager:       fm,
 		allocatorInterface: alloc,
-		dc:                 dc,
 		plan:               plan,
 		tr:                 timerecord.NewTimeRecorder("compactionTask"),
 	}
@@ -314,11 +309,11 @@ func (t *compactionTask) merge(mergeItr iterator, delta map[primaryKey]Timestamp
 	return iDatas, numRows, nil
 }
 
-func (t *compactionTask) compact() error {
+func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 	compactStart := time.Now()
 	if ok := funcutil.CheckCtxValid(t.ctx); !ok {
 		log.Error("compact wrong, task context done or timeout")
-		return errContext
+		return nil, errContext
 	}
 
 	ctxTimeout, cancelAll := context.WithTimeout(t.ctx, time.Duration(t.plan.GetTimeoutInSeconds())*time.Second)
@@ -330,17 +325,17 @@ func (t *compactionTask) compact() error {
 
 	case t.plan.GetType() == datapb.CompactionType_UndefinedCompaction:
 		log.Error("compact wrong, compaction type undefined")
-		return errCompactionTypeUndifined
+		return nil, errCompactionTypeUndifined
 
 	case len(t.plan.GetSegmentBinlogs()) < 1:
 		log.Error("compact wrong, there's no segments in segment binlogs")
-		return errIllegalCompactionPlan
+		return nil, errIllegalCompactionPlan
 
 	case t.plan.GetType() == datapb.CompactionType_MergeCompaction || t.plan.GetType() == datapb.CompactionType_MixCompaction:
 		targetSegID, err = t.allocID()
 		if err != nil {
 			log.Error("compact wrong", zap.Error(err))
-			return err
+			return nil, err
 		}
 
 	case t.plan.GetType() == datapb.CompactionType_InnerCompaction:
@@ -356,7 +351,7 @@ func (t *compactionTask) compact() error {
 	collID, partID, meta, err := t.getSegmentMeta(segIDs[0])
 	if err != nil {
 		log.Error("compact wrong", zap.Int64("planID", t.plan.GetPlanID()), zap.Error(err))
-		return err
+		return nil, err
 	}
 
 	// Inject to stop flush
@@ -409,7 +404,7 @@ func (t *compactionTask) compact() error {
 		// Unable to deal with all empty segments cases, so return error
 		if binlogNum == 0 {
 			log.Error("compact wrong, all segments' binlogs are empty", zap.Int64("planID", t.plan.GetPlanID()))
-			return errIllegalCompactionPlan
+			return nil, errIllegalCompactionPlan
 		}
 
 		for idx := 0; idx < binlogNum; idx++ {
@@ -468,27 +463,27 @@ func (t *compactionTask) compact() error {
 
 	if err != nil {
 		log.Error("compaction IO wrong", zap.Int64("planID", t.plan.GetPlanID()), zap.Error(err))
-		return err
+		return nil, err
 	}
 
 	mergeItr := storage.NewMergeIterator(iItr)
 
 	deltaPk2Ts, deltaBuf, err := t.mergeDeltalogs(dblobs, t.plan.GetTimetravel())
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	iDatas, numRows, err := t.merge(mergeItr, deltaPk2Ts, meta.GetSchema(), t.GetCurrentTime())
 	if err != nil {
 		log.Error("compact wrong", zap.Int64("planID", t.plan.GetPlanID()), zap.Error(err))
-		return err
+		return nil, err
 	}
 
 	uploadStart := time.Now()
 	segPaths, err := t.upload(ctxTimeout, targetSegID, partID, iDatas, deltaBuf.delData, meta)
 	if err != nil {
 		log.Error("compact wrong", zap.Int64("planID", t.plan.GetPlanID()), zap.Error(err))
-		return err
+		return nil, err
 	}
 
 	uploadEnd := time.Now()
@@ -514,21 +509,6 @@ func (t *compactionTask) compact() error {
 		NumOfRows:           numRows,
 	}
 
-	rpcStart := time.Now()
-	status, err := t.dc.CompleteCompaction(ctxTimeout, pack)
-	if err != nil {
-		log.Error("complete compaction rpc wrong", zap.Int64("planID", t.plan.GetPlanID()), zap.Error(err))
-		return err
-	}
-	if status.ErrorCode != commonpb.ErrorCode_Success {
-		log.Error("complete compaction wrong", zap.Int64("planID", t.plan.GetPlanID()), zap.String("reason", status.GetReason()))
-		return fmt.Errorf("complete comapction wrong: %s", status.GetReason())
-	}
-	rpcEnd := time.Now()
-	defer func() {
-		log.Debug("rpc elapse in ms", zap.Int64("planID", t.plan.GetPlanID()), zap.Any("elapse", nano2Milli(rpcEnd.Sub(rpcStart))))
-	}()
-
 	//  Compaction I: update pk range.
 	//  Compaction II: remove the segments and add a new flushed segment with pk range.
 	if t.hasSegment(targetSegID, true) {
@@ -542,7 +522,7 @@ func (t *compactionTask) compact() error {
 		err = t.mergeFlushedSegments(targetSegID, collID, partID, t.plan.GetPlanID(), segIDs, t.plan.GetChannel(), numRows)
 		if err != nil {
 			log.Error("compact wrong", zap.Int64("planID", t.plan.GetPlanID()), zap.Error(err))
-			return err
+			return nil, err
 		}
 	}
 
@@ -564,7 +544,7 @@ func (t *compactionTask) compact() error {
 	log.Info("overall elapse in ms", zap.Int64("planID", t.plan.GetPlanID()), zap.Any("elapse", nano2Milli(time.Since(compactStart))))
 	metrics.DataNodeCompactionLatency.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID())).Observe(float64(t.tr.ElapseSpan().Milliseconds()))
 
-	return nil
+	return pack, nil
 }
 
 // TODO copy maybe expensive, but this seems to be the only convinent way.

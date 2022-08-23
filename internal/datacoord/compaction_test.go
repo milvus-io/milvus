@@ -22,12 +22,13 @@ import (
 	"time"
 
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
 )
-
-// TODO not completed
 
 func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 	ch := make(chan interface{}, 1)
@@ -80,9 +81,11 @@ func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := &compactionPlanHandler{
-				plans:     tt.fields.plans,
-				sessions:  tt.fields.sessions,
-				chManager: tt.fields.chManager,
+				plans:      tt.fields.plans,
+				sessions:   tt.fields.sessions,
+				chManager:  tt.fields.chManager,
+				parallelCh: make(map[int64]chan struct{}),
+				allocator:  newMockAllocator(),
 			}
 			err := c.execCompactionPlan(tt.args.signal, tt.args.plan)
 			assert.Equal(t, tt.err, err)
@@ -91,9 +94,67 @@ func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 				task := c.getCompaction(tt.args.plan.PlanID)
 				assert.Equal(t, tt.args.plan, task.plan)
 				assert.Equal(t, tt.args.signal, task.triggerInfo)
+				assert.Equal(t, 1, c.executingTaskNum)
 			}
 		})
 	}
+}
+
+func Test_compactionPlanHandler_execWithParallels(t *testing.T) {
+	Params.DataCoordCfg.CompactionCheckIntervalInSeconds = 1
+	c := &compactionPlanHandler{
+		plans: map[int64]*compactionTask{},
+		sessions: &SessionManager{
+			sessions: struct {
+				sync.RWMutex
+				data map[int64]*Session
+			}{
+				data: map[int64]*Session{
+					1: {client: &mockDataNodeClient{ch: make(chan interface{}, 1)}},
+				},
+			},
+		},
+		chManager: &ChannelManager{
+			store: &ChannelStore{
+				channelsInfo: map[int64]*NodeChannelInfo{
+					1: {NodeID: 1, Channels: []*channel{{Name: "ch1"}}},
+				},
+			},
+		},
+		parallelCh: make(map[int64]chan struct{}),
+		allocator:  newMockAllocator(),
+	}
+
+	signal := &compactionSignal{id: 100}
+	plan1 := &datapb.CompactionPlan{PlanID: 1, Channel: "ch1", Type: datapb.CompactionType_MergeCompaction}
+	plan2 := &datapb.CompactionPlan{PlanID: 2, Channel: "ch1", Type: datapb.CompactionType_MergeCompaction}
+	plan3 := &datapb.CompactionPlan{PlanID: 3, Channel: "ch1", Type: datapb.CompactionType_MergeCompaction}
+
+	c.parallelCh[1] = make(chan struct{}, 2)
+
+	go func() {
+		c.execCompactionPlan(signal, plan1)
+		c.execCompactionPlan(signal, plan2)
+		c.execCompactionPlan(signal, plan3)
+	}()
+
+	<-c.parallelCh[1]
+	<-c.parallelCh[1]
+	<-c.parallelCh[1]
+
+	tasks := c.getCompactionTasksBySignalID(0)
+	max, min := uint64(0), uint64(0)
+	for _, v := range tasks {
+		if max < v.plan.GetStartTime() {
+			max = v.plan.GetStartTime()
+		}
+		if min > v.plan.GetStartTime() {
+			min = v.plan.GetStartTime()
+		}
+	}
+
+	log.Debug("start time", zap.Uint64("min", min), zap.Uint64("max", max))
+	assert.Less(t, uint64(2), max-min)
 }
 
 func Test_compactionPlanHandler_completeCompaction(t *testing.T) {
@@ -377,7 +438,7 @@ func Test_compactionPlanHandler_getCompaction(t *testing.T) {
 	}
 }
 
-func Test_compactionPlanHandler_expireCompaction(t *testing.T) {
+func Test_compactionPlanHandler_updateCompaction(t *testing.T) {
 	type fields struct {
 		plans    map[int64]*compactionTask
 		sessions *SessionManager
@@ -397,11 +458,12 @@ func Test_compactionPlanHandler_expireCompaction(t *testing.T) {
 		unexpired []int64
 	}{
 		{
-			"test expire compaction task",
+			"test update compaction task",
 			fields{
 				plans: map[int64]*compactionTask{
 					1: {
-						state: executing,
+						state:      executing,
+						dataNodeID: 1,
 						plan: &datapb.CompactionPlan{
 							PlanID:           1,
 							StartTime:        tsoutil.ComposeTS(ts.UnixNano()/int64(time.Millisecond), 0),
@@ -412,10 +474,29 @@ func Test_compactionPlanHandler_expireCompaction(t *testing.T) {
 						},
 					},
 					2: {
-						state: executing,
+						state:      executing,
+						dataNodeID: 2,
 						plan: &datapb.CompactionPlan{
 							PlanID:           2,
 							StartTime:        tsoutil.ComposeTS(ts.UnixNano()/int64(time.Millisecond), 0),
+							TimeoutInSeconds: 1,
+						},
+					},
+					3: {
+						state:      completed,
+						dataNodeID: 2,
+						plan: &datapb.CompactionPlan{
+							PlanID:           3,
+							StartTime:        tsoutil.ComposeTS(ts.UnixNano()/int64(time.Millisecond), 0),
+							TimeoutInSeconds: 1,
+						},
+					},
+					4: {
+						state:      executing,
+						dataNodeID: 2,
+						plan: &datapb.CompactionPlan{
+							PlanID:           4,
+							StartTime:        tsoutil.ComposeTS(ts.UnixNano()/int64(time.Millisecond), 0) - 200*1000,
 							TimeoutInSeconds: 1,
 						},
 					},
@@ -427,11 +508,27 @@ func Test_compactionPlanHandler_expireCompaction(t *testing.T) {
 						},
 					},
 				},
+				sessions: &SessionManager{
+					sessions: struct {
+						sync.RWMutex
+						data map[int64]*Session
+					}{
+						data: map[int64]*Session{
+							1: {client: &mockDataNodeClient{
+								compactionStateResp: &datapb.CompactionStateResponse{
+									Results: []*datapb.CompactionStateResult{
+										{PlanID: 1, State: commonpb.CompactionState_Executing},
+									},
+								},
+							}},
+						},
+					},
+				},
 			},
 			args{ts: tsoutil.ComposeTS(ts.Add(5*time.Second).UnixNano()/int64(time.Millisecond), 0)},
 			false,
-			[]int64{2},
-			[]int64{1},
+			[]int64{2, 4},
+			[]int64{1, 3},
 		},
 	}
 	for _, tt := range tests {
@@ -442,17 +539,17 @@ func Test_compactionPlanHandler_expireCompaction(t *testing.T) {
 				meta:     tt.fields.meta,
 			}
 
-			err := c.expireCompaction(tt.args.ts)
+			err := c.updateCompaction(tt.args.ts)
 			assert.Equal(t, tt.wantErr, err != nil)
 
 			for _, id := range tt.expired {
 				task := c.getCompaction(id)
-				assert.Equal(t, timeout, task.state)
+				assert.Equal(t, failed, task.state)
 			}
 
 			for _, id := range tt.unexpired {
 				task := c.getCompaction(id)
-				assert.NotEqual(t, timeout, task.state)
+				assert.NotEqual(t, failed, task.state)
 			}
 		})
 	}
@@ -483,13 +580,14 @@ func Test_newCompactionPlanHandler(t *testing.T) {
 				&SegmentReferenceManager{segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{}},
 			},
 			&compactionPlanHandler{
-				plans:     map[int64]*compactionTask{},
-				sessions:  &SessionManager{},
-				chManager: &ChannelManager{},
-				meta:      &meta{},
-				allocator: newMockAllocator(),
-				flushCh:   nil,
-				segRefer:  &SegmentReferenceManager{segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{}},
+				plans:      map[int64]*compactionTask{},
+				sessions:   &SessionManager{},
+				chManager:  &ChannelManager{},
+				meta:       &meta{},
+				allocator:  newMockAllocator(),
+				flushCh:    nil,
+				segRefer:   &SegmentReferenceManager{segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{}},
+				parallelCh: make(map[int64]chan struct{}),
 			},
 		},
 	}
@@ -528,7 +626,7 @@ func Test_getCompactionTasksBySignalID(t *testing.T) {
 					},
 					3: {
 						triggerInfo: &compactionSignal{id: 1},
-						state:       timeout,
+						state:       failed,
 					},
 				},
 			},
@@ -544,7 +642,7 @@ func Test_getCompactionTasksBySignalID(t *testing.T) {
 				},
 				{
 					triggerInfo: &compactionSignal{id: 1},
-					state:       timeout,
+					state:       failed,
 				},
 			},
 		},
