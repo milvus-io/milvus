@@ -36,7 +36,7 @@ func TestHistorical_Search(t *testing.T) {
 		searchReq, err := genSearchPlanAndRequests(collection, IndexFaissIDMap, defaultNQ)
 		assert.NoError(t, err)
 
-		_, _, _, err = searchHistorical(his, searchReq, defaultCollectionID, nil, []UniqueID{defaultSegmentID})
+		_, _, _, err = searchHistorical(context.TODO(), his, searchReq, defaultCollectionID, nil, []UniqueID{defaultSegmentID})
 		assert.NoError(t, err)
 	})
 
@@ -52,7 +52,7 @@ func TestHistorical_Search(t *testing.T) {
 		err = his.removeCollection(defaultCollectionID)
 		assert.NoError(t, err)
 
-		_, _, _, err = searchHistorical(his, searchReq, defaultCollectionID, nil, nil)
+		_, _, _, err = searchHistorical(context.TODO(), his, searchReq, defaultCollectionID, nil, nil)
 		assert.Error(t, err)
 	})
 
@@ -68,7 +68,7 @@ func TestHistorical_Search(t *testing.T) {
 		err = his.removeCollection(defaultCollectionID)
 		assert.NoError(t, err)
 
-		_, _, _, err = searchHistorical(his, searchReq, defaultCollectionID, []UniqueID{defaultPartitionID}, nil)
+		_, _, _, err = searchHistorical(context.TODO(), his, searchReq, defaultCollectionID, []UniqueID{defaultPartitionID}, nil)
 		assert.Error(t, err)
 	})
 
@@ -88,7 +88,7 @@ func TestHistorical_Search(t *testing.T) {
 		err = his.removePartition(defaultPartitionID)
 		assert.NoError(t, err)
 
-		_, _, _, err = searchHistorical(his, searchReq, defaultCollectionID, nil, nil)
+		_, _, _, err = searchHistorical(context.TODO(), his, searchReq, defaultCollectionID, nil, nil)
 		assert.Error(t, err)
 	})
 
@@ -104,7 +104,7 @@ func TestHistorical_Search(t *testing.T) {
 		err = his.removePartition(defaultPartitionID)
 		assert.NoError(t, err)
 
-		res, _, ids, err := searchHistorical(his, searchReq, defaultCollectionID, nil, nil)
+		res, _, ids, err := searchHistorical(context.TODO(), his, searchReq, defaultCollectionID, nil, nil)
 		assert.Equal(t, 0, len(res))
 		assert.Equal(t, 0, len(ids))
 		assert.NoError(t, err)
@@ -121,7 +121,7 @@ func TestStreaming_search(t *testing.T) {
 		searchReq, err := genSearchPlanAndRequests(collection, IndexFaissIDMap, defaultNQ)
 		assert.NoError(t, err)
 
-		res, _, _, err := searchStreaming(streaming, searchReq,
+		res, _, _, err := searchStreaming(context.TODO(), streaming, searchReq,
 			defaultCollectionID,
 			[]UniqueID{defaultPartitionID},
 			defaultDMLChannel)
@@ -138,7 +138,7 @@ func TestStreaming_search(t *testing.T) {
 		searchReq, err := genSearchPlanAndRequests(collection, IndexFaissIDMap, defaultNQ)
 		assert.NoError(t, err)
 
-		res, _, _, err := searchStreaming(streaming, searchReq,
+		res, _, _, err := searchStreaming(context.TODO(), streaming, searchReq,
 			defaultCollectionID,
 			[]UniqueID{defaultPartitionID},
 			defaultDMLChannel)
@@ -162,7 +162,7 @@ func TestStreaming_search(t *testing.T) {
 		err = streaming.removePartition(defaultPartitionID)
 		assert.NoError(t, err)
 
-		res, _, _, err := searchStreaming(streaming, searchReq,
+		res, _, _, err := searchStreaming(context.TODO(), streaming, searchReq,
 			defaultCollectionID,
 			[]UniqueID{defaultPartitionID},
 			defaultDMLChannel)
@@ -187,7 +187,7 @@ func TestStreaming_search(t *testing.T) {
 		err = streaming.removePartition(defaultPartitionID)
 		assert.NoError(t, err)
 
-		_, _, _, err = searchStreaming(streaming, searchReq,
+		_, _, _, err = searchStreaming(context.TODO(), streaming, searchReq,
 			defaultCollectionID,
 			[]UniqueID{defaultPartitionID},
 			defaultDMLChannel)
@@ -206,7 +206,7 @@ func TestStreaming_search(t *testing.T) {
 		err = streaming.removePartition(defaultPartitionID)
 		assert.NoError(t, err)
 
-		res, _, _, err := searchStreaming(streaming, searchReq,
+		res, _, _, err := searchStreaming(context.TODO(), streaming, searchReq,
 			defaultCollectionID,
 			[]UniqueID{},
 			defaultDMLChannel)
@@ -228,7 +228,7 @@ func TestStreaming_search(t *testing.T) {
 
 		seg.segmentPtr = nil
 
-		_, _, _, err = searchStreaming(streaming, searchReq,
+		_, _, _, err = searchStreaming(context.TODO(), streaming, searchReq,
 			defaultCollectionID,
 			[]UniqueID{},
 			defaultDMLChannel)

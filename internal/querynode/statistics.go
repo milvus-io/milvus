@@ -1,6 +1,7 @@
 package querynode
 
 import (
+	"context"
 	"fmt"
 	"sync"
 
@@ -55,8 +56,8 @@ func statisticOnSegments(replica ReplicaInterface, segType segmentType, segIDs [
 // if segIDs is not specified, it will search on all the historical segments specified by partIDs.
 // if segIDs is specified, it will only search on the segments specified by the segIDs.
 // if partIDs is empty, it means all the partitions of the loaded collection or all the partitions loaded.
-func statisticHistorical(replica ReplicaInterface, collID UniqueID, partIDs []UniqueID, segIDs []UniqueID) ([]map[string]interface{}, []UniqueID, []UniqueID, error) {
-	searchPartIDs, searchSegmentIDs, err := validateOnHistoricalReplica(replica, collID, partIDs, segIDs)
+func statisticHistorical(ctx context.Context, replica ReplicaInterface, collID UniqueID, partIDs []UniqueID, segIDs []UniqueID) ([]map[string]interface{}, []UniqueID, []UniqueID, error) {
+	searchPartIDs, searchSegmentIDs, err := validateOnHistoricalReplica(ctx, replica, collID, partIDs, segIDs)
 	if err != nil {
 		return nil, searchSegmentIDs, searchPartIDs, err
 	}
@@ -66,8 +67,8 @@ func statisticHistorical(replica ReplicaInterface, collID UniqueID, partIDs []Un
 
 // statisticStreaming will do statistics all the target segments in streaming
 // if partIDs is empty, it means all the partitions of the loaded collection or all the partitions loaded.
-func statisticStreaming(replica ReplicaInterface, collID UniqueID, partIDs []UniqueID, vChannel Channel) ([]map[string]interface{}, []UniqueID, []UniqueID, error) {
-	searchPartIDs, searchSegmentIDs, err := validateOnStreamReplica(replica, collID, partIDs, vChannel)
+func statisticStreaming(ctx context.Context, replica ReplicaInterface, collID UniqueID, partIDs []UniqueID, vChannel Channel) ([]map[string]interface{}, []UniqueID, []UniqueID, error) {
+	searchPartIDs, searchSegmentIDs, err := validateOnStreamReplica(ctx, replica, collID, partIDs, vChannel)
 	if err != nil {
 		return nil, searchSegmentIDs, searchPartIDs, err
 	}

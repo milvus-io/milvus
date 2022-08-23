@@ -159,7 +159,7 @@ func TestReduceSearchResultData(t *testing.T) {
 		dataArray := make([]*schemapb.SearchResultData, 0)
 		dataArray = append(dataArray, data1)
 		dataArray = append(dataArray, data2)
-		res, err := reduceSearchResultData(dataArray, nq, topk)
+		res, err := reduceSearchResultData(context.TODO(), dataArray, nq, topk)
 		assert.Nil(t, err)
 		assert.Equal(t, ids, res.Ids.GetIntId().Data)
 		assert.Equal(t, scores, res.Scores)
@@ -176,7 +176,7 @@ func TestReduceSearchResultData(t *testing.T) {
 		dataArray := make([]*schemapb.SearchResultData, 0)
 		dataArray = append(dataArray, data1)
 		dataArray = append(dataArray, data2)
-		res, err := reduceSearchResultData(dataArray, nq, topk)
+		res, err := reduceSearchResultData(context.TODO(), dataArray, nq, topk)
 		assert.Nil(t, err)
 		assert.ElementsMatch(t, []int64{1, 5, 2, 3}, res.Ids.GetIntId().Data)
 	})
@@ -223,12 +223,13 @@ func TestMergeInternalRetrieveResults(t *testing.T) {
 		// Offset:     []int64{0, 1},
 		FieldsData: fieldDataArray2,
 	}
+	ctx := context.TODO()
 
-	result, err := mergeInternalRetrieveResults([]*internalpb.RetrieveResults{result1, result2})
+	result, err := mergeInternalRetrieveResults(ctx, []*internalpb.RetrieveResults{result1, result2})
 	assert.NoError(t, err)
 	assert.Equal(t, 2, len(result.FieldsData[0].GetScalars().GetLongData().Data))
 	assert.Equal(t, 2*Dim, len(result.FieldsData[1].GetVectors().GetFloatVector().Data))
 
-	_, err = mergeInternalRetrieveResults(nil)
+	_, err = mergeInternalRetrieveResults(ctx, nil)
 	assert.NoError(t, err)
 }

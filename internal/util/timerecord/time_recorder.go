@@ -25,6 +25,7 @@ type TimeRecorder struct {
 	header string
 	start  time.Time
 	last   time.Time
+	ctx    context.Context
 }
 
 // NewTimeRecorder creates a new TimeRecorder
@@ -55,18 +56,30 @@ func (tr *TimeRecorder) ElapseSpan() time.Duration {
 // Record calculates the time span from previous Record call
 func (tr *TimeRecorder) Record(msg string) time.Duration {
 	span := tr.RecordSpan()
-	tr.printTimeRecord(msg, span)
+	tr.printTimeRecord(context.TODO(), msg, span)
+	return span
+}
+
+func (tr *TimeRecorder) CtxRecord(ctx context.Context, msg string) time.Duration {
+	span := tr.RecordSpan()
+	tr.printTimeRecord(ctx, msg, span)
 	return span
 }
 
 // Elapse calculates the time span from the beginning of this TimeRecorder
 func (tr *TimeRecorder) Elapse(msg string) time.Duration {
 	span := tr.ElapseSpan()
-	tr.printTimeRecord(msg, span)
+	tr.printTimeRecord(context.TODO(), msg, span)
 	return span
 }
 
-func (tr *TimeRecorder) printTimeRecord(msg string, span time.Duration) {
+func (tr *TimeRecorder) CtxElapse(ctx context.Context, msg string) time.Duration {
+	span := tr.ElapseSpan()
+	tr.printTimeRecord(ctx, msg, span)
+	return span
+}
+
+func (tr *TimeRecorder) printTimeRecord(ctx context.Context, msg string, span time.Duration) {
 	str := ""
 	if tr.header != "" {
 		str += tr.header + ": "
@@ -75,7 +88,7 @@ func (tr *TimeRecorder) printTimeRecord(msg string, span time.Duration) {
 	str += " ("
 	str += strconv.Itoa(int(span.Milliseconds()))
 	str += "ms)"
-	log.Debug(str)
+	log.Ctx(ctx).Debug(str)
 }
 
 // LongTermChecker checks we receive at least one msg in d duration. If not, checker

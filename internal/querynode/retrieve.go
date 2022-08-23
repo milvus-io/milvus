@@ -17,6 +17,8 @@
 package querynode
 
 import (
+	"context"
+
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/storage"
 )
@@ -44,12 +46,12 @@ func retrieveOnSegments(replica ReplicaInterface, segType segmentType, collID Un
 }
 
 // retrieveHistorical will retrieve all the target segments in historical
-func retrieveHistorical(replica ReplicaInterface, plan *RetrievePlan, collID UniqueID, partIDs []UniqueID, segIDs []UniqueID, vcm storage.ChunkManager) ([]*segcorepb.RetrieveResults, []UniqueID, []UniqueID, error) {
+func retrieveHistorical(ctx context.Context, replica ReplicaInterface, plan *RetrievePlan, collID UniqueID, partIDs []UniqueID, segIDs []UniqueID, vcm storage.ChunkManager) ([]*segcorepb.RetrieveResults, []UniqueID, []UniqueID, error) {
 	var err error
 	var retrieveResults []*segcorepb.RetrieveResults
 	var retrieveSegmentIDs []UniqueID
 	var retrievePartIDs []UniqueID
-	retrievePartIDs, retrieveSegmentIDs, err = validateOnHistoricalReplica(replica, collID, partIDs, segIDs)
+	retrievePartIDs, retrieveSegmentIDs, err = validateOnHistoricalReplica(ctx, replica, collID, partIDs, segIDs)
 	if err != nil {
 		return retrieveResults, retrieveSegmentIDs, retrievePartIDs, err
 	}
@@ -59,13 +61,13 @@ func retrieveHistorical(replica ReplicaInterface, plan *RetrievePlan, collID Uni
 }
 
 // retrieveStreaming will retrieve all the target segments in streaming
-func retrieveStreaming(replica ReplicaInterface, plan *RetrievePlan, collID UniqueID, partIDs []UniqueID, vChannel Channel, vcm storage.ChunkManager) ([]*segcorepb.RetrieveResults, []UniqueID, []UniqueID, error) {
+func retrieveStreaming(ctx context.Context, replica ReplicaInterface, plan *RetrievePlan, collID UniqueID, partIDs []UniqueID, vChannel Channel, vcm storage.ChunkManager) ([]*segcorepb.RetrieveResults, []UniqueID, []UniqueID, error) {
 	var err error
 	var retrieveResults []*segcorepb.RetrieveResults
 	var retrievePartIDs []UniqueID
 	var retrieveSegmentIDs []UniqueID
 
-	retrievePartIDs, retrieveSegmentIDs, err = validateOnStreamReplica(replica, collID, partIDs, vChannel)
+	retrievePartIDs, retrieveSegmentIDs, err = validateOnStreamReplica(ctx, replica, collID, partIDs, vChannel)
 	if err != nil {
 		return retrieveResults, retrieveSegmentIDs, retrievePartIDs, err
 	}

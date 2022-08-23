@@ -17,6 +17,7 @@
 package querynode
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -26,7 +27,7 @@ import (
 )
 
 // TODO: merge validate?
-func validateOnHistoricalReplica(replica ReplicaInterface, collectionID UniqueID, partitionIDs []UniqueID, segmentIDs []UniqueID) ([]UniqueID, []UniqueID, error) {
+func validateOnHistoricalReplica(ctx context.Context, replica ReplicaInterface, collectionID UniqueID, partitionIDs []UniqueID, segmentIDs []UniqueID) ([]UniqueID, []UniqueID, error) {
 	var err error
 	var searchPartIDs []UniqueID
 
@@ -46,7 +47,7 @@ func validateOnHistoricalReplica(replica ReplicaInterface, collectionID UniqueID
 		}
 	}
 
-	log.Debug("read target partitions", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", searchPartIDs))
+	log.Ctx(ctx).Debug("read target partitions", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", searchPartIDs))
 	col, err2 := replica.getCollectionByID(collectionID)
 	if err2 != nil {
 		return searchPartIDs, segmentIDs, err2
@@ -86,7 +87,7 @@ func validateOnHistoricalReplica(replica ReplicaInterface, collectionID UniqueID
 	return searchPartIDs, newSegmentIDs, nil
 }
 
-func validateOnStreamReplica(replica ReplicaInterface, collectionID UniqueID, partitionIDs []UniqueID, vChannel Channel) ([]UniqueID, []UniqueID, error) {
+func validateOnStreamReplica(ctx context.Context, replica ReplicaInterface, collectionID UniqueID, partitionIDs []UniqueID, vChannel Channel) ([]UniqueID, []UniqueID, error) {
 	var err error
 	var searchPartIDs []UniqueID
 	var segmentIDs []UniqueID
@@ -107,7 +108,7 @@ func validateOnStreamReplica(replica ReplicaInterface, collectionID UniqueID, pa
 		}
 	}
 
-	log.Debug("read target partitions", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", searchPartIDs))
+	log.Ctx(ctx).Debug("read target partitions", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", searchPartIDs))
 	col, err2 := replica.getCollectionByID(collectionID)
 	if err2 != nil {
 		return searchPartIDs, segmentIDs, err2
@@ -123,7 +124,7 @@ func validateOnStreamReplica(replica ReplicaInterface, collectionID UniqueID, pa
 	}
 
 	segmentIDs, err = replica.getSegmentIDsByVChannel(searchPartIDs, vChannel, segmentTypeGrowing)
-	log.Debug("validateOnStreamReplica getSegmentIDsByVChannel",
+	log.Ctx(ctx).Debug("validateOnStreamReplica getSegmentIDsByVChannel",
 		zap.Any("collectionID", collectionID),
 		zap.Any("vChannel", vChannel),
 		zap.Any("partitionIDs", searchPartIDs),
