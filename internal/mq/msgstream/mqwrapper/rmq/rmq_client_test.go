@@ -124,9 +124,9 @@ func TestRmqClient_GetLatestMsg(t *testing.T) {
 	for {
 		select {
 		case <-ctx.Done():
-			ret, err := actualLastMsg.ID().LessOrEqualThan(expectLastMsg.Serialize())
+			ret, err := expectLastMsg.LessOrEqualThan(actualLastMsg.ID().Serialize())
 			assert.Nil(t, err)
-			assert.False(t, ret)
+			assert.True(t, ret)
 			return
 		case msg := <-consumer.Chan():
 			consumer.Ack(msg)

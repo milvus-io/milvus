@@ -60,6 +60,10 @@ func TestLessOrEqualThan(t *testing.T) {
 	ret, err = rid2.LessOrEqualThan(rid1.Serialize())
 	assert.Nil(t, err)
 	assert.False(t, ret)
+
+	ret, err = rid1.LessOrEqualThan(rid1.Serialize())
+	assert.Nil(t, err)
+	assert.True(t, ret)
 }
 
 func Test_Equal(t *testing.T) {
