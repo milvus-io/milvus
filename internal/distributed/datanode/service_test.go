@@ -36,18 +36,19 @@ import (
 type MockDataNode struct {
 	nodeID typeutil.UniqueID
 
-	stateCode  internalpb.StateCode
-	states     *internalpb.ComponentStates
-	status     *commonpb.Status
-	err        error
-	initErr    error
-	startErr   error
-	stopErr    error
-	regErr     error
-	strResp    *milvuspb.StringResponse
-	configResp *internalpb.ShowConfigurationsResponse
-	metricResp *milvuspb.GetMetricsResponse
-	resendResp *datapb.ResendSegmentStatsResponse
+	stateCode      internalpb.StateCode
+	states         *internalpb.ComponentStates
+	status         *commonpb.Status
+	err            error
+	initErr        error
+	startErr       error
+	stopErr        error
+	regErr         error
+	strResp        *milvuspb.StringResponse
+	configResp     *internalpb.ShowConfigurationsResponse
+	metricResp     *milvuspb.GetMetricsResponse
+	resendResp     *datapb.ResendSegmentStatsResponse
+	compactionResp *datapb.CompactionStateResponse
 }
 
 func (m *MockDataNode) Init() error {
@@ -112,6 +113,10 @@ func (m *MockDataNode) GetMetrics(ctx context.Context, request *milvuspb.GetMetr
 
 func (m *MockDataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan) (*commonpb.Status, error) {
 	return m.status, m.err
+}
+
+func (m *MockDataNode) GetCompactionState(ctx context.Context, req *datapb.CompactionStateRequest) (*datapb.CompactionStateResponse, error) {
+	return m.compactionResp, m.err
 }
 
 func (m *MockDataNode) SetEtcdClient(client *clientv3.Client) {

@@ -928,6 +928,7 @@ type dataCoordConfig struct {
 	MaxSegmentToMerge                 int
 	SegmentSmallProportion            float64
 	CompactionTimeoutInSeconds        int32
+	CompactionCheckIntervalInSeconds  int64
 	SingleCompactionRatioThreshold    float32
 	SingleCompactionDeltaLogMaxSize   int64
 	SingleCompactionExpiredLogMaxSize int64
@@ -957,6 +958,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	p.initCompactionMaxSegment()
 	p.initSegmentSmallProportion()
 	p.initCompactionTimeoutInSeconds()
+	p.initCompactionCheckIntervalInSeconds()
 	p.initSingleCompactionRatioThreshold()
 	p.initSingleCompactionDeltaLogMaxSize()
 	p.initSingleCompactionExpiredLogMaxSize()
@@ -1014,6 +1016,10 @@ func (p *dataCoordConfig) initSegmentSmallProportion() {
 // compaction execution timeout
 func (p *dataCoordConfig) initCompactionTimeoutInSeconds() {
 	p.CompactionTimeoutInSeconds = p.Base.ParseInt32WithDefault("dataCoord.compaction.timeout", 60*3)
+}
+
+func (p *dataCoordConfig) initCompactionCheckIntervalInSeconds() {
+	p.CompactionCheckIntervalInSeconds = p.Base.ParseInt64WithDefault("dataCoord.compaction.check.interval", 10)
 }
 
 // if total delete entities is large than a ratio of total entities, trigger single compaction.
