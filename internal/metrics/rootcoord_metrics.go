@@ -116,6 +116,23 @@ var (
 			Help:      "number of message streams",
 		})
 
+	RootCoordCredentialReqCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.RootCoordRole,
+			Name:      "credential_req_count",
+			Help:      "count of credential operations",
+		}, []string{functionLabelName, statusLabelName})
+
+	//RootCoordCredentialReqLatency records the latency for credential operations.
+	RootCoordCredentialReqLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.RootCoordRole,
+			Name:      "credential_req_latency",
+			Help:      "latency of credential operations",
+		}, []string{functionLabelName})
+
 	// RootCoordNumOfCredentials counts the number of credentials.
 	RootCoordNumOfCredentials = prometheus.NewGauge(
 		prometheus.GaugeOpts{

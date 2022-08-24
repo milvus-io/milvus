@@ -2275,7 +2275,9 @@ func TestProxy(t *testing.T) {
 
 		getCredentialReq.Username = "("
 		getResp, err = rootCoordClient.GetCredential(ctx, getCredentialReq)
-		assert.Error(t, err)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_GetCredentialFailure, getResp.Status.ErrorCode)
+		//assert.Contains(t, getResp.Status.Reason, "there is no value on key")
 	})
 
 	wg.Add(1)

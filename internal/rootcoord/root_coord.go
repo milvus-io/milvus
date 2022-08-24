@@ -2317,7 +2317,7 @@ func (c *Core) UpdateCredCache(ctx context.Context, credInfo *internalpb.Credent
 // 	3. save in to etcd
 func (c *Core) CreateCredential(ctx context.Context, credInfo *internalpb.CredentialInfo) (*commonpb.Status, error) {
 	method := "CreateCredential"
-	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
+	metrics.RootCoordCredentialReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder(method)
 	log.Debug("CreateCredential", zap.String("role", typeutil.RootCoordRole),
 		zap.String("username", credInfo.Username))
@@ -2327,7 +2327,7 @@ func (c *Core) CreateCredential(ctx context.Context, credInfo *internalpb.Creden
 	if err != nil {
 		log.Error("CreateCredential save credential failed", zap.String("role", typeutil.RootCoordRole),
 			zap.String("username", credInfo.Username), zap.Error(err))
-		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
+		metrics.RootCoordCredentialReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 		return failStatus(commonpb.ErrorCode_CreateCredentialFailure, "CreateCredential failed: "+err.Error()), nil
 	}
 	// update proxy's local cache
@@ -2335,13 +2335,13 @@ func (c *Core) CreateCredential(ctx context.Context, credInfo *internalpb.Creden
 	if err != nil {
 		log.Warn("CreateCredential add cache failed", zap.String("role", typeutil.RootCoordRole),
 			zap.String("username", credInfo.Username), zap.Error(err))
-		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
+		metrics.RootCoordCredentialReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 	}
 	log.Debug("CreateCredential success", zap.String("role", typeutil.RootCoordRole),
 		zap.String("username", credInfo.Username))
 
-	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordCredentialReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
+	metrics.RootCoordCredentialReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.RootCoordNumOfCredentials.Inc()
 	return succStatus(), nil
 }
@@ -2349,7 +2349,7 @@ func (c *Core) CreateCredential(ctx context.Context, credInfo *internalpb.Creden
 // GetCredential get credential by username
 func (c *Core) GetCredential(ctx context.Context, in *rootcoordpb.GetCredentialRequest) (*rootcoordpb.GetCredentialResponse, error) {
 	method := "GetCredential"
-	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
+	metrics.RootCoordCredentialReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder(method)
 	log.Debug("GetCredential", zap.String("role", typeutil.RootCoordRole),
 		zap.String("username", in.Username))
@@ -2358,16 +2358,16 @@ func (c *Core) GetCredential(ctx context.Context, in *rootcoordpb.GetCredentialR
 	if err != nil {
 		log.Error("GetCredential query credential failed", zap.String("role", typeutil.RootCoordRole),
 			zap.String("username", in.Username), zap.Error(err))
-		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
+		metrics.RootCoordCredentialReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 		return &rootcoordpb.GetCredentialResponse{
 			Status: failStatus(commonpb.ErrorCode_GetCredentialFailure, "GetCredential failed: "+err.Error()),
-		}, err
+		}, nil
 	}
 	log.Debug("GetCredential success", zap.String("role", typeutil.RootCoordRole),
 		zap.String("username", in.Username))
 
-	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordCredentialReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
+	metrics.RootCoordCredentialReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return &rootcoordpb.GetCredentialResponse{
 		Status:   succStatus(),
 		Username: credInfo.Username,
@@ -2378,7 +2378,7 @@ func (c *Core) GetCredential(ctx context.Context, in *rootcoordpb.GetCredentialR
 // UpdateCredential update password for a user
 func (c *Core) UpdateCredential(ctx context.Context, credInfo *internalpb.CredentialInfo) (*commonpb.Status, error) {
 	method := "UpdateCredential"
-	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
+	metrics.RootCoordCredentialReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder(method)
 	log.Debug("UpdateCredential", zap.String("role", typeutil.RootCoordRole),
 		zap.String("username", credInfo.Username))
@@ -2387,7 +2387,7 @@ func (c *Core) UpdateCredential(ctx context.Context, credInfo *internalpb.Creden
 	if err != nil {
 		log.Error("UpdateCredential save credential failed", zap.String("role", typeutil.RootCoordRole),
 			zap.String("username", credInfo.Username), zap.Error(err))
-		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
+		metrics.RootCoordCredentialReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 		return failStatus(commonpb.ErrorCode_UpdateCredentialFailure, "UpdateCredential failed: "+err.Error()), nil
 	}
 	// update proxy's local cache
@@ -2395,21 +2395,21 @@ func (c *Core) UpdateCredential(ctx context.Context, credInfo *internalpb.Creden
 	if err != nil {
 		log.Error("UpdateCredential update cache failed", zap.String("role", typeutil.RootCoordRole),
 			zap.String("username", credInfo.Username), zap.Error(err))
-		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
+		metrics.RootCoordCredentialReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 		return failStatus(commonpb.ErrorCode_UpdateCredentialFailure, "UpdateCredential failed: "+err.Error()), nil
 	}
 	log.Debug("UpdateCredential success", zap.String("role", typeutil.RootCoordRole),
 		zap.String("username", credInfo.Username))
 
-	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordCredentialReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
+	metrics.RootCoordCredentialReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return succStatus(), nil
 }
 
 // DeleteCredential delete a user
 func (c *Core) DeleteCredential(ctx context.Context, in *milvuspb.DeleteCredentialRequest) (*commonpb.Status, error) {
 	method := "DeleteCredential"
-	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
+	metrics.RootCoordCredentialReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder(method)
 
 	// delete data on storage
@@ -2417,22 +2417,22 @@ func (c *Core) DeleteCredential(ctx context.Context, in *milvuspb.DeleteCredenti
 	if err != nil {
 		log.Error("DeleteCredential remove credential failed", zap.String("role", typeutil.RootCoordRole),
 			zap.String("username", in.Username), zap.Error(err))
-		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
-		return failStatus(commonpb.ErrorCode_DeleteCredentialFailure, "DeleteCredential failed: "+err.Error()), err
+		metrics.RootCoordCredentialReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
+		return failStatus(commonpb.ErrorCode_DeleteCredentialFailure, "DeleteCredential failed: "+err.Error()), nil
 	}
 	// invalidate proxy's local cache
 	err = c.ExpireCredCache(ctx, in.Username)
 	if err != nil {
 		log.Error("DeleteCredential expire credential cache failed", zap.String("role", typeutil.RootCoordRole),
 			zap.String("username", in.Username), zap.Error(err))
-		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
+		metrics.RootCoordCredentialReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 		return failStatus(commonpb.ErrorCode_DeleteCredentialFailure, "DeleteCredential failed: "+err.Error()), nil
 	}
 	log.Debug("DeleteCredential success", zap.String("role", typeutil.RootCoordRole),
 		zap.String("username", in.Username))
 
-	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordCredentialReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
+	metrics.RootCoordCredentialReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.RootCoordNumOfCredentials.Dec()
 	return succStatus(), nil
 }
@@ -2440,22 +2440,22 @@ func (c *Core) DeleteCredential(ctx context.Context, in *milvuspb.DeleteCredenti
 // ListCredUsers list all usernames
 func (c *Core) ListCredUsers(ctx context.Context, in *milvuspb.ListCredUsersRequest) (*milvuspb.ListCredUsersResponse, error) {
 	method := "ListCredUsers"
-	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
+	metrics.RootCoordCredentialReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder(method)
 
 	credInfo, err := c.MetaTable.ListCredentialUsernames()
 	if err != nil {
 		log.Error("ListCredUsers query usernames failed", zap.String("role", typeutil.RootCoordRole),
 			zap.Int64("msgID", in.Base.MsgID), zap.Error(err))
-		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
+		metrics.RootCoordCredentialReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 		return &milvuspb.ListCredUsersResponse{
 			Status: failStatus(commonpb.ErrorCode_ListCredUsersFailure, "ListCredUsers failed: "+err.Error()),
-		}, err
+		}, nil
 	}
 	log.Debug("ListCredUsers success", zap.String("role", typeutil.RootCoordRole))
 
-	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordCredentialReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
+	metrics.RootCoordCredentialReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return &milvuspb.ListCredUsersResponse{
 		Status:    succStatus(),
 		Usernames: credInfo.Usernames,

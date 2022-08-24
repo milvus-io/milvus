@@ -2945,6 +2945,60 @@ func TestCore_getCollectionName(t *testing.T) {
 //	})
 //}
 
+func TestRootCoord_Credential_Error(t *testing.T) {
+	mt, _, mockTxnKV, closeCli := generateMetaTable(t)
+	defer closeCli()
+
+	rootCoord := &Core{
+		MetaTable: mt,
+	}
+
+	// update credential error
+	{
+		mockTxnKV.save = func(key, value string) error {
+			return errors.New("mock save error")
+		}
+
+		status, err := rootCoord.UpdateCredential(context.TODO(), &internalpb.CredentialInfo{
+			Username:          "test_username_1",
+			EncryptedPassword: "test_encrypted_password_1",
+			Sha256Password:    "test_sha256_password_1",
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UpdateCredentialFailure, status.ErrorCode)
+	}
+
+	// delete credential error
+	{
+		mockTxnKV.remove = func(key string) error {
+			return errors.New("mock remove error")
+		}
+
+		status, err := rootCoord.DeleteCredential(context.TODO(), &milvuspb.DeleteCredentialRequest{
+			Username: "test_username_1",
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_DeleteCredentialFailure, status.ErrorCode)
+	}
+
+	// list credential usernames error
+	{
+		mockTxnKV.loadWithPrefix = func(key string) ([]string, []string, error) {
+			return nil, nil, errors.New("mock loadWithPrefix error")
+		}
+
+		resp, err := rootCoord.ListCredUsers(context.TODO(), &milvuspb.ListCredUsersRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_ListCredUsernames,
+				MsgID:   rand.Int63(),
+			},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_ListCredUsersFailure, resp.Status.ErrorCode)
+	}
+
+}
+
 func TestCore_Rbac(t *testing.T) {
 	ctx := context.Background()
 	c := &Core{
