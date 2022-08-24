@@ -1113,6 +1113,7 @@ type mockRootCoord struct {
 	DropCollectionFunc
 	GetIndexStateFunc
 	GetGetCredentialFunc
+	CheckSegmentIndexReadyFunc
 }
 
 func (m *mockRootCoord) GetCredential(ctx context.Context, request *rootcoordpb.GetCredentialRequest) (*rootcoordpb.GetCredentialResponse, error) {
@@ -1120,7 +1121,6 @@ func (m *mockRootCoord) GetCredential(ctx context.Context, request *rootcoordpb.
 		return m.GetGetCredentialFunc(ctx, request)
 	}
 	return nil, errors.New("mock")
-	CheckSegmentIndexReadyFunc
 }
 
 func (m *mockRootCoord) DescribeCollection(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
