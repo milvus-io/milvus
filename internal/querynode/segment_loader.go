@@ -693,7 +693,7 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 	for hasMore {
 		select {
 		case <-ctx.Done():
-			break
+			return ctx.Err()
 		case msgPack, ok := <-stream.Chan():
 			if !ok {
 				err = fmt.Errorf("%w: pChannelName=%v, msgID=%v",
