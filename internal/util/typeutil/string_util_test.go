@@ -54,3 +54,8 @@ func TestAfter(t *testing.T) {
 	res = After("abc", "ab")
 	assert.Equal(t, res, "c")
 }
+
+func TestAfterN(t *testing.T) {
+	strs := AfterN("by-dev/meta/root-coord/credential/grantee-privileges/public/Global/*", "root-coord/credential/grantee-privileges/", "/")
+	assert.Len(t, strs, 3)
+}

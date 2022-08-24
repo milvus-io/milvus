@@ -55,6 +55,7 @@ var (
 	roleDbMock        *mocks.IRoleDb
 	userRoleDbMock    *mocks.IUserRoleDb
 	grantDbMock       *mocks.IGrantDb
+	grantIDDbMock     *mocks.IGrantIDDb
 
 	mockCatalog *Catalog
 )
@@ -74,6 +75,7 @@ func TestMain(m *testing.M) {
 	roleDbMock = &mocks.IRoleDb{}
 	userRoleDbMock = &mocks.IUserRoleDb{}
 	grantDbMock = &mocks.IGrantDb{}
+	grantIDDbMock = &mocks.IGrantIDDb{}
 
 	metaDomainMock = &mocks.IMetaDomain{}
 	metaDomainMock.On("CollectionDb", ctx).Return(collDbMock)
@@ -87,6 +89,7 @@ func TestMain(m *testing.M) {
 	metaDomainMock.On("RoleDb", ctx).Return(roleDbMock)
 	metaDomainMock.On("UserRoleDb", ctx).Return(userRoleDbMock)
 	metaDomainMock.On("GrantDb", ctx).Return(grantDbMock)
+	metaDomainMock.On("GrantIDDb", ctx).Return(grantIDDbMock)
 
 	mockCatalog = mockMetaCatalog(metaDomainMock)
 
@@ -1525,61 +1528,149 @@ func TestTableCatalog_ListUser_GetUserRolesError(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestTableCatalog_AlterPrivilege_Revoke(t *testing.T) {
+func TestTableCatalog_AlterGrant_Revoke(t *testing.T) {
 	var (
-		grant *milvuspb.GrantEntity
-		err   error
+		roleName         = "foo"
+		roleID     int64 = 1
+		object           = "Collection"
+		objectName       = "col1"
+		grantID    int64 = 10
+		username         = "fo"
+		privilege        = "PrivilegeLoad"
+		grant      *milvuspb.GrantEntity
+		err        error
 	)
 	grant = &milvuspb.GrantEntity{
-		Role:       &milvuspb.RoleEntity{Name: "foo"},
-		Object:     &milvuspb.ObjectEntity{Name: "Collection"},
-		ObjectName: "col1",
+		Role:       &milvuspb.RoleEntity{Name: roleName},
+		Object:     &milvuspb.ObjectEntity{Name: object},
+		ObjectName: objectName,
 		Grantor: &milvuspb.GrantorEntity{
-			User:      &milvuspb.UserEntity{Name: "foo"},
-			Privilege: &milvuspb.PrivilegeEntity{Name: "PrivilegeLoad"},
+			User:      &milvuspb.UserEntity{Name: username},
+			Privilege: &milvuspb.PrivilegeEntity{Name: privilege},
 		},
 	}
-	roleDbMock.On("GetRoles", tenantID, grant.Role.Name).Return([]*dbmodel.Role{{Base: dbmodel.Base{ID: 1}}}, nil).Once()
-	grantDbMock.On("Delete", tenantID, int64(1), grant.Object.Name, grant.ObjectName, grant.Grantor.Privilege.Name).Return(nil).Once()
 
+	roleDbMock.On("GetRoles", tenantID, roleName).Return([]*dbmodel.Role{{Base: dbmodel.Base{ID: roleID}}}, nil).Once()
+	grantDbMock.On("GetGrants", tenantID, roleID, object, objectName).Return([]*dbmodel.Grant{{Base: dbmodel.Base{ID: grantID}}}, nil).Once()
+	grantIDDbMock.On("GetGrantIDs", tenantID, grantID, privilege, mock.Anything, mock.Anything).Return([]*dbmodel.GrantID{{}}, nil).Once()
+	grantIDDbMock.On("Delete", tenantID, grantID, privilege).Return(nil).Once()
 	err = mockCatalog.AlterGrant(ctx, tenantID, grant, milvuspb.OperatePrivilegeType_Revoke)
 	require.NoError(t, err)
+
+	roleDbMock.On("GetRoles", tenantID, roleName).Return([]*dbmodel.Role{{Base: dbmodel.Base{ID: roleID}}}, nil).Once()
+	grantDbMock.On("GetGrants", tenantID, roleID, object, objectName).Return(nil, errors.New("test error")).Once()
+	err = mockCatalog.AlterGrant(ctx, tenantID, grant, milvuspb.OperatePrivilegeType_Revoke)
+	require.Error(t, err)
+
+	roleDbMock.On("GetRoles", tenantID, roleName).Return([]*dbmodel.Role{{Base: dbmodel.Base{ID: roleID}}}, nil).Once()
+	grantDbMock.On("GetGrants", tenantID, roleID, object, objectName).Return(nil, nil).Once()
+	err = mockCatalog.AlterGrant(ctx, tenantID, grant, milvuspb.OperatePrivilegeType_Revoke)
+	require.Error(t, err)
+	require.True(t, common.IsIgnorableError(err))
+
+	roleDbMock.On("GetRoles", tenantID, roleName).Return([]*dbmodel.Role{{Base: dbmodel.Base{ID: roleID}}}, nil).Once()
+	grantDbMock.On("GetGrants", tenantID, roleID, object, objectName).Return([]*dbmodel.Grant{{Base: dbmodel.Base{ID: grantID}}}, nil).Once()
+	grantIDDbMock.On("GetGrantIDs", tenantID, grantID, privilege, mock.Anything, mock.Anything).Return(nil, errors.New("test error")).Once()
+	err = mockCatalog.AlterGrant(ctx, tenantID, grant, milvuspb.OperatePrivilegeType_Revoke)
+	require.Error(t, err)
+
+	roleDbMock.On("GetRoles", tenantID, roleName).Return([]*dbmodel.Role{{Base: dbmodel.Base{ID: roleID}}}, nil).Once()
+	grantDbMock.On("GetGrants", tenantID, roleID, object, objectName).Return([]*dbmodel.Grant{{Base: dbmodel.Base{ID: grantID}}}, nil).Once()
+	grantIDDbMock.On("GetGrantIDs", tenantID, grantID, privilege, mock.Anything, mock.Anything).Return(nil, nil).Once()
+	err = mockCatalog.AlterGrant(ctx, tenantID, grant, milvuspb.OperatePrivilegeType_Revoke)
+	require.Error(t, err)
+	require.True(t, common.IsIgnorableError(err))
+
+	roleDbMock.On("GetRoles", tenantID, roleName).Return([]*dbmodel.Role{{Base: dbmodel.Base{ID: roleID}}}, nil).Once()
+	grantDbMock.On("GetGrants", tenantID, roleID, object, objectName).Return([]*dbmodel.Grant{{Base: dbmodel.Base{ID: grantID}}}, nil).Once()
+	grantIDDbMock.On("GetGrantIDs", tenantID, grantID, privilege, mock.Anything, mock.Anything).Return([]*dbmodel.GrantID{{}}, nil).Once()
+	grantIDDbMock.On("Delete", tenantID, grantID, privilege).Return(errors.New("test error")).Once()
+	err = mockCatalog.AlterGrant(ctx, tenantID, grant, milvuspb.OperatePrivilegeType_Revoke)
+	require.Error(t, err)
 }
 
-func TestTableCatalog_AlterPrivilege_Grant(t *testing.T) {
+func TestTableCatalog_AlterGrant_Grant(t *testing.T) {
 	var (
-		grant *milvuspb.GrantEntity
-		err   error
+		roleName         = "foo"
+		roleID     int64 = 1
+		object           = "Collection"
+		objectName       = "col1"
+		grantID    int64 = 10
+		username         = "fo"
+		userID     int64 = 100
+		privilege        = "PrivilegeLoad"
+		grant      *milvuspb.GrantEntity
+		err        error
 	)
 	grant = &milvuspb.GrantEntity{
-		Role:       &milvuspb.RoleEntity{Name: "foo"},
-		Object:     &milvuspb.ObjectEntity{Name: "Collection"},
-		ObjectName: "col1",
+		Role:       &milvuspb.RoleEntity{Name: roleName},
+		Object:     &milvuspb.ObjectEntity{Name: object},
+		ObjectName: objectName,
 		Grantor: &milvuspb.GrantorEntity{
-			User:      &milvuspb.UserEntity{Name: "foo"},
-			Privilege: &milvuspb.PrivilegeEntity{Name: "PrivilegeLoad"},
+			User:      &milvuspb.UserEntity{Name: username},
+			Privilege: &milvuspb.PrivilegeEntity{Name: privilege},
 		},
 	}
-	roleDbMock.On("GetRoles", tenantID, grant.Role.Name).Return([]*dbmodel.Role{{Base: dbmodel.Base{ID: 1}}}, nil).Once()
-	grantDbMock.On("Insert", mock.Anything).Return(nil).Once()
-
+	roleDbMock.On("GetRoles", tenantID, roleName).Return([]*dbmodel.Role{{Base: dbmodel.Base{ID: roleID}}}, nil).Once()
+	grantDbMock.On("GetGrants", tenantID, roleID, object, objectName).Return([]*dbmodel.Grant{{Base: dbmodel.Base{ID: grantID}}}, nil).Once()
+	grantIDDbMock.On("GetGrantIDs", tenantID, grantID, privilege, mock.Anything, mock.Anything).Return([]*dbmodel.GrantID{}, nil).Once()
+	userDbMock.On("GetByUsername", tenantID, username).Return(&dbmodel.User{ID: userID}, nil).Once()
+	grantIDDbMock.On("Insert", mock.Anything).Return(nil).Once()
 	err = mockCatalog.AlterGrant(ctx, tenantID, grant, milvuspb.OperatePrivilegeType_Grant)
 	require.NoError(t, err)
+
+	roleDbMock.On("GetRoles", tenantID, roleName).Return([]*dbmodel.Role{{Base: dbmodel.Base{ID: roleID}}}, nil).Once()
+	grantDbMock.On("GetGrants", tenantID, roleID, object, objectName).Return(nil, nil).Once()
+	grantDbMock.On("Insert", mock.Anything).Return(nil).Once()
+	grantIDDbMock.On("GetGrantIDs", tenantID, mock.Anything, privilege, mock.Anything, mock.Anything).Return([]*dbmodel.GrantID{}, nil).Once()
+	userDbMock.On("GetByUsername", tenantID, username).Return(&dbmodel.User{ID: userID}, nil).Once()
+	grantIDDbMock.On("Insert", mock.Anything).Return(nil).Once()
+	err = mockCatalog.AlterGrant(ctx, tenantID, grant, milvuspb.OperatePrivilegeType_Grant)
+	require.NoError(t, err)
+
+	roleDbMock.On("GetRoles", tenantID, roleName).Return([]*dbmodel.Role{{Base: dbmodel.Base{ID: roleID}}}, nil).Once()
+	grantDbMock.On("GetGrants", tenantID, roleID, object, objectName).Return([]*dbmodel.Grant{{Base: dbmodel.Base{ID: grantID}}}, nil).Once()
+	grantIDDbMock.On("GetGrantIDs", tenantID, grantID, privilege, mock.Anything, mock.Anything).Return(nil, errors.New("test error")).Once()
+	err = mockCatalog.AlterGrant(ctx, tenantID, grant, milvuspb.OperatePrivilegeType_Grant)
+	require.Error(t, err)
+
+	roleDbMock.On("GetRoles", tenantID, roleName).Return([]*dbmodel.Role{{Base: dbmodel.Base{ID: roleID}}}, nil).Once()
+	grantDbMock.On("GetGrants", tenantID, roleID, object, objectName).Return([]*dbmodel.Grant{{Base: dbmodel.Base{ID: grantID}}}, nil).Once()
+	grantIDDbMock.On("GetGrantIDs", tenantID, grantID, privilege, mock.Anything, mock.Anything).Return([]*dbmodel.GrantID{{}}, nil).Once()
+	err = mockCatalog.AlterGrant(ctx, tenantID, grant, milvuspb.OperatePrivilegeType_Grant)
+	require.Error(t, err)
+	require.True(t, common.IsIgnorableError(err))
+
+	roleDbMock.On("GetRoles", tenantID, roleName).Return([]*dbmodel.Role{{Base: dbmodel.Base{ID: roleID}}}, nil).Once()
+	grantDbMock.On("GetGrants", tenantID, roleID, object, objectName).Return([]*dbmodel.Grant{{Base: dbmodel.Base{ID: grantID}}}, nil).Once()
+	grantIDDbMock.On("GetGrantIDs", tenantID, grantID, privilege, mock.Anything, mock.Anything).Return([]*dbmodel.GrantID{}, nil).Once()
+	userDbMock.On("GetByUsername", tenantID, username).Return(nil, errors.New("test error")).Once()
+	err = mockCatalog.AlterGrant(ctx, tenantID, grant, milvuspb.OperatePrivilegeType_Grant)
+	require.Error(t, err)
+
+	roleDbMock.On("GetRoles", tenantID, roleName).Return([]*dbmodel.Role{{Base: dbmodel.Base{ID: roleID}}}, nil).Once()
+	grantDbMock.On("GetGrants", tenantID, roleID, object, objectName).Return([]*dbmodel.Grant{{Base: dbmodel.Base{ID: grantID}}}, nil).Once()
+	grantIDDbMock.On("GetGrantIDs", tenantID, grantID, privilege, mock.Anything, mock.Anything).Return([]*dbmodel.GrantID{}, nil).Once()
+	userDbMock.On("GetByUsername", tenantID, username).Return(&dbmodel.User{ID: userID}, nil).Once()
+	grantIDDbMock.On("Insert", mock.Anything).Return(errors.New("test error")).Once()
+	err = mockCatalog.AlterGrant(ctx, tenantID, grant, milvuspb.OperatePrivilegeType_Grant)
+	require.Error(t, err)
 }
 
-func TestTableCatalog_AlterPrivilege_InvalidType(t *testing.T) {
+func TestTableCatalog_AlterGrant_InvalidType(t *testing.T) {
 	var (
 		roleName = "foo"
 		err      error
 	)
 
-	roleDbMock.On("GetRoles", tenantID, roleName).Return([]*dbmodel.Role{{Base: dbmodel.Base{ID: 1}}}, nil).Once()
 	err = mockCatalog.AlterGrant(ctx, tenantID, &milvuspb.GrantEntity{Role: &milvuspb.RoleEntity{Name: roleName}}, 100)
 	require.Error(t, err)
 }
 
 func TestTableCatalog_ListGrant(t *testing.T) {
 	var (
+		roleID  int64 = 1
+		grantID int64 = 10
 		grant   *milvuspb.GrantEntity
 		grants  []*dbmodel.Grant
 		entites []*milvuspb.GrantEntity
@@ -1593,18 +1684,33 @@ func TestTableCatalog_ListGrant(t *testing.T) {
 	}
 	grants = []*dbmodel.Grant{
 		{
+			Base:       dbmodel.Base{ID: grantID},
 			Role:       dbmodel.Role{Name: "foo"},
 			Object:     "Collection",
 			ObjectName: "col1",
-			Detail:     "[[\"admin\",\"PrivilegeIndexDetail\"],[\"admin\",\"PrivilegeLoad\"],[\"admin\",\"*\"]]",
 		},
 	}
-	roleDbMock.On("GetRoles", tenantID, grant.Role.Name).Return([]*dbmodel.Role{{Base: dbmodel.Base{ID: 1}}}, nil).Once()
-	grantDbMock.On("GetGrants", tenantID, int64(1), grant.Object.Name, grant.ObjectName).Return(grants, nil).Once()
+	roleDbMock.On("GetRoles", tenantID, grant.Role.Name).Return([]*dbmodel.Role{{Base: dbmodel.Base{ID: roleID}}}, nil).Once()
+	grantDbMock.On("GetGrants", tenantID, roleID, grant.Object.Name, grant.ObjectName).Return(grants, nil).Once()
+	grantIDDbMock.On("GetGrantIDs", tenantID, grantID, "", false, true).Return([]*dbmodel.GrantID{
+		{
+			Privilege: "PrivilegeLoad",
+			Grantor:   dbmodel.User{Username: "root"},
+		},
+		{
+			Privilege: "*",
+			Grantor:   dbmodel.User{Username: "root"},
+		},
+	}, nil).Once()
 
 	entites, err = mockCatalog.ListGrant(ctx, tenantID, grant)
 	require.NoError(t, err)
-	require.Equal(t, 3, len(entites))
+	require.Equal(t, 2, len(entites))
+	require.Equal(t, "foo", entites[0].Role.Name)
+	require.Equal(t, "Collection", entites[1].Object.Name)
+	require.Equal(t, "col1", entites[1].ObjectName)
+	require.Equal(t, "root", entites[1].Grantor.User.Name)
+	require.Equal(t, "*", entites[1].Grantor.Privilege.Name)
 }
 
 func TestTableCatalog_ListGrant_GetRolesError(t *testing.T) {
@@ -1638,12 +1744,15 @@ func TestTableCatalog_ListGrant_GetGrantError(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestTableCatalog_ListGrant_DecodeError(t *testing.T) {
+func TestTableCatalog_ListGrant_GetGrantIDError(t *testing.T) {
 	var (
-		grant  *milvuspb.GrantEntity
-		grants []*dbmodel.Grant
-		err    error
+		roleID  int64 = 1
+		grantID int64 = 10
+		grant   *milvuspb.GrantEntity
+		grants  []*dbmodel.Grant
+		err     error
 	)
+
 	grant = &milvuspb.GrantEntity{
 		Role:       &milvuspb.RoleEntity{Name: "foo"},
 		Object:     &milvuspb.ObjectEntity{Name: "Collection"},
@@ -1651,117 +1760,110 @@ func TestTableCatalog_ListGrant_DecodeError(t *testing.T) {
 	}
 	grants = []*dbmodel.Grant{
 		{
+			Base:       dbmodel.Base{ID: grantID},
 			Role:       dbmodel.Role{Name: "foo"},
 			Object:     "Collection",
 			ObjectName: "col1",
-			Detail:     "decode error",
 		},
 	}
-	roleDbMock.On("GetRoles", tenantID, grant.Role.Name).Return([]*dbmodel.Role{{Base: dbmodel.Base{ID: 1}}}, nil).Once()
-	grantDbMock.On("GetGrants", tenantID, int64(1), grant.Object.Name, grant.ObjectName).Return(grants, nil).Once()
+	roleDbMock.On("GetRoles", tenantID, grant.Role.Name).Return([]*dbmodel.Role{{Base: dbmodel.Base{ID: roleID}}}, nil).Once()
+	grantDbMock.On("GetGrants", tenantID, roleID, grant.Object.Name, grant.ObjectName).Return(grants, nil).Once()
+	grantIDDbMock.On("GetGrantIDs", tenantID, grantID, "", false, true).Return(nil, errors.New("test error")).Once()
 
 	_, err = mockCatalog.ListGrant(ctx, tenantID, grant)
 	require.Error(t, err)
 }
 
-func TestTableCatalog_ListGrant_DetailLenError(t *testing.T) {
+func TestTableCatalog_ListGrant_NotExistError(t *testing.T) {
 	var (
-		grant  *milvuspb.GrantEntity
-		grants []*dbmodel.Grant
-		err    error
+		grant *milvuspb.GrantEntity
+		err   error
 	)
 	grant = &milvuspb.GrantEntity{
 		Role:       &milvuspb.RoleEntity{Name: "foo"},
 		Object:     &milvuspb.ObjectEntity{Name: "Collection"},
 		ObjectName: "col1",
 	}
-	grants = []*dbmodel.Grant{
-		{
-			Role:       dbmodel.Role{Name: "foo"},
-			Object:     "Collection",
-			ObjectName: "col1",
-			Detail:     "[[\"admin\"]]",
-		},
-	}
 	roleDbMock.On("GetRoles", tenantID, grant.Role.Name).Return([]*dbmodel.Role{{Base: dbmodel.Base{ID: 1}}}, nil).Once()
-	grantDbMock.On("GetGrants", tenantID, int64(1), grant.Object.Name, grant.ObjectName).Return(grants, nil).Once()
+	grantDbMock.On("GetGrants", tenantID, int64(1), grant.Object.Name, grant.ObjectName).Return(nil, nil).Once()
 
 	_, err = mockCatalog.ListGrant(ctx, tenantID, grant)
+	require.Error(t, err)
+	require.True(t, common.IsKeyNotExistError(err))
+}
+
+func TestTableCatalog_DropGrant(t *testing.T) {
+	var (
+		roleName       = "foo"
+		roleID   int64 = 10
+		err      error
+	)
+	roleDbMock.On("GetRoles", tenantID, roleName).Return([]*dbmodel.Role{{Base: dbmodel.Base{ID: roleID}}}, nil).Once()
+	grantDbMock.On("Delete", tenantID, roleID, "", "").Return(nil).Once()
+	err = mockCatalog.DeleteGrant(ctx, tenantID, &milvuspb.RoleEntity{Name: roleName})
+	require.NoError(t, err)
+
+	roleDbMock.On("GetRoles", tenantID, roleName).Return(nil, errors.New("test error")).Once()
+	err = mockCatalog.DeleteGrant(ctx, tenantID, &milvuspb.RoleEntity{Name: roleName})
+	require.Error(t, err)
+
+	roleDbMock.On("GetRoles", tenantID, roleName).Return([]*dbmodel.Role{{Base: dbmodel.Base{ID: roleID}}}, nil).Once()
+	grantDbMock.On("Delete", tenantID, roleID, "", "").Return(errors.New("test error")).Once()
+	err = mockCatalog.DeleteGrant(ctx, tenantID, &milvuspb.RoleEntity{Name: roleName})
 	require.Error(t, err)
 }
 
 func TestTableCatalog_ListPolicy(t *testing.T) {
 	var (
-		grant    *milvuspb.GrantEntity
-		grants   []*dbmodel.Grant
-		policies []string
-		err      error
+		roleName1         = "foo1"
+		roleName2         = "foo1"
+		grantID1    int64 = 10
+		grantID2    int64 = 100
+		object1           = "obj1"
+		object2           = "obj2"
+		objectName1       = "col1"
+		objectName2       = "col2"
+		privilege1        = "PrivilegeInsert"
+		privilege2        = "PrivilegeQuery"
+		grants      []*dbmodel.Grant
+		policies    []string
+		err         error
 	)
 
-	grant = &milvuspb.GrantEntity{
-		Role:       &milvuspb.RoleEntity{Name: "foo"},
-		Object:     &milvuspb.ObjectEntity{Name: "Collection"},
-		ObjectName: "col1",
-	}
 	grants = []*dbmodel.Grant{
 		{
-			Role:       dbmodel.Role{Name: "foo"},
-			Object:     "Collection",
-			ObjectName: "col1",
-			Detail:     "[[\"admin\",\"PrivilegeIndexDetail\"]]",
+			Base:       dbmodel.Base{ID: grantID1},
+			Role:       dbmodel.Role{Name: roleName1},
+			Object:     object1,
+			ObjectName: objectName1,
+		},
+		{
+			Base:       dbmodel.Base{ID: grantID2},
+			Role:       dbmodel.Role{Name: roleName2},
+			Object:     object2,
+			ObjectName: objectName2,
 		},
 	}
 	grantDbMock.On("GetGrants", tenantID, int64(0), "", "").Return(grants, nil).Once()
+	grantIDDbMock.On("GetGrantIDs", tenantID, grantID1, "", false, false).Return([]*dbmodel.GrantID{
+		{Privilege: privilege1},
+		{Privilege: privilege2},
+	}, nil).Once()
+	grantIDDbMock.On("GetGrantIDs", tenantID, grantID2, "", false, false).Return([]*dbmodel.GrantID{
+		{Privilege: privilege1},
+	}, nil).Once()
 
 	policies, err = mockCatalog.ListPolicy(ctx, tenantID)
 	require.NoError(t, err)
-	require.Equal(t, 1, len(policies))
-	require.Equal(t, funcutil.PolicyForPrivilege(grant.Role.Name, grant.Object.Name, grant.ObjectName, "PrivilegeIndexDetail"), policies[0])
-}
+	require.Equal(t, 3, len(policies))
+	require.Equal(t, funcutil.PolicyForPrivilege(roleName1, object1, objectName1, privilege1), policies[0])
 
-func TestTableCatalog_ListPolicy_GetGrantsError(t *testing.T) {
 	grantDbMock.On("GetGrants", tenantID, int64(0), "", "").Return(nil, errors.New("test error")).Once()
-
-	_, err := mockCatalog.ListPolicy(ctx, tenantID)
-	require.Error(t, err)
-}
-
-func TestTableCatalog_ListPolicy_DetailLenError(t *testing.T) {
-	var (
-		grants []*dbmodel.Grant
-		err    error
-	)
-
-	grants = []*dbmodel.Grant{
-		{
-			Role:       dbmodel.Role{Name: "foo"},
-			Object:     "Collection",
-			ObjectName: "col1",
-			Detail:     "decode error",
-		},
-	}
-	grantDbMock.On("GetGrants", tenantID, int64(0), "", "").Return(grants, nil).Once()
-
 	_, err = mockCatalog.ListPolicy(ctx, tenantID)
 	require.Error(t, err)
-}
 
-func TestTableCatalog_ListPolicy_DecodeError(t *testing.T) {
-	var (
-		grants []*dbmodel.Grant
-		err    error
-	)
-
-	grants = []*dbmodel.Grant{
-		{
-			Role:       dbmodel.Role{Name: "foo"},
-			Object:     "Collection",
-			ObjectName: "col1",
-			Detail:     "[[\"admin\"]]",
-		},
-	}
 	grantDbMock.On("GetGrants", tenantID, int64(0), "", "").Return(grants, nil).Once()
-
+	grantIDDbMock.On("GetGrantIDs", tenantID, grantID1, "", false, false).Return(nil, errors.New("test error")).Once()
 	_, err = mockCatalog.ListPolicy(ctx, tenantID)
 	require.Error(t, err)
 }

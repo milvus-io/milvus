@@ -27,7 +27,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -86,6 +85,7 @@ type mockTestTxnKV struct {
 	remove                       func(key string) error
 	multiRemove                  func(keys []string) error
 	load                         func(key string) (string, error)
+	removeWithPrefix             func(key string) error
 }
 
 func (m *mockTestTxnKV) LoadWithPrefix(key string) ([]string, []string, error) {
@@ -114,6 +114,10 @@ func (m *mockTestTxnKV) MultiRemove(keys []string) error {
 
 func (m *mockTestTxnKV) Load(key string) (string, error) {
 	return m.load(key)
+}
+
+func (m *mockTestTxnKV) RemoveWithPrefix(key string) error {
+	return m.removeWithPrefix(key)
 }
 
 func generateMetaTable(t *testing.T) (*MetaTable, *mockTestKV, *mockTestTxnKV, func()) {
@@ -937,70 +941,82 @@ func TestRbacOperatePrivilege(t *testing.T) {
 	entity.Grantor.User = &milvuspb.UserEntity{Name: "user2"}
 	err = mt.OperatePrivilege(util.DefaultTenant, entity, milvuspb.OperatePrivilegeType_Revoke)
 	assert.NotNil(t, err)
+
 	err = mt.OperatePrivilege(util.DefaultTenant, entity, milvuspb.OperatePrivilegeType_Grant)
 	assert.NotNil(t, err)
+
 	mockTxnKV.load = func(key string) (string, error) {
-		return "unmarshal", nil
+		return "", common.NewKeyNotExistError(key)
+	}
+	err = mt.OperatePrivilege(util.DefaultTenant, entity, milvuspb.OperatePrivilegeType_Revoke)
+	assert.NotNil(t, err)
+	assert.True(t, common.IsIgnorableError(err))
+
+	mockTxnKV.load = func(key string) (string, error) {
+		return "", common.NewKeyNotExistError(key)
+	}
+	err = mt.OperatePrivilege(util.DefaultTenant, entity, milvuspb.OperatePrivilegeType_Grant)
+	assert.Nil(t, err)
+
+	granteeKey := funcutil.HandleTenantForEtcdKey(rootcoord.GranteePrefix, util.DefaultTenant, fmt.Sprintf("%s/%s/%s", entity.Role.Name, entity.Object.Name, entity.ObjectName))
+	granteeID := "123456"
+	mockTxnKV.load = func(key string) (string, error) {
+		if key == granteeKey {
+			return granteeID, nil
+		}
+		return "", errors.New("test error")
 	}
 	err = mt.OperatePrivilege(util.DefaultTenant, entity, milvuspb.OperatePrivilegeType_Grant)
 	assert.NotNil(t, err)
 
 	mockTxnKV.load = func(key string) (string, error) {
-		return "fail", common.NewKeyNotExistError(key)
+		if key == granteeKey {
+			return granteeID, nil
+		}
+		return "", common.NewKeyNotExistError(key)
+	}
+	err = mt.OperatePrivilege(util.DefaultTenant, entity, milvuspb.OperatePrivilegeType_Revoke)
+	assert.NotNil(t, err)
+	assert.True(t, common.IsIgnorableError(err))
+
+	mockTxnKV.save = func(key, value string) error {
+		return errors.New("test error")
+	}
+	err = mt.OperatePrivilege(util.DefaultTenant, entity, milvuspb.OperatePrivilegeType_Grant)
+	assert.NotNil(t, err)
+
+	mockTxnKV.save = func(key, value string) error {
+		return nil
 	}
 	err = mt.OperatePrivilege(util.DefaultTenant, entity, milvuspb.OperatePrivilegeType_Grant)
 	assert.Nil(t, err)
 
-	grantPrivilegeEntity := &milvuspb.GrantPrivilegeEntity{Entities: []*milvuspb.GrantorEntity{
-		{User: &milvuspb.UserEntity{Name: "aaa"}, Privilege: &milvuspb.PrivilegeEntity{Name: commonpb.ObjectPrivilege_PrivilegeLoad.String()}},
-	}}
 	mockTxnKV.load = func(key string) (string, error) {
-		grantPrivilegeEntityByte, _ := proto.Marshal(grantPrivilegeEntity)
-		return string(grantPrivilegeEntityByte), nil
+		if key == granteeKey {
+			return granteeID, nil
+		}
+		return "", nil
 	}
 	err = mt.OperatePrivilege(util.DefaultTenant, entity, milvuspb.OperatePrivilegeType_Grant)
-	assert.Equal(t, true, common.IsIgnorableError(err))
-	entity.Grantor.Privilege = &milvuspb.PrivilegeEntity{Name: commonpb.ObjectPrivilege_PrivilegeRelease.String()}
-	err = mt.OperatePrivilege(util.DefaultTenant, entity, milvuspb.OperatePrivilegeType_Revoke)
-	assert.Equal(t, true, common.IsIgnorableError(err))
-	grantPrivilegeEntity = &milvuspb.GrantPrivilegeEntity{Entities: []*milvuspb.GrantorEntity{
-		{User: &milvuspb.UserEntity{Name: "user2"}, Privilege: &milvuspb.PrivilegeEntity{Name: commonpb.ObjectPrivilege_PrivilegeLoad.String()}},
-	}}
-	mockTxnKV.load = func(key string) (string, error) {
-		grantPrivilegeEntityByte, _ := proto.Marshal(grantPrivilegeEntity)
-		return string(grantPrivilegeEntityByte), nil
-	}
-	err = mt.OperatePrivilege(util.DefaultTenant, entity, milvuspb.OperatePrivilegeType_Grant)
-	assert.Nil(t, err)
-	grantPrivilegeEntity = &milvuspb.GrantPrivilegeEntity{Entities: []*milvuspb.GrantorEntity{
-		{User: &milvuspb.UserEntity{Name: "user2"}, Privilege: &milvuspb.PrivilegeEntity{Name: commonpb.ObjectPrivilege_PrivilegeRelease.String()}},
-	}}
-	mockTxnKV.load = func(key string) (string, error) {
-		grantPrivilegeEntityByte, _ := proto.Marshal(grantPrivilegeEntity)
-		return string(grantPrivilegeEntityByte), nil
-	}
-	mockTxnKV.remove = func(key string) error {
-		return fmt.Errorf("remove error")
-	}
-	err = mt.OperatePrivilege(util.DefaultTenant, entity, milvuspb.OperatePrivilegeType_Revoke)
 	assert.NotNil(t, err)
+	assert.True(t, common.IsIgnorableError(err))
+
+	mockTxnKV.load = func(key string) (string, error) {
+		if key == granteeKey {
+			return granteeID, nil
+		}
+		return "", nil
+	}
 	mockTxnKV.remove = func(key string) error {
 		return nil
 	}
 	err = mt.OperatePrivilege(util.DefaultTenant, entity, milvuspb.OperatePrivilegeType_Revoke)
 	assert.Nil(t, err)
 
-	grantPrivilegeEntity = &milvuspb.GrantPrivilegeEntity{Entities: []*milvuspb.GrantorEntity{
-		{User: &milvuspb.UserEntity{Name: "u3"}, Privilege: &milvuspb.PrivilegeEntity{Name: commonpb.ObjectPrivilege_PrivilegeInsert.String()}},
-	}}
-	mockTxnKV.load = func(key string) (string, error) {
-		grantPrivilegeEntityByte, _ := proto.Marshal(grantPrivilegeEntity)
-		return string(grantPrivilegeEntityByte), nil
+	mockTxnKV.remove = func(key string) error {
+		return errors.New("test error")
 	}
-	mockTxnKV.save = func(key, value string) error {
-		return fmt.Errorf("save error")
-	}
-	err = mt.OperatePrivilege(util.DefaultTenant, entity, milvuspb.OperatePrivilegeType_Grant)
+	err = mt.OperatePrivilege(util.DefaultTenant, entity, milvuspb.OperatePrivilegeType_Revoke)
 	assert.NotNil(t, err)
 }
 
@@ -1013,71 +1029,95 @@ func TestRbacSelectGrant(t *testing.T) {
 	_, err = mt.SelectGrant(util.DefaultTenant, entity)
 	assert.NotNil(t, err)
 
-	//entity.Role = &milvuspb.RoleEntity{Name: "admin"}
+	entity.Role = &milvuspb.RoleEntity{Name: ""}
 	_, err = mt.SelectGrant(util.DefaultTenant, entity)
 	assert.NotNil(t, err)
 
+	entity.Role = &milvuspb.RoleEntity{Name: "admin"}
+	entity.ObjectName = "Collection"
+	entity.Object = &milvuspb.ObjectEntity{Name: "col"}
 	mockTxnKV.load = func(key string) (string, error) {
-		return "unmarshal error", nil
+		return "", errors.New("test error")
 	}
 	_, err = mt.SelectGrant(util.DefaultTenant, entity)
 	assert.NotNil(t, err)
+
+	granteeID := "123456"
+	mockTxnKV.load = func(key string) (string, error) {
+		return granteeID, nil
+	}
+	mockTxnKV.loadWithPrefix = func(key string) ([]string, []string, error) {
+		return nil, nil, errors.New("test error")
+	}
+	_, err = mt.SelectGrant(util.DefaultTenant, entity)
+	assert.NotNil(t, err)
+
+	mockTxnKV.loadWithPrefix = func(key string) ([]string, []string, error) {
+		return []string{key + "/PrivilegeInsert", key + "/*", key + "/a/b"}, []string{"root", "root", "root"}, nil
+	}
+	grantEntities, err := mt.SelectGrant(util.DefaultTenant, entity)
+	assert.Nil(t, err)
+	assert.Equal(t, 2, len(grantEntities))
 
 	entity.Role = &milvuspb.RoleEntity{Name: "role1"}
-	entity.ObjectName = "col1"
-	entity.Object = &milvuspb.ObjectEntity{Name: "Collection"}
-
-	grantPrivilegeEntity := &milvuspb.GrantPrivilegeEntity{Entities: []*milvuspb.GrantorEntity{
-		{User: &milvuspb.UserEntity{Name: "aaa"}, Privilege: &milvuspb.PrivilegeEntity{Name: "111"}},
-		{User: &milvuspb.UserEntity{Name: "bbb"}, Privilege: &milvuspb.PrivilegeEntity{Name: "222"}},
-		{User: &milvuspb.UserEntity{Name: "ccc"}, Privilege: &milvuspb.PrivilegeEntity{Name: "*"}},
-	}}
-	grantPrivilegeEntityByte, _ := proto.Marshal(grantPrivilegeEntity)
-
-	mockTxnKV.load = func(key string) (string, error) {
-		return "unmarshal error", nil
-	}
-	_, err = mt.SelectGrant(util.DefaultTenant, entity)
-	assert.NotNil(t, err)
-
-	mockTxnKV.load = func(key string) (string, error) {
-		return string(grantPrivilegeEntityByte), nil
-	}
-	results, err := mt.SelectGrant(util.DefaultTenant, entity)
-	assert.Nil(t, err)
-	assert.Equal(t, 3, len(results))
-
-	mockTxnKV.load = func(key string) (string, error) {
-		return "", fmt.Errorf("load error")
-	}
-	_, err = mt.SelectGrant(util.DefaultTenant, entity)
-	assert.NotNil(t, err)
-
-	grantPrivilegeEntity2 := &milvuspb.GrantPrivilegeEntity{Entities: []*milvuspb.GrantorEntity{
-		{User: &milvuspb.UserEntity{Name: "ccc"}, Privilege: &milvuspb.PrivilegeEntity{Name: "333"}},
-	}}
-	grantPrivilegeEntityByte2, _ := proto.Marshal(grantPrivilegeEntity2)
-
-	mockTxnKV.loadWithPrefix = func(key string) ([]string, []string, error) {
-		return []string{key + "/collection/col1", key + "/collection/col2", key + "/collection/a/col3"}, []string{string(grantPrivilegeEntityByte), string(grantPrivilegeEntityByte2), string(grantPrivilegeEntityByte2)}, nil
-	}
 	entity.ObjectName = ""
 	entity.Object = nil
-	results, err = mt.SelectGrant(util.DefaultTenant, entity)
+	mockTxnKV.loadWithPrefix = func(key string) ([]string, []string, error) {
+		return nil, nil, errors.New("test error")
+	}
+	_, err = mt.SelectGrant(util.DefaultTenant, entity)
+	assert.NotNil(t, err)
+
+	granteeID1 := "123456"
+	granteeID2 := "147258"
+	mockTxnKV.loadWithPrefix = func(key string) ([]string, []string, error) {
+		if key == funcutil.HandleTenantForEtcdKey(rootcoord.GranteePrefix, util.DefaultTenant, entity.Role.Name) {
+			return []string{key + "/Collection/col1", key + "/Collection/col2", key + "/Collection/col1/x"}, []string{granteeID1, granteeID1, granteeID2}, nil
+		}
+		return nil, nil, errors.New("test error")
+	}
+	_, err = mt.SelectGrant(util.DefaultTenant, entity)
+	assert.NotNil(t, err)
+
+	mockTxnKV.loadWithPrefix = func(key string) ([]string, []string, error) {
+		if key == funcutil.HandleTenantForEtcdKey(rootcoord.GranteePrefix, util.DefaultTenant, entity.Role.Name) {
+			return []string{key + "/Collection/col1", key + "/Collection/col2", key + "/Collection/col1/x"}, []string{granteeID1, granteeID1, granteeID2}, nil
+		}
+		return []string{key + "/PrivilegeInsert", key + "/*", key + "/a/b"}, []string{"root", "root", "root"}, nil
+	}
+	grantEntities, err = mt.SelectGrant(util.DefaultTenant, entity)
 	assert.Nil(t, err)
-	assert.Equal(t, 4, len(results))
+	assert.Equal(t, 4, len(grantEntities))
+}
 
-	mockTxnKV.loadWithPrefix = func(key string) ([]string, []string, error) {
-		return nil, nil, fmt.Errorf("load with prefix error")
-	}
-	_, err = mt.SelectGrant(util.DefaultTenant, entity)
-	assert.NotNil(t, err)
+func TestRbacDropGrant(t *testing.T) {
+	mt, _, mockTxnKV, closeCli := generateMetaTable(t)
+	defer closeCli()
+	var (
+		roleName = "foo"
+		entity   *milvuspb.RoleEntity
+		err      error
+	)
 
-	mockTxnKV.loadWithPrefix = func(key string) ([]string, []string, error) {
-		return []string{key + "/collection/col1"}, []string{"unmarshal error"}, nil
+	err = mt.DropGrant(util.DefaultTenant, nil)
+	assert.Error(t, err)
+
+	entity = &milvuspb.RoleEntity{Name: ""}
+	err = mt.DropGrant(util.DefaultTenant, entity)
+	assert.Error(t, err)
+
+	entity.Name = roleName
+	mockTxnKV.removeWithPrefix = func(key string) error {
+		return nil
 	}
-	_, err = mt.SelectGrant(util.DefaultTenant, entity)
-	assert.NotNil(t, err)
+	err = mt.DropGrant(util.DefaultTenant, entity)
+	assert.NoError(t, err)
+
+	mockTxnKV.removeWithPrefix = func(key string) error {
+		return errors.New("test error")
+	}
+	err = mt.DropGrant(util.DefaultTenant, entity)
+	assert.Error(t, err)
 }
 
 func TestRbacListPolicy(t *testing.T) {
@@ -1088,30 +1128,29 @@ func TestRbacListPolicy(t *testing.T) {
 		return []string{}, []string{}, fmt.Errorf("load with prefix err")
 	}
 	policies, err := mt.ListPolicy(util.DefaultTenant)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	assert.Equal(t, 0, len(policies))
 
-	grantPrivilegeEntity := &milvuspb.GrantPrivilegeEntity{Entities: []*milvuspb.GrantorEntity{
-		{User: &milvuspb.UserEntity{Name: "aaa"}, Privilege: &milvuspb.PrivilegeEntity{Name: "111"}},
-		{User: &milvuspb.UserEntity{Name: "bbb"}, Privilege: &milvuspb.PrivilegeEntity{Name: "222"}},
-	}}
-	grantPrivilegeEntityByte, _ := proto.Marshal(grantPrivilegeEntity)
-	grantPrivilegeEntity2 := &milvuspb.GrantPrivilegeEntity{Entities: []*milvuspb.GrantorEntity{
-		{User: &milvuspb.UserEntity{Name: "ccc"}, Privilege: &milvuspb.PrivilegeEntity{Name: "333"}},
-	}}
-	grantPrivilegeEntityByte2, _ := proto.Marshal(grantPrivilegeEntity2)
+	granteeID1 := "123456"
+	granteeID2 := "147258"
 	mockTxnKV.loadWithPrefix = func(key string) ([]string, []string, error) {
-		return []string{key + "/alice/collection/col1", key + "/tom/collection/col2", key + "/tom/collection/a/col2"}, []string{string(grantPrivilegeEntityByte), string(grantPrivilegeEntityByte2), string(grantPrivilegeEntityByte2)}, nil
-	}
-	policies, err = mt.ListPolicy(util.DefaultTenant)
-	assert.Nil(t, err)
-	assert.Equal(t, 3, len(policies))
-
-	mockTxnKV.loadWithPrefix = func(key string) ([]string, []string, error) {
-		return []string{key + "/alice/collection/col1"}, []string{"unmarshal error"}, nil
+		if key == funcutil.HandleTenantForEtcdKey(rootcoord.GranteePrefix, util.DefaultTenant, "") {
+			return []string{key + "/alice/collection/col1", key + "/tom/collection/col2", key + "/tom/collection/a/col2"}, []string{granteeID1, granteeID2, granteeID2}, nil
+		}
+		return []string{}, []string{}, errors.New("test error")
 	}
 	_, err = mt.ListPolicy(util.DefaultTenant)
-	assert.Nil(t, err)
+	assert.Error(t, err)
+
+	mockTxnKV.loadWithPrefix = func(key string) ([]string, []string, error) {
+		if key == funcutil.HandleTenantForEtcdKey(rootcoord.GranteePrefix, util.DefaultTenant, "") {
+			return []string{key + "/alice/collection/col1", key + "/tom/collection/col2", key + "/tom/collection/a/col2"}, []string{granteeID1, granteeID2, granteeID2}, nil
+		}
+		return []string{key + "/PrivilegeInsert", key + "/*", key + "/a/b"}, []string{"root", "root", "root"}, nil
+	}
+	policies, err = mt.ListPolicy(util.DefaultTenant)
+	assert.NoError(t, err)
+	assert.Equal(t, 4, len(policies))
 }
 
 func TestRbacListUserRole(t *testing.T) {

@@ -41,3 +41,7 @@ func TestBcryptCost(t *testing.T) {
 	err = bcrypt.CompareHashAndPassword(bytes, []byte(correctPassword))
 	assert.NoError(t, err)
 }
+
+func TestMD5(t *testing.T) {
+	assert.Equal(t, "67f48520697662a2", MD5("These pretzels are making me thirsty."))
+}

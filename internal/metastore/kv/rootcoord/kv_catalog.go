@@ -5,6 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/milvus-io/milvus/internal/util/crypto"
+
+	"github.com/milvus-io/milvus/internal/util"
+
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
@@ -16,7 +20,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
-	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -627,7 +630,7 @@ func (kc *Catalog) ListRole(ctx context.Context, tenant string, entity *milvuspb
 		for _, key := range keys {
 			roleMappingInfos := typeutil.AfterN(key, roleMappingKey+"/", "/")
 			if len(roleMappingInfos) != 2 {
-				log.Warn("invalid role mapping key", zap.String("key", key))
+				log.Warn("invalid role mapping key", zap.String("string", key), zap.String("sub_string", roleMappingKey))
 				continue
 			}
 			username := roleMappingInfos[0]
@@ -657,7 +660,7 @@ func (kc *Catalog) ListRole(ctx context.Context, tenant string, entity *milvuspb
 		for _, key := range keys {
 			infoArr := typeutil.AfterN(key, roleKey+"/", "/")
 			if len(infoArr) != 1 || len(infoArr[0]) == 0 {
-				log.Warn("invalid role key", zap.String("key", key))
+				log.Warn("invalid role key", zap.String("string", key), zap.String("sub_string", roleKey))
 				continue
 			}
 			appendRoleResult(infoArr[0])
@@ -689,7 +692,7 @@ func (kc *Catalog) getRolesByUsername(tenant string, username string) ([]string,
 	for _, key := range keys {
 		roleMappingInfos := typeutil.AfterN(key, k+"/", "/")
 		if len(roleMappingInfos) != 1 {
-			log.Warn("invalid role mapping key", zap.String("key", key))
+			log.Warn("invalid role mapping key", zap.String("string", key), zap.String("sub_string", k))
 			continue
 		}
 		roles = append(roles, roleMappingInfos[0])
@@ -757,13 +760,17 @@ func (kc *Catalog) ListUser(ctx context.Context, tenant string, entity *milvuspb
 }
 
 func (kc *Catalog) AlterGrant(ctx context.Context, tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error {
-	privilegeName := entity.Grantor.Privilege.Name
-	k := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, fmt.Sprintf("%s/%s/%s", entity.Role.Name, entity.Object.Name, entity.ObjectName))
+	var (
+		privilegeName = entity.Grantor.Privilege.Name
+		k             = funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, fmt.Sprintf("%s/%s/%s", entity.Role.Name, entity.Object.Name, entity.ObjectName))
+		idStr         string
+		v             string
+		err           error
+	)
 
-	curGrantPrivilegeEntity := &milvuspb.GrantPrivilegeEntity{}
-	v, err := kc.Txn.Load(k)
+	v, err = kc.Txn.Load(k)
 	if err != nil {
-		log.Warn("fail to load grant privilege entity", zap.String("key", k), zap.Any("type", operateType), zap.Error(err))
+		log.Error("fail to load grant privilege entity", zap.String("key", k), zap.Any("type", operateType), zap.Error(err))
 		if funcutil.IsRevoke(operateType) {
 			if common.IsKeyNotExistError(err) {
 				return common.NewIgnorableError(fmt.Errorf("the grant[%s] isn't existed", k))
@@ -773,85 +780,71 @@ func (kc *Catalog) AlterGrant(ctx context.Context, tenant string, entity *milvus
 		if !common.IsKeyNotExistError(err) {
 			return err
 		}
-		curGrantPrivilegeEntity.Entities = append(curGrantPrivilegeEntity.Entities, &milvuspb.GrantorEntity{
-			Privilege: &milvuspb.PrivilegeEntity{Name: privilegeName},
-			User:      &milvuspb.UserEntity{Name: entity.Grantor.User.Name},
-		})
-	} else {
-		err = proto.Unmarshal([]byte(v), curGrantPrivilegeEntity)
+
+		idStr = crypto.MD5(k)
+		err = kc.Txn.Save(k, idStr)
 		if err != nil {
-			log.Error("fail to unmarshal the grant privilege entity", zap.String("key", k), zap.Any("type", operateType), zap.Error(err))
+			log.Error("fail to allocate id when altering the grant", zap.Error(err))
 			return err
 		}
-		isExisted := false
-		dropIndex := -1
-
-		for entityIndex, grantorEntity := range curGrantPrivilegeEntity.Entities {
-			if grantorEntity.Privilege.Name == privilegeName {
-				isExisted = true
-				dropIndex = entityIndex
-				break
-			}
-		}
-		if !isExisted && funcutil.IsGrant(operateType) {
-			curGrantPrivilegeEntity.Entities = append(curGrantPrivilegeEntity.Entities, &milvuspb.GrantorEntity{
-				Privilege: &milvuspb.PrivilegeEntity{Name: privilegeName},
-				User:      &milvuspb.UserEntity{Name: entity.Grantor.User.Name},
-			})
-		} else if isExisted && funcutil.IsGrant(operateType) {
-			return common.NewIgnorableError(fmt.Errorf("the privilege[%s] is granted", privilegeName))
-		} else if !isExisted && funcutil.IsRevoke(operateType) {
-			return common.NewIgnorableError(fmt.Errorf("the privilege[%s] isn't granted", privilegeName))
-		} else if isExisted && funcutil.IsRevoke(operateType) {
-			curGrantPrivilegeEntity.Entities = append(curGrantPrivilegeEntity.Entities[:dropIndex], curGrantPrivilegeEntity.Entities[dropIndex+1:]...)
-		}
+	} else {
+		idStr = v
 	}
-
-	if funcutil.IsRevoke(operateType) && len(curGrantPrivilegeEntity.Entities) == 0 {
-		err = kc.Txn.Remove(k)
-		if err != nil {
-			log.Error("fail to remove the grant privilege entity", zap.String("key", k), zap.Error(err))
+	k = funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, fmt.Sprintf("%s/%s", idStr, privilegeName))
+	_, err = kc.Txn.Load(k)
+	if err != nil {
+		log.Error("fail to load the grantee id", zap.String("key", k), zap.Error(err))
+		if !common.IsKeyNotExistError(err) {
+			return err
+		}
+		if funcutil.IsRevoke(operateType) {
+			return common.NewIgnorableError(fmt.Errorf("the grantee-id[%s] isn't existed", k))
+		}
+		if funcutil.IsGrant(operateType) {
+			if err = kc.Txn.Save(k, entity.Grantor.User.Name); err != nil {
+				log.Error("fail to save the grantee id", zap.String("key", k), zap.Error(err))
+			}
 			return err
 		}
 		return nil
 	}
-
-	saveValue, err := proto.Marshal(curGrantPrivilegeEntity)
-	if err != nil {
-		log.Error("fail to marshal the grant privilege entity", zap.String("key", k), zap.Any("type", operateType), zap.Error(err))
-		return fmt.Errorf("fail to marshal grant info, key:%s, err:%w", k, err)
-	}
-	err = kc.Txn.Save(k, string(saveValue))
-	if err != nil {
-		log.Error("fail to save the grant privilege entity", zap.String("key", k), zap.Any("type", operateType), zap.Error(err))
+	if funcutil.IsRevoke(operateType) {
+		if err = kc.Txn.Remove(k); err != nil {
+			log.Error("fail to remove the grantee id", zap.String("key", k), zap.Error(err))
+			return err
+		}
 		return err
 	}
-	return nil
+	return common.NewIgnorableError(fmt.Errorf("the privilege[%s] has been granted", privilegeName))
 }
 
 func (kc *Catalog) ListGrant(ctx context.Context, tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error) {
 	var entities []*milvuspb.GrantEntity
 
-	var k string
+	var granteeKey string
 	appendGrantEntity := func(v string, object string, objectName string) error {
-		grantPrivilegeEntity := &milvuspb.GrantPrivilegeEntity{}
-		err := proto.Unmarshal([]byte(v), grantPrivilegeEntity)
+		granteeIDKey := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, v)
+		keys, values, err := kc.Txn.LoadWithPrefix(granteeIDKey)
 		if err != nil {
-			log.Error("fail to unmarshal the grant privilege entity", zap.String("key", k), zap.Error(err))
+			log.Error("fail to load the grantee ids", zap.String("key", granteeIDKey), zap.Error(err))
 			return err
 		}
-		for _, grantorEntity := range grantPrivilegeEntity.Entities {
-			privilegeName := util.PrivilegeNameForAPI(grantorEntity.Privilege.Name)
-			if grantorEntity.Privilege.Name == util.AnyWord {
+		for i, key := range keys {
+			granteeIDInfos := typeutil.AfterN(key, granteeIDKey+"/", "/")
+			if len(granteeIDInfos) != 1 {
+				log.Warn("invalid grantee id", zap.String("string", key), zap.String("sub_string", granteeIDKey))
+				continue
+			}
+			privilegeName := util.PrivilegeNameForAPI(granteeIDInfos[0])
+			if granteeIDInfos[0] == util.AnyWord {
 				privilegeName = util.AnyWord
 			}
-
 			entities = append(entities, &milvuspb.GrantEntity{
 				Role:       &milvuspb.RoleEntity{Name: entity.Role.Name},
 				Object:     &milvuspb.ObjectEntity{Name: object},
 				ObjectName: objectName,
 				Grantor: &milvuspb.GrantorEntity{
-					User:      &milvuspb.UserEntity{Name: grantorEntity.User.Name},
+					User:      &milvuspb.UserEntity{Name: values[i]},
 					Privilege: &milvuspb.PrivilegeEntity{Name: privilegeName},
 				},
 			})
@@ -860,10 +853,10 @@ func (kc *Catalog) ListGrant(ctx context.Context, tenant string, entity *milvusp
 	}
 
 	if !funcutil.IsEmptyString(entity.ObjectName) && entity.Object != nil && !funcutil.IsEmptyString(entity.Object.Name) {
-		k = funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, fmt.Sprintf("%s/%s/%s", entity.Role.Name, entity.Object.Name, entity.ObjectName))
-		v, err := kc.Txn.Load(k)
+		granteeKey = funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, fmt.Sprintf("%s/%s/%s", entity.Role.Name, entity.Object.Name, entity.ObjectName))
+		v, err := kc.Txn.Load(granteeKey)
 		if err != nil {
-			log.Error("fail to load the grant privilege entity", zap.String("key", k), zap.Error(err))
+			log.Error("fail to load the grant privilege entity", zap.String("key", granteeKey), zap.Error(err))
 			return entities, err
 		}
 		err = appendGrantEntity(v, entity.Object.Name, entity.ObjectName)
@@ -871,16 +864,16 @@ func (kc *Catalog) ListGrant(ctx context.Context, tenant string, entity *milvusp
 			return entities, err
 		}
 	} else {
-		k = funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, entity.Role.Name)
-		keys, values, err := kc.Txn.LoadWithPrefix(k)
+		granteeKey = funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, entity.Role.Name)
+		keys, values, err := kc.Txn.LoadWithPrefix(granteeKey)
 		if err != nil {
-			log.Error("fail to load grant privilege entities", zap.String("key", k), zap.Error(err))
+			log.Error("fail to load grant privilege entities", zap.String("key", granteeKey), zap.Error(err))
 			return entities, err
 		}
 		for i, key := range keys {
-			grantInfos := typeutil.AfterN(key, k+"/", "/")
+			grantInfos := typeutil.AfterN(key, granteeKey+"/", "/")
 			if len(grantInfos) != 2 {
-				log.Warn("invalid grant key", zap.String("key", key))
+				log.Warn("invalid grantee key", zap.String("string", key), zap.String("sub_string", granteeKey))
 				continue
 			}
 			err = appendGrantEntity(values[i], grantInfos[0], grantInfos[1])
@@ -893,30 +886,47 @@ func (kc *Catalog) ListGrant(ctx context.Context, tenant string, entity *milvusp
 	return entities, nil
 }
 
+func (kc *Catalog) DeleteGrant(ctx context.Context, tenant string, role *milvuspb.RoleEntity) error {
+	var (
+		k   = funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, role.Name+"/")
+		err error
+	)
+
+	if err = kc.Txn.RemoveWithPrefix(k); err != nil {
+		log.Error("fail to remove with the prefix", zap.String("key", k), zap.Error(err))
+	}
+	return err
+}
+
 func (kc *Catalog) ListPolicy(ctx context.Context, tenant string) ([]string, error) {
 	var grantInfoStrs []string
-	k := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, "")
-	keys, values, err := kc.Txn.LoadWithPrefix(k)
+	granteeKey := funcutil.HandleTenantForEtcdKey(GranteePrefix, tenant, "")
+	keys, values, err := kc.Txn.LoadWithPrefix(granteeKey)
 	if err != nil {
-		log.Error("fail to load all grant privilege entities", zap.String("key", k), zap.Error(err))
+		log.Error("fail to load all grant privilege entities", zap.String("key", granteeKey), zap.Error(err))
 		return []string{}, err
 	}
 
 	for i, key := range keys {
-		grantInfos := typeutil.AfterN(key, k+"/", "/")
+		grantInfos := typeutil.AfterN(key, granteeKey+"/", "/")
 		if len(grantInfos) != 3 {
-			log.Warn("invalid grant key", zap.String("key", key))
+			log.Warn("invalid grantee key", zap.String("string", key), zap.String("sub_string", granteeKey))
 			continue
 		}
-		grantPrivilegeEntity := &milvuspb.GrantPrivilegeEntity{}
-		err = proto.Unmarshal([]byte(values[i]), grantPrivilegeEntity)
+		granteeIDKey := funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, values[i])
+		idKeys, _, err := kc.Txn.LoadWithPrefix(granteeIDKey)
 		if err != nil {
-			log.Warn("fail to unmarshal the grant privilege entity", zap.String("key", key), zap.Error(err))
-			continue
+			log.Error("fail to load the grantee ids", zap.String("key", granteeIDKey), zap.Error(err))
+			return []string{}, err
 		}
-		for _, grantorInfo := range grantPrivilegeEntity.Entities {
+		for _, idKey := range idKeys {
+			granteeIDInfos := typeutil.AfterN(idKey, granteeIDKey+"/", "/")
+			if len(granteeIDInfos) != 1 {
+				log.Warn("invalid grantee id", zap.String("string", idKey), zap.String("sub_string", granteeIDKey))
+				continue
+			}
 			grantInfoStrs = append(grantInfoStrs,
-				funcutil.PolicyForPrivilege(grantInfos[0], grantInfos[1], grantInfos[2], grantorInfo.Privilege.Name))
+				funcutil.PolicyForPrivilege(grantInfos[0], grantInfos[1], grantInfos[2], granteeIDInfos[0]))
 		}
 	}
 	return grantInfoStrs, nil
@@ -934,7 +944,7 @@ func (kc *Catalog) ListUserRole(ctx context.Context, tenant string) ([]string, e
 	for _, key := range keys {
 		userRolesInfos := typeutil.AfterN(key, k+"/", "/")
 		if len(userRolesInfos) != 2 {
-			log.Warn("invalid user-role key", zap.String("key", key))
+			log.Warn("invalid user-role key", zap.String("string", key), zap.String("sub_string", k))
 			continue
 		}
 		userRoles = append(userRoles, funcutil.EncodeUserRoleCache(userRolesInfos[0], userRolesInfos[1]))

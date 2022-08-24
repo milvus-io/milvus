@@ -16,7 +16,10 @@ func (r *roleDb) GetRoles(tenantID string, name string) ([]*dbmodel.Role, error)
 		roles []*dbmodel.Role
 		err   error
 	)
-	err = r.db.Model(&dbmodel.Role{}).Where(&dbmodel.Role{Name: name}).Where(dbmodel.GetCommonCondition(tenantID, false)).Find(&roles).Error
+	err = r.db.Model(&dbmodel.Role{}).
+		Where(&dbmodel.Role{Name: name}).
+		Where(dbmodel.GetCommonCondition(tenantID, false)).
+		Find(&roles).Error
 	if err != nil {
 		log.Error("fail to get roles", zap.String("tenant_id", tenantID), zap.String("name", name), zap.Error(err))
 		return nil, err
@@ -33,7 +36,10 @@ func (r *roleDb) Insert(in *dbmodel.Role) error {
 }
 
 func (r *roleDb) Delete(tenantID string, name string) error {
-	err := r.db.Model(dbmodel.Role{}).Where(&dbmodel.Role{Name: name}).Where(dbmodel.GetCommonCondition(tenantID, false)).Update("is_deleted", true).Error
+	err := r.db.Model(dbmodel.Role{}).
+		Where(&dbmodel.Role{Name: name}).
+		Where(dbmodel.GetCommonCondition(tenantID, false)).
+		Update("is_deleted", true).Error
 	if err != nil {
 		log.Error("fail to delete the role", zap.String("tenant_id", tenantID), zap.String("name", name), zap.Error(err))
 	}

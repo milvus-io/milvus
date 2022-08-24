@@ -12,13 +12,13 @@ type IGrantDb struct {
 	mock.Mock
 }
 
-// Delete provides a mock function with given fields: tenantID, roleID, object, objectName, privilege
-func (_m *IGrantDb) Delete(tenantID string, roleID int64, object string, objectName string, privilege string) error {
-	ret := _m.Called(tenantID, roleID, object, objectName, privilege)
+// Delete provides a mock function with given fields: tenantID, roleID, object, objectName
+func (_m *IGrantDb) Delete(tenantID string, roleID int64, object string, objectName string) error {
+	ret := _m.Called(tenantID, roleID, object, objectName)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, int64, string, string, string) error); ok {
-		r0 = rf(tenantID, roleID, object, objectName, privilege)
+	if rf, ok := ret.Get(0).(func(string, int64, string, string) error); ok {
+		r0 = rf(tenantID, roleID, object, objectName)
 	} else {
 		r0 = ret.Error(0)
 	}

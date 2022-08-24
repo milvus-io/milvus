@@ -682,15 +682,15 @@ func (m *MetaCache) InitPolicyInfo(info []string, userRoles []string) {
 }
 
 func (m *MetaCache) GetPrivilegeInfo(ctx context.Context) []string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
 	return util.StringList(m.privilegeInfos)
 }
 
 func (m *MetaCache) GetUserRole(user string) []string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
 	return util.StringList(m.userToRoles[user])
 }

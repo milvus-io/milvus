@@ -15,6 +15,7 @@ type IMetaDomain interface {
 	RoleDb(ctx context.Context) IRoleDb
 	UserRoleDb(ctx context.Context) IUserRoleDb
 	GrantDb(ctx context.Context) IGrantDb
+	GrantIDDb(ctx context.Context) IGrantIDDb
 }
 
 type ITransaction interface {

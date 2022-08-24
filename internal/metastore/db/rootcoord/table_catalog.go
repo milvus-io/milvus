@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"runtime"
 
-	"github.com/milvus-io/milvus/internal/common"
-
 	"github.com/milvus-io/milvus/internal/util"
+
+	"github.com/milvus-io/milvus/internal/common"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metastore/db/dbmodel"
@@ -709,34 +709,94 @@ func (tc *Catalog) ListUser(ctx context.Context, tenant string, entity *milvuspb
 	return results, nil
 }
 
-func (tc *Catalog) AlterGrant(ctx context.Context, tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error {
+func (tc Catalog) grant(ctx context.Context, tenant string, entity *milvuspb.GrantEntity) error {
 	var (
-		roleID int64
-		detail string
-		err    error
+		roleID      int64
+		grants      []*dbmodel.Grant
+		grantID     int64
+		grantIDObjs []*dbmodel.GrantID
+		err         error
+	)
+	if roleID, err = tc.GetRoleIDByName(ctx, tenant, entity.Role.Name); err != nil {
+		return err
+	}
+
+	if grants, err = tc.metaDomain.GrantDb(ctx).GetGrants(tenant, roleID, entity.Object.Name, entity.ObjectName); err != nil {
+		return err
+	}
+	if len(grants) == 0 {
+		var grant = &dbmodel.Grant{
+			Base:       dbmodel.Base{TenantID: tenant},
+			RoleID:     roleID,
+			Object:     entity.Object.Name,
+			ObjectName: entity.ObjectName,
+		}
+		if err = tc.metaDomain.GrantDb(ctx).Insert(grant); err != nil {
+			return err
+		}
+		log.Debug("grant id", zap.Int64("id", grant.ID))
+		grantID = grant.ID
+	} else {
+		grantID = grants[0].ID
+	}
+	if grantIDObjs, err = tc.metaDomain.GrantIDDb(ctx).GetGrantIDs(tenant, grantID, entity.Grantor.Privilege.Name, false, false); err != nil {
+		return err
+	}
+	if len(grantIDObjs) > 0 {
+		log.Warn("the grant id has existed", zap.Any("entity", entity))
+		return common.NewIgnorableError(fmt.Errorf("the privilege [%s] has been grantd for the role [%s]", entity.Grantor.Privilege.Name, entity.Role.Name))
+	}
+	var user *dbmodel.User
+	if user, err = tc.metaDomain.UserDb(ctx).GetByUsername(tenant, entity.Grantor.User.Name); err != nil {
+		return err
+	}
+	return tc.metaDomain.GrantIDDb(ctx).Insert(&dbmodel.GrantID{
+		Base:      dbmodel.Base{TenantID: tenant},
+		GrantID:   grantID,
+		Privilege: entity.Grantor.Privilege.Name,
+		GrantorID: user.ID,
+	})
+}
+
+func (tc Catalog) revoke(ctx context.Context, tenant string, entity *milvuspb.GrantEntity) error {
+	var (
+		roleID      int64
+		grants      []*dbmodel.Grant
+		grantID     int64
+		grantIDObjs []*dbmodel.GrantID
+		err         error
 	)
 
 	if roleID, err = tc.GetRoleIDByName(ctx, tenant, entity.Role.Name); err != nil {
 		return err
 	}
+
+	if grants, err = tc.metaDomain.GrantDb(ctx).GetGrants(tenant, roleID, entity.Object.Name, entity.ObjectName); err != nil {
+		return err
+	}
+	if len(grants) == 0 {
+		log.Warn("the grant isn't existed", zap.Any("entity", entity))
+		return common.NewIgnorableError(fmt.Errorf("the privilege [%s] isn't grantd for the role [%s]", entity.Grantor.Privilege.Name, entity.Role.Name))
+	}
+	grantID = grants[0].ID
+	if grantIDObjs, err = tc.metaDomain.GrantIDDb(ctx).GetGrantIDs(tenant, grantID, entity.Grantor.Privilege.Name, false, false); err != nil {
+		return err
+	}
+	if len(grantIDObjs) == 0 {
+		log.Error("the grant-id isn't existed", zap.Any("entity", entity))
+		return common.NewIgnorableError(fmt.Errorf("the privilege [%s] isn't grantd for the role [%s]", entity.Grantor.Privilege.Name, entity.Role.Name))
+	}
+	return tc.metaDomain.GrantIDDb(ctx).Delete(tenant, grantID, entity.Grantor.Privilege.Name)
+}
+
+func (tc *Catalog) AlterGrant(ctx context.Context, tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error {
 	switch operateType {
-	case milvuspb.OperatePrivilegeType_Revoke:
-		return tc.metaDomain.GrantDb(ctx).
-			Delete(tenant, roleID, entity.Object.Name, entity.ObjectName, entity.Grantor.Privilege.Name)
 	case milvuspb.OperatePrivilegeType_Grant:
-		if detail, err = dbmodel.EncodeGrantDetail("", entity.Grantor.User.Name, entity.Grantor.Privilege.Name, true); err != nil {
-			log.Error("fail to encode grant detail", zap.String("tenant", tenant), zap.Any("entity", entity), zap.Error(err))
-			return err
-		}
-		return tc.metaDomain.GrantDb(ctx).Insert(&dbmodel.Grant{
-			Base:       dbmodel.Base{TenantID: tenant},
-			RoleID:     roleID,
-			Object:     entity.Object.Name,
-			ObjectName: entity.ObjectName,
-			Detail:     detail,
-		})
+		return tc.grant(ctx, tenant, entity)
+	case milvuspb.OperatePrivilegeType_Revoke:
+		return tc.revoke(ctx, tenant, entity)
 	default:
-		err = fmt.Errorf("invalid operate type: %d", operateType)
+		err := fmt.Errorf("invalid operate type: %d", operateType)
 		log.Error("error: ", zap.Error(err))
 		return err
 	}
@@ -749,7 +809,8 @@ func (tc *Catalog) ListGrant(ctx context.Context, tenant string, entity *milvusp
 		objectName    string
 		grants        []*dbmodel.Grant
 		grantEntities []*milvuspb.GrantEntity
-		details       [][]string
+		grantIDDb     dbmodel.IGrantIDDb
+		grantIDs      []*dbmodel.GrantID
 		privilegeName string
 		err           error
 	)
@@ -764,18 +825,14 @@ func (tc *Catalog) ListGrant(ctx context.Context, tenant string, entity *milvusp
 	if grants, err = tc.metaDomain.GrantDb(ctx).GetGrants(tenant, roleID, object, objectName); err != nil {
 		return nil, err
 	}
+	grantIDDb = tc.metaDomain.GrantIDDb(ctx)
 	for _, grant := range grants {
-		if details, err = dbmodel.DecodeGrantDetail(grant.Detail); err != nil {
-			log.Error("fail to decode grant detail", zap.Any("detail", grant.Detail), zap.Error(err))
+		if grantIDs, err = grantIDDb.GetGrantIDs(tenant, grant.ID, "", false, true); err != nil {
 			return nil, err
 		}
-		for _, detail := range details {
-			if len(detail) != 2 {
-				log.Error("invalid operateDetail", zap.Any("detail", detail))
-				return nil, fmt.Errorf("invalid operateDetail: [%s], decode result: %+v", grant.Detail, details)
-			}
-			privilegeName = util.PrivilegeNameForAPI(detail[1])
-			if detail[1] == util.AnyWord {
+		for _, grantID := range grantIDs {
+			privilegeName = util.PrivilegeNameForAPI(grantID.Privilege)
+			if grantID.Privilege == util.AnyWord {
 				privilegeName = util.AnyWord
 			}
 			grantEntities = append(grantEntities, &milvuspb.GrantEntity{
@@ -783,7 +840,7 @@ func (tc *Catalog) ListGrant(ctx context.Context, tenant string, entity *milvusp
 				Object:     &milvuspb.ObjectEntity{Name: grant.Object},
 				ObjectName: grant.ObjectName,
 				Grantor: &milvuspb.GrantorEntity{
-					User:      &milvuspb.UserEntity{Name: detail[0]},
+					User:      &milvuspb.UserEntity{Name: grantID.Grantor.Username},
 					Privilege: &milvuspb.PrivilegeEntity{Name: privilegeName},
 				},
 			})
@@ -795,28 +852,38 @@ func (tc *Catalog) ListGrant(ctx context.Context, tenant string, entity *milvusp
 	return grantEntities, nil
 }
 
+func (tc *Catalog) DeleteGrant(ctx context.Context, tenant string, role *milvuspb.RoleEntity) error {
+	var (
+		roleID int64
+		err    error
+	)
+
+	if roleID, err = tc.GetRoleIDByName(ctx, tenant, role.Name); err != nil {
+		log.Error("fail to get roleID by the role name", zap.String("role_name", role.Name), zap.Error(err))
+		return err
+	}
+	return tc.metaDomain.GrantDb(ctx).Delete(tenant, roleID, "", "")
+}
+
 func (tc *Catalog) ListPolicy(ctx context.Context, tenant string) ([]string, error) {
 	var (
-		grants   []*dbmodel.Grant
-		details  [][]string
-		policies []string
-		err      error
+		grants    []*dbmodel.Grant
+		grantIDDb dbmodel.IGrantIDDb
+		grantIDs  []*dbmodel.GrantID
+		policies  []string
+		err       error
 	)
 	if grants, err = tc.metaDomain.GrantDb(ctx).GetGrants(tenant, 0, "", ""); err != nil {
 		return nil, err
 	}
+	grantIDDb = tc.metaDomain.GrantIDDb(ctx)
 	for _, grant := range grants {
-		if details, err = dbmodel.DecodeGrantDetail(grant.Detail); err != nil {
-			log.Error("fail to decode grant detail", zap.Any("detail", grant.Detail), zap.Error(err))
+		if grantIDs, err = grantIDDb.GetGrantIDs(tenant, grant.ID, "", false, false); err != nil {
 			return nil, err
 		}
-		for _, detail := range details {
-			if len(detail) != 2 {
-				log.Error("invalid operateDetail", zap.String("tenant", tenant), zap.Strings("detail", detail))
-				return nil, fmt.Errorf("invalid operateDetail: %+v", detail)
-			}
+		for _, grantID := range grantIDs {
 			policies = append(policies,
-				funcutil.PolicyForPrivilege(grant.Role.Name, grant.Object, grant.ObjectName, detail[1]))
+				funcutil.PolicyForPrivilege(grant.Role.Name, grant.Object, grant.ObjectName, grantID.Privilege))
 		}
 	}
 

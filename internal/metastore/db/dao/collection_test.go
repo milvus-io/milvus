@@ -48,6 +48,7 @@ var (
 	roleTestDb      dbmodel.IRoleDb
 	userRoleTestDb  dbmodel.IUserRoleDb
 	grantTestDb     dbmodel.IGrantDb
+	grantIDTestDb   dbmodel.IGrantIDDb
 )
 
 // TestMain is the first function executed in current package, we will do some initial here
@@ -86,6 +87,7 @@ func TestMain(m *testing.M) {
 	roleTestDb = NewMetaDomain().RoleDb(ctx)
 	userRoleTestDb = NewMetaDomain().UserRoleDb(ctx)
 	grantTestDb = NewMetaDomain().GrantDb(ctx)
+	grantIDTestDb = NewMetaDomain().GrantIDDb(ctx)
 
 	// m.Run entry for executing tests
 	os.Exit(m.Run())

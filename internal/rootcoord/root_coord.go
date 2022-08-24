@@ -1061,7 +1061,7 @@ func (c *Core) initRbac() (initError error) {
 			Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Global.String()},
 			ObjectName: util.AnyWord,
 			Grantor: &milvuspb.GrantorEntity{
-				User:      &milvuspb.UserEntity{Name: util.RoleAdmin},
+				User:      &milvuspb.UserEntity{Name: util.UserRoot},
 				Privilege: &milvuspb.PrivilegeEntity{Name: globalPrivilege},
 			},
 		}, milvuspb.OperatePrivilegeType_Grant); initError != nil {
@@ -1078,7 +1078,7 @@ func (c *Core) initRbac() (initError error) {
 			Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Collection.String()},
 			ObjectName: util.AnyWord,
 			Grantor: &milvuspb.GrantorEntity{
-				User:      &milvuspb.UserEntity{Name: util.RoleAdmin},
+				User:      &milvuspb.UserEntity{Name: util.UserRoot},
 				Privilege: &milvuspb.PrivilegeEntity{Name: collectionPrivilege},
 			},
 		}, milvuspb.OperatePrivilegeType_Grant); initError != nil {
@@ -2539,6 +2539,11 @@ func (c *Core) DropRole(ctx context.Context, in *milvuspb.DropRoleRequest) (*com
 				return failStatus(commonpb.ErrorCode_OperateUserRoleFailure, errMsg), err
 			}
 		}
+	}
+	if err = c.MetaTable.DropGrant(util.DefaultTenant, &milvuspb.RoleEntity{Name: in.RoleName}); err != nil {
+		errMsg := "fail to drop the grant"
+		logger.Error(errMsg, zap.String("role_name", in.RoleName), zap.Error(err))
+		return failStatus(commonpb.ErrorCode_DropRoleFailure, errMsg), err
 	}
 	if err = c.MetaTable.DropRole(util.DefaultTenant, in.RoleName); err != nil {
 		errMsg := "fail to drop the role"

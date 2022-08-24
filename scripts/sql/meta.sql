@@ -219,7 +219,7 @@ CREATE TABLE if not exists milvus_meta.role (
     is_deleted BOOL NOT NULL DEFAULT false,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP on update current_timestamp,
-    INDEX idx_role_tenant_name (tenant_id, name),
+    INDEX idx_role_tenant_name (tenant_id, name, is_deleted),
     PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -232,7 +232,7 @@ CREATE TABLE if not exists milvus_meta.user_role (
     is_deleted BOOL NOT NULL DEFAULT false,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP on update current_timestamp,
-    INDEX idx_role_mapping_tenant_user_role (tenant_id, user_id, role_id),
+    INDEX idx_role_mapping_tenant_user_role (tenant_id, user_id, role_id, is_deleted),
     PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -243,10 +243,23 @@ CREATE TABLE if not exists milvus_meta.grant (
     role_id     BIGINT NOT NULL,
     object VARCHAR(128) NOT NULL,
     object_name VARCHAR(128) NOT NULL,
-    detail TEXT NOT NULL,
     is_deleted BOOL NOT NULL DEFAULT false,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP on update current_timestamp,
-    INDEX idx_grant_principal_resource_tenant (tenant_id, role_id, object, object_name),
+    INDEX idx_grant_principal_resource_tenant (tenant_id, role_id, object, object_name, is_deleted),
+    PRIMARY KEY (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- grant-id
+CREATE TABLE if not exists milvus_meta.grant_id (
+    id     BIGINT NOT NULL AUTO_INCREMENT,
+    tenant_id VARCHAR(128) DEFAULT NULL,
+    grant_id     BIGINT NOT NULL,
+    grantor_id     BIGINT NOT NULL,
+    privilege VARCHAR(128) NOT NULL,
+    is_deleted BOOL NOT NULL DEFAULT false,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP on update current_timestamp,
+    INDEX idx_grant_id_tenant_grantor (tenant_id, grant_id, grantor_id, is_deleted),
     PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

@@ -882,7 +882,9 @@ func (mt *MetaTable) AddCredential(credInfo *internalpb.CredentialInfo) error {
 		return err
 	}
 	if len(usernames) >= Params.ProxyCfg.MaxUserNum {
-		return errors.New("unable to add user because the number of users has reached the limit")
+		errMsg := "unable to add user because the number of users has reached the limit"
+		log.Error(errMsg, zap.Int("max_user_num", Params.ProxyCfg.MaxUserNum))
+		return errors.New(errMsg)
 	}
 
 	if origin, _ := mt.catalog.GetCredential(mt.ctx, credInfo.Username); origin != nil {
@@ -902,6 +904,9 @@ func (mt *MetaTable) AlterCredential(credInfo *internalpb.CredentialInfo) error 
 		return fmt.Errorf("username is empty")
 	}
 
+	mt.permissionLock.Lock()
+	defer mt.permissionLock.Unlock()
+
 	credential := &model.Credential{
 		Username:          credInfo.Username,
 		EncryptedPassword: credInfo.EncryptedPassword,
@@ -911,6 +916,9 @@ func (mt *MetaTable) AlterCredential(credInfo *internalpb.CredentialInfo) error 
 
 // GetCredential get credential by username
 func (mt *MetaTable) GetCredential(username string) (*internalpb.CredentialInfo, error) {
+	mt.permissionLock.RLock()
+	defer mt.permissionLock.RUnlock()
+
 	credential, err := mt.catalog.GetCredential(mt.ctx, username)
 	return model.MarshalCredentialModel(credential), err
 }
@@ -949,7 +957,9 @@ func (mt *MetaTable) CreateRole(tenant string, entity *milvuspb.RoleEntity) erro
 		return err
 	}
 	if len(results) >= Params.ProxyCfg.MaxRoleNum {
-		return errors.New("unable to add role because the number of roles has reached the limit")
+		errMsg := "unable to add role because the number of roles has reached the limit"
+		log.Error(errMsg, zap.Int("max_role_num", Params.ProxyCfg.MaxRoleNum))
+		return errors.New(errMsg)
 	}
 
 	return mt.catalog.CreateRole(mt.ctx, tenant, entity)
@@ -1041,6 +1051,16 @@ func (mt *MetaTable) SelectGrant(tenant string, entity *milvuspb.GrantEntity) ([
 	defer mt.permissionLock.RUnlock()
 
 	return mt.catalog.ListGrant(mt.ctx, tenant, entity)
+}
+
+func (mt *MetaTable) DropGrant(tenant string, role *milvuspb.RoleEntity) error {
+	if role == nil || funcutil.IsEmptyString(role.Name) {
+		return fmt.Errorf("the role entity is invalid when dropping the grant")
+	}
+	mt.permissionLock.Lock()
+	defer mt.permissionLock.Unlock()
+
+	return mt.catalog.DeleteGrant(mt.ctx, tenant, role)
 }
 
 func (mt *MetaTable) ListPolicy(tenant string) ([]string, error) {
