@@ -1009,7 +1009,7 @@ func (node *DataNode) AddImportSegment(ctx context.Context, req *datapb.AddImpor
 			zap.Int64("segment ID", req.GetSegmentId()))
 		// Add segment as a flushed segment, but set `importing` to true to add extra information of the segment.
 		// By 'extra information' we mean segment info while adding a `SegmentType_New` typed segment.
-		ids, err := ds.getDmlChannelPositionByBroadcast(ctx, req.GetChannelName(), req.GetBase().GetTimestamp())
+		id, err := ds.getDmlChannelPositionByBroadcast(ctx, req.GetChannelName(), req.GetBase().GetTimestamp())
 		if err != nil {
 			log.Error("failed to get channel position", zap.Error(err))
 			return &commonpb.Status{
@@ -1028,12 +1028,12 @@ func (node *DataNode) AddImportSegment(ctx context.Context, req *datapb.AddImpor
 				statsBinLogs: req.GetStatsLog(),
 				startPos: &internalpb.MsgPosition{
 					ChannelName: req.GetChannelName(),
-					MsgID:       ids[req.GetChannelName()],
+					MsgID:       id,
 					Timestamp:   req.GetBase().GetTimestamp(),
 				},
 				endPos: &internalpb.MsgPosition{
 					ChannelName: req.GetChannelName(),
-					MsgID:       ids[req.GetChannelName()],
+					MsgID:       id,
 					Timestamp:   req.GetBase().GetTimestamp(),
 				},
 				recoverTs: req.GetBase().GetTimestamp(),

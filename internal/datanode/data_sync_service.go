@@ -393,7 +393,7 @@ func (dsService *dataSyncService) getSegmentInfos(segmentIDs []int64) ([]*datapb
 	return segmentInfos, nil
 }
 
-func (dsService *dataSyncService) getDmlChannelPositionByBroadcast(ctx context.Context, channelName string, ts uint64) (map[string][]byte, error) {
+func (dsService *dataSyncService) getDmlChannelPositionByBroadcast(ctx context.Context, channelName string, ts uint64) ([]byte, error) {
 	msgPack := msgstream.MsgPack{}
 	baseMsg := msgstream.BaseMsg{
 		Ctx:            ctx,
@@ -413,13 +413,10 @@ func (dsService *dataSyncService) getDmlChannelPositionByBroadcast(ctx context.C
 		},
 	}
 	msgPack.Msgs = append(msgPack.Msgs, msg)
-	return dsService.broadcastMarkDmlChannel(ctx, channelName, &msgPack)
-}
 
-func (dsService *dataSyncService) broadcastMarkDmlChannel(ctx context.Context, chanName string, pack *msgstream.MsgPack) (map[string][]byte, error) {
-	pChannelName := funcutil.ToPhysicalChannel(chanName)
+	pChannelName := funcutil.ToPhysicalChannel(channelName)
 	log.Info("ddNode convert vChannel to pChannel",
-		zap.String("vChannelName", chanName),
+		zap.String("vChannelName", channelName),
 		zap.String("pChannelName", pChannelName),
 	)
 
@@ -434,10 +431,10 @@ func (dsService *dataSyncService) broadcastMarkDmlChannel(ctx context.Context, c
 
 	result := make(map[string][]byte)
 
-	ids, err := dmlStream.BroadcastMark(pack)
+	ids, err := dmlStream.BroadcastMark(&msgPack)
 	if err != nil {
-		log.Error("BroadcastMark failed", zap.Error(err), zap.String("chanName", chanName))
-		return result, err
+		log.Error("BroadcastMark failed", zap.Error(err), zap.String("channelName", channelName))
+		return nil, err
 	}
 	for cn, idList := range ids {
 		// idList should have length 1, just flat by iteration
@@ -446,5 +443,5 @@ func (dsService *dataSyncService) broadcastMarkDmlChannel(ctx context.Context, c
 		}
 	}
 
-	return result, nil
+	return result[pChannelName], nil
 }

@@ -481,7 +481,7 @@ func TestGetDmlChannelPositionByBroadcast(t *testing.T) {
 		msFactory: factory,
 	}
 
-	dmlChannelName := "fake-by-dev-rootcoord-dml-channel-test-getDmlChannelPositionByBroadcast"
+	dmlChannelName := "fake-by-dev-rootcoord-dml-channel_12345v0"
 
 	insertStream, _ := factory.NewMsgStream(ctx)
 	insertStream.AsProducer([]string{dmlChannelName})
@@ -489,9 +489,7 @@ func TestGetDmlChannelPositionByBroadcast(t *testing.T) {
 	var insertMsgStream = insertStream
 	insertMsgStream.Start()
 
-	ids, err := dsService.getDmlChannelPositionByBroadcast(ctx, dmlChannelName, 0)
+	id, err := dsService.getDmlChannelPositionByBroadcast(ctx, dmlChannelName, 0)
 	assert.NoError(t, err)
-	assert.NotNil(t, ids)
-	id := ids[dmlChannelName]
 	assert.NotNil(t, id)
 }
