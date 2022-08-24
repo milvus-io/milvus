@@ -25,7 +25,6 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -103,21 +102,12 @@ func (kc *Catalog) AddSegment(ctx context.Context, segment *datapb.SegmentInfo) 
 
 	// save handoff req if segment is flushed
 	if segment.State == commonpb.SegmentState_Flushed {
-		handoffSegmentInfo := &querypb.SegmentInfo{
-			SegmentID:           segment.ID,
-			CollectionID:        segment.CollectionID,
-			PartitionID:         segment.PartitionID,
-			DmChannel:           segment.InsertChannel,
-			SegmentState:        commonpb.SegmentState_Sealed,
-			CreatedByCompaction: segment.CreatedByCompaction,
-			CompactionFrom:      segment.CompactionFrom,
-		}
-		handoffSegBytes, err := proto.Marshal(handoffSegmentInfo)
+		flushedSegmentSegBytes, err := proto.Marshal(segment)
 		if err != nil {
-			return fmt.Errorf("add segmentID:%d, marshal handoff segment info failed:%w", segment.GetID(), err)
+			return fmt.Errorf("failed to marshal segment: %d, error: %w", segment.GetID(), err)
 		}
-		queryKey := buildQuerySegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
-		kvs[queryKey] = string(handoffSegBytes)
+		flushSegKey := buildFlushedSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
+		kvs[flushSegKey] = string(flushedSegmentSegBytes)
 	}
 
 	return kc.Txn.MultiSave(kvs)
@@ -142,21 +132,12 @@ func (kc *Catalog) AlterSegments(ctx context.Context, modSegments []*datapb.Segm
 
 		// save handoff req if segment is flushed
 		if segment.State == commonpb.SegmentState_Flushed {
-			handoffSegmentInfo := &querypb.SegmentInfo{
-				SegmentID:           segment.ID,
-				CollectionID:        segment.CollectionID,
-				PartitionID:         segment.PartitionID,
-				DmChannel:           segment.InsertChannel,
-				SegmentState:        commonpb.SegmentState_Sealed,
-				CreatedByCompaction: segment.CreatedByCompaction,
-				CompactionFrom:      segment.CompactionFrom,
-			}
-			handoffSegBytes, err := proto.Marshal(handoffSegmentInfo)
+			flushedSegmentSegBytes, err := proto.Marshal(segment)
 			if err != nil {
 				return fmt.Errorf("failed to marshal segment: %d, error: %w", segment.GetID(), err)
 			}
-			queryKey := buildQuerySegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
-			kv[queryKey] = string(handoffSegBytes)
+			flushSegKey := buildFlushedSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
+			kv[flushSegKey] = string(flushedSegmentSegBytes)
 		}
 	}
 
@@ -366,9 +347,9 @@ func buildFieldStatslogPath(collectionID typeutil.UniqueID, partitionID typeutil
 	return fmt.Sprintf("%s/%d/%d/%d/%d", SegmentStatslogPathPrefix, collectionID, partitionID, segmentID, fieldID)
 }
 
-// buildQuerySegmentPath common logic mapping segment info to corresponding key of queryCoord in kv store
-func buildQuerySegmentPath(collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, segmentID typeutil.UniqueID) string {
-	return fmt.Sprintf("%s/%d/%d/%d", util.HandoffSegmentPrefix, collectionID, partitionID, segmentID)
+// buildFlushedSegmentPath common logic mapping segment info to corresponding key of IndexCoord in kv store
+func buildFlushedSegmentPath(collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, segmentID typeutil.UniqueID) string {
+	return fmt.Sprintf("%s/%d/%d/%d", util.FlushedSegmentPrefix, collectionID, partitionID, segmentID)
 }
 
 func buildFieldBinlogPathPrefix(collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, segmentID typeutil.UniqueID) string {

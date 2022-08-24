@@ -203,6 +203,7 @@ message SegmentLoadInfo {
 
 message FieldIndexInfo {
   int64 fieldID =1;
+  // deprecated
   bool enable_index = 2;
   string index_name = 3;
   int64 indexID = 4;
@@ -351,6 +352,7 @@ message SegmentInfo {
   repeated FieldIndexInfo index_infos = 13;
   repeated int64 replica_ids = 14;
   repeated int64 node_ids = 15;
+  bool enable_index = 16;
 }
 
 message CollectionInfo {

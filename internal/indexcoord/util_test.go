@@ -26,9 +26,7 @@ import (
 )
 
 func Test_getDimension(t *testing.T) {
-	req := &indexpb.BuildIndexRequest{
-		IndexBuildID: UniqueID(0),
-		IndexID:      UniqueID(1),
+	req := &indexpb.CreateIndexRequest{
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -40,9 +38,7 @@ func Test_getDimension(t *testing.T) {
 	assert.Equal(t, int64(128), dim)
 	assert.Nil(t, err)
 
-	req2 := &indexpb.BuildIndexRequest{
-		IndexBuildID: UniqueID(0),
-		IndexID:      UniqueID(1),
+	req2 := &indexpb.CreateIndexRequest{
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -54,9 +50,7 @@ func Test_getDimension(t *testing.T) {
 	assert.Error(t, err)
 	assert.Equal(t, int64(0), dim)
 
-	req3 := &indexpb.BuildIndexRequest{
-		IndexBuildID: UniqueID(0),
-		IndexID:      UniqueID(1),
+	req3 := &indexpb.CreateIndexRequest{
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "TypeParam-Key-1",
@@ -83,125 +77,6 @@ func Test_estimateIndexSize(t *testing.T) {
 	assert.Equal(t, uint64(0), memorySize)
 	// assert.Error(t, err)
 	// assert.Equal(t, uint64(0), memorySize)
-}
-
-func Test_estimateScalarIndexSize(t *testing.T) {
-	type args struct {
-		req *indexpb.BuildIndexRequest
-	}
-	tests := []struct {
-		name    string
-		args    args
-		want    uint64
-		wantErr bool
-	}{
-		{
-			args: args{
-				req: &indexpb.BuildIndexRequest{},
-			},
-			want:    0,
-			wantErr: false,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := estimateScalarIndexSize(tt.args.req)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("estimateScalarIndexSize(%v) error = %v, wantErr %v", tt.args.req, err, tt.wantErr)
-				return
-			}
-			if got != tt.want {
-				t.Errorf("estimateScalarIndexSize(%v) got = %v, want %v", tt.args.req, got, tt.want)
-			}
-		})
-	}
-}
-
-func Test_estimateIndexSizeByReq(t *testing.T) {
-	type args struct {
-		req *indexpb.BuildIndexRequest
-	}
-	tests := []struct {
-		name    string
-		args    args
-		want    uint64
-		wantErr bool
-	}{
-		{
-			// scalar.
-			args: args{
-				req: &indexpb.BuildIndexRequest{
-					FieldSchema: &schemapb.FieldSchema{
-						DataType: schemapb.DataType_VarChar,
-					},
-				},
-			},
-			want:    0,
-			wantErr: false,
-		},
-		{
-			// vector without dim.
-			args: args{
-				req: &indexpb.BuildIndexRequest{
-					FieldSchema: &schemapb.FieldSchema{
-						DataType: schemapb.DataType_FloatVector,
-					},
-				},
-			},
-			want:    0,
-			wantErr: true,
-		},
-		{
-			// float vector.
-			args: args{
-				req: &indexpb.BuildIndexRequest{
-					FieldSchema: &schemapb.FieldSchema{
-						DataType: schemapb.DataType_FloatVector,
-					},
-					NumRows: 1,
-					TypeParams: []*commonpb.KeyValuePair{
-						{
-							Key:   "dim",
-							Value: "8",
-						},
-					},
-				},
-			},
-			want:    32,
-			wantErr: false,
-		},
-		{
-			// binary vector.
-			args: args{
-				req: &indexpb.BuildIndexRequest{
-					FieldSchema: &schemapb.FieldSchema{
-						DataType: schemapb.DataType_BinaryVector,
-					},
-					NumRows: 1,
-					TypeParams: []*commonpb.KeyValuePair{
-						{
-							Key:   "dim",
-							Value: "8",
-						},
-					},
-				},
-			},
-			want:    1,
-			wantErr: false,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := estimateIndexSizeByReq(tt.args.req)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("estimateIndexSizeByReq(%v) error = %v, wantErr %v", tt.args.req, err, tt.wantErr)
-				return
-			}
-			if got != tt.want {
-				t.Errorf("estimateIndexSizeByReq(%v) got = %v, want %v", tt.args.req, got, tt.want)
-			}
-		})
-	}
 }
 
 func Test_parseKey(t *testing.T) {

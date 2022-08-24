@@ -19,363 +19,419 @@ package indexcoord
 import (
 	"context"
 	"errors"
-	"strconv"
+	"math/rand"
 	"time"
 
+	clientv3 "go.etcd.io/etcd/client/v3"
+
 	"github.com/milvus-io/milvus/internal/kv"
-
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/storage"
-
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 // Mock is an alternative to IndexCoord, it will return specific results based on specific parameters.
 type Mock struct {
-	etcdKV  *etcdkv.EtcdKV
-	etcdCli *clientv3.Client
-	Failure bool
+	types.IndexCoord
+
+	CallInit                 func() error
+	CallStart                func() error
+	CallStop                 func() error
+	CallGetComponentStates   func(ctx context.Context) (*internalpb.ComponentStates, error)
+	CallGetStatisticsChannel func(ctx context.Context) (*milvuspb.StringResponse, error)
+	CallRegister             func() error
+
+	CallSetEtcdClient   func(etcdClient *clientv3.Client)
+	CallSetDataCoord    func(dataCoord types.DataCoord) error
+	CallSetRootCoord    func(rootCoord types.RootCoord) error
+	CallUpdateStateCode func(stateCode internalpb.StateCode)
+
+	CallCreateIndex           func(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error)
+	CallGetIndexState         func(ctx context.Context, req *indexpb.GetIndexStateRequest) (*indexpb.GetIndexStateResponse, error)
+	CallGetSegmentIndexState  func(ctx context.Context, req *indexpb.GetSegmentIndexStateRequest) (*indexpb.GetSegmentIndexStateResponse, error)
+	CallGetIndexInfos         func(ctx context.Context, req *indexpb.GetIndexInfoRequest) (*indexpb.GetIndexInfoResponse, error)
+	CallDescribeIndex         func(ctx context.Context, req *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error)
+	CallGetIndexBuildProgress func(ctx context.Context, req *indexpb.GetIndexBuildProgressRequest) (*indexpb.GetIndexBuildProgressResponse, error)
+	CallDropIndex             func(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error)
+	CallShowConfigurations    func(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error)
+	CallGetMetrics            func(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 }
 
 // Init initializes the Mock of IndexCoord. When param `Failure` is true, it will return an error.
-func (icm *Mock) Init() error {
-	if icm.Failure {
-		return errors.New("IndexCoordinate init failed")
-	}
-	return nil
+func (m *Mock) Init() error {
+	return m.CallInit()
 }
 
 // Start starts the Mock of IndexCoord. When param `Failure` is true, it will return an error.
-func (icm *Mock) Start() error {
-	if icm.Failure {
-		return errors.New("IndexCoordinate start failed")
-	}
-	return nil
+func (m *Mock) Start() error {
+	return m.CallStart()
 }
 
 // Stop stops the Mock of IndexCoord. When param `Failure` is true, it will return an error.
-func (icm *Mock) Stop() error {
-	if icm.Failure {
-		return errors.New("IndexCoordinate stop failed")
-	}
-	err := icm.etcdKV.RemoveWithPrefix("session/" + typeutil.IndexCoordRole)
-	return err
+func (m *Mock) Stop() error {
+	return m.CallStop()
 }
 
 // Register registers an IndexCoord role in ETCD, if Param `Failure` is true, it will return an error.
-func (icm *Mock) Register() error {
-	if icm.Failure {
-		return errors.New("IndexCoordinate register failed")
-	}
-	icm.etcdKV = etcdkv.NewEtcdKV(icm.etcdCli, Params.EtcdCfg.MetaRootPath)
-	err := icm.etcdKV.RemoveWithPrefix("session/" + typeutil.IndexCoordRole)
-	if err != nil {
-		return err
-	}
-	session := sessionutil.NewSession(context.Background(), Params.EtcdCfg.MetaRootPath, icm.etcdCli)
-	session.Init(typeutil.IndexCoordRole, Params.IndexCoordCfg.Address, true, false)
-	session.Register()
-	return err
+func (m *Mock) Register() error {
+	return m.CallRegister()
 }
 
-func (icm *Mock) SetEtcdClient(client *clientv3.Client) {
-	icm.etcdCli = client
+func (m *Mock) SetEtcdClient(client *clientv3.Client) {
+	m.CallSetEtcdClient(client)
 }
 
-func (icm *Mock) SetDataCoord(dataCoord types.DataCoord) error {
-	return nil
+func (m *Mock) SetDataCoord(dataCoord types.DataCoord) error {
+	return m.CallSetDataCoord(dataCoord)
 }
 
-func (icm *Mock) UpdateStateCode(stateCode internalpb.StateCode) {
+func (m *Mock) SetRootCoord(rootCoord types.RootCoord) error {
+	return m.CallSetRootCoord(rootCoord)
 }
 
-// GetComponentStates gets the component states of the mocked IndexCoord, if Param `Failure` is true, it will return an error,
-// and the state is `StateCode_Abnormal`. Under normal circumstances the state is `StateCode_Healthy`.
-func (icm *Mock) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
-	if icm.Failure {
-		return &internalpb.ComponentStates{
-			State: &internalpb.ComponentInfo{
-				StateCode: internalpb.StateCode_Abnormal,
-			},
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			},
-		}, errors.New("IndexCoordinate GetComponentStates failed")
-	}
-	return &internalpb.ComponentStates{
-		State: &internalpb.ComponentInfo{
-			StateCode: internalpb.StateCode_Healthy,
-		},
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-	}, nil
+func (m *Mock) UpdateStateCode(stateCode internalpb.StateCode) {
+	m.CallUpdateStateCode(stateCode)
+}
+
+// GetComponentStates gets the component states of the mocked IndexCoord.
+func (m *Mock) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+	return m.CallGetComponentStates(ctx)
 }
 
 // GetStatisticsChannel gets the statistics channel of the mocked IndexCoord, if Param `Failure` is true, it will return an error.
-func (icm *Mock) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	if icm.Failure {
-		return &milvuspb.StringResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			},
-		}, errors.New("IndexCoordinate GetStatisticsChannel failed")
-	}
-	return &milvuspb.StringResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
+func (m *Mock) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
+	return m.CallGetStatisticsChannel(ctx)
+}
+
+func (m *Mock) CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
+	return m.CallCreateIndex(ctx, req)
+}
+
+func (m *Mock) GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRequest) (*indexpb.GetIndexStateResponse, error) {
+	return m.CallGetIndexState(ctx, req)
+}
+
+func (m *Mock) GetSegmentIndexState(ctx context.Context, req *indexpb.GetSegmentIndexStateRequest) (*indexpb.GetSegmentIndexStateResponse, error) {
+	return m.CallGetSegmentIndexState(ctx, req)
+}
+
+func (m *Mock) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoRequest) (*indexpb.GetIndexInfoResponse, error) {
+	return m.CallGetIndexInfos(ctx, req)
+}
+
+func (m *Mock) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error) {
+	return m.CallDescribeIndex(ctx, req)
+}
+
+func (m *Mock) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetIndexBuildProgressRequest) (*indexpb.GetIndexBuildProgressResponse, error) {
+	return m.CallGetIndexBuildProgress(ctx, req)
+}
+
+func (m *Mock) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
+	return m.CallDropIndex(ctx, req)
+}
+
+func (m *Mock) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+	return m.CallShowConfigurations(ctx, req)
+}
+
+func (m *Mock) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	return m.CallGetMetrics(ctx, req)
+}
+
+func NewIndexCoordMock() *Mock {
+	return &Mock{
+		CallInit: func() error {
+			return nil
 		},
-		Value: "",
-	}, nil
-}
-
-// GetTimeTickChannel gets the time tick channel of the mocked IndexCoord, if Param `Failure` is true, it will return an error.
-func (icm *Mock) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	if icm.Failure {
-		return &milvuspb.StringResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			},
-		}, errors.New("IndexCoordinate GetTimeTickChannel failed")
-	}
-	return &milvuspb.StringResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
+		CallStart: func() error {
+			return nil
 		},
-		Value: "",
-	}, nil
-}
-
-// BuildIndex receives a building index request, and return success, if Param `Failure` is true, it will return an error.
-func (icm *Mock) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
-	if icm.Failure {
-		return &indexpb.BuildIndexResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			},
-			IndexBuildID: 0,
-		}, errors.New("IndexCoordinate BuildIndex error")
-	}
-	return &indexpb.BuildIndexResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
+		CallRegister: func() error {
+			return nil
 		},
-		IndexBuildID: 0,
-	}, nil
-}
-
-// DropIndex receives a dropping index request, and return success, if Param `Failure` is true, it will return an error.
-func (icm *Mock) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
-	if icm.Failure {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		}, errors.New("IndexCoordinate DropIndex failed")
-	}
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}, nil
-}
-
-// GetIndexStates gets the indexes states, if Param `Failure` is true, it will return an error.
-// Under normal circumstances the state of each index is `IndexState_Finished`.
-func (icm *Mock) GetIndexStates(ctx context.Context, req *indexpb.GetIndexStatesRequest) (*indexpb.GetIndexStatesResponse, error) {
-	if icm.Failure {
-		return &indexpb.GetIndexStatesResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			},
-		}, errors.New("IndexCoordinate GetIndexStates failed")
-	}
-	states := make([]*indexpb.IndexInfo, len(req.IndexBuildIDs))
-	for i := range states {
-		states[i] = &indexpb.IndexInfo{
-			IndexBuildID: req.IndexBuildIDs[i],
-			State:        commonpb.IndexState_Finished,
-			IndexID:      0,
-		}
-	}
-	return &indexpb.GetIndexStatesResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
+		CallStop: func() error {
+			return nil
 		},
-		States: states,
-	}, nil
-}
-
-// GetIndexFilePaths gets the index file paths, if Param `Failure` is true, it will return an error.
-func (icm *Mock) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error) {
-	if icm.Failure {
-		return &indexpb.GetIndexFilePathsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			},
-		}, errors.New("IndexCoordinate GetIndexFilePaths failed")
-	}
-	filePaths := make([]*indexpb.IndexFilePathInfo, len(req.IndexBuildIDs))
-	for i := range filePaths {
-		filePaths[i] = &indexpb.IndexFilePathInfo{
-			Status: &commonpb.Status{
+		CallSetEtcdClient: func(etcdClient *clientv3.Client) {
+		},
+		CallSetDataCoord: func(dataCoord types.DataCoord) error {
+			return nil
+		},
+		CallSetRootCoord: func(rootCoord types.RootCoord) error {
+			return nil
+		},
+		CallGetComponentStates: func(ctx context.Context) (*internalpb.ComponentStates, error) {
+			return &internalpb.ComponentStates{
+				State: &internalpb.ComponentInfo{
+					NodeID:    1,
+					Role:      typeutil.IndexCoordRole,
+					StateCode: internalpb.StateCode_Healthy,
+				},
+				SubcomponentStates: nil,
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+				},
+			}, nil
+		},
+		CallGetStatisticsChannel: func(ctx context.Context) (*milvuspb.StringResponse, error) {
+			return &milvuspb.StringResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+				},
+			}, nil
+		},
+		CallCreateIndex: func(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
+			return &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_Success,
-			},
-			IndexBuildID:   req.IndexBuildIDs[i],
-			IndexFilePaths: []string{strconv.FormatInt(req.IndexBuildIDs[i], 10)},
-		}
-	}
-	return &indexpb.GetIndexFilePathsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
+			}, nil
 		},
-		FilePaths: filePaths,
-	}, nil
+		CallGetIndexState: func(ctx context.Context, req *indexpb.GetIndexStateRequest) (*indexpb.GetIndexStateResponse, error) {
+			return &indexpb.GetIndexStateResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+				},
+				State: commonpb.IndexState_Finished,
+			}, nil
+		},
+		CallGetSegmentIndexState: func(ctx context.Context, req *indexpb.GetSegmentIndexStateRequest) (*indexpb.GetSegmentIndexStateResponse, error) {
+			segmentStates := make([]*indexpb.SegmentIndexState, 0)
+			for _, segID := range req.SegmentIDs {
+				segmentStates = append(segmentStates, &indexpb.SegmentIndexState{
+					SegmentID: segID,
+					State:     commonpb.IndexState_Finished,
+				})
+			}
+			return &indexpb.GetSegmentIndexStateResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+				},
+				States: segmentStates,
+			}, nil
+		},
+		CallGetIndexInfos: func(ctx context.Context, req *indexpb.GetIndexInfoRequest) (*indexpb.GetIndexInfoResponse, error) {
+			segmentInfos := make(map[int64]*indexpb.SegmentInfo)
+			filePaths := make([]*indexpb.IndexFilePathInfo, 0)
+			for _, segID := range req.SegmentIDs {
+				filePaths = append(filePaths, &indexpb.IndexFilePathInfo{
+					SegmentID:      segID,
+					IndexName:      "default",
+					IndexFilePaths: []string{"file1", "file2"},
+				})
+				segmentInfos[segID] = &indexpb.SegmentInfo{
+					CollectionID: req.CollectionID,
+					SegmentID:    segID,
+					EnableIndex:  true,
+					IndexInfos:   filePaths,
+				}
+			}
+			return &indexpb.GetIndexInfoResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+				},
+				SegmentInfo: segmentInfos,
+			}, nil
+		},
+		CallDescribeIndex: func(ctx context.Context, req *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error) {
+			return &indexpb.DescribeIndexResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+				},
+				IndexInfos: []*indexpb.IndexInfo{
+					{
+						CollectionID: 1,
+						FieldID:      0,
+						IndexName:    "default",
+						IndexID:      0,
+						TypeParams:   nil,
+						IndexParams:  nil,
+					},
+				},
+			}, nil
+		},
+		CallGetIndexBuildProgress: func(ctx context.Context, req *indexpb.GetIndexBuildProgressRequest) (*indexpb.GetIndexBuildProgressResponse, error) {
+			return &indexpb.GetIndexBuildProgressResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+				},
+				IndexedRows: 10240,
+				TotalRows:   10240,
+			}, nil
+		},
+		CallDropIndex: func(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
+			return &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			}, nil
+		},
+		CallShowConfigurations: func(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+			return &internalpb.ShowConfigurationsResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+				},
+			}, nil
+		},
+		CallGetMetrics: func(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+			return &milvuspb.GetMetricsResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+				},
+				ComponentName: typeutil.IndexCoordRole,
+			}, nil
+		},
+	}
 }
 
-//ShowConfigurations returns the configurations of Mock indexNode matching req.Pattern
-func (icm *Mock) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
-	if icm.Failure {
-		return &internalpb.ShowConfigurationsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			},
-			Configuations: nil,
-		}, errors.New("IndexCoord Configurations failed")
-	}
+type RootCoordMock struct {
+	types.RootCoord
 
-	return &internalpb.ShowConfigurationsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-		Configuations: nil,
-	}, nil
+	CallInit               func() error
+	CallStart              func() error
+	CallGetComponentStates func(ctx context.Context) (*internalpb.ComponentStates, error)
+
+	CallAllocID func(ctx context.Context, req *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error)
 }
 
-// GetMetrics gets the metrics of mocked IndexCoord, if Param `Failure` is true, it will return an error.
-func (icm *Mock) GetMetrics(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	if icm.Failure {
-		return &milvuspb.GetMetricsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			},
-		}, errors.New("IndexCoordinate GetMetrics failed")
-	}
-	return &milvuspb.GetMetricsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-		Response:      "",
-		ComponentName: "IndexCoord",
-	}, nil
+func (rcm *RootCoordMock) Init() error {
+	return rcm.CallInit()
 }
 
-func (icm *Mock) RemoveIndex(ctx context.Context, request *indexpb.RemoveIndexRequest) (*commonpb.Status, error) {
-	if icm.Failure {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		}, errors.New("IndexCoordinator RemoveIndex failed")
+func (rcm *RootCoordMock) Start() error {
+	return rcm.CallStart()
+}
+
+func (rcm *RootCoordMock) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+	return rcm.CallGetComponentStates(ctx)
+}
+
+func (rcm *RootCoordMock) AllocID(ctx context.Context, req *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
+	return rcm.CallAllocID(ctx, req)
+}
+
+func NewRootCoordMock() *RootCoordMock {
+	return &RootCoordMock{
+		CallInit: func() error {
+			return nil
+		},
+		CallStart: func() error {
+			return nil
+		},
+		CallGetComponentStates: func(ctx context.Context) (*internalpb.ComponentStates, error) {
+			return &internalpb.ComponentStates{
+				State: &internalpb.ComponentInfo{
+					NodeID:    1,
+					Role:      typeutil.IndexCoordRole,
+					StateCode: internalpb.StateCode_Healthy,
+				},
+				SubcomponentStates: nil,
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+				},
+			}, nil
+		},
+		CallAllocID: func(ctx context.Context, req *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
+			return &rootcoordpb.AllocIDResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+				},
+				ID:    rand.Int63(),
+				Count: req.Count,
+			}, nil
+		},
 	}
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}, nil
 }
 
 type DataCoordMock struct {
 	types.DataCoord
 
-	Fail bool
-	Err  bool
+	CallInit               func() error
+	CallStart              func() error
+	CallGetComponentStates func(ctx context.Context) (*internalpb.ComponentStates, error)
+
+	CallGetSegmentInfo     func(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error)
+	CallGetFlushedSegment  func(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error)
+	CallAcquireSegmentLock func(ctx context.Context, req *datapb.AcquireSegmentLockRequest) (*commonpb.Status, error)
+	CallReleaseSegmentLock func(ctx context.Context, req *datapb.ReleaseSegmentLockRequest) (*commonpb.Status, error)
 }
 
 func (dcm *DataCoordMock) Init() error {
-	if dcm.Err || dcm.Fail {
-		return errors.New("DataCoord mock init failed")
-	}
-	return nil
+	return dcm.CallInit()
 }
 
 func (dcm *DataCoordMock) Start() error {
-	if dcm.Err || dcm.Fail {
-		return errors.New("DataCoord mock start failed")
-	}
-	return nil
+	return dcm.CallStart()
 }
 
 func (dcm *DataCoordMock) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
-	if dcm.Err {
-		return &internalpb.ComponentStates{
-			State: &internalpb.ComponentInfo{
-				StateCode: internalpb.StateCode_Abnormal,
-			},
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    "",
-			},
-		}, errors.New("DataCoord component state is not healthy")
-	}
-	if dcm.Fail {
-		return &internalpb.ComponentStates{
-			State: &internalpb.ComponentInfo{
-				StateCode: internalpb.StateCode_Abnormal,
-			},
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    "",
-			},
-		}, nil
-	}
-	return &internalpb.ComponentStates{
-		State: &internalpb.ComponentInfo{
-			StateCode: internalpb.StateCode_Healthy,
-		},
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
-	}, nil
+	return dcm.CallGetComponentStates(ctx)
 }
 
+func (dcm *DataCoordMock) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
+	return dcm.CallGetSegmentInfo(ctx, req)
+}
 func (dcm *DataCoordMock) AcquireSegmentLock(ctx context.Context, req *datapb.AcquireSegmentLockRequest) (*commonpb.Status, error) {
-	if dcm.Err {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    "",
-		}, errors.New("an error occurred")
-	}
-	if dcm.Fail {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    "failure reason",
-		}, nil
-	}
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-		Reason:    "",
-	}, nil
+	return dcm.CallAcquireSegmentLock(ctx, req)
 }
 
 func (dcm *DataCoordMock) ReleaseSegmentLock(ctx context.Context, req *datapb.ReleaseSegmentLockRequest) (*commonpb.Status, error) {
-	if dcm.Err {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    "",
-		}, errors.New("an error occurred")
+	return dcm.CallReleaseSegmentLock(ctx, req)
+}
+
+func (dcm *DataCoordMock) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error) {
+	return dcm.CallGetFlushedSegment(ctx, req)
+}
+
+func NewDataCoordMock() *DataCoordMock {
+	return &DataCoordMock{
+		CallInit: func() error {
+			return nil
+		},
+		CallStart: func() error {
+			return nil
+		},
+		CallGetComponentStates: func(ctx context.Context) (*internalpb.ComponentStates, error) {
+			return &internalpb.ComponentStates{
+				State: &internalpb.ComponentInfo{
+					NodeID:    1,
+					Role:      typeutil.IndexCoordRole,
+					StateCode: internalpb.StateCode_Healthy,
+				},
+				SubcomponentStates: nil,
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+				},
+			}, nil
+		},
+		CallGetSegmentInfo: func(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
+			return &datapb.GetSegmentInfoResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+				},
+			}, nil
+		},
+		CallGetFlushedSegment: func(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error) {
+			return &datapb.GetFlushedSegmentsResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+				},
+			}, nil
+		},
+		CallAcquireSegmentLock: func(ctx context.Context, req *datapb.AcquireSegmentLockRequest) (*commonpb.Status, error) {
+			return &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			}, nil
+		},
+		CallReleaseSegmentLock: func(ctx context.Context, req *datapb.ReleaseSegmentLockRequest) (*commonpb.Status, error) {
+			return &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			}, nil
+		},
 	}
-	if dcm.Fail {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    "failure reason",
-		}, nil
-	}
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-		Reason:    "",
-	}, nil
 }
 
 // ChunkManagerMock is mock
@@ -410,15 +466,53 @@ func (cmm *ChunkManagerMock) RemoveWithPrefix(prefix string) error {
 type mockETCDKV struct {
 	kv.MetaKv
 
+	save                        func(string, string) error
 	remove                      func(string) error
+	multiSave                   func(map[string]string) error
 	watchWithRevision           func(string, int64) clientv3.WatchChan
 	loadWithRevisionAndVersions func(string) ([]string, []string, []int64, int64, error)
 	compareVersionAndSwap       func(key string, version int64, target string, opts ...clientv3.OpOption) (bool, error)
 	loadWithPrefix2             func(key string) ([]string, []string, []int64, error)
+	loadWithPrefix              func(key string) ([]string, []string, error)
+	loadWithRevision            func(key string) ([]string, []string, int64, error)
+}
+
+func NewMockEtcdKV() *mockETCDKV {
+	return &mockETCDKV{
+		save: func(s string, s2 string) error {
+			return nil
+		},
+		remove: func(s string) error {
+			return nil
+		},
+		multiSave: func(m map[string]string) error {
+			return nil
+		},
+		loadWithRevisionAndVersions: func(s string) ([]string, []string, []int64, int64, error) {
+			return []string{}, []string{}, []int64{}, 0, nil
+		},
+		compareVersionAndSwap: func(key string, version int64, target string, opts ...clientv3.OpOption) (bool, error) {
+			return true, nil
+		},
+		loadWithPrefix2: func(key string) ([]string, []string, []int64, error) {
+			return []string{}, []string{}, []int64{}, nil
+		},
+		loadWithRevision: func(key string) ([]string, []string, int64, error) {
+			return []string{}, []string{}, 0, nil
+		},
+	}
+}
+
+func (mk *mockETCDKV) Save(key string, value string) error {
+	return mk.save(key, value)
 }
 
 func (mk *mockETCDKV) Remove(key string) error {
 	return mk.remove(key)
+}
+
+func (mk *mockETCDKV) MultiSave(kvs map[string]string) error {
+	return mk.multiSave(kvs)
 }
 
 func (mk *mockETCDKV) LoadWithRevisionAndVersions(prefix string) ([]string, []string, []int64, int64, error) {
@@ -429,12 +523,20 @@ func (mk *mockETCDKV) CompareVersionAndSwap(key string, version int64, target st
 	return mk.compareVersionAndSwap(key, version, target, opts...)
 }
 
+func (mk *mockETCDKV) LoadWithPrefix(key string) ([]string, []string, error) {
+	return mk.loadWithPrefix(key)
+}
+
 func (mk *mockETCDKV) LoadWithPrefix2(key string) ([]string, []string, []int64, error) {
 	return mk.loadWithPrefix2(key)
 }
 
 func (mk *mockETCDKV) WatchWithRevision(key string, revision int64) clientv3.WatchChan {
 	return mk.watchWithRevision(key, revision)
+}
+
+func (mk *mockETCDKV) LoadWithRevision(key string) ([]string, []string, int64, error) {
+	return mk.loadWithRevision(key)
 }
 
 type chunkManagerMock struct {

@@ -5,11 +5,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
-
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
 )
 
 var (
@@ -34,18 +32,12 @@ var (
 	}
 
 	colModel = &Collection{
-		TenantID:     tenantID,
-		CollectionID: colID,
-		Name:         colName,
-		AutoID:       false,
-		Description:  "none",
-		Fields:       []*Field{fieldModel},
-		FieldIDToIndexID: []common.Int64Tuple{
-			{
-				Key:   fieldID,
-				Value: indexID,
-			},
-		},
+		TenantID:             tenantID,
+		CollectionID:         colID,
+		Name:                 colName,
+		AutoID:               false,
+		Description:          "none",
+		Fields:               []*Field{fieldModel},
 		VirtualChannelNames:  []string{"vch"},
 		PhysicalChannelNames: []string{"pch"},
 		ShardsNum:            1,

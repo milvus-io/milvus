@@ -109,18 +109,6 @@ func Test_NewClient(t *testing.T) {
 			retCheck(retNotNil, r, err)
 		}
 		{
-			r, err := client.CreateIndex(ctx, nil)
-			retCheck(retNotNil, r, err)
-		}
-		{
-			r, err := client.DropIndex(ctx, nil)
-			retCheck(retNotNil, r, err)
-		}
-		{
-			r, err := client.DescribeIndex(ctx, nil)
-			retCheck(retNotNil, r, err)
-		}
-		{
 			r, err := client.AllocTimestamp(ctx, nil)
 			retCheck(retNotNil, r, err)
 		}
@@ -133,19 +121,11 @@ func Test_NewClient(t *testing.T) {
 			retCheck(retNotNil, r, err)
 		}
 		{
-			r, err := client.DescribeSegment(ctx, nil)
-			retCheck(retNotNil, r, err)
-		}
-		{
 			r, err := client.ShowSegments(ctx, nil)
 			retCheck(retNotNil, r, err)
 		}
 		{
 			r, err := client.ReleaseDQLMessageStream(ctx, nil)
-			retCheck(retNotNil, r, err)
-		}
-		{
-			r, err := client.SegmentFlushCompleted(ctx, nil)
 			retCheck(retNotNil, r, err)
 		}
 		{
@@ -331,18 +311,6 @@ func Test_NewClient(t *testing.T) {
 		retCheck(rTimeout, err)
 	}
 	{
-		rTimeout, err := client.CreateIndex(shortCtx, nil)
-		retCheck(rTimeout, err)
-	}
-	{
-		rTimeout, err := client.DropIndex(shortCtx, nil)
-		retCheck(rTimeout, err)
-	}
-	{
-		rTimeout, err := client.DescribeIndex(shortCtx, nil)
-		retCheck(rTimeout, err)
-	}
-	{
 		rTimeout, err := client.AllocTimestamp(shortCtx, nil)
 		retCheck(rTimeout, err)
 	}
@@ -355,19 +323,11 @@ func Test_NewClient(t *testing.T) {
 		retCheck(rTimeout, err)
 	}
 	{
-		rTimeout, err := client.DescribeSegment(shortCtx, nil)
-		retCheck(rTimeout, err)
-	}
-	{
 		rTimeout, err := client.ShowSegments(shortCtx, nil)
 		retCheck(rTimeout, err)
 	}
 	{
 		rTimeout, err := client.ReleaseDQLMessageStream(shortCtx, nil)
-		retCheck(rTimeout, err)
-	}
-	{
-		rTimeout, err := client.SegmentFlushCompleted(shortCtx, nil)
 		retCheck(rTimeout, err)
 	}
 	{

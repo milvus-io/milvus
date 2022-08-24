@@ -91,7 +91,7 @@ func generateFullWatchDmChannelsRequest(ctx context.Context, broker *globalMetaB
 
 	if err != nil {
 		log.Error("Get Vchannel SegmentInfos failed", zap.Error(err))
-		retryErr := retry.Do(ctx, retryFunc, retry.Attempts(20))
+		retryErr := retry.Do(ctx, retryFunc, retry.Attempts(5))
 		if retryErr != nil {
 			log.Error("Get Vchannel SegmentInfos failed after retry", zap.Error(retryErr))
 			return nil, retryErr

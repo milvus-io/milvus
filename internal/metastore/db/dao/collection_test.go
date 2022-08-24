@@ -32,6 +32,7 @@ const (
 	segmentID2    = typeutil.UniqueID(2002)
 	partitionID1  = typeutil.UniqueID(3001)
 	indexBuildID1 = typeutil.UniqueID(5001)
+	NumRows       = 1025
 )
 
 var (

@@ -51,7 +51,6 @@ mkdir -p indexpb
 mkdir -p datapb
 mkdir -p querypb
 mkdir -p planpb
-
 mkdir -p querypbv2
 
 ${protoc} --proto_path="${GOOGLE_PROTO_DIR}" --proto_path=. --go_out=plugins=grpc,paths=source_relative:./commonpb common.proto

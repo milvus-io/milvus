@@ -32,6 +32,7 @@ import (
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	dcc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
+	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	"github.com/milvus-io/milvus/internal/indexcoord"
 	ic "github.com/milvus-io/milvus/internal/indexcoord"
 	"github.com/milvus-io/milvus/internal/log"
@@ -69,6 +70,7 @@ type Server struct {
 	etcdCli *clientv3.Client
 
 	dataCoord types.DataCoord
+	rootCoord types.RootCoord
 
 	closer io.Closer
 }
@@ -118,6 +120,34 @@ func (s *Server) init() error {
 		return err
 	}
 
+	// --- RootCoord ---
+	if s.rootCoord == nil {
+		s.rootCoord, err = rcc.NewClient(s.loopCtx, ic.Params.EtcdCfg.MetaRootPath, s.etcdCli)
+		if err != nil {
+			log.Debug("IndexCoord try to new RootCoord client failed", zap.Error(err))
+			panic(err)
+		}
+	}
+
+	if err = s.rootCoord.Init(); err != nil {
+		log.Debug("IndexCoord RootCoord client init failed", zap.Error(err))
+		panic(err)
+	}
+	if err = s.rootCoord.Start(); err != nil {
+		log.Debug("IndexCoord RootCoord client start failed", zap.Error(err))
+		panic(err)
+	}
+	log.Debug("IndexCoord try to wait for RootCoord ready")
+	err = funcutil.WaitForComponentHealthy(s.loopCtx, s.rootCoord, typeutil.RootCoordRole, 1000000, time.Millisecond*200)
+	if err != nil {
+		log.Debug("IndexCoord wait for RootCoord ready failed", zap.Error(err))
+		panic(err)
+	}
+
+	if err := s.SetRootCoord(s.rootCoord); err != nil {
+		panic(err)
+	}
+
 	// --- DataCoord ---
 	if s.dataCoord == nil {
 		s.dataCoord, err = dcc.NewClient(s.loopCtx, ic.Params.EtcdCfg.MetaRootPath, s.etcdCli)
@@ -136,7 +166,7 @@ func (s *Server) init() error {
 		panic(err)
 	}
 	log.Debug("IndexCoord try to wait for DataCoord ready")
-	err = funcutil.WaitForComponentHealthy(s.loopCtx, s.dataCoord, "DataCoord", 1000000, time.Millisecond*200)
+	err = funcutil.WaitForComponentHealthy(s.loopCtx, s.dataCoord, typeutil.DataCoordRole, 1000000, time.Millisecond*200)
 	if err != nil {
 		log.Debug("IndexCoord wait for DataCoord ready failed", zap.Error(err))
 		panic(err)
@@ -199,14 +229,15 @@ func (s *Server) SetDataCoord(d types.DataCoord) error {
 	return s.indexcoord.SetDataCoord(d)
 }
 
+// SetRootCoord sets the RootCoord's client for IndexCoord component.
+func (s *Server) SetRootCoord(d types.RootCoord) error {
+	s.rootCoord = d
+	return s.indexcoord.SetRootCoord(d)
+}
+
 // GetComponentStates gets the component states of IndexCoord.
 func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
 	return s.indexcoord.GetComponentStates(ctx)
-}
-
-// GetTimeTickChannel gets the time tick channel of IndexCoord.
-func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
-	return s.indexcoord.GetTimeTickChannel(ctx)
 }
 
 // GetStatisticsChannel gets the statistics channel of IndexCoord.
@@ -214,14 +245,28 @@ func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetSt
 	return s.indexcoord.GetStatisticsChannel(ctx)
 }
 
-// BuildIndex sends the build index request to IndexCoord.
-func (s *Server) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
-	return s.indexcoord.BuildIndex(ctx, req)
+// CreateIndex sends the build index request to IndexCoord.
+func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
+	return s.indexcoord.CreateIndex(ctx, req)
 }
 
-// GetIndexStates gets the index states from IndexCoord.
-func (s *Server) GetIndexStates(ctx context.Context, req *indexpb.GetIndexStatesRequest) (*indexpb.GetIndexStatesResponse, error) {
-	return s.indexcoord.GetIndexStates(ctx, req)
+// GetIndexState gets the index states from IndexCoord.
+func (s *Server) GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRequest) (*indexpb.GetIndexStateResponse, error) {
+	return s.indexcoord.GetIndexState(ctx, req)
+}
+
+func (s *Server) GetSegmentIndexState(ctx context.Context, req *indexpb.GetSegmentIndexStateRequest) (*indexpb.GetSegmentIndexStateResponse, error) {
+	return s.indexcoord.GetSegmentIndexState(ctx, req)
+}
+
+// GetIndexInfos gets the index file paths from IndexCoord.
+func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoRequest) (*indexpb.GetIndexInfoResponse, error) {
+	return s.indexcoord.GetIndexInfos(ctx, req)
+}
+
+// DescribeIndex gets all indexes of the collection.
+func (s *Server) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error) {
+	return s.indexcoord.DescribeIndex(ctx, req)
 }
 
 // DropIndex sends the drop index request to IndexCoord.
@@ -229,13 +274,8 @@ func (s *Server) DropIndex(ctx context.Context, request *indexpb.DropIndexReques
 	return s.indexcoord.DropIndex(ctx, request)
 }
 
-func (s *Server) RemoveIndex(ctx context.Context, req *indexpb.RemoveIndexRequest) (*commonpb.Status, error) {
-	return s.indexcoord.RemoveIndex(ctx, req)
-}
-
-// GetIndexFilePaths gets the index file paths from IndexCoord.
-func (s *Server) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error) {
-	return s.indexcoord.GetIndexFilePaths(ctx, req)
+func (s *Server) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetIndexBuildProgressRequest) (*indexpb.GetIndexBuildProgressResponse, error) {
+	return s.indexcoord.GetIndexBuildProgress(ctx, req)
 }
 
 // ShowConfigurations gets specified configurations para of IndexCoord

@@ -28,6 +28,7 @@ message CollectionInfo {
   repeated int64 partitionIDs = 4;
   // deprecate
   repeated string partitionNames = 5;
+  // deprecat
   repeated FieldIndexInfo field_indexes = 6;
   repeated string virtual_channel_names = 7;
   repeated string physical_channel_names = 8;

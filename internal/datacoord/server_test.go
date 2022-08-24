@@ -2412,23 +2412,7 @@ func TestPostFlush(t *testing.T) {
 		err := svr.postFlush(context.Background(), 1)
 		assert.EqualValues(t, errors.New("segment not found"), err)
 	})
-	t.Run("failed to sync with Rootcoord", func(t *testing.T) {
-		svr := newTestServer(t, nil)
-		defer closeTestServer(t, svr)
-		svr.rootCoordClient = &rootCoordSegFlushComplete{flag: false}
 
-		err := svr.meta.AddSegment(NewSegmentInfo(&datapb.SegmentInfo{
-			ID:           1,
-			CollectionID: 1,
-			PartitionID:  1,
-			State:        commonpb.SegmentState_Flushing,
-		}))
-
-		assert.Nil(t, err)
-
-		err = svr.postFlush(context.Background(), 1)
-		assert.NotNil(t, err)
-	})
 	t.Run("success post flush", func(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)

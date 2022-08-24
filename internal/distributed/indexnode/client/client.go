@@ -20,6 +20,8 @@ import (
 	"context"
 	"fmt"
 
+	"google.golang.org/grpc"
+
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -28,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"google.golang.org/grpc"
 )
 
 var ClientParams paramtable.GrpcClientConfig
@@ -108,21 +109,6 @@ func (c *Client) GetComponentStates(ctx context.Context) (*internalpb.ComponentS
 	return ret.(*internalpb.ComponentStates), err
 }
 
-// GetTimeTickChannel gets the time tick channel of IndexNode.
-func (c *Client) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
-		if !funcutil.CheckCtxValid(ctx) {
-			return nil, ctx.Err()
-		}
-		return client.(indexpb.IndexNodeClient).GetTimeTickChannel(ctx, &internalpb.GetTimeTickChannelRequest{})
-	})
-	if err != nil || ret == nil {
-		return nil, err
-	}
-	return ret.(*milvuspb.StringResponse), err
-}
-
-// GetStatisticsChannel gets the statistics channel of IndexNode.
 func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
@@ -136,18 +122,60 @@ func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 	return ret.(*milvuspb.StringResponse), err
 }
 
-// CreateIndex sends the build index request to IndexNode.
-func (c *Client) CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
+// CreateJob sends the build index request to IndexNode.
+func (c *Client) CreateJob(ctx context.Context, req *indexpb.CreateJobRequest) (*commonpb.Status, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(indexpb.IndexNodeClient).CreateIndex(ctx, req)
+		return client.(indexpb.IndexNodeClient).CreateJob(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
 	}
 	return ret.(*commonpb.Status), err
+}
+
+// QueryJobs query the task info of the index task.
+func (c *Client) QueryJobs(ctx context.Context, req *indexpb.QueryJobsRequest) (*indexpb.QueryJobsResponse, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.(indexpb.IndexNodeClient).QueryJobs(ctx, req)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+	return ret.(*indexpb.QueryJobsResponse), err
+}
+
+// DropJobs query the task info of the index task.
+func (c *Client) DropJobs(ctx context.Context, req *indexpb.DropJobsRequest) (*commonpb.Status, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.(indexpb.IndexNodeClient).DropJobs(ctx, req)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+	return ret.(*commonpb.Status), err
+}
+
+// GetJobStats query the task info of the index task.
+func (c *Client) GetJobStats(ctx context.Context, req *indexpb.GetJobStatsRequest) (*indexpb.GetJobStatsResponse, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.(indexpb.IndexNodeClient).GetJobStats(ctx, req)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+	return ret.(*indexpb.GetJobStatsResponse), err
 }
 
 // ShowConfigurations gets specified configurations para of IndexNode
@@ -177,17 +205,4 @@ func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 		return nil, err
 	}
 	return ret.(*milvuspb.GetMetricsResponse), err
-}
-
-func (c *Client) GetTaskSlots(ctx context.Context, req *indexpb.GetTaskSlotsRequest) (*indexpb.GetTaskSlotsResponse, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
-		if !funcutil.CheckCtxValid(ctx) {
-			return nil, ctx.Err()
-		}
-		return client.(indexpb.IndexNodeClient).GetTaskSlots(ctx, req)
-	})
-	if err != nil || ret == nil {
-		return nil, err
-	}
-	return ret.(*indexpb.GetTaskSlotsResponse), err
 }

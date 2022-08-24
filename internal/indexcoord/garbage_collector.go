@@ -21,9 +21,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/storage"
 	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/storage"
 )
 
 type garbageCollector struct {
@@ -34,25 +37,32 @@ type garbageCollector struct {
 	gcFileDuration time.Duration
 	gcMetaDuration time.Duration
 
-	metaTable    *metaTable
-	chunkManager storage.ChunkManager
+	notify chan struct{}
+
+	metaTable        *metaTable
+	chunkManager     storage.ChunkManager
+	indexCoordClient *IndexCoord
 }
 
-func newGarbageCollector(ctx context.Context, meta *metaTable, chunkManager storage.ChunkManager) *garbageCollector {
+func newGarbageCollector(ctx context.Context, meta *metaTable, chunkManager storage.ChunkManager, ic *IndexCoord) *garbageCollector {
 	ctx, cancel := context.WithCancel(ctx)
 	return &garbageCollector{
-		ctx:            ctx,
-		cancel:         cancel,
-		gcFileDuration: Params.IndexCoordCfg.GCInterval,
-		gcMetaDuration: time.Second * 10,
-		metaTable:      meta,
-		chunkManager:   chunkManager,
+		ctx:              ctx,
+		cancel:           cancel,
+		gcFileDuration:   Params.IndexCoordCfg.GCInterval,
+		gcMetaDuration:   time.Minute,
+		metaTable:        meta,
+		chunkManager:     chunkManager,
+		indexCoordClient: ic,
 	}
 }
 
 func (gc *garbageCollector) Start() {
 	gc.wg.Add(1)
-	go gc.recycleUnusedMeta()
+	go gc.recycleUnusedIndexes()
+
+	gc.wg.Add(1)
+	go gc.recycleUnusedSegIndexes()
 
 	gc.wg.Add(1)
 	go gc.recycleUnusedIndexFiles()
@@ -63,9 +73,125 @@ func (gc *garbageCollector) Stop() {
 	gc.wg.Wait()
 }
 
-func (gc *garbageCollector) recycleUnusedMeta() {
+func (gc *garbageCollector) Notify() {
+	select {
+	case gc.notify <- struct{}{}:
+	default:
+	}
+}
+
+func (gc *garbageCollector) recycleUnusedIndexes() {
 	defer gc.wg.Done()
-	log.Info("IndexCoord garbageCollector recycleUnusedMetaLoop start")
+	log.Info("IndexCoord garbageCollector recycleUnusedIndexes start")
+
+	ticker := time.NewTicker(gc.gcMetaDuration)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-gc.ctx.Done():
+			log.Info("IndexCoord garbageCollector recycleUnusedMetaLoop context has done")
+			return
+		case <-ticker.C:
+			deletedIndexes := gc.metaTable.GetDeletedIndexes()
+			for _, index := range deletedIndexes {
+				buildIDs := gc.metaTable.GetBuildIDsFromIndexID(index.IndexID)
+				if len(buildIDs) == 0 {
+					if err := gc.metaTable.RemoveIndex(index.CollectionID, index.IndexID); err != nil {
+						log.Warn("IndexCoord remove index on collection fail", zap.Int64("collID", index.CollectionID),
+							zap.Int64("indexID", index.IndexID), zap.Error(err))
+						continue
+					}
+				} else {
+					for _, buildID := range buildIDs {
+						segIdx, ok := gc.metaTable.GetMeta(buildID)
+						if !ok {
+							log.Debug("IndexCoord get segment index is not exist", zap.Int64("buildID", buildID))
+							continue
+						}
+						if segIdx.NodeID != 0 {
+							// wait for releasing reference lock
+							continue
+						}
+						if !gc.metaTable.IsExpire(segIdx.BuildID) {
+							continue
+						}
+						if err := gc.metaTable.RemoveSegmentIndex(segIdx.CollectionID, segIdx.PartitionID, segIdx.SegmentID, segIdx.BuildID); err != nil {
+							log.Warn("delete index meta from etcd failed, wait to retry", zap.Int64("buildID", segIdx.BuildID),
+								zap.Int64("nodeID", segIdx.NodeID), zap.Error(err))
+							continue
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+func (gc *garbageCollector) recycleSegIndexesMeta() {
+	segIndexes := gc.metaTable.GetAllSegIndexes()
+	collID2segID := make(map[int64]map[int64]struct{})
+	for segID, segIdx := range segIndexes {
+		if _, ok := collID2segID[segIdx.CollectionID]; !ok {
+			collID2segID[segIdx.CollectionID] = make(map[int64]struct{})
+		}
+		collID2segID[segIdx.CollectionID][segID] = struct{}{}
+	}
+	for collID, segIDs := range collID2segID {
+		resp, err := gc.indexCoordClient.dataCoordClient.GetFlushedSegments(gc.ctx, &datapb.GetFlushedSegmentsRequest{
+			CollectionID: collID,
+			PartitionID:  -1,
+		})
+		if err != nil {
+			log.Warn("IndexCoord garbageCollector get flushed segments from DataCoord fail",
+				zap.Int64("collID", collID), zap.Error(err))
+			return
+		}
+		if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+			log.Warn("IndexCoord garbageCollector get flushed segments from DataCoord fail", zap.Int64("collID", collID),
+				zap.String("fail reason", resp.Status.Reason))
+			return
+		}
+		flushedSegments := make(map[int64]struct{})
+		for _, segID := range resp.Segments {
+			flushedSegments[segID] = struct{}{}
+		}
+		for segID := range segIDs {
+			if segIndexes[segID].IsDeleted {
+				continue
+			}
+			if _, ok := flushedSegments[segID]; !ok {
+				log.Debug("segment is already not exist, mark it deleted", zap.Int64("collID", collID),
+					zap.Int64("segID", segID))
+				if err := gc.metaTable.MarkSegmentsIndexAsDeleted([]int64{segID}); err != nil {
+					continue
+				}
+			}
+		}
+	}
+
+	for _, meta := range segIndexes {
+		if meta.IsDeleted || gc.metaTable.IsIndexDeleted(meta.CollectionID, meta.IndexID) {
+			log.Info("index meta need to recycle it", zap.Int64("buildID", meta.BuildID),
+				zap.Int64("nodeID", meta.NodeID))
+			if meta.NodeID != 0 {
+				// wait for releasing reference lock
+				continue
+			}
+			if !gc.metaTable.IsExpire(meta.BuildID) {
+				continue
+			}
+			if err := gc.metaTable.RemoveSegmentIndex(meta.CollectionID, meta.PartitionID, meta.SegmentID, meta.BuildID); err != nil {
+				log.Warn("delete index meta from etcd failed, wait to retry", zap.Int64("buildID", meta.BuildID),
+					zap.Int64("nodeID", meta.NodeID), zap.Error(err))
+				continue
+			}
+		}
+	}
+}
+
+func (gc *garbageCollector) recycleUnusedSegIndexes() {
+	defer gc.wg.Done()
+	log.Info("IndexCoord garbageCollector recycleUnusedSegIndexes start")
 
 	ticker := time.NewTicker(gc.gcMetaDuration)
 	defer ticker.Stop()
@@ -76,20 +202,9 @@ func (gc *garbageCollector) recycleUnusedMeta() {
 			log.Info("IndexCoord garbageCollector recycleUnusedMetaLoop context has done")
 			return
 		case <-ticker.C:
-			metas := gc.metaTable.GetDeletedMetas()
-			for _, meta := range metas {
-				log.Info("index meta is deleted, recycle it", zap.Int64("buildID", meta.IndexBuildID),
-					zap.Int64("nodeID", meta.NodeID))
-				if meta.NodeID != 0 {
-					// wait for releasing reference lock
-					continue
-				}
-				if err := gc.metaTable.DeleteIndex(meta.IndexBuildID); err != nil {
-					log.Warn("delete index meta from etcd failed, wait to retry", zap.Int64("buildID", meta.IndexBuildID),
-						zap.Int64("nodeID", meta.NodeID), zap.Error(err))
-					continue
-				}
-			}
+			gc.recycleSegIndexesMeta()
+		case <-gc.notify:
+			gc.recycleSegIndexesMeta()
 		}
 	}
 }
@@ -107,7 +222,7 @@ func (gc *garbageCollector) recycleUnusedIndexFiles() {
 		case <-gc.ctx.Done():
 			return
 		case <-ticker.C:
-			prefix := Params.IndexNodeCfg.IndexStorageRootPath + "/"
+			prefix := Params.IndexCoordCfg.IndexStorageRootPath + "/"
 			// list dir first
 			keys, _, err := gc.chunkManager.ListWithPrefix(prefix, false)
 			if err != nil {
@@ -115,6 +230,7 @@ func (gc *garbageCollector) recycleUnusedIndexFiles() {
 				continue
 			}
 			for _, key := range keys {
+				log.Debug("indexFiles keys", zap.String("key", key))
 				buildID, err := parseBuildIDFromFilePath(key)
 				if err != nil {
 					log.Error("IndexCoord garbageCollector recycleUnusedIndexFiles parseIndexFileKey", zap.String("key", key), zap.Error(err))
@@ -134,16 +250,15 @@ func (gc *garbageCollector) recycleUnusedIndexFiles() {
 					continue
 				}
 				log.Info("index meta can be recycled, recycle index files", zap.Int64("buildID", buildID))
-				indexInfo, err := gc.metaTable.GetIndexFilePathInfo(buildID)
-				if err != nil {
+				canRecycle, indexFilePaths := gc.metaTable.GetIndexFilePathByBuildID(buildID)
+				if !canRecycle {
 					// Even if the index is marked as deleted, the index file will not be recycled, wait for the next gc,
 					// and delete all index files about the buildID at one time.
-					log.Warn("IndexCoord garbageCollector get index files fail", zap.Int64("buildID", buildID),
-						zap.Error(err))
+					log.Warn("IndexCoord garbageCollector can not recycle index files", zap.Int64("buildID", buildID))
 					continue
 				}
 				filesMap := make(map[string]bool)
-				for _, file := range indexInfo.IndexFilePaths {
+				for _, file := range indexFilePaths {
 					filesMap[file] = true
 				}
 				files, _, err := gc.chunkManager.ListWithPrefix(key, true)

@@ -130,20 +130,6 @@ func (c *Client) GetComponentStates(ctx context.Context) (*internalpb.ComponentS
 	return ret.(*internalpb.ComponentStates), err
 }
 
-// GetTimeTickChannel gets the time tick channel of IndexCoord.
-func (c *Client) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
-		if !funcutil.CheckCtxValid(ctx) {
-			return nil, ctx.Err()
-		}
-		return client.(indexpb.IndexCoordClient).GetTimeTickChannel(ctx, &internalpb.GetTimeTickChannelRequest{})
-	})
-	if err != nil || ret == nil {
-		return nil, err
-	}
-	return ret.(*milvuspb.StringResponse), err
-}
-
 // GetStatisticsChannel gets the statistics channel of IndexCoord.
 func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
@@ -158,18 +144,88 @@ func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 	return ret.(*milvuspb.StringResponse), err
 }
 
-// BuildIndex sends the build index request to IndexCoord.
-func (c *Client) BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
+// CreateIndex sends the build index request to IndexCoord.
+func (c *Client) CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(indexpb.IndexCoordClient).BuildIndex(ctx, req)
+		return client.(indexpb.IndexCoordClient).CreateIndex(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
 	}
-	return ret.(*indexpb.BuildIndexResponse), err
+	return ret.(*commonpb.Status), err
+}
+
+// GetIndexState gets the index states from IndexCoord.
+func (c *Client) GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRequest) (*indexpb.GetIndexStateResponse, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.(indexpb.IndexCoordClient).GetIndexState(ctx, req)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+	return ret.(*indexpb.GetIndexStateResponse), err
+}
+
+// GetSegmentIndexState gets the index states from IndexCoord.
+func (c *Client) GetSegmentIndexState(ctx context.Context, req *indexpb.GetSegmentIndexStateRequest) (*indexpb.GetSegmentIndexStateResponse, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.(indexpb.IndexCoordClient).GetSegmentIndexState(ctx, req)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+	return ret.(*indexpb.GetSegmentIndexStateResponse), err
+}
+
+// GetIndexInfos gets the index file paths from IndexCoord.
+func (c *Client) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoRequest) (*indexpb.GetIndexInfoResponse, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.(indexpb.IndexCoordClient).GetIndexInfos(ctx, req)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+	return ret.(*indexpb.GetIndexInfoResponse), err
+}
+
+// DescribeIndex describe the index info of the collection.
+func (c *Client) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.(indexpb.IndexCoordClient).DescribeIndex(ctx, req)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+	return ret.(*indexpb.DescribeIndexResponse), err
+}
+
+// GetIndexBuildProgress describe the progress of the index.
+func (c *Client) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetIndexBuildProgressRequest) (*indexpb.GetIndexBuildProgressResponse, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.(indexpb.IndexCoordClient).GetIndexBuildProgress(ctx, req)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+	return ret.(*indexpb.GetIndexBuildProgressResponse), err
 }
 
 // DropIndex sends the drop index request to IndexCoord.
@@ -184,47 +240,6 @@ func (c *Client) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (
 		return nil, err
 	}
 	return ret.(*commonpb.Status), err
-}
-
-func (c *Client) RemoveIndex(ctx context.Context, req *indexpb.RemoveIndexRequest) (*commonpb.Status, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
-		if !funcutil.CheckCtxValid(ctx) {
-			return nil, ctx.Err()
-		}
-		return client.(indexpb.IndexCoordClient).RemoveIndex(ctx, req)
-	})
-	if err != nil || ret == nil {
-		return nil, err
-	}
-	return ret.(*commonpb.Status), err
-}
-
-// GetIndexStates gets the index states from IndexCoord.
-func (c *Client) GetIndexStates(ctx context.Context, req *indexpb.GetIndexStatesRequest) (*indexpb.GetIndexStatesResponse, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
-		if !funcutil.CheckCtxValid(ctx) {
-			return nil, ctx.Err()
-		}
-		return client.(indexpb.IndexCoordClient).GetIndexStates(ctx, req)
-	})
-	if err != nil || ret == nil {
-		return nil, err
-	}
-	return ret.(*indexpb.GetIndexStatesResponse), err
-}
-
-// GetIndexFilePaths gets the index file paths from IndexCoord.
-func (c *Client) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
-		if !funcutil.CheckCtxValid(ctx) {
-			return nil, ctx.Err()
-		}
-		return client.(indexpb.IndexCoordClient).GetIndexFilePaths(ctx, req)
-	})
-	if err != nil || ret == nil {
-		return nil, err
-	}
-	return ret.(*indexpb.GetIndexFilePathsResponse), err
 }
 
 // ShowConfigurations gets specified configurations para of IndexCoord

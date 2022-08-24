@@ -20,12 +20,6 @@ type RootCoordCatalog interface {
 	CreatePartition(ctx context.Context, partition *model.Partition, ts typeutil.Timestamp) error
 	DropPartition(ctx context.Context, collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, ts typeutil.Timestamp) error
 
-	CreateIndex(ctx context.Context, col *model.Collection, index *model.Index) error
-	// AlterIndex newIndex only contains updated parts
-	AlterIndex(ctx context.Context, oldIndex *model.Index, newIndex *model.Index, alterType AlterType) error
-	DropIndex(ctx context.Context, collectionInfo *model.Collection, dropIdxID typeutil.UniqueID) error
-	ListIndexes(ctx context.Context) ([]*model.Index, error)
-
 	CreateAlias(ctx context.Context, alias *model.Alias, ts typeutil.Timestamp) error
 	DropAlias(ctx context.Context, alias string, ts typeutil.Timestamp) error
 	AlterAlias(ctx context.Context, alias *model.Alias, ts typeutil.Timestamp) error
@@ -69,4 +63,18 @@ type DataCoordCatalog interface {
 	MarkChannelDeleted(ctx context.Context, channel string) error
 	IsChannelDropped(ctx context.Context, channel string) bool
 	DropChannel(ctx context.Context, channel string) error
+}
+
+type IndexCoordCatalog interface {
+	CreateIndex(ctx context.Context, index *model.Index) error
+	ListIndexes(ctx context.Context) ([]*model.Index, error)
+	AlterIndex(ctx context.Context, newIndex *model.Index) error
+	AlterIndexes(ctx context.Context, newIndexes []*model.Index) error
+	DropIndex(ctx context.Context, collID, dropIdxID typeutil.UniqueID) error
+
+	CreateSegmentIndex(ctx context.Context, segIdx *model.SegmentIndex) error
+	ListSegmentIndexes(ctx context.Context) ([]*model.SegmentIndex, error)
+	AlterSegmentIndex(ctx context.Context, newSegIndex *model.SegmentIndex) error
+	AlterSegmentIndexes(ctx context.Context, newSegIdxes []*model.SegmentIndex) error
+	DropSegmentIndex(ctx context.Context, collID, partID, segID, buildID typeutil.UniqueID) error
 }

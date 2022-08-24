@@ -22,11 +22,11 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/milvus-io/milvus/internal/storage"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/opentracing/opentracing-go"
 	oplog "github.com/opentracing/opentracing-go/log"
@@ -142,9 +142,6 @@ func (queue *BaseTaskQueue) PopActiveTask(tID UniqueID) task {
 
 // Enqueue adds a task to TaskQueue.
 func (queue *BaseTaskQueue) Enqueue(t task) error {
-	tID, _ := queue.sched.idAllocator.AllocOne()
-	log.Debug("indexcoord", zap.Int64("[Builder] allocate reqID", tID))
-	t.SetID(tID)
 	err := t.OnEnqueue()
 	if err != nil {
 		return err
@@ -178,10 +175,10 @@ func (queue *IndexAddTaskQueue) tryToRemoveUselessIndexAddTask(indexID UniqueID)
 		if !ok {
 			continue
 		}
-		if indexAddTask.req.IndexID == indexID {
+		if indexAddTask.segmentIndex.IndexID == indexID {
 			queue.unissuedTasks.Remove(e)
 			indexAddTask.Notify(nil)
-			indexBuildIDs = append(indexBuildIDs, indexAddTask.req.IndexBuildID)
+			indexBuildIDs = append(indexBuildIDs, indexAddTask.segmentIndex.BuildID)
 		}
 	}
 
@@ -205,9 +202,9 @@ func NewIndexAddTaskQueue(sched *TaskScheduler) *IndexAddTaskQueue {
 type TaskScheduler struct {
 	IndexAddQueue TaskQueue
 
-	idAllocator *allocator.GlobalIDAllocator
-	metaTable   *metaTable
-	cm          storage.ChunkManager
+	rootcoordClient types.RootCoord
+	metaTable       *metaTable
+	cm              storage.ChunkManager
 
 	wg     sync.WaitGroup
 	ctx    context.Context
@@ -216,16 +213,16 @@ type TaskScheduler struct {
 
 // NewTaskScheduler creates a new task scheduler of indexing tasks.
 func NewTaskScheduler(ctx context.Context,
-	idAllocator *allocator.GlobalIDAllocator,
+	client types.RootCoord,
 	cm storage.ChunkManager,
 	table *metaTable) (*TaskScheduler, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	s := &TaskScheduler{
-		idAllocator: idAllocator,
-		metaTable:   table,
-		cm:          cm,
-		ctx:         ctx1,
-		cancel:      cancel,
+		metaTable:       table,
+		rootcoordClient: client,
+		cm:              cm,
+		ctx:             ctx1,
+		cancel:          cancel,
 	}
 	s.IndexAddQueue = NewIndexAddTaskQueue(s)
 	return s, nil

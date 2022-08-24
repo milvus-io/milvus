@@ -28,97 +28,115 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/dependency"
-	"github.com/milvus-io/milvus/internal/util/etcd"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 func TestIndexCoordinateServer(t *testing.T) {
 	ctx := context.Background()
 	factory := dependency.NewDefaultFactory(true)
 	server, err := NewServer(ctx, factory)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.NotNil(t, server)
 	Params.Init()
-	etcd, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	assert.NoError(t, err)
-	assert.NotNil(t, etcd)
-	indexCoordClient := &indexcoord.Mock{}
-	indexCoordClient.SetEtcdClient(etcd)
-	err = server.SetClient(indexCoordClient)
-	assert.Nil(t, err)
 
-	dcm := &indexcoord.DataCoordMock{}
+	indexCoordClient := indexcoord.NewIndexCoordMock()
+	err = server.SetClient(indexCoordClient)
+	assert.NoError(t, err)
+
+	rcm := indexcoord.NewRootCoordMock()
+	server.rootCoord = rcm
+	dcm := indexcoord.NewDataCoordMock()
 	server.dataCoord = dcm
 	err = server.Run()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	t.Run("GetComponentStates", func(t *testing.T) {
 		req := &internalpb.GetComponentStatesRequest{}
 		states, err := server.GetComponentStates(ctx, req)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, internalpb.StateCode_Healthy, states.State.StateCode)
-	})
-
-	t.Run("GetTimeTickChannel", func(t *testing.T) {
-		req := &internalpb.GetTimeTickChannelRequest{}
-		resp, err := server.GetTimeTickChannel(ctx, req)
-		assert.Nil(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
 	t.Run("GetStatisticsChannel", func(t *testing.T) {
 		req := &internalpb.GetStatisticsChannelRequest{}
 		resp, err := server.GetStatisticsChannel(ctx, req)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
-	t.Run("BuildIndex", func(t *testing.T) {
-		req := &indexpb.BuildIndexRequest{
-			IndexBuildID: 0,
-			IndexID:      0,
-			DataPaths:    []string{},
+	t.Run("CreateIndex", func(t *testing.T) {
+		req := &indexpb.CreateIndexRequest{
+			CollectionID: 0,
+			FieldID:      0,
+			IndexName:    "index",
 		}
-		resp, err := server.BuildIndex(ctx, req)
-		assert.Nil(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		resp, err := server.CreateIndex(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
-	t.Run("GetIndexStates", func(t *testing.T) {
-		req := &indexpb.GetIndexStatesRequest{
-			IndexBuildIDs: []UniqueID{0},
+	t.Run("GetIndexState", func(t *testing.T) {
+		req := &indexpb.GetIndexStateRequest{
+			CollectionID: 0,
+			IndexName:    "index",
 		}
-		resp, err := server.GetIndexStates(ctx, req)
-		assert.Nil(t, err)
-		assert.Equal(t, len(req.IndexBuildIDs), len(resp.States))
-		assert.Equal(t, commonpb.IndexState_Finished, resp.States[0].State)
+		resp, err := server.GetIndexState(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.IndexState_Finished, resp.State)
+	})
+
+	t.Run("GetSegmentIndexState", func(t *testing.T) {
+		req := &indexpb.GetSegmentIndexStateRequest{
+			CollectionID: 1,
+			IndexName:    "index",
+			SegmentIDs:   []UniqueID{1, 2},
+		}
+		resp, err := server.GetSegmentIndexState(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, len(req.SegmentIDs), len(resp.States))
+	})
+
+	t.Run("GetIndexInfos", func(t *testing.T) {
+		req := &indexpb.GetIndexInfoRequest{
+			CollectionID: 0,
+			SegmentIDs:   []UniqueID{0},
+			IndexName:    "index",
+		}
+		resp, err := server.GetIndexInfos(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, len(req.SegmentIDs), len(resp.SegmentInfo))
+	})
+
+	t.Run("DescribeIndex", func(t *testing.T) {
+		req := &indexpb.DescribeIndexRequest{
+			CollectionID: 1,
+			IndexName:    "",
+		}
+		resp, err := server.DescribeIndex(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(resp.IndexInfos))
+	})
+
+	t.Run("GetIndexBuildProgress", func(t *testing.T) {
+		req := &indexpb.GetIndexBuildProgressRequest{
+			CollectionID: 1,
+			IndexName:    "default",
+		}
+		resp, err := server.GetIndexBuildProgress(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, resp.TotalRows, resp.IndexedRows)
 	})
 
 	t.Run("DropIndex", func(t *testing.T) {
 		req := &indexpb.DropIndexRequest{
-			IndexID: 0,
+			CollectionID: 0,
+			IndexName:    "default",
+			FieldID:      0,
 		}
 		resp, err := server.DropIndex(ctx, req)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-	})
-
-	t.Run("RemoveIndex", func(t *testing.T) {
-		req := &indexpb.RemoveIndexRequest{
-			BuildIDs: []UniqueID{0},
-		}
-		resp, err := server.RemoveIndex(ctx, req)
-		assert.Nil(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-	})
-
-	t.Run("GetIndexFilePaths", func(t *testing.T) {
-		req := &indexpb.GetIndexFilePathsRequest{
-			IndexBuildIDs: []UniqueID{0, 1},
-		}
-		resp, err := server.GetIndexFilePaths(ctx, req)
-		assert.Nil(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-		assert.Equal(t, len(req.IndexBuildIDs), len(resp.FilePaths))
 	})
 
 	t.Run("ShowConfigurations", func(t *testing.T) {
@@ -135,11 +153,11 @@ func TestIndexCoordinateServer(t *testing.T) {
 			Request: "",
 		}
 		resp, err := server.GetMetrics(ctx, req)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-		assert.Equal(t, "IndexCoord", resp.ComponentName)
+		assert.Equal(t, typeutil.IndexCoordRole, resp.ComponentName)
 	})
 
 	err = server.Stop()
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
