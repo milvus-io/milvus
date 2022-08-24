@@ -25,7 +25,6 @@ SearchOnSealed(const Schema& schema,
                const void* query_data,
                int64_t num_queries,
                const BitsetView& view,
-               SearchResult& result,
-               int64_t segment_id);
+               SearchResult& result);
 
 }  // namespace milvus::query

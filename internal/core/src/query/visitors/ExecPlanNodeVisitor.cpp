@@ -104,8 +104,7 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
         return;
     }
     BitsetView final_view = bitset_holder;
-    segment->vector_search(active_count, node.search_info_, src_data, num_queries, timestamp_, final_view,
-                           search_result);
+    segment->vector_search(node.search_info_, src_data, num_queries, timestamp_, final_view, search_result);
 
     search_result_opt_ = std::move(search_result);
 }

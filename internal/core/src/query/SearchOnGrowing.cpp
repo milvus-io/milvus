@@ -74,15 +74,16 @@ FloatIndexSearch(const segcore::SegmentGrowingImpl& segment,
 
 void
 SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
-                int64_t ins_barrier,
                 const query::SearchInfo& info,
                 const void* query_data,
                 int64_t num_queries,
+                Timestamp timestamp,
                 const BitsetView& bitset,
                 SearchResult& results) {
     auto& schema = segment.get_schema();
     auto& indexing_record = segment.get_indexing_record();
     auto& record = segment.get_insert_record();
+    auto active_count = segment.get_active_count(timestamp);
 
     // step 1.1: get meta
     // step 1.2: get which vector field to search
@@ -102,19 +103,19 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
 
     int32_t current_chunk_id = 0;
     if (field.get_data_type() == DataType::VECTOR_FLOAT) {
-        current_chunk_id = FloatIndexSearch(segment, info, query_data, num_queries, ins_barrier, bitset, final_qr);
+        current_chunk_id = FloatIndexSearch(segment, info, query_data, num_queries, active_count, bitset, final_qr);
     }
 
     // step 3: brute force search where small indexing is unavailable
     auto vec_ptr = record.get_field_data_base(vecfield_id);
     auto vec_size_per_chunk = vec_ptr->get_size_per_chunk();
-    auto max_chunk = upper_div(ins_barrier, vec_size_per_chunk);
+    auto max_chunk = upper_div(active_count, vec_size_per_chunk);
 
     for (int chunk_id = current_chunk_id; chunk_id < max_chunk; ++chunk_id) {
         auto chunk_data = vec_ptr->get_chunk_data(chunk_id);
 
         auto element_begin = chunk_id * vec_size_per_chunk;
-        auto element_end = std::min(ins_barrier, (chunk_id + 1) * vec_size_per_chunk);
+        auto element_end = std::min(active_count, (chunk_id + 1) * vec_size_per_chunk);
         auto size_per_chunk = element_end - element_begin;
 
         auto sub_view = bitset.subview(element_begin, size_per_chunk);
