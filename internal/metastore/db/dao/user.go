@@ -63,3 +63,13 @@ func (s *userDb) MarkDeletedByUsername(tenantID string, username string) error {
 
 	return nil
 }
+
+func (s *userDb) UpdatePassword(tenantID string, username string, encryptedPassword string) error {
+	err := s.db.Model(&dbmodel.User{}).Where("tenant_id = ? AND username = ?", tenantID, username).Update("encrypted_password", encryptedPassword).Error
+	if err != nil {
+		log.Error("update password by username failed", zap.String("tenant", tenantID), zap.String("username", username), zap.Error(err))
+		return err
+	}
+
+	return nil
+}

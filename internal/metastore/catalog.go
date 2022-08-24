@@ -33,6 +33,7 @@ type RootCoordCatalog interface {
 
 	GetCredential(ctx context.Context, username string) (*model.Credential, error)
 	CreateCredential(ctx context.Context, credential *model.Credential) error
+	AlterCredential(ctx context.Context, credential *model.Credential) error
 	DropCredential(ctx context.Context, username string) error
 	ListCredentials(ctx context.Context) ([]string, error)
 

@@ -27,6 +27,7 @@ type IUserDb interface {
 	ListUser(tenantID string) ([]*User, error)
 	Insert(in *User) error
 	MarkDeletedByUsername(tenantID string, username string) error
+	UpdatePassword(tenantID string, username string, encryptedPassword string) error
 }
 
 // model <---> db

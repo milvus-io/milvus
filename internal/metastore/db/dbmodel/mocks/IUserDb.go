@@ -86,6 +86,20 @@ func (_m *IUserDb) MarkDeletedByUsername(tenantID string, username string) error
 	return r0
 }
 
+// UpdatePassword provides a mock function with given fields: tenantID, username, encryptedPassword
+func (_m *IUserDb) UpdatePassword(tenantID string, username string, encryptedPassword string) error {
+	ret := _m.Called(tenantID, username, encryptedPassword)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, string, string) error); ok {
+		r0 = rf(tenantID, username, encryptedPassword)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 type mockConstructorTestingTNewIUserDb interface {
 	mock.TestingT
 	Cleanup(func())

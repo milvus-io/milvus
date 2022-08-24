@@ -1280,7 +1280,7 @@ func (c *Core) Init() error {
 }
 
 func (c *Core) initData() error {
-	credInfo, _ := c.MetaTable.getCredential(util.UserRoot)
+	credInfo, _ := c.MetaTable.GetCredential(util.UserRoot)
 	if credInfo == nil {
 		log.Debug("RootCoord init user root")
 		encryptedRootPassword, _ := crypto.PasswordEncrypt(util.DefaultRootPassword)
@@ -2848,7 +2848,7 @@ func (c *Core) GetCredential(ctx context.Context, in *rootcoordpb.GetCredentialR
 	log.Debug("GetCredential", zap.String("role", typeutil.RootCoordRole),
 		zap.String("username", in.Username))
 
-	credInfo, err := c.MetaTable.getCredential(in.Username)
+	credInfo, err := c.MetaTable.GetCredential(in.Username)
 	if err != nil {
 		log.Error("GetCredential query credential failed", zap.String("role", typeutil.RootCoordRole),
 			zap.String("username", in.Username), zap.Error(err))
@@ -2877,7 +2877,7 @@ func (c *Core) UpdateCredential(ctx context.Context, credInfo *internalpb.Creden
 	log.Debug("UpdateCredential", zap.String("role", typeutil.RootCoordRole),
 		zap.String("username", credInfo.Username))
 	// update data on storage
-	err := c.MetaTable.UpdateCredential(credInfo)
+	err := c.MetaTable.AlterCredential(credInfo)
 	if err != nil {
 		log.Error("UpdateCredential save credential failed", zap.String("role", typeutil.RootCoordRole),
 			zap.String("username", credInfo.Username), zap.Error(err))

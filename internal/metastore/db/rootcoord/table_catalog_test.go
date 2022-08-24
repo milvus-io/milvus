@@ -1340,6 +1340,35 @@ func TestTableCatalog_CreateCredential_InsertUserError(t *testing.T) {
 	require.Error(t, gotErr)
 }
 
+func TestTableCatalog_AlterCredential(t *testing.T) {
+	in := &model.Credential{
+		Username:          username,
+		EncryptedPassword: password,
+	}
+
+	// expectation
+	userDbMock.On("UpdatePassword", tenantID, username, password).Return(nil).Once()
+
+	// actual
+	gotErr := mockCatalog.AlterCredential(ctx, in)
+	require.NoError(t, gotErr)
+}
+
+func TestTableCatalog_AlterCredential_Error(t *testing.T) {
+	in := &model.Credential{
+		Username:          username,
+		EncryptedPassword: password,
+	}
+
+	// expectation
+	errTest := errors.New("test error")
+	userDbMock.On("UpdatePassword", tenantID, username, password).Return(errTest).Once()
+
+	// actual
+	gotErr := mockCatalog.AlterCredential(ctx, in)
+	require.Error(t, gotErr)
+}
+
 func TestTableCatalog_DropCredential(t *testing.T) {
 	// expectation
 	userDbMock.On("MarkDeletedByUsername", tenantID, username).Return(nil).Once()
