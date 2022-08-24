@@ -162,6 +162,14 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 	}
 	log.Debug("Proxy server already listen on tcp", zap.Int("port", grpcPort))
 
+	limiter, err := s.proxy.GetRateLimiter()
+	if err != nil {
+		log.Error("Get proxy rate limiter failed", zap.Int("port", grpcPort), zap.Error(err))
+		errChan <- err
+		return
+	}
+	log.Debug("Get proxy rate limiter done", zap.Int("port", grpcPort))
+
 	opts := trace.GetInterceptorOpts()
 	grpcOpts := []grpc.ServerOption{
 		grpc.KeepaliveEnforcementPolicy(kaep),
@@ -173,6 +181,7 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 			grpc_auth.UnaryServerInterceptor(proxy.AuthenticationInterceptor),
 			proxy.UnaryServerInterceptor(proxy.PrivilegeInterceptor),
 			logutil.UnaryTraceLoggerInterceptor,
+			proxy.RateLimitInterceptor(limiter),
 		)),
 	}
 
@@ -846,4 +855,14 @@ func (s *Server) SelectGrant(ctx context.Context, req *milvuspb.SelectGrantReque
 
 func (s *Server) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error) {
 	return s.proxy.RefreshPolicyInfoCache(ctx, req)
+}
+
+// SetRates notifies Proxy to limit rates of requests.
+func (s *Server) SetRates(ctx context.Context, request *proxypb.SetRatesRequest) (*commonpb.Status, error) {
+	return s.proxy.SetRates(ctx, request)
+}
+
+// GetProxyMetrics gets the metrics of proxy.
+func (s *Server) GetProxyMetrics(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	return s.proxy.GetProxyMetrics(ctx, request)
 }

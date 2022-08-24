@@ -68,6 +68,12 @@ func TestMain(t *testing.M) {
 	// change to specific channel for test
 	Params.CommonCfg.DataCoordTimeTick = Params.CommonCfg.DataCoordTimeTick + strconv.Itoa(rand.Int())
 
+	var err error
+	rateCol, err = newRateCollector()
+	if err != nil {
+		panic("init test failed, err = " + err.Error())
+	}
+
 	code := t.Run()
 	os.Exit(code)
 }
@@ -312,14 +318,30 @@ func TestDataNode(t *testing.T) {
 	t.Run("Test getSystemInfoMetrics", func(t *testing.T) {
 		emptyNode := &DataNode{}
 		emptyNode.session = &sessionutil.Session{ServerID: 1}
+		emptyNode.flowgraphManager = newFlowgraphManager()
 
 		req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
 		assert.NoError(t, err)
 		resp, err := emptyNode.getSystemInfoMetrics(context.TODO(), req)
 		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		log.Info("Test DataNode.getSystemInfoMetrics",
 			zap.String("name", resp.ComponentName),
 			zap.String("response", resp.Response))
+	})
+
+	t.Run("Test getSystemInfoMetrics with quotaMetric error", func(t *testing.T) {
+		emptyNode := &DataNode{}
+		emptyNode.session = &sessionutil.Session{ServerID: 1}
+		emptyNode.flowgraphManager = newFlowgraphManager()
+
+		req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
+		assert.NoError(t, err)
+		rateCol.Deregister(metricsinfo.InsertConsumeThroughput)
+		resp, err := emptyNode.getSystemInfoMetrics(context.TODO(), req)
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		rateCol.Register(metricsinfo.InsertConsumeThroughput)
 	})
 
 	t.Run("Test ShowConfigurations", func(t *testing.T) {
@@ -353,6 +375,7 @@ func TestDataNode(t *testing.T) {
 	t.Run("Test GetMetrics", func(t *testing.T) {
 		node := &DataNode{}
 		node.session = &sessionutil.Session{ServerID: 1}
+		node.flowgraphManager = newFlowgraphManager()
 		// server is closed
 		node.State.Store(internalpb.StateCode_Abnormal)
 		resp, err := node.GetMetrics(ctx, &milvuspb.GetMetricsRequest{})

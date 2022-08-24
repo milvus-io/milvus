@@ -148,8 +148,12 @@ func startEmbedEtcdServer() (*embed.Etcd, error) {
 
 func TestMain(m *testing.M) {
 	setup()
-	// init embed etcd
 	var err error
+	rateCol, err = newRateCollector()
+	if err != nil {
+		panic("init test failed, err = " + err.Error())
+	}
+	// init embed etcd
 	embedetcdServer, err = startEmbedEtcdServer()
 	if err != nil {
 		os.Exit(1)

@@ -38,7 +38,8 @@ type ComponentParam struct {
 	ServiceParam
 	once sync.Once
 
-	CommonCfg commonConfig
+	CommonCfg   commonConfig
+	QuotaConfig quotaConfig
 
 	RootCoordCfg  rootCoordConfig
 	ProxyCfg      proxyConfig
@@ -62,6 +63,7 @@ func (p *ComponentParam) Init() {
 	p.ServiceParam.Init()
 
 	p.CommonCfg.init(&p.BaseTable)
+	p.QuotaConfig.init(&p.BaseTable)
 
 	p.RootCoordCfg.init(&p.BaseTable)
 	p.ProxyCfg.init(&p.BaseTable)

@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/etcd"
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 )
 
@@ -46,7 +47,14 @@ func TestGetSystemInfoMetrics(t *testing.T) {
 	}
 	resp, err := getSystemInfoMetrics(ctx, req, node)
 	assert.NoError(t, err)
-	resp.Status.ErrorCode = commonpb.ErrorCode_Success
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+
+	// test getQuotaMetricsError
+	rateCol.Deregister(metricsinfo.NQPerSecond)
+	resp, err = getSystemInfoMetrics(ctx, req, node)
+	assert.NoError(t, err)
+	assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	rateCol.Register(metricsinfo.NQPerSecond)
 }
 
 func TestGetComponentConfigurationsFailed(t *testing.T) {

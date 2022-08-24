@@ -20,8 +20,10 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strconv"
 	"sync/atomic"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
 
@@ -34,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
@@ -162,6 +165,9 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 				continue
 			}
 
+			rateCol.Add(metricsinfo.InsertConsumeThroughput, float64(proto.Size(&imsg.InsertRequest)))
+			metrics.DataNodeConsumeCounter.WithLabelValues(strconv.FormatInt(Params.DataNodeCfg.GetNodeID(), 10), metrics.InsertLabel).Add(float64(proto.Size(&imsg.InsertRequest)))
+
 			log.Debug("DDNode receive insert messages",
 				zap.Int("numRows", len(imsg.GetRowIDs())),
 				zap.String("vChannelName", ddn.vChannelName))
@@ -182,6 +188,8 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 					zap.Int64("Expected collID", ddn.collectionID))
 				continue
 			}
+			rateCol.Add(metricsinfo.DeleteConsumeThroughput, float64(proto.Size(&dmsg.DeleteRequest)))
+			metrics.DataNodeConsumeCounter.WithLabelValues(strconv.FormatInt(Params.DataNodeCfg.GetNodeID(), 10), metrics.DeleteLabel).Add(float64(proto.Size(&dmsg.DeleteRequest)))
 			fgMsg.deleteMessages = append(fgMsg.deleteMessages, dmsg)
 		}
 	}

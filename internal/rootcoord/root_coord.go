@@ -118,6 +118,8 @@ type Core struct {
 	queryCoord types.QueryCoord
 	indexCoord types.IndexCoord
 
+	quotaCenter *QuotaCenter
+
 	stateCode atomic.Value
 	initOnce  sync.Once
 	startOnce sync.Once
@@ -452,6 +454,9 @@ func (c *Core) initInternal() error {
 
 	c.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
 
+	c.quotaCenter = NewQuotaCenter(c.proxyClientManager, c.queryCoord, c.dataCoord, c.tsoAllocator)
+	log.Debug("RootCoord init QuotaCenter done")
+
 	if err := c.initImportManager(); err != nil {
 		return err
 	}
@@ -604,6 +609,10 @@ func (c *Core) startInternal() error {
 	go c.chanTimeTick.startWatch(&c.wg)
 	go c.importManager.expireOldTasksLoop(&c.wg, c.broker.ReleaseSegRefLock)
 	go c.importManager.sendOutTasksLoop(&c.wg)
+
+	if Params.QuotaConfig.EnableQuotaAndLimits {
+		go c.quotaCenter.run()
+	}
 
 	c.scheduler.Start()
 

@@ -2274,7 +2274,8 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 	method := "Insert"
 	tr := timerecord.NewTimeRecorder(method)
 	receiveSize := proto.Size(request)
-	metrics.ProxyMutationReceiveBytes.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10)).Add(float64(receiveSize))
+	rateCol.Add(internalpb.RateType_DMLInsert.String(), float64(receiveSize))
+	metrics.ProxyReceiveBytes.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), metrics.InsertLabel).Add(float64(receiveSize))
 
 	defer func() {
 		metrics.ProxyDMLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
@@ -2397,7 +2398,8 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 	defer log.Info("Finish processing delete request in Proxy", zap.String("traceID", traceID))
 
 	receiveSize := proto.Size(request)
-	metrics.ProxyMutationReceiveBytes.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10)).Add(float64(receiveSize))
+	rateCol.Add(internalpb.RateType_DMLDelete.String(), float64(receiveSize))
+	metrics.ProxyReceiveBytes.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), metrics.DeleteLabel).Add(float64(receiveSize))
 
 	if !node.checkHealthy() {
 		return &milvuspb.MutationResult{
@@ -2486,6 +2488,11 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 
 // Search search the most similar records of requests.
 func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+	receiveSize := proto.Size(request)
+	metrics.ProxyReceiveBytes.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), metrics.SearchLabel).Add(float64(receiveSize))
+
+	rateCol.Add(internalpb.RateType_DQLSearch.String(), float64(request.GetNq()))
+
 	if !node.checkHealthy() {
 		return &milvuspb.SearchResults{
 			Status: unhealthyStatus(),
@@ -2727,6 +2734,11 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 
 // Query get the records by primary keys.
 func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+	receiveSize := proto.Size(request)
+	metrics.ProxyReceiveBytes.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), metrics.QueryLabel).Add(float64(receiveSize))
+
+	rateCol.Add(internalpb.RateType_DQLQuery.String(), 1)
+
 	if !node.checkHealthy() {
 		return &milvuspb.QueryResults{
 			Status: unhealthyStatus(),
@@ -3556,6 +3568,95 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 	}, nil
 }
 
+// GetProxyMetrics gets the metrics of proxy, it's an internal interface which is different from GetMetrics interface,
+// because it only obtains the metrics of Proxy, not including the topological metrics of Query cluster and Data cluster.
+func (node *Proxy) GetProxyMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	log.Debug("Proxy.GetProxyMetrics",
+		zap.Int64("node_id", Params.ProxyCfg.GetNodeID()),
+		zap.String("req", req.Request))
+
+	if !node.checkHealthy() {
+		log.Warn("Proxy.GetProxyMetrics failed",
+			zap.Int64("node_id", Params.ProxyCfg.GetNodeID()),
+			zap.String("req", req.Request),
+			zap.Error(errProxyIsUnhealthy(Params.ProxyCfg.GetNodeID())))
+
+		return &milvuspb.GetMetricsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    msgProxyIsUnhealthy(Params.ProxyCfg.GetNodeID()),
+			},
+		}, nil
+	}
+
+	metricType, err := metricsinfo.ParseMetricType(req.Request)
+	if err != nil {
+		log.Warn("Proxy.GetProxyMetrics failed to parse metric type",
+			zap.Int64("node_id", Params.ProxyCfg.GetNodeID()),
+			zap.String("req", req.Request),
+			zap.Error(err))
+
+		return &milvuspb.GetMetricsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+		}, nil
+	}
+
+	log.Debug("Proxy.GetProxyMetrics",
+		zap.String("metric_type", metricType))
+
+	msgID := UniqueID(0)
+	msgID, err = node.idAllocator.AllocOne()
+	if err != nil {
+		log.Warn("Proxy.GetProxyMetrics failed to allocate id",
+			zap.Error(err))
+	}
+	req.Base = &commonpb.MsgBase{
+		MsgType:  commonpb.MsgType_SystemInfo,
+		MsgID:    msgID,
+		SourceID: Params.ProxyCfg.GetNodeID(),
+	}
+
+	if metricType == metricsinfo.SystemInfoMetrics {
+		proxyMetrics, err := getProxyMetrics(ctx, req, node)
+		if err != nil {
+			log.Warn("Proxy.GetProxyMetrics failed to getProxyMetrics",
+				zap.Int64("node_id", Params.ProxyCfg.GetNodeID()),
+				zap.String("req", req.Request),
+				zap.Error(err))
+
+			return &milvuspb.GetMetricsResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UnexpectedError,
+					Reason:    err.Error(),
+				},
+			}, nil
+		}
+
+		log.Debug("Proxy.GetProxyMetrics",
+			zap.Int64("node_id", Params.ProxyCfg.GetNodeID()),
+			zap.String("req", req.Request),
+			zap.String("metric_type", metricType),
+			zap.Error(err))
+
+		return proxyMetrics, nil
+	}
+
+	log.Debug("Proxy.GetProxyMetrics failed, request metric type is not implemented yet",
+		zap.Int64("node_id", Params.ProxyCfg.GetNodeID()),
+		zap.String("req", req.Request),
+		zap.String("metric_type", metricType))
+
+	return &milvuspb.GetMetricsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    metricsinfo.MsgUnimplementedMetric,
+		},
+	}, nil
+}
+
 // LoadBalance would do a load balancing operation between query nodes
 func (node *Proxy) LoadBalance(ctx context.Context, req *milvuspb.LoadBalanceRequest) (*commonpb.Status, error) {
 	log.Debug("Proxy.LoadBalance",
@@ -4284,4 +4385,25 @@ func (node *Proxy) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.Refr
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}, nil
+}
+
+// SetRates limits the rates of requests.
+func (node *Proxy) SetRates(ctx context.Context, request *proxypb.SetRatesRequest) (*commonpb.Status, error) {
+	log.Debug("SetRates", zap.String("role", typeutil.ProxyRole), zap.Any("rates", request.GetRates()))
+	resp := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+	}
+	if !node.checkHealthy() {
+		resp = unhealthyStatus()
+		return resp, nil
+	}
+
+	err := node.multiRateLimiter.globalRateLimiter.setRates(request.GetRates())
+	// TODO: set multiple rate limiter rates
+	if err != nil {
+		resp.Reason = err.Error()
+		return resp, nil
+	}
+	resp.ErrorCode = commonpb.ErrorCode_Success
+	return resp, nil
 }

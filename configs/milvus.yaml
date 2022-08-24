@@ -357,3 +357,111 @@ common:
     # tls mode values [0, 1, 2]
     # 0 is close, 1 is one-way authentication, 2 is two-way authentication.
     tlsMode: 0
+
+# QuotaConfig, configurations of Milvus quota and limits.
+# By default, we enable:
+#   1. TT protection;
+#   2. Memory protection.
+# You can enable:
+#   1. DML throughput limitation;
+#   2. DDL, DQL qps/rps limitation;
+#   3. DQL Queue length/latency protection;
+# If necessary, you can also manually force to deny RW requests.
+quotaAndLimits:
+  enable: true # `true` to enable quota and limits, `false` to disable.
+
+  # quotaCenterCollectInterval is the time interval that quotaCenter
+  # collects metrics from Query cluster and Data cluster.
+  quotaCenterCollectInterval: 3 # seconds, (0 ~ 65536)
+
+  ddl: # ddl limit rates, -1 means no limit, default no limit.
+    #collectionRate: # requests per minute, default no limit, rate for CreateCollection, DropCollection, HasCollection, DescribeCollection, LoadCollection, ReleaseCollection
+    #partitionRate: # requests per minute, default no limit, rate for CreatePartition, DropPartition, HasPartition, LoadPartition, ReleasePartition
+    #indexRate: # requests per minute, default no limit, rate for CreateIndex, DropIndex, DescribeIndex
+    #flushRate: # requests per minute, default no limit, rate for flush
+    #compactionRate: # requests per minute, default no limit, rate for manualCompaction
+
+  # dml limit rates, -1 means no limit, default no limit.
+  # The maximum rate will not be greater than `max`,
+  # and the rate after handling back pressure will not be less than `min`.
+  dml:
+    insertRate:
+      #max: # MB/s, default no limit
+      #min: # MB/s, default 0
+    deleteRate:
+      #max: # MB/s, default no limit
+      #min: # MB/s, default 0
+    bulkLoadRate: # not support yet. TODO: limit bulkLoad rate
+      #max: # MB/s, default no limit
+      #min: # MB/s, default 0
+
+  # dql limit rates, -1 means no limit, default no limit.
+  # The maximum rate will not be greater than `max`,
+  # and the rate after handling back pressure will not be less than `min`.
+  dql:
+    searchRate:
+      #max: # vps, default no limit
+      #min: # vps, default 0
+    queryRate:
+      #max: -1 # qps, default no limit
+      #min: -1 # qps, default 0
+
+#  limits: # not support yet. TODO: add comments and support limits
+#    collection:
+#      maxNum: 64 # max number of collections in a Milvus instance.
+#      maxNameLength: 256 # Maximum length of name for a collection or alias.
+#      maxDimension: 32768
+#      maxShardNum: 256
+#      maxRetention: 60 # days,
+#    partition:
+#      maxNum: 4096
+#      maxNameLength: 256
+#    field:
+#      maxNum: 256 # Maximum number of fields in a collection.
+#      maxNameLength: 256
+#    index:
+#      maxNum: 16
+#      maxNameLength: 256
+#      maxDescriptionLength: 4096
+#    dql:
+#      maxQueryParamLength: 256
+#      maxReturnSize: 512 # MB
+#      maxNQ: 32768
+
+  # limitWriting decides whether dml requests are allowed.
+  limitWriting:
+    # forceDeny `false` means dml requests are allowed (except for some
+    # specific conditions, such as memory of nodes to water marker), `true` means always reject all dml requests.
+    forceDeny: false
+    # maxTimeTickDelay indicates the backpressure for DML Operations.
+    # DML rates would be reduced according to the ratio of time tick delay to maxTimeTickDelay,
+    # if time tick delay is greater than maxTimeTickDelay, all DML requests would be rejected.
+    maxTimeTickDelay: 30 # in seconds
+    # When memory usage > memoryHighWaterLevel, all dml requests would be rejected;
+    # When memoryLowWaterLevel < memory usage < memoryHighWaterLevel, reduce the dml rate;
+    # When memory usage < memoryLowWaterLevel, no action.
+    # memoryLowWaterLevel should be less than memoryHighWaterLevel.
+    dataNodeMemoryLowWaterLevel: 0.8 # (0, 1], memoryLowWaterLevel in DataNodes
+    dataNodeMemoryHighWaterLevel: 0.9 # (0, 1], memoryHighWaterLevel in DataNodes
+    queryNodeMemoryLowWaterLevel: 0.8 # (0, 1], memoryLowWaterLevel in QueryNodes
+    queryNodeMemoryHighWaterLevel: 0.9 # (0, 1], memoryHighWaterLevel in QueryNodes
+
+  # limitReading decides whether dql requests are allowed.
+  limitReading:
+    # forceDeny `false` means dql requests are allowed (except for some
+    # specific conditions, such as collection has been dropped), `true` means always reject all dql requests.
+    forceDeny: false
+
+    # NQInQueueThreshold indicated that the system was under backpressure for Search/Query path.
+    # If NQ in any QueryNode's queue is greater than NQInQueueThreshold, search&query rates would gradually cool off
+    # until the NQ in queue no longer exceeds NQInQueueThreshold. We think of the NQ of query request as 1.
+    #NQInQueueThreshold: # milliseconds, default no limit
+
+    # queueLatencyThreshold indicated that the system was under backpressure for Search/Query path.
+    # If dql latency of queuing is greater than queueLatencyThreshold, search&query rates would gradually cool off
+    # until the latency of queuing no longer exceeds queueLatencyThreshold.
+    # The latency here refers to the averaged latency over a period of time.
+    #queueLatencyThreshold: # milliseconds, default no limit
+
+    # coolOffSpeed is the speed of search&query rates cool off.
+    #coolOffSpeed: 0.9 # (0, 1]

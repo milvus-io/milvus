@@ -20,8 +20,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"sync"
 
+	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
@@ -673,6 +675,12 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 		failRet.Status.Reason = err.Error()
 		return failRet, nil
 	}
+
+	if !req.FromShardLeader {
+		rateCol.Add(metricsinfo.NQPerSecond, float64(req.GetReq().GetNq()))
+		rateCol.Add(metricsinfo.SearchThroughput, float64(proto.Size(req)))
+		metrics.QueryNodeExecuteCounter.WithLabelValues(strconv.FormatInt(Params.QueryNodeCfg.GetNodeID(), 10), metrics.SearchLabel).Add(float64(proto.Size(req)))
+	}
 	return ret, nil
 }
 
@@ -825,6 +833,7 @@ func (node *QueryNode) searchWithDmlChannel(ctx context.Context, req *querypb.Se
 	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.SearchLabel, metrics.SuccessLabel).Inc()
 	metrics.QueryNodeSearchNQ.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Observe(float64(req.Req.GetNq()))
 	metrics.QueryNodeSearchTopK.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Observe(float64(req.Req.GetTopk()))
+
 	return ret, nil
 }
 
@@ -1022,6 +1031,11 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 		failRet.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		failRet.Status.Reason = err.Error()
 		return failRet, nil
+	}
+
+	if !req.FromShardLeader {
+		rateCol.Add(metricsinfo.NQPerSecond, 1)
+		metrics.QueryNodeExecuteCounter.WithLabelValues(strconv.FormatInt(Params.QueryNodeCfg.GetNodeID(), 10), metrics.QueryLabel).Add(float64(proto.Size(req)))
 	}
 	return ret, nil
 }

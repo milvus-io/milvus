@@ -58,6 +58,8 @@ enum ErrorCode {
     NotShardLeader = 45;
     NoReplicaAvailable = 46;
     SegmentNotFound = 47;
+    ForceDeny = 48;
+    RateLimit = 49;
 
     // internal error code.
     DDRequestRace = 1000;

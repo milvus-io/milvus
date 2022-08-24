@@ -290,6 +290,24 @@ var (
 		}, []string{
 			nodeIDLabelName,
 		})
+
+	// QueryNodeConsumeCounter counts the bytes QueryNode consumed from message storage.
+	QueryNodeConsumeCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "consume_bytes_counter",
+			Help:      "",
+		}, []string{nodeIDLabelName, msgTypeLabelName})
+
+	// QueryNodeExecuteCounter counts the bytes of requests in QueryNode.
+	QueryNodeExecuteCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "execute_bytes_counter",
+			Help:      "",
+		}, []string{nodeIDLabelName, msgTypeLabelName})
 )
 
 //RegisterQueryNode registers QueryNode metrics
@@ -319,4 +337,6 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeSearchTopK)
 	registry.MustRegister(QueryNodeNumFlowGraphs)
 	registry.MustRegister(QueryNodeNumEntities)
+	registry.MustRegister(QueryNodeConsumeCounter)
+	registry.MustRegister(QueryNodeExecuteCounter)
 }

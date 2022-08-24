@@ -737,6 +737,14 @@ func (m *MockProxy) AlterAlias(ctx context.Context, request *milvuspb.AlterAlias
 	return nil, nil
 }
 
+func (m *MockProxy) SetRates(ctx context.Context, request *proxypb.SetRatesRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
+func (m *MockProxy) GetProxyMetrics(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	return nil, nil
+}
+
 func (m *MockProxy) SetRootCoordClient(rootCoord types.RootCoord) {
 
 }
@@ -751,6 +759,10 @@ func (m *MockProxy) SetIndexCoordClient(indexCoord types.IndexCoord) {
 
 func (m *MockProxy) SetQueryCoordClient(queryCoord types.QueryCoord) {
 
+}
+
+func (m *MockProxy) GetRateLimiter() (types.Limiter, error) {
+	return nil, nil
 }
 
 func (m *MockProxy) UpdateStateCode(stateCode internalpb.StateCode) {

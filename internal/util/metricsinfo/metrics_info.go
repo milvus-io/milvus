@@ -99,6 +99,7 @@ type QueryNodeConfiguration struct {
 type QueryNodeInfos struct {
 	BaseComponentInfos
 	SystemConfigurations QueryNodeConfiguration `json:"system_configurations"`
+	QuotaMetrics         *QueryNodeQuotaMetrics `json:"quota_metrics"`
 }
 
 // QueryCoordConfiguration records the configuration of QueryCoord.
@@ -123,6 +124,7 @@ type ProxyConfiguration struct {
 type ProxyInfos struct {
 	BaseComponentInfos
 	SystemConfigurations ProxyConfiguration `json:"system_configurations"`
+	QuotaMetrics         *ProxyQuotaMetrics `json:"quota_metrics"`
 }
 
 // IndexNodeConfiguration records the configuration of IndexNode.
@@ -158,6 +160,7 @@ type DataNodeConfiguration struct {
 type DataNodeInfos struct {
 	BaseComponentInfos
 	SystemConfigurations DataNodeConfiguration `json:"system_configurations"`
+	QuotaMetrics         *DataNodeQuotaMetrics `json:"quota_metrics"`
 }
 
 // DataCoordConfiguration records the configuration of DataCoord.

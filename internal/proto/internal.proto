@@ -321,5 +321,23 @@ message ShowConfigurationsRequest {
 
 message ShowConfigurationsResponse {
   common.Status status = 1;
-  repeated common.KeyValuePair configuations = 2; 
+  repeated common.KeyValuePair configuations = 2;
+}
+
+enum RateType {
+  DDLCollection = 0;
+  DDLPartition = 1;
+  DDLIndex = 2;
+  DDLFlush = 3;
+  DDLCompaction = 4;
+  DMLInsert = 5;
+  DMLDelete = 6;
+  DMLBulkLoad = 7;
+  DQLSearch = 8;
+  DQLQuery = 9;
+}
+
+message Rate {
+  RateType rt = 1;
+  double r = 2;
 }

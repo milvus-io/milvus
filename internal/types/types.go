@@ -37,6 +37,13 @@ type TimeTickProvider interface {
 	GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error)
 }
 
+// Limiter defines the interface to perform request rate limiting.
+// If Limit function return true, the request will be rejected.
+// Otherwise, the request will pass. Limit also returns limit of limiter.
+type Limiter interface {
+	Limit(rt internalpb.RateType, n int) (bool, float64)
+}
+
 // Component is the interface all services implement
 type Component interface {
 	Init() error
@@ -797,6 +804,12 @@ type Proxy interface {
 
 	UpdateCredentialCache(ctx context.Context, request *proxypb.UpdateCredCacheRequest) (*commonpb.Status, error)
 
+	// SetRates notifies Proxy to limit rates of requests.
+	SetRates(ctx context.Context, req *proxypb.SetRatesRequest) (*commonpb.Status, error)
+
+	// GetProxyMetrics gets the metrics of proxy, it's an internal interface which is different from GetMetrics interface,
+	// because it only obtains the metrics of Proxy, not including the topological metrics of Query cluster and Data cluster.
+	GetProxyMetrics(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 	RefreshPolicyInfoCache(ctx context.Context, req *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error)
 }
 
@@ -823,6 +836,9 @@ type ProxyComponent interface {
 	// SetQueryCoordClient set QueryCoord for Proxy
 	//  `queryCoord` is a client of query coordinator.
 	SetQueryCoordClient(queryCoord QueryCoord)
+
+	// GetRateLimiter returns the rateLimiter in Proxy
+	GetRateLimiter() (Limiter, error)
 
 	// UpdateStateCode updates state code for Proxy
 	//  `stateCode` is current statement of this proxy node, indicating whether it's healthy.
