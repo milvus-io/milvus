@@ -17,6 +17,7 @@ RUN yum install -y epel-release centos-release-scl-rh && yum install -y wget cur
       libcurl-devel python3-devel \
       devtoolset-7-gcc devtoolset-7-gcc-c++ devtoolset-7-gcc-gfortran \
       llvm-toolset-7.0-clang llvm-toolset-7.0-clang-tools-extra \
+      libuuid-devel pulseaudio-libs-devel \
       ccache lcov libtool m4 autoconf automake && \
       rm -rf /var/cache/yum/* && \
     echo "source scl_source enable devtoolset-7" >> /etc/profile.d/devtoolset-7.sh && \

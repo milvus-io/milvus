@@ -46,7 +46,7 @@ jobs:
           export LATEST_DATE_VERSION=${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}
           DATE_VERSION=latest docker-compose build builder
       - name: Docker Push
-        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
+        # if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus'
         continue-on-error: true
         shell: bash
         run: |
