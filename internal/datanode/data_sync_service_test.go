@@ -37,7 +37,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
-	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
 var dataSyncServiceTestDir = "/tmp/milvus_test/data_sync_service"
@@ -483,8 +482,6 @@ func TestGetDmlChannelPositionByBroadcast(t *testing.T) {
 	}
 
 	dmlChannelName := "fake-by-dev-rootcoord-dml-channel-test-getDmlChannelPositionByBroadcast"
-	deltaChannelName, err := funcutil.ConvertChannelName(dmlChannelName, Params.CommonCfg.RootCoordDml, Params.CommonCfg.RootCoordDelta)
-	assert.NoError(t, err)
 
 	insertStream, _ := factory.NewMsgStream(ctx)
 	insertStream.AsProducer([]string{dmlChannelName})
@@ -495,6 +492,6 @@ func TestGetDmlChannelPositionByBroadcast(t *testing.T) {
 	ids, err := dsService.getDmlChannelPositionByBroadcast(ctx, dmlChannelName, 0)
 	assert.NoError(t, err)
 	assert.NotNil(t, ids)
-	id := ids[deltaChannelName]
+	id := ids[dmlChannelName]
 	assert.NotNil(t, id)
 }

@@ -423,17 +423,12 @@ func (dsService *dataSyncService) broadcastMarkDmlChannel(ctx context.Context, c
 		zap.String("pChannelName", pChannelName),
 	)
 
-	deltaChannelName, err := funcutil.ConvertChannelName(pChannelName, Params.CommonCfg.RootCoordDml, Params.CommonCfg.RootCoordDelta)
-	if err != nil {
-		return nil, err
-	}
-
 	dmlStream, err := dsService.msFactory.NewMsgStream(ctx)
 	if err != nil {
 		return nil, err
 	}
 	dmlStream.SetRepackFunc(msgstream.DefaultRepackFunc)
-	dmlStream.AsProducer([]string{deltaChannelName})
+	dmlStream.AsProducer([]string{pChannelName})
 	dmlStream.Start()
 	defer dmlStream.Close()
 
