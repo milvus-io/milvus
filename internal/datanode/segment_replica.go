@@ -278,6 +278,11 @@ func (replica *SegmentReplica) addSegment(req addSegmentReq) error {
 		zap.Int64("collection ID", req.collID),
 		zap.Int64("partition ID", req.partitionID),
 		zap.String("channel name", req.channelName),
+		zap.Any("start position", req.startPos),
+		zap.Any("end position", req.endPos),
+		zap.Any("checkpoints", req.cp),
+		zap.Uint64("recover ts", req.recoverTs),
+		zap.Bool("importing", req.importing),
 	)
 	seg := &Segment{
 		collectionID: req.collID,

@@ -79,7 +79,7 @@ const (
 	ConnectEtcdMaxRetryTime = 100
 )
 
-var addImportSegmentAttempts = uint(50)
+var getFlowGraphServiceAttempts = uint(50)
 
 // makes sure DataNode implements types.DataNode
 var _ types.DataNode = (*DataNode)(nil)
@@ -992,7 +992,7 @@ func (node *DataNode) AddImportSegment(ctx context.Context, req *datapb.AddImpor
 			return errors.New("channel not found")
 		}
 		return nil
-	}, retry.Attempts(addImportSegmentAttempts))
+	}, retry.Attempts(getFlowGraphServiceAttempts))
 	if err != nil {
 		log.Error("channel not found in current DataNode",
 			zap.String("channel name", req.GetChannelName()),
@@ -1009,14 +1009,6 @@ func (node *DataNode) AddImportSegment(ctx context.Context, req *datapb.AddImpor
 			zap.Int64("segment ID", req.GetSegmentId()))
 		// Add segment as a flushed segment, but set `importing` to true to add extra information of the segment.
 		// By 'extra information' we mean segment info while adding a `SegmentType_New` typed segment.
-		id, err := ds.getDmlChannelPositionByBroadcast(ctx, req.GetChannelName(), req.GetBase().GetTimestamp())
-		if err != nil {
-			log.Error("failed to get channel position", zap.Error(err))
-			return &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			}, nil
-		}
 		if err := ds.replica.addSegment(
 			addSegmentReq{
 				segType:      datapb.SegmentType_Flushed,
@@ -1028,12 +1020,12 @@ func (node *DataNode) AddImportSegment(ctx context.Context, req *datapb.AddImpor
 				statsBinLogs: req.GetStatsLog(),
 				startPos: &internalpb.MsgPosition{
 					ChannelName: req.GetChannelName(),
-					MsgID:       id,
+					MsgID:       req.GetDmlPositionId(),
 					Timestamp:   req.GetBase().GetTimestamp(),
 				},
 				endPos: &internalpb.MsgPosition{
 					ChannelName: req.GetChannelName(),
-					MsgID:       id,
+					MsgID:       req.GetDmlPositionId(),
 					Timestamp:   req.GetBase().GetTimestamp(),
 				},
 				recoverTs: req.GetBase().GetTimestamp(),
@@ -1077,7 +1069,9 @@ func importFlushReqFunc(node *DataNode, req *datapb.ImportTaskRequest, res *root
 		}
 
 		// ask DataCoord to alloc a new segment
-		log.Info("import task flush segment", zap.Any("ChannelNames", req.ImportTask.ChannelNames), zap.Int("shardID", shardID))
+		log.Info("import task flush segment",
+			zap.Any("channel names", req.GetImportTask().GetChannelNames()),
+			zap.Int("shard ID", shardID))
 		segReqs := []*datapb.SegmentIDRequest{
 			{
 				ChannelName:  req.ImportTask.ChannelNames[shardID],
@@ -1212,18 +1206,45 @@ func importFlushReqFunc(node *DataNode, req *datapb.ImportTaskRequest, res *root
 			fieldStats = append(fieldStats, &datapb.FieldBinlog{FieldID: k, Binlogs: []*datapb.Binlog{v}})
 		}
 
+		// Fetch the flow graph on the given v-channel.
+		var ds *dataSyncService
+		// Retry in case the channel hasn't been watched yet.
+		err = retry.Do(context.Background(), func() error {
+			var ok bool
+			ds, ok = node.flowgraphManager.getFlowgraphService(segReqs[0].GetChannelName())
+			if !ok {
+				return errors.New("channel not found")
+			}
+			return nil
+		}, retry.Attempts(getFlowGraphServiceAttempts))
+		if err != nil {
+			log.Error("channel not found in current DataNode",
+				zap.Error(err),
+				zap.String("channel name", segReqs[0].GetChannelName()),
+				zap.Int64("node ID", Params.DataNodeCfg.GetNodeID()))
+			return err
+		}
+		// Get the current dml channel position ID, that will be used in segments start positions and end positions.
+		posID, err := ds.getDmlChannelPositionByBroadcast(context.Background(), segReqs[0].GetChannelName(), req.GetBase().GetTimestamp())
+		if err != nil {
+			return errors.New("failed to get channel position")
+		}
 		log.Info("adding segment to the correct DataNode flow graph and saving binlog paths")
 		err = retry.Do(context.Background(), func() error {
 			// Ask DataCoord to save binlog path and add segment to the corresponding DataNode flow graph.
 			resp, err := node.dataCoord.SaveImportSegment(context.Background(), &datapb.SaveImportSegmentRequest{
 				Base: &commonpb.MsgBase{
 					SourceID: Params.DataNodeCfg.GetNodeID(),
+					// Pass current timestamp downstream.
+					Timestamp: ts,
 				},
 				SegmentId:    segmentID,
 				ChannelName:  segReqs[0].GetChannelName(),
 				CollectionId: req.GetImportTask().GetCollectionId(),
 				PartitionId:  req.GetImportTask().GetPartitionId(),
 				RowNum:       int64(rowNum),
+				// Pass the DML position ID downstream.
+				DmlPositionId: posID,
 				SaveBinlogPathReq: &datapb.SaveBinlogPathsRequest{
 					Base: &commonpb.MsgBase{
 						MsgType:   0,
@@ -1235,7 +1256,18 @@ func importFlushReqFunc(node *DataNode, req *datapb.ImportTaskRequest, res *root
 					CollectionID:        req.GetImportTask().GetCollectionId(),
 					Field2BinlogPaths:   fieldInsert,
 					Field2StatslogPaths: fieldStats,
-					Importing:           true,
+					// Set start positions of a SaveBinlogPathRequest explicitly.
+					StartPositions: []*datapb.SegmentStartPosition{
+						{
+							StartPosition: &internalpb.MsgPosition{
+								ChannelName: segReqs[0].GetChannelName(),
+								MsgID:       posID,
+								Timestamp:   ts,
+							},
+							SegmentID: segmentID,
+						},
+					},
+					Importing: true,
 				},
 			})
 			// Only retrying when DataCoord is unhealthy or err != nil, otherwise return immediately.

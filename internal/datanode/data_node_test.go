@@ -28,26 +28,23 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/common"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
-	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/dependency"
-
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
-
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -382,6 +379,28 @@ func TestDataNode(t *testing.T) {
 		]
 		}`)
 
+		chName1 := "fake-by-dev-rootcoord-dml-testimport-1"
+		chName2 := "fake-by-dev-rootcoord-dml-testimport-2"
+		err := node.flowgraphManager.addAndStart(node, &datapb.VchannelInfo{
+			CollectionID:        100,
+			ChannelName:         chName1,
+			UnflushedSegmentIds: []int64{},
+			FlushedSegmentIds:   []int64{},
+		})
+		require.Nil(t, err)
+		err = node.flowgraphManager.addAndStart(node, &datapb.VchannelInfo{
+			CollectionID:        100,
+			ChannelName:         chName2,
+			UnflushedSegmentIds: []int64{},
+			FlushedSegmentIds:   []int64{},
+		})
+		require.Nil(t, err)
+
+		_, ok := node.flowgraphManager.getFlowgraphService(chName1)
+		assert.True(t, ok)
+		_, ok = node.flowgraphManager.getFlowgraphService(chName2)
+		assert.True(t, ok)
+
 		filePath := "import/rows_1.json"
 		err = node.chunkManager.Write(filePath, content)
 		assert.NoError(t, err)
@@ -389,13 +408,13 @@ func TestDataNode(t *testing.T) {
 			ImportTask: &datapb.ImportTask{
 				CollectionId: 100,
 				PartitionId:  100,
-				ChannelNames: []string{"ch1", "ch2"},
+				ChannelNames: []string{chName1, chName2},
 				Files:        []string{filePath},
 				RowBased:     true,
 			},
 		}
 		node.rootCoord.(*RootCoordFactory).ReportImportErr = true
-		_, err := node.Import(context.WithValue(ctx, ctxKey{}, ""), req)
+		_, err = node.Import(context.WithValue(ctx, ctxKey{}, ""), req)
 		assert.NoError(t, err)
 		node.rootCoord.(*RootCoordFactory).ReportImportErr = false
 
@@ -640,7 +659,7 @@ func TestDataNode_AddSegment(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, stat.GetErrorCode())
 		assert.Equal(t, "", stat.GetReason())
 
-		addImportSegmentAttempts = 3
+		getFlowGraphServiceAttempts = 3
 		stat, err = node.AddImportSegment(context.WithValue(ctx, ctxKey{}, ""), &datapb.AddImportSegmentRequest{
 			SegmentId:    100,
 			CollectionId: 100,

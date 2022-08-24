@@ -554,6 +554,7 @@ message AddImportSegmentRequest {
   int64 partition_id = 5;
   int64 row_num = 6;
   repeated FieldBinlog stats_log = 7;
+  bytes dml_position_id = 8;
 }
 
 message SaveImportSegmentRequest {
@@ -564,6 +565,7 @@ message SaveImportSegmentRequest {
   int64 partition_id = 5;
   int64 row_num = 6;
   SaveBinlogPathsRequest save_binlog_path_req = 7;
+  bytes dml_position_id = 8;
 }
 
 message CompleteBulkLoadRequest {

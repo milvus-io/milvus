@@ -1192,14 +1192,16 @@ func (s *Server) SaveImportSegment(ctx context.Context, req *datapb.SaveImportSe
 	resp, err := cli.AddImportSegment(ctx,
 		&datapb.AddImportSegmentRequest{
 			Base: &commonpb.MsgBase{
-				SourceID: Params.DataNodeCfg.GetNodeID(),
+				SourceID:  Params.DataNodeCfg.GetNodeID(),
+				Timestamp: req.GetBase().GetTimestamp(),
 			},
-			SegmentId:    req.GetSegmentId(),
-			ChannelName:  req.GetChannelName(),
-			CollectionId: req.GetCollectionId(),
-			PartitionId:  req.GetPartitionId(),
-			RowNum:       req.GetRowNum(),
-			StatsLog:     req.GetSaveBinlogPathReq().GetField2StatslogPaths(),
+			SegmentId:     req.GetSegmentId(),
+			ChannelName:   req.GetChannelName(),
+			CollectionId:  req.GetCollectionId(),
+			PartitionId:   req.GetPartitionId(),
+			RowNum:        req.GetRowNum(),
+			StatsLog:      req.GetSaveBinlogPathReq().GetField2StatslogPaths(),
+			DmlPositionId: req.GetDmlPositionId(),
 		})
 	if err := VerifyResponse(resp, err); err != nil {
 		log.Error("failed to add segment", zap.Int64("DataNode ID", nodeID), zap.Error(err))
