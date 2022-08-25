@@ -61,8 +61,6 @@ SearchOnSealed(const Schema& schema,
     float* distances = (float*)knowhere::GetDatasetDistance(final);
 
     auto total_num = num_queries * topk;
-
-    const float multiplier = pow(10.0, round_decimal);
     if (round_decimal != -1) {
         const float multiplier = pow(10.0, round_decimal);
         for (int i = 0; i < total_num; i++) {
