@@ -462,6 +462,13 @@ func TestReloadTaskFromKV(t *testing.T) {
 
 	taskScheduler.reloadFromKV()
 
+	// wait for the addtask goroutine finished
+	assert.Eventually(t,
+		func() bool {
+			return taskScheduler.triggerTaskQueue.Len() == len(kvs)-2
+		},
+		10*time.Second, 100*time.Millisecond)
+
 	task := taskScheduler.triggerTaskQueue.popTask()
 	assert.Equal(t, taskDone, task.getState())
 	assert.Equal(t, 1, len(task.getChildTask()))
