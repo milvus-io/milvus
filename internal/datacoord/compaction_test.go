@@ -78,6 +78,35 @@ func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 			false,
 			nil,
 		},
+		{
+			"test exec compaction failed",
+			fields{
+				plans: map[int64]*compactionTask{},
+				sessions: &SessionManager{
+					sessions: struct {
+						sync.RWMutex
+						data map[int64]*Session
+					}{
+						data: map[int64]*Session{
+							1: {client: &mockDataNodeClient{ch: ch, compactionResp: &commonpb.Status{ErrorCode: commonpb.ErrorCode_CacheFailed}}},
+						},
+					},
+				},
+				chManager: &ChannelManager{
+					store: &ChannelStore{
+						channelsInfo: map[int64]*NodeChannelInfo{
+							1: {NodeID: 1, Channels: []*channel{{Name: "ch1"}}},
+						},
+					},
+				},
+			},
+			args{
+				signal: &compactionSignal{id: 100},
+				plan:   &datapb.CompactionPlan{PlanID: 1, Channel: "ch1", Type: datapb.CompactionType_MergeCompaction},
+			},
+			true,
+			nil,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -93,9 +122,19 @@ func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 			if err == nil {
 				<-ch
 				task := c.getCompaction(tt.args.plan.PlanID)
-				assert.Equal(t, tt.args.plan, task.plan)
-				assert.Equal(t, tt.args.signal, task.triggerInfo)
-				assert.Equal(t, 1, c.executingTaskNum)
+				if !tt.wantErr {
+					assert.Equal(t, tt.args.plan, task.plan)
+					assert.Equal(t, tt.args.signal, task.triggerInfo)
+					assert.Equal(t, 1, c.executingTaskNum)
+				} else {
+					assert.Eventually(t,
+						func() bool {
+							c.mu.RLock()
+							defer c.mu.RUnlock()
+							return c.executingTaskNum == 0 && len(c.parallelCh[1]) == 0
+						},
+						5*time.Second, 100*time.Millisecond)
+				}
 			}
 		})
 	}
@@ -455,7 +494,8 @@ func Test_compactionPlanHandler_updateCompaction(t *testing.T) {
 		fields    fields
 		args      args
 		wantErr   bool
-		expired   []int64
+		timeout   []int64
+		failed    []int64
 		unexpired []int64
 	}{
 		{
@@ -484,7 +524,7 @@ func Test_compactionPlanHandler_updateCompaction(t *testing.T) {
 						},
 					},
 					3: {
-						state:      completed,
+						state:      executing,
 						dataNodeID: 2,
 						plan: &datapb.CompactionPlan{
 							PlanID:           3,
@@ -519,6 +559,8 @@ func Test_compactionPlanHandler_updateCompaction(t *testing.T) {
 								compactionStateResp: &datapb.CompactionStateResponse{
 									Results: []*datapb.CompactionStateResult{
 										{PlanID: 1, State: commonpb.CompactionState_Executing},
+										{PlanID: 3, State: commonpb.CompactionState_Completed, Result: &datapb.CompactionResult{PlanID: 3}},
+										{PlanID: 4, State: commonpb.CompactionState_Executing},
 									},
 								},
 							}},
@@ -528,7 +570,8 @@ func Test_compactionPlanHandler_updateCompaction(t *testing.T) {
 			},
 			args{ts: tsoutil.ComposeTS(ts.Add(5*time.Second).UnixNano()/int64(time.Millisecond), 0)},
 			false,
-			[]int64{2, 4},
+			[]int64{4},
+			[]int64{2},
 			[]int64{1, 3},
 		},
 	}
@@ -543,7 +586,12 @@ func Test_compactionPlanHandler_updateCompaction(t *testing.T) {
 			err := c.updateCompaction(tt.args.ts)
 			assert.Equal(t, tt.wantErr, err != nil)
 
-			for _, id := range tt.expired {
+			for _, id := range tt.timeout {
+				task := c.getCompaction(id)
+				assert.Equal(t, timeout, task.state)
+			}
+
+			for _, id := range tt.failed {
 				task := c.getCompaction(id)
 				assert.Equal(t, failed, task.state)
 			}
