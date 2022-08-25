@@ -184,8 +184,8 @@ SegmentGrowingImpl::vector_search(query::SearchInfo& search_info,
                                   SearchResult& output) const {
     auto& sealed_indexing = this->get_sealed_indexing_record();
     if (sealed_indexing.is_ready(search_info.field_id_)) {
-        query::SearchOnSealed(this->get_schema(), sealed_indexing, search_info, query_data, query_count, bitset,
-                              output);
+        query::SearchOnSealedIndex(this->get_schema(), sealed_indexing, search_info, query_data, query_count, bitset,
+                                   output);
     } else {
         query::SearchOnGrowing(*this, search_info, query_data, query_count, timestamp, bitset, output);
     }
