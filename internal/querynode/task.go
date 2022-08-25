@@ -31,7 +31,6 @@ import (
 	queryPb "github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"golang.org/x/sync/errgroup"
 )
 
 type task interface {
@@ -543,22 +542,22 @@ func (l *loadSegmentsTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	runningGroup, groupCtx := errgroup.WithContext(l.ctx)
+	var pos *internalpb.MsgPosition
 	for _, deltaPosition := range l.req.DeltaPositions {
-		pos := deltaPosition
-		runningGroup.Go(func() error {
-			// reload data from dml channel
-			return l.node.loader.FromDmlCPLoadDelete(groupCtx, l.req.CollectionID, pos)
-		})
-	}
-	err = runningGroup.Wait()
-	if err != nil {
-		for _, segment := range l.req.Infos {
-			l.node.metaReplica.removeSegment(segment.SegmentID, segmentTypeSealed)
+		if pos == nil || deltaPosition.GetTimestamp() < pos.GetTimestamp() {
+			pos = deltaPosition
 		}
-		log.Warn("failed to load delete data while load segment", zap.Int64("collectionID", l.req.CollectionID),
-			zap.Int64("replicaID", l.req.ReplicaID), zap.Error(err))
-		return err
+	}
+	if pos != nil {
+		err = l.node.loader.FromDmlCPLoadDelete(ctx, l.req.CollectionID, pos)
+		if err != nil {
+			for _, segment := range l.req.Infos {
+				l.node.metaReplica.removeSegment(segment.SegmentID, segmentTypeSealed)
+			}
+			log.Warn("failed to load delete data while load segment", zap.Int64("collectionID", l.req.CollectionID),
+				zap.Int64("replicaID", l.req.ReplicaID), zap.Error(err))
+			return err
+		}
 	}
 
 	log.Info("LoadSegmentTask Execute done", zap.Int64("collectionID", l.req.CollectionID),
