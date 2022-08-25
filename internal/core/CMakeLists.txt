@@ -50,6 +50,14 @@ else ()
     message(FATAL_ERROR "Unsupported platform!" )
 endif ()
 
+if (CMAKE_COMPILER_IS_GNUCC)
+    if (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 11.99)
+        # ignore deprecated declarations for gcc>=12
+        # TODO: this workaround may removed when protobuf upgraded
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=deprecated-declarations")
+    endif ()
+endif ()
+
 set( CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake" )
 include( Utils )
 
