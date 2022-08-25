@@ -129,8 +129,7 @@ class SegmentInternalInterface : public SegmentInterface {
 
  public:
     virtual void
-    vector_search(int64_t vec_count,
-                  query::SearchInfo& search_info,
+    vector_search(query::SearchInfo& search_info,
                   const void* query_data,
                   int64_t query_count,
                   Timestamp timestamp,

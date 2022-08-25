@@ -349,8 +349,7 @@ SegmentSealedImpl::mask_with_delete(BitsetType& bitset, int64_t ins_barrier, Tim
 }
 
 void
-SegmentSealedImpl::vector_search(int64_t vec_count,
-                                 query::SearchInfo& search_info,
+SegmentSealedImpl::vector_search(query::SearchInfo& search_info,
                                  const void* query_data,
                                  int64_t query_count,
                                  Timestamp timestamp,
@@ -364,7 +363,7 @@ SegmentSealedImpl::vector_search(int64_t vec_count,
     if (get_bit(index_ready_bitset_, field_id)) {
         AssertInfo(vector_indexings_.is_ready(field_id),
                    "vector indexes isn't ready for field " + std::to_string(field_id.get()));
-        query::SearchOnSealed(*schema_, vector_indexings_, search_info, query_data, query_count, bitset, output, id_);
+        query::SearchOnSealed(*schema_, vector_indexings_, search_info, query_data, query_count, bitset, output);
         return;
     } else if (!get_bit(field_data_ready_bitset_, field_id)) {
         PanicInfo("Field Data is not loaded");

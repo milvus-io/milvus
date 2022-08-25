@@ -27,8 +27,7 @@ SearchOnSealed(const Schema& schema,
                const void* query_data,
                int64_t num_queries,
                const BitsetView& bitset,
-               SearchResult& result,
-               int64_t segment_id) {
+               SearchResult& result) {
     auto topk = search_info.topk_;
     auto round_decimal = search_info.round_decimal_;
 
