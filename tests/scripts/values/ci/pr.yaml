@@ -4,13 +4,13 @@ metrics:
 proxy:
   resources:
     requests:
-      cpu: "0.3"
+      cpu: "0.1"
       memory: "256Mi"
 
 rootCoordinator:
   resources:
     requests:
-      cpu: "0.3"
+      cpu: "0.1"
       memory: "256Mi"
 
 queryCoordinator:
@@ -22,7 +22,7 @@ queryCoordinator:
 queryNode:
   resources:
     requests:
-      cpu: "2"
+      cpu: "0.5"
       memory: "500Mi"
 indexCoordinator:
   resources:
@@ -32,7 +32,7 @@ indexCoordinator:
 indexNode:
   resources:
     requests:
-      cpu: "1"
+      cpu: "0.5"
       memory: "500Mi"
 
 dataCoordinator:
@@ -57,7 +57,7 @@ pulsar:
       httpNumThreads: "50"
     resources:
       requests:
-        cpu: "1"
+        cpu: "0.5"
         memory: "2Gi"
   # Resources for the websocket proxy
     wsResources:
@@ -67,7 +67,7 @@ pulsar:
   broker:
     resources:
       requests:
-        cpu: "1.5"
+        cpu: "0.5"
         memory: "4Gi"
     configData:
       PULSAR_MEM: >
@@ -116,7 +116,7 @@ pulsar:
       nettyMaxFrameSizeBytes: "104867840"
     resources:
       requests:
-        cpu: 1
+        cpu: "0.5"
         memory: "4Gi"
 
   bastion:
@@ -128,7 +128,7 @@ pulsar:
   autorecovery:
     resources:
       requests:
-        cpu: "1"
+        cpu: "0.5"
         memory: "512Mi"
 
   zookeeper:
@@ -162,5 +162,5 @@ minio:
 standalone:
   resources:
     requests:
-      cpu: "1"
+      cpu: "0.5"
       memory: "3.5Gi"
