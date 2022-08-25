@@ -363,27 +363,15 @@ SegmentSealedImpl::vector_search(query::SearchInfo& search_info,
     if (get_bit(index_ready_bitset_, field_id)) {
         AssertInfo(vector_indexings_.is_ready(field_id),
                    "vector indexes isn't ready for field " + std::to_string(field_id.get()));
-        query::SearchOnSealed(*schema_, vector_indexings_, search_info, query_data, query_count, bitset, output);
-        return;
-    } else if (!get_bit(field_data_ready_bitset_, field_id)) {
-        PanicInfo("Field Data is not loaded");
+        query::SearchOnSealedIndex(*schema_, vector_indexings_, search_info, query_data, query_count, bitset, output);
+    } else {
+        AssertInfo(get_bit(field_data_ready_bitset_, field_id),
+                   "Field Data is not loaded: " + std::to_string(field_id.get()));
+        AssertInfo(row_count_opt_.has_value(), "Can't get row count value");
+        auto row_count = row_count_opt_.value();
+        query::SearchOnSealed(*schema_, insert_record_, search_info, query_data, query_count, row_count, bitset,
+                              output);
     }
-
-    query::dataset::SearchDataset dataset{search_info.metric_type_,   query_count,          search_info.topk_,
-                                          search_info.round_decimal_, field_meta.get_dim(), query_data};
-    AssertInfo(get_bit(field_data_ready_bitset_, field_id),
-               "Can't get bitset element at " + std::to_string(field_id.get()));
-    AssertInfo(row_count_opt_.has_value(), "Can't get row count value");
-    auto row_count = row_count_opt_.value();
-    auto vec_data = insert_record_.get_field_data_base(field_id);
-    AssertInfo(vec_data->num_chunk() == 1, "num chunk not equal to 1 for sealed segment");
-    auto chunk_data = vec_data->get_chunk_data(0);
-    auto sub_qr = query::BruteForceSearch(dataset, chunk_data, row_count, bitset);
-
-    output.distances_ = std::move(sub_qr.mutable_distances());
-    output.seg_offsets_ = std::move(sub_qr.mutable_seg_offsets());
-    output.unity_topK_ = dataset.topk;
-    output.total_nq_ = dataset.num_queries;
 }
 
 void

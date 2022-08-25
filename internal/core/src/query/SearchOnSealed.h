@@ -19,12 +19,22 @@
 namespace milvus::query {
 
 void
+SearchOnSealedIndex(const Schema& schema,
+                    const segcore::SealedIndexingRecord& record,
+                    const SearchInfo& search_info,
+                    const void* query_data,
+                    int64_t num_queries,
+                    const BitsetView& view,
+                    SearchResult& result);
+
+void
 SearchOnSealed(const Schema& schema,
-               const segcore::SealedIndexingRecord& record,
+               const segcore::InsertRecord& record,
                const SearchInfo& search_info,
                const void* query_data,
                int64_t num_queries,
-               const BitsetView& view,
+               int64_t row_count,
+               const BitsetView& bitset,
                SearchResult& result);
 
 }  // namespace milvus::query
