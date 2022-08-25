@@ -57,3 +57,17 @@ const (
 // Endian is type alias of binary.LittleEndian.
 // Milvus uses little endian by default.
 var Endian = binary.LittleEndian
+
+const (
+	// SegmentInsertLogPath storage path const for segment insert binlog.
+	SegmentInsertLogPath = `insert_log`
+
+	// SegmentDeltaLogPath storage path const for segment delta log.
+	SegmentDeltaLogPath = `delta_log`
+
+	// SegmentStatslogPath storage path const for segment stats log.
+	SegmentStatslogPath = `stats_log`
+
+	// SegmentIndexPath storage path const for segment index files.
+	SegmentIndexPath = `index_files`
+)

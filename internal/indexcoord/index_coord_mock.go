@@ -547,6 +547,10 @@ type chunkManagerMock struct {
 	remove           func(string) error
 }
 
+func (cmm *chunkManagerMock) RootPath() string {
+	return ""
+}
+
 func (cmm *chunkManagerMock) RemoveWithPrefix(prefix string) error {
 	return cmm.removeWithPrefix(prefix)
 }

@@ -26,6 +26,8 @@ type FileReader interface {
 // ChunkManager is to manager chunks.
 // Include Read, Write, Remove chunks.
 type ChunkManager interface {
+	// RootPath returns current root path.
+	RootPath() string
 	// Path returns path of @filePath.
 	Path(filePath string) (string, error)
 	// Size returns path of @filePath.

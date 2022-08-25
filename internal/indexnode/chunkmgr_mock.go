@@ -91,6 +91,10 @@ var _ storage.ChunkManager = &mockChunkmgr{}
 
 // var _ dependency.Factory = &mockFactory{}
 
+func (c *mockChunkmgr) RootPath() string {
+	return ""
+}
+
 func (c *mockChunkmgr) Path(filePath string) (string, error) {
 	// TODO
 	return filePath, errNotImplErr
