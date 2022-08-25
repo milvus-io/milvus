@@ -15,7 +15,7 @@ FROM milvusdb/openblas:ubuntu18.04-20210428 AS openblas
 FROM ubuntu:bionic-20200921
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends libtbb-dev gfortran netcat iputils-ping ca-certificates && \
+    apt-get install -y --no-install-recommends libtbb-dev  libzstd-dev gfortran netcat iputils-ping ca-certificates && \
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
 
