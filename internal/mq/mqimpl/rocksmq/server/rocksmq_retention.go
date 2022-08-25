@@ -21,16 +21,23 @@ import (
 
 	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/tecbot/gorocksdb"
 	"go.uber.org/zap"
 )
 
 // RocksmqRetentionTimeInMinutes is the time of retention
-var RocksmqRetentionTimeInSecs int64 = 10080 * 60
+var RocksmqRetentionTimeInSecs int64
+var DefaultRocksmqRetentionTimeInMins int64 = 7200
 
 // RocksmqRetentionSizeInMB is the size of retention
-var RocksmqRetentionSizeInMB int64 = 8192
+var RocksmqRetentionSizeInMB int64
+var DefaultRocksmqRetentionSizeInMB int64 = 8192
+
+// RocksmqRetentionCompactionInterval is the Interval we trigger compaction,
+var RocksmqRetentionCompactionInterval int64
+var DefaultRocksmqRetentionCompactionInterval int64 = 86400
 
 // Const value that used to convert unit
 const (
@@ -38,7 +45,7 @@ const (
 )
 
 // TickerTimeInSeconds is the time of expired check, default 10 minutes
-var TickerTimeInSeconds int64 = 60
+var TickerTimeInSeconds int64 = 600
 
 type retentionInfo struct {
 	// key is topic name, value is last retention time
@@ -53,7 +60,11 @@ type retentionInfo struct {
 	closeOnce sync.Once
 }
 
-func initRetentionInfo(kv *rocksdbkv.RocksdbKV, db *gorocksdb.DB) (*retentionInfo, error) {
+func initRetentionInfo(params paramtable.BaseTable, kv *rocksdbkv.RocksdbKV, db *gorocksdb.DB) (*retentionInfo, error) {
+	rawRmqRetentionTimeInMinutes := params.ParseInt64WithDefault("rocksmq.retentionTimeInMinutes", DefaultRocksmqRetentionTimeInMins)
+	atomic.StoreInt64(&RocksmqRetentionTimeInSecs, rawRmqRetentionTimeInMinutes*60)
+	atomic.StoreInt64(&RocksmqRetentionSizeInMB, params.ParseInt64WithDefault("rocksmq.retentionSizeInMB", DefaultRocksmqRetentionSizeInMB))
+	atomic.StoreInt64(&RocksmqRetentionCompactionInterval, params.ParseInt64WithDefault("rocksmq.compactionInterval", DefaultRocksmqRetentionCompactionInterval))
 	ri := &retentionInfo{
 		topicRetetionTime: sync.Map{},
 		mutex:             sync.RWMutex{},
@@ -86,15 +97,22 @@ func (ri *retentionInfo) startRetentionInfo() {
 // retention do time ticker and trigger retention check and operation for each topic
 func (ri *retentionInfo) retention() error {
 	log.Debug("Rocksmq retention goroutine start!")
-	// Do retention check every 6s
+	// Do retention check every 10 mins
 	ticker := time.NewTicker(time.Duration(atomic.LoadInt64(&TickerTimeInSeconds) * int64(time.Second)))
+	defer ticker.Stop()
+	compactionTicker := time.NewTicker(time.Duration(atomic.LoadInt64(&RocksmqRetentionCompactionInterval) * int64(time.Second)))
+	defer compactionTicker.Stop()
 	defer ri.closeWg.Done()
 
 	for {
 		select {
 		case <-ri.closeCh:
-			log.Debug("Rocksmq retention finish!")
+			log.Warn("Rocksmq retention finish!")
 			return nil
+		case <-compactionTicker.C:
+			log.Info("trigger rocksdb compaction, should trigger rocksdb data clean")
+			go ri.db.CompactRange(gorocksdb.Range{Start: nil, Limit: nil})
+			go ri.kv.DB.CompactRange(gorocksdb.Range{Start: nil, Limit: nil})
 		case t := <-ticker.C:
 			timeNow := t.Unix()
 			checkTime := atomic.LoadInt64(&RocksmqRetentionTimeInSecs) / 10
@@ -354,7 +372,6 @@ func DeleteMessages(db *gorocksdb.DB, topic string, startID, endID UniqueID) err
 	if err != nil {
 		return err
 	}
-
 	log.Debug("Delete message for topic", zap.String("topic", topic), zap.Int64("startID", startID), zap.Int64("endID", endID))
 	return nil
 }

@@ -111,8 +111,9 @@ rocksmq:
   # please adjust in embedded Milvus: /tmp/milvus/rdb_data
   path: /var/lib/milvus/rdb_data # The path where the message is stored in rocksmq
   rocksmqPageSize: 2147483648 # 2 GB, 2 * 1024 * 1024 * 1024 bytes, The size of each page of messages in rocksmq
-  retentionTimeInMinutes: 10080 # 7 days, 7 * 24 * 60 minutes, The retention time of the message in rocksmq.
+  retentionTimeInMinutes: 7200 # 5 days, 5 * 24 * 60 minutes, The retention time of the message in rocksmq.
   retentionSizeInMB: 8192 # 8 GB, 8 * 1024 MB, The retention size of the message in rocksmq.
+  compactionInterval: 86400 # 1 day, trigger rocksdb compaction every day to remove deleted data
   lrucacheratio:  0.06 # rocksdb cache memory ratio
 
 # Related configuration of rootCoord, used to handle data definition language (DDL) and data control language (DCL) requests

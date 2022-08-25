@@ -65,6 +65,6 @@ func (p *producer) Send(message *ProducerMessage) (UniqueID, error) {
 func (p *producer) Close() {
 	err := p.c.server.DestroyTopic(p.topic)
 	if err != nil {
-		log.Debug("Producer close failed", zap.Any("topicName", p.topic), zap.Any("error", err))
+		log.Warn("Producer close failed", zap.Any("topicName", p.topic), zap.Any("error", err))
 	}
 }

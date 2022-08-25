@@ -77,7 +77,7 @@ func TestRocksmq_RegisterConsumer(t *testing.T) {
 	params.Init()
 	rmq, err := NewRocksMQ(params, rocksdbPath, idAllocator)
 	assert.NoError(t, err)
-	defer rmq.stopRetention()
+	defer rmq.Close()
 
 	topicName := "topic_register"
 	groupName := "group_register"
@@ -231,7 +231,6 @@ func TestRocksmq_Dummy(t *testing.T) {
 	err = rmq.Seek(channelName1, groupName1, 0)
 	assert.Error(t, err)
 
-	rmq.stopRetention()
 	channelName2 := strings.Repeat(channelName1, 100)
 	err = rmq.CreateTopic(string(channelName2))
 	assert.NoError(t, err)
