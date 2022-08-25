@@ -13,6 +13,7 @@ package paramtable
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -25,6 +26,25 @@ func TestMain(m *testing.M) {
 	baseParams.Init()
 	code := m.Run()
 	os.Exit(code)
+}
+
+func TestBaseTable_GetConfigSubSet(t *testing.T) {
+	prefix := "rootcoord."
+	configs := baseParams.mgr.Configs()
+
+	configsWithPrefix := make(map[string]string)
+	for k, v := range configs {
+		if strings.HasPrefix(k, prefix) {
+			configsWithPrefix[k] = v
+		}
+	}
+
+	subSet := baseParams.GetConfigSubSet(prefix)
+
+	for k := range configs {
+		assert.Equal(t, subSet[k], configs[prefix+k])
+	}
+	assert.Equal(t, len(subSet), len(configsWithPrefix))
 }
 
 func TestBaseTable_SaveAndLoad(t *testing.T) {

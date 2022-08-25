@@ -445,7 +445,7 @@ func getKafkaInputStream(ctx context.Context, kafkaAddress string, producerChann
 		"api.version.request": true,
 		"linger.ms":           10,
 	}
-	kafkaClient := kafkawrapper.NewKafkaClientInstanceWithConfigMap(config)
+	kafkaClient := kafkawrapper.NewKafkaClientInstanceWithConfigMap(config, nil, nil)
 	inputStream, _ := NewMqMsgStream(ctx, 100, 100, kafkaClient, factory.NewUnmarshalDispatcher())
 	inputStream.AsProducer(producerChannels)
 	for _, opt := range opts {

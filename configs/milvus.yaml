@@ -96,7 +96,11 @@ pulsar:
   maxMessageSize: 5242880 # 5 * 1024 * 1024 Bytes, Maximum size of each message in pulsar.
 
 # If you want to enable kafka, needs to comment the pulsar configs
-#kafka:
+kafka:
+  producer:
+    client.id: dc
+  consumer:
+    client.id: dc1
 #  brokerList: localhost1:9092,localhost2:9092,localhost3:9092
 #  saslUsername: username
 #  saslPassword: password

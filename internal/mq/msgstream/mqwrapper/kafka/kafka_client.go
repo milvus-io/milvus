@@ -1,6 +1,7 @@
 package kafka
 
 import (
+	"fmt"
 	"strconv"
 	"sync"
 
@@ -17,7 +18,9 @@ var once sync.Once
 
 type kafkaClient struct {
 	// more configs you can see https://github.com/edenhill/librdkafka/blob/master/CONFIGURATION.md
-	basicConfig kafka.ConfigMap
+	basicConfig    kafka.ConfigMap
+	consumerConfig kafka.ConfigMap
+	producerConfig kafka.ConfigMap
 }
 
 func getBasicConfig(address string) kafka.ConfigMap {
@@ -31,11 +34,16 @@ func getBasicConfig(address string) kafka.ConfigMap {
 
 func NewKafkaClientInstance(address string) *kafkaClient {
 	config := getBasicConfig(address)
-	return &kafkaClient{basicConfig: config}
+	return NewKafkaClientInstanceWithConfigMap(config, kafka.ConfigMap{}, kafka.ConfigMap{})
+
 }
 
-func NewKafkaClientInstanceWithConfigMap(config kafka.ConfigMap) *kafkaClient {
-	return &kafkaClient{basicConfig: config}
+func NewKafkaClientInstanceWithConfigMap(config kafka.ConfigMap, extraConsumerConfig kafka.ConfigMap, extraProducerConfig kafka.ConfigMap) *kafkaClient {
+	log.Info("init kafka Config ", zap.String("commonConfig", fmt.Sprintf("+%v", config)),
+		zap.String("extraConsumerConfig", fmt.Sprintf("+%v", extraConsumerConfig)),
+		zap.String("extraProducerConfig", fmt.Sprintf("+%v", extraProducerConfig)),
+	)
+	return &kafkaClient{basicConfig: config, consumerConfig: extraConsumerConfig, producerConfig: extraProducerConfig}
 }
 
 func NewKafkaClientInstanceWithConfig(config *paramtable.KafkaConfig) *kafkaClient {
@@ -53,7 +61,16 @@ func NewKafkaClientInstanceWithConfig(config *paramtable.KafkaConfig) *kafkaClie
 		kafkaConfig.SetKey("sasl.password", config.SaslPassword)
 	}
 
-	return &kafkaClient{basicConfig: kafkaConfig}
+	specExtraConfig := func(config map[string]string) kafka.ConfigMap {
+		kafkaConfigMap := make(kafka.ConfigMap, len(config))
+		for k, v := range config {
+			kafkaConfigMap.SetKey(k, v)
+		}
+		return kafkaConfigMap
+	}
+
+	return NewKafkaClientInstanceWithConfigMap(kafkaConfig, specExtraConfig(config.ConsumerExtraConfig), specExtraConfig(config.ProducerExtraConfig))
+
 }
 
 func cloneKafkaConfig(config kafka.ConfigMap) *kafka.ConfigMap {
@@ -103,6 +120,10 @@ func (kc *kafkaClient) newProducerConfig() *kafka.ConfigMap {
 	newConf.SetKey("message.max.bytes", 10485760)
 	newConf.SetKey("compression.codec", "zstd")
 	newConf.SetKey("linger.ms", 20)
+
+	//special producer config
+	kc.specialExtraConfig(newConf, kc.producerConfig)
+
 	return newConf
 }
 
@@ -126,6 +147,9 @@ func (kc *kafkaClient) newConsumerConfig(group string, offset mqwrapper.Subscrip
 
 	//newConf.SetKey("enable.partition.eof", true)
 	newConf.SetKey("go.events.channel.enable", true)
+
+	kc.specialExtraConfig(newConf, kc.consumerConfig)
+
 	return newConf
 }
 
@@ -157,6 +181,16 @@ func (kc *kafkaClient) StringToMsgID(id string) (mqwrapper.MessageID, error) {
 	}
 
 	return &kafkaID{messageID: offset}, nil
+}
+
+func (kc *kafkaClient) specialExtraConfig(current *kafka.ConfigMap, special kafka.ConfigMap) {
+	for k, v := range special {
+		if existingConf, _ := current.Get(k, nil); existingConf != nil {
+			log.Warn(fmt.Sprintf("The existing config :  %v=%v  will be covered by the speciled kafka config :  %v.", k, v, existingConf))
+		}
+
+		current.SetKey(k, v)
+	}
 }
 
 func (kc *kafkaClient) BytesToMsgID(id []byte) (mqwrapper.MessageID, error) {
