@@ -9,13 +9,13 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
-FROM milvusdb/openblas:ubuntu18.04-20210428 AS openblas
+FROM milvusdb/openblas:ubuntu20.04-20220825-4feedf1 AS openblas
 
 #FROM alpine
-FROM ubuntu:bionic-20200921
+FROM ubuntu:ubuntu:focal-20220426
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends libtbb-dev  libzstd-dev gfortran netcat iputils-ping ca-certificates && \
+    apt-get install -y --no-install-recommends libtbb-dev gfortran netcat iputils-ping ca-certificates && \
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
 

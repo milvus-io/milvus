@@ -24,7 +24,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu18.04, centos7]
+        os: [ubuntu18.04, ubuntu20.04, centos7]
     env:
       OS_NAME: ${{ matrix.os }}
     steps:
