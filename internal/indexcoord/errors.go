@@ -23,6 +23,7 @@ import (
 
 var (
 	ErrCompareVersion = errors.New("failed to save meta in etcd because version compare failure")
+	ErrNotIndexExist  = errors.New("there is no index")
 )
 
 // errIndexNodeIsNotOnService return an error that the specified IndexNode is not exists.

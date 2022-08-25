@@ -7,17 +7,17 @@ option go_package = "github.com/milvus-io/milvus/internal/proto/indexpb";
 import "common.proto";
 import "internal.proto";
 import "milvus.proto";
-import "schema.proto";
 
 service IndexCoord {
   rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
-  rpc GetTimeTickChannel(internal.GetTimeTickChannelRequest) returns(milvus.StringResponse) {}
   rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
-  rpc BuildIndex(BuildIndexRequest) returns (BuildIndexResponse){}
-  rpc GetIndexStates(GetIndexStatesRequest) returns (GetIndexStatesResponse) {}
-  rpc GetIndexFilePaths(GetIndexFilePathsRequest) returns (GetIndexFilePathsResponse){}
+  rpc CreateIndex(CreateIndexRequest) returns (common.Status){}
+  rpc GetIndexState(GetIndexStateRequest) returns (GetIndexStateResponse) {}
+  rpc GetSegmentIndexState(GetSegmentIndexStateRequest) returns (GetSegmentIndexStateResponse) {}
+  rpc GetIndexInfos(GetIndexInfoRequest) returns (GetIndexInfoResponse){}
   rpc DropIndex(DropIndexRequest) returns (common.Status) {}
-  rpc RemoveIndex(RemoveIndexRequest) returns (common.Status) {}
+  rpc DescribeIndex(DescribeIndexRequest) returns (DescribeIndexResponse) {}
+  rpc GetIndexBuildProgress(GetIndexBuildProgressRequest) returns (GetIndexBuildProgressResponse) {}
 
   rpc ShowConfigurations(internal.ShowConfigurationsRequest) returns (internal.ShowConfigurationsResponse){}
   // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
@@ -26,14 +26,47 @@ service IndexCoord {
 
 service IndexNode {
   rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
-  rpc GetTimeTickChannel(internal.GetTimeTickChannelRequest) returns(milvus.StringResponse) {}
   rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
-  rpc CreateIndex(CreateIndexRequest) returns (common.Status){}
-  rpc GetTaskSlots(GetTaskSlotsRequest) returns (GetTaskSlotsResponse){}
+  rpc CreateJob(CreateJobRequest) returns (common.Status) {}
+  rpc QueryJobs(QueryJobsRequest) returns (QueryJobsResponse) {}
+  rpc DropJobs(DropJobsRequest) returns (common.Status) {}
+  rpc GetJobStats(GetJobStatsRequest) returns (GetJobStatsResponse) {}
 
   rpc ShowConfigurations(internal.ShowConfigurationsRequest) returns (internal.ShowConfigurationsResponse){}
   // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
   rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
+}
+
+message IndexInfo {
+  int64 collectionID = 1;
+  int64 fieldID = 2;
+  string index_name = 3;
+  int64 indexID = 4;
+  repeated common.KeyValuePair type_params = 5;
+  repeated common.KeyValuePair index_params = 6;
+}
+
+message FieldIndex {
+  IndexInfo index_info = 1;
+  bool deleted = 2;
+  uint64 create_time = 3;
+}
+
+message SegmentIndex {
+    int64 collectionID = 1;
+    int64 partitionID = 2;
+    int64 segmentID = 3;
+    int64 num_rows = 4;
+    int64 indexID = 5;
+    int64 buildID = 6;
+    int64 nodeID = 7;
+    int64 index_version = 8;
+    common.IndexState state = 9;
+    string fail_reason = 10;
+    repeated string index_files_paths = 11;
+    bool deleted = 12;
+    uint64 create_time = 13;
+    uint64 serialize_size = 14;
 }
 
 message RegisterNodeRequest {
@@ -47,93 +80,163 @@ message RegisterNodeResponse {
   internal.InitParams init_params = 2;
 }
 
-message GetIndexStatesRequest {
-  repeated int64 indexBuildIDs = 1;
+message GetIndexStateRequest {
+  int64 collectionID = 1;
+  string index_name = 2;
 }
 
-message IndexInfo {
-  common.IndexState state = 1;
-  int64 indexBuildID = 2;
-  int64 indexID = 3;
-  string index_name = 4;
-  string reason = 5;
-}
-
-message GetIndexStatesResponse {
+message GetIndexStateResponse {
   common.Status status = 1;
-  repeated IndexInfo states = 2;
+  common.IndexState state = 2;
+  string fail_reason = 3;
+}
+
+message GetSegmentIndexStateRequest {
+  int64 collectionID = 1;
+  string index_name = 2;
+  repeated int64 segmentIDs = 3;
+}
+
+message SegmentIndexState {
+  int64 segmentID = 1;
+  common.IndexState state = 2;
+  string fail_reason = 3;
+}
+
+message GetSegmentIndexStateResponse {
+  common.Status status = 1;
+  repeated SegmentIndexState states = 2;
 }
 
 message CreateIndexRequest {
-  int64 indexBuildID = 1;
-  string index_name = 2;
-  int64 indexID = 3;
-  int64 version = 4;
-  string meta_path = 5;
-  repeated string data_paths = 6;
-  repeated common.KeyValuePair type_params = 7;
-  repeated common.KeyValuePair index_params = 8;
+  int64 collectionID = 1;
+  int64 fieldID = 2;
+  string index_name = 3;
+  repeated common.KeyValuePair type_params = 4;
+  repeated common.KeyValuePair index_params = 5;
+  uint64 timestamp = 6;
 }
 
-message BuildIndexRequest {
-  int64 indexBuildID = 1;
-  string index_name = 2;
-  int64 indexID = 3;
-  repeated string data_paths = 5;
-  repeated common.KeyValuePair type_params = 6;
-  repeated common.KeyValuePair index_params = 7;
-  int64 num_rows = 8;
-  schema.FieldSchema field_schema = 9;
-  int64 segmentID = 10;
-}
-
-message BuildIndexResponse {
-  common.Status status = 1;
-  int64 indexBuildID = 2;
-}
-
-message GetIndexFilePathsRequest {
-  repeated int64 indexBuildIDs = 1;
+message GetIndexInfoRequest {
+  int64 collectionID = 1;
+  repeated int64 segmentIDs = 2;
+  string index_name = 3;
 }
 
 message IndexFilePathInfo {
-  common.Status status = 1;
-  int64 indexBuildID = 2;
-  repeated string index_file_paths = 3;
-  uint64 serialized_size = 4;
+  int64 segmentID = 1;
+  int64 fieldID = 2;
+  int64 indexID = 3;
+  int64 buildID = 4;
+  string index_name = 5;
+  repeated common.KeyValuePair index_params = 6;
+  repeated string index_file_paths = 7;
+  uint64 serialized_size = 8;
 }
 
-message GetIndexFilePathsResponse {
-  common.Status status = 1;
-  repeated IndexFilePathInfo file_paths = 2;
+message SegmentInfo {
+  int64 collectionID = 1;
+  int64 segmentID = 2;
+  bool enable_index = 3;
+  repeated IndexFilePathInfo index_infos = 4;
 }
 
-message IndexMeta {
-  int64 indexBuildID = 1;
-  common.IndexState state = 2;
-  string fail_reason = 3;
-  BuildIndexRequest req = 4;
-  repeated string index_file_paths = 5;
-  bool mark_deleted = 6;
-  int64 nodeID = 7;
-  int64 index_version = 8;
-  bool recycled = 9;
-  uint64 serialize_size = 10;
+message GetIndexInfoResponse {
+  common.Status status = 1;
+  map<int64, SegmentInfo> segment_info = 2;
 }
 
 message DropIndexRequest {
-  int64 indexID = 1;
+  int64 collectionID = 1;
+  string index_name = 3;
+  int64 fieldID = 2;
 }
 
-message RemoveIndexRequest {
-  repeated int64 buildIDs = 1;
+message DescribeIndexRequest {
+  int64 collectionID = 1;
+  string index_name = 2;
 }
 
-message GetTaskSlotsRequest {
-
-}
-
-message GetTaskSlotsResponse {
+message DescribeIndexResponse {
   common.Status status = 1;
-  int64 slots = 2;
+  repeated IndexInfo index_infos = 2;
+}
+
+message GetIndexBuildProgressRequest {
+  int64 collectionID = 1;
+  string index_name = 2;
+}
+
+message GetIndexBuildProgressResponse {
+  common.Status status = 1;
+  int64 indexed_rows = 2;
+  int64 total_rows = 3;
+}
+
+message StorageConfig {
+  string address = 1;
+  string access_keyID = 2;
+  string secret_access_key = 3;
+  bool useSSL = 4;
+  string bucket_name = 5;
+  string root_path = 6;
+  bool useIAM = 7;
+  string IAMEndpoint = 8;
+}
+
+message CreateJobRequest {
+  int64 clusterID = 1;
+  string index_file_prefix = 2;
+  int64 buildID = 3;
+  repeated string data_paths = 4;
+  int64 index_version = 5;
+  int64 indexID = 6;
+  string index_name = 7;
+  StorageConfig storage_config = 8;
+  repeated common.KeyValuePair index_params = 9;
+  repeated common.KeyValuePair type_params = 10;
+}
+
+message QueryJobsRequest {
+  int64 clusterID = 1;
+  repeated int64 buildIDs = 2;
+}
+
+message IndexTaskInfo {
+  int64 buildID = 1;
+  common.IndexState state = 2;
+  repeated string index_files = 3;
+  uint64 serialized_size = 4;
+}
+
+message QueryJobsResponse {
+  common.Status status = 1;
+  int64 clusterID = 2;
+  repeated IndexTaskInfo index_infos = 3;
+}
+
+message DropJobsRequest {
+  int64 clusterID = 1;
+  repeated int64 buildIDs = 2;
+}
+
+message JobInfo {
+  int64 num_rows = 1;
+  int64 dim = 2;
+  int64 start_time = 3;
+  int64 end_time = 4;
+  repeated common.KeyValuePair index_params = 5;
+  int64 podID = 6;
+}
+
+message GetJobStatsRequest {
+}
+
+message GetJobStatsResponse {
+  common.Status status = 1;
+  int64 total_job_num = 2;
+  int64 in_progress_job_num = 3;
+  int64 enqueue_job_num = 4;
+  int64 task_slots = 5;
+  repeated JobInfo job_infos = 6;
 }

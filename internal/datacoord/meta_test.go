@@ -527,7 +527,7 @@ func TestSaveHandoffMeta(t *testing.T) {
 	err = meta.catalog.AddSegment(context.TODO(), segmentInfo.SegmentInfo)
 	assert.Nil(t, err)
 
-	keys, _, err := kvClient.LoadWithPrefix(util.HandoffSegmentPrefix)
+	keys, _, err := kvClient.LoadWithPrefix(util.FlushedSegmentPrefix)
 	assert.Nil(t, err)
 	assert.Equal(t, 1, len(keys))
 	segmentID, err := strconv.ParseInt(filepath.Base(keys[0]), 10, 64)
@@ -649,10 +649,7 @@ func Test_meta_CompleteMergeCompaction(t *testing.T) {
 				collections: tt.fields.collections,
 				segments:    tt.fields.segments,
 			}
-			canCompaction := func(segment *datapb.CompactionSegmentBinlogs) bool {
-				return true
-			}
-			err := m.CompleteMergeCompaction(tt.args.compactionLogs, tt.args.result, canCompaction)
+			err := m.CompleteMergeCompaction(tt.args.compactionLogs, tt.args.result)
 			assert.Equal(t, tt.wantErr, err != nil)
 			if err == nil {
 				for _, l := range tt.args.compactionLogs {

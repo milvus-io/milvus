@@ -307,20 +307,33 @@ func generateIndex(indexBuildID UniqueID, cm storage.ChunkManager) ([]string, er
 	return indexPaths, nil
 }
 
-func generateIndexFileInfo(indexBuildIDs []int64, cm storage.ChunkManager) ([]*indexpb.IndexFilePathInfo, error) {
+func generateIndexFileInfo(segIDs []int64, cm storage.ChunkManager) (map[int64]*indexpb.SegmentInfo, error) {
 	schema := genDefaultCollectionSchema(false)
 	sizePerRecord, _ := typeutil.EstimateSizePerRecord(schema)
 
-	var indexInfos []*indexpb.IndexFilePathInfo
-	for _, buildID := range indexBuildIDs {
+	indexInfos := make(map[int64]*indexpb.SegmentInfo)
+	for _, buildID := range segIDs {
 		indexPaths, err := generateIndex(buildID, cm)
 		if err != nil {
 			return nil, err
 		}
-		indexInfos = append(indexInfos, &indexpb.IndexFilePathInfo{
-			IndexFilePaths: indexPaths,
-			SerializedSize: uint64(sizePerRecord * defaultNumRowPerSegment),
-		})
+		indexInfos[buildID] = &indexpb.SegmentInfo{
+			CollectionID: 0,
+			SegmentID:    buildID,
+			EnableIndex:  true,
+			IndexInfos: []*indexpb.IndexFilePathInfo{
+				{
+					SegmentID:      buildID,
+					FieldID:        0,
+					IndexID:        0,
+					BuildID:        buildID,
+					IndexName:      "",
+					IndexParams:    nil,
+					IndexFilePaths: indexPaths,
+					SerializedSize: uint64(sizePerRecord * defaultNumRowPerSegment),
+				},
+			},
+		}
 	}
 	return indexInfos, nil
 }

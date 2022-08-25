@@ -24,8 +24,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
-
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -36,7 +34,6 @@ import (
 	pnc "github.com/milvus-io/milvus/internal/distributed/proxy/client"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
@@ -388,25 +385,6 @@ func (s *Server) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitions
 	return s.rootCoord.ShowPartitions(ctx, in)
 }
 
-// CreateIndex index builder service
-func (s *Server) CreateIndex(ctx context.Context, in *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
-	return s.rootCoord.CreateIndex(ctx, in)
-}
-
-// DropIndex drops the index.
-func (s *Server) DropIndex(ctx context.Context, in *milvuspb.DropIndexRequest) (*commonpb.Status, error) {
-	return s.rootCoord.DropIndex(ctx, in)
-}
-
-// DescribeIndex get the index information for the specified index name.
-func (s *Server) DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
-	return s.rootCoord.DescribeIndex(ctx, in)
-}
-
-func (s *Server) GetIndexState(ctx context.Context, in *milvuspb.GetIndexStateRequest) (*indexpb.GetIndexStatesResponse, error) {
-	return s.rootCoord.GetIndexState(ctx, in)
-}
-
 // AllocTimestamp global timestamp allocator
 func (s *Server) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error) {
 	return s.rootCoord.AllocTimestamp(ctx, in)
@@ -422,18 +400,9 @@ func (s *Server) UpdateChannelTimeTick(ctx context.Context, in *internalpb.Chann
 	return s.rootCoord.UpdateChannelTimeTick(ctx, in)
 }
 
-// DescribeSegment gets meta info of the segment
-func (s *Server) DescribeSegment(ctx context.Context, in *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error) {
-	return s.rootCoord.DescribeSegment(ctx, in)
-}
-
 // ShowSegments gets all segments
 func (s *Server) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error) {
 	return s.rootCoord.ShowSegments(ctx, in)
-}
-
-func (s *Server) DescribeSegments(ctx context.Context, in *rootcoordpb.DescribeSegmentsRequest) (*rootcoordpb.DescribeSegmentsResponse, error) {
-	return s.rootCoord.DescribeSegments(ctx, in)
 }
 
 // ReleaseDQLMessageStream notifies RootCoord to release and close the search message stream of specific collection.
@@ -444,11 +413,6 @@ func (s *Server) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.Releas
 // InvalidateCollectionMetaCache notifies RootCoord to release the collection cache in Proxies.
 func (s *Server) InvalidateCollectionMetaCache(ctx context.Context, in *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 	return s.rootCoord.InvalidateCollectionMetaCache(ctx, in)
-}
-
-// SegmentFlushCompleted notifies RootCoord that specified segment has been flushed.
-func (s *Server) SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlushCompletedMsg) (*commonpb.Status, error) {
-	return s.rootCoord.SegmentFlushCompleted(ctx, in)
 }
 
 // ShowConfigurations gets specified configurations para of RootCoord

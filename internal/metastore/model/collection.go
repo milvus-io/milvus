@@ -15,7 +15,6 @@ type Collection struct {
 	Description          string
 	AutoID               bool
 	Fields               []*Field
-	FieldIDToIndexID     []common.Int64Tuple
 	VirtualChannelNames  []string
 	PhysicalChannelNames []string
 	ShardsNum            int32
@@ -35,7 +34,6 @@ func (c Collection) Clone() *Collection {
 		AutoID:               c.AutoID,
 		Fields:               c.Fields,
 		Partitions:           c.Partitions,
-		FieldIDToIndexID:     c.FieldIDToIndexID,
 		VirtualChannelNames:  c.VirtualChannelNames,
 		PhysicalChannelNames: c.PhysicalChannelNames,
 		ShardsNum:            c.ShardsNum,
@@ -77,7 +75,6 @@ func UnmarshalCollectionModel(coll *pb.CollectionInfo) *Collection {
 		AutoID:               coll.Schema.AutoID,
 		Fields:               UnmarshalFieldModels(coll.GetSchema().GetFields()),
 		Partitions:           partitions,
-		FieldIDToIndexID:     filedIDToIndexIDs,
 		VirtualChannelNames:  coll.VirtualChannelNames,
 		PhysicalChannelNames: coll.PhysicalChannelNames,
 		ShardsNum:            coll.ShardsNum,
@@ -109,18 +106,9 @@ func MarshalCollectionModel(coll *Collection) *pb.CollectionInfo {
 		}
 	}
 
-	fieldIndexes := make([]*pb.FieldIndexInfo, len(coll.FieldIDToIndexID))
-	for idx, tuple := range coll.FieldIDToIndexID {
-		fieldIndexes[idx] = &pb.FieldIndexInfo{
-			FiledID: tuple.Key,
-			IndexID: tuple.Value,
-		}
-	}
-
 	return &pb.CollectionInfo{
 		ID:                   coll.CollectionID,
 		Schema:               collSchema,
-		FieldIndexes:         fieldIndexes,
 		CreateTime:           coll.CreateTime,
 		VirtualChannelNames:  coll.VirtualChannelNames,
 		PhysicalChannelNames: coll.PhysicalChannelNames,

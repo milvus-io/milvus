@@ -21,6 +21,7 @@ type Index struct {
 	IndexID      int64     `gorm:"index_id"`
 	IndexName    string    `gorm:"index_name"`
 	IndexParams  string    `gorm:"index_params"`
+	TypeParams   string    `gorm:"type_params"`
 	CreateTime   uint64    `gorm:"create_time"`
 	IsDeleted    bool      `gorm:"is_deleted"`
 	CreatedAt    time.Time `gorm:"created_at"`
@@ -34,17 +35,14 @@ func (v Index) TableName() string {
 // ------------- search result -------------
 
 type IndexResult struct {
-	FieldID        int64
-	CollectionID   int64
-	IndexID        int64
-	IndexName      string
-	IndexParams    string
-	SegmentID      int64
-	PartitionID    int64
-	EnableIndex    bool
-	IndexBuildID   int64
-	IndexSize      uint64
-	IndexFilePaths string
+	FieldID      int64
+	CollectionID int64
+	IndexID      int64
+	IndexName    string
+	TypeParams   string
+	IndexParams  string
+	CreateTime   uint64
+	IsDeleted    bool
 }
 
 //go:generate mockery --name=IIndexDb
@@ -61,35 +59,23 @@ type IIndexDb interface {
 
 func UnmarshalIndexModel(inputs []*IndexResult) ([]*model.Index, error) {
 	result := make([]*model.Index, 0, len(inputs))
-
 	for _, ir := range inputs {
-		var indexFilePaths []string
-		if ir.IndexFilePaths != "" {
-			err := json.Unmarshal([]byte(ir.IndexFilePaths), &indexFilePaths)
-			if err != nil {
-				log.Error("unmarshal IndexFilePaths of SegmentIndex failed", zap.Int64("collID", ir.CollectionID),
-					zap.Int64("segmentID", ir.SegmentID), zap.Int64("indexID", ir.IndexID), zap.Error(err))
-				return nil, err
-			}
-		}
-
-		segIndex := &model.SegmentIndex{
-			Segment: model.Segment{
-				SegmentID:   ir.SegmentID,
-				PartitionID: ir.PartitionID,
-			},
-			EnableIndex:    ir.EnableIndex,
-			BuildID:        ir.IndexBuildID,
-			IndexSize:      ir.IndexSize,
-			IndexFilePaths: indexFilePaths,
-		}
-
 		var indexParams []commonpb.KeyValuePair
 		if ir.IndexParams != "" {
 			err := json.Unmarshal([]byte(ir.IndexParams), &indexParams)
 			if err != nil {
 				log.Error("unmarshal IndexParams of index failed", zap.Int64("collID", ir.CollectionID),
-					zap.Int64("segmentID", ir.SegmentID), zap.Int64("indexID", ir.IndexID), zap.Error(err))
+					zap.Int64("indexID", ir.IndexID), zap.String("indexName", ir.IndexName), zap.Error(err))
+				return nil, err
+			}
+		}
+
+		var typeParams []commonpb.KeyValuePair
+		if ir.TypeParams != "" {
+			err := json.Unmarshal([]byte(ir.TypeParams), &typeParams)
+			if err != nil {
+				log.Error("unmarshal TypeParams of index failed", zap.Int64("collID", ir.CollectionID),
+					zap.Int64("indexID", ir.IndexID), zap.String("indexName", ir.IndexName), zap.Error(err))
 				return nil, err
 			}
 		}
@@ -100,11 +86,10 @@ func UnmarshalIndexModel(inputs []*IndexResult) ([]*model.Index, error) {
 			IndexID:      ir.IndexID,
 			IndexName:    ir.IndexName,
 			IndexParams:  funcutil.ConvertToKeyValuePairPointer(indexParams),
-			SegmentIndexes: map[int64]model.SegmentIndex{
-				segIndex.SegmentID: *segIndex,
-			},
+			TypeParams:   funcutil.ConvertToKeyValuePairPointer(typeParams),
+			CreateTime:   ir.CreateTime,
+			IsDeleted:    ir.IsDeleted,
 		}
-
 		result = append(result, idx)
 	}
 

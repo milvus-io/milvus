@@ -13,8 +13,8 @@ func TestMetaLogger(t *testing.T) {
 	replaceLeveledLoggers(logger)
 
 	NewMetaLogger().WithCollectionID(0).
-		WithIndexMeta(&model.Index{}).
 		WithCollectionMeta(&model.Collection{}).
+		WithIndexMeta(&model.Index{}).
 		WithCollectionName("coll").
 		WithPartitionID(0).
 		WithPartitionName("part").
@@ -32,8 +32,8 @@ func TestMetaLogger(t *testing.T) {
 		WithOperation(DropCollection).Info()
 
 	ts.assertMessagesContains("CollectionID=0")
-	ts.assertMessagesContains("CollectionMeta=eyJUZW5hbnRJRCI6IiIsIkNvbGxlY3Rpb25JRCI6MCwiUGFydGl0aW9ucyI6bnVsbCwiTmFtZSI6IiIsIkRlc2NyaXB0aW9uIjoiIiwiQXV0b0lEIjpmYWxzZSwiRmllbGRzIjpudWxsLCJGaWVsZElEVG9JbmRleElEIjpudWxsLCJWaXJ0dWFsQ2hhbm5lbE5hbWVzIjpudWxsLCJQaHlzaWNhbENoYW5uZWxOYW1lcyI6bnVsbCwiU2hhcmRzTnVtIjowLCJTdGFydFBvc2l0aW9ucyI6bnVsbCwiQ3JlYXRlVGltZSI6MCwiQ29uc2lzdGVuY3lMZXZlbCI6MCwiQWxpYXNlcyI6bnVsbCwiRXh0cmEiOm51bGx9")
-	ts.assertMessagesContains("IndexMeta=eyJDb2xsZWN0aW9uSUQiOjAsIkZpZWxkSUQiOjAsIkluZGV4SUQiOjAsIkluZGV4TmFtZSI6IiIsIklzRGVsZXRlZCI6ZmFsc2UsIkNyZWF0ZVRpbWUiOjAsIkluZGV4UGFyYW1zIjpudWxsLCJTZWdtZW50SW5kZXhlcyI6bnVsbCwiRXh0cmEiOm51bGx9")
+	ts.assertMessagesContains("CollectionMeta=eyJUZW5hbnRJRCI6IiIsIkNvbGxlY3Rpb25JRCI6MCwiUGFydGl0aW9ucyI6bnVsbCwiTmFtZSI6IiIsIkRlc2NyaXB0aW9uIjoiIiwiQXV0b0lEIjpmYWxzZSwiRmllbGRzIjpudWxsLCJWaXJ0dWFsQ2hhbm5lbE5hbWVzIjpudWxsLCJQaHlzaWNhbENoYW5uZWxOYW1lcyI6bnVsbCwiU2hhcmRzTnVtIjowLCJTdGFydFBvc2l0aW9ucyI6bnVsbCwiQ3JlYXRlVGltZSI6MCwiQ29uc2lzdGVuY3lMZXZlbCI6MCwiQWxpYXNlcyI6bnVsbCwiRXh0cmEiOm51bGx9")
+	ts.assertMessagesContains("IndexMeta=eyJUZW5hbnRJRCI6IiIsIkNvbGxlY3Rpb25JRCI6MCwiRmllbGRJRCI6MCwiSW5kZXhJRCI6MCwiSW5kZXhOYW1lIjoiIiwiSXNEZWxldGVkIjpmYWxzZSwiQ3JlYXRlVGltZSI6MCwiVHlwZVBhcmFtcyI6bnVsbCwiSW5kZXhQYXJhbXMiOm51bGx9")
 	ts.assertMessagesContains("CollectionName=coll")
 	ts.assertMessagesContains("PartitionID=0")
 	ts.assertMessagesContains("PartitionName=part")

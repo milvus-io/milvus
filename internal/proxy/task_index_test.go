@@ -62,19 +62,25 @@ func TestGetIndexStateTask_Execute(t *testing.T) {
 	// failed to get collection id.
 	_ = InitMetaCache(ctx, rootCoord, queryCoord, shardMgr)
 	assert.Error(t, gist.Execute(ctx))
-	rootCoord.GetIndexStateFunc = func(ctx context.Context, request *milvuspb.GetIndexStateRequest) (*indexpb.GetIndexStatesResponse, error) {
-		return &indexpb.GetIndexStatesResponse{
-			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-			States: []*indexpb.IndexInfo{
-				{
-					State:  commonpb.IndexState_Finished,
-					Reason: "",
-				},
-				{
-					State:  commonpb.IndexState_IndexStateNone,
-					Reason: "",
-				},
+
+	rootCoord.DescribeCollectionFunc = func(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+		return &milvuspb.DescribeCollectionResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
 			},
+			Schema:         newTestSchema(),
+			CollectionID:   collectionID,
+			CollectionName: request.CollectionName,
+		}, nil
+	}
+
+	indexCoord.GetIndexStateFunc = func(ctx context.Context, request *indexpb.GetIndexStateRequest) (*indexpb.GetIndexStateResponse, error) {
+		return &indexpb.GetIndexStateResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+			State:      commonpb.IndexState_Finished,
+			FailReason: "",
 		}, nil
 	}
 

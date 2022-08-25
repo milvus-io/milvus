@@ -16,67 +16,55 @@
 
 package indexcoord
 
-import (
-	"context"
-	"testing"
-
-	"github.com/stretchr/testify/assert"
-
-	"github.com/milvus-io/milvus/internal/indexnode"
-	"github.com/milvus-io/milvus/internal/util/dependency"
-	"github.com/milvus-io/milvus/internal/util/etcd"
-	"github.com/milvus-io/milvus/internal/util/metricsinfo"
-)
-
-func TestGetSystemInfoMetrics(t *testing.T) {
-	ctx := context.Background()
-	factory := dependency.NewDefaultFactory(true)
-	ic, err := NewIndexCoord(ctx, factory)
-	assert.Nil(t, err)
-	Params.Init()
-
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	defer etcdCli.Close()
-	assert.NoError(t, err)
-
-	ic.SetEtcdClient(etcdCli)
-	err = ic.Init()
-	assert.Nil(t, err)
-	err = ic.Start()
-	assert.Nil(t, err)
-	err = ic.Register()
-	assert.Nil(t, err)
-
-	t.Run("getSystemInfoMetrics", func(t *testing.T) {
-		req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
-		assert.Nil(t, err)
-
-		resp, err := getSystemInfoMetrics(ctx, req, ic)
-		assert.Nil(t, err)
-		assert.NotNil(t, resp)
-	})
-
-	t.Run("getSystemInfoMetrics error", func(t *testing.T) {
-		req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
-		assert.Nil(t, err)
-
-		inm1 := &indexnode.Mock{
-			Failure: true,
-			Err:     true,
-		}
-		inm2 := &indexnode.Mock{
-			Failure: true,
-			Err:     false,
-		}
-
-		ic.nodeManager.setClient(1, inm1)
-		ic.nodeManager.setClient(2, inm2)
-
-		resp, err := getSystemInfoMetrics(ctx, req, ic)
-		assert.Nil(t, err)
-		assert.NotNil(t, resp)
-	})
-
-	err = ic.Stop()
-	assert.Nil(t, err)
-}
+//func TestGetSystemInfoMetrics(t *testing.T) {
+//	ctx := context.Background()
+//	factory := dependency.NewDefaultFactory(true)
+//	ic, err := NewIndexCoord(ctx, factory)
+//	assert.Nil(t, err)
+//	Params.Init()
+//
+//	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+//	defer etcdCli.Close()
+//	assert.NoError(t, err)
+//
+//	ic.SetEtcdClient(etcdCli)
+//	err = ic.Init()
+//	assert.Nil(t, err)
+//	err = ic.Start()
+//	assert.Nil(t, err)
+//	err = ic.Register()
+//	assert.Nil(t, err)
+//
+//	t.Run("getSystemInfoMetrics", func(t *testing.T) {
+//		req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
+//		assert.Nil(t, err)
+//
+//		resp, err := getSystemInfoMetrics(ctx, req, ic)
+//		assert.Nil(t, err)
+//		assert.NotNil(t, resp)
+//	})
+//
+//	t.Run("getSystemInfoMetrics error", func(t *testing.T) {
+//		req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
+//		assert.Nil(t, err)
+//
+//		inm1 := &indexnode.Mock{
+//			Failure: true,
+//			Err:     true,
+//		}
+//		inm2 := &indexnode.Mock{
+//			Failure: true,
+//			Err:     false,
+//		}
+//
+//		ic.nodeManager.setClient(1, inm1)
+//		ic.nodeManager.setClient(2, inm2)
+//
+//		resp, err := getSystemInfoMetrics(ctx, req, ic)
+//		assert.Nil(t, err)
+//		assert.NotNil(t, resp)
+//	})
+//
+//	err = ic.Stop()
+//	assert.Nil(t, err)
+//}

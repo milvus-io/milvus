@@ -310,12 +310,26 @@ type DataCoordComponent interface {
 // IndexNode is the interface `indexnode` package implements
 type IndexNode interface {
 	Component
-	TimeTickProvider
+	//TimeTickProvider
 
-	// CreateIndex receives request from IndexCoordinator to build an index.
+	// BuildIndex receives request from IndexCoordinator to build an index.
 	// Index building is asynchronous, so when an index building request comes, IndexNode records the task and returns.
-	CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error)
-	GetTaskSlots(ctx context.Context, req *indexpb.GetTaskSlotsRequest) (*indexpb.GetTaskSlotsResponse, error)
+	//BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*commonpb.Status, error)
+	//GetTaskSlots(ctx context.Context, req *indexpb.GetTaskSlotsRequest) (*indexpb.GetTaskSlotsResponse, error)
+	//
+	//// GetMetrics gets the metrics about IndexNode.
+	//GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
+
+	// CreateJob receive index building job from indexcoord. Notes that index building is asynchronous, task is recorded
+	// in indexnode and then request is finished.
+	CreateJob(context.Context, *indexpb.CreateJobRequest) (*commonpb.Status, error)
+	// QueryJobs returns states of index building jobs specified by BuildIDs. There are four states of index building task
+	// Unissued, InProgress, Finished, Failed
+	QueryJobs(context.Context, *indexpb.QueryJobsRequest) (*indexpb.QueryJobsResponse, error)
+	// DropJobs cancel index building jobs specified by BuildIDs. Notes that dropping task may have finished.
+	DropJobs(context.Context, *indexpb.DropJobsRequest) (*commonpb.Status, error)
+	// GetJobNum returns metrics of indexnode, including available job queue info, available task slots and finished job infos.
+	GetJobStats(context.Context, *indexpb.GetJobStatsRequest) (*indexpb.GetJobStatsResponse, error)
 
 	ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error)
 	// GetMetrics gets the metrics about IndexNode.
@@ -337,33 +351,45 @@ type IndexNodeComponent interface {
 // IndexCoord is the interface `indexcoord` package implements
 type IndexCoord interface {
 	Component
-	TimeTickProvider
+	//TimeTickProvider
 
-	// BuildIndex receives request from RootCoordinator to build an index.
-	// Index building is asynchronous, so when an index building request comes, an IndexBuildID is assigned to the task and
-	// the task is recorded in Meta. The background process assignTaskLoop will find this task and assign it to IndexNode for
-	// execution.
-	BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error)
+	// CreateIndex create an index on collection.
+	// Index building is asynchronous, so when an index building request comes, an IndexID is assigned to the task and
+	// will get all flushed segments from DataCoord and record tasks with these segments. The background process
+	// indexBuilder will find this task and assign it to IndexNode for execution.
+	CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error)
+
+	// GetIndexState gets the index state of the index name in the request from Proxy.
+	GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRequest) (*indexpb.GetIndexStateResponse, error)
+
+	// GetSegmentIndexState gets the index state of the segments in the request from RootCoord.
+	GetSegmentIndexState(ctx context.Context, req *indexpb.GetSegmentIndexStateRequest) (*indexpb.GetSegmentIndexStateResponse, error)
+
+	// GetIndexInfos gets the index files of the IndexBuildIDs in the request from RootCoordinator.
+	GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoRequest) (*indexpb.GetIndexInfoResponse, error)
+
+	// DescribeIndex describe the index info of the collection.
+	DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error)
+
+	// GetIndexBuildProgress get the index building progress by num rows.
+	GetIndexBuildProgress(ctx context.Context, req *indexpb.GetIndexBuildProgressRequest) (*indexpb.GetIndexBuildProgressResponse, error)
 
 	// DropIndex deletes indexes based on IndexID. One IndexID corresponds to the index of an entire column. A column is
 	// divided into many segments, and each segment corresponds to an IndexBuildID. IndexCoord uses IndexBuildID to record
 	// index tasks. Therefore, when DropIndex is called, delete all tasks corresponding to IndexBuildID corresponding to IndexID.
 	DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error)
 
-	// GetIndexStates gets the index states of the IndexBuildIDs in the request from RootCoordinator.
-	GetIndexStates(ctx context.Context, req *indexpb.GetIndexStatesRequest) (*indexpb.GetIndexStatesResponse, error)
-
-	// GetIndexFilePaths gets the index files of the IndexBuildIDs in the request from RootCoordinator.
-	GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error)
+	//// GetIndexStates gets the index states of the IndexBuildIDs in the request from RootCoordinator.
+	//GetIndexStates(ctx context.Context, req *indexpb.GetIndexStatesRequest) (*indexpb.GetIndexStatesResponse, error)
+	//
+	//// GetIndexFilePaths gets the index files of the IndexBuildIDs in the request from RootCoordinator.
+	//GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error)
 
 	// ShowConfigurations gets specified configurations para of IndexCoord
 	ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error)
 
 	// GetMetrics gets the metrics about IndexCoord.
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
-
-	// RemoveIndex removes the index on specify segments.
-	RemoveIndex(ctx context.Context, req *indexpb.RemoveIndexRequest) (*commonpb.Status, error)
 }
 
 // IndexCoordComponent is used by grpc server of IndexCoord
@@ -373,7 +399,8 @@ type IndexCoordComponent interface {
 	// SetEtcdClient set etcd client for IndexCoordComponent
 	SetEtcdClient(etcdClient *clientv3.Client)
 
-	SetDataCoord(dataCoor DataCoord) error
+	SetDataCoord(dataCoord DataCoord) error
+	SetRootCoord(rootCoord RootCoord) error
 
 	// UpdateStateCode updates state code for IndexCoordComponent
 	//  `stateCode` is current statement of this IndexCoordComponent, indicating whether it's healthy.
@@ -496,7 +523,7 @@ type RootCoord interface {
 	// error is always nil
 	//
 	// RootCoord forwards this request to IndexCoord to create index
-	CreateIndex(ctx context.Context, req *milvuspb.CreateIndexRequest) (*commonpb.Status, error)
+	//CreateIndex(ctx context.Context, req *milvuspb.CreateIndexRequest) (*commonpb.Status, error)
 
 	// DescribeIndex notifies RootCoord to get specified index information for specified field
 	//
@@ -506,9 +533,9 @@ type RootCoord interface {
 	// The `Status` in response struct `DescribeIndexResponse` indicates if this operation is processed successfully or fail cause;
 	// index information is filled in `IndexDescriptions`
 	// error is always nil
-	DescribeIndex(ctx context.Context, req *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error)
+	//DescribeIndex(ctx context.Context, req *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error)
 
-	GetIndexState(ctx context.Context, req *milvuspb.GetIndexStateRequest) (*indexpb.GetIndexStatesResponse, error)
+	//GetIndexState(ctx context.Context, req *milvuspb.GetIndexStateRequest) (*milvuspb.GetIndexStateResponse, error)
 
 	// DropIndex notifies RootCoord to drop the specified index for the specified field
 	//
@@ -520,7 +547,7 @@ type RootCoord interface {
 	// error is always nil
 	//
 	// RootCoord forwards this request to IndexCoord to drop index
-	DropIndex(ctx context.Context, req *milvuspb.DropIndexRequest) (*commonpb.Status, error)
+	//DropIndex(ctx context.Context, req *milvuspb.DropIndexRequest) (*commonpb.Status, error)
 
 	// CreateAlias notifies RootCoord to create an alias for the collection
 	//
@@ -590,7 +617,7 @@ type RootCoord interface {
 	// The `Status` in response struct `DescribeSegmentResponse` indicates if this operation is processed successfully or fail cause;
 	// segment index information is filled in `IndexID`, `BuildID` and `EnableIndex`.
 	// error is always nil
-	DescribeSegment(ctx context.Context, req *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error)
+	//DescribeSegment(ctx context.Context, req *milvuspb.DescribeSegmentRequest) (*milvuspb.DescribeSegmentResponse, error)
 
 	// ShowSegments notifies RootCoord to list all segment ids in the collection or partition
 	//
@@ -602,7 +629,7 @@ type RootCoord interface {
 	// error is always nil
 	ShowSegments(ctx context.Context, req *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error)
 
-	DescribeSegments(ctx context.Context, in *rootcoordpb.DescribeSegmentsRequest) (*rootcoordpb.DescribeSegmentsResponse, error)
+	//DescribeSegments(ctx context.Context, in *rootcoordpb.DescribeSegmentsRequest) (*rootcoordpb.DescribeSegmentsResponse, error)
 
 	// ReleaseDQLMessageStream notifies RootCoord to release and close the search message stream of specific collection.
 	//
@@ -642,7 +669,7 @@ type RootCoord interface {
 	//
 	// This interface is only used by DataCoord, when RootCoord receives this request, RootCoord will notify IndexCoord
 	// to build index for this segment.
-	SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlushCompletedMsg) (*commonpb.Status, error)
+	//SegmentFlushCompleted(ctx context.Context, in *datapb.SegmentFlushCompletedMsg) (*commonpb.Status, error)
 
 	// ShowConfigurations gets specified configurations para of RootCoord
 	ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error)

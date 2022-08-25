@@ -21,15 +21,13 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/milvus-io/milvus/internal/util/funcutil"
-
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
 // getDimension gets the dimension of data from building index request.
-func getDimension(req *indexpb.BuildIndexRequest) (int64, error) {
+func getDimension(req *indexpb.CreateIndexRequest) (int64, error) {
 	for _, kvPair := range req.GetTypeParams() {
 		key, value := kvPair.GetKey(), kvPair.GetValue()
 		if key == "dim" {
@@ -59,30 +57,6 @@ func estimateIndexSize(dim int64, numRows int64, dataType schemapb.DataType) (ui
 
 	// TODO: optimize here.
 	return 0, nil
-
-	// errMsg := "the field to build index must be a vector field"
-	// log.Error(errMsg)
-	// return 0, errors.New(errMsg)
-}
-
-func estimateScalarIndexSize(req *indexpb.BuildIndexRequest) (uint64, error) {
-	// TODO: optimize here.
-	return 0, nil
-}
-
-func estimateIndexSizeByReq(req *indexpb.BuildIndexRequest) (uint64, error) {
-	vecDTypes := []schemapb.DataType{
-		schemapb.DataType_FloatVector,
-		schemapb.DataType_BinaryVector,
-	}
-	if funcutil.SliceContain(vecDTypes, req.GetFieldSchema().GetDataType()) {
-		dim, err := getDimension(req)
-		if err != nil {
-			return 0, err
-		}
-		return estimateIndexSize(dim, req.GetNumRows(), req.GetFieldSchema().GetDataType())
-	}
-	return estimateScalarIndexSize(req)
 }
 
 func parseBuildIDFromFilePath(key string) (UniqueID, error) {

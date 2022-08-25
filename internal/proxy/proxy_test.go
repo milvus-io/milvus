@@ -688,6 +688,7 @@ func TestProxy(t *testing.T) {
 			DbName:         dbName,
 			CollectionName: collectionName,
 			FieldName:      floatVecField,
+			IndexName:      indexName,
 			ExtraParams: []*commonpb.KeyValuePair{
 				{
 					Key:   "dim",

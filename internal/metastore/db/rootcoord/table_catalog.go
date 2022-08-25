@@ -3,9 +3,7 @@ package rootcoord
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"reflect"
 	"runtime"
 
 	"github.com/milvus-io/milvus/internal/common"
@@ -13,7 +11,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util"
 
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/db/dbmodel"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
@@ -190,12 +187,6 @@ func (tc *Catalog) populateCollection(ctx context.Context, collectionID typeutil
 		return nil, err
 	}
 
-	// get indexes by collection_id
-	indexes, err := tc.metaDomain.IndexDb(ctx).Get(tenantID, collectionID)
-	if err != nil {
-		return nil, err
-	}
-
 	// merge as collection attributes
 
 	mCollection, err := dbmodel.UnmarshalCollectionModel(collection)
@@ -211,7 +202,6 @@ func (tc *Catalog) populateCollection(ctx context.Context, collectionID typeutil
 	mCollection.Fields = mFields
 	mCollection.Partitions = dbmodel.UnmarshalPartitionModel(partitions)
 	mCollection.VirtualChannelNames, mCollection.PhysicalChannelNames = dbmodel.ExtractChannelNames(channels)
-	mCollection.FieldIDToIndexID = dbmodel.ConvertIndexDBToModel(indexes)
 
 	return mCollection, nil
 }
@@ -381,20 +371,6 @@ func (tc *Catalog) DropCollection(ctx context.Context, collection *model.Collect
 			return err
 		}
 
-		// 6. mark deleted for indexes
-		err = tc.metaDomain.IndexDb(txCtx).MarkDeletedByCollectionID(tenantID, collection.CollectionID)
-		if err != nil {
-			log.Error("mark deleted for indexes failed", zap.String("tenant", tenantID), zap.Int64("collID", collection.CollectionID), zap.Error(err))
-			return err
-		}
-
-		// 7. mark deleted for segment_indexes
-		err = tc.metaDomain.SegmentIndexDb(txCtx).MarkDeletedByCollectionID(tenantID, collection.CollectionID)
-		if err != nil {
-			log.Error("mark deleted for segment_indexes failed", zap.String("tenant", tenantID), zap.Int64("collID", collection.CollectionID), zap.Error(err))
-			return err
-		}
-
 		return err
 	})
 }
@@ -436,208 +412,6 @@ func (tc *Catalog) DropPartition(ctx context.Context, collectionID typeutil.Uniq
 	}
 
 	return nil
-}
-
-func (tc *Catalog) CreateIndex(ctx context.Context, col *model.Collection, index *model.Index) error {
-	tenantID := contextutil.TenantID(ctx)
-
-	return tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
-		// insert index
-		indexParamsBytes, err := json.Marshal(index.IndexParams)
-		if err != nil {
-			log.Error("marshal IndexParams of index failed", zap.String("tenant", tenantID), zap.Int64("collID", index.CollectionID), zap.Int64("indexID", index.IndexID), zap.String("indexName", index.IndexName), zap.Error(err))
-		}
-		indexParamsStr := string(indexParamsBytes)
-
-		idx := &dbmodel.Index{
-			TenantID:     tenantID,
-			CollectionID: index.CollectionID,
-			FieldID:      index.FieldID,
-			IndexID:      index.IndexID,
-			IndexName:    index.IndexName,
-			IndexParams:  indexParamsStr,
-		}
-
-		err = tc.metaDomain.IndexDb(txCtx).Insert([]*dbmodel.Index{idx})
-		if err != nil {
-			log.Error("insert indexes failed", zap.String("tenant", tenantID), zap.Int64("collID", index.CollectionID), zap.Int64("indexID", index.IndexID), zap.String("indexName", index.IndexName), zap.Error(err))
-			return err
-		}
-
-		// insert segment_indexes
-		if len(index.SegmentIndexes) > 0 {
-			segIndexes := make([]*dbmodel.SegmentIndex, 0, len(index.SegmentIndexes))
-
-			for _, segIndex := range index.SegmentIndexes {
-				indexFilePaths, err := json.Marshal(segIndex.IndexFilePaths)
-				if err != nil {
-					log.Error("marshal IndexFilePaths failed", zap.String("tenant", tenantID), zap.Int64("collID", index.CollectionID), zap.Int64("indexID", index.IndexID), zap.Int64("segmentID", segIndex.SegmentID), zap.Error(err))
-					return err
-				}
-				indexFilePathsStr := string(indexFilePaths)
-				si := &dbmodel.SegmentIndex{
-					TenantID:       tenantID,
-					CollectionID:   index.CollectionID,
-					PartitionID:    segIndex.PartitionID,
-					SegmentID:      segIndex.SegmentID,
-					FieldID:        index.FieldID,
-					IndexID:        index.IndexID,
-					IndexBuildID:   segIndex.BuildID,
-					EnableIndex:    segIndex.EnableIndex,
-					IndexFilePaths: indexFilePathsStr,
-					IndexSize:      segIndex.IndexSize,
-				}
-				segIndexes = append(segIndexes, si)
-			}
-
-			err := tc.metaDomain.SegmentIndexDb(txCtx).Insert(segIndexes)
-			if err != nil {
-				log.Error("insert segment_indexes failed", zap.String("tenant", tenantID), zap.Int64("collID", index.CollectionID), zap.Int64("indexID", index.IndexID), zap.String("indexName", index.IndexName), zap.Error(err))
-				return err
-			}
-		}
-
-		return nil
-	})
-}
-
-func (tc *Catalog) AlterIndex(ctx context.Context, oldIndex *model.Index, newIndex *model.Index, alterType metastore.AlterType) error {
-	switch alterType {
-	case metastore.ADD:
-		return tc.alterAddIndex(ctx, oldIndex, newIndex)
-	case metastore.DELETE:
-		return tc.alterDeleteIndex(ctx, oldIndex, newIndex)
-	default:
-		return errors.New("Unknown alter type:" + fmt.Sprintf("%d", alterType))
-	}
-}
-
-func (tc *Catalog) alterAddIndex(ctx context.Context, oldIndex *model.Index, newIndex *model.Index) error {
-	tenantID := contextutil.TenantID(ctx)
-
-	return tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
-		adds := make([]*dbmodel.SegmentIndex, 0, len(newIndex.SegmentIndexes))
-
-		for segID, newSegIndex := range newIndex.SegmentIndexes {
-			oldSegIndex, ok := oldIndex.SegmentIndexes[segID]
-			if !ok || !reflect.DeepEqual(oldSegIndex, newSegIndex) {
-				segment := newSegIndex.Segment
-				segIdxInfo := &dbmodel.SegmentIndex{
-					TenantID:     tenantID,
-					CollectionID: newIndex.CollectionID,
-					PartitionID:  segment.PartitionID,
-					SegmentID:    segment.SegmentID,
-					FieldID:      newIndex.FieldID,
-					IndexID:      newIndex.IndexID,
-					IndexBuildID: newSegIndex.BuildID,
-					EnableIndex:  newSegIndex.EnableIndex,
-					CreateTime:   newSegIndex.CreateTime,
-					//IndexFilePaths: indexFilePathsStr,
-					//IndexSize:      newSegIndex.IndexSize,
-				}
-
-				adds = append(adds, segIdxInfo)
-			}
-		}
-
-		if len(adds) == 0 {
-			return nil
-		}
-
-		// upsert segment_indexes
-		err := tc.metaDomain.SegmentIndexDb(txCtx).Upsert(adds)
-		if err != nil {
-			log.Error("upsert segment_indexes failed", zap.String("tenant", tenantID), zap.Int64("collectionID", newIndex.CollectionID), zap.Int64("indexID", newIndex.IndexID), zap.Error(err))
-			return err
-		}
-
-		// update index info
-		if oldIndex.CreateTime != newIndex.CreateTime || oldIndex.IsDeleted != newIndex.IsDeleted {
-			indexParamsBytes, err := json.Marshal(newIndex.IndexParams)
-			if err != nil {
-				log.Error("marshal IndexParams of index failed", zap.String("tenant", tenantID), zap.Int64("collectionID", newIndex.CollectionID), zap.Int64("indexID", newIndex.IndexID), zap.Error(err))
-				return err
-			}
-			indexParamsStr := string(indexParamsBytes)
-
-			index := &dbmodel.Index{
-				TenantID:     tenantID,
-				CollectionID: newIndex.CollectionID,
-				IndexName:    newIndex.IndexName,
-				IndexID:      newIndex.IndexID,
-				IndexParams:  indexParamsStr,
-				IsDeleted:    newIndex.IsDeleted,
-				CreateTime:   newIndex.CreateTime,
-			}
-			err = tc.metaDomain.IndexDb(txCtx).Update(index)
-			if err != nil {
-				return err
-			}
-		}
-
-		return nil
-	})
-}
-
-func (tc *Catalog) alterDeleteIndex(ctx context.Context, oldIndex *model.Index, newIndex *model.Index) error {
-	tenantID := contextutil.TenantID(ctx)
-	delSegIndexes := make([]*dbmodel.SegmentIndex, 0, len(newIndex.SegmentIndexes))
-
-	for _, segIdx := range newIndex.SegmentIndexes {
-		segIndex := &dbmodel.SegmentIndex{
-			SegmentID: segIdx.SegmentID,
-			IndexID:   newIndex.IndexID,
-		}
-		delSegIndexes = append(delSegIndexes, segIndex)
-	}
-
-	if len(delSegIndexes) == 0 {
-		return nil
-	}
-
-	err := tc.metaDomain.SegmentIndexDb(ctx).MarkDeleted(tenantID, delSegIndexes)
-	if err != nil {
-		log.Error("mark SegmentIndex deleted failed", zap.Int64("collID", newIndex.CollectionID), zap.Int64("indexID", newIndex.IndexID), zap.Error(err))
-		return err
-	}
-
-	return err
-}
-
-func (tc *Catalog) DropIndex(ctx context.Context, collectionInfo *model.Collection, dropIdxID typeutil.UniqueID) error {
-	tenantID := contextutil.TenantID(ctx)
-
-	return tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
-		// mark deleted for index
-		err := tc.metaDomain.IndexDb(txCtx).MarkDeletedByIndexID(tenantID, dropIdxID)
-		if err != nil {
-			return err
-		}
-
-		// mark deleted for segment_indexes
-		err = tc.metaDomain.SegmentIndexDb(txCtx).MarkDeletedByIndexID(tenantID, dropIdxID)
-		if err != nil {
-			return err
-		}
-
-		return nil
-	})
-}
-
-func (tc *Catalog) ListIndexes(ctx context.Context) ([]*model.Index, error) {
-	tenantID := contextutil.TenantID(ctx)
-
-	rs, err := tc.metaDomain.IndexDb(ctx).List(tenantID)
-	if err != nil {
-		return nil, err
-	}
-
-	result, err := dbmodel.UnmarshalIndexModel(rs)
-	if err != nil {
-		return nil, err
-	}
-
-	return result, nil
 }
 
 func (tc *Catalog) CreateAlias(ctx context.Context, alias *model.Alias, ts typeutil.Timestamp) error {

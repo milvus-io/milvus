@@ -29,8 +29,14 @@ const (
 
 	SegmentMetaPrefix    = "queryCoord-segmentMeta"
 	ChangeInfoMetaPrefix = "queryCoord-sealedSegmentChangeInfo"
+
+	FlushedSegmentPrefix = "flushed-segment"
 	HandoffSegmentPrefix = "querycoord-handoff"
-	HeaderAuthorize      = "authorization"
+
+	SegmentIndexPrefix = "segment-index"
+	FieldIndexPrefix   = "field-index"
+
+	HeaderAuthorize = "authorization"
 	// HeaderSourceID identify requests from Milvus members and client requests
 	HeaderSourceID = "sourceId"
 	// MemberCredID id for Milvus members (data/index/query node/coord component)

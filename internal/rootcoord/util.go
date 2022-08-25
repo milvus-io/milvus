@@ -66,23 +66,6 @@ func GetFieldSchemaByID(coll *model.Collection, fieldID typeutil.UniqueID) (*mod
 	return nil, fmt.Errorf("field id = %d not found", fieldID)
 }
 
-// GetFieldSchemaByIndexID return field schema by it's index id
-func GetFieldSchemaByIndexID(coll *model.Collection, idxID typeutil.UniqueID) (*model.Field, error) {
-	var fieldID typeutil.UniqueID
-	exist := false
-	for _, t := range coll.FieldIDToIndexID {
-		if t.Value == idxID {
-			fieldID = t.Key
-			exist = true
-			break
-		}
-	}
-	if !exist {
-		return nil, fmt.Errorf("index id = %d is not attach to any field", idxID)
-	}
-	return GetFieldSchemaByID(coll, fieldID)
-}
-
 // EncodeDdOperation serialize DdOperation into string
 func EncodeDdOperation(m proto.Message, ddType string) (string, error) {
 	mByte, err := proto.Marshal(m)

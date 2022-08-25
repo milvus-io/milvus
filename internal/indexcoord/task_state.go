@@ -29,6 +29,8 @@ const (
 	indexTaskRetry
 	// task has been deleted.
 	indexTaskDeleted
+	// task needs to recycle meta info on IndexNode
+	indexTaskRecycle
 )
 
 var TaskStateNames = map[indexTaskState]string{
@@ -37,6 +39,8 @@ var TaskStateNames = map[indexTaskState]string{
 	2: "Done",
 	3: "Retry",
 	4: "Deleted",
+	5: "Recycle",
+	6: "Wait",
 }
 
 func (x indexTaskState) String() string {

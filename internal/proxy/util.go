@@ -24,30 +24,37 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/crypto/bcrypt"
-
-	"github.com/milvus-io/milvus/internal/log"
 	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/internal/util"
-	"github.com/milvus-io/milvus/internal/util/crypto"
+	"golang.org/x/crypto/bcrypt"
 	"google.golang.org/grpc/metadata"
 
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/util"
+	"github.com/milvus-io/milvus/internal/util/crypto"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
-const strongTS = 0
-const boundedTS = 2
+const (
+	strongTS  = 0
+	boundedTS = 2
 
-// enableMultipleVectorFields indicates whether to enable multiple vector fields.
-const enableMultipleVectorFields = false
+	// enableMultipleVectorFields indicates whether to enable multiple vector fields.
+	enableMultipleVectorFields = false
 
-// maximum length of variable-length strings
-const maxVarCharLengthKey = "max_length"
-const defaultMaxVarCharLength = 65535
+	// maximum length of variable-length strings
+	maxVarCharLengthKey = "max_length"
+
+	defaultMaxVarCharLength = 65535
+
+	// DefaultIndexType name of default index type for scalar field
+	DefaultIndexType = "STL_SORT"
+
+	// DefaultStringIndexType name of default index type for varChar/string field
+	DefaultStringIndexType = "Trie"
+)
 
 var logger = log.L().WithOptions(zap.Fields(zap.String("role", typeutil.ProxyRole)))
 

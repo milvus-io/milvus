@@ -226,9 +226,7 @@ func (c *compactionPlanHandler) completeCompaction(result *datapb.CompactionResu
 			return err
 		}
 	case datapb.CompactionType_MergeCompaction, datapb.CompactionType_MixCompaction:
-		if err := c.handleMergeCompactionResult(plan, result, func(segment *datapb.CompactionSegmentBinlogs) bool {
-			return !c.segRefer.HasSegmentLock(segment.SegmentID)
-		}); err != nil {
+		if err := c.handleMergeCompactionResult(plan, result); err != nil {
 			return err
 		}
 	default:
@@ -252,9 +250,8 @@ func (c *compactionPlanHandler) handleInnerCompactionResult(plan *datapb.Compact
 	return c.meta.CompleteInnerCompaction(plan.GetSegmentBinlogs()[0], result)
 }
 
-func (c *compactionPlanHandler) handleMergeCompactionResult(plan *datapb.CompactionPlan, result *datapb.CompactionResult,
-	canCompaction func(segment *datapb.CompactionSegmentBinlogs) bool) error {
-	return c.meta.CompleteMergeCompaction(plan.GetSegmentBinlogs(), result, canCompaction)
+func (c *compactionPlanHandler) handleMergeCompactionResult(plan *datapb.CompactionPlan, result *datapb.CompactionResult) error {
+	return c.meta.CompleteMergeCompaction(plan.GetSegmentBinlogs(), result)
 }
 
 // getCompaction return compaction task. If planId does not exist, return nil.

@@ -11,12 +11,6 @@ const (
 	AliasMetaPrefix     = ComponentPrefix + "/aliases"
 	FieldMetaPrefix     = ComponentPrefix + "/fields"
 
-	// SegmentIndexMetaPrefix prefix for segment index meta
-	SegmentIndexMetaPrefix = ComponentPrefix + "/segment-index"
-
-	// IndexMetaPrefix prefix for index meta
-	IndexMetaPrefix = ComponentPrefix + "/index"
-
 	// CollectionAliasMetaPrefix prefix for collection alias meta
 	CollectionAliasMetaPrefix = ComponentPrefix + "/collection-alias"
 

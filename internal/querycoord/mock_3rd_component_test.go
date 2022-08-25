@@ -581,13 +581,13 @@ func newIndexCoordMock(path string) (*indexCoordMock, error) {
 	}, nil
 }
 
-func (c *indexCoordMock) GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error) {
+func (c *indexCoordMock) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoRequest) (*indexpb.GetIndexInfoResponse, error) {
 	if c.returnGrpcError {
 		return nil, errors.New("get index file paths failed")
 	}
 
 	if c.returnError {
-		return &indexpb.GetIndexFilePathsResponse{
+		return &indexpb.GetIndexInfoResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    "get index file path failed",
@@ -595,9 +595,9 @@ func (c *indexCoordMock) GetIndexFilePaths(ctx context.Context, req *indexpb.Get
 		}, nil
 	}
 
-	indexPathInfos, err := generateIndexFileInfo(req.IndexBuildIDs, c.chunkManager)
+	indexPathInfos, err := generateIndexFileInfo(req.SegmentIDs, c.chunkManager)
 	if err != nil {
-		return &indexpb.GetIndexFilePathsResponse{
+		return &indexpb.GetIndexInfoResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    err.Error(),
@@ -605,10 +605,10 @@ func (c *indexCoordMock) GetIndexFilePaths(ctx context.Context, req *indexpb.Get
 		}, nil
 	}
 
-	return &indexpb.GetIndexFilePathsResponse{
+	return &indexpb.GetIndexInfoResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
-		FilePaths: indexPathInfos,
+		SegmentInfo: indexPathInfos,
 	}, nil
 }

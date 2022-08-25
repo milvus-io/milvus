@@ -69,7 +69,7 @@ type tbi struct {
 	types.IndexCoord
 }
 
-func (*tbi) BuildIndex(context.Context, *indexpb.BuildIndexRequest) (*indexpb.BuildIndexResponse, error) {
+func (*tbi) CreateIndex(context.Context, *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
 	return nil, nil
 }
 

@@ -19,8 +19,6 @@ package mock
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
-
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -139,21 +137,21 @@ func (m *GrpcRootCoordClient) DescribeSegments(ctx context.Context, in *rootcoor
 	return &rootcoordpb.DescribeSegmentsResponse{}, m.Err
 }
 
-func (m *GrpcRootCoordClient) CreateIndex(ctx context.Context, in *milvuspb.CreateIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.Err
-}
-
-func (m *GrpcRootCoordClient) DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRequest, opts ...grpc.CallOption) (*milvuspb.DescribeIndexResponse, error) {
-	return &milvuspb.DescribeIndexResponse{}, m.Err
-}
-
-func (m *GrpcRootCoordClient) GetIndexState(ctx context.Context, in *milvuspb.GetIndexStateRequest, opt ...grpc.CallOption) (*indexpb.GetIndexStatesResponse, error) {
-	return &indexpb.GetIndexStatesResponse{}, m.Err
-}
-
-func (m *GrpcRootCoordClient) DropIndex(ctx context.Context, in *milvuspb.DropIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.Err
-}
+//func (m *GrpcRootCoordClient) CreateIndex(ctx context.Context, in *milvuspb.CreateIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+//	return &commonpb.Status{}, m.Err
+//}
+//
+//func (m *GrpcRootCoordClient) DescribeIndex(ctx context.Context, in *milvuspb.DescribeIndexRequest, opts ...grpc.CallOption) (*milvuspb.DescribeIndexResponse, error) {
+//	return &milvuspb.DescribeIndexResponse{}, m.Err
+//}
+//
+//func (m *GrpcRootCoordClient) GetIndexState(ctx context.Context, in *milvuspb.GetIndexStateRequest, opt ...grpc.CallOption) (*indexpb.GetIndexStatesResponse, error) {
+//	return &indexpb.GetIndexStatesResponse{}, m.Err
+//}
+//
+//func (m *GrpcRootCoordClient) DropIndex(ctx context.Context, in *milvuspb.DropIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+//	return &commonpb.Status{}, m.Err
+//}
 
 func (m *GrpcRootCoordClient) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestampRequest, opts ...grpc.CallOption) (*rootcoordpb.AllocTimestampResponse, error) {
 	return &rootcoordpb.AllocTimestampResponse{}, m.Err
