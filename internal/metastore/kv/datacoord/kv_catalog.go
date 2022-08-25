@@ -179,38 +179,54 @@ func (kc *Catalog) AlterSegmentsAndAddNewSegment(ctx context.Context, segments [
 	return nil
 }
 
-func (kc *Catalog) SaveDroppedSegmentsInBatch(ctx context.Context, modSegments map[int64]*datapb.SegmentInfo) ([]int64, error) {
+func (kc *Catalog) SaveDroppedSegmentsInBatch(ctx context.Context, segments []*datapb.SegmentInfo) error {
 	kvs := make(map[string]string)
-	batchIDs := make([]int64, 0, MaxOperationsPerTxn)
+	batchIDs := make([]int64, 0, maxOperationsPerTxn)
 
-	size := 0
-	for id, s := range modSegments {
+	multiSave := func() error {
+		if len(kvs) == 0 {
+			return nil
+		}
+
+		if err := kc.Txn.MultiSave(kvs); err != nil {
+			log.Error("Failed to save segments in batch for DropChannel",
+				zap.Any("segmentIDs", batchIDs),
+				zap.Error(err))
+			return err
+		}
+		return nil
+	}
+
+	// the limitation of etcd operations number per transaction is 128,
+	// since segment number might be enormous, so we shall split all save operations into batches
+	splitCount := 0
+	for _, s := range segments {
 		key := buildSegmentPath(s.GetCollectionID(), s.GetPartitionID(), s.GetID())
 		segBytes, err := proto.Marshal(s)
 		if err != nil {
-			return nil, fmt.Errorf("failed to marshal segment: %d, err: %w", s.GetID(), err)
+			return fmt.Errorf("failed to marshal segment: %d, err: %w", s.GetID(), err)
 		}
+
+		kvSize := len(key) + len(segBytes)
+		splitCount += kvSize
+		if len(kvs) == maxOperationsPerTxn || (len(kvs) > 0 && splitCount >= maxBytesPerTxn) {
+			if err := multiSave(); err != nil {
+				return err
+			}
+
+			kvs = make(map[string]string)
+			batchIDs = make([]int64, 0, maxOperationsPerTxn)
+
+			if splitCount >= maxBytesPerTxn {
+				splitCount = kvSize
+			}
+		}
+
 		kvs[key] = string(segBytes)
 		batchIDs = append(batchIDs, s.ID)
-		size += len(key) + len(segBytes)
-		// remove record from map `modSegments`
-		delete(modSegments, id)
-		// batch stops when one of conditions matched:
-		// 1. number of records is equals MaxOperationsPerTxn
-		// 2. left number of modSegments is equals 1
-		// 3. bytes size is greater than MaxBytesPerTxn
-		if len(kvs) == MaxOperationsPerTxn || len(modSegments) == 1 || size >= MaxBytesPerTxn {
-			break
-		}
 	}
 
-	err := kc.Txn.MultiSave(kvs)
-	if err != nil {
-		log.Error("Failed to save segments in batch for DropChannel", zap.Any("segmentIDs", batchIDs), zap.Error(err))
-		return nil, err
-	}
-
-	return batchIDs, nil
+	return multiSave()
 }
 
 func (kc *Catalog) DropSegment(ctx context.Context, segment *datapb.SegmentInfo) error {
