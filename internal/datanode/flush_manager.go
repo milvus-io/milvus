@@ -24,6 +24,7 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -384,7 +385,8 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID Uni
 		// no error raise if alloc=false
 		k := JoinIDPath(collID, partID, segmentID, fieldID, logidx)
 
-		key := path.Join(Params.DataNodeCfg.InsertBinlogRootPath, k)
+		// [rootPath]/[insert_log]/key
+		key := path.Join(m.ChunkManager.RootPath(), common.SegmentInsertLogPath, k)
 		kvs[key] = blob.Value[:]
 		field2Insert[fieldID] = &datapb.Binlog{
 			EntriesNum:    data.size,
@@ -410,7 +412,7 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID Uni
 		// no error raise if alloc=false
 		k := JoinIDPath(collID, partID, segmentID, fieldID, logidx)
 
-		key := path.Join(Params.DataNodeCfg.StatsBinlogRootPath, k)
+		key := path.Join(m.ChunkManager.RootPath(), common.SegmentStatslogPath, k)
 		kvs[key] = blob.Value
 		field2Stats[fieldID] = &datapb.Binlog{
 			EntriesNum:    0,
@@ -460,7 +462,7 @@ func (m *rendezvousFlushManager) flushDelData(data *DelDataBuf, segmentID Unique
 	}
 
 	blobKey := JoinIDPath(collID, partID, segmentID, logID)
-	blobPath := path.Join(Params.DataNodeCfg.DeleteBinlogRootPath, blobKey)
+	blobPath := path.Join(m.ChunkManager.RootPath(), common.SegmentDeltaLogPath, blobKey)
 	kvs := map[string][]byte{blobPath: blob.Value[:]}
 	data.LogSize = int64(len(blob.Value))
 	data.LogPath = blobPath

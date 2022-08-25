@@ -18,9 +18,11 @@ package indexcoord
 
 import (
 	"context"
+	"path"
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 
 	"go.uber.org/zap"
@@ -251,7 +253,7 @@ func (ib *indexBuilder) process(buildID UniqueID) {
 				UseIAM:          Params.MinioCfg.UseIAM,
 				IAMEndpoint:     Params.MinioCfg.IAMEndpoint,
 			},
-			IndexFilePrefix: Params.IndexCoordCfg.IndexStorageRootPath,
+			IndexFilePrefix: path.Join(ib.ic.chunkManager.RootPath(), common.SegmentIndexPath),
 			BuildID:         buildID,
 			DataPaths:       binLogs,
 			IndexVersion:    meta.IndexVersion + 1,

@@ -116,7 +116,12 @@ func (vcm *VectorChunkManager) deserializeVectorFile(filePath string, content []
 	return results, nil
 }
 
-// GetPath returns the path of vector data. If cached, return local path.
+// RootPath returns vector root path
+func (vcm *VectorChunkManager) RootPath() string {
+	return vcm.vectorStorage.RootPath()
+}
+
+// Path returns the path of vector data. If cached, return local path.
 // If not cached return remote path.
 func (vcm *VectorChunkManager) Path(filePath string) (string, error) {
 	return vcm.vectorStorage.Path(filePath)

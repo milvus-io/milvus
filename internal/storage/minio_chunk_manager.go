@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"strings"
 	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -40,6 +41,7 @@ type MinioChunkManager struct {
 
 	ctx        context.Context
 	bucketName string
+	rootPath   string
 }
 
 var _ ChunkManager = (*MinioChunkManager)(nil)
@@ -102,14 +104,26 @@ func newMinioChunkManagerWithConfig(ctx context.Context, c *config) (*MinioChunk
 		Client:     minIOClient,
 		bucketName: c.bucketName,
 	}
-	log.Info("minio chunk manager init success.", zap.String("bucketname", c.bucketName), zap.String("root", c.rootPath))
+	mcm.rootPath = mcm.normalizeRootPath(c.rootPath)
+	log.Info("minio chunk manager init success.", zap.String("bucketname", c.bucketName), zap.String("root", mcm.RootPath()))
 	return mcm, nil
+}
+
+// normalizeRootPath
+func (mcm *MinioChunkManager) normalizeRootPath(rootPath string) string {
+	// no leading "/"
+	return strings.TrimLeft(rootPath, "/")
 }
 
 // SetVar set the variable value of mcm
 func (mcm *MinioChunkManager) SetVar(ctx context.Context, bucketName string) {
 	mcm.ctx = ctx
 	mcm.bucketName = bucketName
+}
+
+// RootPath returns minio root path.
+func (mcm *MinioChunkManager) RootPath() string {
+	return mcm.rootPath
 }
 
 // Path returns the path of minio data if exists.
