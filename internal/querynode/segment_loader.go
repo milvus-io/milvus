@@ -696,12 +696,16 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 			return ctx.Err()
 		case msgPack, ok := <-stream.Chan():
 			if !ok {
+				err = fmt.Errorf("%w: pChannelName=%v, msgID=%v",
+					ErrReadDeltaMsgFailed,
+					pChannelName,
+					position.GetMsgID())
 				log.Warn("fail to read delta msg",
 					zap.String("pChannelName", pChannelName),
 					zap.ByteString("msgID", position.GetMsgID()),
 					zap.Error(err),
 				)
-				return fmt.Errorf("%w: pChannelName=%v, msgID=%v", ErrReadDeltaMsgFailed, pChannelName, position.GetMsgID())
+				return err
 			}
 
 			if msgPack == nil {
