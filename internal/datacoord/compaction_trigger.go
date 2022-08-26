@@ -474,12 +474,7 @@ func (t *compactionTrigger) fillOriginPlan(plan *datapb.CompactionPlan) error {
 	if err != nil {
 		return err
 	}
-	ts, err := t.allocator.allocTimestamp(context.TODO())
-	if err != nil {
-		return err
-	}
 	plan.PlanID = id
-	plan.StartTime = ts
 	plan.TimeoutInSeconds = Params.DataCoordCfg.CompactionTimeoutInSeconds
 	return nil
 }

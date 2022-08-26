@@ -203,7 +203,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 							},
 						},
 					},
-					StartTime:        3,
+					StartTime:        0,
 					TimeoutInSeconds: Params.DataCoordCfg.CompactionTimeoutInSeconds,
 					Type:             datapb.CompactionType_MixCompaction,
 					Timetravel:       200,
