@@ -7,6 +7,7 @@ sys.path.append("..")
 from check.func_check import ResponseChecker
 from utils.api_request import api_request
 from common.common_type import BulkLoadStates
+from pymilvus.orm.role import Role
 
 
 TIMEOUT = 20
@@ -16,6 +17,7 @@ class ApiUtilityWrapper:
     """ Method of encapsulating utility files """
 
     ut = utility
+    role = None
 
     def bulk_load(self, collection_name,  partition_name="", row_based=True, files="", timeout=None,
                   using="default", check_task=None, check_items=None, **kwargs):
@@ -250,4 +252,96 @@ class ApiUtilityWrapper:
         res, is_succ = api_request([self.ut.delete_user, user, using])
         check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
                                        using=using).run()
+        return res, check_result
+
+    def init_role(self, name, using="default", check_task=None, check_items=None, **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, is_succ = api_request([Role, name, using], **kwargs)
+        self.role = res if is_succ else None
+        check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
+                                       name=name, **kwargs).run()
+        return res, check_result
+
+    def create_role(self, using="default", check_task=None, check_items=None, **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, is_succ = api_request([self.role.create], **kwargs)
+        res = res if is_succ else None
+        check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
+                                       **kwargs).run()
+        return res, check_result
+
+    def list_roles(self, include_user_info: bool, using="default", check_task=None, check_items=None):
+        func_name = sys._getframe().f_code.co_name
+        res, is_succ = api_request([self.ut.list_roles, include_user_info, using])
+        check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ, using=using).run()
+        return res, check_result
+
+    def list_user(self, username: str, include_role_info: bool, using="default", check_task=None, check_items=None):
+        func_name = sys._getframe().f_code.co_name
+        res, is_succ = api_request([self.ut.list_user, username, include_role_info, using])
+        check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ, using=using).run()
+        return res, check_result
+
+    def list_users(self, include_role_info: bool, using="default", check_task=None, check_items=None):
+        func_name = sys._getframe().f_code.co_name
+        res, is_succ = api_request([self.ut.list_users, include_role_info, using])
+        check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ, using=using).run()
+        return res, check_result
+
+    def role_drop(self, check_task=None, check_items=None, **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.role.drop], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    def role_is_exist(self, check_task=None, check_items=None, **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.role.is_exist], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    def role_add_user(self, username: str, check_task=None, check_items=None, **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.role.add_user, username], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    def role_remove_user(self, username: str, check_task=None, check_items=None, **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.role.remove_user, username], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    def role_get_users(self, check_task=None, check_items=None, **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.role.get_users], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    @property
+    def role_name(self):
+        return self.role.name
+
+    def role_grant(self, object: str, object_name: str, privilege: str, check_task=None, check_items=None, **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.role.grant, object, object_name, privilege], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    def role_revoke(self, object: str, object_name: str, privilege: str, check_task=None, check_items=None, **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.role.revoke, object, object_name, privilege], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    def role_list_grant(self, object: str, object_name: str, check_task=None, check_items=None, **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.role.list_grant, object, object_name], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    def role_list_grants(self, check_task=None, check_items=None, **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.role.list_grants], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
         return res, check_result
