@@ -94,6 +94,22 @@ func (_m *IMetaDomain) GrantDb(ctx context.Context) dbmodel.IGrantDb {
 	return r0
 }
 
+// GrantIDDb provides a mock function with given fields: ctx
+func (_m *IMetaDomain) GrantIDDb(ctx context.Context) dbmodel.IGrantIDDb {
+	ret := _m.Called(ctx)
+
+	var r0 dbmodel.IGrantIDDb
+	if rf, ok := ret.Get(0).(func(context.Context) dbmodel.IGrantIDDb); ok {
+		r0 = rf(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(dbmodel.IGrantIDDb)
+		}
+	}
+
+	return r0
+}
+
 // IndexDb provides a mock function with given fields: ctx
 func (_m *IMetaDomain) IndexDb(ctx context.Context) dbmodel.IIndexDb {
 	ret := _m.Called(ctx)

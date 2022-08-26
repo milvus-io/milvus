@@ -30,6 +30,9 @@ const (
 	// RoleMappingPrefix prefix for mapping between user and role
 	RoleMappingPrefix = ComponentPrefix + CommonCredentialPrefix + "/user-role-mapping"
 
-	// GranteePrefix prefix for mapping among user or role, resource type, resource name
+	// GranteePrefix prefix for mapping among role, resource type, resource name
 	GranteePrefix = ComponentPrefix + CommonCredentialPrefix + "/grantee-privileges"
+
+	// GranteeIDPrefix prefix for mapping among privilege and grantor
+	GranteeIDPrefix = ComponentPrefix + CommonCredentialPrefix + "/grantee-id"
 )

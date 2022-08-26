@@ -56,3 +56,7 @@ func (d *metaDomain) UserRoleDb(ctx context.Context) dbmodel.IUserRoleDb {
 func (d *metaDomain) GrantDb(ctx context.Context) dbmodel.IGrantDb {
 	return &grantDb{dbcore.GetDB(ctx)}
 }
+
+func (d *metaDomain) GrantIDDb(ctx context.Context) dbmodel.IGrantIDDb {
+	return &grantIDDb{dbcore.GetDB(ctx)}
+}

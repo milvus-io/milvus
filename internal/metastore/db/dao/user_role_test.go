@@ -17,19 +17,16 @@ func TestUserRole_GetUserRoles(t *testing.T) {
 		roleID1   = 10
 		roleID2   = 20
 		userRoles []*dbmodel.UserRole
-		getQuery  func() *sqlmock.ExpectedQuery
 		err       error
 	)
 
 	// mock user and role
-	getQuery = func() *sqlmock.ExpectedQuery {
-		return mock.ExpectQuery("SELECT * FROM `user_role` WHERE `is_deleted` = ? AND `tenant_id` = ?").
-			WithArgs(false, tenantID)
-	}
-	getQuery().WillReturnRows(
-		sqlmock.NewRows([]string{"tenant_id", "user_id", "role_id"}).
-			AddRow(tenantID, userID1, roleID1).
-			AddRow(tenantID, userID2, roleID2))
+	mock.ExpectQuery("SELECT * FROM `user_role` WHERE `is_deleted` = ? AND `tenant_id` = ?").
+		WithArgs(false, tenantID).
+		WillReturnRows(
+			sqlmock.NewRows([]string{"tenant_id", "user_id", "role_id"}).
+				AddRow(tenantID, userID1, roleID1).
+				AddRow(tenantID, userID2, roleID2))
 
 	mock.ExpectQuery("SELECT * FROM `role` WHERE `role`.`id` IN (?,?)").
 		WithArgs(roleID1, roleID2).
@@ -46,13 +43,17 @@ func TestUserRole_GetUserRoles(t *testing.T) {
 				AddRow(userID2, tenantID, "fo2"))
 
 	userRoles, err = userRoleTestDb.GetUserRoles(tenantID, 0, 0)
+	mock.MatchExpectationsInOrder(false)
 	assert.NoError(t, err)
 	assert.Equal(t, 2, len(userRoles))
 	assert.Equal(t, "foo1", userRoles[0].Role.Name)
 	assert.Equal(t, "fo1", userRoles[0].User.Username)
 
-	getQuery().WillReturnError(errors.New("test error"))
+	mock.ExpectQuery("SELECT * FROM `user_role` WHERE `is_deleted` = ? AND `tenant_id` = ?").
+		WithArgs(false, tenantID).
+		WillReturnError(errors.New("test error"))
 	_, err = userRoleTestDb.GetUserRoles(tenantID, 0, 0)
+	mock.MatchExpectationsInOrder(false)
 	assert.Error(t, err)
 }
 
@@ -84,6 +85,7 @@ func TestUserRole_GetUserRolesWithUserID(t *testing.T) {
 				AddRow(userID1, tenantID, "fo1"))
 
 	userRoles, err = userRoleTestDb.GetUserRoles(tenantID, int64(userID1), 0)
+	mock.MatchExpectationsInOrder(false)
 	assert.NoError(t, err)
 	assert.Equal(t, 2, len(userRoles))
 	assert.Equal(t, "foo2", userRoles[1].Role.Name)
@@ -118,6 +120,7 @@ func TestUserRole_GetUserRolesWithRoleID(t *testing.T) {
 				AddRow(userID2, tenantID, "fo2"))
 
 	userRoles, err = userRoleTestDb.GetUserRoles(tenantID, 0, int64(roleID1))
+	mock.MatchExpectationsInOrder(false)
 	assert.NoError(t, err)
 	assert.Equal(t, 2, len(userRoles))
 	assert.Equal(t, "foo1", userRoles[0].Role.Name)
@@ -141,6 +144,7 @@ func TestUserRole_Insert(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 	err = userRoleTestDb.Insert(userRole)
+	mock.MatchExpectationsInOrder(false)
 	assert.NoError(t, err)
 }
 
@@ -161,6 +165,7 @@ func TestUserRole_InsertError(t *testing.T) {
 		WillReturnError(errors.New("test error"))
 	mock.ExpectRollback()
 	err = userRoleTestDb.Insert(userRole)
+	mock.MatchExpectationsInOrder(false)
 	assert.Error(t, err)
 }
 
@@ -183,11 +188,13 @@ func TestUserRole_Delete(t *testing.T) {
 	getExec().WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 	err = userRoleTestDb.Delete(userRole.TenantID, userRole.UserID, userRole.RoleID)
+	mock.MatchExpectationsInOrder(false)
 	assert.NoError(t, err)
 
 	mock.ExpectBegin()
 	getExec().WillReturnError(errors.New("test error"))
 	mock.ExpectRollback()
 	err = userRoleTestDb.Delete(userRole.TenantID, userRole.UserID, userRole.RoleID)
+	mock.MatchExpectationsInOrder(false)
 	assert.Error(t, err)
 }

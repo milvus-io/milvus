@@ -16,7 +16,11 @@ func (u *userRoleDb) GetUserRoles(tenantID string, userID int64, roleID int64) (
 		userRoles []*dbmodel.UserRole
 		err       error
 	)
-	err = u.db.Model(&dbmodel.UserRole{}).Where(&dbmodel.UserRole{UserID: userID, RoleID: roleID}).Where(dbmodel.GetCommonCondition(tenantID, false)).Preload("User").Preload("Role").Find(&userRoles).Error
+	err = u.db.Model(&dbmodel.UserRole{}).
+		Where(&dbmodel.UserRole{UserID: userID, RoleID: roleID}).
+		Where(dbmodel.GetCommonCondition(tenantID, false)).
+		Preload("User").Preload("Role").
+		Find(&userRoles).Error
 	if err != nil {
 		log.Error("fail to get user-roles", zap.String("tenant_id", tenantID), zap.Int64("userID", userID), zap.Int64("roleID", roleID), zap.Error(err))
 		return nil, err
@@ -33,7 +37,10 @@ func (u *userRoleDb) Insert(in *dbmodel.UserRole) error {
 }
 
 func (u *userRoleDb) Delete(tenantID string, userID int64, roleID int64) error {
-	err := u.db.Model(dbmodel.UserRole{}).Where(&dbmodel.UserRole{UserID: userID, RoleID: roleID}).Where(dbmodel.GetCommonCondition(tenantID, false)).Update("is_deleted", true).Error
+	err := u.db.Model(dbmodel.UserRole{}).
+		Where(&dbmodel.UserRole{UserID: userID, RoleID: roleID}).
+		Where(dbmodel.GetCommonCondition(tenantID, false)).
+		Update("is_deleted", true).Error
 	if err != nil {
 		log.Error("fail to delete the user-role", zap.String("tenant_id", tenantID), zap.Int64("userID", userID), zap.Int64("roleID", roleID), zap.Error(err))
 	}

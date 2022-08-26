@@ -1,6 +1,7 @@
 package crypto
 
 import (
+	"crypto/md5" // #nosec
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -38,4 +39,10 @@ func Base64Decode(pwd string) (string, error) {
 
 func Base64Encode(pwd string) string {
 	return base64.StdEncoding.EncodeToString([]byte(pwd))
+}
+
+func MD5(str string) string {
+	// #nosec
+	data := md5.Sum([]byte(str))
+	return hex.EncodeToString(data[:])[8:24]
 }
