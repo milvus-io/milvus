@@ -121,3 +121,13 @@ func (m *QueryNodeMock) GetTimeTickChannel(ctx context.Context) (*milvuspb.Strin
 func (m *QueryNodeMock) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
 	return nil, nil
 }
+
+func (m *QueryNodeMock) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmChannelRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+func (m *QueryNodeMock) GetDataDistribution(context.Context, *querypb.GetDataDistributionRequest) (*querypb.GetDataDistributionResponse, error) {
+	return nil, nil
+}
+func (m *QueryNodeMock) SyncDistribution(context.Context, *querypb.SyncDistributionRequest) (*commonpb.Status, error) {
+	return nil, nil
+}

@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//go:build ignore
 // +build ignore
 
 package gorules
@@ -219,30 +220,30 @@ func oddmathbits(m dsl.Matcher) {
 	).Report("odd math/bits expression: use bits.Len*() instead?")
 }
 
-func floateq(m dsl.Matcher) {
-	m.Match(
-		"$x == $y",
-		"$x != $y",
-	).
-		Where(m["x"].Type.Is("float32") && !m["x"].Const && !m["y"].Text.Matches("0(.0+)?") && !m.File().Name.Matches("floating_comparision.go")).
-		Report("floating point tested for equality")
+// func floateq(m dsl.Matcher) {
+// 	m.Match(
+// 		"$x == $y",
+// 		"$x != $y",
+// 	).
+// 		Where(m["x"].Type.Is("float32") && !m["x"].Const && !m["y"].Text.Matches("0(.0+)?") && !m.File().Name.Matches("floating_comparision.go")).
+// 		Report("floating point tested for equality")
 
-	m.Match(
-		"$x == $y",
-		"$x != $y",
-	).
-		Where(m["x"].Type.Is("float64") && !m["x"].Const && !m["y"].Text.Matches("0(.0+)?") && !m.File().Name.Matches("floating_comparision.go")).
-		Report("floating point tested for equality")
+// 	m.Match(
+// 		"$x == $y",
+// 		"$x != $y",
+// 	).
+// 		Where(m["x"].Type.Is("float64") && !m["x"].Const && !m["y"].Text.Matches("0(.0+)?") && !m.File().Name.Matches("floating_comparision.go")).
+// 		Report("floating point tested for equality")
 
-	m.Match("switch $x { $*_ }", "switch $*_; $x { $*_ }").
-		Where(m["x"].Type.Is("float32")).
-		Report("floating point as switch expression")
+// 	m.Match("switch $x { $*_ }", "switch $*_; $x { $*_ }").
+// 		Where(m["x"].Type.Is("float32")).
+// 		Report("floating point as switch expression")
 
-	m.Match("switch $x { $*_ }", "switch $*_; $x { $*_ }").
-		Where(m["x"].Type.Is("float64")).
-		Report("floating point as switch expression")
+// 	m.Match("switch $x { $*_ }", "switch $*_; $x { $*_ }").
+// 		Where(m["x"].Type.Is("float64")).
+// 		Report("floating point as switch expression")
 
-}
+// }
 
 func badexponent(m dsl.Matcher) {
 	m.Match(

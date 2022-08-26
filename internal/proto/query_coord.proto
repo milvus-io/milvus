@@ -42,6 +42,7 @@ service QueryNode {
   rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
 
   rpc WatchDmChannels(WatchDmChannelsRequest) returns (common.Status) {}
+  rpc UnsubDmChannel(UnsubDmChannelRequest) returns (common.Status) {}
   rpc LoadSegments(LoadSegmentsRequest) returns (common.Status) {}
   rpc ReleaseCollection(ReleaseCollectionRequest) returns (common.Status) {}
   rpc ReleasePartitions(ReleasePartitionsRequest) returns (common.Status) {}
@@ -56,6 +57,9 @@ service QueryNode {
   rpc ShowConfigurations(internal.ShowConfigurationsRequest) returns (internal.ShowConfigurationsResponse){}
   // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
   rpc GetMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
+
+  rpc GetDataDistribution(GetDataDistributionRequest) returns (GetDataDistributionResponse) {}
+  rpc SyncDistribution(SyncDistributionRequest) returns (common.Status) {}
 }
 
 //--------------------QueryCoord grpc request and response proto------------------
@@ -187,6 +191,13 @@ message WatchDmChannelsRequest {
   int64 offlineNodeID = 11;
 }
 
+message UnsubDmChannelRequest {
+    common.MsgBase base = 1;
+    int64 nodeID = 2;
+    int64 collectionID = 3;
+    string channel_name = 4;
+}
+
 message SegmentLoadInfo {
   int64 segmentID = 1;
   int64 partitionID = 2;
@@ -225,6 +236,8 @@ message LoadSegmentsRequest {
   LoadMetaInfo load_meta = 7;
   int64 replicaID = 8;
   repeated internal.MsgPosition delta_positions = 9;
+  int64 version = 10;
+  bool need_transfer = 11;
 }
 
 message ReleaseSegmentsRequest {
@@ -236,6 +249,8 @@ message ReleaseSegmentsRequest {
   repeated int64 partitionIDs = 5;
   repeated int64 segmentIDs = 6;
   DataScope scope = 7; // All, Streaming, Historical
+  string shard = 8;
+  bool need_transfer = 11;
 }
 
 message SearchRequest {
@@ -391,3 +406,83 @@ message SealedSegmentsChangeInfo {
   common.MsgBase base = 1;
   repeated SegmentChangeInfo infos = 2;
 }
+
+message GetDataDistributionRequest {
+  common.MsgBase base = 1;
+}
+
+message GetDataDistributionResponse {
+  common.Status status = 1;
+  int64 nodeID = 2;
+  repeated int64 growing_segmentIDs = 3;
+  repeated SegmentVersionInfo segments = 4;
+  repeated ChannelVersionInfo channels = 5;
+  repeated LeaderView leaderViews = 6;
+}
+
+message LeaderView {
+  int64 collection = 1;
+  string channel = 2;
+  map<int64, int64> segmentNodePairs = 3;
+}
+
+
+message SegmentVersionInfo {
+  int64 ID = 1;
+  int64 collection = 2;
+  int64 partition = 3;
+  string channel = 4;
+  int64 version = 5;
+}
+
+message ChannelVersionInfo {
+  string channel = 1;
+  int64 collection = 2;
+  int64 version = 3;
+}
+
+enum LoadStatus {
+  Invalid = 0;
+  Loading = 1;
+  Loaded = 2;
+}
+
+message CollectionLoadInfo {
+  int64 collectionID = 1;
+  repeated int64 released_partitions = 2;
+  int32 replica_number = 3;
+  LoadStatus status = 4;
+}
+
+message PartitionLoadInfo {
+  int64 collectionID = 1;
+  int64 partitionID = 2;
+  int32 replica_number = 3;
+  LoadStatus status = 4;
+}
+
+message Replica {
+  int64 ID = 1;
+  int64 collectionID = 2;
+  repeated int64 nodes = 3;
+}
+
+enum SyncType {
+  Remove = 0;
+  Set = 1;
+}
+
+message SyncAction {
+  SyncType type = 1;
+  int64 partitionID = 2;
+  int64 segmentID = 3;
+  int64 nodeID = 4;
+}
+
+message SyncDistributionRequest {
+  common.MsgBase base = 1;
+  int64 collectionID = 2;
+  string channel = 3;
+  repeated SyncAction actions = 4;
+}
+

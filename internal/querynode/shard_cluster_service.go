@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	ReplicaMetaPrefix = "queryCoord-ReplicaMeta"
+	ReplicaMetaPrefix = "querycoord-replica"
 )
 
 // shardQueryNodeWrapper wraps a querynode to shardQueryNode and preventing it been closed
@@ -158,4 +158,13 @@ func (s *ShardClusterService) HandoffVChannelSegments(vchannel string, info *que
 		log.Warn("failed to handoff", zap.String("channel", vchannel), zap.Any("segment", info), zap.Error(err))
 	}
 	return err
+}
+
+func (s *ShardClusterService) GetShardClusters() []*ShardCluster {
+	ret := make([]*ShardCluster, 0)
+	s.clusters.Range(func(key, value any) bool {
+		ret = append(ret, value.(*ShardCluster))
+		return true
+	})
+	return ret
 }

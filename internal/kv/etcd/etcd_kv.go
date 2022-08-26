@@ -27,8 +27,9 @@ import (
 
 	"github.com/milvus-io/milvus/internal/common"
 
-	"github.com/milvus-io/milvus/internal/log"
 	clientv3 "go.etcd.io/etcd/client/v3"
+
+	"github.com/milvus-io/milvus/internal/log"
 
 	"go.uber.org/zap"
 )
@@ -284,7 +285,7 @@ func (kv *EtcdKV) LoadWithRevision(key string) ([]string, []string, int64, error
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
 	resp, err := kv.client.Get(ctx, key, clientv3.WithPrefix(),
-		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
+		clientv3.WithSort(clientv3.SortByCreateRevision, clientv3.SortAscend))
 	if err != nil {
 		return nil, nil, 0, err
 	}

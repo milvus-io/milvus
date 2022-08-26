@@ -6,6 +6,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -92,4 +93,18 @@ type IndexCoordCatalog interface {
 	AlterSegmentIndex(ctx context.Context, newSegIndex *model.SegmentIndex) error
 	AlterSegmentIndexes(ctx context.Context, newSegIdxes []*model.SegmentIndex) error
 	DropSegmentIndex(ctx context.Context, collID, partID, segID, buildID typeutil.UniqueID) error
+}
+
+type QueryCoordCatalog interface {
+	SaveCollection(info *querypb.CollectionLoadInfo) error
+	SavePartition(info ...*querypb.PartitionLoadInfo) error
+	SaveReplica(replica *querypb.Replica) error
+	GetCollections() ([]*querypb.CollectionLoadInfo, error)
+	GetPartitions() (map[int64][]*querypb.PartitionLoadInfo, error)
+	GetReplicas() ([]*querypb.Replica, error)
+	ReleaseCollection(id int64) error
+	ReleasePartition(collection int64, partitions ...int64) error
+	ReleaseReplicas(collectionID int64) error
+	ReleaseReplica(collection, replica int64) error
+	RemoveHandoffEvent(segmentInfo *querypb.SegmentInfo) error
 }

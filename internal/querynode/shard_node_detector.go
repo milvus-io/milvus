@@ -22,7 +22,7 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -86,19 +86,12 @@ func (nd *etcdShardNodeDetector) watchNodes(collectionID int64, replicaID int64,
 			continue
 		}
 		// skip replica not related
-		if info.GetCollectionID() != collectionID || info.GetReplicaID() != replicaID {
+		if info.GetCollectionID() != collectionID || info.GetID() != replicaID {
 			continue
 		}
-		// find the leader id for the shard replica
-		var leaderID int64
-		for _, shardReplica := range info.GetShardReplicas() {
-			if shardReplica.GetDmChannelName() == vchannelName {
-				leaderID = shardReplica.GetLeaderID()
-				break
-			}
-		}
+
 		// generate node event
-		for _, nodeID := range info.GetNodeIds() {
+		for _, nodeID := range info.GetNodes() {
 			addr, has := idAddr[nodeID]
 			if !has {
 				log.Warn("Node not found in session", zap.Int64("node id", nodeID))
@@ -108,7 +101,7 @@ func (nd *etcdShardNodeDetector) watchNodes(collectionID int64, replicaID int64,
 				nodeID:    nodeID,
 				nodeAddr:  addr,
 				eventType: nodeAdd,
-				isLeader:  nodeID == leaderID,
+				isLeader:  nodeID == Params.QueryNodeCfg.GetNodeID(),
 			})
 		}
 	}
@@ -168,13 +161,13 @@ func (nd *etcdShardNodeDetector) watch(ch clientv3.WatchChan, collectionID, repl
 
 func (nd *etcdShardNodeDetector) handlePutEvent(e *clientv3.Event, collectionID, replicaID int64) {
 	var err error
-	var info, prevInfo *milvuspb.ReplicaInfo
+	var info, prevInfo *querypb.Replica
 	info, err = nd.parseReplicaInfo(e.Kv.Value)
 	if err != nil {
 		log.Warn("failed to handle node event", zap.Any("event", e), zap.Error(err))
 		return
 	}
-	if info.CollectionID != collectionID || info.ReplicaID != replicaID {
+	if info.CollectionID != collectionID || info.GetID() != replicaID {
 		return
 	}
 	if e.PrevKv != nil {
@@ -188,7 +181,7 @@ func (nd *etcdShardNodeDetector) handlePutEvent(e *clientv3.Event, collectionID,
 	}
 	// all node is added
 	if prevInfo == nil {
-		for _, nodeID := range info.GetNodeIds() {
+		for _, nodeID := range info.GetNodes() {
 			addr, ok := idAddr[nodeID]
 			if !ok {
 				log.Warn("node id not in session", zap.Int64("nodeID", nodeID))
@@ -205,12 +198,12 @@ func (nd *etcdShardNodeDetector) handlePutEvent(e *clientv3.Event, collectionID,
 
 	// maybe binary search is better here
 	currIDs := make(map[int64]struct{})
-	for _, id := range info.GetNodeIds() {
+	for _, id := range info.GetNodes() {
 		currIDs[id] = struct{}{}
 	}
 
 	oldIDs := make(map[int64]struct{})
-	for _, id := range prevInfo.GetNodeIds() {
+	for _, id := range prevInfo.GetNodes() {
 		oldIDs[id] = struct{}{}
 	}
 
@@ -254,7 +247,7 @@ func (nd *etcdShardNodeDetector) handleDelEvent(e *clientv3.Event, collectionID,
 		return
 	}
 	// skip replica not related
-	if prevInfo.GetCollectionID() != collectionID || prevInfo.GetReplicaID() != replicaID {
+	if prevInfo.GetCollectionID() != collectionID || prevInfo.GetID() != replicaID {
 		return
 	}
 	idAddr, err := nd.idAddr()
@@ -262,7 +255,7 @@ func (nd *etcdShardNodeDetector) handleDelEvent(e *clientv3.Event, collectionID,
 		log.Error("Etcd NodeDetector session map failed", zap.Error(err))
 		panic(err)
 	}
-	for _, id := range prevInfo.GetNodeIds() {
+	for _, id := range prevInfo.GetNodes() {
 		//best effort to notify offline
 		addr := idAddr[id]
 		nd.evtCh <- nodeEvent{
@@ -273,8 +266,8 @@ func (nd *etcdShardNodeDetector) handleDelEvent(e *clientv3.Event, collectionID,
 	}
 }
 
-func (nd *etcdShardNodeDetector) parseReplicaInfo(bs []byte) (*milvuspb.ReplicaInfo, error) {
-	info := &milvuspb.ReplicaInfo{}
+func (nd *etcdShardNodeDetector) parseReplicaInfo(bs []byte) (*querypb.Replica, error) {
+	info := &querypb.Replica{}
 	err := proto.Unmarshal(bs, info)
 	return info, err
 }

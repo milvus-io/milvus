@@ -43,6 +43,7 @@ func getInsertNode() (*insertNode, error) {
 		defaultPartitionID,
 		defaultCollectionID,
 		defaultDMLChannel,
+		defaultSegmentVersion,
 		segmentTypeGrowing)
 	if err != nil {
 		return nil, err

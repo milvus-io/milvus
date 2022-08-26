@@ -103,7 +103,7 @@ func RatedWarn(cost float64, msg string, fields ...zap.Field) bool {
 // With creates a child logger and adds structured context to it.
 // Fields added to the child don't affect the parent, and vice versa.
 func With(fields ...zap.Field) *zap.Logger {
-	return L().With(fields...)
+	return L().With(fields...).WithOptions(zap.AddCallerSkip(-1))
 }
 
 // SetLevel alters the logging level.
