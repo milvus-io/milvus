@@ -72,6 +72,7 @@ if [[ "${MILVUS_CLUSTER_ENABLED}" == "true" ]]; then
                                --set cluster.enabled="${MILVUS_CLUSTER_ENABLED}" \
                                --set service.type="${MILVUS_SERVICE_TYPE}" \
                                --set pulsar.broker.replicaCount=2 \
+                               --set minio.mode=standalone \
                                --namespace "${MILVUS_HELM_NAMESPACE}" \
                                "${MILVUS_HELM_RELEASE_NAME}" \
                                ${@:-} "${MILVUS_HELM_CHART_PATH}"
