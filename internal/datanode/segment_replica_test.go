@@ -22,10 +22,12 @@ import (
 	"fmt"
 	"math/rand"
 	"testing"
+	"time"
 
 	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -793,6 +795,52 @@ func TestSegmentReplica_UpdatePKRange(t *testing.T) {
 	}
 }
 
+func TestSegment_getSegmentStatslog(t *testing.T) {
+	rand.Seed(time.Now().UnixNano())
+
+	cases := make([][]int64, 0, 100)
+	for i := 0; i < 100; i++ {
+		tc := make([]int64, 0, 10)
+		for j := 0; j < 100; j++ {
+			tc = append(tc, rand.Int63())
+		}
+		cases = append(cases, tc)
+	}
+	buf := make([]byte, 8)
+	for _, tc := range cases {
+		seg := &Segment{
+			pkFilter: bloom.NewWithEstimates(100000, 0.005),
+		}
+
+		seg.updatePKRange(&storage.Int64FieldData{
+			Data: tc,
+		})
+
+		statBytes, err := seg.getSegmentStatslog(1, schemapb.DataType_Int64)
+		assert.NoError(t, err)
+
+		pks := storage.PrimaryKeyStats{}
+		err = json.Unmarshal(statBytes, &pks)
+		require.NoError(t, err)
+
+		assert.Equal(t, int64(1), pks.FieldID)
+		assert.Equal(t, int64(schemapb.DataType_Int64), pks.PkType)
+
+		for _, v := range tc {
+			pk := newInt64PrimaryKey(v)
+			assert.True(t, pks.MinPk.LE(pk))
+			assert.True(t, pks.MaxPk.GE(pk))
+
+			common.Endian.PutUint64(buf, uint64(v))
+			assert.True(t, seg.pkFilter.Test(buf))
+		}
+	}
+
+	pks := &storage.PrimaryKeyStats{}
+	_, err := json.Marshal(pks)
+	assert.NoError(t, err)
+}
+
 func TestReplica_UpdatePKRange(t *testing.T) {
 	rc := &RootCoordFactory{
 		pkType: schemapb.DataType_Int64,
@@ -843,4 +891,103 @@ func TestReplica_UpdatePKRange(t *testing.T) {
 
 	}
 
+}
+
+// SegmentReplicaSuite setup test suite for SegmentReplica
+type SegmentReplicaSuite struct {
+	suite.Suite
+	sr *SegmentReplica
+
+	collID    UniqueID
+	partID    UniqueID
+	vchanName string
+	cm        *storage.LocalChunkManager
+}
+
+func (s *SegmentReplicaSuite) SetupSuite() {
+	rc := &RootCoordFactory{
+		pkType: schemapb.DataType_Int64,
+	}
+	s.collID = 1
+	s.cm = storage.NewLocalChunkManager(storage.RootPath(segmentReplicaNodeTestDir))
+	var err error
+	s.sr, err = newReplica(context.Background(), rc, s.cm, s.collID)
+	s.Require().NoError(err)
+}
+
+func (s *SegmentReplicaSuite) TearDownSuite() {
+	s.cm.RemoveWithPrefix("")
+
+}
+
+func (s *SegmentReplicaSuite) SetupTest() {
+	var err error
+	err = s.sr.addNewSegment(1, s.collID, s.partID, s.vchanName, &internalpb.MsgPosition{}, nil)
+	s.Require().NoError(err)
+	err = s.sr.addNormalSegment(2, s.collID, s.partID, s.vchanName, 10, nil, nil, 0)
+	s.Require().NoError(err)
+	err = s.sr.addFlushedSegment(3, s.collID, s.partID, s.vchanName, 10, nil, 0)
+	s.Require().NoError(err)
+}
+
+func (s *SegmentReplicaSuite) TearDownTest() {
+	s.sr.removeSegments(1, 2, 3)
+}
+
+func (s *SegmentReplicaSuite) TestGetSegmentStatslog() {
+	bs, err := s.sr.getSegmentStatslog(1)
+	s.NoError(err)
+
+	segment, ok := s.getSegmentByID(1)
+	s.Require().True(ok)
+	expected, err := segment.getSegmentStatslog(106, schemapb.DataType_Int64)
+	s.Require().NoError(err)
+	s.Equal(expected, bs)
+
+	bs, err = s.sr.getSegmentStatslog(2)
+	s.NoError(err)
+
+	segment, ok = s.getSegmentByID(2)
+	s.Require().True(ok)
+	expected, err = segment.getSegmentStatslog(106, schemapb.DataType_Int64)
+	s.Require().NoError(err)
+	s.Equal(expected, bs)
+
+	bs, err = s.sr.getSegmentStatslog(3)
+	s.NoError(err)
+
+	segment, ok = s.getSegmentByID(3)
+	s.Require().True(ok)
+	expected, err = segment.getSegmentStatslog(106, schemapb.DataType_Int64)
+	s.Require().NoError(err)
+	s.Equal(expected, bs)
+
+	_, err = s.sr.getSegmentStatslog(4)
+	s.Error(err)
+}
+
+func (s *SegmentReplicaSuite) getSegmentByID(id UniqueID) (*Segment, bool) {
+	s.sr.segMu.RLock()
+	defer s.sr.segMu.RUnlock()
+
+	seg, ok := s.sr.newSegments[id]
+	if ok {
+		return seg, true
+	}
+
+	seg, ok = s.sr.normalSegments[id]
+	if ok {
+		return seg, true
+	}
+
+	seg, ok = s.sr.flushedSegments[id]
+	if ok {
+		return seg, true
+	}
+
+	return nil, false
+}
+
+func TestSegmentReplicaSuite(t *testing.T) {
+	suite.Run(t, new(SegmentReplicaSuite))
 }

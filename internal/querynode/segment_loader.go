@@ -600,8 +600,15 @@ func (loader *segmentLoader) loadSegmentBloomFilter(segment *Segment, binlogPath
 
 	stats, err := storage.DeserializeStats(blobs)
 	if err != nil {
+		log.Warn("failed to deserialize stats", zap.Error(err))
 		return err
 	}
+	// just one BF, just use it
+	if len(stats) == 1 && stats[0].BF != nil {
+		segment.pkFilter = stats[0].BF
+		return nil
+	}
+	// legacy merge
 	for _, stat := range stats {
 		if stat.BF == nil {
 			log.Warn("stat log with nil bloom filter", zap.Int64("segmentID", segment.segmentID), zap.Any("stat", stat))
