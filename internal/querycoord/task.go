@@ -1757,10 +1757,9 @@ func (ht *handoffTask) execute(ctx context.Context) error {
 				log.Info("handoffTask: add a childTask", zap.String("task type", internalTask.msgType().String()), zap.Int64("segmentID", segmentID))
 			}
 		} else {
-			err = fmt.Errorf("sealed segment has been exist on query node, segmentID is %d", segmentID)
-			log.Error("handoffTask: handoff segment failed", zap.Int64("segmentID", segmentID), zap.Error(err))
-			ht.setResultInfo(err)
-			return err
+			log.Debug("sealed segment has been exist on query node", zap.Int64("segmentID", segmentID))
+			ht.setResultInfo(nil)
+			return nil
 		}
 	}
 

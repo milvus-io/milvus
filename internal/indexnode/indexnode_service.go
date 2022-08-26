@@ -107,7 +107,6 @@ func (i *IndexNode) QueryJobs(ctx context.Context, req *indexpb.QueryJobsRequest
 			},
 		}, nil
 	}
-	log.Debug("querying index build task", zap.Int64("ClusterID", req.ClusterID), zap.Int64s("IndexBuildIDs", req.BuildIDs))
 	infos := make(map[UniqueID]*taskInfo)
 	i.foreachTaskInfo(func(clusterID, buildID UniqueID, info *taskInfo) {
 		if clusterID == req.ClusterID {
