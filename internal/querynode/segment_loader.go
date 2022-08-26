@@ -50,6 +50,10 @@ const (
 	requestConcurrencyLevelLimit = 8
 )
 
+var (
+	ErrReadDeltaMsgFailed = errors.New("ReadDeltaMsgFailed")
+)
+
 // segmentLoader is only responsible for loading the field data from binlog
 type segmentLoader struct {
 	metaReplica ReplicaInterface
@@ -692,7 +696,15 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 			break
 		case msgPack, ok := <-stream.Chan():
 			if !ok {
-				log.Warn("fail to read delta msg", zap.String("pChannelName", pChannelName), zap.Any("msg id", position.GetMsgID()), zap.Error(err))
+				err = fmt.Errorf("%w: pChannelName=%v, msgID=%v",
+					ErrReadDeltaMsgFailed,
+					pChannelName,
+					position.GetMsgID())
+				log.Warn("fail to read delta msg",
+					zap.String("pChannelName", pChannelName),
+					zap.ByteString("msgID", position.GetMsgID()),
+					zap.Error(err),
+				)
 				return err
 			}
 

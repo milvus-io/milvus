@@ -598,7 +598,7 @@ func TestSegmentLoader_testFromDmlCPLoadDelete(t *testing.T) {
 		mockMsg := &mockMsgID{}
 		mockMsg.On("AtEarliestPosition").Return(true, nil)
 		mockMsg.On("Equal", mock.AnythingOfType("string")).Return(false, nil)
-		assert.Nil(t, testConsumingDeltaMsg(ctx, t, position, true, mockMsg))
+		assert.Nil(t, testConsumingDeltaMsg(ctx, t, position, true, true, false, mockMsg))
 	}
 
 	// test already reach latest position
@@ -606,7 +606,7 @@ func TestSegmentLoader_testFromDmlCPLoadDelete(t *testing.T) {
 		mockMsg := &mockMsgID{}
 		mockMsg.On("AtEarliestPosition").Return(false, nil)
 		mockMsg.On("Equal", mock.AnythingOfType("string")).Return(true, nil)
-		assert.Nil(t, testConsumingDeltaMsg(ctx, t, position, true, mockMsg))
+		assert.Nil(t, testConsumingDeltaMsg(ctx, t, position, true, true, false, mockMsg))
 	}
 
 	//test consume after seeking when get last msg successfully
@@ -615,7 +615,7 @@ func TestSegmentLoader_testFromDmlCPLoadDelete(t *testing.T) {
 		mockMsg.On("AtEarliestPosition").Return(false, nil)
 		mockMsg.On("Equal", mock.AnythingOfType("string")).Return(false, nil)
 		mockMsg.On("LessOrEqualThan", mock.AnythingOfType("string")).Return(true, nil)
-		assert.Nil(t, testConsumingDeltaMsg(ctx, t, position, true, mockMsg))
+		assert.Nil(t, testConsumingDeltaMsg(ctx, t, position, true, true, false, mockMsg))
 	}
 
 	//test compare msgID failed when get last msg successfully
@@ -624,7 +624,7 @@ func TestSegmentLoader_testFromDmlCPLoadDelete(t *testing.T) {
 		mockMsg.On("AtEarliestPosition").Return(false, nil)
 		mockMsg.On("Equal", mock.AnythingOfType("string")).Return(false, nil)
 		mockMsg.On("LessOrEqualThan", mock.AnythingOfType("string")).Return(true, errors.New(""))
-		assert.NotNil(t, testConsumingDeltaMsg(ctx, t, position, true, mockMsg))
+		assert.NotNil(t, testConsumingDeltaMsg(ctx, t, position, true, true, false, mockMsg))
 	}
 
 	//test consume after seeking when get last msg failed
@@ -633,7 +633,15 @@ func TestSegmentLoader_testFromDmlCPLoadDelete(t *testing.T) {
 		mockMsg.On("AtEarliestPosition").Return(false, nil)
 		mockMsg.On("Equal", mock.AnythingOfType("string")).Return(false, nil)
 		mockMsg.On("LessOrEqualThan", mock.AnythingOfType("string")).Return(true, errors.New(""))
-		assert.NotNil(t, testConsumingDeltaMsg(ctx, t, position, false, mockMsg))
+		assert.NotNil(t, testConsumingDeltaMsg(ctx, t, position, false, true, false, mockMsg))
+	}
+
+	//test consume after seeking when read stream failed
+	{
+		mockMsg := &mockMsgID{}
+		mockMsg.On("AtEarliestPosition").Return(false, nil)
+		mockMsg.On("Equal", mock.AnythingOfType("string")).Return(false, nil)
+		assert.NotNil(t, testConsumingDeltaMsg(ctx, t, position, true, false, true, mockMsg))
 	}
 }
 
@@ -655,7 +663,7 @@ func testSeekFailWhenConsumingDeltaMsg(ctx context.Context, t *testing.T, positi
 	assert.EqualError(t, ret, errMsg)
 }
 
-func testConsumingDeltaMsg(ctx context.Context, t *testing.T, position *msgstream.MsgPosition, getLastSucc bool, mockMsg *mockMsgID) error {
+func testConsumingDeltaMsg(ctx context.Context, t *testing.T, position *msgstream.MsgPosition, getLastSucc, hasData, closedStream bool, mockMsg *mockMsgID) error {
 	msgStream := &LoadDeleteMsgStream{}
 	msgStream.On("AsConsumer", mock.AnythingOfTypeArgument("string"), mock.AnythingOfTypeArgument("string"))
 	msgStream.On("Seek", mock.AnythingOfType("string")).Return(nil)
@@ -666,13 +674,17 @@ func testConsumingDeltaMsg(ctx context.Context, t *testing.T, position *msgstrea
 		msgStream.On("GetLatestMsgID", mock.AnythingOfType("string")).Return(mockMsg, errors.New(""))
 	}
 
-	msgChan := make(chan *msgstream.MsgPack)
-	go func() {
+	msgChan := make(chan *msgstream.MsgPack, 10)
+	if hasData {
 		msgChan <- nil
 		deleteMsg1 := genDeleteMsg(defaultCollectionID+1, schemapb.DataType_Int64, defaultDelLength)
 		deleteMsg2 := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
 		msgChan <- &msgstream.MsgPack{Msgs: []msgstream.TsMsg{deleteMsg1, deleteMsg2}}
-	}()
+	}
+
+	if closedStream {
+		close(msgChan)
+	}
 
 	msgStream.On("Chan").Return(msgChan)
 	factory := &mockMsgStreamFactory{mockMqStream: msgStream}
