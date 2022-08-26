@@ -345,6 +345,12 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 						StateCode: commonpb.ImportState_ImportPending,
 					},
 				}
+
+				// Here no need to check error returned by setCollectionPartitionName(),
+				// since here we always return task list to client no matter something missed.
+				// We make the method setCollectionPartitionName() returns error
+				// because we need to make sure coverage all the code branch in unittest case.
+				m.setCollectionPartitionName(cID, pID, newTask)
 				resp.Tasks = append(resp.Tasks, newTask.GetId())
 				taskList[i] = newTask.GetId()
 				log.Info("new task created as pending task",
@@ -379,6 +385,11 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 					StateCode: commonpb.ImportState_ImportPending,
 				},
 			}
+			// Here no need to check error returned by setCollectionPartitionName(),
+			// since here we always return task list to client no matter something missed.
+			// We make the method setCollectionPartitionName() returns error
+			// because we need to make sure coverage all the code branch in unittest case.
+			m.setCollectionPartitionName(cID, pID, newTask)
 			resp.Tasks = append(resp.Tasks, newTask.GetId())
 			log.Info("new task created as pending task",
 				zap.Int64("task ID", newTask.GetId()))
@@ -488,19 +499,48 @@ func (m *importManager) setCompleteImportState(taskID int64) error {
 	return nil
 }
 
-func (m *importManager) getCollectionPartitionName(colID, partID int64, resp *milvuspb.GetImportStateResponse) {
+func (m *importManager) setCollectionPartitionName(colID, partID int64, task *datapb.ImportTaskInfo) error {
 	if m.getCollectionName != nil {
 		colName, partName, err := m.getCollectionName(colID, partID)
 		if err == nil {
-			resp.Infos = append(resp.Infos, &commonpb.KeyValuePair{Key: CollectionName, Value: colName})
-			resp.Infos = append(resp.Infos, &commonpb.KeyValuePair{Key: PartitionName, Value: partName})
+			task.CollectionName = colName
+			task.PartitionName = partName
+			return nil
 		} else {
-			log.Error("failed to getCollectionName",
+			log.Error("failed to setCollectionPartitionName",
 				zap.Int64("collection ID", colID),
 				zap.Int64("partition ID", partID),
 				zap.Error(err))
 		}
 	}
+	return errors.New("failed to setCollectionPartitionName for import task")
+}
+
+func (m *importManager) copyTaskInfo(input *datapb.ImportTaskInfo, output *milvuspb.GetImportStateResponse) error {
+	if input == nil || output == nil {
+		log.Error("ImportTaskInfo or ImprtStateResponse object should not be null")
+		return errors.New("ImportTaskInfo or ImprtStateResponse object should not be null")
+	}
+
+	output.Status = &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}
+	output.Id = input.GetId()
+	output.CollectionId = input.GetCollectionId()
+	output.State = input.GetState().GetStateCode()
+	output.RowCount = input.GetState().GetRowCount()
+	output.IdList = input.GetState().GetRowIds()
+	output.SegmentIds = input.GetState().GetSegments()
+	output.CreateTs = input.GetCreateTs()
+	output.Infos = append(output.Infos, &commonpb.KeyValuePair{Key: Files, Value: strings.Join(input.GetFiles(), ",")})
+	output.Infos = append(output.Infos, &commonpb.KeyValuePair{Key: CollectionName, Value: input.GetCollectionName()})
+	output.Infos = append(output.Infos, &commonpb.KeyValuePair{Key: PartitionName, Value: input.GetPartitionName()})
+	output.Infos = append(output.Infos, &commonpb.KeyValuePair{
+		Key:   FailedReason,
+		Value: input.GetState().GetErrorMessage(),
+	})
+
+	return nil
 }
 
 // getTaskState looks for task with the given ID and returns its import state.
@@ -519,19 +559,11 @@ func (m *importManager) getTaskState(tID int64) *milvuspb.GetImportStateResponse
 		m.pendingLock.Lock()
 		for _, t := range m.pendingTasks {
 			if tID == t.Id {
-				resp.Status = &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-				}
-				resp.Id = tID
-				resp.CollectionId = t.CollectionId
-				resp.State = commonpb.ImportState_ImportPending
-				resp.Infos = append(resp.Infos, &commonpb.KeyValuePair{Key: Files, Value: strings.Join(t.GetFiles(), ",")})
-				colID := t.GetCollectionId()
-				partID := t.GetPartitionId()
+				m.copyTaskInfo(t, resp)
+
 				// Release lock early to prevent deadlock.
 				m.pendingLock.Unlock()
-				// TODO: Here and below, we don't need to look up collection/partition name in every internal calls.
-				m.getCollectionPartitionName(colID, partID, resp)
+
 				found = true
 				break
 			}
@@ -549,25 +581,10 @@ func (m *importManager) getTaskState(tID int64) *milvuspb.GetImportStateResponse
 		m.workingLock.Lock()
 		if v, ok := m.workingTasks[tID]; ok {
 			found = true
-			resp.Status = &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			}
-			resp.Id = tID
-			resp.State = v.GetState().GetStateCode()
-			resp.RowCount = v.GetState().GetRowCount()
-			resp.IdList = v.GetState().GetRowIds()
-			resp.CollectionId = v.GetCollectionId()
-			resp.SegmentIds = v.GetState().GetSegments()
-			resp.Infos = append(resp.Infos, &commonpb.KeyValuePair{Key: Files, Value: strings.Join(v.GetFiles(), ",")})
-			resp.Infos = append(resp.Infos, &commonpb.KeyValuePair{
-				Key:   FailedReason,
-				Value: v.GetState().GetErrorMessage(),
-			})
-			colID := v.GetCollectionId()
-			partID := v.GetPartitionId()
+			m.copyTaskInfo(v, resp)
+
 			// Release lock early to prevent deadlock.
 			m.workingLock.Unlock()
-			m.getCollectionPartitionName(colID, partID, resp)
 		}
 		if !found {
 			m.workingLock.Unlock()
@@ -727,20 +744,12 @@ func (m *importManager) listAllTasks() []*milvuspb.GetImportStateResponse {
 		m.pendingLock.Lock()
 		defer m.pendingLock.Unlock()
 		for _, t := range m.pendingTasks {
-			resp := &milvuspb.GetImportStateResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-				},
-				Infos: make([]*commonpb.KeyValuePair, 0),
-				Id:    t.GetId(),
-				State: commonpb.ImportState_ImportPending,
-			}
-			resp.Infos = append(resp.Infos, &commonpb.KeyValuePair{Key: Files, Value: strings.Join(t.GetFiles(), ",")})
-			colID := t.GetCollectionId()
-			partID := t.GetPartitionId()
+			resp := &milvuspb.GetImportStateResponse{}
+			m.copyTaskInfo(t, resp)
+
 			// Release lock early.
 			m.pendingLock.Unlock()
-			m.getCollectionPartitionName(colID, partID, resp)
+
 			// Re-lock.
 			m.pendingLock.Lock()
 			tasks = append(tasks, resp)
@@ -752,27 +761,12 @@ func (m *importManager) listAllTasks() []*milvuspb.GetImportStateResponse {
 		m.workingLock.Lock()
 		defer m.workingLock.Unlock()
 		for _, v := range m.workingTasks {
-			resp := &milvuspb.GetImportStateResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-				},
-				Infos:      make([]*commonpb.KeyValuePair, 0),
-				Id:         v.GetId(),
-				State:      v.GetState().GetStateCode(),
-				RowCount:   v.GetState().GetRowCount(),
-				IdList:     v.GetState().GetRowIds(),
-				SegmentIds: v.GetState().GetSegments(),
-			}
-			resp.Infos = append(resp.Infos, &commonpb.KeyValuePair{Key: Files, Value: strings.Join(v.GetFiles(), ",")})
-			resp.Infos = append(resp.Infos, &commonpb.KeyValuePair{
-				Key:   FailedReason,
-				Value: v.GetState().GetErrorMessage(),
-			})
-			colID := v.GetCollectionId()
-			partID := v.GetPartitionId()
+			resp := &milvuspb.GetImportStateResponse{}
+			m.copyTaskInfo(v, resp)
+
 			// Release lock early.
 			m.workingLock.Unlock()
-			m.getCollectionPartitionName(colID, partID, resp)
+
 			// Re-lock.
 			m.workingLock.Lock()
 			tasks = append(tasks, resp)
@@ -820,16 +814,18 @@ func (m *importManager) GetImportFailedSegmentIDs() ([]int64, error) {
 
 func cloneImportTaskInfo(taskInfo *datapb.ImportTaskInfo) *datapb.ImportTaskInfo {
 	cloned := &datapb.ImportTaskInfo{
-		Id:           taskInfo.GetId(),
-		DatanodeId:   taskInfo.GetDatanodeId(),
-		CollectionId: taskInfo.GetCollectionId(),
-		PartitionId:  taskInfo.GetPartitionId(),
-		ChannelNames: taskInfo.GetChannelNames(),
-		Bucket:       taskInfo.GetBucket(),
-		RowBased:     taskInfo.GetRowBased(),
-		Files:        taskInfo.GetFiles(),
-		CreateTs:     taskInfo.GetCreateTs(),
-		State:        taskInfo.GetState(),
+		Id:             taskInfo.GetId(),
+		DatanodeId:     taskInfo.GetDatanodeId(),
+		CollectionId:   taskInfo.GetCollectionId(),
+		PartitionId:    taskInfo.GetPartitionId(),
+		ChannelNames:   taskInfo.GetChannelNames(),
+		Bucket:         taskInfo.GetBucket(),
+		RowBased:       taskInfo.GetRowBased(),
+		Files:          taskInfo.GetFiles(),
+		CreateTs:       taskInfo.GetCreateTs(),
+		State:          taskInfo.GetState(),
+		CollectionName: taskInfo.GetCollectionName(),
+		PartitionName:  taskInfo.GetPartitionName(),
 	}
 	return cloned
 }

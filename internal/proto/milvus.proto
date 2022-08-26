@@ -861,10 +861,6 @@ message ImportResponse {
   repeated int64 tasks = 2;  // id array of import tasks
 }
 
-message CompleteImportRequest {
-  int64 task_id = 1;          // ID of an import task.
-}
-
 message GetImportStateRequest {
   int64 task = 1;  // id of an import task
 }
@@ -878,6 +874,7 @@ message GetImportStateResponse {
   int64 id = 6;                                      // id of an import task
   int64 collection_id = 7;                           // collection ID of the import task.
   repeated int64 segment_ids = 8;                    // a list of segment IDs created by the import task.
+  int64 create_ts = 9;                               // timestamp when the import task is created.
 }
 
 message ListImportTasksRequest {

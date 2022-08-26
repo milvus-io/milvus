@@ -694,19 +694,31 @@ func TestImportManager_ListAllTasks(t *testing.T) {
 	assert.Equal(t, 0, len(ids))
 }
 
-func TestImportManager_getCollectionPartitionName(t *testing.T) {
+func TestImportManager_setCollectionPartitionName(t *testing.T) {
 	mgr := &importManager{
 		getCollectionName: func(collID, partitionID typeutil.UniqueID) (string, string, error) {
-			return "c1", "p1", nil
+			if collID == 1 && partitionID == 2 {
+				return "c1", "p1", nil
+			} else {
+				return "", "", errors.New("Error")
+			}
 		},
 	}
 
-	resp := &milvuspb.GetImportStateResponse{
-		Infos: make([]*commonpb.KeyValuePair, 0),
+	info := &datapb.ImportTaskInfo{
+		Id: 100,
+		State: &datapb.ImportTaskState{
+			StateCode: commonpb.ImportState_ImportStarted,
+		},
+		CreateTs: time.Now().Unix() - 100,
 	}
-	mgr.getCollectionPartitionName(1, 2, resp)
-	assert.Equal(t, "c1", resp.Infos[0].Value)
-	assert.Equal(t, "p1", resp.Infos[1].Value)
+	err := mgr.setCollectionPartitionName(1, 2, info)
+	assert.Nil(t, err)
+	assert.Equal(t, "c1", info.GetCollectionName())
+	assert.Equal(t, "p1", info.GetPartitionName())
+
+	err = mgr.setCollectionPartitionName(0, 0, info)
+	assert.Error(t, err)
 }
 
 func TestImportManager_rearrangeTasks(t *testing.T) {

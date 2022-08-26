@@ -519,6 +519,8 @@ message ImportTaskInfo {
   repeated string files = 9;                    // A list of files to import.
   int64 create_ts = 10;                         // Timestamp when the import task is created.
   ImportTaskState state = 11;                   // State of the import task.
+  string collection_name = 12;                  // Collection name for the import task.
+  string partition_name = 13;                   // Partition name for the import task.
 }
 
 message ImportTaskResponse {
