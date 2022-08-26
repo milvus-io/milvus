@@ -1607,7 +1607,8 @@ func (wdt *watchDmChannelTask) reschedule(ctx context.Context) ([]task, error) {
 				CollectionID: collectionID,
 				PartitionIDs: wdt.GetLoadMeta().GetPartitionIDs(),
 			},
-			ReplicaID: wdt.GetReplicaID(),
+			ReplicaID:     wdt.GetReplicaID(),
+			OfflineNodeID: wdt.OfflineNodeID,
 		}
 		watchDmChannelReqs = append(watchDmChannelReqs, req)
 	}
@@ -2075,7 +2076,8 @@ func (lbt *loadBalanceTask) processNodeDownLoadBalance(ctx context.Context) erro
 							CollectionID: collectionID,
 							PartitionIDs: toRecoverPartitionIDs,
 						},
-						ReplicaID: replica.ReplicaID,
+						ReplicaID:     replica.ReplicaID,
+						OfflineNodeID: nodeID,
 					}
 
 					if collectionInfo.LoadType == querypb.LoadType_LoadPartition {
