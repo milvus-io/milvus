@@ -67,7 +67,7 @@ jobs:
           git commit -m "Update Builder image changes"
       - name: Create Pull Request
         id: cpr
-        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus' && matrix.os == 'ubuntu18.04'
+        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus' && matrix.os == 'ubuntu20.04'
         continue-on-error: true
         uses: peter-evans/create-pull-request@v3
         with:
@@ -79,10 +79,10 @@ jobs:
           title: '[automated] Update Builder image changes'
           body: |
             Update Builder image changes
-
+            See changes: https://github.com/milvus-io/milvus/commit/${{ github.sha }}
             Signed-off-by: ${{ github.actor }} ${{ github.actor }}@users.noreply.github.com
       - name: Check outputs
-        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus' && matrix.os == 'ubuntu18.04'
+        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus' && matrix.os == 'ubuntu20.04'
         run: |
           echo "Pull Request Number - ${{ steps.cpr.outputs.pull-request-number }}"
           echo "Pull Request URL - ${{ steps.cpr.outputs.pull-request-url }}"

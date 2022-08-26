@@ -12,7 +12,7 @@
 FROM milvusdb/openblas:ubuntu20.04-20220825-4feedf1 AS openblas
 
 #FROM alpine
-FROM ubuntu:ubuntu:focal-20220426
+FROM ubuntu:focal-20220426
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends libtbb-dev gfortran netcat iputils-ping ca-certificates && \
