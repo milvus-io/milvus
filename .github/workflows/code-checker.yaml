@@ -19,6 +19,7 @@ on:
       - Makefile
       - '!**.md'
       - '!build/ci/jenkins/**'
+      - '!build/docker/**'
       # FIXME(wxyu): not need to run code check, update the ci-passed rules and remove these two lines
       - go.mod
       - go.sum
