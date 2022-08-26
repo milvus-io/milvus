@@ -164,6 +164,15 @@ func (c *compactionPlanHandler) execCompactionPlan(signal *compactionSignal, pla
 
 	c.setSegmentsCompacting(plan, true)
 
+	task := &compactionTask{
+		triggerInfo: signal,
+		plan:        plan,
+		state:       executing,
+		dataNodeID:  nodeID,
+	}
+	c.plans[plan.PlanID] = task
+	c.executingTaskNum++
+
 	go func() {
 		log.Debug("acquire queue", zap.Int64("nodeID", nodeID), zap.Int64("planID", plan.GetPlanID()))
 		c.acquireQueue(nodeID)
@@ -173,17 +182,11 @@ func (c *compactionPlanHandler) execCompactionPlan(signal *compactionSignal, pla
 			log.Warn("Alloc start time for CompactionPlan failed", zap.Int64("planID", plan.GetPlanID()))
 			return
 		}
-		plan.StartTime = ts
 
 		c.mu.Lock()
-		task := &compactionTask{
-			triggerInfo: signal,
-			plan:        plan,
-			state:       executing,
-			dataNodeID:  nodeID,
-		}
-		c.plans[plan.PlanID] = task
-		c.executingTaskNum++
+		c.plans[plan.PlanID] = c.plans[plan.PlanID].shadowClone(func(task *compactionTask) {
+			task.plan.StartTime = ts
+		})
 		c.mu.Unlock()
 
 		err = c.sessions.Compaction(nodeID, plan)
@@ -192,6 +195,7 @@ func (c *compactionPlanHandler) execCompactionPlan(signal *compactionSignal, pla
 			c.mu.Lock()
 			delete(c.plans, plan.PlanID)
 			c.executingTaskNum--
+			c.releaseQueue(nodeID)
 			c.mu.Unlock()
 			return
 		}
@@ -274,20 +278,34 @@ func (c *compactionPlanHandler) updateCompaction(ts Timestamp) error {
 		stateResult, ok := planStates[task.plan.PlanID]
 		state := stateResult.GetState()
 		planID := task.plan.PlanID
+		startTime := task.plan.GetStartTime()
 
+		// start time is 0 means this task have not started, skip checker
+		if startTime == 0 {
+			continue
+		}
 		// check wether the state of CompactionPlan is working
 		if ok {
+			if state == commonpb.CompactionState_Completed {
+				log.Info("compaction completed", zap.Int64("planID", planID), zap.Int64("nodeID", task.dataNodeID))
+				c.completeCompaction(stateResult.GetResult())
+				continue
+			}
 			// check wether the CompactionPlan is timeout
 			if state == commonpb.CompactionState_Executing && !c.isTimeout(ts, task.plan.GetStartTime(), task.plan.GetTimeoutInSeconds()) {
 				continue
 			}
-			if state == commonpb.CompactionState_Completed {
-				c.completeCompaction(stateResult.GetResult())
-				continue
-			}
+			log.Info("compaction timeout",
+				zap.Int64("planID", task.plan.PlanID),
+				zap.Int64("nodeID", task.dataNodeID),
+				zap.Uint64("startTime", task.plan.GetStartTime()),
+				zap.Uint64("now", ts),
+			)
 			c.plans[planID] = c.plans[planID].shadowClone(setState(timeout))
+			continue
 		}
 
+		log.Info("compaction failed", zap.Int64("planID", task.plan.PlanID), zap.Int64("nodeID", task.dataNodeID))
 		c.plans[planID] = c.plans[planID].shadowClone(setState(failed))
 		c.setSegmentsCompacting(task.plan, false)
 		c.executingTaskNum--
