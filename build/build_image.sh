@@ -24,7 +24,7 @@ set -x
 # Absolute path to the toplevel milvus directory.
 toplevel=$(dirname "$(cd "$(dirname "${0}")"; pwd)")
 
-OS_NAME="${OS_NAME:-ubuntu18.04}"
+OS_NAME="${OS_NAME:-ubuntu20.04}"
 MILVUS_IMAGE_REPO="${MILVUS_IMAGE_REPO:-milvusdb/milvus}"
 MILVUS_IMAGE_TAG="${MILVUS_IMAGE_TAG:-latest}"
 
