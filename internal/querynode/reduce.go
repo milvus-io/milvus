@@ -28,8 +28,8 @@ import (
 )
 
 type sliceInfo struct {
-	sliceNQs   []int32
-	sliceTopKs []int32
+	sliceNQs   []int64
+	sliceTopKs []int64
 }
 
 // SearchResult contains a pointer to the search result in C++ memory
@@ -47,8 +47,8 @@ type RetrieveResult struct {
 
 func parseSliceInfo(originNQs []int64, originTopKs []int64, nqPerSlice int64) *sliceInfo {
 	sInfo := &sliceInfo{
-		sliceNQs:   make([]int32, 0),
-		sliceTopKs: make([]int32, 0),
+		sliceNQs:   make([]int64, 0),
+		sliceTopKs: make([]int64, 0),
 	}
 
 	if nqPerSlice == 0 {
@@ -57,12 +57,12 @@ func parseSliceInfo(originNQs []int64, originTopKs []int64, nqPerSlice int64) *s
 
 	for i := 0; i < len(originNQs); i++ {
 		for j := 0; j < int(originNQs[i]/nqPerSlice); j++ {
-			sInfo.sliceNQs = append(sInfo.sliceNQs, int32(nqPerSlice))
-			sInfo.sliceTopKs = append(sInfo.sliceTopKs, int32(originTopKs[i]))
+			sInfo.sliceNQs = append(sInfo.sliceNQs, nqPerSlice)
+			sInfo.sliceTopKs = append(sInfo.sliceTopKs, originTopKs[i])
 		}
 		if tailSliceSize := originNQs[i] % nqPerSlice; tailSliceSize > 0 {
-			sInfo.sliceNQs = append(sInfo.sliceNQs, int32(tailSliceSize))
-			sInfo.sliceTopKs = append(sInfo.sliceTopKs, int32(originTopKs[i]))
+			sInfo.sliceNQs = append(sInfo.sliceNQs, tailSliceSize)
+			sInfo.sliceTopKs = append(sInfo.sliceTopKs, originTopKs[i])
 		}
 	}
 
@@ -70,7 +70,7 @@ func parseSliceInfo(originNQs []int64, originTopKs []int64, nqPerSlice int64) *s
 }
 
 func reduceSearchResultsAndFillData(plan *SearchPlan, searchResults []*SearchResult,
-	numSegments int64, sliceNQs []int32, sliceTopKs []int32) (searchResultDataBlobs, error) {
+	numSegments int64, sliceNQs []int64, sliceTopKs []int64) (searchResultDataBlobs, error) {
 	if plan.cSearchPlan == nil {
 		return nil, fmt.Errorf("nil search plan")
 	}
@@ -92,9 +92,9 @@ func reduceSearchResultsAndFillData(plan *SearchPlan, searchResults []*SearchRes
 	}
 	cSearchResultPtr := (*C.CSearchResult)(&cSearchResults[0])
 	cNumSegments := C.int64_t(numSegments)
-	var cSliceNQSPtr = (*C.int32_t)(&sliceNQs[0])
-	var cSliceTopKSPtr = (*C.int32_t)(&sliceTopKs[0])
-	var cNumSlices = C.int32_t(len(sliceNQs))
+	var cSliceNQSPtr = (*C.int64_t)(&sliceNQs[0])
+	var cSliceTopKSPtr = (*C.int64_t)(&sliceTopKs[0])
+	var cNumSlices = C.int64_t(len(sliceNQs))
 	var cSearchResultDataBlobs searchResultDataBlobs
 	status := C.ReduceSearchResultsAndFillData(&cSearchResultDataBlobs, plan.cSearchPlan, cSearchResultPtr,
 		cNumSegments, cSliceNQSPtr, cSliceTopKSPtr, cNumSlices)

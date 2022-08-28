@@ -1632,7 +1632,7 @@ func checkSearchResult(nq int64, plan *SearchPlan, searchResult *SearchResult) e
 		if result.TopK != sliceTopKs[i] {
 			return fmt.Errorf("unexpected topK when checkSearchResult")
 		}
-		if result.NumQueries != int64(sInfo.sliceNQs[i]) {
+		if result.NumQueries != sInfo.sliceNQs[i] {
 			return fmt.Errorf("unexpected nq when checkSearchResult")
 		}
 		// search empty segment, return empty result.IDs
