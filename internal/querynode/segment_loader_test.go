@@ -22,12 +22,14 @@ import (
 	"math/rand"
 	"runtime"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -643,6 +645,17 @@ func TestSegmentLoader_testFromDmlCPLoadDelete(t *testing.T) {
 		mockMsg.On("Equal", mock.AnythingOfType("string")).Return(false, nil)
 		assert.NotNil(t, testConsumingDeltaMsg(ctx, t, position, true, false, true, mockMsg))
 	}
+
+	//test context timeout when reading stream
+	{
+		log.Debug("test context timeout when reading stream")
+		mockMsg := &mockMsgID{}
+		mockMsg.On("AtEarliestPosition").Return(false, nil)
+		mockMsg.On("Equal", mock.AnythingOfType("string")).Return(false, nil)
+		ctx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
+		defer cancel()
+		assert.ErrorIs(t, testConsumingDeltaMsg(ctx, t, position, true, false, false, mockMsg), context.DeadlineExceeded)
+	}
 }
 
 func testSeekFailWhenConsumingDeltaMsg(ctx context.Context, t *testing.T, position *msgstream.MsgPosition, mockMsg *mockMsgID) {
@@ -681,7 +694,6 @@ func testConsumingDeltaMsg(ctx context.Context, t *testing.T, position *msgstrea
 		deleteMsg2 := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
 		msgChan <- &msgstream.MsgPack{Msgs: []msgstream.TsMsg{deleteMsg1, deleteMsg2}}
 	}
-
 	if closedStream {
 		close(msgChan)
 	}
