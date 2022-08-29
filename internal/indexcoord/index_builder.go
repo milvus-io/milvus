@@ -242,7 +242,7 @@ func (ib *indexBuilder) process(buildID UniqueID) {
 
 		req := &indexpb.CreateJobRequest{
 			// TODO @xiaocai2333: set clusterID
-			ClusterID: 0,
+			InstanceID: Params.CommonCfg.InstanceID,
 			StorageConfig: &indexpb.StorageConfig{
 				Address:         Params.MinioCfg.Address,
 				AccessKeyID:     Params.MinioCfg.AccessKeyID,
@@ -259,6 +259,7 @@ func (ib *indexBuilder) process(buildID UniqueID) {
 			IndexVersion:    meta.IndexVersion + 1,
 			IndexParams:     indexParams,
 			TypeParams:      typeParams,
+			NumRows:         meta.NumRows,
 		}
 		log.Debug("assign task to indexNode", zap.Int64("buildID", buildID), zap.Int64("nodeID", nodeID))
 		if err := ib.ic.assignTask(client, req); err != nil {
@@ -340,8 +341,8 @@ func (ib *indexBuilder) getTaskState(buildID, nodeID UniqueID) indexTaskState {
 	client, exist := ib.ic.nodeManager.GetClientByID(nodeID)
 	if exist {
 		response, err := client.QueryJobs(ib.ctx, &indexpb.QueryJobsRequest{
-			ClusterID: 0,
-			BuildIDs:  []int64{buildID},
+			InstanceID: Params.CommonCfg.InstanceID,
+			BuildIDs:   []int64{buildID},
 		})
 		if err != nil {
 			log.Error("IndexCoord get jobs info from IndexNode fail", zap.Int64("nodeID", nodeID),
@@ -365,7 +366,7 @@ func (ib *indexBuilder) getTaskState(buildID, nodeID UniqueID) indexTaskState {
 					return indexTaskInProgress
 				}
 				return indexTaskDone
-			} else if info.State == commonpb.IndexState_Retry {
+			} else if info.State == commonpb.IndexState_Retry || info.State == commonpb.IndexState_IndexStateNone {
 				log.Info("this task should be retry", zap.Int64("buildID", buildID))
 				return indexTaskRetry
 			}
@@ -381,8 +382,8 @@ func (ib *indexBuilder) dropIndexTask(buildID, nodeID UniqueID) bool {
 	client, exist := ib.ic.nodeManager.GetClientByID(nodeID)
 	if exist {
 		status, err := client.DropJobs(ib.ctx, &indexpb.DropJobsRequest{
-			ClusterID: 0,
-			BuildIDs:  []UniqueID{buildID},
+			InstanceID: Params.CommonCfg.InstanceID,
+			BuildIDs:   []UniqueID{buildID},
 		})
 		if err != nil {
 			log.Warn("IndexCoord notify IndexNode drop the index task fail", zap.Int64("buildID", buildID),

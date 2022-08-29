@@ -55,6 +55,7 @@ type taskInfo struct {
 	state          commonpb.IndexState
 	indexFiles     []string
 	serializedSize uint64
+	failReason     string
 
 	// task statistics
 	statistic *indexpb.JobInfo
@@ -68,7 +69,7 @@ type task interface {
 	BuildIndex(context.Context) error
 	SaveIndexFiles(context.Context) error
 	OnEnqueue(context.Context) error
-	SetState(state commonpb.IndexState)
+	SetState(state commonpb.IndexState, failReason string)
 	GetState() commonpb.IndexState
 	Reset()
 }
@@ -85,7 +86,7 @@ type indexBuildTask struct {
 	req            *indexpb.CreateJobRequest
 	BuildID        UniqueID
 	nodeID         UniqueID
-	ClusterID      UniqueID
+	InstanceID     string
 	collectionID   UniqueID
 	partitionID    UniqueID
 	segmentID      UniqueID
@@ -126,12 +127,12 @@ func (it *indexBuildTask) Name() string {
 	return it.ident
 }
 
-func (it *indexBuildTask) SetState(state commonpb.IndexState) {
-	it.node.storeTaskState(it.ClusterID, it.BuildID, state)
+func (it *indexBuildTask) SetState(state commonpb.IndexState, failReason string) {
+	it.node.storeTaskState(it.InstanceID, it.BuildID, state, failReason)
 }
 
 func (it *indexBuildTask) GetState() commonpb.IndexState {
-	state, ok := it.node.loadTaskState(it.ClusterID, it.BuildID)
+	state, ok := it.node.loadTaskState(it.InstanceID, it.BuildID)
 	if !ok {
 		return commonpb.IndexState_IndexStateNone
 	}
@@ -354,7 +355,7 @@ func (it *indexBuildTask) SaveIndexFiles(ctx context.Context) error {
 	}
 	it.savePaths = savePaths
 	it.statistic.EndTime = time.Now().UnixMicro()
-	it.node.storeIndexFilesAndStatistic(it.ClusterID, it.BuildID, savePaths, it.serializedSize, &it.statistic)
+	it.node.storeIndexFilesAndStatistic(it.InstanceID, it.BuildID, savePaths, it.serializedSize, &it.statistic)
 	logutil.Logger(ctx).Debug("save index files done", zap.Strings("IndexFiles", savePaths))
 	saveIndexFileDur := it.tr.Record("index file save done")
 	metrics.IndexNodeSaveIndexFileLatency.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.GetNodeID(), 10)).Observe(float64(saveIndexFileDur.Milliseconds()))

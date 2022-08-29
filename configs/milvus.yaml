@@ -225,6 +225,10 @@ indexCoord:
 
   minSegmentNumRowsToEnableIndex: 1024 # It's a threshold. When the segment num rows is less than this value, the segment will not be indexed
 
+  bindIndexNodeMode:
+    mode: "cluster"
+    address: "localhost:22930"
+
   gc:
     interval: 600 # gc interval in seconds
 
@@ -303,6 +307,8 @@ tls:
 
 
 common:
+  instance:
+    ID: "milvus"
   # Channel name generation rule: ${namePrefix}-${ChannelIdx}
   chanNamePrefix:
     cluster: "by-dev"

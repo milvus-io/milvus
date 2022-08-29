@@ -328,7 +328,7 @@ type IndexNode interface {
 	QueryJobs(context.Context, *indexpb.QueryJobsRequest) (*indexpb.QueryJobsResponse, error)
 	// DropJobs cancel index building jobs specified by BuildIDs. Notes that dropping task may have finished.
 	DropJobs(context.Context, *indexpb.DropJobsRequest) (*commonpb.Status, error)
-	// GetJobNum returns metrics of indexnode, including available job queue info, available task slots and finished job infos.
+	// GetJobStats returns metrics of indexnode, including available job queue info, available task slots and finished job infos.
 	GetJobStats(context.Context, *indexpb.GetJobStatsRequest) (*indexpb.GetJobStatsResponse, error)
 
 	ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error)

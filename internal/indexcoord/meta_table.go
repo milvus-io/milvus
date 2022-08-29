@@ -952,7 +952,7 @@ func (mt *metaTable) ResetMeta(buildID UniqueID) error {
 	mt.segmentIndexLock.Lock()
 	defer mt.segmentIndexLock.Unlock()
 
-	segIdx, ok := mt.buildID2SegmentIndex[buildID]
+	oldIdx, ok := mt.buildID2SegmentIndex[buildID]
 	if !ok {
 		return fmt.Errorf("there is no index with buildID: %d", buildID)
 	}
@@ -962,7 +962,7 @@ func (mt *metaTable) ResetMeta(buildID UniqueID) error {
 		return mt.alterSegmentIndexes([]*model.SegmentIndex{segIdx})
 	}
 
-	return mt.updateSegIndexMeta(segIdx, updateFunc)
+	return mt.updateSegIndexMeta(oldIdx, updateFunc)
 }
 
 func (mt *metaTable) FinishTask(taskInfo *indexpb.IndexTaskInfo) error {

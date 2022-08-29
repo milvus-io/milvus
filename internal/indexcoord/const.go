@@ -20,4 +20,8 @@ const (
 	// IndexAddTaskName is the name of the operation to add index task.
 	IndexAddTaskName    = "IndexAddTask"
 	CreateIndexTaskName = "CreateIndexTask"
+	IndexNodePoolID     = int64(-2)
+
+	defaultBindIndexNodeMode = "cluster"
+	poolBindIndexNodeMode    = "pool"
 )

@@ -20,14 +20,15 @@ import (
 	"context"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
+
 	"go.uber.org/zap"
 
 	grpcindexnodeclient "github.com/milvus-io/milvus/internal/distributed/indexnode/client"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/metrics"
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
 )
@@ -87,7 +88,7 @@ func (nm *NodeManager) AddNode(nodeID UniqueID, address string) error {
 		return nil
 	}
 
-	nodeClient, err := grpcindexnodeclient.NewClient(context.TODO(), address)
+	nodeClient, err := grpcindexnodeclient.NewClient(context.TODO(), address, false)
 	if err != nil {
 		log.Error("IndexCoord NodeManager", zap.Any("Add node err", err))
 		return err
@@ -125,6 +126,7 @@ func (nm *NodeManager) PeekClient(meta *model.SegmentIndex) (UniqueID, types.Ind
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			log.Debug("nodeMnager peek client", zap.Int64("nodeID", nodeID))
 			resp, err := client.GetJobStats(ctx, &indexpb.GetJobStatsRequest{})
 			if err != nil {
 				log.Warn("get IndexNode slots failed", zap.Int64("nodeID", nodeID), zap.Error(err))
@@ -135,6 +137,7 @@ func (nm *NodeManager) PeekClient(meta *model.SegmentIndex) (UniqueID, types.Ind
 					zap.String("reason", resp.Status.Reason))
 				return
 			}
+			log.Debug("get job stats success", zap.Int64("nodeID", nodeID), zap.Int64("task slot", resp.TaskSlots))
 			if resp.TaskSlots > 0 {
 				nodeMutex.Lock()
 				defer nodeMutex.Unlock()

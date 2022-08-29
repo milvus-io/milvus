@@ -185,7 +185,7 @@ message StorageConfig {
 }
 
 message CreateJobRequest {
-  int64 clusterID = 1;
+  string instanceID = 1;
   string index_file_prefix = 2;
   int64 buildID = 3;
   repeated string data_paths = 4;
@@ -195,10 +195,11 @@ message CreateJobRequest {
   StorageConfig storage_config = 8;
   repeated common.KeyValuePair index_params = 9;
   repeated common.KeyValuePair type_params = 10;
+  int64 num_rows = 11;
 }
 
 message QueryJobsRequest {
-  int64 clusterID = 1;
+  string instanceID = 1;
   repeated int64 buildIDs = 2;
 }
 
@@ -212,12 +213,12 @@ message IndexTaskInfo {
 
 message QueryJobsResponse {
   common.Status status = 1;
-  int64 clusterID = 2;
+  string instanceID = 2;
   repeated IndexTaskInfo index_infos = 3;
 }
 
 message DropJobsRequest {
-  int64 clusterID = 1;
+  string instanceID = 1;
   repeated int64 buildIDs = 2;
 }
 

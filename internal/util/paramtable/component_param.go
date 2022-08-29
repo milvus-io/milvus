@@ -96,6 +96,7 @@ func (p *ComponentParam) KafkaEnable() bool {
 type commonConfig struct {
 	Base *BaseTable
 
+	InstanceID    string
 	ClusterPrefix string
 
 	ProxySubName string
@@ -137,6 +138,7 @@ func (p *commonConfig) init(base *BaseTable) {
 	p.Base = base
 
 	// must init cluster prefix first
+	p.initInstanceID()
 	p.initClusterPrefix()
 	p.initProxySubName()
 
@@ -170,6 +172,10 @@ func (p *commonConfig) init(base *BaseTable) {
 	p.initEnableAuthorization()
 
 	p.initClusterName()
+}
+
+func (p *commonConfig) initInstanceID() {
+	p.InstanceID = p.Base.LoadWithDefault("common.instance.ID", "_default_idx")
 }
 
 func (p *commonConfig) initClusterPrefix() {
@@ -1182,6 +1188,10 @@ type indexCoordConfig struct {
 	Address string
 	Port    int
 
+	BindIndexNodeMode string
+	IndexNodeAddress  string
+
+	IndexStorageRootPath           string
 	MinSegmentNumRowsToEnableIndex int64
 
 	GCInterval time.Duration
@@ -1195,6 +1205,8 @@ func (p *indexCoordConfig) init(base *BaseTable) {
 
 	p.initGCInterval()
 	p.initMinSegmentNumRowsToEnableIndex()
+	p.initBindIndexNodeMode()
+	p.initIndexNodeAddress()
 }
 
 func (p *indexCoordConfig) initMinSegmentNumRowsToEnableIndex() {
@@ -1203,6 +1215,14 @@ func (p *indexCoordConfig) initMinSegmentNumRowsToEnableIndex() {
 
 func (p *indexCoordConfig) initGCInterval() {
 	p.GCInterval = time.Duration(p.Base.ParseInt64WithDefault("indexCoord.gc.interval", 60*10)) * time.Second
+}
+
+func (p *indexCoordConfig) initBindIndexNodeMode() {
+	p.BindIndexNodeMode = p.Base.LoadWithDefault("indexCoord.bindIndexNodeMode.mode", "cluster")
+}
+
+func (p *indexCoordConfig) initIndexNodeAddress() {
+	p.IndexNodeAddress = p.Base.LoadWithDefault("indexCoord.bindIndexNodeMode.address", "localhost:22930")
 }
 
 ///////////////////////////////////////////////////////////////////////////////

@@ -68,8 +68,8 @@ var _ types.IndexNodeComponent = (*IndexNode)(nil)
 var Params paramtable.ComponentParam
 
 type taskKey struct {
-	ClusterID UniqueID
-	BuildID   UniqueID
+	InstanceID string
+	BuildID    UniqueID
 }
 
 // IndexNode is a component that executes the task of building indexes.

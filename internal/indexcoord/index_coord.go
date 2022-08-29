@@ -34,6 +34,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/common"
+	grpcindexnodemanagerclient "github.com/milvus-io/milvus/internal/distributed/indexnode/client"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -191,16 +192,30 @@ func (i *IndexCoord) Init() error {
 			return
 		}
 		aliveNodeID := make([]UniqueID, 0)
-		for _, session := range sessions {
-			session := session
-			aliveNodeID = append(aliveNodeID, session.ServerID)
-			//go func() {
-			if err := i.nodeManager.AddNode(session.ServerID, session.Address); err != nil {
-				log.Error("IndexCoord", zap.Int64("ServerID", session.ServerID),
-					zap.Error(err))
+		if Params.IndexCoordCfg.BindIndexNodeMode == poolBindIndexNodeMode {
+			nodeClient, err := grpcindexnodemanagerclient.NewClient(context.TODO(), Params.IndexCoordCfg.IndexNodeAddress, true)
+			if err != nil {
+				log.Error("IndexCoord new IndexNodeManager client fail", zap.Error(err))
+				initErr = err
+				return
 			}
-			//}()
+			i.nodeManager.setClient(IndexNodePoolID, nodeClient)
+			log.Debug("IndexCoord add node success", zap.String("bind IndexNode mode", Params.IndexCoordCfg.BindIndexNodeMode),
+				zap.String("IndexNode address", Params.IndexCoordCfg.IndexNodeAddress))
+			aliveNodeID = append(aliveNodeID, IndexNodePoolID)
+			metrics.IndexCoordIndexNodeNum.WithLabelValues().Inc()
+		} else if Params.IndexCoordCfg.BindIndexNodeMode == defaultBindIndexNodeMode {
+			for _, session := range sessions {
+				session := session
+				if err := i.nodeManager.AddNode(session.ServerID, session.Address); err != nil {
+					log.Error("IndexCoord", zap.Int64("ServerID", session.ServerID),
+						zap.Error(err))
+					continue
+				}
+				aliveNodeID = append(aliveNodeID, session.ServerID)
+			}
 		}
+
 		log.Debug("IndexCoord", zap.Int("IndexNode number", len(i.nodeManager.nodeClients)))
 		i.indexBuilder = newIndexBuilder(i.loopCtx, i, i.metaTable, aliveNodeID)
 
@@ -863,6 +878,9 @@ func (i *IndexCoord) watchNodeLoop() {
 					}
 				}
 				return
+			}
+			if Params.IndexCoordCfg.BindIndexNodeMode == poolBindIndexNodeMode {
+				continue
 			}
 			log.Debug("IndexCoord watchNodeLoop event updated")
 			switch event.EventType {

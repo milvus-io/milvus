@@ -109,7 +109,7 @@ func NewIndexNodeMock() *Mock {
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_Success,
 				},
-				ClusterID:  in.ClusterID,
+				InstanceID: in.InstanceID,
 				IndexInfos: indexInfos,
 			}, nil
 		},

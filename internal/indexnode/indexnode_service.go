@@ -25,14 +25,14 @@ import (
 func (i *IndexNode) CreateJob(ctx context.Context, req *indexpb.CreateJobRequest) (*commonpb.Status, error) {
 	stateCode := i.stateCode.Load().(internalpb.StateCode)
 	if stateCode != internalpb.StateCode_Healthy {
-		log.Warn("index node not ready", zap.Int32("state", int32(stateCode)), zap.Int64("ClusterID", req.ClusterID), zap.Int64("IndexBuildID", req.BuildID))
+		log.Warn("index node not ready", zap.Int32("state", int32(stateCode)), zap.String("InstanceID", req.InstanceID), zap.Int64("IndexBuildID", req.BuildID))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    "state code is not healthy",
 		}, nil
 	}
 	log.Info("IndexNode building index ...",
-		zap.Int64("ClusterID", req.ClusterID),
+		zap.String("InstanceID", req.InstanceID),
 		zap.Int64("IndexBuildID", req.BuildID),
 		zap.Int64("IndexID", req.IndexID),
 		zap.String("IndexName", req.IndexName),
@@ -44,15 +44,15 @@ func (i *IndexNode) CreateJob(ctx context.Context, req *indexpb.CreateJobRequest
 	sp, _ := trace.StartSpanFromContextWithOperationName(ctx, "IndexNode-CreateIndex")
 	defer sp.Finish()
 	sp.SetTag("IndexBuildID", strconv.FormatInt(req.BuildID, 10))
-	sp.SetTag("ClusterID", strconv.FormatInt(req.ClusterID, 10))
+	sp.SetTag("InstanceID", req.InstanceID)
 	metrics.IndexNodeBuildIndexTaskCounter.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.GetNodeID(), 10), metrics.TotalLabel).Inc()
 	taskCtx := logutil.WithModule(i.loopCtx, typeutil.IndexNodeRole)
 
 	taskCtx, taskCancel := context.WithCancel(taskCtx)
-	if oldInfo := i.loadOrStoreTask(req.ClusterID, req.BuildID, &taskInfo{
+	if oldInfo := i.loadOrStoreTask(req.InstanceID, req.BuildID, &taskInfo{
 		cancel: taskCancel,
 		state:  commonpb.IndexState_InProgress}); oldInfo != nil {
-		log.Warn("duplicated index build task", zap.Int64("ClusterID", req.ClusterID), zap.Int64("BuildID", req.BuildID))
+		log.Warn("duplicated index build task", zap.String("InstanceID", req.InstanceID), zap.Int64("BuildID", req.BuildID))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_BuildIndexError,
 			Reason:    "duplicated index build task",
@@ -62,23 +62,23 @@ func (i *IndexNode) CreateJob(ctx context.Context, req *indexpb.CreateJobRequest
 	if err != nil {
 		log.Error("create chunk manager failed", zap.String("Bucket", req.StorageConfig.BucketName),
 			zap.String("AccessKey", req.StorageConfig.AccessKeyID),
-			zap.Int64("ClusterID", req.ClusterID), zap.Int64("IndexBuildID", req.BuildID))
+			zap.String("InstanceID", req.InstanceID), zap.Int64("IndexBuildID", req.BuildID))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_BuildIndexError,
 			Reason:    "create chunk manager failed",
 		}, nil
 	}
 	task := &indexBuildTask{
-		ident:          fmt.Sprintf("%d/%d", req.ClusterID, req.BuildID),
+		ident:          fmt.Sprintf("%d/%d", req.InstanceID, req.BuildID),
 		ctx:            taskCtx,
 		cancel:         taskCancel,
 		BuildID:        req.BuildID,
-		ClusterID:      req.ClusterID,
+		InstanceID:     req.InstanceID,
 		node:           i,
 		req:            req,
 		cm:             cm,
 		nodeID:         i.GetNodeID(),
-		tr:             timerecord.NewTimeRecorder(fmt.Sprintf("IndexBuildID: %d, ClusterID: %d", req.BuildID, req.ClusterID)),
+		tr:             timerecord.NewTimeRecorder(fmt.Sprintf("IndexBuildID: %d, InstanceID: %d", req.BuildID, req.InstanceID)),
 		serializedSize: 0,
 	}
 	ret := &commonpb.Status{
@@ -86,20 +86,20 @@ func (i *IndexNode) CreateJob(ctx context.Context, req *indexpb.CreateJobRequest
 		Reason:    "",
 	}
 	if err := i.sched.IndexBuildQueue.Enqueue(task); err != nil {
-		log.Warn("IndexNode failed to schedule", zap.Int64("IndexBuildID", req.BuildID), zap.Int64("ClusterID", req.ClusterID), zap.Error(err))
+		log.Warn("IndexNode failed to schedule", zap.Int64("IndexBuildID", req.BuildID), zap.String("InstanceID", req.InstanceID), zap.Error(err))
 		ret.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		ret.Reason = err.Error()
 		metrics.IndexNodeBuildIndexTaskCounter.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.GetNodeID(), 10), metrics.FailLabel).Inc()
 		return ret, nil
 	}
-	log.Info("IndexNode successfully scheduled", zap.Int64("IndexBuildID", req.BuildID), zap.Int64("ClusterID", req.ClusterID), zap.String("indexName", req.IndexName))
+	log.Info("IndexNode successfully scheduled", zap.Int64("IndexBuildID", req.BuildID), zap.String("InstanceID", req.InstanceID), zap.String("indexName", req.IndexName))
 	return ret, nil
 }
 
 func (i *IndexNode) QueryJobs(ctx context.Context, req *indexpb.QueryJobsRequest) (*indexpb.QueryJobsResponse, error) {
 	stateCode := i.stateCode.Load().(internalpb.StateCode)
 	if stateCode != internalpb.StateCode_Healthy {
-		log.Warn("index node not ready", zap.Int32("state", int32(stateCode)), zap.Int64("ClusterID", req.ClusterID))
+		log.Warn("index node not ready", zap.Int32("state", int32(stateCode)), zap.String("InstanceID", req.InstanceID))
 		return &indexpb.QueryJobsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -107,10 +107,10 @@ func (i *IndexNode) QueryJobs(ctx context.Context, req *indexpb.QueryJobsRequest
 			},
 		}, nil
 	}
-	log.Debug("querying index build task", zap.Int64("ClusterID", req.ClusterID), zap.Int64s("IndexBuildIDs", req.BuildIDs))
+	log.Debug("querying index build task", zap.String("InstanceID", req.InstanceID), zap.Int64s("IndexBuildIDs", req.BuildIDs))
 	infos := make(map[UniqueID]*taskInfo)
-	i.foreachTaskInfo(func(clusterID, buildID UniqueID, info *taskInfo) {
-		if clusterID == req.ClusterID {
+	i.foreachTaskInfo(func(instanceID string, buildID UniqueID, info *taskInfo) {
+		if instanceID == req.InstanceID {
 			infos[buildID] = &taskInfo{
 				state:          info.state,
 				indexFiles:     info.indexFiles[:],
@@ -123,7 +123,7 @@ func (i *IndexNode) QueryJobs(ctx context.Context, req *indexpb.QueryJobsRequest
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
 		},
-		ClusterID:  req.ClusterID,
+		InstanceID: req.InstanceID,
 		IndexInfos: make([]*indexpb.IndexTaskInfo, 0, len(req.BuildIDs)),
 	}
 	for i, buildID := range req.BuildIDs {
@@ -137,16 +137,17 @@ func (i *IndexNode) QueryJobs(ctx context.Context, req *indexpb.QueryJobsRequest
 			ret.IndexInfos[i].State = info.state
 			ret.IndexInfos[i].IndexFiles = info.indexFiles
 			ret.IndexInfos[i].SerializedSize = info.serializedSize
+			ret.IndexInfos[i].FailReason = info.failReason
 		}
 	}
 	return ret, nil
 }
 
 func (i *IndexNode) DropJobs(ctx context.Context, req *indexpb.DropJobsRequest) (*commonpb.Status, error) {
-	log.Debug("drop index build jobs", zap.Int64("ClusterID", req.ClusterID), zap.Int64s("IndexBuildIDs", req.BuildIDs))
+	log.Debug("drop index build jobs", zap.String("InstanceID", req.InstanceID), zap.Int64s("IndexBuildIDs", req.BuildIDs))
 	stateCode := i.stateCode.Load().(internalpb.StateCode)
 	if stateCode != internalpb.StateCode_Healthy {
-		log.Warn("index node not ready", zap.Int32("state", int32(stateCode)), zap.Int64("ClusterID", req.ClusterID))
+		log.Warn("index node not ready", zap.Int32("state", int32(stateCode)), zap.String("InstanceID", req.InstanceID))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    "state code is not healthy",
@@ -154,7 +155,7 @@ func (i *IndexNode) DropJobs(ctx context.Context, req *indexpb.DropJobsRequest) 
 	}
 	keys := make([]taskKey, 0, len(req.BuildIDs))
 	for _, buildID := range req.BuildIDs {
-		keys = append(keys, taskKey{ClusterID: req.ClusterID, BuildID: buildID})
+		keys = append(keys, taskKey{InstanceID: req.InstanceID, BuildID: buildID})
 	}
 	infos := i.deleteTaskInfos(keys)
 	for _, info := range infos {
@@ -181,7 +182,7 @@ func (i *IndexNode) GetJobStats(ctx context.Context, req *indexpb.GetJobStatsReq
 	}
 	utNum, atNum := i.sched.IndexBuildQueue.GetTaskNum()
 	jobInfos := make([]*indexpb.JobInfo, 0)
-	i.foreachTaskInfo(func(clusterID, buildID UniqueID, info *taskInfo) {
+	i.foreachTaskInfo(func(instanceID string, buildID UniqueID, info *taskInfo) {
 		if info.statistic != nil {
 			jobInfos = append(jobInfos, proto.Clone(info.statistic).(*indexpb.JobInfo))
 		}
