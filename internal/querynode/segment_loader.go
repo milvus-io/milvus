@@ -718,11 +718,6 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 					if dmsg.CollectionID != collectionID {
 						continue
 					}
-					log.Debug("delete pk",
-						zap.Any("pk", dmsg.PrimaryKeys),
-						zap.String("vChannelName", position.GetChannelName()),
-						zap.Any("msg id", position.GetMsgID()),
-					)
 					err = processDeleteMessages(loader.metaReplica, segmentTypeSealed, dmsg, delData)
 					if err != nil {
 						// TODO: panic?
@@ -753,8 +748,8 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 	for segmentID, pks := range delData.deleteIDs {
 		segment, err := loader.metaReplica.getSegmentByID(segmentID, segmentTypeSealed)
 		if err != nil {
-			log.Warn(err.Error())
-			continue
+			log.Warn("failed to get segment", zap.Int64("segment", segmentID), zap.Error(err))
+			return err
 		}
 		offset := segment.segmentPreDelete(len(pks))
 		delData.deleteOffset[segmentID] = offset
