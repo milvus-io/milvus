@@ -43,7 +43,7 @@ func (f *DefaultFactory) Init(params *paramtable.ComponentParam) {
 			storage.RootPath(params.LocalStorageCfg.Path))
 	} else {
 		f.chunkManagerFactory = storage.NewChunkManagerFactory("local", "minio",
-			storage.RootPath(params.LocalStorageCfg.Path),
+			storage.RootPath(params.MinioCfg.RootPath),
 			storage.Address(params.MinioCfg.Address),
 			storage.AccessKeyID(params.MinioCfg.AccessKeyID),
 			storage.SecretAccessKeyID(params.MinioCfg.SecretAccessKey),
