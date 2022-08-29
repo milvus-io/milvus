@@ -77,26 +77,7 @@ func InitRocksMQ(path string) error {
 				log.Warn("rocksmq.rocksmqPageSize is invalid, using default value 2G")
 			}
 		}
-		rawRmqRetentionTimeInMinutes, err := params.Load("rocksmq.retentionTimeInMinutes")
-		if err == nil && rawRmqRetentionTimeInMinutes != "" {
-			rawRmqRetentionTimeInMinutes, err := strconv.ParseInt(rawRmqRetentionTimeInMinutes, 10, 64)
-			if err == nil {
-				atomic.StoreInt64(&RocksmqRetentionTimeInSecs, rawRmqRetentionTimeInMinutes*60)
-			} else {
-				log.Warn("rocksmq.retentionTimeInMinutes is invalid, using default value")
-			}
-		}
-		rawRmqRetentionSizeInMB, err := params.Load("rocksmq.retentionSizeInMB")
-		if err == nil && rawRmqRetentionSizeInMB != "" {
-			rawRmqRetentionSizeInMB, err := strconv.ParseInt(rawRmqRetentionSizeInMB, 10, 64)
-			if err == nil {
-				atomic.StoreInt64(&RocksmqRetentionSizeInMB, rawRmqRetentionSizeInMB)
-			} else {
-				log.Warn("rocksmq.retentionSizeInMB is invalid, using default value 0")
-			}
-		}
-		log.Debug("", zap.Any("RocksmqRetentionTimeInMinutes", rawRmqRetentionTimeInMinutes),
-			zap.Any("RocksmqRetentionSizeInMB", RocksmqRetentionSizeInMB), zap.Any("RocksmqPageSize", RocksmqPageSize))
+
 		Rmq, finalErr = NewRocksMQ(params, path, nil)
 	})
 	return finalErr
