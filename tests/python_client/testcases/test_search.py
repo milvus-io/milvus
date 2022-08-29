@@ -3,6 +3,7 @@ import numbers
 import random
 
 import pytest
+import pandas as pd
 from time import sleep
 
 from base.client_base import TestcaseBase
@@ -388,6 +389,40 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             check_items={"err_code": 1,
                                          "err_msg": "The type of expr must be string ,"
                                                     "but {} is given".format(type(invalid_search_expr))})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("expression", cf.gen_field_compare_expressions())
+    def test_search_with_expression_join_two_fields(self, expression):
+        """
+        target: test search with expressions linking two fields such as 'and'
+        method: create a collection and search with different conjunction
+        expected: raise exception and report the error
+        """
+        # 1. create a collection
+        nb = 1000
+        dim = 1
+        fields = [cf.gen_int64_field("int64_1"), cf.gen_int64_field("int64_2"),
+                  cf.gen_float_vec_field(dim=dim)]
+        schema = cf.gen_collection_schema(fields=fields, primary_field="int64_1")
+        collection_w = self.init_collection_wrap(schema=schema)
+
+        # 2. insert data
+        values = pd.Series(data=[i for i in range(0, nb)])
+        dataframe = pd.DataFrame({"int64_1": values, "int64_2": values,
+                                  ct.default_float_vec_field_name: cf.gen_vectors(nb, dim)})
+        collection_w.insert(dataframe)
+
+        # 3. search with expression
+        log.info("test_search_with_expression: searching with expression: %s" % expression)
+        collection_w.load()
+        expression = expression.replace("&&", "and").replace("||", "or")
+        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, nb, expression,
+                            check_task=CheckTasks.err_res,
+                            check_items={"err_code": 1,
+                                         "err_msg": "failed to create query plan: "
+                                                    "cannot parse expression: %s" % expression})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_param_invalid_expr_value(self, get_invalid_expr_value):
@@ -2518,6 +2553,7 @@ class TestCollectionSearch(TestcaseBase):
                                          "ids": insert_ids,
                                          "limit": nb_old + nb_new,
                                          "_async": _async}) 
+
 
 class TestSearchBase(TestcaseBase):
     @pytest.fixture(

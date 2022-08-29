@@ -494,6 +494,20 @@ def gen_normal_expressions():
     ]
     return expressions
 
+def gen_field_compare_expressions():
+    expressions = [
+        "int64_1 | int64_2 == 1",
+        "int64_1 && int64_2 ==1",
+        "int64_1 + int64_2 == 10",
+        "int64_1 - int64_2 == 2",
+        "int64_1 * int64_2 == 8",
+        "int64_1 / int64_2 == 2",
+        "int64_1 ** int64_2 == 4",
+        "int64_1 % int64_2 == 0",
+        "int64_1 in int64_2",
+        "int64_1 + int64_2 >= 10"
+    ]
+    return expressions
 
 def gen_normal_string_expressions(field):
     expressions = [
