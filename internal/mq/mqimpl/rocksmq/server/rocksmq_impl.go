@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
-	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 
 	"github.com/tecbot/gorocksdb"
@@ -111,19 +110,6 @@ func parsePageID(key string) (int64, error) {
 
 func checkRetention() bool {
 	return RocksmqRetentionTimeInSecs != -1 || RocksmqRetentionSizeInMB != -1
-}
-
-func getNowTs(idAllocator allocator.GIDAllocator) (int64, error) {
-	err := idAllocator.UpdateID()
-	if err != nil {
-		return 0, err
-	}
-	newID, err := idAllocator.AllocOne()
-	if err != nil {
-		return 0, err
-	}
-	nowTs, _ := tsoutil.ParseTS(uint64(newID))
-	return nowTs.Unix(), err
 }
 
 var topicMu = sync.Map{}
@@ -226,7 +212,7 @@ func NewRocksMQ(params paramtable.BaseTable, name string, idAllocator allocator.
 		readers:     sync.Map{},
 	}
 
-	ri, err := initRetentionInfo(kv, db)
+	ri, err := initRetentionInfo(params, kv, db)
 	if err != nil {
 		return nil, err
 	}
