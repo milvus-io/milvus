@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"strconv"
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -345,4 +346,99 @@ func TestInsertTask_CheckAligned(t *testing.T) {
 	case2.FieldsData[8] = newScalarFieldData(varCharFieldSchema, "VarChar", numRows)
 	err = case2.CheckAligned()
 	assert.NoError(t, err)
+}
+
+func TestInsertTask_checkVarcharFieldData(t *testing.T) {
+	ids := make([]int64, 10)
+	for i := 0; i < 10; i++ {
+		ids[i] = int64(i)
+	}
+
+	values := make([]string, 10)
+	for i := 0; i < 10; i++ {
+		values[i] = strconv.Itoa(i)
+	}
+
+	it := insertTask{
+		schema: &schemapb.CollectionSchema{
+			Name:        "TestInsertTask_checkVarcharFieldData",
+			Description: "TestInsertTask_checkVarcharFieldData",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					AutoID:   true,
+					DataType: schemapb.DataType_Int64,
+				},
+				{
+					AutoID:   false,
+					DataType: schemapb.DataType_VarChar,
+				},
+			},
+		},
+	}
+
+	it.FieldsData = []*schemapb.FieldData{
+		{
+			Type:      schemapb.DataType_Int64,
+			FieldName: "aaa",
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{
+							Data: ids,
+						},
+					},
+				},
+			},
+		},
+		{
+			Type:      schemapb.DataType_VarChar,
+			FieldName: "bbb",
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{
+							Data: values,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	err := it.checkVarcharFieldData()
+	assert.Nil(t, err)
+
+	values = append(values, "")
+	it.FieldsData = []*schemapb.FieldData{
+		{
+			Type:      schemapb.DataType_Int64,
+			FieldName: "aaa",
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{
+						LongData: &schemapb.LongArray{
+							Data: ids,
+						},
+					},
+				},
+			},
+		},
+		{
+			Type:      schemapb.DataType_VarChar,
+			FieldName: "bbb",
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{
+							Data: values,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	err = it.checkVarcharFieldData()
+	assert.Error(t, err)
 }

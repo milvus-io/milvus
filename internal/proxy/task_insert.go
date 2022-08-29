@@ -163,6 +163,30 @@ func (it *insertTask) checkPrimaryFieldData() error {
 	return nil
 }
 
+// currently we don't support inserting empty string(not sure the string index can handle it).
+// this method check each row of each varchar field, return error if found any empty string.
+// this is not a good solution, the correct way is:
+//     allow user to insert empty string, store empty string in parquet, ignore empty string in string index
+// TODO: once we support empty string, delete this method
+func (it *insertTask) checkVarcharFieldData() error {
+	fieldsData := it.InsertRequest.GetFieldsData()
+	for _, fd := range fieldsData {
+		if fd.GetType() != schemapb.DataType_VarChar {
+			continue
+		}
+
+		values := fd.GetScalars().GetStringData().GetData()
+		for _, str := range values {
+			if len(str) == 0 {
+				log.Error("value of varchar field cannot be empty string", zap.String("field name", fd.GetFieldName()))
+				return fmt.Errorf("value of varchar field '%s' cannot be empty string", fd.GetFieldName())
+			}
+		}
+	}
+
+	return nil
+}
+
 func (it *insertTask) PreExecute(ctx context.Context) error {
 	sp, ctx := trace.StartSpanFromContextWithOperationName(it.ctx, "Proxy-Insert-PreExecute")
 	defer sp.Finish()
@@ -228,6 +252,13 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	err = it.checkPrimaryFieldData()
 	if err != nil {
 		log.Error("check primary field data and hash primary key failed", zap.Int64("msgID", it.Base.MsgID), zap.String("collection name", collectionName), zap.Error(err))
+		return err
+	}
+
+	// check empty string for varchar field. currently we don't support empty string
+	// TODO: once we support empty string, delete this line and the method checkVarcharFieldData()
+	err = it.checkVarcharFieldData()
+	if err != nil {
 		return err
 	}
 
