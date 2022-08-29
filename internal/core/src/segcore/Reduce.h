@@ -10,10 +10,11 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #pragma once
-#include <cstdint>
-#include <vector>
+
 #include <algorithm>
+#include <cstdint>
 #include <memory>
+#include <vector>
 
 #include "utils/Status.h"
 #include "common/type_c.h"
@@ -31,9 +32,13 @@ class ReduceHelper {
  public:
     explicit ReduceHelper(std::vector<SearchResult*>& search_results,
                           milvus::query::Plan* plan,
-                          std::vector<int64_t>& slice_nqs,
-                          std::vector<int64_t>& slice_topKs)
-        : search_results_(search_results), plan_(plan), slice_nqs_(slice_nqs), slice_topKs_(slice_topKs) {
+                          int64_t* slice_nqs,
+                          int64_t* slice_topKs,
+                          int64_t slice_num)
+        : search_results_(search_results),
+          plan_(plan),
+          slice_nqs_(slice_nqs, slice_nqs + slice_num),
+          slice_topKs_(slice_topKs, slice_topKs + slice_num) {
         Initialize();
     }
 

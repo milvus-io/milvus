@@ -37,8 +37,8 @@ func TestReduce_parseSliceInfo(t *testing.T) {
 	nqPerSlice := int64(2)
 	sInfo := parseSliceInfo(originNQs, originTopKs, nqPerSlice)
 
-	expectedSliceNQs := []int32{2, 2, 1, 2}
-	expectedSliceTopKs := []int32{10, 5, 5, 20}
+	expectedSliceNQs := []int64{2, 2, 1, 2}
+	expectedSliceTopKs := []int64{10, 5, 5, 20}
 	assert.True(t, funcutil.SliceSetEqual(sInfo.sliceNQs, expectedSliceNQs))
 	assert.True(t, funcutil.SliceSetEqual(sInfo.sliceTopKs, expectedSliceTopKs))
 }
@@ -117,7 +117,7 @@ func TestReduce_Invalid(t *testing.T) {
 		assert.NoError(t, err)
 		searchResults := make([]*SearchResult, 0)
 		searchResults = append(searchResults, nil)
-		_, err = reduceSearchResultsAndFillData(searchReq.plan, searchResults, 1, []int32{10}, []int32{10})
+		_, err = reduceSearchResultsAndFillData(searchReq.plan, searchResults, 1, []int64{10}, []int64{10})
 		assert.Error(t, err)
 	})
 }

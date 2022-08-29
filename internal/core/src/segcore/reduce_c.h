@@ -24,9 +24,9 @@ ReduceSearchResultsAndFillData(CSearchResultDataBlobs* cSearchResultDataBlobs,
                                CSearchPlan c_plan,
                                CSearchResult* search_results,
                                int64_t num_segments,
-                               int32_t* slice_nqs,
-                               int32_t* slice_topKs,
-                               int32_t num_slices);
+                               int64_t* slice_nqs,
+                               int64_t* slice_topKs,
+                               int64_t num_slices);
 
 CStatus
 GetSearchResultDataBlob(CProto* searchResultDataBlob,
