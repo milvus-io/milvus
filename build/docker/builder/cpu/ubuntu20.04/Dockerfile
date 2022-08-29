@@ -19,7 +19,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-ce
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
 
-RUN apt-get update && apt-get install -y --no-install-recommends libzstd-dev pkg-config 
+RUN apt-get update && apt-get install -y --no-install-recommends libzstd-dev pkg-config libtbb-dev uuid-dev libaio-dev libgoogle-perftools-dev clang-format libboost-all-dev libmkl-full-dev
 
 # Install Go
 ENV GOPATH /go
