@@ -39,11 +39,6 @@ func TestRmqRetention_Basic(t *testing.T) {
 		return
 	}
 	defer os.RemoveAll(retentionPath)
-	atomic.StoreInt64(&RocksmqRetentionSizeInMB, 0)
-	atomic.StoreInt64(&RocksmqRetentionTimeInSecs, 0)
-	atomic.StoreInt64(&RocksmqPageSize, 10)
-	atomic.StoreInt64(&TickerTimeInSeconds, 2)
-
 	rocksdbPath := retentionPath
 	defer os.RemoveAll(rocksdbPath)
 	metaPath := retentionPath + metaPathSuffix
@@ -52,9 +47,12 @@ func TestRmqRetention_Basic(t *testing.T) {
 	var params paramtable.BaseTable
 	params.Init()
 	rmq, err := NewRocksMQ(params, rocksdbPath, nil)
-	defer rmq.Close()
 	assert.Nil(t, err)
-	defer rmq.stopRetention()
+	defer rmq.Close()
+	atomic.StoreInt64(&RocksmqRetentionSizeInMB, 0)
+	atomic.StoreInt64(&RocksmqRetentionTimeInSecs, 0)
+	atomic.StoreInt64(&RocksmqPageSize, 10)
+	atomic.StoreInt64(&TickerTimeInSeconds, 2)
 
 	topicName := "topic_a"
 	err = rmq.CreateTopic(topicName)
@@ -133,10 +131,6 @@ func TestRmqRetention_NotConsumed(t *testing.T) {
 		return
 	}
 	defer os.RemoveAll(retentionPath)
-	atomic.StoreInt64(&RocksmqRetentionSizeInMB, 0)
-	atomic.StoreInt64(&RocksmqRetentionTimeInSecs, 0)
-	atomic.StoreInt64(&RocksmqPageSize, 10)
-	atomic.StoreInt64(&TickerTimeInSeconds, 2)
 
 	rocksdbPath := retentionPath
 	defer os.RemoveAll(rocksdbPath)
@@ -146,9 +140,13 @@ func TestRmqRetention_NotConsumed(t *testing.T) {
 	var params paramtable.BaseTable
 	params.Init()
 	rmq, err := NewRocksMQ(params, rocksdbPath, nil)
-	defer rmq.Close()
 	assert.Nil(t, err)
-	defer rmq.stopRetention()
+	defer rmq.Close()
+
+	atomic.StoreInt64(&RocksmqRetentionSizeInMB, 0)
+	atomic.StoreInt64(&RocksmqRetentionTimeInSecs, 0)
+	atomic.StoreInt64(&RocksmqPageSize, 10)
+	atomic.StoreInt64(&TickerTimeInSeconds, 2)
 
 	topicName := "topic_a"
 	err = rmq.CreateTopic(topicName)
@@ -238,12 +236,6 @@ func TestRmqRetention_MultipleTopic(t *testing.T) {
 		return
 	}
 	defer os.RemoveAll(retentionPath)
-	// no retention by size
-	atomic.StoreInt64(&RocksmqRetentionSizeInMB, -1)
-	// retention by secs
-	atomic.StoreInt64(&RocksmqRetentionTimeInSecs, 1)
-	atomic.StoreInt64(&RocksmqPageSize, 10)
-	atomic.StoreInt64(&TickerTimeInSeconds, 1)
 	kvPath := retentionPath + "kv_multi_topic"
 	os.RemoveAll(kvPath)
 	idAllocator := InitIDAllocator(kvPath)
@@ -257,6 +249,13 @@ func TestRmqRetention_MultipleTopic(t *testing.T) {
 	rmq, err := NewRocksMQ(params, rocksdbPath, idAllocator)
 	assert.Nil(t, err)
 	defer rmq.Close()
+
+	// no retention by size
+	atomic.StoreInt64(&RocksmqRetentionSizeInMB, -1)
+	// retention by secs
+	atomic.StoreInt64(&RocksmqRetentionTimeInSecs, 1)
+	atomic.StoreInt64(&RocksmqPageSize, 10)
+	atomic.StoreInt64(&TickerTimeInSeconds, 1)
 
 	topicName := "topic_a"
 	err = rmq.CreateTopic(topicName)
@@ -456,12 +455,7 @@ func TestRmqRetention_PageTimeExpire(t *testing.T) {
 		return
 	}
 	defer os.RemoveAll(retentionPath)
-	// no retention by size
-	atomic.StoreInt64(&RocksmqRetentionSizeInMB, -1)
-	// retention by secs
-	atomic.StoreInt64(&RocksmqRetentionTimeInSecs, 5)
-	atomic.StoreInt64(&RocksmqPageSize, 10)
-	atomic.StoreInt64(&TickerTimeInSeconds, 1)
+
 	kvPath := retentionPath + "kv_com1"
 	os.RemoveAll(kvPath)
 	idAllocator := InitIDAllocator(kvPath)
@@ -476,6 +470,13 @@ func TestRmqRetention_PageTimeExpire(t *testing.T) {
 	rmq, err := NewRocksMQ(params, rocksdbPath, idAllocator)
 	assert.Nil(t, err)
 	defer rmq.Close()
+
+	// no retention by size
+	atomic.StoreInt64(&RocksmqRetentionSizeInMB, -1)
+	// retention by secs
+	atomic.StoreInt64(&RocksmqRetentionTimeInSecs, 5)
+	atomic.StoreInt64(&RocksmqPageSize, 10)
+	atomic.StoreInt64(&TickerTimeInSeconds, 1)
 
 	topicName := "topic_a"
 	err = rmq.CreateTopic(topicName)
@@ -579,10 +580,6 @@ func TestRmqRetention_PageSizeExpire(t *testing.T) {
 		return
 	}
 	defer os.RemoveAll(retentionPath)
-	atomic.StoreInt64(&RocksmqRetentionSizeInMB, 1)
-	atomic.StoreInt64(&RocksmqRetentionTimeInSecs, -1)
-	atomic.StoreInt64(&RocksmqPageSize, 10)
-	atomic.StoreInt64(&TickerTimeInSeconds, 1)
 	kvPath := retentionPath + "kv_com2"
 	os.RemoveAll(kvPath)
 	idAllocator := InitIDAllocator(kvPath)
@@ -597,6 +594,12 @@ func TestRmqRetention_PageSizeExpire(t *testing.T) {
 	rmq, err := NewRocksMQ(params, rocksdbPath, idAllocator)
 	assert.Nil(t, err)
 	defer rmq.Close()
+
+	// update some configrocksmq_retentions to make cleanup trigger faster
+	atomic.StoreInt64(&RocksmqRetentionSizeInMB, 1)
+	atomic.StoreInt64(&RocksmqRetentionTimeInSecs, -1)
+	atomic.StoreInt64(&RocksmqPageSize, 10)
+	atomic.StoreInt64(&TickerTimeInSeconds, 1)
 
 	topicName := "topic_a"
 	err = rmq.CreateTopic(topicName)
