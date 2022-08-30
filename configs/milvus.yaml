@@ -207,7 +207,11 @@ queryNode:
   scheduler:
     receiveChanSize: 10240
     unsolvedQueueSize: 10240
-    maxReadConcurrency: 0 # maximum concurrency of read task. if set to less or equal 0, it means no uppper limit.
+    # maxReadConcurrentRatio is the concurrency ratio of read task (search task and query task).
+    # Max read concurrency would be the value of `runtime.NumCPU * maxReadConcurrentRatio`.
+    # It defaults to 2.0, which means max read concurrency would be the value of runtime.NumCPU * 2.
+    # Max read concurrency must greater than or equal to 1, and less than or equal to runtime.NumCPU * 100.
+    maxReadConcurrentRatio: 2.0 # (0, 100]
     cpuRatio: 10.0 # ratio used to estimate read task cpu usage.
 
   grouping:

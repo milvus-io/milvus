@@ -13,6 +13,7 @@ package paramtable
 
 import (
 	"math"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -870,9 +871,13 @@ func (p *queryNodeConfig) initCPURatio() {
 }
 
 func (p *queryNodeConfig) initMaxReadConcurrency() {
-	p.MaxReadConcurrency = p.Base.ParseInt32WithDefault("queryNode.scheduler.maxReadConcurrency", 0)
-	if p.MaxReadConcurrency <= 0 {
-		p.MaxReadConcurrency = math.MaxInt32
+	readConcurrencyRatio := p.Base.ParseFloatWithDefault("queryNode.scheduler.maxReadConcurrentRatio", 2.0)
+	cpuNum := int32(runtime.GOMAXPROCS(0))
+	p.MaxReadConcurrency = int32(float64(cpuNum) * readConcurrencyRatio)
+	if p.MaxReadConcurrency < 1 {
+		p.MaxReadConcurrency = 1 // MaxReadConcurrency must >= 1
+	} else if p.MaxReadConcurrency > cpuNum*100 {
+		p.MaxReadConcurrency = cpuNum * 100 // MaxReadConcurrency must <= 100*cpuNum
 	}
 }
 
