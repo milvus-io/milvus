@@ -839,8 +839,7 @@ class TestCompactionOperation(TestcaseBase):
         collection_w = self.collection_insert_multi_segments_one_shard(prefix, num_of_segment=num_of_segment)
 
         # waiting for auto compaction finished
-        collection_w.collection.compaction_id = 0
-        collection_w.wait_for_compaction_completed()
+        sleep(60)
 
         collection_w.compact()
         collection_w.wait_for_compaction_completed()

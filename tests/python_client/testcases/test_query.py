@@ -269,8 +269,6 @@ class TestQueryParams(TestcaseBase):
                                        check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
     @pytest.mark.tags(CaseLabel.L2)
-    # @pytest.mark.xfail(reason="issue #12210 #7522")
-    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/7522")
     def test_query_expr_by_bool_field(self):
         """
         target: test query by bool field and output bool field

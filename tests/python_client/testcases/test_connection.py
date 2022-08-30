@@ -1037,6 +1037,7 @@ class TestConnectUserPasswordInvalid(TestcaseBase):
         self.utility_wrap.create_user(user=user, password="qwaszx0")
 
         # 3.connect with the created user and wrong password
+        self.connection_wrap.disconnect(alias=connect_name)
         self.connection_wrap.connect(host=host, port=port, user=user, password=ct.default_password)
         self.utility_wrap.list_collections(check_task=ct.CheckTasks.err_res,
                                            check_items={ct.err_code: 1})
