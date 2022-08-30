@@ -1347,25 +1347,16 @@ testReduceSearchWithExpr(int N, int topK, int num_queries) {
         auto suc = search_result_data.ParseFromArray(search_result_data_blobs->blobs[i].data(),
                                                      search_result_data_blobs->blobs[i].size());
         assert(suc);
-
-        assert(suc);
         assert(search_result_data.num_queries() == slice_nqs[i]);
         assert(search_result_data.top_k() == slice_topKs[i]);
-        assert(search_result_data.scores().size() == slice_topKs[i] * slice_nqs[i]);
-        assert(search_result_data.ids().int_id().data_size() == slice_topKs[i] * slice_nqs[i]);
+        assert(search_result_data.scores().size() == search_result_data.topks().at(0) * slice_nqs[i]);
+        assert(search_result_data.ids().int_id().data_size() == search_result_data.topks().at(0) * slice_nqs[i]);
 
-        // check topKs
+        // check real topks
         assert(search_result_data.topks().size() == slice_nqs[i]);
-        for (int j = 0; j < search_result_data.topks().size(); j++) {
-            assert(search_result_data.topks().at(j) == slice_topKs[i]);
+        for (auto real_topk : search_result_data.topks()) {
+            assert(real_topk <= slice_topKs[i]);
         }
-
-        // assert(search_result_data.scores().size() == slice_topKs[i] * slice_nqs[i]);
-        // assert(search_result_data.ids().int_id().data_size() == slice_topKs[i] * slice_nqs[i]);
-        // assert(search_result_data.top_k() == topK);
-        // assert(search_result_data.num_queries() == req_sizes[i]);
-        // assert(search_result_data.scores().size() == topK * req_sizes[i]);
-        // assert(search_result_data.ids().int_id().data_size() == topK * req_sizes[i]);
     }
 
     DeleteSearchResultDataBlobs(cSearchResultData);
@@ -1378,6 +1369,8 @@ testReduceSearchWithExpr(int N, int topK, int num_queries) {
 }
 
 TEST(CApiTest, ReduceSearchWithExpr) {
+    testReduceSearchWithExpr(2, 1, 1);
+    testReduceSearchWithExpr(2, 10, 10);
     testReduceSearchWithExpr(100, 1, 1);
     testReduceSearchWithExpr(100, 10, 10);
     testReduceSearchWithExpr(10000, 1, 1);
