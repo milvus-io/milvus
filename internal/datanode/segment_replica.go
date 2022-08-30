@@ -635,6 +635,8 @@ func (replica *SegmentReplica) getCollectionSchema(collID UniqueID, ts Timestamp
 		return nil, fmt.Errorf("not supported collection %v", collID)
 	}
 
+	replica.segMu.Lock()
+	defer replica.segMu.Unlock()
 	if replica.collSchema == nil {
 		sch, err := replica.metaService.getCollectionSchema(context.Background(), collID, ts)
 		if err != nil {

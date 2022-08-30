@@ -52,6 +52,26 @@ import (
 const ctxTimeInMillisecond = 5000
 const debug = false
 
+// As used in data_sync_service_test.go
+var segID2SegInfo = map[int64]*datapb.SegmentInfo{
+	1: {
+		ID:            1,
+		CollectionID:  1,
+		PartitionID:   1,
+		InsertChannel: "by-dev-rootcoord-dml-test_v1",
+	},
+	2: {
+		ID:            2,
+		CollectionID:  1,
+		InsertChannel: "by-dev-rootcoord-dml-test_v1",
+	},
+	3: {
+		ID:            3,
+		CollectionID:  1,
+		InsertChannel: "by-dev-rootcoord-dml-test_v1",
+	},
+}
+
 var emptyFlushAndDropFunc flushAndDropFunc = func(_ []*segmentFlushPack) {}
 
 func newIDLEDataNodeMock(ctx context.Context, pkType schemapb.DataType) *DataNode {
@@ -263,9 +283,13 @@ func (ds *DataCoordFactory) GetSegmentInfo(ctx context.Context, req *datapb.GetS
 	}
 	var segmentInfos []*datapb.SegmentInfo
 	for _, segmentID := range req.SegmentIDs {
-		segmentInfos = append(segmentInfos, &datapb.SegmentInfo{
-			ID: segmentID,
-		})
+		if segInfo, ok := segID2SegInfo[segmentID]; ok {
+			segmentInfos = append(segmentInfos, segInfo)
+		} else {
+			segmentInfos = append(segmentInfos, &datapb.SegmentInfo{
+				ID: segmentID,
+			})
+		}
 	}
 	return &datapb.GetSegmentInfoResponse{
 		Status: &commonpb.Status{

@@ -3661,7 +3661,7 @@ func (node *Proxy) completeImport(taskID int64) {
 	getImportResp, err := node.checkImportTaskPersisted(taskID)
 	if err != nil {
 		log.Error("task not persisted yet after wait limit",
-			zap.Int64("wait limit", int64(CheckTaskPersistedWaitLimit.Seconds())),
+			zap.Int64("wait limit (seconds)", int64(CheckTaskPersistedWaitLimit.Seconds())),
 			zap.Int64("task ID", taskID),
 			zap.Any("current task state", getImportResp.GetState()))
 		return

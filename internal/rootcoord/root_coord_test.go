@@ -1382,6 +1382,81 @@ func TestRootCoord_Base(t *testing.T) {
 	})
 
 	wg.Add(1)
+	t.Run("count complete index", func(t *testing.T) {
+		defer wg.Done()
+		coll, err := core.MetaTable.GetCollectionByName(collName, 0)
+		assert.NoError(t, err)
+		// Normal case.
+		done, err := core.countCompleteIndex(context.WithValue(ctx, ctxKey{}, ""),
+			collName, coll.GetID(), []UniqueID{1000, 1001, 1002})
+		assert.NoError(t, err)
+		assert.Equal(t, true, done)
+		// Case with an empty result.
+		done, err = core.countCompleteIndex(context.WithValue(ctx, ctxKey{}, ""), collName, coll.GetID(), []UniqueID{})
+		assert.NoError(t, err)
+		assert.Equal(t, true, done)
+		// Case where GetIndexStates failed with error.
+		_, err = core.countCompleteIndex(context.WithValue(ctx, ctxKey{}, returnError),
+			collName, coll.GetID(), []UniqueID{1000, 1001, 1002})
+		assert.Error(t, err)
+		// Case where GetIndexStates failed with bad status.
+		_, err = core.countCompleteIndex(context.WithValue(ctx, ctxKey{}, returnUnsuccessfulStatus),
+			collName, coll.GetID(), []UniqueID{1000, 1001, 1002})
+		assert.Error(t, err)
+		// Case where describing segment fails, which is not considered as an error.
+		_, err = core.countCompleteIndex(context.WithValue(ctx, ctxKey{}, ""),
+			collName, coll.GetID(), []UniqueID{9000, 9001, 9002})
+		assert.NoError(t, err)
+	})
+
+	wg.Add(1)
+	t.Run("check segment index ready with collect name not found", func(t *testing.T) {
+		defer wg.Done()
+		// Check the case where the collection ID is not found.
+		req := &internalpb.CheckSegmentIndexReadyRequest{
+			TaskID: 199,          // Some random ID.
+			ColID:  299,          // Some random ID.
+			SegIDs: []int64{399}, // Some random ID.
+		}
+		rsp, err := core.CheckSegmentIndexReady(ctx, req)
+		assert.Equal(t, commonpb.ErrorCode_CollectionNameNotFound, rsp.GetErrorCode())
+		assert.NoError(t, err)
+	})
+
+	wg.Add(1)
+	t.Run("check segment index ready time out", func(t *testing.T) {
+		defer wg.Done()
+		collMeta, err := core.MetaTable.GetCollectionByName(collName, 0)
+		assert.NoError(t, err)
+		// Check the case where the collection exists.
+		req := &internalpb.CheckSegmentIndexReadyRequest{
+			TaskID: 199,              // Some random ID.
+			ColID:  collMeta.GetID(), // The correct collection ID.
+			SegIDs: []int64{399},     // Some random ID.
+		}
+		// Expect check segment index ready to timeout as we cannot describe the invalid segment correctly.
+		rsp, err := core.CheckSegmentIndexReady(context.WithValue(ctx, ctxKey{}, ""), req)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, rsp.GetErrorCode())
+		assert.NoError(t, err)
+	})
+
+	wg.Add(1)
+	t.Run("check segment index ready succeeds", func(t *testing.T) {
+		defer wg.Done()
+		collMeta, err := core.MetaTable.GetCollectionByName(collName, 0)
+		assert.NoError(t, err)
+		// Check the case where the collection exists.
+		req := &internalpb.CheckSegmentIndexReadyRequest{
+			TaskID: 199,                       // Some random ID.
+			ColID:  collMeta.GetID(),          // The correct collection ID.
+			SegIDs: []int64{1000, 1001, 1002}, // Some random ID.
+		}
+		rsp, err := core.CheckSegmentIndexReady(context.WithValue(ctx, ctxKey{}, ""), req)
+		assert.Equal(t, commonpb.ErrorCode_Success, rsp.GetErrorCode())
+		assert.NoError(t, err)
+	})
+
+	wg.Add(1)
 	t.Run("flush segment", func(t *testing.T) {
 		defer wg.Done()
 		coll, err := core.MetaTable.GetCollectionByName(collName, 0)

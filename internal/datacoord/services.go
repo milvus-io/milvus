@@ -40,6 +40,7 @@ import (
 
 var ImportFlushedCheckInterval = 5 * time.Second
 var ImportFlushedWaitLimit = 2 * time.Minute
+var reportImportAttempts uint = 20
 
 // checks whether server in Healthy State
 func (s *Server) isClosed() bool {
@@ -1226,7 +1227,7 @@ func (s *Server) CompleteBulkLoad(ctx context.Context, req *datapb.CompleteBulkL
 	if err != nil {
 		log.Warn(fmt.Sprintf("failed to wait for all index build to complete %s, but continue anyway", err.Error()))
 	}
-	if checkIndexStatus.ErrorCode != commonpb.ErrorCode_Success {
+	if checkIndexStatus.GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn(fmt.Sprintf("failed to wait for all index build to complete %s, but continue anyway", checkIndexStatus.Reason))
 	}
 
@@ -1238,7 +1239,7 @@ func (s *Server) CompleteBulkLoad(ctx context.Context, req *datapb.CompleteBulkL
 			State:  commonpb.ImportState_ImportCompleted,
 		})
 		return VerifyResponse(status, err)
-	}, retry.Attempts(20))
+	}, retry.Attempts(reportImportAttempts))
 	if err != nil {
 		log.Error("failed to report import, we are not able to update the import task state",
 			zap.Int64("task ID", req.GetTaskId()),

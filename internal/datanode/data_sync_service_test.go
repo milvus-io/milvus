@@ -139,6 +139,11 @@ func TestDataSyncService_newDataSyncService(te *testing.T) {
 			0, 0, "", 0,
 			0, 0, "", 0,
 			"replica nil"},
+		{true, false, &mockMsgStreamFactory{true, true},
+			1, "by-dev-rootcoord-dml-test_v1",
+			1, 1, "by-dev-rootcoord-dml-test_v1", 0,
+			1, 2, "by-dev-rootcoord-dml-test_v1", 0,
+			"add normal segments"},
 	}
 	cm := storage.NewLocalChunkManager(storage.RootPath(dataSyncServiceTestDir))
 	defer cm.RemoveWithPrefix("")

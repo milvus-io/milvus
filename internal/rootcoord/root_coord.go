@@ -2732,11 +2732,7 @@ func (c *Core) CheckSegmentIndexReady(ctx context.Context, req *internalpb.Check
 	}
 	colName = colMeta.GetSchema().GetName()
 	// Check if collection has any indexed fields. If so, start a loop to check segments' index states.
-	if colMeta, err := c.MetaTable.GetCollectionByID(req.GetColID(), 0); err != nil {
-		log.Error("failed to find meta for collection",
-			zap.Int64("collection ID", req.GetColID()),
-			zap.Error(err))
-	} else if len(colMeta.GetFieldIndexes()) == 0 {
+	if len(colMeta.GetFieldIndexes()) == 0 {
 		log.Info("no index field found for collection", zap.Int64("collection ID", req.GetColID()))
 	} else {
 		log.Info("start checking index state", zap.Int64("collection ID", req.GetColID()))
@@ -2842,14 +2838,14 @@ func (c *Core) countCompleteIndex(ctx context.Context, collectionName string, co
 		segmentDesc, err := c.DescribeSegment(ctx, describeSegmentRequest)
 		if err != nil {
 			log.Error("failed to describe segment", zap.Error(err))
-			return true, nil
+			return false, nil
 		}
 		if segmentDesc.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-			// Describe failed, since the segment could get compacted, simply log and ignore the error.
 			log.Error("failed to describe segment",
 				zap.Int64("collection ID", collectionID),
 				zap.Int64("segment ID", segmentID),
 				zap.String("error", segmentDesc.GetStatus().GetReason()))
+			return false, nil
 		}
 		if segmentDesc.GetIndexID() == matchIndexID {
 			if segmentDesc.GetEnableIndex() {
@@ -2862,7 +2858,7 @@ func (c *Core) countCompleteIndex(ctx context.Context, collectionName string, co
 		log.Info("no index build IDs returned, perhaps no index is needed",
 			zap.String("collection name", collectionName),
 			zap.Int64("collection ID", collectionID))
-		//return true, nil
+		return true, nil
 	}
 
 	log.Debug("working on GetIndexState",

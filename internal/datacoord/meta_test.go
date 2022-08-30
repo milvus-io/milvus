@@ -630,6 +630,55 @@ func Test_meta_SetSegmentCompacting(t *testing.T) {
 	}
 }
 
+func Test_meta_SetSegmentIsImporting(t *testing.T) {
+	type fields struct {
+		client   kv.TxnKV
+		segments *SegmentsInfo
+	}
+	type args struct {
+		segmentID   UniqueID
+		isImporting bool
+	}
+	tests := []struct {
+		name   string
+		fields fields
+		args   args
+	}{
+		{
+			"test set segment importing",
+			fields{
+				memkv.NewMemoryKV(),
+				&SegmentsInfo{
+					map[int64]*SegmentInfo{
+						1: {
+							SegmentInfo: &datapb.SegmentInfo{
+								ID:    1,
+								State: commonpb.SegmentState_Flushed,
+							},
+							isImporting: false,
+						},
+					},
+				},
+			},
+			args{
+				segmentID:   1,
+				isImporting: true,
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &meta{
+				client:   tt.fields.client,
+				segments: tt.fields.segments,
+			}
+			m.SetSegmentIsImporting(tt.args.segmentID, tt.args.isImporting)
+			segment := m.GetSegment(tt.args.segmentID)
+			assert.Equal(t, tt.args.isImporting, segment.isImporting)
+		})
+	}
+}
+
 func Test_meta_GetSegmentsOfCollection(t *testing.T) {
 	type fields struct {
 		segments *SegmentsInfo

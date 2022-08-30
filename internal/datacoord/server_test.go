@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -139,6 +140,19 @@ func TestAssignSegmentID(t *testing.T) {
 		assert.EqualValues(t, 1000, assign.Count)
 	})
 
+	t.Run("assign segment for bulk load", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+		reportImportAttempts = 2
+		svr.rootCoordClient = &mockRootCoord{
+			RootCoord: svr.rootCoordClient,
+			collID:    collID,
+		}
+		svr.CompleteBulkLoad(context.TODO(), &datapb.CompleteBulkLoadRequest{
+			SegmentIds: []int64{1001, 1002, 1003},
+		})
+	})
+
 	t.Run("with closed server", func(t *testing.T) {
 		req := &datapb.SegmentIDRequest{
 			Count:        100,
@@ -161,7 +175,7 @@ func TestAssignSegmentID(t *testing.T) {
 	t.Run("assign segment with invalid collection", func(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
-		svr.rootCoordClient = &mockDescribeCollRoot{
+		svr.rootCoordClient = &mockRootCoord{
 			RootCoord: svr.rootCoordClient,
 			collID:    collID,
 		}
@@ -188,12 +202,12 @@ func TestAssignSegmentID(t *testing.T) {
 	})
 }
 
-type mockDescribeCollRoot struct {
+type mockRootCoord struct {
 	types.RootCoord
 	collID UniqueID
 }
 
-func (r *mockDescribeCollRoot) DescribeCollection(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+func (r *mockRootCoord) DescribeCollection(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 	if req.CollectionID != r.collID {
 		return &milvuspb.DescribeCollectionResponse{
 			Status: &commonpb.Status{
@@ -203,6 +217,19 @@ func (r *mockDescribeCollRoot) DescribeCollection(ctx context.Context, req *milv
 		}, nil
 	}
 	return r.RootCoord.DescribeCollection(ctx, req)
+}
+
+func (r *mockRootCoord) CheckSegmentIndexReady(context.Context, *internalpb.CheckSegmentIndexReadyRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}, nil
+}
+
+func (r *mockRootCoord) ReportImport(context.Context, *rootcoordpb.ImportResult) (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		Reason:    "something bad",
+	}, nil
 }
 
 func TestFlush(t *testing.T) {
