@@ -133,6 +133,7 @@ func syncReplicaSegments(ctx context.Context, meta Meta, cluster Cluster, replic
 				log.Warn("syncReplicaSegments: no segment node in replica",
 					zap.Int64("replicaID", replicaID),
 					zap.Any("segment", segments[i]))
+				continue
 			}
 
 			partition := segments[i].PartitionID
