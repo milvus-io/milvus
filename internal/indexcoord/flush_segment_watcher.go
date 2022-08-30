@@ -299,6 +299,7 @@ func (fsw *flushedSegmentWatcher) internalProcess(t *internalTask) {
 			CollectionID:        t.segmentInfo.CollectionID,
 			PartitionID:         t.segmentInfo.PartitionID,
 			NumRows:             t.segmentInfo.NumOfRows,
+			DmChannel:           t.segmentInfo.GetInsertChannel(),
 			IndexName:           "",
 			IndexID:             0,
 			CompactionFrom:      t.segmentInfo.CompactionFrom,
