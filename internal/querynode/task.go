@@ -151,6 +151,23 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 	// init collection meta
 	coll := w.node.metaReplica.addCollection(collectionID, w.req.Schema)
 
+	loadedChannelCounter := 0
+	for _, toLoadChannel := range vChannels {
+		for _, loadedChannel := range coll.vChannels {
+			if toLoadChannel == loadedChannel {
+				loadedChannelCounter += 1
+				break
+			}
+		}
+	}
+
+	// check if all channels has been loaded, if YES, should do nothing and return
+	// in case of query coord trigger same watchDmChannelTask on multi
+	if len(vChannels) == loadedChannelCounter {
+		log.Warn("All channel has been loaded, skip this watchDmChannelsTask")
+		return nil
+	}
+
 	//add shard cluster
 	for _, vchannel := range vChannels {
 		w.node.ShardClusterService.addShardCluster(w.req.GetCollectionID(), w.req.GetReplicaID(), vchannel)

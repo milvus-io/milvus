@@ -301,7 +301,7 @@ func (c *queryNodeCluster) WatchDmChannels(ctx context.Context, nodeID int64, in
 			old, ok := c.clusterMeta.getDmChannel(info.ChannelName)
 			if ok {
 				nodes = append(nodes, old.NodeIds...)
-				removeFromSlice(nodes, in.OfflineNodeID)
+				nodes = removeFromSlice(nodes, in.OfflineNodeID)
 				log.Debug("Remove offline node from dmChannel",
 					zap.String("channel", info.ChannelName),
 					zap.Int64("removedNode", in.OfflineNodeID),
