@@ -1776,6 +1776,7 @@ class TestUtilityUserPassword(TestcaseBase):
         user = "nico"
         password = "wertyu567"
         self.utility_wrap.create_user(user=user, password=password)
+        self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
         self.connection_wrap.connect(host=host, port=port, user=user, password=password,
                                      check_task=ct.CheckTasks.ccr)
         self.utility_wrap.list_collections()
@@ -1794,6 +1795,7 @@ class TestUtilityUserPassword(TestcaseBase):
         user = "robot2048"
         self.utility_wrap.create_user(user=user, password=old_password)
         self.utility_wrap.reset_password(user=user, old_password=old_password, new_password=new_password)
+        self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
         self.connection_wrap.connect(host=host, port=port, user=user,
                                      password=new_password, check_task=ct.CheckTasks.ccr)
         self.utility_wrap.list_collections()
