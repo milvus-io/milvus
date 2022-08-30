@@ -45,7 +45,7 @@ func TestKafkaID_LessOrEqualThan(t *testing.T) {
 
 func TestKafkaID_Equal(t *testing.T) {
 	rid1 := &kafkaID{messageID: 0}
-	rid2 := &kafkaID{messageID: 0}
+	rid2 := &kafkaID{messageID: 1}
 
 	{
 		ret, err := rid1.Equal(rid1.Serialize())

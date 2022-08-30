@@ -885,7 +885,12 @@ func (sc *ShardCluster) Search(ctx context.Context, req *querypb.SearchRequest, 
 		}
 		node, ok := sc.getNode(nodeID)
 		if !ok { // meta dismatch, report error
-			return nil, fmt.Errorf("ShardCluster for %s replicaID %d is no available", sc.vchannelName, sc.replicaID)
+			log.Error("ShardCluster access segment with wrong node",
+				zap.String("channelName", sc.vchannelName),
+				zap.Int64("replica", sc.replicaID),
+				zap.Int64s("segments", segments),
+				zap.Int64("unavailable target node", nodeID))
+			return nil, fmt.Errorf("ShardCluster for %s replicaID %d assess segment failed", sc.vchannelName, sc.replicaID)
 		}
 		wg.Add(1)
 		go func() {
