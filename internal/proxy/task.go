@@ -51,17 +51,19 @@ import (
 )
 
 const (
+	AnnsFieldKey    = "anns_field"
+	TopKKey         = "topk"
+	MetricTypeKey   = "metric_type"
+	SearchParamsKey = "params"
+	RoundDecimalKey = "round_decimal"
+	OffsetKey       = "offset"
+
 	InsertTaskName                  = "InsertTask"
 	CreateCollectionTaskName        = "CreateCollectionTask"
 	DropCollectionTaskName          = "DropCollectionTask"
 	SearchTaskName                  = "SearchTask"
 	RetrieveTaskName                = "RetrieveTask"
 	QueryTaskName                   = "QueryTask"
-	AnnsFieldKey                    = "anns_field"
-	TopKKey                         = "topk"
-	MetricTypeKey                   = "metric_type"
-	SearchParamsKey                 = "params"
-	RoundDecimalKey                 = "round_decimal"
 	HasCollectionTaskName           = "HasCollectionTask"
 	DescribeCollectionTaskName      = "DescribeCollectionTask"
 	GetCollectionStatisticsTaskName = "GetCollectionStatisticsTask"

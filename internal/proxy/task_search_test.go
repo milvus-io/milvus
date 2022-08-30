@@ -1697,6 +1697,11 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 			Value: "invalid",
 		})
 
+		spInvalidTopk65536 := append(spNoTopk, &commonpb.KeyValuePair{
+			Key:   TopKKey,
+			Value: "65536",
+		})
+
 		spNoMetricType := append(spNoTopk, &commonpb.KeyValuePair{
 			Key:   TopKKey,
 			Value: "10",
@@ -1727,6 +1732,7 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 		}{
 			{"No_topk", spNoTopk},
 			{"Invalid_topk", spInvalidTopk},
+			{"Invalid_topk_65536", spInvalidTopk65536},
 			{"No_Metric_type", spNoMetricType},
 			{"No_search_params", spNoSearchParams},
 			{"Invalid_round_decimal", spInvalidRoundDecimal},
