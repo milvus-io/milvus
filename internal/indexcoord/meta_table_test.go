@@ -154,11 +154,11 @@ func constructMetaTable(catalog metastore.IndexCoordCatalog) *metaTable {
 					NodeID:         0,
 					IndexState:     commonpb.IndexState_Finished,
 					FailReason:     "",
-					IndexVersion:   0,
+					IndexVersion:   1,
 					IsDeleted:      false,
 					CreateTime:     createTs,
-					IndexFilePaths: nil,
-					IndexSize:      0,
+					IndexFilePaths: []string{"file1", "file2"},
+					IndexSize:      1024,
 				},
 			},
 		},
@@ -313,6 +313,7 @@ func TestMetaTable_AddIndex(t *testing.T) {
 func TestMetaTable_UpdateVersion(t *testing.T) {
 	newBuildID := buildID + 3
 	segIdx := &model.SegmentIndex{
+		SegmentID:      segID,
 		IndexID:        indexID,
 		BuildID:        newBuildID,
 		NodeID:         0,
@@ -343,6 +344,9 @@ func TestMetaTable_UpdateVersion(t *testing.T) {
 			save: func(s string, s2 string) error {
 				return nil
 			},
+			multiSave: func(m map[string]string) error {
+				return nil
+			},
 		}
 		mt := constructMetaTable(&indexcoord.Catalog{Txn: kv})
 
@@ -358,7 +362,7 @@ func TestMetaTable_UpdateVersion(t *testing.T) {
 		err = mt.UpdateVersion(newBuildID, nodeID)
 		assert.Error(t, err)
 
-		err = mt.MarkSegIndexAsDeleted(newBuildID)
+		err = mt.MarkSegmentsIndexAsDeleted([]int64{segID})
 		assert.NoError(t, err)
 
 		err = mt.UpdateVersion(newBuildID, nodeID)
@@ -391,6 +395,7 @@ func TestMetaTable_UpdateVersion(t *testing.T) {
 func TestMetaTable_BuildIndex(t *testing.T) {
 	newBuildID := buildID + 4
 	segIdx := &model.SegmentIndex{
+		SegmentID:      segID,
 		IndexID:        indexID,
 		BuildID:        newBuildID,
 		NodeID:         0,
@@ -405,6 +410,9 @@ func TestMetaTable_BuildIndex(t *testing.T) {
 	t.Run("success and fail", func(t *testing.T) {
 		kv := &mockETCDKV{
 			save: func(s string, s2 string) error {
+				return nil
+			},
+			multiSave: func(m map[string]string) error {
 				return nil
 			},
 		}
@@ -425,7 +433,7 @@ func TestMetaTable_BuildIndex(t *testing.T) {
 		err = mt.BuildIndex(buildID)
 		assert.Error(t, err)
 
-		err = mt.MarkSegIndexAsDeleted(newBuildID)
+		err = mt.MarkSegmentsIndexAsDeleted([]int64{segID})
 		assert.NoError(t, err)
 
 		err = mt.BuildIndex(newBuildID)
@@ -647,5 +655,120 @@ func TestMetaTable_GetIndexBuildProgress(t *testing.T) {
 }
 
 func TestMetaTable_MarkIndexAsDeleted(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		mt := constructMetaTable(&indexcoord.Catalog{
+			Txn: &mockETCDKV{
+				multiSave: func(m map[string]string) error {
+					return nil
+				},
+			},
+		})
 
+		err := mt.MarkIndexAsDeleted(collID+1, []UniqueID{indexID})
+		assert.NoError(t, err)
+
+		err = mt.MarkIndexAsDeleted(collID, []UniqueID{indexID, indexID + 1})
+		assert.NoError(t, err)
+	})
+
+	t.Run("fail", func(t *testing.T) {
+		mt := constructMetaTable(&indexcoord.Catalog{
+			Txn: &mockETCDKV{
+				multiSave: func(m map[string]string) error {
+					return errors.New("error")
+				},
+			},
+		})
+
+		err := mt.MarkIndexAsDeleted(collID, []UniqueID{indexID})
+		assert.Error(t, err)
+	})
+}
+
+func TestMetaTable_MarkSegmentsIndexAsDeleted(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		mt := constructMetaTable(&indexcoord.Catalog{
+			Txn: &mockETCDKV{
+				multiSave: func(m map[string]string) error {
+					return nil
+				},
+			},
+		})
+
+		err := mt.MarkSegmentsIndexAsDeleted([]int64{segID})
+		assert.NoError(t, err)
+
+		err = mt.MarkSegmentsIndexAsDeleted([]int64{segID})
+		assert.NoError(t, err)
+
+		err = mt.MarkSegmentsIndexAsDeleted([]int64{segID + 1})
+		assert.NoError(t, err)
+	})
+
+	t.Run("fail", func(t *testing.T) {
+		mt := constructMetaTable(&indexcoord.Catalog{
+			Txn: &mockETCDKV{
+				multiSave: func(m map[string]string) error {
+					return errors.New("error")
+				},
+			},
+		})
+
+		err := mt.MarkSegmentsIndexAsDeleted([]int64{segID})
+		assert.Error(t, err)
+	})
+}
+
+func TestMetaTable_GetIndexFilePathInfo(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		mt := constructMetaTable(&indexcoord.Catalog{})
+
+		info, err := mt.GetIndexFilePathInfo(segID, indexID)
+		assert.NoError(t, err)
+		assert.ElementsMatch(t, []string{"file1", "file2"}, info.IndexFilePaths)
+	})
+
+	t.Run("fail", func(t *testing.T) {
+		mt := constructMetaTable(&indexcoord.Catalog{
+			Txn: &mockETCDKV{
+				save: func(s string, s2 string) error {
+					return nil
+				},
+			},
+		})
+
+		info, err := mt.GetIndexFilePathInfo(segID, indexID)
+		assert.NoError(t, err)
+		assert.ElementsMatch(t, []string{"file1", "file2"}, info.IndexFilePaths)
+
+		info, err = mt.GetIndexFilePathInfo(segID+1, indexID)
+		assert.Error(t, err)
+		assert.Nil(t, info)
+
+		info, err = mt.GetIndexFilePathInfo(segID, indexID+1)
+		assert.Error(t, err)
+		assert.Nil(t, info)
+
+		err = mt.AddIndex(&model.SegmentIndex{
+			SegmentID:      segID + 1,
+			CollectionID:   collID + 1,
+			PartitionID:    partID + 1,
+			NumRows:        1024,
+			IndexID:        indexID + 1,
+			BuildID:        buildID + 1,
+			NodeID:         nodeID + 1,
+			IndexVersion:   0,
+			IndexState:     commonpb.IndexState_Unissued,
+			FailReason:     "",
+			IsDeleted:      false,
+			CreateTime:     0,
+			IndexFilePaths: nil,
+			IndexSize:      0,
+		})
+		assert.NoError(t, err)
+
+		info, err = mt.GetIndexFilePathInfo(segID+1, indexID+1)
+		assert.Error(t, err)
+		assert.Nil(t, info)
+	})
 }

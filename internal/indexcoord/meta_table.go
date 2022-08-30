@@ -711,32 +711,7 @@ func (mt *metaTable) MarkIndexAsDeleted(collID UniqueID, indexIDs []UniqueID) er
 	return nil
 }
 
-// MarkSegIndexAsDeleted will mark the index on the segment corresponding the buildID as deleted, and recycleUnusedSegIndexes will recycle these tasks.
-func (mt *metaTable) MarkSegIndexAsDeleted(buildID UniqueID) error {
-	log.Info("IndexCoord metaTable MarkSegIndexAsDeleted", zap.Int64("buildID", buildID))
-
-	mt.segmentIndexLock.Lock()
-	defer mt.segmentIndexLock.Unlock()
-
-	segIdx, ok := mt.buildID2SegmentIndex[buildID]
-	if !ok {
-		return nil
-	}
-
-	updateFunc := func(segIdx *model.SegmentIndex) error {
-		segIdx.IsDeleted = true
-		return mt.saveSegmentIndexMeta(segIdx)
-	}
-
-	if err := mt.updateSegIndexMeta(segIdx, updateFunc); err != nil {
-		log.Warn("IndexCoord metaTable MarkSegIndexAsDeleted fail", zap.Int64("buildID", buildID), zap.Error(err))
-		return err
-	}
-
-	log.Info("IndexCoord metaTable MarkIndexAsDeleted success", zap.Int64("collID", buildID))
-	return nil
-}
-
+// MarkSegmentsIndexAsDeleted will mark the index on the segment corresponding the buildID as deleted, and recycleUnusedSegIndexes will recycle these tasks.
 func (mt *metaTable) MarkSegmentsIndexAsDeleted(segIDs []UniqueID) error {
 	log.Info("IndexCoord metaTable MarkSegmentsIndexAsDeleted", zap.Int64s("segIDs", segIDs))
 
