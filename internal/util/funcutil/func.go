@@ -57,7 +57,7 @@ func CheckGrpcReady(ctx context.Context, targetCh chan error) {
 
 // GetLocalIP return the local ip address
 func GetLocalIP() string {
-    val, present = os.LookupEnv("NOMAD_HOST_IP_http")
+    val, present := os.LookupEnv("NOMAD_HOST_IP_http")
     if !present {
         return ipv4.LocalIP()
     }
