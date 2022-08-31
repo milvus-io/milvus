@@ -17,16 +17,19 @@
 package datacoord
 
 import (
+	"context"
 	"sync"
 	"testing"
 	"time"
 
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"go.uber.org/zap"
 )
 
@@ -140,6 +143,8 @@ func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 }
 
 func Test_compactionPlanHandler_execWithParallels(t *testing.T) {
+
+	mockDataNode := &mocks.DataNode{}
 	Params.DataCoordCfg.CompactionCheckIntervalInSeconds = 1
 	c := &compactionPlanHandler{
 		plans: map[int64]*compactionTask{},
@@ -149,7 +154,7 @@ func Test_compactionPlanHandler_execWithParallels(t *testing.T) {
 				data map[int64]*Session
 			}{
 				data: map[int64]*Session{
-					1: {client: &mockDataNodeClient{ch: make(chan interface{}, 1)}},
+					1: {client: mockDataNode},
 				},
 			},
 		},
@@ -171,15 +176,31 @@ func Test_compactionPlanHandler_execWithParallels(t *testing.T) {
 
 	c.parallelCh[1] = make(chan struct{}, 2)
 
+	var mut sync.RWMutex
+	called := 0
+
+	mockDataNode.EXPECT().Compaction(mock.Anything, mock.Anything).Run(func(ctx context.Context, req *datapb.CompactionPlan) {
+		mut.Lock()
+		defer mut.Unlock()
+		called++
+	}).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil).Times(3)
 	go func() {
 		c.execCompactionPlan(signal, plan1)
 		c.execCompactionPlan(signal, plan2)
 		c.execCompactionPlan(signal, plan3)
 	}()
 
+	// wait for dispatch signal
 	<-c.parallelCh[1]
 	<-c.parallelCh[1]
 	<-c.parallelCh[1]
+
+	// wait for compaction called
+	assert.Eventually(t, func() bool {
+		mut.RLock()
+		defer mut.RUnlock()
+		return called == 3
+	}, time.Second, time.Millisecond*10)
 
 	tasks := c.getCompactionTasksBySignalID(0)
 	max, min := uint64(0), uint64(0)
