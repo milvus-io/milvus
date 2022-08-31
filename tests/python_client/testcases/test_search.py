@@ -1767,6 +1767,7 @@ class TestCollectionSearch(TestcaseBase):
         # 1. initialize with binary data
         nq = 1
         dim = 8
+        limit = 8
         collection_w, _, binary_raw_vector, insert_ids, time_stamp \
             = self.init_collection_general(prefix, True, default_nb, is_binary=True, auto_id=auto_id,
                                            dim=dim, is_index=True, is_flush=is_flush)[0:5]
@@ -1779,13 +1780,13 @@ class TestCollectionSearch(TestcaseBase):
         # 4. search and compare the distance
         search_params = {"metric_type": "SUBSTRUCTURE", "params": {"nprobe": 10}}
         res = collection_w.search(binary_vectors[:nq], "binary_vector",
-                                  search_params, default_limit, "int64 >= 0",
+                                  search_params, limit, "int64 >= 0",
                                   _async=_async,
                                   travel_timestamp=time_stamp,
                                   check_task=CheckTasks.check_search_results,
                                   check_items={"nq": nq,
                                                "ids": insert_ids,
-                                               "limit": default_limit,
+                                               "limit": limit,
                                                "_async": _async})[0]
         if _async:
             res.done()
