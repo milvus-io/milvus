@@ -758,6 +758,7 @@ message QueryRequest {
   repeated string partition_names = 6;
   uint64 travel_timestamp = 7;
   uint64 guarantee_timestamp = 8; // guarantee_timestamp
+  repeated common.KeyValuePair query_params = 9; // optional
 }
 
 message QueryResults {

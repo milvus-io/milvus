@@ -338,3 +338,49 @@ func Test_translateToOutputFieldIDs(t *testing.T) {
 		})
 	}
 }
+
+func TestTaskQuery_functions(t *testing.T) {
+	t.Run("test parseQueryParams", func(t *testing.T) {
+		tests := []struct {
+			description string
+
+			inKey   []string
+			inValue []string
+
+			expectErr bool
+			outLimit  int64
+			outOffset int64
+		}{
+			{"empty input", []string{}, []string{}, false, 0, 0},
+			{"valid limit=1", []string{LimitKey}, []string{"1"}, false, 1, 0},
+			{"valid limit=1, offset=2", []string{LimitKey, OffsetKey}, []string{"1", "2"}, false, 1, 2},
+			{"valid no limit, offset=2", []string{OffsetKey}, []string{"2"}, false, 0, 0},
+			{"invalid limit str", []string{LimitKey}, []string{"a"}, true, 0, 0},
+			{"invalid limit zero", []string{LimitKey}, []string{"0"}, true, 0, 0},
+			{"invalid offset negative", []string{LimitKey, OffsetKey}, []string{"1", "-1"}, true, 0, 0},
+			{"invalid limit=16384 offset=16384", []string{LimitKey, OffsetKey}, []string{"16384", "16384"}, true, 0, 0},
+		}
+
+		for _, test := range tests {
+			t.Run(test.description, func(t *testing.T) {
+				var inParams []*commonpb.KeyValuePair
+				for i := range test.inKey {
+					inParams = append(inParams, &commonpb.KeyValuePair{
+						Key:   test.inKey[i],
+						Value: test.inValue[i],
+					})
+
+				}
+				ret, err := parseQueryParams(inParams)
+				if test.expectErr {
+					assert.Error(t, err)
+					assert.Empty(t, ret)
+				} else {
+					assert.NoError(t, err)
+					assert.Equal(t, test.outLimit, ret.limit)
+					assert.Equal(t, test.outOffset, ret.offset)
+				}
+			})
+		}
+	})
+}
