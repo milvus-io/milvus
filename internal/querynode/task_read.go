@@ -72,9 +72,9 @@ func (b *baseReadTask) SetStep(step TaskStep) {
 	switch step {
 	case TaskStepEnqueue:
 		b.queueDur = 0
-		b.tr.Record("enqueueStart")
+		b.tr.CtxRecord(b.Ctx(), "enqueueStart")
 	case TaskStepPreExecute:
-		b.queueDur = b.tr.Record("enqueueEnd")
+		b.queueDur = b.tr.CtxRecord(b.Ctx(), "enqueueEnd")
 	}
 }
 
@@ -105,7 +105,7 @@ func (b *baseReadTask) PostExecute(ctx context.Context) error {
 func (b *baseReadTask) Notify(err error) {
 	switch b.step {
 	case TaskStepEnqueue:
-		b.queueDur = b.tr.Record("enqueueEnd")
+		b.queueDur = b.tr.CtxRecord(b.Ctx(), "enqueueEnd")
 	}
 	b.baseTask.Notify(err)
 }
@@ -144,7 +144,7 @@ func (b *baseReadTask) Ready() (bool, error) {
 	}
 
 	if _, released := b.QS.collection.getReleaseTime(); released {
-		log.Debug("collection release before search", zap.Int64("collectionID", b.CollectionID))
+		log.Ctx(b.Ctx()).Debug("collection release before search", zap.Int64("collectionID", b.CollectionID))
 		return false, fmt.Errorf("collection has been released, taskID = %d, collectionID = %d", b.ID(), b.CollectionID)
 	}
 
@@ -158,7 +158,7 @@ func (b *baseReadTask) Ready() (bool, error) {
 	if guaranteeTs > serviceTime {
 		return false, nil
 	}
-	log.Debug("query msg can do",
+	log.Ctx(b.Ctx()).Debug("query msg can do",
 		zap.Any("collectionID", b.CollectionID),
 		zap.Any("sm.GuaranteeTimestamp", gt),
 		zap.Any("serviceTime", st),

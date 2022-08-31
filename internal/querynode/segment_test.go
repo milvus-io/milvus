@@ -219,7 +219,7 @@ func TestSegment_retrieve(t *testing.T) {
 	defer plan.delete()
 	assert.NoError(t, err)
 
-	res, err := segment.retrieve(plan)
+	res, err := segment.retrieve(context.Background(), plan)
 	assert.NoError(t, err)
 
 	assert.Equal(t, res.GetFieldsData()[0].GetScalars().Data.(*schemapb.ScalarField_IntData).IntData.Data, []int32{1, 2, 3})
@@ -450,7 +450,7 @@ func TestSegment_segmentSearch(t *testing.T) {
 	req, err := parseSearchRequest(plan, placeGroupByte)
 	assert.NoError(t, err)
 
-	searchResult, err := segment.search(req)
+	searchResult, err := segment.search(ctx, req)
 	assert.NoError(t, err)
 
 	err = checkSearchResult(nq, plan, searchResult)

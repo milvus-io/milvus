@@ -124,7 +124,7 @@ func (queue *baseTaskQueue) AddActiveTask(t task) {
 	tID := t.ID()
 	_, ok := queue.activeTasks[tID]
 	if ok {
-		log.Debug("Proxy task with tID already in active task list!", zap.Any("ID", tID))
+		log.Ctx(t.TraceCtx()).Debug("Proxy task with tID already in active task list!", zap.Any("ID", tID))
 	}
 
 	queue.activeTasks[tID] = t
@@ -139,7 +139,7 @@ func (queue *baseTaskQueue) PopActiveTask(taskID UniqueID) task {
 		return t
 	}
 
-	log.Debug("Proxy task not in active task list! ts", zap.Any("taskID", taskID))
+	log.Ctx(t.TraceCtx()).Debug("Proxy task not in active task list! ts", zap.Any("taskID", taskID))
 	return t
 }
 
@@ -254,7 +254,7 @@ func (queue *dmTaskQueue) PopActiveTask(taskID UniqueID) task {
 		defer queue.statsLock.Unlock()
 
 		delete(queue.activeTasks, taskID)
-		log.Debug("Proxy dmTaskQueue popPChanStats", zap.Any("taskID", t.ID()))
+		log.Ctx(t.TraceCtx()).Debug("Proxy dmTaskQueue popPChanStats", zap.Any("taskID", t.ID()))
 		queue.popPChanStats(t)
 	} else {
 		log.Debug("Proxy task not in active task list!", zap.Any("taskID", taskID))
@@ -266,7 +266,7 @@ func (queue *dmTaskQueue) addPChanStats(t task) error {
 	if dmT, ok := t.(dmlTask); ok {
 		stats, err := dmT.getPChanStats()
 		if err != nil {
-			log.Debug("Proxy dmTaskQueue addPChanStats", zap.Any("tID", t.ID()),
+			log.Ctx(t.TraceCtx()).Debug("Proxy dmTaskQueue addPChanStats", zap.Any("tID", t.ID()),
 				zap.Any("stats", stats), zap.Error(err))
 			return err
 		}
@@ -456,7 +456,7 @@ func (sched *taskScheduler) processTask(t task, q taskQueue) {
 	}()
 	if err != nil {
 		trace.LogError(span, err)
-		log.Error("Failed to pre-execute task: "+err.Error(),
+		log.Ctx(ctx).Error("Failed to pre-execute task: "+err.Error(),
 			zap.String("traceID", traceID))
 		return
 	}
@@ -465,7 +465,7 @@ func (sched *taskScheduler) processTask(t task, q taskQueue) {
 	err = t.Execute(ctx)
 	if err != nil {
 		trace.LogError(span, err)
-		log.Error("Failed to execute task: "+err.Error(),
+		log.Ctx(ctx).Error("Failed to execute task: "+err.Error(),
 			zap.String("traceID", traceID))
 		return
 	}
@@ -475,7 +475,7 @@ func (sched *taskScheduler) processTask(t task, q taskQueue) {
 
 	if err != nil {
 		trace.LogError(span, err)
-		log.Error("Failed to post-execute task: "+err.Error(),
+		log.Ctx(ctx).Error("Failed to post-execute task: "+err.Error(),
 			zap.String("traceID", traceID))
 		return
 	}

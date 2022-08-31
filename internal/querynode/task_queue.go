@@ -126,7 +126,7 @@ func (queue *baseTaskQueue) AddActiveTask(t task) {
 	tID := t.ID()
 	_, ok := queue.activeTasks[tID]
 	if ok {
-		log.Warn("queryNode", zap.Int64("task with ID already in active task list!", tID))
+		log.Ctx(t.Ctx()).Warn("queryNode", zap.Int64("task with ID already in active task list!", tID))
 	}
 
 	queue.activeTasks[tID] = t

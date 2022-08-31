@@ -26,6 +26,7 @@ package querynode
 import "C"
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -306,7 +307,7 @@ func (s *Segment) getMemSize() int64 {
 	return int64(memoryUsageInBytes)
 }
 
-func (s *Segment) search(searchReq *searchRequest) (*SearchResult, error) {
+func (s *Segment) search(ctx context.Context, searchReq *searchRequest) (*SearchResult, error) {
 	/*
 		CStatus
 		Search(void* plan,
@@ -326,7 +327,7 @@ func (s *Segment) search(searchReq *searchRequest) (*SearchResult, error) {
 
 	loadIndex := s.hasLoadIndexForIndexedField(searchReq.searchFieldID)
 	var searchResult SearchResult
-	log.Debug("start do search on segment",
+	log.Ctx(ctx).Debug("start do search on segment",
 		zap.Int64("msgID", searchReq.msgID),
 		zap.Int64("segmentID", s.segmentID),
 		zap.String("segmentType", s.segmentType.String()),
@@ -337,13 +338,14 @@ func (s *Segment) search(searchReq *searchRequest) (*SearchResult, error) {
 		tr := timerecord.NewTimeRecorder("cgoSearch")
 		status = C.Search(s.segmentPtr, searchReq.plan.cSearchPlan, searchReq.cPlaceholderGroup,
 			C.uint64_t(searchReq.timestamp), &searchResult.cSearchResult)
+		// log.Ctx(ctx).Debug("cgoSearch done", zap.Int64("segmentID", s.segmentID), zap.Int64("cost/ms", tr.ElapseSpan().Milliseconds()))
 		metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.SearchLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
 		return nil, nil
 	}).Await()
 	if err := HandleCStatus(&status, "Search failed"); err != nil {
 		return nil, err
 	}
-	log.Debug("do search on segment done",
+	log.Ctx(ctx).Debug("do search on segment done",
 		zap.Int64("msgID", searchReq.msgID),
 		zap.Int64("segmentID", s.segmentID),
 		zap.String("segmentType", s.segmentType.String()),
@@ -351,7 +353,7 @@ func (s *Segment) search(searchReq *searchRequest) (*SearchResult, error) {
 	return &searchResult, nil
 }
 
-func (s *Segment) retrieve(plan *RetrievePlan) (*segcorepb.RetrieveResults, error) {
+func (s *Segment) retrieve(ctx context.Context, plan *RetrievePlan) (*segcorepb.RetrieveResults, error) {
 	if s.segmentPtr == nil {
 		return nil, errors.New("null seg core pointer")
 	}
@@ -365,7 +367,7 @@ func (s *Segment) retrieve(plan *RetrievePlan) (*segcorepb.RetrieveResults, erro
 		status = C.Retrieve(s.segmentPtr, plan.cRetrievePlan, ts, &retrieveResult.cRetrieveResult)
 		metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
 			metrics.QueryLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
-		log.Debug("do retrieve on segment",
+		log.Ctx(ctx).Debug("do retrieve on segment",
 			zap.Int64("msgID", plan.msgID),
 			zap.Int64("segmentID", s.segmentID), zap.String("segmentType", s.segmentType.String()))
 

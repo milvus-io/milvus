@@ -93,7 +93,7 @@ func TestReduce_AllFunc(t *testing.T) {
 	searchReq.timestamp = 0
 	assert.NoError(t, err)
 
-	searchResult, err := segment.search(searchReq)
+	searchResult, err := segment.search(ctx, searchReq)
 	assert.NoError(t, err)
 
 	err = checkSearchResult(nq, plan, searchResult)

@@ -37,6 +37,7 @@ import (
 
 type task interface {
 	ID() UniqueID // return ReqID
+	Ctx() context.Context
 	Timestamp() Timestamp
 	PreExecute(ctx context.Context) error
 	Execute(ctx context.Context) error

@@ -51,9 +51,10 @@ func searchOnSegments(ctx context.Context, replica ReplicaInterface, segType seg
 			}
 			// record search time
 			tr := timerecord.NewTimeRecorder("searchOnSegments")
-			searchResult, err := seg.search(searchReq)
+			searchResult, err := seg.search(ctx, searchReq)
 			errs[i] = err
 			searchResults[i] = searchResult
+			//log.Ctx(ctx).Info("searchOnSegment done", zap.Int64("segID", segID), zap.Int64("cost/ms", tr.ElapseSpan().Milliseconds()))
 			// update metrics
 			metrics.QueryNodeSQSegmentLatency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
 				metrics.SearchLabel, searchLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))

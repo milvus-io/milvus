@@ -192,7 +192,7 @@ func (s *searchTask) estimateCPUUsage() {
 		}
 		segIDs, err := s.QS.metaReplica.getSegmentIDsByVChannel(partitionIDs, channel, segmentTypeGrowing)
 		if err != nil {
-			log.Error("searchTask estimateCPUUsage", zap.Error(err))
+			log.Ctx(s.Ctx()).Error("searchTask estimateCPUUsage", zap.Error(err))
 		}
 		segmentNum = int64(len(segIDs))
 		if segmentNum <= 0 {
