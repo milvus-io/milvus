@@ -875,7 +875,6 @@ func (i *IndexCoord) watchNodeLoop() {
 					if err != nil {
 						log.Error("IndexCoord", zap.Any("Add IndexNode err", err))
 					}
-					log.Debug("IndexCoord", zap.Int("IndexNode number", len(i.nodeManager.nodeClients)))
 				}()
 				i.metricsCacheManager.InvalidateSystemInfoMetrics()
 			case sessionutil.SessionDelEvent:

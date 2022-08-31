@@ -55,7 +55,6 @@ func NewNodeManager(ctx context.Context) *NodeManager {
 // setClient sets IndexNode client to node manager.
 func (nm *NodeManager) setClient(nodeID UniqueID, client types.IndexNode) {
 	log.Debug("IndexCoord NodeManager setClient", zap.Int64("nodeID", nodeID))
-	defer log.Debug("IndexNode NodeManager setClient success", zap.Any("nodeID", nodeID))
 	item := &PQItem{
 		key:      nodeID,
 		priority: 0,
@@ -64,6 +63,7 @@ func (nm *NodeManager) setClient(nodeID UniqueID, client types.IndexNode) {
 	}
 	nm.lock.Lock()
 	nm.nodeClients[nodeID] = client
+	log.Debug("IndexNode NodeManager setClient success", zap.Int64("nodeID", nodeID), zap.Int("IndexNode num", len(nm.nodeClients)))
 	nm.lock.Unlock()
 	nm.pq.Push(item)
 }
