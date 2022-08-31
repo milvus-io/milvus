@@ -173,6 +173,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 			ufInfo := w.req.GetSegmentInfos()[ufInfoID]
 			if ufInfo == nil {
 				log.Warn("an unflushed segment is not found in segment infos", zap.Int64("segment ID", ufInfoID))
+				continue
 			}
 			if len(ufInfo.GetBinlogs()) > 0 {
 				unFlushedSegments = append(unFlushedSegments, &queryPb.SegmentLoadInfo{
