@@ -75,14 +75,6 @@ VecIndexCreator::parse_impl(const std::string& serialized_params_str, knowhere::
     /************************** PQ Params *****************************/
     check_parameter<int>(conf, knowhere::indexparam::PQ_M, stoi_closure, std::nullopt);
 
-#ifdef MILVUS_SUPPORT_NSG
-    /************************** NSG Parameter **************************/
-    check_parameter<int>(conf, knowhere::indexparam::KNNG, stoi_closure, std::nullopt);
-    check_parameter<int>(conf, knowhere::indexparam::SEARCH_LENGTH, stoi_closure, std::nullopt);
-    check_parameter<int>(conf, knowhere::indexparam::OUT_DEGREE, stoi_closure, std::nullopt);
-    check_parameter<int>(conf, knowhere::indexparam::CANDIDATE, stoi_closure, std::nullopt);
-#endif
-
     /************************** HNSW Params *****************************/
     check_parameter<int>(conf, knowhere::indexparam::EFCONSTRUCTION, stoi_closure, std::nullopt);
     check_parameter<int>(conf, knowhere::indexparam::HNSW_M, stoi_closure, std::nullopt);
@@ -91,23 +83,6 @@ VecIndexCreator::parse_impl(const std::string& serialized_params_str, knowhere::
     /************************** Annoy Params *****************************/
     check_parameter<int>(conf, knowhere::indexparam::N_TREES, stoi_closure, std::nullopt);
     check_parameter<int>(conf, knowhere::indexparam::SEARCH_K, stoi_closure, std::nullopt);
-
-#ifdef MILVUS_SUPPORT_NGT
-    /************************** NGT Params *****************************/
-    check_parameter<int>(conf, knowhere::indexparam::EDGE_SIZE, stoi_closure, std::nullopt);
-
-    /************************** NGT Search Params *****************************/
-    check_parameter<float>(conf, knowhere::indexparam::EPSILON, stof_closure, std::nullopt);
-    check_parameter<int>(conf, knowhere::indexparam::MAX_SEARCH_EDGES, stoi_closure, std::nullopt);
-
-    /************************** NGT_PANNG Params *****************************/
-    check_parameter<int>(conf, knowhere::indexparam::FORCEDLY_PRUNED_EDGE_SIZE, stoi_closure, std::nullopt);
-    check_parameter<int>(conf, knowhere::indexparam::SELECTIVELY_PRUNED_EDGE_SIZE, stoi_closure, std::nullopt);
-
-    /************************** NGT_ONNG Params *****************************/
-    check_parameter<int>(conf, knowhere::indexparam::OUTGOING_EDGE_SIZE, stoi_closure, std::nullopt);
-    check_parameter<int>(conf, knowhere::indexparam::INCOMING_EDGE_SIZE, stoi_closure, std::nullopt);
-#endif
 }
 
 void

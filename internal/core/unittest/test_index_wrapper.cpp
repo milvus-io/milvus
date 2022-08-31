@@ -48,22 +48,8 @@ class IndexWrapperTest : public ::testing::TestWithParam<Param> {
             {knowhere::IndexEnum::INDEX_FAISS_IVFSQ8, false},
             {knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT, true},
             {knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP, true},
-#ifdef MILVUS_SUPPORT_SPTAG
-            {knowhere::IndexEnum::INDEX_SPTAG_KDT_RNT, false},
-            {knowhere::IndexEnum::INDEX_SPTAG_BKT_RNT, false},
-#endif
             {knowhere::IndexEnum::INDEX_HNSW, false},
             {knowhere::IndexEnum::INDEX_ANNOY, false},
-            {knowhere::IndexEnum::INDEX_RHNSWFlat, false},
-            {knowhere::IndexEnum::INDEX_RHNSWPQ, false},
-            {knowhere::IndexEnum::INDEX_RHNSWSQ, false},
-#ifdef MILVUS_SUPPORT_NGT
-            {knowhere::IndexEnum::INDEX_NGTPANNG, false},
-            {knowhere::IndexEnum::INDEX_NGTONNG, false},
-#endif
-#ifdef MILVUS_SUPPORT_NSG
-            {knowhere::IndexEnum::INDEX_NSG, false},
-#endif
         };
 
         is_binary = is_binary_map[index_type];
@@ -159,28 +145,6 @@ TEST(IVFFLATNM, Query) {
     ASSERT_TRUE(stats != nullptr);
     index->ClearStatistics();
 }
-
-#ifdef MILVUS_SUPPORT_NSG
-TEST(NSG, Query) {
-    auto index_type = knowhere::IndexEnum::INDEX_NSG;
-    auto metric_type = knowhere::metric::L2;
-    auto conf = generate_conf(index_type, metric_type);
-    auto index = knowhere::VecIndexFactory::GetInstance().CreateVecIndex(index_type);
-    auto dataset = GenDataset(NB, metric_type, false);
-    auto xb_data = dataset.get_col<float>(0);
-    auto xb_dataset = knowhere::GenDataset(NB, DIM, xb_data.data());
-    index->BuildAll(xb_dataset, conf);
-    auto bs = index->Serialize(conf);
-    auto bptr = std::make_shared<knowhere::Binary>();
-    bptr->data = std::shared_ptr<uint8_t[]>((uint8_t*)xb_data.data(), [&](uint8_t*) {});
-    bptr->size = DIM * NB * sizeof(float);
-    bs.Append(RAW_DATA, bptr);
-    index->Load(bs);
-    auto xq_data = dataset.get_col<float>(0);
-    auto xq_dataset = knowhere::GenDataset(NQ, DIM, xq_data.data());
-    auto result = index->Query(xq_dataset, conf, nullptr);
-}
-#endif
 
 TEST(BINFLAT, Build) {
     auto index_type = knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT;
@@ -394,23 +358,9 @@ INSTANTIATE_TEST_CASE_P(
                       std::pair(knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT, knowhere::metric::JACCARD),
                       std::pair(knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT, knowhere::metric::TANIMOTO),
                       std::pair(knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP, knowhere::metric::JACCARD),
-#ifdef MILVUS_SUPPORT_SPTAG
-                      std::pair(knowhere::IndexEnum::INDEX_SPTAG_KDT_RNT, knowhere::metric::L2),
-                      std::pair(knowhere::IndexEnum::INDEX_SPTAG_BKT_RNT, knowhere::metric::L2),
-#endif
                       std::pair(knowhere::IndexEnum::INDEX_HNSW, knowhere::metric::L2),
-                      std::pair(knowhere::IndexEnum::INDEX_ANNOY, knowhere::metric::L2),
-                      std::pair(knowhere::IndexEnum::INDEX_RHNSWFlat, knowhere::metric::L2),
-                      std::pair(knowhere::IndexEnum::INDEX_RHNSWPQ, knowhere::metric::L2),
-                      std::pair(knowhere::IndexEnum::INDEX_RHNSWSQ, knowhere::metric::L2)
-#ifdef MILVUS_SUPPORT_NGT
-                          std::pair(knowhere::IndexEnum::INDEX_NGTPANNG, knowhere::metric::L2),
-                      std::pair(knowhere::IndexEnum::INDEX_NGTONNG, knowhere::metric::L2),
-#endif
-#ifdef MILVUS_SUPPORT_NSG
-                      std::pair(knowhere::IndexEnum::INDEX_NSG, knowhere::metric::L2)
-#endif
-                          ));
+                      std::pair(knowhere::IndexEnum::INDEX_ANNOY, knowhere::metric::L2)
+                      ));
 
 TEST_P(IndexWrapperTest, Constructor) {
     auto index =

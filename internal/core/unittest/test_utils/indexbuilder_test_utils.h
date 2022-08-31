@@ -109,36 +109,6 @@ generate_conf(const knowhere::IndexType& index_type, const knowhere::MetricType&
             {knowhere::meta::DIM, DIM},
             {knowhere::meta::TOPK, K},
         };
-#ifdef MILVUS_SUPPORT_NSG
-    } else if (index_type == knowhere::IndexEnum::INDEX_NSG) {
-        return knowhere::Config{
-            {knowhere::meta::METRIC_TYPE, metric_type},
-            {knowhere::meta::DIM, DIM},
-            {knowhere::meta::TOPK, K},
-            {knowhere::indexparam::NLIST, 163},
-            {knowhere::indexparam::NPROBE, 8},
-            {knowhere::indexparam::KNNG, 20},
-            {knowhere::indexparam::SEARCH_LENGTH, 40},
-            {knowhere::indexparam::OUT_DEGREE, 30},
-            {knowhere::indexparam::CANDIDATE, 100},
-        };
-#endif
-#ifdef MILVUS_SUPPORT_SPTAG
-    } else if (index_type == knowhere::IndexEnum::INDEX_SPTAG_KDT_RNT) {
-        return knowhere::Config{
-            {knowhere::meta::SLICE_SIZE, knowhere::index_file_slice_size},
-            {knowhere::meta::METRIC_TYPE, metric_type},
-            {knowhere::meta::DIM, DIM},
-            {knowhere::meta::TOPK, 10},
-        };
-    } else if (index_type == knowhere::IndexEnum::INDEX_SPTAG_BKT_RNT) {
-        return knowhere::Config{
-            {knowhere::meta::SLICE_SIZE, knowhere::index_file_slice_size},
-            {knowhere::meta::METRIC_TYPE, metric_type},
-            {knowhere::meta::DIM, DIM},
-            {knowhere::meta::TOPK, 10},
-        };
-#endif
     } else if (index_type == knowhere::IndexEnum::INDEX_HNSW) {
         return knowhere::Config{
             {knowhere::meta::SLICE_SIZE, knowhere::index_file_slice_size},
@@ -158,63 +128,6 @@ generate_conf(const knowhere::IndexType& index_type, const knowhere::MetricType&
             {knowhere::indexparam::N_TREES, 4},
             {knowhere::indexparam::SEARCH_K, 100},
         };
-    } else if (index_type == knowhere::IndexEnum::INDEX_RHNSWFlat) {
-        return knowhere::Config{
-            {knowhere::meta::SLICE_SIZE, knowhere::index_file_slice_size},
-            {knowhere::meta::METRIC_TYPE, metric_type},
-            {knowhere::meta::DIM, DIM},
-            {knowhere::meta::TOPK, K},
-            {knowhere::indexparam::HNSW_M, 16},
-            {knowhere::indexparam::EFCONSTRUCTION, 200},
-            {knowhere::indexparam::EF, 200},
-        };
-    } else if (index_type == knowhere::IndexEnum::INDEX_RHNSWPQ) {
-        return knowhere::Config{
-            {knowhere::meta::SLICE_SIZE, knowhere::index_file_slice_size},
-            {knowhere::meta::METRIC_TYPE, metric_type},
-            {knowhere::meta::DIM, DIM},
-            {knowhere::meta::TOPK, K},
-            {knowhere::indexparam::HNSW_M, 16},
-            {knowhere::indexparam::EFCONSTRUCTION, 200},
-            {knowhere::indexparam::EF, 200},
-            {knowhere::indexparam::PQ_M, 8},
-        };
-    } else if (index_type == knowhere::IndexEnum::INDEX_RHNSWSQ) {
-        return knowhere::Config{
-            {knowhere::meta::SLICE_SIZE, knowhere::index_file_slice_size},
-            {knowhere::meta::METRIC_TYPE, metric_type},
-            {knowhere::meta::DIM, DIM},
-            {knowhere::meta::TOPK, K},
-            {knowhere::indexparam::HNSW_M, 16},
-            {knowhere::indexparam::EFCONSTRUCTION, 200},
-            {knowhere::indexparam::EF, 200},
-        };
-#ifdef MILVUS_SUPPORT_NGT
-    } else if (index_type == knowhere::IndexEnum::INDEX_NGTPANNG) {
-        return knowhere::Config{
-            {knowhere::meta::SLICE_SIZE, knowhere::index_file_slice_size},
-            {knowhere::meta::METRIC_TYPE, metric_type},
-            {knowhere::meta::DIM, DIM},
-            {knowhere::meta::TOPK, K},
-            {knowhere::indexparam::EDGE_SIZE, 10},
-            {knowhere::indexparam::EPSILON, 0.1},
-            {knowhere::indexparam::MAX_SEARCH_EDGES, 50},
-            {knowhere::indexparam::FORCEDLY_PRUNED_EDGE_SIZE, 60},
-            {knowhere::indexparam::SELECTIVELY_PRUNED_EDGE_SIZE, 30},
-        };
-    } else if (index_type == knowhere::IndexEnum::INDEX_NGTONNG) {
-        return knowhere::Config{
-            {knowhere::meta::SLICE_SIZE, knowhere::index_file_slice_size},
-            {knowhere::meta::METRIC_TYPE, metric_type},
-            {knowhere::meta::DIM, DIM},
-            {knowhere::meta::TOPK, K},
-            {knowhere::indexparam::EDGE_SIZE, 20},
-            {knowhere::indexparam::EPSILON, 0.1},
-            {knowhere::indexparam::MAX_SEARCH_EDGES, 50},
-            {knowhere::indexparam::OUTGOING_EDGE_SIZE, 5},
-            {knowhere::indexparam::INCOMING_EDGE_SIZE, 40},
-        };
-#endif
     }
     return knowhere::Config();
 }

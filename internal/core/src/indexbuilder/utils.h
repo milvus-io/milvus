@@ -32,9 +32,6 @@ BIN_List();
 std::vector<knowhere::IndexType>
 Need_ID_List();
 
-std::vector<knowhere::IndexType>
-Need_BuildAll_list();
-
 std::vector<std::tuple<knowhere::IndexType, knowhere::MetricType>>
 unsupported_index_combinations();
 
@@ -47,9 +44,6 @@ is_in_bin_list(const knowhere::IndexType& index_type);
 
 bool
 is_in_nm_list(const knowhere::IndexType& index_type);
-
-bool
-is_in_need_build_all_list(const knowhere::IndexType& index_type);
 
 bool
 is_in_need_id_list(const knowhere::IndexType& index_type);

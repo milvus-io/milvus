@@ -16,15 +16,11 @@ INDEX_MAP = {
     "flat": "FLAT",
     "ivf_flat": "IVF_FLAT",
     "ivf_sq8": "IVF_SQ8",
-    "nsg": "NSG",
-    "ivf_sq8h": "IVF_SQ8_HYBRID",
     "ivf_pq": "IVF_PQ",
     "hnsw": "HNSW",
     "annoy": "ANNOY",
     "bin_flat": "BIN_FLAT",
     "bin_ivf_flat": "BIN_IVF_FLAT",
-    "rhnsw_pq": "RHNSW_PQ",
-    "rhnsw_sq": "RHNSW_SQ"
 }
 epsilon = 0.1
 DEFAULT_WARM_QUERY_TOPK = 1

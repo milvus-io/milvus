@@ -187,17 +187,8 @@ ValidateVectorIndexType(std::string& index_type, bool is_binary) {
         knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
         knowhere::IndexEnum::INDEX_FAISS_IVFPQ,
         knowhere::IndexEnum::INDEX_FAISS_IVFSQ8,
-#ifdef MILVUS_GPU_VERSION
-        knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H,
-#endif
-        knowhere::IndexEnum::INDEX_NSG,
         knowhere::IndexEnum::INDEX_HNSW,
         knowhere::IndexEnum::INDEX_ANNOY,
-        knowhere::IndexEnum::INDEX_RHNSWFlat,
-        knowhere::IndexEnum::INDEX_RHNSWPQ,
-        knowhere::IndexEnum::INDEX_RHNSWSQ,
-        knowhere::IndexEnum::INDEX_NGTPANNG,
-        knowhere::IndexEnum::INDEX_NGTONNG,
     };
 
     static std::set<std::string> s_binary_index_types = {
@@ -264,7 +255,6 @@ ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const s
         return Status::OK();
     } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT ||
                index_type == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8 ||
-               index_type == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8H ||
                index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT) {
         auto status = CheckParameterRange(index_params, knowhere::IndexParams::nlist, 1, 65536);
         if (!status.ok()) {
@@ -311,26 +301,7 @@ ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const s
             LOG_SERVER_ERROR_ << msg;
             return Status(SERVER_INVALID_ARGUMENT, msg);
         }*/
-    } else if (index_type == knowhere::IndexEnum::INDEX_NSG) {
-        auto status = CheckParameterRange(index_params, knowhere::IndexParams::search_length, 10, 300);
-        if (!status.ok()) {
-            return status;
-        }
-        status = CheckParameterRange(index_params, knowhere::IndexParams::out_degree, 5, 300);
-        if (!status.ok()) {
-            return status;
-        }
-        status = CheckParameterRange(index_params, knowhere::IndexParams::candidate, 50, 1000);
-        if (!status.ok()) {
-            return status;
-        }
-        status = CheckParameterRange(index_params, knowhere::IndexParams::knng, 5, 300);
-        if (!status.ok()) {
-            return status;
-        }
-    } else if (index_type == knowhere::IndexEnum::INDEX_HNSW || index_type == knowhere::IndexEnum::INDEX_RHNSWFlat ||
-               index_type == knowhere::IndexEnum::INDEX_RHNSWPQ || index_type == knowhere::IndexEnum::INDEX_RHNSWSQ ||
-               index_type == knowhere::IndexEnum::INDEX_RHNSWFlat) {
+    } else if (index_type == knowhere::IndexEnum::INDEX_HNSW) {
         auto status = CheckParameterRange(index_params, knowhere::IndexParams::M, 4, 64);
         if (!status.ok()) {
             return status;
@@ -338,42 +309,6 @@ ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const s
         status = CheckParameterRange(index_params, knowhere::IndexParams::efConstruction, 8, 512);
         if (!status.ok()) {
             return status;
-        }
-
-        if (index_type == knowhere::IndexEnum::INDEX_RHNSWPQ) {
-            status = CheckParameterExistence(index_params, knowhere::IndexParams::PQM);
-            if (!status.ok()) {
-                return status;
-            }
-
-            // special check for 'PQM' parameter
-            int64_t pqm_value = index_params[knowhere::IndexParams::PQM];
-            if (!milvus::knowhere::IVFPQConfAdapter::GetValidCPUM(dimension, pqm_value)) {
-                std::string msg = "Invalid m, dimension can't not be divided by m ";
-                LOG_SERVER_ERROR_ << msg;
-                return Status(SERVER_INVALID_ARGUMENT, msg);
-            }
-            /*int64_t pqm_value = index_params[knowhere::IndexParams::PQM];
-            if (resset.empty()) {
-                std::string msg = "Invalid collection dimension, unable to get reasonable values for 'PQM'";
-                LOG_SERVER_ERROR_ << msg;
-                return Status(SERVER_INVALID_COLLECTION_DIMENSION, msg);
-            }
-
-            auto iter = std::find(std::begin(resset), std::end(resset), pqm_value);
-            if (iter == std::end(resset)) {
-                std::string msg =
-                    "Invalid " + std::string(knowhere::IndexParams::PQM) + ", must be one of the following values: ";
-                for (size_t i = 0; i < resset.size(); i++) {
-                    if (i != 0) {
-                        msg += ",";
-                    }
-                    msg += std::to_string(resset[i]);
-                }
-
-                LOG_SERVER_ERROR_ << msg;
-                return Status(SERVER_INVALID_ARGUMENT, msg);
-            }*/
         }
     } else if (index_type == knowhere::IndexEnum::INDEX_ANNOY) {
         auto status = CheckParameterRange(index_params, knowhere::IndexParams::n_trees, 1, 1024);
