@@ -2604,7 +2604,7 @@ func TestProxy(t *testing.T) {
 	t.Run("InvalidateCredCache fail, unhealthy", func(t *testing.T) {
 		defer wg.Done()
 		resp, err := proxy.InvalidateCredentialCache(ctx, &proxypb.InvalidateCredCacheRequest{Username: "xxx"})
-		assert.Error(t, err)
+		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
@@ -2612,7 +2612,7 @@ func TestProxy(t *testing.T) {
 	t.Run("UpdateCredentialCache fail, unhealthy", func(t *testing.T) {
 		defer wg.Done()
 		resp, err := proxy.UpdateCredentialCache(ctx, &proxypb.UpdateCredCacheRequest{Username: "xxx", Password: "xxx"})
-		assert.Error(t, err)
+		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
@@ -2620,7 +2620,7 @@ func TestProxy(t *testing.T) {
 	t.Run("CreateCredential fail, unhealthy", func(t *testing.T) {
 		defer wg.Done()
 		resp, err := proxy.CreateCredential(ctx, &milvuspb.CreateCredentialRequest{Username: "xxx"})
-		assert.Error(t, err)
+		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
@@ -2628,7 +2628,7 @@ func TestProxy(t *testing.T) {
 	t.Run("UpdateCredential fail, unhealthy", func(t *testing.T) {
 		defer wg.Done()
 		resp, err := proxy.UpdateCredential(ctx, &milvuspb.UpdateCredentialRequest{Username: "xxx"})
-		assert.Error(t, err)
+		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
@@ -2636,7 +2636,7 @@ func TestProxy(t *testing.T) {
 	t.Run("DeleteCredential fail, unhealthy", func(t *testing.T) {
 		defer wg.Done()
 		resp, err := proxy.DeleteCredential(ctx, &milvuspb.DeleteCredentialRequest{Username: "xxx"})
-		assert.Error(t, err)
+		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
@@ -2644,7 +2644,7 @@ func TestProxy(t *testing.T) {
 	t.Run("ListCredUsers fail, unhealthy", func(t *testing.T) {
 		defer wg.Done()
 		resp, err := proxy.ListCredUsers(ctx, &milvuspb.ListCredUsersRequest{})
-		assert.Error(t, err)
+		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
@@ -3274,10 +3274,10 @@ func testProxyRole(ctx context.Context, t *testing.T, proxy *Proxy) {
 	t.Run("Select Role", func(t *testing.T) {
 		defer wg.Done()
 
-		_, err := proxy.SelectRole(ctx, &milvuspb.SelectRoleRequest{Role: &milvuspb.RoleEntity{Name: "  "}})
-		assert.Error(t, err)
+		resp, _ := proxy.SelectRole(ctx, &milvuspb.SelectRoleRequest{Role: &milvuspb.RoleEntity{Name: "  "}})
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 
-		resp, _ := proxy.SelectRole(ctx, &milvuspb.SelectRoleRequest{})
+		resp, _ = proxy.SelectRole(ctx, &milvuspb.SelectRoleRequest{})
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 		roleNum := len(resp.Results)
 
@@ -3436,8 +3436,8 @@ func testProxyPrivilege(ctx context.Context, t *testing.T, proxy *Proxy) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 
 		req.Entity.Role = &milvuspb.RoleEntity{Name: "admin"}
-		_, err := proxy.OperatePrivilege(context.Background(), req)
-		assert.Error(t, err)
+		resp, _ = proxy.OperatePrivilege(context.Background(), req)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 
 		resp, _ = proxy.OperatePrivilege(ctx, req)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)

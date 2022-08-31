@@ -2480,8 +2480,9 @@ func (c *Core) CreateRole(ctx context.Context, in *milvuspb.CreateRoleRequest) (
 
 	err := c.MetaTable.CreateRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: entity.Name})
 	if err != nil {
-		logger.Error("fail to create role", zap.String("role_name", entity.Name), zap.Error(err))
-		return failStatus(commonpb.ErrorCode_CreateRoleFailure, "CreateCollection role failed: "+err.Error()), err
+		errMsg := "fail to create role"
+		log.Error(errMsg, zap.Any("in", in), zap.Error(err))
+		return failStatus(commonpb.ErrorCode_CreateRoleFailure, errMsg), nil
 	}
 
 	logger.Debug(method+" success", zap.String("role_name", entity.Name))
@@ -2509,8 +2510,9 @@ func (c *Core) DropRole(ctx context.Context, in *milvuspb.DropRoleRequest) (*com
 		return errorutil.UnhealthyStatus(code), errorutil.UnhealthyError()
 	}
 	if _, err := c.MetaTable.SelectRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: in.RoleName}, false); err != nil {
-		logger.Error("the role isn't existed", zap.String("role_name", in.RoleName), zap.Error(err))
-		return failStatus(commonpb.ErrorCode_DropRoleFailure, fmt.Sprintf("the role isn't existed, role name: %s", in.RoleName)), err
+		errMsg := "the role isn't existed"
+		log.Error(errMsg, zap.Any("in", in), zap.Error(err))
+		return failStatus(commonpb.ErrorCode_DropRoleFailure, errMsg), nil
 	}
 
 	grantEntities, err := c.MetaTable.SelectGrant(util.DefaultTenant, &milvuspb.GrantEntity{
@@ -2518,37 +2520,39 @@ func (c *Core) DropRole(ctx context.Context, in *milvuspb.DropRoleRequest) (*com
 	})
 	if len(grantEntities) != 0 {
 		errMsg := "fail to drop the role that it has privileges. Use REVOKE API to revoke privileges"
-		logger.Error(errMsg, zap.String("role_name", in.RoleName), zap.Error(err))
-		return failStatus(commonpb.ErrorCode_DropRoleFailure, errMsg), errors.New(errMsg)
+		log.Error(errMsg, zap.Any("in", in), zap.Error(err))
+		return failStatus(commonpb.ErrorCode_DropRoleFailure, errMsg), nil
 	}
 	roleResults, err := c.MetaTable.SelectRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: in.RoleName}, true)
 	if err != nil {
 		errMsg := "fail to select a role by role name"
-		logger.Error("fail to select a role by role name", zap.String("role_name", in.RoleName), zap.Error(err))
-		return failStatus(commonpb.ErrorCode_DropRoleFailure, errMsg), err
+		log.Error(errMsg, zap.Any("in", in), zap.Error(err))
+		return failStatus(commonpb.ErrorCode_DropRoleFailure, errMsg), nil
 	}
 	logger.Debug("role to user info", zap.Int("counter", len(roleResults)))
 	for _, roleResult := range roleResults {
 		for index, userEntity := range roleResult.Users {
-			if err = c.MetaTable.OperateUserRole(util.DefaultTenant, &milvuspb.UserEntity{Name: userEntity.Name}, &milvuspb.RoleEntity{Name: roleResult.Role.Name}, milvuspb.OperateUserRoleType_RemoveUserFromRole); err != nil {
+			if err = c.MetaTable.OperateUserRole(util.DefaultTenant,
+				&milvuspb.UserEntity{Name: userEntity.Name},
+				&milvuspb.RoleEntity{Name: roleResult.Role.Name}, milvuspb.OperateUserRoleType_RemoveUserFromRole); err != nil {
 				if common.IsIgnorableError(err) {
 					continue
 				}
 				errMsg := "fail to remove user from role"
-				logger.Error(errMsg, zap.String("role_name", roleResult.Role.Name), zap.String("username", userEntity.Name), zap.Int("current_index", index), zap.Error(err))
-				return failStatus(commonpb.ErrorCode_OperateUserRoleFailure, errMsg), err
+				log.Error(errMsg, zap.Any("in", in), zap.String("role_name", roleResult.Role.Name), zap.String("username", userEntity.Name), zap.Int("current_index", index), zap.Error(err))
+				return failStatus(commonpb.ErrorCode_OperateUserRoleFailure, errMsg), nil
 			}
 		}
 	}
 	if err = c.MetaTable.DropGrant(util.DefaultTenant, &milvuspb.RoleEntity{Name: in.RoleName}); err != nil {
 		errMsg := "fail to drop the grant"
-		logger.Error(errMsg, zap.String("role_name", in.RoleName), zap.Error(err))
-		return failStatus(commonpb.ErrorCode_DropRoleFailure, errMsg), err
+		log.Error(errMsg, zap.Any("in", in), zap.Error(err))
+		return failStatus(commonpb.ErrorCode_DropRoleFailure, errMsg), nil
 	}
 	if err = c.MetaTable.DropRole(util.DefaultTenant, in.RoleName); err != nil {
 		errMsg := "fail to drop the role"
-		logger.Error(errMsg, zap.String("role_name", in.RoleName), zap.Error(err))
-		return failStatus(commonpb.ErrorCode_DropRoleFailure, errMsg), err
+		log.Error(errMsg, zap.Any("in", in), zap.Error(err))
+		return failStatus(commonpb.ErrorCode_DropRoleFailure, errMsg), nil
 	}
 
 	logger.Debug(method+" success", zap.String("role_name", in.RoleName))
@@ -2576,20 +2580,20 @@ func (c *Core) OperateUserRole(ctx context.Context, in *milvuspb.OperateUserRole
 
 	if _, err := c.MetaTable.SelectRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: in.RoleName}, false); err != nil {
 		errMsg := "fail to check the role name"
-		logger.Error(errMsg, zap.String("role_name", in.RoleName), zap.Error(err))
-		return failStatus(commonpb.ErrorCode_OperateUserRoleFailure, errMsg), err
+		log.Error(errMsg, zap.Any("in", in), zap.Error(err))
+		return failStatus(commonpb.ErrorCode_OperateUserRoleFailure, errMsg), nil
 	}
 	if _, err := c.MetaTable.SelectUser(util.DefaultTenant, &milvuspb.UserEntity{Name: in.Username}, false); err != nil {
 		errMsg := "fail to check the username"
-		logger.Error(errMsg, zap.String("username", in.Username), zap.Error(err))
-		return failStatus(commonpb.ErrorCode_OperateUserRoleFailure, errMsg), err
+		log.Error(errMsg, zap.Any("in", in), zap.Error(err))
+		return failStatus(commonpb.ErrorCode_OperateUserRoleFailure, errMsg), nil
 	}
 	updateCache := true
 	if err := c.MetaTable.OperateUserRole(util.DefaultTenant, &milvuspb.UserEntity{Name: in.Username}, &milvuspb.RoleEntity{Name: in.RoleName}, in.Type); err != nil {
 		if !common.IsIgnorableError(err) {
 			errMsg := "fail to operate user to role"
-			logger.Error(errMsg, zap.String("role_name", in.RoleName), zap.String("username", in.Username), zap.Error(err))
-			return failStatus(commonpb.ErrorCode_OperateUserRoleFailure, errMsg), err
+			log.Error(errMsg, zap.Any("in", in), zap.Error(err))
+			return failStatus(commonpb.ErrorCode_OperateUserRoleFailure, errMsg), nil
 		}
 		updateCache = false
 	}
@@ -2603,14 +2607,16 @@ func (c *Core) OperateUserRole(ctx context.Context, in *milvuspb.OperateUserRole
 			opType = int32(typeutil.CacheRemoveUserFromRole)
 		default:
 			errMsg := "invalid operate type for the OperateUserRole api"
-			logger.Error(errMsg, zap.Any("op_type", in.Type))
-			return failStatus(commonpb.ErrorCode_OperateUserRoleFailure, errMsg), errors.New(errMsg)
+			log.Error(errMsg, zap.Any("in", in))
+			return failStatus(commonpb.ErrorCode_OperateUserRoleFailure, errMsg), nil
 		}
 		if err := c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
 			OpType: opType,
 			OpKey:  funcutil.EncodeUserRoleCache(in.Username, in.RoleName),
 		}); err != nil {
-			return failStatus(commonpb.ErrorCode_OperateUserRoleFailure, err.Error()), err
+			errMsg := "fail to refresh policy info cache"
+			log.Error(errMsg, zap.Any("in", in), zap.Error(err))
+			return failStatus(commonpb.ErrorCode_OperateUserRoleFailure, errMsg), nil
 		}
 	}
 
@@ -2636,25 +2642,25 @@ func (c *Core) SelectRole(ctx context.Context, in *milvuspb.SelectRoleRequest) (
 
 	if in.Role != nil {
 		if _, err := c.MetaTable.SelectRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: in.Role.Name}, false); err != nil {
-			errMsg := "fail to select the role to check the role name"
-			logger.Error(errMsg, zap.String("role_name", in.Role.Name), zap.Error(err))
 			if common.IsKeyNotExistError(err) {
 				return &milvuspb.SelectRoleResponse{
 					Status: succStatus(),
 				}, nil
 			}
+			errMsg := "fail to select the role to check the role name"
+			log.Error(errMsg, zap.Any("in", in), zap.Error(err))
 			return &milvuspb.SelectRoleResponse{
 				Status: failStatus(commonpb.ErrorCode_SelectRoleFailure, errMsg),
-			}, err
+			}, nil
 		}
 	}
 	roleResults, err := c.MetaTable.SelectRole(util.DefaultTenant, in.Role, in.IncludeUserInfo)
 	if err != nil {
 		errMsg := "fail to select the role"
-		logger.Error(errMsg, zap.Error(err))
+		log.Error(errMsg, zap.Any("in", in), zap.Error(err))
 		return &milvuspb.SelectRoleResponse{
 			Status: failStatus(commonpb.ErrorCode_SelectRoleFailure, errMsg),
-		}, err
+		}, nil
 	}
 
 	logger.Debug(method + " success")
@@ -2682,25 +2688,25 @@ func (c *Core) SelectUser(ctx context.Context, in *milvuspb.SelectUserRequest) (
 
 	if in.User != nil {
 		if _, err := c.MetaTable.SelectUser(util.DefaultTenant, &milvuspb.UserEntity{Name: in.User.Name}, false); err != nil {
-			errMsg := "fail to select the user to check the username"
-			logger.Error(errMsg, zap.String("username", in.User.Name), zap.Error(err))
 			if common.IsKeyNotExistError(err) {
 				return &milvuspb.SelectUserResponse{
 					Status: succStatus(),
 				}, nil
 			}
+			errMsg := "fail to select the user to check the username"
+			log.Error(errMsg, zap.Any("in", in), zap.Error(err))
 			return &milvuspb.SelectUserResponse{
 				Status: failStatus(commonpb.ErrorCode_SelectUserFailure, errMsg),
-			}, err
+			}, nil
 		}
 	}
 	userResults, err := c.MetaTable.SelectUser(util.DefaultTenant, in.User, in.IncludeRoleInfo)
 	if err != nil {
 		errMsg := "fail to select the user"
-		log.Error(errMsg, zap.Error(err))
+		log.Error(errMsg, zap.Any("in", in), zap.Error(err))
 		return &milvuspb.SelectUserResponse{
 			Status: failStatus(commonpb.ErrorCode_SelectUserFailure, errMsg),
-		}, err
+		}, nil
 	}
 
 	logger.Debug(method + " success")
@@ -2714,10 +2720,10 @@ func (c *Core) SelectUser(ctx context.Context, in *milvuspb.SelectUserRequest) (
 
 func (c *Core) isValidRole(entity *milvuspb.RoleEntity) error {
 	if entity == nil {
-		return fmt.Errorf("the role entity is nil")
+		return errors.New("the role entity is nil")
 	}
 	if entity.Name == "" {
-		return fmt.Errorf("the name in the role entity is empty")
+		return errors.New("the name in the role entity is empty")
 	}
 	if _, err := c.MetaTable.SelectRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: entity.Name}, false); err != nil {
 		return err
@@ -2727,46 +2733,46 @@ func (c *Core) isValidRole(entity *milvuspb.RoleEntity) error {
 
 func (c *Core) isValidObject(entity *milvuspb.ObjectEntity) error {
 	if entity == nil {
-		return fmt.Errorf("the object entity is nil")
+		return errors.New("the object entity is nil")
 	}
 	if _, ok := commonpb.ObjectType_value[entity.Name]; !ok {
-		return fmt.Errorf("the object type in the object entity is invalid, current value: %s", entity.Name)
+		return fmt.Errorf("the object type in the object entity[name: %s] is invalid", entity.Name)
 	}
 	return nil
 }
 
 func (c *Core) isValidGrantor(entity *milvuspb.GrantorEntity, object string) error {
 	if entity == nil {
-		return fmt.Errorf("the grantor entity is nil")
+		return errors.New("the grantor entity is nil")
 	}
 	if entity.User == nil {
-		return fmt.Errorf("the user entity in the grantor entity is nil")
+		return errors.New("the user entity in the grantor entity is nil")
 	}
 	if entity.User.Name == "" {
-		return fmt.Errorf("the name in the user entity of the grantor entity is empty")
+		return errors.New("the name in the user entity of the grantor entity is empty")
 	}
-	if _, err := c.MetaTable.SelectUser(util.DefaultTenant, &milvuspb.UserEntity{Name: entity.GetUser().Name}, false); err != nil {
+	if _, err := c.MetaTable.SelectUser(util.DefaultTenant, &milvuspb.UserEntity{Name: entity.User.Name}, false); err != nil {
 		return err
 	}
 	if entity.Privilege == nil {
-		return fmt.Errorf("the privilege entity in the grantor entity is nil")
+		return errors.New("the privilege entity in the grantor entity is nil")
 	}
 	if util.IsAnyWord(entity.Privilege.Name) {
 		return nil
 	}
 	if privilegeName := util.PrivilegeNameForMetastore(entity.Privilege.Name); privilegeName == "" {
-		return fmt.Errorf("the privilege name in the privilege entity is invalid, current value: %s", entity.Privilege.Name)
+		return fmt.Errorf("the privilege name[%s] in the privilege entity is invalid", entity.Privilege.Name)
 	}
 	privileges, ok := util.ObjectPrivileges[object]
 	if !ok {
-		return fmt.Errorf("the object type is invalid, current value: %s", object)
+		return fmt.Errorf("the object type[%s] is invalid", object)
 	}
 	for _, privilege := range privileges {
 		if privilege == entity.Privilege.Name {
 			return nil
 		}
 	}
-	return fmt.Errorf("the privilege name is invalid, current value: %s", entity.Privilege.Name)
+	return fmt.Errorf("the privilege name[%s] is invalid", entity.Privilege.Name)
 }
 
 // OperatePrivilege operate the privilege, including grant and revoke
@@ -2787,20 +2793,25 @@ func (c *Core) OperatePrivilege(ctx context.Context, in *milvuspb.OperatePrivile
 	}
 	if in.Type != milvuspb.OperatePrivilegeType_Grant && in.Type != milvuspb.OperatePrivilegeType_Revoke {
 		errMsg := fmt.Sprintf("invalid operate privilege type, current type: %s, valid value: [%s, %s]", in.Type, milvuspb.OperatePrivilegeType_Grant, milvuspb.OperatePrivilegeType_Revoke)
-		return failStatus(commonpb.ErrorCode_OperatePrivilegeFailure, errMsg), errors.New(errMsg)
+		log.Error(errMsg, zap.Any("in", in))
+		return failStatus(commonpb.ErrorCode_OperatePrivilegeFailure, errMsg), nil
 	}
 	if in.Entity == nil {
 		errMsg := "the grant entity in the request is nil"
-		return failStatus(commonpb.ErrorCode_OperatePrivilegeFailure, errMsg), errors.New(errMsg)
+		log.Error(errMsg, zap.Any("in", in))
+		return failStatus(commonpb.ErrorCode_OperatePrivilegeFailure, errMsg), nil
 	}
 	if err := c.isValidObject(in.Entity.Object); err != nil {
-		return failStatus(commonpb.ErrorCode_OperatePrivilegeFailure, err.Error()), err
+		log.Error("", zap.Error(err))
+		return failStatus(commonpb.ErrorCode_OperatePrivilegeFailure, err.Error()), nil
 	}
 	if err := c.isValidRole(in.Entity.Role); err != nil {
-		return failStatus(commonpb.ErrorCode_OperatePrivilegeFailure, err.Error()), err
+		log.Error("", zap.Error(err))
+		return failStatus(commonpb.ErrorCode_OperatePrivilegeFailure, err.Error()), nil
 	}
 	if err := c.isValidGrantor(in.Entity.Grantor, in.Entity.Object.Name); err != nil {
-		return failStatus(commonpb.ErrorCode_OperatePrivilegeFailure, err.Error()), err
+		log.Error("", zap.Error(err))
+		return failStatus(commonpb.ErrorCode_OperatePrivilegeFailure, err.Error()), nil
 	}
 
 	logger.Debug("before PrivilegeNameForMetastore", zap.String("privilege", in.Entity.Grantor.Privilege.Name))
@@ -2815,8 +2826,8 @@ func (c *Core) OperatePrivilege(ctx context.Context, in *milvuspb.OperatePrivile
 	if err := c.MetaTable.OperatePrivilege(util.DefaultTenant, in.Entity, in.Type); err != nil {
 		if !common.IsIgnorableError(err) {
 			errMsg := "fail to operate the privilege"
-			logger.Error(errMsg, zap.Error(err))
-			return failStatus(commonpb.ErrorCode_OperatePrivilegeFailure, errMsg), err
+			log.Error(errMsg, zap.Any("in", in), zap.Error(err))
+			return failStatus(commonpb.ErrorCode_OperatePrivilegeFailure, errMsg), nil
 		}
 		updateCache = false
 	}
@@ -2830,14 +2841,16 @@ func (c *Core) OperatePrivilege(ctx context.Context, in *milvuspb.OperatePrivile
 			opType = int32(typeutil.CacheRevokePrivilege)
 		default:
 			errMsg := "invalid operate type for the OperatePrivilege api"
-			logger.Error(errMsg, zap.Any("op_type", in.Type))
-			return failStatus(commonpb.ErrorCode_OperatePrivilegeFailure, errMsg), errors.New(errMsg)
+			log.Error(errMsg, zap.Any("in", in))
+			return failStatus(commonpb.ErrorCode_OperatePrivilegeFailure, errMsg), nil
 		}
 		if err := c.proxyClientManager.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{
 			OpType: opType,
 			OpKey:  funcutil.PolicyForPrivilege(in.Entity.Role.Name, in.Entity.Object.Name, in.Entity.ObjectName, in.Entity.Grantor.Privilege.Name),
 		}); err != nil {
-			return failStatus(commonpb.ErrorCode_OperatePrivilegeFailure, err.Error()), err
+			errMsg := "fail to refresh policy info cache"
+			log.Error(errMsg, zap.Any("in", in), zap.Error(err))
+			return failStatus(commonpb.ErrorCode_OperatePrivilegeFailure, errMsg), nil
 		}
 	}
 
@@ -2865,20 +2878,23 @@ func (c *Core) SelectGrant(ctx context.Context, in *milvuspb.SelectGrantRequest)
 	}
 	if in.Entity == nil {
 		errMsg := "the grant entity in the request is nil"
+		log.Error(errMsg, zap.Any("in", in))
 		return &milvuspb.SelectGrantResponse{
 			Status: failStatus(commonpb.ErrorCode_SelectGrantFailure, errMsg),
-		}, errors.New(errMsg)
+		}, nil
 	}
 	if err := c.isValidRole(in.Entity.Role); err != nil {
+		log.Error("", zap.Any("in", in), zap.Error(err))
 		return &milvuspb.SelectGrantResponse{
 			Status: failStatus(commonpb.ErrorCode_SelectGrantFailure, err.Error()),
-		}, err
+		}, nil
 	}
 	if in.Entity.Object != nil {
 		if err := c.isValidObject(in.Entity.Object); err != nil {
+			log.Error("", zap.Any("in", in), zap.Error(err))
 			return &milvuspb.SelectGrantResponse{
 				Status: failStatus(commonpb.ErrorCode_SelectGrantFailure, err.Error()),
-			}, err
+			}, nil
 		}
 	}
 
@@ -2890,10 +2906,10 @@ func (c *Core) SelectGrant(ctx context.Context, in *milvuspb.SelectGrantRequest)
 	}
 	if err != nil {
 		errMsg := "fail to select the grant"
-		logger.Error(errMsg, zap.Error(err))
+		log.Error(errMsg, zap.Any("in", in), zap.Error(err))
 		return &milvuspb.SelectGrantResponse{
 			Status: failStatus(commonpb.ErrorCode_SelectGrantFailure, errMsg),
-		}, err
+		}, nil
 	}
 
 	logger.Debug(method + " success")
@@ -2919,15 +2935,19 @@ func (c *Core) ListPolicy(ctx context.Context, in *internalpb.ListPolicyRequest)
 
 	policies, err := c.MetaTable.ListPolicy(util.DefaultTenant)
 	if err != nil {
+		errMsg := "fail to list policy"
+		log.Error(errMsg, zap.Any("in", in), zap.Error(err))
 		return &internalpb.ListPolicyResponse{
-			Status: failStatus(commonpb.ErrorCode_ListPolicyFailure, "fail to list policy"),
-		}, err
+			Status: failStatus(commonpb.ErrorCode_ListPolicyFailure, errMsg),
+		}, nil
 	}
 	userRoles, err := c.MetaTable.ListUserRole(util.DefaultTenant)
 	if err != nil {
+		errMsg := "fail to list user-role"
+		log.Error(errMsg, zap.Any("in", in), zap.Error(err))
 		return &internalpb.ListPolicyResponse{
 			Status: failStatus(commonpb.ErrorCode_ListPolicyFailure, "fail to list user-role"),
-		}, err
+		}, nil
 	}
 
 	logger.Debug(method + " success")
