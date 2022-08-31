@@ -4,6 +4,9 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/milvus-io/milvus/internal/log"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 
@@ -44,4 +47,9 @@ func UnhealthyError() error {
 
 func PermissionDenyError() error {
 	return errors.New("permission deny")
+}
+
+func ReadableError(errMsg string, err error, fields ...zap.Field) error {
+	log.Error(errMsg, append(fields, zap.Error(err))...)
+	return errors.New(errMsg)
 }
