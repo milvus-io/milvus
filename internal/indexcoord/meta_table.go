@@ -435,10 +435,6 @@ func (mt *metaTable) IsExpire(buildID UniqueID) bool {
 }
 
 func (mt *metaTable) checkParams(fieldIndex *model.Index, req *indexpb.CreateIndexRequest) bool {
-	if fieldIndex.IsDeleted {
-		return false
-	}
-
 	if fieldIndex.IndexName != req.IndexName {
 		return false
 	}
@@ -491,6 +487,9 @@ func (mt *metaTable) HasSameReq(req *indexpb.CreateIndexRequest) (bool, UniqueID
 	defer mt.indexLock.RUnlock()
 
 	for _, fieldIndex := range mt.collectionIndexes[req.CollectionID] {
+		if fieldIndex.IsDeleted {
+			continue
+		}
 		if !mt.checkParams(fieldIndex, req) {
 			continue
 		}
