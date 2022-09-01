@@ -30,7 +30,7 @@ func UnmarshalIndexModel(indexInfo *indexpb.FieldIndex) *Index {
 		IndexName:    indexInfo.IndexInfo.GetIndexName(),
 		IsDeleted:    indexInfo.GetDeleted(),
 		CreateTime:   indexInfo.CreateTime,
-		TypeParams:   nil,
+		TypeParams:   indexInfo.IndexInfo.GetTypeParams(),
 		IndexParams:  indexInfo.IndexInfo.GetIndexParams(),
 	}
 }
@@ -106,6 +106,7 @@ func MarshalIndexModel(index *Index) *indexpb.FieldIndex {
 
 func CloneIndex(index *Index) *Index {
 	clonedIndex := &Index{
+		TenantID:     index.TenantID,
 		CollectionID: index.CollectionID,
 		FieldID:      index.FieldID,
 		IndexID:      index.IndexID,
