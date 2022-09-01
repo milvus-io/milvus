@@ -987,17 +987,17 @@ class TestNewIndexBase(TestcaseBase):
         """
         collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix))
         nums = 20
-        tmp_nb = 5000 
-        for i in range (nums) :
+        tmp_nb = 5000
+        for i in range(nums):
             df = cf.gen_default_dataframe_data(nb=tmp_nb, start=i * tmp_nb)
-            insert_res, _  = collection_w.insert(df)
-            assert collection_w.num_entities ==(i+1) * tmp_nb
+            insert_res, _ = collection_w.insert(df)
+            assert collection_w.num_entities == (i + 1) * tmp_nb
         collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
         collection_w.load()
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         search_res, _ = collection_w.search(vectors, default_search_field, default_search_params, default_limit)
         assert len(search_res[0]) == ct.default_limit
-            
+
 
 class TestNewIndexBinary(TestcaseBase):
 
@@ -1229,9 +1229,18 @@ class TestNewIndexAsync(TestcaseBase):
         collection_w.insert(data=data)
         res, _ = collection_w.create_index(ct.default_float_vec_field_name, default_index_params,
                                            index_name=ct.default_index_name, _async=_async)
+
+        # load and search
+        collection_w.load()
+        vectors_s = [[random.random() for _ in range(ct.default_dim)] for _ in range(ct.default_nq)]
+        search_res, _ = collection_w.search(vectors_s[:ct.default_nq], ct.default_float_vec_field_name,
+                                            ct.default_search_params, ct.default_limit)
+        assert len(search_res) == ct.default_nq
+        assert len(search_res[0]) == ct.default_limit
+
         if _async:
             res.done()
-            assert len(collection_w.indexes) == 1
+            assert collection_w.indexes[0].params == default_index_params
         collection_w.drop_index(index_name=ct.default_index_name)
         assert len(collection_w.indexes) == 0
 
