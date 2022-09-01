@@ -85,7 +85,7 @@ func (q *queryTask) queryOnStreaming() error {
 	}
 
 	q.tr.RecordSpan()
-	mergedResult, err := mergeSegcoreRetrieveResults(ctx, sResults)
+	mergedResult, err := mergeSegcoreRetrieveResults(ctx, sResults, q.iReq.GetLimit())
 	if err != nil {
 		return err
 	}
@@ -132,7 +132,7 @@ func (q *queryTask) queryOnHistorical() error {
 		return err
 	}
 
-	mergedResult, err := mergeSegcoreRetrieveResults(ctx, retrieveResults)
+	mergedResult, err := mergeSegcoreRetrieveResults(ctx, retrieveResults, q.req.GetReq().GetLimit())
 	if err != nil {
 		return err
 	}

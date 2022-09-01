@@ -116,7 +116,7 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, e
 	// if limit is provided
 	limitStr, err := funcutil.GetAttrByKeyFromRepeatedKV(LimitKey, queryParamsPair)
 	if err != nil {
-		return &queryParams{}, nil
+		return &queryParams{limit: typeutil.Unlimited}, nil
 	}
 	limit, err = strconv.ParseInt(limitStr, 0, 64)
 	if err != nil || limit <= 0 {
@@ -331,7 +331,7 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 
 	metrics.ProxyDecodeResultLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), metrics.QueryLabel).Observe(0.0)
 	tr.CtxRecord(ctx, "reduceResultStart")
-	t.result, err = mergeRetrieveResults(ctx, t.toReduceResults)
+	t.result, err = reduceRetrieveResults(ctx, t.toReduceResults, t.queryParams)
 	if err != nil {
 		return err
 	}
@@ -409,46 +409,66 @@ func IDs2Expr(fieldName string, ids *schemapb.IDs) string {
 	return fieldName + " in [ " + idsStr + " ]"
 }
 
-func mergeRetrieveResults(ctx context.Context, retrieveResults []*internalpb.RetrieveResults) (*milvuspb.QueryResults, error) {
-	var ret *milvuspb.QueryResults
-	var skipDupCnt int64
-	var idSet = make(map[interface{}]struct{})
+func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.RetrieveResults, queryParams *queryParams) (*milvuspb.QueryResults, error) {
+	log.Ctx(ctx).Debug("reduceInternelRetrieveResults", zap.Int("len(retrieveResults)", len(retrieveResults)))
+	var (
+		ret = &milvuspb.QueryResults{}
 
-	// merge results and remove duplicates
-	for _, rr := range retrieveResults {
-		numPks := typeutil.GetSizeOfIDs(rr.GetIds())
-		// skip empty result, it will break merge result
-		if rr == nil || rr.Ids == nil || rr.GetIds() == nil || numPks == 0 {
+		skipDupCnt int64
+		loopEnd    int
+	)
+
+	validRetrieveResults := []*internalpb.RetrieveResults{}
+	for _, r := range retrieveResults {
+		size := typeutil.GetSizeOfIDs(r.GetIds())
+		if r == nil || len(r.GetFieldsData()) == 0 || size == 0 {
 			continue
 		}
+		validRetrieveResults = append(validRetrieveResults, r)
+		loopEnd += size
+	}
 
-		if ret == nil {
-			ret = &milvuspb.QueryResults{
-				FieldsData: make([]*schemapb.FieldData, len(rr.FieldsData)),
-			}
-		}
+	if len(validRetrieveResults) == 0 {
+		return ret, nil
+	}
 
-		if len(ret.FieldsData) != len(rr.FieldsData) {
-			return nil, fmt.Errorf("mismatch FieldData in proxy RetrieveResults, expect %d get %d", len(ret.FieldsData), len(rr.FieldsData))
-		}
+	ret.FieldsData = make([]*schemapb.FieldData, len(validRetrieveResults[0].GetFieldsData()))
+	idSet := make(map[interface{}]struct{})
+	cursors := make([]int64, len(validRetrieveResults))
 
-		for i := 0; i < numPks; i++ {
-			id := typeutil.GetPK(rr.GetIds(), int64(i))
-			if _, ok := idSet[id]; !ok {
-				typeutil.AppendFieldData(ret.FieldsData, rr.FieldsData, int64(i))
-				idSet[id] = struct{}{}
-			} else {
-				// primary keys duplicate
-				skipDupCnt++
+	if queryParams != nil && queryParams.limit != typeutil.Unlimited {
+		loopEnd = int(queryParams.limit)
+
+		if queryParams.offset > 0 {
+			for i := int64(0); i < queryParams.offset; i++ {
+				sel := typeutil.SelectMinPK(validRetrieveResults, cursors)
+				if sel == -1 {
+					return ret, nil
+				}
+				cursors[sel]++
 			}
 		}
 	}
-	log.Ctx(ctx).Debug("skip duplicated query result", zap.Int64("count", skipDupCnt))
 
-	if ret == nil {
-		ret = &milvuspb.QueryResults{
-			FieldsData: []*schemapb.FieldData{},
+	for j := 0; j < loopEnd; j++ {
+		sel := typeutil.SelectMinPK(validRetrieveResults, cursors)
+		if sel == -1 {
+			break
 		}
+
+		pk := typeutil.GetPK(validRetrieveResults[sel].GetIds(), cursors[sel])
+		if _, ok := idSet[pk]; !ok {
+			typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].GetFieldsData(), cursors[sel])
+			idSet[pk] = struct{}{}
+		} else {
+			// primary keys duplicate
+			skipDupCnt++
+		}
+		cursors[sel]++
+	}
+
+	if skipDupCnt > 0 {
+		log.Ctx(ctx).Debug("skip duplicated query result while reducing QueryResults", zap.Int64("count", skipDupCnt))
 	}
 
 	return ret, nil
