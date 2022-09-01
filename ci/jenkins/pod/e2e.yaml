@@ -3,7 +3,7 @@ kind: Pod
 metadata:
   labels:
     app: milvus-e2e
-  namespace: jenkins
+  namespace: milvus-ci
 spec:
   enableServiceLinks: false
   containers: 
