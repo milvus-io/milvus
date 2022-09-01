@@ -575,7 +575,12 @@ def hamming(x, y):
 def tanimoto(x, y):
     x = np.asarray(x, np.bool)
     y = np.asarray(y, np.bool)
-    return -np.log2(np.double(np.bitwise_and(x, y).sum()) / np.double(np.bitwise_or(x, y).sum()))
+    res = np.double(np.bitwise_and(x, y).sum()) / np.double(np.bitwise_or(x, y).sum())
+    if res == 0:
+        value = 0
+    else:
+        value = -np.log2(res)
+    return value
 
 
 def tanimoto_calc(x, y):
