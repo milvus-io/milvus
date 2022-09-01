@@ -44,12 +44,18 @@ type queryTask struct {
 	qc             types.QueryCoord
 	ids            *schemapb.IDs
 	collectionName string
+	queryParams    *queryParams
 
 	resultBuf       chan *internalpb.RetrieveResults
 	toReduceResults []*internalpb.RetrieveResults
 
 	queryShardPolicy pickShardPolicy
 	shardMgr         *shardClientMgr
+}
+
+type queryParams struct {
+	limit  int64
+	offset int64
 }
 
 // translateOutputFields translates output fields name to output fields id.
@@ -97,6 +103,42 @@ func translateToOutputFieldIDs(outputFields []string, schema *schemapb.Collectio
 
 	}
 	return outputFieldIDs, nil
+}
+
+// parseQueryParams get limit and offset from queryParamsPair, both are optional.
+func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, error) {
+	var (
+		limit  int64
+		offset int64
+		err    error
+	)
+
+	// if limit is provided
+	limitStr, err := funcutil.GetAttrByKeyFromRepeatedKV(LimitKey, queryParamsPair)
+	if err != nil {
+		return &queryParams{}, nil
+	}
+	limit, err = strconv.ParseInt(limitStr, 0, 64)
+	if err != nil || limit <= 0 {
+		return nil, fmt.Errorf("%s [%s] is invalid", LimitKey, limitStr)
+	}
+
+	// if offset is provided
+	if offsetStr, err := funcutil.GetAttrByKeyFromRepeatedKV(OffsetKey, queryParamsPair); err == nil {
+		offset, err = strconv.ParseInt(offsetStr, 0, 64)
+		if err != nil || offset < 0 {
+			return nil, fmt.Errorf("%s [%s] is invalid", OffsetKey, offsetStr)
+		}
+	}
+
+	if err = validateTopK(limit + offset); err != nil {
+		return nil, fmt.Errorf("invalid limit[%d] + offset[%d], %w", limit, offset, err)
+	}
+
+	return &queryParams{
+		limit:  limit,
+		offset: offset,
+	}, nil
 }
 
 func (t *queryTask) PreExecute(ctx context.Context) error {
@@ -149,6 +191,13 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	}
 	log.Ctx(ctx).Debug("Get partitions in collection.", zap.Any("collectionName", collectionName),
 		zap.Int64("msgID", t.ID()), zap.Any("requestType", "query"))
+
+	queryParams, err := parseQueryParams(t.request.GetQueryParams())
+	if err != nil {
+		return err
+	}
+	t.queryParams = queryParams
+	t.RetrieveRequest.Limit = queryParams.limit + queryParams.offset
 
 	loaded, err := checkIfLoaded(ctx, t.qc, collectionName, t.RetrieveRequest.GetPartitionIDs())
 	if err != nil {

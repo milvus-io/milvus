@@ -57,6 +57,7 @@ const (
 	SearchParamsKey = "params"
 	RoundDecimalKey = "round_decimal"
 	OffsetKey       = "offset"
+	LimitKey        = "limit"
 
 	InsertTaskName                  = "InsertTask"
 	CreateCollectionTaskName        = "CreateCollectionTask"

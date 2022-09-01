@@ -222,6 +222,7 @@ message RetrieveRequest {
   uint64 travel_timestamp = 8;
   uint64 guarantee_timestamp = 9;
   uint64 timeout_timestamp = 10;
+  int64 limit = 11; // Optional
 }
 
 message RetrieveResults {
