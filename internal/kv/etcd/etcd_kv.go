@@ -23,6 +23,8 @@ import (
 	"path"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/metrics"
+
 	"github.com/milvus-io/milvus/internal/common"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -687,6 +689,7 @@ func (kv *EtcdKV) CompareVersionAndSwapBytes(key string, source int64, target []
 // CheckElapseAndWarn checks the elapsed time and warns if it is too long.
 func CheckElapseAndWarn(start time.Time, message string, fields ...zap.Field) bool {
 	elapsed := time.Since(start)
+	metrics.EtcdRequestLatency.Observe(float64(elapsed))
 	if elapsed.Milliseconds() > 2000 {
 		log.Warn(message, append([]zap.Field{zap.String("time spent", elapsed.String())}, fields...)...)
 		return true
@@ -696,6 +699,7 @@ func CheckElapseAndWarn(start time.Time, message string, fields ...zap.Field) bo
 
 func CheckValueSizeAndWarn(key string, value interface{}) bool {
 	size := binary.Size(value)
+	metrics.EtcdPutKvSize.Observe(float64(size))
 	if size > 102400 {
 		log.Warn("value size large than 100kb", zap.String("key", key), zap.Int("value_size(kb)", size/1024))
 		return true
