@@ -58,6 +58,7 @@ enum ErrorCode {
     NotShardLeader = 45;
     NoReplicaAvailable = 46;
     SegmentNotFound = 47;
+    GetImportFailedSegmentsFailure = 48;
 
     // internal error code.
     DDRequestRace = 1000;
@@ -157,6 +158,7 @@ enum MsgType {
     HandoffSegments = 254;
     LoadBalanceSegments = 255;
     DescribeSegments = 256;
+    GetImportFailedSegmentIDs = 257;
 
     /* DEFINITION REQUESTS: INDEX */
     CreateIndex = 300;
@@ -263,14 +265,11 @@ enum ConsistencyLevel {
 }
 
 enum ImportState {
-    ImportPending = 0;
-    ImportFailed = 1;
-    ImportStarted = 2;
-    ImportDownloaded = 3;
-    ImportParsed = 4;
-    ImportPersisted = 5;
-    ImportCompleted = 6;
-    ImportAllocSegment = 10;
+    ImportPending = 0;       // the task in in pending list of rootCoord, waiting to be executed
+    ImportFailed = 1;        // the task failed for some reason, get detail reason from GetImportStateResponse.infos
+    ImportStarted = 2;       // the task has been sent to datanode to execute
+    ImportPersisted = 5;     // all data files have been parsed and data already persisted
+    ImportCompleted = 6;     // all indexes are successfully built and segments are able to be compacted as normal.
 }
 
 enum ResourceType {

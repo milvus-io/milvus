@@ -872,11 +872,14 @@ message GetImportStateResponse {
   repeated int64 id_list = 4;                        // auto generated ids if the primary key is autoid
   repeated common.KeyValuePair infos = 5;            // more information about the task, progress percent, file path, failed reason, etc.
   int64 id = 6;                                      // id of an import task
-  bool data_queryable = 7;                           // A flag indicating whether import data are queryable (i.e. loaded in query nodes)
-  bool data_indexed = 8;                             // A flag indicating whether import data are indexed.
+  int64 collection_id = 7;                           // collection ID of the import task.
+  repeated int64 segment_ids = 8;                    // a list of segment IDs created by the import task.
+  int64 create_ts = 9;                               // timestamp when the import task is created.
 }
 
 message ListImportTasksRequest {
+  string collection_name = 1; // target collection, list all tasks if the name is empty
+  int64 limit = 2;            // maximum number of tasks returned, list all tasks if the value is 0
 }
 
 message ListImportTasksResponse {

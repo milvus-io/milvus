@@ -160,6 +160,7 @@ enum ErrorCode : int {
   NotShardLeader = 45,
   NoReplicaAvailable = 46,
   SegmentNotFound = 47,
+  GetImportFailedSegmentsFailure = 48,
   DDRequestRace = 1000,
   ErrorCode_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
   ErrorCode_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
@@ -295,6 +296,7 @@ enum MsgType : int {
   HandoffSegments = 254,
   LoadBalanceSegments = 255,
   DescribeSegments = 256,
+  GetImportFailedSegmentIDs = 257,
   CreateIndex = 300,
   DescribeIndex = 301,
   DropIndex = 302,
@@ -451,17 +453,14 @@ enum ImportState : int {
   ImportPending = 0,
   ImportFailed = 1,
   ImportStarted = 2,
-  ImportDownloaded = 3,
-  ImportParsed = 4,
   ImportPersisted = 5,
   ImportCompleted = 6,
-  ImportAllocSegment = 10,
   ImportState_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
   ImportState_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
 };
 bool ImportState_IsValid(int value);
 constexpr ImportState ImportState_MIN = ImportPending;
-constexpr ImportState ImportState_MAX = ImportAllocSegment;
+constexpr ImportState ImportState_MAX = ImportCompleted;
 constexpr int ImportState_ARRAYSIZE = ImportState_MAX + 1;
 
 const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* ImportState_descriptor();
