@@ -27,7 +27,7 @@ default_nq = ct.default_nq
 default_dim = ct.default_dim
 default_limit = ct.default_limit
 default_search_exp = "int64 >= 0"
-default_search_string_exp =  "varchar >= \"0\""
+default_search_string_exp = "varchar >= \"0\""
 default_search_mix_exp = "int64 >= 0 && varchar >= \"0\""
 default_invaild_string_exp = "varchar >= 0"
 perfix_expr = 'varchar like "0%"'
