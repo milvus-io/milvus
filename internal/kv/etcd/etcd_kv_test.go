@@ -909,3 +909,38 @@ func TestElapse(t *testing.T) {
 	isElapse = etcdkv.CheckElapseAndWarn(start, "err message")
 	assert.Equal(t, isElapse, true)
 }
+
+func TestCheckValueSizeAndWarn(t *testing.T) {
+	ret := etcdkv.CheckValueSizeAndWarn("k", "v")
+	assert.False(t, ret)
+
+	v := make([]byte, 1024000)
+	ret = etcdkv.CheckValueSizeAndWarn("k", v)
+	assert.True(t, ret)
+}
+
+func TestCheckTnxBytesValueSizeAndWarn(t *testing.T) {
+	kvs := make(map[string][]byte, 0)
+	kvs["k"] = []byte("v")
+	ret := etcdkv.CheckTnxBytesValueSizeAndWarn(kvs)
+	assert.False(t, ret)
+
+	kvs["k"] = make([]byte, 1024000)
+	ret = etcdkv.CheckTnxBytesValueSizeAndWarn(kvs)
+	assert.True(t, ret)
+}
+
+func TestCheckTnxStringValueSizeAndWarn(t *testing.T) {
+	kvs := make(map[string]string, 0)
+	kvs["k"] = "v"
+	ret := etcdkv.CheckTnxStringValueSizeAndWarn(kvs)
+	assert.False(t, ret)
+
+	bytes := make([]byte, 1024000)
+	for i := 0; i < 1024000; i++ {
+		bytes[i] = byte('a')
+	}
+	kvs["k"] = string(bytes)
+	ret = etcdkv.CheckTnxStringValueSizeAndWarn(kvs)
+	assert.True(t, ret)
+}
