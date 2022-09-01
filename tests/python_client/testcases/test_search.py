@@ -1334,7 +1334,6 @@ class TestCollectionSearch(TestcaseBase):
                                              "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="issue #18479")
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[:9],
                                  ct.default_index_params[:9]))
@@ -1351,11 +1350,9 @@ class TestCollectionSearch(TestcaseBase):
                                                                                   dim=min_dim, is_index=True)[0:5]
         # 2. create index and load
         if params.get("m"):
-            if (min_dim % params["m"]) != 0:
-                params["m"] = min_dim // 4
+            params["m"] = min_dim
         if params.get("PQM"):
-            if (min_dim % params["PQM"]) != 0:
-                params["PQM"] = min_dim // 4
+            params["PQM"] = min_dim
         default_index = {"index_type": index, "params": params, "metric_type": "L2"}
         collection_w.create_index("float_vector", default_index)
         collection_w.load()

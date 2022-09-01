@@ -232,7 +232,6 @@ class TestUtilityParams(TestcaseBase):
         self.utility_wrap.loading_progress("not_existed_name", check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="pymilvus issue #677")
     def test_loading_progress_invalid_partition_names(self, get_invalid_partition_names):
         """
         target: test loading progress with invalid partition names
