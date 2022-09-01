@@ -359,7 +359,7 @@ func (ib *indexBuilder) getTaskState(buildID, nodeID UniqueID) indexTaskState {
 			if info.State == commonpb.IndexState_Failed || info.State == commonpb.IndexState_Finished {
 				log.Info("this task has been finished", zap.Int64("buildID", info.BuildID),
 					zap.String("index state", info.State.String()))
-				if err := ib.meta.FinishTask(info.BuildID, info.State, info.IndexFiles); err != nil {
+				if err := ib.meta.FinishTask(info); err != nil {
 					log.Error("IndexCoord update index state fail", zap.Int64("buildID", info.BuildID),
 						zap.String("index state", info.State.String()), zap.Error(err))
 					return indexTaskInProgress
