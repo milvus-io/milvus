@@ -28,14 +28,12 @@ pull_request_rules:
         add:
           - dco-passed
 
-  - name: Test passed for code changed
+  - name: Test passed for code changed-master
     conditions:
-      - or:
-        - base=master
-        - base~=^2(\.\d+){2}$
+      - base=master
       - "status-success=Code Checker AMD64 Ubuntu 20.04"
       - "status-success=Build and test AMD64 Ubuntu 20.04"
-      # - "status-success=Code Checker MacOS 11"
+      - "status-success=Code Checker MacOS 11"
       - "status-success=Code Checker CentOS 7"
       - "status-success=cpu-e2e"
       - "status-success=codecov/patch"
@@ -44,7 +42,20 @@ pull_request_rules:
       label:
         add:
           - ci-passed
-
+  - name: Test passed for code changed -2.*.*
+    conditions:
+      - base~=^2(\.\d+){2}$
+      - "status-success=Code Checker AMD64 Ubuntu 18.04"
+      - "status-success=Build and test AMD64 Ubuntu 18.04"
+      - "status-success=Code Checker MacOS 11"
+      - "status-success=Code Checker CentOS 7"
+      - "status-success=cpu-e2e"
+      - "status-success=codecov/patch"
+      - "status-success=codecov/project"
+    actions:
+      label:
+        add:
+          - ci-passed
   - name: Test passed for tests changed
     conditions:
       - or:
@@ -81,14 +92,24 @@ pull_request_rules:
         add:
           - ci-passed
 
-  - name: Test passed for go unittest code changed
+  - name: Test passed for go unittest code changed-master
     conditions:
-      - or:
-        - base=master
-        - base~=^2(\.\d+){2}$
+      - base=master
       - "status-success=Code Checker AMD64 Ubuntu 20.04"
       - "status-success=Build and test AMD64 Ubuntu 20.04"
-      # - "status-success=Code Checker MacOS 11"
+      - "status-success=Code Checker MacOS 11"
+      - "status-success=Code Checker CentOS 7"
+      - -files~=^(?!internal\/.*_test\.go).*$
+    actions:
+      label:
+        add:
+          - ci-passed
+  - name: Test passed for go unittest code changed -2.*.*
+    conditions:
+      - base~=^2(\.\d+){2}$
+      - "status-success=Code Checker AMD64 Ubuntu 20.04"
+      - "status-success=Build and test AMD64 Ubuntu 20.04"
+      - "status-success=Code Checker MacOS 11"
       - "status-success=Code Checker CentOS 7"
       - -files~=^(?!internal\/.*_test\.go).*$
     actions:
@@ -169,15 +190,13 @@ pull_request_rules:
         remove:
           - do-not-merge/missing-related-issue
 
-  - name: Test passed for skip e2e
+  - name: Test passed for skip e2e-master
     conditions:
-      - or:
-        - base=master
-        - base~=^2(\.\d+){2}$
+      - base=master
       - title~=\[skip e2e\]
       - "status-success=Code Checker AMD64 Ubuntu 20.04"
       - "status-success=Build and test AMD64 Ubuntu 20.04"
-      # - "status-success=Code Checker MacOS 11"
+      - "status-success=Code Checker MacOS 11"
       - "status-success=Code Checker CentOS 7"
       - files~=^(?=.*((\.(go|h|cpp)|CMakeLists.txt))).*$
     actions:
@@ -185,25 +204,48 @@ pull_request_rules:
         add:
           - ci-passed
 
+  - name: Test passed for skip e2e - 2.*.*
+    conditions:
+      - base~=^2(\.\d+){2}$
+      - title~=\[skip e2e\]
+      - "status-success=Code Checker AMD64 Ubuntu 18.04"
+      - "status-success=Build and test AMD64 Ubuntu 18.04"
+      - "status-success=Code Checker MacOS 11"
+      - "status-success=Code Checker CentOS 7"
+      - files~=^(?=.*((\.(go|h|cpp)|CMakeLists.txt))).*$
+    actions:
+      label:
+        add:
+          - ci-passed
 
-
-  - name: Remove ci-passed label when status for code checker or ut  is not success
+  - name: Remove ci-passed label when status for code checker or ut  is not success-master
     conditions:
       - label!=manual-pass
-      - or:
-        - base=master
-        - base~=^2(\.\d+){2}$
+      - base=master
       - files~=^(?=.*((\.(go|h|cpp)|CMakeLists.txt))).*$
       - or:
         - "status-success!=Code Checker AMD64 Ubuntu 20.04"
         - "status-success!=Build and test AMD64 Ubuntu 20.04" 
-        # - "status-success!=Code Checker MacOS 11"    
+        - "status-success!=Code Checker MacOS 11"    
         - "status-success!=Code Checker CentOS 7"
     actions:
       label:
         remove:
           - ci-passed
-
+  - name: Remove ci-passed label when status for code checker or ut  is not success-2.*.*
+    conditions:
+      - label!=manual-pass
+      - base~=^2(\.\d+){2}$
+      - files~=^(?=.*((\.(go|h|cpp)|CMakeLists.txt))).*$
+      - or:
+        - "status-success!=Code Checker AMD64 Ubuntu 18.04"
+        - "status-success!=Build and test AMD64 Ubuntu 18.04" 
+        - "status-success!=Code Checker MacOS 11"    
+        - "status-success!=Code Checker CentOS 7"
+    actions:
+      label:
+        remove:
+          - ci-passed
   - name: Remove ci-passed label when  status for jenkins job is not success
     conditions:
       - label!=manual-pass
@@ -230,11 +272,9 @@ pull_request_rules:
         message: |
           @{{author}} E2e jenkins job failed, comment `/run-cpu-e2e` can trigger the job again.
 
-  - name: Add comment when code checker or ut failed
+  - name: Add comment when code checker or ut failed -master
     conditions:
-      - or:
-        - base=master
-        - base~=^2(\.\d+){2}$
+      - base=master
       - or:
         - "check-failure=Code Checker AMD64 Ubuntu 20.04"
         - "check-failure=Build and test AMD64 Ubuntu 20.04"       
@@ -243,7 +283,16 @@ pull_request_rules:
         message: |
           @{{author}} ut workflow job failed, comment `rerun ut` can trigger the job again.
 
-
+  - name: Add comment when code checker or ut failed -2.*.*
+    conditions:
+      - base~=^2(\.\d+){2}$
+      - or:
+        - "check-failure=Code Checker AMD64 Ubuntu 18.04"
+        - "check-failure=Build and test AMD64 Ubuntu 18.04"       
+    actions:
+      comment:
+        message: |
+          @{{author}} ut workflow job failed, comment `rerun ut` can trigger the job again.
 
 
   - name: Add `needs-rebase` label when more than one commit in pr
