@@ -331,7 +331,7 @@ func TestImpl_ShowConfigurations(t *testing.T) {
 	t.Run("test ShowConfigurations", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
-		node.session = sessionutil.NewSession(node.queryNodeLoopCtx, Params.EtcdCfg.MetaRootPath, etcdCli)
+		node.session = sessionutil.NewSession(node.ctx, Params.EtcdCfg.MetaRootPath, etcdCli)
 
 		pattern := "Cache"
 		req := &internalpb.ShowConfigurationsRequest{
@@ -347,7 +347,7 @@ func TestImpl_ShowConfigurations(t *testing.T) {
 	t.Run("test ShowConfigurations node failed", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
-		node.session = sessionutil.NewSession(node.queryNodeLoopCtx, Params.EtcdCfg.MetaRootPath, etcdCli)
+		node.session = sessionutil.NewSession(node.ctx, Params.EtcdCfg.MetaRootPath, etcdCli)
 		node.UpdateStateCode(internalpb.StateCode_Abnormal)
 
 		pattern := "Cache"
@@ -376,7 +376,7 @@ func TestImpl_GetMetrics(t *testing.T) {
 		defer wg.Done()
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
-		node.session = sessionutil.NewSession(node.queryNodeLoopCtx, Params.EtcdCfg.MetaRootPath, etcdCli)
+		node.session = sessionutil.NewSession(node.ctx, Params.EtcdCfg.MetaRootPath, etcdCli)
 
 		metricReq := make(map[string]string)
 		metricReq[metricsinfo.MetricTypeKey] = "system_info"

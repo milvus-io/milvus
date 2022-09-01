@@ -37,21 +37,21 @@ func (m *mockTask) OnEnqueue() error {
 	return nil
 }
 
-func (m *mockTask) PreExecute(ctx context.Context) error {
+func (m *mockTask) PreExecute() error {
 	if m.preExecuteError {
 		return errors.New("test error")
 	}
 	return nil
 }
 
-func (m *mockTask) Execute(ctx context.Context) error {
+func (m *mockTask) Execute() error {
 	if m.executeError {
 		return errors.New("test error")
 	}
 	return nil
 }
 
-func (m *mockTask) PostExecute(ctx context.Context) error {
+func (m *mockTask) PostExecute() error {
 	return nil
 }
 
@@ -106,7 +106,7 @@ func TestTaskScheduler(t *testing.T) {
 	defer cancel()
 	tSafe := newTSafeReplica()
 
-	ts := newTaskScheduler(ctx, tSafe)
+	ts := newTaskScheduler(tSafe)
 	ts.Start()
 
 	task := &mockTask{

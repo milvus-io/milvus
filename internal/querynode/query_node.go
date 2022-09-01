@@ -78,15 +78,9 @@ var Params paramtable.ComponentParam
 //  `indexCoord` is a grpc client of index coordinator.
 //  `stateCode` is current statement of this query node, indicating whether it's healthy.
 type QueryNode struct {
-	queryNodeLoopCtx    context.Context
-	queryNodeLoopCancel context.CancelFunc
-
-	wg sync.WaitGroup
-
+	ctx       context.Context
 	stateCode atomic.Value
-
-	//call once
-	initOnce sync.Once
+	initOnce  sync.Once
 
 	// internal components
 	metaReplica ReplicaInterface
@@ -115,31 +109,33 @@ type QueryNode struct {
 
 	// shard cluster service, handle shard leader functions
 	ShardClusterService *ShardClusterService
-	//shard query service, handles shard-level query & search
+	// shard query service, handles shard-level query & search
 	queryShardService *queryShardService
 
 	// cgoPool is the worker pool to control concurrency of cgo call
 	cgoPool *concurrency.Pool
+
+	wg      sync.WaitGroup
+	closeCh chan struct{}
 }
 
 // NewQueryNode will return a QueryNode with abnormal state.
 func NewQueryNode(ctx context.Context, factory dependency.Factory) *QueryNode {
-	ctx1, cancel := context.WithCancel(ctx)
 	node := &QueryNode{
-		queryNodeLoopCtx:    ctx1,
-		queryNodeLoopCancel: cancel,
-		factory:             factory,
+		ctx:          ctx,
+		factory:      factory,
+		tSafeReplica: newTSafeReplica(),
+		closeCh:      make(chan struct{}),
 	}
 
-	node.tSafeReplica = newTSafeReplica()
-	node.scheduler = newTaskScheduler(ctx1, node.tSafeReplica)
+	node.scheduler = newTaskScheduler(node.tSafeReplica)
 	node.UpdateStateCode(internalpb.StateCode_Abnormal)
 
 	return node
 }
 
 func (node *QueryNode) initSession() error {
-	node.session = sessionutil.NewSession(node.queryNodeLoopCtx, Params.EtcdCfg.MetaRootPath, node.etcdCli)
+	node.session = sessionutil.NewSession(node.ctx, Params.EtcdCfg.MetaRootPath, node.etcdCli)
 	if node.session == nil {
 		return fmt.Errorf("session is nil, the etcd client connection may have failed")
 	}
@@ -154,7 +150,7 @@ func (node *QueryNode) initSession() error {
 func (node *QueryNode) Register() error {
 	node.session.Register()
 	// start liveness check
-	go node.session.LivenessCheck(node.queryNodeLoopCtx, func() {
+	go node.session.LivenessCheck(node.ctx, func() {
 		log.Error("Query Node disconnected from etcd, process will exit", zap.Int64("Server Id", node.session.ServerID))
 		if err := node.Stop(); err != nil {
 			log.Fatal("failed to stop server", zap.Error(err))
@@ -202,7 +198,7 @@ func (node *QueryNode) InitSegcore() {
 
 // Init function init historical and streaming module to manage segments
 func (node *QueryNode) Init() error {
-	var initError error = nil
+	var initError error
 	node.initOnce.Do(func() {
 		//ctx := context.Background()
 		log.Info("QueryNode session info", zap.String("metaPath", Params.EtcdCfg.MetaRootPath))
@@ -215,14 +211,14 @@ func (node *QueryNode) Init() error {
 
 		node.factory.Init(&Params)
 
-		node.vectorStorage, err = node.factory.NewVectorStorageChunkManager(node.queryNodeLoopCtx)
+		node.vectorStorage, err = node.factory.NewVectorStorageChunkManager(node.ctx)
 		if err != nil {
 			log.Error("QueryNode init vector storage failed", zap.Error(err))
 			initError = err
 			return
 		}
 
-		node.cacheStorage, err = node.factory.NewCacheStorageChunkManager(node.queryNodeLoopCtx)
+		node.cacheStorage, err = node.factory.NewCacheStorageChunkManager(node.ctx)
 		if err != nil {
 			log.Error("QueryNode init cache storage failed", zap.Error(err))
 			initError = err
@@ -260,7 +256,7 @@ func (node *QueryNode) Init() error {
 			node.factory,
 			node.cgoPool)
 
-		node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, node.metaReplica, node.tSafeReplica, node.factory)
+		node.dataSyncService = newDataSyncService(node.ctx, node.metaReplica, node.tSafeReplica, node.factory)
 
 		node.InitSegcore()
 
@@ -277,7 +273,7 @@ func (node *QueryNode) Init() error {
 // Start mainly start QueryNode's query service.
 func (node *QueryNode) Start() error {
 	// start task scheduler
-	go node.scheduler.Start()
+	node.scheduler.Start()
 
 	// start services
 	go node.watchChangeInfo()
@@ -285,7 +281,7 @@ func (node *QueryNode) Start() error {
 	// create shardClusterService for shardLeader functions.
 	node.ShardClusterService = newShardClusterService(node.etcdCli, node.session, node)
 	// create shard-level query service
-	node.queryShardService = newQueryShardService(node.queryNodeLoopCtx, node.metaReplica, node.tSafeReplica,
+	node.queryShardService = newQueryShardService(node.metaReplica, node.tSafeReplica,
 		node.ShardClusterService, node.factory, node.scheduler)
 
 	Params.QueryNodeCfg.CreatedTime = time.Now()
@@ -304,7 +300,7 @@ func (node *QueryNode) Start() error {
 func (node *QueryNode) Stop() error {
 	log.Warn("Query node stop..")
 	node.UpdateStateCode(internalpb.StateCode_Abnormal)
-	node.queryNodeLoopCancel()
+	close(node.closeCh)
 
 	// close services
 	if node.dataSyncService != nil {
@@ -317,6 +313,10 @@ func (node *QueryNode) Stop() error {
 
 	if node.queryShardService != nil {
 		node.queryShardService.close()
+	}
+
+	if node.scheduler != nil {
+		node.scheduler.Close()
 	}
 
 	node.session.Revoke(time.Second)
@@ -339,7 +339,7 @@ func (node *QueryNode) watchChangeInfo() {
 	watchChan := node.etcdKV.WatchWithPrefix(util.ChangeInfoMetaPrefix)
 	for {
 		select {
-		case <-node.queryNodeLoopCtx.Done():
+		case <-node.closeCh:
 			log.Info("query node watchChangeInfo close")
 			return
 		case resp, ok := <-watchChan:
@@ -356,7 +356,7 @@ func (node *QueryNode) watchChangeInfo() {
 					return
 				}
 				// if watch loop return due to event canceled, the datanode is not functional anymore
-				log.Panic("querynoe3 is not functional for event canceled", zap.Error(err))
+				log.Panic("querynode is not functional for event canceled", zap.Error(err))
 				return
 			}
 			for _, event := range resp.Events {

@@ -17,7 +17,6 @@
 package querynode
 
 import (
-	"context"
 	"fmt"
 
 	"go.uber.org/zap"
@@ -29,9 +28,6 @@ import (
 )
 
 type queryShard struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-
 	collectionID UniqueID
 	collection   *Collection // quick reference from meta
 	channel      Channel
@@ -49,7 +45,6 @@ type queryShard struct {
 }
 
 func newQueryShard(
-	ctx context.Context,
 	collectionID UniqueID,
 	channel Channel,
 	replicaID int64,
@@ -79,11 +74,12 @@ func newQueryShard(
 	if err != nil {
 		return nil, err
 	}
+	deltaChannel, err := funcutil.ConvertChannelName(channel, Params.CommonCfg.RootCoordDml, Params.CommonCfg.RootCoordDelta)
+	if err != nil {
+		log.Warn("failed to convert dm channel to delta", zap.String("channel", channel), zap.Error(err))
+	}
 
-	ctx, cancel := context.WithCancel(ctx)
 	qs := &queryShard{
-		ctx:                ctx,
-		cancel:             cancel,
 		collectionID:       collectionID,
 		collection:         collection,
 		channel:            channel,
@@ -92,19 +88,14 @@ func newQueryShard(
 		metaReplica:        metaReplica,
 		vectorChunkManager: vectorChunkManager,
 		tSafeReplica:       tSafeReplica,
+		deltaChannel:       deltaChannel,
 	}
-	deltaChannel, err := funcutil.ConvertChannelName(channel, Params.CommonCfg.RootCoordDml, Params.CommonCfg.RootCoordDelta)
-	if err != nil {
-		log.Warn("failed to convert dm channel to delta", zap.String("channel", channel), zap.Error(err))
-	}
-	qs.deltaChannel = deltaChannel
-
 	return qs, nil
 }
 
 // Close cleans query shard
 func (q *queryShard) Close() {
-	q.cancel()
+	q.vectorChunkManager.Close()
 }
 
 type tsType int32

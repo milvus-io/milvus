@@ -38,9 +38,9 @@ import (
 type task interface {
 	ID() UniqueID // return ReqID
 	Timestamp() Timestamp
-	PreExecute(ctx context.Context) error
-	Execute(ctx context.Context) error
-	PostExecute(ctx context.Context) error
+	PreExecute() error
+	Execute() error
+	PostExecute() error
 	WaitToFinish() error
 	Notify(err error)
 	OnEnqueue() error
@@ -69,11 +69,11 @@ func (b *baseTask) Timestamp() Timestamp {
 	return b.ts
 }
 
-func (b *baseTask) PreExecute(ctx context.Context) error {
+func (b *baseTask) PreExecute() error {
 	return nil
 }
 
-func (b *baseTask) PostExecute(ctx context.Context) error {
+func (b *baseTask) PostExecute() error {
 	return nil
 }
 
@@ -111,7 +111,7 @@ type releasePartitionsTask struct {
 }
 
 // watchDmChannelsTask
-func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
+func (w *watchDmChannelsTask) Execute() (err error) {
 	collectionID := w.req.CollectionID
 	partitionIDs := w.req.GetPartitionIDs()
 
@@ -507,7 +507,7 @@ func (l *loadSegmentsTask) watchDeltaChannel(vchanName []string) error {
 }
 
 // loadSegmentsTask
-func (l *loadSegmentsTask) PreExecute(ctx context.Context) error {
+func (l *loadSegmentsTask) PreExecute() error {
 	log.Info("LoadSegmentTask PreExecute start", zap.Int64("msgID", l.req.Base.MsgID))
 	var err error
 	// init meta
@@ -538,7 +538,7 @@ func (l *loadSegmentsTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (l *loadSegmentsTask) Execute(ctx context.Context) error {
+func (l *loadSegmentsTask) Execute() error {
 	log.Info("LoadSegmentTask Execute start", zap.Int64("msgID", l.req.Base.MsgID))
 	err := l.node.loader.LoadSegment(l.req, segmentTypeSealed)
 	if err != nil {
@@ -585,7 +585,7 @@ func (l *loadSegmentsTask) Execute(ctx context.Context) error {
 	return nil
 }
 
-func (r *releaseCollectionTask) Execute(ctx context.Context) error {
+func (r *releaseCollectionTask) Execute() error {
 	log.Info("Execute release collection task", zap.Any("collectionID", r.req.CollectionID))
 
 	collection, err := r.node.metaReplica.getCollectionByID(r.req.CollectionID)
@@ -629,7 +629,7 @@ func (r *releaseCollectionTask) Execute(ctx context.Context) error {
 }
 
 // releasePartitionsTask
-func (r *releasePartitionsTask) Execute(ctx context.Context) error {
+func (r *releasePartitionsTask) Execute() error {
 	log.Info("Execute release partition task",
 		zap.Int64("collectionID", r.req.GetCollectionID()),
 		zap.Int64s("partitionIDs", r.req.GetPartitionIDs()))

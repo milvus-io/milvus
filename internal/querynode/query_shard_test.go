@@ -54,7 +54,7 @@ func genSimpleQueryShard(ctx context.Context) (*queryShard, error) {
 	}
 	shardClusterService.clusters.Store(defaultDMLChannel, shardCluster)
 
-	qs, err := newQueryShard(ctx, defaultCollectionID, defaultDMLChannel, defaultReplicaID, shardClusterService,
+	qs, err := newQueryShard(defaultCollectionID, defaultDMLChannel, defaultReplicaID, shardClusterService,
 		replica, tSafe, localCM, remoteCM, false)
 	if err != nil {
 		return nil, err
@@ -90,15 +90,15 @@ func TestNewQueryShard_IllegalCases(t *testing.T) {
 	}
 	shardClusterService.clusters.Store(defaultDMLChannel, shardCluster)
 
-	_, err = newQueryShard(ctx, defaultCollectionID-1, defaultDMLChannel, defaultReplicaID, shardClusterService,
+	_, err = newQueryShard(defaultCollectionID-1, defaultDMLChannel, defaultReplicaID, shardClusterService,
 		replica, tSafe, localCM, remoteCM, false)
 	assert.Error(t, err)
 
-	_, err = newQueryShard(ctx, defaultCollectionID, defaultDMLChannel, defaultReplicaID, shardClusterService,
+	_, err = newQueryShard(defaultCollectionID, defaultDMLChannel, defaultReplicaID, shardClusterService,
 		replica, tSafe, nil, remoteCM, false)
 	assert.Error(t, err)
 
-	_, err = newQueryShard(ctx, defaultCollectionID, defaultDMLChannel, defaultReplicaID, shardClusterService,
+	_, err = newQueryShard(defaultCollectionID, defaultDMLChannel, defaultReplicaID, shardClusterService,
 		replica, tSafe, localCM, nil, false)
 	assert.Error(t, err)
 }

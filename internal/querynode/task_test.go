@@ -21,6 +21,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper/rmq"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -31,8 +34,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestTask_watchDmChannelsTask(t *testing.T) {
@@ -93,7 +94,7 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 			},
 		}
 		task.req.PartitionIDs = []UniqueID{0}
-		err = task.Execute(ctx)
+		err = task.Execute()
 		assert.NoError(t, err)
 	})
 
@@ -114,10 +115,10 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 		}
 		task.req.PartitionIDs = []UniqueID{0}
 
-		err = task.Execute(ctx)
+		err = task.Execute()
 		assert.NoError(t, err)
 		// query coord may submit same watchDmChannelTask
-		err = task.Execute(ctx)
+		err = task.Execute()
 		assert.NoError(t, err)
 	})
 
@@ -140,7 +141,7 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 				ChannelName:  defaultDMLChannel,
 			},
 		}
-		err = task.Execute(ctx)
+		err = task.Execute()
 		assert.NoError(t, err)
 	})
 
@@ -160,7 +161,7 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 		}
 		task.req.CollectionID++
 		task.req.PartitionIDs[0]++
-		err = task.Execute(ctx)
+		err = task.Execute()
 		assert.NoError(t, err)
 	})
 
@@ -214,7 +215,7 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 				},
 			},
 		}
-		err = task.Execute(ctx)
+		err = task.Execute()
 		// ["Failed to seek"] [error="topic name = xxx not exist"]
 		assert.Error(t, err)
 	})
@@ -241,7 +242,7 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 				FlushedSegmentIds: []int64{},
 			},
 		}
-		err = task.Execute(ctx)
+		err = task.Execute()
 		assert.Error(t, err)
 	})
 
@@ -266,7 +267,7 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 				DroppedSegmentIds: []int64{},
 			},
 		}
-		err = task.Execute(ctx)
+		err = task.Execute()
 		assert.Error(t, err)
 	})
 
@@ -288,7 +289,7 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 				UnflushedSegmentIds: []int64{},
 			},
 		}
-		err = task.Execute(ctx)
+		err = task.Execute()
 		assert.NoError(t, err)
 	})
 }
@@ -364,7 +365,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 			req:  req,
 			node: node,
 		}
-		err = task.Execute(ctx)
+		err = task.Execute()
 		assert.NoError(t, err)
 	})
 
@@ -399,13 +400,13 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 			node: node,
 		}
 		// execute loadSegmentsTask twice
-		err = task.PreExecute(ctx)
+		err = task.PreExecute()
 		assert.NoError(t, err)
-		err = task.Execute(ctx)
+		err = task.Execute()
 		assert.NoError(t, err)
-		err = task.PreExecute(ctx)
+		err = task.PreExecute()
 		assert.NoError(t, err)
-		err = task.Execute(ctx)
+		err = task.Execute()
 		assert.NoError(t, err)
 		// expected only one segment in replica
 		num := node.metaReplica.getSegmentNum(segmentTypeSealed)
@@ -418,7 +419,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 
 		vDmChannel := "by-dev-rootcoord-dml_1_2021v1"
 		pDmChannel := funcutil.ToPhysicalChannel(vDmChannel)
-		stream, err := node.factory.NewMsgStream(node.queryNodeLoopCtx)
+		stream, err := node.factory.NewMsgStream(node.ctx)
 		assert.Nil(t, err)
 		stream.AsProducer([]string{pDmChannel})
 		timeTickMsg := &msgstream.TimeTickMsg{
@@ -511,9 +512,9 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 			req:  req,
 			node: node,
 		}
-		err = task.PreExecute(ctx)
+		err = task.PreExecute()
 		assert.NoError(t, err)
-		err = task.Execute(ctx)
+		err = task.Execute()
 		assert.NoError(t, err)
 		segment, err := node.metaReplica.getSegmentByID(segmentID, segmentTypeSealed)
 		assert.NoError(t, err)
@@ -555,7 +556,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 		for node.loader.checkSegmentSize(defaultCollectionID, task.req.Infos, 1) == nil {
 			task.req.Infos[0].SegmentSize *= 2
 		}
-		err = task.Execute(ctx)
+		err = task.Execute()
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "OOM")
 	})
@@ -597,9 +598,9 @@ func TestTask_loadSegmentsTaskLoadDelta(t *testing.T) {
 			node: node,
 		}
 		// execute loadSegmentsTask twice
-		err = task.PreExecute(ctx)
+		err = task.PreExecute()
 		assert.NoError(t, err)
-		err = task.Execute(ctx)
+		err = task.Execute()
 		assert.NoError(t, err)
 		// expected only one segment in replica
 		num := node.metaReplica.getSegmentNum(segmentTypeSealed)
@@ -633,9 +634,9 @@ func TestTask_loadSegmentsTaskLoadDelta(t *testing.T) {
 			node: node,
 		}
 		// execute loadSegmentsTask twice
-		err = task.PreExecute(ctx)
+		err = task.PreExecute()
 		assert.NoError(t, err)
-		err = task.Execute(ctx)
+		err = task.Execute()
 		assert.NoError(t, err)
 
 		num = node.metaReplica.getSegmentNum(segmentTypeSealed)
@@ -696,7 +697,7 @@ func TestTask_releaseCollectionTask(t *testing.T) {
 			req:  genReleaseCollectionRequest(),
 			node: node,
 		}
-		err = task.Execute(ctx)
+		err = task.Execute()
 		assert.NoError(t, err)
 	})
 
@@ -711,7 +712,7 @@ func TestTask_releaseCollectionTask(t *testing.T) {
 			req:  genReleaseCollectionRequest(),
 			node: node,
 		}
-		err = task.Execute(ctx)
+		err = task.Execute()
 		assert.Error(t, err)
 	})
 
@@ -731,7 +732,7 @@ func TestTask_releaseCollectionTask(t *testing.T) {
 			req:  genReleaseCollectionRequest(),
 			node: node,
 		}
-		err = task.Execute(ctx)
+		err = task.Execute()
 		assert.NoError(t, err)
 	})
 }
@@ -808,7 +809,7 @@ func TestTask_releasePartitionTask(t *testing.T) {
 		}
 		_, err = task.node.dataSyncService.addFlowGraphsForDMLChannels(defaultCollectionID, []Channel{defaultDMLChannel})
 		assert.NoError(t, err)
-		err = task.Execute(ctx)
+		err = task.Execute()
 		assert.NoError(t, err)
 	})
 
@@ -823,7 +824,7 @@ func TestTask_releasePartitionTask(t *testing.T) {
 		err = node.metaReplica.removeCollection(defaultCollectionID)
 		assert.NoError(t, err)
 
-		err = task.Execute(ctx)
+		err = task.Execute()
 		assert.NoError(t, err)
 	})
 
@@ -838,7 +839,7 @@ func TestTask_releasePartitionTask(t *testing.T) {
 		err = node.metaReplica.removePartition(defaultPartitionID)
 		assert.NoError(t, err)
 
-		err = task.Execute(ctx)
+		err = task.Execute()
 		assert.NoError(t, err)
 	})
 
@@ -853,7 +854,7 @@ func TestTask_releasePartitionTask(t *testing.T) {
 			node: node,
 		}
 
-		err = task.Execute(ctx)
+		err = task.Execute()
 		assert.NoError(t, err)
 	})
 
@@ -880,7 +881,7 @@ func TestTask_releasePartitionTask(t *testing.T) {
 		}
 		_, err = task.node.dataSyncService.addFlowGraphsForDMLChannels(defaultCollectionID, []Channel{defaultDMLChannel})
 		assert.NoError(t, err)
-		err = task.Execute(ctx)
+		err = task.Execute()
 		assert.NoError(t, err)
 	})
 }

@@ -35,9 +35,6 @@ const (
 )
 
 type taskScheduler struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-
 	// for search and query start
 	unsolvedReadTasks *list.List
 	readyReadTasks    *list.List
@@ -60,7 +57,8 @@ type taskScheduler struct {
 	queue       taskQueue
 	maxCPUUsage int32
 
-	wg sync.WaitGroup
+	wg      sync.WaitGroup
+	closeCh chan struct{}
 }
 
 func getNumCPU() int {
@@ -71,11 +69,8 @@ func getNumCPU() int {
 	return cur
 }
 
-func newTaskScheduler(ctx context.Context, tSafeReplica TSafeReplicaInterface) *taskScheduler {
-	ctx1, cancel := context.WithCancel(ctx)
+func newTaskScheduler(tSafeReplica TSafeReplicaInterface) *taskScheduler {
 	s := &taskScheduler{
-		ctx:                 ctx1,
-		cancel:              cancel,
 		unsolvedReadTasks:   list.New(),
 		readyReadTasks:      list.New(),
 		receiveReadTaskChan: make(chan readTask, Params.QueryNodeCfg.MaxReceiveChanSize),
@@ -84,14 +79,14 @@ func newTaskScheduler(ctx context.Context, tSafeReplica TSafeReplicaInterface) *
 		tSafeReplica:        tSafeReplica,
 		maxCPUUsage:         int32(getNumCPU() * 100),
 		schedule:            defaultScheduleReadPolicy,
+		closeCh:             make(chan struct{}),
 	}
 	s.queue = newQueryNodeTaskQueue(s)
 	return s
 }
 
 func (s *taskScheduler) processTask(t task, q taskQueue) {
-	// TODO: ctx?
-	err := t.PreExecute(s.ctx)
+	err := t.PreExecute()
 
 	defer func() {
 		t.Notify(err)
@@ -106,19 +101,19 @@ func (s *taskScheduler) processTask(t task, q taskQueue) {
 		q.PopActiveTask(t.ID())
 	}()
 
-	err = t.Execute(s.ctx)
+	err = t.Execute()
 	if err != nil {
 		log.Warn(err.Error())
 		return
 	}
-	err = t.PostExecute(s.ctx)
+	err = t.PostExecute()
 }
 
 func (s *taskScheduler) taskLoop() {
 	defer s.wg.Done()
 	for {
 		select {
-		case <-s.ctx.Done():
+		case <-s.closeCh:
 			return
 		case <-s.queue.utChan():
 			if !s.queue.utEmpty() {
@@ -130,13 +125,9 @@ func (s *taskScheduler) taskLoop() {
 }
 
 func (s *taskScheduler) Start() {
-	s.wg.Add(1)
+	s.wg.Add(3)
 	go s.taskLoop()
-
-	s.wg.Add(1)
 	go s.scheduleReadTasks()
-
-	s.wg.Add(1)
 	go s.executeReadTasks()
 }
 
@@ -184,7 +175,7 @@ func (s *taskScheduler) scheduleReadTasks() {
 	defer l.Unregister()
 	for {
 		select {
-		case <-s.ctx.Done():
+		case <-s.closeCh:
 			log.Warn("QueryNode sop schedulerReadTasks")
 			return
 
@@ -225,7 +216,7 @@ func (s *taskScheduler) AddReadTask(ctx context.Context, t readTask) error {
 	select {
 	case <-ctx.Done():
 		return fmt.Errorf("taskScheduler AddReadTask context is done")
-	case <-s.ctx.Done():
+	case <-s.closeCh:
 		return fmt.Errorf("taskScheduler stoped")
 	case s.receiveReadTaskChan <- t:
 		return nil
@@ -284,7 +275,7 @@ func (s *taskScheduler) executeReadTasks() {
 
 	for {
 		select {
-		case <-s.ctx.Done():
+		case <-s.closeCh:
 			log.Debug("QueryNode stop executeReadTasks", zap.Int64("NodeID", Params.QueryNodeCfg.GetNodeID()))
 			return
 		case t, ok := <-s.executeReadTaskChan:
@@ -310,7 +301,7 @@ func (s *taskScheduler) executeReadTasks() {
 }
 
 func (s *taskScheduler) processReadTask(t readTask) {
-	err := t.PreExecute(t.Ctx())
+	err := t.PreExecute()
 
 	defer func() {
 		t.Notify(err)
@@ -320,16 +311,16 @@ func (s *taskScheduler) processReadTask(t readTask) {
 		return
 	}
 
-	err = t.Execute(s.ctx)
+	err = t.Execute()
 	if err != nil {
 		log.Warn(err.Error())
 		return
 	}
-	err = t.PostExecute(s.ctx)
+	err = t.PostExecute()
 }
 
 func (s *taskScheduler) Close() {
-	s.cancel()
+	close(s.closeCh)
 	s.wg.Wait()
 }
 

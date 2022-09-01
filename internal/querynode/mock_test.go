@@ -1717,7 +1717,7 @@ func genSimpleQueryNodeWithMQFactory(ctx context.Context, fac dependency.Factory
 	node.tSafeReplica.addTSafe(defaultDMLChannel)
 
 	node.tSafeReplica.addTSafe(defaultDeltaChannel)
-	node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, replica, node.tSafeReplica, node.factory)
+	node.dataSyncService = newDataSyncService(node.ctx, replica, node.tSafeReplica, node.factory)
 
 	node.metaReplica = replica
 
@@ -1728,13 +1728,12 @@ func genSimpleQueryNodeWithMQFactory(ctx context.Context, fac dependency.Factory
 	node.loader = loader
 
 	// start task scheduler
-	go node.scheduler.Start()
+	node.scheduler.Start()
 
 	// init shard cluster service
 	node.ShardClusterService = newShardClusterService(node.etcdCli, node.session, node)
 
-	node.queryShardService = newQueryShardService(node.queryNodeLoopCtx,
-		node.metaReplica, node.tSafeReplica,
+	node.queryShardService = newQueryShardService(node.metaReplica, node.tSafeReplica,
 		node.ShardClusterService, node.factory, node.scheduler)
 
 	node.UpdateStateCode(internalpb.StateCode_Healthy)

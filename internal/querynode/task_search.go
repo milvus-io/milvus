@@ -29,6 +29,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/golang/protobuf/proto"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -58,7 +59,7 @@ type searchTask struct {
 	qInfo            *planpb.QueryInfo
 }
 
-func (s *searchTask) PreExecute(ctx context.Context) error {
+func (s *searchTask) PreExecute() error {
 	s.SetStep(TaskStepPreExecute)
 	for _, t := range s.otherTasks {
 		t.SetStep(TaskStepPreExecute)
@@ -160,7 +161,7 @@ func (s *searchTask) searchOnHistorical() error {
 	return s.reduceResults(ctx, searchReq, partResults)
 }
 
-func (s *searchTask) Execute(ctx context.Context) error {
+func (s *searchTask) Execute() error {
 	if s.DataScope == querypb.DataScope_Streaming {
 		return s.searchOnStreaming()
 	} else if s.DataScope == querypb.DataScope_Historical {

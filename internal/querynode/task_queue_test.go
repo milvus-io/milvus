@@ -17,7 +17,6 @@
 package querynode
 
 import (
-	"context"
 	"fmt"
 	"testing"
 
@@ -25,13 +24,7 @@ import (
 )
 
 func TestBaseTaskQueue_addUnissuedTask(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	s := &taskScheduler{
-		ctx:    ctx,
-		cancel: cancel,
-	}
+	s := &taskScheduler{}
 
 	t.Run("test full", func(t *testing.T) {
 		taskQueue := newQueryNodeTaskQueue(s)

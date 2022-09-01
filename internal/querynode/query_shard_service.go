@@ -22,16 +22,14 @@ import (
 	"fmt"
 	"sync"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
-	"go.uber.org/zap"
 )
 
 type queryShardService struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-
 	queryShardsMu sync.Mutex              // guards queryShards
 	queryShards   map[Channel]*queryShard // Virtual Channel -> *queryShard
 
@@ -47,17 +45,14 @@ type queryShardService struct {
 	scheduler           *taskScheduler
 }
 
-func newQueryShardService(ctx context.Context, metaReplica ReplicaInterface, tSafeReplica TSafeReplicaInterface, clusterService *ShardClusterService, factory dependency.Factory, scheduler *taskScheduler) *queryShardService {
-	queryShardServiceCtx, queryShardServiceCancel := context.WithCancel(ctx)
-
+func newQueryShardService(metaReplica ReplicaInterface, tSafeReplica TSafeReplicaInterface,
+	clusterService *ShardClusterService, factory dependency.Factory, scheduler *taskScheduler) *queryShardService {
 	path := Params.LoadWithDefault("localStorage.Path", "/tmp/milvus/data")
 
 	localChunkManager := storage.NewLocalChunkManager(storage.RootPath(path))
-	remoteChunkManager, _ := factory.NewVectorStorageChunkManager(ctx)
+	remoteChunkManager, _ := factory.NewVectorStorageChunkManager(context.Background())
 
 	qss := &queryShardService{
-		ctx:                 queryShardServiceCtx,
-		cancel:              queryShardServiceCancel,
 		queryShards:         make(map[Channel]*queryShard),
 		metaReplica:         metaReplica,
 		tSafeReplica:        tSafeReplica,
@@ -78,7 +73,6 @@ func (q *queryShardService) addQueryShard(collectionID UniqueID, channel Channel
 		return nil
 	}
 	qs, err := newQueryShard(
-		q.ctx,
 		collectionID,
 		channel,
 		replicaID,
@@ -126,7 +120,6 @@ func (q *queryShardService) getQueryShard(channel Channel) (*queryShard, error) 
 
 func (q *queryShardService) close() {
 	log.Warn("Close query shard service")
-	q.cancel()
 	q.queryShardsMu.Lock()
 	defer q.queryShardsMu.Unlock()
 
@@ -137,12 +130,13 @@ func (q *queryShardService) close() {
 
 func (q *queryShardService) releaseCollection(collectionID int64) {
 	q.queryShardsMu.Lock()
+	defer q.queryShardsMu.Unlock()
+
 	for channel, queryShard := range q.queryShards {
 		if queryShard.collectionID == collectionID {
 			queryShard.Close()
 			delete(q.queryShards, channel)
 		}
 	}
-	q.queryShardsMu.Unlock()
 	log.Info("release collection in query shard service", zap.Int64("collectionId", collectionID))
 }

@@ -21,12 +21,13 @@ import (
 	"fmt"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
-	"go.uber.org/zap"
 )
 
 type readTask interface {
@@ -87,17 +88,17 @@ func (b *baseReadTask) SetMaxCPUUsage(cpu int32) {
 	b.maxCPU = cpu
 }
 
-func (b *baseReadTask) PreExecute(ctx context.Context) error {
+func (b *baseReadTask) PreExecute() error {
 	b.SetStep(TaskStepPreExecute)
 	return nil
 }
 
-func (b *baseReadTask) Execute(ctx context.Context) error {
+func (b *baseReadTask) Execute() error {
 	b.SetStep(TaskStepExecute)
 	return nil
 }
 
-func (b *baseReadTask) PostExecute(ctx context.Context) error {
+func (b *baseReadTask) PostExecute() error {
 	b.SetStep(TaskStepPostExecute)
 	return nil
 }

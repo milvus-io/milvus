@@ -42,7 +42,7 @@ type queryTask struct {
 	cpuOnce sync.Once
 }
 
-func (q *queryTask) PreExecute(ctx context.Context) error {
+func (q *queryTask) PreExecute() error {
 	// check ctx timeout
 	if !funcutil.CheckCtxValid(q.Ctx()) {
 		return errors.New("search context timeout1$")
@@ -143,7 +143,7 @@ func (q *queryTask) queryOnHistorical() error {
 	return nil
 }
 
-func (q *queryTask) Execute(ctx context.Context) error {
+func (q *queryTask) Execute() error {
 	if q.DataScope == querypb.DataScope_Streaming {
 		return q.queryOnStreaming()
 	} else if q.DataScope == querypb.DataScope_Historical {
