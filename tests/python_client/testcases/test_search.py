@@ -1778,16 +1778,12 @@ class TestCollectionSearch(TestcaseBase):
         res = collection_w.search(binary_vectors[:nq], "binary_vector",
                                   search_params, default_limit, "int64 >= 0",
                                   _async=_async,
-                                  travel_timestamp=time_stamp,
-                                  check_task=CheckTasks.check_search_results,
-                                  check_items={"nq": nq,
-                                               "ids": insert_ids,
-                                               "limit": default_limit,
-                                               "_async": _async})[0]
+                                  travel_timestamp=time_stamp)[0]
         if _async:
             res.done()
             res = res.result()
         assert res[0].distances[0] == 0.0
+        assert len(res) <= default_limit
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index", ["BIN_FLAT"])
