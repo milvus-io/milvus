@@ -27,6 +27,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/blang/semver/v4"
 	"github.com/minio/minio-go/v7"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -413,7 +414,8 @@ var getCheckBucketFn = func(cli *minio.Client) func() error {
 }
 
 func (s *Server) initServiceDiscovery() error {
-	sessions, rev, err := s.session.GetSessions(typeutil.DataNodeRole)
+	r := semver.MustParseRange(">=2.1.2")
+	sessions, rev, err := s.session.GetSessionsWithVersionRange(typeutil.DataNodeRole, r)
 	if err != nil {
 		log.Warn("DataCoord failed to init service discovery", zap.Error(err))
 		return err
@@ -432,7 +434,7 @@ func (s *Server) initServiceDiscovery() error {
 	s.cluster.Startup(s.ctx, datanodes)
 
 	// TODO implement rewatch logic
-	s.dnEventCh = s.session.WatchServices(typeutil.DataNodeRole, rev+1, nil)
+	s.dnEventCh = s.session.WatchServicesWithVersionRange(typeutil.DataNodeRole, r, rev+1, nil)
 
 	//icSessions, icRevision, err := s.session.GetSessions(typeutil.IndexCoordRole)
 	//if err != nil {

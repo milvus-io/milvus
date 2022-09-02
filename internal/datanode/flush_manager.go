@@ -41,7 +41,7 @@ import (
 // flushManager defines a flush manager signature
 type flushManager interface {
 	// notify flush manager insert buffer data
-	flushBufferData(data *BufferData, segmentID UniqueID, flushed bool, dropped bool, pos *internalpb.MsgPosition) error
+	flushBufferData(data *BufferData, segStats []byte, segmentID UniqueID, flushed bool, dropped bool, pos *internalpb.MsgPosition) error
 	// notify flush manager del buffer data
 	flushDelData(data *DelDataBuf, segmentID UniqueID, pos *internalpb.MsgPosition) error
 	// injectFlush injects compaction or other blocking task before flush sync
@@ -335,7 +335,7 @@ func (m *rendezvousFlushManager) handleDeleteTask(segmentID UniqueID, task flush
 
 // flushBufferData notifies flush manager insert buffer data.
 // This method will be retired on errors. Final errors will be propagated upstream and logged.
-func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID UniqueID, flushed bool,
+func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segStats []byte, segmentID UniqueID, flushed bool,
 	dropped bool, pos *internalpb.MsgPosition) error {
 	tr := timerecord.NewTimeRecorder("flushDuration")
 	// empty flush
@@ -360,12 +360,13 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID Uni
 	// encode data and convert output data
 	inCodec := storage.NewInsertCodec(meta)
 
-	binLogs, statsBinlogs, err := inCodec.Serialize(partID, segmentID, data.buffer)
+	binLogs, _, err := inCodec.Serialize(partID, segmentID, data.buffer)
 	if err != nil {
 		return err
 	}
 
-	start, _, err := m.allocIDBatch(uint32(len(binLogs)))
+	// binlogs + 1 statslog
+	start, _, err := m.allocIDBatch(uint32(len(binLogs) + 1))
 	if err != nil {
 		return err
 	}
@@ -400,27 +401,22 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID Uni
 
 	field2Stats := make(map[UniqueID]*datapb.Binlog)
 	// write stats binlog
-	for _, blob := range statsBinlogs {
-		fieldID, err := strconv.ParseInt(blob.GetKey(), 10, 64)
-		if err != nil {
-			log.Error("Flush failed ... cannot parse string to fieldID ..", zap.Error(err))
-			return err
-		}
 
-		logidx := field2Logidx[fieldID]
+	pkID := getPKID(meta)
+	if pkID == common.InvalidFieldID {
+		return fmt.Errorf("failed to get pk id for segment %d", segmentID)
+	}
 
-		// no error raise if alloc=false
-		k := JoinIDPath(collID, partID, segmentID, fieldID, logidx)
-
-		key := path.Join(m.ChunkManager.RootPath(), common.SegmentStatslogPath, k)
-		kvs[key] = blob.Value
-		field2Stats[fieldID] = &datapb.Binlog{
-			EntriesNum:    0,
-			TimestampFrom: 0, //TODO
-			TimestampTo:   0, //TODO,
-			LogPath:       key,
-			LogSize:       int64(len(blob.Value)),
-		}
+	logidx := start + int64(len(binLogs))
+	k := JoinIDPath(collID, partID, segmentID, pkID, logidx)
+	key := path.Join(m.ChunkManager.RootPath(), common.SegmentStatslogPath, k)
+	kvs[key] = segStats
+	field2Stats[pkID] = &datapb.Binlog{
+		EntriesNum:    0,
+		TimestampFrom: 0, //TODO
+		TimestampTo:   0, //TODO,
+		LogPath:       key,
+		LogSize:       int64(len(segStats)),
 	}
 
 	m.updateSegmentCheckPoint(segmentID)

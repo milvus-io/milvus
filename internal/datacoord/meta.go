@@ -302,17 +302,10 @@ func (m *meta) UpdateFlushSegmentsInfo(
 		}
 	}
 	clonedSegment.Binlogs = currBinlogs
-	// statlogs
-	currStatsLogs := clonedSegment.GetStatslogs()
-	for _, tStatsLogs := range statslogs {
-		fieldStatsLog := getFieldBinlogs(tStatsLogs.GetFieldID(), currStatsLogs)
-		if fieldStatsLog == nil {
-			currStatsLogs = append(currStatsLogs, tStatsLogs)
-		} else {
-			fieldStatsLog.Binlogs = append(fieldStatsLog.Binlogs, tStatsLogs.Binlogs...)
-		}
+	// statlogs, overwrite latest segment stats log
+	if len(statslogs) > 0 {
+		clonedSegment.Statslogs = statslogs
 	}
-	clonedSegment.Statslogs = currStatsLogs
 	// deltalogs
 	currDeltaLogs := clonedSegment.GetDeltalogs()
 	for _, tDeltaLogs := range deltalogs {

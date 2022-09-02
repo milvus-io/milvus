@@ -384,8 +384,16 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 			zap.Bool("dropped", task.dropped),
 			zap.Any("pos", endPositions[0]),
 		)
+
+		segStats, err := ibNode.replica.getSegmentStatslog(task.segmentID)
+		if err != nil {
+			log.Error("failed to get segment stats log", zap.Int64("segmentID", task.segmentID), zap.Error(err))
+			panic(err)
+		}
+
 		err = retry.Do(ibNode.ctx, func() error {
 			return ibNode.flushManager.flushBufferData(task.buffer,
+				segStats,
 				task.segmentID,
 				task.flushed,
 				task.dropped,
