@@ -28,6 +28,7 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -292,15 +293,24 @@ func (sc *ShardCluster) updateSegment(evt shardSegmentInfo) {
 
 // SyncSegments synchronize segment distribution in batch
 func (sc *ShardCluster) SyncSegments(distribution []*querypb.ReplicaSegmentsInfo, state segmentState) {
+	log := log.With(zap.Int64("collectionID", sc.collectionID), zap.String("vchannel", sc.vchannelName), zap.Int64("replicaID", sc.replicaID))
 	log.Info("ShardCluster sync segments", zap.Any("replica segments", distribution), zap.Int32("state", int32(state)))
 
 	sc.mut.Lock()
 	for _, line := range distribution {
 		for _, segmentID := range line.GetSegmentIds() {
+			nodeID := line.GetNodeId()
+			// if node id not in replica node list, this line shall be placeholder for segment offline
+			_, ok := sc.nodes[nodeID]
+			if !ok {
+				log.Warn("Sync segment with invalid nodeID", zap.Int64("segmentID", segmentID), zap.Int64("nodeID", line.NodeId))
+				nodeID = common.InvalidNodeID
+			}
+
 			old, ok := sc.segments[segmentID]
 			if !ok { // newly add
 				sc.segments[segmentID] = shardSegmentInfo{
-					nodeID:      line.GetNodeId(),
+					nodeID:      nodeID,
 					partitionID: line.GetPartitionId(),
 					segmentID:   segmentID,
 					state:       state,
@@ -309,7 +319,7 @@ func (sc *ShardCluster) SyncSegments(distribution []*querypb.ReplicaSegmentsInfo
 			}
 
 			sc.transferSegment(old, shardSegmentInfo{
-				nodeID:      line.GetNodeId(),
+				nodeID:      nodeID,
 				partitionID: line.GetPartitionId(),
 				segmentID:   segmentID,
 				state:       state,
@@ -388,6 +398,7 @@ func (sc *ShardCluster) removeSegment(evt shardSegmentInfo) {
 	}
 
 	delete(sc.segments, evt.segmentID)
+	sc.healthCheck()
 }
 
 // init list all nodes and semgent states ant start watching
@@ -455,7 +466,8 @@ func (sc *ShardCluster) updateShardClusterState(state shardClusterState) {
 // healthCheck iterate all segments to to check cluster could provide service.
 func (sc *ShardCluster) healthCheck() {
 	for _, segment := range sc.segments {
-		if segment.state != segmentStateLoaded { // TODO check hand-off or load balance
+		if segment.state != segmentStateLoaded ||
+			segment.nodeID == common.InvalidNodeID { // segment in offline nodes
 			sc.updateShardClusterState(unavailable)
 			return
 		}
@@ -600,11 +612,15 @@ func (sc *ShardCluster) HandoffSegments(info *querypb.SegmentChangeInfo) error {
 		}
 		nodeID, has := sc.selectNodeInReplica(seg.NodeIds)
 		if !has {
-			continue
+			// remove segment placeholder
+			nodeID = common.InvalidNodeID
 		}
 		sc.removeSegment(shardSegmentInfo{segmentID: seg.GetSegmentID(), nodeID: nodeID})
 
-		removes[nodeID] = append(removes[nodeID], seg.SegmentID)
+		// only add remove operations when node is valid
+		if nodeID != common.InvalidNodeID {
+			removes[nodeID] = append(removes[nodeID], seg.SegmentID)
+		}
 	}
 
 	var errs errorutil.ErrorList
