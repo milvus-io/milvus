@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -968,6 +969,46 @@ func TestShardCluster_SyncSegments(t *testing.T) {
 		}, time.Second, time.Millisecond)
 	})
 
+	t.Run("sync segments with offline nodes", func(t *testing.T) {
+		nodeEvents := []nodeEvent{}
+
+		segmentEvents := []segmentEvent{}
+
+		evtCh := make(chan segmentEvent, 10)
+		sc := NewShardCluster(collectionID, replicaID, vchannelName,
+			&mockNodeDetector{initNodes: nodeEvents}, &mockSegmentDetector{
+				initSegments: segmentEvents,
+				evtCh:        evtCh,
+			}, buildMockQueryNode)
+		defer sc.Close()
+
+		sc.SyncSegments([]*querypb.ReplicaSegmentsInfo{
+			{
+				NodeId:     1,
+				SegmentIds: []int64{1},
+			},
+			{
+				NodeId:     2,
+				SegmentIds: []int64{2},
+			},
+			{
+				NodeId:     3,
+				SegmentIds: []int64{3},
+			},
+		}, segmentStateLoaded)
+		assert.Eventually(t, func() bool {
+			seg, has := sc.getSegment(1)
+			return has && seg.nodeID == common.InvalidNodeID && seg.state == segmentStateLoaded
+		}, time.Second, time.Millisecond)
+		assert.Eventually(t, func() bool {
+			seg, has := sc.getSegment(2)
+			return has && seg.nodeID == common.InvalidNodeID && seg.state == segmentStateLoaded
+		}, time.Second, time.Millisecond)
+		assert.Eventually(t, func() bool {
+			seg, has := sc.getSegment(3)
+			return has && seg.nodeID == common.InvalidNodeID && seg.state == segmentStateLoaded
+		}, time.Second, time.Millisecond)
+	})
 }
 
 var streamingDoNothing = func(context.Context) error { return nil }

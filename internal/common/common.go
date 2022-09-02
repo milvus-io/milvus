@@ -52,6 +52,9 @@ const (
 
 	// NotRegisteredID means node is not registered into etcd.
 	NotRegisteredID = int64(-1)
+
+	// InvalidNodeID indicates that node is not valid in querycoord replica or shard cluster.
+	InvalidNodeID = int64(-1)
 )
 
 // Endian is type alias of binary.LittleEndian.
