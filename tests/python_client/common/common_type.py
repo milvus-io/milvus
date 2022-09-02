@@ -57,6 +57,8 @@ compact_retention_duration = 40  # compaction travel time retention range 20s
 max_compaction_interval = 60  # the max time interval (s) from the last compaction
 max_field_num = 256  # Maximum number of fields in a collection
 default_replica_num = 1
+IMAGE_REPOSITORY_MILVUS = "harbor.milvus.io/dockerhub/milvusdb/milvus"
+NAMESPACE_CHAOS_TESTING = "chaos-testing"
 
 Not_Exist = "Not_Exist"
 Connect_Object_Name = True
