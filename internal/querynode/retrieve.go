@@ -19,6 +19,9 @@ package querynode
 import (
 	"context"
 
+	"golang.org/x/sync/errgroup"
+
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/storage"
 )
@@ -26,21 +29,31 @@ import (
 // retrieveOnSegments performs retrieve on listed segments
 // all segment ids are validated before calling this function
 func retrieveOnSegments(replica ReplicaInterface, segType segmentType, collID UniqueID, plan *RetrievePlan, segIDs []UniqueID, vcm storage.ChunkManager) ([]*segcorepb.RetrieveResults, error) {
-	var retrieveResults []*segcorepb.RetrieveResults
+	retrieveResults := make([]*segcorepb.RetrieveResults, len(segIDs))
 
-	for _, segID := range segIDs {
-		seg, err := replica.getSegmentByID(segID, segType)
-		if err != nil {
-			return nil, err
-		}
-		result, err := seg.retrieve(plan)
-		if err != nil {
-			return nil, err
-		}
-		if err := seg.fillIndexedFieldsData(collID, vcm, result); err != nil {
-			return nil, err
-		}
-		retrieveResults = append(retrieveResults, result)
+	group := &errgroup.Group{}
+	for i, segID := range segIDs {
+		i, segID := i, segID
+		group.Go(func() error {
+			seg, err := replica.getSegmentByID(segID, segType)
+			if err != nil {
+				log.Error(err.Error()) // should not happen but still ignore it since the result is still correct
+				return nil
+			}
+			result, err := seg.retrieve(plan)
+			if err != nil {
+				return err
+			}
+			if err = seg.fillIndexedFieldsData(collID, vcm, result); err != nil {
+				return err
+			}
+			retrieveResults[i] = result
+			return nil
+		})
+	}
+	err := group.Wait()
+	if err != nil {
+		return nil, err
 	}
 	return retrieveResults, nil
 }

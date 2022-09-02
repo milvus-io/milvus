@@ -153,10 +153,33 @@ func (q *queryTask) Execute(ctx context.Context) error {
 }
 
 func (q *queryTask) estimateCPUUsage() {
-	q.cpu = 10
-	if q.cpu > q.maxCPU {
+	var segmentNum int64
+	if q.DataScope == querypb.DataScope_Streaming {
+		// assume growing segments num is 5
+		partitionIDs := q.iReq.GetPartitionIDs()
+		channel := ""
+		if len(q.req.GetDmlChannels()) > 0 {
+			channel = q.req.GetDmlChannels()[0]
+		}
+		segIDs, err := q.QS.metaReplica.getSegmentIDsByVChannel(partitionIDs, channel, segmentTypeGrowing)
+		if err != nil {
+			log.Ctx(q.Ctx()).Error("queryTask estimateCPUUsage", zap.Error(err))
+		}
+		segmentNum = int64(len(segIDs))
+		if segmentNum <= 0 {
+			segmentNum = 1
+		}
+	} else if q.DataScope == querypb.DataScope_Historical {
+		segmentNum = int64(len(q.req.GetSegmentIDs()))
+	}
+	cpu := float64(segmentNum) * Params.QueryNodeCfg.CPURatio
+	q.cpu = int32(cpu)
+	if q.cpu <= 0 {
+		q.cpu = 5
+	} else if q.cpu > q.maxCPU {
 		q.cpu = q.maxCPU
 	}
+	q.baseReadTask.segmentNum = int32(segmentNum)
 }
 
 func (q *queryTask) CPUUsage() int32 {

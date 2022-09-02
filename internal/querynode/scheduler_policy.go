@@ -20,7 +20,7 @@ func defaultScheduleReadPolicy(sqTasks *list.List, targetUsage int32, maxNum int
 		usage += tUsage
 		sqTasks.Remove(e)
 		ret = append(ret, t)
-		maxNum--
+		maxNum -= t.SegmentNum()
 	}
 	return ret, usage
 }

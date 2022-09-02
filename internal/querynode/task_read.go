@@ -40,6 +40,7 @@ type readTask interface {
 	Merge(readTask)
 	CanMergeWith(readTask) bool
 	CPUUsage() int32
+	SegmentNum() int32
 	Timeout() bool
 
 	SetMaxCPUUsage(int32)
@@ -58,6 +59,7 @@ type baseReadTask struct {
 	maxCPU             int32
 	DbID               int64
 	CollectionID       int64
+	segmentNum         int32
 	TravelTimestamp    uint64
 	GuaranteeTimestamp uint64
 	TimeoutTimestamp   uint64
@@ -124,6 +126,10 @@ func (b *baseReadTask) Merge(t readTask) {
 
 func (b *baseReadTask) CPUUsage() int32 {
 	return 0
+}
+
+func (b *baseReadTask) SegmentNum() int32 {
+	return b.segmentNum
 }
 
 func (b *baseReadTask) Timeout() bool {

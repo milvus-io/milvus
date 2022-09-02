@@ -62,6 +62,7 @@ type mockReadTask struct {
 	cpuUsage     int32
 	maxCPU       int32
 	collectionID UniqueID
+	segmentNum   int32
 	ready        bool
 	canMerge     bool
 	timeout      bool
@@ -83,6 +84,10 @@ func (m *mockReadTask) Merge(o readTask) {
 
 func (m *mockReadTask) CPUUsage() int32 {
 	return m.cpuUsage
+}
+
+func (m *mockReadTask) SegmentNum() int32 {
+	return m.segmentNum
 }
 
 func (m *mockReadTask) Timeout() bool {
