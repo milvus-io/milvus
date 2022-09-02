@@ -529,6 +529,7 @@ func (dct *describeCollectionTask) Execute(ctx context.Context) error {
 		CollectionID:         0,
 		VirtualChannelNames:  nil,
 		PhysicalChannelNames: nil,
+		CollectionName:       dct.GetCollectionName(),
 	}
 
 	result, err := dct.rootCoord.DescribeCollection(ctx, dct.DescribeCollectionRequest)
