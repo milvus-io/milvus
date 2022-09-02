@@ -6,6 +6,9 @@ import (
 	"reflect"
 	"strings"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 
 	"github.com/milvus-io/milvus/internal/util"
@@ -161,13 +164,7 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 	}
 
 	log.Debug("permission deny", zap.String("policy", policy), zap.Strings("roles", roleNames))
-	return ctx, &ErrPermissionDenied{}
-}
-
-type ErrPermissionDenied struct{}
-
-func (e *ErrPermissionDenied) Error() string {
-	return "permission deny"
+	return ctx, status.Error(codes.PermissionDenied, "permission deny")
 }
 
 // isCurUserObject Determine whether it is an Object of type User that operates on its own user information,
