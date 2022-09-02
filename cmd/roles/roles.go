@@ -63,6 +63,7 @@ func init() {
 	Registry = prometheus.NewRegistry()
 	Registry.MustRegister(prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
 	Registry.MustRegister(prometheus.NewGoCollector())
+	metrics.RegisterEtcdMetrics(Registry)
 }
 
 func stopRocksmq() {

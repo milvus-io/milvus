@@ -21,6 +21,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
@@ -936,11 +938,7 @@ func TestCheckTnxStringValueSizeAndWarn(t *testing.T) {
 	ret := etcdkv.CheckTnxStringValueSizeAndWarn(kvs)
 	assert.False(t, ret)
 
-	bytes := make([]byte, 1024000)
-	for i := 0; i < 1024000; i++ {
-		bytes[i] = byte('a')
-	}
-	kvs["k"] = string(bytes)
+	kvs["k1"] = funcutil.RandomString(1024000)
 	ret = etcdkv.CheckTnxStringValueSizeAndWarn(kvs)
 	assert.True(t, ret)
 }
