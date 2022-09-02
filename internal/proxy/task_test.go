@@ -1031,7 +1031,7 @@ func TestDescribeCollectionTask_ShardsNum1(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, task.result.Status.ErrorCode)
 	assert.Equal(t, shardsNum, task.result.ShardsNum)
-
+	assert.Equal(t, collectionName, task.result.GetCollectionName())
 }
 
 func TestDescribeCollectionTask_ShardsNum2(t *testing.T) {
@@ -1097,6 +1097,7 @@ func TestDescribeCollectionTask_ShardsNum2(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, task.result.Status.ErrorCode)
 	assert.Equal(t, common.DefaultShardsNum, task.result.ShardsNum)
+	assert.Equal(t, collectionName, task.result.GetCollectionName())
 	rc.Stop()
 }
 
