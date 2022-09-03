@@ -20,6 +20,27 @@ message FieldIndexInfo{
   int64 indexID = 2;
 }
 
+enum CollectionState {
+  CollectionCreated = 0;
+  CollectionCreating = 1;
+  CollectionDropping = 2;
+  CollectionDropped = 3;
+}
+
+enum PartitionState {
+  PartitionCreated = 0;
+  PartitionCreating = 1;
+  PartitionDropping = 2;
+  PartitionDropped = 3;
+}
+
+enum AliasState {
+  AliasCreated = 0;
+  AliasCreating = 1;
+  AliasDropping = 2;
+  AliasDropped = 3;
+}
+
 message CollectionInfo {
   int64 ID = 1;
   schema.CollectionSchema schema = 2;
@@ -37,6 +58,7 @@ message CollectionInfo {
   int32 shards_num = 10;
   repeated common.KeyDataPair start_positions = 11;
   common.ConsistencyLevel consistency_level = 12;
+  CollectionState state = 13; // To keep compatible with older version, default state is `Created`.
 }
 
 message PartitionInfo {
@@ -44,12 +66,14 @@ message PartitionInfo {
   string partitionName = 2;
   uint64 partition_created_timestamp = 3;
   int64 collection_id = 4;
+  PartitionState state = 5; // To keep compatible with older version, default state is `Created`.
 }
 
 message AliasInfo {
   string alias_name = 1;
   int64 collection_id = 2;
   uint64 created_time = 3;
+  AliasState state = 4; // To keep compatible with older version, default state is `Created`.
 }
 
 message SegmentIndexInfo {

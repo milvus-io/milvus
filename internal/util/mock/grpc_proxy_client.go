@@ -53,18 +53,6 @@ func (m *GrpcProxyClient) GetDdChannel(ctx context.Context, in *internalpb.GetDd
 	return &milvuspb.StringResponse{}, m.Err
 }
 
-func (m *GrpcProxyClient) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.Err
-}
-
-func (m *GrpcProxyClient) SendSearchResult(ctx context.Context, in *internalpb.SearchResults, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.Err
-}
-
-func (m *GrpcProxyClient) SendRetrieveResult(ctx context.Context, in *internalpb.RetrieveResults, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.Err
-}
-
 func (m *GrpcProxyClient) InvalidateCredentialCache(ctx context.Context, in *proxypb.InvalidateCredCacheRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }

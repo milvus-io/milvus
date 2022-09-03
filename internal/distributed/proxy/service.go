@@ -548,11 +548,6 @@ func (s *Server) InvalidateCollectionMetaCache(ctx context.Context, request *pro
 	return s.proxy.InvalidateCollectionMetaCache(ctx, request)
 }
 
-// ReleaseDQLMessageStream notifies Proxy to release and close the search message stream of specific collection.
-func (s *Server) ReleaseDQLMessageStream(ctx context.Context, request *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
-	return s.proxy.ReleaseDQLMessageStream(ctx, request)
-}
-
 // CreateCollection notifies Proxy to create a collection
 func (s *Server) CreateCollection(ctx context.Context, request *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
 	return s.proxy.CreateCollection(ctx, request)
@@ -741,14 +736,6 @@ func (s *Server) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.
 // GetFlushState gets the flush state of multiple segments
 func (s *Server) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
 	return s.proxy.GetFlushState(ctx, req)
-}
-
-func (s *Server) SendSearchResult(ctx context.Context, results *internalpb.SearchResults) (*commonpb.Status, error) {
-	return s.proxy.SendSearchResult(ctx, results)
-}
-
-func (s *Server) SendRetrieveResult(ctx context.Context, results *internalpb.RetrieveResults) (*commonpb.Status, error) {
-	return s.proxy.SendRetrieveResult(ctx, results)
 }
 
 func (s *Server) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {

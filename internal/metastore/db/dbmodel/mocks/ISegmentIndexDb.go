@@ -12,6 +12,29 @@ type ISegmentIndexDb struct {
 	mock.Mock
 }
 
+// Get provides a mock function with given fields: tenantID, collectionID, buildID
+func (_m *ISegmentIndexDb) Get(tenantID string, collectionID int64, buildID int64) ([]*dbmodel.SegmentIndexResult, error) {
+	ret := _m.Called(tenantID, collectionID, buildID)
+
+	var r0 []*dbmodel.SegmentIndexResult
+	if rf, ok := ret.Get(0).(func(string, int64, int64) []*dbmodel.SegmentIndexResult); ok {
+		r0 = rf(tenantID, collectionID, buildID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*dbmodel.SegmentIndexResult)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string, int64, int64) error); ok {
+		r1 = rf(tenantID, collectionID, buildID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // Insert provides a mock function with given fields: in
 func (_m *ISegmentIndexDb) Insert(in []*dbmodel.SegmentIndex) error {
 	ret := _m.Called(in)
@@ -26,6 +49,29 @@ func (_m *ISegmentIndexDb) Insert(in []*dbmodel.SegmentIndex) error {
 	return r0
 }
 
+// List provides a mock function with given fields: tenantID
+func (_m *ISegmentIndexDb) List(tenantID string) ([]*dbmodel.SegmentIndexResult, error) {
+	ret := _m.Called(tenantID)
+
+	var r0 []*dbmodel.SegmentIndexResult
+	if rf, ok := ret.Get(0).(func(string) []*dbmodel.SegmentIndexResult); ok {
+		r0 = rf(tenantID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*dbmodel.SegmentIndexResult)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(tenantID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // MarkDeleted provides a mock function with given fields: tenantID, in
 func (_m *ISegmentIndexDb) MarkDeleted(tenantID string, in []*dbmodel.SegmentIndex) error {
 	ret := _m.Called(tenantID, in)
@@ -33,6 +79,20 @@ func (_m *ISegmentIndexDb) MarkDeleted(tenantID string, in []*dbmodel.SegmentInd
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, []*dbmodel.SegmentIndex) error); ok {
 		r0 = rf(tenantID, in)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MarkDeletedByBuildID provides a mock function with given fields: tenantID, idxID
+func (_m *ISegmentIndexDb) MarkDeletedByBuildID(tenantID string, idxID int64) error {
+	ret := _m.Called(tenantID, idxID)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string, int64) error); ok {
+		r0 = rf(tenantID, idxID)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -54,26 +114,12 @@ func (_m *ISegmentIndexDb) MarkDeletedByCollectionID(tenantID string, collID int
 	return r0
 }
 
-// MarkDeletedByIndexID provides a mock function with given fields: tenantID, idxID
-func (_m *ISegmentIndexDb) MarkDeletedByIndexID(tenantID string, idxID int64) error {
-	ret := _m.Called(tenantID, idxID)
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(string, int64) error); ok {
-		r0 = rf(tenantID, idxID)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// Upsert provides a mock function with given fields: in
-func (_m *ISegmentIndexDb) Upsert(in []*dbmodel.SegmentIndex) error {
+// Update provides a mock function with given fields: in
+func (_m *ISegmentIndexDb) Update(in *dbmodel.SegmentIndex) error {
 	ret := _m.Called(in)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func([]*dbmodel.SegmentIndex) error); ok {
+	if rf, ok := ret.Get(0).(func(*dbmodel.SegmentIndex) error); ok {
 		r0 = rf(in)
 	} else {
 		r0 = ret.Error(0)

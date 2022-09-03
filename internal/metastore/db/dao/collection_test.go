@@ -358,8 +358,8 @@ func TestCollection_Insert(t *testing.T) {
 
 	// expectation
 	mock.ExpectBegin()
-	mock.ExpectExec("INSERT INTO `collections` (`tenant_id`,`collection_id`,`collection_name`,`description`,`auto_id`,`shards_num`,`start_position`,`consistency_level`,`ts`,`is_deleted`,`created_at`,`updated_at`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE `id`=`id`").
-		WithArgs(collection.TenantID, collection.CollectionID, collection.CollectionName, collection.Description, collection.AutoID, collection.ShardsNum, collection.StartPosition, collection.ConsistencyLevel, collection.Ts, collection.IsDeleted, collection.CreatedAt, collection.UpdatedAt).
+	mock.ExpectExec("INSERT INTO `collections` (`tenant_id`,`collection_id`,`collection_name`,`description`,`auto_id`,`shards_num`,`start_position`,`consistency_level`,`status`,`ts`,`is_deleted`,`created_at`,`updated_at`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE `id`=`id`").
+		WithArgs(collection.TenantID, collection.CollectionID, collection.CollectionName, collection.Description, collection.AutoID, collection.ShardsNum, collection.StartPosition, collection.ConsistencyLevel, collection.Status, collection.Ts, collection.IsDeleted, collection.CreatedAt, collection.UpdatedAt).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
@@ -386,8 +386,8 @@ func TestCollection_Insert_Error(t *testing.T) {
 
 	// expectation
 	mock.ExpectBegin()
-	mock.ExpectExec("INSERT INTO `collections` (`tenant_id`,`collection_id`,`collection_name`,`description`,`auto_id`,`shards_num`,`start_position`,`consistency_level`,`ts`,`is_deleted`,`created_at`,`updated_at`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE `id`=`id`").
-		WithArgs(collection.TenantID, collection.CollectionID, collection.CollectionName, collection.Description, collection.AutoID, collection.ShardsNum, collection.StartPosition, collection.ConsistencyLevel, collection.Ts, collection.IsDeleted, collection.CreatedAt, collection.UpdatedAt).
+	mock.ExpectExec("INSERT INTO `collections` (`tenant_id`,`collection_id`,`collection_name`,`description`,`auto_id`,`shards_num`,`start_position`,`consistency_level`,`status`,`ts`,`is_deleted`,`created_at`,`updated_at`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE `id`=`id`").
+		WithArgs(collection.TenantID, collection.CollectionID, collection.CollectionName, collection.Description, collection.AutoID, collection.ShardsNum, collection.StartPosition, collection.ConsistencyLevel, collection.Status, collection.Ts, collection.IsDeleted, collection.CreatedAt, collection.UpdatedAt).
 		WillReturnError(errors.New("test error"))
 	mock.ExpectRollback()
 
@@ -422,4 +422,62 @@ func ErrorExec(f func()) {
 	mock.ExpectBegin()
 	f()
 	mock.ExpectRollback()
+}
+
+func Test_collectionDb_Update(t *testing.T) {
+	t.Run("normal case", func(t *testing.T) {
+		var collection = &dbmodel.Collection{
+			TenantID:         "",
+			CollectionID:     collID1,
+			CollectionName:   "test_collection_name_1",
+			Description:      "",
+			AutoID:           false,
+			ShardsNum:        int32(2),
+			StartPosition:    "",
+			ConsistencyLevel: int32(commonpb.ConsistencyLevel_Eventually),
+			Ts:               ts,
+			IsDeleted:        false,
+			CreatedAt:        time.Now(),
+			UpdatedAt:        time.Now(),
+		}
+
+		// expectation
+		mock.ExpectBegin()
+		mock.ExpectExec("UPDATE `collections` SET `auto_id`=?,`collection_id`=?,`collection_name`=?,`consistency_level`=?,`created_at`=?,`description`=?,`is_deleted`=?,`shards_num`=?,`start_position`=?,`status`=?,`tenant_id`=?,`ts`=?,`updated_at`=? WHERE id = ?").
+			WithArgs(collection.AutoID, collection.CollectionID, collection.CollectionName, collection.ConsistencyLevel, collection.CreatedAt, collection.Description, collection.IsDeleted, collection.ShardsNum, collection.StartPosition, collection.Status, collection.TenantID, collection.Ts, collection.UpdatedAt, collection.ID).
+			WillReturnResult(sqlmock.NewResult(1, 1))
+		mock.ExpectCommit()
+
+		// actual
+		err := collTestDb.Update(collection)
+		assert.Nil(t, err)
+	})
+
+	t.Run("error", func(t *testing.T) {
+		var collection = &dbmodel.Collection{
+			TenantID:         "",
+			CollectionID:     collID1,
+			CollectionName:   "test_collection_name_1",
+			Description:      "",
+			AutoID:           false,
+			ShardsNum:        int32(2),
+			StartPosition:    "",
+			ConsistencyLevel: int32(commonpb.ConsistencyLevel_Eventually),
+			Ts:               ts,
+			IsDeleted:        false,
+			CreatedAt:        time.Now(),
+			UpdatedAt:        time.Now(),
+		}
+
+		// expectation
+		mock.ExpectBegin()
+		mock.ExpectExec("UPDATE `collections` SET `auto_id`=?,`collection_id`=?,`collection_name`=?,`consistency_level`=?,`created_at`=?,`description`=?,`is_deleted`=?,`shards_num`=?,`start_position`=?,`status`=?,`tenant_id`=?,`ts`=?,`updated_at`=? WHERE id = ?").
+			WithArgs(collection.AutoID, collection.CollectionID, collection.CollectionName, collection.ConsistencyLevel, collection.CreatedAt, collection.Description, collection.IsDeleted, collection.ShardsNum, collection.StartPosition, collection.Status, collection.TenantID, collection.Ts, collection.UpdatedAt, collection.ID).
+			WillReturnError(errors.New("error mock Update"))
+		mock.ExpectRollback()
+
+		// actual
+		err := collTestDb.Update(collection)
+		assert.Error(t, err)
+	})
 }

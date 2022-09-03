@@ -718,12 +718,6 @@ func TestProxy(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 
-		// recreate -> fail
-		req2 := constructCreateCollectionRequest()
-		resp, err = proxy.CreateCollection(ctx, req2)
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-
 		reqInvalidField := constructCreateCollectionRequest()
 		schema := constructCollectionSchema()
 		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
@@ -764,16 +758,6 @@ func TestProxy(t *testing.T) {
 			DbName:         dbName,
 			CollectionName: collectionName,
 		})
-
-		sameAliasReq := &milvuspb.CreateAliasRequest{
-			Base:           nil,
-			CollectionName: collectionName,
-			Alias:          "alias",
-		}
-
-		resp, err = proxy.CreateAlias(ctx, sameAliasReq)
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
 	wg.Add(1)
@@ -833,15 +817,6 @@ func TestProxy(t *testing.T) {
 			CollectionName: collectionName,
 		})
 
-		sameDropReq := &milvuspb.DropAliasRequest{
-			Base:  nil,
-			Alias: "alias",
-		}
-
-		// Can't drop non-existing alias
-		resp, err = proxy.DropAlias(ctx, sameDropReq)
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
 	wg.Add(1)
@@ -949,16 +924,6 @@ func TestProxy(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-
-		// recreate -> fail
-		resp, err = proxy.CreatePartition(ctx, &milvuspb.CreatePartitionRequest{
-			Base:           nil,
-			DbName:         dbName,
-			CollectionName: collectionName,
-			PartitionName:  partitionName,
-		})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 
 		// create partition with non-exist collection -> fail
 		resp, err = proxy.CreatePartition(ctx, &milvuspb.CreatePartitionRequest{
@@ -1683,23 +1648,13 @@ func TestProxy(t *testing.T) {
 	wg.Add(1)
 	t.Run("release collection", func(t *testing.T) {
 		defer wg.Done()
-		collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
+		_, err := globalMetaCache.GetCollectionID(ctx, collectionName)
 		assert.NoError(t, err)
 
 		resp, err := proxy.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{
 			Base:           nil,
 			DbName:         dbName,
 			CollectionName: collectionName,
-		})
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-		assert.Equal(t, "", resp.Reason)
-
-		// release dql message stream
-		resp, err = proxy.ReleaseDQLMessageStream(ctx, &proxypb.ReleaseDQLMessageStreamRequest{
-			Base:         nil,
-			DbID:         0,
-			CollectionID: collectionID,
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
@@ -1998,24 +1953,6 @@ func TestProxy(t *testing.T) {
 		resp, err = proxy.DropPartition(ctx, &milvuspb.DropPartitionRequest{
 			Base:           nil,
 			DbName:         dbName,
-			CollectionName: collectionName,
-			PartitionName:  partitionName,
-		})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-
-		resp, err = proxy.DropPartition(ctx, &milvuspb.DropPartitionRequest{
-			Base:           nil,
-			DbName:         dbName,
-			CollectionName: collectionName,
-			PartitionName:  otherCollectionName,
-		})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-
-		resp, err = proxy.DropPartition(ctx, &milvuspb.DropPartitionRequest{
-			Base:           nil,
-			DbName:         dbName,
 			CollectionName: otherCollectionName,
 			PartitionName:  partitionName,
 		})
@@ -2087,7 +2024,7 @@ func TestProxy(t *testing.T) {
 	wg.Add(1)
 	t.Run("drop collection", func(t *testing.T) {
 		defer wg.Done()
-		collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
+		_, err := globalMetaCache.GetCollectionID(ctx, collectionName)
 		assert.NoError(t, err)
 
 		resp, err := proxy.DropCollection(ctx, &milvuspb.DropCollectionRequest{
@@ -2103,15 +2040,6 @@ func TestProxy(t *testing.T) {
 			Base:           nil,
 			DbName:         dbName,
 			CollectionName: collectionName,
-		})
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-
-		// release dql stream
-		resp, err = proxy.ReleaseDQLMessageStream(ctx, &proxypb.ReleaseDQLMessageStreamRequest{
-			Base:         nil,
-			DbID:         0,
-			CollectionID: collectionID,
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
@@ -2327,14 +2255,6 @@ func TestProxy(t *testing.T) {
 	//})
 
 	proxy.UpdateStateCode(internalpb.StateCode_Abnormal)
-
-	wg.Add(1)
-	t.Run("ReleaseDQLMessageStream fail, unhealthy", func(t *testing.T) {
-		defer wg.Done()
-		resp, err := proxy.ReleaseDQLMessageStream(ctx, &proxypb.ReleaseDQLMessageStreamRequest{})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
-	})
 
 	wg.Add(1)
 	t.Run("CreateCollection fail, unhealthy", func(t *testing.T) {

@@ -31,6 +31,13 @@ enum DataType {
   FloatVector = 101;
 }
 
+enum FieldState {
+  FieldCreated = 0;
+  FieldCreating = 1;
+  FieldDropping = 2;
+  FieldDropped = 3;
+}
+
 /**
  * @brief Field schema
  */
@@ -43,6 +50,7 @@ message FieldSchema {
   repeated common.KeyValuePair type_params = 6;
   repeated common.KeyValuePair index_params = 7;
   bool autoID = 8;
+  FieldState state = 9; // To keep compatible with older version, the default state is `Created`.
 }
 
 /**

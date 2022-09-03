@@ -5,6 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"runtime"
+	"time"
+
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
+
+	"github.com/milvus-io/milvus/internal/metastore"
 
 	"github.com/milvus-io/milvus/internal/util"
 
@@ -56,6 +61,7 @@ func (tc *Catalog) CreateCollection(ctx context.Context, collection *model.Colle
 			ShardsNum:        collection.ShardsNum,
 			StartPosition:    startPositionsStr,
 			ConsistencyLevel: int32(collection.ConsistencyLevel),
+			Status:           int32(collection.State),
 			Ts:               ts,
 		})
 		if err != nil {
@@ -375,6 +381,47 @@ func (tc *Catalog) DropCollection(ctx context.Context, collection *model.Collect
 	})
 }
 
+func (tc *Catalog) alterModifyCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts typeutil.Timestamp) error {
+	if oldColl.TenantID != newColl.TenantID || oldColl.CollectionID != newColl.CollectionID {
+		return fmt.Errorf("altering tenant id or collection id is forbidden")
+	}
+
+	var startPositionsStr string
+	if newColl.StartPositions != nil {
+		startPositionsBytes, err := json.Marshal(newColl.StartPositions)
+		if err != nil {
+			return fmt.Errorf("failed to marshal start positions: %s", err.Error())
+		}
+		startPositionsStr = string(startPositionsBytes)
+	}
+
+	createdAt, _ := tsoutil.ParseTS(newColl.CreateTime)
+	tenantID := contextutil.TenantID(ctx)
+	coll := &dbmodel.Collection{
+		TenantID:         tenantID,
+		CollectionID:     newColl.CollectionID,
+		CollectionName:   newColl.Name,
+		Description:      newColl.Description,
+		AutoID:           newColl.AutoID,
+		ShardsNum:        newColl.ShardsNum,
+		StartPosition:    startPositionsStr,
+		ConsistencyLevel: int32(newColl.ConsistencyLevel),
+		Status:           int32(newColl.State),
+		Ts:               ts,
+		CreatedAt:        createdAt,
+		UpdatedAt:        time.Now(),
+	}
+
+	return tc.metaDomain.CollectionDb(ctx).Update(coll)
+}
+
+func (tc *Catalog) AlterCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, alterType metastore.AlterType, ts typeutil.Timestamp) error {
+	if alterType == metastore.MODIFY {
+		return tc.alterModifyCollection(ctx, oldColl, newColl, ts)
+	}
+	return fmt.Errorf("altering collection doesn't support %s", alterType.String())
+}
+
 func (tc *Catalog) CreatePartition(ctx context.Context, partition *model.Partition, ts typeutil.Timestamp) error {
 	tenantID := contextutil.TenantID(ctx)
 
@@ -384,6 +431,7 @@ func (tc *Catalog) CreatePartition(ctx context.Context, partition *model.Partiti
 		PartitionName:             partition.PartitionName,
 		PartitionCreatedTimestamp: partition.PartitionCreatedTimestamp,
 		CollectionID:              partition.CollectionID,
+		Status:                    int32(partition.State),
 		Ts:                        ts,
 	}
 	err := tc.metaDomain.PartitionDb(ctx).Insert([]*dbmodel.Partition{p})
@@ -412,6 +460,30 @@ func (tc *Catalog) DropPartition(ctx context.Context, collectionID typeutil.Uniq
 	}
 
 	return nil
+}
+
+func (tc *Catalog) alterModifyPartition(ctx context.Context, oldPart *model.Partition, newPart *model.Partition, ts typeutil.Timestamp) error {
+	createdAt, _ := tsoutil.ParseTS(newPart.PartitionCreatedTimestamp)
+	p := &dbmodel.Partition{
+		TenantID:                  contextutil.TenantID(ctx),
+		PartitionID:               newPart.PartitionID,
+		PartitionName:             newPart.PartitionName,
+		PartitionCreatedTimestamp: newPart.PartitionCreatedTimestamp,
+		CollectionID:              newPart.CollectionID,
+		Status:                    int32(newPart.State),
+		Ts:                        ts,
+		IsDeleted:                 false,
+		CreatedAt:                 createdAt,
+		UpdatedAt:                 time.Now(),
+	}
+	return tc.metaDomain.PartitionDb(ctx).Update(p)
+}
+
+func (tc *Catalog) AlterPartition(ctx context.Context, oldPart *model.Partition, newPart *model.Partition, alterType metastore.AlterType, ts typeutil.Timestamp) error {
+	if alterType == metastore.MODIFY {
+		return tc.alterModifyPartition(ctx, oldPart, newPart, ts)
+	}
+	return fmt.Errorf("altering partition doesn't support: %s", alterType.String())
 }
 
 func (tc *Catalog) CreateAlias(ctx context.Context, alias *model.Alias, ts typeutil.Timestamp) error {

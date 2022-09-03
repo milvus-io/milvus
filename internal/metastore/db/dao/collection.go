@@ -91,3 +91,27 @@ func (s *collectionDb) Insert(in *dbmodel.Collection) error {
 
 	return nil
 }
+
+func generateCollectionUpdatesWithoutID(in *dbmodel.Collection) map[string]interface{} {
+	ret := map[string]interface{}{
+		"tenant_id":         in.TenantID,
+		"collection_id":     in.CollectionID,
+		"collection_name":   in.CollectionName,
+		"description":       in.Description,
+		"auto_id":           in.AutoID,
+		"shards_num":        in.ShardsNum,
+		"start_position":    in.StartPosition,
+		"consistency_level": in.ConsistencyLevel,
+		"status":            in.Status,
+		"ts":                in.Ts,
+		"is_deleted":        in.IsDeleted,
+		"created_at":        in.CreatedAt,
+		"updated_at":        in.UpdatedAt,
+	}
+	return ret
+}
+
+func (s *collectionDb) Update(in *dbmodel.Collection) error {
+	updates := generateCollectionUpdatesWithoutID(in)
+	return s.db.Model(&dbmodel.Collection{}).Where("id = ?", in.ID).Updates(updates).Error
+}

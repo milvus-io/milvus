@@ -49,6 +49,20 @@ func (_m *IPartitionDb) Insert(in []*dbmodel.Partition) error {
 	return r0
 }
 
+// Update provides a mock function with given fields: in
+func (_m *IPartitionDb) Update(in *dbmodel.Partition) error {
+	ret := _m.Called(in)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*dbmodel.Partition) error); ok {
+		r0 = rf(in)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 type mockConstructorTestingTNewIPartitionDb interface {
 	mock.TestingT
 	Cleanup(func())

@@ -19,7 +19,11 @@ package rootcoord
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sync"
 	"testing"
+
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
 
 	"github.com/stretchr/testify/assert"
 
@@ -28,6 +32,74 @@ import (
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 )
+
+type proxyMock struct {
+	types.Proxy
+	collArray []string
+	collIDs   []UniqueID
+	mutex     sync.Mutex
+
+	returnError     bool
+	returnGrpcError bool
+}
+
+func (p *proxyMock) Stop() error {
+	return nil
+}
+
+func (p *proxyMock) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	if p.returnError {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		}, nil
+	}
+	if p.returnGrpcError {
+		return nil, fmt.Errorf("grpc error")
+	}
+	p.collArray = append(p.collArray, request.CollectionName)
+	p.collIDs = append(p.collIDs, request.CollectionID)
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}, nil
+}
+
+func (p *proxyMock) GetCollArray() []string {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	ret := make([]string, 0, len(p.collArray))
+	ret = append(ret, p.collArray...)
+	return ret
+}
+
+func (p *proxyMock) GetCollIDs() []UniqueID {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	ret := p.collIDs
+	return ret
+}
+
+func (p *proxyMock) InvalidateCredentialCache(ctx context.Context, request *proxypb.InvalidateCredCacheRequest) (*commonpb.Status, error) {
+	if p.returnError {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		}, nil
+	}
+	if p.returnGrpcError {
+		return nil, fmt.Errorf("grpc error")
+	}
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
+}
+
+func (p *proxyMock) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}, nil
+}
 
 func TestProxyClientManager_GetProxyClients(t *testing.T) {
 	Params.Init()
@@ -45,7 +117,7 @@ func TestProxyClientManager_GetProxyClients(t *testing.T) {
 		},
 	)
 
-	pcm := newProxyClientManager(core)
+	pcm := newProxyClientManager(core.proxyCreator)
 
 	session := &sessionutil.Session{
 		ServerID: 100,
@@ -72,7 +144,7 @@ func TestProxyClientManager_AddProxyClient(t *testing.T) {
 		},
 	)
 
-	pcm := newProxyClientManager(core)
+	pcm := newProxyClientManager(core.proxyCreator)
 
 	session := &sessionutil.Session{
 		ServerID: 100,
@@ -83,197 +155,145 @@ func TestProxyClientManager_AddProxyClient(t *testing.T) {
 }
 
 func TestProxyClientManager_InvalidateCollectionMetaCache(t *testing.T) {
-	Params.Init()
-	ctx := context.Background()
-
-	core, err := NewCore(ctx, nil)
-	assert.Nil(t, err)
-	cli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	assert.Nil(t, err)
-	defer cli.Close()
-	core.etcdCli = cli
-
-	pcm := newProxyClientManager(core)
-
-	ch := make(chan struct{})
-	pcm.helper = proxyClientManagerHelper{
-		afterConnect: func() { ch <- struct{}{} },
-	}
-
-	err = pcm.InvalidateCollectionMetaCache(ctx, nil)
-	assert.NoError(t, err)
-
-	core.SetNewProxyClient(
-		func(se *sessionutil.Session) (types.Proxy, error) {
-			return &proxyMock{}, nil
-		},
-	)
-
-	session := &sessionutil.Session{
-		ServerID: 100,
-		Address:  "localhost",
-	}
-
-	pcm.AddProxyClient(session)
-	<-ch
-
-	err = pcm.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{
-		CollectionName: "collection0",
+	t.Run("empty proxy list", func(t *testing.T) {
+		ctx := context.Background()
+		pcm := &proxyClientManager{proxyClient: map[int64]types.Proxy{}}
+		err := pcm.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{})
+		assert.NoError(t, err)
 	})
-	assert.NoError(t, err)
 
-	// test releaseDQLMessageStream failed
-	for _, v := range pcm.proxyClient {
-		v.(*proxyMock).returnError = true
-	}
-	err = pcm.InvalidateCollectionMetaCache(ctx, nil)
-	assert.Error(t, err)
+	t.Run("mock rpc error", func(t *testing.T) {
+		ctx := context.Background()
+		p1 := newMockProxy()
+		p1.InvalidateCollectionMetaCacheFunc = func(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
+			return succStatus(), errors.New("error mock InvalidateCollectionMetaCache")
+		}
+		pcm := &proxyClientManager{proxyClient: map[int64]types.Proxy{
+			TestProxyID: p1,
+		}}
+		err := pcm.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{})
+		assert.Error(t, err)
+	})
 
-	for _, v := range pcm.proxyClient {
-		v.(*proxyMock).returnGrpcError = true
-	}
-	err = pcm.InvalidateCollectionMetaCache(ctx, nil)
-	assert.Error(t, err)
-}
+	t.Run("mock error code", func(t *testing.T) {
+		ctx := context.Background()
+		p1 := newMockProxy()
+		p1.InvalidateCollectionMetaCacheFunc = func(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
+			return failStatus(commonpb.ErrorCode_UnexpectedError, "error mock error code"), nil
+		}
+		pcm := &proxyClientManager{proxyClient: map[int64]types.Proxy{
+			TestProxyID: p1,
+		}}
+		err := pcm.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{})
+		assert.Error(t, err)
+	})
 
-func TestProxyClientManager_ReleaseDQLMessageStream(t *testing.T) {
-	Params.Init()
-	ctx := context.Background()
-
-	core, err := NewCore(ctx, nil)
-	assert.Nil(t, err)
-	cli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	assert.Nil(t, err)
-	defer cli.Close()
-	core.etcdCli = cli
-
-	pcm := newProxyClientManager(core)
-
-	ch := make(chan struct{})
-	pcm.helper = proxyClientManagerHelper{
-		afterConnect: func() { ch <- struct{}{} },
-	}
-
-	err = pcm.ReleaseDQLMessageStream(ctx, nil)
-	assert.NoError(t, err)
-
-	core.SetNewProxyClient(
-		func(se *sessionutil.Session) (types.Proxy, error) {
-			return &proxyMock{}, nil
-		},
-	)
-
-	session := &sessionutil.Session{
-		ServerID: 100,
-		Address:  "localhost",
-	}
-
-	pcm.AddProxyClient(session)
-	<-ch
-
-	err = pcm.ReleaseDQLMessageStream(ctx, nil)
-	assert.NoError(t, err)
-
-	// test releaseDQLMessageStream failed
-	for _, v := range pcm.proxyClient {
-		v.(*proxyMock).returnError = true
-	}
-	err = pcm.ReleaseDQLMessageStream(ctx, nil)
-	assert.Error(t, err)
-
-	for _, v := range pcm.proxyClient {
-		v.(*proxyMock).returnGrpcError = true
-	}
-	err = pcm.ReleaseDQLMessageStream(ctx, nil)
-	assert.Error(t, err)
+	t.Run("normal case", func(t *testing.T) {
+		ctx := context.Background()
+		p1 := newMockProxy()
+		p1.InvalidateCollectionMetaCacheFunc = func(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
+			return succStatus(), nil
+		}
+		pcm := &proxyClientManager{proxyClient: map[int64]types.Proxy{
+			TestProxyID: p1,
+		}}
+		err := pcm.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{})
+		assert.NoError(t, err)
+	})
 }
 
 func TestProxyClientManager_InvalidateCredentialCache(t *testing.T) {
-	Params.Init()
-	ctx := context.Background()
+	t.Run("empty proxy list", func(t *testing.T) {
+		ctx := context.Background()
+		pcm := &proxyClientManager{proxyClient: map[int64]types.Proxy{}}
+		err := pcm.InvalidateCredentialCache(ctx, &proxypb.InvalidateCredCacheRequest{})
+		assert.NoError(t, err)
+	})
 
-	core, err := NewCore(ctx, nil)
-	assert.Nil(t, err)
-	cli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	assert.Nil(t, err)
-	defer cli.Close()
-	core.etcdCli = cli
+	t.Run("mock rpc error", func(t *testing.T) {
+		ctx := context.Background()
+		p1 := newMockProxy()
+		p1.InvalidateCredentialCacheFunc = func(ctx context.Context, request *proxypb.InvalidateCredCacheRequest) (*commonpb.Status, error) {
+			return succStatus(), errors.New("error mock InvalidateCredentialCache")
+		}
+		pcm := &proxyClientManager{proxyClient: map[int64]types.Proxy{
+			TestProxyID: p1,
+		}}
+		err := pcm.InvalidateCredentialCache(ctx, &proxypb.InvalidateCredCacheRequest{})
+		assert.Error(t, err)
+	})
 
-	pcm := newProxyClientManager(core)
+	t.Run("mock error code", func(t *testing.T) {
+		ctx := context.Background()
+		p1 := newMockProxy()
+		p1.InvalidateCredentialCacheFunc = func(ctx context.Context, request *proxypb.InvalidateCredCacheRequest) (*commonpb.Status, error) {
+			return failStatus(commonpb.ErrorCode_UnexpectedError, "error mock error code"), nil
+		}
+		pcm := &proxyClientManager{proxyClient: map[int64]types.Proxy{
+			TestProxyID: p1,
+		}}
+		err := pcm.InvalidateCredentialCache(ctx, &proxypb.InvalidateCredCacheRequest{})
+		assert.Error(t, err)
+	})
 
-	ch := make(chan struct{})
-	pcm.helper = proxyClientManagerHelper{
-		afterConnect: func() { ch <- struct{}{} },
-	}
-
-	err = pcm.InvalidateCredentialCache(ctx, nil)
-	assert.NoError(t, err)
-
-	core.SetNewProxyClient(
-		func(se *sessionutil.Session) (types.Proxy, error) {
-			return &proxyMock{}, nil
-		},
-	)
-
-	session := &sessionutil.Session{
-		ServerID: 100,
-		Address:  "localhost",
-	}
-
-	pcm.AddProxyClient(session)
-	<-ch
-
-	err = pcm.InvalidateCredentialCache(ctx, nil)
-	assert.NoError(t, err)
-
-	// test releaseDQLMessageStream failed
-	for _, v := range pcm.proxyClient {
-		v.(*proxyMock).returnError = true
-	}
-	err = pcm.InvalidateCredentialCache(ctx, nil)
-	assert.Error(t, err)
-
-	for _, v := range pcm.proxyClient {
-		v.(*proxyMock).returnGrpcError = true
-	}
-	err = pcm.InvalidateCredentialCache(ctx, nil)
-	assert.Error(t, err)
+	t.Run("normal case", func(t *testing.T) {
+		ctx := context.Background()
+		p1 := newMockProxy()
+		p1.InvalidateCredentialCacheFunc = func(ctx context.Context, request *proxypb.InvalidateCredCacheRequest) (*commonpb.Status, error) {
+			return succStatus(), nil
+		}
+		pcm := &proxyClientManager{proxyClient: map[int64]types.Proxy{
+			TestProxyID: p1,
+		}}
+		err := pcm.InvalidateCredentialCache(ctx, &proxypb.InvalidateCredCacheRequest{})
+		assert.NoError(t, err)
+	})
 }
 
 func TestProxyClientManager_RefreshPolicyInfoCache(t *testing.T) {
-	Params.Init()
-	ctx := context.Background()
+	t.Run("empty proxy list", func(t *testing.T) {
+		ctx := context.Background()
+		pcm := &proxyClientManager{proxyClient: map[int64]types.Proxy{}}
+		err := pcm.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{})
+		assert.NoError(t, err)
+	})
 
-	core, err := NewCore(ctx, nil)
-	assert.Nil(t, err)
-	cli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	assert.Nil(t, err)
-	defer cli.Close()
-	core.etcdCli = cli
+	t.Run("mock rpc error", func(t *testing.T) {
+		ctx := context.Background()
+		p1 := newMockProxy()
+		p1.RefreshPolicyInfoCacheFunc = func(ctx context.Context, request *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error) {
+			return succStatus(), errors.New("error mock RefreshPolicyInfoCache")
+		}
+		pcm := &proxyClientManager{proxyClient: map[int64]types.Proxy{
+			TestProxyID: p1,
+		}}
+		err := pcm.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{})
+		assert.Error(t, err)
+	})
 
-	pcm := newProxyClientManager(core)
+	t.Run("mock error code", func(t *testing.T) {
+		ctx := context.Background()
+		p1 := newMockProxy()
+		p1.RefreshPolicyInfoCacheFunc = func(ctx context.Context, request *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error) {
+			return failStatus(commonpb.ErrorCode_UnexpectedError, "error mock error code"), nil
+		}
+		pcm := &proxyClientManager{proxyClient: map[int64]types.Proxy{
+			TestProxyID: p1,
+		}}
+		err := pcm.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{})
+		assert.Error(t, err)
+	})
 
-	ch := make(chan struct{})
-	pcm.helper = proxyClientManagerHelper{
-		afterConnect: func() { ch <- struct{}{} },
-	}
-	err = pcm.RefreshPolicyInfoCache(ctx, nil)
-	assert.NoError(t, err)
-
-	core.SetNewProxyClient(
-		func(se *sessionutil.Session) (types.Proxy, error) {
-			return &proxyMock{}, nil
-		},
-	)
-
-	session := &sessionutil.Session{
-		ServerID: 100,
-		Address:  "localhost",
-	}
-	pcm.AddProxyClient(session)
-	<-ch
-
-	err = pcm.RefreshPolicyInfoCache(ctx, nil)
-	assert.NoError(t, err)
-
+	t.Run("normal case", func(t *testing.T) {
+		ctx := context.Background()
+		p1 := newMockProxy()
+		p1.RefreshPolicyInfoCacheFunc = func(ctx context.Context, request *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error) {
+			return succStatus(), nil
+		}
+		pcm := &proxyClientManager{proxyClient: map[int64]types.Proxy{
+			TestProxyID: p1,
+		}}
+		err := pcm.RefreshPolicyInfoCache(ctx, &proxypb.RefreshPolicyInfoCacheRequest{})
+		assert.NoError(t, err)
+	})
 }
