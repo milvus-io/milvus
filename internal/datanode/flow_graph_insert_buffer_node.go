@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"reflect"
 	"sync"
 
@@ -108,6 +109,8 @@ type BufferData struct {
 	buffer *InsertData
 	size   int64
 	limit  int64
+	tsFrom Timestamp
+	tsTo   Timestamp
 }
 
 // newBufferData needs an input dimension to calculate the limit of this buffer
@@ -133,7 +136,12 @@ func newBufferData(dimension int64) (*BufferData, error) {
 	limit := Params.DataNodeCfg.FlushInsertBufferSize / (dimension * 4)
 
 	//TODO::xige-16 eval vec and string field
-	return &BufferData{&InsertData{Data: make(map[UniqueID]storage.FieldData)}, 0, limit}, nil
+	return &BufferData{
+		buffer: &InsertData{Data: make(map[UniqueID]storage.FieldData)},
+		size:   0,
+		limit:  limit,
+		tsFrom: math.MaxUint64,
+		tsTo:   0}, nil
 }
 
 func (bd *BufferData) effectiveCap() int64 {
@@ -142,6 +150,16 @@ func (bd *BufferData) effectiveCap() int64 {
 
 func (bd *BufferData) updateSize(no int64) {
 	bd.size += no
+}
+
+// updateTimeRange update BufferData tsFrom, tsTo range according to input time range
+func (bd *BufferData) updateTimeRange(tr TimeRange) {
+	if tr.timestampMin < bd.tsFrom {
+		bd.tsFrom = tr.timestampMin
+	}
+	if tr.timestampMax > bd.tsTo {
+		bd.tsTo = tr.timestampMax
+	}
 }
 
 func (ibNode *insertBufferNode) Name() string {
@@ -544,8 +562,17 @@ func (ibNode *insertBufferNode) bufferInsertMsg(msg *msgstream.InsertMsg, endPos
 	// Maybe there are large write zoom if frequent insert requests are met.
 	buffer.buffer = storage.MergeInsertData(buffer.buffer, addedBuffer)
 
+	tsData, err := storage.GetTimestampFromInsertData(addedBuffer)
+	if err != nil {
+		log.Warn("no timestamp field found in insert msg", zap.Error(err))
+		return err
+	}
+
 	// update buffer size
 	buffer.updateSize(int64(msg.NRows()))
+	// update timestamp range
+	buffer.updateTimeRange(ibNode.getTimestampRange(tsData))
+
 	metrics.DataNodeConsumeMsgRowsCount.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID()), metrics.InsertLabel).Add(float64(len(msg.RowData)))
 
 	// store in buffer
@@ -555,6 +582,23 @@ func (ibNode *insertBufferNode) bufferInsertMsg(msg *msgstream.InsertMsg, endPos
 	ibNode.replica.updateSegmentEndPosition(currentSegID, endPos)
 
 	return nil
+}
+
+func (ibNode *insertBufferNode) getTimestampRange(tsData *storage.Int64FieldData) TimeRange {
+	tr := TimeRange{
+		timestampMin: math.MaxUint64,
+		timestampMax: 0,
+	}
+
+	for _, data := range tsData.Data {
+		if data < int64(tr.timestampMin) {
+			tr.timestampMin = Timestamp(data)
+		}
+		if data > int64(tr.timestampMax) {
+			tr.timestampMax = Timestamp(data)
+		}
+	}
+	return tr
 }
 
 // writeHardTimeTick writes timetick once insertBufferNode operates.
