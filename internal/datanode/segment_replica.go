@@ -18,6 +18,7 @@ package datanode
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -79,6 +80,7 @@ type Replica interface {
 	refreshFlushedSegStatistics(segID UniqueID, numRows int64)
 	getSegmentStatisticsUpdates(segID UniqueID) (*datapb.SegmentStats, error)
 	segmentFlushed(segID UniqueID)
+	getSegmentStatslog(segID UniqueID) ([]byte, error)
 }
 
 // Segment is the data structure of segments in data node replica.
@@ -166,6 +168,18 @@ func (s *Segment) updatePKRange(ids storage.FieldData) error {
 		zap.Int64("num_rows", s.numRows), zap.Any("minPK", s.minPK), zap.Any("maxPK", s.maxPK))
 
 	return nil
+}
+
+func (s *Segment) getSegmentStatslog(pkID UniqueID, pkType schemapb.DataType) ([]byte, error) {
+	pks := storage.PrimaryKeyStats{
+		FieldID: pkID,
+		PkType:  int64(pkType),
+		MaxPk:   s.maxPK,
+		MinPk:   s.minPK,
+		BF:      s.pkFilter,
+	}
+
+	return json.Marshal(pks)
 }
 
 var _ Replica = &SegmentReplica{}
@@ -870,4 +884,38 @@ func (replica *SegmentReplica) listNotFlushedSegmentIDs() []UniqueID {
 	}
 
 	return segIDs
+}
+
+// getSegmentStatslog returns the segment statslog for the provided segment id.
+func (replica *SegmentReplica) getSegmentStatslog(segID UniqueID) ([]byte, error) {
+	replica.segMu.RLock()
+	defer replica.segMu.RUnlock()
+
+	schema, err := replica.getCollectionSchema(replica.collectionID, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	var pkID UniqueID
+	var pkType schemapb.DataType
+	for _, field := range schema.GetFields() {
+		if field.GetIsPrimaryKey() {
+			pkID = field.GetFieldID()
+			pkType = field.GetDataType()
+		}
+	}
+
+	if seg, ok := replica.newSegments[segID]; ok {
+		return seg.getSegmentStatslog(pkID, pkType)
+	}
+
+	if seg, ok := replica.normalSegments[segID]; ok {
+		return seg.getSegmentStatslog(pkID, pkType)
+	}
+
+	if seg, ok := replica.flushedSegments[segID]; ok {
+		return seg.getSegmentStatslog(pkID, pkType)
+	}
+
+	return nil, fmt.Errorf("segment not found: %d", segID)
 }
