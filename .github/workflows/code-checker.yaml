@@ -6,6 +6,7 @@ on:
   push:
     branches:
       - master
+      - 2.*.*
   pull_request:
     # file paths to consider in the event. Optional; defaults to all.
     paths:
