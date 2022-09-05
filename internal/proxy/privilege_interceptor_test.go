@@ -52,9 +52,12 @@ func TestPrivilegeInterceptor(t *testing.T) {
 				},
 				PolicyInfos: []string{
 					funcutil.PolicyForPrivilege("role1", commonpb.ObjectType_Collection.String(), "col1", commonpb.ObjectPrivilege_PrivilegeLoad.String()),
+					funcutil.PolicyForPrivilege("role1", commonpb.ObjectType_Collection.String(), "col1", commonpb.ObjectPrivilege_PrivilegeFlush.String()),
+					funcutil.PolicyForPrivilege("role2", commonpb.ObjectType_Global.String(), "*", commonpb.ObjectPrivilege_PrivilegeAll.String()),
 				},
 				UserRoles: []string{
 					funcutil.EncodeUserRoleCache("alice", "role1"),
+					funcutil.EncodeUserRoleCache("fooo", "role2"),
 				},
 			}, nil
 		}
@@ -95,6 +98,17 @@ func TestPrivilegeInterceptor(t *testing.T) {
 		})
 		assert.NotNil(t, err)
 
+		_, err = PrivilegeInterceptor(ctx, &milvuspb.FlushRequest{
+			DbName:          "db_test",
+			CollectionNames: []string{"col1"},
+		})
+		assert.Nil(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.LoadCollectionRequest{
+			DbName:         "db_test",
+			CollectionName: "col1",
+		})
+		assert.Nil(t, err)
 	})
 
 }

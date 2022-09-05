@@ -39,7 +39,7 @@ p = sub, obj, act
 e = some(where (p.eft == allow))
 
 [matchers]
-m = r.sub == p.sub && globMatch(r.obj, p.obj) && globMatch(r.act, p.act) || r.sub == "admin" || r.act == "All"
+m = r.sub == p.sub && globMatch(r.obj, p.obj) && globMatch(r.act, p.act) || r.sub == "admin" || (r.sub == p.sub && p.act == "PrivilegeAll")
 `
 	ModelKey = "casbin"
 )
@@ -109,7 +109,7 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 	log.Debug("current request info", zap.String("username", username), zap.Strings("role_names", roleNames),
 		zap.String("object_type", objectType), zap.String("object_privilege", objectPrivilege),
 		zap.Int32("object_index", objectNameIndex), zap.String("object_name", objectName),
-		zap.Strings("object_names", objectNames),
+		zap.Int32("object_indexs", objectNameIndexs), zap.Strings("object_names", objectNames),
 		zap.String("policy_info", policyInfo))
 
 	policy := fmt.Sprintf("[%s]", policyInfo)
@@ -128,43 +128,46 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 	}
 	for _, roleName := range roleNames {
 		permitFunc := func(resName string) (bool, error) {
-			object := funcutil.PolicyForResource(objectType, objectName)
+			object := funcutil.PolicyForResource(objectType, resName)
 			isPermit, err := e.Enforce(roleName, object, objectPrivilege)
 			if err != nil {
-				log.Error("Enforce fail", zap.String("role", roleName), zap.String("object", object), zap.String("privilege", objectPrivilege), zap.Error(err))
 				return false, err
 			}
 			return isPermit, nil
 		}
 
-		// handle the api which refers one resource
-		permitObject, err := permitFunc(objectName)
-		if err != nil {
-			return ctx, err
-		}
-		if permitObject {
-			return ctx, nil
-		}
-
-		// handle the api which refers many resources
-		permitObjects := true
-		for _, name := range objectNames {
-			p, err := permitFunc(name)
+		if objectNameIndex != 0 {
+			// handle the api which refers one resource
+			permitObject, err := permitFunc(objectName)
 			if err != nil {
 				return ctx, err
 			}
-			if !p {
-				permitObjects = false
-				break
+			if permitObject {
+				return ctx, nil
 			}
 		}
-		if permitObjects && len(objectNames) != 0 {
-			return ctx, nil
+
+		if objectNameIndexs != 0 {
+			// handle the api which refers many resources
+			permitObjects := true
+			for _, name := range objectNames {
+				p, err := permitFunc(name)
+				if err != nil {
+					return ctx, err
+				}
+				if !p {
+					permitObjects = false
+					break
+				}
+			}
+			if permitObjects && len(objectNames) != 0 {
+				return ctx, nil
+			}
 		}
 	}
 
 	log.Debug("permission deny", zap.String("policy", policy), zap.Strings("roles", roleNames))
-	return ctx, status.Error(codes.PermissionDenied, "permission deny")
+	return ctx, status.Error(codes.PermissionDenied, fmt.Sprintf("%s: permission deny", objectPrivilege))
 }
 
 // isCurUserObject Determine whether it is an Object of type User that operates on its own user information,

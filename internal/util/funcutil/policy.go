@@ -45,9 +45,10 @@ func GetPrivilegeExtObj(m proto.GeneratedMessage) (commonpb.PrivilegeExt, error)
 	privilegeExt := extObj.(*commonpb.PrivilegeExt)
 	log.Debug("GetPrivilegeExtObj success", zap.String("resource_type", privilegeExt.ObjectType.String()), zap.String("resource_privilege", privilegeExt.ObjectPrivilege.String()))
 	return commonpb.PrivilegeExt{
-		ObjectType:      privilegeExt.ObjectType,
-		ObjectPrivilege: privilegeExt.ObjectPrivilege,
-		ObjectNameIndex: privilegeExt.ObjectNameIndex,
+		ObjectType:       privilegeExt.ObjectType,
+		ObjectPrivilege:  privilegeExt.ObjectPrivilege,
+		ObjectNameIndex:  privilegeExt.ObjectNameIndex,
+		ObjectNameIndexs: privilegeExt.ObjectNameIndexs,
 	}, nil
 }
 
