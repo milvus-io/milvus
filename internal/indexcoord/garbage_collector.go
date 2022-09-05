@@ -22,13 +22,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/api/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/api/commonpb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 )
 
@@ -158,7 +158,9 @@ func (gc *garbageCollector) recycleSegIndexesMeta() {
 			if _, ok := flushedSegments[segID]; !ok {
 				log.Debug("segment is already not exist, mark it deleted", zap.Int64("collID", collID),
 					zap.Int64("segID", segID))
-				if err := gc.metaTable.MarkSegmentsIndexAsDeleted([]int64{segID}); err != nil {
+				if err := gc.metaTable.MarkSegmentsIndexAsDeleted(func(segIndex *model.SegmentIndex) bool {
+					return segIndex.SegmentID == segID
+				}); err != nil {
 					continue
 				}
 			}

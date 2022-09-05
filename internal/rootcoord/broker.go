@@ -35,7 +35,7 @@ type Broker interface {
 	Flush(ctx context.Context, cID int64, segIDs []int64) error
 	Import(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error)
 
-	DropCollectionIndex(ctx context.Context, collID UniqueID) error
+	DropCollectionIndex(ctx context.Context, collID UniqueID, partIDs []UniqueID) error
 	GetSegmentIndexState(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*indexpb.SegmentIndexState, error)
 }
 
@@ -181,9 +181,10 @@ func (b *ServerBroker) Import(ctx context.Context, req *datapb.ImportTaskRequest
 	return b.s.dataCoord.Import(ctx, req)
 }
 
-func (b *ServerBroker) DropCollectionIndex(ctx context.Context, collID UniqueID) error {
+func (b *ServerBroker) DropCollectionIndex(ctx context.Context, collID UniqueID, partIDs []UniqueID) error {
 	rsp, err := b.s.indexCoord.DropIndex(ctx, &indexpb.DropIndexRequest{
 		CollectionID: collID,
+		PartitionIDs: partIDs,
 		IndexName:    "",
 	})
 	if err != nil {

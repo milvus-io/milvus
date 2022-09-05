@@ -362,7 +362,9 @@ func TestMetaTable_UpdateVersion(t *testing.T) {
 		err = mt.UpdateVersion(newBuildID, nodeID)
 		assert.Error(t, err)
 
-		err = mt.MarkSegmentsIndexAsDeleted([]int64{segID})
+		err = mt.MarkSegmentsIndexAsDeleted(func(segIndex *model.SegmentIndex) bool {
+			return segIndex.SegmentID == segID
+		})
 		assert.NoError(t, err)
 
 		err = mt.UpdateVersion(newBuildID, nodeID)
@@ -432,7 +434,9 @@ func TestMetaTable_BuildIndex(t *testing.T) {
 		err = mt.BuildIndex(buildID)
 		assert.Error(t, err)
 
-		err = mt.MarkSegmentsIndexAsDeleted([]int64{segID})
+		err = mt.MarkSegmentsIndexAsDeleted(func(segIndex *model.SegmentIndex) bool {
+			return segIndex.SegmentID == segID
+		})
 		assert.NoError(t, err)
 
 		err = mt.BuildIndex(newBuildID)
@@ -694,13 +698,19 @@ func TestMetaTable_MarkSegmentsIndexAsDeleted(t *testing.T) {
 			},
 		})
 
-		err := mt.MarkSegmentsIndexAsDeleted([]int64{segID})
+		err := mt.MarkSegmentsIndexAsDeleted(func(segIndex *model.SegmentIndex) bool {
+			return segIndex.SegmentID == segID
+		})
 		assert.NoError(t, err)
 
-		err = mt.MarkSegmentsIndexAsDeleted([]int64{segID})
+		err = mt.MarkSegmentsIndexAsDeleted(func(segIndex *model.SegmentIndex) bool {
+			return segIndex.SegmentID == segID
+		})
 		assert.NoError(t, err)
 
-		err = mt.MarkSegmentsIndexAsDeleted([]int64{segID + 1})
+		err = mt.MarkSegmentsIndexAsDeleted(func(segIndex *model.SegmentIndex) bool {
+			return segIndex.SegmentID == segID+1
+		})
 		assert.NoError(t, err)
 	})
 
@@ -713,7 +723,9 @@ func TestMetaTable_MarkSegmentsIndexAsDeleted(t *testing.T) {
 			},
 		})
 
-		err := mt.MarkSegmentsIndexAsDeleted([]int64{segID})
+		err := mt.MarkSegmentsIndexAsDeleted(func(segIndex *model.SegmentIndex) bool {
+			return segIndex.SegmentID == segID
+		})
 		assert.Error(t, err)
 	})
 }
@@ -825,6 +837,10 @@ func TestMetaTable_IsIndexDeleted(t *testing.T) {
 
 	err := mt.MarkIndexAsDeleted(collID, []int64{indexID})
 	assert.NoError(t, err)
+
+	err = mt.MarkIndexAsDeleted(collID, []int64{indexID})
+	assert.NoError(t, err)
+
 	deleted = mt.IsIndexDeleted(collID, indexID)
 	assert.True(t, deleted)
 
@@ -847,7 +863,9 @@ func TestMetaTable_IsSegIndexDeleted(t *testing.T) {
 	deleted := mt.IsSegIndexDeleted(buildID)
 	assert.False(t, deleted)
 
-	err := mt.MarkSegmentsIndexAsDeleted([]int64{segID})
+	err := mt.MarkSegmentsIndexAsDeleted(func(segIndex *model.SegmentIndex) bool {
+		return segIndex.SegmentID == segID
+	})
 	assert.NoError(t, err)
 	deleted = mt.IsSegIndexDeleted(buildID)
 	assert.True(t, deleted)
@@ -882,7 +900,9 @@ func TestMetaTable_GetMetasByNodeID(t *testing.T) {
 	segIdxes := mt.GetMetasByNodeID(nodeID)
 	assert.Equal(t, 1, len(segIdxes))
 
-	err = mt.MarkSegmentsIndexAsDeleted([]int64{segID + 1})
+	err = mt.MarkSegmentsIndexAsDeleted(func(segIndex *model.SegmentIndex) bool {
+		return segIndex.SegmentID == segID+1
+	})
 	assert.NoError(t, err)
 
 	segIdxes = mt.GetMetasByNodeID(nodeID)
@@ -900,7 +920,9 @@ func TestMetaTable_GetAllSegIndexes(t *testing.T) {
 	segIdxes := mt.GetAllSegIndexes()
 	assert.Equal(t, 1, len(segIdxes))
 
-	err := mt.MarkSegmentsIndexAsDeleted([]int64{segID})
+	err := mt.MarkSegmentsIndexAsDeleted(func(segIndex *model.SegmentIndex) bool {
+		return segIndex.SegmentID == segID
+	})
 	assert.NoError(t, err)
 
 	segIdxes = mt.GetAllSegIndexes()

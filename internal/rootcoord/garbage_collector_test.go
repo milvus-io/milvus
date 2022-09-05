@@ -31,7 +31,7 @@ func TestGarbageCollectorCtx_ReDropCollection(t *testing.T) {
 			releaseCollectionChan <- struct{}{}
 			return nil
 		}
-		broker.DropCollectionIndexFunc = func(ctx context.Context, collID UniqueID) error {
+		broker.DropCollectionIndexFunc = func(ctx context.Context, collID UniqueID, partIDs []UniqueID) error {
 			return errors.New("error mock DropCollectionIndex")
 		}
 		ticker := newTickerWithMockNormalStream()
@@ -54,7 +54,7 @@ func TestGarbageCollectorCtx_ReDropCollection(t *testing.T) {
 		}
 		dropCollectionIndexCalled := false
 		dropCollectionIndexChan := make(chan struct{}, 1)
-		broker.DropCollectionIndexFunc = func(ctx context.Context, collID UniqueID) error {
+		broker.DropCollectionIndexFunc = func(ctx context.Context, collID UniqueID, partIDs []UniqueID) error {
 			dropCollectionIndexCalled = true
 			dropCollectionIndexChan <- struct{}{}
 			return nil
@@ -88,7 +88,7 @@ func TestGarbageCollectorCtx_ReDropCollection(t *testing.T) {
 		}
 		dropCollectionIndexCalled := false
 		dropCollectionIndexChan := make(chan struct{}, 1)
-		broker.DropCollectionIndexFunc = func(ctx context.Context, collID UniqueID) error {
+		broker.DropCollectionIndexFunc = func(ctx context.Context, collID UniqueID, partIDs []UniqueID) error {
 			dropCollectionIndexCalled = true
 			dropCollectionIndexChan <- struct{}{}
 			return nil
@@ -127,7 +127,7 @@ func TestGarbageCollectorCtx_ReDropCollection(t *testing.T) {
 		}
 		dropCollectionIndexCalled := false
 		dropCollectionIndexChan := make(chan struct{}, 1)
-		broker.DropCollectionIndexFunc = func(ctx context.Context, collID UniqueID) error {
+		broker.DropCollectionIndexFunc = func(ctx context.Context, collID UniqueID, partIDs []UniqueID) error {
 			dropCollectionIndexCalled = true
 			dropCollectionIndexChan <- struct{}{}
 			return nil
@@ -230,7 +230,7 @@ func TestGarbageCollectorCtx_ReDropPartition(t *testing.T) {
 		tsoAllocator.GenerateTSOF = func(count uint32) (uint64, error) {
 			return 100, nil
 		}
-		core := newTestCore(withTtSynchronizer(ticker), withTsoAllocator(tsoAllocator))
+		core := newTestCore(withTtSynchronizer(ticker), withTsoAllocator(tsoAllocator), withDropIndex())
 		core.ddlTsLockManager = newDdlTsLockManagerV2(core.tsoAllocator)
 		gc := newBgGarbageCollector(core)
 		core.garbageCollector = gc
@@ -249,7 +249,7 @@ func TestGarbageCollectorCtx_ReDropPartition(t *testing.T) {
 		tsoAllocator.GenerateTSOF = func(count uint32) (uint64, error) {
 			return 100, nil
 		}
-		core := newTestCore(withMeta(meta), withTtSynchronizer(ticker), withTsoAllocator(tsoAllocator))
+		core := newTestCore(withMeta(meta), withTtSynchronizer(ticker), withTsoAllocator(tsoAllocator), withDropIndex())
 		core.ddlTsLockManager = newDdlTsLockManagerV2(core.tsoAllocator)
 		gc := newBgGarbageCollector(core)
 		core.garbageCollector = gc
@@ -272,7 +272,7 @@ func TestGarbageCollectorCtx_ReDropPartition(t *testing.T) {
 		tsoAllocator.GenerateTSOF = func(count uint32) (uint64, error) {
 			return 100, nil
 		}
-		core := newTestCore(withMeta(meta), withTtSynchronizer(ticker), withTsoAllocator(tsoAllocator))
+		core := newTestCore(withMeta(meta), withTtSynchronizer(ticker), withTsoAllocator(tsoAllocator), withDropIndex())
 		core.ddlTsLockManager = newDdlTsLockManagerV2(core.tsoAllocator)
 		gc := newBgGarbageCollector(core)
 		core.garbageCollector = gc

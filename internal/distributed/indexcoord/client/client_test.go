@@ -163,7 +163,6 @@ func TestIndexCoordClient(t *testing.T) {
 		req := &indexpb.DropIndexRequest{
 			CollectionID: 0,
 			IndexName:    "default",
-			FieldID:      0,
 		}
 		resp, err := icc.DropIndex(ctx, req)
 		assert.NoError(t, err)

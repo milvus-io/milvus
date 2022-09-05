@@ -252,11 +252,12 @@ func (s *releaseCollectionStep) Weight() stepPriority {
 
 type dropIndexStep struct {
 	baseStep
-	collID UniqueID
+	collID  UniqueID
+	partIDs []UniqueID
 }
 
 func (s *dropIndexStep) Execute(ctx context.Context) ([]nestedStep, error) {
-	err := s.core.broker.DropCollectionIndex(ctx, s.collID)
+	err := s.core.broker.DropCollectionIndex(ctx, s.collID, s.partIDs)
 	return nil, err
 }
 
