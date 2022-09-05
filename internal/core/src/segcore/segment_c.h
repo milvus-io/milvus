@@ -42,8 +42,7 @@ Search(CSegmentInterface c_segment,
        CSearchPlan c_plan,
        CPlaceholderGroup c_placeholder_group,
        uint64_t timestamp,
-       CSearchResult* result,
-       int64_t segment_id);
+       CSearchResult* result);
 
 void
 DeleteRetrieveResult(CRetrieveResult* retrieve_result);
