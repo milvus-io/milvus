@@ -207,6 +207,7 @@ message IndexTaskInfo {
   common.IndexState state = 2;
   repeated string index_files = 3;
   uint64 serialized_size = 4;
+  string fail_reason = 5;
 }
 
 message QueryJobsResponse {

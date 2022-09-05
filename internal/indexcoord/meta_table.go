@@ -340,7 +340,7 @@ func (mt *metaTable) UpdateVersion(buildID UniqueID, nodeID UniqueID) error {
 	updateFunc := func(segIdx *model.SegmentIndex) error {
 		segIdx.NodeID = nodeID
 		segIdx.IndexVersion++
-		return mt.saveSegmentIndexMeta(segIdx)
+		return mt.alterSegmentIndexes([]*model.SegmentIndex{segIdx})
 	}
 
 	return mt.updateSegIndexMeta(segIdx, updateFunc)
@@ -936,9 +936,9 @@ func (mt *metaTable) ResetNodeID(buildID UniqueID) error {
 	mt.segmentIndexLock.Lock()
 	defer mt.segmentIndexLock.Unlock()
 
-	updateFunc := func(sedIdx *model.SegmentIndex) error {
-		sedIdx.NodeID = 0
-		return mt.saveSegmentIndexMeta(sedIdx)
+	updateFunc := func(segIdx *model.SegmentIndex) error {
+		segIdx.NodeID = 0
+		return mt.alterSegmentIndexes([]*model.SegmentIndex{segIdx})
 	}
 	segIdx, ok := mt.buildID2SegmentIndex[buildID]
 	if !ok {
@@ -956,27 +956,29 @@ func (mt *metaTable) ResetMeta(buildID UniqueID) error {
 	if !ok {
 		return fmt.Errorf("there is no index with buildID: %d", buildID)
 	}
-	updateFunc := func(sedIdx *model.SegmentIndex) error {
-		sedIdx.NodeID = 0
+	updateFunc := func(segIdx *model.SegmentIndex) error {
+		segIdx.NodeID = 0
 		segIdx.IndexState = commonpb.IndexState_Unissued
-		return mt.saveSegmentIndexMeta(sedIdx)
+		return mt.alterSegmentIndexes([]*model.SegmentIndex{segIdx})
 	}
 
 	return mt.updateSegIndexMeta(segIdx, updateFunc)
 }
 
-func (mt *metaTable) FinishTask(buildID UniqueID, state commonpb.IndexState, filePaths []string) error {
+func (mt *metaTable) FinishTask(taskInfo *indexpb.IndexTaskInfo) error {
 	mt.segmentIndexLock.Lock()
 	defer mt.segmentIndexLock.Unlock()
 
-	segIdx, ok := mt.buildID2SegmentIndex[buildID]
+	segIdx, ok := mt.buildID2SegmentIndex[taskInfo.BuildID]
 	if !ok || segIdx.IsDeleted {
-		return fmt.Errorf("there is no index with buildID: %d", buildID)
+		return fmt.Errorf("there is no index with buildID: %d", taskInfo.BuildID)
 	}
 	updateFunc := func(segIdx *model.SegmentIndex) error {
-		segIdx.IndexState = state
-		segIdx.IndexFilePaths = filePaths
-		return mt.saveSegmentIndexMeta(segIdx)
+		segIdx.IndexState = taskInfo.State
+		segIdx.IndexFilePaths = taskInfo.IndexFiles
+		segIdx.FailReason = taskInfo.FailReason
+		segIdx.IndexSize = taskInfo.SerializedSize
+		return mt.alterSegmentIndexes([]*model.SegmentIndex{segIdx})
 	}
 
 	return mt.updateSegIndexMeta(segIdx, updateFunc)

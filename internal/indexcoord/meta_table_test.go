@@ -173,11 +173,11 @@ func constructMetaTable(catalog metastore.IndexCoordCatalog) *metaTable {
 				NodeID:         0,
 				IndexState:     commonpb.IndexState_Finished,
 				FailReason:     "",
-				IndexVersion:   0,
+				IndexVersion:   1,
 				IsDeleted:      false,
 				CreateTime:     createTs,
-				IndexFilePaths: nil,
-				IndexSize:      0,
+				IndexFilePaths: []string{"file1", "file2"},
+				IndexSize:      1024,
 			},
 		},
 	}
@@ -330,6 +330,9 @@ func TestMetaTable_UpdateVersion(t *testing.T) {
 			save: func(s string, s2 string) error {
 				return nil
 			},
+			multiSave: func(m map[string]string) error {
+				return nil
+			},
 		}
 		mt := constructMetaTable(&indexcoord.Catalog{Txn: kv})
 		err := mt.AddIndex(segIdx)
@@ -377,15 +380,14 @@ func TestMetaTable_UpdateVersion(t *testing.T) {
 			save: func(s string, s2 string) error {
 				return nil
 			},
+			multiSave: func(m map[string]string) error {
+				return errors.New("error")
+			},
 		}
 		mt := constructMetaTable(&indexcoord.Catalog{Txn: kv})
 
 		err := mt.AddIndex(segIdx)
 		assert.NoError(t, err)
-
-		kv.save = func(s string, s2 string) error {
-			return errors.New("error")
-		}
 
 		err = mt.UpdateVersion(newBuildID, nodeID)
 		assert.Error(t, err)
@@ -770,5 +772,374 @@ func TestMetaTable_GetIndexFilePathInfo(t *testing.T) {
 		info, err = mt.GetIndexFilePathInfo(segID+1, indexID+1)
 		assert.Error(t, err)
 		assert.Nil(t, info)
+	})
+}
+
+func TestMetaTable_GetIndexFilePathByBuildID(t *testing.T) {
+	mt := constructMetaTable(&indexcoord.Catalog{
+		Txn: &mockETCDKV{
+			save: func(s string, s2 string) error {
+				return nil
+			},
+		}})
+	canRecycle, files := mt.GetIndexFilePathByBuildID(buildID)
+	assert.True(t, canRecycle)
+	assert.ElementsMatch(t, []string{"file1", "file2"}, files)
+
+	segIdx := &model.SegmentIndex{
+		SegmentID:      segID + 1,
+		CollectionID:   collID,
+		PartitionID:    partID,
+		NumRows:        1026,
+		IndexID:        indexID,
+		BuildID:        buildID + 1,
+		NodeID:         0,
+		IndexVersion:   0,
+		IndexState:     commonpb.IndexState_Unissued,
+		FailReason:     "",
+		IsDeleted:      false,
+		CreateTime:     0,
+		IndexFilePaths: nil,
+		IndexSize:      0,
+	}
+	err := mt.AddIndex(segIdx)
+	assert.NoError(t, err)
+
+	canRecycle, files = mt.GetIndexFilePathByBuildID(buildID + 1)
+	assert.False(t, canRecycle)
+	assert.Zero(t, len(files))
+
+	canRecycle, files = mt.GetIndexFilePathByBuildID(buildID + 2)
+	assert.False(t, canRecycle)
+	assert.Zero(t, len(files))
+}
+
+func TestMetaTable_IsIndexDeleted(t *testing.T) {
+	mt := constructMetaTable(&indexcoord.Catalog{
+		Txn: &mockETCDKV{
+			multiSave: func(m map[string]string) error {
+				return nil
+			},
+		},
+	})
+
+	deleted := mt.IsIndexDeleted(collID, indexID)
+	assert.False(t, deleted)
+
+	err := mt.MarkIndexAsDeleted(collID, []int64{indexID})
+	assert.NoError(t, err)
+	deleted = mt.IsIndexDeleted(collID, indexID)
+	assert.True(t, deleted)
+
+	deleted = mt.IsIndexDeleted(collID+1, indexID)
+	assert.True(t, deleted)
+
+	deleted = mt.IsIndexDeleted(collID, indexID+1)
+	assert.True(t, deleted)
+}
+
+func TestMetaTable_IsSegIndexDeleted(t *testing.T) {
+	mt := constructMetaTable(&indexcoord.Catalog{
+		Txn: &mockETCDKV{
+			multiSave: func(m map[string]string) error {
+				return nil
+			},
+		},
+	})
+
+	deleted := mt.IsSegIndexDeleted(buildID)
+	assert.False(t, deleted)
+
+	err := mt.MarkSegmentsIndexAsDeleted([]int64{segID})
+	assert.NoError(t, err)
+	deleted = mt.IsSegIndexDeleted(buildID)
+	assert.True(t, deleted)
+
+	deleted = mt.IsSegIndexDeleted(buildID + 1)
+	assert.True(t, deleted)
+}
+
+func TestMetaTable_GetMetasByNodeID(t *testing.T) {
+	mt := constructMetaTable(&indexcoord.Catalog{
+		Txn: &mockETCDKV{
+			save: func(s string, s2 string) error {
+				return nil
+			},
+			multiSave: func(m map[string]string) error {
+				return nil
+			},
+		},
+	})
+	err := mt.AddIndex(&model.SegmentIndex{
+		SegmentID:    segID + 1,
+		CollectionID: collID,
+		PartitionID:  partID,
+		NumRows:      1025,
+		IndexID:      indexID,
+		BuildID:      buildID + 1,
+		NodeID:       0,
+	})
+	assert.NoError(t, err)
+	err = mt.UpdateVersion(buildID+1, nodeID)
+	assert.NoError(t, err)
+	segIdxes := mt.GetMetasByNodeID(nodeID)
+	assert.Equal(t, 1, len(segIdxes))
+
+	err = mt.MarkSegmentsIndexAsDeleted([]int64{segID + 1})
+	assert.NoError(t, err)
+
+	segIdxes = mt.GetMetasByNodeID(nodeID)
+	assert.Equal(t, 0, len(segIdxes))
+}
+
+func TestMetaTable_GetAllSegIndexes(t *testing.T) {
+	mt := constructMetaTable(&indexcoord.Catalog{
+		Txn: &mockETCDKV{
+			multiSave: func(m map[string]string) error {
+				return nil
+			},
+		},
+	})
+	segIdxes := mt.GetAllSegIndexes()
+	assert.Equal(t, 1, len(segIdxes))
+
+	err := mt.MarkSegmentsIndexAsDeleted([]int64{segID})
+	assert.NoError(t, err)
+
+	segIdxes = mt.GetAllSegIndexes()
+	assert.Equal(t, 1, len(segIdxes))
+}
+
+func TestMetaTable_GetDeletedIndexes(t *testing.T) {
+	mt := constructMetaTable(&indexcoord.Catalog{
+		Txn: &mockETCDKV{
+			multiSave: func(m map[string]string) error {
+				return nil
+			},
+		},
+	})
+
+	deletedIndexes := mt.GetDeletedIndexes()
+	assert.Equal(t, 0, len(deletedIndexes))
+
+	err := mt.MarkIndexAsDeleted(collID, []int64{indexID})
+	assert.NoError(t, err)
+
+	deletedIndexes = mt.GetDeletedIndexes()
+	assert.Equal(t, 1, len(deletedIndexes))
+}
+
+func TestMetaTable_GetBuildIDsFromIndexID(t *testing.T) {
+	mt := constructMetaTable(&indexcoord.Catalog{})
+	buildIDs := mt.GetBuildIDsFromIndexID(indexID)
+	assert.Equal(t, 1, len(buildIDs))
+}
+
+func TestMetaTable_GetBuildIDsFromSegIDs(t *testing.T) {
+	mt := constructMetaTable(&indexcoord.Catalog{})
+	buildIDs := mt.GetBuildIDsFromSegIDs([]int64{segID, segID + 1})
+	assert.Equal(t, 1, len(buildIDs))
+}
+
+func TestMetaTable_RemoveIndex(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		mt := constructMetaTable(&indexcoord.Catalog{
+			Txn: &mockETCDKV{
+				remove: func(s string) error {
+					return nil
+				},
+			},
+		})
+		err := mt.RemoveIndex(collID, indexID)
+		assert.NoError(t, err)
+		_, ok := mt.collectionIndexes[collID][indexID]
+		assert.False(t, ok)
+	})
+
+	t.Run("fail", func(t *testing.T) {
+		mt := constructMetaTable(&indexcoord.Catalog{
+			Txn: &mockETCDKV{
+				remove: func(s string) error {
+					return errors.New("error")
+				},
+			},
+		})
+		err := mt.RemoveIndex(collID, indexID)
+		assert.Error(t, err)
+		_, ok := mt.collectionIndexes[collID][indexID]
+		assert.True(t, ok)
+	})
+}
+
+func TestMetaTable_RemoveSegmentIndex(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		mt := constructMetaTable(&indexcoord.Catalog{
+			Txn: &mockETCDKV{
+				remove: func(s string) error {
+					return nil
+				},
+			},
+		})
+		err := mt.RemoveSegmentIndex(collID, partID, segID, buildID)
+		assert.NoError(t, err)
+		_, ok := mt.segmentIndexes[segID][indexID]
+		assert.False(t, ok)
+		_, ok = mt.buildID2SegmentIndex[buildID]
+		assert.False(t, ok)
+	})
+	t.Run("fail", func(t *testing.T) {
+		mt := constructMetaTable(&indexcoord.Catalog{
+			Txn: &mockETCDKV{
+				remove: func(s string) error {
+					return errors.New("error")
+				},
+			},
+		})
+		err := mt.RemoveSegmentIndex(collID, partID, segID, buildID)
+		assert.Error(t, err)
+		_, ok := mt.segmentIndexes[segID][indexID]
+		assert.True(t, ok)
+		_, ok = mt.buildID2SegmentIndex[buildID]
+		assert.True(t, ok)
+	})
+}
+
+func TestMetaTable_HasBuildID(t *testing.T) {
+	mt := constructMetaTable(&indexcoord.Catalog{})
+	has := mt.HasBuildID(buildID)
+	assert.True(t, has)
+
+	has = mt.HasBuildID(buildID + 1)
+	assert.False(t, has)
+}
+
+func TestMetaTable_ResetNodeID(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		mt := constructMetaTable(&indexcoord.Catalog{
+			Txn: &mockETCDKV{
+				multiSave: func(m map[string]string) error {
+					return nil
+				},
+			},
+		})
+		err := mt.ResetNodeID(buildID)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(0), mt.buildID2SegmentIndex[buildID].NodeID)
+	})
+
+	t.Run("fail", func(t *testing.T) {
+		mt := constructMetaTable(&indexcoord.Catalog{
+			Txn: &mockETCDKV{
+				multiSave: func(m map[string]string) error {
+					return errors.New("error")
+				},
+			},
+		})
+		err := mt.ResetNodeID(buildID)
+		assert.Error(t, err)
+
+		err = mt.ResetNodeID(buildID + 1)
+		assert.Error(t, err)
+	})
+}
+
+func TestMetaTable_ResetMeta(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		mt := constructMetaTable(&indexcoord.Catalog{
+			Txn: &mockETCDKV{
+				multiSave: func(m map[string]string) error {
+					return nil
+				},
+			},
+		})
+		err := mt.ResetMeta(buildID)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(0), mt.buildID2SegmentIndex[buildID].NodeID)
+		assert.Equal(t, commonpb.IndexState_Unissued, mt.buildID2SegmentIndex[buildID].IndexState)
+	})
+
+	t.Run("fail", func(t *testing.T) {
+		mt := constructMetaTable(&indexcoord.Catalog{
+			Txn: &mockETCDKV{
+				multiSave: func(m map[string]string) error {
+					return errors.New("error")
+				},
+			},
+		})
+		err := mt.ResetMeta(buildID)
+		assert.Error(t, err)
+
+		err = mt.ResetMeta(buildID + 1)
+		assert.Error(t, err)
+	})
+}
+
+func TestMetaTable_FinishTask(t *testing.T) {
+	segIdx := &model.SegmentIndex{
+		SegmentID:      segID + 1,
+		CollectionID:   collID,
+		PartitionID:    partID,
+		NumRows:        10240,
+		IndexID:        indexID,
+		BuildID:        buildID + 1,
+		NodeID:         1,
+		IndexVersion:   1,
+		IndexState:     commonpb.IndexState_InProgress,
+		FailReason:     "",
+		IsDeleted:      false,
+		CreateTime:     1234,
+		IndexFilePaths: nil,
+		IndexSize:      0,
+	}
+	t.Run("success", func(t *testing.T) {
+		mt := constructMetaTable(&indexcoord.Catalog{
+			Txn: &mockETCDKV{
+				save: func(s string, s2 string) error {
+					return nil
+				},
+				multiSave: func(m map[string]string) error {
+					return nil
+				},
+			},
+		})
+		err := mt.AddIndex(segIdx)
+		assert.NoError(t, err)
+
+		err = mt.FinishTask(&indexpb.IndexTaskInfo{
+			BuildID:        buildID + 1,
+			State:          commonpb.IndexState_Finished,
+			IndexFiles:     []string{"file3", "file4"},
+			SerializedSize: 1025,
+			FailReason:     "",
+		})
+
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.IndexState_Finished, mt.buildID2SegmentIndex[buildID+1].IndexState)
+		assert.Equal(t, uint64(1025), mt.buildID2SegmentIndex[buildID+1].IndexSize)
+		assert.ElementsMatch(t, []string{"file3", "file4"}, mt.buildID2SegmentIndex[buildID+1].IndexFilePaths)
+	})
+
+	t.Run("fail", func(t *testing.T) {
+		mt := constructMetaTable(&indexcoord.Catalog{
+			Txn: &mockETCDKV{
+				save: func(s string, s2 string) error {
+					return nil
+				},
+				multiSave: func(m map[string]string) error {
+					return errors.New("error")
+				},
+			},
+		})
+		err := mt.AddIndex(segIdx)
+		assert.NoError(t, err)
+
+		err = mt.FinishTask(&indexpb.IndexTaskInfo{
+			BuildID:        buildID + 1,
+			State:          commonpb.IndexState_Finished,
+			IndexFiles:     []string{"file3", "file4"},
+			SerializedSize: 1025,
+			FailReason:     "",
+		})
+		assert.Error(t, err)
 	})
 }

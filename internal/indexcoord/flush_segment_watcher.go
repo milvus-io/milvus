@@ -244,9 +244,12 @@ func (fsw *flushedSegmentWatcher) childrenRun() {
 	defer fsw.childrenTaskMutex.Unlock()
 	if len(fsw.childrenTasks) > 0 {
 		log.Debug("IndexCoord flushedSegmentWatcher schedule children tasks", zap.Int("internal task num", len(fsw.childrenTasks)))
-		for _, tasks := range fsw.childrenTasks {
+		for segID, tasks := range fsw.childrenTasks {
 			for _, t := range tasks {
 				fsw.childrenProcess(t)
+			}
+			if len(fsw.childrenTasks[segID]) == 0 {
+				delete(fsw.childrenTasks, segID)
 			}
 		}
 	}
