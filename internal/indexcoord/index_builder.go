@@ -80,6 +80,7 @@ func (ib *indexBuilder) refreshTasks(aliveNodes []UniqueID) {
 	metas := ib.meta.GetAllIndexMeta()
 	for build, indexMeta := range metas {
 		// deleted, need to release lock and clean meta
+
 		if indexMeta.MarkDeleted {
 			if indexMeta.NodeID != 0 {
 				ib.tasks[build] = indexTaskDeleted
@@ -183,6 +184,7 @@ func (ib *indexBuilder) process(buildID UniqueID) {
 			ib.tasks[buildID] = indexTaskRetry
 			return
 		}
+
 		req := &indexpb.CreateIndexRequest{
 			IndexBuildID: buildID,
 			IndexName:    meta.indexMeta.Req.IndexName,

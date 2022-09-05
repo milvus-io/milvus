@@ -52,6 +52,11 @@ func NewLocalChunkManager(opts ...Option) *LocalChunkManager {
 	}
 }
 
+// RootPath returns lcm root path.
+func (lcm *LocalChunkManager) RootPath() string {
+	return lcm.localPath
+}
+
 // Path returns the path of local data if exists.
 func (lcm *LocalChunkManager) Path(filePath string) (string, error) {
 	exist, err := lcm.Exist(filePath)
