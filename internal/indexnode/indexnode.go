@@ -68,7 +68,7 @@ var _ types.IndexNodeComponent = (*IndexNode)(nil)
 var Params paramtable.ComponentParam
 
 type taskKey struct {
-	ClusterID UniqueID
+	ClusterID string
 	BuildID   UniqueID
 }
 

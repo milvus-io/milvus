@@ -240,10 +240,14 @@ func (ib *indexBuilder) process(buildID UniqueID) {
 		}
 		indexParams := ib.meta.GetIndexParams(meta.CollectionID, meta.IndexID)
 
-		req := &indexpb.CreateJobRequest{
-			// TODO @xiaocai2333: set clusterID
-			ClusterID: 0,
-			StorageConfig: &indexpb.StorageConfig{
+		var storageConfig *indexpb.StorageConfig
+		if Params.CommonCfg.StorageType == "local" {
+			storageConfig = &indexpb.StorageConfig{
+				RootPath:    Params.LocalStorageCfg.Path,
+				StorageType: Params.CommonCfg.StorageType,
+			}
+		} else {
+			storageConfig = &indexpb.StorageConfig{
 				Address:         Params.MinioCfg.Address,
 				AccessKeyID:     Params.MinioCfg.AccessKeyID,
 				SecretAccessKey: Params.MinioCfg.SecretAccessKey,
@@ -252,13 +256,19 @@ func (ib *indexBuilder) process(buildID UniqueID) {
 				RootPath:        Params.MinioCfg.RootPath,
 				UseIAM:          Params.MinioCfg.UseIAM,
 				IAMEndpoint:     Params.MinioCfg.IAMEndpoint,
-			},
+				StorageType:     Params.CommonCfg.StorageType,
+			}
+		}
+		req := &indexpb.CreateJobRequest{
+			ClusterID:       Params.CommonCfg.ClusterPrefix,
 			IndexFilePrefix: path.Join(ib.ic.chunkManager.RootPath(), common.SegmentIndexPath),
 			BuildID:         buildID,
 			DataPaths:       binLogs,
 			IndexVersion:    meta.IndexVersion + 1,
+			StorageConfig:   storageConfig,
 			IndexParams:     indexParams,
 			TypeParams:      typeParams,
+			NumRows:         meta.NumRows,
 		}
 		log.Debug("assign task to indexNode", zap.Int64("buildID", buildID), zap.Int64("nodeID", nodeID))
 		if err := ib.ic.assignTask(client, req); err != nil {
@@ -340,7 +350,7 @@ func (ib *indexBuilder) getTaskState(buildID, nodeID UniqueID) indexTaskState {
 	client, exist := ib.ic.nodeManager.GetClientByID(nodeID)
 	if exist {
 		response, err := client.QueryJobs(ib.ctx, &indexpb.QueryJobsRequest{
-			ClusterID: 0,
+			ClusterID: Params.CommonCfg.ClusterPrefix,
 			BuildIDs:  []int64{buildID},
 		})
 		if err != nil {
@@ -381,7 +391,7 @@ func (ib *indexBuilder) dropIndexTask(buildID, nodeID UniqueID) bool {
 	client, exist := ib.ic.nodeManager.GetClientByID(nodeID)
 	if exist {
 		status, err := client.DropJobs(ib.ctx, &indexpb.DropJobsRequest{
-			ClusterID: 0,
+			ClusterID: Params.CommonCfg.ClusterPrefix,
 			BuildIDs:  []UniqueID{buildID},
 		})
 		if err != nil {
