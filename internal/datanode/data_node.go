@@ -1105,7 +1105,7 @@ func importFlushReqFunc(node *DataNode, req *datapb.ImportTaskRequest, res *root
 			// no error raise if alloc=false
 			k := JoinIDPath(req.GetImportTask().GetCollectionId(), req.GetImportTask().GetPartitionId(), segmentID, fieldID, logidx)
 
-			key := path.Join(Params.DataNodeCfg.InsertBinlogRootPath, k)
+			key := path.Join(node.chunkManager.RootPath(), common.SegmentInsertLogPath, k)
 			kvs[key] = blob.Value[:]
 			field2Insert[fieldID] = &datapb.Binlog{
 				EntriesNum:    data.size,
@@ -1131,7 +1131,7 @@ func importFlushReqFunc(node *DataNode, req *datapb.ImportTaskRequest, res *root
 			// no error raise if alloc=false
 			k := JoinIDPath(req.GetImportTask().GetCollectionId(), req.GetImportTask().GetPartitionId(), segmentID, fieldID, logidx)
 
-			key := path.Join(Params.DataNodeCfg.StatsBinlogRootPath, k)
+			key := path.Join(node.chunkManager.RootPath(), common.SegmentStatslogPath, k)
 			kvs[key] = blob.Value
 			field2Stats[fieldID] = &datapb.Binlog{
 				EntriesNum:    0,

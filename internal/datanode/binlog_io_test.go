@@ -369,6 +369,10 @@ type mockCm struct {
 
 var _ storage.ChunkManager = (*mockCm)(nil)
 
+func (mk *mockCm) RootPath() string {
+	return "mock_test"
+}
+
 func (mk *mockCm) Write(filePath string, content []byte) error {
 	return nil
 }

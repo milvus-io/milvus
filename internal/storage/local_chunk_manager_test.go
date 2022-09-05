@@ -26,6 +26,11 @@ import (
 )
 
 func TestLocalCM(t *testing.T) {
+	t.Run("test RootPath", func(t *testing.T) {
+		testCM := NewLocalChunkManager(RootPath(localPath))
+		assert.Equal(t, localPath, testCM.RootPath())
+	})
+
 	t.Run("test load", func(t *testing.T) {
 		testLoadRoot := "test_load"
 

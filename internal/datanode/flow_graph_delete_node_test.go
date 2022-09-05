@@ -313,7 +313,6 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		testPath := "/test/datanode/root/meta"
 		assert.NoError(t, clearEtcd(testPath))
 		Params.EtcdCfg.MetaRootPath = testPath
-		Params.DataNodeCfg.DeleteBinlogRootPath = testPath
 
 		c := &nodeConfig{
 			replica:      replica,
@@ -337,7 +336,6 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		testPath := "/test/datanode/root/meta"
 		assert.NoError(t, clearEtcd(testPath))
 		Params.EtcdCfg.MetaRootPath = testPath
-		Params.DataNodeCfg.DeleteBinlogRootPath = testPath
 
 		c := &nodeConfig{
 			replica:      replica,
@@ -367,7 +365,6 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		testPath := "/test/datanode/root/meta"
 		assert.NoError(t, clearEtcd(testPath))
 		Params.EtcdCfg.MetaRootPath = testPath
-		Params.DataNodeCfg.DeleteBinlogRootPath = testPath
 
 		c := &nodeConfig{
 			replica:      replica,
@@ -403,7 +400,6 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		testPath := "/test/datanode/root/meta"
 		assert.NoError(t, clearEtcd(testPath))
 		Params.EtcdCfg.MetaRootPath = testPath
-		Params.DataNodeCfg.DeleteBinlogRootPath = testPath
 
 		c := &nodeConfig{
 			replica:      &mockReplica{},
@@ -436,7 +432,6 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		testPath := "/test/datanode/root/meta"
 		assert.NoError(t, clearEtcd(testPath))
 		Params.EtcdCfg.MetaRootPath = testPath
-		Params.DataNodeCfg.DeleteBinlogRootPath = testPath
 
 		replica := &SegmentReplica{
 			newSegments:       make(map[UniqueID]*Segment),
@@ -492,7 +487,6 @@ func TestFlowGraphDeleteNode_showDelBuf(t *testing.T) {
 	testPath := "/test/datanode/root/meta"
 	assert.NoError(t, clearEtcd(testPath))
 	Params.EtcdCfg.MetaRootPath = testPath
-	Params.DataNodeCfg.DeleteBinlogRootPath = testPath
 
 	c := &nodeConfig{
 		replica:      &mockReplica{},
@@ -533,7 +527,6 @@ func TestFlowGraphDeleteNode_updateCompactedSegments(t *testing.T) {
 	testPath := "/test/datanode/root/meta"
 	assert.NoError(t, clearEtcd(testPath))
 	Params.EtcdCfg.MetaRootPath = testPath
-	Params.DataNodeCfg.DeleteBinlogRootPath = testPath
 
 	replica := SegmentReplica{
 		newSegments:       make(map[UniqueID]*Segment),

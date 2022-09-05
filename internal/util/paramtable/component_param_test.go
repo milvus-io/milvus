@@ -13,7 +13,6 @@ package paramtable
 
 import (
 	"os"
-	"path"
 	"runtime"
 	"testing"
 	"time"
@@ -305,18 +304,11 @@ func TestComponentParam(t *testing.T) {
 		size := Params.FlushInsertBufferSize
 		t.Logf("FlushInsertBufferSize: %d", size)
 
-		path1 := Params.InsertBinlogRootPath
-		t.Logf("InsertBinlogRootPath: %s", path1)
-
 		Params.CreatedTime = time.Now()
 		t.Logf("CreatedTime: %v", Params.CreatedTime)
 
 		Params.UpdatedTime = time.Now()
 		t.Logf("UpdatedTime: %v", Params.UpdatedTime)
-
-		assert.Equal(t, path.Join("files", "insert_log"), Params.InsertBinlogRootPath)
-
-		assert.Equal(t, path.Join("files", "stats_log"), Params.StatsBinlogRootPath)
 	})
 
 	t.Run("test indexCoordConfig", func(t *testing.T) {
@@ -331,8 +323,6 @@ func TestComponentParam(t *testing.T) {
 
 		Params.UpdatedTime = time.Now()
 		t.Logf("UpdatedTime: %v", Params.UpdatedTime)
-
-		t.Logf("IndexStorageRootPath: %v", Params.IndexStorageRootPath)
 	})
 
 	t.Run("test indexNodeConfig", func(t *testing.T) {
@@ -353,7 +343,5 @@ func TestComponentParam(t *testing.T) {
 
 		Params.UpdatedTime = time.Now()
 		t.Logf("UpdatedTime: %v", Params.UpdatedTime)
-
-		t.Logf("IndexStorageRootPath: %v", Params.IndexStorageRootPath)
 	})
 }
