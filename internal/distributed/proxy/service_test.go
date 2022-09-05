@@ -182,10 +182,6 @@ func (m *MockRootCoord) ShowSegments(ctx context.Context, req *milvuspb.ShowSegm
 	return nil, nil
 }
 
-func (m *MockRootCoord) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
-	return nil, nil
-}
-
 func (m *MockRootCoord) InvalidateCollectionMetaCache(ctx context.Context, in *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 	return nil, nil
 }
@@ -597,10 +593,6 @@ func (m *MockProxy) InvalidateCollectionMetaCache(ctx context.Context, request *
 	return nil, nil
 }
 
-func (m *MockProxy) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
-	return nil, nil
-}
-
 func (m *MockProxy) CreateCollection(ctx context.Context, request *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
 	return nil, nil
 }
@@ -781,14 +773,6 @@ func (m *MockProxy) GetCompactionStateWithPlans(ctx context.Context, req *milvus
 }
 
 func (m *MockProxy) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
-	return nil, nil
-}
-
-func (m *MockProxy) SendSearchResult(ctx context.Context, req *internalpb.SearchResults) (*commonpb.Status, error) {
-	return nil, nil
-}
-
-func (m *MockProxy) SendRetrieveResult(ctx context.Context, req *internalpb.RetrieveResults) (*commonpb.Status, error) {
 	return nil, nil
 }
 
@@ -1011,11 +995,6 @@ func Test_NewServer(t *testing.T) {
 
 	t.Run("InvalidateCollectionMetaCache", func(t *testing.T) {
 		_, err := server.InvalidateCollectionMetaCache(ctx, nil)
-		assert.Nil(t, err)
-	})
-
-	t.Run("ReleaseDQLMessageStream", func(t *testing.T) {
-		_, err := server.ReleaseDQLMessageStream(ctx, nil)
 		assert.Nil(t, err)
 	})
 

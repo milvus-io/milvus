@@ -14,6 +14,7 @@ type Partition struct {
 	PartitionName             string             `gorm:"partition_name"`
 	PartitionCreatedTimestamp uint64             `gorm:"partition_created_timestamp"`
 	CollectionID              int64              `gorm:"collection_id"`
+	Status                    int32              `gorm:"status"`
 	Ts                        typeutil.Timestamp `gorm:"ts"`
 	IsDeleted                 bool               `gorm:"is_deleted"`
 	CreatedAt                 time.Time          `gorm:"created_at"`
@@ -28,6 +29,7 @@ func (v Partition) TableName() string {
 type IPartitionDb interface {
 	GetByCollectionID(tenantID string, collectionID typeutil.UniqueID, ts typeutil.Timestamp) ([]*Partition, error)
 	Insert(in []*Partition) error
+	Update(in *Partition) error
 	//MarkDeleted(tenantID string, collID typeutil.UniqueID) error
 }
 

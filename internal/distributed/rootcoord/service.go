@@ -405,11 +405,6 @@ func (s *Server) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsRequ
 	return s.rootCoord.ShowSegments(ctx, in)
 }
 
-// ReleaseDQLMessageStream notifies RootCoord to release and close the search message stream of specific collection.
-func (s *Server) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
-	return s.rootCoord.ReleaseDQLMessageStream(ctx, in)
-}
-
 // InvalidateCollectionMetaCache notifies RootCoord to release the collection cache in Proxies.
 func (s *Server) InvalidateCollectionMetaCache(ctx context.Context, in *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 	return s.rootCoord.InvalidateCollectionMetaCache(ctx, in)

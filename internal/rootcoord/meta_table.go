@@ -22,6 +22,10 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/common"
+
+	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
+
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -64,809 +68,590 @@ const (
 	DefaultStringIndexType = "Trie"
 )
 
-// MetaTable store all rootCoord meta info
+type IMetaTable interface {
+	AddCollection(ctx context.Context, coll *model.Collection) error
+	ChangeCollectionState(ctx context.Context, collectionID UniqueID, state pb.CollectionState, ts Timestamp) error
+	RemoveCollection(ctx context.Context, collectionID UniqueID, ts Timestamp) error
+	GetCollectionByName(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error)
+	GetCollectionByID(ctx context.Context, collectionID UniqueID, ts Timestamp) (*model.Collection, error)
+	ListCollections(ctx context.Context, ts Timestamp) ([]*model.Collection, error)
+	ListAbnormalCollections(ctx context.Context, ts Timestamp) ([]*model.Collection, error)
+	ListCollectionPhysicalChannels() map[typeutil.UniqueID][]string
+	AddPartition(ctx context.Context, partition *model.Partition) error
+	ChangePartitionState(ctx context.Context, collectionID UniqueID, partitionID UniqueID, state pb.PartitionState, ts Timestamp) error
+	RemovePartition(ctx context.Context, collectionID UniqueID, partitionID UniqueID, ts Timestamp) error
+	CreateAlias(ctx context.Context, alias string, collectionName string, ts Timestamp) error
+	DropAlias(ctx context.Context, alias string, ts Timestamp) error
+	AlterAlias(ctx context.Context, alias string, collectionName string, ts Timestamp) error
+
+	// TODO: it'll be a big cost if we handle the time travel logic, since we should always list all aliases in catalog.
+	IsAlias(name string) bool
+	ListAliasesByID(collID UniqueID) []string
+
+	// TODO: better to accept ctx.
+	// TODO: should GetCollectionNameByID & GetCollectionIDByName also accept ts?
+	GetCollectionNameByID(collID UniqueID) (string, error)                                    // serve for bulk load.
+	GetPartitionNameByID(collID UniqueID, partitionID UniqueID, ts Timestamp) (string, error) // serve for bulk load.
+	GetCollectionIDByName(name string) (UniqueID, error)                                      // serve for bulk load.
+	GetPartitionByName(collID UniqueID, partitionName string, ts Timestamp) (UniqueID, error) // serve for bulk load.
+
+	// TODO: better to accept ctx.
+	AddCredential(credInfo *internalpb.CredentialInfo) error
+	GetCredential(username string) (*internalpb.CredentialInfo, error)
+	DeleteCredential(username string) error
+	AlterCredential(credInfo *internalpb.CredentialInfo) error
+	ListCredentialUsernames() (*milvuspb.ListCredUsersResponse, error)
+
+	// TODO: better to accept ctx.
+	CreateRole(tenant string, entity *milvuspb.RoleEntity) error
+	DropRole(tenant string, roleName string) error
+	OperateUserRole(tenant string, userEntity *milvuspb.UserEntity, roleEntity *milvuspb.RoleEntity, operateType milvuspb.OperateUserRoleType) error
+	SelectRole(tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error)
+	SelectUser(tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool) ([]*milvuspb.UserResult, error)
+	OperatePrivilege(tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error
+	SelectGrant(tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error)
+	DropGrant(tenant string, role *milvuspb.RoleEntity) error
+	ListPolicy(tenant string) ([]string, error)
+	ListUserRole(tenant string) ([]string, error)
+}
+
 type MetaTable struct {
 	ctx     context.Context
 	catalog metastore.RootCoordCatalog
 
-	collID2Meta  map[typeutil.UniqueID]model.Collection // collection id -> collection meta
-	collName2ID  map[string]typeutil.UniqueID           // collection name to collection id
-	collAlias2ID map[string]typeutil.UniqueID           // collection alias to collection id
-	//partID2IndexedSegID map[typeutil.UniqueID]map[typeutil.UniqueID]bool // partition id -> segment_id -> bool
-	//segID2IndexID       map[typeutil.UniqueID]typeutil.UniqueID          // segment_id -> index_id
-	//indexID2Meta        map[typeutil.UniqueID]*model.Index               // collection id/index_id -> meta
+	collID2Meta  map[typeutil.UniqueID]*model.Collection // collection id -> collection meta
+	collName2ID  map[string]typeutil.UniqueID            // collection name to collection id
+	collAlias2ID map[string]typeutil.UniqueID            // collection alias to collection id
 
 	ddLock         sync.RWMutex
 	permissionLock sync.RWMutex
 }
 
-// NewMetaTable creates meta table for rootcoord, which stores all in-memory information
-// for collection, partition, segment, index etc.
 func NewMetaTable(ctx context.Context, catalog metastore.RootCoordCatalog) (*MetaTable, error) {
 	mt := &MetaTable{
 		ctx:     contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName),
 		catalog: catalog,
-		ddLock:  sync.RWMutex{},
 	}
-	err := mt.reloadFromCatalog()
-	if err != nil {
+	if err := mt.reload(); err != nil {
 		return nil, err
 	}
 	return mt, nil
 }
 
-func (mt *MetaTable) reloadFromCatalog() error {
-	mt.collID2Meta = make(map[typeutil.UniqueID]model.Collection)
-	mt.collName2ID = make(map[string]typeutil.UniqueID)
-	mt.collAlias2ID = make(map[string]typeutil.UniqueID)
-
-	collAliases, err := mt.catalog.ListAliases(mt.ctx, 0)
-	if err != nil {
-		return err
-	}
-	for _, aliasInfo := range collAliases {
-		mt.collAlias2ID[aliasInfo.Name] = aliasInfo.CollectionID
-	}
-
-	collMap, err := mt.catalog.ListCollections(mt.ctx, 0)
-	if err != nil {
-		return err
-	}
-
-	for _, coll := range collMap {
-		if _, ok := mt.collAlias2ID[coll.Name]; ok {
-			continue
-		}
-
-		mt.collID2Meta[coll.CollectionID] = *coll
-		mt.collName2ID[coll.Name] = coll.CollectionID
-	}
-
-	log.Debug("reload meta table from KV successfully")
-	return nil
-}
-
-// AddCollection add collection
-func (mt *MetaTable) AddCollection(coll *model.Collection, ts typeutil.Timestamp, ddOpStr string) error {
+func (mt *MetaTable) reload() error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
-	if _, ok := mt.collName2ID[coll.Name]; ok {
-		return fmt.Errorf("collection %s exist", coll.Name)
-	}
+	mt.collID2Meta = make(map[UniqueID]*model.Collection)
+	mt.collName2ID = make(map[string]UniqueID)
+	mt.collAlias2ID = make(map[string]UniqueID)
 
-	coll.CreateTime = ts
-	for _, partition := range coll.Partitions {
-		partition.PartitionCreatedTimestamp = ts
-	}
-
-	if err := mt.catalog.CreateCollection(mt.ctx, coll, ts); err != nil {
+	// max ts means listing latest resources, meta table should always cache the latest version of catalog.
+	collections, err := mt.catalog.ListCollections(mt.ctx, typeutil.MaxTimestamp)
+	if err != nil {
 		return err
 	}
+	for name, collection := range collections {
+		mt.collID2Meta[collection.CollectionID] = collection
+		mt.collName2ID[name] = collection.CollectionID
+	}
 
-	mt.collID2Meta[coll.CollectionID] = *coll
+	// max ts means listing latest resources, meta table should always cache the latest version of catalog.
+	aliases, err := mt.catalog.ListAliases(mt.ctx, typeutil.MaxTimestamp)
+	if err != nil {
+		return err
+	}
+	for _, alias := range aliases {
+		mt.collAlias2ID[alias.Name] = alias.CollectionID
+	}
+
+	return nil
+}
+
+func (mt *MetaTable) AddCollection(ctx context.Context, coll *model.Collection) error {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+
+	// Note:
+	// 1, idempotency check was already done outside;
+	// 2, no need to check time travel logic, since ts should always be the latest;
+
+	if coll.State != pb.CollectionState_CollectionCreating {
+		return fmt.Errorf("collection state should be creating, collection name: %s, collection id: %d, state: %s", coll.Name, coll.CollectionID, coll.State)
+	}
+	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName)
+	if err := mt.catalog.CreateCollection(ctx1, coll, coll.CreateTime); err != nil {
+		return err
+	}
 	mt.collName2ID[coll.Name] = coll.CollectionID
+	mt.collID2Meta[coll.CollectionID] = coll.Clone()
+	log.Info("add collection to meta table", zap.String("collection", coll.Name),
+		zap.Int64("id", coll.CollectionID), zap.Uint64("ts", coll.CreateTime))
 	return nil
 }
 
-// DeleteCollection delete collection
-func (mt *MetaTable) DeleteCollection(collID typeutil.UniqueID, ts typeutil.Timestamp, ddOpStr string) error {
+func (mt *MetaTable) ChangeCollectionState(ctx context.Context, collectionID UniqueID, state pb.CollectionState, ts Timestamp) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
-	col, ok := mt.collID2Meta[collID]
+	coll, ok := mt.collID2Meta[collectionID]
 	if !ok {
-		return fmt.Errorf("can't find collection. id = %d", collID)
+		return nil
 	}
-
-	var aliases []string
-	// delete collection aliases
-	for alias, cid := range mt.collAlias2ID {
-		if cid == collID {
-			aliases = append(aliases, alias)
-		}
-	}
-
-	collection := &model.Collection{
-		CollectionID: collID,
-		Aliases:      aliases,
-	}
-
-	if err := mt.catalog.DropCollection(mt.ctx, collection, ts); err != nil {
+	clone := coll.Clone()
+	clone.State = state
+	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName)
+	if err := mt.catalog.AlterCollection(ctx1, coll, clone, metastore.MODIFY, ts); err != nil {
 		return err
 	}
+	mt.collID2Meta[collectionID] = clone
+	log.Info("change collection state", zap.Int64("collection", collectionID),
+		zap.String("state", state.String()), zap.Uint64("ts", ts))
 
-	//// update segID2IndexID
-	//for _, partition := range col.Partitions {
-	//	partID := partition.PartitionID
-	//	if segIDMap, ok := mt.partID2IndexedSegID[partID]; ok {
-	//		for segID := range segIDMap {
-	//			delete(mt.segID2IndexID, segID)
-	//		}
-	//	}
-	//	delete(mt.partID2IndexedSegID, partID)
-	//}
-	//
-	//for _, t := range col.FieldIDToIndexID {
-	//	delete(mt.indexID2Meta, t.Value)
-	//}
+	return nil
+}
 
-	// delete collection aliases
+func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID, ts Timestamp) error {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+
+	// Note: we cannot handle case that dropping collection with `ts1` but a collection exists in catalog with newer ts
+	// which is bigger than `ts1`. So we assume that ts should always be the latest.
+
+	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName)
+	aliases := mt.listAliasesByID(collectionID)
+	if err := mt.catalog.DropCollection(ctx1, &model.Collection{CollectionID: collectionID, Aliases: aliases}, ts); err != nil {
+		return err
+	}
+	delete(mt.collID2Meta, collectionID)
+
+	var name string
+	coll, ok := mt.collID2Meta[collectionID]
+	if ok && coll != nil {
+		name = coll.Name
+		delete(mt.collName2ID, name)
+	}
+
 	for _, alias := range aliases {
 		delete(mt.collAlias2ID, alias)
 	}
 
-	delete(mt.collID2Meta, collID)
-	delete(mt.collName2ID, col.Name)
-
+	log.Info("remove collection", zap.String("name", name), zap.Int64("id", collectionID), zap.Strings("aliases", aliases))
 	return nil
 }
 
-// HasCollection return collection existence
-func (mt *MetaTable) HasCollection(collID typeutil.UniqueID, ts typeutil.Timestamp) bool {
-	mt.ddLock.RLock()
-	defer mt.ddLock.RUnlock()
-	if ts == 0 {
-		_, ok := mt.collID2Meta[collID]
-		return ok
-	}
+// getCollectionByIDInternal get collection by collection id without lock.
+func (mt *MetaTable) getCollectionByIDInternal(ctx context.Context, collectionID UniqueID, ts Timestamp) (*model.Collection, error) {
+	var coll *model.Collection
+	var err error
 
-	return mt.catalog.CollectionExists(mt.ctx, collID, ts)
-}
-
-// GetCollectionIDByName returns the collection ID according to its name.
-// Returns an error if no matching ID is found.
-func (mt *MetaTable) GetCollectionIDByName(cName string) (typeutil.UniqueID, error) {
-	mt.ddLock.RLock()
-	defer mt.ddLock.RUnlock()
-	var cID UniqueID
-	var ok bool
-	if cID, ok = mt.collName2ID[cName]; !ok {
-		return 0, fmt.Errorf("collection ID not found for collection name %s", cName)
-	}
-	return cID, nil
-}
-
-// GetCollectionNameByID returns the collection name according to its ID.
-// Returns an error if no matching name is found.
-func (mt *MetaTable) GetCollectionNameByID(collectionID typeutil.UniqueID) (string, error) {
-	mt.ddLock.RLock()
-	defer mt.ddLock.RUnlock()
-	col, ok := mt.collID2Meta[collectionID]
-	if !ok {
-		return "", fmt.Errorf("can't find collection id : %d", collectionID)
-	}
-	return col.Name, nil
-}
-
-// GetCollectionByID return collection meta by collection id
-func (mt *MetaTable) GetCollectionByID(collectionID typeutil.UniqueID, ts typeutil.Timestamp) (*model.Collection, error) {
-	mt.ddLock.RLock()
-	defer mt.ddLock.RUnlock()
-
-	if ts == 0 {
-		col, ok := mt.collID2Meta[collectionID]
-		if !ok {
-			return nil, fmt.Errorf("can't find collection id : %d", collectionID)
-		}
-		return col.Clone(), nil
-	}
-
-	return mt.catalog.GetCollectionByID(mt.ctx, collectionID, ts)
-}
-
-// GetCollectionByName return collection meta by collection name
-func (mt *MetaTable) GetCollectionByName(collectionName string, ts typeutil.Timestamp) (*model.Collection, error) {
-	mt.ddLock.RLock()
-	defer mt.ddLock.RUnlock()
-
-	if ts == 0 {
-		vid, ok := mt.collName2ID[collectionName]
-		if !ok {
-			if vid, ok = mt.collAlias2ID[collectionName]; !ok {
-				return nil, fmt.Errorf("can't find collection: " + collectionName)
-			}
-		}
-		col, ok := mt.collID2Meta[vid]
-		if !ok {
-			return nil, fmt.Errorf("can't find collection %s with id %d", collectionName, vid)
-		}
-
-		return col.Clone(), nil
-	}
-
-	return mt.catalog.GetCollectionByName(mt.ctx, collectionName, ts)
-}
-
-// ListCollections list all collection names
-func (mt *MetaTable) ListCollections(ts typeutil.Timestamp) (map[string]*model.Collection, error) {
-	mt.ddLock.RLock()
-	defer mt.ddLock.RUnlock()
-	cols := make(map[string]*model.Collection)
-
-	if ts == 0 {
-		for collName, collID := range mt.collName2ID {
-			col := mt.collID2Meta[collID]
-			cols[collName] = col.Clone()
-		}
-		return cols, nil
-	}
-
-	return mt.catalog.ListCollections(mt.ctx, ts)
-}
-
-// ListAliases list all collection aliases
-func (mt *MetaTable) ListAliases(collID typeutil.UniqueID) []string {
-	mt.ddLock.RLock()
-	defer mt.ddLock.RUnlock()
-	var aliases []string
-	for alias, cid := range mt.collAlias2ID {
-		if cid == collID {
-			aliases = append(aliases, alias)
+	coll, ok := mt.collID2Meta[collectionID]
+	if !ok || !coll.Available() || coll.CreateTime > ts {
+		// travel meta information from catalog.
+		ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName)
+		coll, err = mt.catalog.GetCollectionByID(ctx1, collectionID, ts)
+		if err != nil {
+			return nil, err
 		}
 	}
-	return aliases
+
+	if !coll.Available() {
+		// use coll.Name to match error message of regression. TODO: remove this after error code is ready.
+		return nil, fmt.Errorf("can't find collection: %s", coll.Name)
+	}
+
+	clone := coll.Clone()
+	// pick available partitions.
+	clone.Partitions = nil
+	for _, partition := range coll.Partitions {
+		if partition.Available() {
+			clone.Partitions = append(clone.Partitions, partition.Clone())
+		}
+	}
+	return clone, nil
 }
 
-// ListCollectionVirtualChannels list virtual channels of all collections
-func (mt *MetaTable) ListCollectionVirtualChannels() map[typeutil.UniqueID][]string {
+func (mt *MetaTable) GetCollectionByName(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error) {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
-	chanMap := make(map[typeutil.UniqueID][]string)
 
-	for id, collInfo := range mt.collID2Meta {
-		chanMap[id] = collInfo.VirtualChannelNames
+	var collectionID UniqueID
+
+	collectionID, ok := mt.collAlias2ID[collectionName]
+	if ok {
+		return mt.getCollectionByIDInternal(ctx, collectionID, ts)
 	}
-	return chanMap
+
+	collectionID, ok = mt.collName2ID[collectionName]
+	if ok {
+		return mt.getCollectionByIDInternal(ctx, collectionID, ts)
+	}
+
+	// travel meta information from catalog. No need to check time travel logic again, since catalog already did.
+	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName)
+	coll, err := mt.catalog.GetCollectionByName(ctx1, collectionName, ts)
+	if err != nil {
+		return nil, err
+	}
+	if !coll.Available() {
+		return nil, fmt.Errorf("can't find collection: %s", collectionName)
+	}
+	return coll, nil
 }
 
-// ListCollectionPhysicalChannels list physical channels of all collections
+func (mt *MetaTable) GetCollectionByID(ctx context.Context, collectionID UniqueID, ts Timestamp) (*model.Collection, error) {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+
+	return mt.getCollectionByIDInternal(ctx, collectionID, ts)
+}
+
+func (mt *MetaTable) ListCollections(ctx context.Context, ts Timestamp) ([]*model.Collection, error) {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+
+	// list collections should always be loaded from catalog.
+	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName)
+	colls, err := mt.catalog.ListCollections(ctx1, ts)
+	if err != nil {
+		return nil, err
+	}
+	onlineCollections := make([]*model.Collection, 0, len(colls))
+	for _, coll := range colls {
+		if coll.Available() {
+			onlineCollections = append(onlineCollections, coll)
+		}
+	}
+	return onlineCollections, nil
+}
+
+func (mt *MetaTable) ListAbnormalCollections(ctx context.Context, ts Timestamp) ([]*model.Collection, error) {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+
+	// list collections should always be loaded from catalog.
+	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName)
+	colls, err := mt.catalog.ListCollections(ctx1, ts)
+	if err != nil {
+		return nil, err
+	}
+	abnormalCollections := make([]*model.Collection, 0, len(colls))
+	for _, coll := range colls {
+		if !coll.Available() {
+			abnormalCollections = append(abnormalCollections, coll)
+		}
+	}
+	return abnormalCollections, nil
+}
+
+// ListCollectionPhysicalChannels list physical channels of all collections.
 func (mt *MetaTable) ListCollectionPhysicalChannels() map[typeutil.UniqueID][]string {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
-	chanMap := make(map[typeutil.UniqueID][]string)
+
+	chanMap := make(map[UniqueID][]string)
 
 	for id, collInfo := range mt.collID2Meta {
-		chanMap[id] = collInfo.PhysicalChannelNames
+		chanMap[id] = common.CloneStringList(collInfo.PhysicalChannelNames)
 	}
+
 	return chanMap
 }
 
-// AddPartition add partition
-func (mt *MetaTable) AddPartition(collID typeutil.UniqueID, partitionName string, partitionID typeutil.UniqueID, ts typeutil.Timestamp, ddOpStr string) error {
+func (mt *MetaTable) AddPartition(ctx context.Context, partition *model.Partition) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
-	coll, ok := mt.collID2Meta[collID]
-	if !ok {
-		return fmt.Errorf("can't find collection. id = %d", collID)
-	}
 
-	// number of partition tags (except _default) should be limited to 4096 by default
-	if int64(len(coll.Partitions)) >= Params.RootCoordCfg.MaxPartitionNum {
-		return fmt.Errorf("maximum partition's number should be limit to %d", Params.RootCoordCfg.MaxPartitionNum)
+	coll, ok := mt.collID2Meta[partition.CollectionID]
+	if !ok || !coll.Available() {
+		return fmt.Errorf("collection not exists: %d", partition.CollectionID)
 	}
-
-	for _, p := range coll.Partitions {
-		if p.PartitionID == partitionID {
-			return fmt.Errorf("partition id = %d already exists", partitionID)
-		}
-		if p.PartitionName == partitionName {
-			return fmt.Errorf("partition name = %s already exists", partitionName)
-		}
-		// no necessary to check created timestamp
+	if partition.State != pb.PartitionState_PartitionCreated {
+		return fmt.Errorf("partition state is not created, collection: %d, partition: %d, state: %s", partition.CollectionID, partition.PartitionID, partition.State)
 	}
-
-	partition := &model.Partition{
-		PartitionID:               partitionID,
-		PartitionName:             partitionName,
-		PartitionCreatedTimestamp: ts,
-		CollectionID:              collID,
-	}
-	coll.Partitions = append(coll.Partitions, partition)
-
-	if err := mt.catalog.CreatePartition(mt.ctx, partition, ts); err != nil {
+	if err := mt.catalog.CreatePartition(ctx, partition, partition.PartitionCreatedTimestamp); err != nil {
 		return err
 	}
-
-	mt.collID2Meta[collID] = coll
+	mt.collID2Meta[partition.CollectionID].Partitions = append(mt.collID2Meta[partition.CollectionID].Partitions, partition.Clone())
+	log.Info("add partition to meta table",
+		zap.Int64("collection", partition.CollectionID), zap.String("partition", partition.PartitionName),
+		zap.Int64("partitionid", partition.PartitionID), zap.Uint64("ts", partition.PartitionCreatedTimestamp))
 	return nil
 }
 
-// GetPartitionNameByID return partition name by partition id
-func (mt *MetaTable) GetPartitionNameByID(collID, partitionID typeutil.UniqueID, ts typeutil.Timestamp) (string, error) {
-	if ts == 0 {
-		mt.ddLock.RLock()
-		defer mt.ddLock.RUnlock()
-		col, ok := mt.collID2Meta[collID]
-		if !ok {
-			return "", fmt.Errorf("can't find collection id = %d", collID)
+func (mt *MetaTable) ChangePartitionState(ctx context.Context, collectionID UniqueID, partitionID UniqueID, state pb.PartitionState, ts Timestamp) error {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+
+	coll, ok := mt.collID2Meta[collectionID]
+	if !ok {
+		return nil
+	}
+	for idx, part := range coll.Partitions {
+		if part.PartitionID == partitionID {
+			clone := part.Clone()
+			clone.State = state
+			ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName)
+			if err := mt.catalog.AlterPartition(ctx1, part, clone, metastore.MODIFY, ts); err != nil {
+				return err
+			}
+			mt.collID2Meta[collectionID].Partitions[idx] = clone
+			log.Info("change partition state", zap.Int64("collection", collectionID),
+				zap.Int64("partition", partitionID), zap.String("state", state.String()),
+				zap.Uint64("ts", ts))
+			return nil
 		}
-		for _, partition := range col.Partitions {
-			if partition.PartitionID == partitionID {
+	}
+	return fmt.Errorf("partition not exist, collection: %d, partition: %d", collectionID, partitionID)
+}
+
+func (mt *MetaTable) RemovePartition(ctx context.Context, collectionID UniqueID, partitionID UniqueID, ts Timestamp) error {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+
+	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName)
+	if err := mt.catalog.DropPartition(ctx1, collectionID, partitionID, ts); err != nil {
+		return err
+	}
+	coll, ok := mt.collID2Meta[collectionID]
+	if !ok {
+		return nil
+	}
+	var loc = -1
+	for idx, part := range coll.Partitions {
+		if part.PartitionID == partitionID {
+			loc = idx
+			break
+		}
+	}
+	if loc != -1 {
+		coll.Partitions = append(coll.Partitions[:loc], coll.Partitions[loc+1:]...)
+	}
+	log.Info("remove partition", zap.Int64("collection", collectionID), zap.Int64("partition", partitionID), zap.Uint64("ts", ts))
+	return nil
+}
+
+func (mt *MetaTable) CreateAlias(ctx context.Context, alias string, collectionName string, ts Timestamp) error {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+
+	// It's ok that we don't read from catalog when cache missed.
+	// Since cache always keep the latest version, and the ts should always be the latest.
+
+	if _, ok := mt.collName2ID[alias]; ok {
+		return fmt.Errorf("cannot create alias, collection already exists with same name: %s", alias)
+	}
+
+	collectionID, ok := mt.collName2ID[collectionName]
+	if !ok {
+		// you cannot alias to a non-existent collection.
+		return fmt.Errorf("collection not exists: %s", collectionName)
+	}
+
+	// check if alias exists.
+	aliasedCollectionID, ok := mt.collAlias2ID[alias]
+	if ok && aliasedCollectionID == collectionID {
+		log.Warn("add duplicate alias", zap.String("alias", alias), zap.String("collection", collectionName), zap.Uint64("ts", ts))
+		return nil
+	} else if ok {
+		// TODO: better to check if aliasedCollectionID exist or is available, though not very possible.
+		aliasedColl := mt.collID2Meta[aliasedCollectionID]
+		return fmt.Errorf("alias exists and already aliased to another collection, alias: %s, collection: %s, other collection: %s", alias, collectionName, aliasedColl.Name)
+	}
+	// alias didn't exist.
+
+	coll, ok := mt.collID2Meta[collectionID]
+	if !ok || !coll.Available() {
+		// you cannot alias to a non-existent collection.
+		return fmt.Errorf("collection not exists: %s", collectionName)
+	}
+
+	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName)
+	if err := mt.catalog.CreateAlias(ctx1, &model.Alias{
+		Name:         alias,
+		CollectionID: collectionID,
+		CreatedTime:  ts,
+		State:        pb.AliasState_AliasCreated,
+	}, ts); err != nil {
+		return err
+	}
+	mt.collAlias2ID[alias] = collectionID
+	log.Info("create alias", zap.String("alias", alias), zap.String("collection", collectionName), zap.Uint64("ts", ts))
+	return nil
+}
+
+func (mt *MetaTable) DropAlias(ctx context.Context, alias string, ts Timestamp) error {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+
+	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName)
+	if err := mt.catalog.DropAlias(ctx1, alias, ts); err != nil {
+		return err
+	}
+	delete(mt.collAlias2ID, alias)
+	log.Info("drop alias", zap.String("alias", alias), zap.Uint64("ts", ts))
+	return nil
+}
+
+func (mt *MetaTable) AlterAlias(ctx context.Context, alias string, collectionName string, ts Timestamp) error {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+
+	// It's ok that we don't read from catalog when cache missed.
+	// Since cache always keep the latest version, and the ts should always be the latest.
+
+	if _, ok := mt.collName2ID[alias]; ok {
+		return fmt.Errorf("cannot alter alias, collection already exists with same name: %s", alias)
+	}
+
+	collectionID, ok := mt.collName2ID[collectionName]
+	if !ok {
+		// you cannot alias to a non-existent collection.
+		return fmt.Errorf("collection not exists: %s", collectionName)
+	}
+
+	coll, ok := mt.collID2Meta[collectionID]
+	if !ok || !coll.Available() {
+		// you cannot alias to a non-existent collection.
+		return fmt.Errorf("collection not exists: %s", collectionName)
+	}
+
+	// check if alias exists.
+	_, ok = mt.collAlias2ID[alias]
+	if !ok {
+		//
+		return fmt.Errorf("failed to alter alias, alias does not exist: %s", alias)
+	}
+
+	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName)
+	if err := mt.catalog.AlterAlias(ctx1, &model.Alias{
+		Name:         alias,
+		CollectionID: collectionID,
+		CreatedTime:  ts,
+		State:        pb.AliasState_AliasCreated,
+	}, ts); err != nil {
+		return err
+	}
+
+	// alias switch to another collection anyway.
+	mt.collAlias2ID[alias] = collectionID
+	log.Info("alter alias", zap.String("alias", alias), zap.String("collection", collectionName), zap.Uint64("ts", ts))
+	return nil
+}
+
+func (mt *MetaTable) IsAlias(name string) bool {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+
+	_, ok := mt.collAlias2ID[name]
+	return ok
+}
+
+func (mt *MetaTable) listAliasesByID(collID UniqueID) []string {
+	ret := make([]string, 0)
+	for alias, id := range mt.collAlias2ID {
+		if id == collID {
+			ret = append(ret, alias)
+		}
+	}
+	return ret
+}
+
+func (mt *MetaTable) ListAliasesByID(collID UniqueID) []string {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+
+	return mt.listAliasesByID(collID)
+}
+
+// GetCollectionNameByID serve for bulk load. TODO: why this didn't accept ts?
+func (mt *MetaTable) GetCollectionNameByID(collID UniqueID) (string, error) {
+	mt.ddLock.RUnlock()
+	defer mt.ddLock.RUnlock()
+
+	coll, ok := mt.collID2Meta[collID]
+	if !ok || !coll.Available() {
+		return "", fmt.Errorf("collection not exist: %d", collID)
+	}
+
+	return coll.Name, nil
+}
+
+// GetPartitionNameByID serve for bulk load.
+func (mt *MetaTable) GetPartitionNameByID(collID UniqueID, partitionID UniqueID, ts Timestamp) (string, error) {
+	mt.ddLock.RUnlock()
+	defer mt.ddLock.RUnlock()
+
+	coll, ok := mt.collID2Meta[collID]
+	if ok && coll.Available() && coll.CreateTime <= ts {
+		// cache hit.
+		for _, partition := range coll.Partitions {
+			if partition.Available() && partition.PartitionID == partitionID && partition.PartitionCreatedTimestamp <= ts {
+				// cache hit.
 				return partition.PartitionName, nil
 			}
 		}
-		return "", fmt.Errorf("partition %d does not exist", partitionID)
 	}
-
-	col, err := mt.catalog.GetCollectionByID(mt.ctx, collID, ts)
+	// cache miss, get from catalog anyway.
+	coll, err := mt.catalog.GetCollectionByID(mt.ctx, collID, ts)
 	if err != nil {
 		return "", err
 	}
-	for _, partition := range col.Partitions {
-		if partition.PartitionID == partitionID {
+	if !coll.Available() {
+		return "", fmt.Errorf("collection not exist: %d", collID)
+	}
+	for _, partition := range coll.Partitions {
+		// no need to check time travel logic again, since catalog already did.
+		if partition.Available() && partition.PartitionID == partitionID {
 			return partition.PartitionName, nil
 		}
 	}
-	return "", fmt.Errorf("partition %d does not exist", partitionID)
+	return "", fmt.Errorf("partition not exist: %d", partitionID)
 }
 
-func (mt *MetaTable) getPartitionByName(collID typeutil.UniqueID, partitionName string, ts typeutil.Timestamp) (typeutil.UniqueID, error) {
-	if ts == 0 {
-		col, ok := mt.collID2Meta[collID]
-		if !ok {
-			return 0, fmt.Errorf("can't find collection id = %d", collID)
-		}
-		for _, partition := range col.Partitions {
-			if partition.PartitionName == partitionName {
+// GetCollectionIDByName serve for bulk load. TODO: why this didn't accept ts?
+func (mt *MetaTable) GetCollectionIDByName(name string) (UniqueID, error) {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+
+	id, ok := mt.collName2ID[name]
+	if !ok {
+		return InvalidCollectionID, fmt.Errorf("collection not exists: %s", name)
+	}
+	return id, nil
+}
+
+// GetPartitionByName serve for bulk load.
+func (mt *MetaTable) GetPartitionByName(collID UniqueID, partitionName string, ts Timestamp) (UniqueID, error) {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+
+	coll, ok := mt.collID2Meta[collID]
+	if ok && coll.Available() && coll.CreateTime <= ts {
+		// cache hit.
+		for _, partition := range coll.Partitions {
+			if partition.Available() && partition.PartitionName == partitionName && partition.PartitionCreatedTimestamp <= ts {
+				// cache hit.
 				return partition.PartitionID, nil
 			}
 		}
-		return 0, fmt.Errorf("partition %s does not exist", partitionName)
 	}
-
-	col, err := mt.catalog.GetCollectionByID(mt.ctx, collID, ts)
+	// cache miss, get from catalog anyway.
+	coll, err := mt.catalog.GetCollectionByID(mt.ctx, collID, ts)
 	if err != nil {
-		return 0, err
+		return common.InvalidPartitionID, err
 	}
-	for _, partition := range col.Partitions {
-		if partition.PartitionName == partitionName {
+	if !coll.Available() {
+		return common.InvalidPartitionID, fmt.Errorf("collection not exist: %d", collID)
+	}
+	for _, partition := range coll.Partitions {
+		// no need to check time travel logic again, since catalog already did.
+		if partition.Available() && partition.PartitionName == partitionName {
 			return partition.PartitionID, nil
 		}
 	}
-	return 0, fmt.Errorf("partition %s does not exist", partitionName)
-}
 
-// GetPartitionByName return partition id by partition name
-func (mt *MetaTable) GetPartitionByName(collID typeutil.UniqueID, partitionName string, ts typeutil.Timestamp) (typeutil.UniqueID, error) {
-	mt.ddLock.RLock()
-	defer mt.ddLock.RUnlock()
-	return mt.getPartitionByName(collID, partitionName, ts)
-}
-
-// HasPartition check partition existence
-func (mt *MetaTable) HasPartition(collID typeutil.UniqueID, partitionName string, ts typeutil.Timestamp) bool {
-	mt.ddLock.RLock()
-	defer mt.ddLock.RUnlock()
-	_, err := mt.getPartitionByName(collID, partitionName, ts)
-	return err == nil
-}
-
-// DeletePartition delete partition
-func (mt *MetaTable) DeletePartition(collID typeutil.UniqueID, partitionName string, ts typeutil.Timestamp, ddOpStr string) (typeutil.UniqueID, error) {
-	mt.ddLock.Lock()
-	defer mt.ddLock.Unlock()
-
-	if partitionName == Params.CommonCfg.DefaultPartitionName {
-		return 0, fmt.Errorf("default partition cannot be deleted")
-	}
-
-	col, ok := mt.collID2Meta[collID]
-	if !ok {
-		return 0, fmt.Errorf("can't find collection id = %d", collID)
-	}
-
-	// check tag exists
-	exist := false
-
-	parts := make([]*model.Partition, 0, len(col.Partitions))
-
-	var partID typeutil.UniqueID
-	for _, partition := range col.Partitions {
-		if partition.PartitionName == partitionName {
-			partID = partition.PartitionID
-			exist = true
-		} else {
-			parts = append(parts, partition)
-		}
-	}
-	if !exist {
-		return 0, fmt.Errorf("partition %s does not exist", partitionName)
-	}
-
-	col.Partitions = parts
-	if err := mt.catalog.DropPartition(mt.ctx, col.CollectionID, partID, ts); err != nil {
-		return 0, err
-	}
-
-	// update cache
-	mt.collID2Meta[collID] = col
-	//if segIDMap, ok := mt.partID2IndexedSegID[partID]; ok {
-	//	for segID := range segIDMap {
-	//		indexID, ok := mt.segID2IndexID[segID]
-	//		if !ok {
-	//			continue
-	//		}
-	//		delete(mt.segID2IndexID, segID)
-	//
-	//		indexMeta, ok := mt.indexID2Meta[indexID]
-	//		if ok {
-	//			delete(indexMeta.SegmentIndexes, segID)
-	//		}
-	//	}
-	//}
-	//delete(mt.partID2IndexedSegID, partID)
-
-	return partID, nil
-}
-
-// GetFieldSchema return field schema
-func (mt *MetaTable) GetFieldSchema(collName string, fieldName string) (model.Field, error) {
-	mt.ddLock.RLock()
-	defer mt.ddLock.RUnlock()
-
-	return mt.getFieldSchemaInternal(collName, fieldName)
-}
-
-func (mt *MetaTable) getFieldSchemaInternal(collName string, fieldName string) (model.Field, error) {
-	collID, ok := mt.collName2ID[collName]
-	if !ok {
-		collID, ok = mt.collAlias2ID[collName]
-		if !ok {
-			return model.Field{}, fmt.Errorf("collection %s not found", collName)
-		}
-	}
-	col, ok := mt.collID2Meta[collID]
-	if !ok {
-		return model.Field{}, fmt.Errorf("collection %s not found", collName)
-	}
-
-	for _, field := range col.Fields {
-		if field.Name == fieldName {
-			return *field, nil
-		}
-	}
-	return model.Field{}, fmt.Errorf("collection %s doesn't have filed %s", collName, fieldName)
-}
-
-// IsSegmentIndexed check if segment has indexed
-//func (mt *MetaTable) IsSegmentIndexed(segID typeutil.UniqueID, fieldSchema *model.Field, indexParams []*commonpb.KeyValuePair) bool {
-//	mt.ddLock.RLock()
-//	defer mt.ddLock.RUnlock()
-//	return mt.isSegmentIndexedInternal(segID, fieldSchema, indexParams)
-//}
-
-//func (mt *MetaTable) isSegmentIndexedInternal(segID typeutil.UniqueID, fieldSchema *model.Field, indexParams []*commonpb.KeyValuePair) bool {
-//	index, err := mt.getIdxMetaBySegID(segID)
-//	if err != nil {
-//		return false
-//	}
-//
-//	segIndex, ok := index.SegmentIndexes[segID]
-//	if ok && !index.IsDeleted &&
-//		index.FieldID == fieldSchema.FieldID &&
-//		EqualKeyPairArray(indexParams, index.IndexParams) &&
-//		segIndex.EnableIndex {
-//		return true
-//	}
-//
-//	return false
-//}
-
-func (mt *MetaTable) getCollectionInfoInternal(collName string) (model.Collection, error) {
-	collID, ok := mt.collName2ID[collName]
-	if !ok {
-		collID, ok = mt.collAlias2ID[collName]
-		if !ok {
-			return model.Collection{}, fmt.Errorf("collection not found: %s", collName)
-		}
-	}
-	collMeta, ok := mt.collID2Meta[collID]
-	if !ok {
-		return model.Collection{}, fmt.Errorf("collection not found: %s", collName)
-	}
-	return collMeta, nil
-}
-
-//func (mt *MetaTable) checkFieldCanBeIndexed(collMeta model.Collection, fieldSchema model.Field, idxInfo *model.Index) error {
-//	for _, tuple := range collMeta.FieldIDToIndexID {
-//		if tuple.Key == fieldSchema.FieldID {
-//			if info, ok := mt.indexID2Meta[tuple.Value]; ok {
-//				if info.IsDeleted {
-//					continue
-//				}
-//
-//				if idxInfo.IndexName != info.IndexName {
-//					return fmt.Errorf(
-//						"creating multiple indexes on same field is not supported, "+
-//							"collection: %s, field: %s, index name: %s, new index name: %s",
-//						collMeta.Name, fieldSchema.Name,
-//						info.IndexName, idxInfo.IndexName)
-//				}
-//			} else {
-//				// TODO: unexpected: what if index id not exist? Meta incomplete.
-//				log.Warn("index meta was incomplete, index id missing in indexID2Meta",
-//					zap.String("collection", collMeta.Name),
-//					zap.String("field", fieldSchema.Name),
-//					zap.Int64("collection id", collMeta.CollectionID),
-//					zap.Int64("field id", fieldSchema.FieldID),
-//					zap.Int64("index id", tuple.Value))
-//			}
-//		}
-//	}
-//	return nil
-//}
-//
-//func (mt *MetaTable) checkFieldIndexDuplicate(collMeta model.Collection, fieldSchema model.Field, idxInfo *model.Index) (duplicate bool, idx *model.Index, err error) {
-//	for _, t := range collMeta.FieldIDToIndexID {
-//		if info, ok := mt.indexID2Meta[t.Value]; ok && !info.IsDeleted {
-//			if info.IndexName == idxInfo.IndexName {
-//				// the index name must be different for different indexes
-//				if t.Key != fieldSchema.FieldID || !EqualKeyPairArray(info.IndexParams, idxInfo.IndexParams) {
-//					return false, nil, fmt.Errorf("index already exists, collection: %s, field: %s, index: %s", collMeta.Name, fieldSchema.Name, idxInfo.IndexName)
-//				}
-//
-//				// same index name, index params, and fieldId
-//				return true, info, nil
-//			}
-//		}
-//	}
-//	return false, nil, nil
-//}
-//
-//// GetNotIndexedSegments return segment ids which have no index
-//func (mt *MetaTable) GetNotIndexedSegments(collName string, fieldName string, idxInfo *model.Index, segIDs []typeutil.UniqueID) ([]typeutil.UniqueID, model.Field, error) {
-//	mt.ddLock.Lock()
-//	defer mt.ddLock.Unlock()
-//
-//	fieldSchema, err := mt.getFieldSchemaInternal(collName, fieldName)
-//	if err != nil {
-//		return nil, fieldSchema, err
-//	}
-//
-//	rstID := make([]typeutil.UniqueID, 0, 16)
-//	for _, segID := range segIDs {
-//		if ok := mt.isSegmentIndexedInternal(segID, &fieldSchema, idxInfo.IndexParams); !ok {
-//			rstID = append(rstID, segID)
-//		}
-//	}
-//	return rstID, fieldSchema, nil
-//}
-
-// AddIndex add index
-//func (mt *MetaTable) AddIndex(colName string, fieldName string, idxInfo *model.Index, segIDs []typeutil.UniqueID) (bool, error) {
-//	mt.ddLock.Lock()
-//	defer mt.ddLock.Unlock()
-//
-//	fieldSchema, err := mt.getFieldSchemaInternal(colName, fieldName)
-//	if err != nil {
-//		return false, err
-//	}
-//
-//	collMeta, err := mt.getCollectionInfoInternal(colName)
-//	if err != nil {
-//		// error here if collection not found.
-//		return false, err
-//	}
-//
-//	//TODO:: check index params for scalar field
-//	// set default index type for scalar index
-//	if !typeutil.IsVectorType(fieldSchema.DataType) {
-//		if fieldSchema.DataType == schemapb.DataType_VarChar {
-//			idxInfo.IndexParams = []*commonpb.KeyValuePair{{Key: "index_type", Value: DefaultStringIndexType}}
-//		} else {
-//			idxInfo.IndexParams = []*commonpb.KeyValuePair{{Key: "index_type", Value: DefaultIndexType}}
-//		}
-//	}
-//
-//	if idxInfo.IndexParams == nil {
-//		return false, fmt.Errorf("index param is nil")
-//	}
-//
-//	if err := mt.checkFieldCanBeIndexed(collMeta, fieldSchema, idxInfo); err != nil {
-//		return false, err
-//	}
-//
-//	isDuplicated, dupIdxInfo, err := mt.checkFieldIndexDuplicate(collMeta, fieldSchema, idxInfo)
-//	if err != nil {
-//		return isDuplicated, err
-//	}
-//
-//	if isDuplicated {
-//		log.Info("index already exists, update timestamp for IndexID",
-//			zap.Any("indexTs", idxInfo.CreateTime),
-//			zap.Int64("indexID", dupIdxInfo.IndexID))
-//		newIdxMeta := *dupIdxInfo
-//		newIdxMeta.CreateTime = idxInfo.CreateTime
-//		if err := mt.catalog.AlterIndex(mt.ctx, dupIdxInfo, &newIdxMeta, metastore.ADD); err != nil {
-//			return isDuplicated, err
-//		}
-//		mt.indexID2Meta[dupIdxInfo.IndexID] = &newIdxMeta
-//	} else {
-//		segmentIndexes := make(map[int64]model.SegmentIndex, len(segIDs))
-//		for _, segID := range segIDs {
-//			segmentIndex := model.SegmentIndex{
-//				Segment: model.Segment{
-//					SegmentID: segID,
-//				},
-//				EnableIndex: false,
-//			}
-//			segmentIndexes[segID] = segmentIndex
-//		}
-//
-//		idxInfo.SegmentIndexes = segmentIndexes
-//		idxInfo.FieldID = fieldSchema.FieldID
-//		idxInfo.CollectionID = collMeta.CollectionID
-//
-//		tuple := common.Int64Tuple{
-//			Key:   fieldSchema.FieldID,
-//			Value: idxInfo.IndexID,
-//		}
-//		collMeta.FieldIDToIndexID = append(collMeta.FieldIDToIndexID, tuple)
-//		if err := mt.catalog.CreateIndex(mt.ctx, &collMeta, idxInfo); err != nil {
-//			return isDuplicated, err
-//		}
-//
-//		mt.collID2Meta[collMeta.CollectionID] = collMeta
-//		mt.indexID2Meta[idxInfo.IndexID] = idxInfo
-//	}
-//
-//	return isDuplicated, nil
-//}
-//
-//// GetIndexByName return index info by index name
-//func (mt *MetaTable) GetIndexByName(collName, indexName string) (model.Collection, []model.Index, error) {
-//	mt.ddLock.RLock()
-//	defer mt.ddLock.RUnlock()
-//
-//	collID, ok := mt.collName2ID[collName]
-//	if !ok {
-//		collID, ok = mt.collAlias2ID[collName]
-//		if !ok {
-//			return model.Collection{}, nil, fmt.Errorf("collection %s not found", collName)
-//		}
-//	}
-//	col, ok := mt.collID2Meta[collID]
-//	if !ok {
-//		return model.Collection{}, nil, fmt.Errorf("collection %s not found", collName)
-//	}
-//
-//	rstIndex := make([]model.Index, 0, len(col.FieldIDToIndexID))
-//	for _, t := range col.FieldIDToIndexID {
-//		indexID := t.Value
-//		idxInfo, ok := mt.indexID2Meta[indexID]
-//		if !ok {
-//			return model.Collection{}, nil, fmt.Errorf("index id = %d not found", indexID)
-//		}
-//		if idxInfo.IsDeleted {
-//			continue
-//		}
-//		if indexName == "" || idxInfo.IndexName == indexName {
-//			rstIndex = append(rstIndex, *idxInfo)
-//		}
-//	}
-//	return col, rstIndex, nil
-//}
-//
-//// GetIndexByID return index info by index id
-//func (mt *MetaTable) GetIndexByID(indexID typeutil.UniqueID) (*model.Index, error) {
-//	mt.ddLock.RLock()
-//	defer mt.ddLock.RUnlock()
-//
-//	indexInfo, ok := mt.indexID2Meta[indexID]
-//	if !ok || indexInfo.IsDeleted {
-//		return nil, fmt.Errorf("cannot find index, id = %d", indexID)
-//	}
-//	return indexInfo, nil
-//}
-
-func (mt *MetaTable) dupCollectionMeta() map[typeutil.UniqueID]model.Collection {
-	mt.ddLock.RLock()
-	defer mt.ddLock.RUnlock()
-	return mt.collID2Meta
-}
-
-//func (mt *MetaTable) dupMeta() (
-//	map[typeutil.UniqueID]model.Collection,
-//	map[typeutil.UniqueID]typeutil.UniqueID,
-//	map[typeutil.UniqueID]model.Index,
-//) {
-//	mt.ddLock.RLock()
-//	defer mt.ddLock.RUnlock()
-//
-//	collID2Meta := make(map[typeutil.UniqueID]model.Collection, len(mt.collID2Meta))
-//	//segID2IndexID := make(map[typeutil.UniqueID]typeutil.UniqueID, len(mt.segID2IndexID))
-//	//indexID2Meta := make(map[typeutil.UniqueID]model.Index, len(mt.indexID2Meta))
-//	for k, v := range mt.collID2Meta {
-//		collID2Meta[k] = v
-//	}
-//	//for k, v := range mt.segID2IndexID {
-//	//	segID2IndexID[k] = v
-//	//}
-//	//for k, v := range mt.indexID2Meta {
-//	//	indexID2Meta[k] = *v
-//	//}
-//	return collID2Meta, nil, nil
-//}
-
-// AddAlias add collection alias
-func (mt *MetaTable) AddAlias(collectionAlias string, collectionName string, ts typeutil.Timestamp) error {
-	mt.ddLock.Lock()
-	defer mt.ddLock.Unlock()
-	if _, ok := mt.collAlias2ID[collectionAlias]; ok {
-		return fmt.Errorf("duplicate collection alias, alias = %s", collectionAlias)
-	}
-
-	if _, ok := mt.collName2ID[collectionAlias]; ok {
-		return fmt.Errorf("collection alias collides with existing collection name. collection = %s, alias = %s", collectionAlias, collectionAlias)
-	}
-
-	id, ok := mt.collName2ID[collectionName]
-	if !ok {
-		return fmt.Errorf("aliased collection name does not exist, name = %s", collectionName)
-	}
-
-	alias := &model.Alias{
-		CollectionID: id,
-		Name:         collectionAlias,
-		CreatedTime:  ts,
-	}
-	if err := mt.catalog.CreateAlias(mt.ctx, alias, ts); err != nil {
-		return err
-	}
-
-	mt.collAlias2ID[collectionAlias] = id
-	return nil
-}
-
-// DropAlias drop collection alias
-func (mt *MetaTable) DropAlias(collectionAlias string, ts typeutil.Timestamp) error {
-	mt.ddLock.Lock()
-	defer mt.ddLock.Unlock()
-	// TODO: drop alias should be idempotent.
-	_, ok := mt.collAlias2ID[collectionAlias]
-	if !ok {
-		return fmt.Errorf("alias does not exist, alias = %s", collectionAlias)
-	}
-
-	if err := mt.catalog.DropAlias(mt.ctx, collectionAlias, ts); err != nil {
-		return err
-	}
-	delete(mt.collAlias2ID, collectionAlias)
-	return nil
-}
-
-// AlterAlias alter collection alias
-func (mt *MetaTable) AlterAlias(collectionAlias string, collectionName string, ts typeutil.Timestamp) error {
-	mt.ddLock.Lock()
-	defer mt.ddLock.Unlock()
-	if _, ok := mt.collAlias2ID[collectionAlias]; !ok {
-		return fmt.Errorf("alias does not exist, alias = %s", collectionAlias)
-	}
-
-	id, ok := mt.collName2ID[collectionName]
-	if !ok {
-		return fmt.Errorf("aliased collection name does not exist, name = %s", collectionName)
-	}
-
-	alias := &model.Alias{
-		CollectionID: id,
-		Name:         collectionAlias,
-		CreatedTime:  ts,
-	}
-	if err := mt.catalog.AlterAlias(mt.ctx, alias, ts); err != nil {
-		return err
-	}
-	mt.collAlias2ID[collectionAlias] = id
-	return nil
-}
-
-// IsAlias returns true if specific `collectionAlias` is an alias of collection.
-func (mt *MetaTable) IsAlias(collectionAlias string) bool {
-	mt.ddLock.RLock()
-	defer mt.ddLock.RUnlock()
-	_, ok := mt.collAlias2ID[collectionAlias]
-	return ok
+	return common.InvalidPartitionID, fmt.Errorf("partition ")
 }
 
 // AddCredential add credential

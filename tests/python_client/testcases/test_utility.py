@@ -297,8 +297,12 @@ class TestUtilityParams(TestcaseBase):
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
-        error = {ct.err_code: 1, ct.err_msg: f"DescribeCollection failed: can't find collection: {c_name}"}
-        self.utility_wrap.drop_collection(c_name, check_task=CheckTasks.err_res, check_items=error)
+
+        # error = {ct.err_code: 1, ct.err_msg: f"DescribeCollection failed: can't find collection: {c_name}"}
+        # self.utility_wrap.drop_collection(c_name, check_task=CheckTasks.err_res, check_items=error)
+
+        # @longjiquan: dropping collection should be idempotent.
+        self.utility_wrap.drop_collection(c_name)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_calc_distance_left_vector_invalid_type(self, get_invalid_vector_dict):
@@ -977,8 +981,11 @@ class TestUtilityBase(TestcaseBase):
         assert self.utility_wrap.has_collection(c_name)[0]
         collection_w.drop()
         assert not self.utility_wrap.has_collection(c_name)[0]
-        error = {ct.err_code: 1, ct.err_msg: {"describe collection failed: can't find collection:"}}
-        self.utility_wrap.drop_collection(c_name, check_task=CheckTasks.err_res, check_items=error)
+
+        # error = {ct.err_code: 1, ct.err_msg: {"describe collection failed: can't find collection:"}}
+        # self.utility_wrap.drop_collection(c_name, check_task=CheckTasks.err_res, check_items=error)
+        # @longjiquan: dropping collection should be idempotent.
+        self.utility_wrap.drop_collection(c_name)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_drop_collection_create_repeatedly(self):

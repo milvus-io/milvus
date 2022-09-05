@@ -18,6 +18,7 @@ package rootcoord
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -31,8 +32,10 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 )
 
+type proxyCreator func(sess *sessionutil.Session) (types.Proxy, error)
+
 type proxyClientManager struct {
-	core        *Core
+	creator     proxyCreator
 	lock        sync.RWMutex
 	proxyClient map[int64]types.Proxy
 	helper      proxyClientManagerHelper
@@ -46,9 +49,9 @@ var defaultClientManagerHelper = proxyClientManagerHelper{
 	afterConnect: func() {},
 }
 
-func newProxyClientManager(c *Core) *proxyClientManager {
+func newProxyClientManager(creator proxyCreator) *proxyClientManager {
 	return &proxyClientManager{
-		core:        c,
+		creator:     creator,
 		proxyClient: make(map[int64]types.Proxy),
 		helper:      defaultClientManagerHelper,
 	}
@@ -72,7 +75,7 @@ func (p *proxyClientManager) AddProxyClient(session *sessionutil.Session) {
 }
 
 func (p *proxyClientManager) connect(session *sessionutil.Session) {
-	pc, err := p.core.NewProxyClient(session)
+	pc, err := p.creator(session)
 	if err != nil {
 		log.Warn("failed to create proxy client", zap.String("address", session.Address), zap.Int64("serverID", session.ServerID), zap.Error(err))
 		return
@@ -130,32 +133,7 @@ func (p *proxyClientManager) InvalidateCollectionMetaCache(ctx context.Context, 
 	return group.Wait()
 }
 
-func (p *proxyClientManager) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) error {
-	p.lock.Lock()
-	defer p.lock.Unlock()
-
-	if len(p.proxyClient) == 0 {
-		log.Warn("proxy client is empty, ReleaseDQLMessageStream will not send to any client")
-		return nil
-	}
-
-	group := &errgroup.Group{}
-	for k, v := range p.proxyClient {
-		k, v := k, v
-		group.Go(func() error {
-			sta, err := v.ReleaseDQLMessageStream(ctx, in)
-			if err != nil {
-				return fmt.Errorf("ReleaseDQLMessageStream failed, proxyID = %d, err = %s", k, err)
-			}
-			if sta.ErrorCode != commonpb.ErrorCode_Success {
-				return fmt.Errorf("ReleaseDQLMessageStream failed, proxyID = %d, err = %s", k, sta.Reason)
-			}
-			return nil
-		})
-	}
-	return group.Wait()
-}
-
+// InvalidateCredentialCache TODO: too many codes similar to InvalidateCollectionMetaCache.
 func (p *proxyClientManager) InvalidateCredentialCache(ctx context.Context, request *proxypb.InvalidateCredCacheRequest) error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
@@ -182,6 +160,7 @@ func (p *proxyClientManager) InvalidateCredentialCache(ctx context.Context, requ
 	return group.Wait()
 }
 
+// UpdateCredentialCache TODO: too many codes similar to InvalidateCollectionMetaCache.
 func (p *proxyClientManager) UpdateCredentialCache(ctx context.Context, request *proxypb.UpdateCredCacheRequest) error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
@@ -208,6 +187,7 @@ func (p *proxyClientManager) UpdateCredentialCache(ctx context.Context, request 
 	return group.Wait()
 }
 
+// RefreshPolicyInfoCache TODO: too many codes similar to InvalidateCollectionMetaCache.
 func (p *proxyClientManager) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.RefreshPolicyInfoCacheRequest) error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
@@ -221,9 +201,12 @@ func (p *proxyClientManager) RefreshPolicyInfoCache(ctx context.Context, req *pr
 	for k, v := range p.proxyClient {
 		k, v := k, v
 		group.Go(func() error {
-			_, err := v.RefreshPolicyInfoCache(ctx, req)
+			status, err := v.RefreshPolicyInfoCache(ctx, req)
 			if err != nil {
 				return fmt.Errorf("RefreshPolicyInfoCache failed, proxyID = %d, err = %s", k, err)
+			}
+			if status.GetErrorCode() != commonpb.ErrorCode_Success {
+				return errors.New(status.GetReason())
 			}
 			return nil
 		})

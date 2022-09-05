@@ -224,23 +224,6 @@ func (rc *rootCoordMock) ShowPartitions(ctx context.Context, in *milvuspb.ShowPa
 	}, nil
 }
 
-func (rc *rootCoordMock) ReleaseDQLMessageStream(ctx context.Context, in *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
-	if rc.returnGrpcError {
-		return nil, errors.New("release DQLMessage stream failed")
-	}
-
-	if rc.returnError {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    "release DQLMessage stream failed",
-		}, nil
-	}
-
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}, nil
-}
-
 func (rc *rootCoordMock) InvalidateCollectionMetaCache(ctx context.Context, in *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 	if rc.returnGrpcError {
 		return nil, errors.New("InvalidateCollectionMetaCache failed")

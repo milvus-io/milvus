@@ -50,6 +50,7 @@ type BaseKV interface {
 	Close()
 }
 
+//go:generate mockery --name=TxnKV
 // TxnKV contains extra txn operations of kv. The extra operations is transactional.
 type TxnKV interface {
 	BaseKV
@@ -77,6 +78,7 @@ type MetaKv interface {
 	CompareVersionAndSwap(key string, version int64, target string, opts ...clientv3.OpOption) (bool, error)
 }
 
+//go:generate mockery --name=SnapShotKV
 // SnapShotKV is TxnKV for snapshot data. It must save timestamp.
 type SnapShotKV interface {
 	Save(key string, value string, ts typeutil.Timestamp) error

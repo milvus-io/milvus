@@ -14,11 +14,6 @@ service Proxy {
   rpc InvalidateCollectionMetaCache(InvalidateCollMetaCacheRequest) returns (common.Status) {}
   rpc GetDdChannel(internal.GetDdChannelRequest) returns (milvus.StringResponse) {}
 
-  rpc ReleaseDQLMessageStream(ReleaseDQLMessageStreamRequest) returns (common.Status) {}
-
-  rpc SendSearchResult(internal.SearchResults) returns (common.Status) {}
-  rpc SendRetrieveResult(internal.RetrieveResults) returns (common.Status) {}
-
   rpc InvalidateCredentialCache(InvalidateCredCacheRequest) returns (common.Status) {}
   rpc UpdateCredentialCache(UpdateCredCacheRequest) returns (common.Status) {}
 
@@ -30,12 +25,6 @@ message InvalidateCollMetaCacheRequest {
   string db_name = 2;
   string collection_name = 3;
   int64 collectionID = 4;
-}
-
-message ReleaseDQLMessageStreamRequest {
-  common.MsgBase base = 1;
-  int64 dbID = 2;
-  int64 collectionID = 3;
 }
 
 message InvalidateCredCacheRequest {

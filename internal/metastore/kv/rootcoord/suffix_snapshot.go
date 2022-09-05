@@ -176,7 +176,7 @@ func (ss *SuffixSnapshot) checkKeyTS(key string, ts typeutil.Timestamp) (bool, e
 		}
 		latest = ss.lastestTS[key]
 	}
-	return latest < ts, nil
+	return latest <= ts, nil
 }
 
 // loadLatestTS load the loatest ts for specified key

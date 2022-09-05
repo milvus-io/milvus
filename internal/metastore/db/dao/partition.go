@@ -33,3 +33,24 @@ func (s *partitionDb) Insert(in []*dbmodel.Partition) error {
 
 	return nil
 }
+
+func generatePartitionUpdatesWithoutID(in *dbmodel.Partition) map[string]interface{} {
+	ret := map[string]interface{}{
+		"tenant_id":                   in.TenantID,
+		"partition_id":                in.PartitionID,
+		"partition_name":              in.PartitionName,
+		"partition_created_timestamp": in.PartitionCreatedTimestamp,
+		"collection_id":               in.CollectionID,
+		"status":                      in.Status,
+		"ts":                          in.Ts,
+		"is_deleted":                  in.IsDeleted,
+		"created_at":                  in.CreatedAt,
+		"updated_at":                  in.UpdatedAt,
+	}
+	return ret
+}
+
+func (s *partitionDb) Update(in *dbmodel.Partition) error {
+	updates := generatePartitionUpdatesWithoutID(in)
+	return s.db.Model(&dbmodel.Partition{}).Where("id = ?", in.ID).Updates(updates).Error
+}

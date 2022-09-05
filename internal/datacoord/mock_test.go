@@ -432,10 +432,6 @@ func (m *mockRootCoordService) UpdateChannelTimeTick(ctx context.Context, req *i
 	panic("not implemented") // TODO: Implement
 }
 
-func (m *mockRootCoordService) ReleaseDQLMessageStream(ctx context.Context, req *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
-	panic("not implemented") // TODO: Implement
-}
-
 func (m *mockRootCoordService) InvalidateCollectionMetaCache(ctx context.Context, req *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 	panic("not implemented") // TODO: Implement
 }

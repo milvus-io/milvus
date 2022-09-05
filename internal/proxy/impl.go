@@ -129,29 +129,6 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 	}, nil
 }
 
-// ReleaseDQLMessageStream release the query message stream of specific collection.
-func (node *Proxy) ReleaseDQLMessageStream(ctx context.Context, request *proxypb.ReleaseDQLMessageStreamRequest) (*commonpb.Status, error) {
-	ctx = logutil.WithModule(ctx, moduleName)
-	logutil.Logger(ctx).Debug("received request to release DQL message strem",
-		zap.Any("role", typeutil.ProxyRole),
-		zap.Any("db", request.DbID),
-		zap.Any("collection", request.CollectionID))
-
-	if !node.checkHealthy() {
-		return unhealthyStatus(), nil
-	}
-
-	logutil.Logger(ctx).Debug("complete to release DQL message stream",
-		zap.Any("role", typeutil.ProxyRole),
-		zap.Any("db", request.DbID),
-		zap.Any("collection", request.CollectionID))
-
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-		Reason:    "",
-	}, nil
-}
-
 // CreateCollection create a collection by the schema.
 // TODO(dragondriver): add more detailed ut for ConsistencyLevel, should we support multiple consistency level in Proxy?
 func (node *Proxy) CreateCollection(ctx context.Context, request *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
@@ -4018,22 +3995,6 @@ func (node *Proxy) ListCredUsers(ctx context.Context, req *milvuspb.ListCredUser
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
 		Usernames: resp.Usernames,
-	}, nil
-}
-
-// SendSearchResult needs to be removed TODO
-func (node *Proxy) SendSearchResult(ctx context.Context, req *internalpb.SearchResults) (*commonpb.Status, error) {
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		Reason:    "Not implemented",
-	}, nil
-}
-
-// SendRetrieveResult needs to be removed TODO
-func (node *Proxy) SendRetrieveResult(ctx context.Context, req *internalpb.RetrieveResults) (*commonpb.Status, error) {
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		Reason:    "Not implemented",
 	}, nil
 }
 

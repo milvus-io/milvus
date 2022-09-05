@@ -27,7 +27,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metastore/model"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -66,23 +65,6 @@ func GetFieldSchemaByID(coll *model.Collection, fieldID typeutil.UniqueID) (*mod
 	return nil, fmt.Errorf("field id = %d not found", fieldID)
 }
 
-// EncodeDdOperation serialize DdOperation into string
-func EncodeDdOperation(m proto.Message, ddType string) (string, error) {
-	mByte, err := proto.Marshal(m)
-	if err != nil {
-		return "", err
-	}
-	ddOp := DdOperation{
-		Body: mByte,
-		Type: ddType,
-	}
-	ddOpByte, err := json.Marshal(ddOp)
-	if err != nil {
-		return "", err
-	}
-	return string(ddOpByte), nil
-}
-
 // EncodeMsgPositions serialize []*MsgPosition into string
 func EncodeMsgPositions(msgPositions []*msgstream.MsgPosition) (string, error) {
 	if len(msgPositions) == 0 {
@@ -117,4 +99,25 @@ func Int64TupleMapToSlice(s map[int]common.Int64Tuple) []common.Int64Tuple {
 		ret = append(ret, e)
 	}
 	return ret
+}
+
+func CheckMsgType(got, expect commonpb.MsgType) error {
+	if got != expect {
+		return fmt.Errorf("invalid msg type, expect %s, but got %s", expect, got)
+	}
+	return nil
+}
+
+func failStatus(code commonpb.ErrorCode, reason string) *commonpb.Status {
+	return &commonpb.Status{
+		ErrorCode: code,
+		Reason:    reason,
+	}
+}
+
+func succStatus() *commonpb.Status {
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}
 }

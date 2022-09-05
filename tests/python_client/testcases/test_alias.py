@@ -333,7 +333,7 @@ class TestAliasOperation(TestcaseBase):
         method: 
                1.create collection with alias
                2.call drop_collection function with alias as param
-        expected: collection is dropped
+        expected: Got error: collection cannot be dropped via alias.
         """
         self._connect()
         c_name = cf.gen_unique_str("collection")
@@ -467,9 +467,12 @@ class TestAliasOperationInvalid(TestcaseBase):
 
         alias_not_exist_name = cf.gen_unique_str(prefix)
         error = {ct.err_code: 1, ct.err_msg: "Drop alias failed: alias does not exist"}                                         
-        self.utility_wrap.drop_alias(alias_not_exist_name,
-                                     check_task=CheckTasks.err_res,
-                                     check_items=error)
+        # self.utility_wrap.drop_alias(alias_not_exist_name,
+        #                              check_task=CheckTasks.err_res,
+        #                              check_items=error)
+        # @longjiquan: dropping alias should be idempotent.
+        self.utility_wrap.drop_alias(alias_not_exist_name)
+
         #
         # collection_w.drop_alias(alias_not_exist_name,
         #                         check_task=CheckTasks.err_res,
@@ -496,10 +499,14 @@ class TestAliasOperationInvalid(TestcaseBase):
         # collection_w.create_alias(alias_name)
         # collection_w.drop_alias(alias_name)
 
-        error = {ct.err_code: 1, ct.err_msg: "Drop alias failed: alias does not exist"}
-        self.utility_wrap.drop_alias(alias_name,
-                                     check_task=CheckTasks.err_res,
-                                     check_items=error)
+        # @longjiquan: dropping alias should be idempotent.
+        self.utility_wrap.drop_alias(alias_name)
+
+        # error = {ct.err_code: 1, ct.err_msg: "Drop alias failed: alias does not exist"}
+        # self.utility_wrap.drop_alias(alias_name,
+        #                              check_task=CheckTasks.err_res,
+        #                              check_items=error)
+
         # collection_w.drop_alias(alias_name,
         #                         check_task=CheckTasks.err_res,
         #                         check_items=error)

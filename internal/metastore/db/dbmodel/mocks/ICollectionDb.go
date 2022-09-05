@@ -116,6 +116,20 @@ func (_m *ICollectionDb) ListCollectionIDTs(tenantID string, ts uint64) ([]*dbmo
 	return r0, r1
 }
 
+// Update provides a mock function with given fields: in
+func (_m *ICollectionDb) Update(in *dbmodel.Collection) error {
+	ret := _m.Called(in)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*dbmodel.Collection) error); ok {
+		r0 = rf(in)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 type mockConstructorTestingTNewICollectionDb interface {
 	mock.TestingT
 	Cleanup(func())

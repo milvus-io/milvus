@@ -159,6 +159,33 @@ inline bool DataType_Parse(
   return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<DataType>(
     DataType_descriptor(), name, value);
 }
+enum FieldState : int {
+  FieldCreated = 0,
+  FieldCreating = 1,
+  FieldDropping = 2,
+  FieldDropped = 3,
+  FieldState_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
+  FieldState_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
+};
+bool FieldState_IsValid(int value);
+constexpr FieldState FieldState_MIN = FieldCreated;
+constexpr FieldState FieldState_MAX = FieldDropped;
+constexpr int FieldState_ARRAYSIZE = FieldState_MAX + 1;
+
+const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* FieldState_descriptor();
+template<typename T>
+inline const std::string& FieldState_Name(T enum_t_value) {
+  static_assert(::std::is_same<T, FieldState>::value ||
+    ::std::is_integral<T>::value,
+    "Incorrect type passed to function FieldState_Name.");
+  return ::PROTOBUF_NAMESPACE_ID::internal::NameOfEnum(
+    FieldState_descriptor(), enum_t_value);
+}
+inline bool FieldState_Parse(
+    const std::string& name, FieldState* value) {
+  return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<FieldState>(
+    FieldState_descriptor(), name, value);
+}
 // ===================================================================
 
 class FieldSchema :
@@ -282,6 +309,7 @@ class FieldSchema :
     kDataTypeFieldNumber = 5,
     kIsPrimaryKeyFieldNumber = 3,
     kAutoIDFieldNumber = 8,
+    kStateFieldNumber = 9,
   };
   // repeated .milvus.proto.common.KeyValuePair type_params = 6;
   int type_params_size() const;
@@ -347,6 +375,11 @@ class FieldSchema :
   bool autoid() const;
   void set_autoid(bool value);
 
+  // .milvus.proto.schema.FieldState state = 9;
+  void clear_state();
+  ::milvus::proto::schema::FieldState state() const;
+  void set_state(::milvus::proto::schema::FieldState value);
+
   // @@protoc_insertion_point(class_scope:milvus.proto.schema.FieldSchema)
  private:
   class _Internal;
@@ -360,6 +393,7 @@ class FieldSchema :
   int data_type_;
   bool is_primary_key_;
   bool autoid_;
+  int state_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_schema_2eproto;
 };
@@ -2669,6 +2703,20 @@ inline void FieldSchema::set_autoid(bool value) {
   // @@protoc_insertion_point(field_set:milvus.proto.schema.FieldSchema.autoID)
 }
 
+// .milvus.proto.schema.FieldState state = 9;
+inline void FieldSchema::clear_state() {
+  state_ = 0;
+}
+inline ::milvus::proto::schema::FieldState FieldSchema::state() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.schema.FieldSchema.state)
+  return static_cast< ::milvus::proto::schema::FieldState >(state_);
+}
+inline void FieldSchema::set_state(::milvus::proto::schema::FieldState value) {
+  
+  state_ = value;
+  // @@protoc_insertion_point(field_set:milvus.proto.schema.FieldSchema.state)
+}
+
 // -------------------------------------------------------------------
 
 // CollectionSchema
@@ -4069,6 +4117,11 @@ template <> struct is_proto_enum< ::milvus::proto::schema::DataType> : ::std::tr
 template <>
 inline const EnumDescriptor* GetEnumDescriptor< ::milvus::proto::schema::DataType>() {
   return ::milvus::proto::schema::DataType_descriptor();
+}
+template <> struct is_proto_enum< ::milvus::proto::schema::FieldState> : ::std::true_type {};
+template <>
+inline const EnumDescriptor* GetEnumDescriptor< ::milvus::proto::schema::FieldState>() {
+  return ::milvus::proto::schema::FieldState_descriptor();
 }
 
 PROTOBUF_NAMESPACE_CLOSE

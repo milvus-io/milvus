@@ -1741,8 +1741,10 @@ class TestDropCollection(TestcaseBase):
         c_name = cf.gen_unique_str()
         self.init_collection_wrap(name=c_name)
         c_name_2 = cf.gen_unique_str()
-        error = {ct.err_code: 0, ct.err_msg: 'DescribeCollection failed: can\'t find collection: %s' % c_name_2}
-        self.utility_wrap.drop_collection(c_name_2, check_task=CheckTasks.err_res, check_items=error)
+        # error = {ct.err_code: 0, ct.err_msg: 'DescribeCollection failed: can\'t find collection: %s' % c_name_2}
+        # self.utility_wrap.drop_collection(c_name_2, check_task=CheckTasks.err_res, check_items=error)
+        # @longjiquan: dropping collection should be idempotent.
+        self.utility_wrap.drop_collection(c_name_2)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_create_drop_collection_multithread(self):
@@ -2157,7 +2159,7 @@ class TestLoadCollection(TestcaseBase):
         collection_wr.load()
         collection_wr.drop()
         error = {ct.err_code: 0,
-                 ct.err_msg: "DescribeCollection failed: can't find collection: %s" % c_name}
+                 ct.err_msg: "can't find collection"}
         collection_wr.release(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -2773,7 +2775,7 @@ class TestLoadPartition(TestcaseBase):
                                                             "is_empty": True, "num_entities": 0}
                                                )
         collection_w.drop()
-        error = {ct.err_code: 0, ct.err_msg: "HasPartition failed: can\'t find collection: %s" % name}
+        error = {ct.err_code: 0, ct.err_msg: "can\'t find collection"}
         partition_w.load(check_task=CheckTasks.err_res, check_items=error)
         partition_w.release(check_task=CheckTasks.err_res, check_items=error)
 
