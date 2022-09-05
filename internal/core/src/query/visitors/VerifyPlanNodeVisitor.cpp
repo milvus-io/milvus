@@ -32,24 +32,15 @@ class VerifyPlanNodeVisitor : PlanNodeVisitor {
 static knowhere::IndexType
 InferIndexType(const Json& search_params) {
     // ivf -> nprobe
-    // nsg -> search_length
-    // hnsw/rhnsw/*pq/*sq -> ef
+    // hnsw -> ef
     // annoy -> search_k
-    // ngtpanng / ngtonng -> max_search_edges / epsilon
     static const std::map<std::string, knowhere::IndexType> key_list = [] {
         std::map<std::string, knowhere::IndexType> list;
         namespace ip = knowhere::indexparam;
         namespace ie = knowhere::IndexEnum;
         list.emplace(ip::NPROBE, ie::INDEX_FAISS_IVFFLAT);
-#ifdef MILVUS_SUPPORT_NSG
-        list.emplace(ip::search_length, ie::INDEX_NSG);
-#endif
         list.emplace(ip::EF, ie::INDEX_HNSW);
         list.emplace(ip::SEARCH_K, ie::INDEX_ANNOY);
-#ifdef MILVUS_SUPPORT_NGT
-        list.emplace(ip::max_search_edges, ie::INDEX_NGTONNG);
-        list.emplace(ip::epsilon, ie::INDEX_NGTONNG);
-#endif
         return list;
     }();
     auto dbg_str = search_params.dump();

@@ -2584,9 +2584,6 @@ class TestLoadPartition(TestcaseBase):
         params=gen_simple_index()
     )
     def get_simple_index(self, request, connect):
-        # if str(connect._cmd("mode")) == "CPU":
-        #     if request.param["index_type"] in index_cpu_not_support():
-        #         pytest.skip("sq8h not support in cpu mode")
         return request.param
 
     @pytest.fixture(
