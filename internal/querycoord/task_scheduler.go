@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strconv"
 	"sync"
 
@@ -282,24 +283,29 @@ func (scheduler *TaskScheduler) reloadFromKV() error {
 	// so run it in a standalone goroutine
 	go func() {
 		var doneTriggerTask task
+		var allTriggerTasks []task
 		for _, t := range triggerTasks {
-			if t.getState() == taskDone {
+			if t.getState() != taskDone {
+				allTriggerTasks = append(allTriggerTasks, t)
+			} else {
 				doneTriggerTask = t
-				for _, childTask := range activeTasks {
-					childTask.setParentTask(t) //replace child task after reScheduler
-					t.addChildTask(childTask)
-				}
-				t.setResultInfo(nil)
-				continue
 			}
+		}
+		if doneTriggerTask != nil {
+			for _, childTask := range activeTasks {
+				childTask.setParentTask(doneTriggerTask) //replace child task after reScheduler
+				doneTriggerTask.addChildTask(childTask)
+			}
+			doneTriggerTask.setResultInfo(nil)
+			scheduler.triggerTaskQueue.addTask(doneTriggerTask)
+		}
+		sort.Slice(allTriggerTasks, func(i, j int) bool {
+			return allTriggerTasks[i].getTaskID() < allTriggerTasks[j].getTaskID()
+		})
+		for _, t := range allTriggerTasks {
 			scheduler.triggerTaskQueue.addTask(t)
 		}
-
-		if doneTriggerTask != nil {
-			scheduler.triggerTaskQueue.addTaskToFront(doneTriggerTask)
-		}
 	}()
-
 	return nil
 }
 
