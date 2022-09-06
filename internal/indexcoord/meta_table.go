@@ -199,17 +199,17 @@ func (mt *metaTable) GetMeta(buildID UniqueID) (*model.SegmentIndex, bool) {
 	return nil, false
 }
 
-func (mt *metaTable) GetTypeParams(collID, indexID UniqueID) ([]*commonpb.KeyValuePair, error) {
+func (mt *metaTable) GetTypeParams(collID, indexID UniqueID) []*commonpb.KeyValuePair {
 	mt.indexLock.RLock()
 	defer mt.indexLock.RUnlock()
 
 	fieldIndexes, ok := mt.collectionIndexes[collID]
 	if !ok {
-		return nil, fmt.Errorf("there is no index on collection: %d", collID)
+		return nil
 	}
 	index, ok := fieldIndexes[indexID]
 	if !ok {
-		return nil, fmt.Errorf("there is no index on collection: %d with indexID: %d", collID, indexID)
+		return nil
 	}
 	typeParams := make([]*commonpb.KeyValuePair, len(index.TypeParams))
 
@@ -217,7 +217,7 @@ func (mt *metaTable) GetTypeParams(collID, indexID UniqueID) ([]*commonpb.KeyVal
 		typeParams[i] = proto.Clone(param).(*commonpb.KeyValuePair)
 	}
 
-	return typeParams, nil
+	return typeParams
 }
 
 func (mt *metaTable) GetIndexParams(collID, indexID UniqueID) []*commonpb.KeyValuePair {
@@ -369,7 +369,7 @@ func (mt *metaTable) BuildIndex(buildID UniqueID) error {
 		}
 		segIdx.IndexState = commonpb.IndexState_InProgress
 
-		err := mt.saveSegmentIndexMeta(segIdx)
+		err := mt.alterSegmentIndexes([]*model.SegmentIndex{segIdx})
 		if err != nil {
 			log.Error("IndexCoord metaTable BuildIndex fail", zap.Int64("buildID", segIdx.BuildID), zap.Error(err))
 			return err
@@ -982,4 +982,27 @@ func (mt *metaTable) FinishTask(taskInfo *indexpb.IndexTaskInfo) error {
 	}
 
 	return mt.updateSegIndexMeta(segIdx, updateFunc)
+}
+
+// IsIndexDone judges whether the index is complete.
+func (mt *metaTable) IsIndexDone(segID UniqueID) bool {
+	mt.segmentIndexLock.RLock()
+	defer mt.segmentIndexLock.RUnlock()
+
+	segIndexes, ok := mt.segmentIndexes[segID]
+	if !ok {
+		return false
+	}
+	indexDone := true
+	for _, segIndex := range segIndexes {
+		if segIndex.IsDeleted {
+			continue
+		}
+
+		if segIndex.IndexState != commonpb.IndexState_Finished && segIndex.IndexState != commonpb.IndexState_Failed && !segIndex.NotifyHandoff {
+			indexDone = false
+			break
+		}
+	}
+	return indexDone
 }

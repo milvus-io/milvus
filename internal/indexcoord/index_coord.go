@@ -27,6 +27,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/kv"
+
+	"github.com/milvus-io/milvus/internal/proto/querypb"
+
 	"github.com/golang/protobuf/proto"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
@@ -78,7 +82,7 @@ type IndexCoord struct {
 
 	factory      dependency.Factory
 	etcdCli      *clientv3.Client
-	etcdKV       *etcdkv.EtcdKV
+	etcdKV       kv.MetaKv
 	chunkManager storage.ChunkManager
 
 	metaTable             *metaTable
@@ -957,11 +961,11 @@ func (i *IndexCoord) assignTask(builderClient types.IndexNode, req *indexpb.Crea
 func (i *IndexCoord) createIndexForSegment(segIdx *model.SegmentIndex) (bool, UniqueID, error) {
 	log.Info("create index for flushed segment", zap.Int64("collID", segIdx.CollectionID),
 		zap.Int64("segID", segIdx.SegmentID), zap.Int64("numRows", segIdx.NumRows))
-	if segIdx.NumRows < Params.IndexCoordCfg.MinSegmentNumRowsToEnableIndex {
-		log.Debug("no need to build index", zap.Int64("collID", segIdx.CollectionID),
-			zap.Int64("segID", segIdx.SegmentID), zap.Int64("numRows", segIdx.NumRows))
-		return false, 0, nil
-	}
+	//if segIdx.NumRows < Params.IndexCoordCfg.MinSegmentNumRowsToEnableIndex {
+	//	log.Debug("no need to build index", zap.Int64("collID", segIdx.CollectionID),
+	//		zap.Int64("segID", segIdx.SegmentID), zap.Int64("numRows", segIdx.NumRows))
+	//	return false, 0, nil
+	//}
 
 	hasIndex, indexBuildID := i.metaTable.HasSameIndex(segIdx.SegmentID, segIdx.IndexID)
 	if hasIndex {
@@ -1054,4 +1058,24 @@ func (i *IndexCoord) watchFlushedSegmentLoop() {
 			}
 		}
 	}
+}
+
+func (i *IndexCoord) writeHandoffSegment(t *querypb.SegmentInfo) error {
+	key := fmt.Sprintf("%s/%d/%d/%d", util.HandoffSegmentPrefix, t.CollectionID, t.PartitionID, t.SegmentID)
+	value, err := proto.Marshal(t)
+	if err != nil {
+		log.Error("IndexCoord marshal handoff task fail", zap.Int64("collID", t.CollectionID),
+			zap.Int64("partID", t.PartitionID), zap.Int64("segID", t.SegmentID), zap.Error(err))
+		return err
+	}
+	err = i.etcdKV.Save(key, string(value))
+	if err != nil {
+		log.Error("IndexCoord save handoff task fail", zap.Int64("collID", t.CollectionID),
+			zap.Int64("partID", t.PartitionID), zap.Int64("segID", t.SegmentID), zap.Error(err))
+		return err
+	}
+
+	log.Info("IndexCoord write handoff task success", zap.Int64("collID", t.CollectionID),
+		zap.Int64("partID", t.PartitionID), zap.Int64("segID", t.SegmentID))
+	return nil
 }

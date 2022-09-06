@@ -20,6 +20,7 @@ type SegmentIndex struct {
 	CreateTime     uint64
 	IndexFilePaths []string
 	IndexSize      uint64
+	NotifyHandoff  bool
 }
 
 func UnmarshalSegmentIndexModel(segIndex *indexpb.SegmentIndex) *SegmentIndex {
@@ -42,6 +43,7 @@ func UnmarshalSegmentIndexModel(segIndex *indexpb.SegmentIndex) *SegmentIndex {
 		CreateTime:     segIndex.CreateTime,
 		IndexFilePaths: segIndex.IndexFilesPaths,
 		IndexSize:      segIndex.SerializeSize,
+		NotifyHandoff:  segIndex.NotifyHandoff,
 	}
 }
 
@@ -65,6 +67,7 @@ func MarshalSegmentIndexModel(segIdx *SegmentIndex) *indexpb.SegmentIndex {
 		Deleted:         segIdx.IsDeleted,
 		CreateTime:      segIdx.CreateTime,
 		SerializeSize:   segIdx.IndexSize,
+		NotifyHandoff:   segIdx.NotifyHandoff,
 	}
 }
 
@@ -84,5 +87,6 @@ func CloneSegmentIndex(segIndex *SegmentIndex) *SegmentIndex {
 		CreateTime:     segIndex.CreateTime,
 		IndexFilePaths: segIndex.IndexFilePaths,
 		IndexSize:      segIndex.IndexSize,
+		NotifyHandoff:  segIndex.NotifyHandoff,
 	}
 }

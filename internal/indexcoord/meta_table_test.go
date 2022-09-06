@@ -202,16 +202,13 @@ func TestMetaTable_GetMeta(t *testing.T) {
 
 func TestMetaTable_GetTypeParams(t *testing.T) {
 	mt := constructMetaTable(&indexcoord.Catalog{})
-	typeParams1, err1 := mt.GetTypeParams(collID, indexID)
-	assert.NoError(t, err1)
+	typeParams1 := mt.GetTypeParams(collID, indexID)
 	assert.Equal(t, 1, len(typeParams1))
 
-	typeParams2, err2 := mt.GetTypeParams(invalidID, indexID)
-	assert.Error(t, err2)
+	typeParams2 := mt.GetTypeParams(invalidID, indexID)
 	assert.Nil(t, typeParams2)
 
-	typeParams3, err3 := mt.GetTypeParams(collID, invalidID)
-	assert.Error(t, err3)
+	typeParams3 := mt.GetTypeParams(collID, invalidID)
 	assert.Nil(t, typeParams3)
 }
 

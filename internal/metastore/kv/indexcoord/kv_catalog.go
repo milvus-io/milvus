@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/milvus-io/milvus/internal/util"
+
 	"github.com/milvus-io/milvus/internal/log"
 
 	"github.com/golang/protobuf/proto"
@@ -20,11 +22,11 @@ type Catalog struct {
 }
 
 func buildIndexKey(collectionID, indexID int64) string {
-	return fmt.Sprintf("%s/%d/%d", FieldIndexPrefix, collectionID, indexID)
+	return fmt.Sprintf("%s/%d/%d", util.FieldIndexPrefix, collectionID, indexID)
 }
 
 func buildSegmentIndexKey(collectionID, partitionID, segmentID, buildID int64) string {
-	return fmt.Sprintf("%s/%d/%d/%d/%d", SegmentIndexPrefix, collectionID, partitionID, segmentID, buildID)
+	return fmt.Sprintf("%s/%d/%d/%d/%d", util.SegmentIndexPrefix, collectionID, partitionID, segmentID, buildID)
 }
 
 func (kc *Catalog) CreateIndex(ctx context.Context, index *model.Index) error {
@@ -43,9 +45,9 @@ func (kc *Catalog) CreateIndex(ctx context.Context, index *model.Index) error {
 }
 
 func (kc *Catalog) ListIndexes(ctx context.Context) ([]*model.Index, error) {
-	_, values, err := kc.Txn.LoadWithPrefix(FieldIndexPrefix)
+	_, values, err := kc.Txn.LoadWithPrefix(util.FieldIndexPrefix)
 	if err != nil {
-		log.Error("list index meta fail", zap.String("prefix", FieldIndexPrefix), zap.Error(err))
+		log.Error("list index meta fail", zap.String("prefix", util.FieldIndexPrefix), zap.Error(err))
 		return nil, err
 	}
 
@@ -113,9 +115,9 @@ func (kc *Catalog) CreateSegmentIndex(ctx context.Context, segIdx *model.Segment
 }
 
 func (kc *Catalog) ListSegmentIndexes(ctx context.Context) ([]*model.SegmentIndex, error) {
-	_, values, err := kc.Txn.LoadWithPrefix(SegmentIndexPrefix)
+	_, values, err := kc.Txn.LoadWithPrefix(util.SegmentIndexPrefix)
 	if err != nil {
-		log.Error("list segment index meta fail", zap.String("prefix", SegmentIndexPrefix), zap.Error(err))
+		log.Error("list segment index meta fail", zap.String("prefix", util.SegmentIndexPrefix), zap.Error(err))
 		return nil, err
 	}
 

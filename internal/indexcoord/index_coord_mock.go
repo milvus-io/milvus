@@ -18,7 +18,6 @@ package indexcoord
 
 import (
 	"context"
-	"errors"
 	"math/rand"
 	"time"
 
@@ -408,10 +407,43 @@ func NewDataCoordMock() *DataCoordMock {
 			}, nil
 		},
 		CallGetSegmentInfo: func(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
+			segInfos := make([]*datapb.SegmentInfo, 0)
+			for _, segID := range req.SegmentIDs {
+				segInfos = append(segInfos, &datapb.SegmentInfo{
+					ID:             segID,
+					CollectionID:   100,
+					PartitionID:    200,
+					InsertChannel:  "",
+					NumOfRows:      1026,
+					State:          commonpb.SegmentState_Flushed,
+					MaxRowNum:      0,
+					LastExpireTime: 0,
+					StartPosition:  nil,
+					DmlPosition:    nil,
+					Binlogs: []*datapb.FieldBinlog{
+						{
+							Binlogs: []*datapb.Binlog{
+								{
+									LogPath: "file1",
+								},
+								{
+									LogPath: "file2",
+								},
+							},
+						},
+					},
+					Statslogs:           nil,
+					Deltalogs:           nil,
+					CreatedByCompaction: false,
+					CompactionFrom:      nil,
+					DroppedAt:           0,
+				})
+			}
 			return &datapb.GetSegmentInfoResponse{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_Success,
 				},
+				Infos: segInfos,
 			}, nil
 		},
 		CallGetFlushedSegment: func(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error) {
@@ -432,35 +464,6 @@ func NewDataCoordMock() *DataCoordMock {
 			}, nil
 		},
 	}
-}
-
-// ChunkManagerMock is mock
-// deprecated
-type ChunkManagerMock struct {
-	storage.ChunkManager
-
-	Fail bool
-	Err  bool
-}
-
-func (cmm *ChunkManagerMock) Exist(path string) (bool, error) {
-	if cmm.Err {
-		return false, errors.New("path not exist")
-	}
-	if cmm.Fail {
-		return false, nil
-	}
-	return true, nil
-}
-
-func (cmm *ChunkManagerMock) RemoveWithPrefix(prefix string) error {
-	if cmm.Err {
-		return errors.New("error occurred")
-	}
-	if cmm.Fail {
-		return nil
-	}
-	return nil
 }
 
 type mockETCDKV struct {
