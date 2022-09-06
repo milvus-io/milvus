@@ -265,7 +265,6 @@ class ApiUtilityWrapper:
     def create_role(self, using="default", check_task=None, check_items=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
         res, is_succ = api_request([self.role.create], **kwargs)
-        res = res if is_succ else None
         check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
                                        **kwargs).run()
         return res, check_result

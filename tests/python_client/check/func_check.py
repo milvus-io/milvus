@@ -80,6 +80,10 @@ class ResponseChecker:
             # Collection interface response check
             result = self.check_role_property(self.response, self.func_name, self.check_items)
 
+        elif self.check_task == CheckTasks.check_permission_deny:
+            # Collection interface response check
+            result = self.check_permission_deny(self.response, self.succ)
+
         # Add check_items here if something new need verify
 
         return result
@@ -389,4 +393,14 @@ class ResponseChecker:
             raise Exception("No expect values found in the check task")
         if check_items.get("name", None):
             assert role.name == check_items["name"]
+        return True
+
+    @staticmethod
+    def check_permission_deny(res, actual=True):
+        assert actual is False
+        if isinstance(res, Error):
+            assert "permission deny" in res.message
+        else:
+            log.error("[CheckFunc] Response of API is not an error: %s" % str(res))
+            assert False
         return True
