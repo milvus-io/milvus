@@ -243,7 +243,7 @@ func (fsw *flushedSegmentWatcher) childrenRun() {
 	fsw.childrenTaskMutex.Lock()
 	defer fsw.childrenTaskMutex.Unlock()
 	if len(fsw.childrenTasks) > 0 {
-		log.Debug("IndexCoord flushedSegmentWatcher schedule children tasks", zap.Int("internal task num", len(fsw.childrenTasks)))
+		log.Debug("IndexCoord flushedSegmentWatcher schedule children tasks", zap.Int("children task num", len(fsw.childrenTasks)))
 		for segID, tasks := range fsw.childrenTasks {
 			for _, t := range tasks {
 				fsw.childrenProcess(t)

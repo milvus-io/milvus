@@ -201,7 +201,7 @@ func (i *IndexCoord) Init() error {
 			}
 			//}()
 		}
-		log.Debug("IndexCoord", zap.Int("IndexNode number", len(i.nodeManager.nodeClients)))
+		log.Debug("IndexCoord", zap.Int("IndexNode number", len(i.nodeManager.GetAllClients())))
 		i.indexBuilder = newIndexBuilder(i.loopCtx, i, i.metaTable, aliveNodeID)
 
 		// TODO silverxia add Rewatch logic

@@ -55,6 +55,7 @@ type taskInfo struct {
 	state          commonpb.IndexState
 	indexFiles     []string
 	serializedSize uint64
+	failReason     string
 
 	// task statistics
 	statistic *indexpb.JobInfo
@@ -68,7 +69,7 @@ type task interface {
 	BuildIndex(context.Context) error
 	SaveIndexFiles(context.Context) error
 	OnEnqueue(context.Context) error
-	SetState(state commonpb.IndexState)
+	SetState(state commonpb.IndexState, failReason string)
 	GetState() commonpb.IndexState
 	Reset()
 }
@@ -85,7 +86,7 @@ type indexBuildTask struct {
 	req            *indexpb.CreateJobRequest
 	BuildID        UniqueID
 	nodeID         UniqueID
-	ClusterID      UniqueID
+	ClusterID      string
 	collectionID   UniqueID
 	partitionID    UniqueID
 	segmentID      UniqueID
@@ -126,8 +127,8 @@ func (it *indexBuildTask) Name() string {
 	return it.ident
 }
 
-func (it *indexBuildTask) SetState(state commonpb.IndexState) {
-	it.node.storeTaskState(it.ClusterID, it.BuildID, state)
+func (it *indexBuildTask) SetState(state commonpb.IndexState, failReason string) {
+	it.node.storeTaskState(it.ClusterID, it.BuildID, state, failReason)
 }
 
 func (it *indexBuildTask) GetState() commonpb.IndexState {

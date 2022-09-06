@@ -72,6 +72,7 @@ type fakeTask struct {
 	reterr        map[fakeTaskState]error
 	retstate      commonpb.IndexState
 	expectedState commonpb.IndexState
+	failReason    string
 }
 
 var _ task = &fakeTask{}
@@ -119,8 +120,9 @@ func (t *fakeTask) Reset() {
 	_taskwg.Done()
 }
 
-func (t *fakeTask) SetState(state commonpb.IndexState) {
+func (t *fakeTask) SetState(state commonpb.IndexState, failReason string) {
 	t.retstate = state
+	t.failReason = failReason
 }
 
 func (t *fakeTask) GetState() commonpb.IndexState {

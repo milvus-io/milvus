@@ -168,7 +168,7 @@ func TestIndexNodeClient(t *testing.T) {
 
 	t.Run("CreatJob", func(t *testing.T) {
 		req := &indexpb.CreateJobRequest{
-			ClusterID: 0,
+			ClusterID: "0",
 			BuildID:   0,
 		}
 		resp, err := inc.CreateJob(ctx, req)

@@ -68,7 +68,7 @@ func TestIndexNodeServer(t *testing.T) {
 
 	t.Run("CreateJob", func(t *testing.T) {
 		req := &indexpb.CreateJobRequest{
-			ClusterID: 0,
+			ClusterID: "",
 			BuildID:   0,
 			IndexID:   0,
 			DataPaths: []string{},

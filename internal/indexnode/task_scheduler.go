@@ -213,16 +213,16 @@ func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
 		if err := wrap(fn); err != nil {
 			if err == errCancel {
 				logutil.Logger(t.Ctx()).Warn("index build task canceled", zap.String("task", t.Name()))
-				t.SetState(commonpb.IndexState_Failed)
+				t.SetState(commonpb.IndexState_Failed, err.Error())
 			} else if errors.Is(err, ErrNoSuchKey) {
-				t.SetState(commonpb.IndexState_Failed)
+				t.SetState(commonpb.IndexState_Failed, err.Error())
 			} else {
-				t.SetState(commonpb.IndexState_Unissued)
+				t.SetState(commonpb.IndexState_Unissued, err.Error())
 			}
 			return
 		}
 	}
-	t.SetState(commonpb.IndexState_Finished)
+	t.SetState(commonpb.IndexState_Finished, "")
 }
 
 func (sched *TaskScheduler) indexBuildLoop() {

@@ -7,10 +7,10 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 )
 
-func (i *IndexNode) loadOrStoreTask(clusterID, buildID UniqueID, info *taskInfo) *taskInfo {
+func (i *IndexNode) loadOrStoreTask(ClusterID string, buildID UniqueID, info *taskInfo) *taskInfo {
 	i.stateLock.Lock()
 	defer i.stateLock.Unlock()
-	key := taskKey{ClusterID: clusterID, BuildID: buildID}
+	key := taskKey{ClusterID: ClusterID, BuildID: buildID}
 	oldInfo, ok := i.tasks[key]
 	if ok {
 		return oldInfo
@@ -19,24 +19,25 @@ func (i *IndexNode) loadOrStoreTask(clusterID, buildID UniqueID, info *taskInfo)
 	return nil
 }
 
-func (i *IndexNode) loadTaskState(clusterID, buildID UniqueID) (commonpb.IndexState, bool) {
-	key := taskKey{ClusterID: clusterID, BuildID: buildID}
+func (i *IndexNode) loadTaskState(ClusterID string, buildID UniqueID) (commonpb.IndexState, bool) {
+	key := taskKey{ClusterID: ClusterID, BuildID: buildID}
 	i.stateLock.Lock()
 	defer i.stateLock.Unlock()
 	task, ok := i.tasks[key]
 	return task.state, ok
 }
 
-func (i *IndexNode) storeTaskState(clusterID, buildID UniqueID, state commonpb.IndexState) {
-	key := taskKey{ClusterID: clusterID, BuildID: buildID}
+func (i *IndexNode) storeTaskState(ClusterID string, buildID UniqueID, state commonpb.IndexState, failReason string) {
+	key := taskKey{ClusterID: ClusterID, BuildID: buildID}
 	i.stateLock.Lock()
 	defer i.stateLock.Unlock()
 	if task, ok := i.tasks[key]; ok {
 		task.state = state
+		task.failReason = failReason
 	}
 }
 
-func (i *IndexNode) foreachTaskInfo(fn func(clusterID, buildID UniqueID, info *taskInfo)) {
+func (i *IndexNode) foreachTaskInfo(fn func(ClusterID string, buildID UniqueID, info *taskInfo)) {
 	i.stateLock.Lock()
 	defer i.stateLock.Unlock()
 	for key, info := range i.tasks {
@@ -44,8 +45,8 @@ func (i *IndexNode) foreachTaskInfo(fn func(clusterID, buildID UniqueID, info *t
 	}
 }
 
-func (i *IndexNode) storeIndexFilesAndStatistic(clusterID, buildID UniqueID, files []string, serializedSize uint64, statistic *indexpb.JobInfo) {
-	key := taskKey{ClusterID: clusterID, BuildID: buildID}
+func (i *IndexNode) storeIndexFilesAndStatistic(ClusterID string, buildID UniqueID, files []string, serializedSize uint64, statistic *indexpb.JobInfo) {
+	key := taskKey{ClusterID: ClusterID, BuildID: buildID}
 	i.stateLock.Lock()
 	defer i.stateLock.Unlock()
 	if info, ok := i.tasks[key]; ok {

@@ -33,7 +33,7 @@ func TestIndexNodeSimple(t *testing.T) {
 
 	assert.Nil(t, err, err)
 	var (
-		clusterID     int64
+		clusterID           = "test-milvus"
 		idxFilePrefix       = "mock_idx"
 		buildID       int64 = 1
 		collID        int64 = 101
@@ -164,7 +164,7 @@ func TestIndexNodeComplex(t *testing.T) {
 	idxParamsPayload, err := json.Marshal(idxParams)
 	assert.Nil(t, err)
 	var (
-		clusterID        int64
+		clusterID        string
 		buildID0         int64
 		collID0          int64 = 10000
 		partID0          int64 = 20000
