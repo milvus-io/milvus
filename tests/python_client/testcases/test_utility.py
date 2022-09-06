@@ -1725,6 +1725,14 @@ class TestUtilityAdvanced(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_handoff_query_search(self):
+        """
+        target: test query search after handoff
+        method: 1.load collection
+                2.insert, query and search
+                3.flush collection and triggere handoff
+                4. search with handoff indexed segments
+        expected: Search ids before and after handoff are different, because search from growing and search from index
+        """
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), shards_num=1)
         collection_w.create_index(default_field_name, default_index_params)
         collection_w.load()
@@ -1743,7 +1751,7 @@ class TestUtilityAdvanced(TestcaseBase):
 
         start = time.time()
         while True:
-            time.sleep(0.5)
+            time.sleep(2)
             segment_infos, _ = self.utility_wrap.get_query_segment_info(collection_w.name)
             # handoff done
             if len(segment_infos) == 1 and segment_infos[0].state == SegmentState.Sealed:
@@ -1758,9 +1766,9 @@ class TestUtilityAdvanced(TestcaseBase):
                                                   ct.default_float_vec_field_name,
                                                   ct.default_search_params, ct.default_limit)
         # the ids between twice search is different because of index building
-        log.debug(search_res_before[0].ids)
-        log.debug(search_res_after[0].ids)
-        # assert search_res_before[0].ids != search_res_after[0].ids
+        # log.debug(search_res_before[0].ids)
+        # log.debug(search_res_after[0].ids)
+        assert search_res_before[0].ids != search_res_after[0].ids
 
         # assert search result includes the nq-vector before or after handoff
         assert search_res_after[0].ids[0] == 0
