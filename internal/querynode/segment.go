@@ -336,7 +336,7 @@ func (s *Segment) search(searchReq *searchRequest) (*SearchResult, error) {
 	s.pool.Submit(func() (interface{}, error) {
 		tr := timerecord.NewTimeRecorder("cgoSearch")
 		status = C.Search(s.segmentPtr, searchReq.plan.cSearchPlan, searchReq.cPlaceholderGroup,
-			C.uint64_t(searchReq.timestamp), &searchResult.cSearchResult, C.int64_t(s.segmentID))
+			C.uint64_t(searchReq.timestamp), &searchResult.cSearchResult)
 		metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.SearchLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
 		return nil, nil
 	}).Await()
