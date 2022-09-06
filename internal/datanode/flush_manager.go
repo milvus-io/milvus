@@ -391,8 +391,8 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segStats []by
 		kvs[key] = blob.Value[:]
 		field2Insert[fieldID] = &datapb.Binlog{
 			EntriesNum:    data.size,
-			TimestampFrom: 0, //TODO
-			TimestampTo:   0, //TODO,
+			TimestampFrom: data.tsFrom,
+			TimestampTo:   data.tsTo,
 			LogPath:       key,
 			LogSize:       int64(fieldMemorySize[fieldID]),
 		}
