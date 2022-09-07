@@ -193,6 +193,7 @@ class CheckTasks:
     check_delete_compact = "check_delete_compact"
     check_merge_compact = "check_merge_compact"
     check_role_property = "check_role_property"
+    check_permission_deny = "check_permission_deny"
 
 
 class BulkLoadStates:
