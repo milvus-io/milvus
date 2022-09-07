@@ -18,13 +18,60 @@ package querycoord
 
 import (
 	"context"
+	"errors"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 var globalMetaTestDir = "/tmp/milvus_test/global_meta"
+
+func getMockGlobalMetaBroker(ctx context.Context) (*globalMetaBroker, *mocks.DataCoord, *mocks.RootCoord, error) {
+	dc := &mocks.DataCoord{}
+	rc := &mocks.RootCoord{}
+	handler, err := newGlobalMetaBroker(ctx, rc, dc, nil, nil)
+
+	return handler, dc, rc, err
+}
+
+func TestGlobalMetaBroker_describeCollection(t *testing.T) {
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	t.Run("success case", func(t *testing.T) {
+		rootCoord := &mocks.RootCoord{}
+		defer cancel()
+
+		handler, err := newGlobalMetaBroker(ctx, rootCoord, nil, nil, nil)
+		require.NoError(t, err)
+
+		schema := genDefaultCollectionSchema(false)
+		rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+			Schema: schema,
+		}, nil)
+
+		result, err := handler.describeCollection(ctx, defaultCollectionID)
+		assert.NoError(t, err)
+		assert.Equal(t, schema, result)
+	})
+
+	t.Run("failure case", func(t *testing.T) {
+		rootCoord := &mocks.RootCoord{}
+		defer cancel()
+
+		handler, err := newGlobalMetaBroker(ctx, rootCoord, nil, nil, nil)
+		require.NoError(t, err)
+
+		rootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(nil, errors.New("mocked error"))
+		_, err = handler.describeCollection(ctx, defaultCollectionID)
+		assert.Error(t, err)
+	})
+}
 
 func TestGlobalMetaBroker_DataCoord(t *testing.T) {
 	refreshParams()

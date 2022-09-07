@@ -168,7 +168,23 @@ func (handler *HandoffHandler) verifyRequest(req *querypb.SegmentInfo) (bool, *q
 	// if collection has not been loaded, then skip the segment
 	collectionInfo, err := handler.meta.getCollectionInfoByID(req.CollectionID)
 	if err != nil {
-		return false, nil
+		msgType := handler.scheduler.triggerTaskQueue.willLoadOrRelease(req.CollectionID)
+		switch msgType {
+		case commonpb.MsgType_LoadCollection, commonpb.MsgType_LoadPartitions:
+			// collection/partition may be loaded, return valid and let handoff task do the check
+			schema, err := handler.broker.describeCollection(handler.ctx, req.CollectionID)
+			if err != nil {
+				return false, nil
+			}
+			collectionInfo = &querypb.CollectionInfo{
+				CollectionID: req.CollectionID,
+				Schema:       schema,
+				// use load collection to by-pass partition id check
+				LoadType: querypb.LoadType_LoadCollection,
+			}
+		default:
+			return false, nil
+		}
 	}
 
 	// if partition has not been loaded or released, then skip handoff the segment
