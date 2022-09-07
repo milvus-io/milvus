@@ -22,8 +22,9 @@ import (
 )
 
 var (
-	ErrCompareVersion = errors.New("failed to save meta in etcd because version compare failure")
-	ErrNotIndexExist  = errors.New("there is no index")
+	ErrCompareVersion  = errors.New("failed to save meta in etcd because version compare failure")
+	ErrNotIndexExist   = errors.New("there is no index")
+	ErrSegmentNotFound = errors.New("failed to get segment")
 )
 
 // errIndexNodeIsNotOnService return an error that the specified IndexNode is not exists.
@@ -38,4 +39,12 @@ func msgIndexCoordIsUnhealthy(coordID UniqueID) string {
 
 func errIndexCoordIsUnhealthy(coordID UniqueID) error {
 	return errors.New(msgIndexCoordIsUnhealthy(coordID))
+}
+
+func msgSegmentNotFound(segID UniqueID) string {
+	return fmt.Sprintf("failed to get segment %d", segID)
+}
+
+func errSegmentNotFound(segID UniqueID) error {
+	return fmt.Errorf("%w %d", ErrSegmentNotFound, segID)
 }

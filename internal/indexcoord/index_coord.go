@@ -22,12 +22,14 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
 
-	"github.com/golang/protobuf/proto"
+	"github.com/milvus-io/milvus/internal/kv"
+
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -78,7 +80,7 @@ type IndexCoord struct {
 
 	factory      dependency.Factory
 	etcdCli      *clientv3.Client
-	etcdKV       *etcdkv.EtcdKV
+	etcdKV       kv.MetaKv
 	chunkManager storage.ChunkManager
 
 	metaTable             *metaTable
@@ -957,11 +959,11 @@ func (i *IndexCoord) assignTask(builderClient types.IndexNode, req *indexpb.Crea
 func (i *IndexCoord) createIndexForSegment(segIdx *model.SegmentIndex) (bool, UniqueID, error) {
 	log.Info("create index for flushed segment", zap.Int64("collID", segIdx.CollectionID),
 		zap.Int64("segID", segIdx.SegmentID), zap.Int64("numRows", segIdx.NumRows))
-	if segIdx.NumRows < Params.IndexCoordCfg.MinSegmentNumRowsToEnableIndex {
-		log.Debug("no need to build index", zap.Int64("collID", segIdx.CollectionID),
-			zap.Int64("segID", segIdx.SegmentID), zap.Int64("numRows", segIdx.NumRows))
-		return false, 0, nil
-	}
+	//if segIdx.NumRows < Params.IndexCoordCfg.MinSegmentNumRowsToEnableIndex {
+	//	log.Debug("no need to build index", zap.Int64("collID", segIdx.CollectionID),
+	//		zap.Int64("segID", segIdx.SegmentID), zap.Int64("numRows", segIdx.NumRows))
+	//	return false, 0, nil
+	//}
 
 	hasIndex, indexBuildID := i.metaTable.HasSameIndex(segIdx.SegmentID, segIdx.IndexID)
 	if hasIndex {
@@ -1038,16 +1040,14 @@ func (i *IndexCoord) watchFlushedSegmentLoop() {
 			for _, event := range events {
 				switch event.Type {
 				case mvccpb.PUT:
-					segmentInfo := &datapb.SegmentInfo{}
-					if err := proto.Unmarshal(event.Kv.Value, segmentInfo); err != nil {
-						log.Error("watchFlushedSegmentLoop unmarshal fail", zap.Error(err))
+					segmentID, err := strconv.ParseInt(string(event.Kv.Value), 10, 64)
+					if err != nil {
+						log.Error("IndexCoord watch flushed segment, but parse segmentID fail",
+							zap.String("event.Value", string(event.Kv.Value)), zap.Error(err))
 						continue
 					}
-
-					log.Debug("watchFlushedSegmentLoop watch event", zap.Int64("segID", segmentInfo.ID),
-						zap.Int64("collID", segmentInfo.CollectionID), zap.Int64("num rows", segmentInfo.NumOfRows),
-						zap.Int64s("compactForm", segmentInfo.CompactionFrom))
-					i.flushedSegmentWatcher.enqueueInternalTask(segmentInfo)
+					log.Debug("watchFlushedSegmentLoop watch event", zap.Int64("segID", segmentID))
+					i.flushedSegmentWatcher.enqueueInternalTask(segmentID)
 				case mvccpb.DELETE:
 					log.Debug("the segment info has been deleted", zap.String("key", string(event.Kv.Key)))
 				}

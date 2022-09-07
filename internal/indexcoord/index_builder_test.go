@@ -16,410 +16,714 @@
 
 package indexcoord
 
-//func createMetaTable() *metaTable {
-//	return &metaTable{
-//		indexBuildID2Meta: map[UniqueID]*Meta{
-//			1: {
-//				indexMeta: &indexpb.IndexMeta{
-//					IndexBuildID: 1,
-//					State:        commonpb.IndexState_Unissued,
-//					NodeID:       1,
-//					MarkDeleted:  true,
-//					Req: &indexpb.BuildIndexRequest{
-//						NumRows: 100,
-//						TypeParams: []*commonpb.KeyValuePair{
-//							{
-//								Key:   "dim",
-//								Value: "128",
-//							},
-//						},
-//					},
-//				},
-//			},
-//			2: {
-//				indexMeta: &indexpb.IndexMeta{
-//					IndexBuildID: 2,
-//					State:        commonpb.IndexState_Unissued,
-//					NodeID:       0,
-//					Req: &indexpb.BuildIndexRequest{
-//						NumRows: 100,
-//						TypeParams: []*commonpb.KeyValuePair{
-//							{
-//								Key:   "dim",
-//								Value: "128",
-//							},
-//						},
-//					},
-//				},
-//			},
-//			3: {
-//				indexMeta: &indexpb.IndexMeta{
-//					IndexBuildID: 3,
-//					State:        commonpb.IndexState_Unissued,
-//					NodeID:       1,
-//					Req: &indexpb.BuildIndexRequest{
-//						NumRows: 100,
-//						TypeParams: []*commonpb.KeyValuePair{
-//							{
-//								Key:   "dim",
-//								Value: "128",
-//							},
-//						},
-//					},
-//				},
-//			},
-//			4: {
-//				indexMeta: &indexpb.IndexMeta{
-//					IndexBuildID: 4,
-//					State:        commonpb.IndexState_InProgress,
-//					NodeID:       1,
-//					Req: &indexpb.BuildIndexRequest{
-//						NumRows: 100,
-//						TypeParams: []*commonpb.KeyValuePair{
-//							{
-//								Key:   "dim",
-//								Value: "128",
-//							},
-//						},
-//					},
-//				},
-//			},
-//			5: {
-//				indexMeta: &indexpb.IndexMeta{
-//					IndexBuildID: 5,
-//					State:        commonpb.IndexState_InProgress,
-//					NodeID:       3,
-//					Req: &indexpb.BuildIndexRequest{
-//						NumRows: 100,
-//						TypeParams: []*commonpb.KeyValuePair{
-//							{
-//								Key:   "dim",
-//								Value: "128",
-//							},
-//						},
-//					},
-//				},
-//			},
-//			6: {
-//				indexMeta: &indexpb.IndexMeta{
-//					IndexBuildID: 6,
-//					State:        commonpb.IndexState_Finished,
-//					NodeID:       2,
-//					Req: &indexpb.BuildIndexRequest{
-//						NumRows: 100,
-//						TypeParams: []*commonpb.KeyValuePair{
-//							{
-//								Key:   "dim",
-//								Value: "128",
-//							},
-//						},
-//					},
-//				},
-//			},
-//			7: {
-//				indexMeta: &indexpb.IndexMeta{
-//					IndexBuildID: 7,
-//					State:        commonpb.IndexState_Failed,
-//					NodeID:       0,
-//					Req: &indexpb.BuildIndexRequest{
-//						NumRows: 100,
-//						TypeParams: []*commonpb.KeyValuePair{
-//							{
-//								Key:   "dim",
-//								Value: "128",
-//							},
-//						},
-//					},
-//				},
-//			},
-//		},
-//		client: &mockETCDKV{
-//			compareVersionAndSwap: func(key string, version int64, target string, opts ...clientv3.OpOption) (bool, error) {
-//				return true, nil
-//			},
-//		},
-//	}
-//}
-//
-//func TestIndexBuilder(t *testing.T) {
-//	ctx := context.Background()
-//
-//	ic := &IndexCoord{
-//		loopCtx:            ctx,
-//		reqTimeoutInterval: time.Second * 5,
-//		dataCoordClient: &DataCoordMock{
-//			Fail: false,
-//			Err:  false,
-//		},
-//		nodeManager: &NodeManager{
-//			ctx: ctx,
-//			nodeClients: map[UniqueID]types.IndexNode{
-//				4: &indexnode.Mock{
-//					Err:     false,
-//					Failure: false,
-//				},
-//			},
-//		},
-//	}
-//
-//	ib := newIndexBuilder(ctx, ic, createMetaTable(), []UniqueID{1, 2})
-//
-//	assert.Equal(t, 6, len(ib.tasks))
-//	assert.Equal(t, indexTaskDeleted, ib.tasks[1])
-//	assert.Equal(t, indexTaskInit, ib.tasks[2])
-//	assert.Equal(t, indexTaskRetry, ib.tasks[3])
-//	assert.Equal(t, indexTaskInProgress, ib.tasks[4])
-//	assert.Equal(t, indexTaskRetry, ib.tasks[5])
-//	assert.Equal(t, indexTaskDone, ib.tasks[6])
-//
-//	ib.scheduleDuration = time.Millisecond * 500
-//	ib.Start()
-//
-//	t.Run("enqueue", func(t *testing.T) {
-//		ib.meta.indexBuildID2Meta[8] = &Meta{
-//			indexMeta: &indexpb.IndexMeta{
-//				IndexBuildID: 8,
-//				State:        commonpb.IndexState_Unissued,
-//				NodeID:       0,
-//				Req: &indexpb.BuildIndexRequest{
-//					NumRows: 100,
-//					TypeParams: []*commonpb.KeyValuePair{
-//						{
-//							Key:   "dim",
-//							Value: "128",
-//						},
-//					},
-//				},
-//			},
-//		}
-//		ib.enqueue(8)
-//	})
-//
-//	t.Run("node down", func(t *testing.T) {
-//		ib.nodeDown(1)
-//	})
-//
-//	t.Run("updateStateByMeta", func(t *testing.T) {
-//		indexMeta := &indexpb.IndexMeta{
-//			IndexBuildID: 2,
-//			State:        commonpb.IndexState_Finished,
-//			NodeID:       3,
-//		}
-//		ib.updateStateByMeta(indexMeta)
-//
-//		indexMeta = &indexpb.IndexMeta{
-//			IndexBuildID: 3,
-//			State:        commonpb.IndexState_Finished,
-//			NodeID:       3,
-//		}
-//		ib.updateStateByMeta(indexMeta)
-//
-//		indexMeta = &indexpb.IndexMeta{
-//			IndexBuildID: 4,
-//			State:        commonpb.IndexState_Failed,
-//			NodeID:       3,
-//		}
-//		ib.updateStateByMeta(indexMeta)
-//
-//		indexMeta = &indexpb.IndexMeta{
-//			IndexBuildID: 5,
-//			State:        commonpb.IndexState_Unissued,
-//			NodeID:       3,
-//		}
-//		ib.updateStateByMeta(indexMeta)
-//
-//		indexMeta = &indexpb.IndexMeta{
-//			IndexBuildID: 8,
-//			State:        commonpb.IndexState_Finished,
-//			NodeID:       3,
-//		}
-//		ib.updateStateByMeta(indexMeta)
-//
-//		for {
-//			ib.taskMutex.Lock()
-//			if len(ib.tasks) == 1 && indexTaskInProgress == ib.tasks[5] {
-//				ib.taskMutex.Unlock()
-//				break
-//			}
-//			ib.taskMutex.Unlock()
-//			time.Sleep(time.Second)
-//		}
-//	})
-//
-//	ib.Stop()
-//
-//	t.Run("save meta error", func(t *testing.T) {
-//		mt := createMetaTable()
-//		mt.client = &mockETCDKV{
-//			compareVersionAndSwap: func(key string, version int64, target string, opts ...clientv3.OpOption) (bool, error) {
-//				return true, errors.New("error")
-//			},
-//		}
-//		ib2 := newIndexBuilder(ctx, ic, mt, []UniqueID{1, 2})
-//		ib2.scheduleDuration = time.Millisecond * 500
-//		ib2.Start()
-//		time.Sleep(time.Second)
-//		ib2.Stop()
-//
-//		assert.Equal(t, 6, len(ib2.tasks))
-//		assert.Equal(t, indexTaskDeleted, ib2.tasks[1])
-//		assert.Equal(t, indexTaskInit, ib2.tasks[2])
-//		assert.Equal(t, indexTaskRetry, ib2.tasks[3])
-//		assert.Equal(t, indexTaskInProgress, ib2.tasks[4])
-//		assert.Equal(t, indexTaskRetry, ib2.tasks[5])
-//		assert.Equal(t, indexTaskDone, ib2.tasks[6])
-//	})
-//}
-//
-//func TestIndexBuilder_Error(t *testing.T) {
-//	ctx := context.Background()
-//
-//	t.Run("PeekClient fail", func(t *testing.T) {
-//		ic := &IndexCoord{
-//			loopCtx:            ctx,
-//			reqTimeoutInterval: time.Second * 5,
-//			dataCoordClient: &DataCoordMock{
-//				Fail: false,
-//				Err:  false,
-//			},
-//			nodeManager: &NodeManager{
-//				ctx: ctx,
-//			},
-//		}
-//		mt := &metaTable{
-//			indexBuildID2Meta: map[UniqueID]*Meta{
-//				1: {
-//					indexMeta: &indexpb.IndexMeta{
-//						IndexBuildID: 1,
-//						State:        commonpb.IndexState_Unissued,
-//						NodeID:       0,
-//						MarkDeleted:  false,
-//						Req: &indexpb.BuildIndexRequest{
-//							NumRows: 100,
-//							TypeParams: []*commonpb.KeyValuePair{
-//								{
-//									Key:   "dim",
-//									Value: "128",
-//								},
-//							},
-//						},
-//					},
-//				},
-//			},
-//			client: &mockETCDKV{
-//				compareVersionAndSwap: func(key string, version int64, target string, opts ...clientv3.OpOption) (bool, error) {
-//					return true, nil
-//				},
-//			},
-//		}
-//
-//		ib := newIndexBuilder(ic.loopCtx, ic, mt, []UniqueID{})
-//		ib.scheduleDuration = time.Millisecond * 500
-//		ib.Start()
-//		time.Sleep(time.Second)
-//		ib.Stop()
-//	})
-//
-//	t.Run("update version fail", func(t *testing.T) {
-//		ic := &IndexCoord{
-//			loopCtx:            ctx,
-//			reqTimeoutInterval: time.Second * 5,
-//			dataCoordClient: &DataCoordMock{
-//				Fail: false,
-//				Err:  false,
-//			},
-//			nodeManager: &NodeManager{
-//				ctx: ctx,
-//				nodeClients: map[UniqueID]types.IndexNode{
-//					1: &indexnode.Mock{
-//						Err:     false,
-//						Failure: false,
-//					},
-//				},
-//			},
-//		}
-//		mt := &metaTable{
-//			indexBuildID2Meta: map[UniqueID]*Meta{
-//				1: {
-//					indexMeta: &indexpb.IndexMeta{
-//						IndexBuildID: 1,
-//						State:        commonpb.IndexState_Unissued,
-//						NodeID:       0,
-//						MarkDeleted:  false,
-//						Req: &indexpb.BuildIndexRequest{
-//							NumRows: 100,
-//							TypeParams: []*commonpb.KeyValuePair{
-//								{
-//									Key:   "dim",
-//									Value: "128",
-//								},
-//							},
-//						},
-//					},
-//				},
-//			},
-//			client: &mockETCDKV{
-//				compareVersionAndSwap: func(key string, version int64, target string, opts ...clientv3.OpOption) (bool, error) {
-//					return true, errors.New("error")
-//				},
-//			},
-//		}
-//
-//		ib := newIndexBuilder(ic.loopCtx, ic, mt, []UniqueID{})
-//		ib.scheduleDuration = time.Second
-//		ib.Start()
-//		time.Sleep(time.Second)
-//		ib.Stop()
-//	})
-//
-//	t.Run("acquire lock fail", func(t *testing.T) {
-//		ic := &IndexCoord{
-//			loopCtx:            ctx,
-//			reqTimeoutInterval: time.Second * 5,
-//			dataCoordClient: &DataCoordMock{
-//				Fail: false,
-//				Err:  true,
-//			},
-//			nodeManager: &NodeManager{
-//				ctx: ctx,
-//				nodeClients: map[UniqueID]types.IndexNode{
-//					1: &indexnode.Mock{
-//						Err:     false,
-//						Failure: false,
-//					},
-//				},
-//			},
-//		}
-//		mt := &metaTable{
-//			indexBuildID2Meta: map[UniqueID]*Meta{
-//				1: {
-//					indexMeta: &indexpb.IndexMeta{
-//						IndexBuildID: 1,
-//						State:        commonpb.IndexState_Unissued,
-//						NodeID:       0,
-//						MarkDeleted:  false,
-//						Req: &indexpb.BuildIndexRequest{
-//							NumRows: 100,
-//							TypeParams: []*commonpb.KeyValuePair{
-//								{
-//									Key:   "dim",
-//									Value: "128",
-//								},
-//							},
-//						},
-//					},
-//				},
-//			},
-//			client: &mockETCDKV{
-//				compareVersionAndSwap: func(key string, version int64, target string, opts ...clientv3.OpOption) (bool, error) {
-//					return true, nil
-//				},
-//			},
-//		}
-//		ib := newIndexBuilder(ic.loopCtx, ic, mt, []UniqueID{})
-//		ib.scheduleDuration = time.Second
-//		ib.Start()
-//		time.Sleep(time.Second)
-//		ib.Stop()
-//	})
-//}
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
+
+	"github.com/milvus-io/milvus/internal/proto/datapb"
+
+	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/metastore/kv/indexcoord"
+	"github.com/milvus-io/milvus/internal/metastore/model"
+
+	"github.com/milvus-io/milvus/internal/indexnode"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/types"
+	"github.com/stretchr/testify/assert"
+)
+
+func createMetaTable(catalog metastore.IndexCoordCatalog) *metaTable {
+	return &metaTable{
+		catalog: catalog,
+		collectionIndexes: map[UniqueID]map[UniqueID]*model.Index{
+			collID: {
+				indexID: {
+					TenantID:     "",
+					CollectionID: collID,
+					FieldID:      fieldID,
+					IndexID:      indexID,
+					IndexName:    indexName,
+					IsDeleted:    false,
+					CreateTime:   1,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   "dim",
+							Value: "128",
+						},
+					},
+					IndexParams: []*commonpb.KeyValuePair{
+						{
+							Key:   "metrics_type",
+							Value: "L2",
+						},
+					},
+				},
+			},
+		},
+		segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
+			segID: {
+				indexID: {
+					SegmentID:      segID,
+					CollectionID:   collID,
+					PartitionID:    partID,
+					NumRows:        1025,
+					IndexID:        indexID,
+					BuildID:        buildID,
+					NodeID:         0,
+					IndexVersion:   0,
+					IndexState:     commonpb.IndexState_Unissued,
+					FailReason:     "",
+					IsDeleted:      false,
+					CreateTime:     0,
+					IndexFilePaths: nil,
+					IndexSize:      0,
+				},
+			},
+			segID + 1: {
+				indexID: {
+					SegmentID:      segID + 1,
+					CollectionID:   collID,
+					PartitionID:    partID,
+					NumRows:        1026,
+					IndexID:        indexID,
+					BuildID:        buildID + 1,
+					NodeID:         nodeID,
+					IndexVersion:   1,
+					IndexState:     commonpb.IndexState_InProgress,
+					FailReason:     "",
+					IsDeleted:      false,
+					CreateTime:     1111,
+					IndexFilePaths: nil,
+					IndexSize:      0,
+				},
+			},
+			segID + 2: {
+				indexID: {
+					SegmentID:      segID + 2,
+					CollectionID:   collID,
+					PartitionID:    partID,
+					NumRows:        1026,
+					IndexID:        indexID,
+					BuildID:        buildID + 2,
+					NodeID:         nodeID,
+					IndexVersion:   1,
+					IndexState:     commonpb.IndexState_InProgress,
+					FailReason:     "",
+					IsDeleted:      true,
+					CreateTime:     1111,
+					IndexFilePaths: nil,
+					IndexSize:      0,
+				},
+			},
+			segID + 3: {
+				indexID: {
+					SegmentID:      segID + 3,
+					CollectionID:   collID,
+					PartitionID:    partID,
+					NumRows:        500,
+					IndexID:        indexID,
+					BuildID:        buildID + 3,
+					NodeID:         0,
+					IndexVersion:   0,
+					IndexState:     commonpb.IndexState_Unissued,
+					FailReason:     "",
+					IsDeleted:      false,
+					CreateTime:     1111,
+					IndexFilePaths: nil,
+					IndexSize:      0,
+				},
+			},
+			segID + 4: {
+				indexID: {
+					SegmentID:      segID + 4,
+					CollectionID:   collID,
+					PartitionID:    partID,
+					NumRows:        1026,
+					IndexID:        indexID,
+					BuildID:        buildID + 4,
+					NodeID:         nodeID,
+					IndexVersion:   1,
+					IndexState:     commonpb.IndexState_Finished,
+					FailReason:     "",
+					IsDeleted:      false,
+					CreateTime:     1111,
+					IndexFilePaths: nil,
+					IndexSize:      0,
+				},
+			},
+			segID + 5: {
+				indexID: {
+					SegmentID:      segID + 5,
+					CollectionID:   collID,
+					PartitionID:    partID,
+					NumRows:        1026,
+					IndexID:        indexID,
+					BuildID:        buildID + 5,
+					NodeID:         0,
+					IndexVersion:   1,
+					IndexState:     commonpb.IndexState_Finished,
+					FailReason:     "",
+					IsDeleted:      false,
+					CreateTime:     1111,
+					IndexFilePaths: nil,
+					IndexSize:      0,
+				},
+			},
+			segID + 6: {
+				indexID: {
+					SegmentID:      segID + 6,
+					CollectionID:   collID,
+					PartitionID:    partID,
+					NumRows:        1026,
+					IndexID:        indexID,
+					BuildID:        buildID + 6,
+					NodeID:         0,
+					IndexVersion:   1,
+					IndexState:     commonpb.IndexState_Finished,
+					FailReason:     "",
+					IsDeleted:      false,
+					CreateTime:     1111,
+					IndexFilePaths: nil,
+					IndexSize:      0,
+				},
+			},
+			segID + 7: {
+				indexID: {
+					SegmentID:      segID + 7,
+					CollectionID:   collID,
+					PartitionID:    partID,
+					NumRows:        1026,
+					IndexID:        indexID,
+					BuildID:        buildID + 7,
+					NodeID:         0,
+					IndexVersion:   1,
+					IndexState:     commonpb.IndexState_Failed,
+					FailReason:     "error",
+					IsDeleted:      false,
+					CreateTime:     1111,
+					IndexFilePaths: nil,
+					IndexSize:      0,
+				},
+			},
+			segID + 8: {
+				indexID: {
+					SegmentID:      segID + 8,
+					CollectionID:   collID,
+					PartitionID:    partID,
+					NumRows:        1026,
+					IndexID:        indexID,
+					BuildID:        buildID + 8,
+					NodeID:         nodeID + 1,
+					IndexVersion:   1,
+					IndexState:     commonpb.IndexState_InProgress,
+					FailReason:     "",
+					IsDeleted:      false,
+					CreateTime:     1111,
+					IndexFilePaths: nil,
+					IndexSize:      0,
+				},
+			},
+			buildID + 9: {
+				indexID: {
+					SegmentID:      segID + 9,
+					CollectionID:   collID,
+					PartitionID:    partID,
+					NumRows:        500,
+					IndexID:        indexID,
+					BuildID:        buildID + 9,
+					NodeID:         0,
+					IndexVersion:   0,
+					IndexState:     commonpb.IndexState_Unissued,
+					FailReason:     "",
+					IsDeleted:      false,
+					CreateTime:     1111,
+					IndexFilePaths: nil,
+					IndexSize:      0,
+				},
+			},
+		},
+		buildID2SegmentIndex: map[UniqueID]*model.SegmentIndex{
+			buildID: {
+				SegmentID:      segID,
+				CollectionID:   collID,
+				PartitionID:    partID,
+				NumRows:        1025,
+				IndexID:        indexID,
+				BuildID:        buildID,
+				NodeID:         0,
+				IndexVersion:   0,
+				IndexState:     commonpb.IndexState_Unissued,
+				FailReason:     "",
+				IsDeleted:      false,
+				CreateTime:     0,
+				IndexFilePaths: nil,
+				IndexSize:      0,
+			},
+			buildID + 1: {
+				SegmentID:      segID + 1,
+				CollectionID:   collID,
+				PartitionID:    partID,
+				NumRows:        1026,
+				IndexID:        indexID,
+				BuildID:        buildID + 1,
+				NodeID:         nodeID,
+				IndexVersion:   1,
+				IndexState:     commonpb.IndexState_InProgress,
+				FailReason:     "",
+				IsDeleted:      false,
+				CreateTime:     1111,
+				IndexFilePaths: nil,
+				IndexSize:      0,
+			},
+			buildID + 2: {
+				SegmentID:      segID + 2,
+				CollectionID:   collID,
+				PartitionID:    partID,
+				NumRows:        1026,
+				IndexID:        indexID,
+				BuildID:        buildID + 2,
+				NodeID:         nodeID,
+				IndexVersion:   1,
+				IndexState:     commonpb.IndexState_InProgress,
+				FailReason:     "",
+				IsDeleted:      true,
+				CreateTime:     1111,
+				IndexFilePaths: nil,
+				IndexSize:      0,
+			},
+			buildID + 3: {
+				SegmentID:      segID + 3,
+				CollectionID:   collID,
+				PartitionID:    partID,
+				NumRows:        500,
+				IndexID:        indexID,
+				BuildID:        buildID + 3,
+				NodeID:         0,
+				IndexVersion:   0,
+				IndexState:     commonpb.IndexState_Unissued,
+				FailReason:     "",
+				IsDeleted:      false,
+				CreateTime:     1111,
+				IndexFilePaths: nil,
+				IndexSize:      0,
+			},
+			buildID + 4: {
+				SegmentID:      segID + 4,
+				CollectionID:   collID,
+				PartitionID:    partID,
+				NumRows:        1026,
+				IndexID:        indexID,
+				BuildID:        buildID + 4,
+				NodeID:         nodeID,
+				IndexVersion:   1,
+				IndexState:     commonpb.IndexState_Finished,
+				FailReason:     "",
+				IsDeleted:      false,
+				CreateTime:     1111,
+				IndexFilePaths: nil,
+				IndexSize:      0,
+			},
+			buildID + 5: {
+				SegmentID:      segID + 5,
+				CollectionID:   collID,
+				PartitionID:    partID,
+				NumRows:        1026,
+				IndexID:        indexID,
+				BuildID:        buildID + 5,
+				NodeID:         0,
+				IndexVersion:   1,
+				IndexState:     commonpb.IndexState_Finished,
+				FailReason:     "",
+				IsDeleted:      false,
+				CreateTime:     1111,
+				IndexFilePaths: nil,
+				IndexSize:      0,
+			},
+			buildID + 6: {
+				SegmentID:      segID + 6,
+				CollectionID:   collID,
+				PartitionID:    partID,
+				NumRows:        1026,
+				IndexID:        indexID,
+				BuildID:        buildID + 6,
+				NodeID:         0,
+				IndexVersion:   1,
+				IndexState:     commonpb.IndexState_Finished,
+				FailReason:     "",
+				IsDeleted:      false,
+				CreateTime:     1111,
+				IndexFilePaths: nil,
+				IndexSize:      0,
+			},
+			buildID + 7: {
+				SegmentID:      segID + 7,
+				CollectionID:   collID,
+				PartitionID:    partID,
+				NumRows:        1026,
+				IndexID:        indexID,
+				BuildID:        buildID + 7,
+				NodeID:         0,
+				IndexVersion:   1,
+				IndexState:     commonpb.IndexState_Failed,
+				FailReason:     "error",
+				IsDeleted:      false,
+				CreateTime:     1111,
+				IndexFilePaths: nil,
+				IndexSize:      0,
+			},
+			buildID + 8: {
+				SegmentID:      segID + 8,
+				CollectionID:   collID,
+				PartitionID:    partID,
+				NumRows:        1026,
+				IndexID:        indexID,
+				BuildID:        buildID + 8,
+				NodeID:         nodeID + 1,
+				IndexVersion:   1,
+				IndexState:     commonpb.IndexState_InProgress,
+				FailReason:     "",
+				IsDeleted:      false,
+				CreateTime:     1111,
+				IndexFilePaths: nil,
+				IndexSize:      0,
+			},
+			buildID + 9: {
+				SegmentID:      segID + 9,
+				CollectionID:   collID,
+				PartitionID:    partID,
+				NumRows:        500,
+				IndexID:        indexID,
+				BuildID:        buildID + 9,
+				NodeID:         0,
+				IndexVersion:   0,
+				IndexState:     commonpb.IndexState_Unissued,
+				FailReason:     "",
+				IsDeleted:      false,
+				CreateTime:     1111,
+				IndexFilePaths: nil,
+				IndexSize:      0,
+			},
+		},
+	}
+}
+
+func TestIndexBuilder(t *testing.T) {
+	Params.Init()
+	ctx := context.Background()
+
+	ic := &IndexCoord{
+		loopCtx:            ctx,
+		reqTimeoutInterval: time.Second * 5,
+		dataCoordClient:    NewDataCoordMock(),
+		nodeManager: &NodeManager{
+			ctx: ctx,
+			nodeClients: map[UniqueID]types.IndexNode{
+				4: indexnode.NewIndexNodeMock(),
+			},
+		},
+		chunkManager: &chunkManagerMock{},
+		etcdKV: &mockETCDKV{
+			save: func(s string, s2 string) error {
+				return nil
+			},
+		},
+	}
+
+	ib := newIndexBuilder(ctx, ic, createMetaTable(&indexcoord.Catalog{
+		Txn: &mockETCDKV{
+			save: func(s string, s2 string) error {
+				return nil
+			},
+			multiSave: func(m map[string]string) error {
+				return nil
+			},
+		},
+	}), []UniqueID{nodeID})
+
+	assert.Equal(t, 7, len(ib.tasks))
+	assert.Equal(t, indexTaskInit, ib.tasks[buildID])
+	assert.Equal(t, indexTaskInProgress, ib.tasks[buildID+1])
+	assert.Equal(t, indexTaskDeleted, ib.tasks[buildID+2])
+	assert.Equal(t, indexTaskInit, ib.tasks[buildID+3])
+	assert.Equal(t, indexTaskDone, ib.tasks[buildID+4])
+	assert.Equal(t, indexTaskRetry, ib.tasks[buildID+8])
+	assert.Equal(t, indexTaskInit, ib.tasks[buildID+9])
+
+	ib.scheduleDuration = time.Millisecond * 500
+	ib.Start()
+
+	t.Run("enqueue", func(t *testing.T) {
+		segIdx := &model.SegmentIndex{
+			SegmentID:      segID + 10,
+			CollectionID:   collID,
+			PartitionID:    partID,
+			NumRows:        1026,
+			IndexID:        indexID,
+			BuildID:        buildID + 10,
+			NodeID:         0,
+			IndexVersion:   0,
+			IndexState:     0,
+			FailReason:     "",
+			IsDeleted:      false,
+			CreateTime:     0,
+			IndexFilePaths: nil,
+			IndexSize:      0,
+		}
+		err := ib.meta.AddIndex(segIdx)
+		assert.NoError(t, err)
+		ib.enqueue(buildID + 10)
+	})
+
+	t.Run("node down", func(t *testing.T) {
+		ib.nodeDown(nodeID)
+	})
+
+	for {
+		ib.taskMutex.RLock()
+		if len(ib.tasks) == 0 {
+			break
+		}
+		ib.taskMutex.RUnlock()
+	}
+	ib.Stop()
+}
+
+func TestIndexBuilder_Error(t *testing.T) {
+	Params.Init()
+	ib := &indexBuilder{
+		tasks: map[int64]indexTaskState{
+			buildID: indexTaskInit,
+		},
+		meta: createMetaTable(&indexcoord.Catalog{
+			Txn: &mockETCDKV{
+				save: func(s string, s2 string) error {
+					return errors.New("error")
+				},
+				multiSave: func(m map[string]string) error {
+					return errors.New("error")
+				},
+			}}),
+		ic: &IndexCoord{
+			dataCoordClient: &DataCoordMock{
+				CallGetSegmentInfo: func(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
+					return &datapb.GetSegmentInfoResponse{}, errors.New("error")
+				},
+			},
+		},
+	}
+
+	t.Run("meta not exist", func(t *testing.T) {
+		ib.tasks[buildID+100] = indexTaskInit
+		ib.process(buildID + 100)
+	})
+
+	t.Run("finish few rows task fail", func(t *testing.T) {
+		ib.tasks[buildID+9] = indexTaskInit
+		ib.process(buildID + 9)
+	})
+
+	//t.Run("getSegmentInfo fail", func(t *testing.T) {
+	//	ib.ic = &IndexCoord{
+	//		dataCoordClient: &DataCoordMock{
+	//			CallGetSegmentInfo: func(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
+	//				return &datapb.GetSegmentInfoResponse{}, errors.New("error")
+	//			},
+	//		},
+	//	}
+	//	ib.tasks = map[int64]*indexTask{
+	//		buildID: {
+	//			buildID:     buildID,
+	//			state:       indexTaskInit,
+	//			segmentInfo: nil,
+	//		},
+	//	}
+	//	ib.process(ib.tasks[buildID])
+	//
+	//	ib.ic = &IndexCoord{
+	//		dataCoordClient: &DataCoordMock{
+	//			CallGetSegmentInfo: func(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
+	//				return &datapb.GetSegmentInfoResponse{
+	//					Status: &commonpb.Status{
+	//						ErrorCode: commonpb.ErrorCode_UnexpectedError,
+	//						Reason:    "get segment info fail",
+	//					},
+	//				}, nil
+	//			},
+	//		},
+	//	}
+	//	ib.process(ib.tasks[buildID])
+	//})
+
+	t.Run("peek client fail", func(t *testing.T) {
+		ib.ic.nodeManager = &NodeManager{nodeClients: map[UniqueID]types.IndexNode{}}
+		ib.ic.dataCoordClient = NewDataCoordMock()
+		ib.process(buildID)
+	})
+
+	t.Run("update version fail", func(t *testing.T) {
+		ib.ic.nodeManager = &NodeManager{
+			ctx:         context.Background(),
+			nodeClients: map[UniqueID]types.IndexNode{1: indexnode.NewIndexNodeMock()},
+		}
+		ib.process(buildID)
+	})
+
+	t.Run("acquire lock fail", func(t *testing.T) {
+		ib.tasks[buildID] = indexTaskInit
+		ib.meta = createMetaTable(&indexcoord.Catalog{
+			Txn: &mockETCDKV{
+				multiSave: func(m map[string]string) error {
+					return nil
+				},
+			}})
+		dataMock := NewDataCoordMock()
+		dataMock.CallAcquireSegmentLock = func(ctx context.Context, req *datapb.AcquireSegmentLockRequest) (*commonpb.Status, error) {
+			return nil, errors.New("error")
+		}
+		ib.ic.dataCoordClient = dataMock
+		ib.process(buildID)
+	})
+
+	t.Run("assign task fail", func(t *testing.T) {
+		ib.tasks[buildID] = indexTaskInit
+		ib.ic.dataCoordClient = NewDataCoordMock()
+		ib.ic.nodeManager = &NodeManager{
+			ctx: context.Background(),
+			nodeClients: map[UniqueID]types.IndexNode{
+				1: &indexnode.Mock{
+					CallCreateJob: func(ctx context.Context, req *indexpb.CreateJobRequest) (*commonpb.Status, error) {
+						return nil, errors.New("error")
+					},
+					CallGetJobStats: func(ctx context.Context, in *indexpb.GetJobStatsRequest) (*indexpb.GetJobStatsResponse, error) {
+						return &indexpb.GetJobStatsResponse{
+							Status: &commonpb.Status{
+								ErrorCode: commonpb.ErrorCode_Success,
+								Reason:    "",
+							},
+							TaskSlots: 1,
+						}, nil
+					},
+				},
+			},
+		}
+		ib.process(buildID)
+	})
+
+	t.Run("no need to build index", func(t *testing.T) {
+		ib.meta.collectionIndexes[collID][indexID].IsDeleted = true
+		ib.process(buildID)
+	})
+
+	t.Run("finish task fail", func(t *testing.T) {
+		ib.tasks[buildID] = indexTaskInProgress
+		ib.ic.dataCoordClient = NewDataCoordMock()
+		ib.ic.nodeManager = &NodeManager{
+			ctx: context.Background(),
+			nodeClients: map[UniqueID]types.IndexNode{
+				1: &indexnode.Mock{
+					CallQueryJobs: func(ctx context.Context, in *indexpb.QueryJobsRequest) (*indexpb.QueryJobsResponse, error) {
+						return &indexpb.QueryJobsResponse{
+							Status: &commonpb.Status{
+								ErrorCode: commonpb.ErrorCode_Success,
+								Reason:    "",
+							},
+							IndexInfos: []*indexpb.IndexTaskInfo{
+								{
+									BuildID:        buildID,
+									State:          commonpb.IndexState_Finished,
+									IndexFiles:     nil,
+									SerializedSize: 0,
+									FailReason:     "",
+								},
+							},
+						}, nil
+					},
+				},
+			},
+		}
+		ib.ic.metaTable = &metaTable{
+			catalog: &indexcoord.Catalog{
+				Txn: &mockETCDKV{
+					multiSave: func(m map[string]string) error {
+						return errors.New("error")
+					},
+				},
+			},
+		}
+		ib.getTaskState(buildID, 1)
+	})
+
+	t.Run("get state retry", func(t *testing.T) {
+		ib.tasks[buildID] = indexTaskInit
+		ib.ic.dataCoordClient = NewDataCoordMock()
+		ib.ic.nodeManager = &NodeManager{
+			ctx: context.Background(),
+			nodeClients: map[UniqueID]types.IndexNode{
+				1: &indexnode.Mock{
+					CallQueryJobs: func(ctx context.Context, in *indexpb.QueryJobsRequest) (*indexpb.QueryJobsResponse, error) {
+						return &indexpb.QueryJobsResponse{
+							Status: &commonpb.Status{
+								ErrorCode: commonpb.ErrorCode_Success,
+								Reason:    "",
+							},
+							IndexInfos: []*indexpb.IndexTaskInfo{
+								{
+									BuildID:        buildID,
+									State:          commonpb.IndexState_Retry,
+									IndexFiles:     nil,
+									SerializedSize: 0,
+									FailReason:     "create index fail",
+								},
+							},
+						}, nil
+					},
+				},
+			},
+		}
+		ib.ic.metaTable = &metaTable{
+			catalog: &indexcoord.Catalog{
+				Txn: &mockETCDKV{
+					multiSave: func(m map[string]string) error {
+						return nil
+					},
+				},
+			},
+		}
+		ib.getTaskState(buildID, 1)
+	})
+
+	t.Run("get state not exist", func(t *testing.T) {
+		ib.tasks[buildID] = indexTaskInit
+		ib.ic.dataCoordClient = NewDataCoordMock()
+		ib.ic.nodeManager = &NodeManager{
+			ctx: context.Background(),
+			nodeClients: map[UniqueID]types.IndexNode{
+				1: &indexnode.Mock{
+					CallQueryJobs: func(ctx context.Context, in *indexpb.QueryJobsRequest) (*indexpb.QueryJobsResponse, error) {
+						return &indexpb.QueryJobsResponse{
+							Status: &commonpb.Status{
+								ErrorCode: commonpb.ErrorCode_Success,
+								Reason:    "",
+							},
+							IndexInfos: nil,
+						}, nil
+					},
+				},
+			},
+		}
+		ib.ic.metaTable = &metaTable{
+			catalog: &indexcoord.Catalog{
+				Txn: &mockETCDKV{
+					multiSave: func(m map[string]string) error {
+						return nil
+					},
+				},
+			},
+		}
+		ib.getTaskState(buildID, 1)
+	})
+}

@@ -320,14 +320,14 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 			info = s.meta.GetAllSegment(id)
 			if info == nil {
 				log.Warn("failed to get segment, this may have been cleaned", zap.Int64("segmentID", id))
-				resp.Status.Reason = fmt.Sprintf("failed to get segment %d", id)
+				resp.Status.Reason = msgSegmentNotFound(id)
 				return resp, nil
 			}
 			infos = append(infos, info.SegmentInfo)
 		} else {
 			info = s.meta.GetSegment(id)
 			if info == nil {
-				resp.Status.Reason = fmt.Sprintf("failed to get segment %d", id)
+				resp.Status.Reason = msgSegmentNotFound(id)
 				return resp, nil
 			}
 			infos = append(infos, info.SegmentInfo)

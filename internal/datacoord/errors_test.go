@@ -37,3 +37,8 @@ func TestErrDataCoordIsUnhealthy(t *testing.T) {
 		log.Info("TestErrDataCoordIsUnhealthy", zap.Error(errDataCoordIsUnhealthy(nodeID)))
 	}
 }
+
+func TestErrSegmentNotFound(t *testing.T) {
+	segID := UniqueID(435846569243121068)
+	log.Info("TestErrSegmentNotFound", zap.String("msg", msgSegmentNotFound(segID)))
+}

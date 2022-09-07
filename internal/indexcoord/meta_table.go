@@ -199,17 +199,17 @@ func (mt *metaTable) GetMeta(buildID UniqueID) (*model.SegmentIndex, bool) {
 	return nil, false
 }
 
-func (mt *metaTable) GetTypeParams(collID, indexID UniqueID) ([]*commonpb.KeyValuePair, error) {
+func (mt *metaTable) GetTypeParams(collID, indexID UniqueID) []*commonpb.KeyValuePair {
 	mt.indexLock.RLock()
 	defer mt.indexLock.RUnlock()
 
 	fieldIndexes, ok := mt.collectionIndexes[collID]
 	if !ok {
-		return nil, fmt.Errorf("there is no index on collection: %d", collID)
+		return nil
 	}
 	index, ok := fieldIndexes[indexID]
 	if !ok {
-		return nil, fmt.Errorf("there is no index on collection: %d with indexID: %d", collID, indexID)
+		return nil
 	}
 	typeParams := make([]*commonpb.KeyValuePair, len(index.TypeParams))
 
@@ -217,7 +217,7 @@ func (mt *metaTable) GetTypeParams(collID, indexID UniqueID) ([]*commonpb.KeyVal
 		typeParams[i] = proto.Clone(param).(*commonpb.KeyValuePair)
 	}
 
-	return typeParams, nil
+	return typeParams
 }
 
 func (mt *metaTable) GetIndexParams(collID, indexID UniqueID) []*commonpb.KeyValuePair {
@@ -666,7 +666,7 @@ func (mt *metaTable) GetIndexBuildProgress(indexID int64, createTs uint64) int64
 			continue
 		}
 
-		if segIdx.IndexState == commonpb.IndexState_Finished {
+		if segIdx.IndexState == commonpb.IndexState_Finished && segIdx.NumRows >= Params.IndexCoordCfg.MinSegmentNumRowsToEnableIndex {
 			indexRows += segIdx.NumRows
 		}
 	}
