@@ -33,7 +33,7 @@ import (
 func TestValidateCollectionName(t *testing.T) {
 	assert.Nil(t, validateCollectionName("abc"))
 	assert.Nil(t, validateCollectionName("_123abc"))
-	assert.Nil(t, validateCollectionName("abc123_$"))
+	assert.Nil(t, validateCollectionName("abc123_"))
 
 	longName := make([]byte, 256)
 	for i := 0; i < len(longName); i++ {
@@ -42,6 +42,7 @@ func TestValidateCollectionName(t *testing.T) {
 	invalidNames := []string{
 		"123abc",
 		"$abc",
+		"abc$",
 		"_12 ac",
 		" ",
 		"",
@@ -60,7 +61,7 @@ func TestValidatePartitionTag(t *testing.T) {
 	assert.Nil(t, validatePartitionTag("abc", true))
 	assert.Nil(t, validatePartitionTag("123abc", true))
 	assert.Nil(t, validatePartitionTag("_123abc", true))
-	assert.Nil(t, validatePartitionTag("abc123_$", true))
+	assert.Nil(t, validatePartitionTag("abc123_", true))
 
 	longName := make([]byte, 256)
 	for i := 0; i < len(longName); i++ {
@@ -68,6 +69,7 @@ func TestValidatePartitionTag(t *testing.T) {
 	}
 	invalidNames := []string{
 		"$abc",
+		"abc$",
 		"_12 ac",
 		" ",
 		"",
@@ -86,6 +88,7 @@ func TestValidatePartitionTag(t *testing.T) {
 func TestValidateFieldName(t *testing.T) {
 	assert.Nil(t, validateFieldName("abc"))
 	assert.Nil(t, validateFieldName("_123abc"))
+	assert.Nil(t, validateFieldName("abc123_"))
 
 	longName := make([]byte, 256)
 	for i := 0; i < len(longName); i++ {
@@ -94,6 +97,7 @@ func TestValidateFieldName(t *testing.T) {
 	invalidNames := []string{
 		"123abc",
 		"$abc",
+		"abc$",
 		"_12 ac",
 		" ",
 		"",
