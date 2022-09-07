@@ -104,8 +104,8 @@ func validateCollectionNameOrAlias(entity, entityType string) error {
 
 	for i := 1; i < len(entity); i++ {
 		c := entity[i]
-		if c != '_' && c != '$' && !isAlpha(c) && !isNumber(c) {
-			msg := invalidMsg + fmt.Sprintf("Collection %s can only contain numbers, letters, dollars and underscores.", entityType)
+		if c != '_' && !isAlpha(c) && !isNumber(c) {
+			msg := invalidMsg + fmt.Sprintf("Collection %s can only contain numbers, letters and underscores.", entityType)
 			return errors.New(msg)
 		}
 	}
@@ -131,7 +131,7 @@ func validatePartitionTag(partitionTag string, strictCheck bool) error {
 	}
 
 	if int64(len(partitionTag)) > Params.ProxyCfg.MaxNameLength {
-		msg := invalidMsg + "The length of a partition tag must be less than " +
+		msg := invalidMsg + "The length of a partition name must be less than " +
 			strconv.FormatInt(Params.ProxyCfg.MaxNameLength, 10) + " characters."
 		return errors.New(msg)
 	}
@@ -139,15 +139,15 @@ func validatePartitionTag(partitionTag string, strictCheck bool) error {
 	if strictCheck {
 		firstChar := partitionTag[0]
 		if firstChar != '_' && !isAlpha(firstChar) && !isNumber(firstChar) {
-			msg := invalidMsg + "The first character of a partition tag must be an underscore or letter."
+			msg := invalidMsg + "The first character of a partition name must be an underscore or letter."
 			return errors.New(msg)
 		}
 
 		tagSize := len(partitionTag)
 		for i := 1; i < tagSize; i++ {
 			c := partitionTag[i]
-			if c != '_' && c != '$' && !isAlpha(c) && !isNumber(c) {
-				msg := invalidMsg + "Partition tag can only contain numbers, letters, dollars and underscores."
+			if c != '_' && !isAlpha(c) && !isNumber(c) {
+				msg := invalidMsg + "Partition name can only contain numbers, letters and underscores."
 				return errors.New(msg)
 			}
 		}
