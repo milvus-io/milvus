@@ -75,6 +75,23 @@ func (broker *globalMetaBroker) invalidateCollectionMetaCache(ctx context.Contex
 	return nil
 }
 
+func (broker *globalMetaBroker) describeCollection(ctx context.Context, collectionID UniqueID) (*schemapb.CollectionSchema, error) {
+	req := &milvuspb.DescribeCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_DescribeCollection,
+		},
+		CollectionID: collectionID,
+	}
+
+	resp, err := broker.rootCoord.DescribeCollection(ctx, req)
+	if err != nil {
+		log.Warn("failed to describe collection schema", zap.Int64("collectionID", collectionID), zap.Error(err))
+		return nil, err
+	}
+
+	return resp.GetSchema(), nil
+}
+
 func (broker *globalMetaBroker) showPartitionIDs(ctx context.Context, collectionID UniqueID) ([]UniqueID, error) {
 	ctx2, cancel2 := context.WithTimeout(ctx, timeoutForRPC)
 	defer cancel2()
