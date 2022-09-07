@@ -19,6 +19,7 @@ package indexcoord
 import (
 	"context"
 	"path"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -38,8 +39,8 @@ type indexBuilder struct {
 	scheduleDuration time.Duration
 
 	// TODO @xiaocai2333: use priority queue
-	tasks  map[int64]indexTaskState
-	notify chan struct{}
+	tasks      map[int64]indexTaskState
+	notifyChan chan struct{}
 
 	ic *IndexCoord
 
@@ -54,8 +55,8 @@ func newIndexBuilder(ctx context.Context, ic *IndexCoord, metaTable *metaTable, 
 		cancel:           cancel,
 		meta:             metaTable,
 		ic:               ic,
-		notify:           make(chan struct{}, 1024),
-		scheduleDuration: time.Second * 10,
+		notifyChan:       make(chan struct{}, 1),
+		scheduleDuration: time.Second * 3,
 	}
 	ib.refreshTasks(aliveNodes)
 	return ib
@@ -68,7 +69,7 @@ func (ib *indexBuilder) Start() {
 
 func (ib *indexBuilder) Stop() {
 	ib.cancel()
-	close(ib.notify)
+	close(ib.notifyChan)
 	ib.wg.Wait()
 }
 
@@ -118,16 +119,25 @@ func (ib *indexBuilder) refreshTasks(aliveNodes []UniqueID) {
 	}
 }
 
+// notify is an unblocked notify function
+func (ib *indexBuilder) notify() {
+	select {
+	case ib.notifyChan <- struct{}{}:
+	default:
+	}
+}
+
 func (ib *indexBuilder) enqueue(buildID UniqueID) {
-	// notify
+	defer ib.notify()
+
 	ib.taskMutex.Lock()
 	defer ib.taskMutex.Unlock()
+
 	ib.tasks[buildID] = indexTaskInit
-	ib.notify <- struct{}{}
 }
 
 func (ib *indexBuilder) schedule() {
-	// receive notify
+	// receive notifyChan
 	// time ticker
 	defer ib.wg.Done()
 	ticker := time.NewTicker(ib.scheduleDuration)
@@ -137,28 +147,51 @@ func (ib *indexBuilder) schedule() {
 		case <-ib.ctx.Done():
 			log.Warn("index builder ctx done")
 			return
-		case _, ok := <-ib.notify:
+		case _, ok := <-ib.notifyChan:
 			if ok {
-				ib.taskMutex.Lock()
-				log.Info("index builder task schedule", zap.Int("task num", len(ib.tasks)))
-				for buildID := range ib.tasks {
-					ib.process(buildID)
-				}
-				ib.taskMutex.Unlock()
+				ib.run()
 			}
-		// !ok means indexBuild is closed.
+			// !ok means indexBuild is closed.
 		case <-ticker.C:
-			ib.taskMutex.Lock()
-			for buildID := range ib.tasks {
-				ib.process(buildID)
-			}
-			ib.taskMutex.Unlock()
+			ib.run()
 		}
 	}
 }
 
+func (ib *indexBuilder) run() {
+	ib.taskMutex.RLock()
+	log.Info("index builder task schedule", zap.Int("task num", len(ib.tasks)))
+	buildIDs := make([]UniqueID, 0, len(ib.tasks))
+	for tID := range ib.tasks {
+		buildIDs = append(buildIDs, tID)
+	}
+	ib.taskMutex.RUnlock()
+
+	sort.Slice(buildIDs, func(i, j int) bool {
+		return buildIDs[i] < buildIDs[j]
+	})
+	for _, buildID := range buildIDs {
+		ib.process(buildID)
+	}
+}
+
 func (ib *indexBuilder) process(buildID UniqueID) {
+	ib.taskMutex.RLock()
 	state := ib.tasks[buildID]
+	ib.taskMutex.RUnlock()
+
+	updateStateFunc := func(buildID UniqueID, state indexTaskState) {
+		ib.taskMutex.Lock()
+		defer ib.taskMutex.Unlock()
+		ib.tasks[buildID] = state
+	}
+
+	deleteFunc := func(buildID UniqueID) {
+		ib.taskMutex.Lock()
+		defer ib.taskMutex.Unlock()
+		delete(ib.tasks, buildID)
+	}
+
 	log.Info("index task is processing", zap.Int64("buildID", buildID), zap.String("task state", state.String()))
 	meta, exist := ib.meta.GetMeta(buildID)
 
@@ -181,7 +214,7 @@ func (ib *indexBuilder) process(buildID UniqueID) {
 		if err := ib.ic.tryAcquireSegmentReferLock(ib.ctx, buildID, nodeID, []UniqueID{meta.indexMeta.Req.SegmentID}); err != nil {
 			log.Error("index builder acquire segment reference lock failed", zap.Int64("buildID", buildID),
 				zap.Int64("nodeID", nodeID), zap.Error(err))
-			ib.tasks[buildID] = indexTaskRetry
+			updateStateFunc(buildID, indexTaskRetry)
 			return
 		}
 
@@ -199,7 +232,7 @@ func (ib *indexBuilder) process(buildID UniqueID) {
 			// need to release lock then reassign, so set task state to retry
 			log.Error("index builder assign task to IndexNode failed", zap.Int64("buildID", buildID),
 				zap.Int64("nodeID", nodeID), zap.Error(err))
-			ib.tasks[buildID] = indexTaskRetry
+			updateStateFunc(buildID, indexTaskRetry)
 			return
 		}
 		// update index meta state to InProgress
@@ -207,10 +240,10 @@ func (ib *indexBuilder) process(buildID UniqueID) {
 			// need to release lock then reassign, so set task state to retry
 			log.Error("index builder update index meta to InProgress failed", zap.Int64("buildID", buildID),
 				zap.Int64("nodeID", nodeID), zap.Error(err))
-			ib.tasks[buildID] = indexTaskRetry
+			updateStateFunc(buildID, indexTaskRetry)
 			return
 		}
-		ib.tasks[buildID] = indexTaskInProgress
+		updateStateFunc(buildID, indexTaskInProgress)
 
 	case indexTaskDone:
 		if err := ib.releaseLockAndResetNode(buildID, meta.indexMeta.NodeID); err != nil {
@@ -218,15 +251,15 @@ func (ib *indexBuilder) process(buildID UniqueID) {
 			log.Error("index builder try to release reference lock failed", zap.Error(err))
 			return
 		}
-		delete(ib.tasks, buildID)
+		deleteFunc(buildID)
 	case indexTaskRetry:
 		if err := ib.releaseLockAndResetTask(buildID, meta.indexMeta.NodeID); err != nil {
 			// release lock failed, no need to modify state, wait to retry
 			log.Error("index builder try to release reference lock failed", zap.Error(err))
 			return
 		}
-		ib.tasks[buildID] = indexTaskInit
-		ib.notify <- struct{}{}
+		updateStateFunc(buildID, indexTaskInit)
+		ib.notify()
 
 	case indexTaskDeleted:
 		if exist && meta.indexMeta.NodeID != 0 {
@@ -237,7 +270,7 @@ func (ib *indexBuilder) process(buildID UniqueID) {
 			}
 		}
 		// reset nodeID success, remove task.
-		delete(ib.tasks, buildID)
+		deleteFunc(buildID)
 	}
 }
 
@@ -290,7 +323,7 @@ func (ib *indexBuilder) updateStateByMeta(meta *indexpb.IndexMeta) {
 
 	if meta.State == commonpb.IndexState_Finished || meta.State == commonpb.IndexState_Failed {
 		ib.tasks[meta.IndexBuildID] = indexTaskDone
-		ib.notify <- struct{}{}
+		ib.notify()
 		log.Info("this task has been finished", zap.Int64("buildID", meta.IndexBuildID),
 			zap.String("original state", state.String()), zap.String("finish or failed", meta.State.String()))
 		return
@@ -301,30 +334,33 @@ func (ib *indexBuilder) updateStateByMeta(meta *indexpb.IndexMeta) {
 	log.Info("this task need to retry", zap.Int64("buildID", meta.IndexBuildID),
 		zap.String("original state", state.String()), zap.String("index state", meta.State.String()),
 		zap.Int64("original nodeID", meta.NodeID))
-	ib.notify <- struct{}{}
+	ib.notify()
 }
 
 func (ib *indexBuilder) markTaskAsDeleted(buildID UniqueID) {
+	defer ib.notify()
+
 	ib.taskMutex.Lock()
 	defer ib.taskMutex.Unlock()
 
 	if _, ok := ib.tasks[buildID]; ok {
 		ib.tasks[buildID] = indexTaskDeleted
 	}
-	ib.notify <- struct{}{}
 }
 
 func (ib *indexBuilder) nodeDown(nodeID UniqueID) {
+	defer ib.notify()
+
+	metas := ib.meta.GetMetasByNodeID(nodeID)
+
 	ib.taskMutex.Lock()
 	defer ib.taskMutex.Unlock()
-	metas := ib.meta.GetMetasByNodeID(nodeID)
 
 	for _, meta := range metas {
 		if ib.tasks[meta.indexMeta.IndexBuildID] != indexTaskDone {
 			ib.tasks[meta.indexMeta.IndexBuildID] = indexTaskRetry
 		}
 	}
-	ib.notify <- struct{}{}
 }
 
 func (ib *indexBuilder) hasTask(buildID UniqueID) bool {
