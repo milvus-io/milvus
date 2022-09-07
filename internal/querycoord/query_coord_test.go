@@ -32,6 +32,7 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"go.uber.org/zap"
 
@@ -635,15 +636,24 @@ func TestQueryCoord_watchHandoffSegmentLoop(t *testing.T) {
 	assert.Nil(t, err)
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 
+	broker, _, _, err := getMockGlobalMetaBroker(ctx)
+	require.NoError(t, err)
+	scheduler, err := newTaskScheduler(ctx, nil, nil, etcdKV, broker, func() (UniqueID, error) {
+		return 1, nil
+	})
+	require.NoError(t, err)
+
 	qc := &QueryCoord{
 		loopCtx:  ctx,
 		loopWg:   sync.WaitGroup{},
 		kvClient: etcdKV,
 		handoffHandler: &HandoffHandler{
-			ctx:    ctx,
-			cancel: cancel,
-			client: etcdKV,
+			ctx:       ctx,
+			cancel:    cancel,
+			client:    etcdKV,
+			scheduler: scheduler,
 		},
+		scheduler: scheduler,
 	}
 
 	t.Run("chan closed", func(t *testing.T) {
