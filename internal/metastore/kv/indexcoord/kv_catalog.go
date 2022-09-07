@@ -19,16 +19,16 @@ type Catalog struct {
 	Txn kv.TxnKV
 }
 
-func buildIndexKey(collectionID, indexID int64) string {
+func BuildIndexKey(collectionID, indexID int64) string {
 	return fmt.Sprintf("%s/%d/%d", FieldIndexPrefix, collectionID, indexID)
 }
 
-func buildSegmentIndexKey(collectionID, partitionID, segmentID, buildID int64) string {
+func BuildSegmentIndexKey(collectionID, partitionID, segmentID, buildID int64) string {
 	return fmt.Sprintf("%s/%d/%d/%d/%d", SegmentIndexPrefix, collectionID, partitionID, segmentID, buildID)
 }
 
 func (kc *Catalog) CreateIndex(ctx context.Context, index *model.Index) error {
-	key := buildIndexKey(index.CollectionID, index.IndexID)
+	key := BuildIndexKey(index.CollectionID, index.IndexID)
 
 	value, err := proto.Marshal(model.MarshalIndexModel(index))
 	if err != nil {
@@ -71,7 +71,7 @@ func (kc *Catalog) AlterIndex(ctx context.Context, index *model.Index) error {
 func (kc *Catalog) AlterIndexes(ctx context.Context, indexes []*model.Index) error {
 	kvs := make(map[string]string)
 	for _, index := range indexes {
-		key := buildIndexKey(index.CollectionID, index.IndexID)
+		key := BuildIndexKey(index.CollectionID, index.IndexID)
 
 		value, err := proto.Marshal(model.MarshalIndexModel(index))
 		if err != nil {
@@ -84,7 +84,7 @@ func (kc *Catalog) AlterIndexes(ctx context.Context, indexes []*model.Index) err
 }
 
 func (kc *Catalog) DropIndex(ctx context.Context, collID typeutil.UniqueID, dropIdxID typeutil.UniqueID) error {
-	key := buildIndexKey(collID, dropIdxID)
+	key := BuildIndexKey(collID, dropIdxID)
 
 	err := kc.Txn.Remove(key)
 	if err != nil {
@@ -97,7 +97,7 @@ func (kc *Catalog) DropIndex(ctx context.Context, collID typeutil.UniqueID, drop
 }
 
 func (kc *Catalog) CreateSegmentIndex(ctx context.Context, segIdx *model.SegmentIndex) error {
-	key := buildSegmentIndexKey(segIdx.CollectionID, segIdx.PartitionID, segIdx.SegmentID, segIdx.BuildID)
+	key := BuildSegmentIndexKey(segIdx.CollectionID, segIdx.PartitionID, segIdx.SegmentID, segIdx.BuildID)
 
 	value, err := proto.Marshal(model.MarshalSegmentIndexModel(segIdx))
 	if err != nil {
@@ -141,7 +141,7 @@ func (kc *Catalog) AlterSegmentIndex(ctx context.Context, segIdx *model.SegmentI
 func (kc *Catalog) AlterSegmentIndexes(ctx context.Context, segIdxes []*model.SegmentIndex) error {
 	kvs := make(map[string]string)
 	for _, segIdx := range segIdxes {
-		key := buildSegmentIndexKey(segIdx.CollectionID, segIdx.PartitionID, segIdx.SegmentID, segIdx.BuildID)
+		key := BuildSegmentIndexKey(segIdx.CollectionID, segIdx.PartitionID, segIdx.SegmentID, segIdx.BuildID)
 		value, err := proto.Marshal(model.MarshalSegmentIndexModel(segIdx))
 		if err != nil {
 			return err
@@ -152,7 +152,7 @@ func (kc *Catalog) AlterSegmentIndexes(ctx context.Context, segIdxes []*model.Se
 }
 
 func (kc *Catalog) DropSegmentIndex(ctx context.Context, collID, partID, segID, buildID typeutil.UniqueID) error {
-	key := buildSegmentIndexKey(collID, partID, segID, buildID)
+	key := BuildSegmentIndexKey(collID, partID, segID, buildID)
 
 	err := kc.Txn.Remove(key)
 	if err != nil {

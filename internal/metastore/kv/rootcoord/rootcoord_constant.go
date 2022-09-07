@@ -14,6 +14,15 @@ const (
 	// CollectionAliasMetaPrefix prefix for collection alias meta
 	CollectionAliasMetaPrefix = ComponentPrefix + "/collection-alias"
 
+	SnapshotsSep                = "_ts"
+	SnapshotPrefix              = "snapshots"
+	IndexMetaBefore220Prefix    = ComponentPrefix + "/index"
+	SegmentIndexPrefixBefore220 = ComponentPrefix + "/segment-index"
+	// DDOperationPrefix prefix for DD operation, not used.
+	DDOperationPrefix = ComponentPrefix + "/dd-operation"
+	// DDMsgSendPrefix prefix to indicate whether DD msg has been send, not used.
+	DDMsgSendPrefix = ComponentPrefix + "/dd-msg-send"
+
 	// CommonCredentialPrefix subpath for common credential
 	/* #nosec G101 */
 	CommonCredentialPrefix = "/credential"

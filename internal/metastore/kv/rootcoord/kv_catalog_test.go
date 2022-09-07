@@ -858,7 +858,7 @@ func TestCatalog_AlterCollection(t *testing.T) {
 		newC := &model.Collection{CollectionID: collectionID, State: pb.CollectionState_CollectionCreated}
 		err := kc.AlterCollection(ctx, oldC, newC, metastore.MODIFY, 0)
 		assert.NoError(t, err)
-		key := buildCollectionKey(collectionID)
+		key := BuildCollectionKey(collectionID)
 		value, ok := kvs[key]
 		assert.True(t, ok)
 		var collPb pb.CollectionInfo
@@ -909,7 +909,7 @@ func TestCatalog_AlterPartition(t *testing.T) {
 		newP := &model.Partition{PartitionID: partitionID, CollectionID: collectionID, State: pb.PartitionState_PartitionCreated}
 		err := kc.AlterPartition(ctx, oldP, newP, metastore.MODIFY, 0)
 		assert.NoError(t, err)
-		key := buildPartitionKey(collectionID, partitionID)
+		key := BuildPartitionKey(collectionID, partitionID)
 		value, ok := kvs[key]
 		assert.True(t, ok)
 		var partPb pb.PartitionInfo

@@ -43,12 +43,6 @@ const (
 	// TimestampPrefix prefix for timestamp
 	TimestampPrefix = rootcoord.ComponentPrefix + "/timestamp"
 
-	// DDOperationPrefix prefix for DD operation
-	DDOperationPrefix = rootcoord.ComponentPrefix + "/dd-operation"
-
-	// DDMsgSendPrefix prefix to indicate whether DD msg has been send
-	DDMsgSendPrefix = rootcoord.ComponentPrefix + "/dd-msg-send"
-
 	// CreateCollectionDDType name of DD type for create collection
 	CreateCollectionDDType = "CreateCollection"
 

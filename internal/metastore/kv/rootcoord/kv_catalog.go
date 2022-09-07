@@ -38,27 +38,27 @@ type Catalog struct {
 	Snapshot kv.SnapShotKV
 }
 
-func buildCollectionKey(collectionID typeutil.UniqueID) string {
+func BuildCollectionKey(collectionID typeutil.UniqueID) string {
 	return fmt.Sprintf("%s/%d", CollectionMetaPrefix, collectionID)
 }
 
-func buildPartitionPrefix(collectionID typeutil.UniqueID) string {
+func BuildPartitionPrefix(collectionID typeutil.UniqueID) string {
 	return fmt.Sprintf("%s/%d", PartitionMetaPrefix, collectionID)
 }
 
-func buildPartitionKey(collectionID, partitionID typeutil.UniqueID) string {
-	return fmt.Sprintf("%s/%d", buildPartitionPrefix(collectionID), partitionID)
+func BuildPartitionKey(collectionID, partitionID typeutil.UniqueID) string {
+	return fmt.Sprintf("%s/%d", BuildPartitionPrefix(collectionID), partitionID)
 }
 
-func buildFieldPrefix(collectionID typeutil.UniqueID) string {
+func BuildFieldPrefix(collectionID typeutil.UniqueID) string {
 	return fmt.Sprintf("%s/%d", FieldMetaPrefix, collectionID)
 }
 
-func buildFieldKey(collectionID typeutil.UniqueID, fieldID int64) string {
-	return fmt.Sprintf("%s/%d", buildFieldPrefix(collectionID), fieldID)
+func BuildFieldKey(collectionID typeutil.UniqueID, fieldID int64) string {
+	return fmt.Sprintf("%s/%d", BuildFieldPrefix(collectionID), fieldID)
 }
 
-func buildAliasKey(aliasName string) string {
+func BuildAliasKey(aliasName string) string {
 	return fmt.Sprintf("%s/%s", AliasMetaPrefix, aliasName)
 }
 
@@ -123,7 +123,7 @@ func (kc *Catalog) CreateCollection(ctx context.Context, coll *model.Collection,
 		return fmt.Errorf("cannot create collection with state: %s, collection: %s", coll.State.String(), coll.Name)
 	}
 
-	k1 := buildCollectionKey(coll.CollectionID)
+	k1 := BuildCollectionKey(coll.CollectionID)
 	collInfo := model.MarshalCollectionModel(coll)
 	v1, err := proto.Marshal(collInfo)
 	if err != nil {
@@ -144,7 +144,7 @@ func (kc *Catalog) CreateCollection(ctx context.Context, coll *model.Collection,
 
 	// save partition info to newly path.
 	for _, partition := range coll.Partitions {
-		k := buildPartitionKey(coll.CollectionID, partition.PartitionID)
+		k := BuildPartitionKey(coll.CollectionID, partition.PartitionID)
 		partitionInfo := model.MarshalPartitionModel(partition)
 		v, err := proto.Marshal(partitionInfo)
 		if err != nil {
@@ -157,7 +157,7 @@ func (kc *Catalog) CreateCollection(ctx context.Context, coll *model.Collection,
 
 	// save fields info to newly path.
 	for _, field := range coll.Fields {
-		k := buildFieldKey(coll.CollectionID, field.FieldID)
+		k := BuildFieldKey(coll.CollectionID, field.FieldID)
 		fieldInfo := model.MarshalFieldModel(field)
 		v, err := proto.Marshal(fieldInfo)
 		if err != nil {
@@ -172,7 +172,7 @@ func (kc *Catalog) CreateCollection(ctx context.Context, coll *model.Collection,
 }
 
 func (kc *Catalog) loadCollection(ctx context.Context, collectionID typeutil.UniqueID, ts typeutil.Timestamp) (*pb.CollectionInfo, error) {
-	collKey := buildCollectionKey(collectionID)
+	collKey := BuildCollectionKey(collectionID)
 	collVal, err := kc.Snapshot.Load(collKey, ts)
 	if err != nil {
 		log.Error("get collection meta fail", zap.String("key", collKey), zap.Error(err))
@@ -206,7 +206,7 @@ func (kc *Catalog) CreatePartition(ctx context.Context, partition *model.Partiti
 
 	if partitionVersionAfter210(collMeta) {
 		// save to newly path.
-		k := buildPartitionKey(partition.CollectionID, partition.PartitionID)
+		k := BuildPartitionKey(partition.CollectionID, partition.PartitionID)
 		partitionInfo := model.MarshalPartitionModel(partition)
 		v, err := proto.Marshal(partitionInfo)
 		if err != nil {
@@ -228,7 +228,7 @@ func (kc *Catalog) CreatePartition(ctx context.Context, partition *model.Partiti
 	collMeta.PartitionNames = append(collMeta.PartitionNames, partition.PartitionName)
 	collMeta.PartitionCreatedTimestamps = append(collMeta.PartitionCreatedTimestamps, partition.PartitionCreatedTimestamp)
 
-	k := buildCollectionKey(partition.CollectionID)
+	k := BuildCollectionKey(partition.CollectionID)
 	v, err := proto.Marshal(collMeta)
 	if err != nil {
 		return err
@@ -238,7 +238,7 @@ func (kc *Catalog) CreatePartition(ctx context.Context, partition *model.Partiti
 
 func (kc *Catalog) CreateAlias(ctx context.Context, alias *model.Alias, ts typeutil.Timestamp) error {
 	oldKBefore210 := fmt.Sprintf("%s/%s", CollectionAliasMetaPrefix, alias.Name)
-	k := buildAliasKey(alias.Name)
+	k := BuildAliasKey(alias.Name)
 	aliasInfo := model.MarshalAliasModel(alias)
 	v, err := proto.Marshal(aliasInfo)
 	if err != nil {
@@ -270,7 +270,7 @@ func (kc *Catalog) AlterCredential(ctx context.Context, credential *model.Creden
 }
 
 func (kc *Catalog) listPartitionsAfter210(ctx context.Context, collectionID typeutil.UniqueID, ts typeutil.Timestamp) ([]*model.Partition, error) {
-	prefix := buildPartitionPrefix(collectionID)
+	prefix := BuildPartitionPrefix(collectionID)
 	_, values, err := kc.Snapshot.LoadWithPrefix(prefix, ts)
 	if err != nil {
 		return nil, err
@@ -292,7 +292,7 @@ func fieldVersionAfter210(collMeta *pb.CollectionInfo) bool {
 }
 
 func (kc *Catalog) listFieldsAfter210(ctx context.Context, collectionID typeutil.UniqueID, ts typeutil.Timestamp) ([]*model.Field, error) {
-	prefix := buildFieldPrefix(collectionID)
+	prefix := BuildFieldPrefix(collectionID)
 	_, values, err := kc.Snapshot.LoadWithPrefix(prefix, ts)
 	if err != nil {
 		return nil, err
@@ -310,7 +310,7 @@ func (kc *Catalog) listFieldsAfter210(ctx context.Context, collectionID typeutil
 }
 
 func (kc *Catalog) GetCollectionByID(ctx context.Context, collectionID typeutil.UniqueID, ts typeutil.Timestamp) (*model.Collection, error) {
-	collKey := buildCollectionKey(collectionID)
+	collKey := BuildCollectionKey(collectionID)
 	collMeta, err := kc.loadCollection(ctx, collectionID, ts)
 	if err != nil {
 		log.Error("collection meta marshal fail", zap.String("key", collKey), zap.Error(err))
@@ -365,7 +365,7 @@ func (kc *Catalog) AlterAlias(ctx context.Context, alias *model.Alias, ts typeut
 }
 
 func (kc *Catalog) DropCollection(ctx context.Context, collectionInfo *model.Collection, ts typeutil.Timestamp) error {
-	collectionKey := buildCollectionKey(collectionInfo.CollectionID)
+	collectionKey := BuildCollectionKey(collectionInfo.CollectionID)
 
 	var delMetakeysSnap []string
 	for _, alias := range collectionInfo.Aliases {
@@ -373,8 +373,8 @@ func (kc *Catalog) DropCollection(ctx context.Context, collectionInfo *model.Col
 			fmt.Sprintf("%s/%s", CollectionAliasMetaPrefix, alias),
 		)
 	}
-	delMetakeysSnap = append(delMetakeysSnap, buildPartitionPrefix(collectionInfo.CollectionID))
-	delMetakeysSnap = append(delMetakeysSnap, buildFieldPrefix(collectionInfo.CollectionID))
+	delMetakeysSnap = append(delMetakeysSnap, BuildPartitionPrefix(collectionInfo.CollectionID))
+	delMetakeysSnap = append(delMetakeysSnap, BuildFieldPrefix(collectionInfo.CollectionID))
 
 	// Though batchMultiSaveAndRemoveWithPrefix is not atomic enough, we can promise atomicity outside.
 	// If we found collection under dropping state, we'll know that gc is not completely on this collection.
@@ -402,7 +402,7 @@ func (kc *Catalog) alterModifyCollection(oldColl *model.Collection, newColl *mod
 	oldCollClone.CreateTime = newColl.CreateTime
 	oldCollClone.ConsistencyLevel = newColl.ConsistencyLevel
 	oldCollClone.State = newColl.State
-	key := buildCollectionKey(oldColl.CollectionID)
+	key := BuildCollectionKey(oldColl.CollectionID)
 	value, err := proto.Marshal(model.MarshalCollectionModel(oldCollClone))
 	if err != nil {
 		return err
@@ -426,7 +426,7 @@ func (kc *Catalog) alterModifyPartition(oldPart *model.Partition, newPart *model
 	oldPartClone.PartitionName = newPartClone.PartitionName
 	oldPartClone.PartitionCreatedTimestamp = newPartClone.PartitionCreatedTimestamp
 	oldPartClone.State = newPartClone.State
-	key := buildPartitionKey(oldPart.CollectionID, oldPart.PartitionID)
+	key := BuildPartitionKey(oldPart.CollectionID, oldPart.PartitionID)
 	value, err := proto.Marshal(model.MarshalPartitionModel(oldPartClone))
 	if err != nil {
 		return err
@@ -469,11 +469,11 @@ func (kc *Catalog) DropPartition(ctx context.Context, collectionID typeutil.Uniq
 	}
 
 	if partitionVersionAfter210(collMeta) {
-		k := buildPartitionKey(collectionID, partitionID)
+		k := BuildPartitionKey(collectionID, partitionID)
 		return kc.Snapshot.MultiSaveAndRemoveWithPrefix(nil, []string{k}, ts)
 	}
 
-	k := buildCollectionKey(collectionID)
+	k := BuildCollectionKey(collectionID)
 	dropPartition(collMeta, partitionID)
 	v, err := proto.Marshal(collMeta)
 	if err != nil {
@@ -495,7 +495,7 @@ func (kc *Catalog) DropCredential(ctx context.Context, username string) error {
 
 func (kc *Catalog) DropAlias(ctx context.Context, alias string, ts typeutil.Timestamp) error {
 	oldKBefore210 := fmt.Sprintf("%s/%s", CollectionAliasMetaPrefix, alias)
-	k := buildAliasKey(alias)
+	k := BuildAliasKey(alias)
 	return kc.Snapshot.MultiSaveAndRemoveWithPrefix(nil, []string{k, oldKBefore210}, ts)
 }
 
