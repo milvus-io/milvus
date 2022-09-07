@@ -389,7 +389,7 @@ message ChannelWatchInfo {
 
 enum CompactionType {
   UndefinedCompaction = 0;
-  InnerCompaction = 1;
+  reserved 1;
   MergeCompaction = 2;
   MixCompaction = 3;
 }

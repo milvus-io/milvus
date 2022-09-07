@@ -389,9 +389,6 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 			log.Error("compact wrong", zap.Error(err))
 			return nil, err
 		}
-
-	case t.plan.GetType() == datapb.CompactionType_InnerCompaction:
-		targetSegID = t.plan.GetSegmentBinlogs()[0].GetSegmentID()
 	}
 
 	log.Debug("compaction start", zap.Int64("planID", t.plan.GetPlanID()), zap.Int32("timeout in seconds", t.plan.GetTimeoutInSeconds()))

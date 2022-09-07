@@ -225,10 +225,6 @@ func (c *compactionPlanHandler) completeCompaction(result *datapb.CompactionResu
 
 	plan := c.plans[planID].plan
 	switch plan.GetType() {
-	case datapb.CompactionType_InnerCompaction:
-		if err := c.handleInnerCompactionResult(plan, result); err != nil {
-			return err
-		}
 	case datapb.CompactionType_MergeCompaction, datapb.CompactionType_MixCompaction:
 		if err := c.handleMergeCompactionResult(plan, result); err != nil {
 			return err
@@ -247,11 +243,6 @@ func (c *compactionPlanHandler) completeCompaction(result *datapb.CompactionResu
 	nodeID := c.plans[planID].dataNodeID
 	c.releaseQueue(nodeID)
 	return nil
-}
-
-func (c *compactionPlanHandler) handleInnerCompactionResult(plan *datapb.CompactionPlan, result *datapb.CompactionResult) error {
-	//TODO @xiaocai2333: Can reference locks be ignored?
-	return c.meta.CompleteInnerCompaction(plan.GetSegmentBinlogs()[0], result)
 }
 
 func (c *compactionPlanHandler) handleMergeCompactionResult(plan *datapb.CompactionPlan, result *datapb.CompactionResult) error {

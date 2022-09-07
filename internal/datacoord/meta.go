@@ -794,37 +794,6 @@ func (m *meta) CompleteMergeCompaction(compactionLogs []*datapb.CompactionSegmen
 	return nil
 }
 
-func (m *meta) CompleteInnerCompaction(segmentBinlogs *datapb.CompactionSegmentBinlogs, result *datapb.CompactionResult) error {
-	m.Lock()
-	defer m.Unlock()
-
-	if segment := m.segments.GetSegment(segmentBinlogs.SegmentID); segment != nil {
-		// The compaction deletes the entire segment
-		if result.NumOfRows <= 0 {
-			err := m.catalog.DropSegment(m.ctx, segment.SegmentInfo)
-			if err != nil {
-				return err
-			}
-
-			m.segments.DropSegment(segment.ID)
-			return nil
-		}
-
-		cloned := segment.Clone()
-		cloned.Binlogs = m.updateBinlogs(cloned.GetBinlogs(), segmentBinlogs.GetFieldBinlogs(), result.GetInsertLogs())
-		cloned.Statslogs = m.updateBinlogs(cloned.GetStatslogs(), segmentBinlogs.GetField2StatslogPaths(), result.GetField2StatslogPaths())
-		cloned.Deltalogs = m.updateDeltalogs(cloned.GetDeltalogs(), segmentBinlogs.GetDeltalogs(), result.GetDeltalogs())
-		if err := m.catalog.AlterSegments(m.ctx, []*datapb.SegmentInfo{cloned.SegmentInfo}); err != nil {
-			return err
-		}
-
-		cloned.isCompacting = false
-
-		m.segments.SetSegment(cloned.GetID(), cloned)
-	}
-	return nil
-}
-
 func (m *meta) updateBinlogs(origin []*datapb.FieldBinlog, removes []*datapb.FieldBinlog, adds []*datapb.FieldBinlog) []*datapb.FieldBinlog {
 	fieldBinlogs := make(map[int64]map[string]*datapb.Binlog)
 	for _, f := range origin {
