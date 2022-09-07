@@ -83,7 +83,7 @@ func TestUpperLimitCalBySchema(t *testing.T) {
 		},
 	}
 	for _, c := range testCases {
-		result, err := calBySchemaPolicy(c.schema)
+		result, err := calBySchemaPolicy(Params.DataCoordCfg.SegmentMaxSize, c.schema)
 		if c.expectErr {
 			assert.NotNil(t, err)
 		} else {

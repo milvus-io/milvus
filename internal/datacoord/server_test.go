@@ -2876,6 +2876,9 @@ func newTestServer(t *testing.T, receiveCh chan interface{}, opts ...Option) *Se
 	svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
 		return newMockRootCoordService(), nil
 	}
+	svr.indexCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.IndexCoord, error) {
+		return newMockIndexCoord(), nil
+	}
 
 	err = svr.Init()
 	assert.Nil(t, err)
@@ -2926,6 +2929,9 @@ func newTestServer2(t *testing.T, receiveCh chan interface{}, opts ...Option) *S
 	}
 	svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
 		return newMockRootCoordService(), nil
+	}
+	svr.indexCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.IndexCoord, error) {
+		return newMockIndexCoord(), nil
 	}
 
 	err = svr.Init()

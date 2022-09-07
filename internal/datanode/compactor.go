@@ -210,7 +210,57 @@ func nano2Milli(nano time.Duration) float64 {
 	return float64(nano) / float64(time.Millisecond)
 }
 
-func (t *compactionTask) merge(mergeItr iterator, delta map[interface{}]Timestamp, schema *schemapb.CollectionSchema, currentTs Timestamp) ([]*InsertData, []byte, int64, error) {
+func (t *compactionTask) uploadSingleInsertLog(
+	ctxTimeout context.Context,
+	targetSegID UniqueID,
+	partID UniqueID,
+	meta *etcdpb.CollectionMeta,
+	segment *Segment,
+	pkID UniqueID,
+	fID2Content map[UniqueID][]interface{},
+	fID2Type map[UniqueID]schemapb.DataType) (map[UniqueID]*datapb.FieldBinlog, error) {
+	iData := &InsertData{
+		Data: make(map[storage.FieldID]storage.FieldData)}
+
+	for fID, content := range fID2Content {
+		tp, ok := fID2Type[fID]
+		if !ok {
+			log.Warn("no field ID in this schema", zap.Int64("fieldID", fID))
+			return nil, errors.New("Unexpected error")
+		}
+
+		fData, err := interface2FieldData(tp, content, int64(len(content)))
+		if err != nil {
+			log.Warn("transfer interface to FieldData wrong", zap.Error(err))
+			return nil, err
+		}
+
+		if fID == pkID {
+			err = segment.updatePKRange(fData)
+			if err != nil {
+				log.Warn("update pk range failed", zap.Error(err))
+				return nil, err
+			}
+		}
+
+		iData.Data[fID] = fData
+	}
+
+	inPaths, err := t.uploadInsertLog(ctxTimeout, targetSegID, partID, iData, meta)
+	if err != nil {
+		return nil, err
+	}
+
+	return inPaths, nil
+}
+
+func (t *compactionTask) merge(
+	ctxTimeout context.Context,
+	unMergedInsertlogs [][]string,
+	targetSegID UniqueID,
+	partID UniqueID,
+	meta *etcdpb.CollectionMeta,
+	delta map[interface{}]Timestamp) ([]*datapb.FieldBinlog, []*datapb.FieldBinlog, int64, error) {
 	log := log.With(zap.Int64("planID", t.getPlanID()))
 	mergeStart := time.Now()
 
@@ -218,6 +268,7 @@ func (t *compactionTask) merge(mergeItr iterator, delta map[interface{}]Timestam
 		dim              int   // dimension of float/binary vector field
 		maxRowsPerBinlog int   // maximum rows populating one binlog
 		numBinlogs       int   // binlog number
+		numRows          int64 // the number of rows uploaded
 		expired          int64 // the number of expired entity
 		err              error
 
@@ -226,9 +277,11 @@ func (t *compactionTask) merge(mergeItr iterator, delta map[interface{}]Timestam
 		pkID    UniqueID
 		pkType  schemapb.DataType
 
-		iDatas      = make([]*InsertData, 0)
 		fID2Type    = make(map[UniqueID]schemapb.DataType)
 		fID2Content = make(map[UniqueID][]interface{})
+
+		insertField2Path = make(map[UniqueID]*datapb.FieldBinlog)
+		insertPaths      = make([]*datapb.FieldBinlog, 0)
 	)
 
 	isDeletedValue := func(v *storage.Value) bool {
@@ -246,8 +299,20 @@ func (t *compactionTask) merge(mergeItr iterator, delta map[interface{}]Timestam
 		pkFilter: bloom.NewWithEstimates(uint(targetRowCount), maxBloomFalsePositive),
 	}
 
+	addInsertFieldPath := func(inPaths map[UniqueID]*datapb.FieldBinlog) {
+		for fID, path := range inPaths {
+			tmpBinlog, ok := insertField2Path[fID]
+			if !ok {
+				tmpBinlog = path
+			} else {
+				tmpBinlog.Binlogs = append(tmpBinlog.Binlogs, path.GetBinlogs()...)
+			}
+			insertField2Path[fID] = tmpBinlog
+		}
+	}
+
 	// get dim
-	for _, fs := range schema.GetFields() {
+	for _, fs := range meta.GetSchema().GetFields() {
 		fID2Type[fs.GetFieldID()] = fs.GetDataType()
 		if fs.GetIsPrimaryKey() {
 			pkID = fs.GetFieldID()
@@ -268,84 +333,85 @@ func (t *compactionTask) merge(mergeItr iterator, delta map[interface{}]Timestam
 	}
 
 	expired = 0
-	for mergeItr.HasNext() {
-		//  no error if HasNext() returns true
-		vInter, _ := mergeItr.Next()
-
-		v, ok := vInter.(*storage.Value)
-		if !ok {
-			log.Warn("transfer interface to Value wrong")
-			return nil, nil, 0, errors.New("unexpected error")
+	numRows = 0
+	numBinlogs = 0
+	currentTs := t.GetCurrentTime()
+	maxRowsPerBinlog = int(Params.DataNodeCfg.FlushInsertBufferSize / (int64(dim) * 4))
+	currentRows := 0
+	for _, path := range unMergedInsertlogs {
+		data, err := t.download(ctxTimeout, path)
+		if err != nil {
+			log.Warn("download insertlogs wrong")
+			return nil, nil, 0, err
 		}
 
-		if isDeletedValue(v) {
-			continue
+		iter, err := storage.NewInsertBinlogIterator(data, pkID, pkType)
+		if err != nil {
+			log.Warn("new insert binlogs Itr wrong")
+			return nil, nil, 0, err
 		}
-
-		ts := Timestamp(v.Timestamp)
-		// Filtering expired entity
-		if t.isExpiredEntity(ts, currentTs) {
-			expired++
-			continue
-		}
-
-		row, ok := v.Value.(map[UniqueID]interface{})
-		if !ok {
-			log.Warn("transfer interface to map wrong")
-			return nil, nil, 0, errors.New("unexpected error")
-		}
-
-		for fID, vInter := range row {
-			if _, ok := fID2Content[fID]; !ok {
-				fID2Content[fID] = make([]interface{}, 0)
+		for iter.HasNext() {
+			vInter, _ := iter.Next()
+			v, ok := vInter.(*storage.Value)
+			if !ok {
+				log.Warn("transfer interface to Value wrong")
+				return nil, nil, 0, errors.New("unexpected error")
 			}
-			fID2Content[fID] = append(fID2Content[fID], vInter)
+
+			if isDeletedValue(v) {
+				continue
+			}
+
+			ts := Timestamp(v.Timestamp)
+			// Filtering expired entity
+			if t.isExpiredEntity(ts, currentTs) {
+				expired++
+				continue
+			}
+
+			row, ok := v.Value.(map[UniqueID]interface{})
+			if !ok {
+				log.Warn("transfer interface to map wrong")
+				return nil, nil, 0, errors.New("unexpected error")
+			}
+
+			for fID, vInter := range row {
+				if _, ok := fID2Content[fID]; !ok {
+					fID2Content[fID] = make([]interface{}, 0)
+				}
+				fID2Content[fID] = append(fID2Content[fID], vInter)
+			}
+
+			currentRows++
+
+			if currentRows == maxRowsPerBinlog {
+				inPaths, err := t.uploadSingleInsertLog(ctxTimeout, targetSegID, partID, meta, segment, pkID, fID2Content, fID2Type)
+				if err != nil {
+					return nil, nil, 0, err
+				}
+				addInsertFieldPath(inPaths)
+
+				fID2Content = make(map[int64][]interface{})
+				currentRows = 0
+				numRows += int64(maxRowsPerBinlog)
+				numBinlogs++
+			}
 		}
 	}
+	if currentRows != 0 {
+		inPaths, err := t.uploadSingleInsertLog(ctxTimeout, targetSegID, partID, meta, segment, pkID, fID2Content, fID2Type)
+		if err != nil {
+			return nil, nil, 0, err
+		}
 
-	// calculate numRows from rowID field, fieldID 0
-	numRows := int64(len(fID2Content[0]))
-	maxRowsPerBinlog = int(Params.DataNodeCfg.FlushInsertBufferSize / (int64(dim) * 4))
-	numBinlogs = int(numRows) / maxRowsPerBinlog
-	if int(numRows)%maxRowsPerBinlog != 0 {
+		addInsertFieldPath(inPaths)
+
+		numRows += int64(currentRows)
 		numBinlogs++
 	}
 
-	for i := 0; i < numBinlogs; i++ {
-		iDatas = append(iDatas, &InsertData{Data: make(map[storage.FieldID]storage.FieldData)})
-	}
-
-	for fID, content := range fID2Content {
-		tp, ok := fID2Type[fID]
-		if !ok {
-			log.Warn("no field ID in this schema", zap.Int64("fieldID", fID))
-			return nil, nil, 0, errors.New("Unexpected error")
-		}
-
-		for i := 0; i < numBinlogs; i++ {
-			var c []interface{}
-
-			if i == numBinlogs-1 {
-				c = content[i*maxRowsPerBinlog:]
-			} else {
-				c = content[i*maxRowsPerBinlog : i*maxRowsPerBinlog+maxRowsPerBinlog]
-			}
-
-			fData, err := interface2FieldData(tp, c, int64(len(c)))
-
-			if err != nil {
-				log.Warn("transfer interface to FieldData wrong", zap.Error(err))
-				return nil, nil, 0, err
-			}
-			if fID == pkID {
-				err = segment.updatePKRange(fData)
-				if err != nil {
-					log.Warn("update pk range failed", zap.Error(err))
-					return nil, nil, 0, err
-				}
-			}
-			iDatas[i].Data[fID] = fData
-		}
+	for _, path := range insertField2Path {
+		insertPaths = append(insertPaths, path)
 	}
 
 	// marshal segment statslog
@@ -354,11 +420,16 @@ func (t *compactionTask) merge(mergeItr iterator, delta map[interface{}]Timestam
 		log.Warn("failed to generate segment statslog", zap.Int64("pkID", pkID), zap.Error(err))
 		return nil, nil, 0, err
 	}
+	statsPaths, err := t.uploadStatsLog(ctxTimeout, targetSegID, partID, segStats, meta)
+	if err != nil {
+		return nil, nil, 0, err
+	}
 
 	log.Debug("merge end", zap.Int64("remaining insert numRows", numRows),
-		zap.Int64("expired entities", expired),
+		zap.Int64("expired entities", expired), zap.Int("binlog file number", numBinlogs),
 		zap.Float64("elapse in ms", nano2Milli(time.Since(mergeStart))))
-	return iDatas, segStats, numRows, nil
+
+	return insertPaths, statsPaths, numRows, nil
 }
 
 func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
@@ -421,25 +492,12 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 	}()
 
 	var (
-		iItr = make([]iterator, 0)
-		imu  sync.Mutex
-
 		// SegmentID to deltaBlobs
 		dblobs = make(map[UniqueID][]*Blob)
 		dmu    sync.Mutex
-
-		PKfieldID UniqueID
-		PkType    schemapb.DataType
 	)
 
-	// Get PK fieldID
-	for _, fs := range meta.GetSchema().GetFields() {
-		if fs.GetFieldID() >= 100 && typeutil.IsPrimaryFieldType(fs.GetDataType()) && fs.GetIsPrimaryKey() {
-			PKfieldID = fs.GetFieldID()
-			PkType = fs.GetDataType()
-			break
-		}
-	}
+	allPs := make([][]string, 0)
 
 	downloadStart := time.Now()
 	g, gCtx := errgroup.WithContext(ctxTimeout)
@@ -464,26 +522,7 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 			for _, f := range s.GetFieldBinlogs() {
 				ps = append(ps, f.GetBinlogs()[idx].GetLogPath())
 			}
-
-			g.Go(func() error {
-				bs, err := t.download(gCtx, ps)
-				if err != nil {
-					log.Warn("download insertlogs wrong")
-					return err
-				}
-
-				itr, err := storage.NewInsertBinlogIterator(bs, PKfieldID, PkType)
-				if err != nil {
-					log.Warn("new insert binlogs Itr wrong")
-					return err
-				}
-
-				imu.Lock()
-				iItr = append(iItr, itr)
-				imu.Unlock()
-
-				return nil
-			})
+			allPs = append(allPs, ps)
 		}
 
 		segID := s.GetSegmentID()
@@ -518,32 +557,24 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 		return nil, err
 	}
 
-	mergeItr := storage.NewMergeIterator(iItr)
-
 	deltaPk2Ts, deltaBuf, err := t.mergeDeltalogs(dblobs, t.plan.GetTimetravel())
 	if err != nil {
 		return nil, err
 	}
 
-	iDatas, segStats, numRows, err := t.merge(mergeItr, deltaPk2Ts, meta.GetSchema(), t.GetCurrentTime())
+	inPaths, statsPaths, numRows, err := t.merge(ctxTimeout, allPs, targetSegID, partID, meta, deltaPk2Ts)
 	if err != nil {
 		log.Error("compact wrong", zap.Int64("planID", t.plan.GetPlanID()), zap.Error(err))
 		return nil, err
 	}
 
-	uploadStart := time.Now()
-	segPaths, err := t.upload(ctxTimeout, targetSegID, partID, iDatas, segStats, deltaBuf.delData, meta)
+	deltaInfo, err := t.uploadDeltaLog(ctxTimeout, targetSegID, partID, deltaBuf.delData, meta)
 	if err != nil {
 		log.Error("compact wrong", zap.Int64("planID", t.plan.GetPlanID()), zap.Error(err))
 		return nil, err
 	}
 
-	uploadEnd := time.Now()
-	defer func() {
-		log.Debug("upload elapse in ms", zap.Int64("planID", t.plan.GetPlanID()), zap.Float64("elapse", nano2Milli(uploadEnd.Sub(uploadStart))))
-	}()
-
-	for _, fbl := range segPaths.deltaInfo {
+	for _, fbl := range deltaInfo {
 		for _, deltaLogInfo := range fbl.GetBinlogs() {
 			deltaLogInfo.LogSize = deltaBuf.GetLogSize()
 			deltaLogInfo.TimestampFrom = deltaBuf.GetTimestampFrom()
@@ -555,9 +586,9 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 	pack := &datapb.CompactionResult{
 		PlanID:              t.plan.GetPlanID(),
 		SegmentID:           targetSegID,
-		InsertLogs:          segPaths.inPaths,
-		Field2StatslogPaths: segPaths.statsPaths,
-		Deltalogs:           segPaths.deltaInfo,
+		InsertLogs:          inPaths,
+		Field2StatslogPaths: statsPaths,
+		Deltalogs:           deltaInfo,
 		NumOfRows:           numRows,
 	}
 
@@ -603,9 +634,9 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 	log.Info("compaction done",
 		zap.Int64("planID", t.plan.GetPlanID()),
 		zap.Int64("targetSegmentID", targetSegID),
-		zap.Int("num of binlog paths", len(segPaths.inPaths)),
-		zap.Int("num of stats paths", len(segPaths.statsPaths)),
-		zap.Int("num of delta paths", len(segPaths.deltaInfo)),
+		zap.Int("num of binlog paths", len(inPaths)),
+		zap.Int("num of stats paths", len(statsPaths)),
+		zap.Int("num of delta paths", len(deltaInfo)),
 	)
 
 	log.Info("overall elapse in ms", zap.Int64("planID", t.plan.GetPlanID()), zap.Float64("elapse", nano2Milli(time.Since(compactStart))))

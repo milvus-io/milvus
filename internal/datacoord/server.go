@@ -33,6 +33,7 @@ import (
 	"go.uber.org/zap"
 
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
+	indexcoordclient "github.com/milvus-io/milvus/internal/distributed/indexcoord/client"
 	rootcoordclient "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
@@ -91,6 +92,7 @@ const (
 
 type dataNodeCreatorFunc func(ctx context.Context, addr string) (types.DataNode, error)
 type rootCoordCreatorFunc func(ctx context.Context, metaRootPath string, etcdClient *clientv3.Client) (types.RootCoord, error)
+type indexCoordCreatorFunc func(ctx context.Context, metaRootPath string, etcdClient *clientv3.Client) (types.IndexCoord, error)
 
 // makes sure Server implements `DataCoord`
 var _ types.DataCoord = (*Server)(nil)
@@ -135,8 +137,9 @@ type Server struct {
 	qcEventCh <-chan *sessionutil.SessionEvent
 	rcEventCh <-chan *sessionutil.SessionEvent
 
-	dataNodeCreator        dataNodeCreatorFunc
-	rootCoordClientCreator rootCoordCreatorFunc
+	dataNodeCreator         dataNodeCreatorFunc
+	rootCoordClientCreator  rootCoordCreatorFunc
+	indexCoordClientCreator indexCoordCreatorFunc
 
 	segReferManager *SegmentReferenceManager
 }
@@ -159,6 +162,12 @@ type Option func(svr *Server)
 func SetRootCoordCreator(creator rootCoordCreatorFunc) Option {
 	return func(svr *Server) {
 		svr.rootCoordClientCreator = creator
+	}
+}
+
+func SetIndexCoordCreator(creator indexCoordCreatorFunc) Option {
+	return func(svr *Server) {
+		svr.indexCoordClientCreator = creator
 	}
 }
 
@@ -194,13 +203,14 @@ func SetSegmentManager(manager Manager) Option {
 func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Option) *Server {
 	rand.Seed(time.Now().UnixNano())
 	s := &Server{
-		ctx:                    ctx,
-		quitCh:                 make(chan struct{}),
-		factory:                factory,
-		flushCh:                make(chan UniqueID, 1024),
-		dataNodeCreator:        defaultDataNodeCreatorFunc,
-		rootCoordClientCreator: defaultRootCoordCreatorFunc,
-		helper:                 defaultServerHelper(),
+		ctx:                     ctx,
+		quitCh:                  make(chan struct{}),
+		factory:                 factory,
+		flushCh:                 make(chan UniqueID, 1024),
+		dataNodeCreator:         defaultDataNodeCreatorFunc,
+		rootCoordClientCreator:  defaultRootCoordCreatorFunc,
+		indexCoordClientCreator: defaultIndexCoordCreateorFunc,
+		helper:                  defaultServerHelper(),
 
 		metricsCacheManager: metricsinfo.NewMetricsCacheManager(),
 	}
@@ -217,6 +227,10 @@ func defaultDataNodeCreatorFunc(ctx context.Context, addr string) (types.DataNod
 
 func defaultRootCoordCreatorFunc(ctx context.Context, metaRootPath string, client *clientv3.Client) (types.RootCoord, error) {
 	return rootcoordclient.NewClient(ctx, metaRootPath, client)
+}
+
+func defaultIndexCoordCreateorFunc(ctx context.Context, metaRootPath string, client *clientv3.Client) (types.IndexCoord, error) {
+	return indexcoordclient.NewClient(ctx, metaRootPath, client)
 }
 
 // QuitSignal returns signal when server quits
@@ -474,7 +488,7 @@ func (s *Server) initServiceDiscovery() error {
 
 func (s *Server) startSegmentManager() {
 	if s.segmentManager == nil {
-		s.segmentManager = newSegmentManager(s.meta, s.allocator, s.rootCoordClient)
+		s.segmentManager = newSegmentManager(s.meta, s.allocator, s.etcdCli, s.rootCoordClient, s.indexCoordClientCreator)
 	}
 }
 

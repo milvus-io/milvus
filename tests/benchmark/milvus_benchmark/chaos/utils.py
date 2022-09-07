@@ -39,7 +39,6 @@ def assert_fail(func, milvus_client, **params):
     try:
         methodcaller(func, **params)(milvus_client)
     except Exception as e:
-        logger.debug("11111111111111111111111111")
         logger.info(str(e))
         pass
     else:

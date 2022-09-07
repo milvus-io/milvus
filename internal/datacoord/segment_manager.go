@@ -26,10 +26,12 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
 
@@ -97,17 +99,20 @@ var _ Manager = (*SegmentManager)(nil)
 
 // SegmentManager handles segment related logic
 type SegmentManager struct {
-	meta                *meta
-	mu                  sync.RWMutex
-	allocator           allocator
-	helper              allocHelper
-	segments            []UniqueID
-	estimatePolicy      calUpperLimitPolicy
-	allocPolicy         AllocatePolicy
-	segmentSealPolicies []segmentSealPolicy
-	channelSealPolicies []channelSealPolicy
-	flushPolicy         flushPolicy
-	rcc                 types.RootCoord
+	meta                    *meta
+	mu                      sync.RWMutex
+	allocator               allocator
+	helper                  allocHelper
+	segments                []UniqueID
+	estimatePolicy          calUpperLimitPolicy
+	allocPolicy             AllocatePolicy
+	segmentSealPolicies     []segmentSealPolicy
+	channelSealPolicies     []channelSealPolicy
+	flushPolicy             flushPolicy
+	rcc                     types.RootCoord
+	etcdCli                 *clientv3.Client
+	icc                     types.IndexCoord
+	indexCoordClientCreator indexCoordCreatorFunc
 }
 
 type allocHelper struct {
@@ -189,19 +194,33 @@ func defaultFlushPolicy() flushPolicy {
 	return flushPolicyV1
 }
 
+func (s *SegmentManager) initIndexCoordClient(ctx context.Context) error {
+	var err error
+
+	if s.icc, err = s.indexCoordClientCreator(ctx, Params.EtcdCfg.MetaRootPath, s.etcdCli); err != nil {
+		return err
+	}
+	if err = s.icc.Init(); err != nil {
+		return err
+	}
+	return s.icc.Start()
+}
+
 // newSegmentManager should be the only way to retrieve SegmentManager.
-func newSegmentManager(meta *meta, allocator allocator, rcc types.RootCoord, opts ...allocOption) *SegmentManager {
+func newSegmentManager(meta *meta, allocator allocator, etcdCli *clientv3.Client, rcc types.RootCoord, creator indexCoordCreatorFunc, opts ...allocOption) *SegmentManager {
 	manager := &SegmentManager{
-		meta:                meta,
-		allocator:           allocator,
-		helper:              defaultAllocHelper(),
-		segments:            make([]UniqueID, 0),
-		estimatePolicy:      defaultCalUpperLimitPolicy(),
-		allocPolicy:         defaultAllocatePolicy(),
-		segmentSealPolicies: defaultSegmentSealPolicy(), // default only segment size policy
-		channelSealPolicies: []channelSealPolicy{},      // no default channel seal policy
-		flushPolicy:         defaultFlushPolicy(),
-		rcc:                 rcc,
+		meta:                    meta,
+		allocator:               allocator,
+		helper:                  defaultAllocHelper(),
+		segments:                make([]UniqueID, 0),
+		estimatePolicy:          defaultCalUpperLimitPolicy(),
+		allocPolicy:             defaultAllocatePolicy(),
+		segmentSealPolicies:     defaultSegmentSealPolicy(), // default only segment size policy
+		channelSealPolicies:     []channelSealPolicy{},      // no default channel seal policy
+		flushPolicy:             defaultFlushPolicy(),
+		rcc:                     rcc,
+		etcdCli:                 etcdCli,
+		indexCoordClientCreator: creator,
 	}
 	for _, opt := range opts {
 		opt.apply(manager)
@@ -243,10 +262,11 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 	}
 
 	// Apply allocation policy.
-	maxCountPerSegment, err := s.estimateMaxNumOfRows(collectionID)
+	maxCountPerSegment, err := s.estimateMaxNumOfRows(ctx, collectionID)
 	if err != nil {
 		return nil, err
 	}
+
 	newSegmentAllocations, existedSegmentAllocations := s.allocPolicy(segments,
 		requestRows, int64(maxCountPerSegment))
 
@@ -275,6 +295,7 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 	}
 
 	allocations := append(newSegmentAllocations, existedSegmentAllocations...)
+
 	return allocations, nil
 }
 
@@ -358,7 +379,7 @@ func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID Unique
 		log.Error("failed to open new segment while allocID", zap.Error(err))
 		return nil, err
 	}
-	maxNumOfRows, err := s.estimateMaxNumOfRows(collectionID)
+	maxNumOfRows, err := s.estimateMaxNumOfRows(ctx, collectionID)
 	if err != nil {
 		log.Error("failed to open new segment while estimateMaxNumOfRows", zap.Error(err))
 		return nil, err
@@ -389,12 +410,31 @@ func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID Unique
 	return segment, s.helper.afterCreateSegment(segmentInfo)
 }
 
-func (s *SegmentManager) estimateMaxNumOfRows(collectionID UniqueID) (int, error) {
+func (s *SegmentManager) estimateMaxNumOfRows(ctx context.Context, collectionID UniqueID) (int, error) {
 	collMeta := s.meta.GetCollection(collectionID)
 	if collMeta == nil {
 		return -1, fmt.Errorf("failed to get collection %d", collectionID)
 	}
-	return s.estimatePolicy(collMeta.Schema)
+
+	if s.icc == nil {
+		s.initIndexCoordClient(ctx)
+	}
+
+	resp, err := s.icc.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
+		CollectionID: collectionID,
+		IndexName:    "",
+	})
+	if err != nil {
+		return -1, err
+	}
+
+	for _, indexInfo := range resp.IndexInfos {
+		if indexInfo.IndexName == "DiskAnn" {
+			return s.estimatePolicy(Params.DataCoordCfg.SegmentMaxSize/3, collMeta.Schema)
+		}
+	}
+
+	return s.estimatePolicy(Params.DataCoordCfg.SegmentMaxSize, collMeta.Schema)
 }
 
 // DropSegment drop the segment from manager.
