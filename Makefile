@@ -89,6 +89,7 @@ endif
 endif
 
 print-build-info:
+	$(shell git config --global --add safe.directory '*')
 	@echo "Build Tag: $(BUILD_TAGS)"
 	@echo "Build Time: $(BUILD_TIME)"
 	@echo "Git Commit: $(GIT_COMMIT)"
