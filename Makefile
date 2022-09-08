@@ -130,30 +130,65 @@ build-cpp-with-coverage:
 # Run the tests.
 unittest: test-cpp test-go
 
+test-util:
+	@echo "Running go unittests..."
+	@(env bash $(PWD)/scripts/run_go_unittest.sh -t util)
+
+test-storage:
+	@echo "Running go unittests..."
+	@(env bash $(PWD)/scripts/run_go_unittest.sh -t storage)
+
+test-allocator:
+	@echo "Running go unittests..."
+	@(env bash $(PWD)/scripts/run_go_unittest.sh -t allocator)
+
+test-config:
+	@echo "Running go unittests..."
+	@(env bash $(PWD)/scripts/run_go_unittest.sh -t config)
+
+test-tso:
+	@echo "Running go unittests..."
+	@(env bash $(PWD)/scripts/run_go_unittest.sh -t tso)
+
+test-kv:
+	@echo "Running go unittests..."
+	@(env bash $(PWD)/scripts/run_go_unittest.sh -t kv)
+
+test-mq:
+	@echo "Running go unittests..."
+	@(env bash $(PWD)/scripts/run_go_unittest.sh -t mq)
+
+test-rootcoord:
+	@echo "Running go unittests..."
+	@(env bash $(PWD)/scripts/run_go_unittest.sh -t rootcoord)
+
 test-indexnode:
 	@echo "Running go unittests..."
-	go test -race -coverpkg=./... -coverprofile=profile.out -covermode=atomic -timeout 5m github.com/milvus-io/milvus/internal/indexnode -v -failfast
+	@(env bash $(PWD)/scripts/run_go_unittest.sh -t indexnode)
 
 test-proxy:
 	@echo "Running go unittests..."
-	go test -race -coverpkg=./... -coverprofile=profile.out -covermode=atomic -timeout 5m github.com/milvus-io/milvus/internal/proxy -v -failfast
+	@(env bash $(PWD)/scripts/run_go_unittest.sh -t proxy)
 
 test-datacoord:
 	@echo "Running go unittests..."
-	go test -race -coverpkg=./... -coverprofile=profile.out -covermode=atomic -timeout 5m github.com/milvus-io/milvus/internal/datacoord -v -failfast
+	@(env bash $(PWD)/scripts/run_go_unittest.sh -t datacoord)
 
 test-datanode:
 	@echo "Running go unittests..."
-	go test -race -coverpkg=./... -coverprofile=profile.out -covermode=atomic -timeout 5m github.com/milvus-io/milvus/internal/datanode -v -failfast
+	@(env bash $(PWD)/scripts/run_go_unittest.sh -t datanode)
 
 test-querynode:
 	@echo "Running go unittests..."
-	go test -race -coverpkg=./... -coverprofile=profile.out -covermode=atomic -timeout 5m github.com/milvus-io/milvus/internal/querynode -v -failfast
+	@(env bash $(PWD)/scripts/run_go_unittest.sh -t querynode)
 
 test-querycoord:
 	@echo "Running go unittests..."
-	go test -race -coverpkg=./... -coverprofile=profile.out -covermode=atomic -timeout 5m github.com/milvus-io/milvus/internal/querycoord	-v -failfast
+	@(env bash $(PWD)/scripts/run_go_unittest.sh -t querycoord)
 
+test-metastore:
+	@echo "Running go unittests..."
+	@(env bash $(PWD)/scripts/run_go_unittest.sh -t metastore)
 
 test-go: build-cpp-with-unittest
 	@echo "Running go unittests..."
