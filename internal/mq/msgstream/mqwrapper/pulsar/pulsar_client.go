@@ -20,6 +20,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/milvus-io/milvus/internal/log"
@@ -57,6 +58,10 @@ func (pc *pulsarClient) CreateProducer(options mqwrapper.ProducerOptions) (mqwra
 		opts.CompressionType = pulsar.ZSTD
 		opts.CompressionLevel = pulsar.Faster
 	}
+	// disable automatic batching
+	opts.DisableBatching = true
+	// change the batching max publish delay higher to avoid extra cpu consumption
+	opts.BatchingMaxPublishDelay = 1 * time.Minute
 
 	pp, err := pc.client.CreateProducer(opts)
 	if err != nil {

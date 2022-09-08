@@ -346,10 +346,12 @@ func TestStream_KafkaTtMsgStream_2(t *testing.T) {
 
 	ctx := context.Background()
 	inputStream1 := getKafkaInputStream(ctx, kafkaAddress, p1Channels)
+	defer inputStream1.Close()
 	msgPacks1 := createRandMsgPacks(3, 10, 10)
 	assert.Nil(t, sendMsgPacks(inputStream1, msgPacks1))
 
 	inputStream2 := getKafkaInputStream(ctx, kafkaAddress, p2Channels)
+	defer inputStream2.Close()
 	msgPacks2 := createRandMsgPacks(5, 10, 10)
 	assert.Nil(t, sendMsgPacks(inputStream2, msgPacks2))
 
@@ -365,17 +367,17 @@ func TestStream_KafkaTtMsgStream_2(t *testing.T) {
 		} else {
 			outputStream = getKafkaTtOutputStreamAndSeek(ctx, kafkaAddress, rcvMsgPacks[msgCount-1].EndPositions)
 		}
+		defer outputStream.Close()
 		msgPack := consumer(ctx, outputStream)
 		rcvMsgPacks = append(rcvMsgPacks, msgPack)
 		if len(msgPack.Msgs) > 0 {
 			for _, msg := range msgPack.Msgs {
-				log.Println("msg type: ", msg.Type(), ", msg value: ", msg)
+				log.Println("TestStream_KafkaTtMsgStream_2 msg type: ", msg.Type(), ", msg value: ", msg)
 				assert.Greater(t, msg.BeginTs(), msgPack.BeginTs)
 				assert.LessOrEqual(t, msg.BeginTs(), msgPack.EndTs)
 			}
 			log.Println("================")
 		}
-		outputStream.Close()
 		return len(rcvMsgPacks[msgCount].Msgs)
 	}
 
@@ -387,8 +389,6 @@ func TestStream_KafkaTtMsgStream_2(t *testing.T) {
 	cnt2 := (len(msgPacks2)/2 - 1) * len(msgPacks2[0].Msgs)
 	assert.Equal(t, (cnt1 + cnt2), msgCount)
 
-	inputStream1.Close()
-	inputStream2.Close()
 }
 
 func TestStream_KafkaTtMsgStream_DataNodeTimetickMsgstream(t *testing.T) {
