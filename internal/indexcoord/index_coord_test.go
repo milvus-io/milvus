@@ -573,7 +573,7 @@ func TestIndexCoord_RemoveIndex(t *testing.T) {
 	ic := &IndexCoord{
 		metaTable: &metaTable{},
 		indexBuilder: &indexBuilder{
-			notify: make(chan struct{}, 10),
+			notifyChan: make(chan struct{}, 10),
 		},
 	}
 	ic.stateCode.Store(internalpb.StateCode_Healthy)
