@@ -742,6 +742,8 @@ message FlushResponse{
   common.Status status = 1;
   string db_name = 2;
   map<string, schema.LongArray> coll_segIDs = 3;
+  map<string, schema.LongArray> flush_coll_segIDs = 4;
+  map<string, int64> coll_seal_times = 5;
 }
 
 message QueryRequest {

@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/trace"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -84,18 +85,47 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 		resp.Status.Reason = serverNotServingErrMsg
 		return resp, nil
 	}
-	sealedSegments, err := s.segmentManager.SealAllSegments(ctx, req.GetCollectionID(), req.GetSegmentIDs())
+
+	// generate a timestamp timeOfSeal, all data before timeOfSeal is guaranteed to be sealed or flushed
+	ts, err := s.allocator.allocTimestamp(ctx)
+	if err != nil {
+		log.Warn("unable to alloc timestamp", zap.Error(err))
+	}
+	timeOfSeal, _ := tsoutil.ParseTS(ts)
+
+	sealedSegmentIDs, err := s.segmentManager.SealAllSegments(ctx, req.GetCollectionID(), req.GetSegmentIDs())
 	if err != nil {
 		resp.Status.Reason = fmt.Sprintf("failed to flush %d, %s", req.CollectionID, err)
 		return resp, nil
 	}
+
+	sealedSegmentsIDDict := make(map[UniqueID]bool)
+	for _, sealedSegmentID := range sealedSegmentIDs {
+		sealedSegmentsIDDict[sealedSegmentID] = true
+	}
+
+	segments := s.meta.GetSegmentsOfCollection(req.GetCollectionID())
+	flushSegmentIDs := make([]UniqueID, 0, len(segments))
+	for _, segment := range segments {
+		if segment != nil &&
+			(segment.GetState() == commonpb.SegmentState_Flushed ||
+				segment.GetState() == commonpb.SegmentState_Flushing) &&
+			!sealedSegmentsIDDict[segment.GetID()] {
+			flushSegmentIDs = append(flushSegmentIDs, segment.GetID())
+		}
+	}
+
 	log.Info("flush response with segments",
 		zap.Int64("collectionID", req.GetCollectionID()),
-		zap.Any("segments", sealedSegments))
+		zap.Int64s("sealSegments", sealedSegmentIDs),
+		zap.Int64s("flushSegments", flushSegmentIDs),
+		zap.Int64("timeOfSeal", timeOfSeal.Unix()))
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	resp.DbID = req.GetDbID()
 	resp.CollectionID = req.GetCollectionID()
-	resp.SegmentIDs = sealedSegments
+	resp.SegmentIDs = sealedSegmentIDs
+	resp.TimeOfSeal = timeOfSeal.Unix()
+	resp.FlushSegmentIDs = flushSegmentIDs
 	return resp, nil
 }
 
