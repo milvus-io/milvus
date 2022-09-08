@@ -556,14 +556,6 @@ func generateVarCharArray(numRows int, maxLen int) []string {
 	ret := make([]string, numRows)
 	for i := 0; i < numRows; i++ {
 		ret[i] = funcutil.RandomString(rand.Intn(maxLen))
-
-		// In the pr #18881 we make a temp fix to avoid user to insert empty strings for varchar field.
-		// The insertTask.checkVarcharFieldData() will check empty strings for insert request.
-		// So, we don't allow the random string to be empty in unittest.
-		// TODO: once we can support empty string, remove this line.
-		if len(ret[i]) == 0 {
-			ret[i] = " "
-		}
 	}
 
 	return ret
