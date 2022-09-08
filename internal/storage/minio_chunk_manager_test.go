@@ -473,21 +473,21 @@ func TestMinIOCM(t *testing.T) {
 		key = path.Join(testPrefix, "bc", "a", "b")
 		err = testCM.Write(key, value)
 		assert.NoError(t, err)
-		dirs, mods, err := testCM.ListWithPrefix(testPrefix+"/", false)
+		dirs, mods, err := testCM.ListWithPrefix(testPrefix+"/", true)
+		assert.NoError(t, err)
+		assert.Equal(t, 5, len(dirs))
+		assert.Equal(t, 5, len(mods))
+
+		dirs, mods, err = testCM.ListWithPrefix(path.Join(testPrefix, "b"), true)
 		assert.NoError(t, err)
 		assert.Equal(t, 3, len(dirs))
 		assert.Equal(t, 3, len(mods))
 
-		dirs, mods, err = testCM.ListWithPrefix(path.Join(testPrefix, "b"), false)
-		assert.NoError(t, err)
-		assert.Equal(t, 2, len(dirs))
-		assert.Equal(t, 2, len(mods))
-
 		testCM.RemoveWithPrefix(testPrefix)
-		r, m, err = testCM.ListWithPrefix(pathPrefix, false)
+		r, m, err = testCM.ListWithPrefix(pathPrefix, true)
 		assert.NoError(t, err)
-		assert.Equal(t, len(r), 0)
-		assert.Equal(t, len(m), 0)
+		assert.Equal(t, 0, len(r))
+		assert.Equal(t, 0, len(m))
 
 		// test wrong prefix
 		b := make([]byte, 2048)
