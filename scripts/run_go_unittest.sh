@@ -143,6 +143,7 @@ go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/datacoord/..." -failfa
 function test_querycoord()
 {
 go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/distributed/querycoord/..." -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/querycoord/..." -failfast
 }
 
 function test_indexcoord()
