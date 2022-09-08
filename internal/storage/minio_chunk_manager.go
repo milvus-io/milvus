@@ -18,6 +18,7 @@ package storage
 
 import (
 	"bytes"
+	"container/list"
 	"context"
 	"errors"
 	"fmt"
@@ -319,18 +320,51 @@ func (mcm *MinioChunkManager) RemoveWithPrefix(prefix string) error {
 	return nil
 }
 
+// ListWithPrefix returns objects with provided prefix.
+// by default, if `recursive`=false, list object with return object with path under save level
+// say minio has followinng objects: [a, ab, a/b, ab/c]
+// calling `ListWithPrefix` with `prefix` = a && `recursive` = false will only returns [a, ab]
+// If caller needs all objects without level limitation, `recursive` shall be true.
 func (mcm *MinioChunkManager) ListWithPrefix(prefix string, recursive bool) ([]string, []time.Time, error) {
-	objects := mcm.Client.ListObjects(mcm.ctx, mcm.bucketName, minio.ListObjectsOptions{Prefix: prefix, Recursive: recursive})
+
+	// cannot use ListObjects(ctx, bucketName, Opt{Prefix:prefix, Recursive:true})
+	// if minio has lots of objects under the provided path
+	// recursive = true may timeout during the recursive browsing the objects.
+	// See also: https://github.com/milvus-io/milvus/issues/19095
+
 	var objectsKeys []string
 	var modTimes []time.Time
 
-	for object := range objects {
-		if object.Err != nil {
-			log.Warn("failed to list with prefix", zap.String("prefix", prefix), zap.Error(object.Err))
-			return nil, nil, object.Err
+	tasks := list.New()
+	tasks.PushBack(prefix)
+	for tasks.Len() > 0 {
+		e := tasks.Front()
+		pre := e.Value.(string)
+		tasks.Remove(e)
+
+		// TODO add concurrent call if performance matters
+		// only return current level per call
+		objects := mcm.Client.ListObjects(mcm.ctx, mcm.bucketName, minio.ListObjectsOptions{Prefix: pre, Recursive: false})
+
+		for object := range objects {
+			if object.Err != nil {
+				log.Warn("failed to list with prefix", zap.String("prefix", prefix), zap.Error(object.Err))
+				return nil, nil, object.Err
+			}
+
+			// with tailing "/", object is a "directory"
+			if strings.HasSuffix(object.Key, "/") {
+				// enqueue when recursive is true
+				if recursive && object.Key != pre {
+					log.Warn("add next", zap.String("key", object.Key))
+					tasks.PushBack(object.Key)
+				}
+				continue
+			}
+			objectsKeys = append(objectsKeys, object.Key)
+			modTimes = append(modTimes, object.LastModified)
 		}
-		objectsKeys = append(objectsKeys, object.Key)
-		modTimes = append(modTimes, object.LastModified)
 	}
+
 	return objectsKeys, modTimes, nil
 }
