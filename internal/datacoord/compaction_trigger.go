@@ -25,7 +25,10 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/logutil"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
 
@@ -59,25 +62,30 @@ type compactionSignal struct {
 var _ trigger = (*compactionTrigger)(nil)
 
 type compactionTrigger struct {
-	meta              *meta
-	allocator         allocator
-	signals           chan *compactionSignal
-	compactionHandler compactionPlanContext
-	globalTrigger     *time.Ticker
-	forceMu           sync.Mutex
-	quit              chan struct{}
-	wg                sync.WaitGroup
-	segRefer          *SegmentReferenceManager
+	meta                    *meta
+	etcdCli                 *clientv3.Client
+	indexCoord              types.IndexCoord
+	indexCoordClientCreator indexCoordCreatorFunc
+	allocator               allocator
+	signals                 chan *compactionSignal
+	compactionHandler       compactionPlanContext
+	globalTrigger           *time.Ticker
+	forceMu                 sync.Mutex
+	quit                    chan struct{}
+	wg                      sync.WaitGroup
+	segRefer                *SegmentReferenceManager
 }
 
 func newCompactionTrigger(meta *meta, compactionHandler compactionPlanContext, allocator allocator,
-	segRefer *SegmentReferenceManager) *compactionTrigger {
+	segRefer *SegmentReferenceManager, etcdCli *clientv3.Client, creator indexCoordCreatorFunc) *compactionTrigger {
 	return &compactionTrigger{
-		meta:              meta,
-		allocator:         allocator,
-		signals:           make(chan *compactionSignal, 100),
-		compactionHandler: compactionHandler,
-		segRefer:          segRefer,
+		meta:                    meta,
+		etcdCli:                 etcdCli,
+		indexCoordClientCreator: creator,
+		allocator:               allocator,
+		signals:                 make(chan *compactionSignal, 100),
+		compactionHandler:       compactionHandler,
+		segRefer:                segRefer,
 	}
 }
 
@@ -220,6 +228,47 @@ func getPlanIDs(plans []*datapb.CompactionPlan) []int64 {
 	return ids
 }
 
+func (t *compactionTrigger) initIndexCoordClient(ctx context.Context) error {
+	var err error
+
+	if t.indexCoord, err = t.indexCoordClientCreator(ctx, Params.EtcdCfg.MetaRootPath, t.etcdCli); err != nil {
+		return err
+	}
+	if err = t.indexCoord.Init(); err != nil {
+		return err
+	}
+
+	return t.indexCoord.Start()
+}
+
+func (t *compactionTrigger) updateSegmentMaxSize(segments []*SegmentInfo) error {
+	ctx := context.Background()
+	if t.indexCoord == nil {
+		err := t.initIndexCoordClient(ctx)
+		if err != nil {
+			return err
+		}
+	}
+
+	collectionID := segments[0].GetCollectionID()
+	resp, err := t.indexCoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
+		CollectionID: collectionID,
+		IndexName:    "",
+	})
+	if err != nil {
+		return err
+	}
+
+	for _, indexInfo := range resp.IndexInfos {
+		if indexInfo.IndexName == diskAnnIndexName {
+			for _, segment := range segments {
+				segment.MaxRowNum = int64(Params.DataCoordCfg.DiskAnnSegmentMaxSize)
+			}
+		}
+	}
+	return nil
+}
+
 func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) {
 	t.forceMu.Lock()
 	defer t.forceMu.Unlock()
@@ -233,6 +282,12 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) {
 	for _, group := range m {
 		if !signal.isForce && t.compactionHandler.isFull() {
 			break
+		}
+
+		err := t.updateSegmentMaxSize(group.segments)
+		if err != nil {
+			log.Warn("failed to update segment max size,", zap.Error(err))
+			continue
 		}
 
 		plans := t.generatePlans(group.segments, signal.isForce, signal.compactTime)
@@ -282,6 +337,12 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 	channel := segment.GetInsertChannel()
 	partitionID := segment.GetPartitionID()
 	segments := t.getCandidateSegments(channel, partitionID)
+
+	err := t.updateSegmentMaxSize(segments)
+	if err != nil {
+		log.Warn("failed to update segment max size", zap.Error(err))
+	}
+
 	plans := t.generatePlans(segments, signal.isForce, signal.compactTime)
 	for _, plan := range plans {
 		if t.compactionHandler.isFull() {

@@ -917,6 +917,7 @@ type dataCoordConfig struct {
 
 	// --- SEGMENTS ---
 	SegmentMaxSize          float64
+	DiskAnnSegmentMaxSize   float64
 	SegmentSealProportion   float64
 	SegAssignmentExpiration int64
 	SegmentMaxLifetime      time.Duration
@@ -951,6 +952,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	p.initChannelWatchPrefix()
 
 	p.initSegmentMaxSize()
+	p.initDiskAnnSegmentMaxSize()
 	p.initSegmentSealProportion()
 	p.initSegAssignmentExpiration()
 	p.initSegmentMaxLifetime()
@@ -977,6 +979,10 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 
 func (p *dataCoordConfig) initSegmentMaxSize() {
 	p.SegmentMaxSize = p.Base.ParseFloatWithDefault("dataCoord.segment.maxSize", 512.0)
+}
+
+func (p *dataCoordConfig) initDiskAnnSegmentMaxSize() {
+	p.DiskAnnSegmentMaxSize = p.Base.ParseFloatWithDefault("dataCoord.segment.diskAnnMaxSize", 512.0*3)
 }
 
 func (p *dataCoordConfig) initSegmentSealProportion() {

@@ -26,11 +26,13 @@ import (
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -721,3 +723,54 @@ func (h *mockHandler) CheckShouldDropChannel(channel string) bool {
 }
 
 func (h *mockHandler) FinishDropChannel(channel string) {}
+
+type mockIndexCoord struct {
+	types.IndexCoord
+}
+
+func newMockIndexCoord() *mockIndexCoord {
+	return &mockIndexCoord{}
+}
+
+func (m *mockIndexCoord) Init() error {
+	return nil
+}
+
+func (m *mockIndexCoord) Start() error {
+	return nil
+}
+
+func (m *mockIndexCoord) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error) {
+	if req.CollectionID == 1000 {
+		return &indexpb.DescribeIndexResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+			IndexInfos: []*indexpb.IndexInfo{
+				{
+					CollectionID: 1000,
+					FieldID:      0,
+					IndexName:    "DiskAnn",
+					IndexID:      0,
+					TypeParams:   nil,
+					IndexParams:  nil,
+				},
+			},
+		}, nil
+	}
+	return &indexpb.DescribeIndexResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		IndexInfos: []*indexpb.IndexInfo{
+			{
+				CollectionID: 1,
+				FieldID:      0,
+				IndexName:    "default",
+				IndexID:      0,
+				TypeParams:   nil,
+				IndexParams:  nil,
+			},
+		},
+	}, nil
+}

@@ -44,6 +44,7 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 		f := &MetaFactory{}
 		meta := f.GetCollectionMeta(UniqueID(10001), "uploads", schemapb.DataType_Int64)
 
+		//pkFieldID := int64(106)
 		iData := genInsertData()
 		pk := newInt64PrimaryKey(888)
 		dData := &DeleteData{
@@ -69,6 +70,17 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 		assert.NotNil(t, p.deltaInfo)
 
 		ctx, cancel := context.WithCancel(context.Background())
+
+		in, err := b.uploadInsertLog(ctx, 1, 10, iData, meta)
+		assert.NoError(t, err)
+		assert.Equal(t, 12, len(in))
+		assert.Equal(t, 1, len(in[0].GetBinlogs()))
+
+		deltas, err := b.uploadDeltaLog(ctx, 1, 10, dData, meta)
+		assert.NoError(t, err)
+		assert.NotNil(t, deltas)
+		assert.Equal(t, 1, len(deltas[0].GetBinlogs()))
+
 		cancel()
 
 		p, err = b.upload(ctx, 1, 10, []*InsertData{iData}, []byte{}, dData, meta)

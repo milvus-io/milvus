@@ -17,6 +17,7 @@
 package datacoord
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"testing"
@@ -24,7 +25,9 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/stretchr/testify/assert"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 type spyCompactionHandler struct {
@@ -214,13 +217,17 @@ func Test_compactionTrigger_force(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			indexCoordClientCreator := func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.IndexCoord, error) {
+				return newMockIndexCoord(), nil
+			}
 			tr := &compactionTrigger{
-				meta:              tt.fields.meta,
-				allocator:         tt.fields.allocator,
-				signals:           tt.fields.signals,
-				compactionHandler: tt.fields.compactionHandler,
-				globalTrigger:     tt.fields.globalTrigger,
-				segRefer:          tt.fields.segRefer,
+				meta:                    tt.fields.meta,
+				indexCoordClientCreator: indexCoordClientCreator,
+				allocator:               tt.fields.allocator,
+				signals:                 tt.fields.signals,
+				compactionHandler:       tt.fields.compactionHandler,
+				globalTrigger:           tt.fields.globalTrigger,
+				segRefer:                tt.fields.segRefer,
 			}
 			_, err := tr.forceTriggerCompaction(tt.args.collectionID, tt.args.compactTime)
 			assert.Equal(t, tt.wantErr, err != nil)
@@ -355,13 +362,17 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			indexCoordClientCreator := func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.IndexCoord, error) {
+				return newMockIndexCoord(), nil
+			}
 			tr := &compactionTrigger{
-				meta:              tt.fields.meta,
-				allocator:         tt.fields.allocator,
-				signals:           tt.fields.signals,
-				compactionHandler: tt.fields.compactionHandler,
-				globalTrigger:     tt.fields.globalTrigger,
-				segRefer:          &SegmentReferenceManager{segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{}},
+				meta:                    tt.fields.meta,
+				indexCoordClientCreator: indexCoordClientCreator,
+				allocator:               tt.fields.allocator,
+				signals:                 tt.fields.signals,
+				compactionHandler:       tt.fields.compactionHandler,
+				globalTrigger:           tt.fields.globalTrigger,
+				segRefer:                &SegmentReferenceManager{segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{}},
 			}
 			_, err := tr.forceTriggerCompaction(tt.args.collectionID, tt.args.compactTime)
 			assert.Equal(t, tt.wantErr, err != nil)
@@ -512,13 +523,17 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			indexCoordClientCreator := func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.IndexCoord, error) {
+				return newMockIndexCoord(), nil
+			}
 			tr := &compactionTrigger{
-				meta:              tt.fields.meta,
-				allocator:         tt.fields.allocator,
-				signals:           tt.fields.signals,
-				compactionHandler: tt.fields.compactionHandler,
-				globalTrigger:     tt.fields.globalTrigger,
-				segRefer:          &SegmentReferenceManager{segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{}},
+				meta:                    tt.fields.meta,
+				indexCoordClientCreator: indexCoordClientCreator,
+				allocator:               tt.fields.allocator,
+				signals:                 tt.fields.signals,
+				compactionHandler:       tt.fields.compactionHandler,
+				globalTrigger:           tt.fields.globalTrigger,
+				segRefer:                &SegmentReferenceManager{segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{}},
 			}
 			tr.start()
 			defer tr.stop()
@@ -686,13 +701,17 @@ func Test_compactionTrigger_smallfiles(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			indexCoordClientCreator := func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.IndexCoord, error) {
+				return newMockIndexCoord(), nil
+			}
 			tr := &compactionTrigger{
-				meta:              tt.fields.meta,
-				allocator:         tt.fields.allocator,
-				signals:           tt.fields.signals,
-				compactionHandler: tt.fields.compactionHandler,
-				globalTrigger:     tt.fields.globalTrigger,
-				segRefer:          &SegmentReferenceManager{segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{}},
+				meta:                    tt.fields.meta,
+				indexCoordClientCreator: indexCoordClientCreator,
+				allocator:               tt.fields.allocator,
+				signals:                 tt.fields.signals,
+				compactionHandler:       tt.fields.compactionHandler,
+				globalTrigger:           tt.fields.globalTrigger,
+				segRefer:                &SegmentReferenceManager{segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{}},
 			}
 			tr.start()
 			defer tr.stop()
@@ -790,13 +809,17 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			indexCoordClientCreator := func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.IndexCoord, error) {
+				return newMockIndexCoord(), nil
+			}
 			tr := &compactionTrigger{
-				meta:              tt.fields.meta,
-				allocator:         tt.fields.allocator,
-				signals:           tt.fields.signals,
-				compactionHandler: tt.fields.compactionHandler,
-				globalTrigger:     tt.fields.globalTrigger,
-				segRefer:          &SegmentReferenceManager{segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{}},
+				meta:                    tt.fields.meta,
+				indexCoordClientCreator: indexCoordClientCreator,
+				allocator:               tt.fields.allocator,
+				signals:                 tt.fields.signals,
+				compactionHandler:       tt.fields.compactionHandler,
+				globalTrigger:           tt.fields.globalTrigger,
+				segRefer:                &SegmentReferenceManager{segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{}},
 			}
 			tr.start()
 			defer tr.stop()
@@ -839,8 +862,12 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	Params.Init()
 
+	indexCoordClientCreator := func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.IndexCoord, error) {
+		return newMockIndexCoord(), nil
+	}
+
 	trigger := newCompactionTrigger(&meta{}, &compactionPlanHandler{}, newMockAllocator(),
-		&SegmentReferenceManager{segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{}})
+		&SegmentReferenceManager{segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{}}, nil, indexCoordClientCreator)
 
 	// Test too many files.
 	var binlogs []*datapb.FieldBinlog
@@ -972,8 +999,11 @@ func Test_newCompactionTrigger(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			indexCoordClientCreator := func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.IndexCoord, error) {
+				return newMockIndexCoord(), nil
+			}
 			got := newCompactionTrigger(tt.args.meta, tt.args.compactionHandler, tt.args.allocator,
-				&SegmentReferenceManager{segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{}})
+				&SegmentReferenceManager{segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{}}, nil, indexCoordClientCreator)
 			assert.Equal(t, tt.args.meta, got.meta)
 			assert.Equal(t, tt.args.compactionHandler, got.compactionHandler)
 			assert.Equal(t, tt.args.allocator, got.allocator)
@@ -983,8 +1013,12 @@ func Test_newCompactionTrigger(t *testing.T) {
 
 func Test_handleSignal(t *testing.T) {
 
+	indexCoordClientCreator := func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.IndexCoord, error) {
+		return newMockIndexCoord(), nil
+	}
+
 	got := newCompactionTrigger(&meta{segments: NewSegmentsInfo()}, &compactionPlanHandler{}, newMockAllocator(),
-		&SegmentReferenceManager{segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{}})
+		&SegmentReferenceManager{segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{}}, nil, indexCoordClientCreator)
 	signal := &compactionSignal{
 		segmentID: 1,
 	}

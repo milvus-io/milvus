@@ -42,6 +42,10 @@ var (
 	}
 )
 
+const (
+	diskAnnIndexName = "DiskAnn"
+)
+
 // getAllocation unifies way to retrieve allocation struct
 func getAllocation(numOfRows int64) *Allocation {
 	v := allocPool.Get()

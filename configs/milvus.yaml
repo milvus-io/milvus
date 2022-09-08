@@ -242,6 +242,7 @@ dataCoord:
 
   segment:
     maxSize: 512 # Maximum size of a segment in MB
+    diskAnnMaxSize:  1536 # Maximun size of a segment in MB for collection which has DiskAnn index
     sealProportion: 0.25 # It's the minimum proportion for a segment which can be sealed
     assignmentExpiration: 2000 # The time of the assignment expiration in ms
     maxLife: 86400 # The max lifetime of segment in seconds, 24*60*60
