@@ -30,13 +30,14 @@ import (
 	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
 
+	oplog "github.com/opentracing/opentracing-go/log"
+
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/trace"
-	oplog "github.com/opentracing/opentracing-go/log"
 )
 
 // taskQueue is used to cache triggerTasks
@@ -275,11 +276,21 @@ func (scheduler *TaskScheduler) reloadFromKV() error {
 		}
 		state := taskState(value)
 		taskInfos[taskID] = state
-		if _, ok := triggerTasks[taskID]; !ok {
-			log.Error("reloadFromKV: taskStateInfo and triggerTaskInfo are inconsistent")
+		if _, ok := triggerTasks[taskID]; ok {
+			triggerTasks[taskID].setState(state)
 			continue
 		}
-		triggerTasks[taskID].setState(state)
+
+		if _, ok := activeTasks[taskID]; ok {
+			log.Debug("reloadFromKV: found left active task stat info, ignore it",
+				zap.Int64("task", taskID),
+				zap.Any("taskState", state))
+			continue
+		}
+
+		log.Error("reloadFromKV: found task info without correspond task",
+			zap.Int64("task", taskID),
+			zap.Any("taskState", state))
 	}
 
 	// triggerTaskQueue's size is 1024, if the size of triggerTasks if large than 1024 the loop will be blocked,
