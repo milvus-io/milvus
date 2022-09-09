@@ -356,7 +356,6 @@ func (mcm *MinioChunkManager) ListWithPrefix(prefix string, recursive bool) ([]s
 			if strings.HasSuffix(object.Key, "/") {
 				// enqueue when recursive is true
 				if recursive && object.Key != pre {
-					log.Warn("add next", zap.String("key", object.Key))
 					tasks.PushBack(object.Key)
 				}
 				continue
