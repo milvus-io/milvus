@@ -182,6 +182,10 @@ func (s *taskScheduler) scheduleReadTasks() {
 	defer s.wg.Done()
 	l := s.tSafeReplica.Watch()
 	defer l.Unregister()
+	nextExecute := func() {
+		s.tryMergeReadTasks()
+		s.popAndAddToExecute()
+	}
 	for {
 		select {
 		case <-s.ctx.Done():
@@ -189,8 +193,7 @@ func (s *taskScheduler) scheduleReadTasks() {
 			return
 
 		case <-s.notifyChan:
-			s.tryMergeReadTasks()
-			s.popAndAddToExecute()
+			nextExecute()
 
 		case t, ok := <-s.receiveReadTaskChan:
 			if ok {
@@ -205,16 +208,14 @@ func (s *taskScheduler) scheduleReadTasks() {
 						s.unsolvedReadTasks.PushBack(t)
 					}
 				}
-				s.tryMergeReadTasks()
-				s.popAndAddToExecute()
+				nextExecute()
 			} else {
 				errMsg := "taskScheduler receiveReadTaskChan has been closed"
 				log.Warn(errMsg)
 				return
 			}
 		case <-l.On():
-			s.tryMergeReadTasks()
-			s.popAndAddToExecute()
+			nextExecute()
 		}
 	}
 }

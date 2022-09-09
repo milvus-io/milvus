@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime/debug"
+	"sort"
 
 	"go.uber.org/zap"
 
@@ -152,19 +153,19 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 	// init collection meta
 	coll := w.node.metaReplica.addCollection(collectionID, w.req.Schema)
 
-	loadedChannelCounter := 0
-	for _, toLoadChannel := range vChannels {
-		for _, loadedChannel := range coll.vChannels {
-			if toLoadChannel == loadedChannel {
-				loadedChannelCounter++
-				break
-			}
-		}
-	}
-
 	// check if all channels has been loaded, if YES, should do nothing and return
 	// in case of query coord trigger same watchDmChannelTask on multi
-	if len(vChannels) == loadedChannelCounter {
+	sort.Strings(vChannels)
+	sort.Strings(coll.vChannels)
+	isContains := true
+	vChannelsLen := len(coll.vChannels)
+	for i, channel := range vChannels {
+		if i >= vChannelsLen || coll.vChannels[i] != channel {
+			isContains = false
+			break
+		}
+	}
+	if isContains {
 		log.Warn("All channel has been loaded, skip this watchDmChannelsTask")
 		return nil
 	}
