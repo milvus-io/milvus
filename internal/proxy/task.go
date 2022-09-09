@@ -1777,6 +1777,8 @@ func (ft *flushTask) PreExecute(ctx context.Context) error {
 
 func (ft *flushTask) Execute(ctx context.Context) error {
 	coll2Segments := make(map[string]*schemapb.LongArray)
+	flushColl2Segments := make(map[string]*schemapb.LongArray)
+	coll2SealTimes := make(map[string]int64)
 	for _, collName := range ft.CollectionNames {
 		collID, err := globalMetaCache.GetCollectionID(ctx, collName)
 		if err != nil {
@@ -1800,14 +1802,18 @@ func (ft *flushTask) Execute(ctx context.Context) error {
 			return errors.New(resp.Status.Reason)
 		}
 		coll2Segments[collName] = &schemapb.LongArray{Data: resp.GetSegmentIDs()}
+		flushColl2Segments[collName] = &schemapb.LongArray{Data: resp.GetFlushSegmentIDs()}
+		coll2SealTimes[collName] = resp.GetTimeOfSeal()
 	}
 	ft.result = &milvuspb.FlushResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
 		},
-		DbName:     "",
-		CollSegIDs: coll2Segments,
+		DbName:          "",
+		CollSegIDs:      coll2Segments,
+		FlushCollSegIDs: flushColl2Segments,
+		CollSealTimes:   coll2SealTimes,
 	}
 	return nil
 }

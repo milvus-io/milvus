@@ -133,8 +133,12 @@ type DataCoord interface {
 	// ctx is the context to control request deadline and cancellation
 	// req contains the request params, which are database name(not used for now) and collection id
 	//
-	// response struct `FlushResponse` contains related db & collection meta
-	// and the affected segment ids
+	// response struct `FlushResponse` contains
+	// 		1, related db id
+	// 		2, related collection id
+	// 		3, affected segment ids
+	// 		4, already flush/flushing segment ids of related collection before this request
+	// 		5, timeOfSeal, all data before timeOfSeal is guaranteed to be sealed or flushed
 	// error is returned only when some communication issue occurs
 	// if some error occurs in the process of `Flush`, it will be recorded and returned in `Status` field of response
 	//

@@ -89,7 +89,9 @@ message FlushResponse {
   common.Status status = 1;
   int64 dbID = 2;
   int64 collectionID = 3;
-  repeated int64 segmentIDs = 4;
+  repeated int64 segmentIDs = 4; // newly sealed segments
+  repeated int64 flushSegmentIDs = 5; // old flushed segment
+  int64 timeOfSeal = 6;
 }
 
 message SegmentIDRequest {
