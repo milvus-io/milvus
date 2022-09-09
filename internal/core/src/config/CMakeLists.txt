@@ -22,6 +22,7 @@ endif()
 
 set(CONFIG_SRC
         ConfigKnowhere.cpp
+        ConfigChunkManager.cpp
         )
 
 add_library(milvus_config STATIC ${CONFIG_SRC})

@@ -130,15 +130,14 @@ func TestDescriptorEvent(t *testing.T) {
 func TestInsertEvent(t *testing.T) {
 	insertT := func(t *testing.T,
 		dt schemapb.DataType,
+		w *insertEventWriter,
 		ir1 func(w *insertEventWriter) error,
 		ir2 func(w *insertEventWriter) error,
 		iw func(w *insertEventWriter) error,
 		ev interface{},
 	) {
-		w, err := newInsertEventWriter(dt)
-		assert.Nil(t, err)
 		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
-		err = ir1(w)
+		err := ir1(w)
 		assert.Nil(t, err)
 		err = iw(w)
 		assert.NotNil(t, err)
@@ -177,7 +176,9 @@ func TestInsertEvent(t *testing.T) {
 	}
 
 	t.Run("insert_bool", func(t *testing.T) {
-		insertT(t, schemapb.DataType_Bool,
+		w, err := newInsertEventWriter(schemapb.DataType_Bool)
+		assert.Nil(t, err)
+		insertT(t, schemapb.DataType_Bool, w,
 			func(w *insertEventWriter) error {
 				return w.AddDataToPayload([]bool{true, false, true})
 			},
@@ -191,7 +192,9 @@ func TestInsertEvent(t *testing.T) {
 	})
 
 	t.Run("insert_int8", func(t *testing.T) {
-		insertT(t, schemapb.DataType_Int8,
+		w, err := newInsertEventWriter(schemapb.DataType_Int8)
+		assert.Nil(t, err)
+		insertT(t, schemapb.DataType_Int8, w,
 			func(w *insertEventWriter) error {
 				return w.AddDataToPayload([]int8{1, 2, 3})
 			},
@@ -205,7 +208,9 @@ func TestInsertEvent(t *testing.T) {
 	})
 
 	t.Run("insert_int16", func(t *testing.T) {
-		insertT(t, schemapb.DataType_Int16,
+		w, err := newInsertEventWriter(schemapb.DataType_Int16)
+		assert.Nil(t, err)
+		insertT(t, schemapb.DataType_Int16, w,
 			func(w *insertEventWriter) error {
 				return w.AddDataToPayload([]int16{1, 2, 3})
 			},
@@ -219,7 +224,9 @@ func TestInsertEvent(t *testing.T) {
 	})
 
 	t.Run("insert_int32", func(t *testing.T) {
-		insertT(t, schemapb.DataType_Int32,
+		w, err := newInsertEventWriter(schemapb.DataType_Int32)
+		assert.Nil(t, err)
+		insertT(t, schemapb.DataType_Int32, w,
 			func(w *insertEventWriter) error {
 				return w.AddDataToPayload([]int32{1, 2, 3})
 			},
@@ -233,7 +240,9 @@ func TestInsertEvent(t *testing.T) {
 	})
 
 	t.Run("insert_int64", func(t *testing.T) {
-		insertT(t, schemapb.DataType_Int64,
+		w, err := newInsertEventWriter(schemapb.DataType_Int64)
+		assert.Nil(t, err)
+		insertT(t, schemapb.DataType_Int64, w,
 			func(w *insertEventWriter) error {
 				return w.AddDataToPayload([]int64{1, 2, 3})
 			},
@@ -247,7 +256,9 @@ func TestInsertEvent(t *testing.T) {
 	})
 
 	t.Run("insert_float32", func(t *testing.T) {
-		insertT(t, schemapb.DataType_Float,
+		w, err := newInsertEventWriter(schemapb.DataType_Float)
+		assert.Nil(t, err)
+		insertT(t, schemapb.DataType_Float, w,
 			func(w *insertEventWriter) error {
 				return w.AddDataToPayload([]float32{1, 2, 3})
 			},
@@ -261,7 +272,9 @@ func TestInsertEvent(t *testing.T) {
 	})
 
 	t.Run("insert_float64", func(t *testing.T) {
-		insertT(t, schemapb.DataType_Double,
+		w, err := newInsertEventWriter(schemapb.DataType_Double)
+		assert.Nil(t, err)
+		insertT(t, schemapb.DataType_Double, w,
 			func(w *insertEventWriter) error {
 				return w.AddDataToPayload([]float64{1, 2, 3})
 			},
@@ -275,7 +288,9 @@ func TestInsertEvent(t *testing.T) {
 	})
 
 	t.Run("insert_binary_vector", func(t *testing.T) {
-		insertT(t, schemapb.DataType_BinaryVector,
+		w, err := newInsertEventWriter(schemapb.DataType_BinaryVector, 16)
+		assert.Nil(t, err)
+		insertT(t, schemapb.DataType_BinaryVector, w,
 			func(w *insertEventWriter) error {
 				return w.AddDataToPayload([]byte{1, 2, 3, 4}, 16)
 			},
@@ -289,7 +304,9 @@ func TestInsertEvent(t *testing.T) {
 	})
 
 	t.Run("insert_float_vector", func(t *testing.T) {
-		insertT(t, schemapb.DataType_FloatVector,
+		w, err := newInsertEventWriter(schemapb.DataType_FloatVector, 2)
+		assert.Nil(t, err)
+		insertT(t, schemapb.DataType_FloatVector, w,
 			func(w *insertEventWriter) error {
 				return w.AddDataToPayload([]float32{1, 2, 3, 4}, 2)
 			},
@@ -354,181 +371,8 @@ func TestInsertEvent(t *testing.T) {
 }
 
 /* #nosec G103 */
+// delete data will always be saved as string(pk + ts) to binlog
 func TestDeleteEvent(t *testing.T) {
-	deleteT := func(t *testing.T,
-		dt schemapb.DataType,
-		ir1 func(w *deleteEventWriter) error,
-		ir2 func(w *deleteEventWriter) error,
-		iw func(w *deleteEventWriter) error,
-		ev interface{},
-	) {
-		w, err := newDeleteEventWriter(dt)
-		assert.Nil(t, err)
-		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
-		err = ir1(w)
-		assert.Nil(t, err)
-		err = iw(w)
-		assert.NotNil(t, err)
-		err = ir2(w)
-		assert.Nil(t, err)
-		err = w.Finish()
-		assert.Nil(t, err)
-
-		var buf bytes.Buffer
-		err = w.Write(&buf)
-		assert.Nil(t, err)
-		w.Close()
-
-		wBuf := buf.Bytes()
-		st := UnsafeReadInt64(wBuf, binary.Size(eventHeader{}))
-		assert.Equal(t, Timestamp(st), tsoutil.ComposeTS(10, 0))
-		et := UnsafeReadInt64(wBuf, binary.Size(eventHeader{})+int(unsafe.Sizeof(st)))
-		assert.Equal(t, Timestamp(et), tsoutil.ComposeTS(100, 0))
-
-		payloadOffset := binary.Size(eventHeader{}) + binary.Size(insertEventData{})
-		pBuf := wBuf[payloadOffset:]
-		pR, err := NewPayloadReader(dt, pBuf)
-		assert.Nil(t, err)
-		values, _, err := pR.GetDataFromPayload()
-		assert.Nil(t, err)
-		assert.Equal(t, values, ev)
-		pR.Close()
-
-		r, err := newEventReader(dt, bytes.NewBuffer(wBuf))
-		assert.Nil(t, err)
-		payload, _, err := r.GetDataFromPayload()
-		assert.Nil(t, err)
-		assert.Equal(t, payload, ev)
-
-		r.Close()
-	}
-
-	t.Run("delete_bool", func(t *testing.T) {
-		deleteT(t, schemapb.DataType_Bool,
-			func(w *deleteEventWriter) error {
-				return w.AddDataToPayload([]bool{true, false, true})
-			},
-			func(w *deleteEventWriter) error {
-				return w.AddDataToPayload([]bool{false, true, false})
-			},
-			func(w *deleteEventWriter) error {
-				return w.AddDataToPayload([]int{1, 2, 3, 4, 5})
-			},
-			[]bool{true, false, true, false, true, false})
-	})
-
-	t.Run("delete_int8", func(t *testing.T) {
-		deleteT(t, schemapb.DataType_Int8,
-			func(w *deleteEventWriter) error {
-				return w.AddDataToPayload([]int8{1, 2, 3})
-			},
-			func(w *deleteEventWriter) error {
-				return w.AddDataToPayload([]int8{4, 5, 6})
-			},
-			func(w *deleteEventWriter) error {
-				return w.AddDataToPayload([]int{1, 2, 3, 4, 5})
-			},
-			[]int8{1, 2, 3, 4, 5, 6})
-	})
-
-	t.Run("delete_int16", func(t *testing.T) {
-		deleteT(t, schemapb.DataType_Int16,
-			func(w *deleteEventWriter) error {
-				return w.AddDataToPayload([]int16{1, 2, 3})
-			},
-			func(w *deleteEventWriter) error {
-				return w.AddDataToPayload([]int16{4, 5, 6})
-			},
-			func(w *deleteEventWriter) error {
-				return w.AddDataToPayload([]int{1, 2, 3, 4, 5})
-			},
-			[]int16{1, 2, 3, 4, 5, 6})
-	})
-
-	t.Run("delete_int32", func(t *testing.T) {
-		deleteT(t, schemapb.DataType_Int32,
-			func(w *deleteEventWriter) error {
-				return w.AddDataToPayload([]int32{1, 2, 3})
-			},
-			func(w *deleteEventWriter) error {
-				return w.AddDataToPayload([]int32{4, 5, 6})
-			},
-			func(w *deleteEventWriter) error {
-				return w.AddDataToPayload([]int{1, 2, 3, 4, 5})
-			},
-			[]int32{1, 2, 3, 4, 5, 6})
-	})
-
-	t.Run("delete_int64", func(t *testing.T) {
-		deleteT(t, schemapb.DataType_Int64,
-			func(w *deleteEventWriter) error {
-				return w.AddDataToPayload([]int64{1, 2, 3})
-			},
-			func(w *deleteEventWriter) error {
-				return w.AddDataToPayload([]int64{4, 5, 6})
-			},
-			func(w *deleteEventWriter) error {
-				return w.AddDataToPayload([]int{1, 2, 3, 4, 5})
-			},
-			[]int64{1, 2, 3, 4, 5, 6})
-	})
-
-	t.Run("delete_float32", func(t *testing.T) {
-		deleteT(t, schemapb.DataType_Float,
-			func(w *deleteEventWriter) error {
-				return w.AddDataToPayload([]float32{1, 2, 3})
-			},
-			func(w *deleteEventWriter) error {
-				return w.AddDataToPayload([]float32{4, 5, 6})
-			},
-			func(w *deleteEventWriter) error {
-				return w.AddDataToPayload([]int{1, 2, 3, 4, 5})
-			},
-			[]float32{1, 2, 3, 4, 5, 6})
-	})
-
-	t.Run("delete_float64", func(t *testing.T) {
-		deleteT(t, schemapb.DataType_Double,
-			func(w *deleteEventWriter) error {
-				return w.AddDataToPayload([]float64{1, 2, 3})
-			},
-			func(w *deleteEventWriter) error {
-				return w.AddDataToPayload([]float64{4, 5, 6})
-			},
-			func(w *deleteEventWriter) error {
-				return w.AddDataToPayload([]int{1, 2, 3, 4, 5})
-			},
-			[]float64{1, 2, 3, 4, 5, 6})
-	})
-
-	t.Run("delete_binary_vector", func(t *testing.T) {
-		deleteT(t, schemapb.DataType_BinaryVector,
-			func(w *deleteEventWriter) error {
-				return w.AddDataToPayload([]byte{1, 2, 3, 4}, 16)
-			},
-			func(w *deleteEventWriter) error {
-				return w.AddDataToPayload([]byte{5, 6, 7, 8}, 16)
-			},
-			func(w *deleteEventWriter) error {
-				return w.AddDataToPayload([]int{1, 2, 3, 4, 5, 6}, 16)
-			},
-			[]byte{1, 2, 3, 4, 5, 6, 7, 8})
-	})
-
-	t.Run("delete_float_vector", func(t *testing.T) {
-		deleteT(t, schemapb.DataType_FloatVector,
-			func(w *deleteEventWriter) error {
-				return w.AddDataToPayload([]float32{1, 2, 3, 4}, 2)
-			},
-			func(w *deleteEventWriter) error {
-				return w.AddDataToPayload([]float32{5, 6, 7, 8}, 2)
-			},
-			func(w *deleteEventWriter) error {
-				return w.AddDataToPayload([]int{1, 2, 3, 4, 5, 6}, 2)
-			},
-			[]float32{1, 2, 3, 4, 5, 6, 7, 8})
-	})
-
 	t.Run("delete_string", func(t *testing.T) {
 		w, err := newDeleteEventWriter(schemapb.DataType_String)
 		assert.Nil(t, err)

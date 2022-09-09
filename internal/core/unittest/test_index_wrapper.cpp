@@ -359,8 +359,7 @@ INSTANTIATE_TEST_CASE_P(
                       std::pair(knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT, knowhere::metric::TANIMOTO),
                       std::pair(knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP, knowhere::metric::JACCARD),
                       std::pair(knowhere::IndexEnum::INDEX_HNSW, knowhere::metric::L2),
-                      std::pair(knowhere::IndexEnum::INDEX_ANNOY, knowhere::metric::L2)
-                      ));
+                      std::pair(knowhere::IndexEnum::INDEX_ANNOY, knowhere::metric::L2)));
 
 TEST_P(IndexWrapperTest, Constructor) {
     auto index =

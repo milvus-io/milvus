@@ -78,4 +78,9 @@ KnowhereSetIndexSliceSize(const int64_t size) {
     knowhere::KnowhereConfig::SetIndexFileSliceSize(size);
 }
 
+int64_t
+KnowhereGetIndexSliceSize() {
+    return knowhere::KnowhereConfig::GetIndexFileSliceSize();
+}
+
 }  // namespace milvus::config
