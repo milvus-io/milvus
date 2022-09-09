@@ -24,7 +24,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/common"
@@ -203,48 +202,14 @@ func TestIndexCoord(t *testing.T) {
 	})
 
 	t.Run("FlushedSegmentWatcher", func(t *testing.T) {
-		segInfo := &datapb.SegmentInfo{
-			ID:             segID + 1,
-			CollectionID:   collID,
-			PartitionID:    partID,
-			InsertChannel:  "",
-			NumOfRows:      2048,
-			State:          commonpb.SegmentState_Flushed,
-			MaxRowNum:      4096,
-			LastExpireTime: 0,
-			StartPosition: &internalpb.MsgPosition{
-				Timestamp: createTs,
-			},
-			DmlPosition: nil,
-			Binlogs: []*datapb.FieldBinlog{
-				{
-					FieldID: fieldID,
-					Binlogs: []*datapb.Binlog{
-						{
-							LogPath: "file1",
-						},
-						{
-							LogPath: "file2",
-						},
-					},
-				},
-			},
-			Statslogs:           nil,
-			Deltalogs:           nil,
-			CreatedByCompaction: true,
-			CompactionFrom:      []int64{segID},
-			DroppedAt:           0,
-		}
-		value, err := proto.Marshal(segInfo)
-		assert.NoError(t, err)
-
-		err = ic.etcdKV.Save(path.Join(util.FlushedSegmentPrefix, strconv.FormatInt(collID, 10), strconv.FormatInt(partID, 10), strconv.FormatInt(segInfo.ID, 10)), string(value))
+		segmentID := segID + 1
+		err = ic.etcdKV.Save(path.Join(util.FlushedSegmentPrefix, strconv.FormatInt(collID, 10), strconv.FormatInt(partID, 10), strconv.FormatInt(segmentID, 10)), string(strconv.FormatInt(segmentID, 10)))
 		assert.NoError(t, err)
 
 		req := &indexpb.GetSegmentIndexStateRequest{
 			CollectionID: collID,
 			IndexName:    indexName,
-			SegmentIDs:   []UniqueID{segInfo.ID},
+			SegmentIDs:   []UniqueID{segmentID},
 		}
 		resp, err := ic.GetSegmentIndexState(ctx, req)
 		assert.NoError(t, err)

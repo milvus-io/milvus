@@ -115,6 +115,7 @@ func (i *IndexNode) QueryJobs(ctx context.Context, req *indexpb.QueryJobsRequest
 				state:          info.state,
 				indexFiles:     info.indexFiles[:],
 				serializedSize: info.serializedSize,
+				failReason:     info.failReason,
 			}
 		}
 	})

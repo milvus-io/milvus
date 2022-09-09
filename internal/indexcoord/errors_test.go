@@ -17,7 +17,10 @@
 package indexcoord
 
 import (
+	"errors"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 
 	"go.uber.org/zap"
 
@@ -47,4 +50,12 @@ func TestErrIndexCoordIsUnhealthy(t *testing.T) {
 	for _, nodeID := range nodeIDList {
 		log.Info("TestErrIndexCoordIsUnhealthy", zap.Error(errIndexCoordIsUnhealthy(nodeID)))
 	}
+}
+
+func TestErrSegmentNotExist(t *testing.T) {
+	segID := UniqueID(435846569243121068)
+	errMsg := msgSegmentNotFound(segID)
+	log.Info("TestErrSegmentNotExist", zap.String("errMsg", errMsg))
+	err := errSegmentNotFound(segID)
+	assert.True(t, errors.Is(err, ErrSegmentNotFound))
 }

@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/kv"
@@ -102,12 +103,8 @@ func (kc *Catalog) AddSegment(ctx context.Context, segment *datapb.SegmentInfo) 
 
 	// save handoff req if segment is flushed
 	if segment.State == commonpb.SegmentState_Flushed {
-		flushedSegmentSegBytes, err := proto.Marshal(segment)
-		if err != nil {
-			return fmt.Errorf("failed to marshal segment: %d, error: %w", segment.GetID(), err)
-		}
 		flushSegKey := buildFlushedSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
-		kvs[flushSegKey] = string(flushedSegmentSegBytes)
+		kvs[flushSegKey] = strconv.FormatInt(segment.GetID(), 10)
 	}
 
 	return kc.Txn.MultiSave(kvs)
@@ -132,12 +129,8 @@ func (kc *Catalog) AlterSegments(ctx context.Context, modSegments []*datapb.Segm
 
 		// save handoff req if segment is flushed
 		if segment.State == commonpb.SegmentState_Flushed {
-			flushedSegmentSegBytes, err := proto.Marshal(segment)
-			if err != nil {
-				return fmt.Errorf("failed to marshal segment: %d, error: %w", segment.GetID(), err)
-			}
 			flushSegKey := buildFlushedSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
-			kv[flushSegKey] = string(flushedSegmentSegBytes)
+			kv[flushSegKey] = strconv.FormatInt(segment.GetID(), 10)
 		}
 	}
 

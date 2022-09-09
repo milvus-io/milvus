@@ -39,3 +39,7 @@ func msgDataCoordIsUnhealthy(coordID UniqueID) string {
 func errDataCoordIsUnhealthy(coordID UniqueID) error {
 	return errors.New(msgDataCoordIsUnhealthy(coordID))
 }
+
+func msgSegmentNotFound(segID UniqueID) string {
+	return fmt.Sprintf("failed to get segment %d", segID)
+}
