@@ -273,14 +273,11 @@ func (w *PayloadWriter) AddDoubleToPayload(msgs []float64) error {
 
 func (w *PayloadWriter) AddOneStringToPayload(msg string) error {
 	length := len(msg)
-	if length == 0 {
-		return errors.New("can't add empty string into payload")
-	}
-
 	cmsg := C.CString(msg)
 	clength := C.int(length)
 	defer C.free(unsafe.Pointer(cmsg))
 
+	// the C.AddOneStringToPayload can handle empty string
 	status := C.AddOneStringToPayload(w.payloadWriterPtr, cmsg, clength)
 	return HandleCStatus(&status, "AddOneStringToPayload failed")
 }

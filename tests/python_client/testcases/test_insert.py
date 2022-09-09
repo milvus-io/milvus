@@ -1203,22 +1203,6 @@ class TestInsertString(TestcaseBase):
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_insert_string_field_empty(self):
-        """
-        target: test create collection with string field 
-        method: 1.create a collection  
-                2.Insert string field with empty data
-        expected: raise an error
-        """
-        c_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(name=c_name)
-        nb = 1000
-        data = cf.gen_default_list_data(nb)
-        data[2] = [""for _ in range(nb)]
-        error = {ct.err_code: 1, ct.err_msg: f'value of varchar field {ct.default_string_field_name} cannot be empty string'}
-        collection_w.insert(data, check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L1)
     def test_insert_string_field_space(self):
         """
         target: test create collection with string field 
