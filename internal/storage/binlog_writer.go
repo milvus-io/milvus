@@ -23,6 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 // BinlogType is to distinguish different files saving different data.
@@ -148,14 +149,25 @@ type InsertBinlogWriter struct {
 }
 
 // NextInsertEventWriter returns an event writer to write insert data to an event.
-func (writer *InsertBinlogWriter) NextInsertEventWriter() (*insertEventWriter, error) {
+func (writer *InsertBinlogWriter) NextInsertEventWriter(dim ...int) (*insertEventWriter, error) {
 	if writer.isClosed() {
 		return nil, fmt.Errorf("binlog has closed")
 	}
-	event, err := newInsertEventWriter(writer.PayloadDataType)
+
+	var event *insertEventWriter
+	var err error
+	if typeutil.IsVectorType(writer.PayloadDataType) {
+		if len(dim) != 1 {
+			return nil, fmt.Errorf("incorrect input numbers")
+		}
+		event, err = newInsertEventWriter(writer.PayloadDataType, dim[0])
+	} else {
+		event, err = newInsertEventWriter(writer.PayloadDataType)
+	}
 	if err != nil {
 		return nil, err
 	}
+
 	writer.eventWriters = append(writer.eventWriters, event)
 	return event, nil
 }

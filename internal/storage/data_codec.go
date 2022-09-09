@@ -71,6 +71,7 @@ const InvalidUniqueID = UniqueID(-1)
 type Blob struct {
 	Key   string
 	Value []byte
+	Size  int64
 }
 
 // BlobList implements sort.Interface for a list of Blob
@@ -298,7 +299,20 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 
 		// encode fields
 		writer = NewInsertBinlogWriter(field.DataType, insertCodec.Schema.ID, partitionID, segmentID, field.FieldID)
-		eventWriter, err := writer.NextInsertEventWriter()
+		var eventWriter *insertEventWriter
+		var err error
+		if typeutil.IsVectorType(field.DataType) {
+			switch field.DataType {
+			case schemapb.DataType_FloatVector:
+				eventWriter, err = writer.NextInsertEventWriter(singleData.(*FloatVectorFieldData).Dim)
+			case schemapb.DataType_BinaryVector:
+				eventWriter, err = writer.NextInsertEventWriter(singleData.(*BinaryVectorFieldData).Dim)
+			default:
+				return nil, nil, fmt.Errorf("undefined data type %d", field.DataType)
+			}
+		} else {
+			eventWriter, err = writer.NextInsertEventWriter()
+		}
 		if err != nil {
 			writer.Close()
 			return nil, nil, err
@@ -1206,6 +1220,29 @@ func (codec *IndexFileBinlogCodec) serializeImpl(
 	}, nil
 }
 
+// SerializeIndexParams serilizes index params as blob.
+func (codec *IndexFileBinlogCodec) SerializeIndexParams(
+	indexBuildID UniqueID,
+	version int64,
+	collectionID UniqueID,
+	partitionID UniqueID,
+	segmentID UniqueID,
+	fieldID UniqueID,
+	indexParams map[string]string,
+	indexName string,
+	indexID UniqueID) (*Blob, error) {
+	ts := Timestamp(time.Now().UnixNano())
+
+	// save index params.
+	// querycoord will parse index extra info from binlog, better to let this key appear first.
+	params, _ := json.Marshal(indexParams)
+	indexParamBlob, err := codec.serializeImpl(indexBuildID, version, collectionID, partitionID, segmentID, fieldID, indexName, indexID, IndexParamsKey, params, ts)
+	if err != nil {
+		return nil, err
+	}
+	return indexParamBlob, nil
+}
+
 // Serialize serilizes data as blobs.
 func (codec *IndexFileBinlogCodec) Serialize(
 	indexBuildID UniqueID,
@@ -1228,8 +1265,7 @@ func (codec *IndexFileBinlogCodec) Serialize(
 
 	// save index params.
 	// querycoord will parse index extra info from binlog, better to let this key appear first.
-	params, _ := json.Marshal(indexParams)
-	indexParamBlob, err := codec.serializeImpl(indexBuildID, version, collectionID, partitionID, segmentID, fieldID, indexName, indexID, IndexParamsKey, params, ts)
+	indexParamBlob, err := codec.SerializeIndexParams(indexBuildID, version, collectionID, partitionID, segmentID, fieldID, indexParams, indexName, indexID)
 	if err != nil {
 		return nil, err
 	}

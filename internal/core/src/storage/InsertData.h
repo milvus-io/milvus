@@ -15,20 +15,34 @@
 // limitations under the License.
 
 #pragma once
-#include <string>
 
-namespace milvus::config {
+#include <vector>
+#include <memory>
 
-void
-KnowhereInitImpl(const char*);
+#include "storage/DataCodec.h"
 
-std::string
-KnowhereSetSimdType(const char*);
+namespace milvus::storage {
 
-void
-KnowhereSetIndexSliceSize(const int64_t size);
+class InsertData : public DataCodec {
+ public:
+    explicit InsertData(std::shared_ptr<FieldData> data) : DataCodec(data, CodecType::InsertDataType) {
+    }
 
-int64_t
-KnowhereGetIndexSliceSize();
+    std::vector<uint8_t>
+    Serialize(StorageType medium) override;
 
-}  // namespace milvus::config
+    void
+    SetFieldDataMeta(const FieldDataMeta& meta) override;
+
+ public:
+    std::vector<uint8_t>
+    serialize_to_remote_file();
+
+    std::vector<uint8_t>
+    serialize_to_local_file();
+
+ private:
+    std::optional<FieldDataMeta> field_data_meta_;
+};
+
+}  // namespace milvus::storage

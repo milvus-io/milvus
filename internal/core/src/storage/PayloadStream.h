@@ -18,36 +18,22 @@
 
 #include <vector>
 #include <memory>
-#include <arrow/api.h>
-#include <arrow/io/interfaces.h>
-#include <parquet/arrow/writer.h>
-#include <parquet/arrow/reader.h>
-#include "ColumnType.h"
 
-namespace wrapper {
+#include <arrow/api.h>
+#include <arrow/io/api.h>
+
+#include "storage/Types.h"
+
+namespace milvus::storage {
 
 class PayloadOutputStream;
 class PayloadInputStream;
 
-constexpr int EMPTY_DIMENSION = -1;
-
-struct PayloadWriter {
-    ColumnType columnType;
-    int dimension;  // binary vector, float vector
-    std::shared_ptr<arrow::ArrayBuilder> builder;
-    std::shared_ptr<arrow::Schema> schema;
-    std::shared_ptr<PayloadOutputStream> output;
+struct Payload {
+    DataType data_type;
+    const uint8_t* raw_data;
     int rows;
-};
-
-struct PayloadReader {
-    ColumnType column_type;
-    std::shared_ptr<PayloadInputStream> input;
-    std::unique_ptr<parquet::arrow::FileReader> reader;
-    std::shared_ptr<arrow::Table> table;
-    std::shared_ptr<arrow::ChunkedArray> column;
-    std::shared_ptr<arrow::Array> array;
-    bool* bValues;
+    std::optional<int> dimension;
 };
 
 class PayloadOutputStream : public arrow::io::OutputStream {
@@ -102,4 +88,4 @@ class PayloadInputStream : public arrow::io::RandomAccessFile {
     bool closed_;
 };
 
-}  // namespace wrapper
+}  // namespace milvus::storage

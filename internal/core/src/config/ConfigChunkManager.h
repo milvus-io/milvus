@@ -15,20 +15,45 @@
 // limitations under the License.
 
 #pragma once
+
 #include <string>
 
-namespace milvus::config {
+namespace milvus::ChunkMangerConfig {
 
 void
-KnowhereInitImpl(const char*);
+SetAddress(const std::string& address);
 
 std::string
-KnowhereSetSimdType(const char*);
+GetAddress();
 
 void
-KnowhereSetIndexSliceSize(const int64_t size);
+SetAccessKey(const std::string& access_key);
 
-int64_t
-KnowhereGetIndexSliceSize();
+std::string
+GetAccessKey();
 
-}  // namespace milvus::config
+void
+SetAccessValue(const std::string& access_value);
+
+std::string
+GetAccessValue();
+
+void
+SetUseSSL(bool use_ssl);
+
+bool
+GetUseSSL();
+
+void
+SetBucketName(const std::string& bucket_name);
+
+std::string
+GetBucketName();
+
+void
+SetLocalBucketName(const std::string& path_prefix);
+
+std::string
+GetLocalBucketName();
+
+}  // namespace milvus::ChunkMangerConfig

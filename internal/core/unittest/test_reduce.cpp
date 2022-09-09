@@ -27,7 +27,7 @@ std::default_random_engine e(42);
 SubSearchResultUniq
 GenSubSearchResult(const int64_t nq,
                    const int64_t topk,
-                   const knowhere::MetricType &metric_type,
+                   const knowhere::MetricType& metric_type,
                    const int64_t round_decimal) {
     constexpr int64_t limit = 1000000L;
     bool is_ip = (metric_type == knowhere::metric::IP);
@@ -53,7 +53,7 @@ GenSubSearchResult(const int64_t nq,
     return sub_result;
 }
 
-template<class queue_type>
+template <class queue_type>
 void
 CheckSubSearchResult(const int64_t nq,
                      const int64_t topk,
@@ -74,7 +74,7 @@ CheckSubSearchResult(const int64_t nq,
     }
 }
 
-template<class queue_type>
+template <class queue_type>
 void
 TestSubSearchResultMerge(const knowhere::MetricType& metric_type,
                          const int64_t iteration,

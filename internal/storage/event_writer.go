@@ -20,10 +20,12 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 // EventTypeCode represents event type by code
@@ -209,8 +211,17 @@ func newDescriptorEvent() *descriptorEvent {
 	}
 }
 
-func newInsertEventWriter(dataType schemapb.DataType) (*insertEventWriter, error) {
-	payloadWriter, err := NewPayloadWriter(dataType)
+func newInsertEventWriter(dataType schemapb.DataType, dim ...int) (*insertEventWriter, error) {
+	var payloadWriter *PayloadWriter
+	var err error
+	if typeutil.IsVectorType(dataType) {
+		if len(dim) != 1 {
+			return nil, fmt.Errorf("incorrect input numbers")
+		}
+		payloadWriter, err = NewPayloadWriter(dataType, dim[0])
+	} else {
+		payloadWriter, err = NewPayloadWriter(dataType)
+	}
 	if err != nil {
 		return nil, err
 	}

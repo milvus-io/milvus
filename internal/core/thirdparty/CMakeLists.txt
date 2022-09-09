@@ -63,6 +63,7 @@ add_subdirectory( protobuf )
 add_subdirectory( boost_ext )
 add_subdirectory( arrow )
 add_subdirectory( rocksdb )
+#add_subdirectory( aws_sdk )
 
 # ******************************* Thridparty marisa ********************************
 # TODO: support win.

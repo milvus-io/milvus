@@ -23,20 +23,19 @@ extern "C" {
 #include <stdint.h>
 #include <stdbool.h>
 
+#include "common/type_c.h"
+
 typedef struct CBuffer {
     char* data;
     int length;
 } CBuffer;
 
-typedef struct CStatus {
-    int error_code;
-    const char* error_msg;
-} CStatus;
-
 //============= payload writer ======================
 typedef void* CPayloadWriter;
 CPayloadWriter
 NewPayloadWriter(int columnType);
+CPayloadWriter
+NewVectorPayloadWriter(int columnType, int dim);
 CStatus
 AddBooleanToPayload(CPayloadWriter payloadWriter, bool* values, int length);
 CStatus
@@ -72,7 +71,7 @@ typedef void* CPayloadReader;
 CPayloadReader
 NewPayloadReader(int columnType, uint8_t* buffer, int64_t buf_size);
 CStatus
-GetBoolFromPayload(CPayloadReader payloadReader, bool** values, int* length);
+GetBoolFromPayload(CPayloadReader payloadReader, int idx, bool* value);
 CStatus
 GetInt8FromPayload(CPayloadReader payloadReader, int8_t** values, int* length);
 CStatus

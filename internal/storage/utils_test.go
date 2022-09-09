@@ -19,6 +19,8 @@ package storage
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
+	"fmt"
 	"math/rand"
 	"strconv"
 	"testing"
@@ -1238,4 +1240,16 @@ func TestFieldDataToBytes(t *testing.T) {
 	err = binaryRead(endian, bs, receiver)
 	assert.NoError(t, err)
 	assert.ElementsMatch(t, f10.Data, receiver)
+}
+
+func TestJson(t *testing.T) {
+	extras := make(map[string]string)
+	extras["IndexBuildID"] = "10"
+	extras["KEY"] = "IVF_1"
+	ExtraBytes, err := json.Marshal(extras)
+	assert.NoError(t, err)
+	ExtraLength := int32(len(ExtraBytes))
+
+	fmt.Print(string(ExtraBytes))
+	fmt.Println(ExtraLength)
 }

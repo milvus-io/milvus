@@ -14,9 +14,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "PayloadStream.h"
+#include "arrow/api.h"
 
-namespace wrapper {
+#include "storage/PayloadStream.h"
+#include "exceptions/EasyAssert.h"
+
+namespace milvus::storage {
 
 PayloadOutputStream::PayloadOutputStream() {
     buffer_.reserve(1024 * 1024);
@@ -118,4 +121,4 @@ PayloadInputStream::GetSize() {
     return arrow::Result<int64_t>(size_);
 }
 
-}  // namespace wrapper
+}  // namespace milvus::storage

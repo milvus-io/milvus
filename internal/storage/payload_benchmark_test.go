@@ -4,6 +4,8 @@ import (
 	"math/rand"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
@@ -14,7 +16,8 @@ const (
 )
 
 func BenchmarkPayloadReader_Bool(b *testing.B) {
-	w, _ := NewPayloadWriter(schemapb.DataType_Bool)
+	w, err := NewPayloadWriter(schemapb.DataType_Bool)
+	assert.NoError(b, err)
 	defer w.ReleasePayloadWriter()
 	data := make([]bool, 0, numElements)
 	for i := 0; i < numElements; i++ {
@@ -42,7 +45,8 @@ func BenchmarkPayloadReader_Bool(b *testing.B) {
 }
 
 func BenchmarkPayloadReader_Int32(b *testing.B) {
-	w, _ := NewPayloadWriter(schemapb.DataType_Int32)
+	w, err := NewPayloadWriter(schemapb.DataType_Int32)
+	assert.NoError(b, err)
 	defer w.ReleasePayloadWriter()
 	data := make([]int32, 0, numElements)
 	for i := 0; i < numElements; i++ {
@@ -70,7 +74,8 @@ func BenchmarkPayloadReader_Int32(b *testing.B) {
 }
 
 func BenchmarkPayloadReader_Int64(b *testing.B) {
-	w, _ := NewPayloadWriter(schemapb.DataType_Int64)
+	w, err := NewPayloadWriter(schemapb.DataType_Int64)
+	assert.NoError(b, err)
 	defer w.ReleasePayloadWriter()
 	data := make([]int64, 0, numElements)
 	for i := 0; i < numElements; i++ {
@@ -98,7 +103,8 @@ func BenchmarkPayloadReader_Int64(b *testing.B) {
 }
 
 func BenchmarkPayloadReader_Float32(b *testing.B) {
-	w, _ := NewPayloadWriter(schemapb.DataType_Float)
+	w, err := NewPayloadWriter(schemapb.DataType_Float)
+	assert.NoError(b, err)
 	defer w.ReleasePayloadWriter()
 	data := make([]float32, 0, numElements)
 	for i := 0; i < numElements; i++ {
@@ -126,7 +132,8 @@ func BenchmarkPayloadReader_Float32(b *testing.B) {
 }
 
 func BenchmarkPayloadReader_Float64(b *testing.B) {
-	w, _ := NewPayloadWriter(schemapb.DataType_Double)
+	w, err := NewPayloadWriter(schemapb.DataType_Double)
+	assert.NoError(b, err)
 	defer w.ReleasePayloadWriter()
 	data := make([]float64, 0, numElements)
 	for i := 0; i < numElements; i++ {
@@ -154,7 +161,8 @@ func BenchmarkPayloadReader_Float64(b *testing.B) {
 }
 
 func BenchmarkPayloadReader_FloatVector(b *testing.B) {
-	w, _ := NewPayloadWriter(schemapb.DataType_FloatVector)
+	w, err := NewPayloadWriter(schemapb.DataType_FloatVector, vectorDim)
+	assert.NoError(b, err)
 	defer w.ReleasePayloadWriter()
 	data := make([]float32, 0, numElements*vectorDim)
 	for i := 0; i < numElements; i++ {
@@ -182,12 +190,13 @@ func BenchmarkPayloadReader_FloatVector(b *testing.B) {
 }
 
 func BenchmarkPayloadReader_BinaryVector(b *testing.B) {
-	w, _ := NewPayloadWriter(schemapb.DataType_BinaryVector)
+	w, err := NewPayloadWriter(schemapb.DataType_BinaryVector, vectorDim)
+	assert.NoError(b, err)
 	defer w.ReleasePayloadWriter()
 	data := make([]byte, numElements*vectorDim/8)
 	rand.Read(data)
 
-	err := w.AddBinaryVectorToPayload(data, vectorDim)
+	err = w.AddBinaryVectorToPayload(data, vectorDim)
 	if err != nil {
 		panic(err)
 	}

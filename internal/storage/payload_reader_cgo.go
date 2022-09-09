@@ -87,15 +87,18 @@ func (r *PayloadReaderCgo) GetBoolFromPayload() ([]bool, error) {
 		return nil, errors.New("incorrect data type")
 	}
 
-	var cMsg *C.bool
-	var cSize C.int
-
-	status := C.GetBoolFromPayload(r.payloadReaderPtr, &cMsg, &cSize)
-	if err := HandleCStatus(&status, "GetBoolFromPayload failed"); err != nil {
+	length, err := r.GetPayloadLengthFromReader()
+	if err != nil {
 		return nil, err
 	}
+	slice := make([]bool, length)
+	for i := 0; i < length; i++ {
+		status := C.GetBoolFromPayload(r.payloadReaderPtr, C.int(i), (*C.bool)(&slice[i]))
+		if err := HandleCStatus(&status, "GetBoolFromPayload failed"); err != nil {
+			return nil, err
+		}
+	}
 
-	slice := (*[1 << 28]bool)(unsafe.Pointer(cMsg))[:cSize:cSize]
 	return slice, nil
 }
 
