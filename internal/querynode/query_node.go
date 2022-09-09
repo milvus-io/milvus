@@ -242,13 +242,17 @@ func (node *QueryNode) Init() error {
 
 		sig := make(chan struct{})
 
+		var wg sync.WaitGroup
+		wg.Add(cpuNum)
 		for i := 0; i < cpuNum; i++ {
 			node.cgoPool.Submit(func() (interface{}, error) {
 				runtime.LockOSThread()
+				wg.Done()
 				<-sig
 				return nil, nil
 			})
 		}
+		wg.Wait()
 		close(sig)
 
 		node.metaReplica = newCollectionReplica(node.cgoPool)
