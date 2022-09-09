@@ -58,16 +58,22 @@ type nodeCtx struct {
 	downstream             []*nodeCtx
 	downstreamInputChanIdx map[string]int
 
-	closeCh chan struct{}  // notify work to exit
-	closeWg sync.WaitGroup // block Close until work exit
+	closeCh chan struct{} // notify work to exit
 }
 
 // Start invoke Node `Start` method and start a worker goroutine
 func (nodeCtx *nodeCtx) Start() {
 	nodeCtx.node.Start()
 
-	nodeCtx.closeWg.Add(1)
 	go nodeCtx.work()
+}
+
+func isCloseMsg(msgs []Msg) bool {
+	if len(msgs) == 1 {
+		msg, ok := msgs[0].(*MsgStreamMsg)
+		return ok && msg.isCloseMsg
+	}
+	return false
 }
 
 // work handles node work spinning
@@ -75,7 +81,6 @@ func (nodeCtx *nodeCtx) Start() {
 // 2. invoke node.Operate
 // 3. deliver the Operate result to downstream nodes
 func (nodeCtx *nodeCtx) work() {
-	defer nodeCtx.closeWg.Done()
 	name := fmt.Sprintf("nodeCtxTtChecker-%s", nodeCtx.node.Name())
 	var checker *timerecord.GroupChecker
 	if enableTtChecker {
@@ -98,8 +103,19 @@ func (nodeCtx *nodeCtx) work() {
 				nodeCtx.collectInputMessages()
 				inputs = nodeCtx.inputMessages
 			}
-			n := nodeCtx.node
-			res = n.Operate(inputs)
+			// the input message decides whether the operate method is executed
+			if isCloseMsg(inputs) {
+				res = inputs
+			}
+			if len(res) == 0 {
+				n := nodeCtx.node
+				res = n.Operate(inputs)
+			}
+			// the res decide whether the node should be closed.
+			if isCloseMsg(res) {
+				close(nodeCtx.closeCh)
+				nodeCtx.node.Close()
+			}
 
 			if enableTtChecker {
 				checker.Check(name)
@@ -127,13 +143,7 @@ func (nodeCtx *nodeCtx) work() {
 // Close handles cleanup logic and notify worker to quit
 func (nodeCtx *nodeCtx) Close() {
 	if nodeCtx.node.IsInputNode() {
-		nodeCtx.node.Close() // close input msgStream
-		close(nodeCtx.closeCh)
-		nodeCtx.closeWg.Wait()
-	} else {
-		close(nodeCtx.closeCh)
-		nodeCtx.closeWg.Wait()
-		nodeCtx.node.Close() // close output msgStream, and etc...
+		nodeCtx.node.Close()
 	}
 }
 
@@ -146,10 +156,7 @@ func (nodeCtx *nodeCtx) deliverMsg(wg *sync.WaitGroup, msg Msg, inputChanIdx int
 			log.Warn(fmt.Sprintln(err))
 		}
 	}()
-	select {
-	case <-nodeCtx.closeCh:
-	case nodeCtx.inputChannels[inputChanIdx] <- msg:
-	}
+	nodeCtx.inputChannels[inputChanIdx] <- msg
 }
 
 func (nodeCtx *nodeCtx) collectInputMessages() {
@@ -161,17 +168,13 @@ func (nodeCtx *nodeCtx) collectInputMessages() {
 	// and move them to inputMessages.
 	for i := 0; i < inputsNum; i++ {
 		channel := nodeCtx.inputChannels[i]
-		select {
-		case <-nodeCtx.closeCh:
+		msg, ok := <-channel
+		if !ok {
+			// TODO: add status
+			log.Warn("input channel closed")
 			return
-		case msg, ok := <-channel:
-			if !ok {
-				// TODO: add status
-				log.Warn("input channel closed")
-				return
-			}
-			nodeCtx.inputMessages[i] = msg
 		}
+		nodeCtx.inputMessages[i] = msg
 	}
 
 	// timeTick alignment check
@@ -191,16 +194,12 @@ func (nodeCtx *nodeCtx) collectInputMessages() {
 				for nodeCtx.inputMessages[i].TimeTick() != latestTime {
 					log.Debug("Try to align timestamp", zap.Uint64("t1", latestTime), zap.Uint64("t2", nodeCtx.inputMessages[i].TimeTick()))
 					channel := nodeCtx.inputChannels[i]
-					select {
-					case <-nodeCtx.closeCh:
+					msg, ok := <-channel
+					if !ok {
+						log.Warn("input channel closed")
 						return
-					case msg, ok := <-channel:
-						if !ok {
-							log.Warn("input channel closed")
-							return
-						}
-						nodeCtx.inputMessages[i] = msg
 					}
+					nodeCtx.inputMessages[i] = msg
 				}
 			}
 			sign <- struct{}{}
@@ -210,7 +209,6 @@ func (nodeCtx *nodeCtx) collectInputMessages() {
 		case <-time.After(10 * time.Second):
 			panic("Fatal, misaligned time tick, please restart pulsar")
 		case <-sign:
-		case <-nodeCtx.closeCh:
 		}
 	}
 }

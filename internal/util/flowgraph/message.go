@@ -32,6 +32,7 @@ type MsgStreamMsg struct {
 	timestampMax   Timestamp
 	startPositions []*MsgPosition
 	endPositions   []*MsgPosition
+	isCloseMsg     bool
 }
 
 // GenerateMsgStreamMsg is used to create a new MsgStreamMsg object

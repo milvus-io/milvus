@@ -28,8 +28,9 @@ import (
 // InputNode is the entry point of flowgragh
 type InputNode struct {
 	BaseNode
-	inStream msgstream.MsgStream
-	name     string
+	inStream     msgstream.MsgStream
+	name         string
+	closeMsgChan chan struct{}
 }
 
 // IsInputNode returns whether Node is InputNode
@@ -44,10 +45,15 @@ func (inNode *InputNode) Start() {
 
 // Close implements node
 func (inNode *InputNode) Close() {
-	inNode.inStream.Close()
-	log.Debug("message stream closed",
-		zap.String("node name", inNode.name),
-	)
+	select {
+	case <-inNode.closeMsgChan:
+		return
+	default:
+		close(inNode.closeMsgChan)
+		log.Debug("message stream closed",
+			zap.String("node name", inNode.name),
+		)
+	}
 }
 
 // Name returns node name
@@ -62,37 +68,44 @@ func (inNode *InputNode) InStream() msgstream.MsgStream {
 
 // Operate consume a message pack from msgstream and return
 func (inNode *InputNode) Operate(in []Msg) []Msg {
-	msgPack, ok := <-inNode.inStream.Chan()
-	if !ok {
-		log.Warn("MsgStream closed", zap.Any("input node", inNode.Name()))
-		return []Msg{}
-	}
+	select {
+	case <-inNode.closeMsgChan:
+		inNode.inStream.Close()
+		return []Msg{&MsgStreamMsg{
+			isCloseMsg: true,
+		}}
+	case msgPack, ok := <-inNode.inStream.Chan():
+		if !ok {
+			log.Warn("MsgStream closed", zap.Any("input node", inNode.Name()))
+			return []Msg{}
+		}
 
-	// TODO: add status
-	if msgPack == nil {
-		return nil
-	}
-	var spans []opentracing.Span
-	for _, msg := range msgPack.Msgs {
-		sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
-		sp.LogFields(oplog.String("input_node name", inNode.Name()))
-		spans = append(spans, sp)
-		msg.SetTraceCtx(ctx)
-	}
+		// TODO: add status
+		if msgPack == nil {
+			return nil
+		}
+		var spans []opentracing.Span
+		for _, msg := range msgPack.Msgs {
+			sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+			sp.LogFields(oplog.String("input_node name", inNode.Name()))
+			spans = append(spans, sp)
+			msg.SetTraceCtx(ctx)
+		}
 
-	var msgStreamMsg Msg = &MsgStreamMsg{
-		tsMessages:     msgPack.Msgs,
-		timestampMin:   msgPack.BeginTs,
-		timestampMax:   msgPack.EndTs,
-		startPositions: msgPack.StartPositions,
-		endPositions:   msgPack.EndPositions,
-	}
+		var msgStreamMsg Msg = &MsgStreamMsg{
+			tsMessages:     msgPack.Msgs,
+			timestampMin:   msgPack.BeginTs,
+			timestampMax:   msgPack.EndTs,
+			startPositions: msgPack.StartPositions,
+			endPositions:   msgPack.EndPositions,
+		}
 
-	for _, span := range spans {
-		span.Finish()
-	}
+		for _, span := range spans {
+			span.Finish()
+		}
 
-	return []Msg{msgStreamMsg}
+		return []Msg{msgStreamMsg}
+	}
 }
 
 // NewInputNode composes an InputNode with provided MsgStream, name and parameters
@@ -102,8 +115,9 @@ func NewInputNode(inStream msgstream.MsgStream, nodeName string, maxQueueLength 
 	baseNode.SetMaxParallelism(maxParallelism)
 
 	return &InputNode{
-		BaseNode: baseNode,
-		inStream: inStream,
-		name:     nodeName,
+		BaseNode:     baseNode,
+		inStream:     inStream,
+		name:         nodeName,
+		closeMsgChan: make(chan struct{}),
 	}
 }

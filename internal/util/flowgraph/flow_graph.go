@@ -89,13 +89,6 @@ func (fg *TimeTickedFlowGraph) Close() {
 	fg.stopOnce.Do(func() {
 		for _, v := range fg.nodeCtx {
 			if v.node.IsInputNode() {
-				// close inputNode first
-				v.Close()
-			}
-		}
-		for _, v := range fg.nodeCtx {
-			if !v.node.IsInputNode() {
-				// close other nodes
 				v.Close()
 			}
 		}

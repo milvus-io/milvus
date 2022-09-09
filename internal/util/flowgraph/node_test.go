@@ -73,10 +73,7 @@ func TestNodeCtx_Start(t *testing.T) {
 	produceStream.Produce(&msgPack)
 
 	nodeName := "input_node"
-	inputNode := &InputNode{
-		inStream: msgStream,
-		name:     nodeName,
-	}
+	inputNode := NewInputNode(msgStream, nodeName, 100, 100)
 
 	node := &nodeCtx{
 		node:                   inputNode,
