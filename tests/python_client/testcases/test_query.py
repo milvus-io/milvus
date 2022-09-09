@@ -269,8 +269,6 @@ class TestQueryParams(TestcaseBase):
                                        check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
     @pytest.mark.tags(CaseLabel.L2)
-    # @pytest.mark.xfail(reason="issue #12210 #7522")
-    @pytest.mark.xfail(reason="https://github.com/milvus-io/milvus/issues/7522")
     def test_query_expr_by_bool_field(self):
         """
         target: test query by bool field and output bool field
@@ -287,18 +285,24 @@ class TestQueryParams(TestcaseBase):
         assert self.collection_wrap.num_entities == ct.default_nb
         self.collection_wrap.load()
 
-        # Now don't support output bool field
-        # res, _ = self.collection_wrap.query(default_term_expr, output_fields=[ct.default_bool_field_name])
-        # assert set(res[0].keys()) == {ct.default_int64_field_name, ct.default_bool_field_name}
+        # output bool field
+        res, _ = self.collection_wrap.query(default_term_expr, output_fields=[ct.default_bool_field_name])
+        assert set(res[0].keys()) == {ct.default_int64_field_name, ct.default_bool_field_name}
 
-        exprs = [f'{ct.default_bool_field_name} in [false]',
-                 f'{ct.default_bool_field_name} in [True]',
-                 f'{ct.default_bool_field_name} == true',
-                 f'{ct.default_bool_field_name} == False']
-        # exprs.append(f'{ct.default_bool_field_name} in [0]')
-        for expr in exprs:
-            res, _ = self.collection_wrap.query(expr)
-            assert len(res) == ct.default_nb / 2
+        # not support filter bool field with expr 'bool in [0/ 1]'
+        not_support_expr = f'{ct.default_bool_field_name} in [0]'
+        error = {ct.err_code: 1, ct.err_msg: 'error: value \"0\" in list cannot be casted to Bool'}
+        self.collection_wrap.query(not_support_expr, output_fields=[ct.default_bool_field_name],
+                                   check_task=CheckTasks.err_res, check_items=error)
+
+        # filter bool field by bool term expr
+        for bool_value in [True, False]:
+            exprs = [f'{ct.default_bool_field_name} in [{bool_value}]', f'{ct.default_bool_field_name} == {bool_value}']
+            for expr in exprs:
+                res, _ = self.collection_wrap.query(expr, output_fields=[ct.default_bool_field_name])
+                assert len(res) == ct.default_nb / 2
+                for _r in res:
+                    assert _r[ct.default_bool_field_name] == bool_value
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_expr_by_int8_field(self):
