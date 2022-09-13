@@ -28,14 +28,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/kv"
-
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -437,7 +436,6 @@ func (i *IndexCoord) CreateIndex(ctx context.Context, req *indexpb.CreateIndexRe
 		return ret, nil
 	}
 
-	i.garbageCollector.Notify()
 	ret.ErrorCode = commonpb.ErrorCode_Success
 	return ret, nil
 }
@@ -515,7 +513,7 @@ func (i *IndexCoord) GetSegmentIndexState(ctx context.Context, req *indexpb.GetS
 		States: make([]*indexpb.SegmentIndexState, 0),
 	}
 	indexID2CreateTs := i.metaTable.GetIndexIDByName(req.CollectionID, req.IndexName)
-	if len(indexID2CreateTs) != 1 {
+	if len(indexID2CreateTs) == 0 {
 		errMsg := fmt.Sprintf("there is no index on collection: %d with the index name: %s", req.CollectionID, req.IndexName)
 		log.Error("IndexCoord get index state fail", zap.Int64("collectionID", req.CollectionID),
 			zap.String("indexName", req.IndexName), zap.String("fail reason", errMsg))
@@ -526,15 +524,13 @@ func (i *IndexCoord) GetSegmentIndexState(ctx context.Context, req *indexpb.GetS
 			},
 		}, nil
 	}
-	for indexID := range indexID2CreateTs {
-		for _, segID := range req.SegmentIDs {
-			state := i.metaTable.GetSegmentIndexState(segID, indexID)
-			ret.States = append(ret.States, &indexpb.SegmentIndexState{
-				SegmentID:  segID,
-				State:      state.state,
-				FailReason: state.failReason,
-			})
-		}
+	for _, segID := range req.SegmentIDs {
+		state := i.metaTable.GetSegmentIndexState(segID)
+		ret.States = append(ret.States, &indexpb.SegmentIndexState{
+			SegmentID:  segID,
+			State:      state.state,
+			FailReason: state.failReason,
+		})
 	}
 	return ret, nil
 }
@@ -698,7 +694,7 @@ func (i *IndexCoord) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInf
 	}
 
 	log.Info("IndexCoord GetIndexFilePaths ", zap.Int("segIDs num", len(req.SegmentIDs)),
-		zap.Int("file path num", len(ret.SegmentInfo)), zap.Any("ret ", ret.SegmentInfo))
+		zap.Int("file path num", len(ret.SegmentInfo)))
 
 	return ret, nil
 }

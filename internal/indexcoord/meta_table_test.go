@@ -634,11 +634,11 @@ func TestMetaTable_GetSegmentIndexes(t *testing.T) {
 
 func TestMetaTable_GetSegmentIndexState(t *testing.T) {
 	mt := constructMetaTable(&indexcoord.Catalog{})
-	state := mt.GetSegmentIndexState(segID, indexID)
+	state := mt.GetSegmentIndexState(segID)
 	assert.Equal(t, commonpb.IndexState_Finished, state.state)
 
-	state = mt.GetSegmentIndexState(segID+1, indexID)
-	assert.Equal(t, commonpb.IndexState_IndexStateNone, state.state)
+	state = mt.GetSegmentIndexState(segID + 1)
+	assert.Equal(t, commonpb.IndexState_Finished, state.state)
 }
 
 func TestMetaTable_GetIndexBuildProgress(t *testing.T) {
@@ -1139,4 +1139,40 @@ func TestMetaTable_FinishTask(t *testing.T) {
 		})
 		assert.Error(t, err)
 	})
+}
+
+func TestMetaTable_MarkSegmentsIndexAsDeletedByBuildID(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		mt := constructMetaTable(&indexcoord.Catalog{
+			Txn: &mockETCDKV{
+				multiSave: func(m map[string]string) error {
+					return nil
+				},
+			},
+		})
+		err := mt.MarkSegmentsIndexAsDeletedByBuildID([]UniqueID{buildID})
+		assert.NoError(t, err)
+
+		err = mt.MarkSegmentsIndexAsDeletedByBuildID([]UniqueID{buildID})
+		assert.NoError(t, err)
+	})
+
+	t.Run("fail", func(t *testing.T) {
+		mt := constructMetaTable(&indexcoord.Catalog{
+			Txn: &mockETCDKV{
+				multiSave: func(m map[string]string) error {
+					return errors.New("error")
+				},
+			},
+		})
+		err := mt.MarkSegmentsIndexAsDeletedByBuildID([]UniqueID{buildID})
+		assert.Error(t, err)
+	})
+}
+
+func TestMetaTable_GetDeletedSegmentIndexes(t *testing.T) {
+	mt := createMetaTable(&indexcoord.Catalog{})
+
+	segIndexes := mt.GetDeletedSegmentIndexes()
+	assert.Equal(t, 1, len(segIndexes))
 }

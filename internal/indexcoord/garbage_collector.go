@@ -22,12 +22,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
+
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 )
 
@@ -38,8 +39,6 @@ type garbageCollector struct {
 	wg             sync.WaitGroup
 	gcFileDuration time.Duration
 	gcMetaDuration time.Duration
-
-	notify chan struct{}
 
 	metaTable        *metaTable
 	chunkManager     storage.ChunkManager
@@ -73,13 +72,6 @@ func (gc *garbageCollector) Start() {
 func (gc *garbageCollector) Stop() {
 	gc.cancel()
 	gc.wg.Wait()
-}
-
-func (gc *garbageCollector) Notify() {
-	select {
-	case gc.notify <- struct{}{}:
-	default:
-	}
 }
 
 func (gc *garbageCollector) recycleUnusedIndexes() {
@@ -122,6 +114,8 @@ func (gc *garbageCollector) recycleUnusedIndexes() {
 								zap.Int64("nodeID", segIdx.NodeID), zap.Error(err))
 							continue
 						}
+						log.Info("IndexCoord remove segment index meta success", zap.Int64("buildID", segIdx.BuildID),
+							zap.Int64("nodeID", segIdx.NodeID))
 					}
 				}
 			}
@@ -170,11 +164,9 @@ func (gc *garbageCollector) recycleSegIndexesMeta() {
 			}
 		}
 	}
-
+	//segIndexes := gc.metaTable.GetDeletedSegmentIndexes()
 	for _, meta := range segIndexes {
 		if meta.IsDeleted || gc.metaTable.IsIndexDeleted(meta.CollectionID, meta.IndexID) {
-			log.Info("index meta need to recycle it", zap.Int64("buildID", meta.BuildID),
-				zap.Int64("nodeID", meta.NodeID))
 			if meta.NodeID != 0 {
 				// wait for releasing reference lock
 				continue
@@ -187,6 +179,7 @@ func (gc *garbageCollector) recycleSegIndexesMeta() {
 					zap.Int64("nodeID", meta.NodeID), zap.Error(err))
 				continue
 			}
+			log.Debug("index meta recycle success", zap.Int64("buildID", meta.BuildID))
 		}
 	}
 }
@@ -204,8 +197,6 @@ func (gc *garbageCollector) recycleUnusedSegIndexes() {
 			log.Info("IndexCoord garbageCollector recycleUnusedMetaLoop context has done")
 			return
 		case <-ticker.C:
-			gc.recycleSegIndexesMeta()
-		case <-gc.notify:
 			gc.recycleSegIndexesMeta()
 		}
 	}
