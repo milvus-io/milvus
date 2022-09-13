@@ -320,7 +320,7 @@ func TestFlowGraph_DDNode_Operate(t *testing.T) {
 		var msgStreamMsg Msg = flowgraph.GenerateMsgStreamMsg(tsMessages, 0, 0, nil, nil)
 
 		// Test
-		flowGraphRetryOpt = retry.Attempts(1)
+		setFlowGraphRetryOpt(retry.Attempts(1))
 		assert.Panics(t, func() {
 			ddn.Operate([]Msg{msgStreamMsg})
 		})

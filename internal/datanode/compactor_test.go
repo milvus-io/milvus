@@ -24,13 +24,16 @@ import (
 	"time"
 
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -247,10 +250,19 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 	})
 
 	t.Run("Test merge", func(t *testing.T) {
+		collectionID := int64(1)
+		meta := NewMetaFactory().GetCollectionMeta(collectionID, "test", schemapb.DataType_Int64)
+
+		rc := &mocks.RootCoord{}
+		rc.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
+			Return(&milvuspb.DescribeCollectionResponse{
+				Schema: meta.GetSchema(),
+			}, nil)
+		replica, err := newReplica(context.Background(), rc, nil, collectionID)
+		require.NoError(t, err)
 		t.Run("Merge without expiration", func(t *testing.T) {
 			Params.CommonCfg.EntityExpirationTTL = 0
 			iData := genInsertDataWithExpiredTS()
-			meta := NewMetaFactory().GetCollectionMeta(1, "test", schemapb.DataType_Int64)
 
 			iblobs, err := getInsertBlobs(100, iData, meta)
 			require.NoError(t, err)
@@ -264,13 +276,15 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 				1: 10000,
 			}
 
-			ct := &compactionTask{}
-			idata, segStats, numOfRow, err := ct.merge(mitr, dm, meta.GetSchema(), ct.GetCurrentTime())
+			ct := &compactionTask{
+				Replica: replica,
+			}
+			idata, segment, numOfRow, err := ct.merge(mitr, dm, meta.GetSchema(), ct.GetCurrentTime())
 			assert.NoError(t, err)
 			assert.Equal(t, int64(2), numOfRow)
 			assert.Equal(t, 1, len(idata))
 			assert.NotEmpty(t, idata[0].Data)
-			assert.NotEmpty(t, segStats)
+			assert.NotNil(t, segment)
 		})
 		t.Run("Merge without expiration2", func(t *testing.T) {
 			Params.CommonCfg.EntityExpirationTTL = 0
@@ -292,13 +306,15 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 
 			dm := map[interface{}]Timestamp{}
 
-			ct := &compactionTask{}
-			idata, segStats, numOfRow, err := ct.merge(mitr, dm, meta.GetSchema(), ct.GetCurrentTime())
+			ct := &compactionTask{
+				Replica: replica,
+			}
+			idata, segment, numOfRow, err := ct.merge(mitr, dm, meta.GetSchema(), ct.GetCurrentTime())
 			assert.NoError(t, err)
 			assert.Equal(t, int64(2), numOfRow)
 			assert.Equal(t, 2, len(idata))
 			assert.NotEmpty(t, idata[0].Data)
-			assert.NotEmpty(t, segStats)
+			assert.NotEmpty(t, segment)
 		})
 
 		t.Run("Merge with expiration", func(t *testing.T) {
@@ -318,12 +334,14 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 				1: 10000,
 			}
 
-			ct := &compactionTask{}
-			idata, segStats, numOfRow, err := ct.merge(mitr, dm, meta.GetSchema(), genTimestamp())
+			ct := &compactionTask{
+				Replica: replica,
+			}
+			idata, segment, numOfRow, err := ct.merge(mitr, dm, meta.GetSchema(), genTimestamp())
 			assert.NoError(t, err)
 			assert.Equal(t, int64(1), numOfRow)
 			assert.Equal(t, 1, len(idata))
-			assert.NotEmpty(t, segStats)
+			assert.NotEmpty(t, segment)
 		})
 
 		t.Run("Merge with meta error", func(t *testing.T) {
@@ -343,7 +361,9 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 				1: 10000,
 			}
 
-			ct := &compactionTask{}
+			ct := &compactionTask{
+				Replica: replica,
+			}
 			_, _, _, err = ct.merge(mitr, dm, &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 				{DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{
 					{Key: "dim", Value: "64"},
@@ -369,7 +389,9 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 				1: 10000,
 			}
 
-			ct := &compactionTask{}
+			ct := &compactionTask{
+				Replica: replica,
+			}
 			_, _, _, err = ct.merge(mitr, dm, &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 				{DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{
 					{Key: "dim", Value: "dim"},
@@ -575,7 +597,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 				PlanID:           10080,
 				SegmentBinlogs:   segBinlogs,
 				StartTime:        0,
-				TimeoutInSeconds: 1,
+				TimeoutInSeconds: 10,
 				Type:             datapb.CompactionType_InnerCompaction,
 				Timetravel:       30000,
 				Channel:          "channelname",
@@ -760,7 +782,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 					},
 				},
 				StartTime:        0,
-				TimeoutInSeconds: 1,
+				TimeoutInSeconds: 10,
 				Type:             datapb.CompactionType_MergeCompaction,
 				Timetravel:       40000,
 				Channel:          "channelname",
@@ -892,7 +914,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 				},
 			},
 			StartTime:        0,
-			TimeoutInSeconds: 1,
+			TimeoutInSeconds: 10,
 			Type:             datapb.CompactionType_MergeCompaction,
 			Timetravel:       40000,
 			Channel:          "channelname",

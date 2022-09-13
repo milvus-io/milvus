@@ -183,7 +183,7 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 			} else {
 				err := retry.Do(dn.ctx, func() error {
 					return dn.flushManager.flushDelData(buf.(*DelDataBuf), segmentToFlush, fgMsg.endPositions[0])
-				}, flowGraphRetryOpt)
+				}, getFlowGraphRetryOpt())
 				if err != nil {
 					err = fmt.Errorf("failed to flush delete data, err = %s", err)
 					log.Error(err.Error())
