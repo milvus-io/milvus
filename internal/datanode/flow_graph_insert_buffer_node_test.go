@@ -235,7 +235,7 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	assert.Panics(t, func() { iBNode.Operate([]flowgraph.Msg{&inMsg}) })
 
 	// test flushBufferData failed
-	flowGraphRetryOpt = retry.Attempts(1)
+	setFlowGraphRetryOpt(retry.Attempts(1))
 	inMsg = genFlowGraphInsertMsg(insertChannelName)
 	iBNode.flushManager = &mockFlushManager{returnError: true}
 	iBNode.insertBuffer.Store(inMsg.insertMessages[0].SegmentID, &BufferData{})

@@ -19,6 +19,7 @@ package datanode
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand"
 	"testing"
@@ -56,7 +57,7 @@ func (kv *mockDataCM) MultiRead(keys []string) ([][]byte, error) {
 		FieldID: common.RowIDField,
 		Min:     0,
 		Max:     10,
-		BF:      bloom.NewWithEstimates(bloomFilterSize, maxBloomFalsePositive),
+		BF:      bloom.NewWithEstimates(100000, maxBloomFalsePositive),
 	}
 	buffer, _ := json.Marshal(stats)
 	return [][]byte{buffer}, nil
@@ -67,14 +68,16 @@ type mockPkfilterMergeError struct {
 }
 
 func (kv *mockPkfilterMergeError) MultiRead(keys []string) ([][]byte, error) {
-	stats := &storage.PrimaryKeyStats{
-		FieldID: common.RowIDField,
-		Min:     0,
-		Max:     10,
-		BF:      bloom.NewWithEstimates(1, 0.0001),
-	}
-	buffer, _ := json.Marshal(stats)
-	return [][]byte{buffer}, nil
+	/*
+		stats := &storage.PrimaryKeyStats{
+			FieldID: common.RowIDField,
+			Min:     0,
+			Max:     10,
+			BF:      bloom.NewWithEstimates(1, 0.0001),
+		}
+		buffer, _ := json.Marshal(stats)
+		return [][]byte{buffer}, nil*/
+	return nil, errors.New("mocked multi read error")
 }
 
 type mockDataCMError struct {
@@ -566,6 +569,7 @@ func TestSegmentReplica_InterfaceMethod(t *testing.T) {
 				assert.Nil(t, err)
 
 				if test.metaServiceErr {
+					sr.collSchema = nil
 					rc.setCollectionID(-1)
 				} else {
 					rc.setCollectionID(1)
@@ -657,7 +661,15 @@ func TestSegmentReplica_InterfaceMethod(t *testing.T) {
 		require.True(t, sr.hasSegment(1, true))
 		require.True(t, sr.hasSegment(2, true))
 
-		sr.mergeFlushedSegments(3, 1, 0, 100, []UniqueID{1, 2}, "channel", 15)
+		s := &Segment{
+			segmentID:    3,
+			collectionID: 1,
+			partitionID:  0,
+			channelName:  "channel",
+
+			numRows: 15,
+		}
+		sr.mergeFlushedSegments(s, 100, []UniqueID{1, 2})
 		assert.True(t, sr.hasSegment(3, true))
 		assert.False(t, sr.hasSegment(1, true))
 		assert.False(t, sr.hasSegment(2, true))

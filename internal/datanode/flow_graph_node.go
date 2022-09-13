@@ -17,6 +17,8 @@
 package datanode
 
 import (
+	"sync/atomic"
+
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/retry"
 )
@@ -33,3 +35,19 @@ type (
 )
 
 var flowGraphRetryOpt = retry.Attempts(5)
+
+var fgRetryOptVal atomic.Value
+
+func init() {
+	setFlowGraphRetryOpt(retry.Attempts(5))
+}
+
+// setFlowGraphRetryOpt set retry option for flowgraph
+// used for tests only
+func setFlowGraphRetryOpt(opt retry.Option) {
+	fgRetryOptVal.Store(opt)
+}
+
+func getFlowGraphRetryOpt() retry.Option {
+	return fgRetryOptVal.Load().(retry.Option)
+}

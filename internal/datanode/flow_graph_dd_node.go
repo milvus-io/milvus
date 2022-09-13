@@ -187,7 +187,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 	}
 	err := retry.Do(ddn.ctx, func() error {
 		return ddn.forwardDeleteMsg(forwardMsgs, msMsg.TimestampMin(), msMsg.TimestampMax())
-	}, flowGraphRetryOpt)
+	}, getFlowGraphRetryOpt())
 	if err != nil {
 		err = fmt.Errorf("DDNode forward delete msg failed, vChannel = %s, err = %s", ddn.vChannelName, err)
 		log.Error(err.Error())
