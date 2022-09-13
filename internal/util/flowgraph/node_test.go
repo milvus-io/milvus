@@ -20,6 +20,7 @@ import (
 	"context"
 	"math"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -80,6 +81,7 @@ func TestNodeCtx_Start(t *testing.T) {
 		inputChannels:          make([]chan Msg, 2),
 		downstreamInputChanIdx: make(map[string]int),
 		closeCh:                make(chan struct{}),
+		closeWg:                &sync.WaitGroup{},
 	}
 
 	for i := 0; i < len(node.inputChannels); i++ {

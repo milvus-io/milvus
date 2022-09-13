@@ -27,6 +27,7 @@ type TimeTickedFlowGraph struct {
 	nodeCtx   map[NodeName]*nodeCtx
 	stopOnce  sync.Once
 	startOnce sync.Once
+	closeWg   *sync.WaitGroup
 }
 
 // AddNode add Node into flowgraph
@@ -35,6 +36,7 @@ func (fg *TimeTickedFlowGraph) AddNode(node Node) {
 		node:                   node,
 		downstreamInputChanIdx: make(map[string]int),
 		closeCh:                make(chan struct{}),
+		closeWg:                fg.closeWg,
 	}
 	fg.nodeCtx[node.Name()] = &nodeCtx
 }
@@ -92,6 +94,7 @@ func (fg *TimeTickedFlowGraph) Close() {
 				v.Close()
 			}
 		}
+		fg.closeWg.Wait()
 	})
 }
 
@@ -99,6 +102,7 @@ func (fg *TimeTickedFlowGraph) Close() {
 func NewTimeTickedFlowGraph(ctx context.Context) *TimeTickedFlowGraph {
 	flowGraph := TimeTickedFlowGraph{
 		nodeCtx: make(map[string]*nodeCtx),
+		closeWg: &sync.WaitGroup{},
 	}
 
 	return &flowGraph
