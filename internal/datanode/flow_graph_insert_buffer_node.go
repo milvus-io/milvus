@@ -416,7 +416,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 				task.flushed,
 				task.dropped,
 				endPositions[0])
-		}, flowGraphRetryOpt)
+		}, getFlowGraphRetryOpt())
 		if err != nil {
 			metrics.DataNodeFlushBufferCount.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID()), metrics.FailLabel).Inc()
 			metrics.DataNodeFlushBufferCount.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID()), metrics.TotalLabel).Inc()

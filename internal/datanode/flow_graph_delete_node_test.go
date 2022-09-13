@@ -418,7 +418,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 
 		var fgMsg flowgraph.Msg = &msg
 
-		flowGraphRetryOpt = retry.Attempts(1)
+		setFlowGraphRetryOpt(retry.Attempts(1))
 		assert.Panics(te, func() {
 			delNode.Operate([]flowgraph.Msg{fgMsg})
 		})
@@ -462,7 +462,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		delNode.flushManager = NewRendezvousFlushManager(&allocator{}, cm, replica, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
 
 		var fgMsg flowgraph.Msg = &msg
-		flowGraphRetryOpt = retry.Attempts(1)
+		setFlowGraphRetryOpt(retry.Attempts(1))
 		assert.NotPanics(t, func() {
 			delNode.Operate([]flowgraph.Msg{fgMsg})
 		})
