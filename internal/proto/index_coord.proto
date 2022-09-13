@@ -252,4 +252,5 @@ message GetJobStatsResponse {
   int64 enqueue_job_num = 4;
   int64 task_slots = 5;
   repeated JobInfo job_infos = 6;
+  bool enable_disk = 7;
 }

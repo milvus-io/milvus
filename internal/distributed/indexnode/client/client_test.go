@@ -42,11 +42,11 @@ var ParamsGlobal paramtable.ComponentParam
 func Test_NewClient(t *testing.T) {
 	ClientParams.InitOnce(typeutil.IndexNodeRole)
 	ctx := context.Background()
-	client, err := NewClient(ctx, "")
+	client, err := NewClient(ctx, "", false)
 	assert.Nil(t, client)
 	assert.NotNil(t, err)
 
-	client, err = NewClient(ctx, "test")
+	client, err = NewClient(ctx, "test", false)
 	assert.Nil(t, err)
 	assert.NotNil(t, client)
 
@@ -143,7 +143,7 @@ func TestIndexNodeClient(t *testing.T) {
 	err = ins.Run()
 	assert.Nil(t, err)
 
-	inc, err := NewClient(ctx, "localhost:21121")
+	inc, err := NewClient(ctx, "localhost:21121", false)
 	assert.Nil(t, err)
 	assert.NotNil(t, inc)
 

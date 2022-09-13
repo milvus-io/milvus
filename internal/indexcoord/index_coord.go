@@ -193,15 +193,27 @@ func (i *IndexCoord) Init() error {
 			return
 		}
 		aliveNodeID := make([]UniqueID, 0)
-		for _, session := range sessions {
-			session := session
-			aliveNodeID = append(aliveNodeID, session.ServerID)
-			//go func() {
-			if err := i.nodeManager.AddNode(session.ServerID, session.Address); err != nil {
-				log.Error("IndexCoord", zap.Int64("ServerID", session.ServerID),
-					zap.Error(err))
+		if Params.IndexCoordCfg.BindIndexNodeMode {
+			if err = i.nodeManager.AddNode(Params.IndexCoordCfg.IndexNodeID, Params.IndexCoordCfg.IndexNodeAddress); err != nil {
+				log.Error("IndexCoord add node fail", zap.Int64("ServerID", Params.IndexCoordCfg.IndexNodeID),
+					zap.String("address", Params.IndexCoordCfg.IndexNodeAddress), zap.Error(err))
+				initErr = err
+				return
 			}
-			//}()
+			log.Debug("IndexCoord add node success", zap.String("IndexNode address", Params.IndexCoordCfg.IndexNodeAddress),
+				zap.Int64("nodeID", Params.IndexCoordCfg.IndexNodeID))
+			aliveNodeID = append(aliveNodeID, Params.IndexCoordCfg.IndexNodeID)
+			metrics.IndexCoordIndexNodeNum.WithLabelValues().Inc()
+		} else {
+			for _, session := range sessions {
+				session := session
+				if err := i.nodeManager.AddNode(session.ServerID, session.Address); err != nil {
+					log.Error("IndexCoord", zap.Int64("ServerID", session.ServerID),
+						zap.Error(err))
+					continue
+				}
+				aliveNodeID = append(aliveNodeID, session.ServerID)
+			}
 		}
 		log.Debug("IndexCoord", zap.Int("IndexNode number", len(i.nodeManager.GetAllClients())))
 		i.indexBuilder = newIndexBuilder(i.loopCtx, i, i.metaTable, aliveNodeID)
@@ -953,6 +965,9 @@ func (i *IndexCoord) watchNodeLoop() {
 					}
 				}
 				return
+			}
+			if Params.IndexCoordCfg.BindIndexNodeMode {
+				continue
 			}
 			log.Debug("IndexCoord watchNodeLoop event updated")
 			switch event.EventType {

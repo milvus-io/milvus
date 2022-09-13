@@ -19,6 +19,7 @@ package indexcoord
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/milvus-io/milvus/api/commonpb"
@@ -141,5 +142,110 @@ func TestNodeManager_PeekClient(t *testing.T) {
 		nodeID, client := nm.PeekClient(&model.SegmentIndex{})
 		assert.NotNil(t, client)
 		assert.Contains(t, []UniqueID{8, 9}, nodeID)
+	})
+}
+
+func TestNodeManager_ClientSupportDisk(t *testing.T) {
+	t.Run("support", func(t *testing.T) {
+		nm := &NodeManager{
+			ctx:  context.Background(),
+			lock: sync.RWMutex{},
+			nodeClients: map[UniqueID]types.IndexNode{
+				1: &indexnode.Mock{
+					CallGetJobStats: func(ctx context.Context, in *indexpb.GetJobStatsRequest) (*indexpb.GetJobStatsResponse, error) {
+						return &indexpb.GetJobStatsResponse{
+							Status: &commonpb.Status{
+								ErrorCode: commonpb.ErrorCode_Success,
+								Reason:    "",
+							},
+							TaskSlots:  1,
+							JobInfos:   nil,
+							EnableDisk: true,
+						}, nil
+					},
+				},
+			},
+		}
+
+		support := nm.ClientSupportDisk()
+		assert.True(t, support)
+	})
+
+	t.Run("not support", func(t *testing.T) {
+		nm := &NodeManager{
+			ctx:  context.Background(),
+			lock: sync.RWMutex{},
+			nodeClients: map[UniqueID]types.IndexNode{
+				1: &indexnode.Mock{
+					CallGetJobStats: func(ctx context.Context, in *indexpb.GetJobStatsRequest) (*indexpb.GetJobStatsResponse, error) {
+						return &indexpb.GetJobStatsResponse{
+							Status: &commonpb.Status{
+								ErrorCode: commonpb.ErrorCode_Success,
+								Reason:    "",
+							},
+							TaskSlots:  1,
+							JobInfos:   nil,
+							EnableDisk: false,
+						}, nil
+					},
+				},
+			},
+		}
+
+		support := nm.ClientSupportDisk()
+		assert.False(t, support)
+	})
+
+	t.Run("no indexnode", func(t *testing.T) {
+		nm := &NodeManager{
+			ctx:         context.Background(),
+			lock:        sync.RWMutex{},
+			nodeClients: map[UniqueID]types.IndexNode{},
+		}
+
+		support := nm.ClientSupportDisk()
+		assert.False(t, support)
+	})
+
+	t.Run("error", func(t *testing.T) {
+		nm := &NodeManager{
+			ctx:  context.Background(),
+			lock: sync.RWMutex{},
+			nodeClients: map[UniqueID]types.IndexNode{
+				1: &indexnode.Mock{
+					CallGetJobStats: func(ctx context.Context, in *indexpb.GetJobStatsRequest) (*indexpb.GetJobStatsResponse, error) {
+						return nil, errors.New("error")
+					},
+				},
+			},
+		}
+
+		support := nm.ClientSupportDisk()
+		assert.False(t, support)
+	})
+
+	t.Run("fail reason", func(t *testing.T) {
+		nm := &NodeManager{
+			ctx:  context.Background(),
+			lock: sync.RWMutex{},
+			nodeClients: map[UniqueID]types.IndexNode{
+				1: &indexnode.Mock{
+					CallGetJobStats: func(ctx context.Context, in *indexpb.GetJobStatsRequest) (*indexpb.GetJobStatsResponse, error) {
+						return &indexpb.GetJobStatsResponse{
+							Status: &commonpb.Status{
+								ErrorCode: commonpb.ErrorCode_UnexpectedError,
+								Reason:    "fail reason",
+							},
+							TaskSlots:  0,
+							JobInfos:   nil,
+							EnableDisk: false,
+						}, nil
+					},
+				},
+			},
+		}
+
+		support := nm.ClientSupportDisk()
+		assert.False(t, support)
 	})
 }

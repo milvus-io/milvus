@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/milvus-io/milvus/api/commonpb"
 	"github.com/milvus-io/milvus/api/schemapb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -71,4 +72,13 @@ func parseBuildIDFromFilePath(key string) (UniqueID, error) {
 
 func buildHandoffKey(collID, partID, segID UniqueID) string {
 	return fmt.Sprintf("%s/%d/%d/%d", util.HandoffSegmentPrefix, collID, partID, segID)
+}
+
+func GetIndexType(indexParams []*commonpb.KeyValuePair) string {
+	for _, param := range indexParams {
+		if param.Key == "index_type" {
+			return param.Value
+		}
+	}
+	return invalidIndex
 }

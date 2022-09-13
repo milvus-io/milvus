@@ -20,4 +20,7 @@ const (
 	// IndexAddTaskName is the name of the operation to add index task.
 	IndexAddTaskName    = "IndexAddTask"
 	CreateIndexTaskName = "CreateIndexTask"
+
+	diskAnnIndex = "DISKANN"
+	invalidIndex = "invalid"
 )
