@@ -15,7 +15,6 @@
 set -e
 # Print commands
 # set -x
-
 while (( "$#" )); do
   case "$1" in
 
@@ -23,7 +22,7 @@ while (( "$#" )); do
       RELEASE_NAME=$2
       shift 2
     ;;
-  
+
     -h|--help)
       { set +x; } 2>/dev/null
       HELP="
@@ -62,11 +61,17 @@ if [[ -n "${RELEASE_NAME:-}" ]]; then
    
     for restart_pod in ${restart_pods}
     do 
-      reason=$(kubectl get pod ${restart_pod} -n milvus-ci -o json | jq .status.containerStatuses[0].lastState.terminated.reason )
-      restart_count=$(kubectl get pod ${restart_pod} -n milvus-ci -o json | jq .status.containerStatuses[0].restartCount )
+      reason=$(kubectl get pod ${restart_pod} -n ${MILVUS_HELM_NAMESPACE}  -o json | jq .status.containerStatuses[0].lastState.terminated.reason )
+      restart_count=$(kubectl get pod ${restart_pod} -n${MILVUS_HELM_NAMESPACE}  -o json | jq .status.containerStatuses[0].restartCount )
       echo "${restart_pod} restarts ${restart_count}, last terminateed reason is ${reason}"
     done
     
+    echo "----------------Pod Events --------------------------------------------"
+    for pod in $(kubectl get pods -n ${MILVUS_HELM_NAMESPACE}  -o wide | grep "${MILVUS_HELM_RELEASE_NAME}-"  | awk '{print $1}')
+    do
+      echo "--------------------------------${pod}-----------------------------"
+      kubectl describe pod ${pod} -n ${MILVUS_HELM_NAMESPACE} 
+    done
 fi
 
 # Uninstall Milvus Helm Release
