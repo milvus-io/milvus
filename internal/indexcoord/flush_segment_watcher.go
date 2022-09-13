@@ -134,7 +134,7 @@ func (fsw *flushedSegmentWatcher) enqueueInternalTask(segmentID UniqueID) {
 	fsw.internalTaskMutex.Lock()
 
 	fsw.internalTasks[segmentID] = &internalTask{
-		state:       indexTaskInit,
+		state:       indexTaskPreparing,
 		segmentInfo: nil,
 	}
 	fsw.internalTaskMutex.Unlock()
@@ -588,6 +588,8 @@ func (fsw *flushedSegmentWatcher) pullSegmentInfo(segmentID UniqueID) error {
 }
 
 func (fsw *flushedSegmentWatcher) prepare(segID UniqueID) {
+	// set state to IndexTaskInit, ready to be processed
+	defer fsw.updateInternalTaskState(segID, indexTaskInit)
 	if err := fsw.pullSegmentInfo(segID); err != nil {
 		log.Error("flushedSegmentWatcher get segment info fail", zap.Int64("segID", segID),
 			zap.Error(err))
