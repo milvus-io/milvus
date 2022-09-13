@@ -99,6 +99,7 @@ type Core struct {
 	meta             IMetaTable
 	scheduler        IScheduler
 	broker           Broker
+	ddlTsLockManager DdlTsLockManager
 	garbageCollector GarbageCollector
 
 	metaKVCreator metaKVCreator
@@ -173,6 +174,14 @@ func (c *Core) sendTimeTick(t Timestamp, reason string) error {
 	return c.chanTimeTick.updateTimeTick(&ttMsg, reason)
 }
 
+func (c *Core) sendMinDdlTsAsTt() {
+	minDdlTs := c.ddlTsLockManager.GetMinDdlTs()
+	err := c.sendTimeTick(minDdlTs, "timetick loop")
+	if err != nil {
+		log.Warn("failed to send timetick", zap.Error(err))
+	}
+}
+
 func (c *Core) startTimeTickLoop() {
 	defer c.wg.Done()
 	ticker := time.NewTicker(Params.ProxyCfg.TimeTickInterval)
@@ -181,12 +190,7 @@ func (c *Core) startTimeTickLoop() {
 		case <-c.ctx.Done():
 			return
 		case <-ticker.C:
-			if ts, err := c.tsoAllocator.GenerateTSO(1); err == nil {
-				err := c.sendTimeTick(ts, "timetick loop")
-				if err != nil {
-					log.Warn("failed to send timetick", zap.Error(err))
-				}
-			}
+			c.sendMinDdlTsAsTt()
 		}
 	}
 }
@@ -439,6 +443,7 @@ func (c *Core) initInternal() error {
 	c.proxyClientManager = newProxyClientManager(c.proxyCreator)
 
 	c.broker = newServerBroker(c)
+	c.ddlTsLockManager = newDdlTsLockManager(c)
 	c.garbageCollector = newGarbageCollectorCtx(c)
 
 	c.proxyManager = newProxyManager(

@@ -52,7 +52,12 @@ func TestGarbageCollectorCtx_ReDropCollection(t *testing.T) {
 			return nil
 		}
 		ticker := newTickerWithMockFailStream() // failed to broadcast drop msg.
-		core := newTestCore(withBroker(broker), withTtSynchronizer(ticker))
+		tsoAllocator := newMockTsoAllocator()
+		tsoAllocator.GenerateTSOF = func(count uint32) (uint64, error) {
+			return 100, nil
+		}
+		core := newTestCore(withBroker(broker), withTtSynchronizer(ticker), withTsoAllocator(tsoAllocator))
+		core.ddlTsLockManager = newDdlTsLockManager(core)
 		gc := newGarbageCollectorCtx(core)
 		shardsNum := 2
 		pchans := ticker.getDmlChannelNames(shardsNum)
@@ -78,9 +83,15 @@ func TestGarbageCollectorCtx_ReDropCollection(t *testing.T) {
 			return errors.New("error mock RemoveCollection")
 		}
 		ticker := newTickerWithMockNormalStream()
+		tsoAllocator := newMockTsoAllocator()
+		tsoAllocator.GenerateTSOF = func(count uint32) (uint64, error) {
+			return 100, nil
+		}
 		core := newTestCore(withBroker(broker),
 			withTtSynchronizer(ticker),
+			withTsoAllocator(tsoAllocator),
 			withMeta(meta))
+		core.ddlTsLockManager = newDdlTsLockManager(core)
 		gc := newGarbageCollectorCtx(core)
 		gc.ReDropCollection(&model.Collection{}, 1000)
 		assert.True(t, releaseCollectionCalled)
@@ -106,9 +117,15 @@ func TestGarbageCollectorCtx_ReDropCollection(t *testing.T) {
 			return nil
 		}
 		ticker := newTickerWithMockNormalStream()
+		tsoAllocator := newMockTsoAllocator()
+		tsoAllocator.GenerateTSOF = func(count uint32) (uint64, error) {
+			return 100, nil
+		}
 		core := newTestCore(withBroker(broker),
 			withTtSynchronizer(ticker),
+			withTsoAllocator(tsoAllocator),
 			withMeta(meta))
+		core.ddlTsLockManager = newDdlTsLockManager(core)
 		gc := newGarbageCollectorCtx(core)
 		gc.ReDropCollection(&model.Collection{}, 1000)
 		assert.True(t, releaseCollectionCalled)
@@ -166,43 +183,57 @@ func TestGarbageCollectorCtx_RemoveCreatingCollection(t *testing.T) {
 	})
 }
 
-// func TestGarbageCollectorCtx_ReDropPartition(t *testing.T) {
-// 	t.Run("failed to GcPartitionData", func(t *testing.T) {
-// 		ticker := newTickerWithMockFailStream() // failed to broadcast drop msg.
-// 		shardsNum := 2
-// 		pchans := ticker.getDmlChannelNames(shardsNum)
-// 		core := newTestCore(withTtSynchronizer(ticker))
-// 		gc := newGarbageCollectorCtx(core)
-// 		gc.ReDropPartition(pchans, &model.Partition{}, 100000)
-// 	})
-//
-// 	t.Run("failed to RemovePartition", func(t *testing.T) {
-// 		ticker := newTickerWithMockNormalStream()
-// 		shardsNum := 2
-// 		pchans := ticker.getDmlChannelNames(shardsNum)
-// 		meta := newMockMetaTable()
-// 		meta.RemovePartitionFunc = func(ctx context.Context, collectionID UniqueID, partitionID UniqueID, ts Timestamp) error {
-// 			return errors.New("error mock RemovePartition")
-// 		}
-// 		core := newTestCore(withMeta(meta), withTtSynchronizer(ticker))
-// 		gc := newGarbageCollectorCtx(core)
-// 		gc.ReDropPartition(pchans, &model.Partition{}, 100000)
-// 	})
-//
-// 	t.Run("normal case", func(t *testing.T) {
-// 		ticker := newTickerWithMockNormalStream()
-// 		shardsNum := 2
-// 		pchans := ticker.getDmlChannelNames(shardsNum)
-// 		meta := newMockMetaTable()
-// 		removePartitionCalled := false
-// 		meta.RemovePartitionFunc = func(ctx context.Context, collectionID UniqueID, partitionID UniqueID, ts Timestamp) error {
-// 			removePartitionCalled = true
-// 			return nil
-// 		}
-// 		core := newTestCore(withMeta(meta), withTtSynchronizer(ticker))
-// 		gc := newGarbageCollectorCtx(core)
-// 		gc.ReDropPartition(pchans, &model.Partition{}, 100000)
-// 		assert.True(t, removePartitionCalled)
-// 	})
-// }
-//
+func TestGarbageCollectorCtx_ReDropPartition(t *testing.T) {
+	t.Run("failed to GcPartitionData", func(t *testing.T) {
+		ticker := newTickerWithMockFailStream() // failed to broadcast drop msg.
+		shardsNum := 2
+		pchans := ticker.getDmlChannelNames(shardsNum)
+		tsoAllocator := newMockTsoAllocator()
+		tsoAllocator.GenerateTSOF = func(count uint32) (uint64, error) {
+			return 100, nil
+		}
+		core := newTestCore(withTtSynchronizer(ticker), withTsoAllocator(tsoAllocator))
+		core.ddlTsLockManager = newDdlTsLockManager(core)
+		gc := newGarbageCollectorCtx(core)
+		gc.ReDropPartition(pchans, &model.Partition{}, 100000)
+	})
+
+	t.Run("failed to RemovePartition", func(t *testing.T) {
+		ticker := newTickerWithMockNormalStream()
+		shardsNum := 2
+		pchans := ticker.getDmlChannelNames(shardsNum)
+		meta := newMockMetaTable()
+		meta.RemovePartitionFunc = func(ctx context.Context, collectionID UniqueID, partitionID UniqueID, ts Timestamp) error {
+			return errors.New("error mock RemovePartition")
+		}
+		tsoAllocator := newMockTsoAllocator()
+		tsoAllocator.GenerateTSOF = func(count uint32) (uint64, error) {
+			return 100, nil
+		}
+		core := newTestCore(withMeta(meta), withTtSynchronizer(ticker), withTsoAllocator(tsoAllocator))
+		core.ddlTsLockManager = newDdlTsLockManager(core)
+		gc := newGarbageCollectorCtx(core)
+		gc.ReDropPartition(pchans, &model.Partition{}, 100000)
+	})
+
+	t.Run("normal case", func(t *testing.T) {
+		ticker := newTickerWithMockNormalStream()
+		shardsNum := 2
+		pchans := ticker.getDmlChannelNames(shardsNum)
+		meta := newMockMetaTable()
+		removePartitionCalled := false
+		meta.RemovePartitionFunc = func(ctx context.Context, collectionID UniqueID, partitionID UniqueID, ts Timestamp) error {
+			removePartitionCalled = true
+			return nil
+		}
+		tsoAllocator := newMockTsoAllocator()
+		tsoAllocator.GenerateTSOF = func(count uint32) (uint64, error) {
+			return 100, nil
+		}
+		core := newTestCore(withMeta(meta), withTtSynchronizer(ticker), withTsoAllocator(tsoAllocator))
+		core.ddlTsLockManager = newDdlTsLockManager(core)
+		gc := newGarbageCollectorCtx(core)
+		gc.ReDropPartition(pchans, &model.Partition{}, 100000)
+		assert.True(t, removePartitionCalled)
+	})
+}

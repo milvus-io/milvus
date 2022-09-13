@@ -4,6 +4,7 @@ import (
 	"context"
 	"math/rand"
 	"testing"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 
@@ -857,4 +858,39 @@ func TestCore_Rbac(t *testing.T) {
 		assert.NotNil(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	}
+}
+
+func TestCore_sendMinDdlTsAsTt(t *testing.T) {
+	ticker := newRocksMqTtSynchronizer()
+	ddlManager := newMockDdlTsLockManager()
+	ddlManager.GetMinDdlTsFunc = func() Timestamp {
+		return 100
+	}
+	c := newTestCore(
+		withTtSynchronizer(ticker),
+		withDdlTsLockManager(ddlManager))
+	c.sendMinDdlTsAsTt() // no session.
+	ticker.addSession(&sessionutil.Session{ServerID: TestRootCoordID})
+	c.sendMinDdlTsAsTt()
+}
+
+func TestCore_startTimeTickLoop(t *testing.T) {
+	ticker := newRocksMqTtSynchronizer()
+	ticker.addSession(&sessionutil.Session{ServerID: TestRootCoordID})
+	ddlManager := newMockDdlTsLockManager()
+	ddlManager.GetMinDdlTsFunc = func() Timestamp {
+		return 100
+	}
+	c := newTestCore(
+		withTtSynchronizer(ticker),
+		withDdlTsLockManager(ddlManager))
+	ctx, cancel := context.WithCancel(context.Background())
+	c.ctx = ctx
+	Params.ProxyCfg.TimeTickInterval = time.Millisecond
+	c.wg.Add(1)
+	go c.startTimeTickLoop()
+
+	time.Sleep(time.Millisecond * 4)
+	cancel()
+	c.wg.Wait()
 }

@@ -647,7 +647,9 @@ func withAbnormalCode() Opt {
 
 type mockScheduler struct {
 	IScheduler
-	AddTaskFunc func(t taskV2) error
+	AddTaskFunc     func(t taskV2) error
+	GetMinDdlTsFunc func() Timestamp
+	minDdlTs        Timestamp
 }
 
 func newMockScheduler() *mockScheduler {
@@ -659,6 +661,13 @@ func (m mockScheduler) AddTask(t taskV2) error {
 		return m.AddTaskFunc(t)
 	}
 	return nil
+}
+
+func (m mockScheduler) GetMinDdlTs() Timestamp {
+	if m.GetMinDdlTsFunc != nil {
+		return m.GetMinDdlTsFunc()
+	}
+	return m.minDdlTs
 }
 
 func withScheduler(sched IScheduler) Opt {
@@ -809,6 +818,9 @@ func newTickerWithMockFailStream() *timetickSync {
 
 func newMockNormalStream() *msgstream.MockMsgStream {
 	stream := msgstream.NewMockMsgStream()
+	stream.BroadcastFunc = func(pack *msgstream.MsgPack) error {
+		return nil
+	}
 	stream.BroadcastMarkFunc = func(pack *msgstream.MsgPack) (map[string][]msgstream.MessageID, error) {
 		return map[string][]msgstream.MessageID{}, nil
 	}
@@ -837,4 +849,34 @@ func newTickerWithFactory(factory msgstream.Factory) *timetickSync {
 	chans := map[UniqueID][]string{}
 	ticker := newTimeTickSync(ctx, TestRootCoordID, factory, chans)
 	return ticker
+}
+
+type mockDdlTsLockManager struct {
+	DdlTsLockManager
+	GetMinDdlTsFunc func() Timestamp
+}
+
+func (m mockDdlTsLockManager) GetMinDdlTs() Timestamp {
+	if m.GetMinDdlTsFunc != nil {
+		return m.GetMinDdlTsFunc()
+	}
+	return 100
+}
+
+func (m mockDdlTsLockManager) NotifyCollectionGc(ctx context.Context, coll *model.Collection) error {
+	return nil
+}
+
+func (m mockDdlTsLockManager) NotifyPartitionGc(ctx context.Context, pChannels []string, partition *model.Partition) error {
+	return nil
+}
+
+func newMockDdlTsLockManager() *mockDdlTsLockManager {
+	return &mockDdlTsLockManager{}
+}
+
+func withDdlTsLockManager(m DdlTsLockManager) Opt {
+	return func(c *Core) {
+		c.ddlTsLockManager = m
+	}
 }

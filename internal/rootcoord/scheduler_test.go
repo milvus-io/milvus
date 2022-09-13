@@ -3,8 +3,12 @@ package rootcoord
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/rand"
 	"testing"
+	"time"
+
+	"go.uber.org/atomic"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -103,7 +107,7 @@ func Test_scheduler_failed_to_set_ts(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func Test_scheduler_enqueu_normal_case(t *testing.T) {
+func Test_scheduler_enqueue_normal_case(t *testing.T) {
 	idAlloc := newMockIDAllocator()
 	tsoAlloc := newMockTsoAllocator()
 	idAlloc.AllocOneF = func() (UniqueID, error) {
@@ -165,4 +169,56 @@ func Test_scheduler_bg(t *testing.T) {
 	}
 
 	s.Stop()
+}
+
+func Test_scheduler_updateDdlMinTsLoop(t *testing.T) {
+	t.Run("normal case", func(t *testing.T) {
+		idAlloc := newMockIDAllocator()
+		tsoAlloc := newMockTsoAllocator()
+		tso := atomic.NewUint64(100)
+		idAlloc.AllocOneF = func() (UniqueID, error) {
+			return 100, nil
+		}
+		tsoAlloc.GenerateTSOF = func(count uint32) (uint64, error) {
+			got := tso.Inc()
+			return got, nil
+		}
+		ctx := context.Background()
+		s := newScheduler(ctx, idAlloc, tsoAlloc)
+		Params.InitOnce()
+		Params.ProxyCfg.TimeTickInterval = time.Millisecond
+		s.Start()
+
+		time.Sleep(time.Millisecond * 4)
+
+		// add task to queue.
+		n := 10
+		for i := 0; i < n; i++ {
+			task := newMockNormalTask()
+			err := s.AddTask(task)
+			assert.NoError(t, err)
+		}
+
+		time.Sleep(time.Millisecond * 4)
+		s.Stop()
+	})
+
+	t.Run("invalid tso", func(t *testing.T) {
+		idAlloc := newMockIDAllocator()
+		tsoAlloc := newMockTsoAllocator()
+		idAlloc.AllocOneF = func() (UniqueID, error) {
+			return 100, nil
+		}
+		tsoAlloc.GenerateTSOF = func(count uint32) (uint64, error) {
+			return 0, fmt.Errorf("error mock GenerateTSO")
+		}
+		ctx := context.Background()
+		s := newScheduler(ctx, idAlloc, tsoAlloc)
+		Params.InitOnce()
+		Params.ProxyCfg.TimeTickInterval = time.Millisecond
+		s.Start()
+
+		time.Sleep(time.Millisecond * 4)
+		s.Stop()
+	})
 }

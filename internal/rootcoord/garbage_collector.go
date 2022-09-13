@@ -4,10 +4,6 @@ import (
 	"context"
 	"time"
 
-	ms "github.com/milvus-io/milvus/internal/mq/msgstream"
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -97,62 +93,9 @@ func (c *GarbageCollectorCtx) ReDropPartition(pChannels []string, partition *mod
 }
 
 func (c *GarbageCollectorCtx) GcCollectionData(ctx context.Context, coll *model.Collection, ts typeutil.Timestamp) error {
-	msgPack := ms.MsgPack{}
-	baseMsg := ms.BaseMsg{
-		Ctx:            ctx,
-		BeginTimestamp: ts,
-		EndTimestamp:   ts,
-		HashValues:     []uint32{0},
-	}
-	msg := &ms.DropCollectionMsg{
-		BaseMsg: baseMsg,
-		DropCollectionRequest: internalpb.DropCollectionRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_DropCollection,
-				Timestamp: ts,
-				SourceID:  c.s.session.ServerID,
-			},
-			CollectionName: coll.Name,
-			CollectionID:   coll.CollectionID,
-		},
-	}
-	msgPack.Msgs = append(msgPack.Msgs, msg)
-	if err := c.s.chanTimeTick.broadcastDmlChannels(coll.PhysicalChannelNames, &msgPack); err != nil {
-		return err
-	}
-
-	// TODO: remove this after gc can be notified by rpc. Without this tt, DropCollectionMsg cannot be seen by
-	// 		datanodes.
-	return c.s.chanTimeTick.sendTimeTickToChannel(coll.PhysicalChannelNames, ts)
+	return c.s.ddlTsLockManager.NotifyCollectionGc(ctx, coll)
 }
 
 func (c *GarbageCollectorCtx) GcPartitionData(ctx context.Context, pChannels []string, partition *model.Partition, ts typeutil.Timestamp) error {
-	msgPack := ms.MsgPack{}
-	baseMsg := ms.BaseMsg{
-		Ctx:            ctx,
-		BeginTimestamp: ts,
-		EndTimestamp:   ts,
-		HashValues:     []uint32{0},
-	}
-	msg := &ms.DropPartitionMsg{
-		BaseMsg: baseMsg,
-		DropPartitionRequest: internalpb.DropPartitionRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_DropPartition,
-				Timestamp: ts,
-				SourceID:  c.s.session.ServerID,
-			},
-			PartitionName: partition.PartitionName,
-			CollectionID:  partition.CollectionID,
-			PartitionID:   partition.PartitionID,
-		},
-	}
-	msgPack.Msgs = append(msgPack.Msgs, msg)
-	if err := c.s.chanTimeTick.broadcastDmlChannels(pChannels, &msgPack); err != nil {
-		return err
-	}
-
-	// TODO: remove this after gc can be notified by rpc. Without this tt, DropCollectionMsg cannot be seen by
-	// 		datanodes.
-	return c.s.chanTimeTick.sendTimeTickToChannel(pChannels, ts)
+	return c.s.ddlTsLockManager.NotifyPartitionGc(ctx, pChannels, partition)
 }
