@@ -115,10 +115,6 @@ func (s *Server) init() error {
 		log.Error("IndexCoord", zap.Any("init error", err))
 		return err
 	}
-	if err := s.indexcoord.Init(); err != nil {
-		log.Error("IndexCoord", zap.Any("init error", err))
-		return err
-	}
 
 	// --- RootCoord ---
 	if s.rootCoord == nil {
@@ -174,6 +170,11 @@ func (s *Server) init() error {
 
 	if err := s.SetDataCoord(s.dataCoord); err != nil {
 		panic(err)
+	}
+
+	if err := s.indexcoord.Init(); err != nil {
+		log.Error("IndexCoord", zap.Any("init error", err))
+		return err
 	}
 
 	return nil
