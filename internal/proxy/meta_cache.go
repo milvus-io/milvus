@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util"
+	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -136,11 +137,11 @@ func InitMetaCache(ctx context.Context, rootCoord types.RootCoord, queryCoord ty
 	// The privilege info is a little more. And to get this info, the query operation of involving multiple table queries is required.
 	resp, err := rootCoord.ListPolicy(ctx, &internalpb.ListPolicyRequest{})
 	if err != nil {
-		log.Error("fail to init meta cache", zap.Error(err))
+		log.Warn("fail to init meta cache", zap.Error(err))
 		return err
 	}
 	globalMetaCache.InitPolicyInfo(resp.PolicyInfos, resp.UserRoles)
-	log.Debug("success to init meta cache", zap.Strings("policy_infos", resp.PolicyInfos))
+	log.Info("success to init meta cache", zap.Strings("policy_infos", resp.PolicyInfos))
 	return nil
 }
 
@@ -172,7 +173,7 @@ func (m *MetaCache) GetCollectionID(ctx context.Context, collectionName string) 
 		}
 		m.mu.Lock()
 		defer m.mu.Unlock()
-		m.updateCollection(coll, collectionName)
+		m.updateCollection(ctx, coll, collectionName)
 		metrics.ProxyUpdateCacheLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
 		collInfo = m.collInfo[collectionName]
 		return collInfo.collID, nil
@@ -199,7 +200,7 @@ func (m *MetaCache) GetCollectionInfo(ctx context.Context, collectionName string
 			return nil, err
 		}
 		m.mu.Lock()
-		m.updateCollection(coll, collectionName)
+		m.updateCollection(ctx, coll, collectionName)
 		collInfo = m.collInfo[collectionName]
 		m.mu.Unlock()
 		metrics.ProxyUpdateCacheLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
@@ -219,7 +220,7 @@ func (m *MetaCache) GetCollectionInfo(ctx context.Context, collectionName string
 		if showResp.Status.ErrorCode != commonpb.ErrorCode_Success {
 			return nil, errors.New(showResp.Status.Reason)
 		}
-		log.Debug("QueryCoord show collections",
+		log.Info("QueryCoord show collections",
 			zap.Int64("collID", collInfo.collID),
 			zap.Int64s("collections", showResp.GetCollectionIDs()),
 			zap.Int64s("collectionsInMemoryPercentages", showResp.GetInMemoryPercentages()),
@@ -259,12 +260,9 @@ func (m *MetaCache) GetCollectionSchema(ctx context.Context, collectionName stri
 		}
 		m.mu.Lock()
 		defer m.mu.Unlock()
-		m.updateCollection(coll, collectionName)
+		m.updateCollection(ctx, coll, collectionName)
 		collInfo = m.collInfo[collectionName]
 		metrics.ProxyUpdateCacheLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
-		log.Debug("Reload collection from root coordinator ",
-			zap.String("collection name ", collectionName),
-			zap.Any("time (milliseconds) take ", tr.ElapseSpan().Milliseconds()))
 		return collInfo.schema, nil
 	}
 	defer m.mu.RUnlock()
@@ -273,7 +271,9 @@ func (m *MetaCache) GetCollectionSchema(ctx context.Context, collectionName stri
 	return collInfo.schema, nil
 }
 
-func (m *MetaCache) updateCollection(coll *milvuspb.DescribeCollectionResponse, collectionName string) {
+func (m *MetaCache) updateCollection(ctx context.Context, coll *milvuspb.DescribeCollectionResponse, collectionName string) {
+	logutil.Logger(ctx).Info("update collection from root coordinator ",
+		zap.String("collection name ", collectionName), zap.Any("response", coll))
 	_, ok := m.collInfo[collectionName]
 	if !ok {
 		m.collInfo[collectionName] = &collectionInfo{}
@@ -319,12 +319,11 @@ func (m *MetaCache) GetPartitions(ctx context.Context, collectionName string) (m
 		m.mu.Lock()
 		defer m.mu.Unlock()
 
-		err = m.updatePartitions(partitions, collectionName)
+		err = m.updatePartitions(ctx, partitions, collectionName)
 		if err != nil {
 			return nil, err
 		}
 		metrics.ProxyUpdateCacheLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
-		log.Debug("proxy", zap.Any("GetPartitions:partitions after update", partitions), zap.Any("collectionName", collectionName))
 		ret := make(map[string]typeutil.UniqueID)
 		partInfo := m.collInfo[collectionName].partInfo
 		for k, v := range partInfo {
@@ -373,12 +372,11 @@ func (m *MetaCache) GetPartitionInfo(ctx context.Context, collectionName string,
 
 		m.mu.Lock()
 		defer m.mu.Unlock()
-		err = m.updatePartitions(partitions, collectionName)
+		err = m.updatePartitions(ctx, partitions, collectionName)
 		if err != nil {
 			return nil, err
 		}
 		metrics.ProxyUpdateCacheLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
-		log.Debug("proxy", zap.Any("GetPartitionID:partitions after update", partitions), zap.Any("collectionName", collectionName))
 		partInfo, ok = m.collInfo[collectionName].partInfo[partitionName]
 		if !ok {
 			return nil, fmt.Errorf("partitionID of partitionName:%s can not be find", partitionName)
@@ -453,7 +451,8 @@ func (m *MetaCache) showPartitions(ctx context.Context, collectionName string) (
 	return partitions, nil
 }
 
-func (m *MetaCache) updatePartitions(partitions *milvuspb.ShowPartitionsResponse, collectionName string) error {
+func (m *MetaCache) updatePartitions(ctx context.Context, partitions *milvuspb.ShowPartitionsResponse, collectionName string) error {
+	logutil.Logger(ctx).Info("update partition", zap.String("collection name", collectionName), zap.Any("partition", partitions))
 	_, ok := m.collInfo[collectionName]
 	if !ok {
 		m.collInfo[collectionName] = &collectionInfo{
@@ -486,12 +485,14 @@ func (m *MetaCache) updatePartitions(partitions *milvuspb.ShowPartitionsResponse
 func (m *MetaCache) RemoveCollection(ctx context.Context, collectionName string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	logutil.Logger(ctx).Info("Remove collection meta by name", zap.String("collection name", collectionName))
 	delete(m.collInfo, collectionName)
 }
 
 func (m *MetaCache) RemoveCollectionsByID(ctx context.Context, collectionID UniqueID) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	logutil.Logger(ctx).Info("Remove collection meta by id", zap.Int64("collection ID", collectionID))
 	for k, v := range m.collInfo {
 		if v.collID == collectionID {
 			delete(m.collInfo, k)
@@ -502,6 +503,7 @@ func (m *MetaCache) RemoveCollectionsByID(ctx context.Context, collectionID Uniq
 func (m *MetaCache) RemovePartition(ctx context.Context, collectionName, partitionName string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	logutil.Logger(ctx).Info("Remove partition meta by id", zap.String("collection name", collectionName), zap.String("partition name", partitionName))
 	_, ok := m.collInfo[collectionName]
 	if !ok {
 		return
@@ -654,7 +656,7 @@ func (m *MetaCache) ClearShards(collectionName string) {
 	m.mu.Lock()
 	info, ok := m.collInfo[collectionName]
 	if ok {
-		m.collInfo[collectionName].shardLeaders = nil
+		delete(m.collInfo, collectionName)
 	}
 	m.mu.Unlock()
 	// delete refcnt in shardClientMgr

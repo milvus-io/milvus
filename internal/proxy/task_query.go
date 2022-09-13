@@ -157,9 +157,6 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	log.Ctx(ctx).Debug("Validate collection name.", zap.Any("collectionName", collectionName),
-		zap.Int64("msgID", t.ID()), zap.Any("requestType", "query"))
-
 	collID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
 	if err != nil {
 		log.Ctx(ctx).Warn("Failed to get collection id.", zap.Any("collectionName", collectionName),
@@ -168,9 +165,6 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	}
 
 	t.CollectionID = collID
-	log.Ctx(ctx).Debug("Get collection ID by name",
-		zap.Int64("collectionID", t.CollectionID), zap.String("collection name", collectionName),
-		zap.Int64("msgID", t.ID()), zap.Any("requestType", "query"))
 
 	for _, tag := range t.request.PartitionNames {
 		if err := validatePartitionTag(tag, false); err != nil {
@@ -179,8 +173,6 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 			return err
 		}
 	}
-	log.Ctx(ctx).Debug("Validate partition names.",
-		zap.Int64("msgID", t.ID()), zap.Any("requestType", "query"))
 
 	t.RetrieveRequest.PartitionIDs, err = getPartitionIDs(ctx, collectionName, t.request.GetPartitionNames())
 	if err != nil {
@@ -189,8 +181,6 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 			zap.Int64("msgID", t.ID()), zap.Any("requestType", "query"))
 		return err
 	}
-	log.Ctx(ctx).Debug("Get partitions in collection.", zap.Any("collectionName", collectionName),
-		zap.Int64("msgID", t.ID()), zap.Any("requestType", "query"))
 
 	queryParams, err := parseQueryParams(t.request.GetQueryParams())
 	if err != nil {
@@ -231,8 +221,6 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	log.Ctx(ctx).Debug("translate output fields", zap.Any("OutputFields", t.request.OutputFields),
-		zap.Int64("msgID", t.ID()), zap.Any("requestType", "query"))
 
 	outputFieldIDs, err := translateToOutputFieldIDs(t.request.GetOutputFields(), schema)
 	if err != nil {
@@ -240,8 +228,6 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	}
 	t.RetrieveRequest.OutputFieldsId = outputFieldIDs
 	plan.OutputFieldIds = outputFieldIDs
-	log.Ctx(ctx).Debug("translate output fields to field ids", zap.Any("OutputFieldsID", t.OutputFieldsId),
-		zap.Int64("msgID", t.ID()), zap.Any("requestType", "query"))
 
 	t.RetrieveRequest.SerializedExprPlan, err = proto.Marshal(plan)
 	if err != nil {

@@ -139,18 +139,18 @@ func (g *getStatisticsTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		g.fromDataCoord = true
 		g.unloadedPartitionIDs = partIDs
-		log.Debug("checkFullLoaded failed, try get statistics from DataCoord", zap.Int64("msgID", g.ID()), zap.Error(err))
+		log.Warn("checkFullLoaded failed, try get statistics from DataCoord", zap.Int64("msgID", g.ID()), zap.Error(err))
 		return nil
 	}
 	if len(unloaded) > 0 {
 		g.fromDataCoord = true
 		g.unloadedPartitionIDs = unloaded
-		log.Debug("some partitions has not been loaded, try get statistics from DataCoord", zap.Int64("msgID", g.ID()), zap.String("collection", g.collectionName), zap.Int64s("unloaded partitions", unloaded), zap.Error(err))
+		log.Info("some partitions has not been loaded, try get statistics from DataCoord", zap.Int64("msgID", g.ID()), zap.String("collection", g.collectionName), zap.Int64s("unloaded partitions", unloaded), zap.Error(err))
 	}
 	if len(loaded) > 0 {
 		g.fromQueryNode = true
 		g.loadedPartitionIDs = loaded
-		log.Debug("some partitions has been loaded, try get statistics from QueryNode", zap.Int64("msgID", g.ID()), zap.String("collection", g.collectionName), zap.Int64s("loaded partitions", loaded), zap.Error(err))
+		log.Info("some partitions has been loaded, try get statistics from QueryNode", zap.Int64("msgID", g.ID()), zap.String("collection", g.collectionName), zap.Int64s("loaded partitions", loaded), zap.Error(err))
 	}
 	return nil
 }
@@ -168,14 +168,14 @@ func (g *getStatisticsTask) Execute(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		log.Debug("get collection statistics from QueryNode execute done", zap.Int64("msgID", g.ID()))
+		log.Info("get collection statistics from QueryNode execute done", zap.Int64("msgID", g.ID()))
 	}
 	if g.fromDataCoord {
 		err := g.getStatisticsFromDataCoord(ctx)
 		if err != nil {
 			return err
 		}
-		log.Debug("get collection statistics from DataCoord execute done", zap.Int64("msgID", g.ID()))
+		log.Info("get collection statistics from DataCoord execute done", zap.Int64("msgID", g.ID()))
 	}
 	return nil
 }
@@ -191,14 +191,14 @@ func (g *getStatisticsTask) PostExecute(ctx context.Context) error {
 	if g.fromQueryNode {
 		select {
 		case <-g.TraceCtx().Done():
-			log.Debug("wait to finish timeout!", zap.Int64("msgID", g.ID()))
+			log.Info("wait to finish timeout!", zap.Int64("msgID", g.ID()))
 			return nil
 		default:
-			log.Debug("all get statistics are finished or canceled", zap.Int64("msgID", g.ID()))
+			log.Info("all get statistics are finished or canceled", zap.Int64("msgID", g.ID()))
 			close(g.resultBuf)
 			for res := range g.resultBuf {
 				g.toReduceResults = append(g.toReduceResults, res)
-				log.Debug("proxy receives one get statistic response", zap.Int64("sourceID", res.GetBase().GetSourceID()), zap.Int64("msgID", g.ID()))
+				log.Info("proxy receives one get statistic response", zap.Int64("sourceID", res.GetBase().GetSourceID()), zap.Int64("msgID", g.ID()))
 			}
 		}
 	}

@@ -22,10 +22,6 @@ func rpcReceived(method string) string {
 	return fmt.Sprintf("%s received", method)
 }
 
-func rpcEnqueued(method string) string {
-	return fmt.Sprintf("%s enqueued", method)
-}
-
 func rpcDone(method string) string {
 	return fmt.Sprintf("%s done", method)
 }

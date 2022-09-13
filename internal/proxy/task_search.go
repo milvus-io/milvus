@@ -230,9 +230,6 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	log.Ctx(ctx).Debug("translate output fields", zap.Int64("msgID", t.ID()),
-		zap.Strings("output fields", t.request.GetOutputFields()))
-
 	if t.request.GetDslType() == commonpb.DslType_BoolExprV1 {
 		annsField, err := funcutil.GetAttrByKeyFromRepeatedKV(AnnsFieldKey, t.request.GetSearchParams())
 		if err != nil {
@@ -460,7 +457,7 @@ func (t *searchTask) fillInFieldInfo() {
 func (t *searchTask) collectSearchResults(ctx context.Context) error {
 	select {
 	case <-t.TraceCtx().Done():
-		log.Ctx(ctx).Debug("wait to finish timeout!", zap.Int64("msgID", t.ID()))
+		log.Ctx(ctx).Warn("wait to finish timeout!", zap.Int64("msgID", t.ID()))
 		return fmt.Errorf("search task wait to finish timeout, msgID=%d", t.ID())
 	default:
 		log.Ctx(ctx).Debug("all searches are finished or canceled", zap.Int64("msgID", t.ID()))

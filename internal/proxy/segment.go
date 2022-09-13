@@ -81,8 +81,6 @@ func (info *segInfo) Capacity(ts Timestamp) uint32 {
 
 func (info *segInfo) Assign(ts Timestamp, count uint32) uint32 {
 	if info.IsExpired(ts) {
-		log.Debug("segInfo Assign IsExpired", zap.Any("ts", ts),
-			zap.Any("count", count))
 		return 0
 	}
 	ret := uint32(0)
@@ -102,7 +100,6 @@ func (info *assignInfo) RemoveExpired(ts Timestamp) {
 		next = e.Next()
 		segInfo, ok := e.Value.(*segInfo)
 		if !ok {
-			log.Warn("can not cast to segInfo")
 			continue
 		}
 		if segInfo.IsExpired(ts) {
@@ -330,7 +327,7 @@ func (sa *segIDAssigner) syncSegments() (bool, error) {
 	success := true
 	for _, segAssign := range resp.SegIDAssignments {
 		if segAssign.Status.GetErrorCode() != commonpb.ErrorCode_Success {
-			log.Debug("proxy", zap.String("SyncSegment Error", segAssign.Status.Reason))
+			log.Warn("proxy", zap.String("SyncSegment Error", segAssign.Status.Reason))
 			errMsg += segAssign.Status.Reason
 			errMsg += "\n"
 			success = false

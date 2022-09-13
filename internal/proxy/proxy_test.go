@@ -3669,7 +3669,7 @@ func Test_GetFlushState(t *testing.T) {
 		datacoord := &DataCoordMock{}
 		proxy := &Proxy{dataCoord: datacoord}
 		proxy.stateCode.Store(internalpb.StateCode_Healthy)
-		resp, err := proxy.GetFlushState(context.TODO(), nil)
+		resp, err := proxy.GetFlushState(context.TODO(), &milvuspb.GetFlushStateRequest{})
 		assert.EqualValues(t, &milvuspb.GetFlushStateResponse{}, resp)
 		assert.Nil(t, err)
 	})
@@ -3678,7 +3678,7 @@ func Test_GetFlushState(t *testing.T) {
 		datacoord := &DataCoordMock{}
 		proxy := &Proxy{dataCoord: datacoord}
 		proxy.stateCode.Store(internalpb.StateCode_Abnormal)
-		resp, err := proxy.GetFlushState(context.TODO(), nil)
+		resp, err := proxy.GetFlushState(context.TODO(), &milvuspb.GetFlushStateRequest{})
 		assert.EqualValues(t, unhealthyStatus(), resp.Status)
 		assert.Nil(t, err)
 	})

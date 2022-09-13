@@ -661,8 +661,8 @@ func (sct *showCollectionsTask) Execute(ctx context.Context) error {
 		for _, collectionName := range sct.CollectionNames {
 			collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
 			if err != nil {
-				log.Debug("Failed to get collection id.", zap.Any("collectionName", collectionName),
-					zap.Any("requestID", sct.Base.MsgID), zap.Any("requestType", "showCollections"))
+				log.Warn("Failed to get collection id.", zap.Any("collectionName", collectionName),
+					zap.Any("requestID", sct.Base.MsgID), zap.Any("requestType", "showCollections"), zap.Error(err))
 				return err
 			}
 			collectionIDs = append(collectionIDs, collectionID)
@@ -710,14 +710,14 @@ func (sct *showCollectionsTask) Execute(ctx context.Context) error {
 		for offset, id := range resp.CollectionIDs {
 			collectionName, ok := IDs2Names[id]
 			if !ok {
-				log.Debug("Failed to get collection info.", zap.Any("collectionName", collectionName),
+				log.Warn("Failed to get collection info.", zap.Any("collectionName", collectionName),
 					zap.Any("requestID", sct.Base.MsgID), zap.Any("requestType", "showCollections"))
 				return errors.New("failed to show collections")
 			}
 			collectionInfo, err := globalMetaCache.GetCollectionInfo(ctx, collectionName)
 			if err != nil {
-				log.Debug("Failed to get collection info.", zap.Any("collectionName", collectionName),
-					zap.Any("requestID", sct.Base.MsgID), zap.Any("requestType", "showCollections"))
+				log.Warn("Failed to get collection info.", zap.Any("collectionName", collectionName),
+					zap.Any("requestID", sct.Base.MsgID), zap.Any("requestType", "showCollections"), zap.Error(err))
 				return err
 			}
 			sct.result.CollectionIds = append(sct.result.CollectionIds, id)
@@ -1051,8 +1051,8 @@ func (spt *showPartitionsTask) Execute(ctx context.Context) error {
 		collectionName := spt.CollectionName
 		collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
 		if err != nil {
-			log.Debug("Failed to get collection id.", zap.Any("collectionName", collectionName),
-				zap.Any("requestID", spt.Base.MsgID), zap.Any("requestType", "showPartitions"))
+			log.Warn("Failed to get collection id.", zap.Any("collectionName", collectionName),
+				zap.Any("requestID", spt.Base.MsgID), zap.Any("requestType", "showPartitions"), zap.Error(err))
 			return err
 		}
 		IDs2Names := make(map[UniqueID]string)
@@ -1064,8 +1064,8 @@ func (spt *showPartitionsTask) Execute(ctx context.Context) error {
 		for _, partitionName := range spt.PartitionNames {
 			partitionID, err := globalMetaCache.GetPartitionID(ctx, collectionName, partitionName)
 			if err != nil {
-				log.Debug("Failed to get partition id.", zap.Any("partitionName", partitionName),
-					zap.Any("requestID", spt.Base.MsgID), zap.Any("requestType", "showPartitions"))
+				log.Warn("Failed to get partition id.", zap.Any("partitionName", partitionName),
+					zap.Any("requestID", spt.Base.MsgID), zap.Any("requestType", "showPartitions"), zap.Error(err))
 				return err
 			}
 			partitionIDs = append(partitionIDs, partitionID)
@@ -1106,14 +1106,14 @@ func (spt *showPartitionsTask) Execute(ctx context.Context) error {
 		for offset, id := range resp.PartitionIDs {
 			partitionName, ok := IDs2Names[id]
 			if !ok {
-				log.Debug("Failed to get partition id.", zap.Any("partitionName", partitionName),
+				log.Warn("Failed to get partition id.", zap.Any("partitionName", partitionName),
 					zap.Any("requestID", spt.Base.MsgID), zap.Any("requestType", "showPartitions"))
 				return errors.New("failed to show partitions")
 			}
 			partitionInfo, err := globalMetaCache.GetPartitionInfo(ctx, collectionName, partitionName)
 			if err != nil {
-				log.Debug("Failed to get partition id.", zap.Any("partitionName", partitionName),
-					zap.Any("requestID", spt.Base.MsgID), zap.Any("requestType", "showPartitions"))
+				log.Warn("Failed to get partition id.", zap.Any("partitionName", partitionName),
+					zap.Any("requestID", spt.Base.MsgID), zap.Any("requestType", "showPartitions"), zap.Error(err))
 				return err
 			}
 			spt.result.PartitionIDs = append(spt.result.PartitionIDs, id)
@@ -1207,17 +1207,17 @@ func parseIndexParams(m []*commonpb.KeyValuePair) (map[string]string, error) {
 func (cit *createIndexTask) getIndexedField(ctx context.Context) (*schemapb.FieldSchema, error) {
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, cit.GetCollectionName())
 	if err != nil {
-		log.Error("failed to get collection schema", zap.Error(err))
+		log.Warn("failed to get collection schema", zap.Error(err))
 		return nil, fmt.Errorf("failed to get collection schema: %s", err)
 	}
 	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
 	if err != nil {
-		log.Error("failed to parse collection schema", zap.Error(err))
+		log.Warn("failed to parse collection schema", zap.Error(err))
 		return nil, fmt.Errorf("failed to parse collection schema: %s", err)
 	}
 	field, err := schemaHelper.GetFieldFromName(cit.GetFieldName())
 	if err != nil {
-		log.Error("create index on non-exist field", zap.Error(err))
+		log.Warn("create index on non-exist field", zap.Error(err))
 		return nil, fmt.Errorf("cannot create index on non-exist field: %s", cit.GetFieldName())
 	}
 	return field, nil
@@ -1301,7 +1301,7 @@ func (cit *createIndexTask) PreExecute(ctx context.Context) error {
 	// check index param, not accurate, only some static rules
 	indexParams, err := parseIndexParams(cit.GetExtraParams())
 	if err != nil {
-		log.Error("failed to parse index params", zap.Error(err))
+		log.Warn("failed to parse index params", zap.Error(err))
 		return fmt.Errorf("failed to parse index params: %s", err)
 	}
 
@@ -1309,7 +1309,7 @@ func (cit *createIndexTask) PreExecute(ctx context.Context) error {
 }
 
 func (cit *createIndexTask) Execute(ctx context.Context) error {
-	log.Debug("proxy create index", zap.Int64("collID", cit.collectionID), zap.Int64("fieldID", cit.fieldSchema.GetFieldID()),
+	log.Info("proxy create index", zap.Int64("collID", cit.collectionID), zap.Int64("fieldID", cit.fieldSchema.GetFieldID()),
 		zap.String("indexName", cit.GetIndexName()), zap.Any("typeParams", cit.fieldSchema.GetTypeParams()),
 		zap.Any("indexParams", cit.GetExtraParams()))
 	indexParams := cit.GetExtraParams()
@@ -1410,12 +1410,12 @@ func (dit *describeIndexTask) PreExecute(ctx context.Context) error {
 func (dit *describeIndexTask) Execute(ctx context.Context) error {
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, dit.GetCollectionName())
 	if err != nil {
-		log.Error("failed to get collection schema", zap.Error(err))
+		log.Warn("failed to get collection schema", zap.Error(err))
 		return fmt.Errorf("failed to get collection schema: %s", err)
 	}
 	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
 	if err != nil {
-		log.Error("failed to parse collection schema", zap.Error(err))
+		log.Warn("failed to parse collection schema", zap.Error(err))
 		return fmt.Errorf("failed to parse collection schema: %s", err)
 	}
 
@@ -1431,7 +1431,7 @@ func (dit *describeIndexTask) Execute(ctx context.Context) error {
 	for _, indexInfo := range resp.IndexInfos {
 		field, err := schemaHelper.GetFieldFromID(indexInfo.FieldID)
 		if err != nil {
-			log.Error("failed to get collection field", zap.Error(err))
+			log.Warn("failed to get collection field", zap.Error(err))
 			return fmt.Errorf("failed to get collection field: %d", indexInfo.FieldID)
 		}
 
@@ -1870,7 +1870,7 @@ func (lct *loadCollectionTask) OnEnqueue() error {
 }
 
 func (lct *loadCollectionTask) PreExecute(ctx context.Context) error {
-	log.Debug("loadCollectionTask PreExecute", zap.String("role", typeutil.ProxyRole), zap.Int64("msgID", lct.Base.MsgID))
+	log.Info("loadCollectionTask PreExecute", zap.String("role", typeutil.ProxyRole), zap.Int64("msgID", lct.Base.MsgID))
 	lct.Base.MsgType = commonpb.MsgType_LoadCollection
 	lct.Base.SourceID = Params.ProxyCfg.GetNodeID()
 
@@ -1889,7 +1889,7 @@ func (lct *loadCollectionTask) PreExecute(ctx context.Context) error {
 }
 
 func (lct *loadCollectionTask) Execute(ctx context.Context) (err error) {
-	log.Debug("loadCollectionTask Execute", zap.String("role", typeutil.ProxyRole), zap.Int64("msgID", lct.Base.MsgID))
+	log.Info("loadCollectionTask Execute", zap.String("role", typeutil.ProxyRole), zap.Int64("msgID", lct.Base.MsgID))
 	collID, err := globalMetaCache.GetCollectionID(ctx, lct.CollectionName)
 	if err != nil {
 		return err
@@ -1912,7 +1912,7 @@ func (lct *loadCollectionTask) Execute(ctx context.Context) (err error) {
 		Schema:        collSchema,
 		ReplicaNumber: lct.ReplicaNumber,
 	}
-	log.Debug("send LoadCollectionRequest to query coordinator", zap.String("role", typeutil.ProxyRole),
+	log.Info("send LoadCollectionRequest to query coordinator", zap.String("role", typeutil.ProxyRole),
 		zap.Int64("msgID", request.Base.MsgID), zap.Int64("collectionID", request.CollectionID),
 		zap.Any("schema", request.Schema))
 	lct.result, err = lct.queryCoord.LoadCollection(ctx, request)
@@ -1923,7 +1923,7 @@ func (lct *loadCollectionTask) Execute(ctx context.Context) (err error) {
 }
 
 func (lct *loadCollectionTask) PostExecute(ctx context.Context) error {
-	log.Debug("loadCollectionTask PostExecute", zap.String("role", typeutil.ProxyRole),
+	log.Info("loadCollectionTask PostExecute", zap.String("role", typeutil.ProxyRole),
 		zap.Int64("msgID", lct.Base.MsgID))
 	return nil
 }
@@ -2296,8 +2296,7 @@ func (dt *deleteTask) getChannels() ([]pChan, error) {
 
 func getPrimaryKeysFromExpr(schema *schemapb.CollectionSchema, expr string) (res *schemapb.IDs, rowNum int64, err error) {
 	if len(expr) == 0 {
-		log.Warn("empty expr")
-		return
+		return res, 0, fmt.Errorf("failed to create expr plan, expr = %s", expr)
 	}
 
 	plan, err := createExprPlan(schema, expr)
@@ -2357,12 +2356,12 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 
 	collName := dt.CollectionName
 	if err := validateCollectionName(collName); err != nil {
-		log.Error("Invalid collection name", zap.String("collectionName", collName))
+		log.Warn("Invalid collection name", zap.String("collectionName", collName), zap.Error(err))
 		return err
 	}
 	collID, err := globalMetaCache.GetCollectionID(ctx, collName)
 	if err != nil {
-		log.Debug("Failed to get collection id", zap.String("collectionName", collName))
+		log.Warn("Failed to get collection id", zap.String("collectionName", collName), zap.Error(err))
 		return err
 	}
 	dt.DeleteRequest.CollectionID = collID
@@ -2372,12 +2371,12 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 	if len(dt.PartitionName) > 0 {
 		partName := dt.PartitionName
 		if err := validatePartitionTag(partName, true); err != nil {
-			log.Error("Invalid partition name", zap.String("partitionName", partName))
+			log.Warn("Invalid partition name", zap.String("partitionName", partName), zap.Error(err))
 			return err
 		}
 		partID, err := globalMetaCache.GetPartitionID(ctx, collName, partName)
 		if err != nil {
-			log.Debug("Failed to get partition id", zap.String("collectionName", collName), zap.String("partitionName", partName))
+			log.Warn("Failed to get partition id", zap.String("collectionName", collName), zap.String("partitionName", partName), zap.Error(err))
 			return err
 		}
 		dt.DeleteRequest.PartitionID = partID
@@ -2387,7 +2386,7 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, collName)
 	if err != nil {
-		log.Error("Failed to get collection schema", zap.String("collectionName", collName))
+		log.Warn("Failed to get collection schema", zap.String("collectionName", collName), zap.Error(err))
 		return err
 	}
 	dt.schema = schema
@@ -2395,7 +2394,7 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 	// get delete.primaryKeys from delete expr
 	primaryKeys, numRow, err := getPrimaryKeysFromExpr(schema, dt.deleteExpr)
 	if err != nil {
-		log.Error("Failed to get primary keys from expr", zap.Error(err))
+		log.Warn("Failed to get primary keys from expr", zap.Error(err))
 		return err
 	}
 
@@ -2430,14 +2429,14 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 	// hash primary keys to channels
 	channelNames, err := dt.chMgr.getVChannels(collID)
 	if err != nil {
-		log.Error("get vChannels failed", zap.Int64("collectionID", collID), zap.Error(err))
+		log.Warn("get vChannels failed", zap.Int64("collectionID", collID), zap.Error(err))
 		dt.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		dt.result.Status.Reason = err.Error()
 		return err
 	}
 	dt.HashValues = typeutil.HashPK2Channels(dt.result.IDs, channelNames)
 
-	log.Info("send delete request to virtual channels",
+	log.Debug("send delete request to virtual channels",
 		zap.String("collection", dt.GetCollectionName()),
 		zap.Int64("collection_id", collID),
 		zap.Strings("virtual_channels", channelNames),

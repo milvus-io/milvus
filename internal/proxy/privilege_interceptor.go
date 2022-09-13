@@ -3,7 +3,6 @@ package proxy
 import (
 	"context"
 	"fmt"
-	"reflect"
 	"strings"
 
 	"google.golang.org/grpc/codes"
@@ -52,7 +51,7 @@ func initPolicyModel() (model.Model, error) {
 	}
 	policyModel, err := model.NewModelFromString(ModelStr)
 	if err != nil {
-		log.Error("NewModelFromString fail", zap.String("model", ModelStr), zap.Error(err))
+		log.Warn("NewModelFromString fail", zap.String("model", ModelStr), zap.Error(err))
 		return nil, err
 	}
 	modelStore[ModelKey] = policyModel
@@ -75,15 +74,14 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 	if !Params.CommonCfg.AuthorizationEnabled {
 		return ctx, nil
 	}
-	log.Debug("PrivilegeInterceptor", zap.String("type", reflect.TypeOf(req).String()))
 	privilegeExt, err := funcutil.GetPrivilegeExtObj(req)
 	if err != nil {
-		log.Debug("GetPrivilegeExtObj err", zap.Error(err))
+		log.Warn("GetPrivilegeExtObj err", zap.Error(err))
 		return ctx, nil
 	}
 	username, err := GetCurUserFromContext(ctx)
 	if err != nil {
-		log.Error("GetCurUserFromContext fail", zap.Error(err))
+		log.Warn("GetCurUserFromContext fail", zap.Error(err))
 		return ctx, err
 	}
 	if username == util.UserRoot {
@@ -91,7 +89,7 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 	}
 	roleNames, err := GetRole(username)
 	if err != nil {
-		log.Error("GetRole fail", zap.String("username", username), zap.Error(err))
+		log.Warn("GetRole fail", zap.String("username", username), zap.Error(err))
 		return ctx, err
 	}
 	roleNames = append(roleNames, util.RolePublic)
@@ -118,12 +116,12 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 	policyModel, err := initPolicyModel()
 	if err != nil {
 		errStr := "fail to get policy model"
-		log.Error(errStr, zap.Error(err))
+		log.Warn(errStr, zap.Error(err))
 		return ctx, err
 	}
 	e, err := casbin.NewEnforcer(policyModel, a)
 	if err != nil {
-		log.Error("NewEnforcer fail", zap.String("policy", policy), zap.Error(err))
+		log.Warn("NewEnforcer fail", zap.String("policy", policy), zap.Error(err))
 		return ctx, err
 	}
 	for _, roleName := range roleNames {

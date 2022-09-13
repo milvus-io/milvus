@@ -130,7 +130,7 @@ func (it *insertTask) checkPrimaryFieldData() error {
 
 	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(it.schema)
 	if err != nil {
-		log.Error("get primary field schema failed", zap.String("collection name", it.CollectionName), zap.Any("schema", it.schema), zap.Error(err))
+		log.Warn("get primary field schema failed", zap.String("collection name", it.CollectionName), zap.Any("schema", it.schema), zap.Error(err))
 		return err
 	}
 
@@ -139,14 +139,14 @@ func (it *insertTask) checkPrimaryFieldData() error {
 	if !primaryFieldSchema.AutoID {
 		primaryFieldData, err = typeutil.GetPrimaryFieldData(it.GetFieldsData(), primaryFieldSchema)
 		if err != nil {
-			log.Error("get primary field data failed", zap.String("collection name", it.CollectionName), zap.Error(err))
+			log.Warn("get primary field data failed", zap.String("collection name", it.CollectionName), zap.Error(err))
 			return err
 		}
 	} else {
 		// if autoID == true, currently only support autoID for int64 PrimaryField
 		primaryFieldData, err = autoGenPrimaryFieldData(primaryFieldSchema, it.RowIDs)
 		if err != nil {
-			log.Error("generate primary field data failed when autoID == true", zap.String("collection name", it.CollectionName), zap.Error(err))
+			log.Warn("generate primary field data failed when autoID == true", zap.String("collection name", it.CollectionName), zap.Error(err))
 			return err
 		}
 		// if autoID == true, set the primary field data
@@ -156,7 +156,7 @@ func (it *insertTask) checkPrimaryFieldData() error {
 	// parse primaryFieldData to result.IDs, and as returned primary keys
 	it.result.IDs, err = parsePrimaryFieldData2IDs(primaryFieldData)
 	if err != nil {
-		log.Error("parse primary field data to IDs failed", zap.String("collection name", it.CollectionName), zap.Error(err))
+		log.Warn("parse primary field data to IDs failed", zap.String("collection name", it.CollectionName), zap.Error(err))
 		return err
 	}
 
@@ -179,19 +179,19 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 
 	collectionName := it.CollectionName
 	if err := validateCollectionName(collectionName); err != nil {
-		log.Error("valid collection name failed", zap.String("collection name", collectionName), zap.Error(err))
+		log.Warn("valid collection name failed", zap.String("collection name", collectionName), zap.Error(err))
 		return err
 	}
 
 	partitionTag := it.PartitionName
 	if err := validatePartitionTag(partitionTag, true); err != nil {
-		log.Error("valid partition name failed", zap.String("partition name", partitionTag), zap.Error(err))
+		log.Warn("valid partition name failed", zap.String("partition name", partitionTag), zap.Error(err))
 		return err
 	}
 
 	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, collectionName)
 	if err != nil {
-		log.Error("get collection schema from global meta cache failed", zap.String("collection name", collectionName), zap.Error(err))
+		log.Warn("get collection schema from global meta cache failed", zap.String("collection name", collectionName), zap.Error(err))
 		return err
 	}
 	it.schema = collSchema
@@ -227,20 +227,20 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	// set rowIDs as primary data if autoID == true
 	err = it.checkPrimaryFieldData()
 	if err != nil {
-		log.Error("check primary field data and hash primary key failed", zap.Int64("msgID", it.Base.MsgID), zap.String("collection name", collectionName), zap.Error(err))
+		log.Warn("check primary field data and hash primary key failed", zap.Int64("msgID", it.Base.MsgID), zap.String("collection name", collectionName), zap.Error(err))
 		return err
 	}
 
 	// set field ID to insert field data
 	err = fillFieldIDBySchema(it.GetFieldsData(), collSchema)
 	if err != nil {
-		log.Error("set fieldID to fieldData failed", zap.Int64("msgID", it.Base.MsgID), zap.String("collection name", collectionName), zap.Error(err))
+		log.Warn("set fieldID to fieldData failed", zap.Int64("msgID", it.Base.MsgID), zap.String("collection name", collectionName), zap.Error(err))
 		return err
 	}
 
 	// check that all field's number rows are equal
 	if err = it.CheckAligned(); err != nil {
-		log.Error("field data is not aligned", zap.Int64("msgID", it.Base.MsgID), zap.String("collection name", collectionName), zap.Error(err))
+		log.Warn("field data is not aligned", zap.Int64("msgID", it.Base.MsgID), zap.String("collection name", collectionName), zap.Error(err))
 		return err
 	}
 
@@ -296,7 +296,7 @@ func (it *insertTask) assignSegmentID(channelNames []string) (*msgstream.MsgPack
 				return err
 			})
 			if err != nil {
-				log.Error("failed to allocate msg id", zap.Int64("base.MsgID", it.Base.MsgID), zap.Error(err))
+				log.Warn("failed to allocate msg id", zap.Int64("base.MsgID", it.Base.MsgID), zap.Error(err))
 				return 0, err
 			}
 		}
@@ -376,7 +376,7 @@ func (it *insertTask) assignSegmentID(channelNames []string) (*msgstream.MsgPack
 	for channelName, rowOffsets := range channel2RowOffsets {
 		assignedSegmentInfos, err := it.segIDAssigner.GetSegmentID(it.CollectionID, it.PartitionID, channelName, uint32(len(rowOffsets)), channelMaxTSMap[channelName])
 		if err != nil {
-			log.Error("allocate segmentID for insert data failed",
+			log.Warn("allocate segmentID for insert data failed",
 				zap.Int64("collectionID", it.CollectionID),
 				zap.String("channel name", channelName),
 				zap.Int("allocate count", len(rowOffsets)),
@@ -389,7 +389,7 @@ func (it *insertTask) assignSegmentID(channelNames []string) (*msgstream.MsgPack
 			subRowOffsets := rowOffsets[startPos : startPos+int(count)]
 			insertMsgs, err := getInsertMsgsBySegmentID(segmentID, subRowOffsets, channelName, threshold)
 			if err != nil {
-				log.Error("repack insert data to insert msgs failed",
+				log.Warn("repack insert data to insert msgs failed",
 					zap.Int64("collectionID", it.CollectionID),
 					zap.Error(err))
 				return nil, err
@@ -438,13 +438,13 @@ func (it *insertTask) Execute(ctx context.Context) error {
 
 	channelNames, err := it.chMgr.getVChannels(collID)
 	if err != nil {
-		log.Error("get vChannels failed", zap.Int64("msgID", it.Base.MsgID), zap.Int64("collectionID", collID), zap.Error(err))
+		log.Warn("get vChannels failed", zap.Int64("msgID", it.Base.MsgID), zap.Int64("collectionID", collID), zap.Error(err))
 		it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		it.result.Status.Reason = err.Error()
 		return err
 	}
 
-	log.Info("send insert request to virtual channels",
+	log.Debug("send insert request to virtual channels",
 		zap.String("collection", it.GetCollectionName()),
 		zap.String("partition", it.GetPartitionName()),
 		zap.Int64("collection_id", collID),
@@ -455,7 +455,7 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	// assign segmentID for insert data and repack data by segmentID
 	msgPack, err := it.assignSegmentID(channelNames)
 	if err != nil {
-		log.Error("assign segmentID and repack insert data failed", zap.Int64("msgID", it.Base.MsgID), zap.Int64("collectionID", collID), zap.Error(err))
+		log.Warn("assign segmentID and repack insert data failed", zap.Int64("msgID", it.Base.MsgID), zap.Int64("collectionID", collID), zap.Error(err))
 		it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		it.result.Status.Reason = err.Error()
 		return err
