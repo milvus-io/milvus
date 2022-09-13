@@ -4,7 +4,9 @@
 
 For better tracking and debugging Milvus, the script `export-milvus-log.sh` is provided for exporting all Milvus logs at once. For those pods that have been restarted, this script can export the logs of the running pods and the logs of the previously pods.
 
-> Note: This script only works with Milvus installed with k8s.
+> Note: This script only works with Milvus installed on k8s cluster.
+>
+>For milvus installed with helm-chart, if `log.persistence.enabled` is set to true (default false), the tool cannot be used to export milvus logs and the log files can be found directly under the path specified by `log.persistence.mountPath`.
 >
 > For Milvus installed with docker-compose, you can use `docker-compose logs > milvus.log` to export the logs.
 
