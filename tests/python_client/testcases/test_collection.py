@@ -2616,8 +2616,8 @@ class TestLoadPartition(TestcaseBase):
         # for metric_type in ct.binary_metrics:
         binary_index["metric_type"] = metric_type
         if binary_index["index_type"] == "BIN_IVF_FLAT" and metric_type in ct.structure_metrics:
-            error = {ct.err_code: -1, ct.err_msg: 'Invalid metric_type: SUBSTRUCTURE, '
-                                                  'which does not match the index type: %s' % metric_type}
+            error = {ct.err_code: 1, ct.err_msg: 'Invalid metric_type: SUBSTRUCTURE, '
+                                                 'which does not match the index type: %s' % metric_type}
             collection_w.create_index(ct.default_binary_vec_field_name, binary_index,
                                       check_task=CheckTasks.err_res, check_items=error)
         else:
@@ -2850,7 +2850,7 @@ class TestCollectionString(TestcaseBase):
         max_length = 100000
         string_field = cf.gen_string_field(max_length=max_length)
         schema = cf.gen_collection_schema([int_field, string_field, vec_field])
-        error = {ct.err_code: 0, ct.err_msg: "invalid max_length: %s" % max_length}
+        error = {ct.err_code: 1, ct.err_msg: "invalid max_length: %s" % max_length}
         self.collection_wrap.init_collection(name=c_name, schema=schema,
                                              check_task=CheckTasks.err_res, check_items=error)
 
