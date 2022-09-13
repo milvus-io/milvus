@@ -1244,6 +1244,65 @@ class TestCollectionSearch(TestcaseBase):
                                          "limit": nb_old + nb_new,
                                          "_async": _async})
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_different_data_distribution_without_index(self, dim, auto_id, _async):
+        """
+        target: test search different data distribution without index
+        method: 1. connect milvus
+                2. create a collection
+                3. insert data
+                4. Load and search
+        expected: Search successfully
+        """
+        # 1. connect, create collection and insert data
+        self._connect()
+        collection_w = self.init_collection_general(prefix, False, dim=dim)[0]
+        dataframe = cf.gen_default_dataframe_data(dim=dim, start=-1500)
+        collection_w.insert(dataframe)
+
+        # 2. load and search
+        collection_w.load()
+        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, default_limit,
+                            _async=_async,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "limit": default_limit,
+                                         "_async": _async})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_different_data_distribution_with_index(self, dim, auto_id, _async):
+        """
+        target: test search different data distribution with index
+        method: 1. connect milvus
+                2. create a collection
+                3. insert data
+                4. create an index
+                5. Load and search
+        expected: Search successfully
+        """
+        # 1. connect, create collection and insert data
+        self._connect()
+        collection_w = self.init_collection_general(prefix, False, dim=dim)[0]
+        dataframe = cf.gen_default_dataframe_data(dim=dim, start=-1500)
+        collection_w.insert(dataframe)
+
+        # 2. create index
+        index_param = {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}}
+        collection_w.create_index("float_vector", index_param)
+
+        # 3. load and search
+        collection_w.load()
+        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, default_limit,
+                            _async=_async,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "limit": default_limit,
+                                         "_async": _async})
+
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip(reason="debug")
     def test_search_max_dim(self, auto_id, _async):
@@ -1291,6 +1350,119 @@ class TestCollectionSearch(TestcaseBase):
                             check_items={"nq": nq,
                                          "ids": insert_ids,
                                          "limit": nq,
+                                         "_async": _async})
+
+    @pytest.mark.xfail(reason="issue #19129")
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_max_nq(self, auto_id, dim, _async):
+        """
+        target: test search with max nq
+        method: connect milvus, create collection, insert, load and search with max nq
+        expected: search successfully with max nq
+        """
+        self._connect()
+        nq = 17000
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True,
+                                                                      auto_id=auto_id,
+                                                                      dim=dim)[0:4]
+        collection_w.load()
+        log.info("test_search_max_nq: searching collection %s" % collection_w.name)
+        vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
+        collection_w.search(vectors[:nq], default_search_field,
+                            default_search_params, default_limit,
+                            default_search_exp, _async=_async,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": nq,
+                                         "ids": insert_ids,
+                                         "limit": default_limit,
+                                         "_async": _async})
+
+    @pytest.mark.xfail(reason="issue #19130")
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("shards_num", [1, 10, 128, 256])
+    def test_search_with_non_default_shard_nums(self, auto_id, shards_num, _async):
+        """
+        target: test search with non_default shards_num
+        method: connect milvus, create collection with several shard numbers , insert, load and search
+        expected: search successfully with the non_default shards_num
+        """
+        self._connect()
+        name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=name, shards_num=shards_num)
+        dataframe = cf.gen_default_dataframe_data()
+        collection_w.insert(dataframe)
+        collection_w.load()
+        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, default_limit,
+                            default_search_exp, _async=_async,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "limit": default_limit,
+                                         "_async": _async})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("M", [4, 64])
+    @pytest.mark.parametrize("efConstruction", [8, 512])
+    def test_search_HNSW_index_with_max_ef(self, M, efConstruction, auto_id, _async):
+        """
+        target: test search HNSW index with max ef
+        method: connect milvus, create collection , insert, create index, load and search
+        expected: search successfully
+        """
+        dim = M * 4
+        self._connect()
+        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True,
+                                                                                  partition_num=1,
+                                                                                  auto_id=auto_id,
+                                                                                  dim=dim, is_index=True)[0:5]
+        HNSW_index_params = {"M": M, "efConstruction": efConstruction}
+        HNSW_index = {"index_type": "HNSW", "params": HNSW_index_params, "metric_type": "L2"}
+        collection_w.create_index("float_vector", HNSW_index)
+        collection_w.load()
+        search_param = {"metric_type": "L2", "params": {"ef": 32768}}
+        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            search_param, default_limit,
+                            default_search_exp, _async=_async,
+                            travel_timestamp=time_stamp,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": insert_ids,
+                                         "limit": default_limit,
+                                         "_async": _async})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("M", [4, 64])
+    @pytest.mark.parametrize("efConstruction", [8, 512])
+    @pytest.mark.parametrize("limit", [1, 10, 3000])
+    def test_search_HNSW_index_with_min_ef(self, M, efConstruction, limit, auto_id, _async):
+        """
+        target: test search HNSW index with min ef
+        method: connect milvus, create collection , insert, create index, load and search
+        expected: search successfully
+        """
+        dim = M * 4
+        ef = limit
+        self._connect()
+        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True,
+                                                                                  partition_num=1,
+                                                                                  auto_id=auto_id,
+                                                                                  dim=dim, is_index=True)[0:5]
+        HNSW_index_params = {"M": M, "efConstruction": efConstruction}
+        HNSW_index = {"index_type": "HNSW", "params": HNSW_index_params, "metric_type": "L2"}
+        collection_w.create_index("float_vector", HNSW_index)
+        collection_w.load()
+        search_param = {"metric_type": "L2", "params": {"ef": ef}}
+        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            search_param, limit,
+                            default_search_exp, _async=_async,
+                            travel_timestamp=time_stamp,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": insert_ids,
+                                         "limit": limit,
                                          "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L1)
