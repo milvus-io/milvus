@@ -1517,7 +1517,7 @@ class TestCollectionCountBinary(TestcaseBase):
         assert collection_w.num_entities == insert_count
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("auto_id",[True, False])
+    @pytest.mark.parametrize("auto_id", [True, False])
     def test_binary_collection_with_min_dim(self, auto_id):
         """
         target: test binary collection when dim=1
@@ -2617,7 +2617,7 @@ class TestLoadPartition(TestcaseBase):
         binary_index["metric_type"] = metric_type
         if binary_index["index_type"] == "BIN_IVF_FLAT" and metric_type in ct.structure_metrics:
             error = {ct.err_code: 1, ct.err_msg: 'Invalid metric_type: SUBSTRUCTURE, '
-                                                 'which does not match the index type: %s' % metric_type}
+                                                 'which does not match the index type: BIN_IVF_FLAT'}
             collection_w.create_index(ct.default_binary_vec_field_name, binary_index,
                                       check_task=CheckTasks.err_res, check_items=error)
         else:

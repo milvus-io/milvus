@@ -27,6 +27,7 @@ import (
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
+	icc "github.com/milvus-io/milvus/internal/distributed/indexcoord/client"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -59,7 +60,8 @@ type Server struct {
 	wg        sync.WaitGroup
 	dataCoord types.DataCoordComponent
 
-	etcdCli *clientv3.Client
+	etcdCli    *clientv3.Client
+	indexCoord types.IndexCoord
 
 	grpcErrChan chan error
 	grpcServer  *grpc.Server
@@ -97,6 +99,25 @@ func (s *Server) init() error {
 	}
 	s.etcdCli = etcdCli
 	s.dataCoord.SetEtcdClient(etcdCli)
+
+	if s.indexCoord == nil {
+		var err error
+		log.Debug("create IndexCoord client for DataCoord")
+		s.indexCoord, err = icc.NewClient(s.ctx, Params.EtcdCfg.MetaRootPath, etcdCli)
+		if err != nil {
+			log.Warn("failed to create IndexCoord client for DataCoord", zap.Error(err))
+			return err
+		}
+		log.Debug("create IndexCoord client for DataCoord done")
+	}
+
+	log.Debug("init IndexCoord client for DataCoord")
+	if err := s.indexCoord.Init(); err != nil {
+		log.Warn("failed to init IndexCoord client for DataCoord", zap.Error(err))
+		return err
+	}
+	log.Debug("init IndexCoord client for DataCoord done")
+	s.dataCoord.SetIndexCoord(s.indexCoord)
 
 	err = s.startGrpc()
 	if err != nil {

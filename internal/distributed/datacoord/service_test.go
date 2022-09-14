@@ -21,10 +21,12 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/stretchr/testify/assert"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
@@ -81,6 +83,9 @@ func (m *MockDataCoord) Register() error {
 }
 
 func (m *MockDataCoord) SetEtcdClient(etcdClient *clientv3.Client) {
+}
+
+func (m *MockDataCoord) SetIndexCoord(indexCoord types.IndexCoord) {
 }
 
 func (m *MockDataCoord) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
@@ -207,6 +212,10 @@ func Test_NewServer(t *testing.T) {
 
 	t.Run("Run", func(t *testing.T) {
 		server.dataCoord = &MockDataCoord{}
+		indexCoord := mocks.NewMockIndexCoord(t)
+		indexCoord.EXPECT().Init().Return(nil)
+		server.indexCoord = indexCoord
+
 		err := server.Run()
 		assert.Nil(t, err)
 	})

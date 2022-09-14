@@ -245,11 +245,6 @@ func (broker *globalMetaBroker) getFullIndexInfos(ctx context.Context, collectio
 				IndexSize:      int64(info.SerializedSize),
 			}
 
-			if len(info.IndexFilePaths) <= 0 {
-				log.Warn("index not ready", zap.Int64("index_build_id", info.BuildID))
-				return nil, fmt.Errorf("index not ready, index build id: %d", info.BuildID)
-			}
-
 			ret[segmentID] = append(ret[segmentID], indexInfo)
 		}
 	}

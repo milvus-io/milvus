@@ -22,6 +22,9 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
@@ -51,9 +54,10 @@ type GcOption struct {
 // garbageCollector handles garbage files in object storage
 // which could be dropped collection remanent or data node failure traces
 type garbageCollector struct {
-	option   GcOption
-	meta     *meta
-	segRefer *SegmentReferenceManager
+	option     GcOption
+	meta       *meta
+	segRefer   *SegmentReferenceManager
+	indexCoord types.IndexCoord
 
 	startOnce sync.Once
 	stopOnce  sync.Once
@@ -62,14 +66,18 @@ type garbageCollector struct {
 }
 
 // newGarbageCollector create garbage collector with meta and option
-func newGarbageCollector(meta *meta, segRefer *SegmentReferenceManager, opt GcOption) *garbageCollector {
+func newGarbageCollector(meta *meta,
+	segRefer *SegmentReferenceManager,
+	indexCoord types.IndexCoord,
+	opt GcOption) *garbageCollector {
 	log.Info("GC with option", zap.Bool("enabled", opt.enabled), zap.Duration("interval", opt.checkInterval),
 		zap.Duration("missingTolerance", opt.missingTolerance), zap.Duration("dropTolerance", opt.dropTolerance))
 	return &garbageCollector{
-		meta:     meta,
-		segRefer: segRefer,
-		option:   opt,
-		closeCh:  make(chan struct{}),
+		meta:       meta,
+		segRefer:   segRefer,
+		indexCoord: indexCoord,
+		option:     opt,
+		closeCh:    make(chan struct{}),
 	}
 }
 
@@ -170,12 +178,38 @@ func (gc *garbageCollector) scan() {
 }
 
 func (gc *garbageCollector) clearEtcd() {
-	drops := gc.meta.SelectSegments(func(segment *SegmentInfo) bool {
-		return segment.GetState() == commonpb.SegmentState_Dropped && !gc.segRefer.HasSegmentLock(segment.ID)
-	})
+	all := gc.meta.SelectSegments(func(si *SegmentInfo) bool { return true })
+	drops := make(map[int64]*SegmentInfo, 0)
+	compactTo := make(map[int64]*SegmentInfo)
+	for _, segment := range all {
+		if segment.GetState() == commonpb.SegmentState_Dropped && !gc.segRefer.HasSegmentLock(segment.ID) {
+			drops[segment.GetID()] = segment
+			continue
+		}
+		for _, from := range segment.GetCompactionFrom() {
+			compactTo[from] = segment
+		}
+	}
+
+	droppedCompactTo := make(map[*SegmentInfo]struct{})
+	for id := range drops {
+		if to, ok := compactTo[id]; ok {
+			droppedCompactTo[to] = struct{}{}
+		}
+	}
+	indexedSegments := FilterInIndexedSegments(gc.meta, gc.indexCoord, lo.Keys(droppedCompactTo)...)
+	indexedSet := make(typeutil.UniqueSet)
+	for _, segment := range indexedSegments {
+		indexedSet.Insert(segment.GetID())
+	}
 
 	for _, sinfo := range drops {
 		if !gc.isExpire(sinfo.GetDroppedAt()) {
+			continue
+		}
+		// For compact A, B -> C, don't GC A or B if C is not indexed,
+		// guarantee replacing A, B with C won't downgrade performance
+		if to, ok := compactTo[sinfo.GetID()]; ok && !indexedSet.Contain(to.GetID()) {
 			continue
 		}
 		logs := getLogs(sinfo)

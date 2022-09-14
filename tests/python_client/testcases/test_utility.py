@@ -1429,6 +1429,7 @@ class TestUtilityAdvanced(TestcaseBase):
             1. length of segment is greater than 0
             2. the sum num_rows of each segment is equal to num of entities
         """
+        pytest.skip("QueryCoord treat all segments without index as growing segments")
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
         nb = 3000
@@ -1489,6 +1490,7 @@ class TestUtilityAdvanced(TestcaseBase):
             pytest.skip("skip load balance testcase when querynode number less than 2")
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
+        collection_w.create_index(default_field_name, default_index_params)
         ms = MilvusSys()
         nb = 3000
         df = cf.gen_default_dataframe_data(nb)
@@ -1604,6 +1606,7 @@ class TestUtilityAdvanced(TestcaseBase):
         # init a collection
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
+        collection_w.create_index(default_field_name, default_index_params)
         ms = MilvusSys()
         nb = 3000
         df = cf.gen_default_dataframe_data(nb)
@@ -2268,7 +2271,6 @@ class TestUtilityRBAC(TestcaseBase):
                                      password=ct.default_password, check_task=ct.CheckTasks.ccr)
         self.utility_wrap.init_role("public")
         self.utility_wrap.role_grant("Collection", c_name, "Insert")
-
 
     @pytest.mark.tags(CaseLabel.L3)
     def test_role_revoke_collection_privilege(self, host, port):
@@ -3245,7 +3247,7 @@ class TestUtilityRBAC(TestcaseBase):
         self.utility_wrap.reset_password(user=user_test, old_password=password_test, new_password=password,
                                          check_task=CheckTasks.check_permission_deny)
         self.utility_wrap.update_password(user=user_test, old_password=password, new_password=password_test,
-                                         check_task=CheckTasks.check_permission_deny)
+                                          check_task=CheckTasks.check_permission_deny)
         self.utility_wrap.list_user(user_test, False, check_task=CheckTasks.check_permission_deny)
 
         # public role access

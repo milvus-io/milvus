@@ -1268,6 +1268,7 @@ func TestLoadBalanceAndRescheduleDmChannelTaskAfterNodeDown(t *testing.T) {
 		if len(activeTaskValues) != 0 {
 			break
 		}
+		time.Sleep(200 * time.Millisecond)
 	}
 
 	node3, err := startQueryNodeServer(ctx)
@@ -1288,6 +1289,7 @@ func TestLoadBalanceAndRescheduleDmChannelTaskAfterNodeDown(t *testing.T) {
 		if len(triggrtTaskValues) == 0 {
 			break
 		}
+		time.Sleep(200 * time.Millisecond)
 	}
 }
 

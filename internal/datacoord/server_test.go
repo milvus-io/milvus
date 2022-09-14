@@ -30,6 +30,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/minio/minio-go/v7"
@@ -47,8 +48,10 @@ import (
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
@@ -1058,7 +1061,10 @@ func TestSaveBinlogPaths(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
-		svr.meta.AddCollection(&datapb.CollectionInfo{ID: 0})
+		// vecFieldID := int64(201)
+		svr.meta.AddCollection(&datapb.CollectionInfo{
+			ID: 0,
+		})
 
 		segments := []struct {
 			id           UniqueID
@@ -1077,6 +1083,7 @@ func TestSaveBinlogPaths(t *testing.T) {
 			err := svr.meta.AddSegment(NewSegmentInfo(s))
 			assert.Nil(t, err)
 		}
+		svr.indexCoord.(*mocks.MockIndexCoord).EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(nil, nil)
 
 		err := svr.channelManager.AddNode(0)
 		assert.Nil(t, err)
@@ -1205,7 +1212,18 @@ func TestDropVirtualChannel(t *testing.T) {
 
 		defer closeTestServer(t, svr)
 
-		svr.meta.AddCollection(&datapb.CollectionInfo{ID: 0})
+		vecFieldID := int64(201)
+		svr.meta.AddCollection(&datapb.CollectionInfo{
+			ID: 0,
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:  vecFieldID,
+						DataType: schemapb.DataType_FloatVector,
+					},
+				},
+			},
+		})
 		type testSegment struct {
 			id           UniqueID
 			collectionID UniqueID
@@ -1236,6 +1254,7 @@ func TestDropVirtualChannel(t *testing.T) {
 			err := svr.meta.AddSegment(NewSegmentInfo(s))
 			assert.Nil(t, err)
 		}
+		svr.indexCoord.(*mocks.MockIndexCoord).EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(nil, nil)
 		// add non matched segments
 		os := &datapb.SegmentInfo{
 			ID:            maxOperationsPerTxn + 100,
@@ -1660,6 +1679,23 @@ func TestGetVChannelPos(t *testing.T) {
 	}
 	err = svr.meta.AddSegment(NewSegmentInfo(s3))
 	assert.Nil(t, err)
+	mockResp := &indexpb.GetIndexInfoResponse{
+		Status: &commonpb.Status{},
+		SegmentInfo: map[int64]*indexpb.SegmentInfo{
+			s1.ID: {
+				CollectionID: s1.CollectionID,
+				SegmentID:    s1.ID,
+				EnableIndex:  true,
+				IndexInfos: []*indexpb.IndexFilePathInfo{
+					{
+						SegmentID: s1.ID,
+						FieldID:   2,
+					},
+				},
+			},
+		},
+	}
+	svr.indexCoord.(*mocks.MockIndexCoord).EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(mockResp, nil)
 
 	t.Run("get unexisted channel", func(t *testing.T) {
 		vchan := svr.handler.GetVChanPositions(&channel{Name: "chx1", CollectionID: 0}, allPartitionID)
@@ -1905,12 +1941,43 @@ func TestGetRecoveryInfo(t *testing.T) {
 			return newMockRootCoordService(), nil
 		}
 
+		svr.meta.AddCollection(&datapb.CollectionInfo{
+			Schema: newTestSchema(),
+		})
 		seg1 := createSegment(0, 0, 0, 100, 10, "vchan1", commonpb.SegmentState_Flushed)
 		seg2 := createSegment(1, 0, 0, 100, 20, "vchan1", commonpb.SegmentState_Flushed)
 		err := svr.meta.AddSegment(NewSegmentInfo(seg1))
 		assert.Nil(t, err)
 		err = svr.meta.AddSegment(NewSegmentInfo(seg2))
 		assert.Nil(t, err)
+		mockResp := &indexpb.GetIndexInfoResponse{
+			Status: &commonpb.Status{},
+			SegmentInfo: map[int64]*indexpb.SegmentInfo{
+				seg1.ID: {
+					CollectionID: seg1.CollectionID,
+					SegmentID:    seg1.ID,
+					EnableIndex:  true,
+					IndexInfos: []*indexpb.IndexFilePathInfo{
+						{
+							SegmentID: seg1.ID,
+							FieldID:   2,
+						},
+					},
+				},
+				seg2.ID: {
+					CollectionID: seg2.CollectionID,
+					SegmentID:    seg2.ID,
+					EnableIndex:  true,
+					IndexInfos: []*indexpb.IndexFilePathInfo{
+						{
+							SegmentID: seg2.ID,
+							FieldID:   2,
+						},
+					},
+				},
+			},
+		}
+		svr.indexCoord.(*mocks.MockIndexCoord).EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(mockResp, nil)
 
 		req := &datapb.GetRecoveryInfoRequest{
 			CollectionID: 0,
@@ -1939,6 +2006,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		assert.Nil(t, err)
 		err = svr.meta.AddSegment(NewSegmentInfo(seg2))
 		assert.Nil(t, err)
+		svr.indexCoord.(*mocks.MockIndexCoord).EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(nil, nil)
 
 		req := &datapb.GetRecoveryInfoRequest{
 			CollectionID: 0,
@@ -1956,6 +2024,10 @@ func TestGetRecoveryInfo(t *testing.T) {
 	t.Run("test get binlogs", func(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
+
+		svr.meta.AddCollection(&datapb.CollectionInfo{
+			Schema: newTestSchema(),
+		})
 
 		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
 			return newMockRootCoordService(), nil
@@ -2003,13 +2075,30 @@ func TestGetRecoveryInfo(t *testing.T) {
 				},
 			},
 		}
-		segment := createSegment(0, 0, 0, 100, 10, "ch1", commonpb.SegmentState_Flushed)
+		segment := createSegment(0, 0, 1, 100, 10, "vchan1", commonpb.SegmentState_Flushed)
 		err := svr.meta.AddSegment(NewSegmentInfo(segment))
 		assert.Nil(t, err)
 
+		mockResp := &indexpb.GetIndexInfoResponse{
+			Status: &commonpb.Status{},
+			SegmentInfo: map[int64]*indexpb.SegmentInfo{
+				segment.ID: {
+					CollectionID: segment.CollectionID,
+					SegmentID:    segment.ID,
+					EnableIndex:  true,
+					IndexInfos: []*indexpb.IndexFilePathInfo{
+						{
+							SegmentID: segment.ID,
+							FieldID:   2,
+						},
+					},
+				},
+			},
+		}
+		svr.indexCoord.(*mocks.MockIndexCoord).EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(mockResp, nil)
 		err = svr.channelManager.AddNode(0)
 		assert.Nil(t, err)
-		err = svr.channelManager.Watch(&channel{Name: "ch1", CollectionID: 0})
+		err = svr.channelManager.Watch(&channel{Name: "vchan1", CollectionID: 0})
 		assert.Nil(t, err)
 
 		sResp, err := svr.SaveBinlogPaths(context.TODO(), binlogReq)
@@ -2018,7 +2107,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 
 		req := &datapb.GetRecoveryInfoRequest{
 			CollectionID: 0,
-			PartitionID:  0,
+			PartitionID:  1,
 		}
 		resp, err := svr.GetRecoveryInfo(context.TODO(), req)
 		assert.Nil(t, err)
@@ -2045,6 +2134,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		assert.Nil(t, err)
 		err = svr.meta.AddSegment(NewSegmentInfo(seg2))
 		assert.Nil(t, err)
+		svr.indexCoord.(*mocks.MockIndexCoord).EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(nil, nil)
 
 		req := &datapb.GetRecoveryInfoRequest{
 			CollectionID: 0,
@@ -2876,6 +2966,9 @@ func newTestServer(t *testing.T, receiveCh chan interface{}, opts ...Option) *Se
 	svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
 		return newMockRootCoordService(), nil
 	}
+	indexCoord := mocks.NewMockIndexCoord(t)
+	indexCoord.EXPECT().GetIndexInfos(context.Background(), mock.Anything).Return(nil, nil).Maybe()
+	svr.indexCoord = indexCoord
 
 	err = svr.Init()
 	assert.Nil(t, err)

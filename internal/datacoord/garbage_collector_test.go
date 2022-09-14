@@ -26,6 +26,7 @@ import (
 	"time"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -55,8 +56,10 @@ func Test_garbageCollector_basic(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, segRefer)
 
+	indexCoord := mocks.NewMockIndexCoord(t)
+
 	t.Run("normal gc", func(t *testing.T) {
-		gc := newGarbageCollector(meta, segRefer, GcOption{
+		gc := newGarbageCollector(meta, segRefer, indexCoord, GcOption{
 			cli:              cli,
 			enabled:          true,
 			checkInterval:    time.Millisecond * 10,
@@ -73,7 +76,7 @@ func Test_garbageCollector_basic(t *testing.T) {
 	})
 
 	t.Run("with nil cli", func(t *testing.T) {
-		gc := newGarbageCollector(meta, segRefer, GcOption{
+		gc := newGarbageCollector(meta, segRefer, indexCoord, GcOption{
 			cli:              nil,
 			enabled:          true,
 			checkInterval:    time.Millisecond * 10,
@@ -118,6 +121,8 @@ func Test_garbageCollector_scan(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, segRefer)
 
+	indexCoord := mocks.NewMockIndexCoord(t)
+
 	t.Run("key is reference", func(t *testing.T) {
 		segReferManager := &SegmentReferenceManager{
 			etcdKV: etcdKV,
@@ -134,7 +139,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 				2: 1,
 			},
 		}
-		gc := newGarbageCollector(meta, segRefer, GcOption{
+		gc := newGarbageCollector(meta, segRefer, indexCoord, GcOption{
 			cli:              cli,
 			enabled:          true,
 			checkInterval:    time.Minute * 30,
@@ -156,7 +161,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 	})
 
 	t.Run("missing all but save tolerance", func(t *testing.T) {
-		gc := newGarbageCollector(meta, segRefer, GcOption{
+		gc := newGarbageCollector(meta, segRefer, indexCoord, GcOption{
 			cli:              cli,
 			enabled:          true,
 			checkInterval:    time.Minute * 30,
@@ -182,7 +187,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 		err = meta.AddSegment(segment)
 		require.NoError(t, err)
 
-		gc := newGarbageCollector(meta, segRefer, GcOption{
+		gc := newGarbageCollector(meta, segRefer, indexCoord, GcOption{
 			cli:              cli,
 			enabled:          true,
 			checkInterval:    time.Minute * 30,
@@ -211,7 +216,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 		err = meta.AddSegment(segment)
 		require.NoError(t, err)
 
-		gc := newGarbageCollector(meta, segRefer, GcOption{
+		gc := newGarbageCollector(meta, segRefer, indexCoord, GcOption{
 			cli:              cli,
 			enabled:          true,
 			checkInterval:    time.Minute * 30,
@@ -228,7 +233,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 		gc.close()
 	})
 	t.Run("missing gc all", func(t *testing.T) {
-		gc := newGarbageCollector(meta, segRefer, GcOption{
+		gc := newGarbageCollector(meta, segRefer, indexCoord, GcOption{
 			cli:              cli,
 			enabled:          true,
 			checkInterval:    time.Minute * 30,
