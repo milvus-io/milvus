@@ -59,12 +59,14 @@ type nodeCtx struct {
 	downstreamInputChanIdx map[string]int
 
 	closeCh chan struct{} // notify work to exit
+	closeWg *sync.WaitGroup
 }
 
 // Start invoke Node `Start` method and start a worker goroutine
 func (nodeCtx *nodeCtx) Start() {
 	nodeCtx.node.Start()
 
+	nodeCtx.closeWg.Add(1)
 	go nodeCtx.work()
 }
 
@@ -114,6 +116,7 @@ func (nodeCtx *nodeCtx) work() {
 			// the res decide whether the node should be closed.
 			if isCloseMsg(res) {
 				close(nodeCtx.closeCh)
+				nodeCtx.closeWg.Done()
 				nodeCtx.node.Close()
 			}
 
