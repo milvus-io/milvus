@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSchema(t *testing.T) {
@@ -611,4 +612,88 @@ func TestAppendPKs(t *testing.T) {
 	assert.ElementsMatch(t, []string{"1"}, strPks.GetStrId().GetData())
 	AppendPKs(strPks, "2")
 	assert.ElementsMatch(t, []string{"1", "2"}, strPks.GetStrId().GetData())
+}
+
+func TestSwapPK(t *testing.T) {
+	intPks := &schemapb.IDs{}
+	AppendPKs(intPks, int64(1))
+	AppendPKs(intPks, int64(2))
+	AppendPKs(intPks, int64(3))
+	require.Equal(t, []int64{1, 2, 3}, intPks.GetIntId().GetData())
+
+	SwapPK(intPks, 0, 1)
+	assert.Equal(t, []int64{2, 1, 3}, intPks.GetIntId().GetData())
+	SwapPK(intPks, 0, 1)
+	assert.Equal(t, []int64{1, 2, 3}, intPks.GetIntId().GetData())
+	SwapPK(intPks, 0, 2)
+	assert.Equal(t, []int64{3, 2, 1}, intPks.GetIntId().GetData())
+	SwapPK(intPks, 0, 2)
+	assert.Equal(t, []int64{1, 2, 3}, intPks.GetIntId().GetData())
+	SwapPK(intPks, 1, 2)
+	assert.Equal(t, []int64{1, 3, 2}, intPks.GetIntId().GetData())
+	SwapPK(intPks, 1, 2)
+	assert.Equal(t, []int64{1, 2, 3}, intPks.GetIntId().GetData())
+
+	strPks := &schemapb.IDs{}
+	AppendPKs(strPks, "1")
+	AppendPKs(strPks, "2")
+	AppendPKs(strPks, "3")
+
+	require.Equal(t, []string{"1", "2", "3"}, strPks.GetStrId().GetData())
+
+	SwapPK(strPks, 0, 1)
+	assert.Equal(t, []string{"2", "1", "3"}, strPks.GetStrId().GetData())
+	SwapPK(strPks, 0, 1)
+	assert.Equal(t, []string{"1", "2", "3"}, strPks.GetStrId().GetData())
+	SwapPK(strPks, 0, 2)
+	assert.Equal(t, []string{"3", "2", "1"}, strPks.GetStrId().GetData())
+	SwapPK(strPks, 0, 2)
+	assert.Equal(t, []string{"1", "2", "3"}, strPks.GetStrId().GetData())
+	SwapPK(strPks, 1, 2)
+	assert.Equal(t, []string{"1", "3", "2"}, strPks.GetStrId().GetData())
+	SwapPK(strPks, 1, 2)
+	assert.Equal(t, []string{"1", "2", "3"}, strPks.GetStrId().GetData())
+}
+
+func TestComparePk(t *testing.T) {
+	intPks := &schemapb.IDs{}
+	AppendPKs(intPks, int64(1))
+	AppendPKs(intPks, int64(2))
+	AppendPKs(intPks, int64(3))
+	require.Equal(t, []int64{1, 2, 3}, intPks.GetIntId().GetData())
+
+	less := ComparePK(intPks, 0, 1)
+	assert.True(t, less)
+	less = ComparePK(intPks, 0, 2)
+	assert.True(t, less)
+	less = ComparePK(intPks, 1, 2)
+	assert.True(t, less)
+
+	less = ComparePK(intPks, 1, 0)
+	assert.False(t, less)
+	less = ComparePK(intPks, 2, 0)
+	assert.False(t, less)
+	less = ComparePK(intPks, 2, 1)
+	assert.False(t, less)
+
+	strPks := &schemapb.IDs{}
+	AppendPKs(strPks, "1")
+	AppendPKs(strPks, "2")
+	AppendPKs(strPks, "3")
+
+	require.Equal(t, []string{"1", "2", "3"}, strPks.GetStrId().GetData())
+
+	less = ComparePK(strPks, 0, 1)
+	assert.True(t, less)
+	less = ComparePK(strPks, 0, 2)
+	assert.True(t, less)
+	less = ComparePK(strPks, 1, 2)
+	assert.True(t, less)
+
+	less = ComparePK(strPks, 1, 0)
+	assert.False(t, less)
+	less = ComparePK(strPks, 2, 0)
+	assert.False(t, less)
+	less = ComparePK(strPks, 2, 1)
+	assert.False(t, less)
 }

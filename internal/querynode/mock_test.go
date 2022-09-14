@@ -1826,6 +1826,22 @@ func genFieldData(fieldName string, fieldID int64, fieldType schemapb.DataType, 
 			},
 			FieldId: fieldID,
 		}
+	case schemapb.DataType_VarChar:
+		fieldData = &schemapb.FieldData{
+			Type:      schemapb.DataType_VarChar,
+			FieldName: fieldName,
+			Field: &schemapb.FieldData_Scalars{
+				Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{
+						StringData: &schemapb.StringArray{
+							Data: fieldValue.([]string),
+						},
+					},
+				},
+			},
+			FieldId: fieldID,
+		}
+
 	case schemapb.DataType_BinaryVector:
 		fieldData = &schemapb.FieldData{
 			Type:      schemapb.DataType_BinaryVector,

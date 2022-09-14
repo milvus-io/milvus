@@ -285,9 +285,12 @@ func mergeInternalRetrieveResults(ctx context.Context, retrieveResults []*intern
 }
 
 func mergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcorepb.RetrieveResults) (*segcorepb.RetrieveResults, error) {
-	var ret *segcorepb.RetrieveResults
-	var skipDupCnt int64
-	var idSet = make(map[interface{}]struct{})
+
+	var (
+		ret        *segcorepb.RetrieveResults
+		skipDupCnt int64
+		idSet      = make(map[interface{}]struct{})
+	)
 
 	// merge results and remove duplicates
 	for _, rr := range retrieveResults {
@@ -320,7 +323,10 @@ func mergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 			}
 		}
 	}
-	log.Ctx(ctx).Debug("skip duplicated query result", zap.Int64("count", skipDupCnt))
+
+	if skipDupCnt > 0 {
+		log.Ctx(ctx).Debug("skip duplicated query result", zap.Int64("count", skipDupCnt))
+	}
 
 	// not found, return default values indicating not result found
 	if ret == nil {

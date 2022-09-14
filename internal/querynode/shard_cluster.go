@@ -960,8 +960,6 @@ func (sc *ShardCluster) Query(ctx context.Context, req *querypb.QueryRequest, wi
 		defer wg.Done()
 
 		streamErr := withStreaming(reqCtx)
-		resultMut.Lock()
-		defer resultMut.Unlock()
 		if streamErr != nil {
 			cancel()
 			// not set cancel error
@@ -982,7 +980,7 @@ func (sc *ShardCluster) Query(ctx context.Context, req *querypb.QueryRequest, wi
 		}
 		node, ok := sc.getNode(nodeID)
 		if !ok { // meta dismatch, report error
-			return nil, fmt.Errorf("SharcCluster for %s replicaID %d is no available", sc.vchannelName, sc.replicaID)
+			return nil, fmt.Errorf("ShardCluster for %s replicaID %d is no available", sc.vchannelName, sc.replicaID)
 		}
 		wg.Add(1)
 		go func() {

@@ -19,25 +19,22 @@ package querynode
 import (
 	"context"
 	"fmt"
-	"log"
 	"math"
 	"runtime"
 	"testing"
-
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
-
-	"github.com/milvus-io/milvus/internal/storage"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/concurrency"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
@@ -201,18 +198,8 @@ func TestSegment_retrieve(t *testing.T) {
 				},
 			},
 		},
-		OutputFieldIds: []FieldID{simpleInt32Field.id},
+		OutputFieldIds: []FieldID{simpleInt32Field.id, simpleInt64Field.id},
 	}
-	// reqIds := &segcorepb.RetrieveRequest{
-	// 	Ids: &schemapb.IDs{
-	// 		IdField: &schemapb.IDs_IntId{
-	// 			IntId: &schemapb.LongArray{
-	// 				Data: []int64{2, 3, 1},
-	// 			},
-	// 		},
-	// 	},
-	// 	OutputFieldsId: []int64{100},
-	// }
 	planExpr, err := proto.Marshal(planNode)
 	assert.NoError(t, err)
 	plan, err := createRetrievePlanByExpr(collection, planExpr, 100, 100)
@@ -223,6 +210,21 @@ func TestSegment_retrieve(t *testing.T) {
 	assert.NoError(t, err)
 
 	assert.Equal(t, res.GetFieldsData()[0].GetScalars().Data.(*schemapb.ScalarField_IntData).IntData.Data, []int32{1, 2, 3})
+	assert.Equal(t, []int64{1, 2, 3}, res.GetIds().GetIntId().GetData())
+
+	t.Run("Test sort", func(t *testing.T) {
+		offset, err := segment.segmentPreInsert(defaultMsgLength)
+		require.NoError(t, err)
+		require.Equal(t, offset, int64(100))
+		err = segment.segmentInsert(offset, insertMsg.RowIDs, insertMsg.Timestamps, insertRecord)
+		require.NoError(t, err)
+
+		res, err := segment.retrieve(plan)
+		assert.NoError(t, err)
+
+		assert.Equal(t, []int32{1, 1, 2, 2, 3, 3}, res.GetFieldsData()[0].GetScalars().Data.(*schemapb.ScalarField_IntData).IntData.Data)
+		assert.Equal(t, []int64{1, 1, 2, 2, 3, 3}, res.GetIds().GetIntId().GetData())
+	})
 }
 
 func TestSegment_getDeletedCount(t *testing.T) {
@@ -439,9 +441,7 @@ func TestSegment_segmentSearch(t *testing.T) {
 	}
 
 	placeGroupByte, err := proto.Marshal(&placeholderGroup)
-	if err != nil {
-		log.Print("marshal placeholderGroup failed")
-	}
+	require.NoError(t, err)
 
 	dslString := "{\"bool\": { \n\"vector\": {\n \"floatVectorField\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\n \"topk\": 10 \n,\"round_decimal\": 6\n } \n } \n } \n }"
 

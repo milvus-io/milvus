@@ -645,3 +645,24 @@ func AppendPKs(pks *schemapb.IDs, pk interface{}) {
 		log.Warn("got unexpected data type of pk when append pks", zap.Any("pk", pk))
 	}
 }
+
+// SwapPK swaps i-th PK with j-th PK
+func SwapPK(data *schemapb.IDs, i, j int) {
+	switch f := data.GetIdField().(type) {
+	case *schemapb.IDs_IntId:
+		f.IntId.Data[i], f.IntId.Data[j] = f.IntId.Data[j], f.IntId.Data[i]
+	case *schemapb.IDs_StrId:
+		f.StrId.Data[i], f.StrId.Data[j] = f.StrId.Data[j], f.StrId.Data[i]
+	}
+}
+
+// ComparePK returns if i-th PK < j-th PK
+func ComparePK(data *schemapb.IDs, i, j int) bool {
+	switch f := data.GetIdField().(type) {
+	case *schemapb.IDs_IntId:
+		return f.IntId.Data[i] < f.IntId.Data[j]
+	case *schemapb.IDs_StrId:
+		return f.StrId.Data[i] < f.StrId.Data[j]
+	}
+	return false
+}

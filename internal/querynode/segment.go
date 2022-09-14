@@ -29,6 +29,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 	"unsafe"
 
@@ -379,6 +380,8 @@ func (s *Segment) retrieve(plan *RetrievePlan) (*segcorepb.RetrieveResults, erro
 	if err := HandleCProto(&retrieveResult.cRetrieveResult, result); err != nil {
 		return nil, err
 	}
+
+	sort.Sort(&byPK{result})
 	return result, nil
 }
 
