@@ -21,7 +21,7 @@ For better tracking and debugging Milvus, the script `export-milvus-log.sh` is p
 | m          | Export Minio logs                                 | false        |
 | u          | Export pulsar logs                                | false        |
 | k          | Export Kafka logs                                 | False        |
-
+| s          | Only return logs newer than a relative duration like 5s, 2m,or 3h. Defaults to all logs                                | all        |
 > By default, the script only exports the logs of the Milvus component.
 >
 > If you need to export the logs of etcd, minio, and pulsar components, you need to add the parameters -e, -m, -u.
@@ -54,5 +54,11 @@ For better tracking and debugging Milvus, the script `export-milvus-log.sh` is p
 
 ```
 ./export-milvus-log.sh -i my-release -n milvus -p ./logs -k
+```
+
+5. Export the logs for only latest 24h.
+
+```
+./export-milvus-log.sh -i my-release -s 24h
 ```
 

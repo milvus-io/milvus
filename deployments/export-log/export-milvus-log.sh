@@ -8,7 +8,7 @@ etcd="false"
 minio="false"
 pulsar="false"
 kafka="false"
-
+since_args=""
 #-n namespace: The namespace that Milvus is installed in.
 #-i milvus_instance: The name of milvus instance.
 #-p log_path: Log storage path.
@@ -16,7 +16,8 @@ kafka="false"
 #-m export minio logs
 #-u export pulsar logs
 #-k export kafka logs
-while getopts "n:i:p:emuk" opt_name
+#-s 24h: export logs since 24h
+while getopts "n:i:p:s:emuk" opt_name
 do
     case $opt_name in
     	n) namespace=$OPTARG;;
@@ -26,6 +27,7 @@ do
     	m) minio="true";;
     	u) pulsar="true";;
     	k) kafka="true";;
+      s) since=$OPTARG;;
     	*) echo "Unkonwen parameters";;
     esac
 done
@@ -41,6 +43,11 @@ then
 	mkdir -p $log_path
 fi
 
+if [ $since ];
+then
+  since_args="--since=$since"
+fi
+
 echo "The log files will be stored $(readlink -f $log_path)"
 
 
@@ -52,11 +59,11 @@ function export_log(){
 		if [ $(kubectl get pod $pod -n $namespace --output=jsonpath={.status.containerStatuses[0].restartCount}) == 0 ];
 		then
 			echo "Export log of $pod"
-			kubectl logs $pod -n $namespace > $log_path/$pod.log
+			kubectl logs $pod -n $namespace ${since_args}> $log_path/$pod.log
 		else
 			echo "Export log of $pod"
-			kubectl logs $pod -n $namespace -p > $log_path/$pod-pre.log
-			kubectl logs $pod -n $namespace > $log_path/$pod.log
+			kubectl logs $pod -n $namespace -p ${since_args}> $log_path/$pod-pre.log
+			kubectl logs $pod -n $namespace ${since_args}> $log_path/$pod.log
 		fi
 	done
 }
