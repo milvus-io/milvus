@@ -9,7 +9,7 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
-FROM milvusdb/openblas:ubuntu20.04-20220825-4feedf1
+FROM milvusdb/openblas:ubuntu20.04-20220914-179ea77
 
 RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-certificates gnupg2 && \
     wget -qO- "https://cmake.org/files/v3.18/cmake-3.18.6-Linux-x86_64.tar.gz" | tar --strip-components=1 -xz -C /usr/local && \
