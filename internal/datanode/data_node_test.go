@@ -733,7 +733,6 @@ func TestDataNode(t *testing.T) {
 			assert.False(t, fg.replica.hasSegment(req.CompactedFrom[0], true))
 			assert.False(t, fg.replica.hasSegment(req.CompactedFrom[1], true))
 		})
-
 	})
 }
 

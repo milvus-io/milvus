@@ -250,7 +250,7 @@ func (t *compactionTask) merge(
 		err              error
 
 		// statslog generation
-		segment *Segment // empty segment used for bf generation
+		segment = &Segment{} // empty segment used for bf generation
 		pkID    UniqueID
 		pkType  schemapb.DataType
 
@@ -261,6 +261,8 @@ func (t *compactionTask) merge(
 		insertPaths      = make([]*datapb.FieldBinlog, 0)
 	)
 
+	t.Replica.initSegmentBloomFilter(segment)
+
 	isDeletedValue := func(v *storage.Value) bool {
 		ts, ok := delta[v.PK.GetValue()]
 		if ok && uint64(v.Timestamp) <= ts {
@@ -268,9 +270,6 @@ func (t *compactionTask) merge(
 		}
 		return false
 	}
-
-	segment = &Segment{}
-	t.Replica.initSegmentBloomFilter(segment)
 
 	addInsertFieldPath := func(inPaths map[UniqueID]*datapb.FieldBinlog) {
 		for fID, path := range inPaths {
@@ -456,7 +455,7 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 		segIDs = append(segIDs, s.GetSegmentID())
 	}
 
-	collID, partID, meta, err := t.getSegmentMeta(segIDs[0])
+	_, partID, meta, err := t.getSegmentMeta(segIDs[0])
 	if err != nil {
 		log.Error("compact wrong", zap.Int64("planID", t.plan.GetPlanID()), zap.Error(err))
 		return nil, err
@@ -547,7 +546,7 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 		return nil, err
 	}
 
-	inPaths, statsPaths, segment, numRows, err := t.merge(ctxTimeout, allPs, targetSegID, partID, meta, deltaPk2Ts)
+	inPaths, statsPaths, _, numRows, err := t.merge(ctxTimeout, allPs, targetSegID, partID, meta, deltaPk2Ts)
 	if err != nil {
 		log.Error("compact wrong", zap.Int64("planID", t.plan.GetPlanID()), zap.Error(err))
 		return nil, err
@@ -577,44 +576,6 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 		Field2StatslogPaths: statsPaths,
 		Deltalogs:           deltaInfo,
 		NumOfRows:           numRows,
-	}
-
-	// rpcStart := time.Now()
-	// status, err := t.dc.CompleteCompaction(ctxTimeout, pack)
-	// if err != nil {
-	// 	log.Error("complete compaction rpc wrong", zap.Int64("planID", t.plan.GetPlanID()), zap.Error(err))
-	// 	return err
-	// }
-	// if status.ErrorCode != commonpb.ErrorCode_Success {
-	// 	log.Error("complete compaction wrong", zap.Int64("planID", t.plan.GetPlanID()), zap.String("reason", status.GetReason()))
-	// 	return fmt.Errorf("complete comapction wrong: %s", status.GetReason())
-	// }
-	// rpcEnd := time.Now()
-	// defer func() {
-	// 	log.Debug("rpc elapse in ms", zap.Int64("planID", t.plan.GetPlanID()), zap.Float64("elapse", nano2Milli(rpcEnd.Sub(rpcStart))))
-	// }()
-	//
-	//  Compaction I: update pk range.
-	//  Compaction II: remove the segments and add a new flushed segment with pk range.
-	if t.hasSegment(targetSegID, true) {
-		if numRows <= 0 {
-			t.removeSegments(targetSegID)
-		} else {
-			t.refreshFlushedSegStatistics(targetSegID, numRows)
-		}
-		// no need to shorten the PK range of a segment, deleting dup PKs is valid
-	} else {
-		segment.collectionID = collID
-		segment.partitionID = partID
-		segment.segmentID = targetSegID
-		segment.channelName = t.plan.GetChannel()
-		segment.numRows = numRows
-
-		err = t.mergeFlushedSegments(segment, t.plan.GetPlanID(), segIDs)
-		if err != nil {
-			log.Error("compact wrong", zap.Int64("planID", t.plan.GetPlanID()), zap.Error(err))
-			return nil, err
-		}
 	}
 
 	uninjectStart := time.Now()
