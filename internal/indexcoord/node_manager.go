@@ -22,13 +22,13 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/api/commonpb"
+	"github.com/milvus-io/milvus/api/milvuspb"
 	grpcindexnodeclient "github.com/milvus-io/milvus/internal/distributed/indexnode/client"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/metrics"
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
 )
 

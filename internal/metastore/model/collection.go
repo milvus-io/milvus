@@ -1,10 +1,10 @@
 package model
 
 import (
+	"github.com/milvus-io/milvus/api/commonpb"
+	"github.com/milvus-io/milvus/api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
-	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
 type Collection struct {

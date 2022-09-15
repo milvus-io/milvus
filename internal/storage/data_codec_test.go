@@ -24,9 +24,9 @@ import (
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
 
+	"github.com/milvus-io/milvus/api/schemapb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
-	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 )

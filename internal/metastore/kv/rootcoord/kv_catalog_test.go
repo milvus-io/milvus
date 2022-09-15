@@ -9,12 +9,12 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metastore"
 
-	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/api/schemapb"
 
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/api/commonpb"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/stretchr/testify/assert"
 

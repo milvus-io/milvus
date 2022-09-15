@@ -21,6 +21,14 @@ SCRIPTS_DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
 cd ${SCRIPTS_DIR}
 
 GO_SRC_DIR="${SCRIPTS_DIR}/$1"
+
+if [[ $(uname -s) == "Darwin" ]]; then
+  if ! brew --prefix --installed grep >/dev/null 2>&1; then
+        brew install grep
+  fi
+  export PATH="/usr/local/opt/grep/libexec/gnubin:$PATH"
+fi
+
 if test -z "$(git status | grep -E "*pb.go|*pb.cc|*pb.h")"; then
   exit 0
 else

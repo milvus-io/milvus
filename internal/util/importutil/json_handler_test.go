@@ -7,11 +7,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus/api/commonpb"
+	"github.com/milvus-io/milvus/api/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/common"
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 )
 

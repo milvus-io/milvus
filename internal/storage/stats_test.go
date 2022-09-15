@@ -23,8 +23,8 @@ import (
 	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus/api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
-	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
 func TestStatsWriter_Int64PrimaryKey(t *testing.T) {

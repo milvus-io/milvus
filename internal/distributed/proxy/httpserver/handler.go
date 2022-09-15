@@ -5,7 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang/protobuf/proto"
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/api/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
 )
 

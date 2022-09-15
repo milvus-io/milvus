@@ -19,9 +19,9 @@ package datacoord
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/api/commonpb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"go.uber.org/zap"
 )

@@ -1,8 +1,8 @@
 package planparserv2
 
 import (
+	"github.com/milvus-io/milvus/api/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
-	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
 type ExprWithType struct {

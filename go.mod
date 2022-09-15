@@ -28,6 +28,7 @@ require (
 	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/klauspost/compress v1.14.2
 	github.com/lingdor/stackerror v0.0.0-20191119040541-976d8885ed76
+	github.com/milvus-io/milvus/api v0.0.0-20220915082433-b1f4c60117bb
 	github.com/minio/minio-go/v7 v7.0.10
 	github.com/opentracing/opentracing-go v1.2.0
 	github.com/panjf2000/ants/v2 v2.4.8
@@ -55,8 +56,8 @@ require (
 	google.golang.org/grpc/examples v0.0.0-20220617181431-3e7b97febc7f
 	google.golang.org/protobuf v1.28.0
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
-	gorm.io/driver/mysql v1.3.5 // indirect
-	gorm.io/gorm v1.23.8 // indirect
+	gorm.io/driver/mysql v1.3.5
+	gorm.io/gorm v1.23.8
 	stathat.com/c/consistent v1.0.0
 )
 
@@ -140,7 +141,7 @@ require (
 	github.com/prometheus/procfs v0.6.0 // indirect
 	github.com/quasilyte/go-ruleguard/dsl v0.3.21 // indirect
 	github.com/rs/xid v1.2.1 // indirect
-	github.com/samber/lo v1.27.0 // indirect
+	github.com/samber/lo v1.27.0
 	github.com/sirupsen/logrus v1.8.1 // indirect
 	github.com/soheilhy/cmux v0.1.5 // indirect
 	github.com/spf13/afero v1.6.0 // indirect
@@ -197,4 +198,7 @@ replace (
 	github.com/go-kit/kit => github.com/go-kit/kit v0.1.0
 	github.com/streamnative/pulsarctl => github.com/xiaofan-luan/pulsarctl v0.5.1
 	github.com/tecbot/gorocksdb => github.com/milvus-io/gorocksdb v0.0.0-20220624081344-8c5f4212846b // indirect
+	// If you want to use the hook interceptor, the following code should be commented out
+	// and you should modify the api version to be the same as the `so` project.
+	github.com/milvus-io/milvus/api => ./api
 )

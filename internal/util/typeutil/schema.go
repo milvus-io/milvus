@@ -21,8 +21,8 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/milvus-io/milvus/api/schemapb"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"go.uber.org/zap"
 )
 

@@ -6,7 +6,7 @@ package segcorepb
 import (
 	fmt "fmt"
 	proto "github.com/golang/protobuf/proto"
-	schemapb "github.com/milvus-io/milvus/internal/proto/schemapb"
+	schemapb "github.com/milvus-io/milvus/api/schemapb"
 	math "math"
 )
 

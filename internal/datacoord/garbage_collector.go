@@ -26,8 +26,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/samber/lo"
 
+	"github.com/milvus-io/milvus/api/commonpb"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/minio/minio-go/v7"

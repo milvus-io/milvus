@@ -12,8 +12,8 @@ import (
 	"fmt"
 	"unsafe"
 
+	"github.com/milvus-io/milvus/api/commonpb"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
 )
 
 func GetBinarySetKeys(cBinarySet C.CBinarySet) ([]string, error) {

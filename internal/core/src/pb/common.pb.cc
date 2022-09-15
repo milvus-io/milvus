@@ -468,9 +468,9 @@ const char descriptor_table_protodef_common_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "ManageOwnership\020\027\022\027\n\023PrivilegeSelectUser"
   "\020\030:^\n\021privilege_ext_obj\022\037.google.protobu"
   "f.MessageOptions\030\351\007 \001(\0132!.milvus.proto.c"
-  "ommon.PrivilegeExtBW\n\016io.milvus.grpcB\013Co"
-  "mmonProtoP\001Z3github.com/milvus-io/milvus"
-  "/internal/proto/commonpb\240\001\001b\006proto3"
+  "ommon.PrivilegeExtBL\n\016io.milvus.grpcB\013Co"
+  "mmonProtoP\001Z(github.com/milvus-io/milvus"
+  "/api/commonpb\240\001\001b\006proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_common_2eproto_deps[1] = {
   &::descriptor_table_google_2fprotobuf_2fdescriptor_2eproto,
@@ -491,7 +491,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_com
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_common_2eproto_once;
 static bool descriptor_table_common_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_common_2eproto = {
-  &descriptor_table_common_2eproto_initialized, descriptor_table_protodef_common_2eproto, "common.proto", 5275,
+  &descriptor_table_common_2eproto_initialized, descriptor_table_protodef_common_2eproto, "common.proto", 5264,
   &descriptor_table_common_2eproto_once, descriptor_table_common_2eproto_sccs, descriptor_table_common_2eproto_deps, 11, 1,
   schemas, file_default_instances, TableStruct_common_2eproto::offsets,
   file_level_metadata_common_2eproto, 11, file_level_enum_descriptors_common_2eproto, file_level_service_descriptors_common_2eproto,

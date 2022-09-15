@@ -19,7 +19,7 @@ package msgstream
 import (
 	"errors"
 
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/api/commonpb"
 )
 
 // UnmarshalFunc is an interface that has been implemented by each Msg

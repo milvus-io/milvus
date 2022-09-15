@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/api/milvuspb"
 	"github.com/stretchr/testify/assert"
 )
 
