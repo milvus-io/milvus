@@ -38,6 +38,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -123,12 +124,8 @@ func TestLevelGetterAndSetter(t *testing.T) {
 }
 
 func TestUpdateLogLevelThroughHttp(t *testing.T) {
-	httpServer := &http.Server{Addr: ":9081", ReadHeaderTimeout: time.Second * 3}
-	go func() {
-		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			Fatal(err.Error())
-		}
-	}()
+	httpServer := httptest.NewServer(nil)
+	defer httpServer.Close()
 
 	SetLevel(zap.DebugLevel)
 	assert.Equal(t, zap.DebugLevel, GetLevel())
@@ -145,13 +142,14 @@ func TestUpdateLogLevelThroughHttp(t *testing.T) {
 		Fatal(err.Error())
 	}
 
-	req, err := http.NewRequest(http.MethodPut, "http://localhost:9081/log/level", bytes.NewBuffer(payload))
+	url := httpServer.URL + "/log/level"
+	req, err := http.NewRequest(http.MethodPut, url, bytes.NewBuffer(payload))
 	req.Header.Set("Content-Type", "application/json")
 	if err != nil {
 		Fatal(err.Error())
 	}
 
-	client := &http.Client{}
+	client := httpServer.Client()
 	resp, err := client.Do(req)
 	if err != nil {
 		Fatal(err.Error())
@@ -164,12 +162,6 @@ func TestUpdateLogLevelThroughHttp(t *testing.T) {
 	}
 	assert.Equal(t, "{\"level\":\"error\"}\n", string(body))
 	assert.Equal(t, zap.ErrorLevel, GetLevel())
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := httpServer.Shutdown(ctx); err != nil {
-		Fatal(err.Error())
-	}
 }
 
 func TestSampling(t *testing.T) {
