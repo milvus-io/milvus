@@ -425,8 +425,7 @@ class TestNewIndexBase(TestcaseBase):
                                       index_name=ct.default_index_name)
             assert len(collection_w.indexes) == 1
 
-    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/12598")
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_annoy_index(self):
         # The strange thing is that the indexnode crash is only reproduced when nb is 50000 and dim is 512
         nb = 50000
