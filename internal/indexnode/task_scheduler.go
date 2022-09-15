@@ -27,7 +27,6 @@ import (
 
 	"github.com/milvus-io/milvus/api/commonpb"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/util/logutil"
 )
 
 // TaskQueue is a queue used to store tasks.
@@ -217,7 +216,7 @@ func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
 	for _, fn := range pipelines {
 		if err := wrap(fn); err != nil {
 			if err == errCancel {
-				logutil.Logger(t.Ctx()).Warn("index build task canceled", zap.String("task", t.Name()))
+				log.Ctx(t.Ctx()).Warn("index build task canceled", zap.String("task", t.Name()))
 				t.SetState(commonpb.IndexState_Failed, err.Error())
 			} else if errors.Is(err, ErrNoSuchKey) {
 				t.SetState(commonpb.IndexState_Failed, err.Error())

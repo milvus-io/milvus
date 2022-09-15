@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
@@ -34,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
-	"github.com/milvus-io/milvus/internal/util/tsoutil"
 )
 
 // metaTable maintains index-related information
@@ -419,19 +417,6 @@ func (mt *metaTable) CanCreateIndex(req *indexpb.CreateIndexRequest) bool {
 		}
 	}
 	return true
-}
-
-func (mt *metaTable) IsExpire(buildID UniqueID) bool {
-	mt.segmentIndexLock.RLock()
-	defer mt.segmentIndexLock.RUnlock()
-
-	segIdx, ok := mt.buildID2SegmentIndex[buildID]
-	if !ok {
-		return true
-	}
-
-	pTs, _ := tsoutil.ParseTS(segIdx.CreateTime)
-	return time.Since(pTs) > time.Minute*10
 }
 
 func (mt *metaTable) checkParams(fieldIndex *model.Index, req *indexpb.CreateIndexRequest) bool {

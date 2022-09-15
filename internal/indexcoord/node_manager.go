@@ -104,7 +104,6 @@ func (nm *NodeManager) AddNode(nodeID UniqueID, address string) error {
 
 // PeekClient peeks the client with the least load.
 func (nm *NodeManager) PeekClient(meta *model.SegmentIndex) (UniqueID, types.IndexNode) {
-	log.Info("IndexCoord peek client")
 	allClients := nm.GetAllClients()
 	if len(allClients) == 0 {
 		log.Error("there is no IndexNode online")
@@ -155,7 +154,7 @@ func (nm *NodeManager) PeekClient(meta *model.SegmentIndex) (UniqueID, types.Ind
 		return peekNodeID, allClients[peekNodeID]
 	}
 
-	log.Warn("IndexCoord peek client fail")
+	log.RatedDebug(30, "IndexCoord peek client fail")
 	return 0, nil
 }
 
