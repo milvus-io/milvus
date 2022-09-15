@@ -21,12 +21,15 @@ func (i *IndexNode) loadOrStoreTask(ClusterID string, buildID UniqueID, info *ta
 	return nil
 }
 
-func (i *IndexNode) loadTaskState(ClusterID string, buildID UniqueID) (commonpb.IndexState, bool) {
+func (i *IndexNode) loadTaskState(ClusterID string, buildID UniqueID) commonpb.IndexState {
 	key := taskKey{ClusterID: ClusterID, BuildID: buildID}
 	i.stateLock.Lock()
 	defer i.stateLock.Unlock()
 	task, ok := i.tasks[key]
-	return task.state, ok
+	if !ok {
+		return commonpb.IndexState_IndexStateNone
+	}
+	return task.state
 }
 
 func (i *IndexNode) storeTaskState(ClusterID string, buildID UniqueID, state commonpb.IndexState, failReason string) {

@@ -141,8 +141,13 @@ func (queue *IndexTaskQueue) GetTaskNum() (int, int) {
 	defer queue.atLock.Unlock()
 
 	utNum := queue.unissuedTasks.Len()
-	atNum := len(queue.activeTasks)
-
+	atNum := 0
+	// remove the finished task
+	for _, task := range queue.activeTasks {
+		if task.GetState() != commonpb.IndexState_Finished && task.GetState() != commonpb.IndexState_Failed {
+			atNum++
+		}
+	}
 	return utNum, atNum
 }
 

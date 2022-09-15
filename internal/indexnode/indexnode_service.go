@@ -181,7 +181,7 @@ func (i *IndexNode) GetJobStats(ctx context.Context, req *indexpb.GetJobStatsReq
 			},
 		}, nil
 	}
-	utNum, atNum := i.sched.IndexBuildQueue.GetTaskNum()
+	unissued, active := i.sched.IndexBuildQueue.GetTaskNum()
 	jobInfos := make([]*indexpb.JobInfo, 0)
 	i.foreachTaskInfo(func(ClusterID string, buildID UniqueID, info *taskInfo) {
 		if info.statistic != nil {
@@ -189,17 +189,18 @@ func (i *IndexNode) GetJobStats(ctx context.Context, req *indexpb.GetJobStatsReq
 		}
 	})
 	slots := 0
-	if i.sched.buildParallel > utNum+atNum {
-		slots = i.sched.buildParallel - utNum - atNum
+	if i.sched.buildParallel > unissued+active {
+		slots = i.sched.buildParallel - unissued - active
 	}
+	logutil.Logger(ctx).Info("Get Index Job Stats", zap.Int("Unissued", unissued), zap.Int("Active", active), zap.Int("Slot", slots))
 	return &indexpb.GetJobStatsResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
 		},
-		TotalJobNum:      int64(utNum) + int64(atNum),
-		InProgressJobNum: int64(atNum),
-		EnqueueJobNum:    int64(utNum),
+		TotalJobNum:      int64(active) + int64(unissued),
+		InProgressJobNum: int64(active),
+		EnqueueJobNum:    int64(unissued),
 		TaskSlots:        int64(slots),
 		JobInfos:         jobInfos,
 	}, nil

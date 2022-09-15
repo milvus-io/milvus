@@ -132,11 +132,7 @@ func (it *indexBuildTask) SetState(state commonpb.IndexState, failReason string)
 }
 
 func (it *indexBuildTask) GetState() commonpb.IndexState {
-	state, ok := it.node.loadTaskState(it.ClusterID, it.BuildID)
-	if !ok {
-		return commonpb.IndexState_IndexStateNone
-	}
-	return state
+	return it.node.loadTaskState(it.ClusterID, it.BuildID)
 }
 
 // OnEnqueue enqueues indexing tasks.
@@ -148,6 +144,7 @@ func (it *indexBuildTask) OnEnqueue(ctx context.Context) error {
 }
 
 func (it *indexBuildTask) Prepare(ctx context.Context) error {
+	logutil.Logger(ctx).Info("Begin to prepare indexBuildTask", zap.Int64("buildID", it.BuildID), zap.Int64("Collection", it.collectionID), zap.Int64("SegmentIf", it.segmentID))
 	typeParams := make(map[string]string)
 	for _, kvPair := range it.req.GetTypeParams() {
 		key, value := kvPair.GetKey(), kvPair.GetValue()
@@ -199,6 +196,7 @@ func (it *indexBuildTask) Prepare(ctx context.Context) error {
 			// ignore error
 		}
 	}
+	logutil.Logger(ctx).Info("Successfully prepare indexBuildTask", zap.Int64("buildID", it.BuildID), zap.Int64("Collection", it.collectionID), zap.Int64("SegmentIf", it.segmentID))
 	// setup chunkmanager
 	// opts := make([]storage.Option, 0)
 	// // TODO: secret access key_id
@@ -262,7 +260,13 @@ func (it *indexBuildTask) LoadData(ctx context.Context) error {
 	it.tr.Record("load field data done")
 	metrics.IndexNodeLoadFieldLatency.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.GetNodeID(), 10)).Observe(float64(loadVectorDuration))
 
-	return it.decodeBlobs(ctx, blobs)
+	err = it.decodeBlobs(ctx, blobs)
+	if err != nil {
+		logutil.Logger(ctx).Info("failed to decode blobs", zap.Int64("buildID", it.BuildID), zap.Int64("Collection", it.collectionID), zap.Int64("SegmentIf", it.segmentID), zap.Error(err))
+	} else {
+		logutil.Logger(ctx).Info("Successfully load data", zap.Int64("buildID", it.BuildID), zap.Int64("Collection", it.collectionID), zap.Int64("SegmentIf", it.segmentID))
+	}
+	return err
 }
 
 func (it *indexBuildTask) BuildIndex(ctx context.Context) error {
@@ -323,6 +327,7 @@ func (it *indexBuildTask) BuildIndex(ctx context.Context) error {
 	encodeIndexFileDur := it.tr.Record("index codec serialize done")
 	metrics.IndexNodeEncodeIndexFileLatency.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.GetNodeID(), 10)).Observe(float64(encodeIndexFileDur.Milliseconds()))
 	it.indexBlobs = serializedIndexBlobs
+	logutil.Logger(ctx).Info("Successfully build index", zap.Int64("buildID", it.BuildID), zap.Int64("Collection", it.collectionID), zap.Int64("SegmentID", it.segmentID))
 	return nil
 }
 
@@ -360,8 +365,8 @@ func (it *indexBuildTask) SaveIndexFiles(ctx context.Context) error {
 	saveIndexFileDur := it.tr.Record("index file save done")
 	metrics.IndexNodeSaveIndexFileLatency.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.GetNodeID(), 10)).Observe(float64(saveIndexFileDur.Milliseconds()))
 	it.tr.Elapse("index building all done")
-	logutil.Logger(ctx).Info("IndexNode CreateIndex successfully ", zap.Int64("collect", it.collectionID),
-		zap.Int64("partition", it.partitionID), zap.Int64("segment", it.segmentID))
+	logutil.Logger(ctx).Info("Successfully save index files", zap.Int64("buildID", it.BuildID), zap.Int64("Collection", it.collectionID),
+		zap.Int64("partition", it.partitionID), zap.Int64("SegmentId", it.segmentID))
 	return nil
 }
 
