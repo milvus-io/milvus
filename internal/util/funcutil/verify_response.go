@@ -3,7 +3,7 @@ package funcutil
 import (
 	"errors"
 
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/api/commonpb"
 )
 
 // errors for VerifyResponse

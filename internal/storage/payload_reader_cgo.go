@@ -12,9 +12,9 @@ import (
 	"fmt"
 	"unsafe"
 
+	"github.com/milvus-io/milvus/api/commonpb"
+	"github.com/milvus-io/milvus/api/schemapb"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
 // PayloadReaderCgo reads data from payload

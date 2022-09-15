@@ -25,8 +25,8 @@ import (
 	"golang.org/x/exp/mmap"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/milvus-io/milvus/api/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 )
 

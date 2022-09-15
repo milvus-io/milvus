@@ -5,13 +5,13 @@ package mocks
 import (
 	context "context"
 
-	commonpb "github.com/milvus-io/milvus/internal/proto/commonpb"
+	commonpb "github.com/milvus-io/milvus/api/commonpb"
 
 	datapb "github.com/milvus-io/milvus/internal/proto/datapb"
 
 	internalpb "github.com/milvus-io/milvus/internal/proto/internalpb"
 
-	milvuspb "github.com/milvus-io/milvus/internal/proto/milvuspb"
+	milvuspb "github.com/milvus-io/milvus/api/milvuspb"
 
 	mock "github.com/stretchr/testify/mock"
 )

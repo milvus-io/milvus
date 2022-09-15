@@ -1,7 +1,7 @@
 package model
 
 import (
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/api/commonpb"
 )
 
 type Segment struct {

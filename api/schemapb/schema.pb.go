@@ -6,7 +6,7 @@ package schemapb
 import (
 	fmt "fmt"
 	proto "github.com/golang/protobuf/proto"
-	commonpb "github.com/milvus-io/milvus/internal/proto/commonpb"
+	commonpb "github.com/milvus-io/milvus/api/commonpb"
 	math "math"
 )
 

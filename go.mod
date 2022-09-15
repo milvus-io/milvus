@@ -58,6 +58,7 @@ require (
 	gorm.io/driver/mysql v1.3.5 // indirect
 	gorm.io/gorm v1.23.8 // indirect
 	stathat.com/c/consistent v1.0.0
+	github.com/milvus-io/milvus/api v0.0.1
 )
 
 require github.com/apache/thrift v0.15.0
@@ -197,4 +198,5 @@ replace (
 	github.com/go-kit/kit => github.com/go-kit/kit v0.1.0
 	github.com/streamnative/pulsarctl => github.com/xiaofan-luan/pulsarctl v0.5.1
 	github.com/tecbot/gorocksdb => github.com/milvus-io/gorocksdb v0.0.0-20220624081344-8c5f4212846b // indirect
+	github.com/milvus-io/milvus/api => ./api
 )

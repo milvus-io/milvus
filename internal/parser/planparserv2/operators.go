@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/milvus-io/milvus/api/schemapb"
 	parser "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
-	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
 var arithExprMap = map[int]planpb.ArithOpType{

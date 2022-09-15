@@ -1,7 +1,7 @@
 syntax = "proto3";
 package milvus.proto.common;
 
-option go_package="github.com/milvus-io/milvus/internal/proto/commonpb";
+option go_package="github.com/milvus-io/milvus/api/commonpb";
 
 option java_multiple_files = true;
 option java_package = "io.milvus.grpc";

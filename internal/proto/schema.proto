@@ -1,7 +1,7 @@
 syntax = "proto3";
 package milvus.proto.schema;
 
-option go_package = "github.com/milvus-io/milvus/internal/proto/schemapb";
+option go_package = "github.com/milvus-io/milvus/api/schemapb";
 
 option java_multiple_files = true;
 option java_package = "io.milvus.grpc";

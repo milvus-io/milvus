@@ -22,8 +22,8 @@ import (
 	"sync"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/milvus-io/milvus/api/milvuspb"
 	"github.com/milvus-io/milvus/internal/kv"
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 )
 
 const (
