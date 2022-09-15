@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 )
@@ -44,14 +43,6 @@ func Test_Tso(t *testing.T) {
 		pRes, lRes := ParseTS(timestamp)
 		assert.Equal(t, physical.Unix(), pRes.Unix())
 		assert.Equal(t, uint64(logical), lRes)
-	})
-
-	t.Run("test GetCurrentTime", func(t *testing.T) {
-		curTime := GetCurrentTime()
-		p, l := ParseTS(curTime)
-		subTime := time.Since(p)
-		assert.Less(t, subTime, time.Millisecond)
-		assert.Equal(t, typeutil.ZeroTimestamp, l)
 	})
 }
 
