@@ -58,8 +58,6 @@ jobs:
           key: ubuntu20.04-go-mod-${{ hashFiles('**/go.sum') }}
           restore-keys: ubuntu20.04-go-mod-
       - name: Code Check
-        env:
-          CHECK_BUILDER: "1"
         run: |
            ./build/builder.sh /bin/bash -c "make check-proto-product && make verifiers"
   centos:
@@ -90,7 +88,6 @@ jobs:
           restore-keys: centos7-go-mod-
       - name: Code Check
         env:
-          CHECK_BUILDER: "1"
           OS_NAME: "centos7"
         run: |
            ./build/builder.sh /bin/bash -c "make install"
