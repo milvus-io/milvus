@@ -59,7 +59,7 @@ func newIndexBuilder(ctx context.Context, ic *IndexCoord, metaTable *metaTable, 
 		ic:               ic,
 		tasks:            make(map[int64]indexTaskState),
 		notifyChan:       make(chan struct{}, 1),
-		scheduleDuration: time.Second * 3,
+		scheduleDuration: time.Second,
 	}
 	ib.reloadFromKV(aliveNodes)
 	return ib
@@ -129,7 +129,9 @@ func (ib *indexBuilder) enqueue(buildID UniqueID) {
 
 	ib.taskMutex.Lock()
 	defer ib.taskMutex.Unlock()
-	ib.tasks[buildID] = indexTaskInit
+	if _, ok := ib.tasks[buildID]; !ok {
+		ib.tasks[buildID] = indexTaskInit
+	}
 }
 
 func (ib *indexBuilder) schedule() {
@@ -157,7 +159,6 @@ func (ib *indexBuilder) schedule() {
 
 func (ib *indexBuilder) run() {
 	ib.taskMutex.RLock()
-	log.Info("index builder task schedule", zap.Int("task num", len(ib.tasks)))
 	buildIDs := make([]UniqueID, 0, len(ib.tasks))
 	for tID := range ib.tasks {
 		buildIDs = append(buildIDs, tID)
@@ -167,13 +168,15 @@ func (ib *indexBuilder) run() {
 	sort.Slice(buildIDs, func(i, j int) bool {
 		return buildIDs[i] < buildIDs[j]
 	})
+	if len(buildIDs) > 0 {
+		log.Info("index builder task schedule", zap.Int("task num", len(buildIDs)))
+	}
 	for _, buildID := range buildIDs {
 		ib.process(buildID)
 	}
 }
 
 func (ib *indexBuilder) process(buildID UniqueID) {
-	defer ib.notify()
 	ib.taskMutex.RLock()
 	state := ib.tasks[buildID]
 	ib.taskMutex.RUnlock()
@@ -254,6 +257,7 @@ func (ib *indexBuilder) process(buildID UniqueID) {
 		if segmentsInfo.Status.ErrorCode != commonpb.ErrorCode_Success {
 			log.Error("IndexCoord get segment info from DataCoord fail", zap.Int64("segID", meta.SegmentID),
 				zap.Int64("buildID", buildID), zap.String("failReason", segmentsInfo.Status.Reason))
+			// TODO: delete after QueryCoordV2
 			if segmentsInfo.Status.GetReason() == msgSegmentNotFound(meta.SegmentID) {
 				updateStateFunc(buildID, indexTaskDeleted)
 				return
@@ -362,8 +366,11 @@ func (ib *indexBuilder) process(buildID UniqueID) {
 
 	case indexTaskDeleted:
 		log.Debug("index task state is deleted, try to release reference lock", zap.Int64("buildID", buildID))
-
-		if exist && meta.NodeID != 0 {
+		// TODO: delete after QueryCoordV2
+		if err := ib.meta.MarkSegmentsIndexAsDeletedByBuildID([]int64{buildID}); err != nil {
+			return
+		}
+		if meta.NodeID != 0 {
 			if !ib.dropIndexTask(buildID, meta.NodeID) {
 				return
 			}
@@ -492,7 +499,7 @@ func (ib *indexBuilder) releaseLockAndResetTask(buildID UniqueID, nodeID UniqueI
 	return nil
 }
 
-func (ib *indexBuilder) markTasksAsDeleted(buildIDs []UniqueID) {
+func (ib *indexBuilder) markTasksAsDeleted(buildIDs []UniqueID) error {
 	defer ib.notify()
 
 	ib.taskMutex.Lock()
@@ -504,6 +511,7 @@ func (ib *indexBuilder) markTasksAsDeleted(buildIDs []UniqueID) {
 			log.Debug("index task has been deleted", zap.Int64("buildID", buildID))
 		}
 	}
+	return nil
 }
 
 func (ib *indexBuilder) nodeDown(nodeID UniqueID) {

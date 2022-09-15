@@ -192,7 +192,7 @@ func (mt *metaTable) GetMeta(buildID UniqueID) (*model.SegmentIndex, bool) {
 	defer mt.segmentIndexLock.RUnlock()
 
 	segIdx, ok := mt.buildID2SegmentIndex[buildID]
-	if ok {
+	if ok && !segIdx.IsDeleted {
 		return model.CloneSegmentIndex(segIdx), true
 	}
 
@@ -621,29 +621,36 @@ func (mt *metaTable) GetSegmentIndexes(segID UniqueID) []*model.SegmentIndex {
 	segIndexInfos := make([]*model.SegmentIndex, 0)
 	if segIndexes, ok := mt.segmentIndexes[segID]; ok {
 		for _, segIdx := range segIndexes {
+			if segIdx.IsDeleted {
+				continue
+			}
 			segIndexInfos = append(segIndexInfos, model.CloneSegmentIndex(segIdx))
 		}
 	}
 	return segIndexInfos
 }
 
-func (mt *metaTable) GetSegmentIndexState(segmentID UniqueID, indexID UniqueID) IndexState {
+func (mt *metaTable) GetSegmentIndexState(segmentID UniqueID) IndexState {
 	mt.segmentIndexLock.RLock()
 	defer mt.segmentIndexLock.RUnlock()
 
+	state := IndexState{
+		state:      commonpb.IndexState_Finished,
+		failReason: "",
+	}
 	if segIdxes, ok := mt.segmentIndexes[segmentID]; ok {
-		if segIdx, ok := segIdxes[indexID]; ok && !segIdx.IsDeleted {
-			return IndexState{
-				state:      segIdx.IndexState,
-				failReason: segIdx.FailReason,
+		for _, segIdx := range segIdxes {
+			if segIdx.IsDeleted {
+				continue
+			}
+			if segIdx.IndexState != commonpb.IndexState_Finished {
+				state.state = segIdx.IndexState
+				state.failReason = segIdx.FailReason
 			}
 		}
 	}
 
-	return IndexState{
-		state:      commonpb.IndexState_IndexStateNone,
-		failReason: "there is no index",
-	}
+	return state
 }
 
 // GetIndexBuildProgress gets the index progress for indexID from meta table.
@@ -861,6 +868,19 @@ func (mt *metaTable) GetDeletedIndexes() []*model.Index {
 	return indexes
 }
 
+func (mt *metaTable) GetDeletedSegmentIndexes() []*model.SegmentIndex {
+	mt.segmentIndexLock.RLock()
+	defer mt.segmentIndexLock.RUnlock()
+
+	segIndexes := make([]*model.SegmentIndex, 0)
+	for _, segIdx := range mt.buildID2SegmentIndex {
+		if segIdx.IsDeleted {
+			segIndexes = append(segIndexes, segIdx)
+		}
+	}
+	return segIndexes
+}
+
 func (mt *metaTable) GetBuildIDsFromIndexID(indexID UniqueID) []UniqueID {
 	mt.segmentIndexLock.RLock()
 	defer mt.segmentIndexLock.RUnlock()
@@ -982,4 +1002,33 @@ func (mt *metaTable) FinishTask(taskInfo *indexpb.IndexTaskInfo) error {
 	}
 
 	return mt.updateSegIndexMeta(segIdx, updateFunc)
+}
+
+func (mt *metaTable) MarkSegmentsIndexAsDeletedByBuildID(buildIDs []UniqueID) error {
+	mt.segmentIndexLock.Lock()
+	defer mt.segmentIndexLock.Unlock()
+
+	segIdxes := make([]*model.SegmentIndex, 0)
+	for _, buildID := range buildIDs {
+		if segIdx, ok := mt.buildID2SegmentIndex[buildID]; ok {
+			if segIdx.IsDeleted {
+				continue
+			}
+			clonedSegIdx := model.CloneSegmentIndex(segIdx)
+			clonedSegIdx.IsDeleted = true
+			segIdxes = append(segIdxes, clonedSegIdx)
+		}
+	}
+	if len(segIdxes) == 0 {
+		log.Debug("IndexCoord metaTable MarkSegmentsIndexAsDeletedByBuildID success, already have deleted",
+			zap.Int64s("buildIDs", buildIDs))
+		return nil
+	}
+	err := mt.alterSegmentIndexes(segIdxes)
+	if err != nil {
+		log.Error("IndexCoord metaTable MarkSegmentsIndexAsDeletedByBuildID fail", zap.Int64s("buildIDs", buildIDs), zap.Error(err))
+		return err
+	}
+	log.Info("IndexCoord metaTable MarkSegmentsIndexAsDeletedByBuildID success", zap.Int64s("buildIDs", buildIDs))
+	return nil
 }
