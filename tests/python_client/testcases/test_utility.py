@@ -1810,6 +1810,22 @@ class TestUtilityUserPassword(TestcaseBase):
         user = "robot2048"
         self.utility_wrap.create_user(user=user, password=old_password)
         self.utility_wrap.reset_password(user=user, old_password=old_password, new_password=new_password)
+        self.utility_wrap.list_collections()
+
+    @pytest.mark.tags(ct.CaseLabel.L3)
+    @pytest.mark.parametrize("old_password", ["abc1234"])
+    @pytest.mark.parametrize("new_password", ["abc12345"])
+    def test_update_password_with_user_and_old_password(self, host, port, old_password, new_password):
+        """
+        target: test the password update with old password
+        method: get a connection with user and corresponding old password
+        expected: connected is True
+        """
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        user = "robot2060"
+        self.utility_wrap.create_user(user=user, password=old_password)
+        self.utility_wrap.update_password(user=user, old_password=old_password, new_password=new_password)
         self.connection_wrap.disconnect(alias=DefaultConfig.DEFAULT_USING)
         self.connection_wrap.connect(host=host, port=port, user=user,
                                      password=new_password, check_task=ct.CheckTasks.ccr)
@@ -1986,6 +2002,64 @@ class TestUtilityInvalidUserPassword(TestcaseBase):
                                      password=ct.default_password, check_task=ct.CheckTasks.ccr)
         self.utility_wrap.create_user(user=user, password="qwaszx0")
         self.utility_wrap.reset_password(user=user, old_password="waszx0", new_password="123456",
+                                         check_task=ct.CheckTasks.err_res,
+                                         check_items={ct.err_code: 30})
+
+    @pytest.mark.tags(ct.CaseLabel.L3)
+    @pytest.mark.parametrize("user", ["hobo89"])
+    @pytest.mark.parametrize("old_password", ["qwaszx0"])
+    def test_update_password_with_invalid_username(self, host, port, user, old_password):
+        """
+        target: test the wrong user when resetting password
+        method: create a user, and then reset the password with wrong username
+        excepted: reset is false
+        """
+        # 1.default user login
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+
+        # 2.create a user
+        self.utility_wrap.create_user(user=user, password=old_password)
+
+        # 3.reset password with the wrong username
+        self.utility_wrap.update_password(user="hobo", old_password=old_password, new_password="qwaszx1",
+                                         check_task=ct.CheckTasks.err_res,
+                                         check_items={ct.err_code: 30})
+
+    @pytest.mark.tags(ct.CaseLabel.L3)
+    @pytest.mark.parametrize("user", ["demo"])
+    @pytest.mark.parametrize("old_password", ["qwaszx0"])
+    @pytest.mark.parametrize("new_password", ["12345"])
+    def test_update_password_with_invalid_new_password(self, host, port, user, old_password, new_password):
+        """
+        target: test the new password when resetting password
+        method: create a user, and then set a wrong new password
+        excepted: reset is false
+        """
+        # 1.default user login
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+
+        # 2.create a user
+        self.utility_wrap.create_user(user=user, password=old_password)
+
+        # 3.reset password with the wrong new password
+        self.utility_wrap.update_password(user=user, old_password=old_password, new_password=new_password,
+                                         check_task=ct.CheckTasks.err_res,
+                                         check_items={ct.err_code: 5})
+
+    @pytest.mark.tags(ct.CaseLabel.L3)
+    @pytest.mark.parametrize("user", ["genny"])
+    def test_update_password_with_invalid_old_password(self, host, port, user):
+        """
+        target: test the old password when resetting password
+        method: create a credential, and then reset with a wrong old password
+        excepted: reset is false
+        """
+        self.connection_wrap.connect(host=host, port=port, user=ct.default_user,
+                                     password=ct.default_password, check_task=ct.CheckTasks.ccr)
+        self.utility_wrap.create_user(user=user, password="qwaszx0")
+        self.utility_wrap.update_password(user=user, old_password="waszx0", new_password="123456",
                                          check_task=ct.CheckTasks.err_res,
                                          check_items={ct.err_code: 30})
 
