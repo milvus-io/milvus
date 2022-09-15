@@ -250,13 +250,8 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 	// remove growing segment if watch dmChannels failed
 	defer func() {
 		if err != nil {
-			collection, err2 := w.node.metaReplica.getCollectionByID(collectionID)
-			if err2 == nil {
-				collection.Lock()
-				defer collection.Unlock()
-				for _, segmentID := range unFlushedSegmentIDs {
-					w.node.metaReplica.removeSegment(segmentID, segmentTypeGrowing)
-				}
+			for _, segmentID := range unFlushedSegmentIDs {
+				w.node.metaReplica.removeSegment(segmentID, segmentTypeGrowing)
 			}
 		}
 	}()

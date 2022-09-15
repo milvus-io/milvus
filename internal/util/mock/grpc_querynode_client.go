@@ -92,3 +92,15 @@ func (m *GrpcQueryNodeClient) GetMetrics(ctx context.Context, in *milvuspb.GetMe
 func (m *GrpcQueryNodeClient) ShowConfigurations(ctx context.Context, in *internalpb.ShowConfigurationsRequest, opts ...grpc.CallOption) (*internalpb.ShowConfigurationsResponse, error) {
 	return &internalpb.ShowConfigurationsResponse{}, m.Err
 }
+
+func (m *GrpcQueryNodeClient) GetDataDistribution(ctx context.Context, in *querypb.GetDataDistributionRequest, opts ...grpc.CallOption) (*querypb.GetDataDistributionResponse, error) {
+	return &querypb.GetDataDistributionResponse{}, m.Err
+}
+
+func (m *GrpcQueryNodeClient) SyncDistribution(ctx context.Context, in *querypb.SyncDistributionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
+func (m *GrpcQueryNodeClient) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmChannelRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}

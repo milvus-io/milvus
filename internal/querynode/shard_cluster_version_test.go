@@ -18,6 +18,7 @@ package querynode
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -34,7 +35,7 @@ func channelClose(ch chan struct{}) bool {
 func TestShardClusterVersion(t *testing.T) {
 
 	t.Run("new version", func(t *testing.T) {
-		v := NewShardClusterVersion(1, SegmentsStatus{})
+		v := NewShardClusterVersion(1, SegmentsStatus{}, nil)
 
 		assert.True(t, v.IsCurrent())
 		assert.Equal(t, int64(1), v.versionID)
@@ -42,19 +43,21 @@ func TestShardClusterVersion(t *testing.T) {
 	})
 
 	t.Run("version expired", func(t *testing.T) {
-		v := NewShardClusterVersion(1, SegmentsStatus{})
+		v := NewShardClusterVersion(1, SegmentsStatus{}, nil)
 		assert.True(t, v.IsCurrent())
 		ch := v.Expire()
 
 		assert.False(t, v.IsCurrent())
-		assert.True(t, channelClose(ch))
+		assert.Eventually(t, func() bool {
+			return channelClose(ch)
+		}, time.Second, time.Millisecond*10)
 	})
 
 	t.Run("In use check", func(t *testing.T) {
 		v := NewShardClusterVersion(1, SegmentsStatus{
 			1: shardSegmentInfo{segmentID: 1, partitionID: 0, nodeID: 1},
 			2: shardSegmentInfo{segmentID: 2, partitionID: 1, nodeID: 2},
-		})
+		}, nil)
 		allocs := v.GetAllocation([]int64{1})
 		assert.EqualValues(t, map[int64][]int64{2: {2}}, allocs)
 
@@ -65,6 +68,29 @@ func TestShardClusterVersion(t *testing.T) {
 
 		v.FinishUsage()
 
-		assert.True(t, channelClose(ch))
+		assert.Eventually(t, func() bool {
+			return channelClose(ch)
+		}, time.Second, time.Millisecond*10)
+
+	})
+
+	t.Run("wait last version", func(t *testing.T) {
+		lastVersion := NewShardClusterVersion(1, SegmentsStatus{}, nil)
+		lastVersion.GetAllocation(nil)
+		currentVersion := NewShardClusterVersion(2, SegmentsStatus{}, lastVersion)
+
+		ch := currentVersion.Expire()
+
+		select {
+		case <-ch:
+			t.FailNow()
+		default:
+		}
+
+		lastVersion.FinishUsage()
+
+		assert.Eventually(t, func() bool {
+			return channelClose(ch)
+		}, time.Second, time.Millisecond*10)
 	})
 }

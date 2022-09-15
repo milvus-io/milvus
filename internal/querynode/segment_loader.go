@@ -147,7 +147,7 @@ func (loader *segmentLoader) LoadSegment(req *querypb.LoadSegmentsRequest, segme
 			return err
 		}
 
-		segment, err := newSegment(collection, segmentID, partitionID, collectionID, vChannelID, segmentType, loader.cgoPool)
+		segment, err := newSegment(collection, segmentID, partitionID, collectionID, vChannelID, segmentType, req.GetVersion(), loader.cgoPool)
 		if err != nil {
 			log.Error("load segment failed when create new segment",
 				zap.Int64("collectionID", collectionID),

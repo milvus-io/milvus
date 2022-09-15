@@ -67,6 +67,11 @@ go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/proxy/..." -failfast
 go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/distributed/proxy/..." -failfast
 }
 
+function test_querycoordv2()
+{
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/querycoordv2/..." -failfast
+}
+
 function test_querynode()
 {
 go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/querynode/..." -failfast
@@ -174,6 +179,7 @@ test_tso
 test_config
 test_util
 test_metastore
+test_querycoordv2
 }
 
 

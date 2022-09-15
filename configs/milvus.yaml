@@ -179,6 +179,14 @@ queryCoord:
   overloadedMemoryThresholdPercentage: 90 # The threshold percentage that memory overload
   balanceIntervalSeconds: 60
   memoryUsageMaxDifferencePercentage: 30
+  checkInterval: 1000
+  channelTaskTimeout: 60000 # 1 minute
+  segmentTaskTimeout: 15000 # 15 seconds
+  distPullInterval: 500
+  loadTimeoutSeconds: 600
+  checkHandoffInterval: 5000
+  
+
 
 # Related configuration of queryNode, used to run hybrid search between vector and scalar data.
 queryNode:

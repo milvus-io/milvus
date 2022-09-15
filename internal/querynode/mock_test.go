@@ -75,6 +75,8 @@ const (
 	defaultSubName      = "query-node-unittest-sub-name-0"
 
 	defaultLocalStorage = "/tmp/milvus_test/querynode"
+
+	defaultSegmentVersion = int64(1001)
 )
 
 const (
@@ -1223,6 +1225,7 @@ func genSealedSegment(schema *schemapb.CollectionSchema,
 		collectionID,
 		vChannel,
 		segmentTypeSealed,
+		defaultSegmentVersion,
 		pool)
 	if err != nil {
 		return nil, err
@@ -1316,6 +1319,7 @@ func genSimpleReplicaWithGrowingSegment() (ReplicaInterface, error) {
 		defaultPartitionID,
 		defaultCollectionID,
 		defaultDMLChannel,
+		defaultSegmentVersion,
 		segmentTypeGrowing)
 	if err != nil {
 		return nil, err

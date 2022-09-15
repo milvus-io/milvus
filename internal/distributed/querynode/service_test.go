@@ -48,6 +48,7 @@ type MockQueryNode struct {
 	StatsResp  *internalpb.GetStatisticsResponse
 	searchResp *internalpb.SearchResults
 	queryResp  *internalpb.RetrieveResults
+	distResp   *querypb.GetDataDistributionResponse
 }
 
 func (m *MockQueryNode) Init() error {
@@ -140,7 +141,16 @@ func (m *MockQueryNode) ShowConfigurations(ctx context.Context, req *internalpb.
 	return m.configResp, m.err
 }
 
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+func (m *MockQueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmChannelRequest) (*commonpb.Status, error) {
+	return m.status, m.err
+}
+func (m *MockQueryNode) GetDataDistribution(context.Context, *querypb.GetDataDistributionRequest) (*querypb.GetDataDistributionResponse, error) {
+	return m.distResp, m.err
+}
+func (m *MockQueryNode) SyncDistribution(context.Context, *querypb.SyncDistributionRequest) (*commonpb.Status, error) {
+	return m.status, m.err
+}
+
 type MockRootCoord struct {
 	types.RootCoord
 	initErr  error

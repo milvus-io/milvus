@@ -160,3 +160,14 @@ func (client *queryNodeClientMock) SyncReplicaSegments(ctx context.Context, req 
 func (client *queryNodeClientMock) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
 	return client.grpcClient.ShowConfigurations(ctx, req)
 }
+
+func (client *queryNodeClientMock) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmChannelRequest) (*commonpb.Status, error) {
+	return client.grpcClient.UnsubDmChannel(ctx, req)
+}
+
+func (client *queryNodeClientMock) GetDataDistribution(ctx context.Context, req *querypb.GetDataDistributionRequest) (*querypb.GetDataDistributionResponse, error) {
+	return client.grpcClient.GetDataDistribution(ctx, req)
+}
+func (client *queryNodeClientMock) SyncDistribution(ctx context.Context, req *querypb.SyncDistributionRequest) (*commonpb.Status, error) {
+	return client.grpcClient.SyncDistribution(ctx, req)
+}

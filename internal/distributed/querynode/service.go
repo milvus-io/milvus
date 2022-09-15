@@ -268,6 +268,10 @@ func (s *Server) WatchDmChannels(ctx context.Context, req *querypb.WatchDmChanne
 	return s.querynode.WatchDmChannels(ctx, req)
 }
 
+func (s *Server) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmChannelRequest) (*commonpb.Status, error) {
+	return s.querynode.UnsubDmChannel(ctx, req)
+}
+
 // LoadSegments loads the segments to search.
 func (s *Server) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) (*commonpb.Status, error) {
 	// ignore ctx
@@ -320,4 +324,13 @@ func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowCon
 // GetMetrics gets the metrics information of QueryNode.
 func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return s.querynode.GetMetrics(ctx, req)
+}
+
+// GetDataDistribution gets the distribution information of QueryNode.
+func (s *Server) GetDataDistribution(ctx context.Context, req *querypb.GetDataDistributionRequest) (*querypb.GetDataDistributionResponse, error) {
+	return s.querynode.GetDataDistribution(ctx, req)
+}
+
+func (s *Server) SyncDistribution(ctx context.Context, req *querypb.SyncDistributionRequest) (*commonpb.Status, error) {
+	return s.querynode.SyncDistribution(ctx, req)
 }
