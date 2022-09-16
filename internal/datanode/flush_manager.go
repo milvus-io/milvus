@@ -24,6 +24,9 @@ import (
 	"strconv"
 	"sync"
 
+	"go.uber.org/atomic"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
@@ -34,8 +37,6 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
-	"go.uber.org/atomic"
-	"go.uber.org/zap"
 )
 
 // flushManager defines a flush manager signature
@@ -566,12 +567,14 @@ type flushBufferInsertTask struct {
 // flushInsertData implements flushInsertTask
 func (t *flushBufferInsertTask) flushInsertData() error {
 	if t.ChunkManager != nil && len(t.data) > 0 {
-		for _, d := range t.data {
-			metrics.DataNodeFlushedSize.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID()), metrics.InsertLabel).Add(float64(len(d)))
-		}
 		tr := timerecord.NewTimeRecorder("insertData")
 		err := t.MultiWrite(t.data)
 		metrics.DataNodeSave2StorageLatency.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID()), metrics.InsertLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
+		if err == nil {
+			for _, d := range t.data {
+				metrics.DataNodeFlushedSize.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID()), metrics.InsertLabel).Add(float64(len(d)))
+			}
+		}
 		return err
 	}
 	return nil
@@ -585,12 +588,14 @@ type flushBufferDeleteTask struct {
 // flushDeleteData implements flushDeleteTask
 func (t *flushBufferDeleteTask) flushDeleteData() error {
 	if len(t.data) > 0 && t.ChunkManager != nil {
-		for _, d := range t.data {
-			metrics.DataNodeFlushedSize.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID()), metrics.DeleteLabel).Add(float64(len(d)))
-		}
 		tr := timerecord.NewTimeRecorder("deleteData")
 		err := t.MultiWrite(t.data)
 		metrics.DataNodeSave2StorageLatency.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID()), metrics.DeleteLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
+		if err == nil {
+			for _, d := range t.data {
+				metrics.DataNodeFlushedSize.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID()), metrics.DeleteLabel).Add(float64(len(d)))
+			}
+		}
 		return err
 	}
 	return nil

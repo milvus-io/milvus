@@ -24,11 +24,92 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/ratelimitutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 type getMetricsFuncType func(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 type showConfigurationsFuncType func(ctx context.Context, request *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error)
+
+// getQuotaMetrics returns ProxyQuotaMetrics.
+func getQuotaMetrics() (*metricsinfo.ProxyQuotaMetrics, error) {
+	var err error
+	rms := make([]metricsinfo.RateMetric, 0)
+	getRateMetric := func(rateType internalpb.RateType) {
+		rate, err2 := rateCol.Rate(rateType.String(), ratelimitutil.DefaultAvgDuration)
+		if err2 != nil {
+			err = err2
+			return
+		}
+		rms = append(rms, metricsinfo.RateMetric{
+			Label: rateType.String(),
+			Rate:  rate,
+		})
+	}
+	getRateMetric(internalpb.RateType_DMLInsert)
+	getRateMetric(internalpb.RateType_DMLDelete)
+	getRateMetric(internalpb.RateType_DQLSearch)
+	getRateMetric(internalpb.RateType_DQLQuery)
+	if err != nil {
+		return nil, err
+	}
+	return &metricsinfo.ProxyQuotaMetrics{
+		Hms: metricsinfo.HardwareMetrics{},
+		Rms: rms,
+	}, nil
+}
+
+// getProxyMetrics get metrics of Proxy, not including the topological metrics of Query cluster and Data cluster.
+func getProxyMetrics(ctx context.Context, request *milvuspb.GetMetricsRequest, node *Proxy) (*milvuspb.GetMetricsResponse, error) {
+	totalMem := metricsinfo.GetMemoryCount()
+	usedMem := metricsinfo.GetUsedMemoryCount()
+	quotaMetrics, err := getQuotaMetrics()
+	if err != nil {
+		return nil, err
+	}
+	hardwareMetrics := metricsinfo.HardwareMetrics{
+		IP:           node.session.Address,
+		CPUCoreCount: metricsinfo.GetCPUCoreCount(false),
+		CPUCoreUsage: metricsinfo.GetCPUUsage(),
+		Memory:       totalMem,
+		MemoryUsage:  usedMem,
+		Disk:         metricsinfo.GetDiskCount(),
+		DiskUsage:    metricsinfo.GetDiskUsage(),
+	}
+	quotaMetrics.Hms = hardwareMetrics
+
+	proxyRoleName := metricsinfo.ConstructComponentName(typeutil.ProxyRole, Params.ProxyCfg.GetNodeID())
+	proxyMetricInfo := metricsinfo.ProxyInfos{
+		BaseComponentInfos: metricsinfo.BaseComponentInfos{
+			HasError:      false,
+			Name:          proxyRoleName,
+			HardwareInfos: hardwareMetrics,
+			SystemInfo:    metricsinfo.DeployMetrics{},
+			CreatedTime:   Params.ProxyCfg.CreatedTime.String(),
+			UpdatedTime:   Params.ProxyCfg.UpdatedTime.String(),
+			Type:          typeutil.ProxyRole,
+			ID:            node.session.ServerID,
+		},
+		SystemConfigurations: metricsinfo.ProxyConfiguration{
+			DefaultPartitionName: Params.CommonCfg.DefaultPartitionName,
+			DefaultIndexName:     Params.CommonCfg.DefaultIndexName,
+		},
+		QuotaMetrics: quotaMetrics,
+	}
+
+	resp, err := metricsinfo.MarshalComponentInfos(proxyMetricInfo)
+	if err != nil {
+		return nil, err
+	}
+
+	return &milvuspb.GetMetricsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		Response:      resp,
+		ComponentName: metricsinfo.ConstructComponentName(typeutil.ProxyRole, Params.ProxyCfg.GetNodeID()),
+	}, nil
+}
 
 // getSystemInfoMetrics returns the system information metrics.
 func getSystemInfoMetrics(
@@ -36,9 +117,7 @@ func getSystemInfoMetrics(
 	request *milvuspb.GetMetricsRequest,
 	node *Proxy,
 ) (*milvuspb.GetMetricsResponse, error) {
-
 	var err error
-
 	systemTopology := metricsinfo.SystemTopology{
 		NodesInfo: make([]metricsinfo.SystemTopologyNode, 0),
 	}

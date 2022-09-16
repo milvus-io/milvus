@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
+	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
@@ -365,13 +366,19 @@ func (s *proxyTestServer) startGrpc(ctx context.Context, wg *sync.WaitGroup) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	multiLimiter := NewMultiRateLimiter()
+	s.multiRateLimiter = multiLimiter
+
 	opts := trace.GetInterceptorOpts()
 	s.grpcServer = grpc.NewServer(
 		grpc.KeepaliveEnforcementPolicy(kaep),
 		grpc.KeepaliveParams(kasp),
 		grpc.MaxRecvMsgSize(p.ServerMaxRecvSize),
 		grpc.MaxSendMsgSize(p.ServerMaxSendSize),
-		grpc.UnaryInterceptor(ot.UnaryServerInterceptor(opts...)),
+		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
+			ot.UnaryServerInterceptor(opts...),
+			RateLimitInterceptor(multiLimiter),
+		)),
 		grpc.StreamInterceptor(ot.StreamServerInterceptor(opts...)))
 	proxypb.RegisterProxyServer(s.grpcServer, s)
 	milvuspb.RegisterMilvusServiceServer(s.grpcServer, s)
@@ -1604,6 +1611,45 @@ func TestProxy(t *testing.T) {
 		resp, err = proxy.GetMetrics(ctx, notImplemented)
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	wg.Add(1)
+	t.Run("get proxy metrics", func(t *testing.T) {
+		defer wg.Done()
+		req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
+		assert.NoError(t, err)
+		resp, err := proxy.GetProxyMetrics(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+
+		// failed to parse metric type
+		resp, err = proxy.GetProxyMetrics(ctx, &milvuspb.GetMetricsRequest{
+			Base:    &commonpb.MsgBase{},
+			Request: "not in json format",
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+
+		// not implemented metric
+		notImplemented, err := metricsinfo.ConstructRequestByMetricType("not implemented")
+		assert.NoError(t, err)
+		resp, err = proxy.GetProxyMetrics(ctx, notImplemented)
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+
+		// unhealthy
+		proxy.UpdateStateCode(internalpb.StateCode_Abnormal)
+		resp, err = proxy.GetProxyMetrics(ctx, req)
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		proxy.UpdateStateCode(internalpb.StateCode_Healthy)
+
+		// getProxyMetric failed
+		rateCol.Deregister(internalpb.RateType_DMLInsert.String())
+		resp, err = proxy.GetProxyMetrics(ctx, req)
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		rateCol.Register(internalpb.RateType_DMLInsert.String())
 	})
 
 	wg.Add(1)

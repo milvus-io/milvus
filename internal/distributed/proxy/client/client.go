@@ -174,3 +174,32 @@ func (c *Client) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.Refres
 	}
 	return ret.(*commonpb.Status), err
 }
+
+// GetProxyMetrics gets the metrics of proxy, it's an internal interface which is different from GetMetrics interface,
+// because it only obtains the metrics of Proxy, not including the topological metrics of Query cluster and Data cluster.
+func (c *Client) GetProxyMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.(proxypb.ProxyClient).GetProxyMetrics(ctx, req)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+	return ret.(*milvuspb.GetMetricsResponse), err
+}
+
+// SetRates notifies Proxy to limit rates of requests.
+func (c *Client) SetRates(ctx context.Context, req *proxypb.SetRatesRequest) (*commonpb.Status, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.(proxypb.ProxyClient).SetRates(ctx, req)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return ret.(*commonpb.Status), err
+}

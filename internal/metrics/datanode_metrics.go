@@ -162,6 +162,15 @@ var (
 			nodeIDLabelName,
 			statusLabelName,
 		})
+
+	// DataNodeConsumeCounter counts the bytes DataNode consumed from message storage.
+	DataNodeConsumeCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataNodeRole,
+			Name:      "consume_counter",
+			Help:      "",
+		}, []string{nodeIDLabelName, msgTypeLabelName})
 )
 
 //RegisterDataNode registers DataNode metrics
@@ -179,4 +188,5 @@ func RegisterDataNode(registry *prometheus.Registry) {
 	registry.MustRegister(DataNodeAutoFlushBufferCount)
 	registry.MustRegister(DataNodeCompactionLatency)
 	registry.MustRegister(DataNodeFlushReqCounter)
+	registry.MustRegister(DataNodeConsumeCounter)
 }

@@ -41,6 +41,13 @@ type dataSyncService struct {
 	msFactory    msgstream.Factory
 }
 
+// getFlowGraphNum returns number of flow graphs of dataSyncService.
+func (dsService *dataSyncService) getFlowGraphNum() int {
+	dsService.mu.Lock()
+	defer dsService.mu.Unlock()
+	return len(dsService.dmlChannel2FlowGraph) + len(dsService.deltaChannel2FlowGraph)
+}
+
 // checkReplica used to check replica info before init flow graph, it's a private method of dataSyncService
 func (dsService *dataSyncService) checkReplica(collectionID UniqueID) error {
 	// check if the collection exists
@@ -219,6 +226,7 @@ func (dsService *dataSyncService) removeFlowGraphsByDMLChannels(channels []Chann
 			metrics.QueryNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Dec()
 		}
 		delete(dsService.dmlChannel2FlowGraph, channel)
+		rateCol.removeTSafeChannel(channel)
 	}
 }
 
@@ -234,6 +242,7 @@ func (dsService *dataSyncService) removeFlowGraphsByDeltaChannels(channels []Cha
 			metrics.QueryNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Dec()
 		}
 		delete(dsService.deltaChannel2FlowGraph, channel)
+		rateCol.removeTSafeChannel(channel)
 	}
 }
 

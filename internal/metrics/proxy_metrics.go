@@ -17,8 +17,15 @@
 package metrics
 
 import (
-	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"strconv"
+
 	"github.com/prometheus/client_golang/prometheus"
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/ratelimitutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 var (
@@ -214,14 +221,14 @@ var (
 			Buckets:   buckets, // unit: ms
 		}, []string{nodeIDLabelName, functionLabelName})
 
-	// ProxyMutationReceiveBytes record the received bytes of Insert/Delete in Proxy
-	ProxyMutationReceiveBytes = prometheus.NewCounterVec(
+	// ProxyReceiveBytes record the received bytes of messages in Proxy
+	ProxyReceiveBytes = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.ProxyRole,
 			Name:      "receive_bytes_count",
 			Help:      "count of bytes received  from sdk",
-		}, []string{nodeIDLabelName})
+		}, []string{nodeIDLabelName, msgTypeLabelName})
 
 	// ProxyReadReqSendBytes record the bytes sent back to client by Proxy
 	ProxyReadReqSendBytes = prometheus.NewCounterVec(
@@ -231,6 +238,15 @@ var (
 			Name:      "send_bytes_count",
 			Help:      "count of bytes sent back to sdk",
 		}, []string{nodeIDLabelName})
+
+	// ProxyLimiterRate records rates of rateLimiter in Proxy.
+	ProxyLimiterRate = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "limiter_rate",
+			Help:      "",
+		}, []string{nodeIDLabelName, msgTypeLabelName})
 )
 
 //RegisterProxy registers Proxy metrics
@@ -261,6 +277,27 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(ProxyDDLReqLatency)
 	registry.MustRegister(ProxyDMLReqLatency)
 	registry.MustRegister(ProxyDQLReqLatency)
-	registry.MustRegister(ProxyMutationReceiveBytes)
+	registry.MustRegister(ProxyReceiveBytes)
 	registry.MustRegister(ProxyReadReqSendBytes)
+
+	registry.MustRegister(ProxyLimiterRate)
+}
+
+// SetRateGaugeByRateType sets ProxyLimiterRate metrics.
+func SetRateGaugeByRateType(rateType internalpb.RateType, nodeID int64, rate float64) {
+	if ratelimitutil.Limit(rate) == ratelimitutil.Inf {
+		return
+	}
+	nodeIDStr := strconv.FormatInt(nodeID, 10)
+	log.Debug("set rates", zap.Int64("nodeID", nodeID), zap.String("rateType", rateType.String()), zap.Float64("rate", rate))
+	switch rateType {
+	case internalpb.RateType_DMLInsert:
+		ProxyLimiterRate.WithLabelValues(nodeIDStr, InsertLabel).Set(rate)
+	case internalpb.RateType_DMLDelete:
+		ProxyLimiterRate.WithLabelValues(nodeIDStr, DeleteLabel).Set(rate)
+	case internalpb.RateType_DQLSearch:
+		ProxyLimiterRate.WithLabelValues(nodeIDStr, SearchLabel).Set(rate)
+	case internalpb.RateType_DQLQuery:
+		ProxyLimiterRate.WithLabelValues(nodeIDStr, QueryLabel).Set(rate)
+	}
 }

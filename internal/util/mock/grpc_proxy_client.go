@@ -60,3 +60,11 @@ func (m *GrpcProxyClient) InvalidateCredentialCache(ctx context.Context, in *pro
 func (m *GrpcProxyClient) UpdateCredentialCache(ctx context.Context, in *proxypb.UpdateCredCacheRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }
+
+func (m *GrpcProxyClient) GetProxyMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest, opts ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error) {
+	return &milvuspb.GetMetricsResponse{}, m.Err
+}
+
+func (m *GrpcProxyClient) SetRates(ctx context.Context, in *proxypb.SetRatesRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}

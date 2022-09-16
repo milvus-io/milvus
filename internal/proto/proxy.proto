@@ -18,6 +18,8 @@ service Proxy {
   rpc UpdateCredentialCache(UpdateCredCacheRequest) returns (common.Status) {}
 
   rpc RefreshPolicyInfoCache(RefreshPolicyInfoCacheRequest) returns (common.Status) {}
+  rpc GetProxyMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
+  rpc SetRates(SetRatesRequest) returns (common.Status) {}
 }
 
 message InvalidateCollMetaCacheRequest {
@@ -43,4 +45,9 @@ message RefreshPolicyInfoCacheRequest {
   common.MsgBase base = 1;
   int32 opType = 2;
   string opKey = 3;
+}
+
+message SetRatesRequest {
+  common.MsgBase base = 1;
+  repeated internal.Rate rates = 2;
 }

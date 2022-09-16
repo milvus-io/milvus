@@ -1733,6 +1733,10 @@ func genSimpleQueryNodeWithMQFactory(ctx context.Context, fac dependency.Factory
 
 	// start task scheduler
 	go node.scheduler.Start()
+	err = node.initRateCollector()
+	if err != nil {
+		return nil, err
+	}
 
 	// init shard cluster service
 	node.ShardClusterService = newShardClusterService(node.etcdCli, node.session, node)

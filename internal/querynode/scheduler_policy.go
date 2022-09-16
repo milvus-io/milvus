@@ -19,6 +19,7 @@ func defaultScheduleReadPolicy(sqTasks *list.List, targetUsage int32, maxNum int
 		}
 		usage += tUsage
 		sqTasks.Remove(e)
+		rateCol.rtCounter.sub(t, readyQueueType)
 		ret = append(ret, t)
 		maxNum--
 	}

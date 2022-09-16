@@ -153,11 +153,13 @@ func (s *taskScheduler) tryEvictUnsolvedReadTask(headCount int) {
 		t, ok := e.Value.(readTask)
 		if !ok {
 			s.unsolvedReadTasks.Remove(e)
+			rateCol.rtCounter.sub(t, unsolvedQueueType)
 			diff--
 			continue
 		}
 		if t.Timeout() {
 			s.unsolvedReadTasks.Remove(e)
+			rateCol.rtCounter.sub(t, unsolvedQueueType)
 			t.Notify(timeoutErr)
 			diff--
 		}
@@ -173,6 +175,7 @@ func (s *taskScheduler) tryEvictUnsolvedReadTask(headCount int) {
 		s.unsolvedReadTasks.Remove(e)
 		t, ok := e.Value.(readTask)
 		if ok {
+			rateCol.rtCounter.sub(t, unsolvedQueueType)
 			t.Notify(busyErr)
 		}
 	}
@@ -194,15 +197,19 @@ func (s *taskScheduler) scheduleReadTasks() {
 
 		case t, ok := <-s.receiveReadTaskChan:
 			if ok {
+				rateCol.rtCounter.sub(t, receiveQueueType)
 				pendingTaskLen := len(s.receiveReadTaskChan)
 				s.tryEvictUnsolvedReadTask(pendingTaskLen + 1)
 				if t != nil {
 					s.unsolvedReadTasks.PushBack(t)
+					rateCol.rtCounter.add(t, unsolvedQueueType)
 				}
 				for i := 0; i < pendingTaskLen; i++ {
 					t := <-s.receiveReadTaskChan
+					rateCol.rtCounter.sub(t, receiveQueueType)
 					if t != nil {
 						s.unsolvedReadTasks.PushBack(t)
+						rateCol.rtCounter.add(t, unsolvedQueueType)
 					}
 				}
 				s.tryMergeReadTasks()
@@ -228,6 +235,7 @@ func (s *taskScheduler) AddReadTask(ctx context.Context, t readTask) error {
 	case <-s.ctx.Done():
 		return fmt.Errorf("taskScheduler stoped")
 	case s.receiveReadTaskChan <- t:
+		rateCol.rtCounter.add(t, receiveQueueType)
 		return nil
 	}
 }
@@ -257,6 +265,7 @@ func (s *taskScheduler) popAndAddToExecute() {
 	atomic.AddInt32(&s.cpuUsage, deltaUsage)
 	for _, t := range tasks {
 		s.executeReadTaskChan <- t
+		rateCol.rtCounter.add(t, executeQueueType)
 	}
 }
 
@@ -289,6 +298,7 @@ func (s *taskScheduler) executeReadTasks() {
 			return
 		case t, ok := <-s.executeReadTaskChan:
 			if ok {
+				rateCol.rtCounter.sub(t, receiveQueueType)
 				pendingTaskLen := len(s.executeReadTaskChan)
 				taskWg.Add(1)
 				atomic.AddInt32(&s.readConcurrency, int32(pendingTaskLen+1))
@@ -297,6 +307,7 @@ func (s *taskScheduler) executeReadTasks() {
 				for i := 0; i < pendingTaskLen; i++ {
 					taskWg.Add(1)
 					t := <-s.executeReadTaskChan
+					rateCol.rtCounter.sub(t, receiveQueueType)
 					go executeFunc(t)
 				}
 				//log.Debug("QueryNode taskScheduler executeReadTasks process tasks done", zap.Int("numOfTasks", pendingTaskLen+1))
@@ -340,17 +351,20 @@ func (s *taskScheduler) tryMergeReadTasks() {
 		t, ok := e.Value.(readTask)
 		if !ok {
 			s.unsolvedReadTasks.Remove(e)
+			rateCol.rtCounter.sub(t, unsolvedQueueType)
 			continue
 		}
 		ready, err := t.Ready()
 		if err != nil {
 			s.unsolvedReadTasks.Remove(e)
+			rateCol.rtCounter.sub(t, unsolvedQueueType)
 			t.Notify(err)
 			continue
 		}
 		if ready {
 			if !Params.QueryNodeCfg.GroupEnabled {
 				s.readyReadTasks.PushBack(t)
+				rateCol.rtCounter.add(t, readyQueueType)
 			} else {
 				merged := false
 				for m := s.readyReadTasks.Back(); m != nil; m = m.Prev() {
@@ -366,9 +380,11 @@ func (s *taskScheduler) tryMergeReadTasks() {
 				}
 				if !merged {
 					s.readyReadTasks.PushBack(t)
+					rateCol.rtCounter.add(t, readyQueueType)
 				}
 			}
 			s.unsolvedReadTasks.Remove(e)
+			rateCol.rtCounter.sub(t, unsolvedQueueType)
 		}
 	}
 	metrics.QueryNodeReadTaskUnsolveLen.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(s.unsolvedReadTasks.Len()))

@@ -64,6 +64,8 @@ type baseReadTask struct {
 	step               TaskStep
 	queueDur           time.Duration
 	reduceDur          time.Duration
+	waitTsDur          time.Duration
+	waitTSafeTr        *timerecord.TimeRecorder
 	tr                 *timerecord.TimeRecorder
 }
 
@@ -75,6 +77,7 @@ func (b *baseReadTask) SetStep(step TaskStep) {
 		b.tr.Record("enqueueStart")
 	case TaskStepPreExecute:
 		b.queueDur = b.tr.Record("enqueueEnd")
+		rateCol.rtCounter.increaseQueueTime(b)
 	}
 }
 
@@ -131,6 +134,9 @@ func (b *baseReadTask) Timeout() bool {
 }
 
 func (b *baseReadTask) Ready() (bool, error) {
+	if b.waitTSafeTr == nil {
+		b.waitTSafeTr = timerecord.NewTimeRecorder("waitTSafeTimeRecorder")
+	}
 	if b.Timeout() {
 		return false, fmt.Errorf("deadline exceed")
 	}
@@ -165,5 +171,6 @@ func (b *baseReadTask) Ready() (bool, error) {
 		zap.Any("delta milliseconds", gt.Sub(st).Milliseconds()),
 		zap.Any("channel", channel),
 		zap.Any("msgID", b.ID()))
+	b.waitTsDur = b.waitTSafeTr.ElapseSpan()
 	return true, nil
 }

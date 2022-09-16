@@ -79,6 +79,7 @@ func (fm *flowgraphManager) release(vchanName string) {
 		fg.(*dataSyncService).close()
 		metrics.DataNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID())).Dec()
 	}
+	rateCol.removeFlowGraphChannel(vchanName)
 	log.Info("release flowgraph resources end", zap.String("Vchannel", vchanName))
 }
 
@@ -135,6 +136,16 @@ func (fm *flowgraphManager) getFlowgraphService(vchan string) (*dataSyncService,
 func (fm *flowgraphManager) exist(vchan string) bool {
 	_, exist := fm.getFlowgraphService(vchan)
 	return exist
+}
+
+// getFlowGraphNum returns number of flow graphs.
+func (fm *flowgraphManager) getFlowGraphNum() int {
+	length := 0
+	fm.flowgraphs.Range(func(_, _ interface{}) bool {
+		length++
+		return true
+	})
+	return length
 }
 
 func (fm *flowgraphManager) dropAll() {
