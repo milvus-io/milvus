@@ -114,6 +114,7 @@ func (suite *TaskSuite) SetupTest() {
 	suite.cluster = session.NewMockCluster(suite.T())
 
 	suite.scheduler = suite.newScheduler()
+	suite.scheduler.Start(context.Background())
 }
 
 func (suite *TaskSuite) BeforeTest(suiteName, testName string) {
@@ -814,18 +815,24 @@ func (suite *TaskSuite) AssertTaskNum(process, wait, channel, segment int) {
 }
 
 func (suite *TaskSuite) dispatchAndWait(node int64) {
+	timeout := 10 * time.Second
 	suite.scheduler.Dispatch(node)
-	for {
-		count := 0
+	var keys []any
+	count := 0
+	for start := time.Now(); time.Since(start) < timeout; {
+		count = 0
+		keys = make([]any, 0)
 		suite.scheduler.executor.executingActions.Range(func(key, value any) bool {
+			keys = append(keys, key)
 			count++
 			return true
 		})
 		if count == 0 {
-			break
+			return
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
+	suite.FailNow("executor hangs in executing tasks", "count=%d keys=%+v", count, keys)
 }
 
 func (suite *TaskSuite) newScheduler() *taskScheduler {

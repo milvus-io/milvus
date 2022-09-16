@@ -306,6 +306,9 @@ func (s *Server) Start() error {
 	log.Info("start job scheduler...")
 	s.jobScheduler.Start(s.ctx)
 
+	log.Info("start task scheduler...")
+	s.taskScheduler.Start(s.ctx)
+
 	log.Info("start checker controller...")
 	s.checkerController.Start(s.ctx)
 
@@ -335,6 +338,9 @@ func (s *Server) Stop() error {
 
 	log.Info("stop checker controller...")
 	s.checkerController.Stop()
+
+	log.Info("stop task scheduler...")
+	s.taskScheduler.Stop()
 
 	log.Info("stop job scheduler...")
 	s.jobScheduler.Stop()

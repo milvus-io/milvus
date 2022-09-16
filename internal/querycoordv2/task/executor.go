@@ -7,6 +7,7 @@ import (
 
 	"github.com/milvus-io/milvus/api/commonpb"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
@@ -23,12 +24,17 @@ type actionIndex struct {
 }
 
 type Executor struct {
+	doneCh    chan struct{}
+	wg        sync.WaitGroup
 	meta      *meta.Meta
 	dist      *meta.DistributionManager
 	broker    meta.Broker
 	targetMgr *meta.TargetManager
 	cluster   session.Cluster
 	nodeMgr   *session.NodeManager
+
+	// Merge load segment requests
+	merger *Merger[segmentIndex, *querypb.LoadSegmentsRequest]
 
 	executingActions sync.Map
 }
@@ -40,21 +46,33 @@ func NewExecutor(meta *meta.Meta,
 	cluster session.Cluster,
 	nodeMgr *session.NodeManager) *Executor {
 	return &Executor{
+		doneCh:    make(chan struct{}),
 		meta:      meta,
 		dist:      dist,
 		broker:    broker,
 		targetMgr: targetMgr,
 		cluster:   cluster,
 		nodeMgr:   nodeMgr,
+		merger:    NewMerger[segmentIndex, *querypb.LoadSegmentsRequest](),
 
 		executingActions: sync.Map{},
 	}
 }
 
+func (ex *Executor) Start(ctx context.Context) {
+	ex.merger.Start(ctx)
+	ex.scheduleRequests()
+}
+
+func (ex *Executor) Stop() {
+	ex.merger.Stop()
+	ex.wg.Wait()
+}
+
 // Execute executes the given action,
 // does nothing and returns false if the action is already committed,
 // returns true otherwise.
-func (ex *Executor) Execute(task Task, step int, action Action) bool {
+func (ex *Executor) Execute(task Task, step int) bool {
 	index := actionIndex{
 		Task: task.ID(),
 		Step: step,
@@ -65,42 +83,114 @@ func (ex *Executor) Execute(task Task, step int, action Action) bool {
 	}
 
 	log := log.With(
-		zap.Int64("task", task.ID()),
+		zap.Int64("taskID", task.ID()),
 		zap.Int("step", step),
 		zap.Int64("source", task.SourceID()),
 	)
 
 	go func() {
 		log.Info("execute the action of task")
-		switch action := action.(type) {
+		switch task.Actions()[step].(type) {
 		case *SegmentAction:
-			ex.executeSegmentAction(task.(*SegmentTask), action)
+			ex.executeSegmentAction(task.(*SegmentTask), step)
 
 		case *ChannelAction:
-			ex.executeDmChannelAction(task.(*ChannelTask), action)
+			ex.executeDmChannelAction(task.(*ChannelTask), step)
 		}
-
-		ex.executingActions.Delete(index)
 	}()
 
 	return true
 }
 
-func (ex *Executor) executeSegmentAction(task *SegmentTask, action *SegmentAction) {
-	switch action.Type() {
-	case ActionTypeGrow:
-		ex.loadSegment(task, action)
+func (ex *Executor) scheduleRequests() {
+	ex.wg.Add(1)
+	go func() {
+		defer ex.wg.Done()
+		for mergeTask := range ex.merger.Chan() {
+			task := mergeTask.(*LoadSegmentsTask)
+			log.Info("get merge task, process it",
+				zap.Int64("collectionID", task.req.GetCollectionID()),
+				zap.String("shard", task.req.GetInfos()[0].GetInsertChannel()),
+				zap.Int64("nodeID", task.req.GetDstNodeID()),
+				zap.Int("taskNum", len(task.tasks)),
+			)
+			go ex.processMergeTask(mergeTask.(*LoadSegmentsTask))
+		}
+	}()
+}
 
-	case ActionTypeReduce:
-		ex.releaseSegment(task, action)
+func (ex *Executor) processMergeTask(mergeTask *LoadSegmentsTask) {
+	task := mergeTask.tasks[0]
+	action := task.Actions()[mergeTask.steps[0]]
+
+	defer func() {
+		for i := range mergeTask.tasks {
+			mergeTask.tasks[i].SetErr(task.Err())
+			ex.removeTask(mergeTask.tasks[i], mergeTask.steps[i])
+		}
+	}()
+
+	log := log.With(
+		zap.Int64("taskID", task.ID()),
+		zap.Int64("collectionID", task.CollectionID()),
+		zap.Int64("segmentID", task.segmentID),
+		zap.Int64("node", action.Node()),
+		zap.Int64("source", task.SourceID()),
+	)
+
+	// Get shard leader for the given replica and segment
+	channel := mergeTask.req.GetInfos()[0].GetInsertChannel()
+	leader, ok := getShardLeader(ex.meta.ReplicaManager, ex.dist, task.CollectionID(), action.Node(), channel)
+	if !ok {
+		msg := "no shard leader for the segment to execute loading"
+		task.SetErr(utils.WrapError(msg, ErrTaskStale))
+		log.Warn(msg, zap.String("shard", channel))
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(task.Context(), actionTimeout)
+	status, err := ex.cluster.LoadSegments(ctx, leader, mergeTask.req)
+	cancel()
+	if err != nil {
+		log.Warn("failed to load segment, it may be a false failure", zap.Error(err))
+		return
+	}
+	if status.ErrorCode != commonpb.ErrorCode_Success {
+		log.Warn("failed to load segment", zap.String("reason", status.GetReason()))
+		return
 	}
 }
 
-func (ex *Executor) loadSegment(task *SegmentTask, action *SegmentAction) {
+func (ex *Executor) removeTask(task Task, step int) {
+	log.Info("excute task done, remove it",
+		zap.Int64("taskID", task.ID()),
+		zap.Int("step", step),
+		zap.Error(task.Err()))
+	index := actionIndex{
+		Task: task.ID(),
+		Step: step,
+	}
+	ex.executingActions.Delete(index)
+}
+
+func (ex *Executor) executeSegmentAction(task *SegmentTask, step int) {
+	switch task.Actions()[step].Type() {
+	case ActionTypeGrow:
+		ex.loadSegment(task, step)
+
+	case ActionTypeReduce:
+		ex.releaseSegment(task, step)
+	}
+}
+
+// loadSegment commits the request to merger,
+// not really executes the request
+func (ex *Executor) loadSegment(task *SegmentTask, step int) {
+	action := task.Actions()[step].(*SegmentAction)
 	log := log.With(
-		zap.Int64("task", task.ID()),
-		zap.Int64("collection", task.CollectionID()),
-		zap.Int64("segment", task.segmentID),
+		zap.Int64("taskID", task.ID()),
+		zap.Int64("collectionID", task.CollectionID()),
+		zap.Int64("segmentID", task.segmentID),
 		zap.Int64("node", action.Node()),
 		zap.Int64("source", task.SourceID()),
 	)
@@ -152,24 +242,21 @@ func (ex *Executor) loadSegment(task *SegmentTask, action *SegmentAction) {
 	}
 
 	req := packLoadSegmentRequest(task, action, schema, loadMeta, loadInfo, deltaPositions)
-	status, err := ex.cluster.LoadSegments(ctx, leader, req)
-	if err != nil {
-		log.Warn("failed to load segment, it may be a false failure", zap.Error(err))
-		return
-	}
-	if status.ErrorCode != commonpb.ErrorCode_Success {
-		log.Warn("failed to load segment", zap.String("reason", status.GetReason()))
-		return
-	}
+	loadTask := NewLoadSegmentsTask(task, step, req)
+	ex.merger.Add(loadTask)
+	log.Info("load segment task committed")
 }
 
-func (ex *Executor) releaseSegment(task *SegmentTask, action *SegmentAction) {
+func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
+	defer ex.removeTask(task, step)
+
+	action := task.Actions()[step].(*SegmentAction)
 	defer action.isReleaseCommitted.Store(true)
 
 	log := log.With(
-		zap.Int64("task", task.ID()),
-		zap.Int64("collection", task.CollectionID()),
-		zap.Int64("segment", task.segmentID),
+		zap.Int64("taskID", task.ID()),
+		zap.Int64("collectionID", task.CollectionID()),
+		zap.Int64("segmentID", task.segmentID),
 		zap.Int64("node", action.Node()),
 		zap.Int64("source", task.SourceID()),
 	)
@@ -215,20 +302,23 @@ func (ex *Executor) releaseSegment(task *SegmentTask, action *SegmentAction) {
 	}
 }
 
-func (ex *Executor) executeDmChannelAction(task *ChannelTask, action *ChannelAction) {
-	switch action.Type() {
+func (ex *Executor) executeDmChannelAction(task *ChannelTask, step int) {
+	switch task.Actions()[step].Type() {
 	case ActionTypeGrow:
-		ex.subDmChannel(task, action)
+		ex.subDmChannel(task, step)
 
 	case ActionTypeReduce:
-		ex.unsubDmChannel(task, action)
+		ex.unsubDmChannel(task, step)
 	}
 }
 
-func (ex *Executor) subDmChannel(task *ChannelTask, action *ChannelAction) {
+func (ex *Executor) subDmChannel(task *ChannelTask, step int) {
+	defer ex.removeTask(task, step)
+
+	action := task.Actions()[step].(*ChannelAction)
 	log := log.With(
-		zap.Int64("task", task.ID()),
-		zap.Int64("collection", task.CollectionID()),
+		zap.Int64("taskID", task.ID()),
+		zap.Int64("collectionID", task.CollectionID()),
 		zap.String("channel", task.Channel()),
 		zap.Int64("node", action.Node()),
 		zap.Int64("source", task.SourceID()),
@@ -294,10 +384,13 @@ func (ex *Executor) subDmChannel(task *ChannelTask, action *ChannelAction) {
 	log.Info("subscribe DmChannel done")
 }
 
-func (ex *Executor) unsubDmChannel(task *ChannelTask, action *ChannelAction) {
+func (ex *Executor) unsubDmChannel(task *ChannelTask, step int) {
+	defer ex.removeTask(task, step)
+
+	action := task.Actions()[step].(*ChannelAction)
 	log := log.With(
-		zap.Int64("task", task.ID()),
-		zap.Int64("collection", task.CollectionID()),
+		zap.Int64("taskID", task.ID()),
+		zap.Int64("collectionID", task.CollectionID()),
 		zap.String("channel", task.Channel()),
 		zap.Int64("node", action.Node()),
 		zap.Int64("source", task.SourceID()),

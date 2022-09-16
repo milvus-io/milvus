@@ -111,6 +111,8 @@ func (queue *taskQueue) Range(fn func(task Task) bool) {
 }
 
 type Scheduler interface {
+	Start(ctx context.Context)
+	Stop()
 	Add(task Task) error
 	Dispatch(node int64)
 	RemoveByNode(node int64)
@@ -165,6 +167,14 @@ func NewScheduler(ctx context.Context,
 		processQueue: newTaskQueue(taskPoolSize),
 		waitQueue:    newTaskQueue(taskPoolSize * 10),
 	}
+}
+
+func (scheduler *taskScheduler) Start(ctx context.Context) {
+	scheduler.executor.Start(ctx)
+}
+
+func (scheduler *taskScheduler) Stop() {
+	scheduler.executor.Stop()
 }
 
 func (scheduler *taskScheduler) Add(task Task) error {
@@ -482,11 +492,11 @@ func (scheduler *taskScheduler) process(task Task) bool {
 		task.SetErr(ErrTaskStale)
 	}
 
-	actions, step := task.Actions(), task.Step()
+	step := task.Step()
 	log = log.With(zap.Int("step", step))
 	switch task.Status() {
 	case TaskStatusStarted:
-		if scheduler.executor.Execute(task, step, actions[step]) {
+		if scheduler.executor.Execute(task, step) {
 			return true
 		}
 

@@ -38,8 +38,7 @@ func NewScheduler() *Scheduler {
 }
 
 func (scheduler *Scheduler) Start(ctx context.Context) {
-	scheduler.wg.Add(1)
-	go scheduler.schedule(ctx)
+	scheduler.schedule(ctx)
 }
 
 func (scheduler *Scheduler) Stop() {
@@ -48,10 +47,10 @@ func (scheduler *Scheduler) Stop() {
 }
 
 func (scheduler *Scheduler) schedule(ctx context.Context) {
-	defer scheduler.wg.Done()
-
-	ticker := time.NewTicker(500 * time.Millisecond)
+	scheduler.wg.Add(1)
 	go func() {
+		defer scheduler.wg.Done()
+		ticker := time.NewTicker(500 * time.Millisecond)
 		for {
 			select {
 			case <-ctx.Done():
