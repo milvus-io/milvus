@@ -30,7 +30,6 @@ import (
 	kafkawrapper "github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper/kafka"
 
 	"github.com/milvus-io/milvus/api/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/stretchr/testify/assert"
 )
@@ -103,80 +102,80 @@ import (
 //	assert.Equal(t, o3.BeginTs, p3.BeginTs)
 //}
 
-func TestStream_KafkaMsgStream_SeekToLast(t *testing.T) {
-	kafkaAddress := getKafkaBrokerList()
-	c := funcutil.RandomString(8)
-	producerChannels := []string{c}
-	consumerChannels := []string{c}
-	consumerSubName := funcutil.RandomString(8)
-
-	msgPack := &MsgPack{}
-	ctx := context.Background()
-	inputStream := getKafkaInputStream(ctx, kafkaAddress, producerChannels)
-	defer inputStream.Close()
-
-	for i := 0; i < 10; i++ {
-		insertMsg := getTsMsg(commonpb.MsgType_Insert, int64(i))
-		msgPack.Msgs = append(msgPack.Msgs, insertMsg)
-	}
-
-	// produce test data
-	err := inputStream.Produce(msgPack)
-	assert.Nil(t, err)
-
-	// pick a seekPosition
-	var seekPosition *internalpb.MsgPosition
-	outputStream := getKafkaOutputStream(ctx, kafkaAddress, consumerChannels, consumerSubName)
-	for i := 0; i < 10; i++ {
-		result := consumer(ctx, outputStream)
-		assert.Equal(t, result.Msgs[0].ID(), int64(i))
-		if i == 5 {
-			seekPosition = result.EndPositions[0]
-			break
-		}
-	}
-	outputStream.Close()
-
-	// create a consumer can consume data from seek position to last msg
-	outputStream2 := getKafkaOutputStream(ctx, kafkaAddress, consumerChannels, consumerSubName)
-	lastMsgID, err := outputStream2.GetLatestMsgID(c)
-	defer outputStream2.Close()
-	assert.Nil(t, err)
-
-	err = outputStream2.Seek([]*internalpb.MsgPosition{seekPosition})
-	assert.Nil(t, err)
-	outputStream2.Start()
-
-	cnt := 0
-	var value int64 = 6
-	hasMore := true
-	for hasMore {
-		select {
-		case <-ctx.Done():
-			hasMore = false
-		case msgPack, ok := <-outputStream2.Chan():
-			if !ok {
-				assert.Fail(t, "Should not reach here")
-			}
-
-			assert.Equal(t, 1, len(msgPack.Msgs))
-			for _, tsMsg := range msgPack.Msgs {
-				assert.Equal(t, value, tsMsg.ID())
-				value++
-				cnt++
-
-				ret, err := lastMsgID.LessOrEqualThan(tsMsg.Position().MsgID)
-				assert.Nil(t, err)
-				if ret {
-					hasMore = false
-					break
-				}
-			}
-		}
-	}
-
-	assert.Equal(t, 4, cnt)
-}
+//func TestStream_KafkaMsgStream_SeekToLast(t *testing.T) {
+//	kafkaAddress := getKafkaBrokerList()
+//	c := funcutil.RandomString(8)
+//	producerChannels := []string{c}
+//	consumerChannels := []string{c}
+//	consumerSubName := funcutil.RandomString(8)
+//
+//	msgPack := &MsgPack{}
+//	ctx := context.Background()
+//	inputStream := getKafkaInputStream(ctx, kafkaAddress, producerChannels)
+//	defer inputStream.Close()
+//
+//	for i := 0; i < 10; i++ {
+//		insertMsg := getTsMsg(commonpb.MsgType_Insert, int64(i))
+//		msgPack.Msgs = append(msgPack.Msgs, insertMsg)
+//	}
+//
+//	// produce test data
+//	err := inputStream.Produce(msgPack)
+//	assert.Nil(t, err)
+//
+//	// pick a seekPosition
+//	var seekPosition *internalpb.MsgPosition
+//	outputStream := getKafkaOutputStream(ctx, kafkaAddress, consumerChannels, consumerSubName)
+//	for i := 0; i < 10; i++ {
+//		result := consumer(ctx, outputStream)
+//		assert.Equal(t, result.Msgs[0].ID(), int64(i))
+//		if i == 5 {
+//			seekPosition = result.EndPositions[0]
+//			break
+//		}
+//	}
+//	outputStream.Close()
+//
+//	// create a consumer can consume data from seek position to last msg
+//	outputStream2 := getKafkaOutputStream(ctx, kafkaAddress, consumerChannels, consumerSubName)
+//	lastMsgID, err := outputStream2.GetLatestMsgID(c)
+//	defer outputStream2.Close()
+//	assert.Nil(t, err)
+//
+//	err = outputStream2.Seek([]*internalpb.MsgPosition{seekPosition})
+//	assert.Nil(t, err)
+//	outputStream2.Start()
+//
+//	cnt := 0
+//	var value int64 = 6
+//	hasMore := true
+//	for hasMore {
+//		select {
+//		case <-ctx.Done():
+//			hasMore = false
+//		case msgPack, ok := <-outputStream2.Chan():
+//			if !ok {
+//				assert.Fail(t, "Should not reach here")
+//			}
+//
+//			assert.Equal(t, 1, len(msgPack.Msgs))
+//			for _, tsMsg := range msgPack.Msgs {
+//				assert.Equal(t, value, tsMsg.ID())
+//				value++
+//				cnt++
+//
+//				ret, err := lastMsgID.LessOrEqualThan(tsMsg.Position().MsgID)
+//				assert.Nil(t, err)
+//				if ret {
+//					hasMore = false
+//					break
+//				}
+//			}
+//		}
+//	}
+//
+//	assert.Equal(t, 4, cnt)
+//}
 
 func TestStream_KafkaTtMsgStream_Seek(t *testing.T) {
 	kafkaAddress := getKafkaBrokerList()
