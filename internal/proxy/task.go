@@ -802,8 +802,8 @@ func (cpt *createPartitionTask) PreExecute(ctx context.Context) error {
 
 func (cpt *createPartitionTask) Execute(ctx context.Context) (err error) {
 	cpt.result, err = cpt.rootCoord.CreatePartition(ctx, cpt.CreatePartitionRequest)
-	if cpt.result == nil {
-		return errors.New("get collection statistics resp is nil")
+	if err != nil {
+		return err
 	}
 	if cpt.result.ErrorCode != commonpb.ErrorCode_Success {
 		return errors.New(cpt.result.Reason)
@@ -879,8 +879,8 @@ func (dpt *dropPartitionTask) PreExecute(ctx context.Context) error {
 
 func (dpt *dropPartitionTask) Execute(ctx context.Context) (err error) {
 	dpt.result, err = dpt.rootCoord.DropPartition(ctx, dpt.DropPartitionRequest)
-	if dpt.result == nil {
-		return errors.New("get collection statistics resp is nil")
+	if err != nil {
+		return err
 	}
 	if dpt.result.ErrorCode != commonpb.ErrorCode_Success {
 		return errors.New(dpt.result.Reason)
@@ -955,8 +955,8 @@ func (hpt *hasPartitionTask) PreExecute(ctx context.Context) error {
 
 func (hpt *hasPartitionTask) Execute(ctx context.Context) (err error) {
 	hpt.result, err = hpt.rootCoord.HasPartition(ctx, hpt.HasPartitionRequest)
-	if hpt.result == nil {
-		return errors.New("get collection statistics resp is nil")
+	if err != nil {
+		return err
 	}
 	if hpt.result.Status.ErrorCode != commonpb.ErrorCode_Success {
 		return errors.New(hpt.result.Status.Reason)
@@ -1334,8 +1334,8 @@ func (cit *createIndexTask) Execute(ctx context.Context) error {
 	}
 	cit.result, err = cit.indexCoord.CreateIndex(ctx, req)
 	//cit.result, err = cit.rootCoord.CreateIndex(ctx, cit.CreateIndexRequest)
-	if cit.result == nil {
-		return errors.New("get collection statistics resp is nil")
+	if err != nil {
+		return err
 	}
 	if cit.result.ErrorCode != commonpb.ErrorCode_Success {
 		return errors.New(cit.result.Reason)
