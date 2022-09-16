@@ -4,7 +4,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/api/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 
 	"fmt"

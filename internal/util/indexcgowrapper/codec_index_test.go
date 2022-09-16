@@ -14,7 +14,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/storage"
 
-	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/api/schemapb"
 )
 
 type indexTestCase struct {

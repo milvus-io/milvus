@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/api/commonpb"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/api/milvuspb"
 )
 
 func Test_createAliasTask_Prepare(t *testing.T) {

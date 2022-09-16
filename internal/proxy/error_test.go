@@ -19,7 +19,7 @@ package proxy
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/api/schemapb"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"go.uber.org/zap"

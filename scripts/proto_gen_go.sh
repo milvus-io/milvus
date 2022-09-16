@@ -35,13 +35,13 @@ echo `which protoc-gen-go`
 # official go code ship with the crate, so we need to generate it manually.
 pushd ${PROTO_DIR}
 
-mkdir -p commonpb
-mkdir -p schemapb
+mkdir -p ../../api/commonpb
+mkdir -p ../../api/schemapb
 mkdir -p etcdpb
 mkdir -p indexcgopb
 
 mkdir -p internalpb
-mkdir -p milvuspb
+mkdir -p ../../api/milvuspb
 mkdir -p rootcoordpb
 
 mkdir -p segcorepb
@@ -52,20 +52,38 @@ mkdir -p datapb
 mkdir -p querypb
 mkdir -p planpb
 
-${protoc} --proto_path="${GOOGLE_PROTO_DIR}" --proto_path=. --go_out=plugins=grpc,paths=source_relative:./commonpb common.proto
-${protoc} --proto_path="${GOOGLE_PROTO_DIR}" --proto_path=. --go_out=plugins=grpc,paths=source_relative:./schemapb schema.proto
-${protoc} --proto_path="${GOOGLE_PROTO_DIR}" --proto_path=. --go_out=plugins=grpc,paths=source_relative:./etcdpb etcd_meta.proto
-${protoc} --proto_path="${GOOGLE_PROTO_DIR}" --proto_path=. --go_out=plugins=grpc,paths=source_relative:./indexcgopb index_cgo_msg.proto
+${protoc} --proto_path="${GOOGLE_PROTO_DIR}" --proto_path=. \
+    --go_opt="Mmilvus.proto=github.com/milvus-io/milvus/api/milvuspb;milvuspb" \
+    --go_opt=Mcommon.proto=github.com/milvus-io/milvus/api/commonpb \
+    --go_opt=Mschema.proto=github.com/milvus-io/milvus/api/schemapb \
+    --go_out=plugins=grpc,paths=source_relative:./../../api/milvuspb milvus.proto
 
-${protoc} --proto_path="${GOOGLE_PROTO_DIR}" --proto_path=. --go_out=plugins=grpc,paths=source_relative:./rootcoordpb root_coord.proto
+${protoc} --proto_path="${GOOGLE_PROTO_DIR}" --proto_path=. \
+    --go_opt=Mmilvus.proto=github.com/milvus-io/milvus/api/milvuspb \
+    --go_opt=Mcommon.proto=github.com/milvus-io/milvus/api/commonpb \
+    --go_opt="Mschema.proto=github.com/milvus-io/milvus/api/schemapb;schemapb" \
+    --go_out=plugins=grpc,paths=source_relative:./../../api/schemapb schema.proto
 
-${protoc} --proto_path="${GOOGLE_PROTO_DIR}" --proto_path=. --go_out=plugins=grpc,paths=source_relative:./internalpb internal.proto
-${protoc} --proto_path="${GOOGLE_PROTO_DIR}" --proto_path=. --go_out=plugins=grpc,paths=source_relative:./milvuspb milvus.proto
-${protoc} --proto_path="${GOOGLE_PROTO_DIR}" --proto_path=. --go_out=plugins=grpc,paths=source_relative:./proxypb proxy.proto
-${protoc} --proto_path="${GOOGLE_PROTO_DIR}" --proto_path=. --go_out=plugins=grpc,paths=source_relative:./indexpb index_coord.proto
-${protoc} --proto_path="${GOOGLE_PROTO_DIR}" --proto_path=. --go_out=plugins=grpc,paths=source_relative:./datapb data_coord.proto
-${protoc} --proto_path="${GOOGLE_PROTO_DIR}" --proto_path=. --go_out=plugins=grpc,paths=source_relative:./querypb query_coord.proto
-${protoc} --proto_path="${GOOGLE_PROTO_DIR}" --proto_path=. --go_out=plugins=grpc,paths=source_relative:./planpb plan.proto
-${protoc} --proto_path="${GOOGLE_PROTO_DIR}" --proto_path=. --go_out=plugins=grpc,paths=source_relative:./segcorepb segcore.proto
+${protoc} --proto_path="${GOOGLE_PROTO_DIR}" --proto_path=. \
+    --go_opt=Mmilvus.proto=github.com/milvus-io/milvus/api/milvuspb \
+    --go_opt="Mcommon.proto=github.com/milvus-io/milvus/api/commonpb;commonpb" \
+    --go_opt=Mschema.proto=github.com/milvus-io/milvus/api/schemapb \
+    --go_out=plugins=grpc,paths=source_relative:./../../api/commonpb common.proto
+
+protoc_opt="${protoc} --proto_path=${GOOGLE_PROTO_DIR} --proto_path=.
+            --go_opt=Mmilvus.proto=github.com/milvus-io/milvus/api/milvuspb
+            --go_opt=Mcommon.proto=github.com/milvus-io/milvus/api/commonpb
+            --go_opt=Mschema.proto=github.com/milvus-io/milvus/api/schemapb"
+
+${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./etcdpb etcd_meta.proto
+${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./indexcgopb index_cgo_msg.proto
+${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./rootcoordpb root_coord.proto
+${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./internalpb internal.proto
+${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./proxypb proxy.proto
+${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./indexpb index_coord.proto
+${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./datapb data_coord.proto
+${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./querypb query_coord.proto
+${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./planpb plan.proto
+${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./segcorepb segcore.proto
 
 popd

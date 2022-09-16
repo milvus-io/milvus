@@ -3,7 +3,7 @@ package common
 import (
 	"reflect"
 
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/api/commonpb"
 )
 
 type KeyDataPairs []*commonpb.KeyDataPair

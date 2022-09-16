@@ -18,10 +18,10 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/api/commonpb"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/internal/proto/milvuspb"
+	"github.com/milvus-io/milvus/api/milvuspb"
 )
 
 func TestRootCoord_CreateCollection(t *testing.T) {

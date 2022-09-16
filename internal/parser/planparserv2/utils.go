@@ -5,8 +5,8 @@ import (
 
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 
+	"github.com/milvus-io/milvus/api/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
-	"github.com/milvus-io/milvus/internal/proto/schemapb"
 )
 
 func IsBool(n *planpb.GenericValue) bool {

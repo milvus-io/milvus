@@ -20,7 +20,7 @@ import (
 	"container/heap"
 	"sync"
 
-	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/api/commonpb"
 )
 
 // PQItem is something we manage in a priority queue.

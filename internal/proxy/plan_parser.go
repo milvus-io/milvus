@@ -23,8 +23,8 @@ import (
 
 	ant_ast "github.com/antonmedv/expr/ast"
 	ant_parser "github.com/antonmedv/expr/parser"
+	"github.com/milvus-io/milvus/api/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
-	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 

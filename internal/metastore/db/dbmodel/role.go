@@ -1,6 +1,6 @@
 package dbmodel
 
-import "github.com/milvus-io/milvus/internal/proto/milvuspb"
+import "github.com/milvus-io/milvus/api/milvuspb"
 
 type Role struct {
 	Base
