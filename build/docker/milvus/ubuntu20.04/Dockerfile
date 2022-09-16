@@ -9,20 +9,20 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
-FROM milvusdb/openblas:ubuntu20.04-20220825-4feedf1 AS openblas
+FROM milvusdb/openblas:ubuntu20.04-20220914-179ea77 AS openblas
 
 #FROM alpine
 FROM ubuntu:focal-20220426
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends libtbb-dev gfortran netcat iputils-ping ca-certificates && \
+    apt-get install -y --no-install-recommends libtbb-dev gfortran netcat iputils-ping ca-certificates liblapack3 && \
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
 
-COPY --from=openblas /usr/lib/libopenblas-r0.3.9.so /usr/lib/
+COPY --from=openblas /usr/local/lib/libopenblasp-r0.3.21.so /usr/lib/
 
-RUN ln -s /usr/lib/libopenblas-r0.3.9.so /usr/lib/libopenblas.so.0 && \
-    ln -s /usr/lib/libopenblas.so.0 /usr/lib/libopenblas.so
+RUN ln -s /usr/lib/libopenblasp-r0.3.21.so /usr/lib/libopenblas.so.3 && \
+    ln -s /usr/lib/libopenblas.so.3 /usr/lib/libopenblas.so
 
 COPY ./bin/ /milvus/bin/
 
