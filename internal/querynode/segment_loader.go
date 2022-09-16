@@ -425,6 +425,7 @@ func (loader *segmentLoader) loadFieldBinlogsAsync(field *datapb.FieldBinlog) []
 		future := loader.ioPool.Submit(func() (interface{}, error) {
 			binLog, err := loader.cm.Read(path)
 			if err != nil {
+				log.Warn("failed to load binlog", zap.String("filePath", path), zap.Error(err))
 				return nil, err
 			}
 			blob := &storage.Blob{
@@ -471,7 +472,12 @@ func (loader *segmentLoader) loadFieldIndexData(segment *Segment, indexInfo *que
 			indexFuture := loader.cpuPool.Submit(func() (interface{}, error) {
 				indexBlobFuture := loader.ioPool.Submit(func() (interface{}, error) {
 					log.Debug("load index file", zap.String("path", indexPath))
-					return loader.cm.Read(indexPath)
+					data, err := loader.cm.Read(indexPath)
+					if err != nil {
+						log.Warn("failed to load index file", zap.String("path", indexPath), zap.Error(err))
+						return nil, err
+					}
+					return data, nil
 				})
 
 				indexBlob, err := indexBlobFuture.Await()
