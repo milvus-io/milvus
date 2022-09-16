@@ -13,6 +13,8 @@
 
 #include <memory>
 #include <vector>
+#include <string>
+#include <algorithm>
 #include <unordered_map>
 #include <utility>
 
@@ -28,14 +30,14 @@ class OffsetMap {
  public:
     virtual ~OffsetMap() = default;
 
-    virtual std::vector<SegOffset>
-    find_with_timestamp(const PkType pk, Timestamp timestamp, const ConcurrentVector<Timestamp>& timestamps) const = 0;
-
-    virtual std::vector<SegOffset>
-    find_with_barrier(const PkType pk, int64_t barrier) const = 0;
+    virtual std::vector<int64_t>
+    find(const PkType pk) const = 0;
 
     virtual void
     insert(const PkType pk, int64_t offset) = 0;
+
+    virtual void
+    seal() = 0;
 
     virtual bool
     empty() const = 0;
@@ -44,37 +46,20 @@ class OffsetMap {
 template <typename T>
 class OffsetHashMap : public OffsetMap {
  public:
-    std::vector<SegOffset>
-    find_with_timestamp(const PkType pk, Timestamp timestamp, const ConcurrentVector<Timestamp>& timestamps) const {
-        std::vector<SegOffset> res_offsets;
-        auto offset_iter = map_.find(std::get<T>(pk));
-        if (offset_iter != map_.end()) {
-            for (auto offset : offset_iter->second) {
-                if (timestamps[offset] <= timestamp) {
-                    res_offsets.push_back(SegOffset(offset));
-                }
-            }
-        }
-        return res_offsets;
-    }
-
-    std::vector<SegOffset>
-    find_with_barrier(const PkType pk, int64_t barrier) const {
-        std::vector<SegOffset> res_offsets;
-        auto offset_iter = map_.find(std::get<T>(pk));
-        if (offset_iter != map_.end()) {
-            for (auto offset : offset_iter->second) {
-                if (offset <= barrier) {
-                    res_offsets.push_back(SegOffset(offset));
-                }
-            }
-        }
-        return res_offsets;
+    std::vector<int64_t>
+    find(const PkType pk) const {
+        auto offset_vector = map_.find(std::get<T>(pk));
+        return offset_vector != map_.end() ? offset_vector->second : std::vector<int64_t>();
     }
 
     void
     insert(const PkType pk, int64_t offset) {
         map_[std::get<T>(pk)].emplace_back(offset);
+    }
+
+    void
+    seal() {
+        PanicInfo("OffsetHashMap used for growing segment could not be sealed.");
     }
 
     bool
@@ -86,6 +71,58 @@ class OffsetHashMap : public OffsetMap {
     std::unordered_map<T, std::vector<int64_t>> map_;
 };
 
+template <typename T>
+class OffsetOrderedArray : public OffsetMap {
+ public:
+    std::vector<int64_t>
+    find(const PkType pk) const {
+        int left = 0, right = array_.size() - 1;
+        T target = std::get<T>(pk);
+        if (!is_sealed)
+            PanicInfo("OffsetOrderedArray could not search before seal");
+
+        while (left < right) {
+            int mid = (left + right) >> 1;
+            if (array_[mid].first < target)
+                left = mid + 1;
+            else
+                right = mid;
+        }
+
+        std::vector<int64_t> offset_vector;
+        for (int offset_id = right; offset_id < array_.size(); offset_id++) {
+            if (offset_id < 0 || array_[offset_id].first != target)
+                break;
+            offset_vector.push_back(array_[offset_id].second);
+        }
+
+        return offset_vector;
+    }
+
+    void
+    insert(const PkType pk, int64_t offset) {
+        if (is_sealed)
+            PanicInfo("OffsetOrderedArray could not insert after seal");
+        array_.push_back(std::make_pair(std::get<T>(pk), offset));
+    }
+
+    void
+    seal() {
+        sort(array_.begin(), array_.end());
+        is_sealed = true;
+    }
+
+    bool
+    empty() const {
+        return array_.empty();
+    }
+
+ private:
+    bool is_sealed = false;
+    std::vector<std::pair<T, int64_t>> array_;
+};
+
+template <bool is_sealed = false>
 struct InsertRecord {
     ConcurrentVector<Timestamp> timestamps_;
     ConcurrentVector<idx_t> row_ids_;
@@ -100,18 +137,108 @@ struct InsertRecord {
     // pks to row offset
     std::unique_ptr<OffsetMap> pk2offset_;
 
-    explicit InsertRecord(const Schema& schema, int64_t size_per_chunk);
+    InsertRecord(const Schema& schema, int64_t size_per_chunk) : row_ids_(size_per_chunk), timestamps_(size_per_chunk) {
+        std::optional<FieldId> pk_field_id = schema.get_primary_field_id();
+
+        for (auto& field : schema) {
+            auto field_id = field.first;
+            auto& field_meta = field.second;
+            if (pk2offset_ == nullptr && pk_field_id.has_value() && pk_field_id.value() == field_id) {
+                switch (field_meta.get_data_type()) {
+                    case DataType::INT64: {
+                        if (is_sealed)
+                            pk2offset_ = std::make_unique<OffsetOrderedArray<int64_t>>();
+                        else
+                            pk2offset_ = std::make_unique<OffsetHashMap<int64_t>>();
+                        break;
+                    }
+                    case DataType::VARCHAR: {
+                        if (is_sealed)
+                            pk2offset_ = std::make_unique<OffsetOrderedArray<std::string>>();
+                        else
+                            pk2offset_ = std::make_unique<OffsetHashMap<std::string>>();
+                        break;
+                    }
+                    default: {
+                        PanicInfo("unsupported pk type");
+                    }
+                }
+            }
+            if (field_meta.is_vector()) {
+                if (field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
+                    this->append_field_data<FloatVector>(field_id, field_meta.get_dim(), size_per_chunk);
+                    continue;
+                } else if (field_meta.get_data_type() == DataType::VECTOR_BINARY) {
+                    this->append_field_data<BinaryVector>(field_id, field_meta.get_dim(), size_per_chunk);
+                    continue;
+                } else {
+                    PanicInfo("unsupported");
+                }
+            }
+            switch (field_meta.get_data_type()) {
+                case DataType::BOOL: {
+                    this->append_field_data<bool>(field_id, size_per_chunk);
+                    break;
+                }
+                case DataType::INT8: {
+                    this->append_field_data<int8_t>(field_id, size_per_chunk);
+                    break;
+                }
+                case DataType::INT16: {
+                    this->append_field_data<int16_t>(field_id, size_per_chunk);
+                    break;
+                }
+                case DataType::INT32: {
+                    this->append_field_data<int32_t>(field_id, size_per_chunk);
+                    break;
+                }
+                case DataType::INT64: {
+                    this->append_field_data<int64_t>(field_id, size_per_chunk);
+                    break;
+                }
+                case DataType::FLOAT: {
+                    this->append_field_data<float>(field_id, size_per_chunk);
+                    break;
+                }
+                case DataType::DOUBLE: {
+                    this->append_field_data<double>(field_id, size_per_chunk);
+                    break;
+                }
+                case DataType::VARCHAR: {
+                    this->append_field_data<std::string>(field_id, size_per_chunk);
+                    break;
+                }
+                default: {
+                    PanicInfo("unsupported");
+                }
+            }
+        }
+    }
 
     std::vector<SegOffset>
     search_pk(const PkType pk, Timestamp timestamp) const {
         std::shared_lock lck(shared_mutex_);
-        return pk2offset_->find_with_timestamp(pk, timestamp, timestamps_);
+        std::vector<SegOffset> res_offsets;
+        auto offset_iter = pk2offset_->find(pk);
+        for (auto offset : offset_iter) {
+            if (timestamps_[offset] <= timestamp) {
+                res_offsets.push_back(SegOffset(offset));
+            }
+        }
+        return res_offsets;
     }
 
     std::vector<SegOffset>
     search_pk(const PkType pk, int64_t insert_barrier) const {
         std::shared_lock lck(shared_mutex_);
-        return pk2offset_->find_with_barrier(pk, insert_barrier);
+        std::vector<SegOffset> res_offsets;
+        auto offset_iter = pk2offset_->find(pk);
+        for (auto offset : offset_iter) {
+            if (offset <= insert_barrier) {
+                res_offsets.push_back(SegOffset(offset));
+            }
+        }
+        return res_offsets;
     }
 
     void
@@ -124,6 +251,11 @@ struct InsertRecord {
     empty_pks() const {
         std::shared_lock lck(shared_mutex_);
         return pk2offset_->empty();
+    }
+
+    void
+    seal_pks() {
+        pk2offset_->seal();
     }
 
     // get field data without knowing the type

@@ -73,29 +73,6 @@ VectorFieldIndexing::get_search_params(int top_K) const {
     return base_params;
 }
 
-void
-IndexingRecord::UpdateResourceAck(int64_t chunk_ack, const InsertRecord& record) {
-    if (resource_ack_ >= chunk_ack) {
-        return;
-    }
-
-    std::unique_lock lck(mutex_);
-    int64_t old_ack = resource_ack_;
-    if (old_ack >= chunk_ack) {
-        return;
-    }
-    resource_ack_ = chunk_ack;
-    lck.unlock();
-
-    //    std::thread([this, old_ack, chunk_ack, &record] {
-    for (auto& [field_offset, entry] : field_indexings_) {
-        auto vec_base = record.get_field_data_base(field_offset);
-        entry->BuildIndexRange(old_ack, chunk_ack, vec_base);
-    }
-    finished_ack_.AddSegment(old_ack, chunk_ack);
-    //    }).detach();
-}
-
 template <typename T>
 void
 ScalarFieldIndexing<T>::BuildIndexRange(int64_t ack_beg, int64_t ack_end, const VectorBase* vec_base) {

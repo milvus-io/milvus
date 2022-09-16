@@ -193,7 +193,7 @@ class SegmentSealedImpl : public SegmentSealed {
     SealedIndexingRecord vector_indexings_;
 
     // inserted fields data and row_ids, timestamps
-    InsertRecord insert_record_;
+    InsertRecord<true> insert_record_;
 
     // deleted pks
     mutable DeletedRecord deleted_record_;
