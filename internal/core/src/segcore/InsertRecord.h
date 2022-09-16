@@ -24,6 +24,68 @@
 
 namespace milvus::segcore {
 
+class OffsetMap {
+ public:
+    virtual ~OffsetMap() = default;
+
+    virtual std::vector<SegOffset>
+    find_with_timestamp(const PkType pk, Timestamp timestamp, const ConcurrentVector<Timestamp>& timestamps) const = 0;
+
+    virtual std::vector<SegOffset>
+    find_with_barrier(const PkType pk, int64_t barrier) const = 0;
+
+    virtual void
+    insert(const PkType pk, int64_t offset) = 0;
+
+    virtual bool
+    empty() const = 0;
+};
+
+template <typename T>
+class OffsetHashMap : public OffsetMap {
+ public:
+    std::vector<SegOffset>
+    find_with_timestamp(const PkType pk, Timestamp timestamp, const ConcurrentVector<Timestamp>& timestamps) const {
+        std::vector<SegOffset> res_offsets;
+        auto offset_iter = map_.find(std::get<T>(pk));
+        if (offset_iter != map_.end()) {
+            for (auto offset : offset_iter->second) {
+                if (timestamps[offset] <= timestamp) {
+                    res_offsets.push_back(SegOffset(offset));
+                }
+            }
+        }
+        return res_offsets;
+    }
+
+    std::vector<SegOffset>
+    find_with_barrier(const PkType pk, int64_t barrier) const {
+        std::vector<SegOffset> res_offsets;
+        auto offset_iter = map_.find(std::get<T>(pk));
+        if (offset_iter != map_.end()) {
+            for (auto offset : offset_iter->second) {
+                if (offset <= barrier) {
+                    res_offsets.push_back(SegOffset(offset));
+                }
+            }
+        }
+        return res_offsets;
+    }
+
+    void
+    insert(const PkType pk, int64_t offset) {
+        map_[std::get<T>(pk)].emplace_back(offset);
+    }
+
+    bool
+    empty() const {
+        return map_.empty();
+    }
+
+ private:
+    std::unordered_map<T, std::vector<int64_t>> map_;
+};
+
 struct InsertRecord {
     ConcurrentVector<Timestamp> timestamps_;
     ConcurrentVector<idx_t> row_ids_;
@@ -36,52 +98,32 @@ struct InsertRecord {
     TimestampIndex timestamp_index_;
 
     // pks to row offset
-    Pk2OffsetType pk2offset_;
+    std::unique_ptr<OffsetMap> pk2offset_;
 
     explicit InsertRecord(const Schema& schema, int64_t size_per_chunk);
 
     std::vector<SegOffset>
     search_pk(const PkType pk, Timestamp timestamp) const {
         std::shared_lock lck(shared_mutex_);
-        std::vector<SegOffset> res_offsets;
-        auto offset_iter = pk2offset_.find(pk);
-        if (offset_iter != pk2offset_.end()) {
-            for (auto offset : offset_iter->second) {
-                if (timestamps_[offset] <= timestamp) {
-                    res_offsets.push_back(SegOffset(offset));
-                }
-            }
-        }
-
-        return res_offsets;
+        return pk2offset_->find_with_timestamp(pk, timestamp, timestamps_);
     }
 
     std::vector<SegOffset>
     search_pk(const PkType pk, int64_t insert_barrier) const {
         std::shared_lock lck(shared_mutex_);
-        std::vector<SegOffset> res_offsets;
-        auto offset_iter = pk2offset_.find(pk);
-        if (offset_iter != pk2offset_.end()) {
-            for (auto offset : offset_iter->second) {
-                if (offset < insert_barrier) {
-                    res_offsets.push_back(SegOffset(offset));
-                }
-            }
-        }
-
-        return res_offsets;
+        return pk2offset_->find_with_barrier(pk, insert_barrier);
     }
 
     void
     insert_pk(const PkType pk, int64_t offset) {
         std::lock_guard lck(shared_mutex_);
-        pk2offset_[pk].emplace_back(offset);
+        pk2offset_->insert(pk, offset);
     }
 
     bool
     empty_pks() const {
         std::shared_lock lck(shared_mutex_);
-        return pk2offset_.empty();
+        return pk2offset_->empty();
     }
 
     // get field data without knowing the type

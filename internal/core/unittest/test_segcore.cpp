@@ -79,3 +79,37 @@ TEST(SegmentCoreTest, SmallIndex) {
     schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     schema->AddDebugField("age", DataType::INT32);
 }
+
+TEST(OffsetMap, int64_t){
+    using namespace milvus::segcore;
+    OffsetMap *map= new OffsetHashMap<int64_t>();
+    map->insert(PkType(int64_t(10)), 3);
+    std::vector<SegOffset> offset = map->find_with_barrier(PkType(int64_t(10)),10);
+    ASSERT_EQ(offset[0].get(), int64_t(3));
+}
+
+TEST(InsertRecordTest, int64_t){
+    using namespace milvus::segcore;
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto i64_fid = schema->AddDebugField("age", DataType::INT64);
+    schema->set_primary_field_id(i64_fid);
+
+    auto record = milvus::segcore::InsertRecord(*schema, int64_t(32));
+    record.insert_pk(PkType(int64_t(12)), int64_t(3));
+    std::vector<SegOffset> offset = record.search_pk(PkType(int64_t(12)), int64_t(10));
+    ASSERT_EQ(offset[0].get(), int64_t(3));
+}
+
+TEST(InsertRecordTest, string){
+    using namespace milvus::segcore;
+    auto schema = std::make_shared<Schema>();
+    schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto i64_fid = schema->AddDebugField("name", DataType::VARCHAR);
+    schema->set_primary_field_id(i64_fid);
+
+    auto record = milvus::segcore::InsertRecord(*schema, int64_t(32));
+    record.insert_pk(PkType(std::string("test")), int64_t(3));
+    std::vector<SegOffset> offset = record.search_pk(PkType(std::string("test")), int64_t(10));
+    ASSERT_EQ(offset[0].get(), int64_t(3));
+}
