@@ -591,7 +591,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 		zap.Int64("collectionID", collectionID),
 		zap.Int64("partitionID", partitionID),
 	)
-	log.Info("receive get recovery info request")
+	log.Info("get recovery info request received")
 	resp := &datapb.GetRecoveryInfoResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -706,7 +706,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 	return resp, nil
 }
 
-// GetFlushedSegments returns all segment matches provided criterion and in State Flushed
+// GetFlushedSegments returns all segment matches provided criterion and in state Flushed or Dropped (compacted but not GCed yet)
 // If requested partition id < 0, ignores the partition id filter
 func (s *Server) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error) {
 	resp := &datapb.GetFlushedSegmentsResponse{

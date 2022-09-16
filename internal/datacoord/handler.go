@@ -66,9 +66,9 @@ func (h *ServerHandler) GetVChanPositions(channel *channel, partitionID UniqueID
 		zap.Any("numOfSegments", len(segments)),
 	)
 	var (
-		flushedIds   = make(typeutil.UniqueSet)
-		unflushedIds = make(typeutil.UniqueSet)
-		droppedIds   = make(typeutil.UniqueSet)
+		indexedIDs   = make(typeutil.UniqueSet)
+		unIndexedIDs = make(typeutil.UniqueSet)
+		droppedIDs   = make(typeutil.UniqueSet)
 		seekPosition *internalpb.MsgPosition
 	)
 	for _, s := range segments {
@@ -78,26 +78,25 @@ func (h *ServerHandler) GetVChanPositions(channel *channel, partitionID UniqueID
 		}
 		segmentInfos[s.GetID()] = s
 		if s.GetState() == commonpb.SegmentState_Dropped {
-			droppedIds.Insert(s.GetID())
+			droppedIDs.Insert(s.GetID())
 		} else if indexed.Contain(s.GetID()) {
-			flushedIds.Insert(s.GetID())
+			indexedIDs.Insert(s.GetID())
 		} else {
-			unflushedIds.Insert(s.GetID())
+			unIndexedIDs.Insert(s.GetID())
 		}
 	}
-	for id := range unflushedIds {
+	for id := range unIndexedIDs {
 		// Indexed segments are compacted to a raw segment,
 		// replace it with the indexed ones
-		if !indexed.Contain(id) &&
-			len(segmentInfos[id].GetCompactionFrom()) > 0 &&
+		if len(segmentInfos[id].GetCompactionFrom()) > 0 &&
 			indexed.Contain(segmentInfos[id].GetCompactionFrom()...) {
-			flushedIds.Insert(segmentInfos[id].GetCompactionFrom()...)
-			unflushedIds.Remove(id)
-			droppedIds.Remove(segmentInfos[id].GetCompactionFrom()...)
+			unIndexedIDs.Remove(id)
+			indexedIDs.Insert(segmentInfos[id].GetCompactionFrom()...)
+			droppedIDs.Remove(segmentInfos[id].GetCompactionFrom()...)
 		}
 	}
 
-	for id := range flushedIds {
+	for id := range indexedIDs {
 		var segmentPosition *internalpb.MsgPosition
 		segment := segmentInfos[id]
 		if segment.GetDmlPosition() != nil {
@@ -110,7 +109,7 @@ func (h *ServerHandler) GetVChanPositions(channel *channel, partitionID UniqueID
 			seekPosition = segmentPosition
 		}
 	}
-	for id := range unflushedIds {
+	for id := range unIndexedIDs {
 		var segmentPosition *internalpb.MsgPosition
 		segment := segmentInfos[id]
 		if segment.GetDmlPosition() != nil {
@@ -141,9 +140,9 @@ func (h *ServerHandler) GetVChanPositions(channel *channel, partitionID UniqueID
 		CollectionID:        channel.CollectionID,
 		ChannelName:         channel.Name,
 		SeekPosition:        seekPosition,
-		FlushedSegmentIds:   flushedIds.Collect(),
-		UnflushedSegmentIds: unflushedIds.Collect(),
-		DroppedSegmentIds:   droppedIds.Collect(),
+		FlushedSegmentIds:   indexedIDs.Collect(),
+		UnflushedSegmentIds: unIndexedIDs.Collect(),
+		DroppedSegmentIds:   droppedIDs.Collect(),
 	}
 }
 
