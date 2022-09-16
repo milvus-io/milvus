@@ -110,6 +110,22 @@ func sealByLifetimePolicy(lifetime time.Duration) segmentSealPolicy {
 	}
 }
 
+// sealLongTimeIdlePolicy seal segment if the segment has been written with a high frequency before.
+// serve for this case:
+// If users insert entities into segment continuously within a certain period of time, but they forgot to flush/(seal)
+// it and the size of segment didn't reach the seal proportion. Under this situation, Milvus will wait these segments to
+// be expired and during this period search latency may be a little high. We can assume that entities won't be inserted
+// into this segment anymore, so sealLongTimeIdlePolicy will seal these segments to trigger handoff of query cluster.
+// Q: Why we don't decrease the expiry time directly?
+// A: We don't want to influence segments which are accepting `frequent small` batch entities.
+func sealLongTimeIdlePolicy(idleTimeTolerance time.Duration, minSizeToSealIdleSegment float64, maxSizeOfSegment float64) segmentSealPolicy {
+	return func(segment *SegmentInfo, ts Timestamp) bool {
+		limit := (minSizeToSealIdleSegment / maxSizeOfSegment) * float64(segment.GetMaxRowNum())
+		return time.Since(segment.lastWrittenTime) > idleTimeTolerance &&
+			float64(segment.currRows) > limit
+	}
+}
+
 // channelSealPolicy seal policy applies to channel
 type channelSealPolicy func(string, []*SegmentInfo, Timestamp) []*SegmentInfo
 

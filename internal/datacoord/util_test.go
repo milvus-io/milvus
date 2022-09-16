@@ -204,3 +204,11 @@ func (f *fixedTSOAllocator) allocTimestamp(_ context.Context) (Timestamp, error)
 func (f *fixedTSOAllocator) allocID(_ context.Context) (UniqueID, error) {
 	panic("not implemented") // TODO: Implement
 }
+
+func (suite *UtilSuite) TestGetZeroTime() {
+	n := 10
+	for i := 0; i < n; i++ {
+		timeGot := getZeroTime()
+		suite.True(timeGot.IsZero())
+	}
+}

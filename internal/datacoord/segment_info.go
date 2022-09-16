@@ -38,7 +38,8 @@ type SegmentInfo struct {
 	lastFlushTime time.Time
 	isCompacting  bool
 	// a cache to avoid calculate twice
-	size int64
+	size            int64
+	lastWrittenTime time.Time
 }
 
 // NewSegmentInfo create `SegmentInfo` wrapper from `datapb.SegmentInfo`
@@ -51,6 +52,8 @@ func NewSegmentInfo(info *datapb.SegmentInfo) *SegmentInfo {
 		currRows:      info.GetNumOfRows(),
 		allocations:   make([]*Allocation, 0, 16),
 		lastFlushTime: time.Now().Add(-1 * flushInterval),
+		// A growing segment from recovery can be also considered idle.
+		lastWrittenTime: getZeroTime(),
 	}
 }
 
@@ -193,6 +196,7 @@ func (s *SegmentInfo) Clone(opts ...SegmentInfoOption) *SegmentInfo {
 		lastFlushTime: s.lastFlushTime,
 		isCompacting:  s.isCompacting,
 		//cannot copy size, since binlog may be changed
+		lastWrittenTime: s.lastWrittenTime,
 	}
 	for _, opt := range opts {
 		opt(cloned)
@@ -203,12 +207,13 @@ func (s *SegmentInfo) Clone(opts ...SegmentInfoOption) *SegmentInfo {
 // ShadowClone shadow clone the segment and return a new instance
 func (s *SegmentInfo) ShadowClone(opts ...SegmentInfoOption) *SegmentInfo {
 	cloned := &SegmentInfo{
-		SegmentInfo:   s.SegmentInfo,
-		currRows:      s.currRows,
-		allocations:   s.allocations,
-		lastFlushTime: s.lastFlushTime,
-		isCompacting:  s.isCompacting,
-		size:          s.size,
+		SegmentInfo:     s.SegmentInfo,
+		currRows:        s.currRows,
+		allocations:     s.allocations,
+		lastFlushTime:   s.lastFlushTime,
+		isCompacting:    s.isCompacting,
+		size:            s.size,
+		lastWrittenTime: s.lastWrittenTime,
 	}
 
 	for _, opt := range opts {
@@ -274,6 +279,7 @@ func AddAllocation(allocation *Allocation) SegmentInfoOption {
 func SetCurrentRows(rows int64) SegmentInfoOption {
 	return func(segment *SegmentInfo) {
 		segment.currRows = rows
+		segment.lastWrittenTime = time.Now()
 	}
 }
 
