@@ -178,6 +178,7 @@ func (cit *CreateIndexTask) Execute(ctx context.Context) error {
 	}
 
 	buildIDs := make([]UniqueID, 0)
+	segIDs := make([]UniqueID, 0)
 	for _, segmentInfo := range segmentsInfo.Infos {
 		if segmentInfo.State != commonpb.SegmentState_Flushed {
 			continue
@@ -201,6 +202,7 @@ func (cit *CreateIndexTask) Execute(ctx context.Context) error {
 		if have || buildID == 0 {
 			continue
 		}
+		segIDs = append(segIDs, segmentInfo.ID)
 		buildIDs = append(buildIDs, buildID)
 	}
 
@@ -212,6 +214,9 @@ func (cit *CreateIndexTask) Execute(ctx context.Context) error {
 	}
 	for _, buildID := range buildIDs {
 		cit.indexCoordClient.indexBuilder.enqueue(buildID)
+	}
+	for _, segID := range segIDs {
+		cit.indexCoordClient.handoff.enqueue(segID)
 	}
 	return nil
 }

@@ -241,6 +241,7 @@ func (ob *HandoffObserver) handoff(segment *querypb.SegmentInfo) {
 		ID:                  segment.SegmentID,
 		CollectionID:        segment.CollectionID,
 		PartitionID:         segment.PartitionID,
+		NumOfRows:           segment.NumRows,
 		InsertChannel:       segment.GetDmChannel(),
 		State:               segment.GetSegmentState(),
 		CreatedByCompaction: segment.GetCreatedByCompaction(),

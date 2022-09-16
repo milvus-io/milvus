@@ -18,6 +18,7 @@ package indexcoord
 
 import (
 	"context"
+	"errors"
 	"math/rand"
 	"path"
 	"strconv"
@@ -683,3 +684,82 @@ func TestIndexCoord_UnHealthy(t *testing.T) {
 //	assert.Nil(t, err)
 //	assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
 //}
+
+func TestIndexCoord_pullSegmentInfo(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		ic := &IndexCoord{
+			dataCoordClient: NewDataCoordMock(),
+		}
+		info, err := ic.pullSegmentInfo(context.Background(), segID)
+		assert.NoError(t, err)
+		assert.NotNil(t, info)
+	})
+
+	t.Run("fail", func(t *testing.T) {
+		ic := &IndexCoord{
+			dataCoordClient: &DataCoordMock{
+				CallGetSegmentInfo: func(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
+					return nil, errors.New("error")
+				},
+			},
+		}
+		info, err := ic.pullSegmentInfo(context.Background(), segID)
+		assert.Error(t, err)
+		assert.Nil(t, info)
+	})
+
+	t.Run("not success", func(t *testing.T) {
+		ic := &IndexCoord{
+			dataCoordClient: &DataCoordMock{
+				CallGetSegmentInfo: func(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
+					return &datapb.GetSegmentInfoResponse{
+						Status: &commonpb.Status{
+							ErrorCode: commonpb.ErrorCode_UnexpectedError,
+							Reason:    "fail reason",
+						},
+					}, nil
+				},
+			},
+		}
+		info, err := ic.pullSegmentInfo(context.Background(), segID)
+		assert.Error(t, err)
+		assert.Nil(t, info)
+	})
+
+	t.Run("failed to get segment", func(t *testing.T) {
+		ic := &IndexCoord{
+			dataCoordClient: &DataCoordMock{
+				CallGetSegmentInfo: func(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
+					return &datapb.GetSegmentInfoResponse{
+						Status: &commonpb.Status{
+							ErrorCode: commonpb.ErrorCode_UnexpectedError,
+							Reason:    msgSegmentNotFound(segID),
+						},
+					}, nil
+				},
+			},
+		}
+		info, err := ic.pullSegmentInfo(context.Background(), segID)
+		assert.Error(t, err)
+		assert.Nil(t, info)
+	})
+
+	t.Run("seg not exist", func(t *testing.T) {
+		ic := &IndexCoord{
+			dataCoordClient: &DataCoordMock{
+				CallGetSegmentInfo: func(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
+					return &datapb.GetSegmentInfoResponse{
+						Status: &commonpb.Status{
+							ErrorCode: commonpb.ErrorCode_Success,
+							Reason:    "",
+						},
+						Infos: []*datapb.SegmentInfo{},
+					}, nil
+				},
+			},
+		}
+		info, err := ic.pullSegmentInfo(context.Background(), segID)
+		assert.ErrorIs(t, err, ErrSegmentNotFound)
+		assert.Nil(t, info)
+	})
+}

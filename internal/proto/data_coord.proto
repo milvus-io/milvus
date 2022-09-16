@@ -260,6 +260,10 @@ message SegmentInfo {
   bool createdByCompaction = 14;
   repeated int64 compactionFrom = 15;
   uint64 dropped_at = 16; // timestamp when segment marked drop
+  // A flag indicating if:
+  // (1) this segment is created by bulk load, and
+  // (2) the bulk load task that creates this segment has not yet reached `ImportCompleted` state.
+  bool is_importing = 17;
 }
 
 message SegmentStartPosition {

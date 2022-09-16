@@ -67,6 +67,7 @@ message SegmentIndex {
     bool deleted = 12;
     uint64 create_time = 13;
     uint64 serialize_size = 14;
+    bool write_handoff = 15;
 }
 
 message RegisterNodeRequest {

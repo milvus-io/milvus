@@ -18,12 +18,14 @@ package indexcoord
 
 import (
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/milvus-io/milvus/api/schemapb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/util"
 )
 
 // getDimension gets the dimension of data from building index request.
@@ -65,4 +67,8 @@ func parseBuildIDFromFilePath(key string) (UniqueID, error) {
 		return strconv.ParseInt(ss[len(ss)-2], 10, 64)
 	}
 	return strconv.ParseInt(ss[len(ss)-1], 10, 64)
+}
+
+func buildHandoffKey(collID, partID, segID UniqueID) string {
+	return fmt.Sprintf("%s/%d/%d/%d", util.HandoffSegmentPrefix, collID, partID, segID)
 }

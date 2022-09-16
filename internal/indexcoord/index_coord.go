@@ -87,6 +87,7 @@ type IndexCoord struct {
 	indexBuilder          *indexBuilder
 	garbageCollector      *garbageCollector
 	flushedSegmentWatcher *flushedSegmentWatcher
+	handoff               *handoff
 
 	metricsCacheManager *metricsinfo.MetricsCacheManager
 
@@ -218,7 +219,8 @@ func (i *IndexCoord) Init() error {
 		i.chunkManager = chunkManager
 
 		i.garbageCollector = newGarbageCollector(i.loopCtx, i.metaTable, i.chunkManager, i)
-		i.flushedSegmentWatcher, err = newFlushSegmentWatcher(i.loopCtx, i.etcdKV, i.metaTable, i.indexBuilder, i)
+		i.handoff = newHandoff(i.loopCtx, i.metaTable, i.etcdKV, i)
+		i.flushedSegmentWatcher, err = newFlushSegmentWatcher(i.loopCtx, i.etcdKV, i.metaTable, i.indexBuilder, i.handoff, i)
 		if err != nil {
 			initErr = err
 			return
@@ -254,6 +256,7 @@ func (i *IndexCoord) Start() error {
 
 		i.indexBuilder.Start()
 		i.garbageCollector.Start()
+		i.handoff.Start()
 		i.flushedSegmentWatcher.Start()
 
 		i.UpdateStateCode(internalpb.StateCode_Healthy)
@@ -1050,4 +1053,31 @@ func (i *IndexCoord) watchFlushedSegmentLoop() {
 			}
 		}
 	}
+}
+
+func (i *IndexCoord) pullSegmentInfo(ctx context.Context, segmentID UniqueID) (*datapb.SegmentInfo, error) {
+	resp, err := i.dataCoordClient.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
+		SegmentIDs:       []int64{segmentID},
+		IncludeUnHealthy: false,
+	})
+	if err != nil {
+		log.Error("IndexCoord get segment info fail", zap.Int64("segID", segmentID), zap.Error(err))
+		return nil, err
+	}
+	if resp.Status.GetErrorCode() != commonpb.ErrorCode_Success {
+		log.Error("IndexCoord get segment info fail", zap.Int64("segID", segmentID),
+			zap.String("fail reason", resp.Status.GetReason()))
+		if resp.Status.GetReason() == msgSegmentNotFound(segmentID) {
+			return nil, errSegmentNotFound(segmentID)
+		}
+		return nil, errors.New(resp.Status.GetReason())
+	}
+	for _, info := range resp.Infos {
+		if info.ID == segmentID {
+			return info, nil
+		}
+	}
+	errMsg := msgSegmentNotFound(segmentID)
+	log.Error(errMsg)
+	return nil, errSegmentNotFound(segmentID)
 }
