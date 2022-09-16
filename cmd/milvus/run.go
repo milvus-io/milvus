@@ -24,8 +24,15 @@ const (
 type run struct {
 	serverType string
 	// flags
-	svrAlias                                                             string
-	enableRootCoord, enableQueryCoord, enableIndexCoord, enableDataCoord bool
+	svrAlias         string
+	enableRootCoord  bool
+	enableQueryCoord bool
+	enableIndexCoord bool
+	enableDataCoord  bool
+	enableQueryNode  bool
+	enableDataNode   bool
+	enableIndexNode  bool
+	enableProxy      bool
 }
 
 func (c *run) getHelp() string {
@@ -79,6 +86,10 @@ func (c *run) execute(args []string, flags *flag.FlagSet) {
 		role.EnableQueryCoord = c.enableQueryCoord
 		role.EnableDataCoord = c.enableDataCoord
 		role.EnableIndexCoord = c.enableIndexCoord
+		role.EnableQueryNode = c.enableQueryNode
+		role.EnableDataNode = c.enableDataNode
+		role.EnableIndexNode = c.enableIndexNode
+		role.EnableProxy = c.enableProxy
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown server type = %s\n%s", c.serverType, c.getHelp())
 		os.Exit(-1)
@@ -118,6 +129,11 @@ func (c *run) formatFlags(args []string, flags *flag.FlagSet) {
 	flags.BoolVar(&c.enableQueryCoord, typeutil.QueryCoordRole, false, "enable query coordinator")
 	flags.BoolVar(&c.enableIndexCoord, typeutil.IndexCoordRole, false, "enable index coordinator")
 	flags.BoolVar(&c.enableDataCoord, typeutil.DataCoordRole, false, "enable data coordinator")
+
+	flags.BoolVar(&c.enableQueryNode, typeutil.QueryNodeRole, false, "enable query node")
+	flags.BoolVar(&c.enableDataNode, typeutil.DataNodeRole, false, "enable data node")
+	flags.BoolVar(&c.enableIndexNode, typeutil.IndexNodeRole, false, "enable index node")
+	flags.BoolVar(&c.enableProxy, typeutil.ProxyRole, false, "enable proxy node")
 
 	initMaxprocs(c.serverType, flags)
 	if err := flags.Parse(args[3:]); err != nil {
