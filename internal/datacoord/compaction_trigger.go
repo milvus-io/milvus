@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/logutil"
 	"go.uber.org/zap"
 )
@@ -68,16 +69,23 @@ type compactionTrigger struct {
 	quit              chan struct{}
 	wg                sync.WaitGroup
 	segRefer          *SegmentReferenceManager
+	indexCoord        types.IndexCoord
 }
 
-func newCompactionTrigger(meta *meta, compactionHandler compactionPlanContext, allocator allocator,
-	segRefer *SegmentReferenceManager) *compactionTrigger {
+func newCompactionTrigger(
+	meta *meta,
+	compactionHandler compactionPlanContext,
+	allocator allocator,
+	segRefer *SegmentReferenceManager,
+	indexCoord types.IndexCoord,
+) *compactionTrigger {
 	return &compactionTrigger{
 		meta:              meta,
 		allocator:         allocator,
 		signals:           make(chan *compactionSignal, 100),
 		compactionHandler: compactionHandler,
 		segRefer:          segRefer,
+		indexCoord:        indexCoord,
 	}
 }
 
@@ -127,7 +135,7 @@ func (t *compactionTrigger) startGlobalCompactionLoop() {
 			return
 		case <-t.globalTrigger.C:
 			cctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			ct, err := getCompactTime(cctx, t.allocator)
+			ct, err := GetCompactTime(cctx, t.allocator)
 			if err != nil {
 				log.Warn("unbale to get compaction time", zap.Error(err))
 				cancel()
@@ -228,6 +236,7 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) {
 		return (signal.collectionID == 0 || segment.CollectionID == signal.collectionID) &&
 			isSegmentHealthy(segment) &&
 			isFlush(segment) &&
+			IsParentDropped(t.meta, segment) &&
 			!segment.isCompacting // not compacting now
 	}) // m is list of chanPartSegments, which is channel-partition organized segments
 	for _, group := range m {
@@ -460,11 +469,12 @@ func (t *compactionTrigger) getCandidateSegments(channel string, partitionID Uni
 	var res []*SegmentInfo
 	for _, s := range segments {
 		if !isSegmentHealthy(s) || !isFlush(s) || s.GetInsertChannel() != channel ||
-			s.GetPartitionID() != partitionID || s.isCompacting {
+			s.GetPartitionID() != partitionID || !IsParentDropped(t.meta, s) || s.isCompacting {
 			continue
 		}
 		res = append(res, s)
 	}
+
 	return res
 }
 

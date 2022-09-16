@@ -23,12 +23,17 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/suite"
 )
 
-func TestVerifyResponse(t *testing.T) {
+type UtilSuite struct {
+	suite.Suite
+}
+
+func (suite *UtilSuite) TestVerifyResponse() {
 	type testCase struct {
 		resp       interface{}
 		err        error
@@ -104,14 +109,14 @@ func TestVerifyResponse(t *testing.T) {
 	for _, c := range cases {
 		r := VerifyResponse(c.resp, c.err)
 		if c.equalValue {
-			assert.EqualValues(t, c.expected, r)
+			suite.EqualValues(c.expected, r)
 		} else {
-			assert.Equal(t, c.expected, r)
+			suite.Equal(c.expected, r)
 		}
 	}
 }
 
-func Test_getCompactTime(t *testing.T) {
+func (suite *UtilSuite) TestGetCompactTime() {
 	Params.Init()
 	Params.CommonCfg.RetentionDuration = 43200 // 5 days
 
@@ -135,12 +140,57 @@ func Test_getCompactTime(t *testing.T) {
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := getCompactTime(context.TODO(), tt.args.allocator)
-			assert.Equal(t, tt.wantErr, err != nil)
-			assert.EqualValues(t, tt.want, got)
+		suite.Run(tt.name, func() {
+			got, err := GetCompactTime(context.TODO(), tt.args.allocator)
+			suite.Equal(tt.wantErr, err != nil)
+			suite.EqualValues(tt.want, got)
 		})
 	}
+}
+
+func (suite *UtilSuite) TestIsParentDropped() {
+	meta := &meta{
+		segments: &SegmentsInfo{
+			segments: map[int64]*SegmentInfo{
+				1: {
+					SegmentInfo: &datapb.SegmentInfo{
+						ID:    1,
+						State: commonpb.SegmentState_Flushed,
+					},
+				},
+				3: {
+					SegmentInfo: &datapb.SegmentInfo{
+						ID:             3,
+						CompactionFrom: []int64{1},
+						State:          commonpb.SegmentState_Flushed,
+					},
+				},
+				5: {
+					SegmentInfo: &datapb.SegmentInfo{
+						ID:             5,
+						CompactionFrom: []int64{1, 2},
+						State:          commonpb.SegmentState_Flushed,
+					},
+				},
+				7: {
+					SegmentInfo: &datapb.SegmentInfo{
+						ID:             7,
+						CompactionFrom: []int64{2, 4},
+						State:          commonpb.SegmentState_Flushed,
+					},
+				},
+			},
+		},
+	}
+
+	suite.True(IsParentDropped(meta, meta.GetSegment(1)))
+	suite.False(IsParentDropped(meta, meta.GetSegment(3)))
+	suite.False(IsParentDropped(meta, meta.GetSegment(5)))
+	suite.True(IsParentDropped(meta, meta.GetSegment(7)))
+}
+
+func TestUtil(t *testing.T) {
+	suite.Run(t, new(UtilSuite))
 }
 
 type fixedTSOAllocator struct {

@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
 )
 
@@ -45,49 +46,84 @@ func newServerHandler(s *Server) *ServerHandler {
 	return &ServerHandler{s: s}
 }
 
-// GetVChanPositions gets vchannel latest postitions with provided dml channel names
+// GetVChanPositions gets vchannel latest postitions with provided dml channel names,
+// we expect QueryCoord gets the indexed segments to load, so the flushed segments below are actually the indexed segments,
+// the unflushed segments are actually the segments without index, even they are flushed.
 func (h *ServerHandler) GetVChanPositions(channel *channel, partitionID UniqueID) *datapb.VchannelInfo {
 	// cannot use GetSegmentsByChannel since dropped segments are needed here
 	segments := h.s.meta.SelectSegments(func(s *SegmentInfo) bool {
 		return s.InsertChannel == channel.Name
 	})
+	segmentInfos := make(map[int64]*SegmentInfo)
+	indexedSegments := FilterInIndexedSegments(h.s.meta, h.s.indexCoord, segments...)
+	indexed := make(typeutil.UniqueSet)
+	for _, segment := range indexedSegments {
+		indexed.Insert(segment.GetID())
+	}
 	log.Info("GetSegmentsByChannel",
 		zap.Any("collectionID", channel.CollectionID),
 		zap.Any("channel", channel),
 		zap.Any("numOfSegments", len(segments)),
 	)
-	var flushedIds []int64
-	var unflushedIds []int64
-	var droppedIds []int64
-	var seekPosition *internalpb.MsgPosition
+	var (
+		flushedIds   = make(typeutil.UniqueSet)
+		unflushedIds = make(typeutil.UniqueSet)
+		droppedIds   = make(typeutil.UniqueSet)
+		seekPosition *internalpb.MsgPosition
+	)
 	for _, s := range segments {
 		if (partitionID > allPartitionID && s.PartitionID != partitionID) ||
 			(s.GetStartPosition() == nil && s.GetDmlPosition() == nil) {
 			continue
 		}
-
+		segmentInfos[s.GetID()] = s
 		if s.GetState() == commonpb.SegmentState_Dropped {
-			droppedIds = append(droppedIds, trimSegmentInfo(s.SegmentInfo).GetID())
-			continue
-		}
-
-		if s.GetState() == commonpb.SegmentState_Flushing || s.GetState() == commonpb.SegmentState_Flushed {
-			flushedIds = append(flushedIds, trimSegmentInfo(s.SegmentInfo).GetID())
+			droppedIds.Insert(s.GetID())
+		} else if indexed.Contain(s.GetID()) {
+			flushedIds.Insert(s.GetID())
 		} else {
-			unflushedIds = append(unflushedIds, s.SegmentInfo.GetID())
+			unflushedIds.Insert(s.GetID())
 		}
+	}
+	for id := range unflushedIds {
+		// Indexed segments are compacted to a raw segment,
+		// replace it with the indexed ones
+		if !indexed.Contain(id) &&
+			len(segmentInfos[id].GetCompactionFrom()) > 0 &&
+			indexed.Contain(segmentInfos[id].GetCompactionFrom()...) {
+			flushedIds.Insert(segmentInfos[id].GetCompactionFrom()...)
+			unflushedIds.Remove(id)
+			droppedIds.Remove(segmentInfos[id].GetCompactionFrom()...)
+		}
+	}
 
+	for id := range flushedIds {
 		var segmentPosition *internalpb.MsgPosition
-		if s.GetDmlPosition() != nil {
-			segmentPosition = s.GetDmlPosition()
+		segment := segmentInfos[id]
+		if segment.GetDmlPosition() != nil {
+			segmentPosition = segment.GetDmlPosition()
 		} else {
-			segmentPosition = s.GetStartPosition()
+			segmentPosition = segment.GetStartPosition()
 		}
 
 		if seekPosition == nil || segmentPosition.Timestamp < seekPosition.Timestamp {
 			seekPosition = segmentPosition
 		}
 	}
+	for id := range unflushedIds {
+		var segmentPosition *internalpb.MsgPosition
+		segment := segmentInfos[id]
+		if segment.GetDmlPosition() != nil {
+			segmentPosition = segment.GetDmlPosition()
+		} else {
+			segmentPosition = segment.GetStartPosition()
+		}
+
+		if seekPosition == nil || segmentPosition.Timestamp < seekPosition.Timestamp {
+			seekPosition = segmentPosition
+		}
+	}
+
 	// use collection start position when segment position is not found
 	if seekPosition == nil {
 		if channel.StartPositions == nil {
@@ -105,9 +141,9 @@ func (h *ServerHandler) GetVChanPositions(channel *channel, partitionID UniqueID
 		CollectionID:        channel.CollectionID,
 		ChannelName:         channel.Name,
 		SeekPosition:        seekPosition,
-		FlushedSegmentIds:   flushedIds,
-		UnflushedSegmentIds: unflushedIds,
-		DroppedSegmentIds:   droppedIds,
+		FlushedSegmentIds:   flushedIds.Collect(),
+		UnflushedSegmentIds: unflushedIds.Collect(),
+		DroppedSegmentIds:   droppedIds.Collect(),
 	}
 }
 

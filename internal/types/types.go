@@ -316,6 +316,8 @@ type DataCoordComponent interface {
 	// SetEtcdClient set EtcdClient for DataCoord
 	// `etcdClient` is a client of etcd
 	SetEtcdClient(etcdClient *clientv3.Client)
+
+	SetIndexCoord(indexCoord IndexCoord)
 }
 
 // IndexNode is the interface `indexnode` package implements

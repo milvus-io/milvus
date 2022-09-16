@@ -196,6 +196,14 @@ func (m *meta) GetSegment(segID UniqueID) *SegmentInfo {
 	return nil
 }
 
+// GetSegment returns segment info with provided id
+// if not segment is found, nil will be returned
+func (m *meta) GetSegmentUnsafe(segID UniqueID) *SegmentInfo {
+	m.RLock()
+	defer m.RUnlock()
+	return m.segments.GetSegment(segID)
+}
+
 // GetAllSegment returns segment info with provided id
 // different from GetSegment, this will return unhealthy segment as well
 func (m *meta) GetAllSegment(segID UniqueID) *SegmentInfo {
@@ -590,6 +598,23 @@ func (m *meta) GetSegmentsIDOfCollection(collectionID UniqueID) []UniqueID {
 	return ret
 }
 
+// GetSegmentsIDOfCollection returns all segment ids which collection equals to provided `collectionID`
+func (m *meta) GetSegmentsIDOfCollectionWithDropped(collectionID UniqueID) []UniqueID {
+	m.RLock()
+	defer m.RUnlock()
+	ret := make([]UniqueID, 0)
+	segments := m.segments.GetSegments()
+	for _, segment := range segments {
+		if segment != nil &&
+			segment.GetState() != commonpb.SegmentState_SegmentStateNone &&
+			segment.GetState() != commonpb.SegmentState_NotExist &&
+			segment.CollectionID == collectionID {
+			ret = append(ret, segment.ID)
+		}
+	}
+	return ret
+}
+
 // GetSegmentsIDOfPartition returns all segments ids which collection & partition equals to provided `collectionID`, `partitionID`
 func (m *meta) GetSegmentsIDOfPartition(collectionID, partitionID UniqueID) []UniqueID {
 	m.RLock()
@@ -598,6 +623,24 @@ func (m *meta) GetSegmentsIDOfPartition(collectionID, partitionID UniqueID) []Un
 	segments := m.segments.GetSegments()
 	for _, segment := range segments {
 		if isSegmentHealthy(segment) && segment.CollectionID == collectionID && segment.PartitionID == partitionID {
+			ret = append(ret, segment.ID)
+		}
+	}
+	return ret
+}
+
+// GetSegmentsIDOfPartition returns all segments ids which collection & partition equals to provided `collectionID`, `partitionID`
+func (m *meta) GetSegmentsIDOfPartitionWithDropped(collectionID, partitionID UniqueID) []UniqueID {
+	m.RLock()
+	defer m.RUnlock()
+	ret := make([]UniqueID, 0)
+	segments := m.segments.GetSegments()
+	for _, segment := range segments {
+		if segment != nil &&
+			segment.GetState() != commonpb.SegmentState_SegmentStateNone &&
+			segment.GetState() != commonpb.SegmentState_NotExist &&
+			segment.CollectionID == collectionID &&
+			segment.PartitionID == partitionID {
 			ret = append(ret, segment.ID)
 		}
 	}

@@ -137,6 +137,7 @@ type Server struct {
 
 	dataNodeCreator        dataNodeCreatorFunc
 	rootCoordClientCreator rootCoordCreatorFunc
+	indexCoord             types.IndexCoord
 
 	segReferManager *SegmentReferenceManager
 }
@@ -335,6 +336,10 @@ func (s *Server) SetEtcdClient(client *clientv3.Client) {
 	s.etcdCli = client
 }
 
+func (s *Server) SetIndexCoord(indexCoord types.IndexCoord) {
+	s.indexCoord = indexCoord
+}
+
 func (s *Server) createCompactionHandler() {
 	s.compactionHandler = newCompactionPlanHandler(s.sessionManager, s.channelManager, s.meta, s.allocator, s.flushCh, s.segReferManager)
 	s.compactionHandler.start()
@@ -345,7 +350,7 @@ func (s *Server) stopCompactionHandler() {
 }
 
 func (s *Server) createCompactionTrigger() {
-	s.compactionTrigger = newCompactionTrigger(s.meta, s.compactionHandler, s.allocator, s.segReferManager)
+	s.compactionTrigger = newCompactionTrigger(s.meta, s.compactionHandler, s.allocator, s.segReferManager, s.indexCoord)
 	s.compactionTrigger.start()
 }
 
@@ -384,7 +389,7 @@ func (s *Server) initGarbageCollection() error {
 		log.Info("local chunk manager init success")
 	}
 
-	s.garbageCollector = newGarbageCollector(s.meta, s.segReferManager, GcOption{
+	s.garbageCollector = newGarbageCollector(s.meta, s.segReferManager, s.indexCoord, GcOption{
 		cli:      cli,
 		enabled:  Params.DataCoordCfg.EnableGarbageCollection,
 		rootPath: Params.MinioCfg.RootPath,
