@@ -103,7 +103,12 @@ import (
 //	assert.Equal(t, o3.BeginTs, p3.BeginTs)
 //}
 
+func skipTest(t *testing.T) {
+	t.Skip("skip kafka test")
+}
+
 func TestStream_KafkaMsgStream_SeekToLast(t *testing.T) {
+	skipTest(t)
 	kafkaAddress := getKafkaBrokerList()
 	c := funcutil.RandomString(8)
 	producerChannels := []string{c}
@@ -179,6 +184,7 @@ func TestStream_KafkaMsgStream_SeekToLast(t *testing.T) {
 }
 
 func TestStream_KafkaTtMsgStream_Seek(t *testing.T) {
+	skipTest(t)
 	kafkaAddress := getKafkaBrokerList()
 	c1 := funcutil.RandomString(8)
 	producerChannels := []string{c1}
@@ -291,6 +297,7 @@ func TestStream_KafkaTtMsgStream_Seek(t *testing.T) {
 }
 
 func TestStream_KafkaTtMsgStream_1(t *testing.T) {
+	skipTest(t)
 	kafkaAddress := getKafkaBrokerList()
 	c1 := funcutil.RandomString(8)
 	c2 := funcutil.RandomString(8)
@@ -336,6 +343,7 @@ func TestStream_KafkaTtMsgStream_1(t *testing.T) {
 }
 
 func TestStream_KafkaTtMsgStream_2(t *testing.T) {
+	skipTest(t)
 	kafkaAddress := getKafkaBrokerList()
 	c1 := funcutil.RandomString(8)
 	c2 := funcutil.RandomString(8)
@@ -392,6 +400,7 @@ func TestStream_KafkaTtMsgStream_2(t *testing.T) {
 }
 
 func TestStream_KafkaTtMsgStream_DataNodeTimetickMsgstream(t *testing.T) {
+	skipTest(t)
 	kafkaAddress := getKafkaBrokerList()
 	c1 := funcutil.RandomString(8)
 	p1Channels := []string{c1}
