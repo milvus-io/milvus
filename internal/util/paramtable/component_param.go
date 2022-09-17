@@ -1052,7 +1052,7 @@ func (p *dataCoordConfig) initSegmentMaxSize() {
 }
 
 func (p *dataCoordConfig) initSegmentSealProportion() {
-	p.SegmentSealProportion = p.Base.ParseFloatWithDefault("dataCoord.segment.sealProportion", 0.25)
+	p.SegmentSealProportion = p.Base.ParseFloatWithDefault("dataCoord.segment.sealProportion", 0.125)
 }
 
 func (p *dataCoordConfig) initSegAssignmentExpiration() {
@@ -1088,7 +1088,7 @@ func (p *dataCoordConfig) initEnableAutoCompaction() {
 }
 
 func (p *dataCoordConfig) initCompactionMinSegment() {
-	p.MinSegmentToMerge = p.Base.ParseIntWithDefault("dataCoord.compaction.min.segment", 4)
+	p.MinSegmentToMerge = p.Base.ParseIntWithDefault("dataCoord.compaction.min.segment", 3)
 }
 
 func (p *dataCoordConfig) initCompactionMaxSegment() {
@@ -1096,7 +1096,7 @@ func (p *dataCoordConfig) initCompactionMaxSegment() {
 }
 
 func (p *dataCoordConfig) initSegmentSmallProportion() {
-	p.SegmentSmallProportion = p.Base.ParseFloatWithDefault("dataCoord.segment.smallProportion", 0.5)
+	p.SegmentSmallProportion = p.Base.ParseFloatWithDefault("dataCoord.segment.smallProportion", 0.85)
 }
 
 // compaction execution timeout
