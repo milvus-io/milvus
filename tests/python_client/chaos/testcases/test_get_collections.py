@@ -19,13 +19,25 @@ class TestGetCollections(TestcaseBase):
         self._connect()
         all_collections = self.utility_wrap.list_collections()[0]
         all_collections = [c_name for c_name in all_collections if "Checker" in c_name]
-        log.info(f"find {len(all_collections)} collections:")
-        log.info(all_collections)
+        selected_collections_map = {}
+        for c_name in all_collections:
+            prefix = c_name.split("_")[0]
+            if prefix not in selected_collections_map:
+                selected_collections_map[prefix] = [c_name]
+            else:
+                if len(selected_collections_map[prefix]) <= 5:
+                    selected_collections_map[prefix].append(c_name)
+
+        selected_collections = []
+        for value in selected_collections_map.values():
+            selected_collections.extend(value)
+        log.info(f"find {len(selected_collections)} collections:")
+        log.info(selected_collections)
         data = {
-            "all": all_collections,
+            "all": selected_collections,
         }
         with open("/tmp/ci_logs/all_collections.json", "w") as f:
             f.write(json.dumps(data))
-        log.info(f"write {len(all_collections)} collections to /tmp/ci_logs/all_collections.json")
+        log.info(f"write {len(selected_collections)} collections to /tmp/ci_logs/all_collections.json")
         collections_in_json = get_collections()
-        assert len(all_collections) == len(collections_in_json)
+        assert len(selected_collections) == len(collections_in_json)
