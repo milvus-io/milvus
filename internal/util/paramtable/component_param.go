@@ -49,6 +49,7 @@ type ComponentParam struct {
 	DataNodeCfg   dataNodeConfig
 	IndexCoordCfg indexCoordConfig
 	IndexNodeCfg  indexNodeConfig
+	HookCfg       HookConfig
 }
 
 // InitOnce initialize once
@@ -73,6 +74,7 @@ func (p *ComponentParam) Init() {
 	p.DataNodeCfg.init(&p.BaseTable)
 	p.IndexCoordCfg.init(&p.BaseTable)
 	p.IndexNodeCfg.init(&p.BaseTable)
+	p.HookCfg.init()
 }
 
 // SetLogConfig set log config with given role
@@ -428,7 +430,8 @@ type proxyConfig struct {
 	IP             string
 	NetworkAddress string
 
-	Alias string
+	Alias  string
+	SoPath string
 
 	NodeID                   atomic.Value
 	TimeTickInterval         time.Duration
@@ -472,11 +475,17 @@ func (p *proxyConfig) init(base *BaseTable) {
 	p.initGinLogging()
 	p.initMaxUserNum()
 	p.initMaxRoleNum()
+
+	p.initSoPath()
 }
 
 // InitAlias initialize Alias member.
 func (p *proxyConfig) InitAlias(alias string) {
 	p.Alias = alias
+}
+
+func (p *proxyConfig) initSoPath() {
+	p.SoPath = p.Base.LoadWithDefault("proxy.soPath", "")
 }
 
 func (p *proxyConfig) initTimeTickInterval() {
