@@ -262,6 +262,10 @@ func (m *MockRootCoord) ListPolicy(ctx context.Context, in *internalpb.ListPolic
 	return nil, nil
 }
 
+func (m *MockRootCoord) InvalidateSoFile(ctx context.Context, in *milvuspb.InvalidateSoFileRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type MockIndexCoord struct {
 	MockBase
@@ -857,6 +861,10 @@ func (m *MockProxy) SelectGrant(ctx context.Context, in *milvuspb.SelectGrantReq
 }
 
 func (m *MockProxy) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
+func (m *MockProxy) InvalidateSoFile(ctx context.Context, in *milvuspb.InvalidateSoFileRequest) (*commonpb.Status, error) {
 	return nil, nil
 }
 

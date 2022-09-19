@@ -291,3 +291,30 @@ func (p *proxyClientManager) SetRates(ctx context.Context, request *proxypb.SetR
 	}
 	return group.Wait()
 }
+
+func (p *proxyClientManager) InvalidateSoFile(ctx context.Context) error {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+
+	if len(p.proxyClient) == 0 {
+		log.Warn("proxy client is empty, SetRates will not send to any client")
+		return nil
+	}
+
+	group := &errgroup.Group{}
+	request := &milvuspb.InvalidateSoFileRequest{IsRootRequest: true}
+	for k, v := range p.proxyClient {
+		k, v := k, v
+		group.Go(func() error {
+			sta, err := v.InvalidateSoFile(ctx, request)
+			if err != nil {
+				return fmt.Errorf("InvalidateSoFile failed, proxyID = %d, err = %s", k, err)
+			}
+			if sta.GetErrorCode() != commonpb.ErrorCode_Success {
+				return fmt.Errorf("InvalidateSoFile failed, proxyID = %d, err = %s", k, sta.Reason)
+			}
+			return nil
+		})
+	}
+	return group.Wait()
+}

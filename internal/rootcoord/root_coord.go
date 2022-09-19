@@ -2478,3 +2478,14 @@ func (c *Core) ListPolicy(ctx context.Context, in *internalpb.ListPolicyRequest)
 		UserRoles:   userRoles,
 	}, nil
 }
+
+func (c *Core) InvalidateSoFile(ctx context.Context, in *milvuspb.InvalidateSoFileRequest) (*commonpb.Status, error) {
+	method := "InvalidateSoFile"
+	logger.Debug(method, zap.Any("in", in))
+
+	if err := c.proxyClientManager.InvalidateSoFile(ctx); err != nil {
+		return failStatus(commonpb.ErrorCode_UnexpectedError, err.Error()), nil
+	}
+	logger.Debug(method + " success")
+	return succStatus(), nil
+}

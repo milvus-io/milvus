@@ -28,7 +28,7 @@ require (
 	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/klauspost/compress v1.14.2
 	github.com/lingdor/stackerror v0.0.0-20191119040541-976d8885ed76
-	github.com/milvus-io/milvus/api v0.0.0-20220915082433-b1f4c60117bb
+	github.com/milvus-io/milvus/api v0.0.0-20220919095333-888e96d02212
 	github.com/minio/minio-go/v7 v7.0.10
 	github.com/opentracing/opentracing-go v1.2.0
 	github.com/panjf2000/ants/v2 v2.4.8

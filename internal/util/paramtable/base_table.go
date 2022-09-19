@@ -45,6 +45,13 @@ const (
 	DefaultEtcdEndpoints        = "localhost:2379"
 	DefaultInsertBufferSize     = "16777216"
 	DefaultEnvPrefix            = "milvus"
+
+	DefaultLogFormat       = "text"
+	DefaultLogLevelForBase = "debug"
+	DefaultRootPath        = ""
+	DefaultMaxSize         = 300
+	DefaultMaxAge          = 10
+	DefaultMaxBackups      = 20
 )
 
 var defaultYaml = DefaultMilvusYaml
@@ -71,6 +78,8 @@ type BaseTable struct {
 	RoleName   string
 	Log        log.Config
 	LogCfgFunc func(log.Config)
+
+	YamlFile string
 }
 
 // GlobalInitWithYaml initializes the param table with the given yaml.
@@ -94,6 +103,9 @@ func (gp *BaseTable) Init() {
 		ret = strings.ReplaceAll(ret, ".", "")
 		return ret
 	}
+	if gp.YamlFile == "" {
+		gp.YamlFile = defaultYaml
+	}
 	gp.initConfigsFromLocal(formatter)
 	gp.initConfigsFromRemote(formatter)
 	gp.InitLogCfg()
@@ -107,7 +119,7 @@ func (gp *BaseTable) initConfigsFromLocal(formatter func(key string) string) {
 	}
 
 	gp.configDir = gp.initConfPath()
-	configFilePath := gp.configDir + "/" + defaultYaml
+	configFilePath := gp.configDir + "/" + gp.YamlFile
 	gp.mgr, err = config.Init(config.WithEnvSource(formatter), config.WithFilesSource(configFilePath))
 	if err != nil {
 		log.Warn("init baseTable with file failed", zap.String("configFile", configFilePath), zap.Error(err))
@@ -127,7 +139,7 @@ func (gp *BaseTable) initConfigsFromRemote(formatter func(key string) string) {
 		return
 	}
 
-	configFilePath := gp.configDir + "/" + defaultYaml
+	configFilePath := gp.configDir + "/" + gp.YamlFile
 	gp.mgr, err = config.Init(config.WithEnvSource(formatter),
 		config.WithFilesSource(configFilePath),
 		config.WithEtcdSource(&config.EtcdInfo{
@@ -366,19 +378,13 @@ func ConvertRangeToIntSlice(rangeStr, sep string) []int {
 // InitLogCfg init log of the base table
 func (gp *BaseTable) InitLogCfg() {
 	gp.Log = log.Config{}
-	format, err := gp.Load("log.format")
-	if err != nil {
-		panic(err)
-	}
+	format := gp.LoadWithDefault("log.format", DefaultLogFormat)
 	gp.Log.Format = format
-	level, err := gp.Load("log.level")
-	if err != nil {
-		panic(err)
-	}
+	level := gp.LoadWithDefault("log.level", DefaultLogLevelForBase)
 	gp.Log.Level = level
-	gp.Log.File.MaxSize = gp.ParseInt("log.file.maxSize")
-	gp.Log.File.MaxBackups = gp.ParseInt("log.file.maxBackups")
-	gp.Log.File.MaxDays = gp.ParseInt("log.file.maxAge")
+	gp.Log.File.MaxSize = gp.ParseIntWithDefault("log.file.maxSize", DefaultMaxSize)
+	gp.Log.File.MaxBackups = gp.ParseIntWithDefault("log.file.maxBackups", DefaultMaxBackups)
+	gp.Log.File.MaxDays = gp.ParseIntWithDefault("log.file.maxAge", DefaultMaxAge)
 }
 
 // SetLogConfig set log config of the base table
@@ -398,10 +404,7 @@ func (gp *BaseTable) SetLogConfig() {
 
 // SetLogger sets the logger file by given id
 func (gp *BaseTable) SetLogger(id UniqueID) {
-	rootPath, err := gp.Load("log.file.rootPath")
-	if err != nil {
-		panic(err)
-	}
+	rootPath := gp.LoadWithDefault("log.file.rootPath", DefaultRootPath)
 	if rootPath != "" {
 		if id < 0 {
 			gp.Log.File.Filename = path.Join(rootPath, gp.RoleName+".log")

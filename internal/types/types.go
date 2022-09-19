@@ -732,6 +732,8 @@ type RootCoord interface {
 	OperatePrivilege(ctx context.Context, req *milvuspb.OperatePrivilegeRequest) (*commonpb.Status, error)
 	SelectGrant(ctx context.Context, req *milvuspb.SelectGrantRequest) (*milvuspb.SelectGrantResponse, error)
 	ListPolicy(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error)
+
+	InvalidateSoFile(ctx context.Context, in *milvuspb.InvalidateSoFileRequest) (*commonpb.Status, error)
 }
 
 // RootCoordComponent is used by grpc server of RootCoord
@@ -813,6 +815,8 @@ type Proxy interface {
 	// because it only obtains the metrics of Proxy, not including the topological metrics of Query cluster and Data cluster.
 	GetProxyMetrics(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 	RefreshPolicyInfoCache(ctx context.Context, req *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error)
+
+	InvalidateSoFile(ctx context.Context, req *milvuspb.InvalidateSoFileRequest) (*commonpb.Status, error)
 }
 
 // ProxyComponent defines the interface of proxy component.

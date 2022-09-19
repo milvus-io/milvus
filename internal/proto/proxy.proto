@@ -20,6 +20,8 @@ service Proxy {
   rpc RefreshPolicyInfoCache(RefreshPolicyInfoCacheRequest) returns (common.Status) {}
   rpc GetProxyMetrics(milvus.GetMetricsRequest) returns (milvus.GetMetricsResponse) {}
   rpc SetRates(SetRatesRequest) returns (common.Status) {}
+
+  rpc InvalidateSoFile(milvus.InvalidateSoFileRequest) returns (common.Status) {}
 }
 
 message InvalidateCollMetaCacheRequest {

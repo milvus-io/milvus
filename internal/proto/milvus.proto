@@ -83,6 +83,8 @@ service MilvusService {
   rpc SelectUser(SelectUserRequest) returns (SelectUserResponse) {}
   rpc OperatePrivilege(OperatePrivilegeRequest) returns (common.Status) {}
   rpc SelectGrant(SelectGrantRequest) returns (SelectGrantResponse) {}
+
+  rpc InvalidateSoFile(InvalidateSoFileRequest) returns (common.Status) {}
 }
 
 message CreateAliasRequest {
@@ -1251,6 +1253,12 @@ message OperatePrivilegeRequest {
   GrantEntity entity = 2;
   // operation type
   OperatePrivilegeType type = 3;
+}
+
+message InvalidateSoFileRequest {
+  // Not useful for now
+  common.MsgBase base = 1;
+  bool IsRootRequest = 2;
 }
 
 message MilvusExt {
