@@ -49,6 +49,7 @@ type ComponentParam struct {
 	DataNodeCfg   dataNodeConfig
 	IndexCoordCfg indexCoordConfig
 	IndexNodeCfg  indexNodeConfig
+	HookCfg       HookConfig
 }
 
 // InitOnce initialize once
@@ -73,6 +74,7 @@ func (p *ComponentParam) Init() {
 	p.DataNodeCfg.init(&p.BaseTable)
 	p.IndexCoordCfg.init(&p.BaseTable)
 	p.IndexNodeCfg.init(&p.BaseTable)
+	p.HookCfg.init()
 }
 
 // SetLogConfig set log config with given role

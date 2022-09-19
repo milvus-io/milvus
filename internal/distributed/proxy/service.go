@@ -178,6 +178,7 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 			ot.UnaryServerInterceptor(opts...),
+			proxy.UnaryServerHookInterceptor(),
 			grpc_auth.UnaryServerInterceptor(proxy.AuthenticationInterceptor),
 			proxy.UnaryServerInterceptor(proxy.PrivilegeInterceptor),
 			logutil.UnaryTraceLoggerInterceptor,
@@ -865,4 +866,8 @@ func (s *Server) SetRates(ctx context.Context, request *proxypb.SetRatesRequest)
 // GetProxyMetrics gets the metrics of proxy.
 func (s *Server) GetProxyMetrics(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return s.proxy.GetProxyMetrics(ctx, request)
+}
+
+func (s *Server) InvalidateSoFile(ctx context.Context, req *milvuspb.InvalidateSoFileRequest) (*commonpb.Status, error) {
+	return s.proxy.InvalidateSoFile(ctx, req)
 }

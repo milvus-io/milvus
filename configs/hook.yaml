@@ -1,0 +1,7 @@
+soConfig:
+  filters:
+    - "aaa"
+    - "bbb"
+    - "ccc"
+  num: 100
+  hookPrefix: "hook"

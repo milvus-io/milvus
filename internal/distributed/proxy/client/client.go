@@ -203,3 +203,16 @@ func (c *Client) SetRates(ctx context.Context, req *proxypb.SetRatesRequest) (*c
 	}
 	return ret.(*commonpb.Status), err
 }
+
+func (c *Client) InvalidateSoFile(ctx context.Context, in *milvuspb.InvalidateSoFileRequest) (*commonpb.Status, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.(proxypb.ProxyClient).InvalidateSoFile(ctx, in)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return ret.(*commonpb.Status), err
+}

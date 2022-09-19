@@ -4407,3 +4407,26 @@ func (node *Proxy) SetRates(ctx context.Context, request *proxypb.SetRatesReques
 	resp.ErrorCode = commonpb.ErrorCode_Success
 	return resp, nil
 }
+
+func (node *Proxy) InvalidateSoFile(ctx context.Context, req *milvuspb.InvalidateSoFileRequest) (*commonpb.Status, error) {
+	var (
+		status *commonpb.Status
+		err    error
+	)
+
+	logger.Debug("InvalidateSoFile", zap.Bool("is_root", req.IsRootRequest))
+
+	if req.IsRootRequest {
+		globalMetaCache.SoFileFlag(true)
+		status = &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		}
+	} else {
+		status, err = node.rootCoord.InvalidateSoFile(ctx, req)
+		if err != nil {
+			return failedStatus(commonpb.ErrorCode_UnexpectedError, err.Error()), nil
+		}
+	}
+	logger.Debug("InvalidateSoFile success")
+	return status, nil
+}

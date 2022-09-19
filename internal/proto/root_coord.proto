@@ -133,6 +133,8 @@ service RootCoord {
     rpc OperatePrivilege(milvus.OperatePrivilegeRequest) returns (common.Status) {}
     rpc SelectGrant(milvus.SelectGrantRequest) returns (milvus.SelectGrantResponse) {}
     rpc ListPolicy(internal.ListPolicyRequest) returns (internal.ListPolicyResponse) {}
+
+    rpc InvalidateSoFile(milvus.InvalidateSoFileRequest) returns (common.Status) {}
 }
 
 message AllocTimestampRequest {

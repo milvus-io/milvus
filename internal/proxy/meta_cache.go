@@ -24,6 +24,8 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/atomic"
+
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 
 	"go.uber.org/zap"
@@ -73,6 +75,8 @@ type Cache interface {
 	GetUserRole(username string) []string
 	RefreshPolicyInfo(op typeutil.CacheOp) error
 	InitPolicyInfo(info []string, userRoles []string)
+
+	SoFileFlag(isSet bool) bool
 }
 
 type collectionInfo struct {
@@ -119,6 +123,7 @@ type MetaCache struct {
 	mu             sync.RWMutex
 	credMut        sync.RWMutex
 	privilegeMut   sync.RWMutex
+	soFileFlag     *atomic.Bool
 	shardMgr       *shardClientMgr
 }
 
@@ -154,6 +159,7 @@ func NewMetaCache(rootCoord types.RootCoord, queryCoord types.QueryCoord, shardM
 		shardMgr:       shardMgr,
 		privilegeInfos: map[string]struct{}{},
 		userToRoles:    map[string]map[string]struct{}{},
+		soFileFlag:     atomic.NewBool(false),
 	}, nil
 }
 
@@ -728,4 +734,16 @@ func (m *MetaCache) RefreshPolicyInfo(op typeutil.CacheOp) error {
 		return fmt.Errorf("invalid opType, op_type: %d, op_key: %s", int(op.OpType), op.OpKey)
 	}
 	return nil
+}
+
+func (m *MetaCache) SoFileFlag(isSet bool) bool {
+	if isSet {
+		m.soFileFlag.Store(true)
+		return true
+	}
+	res := m.soFileFlag.Load()
+	if res {
+		m.soFileFlag.Store(false)
+	}
+	return res
 }
