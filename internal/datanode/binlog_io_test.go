@@ -44,6 +44,7 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 		f := &MetaFactory{}
 		meta := f.GetCollectionMeta(UniqueID(10001), "uploads", schemapb.DataType_Int64)
 
+		//pkFieldID := int64(106)
 		iData := genInsertData()
 		pk := newInt64PrimaryKey(888)
 		dData := &DeleteData{
@@ -69,11 +70,40 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 		assert.NotNil(t, p.deltaInfo)
 
 		ctx, cancel := context.WithCancel(context.Background())
+
+		in, err := b.uploadInsertLog(ctx, 1, 10, iData, meta)
+		assert.NoError(t, err)
+		assert.Equal(t, 12, len(in))
+		assert.Equal(t, 1, len(in[0].GetBinlogs()))
+
+		stats, err := b.uploadStatsLog(ctx, 1, 10, []byte{}, meta)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(stats))
+		assert.Equal(t, 1, len(stats[0].GetBinlogs()))
+
+		deltas, err := b.uploadDeltaLog(ctx, 1, 10, dData, meta)
+		assert.NoError(t, err)
+		assert.NotNil(t, deltas)
+		assert.Equal(t, 1, len(deltas[0].GetBinlogs()))
+
 		cancel()
 
 		p, err = b.upload(ctx, 1, 10, []*InsertData{iData}, []byte{}, dData, meta)
 		assert.EqualError(t, err, errUploadToBlobStorage.Error())
 		assert.Nil(t, p)
+
+		in, err = b.uploadInsertLog(ctx, 1, 10, iData, meta)
+		assert.EqualError(t, err, errUploadToBlobStorage.Error())
+		assert.Nil(t, in)
+
+		stats, err = b.uploadStatsLog(ctx, 1, 10, []byte{}, meta)
+		assert.EqualError(t, err, errUploadToBlobStorage.Error())
+		assert.Nil(t, stats)
+
+		deltas, err = b.uploadDeltaLog(ctx, 1, 10, dData, meta)
+		assert.EqualError(t, err, errUploadToBlobStorage.Error())
+		assert.Nil(t, deltas)
+
 	})
 
 	t.Run("Test upload error", func(t *testing.T) {
@@ -122,10 +152,34 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 		assert.Error(t, err)
 		assert.Empty(t, p)
 
+		in, err := b.uploadInsertLog(ctx, 1, 10, iData, meta)
+		assert.Error(t, err)
+		assert.Empty(t, in)
+
+		stats, err := b.uploadStatsLog(ctx, 1, 10, []byte{}, meta)
+		assert.Error(t, err)
+		assert.Empty(t, stats)
+
+		deltas, err := b.uploadDeltaLog(ctx, 1, 10, dData, meta)
+		assert.Error(t, err)
+		assert.Empty(t, deltas)
+
 		alloc.isvalid = false
 		p, err = bin.upload(ctx, 1, 10, []*InsertData{iData}, []byte{}, dData, meta)
 		assert.Error(t, err)
 		assert.Empty(t, p)
+
+		in, err = b.uploadInsertLog(ctx, 1, 10, iData, meta)
+		assert.Error(t, err)
+		assert.Empty(t, in)
+
+		stats, err = b.uploadStatsLog(ctx, 1, 10, []byte{}, meta)
+		assert.Error(t, err)
+		assert.Empty(t, stats)
+
+		deltas, err = b.uploadDeltaLog(ctx, 1, 10, dData, meta)
+		assert.Error(t, err)
+		assert.Empty(t, deltas)
 
 		alloc.isvalid = true
 		for _, field := range meta.GetSchema().GetFields() {
@@ -134,6 +188,18 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 		p, err = bin.upload(ctx, 1, 10, []*InsertData{iData}, []byte{}, dData, meta)
 		assert.Error(t, err)
 		assert.Empty(t, p)
+
+		in, err = b.uploadInsertLog(ctx, 1, 10, iData, meta)
+		assert.Error(t, err)
+		assert.Empty(t, in)
+
+		stats, err = b.uploadStatsLog(ctx, 1, 10, []byte{}, meta)
+		assert.Error(t, err)
+		assert.Empty(t, stats)
+
+		deltas, err = b.uploadDeltaLog(ctx, 1, 10, dData, meta)
+		assert.Error(t, err)
+		assert.Empty(t, deltas)
 
 		cancel()
 	})

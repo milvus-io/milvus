@@ -20,6 +20,8 @@ import (
 	"context"
 	"fmt"
 	"math"
+
+	//	"math"
 	"testing"
 	"time"
 
@@ -261,32 +263,40 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 		replica, err := newReplica(context.Background(), rc, nil, collectionID)
 		require.NoError(t, err)
 		t.Run("Merge without expiration", func(t *testing.T) {
+			alloc := NewAllocatorFactory(1)
+			mockbIO := &binlogIO{cm, alloc}
 			Params.CommonCfg.EntityExpirationTTL = 0
 			iData := genInsertDataWithExpiredTS()
 
-			iblobs, err := getInsertBlobs(100, iData, meta)
-			require.NoError(t, err)
+			var allPaths [][]string
+			inpath, err := mockbIO.uploadInsertLog(context.Background(), 1, 0, iData, meta)
+			assert.NoError(t, err)
+			assert.Equal(t, 12, len(inpath))
+			binlogNum := len(inpath[0].GetBinlogs())
+			assert.Equal(t, 1, binlogNum)
 
-			iitr, err := storage.NewInsertBinlogIterator(iblobs, 106, schemapb.DataType_Int64)
-			require.NoError(t, err)
-
-			mitr := storage.NewMergeIterator([]iterator{iitr})
+			for idx := 0; idx < binlogNum; idx++ {
+				var ps []string
+				for _, path := range inpath {
+					ps = append(ps, path.GetBinlogs()[idx].GetLogPath())
+				}
+				allPaths = append(allPaths, ps)
+			}
 
 			dm := map[interface{}]Timestamp{
 				1: 10000,
 			}
 
-			ct := &compactionTask{
-				Replica: replica,
-			}
-			idata, segment, numOfRow, err := ct.merge(mitr, dm, meta.GetSchema(), ct.GetCurrentTime())
+			ct := &compactionTask{Replica: replica, downloader: mockbIO, uploader: mockbIO}
+			inPaths, statsPaths, _, numOfRow, err := ct.merge(context.Background(), allPaths, 2, 0, meta, dm)
 			assert.NoError(t, err)
 			assert.Equal(t, int64(2), numOfRow)
-			assert.Equal(t, 1, len(idata))
-			assert.NotEmpty(t, idata[0].Data)
-			assert.NotNil(t, segment)
+			assert.Equal(t, 1, len(inPaths[0].GetBinlogs()))
+			assert.Equal(t, 1, len(statsPaths))
 		})
 		t.Run("Merge without expiration2", func(t *testing.T) {
+			alloc := NewAllocatorFactory(1)
+			mockbIO := &binlogIO{cm, alloc}
 			Params.CommonCfg.EntityExpirationTTL = 0
 			flushInsertBufferSize := Params.DataNodeCfg.FlushInsertBufferSize
 			defer func() {
@@ -296,106 +306,137 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			iData := genInsertDataWithExpiredTS()
 			meta := NewMetaFactory().GetCollectionMeta(1, "test", schemapb.DataType_Int64)
 
-			iblobs, err := getInsertBlobs(100, iData, meta)
-			require.NoError(t, err)
+			var allPaths [][]string
+			inpath, err := mockbIO.uploadInsertLog(context.Background(), 1, 0, iData, meta)
+			assert.NoError(t, err)
+			assert.Equal(t, 12, len(inpath))
+			binlogNum := len(inpath[0].GetBinlogs())
+			assert.Equal(t, 1, binlogNum)
 
-			iitr, err := storage.NewInsertBinlogIterator(iblobs, 106, schemapb.DataType_Int64)
-			require.NoError(t, err)
-
-			mitr := storage.NewMergeIterator([]iterator{iitr})
+			for idx := 0; idx < binlogNum; idx++ {
+				var ps []string
+				for _, path := range inpath {
+					ps = append(ps, path.GetBinlogs()[idx].GetLogPath())
+				}
+				allPaths = append(allPaths, ps)
+			}
 
 			dm := map[interface{}]Timestamp{}
 
-			ct := &compactionTask{
-				Replica: replica,
-			}
-			idata, segment, numOfRow, err := ct.merge(mitr, dm, meta.GetSchema(), ct.GetCurrentTime())
+			ct := &compactionTask{Replica: replica, downloader: mockbIO, uploader: mockbIO}
+			inPaths, statsPaths, _, numOfRow, err := ct.merge(context.Background(), allPaths, 2, 0, meta, dm)
 			assert.NoError(t, err)
 			assert.Equal(t, int64(2), numOfRow)
-			assert.Equal(t, 2, len(idata))
-			assert.NotEmpty(t, idata[0].Data)
-			assert.NotEmpty(t, segment)
+			assert.Equal(t, 2, len(inPaths[0].GetBinlogs()))
+			assert.Equal(t, 1, len(statsPaths))
+			assert.Equal(t, 1, len(statsPaths[0].GetBinlogs()))
 		})
 
 		t.Run("Merge with expiration", func(t *testing.T) {
+			alloc := NewAllocatorFactory(1)
+			mockbIO := &binlogIO{cm, alloc}
 			Params.CommonCfg.EntityExpirationTTL = 864000 // 10 days in seconds
 			iData := genInsertDataWithExpiredTS()
 			meta := NewMetaFactory().GetCollectionMeta(1, "test", schemapb.DataType_Int64)
 
-			iblobs, err := getInsertBlobs(100, iData, meta)
-			require.NoError(t, err)
+			var allPaths [][]string
+			inpath, err := mockbIO.uploadInsertLog(context.Background(), 1, 0, iData, meta)
+			assert.NoError(t, err)
+			assert.Equal(t, 12, len(inpath))
+			binlogNum := len(inpath[0].GetBinlogs())
+			assert.Equal(t, 1, binlogNum)
 
-			iitr, err := storage.NewInsertBinlogIterator(iblobs, 106, schemapb.DataType_Int64)
-			require.NoError(t, err)
+			for idx := 0; idx < binlogNum; idx++ {
+				var ps []string
+				for _, path := range inpath {
+					ps = append(ps, path.GetBinlogs()[idx].GetLogPath())
+				}
+				allPaths = append(allPaths, ps)
+			}
 
-			mitr := storage.NewMergeIterator([]iterator{iitr})
 			dm := map[interface{}]Timestamp{
 				1: 10000,
 			}
 
-			ct := &compactionTask{
-				Replica: replica,
-			}
-			idata, segment, numOfRow, err := ct.merge(mitr, dm, meta.GetSchema(), genTimestamp())
+			ct := &compactionTask{Replica: replica, downloader: mockbIO, uploader: mockbIO}
+			inPaths, statsPaths, _, numOfRow, err := ct.merge(context.Background(), allPaths, 2, 0, meta, dm)
 			assert.NoError(t, err)
-			assert.Equal(t, int64(1), numOfRow)
-			assert.Equal(t, 1, len(idata))
-			assert.NotEmpty(t, segment)
+			assert.Equal(t, int64(0), numOfRow)
+			assert.Equal(t, 0, len(inPaths))
+			assert.Equal(t, 1, len(statsPaths))
 		})
 
 		t.Run("Merge with meta error", func(t *testing.T) {
+			alloc := NewAllocatorFactory(1)
+			mockbIO := &binlogIO{cm, alloc}
 			Params.CommonCfg.EntityExpirationTTL = 0
 			iData := genInsertDataWithExpiredTS()
 			meta := NewMetaFactory().GetCollectionMeta(1, "test", schemapb.DataType_Int64)
 
-			iblobs, err := getInsertBlobs(100, iData, meta)
-			require.NoError(t, err)
+			var allPaths [][]string
+			inpath, err := mockbIO.uploadInsertLog(context.Background(), 1, 0, iData, meta)
+			assert.NoError(t, err)
+			assert.Equal(t, 12, len(inpath))
+			binlogNum := len(inpath[0].GetBinlogs())
+			assert.Equal(t, 1, binlogNum)
 
-			iitr, err := storage.NewInsertBinlogIterator(iblobs, 106, schemapb.DataType_Int64)
-			require.NoError(t, err)
-
-			mitr := storage.NewMergeIterator([]iterator{iitr})
+			for idx := 0; idx < binlogNum; idx++ {
+				var ps []string
+				for _, path := range inpath {
+					ps = append(ps, path.GetBinlogs()[idx].GetLogPath())
+				}
+				allPaths = append(allPaths, ps)
+			}
 
 			dm := map[interface{}]Timestamp{
 				1: 10000,
 			}
 
-			ct := &compactionTask{
-				Replica: replica,
-			}
-			_, _, _, err = ct.merge(mitr, dm, &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
-				{DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{
-					{Key: "dim", Value: "64"},
+			ct := &compactionTask{Replica: replica, downloader: mockbIO, uploader: mockbIO}
+			_, _, _, _, err = ct.merge(context.Background(), allPaths, 2, 0, &etcdpb.CollectionMeta{
+				Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+					{DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{
+						{Key: "dim", Value: "64"},
+					}},
 				}},
-			}}, ct.GetCurrentTime())
+			}, dm)
 			assert.Error(t, err)
 		})
 
 		t.Run("Merge with meta type param error", func(t *testing.T) {
+			alloc := NewAllocatorFactory(1)
+			mockbIO := &binlogIO{cm, alloc}
 			Params.CommonCfg.EntityExpirationTTL = 0
 			iData := genInsertDataWithExpiredTS()
 			meta := NewMetaFactory().GetCollectionMeta(1, "test", schemapb.DataType_Int64)
 
-			iblobs, err := getInsertBlobs(100, iData, meta)
-			require.NoError(t, err)
+			var allPaths [][]string
+			inpath, err := mockbIO.uploadInsertLog(context.Background(), 1, 0, iData, meta)
+			assert.NoError(t, err)
+			assert.Equal(t, 12, len(inpath))
+			binlogNum := len(inpath[0].GetBinlogs())
+			assert.Equal(t, 1, binlogNum)
 
-			iitr, err := storage.NewInsertBinlogIterator(iblobs, 106, schemapb.DataType_Int64)
-			require.NoError(t, err)
-
-			mitr := storage.NewMergeIterator([]iterator{iitr})
+			for idx := 0; idx < binlogNum; idx++ {
+				var ps []string
+				for _, path := range inpath {
+					ps = append(ps, path.GetBinlogs()[idx].GetLogPath())
+				}
+				allPaths = append(allPaths, ps)
+			}
 
 			dm := map[interface{}]Timestamp{
 				1: 10000,
 			}
 
-			ct := &compactionTask{
-				Replica: replica,
-			}
-			_, _, _, err = ct.merge(mitr, dm, &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
-				{DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{
-					{Key: "dim", Value: "dim"},
-				}},
-			}}, ct.GetCurrentTime())
+			ct := &compactionTask{Replica: replica, downloader: mockbIO, uploader: mockbIO}
+
+			_, _, _, _, err = ct.merge(context.Background(), allPaths, 2, 0, &etcdpb.CollectionMeta{
+				Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+					{DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{
+						{Key: "dim", Value: "dim"},
+					}},
+				}}}, dm)
 			assert.Error(t, err)
 		})
 	})
