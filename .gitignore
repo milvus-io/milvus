@@ -58,7 +58,6 @@ lib/
 .DS_Store
 *.sw[po]
 cwrapper_build
-cwrapper_rocksdb_build/
 **/.clangd/*
 **/compile_commands.json
 **/.lint
@@ -85,10 +84,6 @@ venv/
 
 # docker compose volumes
 deployments/docker/*/volumes
-
-# rocksdb
-cwrapper_rocksdb_build/
-internal/kv/rocksdb/cwrapper/
 
 # local file data
 **/data/*
