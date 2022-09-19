@@ -33,7 +33,6 @@ import (
 
 	"github.com/milvus-io/milvus/api/commonpb"
 	"github.com/milvus-io/milvus/api/milvuspb"
-	pnc "github.com/milvus-io/milvus/internal/distributed/proxy/client"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
@@ -45,7 +44,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 
@@ -177,21 +175,6 @@ func (s *Server) init() error {
 
 	s.rootCoord.UpdateStateCode(internalpb.StateCode_Initializing)
 	log.Debug("RootCoord", zap.Any("State", internalpb.StateCode_Initializing))
-	s.rootCoord.SetNewProxyClient(
-		func(se *sessionutil.Session) (types.Proxy, error) {
-			cli, err := pnc.NewClient(s.ctx, se.Address)
-			if err != nil {
-				return nil, err
-			}
-			if err := cli.Init(); err != nil {
-				return nil, err
-			}
-			if err := cli.Start(); err != nil {
-				return nil, err
-			}
-			return cli, nil
-		},
-	)
 
 	if s.newDataCoordClient != nil {
 		log.Debug("RootCoord start to create DataCoord client")

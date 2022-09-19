@@ -80,10 +80,7 @@ func getSystemInfoMetrics(
 				Type:        typeutil.QueryCoordRole,
 				ID:          qc.session.ServerID,
 			},
-			SystemConfigurations: metricsinfo.QueryCoordConfiguration{
-				SearchChannelPrefix:       Params.CommonCfg.QueryCoordSearch,
-				SearchResultChannelPrefix: Params.CommonCfg.QueryCoordSearchResult,
-			},
+			SystemConfigurations: metricsinfo.QueryCoordConfiguration{},
 		},
 		ConnectedNodes: make([]metricsinfo.QueryNodeInfos, 0),
 	}

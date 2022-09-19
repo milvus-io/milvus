@@ -17,11 +17,12 @@ import (
 
 	"github.com/milvus-io/milvus/api/commonpb"
 	"github.com/milvus-io/milvus/api/milvuspb"
+	"github.com/milvus-io/milvus/internal/common"
 )
 
 const (
 	// MetricTypeKey are the key of metric type in GetMetrics request.
-	MetricTypeKey = "metric_type"
+	MetricTypeKey = common.MetricTypeKey
 
 	// SystemInfoMetrics means users request for system information metrics.
 	SystemInfoMetrics = "system_info"

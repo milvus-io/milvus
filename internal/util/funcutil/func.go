@@ -110,7 +110,7 @@ func ParseIndexParamsMap(mStr string) (map[string]string, error) {
 	buffer := make(map[string]interface{})
 	err := json.Unmarshal([]byte(mStr), &buffer)
 	if err != nil {
-		return nil, errors.New("Unmarshal params failed")
+		return nil, errors.New("unmarshal params failed")
 	}
 	ret := make(map[string]string)
 	for key, value := range buffer {

@@ -7,15 +7,17 @@ import (
 )
 
 type Index struct {
-	TenantID     string
-	CollectionID int64
-	FieldID      int64
-	IndexID      int64
-	IndexName    string
-	IsDeleted    bool
-	CreateTime   uint64
-	TypeParams   []*commonpb.KeyValuePair
-	IndexParams  []*commonpb.KeyValuePair
+	TenantID        string
+	CollectionID    int64
+	FieldID         int64
+	IndexID         int64
+	IndexName       string
+	IsDeleted       bool
+	CreateTime      uint64
+	TypeParams      []*commonpb.KeyValuePair
+	IndexParams     []*commonpb.KeyValuePair
+	IsAutoIndex     bool
+	UserIndexParams []*commonpb.KeyValuePair
 }
 
 func UnmarshalIndexModel(indexInfo *indexpb.FieldIndex) *Index {
@@ -24,14 +26,16 @@ func UnmarshalIndexModel(indexInfo *indexpb.FieldIndex) *Index {
 	}
 
 	return &Index{
-		CollectionID: indexInfo.IndexInfo.GetCollectionID(),
-		FieldID:      indexInfo.IndexInfo.GetFieldID(),
-		IndexID:      indexInfo.IndexInfo.GetIndexID(),
-		IndexName:    indexInfo.IndexInfo.GetIndexName(),
-		IsDeleted:    indexInfo.GetDeleted(),
-		CreateTime:   indexInfo.CreateTime,
-		TypeParams:   indexInfo.IndexInfo.GetTypeParams(),
-		IndexParams:  indexInfo.IndexInfo.GetIndexParams(),
+		CollectionID:    indexInfo.IndexInfo.GetCollectionID(),
+		FieldID:         indexInfo.IndexInfo.GetFieldID(),
+		IndexID:         indexInfo.IndexInfo.GetIndexID(),
+		IndexName:       indexInfo.IndexInfo.GetIndexName(),
+		IsDeleted:       indexInfo.GetDeleted(),
+		CreateTime:      indexInfo.CreateTime,
+		TypeParams:      indexInfo.IndexInfo.GetTypeParams(),
+		IndexParams:     indexInfo.IndexInfo.GetIndexParams(),
+		IsAutoIndex:     indexInfo.IndexInfo.GetIsAutoIndex(),
+		UserIndexParams: indexInfo.IndexInfo.GetUserIndexParams(),
 	}
 }
 

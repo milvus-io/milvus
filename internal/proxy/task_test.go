@@ -324,7 +324,7 @@ func constructSearchRequest(
 		OutputFields:     nil,
 		SearchParams: []*commonpb.KeyValuePair{
 			{
-				Key:   MetricTypeKey,
+				Key:   common.MetricTypeKey,
 				Value: distance.L2,
 			},
 			{
@@ -1866,7 +1866,7 @@ func Test_createIndexTask_getIndexedField(t *testing.T) {
 	fieldName := "test"
 
 	cit := &createIndexTask{
-		CreateIndexRequest: &milvuspb.CreateIndexRequest{
+		req: &milvuspb.CreateIndexRequest{
 			CollectionName: collectionName,
 			FieldName:      fieldName,
 		},
@@ -2061,7 +2061,7 @@ func Test_createIndexTask_PreExecute(t *testing.T) {
 	fieldName := "test"
 
 	cit := &createIndexTask{
-		CreateIndexRequest: &milvuspb.CreateIndexRequest{
+		req: &milvuspb.CreateIndexRequest{
 			Base: &commonpb.MsgBase{
 				MsgType: commonpb.MsgType_CreateIndex,
 			},
@@ -2096,7 +2096,7 @@ func Test_createIndexTask_PreExecute(t *testing.T) {
 			}, nil
 		})
 		globalMetaCache = cache
-		cit.CreateIndexRequest.ExtraParams = []*commonpb.KeyValuePair{
+		cit.req.ExtraParams = []*commonpb.KeyValuePair{
 			{
 				Key:   "index_type",
 				Value: "IVF_FLAT",

@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -9,6 +10,8 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/milvus-io/milvus/internal/util/autoindex"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -95,7 +98,7 @@ func getValidSearchParams() []*commonpb.KeyValuePair {
 			Value: "10",
 		},
 		{
-			Key:   MetricTypeKey,
+			Key:   common.MetricTypeKey,
 			Value: distance.L2,
 		},
 		{
@@ -1756,7 +1759,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 }
 
 func TestTaskSearch_parseQueryInfo(t *testing.T) {
-	t.Run("parseQueryInfo no error", func(t *testing.T) {
+	t.Run("parseSearchInfo no error", func(t *testing.T) {
 		var targetOffset int64 = 200
 
 		sp := getValidSearchParams()
@@ -1765,13 +1768,13 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 			Value: strconv.FormatInt(targetOffset, 10),
 		})
 
-		info, offset, err := parseQueryInfo(sp)
+		info, offset, err := parseSearchInfo(sp)
 		assert.NoError(t, err)
 		assert.NotNil(t, info)
 		assert.Equal(t, targetOffset, offset)
 	})
 
-	t.Run("parseQueryInfo error", func(t *testing.T) {
+	t.Run("parseSearchInfo error", func(t *testing.T) {
 		spNoTopk := []*commonpb.KeyValuePair{{
 			Key:   AnnsFieldKey,
 			Value: testFloatVecField}}
@@ -1797,7 +1800,7 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 		})
 
 		spNoSearchParams := append(spNoMetricType, &commonpb.KeyValuePair{
-			Key:   MetricTypeKey,
+			Key:   common.MetricTypeKey,
 			Value: distance.L2,
 		})
 
@@ -1851,7 +1854,7 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				info, offset, err := parseQueryInfo(test.invalidParams)
+				info, offset, err := parseSearchInfo(test.invalidParams)
 				assert.Error(t, err)
 				assert.Nil(t, info)
 				assert.Zero(t, offset)
@@ -1860,6 +1863,201 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 			})
 		}
 	})
+}
+
+func TestTaskSearch_parseSearchParams_AutoIndexEnable(t *testing.T) {
+	oldEnable := Params.AutoIndexConfig.Enable
+	oldIndexType := Params.AutoIndexConfig.IndexType
+	oldIndexParams := Params.AutoIndexConfig.IndexParams
+	oldSearchParamYamStr := Params.AutoIndexConfig.SearchParamsYamlStr
+	oldParser := Params.AutoIndexConfig.Parser
+	//parseSearchParams
+	Params.AutoIndexConfig.Enable = true
+	Params.AutoIndexConfig.IndexType = indexparamcheck.IndexHNSW
+	Params.AutoIndexConfig.IndexParams = make(map[string]string)
+
+	buildParams := map[string]interface{}{
+		common.MetricTypeKey: indexparamcheck.L2,
+		common.IndexTypeKey:  indexparamcheck.IndexHNSW,
+		"M":                  48,
+		"efConstruction":     500,
+	}
+	buildParamsJSONValue, err := json.Marshal(buildParams)
+	assert.NoError(t, err)
+	Params.AutoIndexConfig.IndexParams, err = funcutil.ParseIndexParamsMap(string(buildParamsJSONValue))
+	assert.NoError(t, err)
+
+	jsonStr := `
+	{
+        "1": {
+          "methodID": 1,
+          "function": "{\"funcID\": 3, \"cof1\": 3,\"cof2\": 4,\"cof3\": 5}"
+        },
+        "2": {
+          "methodID": 2,
+          "bp": [10, 200],
+          "functions": [
+            "{\"funcID\": 1}",
+            "{\"funcID\": 2, \"cof1\": 4,\"cof2\": 5}",
+            "{\"funcID\": 3, \"cof1\": 4,\"cof2\": 5,\"cof3\": 6}"
+          ]
+        },
+        "3": {
+          "methodID": 2,
+          "bp": [10, 300],
+          "functions": [
+            "{\"funcID\": 2, \"cof1\": 3,\"cof2\": 4}",
+            "{\"funcID\": 1}",
+            "{\"funcID\": 3, \"cof1\": 4,\"cof2\": 5,\"cof3\": 6}"
+          ]
+        }
+	}`
+	Params.AutoIndexConfig.Parser = autoindex.NewParser()
+	Params.AutoIndexConfig.Parser.InitFromJSONStr(jsonStr)
+
+	normalKVPairs := []*commonpb.KeyValuePair{
+		{
+			Key:   AnnsFieldKey,
+			Value: testFloatVecField,
+		},
+		{
+			Key:   TopKKey,
+			Value: "10",
+		},
+		{
+			Key:   RoundDecimalKey,
+			Value: "-1",
+		},
+		{
+			Key:   common.MetricTypeKey,
+			Value: indexparamcheck.L2,
+		},
+	}
+
+	normalWithNilParams := append(normalKVPairs,
+		&commonpb.KeyValuePair{
+			Key:   SearchParamsKey,
+			Value: "null",
+		},
+	)
+
+	//var normalWithLevel []*commonpb.KeyValuePair
+	normalWithEmptyParams := append(normalKVPairs,
+		&commonpb.KeyValuePair{
+			Key:   SearchParamsKey,
+			Value: "{}",
+		},
+	)
+
+	normalWithNormalLevel := append(normalKVPairs,
+		&commonpb.KeyValuePair{
+			Key:   SearchParamsKey,
+			Value: `{"level": 1 }`,
+		},
+	)
+
+	normalWithNormalStrLevel := append(normalKVPairs,
+		&commonpb.KeyValuePair{
+			Key:   SearchParamsKey,
+			Value: `{"level": "1" }`,
+		},
+	)
+
+	normalWithSmallLevel := append(normalKVPairs,
+		&commonpb.KeyValuePair{
+			Key:   SearchParamsKey,
+			Value: `{"level":-1}`,
+		},
+	)
+
+	normalWithSmallStrLevel := append(normalKVPairs,
+		&commonpb.KeyValuePair{
+			Key:   SearchParamsKey,
+			Value: `{"level":"-1"}`,
+		},
+	)
+
+	normalWithLargeLevel := append(normalKVPairs,
+		&commonpb.KeyValuePair{
+			Key:   SearchParamsKey,
+			Value: `{"level":100}`,
+		},
+	)
+
+	normalWithLargeStrLevel := append(normalKVPairs,
+		&commonpb.KeyValuePair{
+			Key:   SearchParamsKey,
+			Value: `{"level":"100"}`,
+		},
+	)
+
+	normalTests := []struct {
+		description string
+		params      []*commonpb.KeyValuePair
+	}{
+		{"normal", normalKVPairs},
+		{"normal_with_nil_params", normalWithNilParams},
+		{"normal_with_empty_params", normalWithEmptyParams},
+		{"normal_with_normal_level", normalWithNormalLevel},
+		{"normal_with_normal_str_level", normalWithNormalStrLevel},
+		{"normal_with_small_level", normalWithSmallLevel},
+		{"normal_with_small_str_level", normalWithSmallStrLevel},
+		{"normal_with_large_level", normalWithLargeLevel},
+		{"normal_with_large_str_level", normalWithLargeStrLevel},
+	}
+
+	for _, test := range normalTests {
+		t.Run(test.description, func(t *testing.T) {
+			_, _, err := parseSearchInfo(test.params)
+			assert.NoError(t, err)
+		})
+	}
+
+	invalidWithWrongParams := append(normalKVPairs,
+		&commonpb.KeyValuePair{
+			Key:   SearchParamsKey,
+			Value: "",
+		},
+	)
+
+	invalidWithWrongLevel := append(normalKVPairs,
+		&commonpb.KeyValuePair{
+			Key:   SearchParamsKey,
+			Value: `{"level":x}`,
+		},
+	)
+
+	invalidWithWrongStrLevel := append(normalKVPairs,
+		&commonpb.KeyValuePair{
+			Key:   SearchParamsKey,
+			Value: `{"level":"x"}`,
+		},
+	)
+
+	invalidTests := []struct {
+		description string
+		params      []*commonpb.KeyValuePair
+	}{
+		{"invalid_wrong_params", invalidWithWrongParams},
+		{"invalid_wrong_level", invalidWithWrongLevel},
+		{"invalid_wrong_str_level", invalidWithWrongStrLevel},
+	}
+
+	for _, test := range invalidTests {
+		t.Run(test.description, func(t *testing.T) {
+			info, offset, err := parseSearchInfo(test.params)
+			assert.Error(t, err)
+			assert.Nil(t, info)
+			assert.Zero(t, offset)
+		})
+	}
+
+	Params.AutoIndexConfig.Enable = oldEnable
+	Params.AutoIndexConfig.IndexType = oldIndexType
+	Params.AutoIndexConfig.IndexParams = oldIndexParams
+	Params.AutoIndexConfig.SearchParamsYamlStr = oldSearchParamYamStr
+	Params.AutoIndexConfig.Parser = oldParser
+
 }
 
 func getSearchResultData(nq, topk int64) *schemapb.SearchResultData {

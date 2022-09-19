@@ -1712,11 +1712,11 @@ func (node *Proxy) CreateIndex(ctx context.Context, request *milvuspb.CreateInde
 	traceID, _, _ := trace.InfoFromSpan(sp)
 
 	cit := &createIndexTask{
-		ctx:                ctx,
-		Condition:          NewTaskCondition(ctx),
-		CreateIndexRequest: request,
-		rootCoord:          node.rootCoord,
-		indexCoord:         node.indexCoord,
+		ctx:        ctx,
+		Condition:  NewTaskCondition(ctx),
+		req:        request,
+		rootCoord:  node.rootCoord,
+		indexCoord: node.indexCoord,
 	}
 
 	method := "CreateIndex"

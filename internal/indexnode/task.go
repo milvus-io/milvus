@@ -33,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
@@ -149,42 +148,13 @@ func (it *indexBuildTask) Prepare(ctx context.Context) error {
 	// type params can be removed
 	for _, kvPair := range it.req.GetTypeParams() {
 		key, value := kvPair.GetKey(), kvPair.GetValue()
-		_, ok := typeParams[key]
-		if ok {
-			return errors.New("duplicated key in type params")
-		}
-		if key == util.ParamsKeyToParse {
-			params, err := funcutil.ParseIndexParamsMap(value)
-			if err != nil {
-				return err
-			}
-			for pk, pv := range params {
-				typeParams[pk] = pv
-				indexParams[pk] = pv
-			}
-		} else {
-			typeParams[key] = value
-			indexParams[key] = value
-		}
+		typeParams[key] = value
+		indexParams[key] = value
 	}
 
 	for _, kvPair := range it.req.GetIndexParams() {
 		key, value := kvPair.GetKey(), kvPair.GetValue()
-		_, ok := indexParams[key]
-		if ok {
-			return errors.New("duplicated key in index params")
-		}
-		if key == util.ParamsKeyToParse {
-			params, err := funcutil.ParseIndexParamsMap(value)
-			if err != nil {
-				return err
-			}
-			for pk, pv := range params {
-				indexParams[pk] = pv
-			}
-		} else {
-			indexParams[key] = value
-		}
+		indexParams[key] = value
 	}
 	it.newTypeParams = typeParams
 	it.newIndexParams = indexParams
