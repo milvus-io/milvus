@@ -324,7 +324,7 @@ func constructSearchRequest(
 		OutputFields:     nil,
 		SearchParams: []*commonpb.KeyValuePair{
 			{
-				Key:   MetricTypeKey,
+				Key:   common.MetricTypeKey,
 				Value: distance.L2,
 			},
 			{

@@ -175,14 +175,11 @@ queryCoord:
 
 # Related configuration of queryNode, used to run hybrid search between vector and scalar data.
 queryNode:
-  cacheSize: 32 # GB, default 32 GB, `cacheSize` is the memory used for caching data for faster query. The `cacheSize` must be less than system memory size.
   port: 21123
   loadMemoryUsageFactor: 3 # The multiply factor of calculating the memory usage while loading segments
   enableDisk: true # enable querynode load disk index, and search on disk index
   maxDiskUsagePercentage: 95
 
-  stats:
-    publishInterval: 1000 # Interval for querynode to report node information (milliseconds)
   dataSync:
     flowGraph:
       maxQueueLength: 1024 # Maximum length of task queue in flowgraph
@@ -312,10 +309,7 @@ common:
     rootCoordStatistics: "rootcoord-statistics"
     rootCoordDml: "rootcoord-dml"
     rootCoordDelta: "rootcoord-delta"
-    search: "search"
-    searchResult: "searchResult"
     queryTimeTick: "queryTimeTick"
-    queryNodeStats: "query-node-stats"
     # Cmd for loadIndex, flush, etc...
     cmd: "cmd"
     dataCoordStatistic: "datacoord-statistics-channel"
@@ -446,3 +440,27 @@ quotaAndLimits:
 
       # coolOffSpeed is the speed of search&query rates cool off.
       coolOffSpeed: 0.9 # (0, 1]
+
+# AutoIndexConfig
+autoIndex:
+  enable: false
+  type: "HighPerf" # "BigData"
+  params:
+    build: | # Parameters required to build the index, json format string. if empty, autoIndex is disabled
+      {
+        "M": 48,
+        "efConstruction": 500,
+        "index_type": "HNSW",
+      }
+    search: | # Parameters required for the search, in json string format. if empty, autoIndex is disabled
+      {
+        "1": {
+          "ef": 10,
+        },
+        "2": {
+          "ef": 20,
+        },
+        "3": {
+          "ef": 30,
+        }
+      }

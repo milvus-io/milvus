@@ -20,6 +20,12 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	InsertTaskName = "InsertTask"
+)
+
+type BaseInsertTask = msgstream.InsertMsg
+
 type insertTask struct {
 	BaseInsertTask
 	// req *milvuspb.InsertRequest

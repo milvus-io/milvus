@@ -739,3 +739,55 @@ func passwordVerify(ctx context.Context, username, rawPwd string, globalMetaCach
 	globalMetaCache.UpdateCredential(credInfo)
 	return true
 }
+
+// Support wildcard in output fields:
+//   "*" - all scalar fields
+//   "%" - all vector fields
+// For example, A and B are scalar fields, C and D are vector fields, duplicated fields will automatically be removed.
+//   output_fields=["*"] 	 ==> [A,B]
+//   output_fields=["%"] 	 ==> [C,D]
+//   output_fields=["*","%"] ==> [A,B,C,D]
+//   output_fields=["*",A] 	 ==> [A,B]
+//   output_fields=["*",C]   ==> [A,B,C]
+func translateOutputFields(outputFields []string, schema *schemapb.CollectionSchema, addPrimary bool) ([]string, error) {
+	var primaryFieldName string
+	scalarFieldNameMap := make(map[string]bool)
+	vectorFieldNameMap := make(map[string]bool)
+	resultFieldNameMap := make(map[string]bool)
+	resultFieldNames := make([]string, 0)
+
+	for _, field := range schema.Fields {
+		if field.IsPrimaryKey {
+			primaryFieldName = field.Name
+		}
+		if field.DataType == schemapb.DataType_BinaryVector || field.DataType == schemapb.DataType_FloatVector {
+			vectorFieldNameMap[field.Name] = true
+		} else {
+			scalarFieldNameMap[field.Name] = true
+		}
+	}
+
+	for _, outputFieldName := range outputFields {
+		outputFieldName = strings.TrimSpace(outputFieldName)
+		if outputFieldName == "*" {
+			for fieldName := range scalarFieldNameMap {
+				resultFieldNameMap[fieldName] = true
+			}
+		} else if outputFieldName == "%" {
+			for fieldName := range vectorFieldNameMap {
+				resultFieldNameMap[fieldName] = true
+			}
+		} else {
+			resultFieldNameMap[outputFieldName] = true
+		}
+	}
+
+	if addPrimary {
+		resultFieldNameMap[primaryFieldName] = true
+	}
+
+	for fieldName := range resultFieldNameMap {
+		resultFieldNames = append(resultFieldNames, fieldName)
+	}
+	return resultFieldNames, nil
+}
