@@ -652,3 +652,16 @@ func (c *Client) ListPolicy(ctx context.Context, req *internalpb.ListPolicyReque
 	}
 	return ret.(*internalpb.ListPolicyResponse), err
 }
+
+func (c *Client) InvalidateSoFile(ctx context.Context, in *milvuspb.InvalidateSoFileRequest) (*commonpb.Status, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.(rootcoordpb.RootCoordClient).InvalidateSoFile(ctx, in)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return ret.(*commonpb.Status), err
+}

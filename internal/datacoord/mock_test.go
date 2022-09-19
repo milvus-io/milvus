@@ -702,6 +702,10 @@ func (m *mockRootCoordService) ListPolicy(ctx context.Context, in *internalpb.Li
 	return &internalpb.ListPolicyResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, nil
 }
 
+func (m *mockRootCoordService) InvalidateSoFile(ctx context.Context, in *milvuspb.InvalidateSoFileRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
 type mockHandler struct {
 }
 

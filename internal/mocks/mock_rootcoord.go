@@ -1192,6 +1192,53 @@ func (_c *RootCoord_InvalidateCollectionMetaCache_Call) Return(_a0 *commonpb.Sta
 	return _c
 }
 
+// InvalidateSoFile provides a mock function with given fields: ctx, in
+func (_m *RootCoord) InvalidateSoFile(ctx context.Context, in *milvuspb.InvalidateSoFileRequest) (*commonpb.Status, error) {
+	ret := _m.Called(ctx, in)
+
+	var r0 *commonpb.Status
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.InvalidateSoFileRequest) *commonpb.Status); ok {
+		r0 = rf(ctx, in)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.InvalidateSoFileRequest) error); ok {
+		r1 = rf(ctx, in)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// RootCoord_InvalidateSoFile_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'InvalidateSoFile'
+type RootCoord_InvalidateSoFile_Call struct {
+	*mock.Call
+}
+
+// InvalidateSoFile is a helper method to define mock.On call
+//  - ctx context.Context
+//  - in *milvuspb.InvalidateSoFileRequest
+func (_e *RootCoord_Expecter) InvalidateSoFile(ctx interface{}, in interface{}) *RootCoord_InvalidateSoFile_Call {
+	return &RootCoord_InvalidateSoFile_Call{Call: _e.mock.On("InvalidateSoFile", ctx, in)}
+}
+
+func (_c *RootCoord_InvalidateSoFile_Call) Run(run func(ctx context.Context, in *milvuspb.InvalidateSoFileRequest)) *RootCoord_InvalidateSoFile_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.InvalidateSoFileRequest))
+	})
+	return _c
+}
+
+func (_c *RootCoord_InvalidateSoFile_Call) Return(_a0 *commonpb.Status, _a1 error) *RootCoord_InvalidateSoFile_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
 // ListCredUsers provides a mock function with given fields: ctx, req
 func (_m *RootCoord) ListCredUsers(ctx context.Context, req *milvuspb.ListCredUsersRequest) (*milvuspb.ListCredUsersResponse, error) {
 	ret := _m.Called(ctx, req)

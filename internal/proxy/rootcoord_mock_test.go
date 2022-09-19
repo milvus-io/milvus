@@ -1120,6 +1120,10 @@ func (coord *RootCoordMock) ListPolicy(ctx context.Context, in *internalpb.ListP
 	return &internalpb.ListPolicyResponse{}, nil
 }
 
+func (coord *RootCoordMock) InvalidateSoFile(ctx context.Context, in *milvuspb.InvalidateSoFileRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{}, nil
+}
+
 type DescribeCollectionFunc func(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)
 type ShowPartitionsFunc func(ctx context.Context, request *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error)
 type DescribeIndexFunc func(ctx context.Context, request *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error)
