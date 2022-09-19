@@ -3,43 +3,28 @@ package rootcoord
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"go.uber.org/zap"
 )
 
 type baseUndoTask struct {
-	todoStep []Step // steps to execute
-	undoStep []Step // steps to undo
+	todoStep     []nestedStep // steps to execute
+	undoStep     []nestedStep // steps to undo
+	stepExecutor StepExecutor
 }
 
-func newBaseUndoTask() *baseUndoTask {
+func newBaseUndoTask(stepExecutor StepExecutor) *baseUndoTask {
 	return &baseUndoTask{
-		todoStep: make([]Step, 0),
-		undoStep: make([]Step, 0),
+		todoStep:     make([]nestedStep, 0),
+		undoStep:     make([]nestedStep, 0),
+		stepExecutor: stepExecutor,
 	}
 }
 
-func (b *baseUndoTask) AddStep(todoStep, undoStep Step) {
+func (b *baseUndoTask) AddStep(todoStep, undoStep nestedStep) {
 	b.todoStep = append(b.todoStep, todoStep)
 	b.undoStep = append(b.undoStep, undoStep)
-}
-
-func (b *baseUndoTask) undoFromLastFinished(lastFinished int) {
-	// You cannot just use the ctx of task, since it will be canceled after response is returned.
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
-	defer cancel()
-	for i := lastFinished; i >= 0; i-- {
-		undo := b.undoStep[i]
-		if err := undo.Execute(ctx); err != nil {
-			// You depend on the collection meta to do other gc.
-			// TODO: add ddl logger after other service can be idempotent enough, then you can do separate steps
-			//		independently.
-			log.Error("failed to execute step, garbage may be generated", zap.Error(err))
-			return
-		}
-	}
 }
 
 func (b *baseUndoTask) Execute(ctx context.Context) error {
@@ -48,10 +33,12 @@ func (b *baseUndoTask) Execute(ctx context.Context) error {
 	}
 	for i := 0; i < len(b.todoStep); i++ {
 		todoStep := b.todoStep[i]
-		err := todoStep.Execute(ctx)
-		if err != nil {
-			go b.undoFromLastFinished(i - 1)
-			log.Warn("failed to execute step, trying to undo", zap.Error(err))
+		// no children step in normal case.
+		if _, err := todoStep.Execute(ctx); err != nil {
+			log.Warn("failed to execute step, trying to undo", zap.Error(err), zap.String("desc", todoStep.Desc()))
+			undoSteps := b.undoStep[:i]
+			b.undoStep = nil // let baseUndoTask can be collected.
+			go b.stepExecutor.AddSteps(&stepStack{undoSteps})
 			return err
 		}
 	}

@@ -7,18 +7,28 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func newTestUndoTask() *baseUndoTask {
+	stepExecutor := newMockStepExecutor()
+	stepExecutor.AddStepsFunc = func(s *stepStack) {
+		// no schedule, execute directly.
+		s.Execute(context.Background())
+	}
+	undoTask := newBaseUndoTask(stepExecutor)
+	return undoTask
+}
+
 func Test_baseUndoTask_Execute(t *testing.T) {
 	t.Run("should not happen", func(t *testing.T) {
-		undoTask := newBaseUndoTask()
+		undoTask := newTestUndoTask()
 		undoTask.todoStep = append(undoTask.todoStep, newMockNormalStep())
 		err := undoTask.Execute(context.Background())
 		assert.Error(t, err)
 	})
 
 	t.Run("normal case, no undo step will be called", func(t *testing.T) {
-		undoTask := newBaseUndoTask()
+		undoTask := newTestUndoTask()
 		n := 10
-		todoSteps, undoSteps := make([]Step, 0, n), make([]Step, 0, n)
+		todoSteps, undoSteps := make([]nestedStep, 0, n), make([]nestedStep, 0, n)
 		for i := 0; i < n; i++ {
 			normalTodoStep := newMockNormalStep()
 			normalUndoStep := newMockNormalStep()
@@ -37,13 +47,13 @@ func Test_baseUndoTask_Execute(t *testing.T) {
 	})
 
 	t.Run("partial error, undo from last finished", func(t *testing.T) {
-		undoTask := newBaseUndoTask()
-		todoSteps := []Step{
+		undoTask := newTestUndoTask()
+		todoSteps := []nestedStep{
 			newMockNormalStep(),
 			newMockFailStep(),
 			newMockNormalStep(),
 		}
-		undoSteps := []Step{
+		undoSteps := []nestedStep{
 			newMockNormalStep(),
 			newMockNormalStep(),
 			newMockNormalStep(),
@@ -65,13 +75,13 @@ func Test_baseUndoTask_Execute(t *testing.T) {
 	})
 
 	t.Run("partial error, undo meet error also", func(t *testing.T) {
-		undoTask := newBaseUndoTask()
-		todoSteps := []Step{
+		undoTask := newTestUndoTask()
+		todoSteps := []nestedStep{
 			newMockNormalStep(),
 			newMockNormalStep(),
 			newMockFailStep(),
 		}
-		undoSteps := []Step{
+		undoSteps := []nestedStep{
 			newMockNormalStep(),
 			newMockFailStep(),
 			newMockNormalStep(),

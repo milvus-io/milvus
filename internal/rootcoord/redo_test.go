@@ -9,21 +9,27 @@ import (
 )
 
 type mockFailStep struct {
+	baseStep
 	calledChan chan struct{}
 	called     bool
+	err        error
 }
 
 func newMockFailStep() *mockFailStep {
 	return &mockFailStep{calledChan: make(chan struct{}, 1), called: false}
 }
 
-func (m *mockFailStep) Execute(ctx context.Context) error {
+func (m *mockFailStep) Execute(ctx context.Context) ([]nestedStep, error) {
 	m.called = true
 	m.calledChan <- struct{}{}
-	return errors.New("error mock Execute")
+	if m.err != nil {
+		return nil, m.err
+	}
+	return nil, errors.New("error mock Execute")
 }
 
 type mockNormalStep struct {
+	nestedStep
 	calledChan chan struct{}
 	called     bool
 }
@@ -32,16 +38,26 @@ func newMockNormalStep() *mockNormalStep {
 	return &mockNormalStep{calledChan: make(chan struct{}, 1), called: false}
 }
 
-func (m *mockNormalStep) Execute(ctx context.Context) error {
+func (m *mockNormalStep) Execute(ctx context.Context) ([]nestedStep, error) {
 	m.called = true
 	m.calledChan <- struct{}{}
-	return nil
+	return nil, nil
+}
+
+func newTestRedoTask() *baseRedoTask {
+	stepExecutor := newMockStepExecutor()
+	stepExecutor.AddStepsFunc = func(s *stepStack) {
+		// no schedule, execute directly.
+		s.Execute(context.Background())
+	}
+	redo := newBaseRedoTask(stepExecutor)
+	return redo
 }
 
 func Test_baseRedoTask_redoAsyncSteps(t *testing.T) {
 	t.Run("partial error", func(t *testing.T) {
-		redo := newBaseRedoTask()
-		steps := []Step{newMockNormalStep(), newMockFailStep(), newMockNormalStep()}
+		redo := newTestRedoTask()
+		steps := []nestedStep{newMockNormalStep(), newMockFailStep(), newMockNormalStep()}
 		for _, step := range steps {
 			redo.AddAsyncStep(step)
 		}
@@ -51,9 +67,9 @@ func Test_baseRedoTask_redoAsyncSteps(t *testing.T) {
 	})
 
 	t.Run("normal case", func(t *testing.T) {
-		redo := newBaseRedoTask()
+		redo := newTestRedoTask()
 		n := 10
-		steps := make([]Step, 0, n)
+		steps := make([]nestedStep, 0, n)
 		for i := 0; i < n; i++ {
 			steps = append(steps, newMockNormalStep())
 		}
@@ -69,10 +85,10 @@ func Test_baseRedoTask_redoAsyncSteps(t *testing.T) {
 
 func Test_baseRedoTask_Execute(t *testing.T) {
 	t.Run("sync not finished, no async task", func(t *testing.T) {
-		redo := newBaseRedoTask()
-		syncSteps := []Step{newMockFailStep()}
+		redo := newTestRedoTask()
+		syncSteps := []nestedStep{newMockFailStep()}
 		asyncNum := 10
-		asyncSteps := make([]Step, 0, asyncNum)
+		asyncSteps := make([]nestedStep, 0, asyncNum)
 		for i := 0; i < asyncNum; i++ {
 			asyncSteps = append(asyncSteps, newMockNormalStep())
 		}
@@ -92,11 +108,11 @@ func Test_baseRedoTask_Execute(t *testing.T) {
 	// TODO: sync finished, but some async fail.
 
 	t.Run("normal case", func(t *testing.T) {
-		redo := newBaseRedoTask()
+		redo := newTestRedoTask()
 		syncNum := 10
-		syncSteps := make([]Step, 0, syncNum)
+		syncSteps := make([]nestedStep, 0, syncNum)
 		asyncNum := 10
-		asyncSteps := make([]Step, 0, asyncNum)
+		asyncSteps := make([]nestedStep, 0, asyncNum)
 		for i := 0; i < syncNum; i++ {
 			syncSteps = append(syncSteps, newMockNormalStep())
 		}

@@ -24,6 +24,8 @@ type scheduler struct {
 	tsoAllocator tso.Allocator
 
 	taskChan chan taskV2
+
+	lock sync.Mutex
 }
 
 func newScheduler(ctx context.Context, idAllocator allocator.GIDAllocator, tsoAllocator tso.Allocator) *scheduler {
@@ -49,6 +51,15 @@ func (s *scheduler) Stop() {
 	s.wg.Wait()
 }
 
+func (s *scheduler) execute(task taskV2) {
+	if err := task.Prepare(task.GetCtx()); err != nil {
+		task.NotifyDone(err)
+		return
+	}
+	err := task.Execute(task.GetCtx())
+	task.NotifyDone(err)
+}
+
 func (s *scheduler) taskLoop() {
 	defer s.wg.Done()
 	for {
@@ -56,12 +67,7 @@ func (s *scheduler) taskLoop() {
 		case <-s.ctx.Done():
 			return
 		case task := <-s.taskChan:
-			if err := task.Prepare(task.GetCtx()); err != nil {
-				task.NotifyDone(err)
-				continue
-			}
-			err := task.Execute(task.GetCtx())
-			task.NotifyDone(err)
+			s.execute(task)
 		}
 	}
 }
@@ -89,6 +95,10 @@ func (s *scheduler) enqueue(task taskV2) {
 }
 
 func (s *scheduler) AddTask(task taskV2) error {
+	// make sure that setting ts and enqueue is atomic.
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
 	if err := s.setID(task); err != nil {
 		return err
 	}

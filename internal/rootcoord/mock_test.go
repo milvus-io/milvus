@@ -259,6 +259,12 @@ func newTestCore(opts ...Opt) *Core {
 	c := &Core{
 		session: &sessionutil.Session{ServerID: TestRootCoordID},
 	}
+	executor := newMockStepExecutor()
+	executor.AddStepsFunc = func(s *stepStack) {
+		// no schedule, execute directly.
+		s.Execute(context.Background())
+	}
+	c.stepExecutor = executor
 	for _, opt := range opts {
 		opt(c)
 	}
@@ -647,7 +653,9 @@ func withAbnormalCode() Opt {
 
 type mockScheduler struct {
 	IScheduler
-	AddTaskFunc func(t taskV2) error
+	AddTaskFunc     func(t taskV2) error
+	GetMinDdlTsFunc func() Timestamp
+	minDdlTs        Timestamp
 }
 
 func newMockScheduler() *mockScheduler {
@@ -659,6 +667,13 @@ func (m mockScheduler) AddTask(t taskV2) error {
 		return m.AddTaskFunc(t)
 	}
 	return nil
+}
+
+func (m mockScheduler) GetMinDdlTs() Timestamp {
+	if m.GetMinDdlTsFunc != nil {
+		return m.GetMinDdlTsFunc()
+	}
+	return m.minDdlTs
 }
 
 func withScheduler(sched IScheduler) Opt {
@@ -759,16 +774,16 @@ func withBroker(b Broker) Opt {
 
 type mockGarbageCollector struct {
 	GarbageCollector
-	GcCollectionDataFunc func(ctx context.Context, coll *model.Collection, ts typeutil.Timestamp) error
-	GcPartitionDataFunc  func(ctx context.Context, pChannels []string, partition *model.Partition, ts typeutil.Timestamp) error
+	GcCollectionDataFunc func(ctx context.Context, coll *model.Collection) (Timestamp, error)
+	GcPartitionDataFunc  func(ctx context.Context, pChannels []string, partition *model.Partition) (Timestamp, error)
 }
 
-func (m mockGarbageCollector) GcCollectionData(ctx context.Context, coll *model.Collection, ts typeutil.Timestamp) error {
-	return m.GcCollectionDataFunc(ctx, coll, ts)
+func (m mockGarbageCollector) GcCollectionData(ctx context.Context, coll *model.Collection) (Timestamp, error) {
+	return m.GcCollectionDataFunc(ctx, coll)
 }
 
-func (m mockGarbageCollector) GcPartitionData(ctx context.Context, pChannels []string, partition *model.Partition, ts typeutil.Timestamp) error {
-	return m.GcPartitionDataFunc(ctx, pChannels, partition, ts)
+func (m mockGarbageCollector) GcPartitionData(ctx context.Context, pChannels []string, partition *model.Partition) (Timestamp, error) {
+	return m.GcPartitionDataFunc(ctx, pChannels, partition)
 }
 
 func newMockGarbageCollector() *mockGarbageCollector {
@@ -809,6 +824,9 @@ func newTickerWithMockFailStream() *timetickSync {
 
 func newMockNormalStream() *msgstream.MockMsgStream {
 	stream := msgstream.NewMockMsgStream()
+	stream.BroadcastFunc = func(pack *msgstream.MsgPack) error {
+		return nil
+	}
 	stream.BroadcastMarkFunc = func(pack *msgstream.MsgPack) (map[string][]msgstream.MessageID, error) {
 		return map[string][]msgstream.MessageID{}, nil
 	}
@@ -837,4 +855,64 @@ func newTickerWithFactory(factory msgstream.Factory) *timetickSync {
 	chans := map[UniqueID][]string{}
 	ticker := newTimeTickSync(ctx, TestRootCoordID, factory, chans)
 	return ticker
+}
+
+type mockDdlTsLockManager struct {
+	DdlTsLockManagerV2
+	GetMinDdlTsFunc func() Timestamp
+}
+
+func (m mockDdlTsLockManager) GetMinDdlTs() Timestamp {
+	if m.GetMinDdlTsFunc != nil {
+		return m.GetMinDdlTsFunc()
+	}
+	return 100
+}
+
+func newMockDdlTsLockManager() *mockDdlTsLockManager {
+	return &mockDdlTsLockManager{}
+}
+
+func withDdlTsLockManager(m DdlTsLockManagerV2) Opt {
+	return func(c *Core) {
+		c.ddlTsLockManager = m
+	}
+}
+
+type mockStepExecutor struct {
+	StepExecutor
+	StartFunc    func()
+	StopFunc     func()
+	AddStepsFunc func(s *stepStack)
+}
+
+func newMockStepExecutor() *mockStepExecutor {
+	return &mockStepExecutor{}
+}
+
+func (m mockStepExecutor) Start() {
+	if m.StartFunc != nil {
+		m.StartFunc()
+	} else {
+	}
+}
+
+func (m mockStepExecutor) Stop() {
+	if m.StopFunc != nil {
+		m.StopFunc()
+	} else {
+	}
+}
+
+func (m mockStepExecutor) AddSteps(s *stepStack) {
+	if m.AddStepsFunc != nil {
+		m.AddStepsFunc(s)
+	} else {
+	}
+}
+
+func withStepExecutor(executor StepExecutor) Opt {
+	return func(c *Core) {
+		c.stepExecutor = executor
+	}
 }

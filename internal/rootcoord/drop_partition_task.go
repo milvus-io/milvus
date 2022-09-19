@@ -53,14 +53,14 @@ func (t *dropPartitionTask) Execute(ctx context.Context) error {
 		return nil
 	}
 
-	redoTask := newBaseRedoTask()
-	redoTask.AddSyncStep(&ExpireCacheStep{
+	redoTask := newBaseRedoTask(t.core.stepExecutor)
+	redoTask.AddSyncStep(&expireCacheStep{
 		baseStep:        baseStep{core: t.core},
 		collectionNames: []string{t.Req.GetCollectionName()},
 		collectionID:    t.collMeta.CollectionID,
 		ts:              t.GetTs(),
 	})
-	redoTask.AddSyncStep(&ChangePartitionStateStep{
+	redoTask.AddSyncStep(&changePartitionStateStep{
 		baseStep:     baseStep{core: t.core},
 		collectionID: t.collMeta.CollectionID,
 		partitionID:  partID,
@@ -69,7 +69,7 @@ func (t *dropPartitionTask) Execute(ctx context.Context) error {
 	})
 
 	// TODO: release partition when query coord is ready.
-	redoTask.AddAsyncStep(&DeletePartitionDataStep{
+	redoTask.AddAsyncStep(&deletePartitionDataStep{
 		baseStep: baseStep{core: t.core},
 		pchans:   t.collMeta.PhysicalChannelNames,
 		partition: &model.Partition{
@@ -77,9 +77,8 @@ func (t *dropPartitionTask) Execute(ctx context.Context) error {
 			PartitionName: t.Req.GetPartitionName(),
 			CollectionID:  t.collMeta.CollectionID,
 		},
-		ts: t.GetTs(),
 	})
-	redoTask.AddAsyncStep(&RemovePartitionMetaStep{
+	redoTask.AddAsyncStep(&removePartitionMetaStep{
 		baseStep:     baseStep{core: t.core},
 		collectionID: t.collMeta.CollectionID,
 		partitionID:  partID,

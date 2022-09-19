@@ -53,17 +53,17 @@ func (t *createPartitionTask) Execute(ctx context.Context) error {
 		State:                     pb.PartitionState_PartitionCreated,
 	}
 
-	undoTask := newBaseUndoTask()
-	undoTask.AddStep(&ExpireCacheStep{
+	undoTask := newBaseUndoTask(t.core.stepExecutor)
+	undoTask.AddStep(&expireCacheStep{
 		baseStep:        baseStep{core: t.core},
 		collectionNames: []string{t.Req.GetCollectionName()},
 		collectionID:    t.collMeta.CollectionID,
 		ts:              t.GetTs(),
-	}, &NullStep{})
-	undoTask.AddStep(&AddPartitionMetaStep{
+	}, &nullStep{})
+	undoTask.AddStep(&addPartitionMetaStep{
 		baseStep:  baseStep{core: t.core},
 		partition: partition,
-	}, &NullStep{}) // adding partition is atomic enough.
+	}, &nullStep{}) // adding partition is atomic enough.
 
 	return undoTask.Execute(ctx)
 }

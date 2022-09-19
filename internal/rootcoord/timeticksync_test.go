@@ -21,6 +21,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/util/typeutil"
+
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/api/commonpb"
@@ -103,4 +105,16 @@ func TestTimetickSync(t *testing.T) {
 		assert.Equal(t, ret, tts[1])
 	})
 	wg.Wait()
+}
+
+func Test_ttHistogram_get(t *testing.T) {
+	h := newTtHistogram()
+	assert.Equal(t, typeutil.ZeroTimestamp, h.get("not_exist"))
+	h.update("ch1", 100)
+	assert.Equal(t, Timestamp(100), h.get("ch1"))
+	h.update("ch2", 1000)
+	assert.Equal(t, Timestamp(1000), h.get("ch2"))
+	h.remove("ch1", "ch2", "not_exist")
+	assert.Equal(t, typeutil.ZeroTimestamp, h.get("ch1"))
+	assert.Equal(t, typeutil.ZeroTimestamp, h.get("ch2"))
 }

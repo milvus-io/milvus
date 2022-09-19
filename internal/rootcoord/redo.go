@@ -2,53 +2,49 @@ package rootcoord
 
 import (
 	"context"
-	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"go.uber.org/zap"
 )
 
 type baseRedoTask struct {
-	syncTodoStep  []Step // steps to execute synchronously
-	asyncTodoStep []Step // steps to execute asynchronously
+	syncTodoStep  []nestedStep // steps to execute synchronously
+	asyncTodoStep []nestedStep // steps to execute asynchronously
+	stepExecutor  StepExecutor
 }
 
-func newBaseRedoTask() *baseRedoTask {
+func newBaseRedoTask(stepExecutor StepExecutor) *baseRedoTask {
 	return &baseRedoTask{
-		syncTodoStep:  make([]Step, 0),
-		asyncTodoStep: make([]Step, 0),
+		syncTodoStep:  make([]nestedStep, 0),
+		asyncTodoStep: make([]nestedStep, 0),
+		stepExecutor:  stepExecutor,
 	}
 }
 
-func (b *baseRedoTask) AddSyncStep(step Step) {
+func (b *baseRedoTask) AddSyncStep(step nestedStep) {
 	b.syncTodoStep = append(b.syncTodoStep, step)
 }
 
-func (b *baseRedoTask) AddAsyncStep(step Step) {
+func (b *baseRedoTask) AddAsyncStep(step nestedStep) {
 	b.asyncTodoStep = append(b.asyncTodoStep, step)
 }
 
 func (b *baseRedoTask) redoAsyncSteps() {
-	// You cannot just use the ctx of task, since it will be canceled after response is returned.
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
-	defer cancel()
-	for i := 0; i < len(b.asyncTodoStep); i++ {
-		todo := b.asyncTodoStep[i]
-		if err := todo.Execute(ctx); err != nil {
-			// You depend on the collection meta to do other gc.
-			// TODO: add ddl logger after other service can be idempotent enough, then you can do separate steps
-			//		independently.
-			log.Error("failed to execute step, garbage may be generated", zap.Error(err))
-			return
-		}
+	l := len(b.asyncTodoStep)
+	steps := make([]nestedStep, 0, l)
+	for i := l - 1; i >= 0; i-- {
+		steps = append(steps, b.asyncTodoStep[i])
 	}
+	b.asyncTodoStep = nil // make baseRedoTask can be collected.
+	b.stepExecutor.AddSteps(&stepStack{steps: steps})
 }
 
 func (b *baseRedoTask) Execute(ctx context.Context) error {
 	for i := 0; i < len(b.syncTodoStep); i++ {
 		todo := b.syncTodoStep[i]
-		if err := todo.Execute(ctx); err != nil {
-			log.Error("failed to execute step", zap.Error(err))
+		// no children step in sync steps.
+		if _, err := todo.Execute(ctx); err != nil {
+			log.Error("failed to execute step", zap.Error(err), zap.String("desc", todo.Desc()))
 			return err
 		}
 	}
