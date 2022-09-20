@@ -163,7 +163,7 @@ func (dh *distHandler) updateLeaderView(resp *querypb.GetDataDistributionRespons
 			CollectionID:    lview.GetCollection(),
 			Channel:         lview.GetChannel(),
 			Segments:        lview.GetSegmentNodePairs(),
-			GrowingSegments: typeutil.NewUniqueSet(resp.GetGrowingSegmentIDs()...),
+			GrowingSegments: typeutil.NewUniqueSet(lview.GetGrowingSegmentIDs()...),
 		}
 		updates = append(updates, view)
 	}
