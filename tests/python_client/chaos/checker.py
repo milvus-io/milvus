@@ -26,7 +26,7 @@ class Op(Enum):
     compact = 'compact'
     drop = 'drop'
     load_balance = 'load_balance'
-    bulk_load = 'bulk_load'
+    bulk_insert = 'bulk_insert'
     unknown = 'unknown'
 
 
@@ -540,7 +540,7 @@ class LoadBalanceChecker(Checker):
             sleep(constants.WAIT_PER_OP / 10)
 
 
-class BulkLoadChecker(Checker):
+class BulkInsertChecker(Checker):
     """check bulk load operations in a dependent thread"""
 
     def __init__(self, collection_name=None, files=[]):
@@ -550,25 +550,25 @@ class BulkLoadChecker(Checker):
         self.utility_wrap = ApiUtilityWrapper()
         self.schema = cf.gen_default_collection_schema()
         self.files = files
-        self.row_based = True
+        self.is_row_based = True
         self.recheck_failed_task = False
         self.failed_tasks = []
         self.c_name = None
 
-    def update(self, files=None, schema=None, row_based=None):
+    def update(self, files=None, schema=None, is_row_based=None):
         if files is not None:
             self.files = files
         if schema is not None:
             self.schema = schema
-        if row_based is not None:
-            self.row_based = row_based
+        if is_row_based is not None:
+            self.is_row_based = is_row_based
 
     @trace()
-    def bulk_load(self):
-        task_ids, result = self.utility_wrap.bulk_load(collection_name=self.c_name,
-                                                       row_based=self.row_based,
+    def bulk_insert(self):
+        task_ids, result = self.utility_wrap.bulk_insert(collection_name=self.c_name,
+                                                       is_row_based=self.is_row_based,
                                                        files=self.files)
-        completed, result = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids, timeout=30)
+        completed, result = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=task_ids, timeout=60)
         return task_ids, completed
 
     @exception_handler()
@@ -580,7 +580,7 @@ class BulkLoadChecker(Checker):
             self.c_name = cf.gen_unique_str("BulkLoadChecker_")
         self.c_wrap.init_collection(name=self.c_name, schema=self.schema)
         # import data
-        task_ids, completed = self.bulk_load()
+        task_ids, completed = self.bulk_insert()
         if not completed:
             self.failed_tasks.append(self.c_name)
         return task_ids, completed

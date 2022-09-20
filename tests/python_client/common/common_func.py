@@ -319,7 +319,7 @@ def gen_default_list_data(nb=ct.default_nb, dim=ct.default_dim):
     return data
 
 
-def gen_default_list_data_for_bulk_load(nb=ct.default_nb, dim=ct.default_dim):
+def gen_default_list_data_for_bulk_insert(nb=ct.default_nb, dim=ct.default_dim):
     int_values = [i for i in range(nb)]
     float_values = [float(i) for i in range(nb)]
     string_values = [str(i) for i in range(nb)]
