@@ -245,7 +245,7 @@ indexNode:
 dataCoord:
   address: localhost
   port: 13333
-  enableCompaction: true # Enable data segment compression
+  enableCompaction: true # Enable data segment compaction
   enableGarbageCollection: true
 
   segment:
@@ -253,6 +253,10 @@ dataCoord:
     sealProportion: 0.25 # It's the minimum proportion for a segment which can be sealed
     assignmentExpiration: 2000 # The time of the assignment expiration in ms
     maxLife: 86400 # The max lifetime of segment in seconds, 24*60*60
+    # If a segment didn't accept dml records in `maxIdleTime` and the size of segment is greater than
+    # `minSizeFromIdleToSealed`, Milvus will automatically seal it.
+    maxIdleTime: 600 # The max idle time of segment in seconds, 10*60.
+    minSizeFromIdleToSealed: 16 # The min size in MB of segment which can be idle from sealed.
 
   compaction:
     enableAutoCompaction: true

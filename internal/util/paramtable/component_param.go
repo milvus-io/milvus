@@ -984,10 +984,12 @@ type dataCoordConfig struct {
 	ChannelWatchSubPath string
 
 	// --- SEGMENTS ---
-	SegmentMaxSize          float64
-	SegmentSealProportion   float64
-	SegAssignmentExpiration int64
-	SegmentMaxLifetime      time.Duration
+	SegmentMaxSize                 float64
+	SegmentSealProportion          float64
+	SegAssignmentExpiration        int64
+	SegmentMaxLifetime             time.Duration
+	SegmentMaxIdleTime             time.Duration
+	SegmentMinSizeFromIdleToSealed float64
 
 	CreatedTime time.Time
 	UpdatedTime time.Time
@@ -1022,6 +1024,8 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	p.initSegmentSealProportion()
 	p.initSegAssignmentExpiration()
 	p.initSegmentMaxLifetime()
+	p.initSegmentMaxIdleTime()
+	p.initSegmentMinSizeFromIdleToSealed()
 
 	p.initEnableCompaction()
 	p.initEnableAutoCompaction()
@@ -1057,6 +1061,16 @@ func (p *dataCoordConfig) initSegAssignmentExpiration() {
 
 func (p *dataCoordConfig) initSegmentMaxLifetime() {
 	p.SegmentMaxLifetime = time.Duration(p.Base.ParseInt64WithDefault("dataCoord.segment.maxLife", 24*60*60)) * time.Second
+}
+
+func (p *dataCoordConfig) initSegmentMaxIdleTime() {
+	p.SegmentMaxIdleTime = time.Duration(p.Base.ParseInt64WithDefault("dataCoord.segment.maxIdleTime", 60*60)) * time.Second
+	log.Info("init segment max idle time", zap.String("value", p.SegmentMaxIdleTime.String()))
+}
+
+func (p *dataCoordConfig) initSegmentMinSizeFromIdleToSealed() {
+	p.SegmentMinSizeFromIdleToSealed = p.Base.ParseFloatWithDefault("dataCoord.segment.minSizeFromIdleToSealed", 16.0)
+	log.Info("init segment min size from idle to sealed", zap.Float64("value", p.SegmentMinSizeFromIdleToSealed))
 }
 
 func (p *dataCoordConfig) initChannelWatchPrefix() {

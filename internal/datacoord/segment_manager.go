@@ -182,6 +182,7 @@ func defaultSegmentSealPolicy() []segmentSealPolicy {
 	return []segmentSealPolicy{
 		sealByLifetimePolicy(Params.DataCoordCfg.SegmentMaxLifetime),
 		getSegmentCapacityPolicy(Params.DataCoordCfg.SegmentSealProportion),
+		sealLongTimeIdlePolicy(Params.DataCoordCfg.SegmentMaxIdleTime, Params.DataCoordCfg.SegmentMinSizeFromIdleToSealed, Params.DataCoordCfg.SegmentMaxSize),
 	}
 }
 

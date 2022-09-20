@@ -194,3 +194,8 @@ func IsParentDropped(meta *meta, segment *SegmentInfo) bool {
 	}
 	return true
 }
+
+func getZeroTime() time.Time {
+	var t time.Time
+	return t
+}
