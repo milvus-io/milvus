@@ -48,6 +48,8 @@ const (
 	DataNodeRole = "datanode"
 )
 
+const Unlimited int64 = -1
+
 func ServerTypeMap() map[string]interface{} {
 	return map[string]interface{}{
 		EmbeddedRole:   nil,

@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 func TestResult_mergeSegcoreRetrieveResults(t *testing.T) {
@@ -71,7 +72,7 @@ func TestResult_mergeSegcoreRetrieveResults(t *testing.T) {
 			FieldsData: fieldDataArray2,
 		}
 
-		result, err := mergeSegcoreRetrieveResultsV2(context.Background(), []*segcorepb.RetrieveResults{result1, result2}, unlimited)
+		result, err := mergeSegcoreRetrieveResults(context.Background(), []*segcorepb.RetrieveResults{result1, result2}, typeutil.Unlimited)
 		assert.NoError(t, err)
 		assert.Equal(t, 2, len(result.GetFieldsData()))
 		assert.Equal(t, []int64{0, 1}, result.GetIds().GetIntId().GetData())
@@ -80,7 +81,7 @@ func TestResult_mergeSegcoreRetrieveResults(t *testing.T) {
 	})
 
 	t.Run("test nil results", func(t *testing.T) {
-		ret, err := mergeSegcoreRetrieveResultsV2(context.Background(), nil, unlimited)
+		ret, err := mergeSegcoreRetrieveResults(context.Background(), nil, typeutil.Unlimited)
 		assert.NoError(t, err)
 		assert.Empty(t, ret.GetIds())
 		assert.Empty(t, ret.GetFieldsData())
@@ -98,7 +99,7 @@ func TestResult_mergeSegcoreRetrieveResults(t *testing.T) {
 			FieldsData: fieldDataArray1,
 		}
 
-		ret, err := mergeSegcoreRetrieveResultsV2(context.Background(), []*segcorepb.RetrieveResults{r}, unlimited)
+		ret, err := mergeSegcoreRetrieveResults(context.Background(), []*segcorepb.RetrieveResults{r}, typeutil.Unlimited)
 		assert.NoError(t, err)
 		assert.Empty(t, ret.GetIds())
 		assert.Empty(t, ret.GetFieldsData())
@@ -137,7 +138,7 @@ func TestResult_mergeSegcoreRetrieveResults(t *testing.T) {
 		t.Run("test limited", func(t *testing.T) {
 			tests := []struct {
 				description string
-				limit       int
+				limit       int64
 			}{
 				{"limit 1", 1},
 				{"limit 2", 2},
@@ -148,9 +149,9 @@ func TestResult_mergeSegcoreRetrieveResults(t *testing.T) {
 			resultField0 := []int64{11, 11, 22, 22}
 			for _, test := range tests {
 				t.Run(test.description, func(t *testing.T) {
-					result, err := mergeSegcoreRetrieveResultsV2(context.Background(), []*segcorepb.RetrieveResults{r1, r2}, test.limit)
+					result, err := mergeSegcoreRetrieveResults(context.Background(), []*segcorepb.RetrieveResults{r1, r2}, test.limit)
 					assert.Equal(t, 2, len(result.GetFieldsData()))
-					assert.Equal(t, test.limit, len(result.GetIds().GetIntId().GetData()))
+					assert.Equal(t, int(test.limit), len(result.GetIds().GetIntId().GetData()))
 					assert.Equal(t, resultIDs[0:test.limit], result.GetIds().GetIntId().GetData())
 					assert.Equal(t, resultField0[0:test.limit], result.GetFieldsData()[0].GetScalars().GetLongData().Data)
 					assert.InDeltaSlice(t, resultFloat[0:test.limit*Dim], result.FieldsData[1].GetVectors().GetFloatVector().Data, 10e-10)
@@ -160,7 +161,7 @@ func TestResult_mergeSegcoreRetrieveResults(t *testing.T) {
 		})
 
 		t.Run("test int ID", func(t *testing.T) {
-			result, err := mergeSegcoreRetrieveResultsV2(context.Background(), []*segcorepb.RetrieveResults{r1, r2}, unlimited)
+			result, err := mergeSegcoreRetrieveResults(context.Background(), []*segcorepb.RetrieveResults{r1, r2}, typeutil.Unlimited)
 			assert.Equal(t, 2, len(result.GetFieldsData()))
 			assert.Equal(t, []int64{1, 2, 3, 4}, result.GetIds().GetIntId().GetData())
 			assert.Equal(t, []int64{11, 11, 22, 22}, result.GetFieldsData()[0].GetScalars().GetLongData().Data)
@@ -181,7 +182,7 @@ func TestResult_mergeSegcoreRetrieveResults(t *testing.T) {
 						Data: []string{"b", "d"},
 					}}}
 
-			result, err := mergeSegcoreRetrieveResultsV2(context.Background(), []*segcorepb.RetrieveResults{r1, r2}, unlimited)
+			result, err := mergeSegcoreRetrieveResults(context.Background(), []*segcorepb.RetrieveResults{r1, r2}, typeutil.Unlimited)
 			assert.NoError(t, err)
 			assert.Equal(t, 2, len(result.GetFieldsData()))
 			assert.Equal(t, []string{"a", "b", "c", "d"}, result.GetIds().GetStrId().GetData())
@@ -234,7 +235,7 @@ func TestResult_mergeInternalRetrieveResults(t *testing.T) {
 			FieldsData: fieldDataArray2,
 		}
 
-		result, err := mergeInternalRetrieveResultsV2(context.Background(), []*internalpb.RetrieveResults{result1, result2}, unlimited)
+		result, err := mergeInternalRetrieveResult(context.Background(), []*internalpb.RetrieveResults{result1, result2}, typeutil.Unlimited)
 		assert.NoError(t, err)
 		assert.Equal(t, 2, len(result.GetFieldsData()))
 		assert.Equal(t, []int64{0, 1}, result.GetIds().GetIntId().GetData())
@@ -243,7 +244,7 @@ func TestResult_mergeInternalRetrieveResults(t *testing.T) {
 	})
 
 	t.Run("test nil results", func(t *testing.T) {
-		ret, err := mergeInternalRetrieveResultsV2(context.Background(), nil, unlimited)
+		ret, err := mergeInternalRetrieveResult(context.Background(), nil, typeutil.Unlimited)
 		assert.NoError(t, err)
 		assert.Empty(t, ret.GetIds())
 		assert.Empty(t, ret.GetFieldsData())
@@ -280,7 +281,7 @@ func TestResult_mergeInternalRetrieveResults(t *testing.T) {
 		t.Run("test limited", func(t *testing.T) {
 			tests := []struct {
 				description string
-				limit       int
+				limit       int64
 			}{
 				{"limit 1", 1},
 				{"limit 2", 2},
@@ -291,9 +292,9 @@ func TestResult_mergeInternalRetrieveResults(t *testing.T) {
 			resultField0 := []int64{11, 11, 22, 22}
 			for _, test := range tests {
 				t.Run(test.description, func(t *testing.T) {
-					result, err := mergeInternalRetrieveResultsV2(context.Background(), []*internalpb.RetrieveResults{r1, r2}, test.limit)
+					result, err := mergeInternalRetrieveResult(context.Background(), []*internalpb.RetrieveResults{r1, r2}, test.limit)
 					assert.Equal(t, 2, len(result.GetFieldsData()))
-					assert.Equal(t, test.limit, len(result.GetIds().GetIntId().GetData()))
+					assert.Equal(t, int(test.limit), len(result.GetIds().GetIntId().GetData()))
 					assert.Equal(t, resultIDs[0:test.limit], result.GetIds().GetIntId().GetData())
 					assert.Equal(t, resultField0[0:test.limit], result.GetFieldsData()[0].GetScalars().GetLongData().Data)
 					assert.InDeltaSlice(t, resultFloat[0:test.limit*Dim], result.FieldsData[1].GetVectors().GetFloatVector().Data, 10e-10)
@@ -303,7 +304,7 @@ func TestResult_mergeInternalRetrieveResults(t *testing.T) {
 		})
 
 		t.Run("test int ID", func(t *testing.T) {
-			result, err := mergeInternalRetrieveResultsV2(context.Background(), []*internalpb.RetrieveResults{r1, r2}, unlimited)
+			result, err := mergeInternalRetrieveResult(context.Background(), []*internalpb.RetrieveResults{r1, r2}, typeutil.Unlimited)
 			assert.Equal(t, 2, len(result.GetFieldsData()))
 			assert.Equal(t, []int64{1, 2, 3, 4}, result.GetIds().GetIntId().GetData())
 			assert.Equal(t, []int64{11, 11, 22, 22}, result.GetFieldsData()[0].GetScalars().GetLongData().Data)
@@ -316,15 +317,19 @@ func TestResult_mergeInternalRetrieveResults(t *testing.T) {
 				IdField: &schemapb.IDs_StrId{
 					StrId: &schemapb.StringArray{
 						Data: []string{"a", "c"},
-					}}}
+					},
+				},
+			}
 
 			r2.Ids = &schemapb.IDs{
 				IdField: &schemapb.IDs_StrId{
 					StrId: &schemapb.StringArray{
 						Data: []string{"b", "d"},
-					}}}
+					},
+				},
+			}
 
-			result, err := mergeInternalRetrieveResultsV2(context.Background(), []*internalpb.RetrieveResults{r1, r2}, unlimited)
+			result, err := mergeInternalRetrieveResult(context.Background(), []*internalpb.RetrieveResults{r1, r2}, typeutil.Unlimited)
 			assert.NoError(t, err)
 			assert.Equal(t, 2, len(result.GetFieldsData()))
 			assert.Equal(t, []string{"a", "b", "c", "d"}, result.GetIds().GetStrId().GetData())

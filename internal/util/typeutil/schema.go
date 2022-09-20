@@ -19,6 +19,7 @@ package typeutil
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 
 	"github.com/milvus-io/milvus/api/schemapb"
@@ -665,4 +666,44 @@ func ComparePK(data *schemapb.IDs, i, j int) bool {
 		return f.StrId.Data[i] < f.StrId.Data[j]
 	}
 	return false
+}
+
+type ResultWithID interface {
+	GetIds() *schemapb.IDs
+}
+
+// SelectMinPK select the index of the minPK in results T of the cursors.
+func SelectMinPK[T ResultWithID](results []T, cursors []int64) int {
+	var (
+		sel            = -1
+		minIntPK int64 = math.MaxInt64
+
+		firstStr = true
+		minStrPK string
+	)
+
+	for i, cursor := range cursors {
+		if int(cursor) >= GetSizeOfIDs(results[i].GetIds()) {
+			continue
+		}
+
+		pkInterface := GetPK(results[i].GetIds(), cursor)
+		switch pk := pkInterface.(type) {
+		case string:
+			if firstStr || pk < minStrPK {
+				firstStr = false
+				minStrPK = pk
+				sel = i
+			}
+		case int64:
+			if pk < minIntPK {
+				minIntPK = pk
+				sel = i
+			}
+		default:
+			continue
+		}
+	}
+
+	return sel
 }

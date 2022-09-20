@@ -962,7 +962,7 @@ func (node *QueryNode) queryWithDmlChannel(ctx context.Context, req *querypb.Que
 		msgID, req.GetFromShardLeader(), dmlChannel, req.GetSegmentIDs()))
 
 	results = append(results, streamingResult)
-	ret, err2 := mergeInternalRetrieveResults(ctx, results)
+	ret, err2 := mergeInternalRetrieveResult(ctx, results, req.Req.GetLimit())
 	if err2 != nil {
 		failRet.Status.Reason = err2.Error()
 		return failRet, nil
@@ -1026,7 +1026,7 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 	if err := runningGp.Wait(); err != nil {
 		return failRet, nil
 	}
-	ret, err := mergeInternalRetrieveResults(ctx, toMergeResults)
+	ret, err := mergeInternalRetrieveResult(ctx, toMergeResults, req.GetReq().GetLimit())
 	if err != nil {
 		failRet.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		failRet.Status.Reason = err.Error()
