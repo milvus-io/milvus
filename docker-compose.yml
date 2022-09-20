@@ -50,6 +50,7 @@ services:
       - ETCD_AUTO_COMPACTION_MODE=revision
       - ETCD_AUTO_COMPACTION_RETENTION=1000
       - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
     healthcheck:
       test: ["CMD", "/opt/bitnami/scripts/etcd/healthcheck.sh"]
       interval: 30s
