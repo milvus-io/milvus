@@ -368,20 +368,20 @@ common:
 #   3. DQL Queue length/latency protection;
 # If necessary, you can also manually force to deny RW requests.
 quotaAndLimits:
-  enable: true # `true` to enable quota and limits, `false` to disable.
+  enable: false # `true` to enable quota and limits, `false` to disable.
 
   # quotaCenterCollectInterval is the time interval that quotaCenter
   # collects metrics from Query cluster and Data cluster.
   quotaCenterCollectInterval: 3 # seconds, (0 ~ 65536)
 
-  ddl: # ddl limit rates, -1 means no limit, default no limit.
+  ddl: # ddl limit rates, default no limit.
     #collectionRate: # requests per minute, default no limit, rate for CreateCollection, DropCollection, HasCollection, DescribeCollection, LoadCollection, ReleaseCollection
     #partitionRate: # requests per minute, default no limit, rate for CreatePartition, DropPartition, HasPartition, LoadPartition, ReleasePartition
     #indexRate: # requests per minute, default no limit, rate for CreateIndex, DropIndex, DescribeIndex
     #flushRate: # requests per minute, default no limit, rate for flush
     #compactionRate: # requests per minute, default no limit, rate for manualCompaction
 
-  # dml limit rates, -1 means no limit, default no limit.
+  # dml limit rates, default no limit.
   # The maximum rate will not be greater than `max`,
   # and the rate after handling back pressure will not be less than `min`.
   dml:
@@ -395,7 +395,7 @@ quotaAndLimits:
       #max: # MB/s, default no limit
       #min: # MB/s, default 0
 
-  # dql limit rates, -1 means no limit, default no limit.
+  # dql limit rates, default no limit.
   # The maximum rate will not be greater than `max`,
   # and the rate after handling back pressure will not be less than `min`.
   dql:
@@ -403,30 +403,8 @@ quotaAndLimits:
       #max: # vps, default no limit
       #min: # vps, default 0
     queryRate:
-      #max: -1 # qps, default no limit
-      #min: -1 # qps, default 0
-
-#  limits: # not support yet. TODO: add comments and support limits
-#    collection:
-#      maxNum: 64 # max number of collections in a Milvus instance.
-#      maxNameLength: 256 # Maximum length of name for a collection or alias.
-#      maxDimension: 32768
-#      maxShardNum: 256
-#      maxRetention: 60 # days,
-#    partition:
-#      maxNum: 4096
-#      maxNameLength: 256
-#    field:
-#      maxNum: 256 # Maximum number of fields in a collection.
-#      maxNameLength: 256
-#    index:
-#      maxNum: 16
-#      maxNameLength: 256
-#      maxDescriptionLength: 4096
-#    dql:
-#      maxQueryParamLength: 256
-#      maxReturnSize: 512 # MB
-#      maxNQ: 32768
+      #max: # qps, default no limit
+      #min: # qps, default 0
 
   # limitWriting decides whether dml requests are allowed.
   limitWriting:
@@ -455,7 +433,7 @@ quotaAndLimits:
     # NQInQueueThreshold indicated that the system was under backpressure for Search/Query path.
     # If NQ in any QueryNode's queue is greater than NQInQueueThreshold, search&query rates would gradually cool off
     # until the NQ in queue no longer exceeds NQInQueueThreshold. We think of the NQ of query request as 1.
-    #NQInQueueThreshold: # milliseconds, default no limit
+    #NQInQueueThreshold: # int, default no limit
 
     # queueLatencyThreshold indicated that the system was under backpressure for Search/Query path.
     # If dql latency of queuing is greater than queueLatencyThreshold, search&query rates would gradually cool off

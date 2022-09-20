@@ -28,6 +28,8 @@ import (
 func TestMultiRateLimiter(t *testing.T) {
 	Params.Init()
 	t.Run("test multiRateLimiter", func(t *testing.T) {
+		bak := Params.QuotaConfig.EnableQuotaAndLimits
+		Params.QuotaConfig.EnableQuotaAndLimits = true
 		multiLimiter := NewMultiRateLimiter()
 		for _, rt := range internalpb.RateType_value {
 			multiLimiter.globalRateLimiter.limiters[internalpb.RateType(rt)] = ratelimitutil.NewLimiter(ratelimitutil.Limit(1000), 1)
@@ -40,6 +42,7 @@ func TestMultiRateLimiter(t *testing.T) {
 			ok, _ = multiLimiter.Limit(internalpb.RateType(rt), math.MaxInt)
 			assert.True(t, ok)
 		}
+		Params.QuotaConfig.EnableQuotaAndLimits = bak
 	})
 
 	t.Run("not enable quotaAndLimit", func(t *testing.T) {
