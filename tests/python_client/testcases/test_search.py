@@ -3173,3 +3173,87 @@ class  TestsearchString(TestcaseBase):
                                          "limit": default_limit,
                                          "_async": _async}
                             )
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_string_field_is_primary_insert_empty(self, _async):
+        """
+        target: test search with string expr and string field is primary
+        method: create collection ,string field is primary
+                collection load and insert data
+                collection search uses string expr in string field 
+        expected: Search successfully
+        """
+        # 1. initialize with data
+        collection_w, _, _, _ = \
+            self.init_collection_general(prefix, False, primary_field=ct.default_string_field_name)[0:4]
+
+        nb = 3000
+        data = cf.gen_default_list_data(nb)
+        data[2] = [""for _ in range(nb)] 
+        collection_w.insert(data=data)
+        
+        collection_w.load()
+         
+        
+        search_string_exp = "varchar >= \"\""
+        limit =1
+
+        # 2. search
+        log.info("test_search_string_field_is_primary_true: searching collection %s" % collection_w.name)
+        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+        output_fields = [default_string_field_name, default_float_field_name]
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, limit,
+                            search_string_exp, 
+                            output_fields=output_fields,
+                            _async=_async,
+                            travel_timestamp=0,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "limit": limit,
+                                         "_async": _async})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_string_field_not_primary_is_empty(self, _async):
+        """
+        target: test search with string expr and string field is not primary
+        method: create collection and insert data 
+                create index and collection load
+                collection search uses string expr in string field, string field is not primary
+        expected: Search successfully
+        """
+        # 1. initialize with data
+        collection_w, _, _, insert_ids = \
+            self.init_collection_general(prefix, False, primary_field=ct.default_int64_field_name)[0:4]
+
+        nb = 3000
+        data = cf.gen_default_list_data(nb)
+        data[2] = [""for _ in range(nb)] 
+
+        collection_w.insert(data)
+        assert collection_w.num_entities == nb
+
+        # 2. create index
+        index_param = {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}}
+        collection_w.create_index("float_vector", index_param)
+        collection_w.load()
+
+
+        search_string_exp = "varchar >= \"\""
+        
+        # 3. search
+        log.info("test_search_string_field_not_primary: searching collection %s" % collection_w.name)
+        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+        output_fields = [default_string_field_name, default_float_field_name]
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, default_limit, 
+                            search_string_exp,
+                            output_fields=output_fields,
+                            _async=_async,
+                            travel_timestamp=0,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": insert_ids,
+                                         "limit": default_limit,
+                                         "_async": _async})
+

@@ -1383,3 +1383,65 @@ class  TestqueryString(TestcaseBase):
                            check_items={exp_res: df_dict_list,
                                         "primary_field": default_int_field_name,
                                         "with_vec": True})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_query_string_field_pk_is_empty(self):
+        """
+        target: test query with string expr and string field is primary
+        method: create collection , string field is primary
+                collection load and insert empty data with string field
+                collection query uses string expr in string field
+        expected: query successfully
+        """
+        # 1. create a collection
+        schema = cf.gen_string_pk_default_collection_schema()
+        collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix), schema=schema)
+        
+        collection_w.load()
+        
+        nb = 3000
+        df = cf.gen_default_list_data(nb)
+        df[2] = [""for _ in range(nb)] 
+
+        collection_w.insert(df)
+        assert collection_w.num_entities == nb
+
+        
+        string_exp = "varchar >= \"\""
+        output_fields = [default_int_field_name, default_float_field_name, default_string_field_name]
+        res, _ = collection_w.query(string_exp, output_fields=output_fields)
+
+        assert len(res) == 1
+
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_query_string_field_not_primary_is_empty(self):
+        """
+        target: test query with string expr and string field is not primary
+        method: create collection , string field is primary
+                collection load and insert empty data with string field
+                collection query uses string expr in string field
+        expected: query successfully
+        """
+        # 1.  create a collection
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=False)[0:2]
+        
+        nb = 3000
+        df = cf.gen_default_list_data(nb)
+        df[2] = [""for _ in range(nb)] 
+
+        collection_w.insert(df)
+        assert collection_w.num_entities == nb
+        collection_w.load()
+        
+        collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
+        assert collection_w.has_index()[0]
+
+        
+        output_fields = [default_int_field_name, default_float_field_name, default_string_field_name]
+        
+        expr = "varchar == \"\""
+        res, _ = collection_w.query(expr, output_fields=output_fields)
+
+        assert len(res) == nb
+        
