@@ -1167,9 +1167,9 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 	sealedSegments := node.metaReplica.getSealedSegments()
 	shardClusters := node.ShardClusterService.GetShardClusters()
 
-	growinsgSegmentIDs := make([]int64, 0, len(growingSegments))
+	channelGrowingsMap := make(map[string][]int64)
 	for _, s := range growingSegments {
-		growinsgSegmentIDs = append(growinsgSegmentIDs, s.ID())
+		channelGrowingsMap[s.vChannelID] = append(channelGrowingsMap[s.vChannelID], s.ID())
 	}
 
 	segmentVersionInfos := make([]*querypb.SegmentVersionInfo, 0, len(sealedSegments))
@@ -1196,9 +1196,10 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 			mapping[info.segmentID] = info.nodeID
 		}
 		view := &querypb.LeaderView{
-			Collection:       sc.collectionID,
-			Channel:          sc.vchannelName,
-			SegmentNodePairs: mapping,
+			Collection:        sc.collectionID,
+			Channel:           sc.vchannelName,
+			SegmentNodePairs:  mapping,
+			GrowingSegmentIDs: channelGrowingsMap[sc.vchannelName],
 		}
 		leaderViews = append(leaderViews, view)
 
@@ -1211,12 +1212,11 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 	}
 
 	return &querypb.GetDataDistributionResponse{
-		Status:            &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-		NodeID:            node.session.ServerID,
-		GrowingSegmentIDs: growinsgSegmentIDs,
-		Segments:          segmentVersionInfos,
-		Channels:          channelVersionInfos,
-		LeaderViews:       leaderViews,
+		Status:      &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		NodeID:      node.session.ServerID,
+		Segments:    segmentVersionInfos,
+		Channels:    channelVersionInfos,
+		LeaderViews: leaderViews,
 	}, nil
 }
 

@@ -414,16 +414,16 @@ message GetDataDistributionRequest {
 message GetDataDistributionResponse {
   common.Status status = 1;
   int64 nodeID = 2;
-  repeated int64 growing_segmentIDs = 3;
-  repeated SegmentVersionInfo segments = 4;
-  repeated ChannelVersionInfo channels = 5;
-  repeated LeaderView leaderViews = 6;
+  repeated SegmentVersionInfo segments = 3;
+  repeated ChannelVersionInfo channels = 4;
+  repeated LeaderView leader_views = 5;
 }
 
 message LeaderView {
   int64 collection = 1;
   string channel = 2;
-  map<int64, int64> segmentNodePairs = 3;
+  map<int64, int64> segment_node_pairs = 3;
+  repeated int64 growing_segmentIDs = 4;
 }
 
 
