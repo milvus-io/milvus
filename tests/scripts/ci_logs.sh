@@ -81,7 +81,7 @@ done
 
 LOG_DIR=${LOG_DIR:-/ci-logs/}
 RELEASE_NAME=${RELEASE_NAME:-milvus-testing}
-RELEASE_LOG_DIR=/${RELEASE_NAME}
+RELEASE_LOG_DIR=${LOG_DIR}/${RELEASE_NAME}
 if [[ ! -d ${RELEASE_LOG_DIR} ]] ;then 
   mkdir -p ${RELEASE_LOG_DIR}
 fi 
@@ -93,16 +93,4 @@ do
   mv  ${log_file} ${RELEASE_LOG_DIR}/`echo ${file_name} | sed 's/jenkins.var.log.containers.//g' `
 done 
 
-tar -zcvf ${ARTIFACTS_NAME:-artifacts}.tar.gz ${RELEASE_LOG_DIR}/*
-rm -rf ${RELEASE_LOG_DIR}
-
-remain_log_files=$(find ${LOG_DIR} -type f  -name "*${RELEASE_NAME}*")
-
-if [ -z "${remain_log_files:-}" ]; then
-  echo "No remain log files"
-else
-  echo "Still have log files & Remove again"
-  find ${LOG_DIR} -type f  -name "*${RELEASE_NAME}*" -exec rm -rf {} +
-  echo "Check if any remain log files  after using rm to delete again "
-  find ${LOG_DIR} -type f  -name "*${RELEASE_NAME}*"
-fi
+tar -zcvf ${ARTIFACTS_NAME:-artifacts}.tar.gz -C ${LOG_DIR} ${RELEASE_NAME} --ignore-failed-read --remove-files
