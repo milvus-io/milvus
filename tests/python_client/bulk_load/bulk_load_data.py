@@ -436,7 +436,7 @@ def prepare_bulk_load_json_files(row_based=True, rows=100, dim=128,
     return files
 
 
-def prepare_bulk_load_numpy_files(rows, dim, data_fields=[DataField.vec_field],
+def prepare_bulk_load_numpy_files(minio_endpoint="", bucket_name="milvus-bucket", rows=100, dim=128, data_fields=[DataField.vec_field],
                                   float_vector=True, file_nums=1, force=False):
     """
     Generate column based files based on params in numpy format and copy them to the minio
@@ -471,6 +471,6 @@ def prepare_bulk_load_numpy_files(rows, dim, data_fields=[DataField.vec_field],
                           data_fields=data_fields,
                           file_nums=file_nums, force=force)
 
-    copy_files_to_minio(host=minio, r_source=data_source, files=files, bucket_name=bucket_name, force=force)
+    copy_files_to_minio(host=minio_endpoint, r_source=data_source, files=files, bucket_name=bucket_name, force=force)
     return files
 
