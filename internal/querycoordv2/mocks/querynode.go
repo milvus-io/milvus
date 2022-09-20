@@ -63,14 +63,6 @@ func (node *MockQueryNode) Start() error {
 		err = node.server.Serve(lis)
 	}()
 
-	// Regiser
-	node.session.Init(typeutil.QueryNodeRole, node.addr, false, true)
-	node.ID = node.session.ServerID
-	node.session.Register()
-	log.Debug("mock QueryNode started",
-		zap.Int64("nodeID", node.ID),
-		zap.String("nodeAddr", node.addr))
-
 	successStatus := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}
@@ -102,6 +94,14 @@ func (node *MockQueryNode) Start() error {
 			segment.GetSegmentID())
 		node.segmentVersion[segment.GetSegmentID()] = req.GetVersion()
 	}).Return(successStatus, nil).Maybe()
+
+	// Regiser
+	node.session.Init(typeutil.QueryNodeRole, node.addr, false, true)
+	node.ID = node.session.ServerID
+	node.session.Register()
+	log.Debug("mock QueryNode started",
+		zap.Int64("nodeID", node.ID),
+		zap.String("nodeAddr", node.addr))
 
 	return err
 }
