@@ -92,7 +92,7 @@ class TestChaos(TestChaosBase):
 		self.health_checkers = checkers
 
 	@pytest.fixture(scope="function", autouse=True)
-	def prepare_bulk_load(self, nb=1000, row_based=True):
+	def prepare_bulk_load(self, nb=1000, is_row_based=True):
 		if Op.bulk_load not in self.health_checkers:
 			log.info("bulk_load checker is not in  health checkers, skip prepare bulk load")
 			return
@@ -107,25 +107,25 @@ class TestChaos(TestChaosBase):
 		schema = cf.gen_default_collection_schema()
 		data = cf.gen_default_list_data_for_bulk_load(nb=nb)
 		fields_name = [field.name for field in schema.fields]
-		if not row_based:
+		if not is_row_based:
 			data_dict = dict(zip(fields_name, data))
-		if row_based:
+		if is_row_based:
 			entities = []
 			for i in range(nb):
 				entity_value = [field_values[i] for field_values in data]
 				entity = dict(zip(fields_name, entity_value))
 				entities.append(entity)
 			data_dict = {"rows": entities}
-		file_name = "bulk_load_data_source.json"
+		file_name = "/tmp/ci_logs/bulk_load_data_source.json"
 		files = [file_name]
 		#TODO: npy file type is not supported so far
 		log.info("generate bulk load file")
 		with open(file_name, "w") as f:
-			f.write(json.dumps(data_dict))
+			f.write(json.dumps(data_dict, indent=4))
 		log.info("upload file to minio")
 		client = Minio(minio_endpoint, access_key="minioadmin", secret_key="minioadmin", secure=False)
 		client.fput_object(bucket_name, file_name, file_name)
-		self.health_checkers[Op.bulk_load].update(schema=schema, files=files, row_based=row_based)
+		self.health_checkers[Op.bulk_load].update(schema=schema, files=files, is_row_based=is_row_based)
 		log.info("prepare data for bulk load done")
 
 	def teardown(self):
@@ -139,8 +139,8 @@ class TestChaos(TestChaosBase):
 		log.info(f'Alive threads: {threading.enumerate()}')
 
 	@pytest.mark.tags(CaseLabel.L3)
-	@pytest.mark.parametrize("target_component", ["minio"]) # "minio", "proxy", "rootcoord", "datacoord", "datanode", "etcd"
-	@pytest.mark.parametrize("chaos_type", ["pod_kill"]) # "pod_kill", "pod_failure"
+	@pytest.mark.parametrize("target_component", ["datanode, datacoord"]) # "minio", "proxy", "rootcoord", "datacoord", "datanode", "etcd"
+	@pytest.mark.parametrize("chaos_type", ["pod_kill, pod_failure"]) # "pod_kill", "pod_failure"
 	def test_bulk_load(self, chaos_type, target_component):
 		# start the monitor threads to check the milvus ops
 		log.info("*********************Chaos Test Start**********************")
@@ -155,8 +155,8 @@ class TestChaos(TestChaosBase):
 		update_key_value(chaos_config, "app.kubernetes.io/instance", release_name)
 		self._chaos_config = chaos_config  # cache the chaos config for tear down
 		log.info(f"chaos_config: {chaos_config}")
-		# wait 20s
-		sleep(constants.WAIT_PER_OP * 10)
+		# wait 120s
+		sleep(constants.WAIT_PER_OP * 12)
 		# assert statistic:all ops 100% succ
 		log.info("******1st assert before chaos: ")
 		assert_statistic(self.health_checkers)
@@ -170,8 +170,8 @@ class TestChaos(TestChaosBase):
 		sleep(constants.WAIT_PER_OP * 10)
 		# reset counting
 		cc.reset_counting(self.health_checkers)
-		# wait 120s
-		sleep(constants.CHAOS_DURATION)
+		# wait 240s
+		sleep(240)
 		log.info(f'Alive threads: {threading.enumerate()}')
 		# assert statistic
 		log.info("******2nd assert after chaos injected: ")
@@ -196,8 +196,8 @@ class TestChaos(TestChaosBase):
 		self.health_checkers[Op.bulk_load].recheck_failed_task = True
 		# reset counting again
 		cc.reset_counting(self.health_checkers)
-		# wait 50s (varies by feature)
-		sleep(constants.WAIT_PER_OP * 10)
+		# wait 120s (varies by feature)
+		sleep(constants.WAIT_PER_OP * 12)
 		# assert statistic: all ops success again
 		log.info("******3rd assert after chaos deleted: ")
 		assert_statistic(self.health_checkers)

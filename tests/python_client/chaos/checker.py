@@ -550,25 +550,25 @@ class BulkLoadChecker(Checker):
         self.utility_wrap = ApiUtilityWrapper()
         self.schema = cf.gen_default_collection_schema()
         self.files = files
-        self.row_based = True
+        self.is_row_based = True
         self.recheck_failed_task = False
         self.failed_tasks = []
         self.c_name = None
 
-    def update(self, files=None, schema=None, row_based=None):
+    def update(self, files=None, schema=None, is_row_based=None):
         if files is not None:
             self.files = files
         if schema is not None:
             self.schema = schema
-        if row_based is not None:
-            self.row_based = row_based
+        if is_row_based is not None:
+            self.is_row_based = is_row_based
 
     @trace()
     def bulk_load(self):
         task_ids, result = self.utility_wrap.bulk_load(collection_name=self.c_name,
-                                                       row_based=self.row_based,
+                                                       is_row_based=self.is_row_based,
                                                        files=self.files)
-        completed, result = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids, timeout=30)
+        completed, result = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids, timeout=60)
         return task_ids, completed
 
     @exception_handler()

@@ -9,7 +9,7 @@ allure-pytest==2.7.0
 pytest-print==0.2.1
 pytest-level==0.1.1
 pytest-xdist==2.5.0
-pymilvus==2.2.0.dev33
+pymilvus==2.2.0.dev38
 pytest-rerunfailures==9.1.1
 git+https://github.com/Projectplace/pytest-tags
 ndg-httpsclient

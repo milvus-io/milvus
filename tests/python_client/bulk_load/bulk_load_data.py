@@ -1,14 +1,12 @@
 import time
 import os
+import pathlib
 import numpy as np
 import random
 from sklearn import preprocessing
 from common.common_func import gen_unique_str
 from minio_comm import copy_files_to_minio
 
-# TODO: remove hardcode with input configurations
-minio = "minio_address:port"     # minio service and port
-bucket_name = "milvus-bulk-load"  # bucket name of milvus is using
 
 data_source = "/tmp/bulk_load_data"
 
@@ -35,8 +33,8 @@ class DataErrorType:
     str_on_vector_field = "str_on_vector_field"
 
 
-def gen_file_prefix(row_based=True, auto_id=True, prefix=""):
-    if row_based:
+def gen_file_prefix(is_row_based=True, auto_id=True, prefix=""):
+    if is_row_based:
         if auto_id:
             return f"{prefix}_row_auto"
         else:
@@ -279,7 +277,7 @@ def gen_int_or_float_in_numpy_file(dir, data_field, rows, start=0, force=False):
     return file_name
 
 
-def gen_file_name(row_based, rows, dim, auto_id, str_pk,
+def gen_file_name(is_row_based, rows, dim, auto_id, str_pk,
                   float_vector, data_fields, file_num, file_type, err_type):
     row_suffix = entity_suffix(rows)
     field_suffix = ""
@@ -297,7 +295,7 @@ def gen_file_name(row_based, rows, dim, auto_id, str_pk,
     pk = ""
     if str_pk:
         pk = "str_pk_"
-    prefix = gen_file_prefix(row_based=row_based, auto_id=auto_id, prefix=err_type)
+    prefix = gen_file_prefix(is_row_based=is_row_based, auto_id=auto_id, prefix=err_type)
 
     file_name = f"{prefix}_{pk}{vt}{field_suffix}{dim}d_{row_suffix}_{file_num}{file_type}"
     return file_name
@@ -312,7 +310,7 @@ def gen_subfolder(root, dim, rows, file_num):
     return subfolder
 
 
-def gen_json_files(row_based, rows, dim, auto_id, str_pk,
+def gen_json_files(is_row_based, rows, dim, auto_id, str_pk,
                    float_vector, data_fields, file_nums, multi_folder,
                    file_type, err_type, force, **kwargs):
     # gen json files
@@ -322,7 +320,7 @@ def gen_json_files(row_based, rows, dim, auto_id, str_pk,
     if not auto_id and DataField.pk_field not in data_fields:
         data_fields.append(DataField.pk_field)
     for i in range(file_nums):
-        file_name = gen_file_name(row_based=row_based, rows=rows, dim=dim,
+        file_name = gen_file_name(is_row_based=is_row_based, rows=rows, dim=dim,
                                   auto_id=auto_id, str_pk=str_pk, float_vector=float_vector,
                                   data_fields=data_fields, file_num=i, file_type=file_type, err_type=err_type)
         file = f"{data_source}/{file_name}"
@@ -330,7 +328,7 @@ def gen_json_files(row_based, rows, dim, auto_id, str_pk,
             subfolder = gen_subfolder(root=data_source, dim=dim, rows=rows, file_num=i)
             file = f"{data_source}/{subfolder}/{file_name}"
         if not os.path.exists(file) or force:
-            if row_based:
+            if is_row_based:
                 gen_row_based_json_file(row_file=file, str_pk=str_pk, float_vect=float_vector,
                                         data_fields=data_fields, rows=rows, dim=dim,
                                         start_uid=start_uid, err_type=err_type, **kwargs)
@@ -374,15 +372,21 @@ def gen_npy_files(float_vector, rows, dim, data_fields, file_nums=1, force=False
     return files
 
 
-def prepare_bulk_load_json_files(row_based=True, rows=100, dim=128,
+def prepare_bulk_load_json_files(minio_endpoint="", bucket_name="milvus-bucket", is_row_based=True, rows=100, dim=128,
                                  auto_id=True, str_pk=False, float_vector=True,
                                  data_fields=[], file_nums=1, multi_folder=False,
                                  file_type=".json", err_type="", force=False, **kwargs):
     """
     Generate files based on the params in json format and copy them to minio
 
-    :param row_based: indicate the file(s) to be generated is row based or not
-    :type row_based: boolean
+    :param minio_endpoint: the minio_endpoint of minio
+    :type minio_endpoint: str
+
+    :param bucket_name: the bucket name of Milvus
+    :type bucket_name: str
+
+    :param is_row_based: indicate the file(s) to be generated is row based or not
+    :type is_row_based: boolean
 
     :param rows: the number entities to be generated in the file(s)
     :type rows: int
@@ -427,16 +431,16 @@ def prepare_bulk_load_json_files(row_based=True, rows=100, dim=128,
     :return list
         file names list
     """
-    files = gen_json_files(row_based=row_based, rows=rows, dim=dim,
+    files = gen_json_files(is_row_based=is_row_based, rows=rows, dim=dim,
                            auto_id=auto_id, str_pk=str_pk, float_vector=float_vector,
                            data_fields=data_fields, file_nums=file_nums, multi_folder=multi_folder,
                            file_type=file_type, err_type=err_type, force=force, **kwargs)
 
-    copy_files_to_minio(host=minio, r_source=data_source, files=files, bucket_name=bucket_name, force=force)
+    copy_files_to_minio(host=minio_endpoint, r_source=data_source, files=files, bucket_name=bucket_name, force=force)
     return files
 
 
-def prepare_bulk_load_numpy_files(rows, dim, data_fields=[DataField.vec_field],
+def prepare_bulk_load_numpy_files(minio_endpoint="", bucket_name="milvus-bucket", rows=100, dim=128, data_fields=[DataField.vec_field],
                                   float_vector=True, file_nums=1, force=False):
     """
     Generate column based files based on params in numpy format and copy them to the minio
@@ -471,6 +475,6 @@ def prepare_bulk_load_numpy_files(rows, dim, data_fields=[DataField.vec_field],
                           data_fields=data_fields,
                           file_nums=file_nums, force=force)
 
-    copy_files_to_minio(host=minio, r_source=data_source, files=files, bucket_name=bucket_name, force=force)
+    copy_files_to_minio(host=minio_endpoint, r_source=data_source, files=files, bucket_name=bucket_name, force=force)
     return files
 
