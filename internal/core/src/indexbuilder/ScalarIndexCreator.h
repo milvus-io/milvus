@@ -38,6 +38,9 @@ class ScalarIndexCreator : public IndexCreatorBase {
     std::string
     index_type();
 
+    void
+    parseConfig();
+
  private:
     scalar::IndexBasePtr index_ = nullptr;
     proto::indexcgo::TypeParams type_params_;
