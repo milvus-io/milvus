@@ -3,10 +3,10 @@
 // When scheduling a job that gets automatically triggered by changes,
 // you need to include a [cronjob] tag within the commit message.
 String cron_timezone = 'TZ=Asia/Shanghai'
-String cron_string = BRANCH_NAME == "master" ? "50 22,2 * * * " : ""
+String cron_string = BRANCH_NAME == "master" ? "50 22,4 * * * " : ""
 
 // Make timeout 4 hours so that we can run two nightly during the ci
-int total_timeout_minutes = 4 * 60
+int total_timeout_minutes = 6 * 60
 def imageTag=''
 def chart_version='3.1.11'
 pipeline {
@@ -178,7 +178,7 @@ pipeline {
                                                 def release_name=sh(returnStdout: true, script: './get_release_name.sh')
                                                 def clusterEnabled = "false"
                                                 def mqMode='pulsar'
-                                                int e2e_timeout_seconds = 2 * 60 * 60
+                                                int e2e_timeout_seconds = 5 * 60 * 60
                                                 def tag="L0 L1 L2"
                                                 if ("${MILVUS_SERVER_TYPE}" == "distributed-pulsar") {
                                                     clusterEnabled = "true"
