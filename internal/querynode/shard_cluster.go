@@ -730,11 +730,16 @@ func (sc *ShardCluster) releaseSegments(ctx context.Context, req *querypb.Releas
 		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
 		zap.String("scope", req.GetScope().String()))
 
-	if req.GetScope() != querypb.DataScope_Streaming {
-		offlineSegments := make(typeutil.UniqueSet)
+	offlineSegments := make(typeutil.UniqueSet)
+	if req.Scope != querypb.DataScope_Streaming {
 		offlineSegments.Insert(req.GetSegmentIDs()...)
+	}
 
+	var lastVersionID int64
+	var err error
+	func() {
 		sc.mutVersion.Lock()
+		defer sc.mutVersion.Unlock()
 
 		var allocations SegmentsStatus
 		if sc.currentVersion != nil {
@@ -750,7 +755,6 @@ func (sc *ShardCluster) releaseSegments(ctx context.Context, req *querypb.Releas
 		version := NewShardClusterVersion(versionID, allocations, sc.currentVersion)
 		sc.versions.Store(versionID, version)
 
-		var lastVersionID int64
 		// currentVersion shall be not nil
 		if sc.currentVersion != nil {
 			// wait for last version search done
@@ -760,10 +764,31 @@ func (sc *ShardCluster) releaseSegments(ctx context.Context, req *querypb.Releas
 
 		// set current version to new one
 		sc.currentVersion = version
-		sc.mutVersion.Unlock()
-		sc.cleanupVersion(lastVersionID)
 
-		sc.mut.Lock()
+		// try to release segments from nodes
+		node, ok := sc.getNode(req.GetNodeID())
+		if !ok {
+			log.Warn("node not in cluster", zap.Int64("nodeID", req.NodeID))
+			err = fmt.Errorf("node %d not in cluster ", req.NodeID)
+			return
+		}
+
+		resp, rerr := node.client.ReleaseSegments(ctx, req)
+		if err != nil {
+			log.Warn("failed to dispatch release segment request", zap.Error(err))
+			err = rerr
+			return
+		}
+		if resp.GetErrorCode() != commonpb.ErrorCode_Success {
+			log.Warn("follower release segment failed", zap.String("reason", resp.GetReason()))
+			err = fmt.Errorf("follower %d failed to release segment, reason %s", req.NodeID, resp.GetReason())
+		}
+	}()
+	sc.cleanupVersion(lastVersionID)
+
+	sc.mut.Lock()
+	// do not delete segment if data scope is streaming
+	if req.GetScope() != querypb.DataScope_Streaming {
 		for _, segmentID := range req.SegmentIDs {
 			info, ok := sc.segments[segmentID]
 			if ok {
@@ -773,26 +798,10 @@ func (sc *ShardCluster) releaseSegments(ctx context.Context, req *querypb.Releas
 				}
 			}
 		}
-		sc.mut.Unlock()
 	}
+	sc.mut.Unlock()
 
-	// try to release segments from nodes
-	node, ok := sc.getNode(req.GetNodeID())
-	if !ok {
-		log.Warn("node not in cluster", zap.Int64("nodeID", req.NodeID))
-		return fmt.Errorf("node %d not in cluster ", req.NodeID)
-	}
-
-	resp, err := node.client.ReleaseSegments(ctx, req)
-	if err != nil {
-		log.Warn("failed to dispatch release segment request", zap.Error(err))
-		return err
-	}
-	if resp.GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("follower release segment failed", zap.String("reason", resp.GetReason()))
-		return fmt.Errorf("follower %d failed to release segment, reason %s", req.NodeID, resp.GetReason())
-	}
-	return nil
+	return err
 }
 
 // appendHandoff adds the change info into pending list and returns the token.

@@ -1187,6 +1187,9 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 	channelVersionInfos := make([]*querypb.ChannelVersionInfo, 0, len(shardClusters))
 	leaderViews := make([]*querypb.LeaderView, 0, len(shardClusters))
 	for _, sc := range shardClusters {
+		if !node.queryShardService.hasQueryShard(sc.vchannelName) {
+			continue
+		}
 		segmentInfos := sc.GetSegmentInfos()
 		mapping := make(map[int64]int64)
 		for _, info := range segmentInfos {

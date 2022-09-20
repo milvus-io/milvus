@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/suite"
 )
@@ -83,8 +84,18 @@ func (suite *ChannelDistManagerSuite) TestGetBy() {
 
 func (suite *ChannelDistManagerSuite) TestGetShardLeader() {
 	replicas := []*Replica{
-		{Nodes: typeutil.NewUniqueSet(suite.nodes[0], suite.nodes[2])},
-		{Nodes: typeutil.NewUniqueSet(suite.nodes[1])},
+		{
+			Replica: &querypb.Replica{
+				CollectionID: suite.collection,
+			},
+			Nodes: typeutil.NewUniqueSet(suite.nodes[0], suite.nodes[2]),
+		},
+		{
+			Replica: &querypb.Replica{
+				CollectionID: suite.collection,
+			},
+			Nodes: typeutil.NewUniqueSet(suite.nodes[1]),
+		},
 	}
 
 	// Test on replica 0

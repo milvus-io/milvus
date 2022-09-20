@@ -94,7 +94,9 @@ func (m *ChannelDistManager) GetShardLeadersByReplica(replica *Replica) map[stri
 	for node := range replica.Nodes {
 		channels := m.channels[node]
 		for _, dmc := range channels {
-			ret[dmc.GetChannelName()] = node
+			if dmc.GetCollectionID() == replica.GetCollectionID() {
+				ret[dmc.GetChannelName()] = node
+			}
 		}
 	}
 	return ret
