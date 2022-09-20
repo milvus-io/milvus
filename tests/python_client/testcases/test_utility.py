@@ -1728,6 +1728,7 @@ class TestUtilityAdvanced(TestcaseBase):
                                        check_items={ct.err_code: 1, ct.err_msg: "must be in the same replica group"})
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="querycoordv2")
     def test_handoff_query_search(self):
         """
         target: test query search after handoff
