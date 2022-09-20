@@ -164,13 +164,13 @@ func (c *SegmentChecker) findNeedReleasedGrowingSegments(replica *meta.Replica) 
 	ret := make(map[int64][]int64, 0) // leaderID -> segment ids
 	leaders := c.dist.ChannelDistManager.GetShardLeadersByReplica(replica)
 	for shard, leaderID := range leaders {
-		lview := c.dist.LeaderViewManager.GetLeaderShardView(leaderID, shard)
-		if lview == nil {
+		leaderView := c.dist.LeaderViewManager.GetLeaderShardView(leaderID, shard)
+		if leaderView == nil {
 			continue
 		}
 		// find growing segments from leaderview's sealed segments
 		// because growing segments should be released only after loading the compaction created segment successfully.
-		for sid := range lview.Segments {
+		for sid := range leaderView.Segments {
 			segment := c.targetMgr.GetSegment(sid)
 			if segment == nil {
 				continue
@@ -178,8 +178,8 @@ func (c *SegmentChecker) findNeedReleasedGrowingSegments(replica *meta.Replica) 
 
 			sources := append(segment.GetCompactionFrom(), segment.GetID())
 			for _, source := range sources {
-				if lview.GrowingSegments.Contain(source) {
-					ret[lview.ID] = append(ret[lview.ID], source)
+				if leaderView.GrowingSegments.Contain(source) {
+					ret[leaderView.ID] = append(ret[leaderView.ID], source)
 				}
 			}
 		}
