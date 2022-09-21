@@ -26,49 +26,49 @@ class BoolIndexTest : public ::testing::Test {
             *(half.mutable_data()->Add()) = (i % 2) == 0;
         }
 
-        all_true_ds = GenDsFromPB(all_true);
-        all_false_ds = GenDsFromPB(all_false);
-        half_ds = GenDsFromPB(half);
+        //        all_true_ds = GenDsFromPB(all_true);
+        //        all_false_ds = GenDsFromPB(all_false);
+        //        half_ds = GenDsFromPB(half);
     }
 
     void
     TearDown() override {
-        delete[](char*)(knowhere::GetDatasetTensor(all_true_ds));
-        delete[](char*)(knowhere::GetDatasetTensor(all_false_ds));
-        delete[](char*)(knowhere::GetDatasetTensor(half_ds));
+        //        delete[](char*)(knowhere::GetDatasetTensor(all_true_ds));
+        //        delete[](char*)(knowhere::GetDatasetTensor(all_false_ds));
+        //        delete[](char*)(knowhere::GetDatasetTensor(half_ds));
     }
 
  protected:
     schemapb::BoolArray all_true;
     schemapb::BoolArray all_false;
     schemapb::BoolArray half;
-    knowhere::DatasetPtr all_true_ds;
-    knowhere::DatasetPtr all_false_ds;
-    knowhere::DatasetPtr half_ds;
+    //    knowhere::DatasetPtr all_true_ds;
+    //    knowhere::DatasetPtr all_false_ds;
+    //    knowhere::DatasetPtr half_ds;
     size_t n;
     std::vector<ScalarTestParams> params;
 };
 
 TEST_F(BoolIndexTest, Constructor) {
-    auto index = milvus::scalar::CreateBoolIndex();
+    auto index = milvus::index::CreateBoolIndex();
 }
 
 TEST_F(BoolIndexTest, Count) {
     {
-        auto index = milvus::scalar::CreateBoolIndex();
-        index->BuildWithDataset(all_true_ds);
+        auto index = milvus::index::CreateBoolIndex();
+        index->Build(all_true.data_size(), all_true.data().data());
         ASSERT_EQ(n, index->Count());
     }
 
     {
-        auto index = milvus::scalar::CreateBoolIndex();
-        index->BuildWithDataset(all_false_ds);
+        auto index = milvus::index::CreateBoolIndex();
+        index->Build(all_false.data_size(), all_false.data().data());
         ASSERT_EQ(n, index->Count());
     }
 
     {
-        auto index = milvus::scalar::CreateBoolIndex();
-        index->BuildWithDataset(half_ds);
+        auto index = milvus::index::CreateBoolIndex();
+        index->Build(half.data_size(), half.data().data());
         ASSERT_EQ(n, index->Count());
     }
 }
@@ -78,8 +78,8 @@ TEST_F(BoolIndexTest, In) {
     auto false_test = std::make_unique<bool>(false);
 
     {
-        auto index = milvus::scalar::CreateBoolIndex();
-        index->BuildWithDataset(all_true_ds);
+        auto index = milvus::index::CreateBoolIndex();
+        index->Build(all_true.data_size(), all_true.data().data());
 
         auto bitset1 = index->In(1, true_test.get());
         ASSERT_TRUE(bitset1->any());
@@ -89,8 +89,8 @@ TEST_F(BoolIndexTest, In) {
     }
 
     {
-        auto index = milvus::scalar::CreateBoolIndex();
-        index->BuildWithDataset(all_false_ds);
+        auto index = milvus::index::CreateBoolIndex();
+        index->Build(all_false.data_size(), all_false.data().data());
 
         auto bitset1 = index->In(1, true_test.get());
         ASSERT_TRUE(bitset1->none());
@@ -100,8 +100,8 @@ TEST_F(BoolIndexTest, In) {
     }
 
     {
-        auto index = milvus::scalar::CreateBoolIndex();
-        index->BuildWithDataset(half_ds);
+        auto index = milvus::index::CreateBoolIndex();
+        index->Build(half.data_size(), half.data().data());
 
         auto bitset1 = index->In(1, true_test.get());
         for (size_t i = 0; i < n; i++) {
@@ -120,8 +120,8 @@ TEST_F(BoolIndexTest, NotIn) {
     auto false_test = std::make_unique<bool>(false);
 
     {
-        auto index = milvus::scalar::CreateBoolIndex();
-        index->BuildWithDataset(all_true_ds);
+        auto index = milvus::index::CreateBoolIndex();
+        index->Build(all_true.data_size(), all_true.data().data());
 
         auto bitset1 = index->NotIn(1, true_test.get());
         ASSERT_TRUE(bitset1->none());
@@ -131,8 +131,8 @@ TEST_F(BoolIndexTest, NotIn) {
     }
 
     {
-        auto index = milvus::scalar::CreateBoolIndex();
-        index->BuildWithDataset(all_false_ds);
+        auto index = milvus::index::CreateBoolIndex();
+        index->Build(all_false.data_size(), all_false.data().data());
 
         auto bitset1 = index->NotIn(1, true_test.get());
         ASSERT_TRUE(bitset1->any());
@@ -142,8 +142,8 @@ TEST_F(BoolIndexTest, NotIn) {
     }
 
     {
-        auto index = milvus::scalar::CreateBoolIndex();
-        index->BuildWithDataset(half_ds);
+        auto index = milvus::index::CreateBoolIndex();
+        index->Build(half.data_size(), half.data().data());
 
         auto bitset1 = index->NotIn(1, true_test.get());
         for (size_t i = 0; i < n; i++) {
@@ -162,10 +162,10 @@ TEST_F(BoolIndexTest, Codec) {
     auto false_test = std::make_unique<bool>(false);
 
     {
-        auto index = milvus::scalar::CreateBoolIndex();
-        index->BuildWithDataset(all_true_ds);
+        auto index = milvus::index::CreateBoolIndex();
+        index->Build(all_true.data_size(), all_true.data().data());
 
-        auto copy_index = milvus::scalar::CreateBoolIndex();
+        auto copy_index = milvus::index::CreateBoolIndex();
         copy_index->Load(index->Serialize(nullptr));
 
         auto bitset1 = copy_index->NotIn(1, true_test.get());
@@ -176,10 +176,10 @@ TEST_F(BoolIndexTest, Codec) {
     }
 
     {
-        auto index = milvus::scalar::CreateBoolIndex();
-        index->BuildWithDataset(all_false_ds);
+        auto index = milvus::index::CreateBoolIndex();
+        index->Build(all_false.data_size(), all_false.data().data());
 
-        auto copy_index = milvus::scalar::CreateBoolIndex();
+        auto copy_index = milvus::index::CreateBoolIndex();
         copy_index->Load(index->Serialize(nullptr));
 
         auto bitset1 = copy_index->NotIn(1, true_test.get());
@@ -190,10 +190,10 @@ TEST_F(BoolIndexTest, Codec) {
     }
 
     {
-        auto index = milvus::scalar::CreateBoolIndex();
-        index->BuildWithDataset(half_ds);
+        auto index = milvus::index::CreateBoolIndex();
+        index->Build(half.data_size(), half.data().data());
 
-        auto copy_index = milvus::scalar::CreateBoolIndex();
+        auto copy_index = milvus::index::CreateBoolIndex();
         copy_index->Load(index->Serialize(nullptr));
 
         auto bitset1 = copy_index->NotIn(1, true_test.get());

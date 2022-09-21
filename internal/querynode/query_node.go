@@ -17,11 +17,12 @@
 package querynode
 
 /*
-#cgo pkg-config: milvus_segcore
+#cgo pkg-config: milvus_segcore milvus_common
 
 #include "segcore/collection_c.h"
 #include "segcore/segment_c.h"
 #include "segcore/segcore_init_c.h"
+#include "common/init_c.h"
 
 */
 import "C"
@@ -29,7 +30,6 @@ import "C"
 import (
 	"context"
 	"fmt"
-	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"os"
 	"path"
 	"path/filepath"
@@ -57,6 +57,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/concurrency"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -215,6 +217,9 @@ func (node *QueryNode) InitSegcore() {
 	// override segcore index slice size
 	cIndexSliceSize := C.int64_t(Params.CommonCfg.IndexSliceSize)
 	C.SegcoreSetIndexSliceSize(cIndexSliceSize)
+
+	initcore.InitLocalStorageConfig(&Params)
+	initcore.InitMinioConfig(&Params)
 }
 
 // Init function init historical and streaming module to manage segments

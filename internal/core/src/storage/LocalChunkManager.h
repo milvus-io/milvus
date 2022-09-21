@@ -42,7 +42,7 @@ class LocalChunkManager : public ChunkManager {
     static LocalChunkManager&
     GetInstance() {
         // thread-safe enough after c++ 11
-        static LocalChunkManager instance(ChunkMangerConfig::GetLocalBucketName());
+        static LocalChunkManager instance(ChunkMangerConfig::GetLocalRootPath());
         return instance;
     }
 

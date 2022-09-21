@@ -11,11 +11,7 @@
 
 #include <cmath>
 
-#include "knowhere/index/VecIndex.h"
-#include "knowhere/index/vector_index/ConfAdapter.h"
-#include "knowhere/index/vector_index/ConfAdapterMgr.h"
-#include "knowhere/index/vector_index/helpers/IndexParameter.h"
-#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
+#include "common/QueryInfo.h"
 #include "query/SearchBruteForce.h"
 #include "query/SearchOnSealed.h"
 #include "query/helper.h"
@@ -49,18 +45,13 @@ SearchOnSealedIndex(const Schema& schema,
         auto conf = search_info.search_params_;
         knowhere::SetMetaTopk(conf, search_info.topk_);
         knowhere::SetMetaMetricType(conf, field_indexing->metric_type_);
-        auto index_type = field_indexing->indexing_->index_type();
-        auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_type);
-        try {
-            adapter->CheckSearch(conf, index_type, field_indexing->indexing_->index_mode());
-        } catch (std::exception& e) {
-            AssertInfo(false, e.what());
-        }
-        return field_indexing->indexing_->Query(ds, conf, bitset);
+        auto vec_index = dynamic_cast<index::VectorIndex*>(field_indexing->indexing_.get());
+        auto index_type = vec_index->GetIndexType();
+        return vec_index->Query(ds, search_info, bitset);
     }();
 
-    auto ids = knowhere::GetDatasetIDs(final);
-    float* distances = (float*)knowhere::GetDatasetDistance(final);
+    auto ids = final->seg_offsets_.data();
+    float* distances = final->distances_.data();
 
     auto total_num = num_queries * topk;
     if (round_decimal != -1) {

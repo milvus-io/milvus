@@ -224,6 +224,7 @@ message FieldIndexInfo {
   repeated common.KeyValuePair index_params = 6;
   repeated string index_file_paths = 7;
   int64 index_size = 8;
+  int64 index_version = 9;
 }
 
 message LoadSegmentsRequest {

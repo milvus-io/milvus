@@ -15,7 +15,7 @@
 // limitations under the License.
 
 #include "knowhere/common/BinarySet.h"
-#include "common/vector_index_c.h"
+#include "common/binary_set_c.h"
 
 CStatus
 NewBinarySet(CBinarySet* c_binary_set) {

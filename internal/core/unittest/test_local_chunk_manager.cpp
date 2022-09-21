@@ -31,7 +31,8 @@ class LocalChunkManagerTest : public testing::Test {
 
     virtual void
     SetUp() {
-        ChunkMangerConfig::SetLocalBucketName("/tmp/local-test-dir");
+        std::string local_path_prefix = "/tmp/local-test-dir";
+        ChunkMangerConfig::SetLocalRootPath(local_path_prefix);
     }
 };
 

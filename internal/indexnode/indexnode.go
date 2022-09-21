@@ -48,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
@@ -153,6 +154,9 @@ func (i *IndexNode) initKnowhere() {
 	// override segcore index slice size
 	cIndexSliceSize := C.int64_t(Params.CommonCfg.IndexSliceSize)
 	C.IndexBuilderSetIndexSliceSize(cIndexSliceSize)
+
+	initcore.InitLocalStorageConfig(&Params)
+	initcore.InitMinioConfig(&Params)
 }
 
 func (i *IndexNode) initSession() error {

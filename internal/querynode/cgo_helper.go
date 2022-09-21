@@ -17,11 +17,12 @@
 package querynode
 
 /*
-#cgo pkg-config: milvus_segcore
+#cgo pkg-config: milvus_segcore milvus_storage
 
 #include "segcore/collection_c.h"
 #include "common/type_c.h"
 #include "segcore/segment_c.h"
+#include "storage/storage_c.h"
 */
 import "C"
 
@@ -79,4 +80,17 @@ func GetCProtoBlob(cProto *C.CProto) []byte {
 	lease, blob := cgoconverter.UnsafeGoBytes(&cProto.proto_blob, int(cProto.proto_size))
 	cgoconverter.Extract(lease)
 	return blob
+}
+
+func GetLocalUsedSize() (int64, error) {
+	var availableSize int64
+	cSize := C.int64_t(availableSize)
+
+	status := C.GetLocalUsedSize(&cSize)
+	err := HandleCStatus(&status, "get local used size failed")
+	if err != nil {
+		return 0, err
+	}
+
+	return availableSize, nil
 }

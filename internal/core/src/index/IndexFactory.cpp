@@ -1,48 +1,94 @@
-// Copyright (C) 2019-2020 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 #include "index/IndexFactory.h"
-#include "index/ScalarIndexSort.h"
-#include "index/StringIndexMarisa.h"
+#include "index/VectorMemIndex.h"
+#include "index/Utils.h"
+#include "index/Meta.h"
 
-namespace milvus::scalar {
+#ifdef BUILD_DISK_ANN
+#include "index/VectorDiskIndex.h"
+#endif
+
+namespace milvus::index {
 
 IndexBasePtr
-IndexFactory::CreateIndex(CDataType dtype, const std::string& index_type) {
-    switch (dtype) {
-        case Bool:
-            return CreateIndex<bool>(index_type);
-        case Int8:
-            return CreateIndex<int8_t>(index_type);
-        case Int16:
-            return CreateIndex<int16_t>(index_type);
-        case Int32:
-            return CreateIndex<int32_t>(index_type);
-        case Int64:
-            return CreateIndex<int64_t>(index_type);
-        case Float:
-            return CreateIndex<float>(index_type);
-        case Double:
-            return CreateIndex<double>(index_type);
+IndexFactory::CreateIndex(const CreateIndexInfo& create_index_info, storage::FileManagerImplPtr file_manager) {
+    if (datatype_is_vector(create_index_info.field_type)) {
+        return CreateVectorIndex(create_index_info, file_manager);
+    }
 
-        case String:
-        case VarChar:
-            return CreateIndex<std::string>(index_type);
+    return CreateScalarIndex(create_index_info);
+}
 
-        case None:
-        case BinaryVector:
-        case FloatVector:
+IndexBasePtr
+IndexFactory::CreateScalarIndex(const CreateIndexInfo& create_index_info) {
+    auto data_type = create_index_info.field_type;
+    auto index_type = create_index_info.index_type;
+
+    switch (data_type) {
+        // create scalar index
+        case DataType::BOOL:
+            return CreateScalarIndex<bool>(index_type);
+        case DataType::INT8:
+            return CreateScalarIndex<int8_t>(index_type);
+        case DataType::INT16:
+            return CreateScalarIndex<int16_t>(index_type);
+        case DataType::INT32:
+            return CreateScalarIndex<int32_t>(index_type);
+        case DataType::INT64:
+            return CreateScalarIndex<int64_t>(index_type);
+        case DataType::FLOAT:
+            return CreateScalarIndex<float>(index_type);
+        case DataType::DOUBLE:
+            return CreateScalarIndex<double>(index_type);
+
+            // create string index
+        case DataType::STRING:
+        case DataType::VARCHAR:
+            return CreateScalarIndex<std::string>(index_type);
         default:
-            throw std::invalid_argument(std::string("invalid data type: ") + std::to_string(dtype));
+            throw std::invalid_argument(std::string("invalid data type to build index: ") +
+                                        std::to_string(int(data_type)));
     }
 }
 
-}  // namespace milvus::scalar
+IndexBasePtr
+IndexFactory::CreateVectorIndex(const CreateIndexInfo& create_index_info, storage::FileManagerImplPtr file_manager) {
+    auto data_type = create_index_info.field_type;
+    auto index_type = create_index_info.index_type;
+    auto metric_type = create_index_info.metric_type;
+    auto index_mode = create_index_info.index_mode;
+
+#ifdef BUILD_DISK_ANN
+    // create disk index
+    if (is_in_disk_list(index_type)) {
+        switch (data_type) {
+            case DataType::VECTOR_FLOAT: {
+                return std::make_unique<VectorDiskAnnIndex<float>>(index_type, metric_type, index_mode, file_manager);
+            }
+            default:
+                throw std::invalid_argument(std::string("invalid data type to build disk index: ") +
+                                            std::to_string(int(data_type)));
+        }
+    }
+#endif
+
+    // create mem index
+    return std::make_unique<VectorMemIndex>(index_type, metric_type, index_mode);
+}
+
+}  // namespace milvus::index

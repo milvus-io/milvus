@@ -1271,7 +1271,13 @@ func checkTrain(field *schemapb.FieldSchema, indexParams map[string]string) erro
 		return err
 	}
 
-	ok := adapter.CheckTrain(indexParams)
+	ok := adapter.CheckValidDataType(field.GetDataType())
+	if !ok {
+		log.Warn("Field data type don't support the index build type", zap.String("fieldDataType", field.GetDataType().String()), zap.String("indexType", indexType))
+		return fmt.Errorf("field data type %s don't support the index build type %s", field.GetDataType().String(), indexType)
+	}
+
+	ok = adapter.CheckTrain(indexParams)
 	if !ok {
 		log.Warn("Create index with invalid params", zap.Any("index_params", indexParams))
 		return fmt.Errorf("invalid index params: %v", indexParams)

@@ -28,8 +28,10 @@ type Blob = storage.Blob
 type CodecIndex interface {
 	Build(*Dataset) error
 	Serialize() ([]*Blob, error)
+	SerializeDiskIndex() ([]*Blob, error)
 	Load([]*Blob) error
 	Delete() error
+	CleanLocalData() error
 }
 
 var (
@@ -216,9 +218,47 @@ func (index *CgoIndex) Serialize() ([]*Blob, error) {
 		if err != nil {
 			return nil, err
 		}
+		size, err := GetBinarySetSize(cBinarySet, key)
+		if err != nil {
+			return nil, err
+		}
 		blob := &Blob{
 			Key:   key,
 			Value: value,
+			Size:  size,
+		}
+		ret = append(ret, blob)
+	}
+
+	return ret, nil
+}
+
+func (index *CgoIndex) SerializeDiskIndex() ([]*Blob, error) {
+	var cBinarySet C.CBinarySet
+
+	status := C.SerializeIndexToBinarySet(index.indexPtr, &cBinarySet)
+	defer func() {
+		if cBinarySet != nil {
+			C.DeleteBinarySet(cBinarySet)
+		}
+	}()
+	if err := HandleCStatus(&status, "failed to serialize index to binary set"); err != nil {
+		return nil, err
+	}
+
+	keys, err := GetBinarySetKeys(cBinarySet)
+	if err != nil {
+		return nil, err
+	}
+	ret := make([]*Blob, 0)
+	for _, key := range keys {
+		size, err := GetBinarySetSize(cBinarySet, key)
+		if err != nil {
+			return nil, err
+		}
+		blob := &Blob{
+			Key:  key,
+			Size: size,
 		}
 		ret = append(ret, blob)
 	}
@@ -258,4 +298,9 @@ func (index *CgoIndex) Delete() error {
 	status := C.DeleteIndex(index.indexPtr)
 	index.close = true
 	return HandleCStatus(&status, "failed to delete index")
+}
+
+func (index *CgoIndex) CleanLocalData() error {
+	status := C.CleanLocalData(index.indexPtr)
+	return HandleCStatus(&status, "failed to clean cached data on disk")
 }

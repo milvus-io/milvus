@@ -23,13 +23,6 @@
 #include "common/CDataType.h"
 #include "knowhere/index/Index.h"
 
-struct LoadIndexInfo {
-    int64_t field_id;
-    CDataType field_type;
-    std::map<std::string, std::string> index_params;
-    knowhere::IndexPtr index;
-};
-
 // NOTE: field_id can be system field
 // NOTE: Refer to common/SystemProperty.cpp for details
 // TODO: use arrow to pass field data instead of proto

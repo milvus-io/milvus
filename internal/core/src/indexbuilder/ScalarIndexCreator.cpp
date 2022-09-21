@@ -9,35 +9,53 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include "indexbuilder/helper.h"
 #include "indexbuilder/ScalarIndexCreator.h"
 #include "index/IndexFactory.h"
+#include "index/IndexInfo.h"
+#include "index/Meta.h"
+#include "index/Utils.h"
 
 #include <string>
 
 namespace milvus::indexbuilder {
 
-ScalarIndexCreator::ScalarIndexCreator(CDataType dtype, const char* type_params, const char* index_params) {
-    dtype_ = dtype;
+ScalarIndexCreator::ScalarIndexCreator(DataType dtype, const char* type_params, const char* index_params)
+    : dtype_(dtype) {
     // TODO: move parse-related logic to a common interface.
-    Helper::ParseFromString(type_params_, std::string(type_params));
-    Helper::ParseFromString(index_params_, std::string(index_params));
-    // TODO: create index according to the params.
-    index_ = scalar::IndexFactory::GetInstance().CreateIndex(dtype_, index_type());
+    milvus::index::ParseFromString(type_params_, std::string(type_params));
+    milvus::index::ParseFromString(index_params_, std::string(index_params));
+
+    for (auto i = 0; i < type_params_.params_size(); ++i) {
+        const auto& param = type_params_.params(i);
+        config_[param.key()] = param.value();
+    }
+
+    for (auto i = 0; i < index_params_.params_size(); ++i) {
+        const auto& param = index_params_.params(i);
+        config_[param.key()] = param.value();
+    }
+
+    milvus::index::CreateIndexInfo index_info;
+    index_info.field_type = dtype_;
+    index_info.index_type = index_type();
+    index_info.index_mode = IndexMode::MODE_CPU;
+    index_ = index::IndexFactory::GetInstance().CreateIndex(index_info, nullptr);
 }
 
 void
-ScalarIndexCreator::Build(const knowhere::DatasetPtr& dataset) {
-    index_->BuildWithDataset(dataset);
+ScalarIndexCreator::Build(const milvus::DatasetPtr& dataset) {
+    auto size = knowhere::GetDatasetRows(dataset);
+    auto data = knowhere::GetDatasetTensor(dataset);
+    index_->BuildWithRawData(size, data);
 }
 
-knowhere::BinarySet
+milvus::BinarySet
 ScalarIndexCreator::Serialize() {
     return index_->Serialize(config_);
 }
 
 void
-ScalarIndexCreator::Load(const knowhere::BinarySet& binary_set) {
+ScalarIndexCreator::Load(const milvus::BinarySet& binary_set) {
     index_->Load(binary_set);
 }
 

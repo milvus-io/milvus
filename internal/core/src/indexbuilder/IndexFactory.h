@@ -40,28 +40,24 @@ class IndexFactory {
 
     IndexCreatorBasePtr
     CreateIndex(CDataType dtype, const char* type_params, const char* index_params) {
-        auto real_dtype = proto::schema::DataType(dtype);
-        auto invalid_dtype_msg = std::string("invalid data type: ") + std::to_string(real_dtype);
+        auto real_dtype = DataType(dtype);
+        auto invalid_dtype_msg = std::string("invalid data type: ") + std::to_string(int(real_dtype));
 
         switch (real_dtype) {
-            case proto::schema::Bool:
-            case proto::schema::Int8:
-            case proto::schema::Int16:
-            case proto::schema::Int32:
-            case proto::schema::Int64:
-            case proto::schema::Float:
-            case proto::schema::Double:
-            case proto::schema::VarChar:
-            case proto::schema::String:
-                return CreateScalarIndex(dtype, type_params, index_params);
+            case DataType::BOOL:
+            case DataType::INT8:
+            case DataType::INT16:
+            case DataType::INT32:
+            case DataType::INT64:
+            case DataType::FLOAT:
+            case DataType::DOUBLE:
+            case DataType::VARCHAR:
+            case DataType::STRING:
+                return CreateScalarIndex(real_dtype, type_params, index_params);
 
-            case proto::schema::BinaryVector:
-            case proto::schema::FloatVector:
-                return std::make_unique<VecIndexCreator>(type_params, index_params);
-
-            case proto::schema::None:
-            case proto::schema::DataType_INT_MIN_SENTINEL_DO_NOT_USE_:
-            case proto::schema::DataType_INT_MAX_SENTINEL_DO_NOT_USE_:
+            case DataType::VECTOR_FLOAT:
+            case DataType::VECTOR_BINARY:
+                return std::make_unique<VecIndexCreator>(real_dtype, type_params, index_params);
             default:
                 throw std::invalid_argument(invalid_dtype_msg);
         }

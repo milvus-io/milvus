@@ -49,6 +49,15 @@ set(MILVUS_TEST_FILES
         test_data_codec.cpp
         )
 
+if ( BUILD_DISK_ANN STREQUAL "ON" )
+    set(MILVUS_TEST_FILES
+            ${MILVUS_TEST_FILES}
+#            test_minio_chunk_manager.cpp
+#            test_disk_file_manager_test.cpp
+            test_local_chunk_manager.cpp
+            )
+endif()
+
 if (LINUX OR APPLE)
     set(MILVUS_TEST_FILES
             ${MILVUS_TEST_FILES}
@@ -74,9 +83,6 @@ if (LINUX)
             gtest_main
             milvus_segcore
             milvus_indexbuilder
-            milvus_index
-            milvus_log
-            pthread
             )
     install(TARGETS index_builder_test DESTINATION unittest)
 endif()
@@ -89,9 +95,6 @@ target_link_libraries(all_tests
         gtest
         milvus_segcore
         milvus_indexbuilder
-        milvus_index
-        milvus_log
-        milvus_storage
         pthread
         )
 

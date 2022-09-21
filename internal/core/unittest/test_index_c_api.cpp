@@ -21,7 +21,6 @@
 
 #include "indexbuilder/VecIndexCreator.h"
 #include "indexbuilder/index_c.h"
-#include "indexbuilder/utils.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/indexbuilder_test_utils.h"
 #include "indexbuilder/ScalarIndexCreator.h"

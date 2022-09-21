@@ -52,6 +52,11 @@ const (
 	AnyWord       = "*"
 )
 
+const (
+	// ParamsKeyToParse is the key of the param to build index.
+	ParamsKeyToParse = "params"
+)
+
 var (
 	DefaultRoles = []string{RoleAdmin, RolePublic}
 

@@ -18,6 +18,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "storage/PayloadStream.h"
 #include "storage/FileManager.h"
@@ -62,12 +63,22 @@ std::string
 GenLocalIndexPathPrefix(int64_t build_id, int64_t index_version);
 
 std::string
-GenRawDataPathPrefix(int64_t segment_id, int64_t field_id);
+GenFieldRawDataPathPrefix(int64_t segment_id, int64_t field_id);
 
 std::string
-GetLocalRawDataPathPrefixWithBuildID(int64_t segment_id);
+GetSegmentRawDataPathPrefix(int64_t segment_id);
+
+template <typename T>
+inline bool
+is_in_list(const T& t, std::function<std::vector<T>()> list_func) {
+    auto l = list_func();
+    return std::find(l.begin(), l.end(), t) != l.end();
+}
+
+bool
+is_in_disk_list(const IndexType& index_type);
 
 FileManagerImplPtr
-CreateFileManager(knowhere::IndexType index_type, const FieldDataMeta& field_meta, const IndexMeta& index_meta);
+CreateFileManager(IndexType index_type, const FieldDataMeta& field_meta, const IndexMeta& index_meta);
 
 }  // namespace milvus::storage

@@ -13,6 +13,7 @@ package paramtable
 
 import (
 	"math"
+	"os"
 	"runtime"
 	"strconv"
 	"strings"
@@ -20,8 +21,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/log"
+	"github.com/shirou/gopsutil/disk"
 	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/log"
 )
 
 const (
@@ -797,6 +800,11 @@ type queryNodeConfig struct {
 	LoadMemoryUsageFactor               float64
 	OverloadedMemoryThresholdPercentage float64
 
+	// enable disk
+	EnableDisk             bool
+	DiskCapacityLimit      int64
+	MaxDiskUsagePercentage float64
+
 	// cache limit
 	CacheEnabled     bool
 	CacheMemoryLimit int64
@@ -834,6 +842,9 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	p.initMaxGroupNQ()
 	p.initTopKMergeRatio()
 	p.initCPURatio()
+	p.initEnableDisk()
+	p.initDiskCapacity()
+	p.initMaxDiskUsagePercentage()
 }
 
 // InitAlias initializes an alias for the QueryNode role.
@@ -967,6 +978,43 @@ func (p *queryNodeConfig) GetNodeID() UniqueID {
 		return val.(UniqueID)
 	}
 	return 0
+}
+
+func (p *queryNodeConfig) initEnableDisk() {
+	var err error
+	enableDisk := p.Base.LoadWithDefault("queryNode.enableDisk", "false")
+	p.EnableDisk, err = strconv.ParseBool(enableDisk)
+	if err != nil {
+		panic(err)
+	}
+}
+
+func (p *queryNodeConfig) initMaxDiskUsagePercentage() {
+	maxDiskUsagePercentageStr := p.Base.LoadWithDefault("queryNode.maxDiskUsagePercentage", "95")
+	maxDiskUsagePercentage, err := strconv.ParseInt(maxDiskUsagePercentageStr, 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	p.MaxDiskUsagePercentage = float64(maxDiskUsagePercentage) / 100
+}
+
+func (p *queryNodeConfig) initDiskCapacity() {
+	diskSizeStr := os.Getenv("LOCAL_STORAGE_SIZE")
+	if len(diskSizeStr) == 0 {
+		diskUsage, err := disk.Usage("/")
+		if err != nil {
+			panic(err)
+		}
+		p.DiskCapacityLimit = int64(diskUsage.Total)
+
+		return
+	}
+
+	diskSize, err := strconv.ParseInt(diskSizeStr, 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	p.DiskCapacityLimit = diskSize * 1024 * 1024 * 1024
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1304,12 +1352,20 @@ type indexNodeConfig struct {
 
 	CreatedTime time.Time
 	UpdatedTime time.Time
+
+	// enable disk
+	EnableDisk             bool
+	DiskCapacityLimit      int64
+	MaxDiskUsagePercentage float64
 }
 
 func (p *indexNodeConfig) init(base *BaseTable) {
 	p.Base = base
 	p.NodeID.Store(UniqueID(0))
 	p.initBuildParallel()
+	p.initEnableDisk()
+	p.initDiskCapacity()
+	p.initMaxDiskUsagePercentage()
 }
 
 // InitAlias initializes an alias for the IndexNode role.
@@ -1331,4 +1387,41 @@ func (p *indexNodeConfig) GetNodeID() UniqueID {
 		return val.(UniqueID)
 	}
 	return 0
+}
+
+func (p *indexNodeConfig) initEnableDisk() {
+	var err error
+	enableDisk := p.Base.LoadWithDefault("indexNode.enableDisk", "false")
+	p.EnableDisk, err = strconv.ParseBool(enableDisk)
+	if err != nil {
+		panic(err)
+	}
+}
+
+func (p *indexNodeConfig) initDiskCapacity() {
+	diskSizeStr := os.Getenv("LOCAL_STORAGE_SIZE")
+	if len(diskSizeStr) == 0 {
+		diskUsage, err := disk.Usage("/")
+		if err != nil {
+			panic(err)
+		}
+
+		p.DiskCapacityLimit = int64(diskUsage.Total)
+		return
+	}
+
+	diskSize, err := strconv.ParseInt(diskSizeStr, 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	p.DiskCapacityLimit = diskSize * 1024 * 1024 * 1024
+}
+
+func (p *indexNodeConfig) initMaxDiskUsagePercentage() {
+	maxDiskUsagePercentageStr := p.Base.LoadWithDefault("indexNode.maxDiskUsagePercentage", "95")
+	maxDiskUsagePercentage, err := strconv.ParseInt(maxDiskUsagePercentageStr, 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	p.MaxDiskUsagePercentage = float64(maxDiskUsagePercentage) / 100
 }

@@ -9,11 +9,23 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License
 
-aux_source_directory( ${MILVUS_ENGINE_SRC}/index INDEX_FILES )
+set(INDEX_FILES
+        StringIndexMarisa.cpp
+        Utils.cpp
+        VectorMemIndex.cpp
+        IndexFactory.cpp
+        )
 
-add_library( milvus_index SHARED ${INDEX_FILES} )
+if ( BUILD_DISK_ANN STREQUAL "ON" )
+    set(INDEX_FILES
+            ${INDEX_FILES}
+            VectorDiskIndex.cpp
+            )
+endif ()
 
-# TODO: support compile marisa on windows.
+milvus_add_pkg_config("milvus_index")
+add_library(milvus_index SHARED ${INDEX_FILES})
+
 set(PLATFORM_LIBS )
 if ( LINUX OR APPLE )
     set(PLATFORM_LIBS marisa)
@@ -23,9 +35,7 @@ if (MSYS)
 endif ()
 
 target_link_libraries(milvus_index
-        milvus_proto
-        milvus_exceptions
-        knowhere
+        milvus_storage
         ${PLATFORM_LIBS}
         )
 

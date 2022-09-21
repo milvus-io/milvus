@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "common/BitsetView.h"
+#include "common/QueryInfo.h"
 #include "SearchOnGrowing.h"
 #include "query/SearchBruteForce.h"
 #include "query/SearchOnIndex.h"
@@ -22,7 +23,7 @@ namespace milvus::query {
 //   - Query::ExecWithoutPredicate
 int32_t
 FloatIndexSearch(const segcore::SegmentGrowingImpl& segment,
-                 const query::SearchInfo& info,
+                 const SearchInfo& info,
                  const void* query_data,
                  int64_t num_queries,
                  int64_t ins_barrier,
@@ -44,7 +45,9 @@ FloatIndexSearch(const segcore::SegmentGrowingImpl& segment,
     if (indexing_record.is_in(vecfield_id)) {
         auto max_indexed_id = indexing_record.get_finished_ack();
         const auto& field_indexing = indexing_record.get_vec_field_indexing(vecfield_id);
-        auto search_conf = field_indexing.get_search_params(info.topk_);
+        auto search_params = field_indexing.get_search_params(info.topk_);
+        SearchInfo search_conf(info);
+        search_conf.search_params_ = search_params;
         AssertInfo(vec_ptr->get_size_per_chunk() == field_indexing.get_size_per_chunk(),
                    "[FloatSearch]Chunk size of vector not equal to chunk size of field index");
 
@@ -56,7 +59,8 @@ FloatIndexSearch(const segcore::SegmentGrowingImpl& segment,
 
             auto indexing = field_indexing.get_chunk_indexing(chunk_id);
             auto sub_view = bitset.subview(chunk_id * size_per_chunk, size_per_chunk);
-            auto sub_qr = SearchOnIndex(search_dataset, *indexing, search_conf, sub_view);
+            auto vec_index = (index::VectorIndex*)(indexing);
+            auto sub_qr = SearchOnIndex(search_dataset, *vec_index, search_conf, sub_view);
 
             // convert chunk uid to segment uid
             for (auto& x : sub_qr.mutable_seg_offsets()) {
@@ -74,7 +78,7 @@ FloatIndexSearch(const segcore::SegmentGrowingImpl& segment,
 
 void
 SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
-                const query::SearchInfo& info,
+                const SearchInfo& info,
                 const void* query_data,
                 int64_t num_queries,
                 Timestamp timestamp,

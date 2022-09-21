@@ -56,6 +56,7 @@ WITH_PROMETHEUS="ON"
 CUDA_ARCH="DEFAULT"
 CUSTOM_THIRDPARTY_PATH=""
 EMBEDDED_MILVUS="OFF"
+BUILD_DISK_ANN="OFF"
 
 while getopts "p:d:t:s:f:ulrcghzmeb" arg; do
   case $arg in
@@ -100,6 +101,9 @@ while getopts "p:d:t:s:f:ulrcghzmeb" arg; do
     ;;
   b)
     EMBEDDED_MILVUS="ON"
+    ;;
+  n)
+    BUILD_DISK_ANN="OFF"
     ;;
   h) # help
     echo "
@@ -156,6 +160,11 @@ if [ "$MSYSTEM" == "MINGW64" ] ; then
   export OpenBLAS_HOME="$(cygpath -w /mingw64)"
 fi
 
+# UBUNTU system build diskann index
+if [ "$OS_NAME" == "ubuntu20.04" ] ; then
+  BUILD_DISK_ANN=ON
+fi
+
 pushd ${BUILD_OUTPUT_DIR}
 
 # Remove make cache since build.sh -l use default variables
@@ -198,6 +207,7 @@ ${CMAKE_EXTRA_ARGS} \
 -DMILVUS_CUDA_ARCH=${CUDA_ARCH} \
 -DCUSTOM_THIRDPARTY_DOWNLOAD_PATH=${CUSTOM_THIRDPARTY_PATH} \
 -DEMBEDDED_MILVUS=${EMBEDDED_MILVUS} \
+-DBUILD_DISK_ANN=${BUILD_DISK_ANN} \
 ${CPP_SRC_DIR}"
 
 echo ${CMAKE_CMD}

@@ -14,7 +14,6 @@ set(INDEXBUILDER_FILES
         VecIndexCreator.cpp
         index_c.cpp
         init_c.cpp
-        utils.cpp
         ScalarIndexCreator.cpp
         )
 
@@ -30,11 +29,8 @@ endif ()
 # link order matters
 target_link_libraries(milvus_indexbuilder
         milvus_index
-        milvus_common
-        knowhere
         ${TBB}
         ${PLATFORM_LIBS}
-        pthread
         )
 
 install(TARGETS milvus_indexbuilder DESTINATION "${CMAKE_INSTALL_LIBDIR}")

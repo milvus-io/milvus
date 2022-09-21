@@ -38,7 +38,8 @@ class MinioChunkManager : public RemoteChunkManager {
                                const std::string& access_key,
                                const std::string& access_value,
                                const std::string& default_bucket_name,
-                               bool sercure = false);
+                               bool serure = false,
+                               bool use_iam = false);
 
     MinioChunkManager(const MinioChunkManager&);
     MinioChunkManager&
@@ -52,7 +53,7 @@ class MinioChunkManager : public RemoteChunkManager {
         // thread-safe enough after c++ 11
         static MinioChunkManager instance(ChunkMangerConfig::GetAddress(), ChunkMangerConfig::GetAccessKey(),
                                           ChunkMangerConfig::GetAccessValue(), ChunkMangerConfig::GetBucketName(),
-                                          ChunkMangerConfig::GetUseSSL());
+                                          ChunkMangerConfig::GetUseSSL(), ChunkMangerConfig::GetUseIAM());
         return instance;
     }
 

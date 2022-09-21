@@ -19,6 +19,10 @@
 #include "common/Consts.h"
 #include "config/ConfigChunkManager.h"
 
+#ifdef BUILD_DISK_ANN
+#include "storage/DiskFileManagerImpl.h"
+#endif
+
 namespace milvus::storage {
 
 StorageType
@@ -320,26 +324,51 @@ GetDimensionFromArrowArray(std::shared_ptr<arrow::Array> data, DataType data_typ
 
 std::string
 GenLocalIndexPathPrefix(int64_t build_id, int64_t index_version) {
-    return milvus::ChunkMangerConfig::GetLocalBucketName() + "/" + std::string(INDEX_ROOT_PATH) + "/" +
+    return milvus::ChunkMangerConfig::GetLocalRootPath() + "/" + std::string(INDEX_ROOT_PATH) + "/" +
            std::to_string(build_id) + "/" + std::to_string(index_version) + "/";
 }
 
 std::string
 GetLocalIndexPathPrefixWithBuildID(int64_t build_id) {
-    return milvus::ChunkMangerConfig::GetLocalBucketName() + "/" + std::string(INDEX_ROOT_PATH) + "/" +
+    return milvus::ChunkMangerConfig::GetLocalRootPath() + "/" + std::string(INDEX_ROOT_PATH) + "/" +
            std::to_string(build_id);
 }
 
 std::string
-GenRawDataPathPrefix(int64_t segment_id, int64_t field_id) {
-    return milvus::ChunkMangerConfig::GetLocalBucketName() + "/" + std::string(RAWDATA_ROOT_PATH) + "/" +
+GenFieldRawDataPathPrefix(int64_t segment_id, int64_t field_id) {
+    return milvus::ChunkMangerConfig::GetLocalRootPath() + "/" + std::string(RAWDATA_ROOT_PATH) + "/" +
            std::to_string(segment_id) + "/" + std::to_string(field_id) + "/";
 }
 
 std::string
-GetLocalRawDataPathPrefixWithBuildID(int64_t segment_id) {
-    return milvus::ChunkMangerConfig::GetLocalBucketName() + "/" + std::string(RAWDATA_ROOT_PATH) + "/" +
+GetSegmentRawDataPathPrefix(int64_t segment_id) {
+    return milvus::ChunkMangerConfig::GetLocalRootPath() + "/" + std::string(RAWDATA_ROOT_PATH) + "/" +
            std::to_string(segment_id);
+}
+
+std::vector<IndexType>
+DISK_LIST() {
+    static std::vector<IndexType> ret{
+        knowhere::IndexEnum::INDEX_DISKANN,
+    };
+    return ret;
+}
+
+bool
+is_in_disk_list(const IndexType& index_type) {
+    return is_in_list<IndexType>(index_type, DISK_LIST);
+}
+
+FileManagerImplPtr
+CreateFileManager(IndexType index_type, const FieldDataMeta& field_meta, const IndexMeta& index_meta) {
+    // TODO :: switch case index type to create file manager
+#ifdef BUILD_DISK_ANN
+    if (is_in_disk_list(index_type)) {
+        return std::make_shared<DiskFileManagerImpl>(field_meta, index_meta);
+    }
+#endif
+
+    return nullptr;
 }
 
 }  // namespace milvus::storage

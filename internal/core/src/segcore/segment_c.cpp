@@ -20,6 +20,7 @@
 #include "segcore/SegmentSealedImpl.h"
 #include "segcore/SimilarityCorelation.h"
 #include "segcore/segment_c.h"
+#include "index/IndexInfo.h"
 #include "google/protobuf/text_format.h"
 
 //////////////////////////////    common interfaces    //////////////////////////////
@@ -238,7 +239,7 @@ UpdateSealedSegmentIndex(CSegmentInterface c_segment, CLoadIndexInfo c_load_inde
         auto segment_interface = reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
         auto segment = dynamic_cast<milvus::segcore::SegmentSealed*>(segment_interface);
         AssertInfo(segment != nullptr, "segment conversion failed");
-        auto load_index_info = (LoadIndexInfo*)c_load_index_info;
+        auto load_index_info = (milvus::index::LoadIndexInfo*)c_load_index_info;
         segment->LoadIndex(*load_index_info);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {

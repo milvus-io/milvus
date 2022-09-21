@@ -883,8 +883,13 @@ func (s *Segment) segmentLoadIndexData(bytesIndex [][]byte, indexInfo *querypb.F
 		return err
 	}
 
-	err = loadIndexInfo.appendIndexInfo(bytesIndex, indexInfo, fieldType)
+	err = loadIndexInfo.appendLoadIndexInfo(bytesIndex, indexInfo, s.collectionID, s.partitionID, s.segmentID, fieldType)
 	if err != nil {
+		if loadIndexInfo.cleanLocalData() != nil {
+			log.Error("failed to clean cached data on disk after append index failed",
+				zap.Int64("buildID", indexInfo.BuildID),
+				zap.Int64("index version", indexInfo.IndexVersion))
+		}
 		return err
 	}
 

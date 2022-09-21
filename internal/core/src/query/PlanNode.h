@@ -17,7 +17,8 @@
 #include <vector>
 #include <string>
 
-#include "Expr.h"
+#include "common/QueryInfo.h"
+#include "query/Expr.h"
 #include "knowhere/common/Config.h"
 
 namespace milvus::query {
@@ -33,14 +34,6 @@ struct PlanNode {
 };
 
 using PlanNodePtr = std::unique_ptr<PlanNode>;
-
-struct SearchInfo {
-    int64_t topk_;
-    int64_t round_decimal_;
-    FieldId field_id_;
-    knowhere::MetricType metric_type_;
-    knowhere::Config search_params_;
-};
 
 struct VectorPlanNode : PlanNode {
     std::optional<ExprPtr> predicate_;

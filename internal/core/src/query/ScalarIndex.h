@@ -22,22 +22,22 @@
 namespace milvus::query {
 
 template <typename T>
-inline scalar::ScalarIndexPtr<T>
+inline index::ScalarIndexPtr<T>
 generate_scalar_index(Span<T> data) {
-    auto indexing = std::make_unique<scalar::ScalarIndexSort<T>>();
+    auto indexing = std::make_unique<index::ScalarIndexSort<T>>();
     indexing->Build(data.row_count(), data.data());
     return indexing;
 }
 
 template <>
-inline scalar::ScalarIndexPtr<std::string>
+inline index::ScalarIndexPtr<std::string>
 generate_scalar_index(Span<std::string> data) {
-    auto indexing = scalar::CreateStringIndexSort();
+    auto indexing = index::CreateStringIndexSort();
     indexing->Build(data.row_count(), data.data());
     return indexing;
 }
 
-inline std::unique_ptr<knowhere::Index>
+inline index::IndexBasePtr
 generate_scalar_index(SpanBase data, DataType data_type) {
     Assert(!datatype_is_vector(data_type));
     switch (data_type) {

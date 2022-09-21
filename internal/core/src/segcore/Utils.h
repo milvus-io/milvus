@@ -18,9 +18,9 @@
 #include <vector>
 
 #include "common/QueryResult.h"
-#include "knowhere/index/Index.h"
 #include "segcore/DeletedRecord.h"
 #include "segcore/InsertRecord.h"
+#include "index/Index.h"
 
 namespace milvus::segcore {
 
@@ -56,7 +56,7 @@ get_deleted_bitmap(int64_t del_barrier,
                    Timestamp query_timestamp);
 
 std::unique_ptr<DataArray>
-ReverseDataFromIndex(const knowhere::Index* index,
+ReverseDataFromIndex(const index::IndexBase* index,
                      const int64_t* seg_offsets,
                      int64_t count,
                      const FieldMeta& field_meta);

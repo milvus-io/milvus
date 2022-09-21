@@ -21,7 +21,7 @@
 constexpr int64_t nb = 100;
 namespace indexcgo = milvus::proto::indexcgo;
 namespace schemapb = milvus::proto::schema;
-using milvus::scalar::ScalarIndexPtr;
+using milvus::index::ScalarIndexPtr;
 
 template <typename T>
 class TypedScalarIndexTest : public ::testing::Test {
@@ -48,7 +48,10 @@ TYPED_TEST_P(TypedScalarIndexTest, Constructor) {
     auto dtype = milvus::GetDType<T>();
     auto index_types = GetIndexTypes<T>();
     for (const auto& index_type : index_types) {
-        auto index = milvus::scalar::IndexFactory::GetInstance().CreateIndex(dtype, index_type);
+        milvus::index::CreateIndexInfo create_index_info;
+        create_index_info.field_type = milvus::DataType(dtype);
+        create_index_info.index_type = index_type;
+        auto index = milvus::index::IndexFactory::GetInstance().CreateScalarIndex(create_index_info);
     }
 }
 
@@ -57,10 +60,14 @@ TYPED_TEST_P(TypedScalarIndexTest, Count) {
     auto dtype = milvus::GetDType<T>();
     auto index_types = GetIndexTypes<T>();
     for (const auto& index_type : index_types) {
-        auto index = milvus::scalar::IndexFactory::GetInstance().CreateIndex<T>(index_type);
+        milvus::index::CreateIndexInfo create_index_info;
+        create_index_info.field_type = milvus::DataType(dtype);
+        create_index_info.index_type = index_type;
+        auto index = milvus::index::IndexFactory::GetInstance().CreateScalarIndex(create_index_info);
+        auto scalar_index = dynamic_cast<milvus::index::ScalarIndex<T>*>(index.get());
         auto arr = GenArr<T>(nb);
-        index->Build(nb, arr.data());
-        ASSERT_EQ(nb, index->Count());
+        scalar_index->Build(nb, arr.data());
+        ASSERT_EQ(nb, scalar_index->Count());
     }
 }
 
@@ -69,10 +76,14 @@ TYPED_TEST_P(TypedScalarIndexTest, In) {
     auto dtype = milvus::GetDType<T>();
     auto index_types = GetIndexTypes<T>();
     for (const auto& index_type : index_types) {
-        auto index = milvus::scalar::IndexFactory::GetInstance().CreateIndex<T>(index_type);
+        milvus::index::CreateIndexInfo create_index_info;
+        create_index_info.field_type = milvus::DataType(dtype);
+        create_index_info.index_type = index_type;
+        auto index = milvus::index::IndexFactory::GetInstance().CreateScalarIndex(create_index_info);
+        auto scalar_index = dynamic_cast<milvus::index::ScalarIndex<T>*>(index.get());
         auto arr = GenArr<T>(nb);
-        index->Build(nb, arr.data());
-        assert_in<T>(index, arr);
+        scalar_index->Build(nb, arr.data());
+        assert_in<T>(scalar_index, arr);
     }
 }
 
@@ -81,10 +92,14 @@ TYPED_TEST_P(TypedScalarIndexTest, NotIn) {
     auto dtype = milvus::GetDType<T>();
     auto index_types = GetIndexTypes<T>();
     for (const auto& index_type : index_types) {
-        auto index = milvus::scalar::IndexFactory::GetInstance().CreateIndex<T>(index_type);
+        milvus::index::CreateIndexInfo create_index_info;
+        create_index_info.field_type = milvus::DataType(dtype);
+        create_index_info.index_type = index_type;
+        auto index = milvus::index::IndexFactory::GetInstance().CreateScalarIndex(create_index_info);
+        auto scalar_index = dynamic_cast<milvus::index::ScalarIndex<T>*>(index.get());
         auto arr = GenArr<T>(nb);
-        index->Build(nb, arr.data());
-        assert_not_in<T>(index, arr);
+        scalar_index->Build(nb, arr.data());
+        assert_not_in<T>(scalar_index, arr);
     }
 }
 
@@ -93,10 +108,14 @@ TYPED_TEST_P(TypedScalarIndexTest, Reverse) {
     auto dtype = milvus::GetDType<T>();
     auto index_types = GetIndexTypes<T>();
     for (const auto& index_type : index_types) {
-        auto index = milvus::scalar::IndexFactory::GetInstance().CreateIndex<T>(index_type);
+        milvus::index::CreateIndexInfo create_index_info;
+        create_index_info.field_type = milvus::DataType(dtype);
+        create_index_info.index_type = index_type;
+        auto index = milvus::index::IndexFactory::GetInstance().CreateScalarIndex(create_index_info);
+        auto scalar_index = dynamic_cast<milvus::index::ScalarIndex<T>*>(index.get());
         auto arr = GenArr<T>(nb);
-        index->Build(nb, arr.data());
-        assert_reverse<T>(index, arr);
+        scalar_index->Build(nb, arr.data());
+        assert_reverse<T>(scalar_index, arr);
     }
 }
 
@@ -105,10 +124,14 @@ TYPED_TEST_P(TypedScalarIndexTest, Range) {
     auto dtype = milvus::GetDType<T>();
     auto index_types = GetIndexTypes<T>();
     for (const auto& index_type : index_types) {
-        auto index = milvus::scalar::IndexFactory::GetInstance().CreateIndex<T>(index_type);
+        milvus::index::CreateIndexInfo create_index_info;
+        create_index_info.field_type = milvus::DataType(dtype);
+        create_index_info.index_type = index_type;
+        auto index = milvus::index::IndexFactory::GetInstance().CreateScalarIndex(create_index_info);
+        auto scalar_index = dynamic_cast<milvus::index::ScalarIndex<T>*>(index.get());
         auto arr = GenArr<T>(nb);
-        index->Build(nb, arr.data());
-        assert_range<T>(index, arr);
+        scalar_index->Build(nb, arr.data());
+        assert_range<T>(scalar_index, arr);
     }
 }
 
@@ -117,18 +140,23 @@ TYPED_TEST_P(TypedScalarIndexTest, Codec) {
     auto dtype = milvus::GetDType<T>();
     auto index_types = GetIndexTypes<T>();
     for (const auto& index_type : index_types) {
-        auto index = milvus::scalar::IndexFactory::GetInstance().CreateIndex<T>(index_type);
+        milvus::index::CreateIndexInfo create_index_info;
+        create_index_info.field_type = milvus::DataType(dtype);
+        create_index_info.index_type = index_type;
+        auto index = milvus::index::IndexFactory::GetInstance().CreateScalarIndex(create_index_info);
+        auto scalar_index = dynamic_cast<milvus::index::ScalarIndex<T>*>(index.get());
         auto arr = GenArr<T>(nb);
-        index->Build(nb, arr.data());
+        scalar_index->Build(nb, arr.data());
 
         auto binary_set = index->Serialize(nullptr);
-        auto copy_index = milvus::scalar::IndexFactory::GetInstance().CreateIndex<T>(index_type);
+        auto copy_index = milvus::index::IndexFactory::GetInstance().CreateScalarIndex(create_index_info);
         copy_index->Load(binary_set);
 
-        ASSERT_EQ(nb, copy_index->Count());
-        assert_in<T>(copy_index, arr);
-        assert_not_in<T>(copy_index, arr);
-        assert_range<T>(copy_index, arr);
+        auto copy_scalar_index = dynamic_cast<milvus::index::ScalarIndex<T>*>(copy_index.get());
+        ASSERT_EQ(nb, copy_scalar_index->Count());
+        assert_in<T>(copy_scalar_index, arr);
+        assert_not_in<T>(copy_scalar_index, arr);
+        assert_range<T>(copy_scalar_index, arr);
     }
 }
 

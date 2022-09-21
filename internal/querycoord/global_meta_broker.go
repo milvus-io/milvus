@@ -243,6 +243,7 @@ func (broker *globalMetaBroker) getFullIndexInfos(ctx context.Context, collectio
 				IndexParams:    info.IndexParams,
 				IndexFilePaths: info.IndexFilePaths,
 				IndexSize:      int64(info.SerializedSize),
+				IndexVersion:   info.IndexVersion,
 			}
 
 			ret[segmentID] = append(ret[segmentID], indexInfo)

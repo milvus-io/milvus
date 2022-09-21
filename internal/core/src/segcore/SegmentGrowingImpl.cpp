@@ -16,11 +16,8 @@
 #include <boost/iterator/counting_iterator.hpp>
 
 #include "common/Consts.h"
-#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "query/PlanNode.h"
 #include "query/SearchOnSealed.h"
-#include "query/generated/ExecPlanNodeVisitor.h"
-#include "segcore/Reduce.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/Utils.h"
 
@@ -176,7 +173,7 @@ SegmentGrowingImpl::num_chunk() const {
 }
 
 void
-SegmentGrowingImpl::vector_search(query::SearchInfo& search_info,
+SegmentGrowingImpl::vector_search(SearchInfo& search_info,
                                   const void* query_data,
                                   int64_t query_count,
                                   Timestamp timestamp,

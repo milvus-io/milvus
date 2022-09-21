@@ -154,7 +154,7 @@ ExecExprVisitor::ExecRangeVisitorImpl(FieldId field_id, IndexFunc index_func, El
     auto num_chunk = upper_div(row_count_, size_per_chunk);
     std::deque<BitsetType> results;
 
-    using Index = scalar::ScalarIndex<T>;
+    using Index = index::ScalarIndex<T>;
     for (auto chunk_id = 0; chunk_id < indexing_barrier; ++chunk_id) {
         const Index& indexing = segment_.chunk_scalar_index<T>(field_id, chunk_id);
         // NOTE: knowhere is not const-ready
@@ -211,7 +211,7 @@ ExecExprVisitor::ExecDataRangeVisitorImpl(FieldId field_id, IndexFunc index_func
 
     // if sealed segment has loaded scalar index for this field, then index_barrier = 1 and data_barrier = 0
     // in this case, sealed segment execute expr plan using scalar index
-    using Index = scalar::ScalarIndex<T>;
+    using Index = index::ScalarIndex<T>;
     for (auto chunk_id = data_barrier; chunk_id < indexing_barrier; ++chunk_id) {
         auto& indexing = segment_.chunk_scalar_index<T>(field_id, chunk_id);
         auto this_size = const_cast<Index*>(&indexing)->Count();
@@ -233,7 +233,7 @@ template <typename T>
 auto
 ExecExprVisitor::ExecUnaryRangeVisitorDispatcher(UnaryRangeExpr& expr_raw) -> BitsetType {
     auto& expr = static_cast<UnaryRangeExprImpl<T>&>(expr_raw);
-    using Index = scalar::ScalarIndex<T>;
+    using Index = index::ScalarIndex<T>;
     auto op = expr.op_type_;
     auto val = expr.value_;
     switch (op) {
@@ -270,8 +270,8 @@ ExecExprVisitor::ExecUnaryRangeVisitorDispatcher(UnaryRangeExpr& expr_raw) -> Bi
         case OpType::PrefixMatch: {
             auto index_func = [val](Index* index) {
                 auto dataset = std::make_unique<knowhere::Dataset>();
-                dataset->Set(scalar::OPERATOR_TYPE, OpType::PrefixMatch);
-                dataset->Set(scalar::PREFIX_VALUE, val);
+                dataset->Set(milvus::index::OPERATOR_TYPE, OpType::PrefixMatch);
+                dataset->Set(milvus::index::PREFIX_VALUE, val);
                 return index->Query(std::move(dataset));
             };
             auto elem_func = [val, op](T x) { return Match(x, val, op); };
@@ -291,7 +291,7 @@ template <typename T>
 auto
 ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcher(BinaryArithOpEvalRangeExpr& expr_raw) -> BitsetType {
     auto& expr = static_cast<BinaryArithOpEvalRangeExprImpl<T>&>(expr_raw);
-    using Index = scalar::ScalarIndex<T>;
+    using Index = index::ScalarIndex<T>;
     auto arith_op = expr.arith_op_;
     auto right_operand = expr.right_operand_;
     auto op = expr.op_type_;
@@ -409,7 +409,7 @@ template <typename T>
 auto
 ExecExprVisitor::ExecBinaryRangeVisitorDispatcher(BinaryRangeExpr& expr_raw) -> BitsetType {
     auto& expr = static_cast<BinaryRangeExprImpl<T>&>(expr_raw);
-    using Index = scalar::ScalarIndex<T>;
+    using Index = index::ScalarIndex<T>;
     bool lower_inclusive = expr.lower_inclusive_;
     bool upper_inclusive = expr.upper_inclusive_;
     T val1 = expr.lower_value_;
@@ -824,7 +824,7 @@ auto
 ExecExprVisitor::ExecTermVisitorImpl<std::string>(TermExpr& expr_raw) -> BitsetType {
     using T = std::string;
     auto& expr = static_cast<TermExprImpl<T>&>(expr_raw);
-    using Index = scalar::ScalarIndex<T>;
+    using Index = index::ScalarIndex<T>;
     const auto& terms = expr.terms_;
     auto n = terms.size();
     std::unordered_set<T> term_set(expr.terms_.begin(), expr.terms_.end());

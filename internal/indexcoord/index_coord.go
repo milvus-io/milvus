@@ -691,6 +691,7 @@ func (i *IndexCoord) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInf
 						IndexParams:    i.metaTable.GetIndexParams(segIdx.CollectionID, segIdx.IndexID),
 						IndexFilePaths: segIdx.IndexFilePaths,
 						SerializedSize: segIdx.IndexSize,
+						IndexVersion:   segIdx.IndexVersion,
 					})
 			}
 		}

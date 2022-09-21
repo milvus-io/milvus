@@ -15,13 +15,15 @@
 #include "knowhere/index/VecIndex.h"
 #include "query/SubSearchResult.h"
 #include "query/helper.h"
+#include "common/QueryInfo.h"
+#include "index/VectorIndex.h"
 
 namespace milvus::query {
 
 SubSearchResult
 SearchOnIndex(const dataset::SearchDataset& search_dataset,
-              const knowhere::VecIndex& indexing,
-              const knowhere::Config& search_conf,
+              const index::VectorIndex& indexing,
+              const SearchInfo& search_conf,
               const BitsetView& bitset);
 
 }  // namespace milvus::query

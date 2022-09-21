@@ -46,9 +46,7 @@ endif ()
 
 target_link_libraries(milvus_segcore
         milvus_query
-        milvus_common
         ${PLATFORM_LIBS}
-        pthread
         ${TBB}
         ${OpenMP_CXX_FLAGS}
 #        gperftools

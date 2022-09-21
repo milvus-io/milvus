@@ -23,7 +23,7 @@ namespace milvus::segcore {
 class SegmentSealed : public SegmentInternalInterface {
  public:
     virtual void
-    LoadIndex(const LoadIndexInfo& info) = 0;
+    LoadIndex(const index::LoadIndexInfo& info) = 0;
     virtual void
     LoadSegmentMeta(const milvus::proto::segcore::LoadSegmentMeta& meta) = 0;
     virtual void

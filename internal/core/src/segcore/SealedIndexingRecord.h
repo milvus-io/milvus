@@ -20,22 +20,22 @@
 
 #include "common/Types.h"
 #include "exceptions/EasyAssert.h"
-#include "knowhere/index/VecIndex.h"
+#include "index/VectorIndex.h"
 
 namespace milvus::segcore {
 
 struct SealedIndexingEntry {
-    knowhere::MetricType metric_type_;
-    knowhere::VecIndexPtr indexing_;
+    MetricType metric_type_;
+    index::IndexBasePtr indexing_;
 };
 
 using SealedIndexingEntryPtr = std::unique_ptr<SealedIndexingEntry>;
 
 struct SealedIndexingRecord {
     void
-    append_field_indexing(FieldId field_id, const knowhere::MetricType& metric_type, knowhere::VecIndexPtr indexing) {
+    append_field_indexing(FieldId field_id, const MetricType& metric_type, index::IndexBasePtr indexing) {
         auto ptr = std::make_unique<SealedIndexingEntry>();
-        ptr->indexing_ = indexing;
+        ptr->indexing_ = std::move(indexing);
         ptr->metric_type_ = metric_type;
         std::unique_lock lck(mutex_);
         field_indexings_[field_id] = std::move(ptr);

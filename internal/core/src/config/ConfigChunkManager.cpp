@@ -18,51 +18,53 @@
 
 namespace milvus::ChunkMangerConfig {
 
-std::string MINIO_ADDRESS = "localhost:9000";   // NOLINT
-std::string MINIO_ACCESS_KEY = "minioadmin";    // NOLINT
-std::string MINIO_ACCESS_VALUE = "minioadmin";  // NOLINT
-std::string MINIO_BUCKET_NAME = "a-bucket";     // NOLINT
-std::string LOCAL_BUCKET_NAME = "/tmp/milvus";  // NOLINT
+std::string REMOTE_ADDRESS = "localhost:9000";   // NOLINT
+std::string REMOTE_ACCESS_KEY = "minioadmin";    // NOLINT
+std::string REMOTE_ACCESS_VALUE = "minioadmin";  // NOLINT
+std::string REMOTE_BUCKET_NAME = "a-bucket";     // NOLINT
+std::string REMOTE_ROOT_PATH = "files";          // NOLINT
+std::string LOCAL_ROOT_PATH = "/tmp/milvus";     // NOLINT
 bool MINIO_USE_SSL = false;
+bool MINIO_USE_IAM = false;
 
 void
 SetAddress(const std::string& address) {
-    MINIO_ADDRESS = address.c_str();
+    REMOTE_ADDRESS = address;
 }
 
 std::string
 GetAddress() {
-    return MINIO_ADDRESS;
+    return REMOTE_ADDRESS;
 }
 
 void
 SetAccessKey(const std::string& access_key) {
-    MINIO_ACCESS_KEY = access_key.c_str();
+    REMOTE_ACCESS_KEY = access_key;
 }
 
 std::string
 GetAccessKey() {
-    return MINIO_ACCESS_KEY;
+    return REMOTE_ACCESS_KEY;
 }
 
 void
 SetAccessValue(const std::string& access_value) {
-    MINIO_ACCESS_VALUE = access_value.c_str();
+    REMOTE_ACCESS_VALUE = access_value;
 }
 
 std::string
 GetAccessValue() {
-    return MINIO_ACCESS_VALUE;
+    return REMOTE_ACCESS_VALUE;
 }
 
 void
 SetBucketName(const std::string& bucket_name) {
-    MINIO_BUCKET_NAME = bucket_name.c_str();
+    REMOTE_BUCKET_NAME = bucket_name;
 }
 
 std::string
 GetBucketName() {
-    return MINIO_BUCKET_NAME;
+    return REMOTE_BUCKET_NAME;
 }
 
 void
@@ -76,13 +78,33 @@ GetUseSSL() {
 }
 
 void
-SetLocalBucketName(const std::string& path_prefix) {
-    LOCAL_BUCKET_NAME = path_prefix.c_str();
+SetUseIAM(bool use_iam) {
+    MINIO_USE_IAM = use_iam;
+}
+
+bool
+GetUseIAM() {
+    return MINIO_USE_IAM;
+}
+
+void
+SetRemoteRootPath(const std::string& root_path) {
+    REMOTE_ROOT_PATH = root_path;
 }
 
 std::string
-GetLocalBucketName() {
-    return LOCAL_BUCKET_NAME;
+GetRemoteRootPath() {
+    return REMOTE_ROOT_PATH;
+}
+
+void
+SetLocalRootPath(const std::string& path_prefix) {
+    LOCAL_ROOT_PATH = path_prefix;
+}
+
+std::string
+GetLocalRootPath() {
+    return LOCAL_ROOT_PATH;
 }
 
 }  // namespace milvus::ChunkMangerConfig

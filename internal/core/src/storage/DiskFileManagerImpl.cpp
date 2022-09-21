@@ -19,14 +19,14 @@
 #include <mutex>
 
 #include "common/Consts.h"
-#include "storage/DiskANNFileManagerImpl.h"
+#include "log/Log.h"
+#include "config/ConfigKnowhere.h"
+#include "storage/DiskFileManagerImpl.h"
 #include "storage/LocalChunkManager.h"
 #include "storage/MinioChunkManager.h"
 #include "storage/Exception.h"
-#include "log/Log.h"
 #include "storage/FieldData.h"
 #include "storage/IndexData.h"
-#include "config/ConfigKnowhere.h"
 #include "storage/Util.h"
 
 #define FILEMANAGER_TRY try {
@@ -58,22 +58,22 @@ using WriteLock = std::lock_guard<std::shared_mutex>;
 
 namespace milvus::storage {
 
-DiskANNFileManagerImpl::DiskANNFileManagerImpl(const FieldDataMeta& field_mata, const IndexMeta& index_meta)
+DiskFileManagerImpl::DiskFileManagerImpl(const FieldDataMeta& field_mata, const IndexMeta& index_meta)
     : field_meta_(field_mata), index_meta_(index_meta) {
 }
 
-DiskANNFileManagerImpl::~DiskANNFileManagerImpl() {
+DiskFileManagerImpl::~DiskFileManagerImpl() {
     auto& local_chunk_manager = LocalChunkManager::GetInstance();
     local_chunk_manager.RemoveDir(GetLocalIndexPathPrefixWithBuildID(index_meta_.build_id));
 }
 
 bool
-DiskANNFileManagerImpl::LoadFile(const std::string& file) noexcept {
+DiskFileManagerImpl::LoadFile(const std::string& file) noexcept {
     return true;
 }
 
 bool
-DiskANNFileManagerImpl::AddFile(const std::string& file) noexcept {
+DiskFileManagerImpl::AddFile(const std::string& file) noexcept {
     auto& local_chunk_manager = LocalChunkManager::GetInstance();
     auto& remote_chunk_manager = MinioChunkManager::GetInstance();
     FILEMANAGER_TRY
@@ -119,7 +119,7 @@ DiskANNFileManagerImpl::AddFile(const std::string& file) noexcept {
 }  // namespace knowhere
 
 void
-DiskANNFileManagerImpl::CacheIndexToDisk(std::vector<std::string> remote_files) {
+DiskFileManagerImpl::CacheIndexToDisk(std::vector<std::string> remote_files) {
     auto& local_chunk_manager = LocalChunkManager::GetInstance();
     auto& remote_chunk_manager = MinioChunkManager::GetInstance();
 
@@ -157,30 +157,30 @@ DiskANNFileManagerImpl::CacheIndexToDisk(std::vector<std::string> remote_files) 
 }
 
 std::string
-DiskANNFileManagerImpl::GetFileName(const std::string& localfile) {
+DiskFileManagerImpl::GetFileName(const std::string& localfile) {
     boost::filesystem::path localPath(localfile);
     return localPath.filename().string();
 }
 
 std::string
-DiskANNFileManagerImpl::GetRemoteIndexObjectPrefix() {
-    return "files/" + std::string(INDEX_ROOT_PATH) + "/" + std::to_string(index_meta_.build_id) + "/" +
-           std::to_string(index_meta_.index_version) + "/" + std::to_string(field_meta_.partition_id) + "/" +
-           std::to_string(field_meta_.segment_id);
+DiskFileManagerImpl::GetRemoteIndexObjectPrefix() {
+    return ChunkMangerConfig::GetRemoteRootPath() + "/" + std::string(INDEX_ROOT_PATH) + "/" +
+           std::to_string(index_meta_.build_id) + "/" + std::to_string(index_meta_.index_version) + "/" +
+           std::to_string(field_meta_.partition_id) + "/" + std::to_string(field_meta_.segment_id);
 }
 
 std::string
-DiskANNFileManagerImpl::GetLocalIndexObjectPrefix() {
+DiskFileManagerImpl::GetLocalIndexObjectPrefix() {
     return GenLocalIndexPathPrefix(index_meta_.build_id, index_meta_.index_version);
 }
 
 std::string
-DiskANNFileManagerImpl::GetLocalRawDataObjectPrefix() {
-    return GenRawDataPathPrefix(field_meta_.segment_id, field_meta_.field_id);
+DiskFileManagerImpl::GetLocalRawDataObjectPrefix() {
+    return GenFieldRawDataPathPrefix(field_meta_.segment_id, field_meta_.field_id);
 }
 
 bool
-DiskANNFileManagerImpl::RemoveFile(const std::string& file) noexcept {
+DiskFileManagerImpl::RemoveFile(const std::string& file) noexcept {
     // remove local file
     bool localExist = false;
     auto& local_chunk_manager = LocalChunkManager::GetInstance();
@@ -213,7 +213,7 @@ DiskANNFileManagerImpl::RemoveFile(const std::string& file) noexcept {
 }
 
 std::optional<bool>
-DiskANNFileManagerImpl::IsExisted(const std::string& file) noexcept {
+DiskFileManagerImpl::IsExisted(const std::string& file) noexcept {
     bool isExist = false;
     auto& local_chunk_manager = LocalChunkManager::GetInstance();
     auto& remote_chunk_manager = MinioChunkManager::GetInstance();

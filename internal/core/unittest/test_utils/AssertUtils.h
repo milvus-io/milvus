@@ -15,7 +15,7 @@
 #include <vector>
 #include <memory>
 
-using milvus::scalar::ScalarIndexPtr;
+using milvus::index::ScalarIndex;
 
 namespace {
 
@@ -34,7 +34,7 @@ compare_double(double x, double y, double epsilon = 0.000001f) {
 
 template <typename T>
 inline void
-assert_in(const ScalarIndexPtr<T>& index, const std::vector<T>& arr) {
+assert_in(ScalarIndex<T>* index, const std::vector<T>& arr) {
     // hard to compare floating point value.
     if (std::is_floating_point_v<T>) {
         return;
@@ -51,7 +51,7 @@ assert_in(const ScalarIndexPtr<T>& index, const std::vector<T>& arr) {
 
 template <typename T>
 inline void
-assert_not_in(const ScalarIndexPtr<T>& index, const std::vector<T>& arr) {
+assert_not_in(ScalarIndex<T>* index, const std::vector<T>& arr) {
     auto bitset1 = index->NotIn(arr.size(), arr.data());
     ASSERT_EQ(arr.size(), bitset1->size());
     ASSERT_TRUE(bitset1->none());
@@ -63,7 +63,7 @@ assert_not_in(const ScalarIndexPtr<T>& index, const std::vector<T>& arr) {
 
 template <typename T>
 inline void
-assert_range(const ScalarIndexPtr<T>& index, const std::vector<T>& arr) {
+assert_range(ScalarIndex<T>* index, const std::vector<T>& arr) {
     auto test_min = arr[0];
     auto test_max = arr[arr.size() - 1];
 
@@ -90,7 +90,7 @@ assert_range(const ScalarIndexPtr<T>& index, const std::vector<T>& arr) {
 
 template <typename T>
 inline void
-assert_reverse(const ScalarIndexPtr<T>& index, const std::vector<T>& arr) {
+assert_reverse(ScalarIndex<T>* index, const std::vector<T>& arr) {
     for (size_t offset = 0; offset < arr.size(); ++offset) {
         ASSERT_EQ(index->Reverse_Lookup(offset), arr[offset]);
     }
@@ -98,7 +98,7 @@ assert_reverse(const ScalarIndexPtr<T>& index, const std::vector<T>& arr) {
 
 template <>
 inline void
-assert_reverse(const ScalarIndexPtr<float>& index, const std::vector<float>& arr) {
+assert_reverse(ScalarIndex<float>* index, const std::vector<float>& arr) {
     for (size_t offset = 0; offset < arr.size(); ++offset) {
         ASSERT_TRUE(compare_float(index->Reverse_Lookup(offset), arr[offset]));
     }
@@ -106,7 +106,7 @@ assert_reverse(const ScalarIndexPtr<float>& index, const std::vector<float>& arr
 
 template <>
 inline void
-assert_reverse(const ScalarIndexPtr<double>& index, const std::vector<double>& arr) {
+assert_reverse(ScalarIndex<double>* index, const std::vector<double>& arr) {
     for (size_t offset = 0; offset < arr.size(); ++offset) {
         ASSERT_TRUE(compare_double(index->Reverse_Lookup(offset), arr[offset]));
     }
@@ -114,7 +114,7 @@ assert_reverse(const ScalarIndexPtr<double>& index, const std::vector<double>& a
 
 template <>
 inline void
-assert_reverse(const ScalarIndexPtr<std::string>& index, const std::vector<std::string>& arr) {
+assert_reverse(ScalarIndex<std::string>* index, const std::vector<std::string>& arr) {
     for (size_t offset = 0; offset < arr.size(); ++offset) {
         ASSERT_TRUE(arr[offset].compare(index->Reverse_Lookup(offset)) == 0);
     }
@@ -122,7 +122,7 @@ assert_reverse(const ScalarIndexPtr<std::string>& index, const std::vector<std::
 
 template <>
 inline void
-assert_in(const ScalarIndexPtr<std::string>& index, const std::vector<std::string>& arr) {
+assert_in(ScalarIndex<std::string>* index, const std::vector<std::string>& arr) {
     auto bitset1 = index->In(arr.size(), arr.data());
     ASSERT_EQ(arr.size(), bitset1->size());
     ASSERT_TRUE(bitset1->any());
@@ -130,7 +130,7 @@ assert_in(const ScalarIndexPtr<std::string>& index, const std::vector<std::strin
 
 template <>
 inline void
-assert_not_in(const ScalarIndexPtr<std::string>& index, const std::vector<std::string>& arr) {
+assert_not_in(ScalarIndex<std::string>* index, const std::vector<std::string>& arr) {
     auto bitset1 = index->NotIn(arr.size(), arr.data());
     ASSERT_EQ(arr.size(), bitset1->size());
     ASSERT_TRUE(bitset1->none());
@@ -138,7 +138,7 @@ assert_not_in(const ScalarIndexPtr<std::string>& index, const std::vector<std::s
 
 template <>
 inline void
-assert_range(const ScalarIndexPtr<std::string>& index, const std::vector<std::string>& arr) {
+assert_range(ScalarIndex<std::string>* index, const std::vector<std::string>& arr) {
     auto test_min = arr[0];
     auto test_max = arr[arr.size() - 1];
 

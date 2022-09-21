@@ -234,6 +234,10 @@ if ( BUILD_UNIT_TEST STREQUAL "ON" AND BUILD_COVERAGE STREQUAL "ON" )
                         )
 endif ()
 
+if ( BUILD_DISK_ANN STREQUAL "ON" )
+    ADD_DEFINITIONS(-DBUILD_DISK_ANN=${BUILD_DISK_ANN})
+endif ()
+
 # Warning: add_subdirectory(src) must be after append_flags("-ftest-coverage"),
 # otherwise cpp code coverage tool will miss src folder
 add_subdirectory( thirdparty )

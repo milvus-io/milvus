@@ -259,7 +259,7 @@ MergeDataArray(std::vector<std::pair<milvus::SearchResult*, int64_t>>& result_of
 
 // TODO: split scalar IndexBase with knowhere::Index
 std::unique_ptr<DataArray>
-ReverseDataFromIndex(const knowhere::Index* index,
+ReverseDataFromIndex(const index::IndexBase* index,
                      const int64_t* seg_offsets,
                      int64_t count,
                      const FieldMeta& field_meta) {
@@ -271,7 +271,7 @@ ReverseDataFromIndex(const knowhere::Index* index,
     auto scalar_array = data_array->mutable_scalars();
     switch (data_type) {
         case DataType::BOOL: {
-            using IndexType = scalar::ScalarIndex<bool>;
+            using IndexType = index::ScalarIndex<bool>;
             auto ptr = dynamic_cast<const IndexType*>(index);
             std::vector<bool> raw_data(count);
             for (int64_t i = 0; i < count; ++i) {
@@ -282,7 +282,7 @@ ReverseDataFromIndex(const knowhere::Index* index,
             break;
         }
         case DataType::INT8: {
-            using IndexType = scalar::ScalarIndex<int8_t>;
+            using IndexType = index::ScalarIndex<int8_t>;
             auto ptr = dynamic_cast<const IndexType*>(index);
             std::vector<int8_t> raw_data(count);
             for (int64_t i = 0; i < count; ++i) {
@@ -293,7 +293,7 @@ ReverseDataFromIndex(const knowhere::Index* index,
             break;
         }
         case DataType::INT16: {
-            using IndexType = scalar::ScalarIndex<int16_t>;
+            using IndexType = index::ScalarIndex<int16_t>;
             auto ptr = dynamic_cast<const IndexType*>(index);
             std::vector<int16_t> raw_data(count);
             for (int64_t i = 0; i < count; ++i) {
@@ -304,7 +304,7 @@ ReverseDataFromIndex(const knowhere::Index* index,
             break;
         }
         case DataType::INT32: {
-            using IndexType = scalar::ScalarIndex<int32_t>;
+            using IndexType = index::ScalarIndex<int32_t>;
             auto ptr = dynamic_cast<const IndexType*>(index);
             std::vector<int32_t> raw_data(count);
             for (int64_t i = 0; i < count; ++i) {
@@ -315,7 +315,7 @@ ReverseDataFromIndex(const knowhere::Index* index,
             break;
         }
         case DataType::INT64: {
-            using IndexType = scalar::ScalarIndex<int64_t>;
+            using IndexType = index::ScalarIndex<int64_t>;
             auto ptr = dynamic_cast<const IndexType*>(index);
             std::vector<int64_t> raw_data(count);
             for (int64_t i = 0; i < count; ++i) {
@@ -326,7 +326,7 @@ ReverseDataFromIndex(const knowhere::Index* index,
             break;
         }
         case DataType::FLOAT: {
-            using IndexType = scalar::ScalarIndex<float>;
+            using IndexType = index::ScalarIndex<float>;
             auto ptr = dynamic_cast<const IndexType*>(index);
             std::vector<float> raw_data(count);
             for (int64_t i = 0; i < count; ++i) {
@@ -337,7 +337,7 @@ ReverseDataFromIndex(const knowhere::Index* index,
             break;
         }
         case DataType::DOUBLE: {
-            using IndexType = scalar::ScalarIndex<double>;
+            using IndexType = index::ScalarIndex<double>;
             auto ptr = dynamic_cast<const IndexType*>(index);
             std::vector<double> raw_data(count);
             for (int64_t i = 0; i < count; ++i) {
@@ -348,7 +348,7 @@ ReverseDataFromIndex(const knowhere::Index* index,
             break;
         }
         case DataType::VARCHAR: {
-            using IndexType = scalar::ScalarIndex<std::string>;
+            using IndexType = index::ScalarIndex<std::string>;
             auto ptr = dynamic_cast<const IndexType*>(index);
             std::vector<std::string> raw_data(count);
             for (int64_t i = 0; i < count; ++i) {

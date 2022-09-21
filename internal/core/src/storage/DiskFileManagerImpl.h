@@ -27,11 +27,11 @@
 
 namespace milvus::storage {
 
-class DiskANNFileManagerImpl : public FileManagerImpl {
+class DiskFileManagerImpl : public FileManagerImpl {
  public:
-    explicit DiskANNFileManagerImpl(const FieldDataMeta& field_mata, const IndexMeta& index_meta);
+    explicit DiskFileManagerImpl(const FieldDataMeta& field_mata, const IndexMeta& index_meta);
 
-    virtual ~DiskANNFileManagerImpl();
+    virtual ~DiskFileManagerImpl();
 
     virtual bool
     LoadFile(const std::string& filename) noexcept;
@@ -48,7 +48,7 @@ class DiskANNFileManagerImpl : public FileManagerImpl {
  public:
     virtual std::string
     GetName() const {
-        return "DiskANNFileManagerImpl";
+        return "DiskFileManagerImpl";
     }
 
     std::string
@@ -61,7 +61,7 @@ class DiskANNFileManagerImpl : public FileManagerImpl {
     GetLocalRawDataObjectPrefix();
 
     std::map<std::string, int64_t>
-    GetRemotePaths() const {
+    GetRemotePathsToFileSize() const {
         return remote_paths_to_size_;
     }
 
@@ -101,6 +101,6 @@ class DiskANNFileManagerImpl : public FileManagerImpl {
     std::map<std::string, int64_t> remote_paths_to_size_;
 };
 
-using DiskANNFileManagerImplPtr = std::shared_ptr<DiskANNFileManagerImpl>;
+using DiskANNFileManagerImplPtr = std::shared_ptr<DiskFileManagerImpl>;
 
 }  // namespace milvus::storage

@@ -8,6 +8,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
 // WrapStatus wraps status with given error code, message and errors
@@ -95,30 +96,21 @@ func calculateSegmentSize(segmentLoadInfo *querypb.SegmentLoadInfo) int64 {
 		if index, ok := fieldIndex[fieldID]; ok {
 			segmentSize += index.IndexSize
 		} else {
-			segmentSize += getFieldSizeFromBinlog(fieldBinlog)
+			segmentSize += funcutil.GetFieldSizeFromFieldBinlog(fieldBinlog)
 		}
 	}
 
 	// Get size of state data
 	for _, fieldBinlog := range segmentLoadInfo.Statslogs {
-		segmentSize += getFieldSizeFromBinlog(fieldBinlog)
+		segmentSize += funcutil.GetFieldSizeFromFieldBinlog(fieldBinlog)
 	}
 
 	// Get size of delete data
 	for _, fieldBinlog := range segmentLoadInfo.Deltalogs {
-		segmentSize += getFieldSizeFromBinlog(fieldBinlog)
+		segmentSize += funcutil.GetFieldSizeFromFieldBinlog(fieldBinlog)
 	}
 
 	return segmentSize
-}
-
-func getFieldSizeFromBinlog(fieldBinlog *datapb.FieldBinlog) int64 {
-	fieldSize := int64(0)
-	for _, binlog := range fieldBinlog.Binlogs {
-		fieldSize += binlog.LogSize
-	}
-
-	return fieldSize
 }
 
 func MergeDmChannelInfo(infos []*datapb.VchannelInfo) *meta.DmChannel {
