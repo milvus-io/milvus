@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 
@@ -13,7 +12,6 @@ import (
 	"github.com/milvus-io/milvus/api/commonpb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"go.uber.org/zap"
 )
 
@@ -51,11 +49,6 @@ func newServerBroker(s *Core) *ServerBroker {
 
 func (b *ServerBroker) ReleaseCollection(ctx context.Context, collectionID UniqueID) error {
 	log.Info("releasing collection", zap.Int64("collection", collectionID))
-
-	if err := funcutil.WaitForComponentHealthy(ctx, b.s.queryCoord, "QueryCoord", 100, time.Millisecond*200); err != nil {
-		log.Error("failed to release collection, querycoord not healthy", zap.Error(err), zap.Int64("collection", collectionID))
-		return err
-	}
 
 	resp, err := b.s.queryCoord.ReleaseCollection(ctx, &querypb.ReleaseCollectionRequest{
 		Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_ReleaseCollection},
@@ -99,10 +92,6 @@ func toKeyDataPairs(m map[string][]byte) []*commonpb.KeyDataPair {
 
 func (b *ServerBroker) WatchChannels(ctx context.Context, info *watchInfo) error {
 	log.Info("watching channels", zap.Uint64("ts", info.ts), zap.Int64("collection", info.collectionID), zap.Strings("vChannels", info.vChannels))
-
-	if err := funcutil.WaitForComponentHealthy(ctx, b.s.dataCoord, "DataCoord", 100, time.Millisecond*200); err != nil {
-		return err
-	}
 
 	resp, err := b.s.dataCoord.WatchChannels(ctx, &datapb.WatchChannelsRequest{
 		CollectionID:   info.collectionID,
@@ -193,9 +182,6 @@ func (b *ServerBroker) Import(ctx context.Context, req *datapb.ImportTaskRequest
 }
 
 func (b *ServerBroker) DropCollectionIndex(ctx context.Context, collID UniqueID) error {
-	if err := funcutil.WaitForComponentHealthy(ctx, b.s.indexCoord, "IndexCoord", 100, time.Millisecond*100); err != nil {
-		return err
-	}
 	rsp, err := b.s.indexCoord.DropIndex(ctx, &indexpb.DropIndexRequest{
 		CollectionID: collID,
 		IndexName:    "",

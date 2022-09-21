@@ -4,8 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -146,10 +144,10 @@ func Test_dropPartitionTask_Execute(t *testing.T) {
 		gc := newMockGarbageCollector()
 		deletePartitionCalled := false
 		deletePartitionChan := make(chan struct{}, 1)
-		gc.GcPartitionDataFunc = func(ctx context.Context, pChannels []string, coll *model.Partition, ts typeutil.Timestamp) error {
+		gc.GcPartitionDataFunc = func(ctx context.Context, pChannels []string, coll *model.Partition) (Timestamp, error) {
 			deletePartitionChan <- struct{}{}
 			deletePartitionCalled = true
-			return nil
+			return 0, nil
 		}
 
 		core := newTestCore(withValidProxyManager(), withMeta(meta), withGarbageCollector(gc))

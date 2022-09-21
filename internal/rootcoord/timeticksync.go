@@ -42,7 +42,32 @@ var (
 	ttCheckerWarnMsg       = fmt.Sprintf("RootCoord haven't synchronized the time tick for %f minutes", timeTickSyncTtInterval.Minutes())
 )
 
-// TODO: better to accept ctx for timetickSync-related method, which can trace the ddl.
+type ttHistogram struct {
+	sync.Map
+}
+
+func newTtHistogram() *ttHistogram {
+	return &ttHistogram{}
+}
+
+func (h *ttHistogram) update(channel string, ts Timestamp) {
+	h.Store(channel, ts)
+}
+
+func (h *ttHistogram) get(channel string) Timestamp {
+	ts, ok := h.Load(channel)
+	if !ok {
+		return typeutil.ZeroTimestamp
+	}
+	return ts.(Timestamp)
+}
+
+func (h *ttHistogram) remove(channels ...string) {
+	for _, channel := range channels {
+		h.Delete(channel)
+	}
+}
+
 type timetickSync struct {
 	ctx      context.Context
 	sourceID typeutil.UniqueID
@@ -52,6 +77,8 @@ type timetickSync struct {
 	lock           sync.Mutex
 	sess2ChanTsMap map[typeutil.UniqueID]*chanTsMsg
 	sendChan       chan map[typeutil.UniqueID]*chanTsMsg
+
+	syncedTtHistogram *ttHistogram
 }
 
 type chanTsMsg struct {
@@ -98,6 +125,8 @@ func newTimeTickSync(ctx context.Context, sourceID int64, factory msgstream.Fact
 		lock:           sync.Mutex{},
 		sess2ChanTsMap: make(map[typeutil.UniqueID]*chanTsMsg),
 		sendChan:       make(chan map[typeutil.UniqueID]*chanTsMsg, 16),
+
+		syncedTtHistogram: newTtHistogram(),
 	}
 }
 
@@ -247,6 +276,7 @@ func (t *timetickSync) startWatch(wg *sync.WaitGroup) {
 					if err := t.sendTimeTickToChannel([]string{chanName}, mints); err != nil {
 						log.Warn("SendTimeTickToChannel fail", zap.Error(err))
 					}
+					t.syncedTtHistogram.update(chanName, mints)
 					wg.Done()
 				}(chanName, ts)
 			}
@@ -326,6 +356,7 @@ func (t *timetickSync) addDmlChannels(names ...string) {
 // RemoveDmlChannels remove dml channels
 func (t *timetickSync) removeDmlChannels(names ...string) {
 	t.dmlChannels.removeChannels(names...)
+	// t.syncedTtHistogram.remove(names...) // channel ts shouldn't go back.
 	log.Info("remove dml channels", zap.Strings("channels", names))
 }
 
@@ -337,6 +368,10 @@ func (t *timetickSync) broadcastDmlChannels(chanNames []string, pack *msgstream.
 // BroadcastMarkDmlChannels broadcasts msg pack into dml channels
 func (t *timetickSync) broadcastMarkDmlChannels(chanNames []string, pack *msgstream.MsgPack) (map[string][]byte, error) {
 	return t.dmlChannels.broadcastMark(chanNames, pack)
+}
+
+func (t *timetickSync) getSyncedTimeTick(channel string) Timestamp {
+	return t.syncedTtHistogram.get(channel)
 }
 
 func minTimeTick(tt ...typeutil.Timestamp) typeutil.Timestamp {

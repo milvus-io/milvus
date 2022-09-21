@@ -5,8 +5,6 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -176,10 +174,10 @@ func Test_dropCollectionTask_Execute(t *testing.T) {
 		gc := newMockGarbageCollector()
 		deleteCollectionCalled := false
 		deleteCollectionChan := make(chan struct{}, 1)
-		gc.GcCollectionDataFunc = func(ctx context.Context, coll *model.Collection, ts typeutil.Timestamp) error {
+		gc.GcCollectionDataFunc = func(ctx context.Context, coll *model.Collection) (Timestamp, error) {
 			deleteCollectionCalled = true
 			deleteCollectionChan <- struct{}{}
-			return nil
+			return 0, nil
 		}
 
 		core := newTestCore(

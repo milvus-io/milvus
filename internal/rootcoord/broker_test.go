@@ -12,14 +12,6 @@ import (
 )
 
 func TestServerBroker_ReleaseCollection(t *testing.T) {
-	t.Run("not healthy", func(t *testing.T) {
-		c := newTestCore(withUnhealthyQueryCoord())
-		b := newServerBroker(c)
-		ctx := context.Background()
-		err := b.ReleaseCollection(ctx, 1)
-		assert.Error(t, err)
-	})
-
 	t.Run("failed to execute", func(t *testing.T) {
 		c := newTestCore(withInvalidQueryCoord())
 		b := newServerBroker(c)
@@ -74,14 +66,6 @@ func TestServerBroker_GetSegmentInfo(t *testing.T) {
 }
 
 func TestServerBroker_WatchChannels(t *testing.T) {
-	t.Run("unhealthy", func(t *testing.T) {
-		c := newTestCore(withUnhealthyDataCoord())
-		b := newServerBroker(c)
-		ctx := context.Background()
-		err := b.WatchChannels(ctx, &watchInfo{})
-		assert.Error(t, err)
-	})
-
 	t.Run("failed to execute", func(t *testing.T) {
 		defer cleanTestEnv()
 
@@ -228,14 +212,6 @@ func TestServerBroker_Import(t *testing.T) {
 }
 
 func TestServerBroker_DropCollectionIndex(t *testing.T) {
-	t.Run("not healthy", func(t *testing.T) {
-		c := newTestCore(withUnhealthyIndexCoord())
-		b := newServerBroker(c)
-		ctx := context.Background()
-		err := b.DropCollectionIndex(ctx, 1)
-		assert.Error(t, err)
-	})
-
 	t.Run("failed to execute", func(t *testing.T) {
 		c := newTestCore(withInvalidIndexCoord())
 		b := newServerBroker(c)
