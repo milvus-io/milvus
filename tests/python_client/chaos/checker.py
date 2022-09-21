@@ -144,6 +144,12 @@ class SearchChecker(Checker):
         if collection_name is None:
             collection_name = cf.gen_unique_str("SearchChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num)
+        self.c_wrap.create_index(ct.default_float_vec_field_name,
+                                 constants.DEFAULT_INDEX_PARAM,
+                                 name=cf.gen_unique_str('index_'),
+                                 timeout=timeout,
+                                 enable_traceback=enable_traceback,
+                                 check_task=CheckTasks.check_nothing)        
         # do load before search
         self.c_wrap.load(replica_number=replica_number)
 
@@ -152,7 +158,7 @@ class SearchChecker(Checker):
         res, result = self.c_wrap.search(
             data=cf.gen_vectors(5, ct.default_dim),
             anns_field=ct.default_float_vec_field_name,
-            param={"nprobe": 32},
+            param=constants.DEFAULT_SEARCH_PARAM,
             limit=1,
             timeout=timeout,
             check_task=CheckTasks.check_nothing
