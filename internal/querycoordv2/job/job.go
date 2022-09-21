@@ -133,7 +133,7 @@ func (job *LoadCollectionJob) PreExecute() error {
 	if job.meta.Exist(req.GetCollectionID()) {
 		old := job.meta.GetCollection(req.GetCollectionID())
 		if old == nil {
-			msg := "collection with different load type existed, please release it first"
+			msg := "load the partition after load collection is not supported"
 			log.Warn(msg)
 			return utils.WrapError(msg, ErrLoadParameterMismatched)
 		}
@@ -145,6 +145,12 @@ func (job *LoadCollectionJob) PreExecute() error {
 			return utils.WrapError(msg, ErrLoadParameterMismatched)
 		}
 		return ErrCollectionLoaded
+	}
+
+	if len(job.nodeMgr.GetAll()) < int(job.req.GetReplicaNumber()) {
+		msg := "no enough nodes to create replicas"
+		log.Warn(msg)
+		return utils.WrapError(msg, ErrNoEnoughNode)
 	}
 
 	return nil
@@ -324,7 +330,7 @@ func (job *LoadPartitionJob) PreExecute() error {
 	if job.meta.Exist(req.GetCollectionID()) {
 		old := job.meta.GetCollection(req.GetCollectionID())
 		if old != nil {
-			msg := "collection with different load type existed, please release it first"
+			msg := "load the partition after load collection is not supported"
 			log.Warn(msg)
 			return utils.WrapError(msg, ErrLoadParameterMismatched)
 		}
@@ -346,6 +352,12 @@ func (job *LoadPartitionJob) PreExecute() error {
 			}
 		}
 		return ErrCollectionLoaded
+	}
+
+	if len(job.nodeMgr.GetAll()) < int(job.req.GetReplicaNumber()) {
+		msg := "no enough nodes to create replicas"
+		log.Warn(msg)
+		return utils.WrapError(msg, ErrNoEnoughNode)
 	}
 
 	return nil

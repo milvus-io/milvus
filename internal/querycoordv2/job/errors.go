@@ -9,4 +9,5 @@ var (
 	// Load errors
 	ErrCollectionLoaded        = errors.New("CollectionLoaded")
 	ErrLoadParameterMismatched = errors.New("LoadParameterMismatched")
+	ErrNoEnoughNode            = errors.New("NoEnoughNode")
 )
