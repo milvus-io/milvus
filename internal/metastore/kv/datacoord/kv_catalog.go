@@ -172,6 +172,47 @@ func (kc *Catalog) AlterSegmentsAndAddNewSegment(ctx context.Context, segments [
 	return nil
 }
 
+// RevertAlterSegmentsAndAddNewSegment reverts the metastore operation of AtlerSegmentsAndAddNewSegment
+func (kc *Catalog) RevertAlterSegmentsAndAddNewSegment(ctx context.Context, oldSegments []*datapb.SegmentInfo, removeSegment *datapb.SegmentInfo) error {
+	var (
+		data     = make(map[string]string)
+		removals []string
+	)
+
+	for _, s := range oldSegments {
+		k, v, err := buildSegmentKeyValuePair(s)
+		if err != nil {
+			return err
+		}
+		data[k] = v
+	}
+
+	if removeSegment.NumOfRows > 0 {
+		// get all binlog keys
+		binlogKvs, err := buildBinlogKvPair(removeSegment)
+		if err != nil {
+			return err
+		}
+		binlogKeys := typeutil.GetMapKeys(binlogKvs)
+		removals = append(removals, binlogKeys...)
+
+		// get segment key
+		k, _, err := buildSegmentKeyValuePair(removeSegment)
+		if err != nil {
+			return err
+		}
+		removals = append(removals, k)
+	}
+
+	err := kc.Txn.MultiSaveAndRemove(data, removals)
+	if err != nil {
+		log.Warn("batch save and remove segments failed", zap.Error(err))
+		return err
+	}
+
+	return nil
+}
+
 func (kc *Catalog) SaveDroppedSegmentsInBatch(ctx context.Context, segments []*datapb.SegmentInfo) error {
 	kvs := make(map[string]string)
 	batchIDs := make([]int64, 0, maxOperationsPerTxn)
