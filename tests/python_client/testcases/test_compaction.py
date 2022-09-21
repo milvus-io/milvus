@@ -46,6 +46,7 @@ class TestCompactionParams(TestcaseBase):
         expected: Merge into one segment
         """
         # init collection with one shard, insert into two segments
+        pytest.skip("DataCoord: for A, B -> C, will not compact segment C before A, B GCed, no method to check whether a segment is GCed")
         collection_w = self.collection_insert_multi_segments_one_shard(prefix, nb_of_segment=tmp_nb)
 
         # first compact two segments
@@ -861,6 +862,7 @@ class TestCompactionOperation(TestcaseBase):
         expected: Verify segments info
         """
         # greater than auto-merge threshold 10
+        pytest.skip("DataCoord: for A, B -> C, will not compact segment C before A, B GCed, no method to check whether a segment is GCed")
         num_of_segment = ct.compact_segment_num_threshold + 1
 
         # create collection shard_num=1, insert 11 segments, each with one entity
