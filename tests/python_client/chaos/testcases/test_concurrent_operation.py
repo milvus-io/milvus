@@ -45,7 +45,7 @@ def get_all_collections():
             all_collections = data["all"]
     except Exception as e:
         log.error(f"get_all_collections error: {e}")
-        return []
+        return [None]
     return all_collections
 
 
@@ -98,16 +98,18 @@ class TestOperations(TestBase):
         yield request.param
 
     @pytest.mark.tags(CaseLabel.L3)
-    def test_operations(self, request_duration, is_check):
+    def test_operations(self, request_duration, is_check, collection_name):
         # start the monitor threads to check the milvus ops
         log.info("*********************Test Start**********************")
         log.info(connections.get_connection_addr('default'))
-        c_name = cf.gen_unique_str("Checker_")
+        c_name = collection_name if collection_name else cf.gen_unique_str("Checker_")
         self.init_health_checkers(collection_name=c_name)
         cc.start_monitor_threads(self.health_checkers)
         log.info("*********************Load Start**********************")
-        # wait 200s
-        request_duration = eval(request_duration.replace("h","*3600+").replace("m","*60+").replace("s",""))
+        request_duration = request_duration.replace("h","*3600+").replace("m","*60+").replace("s","")
+        if request_duration[-1] == "+":
+            request_duration = request_duration[:-1]
+        request_duration = eval(request_duration)
         for i in range(10):
             sleep(request_duration//10)
             for k,v in self.health_checkers.items():
