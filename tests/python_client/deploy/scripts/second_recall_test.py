@@ -47,11 +47,11 @@ def search_test(host="127.0.0.1"):
     sum_radio = 0.0
     for index, item in enumerate(result_ids):
         # tmp = set(item).intersection(set(flat_id_list[index]))
-        assert len(item) == len(true_ids[index])
+        assert len(item) == len(true_ids[index]), f"get {len(item)} but expect {len(true_ids[index])}"
         tmp = set(true_ids[index]).intersection(set(item))
         sum_radio = sum_radio + len(tmp) / len(item)
     recall = round(sum_radio / len(result_ids), 3)
-    assert recall >= 0.95
+    assert recall >= 0.95, f"recall is {recall}, less than 0.95"
     print(f"recall={recall}")
 
 
