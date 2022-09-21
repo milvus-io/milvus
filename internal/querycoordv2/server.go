@@ -279,7 +279,7 @@ func (s *Server) initObserver() {
 }
 
 func (s *Server) Start() error {
-	log.Info("start watcher...")
+	log.Info("start watcher....")
 	sessions, revision, err := s.session.GetSessions(typeutil.QueryNodeRole)
 	if err != nil {
 		return err
