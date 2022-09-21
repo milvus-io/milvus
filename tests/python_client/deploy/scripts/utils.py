@@ -167,9 +167,9 @@ def load_and_search(prefix, replicas=1):
                 # Get value of the random value field for search result
                 print(hit, hit.entity.get("random_value"))
             ids = hits.ids
-            assert len(ids) == topK
+            assert len(ids) == topK, f"get {len(ids)} results, but topK is {topK}"
             print(ids)
-        assert len(res) == len(v_search)
+        assert len(res) == len(v_search), f"get {len(res)} results, but search num is {len(v_search)}"
         print("search latency: %.4fs" % (end_time - start_time))
         t0 = time.time()
         expr = "count in [2,4,6,8]"
