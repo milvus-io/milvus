@@ -105,6 +105,7 @@ func (suite *JobSuite) SetupTest() {
 	suite.meta = meta.NewMeta(RandomIncrementIDAllocator(), suite.store)
 	suite.targetMgr = meta.NewTargetManager()
 	suite.nodeMgr = session.NewNodeManager()
+	suite.nodeMgr.Add(&session.NodeInfo{})
 	suite.handoffObserver = observers.NewHandoffObserver(
 		suite.store,
 		suite.meta,
@@ -240,6 +241,35 @@ func (suite *JobSuite) TestLoadCollection() {
 	}
 }
 
+func (suite *JobSuite) TestLoadCollectionWithReplicas() {
+	ctx := context.Background()
+
+	// Test load collection
+	for _, collection := range suite.collections {
+		if suite.loadTypes[collection] != querypb.LoadType_LoadCollection {
+			continue
+		}
+		// Load with 3 replica
+		req := &querypb.LoadCollectionRequest{
+			CollectionID:  collection,
+			ReplicaNumber: 3,
+		}
+		job := NewLoadCollectionJob(
+			ctx,
+			req,
+			suite.dist,
+			suite.meta,
+			suite.targetMgr,
+			suite.broker,
+			suite.nodeMgr,
+			suite.handoffObserver,
+		)
+		suite.scheduler.Add(job)
+		err := job.Wait()
+		suite.ErrorIs(err, ErrNoEnoughNode)
+	}
+}
+
 func (suite *JobSuite) TestLoadPartition() {
 	ctx := context.Background()
 
@@ -372,6 +402,36 @@ func (suite *JobSuite) TestLoadPartition() {
 		suite.scheduler.Add(job)
 		err := job.Wait()
 		suite.ErrorIs(err, ErrLoadParameterMismatched)
+	}
+}
+
+func (suite *JobSuite) TestLoadPartitionWithReplicas() {
+	ctx := context.Background()
+
+	// Test load partitions
+	for _, collection := range suite.collections {
+		if suite.loadTypes[collection] != querypb.LoadType_LoadPartition {
+			continue
+		}
+		// Load with 3 replica
+		req := &querypb.LoadPartitionsRequest{
+			CollectionID:  collection,
+			PartitionIDs:  suite.partitions[collection],
+			ReplicaNumber: 3,
+		}
+		job := NewLoadPartitionJob(
+			ctx,
+			req,
+			suite.dist,
+			suite.meta,
+			suite.targetMgr,
+			suite.broker,
+			suite.nodeMgr,
+			suite.handoffObserver,
+		)
+		suite.scheduler.Add(job)
+		err := job.Wait()
+		suite.ErrorIs(err, ErrNoEnoughNode)
 	}
 }
 

@@ -271,7 +271,7 @@ func (suite *ServiceSuite) TestLoadCollectionFailed() {
 		}
 		resp, err := server.LoadCollection(ctx, req)
 		suite.NoError(err)
-		suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.ErrorCode)
+		suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.ErrorCode)
 		suite.Contains(resp.Reason, job.ErrLoadParameterMismatched.Error())
 	}
 
@@ -286,7 +286,7 @@ func (suite *ServiceSuite) TestLoadCollectionFailed() {
 		}
 		resp, err := server.LoadCollection(ctx, req)
 		suite.NoError(err)
-		suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.ErrorCode)
+		suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.ErrorCode)
 		suite.Contains(resp.Reason, job.ErrLoadParameterMismatched.Error())
 	}
 }
@@ -345,7 +345,7 @@ func (suite *ServiceSuite) TestLoadPartitionFailed() {
 		}
 		resp, err := server.LoadPartitions(ctx, req)
 		suite.NoError(err)
-		suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.ErrorCode)
+		suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.ErrorCode)
 		suite.Contains(resp.Reason, job.ErrLoadParameterMismatched.Error())
 	}
 
@@ -360,7 +360,7 @@ func (suite *ServiceSuite) TestLoadPartitionFailed() {
 		}
 		resp, err := server.LoadPartitions(ctx, req)
 		suite.NoError(err)
-		suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.ErrorCode)
+		suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.ErrorCode)
 		suite.Contains(resp.Reason, job.ErrLoadParameterMismatched.Error())
 	}
 
@@ -375,7 +375,7 @@ func (suite *ServiceSuite) TestLoadPartitionFailed() {
 		}
 		resp, err := server.LoadPartitions(ctx, req)
 		suite.NoError(err)
-		suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.ErrorCode)
+		suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.ErrorCode)
 		suite.Contains(resp.Reason, job.ErrLoadParameterMismatched.Error())
 	}
 }

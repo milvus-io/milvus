@@ -38,6 +38,7 @@ func (s *Server) ShowCollections(ctx context.Context, req *querypb.ShowCollectio
 		}, nil
 	}
 
+	isGetAll := false
 	collectionSet := typeutil.NewUniqueSet(req.GetCollectionIDs()...)
 	if len(req.GetCollectionIDs()) == 0 {
 		for _, collection := range s.meta.GetAllCollections() {
@@ -46,28 +47,35 @@ func (s *Server) ShowCollections(ctx context.Context, req *querypb.ShowCollectio
 		for _, partition := range s.meta.GetAllPartitions() {
 			collectionSet.Insert(partition.GetCollectionID())
 		}
+		isGetAll = true
 	}
 	collections := collectionSet.Collect()
 
 	resp := &querypb.ShowCollectionsResponse{
 		Status:                successStatus,
-		CollectionIDs:         collections,
-		InMemoryPercentages:   make([]int64, len(collectionSet)),
-		QueryServiceAvailable: make([]bool, len(collectionSet)),
+		CollectionIDs:         make([]int64, 0, len(collectionSet)),
+		InMemoryPercentages:   make([]int64, 0, len(collectionSet)),
+		QueryServiceAvailable: make([]bool, 0, len(collectionSet)),
 	}
-	for i, collectionID := range collections {
+	for _, collectionID := range collections {
 		log := log.With(zap.Int64("collectionID", collectionID))
 
 		percentage := s.meta.CollectionManager.GetLoadPercentage(collectionID)
 		if percentage < 0 {
+			if isGetAll {
+				// The collection is released during this,
+				// ignore it
+				continue
+			}
 			err := fmt.Errorf("collection %d has not been loaded to memory or load failed", collectionID)
 			log.Warn("show collection failed", zap.Error(err))
 			return &querypb.ShowCollectionsResponse{
 				Status: utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, err.Error()),
 			}, nil
 		}
-		resp.InMemoryPercentages[i] = int64(percentage)
-		resp.QueryServiceAvailable[i] = s.checkAnyReplicaAvailable(collectionID)
+		resp.CollectionIDs = append(resp.CollectionIDs, collectionID)
+		resp.InMemoryPercentages = append(resp.InMemoryPercentages, int64(percentage))
+		resp.QueryServiceAvailable = append(resp.QueryServiceAvailable, s.checkAnyReplicaAvailable(collectionID))
 	}
 
 	return resp, nil
@@ -79,7 +87,7 @@ func (s *Server) ShowPartitions(ctx context.Context, req *querypb.ShowPartitions
 		zap.Int64("collectionID", req.GetCollectionID()),
 	)
 
-	log.Info("show partitions", zap.Int64s("partitions", req.GetPartitionIDs()))
+	log.Info("show partitions request received", zap.Int64s("partitions", req.GetPartitionIDs()))
 
 	if s.status.Load() != internalpb.StateCode_Healthy {
 		msg := "failed to show partitions"
@@ -184,7 +192,7 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 		msg := "failed to load collection"
 		log.Warn(msg, zap.Error(err))
 		metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
-		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, err), nil
+		return utils.WrapStatus(errCode(err), msg, err), nil
 	}
 
 	metrics.QueryCoordLoadCount.WithLabelValues(metrics.SuccessLabel).Inc()
@@ -264,7 +272,7 @@ func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitions
 		msg := "failed to load partitions"
 		log.Warn(msg, zap.Error(err))
 		metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
-		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, err), nil
+		return utils.WrapStatus(errCode(err), msg, err), nil
 	}
 
 	metrics.QueryCoordLoadCount.WithLabelValues(metrics.SuccessLabel).Inc()
