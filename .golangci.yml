@@ -20,6 +20,7 @@ linters:
     - gosec
     - revive
     - gocritic
+    - funlen
 
 linters-settings:
   misspell:
@@ -31,6 +32,9 @@ linters-settings:
       ruleguard:
         failOnError: true
         rules: "rules.go"
+  funlen:
+    lines: 200 
+    statements: 100
 
 issues:
   exclude-use-default: false
@@ -59,7 +63,12 @@ issues:
   max-issues-per-linter: 0
   # Maximum count of issues with the same text. Set to 0 to disable. Default is 3.
   max-same-issues: 0
+  exclude-rules:
+    - path: _test.go
+      linters:
+        - funlen
 
 service:
   golangci-lint-version: 1.27.0 # use the fixed version to not introduce new linters unexpectedly
+
 
