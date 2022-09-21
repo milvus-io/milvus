@@ -44,6 +44,7 @@ set(MILVUS_TEST_FILES
         test_string_expr.cpp
         test_timestamp_index.cpp
         test_utils.cpp
+        test_config_parse.cpp
         )
 
 if (LINUX OR APPLE)

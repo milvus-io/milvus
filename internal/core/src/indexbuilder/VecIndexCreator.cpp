@@ -23,6 +23,7 @@
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "pb/index_cgo_msg.pb.h"
+#include "indexbuilder/parse.h"
 
 namespace milvus::indexbuilder {
 
@@ -62,7 +63,7 @@ VecIndexCreator::parse_impl(const std::string& serialized_params_str, knowhere::
     auto stof_closure = [](const std::string& s) -> float { return std::stof(s); };
 
     /***************************** meta *******************************/
-    check_parameter<int>(conf, knowhere::meta::SLICE_SIZE, stoi_closure, std::optional{4});
+    check_parameter<int>(conf, knowhere::meta::SLICE_SIZE, stoi_closure, std::optional{DEFAULT_INDEX_SLICE_SIZE});
     check_parameter<int>(conf, knowhere::meta::DIM, stoi_closure, std::nullopt);
     check_parameter<int>(conf, knowhere::meta::TOPK, stoi_closure, std::nullopt);
 
