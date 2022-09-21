@@ -14,8 +14,11 @@ FROM milvusdb/openblas:ubuntu20.04-20220914-179ea77 AS openblas
 #FROM alpine
 FROM ubuntu:focal-20220426
 
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=UTC
+
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends libtbb-dev gfortran netcat iputils-ping ca-certificates liblapack3 && \
+    apt-get install -y --no-install-recommends curl libtbb-dev gfortran netcat iputils-ping ca-certificates liblapack3 libzstd-dev uuid-dev libaio-dev libboost-program-options-dev libboost-filesystem-dev && \
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
 

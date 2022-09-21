@@ -32,16 +32,13 @@ import (
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
-)
-
-const (
-	// paramsKeyToParse is the key of the param to build index.
-	paramsKeyToParse = "params"
 )
 
 var (
@@ -149,33 +146,37 @@ func (it *indexBuildTask) OnEnqueue(ctx context.Context) error {
 
 func (it *indexBuildTask) Prepare(ctx context.Context) error {
 	typeParams := make(map[string]string)
+	indexParams := make(map[string]string)
+
+	// type params can be removed
 	for _, kvPair := range it.req.GetTypeParams() {
 		key, value := kvPair.GetKey(), kvPair.GetValue()
 		_, ok := typeParams[key]
 		if ok {
 			return errors.New("duplicated key in type params")
 		}
-		if key == paramsKeyToParse {
+		if key == util.ParamsKeyToParse {
 			params, err := funcutil.ParseIndexParamsMap(value)
 			if err != nil {
 				return err
 			}
 			for pk, pv := range params {
 				typeParams[pk] = pv
+				indexParams[pk] = pv
 			}
 		} else {
 			typeParams[key] = value
+			indexParams[key] = value
 		}
 	}
 
-	indexParams := make(map[string]string)
 	for _, kvPair := range it.req.GetIndexParams() {
 		key, value := kvPair.GetKey(), kvPair.GetValue()
 		_, ok := indexParams[key]
 		if ok {
 			return errors.New("duplicated key in index params")
 		}
-		if key == paramsKeyToParse {
+		if key == util.ParamsKeyToParse {
 			params, err := funcutil.ParseIndexParamsMap(value)
 			if err != nil {
 				return err
@@ -266,6 +267,12 @@ func (it *indexBuildTask) LoadData(ctx context.Context) error {
 }
 
 func (it *indexBuildTask) BuildIndex(ctx context.Context) error {
+	// support build diskann index
+	indexType := it.newIndexParams["index_type"]
+	if indexType == indexparamcheck.IndexDISKANN {
+		return it.BuildDiskAnnIndex(ctx)
+	}
+
 	dataset := indexcgowrapper.GenDataset(it.fieldData)
 	dType := dataset.DType
 	var err error
@@ -326,7 +333,97 @@ func (it *indexBuildTask) BuildIndex(ctx context.Context) error {
 	return nil
 }
 
+func (it *indexBuildTask) BuildDiskAnnIndex(ctx context.Context) error {
+	// check index node support disk index
+	if !Params.IndexNodeCfg.EnableDisk {
+		logutil.Logger(ctx).Error("IndexNode don't support build disk index",
+			zap.String("index type", it.newIndexParams["index_type"]),
+			zap.Bool("enable disk", Params.IndexNodeCfg.EnableDisk))
+		return errors.New("index node don't support build disk index")
+	}
+
+	// check load size and size of field data
+	localUsedSize, err := indexcgowrapper.GetLocalUsedSize()
+	if err != nil {
+		logutil.Logger(ctx).Error("IndexNode get local used size failed")
+		return errors.New("index node get local used size failed")
+	}
+
+	usedLocalSizeWhenBuild := int64(float64(it.fieldData.GetMemorySize())*2.6) + localUsedSize
+	maxUsedLocalSize := int64(float64(Params.IndexNodeCfg.DiskCapacityLimit) * Params.IndexNodeCfg.MaxDiskUsagePercentage)
+
+	if usedLocalSizeWhenBuild > maxUsedLocalSize {
+		logutil.Logger(ctx).Error("IndexNode don't has enough disk size to build disk ann index",
+			zap.Int64("usedLocalSizeWhenBuild", usedLocalSizeWhenBuild),
+			zap.Int64("maxUsedLocalSize", maxUsedLocalSize))
+		return errors.New("index node don't has enough disk size to build disk ann index")
+	}
+
+	dataset := indexcgowrapper.GenDataset(it.fieldData)
+	dType := dataset.DType
+	if dType != schemapb.DataType_None {
+		// TODO:: too ugly
+		it.newIndexParams["collection_id"] = strconv.FormatInt(it.collectionID, 10)
+		it.newIndexParams["partition_id"] = strconv.FormatInt(it.partitionID, 10)
+		it.newIndexParams["segment_id"] = strconv.FormatInt(it.segmentID, 10)
+		it.newIndexParams["field_id"] = strconv.FormatInt(it.fieldID, 10)
+		it.newIndexParams["index_build_id"] = strconv.FormatInt(it.req.GetBuildID(), 10)
+		it.newIndexParams["index_id"] = strconv.FormatInt(it.req.IndexID, 10)
+		it.newIndexParams["index_version"] = strconv.FormatInt(it.req.GetIndexVersion(), 10)
+
+		it.index, err = indexcgowrapper.NewCgoIndex(dType, it.newTypeParams, it.newIndexParams)
+		if err != nil {
+			logutil.Logger(ctx).Error("failed to create index", zap.Error(err))
+			return err
+		}
+
+		err = it.index.Build(dataset)
+		if err != nil {
+			if it.index.CleanLocalData() != nil {
+				logutil.Logger(ctx).Error("failed to clean cached data on disk after build index failed",
+					zap.Int64("buildID", it.BuildID),
+					zap.Int64("index version", it.req.GetIndexVersion()))
+			}
+			logutil.Logger(ctx).Error("failed to build index", zap.Error(err))
+			return err
+		}
+	}
+
+	metrics.IndexNodeKnowhereBuildIndexLatency.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.GetNodeID(), 10)).Observe(float64(it.tr.RecordSpan()))
+
+	it.tr.Record("build index done")
+
+	indexBlobs, err := it.index.SerializeDiskIndex()
+	if err != nil {
+		logutil.Logger(ctx).Error("IndexNode index Serialize failed", zap.Error(err))
+		return err
+	}
+	it.tr.Record("index serialize done")
+
+	// use serialized size before encoding
+	it.serializedSize = 0
+	for _, blob := range indexBlobs {
+		it.serializedSize += uint64(blob.Size)
+	}
+
+	// early release index for gc, and we can ensure that Delete is idempotent.
+	if err := it.index.Delete(); err != nil {
+		logutil.Logger(it.ctx).Error("IndexNode indexBuildTask Execute CIndexDelete failed", zap.Error(err))
+	}
+
+	encodeIndexFileDur := it.tr.Record("index codec serialize done")
+	metrics.IndexNodeEncodeIndexFileLatency.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.GetNodeID(), 10)).Observe(float64(encodeIndexFileDur.Milliseconds()))
+	it.indexBlobs = indexBlobs
+	return nil
+}
+
 func (it *indexBuildTask) SaveIndexFiles(ctx context.Context) error {
+	// support build diskann index
+	indexType := it.newIndexParams["index_type"]
+	if indexType == indexparamcheck.IndexDISKANN {
+		return it.SaveDiskAnnIndexFiles(ctx)
+	}
+
 	blobCnt := len(it.indexBlobs)
 	getSavePathByKey := func(key string) string {
 		return path.Join(it.req.IndexFilePrefix, strconv.Itoa(int(it.req.BuildID)), strconv.Itoa(int(it.req.IndexVersion)),
@@ -354,6 +451,58 @@ func (it *indexBuildTask) SaveIndexFiles(ctx context.Context) error {
 		return err
 	}
 	it.savePaths = savePaths
+	it.statistic.EndTime = time.Now().UnixMicro()
+	it.node.storeIndexFilesAndStatistic(it.ClusterID, it.BuildID, savePaths, it.serializedSize, &it.statistic)
+	logutil.Logger(ctx).Debug("save index files done", zap.Strings("IndexFiles", savePaths))
+	saveIndexFileDur := it.tr.Record("index file save done")
+	metrics.IndexNodeSaveIndexFileLatency.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.GetNodeID(), 10)).Observe(float64(saveIndexFileDur.Milliseconds()))
+	it.tr.Elapse("index building all done")
+	logutil.Logger(ctx).Info("IndexNode CreateIndex successfully ", zap.Int64("collect", it.collectionID),
+		zap.Int64("partition", it.partitionID), zap.Int64("segment", it.segmentID))
+	return nil
+}
+
+func (it *indexBuildTask) SaveDiskAnnIndexFiles(ctx context.Context) error {
+	savePaths := make([]string, len(it.indexBlobs))
+	for i, blob := range it.indexBlobs {
+		savePath := blob.Key
+		savePaths[i] = savePath
+	}
+
+	// add indexparams file
+	codec := storage.NewIndexFileBinlogCodec()
+	indexParamBlob, err := codec.SerializeIndexParams(
+		it.req.GetBuildID(),
+		it.req.GetIndexVersion(),
+		it.collectionID,
+		it.partitionID,
+		it.segmentID,
+		it.fieldID,
+		it.newIndexParams,
+		it.req.IndexName,
+		it.req.IndexID,
+	)
+	if err != nil {
+		return err
+	}
+
+	getSavePathByKey := func(key string) string {
+		return path.Join("files/index_files", strconv.Itoa(int(it.req.BuildID)), strconv.Itoa(int(it.req.IndexVersion)),
+			strconv.Itoa(int(it.partitionID)), strconv.Itoa(int(it.segmentID)), key)
+	}
+
+	indexParamPath := getSavePathByKey(indexParamBlob.Key)
+	saveFn := func() error {
+		return it.cm.Write(indexParamPath, indexParamBlob.Value)
+	}
+	if err := retry.Do(ctx, saveFn, retry.Attempts(5)); err != nil {
+		logutil.Logger(ctx).Warn("index node save index param file failed", zap.Error(err), zap.String("savePath", indexParamPath))
+		return err
+	}
+
+	savePaths = append(savePaths, indexParamPath)
+	it.savePaths = savePaths
+
 	it.statistic.EndTime = time.Now().UnixMicro()
 	it.node.storeIndexFilesAndStatistic(it.ClusterID, it.BuildID, savePaths, it.serializedSize, &it.statistic)
 	logutil.Logger(ctx).Debug("save index files done", zap.Strings("IndexFiles", savePaths))

@@ -17,7 +17,7 @@ extern "C" {
 
 #include <stdint.h>
 #include "common/type_c.h"
-#include "common/vector_index_c.h"
+#include "common/binary_set_c.h"
 #include "indexbuilder/type_c.h"
 
 CStatus
@@ -50,42 +50,7 @@ CStatus
 LoadIndexFromBinarySet(CIndex index, CBinarySet c_binary_set);
 
 CStatus
-QueryOnFloatVecIndex(CIndex index, int64_t float_value_num, const float* vectors, CIndexQueryResult* res);
-
-CStatus
-QueryOnFloatVecIndexWithParam(CIndex index,
-                              int64_t float_value_num,
-                              const float* vectors,
-                              const char* serialized_search_params,
-                              CIndexQueryResult* res);
-
-CStatus
-QueryOnBinaryVecIndex(CIndex index, int64_t data_size, const uint8_t* vectors, CIndexQueryResult* res);
-
-CStatus
-QueryOnBinaryVecIndexWithParam(CIndex index,
-                               int64_t data_size,
-                               const uint8_t* vectors,
-                               const char* serialized_search_params,
-                               CIndexQueryResult* res);
-
-CStatus
-CreateQueryResult(CIndexQueryResult* res);
-
-int64_t
-NqOfQueryResult(CIndexQueryResult res);
-
-int64_t
-TopkOfQueryResult(CIndexQueryResult res);
-
-void
-GetIdsOfQueryResult(CIndexQueryResult res, int64_t* ids);
-
-void
-GetDistancesOfQueryResult(CIndexQueryResult res, float* distances);
-
-CStatus
-DeleteIndexQueryResult(CIndexQueryResult res);
+CleanLocalData(CIndex index);
 
 #ifdef __cplusplus
 };

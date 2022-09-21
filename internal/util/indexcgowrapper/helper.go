@@ -1,10 +1,11 @@
 package indexcgowrapper
 
 /*
-#cgo pkg-config: milvus_common
+#cgo pkg-config: milvus_common milvus_storage
 
 #include <stdlib.h>	// free
-#include "indexbuilder/index_c.h"
+#include "common/binary_set_c.h"
+#include "storage/storage_c.h"
 */
 import "C"
 import (
@@ -50,6 +51,13 @@ func GetBinarySetValue(cBinarySet C.CBinarySet, key string) ([]byte, error) {
 	return value, nil
 }
 
+func GetBinarySetSize(cBinarySet C.CBinarySet, key string) (int64, error) {
+	cIndexKey := C.CString(key)
+	defer C.free(unsafe.Pointer(cIndexKey))
+	ret := C.GetBinarySetValueSize(cBinarySet, cIndexKey)
+	return int64(ret), nil
+}
+
 // HandleCStatus deal with the error returned from CGO
 func HandleCStatus(status *C.CStatus, extraInfo string) error {
 	if status.error_code == 0 {
@@ -67,4 +75,17 @@ func HandleCStatus(status *C.CStatus, extraInfo string) error {
 	logMsg := fmt.Sprintf("%s, C Runtime Exception: %s\n", extraInfo, finalMsg)
 	log.Warn(logMsg)
 	return errors.New(finalMsg)
+}
+
+func GetLocalUsedSize() (int64, error) {
+	var availableSize int64
+	cSize := C.int64_t(availableSize)
+
+	status := C.GetLocalUsedSize(&cSize)
+	err := HandleCStatus(&status, "get local used size failed")
+	if err != nil {
+		return 0, err
+	}
+
+	return availableSize, nil
 }

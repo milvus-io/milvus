@@ -29,8 +29,17 @@ macro(build_knowhere)
             ${EP_COMMON_CMAKE_ARGS}
             -DCMAKE_BUILD_TYPE=Release
             -DCMAKE_INSTALL_PREFIX=${KNOWHERE_INSTALL_PREFIX}
-            -DKNOWHERE_WITH_DISKANN=false
             )
+
+    if ( BUILD_DISK_ANN STREQUAL "ON" )
+        set(KNOWHERE_CMAKE_ARGS
+                ${KNOWHERE_CMAKE_ARGS}
+            -DKNOWHERE_WITH_DISKANN=true)
+    else ()
+        set(KNOWHERE_CMAKE_ARGS
+                ${KNOWHERE_CMAKE_ARGS}
+            -DKNOWHERE_WITH_DISKANN=false)
+    endif ()
 
     externalproject_add(knowhere_ep
             # GIT_REPOSITORY  "https://github.com/milvus-io/knowhere.git"

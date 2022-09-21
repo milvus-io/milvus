@@ -23,6 +23,7 @@ services:
     #  - "19530:19530"
     environment:
       <<: *ccache
+      OS_NAME: ${OS_NAME}
       PULSAR_ADDRESS: ${PULSAR_ADDRESS}
       ETCD_ENDPOINTS: ${ETCD_ENDPOINTS}
       MINIO_ADDRESS: ${MINIO_ADDRESS}

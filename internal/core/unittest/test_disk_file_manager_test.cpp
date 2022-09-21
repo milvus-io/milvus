@@ -22,7 +22,7 @@
 #include "storage/Event.h"
 #include "storage/MinioChunkManager.h"
 #include "storage/LocalChunkManager.h"
-#include "storage/DiskANNFileManagerImpl.h"
+#include "storage/DiskFileManagerImpl.h"
 #include "config/ConfigChunkManager.h"
 #include "config/ConfigKnowhere.h"
 
@@ -85,6 +85,7 @@ class DiskAnnFileManagerTest : public testing::Test {
         auto accessValue = minioConfig["secretAccessKey"].as<string>();
         auto useSSL = minioConfig["useSSL"].as<bool>();
         auto bucketName = minioConfig["bucketName"].as<string>();
+
         ChunkMangerConfig::SetAddress(endpoint);
         ChunkMangerConfig::SetAccessKey(accessKey);
         ChunkMangerConfig::SetAccessValue(accessValue);
@@ -94,7 +95,7 @@ class DiskAnnFileManagerTest : public testing::Test {
 
     void
     InitLocalChunkManager() {
-        ChunkMangerConfig::SetLocalBucketName("/tmp/diskann");
+        ChunkMangerConfig::SetLocalRootPath("/tmp/diskann");
         config::KnowhereSetIndexSliceSize(5);
     }
 
@@ -131,12 +132,13 @@ TEST_F(DiskAnnFileManagerTest, AddFilePositive) {
     IndexMeta index_meta = {3, 100, 1000, 1, "index"};
 
     int64_t slice_size = config::KnowhereGetIndexSliceSize() << 20;
-    auto diskAnnFileManager = std::make_shared<DiskANNFileManagerImpl>(filed_data_meta, index_meta);
+    auto diskAnnFileManager = std::make_shared<DiskFileManagerImpl>(filed_data_meta, index_meta);
     diskAnnFileManager->AddFile(indexFilePath);
 
     // check result
     auto remotePrefix = diskAnnFileManager->GetRemoteIndexObjectPrefix();
     auto remoteIndexFiles = rcm.ListWithPrefix(remotePrefix);
+
     auto num_slice = index_size / slice_size;
     EXPECT_EQ(remoteIndexFiles.size(), index_size % slice_size == 0 ? num_slice : num_slice + 1);
 
@@ -149,7 +151,14 @@ TEST_F(DiskAnnFileManagerTest, AddFilePositive) {
     auto payload = index->GetPayload();
     auto rows = payload->rows;
     auto rawData = payload->raw_data;
+
     EXPECT_EQ(rows, index_size);
     EXPECT_EQ(rawData[0], data[0]);
     EXPECT_EQ(rawData[4], data[4]);
+
+    auto files = diskAnnFileManager->GetRemotePathsToFileSize();
+    for (auto& value : files) {
+        rcm.Remove(value.first);
+    }
+    rcm.DeleteBucket(testBucketName);
 }

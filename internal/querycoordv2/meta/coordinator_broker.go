@@ -178,6 +178,7 @@ func (broker *CoordinatorBroker) GetIndexInfo(ctx context.Context, collectionID 
 			IndexParams:    info.GetIndexParams(),
 			IndexFilePaths: info.GetIndexFilePaths(),
 			IndexSize:      int64(info.GetSerializedSize()),
+			IndexVersion:   info.GetIndexVersion(),
 		}
 
 		if len(info.GetIndexFilePaths()) == 0 {

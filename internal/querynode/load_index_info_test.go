@@ -19,11 +19,10 @@ package querynode
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus/api/schemapb"
-
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/api/commonpb"
+	"github.com/milvus-io/milvus/api/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
 
@@ -36,6 +35,10 @@ func TestLoadIndexInfo(t *testing.T) {
 	indexParams = append(indexParams, &commonpb.KeyValuePair{
 		Key:   "index_mode",
 		Value: "cpu",
+	})
+	indexParams = append(indexParams, &commonpb.KeyValuePair{
+		Key:   "metric_type",
+		Value: "L2",
 	})
 
 	indexBytes, err := genIndexBinarySet()
@@ -53,7 +56,7 @@ func TestLoadIndexInfo(t *testing.T) {
 	}
 
 	fieldType := schemapb.DataType_FloatVector
-	err = loadIndexInfo.appendIndexInfo(indexBytes, indexInfo, fieldType)
+	err = loadIndexInfo.appendLoadIndexInfo(indexBytes, indexInfo, 0, 0, 0, fieldType)
 	assert.NoError(t, err)
 
 	deleteLoadIndexInfo(loadIndexInfo)

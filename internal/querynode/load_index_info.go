@@ -20,7 +20,7 @@ package querynode
 #cgo pkg-config: milvus_common milvus_segcore
 
 #include "segcore/load_index_c.h"
-#include "common/vector_index_c.h"
+#include "common/binary_set_c.h"
 */
 import "C"
 
@@ -28,9 +28,12 @@ import (
 	"path/filepath"
 	"unsafe"
 
+	"github.com/golang/protobuf/proto"
+
+	"github.com/milvus-io/milvus/api/commonpb"
 	"github.com/milvus-io/milvus/api/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/indexcgopb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
 // LoadIndexInfo is a wrapper of the underlying C-structure C.CLoadIndexInfo
@@ -53,21 +56,20 @@ func deleteLoadIndexInfo(info *LoadIndexInfo) {
 	C.DeleteLoadIndexInfo(info.cLoadIndexInfo)
 }
 
-func (li *LoadIndexInfo) appendIndexInfo(bytesIndex [][]byte, indexInfo *querypb.FieldIndexInfo, fieldType schemapb.DataType) error {
+func (li *LoadIndexInfo) appendLoadIndexInfo(bytesIndex [][]byte, indexInfo *querypb.FieldIndexInfo, collectionID int64, partitionID int64, segmentID int64, fieldType schemapb.DataType) error {
 	fieldID := indexInfo.FieldID
-	indexParams := funcutil.KeyValuePair2Map(indexInfo.IndexParams)
 	indexPaths := indexInfo.IndexFilePaths
 
-	err := li.appendFieldInfo(fieldID, fieldType)
+	err := li.appendFieldInfo(collectionID, partitionID, segmentID, fieldID, fieldType)
 	if err != nil {
 		return err
 	}
-	for key, value := range indexParams {
-		err = li.appendIndexParam(key, value)
-		if err != nil {
-			return err
-		}
+
+	err = li.appendIndexInfo(indexInfo.IndexID, indexInfo.BuildID, indexInfo.IndexVersion, indexInfo.IndexParams)
+	if err != nil {
+		return err
 	}
+
 	err = li.appendIndexData(bytesIndex, indexPaths)
 	return err
 }
@@ -82,16 +84,56 @@ func (li *LoadIndexInfo) appendIndexParam(indexKey string, indexValue string) er
 	return HandleCStatus(&status, "AppendIndexParam failed")
 }
 
+func (li *LoadIndexInfo) appendIndexInfo(indexID int64, buildID int64, indexVersion int64, indexParams []*commonpb.KeyValuePair) error {
+	protoIndexParams := &indexcgopb.IndexParams{
+		Params: indexParams,
+	}
+
+	indexParamsStr := proto.MarshalTextString(protoIndexParams)
+	indexParamsPointer := C.CString(indexParamsStr)
+	defer C.free(unsafe.Pointer(indexParamsPointer))
+
+	cIndexID := C.int64_t(indexID)
+	cBuildID := C.int64_t(buildID)
+	cIndexVersion := C.int64_t(indexVersion)
+
+	status := C.AppendIndexInfo(li.cLoadIndexInfo, cIndexID, cBuildID, cIndexVersion, indexParamsPointer)
+	return HandleCStatus(&status, "AppendIndexInfo failed")
+}
+
+func (li *LoadIndexInfo) cleanLocalData() error {
+	status := C.CleanLoadedIndex(li.cLoadIndexInfo)
+	return HandleCStatus(&status, "failed to clean cached data on disk")
+}
+
+func (li *LoadIndexInfo) appendIndexFile(filePath string) error {
+	cIndexFilePath := C.CString(filePath)
+	defer C.free(unsafe.Pointer(cIndexFilePath))
+
+	status := C.AppendIndexFilePath(li.cLoadIndexInfo, cIndexFilePath)
+	return HandleCStatus(&status, "AppendIndexIFile failed")
+}
+
 // appendFieldInfo appends fieldID & fieldType to index
-func (li *LoadIndexInfo) appendFieldInfo(fieldID FieldID, fieldType schemapb.DataType) error {
+func (li *LoadIndexInfo) appendFieldInfo(collectionID int64, partitionID int64, segmentID int64, fieldID FieldID, fieldType schemapb.DataType) error {
+	cColID := C.int64_t(collectionID)
+	cParID := C.int64_t(partitionID)
+	cSegID := C.int64_t(segmentID)
 	cFieldID := C.int64_t(fieldID)
 	cintDType := uint32(fieldType)
-	status := C.AppendFieldInfo(li.cLoadIndexInfo, cFieldID, cintDType)
+	status := C.AppendFieldInfo(li.cLoadIndexInfo, cColID, cParID, cSegID, cFieldID, cintDType)
 	return HandleCStatus(&status, "AppendFieldInfo failed")
 }
 
 // appendIndexData appends binarySet index to cLoadIndexInfo
 func (li *LoadIndexInfo) appendIndexData(bytesIndex [][]byte, indexKeys []string) error {
+	for _, indexPath := range indexKeys {
+		err := li.appendIndexFile(indexPath)
+		if err != nil {
+			return err
+		}
+	}
+
 	var cBinarySet C.CBinarySet
 	status := C.NewBinarySet(&cBinarySet)
 	defer C.DeleteBinarySet(cBinarySet)

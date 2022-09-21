@@ -21,6 +21,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/milvus-io/milvus/api/commonpb"
 	"github.com/milvus-io/milvus/api/schemapb"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
@@ -31,8 +34,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestTask_watchDmChannelsTask(t *testing.T) {
@@ -542,6 +543,11 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 			req:  genLoadEmptySegmentsRequest(),
 			node: node,
 		}
+		binlogs := []*datapb.Binlog{
+			{
+				LogSize: totalRAM,
+			},
+		}
 		task.req.Infos = []*querypb.SegmentLoadInfo{
 			{
 				SegmentID:    defaultSegmentID,
@@ -549,6 +555,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 				CollectionID: defaultCollectionID,
 				NumOfRows:    totalRAM / int64(sizePerRecord),
 				SegmentSize:  totalRAM,
+				BinlogPaths:  []*datapb.FieldBinlog{{Binlogs: binlogs}},
 			},
 		}
 		// Reach the segment size that would cause OOM

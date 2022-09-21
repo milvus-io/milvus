@@ -14,18 +14,16 @@ milvus_add_pkg_config("milvus_common")
 set(COMMON_SRC
         Schema.cpp
         SystemProperty.cpp
-        vector_index_c.cpp
+        binary_set_c.cpp
+        init_c.cpp
         )
 
 add_library(milvus_common SHARED ${COMMON_SRC})
 
 if ( MSYS )
     target_link_libraries(milvus_common
-            milvus_utils
             milvus_config
             milvus_log
-            knowhere
-            milvus_proto
             yaml-cpp
             boost_bitset_ext
             arrow
@@ -33,11 +31,8 @@ if ( MSYS )
             )
 else()
     target_link_libraries(milvus_common
-            milvus_utils
             milvus_config
             milvus_log
-            knowhere
-            milvus_proto
             yaml-cpp
             boost_bitset_ext
             arrow

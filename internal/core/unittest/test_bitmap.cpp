@@ -22,7 +22,7 @@ TEST(Bitmap, Naive) {
     int N = 10000;
     auto raw_data = DataGen(schema, N);
     auto vec = raw_data.get_col<float>(field_id);
-    auto sort_index = std::make_shared<scalar::ScalarIndexSort<float>>();
+    auto sort_index = std::make_shared<index::ScalarIndexSort<float>>();
     sort_index->Build(N, vec.data());
     {
         auto res = sort_index->Range(0, OpType::LessThan);

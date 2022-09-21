@@ -15,9 +15,8 @@
 #include "index/StringIndexSort.h"
 
 #include "common/SystemProperty.h"
-#include "knowhere/index/vector_index/IndexIVF.h"
-#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "segcore/FieldIndexing.h"
+#include "index/VectorMemIndex.h"
 
 namespace milvus::segcore {
 
@@ -34,11 +33,10 @@ VectorFieldIndexing::BuildIndexRange(int64_t ack_beg, int64_t ack_end, const Vec
     data_.grow_to_at_least(ack_end);
     for (int chunk_id = ack_beg; chunk_id < ack_end; chunk_id++) {
         const auto& chunk = source->get_chunk(chunk_id);
-        // build index for chunk
-        auto indexing = std::make_unique<knowhere::IVF>();
+        auto indexing = std::make_unique<index::VectorMemIndex>(knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+                                                                knowhere::metric::L2, IndexMode::MODE_CPU);
         auto dataset = knowhere::GenDataset(source->get_size_per_chunk(), dim, chunk.data());
-        indexing->Train(dataset, conf);
-        indexing->AddWithoutIds(dataset, conf);
+        indexing->BuildWithDataset(dataset, conf);
         data_[chunk_id] = std::move(indexing);
     }
 }
@@ -53,8 +51,8 @@ VectorFieldIndexing::get_build_params() const {
     auto base_params = config.build_params;
 
     AssertInfo(base_params.count("nlist"), "Can't get nlist from index params");
-    knowhere::SetMetaDim(base_params, field_meta_.get_dim());
-    knowhere::SetMetaMetricType(base_params, metric_type);
+    base_params[knowhere::meta::DIM] = std::to_string(field_meta_.get_dim());
+    base_params[knowhere::meta::METRIC_TYPE] = metric_type;
 
     return base_params;
 }
@@ -111,11 +109,11 @@ ScalarFieldIndexing<T>::BuildIndexRange(int64_t ack_beg, int64_t ack_end, const 
         // build index for chunk
         // TODO
         if constexpr (std::is_same_v<T, std::string>) {
-            auto indexing = scalar::CreateStringIndexSort();
+            auto indexing = index::CreateStringIndexSort();
             indexing->Build(vec_base->get_size_per_chunk(), chunk.data());
             data_[chunk_id] = std::move(indexing);
         } else {
-            auto indexing = scalar::CreateScalarIndexSort<T>();
+            auto indexing = index::CreateScalarIndexSort<T>();
             indexing->Build(vec_base->get_size_per_chunk(), chunk.data());
             data_[chunk_id] = std::move(indexing);
         }

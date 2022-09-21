@@ -18,7 +18,7 @@ namespace milvus::query {
 
 void
 SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
-                const query::SearchInfo& info,
+                const SearchInfo& info,
                 const void* query_data,
                 int64_t num_queries,
                 Timestamp timestamp,

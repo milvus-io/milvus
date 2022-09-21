@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	actionTimeout = 10 * time.Second
+	actionTimeout = 120 * time.Second
 )
 
 type actionIndex struct {

@@ -26,6 +26,10 @@ const milvus::PkType INVALID_PK;  // of std::monostate if not set.
 const int64_t START_USER_FIELDID = 100;
 const char MAX_LENGTH[] = "max_length";
 
+// const fieldID (rowID and timestamp)
+const milvus::FieldId RowFieldID = milvus::FieldId(0);
+const milvus::FieldId TimestampFieldID = milvus::FieldId(1);
+
 // fill followed extra info to binlog file
 const char ORIGIN_SIZE_KEY[] = "original_size";
 const char INDEX_BUILD_ID_KEY[] = "indexBuildID";

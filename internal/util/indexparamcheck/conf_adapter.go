@@ -19,6 +19,7 @@ package indexparamcheck
 import (
 	"strconv"
 
+	"github.com/milvus-io/milvus/api/schemapb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
@@ -57,6 +58,9 @@ const (
 	DefaultMinDim = 1
 	// DefaultMaxDim is the largest dimension supported in Milvus
 	DefaultMaxDim = 32768
+
+	DiskAnnMinDim = 1
+	DiskAnnMaxDim = 1024
 
 	NgtMinEdgeSize = 1
 	NgtMaxEdgeSize = 200
@@ -123,6 +127,7 @@ var supportSubQuantizer = []int{96, 64, 56, 48, 40, 32, 28, 24, 20, 16, 12, 8, 4
 type ConfAdapter interface {
 	// CheckTrain returns true if the index can be built with the specific index parameters.
 	CheckTrain(map[string]string) bool
+	CheckValidDataType(dType schemapb.DataType) bool
 }
 
 // BaseConfAdapter checks if a `FLAT` index can be built.
@@ -136,6 +141,11 @@ func (adapter *BaseConfAdapter) CheckTrain(params map[string]string) bool {
 	}
 
 	return CheckStrByValues(params, Metric, METRICS)
+}
+
+// CheckValidDataType check whether the field data type is supported for the index type
+func (adapter *BaseConfAdapter) CheckValidDataType(dType schemapb.DataType) bool {
+	return true
 }
 
 func newBaseConfAdapter() *BaseConfAdapter {
@@ -255,6 +265,7 @@ func newIVFSQConfAdapter() *IVFSQConfAdapter {
 }
 
 type BinIDMAPConfAdapter struct {
+	BaseConfAdapter
 }
 
 // CheckTrain checks if a binary flat index can be built with the specific parameters.
@@ -272,6 +283,7 @@ func newBinIDMAPConfAdapter() *BinIDMAPConfAdapter {
 
 // BinIVFConfAdapter checks if a bin IFV index can be built.
 type BinIVFConfAdapter struct {
+	BaseConfAdapter
 }
 
 // CheckTrain checks if a binary ivf index can be built with specific parameters.
@@ -298,6 +310,7 @@ func newBinIVFConfAdapter() *BinIVFConfAdapter {
 }
 
 type NSGConfAdapter struct {
+	BaseConfAdapter
 }
 
 // CheckTrain checks if a nsg index can be built with specific parameters.
@@ -506,4 +519,27 @@ func (adapter *NGTONNGConfAdapter) CheckTrain(params map[string]string) bool {
 
 func newNGTONNGConfAdapter() *NGTONNGConfAdapter {
 	return &NGTONNGConfAdapter{}
+}
+
+type DISKANNConfAdapter struct {
+	BaseConfAdapter
+}
+
+func (adapter *DISKANNConfAdapter) CheckTrain(params map[string]string) bool {
+	if !CheckIntByRange(params, DIM, DiskAnnMinDim, DiskAnnMaxDim) {
+		return false
+	}
+	return adapter.BaseConfAdapter.CheckTrain(params)
+}
+
+// CheckValidDataType check whether the field data type is supported for the index type
+func (adapter *DISKANNConfAdapter) CheckValidDataType(dType schemapb.DataType) bool {
+	vecDataTypes := []schemapb.DataType{
+		schemapb.DataType_FloatVector,
+	}
+	return funcutil.SliceContain(vecDataTypes, dType)
+}
+
+func newDISKANNConfAdapter() *DISKANNConfAdapter {
+	return &DISKANNConfAdapter{}
 }

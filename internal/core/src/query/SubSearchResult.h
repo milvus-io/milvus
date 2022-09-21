@@ -20,7 +20,7 @@ namespace milvus::query {
 
 class SubSearchResult {
  public:
-    SubSearchResult(int64_t num_queries, int64_t topk, const knowhere::MetricType& metric_type, int64_t round_decimal)
+    SubSearchResult(int64_t num_queries, int64_t topk, const MetricType& metric_type, int64_t round_decimal)
         : num_queries_(num_queries),
           topk_(topk),
           round_decimal_(round_decimal),
@@ -40,12 +40,12 @@ class SubSearchResult {
 
  public:
     static float
-    init_value(const knowhere::MetricType& metric_type) {
+    init_value(const MetricType& metric_type) {
         return (is_descending(metric_type) ? -1 : 1) * std::numeric_limits<float>::max();
     }
 
     static bool
-    is_descending(const knowhere::MetricType& metric_type) {
+    is_descending(const MetricType& metric_type) {
         // TODO(dog): more types
         if (metric_type == knowhere::metric::IP) {
             return true;

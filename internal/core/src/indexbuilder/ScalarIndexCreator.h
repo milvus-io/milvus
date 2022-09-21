@@ -23,33 +23,33 @@ namespace milvus::indexbuilder {
 
 class ScalarIndexCreator : public IndexCreatorBase {
  public:
-    ScalarIndexCreator(CDataType dtype, const char* type_params, const char* index_params);
+    ScalarIndexCreator(DataType data_type, const char* type_params, const char* index_params);
 
     void
-    Build(const knowhere::DatasetPtr& dataset) override;
+    Build(const milvus::DatasetPtr& dataset) override;
 
-    knowhere::BinarySet
+    milvus::BinarySet
     Serialize() override;
 
     void
-    Load(const knowhere::BinarySet&) override;
+    Load(const milvus::BinarySet&) override;
 
  private:
     std::string
     index_type();
 
  private:
-    scalar::IndexBasePtr index_ = nullptr;
+    index::IndexBasePtr index_ = nullptr;
     proto::indexcgo::TypeParams type_params_;
     proto::indexcgo::IndexParams index_params_;
-    knowhere::Config config_;
-    CDataType dtype_;
+    Config config_;
+    DataType dtype_;
 };
 
 using ScalarIndexCreatorPtr = std::unique_ptr<ScalarIndexCreator>;
 
 inline ScalarIndexCreatorPtr
-CreateScalarIndex(CDataType dtype, const char* type_params, const char* index_params) {
+CreateScalarIndex(DataType dtype, const char* type_params, const char* index_params) {
     return std::make_unique<ScalarIndexCreator>(dtype, type_params, index_params);
 }
 

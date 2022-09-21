@@ -21,9 +21,8 @@
 #include "common/Schema.h"
 #include "index/ScalarIndexSort.h"
 #include "index/StringIndexSort.h"
+#include "index/VectorMemIndex.h"
 #include "knowhere/index/VecIndex.h"
-#include "knowhere/index/VecIndexFactory.h"
-#include "knowhere/index/vector_index/IndexIVF.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "query/SearchOnIndex.h"
 #include "segcore/SegmentGrowingImpl.h"
@@ -44,7 +43,8 @@ struct GeneratedData {
     std::vector<T>
     get_col(FieldId field_id) const {
         std::vector<T> ret(raw_->num_rows());
-        for (auto target_field_data : raw_->fields_data()) {
+        for (auto i = 0; i < raw_->fields_data_size(); i++) {
+            auto target_field_data = raw_->fields_data(i);
             if (field_id.get() != target_field_data.field_id()) {
                 continue;
             }
@@ -428,29 +428,29 @@ SealedCreator(SchemaPtr schema, const GeneratedData& dataset) {
     return segment;
 }
 
-inline knowhere::VecIndexPtr
+inline index::VectorIndexPtr
 GenVecIndexing(int64_t N, int64_t dim, const float* vec) {
     // {knowhere::IndexParams::nprobe, 10},
     auto conf = knowhere::Config{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
-                                 {knowhere::meta::DIM, dim},
-                                 {knowhere::indexparam::NLIST, 1024},
+                                 {knowhere::meta::DIM, std::to_string(dim)},
+                                 {knowhere::indexparam::NLIST, "1024"},
                                  {knowhere::meta::DEVICE_ID, 0}};
     auto database = knowhere::GenDataset(N, dim, vec);
-    auto indexing = std::make_shared<knowhere::IVF>();
-    indexing->Train(database, conf);
-    indexing->AddWithoutIds(database, conf);
+    auto indexing = std::make_unique<index::VectorMemIndex>(knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+                                                            knowhere::metric::L2, IndexMode::MODE_CPU);
+    indexing->BuildWithDataset(database, conf);
     return indexing;
 }
 
 template <typename T>
-inline scalar::IndexBasePtr
+inline index::IndexBasePtr
 GenScalarIndexing(int64_t N, const T* data) {
     if constexpr (std::is_same_v<T, std::string>) {
-        auto indexing = scalar::CreateStringIndexSort();
+        auto indexing = index::CreateStringIndexSort();
         indexing->Build(N, data);
         return indexing;
     } else {
-        auto indexing = scalar::CreateScalarIndexSort<T>();
+        auto indexing = index::CreateScalarIndexSort<T>();
         indexing->Build(N, data);
         return indexing;
     }

@@ -16,6 +16,8 @@
 
 #include <fstream>
 #include <aws/core/auth/AWSCredentials.h>
+#include <aws/core/auth/AWSCredentialsProviderChain.h>
+#include <aws/core/auth/STSCredentialsProvider.h>
 #include <aws/s3/model/CreateBucketRequest.h>
 #include <aws/s3/model/DeleteBucketRequest.h>
 #include <aws/s3/model/DeleteObjectRequest.h>
@@ -66,7 +68,8 @@ MinioChunkManager::MinioChunkManager(const std::string& endpoint,
                                      const std::string& access_key,
                                      const std::string& access_value,
                                      const std::string& bucket_name,
-                                     bool secure)
+                                     bool secure,
+                                     bool use_iam)
     : default_bucket_name_(bucket_name) {
     Aws::InitAPI(sdk_options_);
     Aws::Client::ClientConfiguration config;
@@ -80,9 +83,20 @@ MinioChunkManager::MinioChunkManager(const std::string& endpoint,
         config.verifySSL = false;
     }
 
-    client_ = std::make_shared<Aws::S3::S3Client>(
-        Aws::Auth::AWSCredentials(ConvertToAwsString(access_key), ConvertToAwsString(access_value)), config,
-        Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never, false);
+    if (use_iam) {
+        auto provider = std::make_shared<Aws::Auth::DefaultAWSCredentialsProviderChain>();
+        client_ = std::make_shared<Aws::S3::S3Client>(provider, config,
+                                                      Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never, false);
+
+        LOG_SEGCORE_INFO_C << "use iam mode, credentials{ access_id:"
+                           << provider->GetAWSCredentials().GetAWSAccessKeyId()
+                           << " access_key:" << provider->GetAWSCredentials().GetAWSSecretKey()
+                           << " token:" << provider->GetAWSCredentials().GetSessionToken() << "}";
+    } else {
+        client_ = std::make_shared<Aws::S3::S3Client>(
+            Aws::Auth::AWSCredentials(ConvertToAwsString(access_key), ConvertToAwsString(access_value)), config,
+            Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never, false);
+    }
 
     LOG_SEGCORE_INFO_C << "init MinioChunkManager with parameter[endpoint: '" << endpoint << "', access_key:'"
                        << access_key << "', access_value:'" << access_value << "', default_bucket_name:'" << bucket_name

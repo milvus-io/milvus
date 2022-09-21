@@ -11,7 +11,6 @@
 
 #include "knowhere/index/vector_index/ConfAdapterMgr.h"
 #include "knowhere/index/vector_index/ConfAdapter.h"
-#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "query/generated/VerifyPlanNodeVisitor.h"
 
 namespace milvus::query {
@@ -29,13 +28,14 @@ class VerifyPlanNodeVisitor : PlanNodeVisitor {
 };
 }  // namespace impl
 
-static knowhere::IndexType
+static IndexType
 InferIndexType(const Json& search_params) {
     // ivf -> nprobe
     // hnsw -> ef
     // annoy -> search_k
-    static const std::map<std::string, knowhere::IndexType> key_list = [] {
-        std::map<std::string, knowhere::IndexType> list;
+    // ngtpanng / ngtonng -> max_search_edges / epsilon
+    static const std::map<std::string, IndexType> key_list = [] {
+        std::map<std::string, IndexType> list;
         namespace ip = knowhere::indexparam;
         namespace ie = knowhere::IndexEnum;
         list.emplace(ip::NPROBE, ie::INDEX_FAISS_IVFFLAT);
@@ -53,7 +53,7 @@ InferIndexType(const Json& search_params) {
     PanicCodeInfo(ErrorCodeEnum::IllegalArgument, "failed to infer index type");
 }
 
-static knowhere::IndexType
+static IndexType
 InferBinaryIndexType(const Json& search_params) {
     namespace ip = knowhere::indexparam;
     namespace ie = knowhere::IndexEnum;

@@ -17,7 +17,7 @@ extern "C" {
 #include <stdint.h>
 #include <stdlib.h>
 
-#include "common/vector_index_c.h"
+#include "common/binary_set_c.h"
 #include "common/type_c.h"
 #include "segcore/collection_c.h"
 
@@ -33,10 +33,25 @@ CStatus
 AppendIndexParam(CLoadIndexInfo c_load_index_info, const char* index_key, const char* index_value);
 
 CStatus
-AppendFieldInfo(CLoadIndexInfo c_load_index_info, int64_t field_id, enum CDataType field_type);
+AppendFieldInfo(CLoadIndexInfo c_load_index_info,
+                int64_t collection_id,
+                int64_t partition_id,
+                int64_t segment_id,
+                int64_t field_id,
+                enum CDataType field_type);
+
+CStatus
+AppendIndexInfo(
+    CLoadIndexInfo c_load_index_info, int64_t index_id, int64_t build_id, int64_t version, const char* index_params);
 
 CStatus
 AppendIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set);
+
+CStatus
+AppendIndexFilePath(CLoadIndexInfo c_load_index_info, const char* file_path);
+
+CStatus
+CleanLoadedIndex(CLoadIndexInfo c_load_index_info);
 
 #ifdef __cplusplus
 }

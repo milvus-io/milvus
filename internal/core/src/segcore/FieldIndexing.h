@@ -22,8 +22,8 @@
 #include "AckResponder.h"
 #include "InsertRecord.h"
 #include "common/Schema.h"
-#include "knowhere/index/VecIndex.h"
 #include "segcore/SegcoreConfig.h"
+#include "index/VectorIndex.h"
 
 namespace milvus::segcore {
 
@@ -53,7 +53,7 @@ class FieldIndexing {
         return segcore_config_.get_chunk_rows();
     }
 
-    virtual knowhere::Index*
+    virtual index::IndexBase*
     get_chunk_indexing(int64_t chunk_id) const = 0;
 
  protected:
@@ -71,14 +71,14 @@ class ScalarFieldIndexing : public FieldIndexing {
     BuildIndexRange(int64_t ack_beg, int64_t ack_end, const VectorBase* vec_base) override;
 
     // concurrent
-    scalar::ScalarIndex<T>*
+    index::ScalarIndex<T>*
     get_chunk_indexing(int64_t chunk_id) const override {
         Assert(!field_meta_.is_vector());
         return data_.at(chunk_id).get();
     }
 
  private:
-    tbb::concurrent_vector<scalar::ScalarIndexPtr<T>> data_;
+    tbb::concurrent_vector<index::ScalarIndexPtr<T>> data_;
 };
 
 class VectorFieldIndexing : public FieldIndexing {
@@ -89,7 +89,7 @@ class VectorFieldIndexing : public FieldIndexing {
     BuildIndexRange(int64_t ack_beg, int64_t ack_end, const VectorBase* vec_base) override;
 
     // concurrent
-    knowhere::VecIndex*
+    index::IndexBase*
     get_chunk_indexing(int64_t chunk_id) const override {
         Assert(field_meta_.is_vector());
         return data_.at(chunk_id).get();
@@ -102,7 +102,7 @@ class VectorFieldIndexing : public FieldIndexing {
     get_search_params(int top_k) const;
 
  private:
-    tbb::concurrent_vector<std::unique_ptr<knowhere::VecIndex>> data_;
+    tbb::concurrent_vector<std::unique_ptr<index::VectorIndex>> data_;
 };
 
 std::unique_ptr<FieldIndexing>

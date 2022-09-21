@@ -20,12 +20,13 @@ import (
 	"context"
 	"sort"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/api/milvuspb"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.uber.org/zap"
 )
 
 func getCompareMapFromSlice(sliceData []int64) map[int64]struct{} {
@@ -53,31 +54,21 @@ func estimateSegmentSize(segmentLoadInfo *querypb.SegmentLoadInfo) int64 {
 		if FieldIndexInfo, ok := vecFieldID2IndexInfo[fieldID]; ok {
 			segmentSize += FieldIndexInfo.IndexSize
 		} else {
-			segmentSize += getFieldSizeFromFieldBinlog(fieldBinlog)
+			segmentSize += funcutil.GetFieldSizeFromFieldBinlog(fieldBinlog)
 		}
 	}
 
 	// get size of state data
 	for _, fieldBinlog := range segmentLoadInfo.Statslogs {
-		segmentSize += getFieldSizeFromFieldBinlog(fieldBinlog)
+		segmentSize += funcutil.GetFieldSizeFromFieldBinlog(fieldBinlog)
 	}
 
 	// get size of delete data
 	for _, fieldBinlog := range segmentLoadInfo.Deltalogs {
-		segmentSize += getFieldSizeFromFieldBinlog(fieldBinlog)
+		segmentSize += funcutil.GetFieldSizeFromFieldBinlog(fieldBinlog)
 	}
 
 	return segmentSize
-}
-
-func getFieldSizeFromFieldBinlog(fieldBinlog *datapb.FieldBinlog) int64 {
-	fieldSize := int64(0)
-	for _, binlog := range fieldBinlog.Binlogs {
-		fieldSize += binlog.LogSize
-	}
-
-	return fieldSize
-
 }
 
 // syncReplicaSegments syncs the segments distribution of replica to shard leaders

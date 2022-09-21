@@ -60,6 +60,7 @@ func (mgr *ConfAdapterMgrImpl) registerConfAdapter() {
 	mgr.adapters[IndexRHNSWSQ] = newRHNSWSQConfAdapter()
 	mgr.adapters[IndexNGTPANNG] = newNGTPANNGConfAdapter()
 	mgr.adapters[IndexNGTONNG] = newNGTONNGConfAdapter()
+	mgr.adapters[IndexDISKANN] = newDISKANNConfAdapter()
 }
 
 func newConfAdapterMgrImpl() *ConfAdapterMgrImpl {

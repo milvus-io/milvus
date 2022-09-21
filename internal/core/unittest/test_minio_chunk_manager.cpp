@@ -97,6 +97,7 @@ TEST_F(MinioChunkManagerTest, BucketPositive) {
     chunk_manager.CreateBucket(testBucketName);
     exist = chunk_manager.BucketExists(testBucketName);
     EXPECT_EQ(exist, true);
+    chunk_manager.DeleteBucket(testBucketName);
 }
 
 TEST_F(MinioChunkManagerTest, BucketNegtive) {
@@ -112,6 +113,7 @@ TEST_F(MinioChunkManagerTest, BucketNegtive) {
     } catch (S3ErrorException& e) {
         EXPECT_TRUE(std::string(e.what()).find("BucketAlreadyOwnedByYou") != string::npos);
     }
+    chunk_manager.DeleteBucket(testBucketName);
 }
 
 TEST_F(MinioChunkManagerTest, ObjectExist) {
@@ -125,6 +127,7 @@ TEST_F(MinioChunkManagerTest, ObjectExist) {
 
     bool exist = chunk_manager.Exist(objPath);
     EXPECT_EQ(exist, false);
+    chunk_manager.DeleteBucket(testBucketName);
 }
 
 TEST_F(MinioChunkManagerTest, WritePositive) {
@@ -156,6 +159,9 @@ TEST_F(MinioChunkManagerTest, WritePositive) {
     size = chunk_manager.Size(path);
     EXPECT_EQ(size, datasize);
     delete[] bigdata;
+
+    chunk_manager.Remove(path);
+    chunk_manager.DeleteBucket(testBucketName);
 }
 
 TEST_F(MinioChunkManagerTest, ReadPositive) {
@@ -203,6 +209,9 @@ TEST_F(MinioChunkManagerTest, ReadPositive) {
     EXPECT_EQ(readdata[2], 0x00);
     EXPECT_EQ(readdata[3], 0x34);
     EXPECT_EQ(readdata[4], 0x23);
+
+    chunk_manager.Remove(path);
+    chunk_manager.DeleteBucket(testBucketName);
 }
 
 TEST_F(MinioChunkManagerTest, RemovePositive) {
@@ -225,6 +234,8 @@ TEST_F(MinioChunkManagerTest, RemovePositive) {
 
     exist = chunk_manager.Exist(path);
     EXPECT_EQ(exist, false);
+
+    chunk_manager.DeleteBucket(testBucketName);
 }
 
 TEST_F(MinioChunkManagerTest, ListWithPrefixPositive) {
@@ -259,4 +270,9 @@ TEST_F(MinioChunkManagerTest, ListWithPrefixPositive) {
     std::sort(objs.begin(), objs.end());
     EXPECT_EQ(objs[0], "1/4/8");
     EXPECT_EQ(objs[1], "1/7/4");
+
+    chunk_manager.Remove(path1);
+    chunk_manager.Remove(path2);
+    chunk_manager.Remove(path3);
+    chunk_manager.DeleteBucket(testBucketName);
 }

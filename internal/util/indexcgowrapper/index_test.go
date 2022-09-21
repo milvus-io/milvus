@@ -224,7 +224,10 @@ func TestCIndex_Delete(t *testing.T) {
 }
 
 func TestCIndex_Error(t *testing.T) {
-	indexPtr, err := NewCgoIndex(schemapb.DataType_FloatVector, nil, nil)
+	indexParams := make(map[string]string)
+	indexParams["index_type"] = "IVF_FLAT"
+	indexParams["metric_type"] = "L2"
+	indexPtr, err := NewCgoIndex(schemapb.DataType_FloatVector, nil, indexParams)
 	assert.Nil(t, err)
 
 	t.Run("Serialize error", func(t *testing.T) {

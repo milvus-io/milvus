@@ -31,7 +31,7 @@ class SegcoreConfig {
     SegcoreConfig() {
         // hard code configurations for small index
         SmallIndexConf sub_conf;
-        sub_conf.build_params["nlist"] = nlist_;
+        sub_conf.build_params["nlist"] = std::to_string(nlist_);
         sub_conf.search_params["nprobe"] = nprobe_;
         sub_conf.index_type = "IVF";
         table_[knowhere::metric::L2] = sub_conf;
@@ -50,7 +50,7 @@ class SegcoreConfig {
     parse_from(const std::string& string_path);
 
     const SmallIndexConf&
-    at(const knowhere::MetricType& metric_type) const {
+    at(const MetricType& metric_type) const {
         Assert(table_.count(metric_type));
         return table_.at(metric_type);
     }
@@ -76,7 +76,7 @@ class SegcoreConfig {
     }
 
     void
-    set_small_index_config(const knowhere::MetricType& metric_type, const SmallIndexConf& small_index_conf) {
+    set_small_index_config(const MetricType& metric_type, const SmallIndexConf& small_index_conf) {
         table_[metric_type] = small_index_conf;
     }
 

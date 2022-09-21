@@ -27,10 +27,12 @@
 #include "common/LoadInfo.h"
 #include "common/BitsetView.h"
 #include "common/QueryResult.h"
+#include "common/QueryInfo.h"
 #include "query/Plan.h"
 #include "query/PlanNode.h"
 #include "pb/schema.pb.h"
 #include "pb/segcore.pb.h"
+#include "index/IndexInfo.h"
 
 namespace milvus::segcore {
 
@@ -91,10 +93,10 @@ class SegmentInternalInterface : public SegmentInterface {
     }
 
     template <typename T>
-    const scalar::ScalarIndex<T>&
+    const index::ScalarIndex<T>&
     chunk_scalar_index(FieldId field_id, int64_t chunk_id) const {
         static_assert(IsScalar<T>);
-        using IndexType = scalar::ScalarIndex<T>;
+        using IndexType = index::ScalarIndex<T>;
         auto base_ptr = chunk_index_impl(field_id, chunk_id);
         auto ptr = dynamic_cast<const IndexType*>(base_ptr);
         AssertInfo(ptr, "entry mismatch");
@@ -129,7 +131,7 @@ class SegmentInternalInterface : public SegmentInterface {
 
  public:
     virtual void
-    vector_search(query::SearchInfo& search_info,
+    vector_search(SearchInfo& search_info,
                   const void* query_data,
                   int64_t query_count,
                   Timestamp timestamp,
@@ -176,7 +178,7 @@ class SegmentInternalInterface : public SegmentInterface {
     chunk_data_impl(FieldId field_id, int64_t chunk_id) const = 0;
 
     // internal API: return chunk_index in span, support scalar index only
-    virtual const knowhere::Index*
+    virtual const index::IndexBase*
     chunk_index_impl(FieldId field_id, int64_t chunk_id) const = 0;
 
     // TODO remove system fields

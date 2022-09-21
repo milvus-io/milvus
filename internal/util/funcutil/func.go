@@ -31,19 +31,18 @@ import (
 	"strings"
 	"time"
 
-	"github.com/milvus-io/milvus/api/milvuspb"
-
-	"go.uber.org/zap"
-
 	"github.com/go-basic/ipv4"
+	"go.uber.org/zap"
+	grpcStatus "google.golang.org/grpc/status"
+
 	"github.com/milvus-io/milvus/api/commonpb"
+	"github.com/milvus-io/milvus/api/milvuspb"
 	"github.com/milvus-io/milvus/api/schemapb"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/retry"
-
-	grpcStatus "google.golang.org/grpc/status"
 )
 
 // CheckGrpcReady wait for context timeout, or wait 100ms then send nil to targetCh
@@ -405,4 +404,13 @@ func DecodeUserRoleCache(cache string) (string, string, error) {
 	user := cache[:index]
 	role := cache[index+1:]
 	return user, role, nil
+}
+
+func GetFieldSizeFromFieldBinlog(fieldBinlog *datapb.FieldBinlog) int64 {
+	fieldSize := int64(0)
+	for _, binlog := range fieldBinlog.Binlogs {
+		fieldSize += binlog.LogSize
+	}
+
+	return fieldSize
 }

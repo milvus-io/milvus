@@ -31,4 +31,5 @@ const (
 	IndexANNOY           IndexType = "ANNOY"
 	IndexNGTPANNG        IndexType = "NGT_PANNG"
 	IndexNGTONNG         IndexType = "NGT_ONNG"
+	IndexDISKANN         IndexType = "DISKANN"
 )
