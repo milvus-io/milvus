@@ -19,6 +19,7 @@ package indexcoord
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -227,7 +228,7 @@ func createMetaTable(catalog metastore.IndexCoordCatalog) *metaTable {
 					IndexSize:      0,
 				},
 			},
-			buildID + 9: {
+			segID + 9: {
 				indexID: {
 					SegmentID:      segID + 9,
 					CollectionID:   collID,
@@ -236,6 +237,24 @@ func createMetaTable(catalog metastore.IndexCoordCatalog) *metaTable {
 					IndexID:        indexID,
 					BuildID:        buildID + 9,
 					NodeID:         0,
+					IndexVersion:   0,
+					IndexState:     commonpb.IndexState_Unissued,
+					FailReason:     "",
+					IsDeleted:      false,
+					CreateTime:     1111,
+					IndexFilePaths: nil,
+					IndexSize:      0,
+				},
+			},
+			segID + 10: {
+				indexID: {
+					SegmentID:      segID + 10,
+					CollectionID:   collID,
+					PartitionID:    partID,
+					NumRows:        500,
+					IndexID:        indexID,
+					BuildID:        buildID + 10,
+					NodeID:         nodeID,
 					IndexVersion:   0,
 					IndexState:     commonpb.IndexState_Unissued,
 					FailReason:     "",
@@ -407,6 +426,22 @@ func createMetaTable(catalog metastore.IndexCoordCatalog) *metaTable {
 				IndexFilePaths: nil,
 				IndexSize:      0,
 			},
+			buildID + 10: {
+				SegmentID:      segID + 10,
+				CollectionID:   collID,
+				PartitionID:    partID,
+				NumRows:        500,
+				IndexID:        indexID,
+				BuildID:        buildID + 10,
+				NodeID:         nodeID,
+				IndexVersion:   0,
+				IndexState:     commonpb.IndexState_Unissued,
+				FailReason:     "",
+				IsDeleted:      false,
+				CreateTime:     1111,
+				IndexFilePaths: nil,
+				IndexSize:      0,
+			},
 		},
 	}
 }
@@ -444,7 +479,7 @@ func TestIndexBuilder(t *testing.T) {
 		},
 	}), []UniqueID{nodeID})
 
-	assert.Equal(t, 7, len(ib.tasks))
+	assert.Equal(t, 8, len(ib.tasks))
 	assert.Equal(t, indexTaskInit, ib.tasks[buildID])
 	assert.Equal(t, indexTaskInProgress, ib.tasks[buildID+1])
 	assert.Equal(t, indexTaskDeleted, ib.tasks[buildID+2])
@@ -452,6 +487,7 @@ func TestIndexBuilder(t *testing.T) {
 	assert.Equal(t, indexTaskDone, ib.tasks[buildID+4])
 	assert.Equal(t, indexTaskRetry, ib.tasks[buildID+8])
 	assert.Equal(t, indexTaskInit, ib.tasks[buildID+9])
+	assert.Equal(t, indexTaskRetry, ib.tasks[buildID+10])
 
 	ib.scheduleDuration = time.Millisecond * 500
 	ib.Start()
@@ -521,42 +557,17 @@ func TestIndexBuilder_Error(t *testing.T) {
 		ib.process(buildID + 100)
 	})
 
+	t.Run("init no need to build index", func(t *testing.T) {
+		ib.tasks[buildID] = indexTaskInit
+		ib.meta.collectionIndexes[collID][indexID].IsDeleted = true
+		ib.process(buildID)
+		ib.meta.collectionIndexes[collID][indexID].IsDeleted = false
+	})
+
 	t.Run("finish few rows task fail", func(t *testing.T) {
 		ib.tasks[buildID+9] = indexTaskInit
 		ib.process(buildID + 9)
 	})
-
-	//t.Run("getSegmentInfo fail", func(t *testing.T) {
-	//	ib.ic = &IndexCoord{
-	//		dataCoordClient: &DataCoordMock{
-	//			CallGetSegmentInfo: func(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
-	//				return &datapb.GetSegmentInfoResponse{}, errors.New("error")
-	//			},
-	//		},
-	//	}
-	//	ib.tasks = map[int64]*indexTask{
-	//		buildID: {
-	//			buildID:     buildID,
-	//			state:       indexTaskInit,
-	//			segmentInfo: nil,
-	//		},
-	//	}
-	//	ib.process(ib.tasks[buildID])
-	//
-	//	ib.ic = &IndexCoord{
-	//		dataCoordClient: &DataCoordMock{
-	//			CallGetSegmentInfo: func(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
-	//				return &datapb.GetSegmentInfoResponse{
-	//					Status: &commonpb.Status{
-	//						ErrorCode: commonpb.ErrorCode_UnexpectedError,
-	//						Reason:    "get segment info fail",
-	//					},
-	//				}, nil
-	//			},
-	//		},
-	//	}
-	//	ib.process(ib.tasks[buildID])
-	//})
 
 	t.Run("peek client fail", func(t *testing.T) {
 		ib.ic.nodeManager = &NodeManager{nodeClients: map[UniqueID]types.IndexNode{}}
@@ -575,11 +586,8 @@ func TestIndexBuilder_Error(t *testing.T) {
 	t.Run("acquire lock fail", func(t *testing.T) {
 		ib.tasks[buildID] = indexTaskInit
 		ib.meta = createMetaTable(&indexcoord.Catalog{
-			Txn: &mockETCDKV{
-				multiSave: func(m map[string]string) error {
-					return nil
-				},
-			}})
+			Txn: NewMockEtcdKV(),
+		})
 		dataMock := NewDataCoordMock()
 		dataMock.CallAcquireSegmentLock = func(ctx context.Context, req *datapb.AcquireSegmentLockRequest) (*commonpb.Status, error) {
 			return nil, errors.New("error")
@@ -588,15 +596,122 @@ func TestIndexBuilder_Error(t *testing.T) {
 		ib.process(buildID)
 	})
 
+	t.Run("get segment info error", func(t *testing.T) {
+		ib.tasks[buildID] = indexTaskInit
+		ib.meta = createMetaTable(&indexcoord.Catalog{
+			Txn: NewMockEtcdKV(),
+		})
+		dataMock := NewDataCoordMock()
+		dataMock.CallGetSegmentInfo = func(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
+			return nil, errors.New("error")
+		}
+		ib.ic.dataCoordClient = dataMock
+		ib.process(buildID)
+	})
+
+	t.Run("get segment info fail", func(t *testing.T) {
+		ib.tasks[buildID] = indexTaskInit
+		ib.meta = createMetaTable(&indexcoord.Catalog{
+			Txn: NewMockEtcdKV(),
+		})
+		dataMock := NewDataCoordMock()
+		dataMock.CallGetSegmentInfo = func(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
+			return &datapb.GetSegmentInfoResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+					Reason:    "",
+				},
+			}, nil
+		}
+		ib.ic.dataCoordClient = dataMock
+		ib.process(buildID)
+	})
+
 	t.Run("assign task fail", func(t *testing.T) {
+		Params.CommonCfg.StorageType = "local"
 		ib.tasks[buildID] = indexTaskInit
 		ib.ic.dataCoordClient = NewDataCoordMock()
+		ib.meta = createMetaTable(&indexcoord.Catalog{
+			Txn: NewMockEtcdKV(),
+		})
+		ib.ic = &IndexCoord{
+			loopCtx:            context.Background(),
+			reqTimeoutInterval: time.Second,
+			nodeManager: &NodeManager{
+				ctx: context.Background(),
+				nodeClients: map[UniqueID]types.IndexNode{
+					1: &indexnode.Mock{
+						CallCreateJob: func(ctx context.Context, req *indexpb.CreateJobRequest) (*commonpb.Status, error) {
+							return nil, errors.New("error")
+						},
+						CallGetJobStats: func(ctx context.Context, in *indexpb.GetJobStatsRequest) (*indexpb.GetJobStatsResponse, error) {
+							return &indexpb.GetJobStatsResponse{
+								Status: &commonpb.Status{
+									ErrorCode: commonpb.ErrorCode_Success,
+									Reason:    "",
+								},
+								TaskSlots: 1,
+							}, nil
+						},
+					},
+				},
+			},
+			chunkManager:    &chunkManagerMock{},
+			dataCoordClient: NewDataCoordMock(),
+		}
+		ib.process(buildID)
+	})
+
+	t.Run("update index state inProgress fail", func(t *testing.T) {
+		ib.tasks[buildID] = indexTaskInit
+		ib.meta = createMetaTable(&indexcoord.Catalog{
+			Txn: NewMockEtcdKV(),
+		})
 		ib.ic.nodeManager = &NodeManager{
 			ctx: context.Background(),
 			nodeClients: map[UniqueID]types.IndexNode{
 				1: &indexnode.Mock{
 					CallCreateJob: func(ctx context.Context, req *indexpb.CreateJobRequest) (*commonpb.Status, error) {
-						return nil, errors.New("error")
+						err := ib.meta.MarkSegmentsIndexAsDeletedByBuildID([]UniqueID{buildID})
+						return &commonpb.Status{
+							ErrorCode: commonpb.ErrorCode_Success,
+						}, err
+					},
+					CallGetJobStats: func(ctx context.Context, in *indexpb.GetJobStatsRequest) (*indexpb.GetJobStatsResponse, error) {
+						return &indexpb.GetJobStatsResponse{
+							Status: &commonpb.Status{
+								ErrorCode: commonpb.ErrorCode_Success,
+								Reason:    "",
+							},
+							TaskSlots: 1,
+						}, nil
+					},
+				},
+			},
+		}
+		ib.process(buildID)
+	})
+
+	t.Run("update index state inProgress error", func(t *testing.T) {
+		ib.tasks[buildID] = indexTaskInit
+		ib.meta = createMetaTable(&indexcoord.Catalog{
+			Txn: NewMockEtcdKV(),
+		})
+		ib.ic.nodeManager = &NodeManager{
+			ctx: context.Background(),
+			nodeClients: map[UniqueID]types.IndexNode{
+				1: &indexnode.Mock{
+					CallCreateJob: func(ctx context.Context, req *indexpb.CreateJobRequest) (*commonpb.Status, error) {
+						ib.meta = createMetaTable(&indexcoord.Catalog{
+							Txn: &mockETCDKV{
+								multiSave: func(m map[string]string) error {
+									return errors.New("error")
+								},
+							},
+						})
+						return &commonpb.Status{
+							ErrorCode: commonpb.ErrorCode_Success,
+						}, nil
 					},
 					CallGetJobStats: func(ctx context.Context, in *indexpb.GetJobStatsRequest) (*indexpb.GetJobStatsResponse, error) {
 						return &indexpb.GetJobStatsResponse{
@@ -614,12 +729,194 @@ func TestIndexBuilder_Error(t *testing.T) {
 	})
 
 	t.Run("no need to build index", func(t *testing.T) {
+		ib.tasks[buildID] = indexTaskDone
+		ib.meta = createMetaTable(&indexcoord.Catalog{
+			Txn: NewMockEtcdKV(),
+		})
 		ib.meta.collectionIndexes[collID][indexID].IsDeleted = true
+		ib.process(buildID)
+	})
+
+	t.Run("drop index job error", func(t *testing.T) {
+		ib.tasks[buildID] = indexTaskDone
+		ib.meta = createMetaTable(&indexcoord.Catalog{
+			Txn: NewMockEtcdKV(),
+		})
+		err := ib.meta.UpdateVersion(buildID, nodeID)
+		assert.NoError(t, err)
+		ib.ic.nodeManager = &NodeManager{
+			ctx: context.Background(),
+			nodeClients: map[UniqueID]types.IndexNode{
+				nodeID: &indexnode.Mock{
+					CallDropJobs: func(ctx context.Context, in *indexpb.DropJobsRequest) (*commonpb.Status, error) {
+						return nil, errors.New("error")
+					},
+				},
+			},
+		}
+		ib.process(buildID)
+	})
+
+	t.Run("drop index job fail", func(t *testing.T) {
+		ib.tasks[buildID] = indexTaskDone
+		ib.meta = createMetaTable(&indexcoord.Catalog{
+			Txn: NewMockEtcdKV(),
+		})
+		err := ib.meta.UpdateVersion(buildID, nodeID)
+		assert.NoError(t, err)
+		ib.ic.nodeManager = &NodeManager{
+			ctx: context.Background(),
+			nodeClients: map[UniqueID]types.IndexNode{
+				nodeID: &indexnode.Mock{
+					CallDropJobs: func(ctx context.Context, in *indexpb.DropJobsRequest) (*commonpb.Status, error) {
+						return &commonpb.Status{
+							ErrorCode: commonpb.ErrorCode_UnexpectedError,
+							Reason:    "fail reason",
+						}, nil
+					},
+				},
+			},
+		}
+		ib.process(buildID)
+	})
+
+	t.Run("release lock fail", func(t *testing.T) {
+		ib.tasks[buildID] = indexTaskDone
+		ib.meta = createMetaTable(&indexcoord.Catalog{
+			Txn: &mockETCDKV{
+				multiSave: func(m map[string]string) error {
+					return errors.New("error")
+				},
+			},
+		})
+		ib.ic.nodeManager = &NodeManager{
+			ctx: context.Background(),
+			nodeClients: map[UniqueID]types.IndexNode{
+				nodeID: &indexnode.Mock{
+					CallDropJobs: func(ctx context.Context, in *indexpb.DropJobsRequest) (*commonpb.Status, error) {
+						return &commonpb.Status{
+							ErrorCode: commonpb.ErrorCode_Success,
+							Reason:    "",
+						}, nil
+					},
+				},
+			},
+		}
+		ib.process(buildID)
+	})
+
+	t.Run("retry no need to build index", func(t *testing.T) {
+		ib.tasks[buildID] = indexTaskRetry
+		ib.meta = createMetaTable(&indexcoord.Catalog{
+			Txn: NewMockEtcdKV(),
+		})
+		err := ib.meta.MarkIndexAsDeleted(collID, []UniqueID{indexID})
+		assert.NoError(t, err)
+		ib.process(buildID)
+	})
+
+	t.Run("retry release lock fail", func(t *testing.T) {
+		ib.tasks[buildID] = indexTaskRetry
+		ib.meta = createMetaTable(&indexcoord.Catalog{
+			Txn: &mockETCDKV{
+				multiSave: func(m map[string]string) error {
+					return errors.New("error")
+				},
+			},
+		})
+		ib.process(buildID)
+	})
+
+	t.Run("delete mark fail", func(t *testing.T) {
+		ib.tasks[buildID] = indexTaskDeleted
+		ib.meta = createMetaTable(&indexcoord.Catalog{
+			Txn: &mockETCDKV{
+				multiSave: func(m map[string]string) error {
+					return errors.New("error")
+				},
+			},
+		})
+		ib.process(buildID)
+	})
+
+	t.Run("delete drop index job fail", func(t *testing.T) {
+		ib.tasks[buildID] = indexTaskDeleted
+		ib.meta = createMetaTable(&indexcoord.Catalog{
+			Txn: &mockETCDKV{
+				multiSave: func(m map[string]string) error {
+					return nil
+				},
+			},
+		})
+		err := ib.meta.UpdateVersion(buildID, nodeID)
+		assert.NoError(t, err)
+		ib.ic.nodeManager = &NodeManager{
+			ctx: context.Background(),
+			nodeClients: map[UniqueID]types.IndexNode{
+				nodeID: &indexnode.Mock{
+					CallDropJobs: func(ctx context.Context, in *indexpb.DropJobsRequest) (*commonpb.Status, error) {
+						return &commonpb.Status{
+							ErrorCode: commonpb.ErrorCode_Success,
+							Reason:    "",
+						}, errors.New("error")
+					},
+				},
+			},
+		}
+		ib.process(buildID)
+	})
+
+	t.Run("delete release lock fail", func(t *testing.T) {
+		ib.tasks[buildID] = indexTaskDeleted
+		ib.meta = createMetaTable(&indexcoord.Catalog{
+			Txn: &mockETCDKV{
+				multiSave: func(m map[string]string) error {
+					return nil
+				},
+			},
+		})
+		err := ib.meta.UpdateVersion(buildID, nodeID)
+		assert.NoError(t, err)
+		ib.ic.nodeManager = &NodeManager{
+			ctx: context.Background(),
+			nodeClients: map[UniqueID]types.IndexNode{
+				nodeID: &indexnode.Mock{
+					CallDropJobs: func(ctx context.Context, in *indexpb.DropJobsRequest) (*commonpb.Status, error) {
+						ib.meta.catalog = &indexcoord.Catalog{
+							Txn: &mockETCDKV{
+								multiSave: func(m map[string]string) error {
+									return errors.New("error")
+								},
+							},
+						}
+						return &commonpb.Status{
+							ErrorCode: commonpb.ErrorCode_Success,
+							Reason:    "",
+						}, nil
+					},
+				},
+			},
+		}
+		ib.process(buildID)
+	})
+
+	t.Run("deleted remove task", func(t *testing.T) {
+		ib.tasks[buildID] = indexTaskDeleted
+		ib.meta = createMetaTable(&indexcoord.Catalog{
+			Txn: NewMockEtcdKV(),
+		})
 		ib.process(buildID)
 	})
 
 	t.Run("finish task fail", func(t *testing.T) {
 		ib.tasks[buildID] = indexTaskInProgress
+		ib.meta = createMetaTable(&indexcoord.Catalog{
+			Txn: &mockETCDKV{
+				multiSave: func(m map[string]string) error {
+					return errors.New("error")
+				},
+			},
+		})
 		ib.ic.dataCoordClient = NewDataCoordMock()
 		ib.ic.nodeManager = &NodeManager{
 			ctx: context.Background(),
@@ -645,16 +942,43 @@ func TestIndexBuilder_Error(t *testing.T) {
 				},
 			},
 		}
-		ib.ic.metaTable = &metaTable{
-			catalog: &indexcoord.Catalog{
-				Txn: &mockETCDKV{
-					multiSave: func(m map[string]string) error {
-						return errors.New("error")
-					},
+		ib.getTaskState(buildID, 1)
+	})
+
+	t.Run("inProgress no need to build index", func(t *testing.T) {
+		ib.tasks[buildID] = indexTaskInProgress
+		ib.meta = createMetaTable(&indexcoord.Catalog{Txn: NewMockEtcdKV()})
+		err := ib.meta.MarkIndexAsDeleted(collID, []UniqueID{indexID})
+		assert.NoError(t, err)
+		ib.process(buildID)
+	})
+}
+
+func Test_indexBuilder_getTaskState(t *testing.T) {
+	Params.Init()
+	ib := &indexBuilder{
+		tasks: map[int64]indexTaskState{
+			buildID: indexTaskInit,
+		},
+		meta: createMetaTable(&indexcoord.Catalog{Txn: NewMockEtcdKV()}),
+		ic: &IndexCoord{
+			dataCoordClient: &DataCoordMock{
+				CallGetSegmentInfo: func(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
+					return &datapb.GetSegmentInfoResponse{}, errors.New("error")
 				},
 			},
+		},
+	}
+
+	t.Run("node not exist", func(t *testing.T) {
+		ib.tasks[buildID] = indexTaskInit
+		ib.ic.dataCoordClient = NewDataCoordMock()
+		ib.ic.nodeManager = &NodeManager{
+			ctx:         context.Background(),
+			nodeClients: map[UniqueID]types.IndexNode{},
 		}
-		ib.getTaskState(buildID, 1)
+
+		ib.getTaskState(buildID, nodeID)
 	})
 
 	t.Run("get state retry", func(t *testing.T) {
@@ -663,7 +987,7 @@ func TestIndexBuilder_Error(t *testing.T) {
 		ib.ic.nodeManager = &NodeManager{
 			ctx: context.Background(),
 			nodeClients: map[UniqueID]types.IndexNode{
-				1: &indexnode.Mock{
+				nodeID: &indexnode.Mock{
 					CallQueryJobs: func(ctx context.Context, in *indexpb.QueryJobsRequest) (*indexpb.QueryJobsResponse, error) {
 						return &indexpb.QueryJobsResponse{
 							Status: &commonpb.Status{
@@ -684,16 +1008,7 @@ func TestIndexBuilder_Error(t *testing.T) {
 				},
 			},
 		}
-		ib.ic.metaTable = &metaTable{
-			catalog: &indexcoord.Catalog{
-				Txn: &mockETCDKV{
-					multiSave: func(m map[string]string) error {
-						return nil
-					},
-				},
-			},
-		}
-		ib.getTaskState(buildID, 1)
+		ib.getTaskState(buildID, nodeID)
 	})
 
 	t.Run("get state not exist", func(t *testing.T) {
@@ -702,7 +1017,7 @@ func TestIndexBuilder_Error(t *testing.T) {
 		ib.ic.nodeManager = &NodeManager{
 			ctx: context.Background(),
 			nodeClients: map[UniqueID]types.IndexNode{
-				1: &indexnode.Mock{
+				nodeID: &indexnode.Mock{
 					CallQueryJobs: func(ctx context.Context, in *indexpb.QueryJobsRequest) (*indexpb.QueryJobsResponse, error) {
 						return &indexpb.QueryJobsResponse{
 							Status: &commonpb.Status{
@@ -715,15 +1030,133 @@ func TestIndexBuilder_Error(t *testing.T) {
 				},
 			},
 		}
-		ib.ic.metaTable = &metaTable{
-			catalog: &indexcoord.Catalog{
-				Txn: &mockETCDKV{
-					multiSave: func(m map[string]string) error {
-						return nil
+		ib.getTaskState(buildID, nodeID)
+	})
+
+	t.Run("query jobs error", func(t *testing.T) {
+		ib.tasks[buildID] = indexTaskInit
+		ib.ic.dataCoordClient = NewDataCoordMock()
+		ib.ic.nodeManager = &NodeManager{
+			ctx: context.Background(),
+			nodeClients: map[UniqueID]types.IndexNode{
+				nodeID: &indexnode.Mock{
+					CallQueryJobs: func(ctx context.Context, in *indexpb.QueryJobsRequest) (*indexpb.QueryJobsResponse, error) {
+						return nil, errors.New("error")
 					},
 				},
 			},
 		}
-		ib.getTaskState(buildID, 1)
+		ib.getTaskState(buildID, nodeID)
 	})
+
+	t.Run("query jobs fail", func(t *testing.T) {
+		ib.tasks[buildID] = indexTaskInit
+		ib.ic.dataCoordClient = NewDataCoordMock()
+		ib.ic.nodeManager = &NodeManager{
+			ctx: context.Background(),
+			nodeClients: map[UniqueID]types.IndexNode{
+				nodeID: &indexnode.Mock{
+					CallQueryJobs: func(ctx context.Context, in *indexpb.QueryJobsRequest) (*indexpb.QueryJobsResponse, error) {
+						return &indexpb.QueryJobsResponse{
+							Status: &commonpb.Status{
+								ErrorCode: commonpb.ErrorCode_UnexpectedError,
+								Reason:    "fail reason",
+							},
+						}, nil
+					},
+				},
+			},
+		}
+		ib.getTaskState(buildID, nodeID)
+	})
+
+	t.Run("job is InProgress", func(t *testing.T) {
+		ib.tasks[buildID] = indexTaskInit
+		ib.ic.dataCoordClient = NewDataCoordMock()
+		ib.ic.nodeManager = &NodeManager{
+			ctx: context.Background(),
+			nodeClients: map[UniqueID]types.IndexNode{
+				nodeID: &indexnode.Mock{
+					CallQueryJobs: func(ctx context.Context, in *indexpb.QueryJobsRequest) (*indexpb.QueryJobsResponse, error) {
+						return &indexpb.QueryJobsResponse{
+							Status: &commonpb.Status{
+								ErrorCode: commonpb.ErrorCode_Success,
+								Reason:    "",
+							},
+							IndexInfos: []*indexpb.IndexTaskInfo{
+								{
+									BuildID:        buildID,
+									State:          commonpb.IndexState_InProgress,
+									IndexFiles:     nil,
+									SerializedSize: 0,
+									FailReason:     "",
+								},
+							},
+						}, nil
+					},
+				},
+			},
+		}
+		ib.getTaskState(buildID, nodeID)
+	})
+}
+
+func Test_indexBuilder_releaseLockAndResetNode_error(t *testing.T) {
+	Params.Init()
+	ctx, cancel := context.WithCancel(context.Background())
+	ib := &indexBuilder{
+		ctx:    ctx,
+		cancel: cancel,
+		tasks: map[int64]indexTaskState{
+			buildID: indexTaskInit,
+		},
+		meta: createMetaTable(&indexcoord.Catalog{Txn: NewMockEtcdKV()}),
+		ic: &IndexCoord{
+			dataCoordClient: &DataCoordMock{
+				CallReleaseSegmentLock: func(ctx context.Context, req *datapb.ReleaseSegmentLockRequest) (*commonpb.Status, error) {
+					return nil, errors.New("error")
+				},
+			},
+		},
+	}
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		err := ib.releaseLockAndResetNode(buildID, nodeID)
+		assert.Error(t, err)
+	}()
+	time.Sleep(time.Second)
+	ib.cancel()
+	wg.Wait()
+}
+
+func Test_indexBuilder_releaseLockAndResetTask_error(t *testing.T) {
+	Params.Init()
+	ctx, cancel := context.WithCancel(context.Background())
+	ib := &indexBuilder{
+		ctx:    ctx,
+		cancel: cancel,
+		tasks: map[int64]indexTaskState{
+			buildID: indexTaskInit,
+		},
+		meta: createMetaTable(&indexcoord.Catalog{Txn: NewMockEtcdKV()}),
+		ic: &IndexCoord{
+			dataCoordClient: &DataCoordMock{
+				CallReleaseSegmentLock: func(ctx context.Context, req *datapb.ReleaseSegmentLockRequest) (*commonpb.Status, error) {
+					return nil, errors.New("error")
+				},
+			},
+		},
+	}
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		err := ib.releaseLockAndResetTask(buildID, nodeID)
+		assert.Error(t, err)
+	}()
+	time.Sleep(time.Second)
+	ib.cancel()
+	wg.Wait()
 }

@@ -106,9 +106,6 @@ func (gc *garbageCollector) recycleUnusedIndexes() {
 							// wait for releasing reference lock
 							continue
 						}
-						if !gc.metaTable.IsExpire(segIdx.BuildID) {
-							continue
-						}
 						if err := gc.metaTable.RemoveSegmentIndex(segIdx.CollectionID, segIdx.PartitionID, segIdx.SegmentID, segIdx.BuildID); err != nil {
 							log.Warn("delete index meta from etcd failed, wait to retry", zap.Int64("buildID", segIdx.BuildID),
 								zap.Int64("nodeID", segIdx.NodeID), zap.Error(err))
@@ -169,9 +166,6 @@ func (gc *garbageCollector) recycleSegIndexesMeta() {
 		if meta.IsDeleted || gc.metaTable.IsIndexDeleted(meta.CollectionID, meta.IndexID) {
 			if meta.NodeID != 0 {
 				// wait for releasing reference lock
-				continue
-			}
-			if !gc.metaTable.IsExpire(meta.BuildID) {
 				continue
 			}
 			if err := gc.metaTable.RemoveSegmentIndex(meta.CollectionID, meta.PartitionID, meta.SegmentID, meta.BuildID); err != nil {

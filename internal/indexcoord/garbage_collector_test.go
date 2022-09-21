@@ -18,35 +18,410 @@ package indexcoord
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus/api/commonpb"
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/indexcoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 )
 
-func TestGarbageCollector_Start(t *testing.T) {
-	gc := newGarbageCollector(context.Background(), &metaTable{}, &chunkManagerMock{
+func createGarbageCollectorMetaTable(catalog metastore.IndexCoordCatalog) *metaTable {
+	return &metaTable{
+		catalog:          catalog,
+		indexLock:        sync.RWMutex{},
+		segmentIndexLock: sync.RWMutex{},
+		collectionIndexes: map[UniqueID]map[UniqueID]*model.Index{
+			collID: {
+				indexID: {
+					TenantID:     "",
+					CollectionID: collID,
+					FieldID:      fieldID,
+					IndexID:      indexID,
+					IndexName:    indexName,
+					IsDeleted:    true,
+					CreateTime:   1,
+					TypeParams:   nil,
+					IndexParams:  nil,
+				},
+				indexID + 1: {
+					TenantID:     "",
+					CollectionID: collID,
+					FieldID:      fieldID + 1,
+					IndexID:      indexID + 1,
+					IndexName:    "indexName2",
+					IsDeleted:    true,
+					CreateTime:   0,
+					TypeParams:   nil,
+					IndexParams:  nil,
+				},
+				indexID + 2: {
+					TenantID:     "",
+					CollectionID: collID,
+					FieldID:      fieldID + 2,
+					IndexID:      indexID + 2,
+					IndexName:    "indexName3",
+					IsDeleted:    false,
+					CreateTime:   0,
+					TypeParams:   nil,
+					IndexParams:  nil,
+				},
+			},
+		},
+		segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
+			segID: {
+				indexID: {
+					SegmentID:      segID,
+					CollectionID:   collID,
+					PartitionID:    partID,
+					NumRows:        1025,
+					IndexID:        indexID,
+					BuildID:        buildID,
+					NodeID:         0,
+					IndexVersion:   1,
+					IndexState:     3,
+					FailReason:     "",
+					IsDeleted:      false,
+					CreateTime:     1,
+					IndexFilePaths: nil,
+					IndexSize:      100,
+					WriteHandoff:   false,
+				},
+			},
+			segID + 1: {
+				indexID: {
+					SegmentID:      segID + 1,
+					CollectionID:   collID,
+					PartitionID:    partID,
+					NumRows:        1025,
+					IndexID:        indexID,
+					BuildID:        buildID + 1,
+					NodeID:         0,
+					IndexVersion:   1,
+					IndexState:     2,
+					FailReason:     "",
+					IsDeleted:      false,
+					CreateTime:     1,
+					IndexFilePaths: nil,
+					IndexSize:      100,
+					WriteHandoff:   false,
+				},
+			},
+			segID + 2: {
+				indexID + 2: {
+					SegmentID:      segID + 2,
+					CollectionID:   collID,
+					PartitionID:    partID,
+					NumRows:        10000,
+					IndexID:        indexID + 2,
+					BuildID:        buildID + 2,
+					NodeID:         0,
+					IndexVersion:   1,
+					IndexState:     1,
+					FailReason:     "",
+					IsDeleted:      true,
+					CreateTime:     1,
+					IndexFilePaths: nil,
+					IndexSize:      0,
+					WriteHandoff:   false,
+				},
+			},
+			segID + 3: {
+				indexID + 2: {
+					SegmentID:      segID + 3,
+					CollectionID:   collID,
+					PartitionID:    partID,
+					NumRows:        10000,
+					IndexID:        indexID + 2,
+					BuildID:        buildID + 3,
+					NodeID:         0,
+					IndexVersion:   1,
+					IndexState:     1,
+					FailReason:     "",
+					IsDeleted:      false,
+					CreateTime:     1,
+					IndexFilePaths: []string{"file1", "file2"},
+					IndexSize:      0,
+					WriteHandoff:   false,
+				},
+			},
+			segID + 4: {
+				indexID + 2: {
+					SegmentID:      segID + 4,
+					CollectionID:   collID,
+					PartitionID:    partID,
+					NumRows:        10000,
+					IndexID:        indexID + 2,
+					BuildID:        buildID + 4,
+					NodeID:         0,
+					IndexVersion:   1,
+					IndexState:     2,
+					FailReason:     "",
+					IsDeleted:      false,
+					CreateTime:     1,
+					IndexFilePaths: []string{},
+					IndexSize:      0,
+					WriteHandoff:   false,
+				},
+			},
+		},
+		buildID2SegmentIndex: map[UniqueID]*model.SegmentIndex{
+			buildID: {
+				SegmentID:      segID,
+				CollectionID:   collID,
+				PartitionID:    partID,
+				NumRows:        1025,
+				IndexID:        indexID,
+				BuildID:        buildID,
+				NodeID:         0,
+				IndexVersion:   1,
+				IndexState:     3,
+				FailReason:     "",
+				IsDeleted:      false,
+				CreateTime:     1,
+				IndexFilePaths: nil,
+				IndexSize:      100,
+				WriteHandoff:   false,
+			},
+			buildID + 1: {
+				SegmentID:      segID + 1,
+				CollectionID:   collID,
+				PartitionID:    partID,
+				NumRows:        1025,
+				IndexID:        indexID,
+				BuildID:        buildID + 1,
+				NodeID:         0,
+				IndexVersion:   1,
+				IndexState:     2,
+				FailReason:     "",
+				IsDeleted:      false,
+				CreateTime:     1,
+				IndexFilePaths: nil,
+				IndexSize:      100,
+				WriteHandoff:   false,
+			},
+			buildID + 2: {
+				SegmentID:      segID + 2,
+				CollectionID:   collID,
+				PartitionID:    partID,
+				NumRows:        10000,
+				IndexID:        indexID + 2,
+				BuildID:        buildID + 2,
+				NodeID:         0,
+				IndexVersion:   1,
+				IndexState:     1,
+				FailReason:     "",
+				IsDeleted:      true,
+				CreateTime:     1,
+				IndexFilePaths: nil,
+				IndexSize:      0,
+				WriteHandoff:   false,
+			},
+			buildID + 3: {
+				SegmentID:      segID + 3,
+				CollectionID:   collID,
+				PartitionID:    partID,
+				NumRows:        10000,
+				IndexID:        indexID + 2,
+				BuildID:        buildID + 3,
+				NodeID:         0,
+				IndexVersion:   1,
+				IndexState:     3,
+				FailReason:     "",
+				IsDeleted:      false,
+				CreateTime:     1,
+				IndexFilePaths: []string{"file1", "file2"},
+				IndexSize:      0,
+				WriteHandoff:   false,
+			},
+			buildID + 4: {
+				SegmentID:      segID + 4,
+				CollectionID:   collID,
+				PartitionID:    partID,
+				NumRows:        10000,
+				IndexID:        indexID + 2,
+				BuildID:        buildID + 4,
+				NodeID:         0,
+				IndexVersion:   1,
+				IndexState:     2,
+				FailReason:     "",
+				IsDeleted:      false,
+				CreateTime:     1,
+				IndexFilePaths: []string{},
+				IndexSize:      0,
+				WriteHandoff:   false,
+			},
+		},
+	}
+}
+
+func TestGarbageCollector(t *testing.T) {
+	meta := createGarbageCollectorMetaTable(&indexcoord.Catalog{Txn: NewMockEtcdKV()})
+	gc := newGarbageCollector(context.Background(), meta, &chunkManagerMock{
 		removeWithPrefix: func(s string) error {
 			return nil
 		},
 		listWithPrefix: func(s string, recursive bool) ([]string, []time.Time, error) {
-			return []string{}, []time.Time{}, nil
+			return []string{strconv.FormatInt(buildID, 10), strconv.FormatInt(buildID+1, 10),
+				strconv.FormatInt(buildID+3, 10), strconv.FormatInt(buildID+4, 10)}, []time.Time{}, nil
 		},
 		remove: func(s string) error {
 			return nil
 		},
-	}, &IndexCoord{})
+	}, &IndexCoord{
+		dataCoordClient: &DataCoordMock{
+			CallGetFlushedSegment: func(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error) {
+				return &datapb.GetFlushedSegmentsResponse{
+					Status: &commonpb.Status{
+						ErrorCode: commonpb.ErrorCode_Success,
+					},
+					Segments: []int64{segID, segID + 1, segID + 2, segID + 3, segID + 4},
+				}, nil
+			},
+		},
+	})
 
 	gc.gcMetaDuration = time.Millisecond * 300
 	gc.gcFileDuration = time.Millisecond * 300
 
 	gc.Start()
+	time.Sleep(time.Second * 2)
+	err := gc.metaTable.MarkSegmentsIndexAsDeletedByBuildID([]UniqueID{buildID + 3, buildID + 4})
+	assert.NoError(t, err)
+	segIndexes := gc.metaTable.GetAllSegIndexes()
+	for len(segIndexes) != 0 {
+		time.Sleep(time.Second)
+		segIndexes = gc.metaTable.GetAllSegIndexes()
+	}
 	gc.Stop()
+}
+
+func TestGarbageCollector_error(t *testing.T) {
+	meta := createGarbageCollectorMetaTable(&indexcoord.Catalog{
+		Txn: &mockETCDKV{
+			multiSave: func(m map[string]string) error {
+				return errors.New("error")
+			},
+			remove: func(s string) error {
+				return errors.New("error")
+			},
+		},
+	})
+	gc := newGarbageCollector(context.Background(), meta, &chunkManagerMock{
+		removeWithPrefix: func(s string) error {
+			return errors.New("error")
+		},
+		listWithPrefix: func(s string, recursive bool) ([]string, []time.Time, error) {
+			return nil, nil, errors.New("error")
+		},
+		remove: func(s string) error {
+			return errors.New("error")
+		},
+	}, &IndexCoord{
+		dataCoordClient: &DataCoordMock{
+			CallGetFlushedSegment: func(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error) {
+				return &datapb.GetFlushedSegmentsResponse{
+					Status: &commonpb.Status{
+						ErrorCode: commonpb.ErrorCode_Success,
+					},
+					Segments: []int64{segID, segID + 1, segID + 2, segID + 3, segID + 4},
+				}, nil
+			},
+		},
+	})
+
+	gc.gcMetaDuration = time.Millisecond * 300
+	gc.gcFileDuration = time.Millisecond * 300
+
+	gc.Start()
+	time.Sleep(time.Second * 3)
+	gc.Stop()
+}
+
+func TestGarbageCollectorGetFlushedSegment_error(t *testing.T) {
+	t.Run("error", func(t *testing.T) {
+		meta := createGarbageCollectorMetaTable(&indexcoord.Catalog{
+			Txn: &mockETCDKV{
+				multiSave: func(m map[string]string) error {
+					return errors.New("error")
+				},
+				remove: func(s string) error {
+					return errors.New("error")
+				},
+			},
+		})
+		gc := newGarbageCollector(context.Background(), meta, &chunkManagerMock{
+			removeWithPrefix: func(s string) error {
+				return errors.New("error")
+			},
+			listWithPrefix: func(s string, recursive bool) ([]string, []time.Time, error) {
+				return nil, nil, errors.New("error")
+			},
+			remove: func(s string) error {
+				return errors.New("error")
+			},
+		}, &IndexCoord{
+			dataCoordClient: &DataCoordMock{
+				CallGetFlushedSegment: func(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error) {
+					return &datapb.GetFlushedSegmentsResponse{
+						Status: &commonpb.Status{
+							ErrorCode: commonpb.ErrorCode_Success,
+						},
+						Segments: []int64{},
+					}, errors.New("error")
+				},
+			},
+		})
+
+		gc.recycleSegIndexesMeta()
+	})
+
+	t.Run("fail", func(t *testing.T) {
+		meta := createGarbageCollectorMetaTable(&indexcoord.Catalog{
+			Txn: &mockETCDKV{
+				multiSave: func(m map[string]string) error {
+					return errors.New("error")
+				},
+				remove: func(s string) error {
+					return errors.New("error")
+				},
+			},
+		})
+		gc := newGarbageCollector(context.Background(), meta, &chunkManagerMock{
+			removeWithPrefix: func(s string) error {
+				return errors.New("error")
+			},
+			listWithPrefix: func(s string, recursive bool) ([]string, []time.Time, error) {
+				return nil, nil, errors.New("error")
+			},
+			remove: func(s string) error {
+				return errors.New("error")
+			},
+		}, &IndexCoord{
+			dataCoordClient: &DataCoordMock{
+				CallGetFlushedSegment: func(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error) {
+					return &datapb.GetFlushedSegmentsResponse{
+						Status: &commonpb.Status{
+							ErrorCode: commonpb.ErrorCode_UnexpectedError,
+							Reason:    "fail reason",
+						},
+						Segments: []int64{},
+					}, nil
+				},
+			},
+		})
+
+		gc.recycleSegIndexesMeta()
+	})
+
 }
 
 func TestGarbageCollector_recycleUnusedIndexFiles(t *testing.T) {

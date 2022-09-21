@@ -18,6 +18,7 @@ package indexcoord
 
 import (
 	"context"
+	"errors"
 	"path"
 	"sort"
 	"sync"
@@ -28,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus/api/commonpb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 )
 
@@ -243,22 +243,11 @@ func (ib *indexBuilder) process(buildID UniqueID) {
 			updateStateFunc(buildID, indexTaskRetry)
 			return
 		}
-		segmentsInfo, err := ib.ic.dataCoordClient.GetSegmentInfo(ib.ctx, &datapb.GetSegmentInfoRequest{
-			SegmentIDs:       []UniqueID{meta.SegmentID},
-			IncludeUnHealthy: false,
-		})
-
+		info, err := ib.ic.pullSegmentInfo(ib.ctx, meta.SegmentID)
 		if err != nil {
 			log.Error("IndexCoord get segment info from DataCoord fail", zap.Int64("segID", meta.SegmentID),
 				zap.Int64("buildID", buildID), zap.Error(err))
-			updateStateFunc(buildID, indexTaskRetry)
-			return
-		}
-		if segmentsInfo.Status.ErrorCode != commonpb.ErrorCode_Success {
-			log.Error("IndexCoord get segment info from DataCoord fail", zap.Int64("segID", meta.SegmentID),
-				zap.Int64("buildID", buildID), zap.String("failReason", segmentsInfo.Status.Reason))
-			// TODO: delete after QueryCoordV2
-			if segmentsInfo.Status.GetReason() == msgSegmentNotFound(meta.SegmentID) {
+			if errors.Is(err, ErrSegmentNotFound) {
 				updateStateFunc(buildID, indexTaskDeleted)
 				return
 			}
@@ -266,20 +255,14 @@ func (ib *indexBuilder) process(buildID UniqueID) {
 			return
 		}
 		binLogs := make([]string, 0)
-		for _, segmentInfo := range segmentsInfo.Infos {
-			if segmentInfo.ID != meta.SegmentID || segmentInfo.State != commonpb.SegmentState_Flushed {
-				continue
-			}
-			fieldID := ib.meta.GetFieldIDByIndexID(meta.CollectionID, meta.IndexID)
-			for _, fieldBinLog := range segmentInfo.GetBinlogs() {
-				if fieldBinLog.GetFieldID() == fieldID {
-					for _, binLog := range fieldBinLog.GetBinlogs() {
-						binLogs = append(binLogs, binLog.LogPath)
-					}
-					break
+		fieldID := ib.meta.GetFieldIDByIndexID(meta.CollectionID, meta.IndexID)
+		for _, fieldBinLog := range info.GetBinlogs() {
+			if fieldBinLog.GetFieldID() == fieldID {
+				for _, binLog := range fieldBinLog.GetBinlogs() {
+					binLogs = append(binLogs, binLog.LogPath)
 				}
+				break
 			}
-			break
 		}
 
 		typeParams := ib.meta.GetTypeParams(meta.CollectionID, meta.IndexID)
@@ -372,6 +355,8 @@ func (ib *indexBuilder) process(buildID UniqueID) {
 		}
 		if meta.NodeID != 0 {
 			if !ib.dropIndexTask(buildID, meta.NodeID) {
+				log.Ctx(ib.ctx).Warn("index task state is deleted and drop index job for node fail", zap.Int64("build", buildID),
+					zap.Int64("nodeID", meta.NodeID))
 				return
 			}
 			if err := ib.releaseLockAndResetNode(buildID, meta.NodeID); err != nil {
@@ -499,21 +484,6 @@ func (ib *indexBuilder) releaseLockAndResetTask(buildID UniqueID, nodeID UniqueI
 	return nil
 }
 
-func (ib *indexBuilder) markTasksAsDeleted(buildIDs []UniqueID) error {
-	defer ib.notify()
-
-	ib.taskMutex.Lock()
-	defer ib.taskMutex.Unlock()
-
-	for _, buildID := range buildIDs {
-		if _, ok := ib.tasks[buildID]; ok {
-			ib.tasks[buildID] = indexTaskDeleted
-			log.Debug("index task has been deleted", zap.Int64("buildID", buildID))
-		}
-	}
-	return nil
-}
-
 func (ib *indexBuilder) nodeDown(nodeID UniqueID) {
 	defer ib.notify()
 
@@ -527,12 +497,4 @@ func (ib *indexBuilder) nodeDown(nodeID UniqueID) {
 			ib.tasks[meta.BuildID] = indexTaskRetry
 		}
 	}
-}
-
-func (ib *indexBuilder) hasTask(buildID UniqueID) bool {
-	ib.taskMutex.RLock()
-	defer ib.taskMutex.RUnlock()
-
-	_, ok := ib.tasks[buildID]
-	return ok
 }
