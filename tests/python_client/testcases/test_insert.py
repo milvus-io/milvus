@@ -1217,3 +1217,36 @@ class TestInsertString(TestcaseBase):
         data[2] = [" "for _ in range(nb)] 
         collection_w.insert(data)
         assert collection_w.num_entities == nb
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_insert_string_field_empty(self):
+        """
+        target: test create collection with string field 
+        method: 1.create a collection  
+                2.Insert string field with empty
+        expected: Insert successfully
+        """
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name)
+        nb = 1000
+        data = cf.gen_default_list_data(nb)
+        data[2] = [""for _ in range(nb)] 
+        collection_w.insert(data)
+        assert collection_w.num_entities == nb
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_insert_string_field_is_pk_and_empty(self):
+        """
+        target: test create collection with string field is primary
+        method: 1.create a collection  
+                2.Insert string field with empty, string field is pk
+        expected: Insert successfully
+        """
+        c_name = cf.gen_unique_str(prefix)
+        schema = cf.gen_string_pk_default_collection_schema()
+        collection_w = self.init_collection_wrap(name=c_name, schema=schema)
+        nb = 1000
+        data = cf.gen_default_list_data(nb)
+        data[2] = [""for _ in range(nb)] 
+        collection_w.insert(data)
+        assert collection_w.num_entities == nb
