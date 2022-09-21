@@ -277,8 +277,11 @@ func (q *QuotaCenter) calculateReadRates() {
 		q.forceDenyReading(ManualForceDeny)
 		return
 	}
-	coolOffSpeed := Params.QuotaConfig.CoolOffSpeed
+	if !Params.QuotaConfig.QueueProtectionEnabled {
+		return
+	}
 
+	coolOffSpeed := Params.QuotaConfig.CoolOffSpeed
 	coolOff := func(realTimeSearchRate float64, realTimeQueryRate float64) {
 		if q.currentRates[internalpb.RateType_DQLSearch] != Inf {
 			q.currentRates[internalpb.RateType_DQLSearch] = Limit(realTimeSearchRate * coolOffSpeed)
@@ -384,6 +387,10 @@ func (q *QuotaCenter) resetCurrentRates() {
 // timeTickDelay gets time tick delay of DataNodes and QueryNodes,
 // and return the factor according to max tolerable time tick delay.
 func (q *QuotaCenter) timeTickDelay() (float64, error) {
+	if !Params.QuotaConfig.TtProtectionEnabled {
+		return 1, nil
+	}
+
 	maxTt := Params.QuotaConfig.MaxTimeTickDelay
 	if maxTt < 0 {
 		// < 0 means disable tt protection
@@ -465,6 +472,10 @@ func (q *QuotaCenter) checkQueryLatency() float64 {
 // and return the factor according to max memory water level.
 func (q *QuotaCenter) memoryToWaterLevel() float64 {
 	factor := float64(1)
+	if !Params.QuotaConfig.MemProtectionEnabled {
+		return 1
+	}
+
 	dataNodeMemoryLowWaterLevel := Params.QuotaConfig.DataNodeMemoryLowWaterLevel
 	dataNodeMemoryHighWaterLevel := Params.QuotaConfig.DataNodeMemoryHighWaterLevel
 	queryNodeMemoryLowWaterLevel := Params.QuotaConfig.QueryNodeMemoryLowWaterLevel

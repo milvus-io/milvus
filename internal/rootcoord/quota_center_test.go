@@ -144,8 +144,9 @@ func TestQuotaCenter(t *testing.T) {
 
 		now := time.Now()
 
-		bak := Params.QuotaConfig.MaxTimeTickDelay
+		Params.QuotaConfig.TtProtectionEnabled = true
 		Params.QuotaConfig.MaxTimeTickDelay = 3 * time.Second
+
 		// test force deny writing
 		alloc := newMockTsoAllocator()
 		alloc.GenerateTSOF = func(count uint32) (typeutil.Timestamp, error) {
@@ -188,7 +189,6 @@ func TestQuotaCenter(t *testing.T) {
 		}
 		_, err = quotaCenter.timeTickDelay()
 		assert.Error(t, err)
-		Params.QuotaConfig.MaxTimeTickDelay = bak
 	})
 
 	t.Run("test checkNQInQuery", func(t *testing.T) {
@@ -197,7 +197,7 @@ func TestQuotaCenter(t *testing.T) {
 		assert.Equal(t, float64(1), factor)
 
 		// test cool off
-		bak := Params.QuotaConfig.NQInQueueThreshold
+		Params.QuotaConfig.QueueProtectionEnabled = true
 		Params.QuotaConfig.NQInQueueThreshold = 100
 		quotaCenter.queryNodeMetrics = []*metricsinfo.QueryNodeQuotaMetrics{{
 			SearchQueue: metricsinfo.ReadInfoInQueue{
@@ -217,8 +217,6 @@ func TestQuotaCenter(t *testing.T) {
 		assert.Equal(t, 1.0, factor)
 		//ok := math.Abs(factor-1.0) < 0.0001
 		//assert.True(t, ok)
-
-		Params.QuotaConfig.NQInQueueThreshold = bak
 	})
 
 	t.Run("test checkQueryLatency", func(t *testing.T) {
@@ -227,8 +225,9 @@ func TestQuotaCenter(t *testing.T) {
 		assert.Equal(t, float64(1), factor)
 
 		// test cool off
-		bak := Params.QuotaConfig.QueueLatencyThreshold
+		Params.QuotaConfig.QueueProtectionEnabled = true
 		Params.QuotaConfig.QueueLatencyThreshold = float64(3 * time.Second)
+
 		quotaCenter.queryNodeMetrics = []*metricsinfo.QueryNodeQuotaMetrics{{
 			SearchQueue: metricsinfo.ReadInfoInQueue{
 				AvgQueueDuration: time.Duration(Params.QuotaConfig.QueueLatencyThreshold),
@@ -247,8 +246,6 @@ func TestQuotaCenter(t *testing.T) {
 		assert.Equal(t, 1.0, factor)
 		//ok := math.Abs(factor-1.0) < 0.0001
 		//assert.True(t, ok)
-
-		Params.QuotaConfig.QueueLatencyThreshold = bak
 	})
 
 	t.Run("test calculateReadRates", func(t *testing.T) {
@@ -260,7 +257,8 @@ func TestQuotaCenter(t *testing.T) {
 			},
 		}}
 
-		latencyBak := Params.QuotaConfig.QueueLatencyThreshold
+		Params.QuotaConfig.ForceDenyReading = false
+		Params.QuotaConfig.QueueProtectionEnabled = true
 		Params.QuotaConfig.QueueLatencyThreshold = 100
 		quotaCenter.queryNodeMetrics = []*metricsinfo.QueryNodeQuotaMetrics{{
 			SearchQueue: metricsinfo.ReadInfoInQueue{
@@ -270,9 +268,7 @@ func TestQuotaCenter(t *testing.T) {
 		quotaCenter.calculateReadRates()
 		assert.Equal(t, Limit(100.0*0.9), quotaCenter.currentRates[internalpb.RateType_DQLSearch])
 		assert.Equal(t, Limit(100.0*0.9), quotaCenter.currentRates[internalpb.RateType_DQLQuery])
-		Params.QuotaConfig.QueueLatencyThreshold = latencyBak
 
-		queueBak := Params.QuotaConfig.NQInQueueThreshold
 		Params.QuotaConfig.NQInQueueThreshold = 100
 		quotaCenter.queryNodeMetrics = []*metricsinfo.QueryNodeQuotaMetrics{{
 			SearchQueue: metricsinfo.ReadInfoInQueue{
@@ -282,7 +278,6 @@ func TestQuotaCenter(t *testing.T) {
 		quotaCenter.calculateReadRates()
 		assert.Equal(t, Limit(100.0*0.9), quotaCenter.currentRates[internalpb.RateType_DQLSearch])
 		assert.Equal(t, Limit(100.0*0.9), quotaCenter.currentRates[internalpb.RateType_DQLQuery])
-		Params.QuotaConfig.NQInQueueThreshold = queueBak
 	})
 
 	t.Run("test calculateWriteRates", func(t *testing.T) {

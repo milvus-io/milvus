@@ -619,7 +619,7 @@ func (c *Core) startInternal() error {
 	go c.importManager.expireOldTasksLoop(&c.wg, c.broker.ReleaseSegRefLock)
 	go c.importManager.sendOutTasksLoop(&c.wg)
 
-	if Params.QuotaConfig.EnableQuotaAndLimits {
+	if Params.QuotaConfig.QuotaAndLimitsEnabled {
 		go c.quotaCenter.run()
 	}
 
