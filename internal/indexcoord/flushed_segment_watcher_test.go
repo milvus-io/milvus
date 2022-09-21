@@ -21,8 +21,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
-
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 
@@ -36,22 +35,43 @@ import (
 func Test_flushSegmentWatcher(t *testing.T) {
 	ctx := context.Background()
 
-	watcher, err := newFlushSegmentWatcher(ctx,
+	fsw, err := newFlushSegmentWatcher(ctx,
 		&mockETCDKV{
 			loadWithRevision: func(key string) ([]string, []string, int64, error) {
-				return []string{"seg1"}, []string{"12345"}, 1, nil
+				return []string{"1", "2", "3"}, []string{"1", "2", "3"}, 1, nil
+			},
+			removeWithPrefix: func(key string) error {
+				return nil
 			},
 		},
 		&metaTable{
 			catalog: &indexcoord.Catalog{
 				Txn: NewMockEtcdKV(),
 			},
+			indexLock:            sync.RWMutex{},
+			segmentIndexLock:     sync.RWMutex{},
+			collectionIndexes:    map[UniqueID]map[UniqueID]*model.Index{},
+			segmentIndexes:       map[UniqueID]map[UniqueID]*model.SegmentIndex{},
+			buildID2SegmentIndex: map[UniqueID]*model.SegmentIndex{},
 		},
-		&indexBuilder{}, &IndexCoord{
+		&indexBuilder{}, &handoff{}, &IndexCoord{
 			dataCoordClient: NewDataCoordMock(),
 		})
 	assert.NoError(t, err)
-	assert.NotNil(t, watcher)
+	assert.NotNil(t, fsw)
+
+	fsw.enqueueInternalTask(1)
+
+	fsw.Start()
+
+	// hold ticker.C
+	time.Sleep(time.Second * 2)
+
+	for fsw.Len() != 0 {
+		time.Sleep(time.Second)
+	}
+
+	fsw.Stop()
 }
 
 func Test_flushSegmentWatcher_newFlushSegmentWatcher(t *testing.T) {
@@ -61,7 +81,7 @@ func Test_flushSegmentWatcher_newFlushSegmentWatcher(t *testing.T) {
 				loadWithRevision: func(key string) ([]string, []string, int64, error) {
 					return []string{"segID1"}, []string{"12345"}, 1, nil
 				},
-			}, &metaTable{}, &indexBuilder{}, &IndexCoord{
+			}, &metaTable{}, &indexBuilder{}, &handoff{}, &IndexCoord{
 				dataCoordClient: NewDataCoordMock(),
 			})
 		assert.NoError(t, err)
@@ -74,7 +94,7 @@ func Test_flushSegmentWatcher_newFlushSegmentWatcher(t *testing.T) {
 				loadWithRevision: func(key string) ([]string, []string, int64, error) {
 					return []string{"segID1"}, []string{"12345"}, 1, errors.New("error")
 				},
-			}, &metaTable{}, &indexBuilder{}, &IndexCoord{
+			}, &metaTable{}, &indexBuilder{}, &handoff{}, &IndexCoord{
 				dataCoordClient: NewDataCoordMock(),
 			})
 		assert.Error(t, err)
@@ -87,12 +107,54 @@ func Test_flushSegmentWatcher_newFlushSegmentWatcher(t *testing.T) {
 				loadWithRevision: func(key string) ([]string, []string, int64, error) {
 					return []string{"segID1"}, []string{"segID"}, 1, nil
 				},
-			}, &metaTable{}, &indexBuilder{}, &IndexCoord{
+			}, &metaTable{}, &indexBuilder{}, &handoff{}, &IndexCoord{
 				dataCoordClient: NewDataCoordMock(),
 			})
 		assert.Error(t, err)
 		assert.Nil(t, fsw)
 	})
+}
+
+func Test_flushedSegmentWatcher_internalRun(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	fsw := &flushedSegmentWatcher{
+		ctx:               ctx,
+		cancel:            cancel,
+		kvClient:          NewMockEtcdKV(),
+		wg:                sync.WaitGroup{},
+		scheduleDuration:  time.Second,
+		internalTaskMutex: sync.RWMutex{},
+		internalNotify:    make(chan struct{}, 1),
+		etcdRevision:      0,
+		watchChan:         nil,
+		meta:              nil,
+		builder:           nil,
+		ic: &IndexCoord{
+			dataCoordClient: NewDataCoordMock(),
+		},
+		handoff: nil,
+		internalTasks: map[UniqueID]*internalTask{
+			segID: {
+				state: indexTaskPrepare,
+				segmentInfo: &datapb.SegmentInfo{
+					CollectionID: collID,
+					PartitionID:  partID,
+					ID:           segID,
+				},
+			},
+			segID + 1: {
+				state:       indexTaskPrepare,
+				segmentInfo: nil,
+			},
+			segID - 1: {
+				state:       indexTaskPrepare,
+				segmentInfo: nil,
+			},
+		},
+	}
+
+	fsw.internalRun()
+	assert.Equal(t, 3, fsw.Len())
 }
 
 func Test_flushSegmentWatcher_internalProcess_success(t *testing.T) {
@@ -150,6 +212,15 @@ func Test_flushSegmentWatcher_internalProcess_success(t *testing.T) {
 	}
 
 	fsw := &flushedSegmentWatcher{
+		handoff: &handoff{
+			tasks:            map[UniqueID]struct{}{},
+			taskMutex:        sync.RWMutex{},
+			wg:               sync.WaitGroup{},
+			meta:             meta,
+			notifyChan:       make(chan struct{}, 1),
+			scheduleDuration: time.Second,
+			kvClient:         nil,
+		},
 		ic: &IndexCoord{
 			dataCoordClient: &DataCoordMock{
 				CallGetSegmentInfo: func(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
@@ -217,14 +288,7 @@ func Test_flushSegmentWatcher_internalProcess_success(t *testing.T) {
 		fsw.internalTaskMutex.RUnlock()
 	})
 
-	err := fsw.meta.FinishTask(&indexpb.IndexTaskInfo{
-		BuildID:        buildID,
-		State:          commonpb.IndexState_Finished,
-		IndexFiles:     []string{"file1", "file2"},
-		SerializedSize: 100,
-		FailReason:     "",
-	})
-	assert.NoError(t, err)
+	fsw.handoff.deleteTask(segID)
 
 	t.Run("inProgress", func(t *testing.T) {
 		fsw.internalProcess(segID)
@@ -304,9 +368,9 @@ func Test_flushSegmentWatcher_internalProcess_error(t *testing.T) {
 		fsw.internalTaskMutex.RUnlock()
 	})
 
-	t.Run("write handoff event fail", func(t *testing.T) {
+	t.Run("remove flushed segment fail", func(t *testing.T) {
 		fsw.kvClient = &mockETCDKV{
-			save: func(s string, s2 string) error {
+			removeWithPrefix: func(key string) error {
 				return errors.New("error")
 			},
 		}
@@ -339,28 +403,6 @@ func Test_flushSegmentWatcher_internalProcess_error(t *testing.T) {
 		fsw.internalTaskMutex.RUnlock()
 	})
 
-	t.Run("remove flushed segment fail", func(t *testing.T) {
-		fsw.kvClient = &mockETCDKV{
-			save: func(s string, s2 string) error {
-				return nil
-			},
-			removeWithPrefix: func(key string) error {
-				return errors.New("error")
-			},
-		}
-		fsw.internalProcess(segID)
-		fsw.internalTaskMutex.RLock()
-		assert.Equal(t, indexTaskDone, fsw.internalTasks[segID].state)
-		fsw.internalTaskMutex.RUnlock()
-	})
-
-	t.Run("index is not zero", func(t *testing.T) {
-		fsw.internalProcess(segID)
-		fsw.internalTaskMutex.RLock()
-		assert.Equal(t, indexTaskDone, fsw.internalTasks[segID].state)
-		fsw.internalTaskMutex.RUnlock()
-	})
-
 	t.Run("invalid state", func(t *testing.T) {
 		fsw.internalTasks = map[UniqueID]*internalTask{
 			segID: {
@@ -369,5 +411,79 @@ func Test_flushSegmentWatcher_internalProcess_error(t *testing.T) {
 			},
 		}
 		fsw.internalProcess(segID)
+	})
+}
+
+func Test_flushSegmentWatcher_prepare_error(t *testing.T) {
+	t.Run("segmentInfo already exist", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		fsw := &flushedSegmentWatcher{
+			ctx:               ctx,
+			cancel:            cancel,
+			kvClient:          NewMockEtcdKV(),
+			wg:                sync.WaitGroup{},
+			scheduleDuration:  time.Second,
+			internalTaskMutex: sync.RWMutex{},
+			internalNotify:    make(chan struct{}, 1),
+			etcdRevision:      0,
+			watchChan:         nil,
+			meta:              nil,
+			builder:           nil,
+			ic: &IndexCoord{
+				dataCoordClient: NewDataCoordMock(),
+			},
+			handoff: nil,
+			internalTasks: map[UniqueID]*internalTask{
+				segID: {
+					state: indexTaskPrepare,
+					segmentInfo: &datapb.SegmentInfo{
+						CollectionID: collID,
+						PartitionID:  partID,
+						ID:           segID,
+					},
+				},
+			},
+		}
+		err := fsw.prepare(segID)
+		assert.NoError(t, err)
+	})
+
+	t.Run("segment is not exist", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		fsw := &flushedSegmentWatcher{
+			ctx:               ctx,
+			cancel:            cancel,
+			kvClient:          NewMockEtcdKV(),
+			wg:                sync.WaitGroup{},
+			scheduleDuration:  time.Second,
+			internalTaskMutex: sync.RWMutex{},
+			internalNotify:    make(chan struct{}, 1),
+			etcdRevision:      0,
+			watchChan:         nil,
+			meta:              nil,
+			builder:           nil,
+			ic: &IndexCoord{
+				dataCoordClient: &DataCoordMock{
+					CallGetSegmentInfo: func(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
+						return &datapb.GetSegmentInfoResponse{
+							Status: &commonpb.Status{
+								ErrorCode: commonpb.ErrorCode_Success,
+							},
+							Infos: nil,
+						}, nil
+					},
+				},
+			},
+			handoff: nil,
+			internalTasks: map[UniqueID]*internalTask{
+				segID: {
+					state:       indexTaskPrepare,
+					segmentInfo: nil,
+				},
+			},
+		}
+
+		err := fsw.prepare(segID)
+		assert.ErrorIs(t, err, ErrSegmentNotFound)
 	})
 }

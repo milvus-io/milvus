@@ -1032,3 +1032,18 @@ func (mt *metaTable) MarkSegmentsIndexAsDeletedByBuildID(buildIDs []UniqueID) er
 	log.Info("IndexCoord metaTable MarkSegmentsIndexAsDeletedByBuildID success", zap.Int64s("buildIDs", buildIDs))
 	return nil
 }
+
+func (mt *metaTable) MarkSegmentWriteHandoff(segID UniqueID) error {
+	mt.segmentIndexLock.Lock()
+	defer mt.segmentIndexLock.Unlock()
+
+	segIdxes := make([]*model.SegmentIndex, 0)
+	if segIndexes, ok := mt.segmentIndexes[segID]; ok {
+		for _, segIdx := range segIndexes {
+			clonedSegIdx := model.CloneSegmentIndex(segIdx)
+			clonedSegIdx.WriteHandoff = true
+			segIdxes = append(segIdxes, clonedSegIdx)
+		}
+	}
+	return mt.alterSegmentIndexes(segIdxes)
+}
