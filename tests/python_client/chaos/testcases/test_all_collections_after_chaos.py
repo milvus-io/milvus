@@ -26,7 +26,7 @@ class TestAllCollection(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_default(self, collection_name):
         # create
-        name = collection_name
+        name = collection_name if collection_name else cf.gen_unique_str("Checker_")
         t0 = time.time()
         collection_w = self.init_collection_wrap(name=name, active_trace=True)
         tt = time.time() - t0

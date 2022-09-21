@@ -7,7 +7,8 @@ def pytest_addoption(parser):
     parser.addoption("--target_component", action="store", default="querynode", help="target_component")
     parser.addoption("--chaos_duration", action="store", default="1m", help="chaos_duration")
     parser.addoption("--chaos_interval", action="store", default="10s", help="chaos_interval")
-
+    parser.addoption("--request_duration", action="store", default="3m", help="request_duration")
+    parser.addoption("--is_check", action="store", type=bool, default=False, help="is_check")   
 
 @pytest.fixture
 def milvus_ns(request):
@@ -31,3 +32,13 @@ def chaos_duration(request):
 @pytest.fixture
 def chaos_interval(request):
     return request.config.getoption("--chaos_interval")
+
+
+@pytest.fixture
+def request_duration(request):
+    return request.config.getoption("--request_duration")
+
+
+@pytest.fixture
+def is_check(request):
+    return request.config.getoption("--is_check")    

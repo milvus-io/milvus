@@ -66,8 +66,11 @@ class TestOperations(TestBase):
         self.init_health_checkers(collection_name=c_name)
         cc.start_monitor_threads(self.health_checkers)
         log.info("*********************Load Start**********************")
-        # wait 200s
-        request_duration = eval(request_duration.replace("h","*3600+").replace("m","*60+").replace("s",""))
+        # wait request_duration
+        request_duration = request_duration.replace("h","*3600+").replace("m","*60+").replace("s","")
+        if request_duration[-1] == "+":
+            request_duration = request_duration[:-1]
+        request_duration = eval(request_duration)
         for i in range(10):
             sleep(request_duration//10)
             for k,v in self.health_checkers.items():
