@@ -14,11 +14,12 @@ type DefaultFactory struct {
 	msgStreamFactory    msgstream.Factory
 }
 
+// Only for test
 func NewDefaultFactory(standAlone bool) *DefaultFactory {
 	return &DefaultFactory{
 		standAlone:       standAlone,
 		msgStreamFactory: msgstream.NewRmsFactory("/tmp/milvus/rocksmq/"),
-		chunkManagerFactory: storage.NewChunkManagerFactory("local", "local",
+		chunkManagerFactory: storage.NewChunkManagerFactory("local",
 			storage.RootPath("/tmp/milvus")),
 	}
 }
@@ -37,33 +38,14 @@ func (f *DefaultFactory) Init(params *paramtable.ComponentParam) {
 		return
 	}
 
-	// init storage
-	if params.CommonCfg.StorageType == "local" {
-		f.chunkManagerFactory = storage.NewChunkManagerFactory("local", "local",
-			storage.RootPath(params.LocalStorageCfg.Path))
-	} else {
-		f.chunkManagerFactory = storage.NewChunkManagerFactory("local", "minio",
-			storage.RootPath(params.MinioCfg.RootPath),
-			storage.Address(params.MinioCfg.Address),
-			storage.AccessKeyID(params.MinioCfg.AccessKeyID),
-			storage.SecretAccessKeyID(params.MinioCfg.SecretAccessKey),
-			storage.UseSSL(params.MinioCfg.UseSSL),
-			storage.BucketName(params.MinioCfg.BucketName),
-			storage.UseIAM(params.MinioCfg.UseIAM),
-			storage.IAMEndpoint(params.MinioCfg.IAMEndpoint),
-			storage.CreateBucket(true))
-	}
+	f.chunkManagerFactory = storage.NewChunkManagerFactoryWithParam(params)
 
 	// init mq storage
 	if f.standAlone {
 		f.msgStreamFactory = f.initMQLocalService(params)
-		if f.msgStreamFactory == nil {
-			f.msgStreamFactory = f.initMQRemoteService(params)
-			if f.msgStreamFactory == nil {
-				panic("no available mq configuration, must config rocksmq, Pulsar or Kafka at least one of these!")
-			}
+		if f.msgStreamFactory != nil {
+			return
 		}
-		return
 	}
 
 	f.msgStreamFactory = f.initMQRemoteService(params)
@@ -112,17 +94,12 @@ func (f *DefaultFactory) NewMsgStreamDisposer(ctx context.Context) func([]string
 	return f.msgStreamFactory.NewMsgStreamDisposer(ctx)
 }
 
-func (f *DefaultFactory) NewCacheStorageChunkManager(ctx context.Context) (storage.ChunkManager, error) {
-	return f.chunkManagerFactory.NewCacheStorageChunkManager(ctx)
-}
-
-func (f *DefaultFactory) NewVectorStorageChunkManager(ctx context.Context) (storage.ChunkManager, error) {
-	return f.chunkManagerFactory.NewVectorStorageChunkManager(ctx)
+func (f *DefaultFactory) NewPersistentStorageChunkManager(ctx context.Context) (storage.ChunkManager, error) {
+	return f.chunkManagerFactory.NewPersistentStorageChunkManager(ctx)
 }
 
 type Factory interface {
 	msgstream.Factory
 	Init(p *paramtable.ComponentParam)
-	NewCacheStorageChunkManager(ctx context.Context) (storage.ChunkManager, error)
-	NewVectorStorageChunkManager(ctx context.Context) (storage.ChunkManager, error)
+	NewPersistentStorageChunkManager(ctx context.Context) (storage.ChunkManager, error)
 }

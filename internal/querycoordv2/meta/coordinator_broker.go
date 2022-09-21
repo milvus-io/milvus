@@ -13,7 +13,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 
 	"go.uber.org/zap"
@@ -37,20 +36,16 @@ type CoordinatorBroker struct {
 	dataCoord  types.DataCoord
 	rootCoord  types.RootCoord
 	indexCoord types.IndexCoord
-
-	cm storage.ChunkManager
 }
 
 func NewCoordinatorBroker(
 	dataCoord types.DataCoord,
 	rootCoord types.RootCoord,
-	indexCoord types.IndexCoord,
-	cm storage.ChunkManager) *CoordinatorBroker {
+	indexCoord types.IndexCoord) *CoordinatorBroker {
 	return &CoordinatorBroker{
 		dataCoord,
 		rootCoord,
 		indexCoord,
-		cm,
 	}
 }
 

@@ -28,7 +28,8 @@ func TestQueryShardService(t *testing.T) {
 	qn, err := genSimpleQueryNode(context.Background())
 	require.NoError(t, err)
 
-	qss := newQueryShardService(context.Background(), qn.metaReplica, qn.tSafeReplica, qn.ShardClusterService, qn.factory, qn.scheduler)
+	qss, err := newQueryShardService(context.Background(), qn.metaReplica, qn.tSafeReplica, qn.ShardClusterService, qn.factory, qn.scheduler)
+	assert.NoError(t, err)
 	err = qss.addQueryShard(0, "vchan1", 0)
 	assert.NoError(t, err)
 	found1 := qss.hasQueryShard("vchan1")
@@ -50,7 +51,8 @@ func TestQueryShardService_InvalidChunkManager(t *testing.T) {
 	qn, err := genSimpleQueryNode(context.Background())
 	require.NoError(t, err)
 
-	qss := newQueryShardService(context.Background(), qn.metaReplica, qn.tSafeReplica, qn.ShardClusterService, qn.factory, qn.scheduler)
+	qss, err := newQueryShardService(context.Background(), qn.metaReplica, qn.tSafeReplica, qn.ShardClusterService, qn.factory, qn.scheduler)
+	assert.NoError(t, err)
 
 	lcm := qss.localChunkManager
 	qss.localChunkManager = nil

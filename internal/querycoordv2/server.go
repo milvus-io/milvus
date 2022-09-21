@@ -35,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
@@ -60,7 +59,6 @@ type Server struct {
 	idAllocator         func() (int64, error)
 	factory             dependency.Factory
 	metricsCacheManager *metricsinfo.MetricsCacheManager
-	chunkManager        storage.ChunkManager
 
 	// Coordinators
 	dataCoord  types.DataCoord
@@ -159,13 +157,6 @@ func (s *Server) Init() error {
 	// Init metrics cache manager
 	s.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
 
-	// Init chunk manager
-	s.chunkManager, err = s.factory.NewVectorStorageChunkManager(s.ctx)
-	if err != nil {
-		log.Error("failed to init chunk manager", zap.Error(err))
-		return err
-	}
-
 	// Init meta
 	err = s.initMeta()
 	if err != nil {
@@ -252,7 +243,6 @@ func (s *Server) initMeta() error {
 		s.dataCoord,
 		s.rootCoord,
 		s.indexCoord,
-		s.chunkManager,
 	)
 	return nil
 }

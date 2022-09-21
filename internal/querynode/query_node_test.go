@@ -103,11 +103,7 @@ func newQueryNodeMock() *QueryNode {
 	replica := newCollectionReplica(pool)
 	svr.metaReplica = replica
 	svr.dataSyncService = newDataSyncService(ctx, svr.metaReplica, tsReplica, factory)
-	svr.vectorStorage, err = factory.NewVectorStorageChunkManager(ctx)
-	if err != nil {
-		panic(err)
-	}
-	svr.cacheStorage, err = factory.NewCacheStorageChunkManager(ctx)
+	svr.vectorStorage, err = factory.NewPersistentStorageChunkManager(ctx)
 	if err != nil {
 		panic(err)
 	}

@@ -196,7 +196,7 @@ func (qc *QueryCoord) Init() error {
 		// we only try best to reload the leader addresses
 		reloadShardLeaderAddress(qc.meta, qc.cluster)
 
-		qc.chunkManager, initError = qc.factory.NewVectorStorageChunkManager(qc.loopCtx)
+		qc.chunkManager, initError = qc.factory.NewPersistentStorageChunkManager(qc.loopCtx)
 
 		if initError != nil {
 			log.Error("query coordinator init cluster failed", zap.Error(initError))

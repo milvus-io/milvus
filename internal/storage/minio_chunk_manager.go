@@ -48,7 +48,7 @@ type MinioChunkManager struct {
 var _ ChunkManager = (*MinioChunkManager)(nil)
 
 // NewMinioChunkManager create a new local manager object.
-// Deprecated: Do not call this directly! Use factory.NewVectorStorageChunkManager instead.
+// Deprecated: Do not call this directly! Use factory.NewPersistentStorageChunkManager instead.
 func NewMinioChunkManager(ctx context.Context, opts ...Option) (*MinioChunkManager, error) {
 	c := newDefaultConfig()
 	for _, opt := range opts {
@@ -117,9 +117,10 @@ func (mcm *MinioChunkManager) normalizeRootPath(rootPath string) string {
 }
 
 // SetVar set the variable value of mcm
-func (mcm *MinioChunkManager) SetVar(ctx context.Context, bucketName string) {
+func (mcm *MinioChunkManager) SetVar(ctx context.Context, bucketName string, rootPath string) {
 	mcm.ctx = ctx
 	mcm.bucketName = bucketName
+	mcm.rootPath = rootPath
 }
 
 // RootPath returns minio root path.

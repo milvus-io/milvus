@@ -209,7 +209,7 @@ func (i *IndexCoord) Init() error {
 		// TODO silverxia add Rewatch logic
 		i.eventChan = i.session.WatchServices(typeutil.IndexNodeRole, revision+1, nil)
 
-		chunkManager, err := i.factory.NewVectorStorageChunkManager(i.loopCtx)
+		chunkManager, err := i.factory.NewPersistentStorageChunkManager(i.loopCtx)
 		if err != nil {
 			log.Error("IndexCoord new minio chunkManager failed", zap.Error(err))
 			initErr = err

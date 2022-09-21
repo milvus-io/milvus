@@ -48,7 +48,6 @@ type GcOption struct {
 	checkInterval    time.Duration        // each interval
 	missingTolerance time.Duration        // key missing in meta tolerance time
 	dropTolerance    time.Duration        // dropped segment related key tolerance time
-	rootPath         string
 }
 
 // garbageCollector handles garbage files in object storage
@@ -130,9 +129,9 @@ func (gc *garbageCollector) scan() {
 
 	// walk only data cluster related prefixes
 	prefixes := make([]string, 0, 3)
-	prefixes = append(prefixes, path.Join(gc.option.rootPath, insertLogPrefix))
-	prefixes = append(prefixes, path.Join(gc.option.rootPath, statsLogPrefix))
-	prefixes = append(prefixes, path.Join(gc.option.rootPath, deltaLogPrefix))
+	prefixes = append(prefixes, path.Join(gc.option.cli.RootPath(), insertLogPrefix))
+	prefixes = append(prefixes, path.Join(gc.option.cli.RootPath(), statsLogPrefix))
+	prefixes = append(prefixes, path.Join(gc.option.cli.RootPath(), deltaLogPrefix))
 	var removedKeys []string
 
 	for _, prefix := range prefixes {
@@ -148,7 +147,7 @@ func (gc *garbageCollector) scan() {
 				continue
 			}
 
-			segmentID, err := storage.ParseSegmentIDByBinlog(gc.option.rootPath, infoKey)
+			segmentID, err := storage.ParseSegmentIDByBinlog(gc.option.cli.RootPath(), infoKey)
 			if err != nil && !common.IsIgnorableError(err) {
 				log.Error("parse segment id error", zap.String("infoKey", infoKey), zap.Error(err))
 				continue

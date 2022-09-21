@@ -65,7 +65,6 @@ func Test_garbageCollector_basic(t *testing.T) {
 			checkInterval:    time.Millisecond * 10,
 			missingTolerance: time.Hour * 24,
 			dropTolerance:    time.Hour * 24,
-			rootPath:         rootPath,
 		})
 		gc.start()
 
@@ -82,7 +81,6 @@ func Test_garbageCollector_basic(t *testing.T) {
 			checkInterval:    time.Millisecond * 10,
 			missingTolerance: time.Hour * 24,
 			dropTolerance:    time.Hour * 24,
-			rootPath:         rootPath,
 		})
 		assert.NotPanics(t, func() {
 			gc.start()
@@ -145,7 +143,6 @@ func Test_garbageCollector_scan(t *testing.T) {
 			checkInterval:    time.Minute * 30,
 			missingTolerance: time.Hour * 24,
 			dropTolerance:    time.Hour * 24,
-			rootPath:         rootPath,
 		})
 		gc.segRefer = segReferManager
 		gc.scan()
@@ -167,7 +164,6 @@ func Test_garbageCollector_scan(t *testing.T) {
 			checkInterval:    time.Minute * 30,
 			missingTolerance: time.Hour * 24,
 			dropTolerance:    time.Hour * 24,
-			rootPath:         rootPath,
 		})
 		gc.scan()
 
@@ -193,7 +189,6 @@ func Test_garbageCollector_scan(t *testing.T) {
 			checkInterval:    time.Minute * 30,
 			missingTolerance: time.Hour * 24,
 			dropTolerance:    time.Hour * 24,
-			rootPath:         rootPath,
 		})
 		gc.start()
 		gc.scan()
@@ -222,7 +217,6 @@ func Test_garbageCollector_scan(t *testing.T) {
 			checkInterval:    time.Minute * 30,
 			missingTolerance: time.Hour * 24,
 			dropTolerance:    0,
-			rootPath:         rootPath,
 		})
 		gc.clearEtcd()
 		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, insertLogPrefix), inserts[1:])
@@ -239,7 +233,6 @@ func Test_garbageCollector_scan(t *testing.T) {
 			checkInterval:    time.Minute * 30,
 			missingTolerance: 0,
 			dropTolerance:    0,
-			rootPath:         rootPath,
 		})
 		gc.start()
 		gc.scan()
@@ -324,7 +317,7 @@ func initUtOSSEnv(bucket, root string, n int) (mcm *storage.MinioChunkManager, i
 	mcm = &storage.MinioChunkManager{
 		Client: cli,
 	}
-	mcm.SetVar(context.TODO(), bucket)
+	mcm.SetVar(context.TODO(), bucket, root)
 	return mcm, inserts, stats, delta, other, nil
 }
 

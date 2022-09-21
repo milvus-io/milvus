@@ -47,7 +47,7 @@ const (
 )
 
 type mck struct {
-	params              paramtable.GrpcServerConfig
+	params              *paramtable.ComponentParam
 	taskKeyMap          map[int64]string
 	taskNameMap         map[int64]string
 	allTaskInfo         map[string]string
@@ -232,27 +232,12 @@ func (c *mck) connectEctd() {
 }
 
 func (c *mck) connectMinio() {
-	useSSL := c.params.MinioCfg.UseSSL
-	if c.minioUseSSL == "true" || c.minioUseSSL == "false" {
-		minioUseSSL, err := strconv.ParseBool(c.minioUseSSL)
-		if err != nil {
-			log.Panic("fail to parse the 'minioUseSSL' string to the bool value", zap.String("minioUseSSL", c.minioUseSSL), zap.Error(err))
-		}
-		useSSL = minioUseSSL
-	}
-	chunkManagerFactory := storage.NewChunkManagerFactory("local", "minio",
-		storage.RootPath(c.params.LocalStorageCfg.Path),
-		storage.Address(getConfigValue(c.minioAddress, c.params.MinioCfg.Address, "minio_address")),
-		storage.AccessKeyID(getConfigValue(c.minioUsername, c.params.MinioCfg.AccessKeyID, "minio_username")),
-		storage.SecretAccessKeyID(getConfigValue(c.minioPassword, c.params.MinioCfg.SecretAccessKey, "minio_password")),
-		storage.UseSSL(useSSL),
-		storage.BucketName(getConfigValue(c.minioBucketName, c.params.MinioCfg.BucketName, "minio_bucket_name")),
-		storage.CreateBucket(true))
+	chunkManagerFactory := storage.NewChunkManagerFactoryWithParam(c.params)
 
 	var err error
-	c.minioChunkManager, err = chunkManagerFactory.NewVectorStorageChunkManager(context.Background())
+	c.minioChunkManager, err = chunkManagerFactory.NewPersistentStorageChunkManager(context.Background())
 	if err != nil {
-		log.Fatal("failed to connect to etcd", zap.Error(err))
+		log.Fatal("failed to connect to minio", zap.Error(err))
 	}
 }
 

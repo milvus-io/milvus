@@ -1741,9 +1741,12 @@ func genSimpleQueryNodeWithMQFactory(ctx context.Context, fac dependency.Factory
 	// init shard cluster service
 	node.ShardClusterService = newShardClusterService(node.etcdCli, node.session, node)
 
-	node.queryShardService = newQueryShardService(node.queryNodeLoopCtx,
+	node.queryShardService, err = newQueryShardService(node.queryNodeLoopCtx,
 		node.metaReplica, node.tSafeReplica,
 		node.ShardClusterService, node.factory, node.scheduler)
+	if err != nil {
+		return nil, err
+	}
 
 	node.UpdateStateCode(internalpb.StateCode_Healthy)
 
@@ -1908,7 +1911,7 @@ func (mm *mockMsgStreamFactory) NewQueryMsgStream(ctx context.Context) (msgstrea
 func (mm *mockMsgStreamFactory) NewCacheStorageChunkManager(ctx context.Context) (storage.ChunkManager, error) {
 	return nil, nil
 }
-func (mm *mockMsgStreamFactory) NewVectorStorageChunkManager(ctx context.Context) (storage.ChunkManager, error) {
+func (mm *mockMsgStreamFactory) NewPersistentStorageChunkManager(ctx context.Context) (storage.ChunkManager, error) {
 	return nil, nil
 }
 

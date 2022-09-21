@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/storage"
 )
@@ -23,24 +24,13 @@ func (m *chunkMgr) NewChunkManager(ctx context.Context, config *indexpb.StorageC
 		return v.(storage.ChunkManager), nil
 	}
 
-	opts := make([]storage.Option, 0)
-	if config.StorageType == "local" {
-		opts = append(opts, storage.RootPath(config.RootPath))
-	} else {
-		opts = append(opts, storage.Address(config.Address),
-			storage.AccessKeyID(config.AccessKeyID),
-			storage.SecretAccessKeyID(config.SecretAccessKey),
-			storage.UseSSL(config.UseSSL),
-			storage.BucketName(config.BucketName),
-			storage.UseIAM(config.UseIAM),
-			storage.IAMEndpoint(config.IAMEndpoint))
-	}
-	factory := storage.NewChunkManagerFactory("local", config.StorageType, opts...)
-	mgr, err := factory.NewVectorStorageChunkManager(ctx)
+	chunkManagerFactory := storage.NewChunkManagerFactoryWithParam(&Params)
+	mgr, err := chunkManagerFactory.NewPersistentStorageChunkManager(ctx)
 	if err != nil {
 		return nil, err
 	}
 	v, _ := m.cached.LoadOrStore(key, mgr)
+	log.Ctx(ctx).Info("index node successfully init chunk manager")
 	return v.(storage.ChunkManager), nil
 }
 

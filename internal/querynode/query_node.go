@@ -113,7 +113,6 @@ type QueryNode struct {
 	eventCh <-chan *sessionutil.SessionEvent
 
 	vectorStorage storage.ChunkManager
-	cacheStorage  storage.ChunkManager
 	etcdKV        *etcdkv.EtcdKV
 
 	// shard cluster service, handle shard leader functions
@@ -240,16 +239,9 @@ func (node *QueryNode) Init() error {
 		}
 		log.Info("QueryNode init rateCollector done", zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()))
 
-		node.vectorStorage, err = node.factory.NewVectorStorageChunkManager(node.queryNodeLoopCtx)
+		node.vectorStorage, err = node.factory.NewPersistentStorageChunkManager(node.queryNodeLoopCtx)
 		if err != nil {
 			log.Error("QueryNode init vector storage failed", zap.Error(err))
-			initError = err
-			return
-		}
-
-		node.cacheStorage, err = node.factory.NewCacheStorageChunkManager(node.queryNodeLoopCtx)
-		if err != nil {
-			log.Error("QueryNode init cache storage failed", zap.Error(err))
 			initError = err
 			return
 		}
@@ -315,8 +307,12 @@ func (node *QueryNode) Start() error {
 	// create shardClusterService for shardLeader functions.
 	node.ShardClusterService = newShardClusterService(node.etcdCli, node.session, node)
 	// create shard-level query service
-	node.queryShardService = newQueryShardService(node.queryNodeLoopCtx, node.metaReplica, node.tSafeReplica,
+	queryShardService, err := newQueryShardService(node.queryNodeLoopCtx, node.metaReplica, node.tSafeReplica,
 		node.ShardClusterService, node.factory, node.scheduler)
+	if err != nil {
+		return err
+	}
+	node.queryShardService = queryShardService
 
 	Params.QueryNodeCfg.CreatedTime = time.Now()
 	Params.QueryNodeCfg.UpdatedTime = time.Now()

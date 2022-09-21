@@ -47,14 +47,15 @@ type queryShardService struct {
 	scheduler           *taskScheduler
 }
 
-func newQueryShardService(ctx context.Context, metaReplica ReplicaInterface, tSafeReplica TSafeReplicaInterface, clusterService *ShardClusterService, factory dependency.Factory, scheduler *taskScheduler) *queryShardService {
+func newQueryShardService(ctx context.Context, metaReplica ReplicaInterface, tSafeReplica TSafeReplicaInterface, clusterService *ShardClusterService, factory dependency.Factory, scheduler *taskScheduler) (*queryShardService, error) {
+	// TODO we don't need the local chunk manager any more
+	localChunkManager := storage.NewLocalChunkManager(storage.RootPath(Params.LocalStorageCfg.Path))
+	remoteChunkManager, err := factory.NewPersistentStorageChunkManager(ctx)
+	if err != nil {
+		log.Ctx(ctx).Warn("failed to init remote chunk manager", zap.Error(err))
+		return nil, err
+	}
 	queryShardServiceCtx, queryShardServiceCancel := context.WithCancel(ctx)
-
-	path := Params.LoadWithDefault("localStorage.Path", "/tmp/milvus/data")
-
-	localChunkManager := storage.NewLocalChunkManager(storage.RootPath(path))
-	remoteChunkManager, _ := factory.NewVectorStorageChunkManager(ctx)
-
 	qss := &queryShardService{
 		ctx:                 queryShardServiceCtx,
 		cancel:              queryShardServiceCancel,
@@ -68,7 +69,7 @@ func newQueryShardService(ctx context.Context, metaReplica ReplicaInterface, tSa
 		factory:             factory,
 		scheduler:           scheduler,
 	}
-	return qss
+	return qss, nil
 }
 
 func (q *queryShardService) addQueryShard(collectionID UniqueID, channel Channel, replicaID int64) error {
