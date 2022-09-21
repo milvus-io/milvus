@@ -33,6 +33,7 @@ import (
 	queryPb "github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/samber/lo"
 )
 
 type task interface {
@@ -535,6 +536,10 @@ func (l *loadSegmentsTask) PreExecute(ctx context.Context) error {
 
 func (l *loadSegmentsTask) Execute(ctx context.Context) error {
 	log.Info("LoadSegmentTask Execute start", zap.Int64("msgID", l.req.Base.MsgID))
+
+	segmentIDs := lo.Map(l.req.Infos, func(info *queryPb.SegmentLoadInfo, idx int) UniqueID { return info.SegmentID })
+	l.node.metaReplica.addSegmentsLoadingList(segmentIDs)
+	defer l.node.metaReplica.removeSegmentsLoadingList(segmentIDs)
 	err := l.node.loader.LoadSegment(l.req, segmentTypeSealed)
 	if err != nil {
 		log.Warn("failed to load segment", zap.Int64("collectionID", l.req.CollectionID),

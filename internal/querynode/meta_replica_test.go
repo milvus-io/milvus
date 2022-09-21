@@ -343,6 +343,71 @@ func TestMetaReplica_segment(t *testing.T) {
 	})
 }
 
+func TestMetaReplica_BlackList(t *testing.T) {
+	replica, err := genSimpleReplica()
+	assert.NoError(t, err)
+
+	schema := genTestCollectionSchema()
+	collection := replica.addCollection(defaultCollectionID, schema)
+	replica.addPartition(defaultCollectionID, defaultPartitionID)
+	replica.addPartition(defaultCollectionID, defaultPartitionID+1)
+
+	pool, err := concurrency.NewPool(runtime.GOMAXPROCS(0))
+	require.NoError(t, err)
+
+	segment1, err := newSegment(collection, UniqueID(1), defaultPartitionID, defaultCollectionID, "channel1", segmentTypeSealed, defaultSegmentVersion, pool)
+	assert.NoError(t, err)
+
+	segment2, err := newSegment(collection, UniqueID(2), defaultPartitionID, defaultCollectionID, "channel2", segmentTypeSealed, defaultSegmentVersion, pool)
+	assert.NoError(t, err)
+
+	segment3, err := newSegment(collection, UniqueID(3), defaultPartitionID, defaultCollectionID, "channel2", segmentTypeGrowing, defaultSegmentVersion, pool)
+	assert.NoError(t, err)
+
+	replica.addSegmentsLoadingList([]UniqueID{1, 2, 3})
+
+	segments := replica.getSealedSegments()
+	assert.Equal(t, 0, len(segments))
+
+	segments = replica.getGrowingSegments()
+	assert.Equal(t, 0, len(segments))
+
+	// add segments
+
+	err = replica.setSegment(segment1)
+	assert.NoError(t, err)
+	err = replica.setSegment(segment2)
+	assert.NoError(t, err)
+	err = replica.setSegment(segment3)
+	assert.NoError(t, err)
+
+	// no segments since all in black list
+	segments = replica.getSealedSegments()
+	assert.Equal(t, 0, len(segments))
+
+	// affect sealed segment only
+	segments = replica.getGrowingSegments()
+	assert.Equal(t, 1, len(segments))
+
+	replica.removeSegmentsLoadingList([]UniqueID{1, 2, 3})
+
+	segments = replica.getSealedSegments()
+	assert.Equal(t, 2, len(segments))
+
+	segments = replica.getGrowingSegments()
+	assert.Equal(t, 1, len(segments))
+
+	// try add black list, shall fail since all loaded before
+	replica.addSegmentsLoadingList([]UniqueID{1, 2, 3})
+
+	segments = replica.getSealedSegments()
+	assert.Equal(t, 2, len(segments))
+
+	segments = replica.getGrowingSegments()
+	assert.Equal(t, 1, len(segments))
+
+}
+
 func TestMetaReplica_freeAll(t *testing.T) {
 	replica, err := genSimpleReplica()
 	assert.NoError(t, err)

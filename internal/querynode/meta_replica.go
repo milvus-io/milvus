@@ -39,6 +39,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/concurrency"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/samber/lo"
 )
 
 // ReplicaInterface specifies all the methods that the Collection object needs to implement in QueryNode.
@@ -115,6 +117,11 @@ type ReplicaInterface interface {
 	// printReplica prints the collections, partitions and segments in the collectionReplica
 	printReplica()
 
+	// addSegmentsLoadingList add segment into black list, so get sealed segments will not return them.
+	addSegmentsLoadingList(segmentIDs []UniqueID)
+	// removeSegmentsLoadingList add segment into black list, so get sealed segments will not return them.
+	removeSegmentsLoadingList(segmentIDs []UniqueID)
+
 	getGrowingSegments() []*Segment
 	getSealedSegments() []*Segment
 }
@@ -129,6 +136,9 @@ type metaReplica struct {
 	sealedSegments  map[UniqueID]*Segment
 
 	excludedSegments map[UniqueID][]*datapb.SegmentInfo // map[collectionID]segmentIDs
+
+	// segmentsBlackList stores segments which are still loading
+	segmentsBlackList typeutil.UniqueSet
 
 	cgoPool *concurrency.Pool
 }
@@ -779,6 +789,24 @@ func (replica *metaReplica) freeAll() {
 	replica.sealedSegments = make(map[UniqueID]*Segment)
 }
 
+func (replica *metaReplica) addSegmentsLoadingList(segmentIDs []UniqueID) {
+	replica.mu.Lock()
+	defer replica.mu.Unlock()
+
+	// add to black list only segment is not loaded before
+	replica.segmentsBlackList.Insert(lo.Filter(segmentIDs, func(id UniqueID, idx int) bool {
+		_, isSealed := replica.sealedSegments[id]
+		return !isSealed
+	})...)
+}
+
+func (replica *metaReplica) removeSegmentsLoadingList(segmentIDs []UniqueID) {
+	replica.mu.Lock()
+	defer replica.mu.Unlock()
+
+	replica.segmentsBlackList.Remove(segmentIDs...)
+}
+
 func (replica *metaReplica) getGrowingSegments() []*Segment {
 	replica.mu.RLock()
 	defer replica.mu.RUnlock()
@@ -796,7 +824,9 @@ func (replica *metaReplica) getSealedSegments() []*Segment {
 
 	ret := make([]*Segment, 0, len(replica.sealedSegments))
 	for _, s := range replica.sealedSegments {
-		ret = append(ret, s)
+		if !replica.segmentsBlackList.Contain(s.segmentID) {
+			ret = append(ret, s)
+		}
 	}
 	return ret
 }
@@ -810,7 +840,10 @@ func newCollectionReplica(pool *concurrency.Pool) ReplicaInterface {
 		sealedSegments:  make(map[UniqueID]*Segment),
 
 		excludedSegments: make(map[UniqueID][]*datapb.SegmentInfo),
-		cgoPool:          pool,
+
+		segmentsBlackList: make(typeutil.UniqueSet),
+
+		cgoPool: pool,
 	}
 
 	return replica
