@@ -12,7 +12,6 @@ import (
 	grpcquerynodeclient "github.com/milvus-io/milvus/internal/distributed/querynode/client"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
 )
 
@@ -42,20 +41,12 @@ type Cluster interface {
 	Stop()
 }
 
-type segmentIndex struct {
-	NodeID       int64
-	CollectionID int64
-	Shard        string
-}
-
 // QueryCluster is used to send requests to QueryNodes and manage connections
 type QueryCluster struct {
 	*clients
 	nodeManager *NodeManager
 	wg          sync.WaitGroup
 	ch          chan struct{}
-
-	scheduler *typeutil.GroupScheduler[segmentIndex, *commonpb.Status]
 }
 
 func NewCluster(nodeManager *NodeManager) *QueryCluster {
@@ -63,21 +54,18 @@ func NewCluster(nodeManager *NodeManager) *QueryCluster {
 		clients:     newClients(),
 		nodeManager: nodeManager,
 		ch:          make(chan struct{}),
-		scheduler:   typeutil.NewGroupScheduler[segmentIndex, *commonpb.Status](),
 	}
-	c.wg.Add(1)
-	go c.updateLoop()
 	return c
 }
 
 func (c *QueryCluster) Start(ctx context.Context) {
-	c.scheduler.Start(ctx)
+	c.wg.Add(1)
+	go c.updateLoop()
 }
 
 func (c *QueryCluster) Stop() {
 	c.clients.closeAll()
 	close(c.ch)
-	c.scheduler.Stop()
 	c.wg.Wait()
 }
 
@@ -101,13 +89,6 @@ func (c *QueryCluster) updateLoop() {
 }
 
 func (c *QueryCluster) LoadSegments(ctx context.Context, nodeID int64, req *querypb.LoadSegmentsRequest) (*commonpb.Status, error) {
-	// task := NewLoadSegmentsTask(c, nodeID, req)
-	// c.scheduler.Add(task)
-	// return task.Wait()
-	return c.loadSegments(ctx, nodeID, req)
-}
-
-func (c *QueryCluster) loadSegments(ctx context.Context, nodeID int64, req *querypb.LoadSegmentsRequest) (*commonpb.Status, error) {
 	var status *commonpb.Status
 	var err error
 	err1 := c.send(ctx, nodeID, func(cli *grpcquerynodeclient.Client) {
