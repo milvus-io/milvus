@@ -258,3 +258,17 @@ func (c *Client) AddSegment(ctx context.Context, req *datapb.AddSegmentRequest) 
 	}
 	return ret.(*commonpb.Status), err
 }
+
+// SyncSegments is the DataNode client side code for SyncSegments call.
+func (c *Client) SyncSegments(ctx context.Context, req *datapb.SyncSegmentsRequest) (*commonpb.Status, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.(datapb.DataNodeClient).SyncSegments(ctx, req)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+	return ret.(*commonpb.Status), err
+}

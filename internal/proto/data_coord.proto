@@ -69,6 +69,7 @@ service DataNode {
 
   rpc Compaction(CompactionPlan) returns (common.Status) {}
   rpc GetCompactionState(CompactionStateRequest) returns (CompactionStateResponse) {}
+  rpc SyncSegments(SyncSegmentsRequest) returns (common.Status) {}
 
   // https://wiki.lfaidata.foundation/display/MIL/MEP+24+--+Support+bulk+load
   rpc Import(ImportTaskRequest) returns(common.Status) {}
@@ -296,7 +297,7 @@ message DeltaLogInfo {
   uint64 timestamp_from = 2;
   uint64 timestamp_to = 3;
   string delta_log_path = 4;
-  int64 delta_log_size = 5; 
+  int64 delta_log_size = 5;
 }
 
 message DataNodeTtMsg {
@@ -404,6 +405,13 @@ message CompactionStateRequest {
   common.MsgBase base = 1;
 }
 
+message SyncSegmentsRequest {
+  int64 planID = 1;
+  int64 compacted_to = 2;
+  int64 num_of_rows = 3;
+  repeated int64 compacted_from = 4;
+}
+
 message CompactionSegmentBinlogs {
   int64 segmentID = 1;
   repeated FieldBinlog fieldBinlogs = 2;
@@ -469,8 +477,8 @@ message SetSegmentStateResponse {
 }
 
 message DropVirtualChannelRequest {
-  common.MsgBase base = 1; 
-  string channel_name = 2; 
+  common.MsgBase base = 1;
+  string channel_name = 2;
   repeated DropVirtualChannelSegment segments = 3;
 }
 

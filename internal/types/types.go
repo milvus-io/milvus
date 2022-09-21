@@ -80,6 +80,8 @@ type DataNode interface {
 	Compaction(ctx context.Context, req *datapb.CompactionPlan) (*commonpb.Status, error)
 	// GetCompactionState get states of all compation tasks
 	GetCompactionState(ctx context.Context, req *datapb.CompactionStateRequest) (*datapb.CompactionStateResponse, error)
+	// SyncSegments is called by DataCoord, to sync the segments meta when complete compaction
+	SyncSegments(ctx context.Context, req *datapb.SyncSegmentsRequest) (*commonpb.Status, error)
 
 	// Import data files(json, numpy, etc.) on MinIO/S3 storage, read and parse them into sealed segments
 	//

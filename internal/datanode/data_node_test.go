@@ -604,6 +604,90 @@ func TestDataNode(t *testing.T) {
 		}
 		cancel()
 	})
+
+	t.Run("Test SyncSegments", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		chanName := "fake-by-dev-rootcoord-dml-test-syncsegments-1"
+
+		node := newIDLEDataNodeMock(ctx, schemapb.DataType_Int64)
+		etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+		assert.Nil(t, err)
+		defer etcdCli.Close()
+		node.SetEtcdClient(etcdCli)
+		err = node.Init()
+		assert.Nil(t, err)
+		err = node.Start()
+		assert.Nil(t, err)
+		defer node.Stop()
+
+		err = node.flowgraphManager.addAndStart(node, &datapb.VchannelInfo{
+			ChannelName:         chanName,
+			UnflushedSegmentIds: []int64{},
+			FlushedSegmentIds:   []int64{},
+		})
+		require.NoError(t, err)
+		fg, ok := node.flowgraphManager.getFlowgraphService(chanName)
+		assert.True(t, ok)
+
+		fg.replica.(*SegmentReplica).flushedSegments = map[UniqueID]*Segment{
+			100: {channelName: chanName},
+			101: {channelName: chanName},
+			102: {channelName: chanName},
+		}
+
+		t.Run("invalid compacted from", func(t *testing.T) {
+			invalidCompactedFroms := [][]UniqueID{
+				{},
+				{100, 200},
+			}
+			req := &datapb.SyncSegmentsRequest{}
+
+			for _, invalid := range invalidCompactedFroms {
+				req.CompactedFrom = invalid
+				status, err := node.SyncSegments(ctx, req)
+				assert.NoError(t, err)
+				assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+			}
+		})
+
+		t.Run("valid request numRows>0", func(t *testing.T) {
+			req := &datapb.SyncSegmentsRequest{
+				CompactedFrom: []int64{100, 101},
+				CompactedTo:   200,
+				NumOfRows:     100,
+			}
+			status, err := node.SyncSegments(ctx, req)
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+
+			assert.True(t, fg.replica.hasSegment(req.CompactedTo, true))
+			assert.False(t, fg.replica.hasSegment(req.CompactedFrom[0], true))
+			assert.False(t, fg.replica.hasSegment(req.CompactedFrom[1], true))
+		})
+
+		t.Run("valid request numRows=0", func(t *testing.T) {
+			fg.replica.(*SegmentReplica).flushedSegments = map[UniqueID]*Segment{
+				100: {channelName: chanName},
+				101: {channelName: chanName},
+				102: {channelName: chanName},
+			}
+
+			req := &datapb.SyncSegmentsRequest{
+				CompactedFrom: []int64{100, 101},
+				CompactedTo:   200,
+				NumOfRows:     0,
+			}
+			status, err := node.SyncSegments(ctx, req)
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+
+			assert.False(t, fg.replica.hasSegment(req.CompactedTo, true))
+			assert.False(t, fg.replica.hasSegment(req.CompactedFrom[0], true))
+			assert.False(t, fg.replica.hasSegment(req.CompactedFrom[1], true))
+		})
+
+	})
 }
 
 func TestDataNode_AddSegment(t *testing.T) {

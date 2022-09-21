@@ -641,6 +641,53 @@ func (_c *DataNode_Stop_Call) Return(_a0 error) *DataNode_Stop_Call {
 	return _c
 }
 
+// SyncSegments provides a mock function with given fields: ctx, req
+func (_m *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegmentsRequest) (*commonpb.Status, error) {
+	ret := _m.Called(ctx, req)
+
+	var r0 *commonpb.Status
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.SyncSegmentsRequest) *commonpb.Status); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.SyncSegmentsRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// DataNode_SyncSegments_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SyncSegments'
+type DataNode_SyncSegments_Call struct {
+	*mock.Call
+}
+
+// SyncSegments is a helper method to define mock.On call
+//  - ctx context.Context
+//  - req *datapb.SyncSegmentsRequest
+func (_e *DataNode_Expecter) SyncSegments(ctx interface{}, req interface{}) *DataNode_SyncSegments_Call {
+	return &DataNode_SyncSegments_Call{Call: _e.mock.On("SyncSegments", ctx, req)}
+}
+
+func (_c *DataNode_SyncSegments_Call) Run(run func(ctx context.Context, req *datapb.SyncSegmentsRequest)) *DataNode_SyncSegments_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.SyncSegmentsRequest))
+	})
+	return _c
+}
+
+func (_c *DataNode_SyncSegments_Call) Return(_a0 *commonpb.Status, _a1 error) *DataNode_SyncSegments_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
 // WatchDmChannels provides a mock function with given fields: ctx, req
 func (_m *DataNode) WatchDmChannels(ctx context.Context, req *datapb.WatchDmChannelsRequest) (*commonpb.Status, error) {
 	ret := _m.Called(ctx, req)

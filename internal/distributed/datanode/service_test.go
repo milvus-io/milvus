@@ -134,6 +134,10 @@ func (m *MockDataNode) AddSegment(ctx context.Context, req *datapb.AddSegmentReq
 	return m.status, m.err
 }
 
+func (m *MockDataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegmentsRequest) (*commonpb.Status, error) {
+	return m.status, m.err
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type mockDataCoord struct {
 	types.DataCoord
