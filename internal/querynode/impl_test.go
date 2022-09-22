@@ -763,3 +763,78 @@ func TestImpl_SyncReplicaSegments(t *testing.T) {
 
 	})
 }
+
+func TestSyncDistribution(t *testing.T) {
+	t.Run("QueryNode not healthy", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		node, err := genSimpleQueryNode(ctx)
+		defer node.Stop()
+		assert.NoError(t, err)
+
+		node.UpdateStateCode(internalpb.StateCode_Abnormal)
+
+		resp, err := node.SyncDistribution(ctx, &querypb.SyncDistributionRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+	})
+
+	t.Run("Sync non-exist channel", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		node, err := genSimpleQueryNode(ctx)
+		defer node.Stop()
+		assert.NoError(t, err)
+
+		resp, err := node.SyncDistribution(ctx, &querypb.SyncDistributionRequest{
+			CollectionID: defaultCollectionID,
+			Channel:      defaultDMLChannel,
+			Actions: []*querypb.SyncAction{
+				{
+					Type:        querypb.SyncType_Set,
+					PartitionID: defaultPartitionID,
+					SegmentID:   defaultSegmentID,
+					NodeID:      99,
+				},
+			},
+		})
+
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+	})
+
+	t.Run("Normal sync segments", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		node, err := genSimpleQueryNode(ctx)
+		defer node.Stop()
+		assert.NoError(t, err)
+
+		node.ShardClusterService.addShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel)
+
+		resp, err := node.SyncDistribution(ctx, &querypb.SyncDistributionRequest{
+			CollectionID: defaultCollectionID,
+			Channel:      defaultDMLChannel,
+			Actions: []*querypb.SyncAction{
+				{
+					Type:        querypb.SyncType_Set,
+					PartitionID: defaultPartitionID,
+					SegmentID:   defaultSegmentID,
+					NodeID:      99,
+				},
+			},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+
+		cs, ok := node.ShardClusterService.getShardCluster(defaultDMLChannel)
+		require.True(t, ok)
+		segment, ok := cs.getSegment(defaultSegmentID)
+		require.True(t, ok)
+		assert.Equal(t, common.InvalidNodeID, segment.nodeID)
+		assert.Equal(t, defaultPartitionID, segment.partitionID)
+		assert.Equal(t, segmentStateLoaded, segment.state)
+
+	})
+
+}
