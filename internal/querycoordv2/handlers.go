@@ -60,8 +60,6 @@ func (s *Server) getCollectionSegmentInfo(collection int64) []*querypb.SegmentIn
 // parseBalanceRequest parses the load balance request,
 // returns the collection, replica, and segments
 func (s *Server) balanceSegments(ctx context.Context, req *querypb.LoadBalanceRequest, replica *meta.Replica) error {
-	manualBalanceTimeout := Params.QueryCoordCfg.SegmentTaskTimeout
-
 	srcNode := req.GetSourceNodeIDs()[0]
 	dstNodeSet := typeutil.NewUniqueSet(req.GetDstNodeIDs()...)
 	if dstNodeSet.Len() == 0 {
@@ -87,7 +85,7 @@ func (s *Server) balanceSegments(ctx context.Context, req *querypb.LoadBalanceRe
 	tasks := make([]task.Task, 0, len(plans))
 	for _, plan := range plans {
 		task := task.NewSegmentTask(ctx,
-			manualBalanceTimeout,
+			Params.QueryCoordCfg.SegmentTaskTimeout,
 			req.Base.GetMsgID(),
 			req.GetCollectionID(),
 			replica.GetID(),
@@ -100,7 +98,7 @@ func (s *Server) balanceSegments(ctx context.Context, req *querypb.LoadBalanceRe
 		}
 		tasks = append(tasks, task)
 	}
-	return task.Wait(ctx, manualBalanceTimeout, tasks...)
+	return task.Wait(ctx, Params.QueryCoordCfg.SegmentTaskTimeout, tasks...)
 }
 
 // TODO(dragondriver): add more detail metrics
