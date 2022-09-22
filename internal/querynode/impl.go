@@ -1233,12 +1233,10 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 		case querypb.SyncType_Remove:
 			shardCluster.forceRemoveSegment(action.GetSegmentID())
 		case querypb.SyncType_Set:
-			shardCluster.updateSegment(shardSegmentInfo{
-				segmentID:   action.GetSegmentID(),
-				partitionID: action.GetPartitionID(),
-				nodeID:      action.GetNodeID(),
-				state:       segmentStateLoaded,
-			})
+			shardCluster.SyncSegments([]*querypb.ReplicaSegmentsInfo{
+				{NodeId: action.GetNodeID(), PartitionId: action.GetPartitionID(), SegmentIds: []int64{action.GetSegmentID()}},
+			}, segmentStateLoaded)
+
 		default:
 			return &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
