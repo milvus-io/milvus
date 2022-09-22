@@ -840,7 +840,7 @@ class TestCompactionOperation(TestcaseBase):
 
         # waiting for auto compaction finished
         collection_w.collection.compaction_id = 0
-        collection_w.wait_for_compaction_completed()
+        collection_w.wait_for_compaction_completed(300)
 
         collection_w.compact()
         collection_w.wait_for_compaction_completed()
