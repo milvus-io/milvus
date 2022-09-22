@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"time"
+
+	"github.com/samber/lo"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/api/commonpb"
 	"github.com/milvus-io/milvus/api/milvuspb"
@@ -19,8 +21,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
-	"github.com/samber/lo"
-	"go.uber.org/zap"
 )
 
 // checkAnyReplicaAvailable checks if the collection has enough distinct available shards. These shards
@@ -60,9 +60,7 @@ func (s *Server) getCollectionSegmentInfo(collection int64) []*querypb.SegmentIn
 // parseBalanceRequest parses the load balance request,
 // returns the collection, replica, and segments
 func (s *Server) balanceSegments(ctx context.Context, req *querypb.LoadBalanceRequest, replica *meta.Replica) error {
-	const (
-		manualBalanceTimeout = 10 * time.Second
-	)
+	manualBalanceTimeout := Params.QueryCoordCfg.SegmentTaskTimeout
 
 	srcNode := req.GetSourceNodeIDs()[0]
 	dstNodeSet := typeutil.NewUniqueSet(req.GetDstNodeIDs()...)
