@@ -373,8 +373,17 @@ func (kc *Catalog) DropCollection(ctx context.Context, collectionInfo *model.Col
 			fmt.Sprintf("%s/%s", CollectionAliasMetaPrefix, alias),
 		)
 	}
-	delMetakeysSnap = append(delMetakeysSnap, buildPartitionPrefix(collectionInfo.CollectionID))
-	delMetakeysSnap = append(delMetakeysSnap, buildFieldPrefix(collectionInfo.CollectionID))
+	// Snapshot will list all (k, v) pairs and then use Txn.MultiSave to save tombstone for these keys when it prepares
+	// to remove a prefix, so though we have very few prefixes, the final operations may exceed the max txn number.
+	// TODO(longjiquan): should we list all partitions & fields in KV anyway?
+	for _, partition := range collectionInfo.Partitions {
+		delMetakeysSnap = append(delMetakeysSnap, buildPartitionKey(collectionInfo.CollectionID, partition.PartitionID))
+	}
+	for _, field := range collectionInfo.Fields {
+		delMetakeysSnap = append(delMetakeysSnap, buildFieldKey(collectionInfo.CollectionID, field.FieldID))
+	}
+	// delMetakeysSnap = append(delMetakeysSnap, buildPartitionPrefix(collectionInfo.CollectionID))
+	// delMetakeysSnap = append(delMetakeysSnap, buildFieldPrefix(collectionInfo.CollectionID))
 
 	// Though batchMultiSaveAndRemoveWithPrefix is not atomic enough, we can promise atomicity outside.
 	// If we found collection under dropping state, we'll know that gc is not completely on this collection.

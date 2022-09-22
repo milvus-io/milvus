@@ -82,7 +82,10 @@ func (t *dropPartitionTask) Execute(ctx context.Context) error {
 		baseStep:     baseStep{core: t.core},
 		collectionID: t.collMeta.CollectionID,
 		partitionID:  partID,
-		ts:           t.GetTs(),
+		// This ts is less than the ts when we notify data nodes to drop partition, but it's OK since we have already
+		// marked this partition as deleted. If we want to make this ts greater than the notification's ts, we should
+		// wrap a step who will have these children and connect them with ts.
+		ts: t.GetTs(),
 	})
 
 	return redoTask.Execute(ctx)
