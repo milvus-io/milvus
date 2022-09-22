@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
@@ -16,7 +14,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/trace"
@@ -25,13 +22,13 @@ import (
 func (i *IndexNode) CreateJob(ctx context.Context, req *indexpb.CreateJobRequest) (*commonpb.Status, error) {
 	stateCode := i.stateCode.Load().(internalpb.StateCode)
 	if stateCode != internalpb.StateCode_Healthy {
-		log.Warn("index node not ready", zap.Int32("state", int32(stateCode)), zap.String("ClusterID", req.ClusterID), zap.Int64("IndexBuildID", req.BuildID))
+		log.Ctx(ctx).Warn("index node not ready", zap.Int32("state", int32(stateCode)), zap.String("ClusterID", req.ClusterID), zap.Int64("IndexBuildID", req.BuildID))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    "state code is not healthy",
 		}, nil
 	}
-	log.Info("IndexNode building index ...",
+	log.Ctx(ctx).Info("IndexNode building index ...",
 		zap.String("ClusterID", req.ClusterID),
 		zap.Int64("IndexBuildID", req.BuildID),
 		zap.Int64("IndexID", req.IndexID),
@@ -46,13 +43,12 @@ func (i *IndexNode) CreateJob(ctx context.Context, req *indexpb.CreateJobRequest
 	sp.SetTag("IndexBuildID", strconv.FormatInt(req.BuildID, 10))
 	sp.SetTag("ClusterID", req.ClusterID)
 	metrics.IndexNodeBuildIndexTaskCounter.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.GetNodeID(), 10), metrics.TotalLabel).Inc()
-	taskCtx := logutil.WithModule(i.loopCtx, typeutil.IndexNodeRole)
 
-	taskCtx, taskCancel := context.WithCancel(taskCtx)
+	taskCtx, taskCancel := context.WithCancel(i.loopCtx)
 	if oldInfo := i.loadOrStoreTask(req.ClusterID, req.BuildID, &taskInfo{
 		cancel: taskCancel,
 		state:  commonpb.IndexState_InProgress}); oldInfo != nil {
-		log.Warn("duplicated index build task", zap.String("ClusterID", req.ClusterID), zap.Int64("BuildID", req.BuildID))
+		log.Ctx(ctx).Warn("duplicated index build task", zap.String("ClusterID", req.ClusterID), zap.Int64("BuildID", req.BuildID))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_BuildIndexError,
 			Reason:    "duplicated index build task",
@@ -60,7 +56,7 @@ func (i *IndexNode) CreateJob(ctx context.Context, req *indexpb.CreateJobRequest
 	}
 	cm, err := i.storageFactory.NewChunkManager(i.loopCtx, req.StorageConfig)
 	if err != nil {
-		log.Error("create chunk manager failed", zap.String("Bucket", req.StorageConfig.BucketName),
+		log.Ctx(ctx).Error("create chunk manager failed", zap.String("Bucket", req.StorageConfig.BucketName),
 			zap.String("AccessKey", req.StorageConfig.AccessKeyID),
 			zap.String("ClusterID", req.ClusterID), zap.Int64("IndexBuildID", req.BuildID))
 		return &commonpb.Status{
@@ -86,20 +82,20 @@ func (i *IndexNode) CreateJob(ctx context.Context, req *indexpb.CreateJobRequest
 		Reason:    "",
 	}
 	if err := i.sched.IndexBuildQueue.Enqueue(task); err != nil {
-		log.Warn("IndexNode failed to schedule", zap.Int64("IndexBuildID", req.BuildID), zap.String("ClusterID", req.ClusterID), zap.Error(err))
+		log.Ctx(ctx).Warn("IndexNode failed to schedule", zap.Int64("IndexBuildID", req.BuildID), zap.String("ClusterID", req.ClusterID), zap.Error(err))
 		ret.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		ret.Reason = err.Error()
 		metrics.IndexNodeBuildIndexTaskCounter.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.GetNodeID(), 10), metrics.FailLabel).Inc()
 		return ret, nil
 	}
-	log.Info("IndexNode successfully scheduled", zap.Int64("IndexBuildID", req.BuildID), zap.String("ClusterID", req.ClusterID), zap.String("indexName", req.IndexName))
+	log.Ctx(ctx).Info("IndexNode successfully scheduled", zap.Int64("IndexBuildID", req.BuildID), zap.String("ClusterID", req.ClusterID), zap.String("indexName", req.IndexName))
 	return ret, nil
 }
 
 func (i *IndexNode) QueryJobs(ctx context.Context, req *indexpb.QueryJobsRequest) (*indexpb.QueryJobsResponse, error) {
 	stateCode := i.stateCode.Load().(internalpb.StateCode)
 	if stateCode != internalpb.StateCode_Healthy {
-		log.Warn("index node not ready", zap.Int32("state", int32(stateCode)), zap.String("ClusterID", req.ClusterID))
+		log.Ctx(ctx).Warn("index node not ready", zap.Int32("state", int32(stateCode)), zap.String("ClusterID", req.ClusterID))
 		return &indexpb.QueryJobsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -107,7 +103,6 @@ func (i *IndexNode) QueryJobs(ctx context.Context, req *indexpb.QueryJobsRequest
 			},
 		}, nil
 	}
-	log.Debug("querying index build task", zap.String("ClusterID", req.ClusterID), zap.Int64s("IndexBuildIDs", req.BuildIDs))
 	infos := make(map[UniqueID]*taskInfo)
 	i.foreachTaskInfo(func(ClusterID string, buildID UniqueID, info *taskInfo) {
 		if ClusterID == req.ClusterID {
@@ -139,16 +134,19 @@ func (i *IndexNode) QueryJobs(ctx context.Context, req *indexpb.QueryJobsRequest
 			ret.IndexInfos[i].IndexFiles = info.indexFiles
 			ret.IndexInfos[i].SerializedSize = info.serializedSize
 			ret.IndexInfos[i].FailReason = info.failReason
+			log.Ctx(ctx).Debug("querying index build task", zap.String("ClusterID", req.ClusterID),
+				zap.Int64("IndexBuildID", buildID), zap.String("state", info.state.String()),
+				zap.String("fail reason", info.failReason))
 		}
 	}
 	return ret, nil
 }
 
 func (i *IndexNode) DropJobs(ctx context.Context, req *indexpb.DropJobsRequest) (*commonpb.Status, error) {
-	log.Debug("drop index build jobs", zap.String("ClusterID", req.ClusterID), zap.Int64s("IndexBuildIDs", req.BuildIDs))
+	log.Ctx(ctx).Debug("drop index build jobs", zap.String("ClusterID", req.ClusterID), zap.Int64s("IndexBuildIDs", req.BuildIDs))
 	stateCode := i.stateCode.Load().(internalpb.StateCode)
 	if stateCode != internalpb.StateCode_Healthy {
-		log.Warn("index node not ready", zap.Int32("state", int32(stateCode)), zap.String("ClusterID", req.ClusterID))
+		log.Ctx(ctx).Warn("index node not ready", zap.Int32("state", int32(stateCode)), zap.String("ClusterID", req.ClusterID))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    "state code is not healthy",
@@ -164,6 +162,8 @@ func (i *IndexNode) DropJobs(ctx context.Context, req *indexpb.DropJobsRequest) 
 			info.cancel()
 		}
 	}
+	log.Ctx(ctx).Debug("drop index build jobs success", zap.String("ClusterID", req.ClusterID),
+		zap.Int64s("IndexBuildIDs", req.BuildIDs))
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
@@ -173,7 +173,7 @@ func (i *IndexNode) DropJobs(ctx context.Context, req *indexpb.DropJobsRequest) 
 func (i *IndexNode) GetJobStats(ctx context.Context, req *indexpb.GetJobStatsRequest) (*indexpb.GetJobStatsResponse, error) {
 	stateCode := i.stateCode.Load().(internalpb.StateCode)
 	if stateCode != internalpb.StateCode_Healthy {
-		log.Warn("index node not ready", zap.Int32("state", int32(stateCode)))
+		log.Ctx(ctx).Warn("index node not ready", zap.Int32("state", int32(stateCode)))
 		return &indexpb.GetJobStatsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -192,7 +192,7 @@ func (i *IndexNode) GetJobStats(ctx context.Context, req *indexpb.GetJobStatsReq
 	if i.sched.buildParallel > unissued+active {
 		slots = i.sched.buildParallel - unissued - active
 	}
-	logutil.Logger(ctx).Info("Get Index Job Stats", zap.Int("Unissued", unissued), zap.Int("Active", active), zap.Int("Slot", slots))
+	log.Ctx(ctx).Info("Get Index Job Stats", zap.Int("Unissued", unissued), zap.Int("Active", active), zap.Int("Slot", slots))
 	return &indexpb.GetJobStatsResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -210,7 +210,7 @@ func (i *IndexNode) GetJobStats(ctx context.Context, req *indexpb.GetJobStatsReq
 // TODO(dragondriver): cache the Metrics and set a retention to the cache
 func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	if !i.isHealthy() {
-		log.Warn("IndexNode.GetMetrics failed",
+		log.Ctx(ctx).Warn("IndexNode.GetMetrics failed",
 			zap.Int64("node_id", Params.IndexNodeCfg.GetNodeID()),
 			zap.String("req", req.Request),
 			zap.Error(errIndexNodeIsUnhealthy(Params.IndexNodeCfg.GetNodeID())))
@@ -226,7 +226,7 @@ func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequ
 
 	metricType, err := metricsinfo.ParseMetricType(req.Request)
 	if err != nil {
-		log.Warn("IndexNode.GetMetrics failed to parse metric type",
+		log.Ctx(ctx).Warn("IndexNode.GetMetrics failed to parse metric type",
 			zap.Int64("node_id", Params.IndexNodeCfg.GetNodeID()),
 			zap.String("req", req.Request),
 			zap.Error(err))
@@ -243,7 +243,7 @@ func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequ
 	if metricType == metricsinfo.SystemInfoMetrics {
 		metrics, err := getSystemInfoMetrics(ctx, req, i)
 
-		log.Debug("IndexNode.GetMetrics",
+		log.Ctx(ctx).Debug("IndexNode.GetMetrics",
 			zap.Int64("node_id", Params.IndexNodeCfg.GetNodeID()),
 			zap.String("req", req.Request),
 			zap.String("metric_type", metricType),
@@ -252,7 +252,7 @@ func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequ
 		return metrics, nil
 	}
 
-	log.Warn("IndexNode.GetMetrics failed, request metric type is not implemented yet",
+	log.Ctx(ctx).Warn("IndexNode.GetMetrics failed, request metric type is not implemented yet",
 		zap.Int64("node_id", Params.IndexNodeCfg.GetNodeID()),
 		zap.String("req", req.Request),
 		zap.String("metric_type", metricType))
