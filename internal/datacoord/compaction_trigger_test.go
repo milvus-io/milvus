@@ -26,7 +26,9 @@ import (
 	"github.com/milvus-io/milvus/api/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 )
 
 type spyCompactionHandler struct {
@@ -231,10 +233,27 @@ func Test_compactionTrigger_force(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			indexCoord := mocks.NewMockIndexCoord(t)
-			segmentIDs := make([]int64, 0)
 			for _, segment := range tt.fields.meta.segments.GetSegments() {
-				segmentIDs = append(segmentIDs, segment.GetID())
+				indexCoord.EXPECT().GetIndexInfos(mock.Anything, &indexpb.GetIndexInfoRequest{
+					CollectionID: 2,
+					SegmentIDs:   []int64{segment.GetID()},
+				}).Return(&indexpb.GetIndexInfoResponse{
+					Status: &commonpb.Status{},
+					SegmentInfo: map[int64]*indexpb.SegmentInfo{
+						segment.GetID(): {
+							EnableIndex:  true,
+							CollectionID: 2,
+							SegmentID:    segment.GetID(),
+							IndexInfos: []*indexpb.IndexFilePathInfo{
+								{
+									FieldID: vecFieldID,
+								},
+							},
+						},
+					},
+				}, nil)
 			}
+
 			tr := &compactionTrigger{
 				meta:              tt.fields.meta,
 				allocator:         tt.fields.allocator,
@@ -391,9 +410,25 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			indexCoord := mocks.NewMockIndexCoord(t)
-			segmentIDs := make([]int64, 0)
 			for _, segment := range tt.fields.meta.segments.GetSegments() {
-				segmentIDs = append(segmentIDs, segment.GetID())
+				indexCoord.EXPECT().GetIndexInfos(mock.Anything, &indexpb.GetIndexInfoRequest{
+					CollectionID: 2,
+					SegmentIDs:   []int64{segment.GetID()},
+				}).Return(&indexpb.GetIndexInfoResponse{
+					Status: &commonpb.Status{},
+					SegmentInfo: map[int64]*indexpb.SegmentInfo{
+						segment.GetID(): {
+							EnableIndex:  true,
+							CollectionID: 2,
+							SegmentID:    segment.GetID(),
+							IndexInfos: []*indexpb.IndexFilePathInfo{
+								{
+									FieldID: vecFieldID,
+								},
+							},
+						},
+					},
+				}, nil)
 			}
 
 			tr := &compactionTrigger{
@@ -569,9 +604,25 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			indexCoord := mocks.NewMockIndexCoord(t)
-			segmentIDs := make([]int64, 0)
 			for _, segment := range tt.fields.meta.segments.GetSegments() {
-				segmentIDs = append(segmentIDs, segment.GetID())
+				indexCoord.EXPECT().GetIndexInfos(mock.Anything, &indexpb.GetIndexInfoRequest{
+					CollectionID: 2,
+					SegmentIDs:   []int64{segment.GetID()},
+				}).Return(&indexpb.GetIndexInfoResponse{
+					Status: &commonpb.Status{},
+					SegmentInfo: map[int64]*indexpb.SegmentInfo{
+						segment.GetID(): {
+							EnableIndex:  true,
+							CollectionID: 2,
+							SegmentID:    segment.GetID(),
+							IndexInfos: []*indexpb.IndexFilePathInfo{
+								{
+									FieldID: vecFieldID,
+								},
+							},
+						},
+					},
+				}, nil)
 			}
 			tr := &compactionTrigger{
 				meta:              tt.fields.meta,
@@ -763,9 +814,25 @@ func Test_compactionTrigger_smallfiles(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			indexCoord := mocks.NewMockIndexCoord(t)
-			segmentIDs := make([]int64, 0)
 			for _, segment := range tt.fields.meta.segments.GetSegments() {
-				segmentIDs = append(segmentIDs, segment.GetID())
+				indexCoord.EXPECT().GetIndexInfos(mock.Anything, &indexpb.GetIndexInfoRequest{
+					CollectionID: 2,
+					SegmentIDs:   []int64{segment.GetID()},
+				}).Return(&indexpb.GetIndexInfoResponse{
+					Status: &commonpb.Status{},
+					SegmentInfo: map[int64]*indexpb.SegmentInfo{
+						segment.GetID(): {
+							EnableIndex:  true,
+							CollectionID: 2,
+							SegmentID:    segment.GetID(),
+							IndexInfos: []*indexpb.IndexFilePathInfo{
+								{
+									FieldID: vecFieldID,
+								},
+							},
+						},
+					},
+				}, nil)
 			}
 			tr := &compactionTrigger{
 				meta:              tt.fields.meta,
@@ -887,9 +954,25 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			indexCoord := mocks.NewMockIndexCoord(t)
-			segmentIDs := make([]int64, 0)
 			for _, segment := range tt.fields.meta.segments.GetSegments() {
-				segmentIDs = append(segmentIDs, segment.GetID())
+				indexCoord.EXPECT().GetIndexInfos(mock.Anything, &indexpb.GetIndexInfoRequest{
+					CollectionID: 2,
+					SegmentIDs:   []int64{segment.GetID()},
+				}).Return(&indexpb.GetIndexInfoResponse{
+					Status: &commonpb.Status{},
+					SegmentInfo: map[int64]*indexpb.SegmentInfo{
+						segment.GetID(): {
+							EnableIndex:  true,
+							CollectionID: 2,
+							SegmentID:    segment.GetID(),
+							IndexInfos: []*indexpb.IndexFilePathInfo{
+								{
+									FieldID: vecFieldID,
+								},
+							},
+						},
+					},
+				}, nil)
 			}
 			tr := &compactionTrigger{
 				meta:              tt.fields.meta,

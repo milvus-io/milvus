@@ -558,6 +558,7 @@ class TestCompactionOperation(TestcaseBase):
                 4.load and search
         expected: Verify search result and index info
         """
+        pytest.skip("Compaction requires segment indexed")
         collection_w = self.collection_insert_multi_segments_one_shard(prefix, nb_of_segment=ct.default_nb,
                                                                        is_dup=False)
 
@@ -623,6 +624,7 @@ class TestCompactionOperation(TestcaseBase):
                 3.load and search
         expected: Verify search result
         """
+        pytest.skip("Compaction requires segment indexed")
         collection_w = self.collection_insert_multi_segments_one_shard(prefix, nb_of_segment=ct.default_nb,
                                                                        is_dup=False)
 

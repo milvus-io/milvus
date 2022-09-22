@@ -21,7 +21,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"io"
 	"reflect"
 
 	"github.com/milvus-io/milvus/api/commonpb"
@@ -99,13 +98,9 @@ func appendBinaryVectorField(datas *rowsHelper, rowNum *int, bDatas []byte, dim 
 	return nil
 }
 
-func writeToBuffer(w io.Writer, endian binary.ByteOrder, d interface{}) error {
-	return binary.Write(w, endian, d)
-}
-
 func TransferColumnBasedDataToRowBasedData(schema *schemapb.CollectionSchema, columns []*schemapb.FieldData) (rows []*commonpb.Blob, err error) {
 	dTypes := make([]schemapb.DataType, 0, len(columns))
-	datas := make([][]interface{}, 0, len(columns))
+	data := make([][]interface{}, 0, len(columns))
 	rowNum := 0
 
 	fieldID2FieldData := make(map[int64]schemapb.FieldData)
@@ -128,35 +123,35 @@ func TransferColumnBasedDataToRowBasedData(schema *schemapb.CollectionSchema, co
 			scalarField := fieldData.GetScalars()
 			switch scalarField.Data.(type) {
 			case *schemapb.ScalarField_BoolData:
-				err := appendScalarField(&datas, &rowNum, func() interface{} {
+				err := appendScalarField(&data, &rowNum, func() interface{} {
 					return scalarField.GetBoolData().Data
 				})
 				if err != nil {
 					return nil, err
 				}
 			case *schemapb.ScalarField_IntData:
-				err := appendScalarField(&datas, &rowNum, func() interface{} {
+				err := appendScalarField(&data, &rowNum, func() interface{} {
 					return scalarField.GetIntData().Data
 				})
 				if err != nil {
 					return nil, err
 				}
 			case *schemapb.ScalarField_LongData:
-				err := appendScalarField(&datas, &rowNum, func() interface{} {
+				err := appendScalarField(&data, &rowNum, func() interface{} {
 					return scalarField.GetLongData().Data
 				})
 				if err != nil {
 					return nil, err
 				}
 			case *schemapb.ScalarField_FloatData:
-				err := appendScalarField(&datas, &rowNum, func() interface{} {
+				err := appendScalarField(&data, &rowNum, func() interface{} {
 					return scalarField.GetFloatData().Data
 				})
 				if err != nil {
 					return nil, err
 				}
 			case *schemapb.ScalarField_DoubleData:
-				err := appendScalarField(&datas, &rowNum, func() interface{} {
+				err := appendScalarField(&data, &rowNum, func() interface{} {
 					return scalarField.GetDoubleData().Data
 				})
 				if err != nil {
@@ -177,14 +172,14 @@ func TransferColumnBasedDataToRowBasedData(schema *schemapb.CollectionSchema, co
 			case *schemapb.VectorField_FloatVector:
 				floatVectorFieldData := vectorField.GetFloatVector().Data
 				dim := vectorField.GetDim()
-				err := appendFloatVectorField(&datas, &rowNum, floatVectorFieldData, dim)
+				err := appendFloatVectorField(&data, &rowNum, floatVectorFieldData, dim)
 				if err != nil {
 					return nil, err
 				}
 			case *schemapb.VectorField_BinaryVector:
 				binaryVectorFieldData := vectorField.GetBinaryVector()
 				dim := vectorField.GetDim()
-				err := appendBinaryVectorField(&datas, &rowNum, binaryVectorFieldData, dim)
+				err := appendBinaryVectorField(&data, &rowNum, binaryVectorFieldData, dim)
 				if err != nil {
 					return nil, err
 				}
@@ -202,13 +197,17 @@ func TransferColumnBasedDataToRowBasedData(schema *schemapb.CollectionSchema, co
 		dTypes = append(dTypes, field.DataType)
 	}
 
-	rows = make([]*commonpb.Blob, 0, rowNum)
+	return parseToRowData(data, dTypes, rowNum)
+}
+
+func parseToRowData(data [][]any, dTypes []schemapb.DataType, rowNum int) ([]*commonpb.Blob, error) {
+	rows := make([]*commonpb.Blob, 0, rowNum)
 	l := len(dTypes)
 	// TODO(dragondriver): big endian or little endian?
 	endian := common.Endian
 	for i := 0; i < rowNum; i++ {
 		blob := &commonpb.Blob{
-			Value: make([]byte, 0),
+			Value: make([]byte, 0, l),
 		}
 
 		for j := 0; j < l; j++ {
@@ -216,32 +215,32 @@ func TransferColumnBasedDataToRowBasedData(schema *schemapb.CollectionSchema, co
 			var err error
 			switch dTypes[j] {
 			case schemapb.DataType_Bool:
-				d := datas[j][i].(bool)
-				err = writeToBuffer(&buffer, endian, d)
+				d := data[j][i].(bool)
+				err = binary.Write(&buffer, endian, d)
 			case schemapb.DataType_Int8:
-				d := int8(datas[j][i].(int32))
-				err = writeToBuffer(&buffer, endian, d)
+				d := int8(data[j][i].(int32))
+				err = binary.Write(&buffer, endian, d)
 			case schemapb.DataType_Int16:
-				d := int16(datas[j][i].(int32))
-				err = writeToBuffer(&buffer, endian, d)
+				d := int16(data[j][i].(int32))
+				err = binary.Write(&buffer, endian, d)
 			case schemapb.DataType_Int32:
-				d := datas[j][i].(int32)
-				err = writeToBuffer(&buffer, endian, d)
+				d := data[j][i].(int32)
+				err = binary.Write(&buffer, endian, d)
 			case schemapb.DataType_Int64:
-				d := datas[j][i].(int64)
-				err = writeToBuffer(&buffer, endian, d)
+				d := data[j][i].(int64)
+				err = binary.Write(&buffer, endian, d)
 			case schemapb.DataType_Float:
-				d := datas[j][i].(float32)
-				err = writeToBuffer(&buffer, endian, d)
+				d := data[j][i].(float32)
+				err = binary.Write(&buffer, endian, d)
 			case schemapb.DataType_Double:
-				d := datas[j][i].(float64)
-				err = writeToBuffer(&buffer, endian, d)
+				d := data[j][i].(float64)
+				err = binary.Write(&buffer, endian, d)
 			case schemapb.DataType_FloatVector:
-				d := datas[j][i].([]float32)
-				err = writeToBuffer(&buffer, endian, d)
+				d := data[j][i].([]float32)
+				err = binary.Write(&buffer, endian, d)
 			case schemapb.DataType_BinaryVector:
-				d := datas[j][i].([]byte)
-				err = writeToBuffer(&buffer, endian, d)
+				d := data[j][i].([]byte)
+				err = binary.Write(&buffer, endian, d)
 			default:
 				log.Warn("unsupported data type", zap.String("type", dTypes[j].String()))
 			}

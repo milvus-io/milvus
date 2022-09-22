@@ -236,7 +236,6 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) {
 		return (signal.collectionID == 0 || segment.CollectionID == signal.collectionID) &&
 			isSegmentHealthy(segment) &&
 			isFlush(segment) &&
-			IsParentDroppedUnsafe(t.meta, segment) &&
 			!segment.isCompacting // not compacting now
 	}) // m is list of chanPartSegments, which is channel-partition organized segments
 
@@ -244,6 +243,7 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) {
 		if !signal.isForce && t.compactionHandler.isFull() {
 			break
 		}
+		group.segments = FilterInIndexedSegments(t.meta, t.indexCoord, group.segments...)
 
 		plans := t.generatePlans(group.segments, signal.isForce, signal.compactTime)
 		for _, plan := range plans {
@@ -467,10 +467,14 @@ func reverseGreedySelect(candidates []*SegmentInfo, free int64, maxSegment int) 
 
 func (t *compactionTrigger) getCandidateSegments(channel string, partitionID UniqueID) []*SegmentInfo {
 	segments := t.meta.GetSegmentsByChannel(channel)
+	segments = FilterInIndexedSegments(t.meta, t.indexCoord, segments...)
 	var res []*SegmentInfo
 	for _, s := range segments {
-		if !isSegmentHealthy(s) || !isFlush(s) || s.GetInsertChannel() != channel ||
-			s.GetPartitionID() != partitionID || !IsParentDropped(t.meta, s) || s.isCompacting {
+		if !isSegmentHealthy(s) ||
+			!isFlush(s) ||
+			s.GetInsertChannel() != channel ||
+			s.GetPartitionID() != partitionID ||
+			s.isCompacting {
 			continue
 		}
 		res = append(res, s)

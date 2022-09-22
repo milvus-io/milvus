@@ -1695,6 +1695,7 @@ func TestGetVChannelPos(t *testing.T) {
 			},
 		},
 	}
+	svr.indexCoord = mocks.NewMockIndexCoord(t)
 	svr.indexCoord.(*mocks.MockIndexCoord).EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(mockResp, nil)
 
 	t.Run("get unexisted channel", func(t *testing.T) {
@@ -1977,6 +1978,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 				},
 			},
 		}
+		svr.indexCoord = mocks.NewMockIndexCoord(t)
 		svr.indexCoord.(*mocks.MockIndexCoord).EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(mockResp, nil)
 
 		req := &datapb.GetRecoveryInfoRequest{
@@ -2095,6 +2097,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 				},
 			},
 		}
+		svr.indexCoord = mocks.NewMockIndexCoord(t)
 		svr.indexCoord.(*mocks.MockIndexCoord).EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(mockResp, nil)
 		err = svr.channelManager.AddNode(0)
 		assert.Nil(t, err)
@@ -2967,7 +2970,7 @@ func newTestServer(t *testing.T, receiveCh chan interface{}, opts ...Option) *Se
 		return newMockRootCoordService(), nil
 	}
 	indexCoord := mocks.NewMockIndexCoord(t)
-	indexCoord.EXPECT().GetIndexInfos(context.Background(), mock.Anything).Return(nil, nil).Maybe()
+	indexCoord.EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	svr.indexCoord = indexCoord
 
 	err = svr.Init()
