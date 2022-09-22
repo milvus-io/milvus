@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/api/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/stretchr/testify/suite"
@@ -146,47 +145,6 @@ func (suite *UtilSuite) TestGetCompactTime() {
 			suite.EqualValues(tt.want, got)
 		})
 	}
-}
-
-func (suite *UtilSuite) TestIsParentDropped() {
-	meta := &meta{
-		segments: &SegmentsInfo{
-			segments: map[int64]*SegmentInfo{
-				1: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:    1,
-						State: commonpb.SegmentState_Flushed,
-					},
-				},
-				3: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:             3,
-						CompactionFrom: []int64{1},
-						State:          commonpb.SegmentState_Flushed,
-					},
-				},
-				5: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:             5,
-						CompactionFrom: []int64{1, 2},
-						State:          commonpb.SegmentState_Flushed,
-					},
-				},
-				7: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:             7,
-						CompactionFrom: []int64{2, 4},
-						State:          commonpb.SegmentState_Flushed,
-					},
-				},
-			},
-		},
-	}
-
-	suite.True(IsParentDropped(meta, meta.GetSegment(1)))
-	suite.False(IsParentDropped(meta, meta.GetSegment(3)))
-	suite.False(IsParentDropped(meta, meta.GetSegment(5)))
-	suite.True(IsParentDropped(meta, meta.GetSegment(7)))
 }
 
 func TestUtil(t *testing.T) {
