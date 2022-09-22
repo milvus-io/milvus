@@ -95,7 +95,7 @@ type bgStepExecutor struct {
 	bufferedSteps map[*stepStack]struct{}
 	selector      selectStepPolicy
 	mu            sync.Mutex
-	notify        chan struct{}
+	notifyChan    chan struct{}
 	interval      time.Duration
 }
 
@@ -108,7 +108,7 @@ func newBgStepExecutor(ctx context.Context, opts ...bgOpt) *bgStepExecutor {
 		bufferedSteps: make(map[*stepStack]struct{}),
 		selector:      defaultSelectPolicy(),
 		mu:            sync.Mutex{},
-		notify:        make(chan struct{}, 1),
+		notifyChan:    make(chan struct{}, 1),
 		interval:      defaultBgExecutingInterval,
 	}
 	for _, opt := range opts {
@@ -128,14 +128,8 @@ func (bg *bgStepExecutor) Stop() {
 }
 
 func (bg *bgStepExecutor) AddSteps(s *stepStack) {
-	bg.mu.Lock()
 	bg.addStepsInternal(s)
-	bg.mu.Unlock()
-
-	select {
-	case bg.notify <- struct{}{}:
-	default:
-	}
+	bg.notify()
 }
 
 func (bg *bgStepExecutor) process(steps []*stepStack) {
@@ -150,7 +144,8 @@ func (bg *bgStepExecutor) process(steps []*stepStack) {
 			defer wg.Done()
 			child := s.Execute(bg.ctx)
 			if child != nil {
-				bg.AddSteps(child)
+				// don't notify, wait for reschedule.
+				bg.addStepsInternal(child)
 			}
 		}()
 	}
@@ -161,7 +156,7 @@ func (bg *bgStepExecutor) schedule() {
 	bg.mu.Lock()
 	selected := bg.selector(bg.bufferedSteps)
 	for _, s := range selected {
-		bg.removeStepsInternal(s)
+		bg.unlockRemoveSteps(s)
 	}
 	bg.mu.Unlock()
 
@@ -178,7 +173,7 @@ func (bg *bgStepExecutor) scheduleLoop() {
 		select {
 		case <-bg.ctx.Done():
 			return
-		case <-bg.notify:
+		case <-bg.notifyChan:
 			bg.schedule()
 		case <-ticker.C:
 			bg.schedule()
@@ -187,9 +182,22 @@ func (bg *bgStepExecutor) scheduleLoop() {
 }
 
 func (bg *bgStepExecutor) addStepsInternal(s *stepStack) {
+	bg.mu.Lock()
+	bg.unlockAddSteps(s)
+	bg.mu.Unlock()
+}
+
+func (bg *bgStepExecutor) unlockAddSteps(s *stepStack) {
 	bg.bufferedSteps[s] = struct{}{}
 }
 
-func (bg *bgStepExecutor) removeStepsInternal(s *stepStack) {
+func (bg *bgStepExecutor) unlockRemoveSteps(s *stepStack) {
 	delete(bg.bufferedSteps, s)
+}
+
+func (bg *bgStepExecutor) notify() {
+	select {
+	case bg.notifyChan <- struct{}{}:
+	default:
+	}
 }

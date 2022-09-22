@@ -50,7 +50,10 @@ func (c *bgGarbageCollector) ReDropCollection(collMeta *model.Collection, ts Tim
 	redo.AddAsyncStep(&deleteCollectionMetaStep{
 		baseStep:     baseStep{core: c.s},
 		collectionID: collMeta.CollectionID,
-		ts:           ts,
+		// This ts is less than the ts when we notify data nodes to drop collection, but it's OK since we have already
+		// marked this collection as deleted. If we want to make this ts greater than the notification's ts, we should
+		// wrap a step who will have these three children and connect them with ts.
+		ts: ts,
 	})
 
 	// err is ignored since no sync steps will be executed.
@@ -94,7 +97,10 @@ func (c *bgGarbageCollector) ReDropPartition(pChannels []string, partition *mode
 		baseStep:     baseStep{core: c.s},
 		collectionID: partition.CollectionID,
 		partitionID:  partition.PartitionID,
-		ts:           ts,
+		// This ts is less than the ts when we notify data nodes to drop partition, but it's OK since we have already
+		// marked this partition as deleted. If we want to make this ts greater than the notification's ts, we should
+		// wrap a step who will have these children and connect them with ts.
+		ts: ts,
 	})
 
 	// err is ignored since no sync steps will be executed.

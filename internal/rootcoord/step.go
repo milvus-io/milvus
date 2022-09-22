@@ -198,6 +198,8 @@ type waitForTsSyncedStep struct {
 func (s *waitForTsSyncedStep) Execute(ctx context.Context) ([]nestedStep, error) {
 	syncedTs := s.core.chanTimeTick.getSyncedTimeTick(s.channel)
 	if syncedTs < s.ts {
+		// TODO: there may be frequent log here.
+		// time.Sleep(Params.ProxyCfg.TimeTickInterval)
 		return nil, fmt.Errorf("ts not synced yet, channel: %s, synced: %d, want: %d", s.channel, syncedTs, s.ts)
 	}
 	return nil, nil

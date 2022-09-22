@@ -86,7 +86,10 @@ func (t *dropCollectionTask) Execute(ctx context.Context) error {
 	redoTask.AddAsyncStep(&deleteCollectionMetaStep{
 		baseStep:     baseStep{core: t.core},
 		collectionID: collMeta.CollectionID,
-		ts:           ts,
+		// This ts is less than the ts when we notify data nodes to drop collection, but it's OK since we have already
+		// marked this collection as deleted. If we want to make this ts greater than the notification's ts, we should
+		// wrap a step who will have these three children and connect them with ts.
+		ts: ts,
 	})
 
 	return redoTask.Execute(ctx)
