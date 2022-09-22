@@ -212,6 +212,7 @@ func (m *MetaCache) GetCollectionInfo(ctx context.Context, collectionName string
 				MsgType:  commonpb.MsgType_ShowCollections,
 				SourceID: Params.ProxyCfg.GetNodeID(),
 			},
+			CollectionIDs: []int64{collInfo.collID},
 		})
 		if err != nil {
 			return nil, err
