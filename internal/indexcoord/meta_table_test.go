@@ -1064,13 +1064,49 @@ func TestMetaTable_ResetNodeID(t *testing.T) {
 
 func TestMetaTable_ResetMeta(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
-		mt := constructMetaTable(&indexcoord.Catalog{
-			Txn: &mockETCDKV{
-				multiSave: func(m map[string]string) error {
-					return nil
+		mt := &metaTable{
+			catalog: &indexcoord.Catalog{Txn: NewMockEtcdKV()},
+			buildID2SegmentIndex: map[UniqueID]*model.SegmentIndex{
+				buildID: {
+					SegmentID:      segID,
+					CollectionID:   collID,
+					PartitionID:    partID,
+					NumRows:        1024,
+					IndexID:        indexID,
+					BuildID:        buildID,
+					NodeID:         1,
+					IndexVersion:   1,
+					IndexState:     commonpb.IndexState_InProgress,
+					FailReason:     "",
+					IsDeleted:      false,
+					CreateTime:     1,
+					IndexFilePaths: nil,
+					IndexSize:      0,
+					WriteHandoff:   false,
 				},
 			},
-		})
+			segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
+				segID: {
+					indexID: {
+						SegmentID:      segID,
+						CollectionID:   collID,
+						PartitionID:    partID,
+						NumRows:        1024,
+						IndexID:        indexID,
+						BuildID:        buildID,
+						NodeID:         1,
+						IndexVersion:   1,
+						IndexState:     commonpb.IndexState_InProgress,
+						FailReason:     "",
+						IsDeleted:      false,
+						CreateTime:     1,
+						IndexFilePaths: nil,
+						IndexSize:      0,
+						WriteHandoff:   false,
+					},
+				},
+			},
+		}
 		err := mt.ResetMeta(buildID)
 		assert.NoError(t, err)
 		assert.Equal(t, int64(0), mt.buildID2SegmentIndex[buildID].NodeID)
@@ -1136,6 +1172,32 @@ func TestMetaTable_FinishTask(t *testing.T) {
 		assert.Equal(t, commonpb.IndexState_Finished, mt.buildID2SegmentIndex[buildID+1].IndexState)
 		assert.Equal(t, uint64(1025), mt.buildID2SegmentIndex[buildID+1].IndexSize)
 		assert.ElementsMatch(t, []string{"file3", "file4"}, mt.buildID2SegmentIndex[buildID+1].IndexFilePaths)
+	})
+
+	t.Run("state failed", func(t *testing.T) {
+		mt := constructMetaTable(&indexcoord.Catalog{
+			Txn: &mockETCDKV{
+				save: func(s string, s2 string) error {
+					return nil
+				},
+				multiSave: func(m map[string]string) error {
+					return nil
+				},
+			},
+		})
+		err := mt.AddIndex(segIdx)
+		assert.NoError(t, err)
+
+		err = mt.FinishTask(&indexpb.IndexTaskInfo{
+			BuildID:        buildID + 1,
+			State:          commonpb.IndexState_Failed,
+			IndexFiles:     []string{},
+			SerializedSize: 0,
+			FailReason:     "failed",
+		})
+
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.IndexState_Failed, mt.buildID2SegmentIndex[buildID+1].IndexState)
 	})
 
 	t.Run("fail", func(t *testing.T) {
