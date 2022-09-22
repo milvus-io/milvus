@@ -120,6 +120,8 @@ func (merger *Merger[K, R]) merge(id K, queue chan MergeableTask[K, R]) {
 	go merger.mergeQueue(id, queue)
 }
 
+const maxSegmentsPerTask = 3
+
 // mergeQueue merges tasks in the given queue,
 // it only processes tasks with the number of the length of queue at the time,
 // to avoid leaking goroutines
@@ -128,12 +130,22 @@ func (merger *Merger[K, R]) mergeQueue(id K, queue chan MergeableTask[K, R]) {
 	defer merger.processors.Remove(id)
 
 	len := len(queue)
-	task := <-queue
-	for i := 1; i < len; i++ {
-		task.Merge(<-queue)
+	var task MergeableTask[K, R]
+	// output every per maxSegmentsPerTask
+	for i := 0; i < len; i++ {
+		if i%maxSegmentsPerTask == 0 {
+			if task != nil {
+				merger.outCh <- task
+			}
+			task = <-queue
+		} else {
+			task.Merge(<-queue)
+		}
+	}
+	if task != nil {
+		merger.outCh <- task
 	}
 
 	log.Info("merge tasks done",
 		zap.Any("mergeID", task.ID()))
-	merger.outCh <- task
 }
