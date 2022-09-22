@@ -1191,6 +1191,7 @@ func parseIndexParams(m []*commonpb.KeyValuePair) (map[string]string, error) {
 	}
 	_, exist := indexParams["index_type"] // TODO(dragondriver): change `index_type` to const variable
 	if !exist {
+		//return nil, errors.New("there is no index_type in index params")
 		indexParams["index_type"] = indexparamcheck.IndexFaissIvfPQ // IVF_PQ is the default index type
 	}
 	return indexParams, nil

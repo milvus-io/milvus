@@ -212,8 +212,9 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 			deleteFunc(buildID)
 			return true
 		}
-		if meta.NumRows < Params.IndexCoordCfg.MinSegmentNumRowsToEnableIndex {
-			log.Ctx(ib.ctx).Debug("segment num rows is too few, no need to build index", zap.Int64("buildID", buildID),
+		indexParams := ib.meta.GetIndexParams(meta.CollectionID, meta.IndexID)
+		if getIndexType(indexParams) == flatIndex || meta.NumRows < Params.IndexCoordCfg.MinSegmentNumRowsToEnableIndex {
+			log.Ctx(ib.ctx).Debug("segment does not need index really", zap.Int64("buildID", buildID),
 				zap.Int64("segID", meta.SegmentID), zap.Int64("num rows", meta.NumRows))
 			if err := ib.meta.FinishTask(&indexpb.IndexTaskInfo{
 				BuildID:        buildID,
@@ -271,7 +272,6 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 		}
 
 		typeParams := ib.meta.GetTypeParams(meta.CollectionID, meta.IndexID)
-		indexParams := ib.meta.GetIndexParams(meta.CollectionID, meta.IndexID)
 
 		var storageConfig *indexpb.StorageConfig
 		if Params.CommonCfg.StorageType == "local" {

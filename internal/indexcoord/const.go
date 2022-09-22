@@ -21,6 +21,7 @@ const (
 	IndexAddTaskName    = "IndexAddTask"
 	CreateIndexTaskName = "CreateIndexTask"
 
+	flatIndex    = "FLAT"
 	diskAnnIndex = "DISKANN"
 	invalidIndex = "invalid"
 )
