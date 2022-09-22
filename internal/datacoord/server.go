@@ -358,7 +358,7 @@ func (s *Server) initGarbageCollection() error {
 	var err error
 	if Params.CommonCfg.StorageType == "minio" {
 		chunkManagerFactory := storage.NewChunkManagerFactory("local", "minio",
-			storage.RootPath(Params.LocalStorageCfg.Path),
+			storage.RootPath(Params.MinioCfg.RootPath),
 			storage.Address(Params.MinioCfg.Address),
 			storage.AccessKeyID(Params.MinioCfg.AccessKeyID),
 			storage.SecretAccessKeyID(Params.MinioCfg.SecretAccessKey),
