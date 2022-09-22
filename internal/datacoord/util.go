@@ -186,9 +186,22 @@ func extractSegmentsWithVectorIndex(vecFieldID map[int64]int64, segentIndexInfo 
 	return indexedSegments.Collect()
 }
 
+// IsParentDropped checks whether a segment exists,
+// with acquiring read-lock of meta.
 func IsParentDropped(meta *meta, segment *SegmentInfo) bool {
 	for _, from := range segment.CompactionFrom {
-		if meta.GetSegment(from) != nil {
+		if meta.GetSegmentUnsafe(from) != nil {
+			return false
+		}
+	}
+	return true
+}
+
+// IsParentDroppedUnsafe same as IsParentDropped,
+// but not acquiring read-lock of meta.
+func IsParentDroppedUnsafe(meta *meta, segment *SegmentInfo) bool {
+	for _, from := range segment.CompactionFrom {
+		if meta.segments.GetSegment(from) != nil {
 			return false
 		}
 	}

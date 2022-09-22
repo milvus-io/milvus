@@ -236,9 +236,10 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) {
 		return (signal.collectionID == 0 || segment.CollectionID == signal.collectionID) &&
 			isSegmentHealthy(segment) &&
 			isFlush(segment) &&
-			IsParentDropped(t.meta, segment) &&
+			IsParentDroppedUnsafe(t.meta, segment) &&
 			!segment.isCompacting // not compacting now
 	}) // m is list of chanPartSegments, which is channel-partition organized segments
+
 	for _, group := range m {
 		if !signal.isForce && t.compactionHandler.isFull() {
 			break
