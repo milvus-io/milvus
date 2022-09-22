@@ -1735,6 +1735,7 @@ class TestCollectionSearch(TestcaseBase):
                                          "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail(reason="issue 19374")
     @pytest.mark.parametrize("partition_names",
                              [["(.*)"], ["search(.*)"]])
     def test_search_index_partitions_fuzzy(self, nb, nq, dim, partition_names, auto_id, _async):
