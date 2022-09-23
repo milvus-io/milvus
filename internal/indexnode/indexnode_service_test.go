@@ -96,6 +96,7 @@ func TestIndexNodeSimple(t *testing.T) {
 			case <-timeout:
 				t.Fatal("timeout for querying jobs")
 			default:
+				time.Sleep(1 * time.Millisecond)
 				resp, err := in.QueryJobs(ctx, queryJob)
 				assert.Nil(t, err)
 				assert.Equal(t, resp.Status.ErrorCode, commonpb.ErrorCode_Success)
@@ -109,6 +110,7 @@ func TestIndexNodeSimple(t *testing.T) {
 						}
 					}
 				}
+
 			}
 		}
 
