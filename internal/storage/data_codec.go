@@ -319,92 +319,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 		}
 
 		eventWriter.SetEventTimestamp(typeutil.Timestamp(startTs), typeutil.Timestamp(endTs))
-		switch field.DataType {
-		case schemapb.DataType_Bool:
-			err = eventWriter.AddBoolToPayload(singleData.(*BoolFieldData).Data)
-			if err != nil {
-				eventWriter.Close()
-				writer.Close()
-				return nil, nil, err
-			}
-			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*BoolFieldData).GetMemorySize()))
-		case schemapb.DataType_Int8:
-			err = eventWriter.AddInt8ToPayload(singleData.(*Int8FieldData).Data)
-			if err != nil {
-				eventWriter.Close()
-				writer.Close()
-				return nil, nil, err
-			}
-			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*Int8FieldData).GetMemorySize()))
-		case schemapb.DataType_Int16:
-			err = eventWriter.AddInt16ToPayload(singleData.(*Int16FieldData).Data)
-			if err != nil {
-				eventWriter.Close()
-				writer.Close()
-				return nil, nil, err
-			}
-			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*Int16FieldData).GetMemorySize()))
-		case schemapb.DataType_Int32:
-			err = eventWriter.AddInt32ToPayload(singleData.(*Int32FieldData).Data)
-			if err != nil {
-				eventWriter.Close()
-				writer.Close()
-				return nil, nil, err
-			}
-			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*Int32FieldData).GetMemorySize()))
-		case schemapb.DataType_Int64:
-			err = eventWriter.AddInt64ToPayload(singleData.(*Int64FieldData).Data)
-			if err != nil {
-				eventWriter.Close()
-				writer.Close()
-				return nil, nil, err
-			}
-			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*Int64FieldData).GetMemorySize()))
-		case schemapb.DataType_Float:
-			err = eventWriter.AddFloatToPayload(singleData.(*FloatFieldData).Data)
-			if err != nil {
-				eventWriter.Close()
-				writer.Close()
-				return nil, nil, err
-			}
-			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*FloatFieldData).GetMemorySize()))
-		case schemapb.DataType_Double:
-			err = eventWriter.AddDoubleToPayload(singleData.(*DoubleFieldData).Data)
-			if err != nil {
-				eventWriter.Close()
-				writer.Close()
-				return nil, nil, err
-			}
-			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*DoubleFieldData).GetMemorySize()))
-		case schemapb.DataType_String, schemapb.DataType_VarChar:
-			for _, singleString := range singleData.(*StringFieldData).Data {
-				err = eventWriter.AddOneStringToPayload(singleString)
-				if err != nil {
-					eventWriter.Close()
-					writer.Close()
-					return nil, nil, err
-				}
-			}
-			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*StringFieldData).GetMemorySize()))
-		case schemapb.DataType_BinaryVector:
-			err = eventWriter.AddBinaryVectorToPayload(singleData.(*BinaryVectorFieldData).Data, singleData.(*BinaryVectorFieldData).Dim)
-			if err != nil {
-				eventWriter.Close()
-				writer.Close()
-				return nil, nil, err
-			}
-			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*BinaryVectorFieldData).GetMemorySize()))
-		case schemapb.DataType_FloatVector:
-			err = eventWriter.AddFloatVectorToPayload(singleData.(*FloatVectorFieldData).Data, singleData.(*FloatVectorFieldData).Dim)
-			if err != nil {
-				eventWriter.Close()
-				writer.Close()
-				return nil, nil, err
-			}
-			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*FloatVectorFieldData).GetMemorySize()))
-		default:
-			return nil, nil, fmt.Errorf("undefined data type %d", field.DataType)
-		}
+		err = insertCodec.addPayload(field, writer, eventWriter, singleData)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -447,6 +362,97 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 	}
 
 	return blobs, statsBlobs, nil
+}
+
+func (insertCodec *InsertCodec) addPayload(field *schemapb.FieldSchema, writer *InsertBinlogWriter, eventWriter *insertEventWriter, fieldData FieldData) error {
+	var err error
+	switch field.DataType {
+	case schemapb.DataType_Bool:
+		err = eventWriter.AddBoolToPayload(fieldData.(*BoolFieldData).Data)
+		if err != nil {
+			eventWriter.Close()
+			eventWriter.Close()
+			return err
+		}
+		writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", fieldData.(*BoolFieldData).GetMemorySize()))
+	case schemapb.DataType_Int8:
+		err = eventWriter.AddInt8ToPayload(fieldData.(*Int8FieldData).Data)
+		if err != nil {
+			eventWriter.Close()
+			eventWriter.Close()
+			return err
+		}
+		writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", fieldData.(*Int8FieldData).GetMemorySize()))
+	case schemapb.DataType_Int16:
+		err = eventWriter.AddInt16ToPayload(fieldData.(*Int16FieldData).Data)
+		if err != nil {
+			eventWriter.Close()
+			eventWriter.Close()
+			return err
+		}
+		writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", fieldData.(*Int16FieldData).GetMemorySize()))
+	case schemapb.DataType_Int32:
+		err = eventWriter.AddInt32ToPayload(fieldData.(*Int32FieldData).Data)
+		if err != nil {
+			eventWriter.Close()
+			eventWriter.Close()
+			return err
+		}
+		writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", fieldData.(*Int32FieldData).GetMemorySize()))
+	case schemapb.DataType_Int64:
+		err = eventWriter.AddInt64ToPayload(fieldData.(*Int64FieldData).Data)
+		if err != nil {
+			eventWriter.Close()
+			eventWriter.Close()
+			return err
+		}
+		writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", fieldData.(*Int64FieldData).GetMemorySize()))
+	case schemapb.DataType_Float:
+		err = eventWriter.AddFloatToPayload(fieldData.(*FloatFieldData).Data)
+		if err != nil {
+			eventWriter.Close()
+			eventWriter.Close()
+			return err
+		}
+		writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", fieldData.(*FloatFieldData).GetMemorySize()))
+	case schemapb.DataType_Double:
+		err = eventWriter.AddDoubleToPayload(fieldData.(*DoubleFieldData).Data)
+		if err != nil {
+			eventWriter.Close()
+			eventWriter.Close()
+			return err
+		}
+		writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", fieldData.(*DoubleFieldData).GetMemorySize()))
+	case schemapb.DataType_String, schemapb.DataType_VarChar:
+		for _, singleString := range fieldData.(*StringFieldData).Data {
+			err = eventWriter.AddOneStringToPayload(singleString)
+			if err != nil {
+				eventWriter.Close()
+				eventWriter.Close()
+				return err
+			}
+		}
+		writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", fieldData.(*StringFieldData).GetMemorySize()))
+	case schemapb.DataType_BinaryVector:
+		err = eventWriter.AddBinaryVectorToPayload(fieldData.(*BinaryVectorFieldData).Data, fieldData.(*BinaryVectorFieldData).Dim)
+		if err != nil {
+			eventWriter.Close()
+			eventWriter.Close()
+			return err
+		}
+		writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", fieldData.(*BinaryVectorFieldData).GetMemorySize()))
+	case schemapb.DataType_FloatVector:
+		err = eventWriter.AddFloatVectorToPayload(fieldData.(*FloatVectorFieldData).Data, fieldData.(*FloatVectorFieldData).Dim)
+		if err != nil {
+			eventWriter.Close()
+			eventWriter.Close()
+			return err
+		}
+		writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", fieldData.(*FloatVectorFieldData).GetMemorySize()))
+	default:
+		return fmt.Errorf("undefined data type %d", field.DataType)
+	}
+	return nil
 }
 
 func (insertCodec *InsertCodec) DeserializeAll(blobs []*Blob) (
