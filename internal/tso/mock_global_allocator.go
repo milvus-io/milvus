@@ -4,6 +4,8 @@ import (
 	"time"
 )
 
+// TODO(longjiquan): replace this by mockery.
+
 type MockAllocator struct {
 	Allocator
 	InitializeF       func() error

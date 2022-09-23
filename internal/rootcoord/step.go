@@ -111,8 +111,11 @@ type unwatchChannelsStep struct {
 }
 
 func (s *unwatchChannelsStep) Execute(ctx context.Context) ([]nestedStep, error) {
-	err := s.core.broker.UnwatchChannels(ctx, &watchInfo{collectionID: s.collectionID, vChannels: s.channels.virtualChannels})
-	return nil, err
+	unwatchByDropMsg := &deleteCollectionDataStep{
+		baseStep: baseStep{core: s.core},
+		coll:     &model.Collection{CollectionID: s.collectionID, PhysicalChannelNames: s.channels.physicalChannels},
+	}
+	return unwatchByDropMsg.Execute(ctx)
 }
 
 func (s *unwatchChannelsStep) Desc() string {

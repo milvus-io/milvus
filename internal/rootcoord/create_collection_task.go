@@ -268,7 +268,14 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 	}, &deleteCollectionMetaStep{
 		baseStep:     baseStep{core: t.core},
 		collectionID: collID,
-		ts:           ts,
+		// When we undo createCollectionTask, this ts may be less than the ts when unwatch channels.
+		ts: ts,
+	})
+	// serve for this case: watching channels succeed in datacoord but failed due to network failure.
+	undoTask.AddStep(&nullStep{}, &unwatchChannelsStep{
+		baseStep:     baseStep{core: t.core},
+		collectionID: collID,
+		channels:     t.channels,
 	})
 	undoTask.AddStep(&watchChannelsStep{
 		baseStep: baseStep{core: t.core},
@@ -278,11 +285,7 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 			vChannels:      t.channels.virtualChannels,
 			startPositions: toKeyDataPairs(startPositions),
 		},
-	}, &unwatchChannelsStep{
-		baseStep:     baseStep{core: t.core},
-		collectionID: collID,
-		channels:     t.channels,
-	})
+	}, &nullStep{})
 	undoTask.AddStep(&changeCollectionStateStep{
 		baseStep:     baseStep{core: t.core},
 		collectionID: collID,
