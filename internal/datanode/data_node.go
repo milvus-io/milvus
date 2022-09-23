@@ -34,6 +34,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/metautil"
+
 	"github.com/golang/protobuf/proto"
 	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -1193,7 +1195,7 @@ func importFlushReqFunc(node *DataNode, req *datapb.ImportTaskRequest, res *root
 			logidx := start + int64(idx)
 
 			// no error raise if alloc=false
-			k := JoinIDPath(req.GetImportTask().GetCollectionId(), req.GetImportTask().GetPartitionId(), segmentID, fieldID, logidx)
+			k := metautil.JoinIDPath(req.GetImportTask().GetCollectionId(), req.GetImportTask().GetPartitionId(), segmentID, fieldID, logidx)
 
 			key := path.Join(node.chunkManager.RootPath(), common.SegmentInsertLogPath, k)
 			kvs[key] = blob.Value[:]
@@ -1219,7 +1221,7 @@ func importFlushReqFunc(node *DataNode, req *datapb.ImportTaskRequest, res *root
 			logidx := field2Logidx[fieldID]
 
 			// no error raise if alloc=false
-			k := JoinIDPath(req.GetImportTask().GetCollectionId(), req.GetImportTask().GetPartitionId(), segmentID, fieldID, logidx)
+			k := metautil.JoinIDPath(req.GetImportTask().GetCollectionId(), req.GetImportTask().GetPartitionId(), segmentID, fieldID, logidx)
 
 			key := path.Join(node.chunkManager.RootPath(), common.SegmentStatslogPath, k)
 			kvs[key] = blob.Value

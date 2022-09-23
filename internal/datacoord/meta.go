@@ -44,10 +44,10 @@ type meta struct {
 }
 
 // NewMeta creates meta from provided `kv.TxnKV`
-func newMeta(ctx context.Context, kv kv.TxnKV) (*meta, error) {
+func newMeta(ctx context.Context, kv kv.TxnKV, chunkManagerRootPath string) (*meta, error) {
 	mt := &meta{
 		ctx:         ctx,
-		catalog:     &datacoord.Catalog{Txn: kv},
+		catalog:     &datacoord.Catalog{Txn: kv, ChunkManagerRootPath: chunkManagerRootPath},
 		collections: make(map[UniqueID]*datapb.CollectionInfo),
 		segments:    NewSegmentsInfo(),
 	}
@@ -504,8 +504,6 @@ func (m *meta) mergeDropSegment(seg2Drop *SegmentInfo) *SegmentInfo {
 //   since the flag is not marked so DataNode can re-consume the drop collection msg
 // 2. when failure occurs between save meta and unwatch channel, the removal flag shall be check before let datanode watch this channel
 func (m *meta) batchSaveDropSegments(channel string, modSegments map[int64]*SegmentInfo) error {
-	// TODO: RootCoord supports read-write prohibit when dropping collection
-	// divides two api calls: save dropped segments & mark channel deleted
 	segments := make([]*datapb.SegmentInfo, 0)
 	for _, seg := range modSegments {
 		segments = append(segments, seg.SegmentInfo)
@@ -817,12 +815,17 @@ func (m *meta) CompleteMergeCompaction(compactionLogs []*datapb.CompactionSegmen
 		zap.Int64("NumOfRows", segmentInfo.NumOfRows),
 		zap.Any("compactionFrom", segmentInfo.CompactionFrom))
 
-	modSegments := make([]*datapb.SegmentInfo, 0, len(segments))
+	modSegments := make([]*datapb.SegmentInfo, 0)
 	for _, s := range segments {
 		modSegments = append(modSegments, s.SegmentInfo)
 	}
 
-	if err := m.catalog.AlterSegmentsAndAddNewSegment(m.ctx, modSegments, segment.SegmentInfo); err != nil {
+	var newSegment *datapb.SegmentInfo
+	if segment.SegmentInfo.NumOfRows > 0 {
+		newSegment = segment.SegmentInfo
+	}
+
+	if err := m.catalog.AlterSegmentsAndAddNewSegment(m.ctx, modSegments, newSegment); err != nil {
 		return err
 	}
 

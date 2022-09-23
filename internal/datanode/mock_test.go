@@ -27,6 +27,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/metautil"
+
 	"go.uber.org/zap"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -864,7 +866,7 @@ func (alloc *AllocatorFactory) genKey(ids ...UniqueID) (string, error) {
 		return "", err
 	}
 	ids = append(ids, idx)
-	return JoinIDPath(ids...), nil
+	return metautil.JoinIDPath(ids...), nil
 }
 
 // If id == 0, AllocID will return not successful status
