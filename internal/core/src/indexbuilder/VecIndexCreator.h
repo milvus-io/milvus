@@ -19,7 +19,6 @@
 #include "indexbuilder/IndexCreatorBase.h"
 #include "index/VectorIndex.h"
 #include "index/IndexInfo.h"
-#include "pb/index_cgo_msg.pb.h"
 
 namespace milvus::indexbuilder {
 
@@ -51,8 +50,6 @@ class VecIndexCreator : public IndexCreatorBase {
 
  private:
     milvus::index::IndexBasePtr index_ = nullptr;
-    proto::indexcgo::TypeParams type_params_;
-    proto::indexcgo::IndexParams index_params_;
     Config config_;
     DataType data_type_;
 };

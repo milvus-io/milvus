@@ -28,7 +28,6 @@ set(CONFIG_SRC
 add_library(milvus_config STATIC ${CONFIG_SRC})
 
 target_link_libraries(milvus_config
+        milvus_exceptions
         knowhere
-        milvus_proto
-        milvus_utils
         )

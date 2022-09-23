@@ -14,6 +14,7 @@
 #include "index/IndexInfo.h"
 #include "index/Meta.h"
 #include "index/Utils.h"
+#include "pb/index_cgo_msg.pb.h"
 
 #include <string>
 
@@ -22,6 +23,8 @@ namespace milvus::indexbuilder {
 ScalarIndexCreator::ScalarIndexCreator(DataType dtype, const char* type_params, const char* index_params)
     : dtype_(dtype) {
     // TODO: move parse-related logic to a common interface.
+    proto::indexcgo::TypeParams type_params_;
+    proto::indexcgo::IndexParams index_params_;
     milvus::index::ParseFromString(type_params_, std::string(type_params));
     milvus::index::ParseFromString(index_params_, std::string(index_params));
 

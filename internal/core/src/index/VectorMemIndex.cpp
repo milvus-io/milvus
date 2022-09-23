@@ -25,7 +25,6 @@
 #include "common/BitsetView.h"
 #include "knowhere/index/vector_index/ConfAdapterMgr.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
-#include "pb/index_cgo_msg.pb.h"
 
 namespace milvus::index {
 

@@ -12,7 +12,6 @@
 #pragma once
 
 #include "indexbuilder/IndexCreatorBase.h"
-#include "pb/index_cgo_msg.pb.h"
 #include <string>
 #include <memory>
 #include <common/CDataType.h>
@@ -40,8 +39,6 @@ class ScalarIndexCreator : public IndexCreatorBase {
 
  private:
     index::IndexBasePtr index_ = nullptr;
-    proto::indexcgo::TypeParams type_params_;
-    proto::indexcgo::IndexParams index_params_;
     Config config_;
     DataType dtype_;
 };

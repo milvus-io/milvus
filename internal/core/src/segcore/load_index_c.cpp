@@ -17,7 +17,6 @@
 #include "index/IndexFactory.h"
 #include "storage/Util.h"
 #include "segcore/load_index_c.h"
-#include "pb/index_cgo_msg.pb.h"
 
 CStatus
 NewLoadIndexInfo(CLoadIndexInfo* c_load_index_info) {
@@ -200,20 +199,12 @@ AppendIndexFilePath(CLoadIndexInfo c_load_index_info, const char* c_file_path) {
 }
 
 CStatus
-AppendIndexInfo(
-    CLoadIndexInfo c_load_index_info, int64_t index_id, int64_t build_id, int64_t version, const char* c_index_params) {
+AppendIndexInfo(CLoadIndexInfo c_load_index_info, int64_t index_id, int64_t build_id, int64_t version) {
     try {
         auto load_index_info = (milvus::index::LoadIndexInfo*)c_load_index_info;
         load_index_info->index_id = index_id;
         load_index_info->index_build_id = build_id;
         load_index_info->index_version = version;
-        milvus::proto::indexcgo::IndexParams index_params;
-        milvus::index::ParseFromString(index_params, c_index_params);
-
-        for (auto i = 0; i < index_params.params().size(); i++) {
-            auto& param = index_params.params(i);
-            load_index_info->index_params[param.key()] = param.value();
-        }
 
         auto status = CStatus();
         status.error_code = Success;

@@ -21,7 +21,6 @@
 
 #include "index/Utils.h"
 #include "index/Meta.h"
-#include "pb/index_cgo_msg.pb.h"
 #include <google/protobuf/text_format.h>
 #include "exceptions/EasyAssert.h"
 

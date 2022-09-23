@@ -41,8 +41,7 @@ AppendFieldInfo(CLoadIndexInfo c_load_index_info,
                 enum CDataType field_type);
 
 CStatus
-AppendIndexInfo(
-    CLoadIndexInfo c_load_index_info, int64_t index_id, int64_t build_id, int64_t version, const char* index_params);
+AppendIndexInfo(CLoadIndexInfo c_load_index_info, int64_t index_id, int64_t build_id, int64_t version);
 
 CStatus
 AppendIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set);
