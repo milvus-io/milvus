@@ -617,6 +617,7 @@ type queryCoordConfig struct {
 	//---- Task ---
 	RetryNum      int32
 	RetryInterval int64
+	TaskMergeCap  int32
 
 	//---- Handoff ---
 	AutoHandoff bool
@@ -641,6 +642,7 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	//---- Task ---
 	p.initTaskRetryNum()
 	p.initTaskRetryInterval()
+	p.initTaskMergeCap()
 
 	//---- Handoff ---
 	p.initAutoHandoff()
@@ -664,6 +666,10 @@ func (p *queryCoordConfig) initTaskRetryNum() {
 
 func (p *queryCoordConfig) initTaskRetryInterval() {
 	p.RetryInterval = p.Base.ParseInt64WithDefault("queryCoord.task.retryinterval", int64(10*time.Second))
+}
+
+func (p *queryCoordConfig) initTaskMergeCap() {
+	p.TaskMergeCap = p.Base.ParseInt32WithDefault("queryCoord.taskMergeCap", 2)
 }
 
 func (p *queryCoordConfig) initAutoHandoff() {

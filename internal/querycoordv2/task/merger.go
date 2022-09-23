@@ -6,15 +6,13 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
+	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
 )
 
 // Merger merges tasks with the same mergeID.
-const (
-	taskQueueCap = 16
-	waitQueueCap = 128
-)
+const waitQueueCap = 128
 
 type Merger[K comparable, R any] struct {
 	stopCh chan struct{}
@@ -32,7 +30,7 @@ func NewMerger[K comparable, R any]() *Merger[K, R] {
 		processors: typeutil.NewConcurrentSet[K](),
 		queues:     make(map[K]chan MergeableTask[K, R]),
 		waitQueue:  make(chan MergeableTask[K, R], waitQueueCap),
-		outCh:      make(chan MergeableTask[K, R], taskQueueCap),
+		outCh:      make(chan MergeableTask[K, R], Params.QueryCoordCfg.TaskMergeCap),
 	}
 }
 
@@ -68,7 +66,7 @@ func (merger *Merger[K, R]) schedule(ctx context.Context) {
 			case task := <-merger.waitQueue:
 				queue, ok := merger.queues[task.ID()]
 				if !ok {
-					queue = make(chan MergeableTask[K, R], taskQueueCap)
+					queue = make(chan MergeableTask[K, R], Params.QueryCoordCfg.TaskMergeCap)
 					merger.queues[task.ID()] = queue
 				}
 			outer:
