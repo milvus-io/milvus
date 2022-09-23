@@ -84,9 +84,7 @@ func (fm *flowgraphManager) release(vchanName string) {
 }
 
 func (fm *flowgraphManager) getFlushCh(segID UniqueID) (chan<- flushMsg, error) {
-	var (
-		flushCh chan flushMsg
-	)
+	var flushCh chan flushMsg
 
 	fm.flowgraphs.Range(func(key, value interface{}) bool {
 		fg := value.(*dataSyncService)
@@ -99,6 +97,28 @@ func (fm *flowgraphManager) getFlushCh(segID UniqueID) (chan<- flushMsg, error) 
 
 	if flushCh != nil {
 		return flushCh, nil
+	}
+
+	return nil, fmt.Errorf("cannot find segment %d in all flowgraphs", segID)
+}
+
+func (fm *flowgraphManager) getReplica(segID UniqueID) (Replica, error) {
+	var (
+		rep    Replica
+		exists = false
+	)
+	fm.flowgraphs.Range(func(key, value interface{}) bool {
+		fg := value.(*dataSyncService)
+		if fg.replica.hasSegment(segID, true) {
+			exists = true
+			rep = fg.replica
+			return false
+		}
+		return true
+	})
+
+	if exists {
+		return rep, nil
 	}
 
 	return nil, fmt.Errorf("cannot find segment %d in all flowgraphs", segID)

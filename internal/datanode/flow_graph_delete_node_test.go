@@ -22,16 +22,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/util/retry"
-
 	"github.com/bits-and-blooms/bloom/v3"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/milvus-io/milvus/api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+	"github.com/milvus-io/milvus/internal/util/retry"
 )
 
 var deleteNodeTestDir = "/tmp/milvus_test/deleteNode"
@@ -544,31 +544,41 @@ func TestFlowGraphDeleteNode_updateCompactedSegments(t *testing.T) {
 	require.NoError(t, err)
 
 	tests := []struct {
-		description      string
-		segIDsInBuffer   []UniqueID
+		description    string
+		compactToExist bool
+		segIDsInBuffer []UniqueID
+
 		compactedToIDs   []UniqueID
 		compactedFromIDs []UniqueID
 
 		expectedSegsRemain []UniqueID
 	}{
-		{"zero segments",
+		{"zero segments", false,
 			[]UniqueID{}, []UniqueID{}, []UniqueID{}, []UniqueID{}},
-		{"segment no compaction",
+		{"segment no compaction", false,
 			[]UniqueID{100, 101}, []UniqueID{}, []UniqueID{}, []UniqueID{100, 101}},
-		{"segment compacted not in buffer",
+		{"segment compacted not in buffer", true,
 			[]UniqueID{100, 101}, []UniqueID{200}, []UniqueID{103}, []UniqueID{100, 101}},
-		{"segment compacted in buffer one",
+		{"segment compacted in buffer 100>201", true,
 			[]UniqueID{100, 101}, []UniqueID{201}, []UniqueID{100}, []UniqueID{101, 201}},
-		{"segment compacted in buffer all-1",
+		{"segment compacted in buffer 100+101>201", true,
 			[]UniqueID{100, 101}, []UniqueID{201, 201}, []UniqueID{100, 101}, []UniqueID{201}},
-		{"segment compacted in buffer all-2",
+		{"segment compacted in buffer 100>201, 101>202", true,
 			[]UniqueID{100, 101}, []UniqueID{201, 202}, []UniqueID{100, 101}, []UniqueID{201, 202}},
+		// false
+		{"segment compacted in buffer 100>201", false,
+			[]UniqueID{100, 101}, []UniqueID{201}, []UniqueID{100}, []UniqueID{101}},
+		{"segment compacted in buffer 100+101>201", false,
+			[]UniqueID{100, 101}, []UniqueID{201, 201}, []UniqueID{100, 101}, []UniqueID{}},
+		{"segment compacted in buffer 100>201, 101>202", false,
+			[]UniqueID{100, 101}, []UniqueID{201, 202}, []UniqueID{100, 101}, []UniqueID{}},
 	}
 
 	for _, test := range tests {
 		t.Run(test.description, func(t *testing.T) {
 			for _, seg := range test.segIDsInBuffer {
 				delBuf := newDelDataBuf()
+				delBuf.updateSize(100)
 				delNode.delBuf.Store(seg, delBuf)
 			}
 
@@ -579,20 +589,23 @@ func TestFlowGraphDeleteNode_updateCompactedSegments(t *testing.T) {
 				}
 			}
 
+			if test.compactToExist {
+				for _, seg := range test.compactedToIDs {
+					replica.flushedSegments[seg] = &Segment{
+						segmentID: seg,
+						numRows:   10,
+					}
+				}
+			} else {
+				replica.flushedSegments = make(map[UniqueID]*Segment)
+			}
+
 			delNode.updateCompactedSegments()
 
 			for _, remain := range test.expectedSegsRemain {
 				_, ok := delNode.delBuf.Load(remain)
 				assert.True(t, ok)
 			}
-
-			var count int
-			delNode.delBuf.Range(func(key, value interface{}) bool {
-				count++
-				return true
-			})
-
-			assert.Equal(t, len(test.expectedSegsRemain), count)
 		})
 	}
 }

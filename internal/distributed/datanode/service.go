@@ -381,3 +381,7 @@ func (s *Server) ResendSegmentStats(ctx context.Context, request *datapb.ResendS
 func (s *Server) AddSegment(ctx context.Context, request *datapb.AddSegmentRequest) (*commonpb.Status, error) {
 	return s.datanode.AddSegment(ctx, request)
 }
+
+func (s *Server) SyncSegments(ctx context.Context, request *datapb.SyncSegmentsRequest) (*commonpb.Status, error) {
+	return s.datanode.SyncSegments(ctx, request)
+}

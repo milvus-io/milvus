@@ -57,6 +57,7 @@ type Replica interface {
 	getCollectionID() UniqueID
 	getCollectionSchema(collectionID UniqueID, ts Timestamp) (*schemapb.CollectionSchema, error)
 	getCollectionAndPartitionID(segID UniqueID) (collID, partitionID UniqueID, err error)
+	getChannelName(segID UniqueID) (string, error)
 
 	listAllSegmentIDs() []UniqueID
 	listNotFlushedSegmentIDs() []UniqueID
@@ -271,6 +272,25 @@ func (replica *SegmentReplica) getCollectionAndPartitionID(segID UniqueID) (coll
 	}
 
 	return 0, 0, fmt.Errorf("cannot find segment, id = %v", segID)
+}
+
+func (replica *SegmentReplica) getChannelName(segID UniqueID) (string, error) {
+	replica.segMu.RLock()
+	defer replica.segMu.RUnlock()
+
+	if seg, ok := replica.newSegments[segID]; ok {
+		return seg.channelName, nil
+	}
+
+	if seg, ok := replica.normalSegments[segID]; ok {
+		return seg.channelName, nil
+	}
+
+	if seg, ok := replica.flushedSegments[segID]; ok {
+		return seg.channelName, nil
+	}
+
+	return "", fmt.Errorf("cannot find segment, id = %v", segID)
 }
 
 // maxRowCountPerSegment returns max row count for a segment based on estimation of row size.
@@ -795,15 +815,23 @@ func (replica *SegmentReplica) mergeFlushedSegments(seg *Segment, planID UniqueI
 		return fmt.Errorf("mismatch collection, ID=%d", seg.collectionID)
 	}
 
-	log.Info("merge flushed segments")
-	replica.segMu.Lock()
+	var inValidSegments []UniqueID
 	for _, ID := range compactedFrom {
-		s, ok := replica.flushedSegments[ID]
-
-		if !ok {
-			log.Warn("no match flushed segment to merge from", zap.Int64("segmentID", ID))
-			continue
+		if !replica.hasSegment(ID, true) {
+			inValidSegments = append(inValidSegments, ID)
 		}
+	}
+
+	if len(inValidSegments) > 0 {
+		log.Warn("no match flushed segments to merge from", zap.Int64s("invalid segmentIDs", inValidSegments))
+		return fmt.Errorf("invalid compactedFrom segments: %v", inValidSegments)
+	}
+
+	replica.segMu.Lock()
+	log.Info("merge flushed segments")
+	for _, ID := range compactedFrom {
+		// the existent of the segments are already checked
+		s := replica.flushedSegments[ID]
 
 		s.compactedTo = seg.segmentID
 		replica.compactedSegments[ID] = s
@@ -811,12 +839,15 @@ func (replica *SegmentReplica) mergeFlushedSegments(seg *Segment, planID UniqueI
 	}
 	replica.segMu.Unlock()
 
-	seg.isNew.Store(false)
-	seg.isFlushed.Store(true)
+	// only store segments with numRows > 0
+	if seg.numRows > 0 {
+		seg.isNew.Store(false)
+		seg.isFlushed.Store(true)
 
-	replica.segMu.Lock()
-	replica.flushedSegments[seg.segmentID] = seg
-	replica.segMu.Unlock()
+		replica.segMu.Lock()
+		replica.flushedSegments[seg.segmentID] = seg
+		replica.segMu.Unlock()
+	}
 
 	return nil
 }
