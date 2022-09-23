@@ -22,11 +22,7 @@ macro( build_rocksdb )
     message( STATUS "Building ROCKSDB-${ROCKSDB_VERSION} from source" )
 
     set ( ROCKSDB_MD5 "e4a0625f0cec82060e62c81b787a1124" )
-
-    if ( EMBEDDED_MILVUS )
-        message ( STATUS "Turning on fPIC while building embedded Milvus" )
-        set( FPIC_ARG "-DCMAKE_POSITION_INDEPENDENT_CODE=ON" )
-    endif()
+    set( FPIC_ARG "-DCMAKE_POSITION_INDEPENDENT_CODE=ON" )
     set( ROCKSDB_CMAKE_ARGS
          "-DWITH_GFLAGS=OFF"
          "-DROCKSDB_BUILD_SHARED=OFF"
