@@ -43,7 +43,7 @@ func CreateTestCollection(collection int64, replica int32) *meta.Collection {
 	return &meta.Collection{
 		CollectionLoadInfo: &querypb.CollectionLoadInfo{
 			CollectionID:  collection,
-			ReplicaNumber: 3,
+			ReplicaNumber: replica,
 		},
 	}
 }

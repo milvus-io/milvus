@@ -71,7 +71,7 @@ func (o *LeaderObserver) observeCollection(ctx context.Context, collection int64
 			if leaderView == nil {
 				continue
 			}
-			dists := o.dist.SegmentDistManager.GetByShard(ch)
+			dists := o.dist.SegmentDistManager.GetByShardWithReplica(ch, replica)
 			needLoaded, needRemoved := o.findNeedLoadedSegments(leaderView, dists),
 				o.findNeedRemovedSegments(leaderView, dists)
 			o.sync(ctx, leaderView, append(needLoaded, needRemoved...))

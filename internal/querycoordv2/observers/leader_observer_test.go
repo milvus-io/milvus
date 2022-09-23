@@ -92,6 +92,48 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegments() {
 	)
 }
 
+func (suite *LeaderObserverTestSuite) TestSyncLoadedSegmentsWithReplicas() {
+	observer := suite.observer
+	observer.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 2))
+	observer.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
+	observer.meta.ReplicaManager.Put(utils.CreateTestReplica(2, 1, []int64{3, 4}))
+	observer.target.AddSegment(utils.CreateTestSegmentInfo(1, 1, 1, "test-insert-channel"))
+	observer.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 1, 1, "test-insert-channel"))
+	observer.dist.SegmentDistManager.Update(4, utils.CreateTestSegment(1, 1, 1, 4, 2, "test-insert-channel"))
+	observer.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
+	observer.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, []int64{}))
+	observer.dist.LeaderViewManager.Update(4, utils.CreateTestLeaderView(4, 1, "test-insert-channel", map[int64]int64{1: 4}, []int64{}))
+	expectReq := &querypb.SyncDistributionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_SyncDistribution,
+		},
+		CollectionID: 1,
+		Channel:      "test-insert-channel",
+		Actions: []*querypb.SyncAction{
+			{
+				Type:        querypb.SyncType_Set,
+				PartitionID: 1,
+				SegmentID:   1,
+				NodeID:      1,
+			},
+		},
+	}
+	called := atomic.NewBool(false)
+	suite.mockCluster.EXPECT().SyncDistribution(context.TODO(), int64(2), expectReq).Once().
+		Run(func(args mock.Arguments) { called.Store(true) }).
+		Return(&commonpb.Status{}, nil)
+
+	observer.Start(context.TODO())
+
+	suite.Eventually(
+		func() bool {
+			return called.Load()
+		},
+		10*time.Second,
+		500*time.Millisecond,
+	)
+}
+
 func (suite *LeaderObserverTestSuite) TestSyncRemovedSegments() {
 	observer := suite.observer
 	observer.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
