@@ -81,16 +81,26 @@ func (s *Server) balanceSegments(ctx context.Context, req *querypb.LoadBalanceRe
 		}
 	}
 
+	log := log.With(
+		zap.Int64("collectionID", req.GetCollectionID()),
+		zap.Int64("srcNodeID", srcNode),
+		zap.Int64s("destNodeIDs", dstNodeSet.Collect()),
+	)
+
 	plans := s.balancer.AssignSegment(toBalance.Collect(), dstNodeSet.Collect())
 	tasks := make([]task.Task, 0, len(plans))
 	for _, plan := range plans {
+		log.Info("manually balance segment...",
+			zap.Int64("destNodeID", plan.To),
+			zap.Int64("segmentID", plan.Segment.GetID()),
+		)
 		task := task.NewSegmentTask(ctx,
 			Params.QueryCoordCfg.SegmentTaskTimeout,
 			req.Base.GetMsgID(),
 			req.GetCollectionID(),
 			replica.GetID(),
 			task.NewSegmentAction(plan.To, task.ActionTypeGrow, plan.Segment.GetID()),
-			task.NewSegmentAction(plan.From, task.ActionTypeReduce, plan.Segment.GetID()),
+			task.NewSegmentAction(srcNode, task.ActionTypeReduce, plan.Segment.GetID()),
 		)
 		err := s.taskScheduler.Add(task)
 		if err != nil {
