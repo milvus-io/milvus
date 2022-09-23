@@ -35,7 +35,7 @@ func (s *byPK) Swap(i, j int) {
 }
 
 func (s *byPK) Less(i, j int) bool {
-	return typeutil.ComparePK(s.r.GetIds(), i, j)
+	return typeutil.ComparePKInSlice(s.r.GetIds(), i, j)
 }
 
 func swapFieldData(field *schemapb.FieldData, i int, j int) {

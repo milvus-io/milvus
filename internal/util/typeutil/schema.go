@@ -657,13 +657,24 @@ func SwapPK(data *schemapb.IDs, i, j int) {
 	}
 }
 
-// ComparePK returns if i-th PK < j-th PK
-func ComparePK(data *schemapb.IDs, i, j int) bool {
+// ComparePKInSlice returns if i-th PK < j-th PK
+func ComparePKInSlice(data *schemapb.IDs, i, j int) bool {
 	switch f := data.GetIdField().(type) {
 	case *schemapb.IDs_IntId:
 		return f.IntId.Data[i] < f.IntId.Data[j]
 	case *schemapb.IDs_StrId:
 		return f.StrId.Data[i] < f.StrId.Data[j]
+	}
+	return false
+}
+
+// ComparePK returns if i-th PK of dataA > j-th PK of dataB
+func ComparePK(pkA, pkB interface{}) bool {
+	switch pkA.(type) {
+	case int64:
+		return pkA.(int64) < pkB.(int64)
+	case string:
+		return pkA.(string) < pkB.(string)
 	}
 	return false
 }
