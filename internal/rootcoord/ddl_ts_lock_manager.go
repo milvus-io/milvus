@@ -8,7 +8,7 @@ import (
 	"go.uber.org/atomic"
 )
 
-type DdlTsLockManagerV2 interface {
+type DdlTsLockManager interface {
 	GetMinDdlTs() Timestamp
 	AddRefCnt(delta int32)
 	Lock()
@@ -16,14 +16,14 @@ type DdlTsLockManagerV2 interface {
 	UpdateLastTs(ts Timestamp)
 }
 
-type ddlTsLockManagerV2 struct {
+type ddlTsLockManager struct {
 	lastTs        atomic.Uint64
 	inProgressCnt atomic.Int32
 	tsoAllocator  tso.Allocator
 	mu            sync.Mutex
 }
 
-func (c *ddlTsLockManagerV2) GetMinDdlTs() Timestamp {
+func (c *ddlTsLockManager) GetMinDdlTs() Timestamp {
 	// In fact, `TryLock` can replace the `inProgressCnt` but it's not recommended.
 	if c.inProgressCnt.Load() > 0 {
 		return c.lastTs.Load()
@@ -38,24 +38,24 @@ func (c *ddlTsLockManagerV2) GetMinDdlTs() Timestamp {
 	return ts
 }
 
-func (c *ddlTsLockManagerV2) AddRefCnt(delta int32) {
+func (c *ddlTsLockManager) AddRefCnt(delta int32) {
 	c.inProgressCnt.Add(delta)
 }
 
-func (c *ddlTsLockManagerV2) Lock() {
+func (c *ddlTsLockManager) Lock() {
 	c.mu.Lock()
 }
 
-func (c *ddlTsLockManagerV2) Unlock() {
+func (c *ddlTsLockManager) Unlock() {
 	c.mu.Unlock()
 }
 
-func (c *ddlTsLockManagerV2) UpdateLastTs(ts Timestamp) {
+func (c *ddlTsLockManager) UpdateLastTs(ts Timestamp) {
 	c.lastTs.Store(ts)
 }
 
-func newDdlTsLockManagerV2(tsoAllocator tso.Allocator) *ddlTsLockManagerV2 {
-	return &ddlTsLockManagerV2{
+func newDdlTsLockManager(tsoAllocator tso.Allocator) *ddlTsLockManager {
+	return &ddlTsLockManager{
 		lastTs:        *atomic.NewUint64(0),
 		inProgressCnt: *atomic.NewInt32(0),
 		tsoAllocator:  tsoAllocator,

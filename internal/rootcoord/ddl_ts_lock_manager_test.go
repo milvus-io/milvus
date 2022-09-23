@@ -9,7 +9,7 @@ import (
 
 func Test_ddlTsLockManager_GetMinDdlTs(t *testing.T) {
 	t.Run("there are in-progress tasks", func(t *testing.T) {
-		m := newDdlTsLockManagerV2(nil)
+		m := newDdlTsLockManager(nil)
 		m.UpdateLastTs(100)
 		m.inProgressCnt.Store(9999)
 		ts := m.GetMinDdlTs()
@@ -21,7 +21,7 @@ func Test_ddlTsLockManager_GetMinDdlTs(t *testing.T) {
 		tsoAllocator.GenerateTSOF = func(count uint32) (uint64, error) {
 			return 0, errors.New("error mock GenerateTSO")
 		}
-		m := newDdlTsLockManagerV2(tsoAllocator)
+		m := newDdlTsLockManager(tsoAllocator)
 		m.UpdateLastTs(101)
 		m.inProgressCnt.Store(0)
 		ts := m.GetMinDdlTs()
@@ -33,7 +33,7 @@ func Test_ddlTsLockManager_GetMinDdlTs(t *testing.T) {
 		tsoAllocator.GenerateTSOF = func(count uint32) (uint64, error) {
 			return 102, nil
 		}
-		m := newDdlTsLockManagerV2(tsoAllocator)
+		m := newDdlTsLockManager(tsoAllocator)
 		m.UpdateLastTs(101)
 		m.inProgressCnt.Store(0)
 		ts := m.GetMinDdlTs()

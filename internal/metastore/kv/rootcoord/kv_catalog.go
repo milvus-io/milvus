@@ -175,7 +175,6 @@ func (kc *Catalog) loadCollection(ctx context.Context, collectionID typeutil.Uni
 	collKey := buildCollectionKey(collectionID)
 	collVal, err := kc.Snapshot.Load(collKey, ts)
 	if err != nil {
-		log.Error("get collection meta fail", zap.String("key", collKey), zap.Error(err))
 		return nil, fmt.Errorf("can't find collection: %d", collectionID)
 	}
 
@@ -310,10 +309,8 @@ func (kc *Catalog) listFieldsAfter210(ctx context.Context, collectionID typeutil
 }
 
 func (kc *Catalog) GetCollectionByID(ctx context.Context, collectionID typeutil.UniqueID, ts typeutil.Timestamp) (*model.Collection, error) {
-	collKey := buildCollectionKey(collectionID)
 	collMeta, err := kc.loadCollection(ctx, collectionID, ts)
 	if err != nil {
-		log.Error("collection meta marshal fail", zap.String("key", collKey), zap.Error(err))
 		return nil, err
 	}
 

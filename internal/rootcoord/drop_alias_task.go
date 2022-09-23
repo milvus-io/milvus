@@ -9,7 +9,7 @@ import (
 )
 
 type dropAliasTask struct {
-	baseTaskV2
+	baseTask
 	Req *milvuspb.DropAliasRequest
 }
 

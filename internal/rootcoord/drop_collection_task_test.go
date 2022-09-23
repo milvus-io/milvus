@@ -5,15 +5,14 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/proto/etcdpb"
-
-	"github.com/milvus-io/milvus/internal/metastore/model"
-
-	"github.com/milvus-io/milvus/internal/util/funcutil"
-
 	"github.com/milvus-io/milvus/api/commonpb"
 	"github.com/milvus-io/milvus/api/milvuspb"
+	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/proto/etcdpb"
+	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 )
 
 func Test_dropCollectionTask_Prepare(t *testing.T) {
@@ -35,7 +34,7 @@ func Test_dropCollectionTask_Prepare(t *testing.T) {
 		}
 		core := newTestCore(withMeta(meta))
 		task := &dropCollectionTask{
-			baseTaskV2: baseTaskV2{core: core},
+			baseTask: baseTask{core: core},
 			Req: &milvuspb.DropCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
 				CollectionName: collectionName,
@@ -53,7 +52,7 @@ func Test_dropCollectionTask_Prepare(t *testing.T) {
 		}
 		core := newTestCore(withMeta(meta))
 		task := &dropCollectionTask{
-			baseTaskV2: baseTaskV2{core: core},
+			baseTask: baseTask{core: core},
 			Req: &milvuspb.DropCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
 				CollectionName: collectionName,
@@ -69,7 +68,7 @@ func Test_dropCollectionTask_Execute(t *testing.T) {
 		collectionName := funcutil.GenRandomStr()
 		core := newTestCore(withInvalidMeta())
 		task := &dropCollectionTask{
-			baseTaskV2: baseTaskV2{core: core},
+			baseTask: baseTask{core: core},
 			Req: &milvuspb.DropCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
 				CollectionName: collectionName,
@@ -82,16 +81,26 @@ func Test_dropCollectionTask_Execute(t *testing.T) {
 	t.Run("failed to expire cache", func(t *testing.T) {
 		collectionName := funcutil.GenRandomStr()
 		coll := &model.Collection{Name: collectionName}
-		meta := newMockMetaTable()
-		meta.GetCollectionByNameFunc = func(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error) {
-			return coll.Clone(), nil
-		}
-		meta.ListAliasesByIDFunc = func(collID UniqueID) []string {
-			return []string{}
-		}
+
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("GetCollectionByName",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("uint64"),
+		).Return(coll.Clone(), nil)
+		meta.On("ListAliasesByID",
+			mock.AnythingOfType("int64"),
+		).Return([]string{})
+		meta.On("ChangeCollectionState",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("int64"),
+			mock.Anything, // etcdpb.CollectionState
+			mock.AnythingOfType("uint64"),
+		).Return(nil)
+
 		core := newTestCore(withInvalidProxyManager(), withMeta(meta))
 		task := &dropCollectionTask{
-			baseTaskV2: baseTaskV2{core: core},
+			baseTask: baseTask{core: core},
 			Req: &milvuspb.DropCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
 				CollectionName: collectionName,
@@ -116,7 +125,7 @@ func Test_dropCollectionTask_Execute(t *testing.T) {
 		}
 		core := newTestCore(withValidProxyManager(), withMeta(meta))
 		task := &dropCollectionTask{
-			baseTaskV2: baseTaskV2{core: core},
+			baseTask: baseTask{core: core},
 			Req: &milvuspb.DropCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
 				CollectionName: collectionName,
@@ -188,7 +197,7 @@ func Test_dropCollectionTask_Execute(t *testing.T) {
 			withTtSynchronizer(ticker))
 
 		task := &dropCollectionTask{
-			baseTaskV2: baseTaskV2{core: core},
+			baseTask: baseTask{core: core},
 			Req: &milvuspb.DropCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
 				CollectionName: collectionName,

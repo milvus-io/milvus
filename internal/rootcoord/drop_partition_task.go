@@ -18,7 +18,7 @@ import (
 )
 
 type dropPartitionTask struct {
-	baseTaskV2
+	baseTask
 	Req      *milvuspb.DropPartitionRequest
 	collMeta *model.Collection
 }
@@ -54,18 +54,18 @@ func (t *dropPartitionTask) Execute(ctx context.Context) error {
 	}
 
 	redoTask := newBaseRedoTask(t.core.stepExecutor)
-	redoTask.AddSyncStep(&expireCacheStep{
-		baseStep:        baseStep{core: t.core},
-		collectionNames: []string{t.Req.GetCollectionName()},
-		collectionID:    t.collMeta.CollectionID,
-		ts:              t.GetTs(),
-	})
 	redoTask.AddSyncStep(&changePartitionStateStep{
 		baseStep:     baseStep{core: t.core},
 		collectionID: t.collMeta.CollectionID,
 		partitionID:  partID,
 		state:        pb.PartitionState_PartitionDropping,
 		ts:           t.GetTs(),
+	})
+	redoTask.AddSyncStep(&expireCacheStep{
+		baseStep:        baseStep{core: t.core},
+		collectionNames: []string{t.Req.GetCollectionName()},
+		collectionID:    t.collMeta.CollectionID,
+		ts:              t.GetTs(),
 	})
 
 	redoTask.AddAsyncStep(&dropIndexStep{

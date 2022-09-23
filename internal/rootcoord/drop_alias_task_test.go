@@ -35,7 +35,7 @@ func Test_dropAliasTask_Execute(t *testing.T) {
 		core := newTestCore(withInvalidProxyManager())
 		alias := funcutil.GenRandomStr()
 		task := &dropAliasTask{
-			baseTaskV2: baseTaskV2{core: core},
+			baseTask: baseTask{core: core},
 			Req: &milvuspb.DropAliasRequest{
 
 				Base:  &commonpb.MsgBase{MsgType: commonpb.MsgType_DropAlias},
@@ -50,7 +50,7 @@ func Test_dropAliasTask_Execute(t *testing.T) {
 		core := newTestCore(withValidProxyManager(), withInvalidMeta())
 		alias := funcutil.GenRandomStr()
 		task := &dropAliasTask{
-			baseTaskV2: baseTaskV2{core: core},
+			baseTask: baseTask{core: core},
 			Req: &milvuspb.DropAliasRequest{
 
 				Base:  &commonpb.MsgBase{MsgType: commonpb.MsgType_DropAlias},
@@ -69,7 +69,7 @@ func Test_dropAliasTask_Execute(t *testing.T) {
 		core := newTestCore(withValidProxyManager(), withMeta(meta))
 		alias := funcutil.GenRandomStr()
 		task := &dropAliasTask{
-			baseTaskV2: baseTaskV2{core: core},
+			baseTask: baseTask{core: core},
 			Req: &milvuspb.DropAliasRequest{
 
 				Base:  &commonpb.MsgBase{MsgType: commonpb.MsgType_DropAlias},

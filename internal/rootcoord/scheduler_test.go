@@ -14,14 +14,14 @@ import (
 )
 
 type mockFailTask struct {
-	baseTaskV2
+	baseTask
 	prepareErr error
 	executeErr error
 }
 
 func newMockFailTask() *mockFailTask {
 	task := &mockFailTask{
-		baseTaskV2: baseTaskV2{
+		baseTask: baseTask{
 			ctx:  context.Background(),
 			done: make(chan error, 1),
 		},
@@ -51,12 +51,12 @@ func (m mockFailTask) Execute(context.Context) error {
 }
 
 type mockNormalTask struct {
-	baseTaskV2
+	baseTask
 }
 
 func newMockNormalTask() *mockNormalTask {
 	task := &mockNormalTask{
-		baseTaskV2: baseTaskV2{
+		baseTask: baseTask{
 			ctx:  context.Background(),
 			done: make(chan error, 1),
 		},
@@ -141,7 +141,7 @@ func Test_scheduler_bg(t *testing.T) {
 	s.Start()
 
 	n := 10
-	tasks := make([]taskV2, 0, n)
+	tasks := make([]task, 0, n)
 	for i := 0; i < n; i++ {
 		which := rand.Int() % 3
 		switch which {

@@ -69,7 +69,7 @@ func TestGarbageCollectorCtx_ReDropCollection(t *testing.T) {
 			return 100, nil
 		}
 		core := newTestCore(withBroker(broker), withTtSynchronizer(ticker), withTsoAllocator(tsoAllocator))
-		core.ddlTsLockManager = newDdlTsLockManagerV2(core.tsoAllocator)
+		core.ddlTsLockManager = newDdlTsLockManager(core.tsoAllocator)
 		gc := newBgGarbageCollector(core)
 		core.garbageCollector = gc
 		shardsNum := 2
@@ -110,7 +110,7 @@ func TestGarbageCollectorCtx_ReDropCollection(t *testing.T) {
 			withTtSynchronizer(ticker),
 			withTsoAllocator(tsoAllocator),
 			withMeta(meta))
-		core.ddlTsLockManager = newDdlTsLockManagerV2(core.tsoAllocator)
+		core.ddlTsLockManager = newDdlTsLockManager(core.tsoAllocator)
 		gc := newBgGarbageCollector(core)
 		core.garbageCollector = gc
 		gc.ReDropCollection(&model.Collection{}, 1000)
@@ -153,7 +153,7 @@ func TestGarbageCollectorCtx_ReDropCollection(t *testing.T) {
 			withTtSynchronizer(ticker),
 			withTsoAllocator(tsoAllocator),
 			withMeta(meta))
-		core.ddlTsLockManager = newDdlTsLockManagerV2(core.tsoAllocator)
+		core.ddlTsLockManager = newDdlTsLockManager(core.tsoAllocator)
 		gc := newBgGarbageCollector(core)
 		core.garbageCollector = gc
 		gc.ReDropCollection(&model.Collection{}, 1000)
@@ -189,7 +189,7 @@ func TestGarbageCollectorCtx_RemoveCreatingCollection(t *testing.T) {
 
 		core := newTestCore(withTtSynchronizer(ticker), withTsoAllocator(tsoAllocator), withStepExecutor(executor))
 		gc := newBgGarbageCollector(core)
-		core.ddlTsLockManager = newDdlTsLockManagerV2(tsoAllocator)
+		core.ddlTsLockManager = newDdlTsLockManager(tsoAllocator)
 		core.garbageCollector = gc
 
 		gc.RemoveCreatingCollection(&model.Collection{PhysicalChannelNames: pchans})
@@ -224,7 +224,7 @@ func TestGarbageCollectorCtx_RemoveCreatingCollection(t *testing.T) {
 
 		core := newTestCore(withTtSynchronizer(ticker), withMeta(meta), withTsoAllocator(tsoAllocator))
 		gc := newBgGarbageCollector(core)
-		core.ddlTsLockManager = newDdlTsLockManagerV2(tsoAllocator)
+		core.ddlTsLockManager = newDdlTsLockManager(tsoAllocator)
 		core.garbageCollector = gc
 
 		gc.RemoveCreatingCollection(&model.Collection{PhysicalChannelNames: pchans})
@@ -260,7 +260,7 @@ func TestGarbageCollectorCtx_RemoveCreatingCollection(t *testing.T) {
 
 		core := newTestCore(withTtSynchronizer(ticker), withMeta(meta), withTsoAllocator(tsoAllocator))
 		gc := newBgGarbageCollector(core)
-		core.ddlTsLockManager = newDdlTsLockManagerV2(tsoAllocator)
+		core.ddlTsLockManager = newDdlTsLockManager(tsoAllocator)
 		core.garbageCollector = gc
 
 		gc.RemoveCreatingCollection(&model.Collection{PhysicalChannelNames: pchans})
@@ -279,7 +279,7 @@ func TestGarbageCollectorCtx_ReDropPartition(t *testing.T) {
 			return 100, nil
 		}
 		core := newTestCore(withTtSynchronizer(ticker), withTsoAllocator(tsoAllocator), withDropIndex())
-		core.ddlTsLockManager = newDdlTsLockManagerV2(core.tsoAllocator)
+		core.ddlTsLockManager = newDdlTsLockManager(core.tsoAllocator)
 		gc := newBgGarbageCollector(core)
 		core.garbageCollector = gc
 		gc.ReDropPartition(pchans, &model.Partition{}, 100000)
@@ -298,7 +298,7 @@ func TestGarbageCollectorCtx_ReDropPartition(t *testing.T) {
 			return 100, nil
 		}
 		core := newTestCore(withMeta(meta), withTtSynchronizer(ticker), withTsoAllocator(tsoAllocator), withDropIndex())
-		core.ddlTsLockManager = newDdlTsLockManagerV2(core.tsoAllocator)
+		core.ddlTsLockManager = newDdlTsLockManager(core.tsoAllocator)
 		gc := newBgGarbageCollector(core)
 		core.garbageCollector = gc
 		gc.ReDropPartition(pchans, &model.Partition{}, 100000)
@@ -321,7 +321,7 @@ func TestGarbageCollectorCtx_ReDropPartition(t *testing.T) {
 			return 100, nil
 		}
 		core := newTestCore(withMeta(meta), withTtSynchronizer(ticker), withTsoAllocator(tsoAllocator), withDropIndex())
-		core.ddlTsLockManager = newDdlTsLockManagerV2(core.tsoAllocator)
+		core.ddlTsLockManager = newDdlTsLockManager(core.tsoAllocator)
 		gc := newBgGarbageCollector(core)
 		core.garbageCollector = gc
 		gc.ReDropPartition(pchans, &model.Partition{}, 100000)

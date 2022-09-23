@@ -15,7 +15,7 @@ import (
 )
 
 type createPartitionTask struct {
-	baseTaskV2
+	baseTask
 	Req      *milvuspb.CreatePartitionRequest
 	collMeta *model.Collection
 }

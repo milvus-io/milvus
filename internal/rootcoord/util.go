@@ -121,3 +121,15 @@ func succStatus() *commonpb.Status {
 		Reason:    "",
 	}
 }
+
+type TimeTravelRequest interface {
+	GetBase() *commonpb.MsgBase
+	GetTimeStamp() Timestamp
+}
+
+func getTravelTs(req TimeTravelRequest) Timestamp {
+	if req.GetTimeStamp() == 0 {
+		return typeutil.MaxTimestamp
+	}
+	return req.GetTimeStamp()
+}
