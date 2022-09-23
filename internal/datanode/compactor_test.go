@@ -610,12 +610,9 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 			assert.Error(t, err)
 
 			task := newCompactionTask(context.TODO(), mockbIO, mockbIO, replica, mockfm, alloc, plan)
-			_, err = task.compact()
+			result, err := task.compact()
 			assert.NoError(t, err)
-
-			updates, err := replica.getSegmentStatisticsUpdates(c.segID)
-			assert.NoError(t, err)
-			assert.Equal(t, int64(1), updates.GetNumRows())
+			assert.Equal(t, int64(1), result.GetNumOfRows())
 
 			id := task.getCollection()
 			assert.Equal(t, c.colID, id)
@@ -636,10 +633,11 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 			require.NoError(t, err)
 			plan.PlanID++
 
-			_, err = task.compact()
+			result, err = task.compact()
 			assert.NoError(t, err)
 			// The segment should be removed
-			assert.False(t, replica.hasSegment(c.segID, true))
+			assert.Equal(t, plan.GetPlanID(), result.GetPlanID())
+			assert.Equal(t, c.segID, result.SegmentID)
 
 			// re-add the segment
 			replica.addFlushedSegmentWithPKs(c.segID, c.colID, c.parID, "channelname", 2, c.fieldData)
@@ -669,12 +667,10 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 			plan.PlanID++
 
 			plan.Timetravel = Timestamp(10000)
-			_, err = task.compact()
+			result, err = task.compact()
 			assert.NoError(t, err)
 
-			updates, err = replica.getSegmentStatisticsUpdates(c.segID)
-			assert.NoError(t, err)
-			assert.Equal(t, int64(2), updates.GetNumRows())
+			assert.Equal(t, int64(2), result.GetNumOfRows())
 
 			// New test, remove all the binlogs in memkv
 			//  Timeout
@@ -790,15 +786,15 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 
 			alloc.random = false // generated ID = 19530
 			task := newCompactionTask(context.TODO(), mockbIO, mockbIO, replica, mockfm, alloc, plan)
-			_, err = task.compact()
+			result, err := task.compact()
 			assert.NoError(t, err)
+			assert.NotNil(t, result)
 
-			assert.False(t, replica.hasSegment(c.segID1, true))
-			assert.False(t, replica.hasSegment(c.segID2, true))
-			assert.True(t, replica.hasSegment(19530, true))
-			updates, err := replica.getSegmentStatisticsUpdates(19530)
-			assert.NoError(t, err)
-			assert.Equal(t, int64(2), updates.GetNumRows())
+			assert.Equal(t, plan.GetPlanID(), result.GetPlanID())
+			assert.Equal(t, UniqueID(19530), result.GetSegmentID())
+			assert.Equal(t, int64(2), result.GetNumOfRows())
+			assert.NotEmpty(t, result.InsertLogs)
+			assert.NotEmpty(t, result.Field2StatslogPaths)
 
 			// New test, remove all the binlogs in memkv
 			//  Deltas in timetravel range
@@ -814,15 +810,15 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 			require.True(t, replica.hasSegment(c.segID2, true))
 			require.False(t, replica.hasSegment(19530, true))
 
-			_, err = task.compact()
+			result, err = task.compact()
 			assert.NoError(t, err)
+			assert.NotNil(t, result)
 
-			assert.False(t, replica.hasSegment(c.segID1, true))
-			assert.False(t, replica.hasSegment(c.segID2, true))
-			assert.True(t, replica.hasSegment(19530, true))
-			updates, err = replica.getSegmentStatisticsUpdates(19530)
-			assert.NoError(t, err)
-			assert.Equal(t, int64(3), updates.GetNumRows())
+			assert.Equal(t, plan.GetPlanID(), result.GetPlanID())
+			assert.Equal(t, UniqueID(19530), result.GetSegmentID())
+			assert.Equal(t, int64(3), result.GetNumOfRows())
+			assert.NotEmpty(t, result.InsertLogs)
+			assert.NotEmpty(t, result.Field2StatslogPaths)
 
 			// New test, remove all the binlogs in memkv
 			//  Deltas in timetravel range
@@ -838,15 +834,15 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 			require.True(t, replica.hasSegment(c.segID2, true))
 			require.False(t, replica.hasSegment(19530, true))
 
-			_, err = task.compact()
+			result, err = task.compact()
 			assert.NoError(t, err)
+			assert.NotNil(t, result)
 
-			assert.False(t, replica.hasSegment(c.segID1, true))
-			assert.False(t, replica.hasSegment(c.segID2, true))
-			assert.True(t, replica.hasSegment(19530, true))
-			updates, err = replica.getSegmentStatisticsUpdates(19530)
-			assert.NoError(t, err)
-			assert.Equal(t, int64(4), updates.GetNumRows())
+			assert.Equal(t, plan.GetPlanID(), result.GetPlanID())
+			assert.Equal(t, UniqueID(19530), result.GetSegmentID())
+			assert.Equal(t, int64(4), result.GetNumOfRows())
+			assert.NotEmpty(t, result.InsertLogs)
+			assert.NotEmpty(t, result.Field2StatslogPaths)
 		}
 	})
 
@@ -922,15 +918,15 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 
 		alloc.random = false // generated ID = 19530
 		task := newCompactionTask(context.TODO(), mockbIO, mockbIO, replica, mockfm, alloc, plan)
-		_, err = task.compact()
+		result, err := task.compact()
 		assert.NoError(t, err)
+		assert.NotNil(t, result)
 
-		assert.False(t, replica.hasSegment(segID1, true))
-		assert.False(t, replica.hasSegment(segID2, true))
-		assert.True(t, replica.hasSegment(19530, true))
-		updates, err := replica.getSegmentStatisticsUpdates(19530)
-		assert.NoError(t, err)
-		assert.Equal(t, int64(2), updates.GetNumRows())
+		assert.Equal(t, plan.GetPlanID(), result.GetPlanID())
+		assert.Equal(t, UniqueID(19530), result.GetSegmentID())
+		assert.Equal(t, int64(2), result.GetNumOfRows())
+		assert.NotEmpty(t, result.InsertLogs)
+		assert.NotEmpty(t, result.Field2StatslogPaths)
 	})
 }
 

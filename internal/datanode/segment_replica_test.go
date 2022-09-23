@@ -103,6 +103,57 @@ func getSimpleFieldBinlog() *datapb.FieldBinlog {
 	}
 }
 
+func TestSegmentReplica_getChannelName(t *testing.T) {
+	var (
+		channelName = "TestSegmentReplica_getChannelName"
+		newSegments = map[UniqueID]*Segment{
+			100: {channelName: channelName},
+			101: {channelName: channelName},
+			102: {channelName: channelName},
+		}
+		normalSegments = map[UniqueID]*Segment{
+			200: {channelName: channelName},
+			201: {channelName: channelName},
+			202: {channelName: channelName},
+		}
+		flushedSegments = map[UniqueID]*Segment{
+			300: {channelName: channelName},
+			301: {channelName: channelName},
+			302: {channelName: channelName},
+		}
+	)
+
+	sr := &SegmentReplica{
+		newSegments:     newSegments,
+		normalSegments:  normalSegments,
+		flushedSegments: flushedSegments,
+	}
+
+	tests := []struct {
+		description string
+
+		seg     UniqueID
+		ifExist bool
+	}{
+		{"100 exists in new segments", 100, true},
+		{"201 exists in normal segments", 201, true},
+		{"302 exists in flushed segments", 302, true},
+		{"400 not exists in all segments", 400, false},
+	}
+	for _, test := range tests {
+		t.Run(test.description, func(t *testing.T) {
+			chanName, err := sr.getChannelName(test.seg)
+			if test.ifExist {
+				assert.NoError(t, err)
+				assert.Equal(t, channelName, chanName)
+			} else {
+				assert.Error(t, err)
+				assert.Empty(t, chanName)
+			}
+		})
+	}
+}
+
 func TestSegmentReplica_getCollectionAndPartitionID(te *testing.T) {
 	tests := []struct {
 		segInNew     UniqueID
@@ -656,30 +707,76 @@ func TestSegmentReplica_InterfaceMethod(t *testing.T) {
 		primaryKeyData := &storage.Int64FieldData{
 			Data: []UniqueID{1},
 		}
-		sr.addFlushedSegmentWithPKs(1, 1, 0, "channel", 10, primaryKeyData)
-		sr.addFlushedSegmentWithPKs(2, 1, 0, "channel", 10, primaryKeyData)
-		require.True(t, sr.hasSegment(1, true))
-		require.True(t, sr.hasSegment(2, true))
+		tests := []struct {
+			description string
+			isValid     bool
+			stored      bool
 
-		s := &Segment{
-			segmentID:    3,
-			collectionID: 1,
-			partitionID:  0,
-			channelName:  "channel",
-
-			numRows: 15,
+			inCompactedFrom []UniqueID
+			inSeg           *Segment
+		}{
+			{"mismatch collection", false, false, []UniqueID{1, 2}, &Segment{
+				segmentID:    3,
+				collectionID: -1,
+			}},
+			{"no match flushed segment", false, false, []UniqueID{1, 6}, &Segment{
+				segmentID:    3,
+				collectionID: 1,
+			}},
+			{"numRows==0", true, false, []UniqueID{1, 2}, &Segment{
+				segmentID:    3,
+				collectionID: 1,
+				numRows:      0,
+			}},
+			{"numRows>0", true, true, []UniqueID{1, 2}, &Segment{
+				segmentID:    3,
+				collectionID: 1,
+				numRows:      15,
+			}},
 		}
-		sr.mergeFlushedSegments(s, 100, []UniqueID{1, 2})
-		assert.True(t, sr.hasSegment(3, true))
-		assert.False(t, sr.hasSegment(1, true))
-		assert.False(t, sr.hasSegment(2, true))
 
-		to2from := sr.listCompactedSegmentIDs()
-		assert.NotEmpty(t, to2from)
+		for _, test := range tests {
+			t.Run(test.description, func(t *testing.T) {
+				// prepare segment replica
+				if !sr.hasSegment(1, true) {
+					sr.addFlushedSegmentWithPKs(1, 1, 0, "channel", 10, primaryKeyData)
+				}
 
-		from, ok := to2from[3]
-		assert.True(t, ok)
-		assert.ElementsMatch(t, []UniqueID{1, 2}, from)
+				if !sr.hasSegment(2, true) {
+					sr.addFlushedSegmentWithPKs(2, 1, 0, "channel", 10, primaryKeyData)
+				}
+
+				if sr.hasSegment(3, true) {
+					sr.removeSegments(3)
+				}
+
+				require.True(t, sr.hasSegment(1, true))
+				require.True(t, sr.hasSegment(2, true))
+				require.False(t, sr.hasSegment(3, true))
+
+				// tests start
+				err := sr.mergeFlushedSegments(test.inSeg, 100, test.inCompactedFrom)
+				if test.isValid {
+					assert.NoError(t, err)
+				} else {
+					assert.Error(t, err)
+				}
+
+				if test.stored {
+					assert.True(t, sr.hasSegment(3, true))
+
+					to2from := sr.listCompactedSegmentIDs()
+					assert.NotEmpty(t, to2from)
+
+					from, ok := to2from[3]
+					assert.True(t, ok)
+					assert.ElementsMatch(t, []UniqueID{1, 2}, from)
+				} else {
+					assert.False(t, sr.hasSegment(3, true))
+				}
+
+			})
+		}
 	})
 
 }

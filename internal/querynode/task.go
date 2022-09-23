@@ -155,7 +155,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 	for _, toLoadChannel := range vChannels {
 		for _, loadedChannel := range coll.vChannels {
 			if toLoadChannel == loadedChannel {
-				loadedChannelCounter += 1
+				loadedChannelCounter++
 				break
 			}
 		}
