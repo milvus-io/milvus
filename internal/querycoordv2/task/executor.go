@@ -130,11 +130,17 @@ func (ex *Executor) processMergeTask(mergeTask *LoadSegmentsTask) {
 		}
 	}()
 
+	taskIDs := make([]int64, 0, len(mergeTask.tasks))
+	segments := make([]int64, 0, len(mergeTask.tasks))
+	for _, task := range mergeTask.tasks {
+		taskIDs = append(taskIDs, task.ID())
+		segments = append(segments, task.SegmentID())
+	}
 	log := log.With(
-		zap.Int64("taskID", task.ID()),
+		zap.Int64s("taskIDs", taskIDs),
 		zap.Int64("collectionID", task.CollectionID()),
-		zap.Int64("segmentID", task.segmentID),
-		zap.Int64("node", action.Node()),
+		zap.Int64s("segmentIDs", segments),
+		zap.Int64("nodeID", action.Node()),
 		zap.Int64("source", task.SourceID()),
 	)
 
@@ -148,6 +154,7 @@ func (ex *Executor) processMergeTask(mergeTask *LoadSegmentsTask) {
 		return
 	}
 
+	log.Info("load segments...")
 	ctx, cancel := context.WithTimeout(task.Context(), actionTimeout)
 	status, err := ex.cluster.LoadSegments(ctx, leader, mergeTask.req)
 	cancel()
@@ -159,6 +166,7 @@ func (ex *Executor) processMergeTask(mergeTask *LoadSegmentsTask) {
 		log.Warn("failed to load segment", zap.String("reason", status.GetReason()))
 		return
 	}
+	log.Info("load segments done")
 }
 
 func (ex *Executor) removeTask(task Task, step int) {
