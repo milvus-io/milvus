@@ -18,15 +18,15 @@ func (d defaultHook) Init(params map[string]string) error {
 	return nil
 }
 
-func (d defaultHook) Mock(req interface{}, fullMethod string) (bool, interface{}, error) {
+func (d defaultHook) Mock(ctx context.Context, req interface{}, fullMethod string) (bool, interface{}, error) {
 	return false, nil, nil
 }
 
-func (d defaultHook) Before(req interface{}, fullMethod string) error {
+func (d defaultHook) Before(ctx context.Context, req interface{}, fullMethod string) error {
 	return nil
 }
 
-func (d defaultHook) After(result interface{}, err error, fullMethod string) error {
+func (d defaultHook) After(ctx context.Context, result interface{}, err error, fullMethod string) error {
 	return nil
 }
 
@@ -79,15 +79,15 @@ func UnaryServerHookInterceptor() grpc.UnaryServerInterceptor {
 			err        error
 		)
 
-		if isMock, mockResp, err = hoo.Mock(req, fullMethod); isMock {
+		if isMock, mockResp, err = hoo.Mock(ctx, req, fullMethod); isMock {
 			return mockResp, err
 		}
 
-		if err = hoo.Before(req, fullMethod); err != nil {
+		if err = hoo.Before(ctx, req, fullMethod); err != nil {
 			return nil, err
 		}
 		realResp, realErr = handler(ctx, req)
-		if err = hoo.After(realResp, realErr, fullMethod); err != nil {
+		if err = hoo.After(ctx, realResp, realErr, fullMethod); err != nil {
 			return nil, err
 		}
 		return realResp, realErr

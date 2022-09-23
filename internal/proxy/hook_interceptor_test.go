@@ -28,7 +28,7 @@ type mockHook struct {
 	mockErr error
 }
 
-func (m mockHook) Mock(req interface{}, fullMethod string) (bool, interface{}, error) {
+func (m mockHook) Mock(ctx context.Context, req interface{}, fullMethod string) (bool, interface{}, error) {
 	return true, m.mockRes, m.mockErr
 }
 
@@ -42,7 +42,7 @@ type beforeMock struct {
 	err    error
 }
 
-func (b beforeMock) Before(r interface{}, fullMethod string) error {
+func (b beforeMock) Before(ctx context.Context, r interface{}, fullMethod string) error {
 	re, ok := r.(*req)
 	if !ok {
 		return errors.New("r is invalid type")
@@ -61,7 +61,7 @@ type afterMock struct {
 	err    error
 }
 
-func (a afterMock) After(r interface{}, err error, fullMethod string) error {
+func (a afterMock) After(ctx context.Context, r interface{}, err error, fullMethod string) error {
 	re, ok := r.(*resp)
 	if !ok {
 		return errors.New("r is invalid type")
