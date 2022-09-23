@@ -6,6 +6,10 @@ import (
 	"testing"
 	"time"
 
+	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
+
+	"github.com/stretchr/testify/mock"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/api/commonpb"
 	"github.com/milvus-io/milvus/api/milvuspb"
@@ -446,17 +450,26 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 		broker.WatchChannelsFunc = func(ctx context.Context, info *watchInfo) error {
 			return nil
 		}
+
 		unwatchChannelsCalled := false
 		unwatchChannelsChan := make(chan struct{}, 1)
-		broker.UnwatchChannelsFunc = func(ctx context.Context, info *watchInfo) error {
+		gc := mockrootcoord.NewGarbageCollector(t)
+		gc.On("GcCollectionData",
+			mock.Anything, // context.Context
+			mock.Anything, // *model.Collection
+		).Return(func(ctx context.Context, collection *model.Collection) (ddlTs Timestamp) {
+			for _, pchan := range pchans {
+				ticker.syncedTtHistogram.update(pchan, 101)
+			}
 			unwatchChannelsCalled = true
 			unwatchChannelsChan <- struct{}{}
-			return nil
-		}
+			return 100
+		}, nil)
 
 		core := newTestCore(withValidIDAllocator(),
 			withMeta(meta),
 			withTtSynchronizer(ticker),
+			withGarbageCollector(gc),
 			withBroker(broker))
 
 		schema := &schemapb.CollectionSchema{

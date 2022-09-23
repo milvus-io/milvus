@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 )
 
+//go:generate mockery --name=GarbageCollector --outpkg=mockrootcoord
 type GarbageCollector interface {
 	ReDropCollection(collMeta *model.Collection, ts Timestamp)
 	RemoveCreatingCollection(collMeta *model.Collection)
@@ -62,7 +63,11 @@ func (c *bgGarbageCollector) ReDropCollection(collMeta *model.Collection, ts Tim
 }
 
 func (c *bgGarbageCollector) RemoveCreatingCollection(collMeta *model.Collection) {
+	// TODO: remove this after data gc can be notified by rpc.
+	c.s.chanTimeTick.addDmlChannels(collMeta.PhysicalChannelNames...)
+
 	redo := newBaseRedoTask(c.s.stepExecutor)
+
 	redo.AddAsyncStep(&unwatchChannelsStep{
 		baseStep:     baseStep{core: c.s},
 		collectionID: collMeta.CollectionID,
@@ -71,10 +76,15 @@ func (c *bgGarbageCollector) RemoveCreatingCollection(collMeta *model.Collection
 			physicalChannels: collMeta.PhysicalChannelNames,
 		},
 	})
+	redo.AddAsyncStep(&removeDmlChannelsStep{
+		baseStep:  baseStep{core: c.s},
+		pChannels: collMeta.PhysicalChannelNames,
+	})
 	redo.AddAsyncStep(&deleteCollectionMetaStep{
 		baseStep:     baseStep{core: c.s},
 		collectionID: collMeta.CollectionID,
-		ts:           collMeta.CreateTime,
+		// When we undo createCollectionTask, this ts may be less than the ts when unwatch channels.
+		ts: collMeta.CreateTime,
 	})
 	// err is ignored since no sync steps will be executed.
 	_ = redo.Execute(context.Background())
