@@ -23,6 +23,7 @@ add_library(milvus_common SHARED ${COMMON_SRC})
 if ( MSYS )
     target_link_libraries(milvus_common
             milvus_config
+            milvus_utils
             milvus_log
             yaml-cpp
             boost_bitset_ext
@@ -32,6 +33,7 @@ if ( MSYS )
 else()
     target_link_libraries(milvus_common
             milvus_config
+            milvus_utils
             milvus_log
             yaml-cpp
             boost_bitset_ext

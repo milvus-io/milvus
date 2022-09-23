@@ -15,6 +15,7 @@
 #include "indexbuilder/VecIndexCreator.h"
 #include "index/Utils.h"
 #include "index/IndexFactory.h"
+#include "pb/index_cgo_msg.pb.h"
 
 #ifdef BUILD_DISK_ANN
 #include "storage/DiskFileManagerImpl.h"
@@ -26,6 +27,8 @@ VecIndexCreator::VecIndexCreator(DataType data_type,
                                  const char* serialized_type_params,
                                  const char* serialized_index_params)
     : data_type_(data_type) {
+    proto::indexcgo::TypeParams type_params_;
+    proto::indexcgo::IndexParams index_params_;
     milvus::index::ParseFromString(type_params_, std::string(serialized_type_params));
     milvus::index::ParseFromString(index_params_, std::string(serialized_index_params));
 

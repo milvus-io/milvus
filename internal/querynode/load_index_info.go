@@ -28,11 +28,7 @@ import (
 	"path/filepath"
 	"unsafe"
 
-	"github.com/golang/protobuf/proto"
-
-	"github.com/milvus-io/milvus/api/commonpb"
 	"github.com/milvus-io/milvus/api/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/indexcgopb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
 
@@ -65,9 +61,16 @@ func (li *LoadIndexInfo) appendLoadIndexInfo(bytesIndex [][]byte, indexInfo *que
 		return err
 	}
 
-	err = li.appendIndexInfo(indexInfo.IndexID, indexInfo.BuildID, indexInfo.IndexVersion, indexInfo.IndexParams)
+	err = li.appendIndexInfo(indexInfo.IndexID, indexInfo.BuildID, indexInfo.IndexVersion)
 	if err != nil {
 		return err
+	}
+
+	for _, param := range indexInfo.IndexParams {
+		err = li.appendIndexParam(param.Key, param.Value)
+		if err != nil {
+			return err
+		}
 	}
 
 	err = li.appendIndexData(bytesIndex, indexPaths)
@@ -84,20 +87,12 @@ func (li *LoadIndexInfo) appendIndexParam(indexKey string, indexValue string) er
 	return HandleCStatus(&status, "AppendIndexParam failed")
 }
 
-func (li *LoadIndexInfo) appendIndexInfo(indexID int64, buildID int64, indexVersion int64, indexParams []*commonpb.KeyValuePair) error {
-	protoIndexParams := &indexcgopb.IndexParams{
-		Params: indexParams,
-	}
-
-	indexParamsStr := proto.MarshalTextString(protoIndexParams)
-	indexParamsPointer := C.CString(indexParamsStr)
-	defer C.free(unsafe.Pointer(indexParamsPointer))
-
+func (li *LoadIndexInfo) appendIndexInfo(indexID int64, buildID int64, indexVersion int64) error {
 	cIndexID := C.int64_t(indexID)
 	cBuildID := C.int64_t(buildID)
 	cIndexVersion := C.int64_t(indexVersion)
 
-	status := C.AppendIndexInfo(li.cLoadIndexInfo, cIndexID, cBuildID, cIndexVersion, indexParamsPointer)
+	status := C.AppendIndexInfo(li.cLoadIndexInfo, cIndexID, cBuildID, cIndexVersion)
 	return HandleCStatus(&status, "AppendIndexInfo failed")
 }
 
