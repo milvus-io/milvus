@@ -6,24 +6,12 @@ import (
 	"math/rand"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/kv"
+	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 )
-
-type MockedTxnKV struct {
-	kv.TxnKV
-	multiSave func(kvs map[string]string) error
-	save      func(key, value string) error
-}
-
-func (mc *MockedTxnKV) MultiSave(kvs map[string]string) error {
-	return mc.multiSave(kvs)
-}
-
-func (mc *MockedTxnKV) Save(key, value string) error {
-	return mc.save(key, value)
-}
 
 var (
 	segments = []*datapb.SegmentInfo{
@@ -39,22 +27,103 @@ var (
 	}
 )
 
-func Test_AlterSegmentsAndAddNewSegment_SaveError(t *testing.T) {
-	txn := &MockedTxnKV{}
-	txn.multiSave = func(kvs map[string]string) error {
-		return errors.New("error")
-	}
+func TestCatalog_AlterSegmentsAndAddNewSegment(t *testing.T) {
+	t.Run("save error", func(t *testing.T) {
+		txn := &mocks.TxnKV{}
+		txn.EXPECT().MultiSave(mock.Anything).Return(errors.New("mock error"))
 
-	catalog := &Catalog{txn}
-	err := catalog.AlterSegmentsAndAddNewSegment(context.TODO(), segments, newSegment)
-	assert.Error(t, err)
+		catalog := &Catalog{txn}
+		err := catalog.AlterSegmentsAndAddNewSegment(context.TODO(), segments, newSegment)
+		assert.Error(t, err)
+	})
+
+	t.Run("numRow>0", func(t *testing.T) {
+		txn := &mocks.TxnKV{}
+		txn.EXPECT().MultiSave(mock.Anything).Return(nil)
+
+		toAlter := []*datapb.SegmentInfo{
+			{
+				CollectionID: 100,
+				PartitionID:  10,
+				ID:           1,
+			},
+		}
+
+		newSeg := &datapb.SegmentInfo{
+			Binlogs: []*datapb.FieldBinlog{
+				{
+					FieldID: 101,
+					Binlogs: []*datapb.Binlog{},
+				},
+			},
+			Deltalogs: []*datapb.FieldBinlog{
+				{
+					FieldID: 101,
+					Binlogs: []*datapb.Binlog{},
+				},
+			},
+			CollectionID: 100,
+			PartitionID:  10,
+			ID:           2,
+			NumOfRows:    15,
+		}
+
+		catalog := &Catalog{txn}
+		err := catalog.AlterSegmentsAndAddNewSegment(context.Background(), toAlter, newSeg)
+		assert.NoError(t, err)
+	})
+}
+
+func TestCatalog_RevertAlterSegmentsAndAddNewSegment(t *testing.T) {
+	t.Run("save error", func(t *testing.T) {
+		txn := &mocks.TxnKV{}
+		txn.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything).Return(errors.New("mock error"))
+
+		catalog := &Catalog{txn}
+		err := catalog.RevertAlterSegmentsAndAddNewSegment(context.TODO(), segments, newSegment)
+		assert.Error(t, err)
+	})
+
+	t.Run("numRow>0", func(t *testing.T) {
+		txn := &mocks.TxnKV{}
+		txn.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything).Return(nil)
+
+		toAlter := []*datapb.SegmentInfo{
+			{
+				CollectionID: 100,
+				PartitionID:  10,
+				ID:           1,
+			},
+		}
+
+		newSeg := &datapb.SegmentInfo{
+			Binlogs: []*datapb.FieldBinlog{
+				{
+					FieldID: 101,
+					Binlogs: []*datapb.Binlog{},
+				},
+			},
+			Deltalogs: []*datapb.FieldBinlog{
+				{
+					FieldID: 101,
+					Binlogs: []*datapb.Binlog{},
+				},
+			},
+			CollectionID: 100,
+			PartitionID:  10,
+			ID:           2,
+			NumOfRows:    15,
+		}
+
+		catalog := &Catalog{txn}
+		err := catalog.RevertAlterSegmentsAndAddNewSegment(context.Background(), toAlter, newSeg)
+		assert.NoError(t, err)
+	})
 }
 
 func Test_SaveDroppedSegmentsInBatch_SaveError(t *testing.T) {
-	txn := &MockedTxnKV{}
-	txn.multiSave = func(kvs map[string]string) error {
-		return errors.New("error")
-	}
+	txn := &mocks.TxnKV{}
+	txn.EXPECT().MultiSave(mock.Anything).Return(errors.New("mock error"))
 
 	catalog := &Catalog{txn}
 	segments := []*datapb.SegmentInfo{
@@ -68,14 +137,18 @@ func Test_SaveDroppedSegmentsInBatch_SaveError(t *testing.T) {
 }
 
 func Test_SaveDroppedSegmentsInBatch_MultiSave(t *testing.T) {
-	txn := &MockedTxnKV{}
-	count := 0
-	kvSize := 0
-	txn.multiSave = func(kvs map[string]string) error {
-		count++
-		kvSize += len(kvs)
-		return nil
-	}
+	var (
+		count  = 0
+		kvSize = 0
+	)
+	txn := &mocks.TxnKV{}
+	txn.EXPECT().
+		MultiSave(mock.Anything).
+		Run(func(kvs map[string]string) {
+			count++
+			kvSize += len(kvs)
+		}).
+		Return(nil)
 
 	catalog := &Catalog{txn}
 
@@ -149,10 +222,8 @@ func randomString(len int) string {
 }
 
 func Test_MarkChannelDeleted_SaveError(t *testing.T) {
-	txn := &MockedTxnKV{}
-	txn.save = func(key, value string) error {
-		return errors.New("error")
-	}
+	txn := &mocks.TxnKV{}
+	txn.EXPECT().Save(mock.Anything, mock.Anything).Return(errors.New("mock error"))
 
 	catalog := &Catalog{txn}
 	err := catalog.MarkChannelDeleted(context.TODO(), "test_channel_1")

@@ -9,9 +9,39 @@ type TxnKV struct {
 	mock.Mock
 }
 
+type TxnKV_Expecter struct {
+	mock *mock.Mock
+}
+
+func (_m *TxnKV) EXPECT() *TxnKV_Expecter {
+	return &TxnKV_Expecter{mock: &_m.Mock}
+}
+
 // Close provides a mock function with given fields:
 func (_m *TxnKV) Close() {
 	_m.Called()
+}
+
+// TxnKV_Close_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Close'
+type TxnKV_Close_Call struct {
+	*mock.Call
+}
+
+// Close is a helper method to define mock.On call
+func (_e *TxnKV_Expecter) Close() *TxnKV_Close_Call {
+	return &TxnKV_Close_Call{Call: _e.mock.On("Close")}
+}
+
+func (_c *TxnKV_Close_Call) Run(run func()) *TxnKV_Close_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *TxnKV_Close_Call) Return() *TxnKV_Close_Call {
+	_c.Call.Return()
+	return _c
 }
 
 // Load provides a mock function with given fields: key
@@ -33,6 +63,29 @@ func (_m *TxnKV) Load(key string) (string, error) {
 	}
 
 	return r0, r1
+}
+
+// TxnKV_Load_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Load'
+type TxnKV_Load_Call struct {
+	*mock.Call
+}
+
+// Load is a helper method to define mock.On call
+//  - key string
+func (_e *TxnKV_Expecter) Load(key interface{}) *TxnKV_Load_Call {
+	return &TxnKV_Load_Call{Call: _e.mock.On("Load", key)}
+}
+
+func (_c *TxnKV_Load_Call) Run(run func(key string)) *TxnKV_Load_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *TxnKV_Load_Call) Return(_a0 string, _a1 error) *TxnKV_Load_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
 }
 
 // LoadWithPrefix provides a mock function with given fields: key
@@ -67,6 +120,29 @@ func (_m *TxnKV) LoadWithPrefix(key string) ([]string, []string, error) {
 	return r0, r1, r2
 }
 
+// TxnKV_LoadWithPrefix_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LoadWithPrefix'
+type TxnKV_LoadWithPrefix_Call struct {
+	*mock.Call
+}
+
+// LoadWithPrefix is a helper method to define mock.On call
+//  - key string
+func (_e *TxnKV_Expecter) LoadWithPrefix(key interface{}) *TxnKV_LoadWithPrefix_Call {
+	return &TxnKV_LoadWithPrefix_Call{Call: _e.mock.On("LoadWithPrefix", key)}
+}
+
+func (_c *TxnKV_LoadWithPrefix_Call) Run(run func(key string)) *TxnKV_LoadWithPrefix_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *TxnKV_LoadWithPrefix_Call) Return(_a0 []string, _a1 []string, _a2 error) *TxnKV_LoadWithPrefix_Call {
+	_c.Call.Return(_a0, _a1, _a2)
+	return _c
+}
+
 // MultiLoad provides a mock function with given fields: keys
 func (_m *TxnKV) MultiLoad(keys []string) ([]string, error) {
 	ret := _m.Called(keys)
@@ -90,6 +166,29 @@ func (_m *TxnKV) MultiLoad(keys []string) ([]string, error) {
 	return r0, r1
 }
 
+// TxnKV_MultiLoad_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'MultiLoad'
+type TxnKV_MultiLoad_Call struct {
+	*mock.Call
+}
+
+// MultiLoad is a helper method to define mock.On call
+//  - keys []string
+func (_e *TxnKV_Expecter) MultiLoad(keys interface{}) *TxnKV_MultiLoad_Call {
+	return &TxnKV_MultiLoad_Call{Call: _e.mock.On("MultiLoad", keys)}
+}
+
+func (_c *TxnKV_MultiLoad_Call) Run(run func(keys []string)) *TxnKV_MultiLoad_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].([]string))
+	})
+	return _c
+}
+
+func (_c *TxnKV_MultiLoad_Call) Return(_a0 []string, _a1 error) *TxnKV_MultiLoad_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
 // MultiRemove provides a mock function with given fields: keys
 func (_m *TxnKV) MultiRemove(keys []string) error {
 	ret := _m.Called(keys)
@@ -102,6 +201,29 @@ func (_m *TxnKV) MultiRemove(keys []string) error {
 	}
 
 	return r0
+}
+
+// TxnKV_MultiRemove_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'MultiRemove'
+type TxnKV_MultiRemove_Call struct {
+	*mock.Call
+}
+
+// MultiRemove is a helper method to define mock.On call
+//  - keys []string
+func (_e *TxnKV_Expecter) MultiRemove(keys interface{}) *TxnKV_MultiRemove_Call {
+	return &TxnKV_MultiRemove_Call{Call: _e.mock.On("MultiRemove", keys)}
+}
+
+func (_c *TxnKV_MultiRemove_Call) Run(run func(keys []string)) *TxnKV_MultiRemove_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].([]string))
+	})
+	return _c
+}
+
+func (_c *TxnKV_MultiRemove_Call) Return(_a0 error) *TxnKV_MultiRemove_Call {
+	_c.Call.Return(_a0)
+	return _c
 }
 
 // MultiRemoveWithPrefix provides a mock function with given fields: keys
@@ -118,6 +240,29 @@ func (_m *TxnKV) MultiRemoveWithPrefix(keys []string) error {
 	return r0
 }
 
+// TxnKV_MultiRemoveWithPrefix_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'MultiRemoveWithPrefix'
+type TxnKV_MultiRemoveWithPrefix_Call struct {
+	*mock.Call
+}
+
+// MultiRemoveWithPrefix is a helper method to define mock.On call
+//  - keys []string
+func (_e *TxnKV_Expecter) MultiRemoveWithPrefix(keys interface{}) *TxnKV_MultiRemoveWithPrefix_Call {
+	return &TxnKV_MultiRemoveWithPrefix_Call{Call: _e.mock.On("MultiRemoveWithPrefix", keys)}
+}
+
+func (_c *TxnKV_MultiRemoveWithPrefix_Call) Run(run func(keys []string)) *TxnKV_MultiRemoveWithPrefix_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].([]string))
+	})
+	return _c
+}
+
+func (_c *TxnKV_MultiRemoveWithPrefix_Call) Return(_a0 error) *TxnKV_MultiRemoveWithPrefix_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
 // MultiSave provides a mock function with given fields: kvs
 func (_m *TxnKV) MultiSave(kvs map[string]string) error {
 	ret := _m.Called(kvs)
@@ -130,6 +275,29 @@ func (_m *TxnKV) MultiSave(kvs map[string]string) error {
 	}
 
 	return r0
+}
+
+// TxnKV_MultiSave_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'MultiSave'
+type TxnKV_MultiSave_Call struct {
+	*mock.Call
+}
+
+// MultiSave is a helper method to define mock.On call
+//  - kvs map[string]string
+func (_e *TxnKV_Expecter) MultiSave(kvs interface{}) *TxnKV_MultiSave_Call {
+	return &TxnKV_MultiSave_Call{Call: _e.mock.On("MultiSave", kvs)}
+}
+
+func (_c *TxnKV_MultiSave_Call) Run(run func(kvs map[string]string)) *TxnKV_MultiSave_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(map[string]string))
+	})
+	return _c
+}
+
+func (_c *TxnKV_MultiSave_Call) Return(_a0 error) *TxnKV_MultiSave_Call {
+	_c.Call.Return(_a0)
+	return _c
 }
 
 // MultiSaveAndRemove provides a mock function with given fields: saves, removals
@@ -146,6 +314,30 @@ func (_m *TxnKV) MultiSaveAndRemove(saves map[string]string, removals []string) 
 	return r0
 }
 
+// TxnKV_MultiSaveAndRemove_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'MultiSaveAndRemove'
+type TxnKV_MultiSaveAndRemove_Call struct {
+	*mock.Call
+}
+
+// MultiSaveAndRemove is a helper method to define mock.On call
+//  - saves map[string]string
+//  - removals []string
+func (_e *TxnKV_Expecter) MultiSaveAndRemove(saves interface{}, removals interface{}) *TxnKV_MultiSaveAndRemove_Call {
+	return &TxnKV_MultiSaveAndRemove_Call{Call: _e.mock.On("MultiSaveAndRemove", saves, removals)}
+}
+
+func (_c *TxnKV_MultiSaveAndRemove_Call) Run(run func(saves map[string]string, removals []string)) *TxnKV_MultiSaveAndRemove_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(map[string]string), args[1].([]string))
+	})
+	return _c
+}
+
+func (_c *TxnKV_MultiSaveAndRemove_Call) Return(_a0 error) *TxnKV_MultiSaveAndRemove_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
 // MultiSaveAndRemoveWithPrefix provides a mock function with given fields: saves, removals
 func (_m *TxnKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) error {
 	ret := _m.Called(saves, removals)
@@ -158,6 +350,30 @@ func (_m *TxnKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals 
 	}
 
 	return r0
+}
+
+// TxnKV_MultiSaveAndRemoveWithPrefix_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'MultiSaveAndRemoveWithPrefix'
+type TxnKV_MultiSaveAndRemoveWithPrefix_Call struct {
+	*mock.Call
+}
+
+// MultiSaveAndRemoveWithPrefix is a helper method to define mock.On call
+//  - saves map[string]string
+//  - removals []string
+func (_e *TxnKV_Expecter) MultiSaveAndRemoveWithPrefix(saves interface{}, removals interface{}) *TxnKV_MultiSaveAndRemoveWithPrefix_Call {
+	return &TxnKV_MultiSaveAndRemoveWithPrefix_Call{Call: _e.mock.On("MultiSaveAndRemoveWithPrefix", saves, removals)}
+}
+
+func (_c *TxnKV_MultiSaveAndRemoveWithPrefix_Call) Run(run func(saves map[string]string, removals []string)) *TxnKV_MultiSaveAndRemoveWithPrefix_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(map[string]string), args[1].([]string))
+	})
+	return _c
+}
+
+func (_c *TxnKV_MultiSaveAndRemoveWithPrefix_Call) Return(_a0 error) *TxnKV_MultiSaveAndRemoveWithPrefix_Call {
+	_c.Call.Return(_a0)
+	return _c
 }
 
 // Remove provides a mock function with given fields: key
@@ -174,6 +390,29 @@ func (_m *TxnKV) Remove(key string) error {
 	return r0
 }
 
+// TxnKV_Remove_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Remove'
+type TxnKV_Remove_Call struct {
+	*mock.Call
+}
+
+// Remove is a helper method to define mock.On call
+//  - key string
+func (_e *TxnKV_Expecter) Remove(key interface{}) *TxnKV_Remove_Call {
+	return &TxnKV_Remove_Call{Call: _e.mock.On("Remove", key)}
+}
+
+func (_c *TxnKV_Remove_Call) Run(run func(key string)) *TxnKV_Remove_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *TxnKV_Remove_Call) Return(_a0 error) *TxnKV_Remove_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
 // RemoveWithPrefix provides a mock function with given fields: key
 func (_m *TxnKV) RemoveWithPrefix(key string) error {
 	ret := _m.Called(key)
@@ -188,6 +427,29 @@ func (_m *TxnKV) RemoveWithPrefix(key string) error {
 	return r0
 }
 
+// TxnKV_RemoveWithPrefix_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveWithPrefix'
+type TxnKV_RemoveWithPrefix_Call struct {
+	*mock.Call
+}
+
+// RemoveWithPrefix is a helper method to define mock.On call
+//  - key string
+func (_e *TxnKV_Expecter) RemoveWithPrefix(key interface{}) *TxnKV_RemoveWithPrefix_Call {
+	return &TxnKV_RemoveWithPrefix_Call{Call: _e.mock.On("RemoveWithPrefix", key)}
+}
+
+func (_c *TxnKV_RemoveWithPrefix_Call) Run(run func(key string)) *TxnKV_RemoveWithPrefix_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *TxnKV_RemoveWithPrefix_Call) Return(_a0 error) *TxnKV_RemoveWithPrefix_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
 // Save provides a mock function with given fields: key, value
 func (_m *TxnKV) Save(key string, value string) error {
 	ret := _m.Called(key, value)
@@ -200,6 +462,30 @@ func (_m *TxnKV) Save(key string, value string) error {
 	}
 
 	return r0
+}
+
+// TxnKV_Save_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Save'
+type TxnKV_Save_Call struct {
+	*mock.Call
+}
+
+// Save is a helper method to define mock.On call
+//  - key string
+//  - value string
+func (_e *TxnKV_Expecter) Save(key interface{}, value interface{}) *TxnKV_Save_Call {
+	return &TxnKV_Save_Call{Call: _e.mock.On("Save", key, value)}
+}
+
+func (_c *TxnKV_Save_Call) Run(run func(key string, value string)) *TxnKV_Save_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *TxnKV_Save_Call) Return(_a0 error) *TxnKV_Save_Call {
+	_c.Call.Return(_a0)
+	return _c
 }
 
 type mockConstructorTestingTNewTxnKV interface {

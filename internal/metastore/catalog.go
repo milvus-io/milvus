@@ -79,6 +79,8 @@ type DataCoordCatalog interface {
 	MarkChannelDeleted(ctx context.Context, channel string) error
 	IsChannelDropped(ctx context.Context, channel string) bool
 	DropChannel(ctx context.Context, channel string) error
+
+	RevertAlterSegmentsAndAddNewSegment(ctx context.Context, segments []*datapb.SegmentInfo, removalSegment *datapb.SegmentInfo) error
 }
 
 type IndexCoordCatalog interface {
