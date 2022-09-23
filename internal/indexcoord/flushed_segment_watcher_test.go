@@ -487,3 +487,37 @@ func Test_flushSegmentWatcher_prepare_error(t *testing.T) {
 		assert.ErrorIs(t, err, ErrSegmentNotFound)
 	})
 }
+
+func Test_flushSegmentWatcher_removeFlushedSegment(t *testing.T) {
+	task := &internalTask{
+		state: indexTaskDone,
+		segmentInfo: &datapb.SegmentInfo{
+			ID:           segID,
+			CollectionID: collID,
+			PartitionID:  partID,
+		},
+	}
+	t.Run("success", func(t *testing.T) {
+		fsw := &flushedSegmentWatcher{
+			kvClient: &mockETCDKV{
+				removeWithPrefix: func(key string) error {
+					return nil
+				},
+			},
+		}
+		err := fsw.removeFlushedSegment(task)
+		assert.NoError(t, err)
+	})
+
+	t.Run("fail", func(t *testing.T) {
+		fsw := &flushedSegmentWatcher{
+			kvClient: &mockETCDKV{
+				removeWithPrefix: func(key string) error {
+					return errors.New("error")
+				},
+			},
+		}
+		err := fsw.removeFlushedSegment(task)
+		assert.Error(t, err)
+	})
+}

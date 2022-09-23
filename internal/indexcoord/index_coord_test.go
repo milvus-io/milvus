@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/indexnode"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metastore/kv/indexcoord"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -251,8 +252,8 @@ func TestIndexCoord(t *testing.T) {
 	t.Run("DropIndex", func(t *testing.T) {
 		req := &indexpb.DropIndexRequest{
 			CollectionID: collID,
+			PartitionIDs: nil,
 			IndexName:    indexName,
-			FieldID:      fieldID,
 		}
 		resp, err := ic.DropIndex(ctx, req)
 		assert.NoError(t, err)
@@ -366,7 +367,6 @@ func TestIndexCoord_UnHealthy(t *testing.T) {
 		req := &indexpb.DropIndexRequest{
 			CollectionID: collID,
 			IndexName:    indexName,
-			FieldID:      fieldID,
 		}
 		resp, err := ic.DropIndex(ctx, req)
 		assert.NoError(t, err)
@@ -396,6 +396,81 @@ func TestIndexCoord_UnHealthy(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
 	})
 
+}
+
+func TestIndexCoord_DropIndex(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		ic := &IndexCoord{
+			metaTable: constructMetaTable(&indexcoord.Catalog{
+				Txn: &mockETCDKV{
+					multiSave: func(m map[string]string) error {
+						return nil
+					},
+				},
+			}),
+		}
+		ic.UpdateStateCode(internalpb.StateCode_Healthy)
+		resp, err := ic.DropIndex(context.Background(), &indexpb.DropIndexRequest{
+			CollectionID: collID,
+			PartitionIDs: []int64{partID},
+			IndexName:    indexName,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+
+		resp, err = ic.DropIndex(context.Background(), &indexpb.DropIndexRequest{
+			CollectionID: collID,
+			PartitionIDs: []int64{partID},
+			IndexName:    indexName,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+
+		resp, err = ic.DropIndex(context.Background(), &indexpb.DropIndexRequest{
+			CollectionID: collID,
+			PartitionIDs: nil,
+			IndexName:    indexName,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+
+		resp, err = ic.DropIndex(context.Background(), &indexpb.DropIndexRequest{
+			CollectionID: collID,
+			PartitionIDs: nil,
+			IndexName:    indexName,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	t.Run("fail", func(t *testing.T) {
+		ic := &IndexCoord{
+			metaTable: constructMetaTable(&indexcoord.Catalog{
+				Txn: &mockETCDKV{
+					multiSave: func(m map[string]string) error {
+						return errors.New("error")
+					},
+				},
+			}),
+		}
+		ic.UpdateStateCode(internalpb.StateCode_Healthy)
+
+		resp, err := ic.DropIndex(context.Background(), &indexpb.DropIndexRequest{
+			CollectionID: collID,
+			PartitionIDs: []int64{partID},
+			IndexName:    indexName,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+
+		resp, err = ic.DropIndex(context.Background(), &indexpb.DropIndexRequest{
+			CollectionID: collID,
+			PartitionIDs: nil,
+			IndexName:    indexName,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+	})
 }
 
 // TODO @xiaocai2333: add ut for error occurred.

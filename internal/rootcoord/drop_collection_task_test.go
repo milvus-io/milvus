@@ -165,7 +165,7 @@ func Test_dropCollectionTask_Execute(t *testing.T) {
 		}
 		dropIndexCalled := false
 		dropIndexChan := make(chan struct{}, 1)
-		broker.DropCollectionIndexFunc = func(ctx context.Context, collID UniqueID) error {
+		broker.DropCollectionIndexFunc = func(ctx context.Context, collID UniqueID, partIDs []UniqueID) error {
 			dropIndexCalled = true
 			dropIndexChan <- struct{}{}
 			return nil

@@ -74,6 +74,7 @@ func (t *dropCollectionTask) Execute(ctx context.Context) error {
 	redoTask.AddAsyncStep(&dropIndexStep{
 		baseStep: baseStep{core: t.core},
 		collID:   collMeta.CollectionID,
+		partIDs:  nil,
 	})
 	redoTask.AddAsyncStep(&deleteCollectionDataStep{
 		baseStep: baseStep{core: t.core},

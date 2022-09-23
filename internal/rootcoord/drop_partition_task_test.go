@@ -150,7 +150,7 @@ func Test_dropPartitionTask_Execute(t *testing.T) {
 			return 0, nil
 		}
 
-		core := newTestCore(withValidProxyManager(), withMeta(meta), withGarbageCollector(gc))
+		core := newTestCore(withValidProxyManager(), withMeta(meta), withGarbageCollector(gc), withDropIndex())
 
 		task := &dropPartitionTask{
 			baseTaskV2: baseTaskV2{core: core},

@@ -296,6 +296,16 @@ func withInvalidProxyManager() Opt {
 	}
 }
 
+func withDropIndex() Opt {
+	return func(c *Core) {
+		c.broker = &mockBroker{
+			DropCollectionIndexFunc: func(ctx context.Context, collID UniqueID, partIDs []UniqueID) error {
+				return nil
+			},
+		}
+	}
+}
+
 func withMeta(meta IMetaTable) Opt {
 	return func(c *Core) {
 		c.meta = meta
@@ -743,7 +753,7 @@ type mockBroker struct {
 	FlushFunc             func(ctx context.Context, cID int64, segIDs []int64) error
 	ImportFunc            func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error)
 
-	DropCollectionIndexFunc func(ctx context.Context, collID UniqueID) error
+	DropCollectionIndexFunc func(ctx context.Context, collID UniqueID, partIDs []UniqueID) error
 }
 
 func newMockBroker() *mockBroker {
@@ -762,8 +772,8 @@ func (b mockBroker) ReleaseCollection(ctx context.Context, collectionID UniqueID
 	return b.ReleaseCollectionFunc(ctx, collectionID)
 }
 
-func (b mockBroker) DropCollectionIndex(ctx context.Context, collID UniqueID) error {
-	return b.DropCollectionIndexFunc(ctx, collID)
+func (b mockBroker) DropCollectionIndex(ctx context.Context, collID UniqueID, partIDs []UniqueID) error {
+	return b.DropCollectionIndexFunc(ctx, collID, partIDs)
 }
 
 func withBroker(b Broker) Opt {

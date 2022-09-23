@@ -699,12 +699,15 @@ func (mt *metaTable) MarkIndexAsDeleted(collID UniqueID, indexIDs []UniqueID) er
 	indexes := make([]*model.Index, 0)
 	for _, indexID := range indexIDs {
 		index, ok := fieldIndexes[indexID]
-		if !ok {
+		if !ok || index.IsDeleted {
 			continue
 		}
 		clonedIndex := model.CloneIndex(index)
 		clonedIndex.IsDeleted = true
 		indexes = append(indexes, clonedIndex)
+	}
+	if len(indexes) == 0 {
+		return nil
 	}
 	err := mt.alterIndexes(indexes)
 	if err != nil {
@@ -718,38 +721,32 @@ func (mt *metaTable) MarkIndexAsDeleted(collID UniqueID, indexIDs []UniqueID) er
 }
 
 // MarkSegmentsIndexAsDeleted will mark the index on the segment corresponding the buildID as deleted, and recycleUnusedSegIndexes will recycle these tasks.
-func (mt *metaTable) MarkSegmentsIndexAsDeleted(segIDs []UniqueID) error {
-	log.Info("IndexCoord metaTable MarkSegmentsIndexAsDeleted", zap.Int64s("segIDs", segIDs))
-
+func (mt *metaTable) MarkSegmentsIndexAsDeleted(selector func(index *model.SegmentIndex) bool) error {
 	mt.segmentIndexLock.Lock()
 	defer mt.segmentIndexLock.Unlock()
 
 	buildIDs := make([]UniqueID, 0)
 	segIdxes := make([]*model.SegmentIndex, 0)
-	for _, segID := range segIDs {
-		if segIndexes, ok := mt.segmentIndexes[segID]; ok {
-			for _, segIdx := range segIndexes {
-				if segIdx.IsDeleted {
-					continue
-				}
-				clonedSegIdx := model.CloneSegmentIndex(segIdx)
-				clonedSegIdx.IsDeleted = true
-				segIdxes = append(segIdxes, clonedSegIdx)
-				buildIDs = append(buildIDs, segIdx.BuildID)
-			}
+	for _, segIdx := range mt.buildID2SegmentIndex {
+		if segIdx.IsDeleted {
+			continue
+		}
+		if selector(segIdx) {
+			clonedSegIdx := model.CloneSegmentIndex(segIdx)
+			clonedSegIdx.IsDeleted = true
+			segIdxes = append(segIdxes, clonedSegIdx)
+			buildIDs = append(buildIDs, segIdx.BuildID)
 		}
 	}
+
 	if len(segIdxes) == 0 {
-		log.Debug("IndexCoord metaTable MarkSegmentsIndexAsDeleted success, already have deleted",
-			zap.Int64s("segIDs", segIDs))
+		log.Debug("IndexCoord metaTable MarkSegmentsIndexAsDeleted success, no segment index need to mark")
 		return nil
 	}
 	err := mt.alterSegmentIndexes(segIdxes)
 	if err != nil {
-		log.Error("IndexCoord metaTable MarkSegmentsIndexAsDeleted fail", zap.Int64s("segIDs", segIDs), zap.Error(err))
 		return err
 	}
-	log.Info("IndexCoord metaTable MarkSegmentsIndexAsDeleted success", zap.Int64s("segIDs", segIDs))
 	return nil
 }
 

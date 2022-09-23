@@ -216,7 +216,7 @@ func TestServerBroker_DropCollectionIndex(t *testing.T) {
 		c := newTestCore(withInvalidIndexCoord())
 		b := newServerBroker(c)
 		ctx := context.Background()
-		err := b.DropCollectionIndex(ctx, 1)
+		err := b.DropCollectionIndex(ctx, 1, nil)
 		assert.Error(t, err)
 	})
 
@@ -224,7 +224,7 @@ func TestServerBroker_DropCollectionIndex(t *testing.T) {
 		c := newTestCore(withFailedIndexCoord())
 		b := newServerBroker(c)
 		ctx := context.Background()
-		err := b.DropCollectionIndex(ctx, 1)
+		err := b.DropCollectionIndex(ctx, 1, nil)
 		assert.Error(t, err)
 	})
 
@@ -232,7 +232,7 @@ func TestServerBroker_DropCollectionIndex(t *testing.T) {
 		c := newTestCore(withValidIndexCoord())
 		b := newServerBroker(c)
 		ctx := context.Background()
-		err := b.DropCollectionIndex(ctx, 1)
+		err := b.DropCollectionIndex(ctx, 1, nil)
 		assert.NoError(t, err)
 	})
 }

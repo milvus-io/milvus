@@ -1530,6 +1530,7 @@ func (dit *dropIndexTask) Execute(ctx context.Context) error {
 	var err error
 	dit.result, err = dit.indexCoord.DropIndex(ctx, &indexpb.DropIndexRequest{
 		CollectionID: dit.collectionID,
+		PartitionIDs: nil,
 		IndexName:    dit.IndexName,
 	})
 	if dit.result == nil {
