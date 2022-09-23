@@ -98,7 +98,7 @@ func (mc *MockChunkManager) RemoveWithPrefix(prefix string) error {
 func Test_NewImportWrapper(t *testing.T) {
 	f := dependency.NewDefaultFactory(true)
 	ctx := context.Background()
-	cm, err := f.NewVectorStorageChunkManager(ctx)
+	cm, err := f.NewPersistentStorageChunkManager(ctx)
 	assert.NoError(t, err)
 
 	wrapper := NewImportWrapper(ctx, nil, 2, 1, nil, cm, nil, nil, nil)
@@ -129,7 +129,7 @@ func Test_NewImportWrapper(t *testing.T) {
 func Test_ImportRowBased(t *testing.T) {
 	f := dependency.NewDefaultFactory(true)
 	ctx := context.Background()
-	cm, err := f.NewVectorStorageChunkManager(ctx)
+	cm, err := f.NewPersistentStorageChunkManager(ctx)
 	assert.NoError(t, err)
 
 	idAllocator := newIDAllocator(ctx, t)
@@ -216,7 +216,7 @@ func Test_ImportRowBased(t *testing.T) {
 func Test_ImportColumnBased_json(t *testing.T) {
 	f := dependency.NewDefaultFactory(true)
 	ctx := context.Background()
-	cm, err := f.NewVectorStorageChunkManager(ctx)
+	cm, err := f.NewPersistentStorageChunkManager(ctx)
 	assert.NoError(t, err)
 	defer cm.RemoveWithPrefix("")
 
@@ -316,7 +316,7 @@ func Test_ImportColumnBased_json(t *testing.T) {
 func Test_ImportColumnBased_StringKey(t *testing.T) {
 	f := dependency.NewDefaultFactory(true)
 	ctx := context.Background()
-	cm, err := f.NewVectorStorageChunkManager(ctx)
+	cm, err := f.NewPersistentStorageChunkManager(ctx)
 	assert.NoError(t, err)
 	defer cm.RemoveWithPrefix("")
 
@@ -383,7 +383,7 @@ func Test_ImportColumnBased_StringKey(t *testing.T) {
 func Test_ImportColumnBased_numpy(t *testing.T) {
 	f := dependency.NewDefaultFactory(true)
 	ctx := context.Background()
-	cm, err := f.NewVectorStorageChunkManager(ctx)
+	cm, err := f.NewPersistentStorageChunkManager(ctx)
 	assert.NoError(t, err)
 	defer cm.RemoveWithPrefix("")
 
@@ -520,7 +520,7 @@ func perfSchema(dim int) *schemapb.CollectionSchema {
 func Test_ImportRowBased_perf(t *testing.T) {
 	f := dependency.NewDefaultFactory(true)
 	ctx := context.Background()
-	cm, err := f.NewVectorStorageChunkManager(ctx)
+	cm, err := f.NewPersistentStorageChunkManager(ctx)
 	assert.NoError(t, err)
 	defer cm.RemoveWithPrefix("")
 
@@ -621,7 +621,7 @@ func Test_ImportRowBased_perf(t *testing.T) {
 func Test_ImportColumnBased_perf(t *testing.T) {
 	f := dependency.NewDefaultFactory(true)
 	ctx := context.Background()
-	cm, err := f.NewVectorStorageChunkManager(ctx)
+	cm, err := f.NewPersistentStorageChunkManager(ctx)
 	assert.NoError(t, err)
 	defer cm.RemoveWithPrefix("")
 

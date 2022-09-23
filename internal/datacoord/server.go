@@ -361,39 +361,17 @@ func (s *Server) stopCompactionTrigger() {
 func (s *Server) initGarbageCollection() error {
 	var cli storage.ChunkManager
 	var err error
-	if Params.CommonCfg.StorageType == "minio" {
-		chunkManagerFactory := storage.NewChunkManagerFactory("local", "minio",
-			storage.RootPath(Params.LocalStorageCfg.Path),
-			storage.Address(Params.MinioCfg.Address),
-			storage.AccessKeyID(Params.MinioCfg.AccessKeyID),
-			storage.SecretAccessKeyID(Params.MinioCfg.SecretAccessKey),
-			storage.UseSSL(Params.MinioCfg.UseSSL),
-			storage.BucketName(Params.MinioCfg.BucketName),
-			storage.UseIAM(Params.MinioCfg.UseIAM),
-			storage.IAMEndpoint(Params.MinioCfg.IAMEndpoint),
-			storage.CreateBucket(true))
-		cli, err = chunkManagerFactory.NewVectorStorageChunkManager(s.ctx)
-		if err != nil {
-			log.Error("minio chunk manager init failed", zap.String("error", err.Error()))
-			return err
-		}
-		log.Info("minio chunk manager init success", zap.String("bucketname", Params.MinioCfg.BucketName))
-	} else if Params.CommonCfg.StorageType == "local" {
-		chunkManagerFactory := storage.NewChunkManagerFactory("local", "local",
-			storage.RootPath(Params.LocalStorageCfg.Path))
-		cli, err = chunkManagerFactory.NewVectorStorageChunkManager(s.ctx)
-		if err != nil {
-			log.Error("local chunk manager init failed", zap.String("error", err.Error()))
-			return err
-		}
-		log.Info("local chunk manager init success")
+
+	chunkManagerFactory := storage.NewChunkManagerFactoryWithParam(&Params)
+	cli, err = chunkManagerFactory.NewPersistentStorageChunkManager(s.ctx)
+	if err != nil {
+		log.Error("chunk manager init failed", zap.Error(err))
+		return err
 	}
-
+	log.Info("Datacoord garbage collector chunk manager init success")
 	s.garbageCollector = newGarbageCollector(s.meta, s.segReferManager, s.indexCoord, GcOption{
-		cli:      cli,
-		enabled:  Params.DataCoordCfg.EnableGarbageCollection,
-		rootPath: Params.MinioCfg.RootPath,
-
+		cli:              cli,
+		enabled:          Params.DataCoordCfg.EnableGarbageCollection,
 		checkInterval:    Params.DataCoordCfg.GCInterval,
 		missingTolerance: Params.DataCoordCfg.GCMissingTolerance,
 		dropTolerance:    Params.DataCoordCfg.GCDropTolerance,

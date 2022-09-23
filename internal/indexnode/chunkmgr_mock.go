@@ -227,7 +227,7 @@ func (f *mockFactory) NewCacheStorageChunkManager(context.Context) (storage.Chun
 	return nil, errNotImplErr
 }
 
-func (f *mockFactory) NewVectorStorageChunkManager(context.Context) (storage.ChunkManager, error) {
+func (f *mockFactory) NewPersistentStorageChunkManager(context.Context) (storage.ChunkManager, error) {
 	if f.chunkMgr != nil {
 		return f.chunkMgr, nil
 	}
