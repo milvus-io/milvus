@@ -99,8 +99,8 @@ func parseQueryInfo(searchParamsPair []*commonpb.KeyValuePair) (*planpb.QueryInf
 	if err != nil {
 		return nil, 0, fmt.Errorf("%s [%s] is invalid", TopKKey, topKStr)
 	}
-	if err := validateTopK(topK); err != nil {
-		return nil, 0, fmt.Errorf("invalid limit, %w", err)
+	if err := validateLimit(topK); err != nil {
+		return nil, 0, fmt.Errorf("%s [%d] is invalid, %w", TopKKey, topK, err)
 	}
 
 	var offset int64
@@ -110,11 +110,17 @@ func parseQueryInfo(searchParamsPair []*commonpb.KeyValuePair) (*planpb.QueryInf
 		if err != nil {
 			return nil, 0, fmt.Errorf("%s [%s] is invalid", OffsetKey, offsetStr)
 		}
+
+		if offset != 0 {
+			if err := validateLimit(offset); err != nil {
+				return nil, 0, fmt.Errorf("%s [%d] is invalid, %w", OffsetKey, offset, err)
+			}
+		}
 	}
 
 	queryTopK := topK + offset
-	if err := validateTopK(queryTopK); err != nil {
-		return nil, 0, err
+	if err := validateLimit(queryTopK); err != nil {
+		return nil, 0, fmt.Errorf("%s+%s [%d] is invalid, %w", OffsetKey, TopKKey, queryTopK, err)
 	}
 
 	metricType, err := funcutil.GetAttrByKeyFromRepeatedKV(MetricTypeKey, searchParamsPair)

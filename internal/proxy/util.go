@@ -74,10 +74,10 @@ func isNumber(c uint8) bool {
 	return true
 }
 
-func validateTopK(topK int64) error {
+func validateLimit(limit int64) error {
 	// TODO make this configurable
-	if topK <= 0 || topK >= 16385 {
-		return fmt.Errorf("limit should be in range [1, 16385], but got %d", topK)
+	if limit <= 0 || limit >= 16385 {
+		return fmt.Errorf("should be in range [1, 16385], but got %d", limit)
 	}
 	return nil
 }

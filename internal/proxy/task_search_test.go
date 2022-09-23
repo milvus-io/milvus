@@ -1817,9 +1817,19 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 			Value: "invalid",
 		})
 
-		spInvalidOffset := append(noRoundDecimal, &commonpb.KeyValuePair{
+		spInvalidOffsetNoInt := append(noRoundDecimal, &commonpb.KeyValuePair{
 			Key:   OffsetKey,
 			Value: "invalid",
+		})
+
+		spInvalidOffsetNegative := append(noRoundDecimal, &commonpb.KeyValuePair{
+			Key:   OffsetKey,
+			Value: "-1",
+		})
+
+		spInvalidOffsetTooLarge := append(noRoundDecimal, &commonpb.KeyValuePair{
+			Key:   OffsetKey,
+			Value: "16386",
 		})
 
 		tests := []struct {
@@ -1834,7 +1844,9 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 			{"No_search_params", spNoSearchParams},
 			{"Invalid_round_decimal", spInvalidRoundDecimal},
 			{"Invalid_round_decimal_1000", spInvalidRoundDecimal2},
-			{"Invalid_offset", spInvalidOffset},
+			{"Invalid_offset_not_int", spInvalidOffsetNoInt},
+			{"Invalid_offset_negative", spInvalidOffsetNegative},
+			{"Invalid_offset_too_large", spInvalidOffsetTooLarge},
 		}
 
 		for _, test := range tests {
@@ -1843,6 +1855,8 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 				assert.Error(t, err)
 				assert.Nil(t, info)
 				assert.Zero(t, offset)
+
+				t.Logf("err=%s", err.Error())
 			})
 		}
 	})
