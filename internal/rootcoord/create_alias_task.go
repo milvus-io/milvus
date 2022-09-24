@@ -9,7 +9,7 @@ import (
 )
 
 type createAliasTask struct {
-	baseTaskV2
+	baseTask
 	Req *milvuspb.CreateAliasRequest
 }
 

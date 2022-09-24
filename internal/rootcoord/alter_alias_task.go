@@ -8,7 +8,7 @@ import (
 )
 
 type alterAliasTask struct {
-	baseTaskV2
+	baseTask
 	Req *milvuspb.AlterAliasRequest
 }
 

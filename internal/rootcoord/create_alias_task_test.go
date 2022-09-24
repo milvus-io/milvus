@@ -28,7 +28,7 @@ func Test_createAliasTask_Execute(t *testing.T) {
 	t.Run("failed to create alias", func(t *testing.T) {
 		core := newTestCore(withInvalidMeta())
 		task := &createAliasTask{
-			baseTaskV2: baseTaskV2{core: core},
+			baseTask: baseTask{core: core},
 			Req: &milvuspb.CreateAliasRequest{
 				Base:  &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateAlias},
 				Alias: "test",

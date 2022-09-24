@@ -33,7 +33,7 @@ type collectionChannels struct {
 }
 
 type createCollectionTask struct {
-	baseTaskV2
+	baseTask
 	Req      *milvuspb.CreateCollectionRequest
 	schema   *schemapb.CollectionSchema
 	collID   UniqueID

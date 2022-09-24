@@ -2,12 +2,20 @@ package rootcoord
 
 import (
 	"context"
+	"errors"
 	"math/rand"
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/proto/proxypb"
+	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 
+	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
+
+	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/stretchr/testify/mock"
+
+	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 
@@ -114,34 +122,63 @@ func TestRootCoord_DescribeCollection(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
-	t.Run("failed to add task", func(t *testing.T) {
+	t.Run("failed to get collection by name", func(t *testing.T) {
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("GetCollectionByName",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("uint64")).
+			Return(nil, errors.New("error mock GetCollectionByName"))
+
 		c := newTestCore(withHealthyCode(),
-			withInvalidScheduler())
+			withMeta(meta))
 
 		ctx := context.Background()
-		resp, err := c.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{})
+
+		resp, err := c.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{CollectionName: "test"})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
-	t.Run("failed to execute", func(t *testing.T) {
+	t.Run("failed to get collection by id", func(t *testing.T) {
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("GetCollectionByID",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("int64"),
+			mock.AnythingOfType("uint64")).
+			Return(nil, errors.New("error mock GetCollectionByID"))
+
 		c := newTestCore(withHealthyCode(),
-			withTaskFailScheduler())
+			withMeta(meta))
 
 		ctx := context.Background()
-		resp, err := c.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{})
+
+		resp, err := c.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{CollectionID: 100})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
 	t.Run("normal case, everything is ok", func(t *testing.T) {
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("GetCollectionByName",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("uint64")).
+			Return(&model.Collection{CollectionID: 100}, nil)
+		meta.On("ListAliasesByID",
+			mock.AnythingOfType("int64")).
+			Return([]string{"alias1", "alias2"})
+
 		c := newTestCore(withHealthyCode(),
-			withValidScheduler())
+			withMeta(meta))
 
 		ctx := context.Background()
-		resp, err := c.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{})
+
+		resp, err := c.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{CollectionName: "test"})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, UniqueID(100), resp.GetCollectionID())
+		assert.ElementsMatch(t, []string{"alias1", "alias2"}, resp.GetAliases())
 	})
 }
 
@@ -154,34 +191,41 @@ func TestRootCoord_HasCollection(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
-	t.Run("failed to add task", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(),
-			withInvalidScheduler())
-
-		ctx := context.Background()
-		resp, err := c.HasCollection(ctx, &milvuspb.HasCollectionRequest{})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-	})
-
-	t.Run("failed to execute", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(),
-			withTaskFailScheduler())
-
-		ctx := context.Background()
-		resp, err := c.HasCollection(ctx, &milvuspb.HasCollectionRequest{})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-	})
-
 	t.Run("normal case, everything is ok", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(),
-			withValidScheduler())
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("GetCollectionByName",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("uint64"),
+		).Return(func(ctx context.Context, collectionName string, ts Timestamp) *model.Collection {
+			if ts == typeutil.MaxTimestamp {
+				return &model.Collection{}
+			}
+			return nil
+		}, func(ctx context.Context, collectionName string, ts Timestamp) error {
+			if ts == typeutil.MaxTimestamp {
+				return nil
+			}
+			return errors.New("error mock GetCollectionByName")
+		})
 
+		c := newTestCore(withHealthyCode(), withMeta(meta))
 		ctx := context.Background()
+
 		resp, err := c.HasCollection(ctx, &milvuspb.HasCollectionRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.True(t, resp.GetValue())
+
+		resp, err = c.HasCollection(ctx, &milvuspb.HasCollectionRequest{TimeStamp: typeutil.MaxTimestamp})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.True(t, resp.GetValue())
+
+		resp, err = c.HasCollection(ctx, &milvuspb.HasCollectionRequest{TimeStamp: 100})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.False(t, resp.GetValue())
 	})
 }
 
@@ -194,34 +238,49 @@ func TestRootCoord_ShowCollections(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
-	t.Run("failed to add task", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(),
-			withInvalidScheduler())
-
-		ctx := context.Background()
-		resp, err := c.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-	})
-
-	t.Run("failed to execute", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(),
-			withTaskFailScheduler())
-
-		ctx := context.Background()
-		resp, err := c.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-	})
-
 	t.Run("normal case, everything is ok", func(t *testing.T) {
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("ListCollections",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("uint64")).
+			Return(func(ctx context.Context, ts Timestamp) []*model.Collection {
+				if ts == typeutil.MaxTimestamp {
+					return []*model.Collection{
+						{
+							CollectionID: 100,
+							Name:         "test",
+							State:        pb.CollectionState_CollectionCreated,
+						},
+					}
+				}
+				return nil
+			}, func(ctx context.Context, ts Timestamp) error {
+				if ts == typeutil.MaxTimestamp {
+					return nil
+				}
+				return errors.New("error mock ListCollections")
+			})
+
 		c := newTestCore(withHealthyCode(),
-			withValidScheduler())
+			withMeta(meta))
 
 		ctx := context.Background()
+
 		resp, err := c.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.ElementsMatch(t, []int64{100}, resp.GetCollectionIds())
+		assert.ElementsMatch(t, []string{"test"}, resp.GetCollectionNames())
+
+		resp, err = c.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{TimeStamp: typeutil.MaxTimestamp})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.ElementsMatch(t, []int64{100}, resp.GetCollectionIds())
+		assert.ElementsMatch(t, []string{"test"}, resp.GetCollectionNames())
+
+		resp, err = c.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{TimeStamp: 10000})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 }
 
@@ -314,34 +373,40 @@ func TestRootCoord_HasPartition(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
-	t.Run("failed to add task", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(),
-			withInvalidScheduler())
-
-		ctx := context.Background()
-		resp, err := c.HasPartition(ctx, &milvuspb.HasPartitionRequest{})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-	})
-
-	t.Run("failed to execute", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(),
-			withTaskFailScheduler())
-
-		ctx := context.Background()
-		resp, err := c.HasPartition(ctx, &milvuspb.HasPartitionRequest{})
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-	})
-
 	t.Run("normal case, everything is ok", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(),
-			withValidScheduler())
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("GetCollectionByName",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("uint64"),
+		).Return(func(ctx context.Context, collectionName string, ts Timestamp) *model.Collection {
+			if collectionName == "test1" {
+				return &model.Collection{Partitions: []*model.Partition{{PartitionName: "test_partition"}}}
+			}
+			return nil
+		}, func(ctx context.Context, collectionName string, ts Timestamp) error {
+			if collectionName == "test1" {
+				return nil
+			}
+			return errors.New("error mock GetCollectionByName")
+		})
 
+		c := newTestCore(withHealthyCode(), withMeta(meta))
 		ctx := context.Background()
-		resp, err := c.HasPartition(ctx, &milvuspb.HasPartitionRequest{})
+
+		resp, err := c.HasPartition(ctx, &milvuspb.HasPartitionRequest{CollectionName: "error_case"})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+
+		resp, err = c.HasPartition(ctx, &milvuspb.HasPartitionRequest{CollectionName: "test1", PartitionName: "test_partition"})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.True(t, resp.GetValue())
+
+		resp, err = c.HasPartition(ctx, &milvuspb.HasPartitionRequest{CollectionName: "test1", PartitionName: "non_exist"})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.False(t, resp.GetValue())
 	})
 }
 
@@ -354,32 +419,61 @@ func TestRootCoord_ShowPartitions(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
-	t.Run("failed to add task", func(t *testing.T) {
+	t.Run("failed to get collection by name", func(t *testing.T) {
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("GetCollectionByName",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("uint64")).
+			Return(nil, errors.New("error mock GetCollectionByName"))
+
 		c := newTestCore(withHealthyCode(),
-			withInvalidScheduler())
+			withMeta(meta))
 
 		ctx := context.Background()
-		resp, err := c.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{})
+
+		resp, err := c.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{CollectionName: "test"})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
-	t.Run("failed to execute", func(t *testing.T) {
+	t.Run("failed to get collection by id", func(t *testing.T) {
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("GetCollectionByID",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("int64"),
+			mock.AnythingOfType("uint64")).
+			Return(nil, errors.New("error mock GetCollectionByID"))
+
 		c := newTestCore(withHealthyCode(),
-			withTaskFailScheduler())
+			withMeta(meta))
+
 		ctx := context.Background()
-		resp, err := c.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{})
+
+		resp, err := c.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{CollectionID: 100})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
 	t.Run("normal case, everything is ok", func(t *testing.T) {
-		c := newTestCore(withHealthyCode(),
-			withValidScheduler())
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("GetCollectionByName",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("uint64"),
+		).Return(&model.Collection{Partitions: []*model.Partition{{
+			PartitionName: "test_partition",
+			PartitionID:   102,
+		}}}, nil)
+
+		c := newTestCore(withHealthyCode(), withMeta(meta))
 		ctx := context.Background()
-		resp, err := c.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{})
+
+		resp, err := c.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{CollectionName: "test"})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.ElementsMatch(t, []string{"test_partition"}, resp.GetPartitionNames())
+		assert.ElementsMatch(t, []int64{102}, resp.GetPartitionIDs())
 	})
 }
 

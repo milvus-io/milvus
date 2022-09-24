@@ -663,7 +663,7 @@ func withAbnormalCode() Opt {
 
 type mockScheduler struct {
 	IScheduler
-	AddTaskFunc     func(t taskV2) error
+	AddTaskFunc     func(t task) error
 	GetMinDdlTsFunc func() Timestamp
 	minDdlTs        Timestamp
 }
@@ -672,7 +672,7 @@ func newMockScheduler() *mockScheduler {
 	return &mockScheduler{}
 }
 
-func (m mockScheduler) AddTask(t taskV2) error {
+func (m mockScheduler) AddTask(t task) error {
 	if m.AddTaskFunc != nil {
 		return m.AddTaskFunc(t)
 	}
@@ -694,7 +694,7 @@ func withScheduler(sched IScheduler) Opt {
 
 func withValidScheduler() Opt {
 	sched := newMockScheduler()
-	sched.AddTaskFunc = func(t taskV2) error {
+	sched.AddTaskFunc = func(t task) error {
 		t.NotifyDone(nil)
 		return nil
 	}
@@ -703,7 +703,7 @@ func withValidScheduler() Opt {
 
 func withInvalidScheduler() Opt {
 	sched := newMockScheduler()
-	sched.AddTaskFunc = func(t taskV2) error {
+	sched.AddTaskFunc = func(t task) error {
 		return errors.New("error mock AddTask")
 	}
 	return withScheduler(sched)
@@ -711,7 +711,7 @@ func withInvalidScheduler() Opt {
 
 func withTaskFailScheduler() Opt {
 	sched := newMockScheduler()
-	sched.AddTaskFunc = func(t taskV2) error {
+	sched.AddTaskFunc = func(t task) error {
 		err := errors.New("error mock task fail")
 		t.NotifyDone(err)
 		return nil
@@ -868,7 +868,7 @@ func newTickerWithFactory(factory msgstream.Factory) *timetickSync {
 }
 
 type mockDdlTsLockManager struct {
-	DdlTsLockManagerV2
+	DdlTsLockManager
 	GetMinDdlTsFunc func() Timestamp
 }
 
@@ -883,7 +883,7 @@ func newMockDdlTsLockManager() *mockDdlTsLockManager {
 	return &mockDdlTsLockManager{}
 }
 
-func withDdlTsLockManager(m DdlTsLockManagerV2) Opt {
+func withDdlTsLockManager(m DdlTsLockManager) Opt {
 	return func(c *Core) {
 		c.ddlTsLockManager = m
 	}

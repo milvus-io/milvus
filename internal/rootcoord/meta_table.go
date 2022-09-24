@@ -68,6 +68,7 @@ const (
 	DefaultStringIndexType = "Trie"
 )
 
+//go:generate mockery --name=IMetaTable --outpkg=mockrootcoord
 type IMetaTable interface {
 	AddCollection(ctx context.Context, coll *model.Collection) error
 	ChangeCollectionState(ctx context.Context, collectionID UniqueID, state pb.CollectionState, ts Timestamp) error

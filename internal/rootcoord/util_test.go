@@ -19,6 +19,10 @@ package rootcoord
 import (
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/util/typeutil"
+
+	"github.com/milvus-io/milvus/api/milvuspb"
+
 	"github.com/milvus-io/milvus/internal/metastore/model"
 
 	"github.com/milvus-io/milvus/api/commonpb"
@@ -107,4 +111,23 @@ func Test_DecodeMsgPositions(t *testing.T) {
 
 	err = DecodeMsgPositions("null", &mpOut)
 	assert.Nil(t, err)
+}
+
+func Test_getTravelTs(t *testing.T) {
+	type args struct {
+		req TimeTravelRequest
+	}
+	tests := []struct {
+		name string
+		args args
+		want Timestamp
+	}{
+		{args: args{req: &milvuspb.HasCollectionRequest{}}, want: typeutil.MaxTimestamp},
+		{args: args{req: &milvuspb.DescribeCollectionRequest{TimeStamp: 100}}, want: 100},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equalf(t, tt.want, getTravelTs(tt.args.req), "getTravelTs(%v)", tt.args.req)
+		})
+	}
 }
