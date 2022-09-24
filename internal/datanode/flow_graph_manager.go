@@ -36,12 +36,6 @@ func newFlowgraphManager() *flowgraphManager {
 }
 
 func (fm *flowgraphManager) addAndStart(dn *DataNode, vchan *datapb.VchannelInfo) error {
-	log.Info("received Vchannel Info",
-		zap.String("vChannelName", vchan.GetChannelName()),
-		zap.Int("Unflushed Segment Number", len(vchan.GetUnflushedSegmentIds())),
-		zap.Int("Flushed Segment Number", len(vchan.GetFlushedSegmentIds())),
-	)
-
 	if _, ok := fm.flowgraphs.Load(vchan.GetChannelName()); ok {
 		log.Warn("try to add an existed DataSyncService", zap.String("vChannelName", vchan.GetChannelName()))
 		return nil
@@ -61,11 +55,7 @@ func (fm *flowgraphManager) addAndStart(dn *DataNode, vchan *datapb.VchannelInfo
 		log.Warn("new data sync service fail", zap.String("vChannelName", vchan.GetChannelName()), zap.Error(err))
 		return err
 	}
-	log.Info("successfully created dataSyncService", zap.String("vChannelName", vchan.GetChannelName()))
-
 	dataSyncService.start()
-	log.Info("successfully started dataSyncService", zap.String("vChannelName", vchan.GetChannelName()))
-
 	fm.flowgraphs.Store(vchan.GetChannelName(), dataSyncService)
 
 	metrics.DataNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID())).Inc()
@@ -73,14 +63,11 @@ func (fm *flowgraphManager) addAndStart(dn *DataNode, vchan *datapb.VchannelInfo
 }
 
 func (fm *flowgraphManager) release(vchanName string) {
-	log.Info("release flowgraph resources begin", zap.String("vChannelName", vchanName))
-
 	if fg, loaded := fm.flowgraphs.LoadAndDelete(vchanName); loaded {
 		fg.(*dataSyncService).close()
 		metrics.DataNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID())).Dec()
 	}
 	rateCol.removeFlowGraphChannel(vchanName)
-	log.Info("release flowgraph resources end", zap.String("Vchannel", vchanName))
 }
 
 func (fm *flowgraphManager) getFlushCh(segID UniqueID) (chan<- flushMsg, error) {

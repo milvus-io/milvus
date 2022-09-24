@@ -202,8 +202,8 @@ func newReplica(ctx context.Context, rc types.RootCoord, cm storage.ChunkManager
 	// try to cache latest schema
 	_, err := replica.getCollectionSchema(collID, 0)
 	if err != nil {
-		log.Warn("failed to get schema when create replica", zap.Int64("collID", collID), zap.Error(err))
-		return nil, err
+		err2 := fmt.Errorf("replica get schema for collection %d failed:%w", collID, err)
+		return nil, err2
 	}
 
 	return replica, nil
@@ -758,17 +758,12 @@ func (replica *SegmentReplica) getCollectionID() UniqueID {
 //   If you want the latest collection schema, ts should be 0.
 func (replica *SegmentReplica) getCollectionSchema(collID UniqueID, ts Timestamp) (*schemapb.CollectionSchema, error) {
 	if !replica.validCollection(collID) {
-		log.Warn("Mismatch collection for the replica",
-			zap.Int64("Want", replica.collectionID),
-			zap.Int64("Actual", collID),
-		)
-		return nil, fmt.Errorf("not supported collection %v", collID)
+		return nil, fmt.Errorf("mismatch collection, want %d, actual %d", replica.collectionID, collID)
 	}
 
 	if replica.collSchema == nil {
 		sch, err := replica.metaService.getCollectionSchema(context.Background(), collID, ts)
 		if err != nil {
-			log.Error("Grpc error", zap.Error(err))
 			return nil, err
 		}
 		replica.collSchema = sch

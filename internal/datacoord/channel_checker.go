@@ -63,7 +63,7 @@ func (c *channelStateTimer) loadAllChannels(nodeID UniqueID) ([]*datapb.ChannelW
 		return nil, err
 	}
 
-	ret := []*datapb.ChannelWatchInfo{}
+	var ret []*datapb.ChannelWatchInfo
 
 	for i, k := range keys {
 		watchInfo, err := parseWatchInfo(k, []byte(values[i]))
@@ -101,7 +101,7 @@ func (c *channelStateTimer) startOne(watchState datapb.ChannelWatchState, channe
 			zap.Time("timeout time", timeoutT))
 		select {
 		case <-time.NewTimer(time.Until(timeoutT)).C:
-			log.Info("timeout and stop timer: wait for channel ACK timeout",
+			log.Debug("timeout and stop timer: wait for channel ACK timeout",
 				zap.String("watch state", watchState.String()),
 				zap.Int64("nodeID", nodeID),
 				zap.String("channel name", channelName),

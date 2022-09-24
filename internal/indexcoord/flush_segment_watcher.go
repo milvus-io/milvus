@@ -120,17 +120,12 @@ func (fsw *flushedSegmentWatcher) enqueueInternalTask(segmentID UniqueID) {
 	defer fsw.internalNotifyFunc()
 	fsw.internalTaskMutex.Lock()
 	defer fsw.internalTaskMutex.Unlock()
-
-	log.Ctx(fsw.ctx).Info("flushedSegmentWatcher enqueueInternalTask", zap.Int64("segmentID", segmentID))
-
 	if _, ok := fsw.internalTasks[segmentID]; !ok {
 		fsw.internalTasks[segmentID] = &internalTask{
 			state:       indexTaskPrepare,
 			segmentInfo: nil,
 		}
 	}
-
-	log.Ctx(fsw.ctx).Info("flushedSegmentWatcher already have the task success", zap.Int64("segmentID", segmentID))
 }
 
 func (fsw *flushedSegmentWatcher) internalScheduler() {
@@ -157,8 +152,6 @@ func (fsw *flushedSegmentWatcher) internalRun() {
 	fsw.internalTaskMutex.RLock()
 	segmentIDs := make([]UniqueID, 0, len(fsw.internalTasks))
 	if len(fsw.internalTasks) > 0 {
-		log.Ctx(fsw.ctx).Debug("IndexCoord flushedSegmentWatcher schedule internal tasks",
-			zap.Int("internal task num", len(fsw.internalTasks)))
 		for segID := range fsw.internalTasks {
 			segmentIDs = append(segmentIDs, segID)
 		}
