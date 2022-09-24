@@ -82,6 +82,7 @@ func (fs *FileSource) loadFromFile() error {
 
 	yamlReader.SetConfigFile(configFile)
 	if err := yamlReader.ReadInConfig(); err != nil {
+		log.Warn("Read config failed", zap.Error(err))
 		return err
 	}
 

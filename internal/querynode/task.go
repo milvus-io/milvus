@@ -206,6 +206,8 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 					InsertChannel: ufInfo.InsertChannel,
 				})
 				unFlushedSegmentIDs = append(unFlushedSegmentIDs, ufInfo.GetID())
+			} else {
+				log.Info("skip segment which binlog is empty", zap.Int64("segmentID", ufInfo.ID))
 			}
 		}
 	}

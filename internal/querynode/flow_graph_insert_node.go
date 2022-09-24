@@ -137,11 +137,12 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			panic(err)
 		}
 		if !has {
+			log.Info("Add growing segment", zap.Int64("collectionID", insertMsg.CollectionID), zap.Int64("segmentID", insertMsg.SegmentID))
 			err = iNode.metaReplica.addSegment(insertMsg.SegmentID, insertMsg.PartitionID, insertMsg.CollectionID, insertMsg.ShardName, 0, segmentTypeGrowing)
 			if err != nil {
 				// error occurs when collection or partition cannot be found, collection and partition should be created before
 				err = fmt.Errorf("insertNode addSegment failed, err = %s", err)
-				log.Error(err.Error(), zap.Int64("collection", iNode.collectionID), zap.String("channel", iNode.channel))
+				log.Error(err.Error(), zap.Int64("collectionID", iNode.collectionID), zap.String("channel", iNode.channel))
 				panic(err)
 			}
 		}
@@ -150,7 +151,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		if err != nil {
 			// occurs only when schema doesn't have dim param, this should not happen
 			err = fmt.Errorf("failed to transfer msgStream.insertMsg to storage.InsertRecord, err = %s", err)
-			log.Error(err.Error(), zap.Int64("collection", iNode.collectionID), zap.String("channel", iNode.channel))
+			log.Error(err.Error(), zap.Int64("collectionID", iNode.collectionID), zap.String("channel", iNode.channel))
 			panic(err)
 		}
 
@@ -165,7 +166,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		if err != nil {
 			// error occurs when cannot find collection or data is misaligned, should not happen
 			err = fmt.Errorf("failed to get primary keys, err = %d", err)
-			log.Error(err.Error(), zap.Int64("collection", iNode.collectionID), zap.String("channel", iNode.channel))
+			log.Error(err.Error(), zap.Int64("collectionID", iNode.collectionID), zap.String("channel", iNode.channel))
 			panic(err)
 		}
 		iData.insertPKs[insertMsg.SegmentID] = append(iData.insertPKs[insertMsg.SegmentID], pks...)
@@ -177,7 +178,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		if err != nil {
 			// should not happen, segment should be created before
 			err = fmt.Errorf("insertNode getSegmentByID failed, err = %s", err)
-			log.Error(err.Error(), zap.Int64("collection", iNode.collectionID), zap.String("channel", iNode.channel))
+			log.Error(err.Error(), zap.Int64("collectionID", iNode.collectionID), zap.String("channel", iNode.channel))
 			panic(err)
 		}
 
@@ -187,11 +188,11 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			if err != nil {
 				// error occurs when cgo function `PreInsert` failed
 				err = fmt.Errorf("segmentPreInsert failed, segmentID = %d, err = %s", segmentID, err)
-				log.Error(err.Error(), zap.Int64("collection", iNode.collectionID), zap.String("channel", iNode.channel))
+				log.Error(err.Error(), zap.Int64("collectionID", iNode.collectionID), zap.String("channel", iNode.channel))
 				panic(err)
 			}
 			iData.insertOffset[segmentID] = offset
-			log.Debug("insertNode operator", zap.Int("insert size", numOfRecords), zap.Int64("insert offset", offset), zap.Int64("segment id", segmentID), zap.Int64("collection", iNode.collectionID), zap.String("channel", iNode.channel))
+			log.Debug("insertNode operator", zap.Int("insert size", numOfRecords), zap.Int64("insert offset", offset), zap.Int64("segmentID", segmentID), zap.Int64("collectionID", iNode.collectionID), zap.String("channel", iNode.channel))
 			targetSegment.updateBloomFilter(iData.insertPKs[segmentID])
 		}
 	}
