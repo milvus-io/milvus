@@ -260,7 +260,7 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 
 func (scheduler *taskScheduler) promote(task Task) error {
 	log := log.With(
-		zap.Int64("collection", task.CollectionID()),
+		zap.Int64("collectionID", task.CollectionID()),
 		zap.Int64("taskID", task.ID()),
 		zap.Int64("source", task.SourceID()),
 	)
@@ -535,7 +535,7 @@ func (scheduler *taskScheduler) remove(task Task) {
 	case *SegmentTask:
 		index := replicaSegmentIndex{task.ReplicaID(), task.SegmentID()}
 		delete(scheduler.segmentTasks, index)
-		log = log.With(zap.Int64("segment", task.SegmentID()))
+		log = log.With(zap.Int64("segmentID", task.SegmentID()))
 
 	case *ChannelTask:
 		index := replicaChannelIndex{task.ReplicaID(), task.Channel()}

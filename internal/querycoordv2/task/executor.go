@@ -126,7 +126,7 @@ func (ex *Executor) processMergeTask(mergeTask *LoadSegmentsTask) {
 	defer func() {
 		for i := range mergeTask.tasks {
 			mergeTask.tasks[i].SetErr(task.Err())
-			ex.removeTask(mergeTask.tasks[i], mergeTask.steps[i])
+			ex.removeAction(mergeTask.tasks[i], mergeTask.steps[i])
 		}
 	}()
 
@@ -169,11 +169,14 @@ func (ex *Executor) processMergeTask(mergeTask *LoadSegmentsTask) {
 	log.Info("load segments done")
 }
 
-func (ex *Executor) removeTask(task Task, step int) {
-	log.Info("excute task done, remove it",
-		zap.Int64("taskID", task.ID()),
-		zap.Int("step", step),
-		zap.Error(task.Err()))
+func (ex *Executor) removeAction(task Task, step int) {
+	if task.Err() != nil {
+		log.Info("excute action done, remove it",
+			zap.Int64("taskID", task.ID()),
+			zap.Int("step", step),
+			zap.Error(task.Err()))
+	}
+
 	index := actionIndex{
 		Task: task.ID(),
 		Step: step,
@@ -203,6 +206,13 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) {
 		zap.Int64("source", task.SourceID()),
 	)
 
+	shouldRemoveAction := true
+	defer func() {
+		if shouldRemoveAction {
+			ex.removeAction(task, step)
+		}
+	}()
+
 	ctx, cancel := context.WithTimeout(task.Context(), actionTimeout)
 	defer cancel()
 
@@ -229,7 +239,8 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) {
 	segment := segments[0]
 	indexes, err := ex.broker.GetIndexInfo(ctx, task.CollectionID(), segment.GetID())
 	if err != nil {
-		log.Warn("failed to get index of segment, will load without index")
+		log.Warn("failed to get index of segment", zap.Error(err))
+		return
 	}
 	loadInfo := utils.PackSegmentLoadInfo(segment, indexes)
 
@@ -245,7 +256,7 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) {
 
 	deltaPositions, err := getSegmentDeltaPositions(ctx, ex.targetMgr, ex.broker, segment.GetCollectionID(), segment.GetPartitionID(), segment.GetInsertChannel())
 	if err != nil {
-		log.Warn("failed to get delta positions of segment")
+		log.Warn("failed to get delta positions of segment", zap.Error(err))
 		return
 	}
 
@@ -253,10 +264,11 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) {
 	loadTask := NewLoadSegmentsTask(task, step, req)
 	ex.merger.Add(loadTask)
 	log.Info("load segment task committed")
+	shouldRemoveAction = false
 }
 
 func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
-	defer ex.removeTask(task, step)
+	defer ex.removeAction(task, step)
 
 	action := task.Actions()[step].(*SegmentAction)
 	defer action.isReleaseCommitted.Store(true)
@@ -299,6 +311,7 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 		log = log.With(zap.Int64("shardLeader", leader))
 		req.NeedTransfer = true
 	}
+	log.Info("release segment...")
 	status, err := ex.cluster.ReleaseSegments(ctx, dstNode, req)
 	if err != nil {
 		log.Warn("failed to release segment, it may be a false failure", zap.Error(err))
@@ -308,6 +321,7 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 		log.Warn("failed to release segment", zap.String("reason", status.GetReason()))
 		return
 	}
+	log.Info("release segment done")
 }
 
 func (ex *Executor) executeDmChannelAction(task *ChannelTask, step int) {
@@ -321,7 +335,7 @@ func (ex *Executor) executeDmChannelAction(task *ChannelTask, step int) {
 }
 
 func (ex *Executor) subDmChannel(task *ChannelTask, step int) {
-	defer ex.removeTask(task, step)
+	defer ex.removeAction(task, step)
 
 	action := task.Actions()[step].(*ChannelAction)
 	log := log.With(
@@ -350,28 +364,7 @@ func (ex *Executor) subDmChannel(task *ChannelTask, step int) {
 		task.CollectionID(),
 		partitions...,
 	)
-	// DO NOT fetch channel info from DataCoord here,
-	// that may lead to leaking some data
-	// channels := make([]*datapb.VchannelInfo, 0, len(partitions))
-	// for _, partition := range partitions {
-	// 	vchannels, _, err := ex.broker.GetRecoveryInfo(ctx, task.CollectionID(), partition)
-	// 	if err != nil {
-	// 		log.Warn("failed to get vchannel from DataCoord", zap.Error(err))
-	// 		return
-	// 	}
 
-	// 	for _, channel := range vchannels {
-	// 		if channel.ChannelName == action.ChannelName() {
-	// 			channels = append(channels, channel)
-	// 		}
-	// 	}
-	// }
-	// if len(channels) == 0 {
-	// 	log.Warn("no such channel in DataCoord")
-	// 	return
-	// }
-
-	// dmChannel := utils.MergeDmChannelInfo(channels)
 	dmChannel := ex.targetMgr.GetDmChannel(action.ChannelName())
 	req := packSubDmChannelRequest(task, action, schema, loadMeta, dmChannel)
 	err = fillSubDmChannelRequest(ctx, req, ex.broker)
@@ -380,6 +373,7 @@ func (ex *Executor) subDmChannel(task *ChannelTask, step int) {
 			zap.Error(err))
 		return
 	}
+	log.Info("subscribe channel...")
 	status, err := ex.cluster.WatchDmChannels(ctx, action.Node(), req)
 	if err != nil {
 		log.Warn("failed to subscribe DmChannel, it may be a false failure", zap.Error(err))
@@ -393,7 +387,7 @@ func (ex *Executor) subDmChannel(task *ChannelTask, step int) {
 }
 
 func (ex *Executor) unsubDmChannel(task *ChannelTask, step int) {
-	defer ex.removeTask(task, step)
+	defer ex.removeAction(task, step)
 
 	action := task.Actions()[step].(*ChannelAction)
 	log := log.With(
