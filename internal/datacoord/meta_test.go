@@ -179,55 +179,55 @@ func (mek *mockKvIllegalStatslog) LoadWithPrefix(key string) ([]string, []string
 func TestMetaReloadFromKV(t *testing.T) {
 	t.Run("Test ReloadFromKV success", func(t *testing.T) {
 		fkv := &mockEtcdKv{}
-		_, err := newMeta(context.TODO(), fkv)
+		_, err := newMeta(context.TODO(), fkv, "")
 		assert.Nil(t, err)
 	})
 
 	// load segment error
 	t.Run("Test ReloadFromKV load segment fails", func(t *testing.T) {
 		fkv := &mockKvLoadSegmentError{}
-		_, err := newMeta(context.TODO(), fkv)
+		_, err := newMeta(context.TODO(), fkv, "")
 		assert.NotNil(t, err)
 	})
 
 	// illegal segment info
 	t.Run("Test ReloadFromKV unmarshal segment fails", func(t *testing.T) {
 		fkv := &mockKvIllegalSegment{}
-		_, err := newMeta(context.TODO(), fkv)
+		_, err := newMeta(context.TODO(), fkv, "")
 		assert.NotNil(t, err)
 	})
 
 	// load binlog/deltalog/statslog error
 	t.Run("Test ReloadFromKV load binlog fails", func(t *testing.T) {
 		fkv := &mockKvLoadBinlogError{}
-		_, err := newMeta(context.TODO(), fkv)
+		_, err := newMeta(context.TODO(), fkv, "")
 		assert.NotNil(t, err)
 	})
 	t.Run("Test ReloadFromKV load deltalog fails", func(t *testing.T) {
 		fkv := &mockKvLoadDeltaBinlogError{}
-		_, err := newMeta(context.TODO(), fkv)
+		_, err := newMeta(context.TODO(), fkv, "")
 		assert.NotNil(t, err)
 	})
 	t.Run("Test ReloadFromKV load statslog fails", func(t *testing.T) {
 		fkv := &mockKvLoadStatsBinlogError{}
-		_, err := newMeta(context.TODO(), fkv)
+		_, err := newMeta(context.TODO(), fkv, "")
 		assert.NotNil(t, err)
 	})
 
 	// illegal binlog/deltalog/statslog info
 	t.Run("Test ReloadFromKV unmarshal binlog fails", func(t *testing.T) {
 		fkv := &mockKvIllegalBinlog{}
-		_, err := newMeta(context.TODO(), fkv)
+		_, err := newMeta(context.TODO(), fkv, "")
 		assert.NotNil(t, err)
 	})
 	t.Run("Test ReloadFromKV unmarshal deltalog fails", func(t *testing.T) {
 		fkv := &mockKvIllegalDeltalog{}
-		_, err := newMeta(context.TODO(), fkv)
+		_, err := newMeta(context.TODO(), fkv, "")
 		assert.NotNil(t, err)
 	})
 	t.Run("Test ReloadFromKV unmarshal statslog fails", func(t *testing.T) {
 		fkv := &mockKvIllegalStatslog{}
-		_, err := newMeta(context.TODO(), fkv)
+		_, err := newMeta(context.TODO(), fkv, "")
 		assert.NotNil(t, err)
 	})
 }
@@ -335,14 +335,14 @@ func TestMeta_Basic(t *testing.T) {
 		// inject error for `Save`
 		memoryKV := memkv.NewMemoryKV()
 		fkv := &saveFailKV{TxnKV: memoryKV}
-		meta, err := newMeta(context.TODO(), fkv)
+		meta, err := newMeta(context.TODO(), fkv, "")
 		assert.Nil(t, err)
 
 		err = meta.AddSegment(NewSegmentInfo(&datapb.SegmentInfo{}))
 		assert.NotNil(t, err)
 
 		fkv2 := &removeFailKV{TxnKV: memoryKV}
-		meta, err = newMeta(context.TODO(), fkv2)
+		meta, err = newMeta(context.TODO(), fkv2, "")
 		assert.Nil(t, err)
 		// nil, since no segment yet
 		err = meta.DropSegment(0)
@@ -434,7 +434,7 @@ func TestGetUnFlushedSegments(t *testing.T) {
 
 func TestUpdateFlushSegmentsInfo(t *testing.T) {
 	t.Run("normal", func(t *testing.T) {
-		meta, err := newMeta(context.TODO(), memkv.NewMemoryKV())
+		meta, err := newMeta(context.TODO(), memkv.NewMemoryKV(), "")
 		assert.Nil(t, err)
 
 		segment1 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 1, State: commonpb.SegmentState_Growing, Binlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "binlog0")},
@@ -460,7 +460,7 @@ func TestUpdateFlushSegmentsInfo(t *testing.T) {
 	})
 
 	t.Run("update non-existed segment", func(t *testing.T) {
-		meta, err := newMeta(context.TODO(), memkv.NewMemoryKV())
+		meta, err := newMeta(context.TODO(), memkv.NewMemoryKV(), "")
 		assert.Nil(t, err)
 
 		err = meta.UpdateFlushSegmentsInfo(1, false, false, false, nil, nil, nil, nil, nil)
@@ -468,7 +468,7 @@ func TestUpdateFlushSegmentsInfo(t *testing.T) {
 	})
 
 	t.Run("update checkpoints and start position of non existed segment", func(t *testing.T) {
-		meta, err := newMeta(context.TODO(), memkv.NewMemoryKV())
+		meta, err := newMeta(context.TODO(), memkv.NewMemoryKV(), "")
 		assert.Nil(t, err)
 
 		segment1 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 1, State: commonpb.SegmentState_Growing}}
@@ -485,7 +485,7 @@ func TestUpdateFlushSegmentsInfo(t *testing.T) {
 	t.Run("test save etcd failed", func(t *testing.T) {
 		kv := memkv.NewMemoryKV()
 		failedKv := &saveFailKV{kv}
-		meta, err := newMeta(context.TODO(), failedKv)
+		meta, err := newMeta(context.TODO(), failedKv, "")
 		assert.Nil(t, err)
 
 		segmentInfo := &SegmentInfo{
@@ -513,7 +513,7 @@ func TestUpdateFlushSegmentsInfo(t *testing.T) {
 
 func TestSaveHandoffMeta(t *testing.T) {
 	kvClient := memkv.NewMemoryKV()
-	meta, err := newMeta(context.TODO(), kvClient)
+	meta, err := newMeta(context.TODO(), kvClient, "")
 	assert.Nil(t, err)
 
 	info := &datapb.SegmentInfo{

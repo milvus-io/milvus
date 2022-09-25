@@ -274,7 +274,12 @@ func (s *Server) Start() error {
 		return err
 	}
 
-	if err = s.initMeta(); err != nil {
+	storageCli, err := s.newChunkManagerFactory()
+	if err != nil {
+		return err
+	}
+
+	if err = s.initMeta(storageCli.RootPath()); err != nil {
 		return err
 	}
 
@@ -296,9 +301,7 @@ func (s *Server) Start() error {
 	}
 	s.startSegmentManager()
 
-	if err = s.initGarbageCollection(); err != nil {
-		return err
-	}
+	s.initGarbageCollection(storageCli)
 
 	s.startServerLoop()
 	Params.DataCoordCfg.CreatedTime = time.Now()
@@ -358,17 +361,17 @@ func (s *Server) stopCompactionTrigger() {
 	s.compactionTrigger.stop()
 }
 
-func (s *Server) initGarbageCollection() error {
-	var cli storage.ChunkManager
-	var err error
-
+func (s *Server) newChunkManagerFactory() (storage.ChunkManager, error) {
 	chunkManagerFactory := storage.NewChunkManagerFactoryWithParam(&Params)
-	cli, err = chunkManagerFactory.NewPersistentStorageChunkManager(s.ctx)
+	cli, err := chunkManagerFactory.NewPersistentStorageChunkManager(s.ctx)
 	if err != nil {
 		log.Error("chunk manager init failed", zap.Error(err))
-		return err
+		return nil, err
 	}
-	log.Info("Datacoord garbage collector chunk manager init success")
+	return cli, err
+}
+
+func (s *Server) initGarbageCollection(cli storage.ChunkManager) {
 	s.garbageCollector = newGarbageCollector(s.meta, s.segReferManager, s.indexCoord, GcOption{
 		cli:              cli,
 		enabled:          Params.DataCoordCfg.EnableGarbageCollection,
@@ -376,7 +379,6 @@ func (s *Server) initGarbageCollection() error {
 		missingTolerance: Params.DataCoordCfg.GCMissingTolerance,
 		dropTolerance:    Params.DataCoordCfg.GCDropTolerance,
 	})
-	return nil
 }
 
 // here we use variable for test convenience
@@ -461,12 +463,12 @@ func (s *Server) startSegmentManager() {
 	}
 }
 
-func (s *Server) initMeta() error {
+func (s *Server) initMeta(chunkManagerRootPath string) error {
 	etcdKV := etcdkv.NewEtcdKV(s.etcdCli, Params.EtcdCfg.MetaRootPath)
 	s.kvClient = etcdKV
 	reloadEtcdFn := func() error {
 		var err error
-		s.meta, err = newMeta(s.ctx, s.kvClient)
+		s.meta, err = newMeta(s.ctx, s.kvClient, chunkManagerRootPath)
 		if err != nil {
 			return err
 		}

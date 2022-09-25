@@ -353,8 +353,10 @@ message Binlog {
   int64 entries_num = 1;
   uint64 timestamp_from = 2;
   uint64 timestamp_to = 3;
+  // deprecated
   string log_path = 4;
   int64 log_size = 5;
+  int64 logID = 6;
 }
 
 message GetRecoveryInfoResponse {

@@ -19,6 +19,7 @@ package etcd
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"fmt"
 	"io/ioutil"
 	"time"
 
@@ -26,6 +27,10 @@ import (
 
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	clientv3 "go.etcd.io/etcd/client/v3"
+)
+
+var (
+	maxTxnNum = 64
 )
 
 // GetEtcdClient returns etcd client
@@ -87,4 +92,69 @@ func GetRemoteEtcdSSLClient(endpoints []string, certFile string, keyFile string,
 	}
 
 	return clientv3.New(cfg)
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+//SaveByBatch there will not guarantee atomicity
+func SaveByBatch(kvs map[string]string, op func(partialKvs map[string]string) error) error {
+	if len(kvs) == 0 {
+		return nil
+	}
+
+	keys := make([]string, 0, len(kvs))
+	values := make([]string, 0, len(kvs))
+
+	for k, v := range kvs {
+		keys = append(keys, k)
+		values = append(values, v)
+	}
+
+	for i := 0; i < len(kvs); i = i + maxTxnNum {
+		end := min(i+maxTxnNum, len(keys))
+		batch, err := buildKvGroup(keys[i:end], values[i:end])
+		if err != nil {
+			return err
+		}
+
+		if err := op(batch); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func RemoveByBatch(removals []string, op func(partialKeys []string) error) error {
+	if len(removals) == 0 {
+		return nil
+	}
+
+	for i := 0; i < len(removals); i = i + maxTxnNum {
+		end := min(i+maxTxnNum, len(removals))
+		batch := removals[i:end]
+		if err := op(batch); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func buildKvGroup(keys, values []string) (map[string]string, error) {
+	if len(keys) != len(values) {
+		return nil, fmt.Errorf("length of keys (%d) and values (%d) are not equal", len(keys), len(values))
+	}
+	ret := make(map[string]string, len(keys))
+	for i, k := range keys {
+		_, ok := ret[k]
+		if ok {
+			return nil, fmt.Errorf("duplicated key was found: %s", k)
+		}
+		ret[k] = values[i]
+	}
+	return ret, nil
 }
