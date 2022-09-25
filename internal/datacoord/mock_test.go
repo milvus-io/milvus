@@ -28,9 +28,11 @@ import (
 	"github.com/milvus-io/milvus/internal/kv"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -725,3 +727,87 @@ func (h *mockHandler) CheckShouldDropChannel(channel string) bool {
 }
 
 func (h *mockHandler) FinishDropChannel(channel string) {}
+
+type mockIndexCoord struct {
+	types.IndexCoord
+}
+
+func newMockIndexCoord() *mockIndexCoord {
+	return &mockIndexCoord{}
+}
+
+func (m *mockIndexCoord) Init() error {
+	return nil
+}
+
+func (m *mockIndexCoord) Start() error {
+	return nil
+}
+
+func (m *mockIndexCoord) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error) {
+	if req.CollectionID == 10000 {
+		return nil, errors.New("server down")
+	}
+
+	// Has diskann index
+	if req.CollectionID == 1000 || req.CollectionID == 2000 ||
+		req.CollectionID == 3000 || req.CollectionID == 4000 {
+		return &indexpb.DescribeIndexResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+			IndexInfos: []*indexpb.IndexInfo{
+				{
+					CollectionID: req.CollectionID,
+					FieldID:      0,
+					IndexName:    "DISKANN",
+					IndexID:      0,
+					TypeParams:   nil,
+					IndexParams: []*commonpb.KeyValuePair{
+						{
+							Key:   "index_type",
+							Value: "DISKANN",
+						},
+					},
+				},
+			},
+		}, nil
+	}
+
+	// Has common index
+	return &indexpb.DescribeIndexResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		IndexInfos: []*indexpb.IndexInfo{
+			{
+				CollectionID: 1,
+				FieldID:      0,
+				IndexName:    "default",
+				IndexID:      0,
+				TypeParams:   nil,
+				IndexParams:  nil,
+			},
+		},
+	}, nil
+}
+
+func (m *mockIndexCoord) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoRequest) (*indexpb.GetIndexInfoResponse, error) {
+	segmentID := req.GetSegmentIDs()[0]
+	collectionID := req.GetCollectionID()
+	return &indexpb.GetIndexInfoResponse{
+		Status: &commonpb.Status{},
+		SegmentInfo: map[int64]*indexpb.SegmentInfo{
+			segmentID: {
+				EnableIndex:  true,
+				CollectionID: collectionID,
+				SegmentID:    segmentID,
+				IndexInfos: []*indexpb.IndexFilePathInfo{
+					{
+						FieldID: int64(201),
+					},
+				},
+			},
+		},
+	}, nil
+}

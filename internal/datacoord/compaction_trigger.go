@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"sync"
 	"time"
@@ -25,7 +26,10 @@ import (
 	"github.com/milvus-io/milvus/api/commonpb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/logutil"
 	"go.uber.org/zap"
 )
@@ -60,16 +64,17 @@ type compactionSignal struct {
 var _ trigger = (*compactionTrigger)(nil)
 
 type compactionTrigger struct {
-	meta              *meta
-	allocator         allocator
-	signals           chan *compactionSignal
-	compactionHandler compactionPlanContext
-	globalTrigger     *time.Ticker
-	forceMu           sync.Mutex
-	quit              chan struct{}
-	wg                sync.WaitGroup
-	segRefer          *SegmentReferenceManager
-	indexCoord        types.IndexCoord
+	meta                      *meta
+	allocator                 allocator
+	signals                   chan *compactionSignal
+	compactionHandler         compactionPlanContext
+	globalTrigger             *time.Ticker
+	forceMu                   sync.Mutex
+	quit                      chan struct{}
+	wg                        sync.WaitGroup
+	segRefer                  *SegmentReferenceManager
+	indexCoord                types.IndexCoord
+	estimateDiskSegmentPolicy calUpperLimitPolicy
 }
 
 func newCompactionTrigger(
@@ -80,12 +85,13 @@ func newCompactionTrigger(
 	indexCoord types.IndexCoord,
 ) *compactionTrigger {
 	return &compactionTrigger{
-		meta:              meta,
-		allocator:         allocator,
-		signals:           make(chan *compactionSignal, 100),
-		compactionHandler: compactionHandler,
-		segRefer:          segRefer,
-		indexCoord:        indexCoord,
+		meta:                      meta,
+		allocator:                 allocator,
+		signals:                   make(chan *compactionSignal, 100),
+		compactionHandler:         compactionHandler,
+		segRefer:                  segRefer,
+		indexCoord:                indexCoord,
+		estimateDiskSegmentPolicy: calBySchemaPolicyWithDiskIndex,
 	}
 }
 
@@ -228,6 +234,48 @@ func getPlanIDs(plans []*datapb.CompactionPlan) []int64 {
 	return ids
 }
 
+func (t *compactionTrigger) estimateDiskSegmentMaxNumOfRows(collectionID UniqueID) (int, error) {
+	collMeta := t.meta.GetCollection(collectionID)
+	if collMeta == nil {
+		return -1, fmt.Errorf("failed to get collection %d", collectionID)
+	}
+
+	return t.estimateDiskSegmentPolicy(collMeta.Schema)
+}
+
+func (t *compactionTrigger) updateSegmentMaxSize(segments []*SegmentInfo) error {
+	ctx := context.Background()
+
+	if len(segments) == 0 {
+		return nil
+	}
+
+	collectionID := segments[0].GetCollectionID()
+	resp, err := t.indexCoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
+		CollectionID: collectionID,
+		IndexName:    "",
+	})
+	if err != nil {
+		return err
+	}
+
+	for _, indexInfo := range resp.IndexInfos {
+		indexParamsMap := funcutil.KeyValuePair2Map(indexInfo.IndexParams)
+		if indexType, ok := indexParamsMap["index_type"]; ok {
+			if indexType == indexparamcheck.IndexDISKANN {
+				diskSegmentMaxRows, err := t.estimateDiskSegmentMaxNumOfRows(collectionID)
+				if err != nil {
+					return err
+				}
+				for _, segment := range segments {
+					segment.MaxRowNum = int64(diskSegmentMaxRows)
+				}
+			}
+		}
+	}
+	return nil
+}
+
 func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) {
 	t.forceMu.Lock()
 	defer t.forceMu.Unlock()
@@ -243,7 +291,14 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) {
 		if !signal.isForce && t.compactionHandler.isFull() {
 			break
 		}
+
 		group.segments = FilterInIndexedSegments(t.meta, t.indexCoord, group.segments...)
+
+		err := t.updateSegmentMaxSize(group.segments)
+		if err != nil {
+			log.Warn("failed to update segment max size,", zap.Error(err))
+			continue
+		}
 
 		plans := t.generatePlans(group.segments, signal.isForce, signal.compactTime)
 		for _, plan := range plans {
@@ -292,6 +347,12 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 	channel := segment.GetInsertChannel()
 	partitionID := segment.GetPartitionID()
 	segments := t.getCandidateSegments(channel, partitionID)
+
+	err := t.updateSegmentMaxSize(segments)
+	if err != nil {
+		log.Warn("failed to update segment max size", zap.Error(err))
+	}
+
 	plans := t.generatePlans(segments, signal.isForce, signal.compactTime)
 	for _, plan := range plans {
 		if t.compactionHandler.isFull() {
