@@ -1541,8 +1541,9 @@ class TestUtilityAdvanced(TestcaseBase):
         all_querynodes = sorted(all_querynodes,
                                 key=lambda x: len(segment_distribution[x]["sealed"])
                                 if x in segment_distribution else 0, reverse=True)
-        # set src_node_id as the id of indexnode's id, which is not exist for querynode
-        invalid_src_node_id = [node["identifier"] for node in ms.index_nodes][0]
+        # add node id greater than all querynodes, which is not exist for querynode, to src_node_ids
+        max_query_node_id = max(all_querynodes)
+        invalid_src_node_id = max_query_node_id+1
         src_node_id = all_querynodes[0]
         dst_node_ids = all_querynodes[1:]
         sealed_segment_ids = segment_distribution[src_node_id]["sealed"]
@@ -1578,8 +1579,9 @@ class TestUtilityAdvanced(TestcaseBase):
                                 key=lambda x: len(segment_distribution[x]["sealed"])
                                 if x in segment_distribution else 0, reverse=True)
         src_node_id = all_querynodes[0]
-        # add indexnode's id, which is not exist for querynode, to dst_node_ids
-        dst_node_ids = [node["identifier"] for node in ms.index_nodes]
+        # add node id greater than all querynodes, which is not exist for querynode, to dst_node_ids
+        max_query_node_id = max(all_querynodes)
+        dst_node_ids = [id for id in range(max_query_node_id + 1, max_query_node_id + 3)]
         sealed_segment_ids = segment_distribution[src_node_id]["sealed"]
         # load balance
         self.utility_wrap.load_balance(collection_w.name, src_node_id, dst_node_ids, sealed_segment_ids,
@@ -1587,6 +1589,7 @@ class TestUtilityAdvanced(TestcaseBase):
                                        check_items={ct.err_code: 1, ct.err_msg: "no available queryNode to allocate"})
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue: https://github.com/milvus-io/milvus/issues/19441")
     def test_load_balance_with_one_sealed_segment_id_not_exist(self):
         """
         target: test load balance of collection
@@ -1615,10 +1618,47 @@ class TestUtilityAdvanced(TestcaseBase):
                                 if x in segment_distribution else 0, reverse=True)
         src_node_id = all_querynodes[0]
         dst_node_ids = all_querynodes[1:]
-        dst_node_ids.append([node["identifier"] for node in ms.index_nodes][0])
         sealed_segment_ids = segment_distribution[src_node_id]["sealed"]
         # add a segment id which is not exist
         sealed_segment_ids.append(max(segment_distribution[src_node_id]["sealed"]) + 1)
+        # load balance
+        self.utility_wrap.load_balance(collection_w.name, src_node_id, dst_node_ids, sealed_segment_ids,
+                                       check_task=CheckTasks.err_res,
+                                       check_items={ct.err_code: 1, ct.err_msg: "is not exist"})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_load_balance_with_all_sealed_segment_id_not_exist(self):
+        """
+        target: test load balance of collection
+        method: init a collection and load balance with one of sealed segment ids not exist
+        expected: raise exception
+        """
+        # init a collection
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name)
+        collection_w.create_index(default_field_name, default_index_params)
+        ms = MilvusSys()
+        nb = 3000
+        df = cf.gen_default_dataframe_data(nb)
+        collection_w.insert(df)
+        # get sealed segments
+        collection_w.num_entities
+        # get growing segments
+        collection_w.insert(df)
+        collection_w.load()
+        # prepare load balance params
+        res, _ = self.utility_wrap.get_query_segment_info(c_name)
+        segment_distribution = cf.get_segment_distribution(res)
+        all_querynodes = [node["identifier"] for node in ms.query_nodes]
+        all_querynodes = sorted(all_querynodes,
+                                key=lambda x: len(segment_distribution[x]["sealed"])
+                                if x in segment_distribution else 0, reverse=True)
+        src_node_id = all_querynodes[0]
+        dst_node_ids = all_querynodes[1:]
+        # add segment ids which are not exist
+        sealed_segment_ids = [sealed_segment_id
+                              for sealed_segment_id in range(max(segment_distribution[src_node_id]["sealed"]) + 1,
+                                                             max(segment_distribution[src_node_id]["sealed"]) + 3)]
         # load balance
         self.utility_wrap.load_balance(collection_w.name, src_node_id, dst_node_ids, sealed_segment_ids,
                                        check_task=CheckTasks.err_res,
