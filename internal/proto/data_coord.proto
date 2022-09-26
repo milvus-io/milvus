@@ -12,6 +12,12 @@ import "schema.proto";
 // TODO: import google/protobuf/empty.proto
 message Empty {}
 
+enum SegmentType {
+  New = 0;
+  Normal = 1;
+  Flushed = 2;
+}
+
 service DataCoord {
   rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
   rpc GetTimeTickChannel(internal.GetTimeTickChannelRequest) returns(milvus.StringResponse) {}
@@ -53,7 +59,9 @@ service DataCoord {
   rpc AcquireSegmentLock(AcquireSegmentLockRequest) returns (common.Status) {}
   rpc ReleaseSegmentLock(ReleaseSegmentLockRequest) returns (common.Status) {}
 
-  rpc AddSegment(AddSegmentRequest) returns(common.Status) {}
+  rpc SaveImportSegment(SaveImportSegmentRequest) returns(common.Status) {}
+  rpc UnsetIsImportingState(UnsetIsImportingStateRequest) returns(common.Status) {}
+  rpc MarkSegmentsDropped(MarkSegmentsDroppedRequest) returns(common.Status) {}
 }
 
 service DataNode {
@@ -76,7 +84,7 @@ service DataNode {
 
   rpc ResendSegmentStats(ResendSegmentStatsRequest) returns(ResendSegmentStatsResponse) {}
 
-  rpc AddSegment(AddSegmentRequest) returns(common.Status) {}
+  rpc AddImportSegment(AddImportSegmentRequest) returns(AddImportSegmentResponse) {}
 }
 
 message FlushRequest {
@@ -530,8 +538,8 @@ message ImportTaskInfo {
   repeated string files = 9;                    // A list of files to import.
   int64 create_ts = 10;                         // Timestamp when the import task is created.
   ImportTaskState state = 11;                   // State of the import task.
-  bool data_queryable = 12;                     // A flag indicating whether import data are queryable (i.e. loaded in query nodes)
-  bool data_indexed = 13;                       // A flag indicating whether import data are indexed.
+  string collection_name = 12;                  // Collection name for the import task.
+  string partition_name = 13;                   // Partition name for the import task.
 }
 
 message ImportTaskResponse {
@@ -559,13 +567,40 @@ message ResendSegmentStatsResponse {
   repeated int64 seg_resent = 2;
 }
 
-message AddSegmentRequest {
+message AddImportSegmentRequest {
   common.MsgBase base = 1;
   int64 segment_id = 2;
   string channel_name = 3;
   int64 collection_id = 4;
   int64 partition_id = 5;
   int64 row_num = 6;
+  repeated FieldBinlog stats_log = 7;
+}
+
+message AddImportSegmentResponse {
+  common.Status status = 1;
+  bytes channel_pos = 2;
+}
+
+message SaveImportSegmentRequest {
+  common.MsgBase base = 1;
+  int64 segment_id = 2;
+  string channel_name = 3;
+  int64 collection_id = 4;
+  int64 partition_id = 5;
+  int64 row_num = 6;
+  SaveBinlogPathsRequest save_binlog_path_req = 7;
+  bytes dml_position_id = 8;
+}
+
+message UnsetIsImportingStateRequest {
+  common.MsgBase base = 1;
+  repeated int64 segment_ids = 2;       // IDs of segments whose `isImport` states need to be unset.
+}
+
+message MarkSegmentsDroppedRequest {
+  common.MsgBase base = 1;
+  repeated int64 segment_ids = 2;       // IDs of segments that needs to be marked as `dropped`.
 }
 
 message SegmentReferenceLock {

@@ -175,7 +175,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 		gc.close()
 	})
 	t.Run("hit, no gc", func(t *testing.T) {
-		segment := buildSegment(1, 10, 100, "ch")
+		segment := buildSegment(1, 10, 100, "ch", false)
 		segment.State = commonpb.SegmentState_Flushed
 		segment.Binlogs = []*datapb.FieldBinlog{getFieldBinlogPaths(0, inserts[0])}
 		segment.Statslogs = []*datapb.FieldBinlog{getFieldBinlogPaths(0, stats[0])}
@@ -201,7 +201,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 	})
 
 	t.Run("dropped gc one", func(t *testing.T) {
-		segment := buildSegment(1, 10, 100, "ch")
+		segment := buildSegment(1, 10, 100, "ch", false)
 		segment.State = commonpb.SegmentState_Dropped
 		segment.DroppedAt = uint64(time.Now().Add(-time.Hour).UnixNano())
 		segment.Binlogs = []*datapb.FieldBinlog{getFieldBinlogPaths(0, inserts[0])}
@@ -237,6 +237,27 @@ func Test_garbageCollector_scan(t *testing.T) {
 		gc.start()
 		gc.scan()
 		gc.clearEtcd()
+
+		// bad path shall remains since datacoord cannot determine file is garbage or not if path is not valid
+		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, insertLogPrefix), inserts[1:2])
+		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, statsLogPrefix), stats[1:2])
+		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, deltaLogPrefix), delta[1:2])
+		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, `indexes`), others)
+
+		gc.close()
+	})
+
+	t.Run("list object with error", func(t *testing.T) {
+		gc := newGarbageCollector(meta, segRefer, indexCoord, GcOption{
+			cli:              cli,
+			enabled:          true,
+			checkInterval:    time.Minute * 30,
+			missingTolerance: 0,
+			dropTolerance:    0,
+		})
+		gc.start()
+		gc.scan()
+
 		// bad path shall remains since datacoord cannot determine file is garbage or not if path is not valid
 		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, insertLogPrefix), inserts[1:2])
 		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, statsLogPrefix), stats[1:2])

@@ -284,7 +284,8 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) {
 		return (signal.collectionID == 0 || segment.CollectionID == signal.collectionID) &&
 			isSegmentHealthy(segment) &&
 			isFlush(segment) &&
-			!segment.isCompacting // not compacting now
+			!segment.isCompacting && // not compacting now
+			!segment.GetIsImporting() // not importing now
 	}) // m is list of chanPartSegments, which is channel-partition organized segments
 
 	for _, group := range m {
@@ -535,7 +536,8 @@ func (t *compactionTrigger) getCandidateSegments(channel string, partitionID Uni
 			!isFlush(s) ||
 			s.GetInsertChannel() != channel ||
 			s.GetPartitionID() != partitionID ||
-			s.isCompacting {
+			s.isCompacting ||
+			s.GetIsImporting() {
 			continue
 		}
 		res = append(res, s)

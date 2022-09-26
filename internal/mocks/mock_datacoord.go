@@ -76,53 +76,6 @@ func (_c *DataCoord_AcquireSegmentLock_Call) Return(_a0 *commonpb.Status, _a1 er
 	return _c
 }
 
-// AddSegment provides a mock function with given fields: ctx, req
-func (_m *DataCoord) AddSegment(ctx context.Context, req *datapb.AddSegmentRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
-
-	var r0 *commonpb.Status
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.AddSegmentRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*commonpb.Status)
-		}
-	}
-
-	var r1 error
-	if rf, ok := ret.Get(1).(func(context.Context, *datapb.AddSegmentRequest) error); ok {
-		r1 = rf(ctx, req)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// DataCoord_AddSegment_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AddSegment'
-type DataCoord_AddSegment_Call struct {
-	*mock.Call
-}
-
-// AddSegment is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *datapb.AddSegmentRequest
-func (_e *DataCoord_Expecter) AddSegment(ctx interface{}, req interface{}) *DataCoord_AddSegment_Call {
-	return &DataCoord_AddSegment_Call{Call: _e.mock.On("AddSegment", ctx, req)}
-}
-
-func (_c *DataCoord_AddSegment_Call) Run(run func(ctx context.Context, req *datapb.AddSegmentRequest)) *DataCoord_AddSegment_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*datapb.AddSegmentRequest))
-	})
-	return _c
-}
-
-func (_c *DataCoord_AddSegment_Call) Return(_a0 *commonpb.Status, _a1 error) *DataCoord_AddSegment_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
 // AssignSegmentID provides a mock function with given fields: ctx, req
 func (_m *DataCoord) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error) {
 	ret := _m.Called(ctx, req)
@@ -1095,6 +1048,53 @@ func (_c *DataCoord_ManualCompaction_Call) Return(_a0 *milvuspb.ManualCompaction
 	return _c
 }
 
+// MarkSegmentsDropped provides a mock function with given fields: ctx, req
+func (_m *DataCoord) MarkSegmentsDropped(ctx context.Context, req *datapb.MarkSegmentsDroppedRequest) (*commonpb.Status, error) {
+	ret := _m.Called(ctx, req)
+
+	var r0 *commonpb.Status
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.MarkSegmentsDroppedRequest) *commonpb.Status); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.MarkSegmentsDroppedRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// DataCoord_MarkSegmentsDropped_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'MarkSegmentsDropped'
+type DataCoord_MarkSegmentsDropped_Call struct {
+	*mock.Call
+}
+
+// MarkSegmentsDropped is a helper method to define mock.On call
+//  - ctx context.Context
+//  - req *datapb.MarkSegmentsDroppedRequest
+func (_e *DataCoord_Expecter) MarkSegmentsDropped(ctx interface{}, req interface{}) *DataCoord_MarkSegmentsDropped_Call {
+	return &DataCoord_MarkSegmentsDropped_Call{Call: _e.mock.On("MarkSegmentsDropped", ctx, req)}
+}
+
+func (_c *DataCoord_MarkSegmentsDropped_Call) Run(run func(ctx context.Context, req *datapb.MarkSegmentsDroppedRequest)) *DataCoord_MarkSegmentsDropped_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.MarkSegmentsDroppedRequest))
+	})
+	return _c
+}
+
+func (_c *DataCoord_MarkSegmentsDropped_Call) Return(_a0 *commonpb.Status, _a1 error) *DataCoord_MarkSegmentsDropped_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
 // Register provides a mock function with given fields:
 func (_m *DataCoord) Register() error {
 	ret := _m.Called()
@@ -1221,6 +1221,53 @@ func (_c *DataCoord_SaveBinlogPaths_Call) Run(run func(ctx context.Context, req 
 }
 
 func (_c *DataCoord_SaveBinlogPaths_Call) Return(_a0 *commonpb.Status, _a1 error) *DataCoord_SaveBinlogPaths_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+// SaveImportSegment provides a mock function with given fields: ctx, req
+func (_m *DataCoord) SaveImportSegment(ctx context.Context, req *datapb.SaveImportSegmentRequest) (*commonpb.Status, error) {
+	ret := _m.Called(ctx, req)
+
+	var r0 *commonpb.Status
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.SaveImportSegmentRequest) *commonpb.Status); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.SaveImportSegmentRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// DataCoord_SaveImportSegment_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveImportSegment'
+type DataCoord_SaveImportSegment_Call struct {
+	*mock.Call
+}
+
+// SaveImportSegment is a helper method to define mock.On call
+//  - ctx context.Context
+//  - req *datapb.SaveImportSegmentRequest
+func (_e *DataCoord_Expecter) SaveImportSegment(ctx interface{}, req interface{}) *DataCoord_SaveImportSegment_Call {
+	return &DataCoord_SaveImportSegment_Call{Call: _e.mock.On("SaveImportSegment", ctx, req)}
+}
+
+func (_c *DataCoord_SaveImportSegment_Call) Run(run func(ctx context.Context, req *datapb.SaveImportSegmentRequest)) *DataCoord_SaveImportSegment_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.SaveImportSegmentRequest))
+	})
+	return _c
+}
+
+func (_c *DataCoord_SaveImportSegment_Call) Return(_a0 *commonpb.Status, _a1 error) *DataCoord_SaveImportSegment_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
@@ -1388,6 +1435,53 @@ func (_c *DataCoord_Stop_Call) Run(run func()) *DataCoord_Stop_Call {
 
 func (_c *DataCoord_Stop_Call) Return(_a0 error) *DataCoord_Stop_Call {
 	_c.Call.Return(_a0)
+	return _c
+}
+
+// UnsetIsImportingState provides a mock function with given fields: ctx, req
+func (_m *DataCoord) UnsetIsImportingState(ctx context.Context, req *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error) {
+	ret := _m.Called(ctx, req)
+
+	var r0 *commonpb.Status
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.UnsetIsImportingStateRequest) *commonpb.Status); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.UnsetIsImportingStateRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// DataCoord_UnsetIsImportingState_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UnsetIsImportingState'
+type DataCoord_UnsetIsImportingState_Call struct {
+	*mock.Call
+}
+
+// UnsetIsImportingState is a helper method to define mock.On call
+//  - ctx context.Context
+//  - req *datapb.UnsetIsImportingStateRequest
+func (_e *DataCoord_Expecter) UnsetIsImportingState(ctx interface{}, req interface{}) *DataCoord_UnsetIsImportingState_Call {
+	return &DataCoord_UnsetIsImportingState_Call{Call: _e.mock.On("UnsetIsImportingState", ctx, req)}
+}
+
+func (_c *DataCoord_UnsetIsImportingState_Call) Run(run func(ctx context.Context, req *datapb.UnsetIsImportingStateRequest)) *DataCoord_UnsetIsImportingState_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.UnsetIsImportingStateRequest))
+	})
+	return _c
+}
+
+func (_c *DataCoord_UnsetIsImportingState_Call) Return(_a0 *commonpb.Status, _a1 error) *DataCoord_UnsetIsImportingState_Call {
+	_c.Call.Return(_a0, _a1)
 	return _c
 }
 

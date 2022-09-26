@@ -614,11 +614,17 @@ func TestDropVirtualChannelFunc(t *testing.T) {
 	}
 	dropFunc := dropVirtualChannelFunc(dsService, retry.Attempts(1))
 	t.Run("normal run", func(t *testing.T) {
-		replica.addNewSegment(2, 1, 10, "vchan_01", &internalpb.MsgPosition{
-			ChannelName: "vchan_01",
-			MsgID:       []byte{1, 2, 3},
-			Timestamp:   10,
-		}, nil)
+		replica.addSegment(
+			addSegmentReq{
+				segType:     datapb.SegmentType_New,
+				segID:       2,
+				collID:      1,
+				partitionID: 10,
+				channelName: "vchan_01", startPos: &internalpb.MsgPosition{
+					ChannelName: "vchan_01",
+					MsgID:       []byte{1, 2, 3},
+					Timestamp:   10,
+				}, endPos: nil})
 		assert.NotPanics(t, func() {
 			dropFunc([]*segmentFlushPack{
 				{

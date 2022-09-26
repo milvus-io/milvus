@@ -149,11 +149,6 @@ func (c *Cluster) ReCollectSegmentStats(ctx context.Context, nodeID int64) {
 	c.sessionManager.ReCollectSegmentStats(ctx, nodeID)
 }
 
-// AddSegment triggers a AddSegment call from session manager.
-func (c *Cluster) AddSegment(ctx context.Context, nodeID int64, req *datapb.AddSegmentRequest) {
-	c.sessionManager.AddSegment(ctx, nodeID, req)
-}
-
 // GetSessions returns all sessions
 func (c *Cluster) GetSessions() []*Session {
 	return c.sessionManager.GetSessions()

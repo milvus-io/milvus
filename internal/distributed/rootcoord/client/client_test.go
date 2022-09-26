@@ -410,7 +410,6 @@ func Test_NewClient(t *testing.T) {
 		rTimeout, err := client.ListPolicy(shortCtx, nil)
 		retCheck(rTimeout, err)
 	}
-
 	// clean up
 	err = client.Stop()
 	assert.Nil(t, err)

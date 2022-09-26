@@ -109,6 +109,13 @@ func (s *SegmentsInfo) SetState(segmentID UniqueID, state commonpb.SegmentState)
 	}
 }
 
+// SetIsImporting sets the import status for a segment.
+func (s *SegmentsInfo) SetIsImporting(segmentID UniqueID, isImporting bool) {
+	if segment, ok := s.segments[segmentID]; ok {
+		s.segments[segmentID] = segment.Clone(SetIsImporting(isImporting))
+	}
+}
+
 // SetDmlPosition sets DmlPosition info (checkpoint for recovery) for SegmentInfo with provided segmentID
 // if SegmentInfo not found, do nothing
 func (s *SegmentsInfo) SetDmlPosition(segmentID UniqueID, pos *internalpb.MsgPosition) {
@@ -179,7 +186,7 @@ func (s *SegmentsInfo) AddSegmentBinlogs(segmentID UniqueID, field2Binlogs map[U
 	}
 }
 
-// SetIsCompacting sets compactino status for segment
+// SetIsCompacting sets compaction status for segment
 func (s *SegmentsInfo) SetIsCompacting(segmentID UniqueID, isCompacting bool) {
 	if segment, ok := s.segments[segmentID]; ok {
 		s.segments[segmentID] = segment.ShadowClone(SetIsCompacting(isCompacting))
@@ -243,6 +250,13 @@ func SetExpireTime(expireTs Timestamp) SegmentInfoOption {
 func SetState(state commonpb.SegmentState) SegmentInfoOption {
 	return func(segment *SegmentInfo) {
 		segment.State = state
+	}
+}
+
+// SetIsImporting is the option to set import state for segment info.
+func SetIsImporting(isImporting bool) SegmentInfoOption {
+	return func(segment *SegmentInfo) {
+		segment.IsImporting = isImporting
 	}
 }
 

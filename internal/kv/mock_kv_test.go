@@ -17,6 +17,7 @@
 package kv
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -28,7 +29,7 @@ const testValue = "value"
 
 func TestMockKV_MetaKV(t *testing.T) {
 	mockKv := &MockMetaKV{}
-	mockKv.InMemKv = make(map[string]string)
+	mockKv.InMemKv = sync.Map{}
 
 	var err error
 	value, err := mockKv.Load(testKey)
@@ -42,17 +43,13 @@ func TestMockKV_MetaKV(t *testing.T) {
 	_, _, err = mockKv.LoadWithPrefix(testKey)
 	assert.NoError(t, err)
 
-	assert.Panics(t, func() {
-		mockKv.Save(testKey, testValue)
-	})
+	assert.NoError(t, mockKv.Save(testKey, testValue))
 
 	assert.Panics(t, func() {
 		mockKv.MultiSave(map[string]string{testKey: testValue})
 	})
 
-	assert.Panics(t, func() {
-		mockKv.Remove(testKey)
-	})
+	assert.NoError(t, mockKv.Remove(testKey))
 
 	assert.Panics(t, func() {
 		mockKv.MultiRemove([]string{testKey})

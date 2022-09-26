@@ -61,6 +61,10 @@ enum ErrorCode {
     ForceDeny = 48;
     RateLimit = 49;
 
+    // Service availability.
+    // NA: Not Available.
+    DataCoordNA = 100;
+
     // internal error code.
     DDRequestRace = 1000;
 }
@@ -269,14 +273,12 @@ enum ConsistencyLevel {
 }
 
 enum ImportState {
-    ImportPending = 0;
-    ImportFailed = 1;
-    ImportStarted = 2;
-    ImportDownloaded = 3;
-    ImportParsed = 4;
-    ImportPersisted = 5;
-    ImportCompleted = 6;
-    ImportAllocSegment = 10;
+    ImportPending = 0;              // the task in in pending list of rootCoord, waiting to be executed
+    ImportFailed = 1;               // the task failed for some reason, get detail reason from GetImportStateResponse.infos
+    ImportStarted = 2;              // the task has been sent to datanode to execute
+    ImportPersisted = 5;            // all data files have been parsed and data already persisted
+    ImportCompleted = 6;            // all indexes are successfully built and segments are able to be compacted as normal.
+    ImportFailedAndCleaned = 7;     // the task failed and all segments it generated are cleaned up.
 }
 
 enum ObjectType {

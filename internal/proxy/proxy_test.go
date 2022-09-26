@@ -1657,12 +1657,14 @@ func TestProxy(t *testing.T) {
 		defer wg.Done()
 		req := &milvuspb.ImportRequest{
 			CollectionName: collectionName,
-			Files:          []string{"f1", "f2", "f3"},
+			Files:          []string{"f1.json", "f2.json", "f3.csv"},
 		}
 		proxy.stateCode.Store(internalpb.StateCode_Healthy)
 		resp, err := proxy.Import(context.TODO(), req)
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 		assert.Nil(t, err)
+		// Wait a bit for complete import to start.
+		time.Sleep(2 * time.Second)
 	})
 
 	wg.Add(1)
@@ -3720,44 +3722,6 @@ func TestProxy_Import(t *testing.T) {
 		resp, err := proxy.Import(context.TODO(), req)
 		assert.NoError(t, err)
 		assert.EqualValues(t, unhealthyStatus(), resp.GetStatus())
-	})
-
-	wg.Add(1)
-	t.Run("collection not found", func(t *testing.T) {
-		defer wg.Done()
-		proxy := &Proxy{}
-		proxy.UpdateStateCode(internalpb.StateCode_Healthy)
-		cache := newMockCache()
-		cache.setGetIDFunc(func(ctx context.Context, collectionName string) (typeutil.UniqueID, error) {
-			return 0, errors.New("mock")
-		})
-		globalMetaCache = cache
-		req := &milvuspb.ImportRequest{
-			CollectionName: "dummy",
-		}
-		resp, err := proxy.Import(context.TODO(), req)
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-	})
-
-	wg.Add(1)
-	t.Run("failed to get virtual channels", func(t *testing.T) {
-		defer wg.Done()
-		proxy := &Proxy{}
-		proxy.UpdateStateCode(internalpb.StateCode_Healthy)
-		cache := newMockCache()
-		globalMetaCache = cache
-		chMgr := newMockChannelsMgr()
-		chMgr.getVChannelsFuncType = func(collectionID UniqueID) ([]vChan, error) {
-			return nil, errors.New("mock")
-		}
-		proxy.chMgr = chMgr
-		req := &milvuspb.ImportRequest{
-			CollectionName: "dummy",
-		}
-		resp, err := proxy.Import(context.TODO(), req)
-		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
 	wg.Add(1)
