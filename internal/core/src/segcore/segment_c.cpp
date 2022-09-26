@@ -18,7 +18,6 @@
 #include "segcore/Collection.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentSealedImpl.h"
-#include "segcore/SimilarityCorelation.h"
 #include "segcore/segment_c.h"
 #include "index/IndexInfo.h"
 #include "google/protobuf/text_format.h"
@@ -72,7 +71,7 @@ Search(CSegmentInterface c_segment,
         auto plan = (milvus::query::Plan*)c_plan;
         auto phg_ptr = reinterpret_cast<const milvus::query::PlaceholderGroup*>(c_placeholder_group);
         auto search_result = segment->Search(plan, phg_ptr, timestamp);
-        if (!milvus::segcore::PositivelyRelated(plan->plan_node_->search_info_.metric_type_)) {
+        if (!milvus::PositivelyRelated(plan->plan_node_->search_info_.metric_type_)) {
             for (auto& dis : search_result->distances_) {
                 dis *= -1;
             }
