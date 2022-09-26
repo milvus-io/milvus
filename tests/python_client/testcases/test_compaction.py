@@ -312,6 +312,7 @@ class TestCompactionParams(TestcaseBase):
         """
         # create collection shard_num=1, insert 2 segments, each with tmp_nb entities
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), shards_num=1)
+        collection_w.create_index(ct.default_float_vec_field_name, ct.default_index)
         collection_w.compact()
 
         # Notice:The merge segments compaction triggered by max_compaction_interval also needs to meet
@@ -322,9 +323,6 @@ class TestCompactionParams(TestcaseBase):
             assert collection_w.num_entities == tmp_nb * (i + 1)
 
         sleep(ct.max_compaction_interval + 1)
-
-        # create index
-        collection_w.create_index(ct.default_float_vec_field_name, ct.default_index)
 
         # verify queryNode load the compacted segments
         collection_w.load()
@@ -446,6 +444,7 @@ class TestCompactionOperation(TestcaseBase):
             insert_res, _ = collection_w.insert(df)
             log.debug(collection_w.num_entities)
 
+        collection_w.create_index(ct.default_float_vec_field_name, ct.default_index)
         collection_w.load()
         log.debug(self.utility_wrap.get_query_segment_info(collection_w.name))
 
@@ -658,7 +657,7 @@ class TestCompactionOperation(TestcaseBase):
         df = cf.gen_default_dataframe_data()
         insert_res, _ = collection_w.insert(df)
         assert collection_w.num_entities == ct.default_nb
-
+        collection_w.create_index(ct.default_float_vec_field_name, ct.default_index)
         collection_w.load()
 
         expr = f'{ct.default_int64_field_name} in {insert_res.primary_keys[:ct.default_nb // 2]}'
@@ -1238,7 +1237,7 @@ class TestCompactionOperation(TestcaseBase):
         replicas = collection_w.get_replicas()[0]
         replica_num = len(replicas.groups)
         seg_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
-        assert len(seg_info) == 1*replica_num
+        assert len(seg_info) != 1*replica_num
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_compact_during_search(self):
@@ -1263,6 +1262,7 @@ class TestCompactionOperation(TestcaseBase):
                 assert len(search_res[0]) == ct.default_limit
 
         # compact during search
+        collection_w.create_index(ct.default_float_vec_field_name, ct.default_index)
         collection_w.load()
         t = threading.Thread(target=do_search, args=())
         t.start()

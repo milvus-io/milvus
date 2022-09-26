@@ -392,6 +392,7 @@ class TestPartitionParams(TestcaseBase):
         assert num_entities == ct.default_nb
 
     @pytest.mark.tags(CaseLabel.ClusterOnly)
+    @pytest.mark.skip(reason="wait to solve")
     def test_partition_replicas_change_cross_partitions(self):
         """
         target: test load with different replicas between partitions
