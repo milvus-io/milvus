@@ -73,6 +73,7 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegments() {
 				PartitionID: 1,
 				SegmentID:   1,
 				NodeID:      1,
+				Version:     1,
 			},
 		},
 	}
@@ -90,6 +91,28 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegments() {
 		10*time.Second,
 		500*time.Millisecond,
 	)
+}
+
+func (suite *LeaderObserverTestSuite) TestIgnoreBalancedSegment() {
+	observer := suite.observer
+	observer.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
+	observer.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
+	observer.target.AddSegment(utils.CreateTestSegmentInfo(1, 1, 1, "test-insert-channel"))
+	observer.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 1, 1, "test-insert-channel"))
+	observer.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
+
+	// The leader view saw the segment on new node,
+	// but another nodes not yet
+	leaderView := utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, []int64{})
+	leaderView.Segments[1] = &querypb.SegmentDist{
+		NodeID:  2,
+		Version: 2,
+	}
+	observer.dist.LeaderViewManager.Update(2, leaderView)
+	observer.Start(context.TODO())
+
+	// Nothing should happen
+	time.Sleep(2 * time.Second)
 }
 
 func (suite *LeaderObserverTestSuite) TestSyncLoadedSegmentsWithReplicas() {
@@ -115,6 +138,7 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegmentsWithReplicas() {
 				PartitionID: 1,
 				SegmentID:   1,
 				NodeID:      1,
+				Version:     1,
 			},
 		},
 	}

@@ -101,6 +101,7 @@ type shardSegmentInfo struct {
 	partitionID int64
 	nodeID      int64
 	state       segmentState
+	version     int64
 	inUse       int32
 }
 
@@ -268,6 +269,7 @@ func (sc *ShardCluster) removeNode(evt nodeEvent) {
 	for id, segment := range sc.segments {
 		if segment.nodeID == evt.nodeID {
 			segment.state = segmentStateOffline
+			segment.version = -1
 			sc.segments[id] = segment
 			sc.updateShardClusterState(unavailable)
 		}
@@ -291,12 +293,7 @@ func (sc *ShardCluster) updateSegment(evt shardSegmentInfo) {
 
 	old, ok := sc.segments[evt.segmentID]
 	if !ok { // newly add
-		sc.segments[evt.segmentID] = shardSegmentInfo{
-			nodeID:      evt.nodeID,
-			partitionID: evt.partitionID,
-			segmentID:   evt.segmentID,
-			state:       evt.state,
-		}
+		sc.segments[evt.segmentID] = evt
 		return
 	}
 
@@ -310,8 +307,9 @@ func (sc *ShardCluster) SyncSegments(distribution []*querypb.ReplicaSegmentsInfo
 
 	sc.mut.Lock()
 	for _, line := range distribution {
-		for _, segmentID := range line.GetSegmentIds() {
+		for i, segmentID := range line.GetSegmentIds() {
 			nodeID := line.GetNodeId()
+			version := line.GetVersions()[i]
 			// if node id not in replica node list, this line shall be placeholder for segment offline
 			_, ok := sc.nodes[nodeID]
 			if !ok {
@@ -326,6 +324,7 @@ func (sc *ShardCluster) SyncSegments(distribution []*querypb.ReplicaSegmentsInfo
 					partitionID: line.GetPartitionId(),
 					segmentID:   segmentID,
 					state:       state,
+					version:     version,
 				}
 				continue
 			}
@@ -335,6 +334,7 @@ func (sc *ShardCluster) SyncSegments(distribution []*querypb.ReplicaSegmentsInfo
 				partitionID: line.GetPartitionId(),
 				segmentID:   segmentID,
 				state:       state,
+				version:     version,
 			})
 		}
 	}
@@ -365,6 +365,7 @@ func (sc *ShardCluster) transferSegment(old shardSegmentInfo, evt shardSegmentIn
 	case segmentStateOffline: // safe to update nodeID and state
 		old.nodeID = evt.nodeID
 		old.state = evt.state
+		old.version = evt.version
 		sc.segments[old.segmentID] = old
 		if evt.state == segmentStateLoaded {
 			sc.healthCheck()
@@ -376,6 +377,7 @@ func (sc *ShardCluster) transferSegment(old shardSegmentInfo, evt shardSegmentIn
 		}
 		old.nodeID = evt.nodeID
 		old.state = evt.state
+		old.version = evt.version
 		sc.segments[old.segmentID] = old
 		if evt.state == segmentStateLoaded {
 			sc.healthCheck()
@@ -384,6 +386,7 @@ func (sc *ShardCluster) transferSegment(old shardSegmentInfo, evt shardSegmentIn
 		// load balance
 		old.nodeID = evt.nodeID
 		old.state = evt.state
+		old.version = evt.version
 		sc.segments[old.segmentID] = old
 		if evt.state != segmentStateLoaded {
 			sc.healthCheck()
@@ -705,7 +708,13 @@ func (sc *ShardCluster) LoadSegments(ctx context.Context, req *querypb.LoadSegme
 
 	// update allocation
 	for _, info := range req.Infos {
-		sc.updateSegment(shardSegmentInfo{nodeID: req.DstNodeID, segmentID: info.SegmentID, partitionID: info.PartitionID, state: segmentStateLoaded})
+		sc.updateSegment(shardSegmentInfo{
+			nodeID:      req.DstNodeID,
+			segmentID:   info.SegmentID,
+			partitionID: info.PartitionID,
+			state:       segmentStateLoaded,
+			version:     req.GetVersion(),
+		})
 	}
 
 	// notify handoff wait online if any

@@ -77,6 +77,7 @@ func TestShardClusterService_SyncReplicaSegments(t *testing.T) {
 				PartitionId: defaultPartitionID,
 
 				SegmentIds: []int64{1},
+				Versions:   []int64{1},
 			},
 		})
 

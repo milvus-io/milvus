@@ -105,7 +105,7 @@ func (suite *MergerSuite) TestMerge() {
 
 	for segmentID := int64(1); segmentID <= 3; segmentID++ {
 		task := NewSegmentTask(ctx, timeout, 0, suite.collectionID, suite.replicaID,
-			NewSegmentAction(suite.nodeID, ActionTypeGrow, segmentID))
+			NewSegmentAction(suite.nodeID, ActionTypeGrow, "", segmentID))
 
 		suite.merger.Add(NewLoadSegmentsTask(task, 0, suite.requests[segmentID]))
 	}

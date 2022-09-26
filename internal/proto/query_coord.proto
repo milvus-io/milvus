@@ -280,6 +280,7 @@ message ReplicaSegmentsInfo {
   int64 node_id = 1;
   int64 partition_id = 2;
   repeated int64 segment_ids = 3;
+  repeated int64 versions = 4;
 }
 
 //----------------request auto triggered by QueryCoord-----------------
@@ -423,8 +424,13 @@ message GetDataDistributionResponse {
 message LeaderView {
   int64 collection = 1;
   string channel = 2;
-  map<int64, int64> segment_node_pairs = 3;
+  map<int64, SegmentDist> segment_dist = 3;
   repeated int64 growing_segmentIDs = 4;
+}
+
+message SegmentDist {
+  int64 nodeID = 1;
+  int64 version = 2;
 }
 
 
@@ -478,6 +484,7 @@ message SyncAction {
   int64 partitionID = 2;
   int64 segmentID = 3;
   int64 nodeID = 4;
+  int64 version = 5;
 }
 
 message SyncDistributionRequest {

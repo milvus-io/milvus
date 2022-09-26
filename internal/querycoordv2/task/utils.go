@@ -88,6 +88,7 @@ func packReleaseSegmentRequest(task *SegmentTask, action *SegmentAction) *queryp
 		CollectionID: task.CollectionID(),
 		SegmentIDs:   []int64{task.SegmentID()},
 		Scope:        action.Scope(),
+		Shard:        action.Shard(),
 		NeedTransfer: false,
 	}
 }

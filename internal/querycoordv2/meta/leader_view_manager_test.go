@@ -3,6 +3,7 @@ package meta
 import (
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/suite"
@@ -54,10 +55,13 @@ func (suite *LeaderViewManagerSuite) SetupSuite() {
 				CollectionID:    collection,
 				Channel:         channel,
 				GrowingSegments: typeutil.NewUniqueSet(suite.growingSegments[collection][channel]),
-				Segments:        make(map[int64]int64),
+				Segments:        make(map[int64]*querypb.SegmentDist),
 			}
 			for k, segment := range suite.segments[collection] {
-				view.Segments[segment] = suite.nodes[k]
+				view.Segments[segment] = &querypb.SegmentDist{
+					NodeID:  suite.nodes[k],
+					Version: 0,
+				}
 			}
 			suite.leaders[int64(j)] = map[string]*LeaderView{
 				suite.channels[collection][j-1]: view,
@@ -141,10 +145,10 @@ func (suite *LeaderViewManagerSuite) AssertSegmentDist(segment int64, nodes []in
 	nodeSet := typeutil.NewUniqueSet(nodes...)
 	for leader, views := range suite.leaders {
 		for _, view := range views {
-			node, ok := view.Segments[segment]
+			version, ok := view.Segments[segment]
 			if ok {
-				if !suite.True(nodeSet.Contain(node) ||
-					node == leader && view.GrowingSegments.Contain(node)) {
+				if !suite.True(nodeSet.Contain(version.NodeID) ||
+					version.NodeID == leader && view.GrowingSegments.Contain(version.NodeID)) {
 					return false
 				}
 			}

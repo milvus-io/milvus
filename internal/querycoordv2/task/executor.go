@@ -286,7 +286,11 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 
 	dstNode := action.Node()
 	req := packReleaseSegmentRequest(task, action)
-	if action.Scope() != querypb.DataScope_Streaming {
+	if action.Scope() == querypb.DataScope_Streaming {
+		// Any modification to the segment distribution have to set NeedTransfer true,
+		// to protect the version, which serves search/query
+		req.NeedTransfer = true
+	} else {
 		var targetSegment *meta.Segment
 		segments := ex.dist.SegmentDistManager.GetByNode(action.Node())
 		for _, segment := range segments {
@@ -304,17 +308,13 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 		if ex.meta.CollectionManager.Exist(task.CollectionID()) {
 			leader, ok := getShardLeader(ex.meta.ReplicaManager, ex.dist, task.CollectionID(), action.Node(), req.GetShard())
 			if !ok {
-				log.Warn("no shard leader for the segment to execute loading", zap.String("shard", req.GetShard()))
+				log.Warn("no shard leader for the segment to execute releasing", zap.String("shard", req.GetShard()))
 				return
 			}
 			dstNode = leader
 			log = log.With(zap.Int64("shardLeader", leader))
 			req.NeedTransfer = true
 		}
-	} else {
-		// Any modification to the segment distribution have to set NeedTransfer true,
-		// to protect the version, which serves search/query
-		req.NeedTransfer = true
 	}
 
 	log.Info("release segment...")

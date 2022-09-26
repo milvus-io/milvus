@@ -83,9 +83,9 @@ func (o *LeaderObserver) findNeedLoadedSegments(leaderView *meta.LeaderView, dis
 	ret := make([]*querypb.SyncAction, 0)
 	dists = utils.FindMaxVersionSegments(dists)
 	for _, s := range dists {
-		node, ok := leaderView.Segments[s.GetID()]
-		consistentOnLeader := ok && node == s.Node
-		if consistentOnLeader || !o.target.ContainSegment(s.GetID()) {
+		version, ok := leaderView.Segments[s.GetID()]
+		if ok && version.GetVersion() >= s.Version ||
+			!o.target.ContainSegment(s.GetID()) {
 			continue
 		}
 		ret = append(ret, &querypb.SyncAction{
@@ -93,6 +93,7 @@ func (o *LeaderObserver) findNeedLoadedSegments(leaderView *meta.LeaderView, dis
 			PartitionID: s.GetPartitionID(),
 			SegmentID:   s.GetID(),
 			NodeID:      s.Node,
+			Version:     s.Version,
 		})
 	}
 	return ret
@@ -118,6 +119,10 @@ func (o *LeaderObserver) findNeedRemovedSegments(leaderView *meta.LeaderView, di
 }
 
 func (o *LeaderObserver) sync(ctx context.Context, leaderView *meta.LeaderView, diffs []*querypb.SyncAction) {
+	if len(diffs) == 0 {
+		return
+	}
+
 	log := log.With(
 		zap.Int64("leaderID", leaderView.ID),
 		zap.Int64("collectionID", leaderView.CollectionID),

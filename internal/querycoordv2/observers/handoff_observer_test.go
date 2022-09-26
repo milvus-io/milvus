@@ -116,7 +116,7 @@ func (suite *HandoffObserverTestSuit) TestFlushingHandoff() {
 		ID:              1,
 		CollectionID:    suite.collection,
 		Channel:         suite.channel.ChannelName,
-		Segments:        map[int64]int64{1: 1, 2: 2},
+		Segments:        map[int64]*querypb.SegmentDist{1: {NodeID: 1, Version: 0}, 2: {NodeID: 2, Version: 0}},
 		GrowingSegments: typeutil.NewUniqueSet(3),
 	})
 
@@ -141,7 +141,7 @@ func (suite *HandoffObserverTestSuit) TestFlushingHandoff() {
 		ID:              1,
 		CollectionID:    suite.collection,
 		Channel:         suite.channel.ChannelName,
-		Segments:        map[int64]int64{1: 1, 2: 2, 3: 3},
+		Segments:        map[int64]*querypb.SegmentDist{1: {NodeID: 1, Version: 0}, 2: {NodeID: 2, Version: 0}, 3: {NodeID: 3, Version: 0}},
 		GrowingSegments: typeutil.NewUniqueSet(3),
 	})
 
@@ -154,7 +154,7 @@ func (suite *HandoffObserverTestSuit) TestFlushingHandoff() {
 		ID:           1,
 		CollectionID: suite.collection,
 		Channel:      suite.channel.ChannelName,
-		Segments:     map[int64]int64{1: 1, 2: 2, 3: 3},
+		Segments:     map[int64]*querypb.SegmentDist{1: {NodeID: 1, Version: 0}, 2: {NodeID: 2, Version: 0}, 3: {NodeID: 3, Version: 0}},
 	})
 
 	suite.Eventually(func() bool {
@@ -174,7 +174,7 @@ func (suite *HandoffObserverTestSuit) TestCompactHandoff() {
 		ID:           1,
 		CollectionID: suite.collection,
 		Channel:      suite.channel.ChannelName,
-		Segments:     map[int64]int64{1: 1, 2: 2},
+		Segments:     map[int64]*querypb.SegmentDist{1: {NodeID: 1, Version: 0}, 2: {NodeID: 2, Version: 0}},
 	})
 
 	Params.QueryCoordCfg.CheckHandoffInterval = 1 * time.Second
@@ -201,7 +201,7 @@ func (suite *HandoffObserverTestSuit) TestCompactHandoff() {
 		ID:           1,
 		CollectionID: suite.collection,
 		Channel:      suite.channel.ChannelName,
-		Segments:     map[int64]int64{1: 1, 2: 2, 3: 3},
+		Segments:     map[int64]*querypb.SegmentDist{1: {NodeID: 1, Version: 0}, 2: {NodeID: 2, Version: 0}, 3: {NodeID: 3, Version: 0}},
 	})
 
 	suite.Eventually(func() bool {
@@ -214,7 +214,7 @@ func (suite *HandoffObserverTestSuit) TestCompactHandoff() {
 		ID:           1,
 		CollectionID: suite.collection,
 		Channel:      suite.channel.ChannelName,
-		Segments:     map[int64]int64{2: 2, 3: 3},
+		Segments:     map[int64]*querypb.SegmentDist{2: {NodeID: 2, Version: 0}, 3: {NodeID: 3, Version: 0}},
 	})
 
 	suite.Eventually(func() bool {
@@ -230,7 +230,7 @@ func (suite *HandoffObserverTestSuit) TestRecursiveHandoff() {
 		ID:              1,
 		CollectionID:    suite.collection,
 		Channel:         suite.channel.ChannelName,
-		Segments:        map[int64]int64{1: 1, 2: 2},
+		Segments:        map[int64]*querypb.SegmentDist{1: {NodeID: 1, Version: 0}, 2: {NodeID: 2, Version: 0}},
 		GrowingSegments: typeutil.NewUniqueSet(3),
 	})
 
@@ -272,7 +272,7 @@ func (suite *HandoffObserverTestSuit) TestRecursiveHandoff() {
 		ID:              1,
 		CollectionID:    suite.collection,
 		Channel:         suite.channel.ChannelName,
-		Segments:        map[int64]int64{1: 1, 2: 2, 5: 3},
+		Segments:        map[int64]*querypb.SegmentDist{1: {NodeID: 1, Version: 0}, 2: {NodeID: 2, Version: 0}, 5: {NodeID: 3, Version: 0}},
 		GrowingSegments: typeutil.NewUniqueSet(3),
 	})
 
@@ -289,7 +289,7 @@ func (suite *HandoffObserverTestSuit) TestRecursiveHandoff() {
 		ID:           1,
 		CollectionID: suite.collection,
 		Channel:      suite.channel.ChannelName,
-		Segments:     map[int64]int64{1: 1, 2: 2, 5: 3},
+		Segments:     map[int64]*querypb.SegmentDist{1: {NodeID: 1, Version: 0}, 2: {NodeID: 2, Version: 0}, 5: {NodeID: 3, Version: 0}},
 	})
 
 	suite.Eventually(func() bool {
@@ -317,7 +317,7 @@ func (suite *HandoffObserverTestSuit) TestReloadHandoffEventOrder() {
 		ID:              1,
 		CollectionID:    suite.collection,
 		Channel:         suite.channel.ChannelName,
-		Segments:        map[int64]int64{1: 1, 2: 2},
+		Segments:        map[int64]*querypb.SegmentDist{1: {NodeID: 1, Version: 0}, 2: {NodeID: 2, Version: 0}},
 		GrowingSegments: typeutil.NewUniqueSet(3),
 	})
 
@@ -362,7 +362,7 @@ func (suite *HandoffObserverTestSuit) TestLoadHandoffEventFromStore() {
 		ID:              1,
 		CollectionID:    suite.collection,
 		Channel:         suite.channel.ChannelName,
-		Segments:        map[int64]int64{1: 1, 2: 2},
+		Segments:        map[int64]*querypb.SegmentDist{1: {NodeID: 1, Version: 0}, 2: {NodeID: 2, Version: 0}},
 		GrowingSegments: typeutil.NewUniqueSet(3),
 	})
 
@@ -403,7 +403,7 @@ func (suite *HandoffObserverTestSuit) TestLoadHandoffEventFromStore() {
 		ID:              1,
 		CollectionID:    suite.collection,
 		Channel:         suite.channel.ChannelName,
-		Segments:        map[int64]int64{1: 1, 2: 2, 3: 3, 4: 2, 5: 3},
+		Segments:        map[int64]*querypb.SegmentDist{1: {NodeID: 1, Version: 0}, 2: {NodeID: 2, Version: 0}, 3: {NodeID: 3, Version: 0}, 4: {NodeID: 2, Version: 0}, 5: {NodeID: 3, Version: 0}},
 		GrowingSegments: typeutil.NewUniqueSet(3),
 	})
 
@@ -420,7 +420,7 @@ func (suite *HandoffObserverTestSuit) TestLoadHandoffEventFromStore() {
 		ID:           1,
 		CollectionID: suite.collection,
 		Channel:      suite.channel.ChannelName,
-		Segments:     map[int64]int64{1: 1, 2: 2, 5: 3},
+		Segments:     map[int64]*querypb.SegmentDist{1: {NodeID: 1, Version: 0}, 2: {NodeID: 2, Version: 0}, 5: {NodeID: 3, Version: 0}},
 	})
 
 	suite.Eventually(func() bool {
@@ -496,7 +496,7 @@ func (suite *HandoffObserverTestSuit) TestHandoffOnUnLoadedPartition() {
 		ID:           1,
 		CollectionID: collectionID,
 		Channel:      suite.channel.ChannelName,
-		Segments:     map[int64]int64{1: 1, 2: 2},
+		Segments:     map[int64]*querypb.SegmentDist{1: {NodeID: 1, Version: 0}, 2: {NodeID: 2, Version: 0}},
 	})
 
 	Params.QueryCoordCfg.CheckHandoffInterval = 1 * time.Second

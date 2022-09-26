@@ -167,13 +167,13 @@ func (suite *CollectionObserverSuite) TestObserve() {
 		ID:           1,
 		CollectionID: 100,
 		Channel:      "100-dmc0",
-		Segments:     map[int64]int64{1: 1},
+		Segments:     map[int64]*querypb.SegmentDist{1: {NodeID: 1, Version: 0}},
 	})
 	suite.dist.LeaderViewManager.Update(2, &meta.LeaderView{
 		ID:           2,
 		CollectionID: 100,
 		Channel:      "100-dmc1",
-		Segments:     map[int64]int64{2: 2},
+		Segments:     map[int64]*querypb.SegmentDist{2: {NodeID: 2, Version: 0}},
 	})
 	suite.Eventually(func() bool {
 		return suite.isCollectionLoaded(suite.collections[0]) &&

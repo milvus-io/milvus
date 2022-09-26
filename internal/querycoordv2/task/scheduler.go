@@ -190,11 +190,11 @@ func (scheduler *taskScheduler) Add(task Task) error {
 	scheduler.tasks.Insert(task.ID())
 	switch task := task.(type) {
 	case *SegmentTask:
-		index := replicaSegmentIndex{task.ReplicaID(), task.segmentID}
+		index := replicaSegmentIndex{task.ReplicaID(), task.SegmentID()}
 		scheduler.segmentTasks[index] = task
 
 	case *ChannelTask:
-		index := replicaChannelIndex{task.ReplicaID(), task.channel}
+		index := replicaChannelIndex{task.ReplicaID(), task.Channel()}
 		scheduler.channelTasks[index] = task
 	}
 	if !scheduler.waitQueue.Add(task) {
@@ -219,7 +219,7 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 			if task.Priority() > old.Priority() {
 				log.Info("replace old task, the new one with higher priority",
 					zap.Int64("oldID", old.ID()),
-					zap.Int32("oldPrioprity", old.Priority()),
+					zap.Int32("oldPriority", old.Priority()),
 					zap.Int64("newID", task.ID()),
 					zap.Int32("newPriority", task.Priority()),
 				)
@@ -233,7 +233,7 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 		}
 
 	case *ChannelTask:
-		index := replicaChannelIndex{task.ReplicaID(), task.channel}
+		index := replicaChannelIndex{task.ReplicaID(), task.Channel()}
 		if old, ok := scheduler.channelTasks[index]; ok {
 			if task.Priority() > old.Priority() {
 				log.Info("replace old task, the new one with higher priority",

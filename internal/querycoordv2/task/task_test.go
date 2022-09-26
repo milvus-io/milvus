@@ -333,7 +333,7 @@ func (suite *TaskSuite) TestLoadSegmentTask() {
 			0,
 			suite.collection,
 			suite.replica,
-			NewSegmentAction(targetNode, ActionTypeGrow, segment),
+			NewSegmentAction(targetNode, ActionTypeGrow, channel.GetChannelName(), segment),
 		)
 		tasks = append(tasks, task)
 		err := suite.scheduler.Add(task)
@@ -355,10 +355,10 @@ func (suite *TaskSuite) TestLoadSegmentTask() {
 	view := &meta.LeaderView{
 		ID:           targetNode,
 		CollectionID: suite.collection,
-		Segments:     map[int64]int64{},
+		Segments:     map[int64]*querypb.SegmentDist{},
 	}
 	for _, segment := range suite.loadSegments {
-		view.Segments[segment] = targetNode
+		view.Segments[segment] = &querypb.SegmentDist{NodeID: targetNode, Version: 0}
 	}
 	suite.dist.LeaderViewManager.Update(targetNode, view)
 	suite.dispatchAndWait(targetNode)
@@ -416,7 +416,7 @@ func (suite *TaskSuite) TestLoadSegmentTaskFailed() {
 			0,
 			suite.collection,
 			suite.replica,
-			NewSegmentAction(targetNode, ActionTypeGrow, segment),
+			NewSegmentAction(targetNode, ActionTypeGrow, channel.GetChannelName(), segment),
 		)
 		tasks = append(tasks, task)
 		err := suite.scheduler.Add(task)
@@ -462,7 +462,7 @@ func (suite *TaskSuite) TestReleaseSegmentTask() {
 		ID:           targetNode,
 		CollectionID: suite.collection,
 		Channel:      channel.ChannelName,
-		Segments:     make(map[int64]int64),
+		Segments:     make(map[int64]*querypb.SegmentDist),
 	}
 	segments := make([]*meta.Segment, 0)
 	tasks := []Task{}
@@ -475,14 +475,14 @@ func (suite *TaskSuite) TestReleaseSegmentTask() {
 				InsertChannel: channel.ChannelName,
 			},
 		})
-		view.Segments[segment] = targetNode
+		view.Segments[segment] = &querypb.SegmentDist{NodeID: targetNode, Version: 0}
 		task := NewSegmentTask(
 			ctx,
 			timeout,
 			0,
 			suite.collection,
 			suite.replica,
-			NewSegmentAction(targetNode, ActionTypeReduce, segment),
+			NewSegmentAction(targetNode, ActionTypeReduce, channel.GetChannelName(), segment),
 		)
 		tasks = append(tasks, task)
 		err := suite.scheduler.Add(task)
@@ -529,7 +529,7 @@ func (suite *TaskSuite) TestReleaseGrowingSegmentTask() {
 			0,
 			suite.collection,
 			suite.replica,
-			NewSegmentActionWithScope(targetNode, ActionTypeReduce, segment, querypb.DataScope_Streaming),
+			NewSegmentActionWithScope(targetNode, ActionTypeReduce, "", segment, querypb.DataScope_Streaming),
 		)
 		tasks = append(tasks, task)
 		err := suite.scheduler.Add(task)
@@ -599,7 +599,7 @@ func (suite *TaskSuite) TestMoveSegmentTask() {
 		ID:           leader,
 		CollectionID: suite.collection,
 		Channel:      channel.ChannelName,
-		Segments:     make(map[int64]int64),
+		Segments:     make(map[int64]*querypb.SegmentDist),
 	}
 	tasks := []Task{}
 	segments := make([]*meta.Segment, 0)
@@ -612,7 +612,7 @@ func (suite *TaskSuite) TestMoveSegmentTask() {
 			PartitionID:   partition,
 			InsertChannel: channel.ChannelName,
 		})
-		view.Segments[segment] = sourceNode
+		view.Segments[segment] = &querypb.SegmentDist{NodeID: sourceNode, Version: 0}
 
 		task := NewSegmentTask(
 			ctx,
@@ -620,8 +620,8 @@ func (suite *TaskSuite) TestMoveSegmentTask() {
 			0,
 			suite.collection,
 			suite.replica,
-			NewSegmentAction(targetNode, ActionTypeGrow, segment),
-			NewSegmentAction(sourceNode, ActionTypeReduce, segment),
+			NewSegmentAction(targetNode, ActionTypeGrow, channel.GetChannelName(), segment),
+			NewSegmentAction(sourceNode, ActionTypeReduce, channel.GetChannelName(), segment),
 		)
 		tasks = append(tasks, task)
 		err := suite.scheduler.Add(task)
@@ -643,7 +643,7 @@ func (suite *TaskSuite) TestMoveSegmentTask() {
 	// Process tasks, target node contains the segment
 	view = view.Clone()
 	for _, segment := range suite.moveSegments {
-		view.Segments[segment] = targetNode
+		view.Segments[segment] = &querypb.SegmentDist{NodeID: targetNode, Version: 0}
 	}
 	suite.dist.LeaderViewManager.Update(leader, view)
 	// First action done, execute the second action
@@ -768,7 +768,7 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 			0,
 			suite.collection,
 			suite.replica,
-			NewSegmentAction(targetNode, ActionTypeGrow, segment),
+			NewSegmentAction(targetNode, ActionTypeGrow, channel.GetChannelName(), segment),
 		)
 		tasks = append(tasks, task)
 		err := suite.scheduler.Add(task)
@@ -790,10 +790,10 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 	view := &meta.LeaderView{
 		ID:           targetNode,
 		CollectionID: suite.collection,
-		Segments:     map[int64]int64{},
+		Segments:     map[int64]*querypb.SegmentDist{},
 	}
 	for _, segment := range suite.loadSegments[1:] {
-		view.Segments[segment] = targetNode
+		view.Segments[segment] = &querypb.SegmentDist{NodeID: targetNode, Version: 0}
 	}
 	suite.dist.LeaderViewManager.Update(targetNode, view)
 	suite.target.RemoveSegment(suite.loadSegments[0])
@@ -879,7 +879,7 @@ func (suite *TaskSuite) TestSegmentTaskReplace() {
 			0,
 			suite.collection,
 			suite.replica,
-			NewSegmentAction(targetNode, ActionTypeGrow, segment),
+			NewSegmentAction(targetNode, ActionTypeGrow, "", segment),
 		)
 		task.SetPriority(TaskPriorityNormal)
 		err := suite.scheduler.Add(task)
@@ -895,7 +895,7 @@ func (suite *TaskSuite) TestSegmentTaskReplace() {
 			0,
 			suite.collection,
 			suite.replica,
-			NewSegmentAction(targetNode, ActionTypeGrow, segment),
+			NewSegmentAction(targetNode, ActionTypeGrow, "", segment),
 		)
 		task.SetPriority(TaskPriorityNormal)
 		err := suite.scheduler.Add(task)
@@ -913,7 +913,7 @@ func (suite *TaskSuite) TestSegmentTaskReplace() {
 			0,
 			suite.collection,
 			suite.replica,
-			NewSegmentAction(targetNode, ActionTypeGrow, segment),
+			NewSegmentAction(targetNode, ActionTypeGrow, "", segment),
 		)
 		task.SetPriority(TaskPriorityHigh)
 		err := suite.scheduler.Add(task)

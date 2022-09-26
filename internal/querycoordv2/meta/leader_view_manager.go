@@ -3,6 +3,7 @@ package meta
 import (
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -10,12 +11,12 @@ type LeaderView struct {
 	ID              int64
 	CollectionID    int64
 	Channel         string
-	Segments        map[int64]int64 // SegmentID -> NodeID
+	Segments        map[int64]*querypb.SegmentDist
 	GrowingSegments typeutil.UniqueSet
 }
 
 func (view *LeaderView) Clone() *LeaderView {
-	segments := make(map[int64]int64)
+	segments := make(map[int64]*querypb.SegmentDist)
 	for k, v := range view.Segments {
 		segments[k] = v
 	}
@@ -52,8 +53,8 @@ func (mgr *LeaderViewManager) GetSegmentByNode(nodeID int64) []int64 {
 	segments := make([]int64, 0)
 	for leaderID, views := range mgr.views {
 		for _, view := range views {
-			for segment, node := range view.Segments {
-				if node == nodeID {
+			for segment, version := range view.Segments {
+				if version.NodeID == nodeID {
 					segments = append(segments, segment)
 				}
 			}
@@ -83,9 +84,9 @@ func (mgr *LeaderViewManager) GetSegmentDist(segmentID int64) []int64 {
 	nodes := make([]int64, 0)
 	for leaderID, views := range mgr.views {
 		for _, view := range views {
-			node, ok := view.Segments[segmentID]
+			version, ok := view.Segments[segmentID]
 			if ok {
-				nodes = append(nodes, node)
+				nodes = append(nodes, version.NodeID)
 			}
 			if view.GrowingSegments.Contain(segmentID) {
 				nodes = append(nodes, leaderID)
@@ -102,9 +103,9 @@ func (mgr *LeaderViewManager) GetSealedSegmentDist(segmentID int64) []int64 {
 	nodes := make([]int64, 0)
 	for _, views := range mgr.views {
 		for _, view := range views {
-			node, ok := view.Segments[segmentID]
+			version, ok := view.Segments[segmentID]
 			if ok {
-				nodes = append(nodes, node)
+				nodes = append(nodes, version.NodeID)
 			}
 		}
 	}
@@ -125,6 +126,21 @@ func (mgr *LeaderViewManager) GetGrowingSegmentDist(segmentID int64) []int64 {
 		}
 	}
 	return nodes
+}
+
+// GetLeadersByGrowingSegment returns the first leader which contains the given growing segment
+func (mgr *LeaderViewManager) GetLeadersByGrowingSegment(segmentID int64) *LeaderView {
+	mgr.rwmutex.RLock()
+	defer mgr.rwmutex.RUnlock()
+
+	for _, views := range mgr.views {
+		for _, view := range views {
+			if view.GrowingSegments.Contain(segmentID) {
+				return view
+			}
+		}
+	}
+	return nil
 }
 
 // GetSegmentDist returns the list of nodes the given segment on

@@ -289,6 +289,9 @@ func (ob *HandoffObserver) tryRelease(ctx context.Context, event *HandoffEvent) 
 	segment := event.Segment
 	if ob.isSealedSegmentLoaded(segment) || !ob.isSegmentExistOnTarget(segment) {
 		compactSource := segment.CompactionFrom
+		if len(compactSource) == 0 {
+			return
+		}
 		log.Info("remove compactFrom segments",
 			zap.Int64("collectionID", segment.CollectionID),
 			zap.Int64("partitionID", segment.PartitionID),
