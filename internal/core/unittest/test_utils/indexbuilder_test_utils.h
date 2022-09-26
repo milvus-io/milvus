@@ -240,9 +240,9 @@ CountDistance(
     if (point_a == nullptr || point_b == nullptr) {
         return std::numeric_limits<float>::max();
     }
-    if (metric == knowhere::metric::L2) {
+    if (milvus::IsMetricType(metric, knowhere::metric::L2)) {
         return L2(static_cast<const float*>(point_a), static_cast<const float*>(point_b), dim);
-    } else if (metric == knowhere::metric::JACCARD) {
+    } else if (milvus::IsMetricType(metric, knowhere::metric::JACCARD)) {
         return Jaccard(static_cast<const uint8_t*>(point_a), static_cast<const uint8_t*>(point_b), dim);
     } else {
         return std::numeric_limits<float>::max();

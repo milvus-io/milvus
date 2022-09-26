@@ -11,7 +11,9 @@
 
 #include <gtest/gtest.h>
 #include <random>
-#include <knowhere/index/vector_index/helpers/IndexParameter.h>
+
+#include "common/Utils.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 
 #include "query/SearchBruteForce.h"
 #include "test_utils/Distance.h"
@@ -38,13 +40,13 @@ Distances(const float* base,
           int nb,
           int dim,
           const knowhere::MetricType& metric) {
-    if (metric == knowhere::metric::L2) {
+    if (milvus::IsMetricType(metric, knowhere::metric::L2)) {
         std::vector<std::tuple<int, float>> res;
         for (int i = 0; i < nb; i++) {
             res.emplace_back(i, L2(base + i * dim, query, dim));
         }
         return res;
-    } else if (metric == knowhere::metric::IP) {
+    } else if (milvus::IsMetricType(metric, knowhere::metric::IP)) {
         std::vector<std::tuple<int, float>> res;
         for (int i = 0; i < nb; i++) {
             res.emplace_back(i, IP(base + i * dim, query, dim));
@@ -75,8 +77,9 @@ Ref(const float* base,
     const knowhere::MetricType& metric) {
     auto res = Distances(base, query, nb, dim, metric);
     std::sort(res.begin(), res.end());
-    if (metric == knowhere::metric::L2) {
-    } else if (metric == knowhere::metric::IP) {
+    if (milvus::IsMetricType(metric, knowhere::metric::L2)) {
+        // do nothing
+    } else if (milvus::IsMetricType(metric, knowhere::metric::IP)) {
         std::reverse(res.begin(), res.end());
     } else {
         PanicInfo("invalid metric type");
@@ -95,8 +98,8 @@ AssertMatch(const std::vector<int>& ref, const int64_t* ans) {
 }
 
 bool
-is_supported_float_metric(const knowhere::MetricType& metric) {
-    return metric == knowhere::metric::L2 || metric == knowhere::metric::IP;
+is_supported_float_metric(const std::string& metric) {
+    return milvus::IsMetricType(metric, knowhere::metric::L2) || milvus::IsMetricType(metric, knowhere::metric::IP);
 }
 
 }  // namespace
@@ -127,11 +130,13 @@ class TestFloatSearchBruteForce : public ::testing::Test {
 };
 
 TEST_F(TestFloatSearchBruteForce, L2) {
-    Run(100, 10, 5, 128, knowhere::metric::L2);
+    Run(100, 10, 5, 128, "L2");
+    Run(100, 10, 5, 128, "l2");
 }
 
 TEST_F(TestFloatSearchBruteForce, IP) {
-    Run(100, 10, 5, 128, knowhere::metric::IP);
+    Run(100, 10, 5, 128, "IP");
+    Run(100, 10, 5, 128, "ip");
 }
 
 TEST_F(TestFloatSearchBruteForce, NotSupported) {

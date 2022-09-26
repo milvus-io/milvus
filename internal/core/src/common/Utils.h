@@ -11,12 +11,14 @@
 
 #pragma once
 
-#include <string>
-#include "exceptions/EasyAssert.h"
-#include "config/ConfigChunkManager.h"
-#include "common/Consts.h"
 #include <google/protobuf/text_format.h>
+#include <string>
+
+#include "common/Consts.h"
+#include "config/ConfigChunkManager.h"
+#include "exceptions/EasyAssert.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
+#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 
 namespace milvus {
 
@@ -94,6 +96,16 @@ upper_div(int64_t value, int64_t align) {
     Assert(align > 0);
     auto groups = (value + align - 1) / align;
     return groups;
+}
+
+inline bool
+IsMetricType(const std::string& str, const knowhere::MetricType& metric_type) {
+    return !strcasecmp(str.c_str(), metric_type.c_str());
+}
+
+inline bool
+PositivelyRelated(const knowhere::MetricType& metric_type) {
+    return IsMetricType(metric_type, knowhere::metric::IP);
 }
 
 }  // namespace milvus
