@@ -25,11 +25,40 @@ compare_float(float x, float y, float epsilon = 0.000001f) {
         return true;
     return false;
 }
+
 bool
 compare_double(double x, double y, double epsilon = 0.000001f) {
     if (fabs(x - y) < epsilon)
         return true;
     return false;
+}
+
+inline void
+assert_order(const milvus::SearchResult& result, const knowhere::MetricType& metric_type) {
+    bool dsc = milvus::PositivelyRelated(metric_type);
+    auto& ids = result.seg_offsets_;
+    auto& dist = result.distances_;
+    auto nq = result.total_nq_;
+    auto topk = result.unity_topK_;
+    if (dsc) {
+        for (int i = 0; i < nq; i++) {
+            for (int j = 1; j < topk; j++) {
+                auto idx = i * topk + j;
+                if (ids[idx] != -1) {
+                    ASSERT_GE(dist[idx - 1], dist[idx]);
+                }
+            }
+        }
+    } else {
+        for (int i = 0; i < nq; i++) {
+            for (int j = 1; j < topk; j++) {
+                auto idx = i * topk + j;
+                if (ids[idx] != -1) {
+                    ASSERT_LE(dist[idx - 1], dist[idx]);
+                }
+            }
+        }
+    }
 }
 
 template <typename T>

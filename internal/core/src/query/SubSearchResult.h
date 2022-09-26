@@ -13,7 +13,9 @@
 
 #include <limits>
 #include <vector>
+
 #include "common/Types.h"
+#include "common/Utils.h"
 
 namespace milvus::query {
 
@@ -31,17 +33,7 @@ class SubSearchResult {
  public:
     static float
     init_value(const knowhere::MetricType& metric_type) {
-        return (is_descending(metric_type) ? -1 : 1) * std::numeric_limits<float>::max();
-    }
-
-    static bool
-    is_descending(const knowhere::MetricType& metric_type) {
-        // TODO(dog): more types
-        if (metric_type == knowhere::metric::IP) {
-            return true;
-        } else {
-            return false;
-        }
+        return (PositivelyRelated(metric_type) ? -1 : 1) * std::numeric_limits<float>::max();
     }
 
  public:
