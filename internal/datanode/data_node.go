@@ -393,15 +393,12 @@ func parseDeleteEventKey(key string) string {
 
 func (node *DataNode) handlePutEvent(watchInfo *datapb.ChannelWatchInfo, version int64) (err error) {
 	vChanName := watchInfo.GetVchan().GetChannelName()
-	log.Info("handle put event", zap.String("watch state", watchInfo.State.String()), zap.String("vChanName", vChanName))
-
 	switch watchInfo.State {
 	case datapb.ChannelWatchState_Uncomplete, datapb.ChannelWatchState_ToWatch:
 		if err := node.flowgraphManager.addAndStart(node, watchInfo.GetVchan()); err != nil {
 			return fmt.Errorf("fail to add and start flowgraph for vChanName: %s, err: %v", vChanName, err)
 		}
-
-		log.Debug("handle put event: new data sync service success", zap.String("vChanName", vChanName))
+		log.Info("handle put event: new data sync service success", zap.String("vChanName", vChanName))
 		watchInfo.State = datapb.ChannelWatchState_WatchSuccess
 
 	case datapb.ChannelWatchState_ToRelease:
@@ -429,12 +426,14 @@ func (node *DataNode) handlePutEvent(watchInfo *datapb.ChannelWatchInfo, version
 	// etcd valid but the states updated.
 	if !success {
 		log.Info("handle put event: failed to compare version and swap, release flowgraph",
-			zap.String("key", key), zap.String("state", watchInfo.State.String()))
+			zap.String("key", key), zap.String("state", watchInfo.State.String()),
+			zap.String("vChanName", vChanName))
 		// flow graph will leak if not release, causing new datanode failed to subscribe
 		node.tryToReleaseFlowgraph(vChanName)
 		return nil
 	}
-	log.Info("handle put event successfully", zap.String("key", key), zap.String("state", watchInfo.State.String()))
+	log.Info("handle put event success", zap.String("key", key),
+		zap.String("state", watchInfo.State.String()), zap.String("vChanName", vChanName))
 	return nil
 }
 
@@ -444,8 +443,8 @@ func (node *DataNode) handleDeleteEvent(vChanName string) {
 
 // tryToReleaseFlowgraph tries to release a flowgraph
 func (node *DataNode) tryToReleaseFlowgraph(vChanName string) {
+	log.Info("try to release flowgraph", zap.String("vChanName", vChanName))
 	node.flowgraphManager.release(vChanName)
-	log.Info("try to release flowgraph success", zap.String("vChanName", vChanName))
 }
 
 // BackGroundGC runs in background to release datanode resources
@@ -455,7 +454,6 @@ func (node *DataNode) BackGroundGC(vChannelCh <-chan string) {
 	for {
 		select {
 		case vchanName := <-vChannelCh:
-			log.Info("GC flowgraph", zap.String("vChanName", vchanName))
 			node.tryToReleaseFlowgraph(vchanName)
 		case <-node.ctx.Done():
 			log.Warn("DataNode context done, exiting background GC")

@@ -742,11 +742,8 @@ func (c *ChannelManager) Reassign(nodeID UniqueID, channelName string) error {
 		if err := c.remove(nodeID, ch); err != nil {
 			return fmt.Errorf("failed to remove watch info: %v,%s", ch, err.Error())
 		}
-
-		log.Debug("try to cleanup removal flag ", zap.String("channel name", channelName))
 		c.h.FinishDropChannel(channelName)
-
-		log.Info("removed channel assignment", zap.Any("channel", ch))
+		log.Info("removed channel assignment", zap.String("channel name", channelName))
 		return nil
 	}
 

@@ -128,12 +128,8 @@ func (e *channelEventManager) retryHandlePutEvent(event event) {
 					return
 				}
 			}
-
 			err = e.handlePutEvent(event.info, event.version)
-			if err != nil {
-				log.Warn("failed to handle put event", zap.String("vChanName", event.vChanName), zap.Error(err))
-				// no need to retry here,
-			} else {
+			if err == nil {
 				log.Info("handle put event successfully", zap.String("vChanName", event.vChanName))
 				return
 			}

@@ -1044,11 +1044,9 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 
 // GetFlushState gets the flush state of multiple segments
 func (s *Server) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
-	log.Info("DataCoord receive get flush state request", zap.Int64s("segmentIDs", req.GetSegmentIDs()), zap.Int("len", len(req.GetSegmentIDs())))
-
 	resp := &milvuspb.GetFlushStateResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}}
 	if s.isClosed() {
-		log.Warn("failed to get flush state because of closed server",
+		log.Warn("DataCoord receive GetFlushState request, server closed",
 			zap.Int64s("segmentIDs", req.GetSegmentIDs()), zap.Int("len", len(req.GetSegmentIDs())))
 		resp.Status.Reason = msgDataCoordIsUnhealthy(Params.DataCoordCfg.GetNodeID())
 		return resp, nil
@@ -1062,18 +1060,16 @@ func (s *Server) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateR
 			segment.GetState() == commonpb.SegmentState_Flushed {
 			continue
 		}
-
 		unflushed = append(unflushed, sid)
 	}
 
 	if len(unflushed) != 0 {
-		log.Info("[flush state] unflushed segment ids", zap.Int64s("segmentIDs", unflushed), zap.Int("len", len(unflushed)))
+		log.Info("DataCoord receive GetFlushState request, Flushed is false", zap.Int64s("segmentIDs", unflushed), zap.Int("len", len(unflushed)))
 		resp.Flushed = false
 	} else {
-		log.Info("[flush state] all segment is flushed", zap.Int64s("segment ids", req.GetSegmentIDs()))
+		log.Info("DataCoord receive GetFlushState request, Flushed is true", zap.Int64s("segmentIDs", req.GetSegmentIDs()), zap.Int("len", len(req.GetSegmentIDs())))
 		resp.Flushed = true
 	}
-
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	return resp, nil
 }
