@@ -1425,7 +1425,7 @@ func (dit *describeIndexTask) Execute(ctx context.Context) error {
 		return fmt.Errorf("failed to parse collection schema: %s", err)
 	}
 
-	resp, err := dit.indexCoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{CollectionID: dit.collectionID})
+	resp, err := dit.indexCoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{CollectionID: dit.collectionID, IndexName: dit.IndexName})
 	if err != nil || resp == nil {
 		return err
 	}
