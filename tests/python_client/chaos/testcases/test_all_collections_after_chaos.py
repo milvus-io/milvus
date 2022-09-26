@@ -54,7 +54,7 @@ class TestAllCollection(TestcaseBase):
         # search
         collection_w.load()
         search_vectors = cf.gen_vectors(1, ct.default_dim)
-        search_params = {"metric_type": "L2", "params": {"nprobe": 16}}
+        search_params = {"metric_type": "L2", "params": {"ef": 64}}
         t0 = time.time()
         res_1, _ = collection_w.search(data=search_vectors,
                                        anns_field=ct.default_float_vec_field_name,
@@ -68,7 +68,7 @@ class TestAllCollection(TestcaseBase):
         d = cf.gen_default_list_data()
         collection_w.insert(d)
         log.info(f"assert index entities: {collection_w.num_entities}")
-        _index_params = {"index_type": "IVF_SQ8", "params": {"nlist": 64}, "metric_type": "L2"}
+        _index_params = {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 48, "efConstruction": 500}}
         t0 = time.time()
         index, _ = collection_w.create_index(field_name=ct.default_float_vec_field_name,
                                              index_params=_index_params,
