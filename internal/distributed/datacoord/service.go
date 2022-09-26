@@ -377,6 +377,18 @@ func (s *Server) ReleaseSegmentLock(ctx context.Context, req *datapb.ReleaseSegm
 	return s.dataCoord.ReleaseSegmentLock(ctx, req)
 }
 
-func (s *Server) AddSegment(ctx context.Context, request *datapb.AddSegmentRequest) (*commonpb.Status, error) {
-	return s.dataCoord.AddSegment(ctx, request)
+// SaveImportSegment saves the import segment binlog paths data and then looks for the right DataNode to add the
+// segment to that DataNode.
+func (s *Server) SaveImportSegment(ctx context.Context, request *datapb.SaveImportSegmentRequest) (*commonpb.Status, error) {
+	return s.dataCoord.SaveImportSegment(ctx, request)
+}
+
+// UnsetIsImportingState is the distributed caller of UnsetIsImportingState.
+func (s *Server) UnsetIsImportingState(ctx context.Context, request *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error) {
+	return s.dataCoord.UnsetIsImportingState(ctx, request)
+}
+
+// MarkSegmentsDropped is the distributed caller of MarkSegmentsDropped.
+func (s *Server) MarkSegmentsDropped(ctx context.Context, req *datapb.MarkSegmentsDroppedRequest) (*commonpb.Status, error) {
+	return s.dataCoord.MarkSegmentsDropped(ctx, req)
 }

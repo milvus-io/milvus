@@ -34,9 +34,12 @@ type Broker interface {
 	ReleaseSegRefLock(ctx context.Context, taskID int64, segIDs []int64) error
 	Flush(ctx context.Context, cID int64, segIDs []int64) error
 	Import(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error)
+	UnsetIsImportingState(context.Context, *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error)
+	MarkSegmentsDropped(context.Context, *datapb.MarkSegmentsDroppedRequest) (*commonpb.Status, error)
 
 	DropCollectionIndex(ctx context.Context, collID UniqueID, partIDs []UniqueID) error
 	GetSegmentIndexState(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*indexpb.SegmentIndexState, error)
+	DescribeIndex(ctx context.Context, colID UniqueID) (*indexpb.DescribeIndexResponse, error)
 }
 
 type ServerBroker struct {
@@ -170,7 +173,7 @@ func (b *ServerBroker) Flush(ctx context.Context, cID int64, segIDs []int64) err
 	if err != nil {
 		return errors.New("failed to call flush to data coordinator: " + err.Error())
 	}
-	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		return errors.New(resp.Status.Reason)
 	}
 	log.Info("flush on collection succeed", zap.Int64("collection ID", cID))
@@ -179,6 +182,14 @@ func (b *ServerBroker) Flush(ctx context.Context, cID int64, segIDs []int64) err
 
 func (b *ServerBroker) Import(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
 	return b.s.dataCoord.Import(ctx, req)
+}
+
+func (b *ServerBroker) UnsetIsImportingState(ctx context.Context, req *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error) {
+	return b.s.dataCoord.UnsetIsImportingState(ctx, req)
+}
+
+func (b *ServerBroker) MarkSegmentsDropped(ctx context.Context, req *datapb.MarkSegmentsDroppedRequest) (*commonpb.Status, error) {
+	return b.s.dataCoord.MarkSegmentsDropped(ctx, req)
 }
 
 func (b *ServerBroker) DropCollectionIndex(ctx context.Context, collID UniqueID, partIDs []UniqueID) error {
@@ -210,4 +221,10 @@ func (b *ServerBroker) GetSegmentIndexState(ctx context.Context, collID UniqueID
 	}
 
 	return resp.GetStates(), nil
+}
+
+func (b *ServerBroker) DescribeIndex(ctx context.Context, colID UniqueID) (*indexpb.DescribeIndexResponse, error) {
+	return b.s.indexCoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
+		CollectionID: colID,
+	})
 }

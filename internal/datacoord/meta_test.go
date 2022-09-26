@@ -274,13 +274,13 @@ func TestMeta_Basic(t *testing.T) {
 		// create seg0 for partition0, seg0/seg1 for partition1
 		segID0_0, err := mockAllocator.allocID(ctx)
 		assert.Nil(t, err)
-		segInfo0_0 := buildSegment(collID, partID0, segID0_0, channelName)
+		segInfo0_0 := buildSegment(collID, partID0, segID0_0, channelName, true)
 		segID1_0, err := mockAllocator.allocID(ctx)
 		assert.Nil(t, err)
-		segInfo1_0 := buildSegment(collID, partID1, segID1_0, channelName)
+		segInfo1_0 := buildSegment(collID, partID1, segID1_0, channelName, false)
 		segID1_1, err := mockAllocator.allocID(ctx)
 		assert.Nil(t, err)
-		segInfo1_1 := buildSegment(collID, partID1, segID1_1, channelName)
+		segInfo1_1 := buildSegment(collID, partID1, segID1_1, channelName, false)
 
 		// check AddSegment
 		err = meta.AddSegment(segInfo0_0)
@@ -329,6 +329,28 @@ func TestMeta_Basic(t *testing.T) {
 		info0_0 = meta.GetSegment(segID0_0)
 		assert.NotNil(t, info0_0)
 		assert.EqualValues(t, commonpb.SegmentState_Flushed, info0_0.State)
+
+		info0_0 = meta.GetSegment(segID0_0)
+		assert.NotNil(t, info0_0)
+		assert.Equal(t, true, info0_0.GetIsImporting())
+		err = meta.UnsetIsImporting(segID0_0)
+		assert.NoError(t, err)
+		info0_0 = meta.GetSegment(segID0_0)
+		assert.NotNil(t, info0_0)
+		assert.Equal(t, false, info0_0.GetIsImporting())
+
+		// UnsetIsImporting on segment that does not exist.
+		err = meta.UnsetIsImporting(segID1_0)
+		assert.Error(t, err)
+
+		info1_1 := meta.GetSegment(segID1_1)
+		assert.NotNil(t, info1_1)
+		assert.Equal(t, false, info1_1.GetIsImporting())
+		err = meta.UnsetIsImporting(segID1_1)
+		assert.NoError(t, err)
+		info1_1 = meta.GetSegment(segID1_1)
+		assert.NotNil(t, info1_1)
+		assert.Equal(t, false, info1_1.GetIsImporting())
 	})
 
 	t.Run("Test segment with kv fails", func(t *testing.T) {
@@ -366,7 +388,7 @@ func TestMeta_Basic(t *testing.T) {
 		// add seg1 with 100 rows
 		segID0, err := mockAllocator.allocID(ctx)
 		assert.Nil(t, err)
-		segInfo0 := buildSegment(collID, partID0, segID0, channelName)
+		segInfo0 := buildSegment(collID, partID0, segID0, channelName, false)
 		segInfo0.NumOfRows = rowCount0
 		err = meta.AddSegment(segInfo0)
 		assert.Nil(t, err)
@@ -374,7 +396,7 @@ func TestMeta_Basic(t *testing.T) {
 		// add seg2 with 300 rows
 		segID1, err := mockAllocator.allocID(ctx)
 		assert.Nil(t, err)
-		segInfo1 := buildSegment(collID, partID0, segID1, channelName)
+		segInfo1 := buildSegment(collID, partID0, segID1, channelName, false)
 		segInfo1.NumOfRows = rowCount1
 		err = meta.AddSegment(segInfo1)
 		assert.Nil(t, err)
@@ -713,6 +735,55 @@ func Test_meta_SetSegmentCompacting(t *testing.T) {
 			m.SetSegmentCompacting(tt.args.segmentID, tt.args.compacting)
 			segment := m.GetSegment(tt.args.segmentID)
 			assert.Equal(t, tt.args.compacting, segment.isCompacting)
+		})
+	}
+}
+
+func Test_meta_SetSegmentImporting(t *testing.T) {
+	type fields struct {
+		client   kv.TxnKV
+		segments *SegmentsInfo
+	}
+	type args struct {
+		segmentID UniqueID
+		importing bool
+	}
+	tests := []struct {
+		name   string
+		fields fields
+		args   args
+	}{
+		{
+			"test set segment importing",
+			fields{
+				memkv.NewMemoryKV(),
+				&SegmentsInfo{
+					map[int64]*SegmentInfo{
+						1: {
+							SegmentInfo: &datapb.SegmentInfo{
+								ID:          1,
+								State:       commonpb.SegmentState_Flushed,
+								IsImporting: false,
+							},
+						},
+					},
+				},
+			},
+			args{
+				segmentID: 1,
+				importing: true,
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &meta{
+				catalog:  &datacoord.Catalog{Txn: tt.fields.client},
+				segments: tt.fields.segments,
+			}
+			m.SetSegmentCompacting(tt.args.segmentID, tt.args.importing)
+			segment := m.GetSegment(tt.args.segmentID)
+			assert.Equal(t, tt.args.importing, segment.isCompacting)
 		})
 	}
 }

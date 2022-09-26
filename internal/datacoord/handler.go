@@ -76,6 +76,10 @@ func (h *ServerHandler) GetVChanPositions(channel *channel, partitionID UniqueID
 			(s.GetStartPosition() == nil && s.GetDmlPosition() == nil) {
 			continue
 		}
+		if s.GetIsImporting() {
+			// Skip bulk load segments.
+			continue
+		}
 		segmentInfos[s.GetID()] = s
 		if s.GetState() == commonpb.SegmentState_Dropped {
 			droppedIDs.Insert(s.GetID())

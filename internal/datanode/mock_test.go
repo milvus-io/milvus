@@ -54,6 +54,26 @@ import (
 const ctxTimeInMillisecond = 5000
 const debug = false
 
+// As used in data_sync_service_test.go
+var segID2SegInfo = map[int64]*datapb.SegmentInfo{
+	1: {
+		ID:            1,
+		CollectionID:  1,
+		PartitionID:   1,
+		InsertChannel: "by-dev-rootcoord-dml-test_v1",
+	},
+	2: {
+		ID:            2,
+		CollectionID:  1,
+		InsertChannel: "by-dev-rootcoord-dml-test_v1",
+	},
+	3: {
+		ID:            3,
+		CollectionID:  1,
+		InsertChannel: "by-dev-rootcoord-dml-test_v1",
+	},
+}
+
 var emptyFlushAndDropFunc flushAndDropFunc = func(_ []*segmentFlushPack) {}
 
 func newIDLEDataNodeMock(ctx context.Context, pkType schemapb.DataType) *DataNode {
@@ -161,6 +181,9 @@ type RootCoordFactory struct {
 	collectionName string
 	collectionID   UniqueID
 	pkType         schemapb.DataType
+
+	ReportImportErr        bool
+	ReportImportNotSuccess bool
 }
 
 type DataCoordFactory struct {
@@ -177,6 +200,9 @@ type DataCoordFactory struct {
 
 	GetSegmentInfosError      bool
 	GetSegmentInfosNotSuccess bool
+
+	AddSegmentError      bool
+	AddSegmentNotSuccess bool
 }
 
 func (ds *DataCoordFactory) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error) {
@@ -227,7 +253,19 @@ func (ds *DataCoordFactory) UpdateSegmentStatistics(ctx context.Context, req *da
 	}, nil
 }
 
-func (ds *DataCoordFactory) AddSegment(ctx context.Context, req *datapb.AddSegmentRequest) (*commonpb.Status, error) {
+func (ds *DataCoordFactory) SaveImportSegment(ctx context.Context, req *datapb.SaveImportSegmentRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}, nil
+}
+
+func (ds *DataCoordFactory) UnsetIsImportingState(context.Context, *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}, nil
+}
+
+func (ds *DataCoordFactory) MarkSegmentsDropped(context.Context, *datapb.MarkSegmentsDroppedRequest) (*commonpb.Status, error) {
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}, nil
@@ -247,9 +285,13 @@ func (ds *DataCoordFactory) GetSegmentInfo(ctx context.Context, req *datapb.GetS
 	}
 	var segmentInfos []*datapb.SegmentInfo
 	for _, segmentID := range req.SegmentIDs {
-		segmentInfos = append(segmentInfos, &datapb.SegmentInfo{
-			ID: segmentID,
-		})
+		if segInfo, ok := segID2SegInfo[segmentID]; ok {
+			segmentInfos = append(segmentInfos, segInfo)
+		} else {
+			segmentInfos = append(segmentInfos, &datapb.SegmentInfo{
+				ID: segmentID,
+			})
+		}
 	}
 	return &datapb.GetSegmentInfoResponse{
 		Status: &commonpb.Status{
@@ -975,6 +1017,16 @@ func (m *RootCoordFactory) ReportImport(ctx context.Context, req *rootcoordpb.Im
 		if v := ctx.Value(ctxKey{}).(string); v == returnError {
 			return nil, fmt.Errorf("injected error")
 		}
+	}
+	if m.ReportImportErr {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		}, fmt.Errorf("mock error")
+	}
+	if m.ReportImportNotSuccess {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		}, nil
 	}
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,

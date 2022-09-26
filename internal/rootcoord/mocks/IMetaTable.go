@@ -290,6 +290,22 @@ func (_m *IMetaTable) GetCollectionNameByID(collID int64) (string, error) {
 	return r0, r1
 }
 
+// GetCollectionVirtualChannels provides a mock function with given fields: colID
+func (_m *IMetaTable) GetCollectionVirtualChannels(colID int64) []string {
+	ret := _m.Called(colID)
+
+	var r0 []string
+	if rf, ok := ret.Get(0).(func(int64) []string); ok {
+		r0 = rf(colID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]string)
+		}
+	}
+
+	return r0
+}
+
 // GetCredential provides a mock function with given fields: username
 func (_m *IMetaTable) GetCredential(username string) (*internalpb.CredentialInfo, error) {
 	ret := _m.Called(username)

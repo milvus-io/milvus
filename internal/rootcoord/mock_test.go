@@ -38,20 +38,23 @@ const (
 
 type mockMetaTable struct {
 	IMetaTable
-	ListCollectionsFunc       func(ctx context.Context, ts Timestamp) ([]*model.Collection, error)
-	AddCollectionFunc         func(ctx context.Context, coll *model.Collection) error
-	GetCollectionByNameFunc   func(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error)
-	GetCollectionByIDFunc     func(ctx context.Context, collectionID UniqueID, ts Timestamp) (*model.Collection, error)
-	ChangeCollectionStateFunc func(ctx context.Context, collectionID UniqueID, state pb.CollectionState, ts Timestamp) error
-	RemoveCollectionFunc      func(ctx context.Context, collectionID UniqueID, ts Timestamp) error
-	AddPartitionFunc          func(ctx context.Context, partition *model.Partition) error
-	ChangePartitionStateFunc  func(ctx context.Context, collectionID UniqueID, partitionID UniqueID, state pb.PartitionState, ts Timestamp) error
-	RemovePartitionFunc       func(ctx context.Context, collectionID UniqueID, partitionID UniqueID, ts Timestamp) error
-	CreateAliasFunc           func(ctx context.Context, alias string, collectionName string, ts Timestamp) error
-	AlterAliasFunc            func(ctx context.Context, alias string, collectionName string, ts Timestamp) error
-	DropAliasFunc             func(ctx context.Context, alias string, ts Timestamp) error
-	IsAliasFunc               func(name string) bool
-	ListAliasesByIDFunc       func(collID UniqueID) []string
+	ListCollectionsFunc              func(ctx context.Context, ts Timestamp) ([]*model.Collection, error)
+	AddCollectionFunc                func(ctx context.Context, coll *model.Collection) error
+	GetCollectionByNameFunc          func(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error)
+	GetCollectionByIDFunc            func(ctx context.Context, collectionID UniqueID, ts Timestamp) (*model.Collection, error)
+	ChangeCollectionStateFunc        func(ctx context.Context, collectionID UniqueID, state pb.CollectionState, ts Timestamp) error
+	RemoveCollectionFunc             func(ctx context.Context, collectionID UniqueID, ts Timestamp) error
+	AddPartitionFunc                 func(ctx context.Context, partition *model.Partition) error
+	ChangePartitionStateFunc         func(ctx context.Context, collectionID UniqueID, partitionID UniqueID, state pb.PartitionState, ts Timestamp) error
+	RemovePartitionFunc              func(ctx context.Context, collectionID UniqueID, partitionID UniqueID, ts Timestamp) error
+	CreateAliasFunc                  func(ctx context.Context, alias string, collectionName string, ts Timestamp) error
+	AlterAliasFunc                   func(ctx context.Context, alias string, collectionName string, ts Timestamp) error
+	DropAliasFunc                    func(ctx context.Context, alias string, ts Timestamp) error
+	IsAliasFunc                      func(name string) bool
+	ListAliasesByIDFunc              func(collID UniqueID) []string
+	GetCollectionIDByNameFunc        func(name string) (UniqueID, error)
+	GetPartitionByNameFunc           func(collID UniqueID, partitionName string, ts Timestamp) (UniqueID, error)
+	GetCollectionVirtualChannelsFunc func(colID int64) []string
 }
 
 func (m mockMetaTable) ListCollections(ctx context.Context, ts Timestamp) ([]*model.Collection, error) {
@@ -110,6 +113,18 @@ func (m mockMetaTable) ListAliasesByID(collID UniqueID) []string {
 	return m.ListAliasesByIDFunc(collID)
 }
 
+func (m mockMetaTable) GetCollectionIDByName(name string) (UniqueID, error) {
+	return m.GetCollectionIDByNameFunc(name)
+}
+
+func (m mockMetaTable) GetPartitionByName(collID UniqueID, partitionName string, ts Timestamp) (UniqueID, error) {
+	return m.GetPartitionByNameFunc(collID, partitionName, ts)
+}
+
+func (m mockMetaTable) GetCollectionVirtualChannels(colID int64) []string {
+	return m.GetCollectionVirtualChannelsFunc(colID)
+}
+
 func newMockMetaTable() *mockMetaTable {
 	return &mockMetaTable{}
 }
@@ -139,12 +154,13 @@ func (m mockIndexCoord) DropIndex(ctx context.Context, req *indexpb.DropIndexReq
 
 type mockDataCoord struct {
 	types.DataCoord
-	GetComponentStatesFunc func(ctx context.Context) (*internalpb.ComponentStates, error)
-	WatchChannelsFunc      func(ctx context.Context, req *datapb.WatchChannelsRequest) (*datapb.WatchChannelsResponse, error)
-	AcquireSegmentLockFunc func(ctx context.Context, req *datapb.AcquireSegmentLockRequest) (*commonpb.Status, error)
-	ReleaseSegmentLockFunc func(ctx context.Context, req *datapb.ReleaseSegmentLockRequest) (*commonpb.Status, error)
-	FlushFunc              func(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error)
-	ImportFunc             func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error)
+	GetComponentStatesFunc    func(ctx context.Context) (*internalpb.ComponentStates, error)
+	WatchChannelsFunc         func(ctx context.Context, req *datapb.WatchChannelsRequest) (*datapb.WatchChannelsResponse, error)
+	AcquireSegmentLockFunc    func(ctx context.Context, req *datapb.AcquireSegmentLockRequest) (*commonpb.Status, error)
+	ReleaseSegmentLockFunc    func(ctx context.Context, req *datapb.ReleaseSegmentLockRequest) (*commonpb.Status, error)
+	FlushFunc                 func(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error)
+	ImportFunc                func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error)
+	UnsetIsImportingStateFunc func(ctx context.Context, req *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error)
 }
 
 func newMockDataCoord() *mockDataCoord {
@@ -173,6 +189,10 @@ func (m *mockDataCoord) Flush(ctx context.Context, req *datapb.FlushRequest) (*d
 
 func (m *mockDataCoord) Import(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
 	return m.ImportFunc(ctx, req)
+}
+
+func (m *mockDataCoord) UnsetIsImportingState(ctx context.Context, req *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error) {
+	return m.UnsetIsImportingStateFunc(ctx, req)
 }
 
 type mockQueryCoord struct {
@@ -580,6 +600,9 @@ func withInvalidDataCoord() Opt {
 	dc.ImportFunc = func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
 		return nil, errors.New("error mock Import")
 	}
+	dc.UnsetIsImportingStateFunc = func(ctx context.Context, req *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error) {
+		return nil, errors.New("error mock UnsetIsImportingState")
+	}
 	return withDataCoord(dc)
 }
 
@@ -610,6 +633,12 @@ func withFailedDataCoord() Opt {
 	dc.ImportFunc = func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
 		return &datapb.ImportTaskResponse{
 			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "mock import error"),
+		}, nil
+	}
+	dc.UnsetIsImportingStateFunc = func(ctx context.Context, req *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error) {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "mock UnsetIsImportingState error",
 		}, nil
 	}
 	return withDataCoord(dc)
@@ -643,6 +672,9 @@ func withValidDataCoord() Opt {
 		return &datapb.ImportTaskResponse{
 			Status: succStatus(),
 		}, nil
+	}
+	dc.UnsetIsImportingStateFunc = func(ctx context.Context, req *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error) {
+		return succStatus(), nil
 	}
 	return withDataCoord(dc)
 }
@@ -753,7 +785,9 @@ type mockBroker struct {
 	FlushFunc             func(ctx context.Context, cID int64, segIDs []int64) error
 	ImportFunc            func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error)
 
-	DropCollectionIndexFunc func(ctx context.Context, collID UniqueID, partIDs []UniqueID) error
+	DropCollectionIndexFunc  func(ctx context.Context, collID UniqueID, partIDs []UniqueID) error
+	DescribeIndexFunc        func(ctx context.Context, colID UniqueID) (*indexpb.DescribeIndexResponse, error)
+	GetSegmentIndexStateFunc func(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*indexpb.SegmentIndexState, error)
 }
 
 func newMockBroker() *mockBroker {
@@ -774,6 +808,14 @@ func (b mockBroker) ReleaseCollection(ctx context.Context, collectionID UniqueID
 
 func (b mockBroker) DropCollectionIndex(ctx context.Context, collID UniqueID, partIDs []UniqueID) error {
 	return b.DropCollectionIndexFunc(ctx, collID, partIDs)
+}
+
+func (b mockBroker) DescribeIndex(ctx context.Context, colID UniqueID) (*indexpb.DescribeIndexResponse, error) {
+	return b.DescribeIndexFunc(ctx, colID)
+}
+
+func (b mockBroker) GetSegmentIndexState(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*indexpb.SegmentIndexState, error) {
+	return b.GetSegmentIndexStateFunc(ctx, collID, indexName, segIDs)
 }
 
 func withBroker(b Broker) Opt {

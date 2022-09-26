@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/concurrency"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
 // dataSyncService controls a flowgraph for a specific collection
@@ -210,8 +211,16 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 		// avoid closure capture iteration variable
 		segment := us
 		future := dsService.ioPool.Submit(func() (interface{}, error) {
-			if err := dsService.replica.addNormalSegment(segment.GetID(), segment.GetCollectionID(), segment.GetPartitionID(), segment.GetInsertChannel(),
-				segment.GetNumOfRows(), segment.GetStatslogs(), cp, vchanInfo.GetSeekPosition().GetTimestamp()); err != nil {
+			if err := dsService.replica.addSegment(addSegmentReq{
+				segType:      datapb.SegmentType_Normal,
+				segID:        segment.GetID(),
+				collID:       segment.CollectionID,
+				partitionID:  segment.PartitionID,
+				channelName:  segment.GetInsertChannel(),
+				numOfRows:    segment.GetNumOfRows(),
+				statsBinLogs: segment.Statslogs,
+				cp:           cp,
+				recoverTs:    vchanInfo.GetSeekPosition().GetTimestamp()}); err != nil {
 				return nil, err
 			}
 			return nil, nil
@@ -238,8 +247,16 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 		// avoid closure capture iteration variable
 		segment := fs
 		future := dsService.ioPool.Submit(func() (interface{}, error) {
-			if err := dsService.replica.addFlushedSegment(segment.GetID(), segment.GetCollectionID(), segment.GetPartitionID(), segment.GetInsertChannel(),
-				segment.GetNumOfRows(), segment.GetStatslogs(), vchanInfo.GetSeekPosition().GetTimestamp()); err != nil {
+			if err := dsService.replica.addSegment(addSegmentReq{
+				segType:      datapb.SegmentType_Flushed,
+				segID:        segment.GetID(),
+				collID:       segment.CollectionID,
+				partitionID:  segment.PartitionID,
+				channelName:  segment.GetInsertChannel(),
+				numOfRows:    segment.GetNumOfRows(),
+				statsBinLogs: segment.Statslogs,
+				recoverTs:    vchanInfo.GetSeekPosition().GetTimestamp(),
+			}); err != nil {
 				return nil, err
 			}
 			return nil, nil
@@ -371,4 +388,24 @@ func (dsService *dataSyncService) getSegmentInfos(segmentIDs []int64) ([]*datapb
 		return nil, err
 	}
 	return infoResp.Infos, nil
+}
+
+func (dsService *dataSyncService) getChannelLatestMsgID(ctx context.Context, channelName string) ([]byte, error) {
+	pChannelName := funcutil.ToPhysicalChannel(channelName)
+	log.Info("ddNode convert vChannel to pChannel",
+		zap.String("vChannelName", channelName),
+		zap.String("pChannelName", pChannelName),
+	)
+
+	dmlStream, err := dsService.msFactory.NewMsgStream(ctx)
+	defer dmlStream.Close()
+	if err != nil {
+		return nil, err
+	}
+	dmlStream.AsConsumer([]string{pChannelName}, channelName)
+	id, err := dmlStream.GetLatestMsgID(pChannelName)
+	if err != nil {
+		return nil, err
+	}
+	return id.Serialize(), nil
 }
