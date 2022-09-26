@@ -1442,10 +1442,14 @@ func (dit *describeIndexTask) Execute(ctx context.Context) error {
 		}
 
 		dit.result.IndexDescriptions = append(dit.result.IndexDescriptions, &milvuspb.IndexDescription{
-			IndexName: indexInfo.GetIndexName(),
-			IndexID:   indexInfo.GetIndexID(),
-			FieldName: field.Name,
-			Params:    indexInfo.GetIndexParams(),
+			IndexName:            indexInfo.GetIndexName(),
+			IndexID:              indexInfo.GetIndexID(),
+			FieldName:            field.Name,
+			Params:               indexInfo.GetIndexParams(),
+			IndexedRows:          indexInfo.GetIndexedRows(),
+			TotalRows:            indexInfo.GetTotalRows(),
+			State:                indexInfo.GetState(),
+			IndexStateFailReason: indexInfo.GetIndexStateFailReason(),
 		})
 	}
 	return err
@@ -1546,6 +1550,7 @@ func (dit *dropIndexTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
+// Deprecated: use describeIndexTask instead
 type getIndexBuildProgressTask struct {
 	Condition
 	*milvuspb.GetIndexBuildProgressRequest
@@ -1639,6 +1644,7 @@ func (gibpt *getIndexBuildProgressTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
+// Deprecated: use describeIndexTask instead
 type getIndexStateTask struct {
 	Condition
 	*milvuspb.GetIndexStateRequest

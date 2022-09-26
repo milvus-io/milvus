@@ -36,7 +36,9 @@ service MilvusService {
 
   rpc CreateIndex(CreateIndexRequest) returns (common.Status) {}
   rpc DescribeIndex(DescribeIndexRequest) returns (DescribeIndexResponse) {}
+  // Deprecated: use DescribeIndex instead
   rpc GetIndexState(GetIndexStateRequest) returns (GetIndexStateResponse) {}
+  // Deprecated: use DescribeIndex instead
   rpc GetIndexBuildProgress(GetIndexBuildProgressRequest) returns (GetIndexBuildProgressResponse) {}
   rpc DropIndex(DropIndexRequest) returns (common.Status) {}
 
@@ -581,6 +583,12 @@ message IndexDescription {
   repeated common.KeyValuePair params = 3;
   // The vector field name
   string field_name = 4;
+  // index build progress
+  int64 indexed_rows = 5;
+  int64 total_rows = 6;
+  // index state
+  common.IndexState state = 7;
+  string index_state_fail_reason = 8;
 }
 
 /*

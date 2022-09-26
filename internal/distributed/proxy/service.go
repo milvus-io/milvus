@@ -644,11 +644,13 @@ func (s *Server) DescribeIndex(ctx context.Context, request *milvuspb.DescribeIn
 
 // GetIndexBuildProgress gets index build progress with filed_name and index_name.
 // IndexRows is the num of indexed rows. And TotalRows is the total number of segment rows.
+// Deprecated: use DescribeIndex instead
 func (s *Server) GetIndexBuildProgress(ctx context.Context, request *milvuspb.GetIndexBuildProgressRequest) (*milvuspb.GetIndexBuildProgressResponse, error) {
 	return s.proxy.GetIndexBuildProgress(ctx, request)
 }
 
-// GetIndexStates gets the index states from proxy.
+// GetIndexState gets the index states from proxy.
+// Deprecated: use DescribeIndex instead
 func (s *Server) GetIndexState(ctx context.Context, request *milvuspb.GetIndexStateRequest) (*milvuspb.GetIndexStateResponse, error) {
 	return s.proxy.GetIndexState(ctx, request)
 }
