@@ -398,7 +398,7 @@ func (b *binlogIO) uploadStatsLog(
 	if err != nil {
 		return nil, err
 	}
-	k := JoinIDPath(meta.GetID(), partID, segID, pkID, logID)
+	k := metautil.JoinIDPath(meta.GetID(), partID, segID, pkID, logID)
 	key := path.Join(b.ChunkManager.RootPath(), common.SegmentStatslogPath, k)
 	fileLen := len(segStats)
 
