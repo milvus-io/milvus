@@ -167,7 +167,7 @@ func (gp *BaseTable) initConfPath() string {
 		if err != nil {
 			panic(err)
 		}
-		configDir = runPath + "/configs/"
+		configDir = runPath + "/configs"
 		if _, err := os.Stat(configDir); err != nil {
 			_, fpath, _, _ := runtime.Caller(0)
 			configDir = path.Dir(fpath) + "/../../../configs"

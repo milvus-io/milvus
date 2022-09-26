@@ -87,6 +87,7 @@ func (loader *segmentLoader) LoadSegment(req *querypb.LoadSegmentsRequest, segme
 		return fmt.Errorf("nil base message when load segment, collectionID = %d", req.CollectionID)
 	}
 
+	log := log.With(zap.Int64("collectionID", req.CollectionID), zap.String("segmentType", segmentType.String()))
 	// no segment needs to load, return
 	segmentNum := len(req.Infos)
 
@@ -95,10 +96,7 @@ func (loader *segmentLoader) LoadSegment(req *querypb.LoadSegmentsRequest, segme
 		return nil
 	}
 
-	log.Info("segmentLoader start loading...",
-		zap.Any("collectionID", req.CollectionID),
-		zap.Any("segmentNum", segmentNum),
-		zap.Any("segmentType", segmentType.String()))
+	log.Info("segmentLoader start loading...", zap.Any("segmentNum", segmentNum))
 
 	// check memory limit
 	min := func(first int, values ...int) int {
@@ -152,10 +150,8 @@ func (loader *segmentLoader) LoadSegment(req *querypb.LoadSegmentsRequest, segme
 		segment, err := newSegment(collection, segmentID, partitionID, collectionID, vChannelID, segmentType, req.GetVersion(), loader.cgoPool)
 		if err != nil {
 			log.Error("load segment failed when create new segment",
-				zap.Int64("collectionID", collectionID),
 				zap.Int64("partitionID", partitionID),
 				zap.Int64("segmentID", segmentID),
-				zap.String("segmentType", segmentType.String()),
 				zap.Error(err))
 			segmentGC()
 			return err
@@ -166,7 +162,6 @@ func (loader *segmentLoader) LoadSegment(req *querypb.LoadSegmentsRequest, segme
 
 	loadFileFunc := func(idx int) error {
 		loadInfo := req.Infos[idx]
-		collectionID := loadInfo.CollectionID
 		partitionID := loadInfo.PartitionID
 		segmentID := loadInfo.SegmentID
 		segment := newSegments[segmentID]
@@ -175,10 +170,8 @@ func (loader *segmentLoader) LoadSegment(req *querypb.LoadSegmentsRequest, segme
 		err := loader.loadFiles(segment, loadInfo)
 		if err != nil {
 			log.Error("load segment failed when load data into memory",
-				zap.Int64("collectionID", collectionID),
 				zap.Int64("partitionID", partitionID),
 				zap.Int64("segmentID", segmentID),
-				zap.String("segmentType", segmentType.String()),
 				zap.Error(err))
 			return err
 		}
