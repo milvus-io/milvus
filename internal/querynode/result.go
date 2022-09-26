@@ -183,17 +183,32 @@ func reduceSearchResultData(ctx context.Context, searchResultData []*schemapb.Se
 }
 
 func selectSearchResultData(dataArray []*schemapb.SearchResultData, resultOffsets [][]int64, offsets []int64, qi int64) int {
-	sel := -1
-	maxDistance := -1 * float32(math.MaxFloat32)
+	var (
+		sel                 = -1
+		maxDistance         = -1 * float32(math.MaxFloat32)
+		resultDataIdx int64 = -1
+	)
 	for i, offset := range offsets { // query num, the number of ways to merge
 		if offset >= dataArray[i].Topks[qi] {
 			continue
 		}
+
 		idx := resultOffsets[i][qi] + offset
 		distance := dataArray[i].Scores[idx]
+
 		if distance > maxDistance {
 			sel = i
 			maxDistance = distance
+			resultDataIdx = idx
+		} else if distance == maxDistance {
+			sID := typeutil.GetPK(dataArray[i].GetIds(), idx)
+			tmpID := typeutil.GetPK(dataArray[sel].GetIds(), resultDataIdx)
+
+			if typeutil.ComparePK(sID, tmpID) {
+				sel = i
+				maxDistance = distance
+				resultDataIdx = idx
+			}
 		}
 	}
 	return sel

@@ -662,18 +662,18 @@ func TestComparePk(t *testing.T) {
 	AppendPKs(intPks, int64(3))
 	require.Equal(t, []int64{1, 2, 3}, intPks.GetIntId().GetData())
 
-	less := ComparePK(intPks, 0, 1)
+	less := ComparePKInSlice(intPks, 0, 1)
 	assert.True(t, less)
-	less = ComparePK(intPks, 0, 2)
+	less = ComparePKInSlice(intPks, 0, 2)
 	assert.True(t, less)
-	less = ComparePK(intPks, 1, 2)
+	less = ComparePKInSlice(intPks, 1, 2)
 	assert.True(t, less)
 
-	less = ComparePK(intPks, 1, 0)
+	less = ComparePKInSlice(intPks, 1, 0)
 	assert.False(t, less)
-	less = ComparePK(intPks, 2, 0)
+	less = ComparePKInSlice(intPks, 2, 0)
 	assert.False(t, less)
-	less = ComparePK(intPks, 2, 1)
+	less = ComparePKInSlice(intPks, 2, 1)
 	assert.False(t, less)
 
 	strPks := &schemapb.IDs{}
@@ -683,17 +683,17 @@ func TestComparePk(t *testing.T) {
 
 	require.Equal(t, []string{"1", "2", "3"}, strPks.GetStrId().GetData())
 
-	less = ComparePK(strPks, 0, 1)
+	less = ComparePKInSlice(strPks, 0, 1)
 	assert.True(t, less)
-	less = ComparePK(strPks, 0, 2)
+	less = ComparePKInSlice(strPks, 0, 2)
 	assert.True(t, less)
-	less = ComparePK(strPks, 1, 2)
+	less = ComparePKInSlice(strPks, 1, 2)
 	assert.True(t, less)
 
-	less = ComparePK(strPks, 1, 0)
+	less = ComparePKInSlice(strPks, 1, 0)
 	assert.False(t, less)
-	less = ComparePK(strPks, 2, 0)
+	less = ComparePKInSlice(strPks, 2, 0)
 	assert.False(t, less)
-	less = ComparePK(strPks, 2, 1)
+	less = ComparePKInSlice(strPks, 2, 1)
 	assert.False(t, less)
 }

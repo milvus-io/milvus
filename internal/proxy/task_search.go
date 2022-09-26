@@ -564,11 +564,21 @@ func selectHighestScoreIndex(subSearchResultData []*schemapb.SearchResultData, s
 		}
 		sIdx := subSearchNqOffset[i][qi] + cursors[i]
 		sScore := subSearchResultData[i].Scores[sIdx]
+
+		// Choose the larger score idx or the smaller pk idx with the same score
 		if sScore > maxScore {
 			subSearchIdx = i
 			resultDataIdx = sIdx
-
 			maxScore = sScore
+		} else if sScore == maxScore {
+			sID := typeutil.GetPK(subSearchResultData[i].GetIds(), sIdx)
+			tmpID := typeutil.GetPK(subSearchResultData[subSearchIdx].GetIds(), resultDataIdx)
+
+			if typeutil.ComparePK(sID, tmpID) {
+				subSearchIdx = i
+				resultDataIdx = sIdx
+				maxScore = sScore
+			}
 		}
 	}
 	return subSearchIdx, resultDataIdx
