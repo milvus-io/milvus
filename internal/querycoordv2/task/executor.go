@@ -284,33 +284,39 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 	ctx, cancel := context.WithTimeout(task.Context(), actionTimeout)
 	defer cancel()
 
-	var targetSegment *meta.Segment
-	segments := ex.dist.SegmentDistManager.GetByNode(action.Node())
-	for _, segment := range segments {
-		if segment.ID == task.SegmentID() {
-			targetSegment = segment
-			break
-		}
-	}
-	if targetSegment == nil {
-		log.Info("segment to release not found in distribution")
-		return
-	}
-
-	req := packReleaseSegmentRequest(task, action, targetSegment.GetInsertChannel())
-
-	// Get shard leader for the given replica and segment
 	dstNode := action.Node()
-	if ex.meta.CollectionManager.Exist(task.CollectionID()) {
-		leader, ok := getShardLeader(ex.meta.ReplicaManager, ex.dist, task.CollectionID(), action.Node(), targetSegment.GetInsertChannel())
-		if !ok {
-			log.Warn("no shard leader for the segment to execute loading", zap.String("shard", targetSegment.GetInsertChannel()))
+	req := packReleaseSegmentRequest(task, action)
+	if action.Scope() != querypb.DataScope_Streaming {
+		var targetSegment *meta.Segment
+		segments := ex.dist.SegmentDistManager.GetByNode(action.Node())
+		for _, segment := range segments {
+			if segment.GetID() == task.SegmentID() {
+				targetSegment = segment
+				break
+			}
+		}
+		if targetSegment == nil {
+			log.Info("segment to release not found in distribution")
 			return
 		}
-		dstNode = leader
-		log = log.With(zap.Int64("shardLeader", leader))
+		req.Shard = targetSegment.GetInsertChannel()
+
+		if ex.meta.CollectionManager.Exist(task.CollectionID()) {
+			leader, ok := getShardLeader(ex.meta.ReplicaManager, ex.dist, task.CollectionID(), action.Node(), req.GetShard())
+			if !ok {
+				log.Warn("no shard leader for the segment to execute loading", zap.String("shard", req.GetShard()))
+				return
+			}
+			dstNode = leader
+			log = log.With(zap.Int64("shardLeader", leader))
+			req.NeedTransfer = true
+		}
+	} else {
+		// Any modification to the segment distribution have to set NeedTransfer true,
+		// to protect the version, which serves search/query
 		req.NeedTransfer = true
 	}
+
 	log.Info("release segment...")
 	status, err := ex.cluster.ReleaseSegments(ctx, dstNode, req)
 	if err != nil {

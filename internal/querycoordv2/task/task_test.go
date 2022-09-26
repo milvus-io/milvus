@@ -513,6 +513,50 @@ func (suite *TaskSuite) TestReleaseSegmentTask() {
 	}
 }
 
+func (suite *TaskSuite) TestReleaseGrowingSegmentTask() {
+	ctx := context.Background()
+	timeout := 10 * time.Second
+	targetNode := int64(3)
+
+	// Expect
+	suite.cluster.EXPECT().ReleaseSegments(mock.Anything, targetNode, mock.Anything).Return(utils.WrapStatus(commonpb.ErrorCode_Success, ""), nil)
+
+	tasks := []Task{}
+	for _, segment := range suite.releaseSegments {
+		task := NewSegmentTask(
+			ctx,
+			timeout,
+			0,
+			suite.collection,
+			suite.replica,
+			NewSegmentActionWithScope(targetNode, ActionTypeReduce, segment, querypb.DataScope_Streaming),
+		)
+		tasks = append(tasks, task)
+		err := suite.scheduler.Add(task)
+		suite.NoError(err)
+	}
+
+	segmentsNum := len(suite.releaseSegments)
+	suite.AssertTaskNum(0, segmentsNum, 0, segmentsNum)
+
+	// Process tasks
+	suite.dispatchAndWait(targetNode)
+	suite.AssertTaskNum(segmentsNum, 0, 0, segmentsNum)
+
+	// Other nodes' HB can't trigger the procedure of tasks
+	suite.dispatchAndWait(targetNode + 1)
+	suite.AssertTaskNum(segmentsNum, 0, 0, segmentsNum)
+
+	// Process tasks done
+	suite.dispatchAndWait(targetNode)
+	suite.AssertTaskNum(0, 0, 0, 0)
+
+	for _, task := range tasks {
+		suite.Equal(TaskStatusSucceeded, task.Status())
+		suite.NoError(task.Err())
+	}
+}
+
 func (suite *TaskSuite) TestMoveSegmentTask() {
 	ctx := context.Background()
 	timeout := 10 * time.Second
