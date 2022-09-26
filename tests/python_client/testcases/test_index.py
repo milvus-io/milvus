@@ -91,6 +91,7 @@ class TestIndexParams(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L0)
     # TODO (reason="pymilvus issue #677", raises=TypeError)
+    @pytest.mark.xfail(reason="issue 19408")
     @pytest.mark.parametrize("index_type", ct.get_invalid_strs)
     def test_index_type_invalid(self, index_type):
         """
