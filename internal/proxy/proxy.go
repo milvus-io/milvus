@@ -412,6 +412,10 @@ func (node *Proxy) Stop() error {
 		node.shardMgr.Close()
 	}
 
+	if node.chMgr != nil {
+		_ = node.chMgr.removeAllDMLStream()
+	}
+
 	// https://github.com/milvus-io/milvus/issues/12282
 	node.UpdateStateCode(internalpb.StateCode_Abnormal)
 

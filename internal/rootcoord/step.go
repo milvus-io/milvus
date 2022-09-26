@@ -149,10 +149,11 @@ type expireCacheStep struct {
 	collectionNames []string
 	collectionID    UniqueID
 	ts              Timestamp
+	opts            []expireCacheOpt
 }
 
 func (s *expireCacheStep) Execute(ctx context.Context) ([]nestedStep, error) {
-	err := s.core.ExpireMetaCache(ctx, s.collectionNames, s.collectionID, s.ts)
+	err := s.core.ExpireMetaCache(ctx, s.collectionNames, s.collectionID, s.ts, s.opts...)
 	return nil, err
 }
 

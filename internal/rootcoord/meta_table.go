@@ -248,7 +248,7 @@ func (mt *MetaTable) getCollectionByIDInternal(ctx context.Context, collectionID
 	var err error
 
 	coll, ok := mt.collID2Meta[collectionID]
-	if !ok || !coll.Available() || coll.CreateTime > ts {
+	if !ok || coll == nil || !coll.Available() || coll.CreateTime > ts {
 		// travel meta information from catalog.
 		ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName)
 		coll, err = mt.catalog.GetCollectionByID(ctx1, collectionID, ts)
@@ -257,9 +257,9 @@ func (mt *MetaTable) getCollectionByIDInternal(ctx context.Context, collectionID
 		}
 	}
 
-	if !coll.Available() {
+	if coll == nil || !coll.Available() {
 		// use coll.Name to match error message of regression. TODO: remove this after error code is ready.
-		return nil, fmt.Errorf("can't find collection: %s", coll.Name)
+		return nil, common.NewCollectionNotExistError(fmt.Sprintf("can't find collection: %s", coll.Name))
 	}
 
 	clone := coll.Clone()
@@ -296,7 +296,14 @@ func (mt *MetaTable) GetCollectionByName(ctx context.Context, collectionName str
 		return nil, err
 	}
 	if !coll.Available() {
-		return nil, fmt.Errorf("can't find collection: %s", collectionName)
+		return nil, common.NewCollectionNotExistError(fmt.Sprintf("can't find collection: %s", collectionName))
+	}
+	partitions := coll.Partitions
+	coll.Partitions = nil
+	for _, partition := range partitions {
+		if partition.Available() {
+			coll.Partitions = append(coll.Partitions, partition.Clone())
+		}
 	}
 	return coll, nil
 }

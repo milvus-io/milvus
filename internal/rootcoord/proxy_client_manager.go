@@ -117,9 +117,15 @@ func (p *proxyClientManager) DelProxyClient(s *sessionutil.Session) {
 	log.Debug("remove proxy client", zap.String("proxy address", s.Address), zap.Int64("proxy id", s.ServerID))
 }
 
-func (p *proxyClientManager) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) error {
+func (p *proxyClientManager) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest, opts ...expireCacheOpt) error {
 	p.lock.Lock()
 	defer p.lock.Unlock()
+
+	c := defaultExpireCacheConfig()
+	for _, opt := range opts {
+		opt(&c)
+	}
+	c.apply(request)
 
 	if len(p.proxyClient) == 0 {
 		log.Warn("proxy client is empty, InvalidateCollectionMetaCache will not send to any client")

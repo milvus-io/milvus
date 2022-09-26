@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/common"
+
 	"github.com/milvus-io/milvus/api/commonpb"
 	"github.com/milvus-io/milvus/api/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -66,7 +68,18 @@ func Test_dropCollectionTask_Prepare(t *testing.T) {
 func Test_dropCollectionTask_Execute(t *testing.T) {
 	t.Run("drop non-existent collection", func(t *testing.T) {
 		collectionName := funcutil.GenRandomStr()
-		core := newTestCore(withInvalidMeta())
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("GetCollectionByName",
+			mock.Anything, // context.Context.
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("uint64"),
+		).Return(nil, func(ctx context.Context, name string, ts Timestamp) error {
+			if collectionName == name {
+				return common.NewCollectionNotExistError("collection not exist")
+			}
+			return errors.New("error mock GetCollectionByName")
+		})
+		core := newTestCore(withMeta(meta))
 		task := &dropCollectionTask{
 			baseTask: baseTask{core: core},
 			Req: &milvuspb.DropCollectionRequest{
@@ -76,6 +89,9 @@ func Test_dropCollectionTask_Execute(t *testing.T) {
 		}
 		err := task.Execute(context.Background())
 		assert.NoError(t, err)
+		task.Req.CollectionName = collectionName + "_test"
+		err = task.Execute(context.Background())
+		assert.Error(t, err)
 	})
 
 	t.Run("failed to expire cache", func(t *testing.T) {

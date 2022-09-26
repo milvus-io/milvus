@@ -27,6 +27,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/stretchr/testify/mock"
+
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 
@@ -745,79 +748,6 @@ func TestCreateCollectionTask(t *testing.T) {
 			assert.Error(t, err)
 		}
 	})
-}
-
-func TestDropCollectionTask(t *testing.T) {
-	Params.InitOnce()
-
-	prefix := "TestDropCollectionTask"
-	dbName := ""
-	collectionName := prefix + funcutil.GenRandomStr()
-	ctx := context.Background()
-
-	task := &dropCollectionTask{
-		Condition: NewTaskCondition(ctx),
-		DropCollectionRequest: &milvuspb.DropCollectionRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_DropCollection,
-				MsgID:     100,
-				Timestamp: 100,
-			},
-			DbName:         dbName,
-			CollectionName: collectionName,
-		},
-		ctx:    ctx,
-		result: nil,
-	}
-
-	task.SetID(100)
-	assert.Equal(t, UniqueID(100), task.ID())
-	assert.Equal(t, DropCollectionTaskName, task.Name())
-	assert.Equal(t, commonpb.MsgType_DropCollection, task.Type())
-	task.SetTs(100)
-	assert.Equal(t, Timestamp(100), task.BeginTs())
-	assert.Equal(t, Timestamp(100), task.EndTs())
-
-	err := task.PreExecute(ctx)
-	assert.NoError(t, err)
-	assert.Equal(t, Params.ProxyCfg.GetNodeID(), task.GetBase().GetSourceID())
-
-	task.CollectionName = "#0xc0de"
-	err = task.PreExecute(ctx)
-	assert.Error(t, err)
-	task.CollectionName = collectionName
-
-	cache := newMockCache()
-	chMgr := newMockChannelsMgr()
-	rc := newMockRootCoord()
-
-	globalMetaCache = cache
-	task.chMgr = chMgr
-	task.rootCoord = rc
-
-	cache.setGetIDFunc(func(ctx context.Context, collectionName string) (typeutil.UniqueID, error) {
-		return 0, errors.New("mock")
-	})
-	err = task.Execute(ctx)
-	assert.NoError(t, err)
-	cache.setGetIDFunc(func(ctx context.Context, collectionName string) (typeutil.UniqueID, error) {
-		return 0, nil
-	})
-
-	rc.DropCollectionFunc = func(ctx context.Context, request *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
-		return nil, errors.New("mock")
-	}
-	err = task.Execute(ctx)
-	assert.Error(t, err)
-	rc.DropCollectionFunc = func(ctx context.Context, request *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
-		return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
-	}
-
-	// normal case
-	err = task.Execute(ctx)
-	assert.NoError(t, err)
-	err = task.PostExecute(ctx)
-	assert.NoError(t, err)
 }
 
 func TestHasCollectionTask(t *testing.T) {
@@ -2191,4 +2121,55 @@ func Test_createIndexTask_PreExecute(t *testing.T) {
 		globalMetaCache = cache
 		assert.Error(t, cit.PreExecute(context.Background()))
 	})
+}
+
+func Test_dropCollectionTask_PreExecute(t *testing.T) {
+	Params.InitOnce()
+	dct := &dropCollectionTask{DropCollectionRequest: &milvuspb.DropCollectionRequest{
+		Base:           &commonpb.MsgBase{},
+		CollectionName: "0xffff", // invalid
+	}}
+	ctx := context.Background()
+	err := dct.PreExecute(ctx)
+	assert.Error(t, err)
+	dct.DropCollectionRequest.CollectionName = "valid"
+	err = dct.PreExecute(ctx)
+	assert.NoError(t, err)
+}
+
+func Test_dropCollectionTask_Execute(t *testing.T) {
+	mockRC := mocks.NewRootCoord(t)
+	mockRC.On("DropCollection",
+		mock.Anything, // context.Context
+		mock.Anything, // *milvuspb.DropCollectionRequest
+	).Return(&commonpb.Status{}, func(ctx context.Context, request *milvuspb.DropCollectionRequest) error {
+		switch request.GetCollectionName() {
+		case "c1":
+			return errors.New("error mock DropCollection")
+		case "c2":
+			return common.NewStatusError(commonpb.ErrorCode_CollectionNotExists, "collection not exist")
+		default:
+			return nil
+		}
+	})
+
+	ctx := context.Background()
+
+	dct := &dropCollectionTask{rootCoord: mockRC, DropCollectionRequest: &milvuspb.DropCollectionRequest{CollectionName: "normal"}}
+	err := dct.Execute(ctx)
+	assert.NoError(t, err)
+
+	dct.DropCollectionRequest.CollectionName = "c1"
+	err = dct.Execute(ctx)
+	assert.Error(t, err)
+
+	dct.DropCollectionRequest.CollectionName = "c2"
+	err = dct.Execute(ctx)
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, dct.result.GetErrorCode())
+}
+
+func Test_dropCollectionTask_PostExecute(t *testing.T) {
+	dct := &dropCollectionTask{}
+	assert.NoError(t, dct.PostExecute(context.Background()))
 }
