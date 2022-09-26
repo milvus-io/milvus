@@ -360,6 +360,8 @@ class TestPartitionParams(TestcaseBase):
                 2.load with a new replica number
                 3.release partition
                 4.load with a new replica
+                5.create index is a must because get_query_segment_info could
+                  only return indexed and loaded segment
         expected: The second time successfully loaded with a new replica number
         """
         # create, insert
@@ -368,6 +370,7 @@ class TestPartitionParams(TestcaseBase):
         partition_w = self.init_partition_wrap(collection_w)
         partition_w.insert(cf.gen_default_list_data())
         assert partition_w.num_entities == ct.default_nb
+        collection_w.create_index(ct.default_float_vec_field_name, ct.default_index)
 
         partition_w.load(replica_number=1)
         collection_w.query(expr=f"{ct.default_int64_field_name} in [0]", check_task=CheckTasks.check_query_results,
@@ -392,12 +395,13 @@ class TestPartitionParams(TestcaseBase):
         assert num_entities == ct.default_nb
 
     @pytest.mark.tags(CaseLabel.ClusterOnly)
-    @pytest.mark.skip(reason="wait to solve")
     def test_partition_replicas_change_cross_partitions(self):
         """
         target: test load with different replicas between partitions
         method: 1.Create two partitions and insert data
-                2.Load two partitions with different replicas
+                2.Create index is a must because get_query_segment_info could
+                  only return indexed and loaded segment
+                3.Load two partitions with different replicas
         expected: Raise an exception
         """
         # Create two partitions and insert data
@@ -407,6 +411,7 @@ class TestPartitionParams(TestcaseBase):
         partition_w1.insert(cf.gen_default_dataframe_data())
         partition_w2.insert(cf.gen_default_dataframe_data(start=ct.default_nb))
         assert collection_w.num_entities == ct.default_nb * 2
+        collection_w.create_index(ct.default_float_vec_field_name, ct.default_index)
 
         # load with different replicas
         partition_w1.load(replica_number=1)
