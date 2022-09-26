@@ -131,7 +131,7 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, e
 		}
 	}
 
-	if err = validateTopK(limit + offset); err != nil {
+	if err = validateLimit(limit + offset); err != nil {
 		return nil, fmt.Errorf("invalid limit[%d] + offset[%d], %w", limit, offset, err)
 	}
 
