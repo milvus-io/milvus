@@ -45,7 +45,7 @@ func NewMultiRateLimiter() *MultiRateLimiter {
 // Limit returns true, the request will be rejected.
 // Otherwise, the request will pass. Limit also returns limit of limiter.
 func (m *MultiRateLimiter) Limit(rt internalpb.RateType, n int) (bool, float64) {
-	if !Params.QuotaConfig.EnableQuotaAndLimits {
+	if !Params.QuotaConfig.QuotaAndLimitsEnabled {
 		return false, 1 // no limit
 	}
 	// TODO: call other rate limiters

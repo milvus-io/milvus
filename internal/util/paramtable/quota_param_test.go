@@ -17,7 +17,6 @@
 package paramtable
 
 import (
-	"math"
 	"testing"
 	"time"
 
@@ -29,11 +28,12 @@ func TestQuotaParam(t *testing.T) {
 	qc.init(&baseParams)
 
 	t.Run("test quota", func(t *testing.T) {
-		assert.False(t, qc.EnableQuotaAndLimits)
+		assert.False(t, qc.QuotaAndLimitsEnabled)
 		assert.Equal(t, float64(3), qc.QuotaCenterCollectInterval)
 	})
 
 	t.Run("test ddl", func(t *testing.T) {
+		assert.Equal(t, false, qc.DDLLimitEnabled)
 		assert.Equal(t, defaultMax, qc.DDLCollectionRate)
 		assert.Equal(t, defaultMax, qc.DDLPartitionRate)
 		assert.Equal(t, defaultMax, qc.DDLIndexRate)
@@ -42,6 +42,7 @@ func TestQuotaParam(t *testing.T) {
 	})
 
 	t.Run("test dml", func(t *testing.T) {
+		assert.Equal(t, false, qc.DMLLimitEnabled)
 		assert.Equal(t, defaultMax, qc.DMLMaxInsertRate)
 		assert.Equal(t, defaultMin, qc.DMLMinInsertRate)
 		assert.Equal(t, defaultMax, qc.DMLMaxDeleteRate)
@@ -51,6 +52,7 @@ func TestQuotaParam(t *testing.T) {
 	})
 
 	t.Run("test dql", func(t *testing.T) {
+		assert.Equal(t, false, qc.DQLLimitEnabled)
 		assert.Equal(t, defaultMax, qc.DQLMaxSearchRate)
 		assert.Equal(t, defaultMin, qc.DQLMinSearchRate)
 		assert.Equal(t, defaultMax, qc.DQLMaxQueryRate)
@@ -61,8 +63,9 @@ func TestQuotaParam(t *testing.T) {
 		assert.Equal(t, 64, qc.MaxCollectionNum)
 	})
 
-	t.Run("test force deny writing", func(t *testing.T) {
+	t.Run("test limit writing", func(t *testing.T) {
 		assert.False(t, qc.ForceDenyWriting)
+		assert.Equal(t, true, qc.TtProtectionEnabled)
 		assert.Equal(t, 30*time.Second, qc.MaxTimeTickDelay)
 		assert.Equal(t, defaultLowWaterLevel, qc.DataNodeMemoryLowWaterLevel)
 		assert.Equal(t, defaultHighWaterLevel, qc.DataNodeMemoryHighWaterLevel)
@@ -70,10 +73,11 @@ func TestQuotaParam(t *testing.T) {
 		assert.Equal(t, defaultHighWaterLevel, qc.QueryNodeMemoryHighWaterLevel)
 	})
 
-	t.Run("test force deny reading", func(t *testing.T) {
+	t.Run("test limit reading", func(t *testing.T) {
 		assert.False(t, qc.ForceDenyReading)
-		assert.Equal(t, int64(math.MaxInt64), qc.NQInQueueThreshold)
-		assert.Equal(t, float64(defaultMax), qc.QueueLatencyThreshold)
+		assert.Equal(t, false, qc.QueueProtectionEnabled)
+		assert.Equal(t, int64(0), qc.NQInQueueThreshold)
+		assert.Equal(t, float64(0), qc.QueueLatencyThreshold)
 		assert.Equal(t, 0.9, qc.CoolOffSpeed)
 	})
 }
