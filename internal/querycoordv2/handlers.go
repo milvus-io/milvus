@@ -96,7 +96,7 @@ func (s *Server) balanceSegments(ctx context.Context, req *querypb.LoadBalanceRe
 		)
 		task := task.NewSegmentTask(ctx,
 			Params.QueryCoordCfg.SegmentTaskTimeout,
-			req.Base.GetMsgID(),
+			req.GetBase().GetMsgID(),
 			req.GetCollectionID(),
 			replica.GetID(),
 			task.NewSegmentAction(plan.To, task.ActionTypeGrow, plan.Segment.GetID()),

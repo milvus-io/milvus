@@ -289,16 +289,15 @@ func (ob *HandoffObserver) tryRelease(ctx context.Context, event *HandoffEvent) 
 	segment := event.Segment
 	if ob.isSealedSegmentLoaded(segment) || !ob.isSegmentExistOnTarget(segment) {
 		compactSource := segment.CompactionFrom
-
+		log.Info("remove compactFrom segments",
+			zap.Int64("collectionID", segment.CollectionID),
+			zap.Int64("partitionID", segment.PartitionID),
+			zap.Int64("segmentID", segment.SegmentID),
+			zap.Int64s("sourceSegments", compactSource),
+		)
 		for _, toRelease := range compactSource {
 			// when handoff happens between growing and sealed, both with same Segment id, so can't remove from target here
 			if segment.CreatedByCompaction {
-				log.Info("HandoffObserver: remove compactFrom Segment",
-					zap.Int64("collectionID", segment.CollectionID),
-					zap.Int64("partitionID", segment.PartitionID),
-					zap.Int64("compactedSegment", segment.SegmentID),
-					zap.Int64("toReleaseSegment", toRelease),
-				)
 				ob.target.RemoveSegment(toRelease)
 			}
 		}

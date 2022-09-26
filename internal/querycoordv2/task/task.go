@@ -72,9 +72,6 @@ type baseTask struct {
 	err      error
 	actions  []Action
 	step     int
-
-	successCallbacks []func()
-	failureCallbacks []func()
 }
 
 func newBaseTask(ctx context.Context, timeout time.Duration, sourceID, collectionID, replicaID UniqueID) *baseTask {

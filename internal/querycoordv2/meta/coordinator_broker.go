@@ -143,7 +143,8 @@ func (broker *CoordinatorBroker) GetIndexInfo(ctx context.Context, collectionID 
 	defer cancel()
 
 	resp, err := broker.indexCoord.GetIndexInfos(ctx, &indexpb.GetIndexInfoRequest{
-		SegmentIDs: []int64{segmentID},
+		CollectionID: collectionID,
+		SegmentIDs:   []int64{segmentID},
 	})
 	if err != nil || resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Error("failed to get segment index info",
@@ -174,10 +175,6 @@ func (broker *CoordinatorBroker) GetIndexInfo(ctx context.Context, collectionID 
 			IndexFilePaths: info.GetIndexFilePaths(),
 			IndexSize:      int64(info.GetSerializedSize()),
 			IndexVersion:   info.GetIndexVersion(),
-		}
-
-		if len(info.GetIndexFilePaths()) == 0 {
-			return nil, fmt.Errorf("index not ready")
 		}
 
 		indexes = append(indexes, indexInfo)
