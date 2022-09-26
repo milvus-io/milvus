@@ -91,10 +91,9 @@ type IMetaTable interface {
 	ListAliasesByID(collID UniqueID) []string
 
 	// TODO: better to accept ctx.
-	// TODO: should GetCollectionNameByID & GetCollectionIDByName also accept ts?
-	GetCollectionNameByID(collID UniqueID) (string, error)                                    // serve for bulk load.
+	GetCollectionNameByID(collID UniqueID) (string, error)                                    // [Deprecated].
 	GetPartitionNameByID(collID UniqueID, partitionID UniqueID, ts Timestamp) (string, error) // serve for bulk load.
-	GetCollectionIDByName(name string) (UniqueID, error)                                      // serve for bulk load.
+	GetCollectionIDByName(name string) (UniqueID, error)                                      // [Deprecated].
 	GetPartitionByName(collID UniqueID, partitionName string, ts Timestamp) (UniqueID, error) // serve for bulk load.
 
 	// TODO: better to accept ctx.
@@ -580,6 +579,7 @@ func (mt *MetaTable) ListAliasesByID(collID UniqueID) []string {
 }
 
 // GetCollectionNameByID serve for bulk load. TODO: why this didn't accept ts?
+// [Deprecated]
 func (mt *MetaTable) GetCollectionNameByID(collID UniqueID) (string, error) {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
@@ -625,6 +625,7 @@ func (mt *MetaTable) GetPartitionNameByID(collID UniqueID, partitionID UniqueID,
 }
 
 // GetCollectionIDByName serve for bulk load. TODO: why this didn't accept ts?
+// [Deprecated]
 func (mt *MetaTable) GetCollectionIDByName(name string) (UniqueID, error) {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()

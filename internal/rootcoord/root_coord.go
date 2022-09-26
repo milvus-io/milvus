@@ -1471,14 +1471,15 @@ func (c *Core) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvus
 	}
 
 	// Get collection/partition ID from collection/partition name.
-	var cID UniqueID
+	var colInfo *model.Collection
 	var err error
-	if cID, err = c.meta.GetCollectionIDByName(req.GetCollectionName()); err != nil {
+	if colInfo, err = c.meta.GetCollectionByName(ctx, req.GetCollectionName(), typeutil.MaxTimestamp); err != nil {
 		log.Error("failed to find collection ID from its name",
 			zap.String("collection name", req.GetCollectionName()),
 			zap.Error(err))
 		return nil, err
 	}
+	cID := colInfo.CollectionID
 	req.ChannelNames = c.meta.GetCollectionVirtualChannels(cID)
 	if req.GetPartitionName() == "" {
 		req.PartitionName = Params.CommonCfg.DefaultPartitionName
