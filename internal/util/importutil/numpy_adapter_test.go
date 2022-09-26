@@ -1,3 +1,19 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package importutil
 
 import (
@@ -29,7 +45,21 @@ func Test_CreateNumpyFile(t *testing.T) {
 	assert.NotNil(t, err)
 }
 
-func Test_SetByteOrder(t *testing.T) {
+func Test_CreateNumpyData(t *testing.T) {
+	// directory doesn't exist
+	data1 := []float32{1, 2, 3, 4, 5}
+	buf, err := CreateNumpyData(data1)
+	assert.NotNil(t, buf)
+	assert.Nil(t, err)
+
+	// invalid data type
+	data2 := make(map[string]int)
+	buf, err = CreateNumpyData(data2)
+	assert.NotNil(t, err)
+	assert.Nil(t, buf)
+}
+
+func Test_NumpyAdapterSetByteOrder(t *testing.T) {
 	adapter := &NumpyAdapter{
 		reader:    nil,
 		npyReader: &npy.Reader{},
@@ -46,7 +76,7 @@ func Test_SetByteOrder(t *testing.T) {
 	assert.Equal(t, binary.BigEndian, adapter.order)
 }
 
-func Test_ReadError(t *testing.T) {
+func Test_NumpyAdapterReadError(t *testing.T) {
 	adapter := &NumpyAdapter{
 		reader:    nil,
 		npyReader: nil,
@@ -174,7 +204,7 @@ func Test_ReadError(t *testing.T) {
 	}
 }
 
-func Test_Read(t *testing.T) {
+func Test_NumpyAdapterRead(t *testing.T) {
 	err := os.MkdirAll(TempFilesPath, os.ModePerm)
 	assert.Nil(t, err)
 	defer os.RemoveAll(TempFilesPath)
