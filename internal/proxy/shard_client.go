@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"sync"
 
+	cmap "github.com/orcaman/concurrent-map/v2"
+
 	qnClient "github.com/milvus-io/milvus/internal/distributed/querynode/client"
 	"github.com/milvus-io/milvus/internal/types"
 )
@@ -125,10 +127,16 @@ func newShardClientMgr(options ...shardClientMgrOpt) *shardClientMgr {
 	return s
 }
 
-// Warning this method may modify parameter `oldLeaders`
-func (c *shardClientMgr) UpdateShardLeaders(oldLeaders map[string][]nodeInfo, newLeaders map[string][]nodeInfo) error {
+func (c *shardClientMgr) UpdateShardLeaders(oldLeaders ShardLeaders, newLeaders ShardLeaders) error {
+	if oldLeaders == nil {
+		oldLeaders = cmap.New[[]nodeInfo]() // prevent panic
+	}
+	if newLeaders == nil {
+		newLeaders = cmap.New[[]nodeInfo]() // prevent panic
+	}
+
 	oldLocalMap := make(map[UniqueID]*nodeInfo)
-	for _, nodes := range oldLeaders {
+	for _, nodes := range oldLeaders.Items() {
 		for i := range nodes {
 			n := &nodes[i]
 			_, ok := oldLocalMap[n.nodeID]
@@ -137,9 +145,9 @@ func (c *shardClientMgr) UpdateShardLeaders(oldLeaders map[string][]nodeInfo, ne
 			}
 		}
 	}
-	newLocalMap := make(map[UniqueID]*nodeInfo)
 
-	for _, nodes := range newLeaders {
+	newLocalMap := make(map[UniqueID]*nodeInfo)
+	for _, nodes := range newLeaders.Items() {
 		for i := range nodes {
 			n := &nodes[i]
 			_, ok := oldLocalMap[n.nodeID]

@@ -7,32 +7,35 @@ import (
 	"sync"
 	"testing"
 
+	cmap "github.com/orcaman/concurrent-map/v2"
+	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/types"
-
-	"github.com/stretchr/testify/assert"
-
-	"go.uber.org/zap"
 )
 
 func TestUpdateShardsWithRoundRobin(t *testing.T) {
-	list := map[string][]nodeInfo{
-		"channel-1": {
-			{1, "addr1"},
-			{2, "addr2"},
-		},
-		"channel-2": {
-			{20, "addr20"},
-			{21, "addr21"},
-		},
-	}
+	list := cmap.New[[]nodeInfo]()
+	list.Set("channel-1", []nodeInfo{
+		{1, "addr1"},
+		{2, "addr2"},
+	})
+	list.Set("channel-2", []nodeInfo{
+		{20, "addr20"},
+		{21, "addr21"},
+	})
 
 	updateShardsWithRoundRobin(list)
 
-	assert.Equal(t, int64(2), list["channel-1"][0].nodeID)
-	assert.Equal(t, "addr2", list["channel-1"][0].address)
-	assert.Equal(t, int64(21), list["channel-2"][0].nodeID)
-	assert.Equal(t, "addr21", list["channel-2"][0].address)
+	res1, ok := list.Get("channel-1")
+	assert.True(t, ok)
+	assert.Equal(t, int64(2), res1[0].nodeID)
+	assert.Equal(t, "addr2", res1[0].address)
+	res2, ok := list.Get("channel-2")
+	assert.True(t, ok)
+	assert.Equal(t, int64(21), res2[0].nodeID)
+	assert.Equal(t, "addr21", res2[0].address)
 
 	t.Run("check print", func(t *testing.T) {
 		qns := []nodeInfo{
@@ -63,12 +66,11 @@ func TestGroupShardLeadersWithSameQueryNode(t *testing.T) {
 
 	mgr := newShardClientMgr()
 
-	shard2leaders := map[string][]nodeInfo{
-		"c0": {{nodeID: 0, address: "fake"}, {nodeID: 1, address: "fake"}, {nodeID: 2, address: "fake"}},
-		"c1": {{nodeID: 1, address: "fake"}, {nodeID: 2, address: "fake"}, {nodeID: 3, address: "fake"}},
-		"c2": {{nodeID: 0, address: "fake"}, {nodeID: 2, address: "fake"}, {nodeID: 3, address: "fake"}},
-		"c3": {{nodeID: 1, address: "fake"}, {nodeID: 3, address: "fake"}, {nodeID: 4, address: "fake"}},
-	}
+	shard2leaders := cmap.New[[]nodeInfo]()
+	shard2leaders.Set("c0", []nodeInfo{{nodeID: 0, address: "fake"}, {nodeID: 1, address: "fake"}, {nodeID: 2, address: "fake"}})
+	shard2leaders.Set("c1", []nodeInfo{{nodeID: 1, address: "fake"}, {nodeID: 2, address: "fake"}, {nodeID: 3, address: "fake"}})
+	shard2leaders.Set("c2", []nodeInfo{{nodeID: 0, address: "fake"}, {nodeID: 2, address: "fake"}, {nodeID: 3, address: "fake"}})
+	shard2leaders.Set("c3", []nodeInfo{{nodeID: 1, address: "fake"}, {nodeID: 3, address: "fake"}, {nodeID: 4, address: "fake"}})
 	mgr.UpdateShardLeaders(nil, shard2leaders)
 	nexts := map[string]int{
 		"c0": 0,
@@ -127,12 +129,11 @@ func TestMergeRoundRobinPolicy(t *testing.T) {
 
 	mgr := newShardClientMgr()
 
-	shard2leaders := map[string][]nodeInfo{
-		"c0": {{nodeID: 0, address: "fake"}, {nodeID: 1, address: "fake"}, {nodeID: 2, address: "fake"}},
-		"c1": {{nodeID: 1, address: "fake"}, {nodeID: 2, address: "fake"}, {nodeID: 3, address: "fake"}},
-		"c2": {{nodeID: 0, address: "fake"}, {nodeID: 2, address: "fake"}, {nodeID: 3, address: "fake"}},
-		"c3": {{nodeID: 1, address: "fake"}, {nodeID: 3, address: "fake"}, {nodeID: 4, address: "fake"}},
-	}
+	shard2leaders := cmap.New[[]nodeInfo]()
+	shard2leaders.Set("c0", []nodeInfo{{nodeID: 0, address: "fake"}, {nodeID: 1, address: "fake"}, {nodeID: 2, address: "fake"}})
+	shard2leaders.Set("c1", []nodeInfo{{nodeID: 1, address: "fake"}, {nodeID: 2, address: "fake"}, {nodeID: 3, address: "fake"}})
+	shard2leaders.Set("c2", []nodeInfo{{nodeID: 0, address: "fake"}, {nodeID: 2, address: "fake"}, {nodeID: 3, address: "fake"}})
+	shard2leaders.Set("c3", []nodeInfo{{nodeID: 1, address: "fake"}, {nodeID: 3, address: "fake"}, {nodeID: 4, address: "fake"}})
 	mgr.UpdateShardLeaders(nil, shard2leaders)
 
 	querier := &mockQuery{}

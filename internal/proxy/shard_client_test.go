@@ -4,13 +4,15 @@ import (
 	"context"
 	"testing"
 
+	cmap "github.com/orcaman/concurrent-map/v2"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/mock"
-	"github.com/stretchr/testify/assert"
 )
 
-func genShardLeaderInfo(channel string, leaderIDs []UniqueID) map[string][]nodeInfo {
-	leaders := make(map[string][]nodeInfo)
+func genShardLeaderInfo(channel string, leaderIDs []UniqueID) ShardLeaders {
+	leaders := cmap.New[[]nodeInfo]()
 	nodeInfos := make([]nodeInfo, len(leaderIDs))
 	for i, id := range leaderIDs {
 		nodeInfos[i] = nodeInfo{
@@ -18,7 +20,7 @@ func genShardLeaderInfo(channel string, leaderIDs []UniqueID) map[string][]nodeI
 			address: "fake",
 		}
 	}
-	leaders[channel] = nodeInfos
+	leaders.Set(channel, nodeInfos)
 	return leaders
 }
 

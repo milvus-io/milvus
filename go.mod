@@ -63,6 +63,8 @@ require (
 
 require github.com/apache/thrift v0.15.0
 
+require github.com/orcaman/concurrent-map/v2 v2.0.0 // indirect
+
 require (
 	github.com/99designs/go-keychain v0.0.0-20191008050251-8e49817e8af4 // indirect
 	github.com/AthenZ/athenz v1.10.15 // indirect
@@ -196,9 +198,9 @@ replace (
 	github.com/bketelsen/crypt => github.com/bketelsen/crypt v0.0.4 // Fix security alert for core-os/etcd
 	github.com/dgrijalva/jwt-go => github.com/golang-jwt/jwt v3.2.2+incompatible // Fix security alert for jwt-go 3.2.0
 	github.com/go-kit/kit => github.com/go-kit/kit v0.1.0
-	github.com/streamnative/pulsarctl => github.com/xiaofan-luan/pulsarctl v0.5.1
-	github.com/tecbot/gorocksdb => github.com/milvus-io/gorocksdb v0.0.0-20220624081344-8c5f4212846b // indirect
 	// If you want to use the hook interceptor, the following code should be commented out
 	// and you should modify the api version to be the same as the `so` project.
 	github.com/milvus-io/milvus/api => ./api
+	github.com/streamnative/pulsarctl => github.com/xiaofan-luan/pulsarctl v0.5.1
+	github.com/tecbot/gorocksdb => github.com/milvus-io/gorocksdb v0.0.0-20220624081344-8c5f4212846b // indirect
 )

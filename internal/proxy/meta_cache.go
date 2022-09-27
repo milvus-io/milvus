@@ -24,8 +24,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/util/funcutil"
-
+	cmap "github.com/orcaman/concurrent-map/v2"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/api/commonpb"
@@ -39,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -58,7 +58,7 @@ type Cache interface {
 	GetPartitionInfo(ctx context.Context, collectionName string, partitionName string) (*partitionInfo, error)
 	// GetCollectionSchema get collection's schema.
 	GetCollectionSchema(ctx context.Context, collectionName string) (*schemapb.CollectionSchema, error)
-	GetShards(ctx context.Context, withCache bool, collectionName string) (map[string][]nodeInfo, error)
+	GetShards(ctx context.Context, withCache bool, collectionName string) (ShardLeaders, error)
 	ClearShards(collectionName string)
 	RemoveCollection(ctx context.Context, collectionName string)
 	RemoveCollectionsByID(ctx context.Context, collectionID UniqueID)
@@ -79,24 +79,13 @@ type collectionInfo struct {
 	collID              typeutil.UniqueID
 	schema              *schemapb.CollectionSchema
 	partInfo            map[string]*partitionInfo
-	shardLeaders        map[string][]nodeInfo
-	leaderMutex         sync.Mutex
+	shardLeaders        ShardLeaders
 	createdTimestamp    uint64
 	createdUtcTimestamp uint64
 	isLoaded            bool
 }
 
-// CloneShardLeaders returns a copy of shard leaders
-// leaderMutex shall be accuired before invoking this method
-func (c *collectionInfo) CloneShardLeaders() map[string][]nodeInfo {
-	m := make(map[string][]nodeInfo)
-	for channel, leaders := range c.shardLeaders {
-		l := make([]nodeInfo, len(leaders))
-		copy(l, leaders)
-		m[channel] = l
-	}
-	return m
-}
+type ShardLeaders = cmap.ConcurrentMap[[]nodeInfo]
 
 type partitionInfo struct {
 	partitionID         typeutil.UniqueID
@@ -564,20 +553,16 @@ func (m *MetaCache) UpdateCredential(credInfo *internalpb.CredentialInfo) {
 }
 
 // GetShards update cache if withCache == false
-func (m *MetaCache) GetShards(ctx context.Context, withCache bool, collectionName string) (map[string][]nodeInfo, error) {
+func (m *MetaCache) GetShards(ctx context.Context, withCache bool, collectionName string) (ShardLeaders, error) {
 	info, err := m.GetCollectionInfo(ctx, collectionName)
 	if err != nil {
 		return nil, err
 	}
 
 	if withCache {
-		if len(info.shardLeaders) > 0 {
-			info.leaderMutex.Lock()
+		if info.shardLeaders != nil && info.shardLeaders.Count() > 0 {
 			updateShardsWithRoundRobin(info.shardLeaders)
-
-			shards := info.CloneShardLeaders()
-			info.leaderMutex.Unlock()
-			return shards, nil
+			return info.shardLeaders, nil
 		}
 		log.Info("no shard cache for collection, try to get shard leaders from QueryCoord",
 			zap.String("collectionName", collectionName))
@@ -615,26 +600,22 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, collectionNam
 		return nil, fmt.Errorf("fail to get shard leaders from QueryCoord: %s", resp.Status.Reason)
 	}
 
-	shards := parseShardLeaderList2QueryNode(resp.GetShards())
+	newShards := parseShardLeaderList2QueryNode(resp.GetShards())
 
 	// manipulate info in map, get map returns a copy of the information
 	m.mu.RLock()
 	info = m.collInfo[collectionName]
-	// lock leader
-	info.leaderMutex.Lock()
 	oldShards := info.shardLeaders
-	info.shardLeaders = shards
-	info.leaderMutex.Unlock()
+	info.shardLeaders = newShards
 	m.mu.RUnlock()
 
 	// update refcnt in shardClientMgr
-	ret := info.CloneShardLeaders()
-	_ = m.shardMgr.UpdateShardLeaders(oldShards, ret)
-	return ret, nil
+	_ = m.shardMgr.UpdateShardLeaders(oldShards, newShards)
+	return newShards, nil
 }
 
-func parseShardLeaderList2QueryNode(shardsLeaders []*querypb.ShardLeadersList) map[string][]nodeInfo {
-	shard2QueryNodes := make(map[string][]nodeInfo)
+func parseShardLeaderList2QueryNode(shardsLeaders []*querypb.ShardLeadersList) ShardLeaders {
+	shard2QueryNodes := cmap.New[[]nodeInfo]()
 
 	for _, leaders := range shardsLeaders {
 		qns := make([]nodeInfo, len(leaders.GetNodeIds()))
@@ -643,7 +624,7 @@ func parseShardLeaderList2QueryNode(shardsLeaders []*querypb.ShardLeadersList) m
 			qns[j] = nodeInfo{leaders.GetNodeIds()[j], leaders.GetNodeAddrs()[j]}
 		}
 
-		shard2QueryNodes[leaders.GetChannelName()] = qns
+		shard2QueryNodes.Set(leaders.GetChannelName(), qns)
 	}
 
 	return shard2QueryNodes

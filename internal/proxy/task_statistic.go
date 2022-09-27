@@ -258,9 +258,9 @@ func (g *getStatisticsTask) getStatisticsFromQueryNode(ctx context.Context) erro
 		if err != nil {
 			return err
 		}
-		g.resultBuf = make(chan *internalpb.GetStatisticsResponse, len(shard2Leaders))
+		g.resultBuf = make(chan *internalpb.GetStatisticsResponse, shard2Leaders.Count())
 		if err := g.statisticShardPolicy(ctx, g.shardMgr, g.getStatisticsShard, shard2Leaders); err != nil {
-			log.Warn("failed to get statistics", zap.Int64("msgID", g.ID()), zap.Error(err), zap.String("Shards", fmt.Sprintf("%v", shard2Leaders)))
+			log.Warn("failed to get statistics", zap.Int64("msgID", g.ID()), zap.Error(err))
 			return err
 		}
 		return nil

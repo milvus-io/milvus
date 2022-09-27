@@ -284,8 +284,8 @@ func (t *queryTask) Execute(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		t.resultBuf = make(chan *internalpb.RetrieveResults, len(shards))
-		t.toReduceResults = make([]*internalpb.RetrieveResults, 0, len(shards))
+		t.resultBuf = make(chan *internalpb.RetrieveResults, shards.Count())
+		t.toReduceResults = make([]*internalpb.RetrieveResults, 0, shards.Count())
 
 		if err := t.queryShardPolicy(ctx, t.shardMgr, t.queryShard, shards); err != nil {
 			return err

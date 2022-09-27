@@ -328,10 +328,10 @@ func (t *searchTask) Execute(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		t.resultBuf = make(chan *internalpb.SearchResults, len(shard2Leaders))
-		t.toReduceResults = make([]*internalpb.SearchResults, 0, len(shard2Leaders))
+		t.resultBuf = make(chan *internalpb.SearchResults, shard2Leaders.Count())
+		t.toReduceResults = make([]*internalpb.SearchResults, 0, shard2Leaders.Count())
 		if err := t.searchShardPolicy(ctx, t.shardMgr, t.searchShard, shard2Leaders); err != nil {
-			log.Ctx(ctx).Warn("failed to do search", zap.Error(err), zap.String("Shards", fmt.Sprintf("%v", shard2Leaders)))
+			log.Ctx(ctx).Warn("failed to do search", zap.Error(err))
 			return err
 		}
 		return nil

@@ -14,35 +14,38 @@ import (
 
 // type pickShardPolicy func(ctx context.Context, mgr *shardClientMgr, query func(UniqueID, types.QueryNode) error, leaders []nodeInfo) error
 
-type pickShardPolicy func(context.Context, *shardClientMgr, func(context.Context, UniqueID, types.QueryNode, []string) error, map[string][]nodeInfo) error
+type pickShardPolicy func(context.Context, *shardClientMgr, func(context.Context, UniqueID, types.QueryNode, []string) error, ShardLeaders) error
 
 var (
 	errBegin               = errors.New("begin error")
 	errInvalidShardLeaders = errors.New("Invalid shard leader")
 )
 
-func updateShardsWithRoundRobin(shardsLeaders map[string][]nodeInfo) {
-	for channelID, leaders := range shardsLeaders {
-		if len(leaders) <= 1 {
+func updateShardsWithRoundRobin(shardsLeaders ShardLeaders) {
+	for items := range shardsLeaders.IterBuffered() {
+		if len(items.Val) <= 1 {
 			continue
 		}
-
-		shardsLeaders[channelID] = append(leaders[1:], leaders[0])
+		leaders := make([]nodeInfo, len(items.Val))
+		copy(leaders, items.Val)
+		leaders = append(leaders[1:], leaders[0])
+		shardsLeaders.Set(items.Key, leaders)
 	}
 }
 
 // group dml shard leader with same nodeID
 func groupShardleadersWithSameQueryNode(
 	ctx context.Context,
-	shard2leaders map[string][]nodeInfo,
+	shard2leaders ShardLeaders,
 	nexts map[string]int, errSet map[string]error,
 	mgr *shardClientMgr) (map[int64][]string, map[int64]types.QueryNode, error) {
 	// check if all leaders were checked
 	for dml, idx := range nexts {
-		if idx >= len(shard2leaders[dml]) {
+		leaders, _ := shard2leaders.Get(dml)
+		if idx >= len(leaders) {
 			log.Ctx(ctx).Warn("no shard leaders were available",
 				zap.String("channel", dml),
-				zap.String("leaders", fmt.Sprintf("%v", shard2leaders[dml])))
+				zap.String("leaders", fmt.Sprintf("%v", leaders)))
 			if e, ok := errSet[dml]; ok {
 				return nil, nil, e // return last error recorded
 			}
@@ -55,7 +58,8 @@ func groupShardleadersWithSameQueryNode(
 
 	for dml, idx := range nexts {
 		updates[dml] = idx + 1
-		nodeInfo := shard2leaders[dml][idx]
+		shardLeader, _ := shard2leaders.Get(dml)
+		nodeInfo := shardLeader[idx]
 		if _, ok := qnSet[nodeInfo.nodeID]; !ok {
 			qn, err := mgr.GetClient(ctx, nodeInfo.nodeID)
 			if err != nil {
@@ -90,10 +94,10 @@ func mergeRoundRobinPolicy(
 	ctx context.Context,
 	mgr *shardClientMgr,
 	query func(context.Context, UniqueID, types.QueryNode, []string) error,
-	dml2leaders map[string][]nodeInfo) error {
+	dml2leaders ShardLeaders) error {
 	nexts := make(map[string]int)
 	errSet := make(map[string]error) // record err for dml channels
-	for dml := range dml2leaders {
+	for _, dml := range dml2leaders.Keys() {
 		nexts[dml] = 0
 	}
 	for len(nexts) > 0 {
@@ -132,10 +136,11 @@ func mergeRoundRobinPolicy(
 		if len(nexts) > 0 {
 			nextSet := make(map[string]int64)
 			for dml, idx := range nexts {
-				if idx >= len(dml2leaders[dml]) {
+				shardLeader, _ := dml2leaders.Get(dml)
+				if idx >= len(shardLeader) {
 					nextSet[dml] = -1
 				} else {
-					nextSet[dml] = dml2leaders[dml][idx].nodeID
+					nextSet[dml] = shardLeader[idx].nodeID
 				}
 			}
 			log.Ctx(ctx).Warn("retry another query node with round robin", zap.Any("Nexts", nextSet))
