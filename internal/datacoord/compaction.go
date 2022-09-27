@@ -258,7 +258,38 @@ func (c *compactionPlanHandler) handleInnerCompactionResult(plan *datapb.Compact
 
 func (c *compactionPlanHandler) handleMergeCompactionResult(plan *datapb.CompactionPlan, result *datapb.CompactionResult,
 	canCompaction func(segment *datapb.CompactionSegmentBinlogs) bool) error {
-	return c.meta.CompleteMergeCompaction(plan.GetSegmentBinlogs(), result, canCompaction)
+	oldSegments, modSegments, newSegment, err := c.meta.GetCompleteCompactionMeta(plan.GetSegmentBinlogs(), result, canCompaction)
+	if err != nil {
+		return err
+	}
+
+	log := log.With(zap.Int64("planID", plan.GetPlanID()))
+
+	log.Debug("handleCompactionResult: altering metastore after compaction")
+	if err := c.meta.alterMetaStoreAfterCompaction(modSegments, newSegment); err != nil {
+		log.Warn("handleCompactionResult: fail to alter metastore after compaction", zap.Error(err))
+		return fmt.Errorf("fail to alter metastore after compaction, err=%w", err)
+	}
+
+	var nodeID = c.plans[plan.GetPlanID()].dataNodeID
+	req := &datapb.SyncSegmentsRequest{
+		PlanID:        plan.PlanID,
+		CompactedTo:   newSegment.GetID(),
+		CompactedFrom: newSegment.GetCompactionFrom(),
+		NumOfRows:     newSegment.GetNumOfRows(),
+		StatsLogs:     newSegment.GetStatslogs(),
+	}
+
+	log.Debug("handleCompactionResult: syncing segments with node", zap.Int64("nodeID", nodeID))
+	if err := c.sessions.SyncSegments(nodeID, req); err != nil {
+		log.Warn("handleCompactionResult: fail to sync segments with node, reverting metastore",
+			zap.Int64("nodeID", nodeID), zap.String("reason", err.Error()))
+		return c.meta.revertAlterMetaStoreAfterCompaction(oldSegments, newSegment)
+	}
+
+	c.meta.alterInMemoryMetaAfterCompaction(newSegment, modSegments)
+	log.Info("handleCompactionResult: success to handle merge compaction result")
+	return nil
 }
 
 // getCompaction return compaction task. If planId does not exist, return nil.

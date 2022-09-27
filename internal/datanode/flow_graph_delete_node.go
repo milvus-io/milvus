@@ -211,7 +211,17 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 // update delBuf for compacted segments
 func (dn *deleteNode) updateCompactedSegments() {
 	compactedTo2From := dn.replica.listCompactedSegmentIDs()
+
 	for compactedTo, compactedFrom := range compactedTo2From {
+		// if the compactedTo segment has 0 numRows, remove all segments related
+		if !dn.replica.hasSegment(compactedTo, true) {
+			for _, segID := range compactedFrom {
+				dn.delBuf.Delete(segID)
+			}
+			dn.replica.removeSegments(compactedFrom...)
+			continue
+		}
+
 		var compactToDelBuff *DelDataBuf
 		delBuf, loaded := dn.delBuf.Load(compactedTo)
 		if !loaded {
@@ -223,8 +233,11 @@ func (dn *deleteNode) updateCompactedSegments() {
 		for _, segID := range compactedFrom {
 			if value, loaded := dn.delBuf.LoadAndDelete(segID); loaded {
 				compactToDelBuff.updateFromBuf(value.(*DelDataBuf))
-				dn.delBuf.Store(compactedTo, compactToDelBuff)
 
+				// only store delBuf if EntriesNum > 0
+				if compactToDelBuff.EntriesNum > 0 {
+					dn.delBuf.Store(compactedTo, compactToDelBuff)
+				}
 			}
 		}
 		log.Debug("update delBuf for compacted segments",

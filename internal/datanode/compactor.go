@@ -199,13 +199,15 @@ func (t *compactionTask) merge(mergeItr iterator, delta map[interface{}]Timestam
 		err              error
 
 		// statslog generation
-		segment *Segment // empty segment used for bf generation
+		segment = &Segment{} // empty segment used for bf generation
 		pkID    UniqueID
 
 		iDatas      = make([]*InsertData, 0)
 		fID2Type    = make(map[UniqueID]schemapb.DataType)
 		fID2Content = make(map[UniqueID][]interface{})
 	)
+
+	t.Replica.initSegmentBloomFilter(segment)
 
 	isDeletedValue := func(v *storage.Value) bool {
 		ts, ok := delta[v.PK.GetValue()]
@@ -216,10 +218,7 @@ func (t *compactionTask) merge(mergeItr iterator, delta map[interface{}]Timestam
 		return false
 	}
 
-	segment = &Segment{}
-	t.Replica.initSegmentBloomFilter(segment)
-
-	// get dim
+	// get pkID, pkType, dim
 	for _, fs := range schema.GetFields() {
 		fID2Type[fs.GetFieldID()] = fs.GetDataType()
 		if fs.GetIsPrimaryKey() {
@@ -365,7 +364,7 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 		segIDs = append(segIDs, s.GetSegmentID())
 	}
 
-	collID, partID, meta, err := t.getSegmentMeta(segIDs[0])
+	_, partID, meta, err := t.getSegmentMeta(segIDs[0])
 	if err != nil {
 		log.Error("compact wrong", zap.Int64("planID", t.plan.GetPlanID()), zap.Error(err))
 		return nil, err
@@ -531,29 +530,6 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 		Field2StatslogPaths: segPaths.statsPaths,
 		Deltalogs:           segPaths.deltaInfo,
 		NumOfRows:           numRows,
-	}
-
-	//  Compaction I: update pk range.
-	//  Compaction II: remove the segments and add a new flushed segment with pk range.
-	if t.hasSegment(targetSegID, true) {
-		if numRows <= 0 {
-			t.removeSegments(targetSegID)
-		} else {
-			t.refreshFlushedSegStatistics(targetSegID, numRows)
-		}
-		// no need to shorten the PK range of a segment, deleting dup PKs is valid
-	} else {
-		segment.collectionID = collID
-		segment.partitionID = partID
-		segment.segmentID = targetSegID
-		segment.channelName = t.plan.GetChannel()
-		segment.numRows = numRows
-
-		err = t.mergeFlushedSegments(segment, t.plan.GetPlanID(), segIDs)
-		if err != nil {
-			log.Error("compact wrong", zap.Int64("planID", t.plan.GetPlanID()), zap.Error(err))
-			return nil, err
-		}
 	}
 
 	uninjectStart := time.Now()
