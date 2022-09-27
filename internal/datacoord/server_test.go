@@ -1337,7 +1337,7 @@ func TestDataNodeTtChannel(t *testing.T) {
 		}
 	}
 	t.Run("Test segment flush after tt", func(t *testing.T) {
-		ch := make(chan interface{}, 1)
+		ch := make(chan any, 1)
 		svr := newTestServer(t, ch)
 		defer closeTestServer(t, svr)
 
@@ -1407,7 +1407,7 @@ func TestDataNodeTtChannel(t *testing.T) {
 	})
 
 	t.Run("flush segment with different channels", func(t *testing.T) {
-		ch := make(chan interface{}, 1)
+		ch := make(chan any, 1)
 		svr := newTestServer(t, ch)
 		defer closeTestServer(t, svr)
 		svr.meta.AddCollection(&datapb.CollectionInfo{
@@ -1484,7 +1484,7 @@ func TestDataNodeTtChannel(t *testing.T) {
 	})
 
 	t.Run("test expire allocation after receiving tt msg", func(t *testing.T) {
-		ch := make(chan interface{}, 1)
+		ch := make(chan any, 1)
 		helper := ServerHelper{
 			eventAfterHandleDataNodeTt: func() { ch <- struct{}{} },
 		}
@@ -2616,12 +2616,9 @@ func TestDataCoordServer_SetSegmentState(t *testing.T) {
 	})
 
 	t.Run("dataCoord meta set state error", func(t *testing.T) {
-		svr := newTestServer(t, nil)
-		svr.meta.Lock()
-		func() {
-			defer svr.meta.Unlock()
-			svr.meta, _ = newMeta(context.TODO(), &mockTxnKVext{}, "")
-		}()
+		meta, err := newMeta(context.TODO(), &mockTxnKVext{}, "")
+		assert.NoError(t, err)
+		svr := newTestServerWithMeta(t, nil, meta)
 		defer closeTestServer(t, svr)
 		segment := &datapb.SegmentInfo{
 			ID:            1000,
@@ -2961,7 +2958,7 @@ func (ms *MockClosePanicMsgstream) Chan() <-chan *msgstream.MsgPack {
 	return args.Get(0).(chan *msgstream.MsgPack)
 }
 
-func newTestServer(t *testing.T, receiveCh chan interface{}, opts ...Option) *Server {
+func newTestServer(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 	var err error
 	Params.Init()
 	Params.CommonCfg.DataCoordTimeTick = Params.CommonCfg.DataCoordTimeTick + strconv.Itoa(rand.Int())
@@ -3000,6 +2997,47 @@ func newTestServer(t *testing.T, receiveCh chan interface{}, opts ...Option) *Se
 	return svr
 }
 
+func newTestServerWithMeta(t *testing.T, receiveCh chan any, meta *meta, opts ...Option) *Server {
+	var err error
+	Params.Init()
+	Params.CommonCfg.DataCoordTimeTick = Params.CommonCfg.DataCoordTimeTick + strconv.Itoa(rand.Int())
+	factory := dependency.NewDefaultFactory(true)
+
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	assert.Nil(t, err)
+	sessKey := path.Join(Params.EtcdCfg.MetaRootPath, sessionutil.DefaultServiceRoot)
+	_, err = etcdCli.Delete(context.Background(), sessKey, clientv3.WithPrefix())
+	assert.Nil(t, err)
+
+	svr := CreateServer(context.TODO(), factory, opts...)
+	svr.SetEtcdClient(etcdCli)
+	svr.dataNodeCreator = func(ctx context.Context, addr string) (types.DataNode, error) {
+		return newMockDataNodeClient(0, receiveCh)
+	}
+	svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
+		return newMockRootCoordService(), nil
+	}
+	indexCoord := mocks.NewMockIndexCoord(t)
+	indexCoord.EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+	svr.indexCoord = indexCoord
+
+	err = svr.Init()
+	assert.Nil(t, err)
+	svr.meta = meta
+
+	err = svr.Start()
+	assert.Nil(t, err)
+	err = svr.Register()
+	assert.Nil(t, err)
+
+	// Stop channal watch state watcher in tests
+	if svr.channelManager != nil && svr.channelManager.stopChecker != nil {
+		svr.channelManager.stopChecker()
+	}
+
+	return svr
+}
+
 func closeTestServer(t *testing.T, svr *Server) {
 	err := svr.Stop()
 	assert.Nil(t, err)
@@ -3007,7 +3045,7 @@ func closeTestServer(t *testing.T, svr *Server) {
 	assert.Nil(t, err)
 }
 
-func newTestServer2(t *testing.T, receiveCh chan interface{}, opts ...Option) *Server {
+func newTestServer2(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 	var err error
 	Params.Init()
 	Params.CommonCfg.DataCoordTimeTick = Params.CommonCfg.DataCoordTimeTick + strconv.Itoa(rand.Int())
