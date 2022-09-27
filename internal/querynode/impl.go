@@ -1221,6 +1221,8 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 }
 
 func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDistributionRequest) (*commonpb.Status, error) {
+	log := log.Ctx(ctx).With(zap.Int64("collectionID", req.GetCollectionID()), zap.String("channel", req.GetChannel()))
+	log.Debug("SyncDistribution received")
 	shardCluster, ok := node.ShardClusterService.getShardCluster(req.GetChannel())
 	if !ok {
 		return &commonpb.Status{
@@ -1229,9 +1231,13 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 		}, nil
 	}
 	for _, action := range req.GetActions() {
+		log.Debug("sync action", zap.String("Action", action.GetType().String()), zap.Int64("segmentID", action.SegmentID))
 		switch action.GetType() {
 		case querypb.SyncType_Remove:
-			shardCluster.forceRemoveSegment(action.GetSegmentID())
+			shardCluster.ReleaseSegments(ctx, &querypb.ReleaseSegmentsRequest{
+				SegmentIDs: []UniqueID{action.GetSegmentID()},
+				Scope:      querypb.DataScope_Historical,
+			}, true)
 		case querypb.SyncType_Set:
 			shardCluster.SyncSegments([]*querypb.ReplicaSegmentsInfo{
 				{NodeId: action.GetNodeID(), PartitionId: action.GetPartitionID(), SegmentIds: []int64{action.GetSegmentID()}},
