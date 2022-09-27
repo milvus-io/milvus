@@ -39,6 +39,7 @@ service DataCoord {
   rpc SaveBinlogPaths(SaveBinlogPathsRequest) returns (common.Status){}
   rpc GetRecoveryInfo(GetRecoveryInfoRequest) returns (GetRecoveryInfoResponse){}
   rpc GetFlushedSegments(GetFlushedSegmentsRequest) returns(GetFlushedSegmentsResponse){}
+  rpc GetSegmentsByStates(GetSegmentsByStatesRequest) returns(GetSegmentsByStatesResponse){}
 
   rpc ShowConfigurations(internal.ShowConfigurationsRequest) returns (internal.ShowConfigurationsResponse){}
   // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
@@ -377,6 +378,18 @@ message GetRecoveryInfoRequest {
   common.MsgBase base = 1;
   int64 collectionID = 2;
   int64 partitionID = 3;
+}
+
+message GetSegmentsByStatesRequest {
+  common.MsgBase base = 1;
+  int64 collectionID = 2;
+  int64 partitionID = 3;
+  repeated common.SegmentState states = 4;
+}
+
+message GetSegmentsByStatesResponse {
+  common.Status status = 1;
+  repeated int64 segments = 2;
 }
 
 message GetFlushedSegmentsRequest {

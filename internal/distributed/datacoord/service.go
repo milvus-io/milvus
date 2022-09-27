@@ -312,6 +312,11 @@ func (s *Server) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedS
 	return s.dataCoord.GetFlushedSegments(ctx, req)
 }
 
+// GetSegmentsByStates get all segments of a partition by given states
+func (s *Server) GetSegmentsByStates(ctx context.Context, req *datapb.GetSegmentsByStatesRequest) (*datapb.GetSegmentsByStatesResponse, error) {
+	return s.dataCoord.GetSegmentsByStates(ctx, req)
+}
+
 // ShowConfigurations gets specified configurations para of DataCoord
 func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
 	return s.dataCoord.ShowConfigurations(ctx, req)

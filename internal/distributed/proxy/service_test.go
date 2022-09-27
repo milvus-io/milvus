@@ -514,6 +514,10 @@ func (m *MockDataCoord) GetFlushedSegments(ctx context.Context, req *datapb.GetF
 	return nil, nil
 }
 
+func (m *MockDataCoord) GetSegmentsByStates(ctx context.Context, req *datapb.GetSegmentsByStatesRequest) (*datapb.GetSegmentsByStatesResponse, error) {
+	return nil, nil
+}
+
 func (m *MockDataCoord) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
 	return nil, nil
 }

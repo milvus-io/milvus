@@ -474,6 +474,28 @@ func (_m *DataCoord) GetFlushedSegments(ctx context.Context, req *datapb.GetFlus
 	return r0, r1
 }
 
+func (_m *DataCoord) GetSegmentsByStates(ctx context.Context, req *datapb.GetSegmentsByStatesRequest) (*datapb.GetSegmentsByStatesResponse, error) {
+	ret := _m.Called(ctx, req)
+
+	var r0 *datapb.GetSegmentsByStatesResponse
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.GetSegmentsByStatesRequest) *datapb.GetSegmentsByStatesResponse); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.GetSegmentsByStatesResponse)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.GetSegmentsByStatesRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // DataCoord_GetFlushedSegments_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetFlushedSegments'
 type DataCoord_GetFlushedSegments_Call struct {
 	*mock.Call
