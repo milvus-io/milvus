@@ -231,7 +231,11 @@ func (s *searchTask) reduceResults(ctx context.Context, searchReq *searchRequest
 			log.Ctx(ctx).Warn("marshal for historical results error", zap.Int64("msgID", s.ID()), zap.Error(err))
 			return err
 		}
-		defer deleteSearchResultDataBlobs(blobs)
+
+		defer func() {
+			deleteSearchResultDataBlobs(blobs)
+			s.reduceDur = s.tr.RecordSpan()
+		}()
 
 		for i := 0; i < cnt; i++ {
 			blob, err := getSearchResultDataBlob(blobs, i)
@@ -274,8 +278,9 @@ func (s *searchTask) reduceResults(ctx context.Context, searchReq *searchRequest
 				SlicedNumCount: 1,
 			}
 		}
+
+		s.reduceDur = s.tr.RecordSpan()
 	}
-	s.reduceDur = s.tr.RecordSpan()
 	return nil
 }
 
