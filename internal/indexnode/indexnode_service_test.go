@@ -217,7 +217,7 @@ func TestIndexNodeComplex(t *testing.T) {
 	var i int64
 	t.Logf("preparing mock data...")
 	wg := sync.WaitGroup{}
-	for i = 0; i < 256; i++ {
+	for i = 0; i < 10; i++ {
 		task := &testTask{
 			buildID:    i + buildID0,
 			collID:     i + collID0,
@@ -289,6 +289,7 @@ Loop:
 			if jobNumRet.TotalJobNum == 0 {
 				break Loop
 			}
+			time.Sleep(time.Second)
 		}
 	}
 	buildIDs := make([]int64, 0, len(tasks))
