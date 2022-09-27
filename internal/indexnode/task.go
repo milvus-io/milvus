@@ -399,7 +399,7 @@ func (it *indexBuildTask) BuildDiskAnnIndex(ctx context.Context) error {
 
 	it.tr.Record("build index done")
 
-	indexBlobs, err := it.index.SerializeDiskIndex()
+	fileInfos, err := it.index.GetIndexFileInfo()
 	if err != nil {
 		log.Ctx(ctx).Error("IndexNode index Serialize failed", zap.Error(err))
 		return err
@@ -408,8 +408,12 @@ func (it *indexBuildTask) BuildDiskAnnIndex(ctx context.Context) error {
 
 	// use serialized size before encoding
 	it.serializedSize = 0
-	for _, blob := range indexBlobs {
-		it.serializedSize += uint64(blob.Size)
+	for _, info := range fileInfos {
+		it.serializedSize += uint64(info.FileSize)
+		it.indexBlobs = append(it.indexBlobs, &storage.Blob{
+			Key:  info.FileName,
+			Size: info.FileSize,
+		})
 	}
 
 	// early release index for gc, and we can ensure that Delete is idempotent.
@@ -419,7 +423,6 @@ func (it *indexBuildTask) BuildDiskAnnIndex(ctx context.Context) error {
 
 	encodeIndexFileDur := it.tr.Record("index codec serialize done")
 	metrics.IndexNodeEncodeIndexFileLatency.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.GetNodeID(), 10)).Observe(float64(encodeIndexFileDur.Milliseconds()))
-	it.indexBlobs = indexBlobs
 	return nil
 }
 

@@ -25,10 +25,15 @@ import (
 
 type Blob = storage.Blob
 
+type IndexFileInfo struct {
+	FileName string
+	FileSize int64
+}
+
 type CodecIndex interface {
 	Build(*Dataset) error
 	Serialize() ([]*Blob, error)
-	SerializeDiskIndex() ([]*Blob, error)
+	GetIndexFileInfo() ([]*IndexFileInfo, error)
 	Load([]*Blob) error
 	Delete() error
 	CleanLocalData() error
@@ -233,7 +238,7 @@ func (index *CgoIndex) Serialize() ([]*Blob, error) {
 	return ret, nil
 }
 
-func (index *CgoIndex) SerializeDiskIndex() ([]*Blob, error) {
+func (index *CgoIndex) GetIndexFileInfo() ([]*IndexFileInfo, error) {
 	var cBinarySet C.CBinarySet
 
 	status := C.SerializeIndexToBinarySet(index.indexPtr, &cBinarySet)
@@ -250,17 +255,17 @@ func (index *CgoIndex) SerializeDiskIndex() ([]*Blob, error) {
 	if err != nil {
 		return nil, err
 	}
-	ret := make([]*Blob, 0)
+	ret := make([]*IndexFileInfo, 0)
 	for _, key := range keys {
 		size, err := GetBinarySetSize(cBinarySet, key)
 		if err != nil {
 			return nil, err
 		}
-		blob := &Blob{
-			Key:  key,
-			Size: size,
+		info := &IndexFileInfo{
+			FileName: key,
+			FileSize: size,
 		}
-		ret = append(ret, blob)
+		ret = append(ret, info)
 	}
 
 	return ret, nil
