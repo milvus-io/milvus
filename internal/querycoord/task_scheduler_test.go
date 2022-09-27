@@ -559,6 +559,7 @@ func TestTaskScheduler_BindContext(t *testing.T) {
 }
 
 func TestTaskScheduler_willLoadOrRelease(t *testing.T) {
+	refreshParams()
 	ctx := context.Background()
 	queryCoord := &QueryCoord{}
 

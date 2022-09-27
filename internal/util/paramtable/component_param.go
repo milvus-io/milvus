@@ -596,6 +596,9 @@ type queryCoordConfig struct {
 	OverloadedMemoryThresholdPercentage float64
 	BalanceIntervalSeconds              int64
 	MemoryUsageMaxDifferencePercentage  float64
+
+	//---- Task ---
+	MaxTask int64
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -609,6 +612,9 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	p.initOverloadedMemoryThresholdPercentage()
 	p.initBalanceIntervalSeconds()
 	p.initMemoryUsageMaxDifferencePercentage()
+
+	//---- Task ---
+	p.initMaxTask()
 }
 
 func (p *queryCoordConfig) initAutoHandoff() {
@@ -656,6 +662,15 @@ func (p *queryCoordConfig) initMemoryUsageMaxDifferencePercentage() {
 		panic(err)
 	}
 	p.MemoryUsageMaxDifferencePercentage = float64(diffPercentage) / 100
+}
+
+func (p *queryCoordConfig) initMaxTask() {
+	maxDiff := p.Base.LoadWithDefault("queryCoord.maxTask", "2048")
+	MaxTask, err := strconv.ParseInt(maxDiff, 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	p.MaxTask = MaxTask
 }
 
 func (p *queryCoordConfig) SetNodeID(id UniqueID) {

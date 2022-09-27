@@ -159,6 +159,7 @@ queryCoord:
   overloadedMemoryThresholdPercentage: 90 # The threshold percentage that memory overload
   balanceIntervalSeconds: 60
   memoryUsageMaxDifferencePercentage: 30
+  maxTask: 2048
 
 # Related configuration of queryNode, used to run hybrid search between vector and scalar data.
 queryNode:

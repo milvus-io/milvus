@@ -163,8 +163,8 @@ func (queue *taskQueue) popTask() task {
 func newTaskQueue() *taskQueue {
 	return &taskQueue{
 		tasks:    list.New(),
-		maxTask:  1024,
-		taskChan: make(chan int, 1024),
+		maxTask:  Params.QueryCoordCfg.MaxTask,
+		taskChan: make(chan int, Params.QueryCoordCfg.MaxTask),
 	}
 }
 
@@ -193,7 +193,7 @@ func newTaskScheduler(ctx context.Context,
 	broker *globalMetaBroker,
 	idAllocator func() (UniqueID, error)) (*TaskScheduler, error) {
 	ctx1, cancel := context.WithCancel(ctx)
-	taskChan := make(chan task, 1024)
+	taskChan := make(chan task, Params.QueryCoordCfg.MaxTask)
 	stopTaskLoopChan := make(chan int, 1)
 	s := &TaskScheduler{
 		ctx:                      ctx1,
@@ -279,33 +279,32 @@ func (scheduler *TaskScheduler) reloadFromKV() error {
 		triggerTasks[taskID].setState(state)
 	}
 
-	// triggerTaskQueue's size is 1024, if the size of triggerTasks if large than 1024 the loop will be blocked,
-	// so run it in a standalone goroutine
-	go func() {
-		var doneTriggerTask task
-		var allTriggerTasks []task
-		for _, t := range triggerTasks {
-			if t.getState() != taskDone {
-				allTriggerTasks = append(allTriggerTasks, t)
-			} else {
-				doneTriggerTask = t
-			}
+	var doneTriggerTask task
+	var allTriggerTasks []task
+	for _, t := range triggerTasks {
+		if t.getState() != taskDone {
+			allTriggerTasks = append(allTriggerTasks, t)
+		} else {
+			doneTriggerTask = t
 		}
-		if doneTriggerTask != nil {
-			for _, childTask := range activeTasks {
-				childTask.setParentTask(doneTriggerTask) //replace child task after reScheduler
-				doneTriggerTask.addChildTask(childTask)
-			}
-			doneTriggerTask.setResultInfo(nil)
-			scheduler.triggerTaskQueue.addTask(doneTriggerTask)
+	}
+	if doneTriggerTask != nil {
+		for _, childTask := range activeTasks {
+			childTask.setParentTask(doneTriggerTask) //replace child task after reScheduler
+			doneTriggerTask.addChildTask(childTask)
 		}
-		sort.Slice(allTriggerTasks, func(i, j int) bool {
-			return allTriggerTasks[i].getTaskID() < allTriggerTasks[j].getTaskID()
-		})
-		for _, t := range allTriggerTasks {
-			scheduler.triggerTaskQueue.addTask(t)
+		doneTriggerTask.setResultInfo(nil)
+		scheduler.triggerTaskQueue.addTask(doneTriggerTask)
+	}
+	sort.Slice(allTriggerTasks, func(i, j int) bool {
+		return allTriggerTasks[i].getTaskID() < allTriggerTasks[j].getTaskID()
+	})
+	for _, t := range allTriggerTasks {
+		if scheduler.triggerTaskQueue.taskFull() {
+			panic("Quercoord init failed: task sum out of range, should amplify queryCoord.maxTask")
 		}
-	}()
+		scheduler.triggerTaskQueue.addTask(t)
+	}
 	return nil
 }
 
