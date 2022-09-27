@@ -3246,7 +3246,6 @@ class  TestsearchString(TestcaseBase):
                                          "limit": default_limit,
                                          "_async": _async})
 
-
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_string_field_is_primary_true(self, dim, _async):
         """
@@ -3274,7 +3273,6 @@ class  TestsearchString(TestcaseBase):
                                          "ids": insert_ids,
                                          "limit": default_limit,
                                          "_async": _async})
-
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_string_mix_expr(self, dim, auto_id, _async):
@@ -3327,8 +3325,6 @@ class  TestsearchString(TestcaseBase):
                             check_items={"err_code": 1,
                                          "err_msg": "failed to create query plan: type mismatch"}
                             )
-
-
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("expression", cf.gen_normal_string_expressions(ct.default_string_field_name))
@@ -3412,7 +3408,6 @@ class  TestsearchString(TestcaseBase):
                                          "limit": 2,
                                          "_async": _async})
 
-
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_string_field_binary(self, auto_id, dim, _async):
         """
@@ -3444,7 +3439,6 @@ class  TestsearchString(TestcaseBase):
                                          "ids": insert_ids,
                                          "limit": 2,
                                          "_async": _async})
-
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_mix_expr_with_binary(self, dim, auto_id, _async):
@@ -3592,7 +3586,6 @@ class  TestsearchString(TestcaseBase):
                                          "limit": limit,
                                          "_async": _async})
 
-
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_string_field_not_primary_is_empty(self, _async):
         """
@@ -3605,12 +3598,10 @@ class  TestsearchString(TestcaseBase):
         # 1. initialize with data
         collection_w, _, _, _= \
             self.init_collection_general(prefix, False, primary_field=ct.default_int64_field_name)[0:4]
-
         nb = 3000
         data = cf.gen_default_list_data(nb)
         insert_ids = data[0]
-        data[2] = [""for _ in range(nb)]
-
+        data[2] = ["" for _ in range(nb)]
         collection_w.insert(data)
         assert collection_w.num_entities == nb
 
@@ -3618,7 +3609,6 @@ class  TestsearchString(TestcaseBase):
         index_param = {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}}
         collection_w.create_index("float_vector", index_param)
         collection_w.load()
-
 
         search_string_exp = "varchar >= \"\""
 
@@ -3637,3 +3627,198 @@ class  TestsearchString(TestcaseBase):
                                          "ids": insert_ids,
                                          "limit": default_limit,
                                          "_async": _async})
+
+
+class TestsearchPagination(TestcaseBase):
+    """ Test case of search pagination """
+
+    @pytest.fixture(scope="function", params=[0, 10])
+    def offset(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=[8, 128])
+    def dim(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=[False, True])
+    def auto_id(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=[False, True])
+    def _async(self, request):
+        yield request.param
+
+    """
+    ******************************************************************
+    #  The following are valid base cases
+    ******************************************************************
+    """
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("limit", [10, 20])
+    def test_search_with_pagination(self, offset, auto_id, dim, limit, _async):
+        """
+        target: test search with pagination
+        method: 1. connect and create a collection
+                2. search pagination with offset
+                3. search with offset+limit
+                4. compare with the search results whose corresponding ids should be the same
+        expected: search successfully and ids is correct
+        """
+        # 1. create a collection
+        collection_w = self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim)[0]
+        # 2. search pagination with offset
+        search_param = {"metric_type": "L2", "params": {"nprobe": 10}, "offset": offset}
+        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        search_res = collection_w.search(vectors[:default_nq], default_search_field,
+                                         search_param, limit,
+                                         default_search_exp, _async=_async,
+                                         check_task=CheckTasks.check_search_results,
+                                         check_items={"nq": default_nq,
+                                         "limit": limit,
+                                         "_async": _async})[0]
+        # 3. search with offset+limit
+        res = collection_w.search(vectors[:default_nq], default_search_field, default_search_params,
+                                  limit+offset, default_search_exp, _async=_async)[0]
+        if _async:
+            search_res.done()
+            search_res = search_res.result()
+            res.done()
+            res = res.result()
+        assert search_res[0].ids == res[0].ids[offset:]
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_string_with_pagination(self, offset, auto_id, _async):
+        """
+        target: test search string with pagination
+        method: 1. connect and create a collection
+                2. search pagination with offset
+                3. search with offset+limit
+                4. compare with the search results whose corresponding ids should be the same
+        expected: search successfully and ids is correct
+        """
+        # 1. create a collection
+        collection_w, _, _, insert_ids = \
+            self.init_collection_general(prefix, True, auto_id=auto_id, dim=default_dim)[0:4]
+        # 2. search
+        search_param = {"metric_type": "L2", "params": {"nprobe": 10}, "offset": offset}
+        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+        output_fields = [default_string_field_name, default_float_field_name]
+        search_res = collection_w.search(vectors[:default_nq], default_search_field,
+                                         search_param, default_limit,
+                                         default_search_string_exp,
+                                         output_fields=output_fields,
+                                         _async=_async,
+                                         check_task=CheckTasks.check_search_results,
+                                         check_items={"nq": default_nq,
+                                                      "ids": insert_ids,
+                                                      "limit": default_limit,
+                                                      "_async": _async})[0]
+        # 3. search with offset+limit
+        res = collection_w.search(vectors[:default_nq], default_search_field, default_search_params,
+                                  default_limit + offset, default_search_string_exp, _async=_async)[0]
+        if _async:
+            search_res.done()
+            search_res = search_res.result()
+            res.done()
+            res = res.result()
+        assert search_res[0].ids == res[0].ids[offset:]
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue #19338")
+    def test_search_binary_with_pagination(self, offset, auto_id):
+        """
+        target: test search binary with pagination
+        method: 1. connect and create a collection
+                2. search pagination with offset
+                3. search with offset+limit
+                4. compare with the search results whose corresponding ids should be the same
+        expected: search successfully and ids is correct
+        """
+        # 1. create a collection
+        collection_w, _, _, insert_ids = \
+            self.init_collection_general(prefix, True, is_binary=True, auto_id=auto_id, dim=default_dim)[0:4]
+        # 2. search
+        search_param = {"metric_type": "JACCARD", "params": {"nprobe": 10}, "offset": offset}
+        binary_vectors = cf.gen_binary_vectors(default_nq, default_dim)[1]
+        search_res = collection_w.search(binary_vectors[:default_nq], "binary_vector",
+                                         search_param, default_limit,
+                                         check_task=CheckTasks.check_search_results,
+                                         check_items={"nq": default_nq,
+                                                      "ids": insert_ids,
+                                                      "limit": default_limit})[0]
+        # 3. search with offset+limit
+        search_binary_param = {"metric_type": "JACCARD", "params": {"nprobe": 10}}
+        res = collection_w.search(binary_vectors[:default_nq], "binary_vector", search_binary_param,
+                                  default_limit + offset)[0]
+        assert search_res[0].ids == res[0].ids[offset:]
+
+
+class TestsearchPaginationInvalid(TestcaseBase):
+    """ Test case of search pagination """
+
+    @pytest.fixture(scope="function", params=[0, 10])
+    def offset(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=[8, 128])
+    def dim(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=[False, True])
+    def auto_id(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=[False, True])
+    def _async(self, request):
+        yield request.param
+
+    """
+    ******************************************************************
+    #  The following are invalid cases
+    ******************************************************************
+    """
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("offset", [" ", [1, 2], {1}, "12 s"])
+    def test_search_pagination_with_invalid_offset_type(self, offset, auto_id, dim):
+        """
+        target: test search pagination with invalid offset type
+        method: create connection, collection, insert and search with invalid offset type
+        expected: search successfully
+        """
+        # 1. initialize
+        collection_w = self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim)[0]
+        # 2. search
+        search_param = {"metric_type": "L2", "params": {"nprobe": 10}, "offset": offset}
+        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            search_param, default_limit,
+                            default_search_exp,
+                            check_task=CheckTasks.err_res,
+                            check_items={"err_code": 1,
+                                         "err_msg": "offset [%s] is invalid"
+                                                    % offset})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue #19250")
+    @pytest.mark.parametrize("offset", [-1, -10, 16385])
+    def test_search_pagination_with_invalid_offset_value(self, offset, dim, _async):
+        """
+        target: test search pagination with invalid offset value
+        method: create connection, collection, insert and search with invalid offset value
+        expected: search successfully
+        """
+        # 1. initialize
+        collection_w = self.init_collection_general(prefix, True, dim=dim)[0]
+        # 2. search
+        search_param = {"metric_type": "L2", "params": {"nprobe": 10}, "offset": offset}
+        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            search_param, default_limit,
+                            default_search_exp, _async=_async,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "limit": default_limit,
+                                         "_async": _async})
+
