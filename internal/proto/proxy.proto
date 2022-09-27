@@ -23,6 +23,9 @@ service Proxy {
 }
 
 message InvalidateCollMetaCacheRequest {
+  // MsgType:
+  //  DropCollection    ->  {meta cache, dml channels}
+  //  Other             ->  {meta cache}
   common.MsgBase base = 1;
   string db_name = 2;
   string collection_name = 3;

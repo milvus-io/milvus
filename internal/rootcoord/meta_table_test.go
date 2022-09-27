@@ -17,6 +17,7 @@
 package rootcoord
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,6 +25,13 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
+
+	"github.com/milvus-io/milvus/internal/metastore/mocks"
+	"github.com/stretchr/testify/mock"
+
+	"github.com/milvus-io/milvus/internal/metastore/model"
 
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 
@@ -675,4 +683,161 @@ func TestRbacListUserRole(t *testing.T) {
 	userRoles, err = mt.ListUserRole(util.DefaultTenant)
 	assert.Nil(t, err)
 	assert.Equal(t, 4, len(userRoles))
+}
+
+func TestMetaTable_getCollectionByIDInternal(t *testing.T) {
+	t.Run("failed to get from catalog", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("GetCollectionByID",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("int64"),
+			mock.AnythingOfType("uint64"),
+		).Return(nil, errors.New("error mock GetCollectionByID"))
+		meta := &MetaTable{
+			catalog:     catalog,
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{},
+		}
+		ctx := context.Background()
+		_, err := meta.getCollectionByIDInternal(ctx, 100, 101)
+		assert.Error(t, err)
+	})
+
+	t.Run("collection not available", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("GetCollectionByID",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("int64"),
+			mock.AnythingOfType("uint64"),
+		).Return(&model.Collection{State: pb.CollectionState_CollectionDropped}, nil)
+		meta := &MetaTable{
+			catalog:     catalog,
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{},
+		}
+		ctx := context.Background()
+		_, err := meta.getCollectionByIDInternal(ctx, 100, 101)
+		assert.Error(t, err)
+		assert.True(t, common.IsCollectionNotExistError(err))
+	})
+
+	t.Run("normal case, filter unavailable partitions", func(t *testing.T) {
+		Params.InitOnce()
+		meta := &MetaTable{
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				100: {
+					State:      pb.CollectionState_CollectionCreated,
+					CreateTime: 99,
+					Partitions: []*model.Partition{
+						{PartitionID: 11, PartitionName: Params.CommonCfg.DefaultPartitionName, State: pb.PartitionState_PartitionCreated},
+						{PartitionID: 22, PartitionName: "dropped", State: pb.PartitionState_PartitionDropped},
+					},
+				},
+			},
+		}
+		ctx := context.Background()
+		coll, err := meta.getCollectionByIDInternal(ctx, 100, 101)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(coll.Partitions))
+		assert.Equal(t, UniqueID(11), coll.Partitions[0].PartitionID)
+		assert.Equal(t, Params.CommonCfg.DefaultPartitionName, coll.Partitions[0].PartitionName)
+	})
+}
+
+func TestMetaTable_GetCollectionByName(t *testing.T) {
+	t.Run("get by alias", func(t *testing.T) {
+		meta := &MetaTable{
+			collAlias2ID: map[string]typeutil.UniqueID{
+				"alias": 100,
+			},
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				100: {
+					State:      pb.CollectionState_CollectionCreated,
+					CreateTime: 99,
+					Partitions: []*model.Partition{
+						{PartitionID: 11, PartitionName: Params.CommonCfg.DefaultPartitionName, State: pb.PartitionState_PartitionCreated},
+						{PartitionID: 22, PartitionName: "dropped", State: pb.PartitionState_PartitionDropped},
+					},
+				},
+			},
+		}
+		ctx := context.Background()
+		coll, err := meta.GetCollectionByName(ctx, "alias", 101)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(coll.Partitions))
+		assert.Equal(t, UniqueID(11), coll.Partitions[0].PartitionID)
+		assert.Equal(t, Params.CommonCfg.DefaultPartitionName, coll.Partitions[0].PartitionName)
+	})
+
+	t.Run("get by name", func(t *testing.T) {
+		meta := &MetaTable{
+			collName2ID: map[string]typeutil.UniqueID{
+				"name": 100,
+			},
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				100: {
+					State:      pb.CollectionState_CollectionCreated,
+					CreateTime: 99,
+					Partitions: []*model.Partition{
+						{PartitionID: 11, PartitionName: Params.CommonCfg.DefaultPartitionName, State: pb.PartitionState_PartitionCreated},
+						{PartitionID: 22, PartitionName: "dropped", State: pb.PartitionState_PartitionDropped},
+					},
+				},
+			},
+		}
+		ctx := context.Background()
+		coll, err := meta.GetCollectionByName(ctx, "name", 101)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(coll.Partitions))
+		assert.Equal(t, UniqueID(11), coll.Partitions[0].PartitionID)
+		assert.Equal(t, Params.CommonCfg.DefaultPartitionName, coll.Partitions[0].PartitionName)
+	})
+
+	t.Run("failed to get from catalog", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("GetCollectionByName",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("uint64"),
+		).Return(nil, errors.New("error mock GetCollectionByName"))
+		meta := &MetaTable{catalog: catalog}
+		ctx := context.Background()
+		_, err := meta.GetCollectionByName(ctx, "name", 101)
+		assert.Error(t, err)
+	})
+
+	t.Run("collection not available", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("GetCollectionByName",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("uint64"),
+		).Return(&model.Collection{State: pb.CollectionState_CollectionDropped}, nil)
+		meta := &MetaTable{catalog: catalog}
+		ctx := context.Background()
+		_, err := meta.GetCollectionByName(ctx, "name", 101)
+		assert.Error(t, err)
+		assert.True(t, common.IsCollectionNotExistError(err))
+	})
+
+	t.Run("normal case, filter unavailable partitions", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("GetCollectionByName",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("uint64"),
+		).Return(&model.Collection{
+			State:      pb.CollectionState_CollectionCreated,
+			CreateTime: 99,
+			Partitions: []*model.Partition{
+				{PartitionID: 11, PartitionName: Params.CommonCfg.DefaultPartitionName, State: pb.PartitionState_PartitionCreated},
+				{PartitionID: 22, PartitionName: "dropped", State: pb.PartitionState_PartitionDropped},
+			},
+		}, nil)
+		meta := &MetaTable{catalog: catalog}
+		ctx := context.Background()
+		coll, err := meta.GetCollectionByName(ctx, "name", 101)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(coll.Partitions))
+		assert.Equal(t, UniqueID(11), coll.Partitions[0].PartitionID)
+		assert.Equal(t, Params.CommonCfg.DefaultPartitionName, coll.Partitions[0].PartitionName)
+	})
 }

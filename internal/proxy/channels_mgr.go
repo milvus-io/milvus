@@ -284,8 +284,10 @@ func (mgr *singleTypeChannelsMgr) removeStream(collectionID UniqueID) error {
 	defer mgr.mu.Unlock()
 	if info, ok := mgr.infos[collectionID]; ok {
 		decPChanMetrics(info.channelInfos.pchans)
+		info.stream.Close()
 		delete(mgr.infos, collectionID)
 	}
+	log.Info("dml stream removed", zap.Int64("collection_id", collectionID))
 	return nil
 }
 
@@ -294,9 +296,11 @@ func (mgr *singleTypeChannelsMgr) removeAllStream() error {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
 	for _, info := range mgr.infos {
+		info.stream.Close()
 		decPChanMetrics(info.channelInfos.pchans)
 	}
 	mgr.infos = make(map[UniqueID]streamInfos)
+	log.Info("all dml stream removed")
 	return nil
 }
 

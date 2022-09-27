@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
+//go:generate mockery --name=RootCoordCatalog
 type RootCoordCatalog interface {
 	CreateCollection(ctx context.Context, collectionInfo *model.Collection, ts typeutil.Timestamp) error
 	GetCollectionByID(ctx context.Context, collectionID typeutil.UniqueID, ts typeutil.Timestamp) (*model.Collection, error)

@@ -16,7 +16,11 @@
 
 package common
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/milvus-io/milvus/api/commonpb"
+)
 
 type IgnorableError struct {
 	msg string
@@ -54,4 +58,48 @@ type KeyNotExistError struct {
 
 func (k *KeyNotExistError) Error() string {
 	return fmt.Sprintf("there is no value on key = %s", k.key)
+}
+
+type statusError struct {
+	commonpb.Status
+}
+
+func (e *statusError) Error() string {
+	return fmt.Sprintf("code: %s, reason: %s", e.GetErrorCode().String(), e.GetReason())
+}
+
+func NewStatusError(code commonpb.ErrorCode, reason string) *statusError {
+	return &statusError{Status: commonpb.Status{ErrorCode: code, Reason: reason}}
+}
+
+func IsStatusError(e error) bool {
+	_, ok := e.(*statusError)
+	return ok
+}
+
+var (
+	// static variable, save temporary memory.
+	collectionNotExistCodes = []commonpb.ErrorCode{
+		commonpb.ErrorCode_UnexpectedError, // TODO: remove this after SDK remove this dependency.
+		commonpb.ErrorCode_CollectionNotExists,
+	}
+)
+
+func NewCollectionNotExistError(msg string) *statusError {
+	return NewStatusError(commonpb.ErrorCode_CollectionNotExists, msg)
+}
+
+func IsCollectionNotExistError(e error) bool {
+	statusError, ok := e.(*statusError)
+	if !ok {
+		return false
+	}
+	// cycle import: common -> funcutil -> types -> sessionutil -> common
+	// return funcutil.SliceContain(collectionNotExistCodes, statusError.GetErrorCode())
+	for _, code := range collectionNotExistCodes {
+		if code == statusError.GetErrorCode() {
+			return true
+		}
+	}
+	return false
 }

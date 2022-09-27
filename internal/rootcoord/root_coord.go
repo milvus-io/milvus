@@ -256,40 +256,6 @@ func (c *Core) SetQueryCoord(s types.QueryCoord) error {
 	return nil
 }
 
-// ExpireMetaCache will call invalidate collection meta cache
-func (c *Core) ExpireMetaCache(ctx context.Context, collNames []string, collectionID UniqueID, ts typeutil.Timestamp) error {
-	// if collectionID is specified, invalidate all the collection meta cache with the specified collectionID and return
-	if collectionID != InvalidCollectionID {
-		req := proxypb.InvalidateCollMetaCacheRequest{
-			Base: &commonpb.MsgBase{
-				Timestamp: ts,
-				SourceID:  c.session.ServerID,
-			},
-			CollectionID: collectionID,
-		}
-		return c.proxyClientManager.InvalidateCollectionMetaCache(ctx, &req)
-	}
-
-	// if only collNames are specified, invalidate the collection meta cache with the specified collectionName
-	for _, collName := range collNames {
-		req := proxypb.InvalidateCollMetaCacheRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   0, //TODO, msg type
-				MsgID:     0, //TODO, msg id
-				Timestamp: ts,
-				SourceID:  c.session.ServerID,
-			},
-			CollectionName: collName,
-		}
-		err := c.proxyClientManager.InvalidateCollectionMetaCache(ctx, &req)
-		if err != nil {
-			// TODO: try to expire all or directly return err?
-			return err
-		}
-	}
-	return nil
-}
-
 // Register register rootcoord at etcd
 func (c *Core) Register() error {
 	c.session.Register()
@@ -828,6 +794,7 @@ func (c *Core) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequ
 	log.Info("received request to has collection")
 
 	_, err := c.meta.GetCollectionByName(ctx, in.GetCollectionName(), ts)
+	// TODO: what if err != nil && common.IsCollectionNotExistError == false, should we consider this RPC as failure?
 	has := err == nil
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("HasCollection", metrics.SuccessLabel).Inc()
@@ -894,6 +861,8 @@ func (c *Core) DescribeCollection(ctx context.Context, in *milvuspb.DescribeColl
 
 	coll, err := c.describeCollection(ctx, in)
 	if err != nil {
+		// TODO: check whether err indicates the collection not exist.
+
 		log.Error("failed to describe collection", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues("DescribeCollection", metrics.FailLabel).Inc()
 
@@ -1077,6 +1046,7 @@ func (c *Core) HasPartition(ctx context.Context, in *milvuspb.HasPartitionReques
 
 	coll, err := c.meta.GetCollectionByName(ctx, in.GetCollectionName(), ts)
 	if err != nil {
+		// TODO: check if err indicates collection not exist.
 		log.Error("failed to has partition", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues("HasPartition", metrics.FailLabel).Inc()
 		// TODO: use commonpb.ErrorCode_CollectionNotExists. SDK use commonpb.ErrorCode_UnexpectedError now.
@@ -1127,6 +1097,7 @@ func (c *Core) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRe
 	}
 
 	if err != nil {
+		// TODO: check if err indicates collection not exist.
 		log.Error("failed to show partitions", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues("ShowPartitions", metrics.FailLabel).Inc()
 		// TODO: use commonpb.ErrorCode_CollectionNotExists. SDK use commonpb.ErrorCode_UnexpectedError now.

@@ -312,25 +312,17 @@ func (dct *dropCollectionTask) PreExecute(ctx context.Context) error {
 }
 
 func (dct *dropCollectionTask) Execute(ctx context.Context) error {
-	collID, err := globalMetaCache.GetCollectionID(ctx, dct.CollectionName)
-	if err != nil {
+	var err error
+	dct.result, err = dct.rootCoord.DropCollection(ctx, dct.DropCollectionRequest)
+	if common.IsCollectionNotExistError(err) {
 		// make dropping collection idempotent.
 		dct.result = &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
 		return nil
 	}
-
-	dct.result, err = dct.rootCoord.DropCollection(ctx, dct.DropCollectionRequest)
-	if err != nil {
-		return err
-	}
-
-	_ = dct.chMgr.removeDMLStream(collID)
-	globalMetaCache.RemoveCollection(ctx, dct.CollectionName)
-	return nil
+	return err
 }
 
 func (dct *dropCollectionTask) PostExecute(ctx context.Context) error {
-	globalMetaCache.RemoveCollection(ctx, dct.CollectionName)
 	return nil
 }
 

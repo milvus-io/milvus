@@ -137,7 +137,7 @@ func (kc *Catalog) loadCollection(ctx context.Context, collectionID typeutil.Uni
 	collKey := buildCollectionKey(collectionID)
 	collVal, err := kc.Snapshot.Load(collKey, ts)
 	if err != nil {
-		return nil, fmt.Errorf("can't find collection: %d", collectionID)
+		return nil, common.NewCollectionNotExistError(fmt.Sprintf("collection not found: %d", collectionID))
 	}
 
 	collMeta := &pb.CollectionInfo{}
@@ -487,7 +487,7 @@ func (kc *Catalog) GetCollectionByName(ctx context.Context, collectionName strin
 		}
 	}
 
-	return nil, fmt.Errorf("can't find collection: %s, at timestamp = %d", collectionName, ts)
+	return nil, common.NewCollectionNotExistError(fmt.Sprintf("can't find collection: %s, at timestamp = %d", collectionName, ts))
 }
 
 func (kc *Catalog) ListCollections(ctx context.Context, ts typeutil.Timestamp) (map[string]*model.Collection, error) {
