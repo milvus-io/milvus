@@ -420,6 +420,7 @@ message SyncSegmentsRequest {
   int64 compacted_to = 2;
   int64 num_of_rows = 3;
   repeated int64 compacted_from = 4;
+  repeated FieldBinlog stats_logs = 5;
 }
 
 message CompactionSegmentBinlogs {

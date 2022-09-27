@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
 
@@ -218,193 +219,224 @@ func Test_compactionPlanHandler_execWithParallels(t *testing.T) {
 	assert.Less(t, uint64(2), max-min)
 }
 
-func Test_compactionPlanHandler_completeCompaction(t *testing.T) {
-	type fields struct {
-		plans    map[int64]*compactionTask
-		sessions *SessionManager
-		meta     *meta
-		flushCh  chan UniqueID
-	}
-	type args struct {
-		result *datapb.CompactionResult
-	}
-	tests := []struct {
-		name    string
-		fields  fields
-		args    args
-		wantErr bool
-		want    *compactionTask
-	}{
-		{
-			"test complete non existed compaction task",
-			fields{
-				plans: map[int64]*compactionTask{1: {}},
-			},
-			args{
-				result: &datapb.CompactionResult{PlanID: 2},
-			},
-			true,
-			nil,
-		},
-		{
-			"test complete completed task",
-			fields{
-				plans: map[int64]*compactionTask{1: {state: completed}},
-			},
-			args{
-				result: &datapb.CompactionResult{PlanID: 1},
-			},
-			true,
-			nil,
-		},
-		{
-			"test complete merge compaction",
-			fields{
-				map[int64]*compactionTask{
-					1: {
-						triggerInfo: &compactionSignal{id: 1},
-						state:       executing,
-						plan: &datapb.CompactionPlan{
-							PlanID: 1,
-							SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+func TestCompactionPlanHandler_handleMergeCompactionResult(t *testing.T) {
+	mockDataNode := &mocks.DataNode{}
+	mockDataNode.EXPECT().SyncSegments(mock.Anything, mock.Anything).Run(func(ctx context.Context, req *datapb.SyncSegmentsRequest) {}).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil)
 
-								{SegmentID: 1, FieldBinlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log1")}},
-								{SegmentID: 2, FieldBinlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log2")}},
-							},
-							Type: datapb.CompactionType_MergeCompaction,
-						},
-					},
-				},
-				nil,
-				&meta{
-					catalog: &datacoord.Catalog{Txn: memkv.NewMemoryKV()},
-					segments: &SegmentsInfo{
-						map[int64]*SegmentInfo{
+	dataNodeID := UniqueID(111)
 
-							1: {SegmentInfo: &datapb.SegmentInfo{ID: 1, Binlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log1")}}},
-							2: {SegmentInfo: &datapb.SegmentInfo{ID: 2, Binlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log2")}}},
-						},
-					},
-				},
-				make(chan UniqueID, 1),
+	seg1 := &datapb.SegmentInfo{
+		ID:        1,
+		Binlogs:   []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log1")},
+		Statslogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log2")},
+		Deltalogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log3")},
+	}
+
+	seg2 := &datapb.SegmentInfo{
+		ID:        2,
+		Binlogs:   []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log4")},
+		Statslogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log5")},
+		Deltalogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log6")},
+	}
+
+	plan := &datapb.CompactionPlan{
+		PlanID: 1,
+		SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+			{
+				SegmentID:           seg1.ID,
+				FieldBinlogs:        seg1.GetBinlogs(),
+				Field2StatslogPaths: seg1.GetStatslogs(),
+				Deltalogs:           seg1.GetDeltalogs(),
 			},
-			args{
-				result: &datapb.CompactionResult{
-					PlanID:     1,
-					SegmentID:  3,
-					InsertLogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log3")},
-				},
+			{
+				SegmentID:           seg2.ID,
+				FieldBinlogs:        seg2.GetBinlogs(),
+				Field2StatslogPaths: seg2.GetStatslogs(),
+				Deltalogs:           seg2.GetDeltalogs(),
 			},
-			false,
-			&compactionTask{
-				triggerInfo: &compactionSignal{id: 1},
-				state:       completed,
-				plan: &datapb.CompactionPlan{
-					PlanID: 1,
-					SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
-						{SegmentID: 1, FieldBinlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log1")}},
-						{SegmentID: 2, FieldBinlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log2")}},
-					},
-					Type: datapb.CompactionType_MergeCompaction,
-				},
+		},
+		Type: datapb.CompactionType_MergeCompaction,
+	}
+
+	sessions := &SessionManager{
+		sessions: struct {
+			sync.RWMutex
+			data map[int64]*Session
+		}{
+			data: map[int64]*Session{
+				dataNodeID: {client: mockDataNode}},
+		},
+	}
+
+	task := &compactionTask{
+		triggerInfo: &compactionSignal{id: 1},
+		state:       executing,
+		plan:        plan,
+		dataNodeID:  dataNodeID,
+	}
+
+	plans := map[int64]*compactionTask{1: task}
+
+	meta := &meta{
+		catalog: &datacoord.Catalog{Txn: memkv.NewMemoryKV()},
+		segments: &SegmentsInfo{
+			map[int64]*SegmentInfo{
+				seg1.ID: {SegmentInfo: seg1},
+				seg2.ID: {SegmentInfo: seg2},
 			},
 		},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			c := &compactionPlanHandler{
-				plans:    tt.fields.plans,
-				sessions: tt.fields.sessions,
-				meta:     tt.fields.meta,
-				flushCh:  tt.fields.flushCh,
-				segRefer: &SegmentReferenceManager{
-					segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{},
-				},
-			}
-			err := c.completeCompaction(tt.args.result)
-			assert.Equal(t, tt.wantErr, err != nil)
-		})
+
+	c := &compactionPlanHandler{
+		plans:    plans,
+		sessions: sessions,
+		meta:     meta,
+		segRefer: &SegmentReferenceManager{
+			segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{},
+		},
 	}
+
+	compactionResult := &datapb.CompactionResult{
+		PlanID:              1,
+		SegmentID:           3,
+		NumOfRows:           15,
+		InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log301")},
+		Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log302")},
+		Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log303")},
+	}
+
+	has, err := c.meta.HasSegments([]UniqueID{1, 2})
+	require.NoError(t, err)
+	require.True(t, has)
+
+	has, err = c.meta.HasSegments([]UniqueID{3})
+	require.Error(t, err)
+	require.False(t, has)
+
+	err = c.handleMergeCompactionResult(plan, compactionResult)
+	assert.NoError(t, err)
+
+	has, err = c.meta.HasSegments([]UniqueID{1, 2, 3})
+	require.NoError(t, err)
+	require.True(t, has)
 }
 
-func Test_compactionPlanHandler_segment_is_referenced(t *testing.T) {
-	type fields struct {
-		plans    map[int64]*compactionTask
-		sessions *SessionManager
-		meta     *meta
-		flushCh  chan UniqueID
-	}
-	type args struct {
-		result *datapb.CompactionResult
-	}
-	tests := []struct {
-		name    string
-		fields  fields
-		args    args
-		wantErr bool
-		want    *compactionTask
-	}{
-		{
-			"test compaction segment is referenced",
-			fields{
-				map[int64]*compactionTask{
-					1: {
-						triggerInfo: &compactionSignal{id: 1},
-						state:       executing,
-						plan: &datapb.CompactionPlan{
-							PlanID: 1,
-							SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
-
-								{SegmentID: 1, FieldBinlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log1")}},
-								{SegmentID: 2, FieldBinlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log2")}},
-							},
-							Type: datapb.CompactionType_MergeCompaction,
-						},
-					},
-				},
-				nil,
-				&meta{
-					catalog: &datacoord.Catalog{Txn: memkv.NewMemoryKV()},
-					segments: &SegmentsInfo{
-						map[int64]*SegmentInfo{
-
-							1: {SegmentInfo: &datapb.SegmentInfo{ID: 1, Binlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log1")}}},
-							2: {SegmentInfo: &datapb.SegmentInfo{ID: 2, Binlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log2")}}},
-						},
-					},
-				},
-				make(chan UniqueID, 1),
+func TestCompactionPlanHandler_completeCompaction(t *testing.T) {
+	t.Run("test not exists compaction task", func(t *testing.T) {
+		c := &compactionPlanHandler{
+			plans: map[int64]*compactionTask{1: {}},
+			segRefer: &SegmentReferenceManager{
+				segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{},
 			},
-			args{
-				result: &datapb.CompactionResult{
-					PlanID:     1,
-					SegmentID:  3,
-					InsertLogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log3")},
+		}
+		err := c.completeCompaction(&datapb.CompactionResult{PlanID: 2})
+		assert.Error(t, err)
+	})
+	t.Run("test completed compaction task", func(t *testing.T) {
+		c := &compactionPlanHandler{
+			plans: map[int64]*compactionTask{1: {state: completed}},
+			segRefer: &SegmentReferenceManager{
+				segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{},
+			},
+		}
+		err := c.completeCompaction(&datapb.CompactionResult{PlanID: 1})
+		assert.Error(t, err)
+	})
+
+	t.Run("test complete merge compaction task", func(t *testing.T) {
+		mockDataNode := &mocks.DataNode{}
+		mockDataNode.EXPECT().SyncSegments(mock.Anything, mock.Anything).Run(func(ctx context.Context, req *datapb.SyncSegmentsRequest) {}).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil)
+
+		dataNodeID := UniqueID(111)
+
+		seg1 := &datapb.SegmentInfo{
+			ID:        1,
+			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log1")},
+			Statslogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log2")},
+			Deltalogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log3")},
+		}
+
+		seg2 := &datapb.SegmentInfo{
+			ID:        2,
+			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log4")},
+			Statslogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log5")},
+			Deltalogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log6")},
+		}
+
+		plan := &datapb.CompactionPlan{
+			PlanID: 1,
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{
+					SegmentID:           seg1.ID,
+					FieldBinlogs:        seg1.GetBinlogs(),
+					Field2StatslogPaths: seg1.GetStatslogs(),
+					Deltalogs:           seg1.GetDeltalogs(),
+				},
+				{
+					SegmentID:           seg2.ID,
+					FieldBinlogs:        seg2.GetBinlogs(),
+					Field2StatslogPaths: seg2.GetStatslogs(),
+					Deltalogs:           seg2.GetDeltalogs(),
 				},
 			},
-			true,
-			nil,
-		},
-	}
+			Type: datapb.CompactionType_MergeCompaction,
+		}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			c := &compactionPlanHandler{
-				plans:    tt.fields.plans,
-				sessions: tt.fields.sessions,
-				meta:     tt.fields.meta,
-				flushCh:  tt.fields.flushCh,
-				segRefer: &SegmentReferenceManager{
-					segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{},
-					segmentReferCnt: map[UniqueID]int{
-						1: 1,
-					},
+		sessions := &SessionManager{
+			sessions: struct {
+				sync.RWMutex
+				data map[int64]*Session
+			}{
+				data: map[int64]*Session{
+					dataNodeID: {client: mockDataNode}},
+			},
+		}
+
+		task := &compactionTask{
+			triggerInfo: &compactionSignal{id: 1},
+			state:       executing,
+			plan:        plan,
+			dataNodeID:  dataNodeID,
+		}
+
+		plans := map[int64]*compactionTask{1: task}
+
+		meta := &meta{
+			catalog: &datacoord.Catalog{Txn: memkv.NewMemoryKV()},
+			segments: &SegmentsInfo{
+				map[int64]*SegmentInfo{
+					seg1.ID: {SegmentInfo: seg1},
+					seg2.ID: {SegmentInfo: seg2},
 				},
-			}
-			err := c.completeCompaction(tt.args.result)
-			assert.Equal(t, tt.wantErr, err == nil)
-		})
-	}
+			},
+		}
+		compactionResult := datapb.CompactionResult{
+			PlanID:              1,
+			SegmentID:           3,
+			NumOfRows:           15,
+			InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log301")},
+			Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log302")},
+			Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log303")},
+		}
+
+		flushCh := make(chan UniqueID, 1)
+		c := &compactionPlanHandler{
+			plans:    plans,
+			sessions: sessions,
+			meta:     meta,
+			flushCh:  flushCh,
+			segRefer: &SegmentReferenceManager{
+				segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{},
+			},
+		}
+
+		err := c.completeCompaction(&compactionResult)
+
+		segID, ok := <-flushCh
+		assert.True(t, ok)
+		assert.Equal(t, compactionResult.GetSegmentID(), segID)
+		assert.NoError(t, err)
+	})
 }
 
 func Test_compactionPlanHandler_getCompaction(t *testing.T) {

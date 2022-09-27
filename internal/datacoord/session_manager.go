@@ -161,6 +161,26 @@ func (c *SessionManager) Compaction(nodeID int64, plan *datapb.CompactionPlan) e
 	return nil
 }
 
+// SyncSegments is a grpc interface. It will send request to DataNode with provided `nodeID` synchronously.
+func (c *SessionManager) SyncSegments(nodeID int64, req *datapb.SyncSegmentsRequest) error {
+	ctx, cancel := context.WithTimeout(context.Background(), rpcCompactionTimeout)
+	defer cancel()
+	cli, err := c.getClient(ctx, nodeID)
+	if err != nil {
+		log.Warn("failed to get client", zap.Int64("nodeID", nodeID), zap.Error(err))
+		return err
+	}
+
+	resp, err := cli.SyncSegments(ctx, req)
+	if err := VerifyResponse(resp, err); err != nil {
+		log.Warn("failed to sync segments", zap.Int64("node", nodeID), zap.Error(err), zap.Int64("planID", req.GetPlanID()))
+		return err
+	}
+
+	log.Info("success to sync segments", zap.Int64("node", nodeID), zap.Any("planID", req.GetPlanID()))
+	return nil
+}
+
 // Import is a grpc interface. It will send request to DataNode with provided `nodeID` asynchronously.
 func (c *SessionManager) Import(ctx context.Context, nodeID int64, itr *datapb.ImportTaskRequest) {
 	go c.execImport(ctx, nodeID, itr)
