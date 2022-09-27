@@ -465,7 +465,7 @@ func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceReques
 	srcNode := req.GetSourceNodeIDs()[0]
 	replica := s.meta.ReplicaManager.GetByCollectionAndNode(req.GetCollectionID(), srcNode)
 	if replica == nil {
-		msg := "source node not in any replica"
+		msg := "source node not found in any replica"
 		log.Warn(msg)
 		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg), nil
 	}

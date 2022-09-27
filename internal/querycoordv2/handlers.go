@@ -67,15 +67,20 @@ func (s *Server) balanceSegments(ctx context.Context, req *querypb.LoadBalanceRe
 	}
 	dstNodeSet.Remove(srcNode)
 
-	sealedSegmentSet := typeutil.NewUniqueSet(req.GetSealedSegmentIDs()...)
 	toBalance := typeutil.NewSet[*meta.Segment]()
 	segments := s.dist.SegmentDistManager.GetByNode(srcNode)
+	allSegments := make(map[int64]*meta.Segment)
+	for _, segment := range segments {
+		allSegments[segment.GetID()] = segment
+	}
+
 	if len(req.GetSealedSegmentIDs()) == 0 {
 		toBalance.Insert(segments...)
 	} else {
-		for _, segment := range segments {
-			if !sealedSegmentSet.Contain(segment.GetID()) {
-				return fmt.Errorf("segment %d not found in source node %d", segment.GetID(), srcNode)
+		for _, segmentID := range req.GetSealedSegmentIDs() {
+			segment, ok := allSegments[segmentID]
+			if !ok {
+				return fmt.Errorf("segment %d not found in source node %d", segmentID, srcNode)
 			}
 			toBalance.Insert(segment)
 		}
@@ -86,7 +91,6 @@ func (s *Server) balanceSegments(ctx context.Context, req *querypb.LoadBalanceRe
 		zap.Int64("srcNodeID", srcNode),
 		zap.Int64s("destNodeIDs", dstNodeSet.Collect()),
 	)
-
 	plans := s.balancer.AssignSegment(toBalance.Collect(), dstNodeSet.Collect())
 	tasks := make([]task.Task, 0, len(plans))
 	for _, plan := range plans {
