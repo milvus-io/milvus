@@ -1126,7 +1126,6 @@ func (coord *RootCoordMock) AlterCollection(ctx context.Context, request *milvus
 
 type DescribeCollectionFunc func(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)
 type ShowPartitionsFunc func(ctx context.Context, request *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error)
-type DescribeIndexFunc func(ctx context.Context, request *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error)
 type ShowSegmentsFunc func(ctx context.Context, request *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error)
 type DescribeSegmentsFunc func(ctx context.Context, request *rootcoordpb.DescribeSegmentsRequest) (*rootcoordpb.DescribeSegmentsResponse, error)
 type ImportFunc func(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error)
@@ -1138,7 +1137,6 @@ type mockRootCoord struct {
 	types.RootCoord
 	DescribeCollectionFunc
 	ShowPartitionsFunc
-	DescribeIndexFunc
 	ShowSegmentsFunc
 	DescribeSegmentsFunc
 	ImportFunc

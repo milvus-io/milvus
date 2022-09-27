@@ -240,10 +240,12 @@ func NewIndexCoordMock() *IndexCoordMock {
 }
 
 type GetIndexStateFunc func(ctx context.Context, request *indexpb.GetIndexStateRequest) (*indexpb.GetIndexStateResponse, error)
+type DescribeIndexFunc func(ctx context.Context, request *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error)
 
 type mockIndexCoord struct {
 	types.IndexCoord
 	GetIndexStateFunc
+	DescribeIndexFunc
 }
 
 func (m *mockIndexCoord) GetIndexState(ctx context.Context, request *indexpb.GetIndexStateRequest) (*indexpb.GetIndexStateResponse, error) {
@@ -252,6 +254,15 @@ func (m *mockIndexCoord) GetIndexState(ctx context.Context, request *indexpb.Get
 		return m.GetIndexStateFunc(ctx, request)
 	}
 	log.Warn("func nil")
+	return nil, errors.New("mock")
+}
+
+func (m *mockIndexCoord) DescribeIndex(ctx context.Context, request *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error) {
+	if m.DescribeIndexFunc != nil {
+		log.Warn("DescribeIndexFunc not nil")
+		return m.DescribeIndexFunc(ctx, request)
+	}
+	log.Warn("DescribeIndexFunc nil")
 	return nil, errors.New("mock")
 }
 

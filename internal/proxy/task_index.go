@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 
 	"go.uber.org/zap"
 
@@ -290,7 +291,7 @@ func (cit *createIndexTask) Execute(ctx context.Context) error {
 		zap.Any("indexParams", cit.req.GetExtraParams()))
 
 	if cit.req.GetIndexName() == "" {
-		cit.req.IndexName = Params.CommonCfg.DefaultIndexName
+		cit.req.IndexName = Params.CommonCfg.DefaultIndexName + "_" + strconv.FormatInt(cit.fieldSchema.GetFieldID(), 10)
 	}
 	var err error
 	req := &indexpb.CreateIndexRequest{

@@ -235,6 +235,7 @@ class TestCompactionParams(TestcaseBase):
         collection_w.insert(cf.gen_default_dataframe_data(1, start=tmp_nb))
         assert collection_w.num_entities == tmp_nb + 1
 
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
         collection_w.query(ratio_expr, check_items=CheckTasks.check_query_empty)
 
@@ -261,6 +262,7 @@ class TestCompactionParams(TestcaseBase):
         collection_w.delete(ratio_expr)
         assert collection_w.num_entities == tmp_nb
 
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
         collection_w.query(ratio_expr, check_task=CheckTasks.check_query_empty)
 
@@ -288,6 +290,7 @@ class TestCompactionParams(TestcaseBase):
         collection_w.wait_for_compaction_completed()
         collection_w.get_compaction_plans(check_task=CheckTasks.check_delete_compact)
 
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
         collection_w.query(expr, check_items=CheckTasks.check_query_empty)
 

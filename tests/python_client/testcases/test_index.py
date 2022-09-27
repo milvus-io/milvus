@@ -1336,6 +1336,7 @@ class TestIndexString(TestcaseBase):
         index, _ = self.index_wrap.init_index(collection_w.collection, default_string_field_name,
                                               default_string_index_params)
         cf.assert_equal_index(index, collection_w.indexes[0])
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index, index_name="vector_flat")
         collection_w.load()
         assert collection_w.num_entities == default_nb
 
@@ -1351,6 +1352,7 @@ class TestIndexString(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         data = cf.gen_default_list_data(ct.default_nb)
         collection_w.insert(data=data)
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index, index_name="vector_flat")
         collection_w.load()
         index, _ = self.index_wrap.init_index(collection_w.collection, default_string_field_name,
                                               default_string_index_params)

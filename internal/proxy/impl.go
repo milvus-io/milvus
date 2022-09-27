@@ -430,6 +430,7 @@ func (node *Proxy) LoadCollection(ctx context.Context, request *milvuspb.LoadCol
 		Condition:             NewTaskCondition(ctx),
 		LoadCollectionRequest: request,
 		queryCoord:            node.queryCoord,
+		indexCoord:            node.indexCoord,
 	}
 
 	log.Debug("LoadCollection received",
@@ -1395,6 +1396,7 @@ func (node *Proxy) LoadPartitions(ctx context.Context, request *milvuspb.LoadPar
 		Condition:             NewTaskCondition(ctx),
 		LoadPartitionsRequest: request,
 		queryCoord:            node.queryCoord,
+		indexCoord:            node.indexCoord,
 	}
 
 	log.Debug(
