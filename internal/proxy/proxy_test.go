@@ -1268,6 +1268,24 @@ func TestProxy(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+
+		{
+			progressResp, err := proxy.GetLoadingProgress(ctx, &milvuspb.GetLoadingProgressRequest{
+				CollectionName: collectionName,
+			})
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, progressResp.Status.ErrorCode)
+			assert.NotEqual(t, int64(0), progressResp.Progress)
+		}
+
+		{
+			progressResp, err := proxy.GetLoadingProgress(ctx, &milvuspb.GetLoadingProgressRequest{
+				CollectionName: otherCollectionName,
+			})
+			assert.NoError(t, err)
+			assert.NotEqual(t, commonpb.ErrorCode_Success, progressResp.Status.ErrorCode)
+			assert.Equal(t, int64(0), progressResp.Progress)
+		}
 	})
 
 	wg.Add(1)
@@ -1849,6 +1867,26 @@ func TestProxy(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+
+		{
+			resp, err := proxy.GetLoadingProgress(ctx, &milvuspb.GetLoadingProgressRequest{
+				CollectionName: collectionName,
+				PartitionNames: []string{partitionName},
+			})
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+			assert.NotEqual(t, int64(0), resp.Progress)
+		}
+
+		{
+			resp, err := proxy.GetLoadingProgress(ctx, &milvuspb.GetLoadingProgressRequest{
+				CollectionName: collectionName,
+				PartitionNames: []string{otherPartitionName},
+			})
+			assert.NoError(t, err)
+			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+			assert.Equal(t, int64(0), resp.Progress)
+		}
 	})
 
 	wg.Add(1)
@@ -2425,6 +2463,14 @@ func TestProxy(t *testing.T) {
 	})
 
 	wg.Add(1)
+	t.Run("GetLoadingProgress fail, unhealthy", func(t *testing.T) {
+		defer wg.Done()
+		resp, err := proxy.GetLoadingProgress(ctx, &milvuspb.GetLoadingProgressRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	wg.Add(1)
 	t.Run("CreateIndex fail, unhealthy", func(t *testing.T) {
 		defer wg.Done()
 		resp, err := proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{})
@@ -2986,6 +3032,14 @@ func TestProxy(t *testing.T) {
 	t.Run("ShowPartitions fail, timeout", func(t *testing.T) {
 		defer wg.Done()
 		resp, err := proxy.ShowPartitions(shortCtx, &milvuspb.ShowPartitionsRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	wg.Add(1)
+	t.Run("GetLoadingProgress fail, timeout", func(t *testing.T) {
+		defer wg.Done()
+		resp, err := proxy.GetLoadingProgress(shortCtx, &milvuspb.GetLoadingProgressRequest{})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})

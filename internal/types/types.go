@@ -1011,6 +1011,9 @@ type ProxyComponent interface {
 	// error is always nil
 	ShowPartitions(ctx context.Context, request *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error)
 
+	// GetLoadingProgress get the collection or partitions loading progress
+	GetLoadingProgress(ctx context.Context, request *milvuspb.GetLoadingProgressRequest) (*milvuspb.GetLoadingProgressResponse, error)
+
 	// CreateIndex notifies Proxy to create index of a field
 	//
 	// ctx is the context to control request deadline and cancellation
