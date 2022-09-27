@@ -896,6 +896,9 @@ func TestCore_Import(t *testing.T) {
 		meta.GetCollectionIDByNameFunc = func(name string) (UniqueID, error) {
 			return 0, errors.New("error mock GetCollectionIDByName")
 		}
+		meta.GetCollectionByNameFunc = func(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error) {
+			return nil, errors.New("collection name not found")
+		}
 		_, err := c.Import(ctx, &milvuspb.ImportRequest{
 			CollectionName: "a-bad-name",
 		})
@@ -933,6 +936,10 @@ func TestCore_Import(t *testing.T) {
 		}
 		meta.GetPartitionByNameFunc = func(collID UniqueID, partitionName string, ts Timestamp) (UniqueID, error) {
 			return 101, nil
+		}
+		coll := &model.Collection{Name: "a-good-name"}
+		meta.GetCollectionByNameFunc = func(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error) {
+			return coll.Clone(), nil
 		}
 		_, err := c.Import(ctx, &milvuspb.ImportRequest{
 			CollectionName: "a-good-name",

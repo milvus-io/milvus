@@ -7,6 +7,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
 )
 
@@ -66,19 +67,18 @@ func NewImportFactory(c *Core) ImportFactory {
 
 func GetCollectionNameWithCore(c *Core) GetCollectionNameFunc {
 	return func(collID, partitionID UniqueID) (string, string, error) {
-		colName, err := c.meta.GetCollectionNameByID(collID)
+		colInfo, err := c.meta.GetCollectionByID(c.ctx, collID, typeutil.MaxTimestamp)
 		if err != nil {
 			log.Error("Core failed to get collection name by id", zap.Int64("ID", collID), zap.Error(err))
 			return "", "", err
 		}
-
 		partName, err := c.meta.GetPartitionNameByID(collID, partitionID, 0)
 		if err != nil {
 			log.Error("Core failed to get partition name by id", zap.Int64("ID", partitionID), zap.Error(err))
-			return colName, "", err
+			return colInfo.Name, "", err
 		}
 
-		return colName, partName, nil
+		return colInfo.Name, partName, nil
 	}
 }
 
