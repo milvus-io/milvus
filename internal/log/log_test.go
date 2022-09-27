@@ -34,11 +34,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io/ioutil"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -120,47 +116,6 @@ func TestLevelGetterAndSetter(t *testing.T) {
 	assert.Equal(t, zap.DebugLevel, GetLevel())
 
 	SetLevel(zap.ErrorLevel)
-	assert.Equal(t, zap.ErrorLevel, GetLevel())
-}
-
-func TestUpdateLogLevelThroughHttp(t *testing.T) {
-	httpServer := httptest.NewServer(nil)
-	defer httpServer.Close()
-
-	SetLevel(zap.DebugLevel)
-	assert.Equal(t, zap.DebugLevel, GetLevel())
-
-	// replace global logger, log change will not be affected.
-	conf := &Config{Level: "info", File: FileLogConfig{}, DisableTimestamp: true}
-	logger, p, _ := InitLogger(conf)
-	ReplaceGlobals(logger, p)
-	assert.Equal(t, zap.InfoLevel, GetLevel())
-
-	// change log level through http
-	payload, err := json.Marshal(map[string]interface{}{"level": "error"})
-	if err != nil {
-		Fatal(err.Error())
-	}
-
-	url := httpServer.URL + "/log/level"
-	req, err := http.NewRequest(http.MethodPut, url, bytes.NewBuffer(payload))
-	req.Header.Set("Content-Type", "application/json")
-	if err != nil {
-		Fatal(err.Error())
-	}
-
-	client := httpServer.Client()
-	resp, err := client.Do(req)
-	if err != nil {
-		Fatal(err.Error())
-	}
-	defer resp.Body.Close()
-
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		Fatal(err.Error())
-	}
-	assert.Equal(t, "{\"level\":\"error\"}\n", string(body))
 	assert.Equal(t, zap.ErrorLevel, GetLevel())
 }
 

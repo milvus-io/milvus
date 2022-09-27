@@ -17,24 +17,16 @@
 package metrics
 
 import (
-	"fmt"
-	"net/http"
-	"os"
-	"strconv"
 
 	// nolint:gosec
 	_ "net/http/pprof"
 
-	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/management"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"go.uber.org/zap"
 )
 
 const (
-	DefaultListenPort = "9091"
-	ListenPortEnvKey  = "METRICS_PORT"
-
 	milvusNamespace = "milvus"
 
 	AbandonLabel = "abandon"
@@ -83,25 +75,14 @@ var (
 	buckets = prometheus.ExponentialBuckets(1, 2, 18)
 )
 
-//ServeHTTP serves prometheus http service
-func ServeHTTP(r *prometheus.Registry) {
-	http.Handle("/metrics", promhttp.HandlerFor(r, promhttp.HandlerOpts{}))
-	http.Handle("/metrics_default", promhttp.Handler())
-	go func() {
-		bindAddr := getMetricsAddr()
-		log.Debug("metrics listen", zap.Any("addr", bindAddr))
-		if err := http.ListenAndServe(bindAddr, nil); err != nil {
-			log.Error("handle metrics failed", zap.Error(err))
-		}
-	}()
-}
-
-func getMetricsAddr() string {
-	port := os.Getenv(ListenPortEnvKey)
-	_, err := strconv.Atoi(port)
-	if err != nil {
-		return fmt.Sprintf(":%s", DefaultListenPort)
-	}
-
-	return fmt.Sprintf(":%s", port)
+//Register serves prometheus http service
+func Register(r *prometheus.Registry) {
+	management.Register(&management.HTTPHandler{
+		Path:    "/metrics",
+		Handler: promhttp.HandlerFor(r, promhttp.HandlerOpts{}),
+	})
+	management.Register(&management.HTTPHandler{
+		Path:    "/metrics_default",
+		Handler: promhttp.Handler(),
+	})
 }
