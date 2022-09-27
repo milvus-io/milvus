@@ -115,6 +115,10 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 			globalMetaCache.RemoveCollectionsByID(ctx, collectionID)
 		}
 	}
+
+	// err is ignored, since this Proxy may not create dml stream for the collection.
+	_ = node.chMgr.removeDMLStream(collectionID)
+
 	logutil.Logger(ctx).Info("complete to invalidate collection meta cache",
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
