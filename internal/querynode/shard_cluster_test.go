@@ -2462,6 +2462,7 @@ func (suite *ShardClusterSuite) TestReleaseSegments() {
 		scope      querypb.DataScope
 
 		expectError bool
+		force       bool
 	}
 
 	cases := []TestCase{
@@ -2471,6 +2472,7 @@ func (suite *ShardClusterSuite) TestReleaseSegments() {
 			nodeID:      2,
 			scope:       querypb.DataScope_All,
 			expectError: false,
+			force:       false,
 		},
 	}
 
@@ -2479,11 +2481,11 @@ func (suite *ShardClusterSuite) TestReleaseSegments() {
 			suite.TearDownTest()
 			suite.SetupTest()
 
-			err := suite.sc.releaseSegments(context.Background(), &querypb.ReleaseSegmentsRequest{
+			err := suite.sc.ReleaseSegments(context.Background(), &querypb.ReleaseSegmentsRequest{
 				NodeID:     test.nodeID,
 				SegmentIDs: test.segmentIDs,
 				Scope:      test.scope,
-			})
+			}, test.force)
 			if test.expectError {
 				suite.Error(err)
 			} else {

@@ -835,6 +835,25 @@ func TestSyncDistribution(t *testing.T) {
 		assert.Equal(t, defaultPartitionID, segment.partitionID)
 		assert.Equal(t, segmentStateLoaded, segment.state)
 
+		resp, err = node.SyncDistribution(ctx, &querypb.SyncDistributionRequest{
+			CollectionID: defaultCollectionID,
+			Channel:      defaultDMLChannel,
+			Actions: []*querypb.SyncAction{
+				{
+					Type:        querypb.SyncType_Remove,
+					PartitionID: defaultPartitionID,
+					SegmentID:   defaultSegmentID,
+					NodeID:      99,
+				},
+			},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+
+		cs, ok = node.ShardClusterService.getShardCluster(defaultDMLChannel)
+		require.True(t, ok)
+		_, ok = cs.getSegment(defaultSegmentID)
+		require.False(t, ok)
 	})
 
 }

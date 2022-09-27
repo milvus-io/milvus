@@ -387,7 +387,7 @@ func (node *QueryNode) watchChangeInfo() {
 					return
 				}
 				// if watch loop return due to event canceled, the datanode is not functional anymore
-				log.Panic("querynoe3 is not functional for event canceled", zap.Error(err))
+				log.Panic("querynode is not functional for event canceled", zap.Error(err))
 				return
 			}
 			for _, event := range resp.Events {
