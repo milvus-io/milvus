@@ -643,8 +643,8 @@ func (replica *SegmentReplica) hasSegment(segID UniqueID, countFlushed bool) boo
 	return inNew || inNormal || inFlush
 }
 func (replica *SegmentReplica) refreshFlushedSegStatistics(segID UniqueID, numRows int64) {
-	replica.segMu.RLock()
-	defer replica.segMu.RUnlock()
+	replica.segMu.Lock()
+	defer replica.segMu.Unlock()
 
 	if seg, ok := replica.flushedSegments[segID]; ok {
 		seg.memorySize = 0
