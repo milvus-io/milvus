@@ -251,6 +251,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 }
 
 // GetIndexState gets the index states from IndexCoord.
+// Deprecated: use DescribeIndex instead
 func (s *Server) GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRequest) (*indexpb.GetIndexStateResponse, error) {
 	return s.indexcoord.GetIndexState(ctx, req)
 }
@@ -274,6 +275,7 @@ func (s *Server) DropIndex(ctx context.Context, request *indexpb.DropIndexReques
 	return s.indexcoord.DropIndex(ctx, request)
 }
 
+// Deprecated: use DescribeIndex instead
 func (s *Server) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetIndexBuildProgressRequest) (*indexpb.GetIndexBuildProgressResponse, error) {
 	return s.indexcoord.GetIndexBuildProgress(ctx, req)
 }

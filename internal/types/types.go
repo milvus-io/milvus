@@ -381,6 +381,7 @@ type IndexCoord interface {
 	CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error)
 
 	// GetIndexState gets the index state of the index name in the request from Proxy.
+	// Deprecated: use DescribeIndex instead
 	GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRequest) (*indexpb.GetIndexStateResponse, error)
 
 	// GetSegmentIndexState gets the index state of the segments in the request from RootCoord.
@@ -393,6 +394,7 @@ type IndexCoord interface {
 	DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error)
 
 	// GetIndexBuildProgress get the index building progress by num rows.
+	// Deprecated: use DescribeIndex instead
 	GetIndexBuildProgress(ctx context.Context, req *indexpb.GetIndexBuildProgressRequest) (*indexpb.GetIndexBuildProgressResponse, error)
 
 	// DropIndex deletes indexes based on IndexID. One IndexID corresponds to the index of an entire column. A column is
@@ -1048,6 +1050,7 @@ type ProxyComponent interface {
 	// the `IndexdRows` in `GetIndexBuildProgressResponse` return the num of indexed rows.
 	// the `TotalRows` in `GetIndexBuildProgressResponse` return the total number of segment rows.
 	// error is always nil
+	// Deprecated: use DescribeIndex instead
 	GetIndexBuildProgress(ctx context.Context, request *milvuspb.GetIndexBuildProgressRequest) (*milvuspb.GetIndexBuildProgressResponse, error)
 
 	// GetIndexState notifies Proxy to return index state
@@ -1058,6 +1061,7 @@ type ProxyComponent interface {
 	// The `Status` in response struct `GetIndexStateResponse` indicates if this operation is processed successfully or fail cause;
 	// the `State` in `GetIndexStateResponse` return the state of index: Unissued/InProgress/Finished/Failed.
 	// error is always nil
+	// Deprecated: use DescribeIndex instead
 	GetIndexState(ctx context.Context, request *milvuspb.GetIndexStateRequest) (*milvuspb.GetIndexStateResponse, error)
 
 	// Insert notifies Proxy to insert rows

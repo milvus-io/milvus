@@ -201,6 +201,23 @@ func TestIndexCoord(t *testing.T) {
 		resp, err := ic.DescribeIndex(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(resp.IndexInfos))
+
+		originFunc1 := dcm.CallGetFlushedSegment
+		originFunc2 := dcm.CallGetSegmentInfo
+		dcm.CallGetFlushedSegment = func(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error) {
+			return nil, errors.New("mock error")
+		}
+		resp, err = ic.DescribeIndex(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, resp.Status.ErrorCode, commonpb.ErrorCode_UnexpectedError)
+		dcm.CallGetFlushedSegment = originFunc1
+		dcm.CallGetSegmentInfo = func(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
+			return nil, errors.New("mock error")
+		}
+		resp, err = ic.DescribeIndex(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, resp.Status.ErrorCode, commonpb.ErrorCode_UnexpectedError)
+		dcm.CallGetSegmentInfo = originFunc2
 	})
 
 	t.Run("FlushedSegmentWatcher", func(t *testing.T) {

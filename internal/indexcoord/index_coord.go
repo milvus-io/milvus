@@ -538,6 +538,66 @@ func (i *IndexCoord) GetSegmentIndexState(ctx context.Context, req *indexpb.GetS
 	return ret, nil
 }
 
+// CompleteIndexInfo get the building index progress and index state
+func (i *IndexCoord) completeIndexInfo(ctx context.Context, indexInfo *indexpb.IndexInfo) error {
+	collectionID := indexInfo.CollectionID
+	indexName := indexInfo.IndexName
+	log.Info("IndexCoord completeIndexInfo", zap.Int64("collID", collectionID),
+		zap.String("indexName", indexName))
+	flushSegments, err := i.dataCoordClient.GetFlushedSegments(ctx, &datapb.GetFlushedSegmentsRequest{
+		CollectionID: collectionID,
+		PartitionID:  -1,
+	})
+	if err != nil {
+		return err
+	}
+
+	resp, err := i.dataCoordClient.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
+		SegmentIDs: flushSegments.Segments,
+	})
+	if err != nil {
+		return err
+	}
+	totalRows, indexRows := int64(0), int64(0)
+
+	for _, seg := range resp.Infos {
+		totalRows += seg.NumOfRows
+	}
+
+	indexID2CreateTs := i.metaTable.GetIndexIDByName(collectionID, indexName)
+	if len(indexID2CreateTs) < 1 {
+		log.Error("there is no index on collection", zap.Int64("collectionID", collectionID), zap.String("indexName", indexName))
+		return nil
+	}
+
+	for indexID, createTs := range indexID2CreateTs {
+		indexRows = i.metaTable.GetIndexBuildProgress(indexID, createTs)
+		break
+	}
+	indexInfo.IndexedRows = indexRows
+	indexInfo.TotalRows = totalRows
+
+	stateRes := commonpb.IndexState_Finished
+	failReasonRes := ""
+	for indexID, createTs := range indexID2CreateTs {
+		indexStates := i.metaTable.GetIndexStates(indexID, createTs)
+		for _, state := range indexStates {
+			if state.state != commonpb.IndexState_Finished {
+				stateRes = state.state
+				failReasonRes = state.failReason
+				break
+			}
+		}
+	}
+	indexInfo.State = stateRes
+	indexInfo.IndexStateFailReason = failReasonRes
+
+	log.Debug("IndexCoord completeIndexInfo success", zap.Int64("collID", collectionID),
+		zap.Int64("totalRows", totalRows), zap.Int64("indexRows", indexRows), zap.Int("seg num", len(resp.Infos)),
+		zap.Any("state", stateRes), zap.String("failReason", failReasonRes))
+	return nil
+}
+
 // GetIndexBuildProgress get the index building progress by num rows.
 func (i *IndexCoord) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetIndexBuildProgressRequest) (*indexpb.GetIndexBuildProgressResponse, error) {
 	log.Info("IndexCoord receive GetIndexBuildProgress request", zap.Int64("collID", req.CollectionID),
@@ -745,13 +805,24 @@ func (i *IndexCoord) DescribeIndex(ctx context.Context, req *indexpb.DescribeInd
 	}
 	indexInfos := make([]*indexpb.IndexInfo, 0)
 	for _, index := range indexes {
-		indexInfos = append(indexInfos, &indexpb.IndexInfo{
+		indexInfo := &indexpb.IndexInfo{
 			CollectionID: index.CollectionID,
 			FieldID:      index.FieldID,
 			IndexName:    index.IndexName,
 			TypeParams:   index.TypeParams,
 			IndexParams:  index.IndexParams,
-		})
+		}
+		if err := i.completeIndexInfo(ctx, indexInfo); err != nil {
+			log.Error("IndexCoord describe index fail", zap.Int64("collectionID", req.CollectionID),
+				zap.String("indexName", req.IndexName), zap.Error(err))
+			return &indexpb.DescribeIndexResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UnexpectedError,
+					Reason:    err.Error(),
+				},
+			}, nil
+		}
+		indexInfos = append(indexInfos, indexInfo)
 	}
 
 	return &indexpb.DescribeIndexResponse{
