@@ -907,8 +907,8 @@ func (replica *SegmentReplica) listNotFlushedSegmentIDs() []UniqueID {
 // getSegmentStatslog returns the segment statslog for the provided segment id.
 func (replica *SegmentReplica) getSegmentStatslog(segID UniqueID) ([]byte, error) {
 	replica.segMu.RLock()
+	defer replica.segMu.RUnlock()
 	colID := replica.getCollectionID()
-	replica.segMu.RUnlock()
 
 	schema, err := replica.getCollectionSchema(colID, 0)
 	if err != nil {
