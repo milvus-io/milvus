@@ -20,6 +20,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 type mockTask struct {
@@ -65,6 +67,7 @@ type mockReadTask struct {
 	ready        bool
 	canMerge     bool
 	timeout      bool
+	timeoutError error
 	step         TaskStep
 	readyError   error
 }
@@ -87,6 +90,10 @@ func (m *mockReadTask) CPUUsage() int32 {
 
 func (m *mockReadTask) Timeout() bool {
 	return m.timeout
+}
+
+func (m *mockReadTask) TimeoutError() error {
+	return m.timeoutError
 }
 
 func (m *mockReadTask) SetMaxCPUUsage(cpu int32) {
@@ -124,4 +131,81 @@ func TestTaskScheduler(t *testing.T) {
 	ts.processTask(task, ts.queue)
 
 	ts.Close()
+}
+
+func TestTaskScheduler_tryEvictUnsolvedReadTask(t *testing.T) {
+	t.Run("evict canceled task", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		tSafe := newTSafeReplica()
+
+		ts := newTaskScheduler(ctx, tSafe)
+
+		taskCanceled := &mockReadTask{
+			mockTask: mockTask{
+				baseTask: baseTask{
+					ctx:  ctx,
+					done: make(chan error, 1024),
+				},
+			},
+			timeout:      true,
+			timeoutError: context.Canceled,
+		}
+		taskNormal := &mockReadTask{
+			mockTask: mockTask{
+				baseTask: baseTask{
+					ctx:  context.Background(),
+					done: make(chan error, 1024),
+				},
+			},
+		}
+
+		ts.unsolvedReadTasks.PushBack(taskNormal)
+		ts.unsolvedReadTasks.PushBack(taskCanceled)
+
+		// set max len to 2
+		tmp := Params.QueryNodeCfg.MaxUnsolvedQueueSize
+		Params.QueryNodeCfg.MaxUnsolvedQueueSize = 2
+		ts.tryEvictUnsolvedReadTask(1)
+		Params.QueryNodeCfg.MaxUnsolvedQueueSize = tmp
+
+		err := <-taskCanceled.done
+		assert.ErrorIs(t, err, context.Canceled)
+
+		select {
+		case <-taskNormal.done:
+			t.Fail()
+		default:
+		}
+
+		assert.Equal(t, 1, ts.unsolvedReadTasks.Len())
+	})
+}
+
+func TestTaskScheduler_executeReadTasks(t *testing.T) {
+	t.Run("execute canceled task", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		tSafe := newTSafeReplica()
+
+		ts := newTaskScheduler(ctx, tSafe)
+		ts.Start()
+		defer ts.Close()
+
+		taskCanceled := &mockReadTask{
+			mockTask: mockTask{
+				baseTask: baseTask{
+					ctx:  ctx,
+					done: make(chan error, 1024),
+				},
+			},
+			timeout:      true,
+			timeoutError: context.Canceled,
+		}
+
+		ts.executeReadTaskChan <- taskCanceled
+
+		err := <-taskCanceled.done
+		assert.ErrorIs(t, err, context.Canceled)
+	})
 }
