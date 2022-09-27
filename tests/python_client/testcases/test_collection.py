@@ -101,7 +101,7 @@ class TestCollectionParams(TestcaseBase):
                                              check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("name", [[], 1, [1, "2", 3], (1,), {1: 1}, None])
+    @pytest.mark.parametrize("name", [[], 1, [1, "2", 3], (1,), {1: 1}, "qw$_o90", "1ns_", None])
     def test_collection_illegal_name(self, name):
         """
         target: test collection with illegal name
@@ -109,9 +109,26 @@ class TestCollectionParams(TestcaseBase):
         expected: raise exception
         """
         self._connect()
-        error = {ct.err_code: -1, ct.err_msg: "`collection_name` value {} is illegal".format(name)}
+        error = {ct.err_code: 1, ct.err_msg: "`collection_name` value {} is illegal".format(name)}
         self.collection_wrap.init_collection(name, schema=default_schema, check_task=CheckTasks.err_res,
                                              check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("name", ["_co11ection", "co11_ection"])
+    def test_collection_naming_rules(self, name):
+        """
+        target: test collection with valid name
+        method: 1. connect milvus
+                2. Create a field with a name which uses all the supported elements in the naming rules
+                3. Create a collection with a name which uses all the supported elements in the naming rules
+        expected: Collection created successfully
+        """
+        self._connect()
+        fields = [cf.gen_int64_field(), cf.gen_int64_field("_1nt"), cf.gen_float_vec_field("f10at_")]
+        schema = cf.gen_collection_schema(fields=fields, primary_field=ct.default_int64_field_name)
+        self.collection_wrap.init_collection(name, schema=schema,
+                                             check_task=CheckTasks.check_collection_property,
+                                             check_items={exp_name: name, exp_schema: schema})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("name", ["12-s", "12 s", "(mn)", "中文", "%$#", "a".join("a" for i in range(256))])
