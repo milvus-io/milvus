@@ -1325,6 +1325,11 @@ type indexCoordConfig struct {
 	Address string
 	Port    int
 
+	BindIndexNodeMode bool
+	IndexNodeAddress  string
+	WithCredential    bool
+	IndexNodeID       int64
+
 	MinSegmentNumRowsToEnableIndex int64
 
 	GCInterval time.Duration
@@ -1338,6 +1343,10 @@ func (p *indexCoordConfig) init(base *BaseTable) {
 
 	p.initGCInterval()
 	p.initMinSegmentNumRowsToEnableIndex()
+	p.initBindIndexNodeMode()
+	p.initIndexNodeAddress()
+	p.initWithCredential()
+	p.initIndexNodeID()
 }
 
 func (p *indexCoordConfig) initMinSegmentNumRowsToEnableIndex() {
@@ -1346,6 +1355,22 @@ func (p *indexCoordConfig) initMinSegmentNumRowsToEnableIndex() {
 
 func (p *indexCoordConfig) initGCInterval() {
 	p.GCInterval = time.Duration(p.Base.ParseInt64WithDefault("indexCoord.gc.interval", 60*10)) * time.Second
+}
+
+func (p *indexCoordConfig) initBindIndexNodeMode() {
+	p.BindIndexNodeMode = p.Base.ParseBool("indexCoord.bindIndexNodeMode.enable", false)
+}
+
+func (p *indexCoordConfig) initIndexNodeAddress() {
+	p.IndexNodeAddress = p.Base.LoadWithDefault("indexCoord.bindIndexNodeMode.address", "localhost:22930")
+}
+
+func (p *indexCoordConfig) initWithCredential() {
+	p.WithCredential = p.Base.ParseBool("indexCoord.bindIndexNodeMode.withCred", false)
+}
+
+func (p *indexCoordConfig) initIndexNodeID() {
+	p.IndexNodeID = p.Base.ParseInt64WithDefault("indexCoord.bindIndexNodeMode.nodeID", 0)
 }
 
 ///////////////////////////////////////////////////////////////////////////////

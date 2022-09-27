@@ -53,6 +53,10 @@ func (c *GRPCClientBase) SetRole(role string) {
 	c.role = role
 }
 
+func (c *GRPCClientBase) EnableEncryption() {
+
+}
+
 func (c *GRPCClientBase) SetNewGrpcClientFunc(f func(cc *grpc.ClientConn) interface{}) {
 	c.newGrpcClient = f
 }

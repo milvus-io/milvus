@@ -318,6 +318,11 @@ func TestComponentParam(t *testing.T) {
 
 		Params.UpdatedTime = time.Now()
 		t.Logf("UpdatedTime: %v", Params.UpdatedTime)
+
+		assert.False(t, Params.BindIndexNodeMode)
+		assert.Equal(t, "localhost:22930", Params.IndexNodeAddress)
+		assert.False(t, Params.WithCredential)
+		assert.Equal(t, int64(0), Params.IndexNodeID)
 	})
 
 	t.Run("test indexNodeConfig", func(t *testing.T) {

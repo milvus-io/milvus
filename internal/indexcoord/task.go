@@ -126,6 +126,10 @@ func (cit *CreateIndexTask) OnEnqueue() error {
 func (cit *CreateIndexTask) PreExecute(ctx context.Context) error {
 	log.Info("IndexCoord CreateIndexTask PreExecute", zap.Int64("collectionID", cit.req.CollectionID),
 		zap.Int64("fieldID", cit.req.FieldID), zap.String("indexName", cit.req.IndexName))
+	// TODO: check index type is disk index.
+	if GetIndexType(cit.req.GetIndexParams()) == diskAnnIndex && !cit.indexCoordClient.nodeManager.ClientSupportDisk() {
+		return errors.New("all IndexNodes do not support disk indexes, please verify")
+	}
 	return nil
 }
 

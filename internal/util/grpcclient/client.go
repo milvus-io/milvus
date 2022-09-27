@@ -18,23 +18,23 @@ package grpcclient
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
-
-	"github.com/milvus-io/milvus/internal/util"
-
-	"github.com/milvus-io/milvus/internal/util/crypto"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/keepalive"
 
 	grpcopentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util"
+	"github.com/milvus-io/milvus/internal/util/crypto"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/keepalive"
 )
 
 // GrpcClient abstracts client of grpc
@@ -42,6 +42,7 @@ type GrpcClient interface {
 	SetRole(string)
 	GetRole() string
 	SetGetAddrFunc(func() (string, error))
+	EnableEncryption()
 	SetNewGrpcClientFunc(func(cc *grpc.ClientConn) interface{})
 	GetGrpcClient(ctx context.Context) (interface{}, error)
 	ReCall(ctx context.Context, caller func(client interface{}) (interface{}, error)) (interface{}, error)
@@ -55,6 +56,7 @@ type ClientBase struct {
 	newGrpcClient func(cc *grpc.ClientConn) interface{}
 
 	grpcClient             interface{}
+	encryption             bool
 	conn                   *grpc.ClientConn
 	grpcClientMtx          sync.RWMutex
 	role                   string
@@ -85,6 +87,10 @@ func (c *ClientBase) GetRole() string {
 // SetGetAddrFunc sets getAddrFunc of client
 func (c *ClientBase) SetGetAddrFunc(f func() (string, error)) {
 	c.getAddrFunc = f
+}
+
+func (c *ClientBase) EnableEncryption() {
+	c.encryption = true
 }
 
 // SetNewGrpcClientFunc sets newGrpcClient of client
@@ -157,34 +163,70 @@ func (c *ClientBase) connect(ctx context.Context) error {
 		  }
 		}]}`, c.RetryServiceNameConfig, c.MaxAttempts, c.InitialBackoff, c.MaxBackoff, c.BackoffMultiplier)
 
-	conn, err := grpc.DialContext(
-		dialContext,
-		addr,
-		grpc.WithInsecure(),
-		grpc.WithBlock(),
-		grpc.WithDefaultCallOptions(
-			grpc.MaxCallRecvMsgSize(c.ClientMaxRecvSize),
-			grpc.MaxCallSendMsgSize(c.ClientMaxSendSize),
-		),
-		grpc.WithUnaryInterceptor(grpcopentracing.UnaryClientInterceptor(opts...)),
-		grpc.WithStreamInterceptor(grpcopentracing.StreamClientInterceptor(opts...)),
-		grpc.WithDefaultServiceConfig(retryPolicy),
-		grpc.WithKeepaliveParams(keepalive.ClientParameters{
-			Time:                c.KeepAliveTime,
-			Timeout:             c.KeepAliveTimeout,
-			PermitWithoutStream: true,
-		}),
-		grpc.WithConnectParams(grpc.ConnectParams{
-			Backoff: backoff.Config{
-				BaseDelay:  100 * time.Millisecond,
-				Multiplier: 1.6,
-				Jitter:     0.2,
-				MaxDelay:   3 * time.Second,
-			},
-			MinConnectTimeout: c.DialTimeout,
-		}),
-		grpc.WithPerRPCCredentials(&Token{Value: crypto.Base64Encode(util.MemberCredID)}),
-	)
+	var conn *grpc.ClientConn
+	if c.encryption {
+		conn, err = grpc.DialContext(
+			dialContext,
+			addr,
+			//grpc.WithInsecure(),
+			// #nosec G402
+			grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{})),
+			grpc.WithBlock(),
+			grpc.WithDefaultCallOptions(
+				grpc.MaxCallRecvMsgSize(c.ClientMaxRecvSize),
+				grpc.MaxCallSendMsgSize(c.ClientMaxSendSize),
+			),
+			grpc.WithUnaryInterceptor(grpcopentracing.UnaryClientInterceptor(opts...)),
+			grpc.WithStreamInterceptor(grpcopentracing.StreamClientInterceptor(opts...)),
+			grpc.WithDefaultServiceConfig(retryPolicy),
+			grpc.WithKeepaliveParams(keepalive.ClientParameters{
+				Time:                c.KeepAliveTime,
+				Timeout:             c.KeepAliveTimeout,
+				PermitWithoutStream: true,
+			}),
+			grpc.WithConnectParams(grpc.ConnectParams{
+				Backoff: backoff.Config{
+					BaseDelay:  100 * time.Millisecond,
+					Multiplier: 1.6,
+					Jitter:     0.2,
+					MaxDelay:   3 * time.Second,
+				},
+				MinConnectTimeout: c.DialTimeout,
+			}),
+			grpc.WithPerRPCCredentials(&Token{Value: crypto.Base64Encode(util.MemberCredID)}),
+		)
+	} else {
+		conn, err = grpc.DialContext(
+			dialContext,
+			addr,
+			grpc.WithInsecure(),
+			//grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{})),
+			grpc.WithBlock(),
+			grpc.WithDefaultCallOptions(
+				grpc.MaxCallRecvMsgSize(c.ClientMaxRecvSize),
+				grpc.MaxCallSendMsgSize(c.ClientMaxSendSize),
+			),
+			grpc.WithUnaryInterceptor(grpcopentracing.UnaryClientInterceptor(opts...)),
+			grpc.WithStreamInterceptor(grpcopentracing.StreamClientInterceptor(opts...)),
+			grpc.WithDefaultServiceConfig(retryPolicy),
+			grpc.WithKeepaliveParams(keepalive.ClientParameters{
+				Time:                c.KeepAliveTime,
+				Timeout:             c.KeepAliveTimeout,
+				PermitWithoutStream: true,
+			}),
+			grpc.WithConnectParams(grpc.ConnectParams{
+				Backoff: backoff.Config{
+					BaseDelay:  100 * time.Millisecond,
+					Multiplier: 1.6,
+					Jitter:     0.2,
+					MaxDelay:   3 * time.Second,
+				},
+				MinConnectTimeout: c.DialTimeout,
+			}),
+			grpc.WithPerRPCCredentials(&Token{Value: crypto.Base64Encode(util.MemberCredID)}),
+		)
+	}
+
 	cancel()
 	if err != nil {
 		return wrapErrConnect(addr, err)
