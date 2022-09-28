@@ -20,7 +20,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"sync"
+
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
@@ -173,6 +176,37 @@ func (mt *metaTable) updateSegIndexMeta(segIdx *model.SegmentIndex, updateFunc f
 	return updateFunc(model.CloneSegmentIndex(segIdx))
 }
 
+func (mt *metaTable) updateIndexTasksMetrics() {
+	taskMetrics := make(map[UniqueID]map[commonpb.IndexState]int)
+	for _, segIdx := range mt.buildID2SegmentIndex {
+		if segIdx.IsDeleted {
+			continue
+		}
+		if _, ok := taskMetrics[segIdx.CollectionID]; !ok {
+			taskMetrics[segIdx.CollectionID] = make(map[commonpb.IndexState]int)
+			taskMetrics[segIdx.CollectionID][commonpb.IndexState_Unissued] = 0
+			taskMetrics[segIdx.CollectionID][commonpb.IndexState_InProgress] = 0
+			taskMetrics[segIdx.CollectionID][commonpb.IndexState_Finished] = 0
+			taskMetrics[segIdx.CollectionID][commonpb.IndexState_Failed] = 0
+		}
+		taskMetrics[segIdx.CollectionID][segIdx.IndexState]++
+	}
+	for collID, m := range taskMetrics {
+		for k, v := range m {
+			switch k {
+			case commonpb.IndexState_Unissued:
+				metrics.IndexCoordIndexTaskNum.WithLabelValues(strconv.FormatInt(collID, 10), metrics.UnissuedIndexTaskLabel).Set(float64(v))
+			case commonpb.IndexState_InProgress:
+				metrics.IndexCoordIndexTaskNum.WithLabelValues(strconv.FormatInt(collID, 10), metrics.InProgressIndexTaskLabel).Set(float64(v))
+			case commonpb.IndexState_Finished:
+				metrics.IndexCoordIndexTaskNum.WithLabelValues(strconv.FormatInt(collID, 10), metrics.FinishedIndexTaskLabel).Set(float64(v))
+			case commonpb.IndexState_Failed:
+				metrics.IndexCoordIndexTaskNum.WithLabelValues(strconv.FormatInt(collID, 10), metrics.FailedIndexTaskLabel).Set(float64(v))
+			}
+		}
+	}
+}
+
 func (mt *metaTable) GetAllIndexMeta() map[int64]*model.SegmentIndex {
 	mt.segmentIndexLock.RLock()
 	defer mt.segmentIndexLock.RUnlock()
@@ -273,7 +307,7 @@ func (mt *metaTable) AddIndex(segIndex *model.SegmentIndex) error {
 	}
 	segIndex.IndexState = commonpb.IndexState_Unissued
 
-	metrics.IndexCoordIndexTaskCounter.WithLabelValues(metrics.UnissuedIndexTaskLabel).Inc()
+	metrics.IndexCoordIndexTaskNum.WithLabelValues(strconv.FormatInt(segIndex.CollectionID, 10), metrics.UnissuedIndexTaskLabel).Inc()
 	if err := mt.saveSegmentIndexMeta(segIndex); err != nil {
 		// no need to reload, no reason to compare version fail
 		log.Error("IndexCoord metaTable save index meta failed", zap.Int64("buildID", buildID),
@@ -372,11 +406,14 @@ func (mt *metaTable) BuildIndex(buildID UniqueID) error {
 			log.Error("IndexCoord metaTable BuildIndex fail", zap.Int64("buildID", segIdx.BuildID), zap.Error(err))
 			return err
 		}
-		metrics.IndexCoordIndexTaskCounter.WithLabelValues(metrics.UnissuedIndexTaskLabel).Dec()
-		metrics.IndexCoordIndexTaskCounter.WithLabelValues(metrics.InProgressIndexTaskLabel).Inc()
 		return nil
 	}
-	return mt.updateSegIndexMeta(segIdx, updateFunc)
+	if err := mt.updateSegIndexMeta(segIdx, updateFunc); err != nil {
+		return err
+	}
+
+	mt.updateIndexTasksMetrics()
+	return nil
 }
 
 // GetIndexesForCollection gets all indexes info with the specified collection.
@@ -905,6 +942,13 @@ func (mt *metaTable) RemoveIndex(collID, indexID UniqueID) error {
 	}
 
 	delete(mt.collectionIndexes[collID], indexID)
+	if len(mt.collectionIndexes[collID]) == 0 {
+		delete(mt.collectionIndexes, collID)
+		metrics.IndexCoordIndexTaskNum.Delete(prometheus.Labels{"collection_id": strconv.FormatInt(collID, 10), "index_task_status": metrics.UnissuedIndexTaskLabel})
+		metrics.IndexCoordIndexTaskNum.Delete(prometheus.Labels{"collection_id": strconv.FormatInt(collID, 10), "index_task_status": metrics.InProgressIndexTaskLabel})
+		metrics.IndexCoordIndexTaskNum.Delete(prometheus.Labels{"collection_id": strconv.FormatInt(collID, 10), "index_task_status": metrics.FinishedIndexTaskLabel})
+		metrics.IndexCoordIndexTaskNum.Delete(prometheus.Labels{"collection_id": strconv.FormatInt(collID, 10), "index_task_status": metrics.FailedIndexTaskLabel})
+	}
 	log.Info("IndexCoord meta table remove index success", zap.Int64("collID", collID), zap.Int64("indexID", indexID))
 	return nil
 }
@@ -923,8 +967,12 @@ func (mt *metaTable) RemoveSegmentIndex(collID, partID, segID, buildID UniqueID)
 	if !ok {
 		return nil
 	}
-	delete(mt.segmentIndexes[segIdx.SegmentID], segIdx.IndexID)
+	delete(mt.segmentIndexes[segID], segIdx.IndexID)
 	delete(mt.buildID2SegmentIndex, buildID)
+	if len(mt.segmentIndexes[segID]) == 0 {
+		delete(mt.segmentIndexes, segID)
+	}
+
 	return nil
 }
 
@@ -968,7 +1016,11 @@ func (mt *metaTable) ResetMeta(buildID UniqueID) error {
 		return mt.alterSegmentIndexes([]*model.SegmentIndex{segIdx})
 	}
 
-	return mt.updateSegIndexMeta(segIdx, updateFunc)
+	if err := mt.updateSegIndexMeta(segIdx, updateFunc); err != nil {
+		return err
+	}
+	mt.updateIndexTasksMetrics()
+	return nil
 }
 
 func (mt *metaTable) FinishTask(taskInfo *indexpb.IndexTaskInfo) error {
@@ -987,7 +1039,12 @@ func (mt *metaTable) FinishTask(taskInfo *indexpb.IndexTaskInfo) error {
 		return mt.alterSegmentIndexes([]*model.SegmentIndex{segIdx})
 	}
 
-	return mt.updateSegIndexMeta(segIdx, updateFunc)
+	if err := mt.updateSegIndexMeta(segIdx, updateFunc); err != nil {
+		return err
+	}
+
+	mt.updateIndexTasksMetrics()
+	return nil
 }
 
 func (mt *metaTable) MarkSegmentsIndexAsDeletedByBuildID(buildIDs []UniqueID) error {
