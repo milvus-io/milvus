@@ -7,6 +7,7 @@ on:
     branches:
       - master
       - 2.*.*
+      - perf
   pull_request:
     # file paths to consider in the event. Optional; defaults to all.
     paths:
@@ -28,7 +29,7 @@ jobs:
   ubuntu:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -111,6 +112,9 @@ jobs:
             mkdir -p /var/tmp/ccache
           fi
           brew install boost libomp ninja tbb openblas ccache
+          if [[ ! -d "/usr/local/opt/llvm" ]]; then
+            ln -s /usr/local/opt/llvm@13 /usr/local/opt/llvm
+          fi
           make check-proto-product && make verifiers && sh scripts/collect_arrow_dep.sh -f /tmp/thirdparty
   centos:
     name: Code Checker CentOS 7
