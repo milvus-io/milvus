@@ -123,7 +123,13 @@ func (s *taskScheduler) taskLoop() {
 		case <-s.queue.utChan():
 			if !s.queue.utEmpty() {
 				t := s.queue.PopUnissuedTask()
-				s.processTask(t, s.queue)
+				select {
+				case <-t.Ctx().Done():
+					t.Notify(context.Canceled)
+					continue
+				default:
+					s.processTask(t, s.queue)
+				}
 			}
 		}
 	}

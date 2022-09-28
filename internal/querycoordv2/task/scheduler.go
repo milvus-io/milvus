@@ -19,7 +19,7 @@ const (
 	TaskTypeReduce
 	TaskTypeMove
 
-	taskPoolSize = 128
+	taskPoolSize = 256
 )
 
 var (

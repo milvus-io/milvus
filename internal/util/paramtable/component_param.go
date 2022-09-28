@@ -661,7 +661,7 @@ func (p *queryCoordConfig) initTaskRetryInterval() {
 }
 
 func (p *queryCoordConfig) initTaskMergeCap() {
-	p.TaskMergeCap = p.Base.ParseInt32WithDefault("queryCoord.taskMergeCap", 2)
+	p.TaskMergeCap = p.Base.ParseInt32WithDefault("queryCoord.taskMergeCap", 8)
 }
 
 func (p *queryCoordConfig) initAutoHandoff() {
