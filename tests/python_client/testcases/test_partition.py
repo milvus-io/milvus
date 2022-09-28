@@ -180,6 +180,22 @@ class TestPartitionParams(TestcaseBase):
                                            )
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("partition_name", ["_Partiti0n", "pArt1_ti0n"])
+    def test_partition_naming_rules(self, partition_name):
+        """
+        target: test partition naming rules
+        method: 1. connect milvus
+                2. Create a collection
+                3. Create a partition with a name which uses all the supported elements in the naming rules
+        expected: Partition create successfully
+        """
+        self._connect()
+        collection_w = self.init_collection_wrap()
+        self.partition_wrap.init_partition(collection_w.collection, partition_name,
+                                           check_task=CheckTasks.check_partition_property,
+                                           check_items={"name": partition_name})
+
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("partition_name", ct.get_invalid_strs)
     def test_partition_invalid_name(self, partition_name):
         """

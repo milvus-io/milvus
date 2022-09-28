@@ -138,9 +138,46 @@ class TestIndexParams(TestcaseBase):
                                    check_task=CheckTasks.err_res,
                                    check_items={ct.err_code: 1, ct.err_msg: ""})
 
-    # TODO: not supported
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason='not supported')
+    @pytest.mark.parametrize("index_name", ["_1ndeX", "In_t0"])
+    def test_index_naming_rules(self, index_name):
+        """
+        target: test index naming rules
+        method: 1. connect milvus
+                2. Create a collection
+                3. Create an index with an index_name which uses all the supported elements in the naming rules
+        expected: Index create successfully
+        """
+        self._connect()
+        collection_w = self.init_collection_wrap()
+        collection_w.create_index(default_field_name, default_index_params, index_name=index_name)
+        assert len(collection_w.indexes) == 1
+        assert collection_w.indexes[0].index_name == index_name
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("index_name", ["_1ndeX", "In_0"])
+    def test_index_same_index_name_two_fields(self, index_name):
+        """
+        target: test index naming rules
+        method: 1. connect milvus
+                2. Create a collection with more than 3 fields
+                3. Create two indexes on two fields with the same index name
+        expected: raise exception
+        """
+        self._connect()
+        collection_w = self.init_collection_wrap()
+        self.index_wrap.init_index(collection_w.collection, default_field_name, default_index_params,
+                                   index_name=index_name)
+        self.index_wrap.init_index(collection_w.collection, ct.default_int64_field_name, default_index_params,
+                                   index_name=index_name,
+                                   check_task=CheckTasks.err_res,
+                                   check_items={ct.err_code: 1,
+                                                ct.err_msg: "CreateIndex failed: index already exist, "
+                                                            "but parameters are inconsistent"})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue 19181")
+    @pytest.mark.parametrize("get_invalid_index_name", ["1nDex", "$in4t", "12 s", None, "(中文)"])
     def test_index_name_invalid(self, get_invalid_index_name):
         """
         target: test index with error index name
@@ -151,8 +188,7 @@ class TestIndexParams(TestcaseBase):
         index_name = get_invalid_index_name
         collection_w = self.init_collection_wrap(name=c_name)
         self.index_wrap.init_index(collection_w.collection, default_field_name, default_index_params,
-                                   check_task=CheckTasks.err_res,
-                                   check_items={ct.err_code: 1, ct.err_msg: ""})
+                                   index_name=get_invalid_index_name)
 
 
 class TestIndexOperation(TestcaseBase):

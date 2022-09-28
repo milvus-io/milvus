@@ -37,6 +37,7 @@ default_int64_field_name = ct.default_int64_field_name
 default_float_field_name = ct.default_float_field_name
 default_bool_field_name = ct.default_bool_field_name
 default_string_field_name = ct.default_string_field_name
+default_index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
 vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
 
 uid = "test_search"
@@ -2791,6 +2792,106 @@ class TestCollectionSearch(TestcaseBase):
                                          "ids": insert_ids,
                                          "limit": nb_old + nb_new,
                                          "_async": _async})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("name", ["_co11ection", "co11_ection"])
+    @pytest.mark.parametrize("index_name", ["_1ndeX", "In_0"])
+    def test_search_collection_naming_rules(self, nq, dim, name, index_name, _async):
+        """
+        target: test search collection naming rules
+        method: 1. Connect milvus
+                2. Create a field with a name which uses all the supported elements in the naming rules
+                3. Create a collection with a name which uses all the supported elements in the naming rules
+                4. Create an index with a name which uses all the supported elements in the naming rules
+                5. Insert data (5000) into collection
+                6. Search collection
+        expected: searched successfully
+        """
+        nb = 5000
+        field_name1 = "_1nt"
+        field_name2 = "f10at_"
+        collection_name = cf.gen_unique_str(name)
+        self._connect()
+        fields = [cf.gen_int64_field(), cf.gen_int64_field(field_name1),
+                  cf.gen_float_vec_field(field_name2, dim=dim)]
+        schema = cf.gen_collection_schema(fields=fields, primary_field=ct.default_int64_field_name)
+        collection_w = self.init_collection_wrap(name=collection_name, schema=schema,
+                                                 check_task=CheckTasks.check_collection_property,
+                                                 check_items={"name": collection_name, "schema": schema})
+        collection_w.create_index(field_name1, default_index_params, index_name=index_name)
+        int_values = pd.Series(data=[i for i in range(0, nb)])
+        float_vec_values = gen_vectors(nb, dim)
+        dataframe = pd.DataFrame({ct.default_int64_field_name: int_values,
+                                  field_name1: int_values, field_name2: float_vec_values})
+        collection_w.insert(dataframe)
+        collection_w.load()
+        vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
+        collection_w.search(vectors[:nq], field_name2, default_search_params,
+                            default_limit, _async=_async,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": nq,
+                                         "limit": default_limit,
+                                         "_async": _async})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("partition_name", ["_PartiTi0n", "pArt1_ti0n"])
+    def test_search_partition_naming_rules_without_index(self, nq, dim, auto_id, partition_name):
+        """
+        target: test search collection naming rules
+        method: 1. Connect milvus
+                2. Create a collection
+                3. Create a partition with a name which uses all the supported elements in the naming rules
+                4. Insert data into collection
+                5. without index with a name which uses all the supported elements in the naming rules
+                6. Search partition (should successful)
+        expected: searched successfully
+        """
+        nb = 5000
+        self._connect()
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, False, nb,
+                                                                      auto_id=auto_id,
+                                                                      dim=dim)[0:4]
+        collection_w.create_partition(partition_name)
+        insert_ids = cf.insert_data(collection_w, nb, auto_id=auto_id, dim=dim)[3]
+        collection_w.load()
+        vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
+        collection_w.search(vectors[:nq], default_search_field, default_search_params,
+                            default_limit, default_search_exp, [partition_name],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": nq,
+                                         "ids": insert_ids,
+                                         "limit": default_limit})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("partition_name", ["_PartiTi0n", "pArt1_ti0n"])
+    @pytest.mark.parametrize("index_name", ["_1ndeX", "In_0"])
+    def test_search_partition_naming_rules_with_index(self, nq, dim, auto_id, partition_name, index_name):
+        """
+        target: test search collection naming rules
+        method: 1. Connect milvus
+                2. Create a collection
+                3. Create a partition with a name which uses all the supported elements in the naming rules
+                4. Insert data into collection
+                5. with index with a name which uses all the supported elements in the naming rules
+                6. Search partition (should successful)
+        expected: searched successfully
+        """
+        nb = 5000
+        self._connect()
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, False, nb,
+                                                                      auto_id=auto_id,
+                                                                      dim=dim)[0:4]
+        collection_w.create_partition(partition_name)
+        insert_ids = cf.insert_data(collection_w, nb, auto_id=auto_id, dim=dim)[3]
+        collection_w.create_index(default_search_field, default_index_params, index_name=index_name)
+        collection_w.load()
+        vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
+        collection_w.search(vectors[:nq], default_search_field, default_search_params,
+                            default_limit, default_search_exp, [partition_name],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": nq,
+                                         "ids": insert_ids,
+                                         "limit": default_limit})
 
 
 class TestSearchBase(TestcaseBase):
