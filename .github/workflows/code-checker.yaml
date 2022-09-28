@@ -7,7 +7,7 @@ on:
     branches:
       - master
       - 2.*.*
-      - perf
+      - perf-mac
   pull_request:
     # file paths to consider in the event. Optional; defaults to all.
     paths:
@@ -34,8 +34,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-        - name: Code Checker AMD64 Ubuntu 18.04
-          os: ubuntu-18.04
+        # - name: Code Checker AMD64 Ubuntu 18.04
+        #   os: ubuntu-18.04
         - name: Code Checker MacOS 11
           os: macos-11
     env:
@@ -98,6 +98,12 @@ jobs:
           CHECK_BUILDER: "1"
         run: |
            ./build/builder.sh /bin/bash -c "make check-proto-product && make verifiers"
+      - uses: shaowenchen/debugger-action@v2
+        name: debugger
+        timeout-minutes: 30
+        continue-on-error: true
+        with:
+          ngrok_token: ${{ secrets.NGROK_TOKEN }} 
       - name: Code Check
         if: ${{  matrix.os == 'macos-11' }}
         env:
