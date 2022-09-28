@@ -1224,7 +1224,7 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 }
 
 func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDistributionRequest) (*commonpb.Status, error) {
-	log := log.Ctx(ctx).With(zap.Int64("collectionID", req.GetCollectionID()), zap.String("channel", req.GetChannel()))
+	log := log.Ctx(ctx).With(zap.Int64("collectionID", req.GetCollectionID()), zap.String("channel", req.GetChannel()), zap.String("actions", req.String()))
 	log.Debug("SyncDistribution received")
 	shardCluster, ok := node.ShardClusterService.getShardCluster(req.GetChannel())
 	if !ok {
