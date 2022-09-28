@@ -91,9 +91,7 @@ type IMetaTable interface {
 	ListAliasesByID(collID UniqueID) []string
 
 	// TODO: better to accept ctx.
-	GetCollectionNameByID(collID UniqueID) (string, error)                                    // [Deprecated].
 	GetPartitionNameByID(collID UniqueID, partitionID UniqueID, ts Timestamp) (string, error) // serve for bulk load.
-	GetCollectionIDByName(name string) (UniqueID, error)                                      // [Deprecated].
 	GetPartitionByName(collID UniqueID, partitionName string, ts Timestamp) (UniqueID, error) // serve for bulk load.
 
 	// TODO: better to accept ctx.

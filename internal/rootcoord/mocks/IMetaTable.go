@@ -248,48 +248,6 @@ func (_m *IMetaTable) GetCollectionByName(ctx context.Context, collectionName st
 	return r0, r1
 }
 
-// GetCollectionIDByName provides a mock function with given fields: name
-func (_m *IMetaTable) GetCollectionIDByName(name string) (int64, error) {
-	ret := _m.Called(name)
-
-	var r0 int64
-	if rf, ok := ret.Get(0).(func(string) int64); ok {
-		r0 = rf(name)
-	} else {
-		r0 = ret.Get(0).(int64)
-	}
-
-	var r1 error
-	if rf, ok := ret.Get(1).(func(string) error); ok {
-		r1 = rf(name)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// GetCollectionNameByID provides a mock function with given fields: collID
-func (_m *IMetaTable) GetCollectionNameByID(collID int64) (string, error) {
-	ret := _m.Called(collID)
-
-	var r0 string
-	if rf, ok := ret.Get(0).(func(int64) string); ok {
-		r0 = rf(collID)
-	} else {
-		r0 = ret.Get(0).(string)
-	}
-
-	var r1 error
-	if rf, ok := ret.Get(1).(func(int64) error); ok {
-		r1 = rf(collID)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
 // GetCollectionVirtualChannels provides a mock function with given fields: colID
 func (_m *IMetaTable) GetCollectionVirtualChannels(colID int64) []string {
 	ret := _m.Called(colID)

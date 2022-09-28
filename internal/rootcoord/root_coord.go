@@ -810,7 +810,7 @@ func (c *Core) describeCollection(ctx context.Context, in *milvuspb.DescribeColl
 	if in.GetCollectionName() != "" {
 		return c.meta.GetCollectionByName(ctx, in.GetCollectionName(), ts)
 	}
-	return c.meta.GetCollectionByID(ctx, in.GetCollectionID(), in.GetTimeStamp())
+	return c.meta.GetCollectionByID(ctx, in.GetCollectionID(), ts)
 }
 
 func convertModelToDesc(collInfo *model.Collection, aliases []string) *milvuspb.DescribeCollectionResponse {
