@@ -169,7 +169,7 @@ queryCoord:
   distPullInterval: 500
   loadTimeoutSeconds: 600
   checkHandoffInterval: 5000
-  taskMergeCap: 2
+  taskMergeCap: 8
   
 
 

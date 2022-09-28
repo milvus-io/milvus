@@ -38,6 +38,7 @@ import (
 
 type task interface {
 	ID() UniqueID // return ReqID
+	Ctx() context.Context
 	Timestamp() Timestamp
 	PreExecute(ctx context.Context) error
 	Execute(ctx context.Context) error
@@ -538,6 +539,12 @@ func (l *loadSegmentsTask) PreExecute(ctx context.Context) error {
 
 func (l *loadSegmentsTask) Execute(ctx context.Context) error {
 	log.Info("LoadSegmentTask Execute start", zap.Int64("msgID", l.req.Base.MsgID))
+
+	if len(l.req.Infos) == 0 {
+		log.Info("all segments loaded",
+			zap.Int64("msgID", l.req.GetBase().GetMsgID()))
+		return nil
+	}
 
 	segmentIDs := lo.Map(l.req.Infos, func(info *queryPb.SegmentLoadInfo, idx int) UniqueID { return info.SegmentID })
 	l.node.metaReplica.addSegmentsLoadingList(segmentIDs)

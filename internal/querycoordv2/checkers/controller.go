@@ -14,7 +14,7 @@ import (
 )
 
 var (
-	checkRoundTaskNumLimit = 128
+	checkRoundTaskNumLimit = 256
 )
 
 type CheckerController struct {
@@ -86,20 +86,21 @@ func (controller *CheckerController) Stop() {
 // check is the real implementation of Check
 func (controller *CheckerController) check(ctx context.Context) {
 	tasks := make([]task.Task, 0)
-	for id, checker := range controller.checkers {
-		log := log.With(zap.Int("checkerID", id))
-
+	for _, checker := range controller.checkers {
 		tasks = append(tasks, checker.Check(ctx)...)
-		if len(tasks) >= checkRoundTaskNumLimit {
-			log.Info("checkers have spawn too many tasks, won't run subsequent checkers, and truncate the spawned tasks",
-				zap.Int("taskNum", len(tasks)),
-				zap.Int("taskNumLimit", checkRoundTaskNumLimit))
-			tasks = tasks[:checkRoundTaskNumLimit]
-			break
-		}
 	}
 
+	added := 0
 	for _, task := range tasks {
-		controller.scheduler.Add(task)
+		err := controller.scheduler.Add(task)
+		if err != nil {
+			continue
+		}
+		added++
+		if added >= checkRoundTaskNumLimit {
+			log.Info("checkers have added too many tasks, truncate the subsequent tasks",
+				zap.Int("taskNum", len(tasks)),
+				zap.Int("taskNumLimit", checkRoundTaskNumLimit))
+		}
 	}
 }
