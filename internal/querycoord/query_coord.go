@@ -94,7 +94,9 @@ type QueryCoord struct {
 	offlineNodesChan chan UniqueID
 	offlineNodes     map[UniqueID]struct{}
 
-	stateCode atomic.Value
+	stateCode           atomic.Value
+	enableActiveStandBy bool
+	activateFunc        func()
 
 	factory       dependency.Factory
 	chunkManager  storage.ChunkManager
@@ -104,6 +106,9 @@ type QueryCoord struct {
 // Register register query service at etcd
 func (qc *QueryCoord) Register() error {
 	qc.session.Register()
+	if qc.enableActiveStandBy {
+		qc.session.ProcessActiveStandBy(qc.activateFunc)
+	}
 	go qc.session.LivenessCheck(qc.loopCtx, func() {
 		log.Error("Query Coord disconnected from etcd, process will exit", zap.Int64("Server Id", qc.session.ServerID))
 		if err := qc.Stop(); err != nil {
@@ -125,6 +130,7 @@ func (qc *QueryCoord) initSession() error {
 		return fmt.Errorf("session is nil, the etcd client connection may have failed")
 	}
 	qc.session.Init(typeutil.QueryCoordRole, Params.QueryCoordCfg.Address, true, true)
+	qc.session.SetEnableActiveStandBy(qc.enableActiveStandBy)
 	Params.QueryCoordCfg.SetNodeID(qc.session.ServerID)
 	Params.SetLogger(qc.session.ServerID)
 	return nil
@@ -258,7 +264,17 @@ func (qc *QueryCoord) Start() error {
 		go qc.loadBalanceSegmentLoop()
 	}
 
-	qc.UpdateStateCode(internalpb.StateCode_Healthy)
+	if qc.enableActiveStandBy {
+		qc.activateFunc = func() {
+			// todo to complete
+			log.Info("querycoord switch from standby to active, activating")
+			qc.meta.reloadFromKV()
+			qc.UpdateStateCode(internalpb.StateCode_Healthy)
+		}
+		qc.UpdateStateCode(internalpb.StateCode_StandBy)
+	} else {
+		qc.UpdateStateCode(internalpb.StateCode_Healthy)
+	}
 
 	return nil
 }
@@ -303,12 +319,13 @@ func NewQueryCoord(ctx context.Context, factory dependency.Factory) (*QueryCoord
 	rand.Seed(time.Now().UnixNano())
 	ctx1, cancel := context.WithCancel(ctx)
 	service := &QueryCoord{
-		loopCtx:          ctx1,
-		loopCancel:       cancel,
-		factory:          factory,
-		newNodeFn:        newQueryNode,
-		offlineNodesChan: make(chan UniqueID, 256),
-		offlineNodes:     make(map[UniqueID]struct{}, 256),
+		loopCtx:             ctx1,
+		loopCancel:          cancel,
+		factory:             factory,
+		newNodeFn:           newQueryNode,
+		offlineNodesChan:    make(chan UniqueID, 256),
+		offlineNodes:        make(map[UniqueID]struct{}, 256),
+		enableActiveStandBy: Params.QueryCoordCfg.EnableActiveStandby,
 	}
 
 	service.UpdateStateCode(internalpb.StateCode_Abnormal)

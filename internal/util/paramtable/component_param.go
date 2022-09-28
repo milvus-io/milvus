@@ -34,6 +34,9 @@ const (
 	// DefaultIndexSliceSize defines the default slice size of index file when serializing.
 	DefaultIndexSliceSize = 16
 	DefaultGracefulTime   = 5000 //ms
+
+	DefaultSessionTTL        = 60 //s
+	DefaultSessionRetryTimes = 30
 )
 
 // ComponentParam is used to quickly and easily access all components' configurations.
@@ -138,6 +141,9 @@ type commonConfig struct {
 	AuthorizationEnabled bool
 
 	ClusterName string
+
+	SessionTTL        int64
+	SessionRetryTimes int64
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -177,6 +183,9 @@ func (p *commonConfig) init(base *BaseTable) {
 	p.initEnableAuthorization()
 
 	p.initClusterName()
+
+	p.initSessionTTL()
+	p.initSessionRetryTimes()
 }
 
 func (p *commonConfig) initClusterPrefix() {
@@ -384,6 +393,14 @@ func (p *commonConfig) initClusterName() {
 	p.ClusterName = p.Base.LoadWithDefault("common.cluster.name", "")
 }
 
+func (p *commonConfig) initSessionTTL() {
+	p.SessionTTL = p.Base.ParseInt64WithDefault("common.session.ttl", 60)
+}
+
+func (p *commonConfig) initSessionRetryTimes() {
+	p.SessionRetryTimes = p.Base.ParseInt64WithDefault("common.session.retryTimes", 30)
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // --- rootcoord ---
 type rootCoordConfig struct {
@@ -403,6 +420,8 @@ type rootCoordConfig struct {
 
 	CreatedTime time.Time
 	UpdatedTime time.Time
+
+	EnableActiveStandby bool
 }
 
 func (p *rootCoordConfig) init(base *BaseTable) {
@@ -413,6 +432,7 @@ func (p *rootCoordConfig) init(base *BaseTable) {
 	p.ImportTaskExpiration = p.Base.ParseFloatWithDefault("rootCoord.importTaskExpiration", 15*60)
 	p.ImportTaskRetention = p.Base.ParseFloatWithDefault("rootCoord.importTaskRetention", 24*60*60)
 	p.ImportTaskSubPath = "importtask"
+	p.EnableActiveStandby = p.Base.ParseBool("rootCoord.enableActiveStandby", false)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -625,6 +645,7 @@ type queryCoordConfig struct {
 	DistPullInterval                    time.Duration
 	LoadTimeoutSeconds                  time.Duration
 	CheckHandoffInterval                time.Duration
+	EnableActiveStandby                 bool
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -650,6 +671,7 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	p.initDistPullInterval()
 	p.initLoadTimeoutSeconds()
 	p.initCheckHandoffInterval()
+	p.initEnableActiveStandby()
 }
 
 func (p *queryCoordConfig) initTaskRetryNum() {
@@ -709,6 +731,10 @@ func (p *queryCoordConfig) initMemoryUsageMaxDifferencePercentage() {
 		panic(err)
 	}
 	p.MemoryUsageMaxDifferencePercentage = float64(diffPercentage) / 100
+}
+
+func (p *queryCoordConfig) initEnableActiveStandby() {
+	p.EnableActiveStandby = p.Base.ParseBool("queryCoord.enableActiveStandby", false)
 }
 
 func (p *queryCoordConfig) initCheckInterval() {
@@ -1070,6 +1096,7 @@ type dataCoordConfig struct {
 	GCInterval              time.Duration
 	GCMissingTolerance      time.Duration
 	GCDropTolerance         time.Duration
+	EnableActiveStandby     bool
 }
 
 func (p *dataCoordConfig) init(base *BaseTable) {
@@ -1102,6 +1129,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	p.initGCInterval()
 	p.initGCMissingTolerance()
 	p.initGCDropTolerance()
+	p.initEnableActiveStandby()
 }
 
 func (p *dataCoordConfig) initSegmentMaxSize() {
@@ -1223,6 +1251,10 @@ func (p *dataCoordConfig) GetEnableAutoCompaction() bool {
 	return false
 }
 
+func (p *dataCoordConfig) initEnableActiveStandby() {
+	p.EnableActiveStandby = p.Base.ParseBool("dataCoord.enableActiveStandby", false)
+}
+
 func (p *dataCoordConfig) SetNodeID(id UniqueID) {
 	p.NodeID.Store(id)
 }
@@ -1336,6 +1368,8 @@ type indexCoordConfig struct {
 
 	CreatedTime time.Time
 	UpdatedTime time.Time
+
+	EnableActiveStandby bool
 }
 
 func (p *indexCoordConfig) init(base *BaseTable) {
@@ -1347,6 +1381,7 @@ func (p *indexCoordConfig) init(base *BaseTable) {
 	p.initIndexNodeAddress()
 	p.initWithCredential()
 	p.initIndexNodeID()
+	p.initEnableActiveStandby()
 }
 
 func (p *indexCoordConfig) initMinSegmentNumRowsToEnableIndex() {
@@ -1371,6 +1406,10 @@ func (p *indexCoordConfig) initWithCredential() {
 
 func (p *indexCoordConfig) initIndexNodeID() {
 	p.IndexNodeID = p.Base.ParseInt64WithDefault("indexCoord.bindIndexNodeMode.nodeID", 0)
+}
+
+func (p *indexCoordConfig) initEnableActiveStandby() {
+	p.EnableActiveStandby = p.Base.ParseBool("indexCoord.enableActiveStandby", false)
 }
 
 ///////////////////////////////////////////////////////////////////////////////

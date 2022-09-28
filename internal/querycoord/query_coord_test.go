@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/api/milvuspb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -118,6 +119,33 @@ func startQueryCoord(ctx context.Context) (*QueryCoord, error) {
 		return nil, err
 	}
 	return coord, nil
+}
+
+func TestQueryCoord_DisableActiveStandby(t *testing.T) {
+	Params.Init()
+	Params.QueryCoordCfg.EnableActiveStandby = false
+	ctx := context.Background()
+	queryCoord, err := startQueryCoord(ctx)
+	assert.Nil(t, err)
+	resp, err := queryCoord.GetComponentStates(ctx)
+	assert.Nil(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	assert.Equal(t, internalpb.StateCode_Healthy, resp.GetState().GetStateCode())
+	defer queryCoord.Stop()
+}
+
+// make sure the main functions work well when EnableActiveStandby=true
+func TestQueryCoord_EnableActiveStandby(t *testing.T) {
+	Params.Init()
+	Params.QueryCoordCfg.EnableActiveStandby = true
+	ctx := context.Background()
+	queryCoord, err := startQueryCoord(ctx)
+	assert.Nil(t, err)
+	resp, err := queryCoord.GetComponentStates(ctx)
+	assert.Nil(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	assert.Equal(t, internalpb.StateCode_Healthy, resp.GetState().GetStateCode())
+	defer queryCoord.Stop()
 }
 
 func createDefaultPartition(ctx context.Context, queryCoord *QueryCoord) error {

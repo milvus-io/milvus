@@ -9,6 +9,7 @@ enum StateCode {
   Initializing = 0;
   Healthy = 1;
   Abnormal = 2;
+  StandBy = 3;
 }
 
 message ComponentInfo {

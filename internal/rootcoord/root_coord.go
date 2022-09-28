@@ -126,6 +126,9 @@ type Core struct {
 	factory dependency.Factory
 
 	importManager *importManager
+
+	enableActiveStandBy bool
+	activateFunc        func()
 }
 
 // --------------------- function --------------------------
@@ -135,9 +138,10 @@ func NewCore(c context.Context, factory dependency.Factory) (*Core, error) {
 	ctx, cancel := context.WithCancel(c)
 	rand.Seed(time.Now().UnixNano())
 	core := &Core{
-		ctx:     ctx,
-		cancel:  cancel,
-		factory: factory,
+		ctx:                 ctx,
+		cancel:              cancel,
+		factory:             factory,
+		enableActiveStandBy: Params.RootCoordCfg.EnableActiveStandby,
 	}
 	core.UpdateStateCode(internalpb.StateCode_Abnormal)
 	return core, nil
@@ -259,6 +263,13 @@ func (c *Core) SetQueryCoord(s types.QueryCoord) error {
 // Register register rootcoord at etcd
 func (c *Core) Register() error {
 	c.session.Register()
+	if c.enableActiveStandBy {
+		c.session.ProcessActiveStandBy(c.activateFunc)
+	} else {
+		c.UpdateStateCode(internalpb.StateCode_Healthy)
+		log.Debug("RootCoord start successfully ", zap.String("State Code", internalpb.StateCode_Healthy.String()))
+	}
+	log.Info("RootCoord Register Finished")
 	go c.session.LivenessCheck(c.ctx, func() {
 		log.Error("Root Coord disconnected from etcd, process will exit", zap.Int64("Server Id", c.session.ServerID))
 		if err := c.Stop(); err != nil {
@@ -287,6 +298,7 @@ func (c *Core) initSession() error {
 		return fmt.Errorf("session is nil, the etcd client connection may have failed")
 	}
 	c.session.Init(typeutil.RootCoordRole, Params.RootCoordCfg.Address, true, true)
+	c.session.SetEnableActiveStandBy(c.enableActiveStandBy)
 	Params.SetLogger(c.session.ServerID)
 	return nil
 }
@@ -596,6 +608,14 @@ func (c *Core) startInternal() error {
 	Params.RootCoordCfg.CreatedTime = time.Now()
 	Params.RootCoordCfg.UpdatedTime = time.Now()
 
+	if c.enableActiveStandBy {
+		c.activateFunc = func() {
+			// todo to complete
+			log.Info("rootcoord switch from standby to active, activating")
+			c.UpdateStateCode(internalpb.StateCode_Healthy)
+		}
+		c.UpdateStateCode(internalpb.StateCode_StandBy)
+	}
 	return nil
 }
 

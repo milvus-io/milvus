@@ -42,9 +42,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 )
 
-func TestIndexCoord(t *testing.T) {
+func testIndexCoord(t *testing.T) {
 	ctx := context.Background()
-	Params.InitOnce()
 	Params.EtcdCfg.MetaRootPath = "indexcoord-ut"
 
 	// first start an IndexNode
@@ -296,6 +295,19 @@ func TestIndexCoord(t *testing.T) {
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 	err = etcdKV.RemoveWithPrefix("")
 	assert.NoError(t, err)
+}
+
+func TestIndexCoord_DisableActiveStandby(t *testing.T) {
+	Params.InitOnce()
+	Params.IndexCoordCfg.EnableActiveStandby = false
+	testIndexCoord(t)
+}
+
+// make sure the main functions work well when EnableActiveStandby=true
+func TestIndexCoord_EnableActiveStandby(t *testing.T) {
+	Params.InitOnce()
+	Params.IndexCoordCfg.EnableActiveStandby = true
+	testIndexCoord(t)
 }
 
 func TestIndexCoord_GetComponentStates(t *testing.T) {

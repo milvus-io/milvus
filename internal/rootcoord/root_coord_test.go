@@ -3,6 +3,7 @@ package rootcoord
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/rand"
 	"sync"
 	"testing"
@@ -21,10 +22,13 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
+	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -1308,4 +1312,46 @@ func TestCore_startTimeTickLoop(t *testing.T) {
 	time.Sleep(time.Millisecond * 4)
 	cancel()
 	c.wg.Wait()
+}
+
+// make sure the main functions work well when EnableActiveStandby=true
+func TestRootcoord_EnableActiveStandby(t *testing.T) {
+	Params.Init()
+	Params.RootCoordCfg.EnableActiveStandby = true
+	randVal := rand.Int()
+	Params.CommonCfg.RootCoordTimeTick = fmt.Sprintf("rootcoord-time-tick-%d", randVal)
+	Params.CommonCfg.RootCoordStatistics = fmt.Sprintf("rootcoord-statistics-%d", randVal)
+	Params.EtcdCfg.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.EtcdCfg.MetaRootPath)
+	Params.EtcdCfg.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.EtcdCfg.KvRootPath)
+	Params.CommonCfg.RootCoordSubName = fmt.Sprintf("subname-%d", randVal)
+	Params.CommonCfg.RootCoordDml = fmt.Sprintf("rootcoord-dml-test-%d", randVal)
+	Params.CommonCfg.RootCoordDelta = fmt.Sprintf("rootcoord-delta-test-%d", randVal)
+
+	ctx := context.Background()
+	coreFactory := dependency.NewDefaultFactory(true)
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	assert.NoError(t, err)
+	defer etcdCli.Close()
+	core, err := NewCore(ctx, coreFactory)
+	core.etcdCli = etcdCli
+	assert.NoError(t, err)
+	err = core.Init()
+	assert.NoError(t, err)
+	err = core.Start()
+	assert.NoError(t, err)
+	core.session.TriggerKill = false
+	err = core.Register()
+	assert.NoError(t, err)
+	resp, err := core.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_DescribeCollection,
+			MsgID:     0,
+			Timestamp: 0,
+			SourceID:  Params.ProxyCfg.GetNodeID(),
+		},
+		CollectionName: "unexist"})
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+	err = core.Stop()
+	assert.NoError(t, err)
 }
