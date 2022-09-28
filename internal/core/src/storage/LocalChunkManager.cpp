@@ -18,6 +18,7 @@
 #include "Exception.h"
 
 #include <sstream>
+#include <fstream>
 #include <boost/filesystem.hpp>
 #include <boost/system/error_code.hpp>
 

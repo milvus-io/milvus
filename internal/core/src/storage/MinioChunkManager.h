@@ -114,7 +114,8 @@ class MinioChunkManager : public RemoteChunkManager {
     ListObjects(const char* bucket_name, const char* prefix = NULL);
 
  private:
-    Aws::SDKOptions sdk_options_;
+    const Aws::SDKOptions sdk_options_;
+    static std::atomic<size_t> init_count_;
     std::shared_ptr<Aws::S3::S3Client> client_;
     std::string default_bucket_name_;
 };

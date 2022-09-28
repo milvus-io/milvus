@@ -20,6 +20,7 @@
 #include <aws/core/auth/STSCredentialsProvider.h>
 #include <aws/s3/model/CreateBucketRequest.h>
 #include <aws/s3/model/DeleteBucketRequest.h>
+#include <aws/s3/model/HeadBucketRequest.h>
 #include <aws/s3/model/DeleteObjectRequest.h>
 #include <aws/s3/model/HeadObjectRequest.h>
 #include <aws/s3/model/ListObjectsRequest.h>
@@ -40,6 +41,8 @@
 
 #define S3NoSuchBucket "NoSuchBucket"
 namespace milvus::storage {
+
+std::atomic<size_t> MinioChunkManager::init_count_(0);
 
 /**
  * @brief convert std::string to Aws::String
@@ -66,7 +69,10 @@ ConvertFromAwsString(const Aws::String& aws_str) {
 
 MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
     : default_bucket_name_(storage_config.bucket_name) {
-    Aws::InitAPI(sdk_options_);
+    const size_t initCount = init_count_++;
+    if (initCount == 0) {
+        Aws::InitAPI(sdk_options_);
+    }
     Aws::Client::ClientConfiguration config;
     config.endpointOverride = ConvertToAwsString(storage_config.address);
 
@@ -105,7 +111,10 @@ MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
 }
 
 MinioChunkManager::~MinioChunkManager() {
-    Aws::ShutdownAPI(sdk_options_);
+    const size_t initCount = --init_count_;
+    if (initCount == 0) {
+        Aws::ShutdownAPI(sdk_options_);
+    }
     client_.reset();
 }
 
@@ -146,17 +155,31 @@ MinioChunkManager::Write(const std::string& filepath, void* buf, uint64_t size) 
 
 bool
 MinioChunkManager::BucketExists(const std::string& bucket_name) {
-    auto outcome = client_->ListBuckets();
+    // auto outcome = client_->ListBuckets();
+
+    // if (!outcome.IsSuccess()) {
+    //     THROWS3ERROR(BucketExists);
+    // }
+    // for (auto&& b : outcome.GetResult().GetBuckets()) {
+    //     if (ConvertFromAwsString(b.GetName()) == bucket_name) {
+    //         return true;
+    //     }
+    // }
+    Aws::S3::Model::HeadBucketRequest request;
+    request.SetBucket(bucket_name.c_str());
+
+    auto outcome = client_->HeadBucket(request);
 
     if (!outcome.IsSuccess()) {
-        THROWS3ERROR(BucketExists);
-    }
-    for (auto&& b : outcome.GetResult().GetBuckets()) {
-        if (ConvertFromAwsString(b.GetName()) == bucket_name) {
-            return true;
+        auto error = outcome.GetError();
+        if (!error.GetExceptionName().empty()) {
+            std::stringstream err_msg;
+            err_msg << "Error: BucketExists: " << error.GetExceptionName() + " - " + error.GetMessage();
+            throw S3ErrorException(err_msg.str());
         }
+        return false;
     }
-    return false;
+    return true;
 }
 
 std::vector<std::string>
