@@ -77,6 +77,7 @@ class MinioChunkManagerTest : public testing::Test {
         auto accessKey = minioConfig["accessKeyID"].as<string>();
         auto accessValue = minioConfig["secretAccessKey"].as<string>();
         auto useSSL = minioConfig["useSSL"].as<bool>();
+        auto useIAM = minioConfig["useIAM"].as<bool>();
         auto bucketName = minioConfig["bucketName"].as<string>();
 
         ChunkMangerConfig::SetAddress(endpoint);
@@ -84,6 +85,7 @@ class MinioChunkManagerTest : public testing::Test {
         ChunkMangerConfig::SetAccessValue(accessValue);
         ChunkMangerConfig::SetBucketName(bucketName);
         ChunkMangerConfig::SetUseSSL(useSSL);
+        ChunkMangerConfig::SetUseIAM(useIAM);
     }
 };
 

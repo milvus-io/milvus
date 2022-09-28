@@ -181,35 +181,8 @@ DiskFileManagerImpl::GetLocalRawDataObjectPrefix() {
 
 bool
 DiskFileManagerImpl::RemoveFile(const std::string& file) noexcept {
-    // remove local file
-    bool localExist = false;
-    auto& local_chunk_manager = LocalChunkManager::GetInstance();
-    auto& remote_chunk_manager = MinioChunkManager::GetInstance();
-    FILEMANAGER_TRY
-    localExist = local_chunk_manager.Exist(file);
-    FILEMANAGER_CATCH
-    FILEMANAGER_END
-    if (!localExist) {
-        FILEMANAGER_TRY
-        local_chunk_manager.Remove(file);
-        FILEMANAGER_CATCH
-        FILEMANAGER_END
-    }
-
-    // remove according remote file
-    std::string remoteFile = "";
-    bool remoteExist = false;
-    FILEMANAGER_TRY
-    remoteExist = remote_chunk_manager.Exist(remoteFile);
-    FILEMANAGER_CATCH
-    FILEMANAGER_END
-    if (!remoteExist) {
-        FILEMANAGER_TRY
-        remote_chunk_manager.Remove(file);
-        FILEMANAGER_CATCH
-        FILEMANAGER_END
-    }
-    return true;
+    // TODO: implement this interface
+    return false;
 }
 
 std::optional<bool>

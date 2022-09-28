@@ -52,8 +52,8 @@ set(MILVUS_TEST_FILES
 if ( BUILD_DISK_ANN STREQUAL "ON" )
     set(MILVUS_TEST_FILES
             ${MILVUS_TEST_FILES}
-#            test_minio_chunk_manager.cpp
-#            test_disk_file_manager_test.cpp
+            #test_minio_chunk_manager.cpp
+            #test_disk_file_manager_test.cpp
             test_local_chunk_manager.cpp
             )
 endif()
