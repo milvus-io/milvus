@@ -1049,11 +1049,10 @@ func (sc *ShardCluster) Search(ctx context.Context, req *querypb.SearchRequest, 
 		resultMut.Lock()
 		defer resultMut.Unlock()
 		if streamErr != nil {
-			cancel()
-			// not set cancel error
-			if !errors.Is(streamErr, context.Canceled) {
+			if err == nil {
 				err = fmt.Errorf("stream operation failed: %w", streamErr)
 			}
+			cancel()
 		}
 	}()
 
@@ -1077,11 +1076,10 @@ func (sc *ShardCluster) Search(ctx context.Context, req *querypb.SearchRequest, 
 			resultMut.Lock()
 			defer resultMut.Unlock()
 			if nodeErr != nil || partialResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-				cancel()
-				// not set cancel error
-				if !errors.Is(nodeErr, context.Canceled) {
+				if err == nil {
 					err = fmt.Errorf("Search %d failed, reason %s err %w", node.nodeID, partialResult.GetStatus().GetReason(), nodeErr)
 				}
+				cancel()
 				return
 			}
 			results = append(results, partialResult)
@@ -1128,11 +1126,10 @@ func (sc *ShardCluster) Query(ctx context.Context, req *querypb.QueryRequest, wi
 
 		streamErr := withStreaming(reqCtx)
 		if streamErr != nil {
-			cancel()
-			// not set cancel error
-			if !errors.Is(streamErr, context.Canceled) {
+			if err == nil {
 				err = fmt.Errorf("stream operation failed: %w", streamErr)
 			}
+			cancel()
 		}
 	}()
 
@@ -1156,8 +1153,8 @@ func (sc *ShardCluster) Query(ctx context.Context, req *querypb.QueryRequest, wi
 			resultMut.Lock()
 			defer resultMut.Unlock()
 			if nodeErr != nil || partialResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-				cancel()
 				err = fmt.Errorf("Query %d failed, reason %s err %w", node.nodeID, partialResult.GetStatus().GetReason(), nodeErr)
+				cancel()
 				return
 			}
 			results = append(results, partialResult)

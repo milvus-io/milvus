@@ -146,7 +146,6 @@ func (s *taskScheduler) tryEvictUnsolvedReadTask(headCount int) {
 	if diff <= 0 {
 		return
 	}
-	timeoutErr := fmt.Errorf("deadline exceed")
 	var next *list.Element
 	for e := s.unsolvedReadTasks.Front(); e != nil; e = next {
 		next = e.Next()
@@ -160,7 +159,7 @@ func (s *taskScheduler) tryEvictUnsolvedReadTask(headCount int) {
 		if t.Timeout() {
 			s.unsolvedReadTasks.Remove(e)
 			rateCol.rtCounter.sub(t, unsolvedQueueType)
-			t.Notify(timeoutErr)
+			t.Notify(t.TimeoutError())
 			diff--
 		}
 	}
@@ -188,7 +187,7 @@ func (s *taskScheduler) scheduleReadTasks() {
 	for {
 		select {
 		case <-s.ctx.Done():
-			log.Warn("QueryNode sop schedulerReadTasks")
+			log.Warn("QueryNode stop schedulerReadTasks")
 			return
 
 		case <-s.notifyChan:
@@ -273,12 +272,11 @@ func (s *taskScheduler) executeReadTasks() {
 	defer s.wg.Done()
 	var taskWg sync.WaitGroup
 	defer taskWg.Wait()
-	timeoutErr := fmt.Errorf("deadline exceed")
 
 	executeFunc := func(t readTask) {
 		defer taskWg.Done()
 		if t.Timeout() {
-			t.Notify(timeoutErr)
+			t.Notify(t.TimeoutError())
 		} else {
 			s.processReadTask(t)
 		}
@@ -302,6 +300,7 @@ func (s *taskScheduler) executeReadTasks() {
 				pendingTaskLen := len(s.executeReadTaskChan)
 				taskWg.Add(1)
 				atomic.AddInt32(&s.readConcurrency, int32(pendingTaskLen+1))
+				log.Debug("begin to execute task")
 				go executeFunc(t)
 
 				for i := 0; i < pendingTaskLen; i++ {
