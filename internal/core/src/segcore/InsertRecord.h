@@ -234,7 +234,7 @@ struct InsertRecord {
         std::vector<SegOffset> res_offsets;
         auto offset_iter = pk2offset_->find(pk);
         for (auto offset : offset_iter) {
-            if (offset <= insert_barrier) {
+            if (offset < insert_barrier) {
                 res_offsets.push_back(SegOffset(offset));
             }
         }
