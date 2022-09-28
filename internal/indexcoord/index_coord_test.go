@@ -19,11 +19,14 @@ package indexcoord
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/rand"
 	"path"
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/milvus-io/milvus/internal/metastore/model"
 
 	"github.com/stretchr/testify/assert"
 
@@ -41,6 +44,51 @@ import (
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 )
+
+func TestMockEtcd(t *testing.T) {
+	Params.InitOnce()
+	Params.EtcdCfg.MetaRootPath = "indexcoord-mock"
+
+	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	assert.NoError(t, err)
+	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
+
+	mockEtcd := NewMockEtcdKVWithReal(etcdKV)
+	key := "foo"
+	value := "foo-val"
+	err = mockEtcd.Save(key, value)
+	assert.NoError(t, err)
+
+	fmt.Println(mockEtcd == nil)
+	loadVal, err := mockEtcd.Load(key)
+	assert.NoError(t, err)
+	assert.Equal(t, value, loadVal)
+
+	_, _, err = mockEtcd.LoadWithPrefix(key)
+	assert.NoError(t, err)
+
+	_, _, _, err = mockEtcd.LoadWithPrefix2(key)
+	assert.NoError(t, err)
+
+	_, _, _, err = mockEtcd.LoadWithRevision(key)
+	assert.NoError(t, err)
+
+	_, _, _, _, err = mockEtcd.LoadWithRevisionAndVersions(key)
+	assert.NoError(t, err)
+
+	err = mockEtcd.MultiSave(map[string]string{
+		"TestMockEtcd-1": "mock-val",
+		"TestMockEtcd-2": "mock-val",
+	})
+	assert.NoError(t, err)
+
+	err = mockEtcd.RemoveWithPrefix("TestMockEtcd-")
+	assert.NoError(t, err)
+
+	err = mockEtcd.Remove(key)
+	assert.NoError(t, err)
+
+}
 
 func testIndexCoord(t *testing.T) {
 	ctx := context.Background()
@@ -122,6 +170,10 @@ func testIndexCoord(t *testing.T) {
 	err = ic.Init()
 	assert.NoError(t, err)
 
+	mockKv := NewMockEtcdKVWithReal(ic.etcdKV)
+	ic.metaTable, err = NewMetaTable(mockKv)
+	assert.NoError(t, err)
+
 	err = ic.Register()
 	assert.NoError(t, err)
 
@@ -192,6 +244,120 @@ func testIndexCoord(t *testing.T) {
 		assert.Equal(t, len(req.SegmentIDs), len(resp.SegmentInfo))
 	})
 
+	getReq := func() *indexpb.DescribeIndexRequest {
+		return &indexpb.DescribeIndexRequest{
+			CollectionID: collID,
+			IndexName:    indexName,
+		}
+	}
+
+	t.Run("DescribeIndex NotExist", func(t *testing.T) {
+		indexs := ic.metaTable.collectionIndexes
+		ic.metaTable.collectionIndexes = make(map[UniqueID]map[UniqueID]*model.Index)
+		defer func() {
+			fmt.Println("simfg fubang")
+			ic.metaTable.collectionIndexes = indexs
+		}()
+
+		resp, err := ic.DescribeIndex(ctx, getReq())
+		assert.NoError(t, err)
+		assert.Equal(t, resp.Status.ErrorCode, commonpb.ErrorCode_IndexNotExist)
+	})
+
+	t.Run("DescribeIndex State", func(t *testing.T) {
+		req := getReq()
+		res := ic.metaTable.GetIndexIDByName(collID, indexName)
+		var indexIDTest int64
+		for k := range res {
+			indexIDTest = k
+			break
+		}
+
+		indexs := ic.metaTable.segmentIndexes
+		mockIndexs := make(map[UniqueID]map[UniqueID]*model.SegmentIndex)
+		progressIndex := &model.SegmentIndex{
+			IndexState: commonpb.IndexState_InProgress,
+		}
+		failedIndex := &model.SegmentIndex{
+			IndexState: commonpb.IndexState_Failed,
+			SegmentID:  333,
+			FailReason: "mock fail",
+		}
+		finishedIndex := &model.SegmentIndex{
+			IndexState: commonpb.IndexState_Finished,
+			NumRows:    2048,
+		}
+		ic.metaTable.segmentIndexes = mockIndexs
+		defer func() {
+			ic.metaTable.segmentIndexes = indexs
+		}()
+
+		mockIndexs[111] = make(map[UniqueID]*model.SegmentIndex)
+		mockIndexs[111][indexIDTest] = finishedIndex
+
+		resp, err := ic.DescribeIndex(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.IndexState_Finished, resp.IndexInfos[0].State)
+
+		originFunc1 := dcm.CallGetFlushedSegment
+		originFunc2 := dcm.CallGetSegmentInfo
+		defer func() {
+			dcm.CallGetFlushedSegment = originFunc1
+			dcm.SetFunc(func() {
+				dcm.CallGetSegmentInfo = originFunc2
+			})
+		}()
+		dcm.CallGetFlushedSegment = func(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error) {
+			return nil, errors.New("mock error")
+		}
+
+		mockIndexs[222] = make(map[UniqueID]*model.SegmentIndex)
+		mockIndexs[222][indexIDTest] = progressIndex
+		resp, err = ic.DescribeIndex(ctx, req)
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+
+		dcm.CallGetFlushedSegment = func(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error) {
+			return &datapb.GetFlushedSegmentsResponse{
+				Segments: []int64{111, 222, 333},
+			}, nil
+		}
+		dcm.SetFunc(func() {
+			dcm.CallGetSegmentInfo = func(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
+				return nil, errors.New("mock error")
+			}
+		})
+		resp, err = ic.DescribeIndex(ctx, req)
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+
+		dcm.SetFunc(func() {
+			dcm.CallGetSegmentInfo = func(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
+				return &datapb.GetSegmentInfoResponse{
+					Infos: []*datapb.SegmentInfo{
+						{State: commonpb.SegmentState_Flushed, NumOfRows: 2048},
+						{State: commonpb.SegmentState_Flushed, NumOfRows: 2048},
+						{State: commonpb.SegmentState_Flushed, NumOfRows: 2048},
+					},
+				}, nil
+			}
+		})
+		resp, err = ic.DescribeIndex(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.IndexState_InProgress, resp.IndexInfos[0].State)
+		assert.Equal(t, int64(2048), resp.IndexInfos[0].IndexedRows)
+		assert.Equal(t, int64(2048*3), resp.IndexInfos[0].TotalRows)
+
+		mockIndexs[333] = make(map[UniqueID]*model.SegmentIndex)
+		mockIndexs[333][indexIDTest] = failedIndex
+		resp, err = ic.DescribeIndex(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.IndexState_Failed, resp.IndexInfos[0].State)
+	})
+
 	t.Run("DescribeIndex", func(t *testing.T) {
 		req := &indexpb.DescribeIndexRequest{
 			CollectionID: collID,
@@ -200,27 +366,6 @@ func testIndexCoord(t *testing.T) {
 		resp, err := ic.DescribeIndex(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(resp.IndexInfos))
-
-		originFunc1 := dcm.CallGetFlushedSegment
-		originFunc2 := dcm.CallGetSegmentInfo
-		dcm.CallGetFlushedSegment = func(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error) {
-			return nil, errors.New("mock error")
-		}
-		resp, err = ic.DescribeIndex(ctx, req)
-		assert.NoError(t, err)
-		assert.Equal(t, resp.Status.ErrorCode, commonpb.ErrorCode_UnexpectedError)
-		dcm.CallGetFlushedSegment = originFunc1
-		dcm.SetFunc(func() {
-			dcm.CallGetSegmentInfo = func(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
-				return nil, errors.New("mock error")
-			}
-		})
-		resp, err = ic.DescribeIndex(ctx, req)
-		assert.NoError(t, err)
-		assert.Equal(t, resp.Status.ErrorCode, commonpb.ErrorCode_UnexpectedError)
-		dcm.SetFunc(func() {
-			dcm.CallGetSegmentInfo = originFunc2
-		})
 	})
 
 	t.Run("FlushedSegmentWatcher", func(t *testing.T) {

@@ -483,6 +483,7 @@ type mockETCDKV struct {
 	kv.MetaKv
 
 	save                        func(string, string) error
+	load                        func(string) (string, error)
 	remove                      func(string) error
 	multiSave                   func(map[string]string) error
 	watchWithRevision           func(string, int64) clientv3.WatchChan
@@ -498,6 +499,9 @@ func NewMockEtcdKV() *mockETCDKV {
 	return &mockETCDKV{
 		save: func(s string, s2 string) error {
 			return nil
+		},
+		load: func(s string) (string, error) {
+			return "", nil
 		},
 		remove: func(s string) error {
 			return nil
@@ -519,6 +523,41 @@ func NewMockEtcdKV() *mockETCDKV {
 		},
 		removeWithPrefix: func(key string) error {
 			return nil
+		},
+	}
+}
+
+func NewMockEtcdKVWithReal(real kv.MetaKv) *mockETCDKV {
+	return &mockETCDKV{
+		save: func(s string, s2 string) error {
+			return real.Save(s, s2)
+		},
+		load: func(s string) (string, error) {
+			return real.Load(s)
+		},
+		remove: func(s string) error {
+			return real.Remove(s)
+		},
+		multiSave: func(m map[string]string) error {
+			return real.MultiSave(m)
+		},
+		loadWithRevisionAndVersions: func(s string) ([]string, []string, []int64, int64, error) {
+			return real.LoadWithRevisionAndVersions(s)
+		},
+		compareVersionAndSwap: func(key string, version int64, target string, opts ...clientv3.OpOption) (bool, error) {
+			return real.CompareVersionAndSwap(key, version, target, opts...)
+		},
+		loadWithPrefix: func(key string) ([]string, []string, error) {
+			return real.LoadWithPrefix(key)
+		},
+		loadWithPrefix2: func(key string) ([]string, []string, []int64, error) {
+			return real.LoadWithPrefix2(key)
+		},
+		loadWithRevision: func(key string) ([]string, []string, int64, error) {
+			return real.LoadWithRevision(key)
+		},
+		removeWithPrefix: func(key string) error {
+			return real.RemoveWithPrefix(key)
 		},
 	}
 }
@@ -561,6 +600,10 @@ func (mk *mockETCDKV) LoadWithRevision(key string) ([]string, []string, int64, e
 
 func (mk *mockETCDKV) RemoveWithPrefix(key string) error {
 	return mk.removeWithPrefix(key)
+}
+
+func (mk *mockETCDKV) Load(key string) (string, error) {
+	return mk.load(key)
 }
 
 type chunkManagerMock struct {
