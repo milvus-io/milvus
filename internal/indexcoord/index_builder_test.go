@@ -531,6 +531,7 @@ func TestIndexBuilder(t *testing.T) {
 func TestIndexBuilder_Error(t *testing.T) {
 	Params.Init()
 	ib := &indexBuilder{
+		ctx: context.Background(),
 		tasks: map[int64]indexTaskState{
 			buildID: indexTaskInit,
 		},
@@ -957,6 +958,7 @@ func TestIndexBuilder_Error(t *testing.T) {
 func Test_indexBuilder_getTaskState(t *testing.T) {
 	Params.Init()
 	ib := &indexBuilder{
+		ctx: context.Background(),
 		tasks: map[int64]indexTaskState{
 			buildID: indexTaskInit,
 		},

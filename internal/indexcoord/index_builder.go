@@ -390,7 +390,9 @@ func (ib *indexBuilder) getTaskState(buildID, nodeID UniqueID) indexTaskState {
 	log.Ctx(ib.ctx).Info("IndexCoord indexBuilder get index task state", zap.Int64("buildID", buildID), zap.Int64("nodeID", nodeID))
 	client, exist := ib.ic.nodeManager.GetClientByID(nodeID)
 	if exist {
-		response, err := client.QueryJobs(ib.ctx, &indexpb.QueryJobsRequest{
+		ctx1, cancel := context.WithTimeout(ib.ctx, reqTimeoutInterval)
+		defer cancel()
+		response, err := client.QueryJobs(ctx1, &indexpb.QueryJobsRequest{
 			ClusterID: Params.CommonCfg.ClusterPrefix,
 			BuildIDs:  []int64{buildID},
 		})
@@ -436,7 +438,9 @@ func (ib *indexBuilder) dropIndexTask(buildID, nodeID UniqueID) bool {
 	log.Ctx(ib.ctx).Info("IndexCoord notify IndexNode drop the index task", zap.Int64("buildID", buildID), zap.Int64("nodeID", nodeID))
 	client, exist := ib.ic.nodeManager.GetClientByID(nodeID)
 	if exist {
-		status, err := client.DropJobs(ib.ctx, &indexpb.DropJobsRequest{
+		ctx1, cancel := context.WithTimeout(ib.ctx, reqTimeoutInterval)
+		defer cancel()
+		status, err := client.DropJobs(ctx1, &indexpb.DropJobsRequest{
 			ClusterID: Params.CommonCfg.ClusterPrefix,
 			BuildIDs:  []UniqueID{buildID},
 		})
