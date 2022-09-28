@@ -76,10 +76,9 @@ func (c *SegmentChecker) checkReplica(ctx context.Context, replica *meta.Replica
 	ret = append(ret, tasks...)
 
 	// release redundant growing segments
-	leaderReduancies := c.findNeedReleasedGrowingSegments(replica)
+	leaderRedundancies := c.findNeedReleasedGrowingSegments(replica)
 	redundancies = make([]*meta.Segment, 0)
-	for leaderID, segmentIDs := range leaderReduancies {
-		segments := packSegments(segmentIDs, leaderID, replica.GetCollectionID())
+	for _, segments := range leaderRedundancies {
 		redundancies = append(redundancies, segments...)
 	}
 	tasks = c.createSegmentReduceTasks(ctx, redundancies, replica.GetID(), querypb.DataScope_Streaming)
@@ -145,8 +144,8 @@ func (c *SegmentChecker) filterExistedOnLeader(replica *meta.Replica, segments [
 		onLeader := false
 		leaderViews := c.dist.LeaderViewManager.GetLeaderView(leaderID)
 		for _, view := range leaderViews {
-			node, ok := view.Segments[s.GetID()]
-			if ok && node == s.Node {
+			version, ok := view.Segments[s.GetID()]
+			if ok && version.NodeID == s.Node {
 				onLeader = true
 				break
 			}
@@ -160,8 +159,8 @@ func (c *SegmentChecker) filterExistedOnLeader(replica *meta.Replica, segments [
 	return filtered
 }
 
-func (c *SegmentChecker) findNeedReleasedGrowingSegments(replica *meta.Replica) map[int64][]int64 {
-	ret := make(map[int64][]int64, 0) // leaderID -> segment ids
+func (c *SegmentChecker) findNeedReleasedGrowingSegments(replica *meta.Replica) map[int64][]*meta.Segment {
+	ret := make(map[int64][]*meta.Segment, 0) // leaderID -> segment ids
 	leaders := c.dist.ChannelDistManager.GetShardLeadersByReplica(replica)
 	for shard, leaderID := range leaders {
 		leaderView := c.dist.LeaderViewManager.GetLeaderShardView(leaderID, shard)
@@ -179,7 +178,14 @@ func (c *SegmentChecker) findNeedReleasedGrowingSegments(replica *meta.Replica) 
 			sources := append(segment.GetCompactionFrom(), segment.GetID())
 			for _, source := range sources {
 				if leaderView.GrowingSegments.Contain(source) {
-					ret[leaderView.ID] = append(ret[leaderView.ID], source)
+					ret[leaderView.ID] = append(ret[leaderView.ID], &meta.Segment{
+						SegmentInfo: &datapb.SegmentInfo{
+							ID:            source,
+							CollectionID:  replica.GetCollectionID(),
+							InsertChannel: leaderView.Channel,
+						},
+						Node: leaderID,
+					})
 				}
 			}
 		}
@@ -223,7 +229,7 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 func (c *SegmentChecker) createSegmentReduceTasks(ctx context.Context, segments []*meta.Segment, replicaID int64, scope querypb.DataScope) []task.Task {
 	ret := make([]task.Task, 0, len(segments))
 	for _, s := range segments {
-		action := task.NewSegmentActionWithScope(s.Node, task.ActionTypeReduce, s.GetID(), scope)
+		action := task.NewSegmentActionWithScope(s.Node, task.ActionTypeReduce, s.GetInsertChannel(), s.GetID(), scope)
 		ret = append(ret, task.NewSegmentTask(
 			ctx,
 			Params.QueryCoordCfg.SegmentTaskTimeout,

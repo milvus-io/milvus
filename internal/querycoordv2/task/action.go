@@ -33,14 +33,14 @@ type Action interface {
 type BaseAction struct {
 	nodeID UniqueID
 	typ    ActionType
-
-	onDone []func()
+	shard  string
 }
 
-func NewBaseAction(nodeID UniqueID, typ ActionType) *BaseAction {
+func NewBaseAction(nodeID UniqueID, typ ActionType, shard string) *BaseAction {
 	return &BaseAction{
 		nodeID: nodeID,
 		typ:    typ,
+		shard:  shard,
 	}
 }
 
@@ -52,6 +52,10 @@ func (action *BaseAction) Type() ActionType {
 	return action.typ
 }
 
+func (action *BaseAction) Shard() string {
+	return action.shard
+}
+
 type SegmentAction struct {
 	*BaseAction
 
@@ -61,12 +65,11 @@ type SegmentAction struct {
 	isReleaseCommitted atomic.Bool
 }
 
-func NewSegmentAction(nodeID UniqueID, typ ActionType, segmentID UniqueID, onDone ...func()) *SegmentAction {
-	return NewSegmentActionWithScope(nodeID, typ, segmentID, querypb.DataScope_All, onDone...)
+func NewSegmentAction(nodeID UniqueID, typ ActionType, shard string, segmentID UniqueID) *SegmentAction {
+	return NewSegmentActionWithScope(nodeID, typ, shard, segmentID, querypb.DataScope_All)
 }
-func NewSegmentActionWithScope(nodeID UniqueID, typ ActionType, segmentID UniqueID, scope querypb.DataScope, onDone ...func()) *SegmentAction {
-	base := NewBaseAction(nodeID, typ)
-	base.onDone = append(base.onDone, onDone...)
+func NewSegmentActionWithScope(nodeID UniqueID, typ ActionType, shard string, segmentID UniqueID, scope querypb.DataScope) *SegmentAction {
+	base := NewBaseAction(nodeID, typ, shard)
 	return &SegmentAction{
 		BaseAction:         base,
 		segmentID:          segmentID,
@@ -100,19 +103,16 @@ func (action *SegmentAction) IsFinished(distMgr *meta.DistributionManager) bool 
 
 type ChannelAction struct {
 	*BaseAction
-	channelName string
 }
 
 func NewChannelAction(nodeID UniqueID, typ ActionType, channelName string) *ChannelAction {
 	return &ChannelAction{
-		BaseAction: NewBaseAction(nodeID, typ),
-
-		channelName: channelName,
+		BaseAction: NewBaseAction(nodeID, typ, channelName),
 	}
 }
 
 func (action *ChannelAction) ChannelName() string {
-	return action.channelName
+	return action.shard
 }
 
 func (action *ChannelAction) IsFinished(distMgr *meta.DistributionManager) bool {

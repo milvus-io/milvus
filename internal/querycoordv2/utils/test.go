@@ -8,11 +8,18 @@ import (
 )
 
 func CreateTestLeaderView(id, collection int64, channel string, segments map[int64]int64, growings []int64) *meta.LeaderView {
+	segmentVersions := make(map[int64]*querypb.SegmentDist)
+	for segment, node := range segments {
+		segmentVersions[segment] = &querypb.SegmentDist{
+			NodeID:  node,
+			Version: 0,
+		}
+	}
 	return &meta.LeaderView{
 		ID:              id,
 		CollectionID:    collection,
 		Channel:         channel,
-		Segments:        segments,
+		Segments:        segmentVersions,
 		GrowingSegments: typeutil.NewUniqueSet(growings...),
 	}
 }

@@ -1191,14 +1191,17 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 			continue
 		}
 		segmentInfos := sc.GetSegmentInfos()
-		mapping := make(map[int64]int64)
+		mapping := make(map[int64]*querypb.SegmentDist)
 		for _, info := range segmentInfos {
-			mapping[info.segmentID] = info.nodeID
+			mapping[info.segmentID] = &querypb.SegmentDist{
+				NodeID:  info.nodeID,
+				Version: info.version,
+			}
 		}
 		view := &querypb.LeaderView{
 			Collection:        sc.collectionID,
 			Channel:           sc.vchannelName,
-			SegmentNodePairs:  mapping,
+			SegmentDist:       mapping,
 			GrowingSegmentIDs: channelGrowingsMap[sc.vchannelName],
 		}
 		leaderViews = append(leaderViews, view)
@@ -1240,7 +1243,12 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 			}, true)
 		case querypb.SyncType_Set:
 			shardCluster.SyncSegments([]*querypb.ReplicaSegmentsInfo{
-				{NodeId: action.GetNodeID(), PartitionId: action.GetPartitionID(), SegmentIds: []int64{action.GetSegmentID()}},
+				{
+					NodeId:      action.GetNodeID(),
+					PartitionId: action.GetPartitionID(),
+					SegmentIds:  []int64{action.GetSegmentID()},
+					Versions:    []int64{action.GetVersion()},
+				},
 			}, segmentStateLoaded)
 
 		default:

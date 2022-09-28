@@ -663,8 +663,8 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 				continue
 			}
 			isAllNodeAvailable := true
-			for _, node := range leader.Segments {
-				if s.nodeMgr.Get(node) == nil {
+			for _, version := range leader.Segments {
+				if s.nodeMgr.Get(version.NodeID) == nil {
 					isAllNodeAvailable = false
 					break
 				}

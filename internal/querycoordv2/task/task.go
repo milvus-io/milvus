@@ -65,6 +65,7 @@ type baseTask struct {
 	id           UniqueID // Set by scheduler
 	collectionID UniqueID
 	replicaID    UniqueID
+	shard        string
 	loadType     querypb.LoadType
 
 	status   *atomic.Int32
@@ -74,13 +75,14 @@ type baseTask struct {
 	step     int
 }
 
-func newBaseTask(ctx context.Context, timeout time.Duration, sourceID, collectionID, replicaID UniqueID) *baseTask {
+func newBaseTask(ctx context.Context, timeout time.Duration, sourceID, collectionID, replicaID UniqueID, shard string) *baseTask {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 
 	return &baseTask{
 		sourceID:     sourceID,
 		collectionID: collectionID,
 		replicaID:    replicaID,
+		shard:        shard,
 
 		status:   atomic.NewInt32(TaskStatusStarted),
 		priority: TaskPriorityNormal,
@@ -221,25 +223,30 @@ func NewSegmentTask(ctx context.Context,
 	}
 
 	segmentID := int64(-1)
+	shard := ""
 	for _, action := range actions {
 		action, ok := action.(*SegmentAction)
 		if !ok {
 			panic("SegmentTask can only contain SegmentActions")
 		}
 		if segmentID == -1 {
-			segmentID = action.segmentID
+			segmentID = action.SegmentID()
+			shard = action.Shard()
 		} else if segmentID != action.SegmentID() {
 			panic("all actions must process the same segment")
 		}
 	}
 
-	base := newBaseTask(ctx, timeout, sourceID, collectionID, replicaID)
+	base := newBaseTask(ctx, timeout, sourceID, collectionID, replicaID, shard)
 	base.actions = actions
 	return &SegmentTask{
-		baseTask: base,
-
+		baseTask:  base,
 		segmentID: segmentID,
 	}
+}
+
+func (task *SegmentTask) Shard() string {
+	return task.shard
 }
 
 func (task *SegmentTask) SegmentID() UniqueID {
@@ -252,8 +259,6 @@ func (task *SegmentTask) String() string {
 
 type ChannelTask struct {
 	*baseTask
-
-	channel string
 }
 
 // NewChannelTask creates a ChannelTask with actions,
@@ -282,19 +287,17 @@ func NewChannelTask(ctx context.Context,
 		}
 	}
 
-	base := newBaseTask(ctx, timeout, sourceID, collectionID, replicaID)
+	base := newBaseTask(ctx, timeout, sourceID, collectionID, replicaID, channel)
 	base.actions = actions
 	return &ChannelTask{
 		baseTask: base,
-
-		channel: channel,
 	}
 }
 
 func (task *ChannelTask) Channel() string {
-	return task.channel
+	return task.shard
 }
 
 func (task *ChannelTask) String() string {
-	return fmt.Sprintf("%s [channel=%s]", task.baseTask.String(), task.channel)
+	return fmt.Sprintf("%s [channel=%s]", task.baseTask.String(), task.Channel())
 }

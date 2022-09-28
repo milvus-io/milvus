@@ -113,6 +113,7 @@ func segmentEventsToSyncInfo(events []segmentEvent) []*querypb.ReplicaSegmentsIn
 				NodeId:      nodeID,
 				SegmentIds:  []int64{event.segmentID},
 				PartitionId: event.partitionID,
+				Versions:    []int64{0},
 			})
 		}
 	}
@@ -895,14 +896,17 @@ func TestShardCluster_SyncSegments(t *testing.T) {
 			{
 				NodeId:     1,
 				SegmentIds: []int64{1},
+				Versions:   []int64{1},
 			},
 			{
 				NodeId:     2,
 				SegmentIds: []int64{2},
+				Versions:   []int64{1},
 			},
 			{
 				NodeId:     3,
 				SegmentIds: []int64{3},
+				Versions:   []int64{1},
 			},
 		}, segmentStateLoaded)
 		assert.Eventually(t, func() bool {
@@ -966,14 +970,17 @@ func TestShardCluster_SyncSegments(t *testing.T) {
 			{
 				NodeId:     1,
 				SegmentIds: []int64{1},
+				Versions:   []int64{1},
 			},
 			{
 				NodeId:     2,
 				SegmentIds: []int64{2},
+				Versions:   []int64{1},
 			},
 			{
 				NodeId:     3,
 				SegmentIds: []int64{3},
+				Versions:   []int64{1},
 			},
 		}, segmentStateLoaded)
 		assert.Eventually(t, func() bool {
@@ -1007,14 +1014,17 @@ func TestShardCluster_SyncSegments(t *testing.T) {
 			{
 				NodeId:     1,
 				SegmentIds: []int64{1},
+				Versions:   []int64{1},
 			},
 			{
 				NodeId:     2,
 				SegmentIds: []int64{2},
+				Versions:   []int64{1},
 			},
 			{
 				NodeId:     3,
 				SegmentIds: []int64{3},
+				Versions:   []int64{1},
 			},
 		}, segmentStateLoaded)
 		assert.Eventually(t, func() bool {
