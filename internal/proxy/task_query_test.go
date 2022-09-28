@@ -359,7 +359,10 @@ func TestTaskQuery_functions(t *testing.T) {
 			{"valid no limit, offset=2", []string{OffsetKey}, []string{"2"}, false, typeutil.Unlimited, 0},
 			{"invalid limit str", []string{LimitKey}, []string{"a"}, true, 0, 0},
 			{"invalid limit zero", []string{LimitKey}, []string{"0"}, true, 0, 0},
+			{"invalid limit negative", []string{LimitKey}, []string{"-1"}, true, 0, 0},
+			{"invalid limit 16385", []string{LimitKey}, []string{"16385"}, true, 0, 0},
 			{"invalid offset negative", []string{LimitKey, OffsetKey}, []string{"1", "-1"}, true, 0, 0},
+			{"invalid offset 16385", []string{LimitKey, OffsetKey}, []string{"1", "16385"}, true, 0, 0},
 			{"invalid limit=16384 offset=16384", []string{LimitKey, OffsetKey}, []string{"16384", "16384"}, true, 0, 0},
 		}
 
