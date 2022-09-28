@@ -34,11 +34,9 @@ import "C"
 import (
 	"context"
 	"fmt"
-	"math"
 	"os"
 	"path"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -47,7 +45,6 @@ import (
 	"unsafe"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/panjf2000/ants/v2"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -61,7 +58,6 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util"
-	"github.com/milvus-io/milvus/internal/util/concurrency"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -127,9 +123,6 @@ type QueryNode struct {
 	ShardClusterService *ShardClusterService
 	//shard query service, handles shard-level query & search
 	queryShardService *queryShardService
-
-	// cgoPool is the worker pool to control concurrency of cgo call
-	cgoPool *concurrency.Pool
 }
 
 // NewQueryNode will return a QueryNode with abnormal state.
@@ -242,39 +235,13 @@ func (node *QueryNode) Init() error {
 		node.etcdKV = etcdkv.NewEtcdKV(node.etcdCli, Params.EtcdCfg.MetaRootPath)
 		log.Info("queryNode try to connect etcd success", zap.Any("MetaRootPath", Params.EtcdCfg.MetaRootPath))
 
-		cpuNum := runtime.GOMAXPROCS(0)
-		node.cgoPool, err = concurrency.NewPool(cpuNum, ants.WithPreAlloc(true),
-			ants.WithExpiryDuration(math.MaxInt64))
-		if err != nil {
-			log.Error("QueryNode init cgo pool failed", zap.Error(err))
-			initError = err
-			return
-		}
-
-		// ensure every cgopool go routine is locked with a OS thread
-		// so openmp in knowhere won't create too much request
-		sig := make(chan struct{})
-		wg := sync.WaitGroup{}
-		wg.Add(cpuNum)
-		for i := 0; i < cpuNum; i++ {
-			node.cgoPool.Submit(func() (interface{}, error) {
-				runtime.LockOSThread()
-				wg.Done()
-				<-sig
-				return nil, nil
-			})
-		}
-		wg.Wait()
-		close(sig)
-
-		node.metaReplica = newCollectionReplica(node.cgoPool)
+		node.metaReplica = newCollectionReplica()
 
 		node.loader = newSegmentLoader(
 			node.metaReplica,
 			node.etcdKV,
 			node.vectorStorage,
-			node.factory,
-			node.cgoPool)
+			node.factory)
 
 		node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, node.metaReplica, node.tSafeReplica, node.factory)
 
