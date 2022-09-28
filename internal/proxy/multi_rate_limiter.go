@@ -124,7 +124,7 @@ func (rl *rateLimiter) registerLimiters() {
 		}
 		log.Info("RateLimiter register for rateType",
 			zap.String("rateType", internalpb.RateType_name[rt]),
-			zap.Float64("rate", r))
+			zap.String("rate", ratelimitutil.Limit(r).String()))
 		limit := ratelimitutil.Limit(r)
 		if limit < 0 {
 			limit = ratelimitutil.Inf

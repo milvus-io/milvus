@@ -35,6 +35,9 @@ const (
 	defaultLowWaterLevel = float64(0.8)
 	// defaultHighWaterLevel is the default memory low water level.
 	defaultHighWaterLevel = float64(0.9)
+
+	// secondsPerMinute is used to convert minutes to seconds.
+	secondsPerMinute = 60.0
 )
 
 // quotaConfig is configuration for quota and limitations.
@@ -164,6 +167,7 @@ func (p *quotaConfig) initDDLCollectionRate() {
 		return
 	}
 	p.DDLCollectionRate = p.Base.ParseFloatWithDefault("quotaAndLimits.ddl.collectionRate", defaultMax)
+	p.DDLCollectionRate /= secondsPerMinute
 	// [0 ~ Inf)
 	if p.DDLCollectionRate < 0 {
 		p.DDLCollectionRate = defaultMax
@@ -176,6 +180,7 @@ func (p *quotaConfig) initDDLPartitionRate() {
 		return
 	}
 	p.DDLPartitionRate = p.Base.ParseFloatWithDefault("quotaAndLimits.ddl.partitionRate", defaultMax)
+	p.DDLPartitionRate /= secondsPerMinute
 	// [0 ~ Inf)
 	if p.DDLPartitionRate < 0 {
 		p.DDLPartitionRate = defaultMax
@@ -188,6 +193,7 @@ func (p *quotaConfig) initDDLIndexRate() {
 		return
 	}
 	p.DDLIndexRate = p.Base.ParseFloatWithDefault("quotaAndLimits.ddl.indexRate", defaultMax)
+	p.DDLIndexRate /= secondsPerMinute
 	// [0 ~ Inf)
 	if p.DDLIndexRate < 0 {
 		p.DDLIndexRate = defaultMax
@@ -200,6 +206,7 @@ func (p *quotaConfig) initDDLFlushRate() {
 		return
 	}
 	p.DDLFlushRate = p.Base.ParseFloatWithDefault("quotaAndLimits.ddl.flushRate", defaultMax)
+	p.DDLFlushRate /= secondsPerMinute
 	// [0 ~ Inf)
 	if p.DDLFlushRate < 0 {
 		p.DDLFlushRate = defaultMax
@@ -212,6 +219,7 @@ func (p *quotaConfig) initDDLCompactionRate() {
 		return
 	}
 	p.DDLCompactionRate = p.Base.ParseFloatWithDefault("quotaAndLimits.ddl.compactionRate", defaultMax)
+	p.DDLCompactionRate /= secondsPerMinute
 	// [0 ~ Inf)
 	if p.DDLCompactionRate < 0 {
 		p.DDLCompactionRate = defaultMax

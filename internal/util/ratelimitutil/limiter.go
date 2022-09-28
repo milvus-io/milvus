@@ -17,6 +17,7 @@
 package ratelimitutil
 
 import (
+	"fmt"
 	"math"
 	"sync"
 	"time"
@@ -130,6 +131,14 @@ func (lim *Limiter) advance(now time.Time) (newNow time.Time, newLast time.Time,
 		tokens = burst
 	}
 	return now, last, tokens
+}
+
+// String returns string of Limit.
+func (limit Limit) String() string {
+	if limit == Inf {
+		return "+inf"
+	}
+	return fmt.Sprintf("%.4f", limit)
 }
 
 // tokensFromDuration is a unit conversion function from a time duration to the number of tokens

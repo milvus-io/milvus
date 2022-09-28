@@ -403,8 +403,8 @@ quotaAndLimits:
   dql:
     enabled: false
     searchRate:
-      max: # vps, default no limit
-      min: # vps, default 0
+      max: # vps (vectors per second), default no limit
+      min: # vps (vectors per second), default 0
     queryRate:
       max: # qps, default no limit
       min: # qps, default 0
