@@ -58,7 +58,7 @@ CUSTOM_THIRDPARTY_PATH=""
 EMBEDDED_MILVUS="OFF"
 BUILD_DISK_ANN="OFF"
 
-while getopts "p:d:t:s:f:ulrcghzmeb" arg; do
+while getopts "p:d:t:s:f:n:ulrcghzmeb" arg; do
   case $arg in
   f)
     CUSTOM_THIRDPARTY_PATH=$OPTARG
@@ -103,7 +103,7 @@ while getopts "p:d:t:s:f:ulrcghzmeb" arg; do
     EMBEDDED_MILVUS="ON"
     ;;
   n)
-    BUILD_DISK_ANN="OFF"
+    BUILD_DISK_ANN=$OPTARG
     ;;
   h) # help
     echo "
