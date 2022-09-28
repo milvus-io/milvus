@@ -70,27 +70,10 @@ func printBinlogFile(filename string) error {
 	}
 	defer r.Close()
 
-	fmt.Println("descriptor event header:")
-	physical, _ := tsoutil.ParseTS(r.descriptorEvent.descriptorEventHeader.Timestamp)
-	fmt.Printf("\tTimestamp: %v\n", physical)
-	fmt.Printf("\tTypeCode: %s\n", r.descriptorEvent.descriptorEventHeader.TypeCode.String())
-	fmt.Printf("\tEventLength: %d\n", r.descriptorEvent.descriptorEventHeader.EventLength)
-	fmt.Printf("\tNextPosition :%d\n", r.descriptorEvent.descriptorEventHeader.NextPosition)
-	fmt.Println("descriptor event data:")
-	fmt.Printf("\tCollectionID: %d\n", r.descriptorEvent.descriptorEventData.CollectionID)
-	fmt.Printf("\tPartitionID: %d\n", r.descriptorEvent.descriptorEventData.PartitionID)
-	fmt.Printf("\tSegmentID: %d\n", r.descriptorEvent.descriptorEventData.SegmentID)
-	fmt.Printf("\tFieldID: %d\n", r.descriptorEvent.descriptorEventData.FieldID)
-	physical, _ = tsoutil.ParseTS(r.descriptorEvent.descriptorEventData.StartTimestamp)
-	fmt.Printf("\tStartTimestamp: %v\n", physical)
-	physical, _ = tsoutil.ParseTS(r.descriptorEvent.descriptorEventData.EndTimestamp)
-	fmt.Printf("\tEndTimestamp: %v\n", physical)
-	dataTypeName, ok := schemapb.DataType_name[int32(r.descriptorEvent.descriptorEventData.PayloadDataType)]
-	if !ok {
-		return fmt.Errorf("undefine data type %d", r.descriptorEvent.descriptorEventData.PayloadDataType)
+	err = printDescriptorEvent(r.descriptorEvent)
+	if err != nil {
+		return err
 	}
-	fmt.Printf("\tPayloadDataType: %v\n", dataTypeName)
-	fmt.Printf("\tPostHeaderLengths: %v\n", r.descriptorEvent.descriptorEventData.PostHeaderLengths)
 	eventNum := 0
 	for {
 		event, err := r.NextEventReader()
@@ -100,121 +83,157 @@ func printBinlogFile(filename string) error {
 		if event == nil {
 			break
 		}
-		fmt.Printf("event %d header:\n", eventNum)
-		physical, _ = tsoutil.ParseTS(event.eventHeader.Timestamp)
-		fmt.Printf("\tTimestamp: %v\n", physical)
-		fmt.Printf("\tTypeCode: %s\n", event.eventHeader.TypeCode.String())
-		fmt.Printf("\tEventLength: %d\n", event.eventHeader.EventLength)
-		fmt.Printf("\tNextPosition: %d\n", event.eventHeader.NextPosition)
-		switch event.eventHeader.TypeCode {
-		case InsertEventType:
-			evd, ok := event.eventData.(*insertEventData)
-			if !ok {
-				return errors.New("incorrect event data type")
-			}
-			fmt.Printf("event %d insert event:\n", eventNum)
-			physical, _ = tsoutil.ParseTS(evd.StartTimestamp)
-			fmt.Printf("\tStartTimestamp: %v\n", physical)
-			physical, _ = tsoutil.ParseTS(evd.EndTimestamp)
-			fmt.Printf("\tEndTimestamp: %v\n", physical)
-			if err := printPayloadValues(r.descriptorEvent.descriptorEventData.PayloadDataType, event.PayloadReaderInterface); err != nil {
-				return err
-			}
-		case DeleteEventType:
-			evd, ok := event.eventData.(*deleteEventData)
-			if !ok {
-				return errors.New("incorrect event data type")
-			}
-			fmt.Printf("event %d delete event:\n", eventNum)
-			physical, _ = tsoutil.ParseTS(evd.StartTimestamp)
-			fmt.Printf("\tStartTimestamp: %v\n", physical)
-			physical, _ = tsoutil.ParseTS(evd.EndTimestamp)
-			fmt.Printf("\tEndTimestamp: %v\n", physical)
-			if err := printPayloadValues(r.descriptorEvent.descriptorEventData.PayloadDataType, event.PayloadReaderInterface); err != nil {
-				return err
-			}
-		case CreateCollectionEventType:
-			evd, ok := event.eventData.(*createCollectionEventData)
-			if !ok {
-				return errors.New("incorrect event data type")
-			}
-			fmt.Printf("event %d create collection event:\n", eventNum)
-			physical, _ = tsoutil.ParseTS(evd.StartTimestamp)
-			fmt.Printf("\tStartTimestamp: %v\n", physical)
-			physical, _ = tsoutil.ParseTS(evd.EndTimestamp)
-			fmt.Printf("\tEndTimestamp: %v\n", physical)
-			if err := printDDLPayloadValues(event.eventHeader.TypeCode, r.descriptorEvent.descriptorEventData.PayloadDataType, event.PayloadReaderInterface); err != nil {
-				return err
-			}
-		case DropCollectionEventType:
-			evd, ok := event.eventData.(*dropCollectionEventData)
-			if !ok {
-				return errors.New("incorrect event data type")
-			}
-			fmt.Printf("event %d drop collection event:\n", eventNum)
-			physical, _ = tsoutil.ParseTS(evd.StartTimestamp)
-			fmt.Printf("\tStartTimestamp: %v\n", physical)
-			physical, _ = tsoutil.ParseTS(evd.EndTimestamp)
-			fmt.Printf("\tEndTimestamp: %v\n", physical)
-			if err := printDDLPayloadValues(event.eventHeader.TypeCode, r.descriptorEvent.descriptorEventData.PayloadDataType, event.PayloadReaderInterface); err != nil {
-				return err
-			}
-		case CreatePartitionEventType:
-			evd, ok := event.eventData.(*createPartitionEventData)
-			if !ok {
-				return errors.New("incorrect event data type")
-			}
-			fmt.Printf("event %d create partition event:\n", eventNum)
-			physical, _ = tsoutil.ParseTS(evd.StartTimestamp)
-			fmt.Printf("\tStartTimestamp: %v\n", physical)
-			physical, _ = tsoutil.ParseTS(evd.EndTimestamp)
-			fmt.Printf("\tEndTimestamp: %v\n", physical)
-			if err := printDDLPayloadValues(event.eventHeader.TypeCode, r.descriptorEvent.descriptorEventData.PayloadDataType, event.PayloadReaderInterface); err != nil {
-				return err
-			}
-		case DropPartitionEventType:
-			evd, ok := event.eventData.(*dropPartitionEventData)
-			if !ok {
-				return errors.New("incorrect event data type")
-			}
-			fmt.Printf("event %d drop partition event:\n", eventNum)
-			physical, _ = tsoutil.ParseTS(evd.StartTimestamp)
-			fmt.Printf("\tStartTimestamp: %v\n", physical)
-			physical, _ = tsoutil.ParseTS(evd.EndTimestamp)
-			fmt.Printf("\tEndTimestamp: %v\n", physical)
-			if err := printDDLPayloadValues(event.eventHeader.TypeCode, r.descriptorEvent.descriptorEventData.PayloadDataType, event.PayloadReaderInterface); err != nil {
-				return err
-			}
-		case IndexFileEventType:
-			desc := r.descriptorEvent
-			extraBytes := desc.ExtraBytes
-			extra := make(map[string]interface{})
-			err = json.Unmarshal(extraBytes, &extra)
-			if err != nil {
-				return fmt.Errorf("failed to unmarshal extra: %s", err.Error())
-			}
-			fmt.Printf("indexBuildID: %v\n", extra["indexBuildID"])
-			fmt.Printf("indexName: %v\n", extra["indexName"])
-			fmt.Printf("indexID: %v\n", extra["indexID"])
-			evd, ok := event.eventData.(*indexFileEventData)
-			if !ok {
-				return errors.New("incorrect event data type")
-			}
-			fmt.Printf("index file event num: %d\n", eventNum)
-			physical, _ = tsoutil.ParseTS(evd.StartTimestamp)
-			fmt.Printf("\tStartTimestamp: %v\n", physical)
-			physical, _ = tsoutil.ParseTS(evd.EndTimestamp)
-			fmt.Printf("\tEndTimestamp: %v\n", physical)
-			key := fmt.Sprintf("%v", extra["key"])
-			if err := printIndexFilePayloadValues(event.PayloadReaderInterface, key); err != nil {
-				return err
-			}
-		default:
-			return fmt.Errorf("undefined event typd %d", event.eventHeader.TypeCode)
+
+		err = printEvent(r.descriptorEvent, eventNum, event)
+		if err != nil {
+			return err
 		}
 		eventNum++
 	}
 
+	return nil
+}
+
+func printDescriptorEvent(event descriptorEvent) error {
+	fmt.Println("descriptor event header:")
+	physical, _ := tsoutil.ParseTS(event.descriptorEventHeader.Timestamp)
+	fmt.Printf("\tTimestamp: %v\n", physical)
+	fmt.Printf("\tTypeCode: %s\n", event.descriptorEventHeader.TypeCode.String())
+	fmt.Printf("\tEventLength: %d\n", event.descriptorEventHeader.EventLength)
+	fmt.Printf("\tNextPosition :%d\n", event.descriptorEventHeader.NextPosition)
+
+	fmt.Println("descriptor event data:")
+	fmt.Printf("\tCollectionID: %d\n", event.descriptorEventData.CollectionID)
+	fmt.Printf("\tPartitionID: %d\n", event.descriptorEventData.PartitionID)
+	fmt.Printf("\tSegmentID: %d\n", event.descriptorEventData.SegmentID)
+	fmt.Printf("\tFieldID: %d\n", event.descriptorEventData.FieldID)
+	physical, _ = tsoutil.ParseTS(event.descriptorEventData.StartTimestamp)
+	fmt.Printf("\tStartTimestamp: %v\n", physical)
+	physical, _ = tsoutil.ParseTS(event.descriptorEventData.EndTimestamp)
+	fmt.Printf("\tEndTimestamp: %v\n", physical)
+	dataTypeName, ok := schemapb.DataType_name[int32(event.descriptorEventData.PayloadDataType)]
+	if !ok {
+		return fmt.Errorf("undefine data type %d", event.descriptorEventData.PayloadDataType)
+	}
+	fmt.Printf("\tPayloadDataType: %v\n", dataTypeName)
+	fmt.Printf("\tPostHeaderLengths: %v\n", event.descriptorEventData.PostHeaderLengths)
+
+	return nil
+}
+
+func printEvent(descriptor descriptorEvent, n int, event *EventReader) error {
+	fmt.Printf("event %d header:\n", n)
+	physical, _ := tsoutil.ParseTS(event.eventHeader.Timestamp)
+	fmt.Printf("\tTimestamp: %v\n", physical)
+	fmt.Printf("\tTypeCode: %s\n", event.eventHeader.TypeCode.String())
+	fmt.Printf("\tEventLength: %d\n", event.eventHeader.EventLength)
+	fmt.Printf("\tNextPosition: %d\n", event.eventHeader.NextPosition)
+	switch event.eventHeader.TypeCode {
+	case InsertEventType:
+		evd, ok := event.eventData.(*insertEventData)
+		if !ok {
+			return errors.New("incorrect event data type")
+		}
+		fmt.Printf("event %d insert event:\n", n)
+		physical, _ = tsoutil.ParseTS(evd.StartTimestamp)
+		fmt.Printf("\tStartTimestamp: %v\n", physical)
+		physical, _ = tsoutil.ParseTS(evd.EndTimestamp)
+		fmt.Printf("\tEndTimestamp: %v\n", physical)
+		if err := printPayloadValues(descriptor.descriptorEventData.PayloadDataType, event.PayloadReaderInterface); err != nil {
+			return err
+		}
+	case DeleteEventType:
+		evd, ok := event.eventData.(*deleteEventData)
+		if !ok {
+			return errors.New("incorrect event data type")
+		}
+		fmt.Printf("event %d delete event:\n", n)
+		physical, _ = tsoutil.ParseTS(evd.StartTimestamp)
+		fmt.Printf("\tStartTimestamp: %v\n", physical)
+		physical, _ = tsoutil.ParseTS(evd.EndTimestamp)
+		fmt.Printf("\tEndTimestamp: %v\n", physical)
+		if err := printPayloadValues(descriptor.descriptorEventData.PayloadDataType, event.PayloadReaderInterface); err != nil {
+			return err
+		}
+	case CreateCollectionEventType:
+		evd, ok := event.eventData.(*createCollectionEventData)
+		if !ok {
+			return errors.New("incorrect event data type")
+		}
+		fmt.Printf("event %d create collection event:\n", n)
+		physical, _ = tsoutil.ParseTS(evd.StartTimestamp)
+		fmt.Printf("\tStartTimestamp: %v\n", physical)
+		physical, _ = tsoutil.ParseTS(evd.EndTimestamp)
+		fmt.Printf("\tEndTimestamp: %v\n", physical)
+		if err := printDDLPayloadValues(event.eventHeader.TypeCode, descriptor.descriptorEventData.PayloadDataType, event.PayloadReaderInterface); err != nil {
+			return err
+		}
+	case DropCollectionEventType:
+		evd, ok := event.eventData.(*dropCollectionEventData)
+		if !ok {
+			return errors.New("incorrect event data type")
+		}
+		fmt.Printf("event %d drop collection event:\n", n)
+		physical, _ = tsoutil.ParseTS(evd.StartTimestamp)
+		fmt.Printf("\tStartTimestamp: %v\n", physical)
+		physical, _ = tsoutil.ParseTS(evd.EndTimestamp)
+		fmt.Printf("\tEndTimestamp: %v\n", physical)
+		if err := printDDLPayloadValues(event.eventHeader.TypeCode, descriptor.descriptorEventData.PayloadDataType, event.PayloadReaderInterface); err != nil {
+			return err
+		}
+	case CreatePartitionEventType:
+		evd, ok := event.eventData.(*createPartitionEventData)
+		if !ok {
+			return errors.New("incorrect event data type")
+		}
+		fmt.Printf("event %d create partition event:\n", n)
+		physical, _ = tsoutil.ParseTS(evd.StartTimestamp)
+		fmt.Printf("\tStartTimestamp: %v\n", physical)
+		physical, _ = tsoutil.ParseTS(evd.EndTimestamp)
+		fmt.Printf("\tEndTimestamp: %v\n", physical)
+		if err := printDDLPayloadValues(event.eventHeader.TypeCode, descriptor.descriptorEventData.PayloadDataType, event.PayloadReaderInterface); err != nil {
+			return err
+		}
+	case DropPartitionEventType:
+		evd, ok := event.eventData.(*dropPartitionEventData)
+		if !ok {
+			return errors.New("incorrect event data type")
+		}
+		fmt.Printf("event %d drop partition event:\n", n)
+		physical, _ = tsoutil.ParseTS(evd.StartTimestamp)
+		fmt.Printf("\tStartTimestamp: %v\n", physical)
+		physical, _ = tsoutil.ParseTS(evd.EndTimestamp)
+		fmt.Printf("\tEndTimestamp: %v\n", physical)
+		if err := printDDLPayloadValues(event.eventHeader.TypeCode, descriptor.descriptorEventData.PayloadDataType, event.PayloadReaderInterface); err != nil {
+			return err
+		}
+	case IndexFileEventType:
+		desc := descriptor
+		extraBytes := desc.ExtraBytes
+		extra := make(map[string]interface{})
+		err := json.Unmarshal(extraBytes, &extra)
+		if err != nil {
+			return fmt.Errorf("failed to unmarshal extra: %s", err.Error())
+		}
+		fmt.Printf("indexBuildID: %v\n", extra["indexBuildID"])
+		fmt.Printf("indexName: %v\n", extra["indexName"])
+		fmt.Printf("indexID: %v\n", extra["indexID"])
+		evd, ok := event.eventData.(*indexFileEventData)
+		if !ok {
+			return errors.New("incorrect event data type")
+		}
+		fmt.Printf("index file event num: %d\n", n)
+		physical, _ = tsoutil.ParseTS(evd.StartTimestamp)
+		fmt.Printf("\tStartTimestamp: %v\n", physical)
+		physical, _ = tsoutil.ParseTS(evd.EndTimestamp)
+		fmt.Printf("\tEndTimestamp: %v\n", physical)
+		key := fmt.Sprintf("%v", extra["key"])
+		if err := printIndexFilePayloadValues(event.PayloadReaderInterface, key); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("undefined event typd %d", event.eventHeader.TypeCode)
+	}
 	return nil
 }
 
