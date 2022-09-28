@@ -17,15 +17,11 @@
 package querynode
 
 import (
-	"runtime"
 	"testing"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/util/concurrency"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestMetaReplica_collection(t *testing.T) {
@@ -228,9 +224,6 @@ func TestMetaReplica_segment(t *testing.T) {
 		assert.NoError(t, err)
 		defer replica.freeAll()
 
-		pool, err := concurrency.NewPool(runtime.GOMAXPROCS(0))
-		require.NoError(t, err)
-
 		schema := genTestCollectionSchema()
 		collection := replica.addCollection(defaultCollectionID, schema)
 		replica.addPartition(defaultCollectionID, defaultPartitionID)
@@ -250,12 +243,12 @@ func TestMetaReplica_segment(t *testing.T) {
 			},
 		}
 
-		segment1, err := newSegment(collection, UniqueID(1), defaultPartitionID, defaultCollectionID, "", segmentTypeGrowing, pool)
+		segment1, err := newSegment(collection, UniqueID(1), defaultPartitionID, defaultCollectionID, "", segmentTypeGrowing)
 		assert.NoError(t, err)
 		err = replica.setSegment(segment1)
 		assert.NoError(t, err)
 
-		segment2, err := newSegment(collection, UniqueID(2), defaultPartitionID, defaultCollectionID, "", segmentTypeSealed, pool)
+		segment2, err := newSegment(collection, UniqueID(2), defaultPartitionID, defaultCollectionID, "", segmentTypeSealed)
 		assert.NoError(t, err)
 		segment2.setIndexedFieldInfo(fieldID, indexInfo)
 		err = replica.setSegment(segment2)
@@ -277,30 +270,27 @@ func TestMetaReplica_segment(t *testing.T) {
 		assert.NoError(t, err)
 		defer replica.freeAll()
 
-		pool, err := concurrency.NewPool(runtime.GOMAXPROCS(0))
-		require.NoError(t, err)
-
 		schema := genTestCollectionSchema()
 		collection := replica.addCollection(defaultCollectionID, schema)
 		replica.addPartition(defaultCollectionID, defaultPartitionID)
 		replica.addPartition(defaultCollectionID, defaultPartitionID+1)
 
-		segment1, err := newSegment(collection, UniqueID(1), defaultPartitionID, defaultCollectionID, "channel1", segmentTypeGrowing, pool)
+		segment1, err := newSegment(collection, UniqueID(1), defaultPartitionID, defaultCollectionID, "channel1", segmentTypeGrowing)
 		assert.NoError(t, err)
 		err = replica.setSegment(segment1)
 		assert.NoError(t, err)
 
-		segment2, err := newSegment(collection, UniqueID(2), defaultPartitionID+1, defaultCollectionID, "channel2", segmentTypeGrowing, pool)
+		segment2, err := newSegment(collection, UniqueID(2), defaultPartitionID+1, defaultCollectionID, "channel2", segmentTypeGrowing)
 		assert.NoError(t, err)
 		err = replica.setSegment(segment2)
 		assert.NoError(t, err)
 
-		segment3, err := newSegment(collection, UniqueID(3), defaultPartitionID+1, defaultCollectionID, "channel2", segmentTypeGrowing, pool)
+		segment3, err := newSegment(collection, UniqueID(3), defaultPartitionID+1, defaultCollectionID, "channel2", segmentTypeGrowing)
 		assert.NoError(t, err)
 		err = replica.setSegment(segment3)
 		assert.NoError(t, err)
 
-		segment4, err := newSegment(collection, UniqueID(4), defaultPartitionID, defaultCollectionID, "channel1", segmentTypeSealed, pool)
+		segment4, err := newSegment(collection, UniqueID(4), defaultPartitionID, defaultCollectionID, "channel1", segmentTypeSealed)
 		assert.NoError(t, err)
 		err = replica.setSegment(segment4)
 		assert.NoError(t, err)
