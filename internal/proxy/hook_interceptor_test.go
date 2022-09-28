@@ -36,19 +36,23 @@ type req struct {
 	method string
 }
 
+type BeforeMockCtxKey int
+
 type beforeMock struct {
 	defaultHook
-	method string
-	err    error
+	method   string
+	ctxKey   BeforeMockCtxKey
+	ctxValue string
+	err      error
 }
 
-func (b beforeMock) Before(ctx context.Context, r interface{}, fullMethod string) error {
+func (b beforeMock) Before(ctx context.Context, r interface{}, fullMethod string) (context.Context, error) {
 	re, ok := r.(*req)
 	if !ok {
-		return errors.New("r is invalid type")
+		return ctx, errors.New("r is invalid type")
 	}
 	re.method = b.method
-	return b.err
+	return context.WithValue(ctx, b.ctxKey, b.ctxValue), b.err
 }
 
 type resp struct {
@@ -80,7 +84,7 @@ func TestHookInterceptor(t *testing.T) {
 		mockHoo     = mockHook{mockRes: "mock", mockErr: errors.New("mock")}
 		r           = &req{method: "req"}
 		re          = &resp{method: "resp"}
-		beforeHoo   = beforeMock{method: "before", err: errors.New("before")}
+		beforeHoo   = beforeMock{method: "before", ctxKey: 100, ctxValue: "hook", err: errors.New("before")}
 		afterHoo    = afterMock{method: "after", err: errors.New("after")}
 
 		res interface{}
@@ -96,6 +100,15 @@ func TestHookInterceptor(t *testing.T) {
 
 	hoo = beforeHoo
 	_, err = interceptor(ctx, r, info, func(ctx context.Context, req interface{}) (interface{}, error) {
+		return nil, nil
+	})
+	assert.Equal(t, r.method, beforeHoo.method)
+	assert.Equal(t, err, beforeHoo.err)
+
+	beforeHoo.err = nil
+	hoo = beforeHoo
+	_, err = interceptor(ctx, r, info, func(ctx context.Context, req interface{}) (interface{}, error) {
+		assert.Equal(t, beforeHoo.ctxValue, ctx.Value(beforeHoo.ctxKey))
 		return nil, nil
 	})
 	assert.Equal(t, r.method, beforeHoo.method)

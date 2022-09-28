@@ -22,8 +22,8 @@ func (d defaultHook) Mock(ctx context.Context, req interface{}, fullMethod strin
 	return false, nil, nil
 }
 
-func (d defaultHook) Before(ctx context.Context, req interface{}, fullMethod string) error {
-	return nil
+func (d defaultHook) Before(ctx context.Context, req interface{}, fullMethod string) (context.Context, error) {
+	return ctx, nil
 }
 
 func (d defaultHook) After(ctx context.Context, result interface{}, err error, fullMethod string) error {
@@ -72,6 +72,7 @@ func UnaryServerHookInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		var (
 			fullMethod = info.FullMethod
+			newCtx     context.Context
 			isMock     bool
 			mockResp   interface{}
 			realResp   interface{}
@@ -83,11 +84,11 @@ func UnaryServerHookInterceptor() grpc.UnaryServerInterceptor {
 			return mockResp, err
 		}
 
-		if err = hoo.Before(ctx, req, fullMethod); err != nil {
+		if newCtx, err = hoo.Before(ctx, req, fullMethod); err != nil {
 			return nil, err
 		}
-		realResp, realErr = handler(ctx, req)
-		if err = hoo.After(ctx, realResp, realErr, fullMethod); err != nil {
+		realResp, realErr = handler(newCtx, req)
+		if err = hoo.After(newCtx, realResp, realErr, fullMethod); err != nil {
 			return nil, err
 		}
 		return realResp, realErr
