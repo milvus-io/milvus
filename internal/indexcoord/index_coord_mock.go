@@ -19,6 +19,7 @@ package indexcoord
 import (
 	"context"
 	"math/rand"
+	"sync"
 	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -348,6 +349,8 @@ func NewRootCoordMock() *RootCoordMock {
 type DataCoordMock struct {
 	types.DataCoord
 
+	FuncLock sync.RWMutex
+
 	CallInit               func() error
 	CallStart              func() error
 	CallGetComponentStates func(ctx context.Context) (*internalpb.ComponentStates, error)
@@ -370,7 +373,17 @@ func (dcm *DataCoordMock) GetComponentStates(ctx context.Context) (*internalpb.C
 	return dcm.CallGetComponentStates(ctx)
 }
 
+func (dcm *DataCoordMock) SetFunc(f func()) {
+	dcm.FuncLock.Lock()
+	defer dcm.FuncLock.Unlock()
+
+	f()
+}
+
 func (dcm *DataCoordMock) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
+	dcm.FuncLock.RLock()
+	defer dcm.FuncLock.RUnlock()
+
 	return dcm.CallGetSegmentInfo(ctx, req)
 }
 func (dcm *DataCoordMock) AcquireSegmentLock(ctx context.Context, req *datapb.AcquireSegmentLockRequest) (*commonpb.Status, error) {
