@@ -247,14 +247,15 @@ dataCoord:
 
   segment:
     maxSize: 512 # Maximum size of a segment in MB
-    diskSegmentMaxSize:  2048 # Maximun size of a segment in MB for collection which has Disk index
-    sealProportion: 0.25 # It's the minimum proportion for a segment which can be sealed
+    diskSegmentMaxSize:  2048 # The maximum size of a segment in MB for collection which has Disk index
+    sealProportion: 0.25 # The minimum proportion for a growing segment which can be sealed
+    smallProportion: 0.9 # The proportion for a sealed segment, which would not be compacted
     assignmentExpiration: 2000 # The time of the assignment expiration in ms
-    maxLife: 86400 # The max lifetime of segment in seconds, 24*60*60
-    # If a segment didn't accept dml records in `maxIdleTime` and the size of segment is greater than
+    maxLife: 3600 # The maximum lifetime of a growing segment in seconds, regardless of its size, 60*60
+    # If a growing segment didn't accept dml records in `maxIdleTime` and the size of segment is greater than
     # `minSizeFromIdleToSealed`, Milvus will automatically seal it.
-    maxIdleTime: 600 # The max idle time of segment in seconds, 10*60.
-    minSizeFromIdleToSealed: 16 # The min size in MB of segment which can be idle from sealed.
+    maxIdleTime: 300 # The maximum idle time of a growing segment in seconds, 5*60.
+    minSizeFromIdleToSealed: 16 # The minimum size in MB of segment which can be idle from sealed.
 
   compaction:
     enableAutoCompaction: true
@@ -340,7 +341,7 @@ common:
 
   defaultPartitionName: "_default"  # default partition name for a collection
   defaultIndexName: "_default_idx"  # default index name
-  retentionDuration: 86400 # time travel reserved time, insert/delete will not be cleaned in this period. 1 days in seconds
+  retentionDuration: 0 # time travel reserved time in seconds, insert/delete will not be cleaned in this period. Disabled if zero
   entityExpiration:  -1     # Entity expiration in seconds, CAUTION make sure entityExpiration >= retentionDuration and -1 means never expire
 
   gracefulTime: 5000 # milliseconds. it represents the interval (in ms) by which the request arrival time needs to be subtracted in the case of Bounded Consistency.
