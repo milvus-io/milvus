@@ -599,6 +599,13 @@ func (r *releaseCollectionTask) Execute(ctx context.Context) error {
 
 	collection, err := r.node.metaReplica.getCollectionByID(r.req.CollectionID)
 	if err != nil {
+		if errors.Is(err, ErrCollectionNotFound) {
+			log.Info("collection has been released",
+				zap.Int64("collectionID", r.req.GetCollectionID()),
+				zap.Error(err),
+			)
+			return nil
+		}
 		return err
 	}
 	// set release time

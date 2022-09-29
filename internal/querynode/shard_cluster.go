@@ -167,8 +167,8 @@ func NewShardCluster(collectionID int64, replicaID int64, vchannelName string,
 		replicaID:    replicaID,
 		vchannelName: vchannelName,
 
-		nodeDetector:    nodeDetector,
 		segmentDetector: segmentDetector,
+		nodeDetector:    nodeDetector,
 		nodeBuilder:     nodeBuilder,
 
 		nodes:         make(map[int64]*shardNode),
