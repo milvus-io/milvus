@@ -128,11 +128,15 @@ func (t *createCollectionTask) assignPartitionID() error {
 }
 
 func (t *createCollectionTask) assignChannels() error {
-	vchanNames := make([]string, t.Req.ShardsNum)
+	vchanNames := make([]string, t.Req.GetShardsNum())
 	//physical channel names
-	chanNames := t.core.chanTimeTick.getDmlChannelNames(int(t.Req.ShardsNum))
+	chanNames := t.core.chanTimeTick.getDmlChannelNames(int(t.Req.GetShardsNum()))
 
-	for i := int32(0); i < t.Req.ShardsNum; i++ {
+	if int32(len(chanNames)) < t.Req.GetShardsNum() {
+		return fmt.Errorf("no enough channels, want: %d, got: %d", t.Req.GetShardsNum(), len(chanNames))
+	}
+
+	for i := int32(0); i < t.Req.GetShardsNum(); i++ {
 		vchanNames[i] = fmt.Sprintf("%s_%dv%d", chanNames[i], t.collID, i)
 	}
 	t.channels = collectionChannels{

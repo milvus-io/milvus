@@ -180,11 +180,11 @@ func newDmlChannels(ctx context.Context, factory msgstream.Factory, chanNamePref
 }
 
 func (d *dmlChannels) getChannelNames(count int) []string {
+	d.mut.Lock()
+	defer d.mut.Unlock()
 	if count > len(d.channelsHeap) {
 		return nil
 	}
-	d.mut.Lock()
-	defer d.mut.Unlock()
 	// get next count items from heap
 	items := make([]*dmlMsgStream, 0, count)
 	result := make([]string, 0, count)
