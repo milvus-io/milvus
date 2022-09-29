@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <boost/filesystem.hpp>
 #include <mutex>
+#include <map>
 
 #include "common/Consts.h"
 #include "log/Log.h"
@@ -137,20 +138,30 @@ DiskFileManagerImpl::CacheIndexToDisk(std::vector<std::string> remote_files) {
         auto prefix = slices.first;
         auto local_index_file_name = GetLocalIndexObjectPrefix() + prefix.substr(prefix.find_last_of("/") + 1);
         local_chunk_manager.CreateFile(local_index_file_name);
-        int64_t offset = 0;
+
+        std::vector<std::string> files;
+        std::map<std::string, uint64_t> file_to_size;
         for (auto iter = slices.second.begin(); iter != slices.second.end(); iter++) {
             auto origin_file = prefix + "_" + std::to_string(*iter);
+            files.emplace_back(origin_file);
             auto fileSize = remote_chunk_manager.Size(origin_file);
+            file_to_size[origin_file] = fileSize;
+        }
+
+        auto batch_size = milvus::config::KnowhereGetIndexSliceSize() << 20;
+#pragma omp parallel for
+        for (auto i = 0; i < files.size(); i++) {
+            auto origin_file = files[i];
+            auto fileSize = file_to_size[origin_file];
             auto buf = std::unique_ptr<uint8_t[]>(new uint8_t[fileSize]);
-            remote_chunk_manager.Read(origin_file, buf.get(), fileSize);
+            remote_chunk_manager.Read(files[i], buf.get(), fileSize);
 
             auto decoded_index_data = DeserializeFileData(buf.get(), fileSize);
             auto index_payload = decoded_index_data->GetPayload();
             auto index_size = index_payload->rows * sizeof(uint8_t);
 
-            local_chunk_manager.Write(local_index_file_name, offset, const_cast<uint8_t*>(index_payload->raw_data),
-                                      index_size);
-            offset += index_size;
+            local_chunk_manager.Write(local_index_file_name, i * batch_size,
+                                      const_cast<uint8_t*>(index_payload->raw_data), index_size);
         }
         local_paths_.emplace_back(local_index_file_name);
     }
