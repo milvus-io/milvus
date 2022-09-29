@@ -20,6 +20,7 @@ LIBRARY_PATH := $(PWD)/lib
 OS := $(shell uname -s)
 ARCH := $(shell arch)
 mode = Release
+disk_index = OFF
 
 all: build-cpp build-go
 
@@ -113,19 +114,19 @@ build-go: milvus
 
 build-cpp: 
 	@echo "Building Milvus cpp library ..."
-	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)")
+	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index})
 
 build-cpp-embd: 
 	@echo "Building **Embedded** Milvus cpp library ..."
-	@(env bash $(PWD)/scripts/core_build.sh -b -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)")
+	@(env bash $(PWD)/scripts/core_build.sh -b -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index})
 
 build-cpp-with-unittest: 
 	@echo "Building Milvus cpp library with unittest ..."
-	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -u -f "$(CUSTOM_THIRDPARTY_PATH)")
+	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -u -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index})
 
 build-cpp-with-coverage: 
 	@echo "Building Milvus cpp library with coverage and unittest ..."
-	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -u -c -f "$(CUSTOM_THIRDPARTY_PATH)")
+	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -u -c -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index})
 
 
 # Run the tests.
