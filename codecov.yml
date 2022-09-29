@@ -16,14 +16,10 @@ coverage:
       default:
         target: 77%
         threshold: 0% #Allow the coverage to drop by threshold%, and posting a success status.
-        branches:
-          - master
     patch:
       default:
         target: 80%   #target of patch diff
         threshold: 0%
-        branches:
-          - master
         if_ci_failed: error #success, failure, error, ignore
 
 comment:
