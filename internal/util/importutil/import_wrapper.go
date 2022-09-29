@@ -140,7 +140,8 @@ func (p *ImportWrapper) fileValidation(filePaths []string, rowBased bool) error 
 		}
 
 		// check file size
-		size, _ := p.chunkManager.Size(filePath)
+		// TODO add context
+		size, _ := p.chunkManager.Size(context.TODO(), filePath)
 		if size == 0 {
 			return errors.New("the file " + filePath + " is empty")
 		}
@@ -271,9 +272,12 @@ func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate b
 func (p *ImportWrapper) parseRowBasedJSON(filePath string, onlyValidate bool) error {
 	tr := timerecord.NewTimeRecorder("json row-based parser: " + filePath)
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	// for minio storage, chunkManager will download file into local memory
 	// for local storage, chunkManager open the file directly
-	file, err := p.chunkManager.Reader(filePath)
+	file, err := p.chunkManager.Reader(ctx, filePath)
 	if err != nil {
 		return err
 	}
@@ -317,9 +321,12 @@ func (p *ImportWrapper) parseColumnBasedJSON(filePath string, onlyValidate bool,
 	combineFunc func(fields map[storage.FieldID]storage.FieldData) error) error {
 	tr := timerecord.NewTimeRecorder("json column-based parser: " + filePath)
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	// for minio storage, chunkManager will download file into local memory
 	// for local storage, chunkManager open the file directly
-	file, err := p.chunkManager.Reader(filePath)
+	file, err := p.chunkManager.Reader(ctx, filePath)
 	if err != nil {
 		return err
 	}
@@ -353,11 +360,13 @@ func (p *ImportWrapper) parseColumnBasedNumpy(filePath string, onlyValidate bool
 	combineFunc func(fields map[storage.FieldID]storage.FieldData) error) error {
 	tr := timerecord.NewTimeRecorder("numpy parser: " + filePath)
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	fileName, _ := getFileNameAndExt(filePath)
 
 	// for minio storage, chunkManager will download file into local memory
 	// for local storage, chunkManager open the file directly
-	file, err := p.chunkManager.Reader(filePath)
+	file, err := p.chunkManager.Reader(ctx, filePath)
 	if err != nil {
 		return err
 	}

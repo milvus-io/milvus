@@ -494,7 +494,7 @@ func (c *mck) extractVchannelInfo(taskID int64, infos []*datapb.VchannelInfo) ([
 func (c *mck) extractFieldBinlog(taskID int64, fieldBinlogList []*datapb.FieldBinlog) {
 	for _, fieldBinlog := range fieldBinlogList {
 		for _, binlog := range fieldBinlog.Binlogs {
-			ok, _ := c.minioChunkManager.Exist(binlog.LogPath)
+			ok, _ := c.minioChunkManager.Exist(context.Background(), binlog.LogPath)
 			if !ok {
 				c.taskIDToInvalidPath[taskID] = append(c.taskIDToInvalidPath[taskID], binlog.LogPath)
 			}
@@ -505,7 +505,7 @@ func (c *mck) extractFieldBinlog(taskID int64, fieldBinlogList []*datapb.FieldBi
 func (c *mck) extractVecFieldIndexInfo(taskID int64, infos []*querypb.FieldIndexInfo) {
 	for _, info := range infos {
 		for _, indexPath := range info.IndexFilePaths {
-			ok, _ := c.minioChunkManager.Exist(indexPath)
+			ok, _ := c.minioChunkManager.Exist(context.Background(), indexPath)
 			if !ok {
 				c.taskIDToInvalidPath[taskID] = append(c.taskIDToInvalidPath[taskID], indexPath)
 			}

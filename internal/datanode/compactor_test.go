@@ -42,8 +42,10 @@ import (
 var compactTestDir = "/tmp/milvus_test/compact"
 
 func TestCompactionTaskInnerMethods(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	cm := storage.NewLocalChunkManager(storage.RootPath(compactTestDir))
-	defer cm.RemoveWithPrefix("")
+	defer cm.RemoveWithPrefix(ctx, "")
 	t.Run("Test getSegmentMeta", func(t *testing.T) {
 		rc := &RootCoordFactory{
 			pkType: schemapb.DataType_Int64,
@@ -534,8 +536,10 @@ func getInsertBlobs(segID UniqueID, iData *InsertData, meta *etcdpb.CollectionMe
 }
 
 func TestCompactorInterfaceMethods(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	cm := storage.NewLocalChunkManager(storage.RootPath(compactTestDir))
-	defer cm.RemoveWithPrefix("")
+	defer cm.RemoveWithPrefix(ctx, "")
 	notEmptySegmentBinlogs := []*datapb.CompactionSegmentBinlogs{{
 		SegmentID:           100,
 		FieldBinlogs:        nil,

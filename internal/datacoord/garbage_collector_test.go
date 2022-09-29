@@ -338,7 +338,7 @@ func initUtOSSEnv(bucket, root string, n int) (mcm *storage.MinioChunkManager, i
 	mcm = &storage.MinioChunkManager{
 		Client: cli,
 	}
-	mcm.SetVar(context.TODO(), bucket, root)
+	mcm.SetVar(bucket, root)
 	return mcm, inserts, stats, delta, other, nil
 }
 

@@ -82,7 +82,7 @@ func (loader *segmentLoader) getFieldType(segment *Segment, fieldID FieldID) (sc
 	return coll.getFieldType(fieldID)
 }
 
-func (loader *segmentLoader) LoadSegment(req *querypb.LoadSegmentsRequest, segmentType segmentType) error {
+func (loader *segmentLoader) LoadSegment(ctx context.Context, req *querypb.LoadSegmentsRequest, segmentType segmentType) error {
 	if req.Base == nil {
 		return fmt.Errorf("nil base message when load segment, collectionID = %d", req.CollectionID)
 	}
@@ -167,7 +167,7 @@ func (loader *segmentLoader) LoadSegment(req *querypb.LoadSegmentsRequest, segme
 		segment := newSegments[segmentID]
 
 		tr := timerecord.NewTimeRecorder("loadDurationPerSegment")
-		err := loader.loadFiles(segment, loadInfo)
+		err := loader.loadFiles(ctx, segment, loadInfo)
 		if err != nil {
 			log.Error("load segment failed when load data into memory",
 				zap.Int64("partitionID", partitionID),
@@ -211,7 +211,7 @@ func (loader *segmentLoader) LoadSegment(req *querypb.LoadSegmentsRequest, segme
 	return nil
 }
 
-func (loader *segmentLoader) loadFiles(segment *Segment,
+func (loader *segmentLoader) loadFiles(ctx context.Context, segment *Segment,
 	loadInfo *querypb.SegmentLoadInfo) error {
 	collectionID := loadInfo.CollectionID
 	partitionID := loadInfo.PartitionID
@@ -262,14 +262,14 @@ func (loader *segmentLoader) loadFiles(segment *Segment,
 			}
 		}
 
-		if err := loader.loadIndexedFieldData(segment, indexedFieldInfos); err != nil {
+		if err := loader.loadIndexedFieldData(ctx, segment, indexedFieldInfos); err != nil {
 			return err
 		}
-		if err := loader.loadSealedSegmentFields(segment, fieldBinlogs, loadInfo); err != nil {
+		if err := loader.loadSealedSegmentFields(ctx, segment, fieldBinlogs, loadInfo); err != nil {
 			return err
 		}
 	} else {
-		if err := loader.loadGrowingSegmentFields(segment, loadInfo.BinlogPaths); err != nil {
+		if err := loader.loadGrowingSegmentFields(ctx, segment, loadInfo.BinlogPaths); err != nil {
 			return err
 		}
 	}
@@ -279,14 +279,14 @@ func (loader *segmentLoader) loadFiles(segment *Segment,
 	} else {
 		log.Debug("loading bloom filter...", zap.Int64("segmentID", segmentID))
 		pkStatsBinlogs := loader.filterPKStatsBinlogs(loadInfo.Statslogs, pkFieldID)
-		err = loader.loadSegmentBloomFilter(segment, pkStatsBinlogs)
+		err = loader.loadSegmentBloomFilter(ctx, segment, pkStatsBinlogs)
 		if err != nil {
 			return err
 		}
 	}
 
 	log.Debug("loading delta...", zap.Int64("segmentID", segmentID))
-	err = loader.loadDeltaLogs(segment, loadInfo.Deltalogs)
+	err = loader.loadDeltaLogs(ctx, segment, loadInfo.Deltalogs)
 	return err
 }
 
@@ -302,7 +302,7 @@ func (loader *segmentLoader) filterPKStatsBinlogs(fieldBinlogs []*datapb.FieldBi
 	return result
 }
 
-func (loader *segmentLoader) loadGrowingSegmentFields(segment *Segment, fieldBinlogs []*datapb.FieldBinlog) error {
+func (loader *segmentLoader) loadGrowingSegmentFields(ctx context.Context, segment *Segment, fieldBinlogs []*datapb.FieldBinlog) error {
 	if len(fieldBinlogs) <= 0 {
 		return nil
 	}
@@ -313,7 +313,7 @@ func (loader *segmentLoader) loadGrowingSegmentFields(segment *Segment, fieldBin
 	// change all field bin log loading into concurrent
 	loadFutures := make([]*concurrency.Future, 0, len(fieldBinlogs))
 	for _, fieldBinlog := range fieldBinlogs {
-		futures := loader.loadFieldBinlogsAsync(fieldBinlog)
+		futures := loader.loadFieldBinlogsAsync(ctx, fieldBinlog)
 		loadFutures = append(loadFutures, futures...)
 	}
 
@@ -363,11 +363,11 @@ func (loader *segmentLoader) loadGrowingSegmentFields(segment *Segment, fieldBin
 	}
 }
 
-func (loader *segmentLoader) loadSealedSegmentFields(segment *Segment, fields []*datapb.FieldBinlog, loadInfo *querypb.SegmentLoadInfo) error {
+func (loader *segmentLoader) loadSealedSegmentFields(ctx context.Context, segment *Segment, fields []*datapb.FieldBinlog, loadInfo *querypb.SegmentLoadInfo) error {
 	// Load fields concurrently
 	futures := make([]*concurrency.Future, 0, len(fields))
 	for _, field := range fields {
-		future := loader.loadSealedFieldAsync(segment, field, loadInfo)
+		future := loader.loadSealedFieldAsync(ctx, segment, field, loadInfo)
 
 		futures = append(futures, future)
 	}
@@ -387,13 +387,13 @@ func (loader *segmentLoader) loadSealedSegmentFields(segment *Segment, fields []
 }
 
 // async load field of sealed segment
-func (loader *segmentLoader) loadSealedFieldAsync(segment *Segment, field *datapb.FieldBinlog, loadInfo *querypb.SegmentLoadInfo) *concurrency.Future {
+func (loader *segmentLoader) loadSealedFieldAsync(ctx context.Context, segment *Segment, field *datapb.FieldBinlog, loadInfo *querypb.SegmentLoadInfo) *concurrency.Future {
 	iCodec := storage.InsertCodec{}
 
 	// Avoid consuming too much memory if no CPU worker ready,
 	// acquire a CPU worker before load field binlogs
 	return loader.cpuPool.Submit(func() (interface{}, error) {
-		futures := loader.loadFieldBinlogsAsync(field)
+		futures := loader.loadFieldBinlogsAsync(ctx, field)
 
 		blobs := make([]*storage.Blob, len(futures))
 		for index, future := range futures {
@@ -419,12 +419,12 @@ func (loader *segmentLoader) loadSealedFieldAsync(segment *Segment, field *datap
 }
 
 // Load binlogs concurrently into memory from KV storage asyncly
-func (loader *segmentLoader) loadFieldBinlogsAsync(field *datapb.FieldBinlog) []*concurrency.Future {
+func (loader *segmentLoader) loadFieldBinlogsAsync(ctx context.Context, field *datapb.FieldBinlog) []*concurrency.Future {
 	futures := make([]*concurrency.Future, 0, len(field.Binlogs))
 	for i := range field.Binlogs {
 		path := field.Binlogs[i].GetLogPath()
 		future := loader.ioPool.Submit(func() (interface{}, error) {
-			binLog, err := loader.cm.Read(path)
+			binLog, err := loader.cm.Read(ctx, path)
 			if err != nil {
 				log.Warn("failed to load binlog", zap.String("filePath", path), zap.Error(err))
 				return nil, err
@@ -442,10 +442,10 @@ func (loader *segmentLoader) loadFieldBinlogsAsync(field *datapb.FieldBinlog) []
 	return futures
 }
 
-func (loader *segmentLoader) loadIndexedFieldData(segment *Segment, vecFieldInfos map[int64]*IndexedFieldInfo) error {
+func (loader *segmentLoader) loadIndexedFieldData(ctx context.Context, segment *Segment, vecFieldInfos map[int64]*IndexedFieldInfo) error {
 	for fieldID, fieldInfo := range vecFieldInfos {
 		indexInfo := fieldInfo.indexInfo
-		err := loader.loadFieldIndexData(segment, indexInfo)
+		err := loader.loadFieldIndexData(ctx, segment, indexInfo)
 		if err != nil {
 			return err
 		}
@@ -461,7 +461,7 @@ func (loader *segmentLoader) loadIndexedFieldData(segment *Segment, vecFieldInfo
 	return nil
 }
 
-func (loader *segmentLoader) loadFieldIndexData(segment *Segment, indexInfo *querypb.FieldIndexInfo) error {
+func (loader *segmentLoader) loadFieldIndexData(ctx context.Context, segment *Segment, indexInfo *querypb.FieldIndexInfo) error {
 	indexBuffer := make([][]byte, 0, len(indexInfo.IndexFilePaths))
 	filteredPaths := make([]string, 0, len(indexInfo.IndexFilePaths))
 	futures := make([]*concurrency.Future, 0, len(indexInfo.IndexFilePaths))
@@ -472,7 +472,7 @@ func (loader *segmentLoader) loadFieldIndexData(segment *Segment, indexInfo *que
 		if path.Base(indexPath) == storage.IndexParamsKey {
 			indexParamsFuture := loader.ioPool.Submit(func() (interface{}, error) {
 				log.Debug("load index params file", zap.String("path", indexPath))
-				return loader.cm.Read(indexPath)
+				return loader.cm.Read(ctx, indexPath)
 			})
 
 			indexParamsBlob, err := indexParamsFuture.Await()
@@ -514,7 +514,7 @@ func (loader *segmentLoader) loadFieldIndexData(segment *Segment, indexInfo *que
 		indexFuture := loader.cpuPool.Submit(func() (interface{}, error) {
 			indexBlobFuture := loader.ioPool.Submit(func() (interface{}, error) {
 				log.Debug("load index file", zap.String("path", indexPath))
-				data, err := loader.cm.Read(indexPath)
+				data, err := loader.cm.Read(ctx, indexPath)
 				if err != nil {
 					log.Warn("failed to load index file", zap.String("path", indexPath), zap.Error(err))
 					return nil, err
@@ -623,13 +623,13 @@ func (loader *segmentLoader) loadSealedSegments(segment *Segment, insertData *st
 	return nil
 }
 
-func (loader *segmentLoader) loadSegmentBloomFilter(segment *Segment, binlogPaths []string) error {
+func (loader *segmentLoader) loadSegmentBloomFilter(ctx context.Context, segment *Segment, binlogPaths []string) error {
 	if len(binlogPaths) == 0 {
 		log.Info("there are no stats logs saved with segment", zap.Any("segmentID", segment.segmentID))
 		return nil
 	}
 
-	values, err := loader.cm.MultiRead(binlogPaths)
+	values, err := loader.cm.MultiRead(ctx, binlogPaths)
 	if err != nil {
 		return err
 	}
@@ -662,12 +662,12 @@ func (loader *segmentLoader) loadSegmentBloomFilter(segment *Segment, binlogPath
 	return nil
 }
 
-func (loader *segmentLoader) loadDeltaLogs(segment *Segment, deltaLogs []*datapb.FieldBinlog) error {
+func (loader *segmentLoader) loadDeltaLogs(ctx context.Context, segment *Segment, deltaLogs []*datapb.FieldBinlog) error {
 	dCodec := storage.DeleteCodec{}
 	var blobs []*storage.Blob
 	for _, deltaLog := range deltaLogs {
 		for _, bLog := range deltaLog.GetBinlogs() {
-			value, err := loader.cm.Read(bLog.GetLogPath())
+			value, err := loader.cm.Read(ctx, bLog.GetLogPath())
 			if err != nil {
 				return err
 			}

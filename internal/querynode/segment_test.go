@@ -714,7 +714,7 @@ func TestSegment_fillIndexedFieldsData(t *testing.T) {
 			Offset:     []int64{0},
 			FieldsData: fieldData,
 		}
-		err = segment.fillIndexedFieldsData(defaultCollectionID, vecCM, result)
+		err = segment.fillIndexedFieldsData(ctx, defaultCollectionID, vecCM, result)
 		assert.Error(t, err)
 	})
 }
@@ -747,6 +747,8 @@ func Test_getFieldDataPath(t *testing.T) {
 }
 
 func Test_fillBinVecFieldData(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	var m storage.ChunkManager
 
 	m = newMockChunkManager(withDefaultReadAt())
@@ -758,13 +760,15 @@ func Test_fillBinVecFieldData(t *testing.T) {
 	offset := int64(100)
 	endian := common.Endian
 
-	assert.NoError(t, fillBinVecFieldData(m, path, f, index, offset, endian))
+	assert.NoError(t, fillBinVecFieldData(ctx, m, path, f, index, offset, endian))
 
 	m = newMockChunkManager(withReadAtErr())
-	assert.Error(t, fillBinVecFieldData(m, path, f, index, offset, endian))
+	assert.Error(t, fillBinVecFieldData(ctx, m, path, f, index, offset, endian))
 }
 
 func Test_fillFloatVecFieldData(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	var m storage.ChunkManager
 
 	m = newMockChunkManager(withDefaultReadAt())
@@ -776,16 +780,18 @@ func Test_fillFloatVecFieldData(t *testing.T) {
 	offset := int64(100)
 	endian := common.Endian
 
-	assert.NoError(t, fillFloatVecFieldData(m, path, f, index, offset, endian))
+	assert.NoError(t, fillFloatVecFieldData(ctx, m, path, f, index, offset, endian))
 
 	m = newMockChunkManager(withReadAtErr())
-	assert.Error(t, fillFloatVecFieldData(m, path, f, index, offset, endian))
+	assert.Error(t, fillFloatVecFieldData(ctx, m, path, f, index, offset, endian))
 
 	m = newMockChunkManager(withReadAtEmptyContent())
-	assert.Error(t, fillFloatVecFieldData(m, path, f, index, offset, endian))
+	assert.Error(t, fillFloatVecFieldData(ctx, m, path, f, index, offset, endian))
 }
 
 func Test_fillBoolFieldData(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	var m storage.ChunkManager
 
 	offset := int64(100)
@@ -797,16 +803,19 @@ func Test_fillBoolFieldData(t *testing.T) {
 	index := 0
 	endian := common.Endian
 
-	assert.NoError(t, fillBoolFieldData(m, path, f, index, offset, endian))
+	assert.NoError(t, fillBoolFieldData(ctx, m, path, f, index, offset, endian))
 
 	m = newMockChunkManager(withReadErr())
-	assert.Error(t, fillBoolFieldData(m, path, f, index, offset, endian))
+	assert.Error(t, fillBoolFieldData(ctx, m, path, f, index, offset, endian))
 
 	m = newMockChunkManager(withReadIllegalBool())
-	assert.Error(t, fillBoolFieldData(m, path, f, index, offset, endian))
+	assert.Error(t, fillBoolFieldData(ctx, m, path, f, index, offset, endian))
 }
 
 func Test_fillStringFieldData(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	var m storage.ChunkManager
 
 	offset := int64(100)
@@ -818,16 +827,19 @@ func Test_fillStringFieldData(t *testing.T) {
 	index := 0
 	endian := common.Endian
 
-	assert.NoError(t, fillStringFieldData(m, path, f, index, offset, endian))
+	assert.NoError(t, fillStringFieldData(ctx, m, path, f, index, offset, endian))
 
 	m = newMockChunkManager(withReadErr())
-	assert.Error(t, fillStringFieldData(m, path, f, index, offset, endian))
+	assert.Error(t, fillStringFieldData(ctx, m, path, f, index, offset, endian))
 
 	m = newMockChunkManager(withReadIllegalString())
-	assert.Error(t, fillStringFieldData(m, path, f, index, offset, endian))
+	assert.Error(t, fillStringFieldData(ctx, m, path, f, index, offset, endian))
 }
 
 func Test_fillInt8FieldData(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	var m storage.ChunkManager
 
 	offset := int64(100)
@@ -839,16 +851,19 @@ func Test_fillInt8FieldData(t *testing.T) {
 	index := 0
 	endian := common.Endian
 
-	assert.NoError(t, fillInt8FieldData(m, path, f, index, offset, endian))
+	assert.NoError(t, fillInt8FieldData(ctx, m, path, f, index, offset, endian))
 
 	m = newMockChunkManager(withReadAtErr())
-	assert.Error(t, fillInt8FieldData(m, path, f, index, offset, endian))
+	assert.Error(t, fillInt8FieldData(ctx, m, path, f, index, offset, endian))
 
 	m = newMockChunkManager(withReadAtEmptyContent())
-	assert.Error(t, fillInt8FieldData(m, path, f, index, offset, endian))
+	assert.Error(t, fillInt8FieldData(ctx, m, path, f, index, offset, endian))
 }
 
 func Test_fillInt16FieldData(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	var m storage.ChunkManager
 
 	offset := int64(100)
@@ -860,16 +875,18 @@ func Test_fillInt16FieldData(t *testing.T) {
 	index := 0
 	endian := common.Endian
 
-	assert.NoError(t, fillInt16FieldData(m, path, f, index, offset, endian))
+	assert.NoError(t, fillInt16FieldData(ctx, m, path, f, index, offset, endian))
 
 	m = newMockChunkManager(withReadAtErr())
-	assert.Error(t, fillInt16FieldData(m, path, f, index, offset, endian))
+	assert.Error(t, fillInt16FieldData(ctx, m, path, f, index, offset, endian))
 
 	m = newMockChunkManager(withReadAtEmptyContent())
-	assert.Error(t, fillInt16FieldData(m, path, f, index, offset, endian))
+	assert.Error(t, fillInt16FieldData(ctx, m, path, f, index, offset, endian))
 }
 
 func Test_fillInt32FieldData(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	var m storage.ChunkManager
 
 	offset := int64(100)
@@ -881,16 +898,18 @@ func Test_fillInt32FieldData(t *testing.T) {
 	index := 0
 	endian := common.Endian
 
-	assert.NoError(t, fillInt32FieldData(m, path, f, index, offset, endian))
+	assert.NoError(t, fillInt32FieldData(ctx, m, path, f, index, offset, endian))
 
 	m = newMockChunkManager(withReadAtErr())
-	assert.Error(t, fillInt32FieldData(m, path, f, index, offset, endian))
+	assert.Error(t, fillInt32FieldData(ctx, m, path, f, index, offset, endian))
 
 	m = newMockChunkManager(withReadAtEmptyContent())
-	assert.Error(t, fillInt32FieldData(m, path, f, index, offset, endian))
+	assert.Error(t, fillInt32FieldData(ctx, m, path, f, index, offset, endian))
 }
 
 func Test_fillInt64FieldData(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	var m storage.ChunkManager
 
 	offset := int64(100)
@@ -902,16 +921,18 @@ func Test_fillInt64FieldData(t *testing.T) {
 	index := 0
 	endian := common.Endian
 
-	assert.NoError(t, fillInt64FieldData(m, path, f, index, offset, endian))
+	assert.NoError(t, fillInt64FieldData(ctx, m, path, f, index, offset, endian))
 
 	m = newMockChunkManager(withReadAtErr())
-	assert.Error(t, fillInt64FieldData(m, path, f, index, offset, endian))
+	assert.Error(t, fillInt64FieldData(ctx, m, path, f, index, offset, endian))
 
 	m = newMockChunkManager(withReadAtEmptyContent())
-	assert.Error(t, fillInt64FieldData(m, path, f, index, offset, endian))
+	assert.Error(t, fillInt64FieldData(ctx, m, path, f, index, offset, endian))
 }
 
 func Test_fillFloatFieldData(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	var m storage.ChunkManager
 
 	offset := int64(100)
@@ -923,16 +944,18 @@ func Test_fillFloatFieldData(t *testing.T) {
 	index := 0
 	endian := common.Endian
 
-	assert.NoError(t, fillFloatFieldData(m, path, f, index, offset, endian))
+	assert.NoError(t, fillFloatFieldData(ctx, m, path, f, index, offset, endian))
 
 	m = newMockChunkManager(withReadAtErr())
-	assert.Error(t, fillFloatFieldData(m, path, f, index, offset, endian))
+	assert.Error(t, fillFloatFieldData(ctx, m, path, f, index, offset, endian))
 
 	m = newMockChunkManager(withReadAtEmptyContent())
-	assert.Error(t, fillFloatFieldData(m, path, f, index, offset, endian))
+	assert.Error(t, fillFloatFieldData(ctx, m, path, f, index, offset, endian))
 }
 
 func Test_fillDoubleFieldData(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	var m storage.ChunkManager
 
 	offset := int64(100)
@@ -944,13 +967,13 @@ func Test_fillDoubleFieldData(t *testing.T) {
 	index := 0
 	endian := common.Endian
 
-	assert.NoError(t, fillDoubleFieldData(m, path, f, index, offset, endian))
+	assert.NoError(t, fillDoubleFieldData(ctx, m, path, f, index, offset, endian))
 
 	m = newMockChunkManager(withReadAtErr())
-	assert.Error(t, fillDoubleFieldData(m, path, f, index, offset, endian))
+	assert.Error(t, fillDoubleFieldData(ctx, m, path, f, index, offset, endian))
 
 	m = newMockChunkManager(withReadAtEmptyContent())
-	assert.Error(t, fillDoubleFieldData(m, path, f, index, offset, endian))
+	assert.Error(t, fillDoubleFieldData(ctx, m, path, f, index, offset, endian))
 }
 
 func Test_fillFieldData(t *testing.T) {
@@ -986,10 +1009,10 @@ func Test_fillFieldData(t *testing.T) {
 			m = newMockChunkManager(withDefaultReadAt())
 		}
 
-		assert.NoError(t, fillFieldData(m, path, f, index, offset, endian))
+		assert.NoError(t, fillFieldData(context.Background(), m, path, f, index, offset, endian))
 	}
 
-	assert.Error(t, fillFieldData(m, path, &schemapb.FieldData{Type: schemapb.DataType_None}, index, offset, endian))
+	assert.Error(t, fillFieldData(context.Background(), m, path, &schemapb.FieldData{Type: schemapb.DataType_None}, index, offset, endian))
 }
 
 func TestUpdateBloomFilter(t *testing.T) {

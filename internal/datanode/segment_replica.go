@@ -377,7 +377,7 @@ func (replica *SegmentReplica) addSegment(req addSegmentReq) error {
 		}
 	}
 	// Set up bloom filter.
-	err := replica.initPKBloomFilter(seg, req.statsBinLogs, req.recoverTs)
+	err := replica.initPKBloomFilter(context.TODO(), seg, req.statsBinLogs, req.recoverTs)
 	if err != nil {
 		log.Error("failed to init bloom filter",
 			zap.Int64("segment ID", req.segID),
@@ -451,7 +451,7 @@ func (replica *SegmentReplica) filterSegments(channelName string, partitionID Un
 	return results
 }
 
-func (replica *SegmentReplica) initPKBloomFilter(s *Segment, statsBinlogs []*datapb.FieldBinlog, ts Timestamp) error {
+func (replica *SegmentReplica) initPKBloomFilter(ctx context.Context, s *Segment, statsBinlogs []*datapb.FieldBinlog, ts Timestamp) error {
 	log := log.With(zap.Int64("segmentID", s.segmentID))
 	log.Info("begin to init pk bloom filter", zap.Int("stats bin logs", len(statsBinlogs)))
 	schema, err := replica.getCollectionSchema(s.collectionID, ts)
@@ -486,7 +486,7 @@ func (replica *SegmentReplica) initPKBloomFilter(s *Segment, statsBinlogs []*dat
 		return replica.initSegmentBloomFilter(s)
 	}
 
-	values, err := replica.chunkManager.MultiRead(bloomFilterFiles)
+	values, err := replica.chunkManager.MultiRead(ctx, bloomFilterFiles)
 	if err != nil {
 		log.Warn("failed to load bloom filter files", zap.Error(err))
 		return err

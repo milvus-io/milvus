@@ -17,6 +17,7 @@
 package storage
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -58,8 +59,8 @@ func (lcm *LocalChunkManager) RootPath() string {
 }
 
 // Path returns the path of local data if exists.
-func (lcm *LocalChunkManager) Path(filePath string) (string, error) {
-	exist, err := lcm.Exist(filePath)
+func (lcm *LocalChunkManager) Path(ctx context.Context, filePath string) (string, error) {
+	exist, err := lcm.Exist(ctx, filePath)
 	if err != nil {
 		return "", err
 	}
@@ -71,8 +72,8 @@ func (lcm *LocalChunkManager) Path(filePath string) (string, error) {
 	return absPath, nil
 }
 
-func (lcm *LocalChunkManager) Reader(filePath string) (FileReader, error) {
-	exist, err := lcm.Exist(filePath)
+func (lcm *LocalChunkManager) Reader(ctx context.Context, filePath string) (FileReader, error) {
+	exist, err := lcm.Exist(ctx, filePath)
 	if err != nil {
 		return nil, err
 	}
@@ -84,10 +85,10 @@ func (lcm *LocalChunkManager) Reader(filePath string) (FileReader, error) {
 }
 
 // Write writes the data to local storage.
-func (lcm *LocalChunkManager) Write(filePath string, content []byte) error {
+func (lcm *LocalChunkManager) Write(ctx context.Context, filePath string, content []byte) error {
 	absPath := path.Join(lcm.localPath, filePath)
 	dir := path.Dir(absPath)
-	exist, err := lcm.Exist(dir)
+	exist, err := lcm.Exist(ctx, dir)
 	if err != nil {
 		return err
 	}
@@ -101,10 +102,10 @@ func (lcm *LocalChunkManager) Write(filePath string, content []byte) error {
 }
 
 // MultiWrite writes the data to local storage.
-func (lcm *LocalChunkManager) MultiWrite(contents map[string][]byte) error {
+func (lcm *LocalChunkManager) MultiWrite(ctx context.Context, contents map[string][]byte) error {
 	var el errorutil.ErrorList
 	for filePath, content := range contents {
-		err := lcm.Write(filePath, content)
+		err := lcm.Write(ctx, filePath, content)
 		if err != nil {
 			el = append(el, err)
 		}
@@ -116,7 +117,7 @@ func (lcm *LocalChunkManager) MultiWrite(contents map[string][]byte) error {
 }
 
 // Exist checks whether chunk is saved to local storage.
-func (lcm *LocalChunkManager) Exist(filePath string) (bool, error) {
+func (lcm *LocalChunkManager) Exist(ctx context.Context, filePath string) (bool, error) {
 	absPath := path.Join(lcm.localPath, filePath)
 	_, err := os.Stat(absPath)
 	if err != nil {
@@ -129,8 +130,8 @@ func (lcm *LocalChunkManager) Exist(filePath string) (bool, error) {
 }
 
 // Read reads the local storage data if exists.
-func (lcm *LocalChunkManager) Read(filePath string) ([]byte, error) {
-	exist, err := lcm.Exist(filePath)
+func (lcm *LocalChunkManager) Read(ctx context.Context, filePath string) ([]byte, error) {
+	exist, err := lcm.Exist(ctx, filePath)
 	if err != nil {
 		return nil, err
 	}
@@ -151,11 +152,11 @@ func (lcm *LocalChunkManager) Read(filePath string) ([]byte, error) {
 }
 
 // MultiRead reads the local storage data if exists.
-func (lcm *LocalChunkManager) MultiRead(filePaths []string) ([][]byte, error) {
+func (lcm *LocalChunkManager) MultiRead(ctx context.Context, filePaths []string) ([][]byte, error) {
 	results := make([][]byte, len(filePaths))
 	var el errorutil.ErrorList
 	for i, filePath := range filePaths {
-		content, err := lcm.Read(filePath)
+		content, err := lcm.Read(ctx, filePath)
 		if err != nil {
 			el = append(el, err)
 		}
@@ -167,7 +168,7 @@ func (lcm *LocalChunkManager) MultiRead(filePaths []string) ([][]byte, error) {
 	return results, el
 }
 
-func (lcm *LocalChunkManager) ListWithPrefix(prefix string, recursive bool) ([]string, []time.Time, error) {
+func (lcm *LocalChunkManager) ListWithPrefix(ctx context.Context, prefix string, recursive bool) ([]string, []time.Time, error) {
 	var filePaths []string
 	var modTimes []time.Time
 	if recursive {
@@ -209,17 +210,17 @@ func (lcm *LocalChunkManager) ListWithPrefix(prefix string, recursive bool) ([]s
 	return filePaths, modTimes, nil
 }
 
-func (lcm *LocalChunkManager) ReadWithPrefix(prefix string) ([]string, [][]byte, error) {
-	filePaths, _, err := lcm.ListWithPrefix(prefix, true)
+func (lcm *LocalChunkManager) ReadWithPrefix(ctx context.Context, prefix string) ([]string, [][]byte, error) {
+	filePaths, _, err := lcm.ListWithPrefix(ctx, prefix, true)
 	if err != nil {
 		return nil, nil, err
 	}
-	result, err := lcm.MultiRead(filePaths)
+	result, err := lcm.MultiRead(ctx, filePaths)
 	return filePaths, result, err
 }
 
 // ReadAt reads specific position data of local storage if exists.
-func (lcm *LocalChunkManager) ReadAt(filePath string, off int64, length int64) ([]byte, error) {
+func (lcm *LocalChunkManager) ReadAt(ctx context.Context, filePath string, off int64, length int64) ([]byte, error) {
 	if off < 0 || length < 0 {
 		return nil, io.EOF
 	}
@@ -236,12 +237,12 @@ func (lcm *LocalChunkManager) ReadAt(filePath string, off int64, length int64) (
 	return res, nil
 }
 
-func (lcm *LocalChunkManager) Mmap(filePath string) (*mmap.ReaderAt, error) {
+func (lcm *LocalChunkManager) Mmap(ctx context.Context, filePath string) (*mmap.ReaderAt, error) {
 	absPath := path.Join(lcm.localPath, filePath)
 	return mmap.Open(path.Clean(absPath))
 }
 
-func (lcm *LocalChunkManager) Size(filePath string) (int64, error) {
+func (lcm *LocalChunkManager) Size(ctx context.Context, filePath string) (int64, error) {
 	absPath := path.Join(lcm.localPath, filePath)
 	fi, err := os.Stat(absPath)
 	if err != nil {
@@ -252,8 +253,8 @@ func (lcm *LocalChunkManager) Size(filePath string) (int64, error) {
 	return size, nil
 }
 
-func (lcm *LocalChunkManager) Remove(filePath string) error {
-	exist, err := lcm.Exist(filePath)
+func (lcm *LocalChunkManager) Remove(ctx context.Context, filePath string) error {
+	exist, err := lcm.Exist(ctx, filePath)
 	if err != nil {
 		return err
 	}
@@ -267,10 +268,10 @@ func (lcm *LocalChunkManager) Remove(filePath string) error {
 	return nil
 }
 
-func (lcm *LocalChunkManager) MultiRemove(filePaths []string) error {
+func (lcm *LocalChunkManager) MultiRemove(ctx context.Context, filePaths []string) error {
 	var el errorutil.ErrorList
 	for _, filePath := range filePaths {
-		err := lcm.Remove(filePath)
+		err := lcm.Remove(ctx, filePath)
 		if err != nil {
 			el = append(el, err)
 		}
@@ -281,12 +282,12 @@ func (lcm *LocalChunkManager) MultiRemove(filePaths []string) error {
 	return el
 }
 
-func (lcm *LocalChunkManager) RemoveWithPrefix(prefix string) error {
-	filePaths, _, err := lcm.ListWithPrefix(prefix, true)
+func (lcm *LocalChunkManager) RemoveWithPrefix(ctx context.Context, prefix string) error {
+	filePaths, _, err := lcm.ListWithPrefix(ctx, prefix, true)
 	if err != nil {
 		return err
 	}
-	return lcm.MultiRemove(filePaths)
+	return lcm.MultiRemove(ctx, filePaths)
 }
 
 func (lcm *LocalChunkManager) getModTime(filepath string) (time.Time, error) {

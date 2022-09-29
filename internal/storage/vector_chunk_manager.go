@@ -17,6 +17,7 @@
 package storage
 
 import (
+	"context"
 	"errors"
 	"io"
 	"sync"
@@ -53,7 +54,7 @@ type VectorChunkManager struct {
 var _ ChunkManager = (*VectorChunkManager)(nil)
 
 // NewVectorChunkManager create a new vector manager object.
-func NewVectorChunkManager(cacheStorage ChunkManager, vectorStorage ChunkManager, schema *etcdpb.CollectionMeta, cacheLimit int64, cacheEnable bool) (*VectorChunkManager, error) {
+func NewVectorChunkManager(ctx context.Context, cacheStorage ChunkManager, vectorStorage ChunkManager, schema *etcdpb.CollectionMeta, cacheLimit int64, cacheEnable bool) (*VectorChunkManager, error) {
 	insertCodec := NewInsertCodec(schema)
 	vcm := &VectorChunkManager{
 		cacheStorage:  cacheStorage,
@@ -74,7 +75,7 @@ func NewVectorChunkManager(cacheStorage ChunkManager, vectorStorage ChunkManager
 			if err != nil {
 				log.Error("Unmmap file failed", zap.Any("file", k))
 			}
-			err = cacheStorage.Remove(k.(string))
+			err = cacheStorage.Remove(ctx, k.(string))
 			if err != nil {
 				log.Error("cache storage remove file failed", zap.Any("file", k))
 			}
@@ -123,31 +124,31 @@ func (vcm *VectorChunkManager) RootPath() string {
 
 // Path returns the path of vector data. If cached, return local path.
 // If not cached return remote path.
-func (vcm *VectorChunkManager) Path(filePath string) (string, error) {
-	return vcm.vectorStorage.Path(filePath)
+func (vcm *VectorChunkManager) Path(ctx context.Context, filePath string) (string, error) {
+	return vcm.vectorStorage.Path(ctx, filePath)
 }
 
-func (vcm *VectorChunkManager) Size(filePath string) (int64, error) {
-	return vcm.vectorStorage.Size(filePath)
+func (vcm *VectorChunkManager) Size(ctx context.Context, filePath string) (int64, error) {
+	return vcm.vectorStorage.Size(ctx, filePath)
 }
 
 // Write writes the vector data to local cache if cache enabled.
-func (vcm *VectorChunkManager) Write(filePath string, content []byte) error {
-	return vcm.vectorStorage.Write(filePath, content)
+func (vcm *VectorChunkManager) Write(ctx context.Context, filePath string, content []byte) error {
+	return vcm.vectorStorage.Write(ctx, filePath, content)
 }
 
 // MultiWrite writes the vector data to local cache if cache enabled.
-func (vcm *VectorChunkManager) MultiWrite(contents map[string][]byte) error {
-	return vcm.vectorStorage.MultiWrite(contents)
+func (vcm *VectorChunkManager) MultiWrite(ctx context.Context, contents map[string][]byte) error {
+	return vcm.vectorStorage.MultiWrite(ctx, contents)
 }
 
 // Exist checks whether vector data is saved to local cache.
-func (vcm *VectorChunkManager) Exist(filePath string) (bool, error) {
-	return vcm.vectorStorage.Exist(filePath)
+func (vcm *VectorChunkManager) Exist(ctx context.Context, filePath string) (bool, error) {
+	return vcm.vectorStorage.Exist(ctx, filePath)
 }
 
-func (vcm *VectorChunkManager) readWithCache(filePath string) ([]byte, error) {
-	contents, err := vcm.vectorStorage.Read(filePath)
+func (vcm *VectorChunkManager) readWithCache(ctx context.Context, filePath string) ([]byte, error) {
+	contents, err := vcm.vectorStorage.Read(ctx, filePath)
 	if err != nil {
 		return nil, err
 	}
@@ -155,15 +156,15 @@ func (vcm *VectorChunkManager) readWithCache(filePath string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = vcm.cacheStorage.Write(filePath, results)
+	err = vcm.cacheStorage.Write(ctx, filePath, results)
 	if err != nil {
 		return nil, err
 	}
-	r, err := vcm.cacheStorage.Mmap(filePath)
+	r, err := vcm.cacheStorage.Mmap(ctx, filePath)
 	if err != nil {
 		return nil, err
 	}
-	size, err := vcm.cacheStorage.Size(filePath)
+	size, err := vcm.cacheStorage.Size(ctx, filePath)
 	if err != nil {
 		return nil, err
 	}
@@ -187,7 +188,7 @@ func (vcm *VectorChunkManager) readWithCache(filePath string) ([]byte, error) {
 }
 
 // Read reads the pure vector data. If cached, it reads from local.
-func (vcm *VectorChunkManager) Read(filePath string) ([]byte, error) {
+func (vcm *VectorChunkManager) Read(ctx context.Context, filePath string) ([]byte, error) {
 	if vcm.cacheEnable {
 		if r, ok := vcm.cache.Get(filePath); ok {
 			at := r.(*mmap.ReaderAt)
@@ -198,9 +199,9 @@ func (vcm *VectorChunkManager) Read(filePath string) ([]byte, error) {
 			}
 			return p, nil
 		}
-		return vcm.readWithCache(filePath)
+		return vcm.readWithCache(ctx, filePath)
 	}
-	contents, err := vcm.vectorStorage.Read(filePath)
+	contents, err := vcm.vectorStorage.Read(ctx, filePath)
 	if err != nil {
 		return nil, err
 	}
@@ -208,10 +209,10 @@ func (vcm *VectorChunkManager) Read(filePath string) ([]byte, error) {
 }
 
 // MultiRead reads the pure vector data. If cached, it reads from local.
-func (vcm *VectorChunkManager) MultiRead(filePaths []string) ([][]byte, error) {
+func (vcm *VectorChunkManager) MultiRead(ctx context.Context, filePaths []string) ([][]byte, error) {
 	results := make([][]byte, len(filePaths))
 	for i, filePath := range filePaths {
-		content, err := vcm.Read(filePath)
+		content, err := vcm.Read(ctx, filePath)
 		if err != nil {
 			return nil, err
 		}
@@ -221,23 +222,23 @@ func (vcm *VectorChunkManager) MultiRead(filePaths []string) ([][]byte, error) {
 	return results, nil
 }
 
-func (vcm *VectorChunkManager) ReadWithPrefix(prefix string) ([]string, [][]byte, error) {
-	filePaths, _, err := vcm.ListWithPrefix(prefix, true)
+func (vcm *VectorChunkManager) ReadWithPrefix(ctx context.Context, prefix string) ([]string, [][]byte, error) {
+	filePaths, _, err := vcm.ListWithPrefix(ctx, prefix, true)
 	if err != nil {
 		return nil, nil, err
 	}
-	results, err := vcm.MultiRead(filePaths)
+	results, err := vcm.MultiRead(ctx, filePaths)
 	if err != nil {
 		return nil, nil, err
 	}
 	return filePaths, results, nil
 }
 
-func (vcm *VectorChunkManager) ListWithPrefix(prefix string, recursive bool) ([]string, []time.Time, error) {
-	return vcm.vectorStorage.ListWithPrefix(prefix, recursive)
+func (vcm *VectorChunkManager) ListWithPrefix(ctx context.Context, prefix string, recursive bool) ([]string, []time.Time, error) {
+	return vcm.vectorStorage.ListWithPrefix(ctx, prefix, recursive)
 }
 
-func (vcm *VectorChunkManager) Mmap(filePath string) (*mmap.ReaderAt, error) {
+func (vcm *VectorChunkManager) Mmap(ctx context.Context, filePath string) (*mmap.ReaderAt, error) {
 	if vcm.cacheEnable && vcm.cache != nil {
 		if r, ok := vcm.cache.Get(filePath); ok {
 			return r.(*mmap.ReaderAt), nil
@@ -246,12 +247,12 @@ func (vcm *VectorChunkManager) Mmap(filePath string) (*mmap.ReaderAt, error) {
 	return nil, errors.New("the file mmap has not been cached")
 }
 
-func (vcm *VectorChunkManager) Reader(filePath string) (FileReader, error) {
+func (vcm *VectorChunkManager) Reader(ctx context.Context, filePath string) (FileReader, error) {
 	return nil, errors.New("this method has not been implemented")
 }
 
 // ReadAt reads specific position data of vector. If cached, it reads from local.
-func (vcm *VectorChunkManager) ReadAt(filePath string, off int64, length int64) ([]byte, error) {
+func (vcm *VectorChunkManager) ReadAt(ctx context.Context, filePath string, off int64, length int64) ([]byte, error) {
 	if vcm.cacheEnable {
 		if r, ok := vcm.cache.Get(filePath); ok {
 			at := r.(*mmap.ReaderAt)
@@ -262,13 +263,13 @@ func (vcm *VectorChunkManager) ReadAt(filePath string, off int64, length int64) 
 			}
 			return p, nil
 		}
-		results, err := vcm.readWithCache(filePath)
+		results, err := vcm.readWithCache(ctx, filePath)
 		if err != nil {
 			return nil, err
 		}
 		return results[off : off+length], nil
 	}
-	contents, err := vcm.vectorStorage.Read(filePath)
+	contents, err := vcm.vectorStorage.Read(ctx, filePath)
 	if err != nil {
 		return nil, err
 	}
@@ -288,8 +289,8 @@ func (vcm *VectorChunkManager) ReadAt(filePath string, off int64, length int64) 
 	}
 	return p, nil
 }
-func (vcm *VectorChunkManager) Remove(filePath string) error {
-	err := vcm.vectorStorage.Remove(filePath)
+func (vcm *VectorChunkManager) Remove(ctx context.Context, filePath string) error {
+	err := vcm.vectorStorage.Remove(ctx, filePath)
 	if err != nil {
 		return err
 	}
@@ -299,8 +300,8 @@ func (vcm *VectorChunkManager) Remove(filePath string) error {
 	return nil
 }
 
-func (vcm *VectorChunkManager) MultiRemove(filePaths []string) error {
-	err := vcm.vectorStorage.MultiRemove(filePaths)
+func (vcm *VectorChunkManager) MultiRemove(ctx context.Context, filePaths []string) error {
+	err := vcm.vectorStorage.MultiRemove(ctx, filePaths)
 	if err != nil {
 		return err
 	}
@@ -312,13 +313,13 @@ func (vcm *VectorChunkManager) MultiRemove(filePaths []string) error {
 	return nil
 }
 
-func (vcm *VectorChunkManager) RemoveWithPrefix(prefix string) error {
-	err := vcm.vectorStorage.RemoveWithPrefix(prefix)
+func (vcm *VectorChunkManager) RemoveWithPrefix(ctx context.Context, prefix string) error {
+	err := vcm.vectorStorage.RemoveWithPrefix(ctx, prefix)
 	if err != nil {
 		return err
 	}
 	if vcm.cacheEnable {
-		filePaths, _, err := vcm.ListWithPrefix(prefix, true)
+		filePaths, _, err := vcm.ListWithPrefix(ctx, prefix, true)
 		if err != nil {
 			return err
 		}

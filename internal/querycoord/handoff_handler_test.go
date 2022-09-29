@@ -193,7 +193,7 @@ func TestHandoff(t *testing.T) {
 	dataCoord := newDataCoordMock(ctx)
 	rootCoord.enableIndex = true
 	cm := storage.NewLocalChunkManager(storage.RootPath(handoffHandlerTestDir))
-	defer cm.RemoveWithPrefix("")
+	defer cm.RemoveWithPrefix(ctx, "")
 	broker, err := newGlobalMetaBroker(ctx, rootCoord, dataCoord, indexCoord, cm)
 	assert.Nil(t, err)
 

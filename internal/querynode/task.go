@@ -241,7 +241,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 		zap.Int64("collectionID", collectionID),
 		zap.Int64s("unFlushedSegmentIDs", unFlushedSegmentIDs),
 	)
-	err = w.node.loader.LoadSegment(req, segmentTypeGrowing)
+	err = w.node.loader.LoadSegment(w.ctx, req, segmentTypeGrowing)
 	if err != nil {
 		log.Warn(err.Error())
 		return err
@@ -549,7 +549,7 @@ func (l *loadSegmentsTask) Execute(ctx context.Context) error {
 	segmentIDs := lo.Map(l.req.Infos, func(info *queryPb.SegmentLoadInfo, idx int) UniqueID { return info.SegmentID })
 	l.node.metaReplica.addSegmentsLoadingList(segmentIDs)
 	defer l.node.metaReplica.removeSegmentsLoadingList(segmentIDs)
-	err := l.node.loader.LoadSegment(l.req, segmentTypeSealed)
+	err := l.node.loader.LoadSegment(l.ctx, l.req, segmentTypeSealed)
 	if err != nil {
 		log.Warn("failed to load segment", zap.Int64("collectionID", l.req.CollectionID),
 			zap.Int64("replicaID", l.req.ReplicaID), zap.Error(err))

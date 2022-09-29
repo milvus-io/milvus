@@ -146,7 +146,7 @@ func TestDataSyncService_newDataSyncService(te *testing.T) {
 			"add un-flushed and flushed segments"},
 	}
 	cm := storage.NewLocalChunkManager(storage.RootPath(dataSyncServiceTestDir))
-	defer cm.RemoveWithPrefix("")
+	defer cm.RemoveWithPrefix(ctx, "")
 
 	for _, test := range tests {
 		te.Run(test.description, func(t *testing.T) {
@@ -209,7 +209,7 @@ func TestDataSyncService_Start(t *testing.T) {
 	flushChan := make(chan flushMsg, 100)
 	resendTTChan := make(chan resendTTMsg, 100)
 	cm := storage.NewLocalChunkManager(storage.RootPath(dataSyncServiceTestDir))
-	defer cm.RemoveWithPrefix("")
+	defer cm.RemoveWithPrefix(ctx, "")
 	replica, err := newReplica(context.Background(), mockRootCoord, cm, collectionID)
 	assert.Nil(t, err)
 
@@ -411,9 +411,11 @@ func TestGetSegmentInfos(t *testing.T) {
 }
 
 func TestClearGlobalFlushingCache(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	dataCoord := &DataCoordFactory{}
 	cm := storage.NewLocalChunkManager(storage.RootPath(dataSyncServiceTestDir))
-	defer cm.RemoveWithPrefix("")
+	defer cm.RemoveWithPrefix(ctx, "")
 	replica, err := newReplica(context.Background(), &RootCoordFactory{pkType: schemapb.DataType_Int64}, cm, 1)
 	require.NoError(t, err)
 

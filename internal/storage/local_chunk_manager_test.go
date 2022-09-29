@@ -17,6 +17,7 @@
 package storage
 
 import (
+	"context"
 	"fmt"
 	"path"
 	"testing"
@@ -26,6 +27,7 @@ import (
 )
 
 func TestLocalCM(t *testing.T) {
+	ctx := context.Background()
 	t.Run("test RootPath", func(t *testing.T) {
 		testCM := NewLocalChunkManager(RootPath(localPath))
 		assert.Equal(t, localPath, testCM.RootPath())
@@ -35,7 +37,7 @@ func TestLocalCM(t *testing.T) {
 		testLoadRoot := "test_load"
 
 		testCM := NewLocalChunkManager(RootPath(localPath))
-		defer testCM.RemoveWithPrefix(testLoadRoot)
+		defer testCM.RemoveWithPrefix(ctx, testLoadRoot)
 
 		prepareTests := []struct {
 			key   string
@@ -49,7 +51,7 @@ func TestLocalCM(t *testing.T) {
 		}
 
 		for _, test := range prepareTests {
-			err := testCM.Write(path.Join(testLoadRoot, test.key), test.value)
+			err := testCM.Write(ctx, path.Join(testLoadRoot, test.key), test.value)
 			require.NoError(t, err)
 		}
 
@@ -72,17 +74,17 @@ func TestLocalCM(t *testing.T) {
 		for _, test := range loadTests {
 			t.Run(test.description, func(t *testing.T) {
 				if test.isvalid {
-					got, err := testCM.Read(path.Join(testLoadRoot, test.loadKey))
+					got, err := testCM.Read(ctx, path.Join(testLoadRoot, test.loadKey))
 					assert.NoError(t, err)
 					assert.Equal(t, test.expectedValue, got)
 				} else {
 					if test.loadKey == "/" {
-						got, err := testCM.Read(test.loadKey)
+						got, err := testCM.Read(ctx, test.loadKey)
 						assert.Error(t, err)
 						assert.Empty(t, got)
 						return
 					}
-					got, err := testCM.Read(path.Join(testLoadRoot, test.loadKey))
+					got, err := testCM.Read(ctx, path.Join(testLoadRoot, test.loadKey))
 					assert.Error(t, err)
 					assert.Empty(t, got)
 				}
@@ -103,7 +105,7 @@ func TestLocalCM(t *testing.T) {
 
 		for _, test := range loadWithPrefixTests {
 			t.Run(test.description, func(t *testing.T) {
-				gotk, gotv, err := testCM.ReadWithPrefix(path.Join(testLoadRoot, test.prefix))
+				gotk, gotv, err := testCM.ReadWithPrefix(ctx, path.Join(testLoadRoot, test.prefix))
 				assert.Nil(t, err)
 				assert.Equal(t, len(test.expectedValue), len(gotk))
 				assert.Equal(t, len(test.expectedValue), len(gotv))
@@ -128,11 +130,11 @@ func TestLocalCM(t *testing.T) {
 					test.multiKeys[i] = path.Join(testLoadRoot, test.multiKeys[i])
 				}
 				if test.isvalid {
-					got, err := testCM.MultiRead(test.multiKeys)
+					got, err := testCM.MultiRead(ctx, test.multiKeys)
 					assert.Nil(t, err)
 					assert.Equal(t, test.expectedValue, got)
 				} else {
-					got, err := testCM.MultiRead(test.multiKeys)
+					got, err := testCM.MultiRead(ctx, test.multiKeys)
 					assert.Error(t, err)
 					assert.Equal(t, test.expectedValue, got)
 				}
@@ -146,20 +148,20 @@ func TestLocalCM(t *testing.T) {
 		testCM := NewLocalChunkManager(RootPath(localPath))
 		//defer testCM.RemoveWithPrefix(testMultiSaveRoot)
 
-		err := testCM.Write(path.Join(testMultiSaveRoot, "key_1"), []byte("111"))
+		err := testCM.Write(ctx, path.Join(testMultiSaveRoot, "key_1"), []byte("111"))
 		assert.Nil(t, err)
-		err = testCM.Write(path.Join(testMultiSaveRoot, "key_2"), []byte("222"))
+		err = testCM.Write(ctx, path.Join(testMultiSaveRoot, "key_2"), []byte("222"))
 		assert.Nil(t, err)
 
-		val, err := testCM.Read(path.Join(testMultiSaveRoot, "key_1"))
+		val, err := testCM.Read(ctx, path.Join(testMultiSaveRoot, "key_1"))
 		assert.Nil(t, err)
 		assert.Equal(t, []byte("111"), val)
 
-		val, err = testCM.Read(path.Join(testMultiSaveRoot, "key_2"))
+		val, err = testCM.Read(ctx, path.Join(testMultiSaveRoot, "key_2"))
 		assert.Nil(t, err)
 		assert.Equal(t, []byte("222"), val)
 
-		err = testCM.Write(path.Join(testMultiSaveRoot, "key_1/key_1"), []byte("111"))
+		err = testCM.Write(ctx, path.Join(testMultiSaveRoot, "key_1/key_1"), []byte("111"))
 		assert.Error(t, err)
 
 	})
@@ -168,9 +170,9 @@ func TestLocalCM(t *testing.T) {
 		testMultiSaveRoot := "test_multisave"
 
 		testCM := NewLocalChunkManager(RootPath(localPath))
-		defer testCM.RemoveWithPrefix(testMultiSaveRoot)
+		defer testCM.RemoveWithPrefix(ctx, testMultiSaveRoot)
 
-		err := testCM.Write(path.Join(testMultiSaveRoot, "key_1"), []byte("111"))
+		err := testCM.Write(ctx, path.Join(testMultiSaveRoot, "key_1"), []byte("111"))
 		assert.Nil(t, err)
 
 		kvs := map[string][]byte{
@@ -178,10 +180,10 @@ func TestLocalCM(t *testing.T) {
 			path.Join(testMultiSaveRoot, "key_2"): []byte("456"),
 		}
 
-		err = testCM.MultiWrite(kvs)
+		err = testCM.MultiWrite(ctx, kvs)
 		assert.Nil(t, err)
 
-		val, err := testCM.Read(path.Join(testMultiSaveRoot, "key_1"))
+		val, err := testCM.Read(ctx, path.Join(testMultiSaveRoot, "key_1"))
 		assert.Nil(t, err)
 		assert.Equal(t, []byte("123"), val)
 
@@ -190,7 +192,7 @@ func TestLocalCM(t *testing.T) {
 			path.Join(testMultiSaveRoot, "key_2/key_2"): []byte("456"),
 		}
 
-		err = testCM.MultiWrite(kvs)
+		err = testCM.MultiWrite(ctx, kvs)
 		assert.Error(t, err)
 	})
 
@@ -198,7 +200,7 @@ func TestLocalCM(t *testing.T) {
 		testRemoveRoot := "test_remove"
 
 		testCM := NewLocalChunkManager(RootPath(localPath))
-		defer testCM.RemoveWithPrefix(testRemoveRoot)
+		defer testCM.RemoveWithPrefix(ctx, testRemoveRoot)
 
 		prepareTests := []struct {
 			k string
@@ -216,7 +218,7 @@ func TestLocalCM(t *testing.T) {
 
 		for _, test := range prepareTests {
 			k := path.Join(testRemoveRoot, test.k)
-			err := testCM.Write(k, test.v)
+			err := testCM.Write(ctx, k, test.v)
 			require.NoError(t, err)
 		}
 
@@ -233,14 +235,14 @@ func TestLocalCM(t *testing.T) {
 		for _, test := range removeTests {
 			t.Run(test.description, func(t *testing.T) {
 				k := path.Join(testRemoveRoot, test.removeKey)
-				v, err := testCM.Read(k)
+				v, err := testCM.Read(ctx, k)
 				require.NoError(t, err)
 				require.Equal(t, test.valueBeforeRemove, v)
 
-				err = testCM.Remove(k)
+				err = testCM.Remove(ctx, k)
 				assert.NoError(t, err)
 
-				v, err = testCM.Read(k)
+				v, err = testCM.Read(ctx, k)
 				require.Error(t, err)
 				require.Empty(t, v)
 			})
@@ -252,15 +254,15 @@ func TestLocalCM(t *testing.T) {
 			path.Join(testRemoveRoot, "mkey_3"),
 		}
 
-		lv, err := testCM.MultiRead(multiRemoveTest)
+		lv, err := testCM.MultiRead(ctx, multiRemoveTest)
 		require.Nil(t, err)
 		require.ElementsMatch(t, [][]byte{[]byte("111"), []byte("222"), []byte("333")}, lv)
 
-		err = testCM.MultiRemove(multiRemoveTest)
+		err = testCM.MultiRemove(ctx, multiRemoveTest)
 		assert.Nil(t, err)
 
 		for _, k := range multiRemoveTest {
-			v, err := testCM.Read(k)
+			v, err := testCM.Read(ctx, k)
 			assert.Error(t, err)
 			assert.Empty(t, v)
 		}
@@ -272,15 +274,15 @@ func TestLocalCM(t *testing.T) {
 		}
 		removePrefix := path.Join(testRemoveRoot, "key_prefix")
 
-		lv, err = testCM.MultiRead(removeWithPrefixTest)
+		lv, err = testCM.MultiRead(ctx, removeWithPrefixTest)
 		require.NoError(t, err)
 		require.ElementsMatch(t, [][]byte{[]byte("111"), []byte("222"), []byte("333")}, lv)
 
-		err = testCM.RemoveWithPrefix(removePrefix)
+		err = testCM.RemoveWithPrefix(ctx, removePrefix)
 		assert.NoError(t, err)
 
 		for _, k := range removeWithPrefixTest {
-			v, err := testCM.Read(k)
+			v, err := testCM.Read(ctx, k)
 			assert.Error(t, err)
 			assert.Empty(t, v)
 		}
@@ -290,44 +292,44 @@ func TestLocalCM(t *testing.T) {
 		testLoadPartialRoot := "read_at"
 
 		testCM := NewLocalChunkManager(RootPath(localPath))
-		defer testCM.RemoveWithPrefix(testLoadPartialRoot)
+		defer testCM.RemoveWithPrefix(ctx, testLoadPartialRoot)
 
 		key := path.Join(testLoadPartialRoot, "TestMinIOKV_LoadPartial_key")
 		value := []byte("TestMinIOKV_LoadPartial_value")
 
-		err := testCM.Write(key, value)
+		err := testCM.Write(ctx, key, value)
 		assert.NoError(t, err)
 
 		var off, length int64
 		var partial []byte
 
 		off, length = 1, 1
-		partial, err = testCM.ReadAt(key, off, length)
+		partial, err = testCM.ReadAt(ctx, key, off, length)
 		assert.NoError(t, err)
 		assert.ElementsMatch(t, partial, value[off:off+length])
 
 		off, length = 0, int64(len(value))
-		partial, err = testCM.ReadAt(key, off, length)
+		partial, err = testCM.ReadAt(ctx, key, off, length)
 		assert.NoError(t, err)
 		assert.ElementsMatch(t, partial, value[off:off+length])
 
 		// error case
 		off, length = 5, -2
-		_, err = testCM.ReadAt(key, off, length)
+		_, err = testCM.ReadAt(ctx, key, off, length)
 		assert.Error(t, err)
 
 		off, length = -1, 2
-		_, err = testCM.ReadAt(key, off, length)
+		_, err = testCM.ReadAt(ctx, key, off, length)
 		assert.Error(t, err)
 
 		off, length = 1, -2
-		_, err = testCM.ReadAt(key, off, length)
+		_, err = testCM.ReadAt(ctx, key, off, length)
 		assert.Error(t, err)
 
-		err = testCM.Remove(key)
+		err = testCM.Remove(ctx, key)
 		assert.NoError(t, err)
 		off, length = 1, 1
-		_, err = testCM.ReadAt(key, off, length)
+		_, err = testCM.ReadAt(ctx, key, off, length)
 		assert.Error(t, err)
 	})
 
@@ -335,21 +337,21 @@ func TestLocalCM(t *testing.T) {
 		testGetSizeRoot := "get_size"
 
 		testCM := NewLocalChunkManager(RootPath(localPath))
-		defer testCM.RemoveWithPrefix(testGetSizeRoot)
+		defer testCM.RemoveWithPrefix(ctx, testGetSizeRoot)
 
 		key := path.Join(testGetSizeRoot, "TestMinIOKV_GetSize_key")
 		value := []byte("TestMinIOKV_GetSize_value")
 
-		err := testCM.Write(key, value)
+		err := testCM.Write(ctx, key, value)
 		assert.NoError(t, err)
 
-		size, err := testCM.Size(key)
+		size, err := testCM.Size(ctx, key)
 		assert.NoError(t, err)
 		assert.Equal(t, size, int64(len(value)))
 
 		key2 := path.Join(testGetSizeRoot, "TestMemoryKV_GetSize_key2")
 
-		size, err = testCM.Size(key2)
+		size, err = testCM.Size(ctx, key2)
 		assert.Error(t, err)
 		assert.Equal(t, int64(0), size)
 	})
@@ -358,21 +360,21 @@ func TestLocalCM(t *testing.T) {
 		testGetSizeRoot := "get_path"
 
 		testCM := NewLocalChunkManager(RootPath(localPath))
-		defer testCM.RemoveWithPrefix(testGetSizeRoot)
+		defer testCM.RemoveWithPrefix(ctx, testGetSizeRoot)
 
 		key := path.Join(testGetSizeRoot, "TestMinIOKV_GetPath_key")
 		value := []byte("TestMinIOKV_GetPath_value")
 
-		err := testCM.Write(key, value)
+		err := testCM.Write(ctx, key, value)
 		assert.NoError(t, err)
 
-		p, err := testCM.Path(key)
+		p, err := testCM.Path(ctx, key)
 		assert.NoError(t, err)
 		assert.Equal(t, p, path.Join(localPath, key))
 
 		key2 := path.Join(testGetSizeRoot, "TestMemoryKV_GetSize_key2")
 
-		p, err = testCM.Path(key2)
+		p, err = testCM.Path(ctx, key2)
 		assert.Error(t, err)
 		assert.Equal(t, p, "")
 	})
@@ -381,29 +383,29 @@ func TestLocalCM(t *testing.T) {
 		testPrefix := "prefix"
 
 		testCM := NewLocalChunkManager(RootPath(localPath))
-		defer testCM.RemoveWithPrefix(testPrefix)
+		defer testCM.RemoveWithPrefix(ctx, testPrefix)
 
 		pathB := path.Join("a", "b")
 
 		key := path.Join(testPrefix, pathB)
 		value := []byte("a")
 
-		err := testCM.Write(key, value)
+		err := testCM.Write(ctx, key, value)
 		assert.NoError(t, err)
 
 		pathC := path.Join("a", "c")
 		key = path.Join(testPrefix, pathC)
-		err = testCM.Write(key, value)
+		err = testCM.Write(ctx, key, value)
 		assert.NoError(t, err)
 
 		pathPrefix := path.Join(testPrefix, "a")
-		r, m, err := testCM.ListWithPrefix(pathPrefix, true)
+		r, m, err := testCM.ListWithPrefix(ctx, pathPrefix, true)
 		assert.NoError(t, err)
 		assert.Equal(t, len(r), 2)
 		assert.Equal(t, len(m), 2)
 
-		testCM.RemoveWithPrefix(testPrefix)
-		r, m, err = testCM.ListWithPrefix(pathPrefix, true)
+		testCM.RemoveWithPrefix(ctx, testPrefix)
+		r, m, err = testCM.ListWithPrefix(ctx, pathPrefix, true)
 		assert.NoError(t, err)
 		assert.Equal(t, len(r), 0)
 		assert.Equal(t, len(m), 0)
@@ -413,46 +415,46 @@ func TestLocalCM(t *testing.T) {
 		testPrefix := "prefix-ListWithPrefix"
 
 		testCM := NewLocalChunkManager(RootPath(localPath))
-		defer testCM.RemoveWithPrefix(testPrefix)
+		defer testCM.RemoveWithPrefix(ctx, testPrefix)
 
 		key := path.Join(testPrefix, "abc", "def")
 		value := []byte("a")
-		err := testCM.Write(key, value)
+		err := testCM.Write(ctx, key, value)
 		assert.NoError(t, err)
 
 		key = path.Join(testPrefix, "abc", "deg")
-		err = testCM.Write(key, value)
+		err = testCM.Write(ctx, key, value)
 		assert.NoError(t, err)
 
 		key = path.Join(testPrefix, "abd")
-		err = testCM.Write(key, value)
+		err = testCM.Write(ctx, key, value)
 		assert.NoError(t, err)
 
 		key = path.Join(testPrefix, "bcd")
-		err = testCM.Write(key, value)
+		err = testCM.Write(ctx, key, value)
 		assert.NoError(t, err)
 
-		dirs, mods, err := testCM.ListWithPrefix(testPrefix+"/", false)
+		dirs, mods, err := testCM.ListWithPrefix(ctx, testPrefix+"/", false)
 		assert.Nil(t, err)
 		fmt.Println(dirs)
 		assert.Equal(t, 3, len(dirs))
 		assert.Equal(t, 3, len(mods))
 
 		testPrefix2 := path.Join(testPrefix, "a")
-		dirs, mods, err = testCM.ListWithPrefix(testPrefix2, false)
+		dirs, mods, err = testCM.ListWithPrefix(ctx, testPrefix2, false)
 		assert.Nil(t, err)
 		assert.Equal(t, 2, len(dirs))
 		assert.Equal(t, 2, len(mods))
 
-		dirs, mods, err = testCM.ListWithPrefix(testPrefix2, false)
+		dirs, mods, err = testCM.ListWithPrefix(ctx, testPrefix2, false)
 		assert.Nil(t, err)
 		assert.Equal(t, 2, len(dirs))
 		assert.Equal(t, 2, len(mods))
 
-		err = testCM.RemoveWithPrefix(testPrefix)
+		err = testCM.RemoveWithPrefix(ctx, testPrefix)
 		assert.NoError(t, err)
 
-		dirs, mods, err = testCM.ListWithPrefix(testPrefix, false)
+		dirs, mods, err = testCM.ListWithPrefix(ctx, testPrefix, false)
 		assert.NoError(t, err)
 		fmt.Println(dirs)
 		// dir still exist

@@ -36,63 +36,63 @@ func (mc *MockChunkManager) RootPath() string {
 	return TempFilesPath
 }
 
-func (mc *MockChunkManager) Path(filePath string) (string, error) {
+func (mc *MockChunkManager) Path(ctx context.Context, filePath string) (string, error) {
 	return "", nil
 }
 
-func (mc *MockChunkManager) Reader(filePath string) (storage.FileReader, error) {
+func (mc *MockChunkManager) Reader(ctx context.Context, filePath string) (storage.FileReader, error) {
 	return nil, nil
 }
 
-func (mc *MockChunkManager) Write(filePath string, content []byte) error {
+func (mc *MockChunkManager) Write(ctx context.Context, filePath string, content []byte) error {
 	return nil
 }
 
-func (mc *MockChunkManager) MultiWrite(contents map[string][]byte) error {
+func (mc *MockChunkManager) MultiWrite(ctx context.Context, contents map[string][]byte) error {
 	return nil
 }
 
-func (mc *MockChunkManager) Exist(filePath string) (bool, error) {
+func (mc *MockChunkManager) Exist(ctx context.Context, filePath string) (bool, error) {
 	return true, nil
 }
 
-func (mc *MockChunkManager) Read(filePath string) ([]byte, error) {
+func (mc *MockChunkManager) Read(ctx context.Context, filePath string) ([]byte, error) {
 	return nil, nil
 }
 
-func (mc *MockChunkManager) MultiRead(filePaths []string) ([][]byte, error) {
+func (mc *MockChunkManager) MultiRead(ctx context.Context, filePaths []string) ([][]byte, error) {
 	return nil, nil
 }
 
-func (mc *MockChunkManager) ListWithPrefix(prefix string, recursive bool) ([]string, []time.Time, error) {
+func (mc *MockChunkManager) ListWithPrefix(ctx context.Context, prefix string, recursive bool) ([]string, []time.Time, error) {
 	return nil, nil, nil
 }
 
-func (mc *MockChunkManager) ReadWithPrefix(prefix string) ([]string, [][]byte, error) {
+func (mc *MockChunkManager) ReadWithPrefix(ctx context.Context, prefix string) ([]string, [][]byte, error) {
 	return nil, nil, nil
 }
 
-func (mc *MockChunkManager) ReadAt(filePath string, off int64, length int64) ([]byte, error) {
+func (mc *MockChunkManager) ReadAt(ctx context.Context, filePath string, off int64, length int64) ([]byte, error) {
 	return nil, nil
 }
 
-func (mc *MockChunkManager) Mmap(filePath string) (*mmap.ReaderAt, error) {
+func (mc *MockChunkManager) Mmap(ctx context.Context, filePath string) (*mmap.ReaderAt, error) {
 	return nil, nil
 }
 
-func (mc *MockChunkManager) Size(filePath string) (int64, error) {
+func (mc *MockChunkManager) Size(ctx context.Context, filePath string) (int64, error) {
 	return mc.size, nil
 }
 
-func (mc *MockChunkManager) Remove(filePath string) error {
+func (mc *MockChunkManager) Remove(ctx context.Context, filePath string) error {
 	return nil
 }
 
-func (mc *MockChunkManager) MultiRemove(filePaths []string) error {
+func (mc *MockChunkManager) MultiRemove(ctx context.Context, filePaths []string) error {
 	return nil
 }
 
-func (mc *MockChunkManager) RemoveWithPrefix(prefix string) error {
+func (mc *MockChunkManager) RemoveWithPrefix(ctx context.Context, prefix string) error {
 	return nil
 }
 
@@ -146,9 +146,9 @@ func Test_ImportRowBased(t *testing.T) {
 	}`)
 
 	filePath := TempFilesPath + "rows_1.json"
-	err = cm.Write(filePath, content)
+	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
-	defer cm.RemoveWithPrefix("")
+	defer cm.RemoveWithPrefix(ctx, "")
 
 	rowCount := 0
 	flushFunc := func(fields map[storage.FieldID]storage.FieldData, shardNum int) error {
@@ -196,7 +196,7 @@ func Test_ImportRowBased(t *testing.T) {
 	}`)
 
 	filePath = TempFilesPath + "rows_2.json"
-	err = cm.Write(filePath, content)
+	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
 
 	importResult.State = commonpb.ImportState_ImportStarted
@@ -219,7 +219,7 @@ func Test_ImportColumnBased_json(t *testing.T) {
 	ctx := context.Background()
 	cm, err := f.NewPersistentStorageChunkManager(ctx)
 	assert.NoError(t, err)
-	defer cm.RemoveWithPrefix("")
+	defer cm.RemoveWithPrefix(ctx, "")
 
 	idAllocator := newIDAllocator(ctx, t)
 
@@ -249,7 +249,7 @@ func Test_ImportColumnBased_json(t *testing.T) {
 	}`)
 
 	filePath := TempFilesPath + "columns_1.json"
-	err = cm.Write(filePath, content)
+	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
 
 	rowCount := 0
@@ -296,7 +296,7 @@ func Test_ImportColumnBased_json(t *testing.T) {
 	}`)
 
 	filePath = TempFilesPath + "rows_2.json"
-	err = cm.Write(filePath, content)
+	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
 
 	importResult.State = commonpb.ImportState_ImportStarted
@@ -319,7 +319,7 @@ func Test_ImportColumnBased_StringKey(t *testing.T) {
 	ctx := context.Background()
 	cm, err := f.NewPersistentStorageChunkManager(ctx)
 	assert.NoError(t, err)
-	defer cm.RemoveWithPrefix("")
+	defer cm.RemoveWithPrefix(ctx, "")
 
 	idAllocator := newIDAllocator(ctx, t)
 
@@ -339,7 +339,7 @@ func Test_ImportColumnBased_StringKey(t *testing.T) {
 	}`)
 
 	filePath := TempFilesPath + "columns_2.json"
-	err = cm.Write(filePath, content)
+	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
 
 	rowCount := 0
@@ -386,7 +386,7 @@ func Test_ImportColumnBased_numpy(t *testing.T) {
 	ctx := context.Background()
 	cm, err := f.NewPersistentStorageChunkManager(ctx)
 	assert.NoError(t, err)
-	defer cm.RemoveWithPrefix("")
+	defer cm.RemoveWithPrefix(ctx, "")
 
 	idAllocator := newIDAllocator(ctx, t)
 
@@ -404,7 +404,7 @@ func Test_ImportColumnBased_numpy(t *testing.T) {
 	files := make([]string, 0)
 
 	filePath := TempFilesPath + "scalar_fields.json"
-	err = cm.Write(filePath, content)
+	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
 	files = append(files, filePath)
 
@@ -413,7 +413,7 @@ func Test_ImportColumnBased_numpy(t *testing.T) {
 	content, err = CreateNumpyData(bin)
 	assert.Nil(t, err)
 	log.Debug("content", zap.Any("c", content))
-	err = cm.Write(filePath, content)
+	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
 	files = append(files, filePath)
 
@@ -422,7 +422,7 @@ func Test_ImportColumnBased_numpy(t *testing.T) {
 	content, err = CreateNumpyData(flo)
 	assert.Nil(t, err)
 	log.Debug("content", zap.Any("c", content))
-	err = cm.Write(filePath, content)
+	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
 	files = append(files, filePath)
 
@@ -471,7 +471,7 @@ func Test_ImportColumnBased_numpy(t *testing.T) {
 	}`)
 
 	filePath = TempFilesPath + "rows_2.json"
-	err = cm.Write(filePath, content)
+	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
 
 	importResult.State = commonpb.ImportState_ImportStarted
@@ -524,7 +524,7 @@ func Test_ImportRowBased_perf(t *testing.T) {
 	ctx := context.Background()
 	cm, err := f.NewPersistentStorageChunkManager(ctx)
 	assert.NoError(t, err)
-	defer cm.RemoveWithPrefix("")
+	defer cm.RemoveWithPrefix(ctx, "")
 
 	idAllocator := newIDAllocator(ctx, t)
 
@@ -573,7 +573,7 @@ func Test_ImportRowBased_perf(t *testing.T) {
 		assert.Nil(t, err)
 		err = bw.Flush()
 		assert.NoError(t, err)
-		err = cm.Write(filePath, b.Bytes())
+		err = cm.Write(ctx, filePath, b.Bytes())
 		assert.NoError(t, err)
 	}()
 	tr.Record("generate large json file " + filePath)
@@ -625,7 +625,7 @@ func Test_ImportColumnBased_perf(t *testing.T) {
 	ctx := context.Background()
 	cm, err := f.NewPersistentStorageChunkManager(ctx)
 	assert.NoError(t, err)
-	defer cm.RemoveWithPrefix("")
+	defer cm.RemoveWithPrefix(ctx, "")
 
 	idAllocator := newIDAllocator(ctx, t)
 
@@ -675,7 +675,7 @@ func Test_ImportColumnBased_perf(t *testing.T) {
 		assert.Nil(t, err)
 		err = bw.Flush()
 		assert.NoError(t, err)
-		err = cm.Write(filePath, b.Bytes())
+		err = cm.Write(ctx, filePath, b.Bytes())
 		assert.NoError(t, err)
 		return nil
 	}
@@ -824,9 +824,9 @@ func Test_ReportImportFailRowBased(t *testing.T) {
 	}`)
 
 	filePath := TempFilesPath + "rows_1.json"
-	err = cm.Write(filePath, content)
+	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
-	defer cm.RemoveWithPrefix("")
+	defer cm.RemoveWithPrefix(ctx, "")
 
 	rowCount := 0
 	flushFunc := func(fields map[storage.FieldID]storage.FieldData, shardNum int) error {
@@ -876,7 +876,7 @@ func Test_ReportImportFailColumnBased_json(t *testing.T) {
 	ctx := context.Background()
 	cm, err := f.NewPersistentStorageChunkManager(ctx)
 	assert.NoError(t, err)
-	defer cm.RemoveWithPrefix("")
+	defer cm.RemoveWithPrefix(ctx, "")
 
 	idAllocator := newIDAllocator(ctx, t)
 
@@ -906,7 +906,7 @@ func Test_ReportImportFailColumnBased_json(t *testing.T) {
 	}`)
 
 	filePath := TempFilesPath + "columns_1.json"
-	err = cm.Write(filePath, content)
+	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
 
 	rowCount := 0
@@ -957,7 +957,7 @@ func Test_ReportImportFailColumnBased_numpy(t *testing.T) {
 	ctx := context.Background()
 	cm, err := f.NewPersistentStorageChunkManager(ctx)
 	assert.NoError(t, err)
-	defer cm.RemoveWithPrefix("")
+	defer cm.RemoveWithPrefix(ctx, "")
 
 	idAllocator := newIDAllocator(ctx, t)
 
@@ -975,7 +975,7 @@ func Test_ReportImportFailColumnBased_numpy(t *testing.T) {
 	files := make([]string, 0)
 
 	filePath := TempFilesPath + "scalar_fields.json"
-	err = cm.Write(filePath, content)
+	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
 	files = append(files, filePath)
 
@@ -984,7 +984,7 @@ func Test_ReportImportFailColumnBased_numpy(t *testing.T) {
 	content, err = CreateNumpyData(bin)
 	assert.Nil(t, err)
 	log.Debug("content", zap.Any("c", content))
-	err = cm.Write(filePath, content)
+	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
 	files = append(files, filePath)
 
@@ -993,7 +993,7 @@ func Test_ReportImportFailColumnBased_numpy(t *testing.T) {
 	content, err = CreateNumpyData(flo)
 	assert.Nil(t, err)
 	log.Debug("content", zap.Any("c", content))
-	err = cm.Write(filePath, content)
+	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
 	files = append(files, filePath)
 

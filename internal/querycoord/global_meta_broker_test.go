@@ -79,7 +79,7 @@ func TestGlobalMetaBroker_DataCoord(t *testing.T) {
 	dataCoord := newDataCoordMock(ctx)
 
 	cm := storage.NewLocalChunkManager(storage.RootPath(globalMetaTestDir))
-	defer cm.RemoveWithPrefix("")
+	defer cm.RemoveWithPrefix(ctx, "")
 	handler, err := newGlobalMetaBroker(ctx, nil, dataCoord, nil, cm)
 	assert.Nil(t, err)
 
@@ -166,7 +166,7 @@ func TestGetDataSegmentInfosByIDs(t *testing.T) {
 	dataCoord := newDataCoordMock(ctx)
 
 	cm := storage.NewLocalChunkManager(storage.RootPath(globalMetaTestDir))
-	defer cm.RemoveWithPrefix("")
+	defer cm.RemoveWithPrefix(ctx, "")
 	handler, err := newGlobalMetaBroker(ctx, nil, dataCoord, nil, cm)
 	assert.Nil(t, err)
 

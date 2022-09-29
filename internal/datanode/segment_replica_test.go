@@ -42,7 +42,7 @@ var segmentReplicaNodeTestDir = "/tmp/milvus_test/segment_replica"
 func TestNewReplica(t *testing.T) {
 	rc := &RootCoordFactory{}
 	cm := storage.NewLocalChunkManager(storage.RootPath(segmentReplicaNodeTestDir))
-	defer cm.RemoveWithPrefix("")
+	defer cm.RemoveWithPrefix(context.Background(), "")
 	replica, err := newReplica(context.Background(), rc, cm, 0)
 	assert.Nil(t, err)
 	assert.NotNil(t, replica)
@@ -52,7 +52,7 @@ type mockDataCM struct {
 	storage.ChunkManager
 }
 
-func (kv *mockDataCM) MultiRead(keys []string) ([][]byte, error) {
+func (kv *mockDataCM) MultiRead(ctx context.Context, keys []string) ([][]byte, error) {
 	stats := &storage.PrimaryKeyStats{
 		FieldID: common.RowIDField,
 		Min:     0,
@@ -67,7 +67,7 @@ type mockPkfilterMergeError struct {
 	storage.ChunkManager
 }
 
-func (kv *mockPkfilterMergeError) MultiRead(keys []string) ([][]byte, error) {
+func (kv *mockPkfilterMergeError) MultiRead(ctx context.Context, keys []string) ([][]byte, error) {
 	/*
 		stats := &storage.PrimaryKeyStats{
 			FieldID: common.RowIDField,
@@ -84,7 +84,7 @@ type mockDataCMError struct {
 	storage.ChunkManager
 }
 
-func (kv *mockDataCMError) MultiRead(keys []string) ([][]byte, error) {
+func (kv *mockDataCMError) MultiRead(ctx context.Context, keys []string) ([][]byte, error) {
 	return nil, fmt.Errorf("mock error")
 }
 
@@ -92,7 +92,7 @@ type mockDataCMStatsError struct {
 	storage.ChunkManager
 }
 
-func (kv *mockDataCMStatsError) MultiRead(keys []string) ([][]byte, error) {
+func (kv *mockDataCMStatsError) MultiRead(ctx context.Context, keys []string) ([][]byte, error) {
 	return [][]byte{[]byte("3123123,error,test")}, nil
 }
 
@@ -226,12 +226,14 @@ func TestSegmentReplica_getCollectionAndPartitionID(te *testing.T) {
 }
 
 func TestSegmentReplica(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	rc := &RootCoordFactory{
 		pkType: schemapb.DataType_Int64,
 	}
 	collID := UniqueID(1)
 	cm := storage.NewLocalChunkManager(storage.RootPath(segmentReplicaNodeTestDir))
-	defer cm.RemoveWithPrefix("")
+	defer cm.RemoveWithPrefix(ctx, "")
 
 	t.Run("Test coll mot match", func(t *testing.T) {
 		replica, err := newReplica(context.Background(), rc, cm, collID)
@@ -318,11 +320,13 @@ func TestSegmentReplica(t *testing.T) {
 }
 
 func TestSegmentReplica_InterfaceMethod(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	rc := &RootCoordFactory{
 		pkType: schemapb.DataType_Int64,
 	}
 	cm := storage.NewLocalChunkManager(storage.RootPath(segmentReplicaNodeTestDir))
-	defer cm.RemoveWithPrefix("")
+	defer cm.RemoveWithPrefix(ctx, "")
 
 	t.Run("Test addFlushedSegmentWithPKs", func(t *testing.T) {
 		tests := []struct {
@@ -882,12 +886,14 @@ func TestSegmentReplica_InterfaceMethod(t *testing.T) {
 
 }
 func TestInnerFunctionSegment(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	rc := &RootCoordFactory{
 		pkType: schemapb.DataType_Int64,
 	}
 	collID := UniqueID(1)
 	cm := storage.NewLocalChunkManager(storage.RootPath(segmentReplicaNodeTestDir))
-	defer cm.RemoveWithPrefix("")
+	defer cm.RemoveWithPrefix(ctx, "")
 	replica, err := newReplica(context.Background(), rc, cm, collID)
 	assert.Nil(t, err)
 	replica.chunkManager = &mockDataCM{}
@@ -1093,6 +1099,8 @@ func TestSegment_getSegmentStatslog(t *testing.T) {
 }
 
 func TestReplica_UpdatePKRange(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	rc := &RootCoordFactory{
 		pkType: schemapb.DataType_Int64,
 	}
@@ -1105,7 +1113,7 @@ func TestReplica_UpdatePKRange(t *testing.T) {
 	cp := &segmentCheckPoint{int64(10), *cpPos}
 
 	cm := storage.NewLocalChunkManager(storage.RootPath(segmentReplicaNodeTestDir))
-	defer cm.RemoveWithPrefix("")
+	defer cm.RemoveWithPrefix(ctx, "")
 	replica, err := newReplica(context.Background(), rc, cm, collID)
 	assert.Nil(t, err)
 	replica.chunkManager = &mockDataCM{}
@@ -1187,8 +1195,7 @@ func (s *SegmentReplicaSuite) SetupSuite() {
 }
 
 func (s *SegmentReplicaSuite) TearDownSuite() {
-	s.cm.RemoveWithPrefix("")
-
+	s.cm.RemoveWithPrefix(context.Background(), "")
 }
 
 func (s *SegmentReplicaSuite) SetupTest() {
