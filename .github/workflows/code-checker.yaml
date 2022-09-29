@@ -35,8 +35,6 @@ jobs:
         include:
         - name: Code Checker AMD64 Ubuntu 18.04
           os: ubuntu-18.04
-        - name: Code Checker MacOS 11
-          os: macos-11
     env:
       UBUNTU: 18.04
     steps:
@@ -57,7 +55,7 @@ jobs:
           key: ubuntu18.04-thirdparty-${{ hashFiles('internal/core/thirdparty/**') }}
           restore-keys: ubuntu18.04-thirdparty-
       - name: Mac Cache Third Party
-        if: ${{  matrix.os == 'macos-11' }}
+        if: ${{  matrix.os == 'macos-12' }}
         uses: actions/cache@v3
         with:
           path: |
