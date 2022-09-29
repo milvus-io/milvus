@@ -52,6 +52,8 @@ message IndexInfo {
   // index state
   common.IndexState state = 9;
   string index_state_fail_reason = 10;
+  bool is_auto_index = 11;
+  repeated common.KeyValuePair user_index_params = 12;
 }
 
 message FieldIndex {
@@ -124,6 +126,8 @@ message CreateIndexRequest {
   repeated common.KeyValuePair type_params = 4;
   repeated common.KeyValuePair index_params = 5;
   uint64 timestamp = 6;
+  bool  is_auto_index = 7;
+  repeated common.KeyValuePair user_index_params = 8;
 }
 
 message GetIndexInfoRequest {

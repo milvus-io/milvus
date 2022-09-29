@@ -36,6 +36,14 @@ func (tc *Catalog) CreateIndex(ctx context.Context, index *model.Index) error {
 		return err
 	}
 
+	userIndexParamsBytes, err := json.Marshal(index.UserIndexParams)
+	if err != nil {
+		log.Error("marshal userIndexParams of index failed", zap.String("tenant", tenantID),
+			zap.Int64("collID", index.CollectionID), zap.Int64("indexID", index.IndexID),
+			zap.String("indexName", index.IndexName), zap.Error(err))
+		return err
+	}
+
 	typeParamsBytes, err := json.Marshal(index.TypeParams)
 	if err != nil {
 		log.Error("marshal TypeParams of index failed", zap.String("tenant", tenantID),
@@ -45,15 +53,17 @@ func (tc *Catalog) CreateIndex(ctx context.Context, index *model.Index) error {
 	}
 
 	idx := &dbmodel.Index{
-		TenantID:     tenantID,
-		CollectionID: index.CollectionID,
-		FieldID:      index.FieldID,
-		IndexID:      index.IndexID,
-		IndexName:    index.IndexName,
-		TypeParams:   string(typeParamsBytes),
-		IndexParams:  string(indexParamsBytes),
-		CreateTime:   index.CreateTime,
-		IsDeleted:    index.IsDeleted,
+		TenantID:        tenantID,
+		CollectionID:    index.CollectionID,
+		FieldID:         index.FieldID,
+		IndexID:         index.IndexID,
+		IndexName:       index.IndexName,
+		TypeParams:      string(typeParamsBytes),
+		IndexParams:     string(indexParamsBytes),
+		CreateTime:      index.CreateTime,
+		IsDeleted:       index.IsDeleted,
+		IsAutoIndex:     index.IsAutoIndex,
+		UserIndexParams: string(userIndexParamsBytes),
 	}
 
 	err = tc.metaDomain.IndexDb(ctx).Insert([]*dbmodel.Index{idx})
@@ -92,6 +102,14 @@ func (tc *Catalog) AlterIndex(ctx context.Context, index *model.Index) error {
 		return err
 	}
 
+	userIndexParamsBytes, err := json.Marshal(index.UserIndexParams)
+	if err != nil {
+		log.Error("marshal userIndexParams of index failed", zap.String("tenant", tenantID),
+			zap.Int64("collID", index.CollectionID), zap.Int64("indexID", index.IndexID),
+			zap.String("indexName", index.IndexName), zap.Error(err))
+		return err
+	}
+
 	typeParamsBytes, err := json.Marshal(index.TypeParams)
 	if err != nil {
 		log.Error("marshal TypeParams of index failed", zap.String("tenant", tenantID),
@@ -101,15 +119,17 @@ func (tc *Catalog) AlterIndex(ctx context.Context, index *model.Index) error {
 	}
 
 	idx := &dbmodel.Index{
-		TenantID:     tenantID,
-		CollectionID: index.CollectionID,
-		FieldID:      index.FieldID,
-		IndexID:      index.IndexID,
-		IndexName:    index.IndexName,
-		TypeParams:   string(typeParamsBytes),
-		IndexParams:  string(indexParamsBytes),
-		CreateTime:   index.CreateTime,
-		IsDeleted:    index.IsDeleted,
+		TenantID:        tenantID,
+		CollectionID:    index.CollectionID,
+		FieldID:         index.FieldID,
+		IndexID:         index.IndexID,
+		IndexName:       index.IndexName,
+		TypeParams:      string(typeParamsBytes),
+		IndexParams:     string(indexParamsBytes),
+		CreateTime:      index.CreateTime,
+		IsDeleted:       index.IsDeleted,
+		IsAutoIndex:     index.IsAutoIndex,
+		UserIndexParams: string(userIndexParamsBytes),
 	}
 	err = tc.metaDomain.IndexDb(ctx).Update(idx)
 	if err != nil {
@@ -131,6 +151,13 @@ func (tc *Catalog) AlterIndexes(ctx context.Context, indexes []*model.Index) err
 				return err
 			}
 
+			userIndexParamsBytes, err := json.Marshal(index.UserIndexParams)
+			if err != nil {
+				log.Error("marshal userIndexParams of index failed", zap.String("tenant", tenantID),
+					zap.Int64("collID", index.CollectionID), zap.Int64("indexID", index.IndexID),
+					zap.String("indexName", index.IndexName), zap.Error(err))
+				return err
+			}
 			typeParamsBytes, err := json.Marshal(index.TypeParams)
 			if err != nil {
 				log.Error("marshal TypeParams of index failed", zap.String("tenant", tenantID),
@@ -140,15 +167,17 @@ func (tc *Catalog) AlterIndexes(ctx context.Context, indexes []*model.Index) err
 			}
 
 			idx := &dbmodel.Index{
-				TenantID:     tenantID,
-				CollectionID: index.CollectionID,
-				FieldID:      index.FieldID,
-				IndexID:      index.IndexID,
-				IndexName:    index.IndexName,
-				TypeParams:   string(typeParamsBytes),
-				IndexParams:  string(indexParamsBytes),
-				CreateTime:   index.CreateTime,
-				IsDeleted:    index.IsDeleted,
+				TenantID:        tenantID,
+				CollectionID:    index.CollectionID,
+				FieldID:         index.FieldID,
+				IndexID:         index.IndexID,
+				IndexName:       index.IndexName,
+				TypeParams:      string(typeParamsBytes),
+				IndexParams:     string(indexParamsBytes),
+				CreateTime:      index.CreateTime,
+				IsDeleted:       index.IsDeleted,
+				IsAutoIndex:     index.IsAutoIndex,
+				UserIndexParams: string(userIndexParamsBytes),
 			}
 			err = tc.metaDomain.IndexDb(ctx).Update(idx)
 			if err != nil {

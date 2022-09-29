@@ -2,7 +2,6 @@ package indexnode
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math/rand"
 	"sync"
@@ -26,10 +25,6 @@ func TestIndexNodeSimple(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, state.Status.ErrorCode, commonpb.ErrorCode_Success)
 	assert.Equal(t, state.State.StateCode, internalpb.StateCode_Healthy)
-	idxParams := map[string]string{
-		"nlist": "128",
-	}
-	idxParamsPayload, err := json.Marshal(idxParams)
 
 	assert.Nil(t, err, err)
 	var (
@@ -50,16 +45,16 @@ func TestIndexNodeSimple(t *testing.T) {
 		}
 		indexParams = []*commonpb.KeyValuePair{
 			{
-				Key:   "params",
-				Value: string(idxParamsPayload),
-			},
-			{
 				Key:   "metric_type",
 				Value: "L2",
 			},
 			{
 				Key:   "index_type",
 				Value: "IVF_FLAT",
+			},
+			{
+				Key:   "nlist",
+				Value: "128",
 			},
 		}
 		mockChunkMgr = mockChunkMgrIns
@@ -160,11 +155,6 @@ type testTask struct {
 }
 
 func TestIndexNodeComplex(t *testing.T) {
-	idxParams := map[string]string{
-		"nlist": "128",
-	}
-	idxParamsPayload, err := json.Marshal(idxParams)
-	assert.Nil(t, err)
 	var (
 		clusterID        string
 		buildID0         int64
@@ -190,8 +180,8 @@ func TestIndexNodeComplex(t *testing.T) {
 		dims        = []int{8, 16, 32}
 		indexParams = []*commonpb.KeyValuePair{
 			{
-				Key:   "params",
-				Value: string(idxParamsPayload),
+				Key:   "nlist",
+				Value: "128",
 			},
 			{
 				Key:   "metric_type",

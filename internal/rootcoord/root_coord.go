@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/api/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/common"
+	pnc "github.com/milvus-io/milvus/internal/distributed/proxy/client"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
@@ -144,6 +145,20 @@ func NewCore(c context.Context, factory dependency.Factory) (*Core, error) {
 		enableActiveStandBy: Params.RootCoordCfg.EnableActiveStandby,
 	}
 	core.UpdateStateCode(internalpb.StateCode_Abnormal)
+	core.proxyCreator = func(se *sessionutil.Session) (types.Proxy, error) {
+		cli, err := pnc.NewClient(c, se.Address)
+		if err != nil {
+			return nil, err
+		}
+		if err := cli.Init(); err != nil {
+			return nil, err
+		}
+		if err := cli.Start(); err != nil {
+			return nil, err
+		}
+		return cli, nil
+	}
+
 	return core, nil
 }
 
@@ -221,10 +236,6 @@ func (c *Core) tsLoop() {
 			return
 		}
 	}
-}
-
-func (c *Core) SetNewProxyClient(f func(sess *sessionutil.Session) (types.Proxy, error)) {
-	c.proxyCreator = f
 }
 
 func (c *Core) SetDataCoord(ctx context.Context, s types.DataCoord) error {

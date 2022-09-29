@@ -63,6 +63,8 @@ require (
 
 require github.com/apache/thrift v0.15.0
 
+require github.com/sandertv/go-formula/v2 v2.0.0-alpha.7 // indirect
+
 require (
 	github.com/99designs/go-keychain v0.0.0-20191008050251-8e49817e8af4 // indirect
 	github.com/AthenZ/athenz v1.10.15 // indirect

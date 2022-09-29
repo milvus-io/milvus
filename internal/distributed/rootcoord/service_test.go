@@ -85,9 +85,6 @@ func (m *mockCore) Stop() error {
 	return fmt.Errorf("stop error")
 }
 
-func (m *mockCore) SetNewProxyClient(func(sess *sessionutil.Session) (types.Proxy, error)) {
-}
-
 type mockDataCoord struct {
 	types.DataCoord
 }

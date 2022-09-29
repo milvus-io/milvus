@@ -22,6 +22,11 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	GetCollectionStatisticsTaskName = "GetCollectionStatisticsTask"
+	GetPartitionStatisticsTaskName  = "GetPartitionStatisticsTask"
+)
+
 type getStatisticsTask struct {
 	request *milvuspb.GetStatisticsRequest
 	result  *milvuspb.GetStatisticsResponse

@@ -13,13 +13,15 @@ import (
 func TestIndex_Get(t *testing.T) {
 	var indexes = []*dbmodel.Index{
 		{
-			TenantID:     "",
-			FieldID:      fieldID1,
-			CollectionID: collID1,
-			IndexID:      indexID1,
-			IndexName:    "test_index_1",
-			IndexParams:  "",
-			TypeParams:   "",
+			TenantID:        "",
+			FieldID:         fieldID1,
+			CollectionID:    collID1,
+			IndexID:         indexID1,
+			IndexName:       "test_index_1",
+			IndexParams:     "",
+			TypeParams:      "",
+			UserIndexParams: "",
+			IsAutoIndex:     false,
 		},
 	}
 
@@ -51,14 +53,16 @@ func TestIndex_Get_Error(t *testing.T) {
 func TestIndex_List(t *testing.T) {
 	var indexResults = []*dbmodel.IndexResult{
 		{
-			FieldID:      fieldID1,
-			CollectionID: collID1,
-			IndexID:      indexID1,
-			IndexName:    "test_index_1",
-			TypeParams:   "",
-			IndexParams:  "",
-			CreateTime:   uint64(1011),
-			IsDeleted:    false,
+			FieldID:         fieldID1,
+			CollectionID:    collID1,
+			IndexID:         indexID1,
+			IndexName:       "test_index_1",
+			TypeParams:      "",
+			IndexParams:     "",
+			UserIndexParams: "",
+			IsAutoIndex:     false,
+			CreateTime:      uint64(1011),
+			IsDeleted:       false,
 		},
 	}
 
@@ -66,8 +70,8 @@ func TestIndex_List(t *testing.T) {
 	mock.ExpectQuery("SELECT indexes.field_id AS field_id, indexes.collection_id AS collection_id, indexes.index_id AS index_id, indexes.index_name AS index_name, indexes.index_params AS index_params, indexes.type_params AS type_params, indexes.is_deleted AS is_deleted, indexes.create_time AS create_time FROM `indexes` WHERE indexes.tenant_id = ?").
 		WithArgs(tenantID).
 		WillReturnRows(
-			sqlmock.NewRows([]string{"field_id", "collection_id", "index_id", "index_name", "index_params", "type_params", "is_deleted", "create_time"}).
-				AddRow(indexResults[0].FieldID, indexResults[0].CollectionID, indexResults[0].IndexID, indexResults[0].IndexName, indexResults[0].IndexParams, indexResults[0].TypeParams, indexResults[0].IsDeleted, indexResults[0].CreateTime))
+			sqlmock.NewRows([]string{"field_id", "collection_id", "index_id", "index_name", "index_params", "type_params", "user_index_params", "is_auto_index", "is_deleted", "create_time"}).
+				AddRow(indexResults[0].FieldID, indexResults[0].CollectionID, indexResults[0].IndexID, indexResults[0].IndexName, indexResults[0].IndexParams, indexResults[0].TypeParams, indexResults[0].UserIndexParams, indexResults[0].IsAutoIndex, indexResults[0].IsDeleted, indexResults[0].CreateTime))
 
 	// actual
 	res, err := indexTestDb.List(tenantID)
@@ -90,24 +94,26 @@ func TestIndex_List_Error(t *testing.T) {
 func TestIndex_Insert(t *testing.T) {
 	var indexes = []*dbmodel.Index{
 		{
-			TenantID:     tenantID,
-			FieldID:      fieldID1,
-			CollectionID: collID1,
-			IndexID:      indexID1,
-			IndexName:    "test_index_1",
-			IndexParams:  "",
-			TypeParams:   "",
-			CreateTime:   uint64(1011),
-			IsDeleted:    false,
-			CreatedAt:    time.Now(),
-			UpdatedAt:    time.Now(),
+			TenantID:        tenantID,
+			FieldID:         fieldID1,
+			CollectionID:    collID1,
+			IndexID:         indexID1,
+			IndexName:       "test_index_1",
+			IndexParams:     "",
+			TypeParams:      "",
+			UserIndexParams: "",
+			IsAutoIndex:     false,
+			CreateTime:      uint64(1011),
+			IsDeleted:       false,
+			CreatedAt:       time.Now(),
+			UpdatedAt:       time.Now(),
 		},
 	}
 
 	// expectation
 	mock.ExpectBegin()
-	mock.ExpectExec("INSERT INTO `indexes` (`tenant_id`,`field_id`,`collection_id`,`index_id`,`index_name`,`index_params`,`type_params`,`create_time`,`is_deleted`,`created_at`,`updated_at`) VALUES (?,?,?,?,?,?,?,?,?,?,?)").
-		WithArgs(indexes[0].TenantID, indexes[0].FieldID, indexes[0].CollectionID, indexes[0].IndexID, indexes[0].IndexName, indexes[0].IndexParams, indexes[0].TypeParams, indexes[0].CreateTime, indexes[0].IsDeleted, indexes[0].CreatedAt, indexes[0].UpdatedAt).
+	mock.ExpectExec("INSERT INTO `indexes` (`tenant_id`,`field_id`,`collection_id`,`index_id`,`index_name`,`index_params`,`type_params`,`user_index_params`,`is_auto_index`,`create_time`,`is_deleted`,`created_at`,`updated_at`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)").
+		WithArgs(indexes[0].TenantID, indexes[0].FieldID, indexes[0].CollectionID, indexes[0].IndexID, indexes[0].IndexName, indexes[0].IndexParams, indexes[0].TypeParams, indexes[0].UserIndexParams, indexes[0].IsAutoIndex, indexes[0].CreateTime, indexes[0].IsDeleted, indexes[0].CreatedAt, indexes[0].UpdatedAt).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
@@ -134,8 +140,8 @@ func TestIndex_Insert_Error(t *testing.T) {
 
 	// expectation
 	mock.ExpectBegin()
-	mock.ExpectExec("INSERT INTO `indexes` (`tenant_id`,`field_id`,`collection_id`,`index_id`,`index_name`,`index_params`,`type_params`,`create_time`,`is_deleted`,`created_at`,`updated_at`) VALUES (?,?,?,?,?,?,?,?,?,?,?)").
-		WithArgs(indexes[0].TenantID, indexes[0].FieldID, indexes[0].CollectionID, indexes[0].IndexID, indexes[0].IndexName, indexes[0].IndexParams, indexes[0].TypeParams, indexes[0].CreateTime, indexes[0].IsDeleted, indexes[0].CreatedAt, indexes[0].UpdatedAt).
+	mock.ExpectExec("INSERT INTO `indexes` (`tenant_id`,`field_id`,`collection_id`,`index_id`,`index_name`,`index_params`,`type_params`, `user_index_params`, `is_auto_index`, `create_time`,`is_deleted`,`created_at`,`updated_at`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)").
+		WithArgs(indexes[0].TenantID, indexes[0].FieldID, indexes[0].CollectionID, indexes[0].IndexID, indexes[0].IndexName, indexes[0].IndexParams, indexes[0].TypeParams, indexes[0].UserIndexParams, indexes[0].IsAutoIndex, indexes[0].CreateTime, indexes[0].IsDeleted, indexes[0].CreatedAt, indexes[0].UpdatedAt).
 		WillReturnError(errors.New("test error"))
 	mock.ExpectRollback()
 
