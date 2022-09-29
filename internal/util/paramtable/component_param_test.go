@@ -114,6 +114,11 @@ func TestComponentParam(t *testing.T) {
 
 		assert.Equal(t, Params.DataNodeSubName, "by-dev-dataNode")
 		t.Logf("datanode subname = %s", Params.DataNodeSubName)
+
+		assert.Equal(t, Params.SessionTTL, int64(DefaultSessionTTL))
+		t.Logf("default session TTL time = %d", Params.SessionTTL)
+		assert.Equal(t, Params.SessionRetryTimes, int64(DefaultSessionRetryTimes))
+		t.Logf("default session retry times = %d", Params.SessionRetryTimes)
 	})
 
 	t.Run("test rootCoordConfig", func(t *testing.T) {
@@ -125,6 +130,8 @@ func TestComponentParam(t *testing.T) {
 		t.Logf("master MinSegmentSizeToEnableIndex = %d", Params.MinSegmentSizeToEnableIndex)
 		assert.NotEqual(t, Params.ImportTaskExpiration, 0)
 		t.Logf("master ImportTaskRetention = %f", Params.ImportTaskRetention)
+		assert.Equal(t, Params.EnableActiveStandby, false)
+		t.Logf("rootCoord EnableActiveStandby = %t", Params.EnableActiveStandby)
 
 		Params.CreatedTime = time.Now()
 		Params.UpdatedTime = time.Now()
@@ -214,6 +221,12 @@ func TestComponentParam(t *testing.T) {
 		})
 	})
 
+	t.Run("test queryCoordConfig", func(t *testing.T) {
+		Params := CParams.QueryCoordCfg
+		assert.Equal(t, Params.EnableActiveStandby, false)
+		t.Logf("queryCoord EnableActiveStandby = %t", Params.EnableActiveStandby)
+	})
+
 	t.Run("test queryNodeConfig", func(t *testing.T) {
 		Params := CParams.QueryNodeCfg
 
@@ -275,8 +288,9 @@ func TestComponentParam(t *testing.T) {
 	t.Run("test dataCoordConfig", func(t *testing.T) {
 		Params := CParams.DataCoordCfg
 		assert.Equal(t, 24*60*60*time.Second, Params.SegmentMaxLifetime)
-
 		assert.True(t, Params.EnableGarbageCollection)
+		assert.Equal(t, Params.EnableActiveStandby, false)
+		t.Logf("dataCoord EnableActiveStandby = %t", Params.EnableActiveStandby)
 	})
 
 	t.Run("test dataNodeConfig", func(t *testing.T) {
@@ -323,6 +337,9 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, "localhost:22930", Params.IndexNodeAddress)
 		assert.False(t, Params.WithCredential)
 		assert.Equal(t, int64(0), Params.IndexNodeID)
+
+		assert.Equal(t, Params.EnableActiveStandby, false)
+		t.Logf("indexCoord EnableActiveStandby = %t", Params.EnableActiveStandby)
 	})
 
 	t.Run("test indexNodeConfig", func(t *testing.T) {

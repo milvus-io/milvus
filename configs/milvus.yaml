@@ -120,6 +120,7 @@ rocksmq:
 rootCoord:
   address: localhost
   port: 53100
+  enableActiveStandby: false  # Enable active-standby
 
   dmlChannelNum: 256 # The number of dml channels created at system startup
   maxPartitionNum: 4096 # Maximum number of partitions in a collection
@@ -170,8 +171,7 @@ queryCoord:
   loadTimeoutSeconds: 600
   checkHandoffInterval: 5000
   taskMergeCap: 8
-  
-
+  enableActiveStandby: false  # Enable active-standby
 
 # Related configuration of queryNode, used to run hybrid search between vector and scalar data.
 queryNode:
@@ -217,6 +217,7 @@ queryNode:
 indexCoord:
   address: localhost
   port: 31000
+  enableActiveStandby: false  # Enable active-standby
 
   minSegmentNumRowsToEnableIndex: 1024 # It's a threshold. When the segment num rows is less than this value, the segment will not be indexed
 
@@ -242,6 +243,7 @@ dataCoord:
   port: 13333
   enableCompaction: true # Enable data segment compaction
   enableGarbageCollection: true
+  enableActiveStandby: false  # Enable active-standby
 
   segment:
     maxSize: 512 # Maximum size of a segment in MB
@@ -357,6 +359,10 @@ common:
     # tls mode values [0, 1, 2]
     # 0 is close, 1 is one-way authentication, 2 is two-way authentication.
     tlsMode: 0
+
+  session:
+    ttl: 60 # ttl value when session granting a lease to register service
+    retryTimes: 30 # retry times when session sending etcd requests
 
 # QuotaConfig, configurations of Milvus quota and limits.
 # By default, we enable:
