@@ -224,7 +224,7 @@ pull_request_rules:
     conditions:
       - label!=manual-pass
       - base=master
-      - files~=^(?=.*((\.(go|h|cpp)|CMakeLists.txt))).*$
+      - files~=^(?=.*((\.(go|h|cpp)|CMakeLists.txt|milvus.yaml))).*$
       - or:
         - "status-success!=Code Checker AMD64 Ubuntu 20.04"
         - "status-success!=Build and test AMD64 Ubuntu 20.04" 
@@ -238,7 +238,7 @@ pull_request_rules:
     conditions:
       - label!=manual-pass
       - base~=^2(\.\d+){2}$
-      - files~=^(?=.*((\.(go|h|cpp)|CMakeLists.txt))).*$
+      - files~=^(?=.*((\.(go|h|cpp)|CMakeLists.txt|milvus.yaml))).*$
       - or:
         - "status-success!=Code Checker AMD64 Ubuntu 18.04"
         - "status-success!=Build and test AMD64 Ubuntu 18.04" 
