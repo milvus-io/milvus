@@ -1320,7 +1320,7 @@ func (cit *createIndexTask) Execute(ctx context.Context) error {
 		}
 	}
 	if cit.IndexName == "" {
-		cit.IndexName = Params.CommonCfg.DefaultIndexName
+		cit.IndexName = Params.CommonCfg.DefaultIndexName + "_" + strconv.FormatInt(cit.fieldSchema.GetFieldID(), 10)
 	}
 	var err error
 	req := &indexpb.CreateIndexRequest{
