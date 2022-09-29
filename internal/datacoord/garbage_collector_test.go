@@ -300,9 +300,12 @@ func initUtOSSEnv(bucket, root string, n int) (mcm *storage.MinioChunkManager, i
 		reader := bytes.NewReader(content)
 		// collID/partID/segID/fieldID/fileName
 		// [str]/id/id/string/string
-		token := path.Join(funcutil.RandomString(8), strconv.Itoa(i), strconv.Itoa(i), funcutil.RandomString(8), funcutil.RandomString(8))
+
+		var token string
 		if i == 1 {
-			token = path.Join(funcutil.RandomString(8), strconv.Itoa(i), strconv.Itoa(i), funcutil.RandomString(8))
+			token = path.Join(strconv.Itoa(i), strconv.Itoa(i), "error-seg-id", funcutil.RandomString(8), funcutil.RandomString(8))
+		} else {
+			token = path.Join(strconv.Itoa(i), strconv.Itoa(i), strconv.Itoa(i), funcutil.RandomString(8), funcutil.RandomString(8))
 		}
 		// insert
 		filePath := path.Join(root, insertLogPrefix, token)
@@ -320,6 +323,11 @@ func initUtOSSEnv(bucket, root string, n int) (mcm *storage.MinioChunkManager, i
 		stats = append(stats, info.Key)
 
 		// delta
+		if i == 1 {
+			token = path.Join(strconv.Itoa(i), strconv.Itoa(i), "error-seg-id", funcutil.RandomString(8))
+		} else {
+			token = path.Join(strconv.Itoa(i), strconv.Itoa(i), strconv.Itoa(i), funcutil.RandomString(8))
+		}
 		filePath = path.Join(root, deltaLogPrefix, token)
 		info, err = cli.PutObject(context.TODO(), bucket, filePath, reader, int64(len(content)), minio.PutObjectOptions{})
 		if err != nil {
