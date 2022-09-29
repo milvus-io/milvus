@@ -36,7 +36,7 @@ jobs:
   ubuntu:
     name: Build and test AMD64 Ubuntu ${{ matrix.ubuntu }}
     runs-on: ubuntu-${{ matrix.ubuntu }}
-    timeout-minutes: 90
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
