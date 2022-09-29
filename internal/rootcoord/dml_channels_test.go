@@ -149,6 +149,9 @@ func TestDmlChannels(t *testing.T) {
 	dml.addChannels(chans1...)
 	assert.Equal(t, 2, dml.getChannelNum())
 
+	chans2 := dml.getChannelNames(totalDmlChannelNum + 1)
+	assert.Nil(t, chans2)
+
 	dml.removeChannels(chans1...)
 	assert.Equal(t, 2, dml.getChannelNum())
 

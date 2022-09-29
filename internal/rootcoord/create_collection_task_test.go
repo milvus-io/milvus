@@ -218,10 +218,6 @@ func Test_createCollectionTask_Prepare(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("failed to assign channels", func(t *testing.T) {
-		// TODO: error won't happen here.
-	})
-
 	t.Run("normal case", func(t *testing.T) {
 		defer cleanTestEnv()
 
@@ -251,6 +247,10 @@ func Test_createCollectionTask_Prepare(t *testing.T) {
 				Schema:         marshaledSchema,
 			},
 		}
+		task.Req.ShardsNum = int32(Params.RootCoordCfg.DmlChannelNum + 1) // no enough channels.
+		err = task.Prepare(context.Background())
+		assert.Error(t, err)
+		task.Req.ShardsNum = 1
 		err = task.Prepare(context.Background())
 		assert.NoError(t, err)
 	})
