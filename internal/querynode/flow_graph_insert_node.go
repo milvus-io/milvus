@@ -19,6 +19,7 @@ package querynode
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"reflect"
@@ -203,7 +204,8 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		segmentID := segmentID
 		wg.Add(1)
 		go func() {
-			err := iNode.insert(&iData, segmentID, &wg)
+			defer wg.Done()
+			err := iNode.insert(&iData, segmentID)
 			if err != nil {
 				// error occurs when segment cannot be found or cgo function `Insert` failed
 				err = fmt.Errorf("segment insert failed, segmentID = %d, err = %s", segmentID, err)
@@ -241,7 +243,14 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	for segmentID, pks := range delData.deleteIDs {
 		segment, err := iNode.metaReplica.getSegmentByID(segmentID, segmentTypeGrowing)
 		if err != nil {
-			// error occurs when segment cannot be found, should not happen
+			if errors.Is(err, ErrSegmentNotFound) {
+				log.Warn("segment not found when do preDelete, it may have been released due to compaction",
+					zap.Int64("segmentID", segmentID),
+					zap.Error(err),
+				)
+				continue
+			}
+
 			err = fmt.Errorf("insertNode getSegmentByID failed, err = %s", err)
 			log.Error(err.Error())
 			panic(err)
@@ -255,7 +264,8 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		segmentID := segmentID
 		wg.Add(1)
 		go func() {
-			err := iNode.delete(delData, segmentID, &wg)
+			defer wg.Done()
+			err := iNode.delete(delData, segmentID)
 			if err != nil {
 				// error occurs when segment cannot be found, calling cgo function delete failed and etc...
 				err = fmt.Errorf("segment delete failed, segmentID = %d, err = %s", segmentID, err)
@@ -301,6 +311,13 @@ func processDeleteMessages(replica ReplicaInterface, segType segmentType, msg *m
 	for _, segmentID := range resultSegmentIDs {
 		segment, err := replica.getSegmentByID(segmentID, segType)
 		if err != nil {
+			if errors.Is(err, ErrSegmentNotFound) {
+				log.Warn("segment not found when process delete messages, it may have been released due to compaction",
+					zap.Int64("segmentID", segmentID),
+					zap.Error(err),
+				)
+				continue
+			}
 			return err
 		}
 		pks, tss, err := filterSegmentsByPKs(primaryKeys, msg.Timestamps, segment)
@@ -346,9 +363,7 @@ func filterSegmentsByPKs(pks []primaryKey, timestamps []Timestamp, segment *Segm
 }
 
 // insert would execute insert operations for specific growing segment
-func (iNode *insertNode) insert(iData *insertData, segmentID UniqueID, wg *sync.WaitGroup) error {
-	defer wg.Done()
-
+func (iNode *insertNode) insert(iData *insertData, segmentID UniqueID) error {
 	var targetSegment, err = iNode.metaReplica.getSegmentByID(segmentID, segmentTypeGrowing)
 	if err != nil {
 		return fmt.Errorf("getSegmentByID failed, err = %s", err)
@@ -372,10 +387,16 @@ func (iNode *insertNode) insert(iData *insertData, segmentID UniqueID, wg *sync.
 }
 
 // delete would execute delete operations for specific growing segment
-func (iNode *insertNode) delete(deleteData *deleteData, segmentID UniqueID, wg *sync.WaitGroup) error {
-	defer wg.Done()
+func (iNode *insertNode) delete(deleteData *deleteData, segmentID UniqueID) error {
 	targetSegment, err := iNode.metaReplica.getSegmentByID(segmentID, segmentTypeGrowing)
 	if err != nil {
+		if errors.Is(err, ErrSegmentNotFound) {
+			log.Warn("segment not found when applying delete message, it may have been released due to compaction",
+				zap.Int64("segmentID", segmentID),
+				zap.Error(err),
+			)
+			return nil
+		}
 		return fmt.Errorf("getSegmentByID failed, err = %s", err)
 	}
 

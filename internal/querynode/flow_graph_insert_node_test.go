@@ -18,7 +18,6 @@ package querynode
 
 import (
 	"fmt"
-	"sync"
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -106,9 +105,7 @@ func TestFlowGraphInsertNode_insert(t *testing.T) {
 		insertData, err := genFlowGraphInsertData(schema, defaultMsgLength)
 		assert.NoError(t, err)
 
-		wg := &sync.WaitGroup{}
-		wg.Add(1)
-		err = insertNode.insert(insertData, defaultSegmentID, wg)
+		err = insertNode.insert(insertData, defaultSegmentID)
 		assert.NoError(t, err)
 	})
 
@@ -119,10 +116,8 @@ func TestFlowGraphInsertNode_insert(t *testing.T) {
 		insertData, err := genFlowGraphInsertData(schema, defaultMsgLength)
 		assert.NoError(t, err)
 
-		wg := &sync.WaitGroup{}
-		wg.Add(1)
 		insertData.insertRecords[defaultSegmentID] = insertData.insertRecords[defaultSegmentID][:len(insertData.insertRecords[defaultSegmentID])/2]
-		err = insertNode.insert(insertData, defaultSegmentID, wg)
+		err = insertNode.insert(insertData, defaultSegmentID)
 		assert.Error(t, err)
 	})
 
@@ -130,9 +125,7 @@ func TestFlowGraphInsertNode_insert(t *testing.T) {
 		streaming, err := genSimpleReplica()
 		assert.NoError(t, err)
 		insertNode := newInsertNode(streaming, defaultCollectionID, defaultDMLChannel)
-		wg := &sync.WaitGroup{}
-		wg.Add(1)
-		err = insertNode.insert(nil, defaultSegmentID, wg)
+		err = insertNode.insert(nil, defaultSegmentID)
 		assert.Error(t, err)
 	})
 
@@ -147,9 +140,7 @@ func TestFlowGraphInsertNode_insert(t *testing.T) {
 		assert.NoError(t, err)
 		seg.setType(segmentTypeSealed)
 
-		wg := &sync.WaitGroup{}
-		wg.Add(1)
-		err = insertNode.insert(insertData, defaultSegmentID, wg)
+		err = insertNode.insert(insertData, defaultSegmentID)
 		assert.Error(t, err)
 	})
 }
@@ -164,15 +155,12 @@ func TestFlowGraphInsertNode_delete(t *testing.T) {
 		insertData, err := genFlowGraphInsertData(schema, defaultMsgLength)
 		assert.NoError(t, err)
 
-		wg := &sync.WaitGroup{}
-		wg.Add(1)
-		err = insertNode.insert(insertData, defaultSegmentID, wg)
+		err = insertNode.insert(insertData, defaultSegmentID)
 		assert.NoError(t, err)
 
 		deleteData, err := genFlowGraphDeleteData()
 		assert.NoError(t, err)
-		wg.Add(1)
-		err = insertNode.delete(deleteData, defaultSegmentID, wg)
+		err = insertNode.delete(deleteData, defaultSegmentID)
 		assert.NoError(t, err)
 	})
 
@@ -182,9 +170,7 @@ func TestFlowGraphInsertNode_delete(t *testing.T) {
 
 		deleteData, err := genFlowGraphDeleteData()
 		assert.NoError(t, err)
-		wg := &sync.WaitGroup{}
-		wg.Add(1)
-		err = insertNode.delete(deleteData, defaultSegmentID, wg)
+		err = insertNode.delete(deleteData, defaultSegmentID)
 		assert.NoError(t, err)
 	})
 
@@ -194,10 +180,8 @@ func TestFlowGraphInsertNode_delete(t *testing.T) {
 
 		deleteData, err := genFlowGraphDeleteData()
 		assert.NoError(t, err)
-		wg := &sync.WaitGroup{}
-		wg.Add(1)
 		deleteData.deleteTimestamps[defaultSegmentID] = deleteData.deleteTimestamps[defaultSegmentID][:len(deleteData.deleteTimestamps)/2]
-		err = insertNode.delete(deleteData, defaultSegmentID, wg)
+		err = insertNode.delete(deleteData, defaultSegmentID)
 		assert.Error(t, err)
 	})
 
@@ -205,10 +189,8 @@ func TestFlowGraphInsertNode_delete(t *testing.T) {
 		streaming, err := genSimpleReplica()
 		assert.NoError(t, err)
 		insertNode := newInsertNode(streaming, defaultCollectionID, defaultDMLChannel)
-		wg := &sync.WaitGroup{}
-		wg.Add(1)
-		err = insertNode.delete(nil, defaultSegmentID, wg)
-		assert.Error(t, err)
+		err = insertNode.delete(nil, defaultSegmentID)
+		assert.NoError(t, err)
 	})
 }
 

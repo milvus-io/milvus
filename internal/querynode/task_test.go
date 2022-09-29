@@ -719,7 +719,7 @@ func TestTask_releaseCollectionTask(t *testing.T) {
 			node: node,
 		}
 		err = task.Execute(ctx)
-		assert.Error(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("test execute remove deltaVChannel tSafe", func(t *testing.T) {

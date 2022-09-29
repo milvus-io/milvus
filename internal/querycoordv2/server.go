@@ -618,13 +618,13 @@ func (s *Server) checkReplicas() {
 					toRemove = append(toRemove, node)
 				}
 			}
-			log := log.With(
-				zap.Int64("replicaID", replica.GetID()),
-				zap.Int64s("offlineNodes", toRemove),
-			)
 
-			log.Debug("some nodes are offline, remove them from replica")
 			if len(toRemove) > 0 {
+				log := log.With(
+					zap.Int64("replicaID", replica.GetID()),
+					zap.Int64s("offlineNodes", toRemove),
+				)
+				log.Debug("some nodes are offline, remove them from replica")
 				replica.RemoveNode(toRemove...)
 				err := s.meta.ReplicaManager.Put(replica)
 				if err != nil {
