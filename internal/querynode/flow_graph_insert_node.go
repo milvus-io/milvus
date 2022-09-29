@@ -175,6 +175,8 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 	// 2. do preInsert
 	for segmentID := range iData.insertRecords {
+		log := log.With(
+			zap.Int64("segmentID", segmentID))
 		var targetSegment, err = iNode.metaReplica.getSegmentByID(segmentID, segmentTypeGrowing)
 		if err != nil {
 			// should not happen, segment should be created before
@@ -187,6 +189,10 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		if targetSegment != nil {
 			offset, err := targetSegment.segmentPreInsert(numOfRecords)
 			if err != nil {
+				if errors.Is(err, errSegmentUnhealthy) {
+					log.Debug("segment removed before preInsert")
+					continue
+				}
 				// error occurs when cgo function `PreInsert` failed
 				err = fmt.Errorf("segmentPreInsert failed, segmentID = %d, err = %s", segmentID, err)
 				log.Error(err.Error(), zap.Int64("collectionID", iNode.collectionID), zap.String("channel", iNode.channel))
@@ -256,7 +262,9 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			panic(err)
 		}
 		offset := segment.segmentPreDelete(len(pks))
-		delData.deleteOffset[segmentID] = offset
+		if offset >= 0 {
+			delData.deleteOffset[segmentID] = offset
+		}
 	}
 
 	// 3. do delete
@@ -364,6 +372,9 @@ func filterSegmentsByPKs(pks []primaryKey, timestamps []Timestamp, segment *Segm
 
 // insert would execute insert operations for specific growing segment
 func (iNode *insertNode) insert(iData *insertData, segmentID UniqueID) error {
+	log := log.With(
+		zap.Int64("collectionID", iNode.collectionID),
+		zap.Int64("segmentID", segmentID))
 	var targetSegment, err = iNode.metaReplica.getSegmentByID(segmentID, segmentTypeGrowing)
 	if err != nil {
 		return fmt.Errorf("getSegmentByID failed, err = %s", err)
@@ -379,15 +390,22 @@ func (iNode *insertNode) insert(iData *insertData, segmentID UniqueID) error {
 
 	err = targetSegment.segmentInsert(offsets, ids, timestamps, insertRecord)
 	if err != nil {
+		if errors.Is(err, errSegmentUnhealthy) {
+			log.Debug("segment removed before insert")
+			return nil
+		}
 		return fmt.Errorf("segmentInsert failed, segmentID = %d, err = %s", segmentID, err)
 	}
 
-	log.Debug("Do insert done", zap.Int("len", len(iData.insertIDs[segmentID])), zap.Int64("collectionID", targetSegment.collectionID), zap.Int64("segmentID", segmentID))
+	log.Debug("Do insert done", zap.Int("len", len(iData.insertIDs[segmentID])))
 	return nil
 }
 
 // delete would execute delete operations for specific growing segment
 func (iNode *insertNode) delete(deleteData *deleteData, segmentID UniqueID) error {
+	log := log.With(
+		zap.Int64("collectionID", iNode.collectionID),
+		zap.Int64("segmentID", segmentID))
 	targetSegment, err := iNode.metaReplica.getSegmentByID(segmentID, segmentTypeGrowing)
 	if err != nil {
 		if errors.Is(err, ErrSegmentNotFound) {
@@ -400,7 +418,7 @@ func (iNode *insertNode) delete(deleteData *deleteData, segmentID UniqueID) erro
 		return fmt.Errorf("getSegmentByID failed, err = %s", err)
 	}
 
-	if targetSegment.segmentType != segmentTypeGrowing {
+	if targetSegment.getType() != segmentTypeGrowing {
 		return fmt.Errorf("unexpected segmentType when delete, segmentType = %s", targetSegment.segmentType.String())
 	}
 
@@ -410,10 +428,14 @@ func (iNode *insertNode) delete(deleteData *deleteData, segmentID UniqueID) erro
 
 	err = targetSegment.segmentDelete(offset, ids, timestamps)
 	if err != nil {
+		if errors.Is(err, errSegmentUnhealthy) {
+			log.Debug("segment removed before delete")
+			return nil
+		}
 		return fmt.Errorf("segmentDelete failed, err = %s", err)
 	}
 
-	log.Debug("Do delete done", zap.Int("len", len(deleteData.deleteIDs[segmentID])), zap.Int64("segmentID", segmentID))
+	log.Debug("Do delete done", zap.Int("len", len(deleteData.deleteIDs[segmentID])))
 	return nil
 }
 

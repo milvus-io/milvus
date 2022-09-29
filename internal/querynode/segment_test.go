@@ -89,7 +89,7 @@ func TestSegment_deleteSegment(t *testing.T) {
 	t.Run("test delete nil ptr", func(t *testing.T) {
 		s, err := genSimpleSealedSegment(defaultMsgLength)
 		assert.NoError(t, err)
-		s.segmentPtr = nil
+		s.setUnhealthy()
 		deleteSegment(s)
 	})
 }
@@ -134,7 +134,7 @@ func TestSegment_getRowCount(t *testing.T) {
 	t.Run("test getRowCount nil ptr", func(t *testing.T) {
 		s, err := genSimpleSealedSegment(defaultMsgLength)
 		assert.NoError(t, err)
-		s.segmentPtr = nil
+		s.setUnhealthy()
 		res := s.getRowCount()
 		assert.Equal(t, int64(-1), res)
 	})
@@ -273,7 +273,7 @@ func TestSegment_getDeletedCount(t *testing.T) {
 	t.Run("test getDeletedCount nil ptr", func(t *testing.T) {
 		s, err := genSimpleSealedSegment(defaultMsgLength)
 		assert.NoError(t, err)
-		s.segmentPtr = nil
+		s.setUnhealthy()
 		res := s.getDeletedCount()
 		assert.Equal(t, int64(-1), res)
 	})
