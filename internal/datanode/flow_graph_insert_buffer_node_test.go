@@ -62,7 +62,7 @@ func TestFlowGraphInsertBufferNodeCreate(t *testing.T) {
 	defer cancel()
 
 	cm := storage.NewLocalChunkManager(storage.RootPath(insertNodeTestDir))
-	defer cm.RemoveWithPrefix("")
+	defer cm.RemoveWithPrefix(ctx, "")
 	insertChannelName := "datanode-01-test-flowgraphinsertbuffernode-create"
 
 	testPath := "/test/datanode/root/meta"
@@ -159,7 +159,7 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	insertChannelName := "datanode-01-test-flowgraphinsertbuffernode-operate"
 
 	cm := storage.NewLocalChunkManager(storage.RootPath(insertNodeTestDir))
-	defer cm.RemoveWithPrefix("")
+	defer cm.RemoveWithPrefix(ctx, "")
 	testPath := "/test/datanode/root/meta"
 	err := clearEtcd(testPath)
 	require.NoError(t, err)
@@ -429,7 +429,7 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 	wg := sync.WaitGroup{}
 
 	cm := storage.NewLocalChunkManager(storage.RootPath(insertNodeTestDir))
-	defer cm.RemoveWithPrefix("")
+	defer cm.RemoveWithPrefix(ctx, "")
 	fm := NewRendezvousFlushManager(NewAllocatorFactory(), cm, colRep, func(pack *segmentFlushPack) {
 		fpMut.Lock()
 		flushPacks = append(flushPacks, pack)
@@ -685,7 +685,7 @@ func TestFlowGraphInsertBufferNode_DropPartition(t *testing.T) {
 	wg := sync.WaitGroup{}
 
 	cm := storage.NewLocalChunkManager(storage.RootPath(insertNodeTestDir))
-	defer cm.RemoveWithPrefix("")
+	defer cm.RemoveWithPrefix(ctx, "")
 	fm := NewRendezvousFlushManager(NewAllocatorFactory(), cm, colRep, func(pack *segmentFlushPack) {
 		fpMut.Lock()
 		flushPacks = append(flushPacks, pack)
@@ -922,7 +922,7 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 	}
 
 	cm := storage.NewLocalChunkManager(storage.RootPath(insertNodeTestDir))
-	defer cm.RemoveWithPrefix("")
+	defer cm.RemoveWithPrefix(ctx, "")
 	for _, test := range tests {
 		collMeta := Factory.GetCollectionMeta(test.collID, "collection", test.pkType)
 		rcf := &RootCoordFactory{
@@ -979,8 +979,10 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 }
 
 func TestInsertBufferNode_updateSegStatesInReplica(te *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	cm := storage.NewLocalChunkManager(storage.RootPath(insertNodeTestDir))
-	defer cm.RemoveWithPrefix("")
+	defer cm.RemoveWithPrefix(ctx, "")
 	invalideTests := []struct {
 		replicaCollID UniqueID
 

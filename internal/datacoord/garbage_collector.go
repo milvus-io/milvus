@@ -17,6 +17,7 @@
 package datacoord
 
 import (
+	"context"
 	"path"
 	"sync"
 	"time"
@@ -116,6 +117,8 @@ func (gc *garbageCollector) close() {
 // scan load meta file info and compares OSS keys
 // if missing found, performs gc cleanup
 func (gc *garbageCollector) scan() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	var total, valid, missing int
 	segmentFiles := gc.meta.ListSegmentFiles()
 	filesMap := make(map[string]struct{})
@@ -131,7 +134,7 @@ func (gc *garbageCollector) scan() {
 	var removedKeys []string
 
 	for _, prefix := range prefixes {
-		infoKeys, modTimes, err := gc.option.cli.ListWithPrefix(prefix, true)
+		infoKeys, modTimes, err := gc.option.cli.ListWithPrefix(ctx, prefix, true)
 		if err != nil {
 			log.Error("gc listWithPrefix error", zap.String("error", err.Error()))
 		}
@@ -161,7 +164,7 @@ func (gc *garbageCollector) scan() {
 			if time.Since(modTimes[i]) > gc.option.missingTolerance {
 				// ignore error since it could be cleaned up next time
 				removedKeys = append(removedKeys, infoKey)
-				err = gc.option.cli.Remove(infoKey)
+				err = gc.option.cli.Remove(ctx, infoKey)
 				if err != nil {
 					log.Error("failed to remove object", zap.String("infoKey", infoKey), zap.Error(err))
 				}
@@ -236,9 +239,11 @@ func getLogs(sinfo *SegmentInfo) []*datapb.Binlog {
 }
 
 func (gc *garbageCollector) removeLogs(logs []*datapb.Binlog) bool {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	delFlag := true
 	for _, l := range logs {
-		err := gc.option.cli.Remove(l.GetLogPath())
+		err := gc.option.cli.Remove(ctx, l.GetLogPath())
 		if err != nil {
 			switch err.(type) {
 			case minio.ErrorResponse:

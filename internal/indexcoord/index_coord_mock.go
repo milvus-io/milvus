@@ -575,14 +575,14 @@ func (cmm *chunkManagerMock) RootPath() string {
 	return ""
 }
 
-func (cmm *chunkManagerMock) RemoveWithPrefix(prefix string) error {
+func (cmm *chunkManagerMock) RemoveWithPrefix(ctx context.Context, prefix string) error {
 	return cmm.removeWithPrefix(prefix)
 }
 
-func (cmm *chunkManagerMock) ListWithPrefix(prefix string, recursive bool) ([]string, []time.Time, error) {
+func (cmm *chunkManagerMock) ListWithPrefix(ctx context.Context, prefix string, recursive bool) ([]string, []time.Time, error) {
 	return cmm.listWithPrefix(prefix, recursive)
 }
 
-func (cmm *chunkManagerMock) Remove(key string) error {
+func (cmm *chunkManagerMock) Remove(ctx context.Context, key string) error {
 	return cmm.remove(key)
 }

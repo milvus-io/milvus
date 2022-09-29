@@ -141,8 +141,10 @@ func TestOrderFlushQueue_Order(t *testing.T) {
 }
 
 func TestRendezvousFlushManager(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	cm := storage.NewLocalChunkManager(storage.RootPath(flushTestDir))
-	defer cm.RemoveWithPrefix("")
+	defer cm.RemoveWithPrefix(ctx, "")
 
 	size := 1000
 	var counter atomic.Int64
@@ -178,8 +180,10 @@ func TestRendezvousFlushManager(t *testing.T) {
 }
 
 func TestRendezvousFlushManager_Inject(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	cm := storage.NewLocalChunkManager(storage.RootPath(flushTestDir))
-	defer cm.RemoveWithPrefix("")
+	defer cm.RemoveWithPrefix(ctx, "")
 
 	size := 1000
 	var counter atomic.Int64

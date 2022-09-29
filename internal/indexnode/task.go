@@ -216,7 +216,7 @@ func (it *indexBuildTask) Prepare(ctx context.Context) error {
 
 func (it *indexBuildTask) LoadData(ctx context.Context) error {
 	getValueByPath := func(path string) ([]byte, error) {
-		data, err := it.cm.Read(path)
+		data, err := it.cm.Read(ctx, path)
 		if err != nil {
 			if errors.Is(err, ErrNoSuchKey) {
 				return nil, ErrNoSuchKey
@@ -444,7 +444,7 @@ func (it *indexBuildTask) SaveIndexFiles(ctx context.Context) error {
 		blob := it.indexBlobs[idx]
 		savePath := getSavePathByKey(blob.Key)
 		saveFn := func() error {
-			return it.cm.Write(savePath, blob.Value)
+			return it.cm.Write(ctx, savePath, blob.Value)
 		}
 		if err := retry.Do(ctx, saveFn, retry.Attempts(5)); err != nil {
 			log.Ctx(ctx).Warn("index node save index file failed", zap.Error(err), zap.String("savePath", savePath))
@@ -502,7 +502,7 @@ func (it *indexBuildTask) SaveDiskAnnIndexFiles(ctx context.Context) error {
 
 	indexParamPath := getSavePathByKey(indexParamBlob.Key)
 	saveFn := func() error {
-		return it.cm.Write(indexParamPath, indexParamBlob.Value)
+		return it.cm.Write(ctx, indexParamPath, indexParamBlob.Value)
 	}
 	if err := retry.Do(ctx, saveFn, retry.Attempts(5)); err != nil {
 		log.Ctx(ctx).Warn("index node save index param file failed", zap.Error(err), zap.String("savePath", indexParamPath))

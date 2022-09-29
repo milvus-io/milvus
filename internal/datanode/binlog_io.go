@@ -86,7 +86,7 @@ func (b *binlogIO) download(ctx context.Context, paths []string) ([]*Blob, error
 					log.Warn("downloading failed, retry in 50ms", zap.Strings("paths", paths))
 					<-time.After(50 * time.Millisecond)
 				}
-				vs, err = b.MultiRead(paths)
+				vs, err = b.MultiRead(ctx, paths)
 			}
 		}
 		return nil
@@ -125,7 +125,7 @@ func (b *binlogIO) uploadSegmentFiles(
 					zap.Int64("segmentID", segID))
 				<-time.After(50 * time.Millisecond)
 			}
-			err = b.MultiWrite(kvs)
+			err = b.MultiWrite(ctx, kvs)
 		}
 	}
 	return nil

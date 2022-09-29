@@ -177,7 +177,7 @@ func (broker *globalMetaBroker) loadIndexExtraInfo(ctx context.Context, fieldPat
 	for _, indexFilePath := range fieldPathInfo.IndexFilePaths {
 		// get index params when detecting indexParamPrefix
 		if path.Base(indexFilePath) == storage.IndexParamsKey {
-			content, err := broker.cm.MultiRead([]string{indexFilePath})
+			content, err := broker.cm.MultiRead(ctx, []string{indexFilePath})
 			if err != nil {
 				return nil, err
 			}

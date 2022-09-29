@@ -345,7 +345,7 @@ func loadIndexForSegment(ctx context.Context, node *QueryNode, segmentID UniqueI
 		},
 	}
 
-	err = loader.LoadSegment(req, segmentTypeSealed)
+	err = loader.LoadSegment(ctx, req, segmentTypeSealed)
 	if err != nil {
 		return err
 	}
@@ -415,7 +415,7 @@ func generateAndSaveIndex(segmentID UniqueID, msgLength int, indexType, metricTy
 	for _, index := range serializedIndexBlobs {
 		p := strconv.Itoa(int(segmentID)) + "/" + index.Key
 		indexPaths = append(indexPaths, p)
-		err := cm.Write(p, index.Value)
+		err := cm.Write(context.Background(), p, index.Value)
 		if err != nil {
 			return nil, err
 		}
@@ -615,7 +615,7 @@ func genVectorChunkManager(ctx context.Context, col *Collection) (*storage.Vecto
 		return nil, err
 	}
 
-	vcm, err := storage.NewVectorChunkManager(lcm, rcm, &etcdpb.CollectionMeta{
+	vcm, err := storage.NewVectorChunkManager(ctx, lcm, rcm, &etcdpb.CollectionMeta{
 		ID:     col.id,
 		Schema: col.schema,
 	}, Params.QueryNodeCfg.CacheMemoryLimit, false)
@@ -1059,7 +1059,7 @@ func saveBinLog(ctx context.Context,
 	log.Debug("[query node unittest] save statsLog file to MinIO/S3")
 
 	cm := storage.NewLocalChunkManager(storage.RootPath(defaultLocalStorage))
-	err = cm.MultiWrite(kvs)
+	err = cm.MultiWrite(ctx, kvs)
 	return fieldBinlog, statsBinlog, err
 }
 
@@ -1107,7 +1107,7 @@ func saveDeltaLog(collectionID UniqueID,
 	})
 	log.Debug("[query node unittest] save delta log file to MinIO/S3")
 
-	return fieldBinlog, storage.NewLocalChunkManager(storage.RootPath(defaultLocalStorage)).MultiWrite(kvs)
+	return fieldBinlog, storage.NewLocalChunkManager(storage.RootPath(defaultLocalStorage)).MultiWrite(context.Background(), kvs)
 }
 
 func genSimpleTimestampFieldData(numRows int) []Timestamp {
@@ -2034,14 +2034,14 @@ func newMockChunkManager(opts ...mockChunkManagerOpt) storage.ChunkManager {
 	return ret
 }
 
-func (m *mockChunkManager) ReadAt(path string, offset int64, length int64) ([]byte, error) {
+func (m *mockChunkManager) ReadAt(ctx context.Context, path string, offset int64, length int64) ([]byte, error) {
 	if m.readAt != nil {
 		return m.readAt(path, offset, length)
 	}
 	return defaultReadAt(path, offset, length)
 }
 
-func (m *mockChunkManager) Read(path string) ([]byte, error) {
+func (m *mockChunkManager) Read(ctx context.Context, path string) ([]byte, error) {
 	if m.read != nil {
 		return m.read(path)
 	}

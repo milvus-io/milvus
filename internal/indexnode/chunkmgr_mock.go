@@ -95,32 +95,32 @@ func (c *mockChunkmgr) RootPath() string {
 	return ""
 }
 
-func (c *mockChunkmgr) Path(filePath string) (string, error) {
+func (c *mockChunkmgr) Path(ctx context.Context, filePath string) (string, error) {
 	// TODO
 	return filePath, errNotImplErr
 }
 
-func (c *mockChunkmgr) Size(filePath string) (int64, error) {
+func (c *mockChunkmgr) Size(ctx context.Context, filePath string) (int64, error) {
 	// TODO
 	return 0, errNotImplErr
 }
 
-func (c *mockChunkmgr) Write(filePath string, content []byte) error {
+func (c *mockChunkmgr) Write(ctx context.Context, filePath string, content []byte) error {
 	c.indexedData.Store(filePath, content)
 	return nil
 }
 
-func (c *mockChunkmgr) MultiWrite(contents map[string][]byte) error {
+func (c *mockChunkmgr) MultiWrite(ctx context.Context, contents map[string][]byte) error {
 	// TODO
 	return errNotImplErr
 }
 
-func (c *mockChunkmgr) Exist(filePath string) (bool, error) {
+func (c *mockChunkmgr) Exist(ctx context.Context, filePath string) (bool, error) {
 	// TODO
 	return false, errNotImplErr
 }
 
-func (c *mockChunkmgr) Read(filePath string) ([]byte, error) {
+func (c *mockChunkmgr) Read(ctx context.Context, filePath string) ([]byte, error) {
 	value, ok := c.segmentData.Load(filePath)
 	if !ok {
 		return nil, fmt.Errorf("data not exists")
@@ -128,47 +128,47 @@ func (c *mockChunkmgr) Read(filePath string) ([]byte, error) {
 	return value.(*storage.Blob).Value, nil
 }
 
-func (c *mockChunkmgr) Reader(filePath string) (storage.FileReader, error) {
+func (c *mockChunkmgr) Reader(ctx context.Context, filePath string) (storage.FileReader, error) {
 	// TODO
 	return nil, errNotImplErr
 }
 
-func (c *mockChunkmgr) MultiRead(filePaths []string) ([][]byte, error) {
+func (c *mockChunkmgr) MultiRead(ctx context.Context, filePaths []string) ([][]byte, error) {
 	// TODO
 	return nil, errNotImplErr
 }
 
-func (c *mockChunkmgr) ReadWithPrefix(prefix string) ([]string, [][]byte, error) {
+func (c *mockChunkmgr) ReadWithPrefix(ctx context.Context, prefix string) ([]string, [][]byte, error) {
 	// TODO
 	return nil, nil, errNotImplErr
 }
 
-func (c *mockChunkmgr) ListWithPrefix(prefix string, recursive bool) ([]string, []time.Time, error) {
+func (c *mockChunkmgr) ListWithPrefix(ctx context.Context, prefix string, recursive bool) ([]string, []time.Time, error) {
 	// TODO
 	return nil, nil, errNotImplErr
 }
 
-func (c *mockChunkmgr) Mmap(filePath string) (*mmap.ReaderAt, error) {
+func (c *mockChunkmgr) Mmap(ctx context.Context, filePath string) (*mmap.ReaderAt, error) {
 	// TODO
 	return nil, errNotImplErr
 }
 
-func (c *mockChunkmgr) ReadAt(filePath string, off int64, length int64) ([]byte, error) {
+func (c *mockChunkmgr) ReadAt(ctx context.Context, filePath string, off int64, length int64) ([]byte, error) {
 	// TODO
 	return nil, errNotImplErr
 }
 
-func (c *mockChunkmgr) Remove(filePath string) error {
+func (c *mockChunkmgr) Remove(ctx context.Context, filePath string) error {
 	// TODO
 	return errNotImplErr
 }
 
-func (c *mockChunkmgr) MultiRemove(filePaths []string) error {
+func (c *mockChunkmgr) MultiRemove(ctx context.Context, filePaths []string) error {
 	// TODO
 	return errNotImplErr
 }
 
-func (c *mockChunkmgr) RemoveWithPrefix(prefix string) error {
+func (c *mockChunkmgr) RemoveWithPrefix(ctx context.Context, prefix string) error {
 	// TODO
 	return errNotImplErr
 }

@@ -75,7 +75,7 @@ func TestSegmentLoader_loadSegment(t *testing.T) {
 			},
 		}
 
-		err = loader.LoadSegment(req, segmentTypeSealed)
+		err = loader.LoadSegment(ctx, req, segmentTypeSealed)
 		assert.NoError(t, err)
 	})
 
@@ -106,7 +106,7 @@ func TestSegmentLoader_loadSegment(t *testing.T) {
 			},
 		}
 
-		err = loader.LoadSegment(req, segmentTypeSealed)
+		err = loader.LoadSegment(ctx, req, segmentTypeSealed)
 		assert.Error(t, err)
 	})
 
@@ -119,7 +119,7 @@ func TestSegmentLoader_loadSegment(t *testing.T) {
 
 		req := &querypb.LoadSegmentsRequest{}
 
-		err = loader.LoadSegment(req, segmentTypeSealed)
+		err = loader.LoadSegment(ctx, req, segmentTypeSealed)
 		assert.Error(t, err)
 	})
 }
@@ -192,7 +192,7 @@ func TestSegmentLoader_loadSegmentFieldsData(t *testing.T) {
 		binlog, _, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
 		assert.NoError(t, err)
 
-		err = loader.loadSealedSegmentFields(segment, binlog, &querypb.SegmentLoadInfo{})
+		err = loader.loadSealedSegmentFields(ctx, segment, binlog, &querypb.SegmentLoadInfo{})
 		assert.NoError(t, err)
 	}
 
@@ -245,7 +245,7 @@ func TestSegmentLoader_invalid(t *testing.T) {
 			},
 		}
 
-		err = loader.LoadSegment(req, segmentTypeSealed)
+		err = loader.LoadSegment(ctx, req, segmentTypeSealed)
 		assert.Error(t, err)
 	})
 
@@ -283,7 +283,7 @@ func TestSegmentLoader_invalid(t *testing.T) {
 				},
 			},
 		}
-		err = loader.LoadSegment(req, segmentTypeSealed)
+		err = loader.LoadSegment(ctx, req, segmentTypeSealed)
 		assert.Error(t, err)
 	})
 
@@ -308,7 +308,7 @@ func TestSegmentLoader_invalid(t *testing.T) {
 			},
 		}
 
-		err = loader.LoadSegment(req, commonpb.SegmentState_Dropped)
+		err = loader.LoadSegment(ctx, req, commonpb.SegmentState_Dropped)
 		assert.Error(t, err)
 	})
 
@@ -322,7 +322,7 @@ func TestSegmentLoader_invalid(t *testing.T) {
 		require.NoError(t, err)
 
 		cm := &mocks.ChunkManager{}
-		cm.EXPECT().Read(mock.AnythingOfType("string")).Return(nil, errors.New("mocked"))
+		cm.EXPECT().Read(mock.Anything, mock.AnythingOfType("string")).Return(nil, errors.New("mocked"))
 
 		loader.cm = cm
 		fieldPk := genPKFieldSchema(simpleInt64Field)
@@ -350,7 +350,7 @@ func TestSegmentLoader_invalid(t *testing.T) {
 		binlog, _, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
 		assert.NoError(t, err)
 
-		err = loader.loadSealedSegmentFields(segment, binlog, &querypb.SegmentLoadInfo{})
+		err = loader.loadSealedSegmentFields(ctx, segment, binlog, &querypb.SegmentLoadInfo{})
 		assert.Error(t, err)
 	})
 
@@ -365,7 +365,7 @@ func TestSegmentLoader_invalid(t *testing.T) {
 		require.NoError(t, err)
 
 		cm := &mocks.ChunkManager{}
-		cm.EXPECT().Read(mock.AnythingOfType("string")).Return(nil, errors.New("mocked"))
+		cm.EXPECT().Read(mock.Anything, mock.AnythingOfType("string")).Return(nil, errors.New("mocked"))
 
 		loader.cm = cm
 		fieldPk := genPKFieldSchema(simpleInt64Field)
@@ -390,7 +390,7 @@ func TestSegmentLoader_invalid(t *testing.T) {
 			pool)
 		assert.Nil(t, err)
 
-		err = loader.loadFieldIndexData(segment, &querypb.FieldIndexInfo{
+		err = loader.loadFieldIndexData(ctx, segment, &querypb.FieldIndexInfo{
 			FieldID:     fieldVector.FieldID,
 			EnableIndex: true,
 
@@ -514,7 +514,7 @@ func TestSegmentLoader_testLoadGrowingAndSealed(t *testing.T) {
 			},
 		}
 
-		err = loader.LoadSegment(req1, segmentTypeSealed)
+		err = loader.LoadSegment(ctx, req1, segmentTypeSealed)
 		assert.NoError(t, err)
 
 		segment1, err := loader.metaReplica.getSegmentByID(segmentID1, segmentTypeSealed)
@@ -540,7 +540,7 @@ func TestSegmentLoader_testLoadGrowingAndSealed(t *testing.T) {
 			},
 		}
 
-		err = loader.LoadSegment(req2, segmentTypeSealed)
+		err = loader.LoadSegment(ctx, req2, segmentTypeSealed)
 		assert.NoError(t, err)
 
 		segment2, err := loader.metaReplica.getSegmentByID(segmentID2, segmentTypeSealed)
@@ -574,7 +574,7 @@ func TestSegmentLoader_testLoadGrowingAndSealed(t *testing.T) {
 			},
 		}
 
-		err = loader.LoadSegment(req1, segmentTypeGrowing)
+		err = loader.LoadSegment(ctx, req1, segmentTypeGrowing)
 		assert.NoError(t, err)
 
 		segment1, err := loader.metaReplica.getSegmentByID(segmentID1, segmentTypeGrowing)
@@ -600,7 +600,7 @@ func TestSegmentLoader_testLoadGrowingAndSealed(t *testing.T) {
 			},
 		}
 
-		err = loader.LoadSegment(req2, segmentTypeGrowing)
+		err = loader.LoadSegment(ctx, req2, segmentTypeGrowing)
 		assert.NoError(t, err)
 
 		segment2, err := loader.metaReplica.getSegmentByID(segmentID2, segmentTypeGrowing)
@@ -660,7 +660,7 @@ func TestSegmentLoader_testLoadSealedSegmentWithIndex(t *testing.T) {
 		},
 	}
 
-	err = loader.LoadSegment(req, segmentTypeSealed)
+	err = loader.LoadSegment(ctx, req, segmentTypeSealed)
 	assert.NoError(t, err)
 
 	segment, err := node.metaReplica.getSegmentByID(segmentID, segmentTypeSealed)

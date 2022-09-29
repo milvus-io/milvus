@@ -130,7 +130,7 @@ func buildVectorChunkManager(localPath string, localCacheEnable bool) (*VectorCh
 	lcm := NewLocalChunkManager(RootPath(localPath))
 
 	meta := initMeta()
-	vcm, err := NewVectorChunkManager(lcm, rcm, meta, 16, localCacheEnable)
+	vcm, err := NewVectorChunkManager(ctx, lcm, rcm, meta, 16, localCacheEnable)
 	if err != nil {
 		return nil, cancel, err
 	}
@@ -161,17 +161,19 @@ func TestNewVectorChunkManager(t *testing.T) {
 	lcm := NewLocalChunkManager(RootPath(localPath))
 
 	meta := initMeta()
-	vcm, err := NewVectorChunkManager(lcm, rcm, meta, 16, true)
+	vcm, err := NewVectorChunkManager(ctx, lcm, rcm, meta, 16, true)
 	assert.Equal(t, "", vcm.RootPath())
 	assert.Nil(t, err)
 	assert.NotNil(t, vcm)
 
-	vcm, err = NewVectorChunkManager(lcm, rcm, meta, -1, true)
+	vcm, err = NewVectorChunkManager(ctx, lcm, rcm, meta, -1, true)
 	assert.NotNil(t, err)
 	assert.Nil(t, vcm)
 }
 
 func TestVectorChunkManager_GetPath(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	localCaches := []bool{true, false}
 	for _, localCache := range localCaches {
 		vcm, cancel, err := buildVectorChunkManager(localPath, localCache)
@@ -179,19 +181,19 @@ func TestVectorChunkManager_GetPath(t *testing.T) {
 		assert.NotNil(t, vcm)
 
 		key := "1"
-		err = vcm.Write(key, []byte{1})
+		err = vcm.Write(ctx, key, []byte{1})
 		assert.Nil(t, err)
-		pathGet, err := vcm.Path(key)
-		assert.Nil(t, err)
-		assert.Equal(t, pathGet, key)
-
-		err = vcm.cacheStorage.Write(key, []byte{1})
-		assert.Nil(t, err)
-		pathGet, err = vcm.Path(key)
+		pathGet, err := vcm.Path(ctx, key)
 		assert.Nil(t, err)
 		assert.Equal(t, pathGet, key)
 
-		err = vcm.RemoveWithPrefix(localPath)
+		err = vcm.cacheStorage.Write(ctx, key, []byte{1})
+		assert.Nil(t, err)
+		pathGet, err = vcm.Path(ctx, key)
+		assert.Nil(t, err)
+		assert.Equal(t, pathGet, key)
+
+		err = vcm.RemoveWithPrefix(ctx, localPath)
 		assert.NoError(t, err)
 		cancel()
 		vcm.Close()
@@ -199,6 +201,8 @@ func TestVectorChunkManager_GetPath(t *testing.T) {
 }
 
 func TestVectorChunkManager_GetSize(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	localCaches := []bool{true, false}
 	for _, localCache := range localCaches {
 		vcm, cancel, err := buildVectorChunkManager(localPath, localCache)
@@ -206,19 +210,19 @@ func TestVectorChunkManager_GetSize(t *testing.T) {
 		assert.NotNil(t, vcm)
 
 		key := "1"
-		err = vcm.Write(key, []byte{1})
+		err = vcm.Write(ctx, key, []byte{1})
 		assert.Nil(t, err)
-		sizeGet, err := vcm.Size(key)
-		assert.Nil(t, err)
-		assert.EqualValues(t, sizeGet, 1)
-
-		err = vcm.cacheStorage.Write(key, []byte{1})
-		assert.Nil(t, err)
-		sizeGet, err = vcm.Size(key)
+		sizeGet, err := vcm.Size(ctx, key)
 		assert.Nil(t, err)
 		assert.EqualValues(t, sizeGet, 1)
 
-		err = vcm.RemoveWithPrefix(localPath)
+		err = vcm.cacheStorage.Write(ctx, key, []byte{1})
+		assert.Nil(t, err)
+		sizeGet, err = vcm.Size(ctx, key)
+		assert.Nil(t, err)
+		assert.EqualValues(t, sizeGet, 1)
+
+		err = vcm.RemoveWithPrefix(ctx, localPath)
 		assert.NoError(t, err)
 		cancel()
 		vcm.Close()
@@ -226,6 +230,9 @@ func TestVectorChunkManager_GetSize(t *testing.T) {
 }
 
 func TestVectorChunkManager_Write(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	localCaches := []bool{true, false}
 	for _, localCache := range localCaches {
 		vcm, cancel, err := buildVectorChunkManager(localPath, localCache)
@@ -233,10 +240,10 @@ func TestVectorChunkManager_Write(t *testing.T) {
 		assert.NotNil(t, vcm)
 
 		key := "1"
-		err = vcm.Write(key, []byte{1})
+		err = vcm.Write(ctx, key, []byte{1})
 		assert.Nil(t, err)
 
-		exist, err := vcm.Exist(key)
+		exist, err := vcm.Exist(ctx, key)
 		assert.True(t, exist)
 		assert.NoError(t, err)
 
@@ -244,17 +251,17 @@ func TestVectorChunkManager_Write(t *testing.T) {
 			"key_1": {111},
 			"key_2": {222},
 		}
-		err = vcm.MultiWrite(contents)
+		err = vcm.MultiWrite(ctx, contents)
 		assert.NoError(t, err)
 
-		exist, err = vcm.Exist("key_1")
+		exist, err = vcm.Exist(ctx, "key_1")
 		assert.True(t, exist)
 		assert.NoError(t, err)
-		exist, err = vcm.Exist("key_2")
+		exist, err = vcm.Exist(ctx, "key_2")
 		assert.True(t, exist)
 		assert.NoError(t, err)
 
-		err = vcm.RemoveWithPrefix(localPath)
+		err = vcm.RemoveWithPrefix(ctx, localPath)
 		assert.NoError(t, err)
 		cancel()
 		vcm.Close()
@@ -262,6 +269,9 @@ func TestVectorChunkManager_Write(t *testing.T) {
 }
 
 func TestVectorChunkManager_Remove(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	localCaches := []bool{true, false}
 	for _, localCache := range localCaches {
 		vcm, cancel, err := buildVectorChunkManager(localPath, localCache)
@@ -269,13 +279,13 @@ func TestVectorChunkManager_Remove(t *testing.T) {
 		assert.NotNil(t, vcm)
 
 		key := "1"
-		err = vcm.cacheStorage.Write(key, []byte{1})
+		err = vcm.cacheStorage.Write(ctx, key, []byte{1})
 		assert.Nil(t, err)
 
-		err = vcm.Remove(key)
+		err = vcm.Remove(ctx, key)
 		assert.Nil(t, err)
 
-		exist, err := vcm.Exist(key)
+		exist, err := vcm.Exist(ctx, key)
 		assert.False(t, exist)
 		assert.NoError(t, err)
 
@@ -283,20 +293,20 @@ func TestVectorChunkManager_Remove(t *testing.T) {
 			"key_1": {111},
 			"key_2": {222},
 		}
-		err = vcm.cacheStorage.MultiWrite(contents)
+		err = vcm.cacheStorage.MultiWrite(ctx, contents)
 		assert.NoError(t, err)
 
-		err = vcm.MultiRemove([]string{"key_1", "key_2"})
+		err = vcm.MultiRemove(ctx, []string{"key_1", "key_2"})
 		assert.NoError(t, err)
 
-		exist, err = vcm.Exist("key_1")
+		exist, err = vcm.Exist(ctx, "key_1")
 		assert.False(t, exist)
 		assert.NoError(t, err)
-		exist, err = vcm.Exist("key_2")
+		exist, err = vcm.Exist(ctx, "key_2")
 		assert.False(t, exist)
 		assert.NoError(t, err)
 
-		err = vcm.RemoveWithPrefix(localPath)
+		err = vcm.RemoveWithPrefix(ctx, localPath)
 		assert.NoError(t, err)
 		cancel()
 		vcm.Close()
@@ -308,20 +318,20 @@ type mockFailedChunkManager struct {
 	ChunkManager
 }
 
-func (m *mockFailedChunkManager) Remove(key string) error {
+func (m *mockFailedChunkManager) Remove(ctx context.Context, key string) error {
 	if m.fail {
 		return errors.New("remove error")
 	}
 	return nil
 }
 
-func (m *mockFailedChunkManager) RemoveWithPrefix(prefix string) error {
+func (m *mockFailedChunkManager) RemoveWithPrefix(ctx context.Context, prefix string) error {
 	if m.fail {
 		return errors.New("remove with prefix error")
 	}
 	return nil
 }
-func (m *mockFailedChunkManager) MultiRemove(key []string) error {
+func (m *mockFailedChunkManager) MultiRemove(ctx context.Context, key []string) error {
 	if m.fail {
 		return errors.New("multi remove error")
 	}
@@ -329,23 +339,29 @@ func (m *mockFailedChunkManager) MultiRemove(key []string) error {
 }
 
 func TestVectorChunkManager_Remove_Fail(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	vcm := &VectorChunkManager{
 		vectorStorage: &mockFailedChunkManager{fail: true},
 		cacheStorage:  &mockFailedChunkManager{fail: true},
 	}
-	assert.Error(t, vcm.Remove("test"))
-	assert.Error(t, vcm.MultiRemove([]string{"test"}))
-	assert.Error(t, vcm.RemoveWithPrefix("test"))
+	assert.Error(t, vcm.Remove(ctx, "test"))
+	assert.Error(t, vcm.MultiRemove(ctx, []string{"test"}))
+	assert.Error(t, vcm.RemoveWithPrefix(ctx, "test"))
 }
 
 func TestVectorChunkManager_Read(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	localCaches := []bool{true, false}
 	for _, localCache := range localCaches {
 		vcm, cancel, err := buildVectorChunkManager(localPath, localCache)
 		assert.NotNil(t, vcm)
 		assert.NoError(t, err)
 
-		content, err := vcm.Read("9999")
+		content, err := vcm.Read(ctx, "9999")
 		assert.Error(t, err)
 		assert.Nil(t, content)
 
@@ -353,15 +369,15 @@ func TestVectorChunkManager_Read(t *testing.T) {
 		binlogs := initBinlogFile(meta)
 		assert.NotNil(t, binlogs)
 		for _, binlog := range binlogs {
-			err := vcm.vectorStorage.Write(binlog.Key, binlog.Value)
+			err := vcm.vectorStorage.Write(ctx, binlog.Key, binlog.Value)
 			assert.Nil(t, err)
 		}
 
-		content, err = vcm.Read("108")
+		content, err = vcm.Read(ctx, "108")
 		assert.Nil(t, err)
 		assert.Equal(t, []byte{0, 255}, content)
 
-		content, err = vcm.Read("109")
+		content, err = vcm.Read(ctx, "109")
 		assert.Nil(t, err)
 		floatResult := make([]float32, 0)
 		for i := 0; i < len(content)/4; i++ {
@@ -370,7 +386,7 @@ func TestVectorChunkManager_Read(t *testing.T) {
 		}
 		assert.Equal(t, []float32{0, 1, 2, 3, 4, 5, 6, 7, 0, 111, 222, 333, 444, 555, 777, 666}, floatResult)
 
-		contents, err := vcm.MultiRead([]string{"108", "109"})
+		contents, err := vcm.MultiRead(ctx, []string{"108", "109"})
 		assert.Nil(t, err)
 		assert.Equal(t, []byte{0, 255}, contents[0])
 
@@ -381,7 +397,7 @@ func TestVectorChunkManager_Read(t *testing.T) {
 		}
 		assert.Equal(t, []float32{0, 1, 2, 3, 4, 5, 6, 7, 0, 111, 222, 333, 444, 555, 777, 666}, floatResult)
 
-		keys, contents, err := vcm.ReadWithPrefix("10")
+		keys, contents, err := vcm.ReadWithPrefix(ctx, "10")
 		assert.Nil(t, err)
 		assert.Equal(t, "101", keys[0])
 		assert.Equal(t, []byte{3, 4}, contents[0])
@@ -398,7 +414,7 @@ func TestVectorChunkManager_Read(t *testing.T) {
 		assert.Equal(t, "109", keys[2])
 		assert.Equal(t, []float32{0, 1, 2, 3, 4, 5, 6, 7, 0, 111, 222, 333, 444, 555, 777, 666}, floatResult)
 
-		content, err = vcm.ReadAt("109", 8*4, 8*4)
+		content, err = vcm.ReadAt(ctx, "109", 8*4, 8*4)
 		assert.Nil(t, err)
 
 		floatResult = make([]float32, 0)
@@ -408,36 +424,36 @@ func TestVectorChunkManager_Read(t *testing.T) {
 		}
 		assert.Equal(t, []float32{0, 111, 222, 333, 444, 555, 777, 666}, floatResult)
 
-		content, err = vcm.ReadAt("9999", 0, 8*4)
+		content, err = vcm.ReadAt(ctx, "9999", 0, 8*4)
 		assert.Error(t, err)
 		assert.Nil(t, content)
 
-		content, err = vcm.ReadAt("109", 8*4, 8*4)
+		content, err = vcm.ReadAt(ctx, "109", 8*4, 8*4)
 		assert.Nil(t, err)
 		assert.Equal(t, 32, len(content))
 
 		if localCache {
-			r, err := vcm.Mmap("109")
+			r, err := vcm.Mmap(ctx, "109")
 			assert.Nil(t, err)
 			p := make([]byte, 32)
 			n, err := r.ReadAt(p, 32)
 			assert.Nil(t, err)
 			assert.Equal(t, n, 32)
 
-			r, err = vcm.Mmap("not exist")
+			r, err = vcm.Mmap(ctx, "not exist")
 			assert.Error(t, err)
 			assert.Nil(t, nil)
 		}
 
-		content, err = vcm.ReadAt("109", 9999, 8*4)
+		content, err = vcm.ReadAt(ctx, "109", 9999, 8*4)
 		assert.Error(t, err)
 		assert.Nil(t, content)
 
-		content, err = vcm.ReadAt("9999", 0, 8*4)
+		content, err = vcm.ReadAt(ctx, "9999", 0, 8*4)
 		assert.Error(t, err)
 		assert.Nil(t, content)
 
-		err = vcm.RemoveWithPrefix(localPath)
+		err = vcm.RemoveWithPrefix(ctx, localPath)
 		assert.NoError(t, err)
 
 		cancel()

@@ -199,6 +199,7 @@ func genMockReplica(segIDs []int64, pks []primaryKey, chanName string) *mockRepl
 }
 
 func TestFlowGraphDeleteNode_Operate(t *testing.T) {
+	ctx := context.Background()
 	t.Run("Test deleteNode Operate invalid Msg", func(te *testing.T) {
 		invalidInTests := []struct {
 			in   []Msg
@@ -245,7 +246,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		tss = []uint64{1, 1, 1, 1, 1}
 	)
 	cm := storage.NewLocalChunkManager(storage.RootPath(deleteNodeTestDir))
-	defer cm.RemoveWithPrefix("")
+	defer cm.RemoveWithPrefix(ctx, "")
 
 	t.Run("Test get segment by varChar primary keys", func(te *testing.T) {
 		replica := genMockReplica(segIDs, varCharPks, chanName)
@@ -475,13 +476,13 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 }
 
 func TestFlowGraphDeleteNode_showDelBuf(t *testing.T) {
-	cm := storage.NewLocalChunkManager(storage.RootPath(deleteNodeTestDir))
-	defer cm.RemoveWithPrefix("")
-
-	fm := NewRendezvousFlushManager(NewAllocatorFactory(), cm, &mockReplica{}, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
-
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
+
+	cm := storage.NewLocalChunkManager(storage.RootPath(deleteNodeTestDir))
+	defer cm.RemoveWithPrefix(ctx, "")
+
+	fm := NewRendezvousFlushManager(NewAllocatorFactory(), cm, &mockReplica{}, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
 
 	chanName := "datanode-test-FlowGraphDeletenode-showDelBuf"
 	testPath := "/test/datanode/root/meta"
@@ -515,13 +516,13 @@ func TestFlowGraphDeleteNode_showDelBuf(t *testing.T) {
 }
 
 func TestFlowGraphDeleteNode_updateCompactedSegments(t *testing.T) {
-	cm := storage.NewLocalChunkManager(storage.RootPath(deleteNodeTestDir))
-	defer cm.RemoveWithPrefix("")
-
-	fm := NewRendezvousFlushManager(NewAllocatorFactory(), cm, &mockReplica{}, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
+	cm := storage.NewLocalChunkManager(storage.RootPath(deleteNodeTestDir))
+	defer cm.RemoveWithPrefix(ctx, "")
+
+	fm := NewRendezvousFlushManager(NewAllocatorFactory(), cm, &mockReplica{}, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
 
 	chanName := "datanode-test-FlowGraphDeletenode-showDelBuf"
 	testPath := "/test/datanode/root/meta"

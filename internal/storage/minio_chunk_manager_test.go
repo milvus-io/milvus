@@ -96,7 +96,7 @@ func TestMinIOCM(t *testing.T) {
 
 		testCM, err := newMinIOChunkManager(ctx, testBucket, testLoadRoot)
 		require.NoError(t, err)
-		defer testCM.RemoveWithPrefix(testLoadRoot)
+		defer testCM.RemoveWithPrefix(ctx, testLoadRoot)
 
 		assert.Equal(t, testLoadRoot, testCM.RootPath())
 
@@ -112,7 +112,7 @@ func TestMinIOCM(t *testing.T) {
 		}
 
 		for _, test := range prepareTests {
-			err = testCM.Write(path.Join(testLoadRoot, test.key), test.value)
+			err = testCM.Write(ctx, path.Join(testLoadRoot, test.key), test.value)
 			require.NoError(t, err)
 		}
 
@@ -135,17 +135,17 @@ func TestMinIOCM(t *testing.T) {
 		for _, test := range loadTests {
 			t.Run(test.description, func(t *testing.T) {
 				if test.isvalid {
-					got, err := testCM.Read(path.Join(testLoadRoot, test.loadKey))
+					got, err := testCM.Read(ctx, path.Join(testLoadRoot, test.loadKey))
 					assert.NoError(t, err)
 					assert.Equal(t, test.expectedValue, got)
 				} else {
 					if test.loadKey == "/" {
-						got, err := testCM.Read(test.loadKey)
+						got, err := testCM.Read(ctx, test.loadKey)
 						assert.Error(t, err)
 						assert.Empty(t, got)
 						return
 					}
-					got, err := testCM.Read(path.Join(testLoadRoot, test.loadKey))
+					got, err := testCM.Read(ctx, path.Join(testLoadRoot, test.loadKey))
 					assert.Error(t, err)
 					assert.Empty(t, got)
 				}
@@ -166,7 +166,7 @@ func TestMinIOCM(t *testing.T) {
 
 		for _, test := range loadWithPrefixTests {
 			t.Run(test.description, func(t *testing.T) {
-				gotk, gotv, err := testCM.ReadWithPrefix(path.Join(testLoadRoot, test.prefix))
+				gotk, gotv, err := testCM.ReadWithPrefix(ctx, path.Join(testLoadRoot, test.prefix))
 				assert.NoError(t, err)
 				assert.Equal(t, len(test.expectedValue), len(gotk))
 				assert.Equal(t, len(test.expectedValue), len(gotv))
@@ -191,11 +191,11 @@ func TestMinIOCM(t *testing.T) {
 					test.multiKeys[i] = path.Join(testLoadRoot, test.multiKeys[i])
 				}
 				if test.isvalid {
-					got, err := testCM.MultiRead(test.multiKeys)
+					got, err := testCM.MultiRead(ctx, test.multiKeys)
 					assert.NoError(t, err)
 					assert.Equal(t, test.expectedValue, got)
 				} else {
-					got, err := testCM.MultiRead(test.multiKeys)
+					got, err := testCM.MultiRead(ctx, test.multiKeys)
 					assert.Error(t, err)
 					assert.Equal(t, test.expectedValue, got)
 				}
@@ -211,9 +211,9 @@ func TestMinIOCM(t *testing.T) {
 
 		testCM, err := newMinIOChunkManager(ctx, testBucket, testMultiSaveRoot)
 		assert.Nil(t, err)
-		defer testCM.RemoveWithPrefix(testMultiSaveRoot)
+		defer testCM.RemoveWithPrefix(ctx, testMultiSaveRoot)
 
-		err = testCM.Write(path.Join(testMultiSaveRoot, "key_1"), []byte("111"))
+		err = testCM.Write(ctx, path.Join(testMultiSaveRoot, "key_1"), []byte("111"))
 		assert.Nil(t, err)
 
 		kvs := map[string][]byte{
@@ -221,10 +221,10 @@ func TestMinIOCM(t *testing.T) {
 			path.Join(testMultiSaveRoot, "key_2"): []byte("456"),
 		}
 
-		err = testCM.MultiWrite(kvs)
+		err = testCM.MultiWrite(ctx, kvs)
 		assert.Nil(t, err)
 
-		val, err := testCM.Read(path.Join(testMultiSaveRoot, "key_1"))
+		val, err := testCM.Read(ctx, path.Join(testMultiSaveRoot, "key_1"))
 		assert.Nil(t, err)
 		assert.Equal(t, []byte("123"), val)
 	})
@@ -236,7 +236,7 @@ func TestMinIOCM(t *testing.T) {
 
 		testCM, err := newMinIOChunkManager(ctx, testBucket, testRemoveRoot)
 		assert.Nil(t, err)
-		defer testCM.RemoveWithPrefix(testRemoveRoot)
+		defer testCM.RemoveWithPrefix(ctx, testRemoveRoot)
 
 		prepareTests := []struct {
 			k string
@@ -254,7 +254,7 @@ func TestMinIOCM(t *testing.T) {
 
 		for _, test := range prepareTests {
 			k := path.Join(testRemoveRoot, test.k)
-			err = testCM.Write(k, test.v)
+			err = testCM.Write(ctx, k, test.v)
 			require.NoError(t, err)
 		}
 
@@ -271,14 +271,14 @@ func TestMinIOCM(t *testing.T) {
 		for _, test := range removeTests {
 			t.Run(test.description, func(t *testing.T) {
 				k := path.Join(testRemoveRoot, test.removeKey)
-				v, err := testCM.Read(k)
+				v, err := testCM.Read(ctx, k)
 				require.NoError(t, err)
 				require.Equal(t, test.valueBeforeRemove, v)
 
-				err = testCM.Remove(k)
+				err = testCM.Remove(ctx, k)
 				assert.NoError(t, err)
 
-				v, err = testCM.Read(k)
+				v, err = testCM.Read(ctx, k)
 				require.Error(t, err)
 				require.Empty(t, v)
 			})
@@ -290,15 +290,15 @@ func TestMinIOCM(t *testing.T) {
 			path.Join(testRemoveRoot, "mkey_3"),
 		}
 
-		lv, err := testCM.MultiRead(multiRemoveTest)
+		lv, err := testCM.MultiRead(ctx, multiRemoveTest)
 		require.NoError(t, err)
 		require.ElementsMatch(t, [][]byte{[]byte("111"), []byte("222"), []byte("333")}, lv)
 
-		err = testCM.MultiRemove(multiRemoveTest)
+		err = testCM.MultiRemove(ctx, multiRemoveTest)
 		assert.NoError(t, err)
 
 		for _, k := range multiRemoveTest {
-			v, err := testCM.Read(k)
+			v, err := testCM.Read(ctx, k)
 			assert.Error(t, err)
 			assert.Empty(t, v)
 		}
@@ -310,15 +310,15 @@ func TestMinIOCM(t *testing.T) {
 		}
 		removePrefix := path.Join(testRemoveRoot, "key_prefix")
 
-		lv, err = testCM.MultiRead(removeWithPrefixTest)
+		lv, err = testCM.MultiRead(ctx, removeWithPrefixTest)
 		require.NoError(t, err)
 		require.ElementsMatch(t, [][]byte{[]byte("111"), []byte("222"), []byte("333")}, lv)
 
-		err = testCM.RemoveWithPrefix(removePrefix)
+		err = testCM.RemoveWithPrefix(ctx, removePrefix)
 		assert.NoError(t, err)
 
 		for _, k := range removeWithPrefixTest {
-			v, err := testCM.Read(k)
+			v, err := testCM.Read(ctx, k)
 			assert.Error(t, err)
 			assert.Empty(t, v)
 		}
@@ -332,44 +332,44 @@ func TestMinIOCM(t *testing.T) {
 
 		testCM, err := newMinIOChunkManager(ctx, testBucket, testLoadPartialRoot)
 		require.NoError(t, err)
-		defer testCM.RemoveWithPrefix(testLoadPartialRoot)
+		defer testCM.RemoveWithPrefix(ctx, testLoadPartialRoot)
 
 		key := path.Join(testLoadPartialRoot, "TestMinIOKV_LoadPartial_key")
 		value := []byte("TestMinIOKV_LoadPartial_value")
 
-		err = testCM.Write(key, value)
+		err = testCM.Write(ctx, key, value)
 		assert.NoError(t, err)
 
 		var off, length int64
 		var partial []byte
 
 		off, length = 1, 1
-		partial, err = testCM.ReadAt(key, off, length)
+		partial, err = testCM.ReadAt(ctx, key, off, length)
 		assert.NoError(t, err)
 		assert.ElementsMatch(t, partial, value[off:off+length])
 
 		off, length = 0, int64(len(value))
-		partial, err = testCM.ReadAt(key, off, length)
+		partial, err = testCM.ReadAt(ctx, key, off, length)
 		assert.NoError(t, err)
 		assert.ElementsMatch(t, partial, value[off:off+length])
 
 		// error case
 		off, length = 5, -2
-		_, err = testCM.ReadAt(key, off, length)
+		_, err = testCM.ReadAt(ctx, key, off, length)
 		assert.Error(t, err)
 
 		off, length = -1, 2
-		_, err = testCM.ReadAt(key, off, length)
+		_, err = testCM.ReadAt(ctx, key, off, length)
 		assert.Error(t, err)
 
 		off, length = 1, -2
-		_, err = testCM.ReadAt(key, off, length)
+		_, err = testCM.ReadAt(ctx, key, off, length)
 		assert.Error(t, err)
 
-		err = testCM.Remove(key)
+		err = testCM.Remove(ctx, key)
 		assert.NoError(t, err)
 		off, length = 1, 1
-		_, err = testCM.ReadAt(key, off, length)
+		_, err = testCM.ReadAt(ctx, key, off, length)
 		assert.Error(t, err)
 	})
 
@@ -380,21 +380,21 @@ func TestMinIOCM(t *testing.T) {
 
 		testCM, err := newMinIOChunkManager(ctx, testBucket, testGetSizeRoot)
 		require.NoError(t, err)
-		defer testCM.RemoveWithPrefix(testGetSizeRoot)
+		defer testCM.RemoveWithPrefix(ctx, testGetSizeRoot)
 
 		key := path.Join(testGetSizeRoot, "TestMinIOKV_GetSize_key")
 		value := []byte("TestMinIOKV_GetSize_value")
 
-		err = testCM.Write(key, value)
+		err = testCM.Write(ctx, key, value)
 		assert.NoError(t, err)
 
-		size, err := testCM.Size(key)
+		size, err := testCM.Size(ctx, key)
 		assert.NoError(t, err)
 		assert.Equal(t, size, int64(len(value)))
 
 		key2 := path.Join(testGetSizeRoot, "TestMemoryKV_GetSize_key2")
 
-		size, err = testCM.Size(key2)
+		size, err = testCM.Size(ctx, key2)
 		assert.Error(t, err)
 		assert.Equal(t, int64(0), size)
 	})
@@ -406,21 +406,21 @@ func TestMinIOCM(t *testing.T) {
 
 		testCM, err := newMinIOChunkManager(ctx, testBucket, testGetPathRoot)
 		require.NoError(t, err)
-		defer testCM.RemoveWithPrefix(testGetPathRoot)
+		defer testCM.RemoveWithPrefix(ctx, testGetPathRoot)
 
 		key := path.Join(testGetPathRoot, "TestMinIOKV_GetSize_key")
 		value := []byte("TestMinIOKV_GetSize_value")
 
-		err = testCM.Write(key, value)
+		err = testCM.Write(ctx, key, value)
 		assert.NoError(t, err)
 
-		p, err := testCM.Path(key)
+		p, err := testCM.Path(ctx, key)
 		assert.NoError(t, err)
 		assert.Equal(t, p, key)
 
 		key2 := path.Join(testGetPathRoot, "TestMemoryKV_GetSize_key2")
 
-		p, err = testCM.Path(key2)
+		p, err = testCM.Path(ctx, key2)
 		assert.Error(t, err)
 		assert.Equal(t, p, "")
 	})
@@ -432,15 +432,15 @@ func TestMinIOCM(t *testing.T) {
 
 		testCM, err := newMinIOChunkManager(ctx, testBucket, testMmapRoot)
 		require.NoError(t, err)
-		defer testCM.RemoveWithPrefix(testMmapRoot)
+		defer testCM.RemoveWithPrefix(ctx, testMmapRoot)
 
 		key := path.Join(testMmapRoot, "TestMinIOKV_GetSize_key")
 		value := []byte("TestMinIOKV_GetSize_value")
 
-		err = testCM.Write(key, value)
+		err = testCM.Write(ctx, key, value)
 		assert.NoError(t, err)
 
-		r, err := testCM.Mmap(key)
+		r, err := testCM.Mmap(ctx, key)
 		assert.Error(t, err)
 		assert.Nil(t, r)
 
@@ -453,50 +453,50 @@ func TestMinIOCM(t *testing.T) {
 
 		testCM, err := newMinIOChunkManager(ctx, testBucket, testPrefix)
 		require.NoError(t, err)
-		defer testCM.RemoveWithPrefix(testPrefix)
+		defer testCM.RemoveWithPrefix(ctx, testPrefix)
 
 		pathB := path.Join("a", "b")
 
 		key := path.Join(testPrefix, pathB)
 		value := []byte("a")
 
-		err = testCM.Write(key, value)
+		err = testCM.Write(ctx, key, value)
 		assert.NoError(t, err)
 
 		pathC := path.Join("a", "c")
 		key = path.Join(testPrefix, pathC)
-		err = testCM.Write(key, value)
+		err = testCM.Write(ctx, key, value)
 		assert.NoError(t, err)
 
 		pathPrefix := path.Join(testPrefix, "a")
-		r, m, err := testCM.ListWithPrefix(pathPrefix, true)
+		r, m, err := testCM.ListWithPrefix(ctx, pathPrefix, true)
 		assert.NoError(t, err)
 		assert.Equal(t, len(r), 2)
 		assert.Equal(t, len(m), 2)
 
 		key = path.Join(testPrefix, "b", "b", "b")
-		err = testCM.Write(key, value)
+		err = testCM.Write(ctx, key, value)
 		assert.NoError(t, err)
 
 		key = path.Join(testPrefix, "b", "a", "b")
-		err = testCM.Write(key, value)
+		err = testCM.Write(ctx, key, value)
 		assert.NoError(t, err)
 
 		key = path.Join(testPrefix, "bc", "a", "b")
-		err = testCM.Write(key, value)
+		err = testCM.Write(ctx, key, value)
 		assert.NoError(t, err)
-		dirs, mods, err := testCM.ListWithPrefix(testPrefix+"/", true)
+		dirs, mods, err := testCM.ListWithPrefix(ctx, testPrefix+"/", true)
 		assert.NoError(t, err)
 		assert.Equal(t, 5, len(dirs))
 		assert.Equal(t, 5, len(mods))
 
-		dirs, mods, err = testCM.ListWithPrefix(path.Join(testPrefix, "b"), true)
+		dirs, mods, err = testCM.ListWithPrefix(ctx, path.Join(testPrefix, "b"), true)
 		assert.NoError(t, err)
 		assert.Equal(t, 3, len(dirs))
 		assert.Equal(t, 3, len(mods))
 
-		testCM.RemoveWithPrefix(testPrefix)
-		r, m, err = testCM.ListWithPrefix(pathPrefix, true)
+		testCM.RemoveWithPrefix(ctx, testPrefix)
+		r, m, err = testCM.ListWithPrefix(ctx, pathPrefix, true)
 		assert.NoError(t, err)
 		assert.Equal(t, 0, len(r))
 		assert.Equal(t, 0, len(m))
@@ -504,7 +504,7 @@ func TestMinIOCM(t *testing.T) {
 		// test wrong prefix
 		b := make([]byte, 2048)
 		pathWrong := path.Join(testPrefix, string(b))
-		_, _, err = testCM.ListWithPrefix(pathWrong, true)
+		_, _, err = testCM.ListWithPrefix(ctx, pathWrong, true)
 		assert.Error(t, err)
 	})
 }

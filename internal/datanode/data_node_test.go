@@ -453,7 +453,7 @@ func TestDataNode(t *testing.T) {
 		assert.True(t, ok)
 
 		filePath := "import/rows_1.json"
-		err = node.chunkManager.Write(filePath, content)
+		err = node.chunkManager.Write(ctx, filePath, content)
 		assert.NoError(t, err)
 		req := &datapb.ImportTaskRequest{
 			ImportTask: &datapb.ImportTask{
@@ -529,7 +529,7 @@ func TestDataNode(t *testing.T) {
 		}`)
 
 		filePath := "import/rows_1.json"
-		err = node.chunkManager.Write(filePath, content)
+		err = node.chunkManager.Write(ctx, filePath, content)
 		assert.NoError(t, err)
 		req := &datapb.ImportTaskRequest{
 			ImportTask: &datapb.ImportTask{
@@ -562,7 +562,7 @@ func TestDataNode(t *testing.T) {
 		}`)
 
 		filePath := "import/rows_1.json"
-		err = node.chunkManager.Write(filePath, content)
+		err = node.chunkManager.Write(ctx, filePath, content)
 		assert.NoError(t, err)
 		req := &datapb.ImportTaskRequest{
 			ImportTask: &datapb.ImportTask{

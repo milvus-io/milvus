@@ -71,7 +71,7 @@ func newQueryShard(
 	if remoteChunkManager == nil {
 		return nil, fmt.Errorf("can not create vector chunk manager for remote chunk manager is nil")
 	}
-	vectorChunkManager, err := storage.NewVectorChunkManager(localChunkManager, remoteChunkManager,
+	vectorChunkManager, err := storage.NewVectorChunkManager(ctx, localChunkManager, remoteChunkManager,
 		&etcdpb.CollectionMeta{
 			ID:     collectionID,
 			Schema: collection.schema,

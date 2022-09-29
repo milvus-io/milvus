@@ -928,7 +928,7 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 		numRows:      req.GetNumOfRows(),
 	}
 
-	replica.(*SegmentReplica).initPKBloomFilter(targetSeg, req.GetStatsLogs(), tsoutil.GetCurrentTime())
+	replica.(*SegmentReplica).initPKBloomFilter(ctx, targetSeg, req.GetStatsLogs(), tsoutil.GetCurrentTime())
 
 	if err := replica.mergeFlushedSegments(targetSeg, req.GetPlanID(), req.GetCompactedFrom()); err != nil {
 		status.Reason = err.Error()
@@ -1286,6 +1286,10 @@ func composeAssignSegmentIDRequest(rowNum int, shardID int, chNames []string,
 
 func createBinLogs(rowNum int, schema *schemapb.CollectionSchema, ts Timestamp,
 	fields map[storage.FieldID]storage.FieldData, node *DataNode, segmentID, colID, partID UniqueID) ([]*datapb.FieldBinlog, []*datapb.FieldBinlog, error) {
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	tsFieldData := make([]int64, rowNum)
 	for i := range tsFieldData {
 		tsFieldData[i] = int64(ts)
@@ -1375,7 +1379,7 @@ func createBinLogs(rowNum int, schema *schemapb.CollectionSchema, ts Timestamp,
 		}
 	}
 
-	err = node.chunkManager.MultiWrite(kvs)
+	err = node.chunkManager.MultiWrite(ctx, kvs)
 	if err != nil {
 		return nil, nil, err
 	}

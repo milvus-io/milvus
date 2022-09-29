@@ -3,8 +3,11 @@
 package mocks
 
 import (
-	mock "github.com/stretchr/testify/mock"
+	context "context"
+
 	mmap "golang.org/x/exp/mmap"
+
+	mock "github.com/stretchr/testify/mock"
 
 	storage "github.com/milvus-io/milvus/internal/storage"
 
@@ -24,20 +27,20 @@ func (_m *ChunkManager) EXPECT() *ChunkManager_Expecter {
 	return &ChunkManager_Expecter{mock: &_m.Mock}
 }
 
-// Exist provides a mock function with given fields: filePath
-func (_m *ChunkManager) Exist(filePath string) (bool, error) {
-	ret := _m.Called(filePath)
+// Exist provides a mock function with given fields: ctx, filePath
+func (_m *ChunkManager) Exist(ctx context.Context, filePath string) (bool, error) {
+	ret := _m.Called(ctx, filePath)
 
 	var r0 bool
-	if rf, ok := ret.Get(0).(func(string) bool); ok {
-		r0 = rf(filePath)
+	if rf, ok := ret.Get(0).(func(context.Context, string) bool); ok {
+		r0 = rf(ctx, filePath)
 	} else {
 		r0 = ret.Get(0).(bool)
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(string) error); ok {
-		r1 = rf(filePath)
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, filePath)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -51,14 +54,15 @@ type ChunkManager_Exist_Call struct {
 }
 
 // Exist is a helper method to define mock.On call
+//  - ctx context.Context
 //  - filePath string
-func (_e *ChunkManager_Expecter) Exist(filePath interface{}) *ChunkManager_Exist_Call {
-	return &ChunkManager_Exist_Call{Call: _e.mock.On("Exist", filePath)}
+func (_e *ChunkManager_Expecter) Exist(ctx interface{}, filePath interface{}) *ChunkManager_Exist_Call {
+	return &ChunkManager_Exist_Call{Call: _e.mock.On("Exist", ctx, filePath)}
 }
 
-func (_c *ChunkManager_Exist_Call) Run(run func(filePath string)) *ChunkManager_Exist_Call {
+func (_c *ChunkManager_Exist_Call) Run(run func(ctx context.Context, filePath string)) *ChunkManager_Exist_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string))
+		run(args[0].(context.Context), args[1].(string))
 	})
 	return _c
 }
@@ -68,13 +72,13 @@ func (_c *ChunkManager_Exist_Call) Return(_a0 bool, _a1 error) *ChunkManager_Exi
 	return _c
 }
 
-// ListWithPrefix provides a mock function with given fields: prefix, recursive
-func (_m *ChunkManager) ListWithPrefix(prefix string, recursive bool) ([]string, []time.Time, error) {
-	ret := _m.Called(prefix, recursive)
+// ListWithPrefix provides a mock function with given fields: ctx, prefix, recursive
+func (_m *ChunkManager) ListWithPrefix(ctx context.Context, prefix string, recursive bool) ([]string, []time.Time, error) {
+	ret := _m.Called(ctx, prefix, recursive)
 
 	var r0 []string
-	if rf, ok := ret.Get(0).(func(string, bool) []string); ok {
-		r0 = rf(prefix, recursive)
+	if rf, ok := ret.Get(0).(func(context.Context, string, bool) []string); ok {
+		r0 = rf(ctx, prefix, recursive)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]string)
@@ -82,8 +86,8 @@ func (_m *ChunkManager) ListWithPrefix(prefix string, recursive bool) ([]string,
 	}
 
 	var r1 []time.Time
-	if rf, ok := ret.Get(1).(func(string, bool) []time.Time); ok {
-		r1 = rf(prefix, recursive)
+	if rf, ok := ret.Get(1).(func(context.Context, string, bool) []time.Time); ok {
+		r1 = rf(ctx, prefix, recursive)
 	} else {
 		if ret.Get(1) != nil {
 			r1 = ret.Get(1).([]time.Time)
@@ -91,8 +95,8 @@ func (_m *ChunkManager) ListWithPrefix(prefix string, recursive bool) ([]string,
 	}
 
 	var r2 error
-	if rf, ok := ret.Get(2).(func(string, bool) error); ok {
-		r2 = rf(prefix, recursive)
+	if rf, ok := ret.Get(2).(func(context.Context, string, bool) error); ok {
+		r2 = rf(ctx, prefix, recursive)
 	} else {
 		r2 = ret.Error(2)
 	}
@@ -106,15 +110,16 @@ type ChunkManager_ListWithPrefix_Call struct {
 }
 
 // ListWithPrefix is a helper method to define mock.On call
+//  - ctx context.Context
 //  - prefix string
 //  - recursive bool
-func (_e *ChunkManager_Expecter) ListWithPrefix(prefix interface{}, recursive interface{}) *ChunkManager_ListWithPrefix_Call {
-	return &ChunkManager_ListWithPrefix_Call{Call: _e.mock.On("ListWithPrefix", prefix, recursive)}
+func (_e *ChunkManager_Expecter) ListWithPrefix(ctx interface{}, prefix interface{}, recursive interface{}) *ChunkManager_ListWithPrefix_Call {
+	return &ChunkManager_ListWithPrefix_Call{Call: _e.mock.On("ListWithPrefix", ctx, prefix, recursive)}
 }
 
-func (_c *ChunkManager_ListWithPrefix_Call) Run(run func(prefix string, recursive bool)) *ChunkManager_ListWithPrefix_Call {
+func (_c *ChunkManager_ListWithPrefix_Call) Run(run func(ctx context.Context, prefix string, recursive bool)) *ChunkManager_ListWithPrefix_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(bool))
+		run(args[0].(context.Context), args[1].(string), args[2].(bool))
 	})
 	return _c
 }
@@ -124,13 +129,13 @@ func (_c *ChunkManager_ListWithPrefix_Call) Return(_a0 []string, _a1 []time.Time
 	return _c
 }
 
-// Mmap provides a mock function with given fields: filePath
-func (_m *ChunkManager) Mmap(filePath string) (*mmap.ReaderAt, error) {
-	ret := _m.Called(filePath)
+// Mmap provides a mock function with given fields: ctx, filePath
+func (_m *ChunkManager) Mmap(ctx context.Context, filePath string) (*mmap.ReaderAt, error) {
+	ret := _m.Called(ctx, filePath)
 
 	var r0 *mmap.ReaderAt
-	if rf, ok := ret.Get(0).(func(string) *mmap.ReaderAt); ok {
-		r0 = rf(filePath)
+	if rf, ok := ret.Get(0).(func(context.Context, string) *mmap.ReaderAt); ok {
+		r0 = rf(ctx, filePath)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*mmap.ReaderAt)
@@ -138,8 +143,8 @@ func (_m *ChunkManager) Mmap(filePath string) (*mmap.ReaderAt, error) {
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(string) error); ok {
-		r1 = rf(filePath)
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, filePath)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -153,14 +158,15 @@ type ChunkManager_Mmap_Call struct {
 }
 
 // Mmap is a helper method to define mock.On call
+//  - ctx context.Context
 //  - filePath string
-func (_e *ChunkManager_Expecter) Mmap(filePath interface{}) *ChunkManager_Mmap_Call {
-	return &ChunkManager_Mmap_Call{Call: _e.mock.On("Mmap", filePath)}
+func (_e *ChunkManager_Expecter) Mmap(ctx interface{}, filePath interface{}) *ChunkManager_Mmap_Call {
+	return &ChunkManager_Mmap_Call{Call: _e.mock.On("Mmap", ctx, filePath)}
 }
 
-func (_c *ChunkManager_Mmap_Call) Run(run func(filePath string)) *ChunkManager_Mmap_Call {
+func (_c *ChunkManager_Mmap_Call) Run(run func(ctx context.Context, filePath string)) *ChunkManager_Mmap_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string))
+		run(args[0].(context.Context), args[1].(string))
 	})
 	return _c
 }
@@ -170,13 +176,13 @@ func (_c *ChunkManager_Mmap_Call) Return(_a0 *mmap.ReaderAt, _a1 error) *ChunkMa
 	return _c
 }
 
-// MultiRead provides a mock function with given fields: filePaths
-func (_m *ChunkManager) MultiRead(filePaths []string) ([][]byte, error) {
-	ret := _m.Called(filePaths)
+// MultiRead provides a mock function with given fields: ctx, filePaths
+func (_m *ChunkManager) MultiRead(ctx context.Context, filePaths []string) ([][]byte, error) {
+	ret := _m.Called(ctx, filePaths)
 
 	var r0 [][]byte
-	if rf, ok := ret.Get(0).(func([]string) [][]byte); ok {
-		r0 = rf(filePaths)
+	if rf, ok := ret.Get(0).(func(context.Context, []string) [][]byte); ok {
+		r0 = rf(ctx, filePaths)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([][]byte)
@@ -184,8 +190,8 @@ func (_m *ChunkManager) MultiRead(filePaths []string) ([][]byte, error) {
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func([]string) error); ok {
-		r1 = rf(filePaths)
+	if rf, ok := ret.Get(1).(func(context.Context, []string) error); ok {
+		r1 = rf(ctx, filePaths)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -199,14 +205,15 @@ type ChunkManager_MultiRead_Call struct {
 }
 
 // MultiRead is a helper method to define mock.On call
+//  - ctx context.Context
 //  - filePaths []string
-func (_e *ChunkManager_Expecter) MultiRead(filePaths interface{}) *ChunkManager_MultiRead_Call {
-	return &ChunkManager_MultiRead_Call{Call: _e.mock.On("MultiRead", filePaths)}
+func (_e *ChunkManager_Expecter) MultiRead(ctx interface{}, filePaths interface{}) *ChunkManager_MultiRead_Call {
+	return &ChunkManager_MultiRead_Call{Call: _e.mock.On("MultiRead", ctx, filePaths)}
 }
 
-func (_c *ChunkManager_MultiRead_Call) Run(run func(filePaths []string)) *ChunkManager_MultiRead_Call {
+func (_c *ChunkManager_MultiRead_Call) Run(run func(ctx context.Context, filePaths []string)) *ChunkManager_MultiRead_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].([]string))
+		run(args[0].(context.Context), args[1].([]string))
 	})
 	return _c
 }
@@ -216,13 +223,13 @@ func (_c *ChunkManager_MultiRead_Call) Return(_a0 [][]byte, _a1 error) *ChunkMan
 	return _c
 }
 
-// MultiRemove provides a mock function with given fields: filePaths
-func (_m *ChunkManager) MultiRemove(filePaths []string) error {
-	ret := _m.Called(filePaths)
+// MultiRemove provides a mock function with given fields: ctx, filePaths
+func (_m *ChunkManager) MultiRemove(ctx context.Context, filePaths []string) error {
+	ret := _m.Called(ctx, filePaths)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func([]string) error); ok {
-		r0 = rf(filePaths)
+	if rf, ok := ret.Get(0).(func(context.Context, []string) error); ok {
+		r0 = rf(ctx, filePaths)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -236,14 +243,15 @@ type ChunkManager_MultiRemove_Call struct {
 }
 
 // MultiRemove is a helper method to define mock.On call
+//  - ctx context.Context
 //  - filePaths []string
-func (_e *ChunkManager_Expecter) MultiRemove(filePaths interface{}) *ChunkManager_MultiRemove_Call {
-	return &ChunkManager_MultiRemove_Call{Call: _e.mock.On("MultiRemove", filePaths)}
+func (_e *ChunkManager_Expecter) MultiRemove(ctx interface{}, filePaths interface{}) *ChunkManager_MultiRemove_Call {
+	return &ChunkManager_MultiRemove_Call{Call: _e.mock.On("MultiRemove", ctx, filePaths)}
 }
 
-func (_c *ChunkManager_MultiRemove_Call) Run(run func(filePaths []string)) *ChunkManager_MultiRemove_Call {
+func (_c *ChunkManager_MultiRemove_Call) Run(run func(ctx context.Context, filePaths []string)) *ChunkManager_MultiRemove_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].([]string))
+		run(args[0].(context.Context), args[1].([]string))
 	})
 	return _c
 }
@@ -253,13 +261,13 @@ func (_c *ChunkManager_MultiRemove_Call) Return(_a0 error) *ChunkManager_MultiRe
 	return _c
 }
 
-// MultiWrite provides a mock function with given fields: contents
-func (_m *ChunkManager) MultiWrite(contents map[string][]byte) error {
-	ret := _m.Called(contents)
+// MultiWrite provides a mock function with given fields: ctx, contents
+func (_m *ChunkManager) MultiWrite(ctx context.Context, contents map[string][]byte) error {
+	ret := _m.Called(ctx, contents)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(map[string][]byte) error); ok {
-		r0 = rf(contents)
+	if rf, ok := ret.Get(0).(func(context.Context, map[string][]byte) error); ok {
+		r0 = rf(ctx, contents)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -273,14 +281,15 @@ type ChunkManager_MultiWrite_Call struct {
 }
 
 // MultiWrite is a helper method to define mock.On call
+//  - ctx context.Context
 //  - contents map[string][]byte
-func (_e *ChunkManager_Expecter) MultiWrite(contents interface{}) *ChunkManager_MultiWrite_Call {
-	return &ChunkManager_MultiWrite_Call{Call: _e.mock.On("MultiWrite", contents)}
+func (_e *ChunkManager_Expecter) MultiWrite(ctx interface{}, contents interface{}) *ChunkManager_MultiWrite_Call {
+	return &ChunkManager_MultiWrite_Call{Call: _e.mock.On("MultiWrite", ctx, contents)}
 }
 
-func (_c *ChunkManager_MultiWrite_Call) Run(run func(contents map[string][]byte)) *ChunkManager_MultiWrite_Call {
+func (_c *ChunkManager_MultiWrite_Call) Run(run func(ctx context.Context, contents map[string][]byte)) *ChunkManager_MultiWrite_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(map[string][]byte))
+		run(args[0].(context.Context), args[1].(map[string][]byte))
 	})
 	return _c
 }
@@ -290,20 +299,20 @@ func (_c *ChunkManager_MultiWrite_Call) Return(_a0 error) *ChunkManager_MultiWri
 	return _c
 }
 
-// Path provides a mock function with given fields: filePath
-func (_m *ChunkManager) Path(filePath string) (string, error) {
-	ret := _m.Called(filePath)
+// Path provides a mock function with given fields: ctx, filePath
+func (_m *ChunkManager) Path(ctx context.Context, filePath string) (string, error) {
+	ret := _m.Called(ctx, filePath)
 
 	var r0 string
-	if rf, ok := ret.Get(0).(func(string) string); ok {
-		r0 = rf(filePath)
+	if rf, ok := ret.Get(0).(func(context.Context, string) string); ok {
+		r0 = rf(ctx, filePath)
 	} else {
 		r0 = ret.Get(0).(string)
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(string) error); ok {
-		r1 = rf(filePath)
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, filePath)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -317,14 +326,15 @@ type ChunkManager_Path_Call struct {
 }
 
 // Path is a helper method to define mock.On call
+//  - ctx context.Context
 //  - filePath string
-func (_e *ChunkManager_Expecter) Path(filePath interface{}) *ChunkManager_Path_Call {
-	return &ChunkManager_Path_Call{Call: _e.mock.On("Path", filePath)}
+func (_e *ChunkManager_Expecter) Path(ctx interface{}, filePath interface{}) *ChunkManager_Path_Call {
+	return &ChunkManager_Path_Call{Call: _e.mock.On("Path", ctx, filePath)}
 }
 
-func (_c *ChunkManager_Path_Call) Run(run func(filePath string)) *ChunkManager_Path_Call {
+func (_c *ChunkManager_Path_Call) Run(run func(ctx context.Context, filePath string)) *ChunkManager_Path_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string))
+		run(args[0].(context.Context), args[1].(string))
 	})
 	return _c
 }
@@ -334,13 +344,13 @@ func (_c *ChunkManager_Path_Call) Return(_a0 string, _a1 error) *ChunkManager_Pa
 	return _c
 }
 
-// Read provides a mock function with given fields: filePath
-func (_m *ChunkManager) Read(filePath string) ([]byte, error) {
-	ret := _m.Called(filePath)
+// Read provides a mock function with given fields: ctx, filePath
+func (_m *ChunkManager) Read(ctx context.Context, filePath string) ([]byte, error) {
+	ret := _m.Called(ctx, filePath)
 
 	var r0 []byte
-	if rf, ok := ret.Get(0).(func(string) []byte); ok {
-		r0 = rf(filePath)
+	if rf, ok := ret.Get(0).(func(context.Context, string) []byte); ok {
+		r0 = rf(ctx, filePath)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]byte)
@@ -348,8 +358,8 @@ func (_m *ChunkManager) Read(filePath string) ([]byte, error) {
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(string) error); ok {
-		r1 = rf(filePath)
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, filePath)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -363,14 +373,15 @@ type ChunkManager_Read_Call struct {
 }
 
 // Read is a helper method to define mock.On call
+//  - ctx context.Context
 //  - filePath string
-func (_e *ChunkManager_Expecter) Read(filePath interface{}) *ChunkManager_Read_Call {
-	return &ChunkManager_Read_Call{Call: _e.mock.On("Read", filePath)}
+func (_e *ChunkManager_Expecter) Read(ctx interface{}, filePath interface{}) *ChunkManager_Read_Call {
+	return &ChunkManager_Read_Call{Call: _e.mock.On("Read", ctx, filePath)}
 }
 
-func (_c *ChunkManager_Read_Call) Run(run func(filePath string)) *ChunkManager_Read_Call {
+func (_c *ChunkManager_Read_Call) Run(run func(ctx context.Context, filePath string)) *ChunkManager_Read_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string))
+		run(args[0].(context.Context), args[1].(string))
 	})
 	return _c
 }
@@ -380,13 +391,13 @@ func (_c *ChunkManager_Read_Call) Return(_a0 []byte, _a1 error) *ChunkManager_Re
 	return _c
 }
 
-// ReadAt provides a mock function with given fields: filePath, off, length
-func (_m *ChunkManager) ReadAt(filePath string, off int64, length int64) ([]byte, error) {
-	ret := _m.Called(filePath, off, length)
+// ReadAt provides a mock function with given fields: ctx, filePath, off, length
+func (_m *ChunkManager) ReadAt(ctx context.Context, filePath string, off int64, length int64) ([]byte, error) {
+	ret := _m.Called(ctx, filePath, off, length)
 
 	var r0 []byte
-	if rf, ok := ret.Get(0).(func(string, int64, int64) []byte); ok {
-		r0 = rf(filePath, off, length)
+	if rf, ok := ret.Get(0).(func(context.Context, string, int64, int64) []byte); ok {
+		r0 = rf(ctx, filePath, off, length)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]byte)
@@ -394,8 +405,8 @@ func (_m *ChunkManager) ReadAt(filePath string, off int64, length int64) ([]byte
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(string, int64, int64) error); ok {
-		r1 = rf(filePath, off, length)
+	if rf, ok := ret.Get(1).(func(context.Context, string, int64, int64) error); ok {
+		r1 = rf(ctx, filePath, off, length)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -409,16 +420,17 @@ type ChunkManager_ReadAt_Call struct {
 }
 
 // ReadAt is a helper method to define mock.On call
+//  - ctx context.Context
 //  - filePath string
 //  - off int64
 //  - length int64
-func (_e *ChunkManager_Expecter) ReadAt(filePath interface{}, off interface{}, length interface{}) *ChunkManager_ReadAt_Call {
-	return &ChunkManager_ReadAt_Call{Call: _e.mock.On("ReadAt", filePath, off, length)}
+func (_e *ChunkManager_Expecter) ReadAt(ctx interface{}, filePath interface{}, off interface{}, length interface{}) *ChunkManager_ReadAt_Call {
+	return &ChunkManager_ReadAt_Call{Call: _e.mock.On("ReadAt", ctx, filePath, off, length)}
 }
 
-func (_c *ChunkManager_ReadAt_Call) Run(run func(filePath string, off int64, length int64)) *ChunkManager_ReadAt_Call {
+func (_c *ChunkManager_ReadAt_Call) Run(run func(ctx context.Context, filePath string, off int64, length int64)) *ChunkManager_ReadAt_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].(int64), args[2].(int64))
+		run(args[0].(context.Context), args[1].(string), args[2].(int64), args[3].(int64))
 	})
 	return _c
 }
@@ -428,13 +440,13 @@ func (_c *ChunkManager_ReadAt_Call) Return(p []byte, err error) *ChunkManager_Re
 	return _c
 }
 
-// ReadWithPrefix provides a mock function with given fields: prefix
-func (_m *ChunkManager) ReadWithPrefix(prefix string) ([]string, [][]byte, error) {
-	ret := _m.Called(prefix)
+// ReadWithPrefix provides a mock function with given fields: ctx, prefix
+func (_m *ChunkManager) ReadWithPrefix(ctx context.Context, prefix string) ([]string, [][]byte, error) {
+	ret := _m.Called(ctx, prefix)
 
 	var r0 []string
-	if rf, ok := ret.Get(0).(func(string) []string); ok {
-		r0 = rf(prefix)
+	if rf, ok := ret.Get(0).(func(context.Context, string) []string); ok {
+		r0 = rf(ctx, prefix)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]string)
@@ -442,8 +454,8 @@ func (_m *ChunkManager) ReadWithPrefix(prefix string) ([]string, [][]byte, error
 	}
 
 	var r1 [][]byte
-	if rf, ok := ret.Get(1).(func(string) [][]byte); ok {
-		r1 = rf(prefix)
+	if rf, ok := ret.Get(1).(func(context.Context, string) [][]byte); ok {
+		r1 = rf(ctx, prefix)
 	} else {
 		if ret.Get(1) != nil {
 			r1 = ret.Get(1).([][]byte)
@@ -451,8 +463,8 @@ func (_m *ChunkManager) ReadWithPrefix(prefix string) ([]string, [][]byte, error
 	}
 
 	var r2 error
-	if rf, ok := ret.Get(2).(func(string) error); ok {
-		r2 = rf(prefix)
+	if rf, ok := ret.Get(2).(func(context.Context, string) error); ok {
+		r2 = rf(ctx, prefix)
 	} else {
 		r2 = ret.Error(2)
 	}
@@ -466,14 +478,15 @@ type ChunkManager_ReadWithPrefix_Call struct {
 }
 
 // ReadWithPrefix is a helper method to define mock.On call
+//  - ctx context.Context
 //  - prefix string
-func (_e *ChunkManager_Expecter) ReadWithPrefix(prefix interface{}) *ChunkManager_ReadWithPrefix_Call {
-	return &ChunkManager_ReadWithPrefix_Call{Call: _e.mock.On("ReadWithPrefix", prefix)}
+func (_e *ChunkManager_Expecter) ReadWithPrefix(ctx interface{}, prefix interface{}) *ChunkManager_ReadWithPrefix_Call {
+	return &ChunkManager_ReadWithPrefix_Call{Call: _e.mock.On("ReadWithPrefix", ctx, prefix)}
 }
 
-func (_c *ChunkManager_ReadWithPrefix_Call) Run(run func(prefix string)) *ChunkManager_ReadWithPrefix_Call {
+func (_c *ChunkManager_ReadWithPrefix_Call) Run(run func(ctx context.Context, prefix string)) *ChunkManager_ReadWithPrefix_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string))
+		run(args[0].(context.Context), args[1].(string))
 	})
 	return _c
 }
@@ -483,13 +496,13 @@ func (_c *ChunkManager_ReadWithPrefix_Call) Return(_a0 []string, _a1 [][]byte, _
 	return _c
 }
 
-// Reader provides a mock function with given fields: filePath
-func (_m *ChunkManager) Reader(filePath string) (storage.FileReader, error) {
-	ret := _m.Called(filePath)
+// Reader provides a mock function with given fields: ctx, filePath
+func (_m *ChunkManager) Reader(ctx context.Context, filePath string) (storage.FileReader, error) {
+	ret := _m.Called(ctx, filePath)
 
 	var r0 storage.FileReader
-	if rf, ok := ret.Get(0).(func(string) storage.FileReader); ok {
-		r0 = rf(filePath)
+	if rf, ok := ret.Get(0).(func(context.Context, string) storage.FileReader); ok {
+		r0 = rf(ctx, filePath)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(storage.FileReader)
@@ -497,8 +510,8 @@ func (_m *ChunkManager) Reader(filePath string) (storage.FileReader, error) {
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(string) error); ok {
-		r1 = rf(filePath)
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, filePath)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -512,14 +525,15 @@ type ChunkManager_Reader_Call struct {
 }
 
 // Reader is a helper method to define mock.On call
+//  - ctx context.Context
 //  - filePath string
-func (_e *ChunkManager_Expecter) Reader(filePath interface{}) *ChunkManager_Reader_Call {
-	return &ChunkManager_Reader_Call{Call: _e.mock.On("Reader", filePath)}
+func (_e *ChunkManager_Expecter) Reader(ctx interface{}, filePath interface{}) *ChunkManager_Reader_Call {
+	return &ChunkManager_Reader_Call{Call: _e.mock.On("Reader", ctx, filePath)}
 }
 
-func (_c *ChunkManager_Reader_Call) Run(run func(filePath string)) *ChunkManager_Reader_Call {
+func (_c *ChunkManager_Reader_Call) Run(run func(ctx context.Context, filePath string)) *ChunkManager_Reader_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string))
+		run(args[0].(context.Context), args[1].(string))
 	})
 	return _c
 }
@@ -529,13 +543,13 @@ func (_c *ChunkManager_Reader_Call) Return(_a0 storage.FileReader, _a1 error) *C
 	return _c
 }
 
-// Remove provides a mock function with given fields: filePath
-func (_m *ChunkManager) Remove(filePath string) error {
-	ret := _m.Called(filePath)
+// Remove provides a mock function with given fields: ctx, filePath
+func (_m *ChunkManager) Remove(ctx context.Context, filePath string) error {
+	ret := _m.Called(ctx, filePath)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string) error); ok {
-		r0 = rf(filePath)
+	if rf, ok := ret.Get(0).(func(context.Context, string) error); ok {
+		r0 = rf(ctx, filePath)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -549,14 +563,15 @@ type ChunkManager_Remove_Call struct {
 }
 
 // Remove is a helper method to define mock.On call
+//  - ctx context.Context
 //  - filePath string
-func (_e *ChunkManager_Expecter) Remove(filePath interface{}) *ChunkManager_Remove_Call {
-	return &ChunkManager_Remove_Call{Call: _e.mock.On("Remove", filePath)}
+func (_e *ChunkManager_Expecter) Remove(ctx interface{}, filePath interface{}) *ChunkManager_Remove_Call {
+	return &ChunkManager_Remove_Call{Call: _e.mock.On("Remove", ctx, filePath)}
 }
 
-func (_c *ChunkManager_Remove_Call) Run(run func(filePath string)) *ChunkManager_Remove_Call {
+func (_c *ChunkManager_Remove_Call) Run(run func(ctx context.Context, filePath string)) *ChunkManager_Remove_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string))
+		run(args[0].(context.Context), args[1].(string))
 	})
 	return _c
 }
@@ -566,13 +581,13 @@ func (_c *ChunkManager_Remove_Call) Return(_a0 error) *ChunkManager_Remove_Call 
 	return _c
 }
 
-// RemoveWithPrefix provides a mock function with given fields: prefix
-func (_m *ChunkManager) RemoveWithPrefix(prefix string) error {
-	ret := _m.Called(prefix)
+// RemoveWithPrefix provides a mock function with given fields: ctx, prefix
+func (_m *ChunkManager) RemoveWithPrefix(ctx context.Context, prefix string) error {
+	ret := _m.Called(ctx, prefix)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string) error); ok {
-		r0 = rf(prefix)
+	if rf, ok := ret.Get(0).(func(context.Context, string) error); ok {
+		r0 = rf(ctx, prefix)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -586,14 +601,15 @@ type ChunkManager_RemoveWithPrefix_Call struct {
 }
 
 // RemoveWithPrefix is a helper method to define mock.On call
+//  - ctx context.Context
 //  - prefix string
-func (_e *ChunkManager_Expecter) RemoveWithPrefix(prefix interface{}) *ChunkManager_RemoveWithPrefix_Call {
-	return &ChunkManager_RemoveWithPrefix_Call{Call: _e.mock.On("RemoveWithPrefix", prefix)}
+func (_e *ChunkManager_Expecter) RemoveWithPrefix(ctx interface{}, prefix interface{}) *ChunkManager_RemoveWithPrefix_Call {
+	return &ChunkManager_RemoveWithPrefix_Call{Call: _e.mock.On("RemoveWithPrefix", ctx, prefix)}
 }
 
-func (_c *ChunkManager_RemoveWithPrefix_Call) Run(run func(prefix string)) *ChunkManager_RemoveWithPrefix_Call {
+func (_c *ChunkManager_RemoveWithPrefix_Call) Run(run func(ctx context.Context, prefix string)) *ChunkManager_RemoveWithPrefix_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string))
+		run(args[0].(context.Context), args[1].(string))
 	})
 	return _c
 }
@@ -639,20 +655,20 @@ func (_c *ChunkManager_RootPath_Call) Return(_a0 string) *ChunkManager_RootPath_
 	return _c
 }
 
-// Size provides a mock function with given fields: filePath
-func (_m *ChunkManager) Size(filePath string) (int64, error) {
-	ret := _m.Called(filePath)
+// Size provides a mock function with given fields: ctx, filePath
+func (_m *ChunkManager) Size(ctx context.Context, filePath string) (int64, error) {
+	ret := _m.Called(ctx, filePath)
 
 	var r0 int64
-	if rf, ok := ret.Get(0).(func(string) int64); ok {
-		r0 = rf(filePath)
+	if rf, ok := ret.Get(0).(func(context.Context, string) int64); ok {
+		r0 = rf(ctx, filePath)
 	} else {
 		r0 = ret.Get(0).(int64)
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(string) error); ok {
-		r1 = rf(filePath)
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, filePath)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -666,14 +682,15 @@ type ChunkManager_Size_Call struct {
 }
 
 // Size is a helper method to define mock.On call
+//  - ctx context.Context
 //  - filePath string
-func (_e *ChunkManager_Expecter) Size(filePath interface{}) *ChunkManager_Size_Call {
-	return &ChunkManager_Size_Call{Call: _e.mock.On("Size", filePath)}
+func (_e *ChunkManager_Expecter) Size(ctx interface{}, filePath interface{}) *ChunkManager_Size_Call {
+	return &ChunkManager_Size_Call{Call: _e.mock.On("Size", ctx, filePath)}
 }
 
-func (_c *ChunkManager_Size_Call) Run(run func(filePath string)) *ChunkManager_Size_Call {
+func (_c *ChunkManager_Size_Call) Run(run func(ctx context.Context, filePath string)) *ChunkManager_Size_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string))
+		run(args[0].(context.Context), args[1].(string))
 	})
 	return _c
 }
@@ -683,13 +700,13 @@ func (_c *ChunkManager_Size_Call) Return(_a0 int64, _a1 error) *ChunkManager_Siz
 	return _c
 }
 
-// Write provides a mock function with given fields: filePath, content
-func (_m *ChunkManager) Write(filePath string, content []byte) error {
-	ret := _m.Called(filePath, content)
+// Write provides a mock function with given fields: ctx, filePath, content
+func (_m *ChunkManager) Write(ctx context.Context, filePath string, content []byte) error {
+	ret := _m.Called(ctx, filePath, content)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, []byte) error); ok {
-		r0 = rf(filePath, content)
+	if rf, ok := ret.Get(0).(func(context.Context, string, []byte) error); ok {
+		r0 = rf(ctx, filePath, content)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -703,15 +720,16 @@ type ChunkManager_Write_Call struct {
 }
 
 // Write is a helper method to define mock.On call
+//  - ctx context.Context
 //  - filePath string
 //  - content []byte
-func (_e *ChunkManager_Expecter) Write(filePath interface{}, content interface{}) *ChunkManager_Write_Call {
-	return &ChunkManager_Write_Call{Call: _e.mock.On("Write", filePath, content)}
+func (_e *ChunkManager_Expecter) Write(ctx interface{}, filePath interface{}, content interface{}) *ChunkManager_Write_Call {
+	return &ChunkManager_Write_Call{Call: _e.mock.On("Write", ctx, filePath, content)}
 }
 
-func (_c *ChunkManager_Write_Call) Run(run func(filePath string, content []byte)) *ChunkManager_Write_Call {
+func (_c *ChunkManager_Write_Call) Run(run func(ctx context.Context, filePath string, content []byte)) *ChunkManager_Write_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string), args[1].([]byte))
+		run(args[0].(context.Context), args[1].(string), args[2].([]byte))
 	})
 	return _c
 }

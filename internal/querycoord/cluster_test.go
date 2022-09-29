@@ -252,6 +252,8 @@ func genSimpleIndexParams() indexParam {
 }
 
 func generateIndex(indexBuildID UniqueID, cm storage.ChunkManager) ([]string, error) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	indexParams := genSimpleIndexParams()
 
 	var indexParamsKV []*commonpb.KeyValuePair
@@ -298,7 +300,7 @@ func generateIndex(indexBuildID UniqueID, cm storage.ChunkManager) ([]string, er
 	for _, index := range serializedIndexBlobs {
 		p := strconv.Itoa(int(indexBuildID)) + "/" + index.Key
 		indexPaths = append(indexPaths, p)
-		err := cm.Write(p, index.Value)
+		err := cm.Write(ctx, p, index.Value)
 		if err != nil {
 			return nil, err
 		}

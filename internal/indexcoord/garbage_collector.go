@@ -215,7 +215,7 @@ func (gc *garbageCollector) recycleUnusedIndexFiles() {
 		case <-ticker.C:
 			prefix := path.Join(gc.chunkManager.RootPath(), common.SegmentIndexPath) + "/"
 			// list dir first
-			keys, _, err := gc.chunkManager.ListWithPrefix(prefix, false)
+			keys, _, err := gc.chunkManager.ListWithPrefix(gc.ctx, prefix, false)
 			if err != nil {
 				log.Ctx(gc.ctx).Error("IndexCoord garbageCollector recycleUnusedIndexFiles list keys from chunk manager failed", zap.Error(err))
 				continue
@@ -232,7 +232,7 @@ func (gc *garbageCollector) recycleUnusedIndexFiles() {
 					// buildID no longer exists in meta, remove all index files
 					log.Ctx(gc.ctx).Info("IndexCoord garbageCollector recycleUnusedIndexFiles find meta has not exist, remove index files",
 						zap.Int64("buildID", buildID))
-					err = gc.chunkManager.RemoveWithPrefix(key)
+					err = gc.chunkManager.RemoveWithPrefix(gc.ctx, key)
 					if err != nil {
 						log.Ctx(gc.ctx).Warn("IndexCoord garbageCollector recycleUnusedIndexFiles remove index files failed",
 							zap.Int64("buildID", buildID), zap.String("prefix", key), zap.Error(err))
@@ -252,7 +252,7 @@ func (gc *garbageCollector) recycleUnusedIndexFiles() {
 				for _, file := range indexFilePaths {
 					filesMap[file] = true
 				}
-				files, _, err := gc.chunkManager.ListWithPrefix(key, true)
+				files, _, err := gc.chunkManager.ListWithPrefix(gc.ctx, key, true)
 				if err != nil {
 					log.Ctx(gc.ctx).Warn("IndexCoord garbageCollector recycleUnusedIndexFiles list files failed",
 						zap.Int64("buildID", buildID), zap.String("prefix", key), zap.Error(err))
@@ -263,7 +263,7 @@ func (gc *garbageCollector) recycleUnusedIndexFiles() {
 				deletedFilesNum := 0
 				for _, file := range files {
 					if _, ok := filesMap[file]; !ok {
-						if err = gc.chunkManager.Remove(file); err != nil {
+						if err = gc.chunkManager.Remove(gc.ctx, file); err != nil {
 							log.Ctx(gc.ctx).Warn("IndexCoord garbageCollector recycleUnusedIndexFiles remove file failed",
 								zap.Int64("buildID", buildID), zap.String("file", file), zap.Error(err))
 							continue

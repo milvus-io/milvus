@@ -35,9 +35,11 @@ import (
 var binlogTestDir = "/tmp/milvus_test/test_binlog_io"
 
 func TestBinlogIOInterfaceMethods(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	alloc := NewAllocatorFactory()
 	cm := storage.NewLocalChunkManager(storage.RootPath(binlogTestDir))
-	defer cm.RemoveWithPrefix("")
+	defer cm.RemoveWithPrefix(ctx, "")
 
 	b := &binlogIO{cm, alloc}
 	t.Run("Test upload", func(t *testing.T) {
@@ -259,10 +261,13 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 }
 
 func prepareBlob(cm storage.ChunkManager, key string) ([]byte, string, error) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	k := path.Join("test_prepare_blob", key)
 	blob := []byte{1, 2, 3, 255, 188}
 
-	err := cm.Write(k, blob[:])
+	err := cm.Write(ctx, k, blob[:])
 	if err != nil {
 		return nil, "", err
 	}
@@ -270,9 +275,11 @@ func prepareBlob(cm storage.ChunkManager, key string) ([]byte, string, error) {
 }
 
 func TestBinlogIOInnerMethods(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	alloc := NewAllocatorFactory()
 	cm := storage.NewLocalChunkManager(storage.RootPath(binlogTestDir))
-	defer cm.RemoveWithPrefix("")
+	defer cm.RemoveWithPrefix(ctx, "")
 	b := &binlogIO{
 		cm,
 		alloc,
@@ -447,33 +454,33 @@ func (mk *mockCm) RootPath() string {
 	return "mock_test"
 }
 
-func (mk *mockCm) Write(filePath string, content []byte) error {
+func (mk *mockCm) Write(ctx context.Context, filePath string, content []byte) error {
 	return nil
 }
 
-func (mk *mockCm) MultiWrite(contents map[string][]byte) error {
+func (mk *mockCm) MultiWrite(ctx context.Context, contents map[string][]byte) error {
 	if mk.errMultiSave {
 		return errors.New("mockKv multisave error")
 	}
 	return nil
 }
 
-func (mk *mockCm) Read(filePath string) ([]byte, error) {
+func (mk *mockCm) Read(ctx context.Context, filePath string) ([]byte, error) {
 	return nil, nil
 }
 
-func (mk *mockCm) MultiRead(filePaths []string) ([][]byte, error) {
+func (mk *mockCm) MultiRead(ctx context.Context, filePaths []string) ([][]byte, error) {
 	if mk.errMultiLoad {
 		return nil, errors.New("mockKv multiload error")
 	}
 	return [][]byte{[]byte("a")}, nil
 }
 
-func (mk *mockCm) ReadWithPrefix(prefix string) ([]string, [][]byte, error) {
+func (mk *mockCm) ReadWithPrefix(ctx context.Context, prefix string) ([]string, [][]byte, error) {
 	return nil, nil, nil
 }
 
-func (mk *mockCm) Remove(key string) error           { return nil }
-func (mk *mockCm) MultiRemove(keys []string) error   { return nil }
-func (mk *mockCm) RemoveWithPrefix(key string) error { return nil }
-func (mk *mockCm) Close()                            {}
+func (mk *mockCm) Remove(ctx context.Context, key string) error           { return nil }
+func (mk *mockCm) MultiRemove(ctx context.Context, keys []string) error   { return nil }
+func (mk *mockCm) RemoveWithPrefix(ctx context.Context, key string) error { return nil }
+func (mk *mockCm) Close()                                                 {}
