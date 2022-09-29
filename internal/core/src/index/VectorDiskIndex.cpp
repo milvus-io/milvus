@@ -25,6 +25,8 @@
 
 namespace milvus::index {
 
+const int pq_compress_rate = 8;
+
 #ifdef BUILD_DISK_ANN
 
 template <typename T>
@@ -60,7 +62,11 @@ template <typename T>
 void
 VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset, const Config& config) {
     auto& local_chunk_manager = storage::LocalChunkManager::GetInstance();
-    auto build_config = parse_build_config(config);
+    auto dim = uint32_t(milvus::GetDatasetDim(dataset));
+    auto num = uint32_t(milvus::GetDatasetRows(dataset));
+    auto data_size = num * dim * sizeof(float);
+    auto build_config = parse_build_config(config, float(data_size) / 1024 / 1024 / 1024);
+
     auto segment_id = file_manager_->GetFileDataMeta().segment_id;
     auto field_id = file_manager_->GetFileDataMeta().field_id;
     auto local_data_path = storage::GenFieldRawDataPathPrefix(segment_id, field_id) + "raw_data";
@@ -70,15 +76,10 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset, const Config&
     }
 
     int64_t offset = 0;
-    auto num = uint32_t(milvus::GetDatasetRows(dataset));
     local_chunk_manager.Write(local_data_path, offset, &num, sizeof(num));
     offset += sizeof(num);
-
-    auto dim = uint32_t(milvus::GetDatasetDim(dataset));
     local_chunk_manager.Write(local_data_path, offset, &dim, sizeof(dim));
     offset += sizeof(dim);
-
-    auto data_size = num * dim * sizeof(float);
     auto raw_data = const_cast<void*>(milvus::GetDatasetTensor(dataset));
     local_chunk_manager.Write(local_data_path, offset, raw_data, data_size);
 
@@ -157,7 +158,7 @@ VectorDiskAnnIndex<T>::CleanLocalData() {
 
 template <typename T>
 knowhere::DiskANNBuildConfig
-VectorDiskAnnIndex<T>::parse_build_config(const Config& config) {
+VectorDiskAnnIndex<T>::parse_build_config(const Config& config, float data_size) {
     Config build_config = config;
     parse_config(build_config);
 
@@ -174,10 +175,8 @@ VectorDiskAnnIndex<T>::parse_build_config(const Config& config) {
     AssertInfo(search_list_size.has_value(), "param " + std::string(DISK_ANN_BUILD_LIST) + "is empty");
     build_disk_ann_config.search_list_size = search_list_size.value();
 
-    // set search dram budget
-    auto search_dram_budget_gb = GetValueFromConfig<float>(build_config, DISK_ANN_SEARCH_DRAM_BUDGET);
-    AssertInfo(search_dram_budget_gb.has_value(), "param " + std::string(DISK_ANN_SEARCH_DRAM_BUDGET) + "is empty");
-    build_disk_ann_config.pq_code_budget_gb = search_dram_budget_gb.value();
+    // set pq_code_budget_gb
+    build_disk_ann_config.pq_code_budget_gb = data_size / pq_compress_rate;
 
     // set build dram budget
     auto build_dram_budget_gb = GetValueFromConfig<float>(build_config, DISK_ANN_BUILD_DRAM_BUDGET);
@@ -242,7 +241,6 @@ VectorDiskAnnIndex<T>::parse_config(Config& config) {
     /************************** DiskAnn build Params ************************/
     CheckParameter<int>(config, DISK_ANN_MAX_DEGREE, stoi_closure, std::optional{48});
     CheckParameter<int>(config, DISK_ANN_BUILD_LIST, stoi_closure, std::optional{128});
-    CheckParameter<float>(config, DISK_ANN_SEARCH_DRAM_BUDGET, stof_closure, std::optional{0.03});
     CheckParameter<float>(config, DISK_ANN_BUILD_DRAM_BUDGET, stof_closure, std::optional{32});
     CheckParameter<int>(config, DISK_ANN_BUILD_THREAD_NUM, stoi_closure, std::optional{8});
     CheckParameter<int>(config, DISK_ANN_PQ_BYTES, stoi_closure, std::optional{0});

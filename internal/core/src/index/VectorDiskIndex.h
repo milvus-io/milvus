@@ -64,7 +64,7 @@ class VectorDiskAnnIndex : public VectorIndex {
 
  private:
     knowhere::DiskANNBuildConfig
-    parse_build_config(const Config& config);
+    parse_build_config(const Config& config, float data_size);
 
     knowhere::DiskANNPrepareConfig
     parse_prepare_config(const Config& config);
