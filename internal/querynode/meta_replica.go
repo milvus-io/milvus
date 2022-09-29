@@ -887,7 +887,7 @@ func (replica *metaReplica) getSegmentInfo(segment *Segment) *querypb.SegmentInf
 		IndexName:    indexName,
 		IndexID:      indexID,
 		DmChannel:    segment.vChannelID,
-		SegmentState: segment.segmentType,
+		SegmentState: segment.getType(),
 		IndexInfos:   indexInfos,
 		NodeIds:      []UniqueID{Params.QueryNodeCfg.GetNodeID()},
 	}

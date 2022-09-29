@@ -226,7 +226,7 @@ func TestStreaming_search(t *testing.T) {
 		seg, err := streaming.getSegmentByID(defaultSegmentID, segmentTypeGrowing)
 		assert.NoError(t, err)
 
-		seg.segmentPtr = nil
+		seg.setUnhealthy()
 
 		_, _, _, err = searchStreaming(context.TODO(), streaming, searchReq,
 			defaultCollectionID,

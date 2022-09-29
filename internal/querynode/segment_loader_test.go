@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/api/commonpb"
 	"github.com/milvus-io/milvus/api/schemapb"
@@ -904,11 +905,12 @@ func TestSegmentLoader_getFieldType(t *testing.T) {
 	loader := &segmentLoader{metaReplica: replica}
 
 	// failed to get collection.
-	segment := &Segment{segmentType: segmentTypeSealed}
+	segment := &Segment{segmentType: atomic.NewInt32(0)}
+	segment.setType(segmentTypeSealed)
 	_, err := loader.getFieldType(segment, 100)
 	assert.Error(t, err)
 
-	segment.segmentType = segmentTypeGrowing
+	segment.setType(segmentTypeGrowing)
 	_, err = loader.getFieldType(segment, 100)
 	assert.Error(t, err)
 
@@ -927,12 +929,12 @@ func TestSegmentLoader_getFieldType(t *testing.T) {
 		}, nil
 	}
 
-	segment.segmentType = segmentTypeGrowing
+	segment.setType(segmentTypeGrowing)
 	fieldType, err := loader.getFieldType(segment, 100)
 	assert.NoError(t, err)
 	assert.Equal(t, schemapb.DataType_Int64, fieldType)
 
-	segment.segmentType = segmentTypeSealed
+	segment.setType(segmentTypeSealed)
 	fieldType, err = loader.getFieldType(segment, 100)
 	assert.NoError(t, err)
 	assert.Equal(t, schemapb.DataType_Int64, fieldType)
