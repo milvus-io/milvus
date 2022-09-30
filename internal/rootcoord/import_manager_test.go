@@ -239,6 +239,76 @@ func TestImportManager_NewImportManager(t *testing.T) {
 	wg.Wait()
 }
 
+func TestImportManager_TestSetImportTaskState(t *testing.T) {
+	var countLock sync.RWMutex
+	var globalCount = typeutil.UniqueID(0)
+
+	var idAlloc = func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
+		countLock.Lock()
+		defer countLock.Unlock()
+		globalCount++
+		return globalCount, 0, nil
+	}
+	Params.RootCoordCfg.ImportTaskSubPath = "test_import_task"
+	Params.RootCoordCfg.ImportTaskExpiration = 50
+	Params.RootCoordCfg.ImportTaskRetention = 200
+	checkPendingTasksInterval = 100
+	cleanUpLoopInterval = 100
+	mockKv := &kv.MockMetaKV{}
+	mockKv.InMemKv = sync.Map{}
+	ti1 := &datapb.ImportTaskInfo{
+		Id: 100,
+		State: &datapb.ImportTaskState{
+			StateCode: commonpb.ImportState_ImportPending,
+		},
+		CreateTs: time.Now().Unix() - 100,
+	}
+	ti2 := &datapb.ImportTaskInfo{
+		Id: 200,
+		State: &datapb.ImportTaskState{
+			StateCode: commonpb.ImportState_ImportPersisted,
+		},
+		CreateTs: time.Now().Unix() - 100,
+	}
+	taskInfo1, err := proto.Marshal(ti1)
+	assert.NoError(t, err)
+	taskInfo2, err := proto.Marshal(ti2)
+	assert.NoError(t, err)
+	mockKv.Save(BuildImportTaskKey(1), "value")
+	mockKv.Save(BuildImportTaskKey(100), string(taskInfo1))
+	mockKv.Save(BuildImportTaskKey(200), string(taskInfo2))
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	t.Run("working task expired", func(t *testing.T) {
+		defer wg.Done()
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		mgr := newImportManager(ctx, mockKv, idAlloc, nil, nil, nil, nil, nil, nil)
+		assert.NotNil(t, mgr)
+		_, err := mgr.loadFromTaskStore(true)
+		assert.NoError(t, err)
+		// Task not exist.
+		assert.Error(t, mgr.setImportTaskState(999, commonpb.ImportState_ImportStarted))
+		// Normal case: update in-mem task state.
+		assert.NoError(t, mgr.setImportTaskState(100, commonpb.ImportState_ImportPersisted))
+		v, err := mockKv.Load(BuildImportTaskKey(100))
+		assert.NoError(t, err)
+		ti := &datapb.ImportTaskInfo{}
+		err = proto.Unmarshal([]byte(v), ti)
+		assert.NoError(t, err)
+		assert.Equal(t, ti.GetState().GetStateCode(), commonpb.ImportState_ImportPersisted)
+		// Normal case: update Etcd task state.
+		assert.NoError(t, mgr.setImportTaskState(200, commonpb.ImportState_ImportFailedAndCleaned))
+		v, err = mockKv.Load(BuildImportTaskKey(200))
+		assert.NoError(t, err)
+		ti = &datapb.ImportTaskInfo{}
+		err = proto.Unmarshal([]byte(v), ti)
+		assert.NoError(t, err)
+		assert.Equal(t, ti.GetState().GetStateCode(), commonpb.ImportState_ImportFailedAndCleaned)
+	})
+}
+
 func TestImportManager_TestEtcdCleanUp(t *testing.T) {
 	var countLock sync.RWMutex
 	var globalCount = typeutil.UniqueID(0)
@@ -319,6 +389,8 @@ func TestImportManager_TestEtcdCleanUp(t *testing.T) {
 	keys, _, _ := mockKv.LoadWithPrefix("")
 	// All 3 tasks are stored in Etcd.
 	assert.Equal(t, 3, len(keys))
+	mgr.busyNodes[20] = time.Now().Unix() - 20*60
+	mgr.busyNodes[30] = time.Now().Unix()
 	mgr.cleanupLoop(&wgLoop)
 	keys, _, _ = mockKv.LoadWithPrefix("")
 	// task 1 and task 2 have passed retention period.
