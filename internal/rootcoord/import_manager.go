@@ -66,7 +66,7 @@ var flipTaskStateInterval = 15 * 1000
 type importManager struct {
 	ctx       context.Context // reserved
 	taskStore kv.MetaKv       // Persistent task info storage.
-	busyNodes map[int64]bool  // Set of all current working DataNodes.
+	busyNodes map[int64]int64 // Set of all current working DataNode IDs and related task create timestamp.
 
 	// TODO: Make pendingTask a map to improve look up performance.
 	pendingTasks  []*datapb.ImportTaskInfo         // pending tasks
@@ -101,7 +101,7 @@ func newImportManager(ctx context.Context, client kv.MetaKv,
 		taskStore:                 client,
 		pendingTasks:              make([]*datapb.ImportTaskInfo, 0, MaxPendingCount), // currently task queue max size is 32
 		workingTasks:              make(map[int64]*datapb.ImportTaskInfo),
-		busyNodes:                 make(map[int64]bool),
+		busyNodes:                 make(map[int64]int64),
 		pendingLock:               sync.RWMutex{},
 		workingLock:               sync.RWMutex{},
 		busyNodesLock:             sync.RWMutex{},
@@ -189,6 +189,8 @@ func (m *importManager) cleanupLoop(wg *sync.WaitGroup) {
 			m.expireOldTasksFromEtcd()
 			log.Debug("(in cleanupLoop) start removing bad import segments")
 			m.removeBadImportSegments(m.ctx)
+			log.Debug("(in cleanupLoop) start cleaning hanging busy DataNode")
+			m.releaseHangingBusyDataNode()
 		}
 	}
 }
@@ -249,7 +251,7 @@ func (m *importManager) sendOutTasks(ctx context.Context) error {
 			zap.Int64("task ID", it.GetTaskId()),
 			zap.Int64("dataNode ID", task.GetDatanodeId()))
 		// Add new working dataNode to busyNodes.
-		m.busyNodes[resp.GetDatanodeId()] = true
+		m.busyNodes[resp.GetDatanodeId()] = task.GetCreateTs()
 		err = func() error {
 			m.workingLock.Lock()
 			defer m.workingLock.Unlock()
@@ -645,6 +647,7 @@ func (m *importManager) setImportTaskStateAndReason(taskID int64, targetState co
 				log.Error("failed to unmarshal proto", zap.String("taskInfo", v), zap.Error(err))
 			} else {
 				toPersistImportTaskInfo := cloneImportTaskInfo(ti)
+				toPersistImportTaskInfo.State.StateCode = targetState
 				tryUpdateErrMsg(errReason, toPersistImportTaskInfo)
 				// Update task in task store.
 				if err := m.persistTaskInfo(toPersistImportTaskInfo); err != nil {
@@ -890,6 +893,10 @@ func (m *importManager) expireOldTasksFromMem() {
 				log.Info("a working task has expired", zap.Int64("task ID", v.GetId()))
 				taskID := v.GetId()
 				m.workingLock.Unlock()
+				// Remove DataNode from busy node list, so it can serve other tasks again.
+				m.busyNodesLock.Lock()
+				delete(m.busyNodes, v.GetDatanodeId())
+				m.busyNodesLock.Unlock()
 				if err := m.setImportTaskStateAndReason(taskID, commonpb.ImportState_ImportFailed,
 					"the import task has timed out"); err != nil {
 					log.Error("failed to set import task state",
@@ -935,6 +942,24 @@ func (m *importManager) expireOldTasksFromEtcd() {
 			}
 		}
 	}
+}
+
+// releaseHangingBusyDataNode checks if a busy DataNode has been 'busy' for an unexpected long time.
+// We will then remove these DataNodes from `busy list`.
+func (m *importManager) releaseHangingBusyDataNode() {
+	m.busyNodesLock.Lock()
+	for nodeID, ts := range m.busyNodes {
+		log.Info("busy DataNode found",
+			zap.Int64("node ID", nodeID),
+			zap.Int64("busy duration (seconds)", time.Now().Unix()-ts),
+		)
+		if Params.RootCoordCfg.ImportTaskExpiration <= float64(time.Now().Unix()-ts) {
+			log.Warn("release a hanging busy DataNode",
+				zap.Int64("node ID", nodeID))
+			delete(m.busyNodes, nodeID)
+		}
+	}
+	m.busyNodesLock.Unlock()
 }
 
 func rearrangeTasks(tasks []*milvuspb.GetImportStateResponse) {
