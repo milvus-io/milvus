@@ -70,7 +70,7 @@ func (ob *CollectionObserver) observeTimeout() {
 	collections := ob.meta.CollectionManager.GetAllCollections()
 	for _, collection := range collections {
 		if collection.GetStatus() != querypb.LoadStatus_Loading ||
-			time.Now().Before(collection.CreatedAt.Add(Params.QueryCoordCfg.LoadTimeoutSeconds)) {
+			time.Now().Before(collection.UpdatedAt.Add(Params.QueryCoordCfg.LoadTimeoutSeconds)) {
 			continue
 		}
 
@@ -172,6 +172,9 @@ func (ob *CollectionObserver) observeCollectionLoadStatus(collection *meta.Colle
 
 	updated := collection.Clone()
 	updated.LoadPercentage = int32(loadedCount * 100 / targetNum)
+	if updated.LoadPercentage <= collection.LoadPercentage {
+		return
+	}
 	if loadedCount >= len(segmentTargets)+len(channelTargets) {
 		updated.Status = querypb.LoadStatus_Loaded
 		ob.meta.CollectionManager.UpdateCollection(updated)
@@ -181,11 +184,9 @@ func (ob *CollectionObserver) observeCollectionLoadStatus(collection *meta.Colle
 	} else {
 		ob.meta.CollectionManager.UpdateCollectionInMemory(updated)
 	}
-	if updated.LoadPercentage != collection.LoadPercentage {
-		log.Info("collection load status updated",
-			zap.Int32("loadPercentage", updated.LoadPercentage),
-			zap.Int32("collectionStatus", int32(updated.GetStatus())))
-	}
+	log.Info("collection load status updated",
+		zap.Int32("loadPercentage", updated.LoadPercentage),
+		zap.Int32("collectionStatus", int32(updated.GetStatus())))
 }
 
 func (ob *CollectionObserver) observePartitionLoadStatus(partition *meta.Partition) {
@@ -230,18 +231,21 @@ func (ob *CollectionObserver) observePartitionLoadStatus(partition *meta.Partiti
 			zap.Int("load-segment-count", loadedCount-subChannelCount))
 	}
 
-	partition = partition.Clone()
-	partition.LoadPercentage = int32(loadedCount * 100 / targetNum)
+	updated := partition.Clone()
+	updated.LoadPercentage = int32(loadedCount * 100 / targetNum)
+	if updated.LoadPercentage <= partition.LoadPercentage {
+		return
+	}
 	if loadedCount >= len(segmentTargets)+len(channelTargets) {
-		partition.Status = querypb.LoadStatus_Loaded
-		ob.meta.CollectionManager.PutPartition(partition)
+		updated.Status = querypb.LoadStatus_Loaded
+		ob.meta.CollectionManager.UpdatePartition(updated)
 
-		elapsed := time.Since(partition.CreatedAt)
+		elapsed := time.Since(updated.CreatedAt)
 		metrics.QueryCoordLoadLatency.WithLabelValues().Observe(float64(elapsed.Milliseconds()))
 	} else {
-		ob.meta.CollectionManager.UpdatePartitionInMemory(partition)
+		ob.meta.CollectionManager.UpdatePartitionInMemory(updated)
 	}
 	log.Info("partition load status updated",
-		zap.Int32("loadPercentage", partition.LoadPercentage),
-		zap.Int32("partitionStatus", int32(partition.GetStatus())))
+		zap.Int32("loadPercentage", updated.LoadPercentage),
+		zap.Int32("partitionStatus", int32(updated.GetStatus())))
 }

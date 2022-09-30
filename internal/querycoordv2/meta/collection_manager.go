@@ -15,6 +15,7 @@ type Collection struct {
 	*querypb.CollectionLoadInfo
 	LoadPercentage int32
 	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 func (collection *Collection) Clone() *Collection {
@@ -27,6 +28,7 @@ type Partition struct {
 	*querypb.PartitionLoadInfo
 	LoadPercentage int32
 	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 func (partition *Partition) Clone() *Partition {
@@ -279,6 +281,7 @@ func (m *CollectionManager) putCollection(collection *Collection, withSave bool)
 			return err
 		}
 	}
+	collection.UpdatedAt = time.Now()
 	m.collections[collection.CollectionID] = collection
 
 	return nil
@@ -334,6 +337,7 @@ func (m *CollectionManager) putPartition(partitions []*Partition, withSave bool)
 		}
 	}
 	for _, partition := range partitions {
+		partition.UpdatedAt = time.Now()
 		m.partitions[partition.GetPartitionID()] = partition
 	}
 	return nil
