@@ -12,7 +12,7 @@ import (
 )
 
 // Merger merges tasks with the same mergeID.
-const waitQueueCap = 128
+const waitQueueCap = 256
 
 type Merger[K comparable, R any] struct {
 	stopCh chan struct{}

@@ -170,7 +170,7 @@ queryCoord:
   distPullInterval: 500
   loadTimeoutSeconds: 600
   checkHandoffInterval: 5000
-  taskMergeCap: 8
+  taskMergeCap: 16
   enableActiveStandby: false  # Enable active-standby
 
 # Related configuration of queryNode, used to run hybrid search between vector and scalar data.

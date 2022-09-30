@@ -37,6 +37,8 @@ var (
 	ErrResourceNotEnough = errors.New("ResourceNotEnough")
 
 	ErrTaskQueueFull = errors.New("TaskQueueFull")
+
+	ErrFailedResponse = errors.New("RpcFailed")
 )
 
 type Type = int32
@@ -478,7 +480,9 @@ func (scheduler *taskScheduler) process(task Task) bool {
 		task.SetStatus(TaskStatusSucceeded)
 	} else if scheduler.checkCanceled(task) {
 		task.SetStatus(TaskStatusCanceled)
-		task.SetErr(ErrTaskCanceled)
+		if task.Err() == nil {
+			task.SetErr(ErrTaskCanceled)
+		}
 	} else if scheduler.checkStale(task) {
 		task.SetStatus(TaskStatusStale)
 		task.SetErr(ErrTaskStale)

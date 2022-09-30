@@ -4,17 +4,13 @@ import (
 	"context"
 	"time"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/api/commonpb"
 	"github.com/milvus-io/milvus/api/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
-	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
-	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/samber/lo"
 )
 
 func Wait(ctx context.Context, timeout time.Duration, tasks ...Task) error {
@@ -173,65 +169,4 @@ func getShardLeader(replicaMgr *meta.ReplicaManager, distMgr *meta.DistributionM
 		return 0, false
 	}
 	return distMgr.GetShardLeader(replica, channel)
-}
-
-func getSegmentDeltaPositions(ctx context.Context, targetMgr *meta.TargetManager, broker meta.Broker, collectionID, partitionID int64, channel string) ([]*internalpb.MsgPosition, error) {
-	deltaChannelName, err := funcutil.ConvertChannelName(channel, Params.CommonCfg.RootCoordDml, Params.CommonCfg.RootCoordDelta)
-	if err != nil {
-		return nil, err
-	}
-
-	// vchannels, _, err := broker.GetRecoveryInfo(ctx, collectionID, partitionID)
-	// if err != nil {
-	// 	return nil, err
-	// }
-
-	deltaChannels := make([]*datapb.VchannelInfo, 0)
-	for _, info := range targetMgr.GetDmChannelsByCollection(collectionID) {
-		deltaChannelInfo, err := generatDeltaChannelInfo(info.VchannelInfo)
-		if err != nil {
-			return nil, err
-		}
-		if deltaChannelInfo.ChannelName == deltaChannelName {
-			deltaChannels = append(deltaChannels, deltaChannelInfo)
-		}
-	}
-	deltaChannels = mergeWatchDeltaChannelInfo(deltaChannels)
-
-	return lo.Map(deltaChannels, func(channel *datapb.VchannelInfo, _ int) *internalpb.MsgPosition {
-		return channel.GetSeekPosition()
-	}), nil
-}
-
-func generatDeltaChannelInfo(info *datapb.VchannelInfo) (*datapb.VchannelInfo, error) {
-	deltaChannelName, err := funcutil.ConvertChannelName(info.ChannelName, Params.CommonCfg.RootCoordDml, Params.CommonCfg.RootCoordDelta)
-	if err != nil {
-		return nil, err
-	}
-	deltaChannel := proto.Clone(info).(*datapb.VchannelInfo)
-	deltaChannel.ChannelName = deltaChannelName
-	deltaChannel.UnflushedSegmentIds = nil
-	deltaChannel.FlushedSegmentIds = nil
-	deltaChannel.DroppedSegmentIds = nil
-	return deltaChannel, nil
-}
-
-func mergeWatchDeltaChannelInfo(infos []*datapb.VchannelInfo) []*datapb.VchannelInfo {
-	minPositions := make(map[string]int)
-	for index, info := range infos {
-		_, ok := minPositions[info.ChannelName]
-		if !ok {
-			minPositions[info.ChannelName] = index
-		}
-		minTimeStampIndex := minPositions[info.ChannelName]
-		if info.SeekPosition.GetTimestamp() < infos[minTimeStampIndex].SeekPosition.GetTimestamp() {
-			minPositions[info.ChannelName] = index
-		}
-	}
-	var result []*datapb.VchannelInfo
-	for _, index := range minPositions {
-		result = append(result, infos[index])
-	}
-
-	return result
 }

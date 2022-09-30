@@ -75,8 +75,8 @@ type baseTask struct {
 	step     int
 }
 
-func newBaseTask(ctx context.Context, timeout time.Duration, sourceID, collectionID, replicaID UniqueID, shard string) *baseTask {
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+func newBaseTask(ctx context.Context, sourceID, collectionID, replicaID UniqueID, shard string) *baseTask {
+	ctx, cancel := context.WithCancel(ctx)
 
 	return &baseTask{
 		sourceID:     sourceID,
@@ -237,7 +237,7 @@ func NewSegmentTask(ctx context.Context,
 		}
 	}
 
-	base := newBaseTask(ctx, timeout, sourceID, collectionID, replicaID, shard)
+	base := newBaseTask(ctx, sourceID, collectionID, replicaID, shard)
 	base.actions = actions
 	return &SegmentTask{
 		baseTask:  base,
@@ -287,7 +287,7 @@ func NewChannelTask(ctx context.Context,
 		}
 	}
 
-	base := newBaseTask(ctx, timeout, sourceID, collectionID, replicaID, channel)
+	base := newBaseTask(ctx, sourceID, collectionID, replicaID, channel)
 	base.actions = actions
 	return &ChannelTask{
 		baseTask: base,
