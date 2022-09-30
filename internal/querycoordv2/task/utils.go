@@ -58,8 +58,13 @@ func packLoadSegmentRequest(
 	schema *schemapb.CollectionSchema,
 	loadMeta *querypb.LoadMetaInfo,
 	loadInfo *querypb.SegmentLoadInfo,
-	deltaPositions []*internalpb.MsgPosition,
+	segment *datapb.SegmentInfo,
 ) *querypb.LoadSegmentsRequest {
+	deltaPosition := segment.GetDmlPosition()
+	if deltaPosition == nil {
+		deltaPosition = segment.GetStartPosition()
+	}
+
 	return &querypb.LoadSegmentsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_LoadSegments,
@@ -70,7 +75,7 @@ func packLoadSegmentRequest(
 		LoadMeta:       loadMeta,
 		CollectionID:   task.CollectionID(),
 		ReplicaID:      task.ReplicaID(),
-		DeltaPositions: deltaPositions,
+		DeltaPositions: []*internalpb.MsgPosition{deltaPosition},
 		DstNodeID:      action.Node(),
 		Version:        time.Now().UnixNano(),
 		NeedTransfer:   true,

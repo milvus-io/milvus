@@ -45,19 +45,19 @@ func (task *LoadSegmentsTask) Merge(other MergeableTask[segmentIndex, *querypb.L
 	task.tasks = append(task.tasks, otherTask.tasks...)
 	task.steps = append(task.steps, otherTask.steps...)
 	task.req.Infos = append(task.req.Infos, otherTask.req.GetInfos()...)
-	deltaPositions := make(map[string]*internalpb.MsgPosition)
+	positions := make(map[string]*internalpb.MsgPosition)
 	for _, position := range task.req.DeltaPositions {
-		deltaPositions[position.GetChannelName()] = position
+		positions[position.GetChannelName()] = position
 	}
 	for _, position := range otherTask.req.GetDeltaPositions() {
-		merged, ok := deltaPositions[position.GetChannelName()]
+		merged, ok := positions[position.GetChannelName()]
 		if !ok || merged.GetTimestamp() > position.GetTimestamp() {
 			merged = position
 		}
-		deltaPositions[position.GetChannelName()] = merged
+		positions[position.GetChannelName()] = merged
 	}
-	task.req.DeltaPositions = make([]*internalpb.MsgPosition, 0, len(deltaPositions))
-	for _, position := range deltaPositions {
+	task.req.DeltaPositions = make([]*internalpb.MsgPosition, 0, len(positions))
+	for _, position := range positions {
 		task.req.DeltaPositions = append(task.req.DeltaPositions, position)
 	}
 }
