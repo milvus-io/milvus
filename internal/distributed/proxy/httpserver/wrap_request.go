@@ -89,7 +89,7 @@ func (f FieldData) AsSchemapb() (*schemapb.FieldData, error) {
 				},
 			},
 		}
-	case schemapb.DataType_String:
+	case schemapb.DataType_VarChar:
 		if len(raw) > 0 {
 			_, ok := raw[0].(string)
 			if !ok {
