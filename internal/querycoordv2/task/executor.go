@@ -254,13 +254,7 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) {
 	}
 	log = log.With(zap.Int64("shardLeader", leader))
 
-	deltaPositions, err := getSegmentDeltaPositions(ctx, ex.targetMgr, ex.broker, segment.GetCollectionID(), segment.GetPartitionID(), segment.GetInsertChannel())
-	if err != nil {
-		log.Warn("failed to get delta positions of segment", zap.Error(err))
-		return
-	}
-
-	req := packLoadSegmentRequest(task, action, schema, loadMeta, loadInfo, deltaPositions)
+	req := packLoadSegmentRequest(task, action, schema, loadMeta, loadInfo, segment)
 	loadTask := NewLoadSegmentsTask(task, step, req)
 	ex.merger.Add(loadTask)
 	log.Info("load segment task committed")
