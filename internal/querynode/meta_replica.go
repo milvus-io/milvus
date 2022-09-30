@@ -46,6 +46,19 @@ import (
 	"github.com/milvus-io/milvus/internal/util/concurrency"
 )
 
+var (
+	ErrSegmentNotFound    = errors.New("SegmentNotFound")
+	ErrCollectionNotFound = errors.New("CollectionNotFound")
+)
+
+func WrapSegmentNotFound(segmentID int64) error {
+	return fmt.Errorf("%w(%v)", ErrSegmentNotFound, segmentID)
+}
+
+func WrapCollectionNotFound(collectionID int64) error {
+	return fmt.Errorf("%w(%v)", ErrCollectionNotFound, collectionID)
+}
+
 // ReplicaInterface specifies all the methods that the Collection object needs to implement in QueryNode.
 // In common cases, the system has multiple query nodes. The full data of a collection will be distributed
 // across multiple query nodes, and each query node's collectionReplica will maintain its own part.
@@ -232,7 +245,7 @@ func (replica *metaReplica) getCollectionByID(collectionID UniqueID) (*Collectio
 func (replica *metaReplica) getCollectionByIDPrivate(collectionID UniqueID) (*Collection, error) {
 	collection, ok := replica.collections[collectionID]
 	if !ok {
-		return nil, fmt.Errorf("collection hasn't been loaded or has been released, collection id = %d", collectionID)
+		return nil, fmt.Errorf("collection hasn't been loaded or has been released %w", WrapCollectionNotFound(collectionID))
 	}
 
 	return collection, nil
@@ -654,13 +667,13 @@ func (replica *metaReplica) getSegmentByIDPrivate(segmentID UniqueID, segType se
 	case segmentTypeGrowing:
 		segment, ok := replica.growingSegments[segmentID]
 		if !ok {
-			return nil, fmt.Errorf("cannot find growing segment %d in QueryNode", segmentID)
+			return nil, fmt.Errorf("growing %w", WrapSegmentNotFound(segmentID))
 		}
 		return segment, nil
 	case segmentTypeSealed:
 		segment, ok := replica.sealedSegments[segmentID]
 		if !ok {
-			return nil, fmt.Errorf("cannot find sealed segment %d in QueryNode", segmentID)
+			return nil, fmt.Errorf("sealed %w", WrapSegmentNotFound(segmentID))
 		}
 		return segment, nil
 	default:
@@ -798,7 +811,7 @@ func (replica *metaReplica) getSegmentInfo(segment *Segment) *querypb.SegmentInf
 		IndexName:    indexName,
 		IndexID:      indexID,
 		DmChannel:    segment.vChannelID,
-		SegmentState: segment.segmentType,
+		SegmentState: segment.getType(),
 		IndexInfos:   indexInfos,
 		NodeIds:      []UniqueID{Params.QueryNodeCfg.GetNodeID()},
 	}
