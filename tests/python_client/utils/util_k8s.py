@@ -27,7 +27,7 @@ def init_k8s_client_config():
 
 
 def get_current_namespace():
-    config.load_kube_config()
+    init_k8s_client_config()
     ns = config.list_kube_config_contexts()[1]["context"]["namespace"]
     return ns
 
@@ -188,7 +188,7 @@ def get_milvus_instance_name(namespace, host="127.0.0.1", port="19530", milvus_s
     ip_name_pairs = get_pod_ip_name_pairs(namespace, "app.kubernetes.io/name=milvus")
     pod_name = ip_name_pairs[query_node_ip]
     
-    config.load_kube_config()
+    init_k8s_client_config()
     api_instance = client.CoreV1Api()
     try:
         api_response = api_instance.read_namespaced_pod(namespace=namespace, name=pod_name)
@@ -214,7 +214,7 @@ def get_milvus_deploy_tool(namespace, milvus_sys):
     query_node_ip = ms.query_nodes[0]["infos"]['hardware_infos']["ip"].split(":")[0]
     ip_name_pairs = get_pod_ip_name_pairs(namespace, "app.kubernetes.io/name=milvus")
     pod_name = ip_name_pairs[query_node_ip]
-    config.load_kube_config()
+    init_k8s_client_config()
     api_instance = client.CoreV1Api()
     try:
         api_response = api_instance.read_namespaced_pod(namespace=namespace, name=pod_name)
