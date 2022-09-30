@@ -108,7 +108,7 @@ class TestBulkLoad(TestcaseBase):
         )
         logging.info(f"bulk load task ids:{task_ids}")
         success, _ = self.utility_wrap.wait_for_bulk_load_tasks_completed(
-            task_ids=task_ids, timeout=60
+            task_ids=task_ids, timeout=90
         )
         tt = time.time() - t0
         log.info(f"bulk load state:{success} in {tt}")
@@ -182,7 +182,7 @@ class TestBulkLoad(TestcaseBase):
         )
         logging.info(f"bulk load task ids:{task_ids}")
         completed, _ = self.utility_wrap.wait_for_bulk_load_tasks_completed(
-            task_ids=task_ids, timeout=60
+            task_ids=task_ids, timeout=90
         )
         tt = time.time() - t0
         log.info(f"bulk load state:{completed} in {tt}")
@@ -279,7 +279,7 @@ class TestBulkLoad(TestcaseBase):
         )
         logging.info(f"bulk load task ids:{task_ids}")
         success, state = self.utility_wrap.wait_for_bulk_load_tasks_completed(
-            task_ids=task_ids, target_state=BulkLoadState.ImportCompleted, timeout=60
+            task_ids=task_ids, target_state=BulkLoadState.ImportCompleted, timeout=90
         )
         tt = time.time() - t0
         log.info(f"bulk load state:{success} in {tt}")
@@ -368,7 +368,7 @@ class TestBulkLoad(TestcaseBase):
         logging.info(f"bulk load task ids:{task_ids}")
         # TODO: Update to BulkLoadDataIndexed when issue #16889 fixed
         success, _ = self.utility_wrap.wait_for_bulk_load_tasks_completed(
-            task_ids=task_ids, target_state=BulkLoadState.ImportCompleted, timeout=60
+            task_ids=task_ids, target_state=BulkLoadState.ImportCompleted, timeout=90
         )
         tt = time.time() - t0
         log.info(f"bulk load state:{success} in {tt}")
@@ -471,7 +471,7 @@ class TestBulkLoad(TestcaseBase):
         )
         logging.info(f"bulk load task ids:{task_ids}")
         success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
-            task_ids=task_ids, timeout=60
+            task_ids=task_ids, timeout=90
         )
         tt = time.time() - t0
         log.info(f"bulk load state:{success} in {tt}")
@@ -626,7 +626,7 @@ class TestBulkLoad(TestcaseBase):
         )
         logging.info(f"bulk load task ids:{task_ids}")
         success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
-            task_ids=task_ids, timeout=60
+            task_ids=task_ids, timeout=90
         )
         tt = time.time() - t0
         log.info(f"bulk load state:{success} in {tt}")
@@ -764,7 +764,7 @@ class TestBulkLoad(TestcaseBase):
         )
         logging.info(f"bulk load task ids:{task_ids}")
         success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
-            task_ids=task_ids, timeout=60
+            task_ids=task_ids, timeout=90
         )
         tt = time.time() - t0
         log.info(f"bulk load state:{success} in {tt}")
@@ -893,7 +893,7 @@ class TestBulkLoad(TestcaseBase):
         )
         logging.info(f"bulk load task ids:{task_ids}")
         success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
-            task_ids=task_ids, timeout=60
+            task_ids=task_ids, timeout=90
         )
         tt = time.time() - t0
         log.info(f"bulk load state:{success} in {tt}")
@@ -980,7 +980,7 @@ class TestBulkLoad(TestcaseBase):
         )
         logging.info(f"bulk load task ids:{task_ids}")
         success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
-            task_ids=task_ids, timeout=60
+            task_ids=task_ids, timeout=90
         )
         log.info(f"bulk load state:{success}")
         assert success
@@ -1041,7 +1041,7 @@ class TestBulkLoad(TestcaseBase):
         )
         logging.info(f"bulk load task ids:{task_ids}")
         success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
-            task_ids=task_ids, timeout=60
+            task_ids=task_ids, timeout=90
         )
         log.info(f"bulk load state:{success}")
         assert success
@@ -1110,7 +1110,7 @@ class TestBulkLoad(TestcaseBase):
         )
         logging.info(f"bulk load task ids:{task_ids}")
         success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
-            task_ids=task_ids, timeout=60
+            task_ids=task_ids, timeout=90
         )
         tt = time.time() - t0
         log.info(f"bulk load state:{success} in {tt}")
@@ -1186,7 +1186,7 @@ class TestBulkLoad(TestcaseBase):
             )
             task_ids.append(task_id[0])
         success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
-            task_ids=task_ids, timeout=60
+            task_ids=task_ids, timeout=90
         )
         log.info(f"bulk load state:{success}")
 
@@ -1290,7 +1290,7 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         )
         logging.info(f"bulk load task ids:{task_ids}")
         success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
-            task_ids=task_ids, timeout=60
+            task_ids=task_ids, timeout=90
         )
         assert not success
         failed_reason = f"the file {files[0]} is empty"
@@ -1340,7 +1340,7 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         )
         logging.info(f"bulk load task ids:{task_ids}")
         success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
-            task_ids=task_ids, timeout=60
+            task_ids=task_ids, timeout=90
         )
         assert not success
         failed_reason = "JSON parse: row count is 0"
@@ -1402,7 +1402,7 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         )
         logging.info(f"bulk load task ids:{task_ids}")
         success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
-            task_ids=task_ids, timeout=60
+            task_ids=task_ids, timeout=90
         )
         tt = time.time() - t0
         log.info(f"bulk load state:{success} in {tt}")
@@ -1455,7 +1455,7 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         )
         logging.info(f"bulk load task ids:{task_ids}")
         success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
-            task_ids=task_ids, timeout=60
+            task_ids=task_ids, timeout=90
         )
         assert not success
         if is_row_based:
@@ -1510,7 +1510,7 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         )
         logging.info(f"bulk load task ids:{task_ids}")
         success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
-            task_ids=task_ids, timeout=60
+            task_ids=task_ids, timeout=90
         )
         tt = time.time() - t0
         log.info(f"bulk load state:{success} in {tt}")
@@ -1568,7 +1568,7 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         )
         logging.info(f"bulk load task ids:{task_ids}")
         success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
-            task_ids=task_ids, timeout=60
+            task_ids=task_ids, timeout=90
         )
         tt = time.time() - t0
         log.info(f"bulk load state:{success} in {tt}")
@@ -1628,7 +1628,7 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         )
         logging.info(f"bulk load task ids:{task_ids}")
         success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
-            task_ids=task_ids, timeout=60
+            task_ids=task_ids, timeout=90
         )
         tt = time.time() - t0
         log.info(f"bulk load state:{success} in {tt}")
@@ -1678,7 +1678,7 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         )
         logging.info(f"bulk load task ids:{task_ids}")
         success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
-            task_ids=task_ids, timeout=60
+            task_ids=task_ids, timeout=90
         )
         log.info(f"bulk load state:{success}")
         assert not success
@@ -1801,7 +1801,7 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         )
         logging.info(f"bulk load task ids:{task_ids}")
         success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
-            task_ids=task_ids, timeout=60
+            task_ids=task_ids, timeout=90
         )
         log.info(f"bulk load state:{success}")
         assert not success
@@ -1874,7 +1874,7 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         )
         logging.info(f"bulk load task ids:{task_ids}")
         success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
-            task_ids=task_ids, timeout=60
+            task_ids=task_ids, timeout=90
         )
         tt = time.time() - t0
         log.info(f"bulk load state:{success} in {tt}")
@@ -1926,7 +1926,7 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         )
         logging.info(f"bulk load task ids:{task_ids}")
         success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
-            task_ids=task_ids, timeout=60
+            task_ids=task_ids, timeout=90
         )
         tt = time.time() - t0
         log.info(f"bulk load state:{success} in {tt}")
@@ -1983,7 +1983,7 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         )
         logging.info(f"bulk load task ids:{task_ids}")
         success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
-            task_ids=task_ids, timeout=60
+            task_ids=task_ids, timeout=90
         )
         tt = time.time() - t0
         log.info(f"bulk load state:{success} in {tt}")
@@ -2034,7 +2034,7 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         )
         logging.info(f"bulk load task ids:{task_ids}")
         success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
-            task_ids=task_ids, timeout=60
+            task_ids=task_ids, timeout=90
         )
         tt = time.time() - t0
         log.info(f"bulk load state:{success} in {tt}")
@@ -2088,7 +2088,7 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         )
         logging.info(f"bulk load task ids:{task_ids}")
         success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
-            task_ids=task_ids, timeout=60
+            task_ids=task_ids, timeout=90
         )
         log.info(f"bulk load state:{success}")
         assert not success
@@ -2143,7 +2143,7 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         )
         logging.info(f"bulk load task ids:{task_ids}")
         success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
-            task_ids=task_ids, timeout=60
+            task_ids=task_ids, timeout=90
         )
         log.info(f"bulk load state:{success}")
         assert not success
@@ -2209,7 +2209,7 @@ class TestBulkLoadInvalidParams(TestcaseBase):
             collection_name=c_name, is_row_based=is_row_based, files=files
         )
         success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
-            task_ids=task_ids, timeout=60
+            task_ids=task_ids, timeout=90
         )
         tt = time.time() - t0
         log.info(f"bulk load state:{success} in {tt}")
@@ -2265,7 +2265,7 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         )
         logging.info(f"bulk load task ids:{task_ids}")
         success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
-            task_ids=task_ids, timeout=60
+            task_ids=task_ids, timeout=90
         )
         log.info(f"bulk load state:{success}")
         assert not success
@@ -2325,7 +2325,7 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         )
         logging.info(f"bulk load task ids:{task_ids}")
         success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
-            task_ids=task_ids, timeout=60
+            task_ids=task_ids, timeout=90
         )
         log.info(f"bulk load state:{success}")
         assert not success
