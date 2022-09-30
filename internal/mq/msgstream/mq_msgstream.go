@@ -669,6 +669,10 @@ func (ms *MqTtMsgStream) Close() {
 	ms.mqMsgStream.Close()
 }
 
+func isDMLMsg(msg TsMsg) bool {
+	return msg.Type() == commonpb.MsgType_Insert || msg.Type() == commonpb.MsgType_Delete
+}
+
 func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 	ms.closeRWMutex.RLock()
 	defer ms.closeRWMutex.RUnlock()
@@ -760,7 +764,7 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 			idset := make(typeutil.UniqueSet)
 			uniqueMsgs := make([]TsMsg, 0, len(timeTickBuf))
 			for _, msg := range timeTickBuf {
-				if idset.Contain(msg.ID()) {
+				if isDMLMsg(msg) && idset.Contain(msg.ID()) {
 					log.Warn("mqTtMsgStream, found duplicated msg", zap.Int64("msgID", msg.ID()))
 					continue
 				}
