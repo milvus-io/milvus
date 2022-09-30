@@ -514,8 +514,9 @@ func (p *BinlogAdapter) getShardingListByPrimaryInt64(primaryKeys []int64,
 	shardList := make([]int32, 0, len(primaryKeys))
 	for i, key := range primaryKeys {
 		// if this entity's timestamp is greater than the tsEndPoint, set shardID = -1 to skip this entity
+		// timestamp is stored as int64 type in log file, actually it is uint64, compare with uint64
 		ts := timestampList[i]
-		if ts > int64(p.tsEndPoint) {
+		if uint64(ts) > p.tsEndPoint {
 			shardList = append(shardList, -1)
 			excluded++
 			continue
@@ -565,8 +566,9 @@ func (p *BinlogAdapter) getShardingListByPrimaryVarchar(primaryKeys []string,
 	shardList := make([]int32, 0, len(primaryKeys))
 	for i, key := range primaryKeys {
 		// if this entity's timestamp is greater than the tsEndPoint, set shardID = -1 to skip this entity
+		// timestamp is stored as int64 type in log file, actually it is uint64, compare with uint64
 		ts := timestampList[i]
-		if ts > int64(p.tsEndPoint) {
+		if uint64(ts) > p.tsEndPoint {
 			shardList = append(shardList, -1)
 			excluded++
 			continue
