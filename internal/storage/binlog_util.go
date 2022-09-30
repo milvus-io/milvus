@@ -24,10 +24,16 @@ func ParseSegmentIDByBinlog(rootPath, path string) (UniqueID, error) {
 
 	// binlog path should consist of "[log_type]/collID/partID/segID/fieldID/fileName"
 	keyStr := strings.Split(p, "/")
-	if len(keyStr) == 5 {
-		return 0, common.NewIgnorableError(fmt.Errorf("%s does not contains a file name", path))
+
+	logType := keyStr[0]
+	if logType == common.SegmentDeltaLogPath {
+		if len(keyStr) == 5 {
+			return strconv.ParseInt(keyStr[3], 10, 64)
+		}
+		return 0, fmt.Errorf("%s is not a valid delta log path", path)
 	}
 
+	// log type are binlog or statslog
 	if len(keyStr) == 6 {
 		return strconv.ParseInt(keyStr[len(keyStr)-3], 10, 64)
 	}
