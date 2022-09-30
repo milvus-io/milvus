@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -77,20 +78,6 @@ type (
 	Timestamp = typeutil.Timestamp
 )
 
-// ServerState type alias, presents datacoord Server State
-type ServerState = int64
-
-const (
-	// ServerStateStopped state stands for just created or stopped `Server` instance
-	ServerStateStopped ServerState = 0
-	// ServerStateInitializing state stands initializing `Server` instance
-	ServerStateInitializing ServerState = 1
-	// ServerStateHealthy state stands for healthy `Server` instance
-	ServerStateHealthy ServerState = 2
-	// ServerStateStandby state stands for standby `Server` instance
-	ServerStateStandby ServerState = 3
-)
-
 type dataNodeCreatorFunc func(ctx context.Context, addr string) (types.DataNode, error)
 type rootCoordCreatorFunc func(ctx context.Context, metaRootPath string, etcdClient *clientv3.Client) (types.RootCoord, error)
 
@@ -107,7 +94,7 @@ type Server struct {
 	serverLoopCancel context.CancelFunc
 	serverLoopWg     sync.WaitGroup
 	quitCh           chan struct{}
-	isServing        ServerState
+	stateCode        atomic.Value
 	helper           ServerHelper
 
 	etcdCli          *clientv3.Client
@@ -265,7 +252,7 @@ func (s *Server) initSession() error {
 // Init change server state to Initializing
 func (s *Server) Init() error {
 	var err error
-	atomic.StoreInt64(&s.isServing, ServerStateInitializing)
+	s.stateCode.Store(internalpb.StateCode_Initializing)
 	s.factory.Init(&Params)
 
 	if err = s.initRootCoordClient(); err != nil {
@@ -324,14 +311,14 @@ func (s *Server) Start() error {
 			// todo complete the activateFunc
 			log.Info("datacoord switch from standby to active, activating")
 			s.startServerLoop()
-			atomic.StoreInt64(&s.isServing, ServerStateHealthy)
+			s.stateCode.Store(internalpb.StateCode_Healthy)
 			logutil.Logger(s.ctx).Debug("startup success")
 		}
-		atomic.StoreInt64(&s.isServing, ServerStateStandby)
+		s.stateCode.Store(internalpb.StateCode_StandBy)
 		logutil.Logger(s.ctx).Debug("DataCoord enter standby mode successfully")
 	} else {
 		s.startServerLoop()
-		atomic.StoreInt64(&s.isServing, ServerStateHealthy)
+		s.stateCode.Store(internalpb.StateCode_Healthy)
 		logutil.Logger(s.ctx).Debug("DataCoord startup successfully")
 	}
 
@@ -867,7 +854,7 @@ func (s *Server) initRootCoordClient() error {
 // if Server is healthy, set server state to stopped, release etcd session,
 //	stop message stream client and stop server loops
 func (s *Server) Stop() error {
-	if !atomic.CompareAndSwapInt64(&s.isServing, ServerStateHealthy, ServerStateStopped) {
+	if s.stateCode.CompareAndSwap(internalpb.StateCode_Healthy, internalpb.StateCode_Abnormal) {
 		return nil
 	}
 	logutil.Logger(s.ctx).Debug("server shutdown")

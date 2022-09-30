@@ -25,7 +25,6 @@ import (
 	"os/signal"
 	"path"
 	"strconv"
-	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -580,16 +579,16 @@ func TestGetComponentStates(t *testing.T) {
 	svr.session = &sessionutil.Session{}
 	svr.session.UpdateRegistered(true)
 	type testCase struct {
-		state ServerState
+		state internalpb.StateCode
 		code  internalpb.StateCode
 	}
 	cases := []testCase{
-		{state: ServerStateStopped, code: internalpb.StateCode_Abnormal},
-		{state: ServerStateInitializing, code: internalpb.StateCode_Initializing},
-		{state: ServerStateHealthy, code: internalpb.StateCode_Healthy},
+		{state: internalpb.StateCode_Abnormal, code: internalpb.StateCode_Abnormal},
+		{state: internalpb.StateCode_Initializing, code: internalpb.StateCode_Initializing},
+		{state: internalpb.StateCode_Healthy, code: internalpb.StateCode_Healthy},
 	}
 	for _, tc := range cases {
-		atomic.StoreInt64(&svr.isServing, tc.state)
+		svr.stateCode.Store(tc.state)
 		resp, err := svr.GetComponentStates(context.Background())
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
@@ -880,14 +879,14 @@ func TestServer_ShowConfigurations(t *testing.T) {
 	}
 
 	// server is closed
-	stateSave := atomic.LoadInt64(&svr.isServing)
-	atomic.StoreInt64(&svr.isServing, ServerStateInitializing)
+	stateSave := svr.stateCode.Load()
+	svr.stateCode.Store(internalpb.StateCode_Initializing)
 	resp, err := svr.ShowConfigurations(svr.ctx, req)
 	assert.Nil(t, err)
 	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
 
 	// normal case
-	atomic.StoreInt64(&svr.isServing, stateSave)
+	svr.stateCode.Store(stateSave)
 
 	resp, err = svr.ShowConfigurations(svr.ctx, req)
 	assert.NoError(t, err)
@@ -903,12 +902,12 @@ func TestServer_GetMetrics(t *testing.T) {
 	var err error
 
 	// server is closed
-	stateSave := atomic.LoadInt64(&svr.isServing)
-	atomic.StoreInt64(&svr.isServing, ServerStateInitializing)
+	stateSave := svr.stateCode.Load()
+	svr.stateCode.Store(internalpb.StateCode_Initializing)
 	resp, err := svr.GetMetrics(svr.ctx, &milvuspb.GetMetricsRequest{})
 	assert.Nil(t, err)
 	assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-	atomic.StoreInt64(&svr.isServing, stateSave)
+	svr.stateCode.Store(stateSave)
 
 	// failed to parse metric type
 	invalidRequest := "invalid request"
@@ -2110,7 +2109,7 @@ func TestGetCompactionState(t *testing.T) {
 	Params.DataCoordCfg.EnableCompaction = true
 	t.Run("test get compaction state with new compactionhandler", func(t *testing.T) {
 		svr := &Server{}
-		svr.isServing = ServerStateHealthy
+		svr.stateCode.Store(internalpb.StateCode_Healthy)
 
 		svr.compactionHandler = &mockCompactionHandler{
 			methods: map[string]interface{}{
@@ -2129,7 +2128,7 @@ func TestGetCompactionState(t *testing.T) {
 	})
 	t.Run("test get compaction state in running", func(t *testing.T) {
 		svr := &Server{}
-		svr.isServing = ServerStateHealthy
+		svr.stateCode.Store(internalpb.StateCode_Healthy)
 
 		svr.compactionHandler = &mockCompactionHandler{
 			methods: map[string]interface{}{
@@ -2162,7 +2161,7 @@ func TestGetCompactionState(t *testing.T) {
 
 	t.Run("with closed server", func(t *testing.T) {
 		svr := &Server{}
-		svr.isServing = ServerStateStopped
+		svr.stateCode.Store(internalpb.StateCode_Abnormal)
 
 		resp, err := svr.GetCompactionState(context.Background(), &milvuspb.GetCompactionStateRequest{})
 		assert.Nil(t, err)
@@ -2175,7 +2174,7 @@ func TestManualCompaction(t *testing.T) {
 	Params.DataCoordCfg.EnableCompaction = true
 	t.Run("test manual compaction successfully", func(t *testing.T) {
 		svr := &Server{allocator: &MockAllocator{}}
-		svr.isServing = ServerStateHealthy
+		svr.stateCode.Store(internalpb.StateCode_Healthy)
 		svr.compactionTrigger = &mockCompactionTrigger{
 			methods: map[string]interface{}{
 				"forceTriggerCompaction": func(collectionID int64, ct *compactTime) (UniqueID, error) {
@@ -2194,7 +2193,7 @@ func TestManualCompaction(t *testing.T) {
 
 	t.Run("test manual compaction failure", func(t *testing.T) {
 		svr := &Server{allocator: &MockAllocator{}}
-		svr.isServing = ServerStateHealthy
+		svr.stateCode.Store(internalpb.StateCode_Healthy)
 		svr.compactionTrigger = &mockCompactionTrigger{
 			methods: map[string]interface{}{
 				"forceTriggerCompaction": func(collectionID int64, ct *compactTime) (UniqueID, error) {
@@ -2213,7 +2212,7 @@ func TestManualCompaction(t *testing.T) {
 
 	t.Run("test manual compaction with closed server", func(t *testing.T) {
 		svr := &Server{}
-		svr.isServing = ServerStateStopped
+		svr.stateCode.Store(internalpb.StateCode_Abnormal)
 		svr.compactionTrigger = &mockCompactionTrigger{
 			methods: map[string]interface{}{
 				"forceTriggerCompaction": func(collectionID int64, ct *compactTime) (UniqueID, error) {
@@ -2235,7 +2234,8 @@ func TestManualCompaction(t *testing.T) {
 func TestGetCompactionStateWithPlans(t *testing.T) {
 	t.Run("test get compaction state successfully", func(t *testing.T) {
 		svr := &Server{}
-		svr.isServing = ServerStateHealthy
+		svr.stateCode.Store(internalpb.StateCode_Healthy)
+
 		svr.compactionHandler = &mockCompactionHandler{
 			methods: map[string]interface{}{
 				"getCompactionTasksBySignalID": func(signalID int64) []*compactionTask {
@@ -2259,7 +2259,7 @@ func TestGetCompactionStateWithPlans(t *testing.T) {
 
 	t.Run("test get compaction state with closed server", func(t *testing.T) {
 		svr := &Server{}
-		svr.isServing = ServerStateStopped
+		svr.stateCode.Store(internalpb.StateCode_Abnormal)
 		svr.compactionHandler = &mockCompactionHandler{
 			methods: map[string]interface{}{
 				"getCompactionTasksBySignalID": func(signalID int64) []*compactionTask {
@@ -2470,7 +2470,7 @@ func TestPostFlush(t *testing.T) {
 func TestGetFlushState(t *testing.T) {
 	t.Run("get flush state with all flushed segments", func(t *testing.T) {
 		svr := &Server{
-			isServing: ServerStateHealthy,
+			stateCode: internalpb.StateCode_Healthy,
 			meta: &meta{
 				segments: &SegmentsInfo{
 					segments: map[int64]*SegmentInfo{
@@ -2501,7 +2501,7 @@ func TestGetFlushState(t *testing.T) {
 
 	t.Run("get flush state with unflushed segments", func(t *testing.T) {
 		svr := &Server{
-			isServing: ServerStateHealthy,
+			stateCode: internalpb.StateCode_Healthy,
 			meta: &meta{
 				segments: &SegmentsInfo{
 					segments: map[int64]*SegmentInfo{
@@ -2532,7 +2532,7 @@ func TestGetFlushState(t *testing.T) {
 
 	t.Run("get flush state with compacted segments", func(t *testing.T) {
 		svr := &Server{
-			isServing: ServerStateHealthy,
+			stateCode: internalpb.StateCode_Healthy,
 			meta: &meta{
 				segments: &SegmentsInfo{
 					segments: map[int64]*SegmentInfo{

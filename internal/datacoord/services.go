@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"math/rand"
 	"strconv"
-	"sync/atomic"
 	"time"
 
 	"github.com/milvus-io/milvus/api/commonpb"
@@ -42,7 +41,7 @@ import (
 
 // checks whether server in Healthy State
 func (s *Server) isClosed() bool {
-	return atomic.LoadInt64(&s.isServing) != ServerStateHealthy
+	return s.stateCode.Load() != internalpb.StateCode_Healthy
 }
 
 // GetTimeTickChannel legacy API, returns time tick channel name
@@ -558,27 +557,18 @@ func (s *Server) GetComponentStates(ctx context.Context) (*internalpb.ComponentS
 	if s.session != nil && s.session.Registered() {
 		nodeID = s.session.ServerID // or Params.NodeID
 	}
-
+	code := s.stateCode.Load().(internalpb.StateCode)
 	resp := &internalpb.ComponentStates{
 		State: &internalpb.ComponentInfo{
 			// NodeID:    Params.NodeID, // will race with Server.Register()
 			NodeID:    nodeID,
 			Role:      "datacoord",
-			StateCode: 0,
+			StateCode: code,
 		},
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
 		},
-	}
-	state := atomic.LoadInt64(&s.isServing)
-	switch state {
-	case ServerStateInitializing:
-		resp.State.StateCode = internalpb.StateCode_Initializing
-	case ServerStateHealthy:
-		resp.State.StateCode = internalpb.StateCode_Healthy
-	default:
-		resp.State.StateCode = internalpb.StateCode_Abnormal
 	}
 	return resp, nil
 }

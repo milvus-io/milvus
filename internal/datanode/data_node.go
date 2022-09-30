@@ -104,11 +104,11 @@ var rateCol *rateCollector
 //  `clearSignal` is a signal channel for releasing the flowgraph resources.
 //  `segmentCache` stores all flushing and flushed segments.
 type DataNode struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-	Role   string
-	State  atomic.Value // internalpb.StateCode_Initializing
-
+	ctx              context.Context
+	cancel           context.CancelFunc
+	Role             string
+	State            atomic.Value // internalpb.StateCode_Initializing
+	stateCode        atomic.Value // internalpb.StateCode_Initializing
 	flowgraphManager *flowgraphManager
 	eventManagerMap  sync.Map // vchannel name -> channelEventManager
 
@@ -519,12 +519,12 @@ func (node *DataNode) Start() error {
 
 // UpdateStateCode updates datanode's state code
 func (node *DataNode) UpdateStateCode(code internalpb.StateCode) {
-	node.State.Store(code)
+	node.stateCode.Store(code)
 }
 
 // GetStateCode return datanode's state code
 func (node *DataNode) GetStateCode() internalpb.StateCode {
-	return node.State.Load().(internalpb.StateCode)
+	return node.stateCode.Load().(internalpb.StateCode)
 }
 
 func (node *DataNode) isHealthy() bool {
@@ -543,7 +543,7 @@ func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmCha
 
 // GetComponentStates will return current state of DataNode
 func (node *DataNode) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
-	log.Debug("DataNode current state", zap.Any("State", node.State.Load()))
+	log.Debug("DataNode current state", zap.Any("State", node.stateCode.Load()))
 	nodeID := common.NotRegisteredID
 	if node.session != nil && node.session.Registered() {
 		nodeID = node.session.ServerID
@@ -553,7 +553,7 @@ func (node *DataNode) GetComponentStates(ctx context.Context) (*internalpb.Compo
 			// NodeID:    Params.NodeID, // will race with DataNode.Register()
 			NodeID:    nodeID,
 			Role:      node.Role,
-			StateCode: node.State.Load().(internalpb.StateCode),
+			StateCode: node.stateCode.Load().(internalpb.StateCode),
 		},
 		SubcomponentStates: make([]*internalpb.ComponentInfo, 0),
 		Status:             &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
