@@ -1,3 +1,19 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package importutil
 
 import (
@@ -72,7 +88,10 @@ func sampleSchema() *schemapb.CollectionSchema {
 				Name:         "field_string",
 				IsPrimaryKey: false,
 				Description:  "string",
-				DataType:     schemapb.DataType_String,
+				DataType:     schemapb.DataType_VarChar,
+				TypeParams: []*commonpb.KeyValuePair{
+					{Key: "max_length", Value: "128"},
+				},
 			},
 			{
 				FieldID:      110,
@@ -168,7 +187,9 @@ func Test_AdjustBufSize(t *testing.T) {
 	parser := NewJSONParser(ctx, schema)
 	assert.NotNil(t, parser)
 
-	sizePerRecord, _ := typeutil.EstimateSizePerRecord(schema)
+	sizePerRecord, err := typeutil.EstimateSizePerRecord(schema)
+	assert.Nil(t, err)
+	assert.Greater(t, sizePerRecord, 0)
 	assert.Equal(t, MaxBatchCount, MaxFileSize/(sizePerRecord*int(parser.bufSize)))
 
 	// huge row
@@ -194,7 +215,7 @@ func Test_AdjustBufSize(t *testing.T) {
 	assert.Equal(t, int64(MinBufferSize), parser.bufSize)
 }
 
-func Test_ParserRows(t *testing.T) {
+func Test_JSONParserParserRows(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -299,7 +320,7 @@ func Test_ParserRows(t *testing.T) {
 	assert.NotNil(t, err)
 }
 
-func Test_ParserColumns(t *testing.T) {
+func Test_JSONParserParserColumns(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -423,7 +444,7 @@ func Test_ParserColumns(t *testing.T) {
 	assert.NotNil(t, err)
 }
 
-func Test_ParserRowsStringKey(t *testing.T) {
+func Test_JSONParserParserRowsStringKey(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -525,7 +546,7 @@ func Test_ParserRowsStringKey(t *testing.T) {
 	assert.Equal(t, int64(10), validator.ValidateCount())
 }
 
-func Test_ParserColumnsStrKey(t *testing.T) {
+func Test_JSONParserParserColumnsStrKey(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

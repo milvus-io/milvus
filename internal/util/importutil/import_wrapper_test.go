@@ -1,3 +1,19 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package importutil
 
 import (
@@ -29,7 +45,12 @@ const (
 )
 
 type MockChunkManager struct {
-	size int64
+	size       int64
+	sizeErr    error
+	readBuf    map[string][]byte
+	readErr    error
+	listResult map[string][]string
+	listErr    error
 }
 
 func (mc *MockChunkManager) RootPath() string {
@@ -57,7 +78,16 @@ func (mc *MockChunkManager) Exist(ctx context.Context, filePath string) (bool, e
 }
 
 func (mc *MockChunkManager) Read(ctx context.Context, filePath string) ([]byte, error) {
-	return nil, nil
+	if mc.readErr != nil {
+		return nil, mc.readErr
+	}
+
+	val, ok := mc.readBuf[filePath]
+	if !ok {
+		return nil, errors.New("mock chunk manager: file path not found: " + filePath)
+	}
+
+	return val, nil
 }
 
 func (mc *MockChunkManager) MultiRead(ctx context.Context, filePaths []string) ([][]byte, error) {
@@ -65,6 +95,15 @@ func (mc *MockChunkManager) MultiRead(ctx context.Context, filePaths []string) (
 }
 
 func (mc *MockChunkManager) ListWithPrefix(ctx context.Context, prefix string, recursive bool) ([]string, []time.Time, error) {
+	if mc.listErr != nil {
+		return nil, nil, mc.listErr
+	}
+
+	result, ok := mc.listResult[prefix]
+	if ok {
+		return result, nil, nil
+	}
+
 	return nil, nil, nil
 }
 
@@ -81,6 +120,10 @@ func (mc *MockChunkManager) Mmap(ctx context.Context, filePath string) (*mmap.Re
 }
 
 func (mc *MockChunkManager) Size(ctx context.Context, filePath string) (int64, error) {
+	if mc.sizeErr != nil {
+		return 0, mc.sizeErr
+	}
+
 	return mc.size, nil
 }
 
@@ -101,7 +144,6 @@ func Test_NewImportWrapper(t *testing.T) {
 	ctx := context.Background()
 	cm, err := f.NewPersistentStorageChunkManager(ctx)
 	assert.NoError(t, err)
-
 	wrapper := NewImportWrapper(ctx, nil, 2, 1, nil, cm, nil, nil, nil)
 	assert.Nil(t, wrapper)
 
@@ -127,7 +169,7 @@ func Test_NewImportWrapper(t *testing.T) {
 	assert.Nil(t, err)
 }
 
-func Test_ImportRowBased(t *testing.T) {
+func Test_ImportWrapperRowBased(t *testing.T) {
 	f := dependency.NewDefaultFactory(true)
 	ctx := context.Background()
 	cm, err := f.NewPersistentStorageChunkManager(ctx)
@@ -214,7 +256,7 @@ func Test_ImportRowBased(t *testing.T) {
 	assert.NotNil(t, err)
 }
 
-func Test_ImportColumnBased_json(t *testing.T) {
+func Test_ImportWrapperColumnBased_json(t *testing.T) {
 	f := dependency.NewDefaultFactory(true)
 	ctx := context.Background()
 	cm, err := f.NewPersistentStorageChunkManager(ctx)
@@ -314,7 +356,7 @@ func Test_ImportColumnBased_json(t *testing.T) {
 	assert.NotNil(t, err)
 }
 
-func Test_ImportColumnBased_StringKey(t *testing.T) {
+func Test_ImportWrapperColumnBased_StringKey(t *testing.T) {
 	f := dependency.NewDefaultFactory(true)
 	ctx := context.Background()
 	cm, err := f.NewPersistentStorageChunkManager(ctx)
@@ -381,7 +423,7 @@ func Test_ImportColumnBased_StringKey(t *testing.T) {
 	assert.Equal(t, commonpb.ImportState_ImportPersisted, importResult.State)
 }
 
-func Test_ImportColumnBased_numpy(t *testing.T) {
+func Test_ImportWrapperColumnBased_numpy(t *testing.T) {
 	f := dependency.NewDefaultFactory(true)
 	ctx := context.Background()
 	cm, err := f.NewPersistentStorageChunkManager(ctx)
@@ -519,7 +561,7 @@ func perfSchema(dim int) *schemapb.CollectionSchema {
 	return schema
 }
 
-func Test_ImportRowBased_perf(t *testing.T) {
+func Test_ImportWrapperRowBased_perf(t *testing.T) {
 	f := dependency.NewDefaultFactory(true)
 	ctx := context.Background()
 	cm, err := f.NewPersistentStorageChunkManager(ctx)
@@ -620,7 +662,7 @@ func Test_ImportRowBased_perf(t *testing.T) {
 	tr.Record("parse large json file " + filePath)
 }
 
-func Test_ImportColumnBased_perf(t *testing.T) {
+func Test_ImportWrapperColumnBased_perf(t *testing.T) {
 	f := dependency.NewDefaultFactory(true)
 	ctx := context.Background()
 	cm, err := f.NewPersistentStorageChunkManager(ctx)
@@ -733,7 +775,7 @@ func Test_ImportColumnBased_perf(t *testing.T) {
 	tr.Record("parse large json files: " + filePath1 + "," + filePath2)
 }
 
-func Test_FileValidation(t *testing.T) {
+func Test_ImportWrapperFileValidation(t *testing.T) {
 	ctx := context.Background()
 
 	cm := &MockChunkManager{
@@ -748,64 +790,71 @@ func Test_FileValidation(t *testing.T) {
 	wrapper := NewImportWrapper(ctx, schema, int32(shardNum), int64(segmentSize), idAllocator, cm, nil, nil, nil)
 
 	// duplicate files
-	var files = [2]string{"1.npy", "1.npy"}
-	err := wrapper.fileValidation(files[:], false)
+	files := []string{"1.npy", "1.npy"}
+	err := wrapper.fileValidation(files, false)
 	assert.NotNil(t, err)
-	err = wrapper.fileValidation(files[:], true)
+	err = wrapper.fileValidation(files, true)
 	assert.NotNil(t, err)
 
 	// unsupported file name
 	files[0] = "a/1.npy"
 	files[1] = "b/1.npy"
-	err = wrapper.fileValidation(files[:], true)
+	err = wrapper.fileValidation(files, true)
 	assert.NotNil(t, err)
 
-	err = wrapper.fileValidation(files[:], false)
+	err = wrapper.fileValidation(files, false)
 	assert.NotNil(t, err)
 
 	// unsupported file type
 	files[0] = "1"
 	files[1] = "1"
-	err = wrapper.fileValidation(files[:], true)
+	err = wrapper.fileValidation(files, true)
 	assert.NotNil(t, err)
 
-	err = wrapper.fileValidation(files[:], false)
+	err = wrapper.fileValidation(files, false)
 	assert.NotNil(t, err)
 
 	// valid cases
 	files[0] = "1.json"
 	files[1] = "2.json"
-	err = wrapper.fileValidation(files[:], true)
+	err = wrapper.fileValidation(files, true)
 	assert.Nil(t, err)
 
 	files[1] = "2.npy"
-	err = wrapper.fileValidation(files[:], false)
+	err = wrapper.fileValidation(files, false)
 	assert.Nil(t, err)
 
 	// empty file
-	cm = &MockChunkManager{
-		size: 0,
-	}
+	cm.size = 0
 	wrapper = NewImportWrapper(ctx, schema, int32(shardNum), int64(segmentSize), idAllocator, cm, nil, nil, nil)
-	err = wrapper.fileValidation(files[:], true)
+	err = wrapper.fileValidation(files, true)
 	assert.NotNil(t, err)
 
-	err = wrapper.fileValidation(files[:], false)
+	err = wrapper.fileValidation(files, false)
 	assert.NotNil(t, err)
 
-	// file size exceed limit
-	cm = &MockChunkManager{
-		size: MaxFileSize + 1,
-	}
+	// file size exceed MaxFileSize limit
+	cm.size = MaxFileSize + 1
 	wrapper = NewImportWrapper(ctx, schema, int32(shardNum), int64(segmentSize), idAllocator, cm, nil, nil, nil)
-	err = wrapper.fileValidation(files[:], true)
+	err = wrapper.fileValidation(files, true)
 	assert.NotNil(t, err)
 
-	err = wrapper.fileValidation(files[:], false)
+	err = wrapper.fileValidation(files, false)
+	assert.NotNil(t, err)
+
+	// total files size exceed MaxTotalSizeInMemory limit
+	cm.size = MaxFileSize - 1
+	files = append(files, "3.npy")
+	err = wrapper.fileValidation(files, false)
+	assert.NotNil(t, err)
+
+	// failed to get file size
+	cm.sizeErr = errors.New("error")
+	err = wrapper.fileValidation(files, false)
 	assert.NotNil(t, err)
 }
 
-func Test_ReportImportFailRowBased(t *testing.T) {
+func Test_ImportWrapperReportFailRowBased(t *testing.T) {
 	f := dependency.NewDefaultFactory(true)
 	ctx := context.Background()
 	cm, err := f.NewPersistentStorageChunkManager(ctx)
@@ -871,7 +920,7 @@ func Test_ReportImportFailRowBased(t *testing.T) {
 	assert.Equal(t, commonpb.ImportState_ImportPersisted, importResult.State)
 }
 
-func Test_ReportImportFailColumnBased_json(t *testing.T) {
+func Test_ImportWrapperReportFailColumnBased_json(t *testing.T) {
 	f := dependency.NewDefaultFactory(true)
 	ctx := context.Background()
 	cm, err := f.NewPersistentStorageChunkManager(ctx)
@@ -952,7 +1001,7 @@ func Test_ReportImportFailColumnBased_json(t *testing.T) {
 	assert.Equal(t, commonpb.ImportState_ImportPersisted, importResult.State)
 }
 
-func Test_ReportImportFailColumnBased_numpy(t *testing.T) {
+func Test_ImportWrapperReportFailColumnBased_numpy(t *testing.T) {
 	f := dependency.NewDefaultFactory(true)
 	ctx := context.Background()
 	cm, err := f.NewPersistentStorageChunkManager(ctx)
@@ -1038,4 +1087,103 @@ func Test_ReportImportFailColumnBased_numpy(t *testing.T) {
 	assert.NotNil(t, err)
 	assert.Equal(t, 5, rowCount)
 	assert.Equal(t, commonpb.ImportState_ImportPersisted, importResult.State)
+}
+
+func Test_ImportWrapperIsBinlogImport(t *testing.T) {
+	ctx := context.Background()
+
+	cm := &MockChunkManager{
+		size: 1,
+	}
+
+	idAllocator := newIDAllocator(ctx, t)
+	schema := perfSchema(128)
+	shardNum := 2
+	segmentSize := 512 // unit: MB
+
+	wrapper := NewImportWrapper(ctx, schema, int32(shardNum), int64(segmentSize), idAllocator, cm, nil, nil, nil)
+
+	paths := []string{}
+	b := wrapper.isBinlogImport(paths)
+	assert.False(t, b)
+
+	paths = []string{
+		"path1",
+		"path2",
+		"path3",
+	}
+	b = wrapper.isBinlogImport(paths)
+	assert.False(t, b)
+
+	paths = []string{
+		"path1.txt",
+		"path2.jpg",
+	}
+	b = wrapper.isBinlogImport(paths)
+	assert.False(t, b)
+
+	paths = []string{
+		"/tmp",
+		"/tmp",
+	}
+	b = wrapper.isBinlogImport(paths)
+	assert.True(t, b)
+}
+
+func Test_ImportWrapperDoBinlogImport(t *testing.T) {
+	ctx := context.Background()
+
+	cm := &MockChunkManager{
+		size: 1,
+	}
+
+	idAllocator := newIDAllocator(ctx, t)
+	schema := perfSchema(128)
+	shardNum := 2
+	segmentSize := 512 // unit: MB
+
+	wrapper := NewImportWrapper(ctx, schema, int32(shardNum), int64(segmentSize), idAllocator, cm, nil, nil, nil)
+	paths := []string{
+		"/tmp",
+		"/tmp",
+	}
+	wrapper.chunkManager = nil
+
+	// failed to create new BinlogParser
+	err := wrapper.doBinlogImport(paths, 0)
+	assert.NotNil(t, err)
+
+	cm.listErr = errors.New("error")
+	wrapper.chunkManager = cm
+	wrapper.callFlushFunc = func(fields map[storage.FieldID]storage.FieldData, shardID int) error {
+		return nil
+	}
+
+	// failed to call parser.Parse()
+	err = wrapper.doBinlogImport(paths, 0)
+	assert.NotNil(t, err)
+
+	// Import() failed
+	err = wrapper.Import(paths, false, false)
+	assert.NotNil(t, err)
+
+	cm.listErr = nil
+	wrapper.reportFunc = func(res *rootcoordpb.ImportResult) error {
+		return nil
+	}
+	wrapper.importResult = &rootcoordpb.ImportResult{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		TaskId:     1,
+		DatanodeId: 1,
+		State:      commonpb.ImportState_ImportStarted,
+		Segments:   make([]int64, 0),
+		AutoIds:    make([]int64, 0),
+		RowCount:   0,
+	}
+
+	// succeed
+	err = wrapper.doBinlogImport(paths, 0)
+	assert.Nil(t, err)
 }
