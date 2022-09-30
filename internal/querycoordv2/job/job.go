@@ -277,7 +277,8 @@ func (job *ReleaseCollectionJob) Execute() error {
 	}
 
 	job.targetMgr.RemoveCollection(req.GetCollectionID())
-	waitCollectionReleased(job.dist, req.GetCollectionID())
+	// leave observer to release segments asynchronously.
+	// waitCollectionReleased(job.dist, req.GetCollectionID())
 	return nil
 }
 
@@ -499,6 +500,7 @@ func (job *ReleasePartitionJob) Execute() error {
 			log.Warn("failed to remove replicas", zap.Error(err))
 		}
 		job.targetMgr.RemoveCollection(req.GetCollectionID())
+		// we can't make this asynchronous now, since querynodes may return records of these partitions.
 		waitCollectionReleased(job.dist, req.GetCollectionID())
 	} else {
 		err := job.meta.CollectionManager.RemovePartition(toRelease...)
@@ -510,6 +512,7 @@ func (job *ReleasePartitionJob) Execute() error {
 		for _, partition := range toRelease {
 			job.targetMgr.RemovePartition(partition)
 		}
+		// we can't make this asynchronous now, since querynodes may return records of these partitions.
 		waitCollectionReleased(job.dist, req.GetCollectionID(), toRelease...)
 	}
 	return nil
