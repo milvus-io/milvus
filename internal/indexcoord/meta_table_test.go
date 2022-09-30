@@ -626,8 +626,9 @@ func TestMetaTable_GetIndexNameByID(t *testing.T) {
 
 func TestMetaTable_GetIndexStates(t *testing.T) {
 	mt := constructMetaTable(&indexcoord.Catalog{})
-	states := mt.GetIndexStates(indexID, 11)
+	states, stateCnt := mt.GetIndexStates(indexID, 11)
 	assert.Equal(t, 1, len(states))
+	assert.Equal(t, 1, stateCnt.Finished)
 }
 
 func TestMetaTable_GetSegmentIndexes(t *testing.T) {

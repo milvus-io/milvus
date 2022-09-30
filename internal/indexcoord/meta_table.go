@@ -585,8 +585,17 @@ type IndexState struct {
 	failReason string
 }
 
+type IndexStateCnt struct {
+	None       int
+	Unissued   int
+	InProgress int
+	Finished   int
+	Failed     int
+	FailReason string
+}
+
 // GetIndexStates gets the index states for indexID from meta table.
-func (mt *metaTable) GetIndexStates(indexID int64, createTs uint64) []*IndexState {
+func (mt *metaTable) GetIndexStates(indexID int64, createTs uint64) ([]*IndexState, IndexStateCnt) {
 	mt.segmentIndexLock.RLock()
 	defer mt.segmentIndexLock.RUnlock()
 
@@ -597,6 +606,7 @@ func (mt *metaTable) GetIndexStates(indexID int64, createTs uint64) []*IndexStat
 		cntInProgress = 0
 		cntFinished   = 0
 		cntFailed     = 0
+		failReason    string
 	)
 
 	for _, indexID2SegIdx := range mt.segmentIndexes {
@@ -622,6 +632,7 @@ func (mt *metaTable) GetIndexStates(indexID int64, createTs uint64) []*IndexStat
 			cntFinished++
 		case commonpb.IndexState_Failed:
 			cntFailed++
+			failReason += fmt.Sprintf("%d: %s;", segIdx.SegmentID, segIdx.FailReason)
 		}
 		segIndexStates = append(segIndexStates, &IndexState{
 			state:      segIdx.IndexState,
@@ -633,7 +644,14 @@ func (mt *metaTable) GetIndexStates(indexID int64, createTs uint64) []*IndexStat
 		zap.Int("total", len(segIndexStates)), zap.Int("None", cntNone), zap.Int("Unissued", cntUnissued),
 		zap.Int("InProgress", cntInProgress), zap.Int("Finished", cntFinished), zap.Int("Failed", cntFailed))
 
-	return segIndexStates
+	return segIndexStates, IndexStateCnt{
+		None:       cntNone,
+		Unissued:   cntNone,
+		InProgress: cntInProgress,
+		Finished:   cntFinished,
+		Failed:     cntFailed,
+		FailReason: failReason,
+	}
 }
 
 func (mt *metaTable) GetSegmentIndexes(segID UniqueID) []*model.SegmentIndex {
