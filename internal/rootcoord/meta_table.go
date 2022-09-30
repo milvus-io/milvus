@@ -672,7 +672,8 @@ func (mt *MetaTable) GetPartitionByName(collID UniqueID, partitionName string, t
 		}
 	}
 
-	return common.InvalidPartitionID, fmt.Errorf("partition ")
+	return common.InvalidPartitionID, fmt.Errorf("partition ID not found for partition name %s in collection %d",
+		partitionName, collID)
 }
 
 // AddCredential add credential
