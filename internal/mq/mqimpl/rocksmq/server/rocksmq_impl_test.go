@@ -184,6 +184,60 @@ func TestRocksmq_Basic(t *testing.T) {
 	assert.Equal(t, string(cMsgs[1].Payload), "c_message")
 }
 
+func TestRocksmq_MultiConsumer(t *testing.T) {
+	suffix := "rmq_multi_consumer"
+	kvPath := rmqPath + kvPathSuffix + suffix
+	defer os.RemoveAll(kvPath)
+	idAllocator := InitIDAllocator(kvPath)
+
+	rocksdbPath := rmqPath + suffix
+	defer os.RemoveAll(rocksdbPath + kvSuffix)
+	defer os.RemoveAll(rocksdbPath)
+	var params paramtable.BaseTable
+	params.Init()
+	atomic.StoreInt64(&RocksmqPageSize, 10)
+
+	rmq, err := NewRocksMQ(params, rocksdbPath, idAllocator)
+	assert.Nil(t, err)
+	defer rmq.Close()
+
+	channelName := "channel_rocks"
+	err = rmq.CreateTopic(channelName)
+	assert.Nil(t, err)
+	defer rmq.DestroyTopic(channelName)
+
+	msgNum := 10
+	pMsgs := make([]ProducerMessage, msgNum)
+	for i := 0; i < msgNum; i++ {
+		msg := "message_" + strconv.Itoa(i)
+		pMsg := ProducerMessage{Payload: []byte(msg)}
+		pMsgs[i] = pMsg
+	}
+	ids, err := rmq.Produce(channelName, pMsgs)
+	assert.Nil(t, err)
+	assert.Equal(t, len(pMsgs), len(ids))
+
+	for i := 0; i <= 10; i++ {
+		groupName := "group_" + strconv.Itoa(i)
+		_ = rmq.DestroyConsumerGroup(channelName, groupName)
+		err = rmq.CreateConsumerGroup(channelName, groupName)
+		assert.Nil(t, err)
+
+		consumer := &Consumer{
+			Topic:     channelName,
+			GroupName: groupName,
+		}
+		rmq.RegisterConsumer(consumer)
+	}
+
+	for i := 0; i <= 10; i++ {
+		groupName := "group_" + strconv.Itoa(i)
+		cMsgs, err := rmq.Consume(channelName, groupName, 10)
+		assert.Nil(t, err)
+		assert.Equal(t, len(cMsgs), 10)
+		assert.Equal(t, string(cMsgs[0].Payload), "message_0")
+	}
+}
 func TestRocksmq_Dummy(t *testing.T) {
 	suffix := "_dummy"
 	kvPath := rmqPath + kvPathSuffix + suffix
@@ -847,6 +901,7 @@ func TestRocksmq_Close(t *testing.T) {
 	assert.Error(t, err)
 
 	assert.Error(t, rmq.seek("", "", 0))
+	assert.Error(t, rmq.ForceSeek("", "", 0))
 	assert.Error(t, rmq.SeekToLatest("", ""))
 }
 
@@ -874,4 +929,131 @@ func TestRocksmq_SeekWithNoConsumerError(t *testing.T) {
 	err = rmq.Seek("test", "", 0)
 	fmt.Println(err)
 	assert.Error(t, err)
+	assert.Error(t, rmq.ForceSeek("test", "", 0))
+}
+
+func TestRocksmq_SeekTopicNotExistError(t *testing.T) {
+	ep := etcdEndpoints()
+	etcdCli, err := etcd.GetRemoteEtcdClient(ep)
+	assert.Nil(t, err)
+	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
+	defer etcdKV.Close()
+	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
+	_ = idAllocator.Initialize()
+
+	name := "/tmp/rocksmq_seekerror2"
+	defer os.RemoveAll(name)
+	kvName := name + "_meta_kv"
+	_ = os.RemoveAll(kvName)
+	defer os.RemoveAll(kvName)
+	var params paramtable.BaseTable
+	params.Init()
+	rmq, err := NewRocksMQ(params, name, idAllocator)
+	assert.Nil(t, err)
+	defer rmq.Close()
+
+	assert.Error(t, rmq.Seek("test_topic_not_exist", "", 0))
+	assert.Error(t, rmq.ForceSeek("test_topic_not_exist", "", 0))
+}
+
+func TestRocksmq_SeekTopicMutexError(t *testing.T) {
+	ep := etcdEndpoints()
+	etcdCli, err := etcd.GetRemoteEtcdClient(ep)
+	assert.Nil(t, err)
+	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
+	defer etcdKV.Close()
+	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
+	_ = idAllocator.Initialize()
+
+	name := "/tmp/rocksmq_seekerror2"
+	defer os.RemoveAll(name)
+	kvName := name + "_meta_kv"
+	_ = os.RemoveAll(kvName)
+	defer os.RemoveAll(kvName)
+	var params paramtable.BaseTable
+	params.Init()
+	rmq, err := NewRocksMQ(params, name, idAllocator)
+	assert.Nil(t, err)
+	defer rmq.Close()
+
+	topicMu.Store("test_topic_mutix_error", nil)
+	assert.Error(t, rmq.Seek("test_topic_mutix_error", "", 0))
+	assert.Error(t, rmq.ForceSeek("test_topic_mutix_error", "", 0))
+}
+
+func TestRocksmq_moveConsumePosError(t *testing.T) {
+	ep := etcdEndpoints()
+	etcdCli, err := etcd.GetRemoteEtcdClient(ep)
+	assert.Nil(t, err)
+	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
+	defer etcdKV.Close()
+	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
+	_ = idAllocator.Initialize()
+
+	name := "/tmp/rocksmq_moveconsumeposerror"
+	defer os.RemoveAll(name)
+	kvName := name + "_meta_kv"
+	_ = os.RemoveAll(kvName)
+	defer os.RemoveAll(kvName)
+	var params paramtable.BaseTable
+	params.Init()
+	rmq, err := NewRocksMQ(params, name, idAllocator)
+	assert.Nil(t, err)
+	defer rmq.Close()
+
+	rmq.CreateTopic("test_moveConsumePos")
+	assert.Error(t, rmq.moveConsumePos("test_moveConsumePos", "", 0))
+}
+
+func TestRocksmq_updateAckedInfoErr(t *testing.T) {
+	ep := etcdEndpoints()
+	etcdCli, err := etcd.GetRemoteEtcdClient(ep)
+	assert.Nil(t, err)
+	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
+	defer etcdKV.Close()
+	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
+	_ = idAllocator.Initialize()
+
+	name := "/tmp/rocksmq_updateackedinfoerror"
+	defer os.RemoveAll(name)
+	kvName := name + "_meta_kv"
+	_ = os.RemoveAll(kvName)
+	defer os.RemoveAll(kvName)
+	var params paramtable.BaseTable
+	params.Init()
+	atomic.StoreInt64(&RocksmqPageSize, 10)
+	rmq, err := NewRocksMQ(params, name, idAllocator)
+	assert.Nil(t, err)
+	defer rmq.Close()
+
+	topicName := "test_updateAckedInfo"
+	rmq.CreateTopic(topicName)
+	defer rmq.DestroyTopic(topicName)
+
+	//add message, make sure rmq has more than one page
+	msgNum := 100
+	pMsgs := make([]ProducerMessage, msgNum)
+	for i := 0; i < msgNum; i++ {
+		msg := "message_" + strconv.Itoa(i)
+		pMsg := ProducerMessage{Payload: []byte(msg)}
+		pMsgs[i] = pMsg
+	}
+	ids, err := rmq.Produce(topicName, pMsgs)
+	assert.Nil(t, err)
+	assert.Equal(t, len(pMsgs), len(ids))
+
+	groupName := "test"
+	for i := 0; i < 2; i++ {
+		consumer := &Consumer{
+			Topic:     topicName,
+			GroupName: groupName + strconv.Itoa(i),
+		}
+		//make sure consumer not in rmq.consumersID
+		_ = rmq.DestroyConsumerGroup(topicName, groupName)
+		//add consumer to rmq.consumers
+		rmq.RegisterConsumer(consumer)
+	}
+
+	// update acked for all page in rmq but some consumer not in rmq.consumers
+	assert.Error(t, rmq.updateAckedInfo(topicName, groupName, 0, ids[len(ids)-1]))
 }

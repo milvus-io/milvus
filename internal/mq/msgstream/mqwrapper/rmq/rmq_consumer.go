@@ -63,6 +63,7 @@ func (rc *Consumer) Chan() <-chan mqwrapper.Message {
 						}
 					case <-rc.closeCh:
 						close(rc.msgChannel)
+						rc.c.Close()
 						return
 					}
 				}

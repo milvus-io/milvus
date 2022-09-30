@@ -92,8 +92,9 @@ func TestRmqRetention_Basic(t *testing.T) {
 	assert.Equal(t, len(cMsgs), msgNum)
 
 	time.Sleep(time.Duration(checkTimeInterval+1) * time.Second)
+
 	// Seek to a previous consumed message, the message should be clean up
-	err = rmq.Seek(topicName, groupName, cMsgs[msgNum/2].MsgID)
+	err = rmq.ForceSeek(topicName, groupName, cMsgs[msgNum/2].MsgID)
 	assert.Nil(t, err)
 	newRes, err := rmq.Consume(topicName, groupName, 1)
 	assert.Nil(t, err)
@@ -194,8 +195,9 @@ func TestRmqRetention_NotConsumed(t *testing.T) {
 	// wait for retention
 	checkTimeInterval := 2
 	time.Sleep(time.Duration(checkTimeInterval+1) * time.Second)
+
 	// Seek to a previous consumed message, the message should be clean up
-	err = rmq.Seek(topicName, groupName, cMsgs[1].MsgID)
+	err = rmq.ForceSeek(topicName, groupName, cMsgs[1].MsgID)
 	assert.Nil(t, err)
 	newRes, err := rmq.Consume(topicName, groupName, 1)
 	assert.Nil(t, err)
@@ -311,7 +313,7 @@ func TestRmqRetention_MultipleTopic(t *testing.T) {
 
 	time.Sleep(time.Duration(3) * time.Second)
 
-	err = rmq.Seek(topicName, groupName, ids1[10])
+	err = rmq.ForceSeek(topicName, groupName, ids1[10])
 	assert.Nil(t, err)
 	newRes, err := rmq.Consume(topicName, groupName, 1)
 	assert.Nil(t, err)
@@ -385,7 +387,7 @@ func TestRmqRetention_MultipleTopic(t *testing.T) {
 
 	time.Sleep(time.Duration(3) * time.Second)
 
-	err = rmq.Seek(topicName, groupName, ids2[10])
+	err = rmq.ForceSeek(topicName, groupName, ids2[10])
 	assert.Nil(t, err)
 	newRes, err = rmq.Consume(topicName, groupName, 1)
 	assert.Nil(t, err)
@@ -539,7 +541,7 @@ func TestRmqRetention_PageTimeExpire(t *testing.T) {
 
 	time.Sleep(time.Duration(3) * time.Second)
 
-	err = rmq.Seek(topicName, groupName, ids[10])
+	err = rmq.ForceSeek(topicName, groupName, ids[10])
 	assert.Nil(t, err)
 	newRes, err := rmq.Consume(topicName, groupName, 1)
 	assert.Nil(t, err)
@@ -640,7 +642,7 @@ func TestRmqRetention_PageSizeExpire(t *testing.T) {
 	log.Debug("Already consumed, wait for message cleaned by retention")
 	// wait for enough time for page expiration
 	time.Sleep(time.Duration(2) * time.Second)
-	err = rmq.Seek(topicName, groupName, ids[0])
+	err = rmq.ForceSeek(topicName, groupName, ids[0])
 	assert.Nil(t, err)
 	newRes, err := rmq.Consume(topicName, groupName, 1)
 	assert.Nil(t, err)
