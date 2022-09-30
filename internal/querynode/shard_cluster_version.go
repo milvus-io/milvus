@@ -72,8 +72,7 @@ type ShardClusterVersion struct {
 
 // NewShardClusterVersion creates a version with id and allocation.
 func NewShardClusterVersion(vID int64, status SegmentsStatus, lastVersion *ShardClusterVersion) *ShardClusterVersion {
-	log.Info("Update shard cluster version", zap.Int64("newVersionID", vID),
-		zap.Any("newAllocation", status))
+	log.Info("Update shard cluster version", zap.Int64("newVersionID", vID))
 	return &ShardClusterVersion{
 		versionID:   vID,
 		segments:    status,
