@@ -30,6 +30,8 @@ service MilvusService {
   rpc GetPartitionStatistics(GetPartitionStatisticsRequest) returns (GetPartitionStatisticsResponse) {}
   rpc ShowPartitions(ShowPartitionsRequest) returns (ShowPartitionsResponse) {}
 
+  rpc GetLoadingProgress(GetLoadingProgressRequest) returns (GetLoadingProgressResponse) {}
+
   rpc CreateAlias(CreateAliasRequest) returns (common.Status) {}
   rpc DropAlias(DropAliasRequest) returns (common.Status) {}
   rpc AlterAlias(AlterAliasRequest) returns (common.Status) {}
@@ -323,6 +325,7 @@ message GetCollectionStatisticsResponse {
 /*
 * This is for ShowCollectionsRequest type field.
 */
+// Deprecated: use GetLoadingProgress rpc instead
 enum ShowType {
   // Will return all collections
   All = 0;
@@ -348,6 +351,7 @@ message ShowCollectionsRequest {
   // Decide return Loaded collections or All collections(Optional)
   ShowType type = 4;
   // When type is InMemory, will return these collection's inMemory_percentages.(Optional)
+  // Deprecated: use GetLoadingProgress rpc instead
   repeated string collection_names = 5;
 }
 
@@ -366,6 +370,7 @@ message ShowCollectionsResponse {
   // The utc timestamp calculated by created_timestamp
   repeated uint64 created_utc_timestamps = 5;
   // Load percentage on querynode when type is InMemory
+  // Deprecated: use GetLoadingProgress rpc instead
   repeated int64 inMemory_percentages = 6;
   // Indicate whether query service is available
   repeated bool query_service_available = 7;
@@ -479,6 +484,7 @@ message ShowPartitionsRequest {
   // When type is InMemory, will return these patitions's inMemory_percentages.(Optional)
   repeated string partition_names = 5;
   // Decide return Loaded partitions or All partitions(Optional)
+  // Deprecated: use GetLoadingProgress rpc instead
   ShowType type = 6;
 }
 
@@ -498,6 +504,7 @@ message ShowPartitionsResponse {
   // All utc timestamps calculated by created_timestamps
   repeated uint64 created_utc_timestamps = 5;
   // Load percentage on querynode
+  // Deprecated: use GetLoadingProgress rpc instead
   repeated int64 inMemory_percentages = 6;
 }
 
@@ -1262,6 +1269,19 @@ message OperatePrivilegeRequest {
   GrantEntity entity = 2;
   // operation type
   OperatePrivilegeType type = 3;
+}
+
+message GetLoadingProgressRequest {
+  // Not useful for now
+  common.MsgBase base = 1;
+  string collectionName = 2;
+  repeated string partitionNames = 3;
+}
+
+message GetLoadingProgressResponse {
+  // Not useful for now
+  common.Status status = 1;
+  int64 progress = 2;
 }
 
 message MilvusExt {

@@ -661,6 +661,10 @@ func (m *MockProxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPa
 	return nil, nil
 }
 
+func (m *MockProxy) GetLoadingProgress(ctx context.Context, request *milvuspb.GetLoadingProgressRequest) (*milvuspb.GetLoadingProgressResponse, error) {
+	return nil, nil
+}
+
 func (m *MockProxy) CreateIndex(ctx context.Context, request *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
 	return nil, nil
 }
@@ -1090,6 +1094,11 @@ func Test_NewServer(t *testing.T) {
 
 	t.Run("ShowPartitions", func(t *testing.T) {
 		_, err := server.ShowPartitions(ctx, nil)
+		assert.Nil(t, err)
+	})
+
+	t.Run("GetLoadingProgress", func(t *testing.T) {
+		_, err := server.GetLoadingProgress(ctx, nil)
 		assert.Nil(t, err)
 	})
 

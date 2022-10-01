@@ -1701,6 +1701,146 @@ func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPar
 	return spt.result, nil
 }
 
+func (node *Proxy) getMsgBase() (*commonpb.MsgBase, error) {
+	msgID, err := node.idAllocator.AllocOne()
+	if err != nil {
+		return nil, err
+	}
+	timestamp, err := node.tsoAllocator.AllocOne()
+	if err != nil {
+		return nil, err
+	}
+	return &commonpb.MsgBase{
+		MsgID:     msgID,
+		Timestamp: timestamp,
+		SourceID:  Params.ProxyCfg.GetNodeID(),
+	}, nil
+}
+
+func (node *Proxy) getCollectionProgress(ctx context.Context, request *milvuspb.GetLoadingProgressRequest, collectionID int64) (int64, error) {
+	resp, err := node.queryCoord.ShowCollections(ctx, &querypb.ShowCollectionsRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_ShowCollections,
+			MsgID:     request.Base.MsgID,
+			Timestamp: request.Base.Timestamp,
+			SourceID:  request.Base.SourceID,
+		},
+		CollectionIDs: []int64{collectionID},
+	})
+	if err != nil {
+		return 0, err
+	}
+	if len(resp.InMemoryPercentages) == 0 {
+		return 0, errors.New("fail to show collections from the querycoord, no data")
+	}
+	return resp.InMemoryPercentages[0], nil
+}
+
+func (node *Proxy) getPartitionProgress(ctx context.Context, request *milvuspb.GetLoadingProgressRequest, collectionID int64) (int64, error) {
+	IDs2Names := make(map[int64]string)
+	partitionIDs := make([]int64, 0)
+	for _, partitionName := range request.PartitionNames {
+		partitionID, err := globalMetaCache.GetPartitionID(ctx, request.CollectionName, partitionName)
+		if err != nil {
+			return 0, err
+		}
+		IDs2Names[partitionID] = partitionName
+		partitionIDs = append(partitionIDs, partitionID)
+	}
+	resp, err := node.queryCoord.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_ShowPartitions,
+			MsgID:     request.Base.MsgID,
+			Timestamp: request.Base.Timestamp,
+			SourceID:  request.Base.SourceID,
+		},
+		CollectionID: collectionID,
+		PartitionIDs: partitionIDs,
+	})
+	if err != nil {
+		return 0, err
+	}
+	if len(resp.InMemoryPercentages) != len(partitionIDs) {
+		return 0, errors.New("fail to show partitions from the querycoord, invalid data num")
+	}
+	var progress int64
+	for _, p := range resp.InMemoryPercentages {
+		progress += p
+	}
+	progress /= int64(len(partitionIDs))
+	return progress, nil
+}
+
+func (node *Proxy) GetLoadingProgress(ctx context.Context, request *milvuspb.GetLoadingProgressRequest) (*milvuspb.GetLoadingProgressResponse, error) {
+	if !node.checkHealthy() {
+		return &milvuspb.GetLoadingProgressResponse{Status: unhealthyStatus()}, nil
+	}
+	method := "GetLoadingProgress"
+	tr := timerecord.NewTimeRecorder(method)
+	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-ShowPartitions")
+	defer sp.Finish()
+	traceID, _, _ := trace.InfoFromSpan(sp)
+
+	logger.Info(
+		rpcReceived(method),
+		zap.String("traceID", traceID),
+		zap.Any("request", request))
+
+	getErrResponse := func(err error) *milvuspb.GetLoadingProgressResponse {
+		logger.Error("fail to get loading progress", zap.String("collection_name", request.CollectionName),
+			zap.Strings("partition_name", request.PartitionNames), zap.Error(err))
+		return &milvuspb.GetLoadingProgressResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+		}
+	}
+	if err := validateCollectionName(request.CollectionName); err != nil {
+		return getErrResponse(err), nil
+	}
+	collectionID, err := globalMetaCache.GetCollectionID(ctx, request.CollectionName)
+	if err != nil {
+		return getErrResponse(err), nil
+	}
+	msgBase, err := node.getMsgBase()
+	if err != nil {
+		return getErrResponse(err), nil
+	}
+	if request.Base == nil {
+		request.Base = msgBase
+	} else {
+		request.Base.MsgID = msgBase.MsgID
+		request.Base.Timestamp = msgBase.Timestamp
+		request.Base.SourceID = msgBase.SourceID
+	}
+
+	var progress int64
+	if len(request.GetPartitionNames()) == 0 {
+		if progress, err = node.getCollectionProgress(ctx, request, collectionID); err != nil {
+			return getErrResponse(err), nil
+		}
+	} else {
+		if progress, err = node.getPartitionProgress(ctx, request, collectionID); err != nil {
+			return getErrResponse(err), nil
+		}
+	}
+
+	logger.Info(
+		rpcDone(method),
+		zap.String("traceID", traceID),
+		zap.Any("request", request))
+	metrics.ProxyDMLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method, metrics.TotalLabel).Inc()
+	metrics.ProxyDMLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method, metrics.SuccessLabel).Inc()
+	metrics.ProxyDMLReqLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return &milvuspb.GetLoadingProgressResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		Progress: progress,
+	}, nil
+}
+
 // CreateIndex create index for collection.
 func (node *Proxy) CreateIndex(ctx context.Context, request *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
 	if !node.checkHealthy() {

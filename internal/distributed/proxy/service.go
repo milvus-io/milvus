@@ -627,6 +627,10 @@ func (s *Server) ShowPartitions(ctx context.Context, request *milvuspb.ShowParti
 	return s.proxy.ShowPartitions(ctx, request)
 }
 
+func (s *Server) GetLoadingProgress(ctx context.Context, request *milvuspb.GetLoadingProgressRequest) (*milvuspb.GetLoadingProgressResponse, error) {
+	return s.proxy.GetLoadingProgress(ctx, request)
+}
+
 // CreateIndex notifies Proxy to create index
 func (s *Server) CreateIndex(ctx context.Context, request *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
 	return s.proxy.CreateIndex(ctx, request)
