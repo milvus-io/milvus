@@ -90,9 +90,9 @@ type Proxy struct {
 
 	chTicker channelsTimeTicker
 
-	idAllocator  *allocator.IDAllocator
-	tsoAllocator *timestampAllocator
-	segAssigner  *segIDAssigner
+	rowIDAllocator *allocator.IDAllocator
+	tsoAllocator   *timestampAllocator
+	segAssigner    *segIDAssigner
 
 	metricsCacheManager *metricsinfo.MetricsCacheManager
 
@@ -198,7 +198,7 @@ func (node *Proxy) Init() error {
 			zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", Params.ProxyCfg.GetNodeID()))
 		return err
 	}
-	node.idAllocator = idAllocator
+	node.rowIDAllocator = idAllocator
 	log.Debug("create id allocator done", zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", Params.ProxyCfg.GetNodeID()))
 
 	log.Debug("create timestamp allocator", zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", Params.ProxyCfg.GetNodeID()))
@@ -231,7 +231,7 @@ func (node *Proxy) Init() error {
 	log.Debug("create channels manager done", zap.String("role", typeutil.ProxyRole))
 
 	log.Debug("create task scheduler", zap.String("role", typeutil.ProxyRole))
-	node.sched, err = newTaskScheduler(node.ctx, node.idAllocator, node.tsoAllocator, node.factory)
+	node.sched, err = newTaskScheduler(node.ctx, node.tsoAllocator, node.factory)
 	if err != nil {
 		log.Warn("failed to create task scheduler", zap.Error(err), zap.String("role", typeutil.ProxyRole))
 		return err
@@ -336,7 +336,7 @@ func (node *Proxy) Start() error {
 	log.Debug("start task scheduler done", zap.String("role", typeutil.ProxyRole))
 
 	log.Debug("start id allocator", zap.String("role", typeutil.ProxyRole))
-	if err := node.idAllocator.Start(); err != nil {
+	if err := node.rowIDAllocator.Start(); err != nil {
 		log.Warn("failed to start id allocator", zap.Error(err), zap.String("role", typeutil.ProxyRole))
 		return err
 	}
@@ -377,8 +377,8 @@ func (node *Proxy) Start() error {
 func (node *Proxy) Stop() error {
 	node.cancel()
 
-	if node.idAllocator != nil {
-		node.idAllocator.Close()
+	if node.rowIDAllocator != nil {
+		node.rowIDAllocator.Close()
 		log.Info("close id allocator", zap.String("role", typeutil.ProxyRole))
 	}
 

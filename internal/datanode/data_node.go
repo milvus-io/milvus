@@ -120,10 +120,10 @@ type DataNode struct {
 	rootCoord types.RootCoord
 	dataCoord types.DataCoord
 
-	session      *sessionutil.Session
-	watchKv      kv.MetaKv
-	chunkManager storage.ChunkManager
-	idAllocator  *allocator2.IDAllocator
+	session        *sessionutil.Session
+	watchKv        kv.MetaKv
+	chunkManager   storage.ChunkManager
+	rowIDAllocator *allocator2.IDAllocator
 
 	closer io.Closer
 
@@ -247,7 +247,7 @@ func (node *DataNode) Init() error {
 			zap.String("role", typeutil.DataNodeRole), zap.Int64("DataNodeID", Params.DataNodeCfg.GetNodeID()))
 		return err
 	}
-	node.idAllocator = idAllocator
+	node.rowIDAllocator = idAllocator
 
 	node.factory.Init(&Params)
 	log.Info("DataNode Init successfully",
@@ -465,7 +465,7 @@ func (node *DataNode) BackGroundGC(vChannelCh <-chan string) {
 
 // Start will update DataNode state to HEALTHY
 func (node *DataNode) Start() error {
-	if err := node.idAllocator.Start(); err != nil {
+	if err := node.rowIDAllocator.Start(); err != nil {
 		log.Error("failed to start id allocator", zap.Error(err), zap.String("role", typeutil.DataNodeRole))
 		return err
 	}
@@ -684,9 +684,9 @@ func (node *DataNode) Stop() error {
 	node.cancel()
 	node.flowgraphManager.dropAll()
 
-	if node.idAllocator != nil {
+	if node.rowIDAllocator != nil {
 		log.Info("close id allocator", zap.String("role", typeutil.DataNodeRole))
-		node.idAllocator.Close()
+		node.rowIDAllocator.Close()
 	}
 
 	if node.closer != nil {
@@ -1042,7 +1042,7 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 
 	// parse files and generate segments
 	segmentSize := int64(Params.DataCoordCfg.SegmentMaxSize) * 1024 * 1024
-	importWrapper := importutil.NewImportWrapper(ctx, colInfo.GetSchema(), colInfo.GetShardsNum(), segmentSize, node.idAllocator, node.chunkManager,
+	importWrapper := importutil.NewImportWrapper(ctx, colInfo.GetSchema(), colInfo.GetShardsNum(), segmentSize, node.rowIDAllocator, node.chunkManager,
 		importFlushReqFunc(node, req, importResult, colInfo.GetSchema(), ts), importResult, reportFunc)
 	err = importWrapper.Import(req.GetImportTask().GetFiles(), req.GetImportTask().GetRowBased(), false)
 	if err != nil {

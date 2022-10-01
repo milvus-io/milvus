@@ -118,7 +118,7 @@ var topicMu = sync.Map{}
 type rocksmq struct {
 	store       *gorocksdb.DB
 	kv          kv.BaseKV
-	idAllocator allocator.GIDAllocator
+	idAllocator allocator.Interface
 	storeMu     *sync.Mutex
 	consumers   sync.Map
 	consumersID sync.Map
@@ -132,7 +132,7 @@ type rocksmq struct {
 // 1. New rocksmq instance based on rocksdb with name and rocksdbkv with kvname
 // 2. Init retention info, load retention info to memory
 // 3. Start retention goroutine
-func NewRocksMQ(params paramtable.BaseTable, name string, idAllocator allocator.GIDAllocator) (*rocksmq, error) {
+func NewRocksMQ(params paramtable.BaseTable, name string, idAllocator allocator.Interface) (*rocksmq, error) {
 	// TODO we should use same rocksdb instance with different cfs
 	maxProcs := runtime.GOMAXPROCS(0)
 	parallelism := 1
@@ -191,7 +191,7 @@ func NewRocksMQ(params paramtable.BaseTable, name string, idAllocator allocator.
 		return nil, err
 	}
 
-	var mqIDAllocator allocator.GIDAllocator
+	var mqIDAllocator allocator.Interface
 	// if user didn't specify id allocator, init one with kv
 	if idAllocator == nil {
 		allocator := allocator.NewGlobalIDAllocator("rmq_id", kv)

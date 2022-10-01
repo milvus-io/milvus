@@ -64,7 +64,6 @@ type baseTaskQueue struct {
 	utBufChan chan int // to block scheduler
 
 	tsoAllocatorIns tsoAllocator
-	idAllocatorIns  idAllocatorInterface
 }
 
 func (queue *baseTaskQueue) utChan() <-chan int {
@@ -176,11 +175,8 @@ func (queue *baseTaskQueue) Enqueue(t task) error {
 	}
 	t.SetTs(ts)
 
-	reqID, err := queue.idAllocatorIns.AllocOne()
-	if err != nil {
-		return err
-	}
-	t.SetID(reqID)
+	// we always use same msg id and ts for now.
+	t.SetID(UniqueID(ts))
 
 	return queue.addUnissuedTask(t)
 }
@@ -199,7 +195,7 @@ func (queue *baseTaskQueue) getMaxTaskNum() int64 {
 	return queue.maxTaskNum
 }
 
-func newBaseTaskQueue(tsoAllocatorIns tsoAllocator, idAllocatorIns idAllocatorInterface) *baseTaskQueue {
+func newBaseTaskQueue(tsoAllocatorIns tsoAllocator) *baseTaskQueue {
 	return &baseTaskQueue{
 		unissuedTasks:   list.New(),
 		activeTasks:     make(map[UniqueID]task),
@@ -208,7 +204,6 @@ func newBaseTaskQueue(tsoAllocatorIns tsoAllocator, idAllocatorIns idAllocatorIn
 		maxTaskNum:      Params.ProxyCfg.MaxTaskNum,
 		utBufChan:       make(chan int, Params.ProxyCfg.MaxTaskNum),
 		tsoAllocatorIns: tsoAllocatorIns,
-		idAllocatorIns:  idAllocatorIns,
 	}
 }
 
@@ -349,22 +344,22 @@ func (queue *ddTaskQueue) Enqueue(t task) error {
 	return queue.baseTaskQueue.Enqueue(t)
 }
 
-func newDdTaskQueue(tsoAllocatorIns tsoAllocator, idAllocatorIns idAllocatorInterface) *ddTaskQueue {
+func newDdTaskQueue(tsoAllocatorIns tsoAllocator) *ddTaskQueue {
 	return &ddTaskQueue{
-		baseTaskQueue: newBaseTaskQueue(tsoAllocatorIns, idAllocatorIns),
+		baseTaskQueue: newBaseTaskQueue(tsoAllocatorIns),
 	}
 }
 
-func newDmTaskQueue(tsoAllocatorIns tsoAllocator, idAllocatorIns idAllocatorInterface) *dmTaskQueue {
+func newDmTaskQueue(tsoAllocatorIns tsoAllocator) *dmTaskQueue {
 	return &dmTaskQueue{
-		baseTaskQueue:        newBaseTaskQueue(tsoAllocatorIns, idAllocatorIns),
+		baseTaskQueue:        newBaseTaskQueue(tsoAllocatorIns),
 		pChanStatisticsInfos: make(map[pChan]*pChanStatInfo),
 	}
 }
 
-func newDqTaskQueue(tsoAllocatorIns tsoAllocator, idAllocatorIns idAllocatorInterface) *dqTaskQueue {
+func newDqTaskQueue(tsoAllocatorIns tsoAllocator) *dqTaskQueue {
 	return &dqTaskQueue{
-		baseTaskQueue: newBaseTaskQueue(tsoAllocatorIns, idAllocatorIns),
+		baseTaskQueue: newBaseTaskQueue(tsoAllocatorIns),
 	}
 }
 
@@ -384,7 +379,6 @@ type taskScheduler struct {
 type schedOpt func(*taskScheduler)
 
 func newTaskScheduler(ctx context.Context,
-	idAllocatorIns idAllocatorInterface,
 	tsoAllocatorIns tsoAllocator,
 	factory msgstream.Factory,
 	opts ...schedOpt,
@@ -395,9 +389,9 @@ func newTaskScheduler(ctx context.Context,
 		cancel:    cancel,
 		msFactory: factory,
 	}
-	s.ddQueue = newDdTaskQueue(tsoAllocatorIns, idAllocatorIns)
-	s.dmQueue = newDmTaskQueue(tsoAllocatorIns, idAllocatorIns)
-	s.dqQueue = newDqTaskQueue(tsoAllocatorIns, idAllocatorIns)
+	s.ddQueue = newDdTaskQueue(tsoAllocatorIns)
+	s.dmQueue = newDmTaskQueue(tsoAllocatorIns)
+	s.dqQueue = newDqTaskQueue(tsoAllocatorIns)
 
 	for _, opt := range opts {
 		opt(s)

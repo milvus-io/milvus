@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package proxy
+package allocator
 
 import (
 	"context"
@@ -22,13 +22,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 )
 
-// use interface tsoAllocator to keep other components testable
-// include: channelsTimeTickerImpl, baseTaskQueue, taskScheduler
-type tsoAllocator interface {
-	AllocOne() (Timestamp, error)
-}
-
-// use timestampAllocatorInterface to keep other components testable
-type timestampAllocatorInterface interface {
-	AllocTimestamp(ctx context.Context, req *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error)
+type remoteInterface interface {
+	AllocID(ctx context.Context, req *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error)
 }

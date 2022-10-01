@@ -361,7 +361,7 @@ func withInvalidMeta() Opt {
 	return withMeta(meta)
 }
 
-func withIDAllocator(idAllocator allocator.GIDAllocator) Opt {
+func withIDAllocator(idAllocator allocator.Interface) Opt {
 	return func(c *Core) {
 		c.idAllocator = idAllocator
 	}

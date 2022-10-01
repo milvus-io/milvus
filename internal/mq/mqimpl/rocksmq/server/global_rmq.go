@@ -40,7 +40,7 @@ var once sync.Once
 var params paramtable.BaseTable
 
 // InitRmq is deprecate implementation of global rocksmq. will be removed later
-func InitRmq(rocksdbName string, idAllocator allocator.GIDAllocator) error {
+func InitRmq(rocksdbName string, idAllocator allocator.Interface) error {
 	var err error
 	params.Init()
 	Rmq, err = NewRocksMQ(params, rocksdbName, idAllocator)

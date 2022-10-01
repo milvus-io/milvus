@@ -22,14 +22,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/util/paramtable"
-
 	"github.com/milvus-io/milvus/api/commonpb"
 	"github.com/milvus-io/milvus/api/schemapb"
+	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
 )
 
@@ -82,7 +82,11 @@ func (m *mockIDAllocatorInterface) AllocOne() (UniqueID, error) {
 	return UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()), nil
 }
 
-func newMockIDAllocatorInterface() idAllocatorInterface {
+func (m *mockIDAllocatorInterface) Alloc(count uint32) (UniqueID, UniqueID, error) {
+	return UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()), UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt() + int(count)), nil
+}
+
+func newMockIDAllocatorInterface() allocator.Interface {
 	return &mockIDAllocatorInterface{}
 }
 
