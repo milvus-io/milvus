@@ -21,6 +21,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -142,15 +143,15 @@ func (mc *mockCompactor) complete() {
 	mc.wg.Done()
 }
 
-func (mc *mockCompactor) compact() error {
+func (mc *mockCompactor) compact() (*datapb.CompactionResult, error) {
 	if !mc.isvalid {
-		return errStart
+		return nil, errStart
 	}
 	if mc.alwaysWorking {
 		<-mc.ctx.Done()
-		return mc.ctx.Err()
+		return nil, mc.ctx.Err()
 	}
-	return nil
+	return nil, nil
 }
 
 func (mc *mockCompactor) getPlanID() UniqueID {

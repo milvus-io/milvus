@@ -49,7 +49,7 @@ func (h *spyCompactionHandler) getCompaction(planID int64) *compactionTask {
 }
 
 // expireCompaction set the compaction state to expired
-func (h *spyCompactionHandler) expireCompaction(ts Timestamp) error {
+func (h *spyCompactionHandler) updateCompaction(ts Timestamp) error {
 	panic("not implemented") // TODO: Implement
 }
 
@@ -203,7 +203,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 							},
 						},
 					},
-					StartTime:        3,
+					StartTime:        0,
 					TimeoutInSeconds: Params.DataCoordCfg.CompactionTimeoutInSeconds,
 					Type:             datapb.CompactionType_MixCompaction,
 					Timetravel:       200,

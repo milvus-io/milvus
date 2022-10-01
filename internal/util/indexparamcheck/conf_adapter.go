@@ -419,7 +419,7 @@ func (adapter *RHNSWPQConfAdapter) CheckTrain(params map[string]string) bool {
 		return false
 	}
 	pqm, err := strconv.Atoi(pqmStr)
-	if err != nil {
+	if err != nil || pqm == 0 {
 		return false
 	}
 

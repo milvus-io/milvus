@@ -780,6 +780,24 @@ func GetPkFromInsertData(collSchema *schemapb.CollectionSchema, data *InsertData
 	return realPfData, nil
 }
 
+// GetTimestampFromInsertData returns the Int64FieldData for timestamp field.
+func GetTimestampFromInsertData(data *InsertData) (*Int64FieldData, error) {
+	if data == nil {
+		return nil, errors.New("try to get timestamp from nil insert data")
+	}
+	fieldData, ok := data.Data[common.TimeStampField]
+	if !ok {
+		return nil, errors.New("no timestamp field in insert data")
+	}
+
+	ifd, ok := fieldData.(*Int64FieldData)
+	if !ok {
+		return nil, errors.New("timestamp field is not Int64")
+	}
+
+	return ifd, nil
+}
+
 func boolFieldDataToPbBytes(field *BoolFieldData) ([]byte, error) {
 	arr := &schemapb.BoolArray{Data: field.Data}
 	return proto.Marshal(arr)

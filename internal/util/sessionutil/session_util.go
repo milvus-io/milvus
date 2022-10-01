@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/blang/semver/v4"
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"go.etcd.io/etcd/api/v3/mvccpb"
@@ -60,6 +62,7 @@ type Session struct {
 	Address     string `json:"Address,omitempty"`
 	Exclusive   bool   `json:"Exclusive,omitempty"`
 	TriggerKill bool
+	Version     semver.Version `json:"Version,omitempty"`
 
 	liveCh  <-chan bool
 	etcdCli *clientv3.Client
@@ -70,6 +73,58 @@ type Session struct {
 	registered atomic.Value
 }
 
+// UnmarshalJSON unmarshal bytes to Session.
+func (s *Session) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		ServerID    int64  `json:"ServerID,omitempty"`
+		ServerName  string `json:"ServerName,omitempty"`
+		Address     string `json:"Address,omitempty"`
+		Exclusive   bool   `json:"Exclusive,omitempty"`
+		TriggerKill bool
+		Version     string `json:"Version"`
+	}
+	err := json.Unmarshal(data, &raw)
+	if err != nil {
+		return err
+	}
+
+	if raw.Version != "" {
+		s.Version, err = semver.Parse(raw.Version)
+		if err != nil {
+			return err
+		}
+	}
+
+	s.ServerID = raw.ServerID
+	s.ServerName = raw.ServerName
+	s.Address = raw.Address
+	s.Exclusive = raw.Exclusive
+	s.TriggerKill = raw.TriggerKill
+	return nil
+}
+
+// MarshalJSON marshals session to bytes.
+func (s *Session) MarshalJSON() ([]byte, error) {
+
+	verStr := s.Version.String()
+	return json.Marshal(&struct {
+		ServerID    int64  `json:"ServerID,omitempty"`
+		ServerName  string `json:"ServerName,omitempty"`
+		Address     string `json:"Address,omitempty"`
+		Exclusive   bool   `json:"Exclusive,omitempty"`
+		TriggerKill bool
+		Version     string `json:"Version"`
+	}{
+		ServerID:    s.ServerID,
+		ServerName:  s.ServerName,
+		Address:     s.Address,
+		Exclusive:   s.Exclusive,
+		TriggerKill: s.TriggerKill,
+		Version:     verStr,
+	})
+
+}
+
 // NewSession is a helper to build Session object.
 // ServerID, ServerName, Address, Exclusive will be assigned after Init().
 // metaRoot is a path in etcd to save session information.
@@ -78,6 +133,7 @@ func NewSession(ctx context.Context, metaRoot string, client *clientv3.Client) *
 	session := &Session{
 		ctx:      ctx,
 		metaRoot: metaRoot,
+		Version:  common.Version,
 	}
 
 	session.UpdateRegistered(false)
@@ -119,7 +175,7 @@ func (s *Session) Init(serverName, address string, exclusive bool, triggerKill b
 
 // String makes Session struct able to be logged by zap
 func (s *Session) String() string {
-	return fmt.Sprintf("Session:<ServerID: %d, ServerName: %s>", s.ServerID, s.ServerName)
+	return fmt.Sprintf("Session:<ServerID: %d, ServerName: %s, Version: %s>", s.ServerID, s.ServerName, s.Version.String())
 }
 
 // Register will process keepAliveResponse to keep alive with etcd.
@@ -304,6 +360,35 @@ func (s *Session) GetSessions(prefix string) (map[string]*Session, int64, error)
 	return res, resp.Header.Revision, nil
 }
 
+// GetSessionsWithVersionRange will get all sessions with provided prefix and version range in etcd.
+// Revision is returned for WatchServices to prevent missing events.
+func (s *Session) GetSessionsWithVersionRange(prefix string, r semver.Range) (map[string]*Session, int64, error) {
+	res := make(map[string]*Session)
+	key := path.Join(s.metaRoot, DefaultServiceRoot, prefix)
+	resp, err := s.etcdCli.Get(s.ctx, key, clientv3.WithPrefix(),
+		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
+	if err != nil {
+		return nil, 0, err
+	}
+	for _, kv := range resp.Kvs {
+		session := &Session{}
+		err = json.Unmarshal(kv.Value, session)
+		if err != nil {
+			return nil, 0, err
+		}
+		if !r(session.Version) {
+			log.Debug("Session version out of range", zap.String("version", session.Version.String()), zap.Int64("serverID", session.ServerID))
+			continue
+		}
+		_, mapKey := path.Split(string(kv.Key))
+		log.Debug("SessionUtil GetSessions ", zap.String("prefix", prefix),
+			zap.String("key", mapKey),
+			zap.String("address", session.Address))
+		res[mapKey] = session
+	}
+	return res, resp.Header.Revision, nil
+}
+
 // SessionEvent indicates the changes of other servers.
 // if a server is up, EventType is SessAddEvent.
 // if a server is down, EventType is SessDelEvent.
@@ -314,11 +399,12 @@ type SessionEvent struct {
 }
 
 type sessionWatcher struct {
-	s       *Session
-	rch     clientv3.WatchChan
-	eventCh chan *SessionEvent
-	prefix  string
-	rewatch Rewatch
+	s        *Session
+	rch      clientv3.WatchChan
+	eventCh  chan *SessionEvent
+	prefix   string
+	rewatch  Rewatch
+	validate func(*Session) bool
 }
 
 func (w *sessionWatcher) start() {
@@ -348,11 +434,31 @@ func (w *sessionWatcher) start() {
 // If a server down, an event will be add to channel with eventType SessionDelType.
 func (s *Session) WatchServices(prefix string, revision int64, rewatch Rewatch) (eventChannel <-chan *SessionEvent) {
 	w := &sessionWatcher{
-		s:       s,
-		eventCh: make(chan *SessionEvent, 100),
-		rch:     s.etcdCli.Watch(s.ctx, path.Join(s.metaRoot, DefaultServiceRoot, prefix), clientv3.WithPrefix(), clientv3.WithPrevKV(), clientv3.WithRev(revision)),
-		prefix:  prefix,
-		rewatch: rewatch,
+		s:        s,
+		eventCh:  make(chan *SessionEvent, 100),
+		rch:      s.etcdCli.Watch(s.ctx, path.Join(s.metaRoot, DefaultServiceRoot, prefix), clientv3.WithPrefix(), clientv3.WithPrevKV(), clientv3.WithRev(revision)),
+		prefix:   prefix,
+		rewatch:  rewatch,
+		validate: func(s *Session) bool { return true },
+	}
+	w.start()
+	return w.eventCh
+}
+
+// WatchServicesWithVersionRange watches the service's up and down in etcd, and sends event toeventChannel.
+// Acts like WatchServices but with extra version range check.
+// prefix is a parameter to know which service to watch and can be obtained intypeutil.type.go.
+// revision is a etcd reversion to prevent missing key events and can be obtained in GetSessions.
+// If a server up, an event will be add to channel with eventType SessionAddType.
+// If a server down, an event will be add to channel with eventType SessionDelType.
+func (s *Session) WatchServicesWithVersionRange(prefix string, r semver.Range, revision int64, rewatch Rewatch) (eventChannel <-chan *SessionEvent) {
+	w := &sessionWatcher{
+		s:        s,
+		eventCh:  make(chan *SessionEvent, 100),
+		rch:      s.etcdCli.Watch(s.ctx, path.Join(s.metaRoot, DefaultServiceRoot, prefix), clientv3.WithPrefix(), clientv3.WithPrevKV(), clientv3.WithRev(revision)),
+		prefix:   prefix,
+		rewatch:  rewatch,
+		validate: func(s *Session) bool { return r(s.Version) },
 	}
 	w.start()
 	return w.eventCh
@@ -379,6 +485,9 @@ func (w *sessionWatcher) handleWatchResponse(wresp clientv3.WatchResponse) {
 				log.Error("watch services", zap.Error(err))
 				continue
 			}
+			if !w.validate(session) {
+				continue
+			}
 			eventType = SessionAddEvent
 		case mvccpb.DELETE:
 			log.Debug("watch services",
@@ -386,6 +495,9 @@ func (w *sessionWatcher) handleWatchResponse(wresp clientv3.WatchResponse) {
 			err := json.Unmarshal([]byte(ev.PrevKv.Value), session)
 			if err != nil {
 				log.Error("watch services", zap.Error(err))
+				continue
+			}
+			if !w.validate(session) {
 				continue
 			}
 			eventType = SessionDelEvent

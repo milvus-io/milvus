@@ -103,9 +103,6 @@ func Test_NewClient(t *testing.T) {
 		r15, err := client.GetMetrics(ctx, nil)
 		retCheck(retNotNil, r15, err)
 
-		r16, err := client.CompleteCompaction(ctx, nil)
-		retCheck(retNotNil, r16, err)
-
 		r17, err := client.GetCompactionState(ctx, nil)
 		retCheck(retNotNil, r17, err)
 

@@ -43,7 +43,10 @@ class Schema {
 
     // auto gen field_id for convenience
     FieldId
-    AddDebugField(const std::string& name, DataType data_type, int64_t dim, std::optional<MetricType> metric_type) {
+    AddDebugField(const std::string& name,
+                  DataType data_type,
+                  int64_t dim,
+                  std::optional<knowhere::MetricType> metric_type) {
         auto field_id = FieldId(debug_id);
         debug_id++;
         auto field_meta = FieldMeta(FieldName(name), field_id, data_type, dim, metric_type);
@@ -71,7 +74,7 @@ class Schema {
              const FieldId id,
              DataType data_type,
              int64_t dim,
-             std::optional<MetricType> metric_type) {
+             std::optional<knowhere::MetricType> metric_type) {
         auto field_meta = FieldMeta(name, id, data_type, dim, metric_type);
         this->AddField(std::move(field_meta));
     }

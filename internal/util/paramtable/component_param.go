@@ -14,7 +14,7 @@ package paramtable
 import (
 	"math"
 	"os"
-	"path"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -596,6 +596,9 @@ type queryCoordConfig struct {
 	OverloadedMemoryThresholdPercentage float64
 	BalanceIntervalSeconds              int64
 	MemoryUsageMaxDifferencePercentage  float64
+
+	//---- Task ---
+	MaxTask int64
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -609,6 +612,9 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	p.initOverloadedMemoryThresholdPercentage()
 	p.initBalanceIntervalSeconds()
 	p.initMemoryUsageMaxDifferencePercentage()
+
+	//---- Task ---
+	p.initMaxTask()
 }
 
 func (p *queryCoordConfig) initAutoHandoff() {
@@ -656,6 +662,15 @@ func (p *queryCoordConfig) initMemoryUsageMaxDifferencePercentage() {
 		panic(err)
 	}
 	p.MemoryUsageMaxDifferencePercentage = float64(diffPercentage) / 100
+}
+
+func (p *queryCoordConfig) initMaxTask() {
+	maxDiff := p.Base.LoadWithDefault("queryCoord.maxTask", "2048")
+	MaxTask, err := strconv.ParseInt(maxDiff, 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	p.MaxTask = MaxTask
 }
 
 func (p *queryCoordConfig) SetNodeID(id UniqueID) {
@@ -866,9 +881,13 @@ func (p *queryNodeConfig) initCPURatio() {
 }
 
 func (p *queryNodeConfig) initMaxReadConcurrency() {
-	p.MaxReadConcurrency = p.Base.ParseInt32WithDefault("queryNode.scheduler.maxReadConcurrency", 0)
-	if p.MaxReadConcurrency <= 0 {
-		p.MaxReadConcurrency = math.MaxInt32
+	readConcurrencyRatio := p.Base.ParseFloatWithDefault("queryNode.scheduler.maxReadConcurrentRatio", 2.0)
+	cpuNum := int32(runtime.GOMAXPROCS(0))
+	p.MaxReadConcurrency = int32(float64(cpuNum) * readConcurrencyRatio)
+	if p.MaxReadConcurrency < 1 {
+		p.MaxReadConcurrency = 1 // MaxReadConcurrency must >= 1
+	} else if p.MaxReadConcurrency > cpuNum*100 {
+		p.MaxReadConcurrency = cpuNum * 100 // MaxReadConcurrency must <= 100*cpuNum
 	}
 }
 
@@ -923,6 +942,7 @@ type dataCoordConfig struct {
 	MaxSegmentToMerge                 int
 	SegmentSmallProportion            float64
 	CompactionTimeoutInSeconds        int32
+	CompactionCheckIntervalInSeconds  int64
 	SingleCompactionRatioThreshold    float32
 	SingleCompactionDeltaLogMaxSize   int64
 	SingleCompactionExpiredLogMaxSize int64
@@ -952,6 +972,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	p.initCompactionMaxSegment()
 	p.initSegmentSmallProportion()
 	p.initCompactionTimeoutInSeconds()
+	p.initCompactionCheckIntervalInSeconds()
 	p.initSingleCompactionRatioThreshold()
 	p.initSingleCompactionDeltaLogMaxSize()
 	p.initSingleCompactionExpiredLogMaxSize()
@@ -1009,6 +1030,10 @@ func (p *dataCoordConfig) initSegmentSmallProportion() {
 // compaction execution timeout
 func (p *dataCoordConfig) initCompactionTimeoutInSeconds() {
 	p.CompactionTimeoutInSeconds = p.Base.ParseInt32WithDefault("dataCoord.compaction.timeout", 60*3)
+}
+
+func (p *dataCoordConfig) initCompactionCheckIntervalInSeconds() {
+	p.CompactionCheckIntervalInSeconds = p.Base.ParseInt64WithDefault("dataCoord.compaction.check.interval", 10)
 }
 
 // if total delete entities is large than a ratio of total entities, trigger single compaction.
@@ -1093,10 +1118,8 @@ type dataNodeConfig struct {
 	FlowGraphMaxQueueLength int32
 	FlowGraphMaxParallelism int32
 	FlushInsertBufferSize   int64
-	InsertBinlogRootPath    string
-	StatsBinlogRootPath     string
-	DeleteBinlogRootPath    string
-	Alias                   string // Different datanode in one machine
+
+	Alias string // Different datanode in one machine
 
 	// etcd
 	ChannelWatchSubPath string
@@ -1114,9 +1137,6 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	p.initFlowGraphMaxQueueLength()
 	p.initFlowGraphMaxParallelism()
 	p.initFlushInsertBufferSize()
-	p.initInsertBinlogRootPath()
-	p.initStatsBinlogRootPath()
-	p.initDeleteBinlogRootPath()
 	p.initIOConcurrency()
 
 	p.initChannelWatchPath()
@@ -1137,31 +1157,6 @@ func (p *dataNodeConfig) initFlowGraphMaxParallelism() {
 
 func (p *dataNodeConfig) initFlushInsertBufferSize() {
 	p.FlushInsertBufferSize = p.Base.ParseInt64("_DATANODE_INSERTBUFSIZE")
-}
-
-func (p *dataNodeConfig) initInsertBinlogRootPath() {
-	// GOOSE TODO: rootPath change to TenentID
-	rootPath, err := p.Base.Load("minio.rootPath")
-	if err != nil {
-		panic(err)
-	}
-	p.InsertBinlogRootPath = path.Join(rootPath, "insert_log")
-}
-
-func (p *dataNodeConfig) initStatsBinlogRootPath() {
-	rootPath, err := p.Base.Load("minio.rootPath")
-	if err != nil {
-		panic(err)
-	}
-	p.StatsBinlogRootPath = path.Join(rootPath, "stats_log")
-}
-
-func (p *dataNodeConfig) initDeleteBinlogRootPath() {
-	rootPath, err := p.Base.Load("minio.rootPath")
-	if err != nil {
-		panic(err)
-	}
-	p.DeleteBinlogRootPath = path.Join(rootPath, "delta_log")
 }
 
 func (p *dataNodeConfig) initChannelWatchPath() {
@@ -1192,7 +1187,7 @@ type indexCoordConfig struct {
 	Address string
 	Port    int
 
-	IndexStorageRootPath string
+	MinSegmentNumRowsToEnableIndex int64
 
 	GCInterval time.Duration
 
@@ -1203,17 +1198,11 @@ type indexCoordConfig struct {
 func (p *indexCoordConfig) init(base *BaseTable) {
 	p.Base = base
 
-	p.initIndexStorageRootPath()
 	p.initGCInterval()
 }
 
-// initIndexStorageRootPath initializes the root path of index files.
-func (p *indexCoordConfig) initIndexStorageRootPath() {
-	rootPath, err := p.Base.Load("minio.rootPath")
-	if err != nil {
-		panic(err)
-	}
-	p.IndexStorageRootPath = path.Join(rootPath, "index_files")
+func (p *indexCoordConfig) initMinSegmentNumRowsToEnableIndex() {
+	p.MinSegmentNumRowsToEnableIndex = p.Base.ParseInt64WithDefault("indexCoord.minSegmentNumRowsToEnableIndex", 1024)
 }
 
 func (p *indexCoordConfig) initGCInterval() {
@@ -1233,8 +1222,7 @@ type indexNodeConfig struct {
 
 	Alias string
 
-	IndexStorageRootPath string
-	BuildParallel        int
+	BuildParallel int
 
 	CreatedTime time.Time
 	UpdatedTime time.Time
@@ -1243,21 +1231,12 @@ type indexNodeConfig struct {
 func (p *indexNodeConfig) init(base *BaseTable) {
 	p.Base = base
 	p.NodeID.Store(UniqueID(0))
-	p.initIndexStorageRootPath()
 	p.initBuildParallel()
 }
 
 // InitAlias initializes an alias for the IndexNode role.
 func (p *indexNodeConfig) InitAlias(alias string) {
 	p.Alias = alias
-}
-
-func (p *indexNodeConfig) initIndexStorageRootPath() {
-	rootPath, err := p.Base.Load("minio.rootPath")
-	if err != nil {
-		panic(err)
-	}
-	p.IndexStorageRootPath = path.Join(rootPath, "index_files")
 }
 
 func (p *indexNodeConfig) initBuildParallel() {

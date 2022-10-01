@@ -33,8 +33,8 @@ inline ScalarIndexSort<T>::ScalarIndexSort(const size_t n, const T* values) : is
 template <typename T>
 inline void
 ScalarIndexSort<T>::BuildWithDataset(const DatasetPtr& dataset) {
-    auto size = dataset->Get<int64_t>(knowhere::meta::ROWS);
-    auto data = dataset->Get<const void*>(knowhere::meta::TENSOR);
+    auto size = knowhere::GetDatasetRows(dataset);
+    auto data = knowhere::GetDatasetTensor(dataset);
     Build(size, reinterpret_cast<const T*>(data));
 }
 

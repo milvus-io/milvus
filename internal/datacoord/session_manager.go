@@ -95,6 +95,18 @@ func (c *SessionManager) DeleteSession(node *NodeInfo) {
 	}
 }
 
+// getLiveNodeIDs returns IDs of all live DataNodes.
+func (c *SessionManager) getLiveNodeIDs() []int64 {
+	c.sessions.RLock()
+	defer c.sessions.RUnlock()
+
+	ret := make([]int64, 0, len(c.sessions.data))
+	for id := range c.sessions.data {
+		ret = append(ret, id)
+	}
+	return ret
+}
+
 // GetSessions gets all node sessions
 func (c *SessionManager) GetSessions() []*Session {
 	c.sessions.RLock()
@@ -129,27 +141,44 @@ func (c *SessionManager) execFlush(ctx context.Context, nodeID int64, req *datap
 	}
 }
 
-// Compaction is a grpc interface. It will send request to DataNode with provided `nodeID` asynchronously.
-func (c *SessionManager) Compaction(nodeID int64, plan *datapb.CompactionPlan) {
-	go c.execCompaction(nodeID, plan)
-}
-
-func (c *SessionManager) execCompaction(nodeID int64, plan *datapb.CompactionPlan) {
-	ctx, cancel := context.WithTimeout(context.Background(), compactionTimeout)
+// Compaction is a grpc interface. It will send request to DataNode with provided `nodeID` synchronously.
+func (c *SessionManager) Compaction(nodeID int64, plan *datapb.CompactionPlan) error {
+	ctx, cancel := context.WithTimeout(context.Background(), rpcCompactionTimeout)
 	defer cancel()
 	cli, err := c.getClient(ctx, nodeID)
 	if err != nil {
 		log.Warn("failed to get client", zap.Int64("nodeID", nodeID), zap.Error(err))
-		return
+		return err
 	}
 
 	resp, err := cli.Compaction(ctx, plan)
 	if err := VerifyResponse(resp, err); err != nil {
 		log.Warn("failed to execute compaction", zap.Int64("node", nodeID), zap.Error(err), zap.Int64("planID", plan.GetPlanID()))
-		return
+		return err
 	}
 
 	log.Info("success to execute compaction", zap.Int64("node", nodeID), zap.Any("planID", plan.GetPlanID()))
+	return nil
+}
+
+// SyncSegments is a grpc interface. It will send request to DataNode with provided `nodeID` synchronously.
+func (c *SessionManager) SyncSegments(nodeID int64, req *datapb.SyncSegmentsRequest) error {
+	ctx, cancel := context.WithTimeout(context.Background(), rpcCompactionTimeout)
+	defer cancel()
+	cli, err := c.getClient(ctx, nodeID)
+	if err != nil {
+		log.Warn("failed to get client", zap.Int64("nodeID", nodeID), zap.Error(err))
+		return err
+	}
+
+	resp, err := cli.SyncSegments(ctx, req)
+	if err := VerifyResponse(resp, err); err != nil {
+		log.Warn("failed to sync segments", zap.Int64("node", nodeID), zap.Error(err), zap.Int64("planID", req.GetPlanID()))
+		return err
+	}
+
+	log.Info("success to sync segments", zap.Int64("node", nodeID), zap.Any("planID", req.GetPlanID()))
+	return nil
 }
 
 // Import is a grpc interface. It will send request to DataNode with provided `nodeID` asynchronously.
@@ -202,6 +231,57 @@ func (c *SessionManager) execReCollectSegmentStats(ctx context.Context, nodeID i
 			zap.Int64("DataNode ID", nodeID),
 			zap.Int64s("segment stat collected", resp.GetSegResent()))
 	}
+}
+
+func (c *SessionManager) GetCompactionState() map[int64]*datapb.CompactionStateResult {
+	wg := sync.WaitGroup{}
+	ctx := context.Background()
+	c.sessions.RLock()
+	wg.Add(len(c.sessions.data))
+	c.sessions.RUnlock()
+
+	plans := sync.Map{}
+	c.sessions.RLock()
+	for nodeID, s := range c.sessions.data {
+		go func(nodeID int64, s *Session) {
+			defer wg.Done()
+			cli, err := s.GetOrCreateClient(ctx)
+			if err != nil {
+				log.Info("Cannot Create Client", zap.Int64("NodeID", nodeID))
+				return
+			}
+			ctx, cancel := context.WithTimeout(ctx, rpcCompactionTimeout)
+			defer cancel()
+			resp, err := cli.GetCompactionState(ctx, &datapb.CompactionStateRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:  commonpb.MsgType_GetSystemConfigs,
+					SourceID: Params.DataCoordCfg.GetNodeID(),
+				},
+			})
+			if err != nil {
+				log.Info("Get State failed", zap.Error(err))
+				return
+			}
+
+			if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+				log.Info("Get State failed", zap.String("Reason", resp.GetStatus().GetReason()))
+				return
+			}
+			for _, rst := range resp.GetResults() {
+				plans.Store(rst.PlanID, rst)
+			}
+		}(nodeID, s)
+	}
+	c.sessions.RUnlock()
+	wg.Wait()
+
+	rst := make(map[int64]*datapb.CompactionStateResult)
+	plans.Range(func(key, value interface{}) bool {
+		rst[key.(int64)] = value.(*datapb.CompactionStateResult)
+		return true
+	})
+
+	return rst
 }
 
 // AddSegment calls DataNode with ID == `nodeID` to put the segment into this node.

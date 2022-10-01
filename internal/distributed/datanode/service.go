@@ -354,6 +354,11 @@ func (s *Server) Compaction(ctx context.Context, request *datapb.CompactionPlan)
 	return s.datanode.Compaction(ctx, request)
 }
 
+// GetCompactionState gets the Compaction tasks state of DataNode
+func (s *Server) GetCompactionState(ctx context.Context, request *datapb.CompactionStateRequest) (*datapb.CompactionStateResponse, error) {
+	return s.datanode.GetCompactionState(ctx, request)
+}
+
 func (s *Server) Import(ctx context.Context, request *datapb.ImportTaskRequest) (*commonpb.Status, error) {
 	return s.datanode.Import(ctx, request)
 }
@@ -364,4 +369,8 @@ func (s *Server) ResendSegmentStats(ctx context.Context, request *datapb.ResendS
 
 func (s *Server) AddSegment(ctx context.Context, request *datapb.AddSegmentRequest) (*commonpb.Status, error) {
 	return s.datanode.AddSegment(ctx, request)
+}
+
+func (s *Server) SyncSegments(ctx context.Context, request *datapb.SyncSegmentsRequest) (*commonpb.Status, error) {
+	return s.datanode.SyncSegments(ctx, request)
 }

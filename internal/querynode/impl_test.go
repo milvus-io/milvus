@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/milvuspb"
@@ -573,7 +574,7 @@ func TestImpl_SyncReplicaSegments(t *testing.T) {
 		require.True(t, ok)
 		segment, ok := cs.getSegment(1)
 		require.True(t, ok)
-		assert.Equal(t, int64(1), segment.nodeID)
+		assert.Equal(t, common.InvalidNodeID, segment.nodeID)
 		assert.Equal(t, defaultPartitionID, segment.partitionID)
 		assert.Equal(t, segmentStateLoaded, segment.state)
 

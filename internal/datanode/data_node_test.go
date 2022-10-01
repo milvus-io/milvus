@@ -149,6 +149,41 @@ func TestDataNode(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, stat.Status.ErrorCode)
 	})
 
+	t.Run("Test GetCompactionState", func(t *testing.T) {
+		node.compactionExecutor.executing.Store(int64(3), 0)
+		node.compactionExecutor.executing.Store(int64(2), 0)
+		node.compactionExecutor.completed.Store(int64(1), &datapb.CompactionResult{
+			PlanID:    1,
+			SegmentID: 10,
+		})
+		stat, err := node.GetCompactionState(node.ctx, nil)
+		assert.NoError(t, err)
+
+		assert.Equal(t, 3, len(stat.GetResults()))
+
+		cnt := 0
+		for _, v := range stat.GetResults() {
+			if v.GetState() == commonpb.CompactionState_Completed {
+				cnt++
+			}
+		}
+		assert.Equal(t, 1, cnt)
+
+		cnt = 0
+		node.compactionExecutor.completed.Range(func(k, v interface{}) bool {
+			cnt++
+			return true
+		})
+		assert.Equal(t, 0, cnt)
+	})
+
+	t.Run("Test GetCompactionState unhealthy", func(t *testing.T) {
+		node.UpdateStateCode(internalpb.StateCode_Abnormal)
+		resp, _ := node.GetCompactionState(ctx, nil)
+		assert.Equal(t, "DataNode is unhealthy", resp.GetStatus().GetReason())
+		node.UpdateStateCode(internalpb.StateCode_Healthy)
+	})
+
 	t.Run("Test FlushSegments", func(t *testing.T) {
 		dmChannelName := "fake-by-dev-rootcoord-dml-channel-test-FlushSegments"
 
@@ -517,6 +552,89 @@ func TestDataNode(t *testing.T) {
 			}
 		}
 		cancel()
+	})
+
+	t.Run("Test SyncSegments", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		chanName := "fake-by-dev-rootcoord-dml-test-syncsegments-1"
+
+		node := newIDLEDataNodeMock(ctx, schemapb.DataType_Int64)
+		etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+		assert.Nil(t, err)
+		defer etcdCli.Close()
+		node.SetEtcdClient(etcdCli)
+		err = node.Init()
+		assert.Nil(t, err)
+		err = node.Start()
+		assert.Nil(t, err)
+		defer node.Stop()
+
+		err = node.flowgraphManager.addAndStart(node, &datapb.VchannelInfo{
+			ChannelName:         chanName,
+			UnflushedSegmentIds: []int64{},
+			FlushedSegmentIds:   []int64{},
+		})
+		require.NoError(t, err)
+		fg, ok := node.flowgraphManager.getFlowgraphService(chanName)
+		assert.True(t, ok)
+
+		fg.replica.(*SegmentReplica).flushedSegments = map[UniqueID]*Segment{
+			100: {channelName: chanName},
+			101: {channelName: chanName},
+			102: {channelName: chanName},
+		}
+
+		t.Run("invalid compacted from", func(t *testing.T) {
+			invalidCompactedFroms := [][]UniqueID{
+				{},
+				{100, 200},
+			}
+			req := &datapb.SyncSegmentsRequest{}
+
+			for _, invalid := range invalidCompactedFroms {
+				req.CompactedFrom = invalid
+				status, err := node.SyncSegments(ctx, req)
+				assert.NoError(t, err)
+				assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+			}
+		})
+
+		t.Run("valid request numRows>0", func(t *testing.T) {
+			req := &datapb.SyncSegmentsRequest{
+				CompactedFrom: []int64{100, 101},
+				CompactedTo:   200,
+				NumOfRows:     100,
+			}
+			status, err := node.SyncSegments(ctx, req)
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+
+			assert.True(t, fg.replica.hasSegment(req.CompactedTo, true))
+			assert.False(t, fg.replica.hasSegment(req.CompactedFrom[0], true))
+			assert.False(t, fg.replica.hasSegment(req.CompactedFrom[1], true))
+		})
+
+		t.Run("valid request numRows=0", func(t *testing.T) {
+			fg.replica.(*SegmentReplica).flushedSegments = map[UniqueID]*Segment{
+				100: {channelName: chanName},
+				101: {channelName: chanName},
+				102: {channelName: chanName},
+			}
+
+			req := &datapb.SyncSegmentsRequest{
+				CompactedFrom: []int64{100, 101},
+				CompactedTo:   200,
+				NumOfRows:     0,
+			}
+			status, err := node.SyncSegments(ctx, req)
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+
+			assert.False(t, fg.replica.hasSegment(req.CompactedTo, true))
+			assert.False(t, fg.replica.hasSegment(req.CompactedFrom[0], true))
+			assert.False(t, fg.replica.hasSegment(req.CompactedFrom[1], true))
+		})
 	})
 }
 

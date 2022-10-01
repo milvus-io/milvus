@@ -18,9 +18,11 @@ package indexcoord
 
 import (
 	"context"
+	"path"
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/storage"
 	"go.uber.org/zap"
@@ -107,7 +109,7 @@ func (gc *garbageCollector) recycleUnusedIndexFiles() {
 		case <-gc.ctx.Done():
 			return
 		case <-ticker.C:
-			prefix := Params.IndexNodeCfg.IndexStorageRootPath + "/"
+			prefix := path.Join(gc.chunkManager.RootPath(), common.SegmentIndexPath) + "/"
 			// list dir first
 			keys, _, err := gc.chunkManager.ListWithPrefix(prefix, false)
 			if err != nil {

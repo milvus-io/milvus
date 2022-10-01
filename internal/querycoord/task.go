@@ -538,7 +538,7 @@ func (lct *loadCollectionTask) execute(ctx context.Context) error {
 				ReplicaID: replica.GetReplicaID(),
 			}
 
-			fullWatchRequest, err := generateFullWatchDmChannelsRequest(lct.broker, watchRequest)
+			fullWatchRequest, err := generateFullWatchDmChannelsRequest(ctx, lct.broker, watchRequest)
 			if err != nil {
 				lct.setResultInfo(err)
 				return err
@@ -1032,7 +1032,7 @@ func (lpt *loadPartitionTask) execute(ctx context.Context) error {
 				ReplicaID: replica.GetReplicaID(),
 			}
 
-			fullWatchRequest, err := generateFullWatchDmChannelsRequest(lpt.broker, watchRequest)
+			fullWatchRequest, err := generateFullWatchDmChannelsRequest(ctx, lpt.broker, watchRequest)
 			if err != nil {
 				lpt.setResultInfo(err)
 				return err
@@ -1607,7 +1607,8 @@ func (wdt *watchDmChannelTask) reschedule(ctx context.Context) ([]task, error) {
 				CollectionID: collectionID,
 				PartitionIDs: wdt.GetLoadMeta().GetPartitionIDs(),
 			},
-			ReplicaID: wdt.GetReplicaID(),
+			ReplicaID:     wdt.GetReplicaID(),
+			OfflineNodeID: wdt.OfflineNodeID,
 		}
 		watchDmChannelReqs = append(watchDmChannelReqs, req)
 	}
@@ -2075,14 +2076,15 @@ func (lbt *loadBalanceTask) processNodeDownLoadBalance(ctx context.Context) erro
 							CollectionID: collectionID,
 							PartitionIDs: toRecoverPartitionIDs,
 						},
-						ReplicaID: replica.ReplicaID,
+						ReplicaID:     replica.ReplicaID,
+						OfflineNodeID: nodeID,
 					}
 
 					if collectionInfo.LoadType == querypb.LoadType_LoadPartition {
 						watchRequest.PartitionIDs = toRecoverPartitionIDs
 					}
 
-					fullWatchRequest, err := generateFullWatchDmChannelsRequest(lbt.broker, watchRequest)
+					fullWatchRequest, err := generateFullWatchDmChannelsRequest(ctx, lbt.broker, watchRequest)
 					if err != nil {
 						lbt.setResultInfo(err)
 						return err

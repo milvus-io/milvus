@@ -30,7 +30,6 @@
 #include "SegmentGrowing.h"
 
 #include "exceptions/EasyAssert.h"
-#include "knowhere/index/vector_index/VecIndex.h"
 #include "query/PlanNode.h"
 #include "query/deprecated/GeneralQuery.h"
 #include "utils/Status.h"
@@ -71,7 +70,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     debug() const override;
 
  public:
-    const InsertRecord&
+    const InsertRecord<>&
     get_insert_record() const {
         return insert_record_;
     }
@@ -227,7 +226,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     SealedIndexingRecord sealed_indexing_record_;  // not used
 
     // inserted fields data and row_ids, timestamps
-    InsertRecord insert_record_;
+    InsertRecord<false> insert_record_;
 
     // deleted pks
     mutable DeletedRecord deleted_record_;

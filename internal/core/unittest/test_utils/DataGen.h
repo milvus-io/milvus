@@ -15,20 +15,20 @@
 #include <cstring>
 #include <memory>
 #include <random>
-#include "google/protobuf/text_format.h"
-#include <knowhere/index/vector_index/VecIndex.h>
-#include <knowhere/index/vector_index/adapter/VectorAdapter.h>
-#include <knowhere/index/vector_index/VecIndexFactory.h>
-#include <knowhere/index/vector_index/IndexIVF.h>
+#include <google/protobuf/text_format.h>
 
 #include "Constants.h"
 #include "common/Schema.h"
+#include "index/ScalarIndexSort.h"
+#include "index/StringIndexSort.h"
+#include "knowhere/index/VecIndex.h"
+#include "knowhere/index/VecIndexFactory.h"
+#include "knowhere/index/vector_index/IndexIVF.h"
+#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "query/SearchOnIndex.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentSealedImpl.h"
 #include "segcore/Utils.h"
-#include "index/ScalarIndexSort.h"
-#include "index/StringIndexSort.h"
 
 using boost::algorithm::starts_with;
 
@@ -431,10 +431,12 @@ SealedCreator(SchemaPtr schema, const GeneratedData& dataset) {
 inline knowhere::VecIndexPtr
 GenVecIndexing(int64_t N, int64_t dim, const float* vec) {
     // {knowhere::IndexParams::nprobe, 10},
-    auto conf = knowhere::Config{{knowhere::meta::DIM, dim},
-                                 {knowhere::IndexParams::nlist, 1024},
-                                 {knowhere::Metric::TYPE, knowhere::Metric::L2},
-                                 {knowhere::meta::DEVICEID, 0}};
+    auto conf = knowhere::Config{
+        {knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+        {knowhere::meta::DIM, dim},
+        {knowhere::indexparam::NLIST, 1024},
+        {knowhere::meta::DEVICE_ID, 0}
+    };
     auto database = knowhere::GenDataset(N, dim, vec);
     auto indexing = std::make_shared<knowhere::IVF>();
     indexing->Train(database, conf);

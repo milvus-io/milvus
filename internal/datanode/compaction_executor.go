@@ -29,30 +29,17 @@ const (
 	maxTaskNum = 1024
 )
 
-var maxParallelCompactionNum = calculateParallel()
-
 type compactionExecutor struct {
-	parallelCh chan struct{}
-	executing  sync.Map // planID to compactor
-	taskCh     chan compactor
-	dropped    sync.Map // vchannel dropped
-}
-
-// 0.5*min(8, NumCPU/2)
-func calculateParallel() int {
-	return 2
-	//cores := runtime.NumCPU()
-	//if cores < 16 {
-	//return 4
-	//}
-	//return cores / 2
+	executing sync.Map // planID to compactor
+	completed sync.Map // planID to CompactionResult
+	taskCh    chan compactor
+	dropped   sync.Map // vchannel dropped
 }
 
 func newCompactionExecutor() *compactionExecutor {
 	return &compactionExecutor{
-		parallelCh: make(chan struct{}, maxParallelCompactionNum),
-		executing:  sync.Map{},
-		taskCh:     make(chan compactor, maxTaskNum),
+		executing: sync.Map{},
+		taskCh:    make(chan compactor, maxTaskNum),
 	}
 }
 
@@ -88,20 +75,20 @@ func (c *compactionExecutor) start(ctx context.Context) {
 }
 
 func (c *compactionExecutor) executeTask(task compactor) {
-	c.parallelCh <- struct{}{}
 	defer func() {
 		c.toCompleteState(task)
-		<-c.parallelCh
 	}()
 
 	log.Info("start to execute compaction", zap.Int64("planID", task.getPlanID()))
 
-	err := task.compact()
+	result, err := task.compact()
 	if err != nil {
 		log.Warn("compaction task failed",
 			zap.Int64("planID", task.getPlanID()),
 			zap.Error(err),
 		)
+	} else {
+		c.completed.Store(task.getPlanID(), result)
 	}
 
 	log.Info("end to execute compaction", zap.Int64("planID", task.getPlanID()))

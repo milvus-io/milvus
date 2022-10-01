@@ -12,6 +12,7 @@
 #include "indexbuilder/helper.h"
 #include "indexbuilder/ScalarIndexCreator.h"
 #include "index/IndexFactory.h"
+#include "indexbuilder/parse.h"
 
 #include <string>
 
@@ -24,6 +25,16 @@ ScalarIndexCreator::ScalarIndexCreator(CDataType dtype, const char* type_params,
     Helper::ParseFromString(index_params_, std::string(index_params));
     // TODO: create index according to the params.
     index_ = scalar::IndexFactory::GetInstance().CreateIndex(dtype_, index_type());
+    parseConfig();
+}
+
+void
+ScalarIndexCreator::parseConfig() {
+    AddToConfig(config_, type_params_);
+    AddToConfig(config_, index_params_);
+
+    auto stoi_closure = [](const std::string& s) -> int { return std::stoi(s); };
+    ParseConfig<int>(config_, knowhere::meta::SLICE_SIZE, stoi_closure, std::optional{DEFAULT_INDEX_SLICE_SIZE});
 }
 
 void

@@ -20,7 +20,6 @@
 #include <string>
 #include "Types.h"
 
-#include "knowhere/index/vector_index/VecIndex.h"
 #include "common/CDataType.h"
 #include "knowhere/index/Index.h"
 

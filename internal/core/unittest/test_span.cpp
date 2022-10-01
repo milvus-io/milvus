@@ -23,9 +23,9 @@ TEST(Span, Naive) {
     int64_t N = ROW_COUNT;
     constexpr int64_t size_per_chunk = 32 * 1024;
     auto schema = std::make_shared<Schema>();
-    auto bin_vec_fid = schema->AddDebugField("binaryvec", DataType::VECTOR_BINARY, 512, MetricType::METRIC_Jaccard);
+    auto bin_vec_fid = schema->AddDebugField("binaryvec", DataType::VECTOR_BINARY, 512, knowhere::metric::JACCARD);
     auto float_fid = schema->AddDebugField("age", DataType::FLOAT);
-    auto float_vec_fid = schema->AddDebugField("floatvec", DataType::VECTOR_FLOAT, 32, MetricType::METRIC_L2);
+    auto float_vec_fid = schema->AddDebugField("floatvec", DataType::VECTOR_FLOAT, 32, knowhere::metric::L2);
     auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
 

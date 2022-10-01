@@ -217,7 +217,7 @@ GenTestSchema() {
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField("str", DataType::VARCHAR);
     schema->AddDebugField("another_str", DataType::VARCHAR);
-    schema->AddDebugField("fvec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
+    schema->AddDebugField("fvec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto pk = schema->AddDebugField("int64", DataType::INT64);
     schema->set_primary_field_id(pk);
     return schema;
@@ -228,7 +228,7 @@ GenStrPKSchema() {
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("str", DataType::VARCHAR);
     schema->AddDebugField("another_str", DataType::VARCHAR);
-    schema->AddDebugField("fvec", DataType::VECTOR_FLOAT, 16, MetricType::METRIC_L2);
+    schema->AddDebugField("fvec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     schema->AddDebugField("int64", DataType::INT64);
     schema->set_primary_field_id(pk);
     return schema;
@@ -531,14 +531,14 @@ TEST(AlwaysTrueStringPlan, SearchWithOutputFields) {
     std::vector<const PlaceholderGroup*> ph_group_arr = {ph_group.get()};
 
     query::dataset::SearchDataset search_dataset{
-        faiss::MetricType::METRIC_L2,  //
-        num_queries,                   //
-        topk,                          //
+        knowhere::metric::L2,   //
+        num_queries,            //
+        topk,                   //
         round_decimal,
         dim,       //
         query_ptr  //
     };
-    auto sub_result = FloatSearchBruteForce(search_dataset, vec_col.data(), N, nullptr);
+    auto sub_result = BruteForceSearch(search_dataset, vec_col.data(), N, nullptr);
 
     auto sr = segment->Search(plan.get(), ph_group.get(), time);
     segment->FillPrimaryKeys(plan.get(), *sr);

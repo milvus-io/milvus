@@ -60,6 +60,21 @@ func (pid *pulsarID) LessOrEqualThan(msgID []byte) (bool, error) {
 	return false, nil
 }
 
+func (pid *pulsarID) Equal(msgID []byte) (bool, error) {
+	pMsgID, err := pulsar.DeserializeMessageID(msgID)
+	if err != nil {
+		return false, err
+	}
+
+	if pid.messageID.LedgerID() == pMsgID.LedgerID() &&
+		pid.messageID.EntryID() == pMsgID.EntryID() &&
+		pid.messageID.BatchIdx() == pMsgID.BatchIdx() {
+		return true, nil
+	}
+
+	return false, nil
+}
+
 // SerializePulsarMsgID returns the serialized message ID
 func SerializePulsarMsgID(messageID pulsar.MessageID) []byte {
 	return messageID.Serialize()

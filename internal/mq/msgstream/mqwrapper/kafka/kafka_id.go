@@ -19,6 +19,10 @@ func (kid *kafkaID) AtEarliestPosition() bool {
 	return kid.messageID <= 0
 }
 
+func (kid *kafkaID) Equal(msgID []byte) (bool, error) {
+	return kid.messageID == DeserializeKafkaID(msgID), nil
+}
+
 func (kid *kafkaID) LessOrEqualThan(msgID []byte) (bool, error) {
 	return kid.messageID <= DeserializeKafkaID(msgID), nil
 }

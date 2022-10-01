@@ -11,24 +11,16 @@
 
 #pragma once
 
-#include "common/Schema.h"
 #include "common/BitsetView.h"
 #include "query/SubSearchResult.h"
 #include "query/helper.h"
-#include "segcore/ConcurrentVector.h"
 
 namespace milvus::query {
 
 SubSearchResult
-BinarySearchBruteForce(const dataset::SearchDataset& dataset,
-                       const void* chunk_data_raw,
-                       int64_t size_per_chunk,
-                       const BitsetView& bitset);
-
-SubSearchResult
-FloatSearchBruteForce(const dataset::SearchDataset& dataset,
-                      const void* chunk_data_raw,
-                      int64_t size_per_chunk,
-                      const BitsetView& bitset);
+BruteForceSearch(const dataset::SearchDataset& dataset,
+                 const void* chunk_data_raw,
+                 int64_t chunk_rows,
+                 const BitsetView& bitset);
 
 }  // namespace milvus::query

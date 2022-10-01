@@ -27,13 +27,14 @@ import (
 )
 
 // TODO: NewMinioChunkManager is deprecated. Rewrite this unittest.
-func newMinIOChunkManager(ctx context.Context, bucketName string) (*MinioChunkManager, error) {
+func newMinIOChunkManager(ctx context.Context, bucketName string, rootPath string) (*MinioChunkManager, error) {
 	endPoint, _ := Params.Load("_MinioAddress")
 	accessKeyID, _ := Params.Load("minio.accessKeyID")
 	secretAccessKey, _ := Params.Load("minio.secretAccessKey")
 	useSSLStr, _ := Params.Load("minio.useSSL")
 	useSSL, _ := strconv.ParseBool(useSSLStr)
 	client, err := NewMinioChunkManager(ctx,
+		RootPath(rootPath),
 		Address(endPoint),
 		AccessKeyID(accessKeyID),
 		SecretAccessKeyID(secretAccessKey),
@@ -45,6 +46,7 @@ func newMinIOChunkManager(ctx context.Context, bucketName string) (*MinioChunkMa
 	)
 	return client, err
 }
+
 func TestMinIOCMFail(t *testing.T) {
 	ctx := context.Background()
 	endPoint, _ := Params.Load("9.9.9.9")
@@ -80,9 +82,11 @@ func TestMinIOCM(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		testCM, err := newMinIOChunkManager(ctx, testBucket)
+		testCM, err := newMinIOChunkManager(ctx, testBucket, testLoadRoot)
 		require.NoError(t, err)
 		defer testCM.RemoveWithPrefix(testLoadRoot)
+
+		assert.Equal(t, testLoadRoot, testCM.RootPath())
 
 		prepareTests := []struct {
 			key   string
@@ -193,7 +197,7 @@ func TestMinIOCM(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		testCM, err := newMinIOChunkManager(ctx, testBucket)
+		testCM, err := newMinIOChunkManager(ctx, testBucket, testMultiSaveRoot)
 		assert.Nil(t, err)
 		defer testCM.RemoveWithPrefix(testMultiSaveRoot)
 
@@ -218,7 +222,7 @@ func TestMinIOCM(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		testCM, err := newMinIOChunkManager(ctx, testBucket)
+		testCM, err := newMinIOChunkManager(ctx, testBucket, testRemoveRoot)
 		assert.Nil(t, err)
 		defer testCM.RemoveWithPrefix(testRemoveRoot)
 
@@ -314,7 +318,7 @@ func TestMinIOCM(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		testCM, err := newMinIOChunkManager(ctx, testBucket)
+		testCM, err := newMinIOChunkManager(ctx, testBucket, testLoadPartialRoot)
 		require.NoError(t, err)
 		defer testCM.RemoveWithPrefix(testLoadPartialRoot)
 
@@ -362,7 +366,7 @@ func TestMinIOCM(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		testCM, err := newMinIOChunkManager(ctx, testBucket)
+		testCM, err := newMinIOChunkManager(ctx, testBucket, testGetSizeRoot)
 		require.NoError(t, err)
 		defer testCM.RemoveWithPrefix(testGetSizeRoot)
 
@@ -388,7 +392,7 @@ func TestMinIOCM(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		testCM, err := newMinIOChunkManager(ctx, testBucket)
+		testCM, err := newMinIOChunkManager(ctx, testBucket, testGetPathRoot)
 		require.NoError(t, err)
 		defer testCM.RemoveWithPrefix(testGetPathRoot)
 
@@ -414,7 +418,7 @@ func TestMinIOCM(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		testCM, err := newMinIOChunkManager(ctx, testBucket)
+		testCM, err := newMinIOChunkManager(ctx, testBucket, testMmapRoot)
 		require.NoError(t, err)
 		defer testCM.RemoveWithPrefix(testMmapRoot)
 
@@ -435,7 +439,7 @@ func TestMinIOCM(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		testCM, err := newMinIOChunkManager(ctx, testBucket)
+		testCM, err := newMinIOChunkManager(ctx, testBucket, testPrefix)
 		require.NoError(t, err)
 		defer testCM.RemoveWithPrefix(testPrefix)
 
@@ -469,21 +473,21 @@ func TestMinIOCM(t *testing.T) {
 		key = path.Join(testPrefix, "bc", "a", "b")
 		err = testCM.Write(key, value)
 		assert.NoError(t, err)
-		dirs, mods, err := testCM.ListWithPrefix(testPrefix+"/", false)
+		dirs, mods, err := testCM.ListWithPrefix(testPrefix+"/", true)
+		assert.NoError(t, err)
+		assert.Equal(t, 5, len(dirs))
+		assert.Equal(t, 5, len(mods))
+
+		dirs, mods, err = testCM.ListWithPrefix(path.Join(testPrefix, "b"), true)
 		assert.NoError(t, err)
 		assert.Equal(t, 3, len(dirs))
 		assert.Equal(t, 3, len(mods))
 
-		dirs, mods, err = testCM.ListWithPrefix(path.Join(testPrefix, "b"), false)
-		assert.NoError(t, err)
-		assert.Equal(t, 2, len(dirs))
-		assert.Equal(t, 2, len(mods))
-
 		testCM.RemoveWithPrefix(testPrefix)
-		r, m, err = testCM.ListWithPrefix(pathPrefix, false)
+		r, m, err = testCM.ListWithPrefix(pathPrefix, true)
 		assert.NoError(t, err)
-		assert.Equal(t, len(r), 0)
-		assert.Equal(t, len(m), 0)
+		assert.Equal(t, 0, len(r))
+		assert.Equal(t, 0, len(m))
 
 		// test wrong prefix
 		b := make([]byte, 2048)
@@ -491,4 +495,45 @@ func TestMinIOCM(t *testing.T) {
 		_, _, err = testCM.ListWithPrefix(pathWrong, true)
 		assert.Error(t, err)
 	})
+}
+
+func TestMinioChunkManager_normalizeRootPath(t *testing.T) {
+	type testCase struct {
+		input    string
+		expected string
+	}
+
+	cases := []testCase{
+		{
+			input:    "files",
+			expected: "files",
+		},
+		{
+			input:    "files/",
+			expected: "files/",
+		},
+		{
+			input:    "/files",
+			expected: "files",
+		},
+		{
+			input:    "//files",
+			expected: "files",
+		},
+		{
+			input:    "files/my-folder",
+			expected: "files/my-folder",
+		},
+		{
+			input:    "",
+			expected: "",
+		},
+	}
+
+	mcm := &MinioChunkManager{}
+	for _, test := range cases {
+		t.Run(test.input, func(t *testing.T) {
+			assert.Equal(t, test.expected, mcm.normalizeRootPath(test.input))
+		})
+	}
 }

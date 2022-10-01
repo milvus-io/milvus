@@ -43,8 +43,8 @@ func NewKafkaClientInstanceWithConfig(config *paramtable.KafkaConfig) *kafkaClie
 	}
 
 	if config.SaslUsername != "" && config.SaslPassword != "" {
-		kafkaConfig.SetKey("sasl.mechanisms", "PLAIN")
-		kafkaConfig.SetKey("security.protocol", "SASL_SSL")
+		kafkaConfig.SetKey("sasl.mechanisms", config.SaslMechanisms)
+		kafkaConfig.SetKey("security.protocol", config.SecurityProtocol)
 		kafkaConfig.SetKey("sasl.username", config.SaslUsername)
 		kafkaConfig.SetKey("sasl.password", config.SaslPassword)
 	}

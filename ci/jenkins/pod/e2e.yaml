@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    app: milvus-e2e
+  namespace: jenkins
+spec:
+  enableServiceLinks: false
+  containers: 
+  - name: pytest
+    image: harbor.milvus.io/dockerhub/milvusdb/pytest:20220728-a2e24ab
+    resources:
+      limits:
+        cpu: "6"
+        memory: 12Gi
+      requests:
+        cpu: "0.5"
+        memory: 5Gi
+    volumeMounts:
+    - mountPath: /ci-logs
+      name: ci-logs
+  volumes:
+  - name: ci-logs
+    nfs:
+      path: /ci-logs
+      server: 172.16.70.239

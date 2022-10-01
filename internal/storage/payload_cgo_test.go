@@ -567,7 +567,7 @@ func TestPayload_CGO_ReaderandWriter(t *testing.T) {
 		assert.NotNil(t, err)
 
 		err = w.AddOneStringToPayload("")
-		assert.NotNil(t, err)
+		assert.Nil(t, err)
 		err = w.FinishPayloadWriter()
 		assert.Nil(t, err)
 		err = w.AddOneStringToPayload("c")

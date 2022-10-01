@@ -27,6 +27,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/blang/semver/v4"
 	"github.com/minio/minio-go/v7"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -308,7 +309,7 @@ func (s *Server) Start() error {
 	// data from all DataNode.
 	// This will prevent DataCoord from missing out any important segment stats
 	// data while offline.
-	log.Info("DataNode (re)starts successfully and re-collecting segment stats from DataNodes")
+	log.Info("DataCoord (re)starts successfully and re-collecting segment stats from DataNodes")
 	s.reCollectSegmentStats(s.ctx)
 
 	return nil
@@ -357,7 +358,7 @@ func (s *Server) initGarbageCollection() error {
 	var err error
 	if Params.CommonCfg.StorageType == "minio" {
 		chunkManagerFactory := storage.NewChunkManagerFactory("local", "minio",
-			storage.RootPath(Params.LocalStorageCfg.Path),
+			storage.RootPath(Params.MinioCfg.RootPath),
 			storage.Address(Params.MinioCfg.Address),
 			storage.AccessKeyID(Params.MinioCfg.AccessKeyID),
 			storage.SecretAccessKeyID(Params.MinioCfg.SecretAccessKey),
@@ -413,7 +414,8 @@ var getCheckBucketFn = func(cli *minio.Client) func() error {
 }
 
 func (s *Server) initServiceDiscovery() error {
-	sessions, rev, err := s.session.GetSessions(typeutil.DataNodeRole)
+	r := semver.MustParseRange(">2.1.1")
+	sessions, rev, err := s.session.GetSessionsWithVersionRange(typeutil.DataNodeRole, r)
 	if err != nil {
 		log.Warn("DataCoord failed to init service discovery", zap.Error(err))
 		return err
@@ -432,7 +434,7 @@ func (s *Server) initServiceDiscovery() error {
 	s.cluster.Startup(s.ctx, datanodes)
 
 	// TODO implement rewatch logic
-	s.dnEventCh = s.session.WatchServices(typeutil.DataNodeRole, rev+1, nil)
+	s.dnEventCh = s.session.WatchServicesWithVersionRange(typeutil.DataNodeRole, r, rev+1, nil)
 
 	//icSessions, icRevision, err := s.session.GetSessions(typeutil.IndexCoordRole)
 	//if err != nil {
@@ -621,6 +623,16 @@ func (s *Server) handleTimetickMessage(ctx context.Context, ttMsg *msgstream.Dat
 
 func (s *Server) updateSegmentStatistics(stats []*datapb.SegmentStats) {
 	for _, stat := range stats {
+		// Log if # of rows is updated.
+		if s.meta.GetAllSegment(stat.GetSegmentID()) != nil &&
+			s.meta.GetAllSegment(stat.GetSegmentID()).GetNumOfRows() != stat.GetNumRows() {
+			log.Debug("Updating segment number of rows",
+				zap.Int64("segment ID", stat.GetSegmentID()),
+				zap.Int64("old value", s.meta.GetAllSegment(stat.GetSegmentID()).GetNumOfRows()),
+				zap.Int64("new value", stat.GetNumRows()),
+				zap.Any("seg info", s.meta.GetSegment(stat.GetSegmentID())),
+			)
+		}
 		s.meta.SetCurrentRows(stat.GetSegmentID(), stat.GetNumRows())
 	}
 }
@@ -958,7 +970,7 @@ func (s *Server) reCollectSegmentStats(ctx context.Context) {
 		log.Error("null channel manager found, which should NOT happen in non-testing environment")
 		return
 	}
-	nodes := s.channelManager.store.GetNodes()
+	nodes := s.sessionManager.getLiveNodeIDs()
 	log.Info("re-collecting segment stats from DataNodes",
 		zap.Int64s("DataNode IDs", nodes))
 	for _, node := range nodes {

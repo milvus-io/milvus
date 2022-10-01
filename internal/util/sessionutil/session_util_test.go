@@ -2,25 +2,35 @@ package sessionutil
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"math/rand"
+	"net/url"
+	"os"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/blang/semver/v4"
+	"github.com/milvus-io/milvus/internal/common"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/server/v3/embed"
+	"go.etcd.io/etcd/server/v3/etcdserver/api/v3client"
 )
 
 var Params paramtable.BaseTable
@@ -242,10 +252,11 @@ func TestWatcherHandleWatchResp(t *testing.T) {
 
 	getWatcher := func(s *Session, rewatch Rewatch) *sessionWatcher {
 		return &sessionWatcher{
-			s:       s,
-			prefix:  "test",
-			rewatch: rewatch,
-			eventCh: make(chan *SessionEvent, 10),
+			s:        s,
+			prefix:   "test",
+			rewatch:  rewatch,
+			eventCh:  make(chan *SessionEvent, 10),
+			validate: func(*Session) bool { return true },
 		}
 	}
 
@@ -410,4 +421,207 @@ func TestSession_Registered(t *testing.T) {
 func TestSession_String(t *testing.T) {
 	s := &Session{}
 	log.Debug("log session", zap.Any("session", s))
+}
+
+func TestSesssionMarshal(t *testing.T) {
+	s := &Session{
+		ServerID:   1,
+		ServerName: "test",
+		Address:    "localhost",
+		Version:    common.Version,
+	}
+
+	bs, err := json.Marshal(s)
+	require.NoError(t, err)
+
+	s2 := &Session{}
+	err = json.Unmarshal(bs, s2)
+	assert.NoError(t, err)
+	assert.Equal(t, s.ServerID, s2.ServerID)
+	assert.Equal(t, s.ServerName, s2.ServerName)
+	assert.Equal(t, s.Address, s2.Address)
+	assert.Equal(t, s.Version.String(), s2.Version.String())
+}
+
+func TestSessionUnmarshal(t *testing.T) {
+	t.Run("json failure", func(t *testing.T) {
+		s := &Session{}
+		err := json.Unmarshal([]byte("garbage"), s)
+		assert.Error(t, err)
+	})
+
+	t.Run("version error", func(t *testing.T) {
+		s := &Session{}
+		err := json.Unmarshal([]byte(`{"Version": "a.b.c"}`), s)
+		assert.Error(t, err)
+	})
+}
+
+type SessionWithVersionSuite struct {
+	suite.Suite
+	tmpDir     string
+	etcdServer *embed.Etcd
+
+	metaRoot   string
+	serverName string
+	sessions   []*Session
+	client     *clientv3.Client
+}
+
+// SetupSuite setup suite env
+func (suite *SessionWithVersionSuite) SetupSuite() {
+	dir, err := ioutil.TempDir(os.TempDir(), "milvus_ut")
+	suite.Require().NoError(err)
+	suite.tmpDir = dir
+	suite.T().Log("using tmp dir:", dir)
+
+	config := embed.NewConfig()
+
+	config.Dir = os.TempDir()
+	config.LogLevel = "warn"
+	config.LogOutputs = []string{"default"}
+	u, err := url.Parse("http://localhost:0")
+	suite.Require().NoError(err)
+
+	config.LCUrls = []url.URL{*u}
+	u, err = url.Parse("http://localhost:0")
+	suite.Require().NoError(err)
+	config.LPUrls = []url.URL{*u}
+
+	etcdServer, err := embed.StartEtcd(config)
+	suite.Require().NoError(err)
+	suite.etcdServer = etcdServer
+}
+
+func (suite *SessionWithVersionSuite) TearDownSuite() {
+	if suite.etcdServer != nil {
+		suite.etcdServer.Close()
+	}
+	if suite.tmpDir != "" {
+		os.RemoveAll(suite.tmpDir)
+	}
+}
+
+func (suite *SessionWithVersionSuite) SetupTest() {
+	client := v3client.New(suite.etcdServer.Server)
+	suite.client = client
+
+	ctx := context.Background()
+	suite.metaRoot = "sessionWithVersion"
+	suite.serverName = "sessionComp"
+
+	s1 := NewSession(ctx, suite.metaRoot, client)
+	s1.Version.Major, s1.Version.Minor, s1.Version.Patch = 0, 0, 0
+	s1.Init(suite.serverName, "s1", false, false)
+	s1.Register()
+
+	suite.sessions = append(suite.sessions, s1)
+
+	s2 := NewSession(ctx, suite.metaRoot, client)
+	s2.Version.Major, s2.Version.Minor, s2.Version.Patch = 2, 1, 0
+	s2.Init(suite.serverName, "s2", false, false)
+	s2.Register()
+
+	suite.sessions = append(suite.sessions, s2)
+
+	s3 := NewSession(ctx, suite.metaRoot, client)
+	s3.Version.Major, s3.Version.Minor, s3.Version.Patch = 2, 2, 0
+	s3.Version.Build = []string{"dev"}
+	s3.Init(suite.serverName, "s3", false, false)
+	s3.Register()
+
+	suite.sessions = append(suite.sessions, s3)
+
+}
+
+func (suite *SessionWithVersionSuite) TearDownTest() {
+	for _, s := range suite.sessions {
+		s.Revoke(time.Second)
+	}
+
+	suite.sessions = nil
+	_, err := suite.client.Delete(context.Background(), suite.metaRoot, clientv3.WithPrefix())
+	suite.Require().NoError(err)
+
+	if suite.client != nil {
+		suite.client.Close()
+		suite.client = nil
+	}
+}
+
+func (suite *SessionWithVersionSuite) TestGetSessionsWithRangeVersion() {
+	s := NewSession(context.Background(), suite.metaRoot, suite.client)
+
+	suite.Run(">1.0.0", func() {
+		r, err := semver.ParseRange(">1.0.0")
+		suite.Require().NoError(err)
+
+		result, _, err := s.GetSessionsWithVersionRange(suite.serverName, r)
+		suite.Require().NoError(err)
+		suite.Equal(2, len(result))
+	})
+
+	suite.Run(">2.1.0", func() {
+		r, err := semver.ParseRange(">2.1.0")
+		suite.Require().NoError(err)
+
+		result, _, err := s.GetSessionsWithVersionRange(suite.serverName, r)
+		suite.Require().NoError(err)
+		suite.Equal(1, len(result))
+	})
+
+	suite.Run(">=2.2.0", func() {
+		r, err := semver.ParseRange(">=2.2.0")
+		suite.Require().NoError(err)
+
+		result, _, err := s.GetSessionsWithVersionRange(suite.serverName, r)
+		suite.Require().NoError(err)
+		suite.Equal(0, len(result))
+	})
+
+	suite.Run(">=0.0.0 with garbage", func() {
+		ctx := context.Background()
+		r, err := semver.ParseRange(">=0.0.0")
+		suite.Require().NoError(err)
+
+		suite.client.Put(ctx, path.Join(suite.metaRoot, DefaultServiceRoot, suite.serverName, "garbage"), "garbage")
+		suite.client.Put(ctx, path.Join(suite.metaRoot, DefaultServiceRoot, suite.serverName, "garbage_1"), `{"Version": "a.b.c"}`)
+
+		_, _, err = s.GetSessionsWithVersionRange(suite.serverName, r)
+		suite.Error(err)
+	})
+}
+
+func (suite *SessionWithVersionSuite) TestWatchServicesWithVersionRange() {
+	s := NewSession(context.Background(), suite.metaRoot, suite.client)
+
+	suite.Run(">1.0.0 <=2.1.0", func() {
+		r, err := semver.ParseRange(">1.0.0 <=2.1.0")
+		suite.Require().NoError(err)
+
+		_, rev, err := s.GetSessionsWithVersionRange(suite.serverName, r)
+		suite.Require().NoError(err)
+
+		ch := s.WatchServicesWithVersionRange(suite.serverName, r, rev, nil)
+
+		// remove all sessions
+		go func() {
+			for _, s := range suite.sessions {
+				s.Revoke(time.Second)
+			}
+		}()
+
+		t := time.NewTimer(time.Second)
+		defer t.Stop()
+		select {
+		case evt := <-ch:
+			suite.Equal(suite.sessions[1].ServerID, evt.Session.ServerID)
+		case <-t.C:
+			suite.Fail("no event received, failing")
+		}
+	})
+}
+
+func TestSessionWithVersionRange(t *testing.T) {
+	suite.Run(t, new(SessionWithVersionSuite))
 }

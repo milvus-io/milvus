@@ -62,6 +62,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -801,7 +802,6 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 		ds.replica,
 		ds.flushManager,
 		ds.idAllocator,
-		node.dataCoord,
 		req,
 	)
 
@@ -810,6 +810,103 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}, nil
+}
+
+// GetCompactionState called by DataCoord
+// return status of all compaction plans
+func (node *DataNode) GetCompactionState(ctx context.Context, req *datapb.CompactionStateRequest) (*datapb.CompactionStateResponse, error) {
+	log.Info("DataNode.GetCompactionState")
+	if !node.isHealthy() {
+		return &datapb.CompactionStateResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "DataNode is unhealthy",
+			},
+		}, nil
+	}
+	results := make([]*datapb.CompactionStateResult, 0)
+	node.compactionExecutor.executing.Range(func(k, v interface{}) bool {
+		results = append(results, &datapb.CompactionStateResult{
+			State:  commonpb.CompactionState_Executing,
+			PlanID: k.(UniqueID),
+		})
+		return true
+	})
+	node.compactionExecutor.completed.Range(func(k, v interface{}) bool {
+		results = append(results, &datapb.CompactionStateResult{
+			State:  commonpb.CompactionState_Completed,
+			PlanID: k.(UniqueID),
+			Result: v.(*datapb.CompactionResult),
+		})
+		node.compactionExecutor.completed.Delete(k)
+		return true
+	})
+	log.Debug("Compaction results", zap.Any("results", results))
+	return &datapb.CompactionStateResponse{
+		Status:  &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		Results: results,
+	}, nil
+}
+
+// SyncSegments called by DataCoord, sync the compacted segments' meta between DC and DN
+func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegmentsRequest) (*commonpb.Status, error) {
+	log.Info("DataNode receives SyncSegments",
+		zap.Int64("planID", req.GetPlanID()),
+		zap.Int64("target segmentID", req.GetCompactedTo()),
+		zap.Int64s("compacted from", req.GetCompactedFrom()),
+		zap.Int64("numOfRows", req.GetNumOfRows()),
+	)
+	status := &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}
+
+	if !node.isHealthy() {
+		status.Reason = "DataNode is unhealthy"
+		return status, nil
+	}
+
+	if len(req.GetCompactedFrom()) <= 0 {
+		status.Reason = "invalid request, compacted from segments shouldn't be empty"
+		return status, nil
+	}
+
+	oneSegment := req.GetCompactedFrom()[0]
+	replica, err := node.flowgraphManager.getReplica(oneSegment)
+	if err != nil {
+		status.Reason = fmt.Sprintf("invalid request, err=%s", err.Error())
+		return status, nil
+	}
+
+	// check if all compactedFrom segments are valid
+	var invalidSegIDs []UniqueID
+	for _, segID := range req.GetCompactedFrom() {
+		if !replica.hasSegment(segID, true) {
+			invalidSegIDs = append(invalidSegIDs, segID)
+		}
+	}
+	if len(invalidSegIDs) > 0 {
+		status.Reason = fmt.Sprintf("invalid request, some segments are not in the same replica: %v", invalidSegIDs)
+		return status, nil
+	}
+
+	// oneSegment is definitely in the replica, guaranteed by the check before.
+	collID, partID, _ := replica.getCollectionAndPartitionID(oneSegment)
+	chanName, _ := replica.getChannelName(oneSegment)
+	targetSeg := &Segment{
+		collectionID: collID,
+		partitionID:  partID,
+		channelName:  chanName,
+		segmentID:    req.GetCompactedTo(),
+		numRows:      req.GetNumOfRows(),
+	}
+
+	replica.(*SegmentReplica).initPKBloomFilter(targetSeg, req.GetStatsLogs(), tsoutil.GetCurrentTime())
+
+	if err := replica.mergeFlushedSegments(targetSeg, req.GetPlanID(), req.GetCompactedFrom()); err != nil {
+		status.Reason = err.Error()
+		return status, nil
+	}
+
+	status.ErrorCode = commonpb.ErrorCode_Success
+	return status, nil
 }
 
 // Import data files(json, numpy, etc.) on MinIO/S3 storage, read and parse them into sealed segments
@@ -1070,7 +1167,7 @@ func importFlushReqFunc(node *DataNode, req *datapb.ImportTaskRequest, res *root
 			// no error raise if alloc=false
 			k := JoinIDPath(req.GetImportTask().GetCollectionId(), req.GetImportTask().GetPartitionId(), segmentID, fieldID, logidx)
 
-			key := path.Join(Params.DataNodeCfg.InsertBinlogRootPath, k)
+			key := path.Join(node.chunkManager.RootPath(), common.SegmentInsertLogPath, k)
 			kvs[key] = blob.Value[:]
 			field2Insert[fieldID] = &datapb.Binlog{
 				EntriesNum:    data.size,
@@ -1096,7 +1193,7 @@ func importFlushReqFunc(node *DataNode, req *datapb.ImportTaskRequest, res *root
 			// no error raise if alloc=false
 			k := JoinIDPath(req.GetImportTask().GetCollectionId(), req.GetImportTask().GetPartitionId(), segmentID, fieldID, logidx)
 
-			key := path.Join(Params.DataNodeCfg.StatsBinlogRootPath, k)
+			key := path.Join(node.chunkManager.RootPath(), common.SegmentStatslogPath, k)
 			kvs[key] = blob.Value
 			field2Stats[fieldID] = &datapb.Binlog{
 				EntriesNum:    0,

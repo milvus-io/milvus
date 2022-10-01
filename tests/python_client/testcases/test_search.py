@@ -1648,16 +1648,12 @@ class TestCollectionSearch(TestcaseBase):
         res = collection_w.search(binary_vectors[:nq], "binary_vector",
                                   search_params, default_limit, "int64 >= 0",
                                   _async=_async,
-                                  travel_timestamp=time_stamp,
-                                  check_task=CheckTasks.check_search_results,
-                                  check_items={"nq": nq,
-                                               "ids": insert_ids,
-                                               "limit": default_limit,
-                                               "_async": _async})[0]
+                                  travel_timestamp=time_stamp)[0]
         if _async:
             res.done()
             res = res.result()
         assert res[0].distances[0] == 0.0
+        assert len(res) <= default_limit
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index", ["BIN_FLAT"])
@@ -2189,7 +2185,7 @@ class TestCollectionSearch(TestcaseBase):
         """
         target: test search with large expression
         method: test search with large expression
-        expected: searched successfully 
+        expected: searched successfully
         """
         # 1. initialize with data
         nb = 10000
@@ -2197,7 +2193,7 @@ class TestCollectionSearch(TestcaseBase):
                                                                       nb, dim=dim,
                                                                       is_index=True)[0:4]
 
-        
+
         # 2. create index
         index_param = {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}}
         collection_w.create_index("float_vector", index_param)
@@ -2223,21 +2219,21 @@ class TestCollectionSearch(TestcaseBase):
         """
         target: test search with large expression
         method: test one of the collection ids to another collection search for it, with the large expression
-        expected: searched successfully 
+        expected: searched successfully
         """
         # 1. initialize with data
         nb = 10000
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True,
                                                                                nb, dim=dim,
-                                                                               is_index=True)[0:4]                                                                 
+                                                                               is_index=True)[0:4]
 
-        
+
         # 2. create index
         index_param = {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}}
         collection_w.create_index("float_vector", index_param)
         collection_w.load()
 
- 
+
         nums = 5000
         vectors = [[random.random() for _ in range(dim)] for _ in range(nums)]
         vectors_id = [random.randint(0,nums)for _ in range(nums)]
@@ -2258,13 +2254,13 @@ class TestCollectionSearch(TestcaseBase):
         method: 1. create a collection
                 2. insert data
                 3. search with consistency_level is "bounded"
-        expected: searched successfully 
+        expected: searched successfully
         """
         limit = 1000
         nb_old = 500
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb_old,
                                                                       auto_id=auto_id,
-                                                                      dim=dim)[0:4] 
+                                                                      dim=dim)[0:4]
         # 2. search for original data after load
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         collection_w.search(vectors[:nq], default_search_field,
@@ -2276,7 +2272,7 @@ class TestCollectionSearch(TestcaseBase):
                                          "limit": nb_old,
                                          "_async": _async,
                                          })
-        
+
         kwargs = {}
         consistency_level = kwargs.get("consistency_level", CONSISTENCY_BOUNDED)
         kwargs.update({"consistency_level": consistency_level})
@@ -2291,7 +2287,7 @@ class TestCollectionSearch(TestcaseBase):
                             default_search_params, limit,
                             default_search_exp, _async=_async,
                             **kwargs,
-                            ) 
+                            )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_with_consistency_strong(self, nq, dim, auto_id, _async):
@@ -2300,7 +2296,7 @@ class TestCollectionSearch(TestcaseBase):
         method: 1. create a collection
                 2. insert data
                 3. search with consistency_level is "Strong"
-        expected: searched successfully 
+        expected: searched successfully
         """
         limit = 1000
         nb_old = 500
@@ -2317,7 +2313,7 @@ class TestCollectionSearch(TestcaseBase):
                                          "ids": insert_ids,
                                          "limit": nb_old,
                                          "_async": _async})
-        
+
         nb_new = 400
         _, _, _, insert_ids_new, _ = cf.insert_data(collection_w, nb_new,
                                                     auto_id=auto_id, dim=dim,
@@ -2335,7 +2331,7 @@ class TestCollectionSearch(TestcaseBase):
                             check_items={"nq": nq,
                                          "ids": insert_ids,
                                          "limit": nb_old + nb_new,
-                                         "_async": _async}) 
+                                         "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_with_consistency_eventually(self, nq, dim, auto_id, _async):
@@ -2344,7 +2340,7 @@ class TestCollectionSearch(TestcaseBase):
         method: 1. create a collection
                 2. insert data
                 3. search with consistency_level is "eventually"
-        expected: searched successfully 
+        expected: searched successfully
         """
         limit = 1000
         nb_old = 500
@@ -2373,7 +2369,7 @@ class TestCollectionSearch(TestcaseBase):
                             default_search_params, limit,
                             default_search_exp, _async=_async,
                             **kwargs
-                            ) 
+                            )
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_with_consistency_session(self, nq, dim, auto_id, _async):
@@ -2382,13 +2378,13 @@ class TestCollectionSearch(TestcaseBase):
         method: 1. create a collection
                 2. insert data
                 3. search with consistency_level is "session"
-        expected: searched successfully 
+        expected: searched successfully
         """
         limit = 1000
         nb_old = 500
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb_old,
                                                                       auto_id=auto_id,
-                                                                      dim=dim)[0:4] 
+                                                                      dim=dim)[0:4]
         # 2. search for original data after load
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         collection_w.search(vectors[:nq], default_search_field,
@@ -2399,7 +2395,7 @@ class TestCollectionSearch(TestcaseBase):
                                          "ids": insert_ids,
                                          "limit": nb_old,
                                          "_async": _async})
-        
+
         kwargs = {}
         consistency_level = kwargs.get("consistency_level", CONSISTENCY_SESSION)
         kwargs.update({"consistency_level": consistency_level})
@@ -2417,7 +2413,7 @@ class TestCollectionSearch(TestcaseBase):
                             check_items={"nq": nq,
                                          "ids": insert_ids,
                                          "limit": nb_old + nb_new,
-                                         "_async": _async}) 
+                                         "_async": _async})
 
 class TestSearchBase(TestcaseBase):
     @pytest.fixture(
@@ -2819,7 +2815,7 @@ class TestSearchDSL(TestcaseBase):
 class  TestsearchString(TestcaseBase):
     """
     ******************************************************************
-      The following cases are used to test search about string 
+      The following cases are used to test search about string
     ******************************************************************
     """
 
@@ -2848,7 +2844,7 @@ class  TestsearchString(TestcaseBase):
     def test_search_string_field_not_primary(self, auto_id, _async):
         """
         target: test search with string expr and string field is not primary
-        method: create collection and insert data 
+        method: create collection and insert data
                 create index and collection load
                 collection search uses string expr in string field, string field is not primary
         expected: Search successfully
@@ -2861,7 +2857,7 @@ class  TestsearchString(TestcaseBase):
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         output_fields = [default_string_field_name, default_float_field_name]
         collection_w.search(vectors[:default_nq], default_search_field,
-                            default_search_params, default_limit, 
+                            default_search_params, default_limit,
                             default_search_string_exp,
                             output_fields=output_fields,
                             _async=_async,
@@ -2872,12 +2868,12 @@ class  TestsearchString(TestcaseBase):
                                          "limit": default_limit,
                                          "_async": _async})
 
-        
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_string_field_is_primary_true(self, dim, _async):
         """
         target: test search with string expr and string field is primary
-        method: create collection and insert data 
+        method: create collection and insert data
                 create index and collection load
                 collection search uses string expr in string field ,string field is primary
         expected: Search successfully
@@ -2891,7 +2887,7 @@ class  TestsearchString(TestcaseBase):
         output_fields = [default_string_field_name, default_float_field_name]
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, default_limit,
-                            default_search_string_exp, 
+                            default_search_string_exp,
                             output_fields=output_fields,
                             _async=_async,
                             travel_timestamp=0,
@@ -2900,7 +2896,7 @@ class  TestsearchString(TestcaseBase):
                                          "ids": insert_ids,
                                          "limit": default_limit,
                                          "_async": _async})
-        
+
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_string_mix_expr(self, dim, auto_id, _async):
@@ -2908,7 +2904,7 @@ class  TestsearchString(TestcaseBase):
         target: test search with mix string and int expr
         method: create collection and insert data
                 create index and collection load
-                collection search uses mix expr 
+                collection search uses mix expr
         expected: Search successfully
         """
         # 1. initialize with data
@@ -2936,7 +2932,7 @@ class  TestsearchString(TestcaseBase):
         target: test search data
         method: create collection and insert data
                 create index and collection load
-                collection search uses invalid string expr  
+                collection search uses invalid string expr
         expected: Raise exception
         """
 
@@ -2948,13 +2944,13 @@ class  TestsearchString(TestcaseBase):
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, default_limit,
-                            default_invaild_string_exp, 
+                            default_invaild_string_exp,
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 1,
                                          "err_msg": "failed to create query plan: type mismatch"}
                             )
 
-          
+
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("expression", cf.gen_normal_string_expressions(ct.default_string_field_name))
@@ -3009,12 +3005,12 @@ class  TestsearchString(TestcaseBase):
     def test_search_string_field_is_primary_binary(self, dim, _async):
         """
         target: test search with string expr and string field is primary
-        method: create collection and insert data 
+        method: create collection and insert data
                 create index and collection load
                 collection search uses string expr in string field ,string field is primary
         expected: Search successfully
         """
-        
+
         # 1. initialize with binary data
         collection_w, _, binary_raw_vector, insert_ids = self.init_collection_general(prefix, True, 2,
                                                                                       is_binary=True,
@@ -3037,19 +3033,19 @@ class  TestsearchString(TestcaseBase):
                                          "ids": insert_ids,
                                          "limit": 2,
                                          "_async": _async})
-        
+
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_string_field_binary(self, auto_id, dim, _async):
         """
         target: test search with string expr and string field is not primary
-        method: create an binary collection and insert data 
+        method: create an binary collection and insert data
                 create index and collection load
-                collection search uses string expr in string field, string field is not primary 
+                collection search uses string expr in string field, string field is not primary
         expected: Search successfully
         """
          # 1. initialize with binary data
-         
+
         collection_w, _, binary_raw_vector, insert_ids = self.init_collection_general(prefix, True, 2,
                                                                                       is_binary=True,
                                                                                       auto_id=auto_id,
@@ -3057,8 +3053,8 @@ class  TestsearchString(TestcaseBase):
                                                                                       is_index=True)[0:4]
         # 2. create index
         default_index = {"index_type": "BIN_IVF_FLAT", "params": {"nlist": 128}, "metric_type": "JACCARD"}
-        collection_w.create_index("binary_vector", default_index)   
-        collection_w.load()                                                                           
+        collection_w.create_index("binary_vector", default_index)
+        collection_w.load()
         # 2. search with exception
         binary_vectors = cf.gen_binary_vectors(3000, dim)[1]
         search_params = {"metric_type": "JACCARD", "params": {"nprobe": 10}}
@@ -3078,7 +3074,7 @@ class  TestsearchString(TestcaseBase):
         target: test search with mix string and int expr
         method: create an binary collection and insert data
                 create index and collection load
-                collection search uses mix expr 
+                collection search uses mix expr
         expected: Search successfully
         """
         # 1. initialize with data
@@ -3106,10 +3102,10 @@ class  TestsearchString(TestcaseBase):
                                          "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_search_string_field_not_primary_perfix(self, auto_id, _async):
+    def test_search_string_field_not_primary_prefix(self, auto_id, _async):
         """
         target: test search with string expr and string field is not primary
-        method: create collection and insert data 
+        method: create collection and insert data
                 create index and collection load
                 collection search uses string expr in string field, string field is not primary
         expected: Search successfully
@@ -3127,7 +3123,8 @@ class  TestsearchString(TestcaseBase):
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         output_fields = [default_float_field_name, default_string_field_name]
         collection_w.search(vectors[:default_nq], default_search_field,
-                            default_search_params, default_limit, 
+                            # search all buckets
+                            {"metric_type": "L2", "params": {"nprobe": 100}}, default_limit,
                             perfix_expr,
                             output_fields=output_fields,
                             _async=_async,
@@ -3144,7 +3141,7 @@ class  TestsearchString(TestcaseBase):
         """
         target: test delete after creating index
         method: 1.create collection , insert data, primary_field is string field
-                2.create string and float index ,delete entities, query 
+                2.create string and float index ,delete entities, query
                 3.search
         expected: assert index and deleted id not in search result
         """
@@ -3166,7 +3163,7 @@ class  TestsearchString(TestcaseBase):
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         output_fields = [default_int64_field_name, default_float_field_name,  default_string_field_name]
         collection_w.search(vectors[:default_nq], default_search_field,
-                            default_search_params, default_limit, 
+                            default_search_params, default_limit,
                             expr,
                             output_fields=output_fields,
                             _async=_async,
@@ -3177,3 +3174,87 @@ class  TestsearchString(TestcaseBase):
                                          "limit": default_limit,
                                          "_async": _async}
                             )
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_string_field_is_primary_insert_empty(self, _async):
+        """
+        target: test search with string expr and string field is primary
+        method: create collection ,string field is primary
+                collection load and insert data
+                collection search uses string expr in string field
+        expected: Search successfully
+        """
+        # 1. initialize with data
+        collection_w, _, _, _ = \
+            self.init_collection_general(prefix, False, primary_field=ct.default_string_field_name)[0:4]
+
+        nb = 3000
+        data = cf.gen_default_list_data(nb)
+        data[2] = [""for _ in range(nb)]
+        collection_w.insert(data=data)
+
+        collection_w.load()
+
+
+        search_string_exp = "varchar >= \"\""
+        limit =1
+
+        # 2. search
+        log.info("test_search_string_field_is_primary_true: searching collection %s" % collection_w.name)
+        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+        output_fields = [default_string_field_name, default_float_field_name]
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, limit,
+                            search_string_exp,
+                            output_fields=output_fields,
+                            _async=_async,
+                            travel_timestamp=0,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "limit": limit,
+                                         "_async": _async})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_string_field_not_primary_is_empty(self, _async):
+        """
+        target: test search with string expr and string field is not primary
+        method: create collection and insert data
+                create index and collection load
+                collection search uses string expr in string field, string field is not primary
+        expected: Search successfully
+        """
+        # 1. initialize with data
+        collection_w, _, _, _ = \
+            self.init_collection_general(prefix, False, primary_field=ct.default_int64_field_name)[0:4]
+
+        nb = 3000
+        data = cf.gen_default_list_data(nb)
+        data[2] = [""for _ in range(nb)]
+        insert_ids = data[0]
+
+        collection_w.insert(data)
+        assert collection_w.num_entities == nb
+
+        # 2. create index
+        index_param = {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}}
+        collection_w.create_index("float_vector", index_param)
+        collection_w.load()
+
+
+        search_string_exp = "varchar >= \"\""
+
+        # 3. search
+        log.info("test_search_string_field_not_primary: searching collection %s" % collection_w.name)
+        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+        output_fields = [default_string_field_name, default_float_field_name]
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, default_limit,
+                            search_string_exp,
+                            output_fields=output_fields,
+                            _async=_async,
+                            travel_timestamp=0,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": insert_ids,
+                                         "limit": default_limit,
+                                         "_async": _async})

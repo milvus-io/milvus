@@ -33,6 +33,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCheckTsField(t *testing.T) {
@@ -1067,6 +1068,63 @@ func TestGetPkFromInsertData(t *testing.T) {
 	d, err := GetPkFromInsertData(pfSchema, realInt64Data)
 	assert.NoError(t, err)
 	assert.Equal(t, []int64{1, 2, 3}, d.(*Int64FieldData).Data)
+}
+
+func Test_GetTimestampFromInsertData(t *testing.T) {
+	type testCase struct {
+		tag string
+
+		data        *InsertData
+		expectError bool
+		expectData  *Int64FieldData
+	}
+
+	cases := []testCase{
+		{
+			tag:         "nil data",
+			expectError: true,
+		},
+		{
+			tag:         "no timestamp",
+			expectError: true,
+			data: &InsertData{
+				Data: map[FieldID]FieldData{
+					common.StartOfUserFieldID: &Int64FieldData{Data: []int64{1, 2, 3}},
+				},
+			},
+		},
+		{
+			tag:         "timestamp wrong type",
+			expectError: true,
+			data: &InsertData{
+				Data: map[FieldID]FieldData{
+					common.TimeStampField: &Int32FieldData{Data: []int32{1, 2, 3}},
+				},
+			},
+		},
+		{
+			tag: "normal insert data",
+			data: &InsertData{
+				Data: map[FieldID]FieldData{
+					common.TimeStampField:     &Int64FieldData{Data: []int64{1, 2, 3}},
+					common.StartOfUserFieldID: &Int32FieldData{Data: []int32{1, 2, 3}},
+				},
+			},
+			expectData: &Int64FieldData{Data: []int64{1, 2, 3}},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.tag, func(t *testing.T) {
+			result, err := GetTimestampFromInsertData(tc.data)
+			if tc.expectError {
+				assert.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tc.expectData, result)
+			}
+		})
+	}
 }
 
 func Test_boolFieldDataToBytes(t *testing.T) {

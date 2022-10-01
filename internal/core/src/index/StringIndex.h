@@ -24,8 +24,8 @@ class StringIndex : public ScalarIndex<std::string> {
  public:
     void
     BuildWithDataset(const DatasetPtr& dataset) override {
-        auto size = dataset->Get<int64_t>(knowhere::meta::ROWS);
-        auto data = dataset->Get<const void*>(knowhere::meta::TENSOR);
+        auto size = knowhere::GetDatasetRows(dataset);
+        auto data = knowhere::GetDatasetTensor(dataset);
         proto::schema::StringArray arr;
         arr.ParseFromArray(data, size);
 

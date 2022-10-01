@@ -69,8 +69,6 @@ jobs:
         run: |
           docker-compose up -d pulsar etcd minio
       - name: Build and UnitTest
-        env:
-          CHECK_BUILDER: "1"
         run: |
           ./build/builder.sh /bin/bash -c "make check-proto-product && make codecov"
       - name: Get the status & restart count for containers when ut failed

@@ -19,13 +19,16 @@ package datanode
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand"
 	"testing"
+	"time"
 
 	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -54,7 +57,7 @@ func (kv *mockDataCM) MultiRead(keys []string) ([][]byte, error) {
 		FieldID: common.RowIDField,
 		Min:     0,
 		Max:     10,
-		BF:      bloom.NewWithEstimates(bloomFilterSize, maxBloomFalsePositive),
+		BF:      bloom.NewWithEstimates(100000, maxBloomFalsePositive),
 	}
 	buffer, _ := json.Marshal(stats)
 	return [][]byte{buffer}, nil
@@ -65,14 +68,16 @@ type mockPkfilterMergeError struct {
 }
 
 func (kv *mockPkfilterMergeError) MultiRead(keys []string) ([][]byte, error) {
-	stats := &storage.PrimaryKeyStats{
-		FieldID: common.RowIDField,
-		Min:     0,
-		Max:     10,
-		BF:      bloom.NewWithEstimates(1, 0.0001),
-	}
-	buffer, _ := json.Marshal(stats)
-	return [][]byte{buffer}, nil
+	/*
+		stats := &storage.PrimaryKeyStats{
+			FieldID: common.RowIDField,
+			Min:     0,
+			Max:     10,
+			BF:      bloom.NewWithEstimates(1, 0.0001),
+		}
+		buffer, _ := json.Marshal(stats)
+		return [][]byte{buffer}, nil*/
+	return nil, errors.New("mocked multi read error")
 }
 
 type mockDataCMError struct {
@@ -95,6 +100,57 @@ func getSimpleFieldBinlog() *datapb.FieldBinlog {
 	return &datapb.FieldBinlog{
 		FieldID: 106,
 		Binlogs: []*datapb.Binlog{{LogPath: "test"}},
+	}
+}
+
+func TestSegmentReplica_getChannelName(t *testing.T) {
+	var (
+		channelName = "TestSegmentReplica_getChannelName"
+		newSegments = map[UniqueID]*Segment{
+			100: {channelName: channelName},
+			101: {channelName: channelName},
+			102: {channelName: channelName},
+		}
+		normalSegments = map[UniqueID]*Segment{
+			200: {channelName: channelName},
+			201: {channelName: channelName},
+			202: {channelName: channelName},
+		}
+		flushedSegments = map[UniqueID]*Segment{
+			300: {channelName: channelName},
+			301: {channelName: channelName},
+			302: {channelName: channelName},
+		}
+	)
+
+	sr := &SegmentReplica{
+		newSegments:     newSegments,
+		normalSegments:  normalSegments,
+		flushedSegments: flushedSegments,
+	}
+
+	tests := []struct {
+		description string
+
+		seg     UniqueID
+		ifExist bool
+	}{
+		{"100 exists in new segments", 100, true},
+		{"201 exists in normal segments", 201, true},
+		{"302 exists in flushed segments", 302, true},
+		{"400 not exists in all segments", 400, false},
+	}
+	for _, test := range tests {
+		t.Run(test.description, func(t *testing.T) {
+			chanName, err := sr.getChannelName(test.seg)
+			if test.ifExist {
+				assert.NoError(t, err)
+				assert.Equal(t, channelName, chanName)
+			} else {
+				assert.Error(t, err)
+				assert.Empty(t, chanName)
+			}
+		})
 	}
 }
 
@@ -564,6 +620,7 @@ func TestSegmentReplica_InterfaceMethod(t *testing.T) {
 				assert.Nil(t, err)
 
 				if test.metaServiceErr {
+					sr.collSchema = nil
 					rc.setCollectionID(-1)
 				} else {
 					rc.setCollectionID(1)
@@ -650,22 +707,76 @@ func TestSegmentReplica_InterfaceMethod(t *testing.T) {
 		primaryKeyData := &storage.Int64FieldData{
 			Data: []UniqueID{1},
 		}
-		sr.addFlushedSegmentWithPKs(1, 1, 0, "channel", 10, primaryKeyData)
-		sr.addFlushedSegmentWithPKs(2, 1, 0, "channel", 10, primaryKeyData)
-		require.True(t, sr.hasSegment(1, true))
-		require.True(t, sr.hasSegment(2, true))
+		tests := []struct {
+			description string
+			isValid     bool
+			stored      bool
 
-		sr.mergeFlushedSegments(3, 1, 0, 100, []UniqueID{1, 2}, "channel", 15)
-		assert.True(t, sr.hasSegment(3, true))
-		assert.False(t, sr.hasSegment(1, true))
-		assert.False(t, sr.hasSegment(2, true))
+			inCompactedFrom []UniqueID
+			inSeg           *Segment
+		}{
+			{"mismatch collection", false, false, []UniqueID{1, 2}, &Segment{
+				segmentID:    3,
+				collectionID: -1,
+			}},
+			{"no match flushed segment", false, false, []UniqueID{1, 6}, &Segment{
+				segmentID:    3,
+				collectionID: 1,
+			}},
+			{"numRows==0", true, false, []UniqueID{1, 2}, &Segment{
+				segmentID:    3,
+				collectionID: 1,
+				numRows:      0,
+			}},
+			{"numRows>0", true, true, []UniqueID{1, 2}, &Segment{
+				segmentID:    3,
+				collectionID: 1,
+				numRows:      15,
+			}},
+		}
 
-		to2from := sr.listCompactedSegmentIDs()
-		assert.NotEmpty(t, to2from)
+		for _, test := range tests {
+			t.Run(test.description, func(t *testing.T) {
+				// prepare segment replica
+				if !sr.hasSegment(1, true) {
+					sr.addFlushedSegmentWithPKs(1, 1, 0, "channel", 10, primaryKeyData)
+				}
 
-		from, ok := to2from[3]
-		assert.True(t, ok)
-		assert.ElementsMatch(t, []UniqueID{1, 2}, from)
+				if !sr.hasSegment(2, true) {
+					sr.addFlushedSegmentWithPKs(2, 1, 0, "channel", 10, primaryKeyData)
+				}
+
+				if sr.hasSegment(3, true) {
+					sr.removeSegments(3)
+				}
+
+				require.True(t, sr.hasSegment(1, true))
+				require.True(t, sr.hasSegment(2, true))
+				require.False(t, sr.hasSegment(3, true))
+
+				// tests start
+				err := sr.mergeFlushedSegments(test.inSeg, 100, test.inCompactedFrom)
+				if test.isValid {
+					assert.NoError(t, err)
+				} else {
+					assert.Error(t, err)
+				}
+
+				if test.stored {
+					assert.True(t, sr.hasSegment(3, true))
+
+					to2from := sr.listCompactedSegmentIDs()
+					assert.NotEmpty(t, to2from)
+
+					from, ok := to2from[3]
+					assert.True(t, ok)
+					assert.ElementsMatch(t, []UniqueID{1, 2}, from)
+				} else {
+					assert.False(t, sr.hasSegment(3, true))
+				}
+
+			})
+		}
 	})
 
 }
@@ -793,6 +904,52 @@ func TestSegmentReplica_UpdatePKRange(t *testing.T) {
 	}
 }
 
+func TestSegment_getSegmentStatslog(t *testing.T) {
+	rand.Seed(time.Now().UnixNano())
+
+	cases := make([][]int64, 0, 100)
+	for i := 0; i < 100; i++ {
+		tc := make([]int64, 0, 10)
+		for j := 0; j < 100; j++ {
+			tc = append(tc, rand.Int63())
+		}
+		cases = append(cases, tc)
+	}
+	buf := make([]byte, 8)
+	for _, tc := range cases {
+		seg := &Segment{
+			pkFilter: bloom.NewWithEstimates(100000, 0.005),
+		}
+
+		seg.updatePKRange(&storage.Int64FieldData{
+			Data: tc,
+		})
+
+		statBytes, err := seg.getSegmentStatslog(1, schemapb.DataType_Int64)
+		assert.NoError(t, err)
+
+		pks := storage.PrimaryKeyStats{}
+		err = json.Unmarshal(statBytes, &pks)
+		require.NoError(t, err)
+
+		assert.Equal(t, int64(1), pks.FieldID)
+		assert.Equal(t, int64(schemapb.DataType_Int64), pks.PkType)
+
+		for _, v := range tc {
+			pk := newInt64PrimaryKey(v)
+			assert.True(t, pks.MinPk.LE(pk))
+			assert.True(t, pks.MaxPk.GE(pk))
+
+			common.Endian.PutUint64(buf, uint64(v))
+			assert.True(t, seg.pkFilter.Test(buf))
+		}
+	}
+
+	pks := &storage.PrimaryKeyStats{}
+	_, err := json.Marshal(pks)
+	assert.NoError(t, err)
+}
+
 func TestReplica_UpdatePKRange(t *testing.T) {
 	rc := &RootCoordFactory{
 		pkType: schemapb.DataType_Int64,
@@ -843,4 +1000,103 @@ func TestReplica_UpdatePKRange(t *testing.T) {
 
 	}
 
+}
+
+// SegmentReplicaSuite setup test suite for SegmentReplica
+type SegmentReplicaSuite struct {
+	suite.Suite
+	sr *SegmentReplica
+
+	collID    UniqueID
+	partID    UniqueID
+	vchanName string
+	cm        *storage.LocalChunkManager
+}
+
+func (s *SegmentReplicaSuite) SetupSuite() {
+	rc := &RootCoordFactory{
+		pkType: schemapb.DataType_Int64,
+	}
+	s.collID = 1
+	s.cm = storage.NewLocalChunkManager(storage.RootPath(segmentReplicaNodeTestDir))
+	var err error
+	s.sr, err = newReplica(context.Background(), rc, s.cm, s.collID)
+	s.Require().NoError(err)
+}
+
+func (s *SegmentReplicaSuite) TearDownSuite() {
+	s.cm.RemoveWithPrefix("")
+
+}
+
+func (s *SegmentReplicaSuite) SetupTest() {
+	var err error
+	err = s.sr.addNewSegment(1, s.collID, s.partID, s.vchanName, &internalpb.MsgPosition{}, nil)
+	s.Require().NoError(err)
+	err = s.sr.addNormalSegment(2, s.collID, s.partID, s.vchanName, 10, nil, nil, 0)
+	s.Require().NoError(err)
+	err = s.sr.addFlushedSegment(3, s.collID, s.partID, s.vchanName, 10, nil, 0)
+	s.Require().NoError(err)
+}
+
+func (s *SegmentReplicaSuite) TearDownTest() {
+	s.sr.removeSegments(1, 2, 3)
+}
+
+func (s *SegmentReplicaSuite) TestGetSegmentStatslog() {
+	bs, err := s.sr.getSegmentStatslog(1)
+	s.NoError(err)
+
+	segment, ok := s.getSegmentByID(1)
+	s.Require().True(ok)
+	expected, err := segment.getSegmentStatslog(106, schemapb.DataType_Int64)
+	s.Require().NoError(err)
+	s.Equal(expected, bs)
+
+	bs, err = s.sr.getSegmentStatslog(2)
+	s.NoError(err)
+
+	segment, ok = s.getSegmentByID(2)
+	s.Require().True(ok)
+	expected, err = segment.getSegmentStatslog(106, schemapb.DataType_Int64)
+	s.Require().NoError(err)
+	s.Equal(expected, bs)
+
+	bs, err = s.sr.getSegmentStatslog(3)
+	s.NoError(err)
+
+	segment, ok = s.getSegmentByID(3)
+	s.Require().True(ok)
+	expected, err = segment.getSegmentStatslog(106, schemapb.DataType_Int64)
+	s.Require().NoError(err)
+	s.Equal(expected, bs)
+
+	_, err = s.sr.getSegmentStatslog(4)
+	s.Error(err)
+}
+
+func (s *SegmentReplicaSuite) getSegmentByID(id UniqueID) (*Segment, bool) {
+	s.sr.segMu.RLock()
+	defer s.sr.segMu.RUnlock()
+
+	seg, ok := s.sr.newSegments[id]
+	if ok {
+		return seg, true
+	}
+
+	seg, ok = s.sr.normalSegments[id]
+	if ok {
+		return seg, true
+	}
+
+	seg, ok = s.sr.flushedSegments[id]
+	if ok {
+		return seg, true
+	}
+
+	return nil, false
+}
+
+func TestSegmentReplicaSuite(t *testing.T) {
+	suite.Run(t, new(SegmentReplicaSuite))
 }

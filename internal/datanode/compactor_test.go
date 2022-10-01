@@ -24,12 +24,16 @@ import (
 	"time"
 
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
+	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -246,10 +250,19 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 	})
 
 	t.Run("Test merge", func(t *testing.T) {
+		collectionID := int64(1)
+		meta := NewMetaFactory().GetCollectionMeta(collectionID, "test", schemapb.DataType_Int64)
+
+		rc := &mocks.RootCoord{}
+		rc.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
+			Return(&milvuspb.DescribeCollectionResponse{
+				Schema: meta.GetSchema(),
+			}, nil)
+		replica, err := newReplica(context.Background(), rc, nil, collectionID)
+		require.NoError(t, err)
 		t.Run("Merge without expiration", func(t *testing.T) {
 			Params.CommonCfg.EntityExpirationTTL = 0
 			iData := genInsertDataWithExpiredTS()
-			meta := NewMetaFactory().GetCollectionMeta(1, "test", schemapb.DataType_Int64)
 
 			iblobs, err := getInsertBlobs(100, iData, meta)
 			require.NoError(t, err)
@@ -259,17 +272,19 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 
 			mitr := storage.NewMergeIterator([]iterator{iitr})
 
-			pk := newInt64PrimaryKey(1)
-			dm := map[primaryKey]Timestamp{
-				pk: 10000,
+			dm := map[interface{}]Timestamp{
+				1: 10000,
 			}
 
-			ct := &compactionTask{}
-			idata, numOfRow, err := ct.merge(mitr, dm, meta.GetSchema(), ct.GetCurrentTime())
+			ct := &compactionTask{
+				Replica: replica,
+			}
+			idata, segment, numOfRow, err := ct.merge(mitr, dm, meta.GetSchema(), ct.GetCurrentTime())
 			assert.NoError(t, err)
 			assert.Equal(t, int64(2), numOfRow)
 			assert.Equal(t, 1, len(idata))
 			assert.NotEmpty(t, idata[0].Data)
+			assert.NotNil(t, segment)
 		})
 		t.Run("Merge without expiration2", func(t *testing.T) {
 			Params.CommonCfg.EntityExpirationTTL = 0
@@ -289,14 +304,17 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 
 			mitr := storage.NewMergeIterator([]iterator{iitr})
 
-			dm := map[primaryKey]Timestamp{}
+			dm := map[interface{}]Timestamp{}
 
-			ct := &compactionTask{}
-			idata, numOfRow, err := ct.merge(mitr, dm, meta.GetSchema(), ct.GetCurrentTime())
+			ct := &compactionTask{
+				Replica: replica,
+			}
+			idata, segment, numOfRow, err := ct.merge(mitr, dm, meta.GetSchema(), ct.GetCurrentTime())
 			assert.NoError(t, err)
 			assert.Equal(t, int64(2), numOfRow)
 			assert.Equal(t, 2, len(idata))
 			assert.NotEmpty(t, idata[0].Data)
+			assert.NotEmpty(t, segment)
 		})
 
 		t.Run("Merge with expiration", func(t *testing.T) {
@@ -312,16 +330,74 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 
 			mitr := storage.NewMergeIterator([]iterator{iitr})
 
-			pk := newInt64PrimaryKey(1)
-			dm := map[primaryKey]Timestamp{
-				pk: 10000,
+			dm := map[interface{}]Timestamp{
+				1: 10000,
 			}
 
-			ct := &compactionTask{}
-			idata, numOfRow, err := ct.merge(mitr, dm, meta.GetSchema(), genTimestamp())
+			ct := &compactionTask{
+				Replica: replica,
+			}
+			idata, segment, numOfRow, err := ct.merge(mitr, dm, meta.GetSchema(), genTimestamp())
 			assert.NoError(t, err)
 			assert.Equal(t, int64(1), numOfRow)
 			assert.Equal(t, 1, len(idata))
+			assert.NotEmpty(t, segment)
+		})
+
+		t.Run("Merge with meta error", func(t *testing.T) {
+			Params.CommonCfg.EntityExpirationTTL = 0
+			iData := genInsertDataWithExpiredTS()
+			meta := NewMetaFactory().GetCollectionMeta(1, "test", schemapb.DataType_Int64)
+
+			iblobs, err := getInsertBlobs(100, iData, meta)
+			require.NoError(t, err)
+
+			iitr, err := storage.NewInsertBinlogIterator(iblobs, 106, schemapb.DataType_Int64)
+			require.NoError(t, err)
+
+			mitr := storage.NewMergeIterator([]iterator{iitr})
+
+			dm := map[interface{}]Timestamp{
+				1: 10000,
+			}
+
+			ct := &compactionTask{
+				Replica: replica,
+			}
+			_, _, _, err = ct.merge(mitr, dm, &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+				{DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{
+					{Key: "dim", Value: "64"},
+				}},
+			}}, ct.GetCurrentTime())
+			assert.Error(t, err)
+		})
+
+		t.Run("Merge with meta type param error", func(t *testing.T) {
+			Params.CommonCfg.EntityExpirationTTL = 0
+			iData := genInsertDataWithExpiredTS()
+			meta := NewMetaFactory().GetCollectionMeta(1, "test", schemapb.DataType_Int64)
+
+			iblobs, err := getInsertBlobs(100, iData, meta)
+			require.NoError(t, err)
+
+			iitr, err := storage.NewInsertBinlogIterator(iblobs, 106, schemapb.DataType_Int64)
+			require.NoError(t, err)
+
+			mitr := storage.NewMergeIterator([]iterator{iitr})
+
+			dm := map[interface{}]Timestamp{
+				1: 10000,
+			}
+
+			ct := &compactionTask{
+				Replica: replica,
+			}
+			_, _, _, err = ct.merge(mitr, dm, &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+				{DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{
+					{Key: "dim", Value: "dim"},
+				}},
+			}}, ct.GetCurrentTime())
+			assert.Error(t, err)
 		})
 	})
 
@@ -439,18 +515,18 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 		}
 
 		emptyTask.plan = plan
-		err := emptyTask.compact()
+		_, err := emptyTask.compact()
 		assert.Error(t, err)
 
 		plan.Type = datapb.CompactionType_InnerCompaction
 		plan.SegmentBinlogs = emptySegmentBinlogs
-		err = emptyTask.compact()
+		_, err = emptyTask.compact()
 		assert.Error(t, err)
 
 		plan.Type = datapb.CompactionType_MergeCompaction
 		emptyTask.allocatorInterface = invalidAlloc
 		plan.SegmentBinlogs = notEmptySegmentBinlogs
-		err = emptyTask.compact()
+		_, err = emptyTask.compact()
 		assert.Error(t, err)
 
 		emptyTask.stop()
@@ -493,7 +569,6 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 			rc := &RootCoordFactory{
 				pkType: c.pkType,
 			}
-			dc := &DataCoordFactory{}
 			mockfm := &mockFlushManager{}
 			mockbIO := &binlogIO{cm, alloc}
 			replica, err := newReplica(context.TODO(), rc, cm, c.colID)
@@ -507,7 +582,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 				RowCount: 1,
 			}
 
-			cpaths, err := mockbIO.upload(context.TODO(), c.segID, c.parID, []*InsertData{iData}, dData, meta)
+			cpaths, err := mockbIO.upload(context.TODO(), c.segID, c.parID, []*InsertData{iData}, []byte{}, dData, meta)
 			require.NoError(t, err)
 			require.Equal(t, 12, len(cpaths.inPaths))
 			segBinlogs := []*datapb.CompactionSegmentBinlogs{
@@ -522,7 +597,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 				PlanID:           10080,
 				SegmentBinlogs:   segBinlogs,
 				StartTime:        0,
-				TimeoutInSeconds: 1,
+				TimeoutInSeconds: 10,
 				Type:             datapb.CompactionType_InnerCompaction,
 				Timetravel:       30000,
 				Channel:          "channelname",
@@ -530,17 +605,14 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 
 			ctx, cancel := context.WithCancel(context.TODO())
 			cancel()
-			canceledTask := newCompactionTask(ctx, mockbIO, mockbIO, replica, mockfm, alloc, dc, plan)
-			err = canceledTask.compact()
+			canceledTask := newCompactionTask(ctx, mockbIO, mockbIO, replica, mockfm, alloc, plan)
+			_, err = canceledTask.compact()
 			assert.Error(t, err)
 
-			task := newCompactionTask(context.TODO(), mockbIO, mockbIO, replica, mockfm, alloc, dc, plan)
-			err = task.compact()
+			task := newCompactionTask(context.TODO(), mockbIO, mockbIO, replica, mockfm, alloc, plan)
+			result, err := task.compact()
 			assert.NoError(t, err)
-
-			updates, err := replica.getSegmentStatisticsUpdates(c.segID)
-			assert.NoError(t, err)
-			assert.Equal(t, int64(1), updates.GetNumRows())
+			assert.Equal(t, int64(1), result.GetNumOfRows())
 
 			id := task.getCollection()
 			assert.Equal(t, c.colID, id)
@@ -557,14 +629,15 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 
 			err = cm.RemoveWithPrefix("/")
 			require.NoError(t, err)
-			cpaths, err = mockbIO.upload(context.TODO(), c.segID, c.parID, []*InsertData{iData}, deleteAllData, meta)
+			cpaths, err = mockbIO.upload(context.TODO(), c.segID, c.parID, []*InsertData{iData}, []byte{}, deleteAllData, meta)
 			require.NoError(t, err)
 			plan.PlanID++
 
-			err = task.compact()
+			result, err = task.compact()
 			assert.NoError(t, err)
 			// The segment should be removed
-			assert.False(t, replica.hasSegment(c.segID, true))
+			assert.Equal(t, plan.GetPlanID(), result.GetPlanID())
+			assert.Equal(t, c.segID, result.SegmentID)
 
 			// re-add the segment
 			replica.addFlushedSegmentWithPKs(c.segID, c.colID, c.parID, "channelname", 2, c.fieldData)
@@ -572,7 +645,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 			// Compact empty segment
 			err = cm.RemoveWithPrefix("/")
 			require.NoError(t, err)
-			cpaths, err = mockbIO.upload(context.TODO(), c.segID, c.parID, []*InsertData{iData}, dData, meta)
+			cpaths, err = mockbIO.upload(context.TODO(), c.segID, c.parID, []*InsertData{iData}, []byte{}, dData, meta)
 			require.NoError(t, err)
 			plan.PlanID = 999876
 			segmentBinlogsWithEmptySegment := []*datapb.CompactionSegmentBinlogs{
@@ -581,7 +654,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 				},
 			}
 			plan.SegmentBinlogs = segmentBinlogsWithEmptySegment
-			err = task.compact()
+			_, err = task.compact()
 			assert.Error(t, err)
 
 			plan.SegmentBinlogs = segBinlogs
@@ -589,28 +662,26 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 			//  Deltas in timetravel range
 			err = cm.RemoveWithPrefix("/")
 			require.NoError(t, err)
-			cpaths, err = mockbIO.upload(context.TODO(), c.segID, c.parID, []*InsertData{iData}, dData, meta)
+			cpaths, err = mockbIO.upload(context.TODO(), c.segID, c.parID, []*InsertData{iData}, []byte{}, dData, meta)
 			require.NoError(t, err)
 			plan.PlanID++
 
 			plan.Timetravel = Timestamp(10000)
-			err = task.compact()
+			result, err = task.compact()
 			assert.NoError(t, err)
 
-			updates, err = replica.getSegmentStatisticsUpdates(c.segID)
-			assert.NoError(t, err)
-			assert.Equal(t, int64(2), updates.GetNumRows())
+			assert.Equal(t, int64(2), result.GetNumOfRows())
 
 			// New test, remove all the binlogs in memkv
 			//  Timeout
 			err = cm.RemoveWithPrefix("/")
 			require.NoError(t, err)
-			cpaths, err = mockbIO.upload(context.TODO(), c.segID, c.parID, []*InsertData{iData}, dData, meta)
+			cpaths, err = mockbIO.upload(context.TODO(), c.segID, c.parID, []*InsertData{iData}, []byte{}, dData, meta)
 			require.NoError(t, err)
 			plan.PlanID++
 
 			mockfm.sleepSeconds = plan.TimeoutInSeconds + int32(1)
-			err = task.compact()
+			_, err = task.compact()
 			assert.Error(t, err)
 		}
 	})
@@ -657,7 +728,6 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 			rc := &RootCoordFactory{
 				pkType: c.pkType,
 			}
-			dc := &DataCoordFactory{}
 			mockfm := &mockFlushManager{}
 			mockKv := memkv.NewMemoryKV()
 			mockbIO := &binlogIO{cm, alloc}
@@ -683,11 +753,11 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 				RowCount: 1,
 			}
 
-			cpaths1, err := mockbIO.upload(context.TODO(), c.segID1, c.parID, []*InsertData{iData1}, dData1, meta)
+			cpaths1, err := mockbIO.upload(context.TODO(), c.segID1, c.parID, []*InsertData{iData1}, []byte{}, dData1, meta)
 			require.NoError(t, err)
 			require.Equal(t, 12, len(cpaths1.inPaths))
 
-			cpaths2, err := mockbIO.upload(context.TODO(), c.segID2, c.parID, []*InsertData{iData2}, dData2, meta)
+			cpaths2, err := mockbIO.upload(context.TODO(), c.segID2, c.parID, []*InsertData{iData2}, []byte{}, dData2, meta)
 			require.NoError(t, err)
 			require.Equal(t, 12, len(cpaths2.inPaths))
 
@@ -708,23 +778,23 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 					},
 				},
 				StartTime:        0,
-				TimeoutInSeconds: 1,
+				TimeoutInSeconds: 10,
 				Type:             datapb.CompactionType_MergeCompaction,
 				Timetravel:       40000,
 				Channel:          "channelname",
 			}
 
 			alloc.random = false // generated ID = 19530
-			task := newCompactionTask(context.TODO(), mockbIO, mockbIO, replica, mockfm, alloc, dc, plan)
-			err = task.compact()
+			task := newCompactionTask(context.TODO(), mockbIO, mockbIO, replica, mockfm, alloc, plan)
+			result, err := task.compact()
 			assert.NoError(t, err)
+			assert.NotNil(t, result)
 
-			assert.False(t, replica.hasSegment(c.segID1, true))
-			assert.False(t, replica.hasSegment(c.segID2, true))
-			assert.True(t, replica.hasSegment(19530, true))
-			updates, err := replica.getSegmentStatisticsUpdates(19530)
-			assert.NoError(t, err)
-			assert.Equal(t, int64(2), updates.GetNumRows())
+			assert.Equal(t, plan.GetPlanID(), result.GetPlanID())
+			assert.Equal(t, UniqueID(19530), result.GetSegmentID())
+			assert.Equal(t, int64(2), result.GetNumOfRows())
+			assert.NotEmpty(t, result.InsertLogs)
+			assert.NotEmpty(t, result.Field2StatslogPaths)
 
 			// New test, remove all the binlogs in memkv
 			//  Deltas in timetravel range
@@ -740,15 +810,15 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 			require.True(t, replica.hasSegment(c.segID2, true))
 			require.False(t, replica.hasSegment(19530, true))
 
-			err = task.compact()
+			result, err = task.compact()
 			assert.NoError(t, err)
+			assert.NotNil(t, result)
 
-			assert.False(t, replica.hasSegment(c.segID1, true))
-			assert.False(t, replica.hasSegment(c.segID2, true))
-			assert.True(t, replica.hasSegment(19530, true))
-			updates, err = replica.getSegmentStatisticsUpdates(19530)
-			assert.NoError(t, err)
-			assert.Equal(t, int64(3), updates.GetNumRows())
+			assert.Equal(t, plan.GetPlanID(), result.GetPlanID())
+			assert.Equal(t, UniqueID(19530), result.GetSegmentID())
+			assert.Equal(t, int64(3), result.GetNumOfRows())
+			assert.NotEmpty(t, result.InsertLogs)
+			assert.NotEmpty(t, result.Field2StatslogPaths)
 
 			// New test, remove all the binlogs in memkv
 			//  Deltas in timetravel range
@@ -764,15 +834,15 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 			require.True(t, replica.hasSegment(c.segID2, true))
 			require.False(t, replica.hasSegment(19530, true))
 
-			err = task.compact()
+			result, err = task.compact()
 			assert.NoError(t, err)
+			assert.NotNil(t, result)
 
-			assert.False(t, replica.hasSegment(c.segID1, true))
-			assert.False(t, replica.hasSegment(c.segID2, true))
-			assert.True(t, replica.hasSegment(19530, true))
-			updates, err = replica.getSegmentStatisticsUpdates(19530)
-			assert.NoError(t, err)
-			assert.Equal(t, int64(4), updates.GetNumRows())
+			assert.Equal(t, plan.GetPlanID(), result.GetPlanID())
+			assert.Equal(t, UniqueID(19530), result.GetSegmentID())
+			assert.Equal(t, int64(4), result.GetNumOfRows())
+			assert.NotEmpty(t, result.InsertLogs)
+			assert.NotEmpty(t, result.Field2StatslogPaths)
 		}
 	})
 
@@ -786,7 +856,6 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 		rc := &RootCoordFactory{
 			pkType: schemapb.DataType_Int64,
 		}
-		dc := &DataCoordFactory{}
 		mockfm := &mockFlushManager{}
 		mockbIO := &binlogIO{cm, alloc}
 		replica, err := newReplica(context.TODO(), rc, cm, collID)
@@ -816,11 +885,11 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 			RowCount: 0,
 		}
 
-		cpaths1, err := mockbIO.upload(context.TODO(), segID1, partID, []*InsertData{iData1}, dData1, meta)
+		cpaths1, err := mockbIO.upload(context.TODO(), segID1, partID, []*InsertData{iData1}, []byte{}, dData1, meta)
 		require.NoError(t, err)
 		require.Equal(t, 12, len(cpaths1.inPaths))
 
-		cpaths2, err := mockbIO.upload(context.TODO(), segID2, partID, []*InsertData{iData2}, dData2, meta)
+		cpaths2, err := mockbIO.upload(context.TODO(), segID2, partID, []*InsertData{iData2}, []byte{}, dData2, meta)
 		require.NoError(t, err)
 		require.Equal(t, 12, len(cpaths2.inPaths))
 
@@ -841,23 +910,23 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 				},
 			},
 			StartTime:        0,
-			TimeoutInSeconds: 1,
+			TimeoutInSeconds: 10,
 			Type:             datapb.CompactionType_MergeCompaction,
 			Timetravel:       40000,
 			Channel:          "channelname",
 		}
 
 		alloc.random = false // generated ID = 19530
-		task := newCompactionTask(context.TODO(), mockbIO, mockbIO, replica, mockfm, alloc, dc, plan)
-		err = task.compact()
+		task := newCompactionTask(context.TODO(), mockbIO, mockbIO, replica, mockfm, alloc, plan)
+		result, err := task.compact()
 		assert.NoError(t, err)
+		assert.NotNil(t, result)
 
-		assert.False(t, replica.hasSegment(segID1, true))
-		assert.False(t, replica.hasSegment(segID2, true))
-		assert.True(t, replica.hasSegment(19530, true))
-		updates, err := replica.getSegmentStatisticsUpdates(19530)
-		assert.NoError(t, err)
-		assert.Equal(t, int64(2), updates.GetNumRows())
+		assert.Equal(t, plan.GetPlanID(), result.GetPlanID())
+		assert.Equal(t, UniqueID(19530), result.GetSegmentID())
+		assert.Equal(t, int64(2), result.GetNumOfRows())
+		assert.NotEmpty(t, result.InsertLogs)
+		assert.NotEmpty(t, result.Field2StatslogPaths)
 	})
 }
 
@@ -868,7 +937,7 @@ type mockFlushManager struct {
 
 var _ flushManager = (*mockFlushManager)(nil)
 
-func (mfm *mockFlushManager) flushBufferData(data *BufferData, segmentID UniqueID, flushed bool, dropped bool, pos *internalpb.MsgPosition) error {
+func (mfm *mockFlushManager) flushBufferData(data *BufferData, segStats []byte, segmentID UniqueID, flushed bool, dropped bool, pos *internalpb.MsgPosition) error {
 	if mfm.returnError {
 		return fmt.Errorf("mock error")
 	}

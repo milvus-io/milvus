@@ -12,7 +12,7 @@
 #pragma once
 
 #include "common/BitsetView.h"
-#include "knowhere/index/vector_index/VecIndex.h"
+#include "knowhere/index/VecIndex.h"
 #include "query/SubSearchResult.h"
 #include "query/helper.h"
 

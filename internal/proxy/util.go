@@ -17,11 +17,19 @@
 package proxy
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
+
+	"github.com/milvus-io/milvus/internal/log"
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/util/crypto"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
@@ -85,8 +93,8 @@ func validateCollectionNameOrAlias(entity, entityType string) error {
 
 	for i := 1; i < len(entity); i++ {
 		c := entity[i]
-		if c != '_' && c != '$' && !isAlpha(c) && !isNumber(c) {
-			msg := invalidMsg + fmt.Sprintf("Collection %s can only contain numbers, letters, dollars and underscores.", entityType)
+		if c != '_' && !isAlpha(c) && !isNumber(c) {
+			msg := invalidMsg + fmt.Sprintf("Collection %s can only contain numbers, letters and underscores.", entityType)
 			return errors.New(msg)
 		}
 	}
@@ -112,7 +120,7 @@ func validatePartitionTag(partitionTag string, strictCheck bool) error {
 	}
 
 	if int64(len(partitionTag)) > Params.ProxyCfg.MaxNameLength {
-		msg := invalidMsg + "The length of a partition tag must be less than " +
+		msg := invalidMsg + "The length of a partition name must be less than " +
 			strconv.FormatInt(Params.ProxyCfg.MaxNameLength, 10) + " characters."
 		return errors.New(msg)
 	}
@@ -120,15 +128,15 @@ func validatePartitionTag(partitionTag string, strictCheck bool) error {
 	if strictCheck {
 		firstChar := partitionTag[0]
 		if firstChar != '_' && !isAlpha(firstChar) && !isNumber(firstChar) {
-			msg := invalidMsg + "The first character of a partition tag must be an underscore or letter."
+			msg := invalidMsg + "The first character of a partition name must be an underscore or letter."
 			return errors.New(msg)
 		}
 
 		tagSize := len(partitionTag)
 		for i := 1; i < tagSize; i++ {
 			c := partitionTag[i]
-			if c != '_' && c != '$' && !isAlpha(c) && !isNumber(c) {
-				msg := invalidMsg + "Partition tag can only contain numbers, letters, dollars and underscores."
+			if c != '_' && !isAlpha(c) && !isNumber(c) {
+				msg := invalidMsg + "Partition name can only contain numbers, letters and underscores."
 				return errors.New(msg)
 			}
 		}
@@ -592,4 +600,33 @@ func parseGuaranteeTs(ts, tMax typeutil.Timestamp) typeutil.Timestamp {
 		ts = tsoutil.AddPhysicalDurationOnTs(tMax, ratio*time.Millisecond)
 	}
 	return ts
+}
+
+// PasswordVerify verify password
+func passwordVerify(ctx context.Context, username, rawPwd string, globalMetaCache Cache) bool {
+	// it represents the cache miss if Sha256Password is empty within credInfo, which shall be updated first connection.
+	// meanwhile, generating Sha256Password depends on raw password and encrypted password will not cache.
+	credInfo, err := globalMetaCache.GetCredentialInfo(ctx, username)
+	if err != nil {
+		log.Error("found no credential", zap.String("username", username), zap.Error(err))
+		return false
+	}
+
+	// hit cache
+	sha256Pwd := crypto.SHA256(rawPwd, credInfo.Username)
+	if credInfo.Sha256Password != "" {
+		return sha256Pwd == credInfo.Sha256Password
+	}
+
+	// miss cache, verify against encrypted password from etcd
+	if err := bcrypt.CompareHashAndPassword([]byte(credInfo.EncryptedPassword), []byte(rawPwd)); err != nil {
+		log.Error("Verify password failed", zap.Error(err))
+		return false
+	}
+
+	// update cache after miss cache
+	credInfo.Sha256Password = sha256Pwd
+	log.Debug("get credential miss cache, update cache with", zap.Any("credential", credInfo))
+	globalMetaCache.UpdateCredential(credInfo)
+	return true
 }

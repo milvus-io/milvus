@@ -123,7 +123,7 @@ GetFieldID(CSearchPlan plan, int64_t* field_id) {
 const char*
 GetMetricType(CSearchPlan plan) {
     auto search_plan = static_cast<milvus::query::Plan*>(plan);
-    auto metric_str = milvus::MetricTypeToName(search_plan->plan_node_->search_info_.metric_type_);
+    auto& metric_str = search_plan->plan_node_->search_info_.metric_type_;
     return strdup(metric_str.c_str());
 }
 

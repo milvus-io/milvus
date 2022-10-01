@@ -75,6 +75,23 @@ func (broker *globalMetaBroker) invalidateCollectionMetaCache(ctx context.Contex
 	return nil
 }
 
+func (broker *globalMetaBroker) describeCollection(ctx context.Context, collectionID UniqueID) (*schemapb.CollectionSchema, error) {
+	req := &milvuspb.DescribeCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_DescribeCollection,
+		},
+		CollectionID: collectionID,
+	}
+
+	resp, err := broker.rootCoord.DescribeCollection(ctx, req)
+	if err != nil {
+		log.Warn("failed to describe collection schema", zap.Int64("collectionID", collectionID), zap.Error(err))
+		return nil, err
+	}
+
+	return resp.GetSchema(), nil
+}
+
 func (broker *globalMetaBroker) showPartitionIDs(ctx context.Context, collectionID UniqueID) ([]UniqueID, error) {
 	ctx2, cancel2 := context.WithTimeout(ctx, timeoutForRPC)
 	defer cancel2()
@@ -534,9 +551,9 @@ func (broker *globalMetaBroker) releaseSegmentReferLock(ctx context.Context, tas
 }
 
 // getDataSegmentInfosByIDs return the SegmentInfo details according to the given ids through RPC to datacoord
-func (broker *globalMetaBroker) getDataSegmentInfosByIDs(segmentIds []int64) ([]*datapb.SegmentInfo, error) {
+func (broker *globalMetaBroker) getDataSegmentInfosByIDs(ctx context.Context, segmentIds []int64) ([]*datapb.SegmentInfo, error) {
 	var segmentInfos []*datapb.SegmentInfo
-	infoResp, err := broker.dataCoord.GetSegmentInfo(broker.ctx, &datapb.GetSegmentInfoRequest{
+	infoResp, err := broker.dataCoord.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_SegmentInfo,
 			MsgID:     0,

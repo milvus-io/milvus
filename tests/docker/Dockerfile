@@ -15,6 +15,8 @@ RUN apt-get update && apt-get install -y jq
 
 COPY ./tests/python_client/requirements.txt /requirements.txt
 
-RUN python3 -m pip install --no-cache-dir -r /requirements.txt
+RUN python3 -m pip install --upgrade setuptools \
+    && python3 -m pip install --upgrade pip \
+    && python3 -m pip install --no-cache-dir  -r /requirements.txt --timeout 30 --retries 6
 
 CMD ["tail", "-f", "/dev/null"]

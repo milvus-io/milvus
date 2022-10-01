@@ -17,6 +17,7 @@
 package querycoord
 
 import (
+	"container/list"
 	"context"
 	"fmt"
 	"math/rand"
@@ -27,11 +28,14 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
 
@@ -64,8 +68,13 @@ func TestHandoffHandlerReloadFromKV(t *testing.T) {
 	err = kv.Save(key, string(value))
 	assert.Nil(t, err)
 
+	scheduler, err := newTaskScheduler(baseCtx, meta, nil, kv, nil, func() (UniqueID, error) {
+		return 1, nil
+	})
+	require.NoError(t, err)
+
 	t.Run("Test_CollectionNotExist", func(t *testing.T) {
-		handoffHandler, err := newHandoffHandler(baseCtx, kv, meta, nil, nil, nil)
+		handoffHandler, err := newHandoffHandler(baseCtx, kv, meta, nil, scheduler, nil)
 		assert.Nil(t, err)
 		assert.True(t, len(handoffHandler.tasks) > 0)
 		for _, task := range handoffHandler.tasks {
@@ -96,6 +105,32 @@ func TestHandoffHandlerReloadFromKV(t *testing.T) {
 		assert.Nil(t, err)
 		assert.True(t, len(handoffHandler.tasks) > 0)
 		for _, task := range handoffHandler.tasks {
+			assert.Equal(t, handoffTaskInit, task.state)
+		}
+	})
+
+	t.Run("Test_LoadInQueue", func(t *testing.T) {
+		broker, _, rc, err := getMockGlobalMetaBroker(baseCtx)
+		assert.NoError(t, err)
+
+		list := list.New()
+		list.PushBack(&querypb.LoadCollectionRequest{
+			CollectionID: defaultCollectionID,
+		})
+		handler, err := newHandoffHandler(baseCtx, kv, meta, nil, &TaskScheduler{
+			triggerTaskQueue: &taskQueue{
+				tasks: list,
+			},
+		}, broker)
+
+		schema := genDefaultCollectionSchema(false)
+
+		rc.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+			Schema: schema,
+		}, nil)
+		assert.Nil(t, err)
+		assert.True(t, len(handler.tasks) > 0)
+		for _, task := range handler.tasks {
 			assert.Equal(t, handoffTaskInit, task.state)
 		}
 	})

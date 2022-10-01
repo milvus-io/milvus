@@ -42,13 +42,13 @@ type SegmentInfo struct {
 }
 
 // NewSegmentInfo create `SegmentInfo` wrapper from `datapb.SegmentInfo`
-// assign current rows to 0 and pre-allocate `allocations` slice
+// assign current rows to last checkpoint and pre-allocate `allocations` slice
 // Note that the allocation information is not preserved,
 // the worst case scenario is to have a segment with twice size we expects
 func NewSegmentInfo(info *datapb.SegmentInfo) *SegmentInfo {
 	return &SegmentInfo{
 		SegmentInfo:   info,
-		currRows:      0,
+		currRows:      info.GetNumOfRows(),
 		allocations:   make([]*Allocation, 0, 16),
 		lastFlushTime: time.Now().Add(-1 * flushInterval),
 	}

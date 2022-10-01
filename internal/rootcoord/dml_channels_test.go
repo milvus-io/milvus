@@ -17,8 +17,10 @@
 package rootcoord
 
 import (
+	"container/heap"
 	"context"
 	"errors"
+	"math/rand"
 	"sync"
 	"testing"
 
@@ -30,6 +32,93 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestDmlMsgStream(t *testing.T) {
+	t.Run("RefCnt", func(t *testing.T) {
+
+		dms := &dmlMsgStream{refcnt: 0}
+		assert.Equal(t, int64(0), dms.RefCnt())
+		assert.Equal(t, int64(0), dms.Used())
+
+		dms.IncRefcnt()
+		assert.Equal(t, int64(1), dms.RefCnt())
+		dms.BookUsage()
+		assert.Equal(t, int64(1), dms.Used())
+
+		dms.DecRefCnt()
+		assert.Equal(t, int64(0), dms.RefCnt())
+		assert.Equal(t, int64(1), dms.Used())
+
+		dms.DecRefCnt()
+		assert.Equal(t, int64(0), dms.RefCnt())
+		assert.Equal(t, int64(1), dms.Used())
+	})
+}
+
+func TestChannelsHeap(t *testing.T) {
+	chanNum := 16
+	var h channelsHeap
+	h = make([]*dmlMsgStream, 0, chanNum)
+
+	for i := int64(0); i < int64(chanNum); i++ {
+		dms := &dmlMsgStream{
+			refcnt: 0,
+			used:   0,
+			idx:    i,
+			pos:    int(i),
+		}
+		h = append(h, dms)
+	}
+
+	check := func(h channelsHeap) bool {
+		for i := 0; i < chanNum; i++ {
+			if h[i].pos != i {
+				return false
+			}
+			if i*2+1 < chanNum {
+				if !h.Less(i, i*2+1) {
+					t.Log("left", i)
+					return false
+				}
+			}
+			if i*2+2 < chanNum {
+				if !h.Less(i, i*2+2) {
+					t.Log("right", i)
+					return false
+				}
+			}
+		}
+		return true
+	}
+
+	heap.Init(&h)
+
+	assert.True(t, check(h))
+
+	// add usage for all
+	for i := 0; i < chanNum; i++ {
+		h[0].BookUsage()
+		h[0].IncRefcnt()
+		heap.Fix(&h, 0)
+	}
+
+	assert.True(t, check(h))
+	for i := 0; i < chanNum; i++ {
+		assert.EqualValues(t, 1, h[i].RefCnt())
+		assert.EqualValues(t, 1, h[i].Used())
+	}
+
+	randIdx := rand.Intn(chanNum)
+
+	target := h[randIdx]
+	h[randIdx].DecRefCnt()
+	heap.Fix(&h, randIdx)
+	assert.EqualValues(t, 0, target.pos)
+
+	next := heap.Pop(&h).(*dmlMsgStream)
+
+	assert.Equal(t, target, next)
+}
 
 func TestDmlChannels(t *testing.T) {
 	const (
@@ -52,27 +141,18 @@ func TestDmlChannels(t *testing.T) {
 	assert.Panics(t, func() { dml.broadcastMark([]string{randStr}, nil) })
 	assert.Panics(t, func() { dml.removeChannels(randStr) })
 
-	// dml_xxx_0 => {chanName0, chanName2}
-	// dml_xxx_1 => {chanName1}
-	chanName0 := dml.getChannelName()
-	dml.addChannels(chanName0)
-	assert.Equal(t, 1, dml.getChannelNum())
-
-	chanName1 := dml.getChannelName()
-	dml.addChannels(chanName1)
+	chans0 := dml.getChannelNames(2)
+	dml.addChannels(chans0...)
 	assert.Equal(t, 2, dml.getChannelNum())
 
-	chanName2 := dml.getChannelName()
-	dml.addChannels(chanName2)
+	chans1 := dml.getChannelNames(1)
+	dml.addChannels(chans1...)
 	assert.Equal(t, 2, dml.getChannelNum())
 
-	dml.removeChannels(chanName0)
+	dml.removeChannels(chans1...)
 	assert.Equal(t, 2, dml.getChannelNum())
 
-	dml.removeChannels(chanName1)
-	assert.Equal(t, 1, dml.getChannelNum())
-
-	dml.removeChannels(chanName0)
+	dml.removeChannels(chans0...)
 	assert.Equal(t, 0, dml.getChannelNum())
 }
 
@@ -90,7 +170,7 @@ func TestDmChannelsFailure(t *testing.T) {
 		defer wg.Done()
 		mockFactory := &FailMessageStreamFactory{errBroadcast: true}
 		dml := newDmlChannels(context.TODO(), mockFactory, "test-newdmlchannel-root", 1)
-		chanName0 := dml.getChannelName()
+		chanName0 := dml.getChannelNames(1)[0]
 		dml.addChannels(chanName0)
 		require.Equal(t, 1, dml.getChannelNum())
 

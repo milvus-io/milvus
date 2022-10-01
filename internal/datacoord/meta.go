@@ -312,17 +312,10 @@ func (m *meta) UpdateFlushSegmentsInfo(
 		}
 	}
 	clonedSegment.Binlogs = currBinlogs
-	// statlogs
-	currStatsLogs := clonedSegment.GetStatslogs()
-	for _, tStatsLogs := range statslogs {
-		fieldStatsLog := getFieldBinlogs(tStatsLogs.GetFieldID(), currStatsLogs)
-		if fieldStatsLog == nil {
-			currStatsLogs = append(currStatsLogs, tStatsLogs)
-		} else {
-			fieldStatsLog.Binlogs = append(fieldStatsLog.Binlogs, tStatsLogs.Binlogs...)
-		}
+	// statlogs, overwrite latest segment stats log
+	if len(statslogs) > 0 {
+		clonedSegment.Statslogs = statslogs
 	}
-	clonedSegment.Statslogs = currStatsLogs
 	// deltalogs
 	currDeltaLogs := clonedSegment.GetDeltalogs()
 	for _, tDeltaLogs := range deltalogs {
@@ -778,29 +771,38 @@ func (m *meta) SetSegmentCompacting(segmentID UniqueID, compacting bool) {
 	m.segments.SetIsCompacting(segmentID, compacting)
 }
 
-func (m *meta) CompleteMergeCompaction(compactionLogs []*datapb.CompactionSegmentBinlogs, result *datapb.CompactionResult,
-	canCompaction func(segment *datapb.CompactionSegmentBinlogs) bool) error {
+// GetCompleteComapctionMeta returns
+// - the segment info of compactedFrom segments before compaction to revert
+// - the segment info of compactedFrom segments after compaction to alter
+// - the segment info of compactedTo segment after compaction to add
+// The compactedTo segment could contain 0 numRows
+func (m *meta) GetCompleteCompactionMeta(compactionLogs []*datapb.CompactionSegmentBinlogs, result *datapb.CompactionResult,
+	canCompaction func(segment *datapb.CompactionSegmentBinlogs) bool) ([]*SegmentInfo, []*SegmentInfo, *SegmentInfo, error) {
 	m.Lock()
 	defer m.Unlock()
 
-	segments := make([]*SegmentInfo, 0, len(compactionLogs))
-	orginSegments := make([]*SegmentInfo, 0, len(compactionLogs))
+	var (
+		oldSegments = make([]*SegmentInfo, 0, len(compactionLogs))
+		modSegments = make([]*SegmentInfo, 0, len(compactionLogs))
+	)
+
 	for _, cl := range compactionLogs {
 		if !canCompaction(cl) {
 			log.Warn("can not be compacted, segment has reference lock", zap.Int64("segmentID", cl.SegmentID))
-			return fmt.Errorf("can not be compacted, segment with ID %d has reference lock", cl.SegmentID)
+			return nil, nil, nil, fmt.Errorf("can not be compacted, segment with ID %d has reference lock", cl.SegmentID)
 		}
 		if segment := m.segments.GetSegment(cl.GetSegmentID()); segment != nil {
+			oldSegments = append(oldSegments, segment.Clone())
+
 			cloned := segment.Clone()
 			cloned.State = commonpb.SegmentState_Dropped
 			cloned.DroppedAt = uint64(time.Now().UnixNano())
-			segments = append(segments, cloned)
-			orginSegments = append(orginSegments, segment)
+			modSegments = append(modSegments, cloned)
 		}
 	}
 
 	var startPosition, dmlPosition *internalpb.MsgPosition
-	for _, s := range segments {
+	for _, s := range modSegments {
 		if dmlPosition == nil ||
 			s.GetDmlPosition() != nil && s.GetDmlPosition().GetTimestamp() < dmlPosition.GetTimestamp() {
 			dmlPosition = s.GetDmlPosition()
@@ -814,7 +816,7 @@ func (m *meta) CompleteMergeCompaction(compactionLogs []*datapb.CompactionSegmen
 
 	// find new added delta logs when executing compaction
 	var originDeltalogs []*datapb.FieldBinlog
-	for _, s := range segments {
+	for _, s := range modSegments {
 		originDeltalogs = append(originDeltalogs, s.GetDeltalogs()...)
 	}
 
@@ -826,19 +828,19 @@ func (m *meta) CompleteMergeCompaction(compactionLogs []*datapb.CompactionSegmen
 	newAddedDeltalogs := m.updateDeltalogs(originDeltalogs, deletedDeltalogs, nil)
 	deltalogs := append(result.GetDeltalogs(), newAddedDeltalogs...)
 
-	compactionFrom := make([]UniqueID, 0, len(segments))
-	for _, s := range segments {
+	compactionFrom := make([]UniqueID, 0, len(modSegments))
+	for _, s := range modSegments {
 		compactionFrom = append(compactionFrom, s.GetID())
 	}
 
 	segmentInfo := &datapb.SegmentInfo{
 		ID:                  result.GetSegmentID(),
-		CollectionID:        segments[0].CollectionID,
-		PartitionID:         segments[0].PartitionID,
-		InsertChannel:       segments[0].InsertChannel,
+		CollectionID:        modSegments[0].CollectionID,
+		PartitionID:         modSegments[0].PartitionID,
+		InsertChannel:       modSegments[0].InsertChannel,
 		NumOfRows:           result.NumOfRows,
 		State:               commonpb.SegmentState_Flushing,
-		MaxRowNum:           segments[0].MaxRowNum,
+		MaxRowNum:           modSegments[0].MaxRowNum,
 		Binlogs:             result.GetInsertLogs(),
 		Statslogs:           result.GetField2StatslogPaths(),
 		Deltalogs:           deltalogs,
@@ -849,15 +851,19 @@ func (m *meta) CompleteMergeCompaction(compactionLogs []*datapb.CompactionSegmen
 	}
 	segment := NewSegmentInfo(segmentInfo)
 
-	log.Info("CompleteMergeCompaction", zap.Int64("segmentID", segmentInfo.ID),
+	log.Info("GetCompleteCompactionMeta", zap.Int64("segmentID", segmentInfo.ID),
 		zap.Int64("collectionID", segmentInfo.CollectionID),
 		zap.Int64("partitionID", segmentInfo.PartitionID),
 		zap.Int64("NumOfRows", segmentInfo.NumOfRows),
 		zap.Any("compactionFrom", segmentInfo.CompactionFrom))
 
+	return oldSegments, modSegments, segment, nil
+}
+
+func (m *meta) alterMetaStoreAfterCompaction(modSegments []*SegmentInfo, newSegment *SegmentInfo) error {
 	data := make(map[string]string)
 
-	for _, s := range segments {
+	for _, s := range modSegments {
 		k, v, err := m.marshal(s)
 		if err != nil {
 			return err
@@ -865,33 +871,63 @@ func (m *meta) CompleteMergeCompaction(compactionLogs []*datapb.CompactionSegmen
 		data[k] = v
 	}
 
-	if segment.NumOfRows > 0 {
-		k, v, err := m.marshal(segment)
+	if newSegment.NumOfRows > 0 {
+		k, v, err := m.marshal(newSegment)
 		if err != nil {
 			return err
 		}
 		data[k] = v
 	}
 
-	if err := m.saveKvTxn(data); err != nil {
-		return err
+	return m.saveKvTxn(data)
+}
+
+func (m *meta) revertAlterMetaStoreAfterCompaction(oldSegments []*SegmentInfo, removalSegment *SegmentInfo) error {
+	log.Info("revert metastore after compaction failure",
+		zap.Int64("collectionID", removalSegment.CollectionID),
+		zap.Int64("partitionID", removalSegment.PartitionID),
+		zap.Int64("compactedTo", removalSegment.ID),
+		zap.Int64s("compactedFrom", removalSegment.GetCompactionFrom()),
+	)
+
+	var (
+		data     = make(map[string]string)
+		removals []string
+	)
+
+	for _, s := range oldSegments {
+		k, v, err := m.marshal(s)
+		if err != nil {
+			return err
+		}
+		data[k] = v
 	}
 
-	for _, s := range orginSegments {
-		metrics.DataCoordNumSegments.WithLabelValues(s.GetState().String()).Dec()
+	if removalSegment.NumOfRows > 0 {
+		k, _, err := m.marshal(removalSegment)
+		if err != nil {
+			return err
+		}
+		removals = append(removals, k)
 	}
 
-	for _, s := range segments {
+	return m.client.MultiSaveAndRemove(data, removals)
+}
+
+func (m *meta) alterInMemoryMetaAfterCompaction(segmentCompactTo *SegmentInfo, segmentsCompactFrom []*SegmentInfo) {
+	m.Lock()
+	defer m.Unlock()
+
+	for _, s := range segmentsCompactFrom {
 		m.segments.SetSegment(s.GetID(), s)
 		metrics.DataCoordNumSegments.WithLabelValues(s.GetState().String()).Inc()
 	}
 
 	// Handle empty segment generated by merge-compaction
-	if segment.NumOfRows > 0 {
-		m.segments.SetSegment(segment.GetID(), segment)
-		metrics.DataCoordNumSegments.WithLabelValues(segment.GetState().String()).Inc()
+	if segmentCompactTo.GetNumOfRows() > 0 {
+		m.segments.SetSegment(segmentCompactTo.GetID(), segmentCompactTo)
+		metrics.DataCoordNumSegments.WithLabelValues(segmentCompactTo.GetState().String()).Inc()
 	}
-	return nil
 }
 
 func (m *meta) CompleteInnerCompaction(segmentBinlogs *datapb.CompactionSegmentBinlogs, result *datapb.CompactionResult) error {

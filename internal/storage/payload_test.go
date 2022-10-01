@@ -567,7 +567,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		assert.NotNil(t, err)
 
 		err = w.AddOneStringToPayload("")
-		assert.NotNil(t, err)
+		assert.Nil(t, err)
 		err = w.FinishPayloadWriter()
 		assert.Nil(t, err)
 		err = w.AddOneStringToPayload("c")

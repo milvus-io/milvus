@@ -24,7 +24,7 @@ static int dim = 768;
 
 const auto schema = []() {
     auto schema = std::make_shared<Schema>();
-    schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, dim, MetricType::METRIC_L2);
+    schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
     return schema;
 }();
 
@@ -108,7 +108,7 @@ Search_Sealed(benchmark::State& state) {
         info.field_id = (*schema)[FieldName("fakevec")].get_id().get();
         info.index_params["index_type"] = "IVF";
         info.index_params["index_mode"] = "CPU";
-        info.index_params["metric_type"] = MetricTypeToName(MetricType::METRIC_L2);
+        info.index_params["metric_type"] = knowhere::metric::L2;
         segment->LoadIndex(info);
     }
     Timestamp time = 10000000;

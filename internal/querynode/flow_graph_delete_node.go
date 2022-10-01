@@ -166,7 +166,7 @@ func (dNode *deleteNode) delete(deleteData *deleteData, segmentID UniqueID, wg *
 		return fmt.Errorf("getSegmentByID failed, err = %s", err)
 	}
 
-	if targetSegment.segmentType != segmentTypeSealed {
+	if targetSegment.getType() != segmentTypeSealed {
 		return fmt.Errorf("unexpected segmentType when delete, segmentID = %d, segmentType = %s", segmentID, targetSegment.segmentType.String())
 	}
 

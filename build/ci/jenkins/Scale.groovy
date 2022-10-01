@@ -17,7 +17,7 @@ pipeline {
 
     agent {
         kubernetes {
-            label 'milvus-scale-test'
+//             label 'milvus-scale-test'
 //             inheritFrom 'milvus-test'
             defaultContainer 'milvus-test'
             yamlFile "build/ci/jenkins/pod/scale-test.yaml"

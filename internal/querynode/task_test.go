@@ -97,6 +97,30 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("test execute repeated watchDmChannelTask", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		task := watchDmChannelsTask{
+			req:  genWatchDMChannelsRequest(),
+			node: node,
+		}
+
+		task.req.Infos = []*datapb.VchannelInfo{
+			{
+				CollectionID: defaultCollectionID,
+				ChannelName:  defaultDMLChannel,
+			},
+		}
+		task.req.PartitionIDs = []UniqueID{0}
+
+		err = task.Execute(ctx)
+		assert.NoError(t, err)
+		// query coord may submit same watchDmChannelTask
+		err = task.Execute(ctx)
+		assert.NoError(t, err)
+	})
+
 	t.Run("test execute loadPartition", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
@@ -688,7 +712,7 @@ func TestTask_releaseCollectionTask(t *testing.T) {
 			node: node,
 		}
 		err = task.Execute(ctx)
-		assert.Error(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("test execute remove deltaVChannel tSafe", func(t *testing.T) {

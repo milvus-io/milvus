@@ -15,7 +15,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <fcntl.h>
-#include <knowhere/common/Utils.h>
+#include <knowhere/index/VecIndex.h>
 
 #include "index/StringIndexMarisa.h"
 #include "index/Utils.h"

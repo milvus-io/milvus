@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strconv"
 	"sync"
 
@@ -58,6 +59,13 @@ func (queue *taskQueue) taskEmpty() bool {
 	queue.Lock()
 	defer queue.Unlock()
 	return queue.tasks.Len() == 0
+}
+
+func (queue *taskQueue) Len() int {
+	queue.Lock()
+	defer queue.Unlock()
+
+	return queue.tasks.Len()
 }
 
 func (queue *taskQueue) taskFull() bool {
@@ -122,6 +130,9 @@ func (queue *taskQueue) addTask(t task) {
 
 func (queue *taskQueue) addTaskToFront(t task) {
 	queue.taskChan <- 1
+
+	queue.Lock()
+	defer queue.Unlock()
 	if queue.tasks.Len() == 0 {
 		queue.tasks.PushBack(t)
 	} else {
@@ -152,8 +163,8 @@ func (queue *taskQueue) popTask() task {
 func newTaskQueue() *taskQueue {
 	return &taskQueue{
 		tasks:    list.New(),
-		maxTask:  1024,
-		taskChan: make(chan int, 1024),
+		maxTask:  Params.QueryCoordCfg.MaxTask,
+		taskChan: make(chan int, Params.QueryCoordCfg.MaxTask),
 	}
 }
 
@@ -182,7 +193,7 @@ func newTaskScheduler(ctx context.Context,
 	broker *globalMetaBroker,
 	idAllocator func() (UniqueID, error)) (*TaskScheduler, error) {
 	ctx1, cancel := context.WithCancel(ctx)
-	taskChan := make(chan task, 1024)
+	taskChan := make(chan task, Params.QueryCoordCfg.MaxTask)
 	stopTaskLoopChan := make(chan int, 1)
 	s := &TaskScheduler{
 		ctx:                      ctx1,
@@ -269,23 +280,31 @@ func (scheduler *TaskScheduler) reloadFromKV() error {
 	}
 
 	var doneTriggerTask task
+	var allTriggerTasks []task
 	for _, t := range triggerTasks {
-		if t.getState() == taskDone {
+		if t.getState() != taskDone {
+			allTriggerTasks = append(allTriggerTasks, t)
+		} else {
 			doneTriggerTask = t
-			for _, childTask := range activeTasks {
-				childTask.setParentTask(t) //replace child task after reScheduler
-				t.addChildTask(childTask)
-			}
-			t.setResultInfo(nil)
-			continue
+		}
+	}
+	if doneTriggerTask != nil {
+		for _, childTask := range activeTasks {
+			childTask.setParentTask(doneTriggerTask) //replace child task after reScheduler
+			doneTriggerTask.addChildTask(childTask)
+		}
+		doneTriggerTask.setResultInfo(nil)
+		scheduler.triggerTaskQueue.addTask(doneTriggerTask)
+	}
+	sort.Slice(allTriggerTasks, func(i, j int) bool {
+		return allTriggerTasks[i].getTaskID() < allTriggerTasks[j].getTaskID()
+	})
+	for _, t := range allTriggerTasks {
+		if scheduler.triggerTaskQueue.taskFull() {
+			panic("Quercoord init failed: task sum out of range, should amplify queryCoord.maxTask")
 		}
 		scheduler.triggerTaskQueue.addTask(t)
 	}
-
-	if doneTriggerTask != nil {
-		scheduler.triggerTaskQueue.addTaskToFront(doneTriggerTask)
-	}
-
 	return nil
 }
 
@@ -389,7 +408,7 @@ func (scheduler *TaskScheduler) unmarshalTask(taskID UniqueID, t string) (task, 
 		if err != nil {
 			return nil, err
 		}
-		fullReq, err := generateFullWatchDmChannelsRequest(scheduler.broker, &req)
+		fullReq, err := generateFullWatchDmChannelsRequest(baseTask.traceCtx(), scheduler.broker, &req)
 		if err != nil {
 			return nil, err
 		}

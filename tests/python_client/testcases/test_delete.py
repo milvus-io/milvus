@@ -1710,3 +1710,36 @@ class TestDeleteString(TestcaseBase):
                            check_task=CheckTasks.check_query_results, check_items={'exp_res': res , 'primary_field': ct.default_string_field_name, 'with_vec': True})
         collection_w.search(data=[df_new[ct.default_float_vec_field_name][0]], anns_field=ct.default_float_vec_field_name,
                             param=default_search_params, limit=1)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_delete_with_string_field_is_empty(self):
+        """
+        target: test delete with string field is empty
+        method: 1.string field is PK, insert empty data
+                2.delete ids from collection
+                3.load and query with id
+        expected: No query result
+        """
+        # create collection, insert data without flush
+        schema = cf.gen_string_pk_default_collection_schema()
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), schema=schema)
+
+        nb = 3000
+        df = cf.gen_default_list_data(nb)
+        df[2] = [""for _ in range(nb)] 
+
+        collection_w.insert(df)
+        collection_w.load()
+        assert collection_w.num_entities == nb
+
+        # delete
+        string_expr = "varchar in [\"\", \"\"]"
+        del_res, _ = collection_w.delete(string_expr)
+        assert del_res.delete_count == 2
+
+        # load and query with id
+        collection_w.load()
+        collection_w.query(string_expr, check_task=CheckTasks.check_query_empty)
+
+
+       

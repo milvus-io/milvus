@@ -22,15 +22,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/util/retry"
-
 	"github.com/bits-and-blooms/bloom/v3"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
-	"github.com/stretchr/testify/assert"
+	"github.com/milvus-io/milvus/internal/util/retry"
 )
 
 var deleteNodeTestDir = "/tmp/milvus_test/deleteNode"
@@ -312,7 +313,6 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		testPath := "/test/datanode/root/meta"
 		assert.NoError(t, clearEtcd(testPath))
 		Params.EtcdCfg.MetaRootPath = testPath
-		Params.DataNodeCfg.DeleteBinlogRootPath = testPath
 
 		c := &nodeConfig{
 			replica:      replica,
@@ -336,7 +336,6 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		testPath := "/test/datanode/root/meta"
 		assert.NoError(t, clearEtcd(testPath))
 		Params.EtcdCfg.MetaRootPath = testPath
-		Params.DataNodeCfg.DeleteBinlogRootPath = testPath
 
 		c := &nodeConfig{
 			replica:      replica,
@@ -357,6 +356,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		// send again shall trigger empty buffer flush
 		delNode.Operate([]flowgraph.Msg{fgMsg})
 	})
+
 	t.Run("Test deleteNode Operate valid with dropCollection", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
@@ -365,7 +365,6 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		testPath := "/test/datanode/root/meta"
 		assert.NoError(t, clearEtcd(testPath))
 		Params.EtcdCfg.MetaRootPath = testPath
-		Params.DataNodeCfg.DeleteBinlogRootPath = testPath
 
 		c := &nodeConfig{
 			replica:      replica,
@@ -401,7 +400,6 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		testPath := "/test/datanode/root/meta"
 		assert.NoError(t, clearEtcd(testPath))
 		Params.EtcdCfg.MetaRootPath = testPath
-		Params.DataNodeCfg.DeleteBinlogRootPath = testPath
 
 		c := &nodeConfig{
 			replica:      &mockReplica{},
@@ -420,9 +418,194 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 
 		var fgMsg flowgraph.Msg = &msg
 
-		flowGraphRetryOpt = retry.Attempts(1)
+		setFlowGraphRetryOpt(retry.Attempts(1))
 		assert.Panics(te, func() {
 			delNode.Operate([]flowgraph.Msg{fgMsg})
 		})
 	})
+
+	t.Run("Test issue#18565", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		chanName := "datanode-test-FlowGraphDeletenode-issue18565"
+		testPath := "/test/datanode/root/meta"
+		assert.NoError(t, clearEtcd(testPath))
+		Params.EtcdCfg.MetaRootPath = testPath
+
+		replica := &SegmentReplica{
+			newSegments:       make(map[UniqueID]*Segment),
+			normalSegments:    make(map[UniqueID]*Segment),
+			flushedSegments:   make(map[UniqueID]*Segment),
+			compactedSegments: make(map[UniqueID]*Segment),
+		}
+
+		c := &nodeConfig{
+			replica:      replica,
+			allocator:    NewAllocatorFactory(),
+			vChannelName: chanName,
+		}
+		delNode, err := newDeleteNode(ctx, fm, make(chan string, 1), c)
+		assert.Nil(t, err)
+
+		compactedSegment := UniqueID(10020987)
+		replica.compactedSegments[compactedSegment] = &Segment{
+			segmentID:   compactedSegment,
+			compactedTo: 100,
+		}
+
+		msg := genFlowGraphDeleteMsg(int64Pks, chanName)
+		msg.deleteMessages = []*msgstream.DeleteMsg{}
+		msg.segmentsToFlush = []UniqueID{compactedSegment}
+
+		delNode.delBuf.Store(compactedSegment, &DelDataBuf{delData: &DeleteData{}})
+		delNode.flushManager = NewRendezvousFlushManager(&allocator{}, cm, replica, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
+
+		var fgMsg flowgraph.Msg = &msg
+		setFlowGraphRetryOpt(retry.Attempts(1))
+		assert.NotPanics(t, func() {
+			delNode.Operate([]flowgraph.Msg{fgMsg})
+		})
+
+		_, ok := delNode.delBuf.Load(100)
+		assert.False(t, ok)
+		_, ok = delNode.delBuf.Load(compactedSegment)
+		assert.False(t, ok)
+	})
+}
+
+func TestFlowGraphDeleteNode_showDelBuf(t *testing.T) {
+	cm := storage.NewLocalChunkManager(storage.RootPath(deleteNodeTestDir))
+	defer cm.RemoveWithPrefix("")
+
+	fm := NewRendezvousFlushManager(NewAllocatorFactory(), cm, &mockReplica{}, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	chanName := "datanode-test-FlowGraphDeletenode-showDelBuf"
+	testPath := "/test/datanode/root/meta"
+	assert.NoError(t, clearEtcd(testPath))
+	Params.EtcdCfg.MetaRootPath = testPath
+
+	c := &nodeConfig{
+		replica:      &mockReplica{},
+		allocator:    NewAllocatorFactory(),
+		vChannelName: chanName,
+	}
+	delNode, err := newDeleteNode(ctx, fm, make(chan string, 1), c)
+	require.NoError(t, err)
+
+	tests := []struct {
+		seg     UniqueID
+		numRows int64
+	}{
+		{111, 10},
+		{112, 10},
+		{113, 1},
+	}
+
+	for _, test := range tests {
+		delBuf := newDelDataBuf()
+		delBuf.updateSize(test.numRows)
+		delNode.delBuf.Store(test.seg, delBuf)
+	}
+
+	delNode.showDelBuf([]UniqueID{111, 112, 113}, 100)
+}
+
+func TestFlowGraphDeleteNode_updateCompactedSegments(t *testing.T) {
+	cm := storage.NewLocalChunkManager(storage.RootPath(deleteNodeTestDir))
+	defer cm.RemoveWithPrefix("")
+
+	fm := NewRendezvousFlushManager(NewAllocatorFactory(), cm, &mockReplica{}, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	chanName := "datanode-test-FlowGraphDeletenode-showDelBuf"
+	testPath := "/test/datanode/root/meta"
+	assert.NoError(t, clearEtcd(testPath))
+	Params.EtcdCfg.MetaRootPath = testPath
+
+	replica := SegmentReplica{
+		newSegments:       make(map[UniqueID]*Segment),
+		normalSegments:    make(map[UniqueID]*Segment),
+		flushedSegments:   make(map[UniqueID]*Segment),
+		compactedSegments: make(map[UniqueID]*Segment),
+	}
+
+	c := &nodeConfig{
+		replica:      &replica,
+		allocator:    NewAllocatorFactory(),
+		vChannelName: chanName,
+	}
+	delNode, err := newDeleteNode(ctx, fm, make(chan string, 1), c)
+	require.NoError(t, err)
+
+	tests := []struct {
+		description    string
+		compactToExist bool
+		segIDsInBuffer []UniqueID
+
+		compactedToIDs   []UniqueID
+		compactedFromIDs []UniqueID
+
+		expectedSegsRemain []UniqueID
+	}{
+		{"zero segments", false,
+			[]UniqueID{}, []UniqueID{}, []UniqueID{}, []UniqueID{}},
+		{"segment no compaction", false,
+			[]UniqueID{100, 101}, []UniqueID{}, []UniqueID{}, []UniqueID{100, 101}},
+		{"segment compacted not in buffer", true,
+			[]UniqueID{100, 101}, []UniqueID{200}, []UniqueID{103}, []UniqueID{100, 101}},
+		{"segment compacted in buffer 100>201", true,
+			[]UniqueID{100, 101}, []UniqueID{201}, []UniqueID{100}, []UniqueID{101, 201}},
+		{"segment compacted in buffer 100+101>201", true,
+			[]UniqueID{100, 101}, []UniqueID{201, 201}, []UniqueID{100, 101}, []UniqueID{201}},
+		{"segment compacted in buffer 100>201, 101>202", true,
+			[]UniqueID{100, 101}, []UniqueID{201, 202}, []UniqueID{100, 101}, []UniqueID{201, 202}},
+		// false
+		{"segment compacted in buffer 100>201", false,
+			[]UniqueID{100, 101}, []UniqueID{201}, []UniqueID{100}, []UniqueID{101}},
+		{"segment compacted in buffer 100+101>201", false,
+			[]UniqueID{100, 101}, []UniqueID{201, 201}, []UniqueID{100, 101}, []UniqueID{}},
+		{"segment compacted in buffer 100>201, 101>202", false,
+			[]UniqueID{100, 101}, []UniqueID{201, 202}, []UniqueID{100, 101}, []UniqueID{}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.description, func(t *testing.T) {
+			for _, seg := range test.segIDsInBuffer {
+				delBuf := newDelDataBuf()
+				delBuf.updateSize(100)
+				delNode.delBuf.Store(seg, delBuf)
+			}
+
+			for i, seg := range test.compactedFromIDs {
+				replica.compactedSegments[seg] = &Segment{
+					segmentID:   seg,
+					compactedTo: test.compactedToIDs[i],
+				}
+			}
+
+			if test.compactToExist {
+				for _, seg := range test.compactedToIDs {
+					replica.flushedSegments[seg] = &Segment{
+						segmentID: seg,
+						numRows:   10,
+					}
+				}
+			} else {
+				replica.flushedSegments = make(map[UniqueID]*Segment)
+			}
+
+			delNode.updateCompactedSegments()
+
+			for _, remain := range test.expectedSegsRemain {
+				_, ok := delNode.delBuf.Load(remain)
+				assert.True(t, ok)
+			}
+		})
+	}
 }

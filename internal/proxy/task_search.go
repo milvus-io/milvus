@@ -481,52 +481,32 @@ func checkIfLoaded(ctx context.Context, qc types.QueryCoord, collectionName stri
 	if info.isLoaded {
 		return true, nil
 	}
-
-	// If request to search partitions
-	if len(searchPartitionIDs) > 0 {
-		resp, err := qc.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:  commonpb.MsgType_ShowCollections,
-				SourceID: Params.ProxyCfg.GetNodeID(),
-			},
-			CollectionID: info.collID,
-			PartitionIDs: searchPartitionIDs,
-		})
-		if err != nil {
-			return false, fmt.Errorf("showPartitions failed, collection = %s, partitionIDs = %v, err = %s", collectionName, searchPartitionIDs, err)
-		}
-
-		if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
-			return false, fmt.Errorf("showPartitions failed, collection = %s, partitionIDs = %v, reason = %s", collectionName, searchPartitionIDs, resp.GetStatus().GetReason())
-		}
-		// Current logic: show partitions won't return error if the given partitions are all loaded
-		return true, nil
+	if len(searchPartitionIDs) == 0 {
+		return false, nil
 	}
 
-	// If request to search collection and collection is not fully loaded
+	// If request to search partitions
 	resp, err := qc.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
 		Base: &commonpb.MsgBase{
-			MsgType:  commonpb.MsgType_ShowCollections,
+			MsgType:  commonpb.MsgType_ShowPartitions,
 			SourceID: Params.ProxyCfg.GetNodeID(),
 		},
 		CollectionID: info.collID,
+		PartitionIDs: searchPartitionIDs,
 	})
 	if err != nil {
 		return false, fmt.Errorf("showPartitions failed, collection = %s, partitionIDs = %v, err = %s", collectionName, searchPartitionIDs, err)
 	}
-
 	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
 		return false, fmt.Errorf("showPartitions failed, collection = %s, partitionIDs = %v, reason = %s", collectionName, searchPartitionIDs, resp.GetStatus().GetReason())
 	}
 
-	if len(resp.GetPartitionIDs()) > 0 {
-		log.Warn("collection not fully loaded, search on these partitions",
-			zap.String("collection", collectionName),
-			zap.Int64("collectionID", info.collID), zap.Int64s("partitionIDs", resp.GetPartitionIDs()))
-		return true, nil
+	for _, persent := range resp.InMemoryPercentages {
+		if persent < 100 {
+			return false, nil
+		}
 	}
-
-	return false, nil
+	return true, nil
 }
 
 func decodeSearchResults(searchResults []*internalpb.SearchResults) ([]*schemapb.SearchResultData, error) {

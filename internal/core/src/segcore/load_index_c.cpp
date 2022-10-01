@@ -9,13 +9,13 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include "common/CDataType.h"
 #include "common/LoadInfo.h"
 #include "exceptions/EasyAssert.h"
-#include "knowhere/common/BinarySet.h"
-#include "knowhere/index/vector_index/VecIndexFactory.h"
-#include "segcore/load_index_c.h"
 #include "index/IndexFactory.h"
-#include "common/CDataType.h"
+#include "knowhere/common/BinarySet.h"
+#include "knowhere/index/VecIndexFactory.h"
+#include "segcore/load_index_c.h"
 
 CStatus
 NewLoadIndexInfo(CLoadIndexInfo* c_load_index_info) {

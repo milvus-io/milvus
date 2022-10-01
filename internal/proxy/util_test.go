@@ -17,18 +17,23 @@
 package proxy
 
 import (
+	"context"
+	"fmt"
 	"strconv"
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/proto/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/proto/schemapb"
+	"github.com/milvus-io/milvus/internal/util/crypto"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestValidateCollectionName(t *testing.T) {
 	assert.Nil(t, validateCollectionName("abc"))
 	assert.Nil(t, validateCollectionName("_123abc"))
-	assert.Nil(t, validateCollectionName("abc123_$"))
+	assert.Nil(t, validateCollectionName("abc123_"))
 
 	longName := make([]byte, 256)
 	for i := 0; i < len(longName); i++ {
@@ -37,6 +42,7 @@ func TestValidateCollectionName(t *testing.T) {
 	invalidNames := []string{
 		"123abc",
 		"$abc",
+		"abc$",
 		"_12 ac",
 		" ",
 		"",
@@ -55,7 +61,7 @@ func TestValidatePartitionTag(t *testing.T) {
 	assert.Nil(t, validatePartitionTag("abc", true))
 	assert.Nil(t, validatePartitionTag("123abc", true))
 	assert.Nil(t, validatePartitionTag("_123abc", true))
-	assert.Nil(t, validatePartitionTag("abc123_$", true))
+	assert.Nil(t, validatePartitionTag("abc123_", true))
 
 	longName := make([]byte, 256)
 	for i := 0; i < len(longName); i++ {
@@ -63,6 +69,7 @@ func TestValidatePartitionTag(t *testing.T) {
 	}
 	invalidNames := []string{
 		"$abc",
+		"abc$",
 		"_12 ac",
 		" ",
 		"",
@@ -81,6 +88,7 @@ func TestValidatePartitionTag(t *testing.T) {
 func TestValidateFieldName(t *testing.T) {
 	assert.Nil(t, validateFieldName("abc"))
 	assert.Nil(t, validateFieldName("_123abc"))
+	assert.Nil(t, validateFieldName("abc123_"))
 
 	longName := make([]byte, 256)
 	for i := 0; i < len(longName); i++ {
@@ -89,6 +97,7 @@ func TestValidateFieldName(t *testing.T) {
 	invalidNames := []string{
 		"123abc",
 		"$abc",
+		"abc$",
 		"_12 ac",
 		" ",
 		"",
@@ -615,4 +624,48 @@ func TestReplaceID2Name(t *testing.T) {
 	srcStr := "collection 432682805904801793 has not been loaded to memory or load failed"
 	dstStr := "collection default_collection has not been loaded to memory or load failed"
 	assert.Equal(t, dstStr, ReplaceID2Name(srcStr, int64(432682805904801793), "default_collection"))
+}
+
+func TestPasswordVerify(t *testing.T) {
+	username := "user-test00"
+	password := "PasswordVerify"
+
+	// credential does not exist within cache
+	credCache := make(map[string]*internalpb.CredentialInfo)
+	invokedCount := 0
+
+	mockedRootCoord := newMockRootCoord()
+	mockedRootCoord.GetGetCredentialFunc = func(ctx context.Context, req *rootcoordpb.GetCredentialRequest) (*rootcoordpb.GetCredentialResponse, error) {
+		invokedCount++
+		return nil, fmt.Errorf("get cred not found credential")
+	}
+
+	metaCache := &MetaCache{
+		credMap:   credCache,
+		rootCoord: mockedRootCoord,
+	}
+	ret, ok := credCache[username]
+	assert.False(t, ok)
+	assert.Nil(t, ret)
+	assert.False(t, passwordVerify(context.TODO(), username, password, metaCache))
+	assert.Equal(t, 1, invokedCount)
+
+	// Sha256Password has not been filled into cache during establish connection firstly
+	encryptedPwd, err := crypto.PasswordEncrypt(password)
+	assert.Nil(t, err)
+	credCache[username] = &internalpb.CredentialInfo{
+		Username:          username,
+		EncryptedPassword: encryptedPwd,
+	}
+	assert.True(t, passwordVerify(context.TODO(), username, password, metaCache))
+	ret, ok = credCache[username]
+	assert.True(t, ok)
+	assert.NotNil(t, ret)
+	assert.Equal(t, username, ret.Username)
+	assert.NotNil(t, ret.Sha256Password)
+	assert.Equal(t, 1, invokedCount)
+
+	// Sha256Password already exists within cache
+	assert.True(t, passwordVerify(context.TODO(), username, password, metaCache))
+	assert.Equal(t, 1, invokedCount)
 }

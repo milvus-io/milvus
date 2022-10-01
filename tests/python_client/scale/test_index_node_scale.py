@@ -76,7 +76,7 @@ class TestIndexNodeScale:
             # create index
             # Note that the num of segments and the num of indexNode are related to indexing time
             start = datetime.datetime.now()
-            collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
+            collection_w.create_index(ct.default_float_vec_field_name, default_index_params, timeout=60)
             assert collection_w.has_index()[0]
             t0 = datetime.datetime.now() - start
             log.info(f'Create index on {init_replicas} indexNode cost t0: {t0}')
@@ -92,14 +92,14 @@ class TestIndexNodeScale:
 
             # create index again
             start = datetime.datetime.now()
-            collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
+            collection_w.create_index(ct.default_float_vec_field_name, default_index_params, timeout=60)
             assert collection_w.has_index()[0]
             t1 = datetime.datetime.now() - start
             log.info(f'Create index on {expand_replicas} indexNode cost t1: {t1}')
             collection_w.drop_index()
 
             start = datetime.datetime.now()
-            collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
+            collection_w.create_index(ct.default_float_vec_field_name, default_index_params, timeout=60)
             assert collection_w.has_index()[0]
             t2 = datetime.datetime.now() - start
             log.info(f'Create index on {expand_replicas} indexNode cost t2: {t2}')
@@ -166,7 +166,7 @@ class TestIndexNodeScale:
 
             # create index on collection one and two
             start = datetime.datetime.now()
-            collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
+            collection_w.create_index(ct.default_float_vec_field_name, default_index_params, timeout=60)
             assert collection_w.has_index()[0]
             t0 = datetime.datetime.now() - start
 
@@ -189,7 +189,7 @@ class TestIndexNodeScale:
             assert not collection_w.has_index()[0]
 
             start = datetime.datetime.now()
-            collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
+            collection_w.create_index(ct.default_float_vec_field_name, default_index_params, timeout=60)
             assert collection_w.has_index()[0]
             t2 = datetime.datetime.now() - start
             log.info(f'Create index on 1 indexNode cost t2: {t2}')

@@ -1526,11 +1526,26 @@ func Test_checkIfLoaded(t *testing.T) {
 		globalMetaCache = cache
 		qc := NewQueryCoordMock()
 		qc.SetShowPartitionsFunc(func(ctx context.Context, request *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
-			return &querypb.ShowPartitionsResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, nil
+			return &querypb.ShowPartitionsResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, InMemoryPercentages: []int64{100, 100}}, nil
 		})
 		loaded, err := checkIfLoaded(context.Background(), qc, "test", []UniqueID{1, 2})
 		assert.NoError(t, err)
 		assert.True(t, loaded)
+	})
+
+	t.Run("partitions loaded, some patitions not fully loaded", func(t *testing.T) {
+		cache := newMockCache()
+		cache.setGetInfoFunc(func(ctx context.Context, collectionName string) (*collectionInfo, error) {
+			return &collectionInfo{isLoaded: false}, nil
+		})
+		globalMetaCache = cache
+		qc := NewQueryCoordMock()
+		qc.SetShowPartitionsFunc(func(ctx context.Context, request *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
+			return &querypb.ShowPartitionsResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, InMemoryPercentages: []int64{100, 50}}, nil
+		})
+		loaded, err := checkIfLoaded(context.Background(), qc, "test", []UniqueID{1, 2})
+		assert.NoError(t, err)
+		assert.False(t, loaded)
 	})
 
 	t.Run("no specified partitions, show partitions failed", func(t *testing.T) {
@@ -1543,7 +1558,7 @@ func Test_checkIfLoaded(t *testing.T) {
 		qc.SetShowPartitionsFunc(func(ctx context.Context, request *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
 			return nil, errors.New("mock")
 		})
-		_, err := checkIfLoaded(context.Background(), qc, "test", []UniqueID{})
+		_, err := checkIfLoaded(context.Background(), qc, "test", []UniqueID{1, 2})
 		assert.Error(t, err)
 	})
 
@@ -1557,7 +1572,7 @@ func Test_checkIfLoaded(t *testing.T) {
 		qc.SetShowPartitionsFunc(func(ctx context.Context, request *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
 			return &querypb.ShowPartitionsResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_CollectionNotExists}}, nil
 		})
-		_, err := checkIfLoaded(context.Background(), qc, "test", []UniqueID{})
+		_, err := checkIfLoaded(context.Background(), qc, "test", []UniqueID{1, 2})
 		assert.Error(t, err)
 	})
 
@@ -1573,7 +1588,7 @@ func Test_checkIfLoaded(t *testing.T) {
 		})
 		loaded, err := checkIfLoaded(context.Background(), qc, "test", []UniqueID{})
 		assert.NoError(t, err)
-		assert.True(t, loaded)
+		assert.False(t, loaded)
 	})
 
 	t.Run("not loaded", func(t *testing.T) {

@@ -31,6 +31,10 @@ type MockChunkManager struct {
 	size int64
 }
 
+func (mc *MockChunkManager) RootPath() string {
+	return TempFilesPath
+}
+
 func (mc *MockChunkManager) Path(filePath string) (string, error) {
 	return "", nil
 }

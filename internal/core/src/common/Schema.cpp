@@ -65,7 +65,7 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
             if (!index_map.count("metric_type")) {
                 schema->AddField(name, field_id, data_type, dim, std::nullopt);
             } else {
-                auto metric_type = GetMetricType(index_map.at("metric_type"));
+                auto metric_type = index_map.at("metric_type");
                 schema->AddField(name, field_id, data_type, dim, metric_type);
             }
         } else if (datatype_is_string(data_type)) {

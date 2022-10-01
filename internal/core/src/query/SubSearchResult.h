@@ -13,13 +13,15 @@
 
 #include <limits>
 #include <vector>
+
 #include "common/Types.h"
+#include "common/Utils.h"
 
 namespace milvus::query {
 
 class SubSearchResult {
  public:
-    SubSearchResult(int64_t num_queries, int64_t topk, MetricType metric_type, int64_t round_decimal)
+    SubSearchResult(int64_t num_queries, int64_t topk, const knowhere::MetricType& metric_type, int64_t round_decimal)
         : metric_type_(metric_type),
           num_queries_(num_queries),
           topk_(topk),
@@ -29,19 +31,9 @@ class SubSearchResult {
     }
 
  public:
-    static constexpr float
-    init_value(MetricType metric_type) {
-        return (is_descending(metric_type) ? -1 : 1) * std::numeric_limits<float>::max();
-    }
-
-    static constexpr bool
-    is_descending(MetricType metric_type) {
-        // TODO(dog): more types
-        if (metric_type == MetricType::METRIC_INNER_PRODUCT) {
-            return true;
-        } else {
-            return false;
-        }
+    static float
+    init_value(const knowhere::MetricType& metric_type) {
+        return (PositivelyRelated(metric_type) ? -1 : 1) * std::numeric_limits<float>::max();
     }
 
  public:
@@ -103,7 +95,7 @@ class SubSearchResult {
     int64_t num_queries_;
     int64_t topk_;
     int64_t round_decimal_;
-    MetricType metric_type_;
+    knowhere::MetricType metric_type_;
     std::vector<int64_t> seg_offsets_;
     std::vector<float> distances_;
 };

@@ -52,8 +52,25 @@ const (
 
 	// NotRegisteredID means node is not registered into etcd.
 	NotRegisteredID = int64(-1)
+
+	// InvalidNodeID indicates that node is not valid in querycoord replica or shard cluster.
+	InvalidNodeID = int64(-1)
 )
 
 // Endian is type alias of binary.LittleEndian.
 // Milvus uses little endian by default.
 var Endian = binary.LittleEndian
+
+const (
+	// SegmentInsertLogPath storage path const for segment insert binlog.
+	SegmentInsertLogPath = `insert_log`
+
+	// SegmentDeltaLogPath storage path const for segment delta log.
+	SegmentDeltaLogPath = `delta_log`
+
+	// SegmentStatslogPath storage path const for segment stats log.
+	SegmentStatslogPath = `stats_log`
+
+	// SegmentIndexPath storage path const for segment index files.
+	SegmentIndexPath = `index_files`
+)

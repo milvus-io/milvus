@@ -84,13 +84,16 @@ pulsar:
 #  brokerList: localhost1:9092,localhost2:9092,localhost3:9092
 #  saslUsername: username
 #  saslPassword: password
+#  saslMechanisms: PLAIN
+#  securityProtocol: SASL_SSL
 
 rocksmq:
   # please adjust in embedded Milvus: /tmp/milvus/rdb_data
   path: /var/lib/milvus/rdb_data # The path where the message is stored in rocksmq
   rocksmqPageSize: 2147483648 # 2 GB, 2 * 1024 * 1024 * 1024 bytes, The size of each page of messages in rocksmq
-  retentionTimeInMinutes: 10080 # 7 days, 7 * 24 * 60 minutes, The retention time of the message in rocksmq.
+  retentionTimeInMinutes: 7200 # 5 days, 5 * 24 * 60 minutes, The retention time of the message in rocksmq.
   retentionSizeInMB: 8192 # 8 GB, 8 * 1024 MB, The retention size of the message in rocksmq.
+  compactionInterval: 86400 # 1 day, trigger rocksdb compaction every day to remove deleted data
   lrucacheratio:  0.06 # rocksdb cache memory ratio
 
 # Related configuration of rootCoord, used to handle data definition language (DDL) and data control language (DCL) requests
@@ -156,6 +159,7 @@ queryCoord:
   overloadedMemoryThresholdPercentage: 90 # The threshold percentage that memory overload
   balanceIntervalSeconds: 60
   memoryUsageMaxDifferencePercentage: 30
+  maxTask: 2048
 
 # Related configuration of queryNode, used to run hybrid search between vector and scalar data.
 queryNode:
@@ -184,7 +188,11 @@ queryNode:
   scheduler:
     receiveChanSize: 10240
     unsolvedQueueSize: 10240
-    maxReadConcurrency: 0 # maximum concurrency of read task. if set to less or equal 0, it means no uppper limit.
+    # maxReadConcurrentRatio is the concurrency ratio of read task (search task and query task).
+    # Max read concurrency would be the value of `runtime.NumCPU * maxReadConcurrentRatio`.
+    # It defaults to 2.0, which means max read concurrency would be the value of runtime.NumCPU * 2.
+    # Max read concurrency must greater than or equal to 1, and less than or equal to runtime.NumCPU * 100.
+    maxReadConcurrentRatio: 2.0 # (0, 100]
     cpuRatio: 10.0 # ratio used to estimate read task cpu usage.
 
   grouping:

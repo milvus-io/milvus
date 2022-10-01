@@ -50,6 +50,10 @@ const (
 	requestConcurrencyLevelLimit = 8
 )
 
+var (
+	ErrReadDeltaMsgFailed = errors.New("ReadDeltaMsgFailed")
+)
+
 // segmentLoader is only responsible for loading the field data from binlog
 type segmentLoader struct {
 	metaReplica ReplicaInterface
@@ -596,8 +600,15 @@ func (loader *segmentLoader) loadSegmentBloomFilter(segment *Segment, binlogPath
 
 	stats, err := storage.DeserializeStats(blobs)
 	if err != nil {
+		log.Warn("failed to deserialize stats", zap.Error(err))
 		return err
 	}
+	// just one BF, just use it
+	if len(stats) == 1 && stats[0].BF != nil {
+		segment.pkFilter = stats[0].BF
+		return nil
+	}
+	// legacy merge
 	for _, stat := range stats {
 		if stat.BF == nil {
 			log.Warn("stat log with nil bloom filter", zap.Int64("segmentID", segment.segmentID), zap.Any("stat", stat))
@@ -664,7 +675,8 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 		return err
 	}
 
-	if lastMsgID.AtEarliestPosition() {
+	reachLatest, _ := lastMsgID.Equal(position.MsgID)
+	if reachLatest || lastMsgID.AtEarliestPosition() {
 		log.Info("there is no more delta msg", zap.Int64("Collection ID", collectionID), zap.String("channel", pChannelName))
 		return nil
 	}
@@ -688,10 +700,18 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 	for hasMore {
 		select {
 		case <-ctx.Done():
-			break
+			return ctx.Err()
 		case msgPack, ok := <-stream.Chan():
 			if !ok {
-				log.Warn("fail to read delta msg", zap.String("pChannelName", pChannelName), zap.Any("msg id", position.GetMsgID()), zap.Error(err))
+				err = fmt.Errorf("%w: pChannelName=%v, msgID=%v",
+					ErrReadDeltaMsgFailed,
+					pChannelName,
+					position.GetMsgID())
+				log.Warn("fail to read delta msg",
+					zap.String("pChannelName", pChannelName),
+					zap.ByteString("msgID", position.GetMsgID()),
+					zap.Error(err),
+				)
 				return err
 			}
 

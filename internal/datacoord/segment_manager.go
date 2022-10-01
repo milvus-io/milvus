@@ -423,9 +423,12 @@ func (s *SegmentManager) GetFlushableSegments(ctx context.Context, channel strin
 	defer s.mu.Unlock()
 	sp, _ := trace.StartSpanFromContext(ctx)
 	defer sp.Finish()
+	// TODO:move tryToSealSegment and dropEmptySealedSegment outside
 	if err := s.tryToSealSegment(t, channel); err != nil {
 		return nil, err
 	}
+
+	s.dropEmptySealedSegment(t, channel)
 
 	ret := make([]UniqueID, 0, len(s.segments))
 	for _, id := range s.segments {
@@ -462,6 +465,29 @@ func (s *SegmentManager) ExpireAllocations(channel string, ts Timestamp) error {
 		s.meta.SetAllocations(segment.GetID(), allocations)
 	}
 	return nil
+}
+
+func (s *SegmentManager) dropEmptySealedSegment(ts Timestamp, channel string) {
+	valids := make([]int64, 0, len(s.segments))
+	for _, id := range s.segments {
+		segment := s.meta.GetSegment(id)
+		if segment == nil || segment.InsertChannel != channel {
+			valids = append(valids, id)
+			continue
+		}
+
+		if isEmptySealedSegment(segment, ts) {
+			log.Info("remove empty sealed segment", zap.Any("segment", id))
+			s.meta.SetState(id, commonpb.SegmentState_Dropped)
+			continue
+		}
+		valids = append(valids, id)
+	}
+	s.segments = valids
+}
+
+func isEmptySealedSegment(segment *SegmentInfo, ts Timestamp) bool {
+	return segment.GetState() == commonpb.SegmentState_Sealed && segment.GetLastExpireTime() <= ts && segment.currRows == 0
 }
 
 // tryToSealSegment applies segment & channel seal policies

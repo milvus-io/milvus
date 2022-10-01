@@ -18,7 +18,7 @@ using namespace milvus::segcore;
 TEST(Binary, Insert) {
     int64_t N = 100000;
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField("vecbin", DataType::VECTOR_BINARY, 128, MetricType::METRIC_Jaccard);
+    auto vec_fid = schema->AddDebugField("vecbin", DataType::VECTOR_BINARY, 128, knowhere::metric::JACCARD);
     auto i64_fid = schema->AddDebugField("age", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
     auto dataset = DataGen(schema, N, 10);

@@ -392,6 +392,12 @@ func TestGetFlushableSegments(t *testing.T) {
 		assert.Nil(t, err)
 		assert.EqualValues(t, 1, len(ids))
 		assert.EqualValues(t, allocations[0].SegmentID, ids[0])
+
+		meta.SetCurrentRows(allocations[0].SegmentID, 0)
+		ids, err = segmentManager.GetFlushableSegments(context.TODO(), "c1", allocations[0].ExpireTime)
+		assert.Nil(t, err)
+		assert.Empty(t, ids)
+		assert.Nil(t, meta.GetSegment(allocations[0].SegmentID))
 	})
 }
 

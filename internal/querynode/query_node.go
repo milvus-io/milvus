@@ -34,6 +34,7 @@ import "C"
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"path"
 	"path/filepath"
@@ -242,22 +243,28 @@ func (node *QueryNode) Init() error {
 		log.Info("queryNode try to connect etcd success", zap.Any("MetaRootPath", Params.EtcdCfg.MetaRootPath))
 
 		cpuNum := runtime.GOMAXPROCS(0)
-		node.cgoPool, err = concurrency.NewPool(cpuNum, ants.WithPreAlloc(true))
+		node.cgoPool, err = concurrency.NewPool(cpuNum, ants.WithPreAlloc(true),
+			ants.WithExpiryDuration(math.MaxInt64))
 		if err != nil {
 			log.Error("QueryNode init cgo pool failed", zap.Error(err))
 			initError = err
 			return
 		}
 
+		// ensure every cgopool go routine is locked with a OS thread
+		// so openmp in knowhere won't create too much request
 		sig := make(chan struct{})
-
+		wg := sync.WaitGroup{}
+		wg.Add(cpuNum)
 		for i := 0; i < cpuNum; i++ {
 			node.cgoPool.Submit(func() (interface{}, error) {
 				runtime.LockOSThread()
+				wg.Done()
 				<-sig
 				return nil, nil
 			})
 		}
+		wg.Wait()
 		close(sig)
 
 		node.metaReplica = newCollectionReplica(node.cgoPool)

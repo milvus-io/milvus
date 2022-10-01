@@ -123,7 +123,7 @@ func buildVectorChunkManager(localPath string, localCacheEnable bool) (*VectorCh
 
 	bucketName := "vector-chunk-manager"
 
-	rcm, err := newMinIOChunkManager(ctx, bucketName)
+	rcm, err := newMinIOChunkManager(ctx, bucketName, "")
 	if err != nil {
 		return nil, cancel, err
 	}
@@ -155,13 +155,14 @@ func TestNewVectorChunkManager(t *testing.T) {
 	ctx := context.Background()
 	bucketName := "vector-chunk-manager"
 
-	rcm, err := newMinIOChunkManager(ctx, bucketName)
+	rcm, err := newMinIOChunkManager(ctx, bucketName, "")
 	assert.Nil(t, err)
 	assert.NotNil(t, rcm)
 	lcm := NewLocalChunkManager(RootPath(localPath))
 
 	meta := initMeta()
 	vcm, err := NewVectorChunkManager(lcm, rcm, meta, 16, true)
+	assert.Equal(t, "", vcm.RootPath())
 	assert.Nil(t, err)
 	assert.NotNil(t, vcm)
 

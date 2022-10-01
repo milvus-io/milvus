@@ -157,7 +157,8 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 				log.Info("filter insert messages",
 					zap.Int64("filter segment ID", imsg.GetSegmentID()),
 					zap.Uint64("message timestamp", msg.EndTs()),
-				)
+					zap.String("segment's vChannel", imsg.GetShardName()),
+					zap.String("current vChannel", ddn.vChannelName))
 				continue
 			}
 
@@ -186,7 +187,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 	}
 	err := retry.Do(ddn.ctx, func() error {
 		return ddn.forwardDeleteMsg(forwardMsgs, msMsg.TimestampMin(), msMsg.TimestampMax())
-	}, flowGraphRetryOpt)
+	}, getFlowGraphRetryOpt())
 	if err != nil {
 		err = fmt.Errorf("DDNode forward delete msg failed, vChannel = %s, err = %s", ddn.vChannelName, err)
 		log.Error(err.Error())
@@ -206,6 +207,10 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 }
 
 func (ddn *ddNode) tryToFilterSegmentInsertMessages(msg *msgstream.InsertMsg) bool {
+	if msg.GetShardName() != ddn.vChannelName {
+		return true
+	}
+
 	// Filter all dropped segments
 	if ddn.isDropped(msg.GetSegmentID()) {
 		return true

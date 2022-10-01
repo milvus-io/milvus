@@ -57,6 +57,10 @@ func (m *GrpcDataNodeClient) Compaction(ctx context.Context, req *datapb.Compact
 	return &commonpb.Status{}, m.Err
 }
 
+func (m *GrpcDataNodeClient) GetCompactionState(ctx context.Context, in *datapb.CompactionStateRequest, opts ...grpc.CallOption) (*datapb.CompactionStateResponse, error) {
+	return &datapb.CompactionStateResponse{}, m.Err
+}
+
 func (m *GrpcDataNodeClient) Import(ctx context.Context, req *datapb.ImportTaskRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }
@@ -66,5 +70,9 @@ func (m *GrpcDataNodeClient) ResendSegmentStats(ctx context.Context, req *datapb
 }
 
 func (m *GrpcDataNodeClient) AddSegment(ctx context.Context, in *datapb.AddSegmentRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
+func (m *GrpcDataNodeClient) SyncSegments(ctx context.Context, in *datapb.SyncSegmentsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }

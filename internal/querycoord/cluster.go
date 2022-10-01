@@ -305,6 +305,11 @@ func (c *queryNodeCluster) WatchDmChannels(ctx context.Context, nodeID int64, in
 			old, ok := c.clusterMeta.getDmChannel(info.ChannelName)
 			if ok {
 				nodes = append(nodes, old.NodeIds...)
+				nodes = removeFromSlice(nodes, in.OfflineNodeID)
+				log.Debug("Remove offline node from dmChannel",
+					zap.String("channel", info.ChannelName),
+					zap.Int64("removedNode", in.OfflineNodeID),
+					zap.Int64s("leftNodes", nodes))
 			}
 
 			dmChannelWatchInfo[index] = &querypb.DmChannelWatchInfo{
@@ -464,8 +469,9 @@ func (c *queryNodeCluster) SyncReplicaSegments(ctx context.Context, leaderID Uni
 }
 
 type queryNodeGetMetricsResponse struct {
-	resp *milvuspb.GetMetricsResponse
-	err  error
+	resp   *milvuspb.GetMetricsResponse
+	err    error
+	nodeID UniqueID // used when error occurred.
 }
 
 func (c *queryNodeCluster) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) []queryNodeGetMetricsResponse {
@@ -474,13 +480,15 @@ func (c *queryNodeCluster) GetMetrics(ctx context.Context, in *milvuspb.GetMetri
 	cnt := len(c.nodes)
 	wg.Add(cnt)
 	respChan := make(chan queryNodeGetMetricsResponse, cnt)
-	for _, node := range c.nodes {
+	for nodeID, node := range c.nodes {
+		nodeID := nodeID
 		go func(node Node) {
 			defer wg.Done()
 			resp, err := node.getMetrics(ctx, in)
 			respChan <- queryNodeGetMetricsResponse{
-				resp: resp,
-				err:  err,
+				resp:   resp,
+				err:    err,
+				nodeID: nodeID,
 			}
 		}(node)
 	}

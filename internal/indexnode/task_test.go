@@ -89,6 +89,10 @@ func (mcm *mockChunkManager) Read(key string) ([]byte, error) {
 	return mcm.read(key)
 }
 
+func (mcm *mockChunkManager) RootPath() string {
+	return ""
+}
+
 func TestIndexBuildTask_Execute(t *testing.T) {
 	t.Run("task retry", func(t *testing.T) {
 		indexTask := &IndexBuildTask{
@@ -177,6 +181,7 @@ func TestIndexBuildTask_saveIndex(t *testing.T) {
 				DataPaths:    []string{"path1", "path2"},
 				Version:      1,
 			},
+			cm: &mockChunkManager{},
 		}
 
 		blobs := []*storage.Blob{
