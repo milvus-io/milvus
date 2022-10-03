@@ -368,7 +368,7 @@ func (s *Segment) search(searchReq *searchRequest) (*SearchResult, error) {
 		return nil, nil
 	}).Await()
 	if err := HandleCStatus(&status, "Search failed"); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("search segment %d: %v", s.segmentID, err)
 	}
 	log.Debug("do search on segment done",
 		zap.Int64("msgID", searchReq.msgID),
