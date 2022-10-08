@@ -867,6 +867,196 @@ class TestQueryParams(TestcaseBase):
         collection_w.query(default_term_expr, partition_names=[partition_names],
                            check_task=CheckTasks.err_res, check_items=error)
 
+    @pytest.fixture(scope="function", params=[0, 10, 100])
+    def offset(self, request):
+        yield request.param
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_query_pagination(self, offset):
+        """
+        target: test query pagination
+        method: create collection and query with pagination params,
+                verify if the result is ordered by primary key
+        expected: query successfully and verify query result
+        """
+        # create collection, insert default_nb, load collection
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
+        int_values = vectors[0][ct.default_int64_field_name].values.tolist()
+        pos = 10
+        term_expr = f'{ct.default_int64_field_name} in {int_values[offset: pos+offset]}'
+        res = vectors[0].iloc[offset:pos+offset, :1].to_dict('records')
+        query_params = {"offset": offset, "limit": 10}
+        query_res = collection_w.query(term_expr, params=query_params,
+                                       check_task=CheckTasks.check_query_results,
+                                       check_items={exp_res: res})[0]
+        key_res = [item[key] for item in query_res for key in item]
+        assert key_res == int_values[offset: pos+offset]
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_query_binary_pagination(self, offset):
+        """
+        target: test query binary pagination
+        method: create collection and query with pagination params,
+                verify if the result is ordered by primary key
+        expected: query successfully and verify query result
+        """
+        # create collection, insert default_nb, load collection
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True,
+                                                             is_binary=True)[0:2]
+        int_values = vectors[0][ct.default_int64_field_name].values.tolist()
+        pos = 10
+        term_expr = f'{ct.default_int64_field_name} in {int_values[offset: pos+offset]}'
+        res = vectors[0].iloc[offset:pos+offset, :1].to_dict('records')
+        query_params = {"offset": offset, "limit": 10}
+        query_res = collection_w.query(term_expr, params=query_params,
+                                       check_task=CheckTasks.check_query_results,
+                                       check_items={exp_res: res})[0]
+        key_res = [item[key] for item in query_res for key in item]
+        assert key_res == int_values[offset: pos + offset]
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_query_pagination_with_expression(self, offset, get_normal_expr):
+        """
+        target: test query pagination with different expression
+        method: query with different expression and verify the result
+        expected: query successfully
+        """
+        # 1. initialize with data
+        nb = 1000
+        collection_w, _vectors, _, insert_ids = self.init_collection_general(prefix, True, nb)[0:4]
+
+        # filter result with expression in collection
+        _vectors = _vectors[0]
+        expr = get_normal_expr
+        expression = expr.replace("&&", "and").replace("||", "or")
+        filter_ids = []
+        for i, _id in enumerate(insert_ids):
+            int64 = _vectors.int64[i]
+            float = _vectors.float[i]
+            if not expression or eval(expression):
+                filter_ids.append(_id)
+
+        # query and verify result
+        query_params = {"offset": offset, "limit": 10}
+        res = collection_w.query(expr=expression, params=query_params)[0]
+        key_res = [item[key] for item in res for key in item]
+        assert key_res == filter_ids
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_query_pagination_with_partition(self, offset):
+        """
+        target: test query pagination on partition
+        method: create a partition and query with different offset
+        expected: verify query result
+        """
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        partition_w = self.init_partition_wrap(collection_wrap=collection_w)
+        df = cf.gen_default_dataframe_data()
+        partition_w.insert(df)
+        assert collection_w.num_entities == ct.default_nb
+        partition_w.load()
+        res = df.iloc[:2, :1].to_dict('records')
+        query_params = {"offset": offset, "limit": 10}
+        collection_w.query(default_term_expr, params=query_params, partition_names=[partition_w.name],
+                           check_task=CheckTasks.check_query_results, check_items={exp_res: res})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_query_pagination_with_insert_data(self, offset):
+        """
+        target: test query pagination on partition
+        method: create a partition and query with pagination
+        expected: verify query result
+        """
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        df = cf.gen_default_dataframe_data()
+        collection_w.insert(df)
+        assert collection_w.num_entities == ct.default_nb
+        collection_w.load()
+        res = df.iloc[:2, :1].to_dict('records')
+        query_params = {"offset": offset, "limit": 10}
+        collection_w.query(default_term_expr, params=query_params,
+                           check_task=CheckTasks.check_query_results, check_items={exp_res: res})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail(reason="issue #19482")
+    @pytest.mark.parametrize("limit", ["12 s", " ", [0, 1], {2}])
+    def test_query_pagination_with_invalid_limit_type(self, limit):
+        """
+        target: test query pagination with invalid limit type
+        method: query with invalid limit tyype
+        expected: raise exception
+        """
+        # create collection, insert default_nb, load collection
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
+        int_values = vectors[0][ct.default_int64_field_name].values.tolist()
+        pos = 10
+        term_expr = f'{ct.default_int64_field_name} in {int_values[10: pos+10]}'
+        res = vectors[0].iloc[10: pos+10, :1].to_dict('records')
+        query_params = {"offset": 10, "limit": limit}
+        collection_w.query(term_expr, params=query_params,
+                           check_task=CheckTasks.check_query_results,
+                           check_items={exp_res: res})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail(reason="issue #19482")
+    @pytest.mark.parametrize("limit", [-1, 67890])
+    def test_query_pagination_with_invalid_limit_value(self, limit):
+        """
+        target: test query pagination with invalid limit value
+        method: query with invalid limit value
+        expected: raise exception
+        """
+        # create collection, insert default_nb, load collection
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
+        int_values = vectors[0][ct.default_int64_field_name].values.tolist()
+        pos = 10
+        term_expr = f'{ct.default_int64_field_name} in {int_values[10: pos + 10]}'
+        res = vectors[0].iloc[10: pos + 10, :1].to_dict('records')
+        query_params = {"offset": 10, "limit": limit}
+        collection_w.query(term_expr, params=query_params,
+                           check_task=CheckTasks.check_query_results,
+                           check_items={exp_res: res})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail(reason="issue #19482")
+    @pytest.mark.parametrize("offset", ["12 s", " ", [0, 1], {2}])
+    def test_query_pagination_with_invalid_offset_type(self, offset):
+        """
+        target: test query pagination with invalid offset type
+        method: query with invalid offset type
+        expected: raise exception
+        """
+        # create collection, insert default_nb, load collection
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
+        int_values = vectors[0][ct.default_int64_field_name].values.tolist()
+        pos = 10
+        term_expr = f'{ct.default_int64_field_name} in {int_values[10: pos + 10]}'
+        res = vectors[0].iloc[10: pos + 10, :1].to_dict('records')
+        query_params = {"offset": offset, "limit": 10}
+        collection_w.query(term_expr, params=query_params,
+                           check_task=CheckTasks.check_query_results,
+                           check_items={exp_res: res})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail(reason="issue #19482")
+    @pytest.mark.parametrize("offset", [-1, 67890])
+    def test_query_pagination_with_invalid_offset_value(self, offset):
+        """
+        target: test query pagination with invalid offset value
+        method: query with invalid offset value
+        expected: raise exception
+        """
+        # create collection, insert default_nb, load collection
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
+        int_values = vectors[0][ct.default_int64_field_name].values.tolist()
+        pos = 10
+        term_expr = f'{ct.default_int64_field_name} in {int_values[10: pos + 10]}'
+        res = vectors[0].iloc[10: pos + 10, :1].to_dict('records')
+        query_params = {"offset": offset, "limit": 10}
+        collection_w.query(term_expr, params=query_params,
+                           check_task=CheckTasks.check_query_results,
+                           check_items={exp_res: res})
+
 
 class TestQueryOperation(TestcaseBase):
     """
@@ -1207,7 +1397,7 @@ class TestQueryOperation(TestcaseBase):
                            check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
 
-class  TestqueryString(TestcaseBase):
+class TestqueryString(TestcaseBase):
     """
     ******************************************************************
       The following cases are used to test query with string
@@ -1242,7 +1432,6 @@ class  TestqueryString(TestcaseBase):
         res, _ = collection_w.query(expression, output_fields=[ct.default_string_field_name])
         assert res[0].keys() == {ct.default_string_field_name}
 
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_string_with_mix_expr(self):
         """
@@ -1256,7 +1445,6 @@ class  TestqueryString(TestcaseBase):
         output_fields = [default_float_field_name, default_string_field_name]
         collection_w.query(default_mix_expr, output_fields=output_fields,
                                    check_task=CheckTasks.check_query_results, check_items={exp_res: res})
-
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("expression", cf.gen_invaild_string_expressions())
@@ -1413,7 +1601,6 @@ class  TestqueryString(TestcaseBase):
         res, _ = collection_w.query(string_exp, output_fields=output_fields)
 
         assert len(res) == 1
-
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_query_string_field_not_primary_is_empty(self):
