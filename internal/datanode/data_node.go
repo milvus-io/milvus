@@ -982,16 +982,9 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 			zap.Int64("taskID", req.GetImportTask().GetTaskId()),
 			zap.Error(errDataNodeIsUnhealthy(Params.DataNodeCfg.GetNodeID())))
 
-		msg := msgDataNodeIsUnhealthy(Params.DataNodeCfg.GetNodeID())
-		importResult.State = commonpb.ImportState_ImportFailed
-		importResult.Infos = append(importResult.Infos, &commonpb.KeyValuePair{Key: "failed_reason", Value: msg})
-		reportErr := reportFunc(importResult)
-		if reportErr != nil {
-			log.Warn("fail to report import state to root coord", zap.Error(reportErr))
-		}
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    msg,
+			Reason:    msgDataNodeIsUnhealthy(Params.DataNodeCfg.GetNodeID()),
 		}, nil
 	}
 
