@@ -106,11 +106,11 @@ func (rl *rateLimiter) registerLimiters() {
 		case internalpb.RateType_DDLPartition:
 			r = Params.QuotaConfig.DDLPartitionRate
 		case internalpb.RateType_DDLIndex:
-			r = Params.QuotaConfig.DDLIndexRate
+			r = Params.QuotaConfig.MaxIndexRate
 		case internalpb.RateType_DDLFlush:
-			r = Params.QuotaConfig.DDLFlushRate
+			r = Params.QuotaConfig.MaxFlushRate
 		case internalpb.RateType_DDLCompaction:
-			r = Params.QuotaConfig.DDLCompactionRate
+			r = Params.QuotaConfig.MaxCompactionRate
 		case internalpb.RateType_DMLInsert:
 			r = Params.QuotaConfig.DMLMaxInsertRate
 		case internalpb.RateType_DMLDelete:
