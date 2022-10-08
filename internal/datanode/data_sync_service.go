@@ -390,19 +390,19 @@ func (dsService *dataSyncService) getSegmentInfos(segmentIDs []int64) ([]*datapb
 	return infoResp.Infos, nil
 }
 
-func (dsService *dataSyncService) getChannelLatestMsgID(ctx context.Context, channelName string) ([]byte, error) {
+func (dsService *dataSyncService) getChannelLatestMsgID(ctx context.Context, channelName string, segmentID int64) ([]byte, error) {
 	pChannelName := funcutil.ToPhysicalChannel(channelName)
-	log.Info("ddNode convert vChannel to pChannel",
-		zap.String("vChannelName", channelName),
-		zap.String("pChannelName", pChannelName),
-	)
-
 	dmlStream, err := dsService.msFactory.NewMsgStream(ctx)
 	defer dmlStream.Close()
 	if err != nil {
 		return nil, err
 	}
-	dmlStream.AsConsumer([]string{pChannelName}, channelName)
+	subName := fmt.Sprintf("datanode-%d-%s-%d", Params.DataNodeCfg.GetNodeID(), channelName, segmentID)
+	log.Debug("dataSyncService register consumer for getChannelLatestMsgID",
+		zap.String("pChannelName", pChannelName),
+		zap.String("subscription", subName),
+	)
+	dmlStream.AsConsumer([]string{pChannelName}, subName)
 	id, err := dmlStream.GetLatestMsgID(pChannelName)
 	if err != nil {
 		return nil, err
