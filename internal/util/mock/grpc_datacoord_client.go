@@ -90,6 +90,10 @@ func (m *GrpcDataCoordClient) GetFlushedSegments(ctx context.Context, in *datapb
 	return &datapb.GetFlushedSegmentsResponse{}, m.Err
 }
 
+func (m *GrpcDataCoordClient) GetSegmentsByStates(ctx context.Context, in *datapb.GetSegmentsByStatesRequest, opts ...grpc.CallOption) (*datapb.GetSegmentsByStatesResponse, error) {
+	return &datapb.GetSegmentsByStatesResponse{}, m.Err
+}
+
 func (m *GrpcDataCoordClient) ShowConfigurations(ctx context.Context, in *internalpb.ShowConfigurationsRequest, opts ...grpc.CallOption) (*internalpb.ShowConfigurationsResponse, error) {
 	return &internalpb.ShowConfigurationsResponse{}, m.Err
 }

@@ -166,6 +166,10 @@ func (coord *DataCoordMock) GetFlushedSegments(ctx context.Context, req *datapb.
 	panic("implement me")
 }
 
+func (coord *DataCoordMock) GetSegmentsByStates(ctx context.Context, req *datapb.GetSegmentsByStatesRequest) (*datapb.GetSegmentsByStatesResponse, error) {
+	panic("implement me")
+}
+
 func (coord *DataCoordMock) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
 	if !coord.healthy() {
 		return &internalpb.ShowConfigurationsResponse{

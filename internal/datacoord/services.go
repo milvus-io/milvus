@@ -752,6 +752,49 @@ func (s *Server) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedS
 	return resp, nil
 }
 
+// GetSegmentsByStates returns all segment matches provided criterion and States
+// If requested partition id < 0, ignores the partition id filter
+func (s *Server) GetSegmentsByStates(ctx context.Context, req *datapb.GetSegmentsByStatesRequest) (*datapb.GetSegmentsByStatesResponse, error) {
+	resp := &datapb.GetSegmentsByStatesResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		},
+	}
+	collectionID := req.GetCollectionID()
+	partitionID := req.GetPartitionID()
+	states := req.GetStates()
+	log.Debug("received get segments by states request",
+		zap.Int64("collectionID", collectionID),
+		zap.Int64("partitionID", partitionID),
+		zap.Any("states", states))
+	if s.isClosed() {
+		resp.Status.Reason = serverNotServingErrMsg
+		return resp, nil
+	}
+	var segmentIDs []UniqueID
+	if partitionID < 0 {
+		segmentIDs = s.meta.GetSegmentsIDOfCollection(collectionID)
+	} else {
+		segmentIDs = s.meta.GetSegmentsIDOfPartition(collectionID, partitionID)
+	}
+	ret := make([]UniqueID, 0, len(segmentIDs))
+
+	statesDict := make(map[commonpb.SegmentState]bool)
+	for _, state := range states {
+		statesDict[state] = true
+	}
+	for _, id := range segmentIDs {
+		segment := s.meta.GetSegment(id)
+		if segment != nil && statesDict[segment.GetState()] {
+			ret = append(ret, id)
+		}
+	}
+
+	resp.Segments = ret
+	resp.Status.ErrorCode = commonpb.ErrorCode_Success
+	return resp, nil
+}
+
 //ShowConfigurations returns the configurations of DataCoord matching req.Pattern
 func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
 	log.Debug("DataCoord.ShowConfigurations", zap.String("pattern", req.Pattern))

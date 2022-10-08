@@ -688,6 +688,111 @@ func TestGetFlushedSegments(t *testing.T) {
 	})
 }
 
+func TestGetSegmentsByStates(t *testing.T) {
+	t.Run("normal case", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+		type testCase struct {
+			collID          int64
+			partID          int64
+			searchPartID    int64
+			flushedSegments []int64
+			sealedSegments  []int64
+			growingSegments []int64
+			expected        []int64
+		}
+		cases := []testCase{
+			{
+				collID:          1,
+				partID:          1,
+				searchPartID:    1,
+				flushedSegments: []int64{1, 2, 3},
+				sealedSegments:  []int64{4},
+				growingSegments: []int64{5},
+				expected:        []int64{1, 2, 3, 4},
+			},
+			{
+				collID:          1,
+				partID:          2,
+				searchPartID:    2,
+				flushedSegments: []int64{6, 7},
+				sealedSegments:  []int64{},
+				growingSegments: []int64{8},
+				expected:        []int64{6, 7},
+			},
+			{
+				collID:          2,
+				partID:          3,
+				searchPartID:    3,
+				flushedSegments: []int64{9, 10},
+				sealedSegments:  []int64{},
+				growingSegments: []int64{11},
+				expected:        []int64{9, 10},
+			},
+			{
+				collID:       1,
+				searchPartID: -1,
+				expected:     []int64{1, 2, 3, 4, 6, 7},
+			},
+			{
+				collID:       2,
+				searchPartID: -1,
+				expected:     []int64{9, 10},
+			},
+		}
+		for _, tc := range cases {
+			for _, fs := range tc.flushedSegments {
+				segInfo := &datapb.SegmentInfo{
+					ID:           fs,
+					CollectionID: tc.collID,
+					PartitionID:  tc.partID,
+					State:        commonpb.SegmentState_Flushed,
+				}
+				assert.Nil(t, svr.meta.AddSegment(NewSegmentInfo(segInfo)))
+			}
+			for _, us := range tc.sealedSegments {
+				segInfo := &datapb.SegmentInfo{
+					ID:           us,
+					CollectionID: tc.collID,
+					PartitionID:  tc.partID,
+					State:        commonpb.SegmentState_Sealed,
+				}
+				assert.Nil(t, svr.meta.AddSegment(NewSegmentInfo(segInfo)))
+			}
+			for _, us := range tc.growingSegments {
+				segInfo := &datapb.SegmentInfo{
+					ID:           us,
+					CollectionID: tc.collID,
+					PartitionID:  tc.partID,
+					State:        commonpb.SegmentState_Growing,
+				}
+				assert.Nil(t, svr.meta.AddSegment(NewSegmentInfo(segInfo)))
+			}
+
+			resp, err := svr.GetSegmentsByStates(context.Background(), &datapb.GetSegmentsByStatesRequest{
+				CollectionID: tc.collID,
+				PartitionID:  tc.searchPartID,
+				States:       []commonpb.SegmentState{commonpb.SegmentState_Sealed, commonpb.SegmentState_Flushed},
+			})
+			assert.Nil(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+
+			assert.ElementsMatch(t, tc.expected, resp.GetSegments())
+		}
+	})
+
+	t.Run("with closed server", func(t *testing.T) {
+		t.Run("with closed server", func(t *testing.T) {
+			svr := newTestServer(t, nil)
+			closeTestServer(t, svr)
+			resp, err := svr.GetSegmentsByStates(context.Background(), &datapb.GetSegmentsByStatesRequest{})
+			assert.Nil(t, err)
+			assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+			assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+		})
+	})
+}
+
 func TestService_WatchServices(t *testing.T) {
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc, syscall.SIGINT)

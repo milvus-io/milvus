@@ -251,11 +251,21 @@ type DataCoord interface {
 	//  if the constraint is broken, the checkpoint position will not be monotonically increasing and the integrity will be compromised
 	SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error)
 
-	// GetFlushedSegments returns flushed segment list of requested collection/parition
+	// GetSegmentsByStates returns segment list of requested collection/partition in given states
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the collection/partition id and states to query
+	// when partition is lesser or equal to 0, all flushed segments of collection will be returned
+	//
+	// response struct `GetSegmentsByStatesResponse` contains segment id list
+	// error is returned only when some communication issue occurs
+	GetSegmentsByStates(ctx context.Context, req *datapb.GetSegmentsByStatesRequest) (*datapb.GetSegmentsByStatesResponse, error)
+
+	// GetFlushedSegments returns flushed segment list of requested collection/partition
 	//
 	// ctx is the context to control request deadline and cancellation
 	// req contains the collection/partition id to query
-	//  when partition is lesser or equal to 0, all flushed segments of collection will be returned
+	// when partition is lesser or equal to 0, all flushed segments of collection will be returned
 	//
 	// response struct `GetFlushedSegmentsResponse` contains flushed segment id list
 	// error is returned only when some communication issue occurs

@@ -3531,23 +3531,18 @@ func (node *Proxy) getSegmentsOfCollection(ctx context.Context, dbName string, c
 
 	ret := make([]UniqueID, 0)
 	for _, partitionID := range showPartitionsResp.PartitionIDs {
-		showSegmentResponse, err := node.rootCoord.ShowSegments(ctx, &milvuspb.ShowSegmentsRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_ShowSegments,
-				MsgID:     0,
-				Timestamp: 0,
-				SourceID:  Params.ProxyCfg.GetNodeID(),
-			},
+		getSegmentsByStatesResponse, err := node.dataCoord.GetSegmentsByStates(ctx, &datapb.GetSegmentsByStatesRequest{
 			CollectionID: collectionID,
 			PartitionID:  partitionID,
+			States:       []commonpb.SegmentState{commonpb.SegmentState_Flushing, commonpb.SegmentState_Flushed, commonpb.SegmentState_Sealed},
 		})
 		if err != nil {
 			return nil, err
 		}
-		if showSegmentResponse.Status.ErrorCode != commonpb.ErrorCode_Success {
-			return nil, errors.New(showSegmentResponse.Status.Reason)
+		if getSegmentsByStatesResponse.Status.ErrorCode != commonpb.ErrorCode_Success {
+			return nil, errors.New(getSegmentsByStatesResponse.Status.Reason)
 		}
-		ret = append(ret, showSegmentResponse.SegmentIDs...)
+		ret = append(ret, getSegmentsByStatesResponse.GetSegments()...)
 	}
 	return ret, nil
 }

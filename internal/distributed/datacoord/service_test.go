@@ -50,6 +50,7 @@ type MockDataCoord struct {
 	partStatResp              *datapb.GetPartitionStatisticsResponse
 	recoverResp               *datapb.GetRecoveryInfoResponse
 	flushSegResp              *datapb.GetFlushedSegmentsResponse
+	SegByStatesResp           *datapb.GetSegmentsByStatesResponse
 	configResp                *internalpb.ShowConfigurationsResponse
 	metricResp                *milvuspb.GetMetricsResponse
 	compactionStateResp       *milvuspb.GetCompactionStateResponse
@@ -144,6 +145,10 @@ func (m *MockDataCoord) GetRecoveryInfo(ctx context.Context, req *datapb.GetReco
 
 func (m *MockDataCoord) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error) {
 	return m.flushSegResp, m.err
+}
+
+func (m *MockDataCoord) GetSegmentsByStates(ctx context.Context, req *datapb.GetSegmentsByStatesRequest) (*datapb.GetSegmentsByStatesResponse, error) {
+	return m.SegByStatesResp, m.err
 }
 
 func (m *MockDataCoord) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
