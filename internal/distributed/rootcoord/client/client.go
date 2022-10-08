@@ -231,6 +231,19 @@ func (c *Client) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectio
 	return ret.(*milvuspb.ShowCollectionsResponse), err
 }
 
+func (c *Client) AlterCollection(ctx context.Context, request *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.(rootcoordpb.RootCoordClient).AlterCollection(ctx, request)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+	return ret.(*commonpb.Status), err
+}
+
 // CreatePartition create partition
 func (c *Client) CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {

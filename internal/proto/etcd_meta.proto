@@ -49,7 +49,7 @@ message CollectionInfo {
   repeated int64 partitionIDs = 4;
   // deprecate
   repeated string partitionNames = 5;
-  // deprecat
+  // deprecate
   repeated FieldIndexInfo field_indexes = 6;
   repeated string virtual_channel_names = 7;
   repeated string physical_channel_names = 8;
@@ -59,6 +59,7 @@ message CollectionInfo {
   repeated common.KeyDataPair start_positions = 11;
   common.ConsistencyLevel consistency_level = 12;
   CollectionState state = 13; // To keep compatible with older version, default state is `Created`.
+  repeated common.KeyValuePair properties = 14;
 }
 
 message PartitionInfo {

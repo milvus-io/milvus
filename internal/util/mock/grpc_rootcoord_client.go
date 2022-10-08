@@ -216,3 +216,7 @@ func (m *GrpcRootCoordClient) ListCredUsers(ctx context.Context, in *milvuspb.Li
 func (m *GrpcRootCoordClient) GetCredential(ctx context.Context, in *rootcoordpb.GetCredentialRequest, opts ...grpc.CallOption) (*rootcoordpb.GetCredentialResponse, error) {
 	return &rootcoordpb.GetCredentialResponse{}, m.Err
 }
+
+func (m *GrpcRootCoordClient) AlterCollection(ctx context.Context, in *milvuspb.AlterCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}

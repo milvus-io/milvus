@@ -63,6 +63,8 @@ service DataCoord {
   rpc SaveImportSegment(SaveImportSegmentRequest) returns(common.Status) {}
   rpc UnsetIsImportingState(UnsetIsImportingStateRequest) returns(common.Status) {}
   rpc MarkSegmentsDropped(MarkSegmentsDroppedRequest) returns(common.Status) {}
+
+  rpc BroadCastAlteredCollection(milvus.AlterCollectionRequest) returns (common.Status) {}
 }
 
 service DataNode {
@@ -242,13 +244,6 @@ message FlushSegmentsRequest {
 message SegmentMsg{
   common.MsgBase base = 1;
   SegmentInfo segment = 2;
-}
-
-message CollectionInfo {
-  int64 ID = 1;
-  schema.CollectionSchema schema = 2;
-  repeated int64 partitions = 3;
-  repeated common.KeyDataPair start_positions = 4;
 }
 
 message SegmentInfo {
@@ -454,6 +449,7 @@ message CompactionPlan {
   CompactionType type = 5;
   uint64 timetravel = 6;
   string channel = 7;
+  int64 collection_ttl = 8;
 }
 
 message CompactionResult {

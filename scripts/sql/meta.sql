@@ -21,6 +21,7 @@ CREATE TABLE if not exists milvus_meta.collections (
     start_position TEXT,
     consistency_level INT,
     status INT NOT NULL,
+    properties VARCHAR(512),
     ts BIGINT UNSIGNED DEFAULT 0,
     is_deleted BOOL DEFAULT FALSE,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,

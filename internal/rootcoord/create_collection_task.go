@@ -242,6 +242,7 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 				State:                     pb.PartitionState_PartitionCreated,
 			},
 		},
+		Properties: t.Req.Properties,
 	}
 
 	// We cannot check the idempotency inside meta table when adding collection, since we'll execute duplicate steps

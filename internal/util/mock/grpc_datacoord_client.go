@@ -160,3 +160,8 @@ func (m *GrpcDataCoordClient) UnsetIsImportingState(context.Context, *datapb.Uns
 func (m *GrpcDataCoordClient) MarkSegmentsDropped(context.Context, *datapb.MarkSegmentsDroppedRequest, ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }
+
+func (m *GrpcDataCoordClient) BroadCastAlteredCollection(ctx context.Context, in *milvuspb.AlterCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+
+}

@@ -52,7 +52,12 @@ func (tc *Catalog) CreateCollection(ctx context.Context, collection *model.Colle
 			startPositionsStr = string(startPositionsBytes)
 		}
 
-		err := tc.metaDomain.CollectionDb(txCtx).Insert(&dbmodel.Collection{
+		properties, err := dbmodel.MarshalProperties(collection.Properties)
+		if err != nil {
+			return err
+		}
+
+		err = tc.metaDomain.CollectionDb(txCtx).Insert(&dbmodel.Collection{
 			TenantID:         tenantID,
 			CollectionID:     collection.CollectionID,
 			CollectionName:   collection.Name,
@@ -63,6 +68,7 @@ func (tc *Catalog) CreateCollection(ctx context.Context, collection *model.Colle
 			ConsistencyLevel: int32(collection.ConsistencyLevel),
 			Status:           int32(collection.State),
 			Ts:               ts,
+			Properties:       properties,
 		})
 		if err != nil {
 			return err
@@ -395,6 +401,11 @@ func (tc *Catalog) alterModifyCollection(ctx context.Context, oldColl *model.Col
 		startPositionsStr = string(startPositionsBytes)
 	}
 
+	properties, err := dbmodel.MarshalProperties(newColl.Properties)
+	if err != nil {
+		return err
+	}
+
 	createdAt, _ := tsoutil.ParseTS(newColl.CreateTime)
 	tenantID := contextutil.TenantID(ctx)
 	coll := &dbmodel.Collection{
@@ -410,6 +421,7 @@ func (tc *Catalog) alterModifyCollection(ctx context.Context, oldColl *model.Col
 		Ts:               ts,
 		CreatedAt:        createdAt,
 		UpdatedAt:        time.Now(),
+		Properties:       properties,
 	}
 
 	return tc.metaDomain.CollectionDb(ctx).Update(coll)

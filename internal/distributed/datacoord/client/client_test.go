@@ -144,6 +144,11 @@ func Test_NewClient(t *testing.T) {
 
 		r31, err := client.ShowConfigurations(ctx, nil)
 		retCheck(retNotNil, r31, err)
+
+		{
+			ret, err := client.BroadCastAlteredCollection(ctx, nil)
+			retCheck(retNotNil, ret, err)
+		}
 	}
 
 	client.grpcClient = &mock.GRPCClientBase{

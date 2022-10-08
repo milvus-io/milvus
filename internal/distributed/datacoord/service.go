@@ -397,3 +397,7 @@ func (s *Server) UnsetIsImportingState(ctx context.Context, request *datapb.Unse
 func (s *Server) MarkSegmentsDropped(ctx context.Context, req *datapb.MarkSegmentsDroppedRequest) (*commonpb.Status, error) {
 	return s.dataCoord.MarkSegmentsDropped(ctx, req)
 }
+
+func (s *Server) BroadCastAlteredCollection(ctx context.Context, request *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
+	return s.dataCoord.BroadCastAlteredCollection(ctx, request)
+}

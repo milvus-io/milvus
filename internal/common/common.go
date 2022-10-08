@@ -81,3 +81,9 @@ const (
 	MetricTypeKey  = "metric_type"
 	DimKey         = "dim"
 )
+
+//  Collection properties key
+
+const (
+	CollectionTTLConfigKey = "collection.ttl.seconds"
+)

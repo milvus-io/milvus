@@ -2,6 +2,7 @@ package dbmodel
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/milvus-io/milvus/api/commonpb"
@@ -22,6 +23,7 @@ type Collection struct {
 	StartPosition    string             `gorm:"start_position"`
 	ConsistencyLevel int32              `gorm:"consistency_level"`
 	Status           int32              `gorm:"status"`
+	Properties       string             `gorm:"properties"`
 	Ts               typeutil.Timestamp `gorm:"ts"`
 	IsDeleted        bool               `gorm:"is_deleted"`
 	CreatedAt        time.Time          `gorm:"created_at"`
@@ -55,6 +57,13 @@ func UnmarshalCollectionModel(coll *Collection) (*model.Collection, error) {
 		}
 	}
 
+	properties, err := UnmarshalProperties(coll.Properties)
+	if err != nil {
+		log.Error("unmarshal collection properties error", zap.Int64("collID", coll.CollectionID),
+			zap.String("properties", coll.Properties), zap.Error(err))
+		return nil, err
+	}
+
 	return &model.Collection{
 		TenantID:         coll.TenantID,
 		CollectionID:     coll.CollectionID,
@@ -65,5 +74,33 @@ func UnmarshalCollectionModel(coll *Collection) (*model.Collection, error) {
 		StartPositions:   startPositions,
 		ConsistencyLevel: commonpb.ConsistencyLevel(coll.ConsistencyLevel),
 		CreateTime:       coll.Ts,
+		Properties:       properties,
 	}, nil
+}
+
+func UnmarshalProperties(propertiesStr string) ([]*commonpb.KeyValuePair, error) {
+	if propertiesStr == "" {
+		return nil, nil
+	}
+
+	var properties []*commonpb.KeyValuePair
+	if propertiesStr != "" {
+		if err := json.Unmarshal([]byte(propertiesStr), &properties); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal properties: %s", err.Error())
+		}
+	}
+
+	return properties, nil
+}
+
+func MarshalProperties(properties []*commonpb.KeyValuePair) (string, error) {
+	if properties == nil {
+		return "", nil
+	}
+
+	propertiesBytes, err := json.Marshal(properties)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal properties: %s", err.Error())
+	}
+	return string(propertiesBytes), nil
 }

@@ -126,6 +126,10 @@ func (coord *DataCoordMock) MarkSegmentsDropped(ctx context.Context, req *datapb
 	panic("implement me")
 }
 
+func (coord *DataCoordMock) BroadCastAlteredCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
 func (coord *DataCoordMock) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error) {
 	panic("implement me")
 }

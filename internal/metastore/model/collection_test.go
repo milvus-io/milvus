@@ -51,6 +51,12 @@ var (
 				PartitionCreatedTimestamp: 1,
 			},
 		},
+		Properties: []*commonpb.KeyValuePair{
+			{
+				Key:   "k",
+				Value: "v",
+			},
+		},
 	}
 
 	deprecatedColPb = &pb.CollectionInfo{
@@ -76,6 +82,12 @@ var (
 		ShardsNum:            1,
 		StartPositions:       startPositions,
 		ConsistencyLevel:     commonpb.ConsistencyLevel_Strong,
+		Properties: []*commonpb.KeyValuePair{
+			{
+				Key:   "k",
+				Value: "v",
+			},
+		},
 	}
 )
 

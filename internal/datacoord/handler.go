@@ -150,8 +150,8 @@ func (h *ServerHandler) GetVChanPositions(channel *channel, partitionID UniqueID
 	}
 }
 
-func getCollectionStartPosition(channel string, collectionInfo *datapb.CollectionInfo) *internalpb.MsgPosition {
-	return toMsgPosition(channel, collectionInfo.GetStartPositions())
+func getCollectionStartPosition(channel string, collectionInfo *collectionInfo) *internalpb.MsgPosition {
+	return toMsgPosition(channel, collectionInfo.StartPositions)
 }
 
 func toMsgPosition(channel string, startPositions []*commonpb.KeyDataPair) *internalpb.MsgPosition {
@@ -184,7 +184,7 @@ func trimSegmentInfo(info *datapb.SegmentInfo) *datapb.SegmentInfo {
 }
 
 // GetCollection returns collection info with specified collection id
-func (h *ServerHandler) GetCollection(ctx context.Context, collectionID UniqueID) *datapb.CollectionInfo {
+func (h *ServerHandler) GetCollection(ctx context.Context, collectionID UniqueID) *collectionInfo {
 	coll := h.s.meta.GetCollection(collectionID)
 	if coll != nil {
 		return coll

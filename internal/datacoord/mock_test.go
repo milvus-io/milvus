@@ -59,6 +59,17 @@ func (m *MockAllocator) allocID(ctx context.Context) (UniqueID, error) {
 	return val, nil
 }
 
+type MockAllocator0 struct {
+}
+
+func (m *MockAllocator0) allocTimestamp(ctx context.Context) (Timestamp, error) {
+	return Timestamp(0), nil
+}
+
+func (m *MockAllocator0) allocID(ctx context.Context) (UniqueID, error) {
+	return 0, nil
+}
+
 var _ allocator = (*FailsAllocator)(nil)
 
 // FailsAllocator allocator that fails
@@ -360,6 +371,10 @@ func (m *mockRootCoordService) ShowCollections(ctx context.Context, req *milvusp
 	}, nil
 }
 
+func (m *mockRootCoordService) AlterCollection(ctx context.Context, request *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
+	panic("not implemented") // TODO: Implement
+}
+
 func (m *mockRootCoordService) CreatePartition(ctx context.Context, req *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
 	panic("not implemented") // TODO: Implement
 }
@@ -613,30 +628,30 @@ type mockCompactionTrigger struct {
 }
 
 // triggerCompaction trigger a compaction if any compaction condition satisfy.
-func (t *mockCompactionTrigger) triggerCompaction(ct *compactTime) error {
+func (t *mockCompactionTrigger) triggerCompaction() error {
 	if f, ok := t.methods["triggerCompaction"]; ok {
-		if ff, ok := f.(func(ct *compactTime) error); ok {
-			return ff(ct)
+		if ff, ok := f.(func() error); ok {
+			return ff()
 		}
 	}
 	panic("not implemented")
 }
 
 // triggerSingleCompaction trigerr a compaction bundled with collection-partiiton-channel-segment
-func (t *mockCompactionTrigger) triggerSingleCompaction(collectionID int64, partitionID int64, segmentID int64, channel string, ct *compactTime) error {
+func (t *mockCompactionTrigger) triggerSingleCompaction(collectionID, partitionID, segmentID int64, channel string) error {
 	if f, ok := t.methods["triggerSingleCompaction"]; ok {
-		if ff, ok := f.(func(collectionID int64, partitionID int64, segmentID int64, channel string, ct *compactTime) error); ok {
-			return ff(collectionID, partitionID, segmentID, channel, ct)
+		if ff, ok := f.(func(collectionID int64, partitionID int64, segmentID int64, channel string) error); ok {
+			return ff(collectionID, partitionID, segmentID, channel)
 		}
 	}
 	panic("not implemented")
 }
 
 // forceTriggerCompaction force to start a compaction
-func (t *mockCompactionTrigger) forceTriggerCompaction(collectionID int64, ct *compactTime) (UniqueID, error) {
+func (t *mockCompactionTrigger) forceTriggerCompaction(collectionID int64) (UniqueID, error) {
 	if f, ok := t.methods["forceTriggerCompaction"]; ok {
-		if ff, ok := f.(func(collectionID int64, ct *compactTime) (UniqueID, error)); ok {
-			return ff(collectionID, ct)
+		if ff, ok := f.(func(collectionID int64) (UniqueID, error)); ok {
+			return ff(collectionID)
 		}
 	}
 	panic("not implemented")

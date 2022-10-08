@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"math/rand"
 	"strconv"
-	"time"
 
 	"github.com/milvus-io/milvus/api/commonpb"
 	"github.com/milvus-io/milvus/api/milvuspb"
@@ -439,20 +438,12 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		s.flushCh <- req.SegmentID
 
 		if !req.Importing && Params.DataCoordCfg.EnableCompaction {
-			cctx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
-			defer cancel()
-
-			ct, err := GetCompactTime(cctx, s.allocator)
-			if err == nil {
-				err = s.compactionTrigger.triggerSingleCompaction(segment.GetCollectionID(),
-					segment.GetPartitionID(), segmentID, segment.GetInsertChannel(), ct)
-				if err != nil {
-					log.Warn("failed to trigger single compaction", zap.Int64("segment ID", segmentID))
-				} else {
-					log.Info("compaction triggered for segment", zap.Int64("segment ID", segmentID))
-				}
+			err = s.compactionTrigger.triggerSingleCompaction(segment.GetCollectionID(), segment.GetPartitionID(),
+				segmentID, segment.GetInsertChannel())
+			if err != nil {
+				log.Warn("failed to trigger single compaction", zap.Int64("segment ID", segmentID))
 			} else {
-				log.Warn("failed to get time travel reverse time")
+				log.Info("compaction triggered for segment", zap.Int64("segment ID", segmentID))
 			}
 		}
 	}
@@ -916,14 +907,7 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 		return resp, nil
 	}
 
-	ct, err := GetCompactTime(ctx, s.allocator)
-	if err != nil {
-		log.Warn("failed to get compact time", zap.Int64("collectionID", req.GetCollectionID()), zap.Error(err))
-		resp.Status.Reason = err.Error()
-		return resp, nil
-	}
-
-	id, err := s.compactionTrigger.forceTriggerCompaction(req.CollectionID, ct)
+	id, err := s.compactionTrigger.forceTriggerCompaction(req.CollectionID)
 	if err != nil {
 		log.Error("failed to trigger manual compaction", zap.Int64("collectionID", req.GetCollectionID()), zap.Error(err))
 		resp.Status.Reason = err.Error()
@@ -1370,6 +1354,49 @@ func (s *Server) MarkSegmentsDropped(ctx context.Context, req *datapb.MarkSegmen
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		}, nil
 	}
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}, nil
+}
+
+func (s *Server) BroadCastAlteredCollection(ctx context.Context,
+	req *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
+	errResp := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		Reason:    "",
+	}
+
+	if s.isClosed() {
+		log.Warn("failed to broadcast collection information for closed server")
+		errResp.Reason = msgDataCoordIsUnhealthy(Params.DataCoordCfg.GetNodeID())
+		return errResp, nil
+	}
+
+	// get collection info from cache
+	clonedColl := s.meta.GetClonedCollectionInfo(req.CollectionID)
+
+	// try to reload collection from RootCoord
+	if clonedColl == nil {
+		err := s.loadCollectionFromRootCoord(ctx, req.CollectionID)
+		if err != nil {
+			log.Warn("failed to load collection from rootcoord", zap.Int64("collectionID", req.CollectionID), zap.Error(err))
+			errResp.Reason = fmt.Sprintf("failed to load collection from rootcoord, collectionID:%d", req.CollectionID)
+			return errResp, nil
+		}
+	}
+
+	clonedColl = s.meta.GetClonedCollectionInfo(req.CollectionID)
+	if clonedColl == nil {
+		return nil, fmt.Errorf("get collection from cache failed, collectionID:%d", req.CollectionID)
+	}
+
+	properties := make(map[string]string)
+	for _, pair := range req.Properties {
+		properties[pair.GetKey()] = pair.GetValue()
+	}
+
+	clonedColl.Properties = properties
+	s.meta.AddCollection(clonedColl)
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}, nil

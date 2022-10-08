@@ -474,3 +474,7 @@ func (s *Server) SelectGrant(ctx context.Context, request *milvuspb.SelectGrantR
 func (s *Server) ListPolicy(ctx context.Context, request *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
 	return s.rootCoord.ListPolicy(ctx, request)
 }
+
+func (s *Server) AlterCollection(ctx context.Context, request *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
+	return s.rootCoord.AlterCollection(ctx, request)
+}

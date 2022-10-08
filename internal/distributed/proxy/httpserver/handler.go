@@ -113,6 +113,7 @@ func (h *Handlers) handleCreateCollection(c *gin.Context) (interface{}, error) {
 		Schema:           schemaProto,
 		ShardsNum:        wrappedReq.ShardsNum,
 		ConsistencyLevel: wrappedReq.ConsistencyLevel,
+		Properties:       wrappedReq.Properties,
 	}
 	return h.proxy.CreateCollection(c, req)
 }

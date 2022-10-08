@@ -37,6 +37,7 @@ type WrappedCreateCollectionRequest struct {
 	ShardsNum int32 `protobuf:"varint,5,opt,name=shards_num,json=shardsNum,proto3" json:"shards_num,omitempty"`
 	// The consistency level that the collection used, modification is not supported now.
 	ConsistencyLevel commonpb.ConsistencyLevel `protobuf:"varint,6,opt,name=consistency_level,json=consistencyLevel,proto3,enum=milvus.proto.common.ConsistencyLevel" json:"consistency_level,omitempty"`
+	Properties       []*commonpb.KeyValuePair  `protobuf:"bytes,13,rep,name=properties,proto3" json:"properties,omitempty"`
 }
 
 // WrappedInsertRequest is the InsertRequest wrapped for RESTful request

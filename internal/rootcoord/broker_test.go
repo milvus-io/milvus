@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/milvus-io/milvus/api/milvuspb"
+
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 
 	"github.com/milvus-io/milvus/api/commonpb"
@@ -274,5 +276,31 @@ func TestServerBroker_GetSegmentIndexState(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(states))
 		assert.Equal(t, commonpb.IndexState_Finished, states[0].GetState())
+	})
+}
+
+func TestServerBroker_BroadCastAlteredCollection(t *testing.T) {
+	t.Run("failed to execute", func(t *testing.T) {
+		c := newTestCore(withInvalidDataCoord())
+		b := newServerBroker(c)
+		ctx := context.Background()
+		err := b.BroadCastAlteredCollection(ctx, &milvuspb.AlterCollectionRequest{})
+		assert.Error(t, err)
+	})
+
+	t.Run("non success error code on execute", func(t *testing.T) {
+		c := newTestCore(withFailedDataCoord())
+		b := newServerBroker(c)
+		ctx := context.Background()
+		err := b.BroadCastAlteredCollection(ctx, &milvuspb.AlterCollectionRequest{})
+		assert.Error(t, err)
+	})
+
+	t.Run("success", func(t *testing.T) {
+		c := newTestCore(withValidDataCoord())
+		b := newServerBroker(c)
+		ctx := context.Background()
+		err := b.BroadCastAlteredCollection(ctx, &milvuspb.AlterCollectionRequest{})
+		assert.NoError(t, err)
 	})
 }

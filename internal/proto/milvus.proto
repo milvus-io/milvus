@@ -21,6 +21,7 @@ service MilvusService {
   rpc DescribeCollection(DescribeCollectionRequest) returns (DescribeCollectionResponse) {}
   rpc GetCollectionStatistics(GetCollectionStatisticsRequest) returns (GetCollectionStatisticsResponse) {}
   rpc ShowCollections(ShowCollectionsRequest) returns (ShowCollectionsResponse) {}
+  rpc AlterCollection(AlterCollectionRequest) returns (common.Status) {}
 
   rpc CreatePartition(CreatePartitionRequest) returns (common.Status) {}
   rpc DropPartition(DropPartitionRequest) returns (common.Status) {}
@@ -133,6 +134,7 @@ message CreateCollectionRequest {
   int32 shards_num = 5;
   // The consistency level that the collection used, modification is not supported now.
   common.ConsistencyLevel consistency_level = 6;
+  repeated common.KeyValuePair properties = 7;
 }
 
 /**
@@ -150,6 +152,25 @@ message DropCollectionRequest {
   string db_name = 2;
   // The unique collection name in milvus.(Required)
   string collection_name = 3;
+}
+
+/**
+* Alter collection in milvus
+*/
+message AlterCollectionRequest {
+  option (common.privilege_ext_obj) = {
+    object_type: Global
+    object_privilege: PrivilegeCreateCollection
+    object_name_index: -1
+  };
+  // Not useful for now
+  common.MsgBase base = 1;
+  // Not useful for now
+  string db_name = 2;
+  // The unique collection name in milvus.(Required)
+  string collection_name = 3;
+  int64  collectionID = 4;
+  repeated common.KeyValuePair properties = 5;
 }
 
 /**
@@ -226,6 +247,7 @@ message DescribeCollectionResponse {
   common.ConsistencyLevel consistency_level = 11;
   // The collection name
   string collection_name = 12;
+  repeated common.KeyValuePair properties = 13;
 }
 
 /**

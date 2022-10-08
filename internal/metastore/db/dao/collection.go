@@ -103,6 +103,7 @@ func generateCollectionUpdatesWithoutID(in *dbmodel.Collection) map[string]inter
 		"start_position":    in.StartPosition,
 		"consistency_level": in.ConsistencyLevel,
 		"status":            in.Status,
+		"properties":        in.Properties,
 		"ts":                in.Ts,
 		"is_deleted":        in.IsDeleted,
 		"created_at":        in.CreatedAt,
