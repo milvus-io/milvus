@@ -89,7 +89,7 @@ jobs:
           name: ubuntu-${{ matrix.ubuntu }}-unittests
           fail_ci_if_error: true
       - name: Retry Upload coverage to Codecov
-        if: "steps.upload_cov.outcome=='failure' && github.repository == 'milvus-io/milvus'"
+        if: "${{ failure() }} && github.repository == 'milvus-io/milvus'"
         uses: codecov/codecov-action@v3.1.1
         id: retry_upload_cov
         with:
