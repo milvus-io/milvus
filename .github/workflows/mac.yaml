@@ -66,10 +66,7 @@ jobs:
           if [[ ! -d "/var/tmp/ccache" ]];then
             mkdir -p /var/tmp/ccache
           fi
-          brew install boost libomp ninja tbb openblas ccache
-          if [[ ! -d "/usr/local/opt/llvm" ]]; then
-            ln -s /usr/local/opt/llvm@14 /usr/local/opt/llvm
-          fi
+          brew install llvm boost libomp ninja tbb openblas ccache
           make milvus && sh scripts/collect_arrow_dep.sh -f /tmp/thirdparty
       - name: Upload Cmake log
         uses: actions/upload-artifact@v3
