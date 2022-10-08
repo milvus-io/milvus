@@ -61,14 +61,14 @@ jobs:
           CCACHE_COMPRESS: 1
           CCACHE_COMPRESSLEVEL: 5
           CCACHE_MAXSIZE: 2G
-          CUSTOM_THIRDPARTY_PATH: /tmp/thirdparty          
+          CUSTOM_THIRDPARTY_PATH: /tmp/thirdparty
         run: |
           if [[ ! -d "/var/tmp/ccache" ]];then
             mkdir -p /var/tmp/ccache
           fi
           brew install boost libomp ninja tbb openblas ccache
           if [[ ! -d "/usr/local/opt/llvm" ]]; then
-            ln -s /usr/local/opt/llvm@13 /usr/local/opt/llvm
+            ln -s /usr/local/opt/llvm@14 /usr/local/opt/llvm
           fi
           make milvus && sh scripts/collect_arrow_dep.sh -f /tmp/thirdparty
       - name: Upload Cmake log
