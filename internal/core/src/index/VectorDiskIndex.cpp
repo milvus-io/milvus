@@ -52,7 +52,8 @@ VectorDiskAnnIndex<T>::Load(const BinarySet& binary_set /* not used */, const Co
     auto index_files = GetValueFromConfig<std::vector<std::string>>(config, "index_files");
     AssertInfo(index_files.has_value(), "index file paths is empty when load disk ann index data");
     file_manager_->CacheIndexToDisk(index_files.value());
-    index_->Prepare(cfg);
+    auto ok = index_->Prepare(cfg);
+    AssertInfo(ok, "load disk index failed");
     SetDim(index_->Dim());
 }
 
