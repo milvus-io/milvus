@@ -43,7 +43,7 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 
 	genWatchDMChannelsRequest := func() *querypb.WatchDmChannelsRequest {
 		req := &querypb.WatchDmChannelsRequest{
-			Base:         genCommonMsgBase(commonpb.MsgType_WatchDmChannels),
+			Base:         genCommonMsgBase(commonpb.MsgType_WatchDmChannels, 0),
 			CollectionID: defaultCollectionID,
 			PartitionIDs: []UniqueID{defaultPartitionID},
 			Schema:       schema,
@@ -301,7 +301,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 
 	genLoadEmptySegmentsRequest := func() *querypb.LoadSegmentsRequest {
 		req := &querypb.LoadSegmentsRequest{
-			Base:         genCommonMsgBase(commonpb.MsgType_LoadSegments),
+			Base:         genCommonMsgBase(commonpb.MsgType_LoadSegments, 0),
 			CollectionID: defaultCollectionID,
 			Schema:       schema,
 		}
@@ -345,7 +345,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 		assert.NoError(t, err)
 
 		req := &querypb.LoadSegmentsRequest{
-			Base:   genCommonMsgBase(commonpb.MsgType_LoadSegments),
+			Base:   genCommonMsgBase(commonpb.MsgType_LoadSegments, node.session.ServerID),
 			Schema: schema,
 			Infos: []*querypb.SegmentLoadInfo{
 				{
@@ -379,7 +379,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 		assert.NoError(t, err)
 
 		req := &querypb.LoadSegmentsRequest{
-			Base:   genCommonMsgBase(commonpb.MsgType_LoadSegments),
+			Base:   genCommonMsgBase(commonpb.MsgType_LoadSegments, node.session.ServerID),
 			Schema: schema,
 			Infos: []*querypb.SegmentLoadInfo{
 				{
@@ -484,7 +484,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 		assert.NoError(t, err)
 
 		req := &querypb.LoadSegmentsRequest{
-			Base:   genCommonMsgBase(commonpb.MsgType_LoadSegments),
+			Base:   genCommonMsgBase(commonpb.MsgType_LoadSegments, node.session.ServerID),
 			Schema: schema,
 			Infos: []*querypb.SegmentLoadInfo{
 				{
@@ -584,7 +584,7 @@ func TestTask_loadSegmentsTaskLoadDelta(t *testing.T) {
 			CollectionID: defaultCollectionID,
 		}
 		loadReq := &querypb.LoadSegmentsRequest{
-			Base:   genCommonMsgBase(commonpb.MsgType_LoadSegments),
+			Base:   genCommonMsgBase(commonpb.MsgType_LoadSegments, node.session.ServerID),
 			Schema: schema,
 			Infos:  []*querypb.SegmentLoadInfo{segmentLoadInfo},
 			DeltaPositions: []*internalpb.MsgPosition{
@@ -614,7 +614,7 @@ func TestTask_loadSegmentsTaskLoadDelta(t *testing.T) {
 
 		// load second segments with same channel
 		loadReq = &querypb.LoadSegmentsRequest{
-			Base:   genCommonMsgBase(commonpb.MsgType_LoadSegments),
+			Base:   genCommonMsgBase(commonpb.MsgType_LoadSegments, node.session.ServerID),
 			Schema: schema,
 			Infos: []*querypb.SegmentLoadInfo{
 				{
@@ -662,7 +662,7 @@ func TestTask_releaseCollectionTask(t *testing.T) {
 
 	genReleaseCollectionRequest := func() *querypb.ReleaseCollectionRequest {
 		req := &querypb.ReleaseCollectionRequest{
-			Base:         genCommonMsgBase(commonpb.MsgType_LoadSegments),
+			Base:         genCommonMsgBase(commonpb.MsgType_ReleaseCollection, 0),
 			CollectionID: defaultCollectionID,
 		}
 		return req
@@ -749,7 +749,7 @@ func TestTask_releasePartitionTask(t *testing.T) {
 
 	genReleasePartitionsRequest := func() *querypb.ReleasePartitionsRequest {
 		req := &querypb.ReleasePartitionsRequest{
-			Base:         genCommonMsgBase(commonpb.MsgType_LoadSegments),
+			Base:         genCommonMsgBase(commonpb.MsgType_ReleasePartitions, 0),
 			CollectionID: defaultCollectionID,
 			PartitionIDs: []UniqueID{defaultPartitionID},
 		}

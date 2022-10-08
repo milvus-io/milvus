@@ -279,6 +279,7 @@ func (node *QueryNode) getStatisticsWithDmlChannel(ctx context.Context, req *que
 
 // WatchDmChannels create consumers on dmChannels to receive Incremental data，which is the important part of real-time query
 func (node *QueryNode) WatchDmChannels(ctx context.Context, in *querypb.WatchDmChannelsRequest) (*commonpb.Status, error) {
+	// check node healthy
 	code := node.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
 		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeCfg.GetNodeID())
@@ -288,6 +289,16 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, in *querypb.WatchDmC
 		}
 		return status, nil
 	}
+
+	// check target matches
+	if in.GetBase().GetTargetID() != node.session.ServerID {
+		status := &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_NodeIDNotMatch,
+			Reason:    common.WrapNodeIDNotMatchMsg(in.GetBase().GetTargetID(), node.session.ServerID),
+		}
+		return status, nil
+	}
+
 	task := &watchDmChannelsTask{
 		baseTask: baseTask{
 			ctx:  ctx,
@@ -335,6 +346,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, in *querypb.WatchDmC
 }
 
 func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmChannelRequest) (*commonpb.Status, error) {
+	// check node healthy
 	code := node.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
 		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeCfg.GetNodeID())
@@ -344,6 +356,16 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 		}
 		return status, nil
 	}
+
+	// check target matches
+	if req.GetBase().GetTargetID() != node.session.ServerID {
+		status := &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_NodeIDNotMatch,
+			Reason:    common.WrapNodeIDNotMatchMsg(req.GetBase().GetTargetID(), node.session.ServerID),
+		}
+		return status, nil
+	}
+
 	dct := &releaseCollectionTask{
 		baseTask: baseTask{
 			ctx:  ctx,
@@ -385,12 +407,21 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 
 // LoadSegments load historical data into query node, historical data can be vector data or index
 func (node *QueryNode) LoadSegments(ctx context.Context, in *querypb.LoadSegmentsRequest) (*commonpb.Status, error) {
+	// check node healthy
 	code := node.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
 		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeCfg.GetNodeID())
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
+		}
+		return status, nil
+	}
+	// check target matches
+	if in.GetBase().GetTargetID() != node.session.ServerID {
+		status := &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_NodeIDNotMatch,
+			Reason:    common.WrapNodeIDNotMatchMsg(in.GetBase().GetTargetID(), node.session.ServerID),
 		}
 		return status, nil
 	}
@@ -537,12 +568,21 @@ func (node *QueryNode) ReleasePartitions(ctx context.Context, in *querypb.Releas
 
 // ReleaseSegments remove the specified segments from query node according segmentIDs, partitionIDs, and collectionID
 func (node *QueryNode) ReleaseSegments(ctx context.Context, in *querypb.ReleaseSegmentsRequest) (*commonpb.Status, error) {
+	// check node healthy
 	code := node.stateCode.Load().(internalpb.StateCode)
 	if code != internalpb.StateCode_Healthy {
 		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeCfg.GetNodeID())
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
+		}
+		return status, nil
+	}
+	// check target matches
+	if in.GetBase().GetTargetID() != node.session.ServerID {
+		status := &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_NodeIDNotMatch,
+			Reason:    common.WrapNodeIDNotMatchMsg(in.GetBase().GetTargetID(), node.session.ServerID),
 		}
 		return status, nil
 	}
@@ -1163,6 +1203,15 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 		}, nil
 	}
 
+	// check target matches
+	if req.GetBase().GetTargetID() != node.session.ServerID {
+		status := &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_NodeIDNotMatch,
+			Reason:    common.WrapNodeIDNotMatchMsg(req.GetBase().GetTargetID(), node.session.ServerID),
+		}
+		return &querypb.GetDataDistributionResponse{Status: status}, nil
+	}
+
 	growingSegments := node.metaReplica.getGrowingSegments()
 	sealedSegments := node.metaReplica.getSealedSegments()
 	shardClusters := node.ShardClusterService.GetShardClusters()
@@ -1225,6 +1274,24 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 
 func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDistributionRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", req.GetCollectionID()), zap.String("channel", req.GetChannel()))
+	// check node healthy
+	code := node.stateCode.Load().(internalpb.StateCode)
+	if code != internalpb.StateCode_Healthy {
+		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeCfg.GetNodeID())
+		status := &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}
+		return status, nil
+	}
+	// check target matches
+	if req.GetBase().GetTargetID() != node.session.ServerID {
+		status := &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_NodeIDNotMatch,
+			Reason:    common.WrapNodeIDNotMatchMsg(req.GetBase().GetTargetID(), node.session.ServerID),
+		}
+		return status, nil
+	}
 	log.Debug("SyncDistribution received")
 	shardCluster, ok := node.ShardClusterService.getShardCluster(req.GetChannel())
 	if !ok {

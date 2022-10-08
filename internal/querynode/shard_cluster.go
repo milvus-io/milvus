@@ -26,6 +26,7 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/api/commonpb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
@@ -696,6 +697,8 @@ func (sc *ShardCluster) LoadSegments(ctx context.Context, req *querypb.LoadSegme
 		return fmt.Errorf("node not in cluster %d", req.GetDstNodeID())
 	}
 
+	req = proto.Clone(req).(*querypb.LoadSegmentsRequest)
+	req.Base.TargetID = req.GetDstNodeID()
 	resp, err := node.client.LoadSegments(ctx, req)
 	if err != nil {
 		log.Warn("failed to dispatch load segment request", zap.Error(err))
@@ -800,6 +803,8 @@ func (sc *ShardCluster) ReleaseSegments(ctx context.Context, req *querypb.Releas
 			return
 		}
 
+		req = proto.Clone(req).(*querypb.ReleaseSegmentsRequest)
+		req.Base.TargetID = req.GetNodeID()
 		resp, rerr := node.client.ReleaseSegments(ctx, req)
 		if err != nil {
 			log.Warn("failed to dispatch release segment request", zap.Error(err))

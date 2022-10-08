@@ -91,32 +91,89 @@ func TestImpl_WatchDmChannels(t *testing.T) {
 	node, err := genSimpleQueryNode(ctx)
 	assert.NoError(t, err)
 
-	schema := genTestCollectionSchema()
-	req := &queryPb.WatchDmChannelsRequest{
-		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_WatchDmChannels,
-			MsgID:   rand.Int63(),
-		},
-		NodeID:       0,
-		CollectionID: defaultCollectionID,
-		PartitionIDs: []UniqueID{defaultPartitionID},
-		Schema:       schema,
-		Infos: []*datapb.VchannelInfo{
-			{
-				CollectionID: 1000,
-				ChannelName:  "1000-dmc0",
+	t.Run("normal_run", func(t *testing.T) {
+		schema := genTestCollectionSchema()
+		req := &queryPb.WatchDmChannelsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_WatchDmChannels,
+				MsgID:    rand.Int63(),
+				TargetID: node.session.ServerID,
 			},
-		},
-	}
+			NodeID:       0,
+			CollectionID: defaultCollectionID,
+			PartitionIDs: []UniqueID{defaultPartitionID},
+			Schema:       schema,
+			Infos: []*datapb.VchannelInfo{
+				{
+					CollectionID: 1000,
+					ChannelName:  "1000-dmc0",
+				},
+			},
+		}
 
-	status, err := node.WatchDmChannels(ctx, req)
-	assert.NoError(t, err)
-	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+		status, err := node.WatchDmChannels(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+	})
 
-	node.UpdateStateCode(internalpb.StateCode_Abnormal)
-	status, err = node.WatchDmChannels(ctx, req)
+	t.Run("target not match", func(t *testing.T) {
+		req := &queryPb.WatchDmChannelsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_WatchDmChannels,
+				MsgID:    rand.Int63(),
+				TargetID: -1,
+			},
+		}
+		status, err := node.WatchDmChannels(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_NodeIDNotMatch, status.ErrorCode)
+	})
+
+	t.Run("server unhealthy", func(t *testing.T) {
+		req := &queryPb.WatchDmChannelsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_WatchDmChannels,
+				MsgID:   rand.Int63(),
+			},
+		}
+		node.UpdateStateCode(internalpb.StateCode_Abnormal)
+		status, err := node.WatchDmChannels(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+	})
+}
+
+func TestImpl_UnsubDmChannel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	node, err := genSimpleQueryNode(ctx)
 	assert.NoError(t, err)
-	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+
+	t.Run("target not match", func(t *testing.T) {
+		req := &queryPb.UnsubDmChannelRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_UnsubDmChannel,
+				MsgID:    rand.Int63(),
+				TargetID: -1,
+			},
+		}
+		status, err := node.UnsubDmChannel(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_NodeIDNotMatch, status.ErrorCode)
+	})
+
+	t.Run("server unhealthy", func(t *testing.T) {
+		req := &queryPb.UnsubDmChannelRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_UnsubDmChannel,
+				MsgID:   rand.Int63(),
+			},
+		}
+		node.UpdateStateCode(internalpb.StateCode_Abnormal)
+		status, err := node.UnsubDmChannel(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+	})
 }
 
 func TestImpl_LoadSegments(t *testing.T) {
@@ -129,21 +186,39 @@ func TestImpl_LoadSegments(t *testing.T) {
 
 	req := &queryPb.LoadSegmentsRequest{
 		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_WatchQueryChannels,
-			MsgID:   rand.Int63(),
+			MsgType:  commonpb.MsgType_WatchQueryChannels,
+			MsgID:    rand.Int63(),
+			TargetID: node.session.ServerID,
 		},
 		DstNodeID: 0,
 		Schema:    schema,
 	}
 
-	status, err := node.LoadSegments(ctx, req)
-	assert.NoError(t, err)
-	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+	t.Run("normal run", func(t *testing.T) {
+		status, err := node.LoadSegments(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+	})
 
-	node.UpdateStateCode(internalpb.StateCode_Abnormal)
-	status, err = node.LoadSegments(ctx, req)
-	assert.NoError(t, err)
-	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+	t.Run("target not match", func(t *testing.T) {
+		req := &queryPb.LoadSegmentsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_WatchQueryChannels,
+				MsgID:    rand.Int63(),
+				TargetID: -1,
+			},
+		}
+		status, err := node.LoadSegments(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_NodeIDNotMatch, status.ErrorCode)
+	})
+
+	t.Run("server unhealthy", func(t *testing.T) {
+		node.UpdateStateCode(internalpb.StateCode_Abnormal)
+		status, err := node.LoadSegments(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+	})
 }
 
 func TestImpl_ReleaseCollection(t *testing.T) {
@@ -342,7 +417,7 @@ func TestImpl_ShowConfigurations(t *testing.T) {
 
 		pattern := "Cache"
 		req := &internalpb.ShowConfigurationsRequest{
-			Base:    genCommonMsgBase(commonpb.MsgType_WatchQueryChannels),
+			Base:    genCommonMsgBase(commonpb.MsgType_WatchQueryChannels, node.session.ServerID),
 			Pattern: pattern,
 		}
 
@@ -359,7 +434,7 @@ func TestImpl_ShowConfigurations(t *testing.T) {
 
 		pattern := "Cache"
 		req := &internalpb.ShowConfigurationsRequest{
-			Base:    genCommonMsgBase(commonpb.MsgType_WatchQueryChannels),
+			Base:    genCommonMsgBase(commonpb.MsgType_WatchQueryChannels, node.session.ServerID),
 			Pattern: pattern,
 		}
 
@@ -429,15 +504,12 @@ func TestImpl_ReleaseSegments(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	var wg sync.WaitGroup
-	wg.Add(1)
 	t.Run("test valid", func(t *testing.T) {
-		defer wg.Done()
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 
 		req := &queryPb.ReleaseSegmentsRequest{
-			Base:         genCommonMsgBase(commonpb.MsgType_ReleaseSegments),
+			Base:         genCommonMsgBase(commonpb.MsgType_ReleaseSegments, node.session.ServerID),
 			CollectionID: defaultCollectionID,
 			PartitionIDs: []UniqueID{defaultPartitionID},
 			SegmentIDs:   []UniqueID{defaultSegmentID},
@@ -456,32 +528,45 @@ func TestImpl_ReleaseSegments(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	wg.Add(1)
 	t.Run("test invalid query node", func(t *testing.T) {
-		defer wg.Done()
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 
 		req := &queryPb.ReleaseSegmentsRequest{
-			Base:         genCommonMsgBase(commonpb.MsgType_ReleaseSegments),
+			Base:         genCommonMsgBase(commonpb.MsgType_ReleaseSegments, node.session.ServerID),
 			CollectionID: defaultCollectionID,
 			PartitionIDs: []UniqueID{defaultPartitionID},
 			SegmentIDs:   []UniqueID{defaultSegmentID},
 		}
 
 		node.UpdateStateCode(internalpb.StateCode_Abnormal)
-		_, err = node.ReleaseSegments(ctx, req)
+		resp, err := node.ReleaseSegments(ctx, req)
 		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
 	})
 
-	wg.Add(1)
-	t.Run("test segment not exists", func(t *testing.T) {
-		defer wg.Done()
+	t.Run("test target not matched", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 
 		req := &queryPb.ReleaseSegmentsRequest{
-			Base:         genCommonMsgBase(commonpb.MsgType_ReleaseSegments),
+			Base:         genCommonMsgBase(commonpb.MsgType_ReleaseSegments, -1),
+			CollectionID: defaultCollectionID,
+			PartitionIDs: []UniqueID{defaultPartitionID},
+			SegmentIDs:   []UniqueID{defaultSegmentID},
+		}
+
+		resp, err := node.ReleaseSegments(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_NodeIDNotMatch, resp.GetErrorCode())
+	})
+
+	t.Run("test segment not exists", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		assert.NoError(t, err)
+
+		req := &queryPb.ReleaseSegmentsRequest{
+			Base:         genCommonMsgBase(commonpb.MsgType_ReleaseSegments, node.session.ServerID),
 			CollectionID: defaultCollectionID,
 			PartitionIDs: []UniqueID{defaultPartitionID},
 			SegmentIDs:   []UniqueID{defaultSegmentID},
@@ -494,16 +579,14 @@ func TestImpl_ReleaseSegments(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 	})
 
-	wg.Add(1)
 	t.Run("test no collection", func(t *testing.T) {
-		defer wg.Done()
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 		err = node.metaReplica.removeCollection(defaultCollectionID)
 		assert.NoError(t, err)
 
 		req := &queryPb.ReleaseSegmentsRequest{
-			Base:         genCommonMsgBase(commonpb.MsgType_ReleaseSegments),
+			Base:         genCommonMsgBase(commonpb.MsgType_ReleaseSegments, node.session.ServerID),
 			CollectionID: defaultCollectionID,
 		}
 
@@ -511,7 +594,6 @@ func TestImpl_ReleaseSegments(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
 	})
-	wg.Wait()
 }
 
 func TestImpl_Search(t *testing.T) {
@@ -781,6 +863,31 @@ func TestSyncDistribution(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
 	})
 
+	t.Run("Target not match", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		node, err := genSimpleQueryNode(ctx)
+		defer node.Stop()
+		assert.NoError(t, err)
+
+		resp, err := node.SyncDistribution(ctx, &querypb.SyncDistributionRequest{
+			Base:         &commonpb.MsgBase{TargetID: -1},
+			CollectionID: defaultCollectionID,
+			Channel:      defaultDMLChannel,
+			Actions: []*querypb.SyncAction{
+				{
+					Type:        querypb.SyncType_Set,
+					PartitionID: defaultPartitionID,
+					SegmentID:   defaultSegmentID,
+					NodeID:      99,
+				},
+			},
+		})
+
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_NodeIDNotMatch, resp.GetErrorCode())
+	})
+
 	t.Run("Sync non-exist channel", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -789,6 +896,7 @@ func TestSyncDistribution(t *testing.T) {
 		assert.NoError(t, err)
 
 		resp, err := node.SyncDistribution(ctx, &querypb.SyncDistributionRequest{
+			Base:         &commonpb.MsgBase{TargetID: node.session.ServerID},
 			CollectionID: defaultCollectionID,
 			Channel:      defaultDMLChannel,
 			Actions: []*querypb.SyncAction{
@@ -815,6 +923,7 @@ func TestSyncDistribution(t *testing.T) {
 		node.ShardClusterService.addShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel)
 
 		resp, err := node.SyncDistribution(ctx, &querypb.SyncDistributionRequest{
+			Base:         &commonpb.MsgBase{TargetID: node.session.ServerID},
 			CollectionID: defaultCollectionID,
 			Channel:      defaultDMLChannel,
 			Actions: []*querypb.SyncAction{
@@ -839,6 +948,7 @@ func TestSyncDistribution(t *testing.T) {
 		assert.Equal(t, segmentStateLoaded, segment.state)
 		assert.EqualValues(t, 1, segment.version)
 		resp, err = node.SyncDistribution(ctx, &querypb.SyncDistributionRequest{
+			Base:         &commonpb.MsgBase{TargetID: node.session.ServerID},
 			CollectionID: defaultCollectionID,
 			Channel:      defaultDMLChannel,
 			Actions: []*querypb.SyncAction{
@@ -858,5 +968,36 @@ func TestSyncDistribution(t *testing.T) {
 		require.True(t, ok)
 		_, ok = cs.getSegment(defaultSegmentID)
 		require.False(t, ok)
+	})
+}
+
+func TestGetDataDistribution(t *testing.T) {
+	t.Run("QueryNode not healthy", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		node, err := genSimpleQueryNode(ctx)
+		defer node.Stop()
+		assert.NoError(t, err)
+
+		node.UpdateStateCode(internalpb.StateCode_Abnormal)
+
+		resp, err := node.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+	})
+
+	t.Run("Target not match", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		node, err := genSimpleQueryNode(ctx)
+		defer node.Stop()
+		assert.NoError(t, err)
+
+		resp, err := node.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{
+			Base: &commonpb.MsgBase{TargetID: -1},
+		})
+
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_NodeIDNotMatch, resp.GetStatus().GetErrorCode())
 	})
 }

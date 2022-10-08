@@ -2492,6 +2492,7 @@ func (suite *ShardClusterSuite) TestReleaseSegments() {
 			suite.SetupTest()
 
 			err := suite.sc.ReleaseSegments(context.Background(), &querypb.ReleaseSegmentsRequest{
+				Base:       &commonpb.MsgBase{},
 				NodeID:     test.nodeID,
 				SegmentIDs: test.segmentIDs,
 				Scope:      test.scope,

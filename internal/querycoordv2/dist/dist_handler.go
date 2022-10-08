@@ -54,7 +54,9 @@ func (dh *distHandler) start(ctx context.Context) {
 		case <-ticker.C:
 			dh.mu.Lock()
 			cctx, cancel := context.WithTimeout(ctx, distReqTimeout)
-			resp, err := dh.client.GetDataDistribution(cctx, dh.nodeID, &querypb.GetDataDistributionRequest{})
+			resp, err := dh.client.GetDataDistribution(cctx, dh.nodeID, &querypb.GetDataDistributionRequest{
+				Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_GetDistribution},
+			})
 			cancel()
 
 			if err != nil || resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
@@ -175,7 +177,9 @@ func (dh *distHandler) getDistribution(ctx context.Context) {
 	dh.mu.Lock()
 	defer dh.mu.Unlock()
 	cctx, cancel := context.WithTimeout(ctx, distReqTimeout)
-	resp, err := dh.client.GetDataDistribution(cctx, dh.nodeID, &querypb.GetDataDistributionRequest{})
+	resp, err := dh.client.GetDataDistribution(cctx, dh.nodeID, &querypb.GetDataDistributionRequest{
+		Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_GetDistribution},
+	})
 	cancel()
 
 	if err != nil || resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {

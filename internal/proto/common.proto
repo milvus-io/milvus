@@ -60,6 +60,7 @@ enum ErrorCode {
     SegmentNotFound = 47;
     ForceDeny = 48;
     RateLimit = 49;
+    NodeIDNotMatch = 50;
 
     // Service availability.
     // NA: Not Available.
@@ -240,6 +241,7 @@ message MsgBase {
     int64  msgID = 2;
     uint64 timestamp = 3;
     int64 sourceID = 4;
+    int64 targetID = 5;
 }
 
 enum DslType {

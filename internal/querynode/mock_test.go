@@ -986,7 +986,7 @@ func genSimpleInsertMsg(schema *schemapb.CollectionSchema, numRows int) (*msgstr
 	return &msgstream.InsertMsg{
 		BaseMsg: genMsgStreamBaseMsg(),
 		InsertRequest: internalpb.InsertRequest{
-			Base:           genCommonMsgBase(commonpb.MsgType_Insert),
+			Base:           genCommonMsgBase(commonpb.MsgType_Insert, 0),
 			CollectionName: defaultCollectionName,
 			PartitionName:  defaultPartitionName,
 			CollectionID:   defaultCollectionID,
@@ -1182,10 +1182,11 @@ func genMsgStreamBaseMsg() msgstream.BaseMsg {
 	}
 }
 
-func genCommonMsgBase(msgType commonpb.MsgType) *commonpb.MsgBase {
+func genCommonMsgBase(msgType commonpb.MsgType, targetID int64) *commonpb.MsgBase {
 	return &commonpb.MsgBase{
-		MsgType: msgType,
-		MsgID:   rand.Int63(),
+		MsgType:  msgType,
+		MsgID:    rand.Int63(),
+		TargetID: targetID,
 	}
 }
 
@@ -1193,7 +1194,7 @@ func genDeleteMsg(collectionID int64, pkType schemapb.DataType, numRows int) *ms
 	return &msgstream.DeleteMsg{
 		BaseMsg: genMsgStreamBaseMsg(),
 		DeleteRequest: internalpb.DeleteRequest{
-			Base:           genCommonMsgBase(commonpb.MsgType_Delete),
+			Base:           genCommonMsgBase(commonpb.MsgType_Delete, 0),
 			CollectionName: defaultCollectionName,
 			PartitionName:  defaultPartitionName,
 			CollectionID:   collectionID,
@@ -1531,7 +1532,7 @@ func genSimpleRetrievePlan(collection *Collection) (*RetrievePlan, error) {
 
 func genGetCollectionStatisticRequest() (*internalpb.GetStatisticsRequest, error) {
 	return &internalpb.GetStatisticsRequest{
-		Base:         genCommonMsgBase(commonpb.MsgType_GetCollectionStatistics),
+		Base:         genCommonMsgBase(commonpb.MsgType_GetCollectionStatistics, 0),
 		DbID:         0,
 		CollectionID: defaultCollectionID,
 	}, nil
@@ -1539,7 +1540,7 @@ func genGetCollectionStatisticRequest() (*internalpb.GetStatisticsRequest, error
 
 func genGetPartitionStatisticRequest() (*internalpb.GetStatisticsRequest, error) {
 	return &internalpb.GetStatisticsRequest{
-		Base:         genCommonMsgBase(commonpb.MsgType_GetPartitionStatistics),
+		Base:         genCommonMsgBase(commonpb.MsgType_GetPartitionStatistics, 0),
 		DbID:         0,
 		CollectionID: defaultCollectionID,
 		PartitionIDs: []UniqueID{defaultPartitionID},
@@ -1556,7 +1557,7 @@ func genSearchRequest(nq int64, indexType string, schema *schemapb.CollectionSch
 		return nil, err2
 	}
 	return &internalpb.SearchRequest{
-		Base:             genCommonMsgBase(commonpb.MsgType_Search),
+		Base:             genCommonMsgBase(commonpb.MsgType_Search, 0),
 		CollectionID:     defaultCollectionID,
 		PartitionIDs:     []UniqueID{defaultPartitionID},
 		Dsl:              simpleDSL,
@@ -1684,7 +1685,7 @@ func genSimpleChangeInfo() *querypb.SealedSegmentsChangeInfo {
 	}
 
 	return &querypb.SealedSegmentsChangeInfo{
-		Base:  genCommonMsgBase(commonpb.MsgType_LoadBalanceSegments),
+		Base:  genCommonMsgBase(commonpb.MsgType_LoadBalanceSegments, 0),
 		Infos: []*querypb.SegmentChangeInfo{changeInfo},
 	}
 }

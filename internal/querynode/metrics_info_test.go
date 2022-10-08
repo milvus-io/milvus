@@ -43,7 +43,7 @@ func TestGetSystemInfoMetrics(t *testing.T) {
 	node.session = sessionutil.NewSession(node.queryNodeLoopCtx, Params.EtcdCfg.MetaRootPath, etcdCli)
 
 	req := &milvuspb.GetMetricsRequest{
-		Base: genCommonMsgBase(commonpb.MsgType_WatchQueryChannels),
+		Base: genCommonMsgBase(commonpb.MsgType_WatchQueryChannels, node.session.ServerID),
 	}
 	resp, err := getSystemInfoMetrics(ctx, req, node)
 	assert.NoError(t, err)
@@ -70,7 +70,7 @@ func TestGetComponentConfigurationsFailed(t *testing.T) {
 	node.session = sessionutil.NewSession(node.queryNodeLoopCtx, Params.EtcdCfg.MetaRootPath, etcdCli)
 
 	req := &internalpb.ShowConfigurationsRequest{
-		Base:    genCommonMsgBase(commonpb.MsgType_WatchQueryChannels),
+		Base:    genCommonMsgBase(commonpb.MsgType_WatchQueryChannels, node.session.ServerID),
 		Pattern: "Cache",
 	}
 
