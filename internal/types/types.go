@@ -29,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/internal/util/sessionutil"
 )
 
 // TimeTickProvider is the interface all services implement
@@ -784,9 +783,6 @@ type RootCoordComponent interface {
 	//
 	// Always return nil.
 	SetQueryCoord(queryCoord QueryCoord) error
-
-	// SetNewProxyClient set Proxy client creator func for RootCoord
-	SetNewProxyClient(func(sess *sessionutil.Session) (Proxy, error))
 
 	// GetMetrics notifies RootCoordComponent to collect metrics for specified component
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)

@@ -848,11 +848,13 @@ func (i *IndexCoord) DescribeIndex(ctx context.Context, req *indexpb.DescribeInd
 	indexInfos := make([]*indexpb.IndexInfo, 0)
 	for _, index := range indexes {
 		indexInfo := &indexpb.IndexInfo{
-			CollectionID: index.CollectionID,
-			FieldID:      index.FieldID,
-			IndexName:    index.IndexName,
-			TypeParams:   index.TypeParams,
-			IndexParams:  index.IndexParams,
+			CollectionID:    index.CollectionID,
+			FieldID:         index.FieldID,
+			IndexName:       index.IndexName,
+			TypeParams:      index.TypeParams,
+			IndexParams:     index.IndexParams,
+			IsAutoIndex:     index.IsAutoIndex,
+			UserIndexParams: index.UserIndexParams,
 		}
 		if err := i.completeIndexInfo(ctx, indexInfo); err != nil {
 			log.Error("IndexCoord describe index fail", zap.Int64("collectionID", req.CollectionID),

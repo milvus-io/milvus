@@ -59,7 +59,7 @@ const debugUT = false
 
 const (
 	dimKey        = "dim"
-	metricTypeKey = "metric_type"
+	metricTypeKey = common.MetricTypeKey
 
 	defaultPKFieldName  = "pk"
 	defaultTopK         = int64(10)

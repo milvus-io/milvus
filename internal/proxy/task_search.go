@@ -2,11 +2,13 @@ package proxy
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
 
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 
 	"github.com/golang/protobuf/proto"
@@ -30,6 +32,11 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+)
+
+const (
+	SearchTaskName = "SearchTask"
+	SearchLevelKey = "level"
 )
 
 type searchTask struct {
@@ -89,8 +96,63 @@ func getPartitionIDs(ctx context.Context, collectionName string, partitionNames 
 	return partitionIDs, nil
 }
 
-// parseQueryInfo returns QueryInfo and offset
-func parseQueryInfo(searchParamsPair []*commonpb.KeyValuePair) (*planpb.QueryInfo, int64, error) {
+func parseSearchParams(searchParamsPair []*commonpb.KeyValuePair) (string, error) {
+	searchParamStr, err := funcutil.GetAttrByKeyFromRepeatedKV(SearchParamsKey, searchParamsPair)
+	if Params.AutoIndexConfig.Enable {
+		searchParamMap := make(map[string]interface{})
+		var level int
+		if err == nil { // if specified params, we try to parse params
+			err = json.Unmarshal([]byte(searchParamStr), &searchParamMap)
+			if err == nil { // if unmarshal success, we try to parse level
+				if searchParamMap == nil { // is searchParamStr equal "null", searchParamMap will become nil!
+					searchParamMap = make(map[string]interface{})
+				}
+				levelValue, ok := searchParamMap[SearchLevelKey]
+				if !ok { // if level is not specified, set to default 1
+					level = 1
+				} else {
+					switch lValue := levelValue.(type) {
+					case float64: // for numeric values, json unmarshal will interpret it as float64
+						level = int(lValue)
+					case string:
+						level, err = strconv.Atoi(lValue)
+					default:
+						err = fmt.Errorf("wrong level in search params")
+					}
+				}
+			}
+			if err != nil {
+				return "", fmt.Errorf("search params in wrong format:%w", err)
+			}
+		} else {
+			level = 1
+		}
+		calculator := Params.AutoIndexConfig.GetSearchParamStrCalculator(level)
+		if calculator == nil {
+			return "", fmt.Errorf("search params calculator not found for level:%d", level)
+		}
+		newSearchParamMap, err2 := calculator.Calculate(searchParamsPair)
+		if err2 != nil {
+			return "", errors.New("search params calculate failed")
+		}
+		for k, v := range newSearchParamMap {
+			searchParamMap[k] = v
+		}
+		searchParamValue, err2 := json.Marshal(searchParamMap)
+		if err2 != nil {
+			return "", err2
+		}
+		searchParamStr = string(searchParamValue)
+	} else {
+		if err != nil {
+			return "", errors.New(SearchParamsKey + " not found in search_params")
+		}
+	}
+	return searchParamStr, nil
+}
+
+// parseSearchInfo returns QueryInfo and offset
+func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair) (*planpb.QueryInfo, int64, error) {
 	topKStr, err := funcutil.GetAttrByKeyFromRepeatedKV(TopKKey, searchParamsPair)
 	if err != nil {
 		return nil, 0, errors.New(TopKKey + " not found in search_params")
@@ -123,14 +185,9 @@ func parseQueryInfo(searchParamsPair []*commonpb.KeyValuePair) (*planpb.QueryInf
 		return nil, 0, fmt.Errorf("%s+%s [%d] is invalid, %w", OffsetKey, TopKKey, queryTopK, err)
 	}
 
-	metricType, err := funcutil.GetAttrByKeyFromRepeatedKV(MetricTypeKey, searchParamsPair)
+	metricType, err := funcutil.GetAttrByKeyFromRepeatedKV(common.MetricTypeKey, searchParamsPair)
 	if err != nil {
-		return nil, 0, errors.New(MetricTypeKey + " not found in search_params")
-	}
-
-	searchParams, err := funcutil.GetAttrByKeyFromRepeatedKV(SearchParamsKey, searchParamsPair)
-	if err != nil {
-		return nil, 0, errors.New(SearchParamsKey + " not found in search_params")
+		return nil, 0, errors.New(common.MetricTypeKey + " not found in search_params")
 	}
 
 	roundDecimalStr, err := funcutil.GetAttrByKeyFromRepeatedKV(RoundDecimalKey, searchParamsPair)
@@ -146,11 +203,14 @@ func parseQueryInfo(searchParamsPair []*commonpb.KeyValuePair) (*planpb.QueryInf
 	if roundDecimal != -1 && (roundDecimal > 6 || roundDecimal < 0) {
 		return nil, 0, fmt.Errorf("%s [%s] is invalid, should be -1 or an integer in range [0, 6]", RoundDecimalKey, roundDecimalStr)
 	}
-
+	searchParamStr, err := parseSearchParams(searchParamsPair)
+	if err != nil {
+		return nil, 0, err
+	}
 	return &planpb.QueryInfo{
 		Topk:         queryTopK,
 		MetricType:   metricType,
-		SearchParams: searchParams,
+		SearchParams: searchParamStr,
 		RoundDecimal: roundDecimal,
 	}, offset, nil
 }
@@ -245,7 +305,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 			return errors.New(AnnsFieldKey + " not found in search_params")
 		}
 
-		queryInfo, offset, err := parseQueryInfo(t.request.GetSearchParams())
+		queryInfo, offset, err := parseSearchInfo(t.request.GetSearchParams())
 		if err != nil {
 			return err
 		}

@@ -41,7 +41,7 @@ etcd:
     enabled: false # Whether to support ETCD secure connection mode
     tlsCert: /path/to/etcd-client.pem # path to your cert file
     tlsKey: /path/to/etcd-client-key.pem # path to your key file
-    tlsCACert:  /path/to/ca.pem # path to your CACert file
+    tlsCACert: /path/to/ca.pem # path to your CACert file
     # TLS min version
     # Optional values: 1.0, 1.1, 1.2, 1.3。
     # We recommend using version 1.2 and above
@@ -114,7 +114,7 @@ rocksmq:
   retentionTimeInMinutes: 7200 # 5 days, 5 * 24 * 60 minutes, The retention time of the message in rocksmq.
   retentionSizeInMB: 8192 # 8 GB, 8 * 1024 MB, The retention size of the message in rocksmq.
   compactionInterval: 86400 # 1 day, trigger rocksdb compaction every day to remove deleted data
-  lrucacheratio:  0.06 # rocksdb cache memory ratio
+  lrucacheratio: 0.06 # rocksdb cache memory ratio
 
 # Related configuration of rootCoord, used to handle data definition language (DDL) and data control language (DCL) requests
 rootCoord:
@@ -297,8 +297,8 @@ grpc:
   clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
 
   client:
-    dialTimeout:      5000
-    keepAliveTime:    10000
+    dialTimeout: 5000
+    keepAliveTime: 10000
     keepAliveTimeout: 20000
     maxMaxAttempts: 5
     initialBackOff: 1.0
@@ -341,7 +341,7 @@ common:
   defaultPartitionName: "_default"  # default partition name for a collection
   defaultIndexName: "_default_idx"  # default index name
   retentionDuration: 86400 # time travel reserved time, insert/delete will not be cleaned in this period. 1 days in seconds
-  entityExpiration:  -1     # Entity expiration in seconds, CAUTION make sure entityExpiration >= retentionDuration and -1 means never expire
+  entityExpiration: -1     # Entity expiration in seconds, CAUTION make sure entityExpiration >= retentionDuration and -1 means never expire
 
   gracefulTime: 5000 # milliseconds. it represents the interval (in ms) by which the request arrival time needs to be subtracted in the case of Bounded Consistency.
 
@@ -458,3 +458,7 @@ quotaAndLimits:
 
       # coolOffSpeed is the speed of search&query rates cool off.
       coolOffSpeed: 0.9 # (0, 1]
+
+# AutoIndexConfig
+autoIndex:
+  enable: false

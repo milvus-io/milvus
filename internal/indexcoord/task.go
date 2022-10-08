@@ -142,13 +142,15 @@ func (cit *CreateIndexTask) Execute(ctx context.Context) error {
 		cit.indexID = indexID
 	}
 	index := &model.Index{
-		CollectionID: cit.req.CollectionID,
-		FieldID:      cit.req.FieldID,
-		IndexID:      cit.indexID,
-		IndexName:    cit.req.IndexName,
-		TypeParams:   cit.req.TypeParams,
-		IndexParams:  cit.req.IndexParams,
-		CreateTime:   cit.req.Timestamp,
+		CollectionID:    cit.req.GetCollectionID(),
+		FieldID:         cit.req.GetFieldID(),
+		IndexID:         cit.indexID,
+		IndexName:       cit.req.GetIndexName(),
+		TypeParams:      cit.req.GetTypeParams(),
+		IndexParams:     cit.req.GetIndexParams(),
+		CreateTime:      cit.req.GetTimestamp(),
+		IsAutoIndex:     cit.req.GetIsAutoIndex(),
+		UserIndexParams: cit.req.GetUserIndexParams(),
 	}
 
 	// Get flushed segments

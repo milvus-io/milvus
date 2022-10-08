@@ -33,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
@@ -149,42 +148,13 @@ func (it *indexBuildTask) Prepare(ctx context.Context) error {
 	// type params can be removed
 	for _, kvPair := range it.req.GetTypeParams() {
 		key, value := kvPair.GetKey(), kvPair.GetValue()
-		_, ok := typeParams[key]
-		if ok {
-			return errors.New("duplicated key in type params")
-		}
-		if key == util.ParamsKeyToParse {
-			params, err := funcutil.ParseIndexParamsMap(value)
-			if err != nil {
-				return err
-			}
-			for pk, pv := range params {
-				typeParams[pk] = pv
-				indexParams[pk] = pv
-			}
-		} else {
-			typeParams[key] = value
-			indexParams[key] = value
-		}
+		typeParams[key] = value
+		indexParams[key] = value
 	}
 
 	for _, kvPair := range it.req.GetIndexParams() {
 		key, value := kvPair.GetKey(), kvPair.GetValue()
-		_, ok := indexParams[key]
-		if ok {
-			return errors.New("duplicated key in index params")
-		}
-		if key == util.ParamsKeyToParse {
-			params, err := funcutil.ParseIndexParamsMap(value)
-			if err != nil {
-				return err
-			}
-			for pk, pv := range params {
-				indexParams[pk] = pv
-			}
-		} else {
-			indexParams[key] = value
-		}
+		indexParams[key] = value
 	}
 	it.newTypeParams = typeParams
 	it.newIndexParams = indexParams
@@ -199,18 +169,6 @@ func (it *indexBuildTask) Prepare(ctx context.Context) error {
 		}
 	}
 	logutil.Logger(ctx).Info("Successfully prepare indexBuildTask", zap.Int64("buildID", it.BuildID), zap.Int64("Collection", it.collectionID), zap.Int64("SegmentIf", it.segmentID))
-	// setup chunkmanager
-	// opts := make([]storage.Option, 0)
-	// // TODO: secret access key_id
-	// opts = append(opts, storage.AccessKeyID(it.req.StorageAccessKey))
-	// opts = append(opts, storage.BucketName(it.req.BucketName))
-	// factory := storage.NewChunkManagerFactory("local", "minio", opts...)
-	// var err error
-	// it.cm, err = factory.NewVectorStorageChunkManager(ctx)
-	// if err != nil {
-	// 	log.Ctx(ctx).Error("init chunk manager failed", zap.Error(err), zap.String("BucketName", it.req.BucketName), zap.String("StorageAccessKey", it.req.StorageAccessKey))
-	// 	return err
-	// }
 	return nil
 }
 

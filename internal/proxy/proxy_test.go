@@ -702,7 +702,7 @@ func TestProxy(t *testing.T) {
 					Value: strconv.Itoa(dim),
 				},
 				{
-					Key:   MetricTypeKey,
+					Key:   common.MetricTypeKey,
 					Value: distance.L2,
 				},
 				{
@@ -1538,7 +1538,7 @@ func TestProxy(t *testing.T) {
 			OpRight: opRight,
 			Params: []*commonpb.KeyValuePair{
 				{
-					Key:   MetricTypeKey,
+					Key:   common.MetricTypeKey,
 					Value: distance.L2,
 				},
 			},

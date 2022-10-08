@@ -1852,11 +1852,11 @@ func (node *Proxy) CreateIndex(ctx context.Context, request *milvuspb.CreateInde
 	traceID, _, _ := trace.InfoFromSpan(sp)
 
 	cit := &createIndexTask{
-		ctx:                ctx,
-		Condition:          NewTaskCondition(ctx),
-		CreateIndexRequest: request,
-		rootCoord:          node.rootCoord,
-		indexCoord:         node.indexCoord,
+		ctx:        ctx,
+		Condition:  NewTaskCondition(ctx),
+		req:        request,
+		rootCoord:  node.rootCoord,
+		indexCoord: node.indexCoord,
 	}
 
 	method := "CreateIndex"
@@ -1877,10 +1877,10 @@ func (node *Proxy) CreateIndex(ctx context.Context, request *milvuspb.CreateInde
 			zap.Error(err),
 			zap.String("traceID", traceID),
 			zap.String("role", typeutil.ProxyRole),
-			zap.String("db", request.DbName),
-			zap.String("collection", request.CollectionName),
-			zap.String("field", request.FieldName),
-			zap.Any("extra_params", request.ExtraParams))
+			zap.String("db", request.GetDbName()),
+			zap.String("collection", request.GetCollectionName()),
+			zap.String("field", request.GetFieldName()),
+			zap.Any("extra_params", request.GetExtraParams()))
 
 		metrics.ProxyDMLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method,
 			metrics.AbandonLabel).Inc()

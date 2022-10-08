@@ -34,6 +34,11 @@ const (
 	WithoutCache = false
 )
 
+const (
+	RetrieveTaskName = "RetrieveTask"
+	QueryTaskName    = "QueryTask"
+)
+
 type queryTask struct {
 	Condition
 	*internalpb.RetrieveRequest

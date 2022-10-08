@@ -110,6 +110,8 @@ CREATE TABLE if not exists milvus_meta.`indexes` (
     index_id BIGINT NOT NULL,
     index_name VARCHAR(256),
     index_params VARCHAR(2048),
+    user_index_params VARCHAR(2048),
+    is_auto_index BOOL DEFAULT FALSE,
     create_time bigint unsigned,
     is_deleted BOOL DEFAULT FALSE,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
