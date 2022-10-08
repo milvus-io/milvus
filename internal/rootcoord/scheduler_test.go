@@ -191,6 +191,8 @@ func Test_scheduler_updateDdlMinTsLoop(t *testing.T) {
 
 		time.Sleep(time.Millisecond * 4)
 
+		assert.Greater(t, s.GetMinDdlTs(), Timestamp(100))
+
 		// add task to queue.
 		n := 10
 		for i := 0; i < n; i++ {
@@ -219,6 +221,7 @@ func Test_scheduler_updateDdlMinTsLoop(t *testing.T) {
 		s.Start()
 
 		time.Sleep(time.Millisecond * 4)
+		assert.Zero(t, s.GetMinDdlTs())
 		s.Stop()
 	})
 }

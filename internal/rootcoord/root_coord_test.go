@@ -1285,11 +1285,27 @@ func TestCore_sendMinDdlTsAsTt(t *testing.T) {
 	ddlManager.GetMinDdlTsFunc = func() Timestamp {
 		return 100
 	}
+	sched := newMockScheduler()
+	sched.GetMinDdlTsFunc = func() Timestamp {
+		return 100
+	}
 	c := newTestCore(
 		withTtSynchronizer(ticker),
-		withDdlTsLockManager(ddlManager))
+		withDdlTsLockManager(ddlManager),
+		withScheduler(sched))
 	c.sendMinDdlTsAsTt() // no session.
 	ticker.addSession(&sessionutil.Session{ServerID: TestRootCoordID})
+	c.sendMinDdlTsAsTt()
+	sched.GetMinDdlTsFunc = func() Timestamp {
+		return typeutil.ZeroTimestamp
+	}
+	c.sendMinDdlTsAsTt() // zero ts
+	sched.GetMinDdlTsFunc = func() Timestamp {
+		return typeutil.MaxTimestamp
+	}
+	ddlManager.GetMinDdlTsFunc = func() Timestamp {
+		return typeutil.MaxTimestamp
+	}
 	c.sendMinDdlTsAsTt()
 }
 
@@ -1300,9 +1316,14 @@ func TestCore_startTimeTickLoop(t *testing.T) {
 	ddlManager.GetMinDdlTsFunc = func() Timestamp {
 		return 100
 	}
+	sched := newMockScheduler()
+	sched.GetMinDdlTsFunc = func() Timestamp {
+		return 100
+	}
 	c := newTestCore(
 		withTtSynchronizer(ticker),
-		withDdlTsLockManager(ddlManager))
+		withDdlTsLockManager(ddlManager),
+		withScheduler(sched))
 	ctx, cancel := context.WithCancel(context.Background())
 	c.ctx = ctx
 	Params.ProxyCfg.TimeTickInterval = time.Millisecond
