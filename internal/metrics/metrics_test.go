@@ -17,7 +17,6 @@
 package metrics
 
 import (
-	"os"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -42,6 +41,6 @@ func TestRegisterMetrics(t *testing.T) {
 func TestGetMetricsAddr(t *testing.T) {
 	assert.Equal(t, getMetricsAddr(), ":"+DefaultListenPort)
 	testPort := "9092"
-	os.Setenv(ListenPortEnvKey, testPort)
+	t.Setenv(ListenPortEnvKey, testPort)
 	assert.Equal(t, getMetricsAddr(), ":"+testPort)
 }

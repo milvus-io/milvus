@@ -12,41 +12,28 @@
 package metricsinfo
 
 import (
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
 func TestFillDeployMetricsWithEnv(t *testing.T) {
-	var err error
-
 	var m DeployMetrics
 
 	commit := "commit"
-	originalCommit := os.Getenv(GitCommitEnvKey)
-	err = os.Setenv(GitCommitEnvKey, commit)
-	assert.NoError(t, err)
+	t.Setenv(GitCommitEnvKey, commit)
 
 	deploy := "deploy"
-	originalDeploy := os.Getenv(DeployModeEnvKey)
-	err = os.Setenv(DeployModeEnvKey, deploy)
-	assert.NoError(t, err)
+	t.Setenv(DeployModeEnvKey, deploy)
 
 	version := "version"
-	originalVersion := os.Getenv(GitBuildTagsEnvKey)
-	err = os.Setenv(GitBuildTagsEnvKey, version)
-	assert.NoError(t, err)
+	t.Setenv(GitBuildTagsEnvKey, version)
 
 	goVersion := "go"
-	originalGoVersion := os.Getenv(MilvusUsedGoVersion)
-	err = os.Setenv(MilvusUsedGoVersion, goVersion)
-	assert.NoError(t, err)
+	t.Setenv(MilvusUsedGoVersion, goVersion)
 
 	buildTime := "build"
-	originalBuildTime := os.Getenv(MilvusBuildTimeEnvKey)
-	err = os.Setenv(MilvusBuildTimeEnvKey, buildTime)
-	assert.NoError(t, err)
+	t.Setenv(MilvusBuildTimeEnvKey, buildTime)
 
 	FillDeployMetricsWithEnv(&m)
 	assert.NotNil(t, m)
@@ -55,19 +42,4 @@ func TestFillDeployMetricsWithEnv(t *testing.T) {
 	assert.Equal(t, version, m.BuildVersion)
 	assert.Equal(t, goVersion, m.UsedGoVersion)
 	assert.Equal(t, buildTime, m.BuildTime)
-
-	err = os.Setenv(GitCommitEnvKey, originalCommit)
-	assert.NoError(t, err)
-
-	err = os.Setenv(DeployModeEnvKey, originalDeploy)
-	assert.NoError(t, err)
-
-	err = os.Setenv(GitBuildTagsEnvKey, originalVersion)
-	assert.NoError(t, err)
-
-	err = os.Setenv(MilvusUsedGoVersion, originalGoVersion)
-	assert.NoError(t, err)
-
-	err = os.Setenv(MilvusBuildTimeEnvKey, originalBuildTime)
-	assert.NoError(t, err)
 }

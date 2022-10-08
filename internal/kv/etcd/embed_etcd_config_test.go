@@ -29,13 +29,13 @@ import (
 )
 
 func TestEtcdConfigLoad(te *testing.T) {
-	os.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode)
+	te.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode)
 	param := new(paramtable.ServiceParam)
 
-	os.Setenv("etcd.use.embed", "true")
+	te.Setenv("etcd.use.embed", "true")
 	// TODO, not sure if the relative path works for ci environment
-	os.Setenv("etcd.config.path", "../../../configs/advanced/etcd.yaml")
-	os.Setenv("etcd.data.dir", "etcd.test.data.dir")
+	te.Setenv("etcd.config.path", "../../../configs/advanced/etcd.yaml")
+	te.Setenv("etcd.data.dir", "etcd.test.data.dir")
 
 	param.Init()
 	//clean up data
