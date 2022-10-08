@@ -71,3 +71,9 @@ jobs:
             ln -s /usr/local/opt/llvm@13 /usr/local/opt/llvm
           fi
           make milvus && sh scripts/collect_arrow_dep.sh -f /tmp/thirdparty
+      - name: Upload Cmake log
+        uses: actions/upload-artifact@v3
+        if: ${{ failure() }}
+        with:
+          name: cmake-log
+          path: cmake_build/CMakeFiles/*.log
