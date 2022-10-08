@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/api/commonpb"
 	"github.com/milvus-io/milvus/api/milvuspb"
 	grpcquerynodeclient "github.com/milvus-io/milvus/internal/distributed/querynode/client"
@@ -92,6 +93,8 @@ func (c *QueryCluster) LoadSegments(ctx context.Context, nodeID int64, req *quer
 	var status *commonpb.Status
 	var err error
 	err1 := c.send(ctx, nodeID, func(cli *grpcquerynodeclient.Client) {
+		req := proto.Clone(req).(*querypb.LoadSegmentsRequest)
+		req.Base.TargetID = nodeID
 		status, err = cli.LoadSegments(ctx, req)
 	})
 	if err1 != nil {
@@ -104,6 +107,8 @@ func (c *QueryCluster) WatchDmChannels(ctx context.Context, nodeID int64, req *q
 	var status *commonpb.Status
 	var err error
 	err1 := c.send(ctx, nodeID, func(cli *grpcquerynodeclient.Client) {
+		req := proto.Clone(req).(*querypb.WatchDmChannelsRequest)
+		req.Base.TargetID = nodeID
 		status, err = cli.WatchDmChannels(ctx, req)
 	})
 	if err1 != nil {
@@ -116,6 +121,8 @@ func (c *QueryCluster) UnsubDmChannel(ctx context.Context, nodeID int64, req *qu
 	var status *commonpb.Status
 	var err error
 	err1 := c.send(ctx, nodeID, func(cli *grpcquerynodeclient.Client) {
+		req := proto.Clone(req).(*querypb.UnsubDmChannelRequest)
+		req.Base.TargetID = nodeID
 		status, err = cli.UnsubDmChannel(ctx, req)
 	})
 	if err1 != nil {
@@ -128,6 +135,8 @@ func (c *QueryCluster) ReleaseSegments(ctx context.Context, nodeID int64, req *q
 	var status *commonpb.Status
 	var err error
 	err1 := c.send(ctx, nodeID, func(cli *grpcquerynodeclient.Client) {
+		req := proto.Clone(req).(*querypb.ReleaseSegmentsRequest)
+		req.Base.TargetID = nodeID
 		status, err = cli.ReleaseSegments(ctx, req)
 	})
 	if err1 != nil {
@@ -140,6 +149,10 @@ func (c *QueryCluster) GetDataDistribution(ctx context.Context, nodeID int64, re
 	var resp *querypb.GetDataDistributionResponse
 	var err error
 	err1 := c.send(ctx, nodeID, func(cli *grpcquerynodeclient.Client) {
+		req := proto.Clone(req).(*querypb.GetDataDistributionRequest)
+		req.Base = &commonpb.MsgBase{
+			TargetID: nodeID,
+		}
 		resp, err = cli.GetDataDistribution(ctx, req)
 	})
 	if err1 != nil {
@@ -168,6 +181,8 @@ func (c *QueryCluster) SyncDistribution(ctx context.Context, nodeID int64, req *
 		err  error
 	)
 	err1 := c.send(ctx, nodeID, func(cli *grpcquerynodeclient.Client) {
+		req := proto.Clone(req).(*querypb.SyncDistributionRequest)
+		req.Base.TargetID = nodeID
 		resp, err = cli.SyncDistribution(ctx, req)
 	})
 	if err1 != nil {

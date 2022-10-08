@@ -17,10 +17,26 @@
 package common
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/milvus-io/milvus/api/commonpb"
 )
+
+var (
+	// ErrNodeIDNotMatch stands for the error that grpc target id and node session id not match.
+	ErrNodeIDNotMatch = errors.New("target node id not match")
+)
+
+// WrapNodeIDNotMatchError wraps `ErrNodeIDNotMatch` with targetID and sessionID.
+func WrapNodeIDNotMatchError(targetID, nodeID int64) error {
+	return fmt.Errorf("%w target id = %d, node id = %d", ErrNodeIDNotMatch, targetID, nodeID)
+}
+
+// WrapNodeIDNotMatchMsg fmt error msg with `ErrNodeIDNotMatch`, targetID and sessionID.
+func WrapNodeIDNotMatchMsg(targetID, nodeID int64) string {
+	return fmt.Sprintf("%s target id = %d, node id = %d", ErrNodeIDNotMatch.Error(), targetID, nodeID)
+}
 
 type IgnorableError struct {
 	msg string
