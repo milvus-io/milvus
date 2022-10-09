@@ -139,8 +139,6 @@ class TestChaos(TestChaosBase):
 		log.info(f'Alive threads: {threading.enumerate()}')
 
 	@pytest.mark.tags(CaseLabel.L3)
-	@pytest.mark.parametrize("target_component", ["datanode", "datacoord"]) # "minio", "proxy", "rootcoord", "datacoord", "datanode", "etcd"
-	@pytest.mark.parametrize("chaos_type", ["pod_kill", "pod_failure"]) # "pod_kill", "pod_failure"
 	def test_bulk_load(self, chaos_type, target_component):
 		# start the monitor threads to check the milvus ops
 		log.info("*********************Chaos Test Start**********************")
