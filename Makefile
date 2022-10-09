@@ -147,7 +147,7 @@ test-allocator:
 test-config:
 	@echo "Running go unittests..."
 	@(env bash $(PWD)/scripts/run_go_unittest.sh -t config)
-
+# test
 test-tso:
 	@echo "Running go unittests..."
 	@(env bash $(PWD)/scripts/run_go_unittest.sh -t tso)
