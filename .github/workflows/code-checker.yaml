@@ -91,7 +91,6 @@ jobs:
           restore-keys: centos7-go-mod-
       - name: Code Check
         env:
-          CHECK_BUILDER: "1"
           OS_NAME: "centos7"
         run: |
            ./build/builder.sh /bin/bash -c "make install"
