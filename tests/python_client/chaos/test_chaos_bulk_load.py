@@ -145,8 +145,9 @@ class TestChaos(TestChaosBase):
 		log.info(connections.get_connection_addr('default'))
 		release_name = self.instance_name
 		cc.start_monitor_threads(self.health_checkers)
-		chaos_config = cc.gen_experiment_config(f"{str(Path(__file__).absolute().parent)}/chaos_objects/{chaos_type}/chaos_{target_component}_{chaos_type}.yaml")
-		chaos_config['metadata']['name'] = f"test-bulk-load-{int(time.time())}"
+		chaos_config = cc.gen_experiment_config(
+			f"{str(Path(__file__).absolute().parent)}/chaos_objects/{chaos_type.replace('-', '_')}/chaos_{target_component}_{chaos_type.replace('-', '_')}.yaml")
+		chaos_config['metadata']['name'] = f"test-{target_component}-{chaos_type.replace('_','-')}-{int(time.time())}"
 		kind = chaos_config['kind']
 		meta_name = chaos_config.get('metadata', None).get('name', None)
 		update_key_value(chaos_config, "release", release_name)
