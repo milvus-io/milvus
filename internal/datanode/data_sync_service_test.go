@@ -152,7 +152,7 @@ func TestDataSyncService_newDataSyncService(te *testing.T) {
 		te.Run(test.description, func(t *testing.T) {
 			df := &DataCoordFactory{}
 
-			replica, err := newReplica(context.Background(), &RootCoordFactory{pkType: schemapb.DataType_Int64}, cm, test.collID)
+			replica, err := newReplica(context.Background(), &RootCoordFactory{pkType: schemapb.DataType_Int64}, cm, test.collID, nil)
 			assert.Nil(t, err)
 			if test.replicaNil {
 				replica = nil
@@ -210,7 +210,7 @@ func TestDataSyncService_Start(t *testing.T) {
 	resendTTChan := make(chan resendTTMsg, 100)
 	cm := storage.NewLocalChunkManager(storage.RootPath(dataSyncServiceTestDir))
 	defer cm.RemoveWithPrefix(ctx, "")
-	replica, err := newReplica(context.Background(), mockRootCoord, cm, collectionID)
+	replica, err := newReplica(context.Background(), mockRootCoord, cm, collectionID, collMeta.GetSchema())
 	assert.Nil(t, err)
 
 	allocFactory := NewAllocatorFactory(1)
@@ -416,7 +416,7 @@ func TestClearGlobalFlushingCache(t *testing.T) {
 	dataCoord := &DataCoordFactory{}
 	cm := storage.NewLocalChunkManager(storage.RootPath(dataSyncServiceTestDir))
 	defer cm.RemoveWithPrefix(ctx, "")
-	replica, err := newReplica(context.Background(), &RootCoordFactory{pkType: schemapb.DataType_Int64}, cm, 1)
+	replica, err := newReplica(context.Background(), &RootCoordFactory{pkType: schemapb.DataType_Int64}, cm, 1, nil)
 	require.NoError(t, err)
 
 	cache := newCache()

@@ -76,7 +76,7 @@ func TestFlowGraphInsertBufferNodeCreate(t *testing.T) {
 		pkType: schemapb.DataType_Int64,
 	}
 
-	replica, err := newReplica(ctx, mockRootCoord, cm, collMeta.ID)
+	replica, err := newReplica(ctx, mockRootCoord, cm, collMeta.ID, collMeta.GetSchema())
 	assert.Nil(t, err)
 	err = replica.addSegment(
 		addSegmentReq{
@@ -171,7 +171,7 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 		pkType: schemapb.DataType_Int64,
 	}
 
-	replica, err := newReplica(ctx, mockRootCoord, cm, collMeta.ID)
+	replica, err := newReplica(ctx, mockRootCoord, cm, collMeta.ID, collMeta.GetSchema())
 	assert.Nil(t, err)
 
 	err = replica.addSegment(
@@ -933,7 +933,7 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 			compactTs: 100,
 		}
 
-		replica, err := newReplica(ctx, mockRootCoord, cm, collMeta.ID)
+		replica, err := newReplica(ctx, mockRootCoord, cm, collMeta.ID, collMeta.GetSchema())
 		assert.Nil(t, err)
 		err = replica.addSegment(
 			addSegmentReq{
@@ -994,7 +994,7 @@ func TestInsertBufferNode_updateSegStatesInReplica(te *testing.T) {
 	}
 
 	for _, test := range invalideTests {
-		replica, err := newReplica(context.Background(), &RootCoordFactory{pkType: schemapb.DataType_Int64}, cm, test.replicaCollID)
+		replica, err := newReplica(context.Background(), &RootCoordFactory{pkType: schemapb.DataType_Int64}, cm, test.replicaCollID, nil)
 		assert.Nil(te, err)
 
 		ibNode := &insertBufferNode{

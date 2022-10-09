@@ -288,6 +288,12 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 			collectionID:   collID,
 			vChannels:      t.channels.virtualChannels,
 			startPositions: toKeyDataPairs(startPositions),
+			schema: &schemapb.CollectionSchema{
+				Name:        collInfo.Name,
+				Description: collInfo.Description,
+				AutoID:      collInfo.AutoID,
+				Fields:      model.MarshalFieldModels(collInfo.Fields),
+			},
 		},
 	}, &nullStep{})
 	undoTask.AddStep(&changeCollectionStateStep{

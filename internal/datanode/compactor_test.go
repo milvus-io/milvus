@@ -50,7 +50,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 		rc := &RootCoordFactory{
 			pkType: schemapb.DataType_Int64,
 		}
-		replica, err := newReplica(context.TODO(), rc, cm, 1)
+		replica, err := newReplica(context.TODO(), rc, cm, 1, nil)
 		require.NoError(t, err)
 
 		task := &compactionTask{
@@ -270,7 +270,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			Return(&milvuspb.DescribeCollectionResponse{
 				Schema: meta.GetSchema(),
 			}, nil)
-		replica, err := newReplica(context.Background(), rc, nil, collectionID)
+		replica, err := newReplica(context.Background(), rc, nil, collectionID, meta.GetSchema())
 		require.NoError(t, err)
 		t.Run("Merge without expiration", func(t *testing.T) {
 			alloc := NewAllocatorFactory(1)
@@ -623,7 +623,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 			mockfm := &mockFlushManager{}
 			mockKv := memkv.NewMemoryKV()
 			mockbIO := &binlogIO{cm, alloc}
-			replica, err := newReplica(context.TODO(), rc, cm, c.colID)
+			replica, err := newReplica(context.TODO(), rc, cm, c.colID, nil)
 			require.NoError(t, err)
 
 			replica.addFlushedSegmentWithPKs(c.segID1, c.colID, c.parID, "channelname", 2, c.iData1)
@@ -750,7 +750,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 		}
 		mockfm := &mockFlushManager{}
 		mockbIO := &binlogIO{cm, alloc}
-		replica, err := newReplica(context.TODO(), rc, cm, collID)
+		replica, err := newReplica(context.TODO(), rc, cm, collID, nil)
 		require.NoError(t, err)
 
 		replica.addFlushedSegmentWithPKs(segID1, collID, partID, "channelname", 2, &storage.Int64FieldData{Data: []UniqueID{1}})

@@ -108,6 +108,7 @@ type Segment struct {
 type SegmentReplica struct {
 	collectionID UniqueID
 	collSchema   *schemapb.CollectionSchema
+	schemaMut    sync.RWMutex
 
 	segMu             sync.RWMutex
 	newSegments       map[UniqueID]*Segment
@@ -195,11 +196,12 @@ func (s *Segment) getSegmentStatslog(pkID UniqueID, pkType schemapb.DataType) ([
 
 var _ Replica = &SegmentReplica{}
 
-func newReplica(ctx context.Context, rc types.RootCoord, cm storage.ChunkManager, collID UniqueID) (*SegmentReplica, error) {
+func newReplica(ctx context.Context, rc types.RootCoord, cm storage.ChunkManager, collID UniqueID, schema *schemapb.CollectionSchema) (*SegmentReplica, error) {
 	metaService := newMetaService(rc, collID)
 
 	replica := &SegmentReplica{
 		collectionID: collID,
+		collSchema:   schema,
 
 		newSegments:       make(map[UniqueID]*Segment),
 		normalSegments:    make(map[UniqueID]*Segment),
@@ -208,12 +210,6 @@ func newReplica(ctx context.Context, rc types.RootCoord, cm storage.ChunkManager
 
 		metaService:  metaService,
 		chunkManager: cm,
-	}
-	// try to cache latest schema
-	_, err := replica.getCollectionSchema(collID, 0)
-	if err != nil {
-		err2 := fmt.Errorf("replica get schema for collection %d failed:%w", collID, err)
-		return nil, err2
 	}
 
 	return replica, nil
@@ -712,12 +708,21 @@ func (replica *SegmentReplica) getCollectionSchema(collID UniqueID, ts Timestamp
 		return nil, fmt.Errorf("mismatch collection, want %d, actual %d", replica.collectionID, collID)
 	}
 
+	replica.schemaMut.RLock()
 	if replica.collSchema == nil {
-		sch, err := replica.metaService.getCollectionSchema(context.Background(), collID, ts)
-		if err != nil {
-			return nil, err
+		replica.schemaMut.RUnlock()
+
+		replica.schemaMut.Lock()
+		defer replica.schemaMut.Unlock()
+		if replica.collSchema == nil {
+			sch, err := replica.metaService.getCollectionSchema(context.Background(), collID, ts)
+			if err != nil {
+				return nil, err
+			}
+			replica.collSchema = sch
 		}
-		replica.collSchema = sch
+	} else {
+		defer replica.schemaMut.RUnlock()
 	}
 
 	return replica.collSchema, nil

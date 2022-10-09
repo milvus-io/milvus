@@ -415,6 +415,8 @@ message ChannelWatchInfo {
     // the timeout ts, datanode shall do nothing after it
     // if the timeout is not set(= 0), original infinite retry logic shall be applied
     int64 timeoutTs = 4;
+    // the schema of the collection to watch, to avoid get schema rpc issues.
+    schema.CollectionSchema schema = 5;
 }
 
 enum CompactionType {
@@ -484,6 +486,7 @@ message WatchChannelsRequest {
   int64 collectionID = 1;
   repeated string channelNames = 2;
   repeated common.KeyDataPair start_positions = 3;
+  schema.CollectionSchema schema = 4; 
 }
 
 message WatchChannelsResponse {
