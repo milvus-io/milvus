@@ -170,7 +170,7 @@ class TestChaos(TestChaosBase):
 		# reset counting
 		cc.reset_counting(self.health_checkers)
 		# wait 240s
-		sleep(240)
+		sleep(constants.WAIT_PER_OP * 24)
 		log.info(f'Alive threads: {threading.enumerate()}')
 		# assert statistic
 		log.info("******2nd assert after chaos injected: ")
@@ -195,8 +195,8 @@ class TestChaos(TestChaosBase):
 		self.health_checkers[Op.bulk_load].recheck_failed_task = True
 		# reset counting again
 		cc.reset_counting(self.health_checkers)
-		# wait 120s (varies by feature)
-		sleep(constants.WAIT_PER_OP * 12)
+		# wait 240s (varies by feature)
+		sleep(constants.WAIT_PER_OP * 24)
 		# assert statistic: all ops success again
 		log.info("******3rd assert after chaos deleted: ")
 		assert_statistic(self.health_checkers)
