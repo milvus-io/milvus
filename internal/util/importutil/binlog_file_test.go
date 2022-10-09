@@ -599,7 +599,7 @@ func Test_BinlogFileDouble(t *testing.T) {
 }
 
 func Test_BinlogFileVarchar(t *testing.T) {
-	source := []string{"a", "b", "c", "d"}
+	source := []string{"a", "bb", "罗伯特", "d"}
 	chunkManager := &MockChunkManager{
 		readBuf: map[string][]byte{
 			"dummy": createBinlogBuf(t, schemapb.DataType_VarChar, source),

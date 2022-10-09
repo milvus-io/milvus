@@ -1594,7 +1594,6 @@ func (c *Core) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvus
 		zap.Strings("virtual channel names", req.GetChannelNames()),
 		zap.Int64("partition ID", pID),
 		zap.Int("# of files = ", len(req.GetFiles())),
-		zap.Bool("row-based", req.GetRowBased()),
 	)
 	importJobResp := c.importManager.importJob(ctx, req, cID, pID)
 	return importJobResp, nil
@@ -1692,7 +1691,7 @@ func (c *Core) ReportImport(ctx context.Context, ir *rootcoordpb.ImportResult) (
 		resendTaskFunc()
 		// Flush all import data segments.
 		if err := c.broker.Flush(ctx, ti.GetCollectionId(), ir.GetSegments()); err != nil {
-			log.Error("failed to call Flush on bulk load segments",
+			log.Error("failed to call Flush on bulk insert segments",
 				zap.Int64("task ID", ir.GetTaskId()))
 			return &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,

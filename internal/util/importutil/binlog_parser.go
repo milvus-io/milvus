@@ -19,6 +19,7 @@ package importutil
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path"
 	"sort"
 	"strconv"
@@ -30,23 +31,33 @@ import (
 )
 
 type BinlogParser struct {
+	ctx              context.Context            // for canceling parse process
 	collectionSchema *schemapb.CollectionSchema // collection schema
 	shardNum         int32                      // sharding number of the collection
-	segmentSize      int64                      // maximum size of a segment(unit:byte)
+	blockSize        int64                      // maximum size of a read block(unit:byte)
 	chunkManager     storage.ChunkManager       // storage interfaces to browse/read the files
 	callFlushFunc    ImportFlushFunc            // call back function to flush segment
 
-	// a timestamp to define the end point of restore, data after this point will be ignored
+	// a timestamp to define the start time point of restore, data before this time point will be ignored
+	// set this value to 0, all the data will be imported
+	// set this value to math.MaxUint64, all the data will be ignored
+	// the tsStartPoint value must be less/equal than tsEndPoint
+	tsStartPoint uint64
+
+	// a timestamp to define the end time point of restore, data after this time point will be ignored
 	// set this value to 0, all the data will be ignored
 	// set this value to math.MaxUint64, all the data will be imported
+	// the tsEndPoint value must be larger/equal than tsStartPoint
 	tsEndPoint uint64
 }
 
-func NewBinlogParser(collectionSchema *schemapb.CollectionSchema,
+func NewBinlogParser(ctx context.Context,
+	collectionSchema *schemapb.CollectionSchema,
 	shardNum int32,
-	segmentSize int64,
+	blockSize int64,
 	chunkManager storage.ChunkManager,
 	flushFunc ImportFlushFunc,
+	tsStartPoint uint64,
 	tsEndPoint uint64) (*BinlogParser, error) {
 	if collectionSchema == nil {
 		log.Error("Binlog parser: collection schema is nil")
@@ -63,18 +74,27 @@ func NewBinlogParser(collectionSchema *schemapb.CollectionSchema,
 		return nil, errors.New("flush function is nil")
 	}
 
+	if tsStartPoint > tsEndPoint {
+		log.Error("Binlog parser: the tsStartPoint should be less than tsEndPoint",
+			zap.Uint64("tsStartPoint", tsStartPoint), zap.Uint64("tsEndPoint", tsEndPoint))
+		return nil, fmt.Errorf("Binlog parser: the tsStartPoint %d should be less than tsEndPoint %d", tsStartPoint, tsEndPoint)
+	}
+
 	v := &BinlogParser{
+		ctx:              ctx,
 		collectionSchema: collectionSchema,
 		shardNum:         shardNum,
-		segmentSize:      segmentSize,
+		blockSize:        blockSize,
 		chunkManager:     chunkManager,
 		callFlushFunc:    flushFunc,
+		tsStartPoint:     tsStartPoint,
 		tsEndPoint:       tsEndPoint,
 	}
 
 	return v, nil
 }
 
+// constructSegmentHolders builds a list of SegmentFilesHolder, each SegmentFilesHolder represents a segment folder
 // For instance, the insertlogRoot is "backup/bak1/data/insert_log/435978159196147009/435978159196147010".
 // 435978159196147009 is a collection id, 435978159196147010 is a partition id,
 // there is a segment(id is 435978159261483009) under this partition.
@@ -195,8 +215,8 @@ func (p *BinlogParser) parseSegmentFiles(segmentHolder *SegmentFilesHolder) erro
 		return errors.New("segment files holder is nil")
 	}
 
-	adapter, err := NewBinlogAdapter(p.collectionSchema, p.shardNum, p.segmentSize,
-		MaxTotalSizeInMemory, p.chunkManager, p.callFlushFunc, p.tsEndPoint)
+	adapter, err := NewBinlogAdapter(p.ctx, p.collectionSchema, p.shardNum, p.blockSize,
+		MaxTotalSizeInMemory, p.chunkManager, p.callFlushFunc, p.tsStartPoint, p.tsEndPoint)
 	if err != nil {
 		log.Error("Binlog parser: failed to create binlog adapter", zap.Error(err))
 		return err
@@ -205,7 +225,7 @@ func (p *BinlogParser) parseSegmentFiles(segmentHolder *SegmentFilesHolder) erro
 	return adapter.Read(segmentHolder)
 }
 
-// This functions requires two paths:
+// Parse requires two paths:
 // 1. the insert log path of a partition
 // 2. the delta log path of a partiion (optional)
 func (p *BinlogParser) Parse(filePaths []string) error {
