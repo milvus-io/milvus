@@ -484,7 +484,7 @@ class TestBulkLoad(TestcaseBase):
             else:
                 failed_reason = "is not equal to other fields"
             for state in states.values():
-                assert state.state_name == "Failed"
+                assert state.state_name in ["Failed", "Failed and cleaned"]
                 assert failed_reason in state.infos.get("failed_reason", "")
         else:
             assert success
@@ -639,7 +639,7 @@ class TestBulkLoad(TestcaseBase):
             else:
                 failed_reason = "is not equal to other fields"
             for state in states.values():
-                assert state.state_name == "Failed"
+                assert state.state_name in ["Failed", "Failed and cleaned"]
                 assert failed_reason in state.infos.get("failed_reason", "")
         else:
             assert success
@@ -772,7 +772,7 @@ class TestBulkLoad(TestcaseBase):
             assert not success
             failed_reason = "is duplicated"  # "the field xxx is duplicated"
             for state in states.values():
-                assert state.state_name == "Failed"
+                assert state.state_name in ["Failed", "Failed and cleaned"]
                 assert failed_reason in state.infos.get("failed_reason", "")
         else:
             assert success
@@ -905,7 +905,7 @@ class TestBulkLoad(TestcaseBase):
                 f"JSON row validator: field {df.vec_field} missed at the row 0"
             )
             for state in states.values():
-                assert state.state_name == "Failed"
+                assert state.state_name in ["Failed", "Failed and cleaned"]
                 assert failed_reason1 in state.infos.get(
                     "failed_reason", ""
                 ) or failed_reason2 in state.infos.get("failed_reason", "")
@@ -1295,7 +1295,7 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         assert not success
         failed_reason = f"the file {files[0]} is empty"
         for state in states.values():
-            assert state.state_name == "Failed"
+            assert state.state_name in ["Failed", "Failed and cleaned"]
             assert failed_reason in state.infos.get("failed_reason", "")
 
     @pytest.mark.tags(CaseLabel.L3)
@@ -1345,7 +1345,7 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         assert not success
         failed_reason = "JSON parse: row count is 0"
         for state in states.values():
-            assert state.state_name == "Failed"
+            assert state.state_name in ["Failed", "Failed and cleaned"]
             assert failed_reason in state.infos.get("failed_reason", "")
 
     @pytest.mark.tags(CaseLabel.L3)
@@ -1409,7 +1409,7 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         assert not success
         failed_reason = "unsupported file type"
         for state in states.values():
-            assert state.state_name == "Failed"
+            assert state.state_name in ["Failed", "Failed and cleaned"]
             assert failed_reason in state.infos.get("failed_reason", "")
 
     @pytest.mark.tags(CaseLabel.L3)
@@ -1464,7 +1464,7 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         else:
             failed_reason = "JSON parse: row count is 0"
         for state in states.values():
-            assert state.state_name == "Failed"
+            assert state.state_name in ["Failed", "Failed and cleaned"]
             assert failed_reason in state.infos.get("failed_reason", "")
 
     @pytest.mark.tags(CaseLabel.L3)
@@ -1523,7 +1523,7 @@ class TestBulkLoadInvalidParams(TestcaseBase):
             else:
                 failed_reason = f"import error: field {dismatch_pk_field} row count 0 is not equal to other fields"
             for state in states.values():
-                assert state.state_name == "Failed"
+                assert state.state_name in ["Failed", "Failed and cleaned"]
                 assert failed_reason in state.infos.get("failed_reason", "")
 
     @pytest.mark.tags(CaseLabel.L3)
@@ -1582,7 +1582,7 @@ class TestBulkLoadInvalidParams(TestcaseBase):
             else:
                 failed_reason = f"import error: field {dismatch_vec_field} row count 0 is not equal to other fields"
         for state in states.values():
-            assert state.state_name == "Failed"
+            assert state.state_name in ["Failed", "Failed and cleaned"]
             assert failed_reason in state.infos.get("failed_reason", "")
 
     @pytest.mark.tags(CaseLabel.L3)
@@ -1638,7 +1638,7 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         else:
             failed_reason = f"import error: field {dismatch_scalar_field} row count 0 is not equal to other fields"
         for state in states.values():
-            assert state.state_name == "Failed"
+            assert state.state_name in ["Failed", "Failed and cleaned"]
             assert failed_reason in state.infos.get("failed_reason", "")
 
     @pytest.mark.tags(CaseLabel.L3)
@@ -1684,7 +1684,7 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         assert not success
         failed_reason = f"array size {dim} doesn't equal to vector dimension {wrong_dim} of field vectors at the row "
         for state in states.values():
-            assert state.state_name == "Failed"
+            assert state.state_name in ["Failed", "Failed and cleaned"]
             assert failed_reason in state.infos.get("failed_reason", "")
 
     @pytest.mark.tags(CaseLabel.L3)
@@ -1809,7 +1809,7 @@ class TestBulkLoadInvalidParams(TestcaseBase):
             f"doesn't equal to vector dimension {dim} of field vectors at the row"
         )
         for state in states.values():
-            assert state.state_name == "Failed"
+            assert state.state_name in ["Failed", "Failed and cleaned"]
             assert failed_reason in state.infos.get("failed_reason", "")
         assert self.collection_wrap.num_entities == 0
 
@@ -1934,7 +1934,7 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         assert not success
         failed_reason = f"Numpy parse: illegal row width {dim} for field {df.vec_field} dimension {wrong_dim}"
         for state in states.values():
-            assert state.state_name == "Failed"
+            assert state.state_name in ["Failed", "Failed and cleaned"]
             assert failed_reason in state.infos.get("failed_reason", "")
         assert self.collection_wrap.num_entities == 0
 
@@ -1991,7 +1991,7 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         assert not success
         failed_reason = f"Numpy parse: the field {df.vec_field} doesn't exist"
         for state in states.values():
-            assert state.state_name == "Failed"
+            assert state.state_name in ["Failed", "Failed and cleaned"]
             assert failed_reason in state.infos.get("failed_reason", "")
         assert self.collection_wrap.num_entities == 0
 
@@ -2041,7 +2041,7 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         assert not success
         failed_reason = "duplicate file"
         for state in states.values():
-            assert state.state_name == "Failed"
+            assert state.state_name in ["Failed", "Failed and cleaned"]
             assert failed_reason in state.infos.get("failed_reason", "")
         assert self.collection_wrap.num_entities == 0
 
@@ -2094,7 +2094,7 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         assert not success
         failed_reason = f"illegal numeric value"
         for state in states.values():
-            assert state.state_name == "Failed"
+            assert state.state_name in ["Failed", "Failed and cleaned"]
             assert failed_reason in state.infos.get("failed_reason", "")
         assert self.collection_wrap.num_entities == 0
 
@@ -2150,7 +2150,7 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         failed_reason1 = "illegal value"
         failed_reason2 = "invalid character"
         for state in states.values():
-            assert state.state_name == "Failed"
+            assert state.state_name in ["Failed", "Failed and cleaned"]
             assert failed_reason1 in state.infos.get(
                 "failed_reason", ""
             ) or failed_reason2 in state.infos.get("failed_reason", "")
@@ -2217,7 +2217,7 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         assert not success
         failed_reason = "duplicate file"
         for state in states.values():
-            assert state.state_name == "Failed"
+            assert state.state_name in ["Failed", "Failed and cleaned"]
             assert failed_reason in state.infos.get("failed_reason", "")
         assert self.collection_wrap.num_entities == 0
 
@@ -2271,7 +2271,7 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         assert not success
         failed_reason = "illegal numeric value"
         for state in states.values():
-            assert state.state_name == "Failed"
+            assert state.state_name in ["Failed", "Failed and cleaned"]
             assert failed_reason in state.infos.get("failed_reason", "")
         assert self.collection_wrap.num_entities == 0
 
@@ -2333,7 +2333,7 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         if not float_vector:
             failed_reason = f"doesn't equal to vector dimension {dim} of field vectors"
         for state in states.values():
-            assert state.state_name == "Failed"
+            assert state.state_name in ["Failed", "Failed and cleaned"]
             assert failed_reason in state.infos.get("failed_reason", "")
         assert self.collection_wrap.num_entities == 0
 
