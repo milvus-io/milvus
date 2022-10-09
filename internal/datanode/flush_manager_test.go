@@ -527,7 +527,7 @@ func TestFlushNotifyFunc(t *testing.T) {
 	}
 	cm := storage.NewLocalChunkManager(storage.RootPath(flushTestDir))
 
-	replica, err := newReplica(ctx, rcf, cm, 1)
+	replica, err := newReplica(ctx, rcf, cm, 1, nil)
 	require.NoError(t, err)
 
 	dataCoord := &DataCoordFactory{}
@@ -604,7 +604,7 @@ func TestDropVirtualChannelFunc(t *testing.T) {
 	}
 
 	cm := storage.NewLocalChunkManager(storage.RootPath(flushTestDir))
-	replica, err := newReplica(ctx, rcf, cm, 1)
+	replica, err := newReplica(ctx, rcf, cm, 1, nil)
 	require.NoError(t, err)
 
 	dataCoord := &DataCoordFactory{}

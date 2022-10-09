@@ -1076,6 +1076,7 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 			Name:           channelName,
 			CollectionID:   req.GetCollectionID(),
 			StartPositions: req.GetStartPositions(),
+			Schema:         req.GetSchema(),
 		}
 		err := s.channelManager.Watch(ch)
 		if err != nil {

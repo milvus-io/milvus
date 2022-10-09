@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 
 	"github.com/milvus-io/milvus/api/commonpb"
+	"github.com/milvus-io/milvus/api/schemapb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"go.uber.org/zap"
@@ -21,6 +22,7 @@ type watchInfo struct {
 	partitionID    UniqueID
 	vChannels      []string
 	startPositions []*commonpb.KeyDataPair
+	schema         *schemapb.CollectionSchema
 }
 
 // Broker communicates with other components.
@@ -100,6 +102,7 @@ func (b *ServerBroker) WatchChannels(ctx context.Context, info *watchInfo) error
 		CollectionID:   info.collectionID,
 		ChannelNames:   info.vChannels,
 		StartPositions: info.startPositions,
+		Schema:         info.schema,
 	})
 	if err != nil {
 		return err

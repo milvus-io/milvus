@@ -208,7 +208,7 @@ func TestDataNode(t *testing.T) {
 			FlushedSegmentIds:   []int64{},
 		}
 
-		err := node1.flowgraphManager.addAndStart(node1, vchan)
+		err := node1.flowgraphManager.addAndStart(node1, vchan, nil)
 		require.Nil(t, err)
 
 		fgservice, ok := node1.flowgraphManager.getFlowgraphService(dmChannelName)
@@ -437,14 +437,14 @@ func TestDataNode(t *testing.T) {
 			ChannelName:         chName1,
 			UnflushedSegmentIds: []int64{},
 			FlushedSegmentIds:   []int64{},
-		})
+		}, nil)
 		require.Nil(t, err)
 		err = node.flowgraphManager.addAndStart(node, &datapb.VchannelInfo{
 			CollectionID:        100,
 			ChannelName:         chName2,
 			UnflushedSegmentIds: []int64{},
 			FlushedSegmentIds:   []int64{},
-		})
+		}, nil)
 		require.Nil(t, err)
 
 		_, ok := node.flowgraphManager.getFlowgraphService(chName1)
@@ -503,14 +503,14 @@ func TestDataNode(t *testing.T) {
 			ChannelName:         chName1,
 			UnflushedSegmentIds: []int64{},
 			FlushedSegmentIds:   []int64{},
-		})
+		}, nil)
 		require.Nil(t, err)
 		err = node.flowgraphManager.addAndStart(node, &datapb.VchannelInfo{
 			CollectionID:        999, // wrong collection ID.
 			ChannelName:         chName2,
 			UnflushedSegmentIds: []int64{},
 			FlushedSegmentIds:   []int64{},
-		})
+		}, nil)
 		require.Nil(t, err)
 
 		_, ok := node.flowgraphManager.getFlowgraphService(chName1)
@@ -644,7 +644,7 @@ func TestDataNode(t *testing.T) {
 
 		for i, test := range testDataSyncs {
 			if i <= 2 {
-				err = node.flowgraphManager.addAndStart(node, &datapb.VchannelInfo{CollectionID: 1, ChannelName: test.dmChannelName})
+				err = node.flowgraphManager.addAndStart(node, &datapb.VchannelInfo{CollectionID: 1, ChannelName: test.dmChannelName}, nil)
 				assert.Nil(t, err)
 				vchanNameCh <- test.dmChannelName
 			}
@@ -672,7 +672,7 @@ func TestDataNode(t *testing.T) {
 			ChannelName:         chanName,
 			UnflushedSegmentIds: []int64{},
 			FlushedSegmentIds:   []int64{},
-		})
+		}, nil)
 		require.NoError(t, err)
 		fg, ok := node.flowgraphManager.getFlowgraphService(chanName)
 		assert.True(t, ok)
@@ -767,14 +767,14 @@ func TestDataNode_AddSegment(t *testing.T) {
 			ChannelName:         chName1,
 			UnflushedSegmentIds: []int64{},
 			FlushedSegmentIds:   []int64{},
-		})
+		}, nil)
 		require.Nil(t, err)
 		err = node.flowgraphManager.addAndStart(node, &datapb.VchannelInfo{
 			CollectionID:        100,
 			ChannelName:         chName2,
 			UnflushedSegmentIds: []int64{},
 			FlushedSegmentIds:   []int64{},
-		})
+		}, nil)
 		require.Nil(t, err)
 
 		_, ok := node.flowgraphManager.getFlowgraphService(chName1)
@@ -1104,7 +1104,7 @@ func TestDataNode_ResendSegmentStats(t *testing.T) {
 		FlushedSegmentIds:   []int64{},
 	}
 
-	err = node.flowgraphManager.addAndStart(node, vChan)
+	err = node.flowgraphManager.addAndStart(node, vChan, nil)
 	require.Nil(t, err)
 
 	fgService, ok := node.flowgraphManager.getFlowgraphService(dmChannelName)

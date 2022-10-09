@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/milvus-io/milvus/api/schemapb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -35,13 +36,13 @@ func newFlowgraphManager() *flowgraphManager {
 	return &flowgraphManager{}
 }
 
-func (fm *flowgraphManager) addAndStart(dn *DataNode, vchan *datapb.VchannelInfo) error {
+func (fm *flowgraphManager) addAndStart(dn *DataNode, vchan *datapb.VchannelInfo, schema *schemapb.CollectionSchema) error {
 	if _, ok := fm.flowgraphs.Load(vchan.GetChannelName()); ok {
 		log.Warn("try to add an existed DataSyncService", zap.String("vChannelName", vchan.GetChannelName()))
 		return nil
 	}
 
-	replica, err := newReplica(dn.ctx, dn.rootCoord, dn.chunkManager, vchan.GetCollectionID())
+	replica, err := newReplica(dn.ctx, dn.rootCoord, dn.chunkManager, vchan.GetCollectionID(), schema)
 	if err != nil {
 		log.Warn("new replica failed", zap.String("vChannelName", vchan.GetChannelName()), zap.Error(err))
 		return err

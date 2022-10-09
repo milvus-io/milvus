@@ -43,7 +43,7 @@ func TestNewReplica(t *testing.T) {
 	rc := &RootCoordFactory{}
 	cm := storage.NewLocalChunkManager(storage.RootPath(segmentReplicaNodeTestDir))
 	defer cm.RemoveWithPrefix(context.Background(), "")
-	replica, err := newReplica(context.Background(), rc, cm, 0)
+	replica, err := newReplica(context.Background(), rc, cm, 0, nil)
 	assert.Nil(t, err)
 	assert.NotNil(t, replica)
 }
@@ -236,7 +236,7 @@ func TestSegmentReplica(t *testing.T) {
 	defer cm.RemoveWithPrefix(ctx, "")
 
 	t.Run("Test coll mot match", func(t *testing.T) {
-		replica, err := newReplica(context.Background(), rc, cm, collID)
+		replica, err := newReplica(context.Background(), rc, cm, collID, nil)
 		assert.Nil(t, err)
 		err = replica.addSegment(
 			addSegmentReq{
@@ -345,7 +345,7 @@ func TestSegmentReplica_InterfaceMethod(t *testing.T) {
 		}
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				replica, err := newReplica(context.TODO(), rc, cm, test.replicaCollID)
+				replica, err := newReplica(context.TODO(), rc, cm, test.replicaCollID, nil)
 				require.NoError(t, err)
 				if test.isvalid {
 					replica.addFlushedSegmentWithPKs(100, test.incollID, 10, "a", 1, primaryKeyData)
@@ -382,7 +382,7 @@ func TestSegmentReplica_InterfaceMethod(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				sr, err := newReplica(context.Background(), rc, cm, test.replicaCollID)
+				sr, err := newReplica(context.Background(), rc, cm, test.replicaCollID, nil)
 				assert.Nil(t, err)
 				require.False(t, sr.hasSegment(test.inSegID, true))
 				err = sr.addSegment(
@@ -426,7 +426,7 @@ func TestSegmentReplica_InterfaceMethod(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				sr, err := newReplica(context.Background(), rc, &mockDataCM{}, test.replicaCollID)
+				sr, err := newReplica(context.Background(), rc, &mockDataCM{}, test.replicaCollID, nil)
 				assert.Nil(t, err)
 				require.False(t, sr.hasSegment(test.inSegID, true))
 				err = sr.addSegment(
@@ -455,7 +455,7 @@ func TestSegmentReplica_InterfaceMethod(t *testing.T) {
 	})
 
 	t.Run("Test_addNormalSegmentWithNilDml", func(t *testing.T) {
-		sr, err := newReplica(context.Background(), rc, &mockDataCM{}, 1)
+		sr, err := newReplica(context.Background(), rc, &mockDataCM{}, 1, nil)
 		require.NoError(t, err)
 		segID := int64(101)
 		require.False(t, sr.hasSegment(segID, true))
@@ -658,7 +658,7 @@ func TestSegmentReplica_InterfaceMethod(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				sr, err := newReplica(context.Background(), rc, cm, test.replicaCollID)
+				sr, err := newReplica(context.Background(), rc, cm, test.replicaCollID, nil)
 				assert.Nil(t, err)
 
 				if test.metaServiceErr {
@@ -704,7 +704,7 @@ func TestSegmentReplica_InterfaceMethod(t *testing.T) {
 	})
 
 	t.Run("Test_addSegmentMinIOLoadError", func(t *testing.T) {
-		sr, err := newReplica(context.Background(), rc, cm, 1)
+		sr, err := newReplica(context.Background(), rc, cm, 1, nil)
 		assert.Nil(t, err)
 		sr.chunkManager = &mockDataCMError{}
 
@@ -738,7 +738,7 @@ func TestSegmentReplica_InterfaceMethod(t *testing.T) {
 	})
 
 	t.Run("Test_addSegmentStatsError", func(t *testing.T) {
-		sr, err := newReplica(context.Background(), rc, cm, 1)
+		sr, err := newReplica(context.Background(), rc, cm, 1, nil)
 		assert.Nil(t, err)
 		sr.chunkManager = &mockDataCMStatsError{}
 
@@ -772,7 +772,7 @@ func TestSegmentReplica_InterfaceMethod(t *testing.T) {
 	})
 
 	t.Run("Test_addSegmentPkfilterError", func(t *testing.T) {
-		sr, err := newReplica(context.Background(), rc, cm, 1)
+		sr, err := newReplica(context.Background(), rc, cm, 1, nil)
 		assert.Nil(t, err)
 		sr.chunkManager = &mockPkfilterMergeError{}
 
@@ -806,7 +806,7 @@ func TestSegmentReplica_InterfaceMethod(t *testing.T) {
 	})
 
 	t.Run("Test_mergeFlushedSegments", func(t *testing.T) {
-		sr, err := newReplica(context.Background(), rc, cm, 1)
+		sr, err := newReplica(context.Background(), rc, cm, 1, nil)
 		assert.Nil(t, err)
 
 		primaryKeyData := &storage.Int64FieldData{
@@ -894,7 +894,7 @@ func TestInnerFunctionSegment(t *testing.T) {
 	collID := UniqueID(1)
 	cm := storage.NewLocalChunkManager(storage.RootPath(segmentReplicaNodeTestDir))
 	defer cm.RemoveWithPrefix(ctx, "")
-	replica, err := newReplica(context.Background(), rc, cm, collID)
+	replica, err := newReplica(context.Background(), rc, cm, collID, nil)
 	assert.Nil(t, err)
 	replica.chunkManager = &mockDataCM{}
 	assert.False(t, replica.hasSegment(0, true))
@@ -1114,7 +1114,7 @@ func TestReplica_UpdatePKRange(t *testing.T) {
 
 	cm := storage.NewLocalChunkManager(storage.RootPath(segmentReplicaNodeTestDir))
 	defer cm.RemoveWithPrefix(ctx, "")
-	replica, err := newReplica(context.Background(), rc, cm, collID)
+	replica, err := newReplica(context.Background(), rc, cm, collID, nil)
 	assert.Nil(t, err)
 	replica.chunkManager = &mockDataCM{}
 
@@ -1190,7 +1190,7 @@ func (s *SegmentReplicaSuite) SetupSuite() {
 	s.collID = 1
 	s.cm = storage.NewLocalChunkManager(storage.RootPath(segmentReplicaNodeTestDir))
 	var err error
-	s.sr, err = newReplica(context.Background(), rc, s.cm, s.collID)
+	s.sr, err = newReplica(context.Background(), rc, s.cm, s.collID, nil)
 	s.Require().NoError(err)
 }
 
