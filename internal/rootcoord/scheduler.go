@@ -3,6 +3,12 @@ package rootcoord
 import (
 	"context"
 	"sync"
+	"time"
+
+	"github.com/milvus-io/milvus/internal/log"
+
+	"go.uber.org/atomic"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/tso"
 
@@ -13,6 +19,7 @@ type IScheduler interface {
 	Start()
 	Stop()
 	AddTask(t task) error
+	GetMinDdlTs() Timestamp
 }
 
 type scheduler struct {
@@ -26,6 +33,8 @@ type scheduler struct {
 	taskChan chan task
 
 	lock sync.Mutex
+
+	minDdlTs atomic.Uint64
 }
 
 func newScheduler(ctx context.Context, idAllocator allocator.Interface, tsoAllocator tso.Allocator) *scheduler {
@@ -38,6 +47,7 @@ func newScheduler(ctx context.Context, idAllocator allocator.Interface, tsoAlloc
 		idAllocator:  idAllocator,
 		tsoAllocator: tsoAllocator,
 		taskChan:     make(chan task, n),
+		minDdlTs:     *atomic.NewUint64(0),
 	}
 }
 
@@ -52,6 +62,7 @@ func (s *scheduler) Stop() {
 }
 
 func (s *scheduler) execute(task task) {
+	defer s.setMinDdlTs(task.GetTs()) // we should update ts, whatever task succeeds or not.
 	if err := task.Prepare(task.GetCtx()); err != nil {
 		task.NotifyDone(err)
 		return
@@ -62,13 +73,30 @@ func (s *scheduler) execute(task task) {
 
 func (s *scheduler) taskLoop() {
 	defer s.wg.Done()
+	ticker := time.NewTicker(Params.ProxyCfg.TimeTickInterval)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-s.ctx.Done():
 			return
+		case <-ticker.C:
+			s.updateLatestTsoAsMinDdlTs()
 		case task := <-s.taskChan:
 			s.execute(task)
 		}
+	}
+}
+
+func (s *scheduler) updateLatestTsoAsMinDdlTs() {
+	if len(s.taskChan) > 0 {
+		return
+	}
+
+	ts, err := s.tsoAllocator.GenerateTSO(1)
+	if err != nil {
+		log.Warn("failed to generate tso, ignore to update min ddl ts", zap.Error(err))
+	} else {
+		s.setMinDdlTs(ts)
 	}
 }
 
@@ -107,4 +135,12 @@ func (s *scheduler) AddTask(task task) error {
 	}
 	s.enqueue(task)
 	return nil
+}
+
+func (s *scheduler) GetMinDdlTs() Timestamp {
+	return s.minDdlTs.Load()
+}
+
+func (s *scheduler) setMinDdlTs(ts Timestamp) {
+	s.minDdlTs.Store(ts)
 }

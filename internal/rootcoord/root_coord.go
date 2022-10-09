@@ -193,9 +193,23 @@ func (c *Core) sendTimeTick(t Timestamp, reason string) error {
 }
 
 func (c *Core) sendMinDdlTsAsTt() {
-	minDdlTs := c.ddlTsLockManager.GetMinDdlTs()
-	err := c.sendTimeTick(minDdlTs, "timetick loop")
-	if err != nil {
+	minBgDdlTs := c.ddlTsLockManager.GetMinDdlTs()
+	minNormalDdlTs := c.scheduler.GetMinDdlTs()
+	minDdlTs := funcutil.Min(minBgDdlTs, minNormalDdlTs)
+
+	// zero	-> ddlTsLockManager and scheduler not started.
+	if minDdlTs == typeutil.ZeroTimestamp {
+		log.Warn("zero ts was met, this should be only occurred in starting state", zap.Uint64("minBgDdlTs", minBgDdlTs), zap.Uint64("minNormalDdlTs", minNormalDdlTs))
+		return
+	}
+
+	// max	-> abnormal case, impossible.
+	if minDdlTs == typeutil.MaxTimestamp {
+		log.Warn("ddl ts is abnormal, max ts was met", zap.Uint64("minBgDdlTs", minBgDdlTs), zap.Uint64("minNormalDdlTs", minNormalDdlTs))
+		return
+	}
+
+	if err := c.sendTimeTick(minDdlTs, "timetick loop"); err != nil {
 		log.Warn("failed to send timetick", zap.Error(err))
 	}
 }
