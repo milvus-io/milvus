@@ -20,7 +20,7 @@ type scheduler struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
-	idAllocator  allocator.GIDAllocator
+	idAllocator  allocator.Interface
 	tsoAllocator tso.Allocator
 
 	taskChan chan task
@@ -28,7 +28,7 @@ type scheduler struct {
 	lock sync.Mutex
 }
 
-func newScheduler(ctx context.Context, idAllocator allocator.GIDAllocator, tsoAllocator tso.Allocator) *scheduler {
+func newScheduler(ctx context.Context, idAllocator allocator.Interface, tsoAllocator tso.Allocator) *scheduler {
 	ctx1, cancel := context.WithCancel(ctx)
 	// TODO
 	n := 1024 * 10

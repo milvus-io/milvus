@@ -110,7 +110,7 @@ type Core struct {
 
 	chanTimeTick *timetickSync
 
-	idAllocator  allocator.GIDAllocator
+	idAllocator  allocator.Interface
 	tsoAllocator tso.Allocator
 
 	dataCoord  types.DataCoord

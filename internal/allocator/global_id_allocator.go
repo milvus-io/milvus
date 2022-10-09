@@ -22,16 +22,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
-// GIDAllocator is an interface for GlobalIDAllocator.
-// Alloc allocates the id of the count number.
-// AllocOne allocates one id.
-// UpdateID update timestamp of allocator.
-type GIDAllocator interface {
-	Alloc(count uint32) (UniqueID, UniqueID, error)
-	AllocOne() (UniqueID, error)
-	UpdateID() error
-}
-
 // GlobalIDAllocator is the global single point TSO allocator.
 type GlobalIDAllocator struct {
 	allocator tso.Allocator
@@ -72,9 +62,4 @@ func (gia *GlobalIDAllocator) AllocOne() (typeutil.UniqueID, error) {
 	}
 	idStart := typeutil.UniqueID(timestamp)
 	return idStart, nil
-}
-
-// UpdateID updates timestamp of allocator.
-func (gia *GlobalIDAllocator) UpdateID() error {
-	return gia.allocator.UpdateTSO()
 }

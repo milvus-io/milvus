@@ -124,7 +124,7 @@ func (t *Ticker) Chan() <-chan time.Time {
 }
 
 // Allocator allocates from a global allocator by its given member functions
-type Allocator struct {
+type CachedAllocator struct {
 	Ctx        context.Context
 	CancelFunc context.CancelFunc
 
@@ -148,7 +148,7 @@ type Allocator struct {
 }
 
 // Start starts the loop of checking whether to synchronize with the global allocator.
-func (ta *Allocator) Start() error {
+func (ta *CachedAllocator) Start() error {
 	ta.TChan.Init()
 	ta.wg.Add(1)
 	go ta.mainLoop()
@@ -156,12 +156,12 @@ func (ta *Allocator) Start() error {
 }
 
 // Init mainly initialize internal members.
-func (ta *Allocator) Init() {
+func (ta *CachedAllocator) Init() {
 	ta.ForceSyncChan = make(chan Request, maxConcurrentRequests)
 	ta.Reqs = make(chan Request, maxConcurrentRequests)
 }
 
-func (ta *Allocator) mainLoop() {
+func (ta *CachedAllocator) mainLoop() {
 	defer ta.wg.Done()
 
 	loopCtx, loopCancel := context.WithCancel(ta.Ctx)
@@ -207,14 +207,14 @@ func (ta *Allocator) mainLoop() {
 	}
 }
 
-func (ta *Allocator) pickCanDo() {
+func (ta *CachedAllocator) pickCanDo() {
 	if ta.PickCanDoFunc == nil {
 		return
 	}
 	ta.PickCanDoFunc()
 }
 
-func (ta *Allocator) sync(timeout bool) bool {
+func (ta *CachedAllocator) sync(timeout bool) bool {
 	if ta.SyncFunc == nil || ta.CheckSyncFunc == nil {
 		ta.CanDoReqs = ta.ToDoReqs
 		ta.ToDoReqs = nil
@@ -236,7 +236,7 @@ func (ta *Allocator) sync(timeout bool) bool {
 	return ret
 }
 
-func (ta *Allocator) finishSyncRequest() {
+func (ta *CachedAllocator) finishSyncRequest() {
 	for _, req := range ta.SyncReqs {
 		if req != nil {
 			req.Notify(nil)
@@ -245,7 +245,7 @@ func (ta *Allocator) finishSyncRequest() {
 	ta.SyncReqs = nil
 }
 
-func (ta *Allocator) failRemainRequest() {
+func (ta *CachedAllocator) failRemainRequest() {
 	var err error
 	if ta.SyncErr != nil {
 		err = fmt.Errorf("%s failRemainRequest err:%w", ta.Role, ta.SyncErr)
@@ -266,7 +266,7 @@ func (ta *Allocator) failRemainRequest() {
 	ta.ToDoReqs = nil
 }
 
-func (ta *Allocator) finishRequest() {
+func (ta *CachedAllocator) finishRequest() {
 	for _, req := range ta.CanDoReqs {
 		if req != nil {
 			err := ta.ProcessFunc(req)
@@ -276,7 +276,7 @@ func (ta *Allocator) finishRequest() {
 	ta.CanDoReqs = []Request{}
 }
 
-func (ta *Allocator) revokeRequest(err error) {
+func (ta *CachedAllocator) revokeRequest(err error) {
 	n := len(ta.Reqs)
 	for i := 0; i < n; i++ {
 		req := <-ta.Reqs
@@ -285,7 +285,7 @@ func (ta *Allocator) revokeRequest(err error) {
 }
 
 // Close mainly stop the internal coroutine and recover resources.
-func (ta *Allocator) Close() {
+func (ta *CachedAllocator) Close() {
 	ta.CancelFunc()
 	ta.wg.Wait()
 	ta.TChan.Close()
@@ -294,7 +294,7 @@ func (ta *Allocator) Close() {
 }
 
 // CleanCache is used to force synchronize with global allocator.
-func (ta *Allocator) CleanCache() {
+func (ta *CachedAllocator) CleanCache() {
 	req := &SyncRequest{
 		BaseRequest: BaseRequest{
 			Done:  make(chan error),

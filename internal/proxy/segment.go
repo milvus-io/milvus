@@ -36,9 +36,6 @@ const (
 	segCountPerRPC = 20000
 )
 
-// Allocator is an alias for the allocator.Allocator type
-type Allocator = allocator.Allocator
-
 // DataCoord is a narrowed interface of DataCoordinator which only provide AssignSegmentID method
 type DataCoord interface {
 	AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error)
@@ -140,7 +137,7 @@ func (info *assignInfo) Assign(ts Timestamp, count uint32) (map[UniqueID]uint32,
 }
 
 type segIDAssigner struct {
-	Allocator
+	allocator.CachedAllocator
 	assignInfos map[UniqueID]*list.List // collectionID -> *list.List
 	segReqs     []*datapb.SegmentIDRequest
 	getTickFunc func() Timestamp
@@ -154,7 +151,7 @@ type segIDAssigner struct {
 func newSegIDAssigner(ctx context.Context, dataCoord DataCoord, getTickFunc func() Timestamp) (*segIDAssigner, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	sa := &segIDAssigner{
-		Allocator: Allocator{
+		CachedAllocator: allocator.CachedAllocator{
 			Ctx:        ctx1,
 			CancelFunc: cancel,
 			Role:       "SegmentIDAllocator",
@@ -167,10 +164,10 @@ func newSegIDAssigner(ctx context.Context, dataCoord DataCoord, getTickFunc func
 	sa.TChan = &allocator.Ticker{
 		UpdateInterval: time.Second,
 	}
-	sa.Allocator.SyncFunc = sa.syncSegments
-	sa.Allocator.ProcessFunc = sa.processFunc
-	sa.Allocator.CheckSyncFunc = sa.checkSyncFunc
-	sa.Allocator.PickCanDoFunc = sa.pickCanDoFunc
+	sa.CachedAllocator.SyncFunc = sa.syncSegments
+	sa.CachedAllocator.ProcessFunc = sa.processFunc
+	sa.CachedAllocator.CheckSyncFunc = sa.checkSyncFunc
+	sa.CachedAllocator.PickCanDoFunc = sa.pickCanDoFunc
 	sa.Init()
 	return sa, nil
 }

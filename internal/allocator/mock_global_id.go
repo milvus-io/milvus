@@ -1,7 +1,7 @@
 package allocator
 
 type MockGIDAllocator struct {
-	GIDAllocator
+	Interface
 	AllocF    func(count uint32) (UniqueID, UniqueID, error)
 	AllocOneF func() (UniqueID, error)
 	UpdateIDF func() error

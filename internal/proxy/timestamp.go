@@ -71,9 +71,9 @@ func (ta *timestampAllocator) alloc(count uint32) ([]Timestamp, error) {
 		return nil, fmt.Errorf("syncTimeStamp Failed:%s", resp.Status.Reason)
 	}
 	start, cnt := resp.Timestamp, resp.Count
-	var ret []Timestamp
+	ret := make([]Timestamp, cnt)
 	for i := uint32(0); i < cnt; i++ {
-		ret = append(ret, start+uint64(i))
+		ret[i] = start + uint64(i)
 	}
 
 	return ret, nil

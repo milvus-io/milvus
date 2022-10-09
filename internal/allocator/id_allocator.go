@@ -33,16 +33,12 @@ const (
 // UniqueID is alias of typeutil.UniqueID
 type UniqueID = typeutil.UniqueID
 
-type idAllocatorInterface interface {
-	AllocID(ctx context.Context, req *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error)
-}
-
 // IDAllocator allocates Unique and monotonically increasing IDs from Root Coord.
 // It could also batch allocate for less root coord server access
 type IDAllocator struct {
-	Allocator
+	CachedAllocator
 
-	idAllocator idAllocatorInterface
+	remoteAllocator remoteInterface
 
 	countPerRPC uint32
 
@@ -53,30 +49,30 @@ type IDAllocator struct {
 }
 
 // NewIDAllocator creates an ID Allocator allocate Unique and monotonically increasing IDs from RootCoord.
-func NewIDAllocator(ctx context.Context, idAllocator idAllocatorInterface, peerID UniqueID) (*IDAllocator, error) {
+func NewIDAllocator(ctx context.Context, remoteAllocator remoteInterface, peerID UniqueID) (*IDAllocator, error) {
 	ctx1, cancel := context.WithCancel(ctx)
 	a := &IDAllocator{
-		Allocator: Allocator{
+		CachedAllocator: CachedAllocator{
 			Ctx:        ctx1,
 			CancelFunc: cancel,
 			Role:       "IDAllocator",
 		},
-		countPerRPC: idCountPerRPC,
-		idAllocator: idAllocator,
-		PeerID:      peerID,
+		countPerRPC:     idCountPerRPC,
+		remoteAllocator: remoteAllocator,
+		PeerID:          peerID,
 	}
 	a.TChan = &EmptyTicker{}
-	a.Allocator.SyncFunc = a.syncID
-	a.Allocator.ProcessFunc = a.processFunc
-	a.Allocator.CheckSyncFunc = a.checkSyncFunc
-	a.Allocator.PickCanDoFunc = a.pickCanDoFunc
+	a.CachedAllocator.SyncFunc = a.syncID
+	a.CachedAllocator.ProcessFunc = a.processFunc
+	a.CachedAllocator.CheckSyncFunc = a.checkSyncFunc
+	a.CachedAllocator.PickCanDoFunc = a.pickCanDoFunc
 	a.Init()
 	return a, nil
 }
 
 // Start creates some working goroutines of IDAllocator.
 func (ia *IDAllocator) Start() error {
-	return ia.Allocator.Start()
+	return ia.CachedAllocator.Start()
 }
 
 func (ia *IDAllocator) gatherReqIDCount() uint32 {
@@ -105,7 +101,7 @@ func (ia *IDAllocator) syncID() (bool, error) {
 		},
 		Count: need,
 	}
-	resp, err := ia.idAllocator.AllocID(ctx, req)
+	resp, err := ia.remoteAllocator.AllocID(ctx, req)
 
 	cancel()
 	if err != nil {

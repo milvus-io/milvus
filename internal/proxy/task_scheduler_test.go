@@ -33,8 +33,7 @@ func TestBaseTaskQueue(t *testing.T) {
 	var activeTask task
 
 	tsoAllocatorIns := newMockTsoAllocator()
-	idAllocatorIns := newMockIDAllocatorInterface()
-	queue := newBaseTaskQueue(tsoAllocatorIns, idAllocatorIns)
+	queue := newBaseTaskQueue(tsoAllocatorIns)
 	assert.NotNil(t, queue)
 
 	assert.True(t, queue.utEmpty())
@@ -112,8 +111,7 @@ func TestDdTaskQueue(t *testing.T) {
 	var activeTask task
 
 	tsoAllocatorIns := newMockTsoAllocator()
-	idAllocatorIns := newMockIDAllocatorInterface()
-	queue := newDdTaskQueue(tsoAllocatorIns, idAllocatorIns)
+	queue := newDdTaskQueue(tsoAllocatorIns)
 	assert.NotNil(t, queue)
 
 	assert.True(t, queue.utEmpty())
@@ -192,8 +190,7 @@ func TestDmTaskQueue_Basic(t *testing.T) {
 	var activeTask task
 
 	tsoAllocatorIns := newMockTsoAllocator()
-	idAllocatorIns := newMockIDAllocatorInterface()
-	queue := newDmTaskQueue(tsoAllocatorIns, idAllocatorIns)
+	queue := newDmTaskQueue(tsoAllocatorIns)
 	assert.NotNil(t, queue)
 
 	assert.True(t, queue.utEmpty())
@@ -271,8 +268,7 @@ func TestDmTaskQueue_TimestampStatistics(t *testing.T) {
 	var unissuedTask task
 
 	tsoAllocatorIns := newMockTsoAllocator()
-	idAllocatorIns := newMockIDAllocatorInterface()
-	queue := newDmTaskQueue(tsoAllocatorIns, idAllocatorIns)
+	queue := newDmTaskQueue(tsoAllocatorIns)
 	assert.NotNil(t, queue)
 
 	st := newDefaultMockDmlTask()
@@ -312,8 +308,7 @@ func TestDqTaskQueue(t *testing.T) {
 	var activeTask task
 
 	tsoAllocatorIns := newMockTsoAllocator()
-	idAllocatorIns := newMockIDAllocatorInterface()
-	queue := newDqTaskQueue(tsoAllocatorIns, idAllocatorIns)
+	queue := newDqTaskQueue(tsoAllocatorIns)
 	assert.NotNil(t, queue)
 
 	assert.True(t, queue.utEmpty())
@@ -390,10 +385,9 @@ func TestTaskScheduler(t *testing.T) {
 
 	ctx := context.Background()
 	tsoAllocatorIns := newMockTsoAllocator()
-	idAllocatorIns := newMockIDAllocatorInterface()
 	factory := newSimpleMockMsgStreamFactory()
 
-	sched, err := newTaskScheduler(ctx, idAllocatorIns, tsoAllocatorIns, factory)
+	sched, err := newTaskScheduler(ctx, tsoAllocatorIns, factory)
 	assert.NoError(t, err)
 	assert.NotNil(t, sched)
 

@@ -107,7 +107,6 @@ func TestRocksmq_RegisterConsumer(t *testing.T) {
 	pMsgA := ProducerMessage{Payload: []byte(msgA)}
 	pMsgs[0] = pMsgA
 
-	_ = idAllocator.UpdateID()
 	_, err = rmq.Produce(topicName, pMsgs)
 	assert.Nil(t, err)
 
@@ -155,7 +154,6 @@ func TestRocksmq_Basic(t *testing.T) {
 	pMsgA := ProducerMessage{Payload: []byte(msgA)}
 	pMsgs[0] = pMsgA
 
-	_ = idAllocator.UpdateID()
 	_, err = rmq.Produce(channelName, pMsgs)
 	assert.Nil(t, err)
 
@@ -164,7 +162,6 @@ func TestRocksmq_Basic(t *testing.T) {
 
 	pMsgs[0] = pMsgB
 	pMsgs = append(pMsgs, pMsgC)
-	_ = idAllocator.UpdateID()
 	_, err = rmq.Produce(channelName, pMsgs)
 	assert.Nil(t, err)
 
@@ -501,7 +498,6 @@ func TestRocksmq_Throughout(t *testing.T) {
 	for i := 0; i < entityNum; i++ {
 		msg := "message_" + strconv.Itoa(i)
 		pMsg := ProducerMessage{Payload: []byte(msg)}
-		assert.Nil(t, idAllocator.UpdateID())
 		ids, err := rmq.Produce(channelName, []ProducerMessage{pMsg})
 		assert.Nil(t, err)
 		assert.EqualValues(t, 1, len(ids))
