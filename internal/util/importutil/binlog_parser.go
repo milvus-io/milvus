@@ -143,7 +143,9 @@ func (p *BinlogParser) constructSegmentHolders(insertlogRoot string, deltalogRoo
 	// the row count of a_1 is equal to b_1, the row count of a_2 is equal to b_2
 	// when we read these logs, we firstly read a_1 and b_1, then read a_2 and b_2
 	// so, here we must ensure the paths are arranged correctly
-	for _, holder := range holders {
+	segmentIDs := make([]int64, 0)
+	for id, holder := range holders {
+		segmentIDs = append(segmentIDs, id)
 		for _, v := range holder.fieldFiles {
 			sort.Strings(v)
 		}
@@ -177,9 +179,11 @@ func (p *BinlogParser) constructSegmentHolders(insertlogRoot string, deltalogRoo
 		}
 	}
 
+	// since the map in golang is not sorted, we sort the segment id array to return holder list with ascending sequence
+	sort.Slice(segmentIDs, func(i, j int) bool { return segmentIDs[i] < segmentIDs[j] })
 	holdersList := make([]*SegmentFilesHolder, 0)
-	for _, holder := range holders {
-		holdersList = append(holdersList, holder)
+	for _, id := range segmentIDs {
+		holdersList = append(holdersList, holders[id])
 	}
 
 	return holdersList, nil
