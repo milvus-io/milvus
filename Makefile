@@ -97,6 +97,10 @@ print-build-info:
 	@echo "Go Version: $(GO_VERSION)"
 
 milvus: build-cpp print-build-info
+ifeq ($(RELEASE), TRUE)
+	@echo "Update milvus/api version ..."
+	@(env bash $(PWD)/scripts/update_api_version.sh)
+endif
 	@echo "Building Milvus ..."
 	@source $(PWD)/scripts/setenv.sh && \
 		mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && \
