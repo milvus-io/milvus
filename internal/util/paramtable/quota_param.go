@@ -32,12 +32,9 @@ const (
 	// defaultMax is the default minimal rate.
 	defaultMin = float64(0)
 	// defaultLowWaterLevel is the default memory low water level.
-	defaultLowWaterLevel = float64(0.8)
+	defaultLowWaterLevel = float64(0.85)
 	// defaultHighWaterLevel is the default memory low water level.
-	defaultHighWaterLevel = float64(0.9)
-
-	// secondsPerMinute is used to convert minutes to seconds.
-	secondsPerMinute = 60.0
+	defaultHighWaterLevel = float64(0.95)
 )
 
 // quotaConfig is configuration for quota and limitations.
@@ -52,9 +49,13 @@ type quotaConfig struct {
 	DDLLimitEnabled   bool
 	DDLCollectionRate float64
 	DDLPartitionRate  float64
-	DDLIndexRate      float64
-	DDLFlushRate      float64
-	DDLCompactionRate float64
+
+	IndexLimitEnabled      bool
+	MaxIndexRate           float64
+	FlushLimitEnabled      bool
+	MaxFlushRate           float64
+	CompactionLimitEnabled bool
+	MaxCompactionRate      float64
 
 	// dml
 	DMLLimitEnabled    bool
@@ -103,9 +104,13 @@ func (p *quotaConfig) init(base *BaseTable) {
 	p.initDDLLimitEnabled()
 	p.initDDLCollectionRate()
 	p.initDDLPartitionRate()
-	p.initDDLIndexRate()
-	p.initDDLFlushRate()
-	p.initDDLCompactionRate()
+
+	p.initIndexLimitEnabled()
+	p.initMaxIndexRate()
+	p.initFlushLimitEnabled()
+	p.initMaxFlushRate()
+	p.initCompactionLimitEnabled()
+	p.initMaxCompactionRate()
 
 	// dml
 	p.initDMLLimitEnabled()
@@ -167,7 +172,6 @@ func (p *quotaConfig) initDDLCollectionRate() {
 		return
 	}
 	p.DDLCollectionRate = p.Base.ParseFloatWithDefault("quotaAndLimits.ddl.collectionRate", defaultMax)
-	p.DDLCollectionRate /= secondsPerMinute
 	// [0 ~ Inf)
 	if p.DDLCollectionRate < 0 {
 		p.DDLCollectionRate = defaultMax
@@ -180,49 +184,57 @@ func (p *quotaConfig) initDDLPartitionRate() {
 		return
 	}
 	p.DDLPartitionRate = p.Base.ParseFloatWithDefault("quotaAndLimits.ddl.partitionRate", defaultMax)
-	p.DDLPartitionRate /= secondsPerMinute
 	// [0 ~ Inf)
 	if p.DDLPartitionRate < 0 {
 		p.DDLPartitionRate = defaultMax
 	}
 }
 
-func (p *quotaConfig) initDDLIndexRate() {
-	if !p.DDLLimitEnabled {
-		p.DDLIndexRate = defaultMax
+func (p *quotaConfig) initIndexLimitEnabled() {
+	p.IndexLimitEnabled = p.Base.ParseBool("quotaAndLimits.indexRate.enabled", false)
+}
+
+func (p *quotaConfig) initMaxIndexRate() {
+	if !p.IndexLimitEnabled {
+		p.MaxIndexRate = defaultMax
 		return
 	}
-	p.DDLIndexRate = p.Base.ParseFloatWithDefault("quotaAndLimits.ddl.indexRate", defaultMax)
-	p.DDLIndexRate /= secondsPerMinute
+	p.MaxIndexRate = p.Base.ParseFloatWithDefault("quotaAndLimits.indexRate.max", defaultMax)
 	// [0 ~ Inf)
-	if p.DDLIndexRate < 0 {
-		p.DDLIndexRate = defaultMax
+	if p.MaxIndexRate < 0 {
+		p.MaxIndexRate = defaultMax
 	}
 }
 
-func (p *quotaConfig) initDDLFlushRate() {
-	if !p.DDLLimitEnabled {
-		p.DDLFlushRate = defaultMax
+func (p *quotaConfig) initFlushLimitEnabled() {
+	p.FlushLimitEnabled = p.Base.ParseBool("quotaAndLimits.flushRate.enabled", false)
+}
+
+func (p *quotaConfig) initMaxFlushRate() {
+	if !p.FlushLimitEnabled {
+		p.MaxFlushRate = defaultMax
 		return
 	}
-	p.DDLFlushRate = p.Base.ParseFloatWithDefault("quotaAndLimits.ddl.flushRate", defaultMax)
-	p.DDLFlushRate /= secondsPerMinute
+	p.MaxFlushRate = p.Base.ParseFloatWithDefault("quotaAndLimits.flushRate.max", defaultMax)
 	// [0 ~ Inf)
-	if p.DDLFlushRate < 0 {
-		p.DDLFlushRate = defaultMax
+	if p.MaxFlushRate < 0 {
+		p.MaxFlushRate = defaultMax
 	}
 }
 
-func (p *quotaConfig) initDDLCompactionRate() {
-	if !p.DDLLimitEnabled {
-		p.DDLCompactionRate = defaultMax
+func (p *quotaConfig) initCompactionLimitEnabled() {
+	p.CompactionLimitEnabled = p.Base.ParseBool("quotaAndLimits.compactionRate.enabled", false)
+}
+
+func (p *quotaConfig) initMaxCompactionRate() {
+	if !p.CompactionLimitEnabled {
+		p.MaxCompactionRate = defaultMax
 		return
 	}
-	p.DDLCompactionRate = p.Base.ParseFloatWithDefault("quotaAndLimits.ddl.compactionRate", defaultMax)
-	p.DDLCompactionRate /= secondsPerMinute
+	p.MaxCompactionRate = p.Base.ParseFloatWithDefault("quotaAndLimits.compactionRate.max", defaultMax)
 	// [0 ~ Inf)
-	if p.DDLCompactionRate < 0 {
-		p.DDLCompactionRate = defaultMax
+	if p.MaxCompactionRate < 0 {
+		p.MaxCompactionRate = defaultMax
 	}
 }
 

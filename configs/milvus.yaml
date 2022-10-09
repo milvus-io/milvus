@@ -377,43 +377,43 @@ quotaAndLimits:
   enabled: false # `true` to enable quota and limits, `false` to disable.
 
   # quotaCenterCollectInterval is the time interval that quotaCenter
-  # collects metrics from Query cluster and Data cluster.
+  # collects metrics from Proxies, Query cluster and Data cluster.
   quotaCenterCollectInterval: 3 # seconds, (0 ~ 65536)
 
   ddl: # ddl limit rates, default no limit.
     enabled: false
-    collectionRate: # requests per minute, default no limit, rate for CreateCollection, DropCollection, HasCollection, DescribeCollection, LoadCollection, ReleaseCollection
-    partitionRate: # requests per minute, default no limit, rate for CreatePartition, DropPartition, HasPartition, LoadPartition, ReleasePartition
-    indexRate: # requests per minute, default no limit, rate for CreateIndex, DropIndex, DescribeIndex
-    flushRate: # requests per minute, default no limit, rate for flush
-    compactionRate: # requests per minute, default no limit, rate for manualCompaction
+    collectionRate: # qps, default no limit, rate for CreateCollection, DropCollection, LoadCollection, ReleaseCollection
+    partitionRate: # qps, default no limit, rate for CreatePartition, DropPartition, LoadPartition, ReleasePartition
+
+  indexRate:
+    enabled: false
+    max: # qps, default no limit, rate for CreateIndex, DropIndex
+  flushRate:
+    enabled: false
+    max: # qps, default no limit, rate for flush
+  compactionRate:
+    enabled: false
+    max: # qps, default no limit, rate for manualCompaction
 
   # dml limit rates, default no limit.
-  # The maximum rate will not be greater than `max`,
-  # and the rate after handling back pressure will not be less than `min`.
+  # The maximum rate will not be greater than `max`.
   dml:
     enabled: false
     insertRate:
       max: # MB/s, default no limit
-      min: # MB/s, default 0
     deleteRate:
       max: # MB/s, default no limit
-      min: # MB/s, default 0
     bulkLoadRate: # not support yet. TODO: limit bulkLoad rate
       max: # MB/s, default no limit
-      min: # MB/s, default 0
 
   # dql limit rates, default no limit.
-  # The maximum rate will not be greater than `max`,
-  # and the rate after handling back pressure will not be less than `min`.
+  # The maximum rate will not be greater than `max`.
   dql:
     enabled: false
     searchRate:
       max: # vps (vectors per second), default no limit
-      min: # vps (vectors per second), default 0
     queryRate:
       max: # qps, default no limit
-      min: # qps, default 0
 
   # limitWriting decides whether dml requests are allowed.
   limitWriting:
@@ -432,10 +432,10 @@ quotaAndLimits:
       # When memoryLowWaterLevel < memory usage < memoryHighWaterLevel, reduce the dml rate;
       # When memory usage < memoryLowWaterLevel, no action.
       # memoryLowWaterLevel should be less than memoryHighWaterLevel.
-      dataNodeMemoryLowWaterLevel: 0.8 # (0, 1], memoryLowWaterLevel in DataNodes
-      dataNodeMemoryHighWaterLevel: 0.9 # (0, 1], memoryHighWaterLevel in DataNodes
-      queryNodeMemoryLowWaterLevel: 0.8 # (0, 1], memoryLowWaterLevel in QueryNodes
-      queryNodeMemoryHighWaterLevel: 0.9 # (0, 1], memoryHighWaterLevel in QueryNodes
+      dataNodeMemoryLowWaterLevel: 0.85 # (0, 1], memoryLowWaterLevel in DataNodes
+      dataNodeMemoryHighWaterLevel: 0.95 # (0, 1], memoryHighWaterLevel in DataNodes
+      queryNodeMemoryLowWaterLevel: 0.85 # (0, 1], memoryLowWaterLevel in QueryNodes
+      queryNodeMemoryHighWaterLevel: 0.95 # (0, 1], memoryHighWaterLevel in QueryNodes
 
   # limitReading decides whether dql requests are allowed.
   limitReading:

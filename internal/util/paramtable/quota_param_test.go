@@ -36,9 +36,15 @@ func TestQuotaParam(t *testing.T) {
 		assert.Equal(t, false, qc.DDLLimitEnabled)
 		assert.Equal(t, defaultMax, qc.DDLCollectionRate)
 		assert.Equal(t, defaultMax, qc.DDLPartitionRate)
-		assert.Equal(t, defaultMax, qc.DDLIndexRate)
-		assert.Equal(t, defaultMax, qc.DDLFlushRate)
-		assert.Equal(t, defaultMax, qc.DDLCompactionRate)
+	})
+
+	t.Run("test functional params", func(t *testing.T) {
+		assert.Equal(t, false, qc.IndexLimitEnabled)
+		assert.Equal(t, defaultMax, qc.MaxIndexRate)
+		assert.Equal(t, false, qc.FlushLimitEnabled)
+		assert.Equal(t, defaultMax, qc.MaxFlushRate)
+		assert.Equal(t, false, qc.CompactionLimitEnabled)
+		assert.Equal(t, defaultMax, qc.MaxCompactionRate)
 	})
 
 	t.Run("test dml", func(t *testing.T) {

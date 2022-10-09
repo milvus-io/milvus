@@ -65,15 +65,15 @@ func getRequestInfo(req interface{}) (internalpb.RateType, int, error) {
 		return internalpb.RateType_DQLSearch, int(r.GetNq()), nil
 	case *milvuspb.QueryRequest:
 		return internalpb.RateType_DQLQuery, 1, nil // think of the query request's nq as 1
-	case *milvuspb.CreateCollectionRequest, *milvuspb.DropCollectionRequest, *milvuspb.HasCollectionRequest:
+	case *milvuspb.CreateCollectionRequest, *milvuspb.DropCollectionRequest:
 		return internalpb.RateType_DDLCollection, 1, nil
-	case *milvuspb.LoadCollectionRequest, *milvuspb.ReleaseCollectionRequest, *milvuspb.ShowCollectionsRequest:
+	case *milvuspb.LoadCollectionRequest, *milvuspb.ReleaseCollectionRequest:
 		return internalpb.RateType_DDLCollection, 1, nil
-	case *milvuspb.CreatePartitionRequest, *milvuspb.DropPartitionRequest, *milvuspb.HasPartitionRequest:
+	case *milvuspb.CreatePartitionRequest, *milvuspb.DropPartitionRequest:
 		return internalpb.RateType_DDLPartition, 1, nil
-	case *milvuspb.LoadPartitionsRequest, *milvuspb.ReleasePartitionsRequest, *milvuspb.ShowPartitionsRequest:
+	case *milvuspb.LoadPartitionsRequest, *milvuspb.ReleasePartitionsRequest:
 		return internalpb.RateType_DDLPartition, 1, nil
-	case *milvuspb.CreateIndexRequest, *milvuspb.DropIndexRequest, *milvuspb.DescribeIndexRequest:
+	case *milvuspb.CreateIndexRequest, *milvuspb.DropIndexRequest:
 		return internalpb.RateType_DDLIndex, 1, nil
 	case *milvuspb.FlushRequest:
 		return internalpb.RateType_DDLFlush, 1, nil
@@ -130,20 +130,6 @@ func getFailedResponse(req interface{}, code commonpb.ErrorCode, reason string) 
 		*milvuspb.LoadPartitionsRequest, *milvuspb.ReleasePartitionsRequest,
 		*milvuspb.CreateIndexRequest, *milvuspb.DropIndexRequest:
 		return failedStatus(code, reason), nil
-	case *milvuspb.HasCollectionRequest, *milvuspb.HasPartitionRequest:
-		return failedBoolResponse(code, reason), nil
-	case *milvuspb.ShowCollectionsRequest:
-		return &milvuspb.ShowCollectionsResponse{
-			Status: failedStatus(code, reason),
-		}, nil
-	case *milvuspb.ShowPartitionsRequest:
-		return &milvuspb.ShowPartitionsResponse{
-			Status: failedStatus(code, reason),
-		}, nil
-	case *milvuspb.DescribeIndexRequest:
-		return &milvuspb.DescribeIndexResponse{
-			Status: failedStatus(code, reason),
-		}, nil
 	case *milvuspb.FlushRequest:
 		return &milvuspb.FlushResponse{
 			Status: failedStatus(code, reason),

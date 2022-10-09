@@ -96,10 +96,6 @@ func TestRateLimitInterceptor(t *testing.T) {
 		testGetFailedResponse(&milvuspb.SearchRequest{})
 		testGetFailedResponse(&milvuspb.QueryRequest{})
 		testGetFailedResponse(&milvuspb.CreateCollectionRequest{})
-		testGetFailedResponse(&milvuspb.HasCollectionRequest{})
-		testGetFailedResponse(&milvuspb.ShowCollectionsRequest{})
-		testGetFailedResponse(&milvuspb.ShowPartitionsRequest{})
-		testGetFailedResponse(&milvuspb.DescribeIndexRequest{})
 		testGetFailedResponse(&milvuspb.FlushRequest{})
 		testGetFailedResponse(&milvuspb.ManualCompactionRequest{})
 
