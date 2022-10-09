@@ -161,7 +161,7 @@ func (node *DataNode) SetEtcdClient(etcdCli *clientv3.Client) {
 func (node *DataNode) SetRootCoord(rc types.RootCoord) error {
 	switch {
 	case rc == nil, node.rootCoord != nil:
-		return errors.New("Nil parameter or repeatly set")
+		return errors.New("nil parameter or repeatedly set")
 	default:
 		node.rootCoord = rc
 		return nil
@@ -172,7 +172,7 @@ func (node *DataNode) SetRootCoord(rc types.RootCoord) error {
 func (node *DataNode) SetDataCoord(ds types.DataCoord) error {
 	switch {
 	case ds == nil, node.dataCoord != nil:
-		return errors.New("Nil parameter or repeatly set")
+		return errors.New("nil parameter or repeatedly set")
 	default:
 		node.dataCoord = ds
 		return nil
@@ -225,32 +225,32 @@ func (node *DataNode) initRateCollector() error {
 
 // Init function does nothing now.
 func (node *DataNode) Init() error {
-	log.Info("DataNode Init",
+	log.Info("DataNode server initializing",
 		zap.String("TimeTickChannelName", Params.CommonCfg.DataCoordTimeTick),
 	)
 	if err := node.initSession(); err != nil {
-		log.Error("DataNode init session failed", zap.Error(err))
+		log.Error("DataNode server init session failed", zap.Error(err))
 		return err
 	}
 
 	err := node.initRateCollector()
 	if err != nil {
-		log.Error("DataNode init rateCollector failed", zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()), zap.Error(err))
+		log.Error("DataNode server init rateCollector failed", zap.Int64("node ID", Params.QueryNodeCfg.GetNodeID()), zap.Error(err))
 		return err
 	}
-	log.Info("DataNode init rateCollector done", zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()))
+	log.Info("DataNode server init rateCollector done", zap.Int64("node ID", Params.QueryNodeCfg.GetNodeID()))
 
 	idAllocator, err := allocator2.NewIDAllocator(node.ctx, node.rootCoord, Params.DataNodeCfg.GetNodeID())
 	if err != nil {
 		log.Error("failed to create id allocator",
 			zap.Error(err),
-			zap.String("role", typeutil.DataNodeRole), zap.Int64("DataNodeID", Params.DataNodeCfg.GetNodeID()))
+			zap.String("role", typeutil.DataNodeRole), zap.Int64("DataNode ID", Params.DataNodeCfg.GetNodeID()))
 		return err
 	}
 	node.rowIDAllocator = idAllocator
 
 	node.factory.Init(&Params)
-	log.Info("DataNode Init successfully",
+	log.Info("DataNode server init succeeded",
 		zap.String("MsgChannelSubName", Params.CommonCfg.DataNodeSubName))
 
 	return nil
