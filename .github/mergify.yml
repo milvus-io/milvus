@@ -85,7 +85,7 @@ pull_request_rules:
       - or:
         - base=master
         - base~=^2(\.\d+){2}$
-      - -files~=^(?=.*((\.(go|h|cpp)|CMakeLists.txt))).*$
+      - -files~=^(?=.*((\.(go|h|cpp)|CMakeLists.txt | Makefile))).*$
       - "status-success=cpu-e2e"
     actions:
       label:
@@ -135,7 +135,7 @@ pull_request_rules:
         - base~=^2(\.\d+){2}$
       - title~=\[skip e2e\]
       - label=kind/improvement
-      - -files~=^(?=.*((\.(go|h|cpp)|CMakeLists.txt))).*$
+      - -files~=^(?=.*((\.(go|h|cpp)|CMakeLists.txt | Makefile))).*$
     actions:
       label:
         add:
@@ -200,7 +200,7 @@ pull_request_rules:
       - "status-success=Build and test AMD64 Ubuntu 20.04"
       - "status-success=Code Checker MacOS 12"
       - "status-success=Code Checker CentOS 7"
-      - files~=^(?=.*((\.(go|h|cpp)|CMakeLists.txt))).*$
+      - files~=^(?=.*((\.(go|h|cpp)|CMakeLists.txt | Makefile))).*$
     actions:
       label:
         add:
@@ -214,7 +214,7 @@ pull_request_rules:
       - "status-success=Build and test AMD64 Ubuntu 18.04"
       - "status-success=Code Checker MacOS 11"
       - "status-success=Code Checker CentOS 7"
-      - files~=^(?=.*((\.(go|h|cpp)|CMakeLists.txt))).*$
+      - files~=^(?=.*((\.(go|h|cpp)|CMakeLists.txt | Makefile))).*$
     actions:
       label:
         add:
@@ -224,7 +224,7 @@ pull_request_rules:
     conditions:
       - label!=manual-pass
       - base=master
-      - files~=^(?=.*((\.(go|h|cpp)|CMakeLists.txt))).*$
+      - files~=^(?=.*((\.(go|h|cpp)|CMakeLists.txt | Makefile))).*$
       - or:
         - "status-success!=Code Checker AMD64 Ubuntu 20.04"
         - "status-success!=Build and test AMD64 Ubuntu 20.04" 
@@ -238,7 +238,7 @@ pull_request_rules:
     conditions:
       - label!=manual-pass
       - base~=^2(\.\d+){2}$
-      - files~=^(?=.*((\.(go|h|cpp)|CMakeLists.txt))).*$
+      - files~=^(?=.*((\.(go|h|cpp)|CMakeLists.txt | Makefile))).*$
       - or:
         - "status-success!=Code Checker AMD64 Ubuntu 18.04"
         - "status-success!=Build and test AMD64 Ubuntu 18.04" 
