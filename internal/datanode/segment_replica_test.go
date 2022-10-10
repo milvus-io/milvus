@@ -733,6 +733,11 @@ func TestSegmentReplica_InterfaceMethod(t *testing.T) {
 				collectionID: 1,
 				numRows:      15,
 			}},
+			{"segment exists but not flushed", false, false, []UniqueID{1, 4}, &Segment{
+				segmentID:    3,
+				collectionID: 1,
+				numRows:      15,
+			}},
 		}
 
 		for _, test := range tests {
@@ -746,12 +751,19 @@ func TestSegmentReplica_InterfaceMethod(t *testing.T) {
 					sr.addFlushedSegmentWithPKs(2, 1, 0, "channel", 10, primaryKeyData)
 				}
 
+				if !sr.hasSegment(4, false) {
+					sr.removeSegments(4)
+					pos := &internalpb.MsgPosition{ChannelName: "channel", Timestamp: Timestamp(100)}
+					sr.addNewSegment(4, 1, 0, "channel", pos, pos)
+				}
+
 				if sr.hasSegment(3, true) {
 					sr.removeSegments(3)
 				}
 
 				require.True(t, sr.hasSegment(1, true))
 				require.True(t, sr.hasSegment(2, true))
+				require.True(t, sr.hasSegment(4, false))
 				require.False(t, sr.hasSegment(3, true))
 
 				// tests start
