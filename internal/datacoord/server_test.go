@@ -29,6 +29,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/api/commonpb"
 	"github.com/milvus-io/milvus/api/milvuspb"
 	"github.com/milvus-io/milvus/api/schemapb"
@@ -36,7 +46,6 @@ import (
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -46,16 +55,8 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
-	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/minio/minio-go/v7"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/require"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 )
 
 func TestMain(m *testing.M) {
@@ -84,7 +85,7 @@ func TestAssignSegmentID(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 		schema := newTestSchema()
-		svr.meta.AddCollection(&datapb.CollectionInfo{
+		svr.meta.AddCollection(&collectionInfo{
 			ID:         collID,
 			Schema:     schema,
 			Partitions: []int64{},
@@ -115,7 +116,7 @@ func TestAssignSegmentID(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 		schema := newTestSchema()
-		svr.meta.AddCollection(&datapb.CollectionInfo{
+		svr.meta.AddCollection(&collectionInfo{
 			ID:         collID,
 			Schema:     schema,
 			Partitions: []int64{},
@@ -170,7 +171,7 @@ func TestAssignSegmentID(t *testing.T) {
 			collID:    collID,
 		}
 		schema := newTestSchema()
-		svr.meta.AddCollection(&datapb.CollectionInfo{
+		svr.meta.AddCollection(&collectionInfo{
 			ID:         collID,
 			Schema:     schema,
 			Partitions: []int64{},
@@ -231,7 +232,7 @@ func TestFlush(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 		schema := newTestSchema()
-		svr.meta.AddCollection(&datapb.CollectionInfo{ID: 0, Schema: schema, Partitions: []int64{}})
+		svr.meta.AddCollection(&collectionInfo{ID: 0, Schema: schema, Partitions: []int64{}})
 		allocations, err := svr.segmentManager.AllocSegment(context.TODO(), 0, 1, "channel-1", 1)
 		assert.Nil(t, err)
 		assert.EqualValues(t, 1, len(allocations))
@@ -1108,7 +1109,7 @@ func TestSaveBinlogPaths(t *testing.T) {
 		defer closeTestServer(t, svr)
 
 		// vecFieldID := int64(201)
-		svr.meta.AddCollection(&datapb.CollectionInfo{
+		svr.meta.AddCollection(&collectionInfo{
 			ID: 0,
 		})
 
@@ -1226,7 +1227,7 @@ func TestSaveBinlogPaths(t *testing.T) {
 			svr := newTestServer(t, nil, SetSegmentManager(&spySegmentManager{spyCh: spyCh}))
 			defer closeTestServer(t, svr)
 
-			svr.meta.AddCollection(&datapb.CollectionInfo{ID: 1})
+			svr.meta.AddCollection(&collectionInfo{ID: 1})
 			err := svr.meta.AddSegment(&SegmentInfo{
 				Segment: &datapb.SegmentInfo{
 					ID:            1,
@@ -1259,7 +1260,7 @@ func TestDropVirtualChannel(t *testing.T) {
 		defer closeTestServer(t, svr)
 
 		vecFieldID := int64(201)
-		svr.meta.AddCollection(&datapb.CollectionInfo{
+		svr.meta.AddCollection(&collectionInfo{
 			ID: 0,
 			Schema: &schemapb.CollectionSchema{
 				Fields: []*schemapb.FieldSchema{
@@ -1445,7 +1446,7 @@ func TestDataNodeTtChannel(t *testing.T) {
 		svr := newTestServer(t, ch)
 		defer closeTestServer(t, svr)
 
-		svr.meta.AddCollection(&datapb.CollectionInfo{
+		svr.meta.AddCollection(&collectionInfo{
 			ID:         0,
 			Schema:     newTestSchema(),
 			Partitions: []int64{0},
@@ -1514,7 +1515,7 @@ func TestDataNodeTtChannel(t *testing.T) {
 		ch := make(chan any, 1)
 		svr := newTestServer(t, ch)
 		defer closeTestServer(t, svr)
-		svr.meta.AddCollection(&datapb.CollectionInfo{
+		svr.meta.AddCollection(&collectionInfo{
 			ID:         0,
 			Schema:     newTestSchema(),
 			Partitions: []int64{0},
@@ -1595,7 +1596,7 @@ func TestDataNodeTtChannel(t *testing.T) {
 		svr := newTestServer(t, nil, SetServerHelper(helper))
 		defer closeTestServer(t, svr)
 
-		svr.meta.AddCollection(&datapb.CollectionInfo{
+		svr.meta.AddCollection(&collectionInfo{
 			ID:         0,
 			Schema:     newTestSchema(),
 			Partitions: []int64{0},
@@ -1649,7 +1650,7 @@ func TestGetVChannelPos(t *testing.T) {
 	svr := newTestServer(t, nil)
 	defer closeTestServer(t, svr)
 	schema := newTestSchema()
-	svr.meta.AddCollection(&datapb.CollectionInfo{
+	svr.meta.AddCollection(&collectionInfo{
 		ID:     0,
 		Schema: schema,
 		StartPositions: []*commonpb.KeyDataPair{
@@ -1659,7 +1660,7 @@ func TestGetVChannelPos(t *testing.T) {
 			},
 		},
 	})
-	svr.meta.AddCollection(&datapb.CollectionInfo{
+	svr.meta.AddCollection(&collectionInfo{
 		ID:     1,
 		Schema: schema,
 		StartPositions: []*commonpb.KeyDataPair{
@@ -1792,7 +1793,7 @@ func TestShouldDropChannel(t *testing.T) {
 	svr := newTestServer(t, nil)
 	defer closeTestServer(t, svr)
 	schema := newTestSchema()
-	svr.meta.AddCollection(&datapb.CollectionInfo{
+	svr.meta.AddCollection(&collectionInfo{
 		ID:     0,
 		Schema: schema,
 		StartPositions: []*commonpb.KeyDataPair{
@@ -1802,7 +1803,7 @@ func TestShouldDropChannel(t *testing.T) {
 			},
 		},
 	})
-	svr.meta.AddCollection(&datapb.CollectionInfo{
+	svr.meta.AddCollection(&collectionInfo{
 		ID:     1,
 		Schema: schema,
 		StartPositions: []*commonpb.KeyDataPair{
@@ -1988,7 +1989,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 			return newMockRootCoordService(), nil
 		}
 
-		svr.meta.AddCollection(&datapb.CollectionInfo{
+		svr.meta.AddCollection(&collectionInfo{
 			Schema: newTestSchema(),
 		})
 		seg1 := createSegment(0, 0, 0, 100, 10, "vchan1", commonpb.SegmentState_Flushed)
@@ -2048,6 +2049,11 @@ func TestGetRecoveryInfo(t *testing.T) {
 			return newMockRootCoordService(), nil
 		}
 
+		svr.meta.AddCollection(&collectionInfo{
+			ID:     0,
+			Schema: newTestSchema(),
+		})
+
 		seg1 := createSegment(3, 0, 0, 100, 30, "vchan1", commonpb.SegmentState_Growing)
 		seg2 := createSegment(4, 0, 0, 100, 40, "vchan1", commonpb.SegmentState_Growing)
 		err := svr.meta.AddSegment(NewSegmentInfo(seg1))
@@ -2073,7 +2079,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
-		svr.meta.AddCollection(&datapb.CollectionInfo{
+		svr.meta.AddCollection(&collectionInfo{
 			Schema: newTestSchema(),
 		})
 
@@ -2176,6 +2182,11 @@ func TestGetRecoveryInfo(t *testing.T) {
 		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
 			return newMockRootCoordService(), nil
 		}
+
+		svr.meta.AddCollection(&collectionInfo{
+			ID:     0,
+			Schema: newTestSchema(),
+		})
 
 		seg1 := createSegment(7, 0, 0, 100, 30, "vchan1", commonpb.SegmentState_Growing)
 		seg2 := createSegment(8, 0, 0, 100, 40, "vchan1", commonpb.SegmentState_Dropped)
@@ -2282,7 +2293,7 @@ func TestManualCompaction(t *testing.T) {
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 		svr.compactionTrigger = &mockCompactionTrigger{
 			methods: map[string]interface{}{
-				"forceTriggerCompaction": func(collectionID int64, ct *compactTime) (UniqueID, error) {
+				"forceTriggerCompaction": func(collectionID int64) (UniqueID, error) {
 					return 1, nil
 				},
 			},
@@ -2301,7 +2312,7 @@ func TestManualCompaction(t *testing.T) {
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 		svr.compactionTrigger = &mockCompactionTrigger{
 			methods: map[string]interface{}{
-				"forceTriggerCompaction": func(collectionID int64, ct *compactTime) (UniqueID, error) {
+				"forceTriggerCompaction": func(collectionID int64) (UniqueID, error) {
 					return 0, errors.New("mock error")
 				},
 			},
@@ -2320,7 +2331,7 @@ func TestManualCompaction(t *testing.T) {
 		svr.stateCode.Store(commonpb.StateCode_Abnormal)
 		svr.compactionTrigger = &mockCompactionTrigger{
 			methods: map[string]interface{}{
-				"forceTriggerCompaction": func(collectionID int64, ct *compactTime) (UniqueID, error) {
+				"forceTriggerCompaction": func(collectionID int64) (UniqueID, error) {
 					return 1, nil
 				},
 			},
@@ -2905,6 +2916,9 @@ func TestDataCoord_SaveImportSegment(t *testing.T) {
 	t.Run("test add segment", func(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
+		svr.meta.AddCollection(&collectionInfo{
+			ID: 100,
+		})
 		seg := buildSegment(100, 100, 100, "ch1", false)
 		svr.meta.AddSegment(seg)
 		svr.sessionManager.AddSession(&NodeInfo{
@@ -3249,27 +3263,6 @@ func Test_newChunkManagerFactory(t *testing.T) {
 		assert.Contains(t, err.Error(), "too many colons in address")
 	})
 
-	// mock CheckBucketFn
-	getCheckBucketFnBak := getCheckBucketFn
-	getCheckBucketFn = func(cli *minio.Client) func() error {
-		return func() error { return nil }
-	}
-	defer func() {
-		getCheckBucketFn = getCheckBucketFnBak
-	}()
-	Params.MinioCfg.Address = "minio:9000"
-	t.Run("ok", func(t *testing.T) {
-		storageCli, err := server.newChunkManagerFactory()
-		assert.NotNil(t, storageCli)
-		assert.NoError(t, err)
-	})
-	t.Run("iam_ok", func(t *testing.T) {
-		Params.CommonCfg.StorageType = "minio"
-		Params.MinioCfg.UseIAM = true
-		storageCli, err := server.newChunkManagerFactory()
-		assert.Nil(t, storageCli)
-		assert.Error(t, err)
-	})
 	t.Run("local storage init", func(t *testing.T) {
 		Params.CommonCfg.StorageType = "local"
 		storageCli, err := server.newChunkManagerFactory()
@@ -3287,16 +3280,6 @@ func Test_newChunkManagerFactory(t *testing.T) {
 func Test_initGarbageCollection(t *testing.T) {
 	server := newTestServer2(t, nil)
 	Params.DataCoordCfg.EnableGarbageCollection = true
-
-	// mock CheckBucketFn
-	getCheckBucketFnBak := getCheckBucketFn
-	getCheckBucketFn = func(cli *minio.Client) func() error {
-		return func() error { return nil }
-	}
-	defer func() {
-		getCheckBucketFn = getCheckBucketFnBak
-	}()
-	Params.MinioCfg.Address = "minio:9000"
 
 	t.Run("ok", func(t *testing.T) {
 		storageCli, err := server.newChunkManagerFactory()

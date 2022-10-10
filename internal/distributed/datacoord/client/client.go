@@ -629,3 +629,17 @@ func (c *Client) MarkSegmentsDropped(ctx context.Context, req *datapb.MarkSegmen
 	}
 	return ret.(*commonpb.Status), err
 }
+
+// BroadCastAlteredCollection is the DataCoord client side code for BroadCastAlteredCollection call.
+func (c *Client) BroadCastAlteredCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.(datapb.DataCoordClient).BroadCastAlteredCollection(ctx, req)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+	return ret.(*commonpb.Status), err
+}

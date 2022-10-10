@@ -65,6 +65,10 @@ func (mockProxyComponent) ShowCollections(ctx context.Context, request *milvuspb
 	return &milvuspb.ShowCollectionsResponse{Status: testStatus}, nil
 }
 
+func (mockProxyComponent) AlterCollection(ctx context.Context, request *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
+	return testStatus, nil
+}
+
 func (mockProxyComponent) CreatePartition(ctx context.Context, request *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
 	return testStatus, nil
 }

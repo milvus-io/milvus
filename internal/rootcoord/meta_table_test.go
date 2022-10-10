@@ -841,3 +841,45 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 		assert.Equal(t, Params.CommonCfg.DefaultPartitionName, coll.Partitions[0].PartitionName)
 	})
 }
+
+func TestMetaTable_AlterCollection(t *testing.T) {
+	t.Run("alter metastore fail", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("AlterCollection",
+			mock.Anything, // context.Context
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(errors.New("error"))
+		meta := &MetaTable{
+			catalog:     catalog,
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{},
+		}
+		ctx := context.Background()
+		err := meta.AlterCollection(ctx, nil, nil, 0)
+		assert.Error(t, err)
+	})
+
+	t.Run("alter collection ok", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("AlterCollection",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(nil)
+		meta := &MetaTable{
+			catalog:     catalog,
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{},
+		}
+		ctx := context.Background()
+
+		oldColl := &model.Collection{CollectionID: 1}
+		newColl := &model.Collection{CollectionID: 1}
+		err := meta.AlterCollection(ctx, oldColl, newColl, 0)
+		assert.NoError(t, err)
+		assert.Equal(t, meta.collID2Meta[1], newColl)
+	})
+}

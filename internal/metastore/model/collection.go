@@ -21,8 +21,8 @@ type Collection struct {
 	StartPositions       []*commonpb.KeyDataPair
 	CreateTime           uint64
 	ConsistencyLevel     commonpb.ConsistencyLevel
-	Aliases              []string          // TODO: deprecate this.
-	Extra                map[string]string // deprecated.
+	Aliases              []string // TODO: deprecate this.
+	Properties           []*commonpb.KeyValuePair
 	State                pb.CollectionState
 }
 
@@ -46,7 +46,7 @@ func (c Collection) Clone() *Collection {
 		CreateTime:           c.CreateTime,
 		StartPositions:       common.CloneKeyDataPairs(c.StartPositions),
 		Aliases:              common.CloneStringList(c.Aliases),
-		Extra:                common.CloneStr2Str(c.Extra),
+		Properties:           common.CloneKeyValuePairs(c.Properties),
 		State:                c.State,
 	}
 }
@@ -99,6 +99,7 @@ func UnmarshalCollectionModel(coll *pb.CollectionInfo) *Collection {
 		CreateTime:           coll.CreateTime,
 		StartPositions:       coll.StartPositions,
 		State:                coll.State,
+		Properties:           coll.Properties,
 	}
 }
 
@@ -134,5 +135,6 @@ func MarshalCollectionModel(coll *Collection) *pb.CollectionInfo {
 		ConsistencyLevel:     coll.ConsistencyLevel,
 		StartPositions:       coll.StartPositions,
 		State:                coll.State,
+		Properties:           coll.Properties,
 	}
 }

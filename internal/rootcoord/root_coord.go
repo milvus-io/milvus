@@ -883,7 +883,7 @@ func convertModelToDesc(collInfo *model.Collection, aliases []string) *milvuspb.
 	resp.Aliases = aliases
 	resp.StartPositions = collInfo.StartPositions
 	resp.CollectionName = resp.Schema.Name
-
+	resp.Properties = collInfo.Properties
 	return resp
 }
 
@@ -968,6 +968,55 @@ func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollections
 	log.Info("done to show collections", zap.Int("num of collections", len(resp.GetCollectionNames()))) // maybe very large, print number instead.
 
 	return resp, nil
+}
+
+func (c *Core) AlterCollection(ctx context.Context, in *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
+	if code, ok := c.checkHealthy(); !ok {
+		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]), nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues("AlterCollection", metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder("AlterCollection")
+
+	log.Info("received request to alter collection", zap.String("role", typeutil.RootCoordRole),
+		zap.String("name", in.GetCollectionName()), zap.Int64("msgID", in.GetBase().GetMsgID()))
+
+	t := &alterCollectionTask{
+		baseTask: baseTask{
+			ctx:  ctx,
+			core: c,
+			done: make(chan error, 1),
+		},
+		Req: in,
+	}
+
+	if err := c.scheduler.AddTask(t); err != nil {
+		log.Error("failed to enqueue request to alter collection", zap.String("role", typeutil.RootCoordRole),
+			zap.Error(err),
+			zap.String("name", in.GetCollectionName()), zap.Int64("msgID", in.GetBase().GetMsgID()))
+
+		metrics.RootCoordDDLReqCounter.WithLabelValues("AlterCollection", metrics.FailLabel).Inc()
+		return failStatus(commonpb.ErrorCode_UnexpectedError, err.Error()), nil
+	}
+
+	if err := t.WaitToFinish(); err != nil {
+		log.Error("failed to alter collection", zap.String("role", typeutil.RootCoordRole),
+			zap.Error(err),
+			zap.String("name", in.GetCollectionName()),
+			zap.Int64("msgID", in.GetBase().GetMsgID()), zap.Uint64("ts", t.GetTs()))
+
+		metrics.RootCoordDDLReqCounter.WithLabelValues("AlterCollection", metrics.FailLabel).Inc()
+		return failStatus(commonpb.ErrorCode_UnexpectedError, err.Error()), nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues("AlterCollection", metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues("AlterCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordNumOfCollections.Dec()
+
+	log.Info("done to alter collection", zap.String("role", typeutil.RootCoordRole),
+		zap.String("name", in.GetCollectionName()), zap.Int64("msgID", in.GetBase().GetMsgID()),
+		zap.Uint64("ts", t.GetTs()))
+	return succStatus(), nil
 }
 
 // CreatePartition create partition

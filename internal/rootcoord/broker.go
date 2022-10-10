@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/milvus-io/milvus/api/milvuspb"
+
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -42,6 +44,8 @@ type Broker interface {
 	DropCollectionIndex(ctx context.Context, collID UniqueID, partIDs []UniqueID) error
 	GetSegmentIndexState(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*indexpb.SegmentIndexState, error)
 	DescribeIndex(ctx context.Context, colID UniqueID) (*indexpb.DescribeIndexResponse, error)
+
+	BroadCastAlteredCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) error
 }
 
 type ServerBroker struct {
@@ -224,6 +228,18 @@ func (b *ServerBroker) GetSegmentIndexState(ctx context.Context, collID UniqueID
 	}
 
 	return resp.GetStates(), nil
+}
+
+func (b *ServerBroker) BroadCastAlteredCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) error {
+	resp, err := b.s.dataCoord.BroadCastAlteredCollection(ctx, req)
+	if err != nil {
+		return err
+	}
+
+	if resp.ErrorCode != commonpb.ErrorCode_Success {
+		return errors.New(resp.Reason)
+	}
+	return nil
 }
 
 func (b *ServerBroker) DescribeIndex(ctx context.Context, colID UniqueID) (*indexpb.DescribeIndexResponse, error) {

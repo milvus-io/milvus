@@ -28,7 +28,6 @@ import (
 	"time"
 
 	"github.com/blang/semver/v4"
-	"github.com/minio/minio-go/v7"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
@@ -392,23 +391,6 @@ func (s *Server) initGarbageCollection(cli storage.ChunkManager) {
 		missingTolerance: Params.DataCoordCfg.GCMissingTolerance,
 		dropTolerance:    Params.DataCoordCfg.GCDropTolerance,
 	})
-}
-
-// here we use variable for test convenience
-var getCheckBucketFn = func(cli *minio.Client) func() error {
-	return func() error {
-		has, err := cli.BucketExists(context.TODO(), Params.MinioCfg.BucketName)
-		if err != nil {
-			return err
-		}
-		if !has {
-			err = cli.MakeBucket(context.TODO(), Params.MinioCfg.BucketName, minio.MakeBucketOptions{})
-			if err != nil {
-				return err
-			}
-		}
-		return nil
-	}
 }
 
 func (s *Server) initServiceDiscovery() error {
@@ -925,11 +907,18 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 			zap.Int64("collectionID", resp.CollectionID), zap.Error(err))
 		return err
 	}
-	collInfo := &datapb.CollectionInfo{
+
+	properties := make(map[string]string)
+	for _, pair := range resp.Properties {
+		properties[pair.GetKey()] = pair.GetValue()
+	}
+
+	collInfo := &collectionInfo{
 		ID:             resp.CollectionID,
 		Schema:         resp.Schema,
 		Partitions:     presp.PartitionIDs,
 		StartPositions: resp.GetStartPositions(),
+		Properties:     properties,
 	}
 	s.meta.AddCollection(collInfo)
 	return nil

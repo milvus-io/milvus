@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/milvus-io/milvus/api/milvuspb"
+
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -338,4 +340,37 @@ func (s *nullStep) Desc() string {
 
 func (s *nullStep) Weight() stepPriority {
 	return stepPriorityLow
+}
+
+type AlterCollectionStep struct {
+	baseStep
+	oldColl *model.Collection
+	newColl *model.Collection
+	ts      Timestamp
+}
+
+func (a *AlterCollectionStep) Execute(ctx context.Context) ([]nestedStep, error) {
+	err := a.core.meta.AlterCollection(ctx, a.oldColl, a.newColl, a.ts)
+	return nil, err
+}
+
+func (a *AlterCollectionStep) Desc() string {
+	return fmt.Sprintf("alter collection, collectionID: %d, ts: %d", a.oldColl.CollectionID, a.ts)
+}
+
+type BroadcastAlteredCollectionStep struct {
+	baseStep
+	req  *milvuspb.AlterCollectionRequest
+	core *Core
+}
+
+func (b *BroadcastAlteredCollectionStep) Execute(ctx context.Context) ([]nestedStep, error) {
+	// TODO: support online schema change mechanism
+	// It only broadcast collection properties to DataCoord service
+	err := b.core.broker.BroadCastAlteredCollection(ctx, b.req)
+	return nil, err
+}
+
+func (b *BroadcastAlteredCollectionStep) Desc() string {
+	return fmt.Sprintf("broadcast altered collection, collectionID: %d", b.req.CollectionID)
 }

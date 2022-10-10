@@ -67,6 +67,7 @@ type MockDataCoord struct {
 	addSegmentResp            *commonpb.Status
 	unsetIsImportingStateResp *commonpb.Status
 	markSegmentsDroppedResp   *commonpb.Status
+	broadCastResp             *commonpb.Status
 }
 
 func (m *MockDataCoord) Init() error {
@@ -217,6 +218,10 @@ func (m *MockDataCoord) UnsetIsImportingState(context.Context, *datapb.UnsetIsIm
 
 func (m *MockDataCoord) MarkSegmentsDropped(ctx context.Context, req *datapb.MarkSegmentsDroppedRequest) (*commonpb.Status, error) {
 	return m.markSegmentsDroppedResp, m.err
+}
+
+func (m *MockDataCoord) BroadCastAlteredCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
+	return m.broadCastResp, m.err
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

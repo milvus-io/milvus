@@ -138,6 +138,10 @@ func (m *MockRootCoord) ShowCollections(ctx context.Context, req *milvuspb.ShowC
 	return nil, nil
 }
 
+func (m *MockRootCoord) AlterCollection(ctx context.Context, request *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
 func (m *MockRootCoord) CreatePartition(ctx context.Context, req *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
 	return nil, nil
 }
@@ -478,6 +482,10 @@ func (m *MockDataCoord) MarkSegmentsDropped(ctx context.Context, req *datapb.Mar
 	return nil, nil
 }
 
+func (m *MockDataCoord) AlterCollection(ctx context.Context, request *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
 func (m *MockDataCoord) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error) {
 	return nil, nil
 }
@@ -574,6 +582,10 @@ func (m *MockDataCoord) ReleaseSegmentLock(ctx context.Context, req *datapb.Rele
 	return nil, nil
 }
 
+func (m *MockDataCoord) BroadCastAlteredCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type MockProxy struct {
 	MockBase
@@ -634,6 +646,10 @@ func (m *MockProxy) GetCollectionStatistics(ctx context.Context, request *milvus
 }
 
 func (m *MockProxy) ShowCollections(ctx context.Context, request *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
+	return nil, nil
+}
+
+func (m *MockProxy) AlterCollection(ctx context.Context, request *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
 	return nil, nil
 }
 

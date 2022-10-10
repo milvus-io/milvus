@@ -921,6 +921,24 @@ func TestProxy(t *testing.T) {
 	})
 
 	wg.Add(1)
+	t.Run("alter collection", func(t *testing.T) {
+		defer wg.Done()
+		resp, err := proxy.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: "cn",
+			Properties: []*commonpb.KeyValuePair{
+				{
+					Key:   common.CollectionTTLConfigKey,
+					Value: "3600",
+				},
+			},
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	wg.Add(1)
 	t.Run("create partition", func(t *testing.T) {
 		defer wg.Done()
 		resp, err := proxy.CreatePartition(ctx, &milvuspb.CreatePartitionRequest{
@@ -2407,6 +2425,18 @@ func TestProxy(t *testing.T) {
 	})
 
 	wg.Add(1)
+	t.Run("alter collection fail, unhealthy", func(t *testing.T) {
+		defer wg.Done()
+		resp, err := proxy.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: "cn",
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	wg.Add(1)
 	t.Run("CreatePartition fail, unhealthy", func(t *testing.T) {
 		defer wg.Done()
 		resp, err := proxy.CreatePartition(ctx, &milvuspb.CreatePartitionRequest{})
@@ -2738,6 +2768,18 @@ func TestProxy(t *testing.T) {
 	})
 
 	wg.Add(1)
+	t.Run("alter collection fail, dd queue full", func(t *testing.T) {
+		defer wg.Done()
+		resp, err := proxy.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: "cn",
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	wg.Add(1)
 	t.Run("CreatePartition fail, dd queue full", func(t *testing.T) {
 		defer wg.Done()
 		resp, err := proxy.CreatePartition(ctx, &milvuspb.CreatePartitionRequest{})
@@ -2978,6 +3020,18 @@ func TestProxy(t *testing.T) {
 		resp, err := proxy.ShowCollections(shortCtx, &milvuspb.ShowCollectionsRequest{})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	wg.Add(1)
+	t.Run("alter collection fail, timeout", func(t *testing.T) {
+		defer wg.Done()
+		resp, err := proxy.AlterCollection(shortCtx, &milvuspb.AlterCollectionRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: "cn",
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
 	wg.Add(1)

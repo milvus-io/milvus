@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/api/commonpb"
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/stretchr/testify/suite"
@@ -134,7 +135,7 @@ func (suite *UtilSuite) TestGetCompactTime() {
 		{
 			"test get timetravel",
 			args{&fixedTSOAllocator{fixedTime: tFixed}},
-			&compactTime{tsoutil.ComposeTS(tBefore.UnixNano()/int64(time.Millisecond), 0), 0},
+			&compactTime{tsoutil.ComposeTS(tBefore.UnixNano()/int64(time.Millisecond), 0), 0, 0},
 			false,
 		},
 	}
@@ -169,4 +170,27 @@ func (suite *UtilSuite) TestGetZeroTime() {
 		timeGot := getZeroTime()
 		suite.True(timeGot.IsZero())
 	}
+}
+
+func (suite *UtilSuite) TestGetCollectionTTL() {
+	properties1 := map[string]string{
+		common.CollectionTTLConfigKey: "3600",
+	}
+
+	// get ttl from configuration file
+	ttl, err := getCollectionTTL(properties1)
+	suite.NoError(err)
+	suite.Equal(ttl, time.Duration(3600)*time.Second)
+
+	properties2 := map[string]string{
+		common.CollectionTTLConfigKey: "error value",
+	}
+	// test for parsing configuration failed
+	ttl, err = getCollectionTTL(properties2)
+	suite.Error(err)
+	suite.Equal(int(ttl), -1)
+
+	ttl, err = getCollectionTTL(map[string]string{})
+	suite.NoError(err)
+	suite.Equal(ttl, Params.CommonCfg.EntityExpirationTTL)
 }

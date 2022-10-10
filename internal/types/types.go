@@ -324,6 +324,8 @@ type DataCoord interface {
 
 	// MarkSegmentsDropped marks the given segments as `dropped` state.
 	MarkSegmentsDropped(ctx context.Context, req *datapb.MarkSegmentsDroppedRequest) (*commonpb.Status, error)
+
+	BroadCastAlteredCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) (*commonpb.Status, error)
 }
 
 // DataCoordComponent defines the interface of DataCoord component.
@@ -501,6 +503,16 @@ type RootCoord interface {
 	// created times, created UTC times, and so on.
 	// error is always nil
 	ShowCollections(ctx context.Context, req *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error)
+
+	// AlterCollection notifies Proxy to create a collection
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(reserved), collection name and collection properties
+	//
+	// The `ErrorCode` of `Status` is `Success` if create collection successfully;
+	// otherwise, the `ErrorCode` of `Status` will be `Error`, and the `Reason` of `Status` will record the fail cause.
+	// error is always nil
+	AlterCollection(ctx context.Context, request *milvuspb.AlterCollectionRequest) (*commonpb.Status, error)
 
 	// CreatePartition notifies RootCoord to create a partition
 	//
@@ -871,7 +883,6 @@ type ProxyComponent interface {
 	// otherwise, the `ErrorCode` of `Status` will be `Error`, and the `Reason` of `Status` will record the fail cause.
 	// error is always nil
 	CreateCollection(ctx context.Context, request *milvuspb.CreateCollectionRequest) (*commonpb.Status, error)
-
 	// DropCollection notifies Proxy to drop a collection
 	//
 	// ctx is the context to control request deadline and cancellation
@@ -943,6 +954,16 @@ type ProxyComponent interface {
 	// the `CollectionIds` in `ShowCollectionsResponse` return collection ids list.
 	// error is always nil
 	ShowCollections(ctx context.Context, request *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error)
+
+	// AlterCollection notifies Proxy to create a collection
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(reserved), collection name and collection properties
+	//
+	// The `ErrorCode` of `Status` is `Success` if create collection successfully;
+	// otherwise, the `ErrorCode` of `Status` will be `Error`, and the `Reason` of `Status` will record the fail cause.
+	// error is always nil
+	AlterCollection(ctx context.Context, request *milvuspb.AlterCollectionRequest) (*commonpb.Status, error)
 
 	// CreatePartition notifies Proxy to create a partition
 	//

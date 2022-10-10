@@ -61,11 +61,13 @@ service RootCoord {
      */
     rpc ShowCollections(milvus.ShowCollectionsRequest) returns (milvus.ShowCollectionsResponse) {}
 
-    /**
-     * @brief This method is used to create partition
-     *
-     * @return Status
-     */
+    rpc AlterCollection(milvus.AlterCollectionRequest) returns (common.Status) {}
+
+  /**
+   * @brief This method is used to create partition
+   *
+   * @return Status
+   */
     rpc CreatePartition(milvus.CreatePartitionRequest) returns (common.Status) {}
 
     /**

@@ -1698,6 +1698,53 @@ func (_c *RootCoord_ShowCollections_Call) Return(_a0 *milvuspb.ShowCollectionsRe
 	return _c
 }
 
+// ShowCollections provides a mock function with given fields: ctx, req
+func (_m *RootCoord) AlterCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
+	ret := _m.Called(ctx, req)
+
+	var r0 *commonpb.Status
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AlterCollectionRequest) *commonpb.Status); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.AlterCollectionRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// RootCoord_AlterCollection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ShowCollections'
+type RootCoord_AlterCollection_Call struct {
+	*mock.Call
+}
+
+// AlterCollection is a helper method to define mock.On call
+//  - ctx context.Context
+//  - req *milvuspb.AlterCollectionRequest
+func (_e *RootCoord_Expecter) AlterCollection(ctx interface{}, req interface{}) *RootCoord_AlterCollection_Call {
+	return &RootCoord_AlterCollection_Call{Call: _e.mock.On("AlterCollection", ctx, req)}
+}
+
+func (_c *RootCoord_AlterCollection_Call) Run(run func(ctx context.Context, req *milvuspb.AlterCollectionRequest)) *RootCoord_AlterCollection_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.AlterCollectionRequest))
+	})
+	return _c
+}
+
+func (_c *RootCoord_AlterCollection_Call) Return(_a0 *commonpb.Status, _a1 error) *RootCoord_AlterCollection_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
 // ShowConfigurations provides a mock function with given fields: ctx, req
 func (_m *RootCoord) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
 	ret := _m.Called(ctx, req)

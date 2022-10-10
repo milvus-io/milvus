@@ -19,8 +19,11 @@ package datacoord
 import (
 	"context"
 	"errors"
+	"strconv"
 	"sync"
 	"time"
+
+	"github.com/milvus-io/milvus/internal/common"
 
 	"github.com/milvus-io/milvus/api/commonpb"
 	"github.com/milvus-io/milvus/api/schemapb"
@@ -93,10 +96,10 @@ func GetCompactTime(ctx context.Context, allocator allocator) (*compactTime, err
 	if Params.CommonCfg.EntityExpirationTTL > 0 {
 		ttexpired := pts.Add(-Params.CommonCfg.EntityExpirationTTL)
 		ttexpiredLogic := tsoutil.ComposeTS(ttexpired.UnixNano()/int64(time.Millisecond), 0)
-		return &compactTime{ttRetentionLogic, ttexpiredLogic}, nil
+		return &compactTime{ttRetentionLogic, ttexpiredLogic, Params.CommonCfg.EntityExpirationTTL}, nil
 	}
 	// no expiration time
-	return &compactTime{ttRetentionLogic, 0}, nil
+	return &compactTime{ttRetentionLogic, 0, 0}, nil
 }
 
 func FilterInIndexedSegments(meta *meta, indexCoord types.IndexCoord, segments ...*SegmentInfo) []*SegmentInfo {
@@ -115,7 +118,7 @@ func FilterInIndexedSegments(meta *meta, indexCoord types.IndexCoord, segments .
 		collectionSegments[collectionID] = append(collectionSegments[collectionID], segment.GetID())
 	}
 	for collection := range collectionSegments {
-		schema := meta.GetCollection(collection).GetSchema()
+		schema := meta.GetCollection(collection).Schema
 		for _, field := range schema.GetFields() {
 			if field.GetDataType() == schemapb.DataType_BinaryVector ||
 				field.GetDataType() == schemapb.DataType_FloatVector {
@@ -189,4 +192,18 @@ func extractSegmentsWithVectorIndex(vecFieldID map[int64]int64, segentIndexInfo 
 func getZeroTime() time.Time {
 	var t time.Time
 	return t
+}
+
+// getCollectionTTL returns ttl if collection's ttl is specified, or return global ttl
+func getCollectionTTL(properties map[string]string) (time.Duration, error) {
+	v, ok := properties[common.CollectionTTLConfigKey]
+	if ok {
+		ttl, err := strconv.Atoi(v)
+		if err != nil {
+			return -1, err
+		}
+		return time.Duration(ttl) * time.Second, nil
+	}
+
+	return Params.CommonCfg.EntityExpirationTTL, nil
 }

@@ -286,6 +286,7 @@ enum MsgType : int {
   CreateAlias = 108,
   DropAlias = 109,
   AlterAlias = 110,
+  AlterCollection = 111,
   CreatePartition = 200,
   DropPartition = 201,
   HasPartition = 202,

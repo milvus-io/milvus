@@ -795,12 +795,12 @@ func (t *compactionTask) GetCurrentTime() typeutil.Timestamp {
 
 func (t *compactionTask) isExpiredEntity(ts, now Timestamp) bool {
 	// entity expire is not enabled if duration <= 0
-	if Params.CommonCfg.EntityExpirationTTL <= 0 {
+	if t.plan.GetCollectionTtl() <= 0 {
 		return false
 	}
 
 	pts, _ := tsoutil.ParseTS(ts)
 	pnow, _ := tsoutil.ParseTS(now)
-	expireTime := pts.Add(Params.CommonCfg.EntityExpirationTTL)
+	expireTime := pts.Add(time.Duration(t.plan.GetCollectionTtl()))
 	return expireTime.Before(pnow)
 }

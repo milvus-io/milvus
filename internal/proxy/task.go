@@ -73,6 +73,7 @@ const (
 	CreateAliasTaskName        = "CreateAliasTask"
 	DropAliasTaskName          = "DropAliasTask"
 	AlterAliasTaskName         = "AlterAliasTask"
+	AlterCollectionTaskName    = "AlterCollectionTask"
 
 	// minFloat32 minimum float.
 	minFloat32 = -1 * float32(math.MaxFloat32)
@@ -479,6 +480,7 @@ func (dct *describeCollectionTask) Execute(ctx context.Context) error {
 		dct.result.ShardsNum = result.ShardsNum
 		dct.result.ConsistencyLevel = result.ConsistencyLevel
 		dct.result.Aliases = result.Aliases
+		dct.result.Properties = result.Properties
 		for _, field := range result.Schema.Fields {
 			if field.FieldID >= common.StartOfUserFieldID {
 				dct.result.Schema.Fields = append(dct.result.Schema.Fields, &schemapb.FieldSchema{
@@ -660,6 +662,68 @@ func (sct *showCollectionsTask) Execute(ctx context.Context) error {
 }
 
 func (sct *showCollectionsTask) PostExecute(ctx context.Context) error {
+	return nil
+}
+
+type alterCollectionTask struct {
+	Condition
+	*milvuspb.AlterCollectionRequest
+	ctx       context.Context
+	rootCoord types.RootCoord
+	result    *commonpb.Status
+}
+
+func (act *alterCollectionTask) TraceCtx() context.Context {
+	return act.ctx
+}
+
+func (act *alterCollectionTask) ID() UniqueID {
+	return act.Base.MsgID
+}
+
+func (act *alterCollectionTask) SetID(uid UniqueID) {
+	act.Base.MsgID = uid
+}
+
+func (act *alterCollectionTask) Name() string {
+	return AlterCollectionTaskName
+}
+
+func (act *alterCollectionTask) Type() commonpb.MsgType {
+	return act.Base.MsgType
+}
+
+func (act *alterCollectionTask) BeginTs() Timestamp {
+	return act.Base.Timestamp
+}
+
+func (act *alterCollectionTask) EndTs() Timestamp {
+	return act.Base.Timestamp
+}
+
+func (act *alterCollectionTask) SetTs(ts Timestamp) {
+	act.Base.Timestamp = ts
+}
+
+func (act *alterCollectionTask) OnEnqueue() error {
+	act.Base = &commonpb.MsgBase{}
+	return nil
+}
+
+func (act *alterCollectionTask) PreExecute(ctx context.Context) error {
+	act.Base.MsgType = commonpb.MsgType_AlterCollection
+	act.Base.SourceID = Params.ProxyCfg.GetNodeID()
+
+	return nil
+}
+
+func (act *alterCollectionTask) Execute(ctx context.Context) error {
+	var err error
+	act.result, err = act.rootCoord.AlterCollection(ctx, act.AlterCollectionRequest)
+	return err
+}
+
+func (act *alterCollectionTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 

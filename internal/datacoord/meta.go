@@ -23,9 +23,15 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/exp/maps"
+
+	"github.com/golang/protobuf/proto"
+
+	"github.com/milvus-io/milvus/internal/common"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/api/commonpb"
+	"github.com/milvus-io/milvus/api/schemapb"
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -39,8 +45,16 @@ type meta struct {
 	sync.RWMutex
 	ctx         context.Context
 	catalog     metastore.DataCoordCatalog
-	collections map[UniqueID]*datapb.CollectionInfo // collection id to collection info
-	segments    *SegmentsInfo                       // segment id to segment info
+	collections map[UniqueID]*collectionInfo // collection id to collection info
+	segments    *SegmentsInfo                // segment id to segment info
+}
+
+type collectionInfo struct {
+	ID             int64
+	Schema         *schemapb.CollectionSchema
+	Partitions     []int64
+	StartPositions []*commonpb.KeyDataPair
+	Properties     map[string]string
 }
 
 // NewMeta creates meta from provided `kv.TxnKV`
@@ -48,7 +62,7 @@ func newMeta(ctx context.Context, kv kv.TxnKV, chunkManagerRootPath string) (*me
 	mt := &meta{
 		ctx:         ctx,
 		catalog:     &datacoord.Catalog{Txn: kv, ChunkManagerRootPath: chunkManagerRootPath},
-		collections: make(map[UniqueID]*datapb.CollectionInfo),
+		collections: make(map[UniqueID]*collectionInfo),
 		segments:    NewSegmentsInfo(),
 	}
 	err := mt.reloadFromKV()
@@ -86,19 +100,19 @@ func (m *meta) reloadFromKV() error {
 
 // AddCollection adds a collection into meta
 // Note that collection info is just for caching and will not be set into etcd from datacoord
-func (m *meta) AddCollection(collection *datapb.CollectionInfo) {
-	log.Info("meta update: add collection",
-		zap.Int64("collection ID", collection.GetID()))
+func (m *meta) AddCollection(collection *collectionInfo) {
+	log.Debug("meta update: add collection",
+		zap.Int64("collection ID", collection.ID))
 	m.Lock()
 	defer m.Unlock()
 	m.collections[collection.ID] = collection
 	metrics.DataCoordNumCollections.WithLabelValues().Set(float64(len(m.collections)))
-	log.Info("meta update: add collection - complete",
-		zap.Int64("collection ID", collection.GetID()))
+	log.Debug("meta update: add collection - complete",
+		zap.Int64("collection ID", collection.ID))
 }
 
 // GetCollection returns collection info with provided collection id from local cache
-func (m *meta) GetCollection(collectionID UniqueID) *datapb.CollectionInfo {
+func (m *meta) GetCollection(collectionID UniqueID) *collectionInfo {
 	m.RLock()
 	defer m.RUnlock()
 	collection, ok := m.collections[collectionID]
@@ -106,6 +120,28 @@ func (m *meta) GetCollection(collectionID UniqueID) *datapb.CollectionInfo {
 		return nil
 	}
 	return collection
+}
+
+func (m *meta) GetClonedCollectionInfo(collectionID UniqueID) *collectionInfo {
+	m.RLock()
+	defer m.RUnlock()
+
+	coll, ok := m.collections[collectionID]
+	if !ok {
+		return nil
+	}
+
+	clonedProperties := make(map[string]string)
+	maps.Copy(clonedProperties, coll.Properties)
+	cloneColl := &collectionInfo{
+		ID:             coll.ID,
+		Schema:         proto.Clone(coll.Schema).(*schemapb.CollectionSchema),
+		Partitions:     coll.Partitions,
+		StartPositions: common.CloneKeyDataPairs(coll.StartPositions),
+		Properties:     clonedProperties,
+	}
+
+	return cloneColl
 }
 
 // chanPartSegments is an internal result struct, which is aggregates of SegmentInfos with same collectionID, partitionID and channelName
@@ -162,7 +198,7 @@ func (m *meta) GetNumRowsOfCollection(collectionID UniqueID) int64 {
 
 // AddSegment records segment info, persisting info into kv store
 func (m *meta) AddSegment(segment *SegmentInfo) error {
-	log.Info("meta update: adding segment",
+	log.Debug("meta update: adding segment",
 		zap.Int64("segment ID", segment.GetID()))
 	m.Lock()
 	defer m.Unlock()
@@ -174,14 +210,14 @@ func (m *meta) AddSegment(segment *SegmentInfo) error {
 	}
 	m.segments.SetSegment(segment.GetID(), segment)
 	metrics.DataCoordNumSegments.WithLabelValues(segment.GetState().String()).Inc()
-	log.Info("meta update: adding segment - complete",
+	log.Debug("meta update: adding segment - complete",
 		zap.Int64("segment ID", segment.GetID()))
 	return nil
 }
 
 // DropSegment remove segment with provided id, etcd persistence also removed
 func (m *meta) DropSegment(segmentID UniqueID) error {
-	log.Info("meta update: dropping segment",
+	log.Debug("meta update: dropping segment",
 		zap.Int64("segment ID", segmentID))
 	m.Lock()
 	defer m.Unlock()
@@ -199,7 +235,7 @@ func (m *meta) DropSegment(segmentID UniqueID) error {
 	}
 	metrics.DataCoordNumSegments.WithLabelValues(metrics.DropedSegmentLabel).Inc()
 	m.segments.DropSegment(segmentID)
-	log.Info("meta update: dropping segment - complete",
+	log.Debug("meta update: dropping segment - complete",
 		zap.Int64("segment ID", segmentID))
 	return nil
 }
@@ -238,7 +274,7 @@ func (m *meta) GetAllSegment(segID UniqueID) *SegmentInfo {
 
 // SetState setting segment with provided ID state
 func (m *meta) SetState(segmentID UniqueID, targetState commonpb.SegmentState) error {
-	log.Info("meta update: setting segment state",
+	log.Debug("meta update: setting segment state",
 		zap.Int64("segment ID", segmentID),
 		zap.Any("target state", targetState))
 	m.Lock()
@@ -274,7 +310,7 @@ func (m *meta) SetState(segmentID UniqueID, targetState commonpb.SegmentState) e
 	}
 	// Update in-memory meta.
 	m.segments.SetState(segmentID, targetState)
-	log.Info("meta update: setting segment state - complete",
+	log.Debug("meta update: setting segment state - complete",
 		zap.Int64("segment ID", segmentID),
 		zap.String("target state", targetState.String()))
 	return nil
@@ -282,7 +318,7 @@ func (m *meta) SetState(segmentID UniqueID, targetState commonpb.SegmentState) e
 
 // UnsetIsImporting removes the `isImporting` flag of a segment.
 func (m *meta) UnsetIsImporting(segmentID UniqueID) error {
-	log.Info("meta update: unsetting isImport state of segment",
+	log.Debug("meta update: unsetting isImport state of segment",
 		zap.Int64("segment ID", segmentID))
 	m.Lock()
 	defer m.Unlock()
@@ -303,7 +339,7 @@ func (m *meta) UnsetIsImporting(segmentID UniqueID) error {
 	}
 	// Update in-memory meta.
 	m.segments.SetIsImporting(segmentID, false)
-	log.Info("meta update: unsetting isImport state of segment - complete",
+	log.Debug("meta update: unsetting isImport state of segment - complete",
 		zap.Int64("segment ID", segmentID))
 	return nil
 }
@@ -320,7 +356,7 @@ func (m *meta) UpdateFlushSegmentsInfo(
 	checkpoints []*datapb.CheckPoint,
 	startPositions []*datapb.SegmentStartPosition,
 ) error {
-	log.Info("meta update: update flush segments info",
+	log.Debug("meta update: update flush segments info",
 		zap.Int64("segmentId", segmentID),
 		zap.Int("binlog", len(binlogs)),
 		zap.Int("stats log", len(statslogs)),
@@ -452,7 +488,7 @@ func (m *meta) UpdateFlushSegmentsInfo(
 	for id, s := range modSegments {
 		m.segments.SetSegment(id, s)
 	}
-	log.Info("meta update: update flush segments info - update flush segments info successfully",
+	log.Debug("meta update: update flush segments info - update flush segments info successfully",
 		zap.Int64("segment ID", segmentID))
 	return nil
 }
@@ -460,7 +496,7 @@ func (m *meta) UpdateFlushSegmentsInfo(
 // UpdateDropChannelSegmentInfo updates segment checkpoints and binlogs before drop
 // reusing segment info to pass segment id, binlogs, statslog, deltalog, start position and checkpoint
 func (m *meta) UpdateDropChannelSegmentInfo(channel string, segments []*SegmentInfo) error {
-	log.Info("meta update: update drop channel segment info",
+	log.Debug("meta update: update drop channel segment info",
 		zap.String("channel", channel))
 	m.Lock()
 	defer m.Unlock()
@@ -499,11 +535,11 @@ func (m *meta) UpdateDropChannelSegmentInfo(channel string, segments []*SegmentI
 		}
 	}
 	if err != nil {
-		log.Info("meta update: update drop channel segment info failed",
+		log.Error("meta update: update drop channel segment info failed",
 			zap.String("channel", channel),
 			zap.Error(err))
 	} else {
-		log.Info("meta update: update drop channel segment info - complete",
+		log.Debug("meta update: update drop channel segment info - complete",
 			zap.String("channel", channel))
 	}
 	return err
@@ -775,7 +811,7 @@ func (m *meta) SelectSegments(selector SegmentInfoSelector) []*SegmentInfo {
 
 // AddAllocation add allocation in segment
 func (m *meta) AddAllocation(segmentID UniqueID, allocation *Allocation) error {
-	log.Info("meta update: add allocation",
+	log.Debug("meta update: add allocation",
 		zap.Int64("segmentID", segmentID),
 		zap.Any("allocation", allocation))
 	m.Lock()
@@ -799,7 +835,7 @@ func (m *meta) AddAllocation(segmentID UniqueID, allocation *Allocation) error {
 	}
 	// Update in-memory meta.
 	m.segments.AddAllocation(segmentID, allocation)
-	log.Info("meta update: add allocation - complete",
+	log.Debug("meta update: add allocation - complete",
 		zap.Int64("segmentID", segmentID))
 	return nil
 }
@@ -912,7 +948,7 @@ func (m *meta) GetCompleteCompactionMeta(compactionLogs []*datapb.CompactionSegm
 	}
 	segment := NewSegmentInfo(segmentInfo)
 
-	log.Info("meta update: get complete compaction meta - complete",
+	log.Debug("meta update: get complete compaction meta - complete",
 		zap.Int64("segmentID", segmentInfo.ID),
 		zap.Int64("collectionID", segmentInfo.CollectionID),
 		zap.Int64("partitionID", segmentInfo.PartitionID),
@@ -927,7 +963,7 @@ func (m *meta) alterMetaStoreAfterCompaction(modSegments []*datapb.SegmentInfo, 
 }
 
 func (m *meta) revertAlterMetaStoreAfterCompaction(oldSegments []*datapb.SegmentInfo, removalSegment *datapb.SegmentInfo) error {
-	log.Info("revert metastore after compaction failure",
+	log.Debug("revert metastore after compaction failure",
 		zap.Int64("collectionID", removalSegment.CollectionID),
 		zap.Int64("partitionID", removalSegment.PartitionID),
 		zap.Int64("compactedTo", removalSegment.ID),
@@ -941,7 +977,7 @@ func (m *meta) alterInMemoryMetaAfterCompaction(segmentCompactTo *SegmentInfo, s
 	for _, v := range segmentsCompactFrom {
 		compactFromIDs = append(compactFromIDs, v.GetID())
 	}
-	log.Info("meta update: alter in memory meta after compaction",
+	log.Debug("meta update: alter in memory meta after compaction",
 		zap.Int64("compact to segment ID", segmentCompactTo.GetID()),
 		zap.Int64s("compact from segment IDs", compactFromIDs))
 	m.Lock()
@@ -955,7 +991,7 @@ func (m *meta) alterInMemoryMetaAfterCompaction(segmentCompactTo *SegmentInfo, s
 	if segmentCompactTo.GetNumOfRows() > 0 {
 		m.segments.SetSegment(segmentCompactTo.GetID(), segmentCompactTo)
 	}
-	log.Info("meta update: alter in memory meta after compaction - complete",
+	log.Debug("meta update: alter in memory meta after compaction - complete",
 		zap.Int64("compact to segment ID", segmentCompactTo.GetID()),
 		zap.Int64s("compact from segment IDs", compactFromIDs))
 }

@@ -146,6 +146,7 @@ enum MsgType {
     CreateAlias = 108;
     DropAlias = 109;
     AlterAlias = 110;
+    AlterCollection = 111;
 
 
     /* DEFINITION REQUESTS: PARTITION */

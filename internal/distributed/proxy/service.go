@@ -592,6 +592,10 @@ func (s *Server) ShowCollections(ctx context.Context, request *milvuspb.ShowColl
 	return s.proxy.ShowCollections(ctx, request)
 }
 
+func (s *Server) AlterCollection(ctx context.Context, request *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
+	return s.proxy.AlterCollection(ctx, request)
+}
+
 // CreatePartition notifies Proxy to create a partition
 func (s *Server) CreatePartition(ctx context.Context, request *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
 	return s.proxy.CreatePartition(ctx, request)
