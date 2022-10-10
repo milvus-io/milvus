@@ -768,7 +768,8 @@ func (replica *SegmentReplica) mergeFlushedSegments(seg *Segment, planID UniqueI
 
 	var inValidSegments []UniqueID
 	for _, ID := range compactedFrom {
-		if !replica.hasSegment(ID, true) {
+		// no such segments in replica or the segments are unflushed.
+		if !replica.hasSegment(ID, true) || replica.hasSegment(ID, false) {
 			inValidSegments = append(inValidSegments, ID)
 		}
 	}
