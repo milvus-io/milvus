@@ -496,7 +496,7 @@ func TestGetChannelLatestMsgID(t *testing.T) {
 	var insertMsgStream = insertStream
 	insertMsgStream.Start()
 
-	id, err := dsService.getChannelLatestMsgID(ctx, dmlChannelName)
+	id, err := dsService.getChannelLatestMsgID(ctx, dmlChannelName, 0)
 	assert.NoError(t, err)
 	assert.NotNil(t, id)
 }
