@@ -38,7 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metrics"
 	rocksmqimpl "github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
 	"github.com/milvus-io/milvus/internal/proxy"
-	"github.com/milvus-io/milvus/internal/querycoord"
+	querycoord "github.com/milvus-io/milvus/internal/querycoordv2"
 	"github.com/milvus-io/milvus/internal/querynode"
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/util/dependency"

@@ -77,7 +77,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode"
 	"github.com/milvus-io/milvus/internal/indexcoord"
 	"github.com/milvus-io/milvus/internal/indexnode"
-	"github.com/milvus-io/milvus/internal/querycoord"
+	querycoord "github.com/milvus-io/milvus/internal/querycoordv2"
 	"github.com/milvus-io/milvus/internal/querynode"
 )
 
