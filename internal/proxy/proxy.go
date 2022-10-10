@@ -121,7 +121,7 @@ func NewProxy(ctx context.Context, factory dependency.Factory) (*Proxy, error) {
 		shardMgr:         newShardClientMgr(),
 		multiRateLimiter: NewMultiRateLimiter(),
 	}
-	node.UpdateStateCode(internalpb.StateCode_Abnormal)
+	node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	logutil.Logger(ctx).Debug("create a new Proxy instance", zap.Any("state", node.stateCode.Load()))
 	return node, nil
 }
@@ -367,8 +367,8 @@ func (node *Proxy) Start() error {
 	Params.ProxyCfg.CreatedTime = now
 	Params.ProxyCfg.UpdatedTime = now
 
-	log.Debug("update state code", zap.String("role", typeutil.ProxyRole), zap.String("State", internalpb.StateCode_Healthy.String()))
-	node.UpdateStateCode(internalpb.StateCode_Healthy)
+	log.Debug("update state code", zap.String("role", typeutil.ProxyRole), zap.String("State", commonpb.StateCode_Healthy.String()))
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
 
 	return nil
 }
@@ -417,7 +417,7 @@ func (node *Proxy) Stop() error {
 	}
 
 	// https://github.com/milvus-io/milvus/issues/12282
-	node.UpdateStateCode(internalpb.StateCode_Abnormal)
+	node.UpdateStateCode(commonpb.StateCode_Abnormal)
 
 	return nil
 }

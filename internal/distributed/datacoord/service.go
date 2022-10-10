@@ -243,7 +243,7 @@ func (s *Server) Run() error {
 }
 
 // GetComponentStates gets states of datacoord and datanodes
-func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
+func (s *Server) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
 	return s.dataCoord.GetComponentStates(ctx)
 }
 

@@ -1002,10 +1002,10 @@ func (m *RootCoordFactory) DescribeCollection(ctx context.Context, in *milvuspb.
 	return resp, nil
 }
 
-func (m *RootCoordFactory) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
-	return &internalpb.ComponentStates{
-		State:              &internalpb.ComponentInfo{},
-		SubcomponentStates: make([]*internalpb.ComponentInfo, 0),
+func (m *RootCoordFactory) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
+	return &milvuspb.ComponentStates{
+		State:              &milvuspb.ComponentInfo{},
+		SubcomponentStates: make([]*milvuspb.ComponentInfo, 0),
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},

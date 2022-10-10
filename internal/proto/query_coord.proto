@@ -11,7 +11,7 @@ import "schema.proto";
 import "data_coord.proto";
 
 service QueryCoord {
-  rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
+  rpc GetComponentStates(milvus.GetComponentStatesRequest) returns (milvus.ComponentStates) {}
   rpc GetTimeTickChannel(internal.GetTimeTickChannelRequest) returns(milvus.StringResponse) {}
   rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
 
@@ -37,7 +37,7 @@ service QueryCoord {
 }
 
 service QueryNode {
-  rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
+  rpc GetComponentStates(milvus.GetComponentStatesRequest) returns (milvus.ComponentStates) {}
   rpc GetTimeTickChannel(internal.GetTimeTickChannelRequest) returns(milvus.StringResponse) {}
   rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
 

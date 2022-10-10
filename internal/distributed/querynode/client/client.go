@@ -97,17 +97,17 @@ func (c *Client) getAddr() (string, error) {
 }
 
 // GetComponentStates gets the component states of QueryNode.
-func (c *Client) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+func (c *Client) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(querypb.QueryNodeClient).GetComponentStates(ctx, &internalpb.GetComponentStatesRequest{})
+		return client.(querypb.QueryNodeClient).GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
 	})
 	if err != nil || ret == nil {
 		return nil, err
 	}
-	return ret.(*internalpb.ComponentStates), err
+	return ret.(*milvuspb.ComponentStates), err
 }
 
 // GetTimeTickChannel gets the time tick channel of QueryNode.

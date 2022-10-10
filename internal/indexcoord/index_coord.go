@@ -123,7 +123,7 @@ func NewIndexCoord(ctx context.Context, factory dependency.Factory) (*IndexCoord
 		factory:             factory,
 		enableActiveStandBy: Params.IndexCoordCfg.EnableActiveStandby,
 	}
-	i.UpdateStateCode(internalpb.StateCode_Abnormal)
+	i.UpdateStateCode(commonpb.StateCode_Abnormal)
 	return i, nil
 }
 
@@ -165,8 +165,8 @@ func (i *IndexCoord) Init() error {
 	var initErr error
 	Params.InitOnce()
 	i.initOnce.Do(func() {
-		i.UpdateStateCode(internalpb.StateCode_Initializing)
-		log.Debug("IndexCoord init", zap.Any("stateCode", i.stateCode.Load().(internalpb.StateCode)))
+		i.UpdateStateCode(commonpb.StateCode_Initializing)
+		log.Debug("IndexCoord init", zap.Any("stateCode", i.stateCode.Load().(commonpb.StateCode)))
 
 		i.factory.Init(&Params)
 
@@ -279,7 +279,7 @@ func (i *IndexCoord) Start() error {
 		i.handoff.Start()
 		i.flushedSegmentWatcher.Start()
 
-		i.UpdateStateCode(internalpb.StateCode_Healthy)
+		i.UpdateStateCode(commonpb.StateCode_Healthy)
 	})
 	// Start callbacks
 	for _, cb := range i.startCallbacks {
@@ -293,12 +293,12 @@ func (i *IndexCoord) Start() error {
 		i.activateFunc = func() {
 			log.Info("IndexCoord switch from standby to active, reload the KV")
 			i.metaTable.reloadFromKV()
-			i.UpdateStateCode(internalpb.StateCode_Healthy)
+			i.UpdateStateCode(commonpb.StateCode_Healthy)
 		}
-		i.UpdateStateCode(internalpb.StateCode_StandBy)
+		i.UpdateStateCode(commonpb.StateCode_StandBy)
 		log.Info("IndexCoord start successfully", zap.Any("state", i.stateCode.Load()))
 	} else {
-		i.UpdateStateCode(internalpb.StateCode_Healthy)
+		i.UpdateStateCode(commonpb.StateCode_Healthy)
 		log.Info("IndexCoord start successfully", zap.Any("state", i.stateCode.Load()))
 	}
 
@@ -308,7 +308,7 @@ func (i *IndexCoord) Start() error {
 // Stop stops the IndexCoord component.
 func (i *IndexCoord) Stop() error {
 	// https://github.com/milvus-io/milvus/issues/12282
-	i.UpdateStateCode(internalpb.StateCode_Abnormal)
+	i.UpdateStateCode(commonpb.StateCode_Abnormal)
 
 	if i.loopCancel != nil {
 		i.loopCancel()
@@ -367,17 +367,17 @@ func (i *IndexCoord) SetRootCoord(rootCoord types.RootCoord) error {
 }
 
 // UpdateStateCode updates the component state of IndexCoord.
-func (i *IndexCoord) UpdateStateCode(code internalpb.StateCode) {
+func (i *IndexCoord) UpdateStateCode(code commonpb.StateCode) {
 	i.stateCode.Store(code)
 }
 
 func (i *IndexCoord) isHealthy() bool {
-	code := i.stateCode.Load().(internalpb.StateCode)
-	return code == internalpb.StateCode_Healthy
+	code := i.stateCode.Load().(commonpb.StateCode)
+	return code == commonpb.StateCode_Healthy
 }
 
 // GetComponentStates gets the component states of IndexCoord.
-func (i *IndexCoord) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+func (i *IndexCoord) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
 	log.Debug("get IndexCoord component states ...")
 
 	nodeID := common.NotRegisteredID
@@ -385,13 +385,13 @@ func (i *IndexCoord) GetComponentStates(ctx context.Context) (*internalpb.Compon
 		nodeID = i.session.ServerID
 	}
 
-	stateInfo := &internalpb.ComponentInfo{
+	stateInfo := &milvuspb.ComponentInfo{
 		NodeID:    nodeID,
 		Role:      "IndexCoord",
-		StateCode: i.stateCode.Load().(internalpb.StateCode),
+		StateCode: i.stateCode.Load().(commonpb.StateCode),
 	}
 
-	ret := &internalpb.ComponentStates{
+	ret := &milvuspb.ComponentStates{
 		State:              stateInfo,
 		SubcomponentStates: nil, // todo add subcomponents states
 		Status: &commonpb.Status{

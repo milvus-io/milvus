@@ -236,7 +236,7 @@ func (s *Server) SetRootCoord(d types.RootCoord) error {
 }
 
 // GetComponentStates gets the component states of IndexCoord.
-func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
+func (s *Server) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
 	return s.indexcoord.GetComponentStates(ctx)
 }
 

@@ -301,7 +301,8 @@ func (s *Server) init() error {
 		}
 	}
 
-	s.datanode.UpdateStateCode(internalpb.StateCode_Initializing)
+	s.datanode.UpdateStateCode(commonpb.StateCode_Initializing)
+
 	if err := s.datanode.Init(); err != nil {
 		log.Error("failed to init DataNode server", zap.Error(err))
 		return err
@@ -324,7 +325,7 @@ func (s *Server) start() error {
 }
 
 // GetComponentStates gets the component states of Datanode
-func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
+func (s *Server) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
 	return s.datanode.GetComponentStates(ctx)
 }
 
@@ -339,7 +340,7 @@ func (s *Server) WatchDmChannels(ctx context.Context, req *datapb.WatchDmChannel
 }
 
 func (s *Server) FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest) (*commonpb.Status, error) {
-	if s.datanode.GetStateCode() != internalpb.StateCode_Healthy {
+	if s.datanode.GetStateCode() != commonpb.StateCode_Healthy {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    "DataNode isn't healthy.",

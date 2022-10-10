@@ -27,13 +27,8 @@ import (
 	"syscall"
 	"time"
 
-	rocksmqimpl "github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
-	"github.com/milvus-io/milvus/internal/util/dependency"
-
-	"go.uber.org/zap"
-
-	"github.com/prometheus/client_golang/prometheus"
-
+	"github.com/milvus-io/milvus/api/commonpb"
+	"github.com/milvus-io/milvus/api/milvuspb"
 	"github.com/milvus-io/milvus/cmd/components"
 	"github.com/milvus-io/milvus/internal/datacoord"
 	"github.com/milvus-io/milvus/internal/datanode"
@@ -41,17 +36,21 @@ import (
 	"github.com/milvus-io/milvus/internal/indexnode"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	rocksmqimpl "github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/querycoord"
 	"github.com/milvus-io/milvus/internal/querynode"
 	"github.com/milvus-io/milvus/internal/rootcoord"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/healthz"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"go.uber.org/zap"
 )
 
 var Params paramtable.ComponentParam
@@ -465,9 +464,9 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 		multiRoleHealthzHandler := func(w http.ResponseWriter, r *http.Request) {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
-			req := &internalpb.GetComponentStatesRequest{}
-			validateResp := func(resp *internalpb.ComponentStates, err error) bool {
-				return err == nil && resp != nil && resp.GetState().GetStateCode() == internalpb.StateCode_Healthy
+			req := &milvuspb.GetComponentStatesRequest{}
+			validateResp := func(resp *milvuspb.ComponentStates, err error) bool {
+				return err == nil && resp != nil && resp.GetState().GetStateCode() == commonpb.StateCode_Healthy
 			}
 			if mr.EnableRootCoord {
 				if rc == nil || !validateResp(rc.GetComponentStates(ctx, req)) {

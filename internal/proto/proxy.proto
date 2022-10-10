@@ -8,7 +8,7 @@ import "internal.proto";
 import "milvus.proto";
 
 service Proxy {
-  rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
+  rpc GetComponentStates(milvus.GetComponentStatesRequest) returns (milvus.ComponentStates) {}
   rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
 
   rpc InvalidateCollectionMetaCache(InvalidateCollMetaCacheRequest) returns (common.Status) {}

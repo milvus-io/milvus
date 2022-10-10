@@ -117,17 +117,17 @@ func (c *Client) newGrpcClient(cc *grpc.ClientConn) interface{} {
 }
 
 // GetComponentStates gets the component states of IndexCoord.
-func (c *Client) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+func (c *Client) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(indexpb.IndexCoordClient).GetComponentStates(ctx, &internalpb.GetComponentStatesRequest{})
+		return client.(indexpb.IndexCoordClient).GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
 	})
 	if err != nil || ret == nil {
 		return nil, err
 	}
-	return ret.(*internalpb.ComponentStates), err
+	return ret.(*milvuspb.ComponentStates), err
 }
 
 // GetStatisticsChannel gets the statistics channel of IndexCoord.

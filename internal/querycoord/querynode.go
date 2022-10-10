@@ -30,7 +30,6 @@ import (
 	nodeclient "github.com/milvus-io/milvus/internal/distributed/querynode/client"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
@@ -55,7 +54,7 @@ type Node interface {
 	getSegmentInfo(ctx context.Context, in *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error)
 	loadSegments(ctx context.Context, in *querypb.LoadSegmentsRequest) error
 	releaseSegments(ctx context.Context, in *querypb.ReleaseSegmentsRequest) error
-	getComponentInfo(ctx context.Context) *internalpb.ComponentInfo
+	getComponentInfo(ctx context.Context) *milvuspb.ComponentInfo
 
 	getMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 }
@@ -217,19 +216,19 @@ func (qn *queryNode) getSegmentInfo(ctx context.Context, in *querypb.GetSegmentI
 	return res, nil
 }
 
-func (qn *queryNode) getComponentInfo(ctx context.Context) *internalpb.ComponentInfo {
+func (qn *queryNode) getComponentInfo(ctx context.Context) *milvuspb.ComponentInfo {
 	if !qn.isOnline() {
-		return &internalpb.ComponentInfo{
+		return &milvuspb.ComponentInfo{
 			NodeID:    qn.id,
-			StateCode: internalpb.StateCode_Abnormal,
+			StateCode: commonpb.StateCode_Abnormal,
 		}
 	}
 
 	res, err := qn.client.GetComponentStates(qn.ctx)
 	if err != nil || res.Status.ErrorCode != commonpb.ErrorCode_Success {
-		return &internalpb.ComponentInfo{
+		return &milvuspb.ComponentInfo{
 			NodeID:    qn.id,
-			StateCode: internalpb.StateCode_Abnormal,
+			StateCode: commonpb.StateCode_Abnormal,
 		}
 	}
 

@@ -37,8 +37,8 @@ func (m *GrpcQueryNodeClient) GetStatistics(ctx context.Context, in *querypb.Get
 	return &internalpb.GetStatisticsResponse{}, m.Err
 }
 
-func (m *GrpcQueryNodeClient) GetComponentStates(ctx context.Context, in *internalpb.GetComponentStatesRequest, opts ...grpc.CallOption) (*internalpb.ComponentStates, error) {
-	return &internalpb.ComponentStates{}, m.Err
+func (m *GrpcQueryNodeClient) GetComponentStates(ctx context.Context, in *milvuspb.GetComponentStatesRequest, opts ...grpc.CallOption) (*milvuspb.ComponentStates, error) {
+	return &milvuspb.ComponentStates{}, m.Err
 }
 
 func (m *GrpcQueryNodeClient) GetTimeTickChannel(ctx context.Context, in *internalpb.GetTimeTickChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error) {

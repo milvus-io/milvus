@@ -49,18 +49,18 @@ import (
 const moduleName = "Proxy"
 
 // UpdateStateCode updates the state code of Proxy.
-func (node *Proxy) UpdateStateCode(code internalpb.StateCode) {
+func (node *Proxy) UpdateStateCode(code commonpb.StateCode) {
 	node.stateCode.Store(code)
 }
 
 // GetComponentStates get state of Proxy.
-func (node *Proxy) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
-	stats := &internalpb.ComponentStates{
+func (node *Proxy) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
+	stats := &milvuspb.ComponentStates{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
 	}
-	code, ok := node.stateCode.Load().(internalpb.StateCode)
+	code, ok := node.stateCode.Load().(commonpb.StateCode)
 	if !ok {
 		errMsg := "unexpected error in type assertion"
 		stats.Status = &commonpb.Status{
@@ -73,7 +73,7 @@ func (node *Proxy) GetComponentStates(ctx context.Context) (*internalpb.Componen
 	if node.session != nil && node.session.Registered() {
 		nodeID = node.session.ServerID
 	}
-	info := &internalpb.ComponentInfo{
+	info := &milvuspb.ComponentInfo{
 		// NodeID:    Params.ProxyID, // will race with Proxy.Register()
 		NodeID:    nodeID,
 		Role:      typeutil.ProxyRole,
@@ -3577,12 +3577,12 @@ func (node *Proxy) Dummy(ctx context.Context, req *milvuspb.DummyRequest) (*milv
 
 // RegisterLink registers a link
 func (node *Proxy) RegisterLink(ctx context.Context, req *milvuspb.RegisterLinkRequest) (*milvuspb.RegisterLinkResponse, error) {
-	code := node.stateCode.Load().(internalpb.StateCode)
+	code := node.stateCode.Load().(commonpb.StateCode)
 	log.Debug("RegisterLink",
 		zap.String("role", typeutil.ProxyRole),
 		zap.Any("state code of proxy", code))
 
-	if code != internalpb.StateCode_Healthy {
+	if code != commonpb.StateCode_Healthy {
 		return &milvuspb.RegisterLinkResponse{
 			Address: nil,
 			Status: &commonpb.Status{
@@ -3882,13 +3882,13 @@ func (node *Proxy) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStat
 
 // checkHealthy checks proxy state is Healthy
 func (node *Proxy) checkHealthy() bool {
-	code := node.stateCode.Load().(internalpb.StateCode)
-	return code == internalpb.StateCode_Healthy
+	code := node.stateCode.Load().(commonpb.StateCode)
+	return code == commonpb.StateCode_Healthy
 }
 
-func (node *Proxy) checkHealthyAndReturnCode() (internalpb.StateCode, bool) {
-	code := node.stateCode.Load().(internalpb.StateCode)
-	return code, code == internalpb.StateCode_Healthy
+func (node *Proxy) checkHealthyAndReturnCode() (commonpb.StateCode, bool) {
+	code := node.stateCode.Load().(commonpb.StateCode)
+	return code, code == commonpb.StateCode_Healthy
 }
 
 //unhealthyStatus returns the proxy not healthy status

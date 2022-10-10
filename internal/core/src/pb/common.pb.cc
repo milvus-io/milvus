@@ -226,7 +226,7 @@ static void InitDefaultsscc_info_Status_common_2eproto() {
     {{ATOMIC_VAR_INIT(::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase::kUninitialized), 0, InitDefaultsscc_info_Status_common_2eproto}, {}};
 
 static ::PROTOBUF_NAMESPACE_ID::Metadata file_level_metadata_common_2eproto[11];
-static const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* file_level_enum_descriptors_common_2eproto[11];
+static const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* file_level_enum_descriptors_common_2eproto[12];
 static constexpr ::PROTOBUF_NAMESPACE_ID::ServiceDescriptor const** file_level_service_descriptors_common_2eproto = nullptr;
 
 const ::PROTOBUF_NAMESPACE_ID::uint32 TableStruct_common_2eproto::offsets[] PROTOBUF_SECTION_VARIABLE(protodesc_cold) = {
@@ -467,12 +467,13 @@ const char descriptor_table_protodef_common_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "p\020\023\022\027\n\023PrivilegeUpdateUser\020\024\022\032\n\026Privileg"
   "eDropOwnership\020\025\022\034\n\030PrivilegeSelectOwner"
   "ship\020\026\022\034\n\030PrivilegeManageOwnership\020\027\022\027\n\023"
-  "PrivilegeSelectUser\020\030:^\n\021privilege_ext_o"
-  "bj\022\037.google.protobuf.MessageOptions\030\351\007 \001"
-  "(\0132!.milvus.proto.common.PrivilegeExtBL\n"
-  "\016io.milvus.grpcB\013CommonProtoP\001Z(github.c"
-  "om/milvus-io/milvus/api/commonpb\240\001\001b\006pro"
-  "to3"
+  "PrivilegeSelectUser\020\030*E\n\tStateCode\022\020\n\014In"
+  "itializing\020\000\022\013\n\007Healthy\020\001\022\014\n\010Abnormal\020\002\022"
+  "\013\n\007StandBy\020\003:^\n\021privilege_ext_obj\022\037.goog"
+  "le.protobuf.MessageOptions\030\351\007 \001(\0132!.milv"
+  "us.proto.common.PrivilegeExtBL\n\016io.milvu"
+  "s.grpcB\013CommonProtoP\001Z(github.com/milvus"
+  "-io/milvus/api/commonpb\240\001\001b\006proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_common_2eproto_deps[1] = {
   &::descriptor_table_google_2fprotobuf_2fdescriptor_2eproto,
@@ -493,7 +494,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_com
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_common_2eproto_once;
 static bool descriptor_table_common_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_common_2eproto = {
-  &descriptor_table_common_2eproto_initialized, descriptor_table_protodef_common_2eproto, "common.proto", 5283,
+  &descriptor_table_common_2eproto_initialized, descriptor_table_protodef_common_2eproto, "common.proto", 5354,
   &descriptor_table_common_2eproto_once, descriptor_table_common_2eproto_sccs, descriptor_table_common_2eproto_deps, 11, 1,
   schemas, file_default_instances, TableStruct_common_2eproto::offsets,
   file_level_metadata_common_2eproto, 11, file_level_enum_descriptors_common_2eproto, file_level_service_descriptors_common_2eproto,
@@ -823,6 +824,22 @@ bool ObjectPrivilege_IsValid(int value) {
     case 22:
     case 23:
     case 24:
+      return true;
+    default:
+      return false;
+  }
+}
+
+const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* StateCode_descriptor() {
+  ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&descriptor_table_common_2eproto);
+  return file_level_enum_descriptors_common_2eproto[11];
+}
+bool StateCode_IsValid(int value) {
+  switch (value) {
+    case 0:
+    case 1:
+    case 2:
+    case 3:
       return true;
     default:
       return false;

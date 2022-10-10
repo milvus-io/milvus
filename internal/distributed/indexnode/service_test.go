@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/api/commonpb"
+	"github.com/milvus-io/milvus/api/milvuspb"
 	"github.com/milvus-io/milvus/internal/indexnode"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -53,10 +54,10 @@ func TestIndexNodeServer(t *testing.T) {
 	assert.Nil(t, err)
 
 	t.Run("GetComponentStates", func(t *testing.T) {
-		req := &internalpb.GetComponentStatesRequest{}
+		req := &milvuspb.GetComponentStatesRequest{}
 		states, err := server.GetComponentStates(ctx, req)
 		assert.Nil(t, err)
-		assert.Equal(t, internalpb.StateCode_Healthy, states.State.StateCode)
+		assert.Equal(t, commonpb.StateCode_Healthy, states.State.StateCode)
 	})
 
 	t.Run("GetStatisticsChannel", func(t *testing.T) {

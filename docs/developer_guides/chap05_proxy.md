@@ -361,7 +361,7 @@ type Proxy struct {
 	ip         string
 	port       int
 
-	stateCode internalpb.StateCode
+	stateCode commonpb.StateCode
 
 	rootCoordClient  RootCoordClient
 	indexCoordClient IndexCoordClient

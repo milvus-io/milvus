@@ -20,10 +20,11 @@ import (
 	"context"
 	"io"
 
+	"github.com/milvus-io/milvus/api/milvuspb"
 	rc "github.com/milvus-io/milvus/internal/distributed/rootcoord"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+
 	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
 )
@@ -68,6 +69,6 @@ func (rc *RootCoord) Stop() error {
 }
 
 // GetComponentStates returns RootCoord's states
-func (rc *RootCoord) GetComponentStates(ctx context.Context, request *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
+func (rc *RootCoord) GetComponentStates(ctx context.Context, request *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
 	return rc.svr.GetComponentStates(ctx, request)
 }

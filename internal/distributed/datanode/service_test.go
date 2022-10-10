@@ -36,8 +36,8 @@ import (
 type MockDataNode struct {
 	nodeID typeutil.UniqueID
 
-	stateCode            internalpb.StateCode
-	states               *internalpb.ComponentStates
+	stateCode            commonpb.StateCode
+	states               *milvuspb.ComponentStates
 	status               *commonpb.Status
 	err                  error
 	initErr              error
@@ -72,11 +72,11 @@ func (m *MockDataNode) SetNodeID(id typeutil.UniqueID) {
 	m.nodeID = id
 }
 
-func (m *MockDataNode) UpdateStateCode(code internalpb.StateCode) {
+func (m *MockDataNode) UpdateStateCode(code commonpb.StateCode) {
 	m.stateCode = code
 }
 
-func (m *MockDataNode) GetStateCode() internalpb.StateCode {
+func (m *MockDataNode) GetStateCode() commonpb.StateCode {
 	return m.stateCode
 }
 
@@ -88,7 +88,7 @@ func (m *MockDataNode) SetDataCoord(dc types.DataCoord) error {
 	return m.err
 }
 
-func (m *MockDataNode) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+func (m *MockDataNode) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
 	return m.states, m.err
 }
 
@@ -150,17 +150,17 @@ func (m *mockDataCoord) Init() error {
 func (m *mockDataCoord) Start() error {
 	return nil
 }
-func (m *mockDataCoord) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
-	return &internalpb.ComponentStates{
-		State: &internalpb.ComponentInfo{
-			StateCode: internalpb.StateCode_Healthy,
+func (m *mockDataCoord) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
+	return &milvuspb.ComponentStates{
+		State: &milvuspb.ComponentInfo{
+			StateCode: commonpb.StateCode_Healthy,
 		},
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
-		SubcomponentStates: []*internalpb.ComponentInfo{
+		SubcomponentStates: []*milvuspb.ComponentInfo{
 			{
-				StateCode: internalpb.StateCode_Healthy,
+				StateCode: commonpb.StateCode_Healthy,
 			},
 		},
 	}, nil
@@ -180,17 +180,17 @@ func (m *mockRootCoord) Init() error {
 func (m *mockRootCoord) Start() error {
 	return nil
 }
-func (m *mockRootCoord) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
-	return &internalpb.ComponentStates{
-		State: &internalpb.ComponentInfo{
-			StateCode: internalpb.StateCode_Healthy,
+func (m *mockRootCoord) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
+	return &milvuspb.ComponentStates{
+		State: &milvuspb.ComponentInfo{
+			StateCode: commonpb.StateCode_Healthy,
 		},
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
-		SubcomponentStates: []*internalpb.ComponentInfo{
+		SubcomponentStates: []*milvuspb.ComponentInfo{
 			{
-				StateCode: internalpb.StateCode_Healthy,
+				StateCode: commonpb.StateCode_Healthy,
 			},
 		},
 	}, nil
@@ -222,7 +222,7 @@ func Test_NewServer(t *testing.T) {
 
 	t.Run("GetComponentStates", func(t *testing.T) {
 		server.datanode = &MockDataNode{
-			states: &internalpb.ComponentStates{},
+			states: &milvuspb.ComponentStates{},
 		}
 		states, err := server.GetComponentStates(ctx, nil)
 		assert.Nil(t, err)

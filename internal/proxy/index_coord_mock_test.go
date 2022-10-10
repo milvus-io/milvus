@@ -50,38 +50,38 @@ type IndexCoordMock struct {
 	minioBucketName string
 }
 
-func (coord *IndexCoordMock) updateState(state internalpb.StateCode) {
+func (coord *IndexCoordMock) updateState(state commonpb.StateCode) {
 	coord.state.Store(state)
 }
 
-func (coord *IndexCoordMock) getState() internalpb.StateCode {
-	return coord.state.Load().(internalpb.StateCode)
+func (coord *IndexCoordMock) getState() commonpb.StateCode {
+	return coord.state.Load().(commonpb.StateCode)
 }
 
 func (coord *IndexCoordMock) healthy() bool {
-	return coord.getState() == internalpb.StateCode_Healthy
+	return coord.getState() == commonpb.StateCode_Healthy
 }
 
 func (coord *IndexCoordMock) Init() error {
-	coord.updateState(internalpb.StateCode_Initializing)
+	coord.updateState(commonpb.StateCode_Initializing)
 	return nil
 }
 
 func (coord *IndexCoordMock) Start() error {
-	defer coord.updateState(internalpb.StateCode_Healthy)
+	defer coord.updateState(commonpb.StateCode_Healthy)
 
 	return nil
 }
 
 func (coord *IndexCoordMock) Stop() error {
-	defer coord.updateState(internalpb.StateCode_Abnormal)
+	defer coord.updateState(commonpb.StateCode_Abnormal)
 
 	return nil
 }
 
-func (coord *IndexCoordMock) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
-	return &internalpb.ComponentStates{
-		State: &internalpb.ComponentInfo{
+func (coord *IndexCoordMock) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
+	return &milvuspb.ComponentStates{
+		State: &milvuspb.ComponentInfo{
 			NodeID:    coord.nodeID,
 			Role:      typeutil.IndexCoordRole,
 			StateCode: coord.getState(),

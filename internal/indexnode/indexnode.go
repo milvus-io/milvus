@@ -109,7 +109,7 @@ func NewIndexNode(ctx context.Context, factory dependency.Factory) (*IndexNode, 
 		storageFactory: &chunkMgr{},
 		tasks:          map[taskKey]*taskInfo{},
 	}
-	b.UpdateStateCode(internalpb.StateCode_Abnormal)
+	b.UpdateStateCode(commonpb.StateCode_Abnormal)
 	sc, err := NewTaskScheduler(b.loopCtx)
 	if err != nil {
 		return nil, err
@@ -176,8 +176,8 @@ func (i *IndexNode) Init() error {
 	i.initOnce.Do(func() {
 		Params.Init()
 
-		i.UpdateStateCode(internalpb.StateCode_Initializing)
-		log.Debug("IndexNode init", zap.Any("State", i.stateCode.Load().(internalpb.StateCode)))
+		i.UpdateStateCode(commonpb.StateCode_Initializing)
+		log.Debug("IndexNode init", zap.Any("State", i.stateCode.Load().(commonpb.StateCode)))
 		err := i.initSession()
 		if err != nil {
 			log.Error(err.Error())
@@ -212,7 +212,7 @@ func (i *IndexNode) Start() error {
 		Params.IndexNodeCfg.CreatedTime = time.Now()
 		Params.IndexNodeCfg.UpdatedTime = time.Now()
 
-		i.UpdateStateCode(internalpb.StateCode_Healthy)
+		i.UpdateStateCode(commonpb.StateCode_Healthy)
 		log.Debug("IndexNode", zap.Any("State", i.stateCode.Load()))
 	})
 
@@ -223,7 +223,7 @@ func (i *IndexNode) Start() error {
 // Stop closes the server.
 func (i *IndexNode) Stop() error {
 	// https://github.com/milvus-io/milvus/issues/12282
-	i.UpdateStateCode(internalpb.StateCode_Abnormal)
+	i.UpdateStateCode(commonpb.StateCode_Abnormal)
 	// cleanup all running tasks
 	deletedTasks := i.deleteAllTasks()
 	for _, task := range deletedTasks {
@@ -242,7 +242,7 @@ func (i *IndexNode) Stop() error {
 }
 
 // UpdateStateCode updates the component state of IndexNode.
-func (i *IndexNode) UpdateStateCode(code internalpb.StateCode) {
+func (i *IndexNode) UpdateStateCode(code commonpb.StateCode) {
 	i.stateCode.Store(code)
 }
 
@@ -252,14 +252,14 @@ func (i *IndexNode) SetEtcdClient(client *clientv3.Client) {
 }
 
 func (i *IndexNode) isHealthy() bool {
-	code := i.stateCode.Load().(internalpb.StateCode)
-	return code == internalpb.StateCode_Healthy
+	code := i.stateCode.Load().(commonpb.StateCode)
+	return code == commonpb.StateCode_Healthy
 }
 
 //// BuildIndex receives request from IndexCoordinator to build an index.
 //// Index building is asynchronous, so when an index building request comes, IndexNode records the task and returns.
 //func (i *IndexNode) BuildIndex(ctx context.Context, request *indexpb.BuildIndexRequest) (*commonpb.Status, error) {
-//	if i.stateCode.Load().(internalpb.StateCode) != internalpb.StateCode_Healthy {
+//	if i.stateCode.Load().(commonpb.StateCode) != commonpb.StateCode_Healthy {
 //		return &commonpb.Status{
 //			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 //			Reason:    "state code is not healthy",
@@ -310,7 +310,7 @@ func (i *IndexNode) isHealthy() bool {
 //
 //// GetTaskSlots gets how many task the IndexNode can still perform.
 //func (i *IndexNode) GetTaskSlots(ctx context.Context, req *indexpb.GetTaskSlotsRequest) (*indexpb.GetTaskSlotsResponse, error) {
-//	if i.stateCode.Load().(internalpb.StateCode) != internalpb.StateCode_Healthy {
+//	if i.stateCode.Load().(commonpb.StateCode) != commonpb.StateCode_Healthy {
 //		return &indexpb.GetTaskSlotsResponse{
 //			Status: &commonpb.Status{
 //				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -332,20 +332,20 @@ func (i *IndexNode) isHealthy() bool {
 //}
 
 // GetComponentStates gets the component states of IndexNode.
-func (i *IndexNode) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+func (i *IndexNode) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
 	log.Debug("get IndexNode components states ...")
 	nodeID := common.NotRegisteredID
 	if i.session != nil && i.session.Registered() {
 		nodeID = i.session.ServerID
 	}
-	stateInfo := &internalpb.ComponentInfo{
+	stateInfo := &milvuspb.ComponentInfo{
 		// NodeID:    Params.NodeID, // will race with i.Register()
 		NodeID:    nodeID,
 		Role:      typeutil.IndexNodeRole,
-		StateCode: i.stateCode.Load().(internalpb.StateCode),
+		StateCode: i.stateCode.Load().(commonpb.StateCode),
 	}
 
-	ret := &internalpb.ComponentStates{
+	ret := &milvuspb.ComponentStates{
 		State:              stateInfo,
 		SubcomponentStates: nil, // todo add subcomponents states
 		Status: &commonpb.Status{

@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/api/commonpb"
 	"github.com/milvus-io/milvus/api/milvuspb"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
@@ -195,8 +194,8 @@ func (qs *queryNodeServerMock) run() error {
 	return nil
 }
 
-func (qs *queryNodeServerMock) GetComponentStates(ctx context.Context, req *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
-	return &internalpb.ComponentStates{
+func (qs *queryNodeServerMock) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
+	return &milvuspb.ComponentStates{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},

@@ -35,27 +35,27 @@ import (
 )
 
 // GetComponentStates return information about whether the coord is healthy
-func (qc *QueryCoord) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+func (qc *QueryCoord) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
 	nodeID := common.NotRegisteredID
 	if qc.session != nil && qc.session.Registered() {
 		nodeID = qc.session.ServerID
 	}
-	serviceComponentInfo := &internalpb.ComponentInfo{
+	serviceComponentInfo := &milvuspb.ComponentInfo{
 		// NodeID:    Params.QueryCoordID, // will race with QueryCoord.Register()
 		NodeID:    nodeID,
-		StateCode: qc.stateCode.Load().(internalpb.StateCode),
+		StateCode: qc.stateCode.Load().(commonpb.StateCode),
 	}
 
 	//subComponentInfos, err := qs.cluster.GetComponentInfos(ctx)
 	//if err != nil {
-	//	return &internalpb.ComponentStates{
+	//	return &milvuspb.ComponentStates{
 	//		Status: &commonpb.Status{
 	//			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 	//			Reason:    err.Error(),
 	//		},
 	//	}, err
 	//}
-	return &internalpb.ComponentStates{
+	return &milvuspb.ComponentStates{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
@@ -141,7 +141,7 @@ func (qc *QueryCoord) ShowCollections(ctx context.Context, req *querypb.ShowColl
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}
-	if qc.stateCode.Load() != internalpb.StateCode_Healthy {
+	if qc.stateCode.Load() != commonpb.StateCode_Healthy {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		err := errors.New("QueryCoord is not healthy")
 		status.Reason = err.Error()
@@ -253,7 +253,7 @@ func (qc *QueryCoord) LoadCollection(ctx context.Context, req *querypb.LoadColle
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}
-	if qc.stateCode.Load() != internalpb.StateCode_Healthy {
+	if qc.stateCode.Load() != commonpb.StateCode_Healthy {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		err := errors.New("QueryCoord is not healthy")
 		status.Reason = err.Error()
@@ -324,7 +324,7 @@ func (qc *QueryCoord) ReleaseCollection(ctx context.Context, req *querypb.Releas
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}
-	if qc.stateCode.Load() != internalpb.StateCode_Healthy {
+	if qc.stateCode.Load() != commonpb.StateCode_Healthy {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		err := errors.New("QueryCoord is not healthy")
 		status.Reason = err.Error()
@@ -405,7 +405,7 @@ func (qc *QueryCoord) ShowPartitions(ctx context.Context, req *querypb.ShowParti
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}
-	if qc.stateCode.Load() != internalpb.StateCode_Healthy {
+	if qc.stateCode.Load() != commonpb.StateCode_Healthy {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		err := errors.New("QueryCoord is not healthy")
 		status.Reason = err.Error()
@@ -498,7 +498,7 @@ func (qc *QueryCoord) LoadPartitions(ctx context.Context, req *querypb.LoadParti
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}
-	if qc.stateCode.Load() != internalpb.StateCode_Healthy {
+	if qc.stateCode.Load() != commonpb.StateCode_Healthy {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		err := errors.New("QueryCoord is not healthy")
 		status.Reason = err.Error()
@@ -590,7 +590,7 @@ func (qc *QueryCoord) ReleasePartitions(ctx context.Context, req *querypb.Releas
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}
-	if qc.stateCode.Load() != internalpb.StateCode_Healthy {
+	if qc.stateCode.Load() != commonpb.StateCode_Healthy {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		err := errors.New("QueryCoord is not healthy")
 		status.Reason = err.Error()
@@ -751,7 +751,7 @@ func (qc *QueryCoord) GetPartitionStates(ctx context.Context, req *querypb.GetPa
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}
-	if qc.stateCode.Load() != internalpb.StateCode_Healthy {
+	if qc.stateCode.Load() != commonpb.StateCode_Healthy {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		err := errors.New("QueryCoord is not healthy")
 		status.Reason = err.Error()
@@ -807,7 +807,7 @@ func (qc *QueryCoord) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmen
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}
-	if qc.stateCode.Load() != internalpb.StateCode_Healthy {
+	if qc.stateCode.Load() != commonpb.StateCode_Healthy {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		err := errors.New("QueryCoord is not healthy")
 		status.Reason = err.Error()
@@ -866,7 +866,7 @@ func (qc *QueryCoord) LoadBalance(ctx context.Context, req *querypb.LoadBalanceR
 	status := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}
-	if qc.stateCode.Load() != internalpb.StateCode_Healthy {
+	if qc.stateCode.Load() != commonpb.StateCode_Healthy {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		err := errors.New("QueryCoord is not healthy")
 		status.Reason = err.Error()
@@ -920,7 +920,7 @@ func (qc *QueryCoord) ShowConfigurations(ctx context.Context, req *internalpb.Sh
 		zap.String("pattern", req.Pattern),
 		zap.Int64("msgID", req.GetBase().GetMsgID()))
 
-	if qc.stateCode.Load() != internalpb.StateCode_Healthy {
+	if qc.stateCode.Load() != commonpb.StateCode_Healthy {
 		err := errors.New("QueryCoord is not healthy")
 		log.Warn("ShowConfigurations failed", zap.String("role", typeutil.QueryCoordRole), zap.Int64("msgID", req.GetBase().GetMsgID()), zap.Error(err))
 		return &internalpb.ShowConfigurationsResponse{
@@ -949,7 +949,7 @@ func (qc *QueryCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 		ComponentName: metricsinfo.ConstructComponentName(typeutil.QueryCoordRole, Params.QueryCoordCfg.GetNodeID()),
 	}
 
-	if qc.stateCode.Load() != internalpb.StateCode_Healthy {
+	if qc.stateCode.Load() != commonpb.StateCode_Healthy {
 		err := errors.New("QueryCoord is not healthy")
 		getMetricsResponse.Status.Reason = err.Error()
 		log.Warn("getMetrics failed", zap.String("role", typeutil.QueryCoordRole), zap.Int64("msgID", req.GetBase().GetMsgID()), zap.Error(err))
@@ -1027,7 +1027,7 @@ func (qc *QueryCoord) GetReplicas(ctx context.Context, req *milvuspb.GetReplicas
 		ErrorCode: commonpb.ErrorCode_Success,
 	}
 
-	if qc.stateCode.Load() != internalpb.StateCode_Healthy {
+	if qc.stateCode.Load() != commonpb.StateCode_Healthy {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		err := errors.New("QueryCoord is not healthy")
 		status.Reason = err.Error()
@@ -1090,7 +1090,7 @@ func (qc *QueryCoord) GetShardLeaders(ctx context.Context, req *querypb.GetShard
 		ErrorCode: commonpb.ErrorCode_Success,
 	}
 
-	if qc.stateCode.Load() != internalpb.StateCode_Healthy {
+	if qc.stateCode.Load() != commonpb.StateCode_Healthy {
 		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		err := errors.New("QueryCoord is not healthy")
 		status.Reason = err.Error()

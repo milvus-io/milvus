@@ -30,6 +30,7 @@ import "C"
 import (
 	"context"
 	"fmt"
+	"github.com/milvus-io/milvus/api/commonpb"
 	"math"
 	"os"
 	"path"
@@ -51,7 +52,6 @@ import (
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
@@ -138,7 +138,7 @@ func NewQueryNode(ctx context.Context, factory dependency.Factory) *QueryNode {
 
 	node.tSafeReplica = newTSafeReplica()
 	node.scheduler = newTaskScheduler(ctx1, node.tSafeReplica)
-	node.UpdateStateCode(internalpb.StateCode_Abnormal)
+	node.UpdateStateCode(commonpb.StateCode_Abnormal)
 
 	return node
 }
@@ -324,7 +324,7 @@ func (node *QueryNode) Start() error {
 	Params.QueryNodeCfg.CreatedTime = time.Now()
 	Params.QueryNodeCfg.UpdatedTime = time.Now()
 
-	node.UpdateStateCode(internalpb.StateCode_Healthy)
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	log.Info("query node start successfully",
 		zap.Any("queryNodeID", Params.QueryNodeCfg.GetNodeID()),
 		zap.Any("IP", Params.QueryNodeCfg.QueryNodeIP),
@@ -336,7 +336,7 @@ func (node *QueryNode) Start() error {
 // Stop mainly stop QueryNode's query service, historical loop and streaming loop.
 func (node *QueryNode) Stop() error {
 	log.Warn("Query node stop..")
-	node.UpdateStateCode(internalpb.StateCode_Abnormal)
+	node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	node.queryNodeLoopCancel()
 
 	// close services
@@ -358,7 +358,7 @@ func (node *QueryNode) Stop() error {
 }
 
 // UpdateStateCode updata the state of query node, which can be initializing, healthy, and abnormal
-func (node *QueryNode) UpdateStateCode(code internalpb.StateCode) {
+func (node *QueryNode) UpdateStateCode(code commonpb.StateCode) {
 	node.stateCode.Store(code)
 }
 

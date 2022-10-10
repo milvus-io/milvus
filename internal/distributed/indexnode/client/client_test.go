@@ -156,7 +156,7 @@ func TestIndexNodeClient(t *testing.T) {
 	t.Run("GetComponentStates", func(t *testing.T) {
 		states, err := inc.GetComponentStates(ctx)
 		assert.Nil(t, err)
-		assert.Equal(t, internalpb.StateCode_Healthy, states.State.StateCode)
+		assert.Equal(t, commonpb.StateCode_Healthy, states.State.StateCode)
 		assert.Equal(t, commonpb.ErrorCode_Success, states.Status.ErrorCode)
 	})
 

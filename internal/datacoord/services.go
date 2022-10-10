@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"math/rand"
 	"strconv"
-	"sync/atomic"
 	"time"
 
 	"github.com/milvus-io/milvus/api/commonpb"
@@ -42,7 +41,7 @@ import (
 
 // checks whether server in Healthy State
 func (s *Server) isClosed() bool {
-	return atomic.LoadInt64(&s.isServing) != ServerStateHealthy
+	return s.stateCode.Load() != commonpb.StateCode_Healthy
 }
 
 // GetTimeTickChannel legacy API, returns time tick channel name
@@ -552,33 +551,32 @@ func (s *Server) SetSegmentState(ctx context.Context, req *datapb.SetSegmentStat
 	}, nil
 }
 
+func (s *Server) GetStateCode() commonpb.StateCode {
+	code := s.stateCode.Load()
+	if code == nil {
+		return commonpb.StateCode_Abnormal
+	}
+	return code.(commonpb.StateCode)
+}
+
 // GetComponentStates returns DataCoord's current state
-func (s *Server) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+func (s *Server) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
 	nodeID := common.NotRegisteredID
 	if s.session != nil && s.session.Registered() {
 		nodeID = s.session.ServerID // or Params.NodeID
 	}
-
-	resp := &internalpb.ComponentStates{
-		State: &internalpb.ComponentInfo{
+	code := s.GetStateCode()
+	resp := &milvuspb.ComponentStates{
+		State: &milvuspb.ComponentInfo{
 			// NodeID:    Params.NodeID, // will race with Server.Register()
 			NodeID:    nodeID,
 			Role:      "datacoord",
-			StateCode: 0,
+			StateCode: code,
 		},
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
 		},
-	}
-	state := atomic.LoadInt64(&s.isServing)
-	switch state {
-	case ServerStateInitializing:
-		resp.State.StateCode = internalpb.StateCode_Initializing
-	case ServerStateHealthy:
-		resp.State.StateCode = internalpb.StateCode_Healthy
-	default:
-		resp.State.StateCode = internalpb.StateCode_Abnormal
 	}
 	return resp, nil
 }

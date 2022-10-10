@@ -51,10 +51,10 @@ func TestIndexCoordinateServer(t *testing.T) {
 	assert.NoError(t, err)
 
 	t.Run("GetComponentStates", func(t *testing.T) {
-		req := &internalpb.GetComponentStatesRequest{}
+		req := &milvuspb.GetComponentStatesRequest{}
 		states, err := server.GetComponentStates(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, internalpb.StateCode_Healthy, states.State.StateCode)
+		assert.Equal(t, commonpb.StateCode_Healthy, states.State.StateCode)
 	})
 
 	t.Run("GetStatisticsChannel", func(t *testing.T) {

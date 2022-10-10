@@ -11,7 +11,7 @@ import "proxy.proto";
 import "etcd_meta.proto";
 
 service RootCoord {
-  rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
+  rpc GetComponentStates(milvus.GetComponentStatesRequest) returns (milvus.ComponentStates) {}
   rpc GetTimeTickChannel(internal.GetTimeTickChannelRequest) returns(milvus.StringResponse) {}
   rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
     /**

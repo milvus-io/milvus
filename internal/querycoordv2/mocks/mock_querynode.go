@@ -30,20 +30,20 @@ func (_m *MockQueryNodeServer) EXPECT() *MockQueryNodeServer_Expecter {
 }
 
 // GetComponentStates provides a mock function with given fields: _a0, _a1
-func (_m *MockQueryNodeServer) GetComponentStates(_a0 context.Context, _a1 *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
+func (_m *MockQueryNodeServer) GetComponentStates(_a0 context.Context, _a1 *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
 	ret := _m.Called(_a0, _a1)
 
-	var r0 *internalpb.ComponentStates
-	if rf, ok := ret.Get(0).(func(context.Context, *internalpb.GetComponentStatesRequest) *internalpb.ComponentStates); ok {
+	var r0 *milvuspb.ComponentStates
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetComponentStatesRequest) *milvuspb.ComponentStates); ok {
 		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*internalpb.ComponentStates)
+			r0 = ret.Get(0).(*milvuspb.ComponentStates)
 		}
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(context.Context, *internalpb.GetComponentStatesRequest) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetComponentStatesRequest) error); ok {
 		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
@@ -64,14 +64,14 @@ func (_e *MockQueryNodeServer_Expecter) GetComponentStates(_a0 interface{}, _a1 
 	return &MockQueryNodeServer_GetComponentStates_Call{Call: _e.mock.On("GetComponentStates", _a0, _a1)}
 }
 
-func (_c *MockQueryNodeServer_GetComponentStates_Call) Run(run func(_a0 context.Context, _a1 *internalpb.GetComponentStatesRequest)) *MockQueryNodeServer_GetComponentStates_Call {
+func (_c *MockQueryNodeServer_GetComponentStates_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.GetComponentStatesRequest)) *MockQueryNodeServer_GetComponentStates_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*internalpb.GetComponentStatesRequest))
+		run(args[0].(context.Context), args[1].(*milvuspb.GetComponentStatesRequest))
 	})
 	return _c
 }
 
-func (_c *MockQueryNodeServer_GetComponentStates_Call) Return(_a0 *internalpb.ComponentStates, _a1 error) *MockQueryNodeServer_GetComponentStates_Call {
+func (_c *MockQueryNodeServer_GetComponentStates_Call) Return(_a0 *milvuspb.ComponentStates, _a1 error) *MockQueryNodeServer_GetComponentStates_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }

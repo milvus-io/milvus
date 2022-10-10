@@ -5,29 +5,6 @@ option go_package = "github.com/milvus-io/milvus/internal/proto/internalpb";
 import "common.proto";
 import "schema.proto";
 
-enum StateCode {
-  Initializing = 0;
-  Healthy = 1;
-  Abnormal = 2;
-  StandBy = 3;
-}
-
-message ComponentInfo {
-  int64 nodeID = 1;
-  string role = 2;
-  StateCode state_code = 3;
-  repeated common.KeyValuePair extra_info = 4;
-}
-
-message ComponentStates {
-  ComponentInfo state = 1;
-  repeated ComponentInfo subcomponent_states = 2;
-  common.Status status = 3;
-}
-
-message GetComponentStatesRequest {
-}
-
 message GetTimeTickChannelRequest {
 }
 

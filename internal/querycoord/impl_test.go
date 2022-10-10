@@ -366,7 +366,7 @@ func TestGrpcTask(t *testing.T) {
 	t.Run("Test GetComponentStates", func(t *testing.T) {
 		states, err := queryCoord.GetComponentStates(ctx)
 		assert.Equal(t, commonpb.ErrorCode_Success, states.Status.ErrorCode)
-		assert.Equal(t, internalpb.StateCode_Healthy, states.State.StateCode)
+		assert.Equal(t, commonpb.StateCode_Healthy, states.State.StateCode)
 		assert.Nil(t, err)
 	})
 
@@ -775,7 +775,7 @@ func TestGrpcTaskBeforeHealthy(t *testing.T) {
 	t.Run("Test GetComponentStates", func(t *testing.T) {
 		states, err := unHealthyCoord.GetComponentStates(ctx)
 		assert.Equal(t, commonpb.ErrorCode_Success, states.Status.ErrorCode)
-		assert.Equal(t, internalpb.StateCode_Abnormal, states.State.StateCode)
+		assert.Equal(t, commonpb.StateCode_Abnormal, states.State.StateCode)
 		assert.Nil(t, err)
 	})
 
@@ -833,7 +833,7 @@ func TestGrpcTaskBeforeHealthy(t *testing.T) {
 
 func TestQueryCoord_GetComponentStates(t *testing.T) {
 	n := &QueryCoord{}
-	n.stateCode.Store(internalpb.StateCode_Healthy)
+	n.stateCode.Store(commonpb.StateCode_Healthy)
 	resp, err := n.GetComponentStates(context.Background())
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)

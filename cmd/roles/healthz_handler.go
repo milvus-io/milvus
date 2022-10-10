@@ -22,11 +22,11 @@ import (
 	"net/http"
 
 	"github.com/milvus-io/milvus/api/commonpb"
+	"github.com/milvus-io/milvus/api/milvuspb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/healthz"
-	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"go.uber.org/zap"
 )
 
 func unhealthyHandler(w http.ResponseWriter, r *http.Request, reason string) {
@@ -54,7 +54,7 @@ func healthyHandler(w http.ResponseWriter, r *http.Request) {
 // GetComponentStatesInterface defines the interface that get states from component.
 type GetComponentStatesInterface interface {
 	// GetComponentStates returns the states of component.
-	GetComponentStates(ctx context.Context, request *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error)
+	GetComponentStates(ctx context.Context, request *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error)
 }
 
 type componentsHealthzHandler struct {
@@ -62,7 +62,7 @@ type componentsHealthzHandler struct {
 }
 
 func (handler *componentsHealthzHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	states, err := handler.component.GetComponentStates(context.Background(), &internalpb.GetComponentStatesRequest{})
+	states, err := handler.component.GetComponentStates(context.Background(), &milvuspb.GetComponentStatesRequest{})
 
 	if err != nil {
 		log.Warn("failed to get component states", zap.Error(err))
@@ -96,7 +96,7 @@ func (handler *componentsHealthzHandler) ServeHTTP(w http.ResponseWriter, r *htt
 		return
 	}
 
-	if states.State.StateCode != internalpb.StateCode_Healthy {
+	if states.State.StateCode != commonpb.StateCode_Healthy {
 		log.Warn("component is unhealthy", zap.String("state", states.State.StateCode.String()))
 		unhealthyHandler(w, r, fmt.Sprintf("state: %s", states.State.StateCode.String()))
 		return

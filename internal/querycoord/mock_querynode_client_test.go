@@ -101,8 +101,8 @@ func (client *queryNodeClientMock) Register() error {
 	return nil
 }
 
-func (client *queryNodeClientMock) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
-	return client.grpcClient.GetComponentStates(ctx, &internalpb.GetComponentStatesRequest{})
+func (client *queryNodeClientMock) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
+	return client.grpcClient.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
 }
 
 func (client *queryNodeClientMock) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {

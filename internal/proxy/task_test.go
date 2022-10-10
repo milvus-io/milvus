@@ -827,7 +827,7 @@ func TestHasCollectionTask(t *testing.T) {
 	err = task.PreExecute(ctx)
 	assert.NotNil(t, err)
 
-	rc.updateState(internalpb.StateCode_Abnormal)
+	rc.updateState(commonpb.StateCode_Abnormal)
 	task.CollectionName = collectionName
 	err = task.PreExecute(ctx)
 	assert.Nil(t, err)

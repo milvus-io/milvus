@@ -223,7 +223,7 @@ func (s *Server) SetEtcdClient(etcdCli *clientv3.Client) {
 }
 
 // GetComponentStates gets the component states of IndexNode.
-func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
+func (s *Server) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
 	return s.indexnode.GetComponentStates(ctx)
 }
 

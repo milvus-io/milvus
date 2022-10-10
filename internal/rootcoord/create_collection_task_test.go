@@ -17,7 +17,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/stretchr/testify/assert"
 )
@@ -370,11 +369,11 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 		}
 
 		dc := newMockDataCoord()
-		dc.GetComponentStatesFunc = func(ctx context.Context) (*internalpb.ComponentStates, error) {
-			return &internalpb.ComponentStates{
-				State: &internalpb.ComponentInfo{
+		dc.GetComponentStatesFunc = func(ctx context.Context) (*milvuspb.ComponentStates, error) {
+			return &milvuspb.ComponentStates{
+				State: &milvuspb.ComponentInfo{
 					NodeID:    TestRootCoordID,
-					StateCode: internalpb.StateCode_Healthy,
+					StateCode: commonpb.StateCode_Healthy,
 				},
 				SubcomponentStates: nil,
 				Status:             succStatus(),

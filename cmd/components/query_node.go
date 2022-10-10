@@ -19,8 +19,9 @@ package components
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/api/milvuspb"
+
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 
 	grpcquerynode "github.com/milvus-io/milvus/internal/distributed/querynode"
@@ -64,6 +65,6 @@ func (q *QueryNode) Stop() error {
 }
 
 // GetComponentStates returns QueryNode's states
-func (q *QueryNode) GetComponentStates(ctx context.Context, request *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
+func (q *QueryNode) GetComponentStates(ctx context.Context, request *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
 	return q.svr.GetComponentStates(ctx, request)
 }

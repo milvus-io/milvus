@@ -558,6 +558,33 @@ inline bool ObjectPrivilege_Parse(
   return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<ObjectPrivilege>(
     ObjectPrivilege_descriptor(), name, value);
 }
+enum StateCode : int {
+  Initializing = 0,
+  Healthy = 1,
+  Abnormal = 2,
+  StandBy = 3,
+  StateCode_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
+  StateCode_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
+};
+bool StateCode_IsValid(int value);
+constexpr StateCode StateCode_MIN = Initializing;
+constexpr StateCode StateCode_MAX = StandBy;
+constexpr int StateCode_ARRAYSIZE = StateCode_MAX + 1;
+
+const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* StateCode_descriptor();
+template<typename T>
+inline const std::string& StateCode_Name(T enum_t_value) {
+  static_assert(::std::is_same<T, StateCode>::value ||
+    ::std::is_integral<T>::value,
+    "Incorrect type passed to function StateCode_Name.");
+  return ::PROTOBUF_NAMESPACE_ID::internal::NameOfEnum(
+    StateCode_descriptor(), enum_t_value);
+}
+inline bool StateCode_Parse(
+    const std::string& name, StateCode* value) {
+  return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<StateCode>(
+    StateCode_descriptor(), name, value);
+}
 // ===================================================================
 
 class Status :
@@ -3140,6 +3167,11 @@ template <> struct is_proto_enum< ::milvus::proto::common::ObjectPrivilege> : ::
 template <>
 inline const EnumDescriptor* GetEnumDescriptor< ::milvus::proto::common::ObjectPrivilege>() {
   return ::milvus::proto::common::ObjectPrivilege_descriptor();
+}
+template <> struct is_proto_enum< ::milvus::proto::common::StateCode> : ::std::true_type {};
+template <>
+inline const EnumDescriptor* GetEnumDescriptor< ::milvus::proto::common::StateCode>() {
+  return ::milvus::proto::common::StateCode_descriptor();
 }
 
 PROTOBUF_NAMESPACE_CLOSE

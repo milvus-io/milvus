@@ -118,17 +118,17 @@ func (c *Client) Register() error {
 }
 
 // GetComponentStates calls DataCoord GetComponentStates services
-func (c *Client) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+func (c *Client) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(datapb.DataCoordClient).GetComponentStates(ctx, &internalpb.GetComponentStatesRequest{})
+		return client.(datapb.DataCoordClient).GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
 	})
 	if err != nil || ret == nil {
 		return nil, err
 	}
-	return ret.(*internalpb.ComponentStates), err
+	return ret.(*milvuspb.ComponentStates), err
 }
 
 // GetTimeTickChannel return the name of time tick channel.

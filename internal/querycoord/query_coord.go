@@ -41,7 +41,6 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
@@ -269,11 +268,11 @@ func (qc *QueryCoord) Start() error {
 			// todo to complete
 			log.Info("querycoord switch from standby to active, activating")
 			qc.meta.reloadFromKV()
-			qc.UpdateStateCode(internalpb.StateCode_Healthy)
+			qc.UpdateStateCode(commonpb.StateCode_Healthy)
 		}
-		qc.UpdateStateCode(internalpb.StateCode_StandBy)
+		qc.UpdateStateCode(commonpb.StateCode_StandBy)
 	} else {
-		qc.UpdateStateCode(internalpb.StateCode_Healthy)
+		qc.UpdateStateCode(commonpb.StateCode_Healthy)
 	}
 
 	return nil
@@ -281,7 +280,7 @@ func (qc *QueryCoord) Start() error {
 
 // Stop function stops watching the meta and node updates
 func (qc *QueryCoord) Stop() error {
-	qc.UpdateStateCode(internalpb.StateCode_Abnormal)
+	qc.UpdateStateCode(commonpb.StateCode_Abnormal)
 
 	if qc.scheduler != nil {
 		log.Info("close scheduler...")
@@ -310,7 +309,7 @@ func (qc *QueryCoord) Stop() error {
 }
 
 // UpdateStateCode updates the status of the coord, including healthy, unhealthy
-func (qc *QueryCoord) UpdateStateCode(code internalpb.StateCode) {
+func (qc *QueryCoord) UpdateStateCode(code commonpb.StateCode) {
 	qc.stateCode.Store(code)
 }
 
@@ -328,7 +327,7 @@ func NewQueryCoord(ctx context.Context, factory dependency.Factory) (*QueryCoord
 		enableActiveStandBy: Params.QueryCoordCfg.EnableActiveStandby,
 	}
 
-	service.UpdateStateCode(internalpb.StateCode_Abnormal)
+	service.UpdateStateCode(commonpb.StateCode_Abnormal)
 	return service, nil
 }
 

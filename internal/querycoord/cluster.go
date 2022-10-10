@@ -78,7 +78,7 @@ type Cluster interface {
 
 	// Inner
 	reloadFromKV() error
-	getComponentInfos(ctx context.Context) []*internalpb.ComponentInfo
+	getComponentInfos(ctx context.Context) []*milvuspb.ComponentInfo
 }
 
 type newQueryNodeFn func(ctx context.Context, address string, id UniqueID, kv *etcdkv.EtcdKV) (Node, error)
@@ -185,10 +185,10 @@ func (c *queryNodeCluster) GetSessionVersion() int64 {
 	return c.sessionVersion
 }
 
-func (c *queryNodeCluster) getComponentInfos(ctx context.Context) []*internalpb.ComponentInfo {
+func (c *queryNodeCluster) getComponentInfos(ctx context.Context) []*milvuspb.ComponentInfo {
 	c.RLock()
 	defer c.RUnlock()
-	var subComponentInfos []*internalpb.ComponentInfo
+	var subComponentInfos []*milvuspb.ComponentInfo
 	for _, node := range c.nodes {
 		componentState := node.getComponentInfo(ctx)
 		subComponentInfos = append(subComponentInfos, componentState)
