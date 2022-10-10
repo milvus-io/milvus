@@ -173,8 +173,8 @@ func (s *Server) init() error {
 	}
 	log.Debug("grpc init done ...")
 
-	s.rootCoord.UpdateStateCode(internalpb.StateCode_Initializing)
-	log.Debug("RootCoord", zap.Any("State", internalpb.StateCode_Initializing))
+	s.rootCoord.UpdateStateCode(commonpb.StateCode_Initializing)
+	log.Debug("RootCoord", zap.Any("State", commonpb.StateCode_Initializing))
 
 	if s.newDataCoordClient != nil {
 		log.Debug("RootCoord start to create DataCoord client")
@@ -309,7 +309,7 @@ func (s *Server) Stop() error {
 }
 
 // GetComponentStates gets the component states of RootCoord.
-func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
+func (s *Server) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
 	return s.rootCoord.GetComponentStates(ctx)
 }
 

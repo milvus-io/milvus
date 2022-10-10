@@ -119,7 +119,7 @@ func newTestSchema() *schemapb.CollectionSchema {
 
 type mockDataNodeClient struct {
 	id                   int64
-	state                internalpb.StateCode
+	state                commonpb.StateCode
 	ch                   chan interface{}
 	compactionStateResp  *datapb.CompactionStateResponse
 	addImportSegmentResp *datapb.AddImportSegmentResponse
@@ -129,7 +129,7 @@ type mockDataNodeClient struct {
 func newMockDataNodeClient(id int64, ch chan interface{}) (*mockDataNodeClient, error) {
 	return &mockDataNodeClient{
 		id:    id,
-		state: internalpb.StateCode_Initializing,
+		state: commonpb.StateCode_Initializing,
 		ch:    ch,
 		addImportSegmentResp: &datapb.AddImportSegmentResponse{
 			Status: &commonpb.Status{
@@ -144,7 +144,7 @@ func (c *mockDataNodeClient) Init() error {
 }
 
 func (c *mockDataNodeClient) Start() error {
-	c.state = internalpb.StateCode_Healthy
+	c.state = commonpb.StateCode_Healthy
 	return nil
 }
 
@@ -152,9 +152,9 @@ func (c *mockDataNodeClient) Register() error {
 	return nil
 }
 
-func (c *mockDataNodeClient) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
-	return &internalpb.ComponentStates{
-		State: &internalpb.ComponentInfo{
+func (c *mockDataNodeClient) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
+	return &milvuspb.ComponentStates{
+		State: &milvuspb.ComponentInfo{
 			NodeID:    c.id,
 			StateCode: c.state,
 		},
@@ -257,12 +257,12 @@ func (c *mockDataNodeClient) SyncSegments(ctx context.Context, req *datapb.SyncS
 }
 
 func (c *mockDataNodeClient) Stop() error {
-	c.state = internalpb.StateCode_Abnormal
+	c.state = commonpb.StateCode_Abnormal
 	return nil
 }
 
 type mockRootCoordService struct {
-	state internalpb.StateCode
+	state commonpb.StateCode
 	cnt   int64
 }
 
@@ -279,7 +279,7 @@ func (m *mockRootCoordService) AlterAlias(ctx context.Context, req *milvuspb.Alt
 }
 
 func newMockRootCoordService() *mockRootCoordService {
-	return &mockRootCoordService{state: internalpb.StateCode_Healthy}
+	return &mockRootCoordService{state: commonpb.StateCode_Healthy}
 }
 
 func (m *mockRootCoordService) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
@@ -295,7 +295,7 @@ func (m *mockRootCoordService) Start() error {
 }
 
 func (m *mockRootCoordService) Stop() error {
-	m.state = internalpb.StateCode_Abnormal
+	m.state = commonpb.StateCode_Abnormal
 	return nil
 }
 
@@ -303,15 +303,15 @@ func (m *mockRootCoordService) Register() error {
 	return nil
 }
 
-func (m *mockRootCoordService) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
-	return &internalpb.ComponentStates{
-		State: &internalpb.ComponentInfo{
+func (m *mockRootCoordService) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
+	return &milvuspb.ComponentStates{
+		State: &milvuspb.ComponentInfo{
 			NodeID:    0,
 			Role:      "",
 			StateCode: m.state,
 			ExtraInfo: []*commonpb.KeyValuePair{},
 		},
-		SubcomponentStates: []*internalpb.ComponentInfo{},
+		SubcomponentStates: []*milvuspb.ComponentInfo{},
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
@@ -385,7 +385,7 @@ func (m *mockRootCoordService) ShowPartitions(ctx context.Context, req *milvuspb
 
 //global timestamp allocator
 func (m *mockRootCoordService) AllocTimestamp(ctx context.Context, req *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error) {
-	if m.state != internalpb.StateCode_Healthy {
+	if m.state != commonpb.StateCode_Healthy {
 		return &rootcoordpb.AllocTimestampResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}}, nil
 	}
 
@@ -403,7 +403,7 @@ func (m *mockRootCoordService) AllocTimestamp(ctx context.Context, req *rootcoor
 }
 
 func (m *mockRootCoordService) AllocID(ctx context.Context, req *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
-	if m.state != internalpb.StateCode_Healthy {
+	if m.state != commonpb.StateCode_Healthy {
 		return &rootcoordpb.AllocIDResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}}, nil
 	}
 	val := atomic.AddInt64(&m.cnt, int64(req.Count))

@@ -23,7 +23,6 @@ import (
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
@@ -101,7 +100,7 @@ func NewQueryCoord(ctx context.Context, factory dependency.Factory) (*Server, er
 		cancel:  cancel,
 		factory: factory,
 	}
-	server.UpdateStateCode(internalpb.StateCode_Abnormal)
+	server.UpdateStateCode(commonpb.StateCode_Abnormal)
 	return server, nil
 }
 
@@ -310,7 +309,7 @@ func (s *Server) Start() error {
 		panic(err.Error())
 	}
 
-	s.status.Store(internalpb.StateCode_Healthy)
+	s.status.Store(commonpb.StateCode_Healthy)
 	log.Info("QueryCoord started")
 
 	return nil
@@ -345,22 +344,22 @@ func (s *Server) Stop() error {
 }
 
 // UpdateStateCode updates the status of the coord, including healthy, unhealthy
-func (s *Server) UpdateStateCode(code internalpb.StateCode) {
+func (s *Server) UpdateStateCode(code commonpb.StateCode) {
 	s.status.Store(code)
 }
 
-func (s *Server) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+func (s *Server) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
 	nodeID := common.NotRegisteredID
 	if s.session != nil && s.session.Registered() {
 		nodeID = s.session.ServerID
 	}
-	serviceComponentInfo := &internalpb.ComponentInfo{
+	serviceComponentInfo := &milvuspb.ComponentInfo{
 		// NodeID:    Params.QueryCoordID, // will race with QueryCoord.Register()
 		NodeID:    nodeID,
-		StateCode: s.status.Load().(internalpb.StateCode),
+		StateCode: s.status.Load().(commonpb.StateCode),
 	}
 
-	return &internalpb.ComponentStates{
+	return &milvuspb.ComponentStates{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},

@@ -171,15 +171,15 @@ func (_c *MockIndexCoord_DropIndex_Call) Return(_a0 *commonpb.Status, _a1 error)
 }
 
 // GetComponentStates provides a mock function with given fields: ctx
-func (_m *MockIndexCoord) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+func (_m *MockIndexCoord) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
 	ret := _m.Called(ctx)
 
-	var r0 *internalpb.ComponentStates
-	if rf, ok := ret.Get(0).(func(context.Context) *internalpb.ComponentStates); ok {
+	var r0 *milvuspb.ComponentStates
+	if rf, ok := ret.Get(0).(func(context.Context) *milvuspb.ComponentStates); ok {
 		r0 = rf(ctx)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*internalpb.ComponentStates)
+			r0 = ret.Get(0).(*milvuspb.ComponentStates)
 		}
 	}
 
@@ -211,7 +211,7 @@ func (_c *MockIndexCoord_GetComponentStates_Call) Run(run func(ctx context.Conte
 	return _c
 }
 
-func (_c *MockIndexCoord_GetComponentStates_Call) Return(_a0 *internalpb.ComponentStates, _a1 error) *MockIndexCoord_GetComponentStates_Call {
+func (_c *MockIndexCoord_GetComponentStates_Call) Return(_a0 *milvuspb.ComponentStates, _a1 error) *MockIndexCoord_GetComponentStates_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }

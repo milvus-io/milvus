@@ -34,7 +34,7 @@ import (
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type MockQueryCoord struct {
-	states           *internalpb.ComponentStates
+	states           *milvuspb.ComponentStates
 	status           *commonpb.Status
 	err              error
 	initErr          error
@@ -69,7 +69,7 @@ func (m *MockQueryCoord) Register() error {
 	return m.regErr
 }
 
-func (m *MockQueryCoord) UpdateStateCode(code internalpb.StateCode) {
+func (m *MockQueryCoord) UpdateStateCode(code commonpb.StateCode) {
 }
 
 func (m *MockQueryCoord) SetEtcdClient(client *clientv3.Client) {
@@ -87,7 +87,7 @@ func (m *MockQueryCoord) SetIndexCoord(coord types.IndexCoord) error {
 	return nil
 }
 
-func (m *MockQueryCoord) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+func (m *MockQueryCoord) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
 	log.Debug("MockQueryCoord::WaitForComponentStates")
 	return m.states, m.err
 }
@@ -178,9 +178,9 @@ func (m *MockRootCoord) Register() error {
 	return m.regErr
 }
 
-func (m *MockRootCoord) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
-	return &internalpb.ComponentStates{
-		State:  &internalpb.ComponentInfo{StateCode: internalpb.StateCode_Healthy},
+func (m *MockRootCoord) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
+	return &milvuspb.ComponentStates{
+		State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
 		Status: &commonpb.Status{ErrorCode: m.stateErr},
 	}, nil
 }
@@ -211,9 +211,9 @@ func (m *MockDataCoord) Register() error {
 	return m.regErr
 }
 
-func (m *MockDataCoord) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
-	return &internalpb.ComponentStates{
-		State:  &internalpb.ComponentInfo{StateCode: internalpb.StateCode_Healthy},
+func (m *MockDataCoord) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
+	return &milvuspb.ComponentStates{
+		State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
 		Status: &commonpb.Status{ErrorCode: m.stateErr},
 	}, nil
 }
@@ -244,9 +244,9 @@ func (m *MockIndexCoord) Register() error {
 	return m.regErr
 }
 
-func (m *MockIndexCoord) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
-	return &internalpb.ComponentStates{
-		State:  &internalpb.ComponentInfo{StateCode: internalpb.StateCode_Healthy},
+func (m *MockIndexCoord) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
+	return &milvuspb.ComponentStates{
+		State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
 		Status: &commonpb.Status{ErrorCode: m.stateErr},
 	}, nil
 }
@@ -259,8 +259,8 @@ func Test_NewServer(t *testing.T) {
 	assert.NotNil(t, server)
 
 	mqc := &MockQueryCoord{
-		states: &internalpb.ComponentStates{
-			State:  &internalpb.ComponentInfo{StateCode: internalpb.StateCode_Healthy},
+		states: &milvuspb.ComponentStates{
+			State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
 			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 		},
 		status:       &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
@@ -297,10 +297,10 @@ func Test_NewServer(t *testing.T) {
 	})
 
 	t.Run("GetComponentStates", func(t *testing.T) {
-		req := &internalpb.GetComponentStatesRequest{}
+		req := &milvuspb.GetComponentStatesRequest{}
 		states, err := server.GetComponentStates(ctx, req)
 		assert.Nil(t, err)
-		assert.Equal(t, internalpb.StateCode_Healthy, states.State.StateCode)
+		assert.Equal(t, commonpb.StateCode_Healthy, states.State.StateCode)
 	})
 
 	t.Run("GetStatisticsChannel", func(t *testing.T) {

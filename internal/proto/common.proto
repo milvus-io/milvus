@@ -328,3 +328,10 @@ message PrivilegeExt {
 extend google.protobuf.MessageOptions {
     PrivilegeExt privilege_ext_obj = 1001;
 }
+
+enum StateCode {
+    Initializing = 0;
+    Healthy = 1;
+    Abnormal = 2;
+    StandBy = 3;
+}

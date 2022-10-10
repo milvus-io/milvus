@@ -28,7 +28,6 @@ import (
 	"github.com/milvus-io/milvus/api/milvuspb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -335,7 +334,7 @@ func TestGrpcRequestWithNodeOffline(t *testing.T) {
 
 	t.Run("Test getComponentInfo", func(t *testing.T) {
 		res := node.getComponentInfo(baseCtx)
-		assert.Equal(t, internalpb.StateCode_Abnormal, res.StateCode)
+		assert.Equal(t, commonpb.StateCode_Abnormal, res.StateCode)
 	})
 
 	t.Run("Test getMetrics", func(t *testing.T) {

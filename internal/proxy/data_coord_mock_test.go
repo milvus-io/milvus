@@ -41,38 +41,38 @@ type DataCoordMock struct {
 	timeTickChannel        string
 }
 
-func (coord *DataCoordMock) updateState(state internalpb.StateCode) {
+func (coord *DataCoordMock) updateState(state commonpb.StateCode) {
 	coord.state.Store(state)
 }
 
-func (coord *DataCoordMock) getState() internalpb.StateCode {
-	return coord.state.Load().(internalpb.StateCode)
+func (coord *DataCoordMock) getState() commonpb.StateCode {
+	return coord.state.Load().(commonpb.StateCode)
 }
 
 func (coord *DataCoordMock) healthy() bool {
-	return coord.getState() == internalpb.StateCode_Healthy
+	return coord.getState() == commonpb.StateCode_Healthy
 }
 
 func (coord *DataCoordMock) Init() error {
-	coord.updateState(internalpb.StateCode_Initializing)
+	coord.updateState(commonpb.StateCode_Initializing)
 	return nil
 }
 
 func (coord *DataCoordMock) Start() error {
-	defer coord.updateState(internalpb.StateCode_Healthy)
+	defer coord.updateState(commonpb.StateCode_Healthy)
 
 	return nil
 }
 
 func (coord *DataCoordMock) Stop() error {
-	defer coord.updateState(internalpb.StateCode_Abnormal)
+	defer coord.updateState(commonpb.StateCode_Abnormal)
 
 	return nil
 }
 
-func (coord *DataCoordMock) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
-	return &internalpb.ComponentStates{
-		State: &internalpb.ComponentInfo{
+func (coord *DataCoordMock) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
+	return &milvuspb.ComponentStates{
+		State: &milvuspb.ComponentInfo{
 			NodeID:    coord.nodeID,
 			Role:      typeutil.DataCoordRole,
 			StateCode: coord.getState(),

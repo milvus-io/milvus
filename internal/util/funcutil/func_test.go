@@ -30,19 +30,18 @@ import (
 	"github.com/jarcoal/httpmock"
 	"github.com/milvus-io/milvus/api/commonpb"
 	"github.com/milvus-io/milvus/api/milvuspb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/stretchr/testify/assert"
 	grpcCodes "google.golang.org/grpc/codes"
 	grpcStatus "google.golang.org/grpc/status"
 )
 
 type MockComponent struct {
-	compState *internalpb.ComponentStates
+	compState *milvuspb.ComponentStates
 	strResp   *milvuspb.StringResponse
 	compErr   error
 }
 
-func (mc *MockComponent) SetCompState(state *internalpb.ComponentStates) {
+func (mc *MockComponent) SetCompState(state *milvuspb.ComponentStates) {
 	mc.compState = state
 }
 
@@ -62,7 +61,7 @@ func (mc *MockComponent) Stop() error {
 	return nil
 }
 
-func (mc *MockComponent) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+func (mc *MockComponent) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
 	return mc.compState, mc.compErr
 }
 
@@ -74,10 +73,10 @@ func (mc *MockComponent) Register() error {
 	return nil
 }
 
-func buildMockComponent(code internalpb.StateCode) *MockComponent {
+func buildMockComponent(code commonpb.StateCode) *MockComponent {
 	mc := &MockComponent{
-		compState: &internalpb.ComponentStates{
-			State: &internalpb.ComponentInfo{
+		compState: &milvuspb.ComponentStates{
+			State: &milvuspb.ComponentInfo{
 				NodeID:    0,
 				Role:      "role",
 				StateCode: code,
@@ -123,7 +122,7 @@ func Test_WaitForComponentInitOrHealthy(t *testing.T) {
 	assert.NotNil(t, err)
 
 	mc = &MockComponent{
-		compState: &internalpb.ComponentStates{
+		compState: &milvuspb.ComponentStates{
 			State:              nil,
 			SubcomponentStates: nil,
 			Status:             &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError},
@@ -134,8 +133,8 @@ func Test_WaitForComponentInitOrHealthy(t *testing.T) {
 	err = WaitForComponentInitOrHealthy(context.TODO(), mc, "mockService", 1, 10*time.Millisecond)
 	assert.NotNil(t, err)
 
-	validCodes := []internalpb.StateCode{internalpb.StateCode_Initializing, internalpb.StateCode_Healthy}
-	testCodes := []internalpb.StateCode{internalpb.StateCode_Initializing, internalpb.StateCode_Healthy, internalpb.StateCode_Abnormal}
+	validCodes := []commonpb.StateCode{commonpb.StateCode_Initializing, commonpb.StateCode_Healthy}
+	testCodes := []commonpb.StateCode{commonpb.StateCode_Initializing, commonpb.StateCode_Healthy, commonpb.StateCode_Abnormal}
 	for _, code := range testCodes {
 		mc := buildMockComponent(code)
 		err := WaitForComponentInitOrHealthy(context.TODO(), mc, "mockService", 1, 10*time.Millisecond)
@@ -148,8 +147,8 @@ func Test_WaitForComponentInitOrHealthy(t *testing.T) {
 }
 
 func Test_WaitForComponentInit(t *testing.T) {
-	validCodes := []internalpb.StateCode{internalpb.StateCode_Initializing}
-	testCodes := []internalpb.StateCode{internalpb.StateCode_Initializing, internalpb.StateCode_Healthy, internalpb.StateCode_Abnormal}
+	validCodes := []commonpb.StateCode{commonpb.StateCode_Initializing}
+	testCodes := []commonpb.StateCode{commonpb.StateCode_Initializing, commonpb.StateCode_Healthy, commonpb.StateCode_Abnormal}
 	for _, code := range testCodes {
 		mc := buildMockComponent(code)
 		err := WaitForComponentInit(context.TODO(), mc, "mockService", 1, 10*time.Millisecond)
@@ -162,8 +161,8 @@ func Test_WaitForComponentInit(t *testing.T) {
 }
 
 func Test_WaitForComponentHealthy(t *testing.T) {
-	validCodes := []internalpb.StateCode{internalpb.StateCode_Healthy}
-	testCodes := []internalpb.StateCode{internalpb.StateCode_Initializing, internalpb.StateCode_Healthy, internalpb.StateCode_Abnormal}
+	validCodes := []commonpb.StateCode{commonpb.StateCode_Healthy}
+	testCodes := []commonpb.StateCode{commonpb.StateCode_Initializing, commonpb.StateCode_Healthy, commonpb.StateCode_Abnormal}
 	for _, code := range testCodes {
 		mc := buildMockComponent(code)
 		err := WaitForComponentHealthy(context.TODO(), mc, "mockService", 1, 10*time.Millisecond)

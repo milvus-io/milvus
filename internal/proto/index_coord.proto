@@ -9,7 +9,7 @@ import "internal.proto";
 import "milvus.proto";
 
 service IndexCoord {
-  rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
+  rpc GetComponentStates(milvus.GetComponentStatesRequest) returns (milvus.ComponentStates) {}
   rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
   rpc CreateIndex(CreateIndexRequest) returns (common.Status){}
   // Deprecated: use DescribeIndex instead
@@ -27,7 +27,7 @@ service IndexCoord {
 }
 
 service IndexNode {
-  rpc GetComponentStates(internal.GetComponentStatesRequest) returns (internal.ComponentStates) {}
+  rpc GetComponentStates(milvus.GetComponentStatesRequest) returns (milvus.ComponentStates) {}
   rpc GetStatisticsChannel(internal.GetStatisticsChannelRequest) returns(milvus.StringResponse){}
   rpc CreateJob(CreateJobRequest) returns (common.Status) {}
   rpc QueryJobs(QueryJobsRequest) returns (QueryJobsResponse) {}

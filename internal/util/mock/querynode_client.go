@@ -49,8 +49,8 @@ func (q QueryNodeClient) Stop() error {
 	return nil
 }
 
-func (q QueryNodeClient) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
-	return q.grpcClient.GetComponentStates(ctx, &internalpb.GetComponentStatesRequest{})
+func (q QueryNodeClient) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
+	return q.grpcClient.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
 }
 
 func (q QueryNodeClient) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {

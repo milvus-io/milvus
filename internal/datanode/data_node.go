@@ -104,11 +104,11 @@ var rateCol *rateCollector
 //  `clearSignal` is a signal channel for releasing the flowgraph resources.
 //  `segmentCache` stores all flushing and flushed segments.
 type DataNode struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-	Role   string
-	State  atomic.Value // internalpb.StateCode_Initializing
-
+	ctx              context.Context
+	cancel           context.CancelFunc
+	Role             string
+	State            atomic.Value // commonpb.StateCode_Initializing
+	stateCode        atomic.Value // commonpb.StateCode_Initializing
 	flowgraphManager *flowgraphManager
 	eventManagerMap  sync.Map // vchannel name -> channelEventManager
 
@@ -148,7 +148,7 @@ func NewDataNode(ctx context.Context, factory dependency.Factory) *DataNode {
 		flowgraphManager: newFlowgraphManager(),
 		clearSignal:      make(chan string, 100),
 	}
-	node.UpdateStateCode(internalpb.StateCode_Abnormal)
+	node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	return node
 }
 
@@ -513,22 +513,22 @@ func (node *DataNode) Start() error {
 	Params.DataNodeCfg.CreatedTime = time.Now()
 	Params.DataNodeCfg.UpdatedTime = time.Now()
 
-	node.UpdateStateCode(internalpb.StateCode_Healthy)
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	return nil
 }
 
 // UpdateStateCode updates datanode's state code
-func (node *DataNode) UpdateStateCode(code internalpb.StateCode) {
-	node.State.Store(code)
+func (node *DataNode) UpdateStateCode(code commonpb.StateCode) {
+	node.stateCode.Store(code)
 }
 
 // GetStateCode return datanode's state code
-func (node *DataNode) GetStateCode() internalpb.StateCode {
-	return node.State.Load().(internalpb.StateCode)
+func (node *DataNode) GetStateCode() commonpb.StateCode {
+	return node.stateCode.Load().(commonpb.StateCode)
 }
 
 func (node *DataNode) isHealthy() bool {
-	return node.GetStateCode() == internalpb.StateCode_Healthy
+	return node.GetStateCode() == commonpb.StateCode_Healthy
 }
 
 // WatchDmChannels is not in use
@@ -542,20 +542,20 @@ func (node *DataNode) WatchDmChannels(ctx context.Context, in *datapb.WatchDmCha
 }
 
 // GetComponentStates will return current state of DataNode
-func (node *DataNode) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
-	log.Debug("DataNode current state", zap.Any("State", node.State.Load()))
+func (node *DataNode) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
+	log.Debug("DataNode current state", zap.Any("State", node.stateCode.Load()))
 	nodeID := common.NotRegisteredID
 	if node.session != nil && node.session.Registered() {
 		nodeID = node.session.ServerID
 	}
-	states := &internalpb.ComponentStates{
-		State: &internalpb.ComponentInfo{
+	states := &milvuspb.ComponentStates{
+		State: &milvuspb.ComponentInfo{
 			// NodeID:    Params.NodeID, // will race with DataNode.Register()
 			NodeID:    nodeID,
 			Role:      node.Role,
-			StateCode: node.State.Load().(internalpb.StateCode),
+			StateCode: node.stateCode.Load().(commonpb.StateCode),
 		},
-		SubcomponentStates: make([]*internalpb.ComponentInfo, 0),
+		SubcomponentStates: make([]*milvuspb.ComponentInfo, 0),
 		Status:             &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 	}
 	return states, nil
@@ -679,7 +679,7 @@ func (node *DataNode) ResendSegmentStats(ctx context.Context, req *datapb.Resend
 // Stop will release DataNode resources and shutdown datanode
 func (node *DataNode) Stop() error {
 	// https://github.com/milvus-io/milvus/issues/12282
-	node.UpdateStateCode(internalpb.StateCode_Abnormal)
+	node.UpdateStateCode(commonpb.StateCode_Abnormal)
 
 	node.cancel()
 	node.flowgraphManager.dropAll()

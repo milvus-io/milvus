@@ -1749,7 +1749,7 @@ func genSimpleQueryNodeWithMQFactory(ctx context.Context, fac dependency.Factory
 		return nil, err
 	}
 
-	node.UpdateStateCode(internalpb.StateCode_Healthy)
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
 
 	return node, nil
 }

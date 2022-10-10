@@ -64,23 +64,23 @@ func (m *MockBase) On(methodName string, arguments ...interface{}) *mock.Call {
 	return m.Mock.On(methodName, arguments...)
 }
 
-func (m *MockBase) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+func (m *MockBase) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
 	if m.isMockGetComponentStatesOn {
-		ret1 := &internalpb.ComponentStates{}
+		ret1 := &milvuspb.ComponentStates{}
 		var ret2 error
 		args := m.Called(ctx)
 		arg1 := args.Get(0)
 		arg2 := args.Get(1)
 		if arg1 != nil {
-			ret1 = arg1.(*internalpb.ComponentStates)
+			ret1 = arg1.(*milvuspb.ComponentStates)
 		}
 		if arg2 != nil {
 			ret2 = arg2.(error)
 		}
 		return ret1, ret2
 	}
-	return &internalpb.ComponentStates{
-		State:  &internalpb.ComponentInfo{StateCode: internalpb.StateCode_Healthy},
+	return &milvuspb.ComponentStates{
+		State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
 		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 	}, nil
 }
@@ -348,7 +348,7 @@ func (m *MockQueryCoord) Register() error {
 	return m.regErr
 }
 
-func (m *MockQueryCoord) UpdateStateCode(code internalpb.StateCode) {
+func (m *MockQueryCoord) UpdateStateCode(code commonpb.StateCode) {
 }
 
 func (m *MockQueryCoord) SetRootCoord(types.RootCoord) error {
@@ -359,12 +359,12 @@ func (m *MockQueryCoord) SetDataCoord(types.DataCoord) error {
 	return nil
 }
 
-func (m *MockQueryCoord) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
-	return &internalpb.ComponentStates{
-		State: &internalpb.ComponentInfo{
+func (m *MockQueryCoord) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
+	return &milvuspb.ComponentStates{
+		State: &milvuspb.ComponentInfo{
 			NodeID:    int64(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
 			Role:      "MockQueryCoord",
-			StateCode: internalpb.StateCode_Healthy,
+			StateCode: commonpb.StateCode_Healthy,
 			ExtraInfo: nil,
 		},
 		SubcomponentStates: nil,
@@ -781,7 +781,7 @@ func (m *MockProxy) GetRateLimiter() (types.Limiter, error) {
 	return nil, nil
 }
 
-func (m *MockProxy) UpdateStateCode(stateCode internalpb.StateCode) {
+func (m *MockProxy) UpdateStateCode(stateCode commonpb.StateCode) {
 
 }
 
@@ -1332,13 +1332,13 @@ func TestServer_Check(t *testing.T) {
 	assert.NotNil(t, err)
 	assert.Equal(t, grpc_health_v1.HealthCheckResponse_NOT_SERVING, ret.Status)
 
-	componentInfo := &internalpb.ComponentInfo{
+	componentInfo := &milvuspb.ComponentInfo{
 		NodeID:    0,
 		Role:      "proxy",
-		StateCode: internalpb.StateCode_Abnormal,
+		StateCode: commonpb.StateCode_Abnormal,
 	}
 	status := &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}
-	componentState := &internalpb.ComponentStates{
+	componentState := &milvuspb.ComponentStates{
 		State:  componentInfo,
 		Status: status,
 	}
@@ -1353,12 +1353,12 @@ func TestServer_Check(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, grpc_health_v1.HealthCheckResponse_NOT_SERVING, ret.Status)
 
-	componentInfo.StateCode = internalpb.StateCode_Initializing
+	componentInfo.StateCode = commonpb.StateCode_Initializing
 	ret, err = server.Check(ctx, req)
 	assert.Nil(t, err)
 	assert.Equal(t, grpc_health_v1.HealthCheckResponse_NOT_SERVING, ret.Status)
 
-	componentInfo.StateCode = internalpb.StateCode_Healthy
+	componentInfo.StateCode = commonpb.StateCode_Healthy
 	ret, err = server.Check(ctx, req)
 	assert.Nil(t, err)
 	assert.Equal(t, grpc_health_v1.HealthCheckResponse_SERVING, ret.Status)
@@ -1394,13 +1394,13 @@ func TestServer_Watch(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, grpc_health_v1.HealthCheckResponse_NOT_SERVING, ret.Status)
 
-	componentInfo := &internalpb.ComponentInfo{
+	componentInfo := &milvuspb.ComponentInfo{
 		NodeID:    0,
 		Role:      "proxy",
-		StateCode: internalpb.StateCode_Abnormal,
+		StateCode: commonpb.StateCode_Abnormal,
 	}
 	status := &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}
-	componentState := &internalpb.ComponentStates{
+	componentState := &milvuspb.ComponentStates{
 		State:  componentInfo,
 		Status: status,
 	}
@@ -1417,13 +1417,13 @@ func TestServer_Watch(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, grpc_health_v1.HealthCheckResponse_NOT_SERVING, ret.Status)
 
-	componentInfo.StateCode = internalpb.StateCode_Initializing
+	componentInfo.StateCode = commonpb.StateCode_Initializing
 	err = server.Watch(req, watchServer)
 	ret = <-resultChan
 	assert.Nil(t, err)
 	assert.Equal(t, grpc_health_v1.HealthCheckResponse_NOT_SERVING, ret.Status)
 
-	componentInfo.StateCode = internalpb.StateCode_Healthy
+	componentInfo.StateCode = commonpb.StateCode_Healthy
 	err = server.Watch(req, watchServer)
 	ret = <-resultChan
 	assert.Nil(t, err)

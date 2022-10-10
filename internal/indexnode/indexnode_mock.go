@@ -37,12 +37,12 @@ type Mock struct {
 	CallInit                 func() error
 	CallStart                func() error
 	CallStop                 func() error
-	CallGetComponentStates   func(ctx context.Context) (*internalpb.ComponentStates, error)
+	CallGetComponentStates   func(ctx context.Context) (*milvuspb.ComponentStates, error)
 	CallGetStatisticsChannel func(ctx context.Context) (*milvuspb.StringResponse, error)
 	CallRegister             func() error
 
 	CallSetEtcdClient   func(etcdClient *clientv3.Client)
-	CallUpdateStateCode func(stateCode internalpb.StateCode)
+	CallUpdateStateCode func(stateCode commonpb.StateCode)
 
 	CallCreateJob   func(ctx context.Context, req *indexpb.CreateJobRequest) (*commonpb.Status, error)
 	CallQueryJobs   func(ctx context.Context, in *indexpb.QueryJobsRequest) (*indexpb.QueryJobsResponse, error)
@@ -69,14 +69,14 @@ func NewIndexNodeMock() *Mock {
 		},
 		CallSetEtcdClient: func(etcdClient *clientv3.Client) {
 		},
-		CallUpdateStateCode: func(stateCode internalpb.StateCode) {
+		CallUpdateStateCode: func(stateCode commonpb.StateCode) {
 		},
-		CallGetComponentStates: func(ctx context.Context) (*internalpb.ComponentStates, error) {
-			return &internalpb.ComponentStates{
-				State: &internalpb.ComponentInfo{
+		CallGetComponentStates: func(ctx context.Context) (*milvuspb.ComponentStates, error) {
+			return &milvuspb.ComponentStates{
+				State: &milvuspb.ComponentInfo{
 					NodeID:    1,
 					Role:      typeutil.IndexCoordRole,
-					StateCode: internalpb.StateCode_Healthy,
+					StateCode: commonpb.StateCode_Healthy,
 				},
 				SubcomponentStates: nil,
 				Status: &commonpb.Status{
@@ -163,7 +163,7 @@ func (m *Mock) Stop() error {
 	return m.CallStop()
 }
 
-func (m *Mock) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+func (m *Mock) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
 	return m.CallGetComponentStates(ctx)
 }
 
@@ -178,7 +178,7 @@ func (m *Mock) Register() error {
 func (m *Mock) SetEtcdClient(etcdClient *clientv3.Client) {
 }
 
-func (m *Mock) UpdateStateCode(stateCode internalpb.StateCode) {
+func (m *Mock) UpdateStateCode(stateCode commonpb.StateCode) {
 }
 
 func (m *Mock) CreateJob(ctx context.Context, req *indexpb.CreateJobRequest) (*commonpb.Status, error) {

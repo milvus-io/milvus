@@ -19,8 +19,8 @@ package components
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/api/milvuspb"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 
 	grpcdatacoordclient "github.com/milvus-io/milvus/internal/distributed/datacoord"
@@ -60,6 +60,6 @@ func (s *DataCoord) Stop() error {
 }
 
 // GetComponentStates returns DataCoord's states
-func (s *DataCoord) GetComponentStates(ctx context.Context, request *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
+func (s *DataCoord) GetComponentStates(ctx context.Context, request *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
 	return s.svr.GetComponentStates(ctx, request)
 }

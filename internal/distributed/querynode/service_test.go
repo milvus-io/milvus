@@ -34,7 +34,7 @@ import (
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type MockQueryNode struct {
-	states     *internalpb.ComponentStates
+	states     *milvuspb.ComponentStates
 	status     *commonpb.Status
 	err        error
 	initErr    error
@@ -67,7 +67,7 @@ func (m *MockQueryNode) Register() error {
 	return m.regErr
 }
 
-func (m *MockQueryNode) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+func (m *MockQueryNode) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
 	return m.states, m.err
 }
 
@@ -126,7 +126,7 @@ func (m *MockQueryNode) SyncReplicaSegments(ctx context.Context, req *querypb.Sy
 func (m *MockQueryNode) SetEtcdClient(client *clientv3.Client) {
 }
 
-func (m *MockQueryNode) UpdateStateCode(code internalpb.StateCode) {
+func (m *MockQueryNode) UpdateStateCode(code commonpb.StateCode) {
 }
 
 func (m *MockQueryNode) SetRootCoord(rc types.RootCoord) error {
@@ -179,9 +179,9 @@ func (m *MockRootCoord) Register() error {
 func (m *MockRootCoord) SetEtcdClient(client *clientv3.Client) {
 }
 
-func (m *MockRootCoord) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
-	return &internalpb.ComponentStates{
-		State:  &internalpb.ComponentInfo{StateCode: internalpb.StateCode_Healthy},
+func (m *MockRootCoord) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
+	return &milvuspb.ComponentStates{
+		State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
 		Status: &commonpb.Status{ErrorCode: m.stateErr},
 	}, nil
 }
@@ -215,9 +215,9 @@ func (m *MockIndexCoord) Register() error {
 func (m *MockIndexCoord) SetEtcdClient(client *clientv3.Client) {
 }
 
-func (m *MockIndexCoord) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
-	return &internalpb.ComponentStates{
-		State:  &internalpb.ComponentInfo{StateCode: internalpb.StateCode_Healthy},
+func (m *MockIndexCoord) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
+	return &milvuspb.ComponentStates{
+		State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
 		Status: &commonpb.Status{ErrorCode: m.stateErr},
 	}, nil
 }
@@ -230,7 +230,7 @@ func Test_NewServer(t *testing.T) {
 	assert.NotNil(t, server)
 
 	mqn := &MockQueryNode{
-		states:     &internalpb.ComponentStates{State: &internalpb.ComponentInfo{StateCode: internalpb.StateCode_Healthy}},
+		states:     &milvuspb.ComponentStates{State: &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy}},
 		status:     &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 		err:        nil,
 		strResp:    &milvuspb.StringResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}},
@@ -246,10 +246,10 @@ func Test_NewServer(t *testing.T) {
 	})
 
 	t.Run("GetComponentStates", func(t *testing.T) {
-		req := &internalpb.GetComponentStatesRequest{}
+		req := &milvuspb.GetComponentStatesRequest{}
 		states, err := server.GetComponentStates(ctx, req)
 		assert.Nil(t, err)
-		assert.Equal(t, internalpb.StateCode_Healthy, states.State.StateCode)
+		assert.Equal(t, commonpb.StateCode_Healthy, states.State.StateCode)
 	})
 
 	t.Run("GetStatisticsChannel", func(t *testing.T) {

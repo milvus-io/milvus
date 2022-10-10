@@ -180,7 +180,7 @@ func testIndexCoord(t *testing.T) {
 	err = ic.Start()
 	assert.NoError(t, err)
 
-	ic.UpdateStateCode(internalpb.StateCode_Healthy)
+	ic.UpdateStateCode(commonpb.StateCode_Healthy)
 
 	ic.nodeManager.setClient(1, inm0)
 
@@ -188,7 +188,7 @@ func testIndexCoord(t *testing.T) {
 	t.Run("GetComponentStates", func(t *testing.T) {
 		states, err := ic.GetComponentStates(ctx)
 		assert.NoError(t, err)
-		assert.Equal(t, internalpb.StateCode_Healthy, states.State.StateCode)
+		assert.Equal(t, commonpb.StateCode_Healthy, states.State.StateCode)
 	})
 
 	t.Run("GetStatisticsChannel", func(t *testing.T) {
@@ -457,7 +457,7 @@ func TestIndexCoord_EnableActiveStandby(t *testing.T) {
 
 func TestIndexCoord_GetComponentStates(t *testing.T) {
 	ic := &IndexCoord{}
-	ic.stateCode.Store(internalpb.StateCode_Healthy)
+	ic.stateCode.Store(commonpb.StateCode_Healthy)
 	resp, err := ic.GetComponentStates(context.Background())
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
@@ -475,7 +475,7 @@ func TestIndexCoord_UnHealthy(t *testing.T) {
 	ic := &IndexCoord{
 		serverID: 1,
 	}
-	ic.stateCode.Store(internalpb.StateCode_Abnormal)
+	ic.stateCode.Store(commonpb.StateCode_Abnormal)
 
 	// Test IndexCoord function
 	t.Run("CreateIndex", func(t *testing.T) {
@@ -587,7 +587,7 @@ func TestIndexCoord_DropIndex(t *testing.T) {
 				},
 			}),
 		}
-		ic.UpdateStateCode(internalpb.StateCode_Healthy)
+		ic.UpdateStateCode(commonpb.StateCode_Healthy)
 		resp, err := ic.DropIndex(context.Background(), &indexpb.DropIndexRequest{
 			CollectionID: collID,
 			PartitionIDs: []int64{partID},
@@ -631,7 +631,7 @@ func TestIndexCoord_DropIndex(t *testing.T) {
 				},
 			}),
 		}
-		ic.UpdateStateCode(internalpb.StateCode_Healthy)
+		ic.UpdateStateCode(commonpb.StateCode_Healthy)
 
 		resp, err := ic.DropIndex(context.Background(), &indexpb.DropIndexRequest{
 			CollectionID: collID,
@@ -775,7 +775,7 @@ func TestIndexCoord_DropIndex(t *testing.T) {
 //
 //func TestIndexCoord_GetComponentStates(t *testing.T) {
 //	n := &IndexCoord{}
-//	n.stateCode.Store(internalpb.StateCode_Healthy)
+//	n.stateCode.Store(commonpb.StateCode_Healthy)
 //	resp, err := n.GetComponentStates(context.Background())
 //	assert.NoError(t, err)
 //	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
@@ -789,7 +789,7 @@ func TestIndexCoord_DropIndex(t *testing.T) {
 //
 //func TestIndexCoord_NotHealthy(t *testing.T) {
 //	ic := &IndexCoord{}
-//	ic.stateCode.Store(internalpb.StateCode_Abnormal)
+//	ic.stateCode.Store(commonpb.StateCode_Abnormal)
 //	req := &indexpb.BuildIndexRequest{}
 //	resp, err := ic.BuildIndex(context.Background(), req)
 //	assert.Error(t, err)
@@ -839,7 +839,7 @@ func TestIndexCoord_DropIndex(t *testing.T) {
 //		},
 //	}
 //
-//	ic.stateCode.Store(internalpb.StateCode_Healthy)
+//	ic.stateCode.Store(commonpb.StateCode_Healthy)
 //
 //	t.Run("GetIndexFilePaths success", func(t *testing.T) {
 //		resp, err := ic.GetIndexFilePaths(context.Background(), &indexpb.GetIndexFilePathsRequest{IndexBuildIDs: []UniqueID{1}})
@@ -932,7 +932,7 @@ func TestIndexCoord_DropIndex(t *testing.T) {
 //			notify: make(chan struct{}, 10),
 //		},
 //	}
-//	ic.stateCode.Store(internalpb.StateCode_Healthy)
+//	ic.stateCode.Store(commonpb.StateCode_Healthy)
 //	status, err := ic.RemoveIndex(context.Background(), &indexpb.RemoveIndexRequest{BuildIDs: []UniqueID{0}})
 //	assert.Nil(t, err)
 //	assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())

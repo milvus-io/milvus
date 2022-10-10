@@ -1106,11 +1106,11 @@ func TestCore_ReportImport(t *testing.T) {
 	}
 
 	dc := newMockDataCoord()
-	dc.GetComponentStatesFunc = func(ctx context.Context) (*internalpb.ComponentStates, error) {
-		return &internalpb.ComponentStates{
-			State: &internalpb.ComponentInfo{
+	dc.GetComponentStatesFunc = func(ctx context.Context) (*milvuspb.ComponentStates, error) {
+		return &milvuspb.ComponentStates{
+			State: &milvuspb.ComponentInfo{
 				NodeID:    TestRootCoordID,
-				StateCode: internalpb.StateCode_Healthy,
+				StateCode: commonpb.StateCode_Healthy,
 			},
 			SubcomponentStates: nil,
 			Status:             succStatus(),
@@ -1228,7 +1228,7 @@ func TestCore_Rbac(t *testing.T) {
 	}
 
 	// not healthy.
-	c.stateCode.Store(internalpb.StateCode_Abnormal)
+	c.stateCode.Store(commonpb.StateCode_Abnormal)
 
 	{
 		resp, err := c.CreateRole(ctx, &milvuspb.CreateRoleRequest{})

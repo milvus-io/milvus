@@ -30,7 +30,7 @@ func (s *Server) ShowCollections(ctx context.Context, req *querypb.ShowCollectio
 
 	log.Info("show collections request received", zap.Int64s("collections", req.GetCollectionIDs()))
 
-	if s.status.Load() != internalpb.StateCode_Healthy {
+	if s.status.Load() != commonpb.StateCode_Healthy {
 		msg := "failed to show collections"
 		log.Warn(msg, zap.Error(ErrNotHealthy))
 		return &querypb.ShowCollectionsResponse{
@@ -89,7 +89,7 @@ func (s *Server) ShowPartitions(ctx context.Context, req *querypb.ShowPartitions
 
 	log.Info("show partitions request received", zap.Int64s("partitions", req.GetPartitionIDs()))
 
-	if s.status.Load() != internalpb.StateCode_Healthy {
+	if s.status.Load() != commonpb.StateCode_Healthy {
 		msg := "failed to show partitions"
 		log.Warn(msg, zap.Error(ErrNotHealthy))
 		return &querypb.ShowPartitionsResponse{
@@ -170,7 +170,7 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 		zap.Int32("replicaNumber", req.ReplicaNumber))
 	metrics.QueryCoordLoadCount.WithLabelValues(metrics.TotalLabel).Inc()
 
-	if s.status.Load() != internalpb.StateCode_Healthy {
+	if s.status.Load() != commonpb.StateCode_Healthy {
 		msg := "failed to load collection"
 		log.Warn(msg, zap.Error(ErrNotHealthy))
 		metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
@@ -209,7 +209,7 @@ func (s *Server) ReleaseCollection(ctx context.Context, req *querypb.ReleaseColl
 	metrics.QueryCoordReleaseCount.WithLabelValues(metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder("release-collection")
 
-	if s.status.Load() != internalpb.StateCode_Healthy {
+	if s.status.Load() != commonpb.StateCode_Healthy {
 		msg := "failed to release collection"
 		log.Warn(msg, zap.Error(ErrNotHealthy))
 		metrics.QueryCoordReleaseCount.WithLabelValues(metrics.FailLabel).Inc()
@@ -250,7 +250,7 @@ func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitions
 		zap.Int64s("partitions", req.GetPartitionIDs()))
 	metrics.QueryCoordLoadCount.WithLabelValues(metrics.TotalLabel).Inc()
 
-	if s.status.Load() != internalpb.StateCode_Healthy {
+	if s.status.Load() != commonpb.StateCode_Healthy {
 		msg := "failed to load partitions"
 		log.Warn(msg, zap.Error(ErrNotHealthy))
 		metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
@@ -288,7 +288,7 @@ func (s *Server) ReleasePartitions(ctx context.Context, req *querypb.ReleasePart
 	log.Info("release partitions", zap.Int64s("partitions", req.GetPartitionIDs()))
 	metrics.QueryCoordReleaseCount.WithLabelValues(metrics.TotalLabel).Inc()
 
-	if s.status.Load() != internalpb.StateCode_Healthy {
+	if s.status.Load() != commonpb.StateCode_Healthy {
 		msg := "failed to release partitions"
 		log.Warn(msg, zap.Error(ErrNotHealthy))
 		metrics.QueryCoordReleaseCount.WithLabelValues(metrics.FailLabel).Inc()
@@ -332,7 +332,7 @@ func (s *Server) GetPartitionStates(ctx context.Context, req *querypb.GetPartiti
 
 	log.Info("get partition states", zap.Int64s("partitions", req.GetPartitionIDs()))
 
-	if s.status.Load() != internalpb.StateCode_Healthy {
+	if s.status.Load() != commonpb.StateCode_Healthy {
 		msg := "failed to get partition states"
 		log.Warn(msg, zap.Error(ErrNotHealthy))
 		return &querypb.GetPartitionStatesResponse{
@@ -401,7 +401,7 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfo
 
 	log.Info("get segment info", zap.Int64s("segments", req.GetSegmentIDs()))
 
-	if s.status.Load() != internalpb.StateCode_Healthy {
+	if s.status.Load() != commonpb.StateCode_Healthy {
 		msg := "failed to get segment info"
 		log.Warn(msg, zap.Error(ErrNotHealthy))
 		return &querypb.GetSegmentInfoResponse{
@@ -445,7 +445,7 @@ func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceReques
 		zap.Int64s("dest", req.GetDstNodeIDs()),
 		zap.Int64s("segments", req.GetSealedSegmentIDs()))
 
-	if s.status.Load() != internalpb.StateCode_Healthy {
+	if s.status.Load() != commonpb.StateCode_Healthy {
 		msg := "failed to load balance"
 		log.Warn(msg, zap.Error(ErrNotHealthy))
 		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, ErrNotHealthy), nil
@@ -493,7 +493,7 @@ func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowCon
 
 	log.Debug("show configurations request received", zap.String("pattern", req.GetPattern()))
 
-	if s.status.Load() != internalpb.StateCode_Healthy {
+	if s.status.Load() != commonpb.StateCode_Healthy {
 		msg := "failed to show configurations"
 		log.Warn(msg, zap.Error(ErrNotHealthy))
 		return &internalpb.ShowConfigurationsResponse{
@@ -527,7 +527,7 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 	log.Info("get metrics request received",
 		zap.String("metricType", req.GetRequest()))
 
-	if s.status.Load() != internalpb.StateCode_Healthy {
+	if s.status.Load() != commonpb.StateCode_Healthy {
 		msg := "failed to get metrics"
 		log.Warn(msg, zap.Error(ErrNotHealthy))
 		return &milvuspb.GetMetricsResponse{
@@ -582,7 +582,7 @@ func (s *Server) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasReque
 
 	log.Info("get replicas request received", zap.Bool("with-shard-nodes", req.GetWithShardNodes()))
 
-	if s.status.Load() != internalpb.StateCode_Healthy {
+	if s.status.Load() != commonpb.StateCode_Healthy {
 		msg := "failed to get replicas"
 		log.Warn(msg, zap.Error(ErrNotHealthy))
 		return &milvuspb.GetReplicasResponse{
@@ -624,7 +624,7 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 	)
 
 	log.Info("get shard leaders request received")
-	if s.status.Load() != internalpb.StateCode_Healthy {
+	if s.status.Load() != commonpb.StateCode_Healthy {
 		msg := "failed to get shard leaders"
 		log.Warn(msg, zap.Error(ErrNotHealthy))
 		return &querypb.GetShardLeadersResponse{

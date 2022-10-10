@@ -33,7 +33,7 @@ import (
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type MockDataCoord struct {
-	states                    *internalpb.ComponentStates
+	states                    *milvuspb.ComponentStates
 	status                    *commonpb.Status
 	err                       error
 	initErr                   error
@@ -91,7 +91,7 @@ func (m *MockDataCoord) SetEtcdClient(etcdClient *clientv3.Client) {
 func (m *MockDataCoord) SetIndexCoord(indexCoord types.IndexCoord) {
 }
 
-func (m *MockDataCoord) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+func (m *MockDataCoord) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
 	return m.states, m.err
 }
 
@@ -237,7 +237,7 @@ func Test_NewServer(t *testing.T) {
 
 	t.Run("GetComponentStates", func(t *testing.T) {
 		server.dataCoord = &MockDataCoord{
-			states: &internalpb.ComponentStates{},
+			states: &milvuspb.ComponentStates{},
 		}
 		states, err := server.GetComponentStates(ctx, nil)
 		assert.Nil(t, err)

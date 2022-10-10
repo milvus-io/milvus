@@ -109,7 +109,7 @@ func (m *QueryNodeMock) Init() error     { return nil }
 func (m *QueryNodeMock) Start() error    { return nil }
 func (m *QueryNodeMock) Stop() error     { return nil }
 func (m *QueryNodeMock) Register() error { return nil }
-func (m *QueryNodeMock) GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error) {
+func (m *QueryNodeMock) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
 	return nil, nil
 }
 func (m *QueryNodeMock) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {

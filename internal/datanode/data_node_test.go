@@ -181,10 +181,10 @@ func TestDataNode(t *testing.T) {
 	})
 
 	t.Run("Test GetCompactionState unhealthy", func(t *testing.T) {
-		node.UpdateStateCode(internalpb.StateCode_Abnormal)
+		node.UpdateStateCode(commonpb.StateCode_Abnormal)
 		resp, _ := node.GetCompactionState(ctx, nil)
 		assert.Equal(t, "DataNode is unhealthy", resp.GetStatus().GetReason())
-		node.UpdateStateCode(internalpb.StateCode_Healthy)
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
 	})
 
 	t.Run("Test FlushSegments", func(t *testing.T) {
@@ -362,12 +362,12 @@ func TestDataNode(t *testing.T) {
 		//test closed server
 		node := &DataNode{}
 		node.session = &sessionutil.Session{ServerID: 1}
-		node.State.Store(internalpb.StateCode_Abnormal)
+		node.stateCode.Store(commonpb.StateCode_Abnormal)
 
 		resp, err := node.ShowConfigurations(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
-		node.State.Store(internalpb.StateCode_Healthy)
+		node.stateCode.Store(commonpb.StateCode_Healthy)
 
 		resp, err = node.ShowConfigurations(ctx, req)
 		assert.NoError(t, err)
@@ -382,11 +382,11 @@ func TestDataNode(t *testing.T) {
 		node.session = &sessionutil.Session{ServerID: 1}
 		node.flowgraphManager = newFlowgraphManager()
 		// server is closed
-		node.State.Store(internalpb.StateCode_Abnormal)
+		node.stateCode.Store(commonpb.StateCode_Abnormal)
 		resp, err := node.GetMetrics(ctx, &milvuspb.GetMetricsRequest{})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-		node.State.Store(internalpb.StateCode_Healthy)
+		node.stateCode.Store(commonpb.StateCode_Healthy)
 
 		// failed to parse metric type
 		invalidRequest := "invalid request"
@@ -594,7 +594,7 @@ func TestDataNode(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, stat.GetErrorCode())
 
-		node.State.Store(internalpb.StateCode_Abnormal)
+		node.stateCode.Store(commonpb.StateCode_Abnormal)
 		stat, err = node.Import(context.WithValue(ctx, ctxKey{}, ""), req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, stat.GetErrorCode())
@@ -1068,7 +1068,7 @@ func TestWatchChannel(t *testing.T) {
 
 func TestDataNode_GetComponentStates(t *testing.T) {
 	n := &DataNode{}
-	n.State.Store(internalpb.StateCode_Healthy)
+	n.stateCode.Store(commonpb.StateCode_Healthy)
 	resp, err := n.GetComponentStates(context.Background())
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)

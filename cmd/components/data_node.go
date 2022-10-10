@@ -19,11 +19,10 @@ package components
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/util/dependency"
-
+	"github.com/milvus-io/milvus/api/milvuspb"
 	grpcdatanode "github.com/milvus-io/milvus/internal/distributed/datanode"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 )
 
 // DataNode implements DataNode grpc server
@@ -63,6 +62,6 @@ func (d *DataNode) Stop() error {
 }
 
 // GetComponentStates returns DataNode's states
-func (d *DataNode) GetComponentStates(ctx context.Context, request *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
+func (d *DataNode) GetComponentStates(ctx context.Context, request *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
 	return d.svr.GetComponentStates(ctx, request)
 }

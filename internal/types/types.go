@@ -48,7 +48,7 @@ type Component interface {
 	Init() error
 	Start() error
 	Stop() error
-	GetComponentStates(ctx context.Context) (*internalpb.ComponentStates, error)
+	GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error)
 	GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error)
 	Register() error
 }
@@ -105,10 +105,10 @@ type DataNodeComponent interface {
 
 	// UpdateStateCode updates state code for DataNode
 	//  `stateCode` is current statement of this data node, indicating whether it's healthy.
-	UpdateStateCode(stateCode internalpb.StateCode)
+	UpdateStateCode(stateCode commonpb.StateCode)
 
 	// GetStateCode return state code of this data node
-	GetStateCode() internalpb.StateCode
+	GetStateCode() commonpb.StateCode
 
 	// SetEtcdClient set etcd client for DataNode
 	SetEtcdClient(etcdClient *clientv3.Client)
@@ -375,7 +375,7 @@ type IndexNodeComponent interface {
 
 	// UpdateStateCode updates state code for IndexNodeComponent
 	//  `stateCode` is current statement of this QueryCoord, indicating whether it's healthy.
-	UpdateStateCode(stateCode internalpb.StateCode)
+	UpdateStateCode(stateCode commonpb.StateCode)
 }
 
 // IndexCoord is the interface `indexcoord` package implements
@@ -436,7 +436,7 @@ type IndexCoordComponent interface {
 
 	// UpdateStateCode updates state code for IndexCoordComponent
 	//  `stateCode` is current statement of this IndexCoordComponent, indicating whether it's healthy.
-	UpdateStateCode(stateCode internalpb.StateCode)
+	UpdateStateCode(stateCode commonpb.StateCode)
 }
 
 // RootCoord is the interface `rootcoord` package implements
@@ -763,7 +763,7 @@ type RootCoordComponent interface {
 
 	// UpdateStateCode updates state code for RootCoord
 	// State includes: Initializing, Healthy and Abnormal
-	UpdateStateCode(internalpb.StateCode)
+	UpdateStateCode(commonpb.StateCode)
 
 	// SetDataCoord set DataCoord for RootCoord
 	// `dataCoord` is a client of data coordinator.
@@ -860,7 +860,7 @@ type ProxyComponent interface {
 
 	// UpdateStateCode updates state code for Proxy
 	//  `stateCode` is current statement of this proxy node, indicating whether it's healthy.
-	UpdateStateCode(stateCode internalpb.StateCode)
+	UpdateStateCode(stateCode commonpb.StateCode)
 
 	// CreateCollection notifies Proxy to create a collection
 	//
@@ -1307,7 +1307,7 @@ type QueryNodeComponent interface {
 
 	// UpdateStateCode updates state code for QueryNode
 	//  `stateCode` is current statement of this query node, indicating whether it's healthy.
-	UpdateStateCode(stateCode internalpb.StateCode)
+	UpdateStateCode(stateCode commonpb.StateCode)
 
 	// SetEtcdClient set etcd client for QueryNode
 	SetEtcdClient(etcdClient *clientv3.Client)
@@ -1344,7 +1344,7 @@ type QueryCoordComponent interface {
 
 	// UpdateStateCode updates state code for QueryCoord
 	//  `stateCode` is current statement of this QueryCoord, indicating whether it's healthy.
-	UpdateStateCode(stateCode internalpb.StateCode)
+	UpdateStateCode(stateCode commonpb.StateCode)
 
 	// SetDataCoord set DataCoord for QueryCoord
 	// `dataCoord` is a client of data coordinator.

@@ -2,12 +2,10 @@ package errorutil
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/milvus-io/milvus/api/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-
-	"fmt"
 )
 
 // ErrorList for print error log
@@ -31,10 +29,10 @@ func (el ErrorList) Error() string {
 	return builder.String()
 }
 
-func UnhealthyStatus(code internalpb.StateCode) *commonpb.Status {
+func UnhealthyStatus(code commonpb.StateCode) *commonpb.Status {
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		Reason:    "proxy not healthy, StateCode=" + internalpb.StateCode_name[int32(code)],
+		Reason:    "proxy not healthy, StateCode=" + commonpb.StateCode_name[int32(code)],
 	}
 }
 

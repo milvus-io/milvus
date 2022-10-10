@@ -224,8 +224,8 @@ func (s *Server) init() error {
 		panic(err)
 	}
 
-	s.queryCoord.UpdateStateCode(internalpb.StateCode_Initializing)
-	log.Debug("QueryCoord", zap.Any("State", internalpb.StateCode_Initializing))
+	s.queryCoord.UpdateStateCode(commonpb.StateCode_Initializing)
+	log.Debug("QueryCoord", zap.Any("State", commonpb.StateCode_Initializing))
 	if err := s.queryCoord.Init(); err != nil {
 		return err
 	}
@@ -328,7 +328,7 @@ func (s *Server) SetIndexCoord(d types.IndexCoord) error {
 }
 
 // GetComponentStates gets the component states of QueryCoord.
-func (s *Server) GetComponentStates(ctx context.Context, req *internalpb.GetComponentStatesRequest) (*internalpb.ComponentStates, error) {
+func (s *Server) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
 	return s.queryCoord.GetComponentStates(ctx)
 }
 
