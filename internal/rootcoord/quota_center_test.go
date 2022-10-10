@@ -285,6 +285,16 @@ func TestQuotaCenter(t *testing.T) {
 		err = quotaCenter.calculateWriteRates()
 		assert.NoError(t, err)
 
+		// DiskQuota exceeded
+		quotaBackup := Params.QuotaConfig.DiskQuota
+		Params.QuotaConfig.DiskQuota = 99
+		quotaCenter.dataCoordMetrics = &metricsinfo.DataCoordQuotaMetrics{TotalBinlogSize: 100}
+		err = quotaCenter.calculateWriteRates()
+		assert.NoError(t, err)
+		assert.Equal(t, Limit(0), quotaCenter.currentRates[internalpb.RateType_DMLInsert])
+		assert.Equal(t, Limit(0), quotaCenter.currentRates[internalpb.RateType_DMLDelete])
+		Params.QuotaConfig.DiskQuota = quotaBackup
+
 		// force deny
 		forceBak := Params.QuotaConfig.ForceDenyWriting
 		Params.QuotaConfig.ForceDenyWriting = true
@@ -305,6 +315,27 @@ func TestQuotaCenter(t *testing.T) {
 		quotaCenter.queryNodeMetrics = []*metricsinfo.QueryNodeQuotaMetrics{{Hms: metricsinfo.HardwareMetrics{MemoryUsage: 100, Memory: 100}}}
 		factor = quotaCenter.memoryToWaterLevel()
 		assert.Equal(t, float64(0), factor)
+	})
+
+	t.Run("test diskQuotaExceeded", func(t *testing.T) {
+		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
+
+		Params.QuotaConfig.DiskProtectionEnabled = false
+		ok := quotaCenter.diskQuotaExceeded()
+		assert.False(t, ok)
+		Params.QuotaConfig.DiskProtectionEnabled = true
+
+		quotaBackup := Params.QuotaConfig.DiskQuota
+		Params.QuotaConfig.DiskQuota = 99
+		quotaCenter.dataCoordMetrics = &metricsinfo.DataCoordQuotaMetrics{TotalBinlogSize: 100}
+		ok = quotaCenter.diskQuotaExceeded()
+		assert.True(t, ok)
+
+		Params.QuotaConfig.DiskQuota = 101
+		quotaCenter.dataCoordMetrics = &metricsinfo.DataCoordQuotaMetrics{TotalBinlogSize: 100}
+		ok = quotaCenter.diskQuotaExceeded()
+		assert.False(t, ok)
+		Params.QuotaConfig.DiskQuota = quotaBackup
 	})
 
 	t.Run("test setRates", func(t *testing.T) {

@@ -29,7 +29,11 @@ import (
 const (
 	// defaultMax is the default unlimited rate or threshold.
 	defaultMax = float64(math.MaxFloat64)
-	// defaultMax is the default minimal rate.
+	// GB used to convert gigabytes and bytes.
+	GB = 1024.0 * 1024.0 * 1024.0
+	// defaultDiskQuotaInGB is the default disk quota in gigabytes.
+	defaultDiskQuotaInGB = defaultMax / GB
+	// defaultMin is the default minimal rate.
 	defaultMin = float64(0)
 	// defaultLowWaterLevel is the default memory low water level.
 	defaultLowWaterLevel = float64(0.85)
@@ -85,6 +89,8 @@ type quotaConfig struct {
 	DataNodeMemoryHighWaterLevel  float64
 	QueryNodeMemoryLowWaterLevel  float64
 	QueryNodeMemoryHighWaterLevel float64
+	DiskProtectionEnabled         bool
+	DiskQuota                     float64
 
 	// limit reading
 	ForceDenyReading       bool
@@ -140,6 +146,8 @@ func (p *quotaConfig) init(base *BaseTable) {
 	p.initDataNodeMemoryHighWaterLevel()
 	p.initQueryNodeMemoryLowWaterLevel()
 	p.initQueryNodeMemoryHighWaterLevel()
+	p.initDiskProtectionEnabled()
+	p.initDiskQuota()
 
 	// limit reading
 	p.initForceDenyReading()
@@ -494,6 +502,25 @@ func (p *quotaConfig) initQueryNodeMemoryHighWaterLevel() {
 		p.QueryNodeMemoryHighWaterLevel = defaultHighWaterLevel
 		p.QueryNodeMemoryLowWaterLevel = defaultLowWaterLevel
 	}
+}
+
+func (p *quotaConfig) initDiskProtectionEnabled() {
+	p.DiskProtectionEnabled = p.Base.ParseBool("quotaAndLimits.limitWriting.diskProtection.enabled", true)
+}
+
+func (p *quotaConfig) initDiskQuota() {
+	if !p.DiskProtectionEnabled {
+		p.DiskQuota = defaultMax
+		return
+	}
+	p.DiskQuota = p.Base.ParseFloatWithDefault("quotaAndLimits.limitWriting.diskProtection.diskQuota", defaultDiskQuotaInGB)
+	// (0, +inf)
+	if p.DiskQuota <= 0 {
+		log.Warn("DiskQuota must in the range of `(0, +inf)`, use default +inf", zap.Float64("DiskQuota", p.DiskQuota))
+		p.DiskQuota = defaultDiskQuotaInGB
+	}
+	// gigabytes to bytes
+	p.DiskQuota = p.DiskQuota * GB
 }
 
 func (p *quotaConfig) initForceDenyReading() {

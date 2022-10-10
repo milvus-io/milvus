@@ -196,6 +196,18 @@ func (m *meta) GetNumRowsOfCollection(collectionID UniqueID) int64 {
 	return ret
 }
 
+// GetTotalBinlogSize returns the total size (bytes) of all segments in cluster.
+func (m *meta) GetTotalBinlogSize() int64 {
+	m.RLock()
+	defer m.RUnlock()
+	var ret int64
+	segments := m.segments.GetSegments()
+	for _, segment := range segments {
+		ret += segment.getSegmentSize()
+	}
+	return ret
+}
+
 // AddSegment records segment info, persisting info into kv store
 func (m *meta) AddSegment(segment *SegmentInfo) error {
 	log.Debug("meta update: adding segment",
