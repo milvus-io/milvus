@@ -49,6 +49,10 @@ func (fdmNode *filterDmNode) Name() string {
 
 // Operate handles input messages, to filter invalid insert messages
 func (fdmNode *filterDmNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
+	if in == nil {
+		log.Debug("type assertion failed for MsgStreamMsg because it's nil", zap.String("name", fdmNode.Name()))
+		return []Msg{}
+	}
 	if len(in) != 1 {
 		log.Warn("Invalid operate message input in filterDmNode", zap.Int("input length", len(in)), zap.String("name", fdmNode.Name()))
 		return []Msg{}
@@ -56,15 +60,7 @@ func (fdmNode *filterDmNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 	msgStreamMsg, ok := in[0].(*MsgStreamMsg)
 	if !ok {
-		if in[0] == nil {
-			log.Debug("type assertion failed for MsgStreamMsg because it's nil", zap.String("name", fdmNode.Name()))
-		} else {
-			log.Warn("type assertion failed for MsgStreamMsg", zap.String("msgType", reflect.TypeOf(in[0]).Name()), zap.String("name", fdmNode.Name()))
-		}
-		return []Msg{}
-	}
-
-	if msgStreamMsg == nil {
+		log.Warn("type assertion failed for MsgStreamMsg", zap.String("msgType", reflect.TypeOf(in[0]).Name()), zap.String("name", fdmNode.Name()))
 		return []Msg{}
 	}
 

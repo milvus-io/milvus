@@ -75,7 +75,6 @@ func newQueryNodeFlowGraph(ctx context.Context,
 
 	// dmStreamNode
 	err = q.flowGraph.SetEdges(dmStreamNode.Name(),
-		[]string{},
 		[]string{filterDmNode.Name()},
 	)
 	if err != nil {
@@ -84,7 +83,6 @@ func newQueryNodeFlowGraph(ctx context.Context,
 
 	// filterDmNode
 	err = q.flowGraph.SetEdges(filterDmNode.Name(),
-		[]string{dmStreamNode.Name()},
 		[]string{insertNode.Name()},
 	)
 	if err != nil {
@@ -93,7 +91,6 @@ func newQueryNodeFlowGraph(ctx context.Context,
 
 	// insertNode
 	err = q.flowGraph.SetEdges(insertNode.Name(),
-		[]string{filterDmNode.Name()},
 		[]string{serviceTimeNode.Name()},
 	)
 	if err != nil {
@@ -102,7 +99,6 @@ func newQueryNodeFlowGraph(ctx context.Context,
 
 	// serviceTimeNode
 	err = q.flowGraph.SetEdges(serviceTimeNode.Name(),
-		[]string{insertNode.Name()},
 		[]string{},
 	)
 	if err != nil {
@@ -145,7 +141,6 @@ func newQueryNodeDeltaFlowGraph(ctx context.Context,
 
 	// dmStreamNode
 	err = q.flowGraph.SetEdges(dmStreamNode.Name(),
-		[]string{},
 		[]string{filterDeleteNode.Name()},
 	)
 	if err != nil {
@@ -154,7 +149,6 @@ func newQueryNodeDeltaFlowGraph(ctx context.Context,
 
 	// filterDmNode
 	err = q.flowGraph.SetEdges(filterDeleteNode.Name(),
-		[]string{dmStreamNode.Name()},
 		[]string{deleteNode.Name()},
 	)
 	if err != nil {
@@ -163,7 +157,6 @@ func newQueryNodeDeltaFlowGraph(ctx context.Context,
 
 	// insertNode
 	err = q.flowGraph.SetEdges(deleteNode.Name(),
-		[]string{filterDeleteNode.Name()},
 		[]string{serviceTimeNode.Name()},
 	)
 	if err != nil {
@@ -172,7 +165,6 @@ func newQueryNodeDeltaFlowGraph(ctx context.Context,
 
 	// serviceTimeNode
 	err = q.flowGraph.SetEdges(serviceTimeNode.Name(),
-		[]string{deleteNode.Name()},
 		[]string{},
 	)
 	if err != nil {

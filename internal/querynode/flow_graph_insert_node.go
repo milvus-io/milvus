@@ -72,6 +72,11 @@ func (iNode *insertNode) Name() string {
 
 // Operate handles input messages, to execute insert operations
 func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
+	if in == nil {
+		log.Debug("type assertion failed for insertMsg because it's nil", zap.String("name", iNode.Name()))
+		return []Msg{}
+	}
+
 	if len(in) != 1 {
 		log.Warn("Invalid operate message input in insertNode", zap.Int("input length", len(in)), zap.String("name", iNode.Name()))
 		return []Msg{}
@@ -79,11 +84,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 	iMsg, ok := in[0].(*insertMsg)
 	if !ok {
-		if in[0] == nil {
-			log.Debug("type assertion failed for insertMsg because it's nil", zap.String("name", iNode.Name()))
-		} else {
-			log.Warn("type assertion failed for insertMsg", zap.String("msgType", reflect.TypeOf(in[0]).Name()), zap.String("name", iNode.Name()))
-		}
+		log.Warn("type assertion failed for insertMsg", zap.String("msgType", reflect.TypeOf(in[0]).Name()), zap.String("name", iNode.Name()))
 		return []Msg{}
 	}
 
@@ -93,10 +94,6 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		insertRecords:    make(map[UniqueID][]*schemapb.FieldData),
 		insertOffset:     make(map[UniqueID]int64),
 		insertPKs:        make(map[UniqueID][]primaryKey),
-	}
-
-	if iMsg == nil {
-		return []Msg{}
 	}
 
 	var spans []opentracing.Span

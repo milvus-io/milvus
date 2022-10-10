@@ -82,6 +82,11 @@ func (ddn *ddNode) Name() string {
 
 // Operate handles input messages, implementing flowgrpah.Node
 func (ddn *ddNode) Operate(in []Msg) []Msg {
+	if in == nil {
+		log.Debug("type assertion failed for MsgStreamMsg because it's nil")
+		return []Msg{}
+	}
+
 	if len(in) != 1 {
 		log.Warn("Invalid operate message input in ddNode", zap.Int("input length", len(in)))
 		return []Msg{}
@@ -89,11 +94,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 
 	msMsg, ok := in[0].(*MsgStreamMsg)
 	if !ok {
-		if in[0] == nil {
-			log.Debug("type assertion failed for MsgStreamMsg because it's nil")
-		} else {
-			log.Warn("type assertion failed for MsgStreamMsg", zap.String("name", reflect.TypeOf(in[0]).Name()))
-		}
+		log.Warn("type assertion failed for MsgStreamMsg", zap.String("name", reflect.TypeOf(in[0]).Name()))
 		return []Msg{}
 	}
 

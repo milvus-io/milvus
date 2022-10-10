@@ -120,20 +120,19 @@ func (dn *deleteNode) showDelBuf(segIDs []UniqueID, ts Timestamp) {
 
 // Operate implementing flowgraph.Node, performs delete data process
 func (dn *deleteNode) Operate(in []Msg) []Msg {
-	//log.Debug("deleteNode Operating")
+	if in == nil {
+		log.Debug("type assertion failed for flowGraphMsg because it's nil")
+		return []Msg{}
+	}
 
 	if len(in) != 1 {
 		log.Error("Invalid operate message input in deleteNode", zap.Int("input length", len(in)))
-		return nil
+		return []Msg{}
 	}
 
 	fgMsg, ok := in[0].(*flowGraphMsg)
 	if !ok {
-		if in[0] == nil {
-			log.Debug("type assertion failed for flowGraphMsg because it's nil")
-		} else {
-			log.Warn("type assertion failed for flowGraphMsg", zap.String("name", reflect.TypeOf(in[0]).Name()))
-		}
+		log.Warn("type assertion failed for flowGraphMsg", zap.String("name", reflect.TypeOf(in[0]).Name()))
 		return []Msg{}
 	}
 
@@ -205,7 +204,7 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 	for _, sp := range spans {
 		sp.Finish()
 	}
-	return nil
+	return in
 }
 
 // update delBuf for compacted segments

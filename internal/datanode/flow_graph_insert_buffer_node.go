@@ -175,7 +175,10 @@ func (ibNode *insertBufferNode) Close() {
 }
 
 func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
-	// log.Debug("InsertBufferNode Operating")
+	if in == nil {
+		log.Debug("type assertion failed for flowGraphMsg because it's nil")
+		return []Msg{}
+	}
 
 	if len(in) != 1 {
 		log.Error("Invalid operate message input in insertBufferNode", zap.Int("input length", len(in)))
@@ -184,11 +187,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 
 	fgMsg, ok := in[0].(*flowGraphMsg)
 	if !ok {
-		if in[0] == nil {
-			log.Debug("type assertion failed for flowGraphMsg because it's nil")
-		} else {
-			log.Warn("type assertion failed for flowGraphMsg", zap.String("name", reflect.TypeOf(in[0]).Name()))
-		}
+		log.Warn("type assertion failed for flowGraphMsg", zap.String("name", reflect.TypeOf(in[0]).Name()))
 		return []Msg{}
 	}
 
