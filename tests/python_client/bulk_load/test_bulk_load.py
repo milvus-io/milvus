@@ -1210,36 +1210,6 @@ class TestBulkLoad(TestcaseBase):
     def test_from_customize_bucket(self):
         pass
 
-    def test_wait_all_pending_tasks_finished(self):
-        task_states_map = {}
-        all_tasks, _ = self.utility_wrap.list_bulk_load_tasks()
-        # log.info(f"all tasks: {all_tasks}")
-        for task in all_tasks:
-            if task.state in [BulkLoadState.ImportStarted, BulkLoadState.ImportPersisted]:
-                task_states_map[task.id] = task.state
-
-        log.info(f"current tasks states: {task_states_map}")
-        pending_tasks = self.utility_wrap.get_bulk_load_pending_list()
-        working_tasks = self.utility_wrap.get_bulk_load_working_list()
-        log.info(f"in the start, there are {len(working_tasks)} working tasks, {working_tasks} {len(pending_tasks)} pending tasks, {pending_tasks}")
-        time_cnt = 0
-        pending_task_ids = set()
-        while len(pending_tasks) > 0:
-            time.sleep(5)
-            time_cnt += 5
-            pending_tasks = self.utility_wrap.get_bulk_load_pending_list()
-            working_tasks = self.utility_wrap.get_bulk_load_working_list()
-            cur_pending_task_ids = []
-            for task_id in pending_tasks.keys():
-                cur_pending_task_ids.append(task_id)
-                pending_task_ids.add(task_id)
-            log.info(f"after {time_cnt}, there are {len(working_tasks)} working tasks, {len(pending_tasks)} pending tasks")
-            log.debug(f"total pending tasks: {pending_task_ids} current pending tasks: {cur_pending_task_ids}")
-        log.info(f"after {time_cnt}, all pending tasks are finished")
-        all_tasks, _ = self.utility_wrap.list_bulk_load_tasks()
-        for task in all_tasks:
-            if task.task_id in pending_task_ids:
-                log.info(f"task {task.task_id} state transfer from pending to {task.state_name}")
 
 
 class TestBulkLoadInvalidParams(TestcaseBase):
@@ -2338,7 +2308,6 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         assert self.collection_wrap.num_entities == 0
 
 
-@pytest.mark.skip()
 class TestBulkLoadAdvanced(TestcaseBase):
     @pytest.fixture(scope="function", autouse=True)
     def init_minio_client(self, host, port):
@@ -2391,9 +2360,19 @@ class TestBulkLoadAdvanced(TestcaseBase):
         ]
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         self.collection_wrap.init_collection(c_name, schema=schema)
-
+        data_fields = [df.pk_field, vec_field]
         # import data
         file_nums = 3
+        files = prepare_bulk_load_numpy_files(
+            minio_endpoint=self.minio_endpoint,
+            bucket_name=self.bucket_name,
+            rows=entities,
+            dim=dim,
+            data_fields=data_fields,
+            file_nums=file_nums,
+            force=True,
+        )
+        log.info(f"files:{files}")
         for i in range(file_nums):
             files = [
                 f"{dim}d_{suffix}_{i}/{vec_field}.npy"

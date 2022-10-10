@@ -242,8 +242,8 @@ def gen_column_base_json_file(col_file, str_pk, data_fields, float_vect,
         f.write("\n")
 
 
-def gen_vectors_in_numpy_file(dir, float_vector, rows, dim, force=False):
-    file_name = f"{DataField.vec_field}.npy"
+def gen_vectors_in_numpy_file(dir, data_field, float_vector, rows, dim, force=False):
+    file_name = f"{data_field}.npy"
     file = f'{dir}/{file_name}'
 
     if not os.path.exists(file) or force:
@@ -363,8 +363,8 @@ def gen_npy_files(float_vector, rows, dim, data_fields, file_nums=1, force=False
             subfolder = gen_subfolder(root=data_source, dim=dim, rows=rows, file_num=i)
             dir = f"{data_source}/{subfolder}"
             for data_field in data_fields:
-                if data_field == DataField.vec_field:
-                    file_name = gen_vectors_in_numpy_file(dir=dir, float_vector=float_vector, rows=rows, dim=dim, force=force)
+                if DataField.vec_field in data_field:
+                    file_name = gen_vectors_in_numpy_file(dir=dir, data_field=data_field, float_vector=float_vector, rows=rows, dim=dim, force=force)
                 else:
                     file_name = gen_int_or_float_in_numpy_file(dir=dir, data_field=data_field, rows=rows, start=start_uid, force=force)
                 files.append(f"{subfolder}/{file_name}")

@@ -150,6 +150,37 @@ class ApiUtilityWrapper:
             log.info(f"wait for bulk load tasks completed failed, cost time: {end-start}")
             return False, tasks_state
 
+    def wait_all_pending_tasks_finished(self):
+        task_states_map = {}
+        all_tasks, _ = self.list_bulk_load_tasks()
+        # log.info(f"all tasks: {all_tasks}")
+        for task in all_tasks:
+            if task.state in [BulkLoadState.ImportStarted, BulkLoadState.ImportPersisted]:
+                task_states_map[task.task_id] = task.state
+
+        log.info(f"current tasks states: {task_states_map}")
+        pending_tasks = self.get_bulk_load_pending_list()
+        working_tasks = self.get_bulk_load_working_list()
+        log.info(f"in the start, there are {len(working_tasks)} working tasks, {working_tasks} {len(pending_tasks)} pending tasks, {pending_tasks}")
+        time_cnt = 0
+        pending_task_ids = set()
+        while len(pending_tasks) > 0:
+            time.sleep(5)
+            time_cnt += 5
+            pending_tasks = self.get_bulk_load_pending_list()
+            working_tasks = self.get_bulk_load_working_list()
+            cur_pending_task_ids = []
+            for task_id in pending_tasks.keys():
+                cur_pending_task_ids.append(task_id)
+                pending_task_ids.add(task_id)
+            log.info(f"after {time_cnt}, there are {len(working_tasks)} working tasks, {len(pending_tasks)} pending tasks")
+            log.debug(f"total pending tasks: {pending_task_ids} current pending tasks: {cur_pending_task_ids}")
+        log.info(f"after {time_cnt}, all pending tasks are finished")
+        all_tasks, _ = self.list_bulk_load_tasks()
+        for task in all_tasks:
+            if task.task_id in pending_task_ids:
+                log.info(f"task {task.task_id} state transfer from pending to {task.state_name}")
+
     def get_query_segment_info(self, collection_name, timeout=None, using="default", check_task=None, check_items=None):
         timeout = TIMEOUT if timeout is None else timeout
         func_name = sys._getframe().f_code.co_name
