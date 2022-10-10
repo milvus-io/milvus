@@ -52,11 +52,9 @@ type BaseNode struct {
 
 // nodeCtx maintains the running context for a Node in flowgragh
 type nodeCtx struct {
-	node                   Node
-	inputChannels          []chan Msg
-	inputMessages          []Msg
-	downstream             []*nodeCtx
-	downstreamInputChanIdx map[string]int
+	node         Node
+	inputChannel chan []Msg
+	downstream   *nodeCtx
 
 	closeCh chan struct{} // notify work to exit
 	closeWg *sync.WaitGroup
@@ -100,45 +98,37 @@ func (nodeCtx *nodeCtx) work() {
 			return
 		default:
 			// inputs from inputsMessages for Operate
-			var inputs, res []Msg
+			var input, output []Msg
 			if !nodeCtx.node.IsInputNode() {
-				nodeCtx.collectInputMessages()
-				inputs = nodeCtx.inputMessages
+				input = <-nodeCtx.inputChannel
 			}
+
 			// the input message decides whether the operate method is executed
-			if isCloseMsg(inputs) {
-				res = inputs
+			if isCloseMsg(input) {
+				output = input
 			}
-			if len(res) == 0 {
+			if len(output) == 0 {
 				n := nodeCtx.node
-				res = n.Operate(inputs)
+				output = n.Operate(input)
 			}
-			// the res decide whether the node should be closed.
-			if isCloseMsg(res) {
+			// the output decide whether the node should be closed.
+			if isCloseMsg(output) {
 				close(nodeCtx.closeCh)
 				nodeCtx.closeWg.Done()
 				nodeCtx.node.Close()
+				if nodeCtx.inputChannel != nil {
+					close(nodeCtx.inputChannel)
+				}
 			}
 
 			if enableTtChecker {
 				checker.Check(name)
 			}
 
-			downstreamLength := len(nodeCtx.downstreamInputChanIdx)
-			if len(nodeCtx.downstream) < downstreamLength {
-				log.Warn("", zap.Any("nodeCtx.downstream length", len(nodeCtx.downstream)))
+			// deliver to all following flow graph node.
+			if nodeCtx.downstream != nil {
+				nodeCtx.downstream.inputChannel <- output
 			}
-			if len(res) < downstreamLength {
-				// log.Println("node result length = ", len(res))
-				break
-			}
-
-			w := sync.WaitGroup{}
-			for i := 0; i < downstreamLength; i++ {
-				w.Add(1)
-				go nodeCtx.downstream[i].deliverMsg(&w, res[i], nodeCtx.downstreamInputChanIdx[nodeCtx.downstream[i].node.Name()])
-			}
-			w.Wait()
 		}
 	}
 }
@@ -147,72 +137,6 @@ func (nodeCtx *nodeCtx) work() {
 func (nodeCtx *nodeCtx) Close() {
 	if nodeCtx.node.IsInputNode() {
 		nodeCtx.node.Close()
-	}
-}
-
-// deliverMsg tries to put the Msg to specified downstream channel
-func (nodeCtx *nodeCtx) deliverMsg(wg *sync.WaitGroup, msg Msg, inputChanIdx int) {
-	defer wg.Done()
-	defer func() {
-		err := recover()
-		if err != nil {
-			log.Warn(fmt.Sprintln(err))
-		}
-	}()
-	nodeCtx.inputChannels[inputChanIdx] <- msg
-}
-
-func (nodeCtx *nodeCtx) collectInputMessages() {
-	inputsNum := len(nodeCtx.inputChannels)
-	nodeCtx.inputMessages = make([]Msg, inputsNum)
-
-	// init inputMessages,
-	// receive messages from inputChannels,
-	// and move them to inputMessages.
-	for i := 0; i < inputsNum; i++ {
-		channel := nodeCtx.inputChannels[i]
-		msg, ok := <-channel
-		if !ok {
-			// TODO: add status
-			log.Warn("input channel closed")
-			return
-		}
-		nodeCtx.inputMessages[i] = msg
-	}
-
-	// timeTick alignment check
-	if len(nodeCtx.inputMessages) > 1 {
-		t := nodeCtx.inputMessages[0].TimeTick()
-		latestTime := t
-		for i := 1; i < len(nodeCtx.inputMessages); i++ {
-			if latestTime < nodeCtx.inputMessages[i].TimeTick() {
-				latestTime = nodeCtx.inputMessages[i].TimeTick()
-			}
-		}
-
-		// wait for time tick
-		sign := make(chan struct{})
-		go func() {
-			for i := 0; i < len(nodeCtx.inputMessages); i++ {
-				for nodeCtx.inputMessages[i].TimeTick() != latestTime {
-					log.Debug("Try to align timestamp", zap.Uint64("t1", latestTime), zap.Uint64("t2", nodeCtx.inputMessages[i].TimeTick()))
-					channel := nodeCtx.inputChannels[i]
-					msg, ok := <-channel
-					if !ok {
-						log.Warn("input channel closed")
-						return
-					}
-					nodeCtx.inputMessages[i] = msg
-				}
-			}
-			sign <- struct{}{}
-		}()
-
-		select {
-		case <-time.After(10 * time.Second):
-			panic("Fatal, misaligned time tick, please restart pulsar")
-		case <-sign:
-		}
 	}
 }
 

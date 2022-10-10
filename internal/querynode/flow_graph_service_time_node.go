@@ -42,6 +42,11 @@ func (stNode *serviceTimeNode) Name() string {
 
 // Operate handles input messages, to execute insert operations
 func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
+	if in == nil {
+		log.Debug("type assertion failed for serviceTimeMsg because it's nil", zap.String("name", stNode.Name()))
+		return []Msg{}
+	}
+
 	if len(in) != 1 {
 		log.Warn("Invalid operate message input in serviceTimeNode, input length = ", zap.Int("input node", len(in)), zap.String("name", stNode.Name()))
 		return []Msg{}
@@ -49,15 +54,7 @@ func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 	serviceTimeMsg, ok := in[0].(*serviceTimeMsg)
 	if !ok {
-		if in[0] == nil {
-			log.Debug("type assertion failed for serviceTimeMsg because it's nil", zap.String("name", stNode.Name()))
-		} else {
-			log.Warn("type assertion failed for serviceTimeMsg", zap.String("msgType", reflect.TypeOf(in[0]).Name()), zap.String("name", stNode.Name()))
-		}
-		return []Msg{}
-	}
-
-	if serviceTimeMsg == nil {
+		log.Warn("type assertion failed for serviceTimeMsg", zap.String("msgType", reflect.TypeOf(in[0]).Name()), zap.String("name", stNode.Name()))
 		return []Msg{}
 	}
 
@@ -75,7 +72,7 @@ func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		zap.Any("channel", stNode.vChannel),
 	)
 
-	return []Msg{}
+	return in
 }
 
 // newServiceTimeNode returns a new serviceTimeNode

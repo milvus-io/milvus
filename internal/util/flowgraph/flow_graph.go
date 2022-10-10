@@ -22,6 +22,8 @@ import (
 	"sync"
 )
 
+// Flow Graph is no longer a graph rather than a simple pipeline, this simplified our code and increase recovery speed - xiaofan.
+
 // TimeTickedFlowGraph flowgraph with input from tt msg stream
 type TimeTickedFlowGraph struct {
 	nodeCtx   map[NodeName]*nodeCtx
@@ -33,45 +35,37 @@ type TimeTickedFlowGraph struct {
 // AddNode add Node into flowgraph
 func (fg *TimeTickedFlowGraph) AddNode(node Node) {
 	nodeCtx := nodeCtx{
-		node:                   node,
-		downstreamInputChanIdx: make(map[string]int),
-		closeCh:                make(chan struct{}),
-		closeWg:                fg.closeWg,
+		node:    node,
+		closeCh: make(chan struct{}),
+		closeWg: fg.closeWg,
 	}
 	fg.nodeCtx[node.Name()] = &nodeCtx
 }
 
 // SetEdges set directed edges from in nodes to out nodes
-func (fg *TimeTickedFlowGraph) SetEdges(nodeName string, in []string, out []string) error {
+func (fg *TimeTickedFlowGraph) SetEdges(nodeName string, out []string) error {
 	currentNode, ok := fg.nodeCtx[nodeName]
 	if !ok {
 		errMsg := "Cannot find node:" + nodeName
 		return errors.New(errMsg)
 	}
 
-	// init current node's downstream
-	currentNode.downstream = make([]*nodeCtx, len(out))
-
-	// set in nodes
-	for i, inNodeName := range in {
-		inNode, ok := fg.nodeCtx[inNodeName]
-		if !ok {
-			errMsg := "Cannot find in node:" + inNodeName
-			return errors.New(errMsg)
-		}
-		inNode.downstreamInputChanIdx[nodeName] = i
+	if len(out) > 1 {
+		errMsg := "Flow graph now support only pipeline mode, with only one or zero output:" + nodeName
+		return errors.New(errMsg)
 	}
 
+	// init current node's downstream
 	// set out nodes
-	for i, n := range out {
-		outNode, ok := fg.nodeCtx[n]
+	for _, name := range out {
+		outNode, ok := fg.nodeCtx[name]
 		if !ok {
-			errMsg := "Cannot find out node:" + n
+			errMsg := "Cannot find out node:" + name
 			return errors.New(errMsg)
 		}
 		maxQueueLength := outNode.node.MaxQueueLength()
-		outNode.inputChannels = append(outNode.inputChannels, make(chan Msg, maxQueueLength))
-		currentNode.downstream[i] = outNode
+		outNode.inputChannel = make(chan []Msg, maxQueueLength)
+		currentNode.downstream = outNode
 	}
 
 	return nil

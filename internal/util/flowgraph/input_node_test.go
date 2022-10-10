@@ -53,8 +53,11 @@ func TestInputNode(t *testing.T) {
 	stream := inputNode.InStream()
 	assert.NotNil(t, stream)
 
-	output := inputNode.Operate([]Msg{})
-	assert.Greater(t, len(output), 0)
+	output := inputNode.Operate(nil)
+	assert.NotNil(t, output)
+	msg, ok := output[0].(*MsgStreamMsg)
+	assert.True(t, ok)
+	assert.False(t, msg.isCloseMsg)
 }
 
 func Test_NewInputNode(t *testing.T) {

@@ -18,7 +18,6 @@ package flowgraph
 
 import (
 	"context"
-	"log"
 	"math"
 	"math/rand"
 	"testing"
@@ -27,11 +26,10 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// Flow graph basic example: count `d = pow(a) + sqrt(a)`
+// Flow graph basic example: count `c = pow(a) + 2`
 // nodeA: receive input value a from input channel
 // nodeB: count b = pow(a, 2)
-// nodeC: count c = sqrt(a)
-// nodeD: count d = b + c
+// nodeD: count c = b + 2
 
 type nodeA struct {
 	BaseNode
@@ -45,11 +43,6 @@ type nodeB struct {
 }
 
 type nodeC struct {
-	BaseNode
-	c float64
-}
-
-type nodeD struct {
 	BaseNode
 	d          float64
 	outputChan chan float64
@@ -73,7 +66,7 @@ func (n *nodeA) Operate(in []Msg) []Msg {
 	var res Msg = &numMsg{
 		num: a,
 	}
-	return []Msg{res, res}
+	return []Msg{res}
 }
 
 func (n *nodeB) Name() string {
@@ -81,12 +74,9 @@ func (n *nodeB) Name() string {
 }
 
 func (n *nodeB) Operate(in []Msg) []Msg {
-	if len(in) != 1 {
-		panic("illegal in")
-	}
 	a, ok := in[0].(*numMsg)
 	if !ok {
-		return []Msg{}
+		return nil
 	}
 	b := math.Pow(a.num, 2)
 	var res Msg = &numMsg{
@@ -100,43 +90,17 @@ func (n *nodeC) Name() string {
 }
 
 func (n *nodeC) Operate(in []Msg) []Msg {
-	if len(in) != 1 {
-		panic("illegal in")
-	}
-	a, ok := in[0].(*numMsg)
-	if !ok {
-		return []Msg{}
-	}
-	c := math.Sqrt(a.num)
-	var res Msg = &numMsg{
-		num: c,
-	}
-	return []Msg{res}
-}
-
-func (n *nodeD) Name() string {
-	return "NodeD"
-}
-
-func (n *nodeD) Operate(in []Msg) []Msg {
-	if len(in) != 2 {
-		panic("illegal in")
-	}
 	b, ok := in[0].(*numMsg)
 	if !ok {
 		return nil
 	}
-	c, ok := in[1].(*numMsg)
-	if !ok {
-		return nil
-	}
-	d := b.num + c.num
-	n.outputChan <- d
+	c := b.num + 2
+	n.outputChan <- c
 	// return nil because nodeD doesn't have any downstream node.
 	return nil
 }
 
-func createExampleFlowGraph() (*TimeTickedFlowGraph, chan float64, chan float64, context.CancelFunc) {
+func createExampleFlowGraph() (*TimeTickedFlowGraph, chan float64, chan float64, context.CancelFunc, error) {
 	const MaxQueueLength = 1024
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -160,52 +124,35 @@ func createExampleFlowGraph() (*TimeTickedFlowGraph, chan float64, chan float64,
 		BaseNode: BaseNode{
 			maxQueueLength: MaxQueueLength,
 		},
-	}
-	var d Node = &nodeD{
-		BaseNode: BaseNode{
-			maxQueueLength: MaxQueueLength,
-		},
 		outputChan: outputChan,
 	}
 
 	fg.AddNode(a)
 	fg.AddNode(b)
 	fg.AddNode(c)
-	fg.AddNode(d)
 
 	var err = fg.SetEdges(a.Name(),
-		[]string{},
-		[]string{b.Name(), c.Name()},
+		[]string{b.Name()},
 	)
 	if err != nil {
-		log.Fatal("set edges failed")
+		return nil, nil, nil, cancel, err
 	}
 
 	err = fg.SetEdges(b.Name(),
-		[]string{a.Name()},
-		[]string{d.Name()},
+		[]string{c.Name()},
 	)
 	if err != nil {
-		log.Fatal("set edges failed")
+		return nil, nil, nil, cancel, err
 	}
 
 	err = fg.SetEdges(c.Name(),
-		[]string{a.Name()},
-		[]string{d.Name()},
-	)
-	if err != nil {
-		log.Fatal("set edges failed")
-	}
-
-	err = fg.SetEdges(d.Name(),
-		[]string{b.Name(), c.Name()},
 		[]string{},
 	)
 	if err != nil {
-		log.Fatal("set edges failed")
+		return nil, nil, nil, cancel, err
 	}
 
-	return fg, inputChan, outputChan, cancel
+	return fg, inputChan, outputChan, cancel, nil
 }
 
 func TestTimeTickedFlowGraph_AddNode(t *testing.T) {
@@ -232,60 +179,9 @@ func TestTimeTickedFlowGraph_AddNode(t *testing.T) {
 	assert.Equal(t, len(fg.nodeCtx), 2)
 }
 
-func TestTimeTickedFlowGraph_SetEdges(t *testing.T) {
-	const MaxQueueLength = 1024
-	inputChan := make(chan float64, MaxQueueLength)
-
-	fg := NewTimeTickedFlowGraph(context.TODO())
-
-	var a Node = &nodeA{
-		BaseNode: BaseNode{
-			maxQueueLength: MaxQueueLength,
-		},
-		inputChan: inputChan,
-	}
-	var b Node = &nodeB{
-		BaseNode: BaseNode{
-			maxQueueLength: MaxQueueLength,
-		},
-	}
-	var c Node = &nodeC{
-		BaseNode: BaseNode{
-			maxQueueLength: MaxQueueLength,
-		},
-	}
-
-	fg.AddNode(a)
-	fg.AddNode(b)
-	fg.AddNode(c)
-
-	var err = fg.SetEdges(a.Name(),
-		[]string{b.Name()},
-		[]string{c.Name()},
-	)
-	assert.Nil(t, err)
-
-	err = fg.SetEdges("Invalid",
-		[]string{b.Name()},
-		[]string{c.Name()},
-	)
-	assert.Error(t, err)
-
-	err = fg.SetEdges(a.Name(),
-		[]string{"Invalid"},
-		[]string{c.Name()},
-	)
-	assert.Error(t, err)
-
-	err = fg.SetEdges(a.Name(),
-		[]string{b.Name()},
-		[]string{"Invalid"},
-	)
-	assert.Error(t, err)
-}
-
 func TestTimeTickedFlowGraph_Start(t *testing.T) {
-	fg, inputChan, outputChan, cancel := createExampleFlowGraph()
+	fg, inputChan, outputChan, cancel, err := createExampleFlowGraph()
+	assert.NoError(t, err)
 	defer cancel()
 	fg.Start()
 
@@ -297,7 +193,7 @@ func TestTimeTickedFlowGraph_Start(t *testing.T) {
 
 			// output check
 			d := <-outputChan
-			res := math.Pow(a, 2) + math.Sqrt(a)
+			res := math.Pow(a, 2) + 2
 			assert.Equal(t, d, res)
 		}
 	}()
@@ -305,7 +201,8 @@ func TestTimeTickedFlowGraph_Start(t *testing.T) {
 }
 
 func TestTimeTickedFlowGraph_Close(t *testing.T) {
-	fg, _, _, cancel := createExampleFlowGraph()
+	fg, _, _, cancel, err := createExampleFlowGraph()
+	assert.NoError(t, err)
 	defer cancel()
 	fg.Close()
 }

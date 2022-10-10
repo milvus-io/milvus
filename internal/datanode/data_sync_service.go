@@ -326,7 +326,6 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 
 	// ddStreamNode
 	err = dsService.fg.SetEdges(dmStreamNode.Name(),
-		[]string{},
 		[]string{ddNode.Name()},
 	)
 	if err != nil {
@@ -336,7 +335,6 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 
 	// ddNode
 	err = dsService.fg.SetEdges(ddNode.Name(),
-		[]string{dmStreamNode.Name()},
 		[]string{insertBufferNode.Name()},
 	)
 	if err != nil {
@@ -346,7 +344,6 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 
 	// insertBufferNode
 	err = dsService.fg.SetEdges(insertBufferNode.Name(),
-		[]string{ddNode.Name()},
 		[]string{deleteNode.Name()},
 	)
 	if err != nil {
@@ -356,7 +353,6 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 
 	//deleteNode
 	err = dsService.fg.SetEdges(deleteNode.Name(),
-		[]string{insertBufferNode.Name()},
 		[]string{},
 	)
 	if err != nil {
