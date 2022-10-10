@@ -18,14 +18,18 @@ package management
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/milvus-io/milvus/api/commonpb"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/management/healthz"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 )
 
@@ -36,34 +40,45 @@ func TestGetHTTPAddr(t *testing.T) {
 	assert.Equal(t, getHTTPAddr(), ":"+testPort)
 }
 
-func TestDefaultLogHandler(t *testing.T) {
-	httpServer := httptest.NewServer(nil)
-	defer httpServer.Close()
+type HTTPServerTestSuite struct {
+	suite.Suite
+	server *httptest.Server
+}
+
+func (suite *HTTPServerTestSuite) SetupSuite() {
+	suite.server = httptest.NewServer(nil)
 	registerDefaults()
 
+}
+
+func (suite *HTTPServerTestSuite) TearDownSuite() {
+	defer suite.server.Close()
+}
+
+func (suite *HTTPServerTestSuite) TestDefaultLogHandler() {
 	log.SetLevel(zap.DebugLevel)
-	assert.Equal(t, zap.DebugLevel, log.GetLevel())
+	suite.Equal(zap.DebugLevel, log.GetLevel())
 
 	// replace global logger, log change will not be affected.
 	conf := &log.Config{Level: "info", File: log.FileLogConfig{}, DisableTimestamp: true}
 	logger, p, _ := log.InitLogger(conf)
 	log.ReplaceGlobals(logger, p)
-	assert.Equal(t, zap.InfoLevel, log.GetLevel())
+	suite.Equal(zap.InfoLevel, log.GetLevel())
 
 	// change log level through http
-	payload, err := json.Marshal(map[string]interface{}{"level": "error"})
+	payload, err := json.Marshal(map[string]any{"level": "error"})
 	if err != nil {
 		log.Fatal(err.Error())
 	}
 
-	url := httpServer.URL + "/log/level"
+	url := suite.server.URL + "/log/level"
 	req, err := http.NewRequest(http.MethodPut, url, bytes.NewBuffer(payload))
 	req.Header.Set("Content-Type", "application/json")
 	if err != nil {
 		log.Fatal(err.Error())
 	}
 
-	client := httpServer.Client()
+	client := suite.server.Client()
 	resp, err := client.Do(req)
 	if err != nil {
 		log.Fatal(err.Error())
@@ -74,6 +89,54 @@ func TestDefaultLogHandler(t *testing.T) {
 	if err != nil {
 		log.Fatal(err.Error())
 	}
-	assert.Equal(t, "{\"level\":\"error\"}\n", string(body))
-	assert.Equal(t, zap.ErrorLevel, log.GetLevel())
+	suite.Equal("{\"level\":\"error\"}\n", string(body))
+	suite.Equal(zap.ErrorLevel, log.GetLevel())
+}
+
+func (suite *HTTPServerTestSuite) TestHealthzHandler() {
+	url := suite.server.URL + "/healthz"
+	client := suite.server.Client()
+
+	healthz.Register(&MockIndicator{"m1", commonpb.StateCode_Healthy})
+
+	req, _ := http.NewRequest(http.MethodGet, url, nil)
+	resp, err := client.Do(req)
+	suite.Nil(err)
+	defer resp.Body.Close()
+	body, _ := ioutil.ReadAll(resp.Body)
+	suite.Equal("OK", string(body))
+
+	req, _ = http.NewRequest(http.MethodGet, url, nil)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = client.Do(req)
+	suite.Nil(err)
+	defer resp.Body.Close()
+	body, _ = ioutil.ReadAll(resp.Body)
+	suite.Equal("{\"state\":\"OK\",\"detail\":[{\"name\":\"m1\",\"code\":1}]}", string(body))
+
+	healthz.Register(&MockIndicator{"m2", commonpb.StateCode_Abnormal})
+	req, _ = http.NewRequest(http.MethodGet, url, nil)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = client.Do(req)
+	suite.Nil(err)
+	defer resp.Body.Close()
+	body, _ = ioutil.ReadAll(resp.Body)
+	suite.Equal("{\"state\":\"component m2 state is Abnormal\",\"detail\":[{\"name\":\"m1\",\"code\":1},{\"name\":\"m2\",\"code\":2}]}", string(body))
+}
+
+func TestHTTPServerSuite(t *testing.T) {
+	suite.Run(t, new(HTTPServerTestSuite))
+}
+
+type MockIndicator struct {
+	name string
+	code commonpb.StateCode
+}
+
+func (m *MockIndicator) Health(ctx context.Context) commonpb.StateCode {
+	return m.code
+}
+
+func (m *MockIndicator) GetName() string {
+	return m.name
 }

@@ -18,18 +18,16 @@ package roles
 
 import (
 	"context"
-	"fmt"
-	"net/http"
 	"os"
 	"os/signal"
 	"strings"
 	"sync"
 	"syscall"
-	"time"
 
-	"github.com/milvus-io/milvus/api/commonpb"
-	"github.com/milvus-io/milvus/api/milvuspb"
 	"github.com/milvus-io/milvus/internal/management"
+	rocksmqimpl "github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
+
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/cmd/components"
 	"github.com/milvus-io/milvus/internal/datacoord"
@@ -37,22 +35,19 @@ import (
 	"github.com/milvus-io/milvus/internal/indexcoord"
 	"github.com/milvus-io/milvus/internal/indexnode"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/management/healthz"
 	"github.com/milvus-io/milvus/internal/metrics"
-	rocksmqimpl "github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
 	"github.com/milvus-io/milvus/internal/proxy"
 	querycoord "github.com/milvus-io/milvus/internal/querycoordv2"
 	"github.com/milvus-io/milvus/internal/querynode"
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
-	"github.com/milvus-io/milvus/internal/util/healthz"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-
 	"github.com/prometheus/client_golang/prometheus"
-	"go.uber.org/zap"
 )
 
 var Params paramtable.ComponentParam
@@ -71,9 +66,50 @@ func stopRocksmq() {
 	rocksmqimpl.CloseRocksMQ()
 }
 
+type component interface {
+	healthz.Indicator
+	Run() error
+	Stop() error
+}
+
+func runComponent[T component](ctx context.Context,
+	localMsg bool,
+	params *paramtable.ComponentParam,
+	extraInit func(),
+	creator func(context.Context, dependency.Factory) (T, error),
+	metricRegister func(*prometheus.Registry)) T {
+	var role T
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		params.InitOnce()
+		if extraInit != nil {
+			extraInit()
+		}
+		factory := dependency.NewFactory(localMsg)
+		var err error
+		role, err = creator(ctx, factory)
+		if localMsg {
+			params.SetLogConfig(typeutil.StandaloneRole)
+		} else {
+			params.SetLogConfig(role.GetName())
+		}
+		if err != nil {
+			panic(err)
+		}
+		wg.Done()
+		_ = role.Run()
+	}()
+	wg.Wait()
+
+	healthz.Register(role)
+	metricRegister(Registry)
+	return role
+}
+
 // MilvusRoles decides which components are brought up with Milvus.
 type MilvusRoles struct {
-	HasMultipleRoles bool
 	EnableRootCoord  bool `env:"ENABLE_ROOT_COORD"`
 	EnableProxy      bool `env:"ENABLE_PROXY"`
 	EnableQueryCoord bool `env:"ENABLE_QUERY_COORD"`
@@ -100,258 +136,55 @@ func (mr *MilvusRoles) printLDPreLoad() {
 }
 
 func (mr *MilvusRoles) runRootCoord(ctx context.Context, localMsg bool) *components.RootCoord {
-	var rc *components.RootCoord
-	var wg sync.WaitGroup
-
-	wg.Add(1)
-	go func() {
-		rootcoord.Params.InitOnce()
-		if localMsg {
-			rootcoord.Params.SetLogConfig(typeutil.StandaloneRole)
-		} else {
-			rootcoord.Params.SetLogConfig(typeutil.RootCoordRole)
-		}
-		factory := dependency.NewFactory(localMsg)
-		var err error
-		rc, err = components.NewRootCoord(ctx, factory)
-		if err != nil {
-			panic(err)
-		}
-		if !mr.HasMultipleRoles {
-			http.Handle(healthz.HealthzRouterPath, &componentsHealthzHandler{component: rc})
-		}
-		wg.Done()
-		_ = rc.Run()
-	}()
-	wg.Wait()
-
-	metrics.RegisterRootCoord(Registry)
-	return rc
+	return runComponent(ctx, localMsg, &rootcoord.Params, nil, components.NewRootCoord, metrics.RegisterRootCoord)
 }
 
 func (mr *MilvusRoles) runProxy(ctx context.Context, localMsg bool, alias string) *components.Proxy {
-	var pn *components.Proxy
-	var wg sync.WaitGroup
-
-	wg.Add(1)
-	go func() {
-		proxy.Params.ProxyCfg.InitAlias(alias)
-		proxy.Params.InitOnce()
-		if localMsg {
-			proxy.Params.SetLogConfig(typeutil.StandaloneRole)
-		} else {
-			proxy.Params.SetLogConfig(typeutil.ProxyRole)
-		}
-
-		factory := dependency.NewFactory(localMsg)
-		var err error
-		pn, err = components.NewProxy(ctx, factory)
-		if err != nil {
-			panic(err)
-		}
-		if !mr.HasMultipleRoles {
-			http.Handle(healthz.HealthzRouterPath, &componentsHealthzHandler{component: pn})
-		}
-		wg.Done()
-		_ = pn.Run()
-	}()
-	wg.Wait()
-
-	metrics.RegisterProxy(Registry)
-	return pn
+	return runComponent(ctx, localMsg, &proxy.Params,
+		func() {
+			proxy.Params.ProxyCfg.InitAlias(alias)
+		},
+		components.NewProxy,
+		metrics.RegisterProxy)
 }
 
 func (mr *MilvusRoles) runQueryCoord(ctx context.Context, localMsg bool) *components.QueryCoord {
-	var qs *components.QueryCoord
-	var wg sync.WaitGroup
-
-	wg.Add(1)
-	go func() {
-		querycoord.Params.InitOnce()
-		if localMsg {
-			querycoord.Params.SetLogConfig(typeutil.StandaloneRole)
-		} else {
-			querycoord.Params.SetLogConfig(typeutil.QueryCoordRole)
-		}
-
-		factory := dependency.NewFactory(localMsg)
-		var err error
-		qs, err = components.NewQueryCoord(ctx, factory)
-		if err != nil {
-			panic(err)
-		}
-		if !mr.HasMultipleRoles {
-			http.Handle(healthz.HealthzRouterPath, &componentsHealthzHandler{component: qs})
-		}
-		wg.Done()
-		_ = qs.Run()
-	}()
-	wg.Wait()
-
-	metrics.RegisterQueryCoord(Registry)
-	return qs
+	return runComponent(ctx, localMsg, querycoord.Params, nil, components.NewQueryCoord, metrics.RegisterQueryCoord)
 }
 
 func (mr *MilvusRoles) runQueryNode(ctx context.Context, localMsg bool, alias string) *components.QueryNode {
-	var qn *components.QueryNode
-	var wg sync.WaitGroup
-
-	wg.Add(1)
-	go func() {
-		querynode.Params.QueryNodeCfg.InitAlias(alias)
-		querynode.Params.InitOnce()
-		if localMsg {
-			querynode.Params.SetLogConfig(typeutil.StandaloneRole)
-		} else {
-			querynode.Params.SetLogConfig(typeutil.QueryNodeRole)
-		}
-
-		factory := dependency.NewFactory(localMsg)
-		var err error
-		qn, err = components.NewQueryNode(ctx, factory)
-		if err != nil {
-			panic(err)
-		}
-		if !mr.HasMultipleRoles {
-			http.Handle(healthz.HealthzRouterPath, &componentsHealthzHandler{component: qn})
-		}
-		wg.Done()
-		_ = qn.Run()
-	}()
-	wg.Wait()
-
-	metrics.RegisterQueryNode(Registry)
-	return qn
+	return runComponent(ctx, localMsg, &querynode.Params,
+		func() {
+			querynode.Params.QueryNodeCfg.InitAlias(alias)
+		},
+		components.NewQueryNode,
+		metrics.RegisterQueryNode)
 }
 
 func (mr *MilvusRoles) runDataCoord(ctx context.Context, localMsg bool) *components.DataCoord {
-	var ds *components.DataCoord
-	var wg sync.WaitGroup
-
-	wg.Add(1)
-	go func() {
-		datacoord.Params.InitOnce()
-		if localMsg {
-			datacoord.Params.SetLogConfig(typeutil.StandaloneRole)
-		} else {
-			datacoord.Params.SetLogConfig(typeutil.DataCoordRole)
-		}
-
-		factory := dependency.NewFactory(localMsg)
-
-		dctx := log.WithModule(ctx, "DataCoord")
-		var err error
-		ds, err = components.NewDataCoord(dctx, factory)
-		if err != nil {
-			panic(err)
-		}
-		if !mr.HasMultipleRoles {
-			http.Handle(healthz.HealthzRouterPath, &componentsHealthzHandler{component: ds})
-		}
-		wg.Done()
-		_ = ds.Run()
-	}()
-	wg.Wait()
-
-	metrics.RegisterDataCoord(Registry)
-	return ds
+	return runComponent(ctx, localMsg, &datacoord.Params, nil, components.NewDataCoord, metrics.RegisterDataCoord)
 }
 
 func (mr *MilvusRoles) runDataNode(ctx context.Context, localMsg bool, alias string) *components.DataNode {
-	var dn *components.DataNode
-	var wg sync.WaitGroup
-
-	wg.Add(1)
-	go func() {
-		datanode.Params.DataNodeCfg.InitAlias(alias)
-		datanode.Params.InitOnce()
-		if localMsg {
-			datanode.Params.SetLogConfig(typeutil.StandaloneRole)
-		} else {
-			datanode.Params.SetLogConfig(typeutil.DataNodeRole)
-		}
-
-		factory := dependency.NewFactory(localMsg)
-		var err error
-		dn, err = components.NewDataNode(ctx, factory)
-		if err != nil {
-			panic(err)
-		}
-		if !mr.HasMultipleRoles {
-			http.Handle(healthz.HealthzRouterPath, &componentsHealthzHandler{component: dn})
-		}
-		wg.Done()
-		_ = dn.Run()
-	}()
-	wg.Wait()
-
-	metrics.RegisterDataNode(Registry)
-	return dn
+	return runComponent(ctx, localMsg, &datanode.Params,
+		func() {
+			datanode.Params.DataNodeCfg.InitAlias(alias)
+		},
+		components.NewDataNode,
+		metrics.RegisterDataNode)
 }
 
 func (mr *MilvusRoles) runIndexCoord(ctx context.Context, localMsg bool) *components.IndexCoord {
-	var is *components.IndexCoord
-	var wg sync.WaitGroup
-
-	wg.Add(1)
-	go func() {
-		indexcoord.Params.InitOnce()
-		if localMsg {
-			indexcoord.Params.SetLogConfig(typeutil.StandaloneRole)
-		} else {
-			indexcoord.Params.SetLogConfig(typeutil.IndexCoordRole)
-		}
-
-		factory := dependency.NewFactory(localMsg)
-
-		var err error
-		is, err = components.NewIndexCoord(ctx, factory)
-		if err != nil {
-			panic(err)
-		}
-		if !mr.HasMultipleRoles {
-			http.Handle(healthz.HealthzRouterPath, &componentsHealthzHandler{component: is})
-		}
-		wg.Done()
-		_ = is.Run()
-	}()
-	wg.Wait()
-
-	metrics.RegisterIndexCoord(Registry)
-	return is
+	return runComponent(ctx, localMsg, &indexcoord.Params, nil, components.NewIndexCoord, metrics.RegisterIndexCoord)
 }
 
 func (mr *MilvusRoles) runIndexNode(ctx context.Context, localMsg bool, alias string) *components.IndexNode {
-	var in *components.IndexNode
-	var wg sync.WaitGroup
-
-	wg.Add(1)
-	go func() {
-		indexnode.Params.IndexNodeCfg.InitAlias(alias)
-		indexnode.Params.InitOnce()
-		if localMsg {
-			indexnode.Params.SetLogConfig(typeutil.StandaloneRole)
-		} else {
-			indexnode.Params.SetLogConfig(typeutil.IndexNodeRole)
-		}
-
-		factory := dependency.NewFactory(localMsg)
-
-		var err error
-		in, err = components.NewIndexNode(ctx, factory)
-		if err != nil {
-			panic(err)
-		}
-		if !mr.HasMultipleRoles {
-			http.Handle(healthz.HealthzRouterPath, &componentsHealthzHandler{component: in})
-		}
-		wg.Done()
-		_ = in.Run()
-	}()
-	wg.Wait()
-
-	metrics.RegisterIndexNode(Registry)
-	return in
+	return runComponent(ctx, localMsg, &indexnode.Params,
+		func() {
+			indexnode.Params.IndexNodeCfg.InitAlias(alias)
+		},
+		components.NewIndexNode,
+		metrics.RegisterIndexNode)
 }
 
 // Run Milvus components.
@@ -460,61 +293,6 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 		if in != nil {
 			defer in.Stop()
 		}
-	}
-
-	if mr.HasMultipleRoles {
-		multiRoleHealthzHandler := func(w http.ResponseWriter, r *http.Request) {
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			defer cancel()
-			req := &milvuspb.GetComponentStatesRequest{}
-			validateResp := func(resp *milvuspb.ComponentStates, err error) bool {
-				return err == nil && resp != nil && resp.GetState().GetStateCode() == commonpb.StateCode_Healthy
-			}
-			if mr.EnableRootCoord {
-				if rc == nil || !validateResp(rc.GetComponentStates(ctx, req)) {
-					rootCoordNotServingHandler(w, r)
-					return
-				}
-			}
-
-			if mr.EnableQueryCoord {
-				if qs == nil || !validateResp(qs.GetComponentStates(ctx, req)) {
-					queryCoordNotServingHandler(w, r)
-					return
-				}
-			}
-
-			if mr.EnableDataCoord {
-				if ds == nil || !validateResp(ds.GetComponentStates(ctx, req)) {
-					dataCoordNotServingHandler(w, r)
-					return
-				}
-			}
-			if mr.EnableIndexCoord {
-				if is == nil || !validateResp(is.GetComponentStates(ctx, req)) {
-					indexCoordNotServingHandler(w, r)
-					return
-				}
-			}
-			if mr.EnableProxy {
-				if pn == nil || !validateResp(pn.GetComponentStates(ctx, req)) {
-					proxyNotServingHandler(w, r)
-					return
-				}
-			}
-			// TODO(dragondriver): need to check node state?
-
-			w.WriteHeader(http.StatusOK)
-			w.Header().Set(healthz.ContentTypeHeader, healthz.ContentTypeText)
-			_, err := fmt.Fprint(w, "OK")
-			if err != nil {
-				log.Warn("Failed to send response",
-					zap.Error(err))
-			}
-
-			// TODO(dragondriver): handle component states
-		}
-		http.HandleFunc(healthz.HealthzRouterPath, multiRoleHealthzHandler)
 	}
 
 	metrics.Register(Registry)

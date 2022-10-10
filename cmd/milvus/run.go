@@ -70,7 +70,6 @@ func (c *run) execute(args []string, flags *flag.FlagSet) {
 	case typeutil.IndexNodeRole:
 		role.EnableIndexNode = true
 	case typeutil.StandaloneRole, typeutil.EmbeddedRole:
-		role.HasMultipleRoles = true
 		role.EnableRootCoord = true
 		role.EnableProxy = true
 		role.EnableQueryCoord = true
@@ -81,7 +80,6 @@ func (c *run) execute(args []string, flags *flag.FlagSet) {
 		role.EnableIndexNode = true
 		local = true
 	case roleMixture:
-		role.HasMultipleRoles = true
 		role.EnableRootCoord = c.enableRootCoord
 		role.EnableQueryCoord = c.enableQueryCoord
 		role.EnableDataCoord = c.enableDataCoord

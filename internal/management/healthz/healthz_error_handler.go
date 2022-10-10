@@ -14,21 +14,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package roles
+package healthz
 
 import (
 	"fmt"
 	"net/http"
 
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/util/healthz"
 	"github.com/milvus-io/milvus/internal/util/milvuserrors"
 	"go.uber.org/zap"
 )
 
 func componentsNotServingHandler(w http.ResponseWriter, r *http.Request, msg string) {
 	w.WriteHeader(http.StatusInternalServerError)
-	w.Header().Set(healthz.ContentTypeHeader, healthz.ContentTypeText)
+	w.Header().Set(ContentTypeHeader, ContentTypeText)
 	_, err := fmt.Fprint(w, msg)
 	if err != nil {
 		log.Warn("failed to send response",

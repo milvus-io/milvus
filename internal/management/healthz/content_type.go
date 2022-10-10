@@ -16,5 +16,11 @@
 
 package healthz
 
-// HealthzRouterPath is default path for check health state.
-const HealthzRouterPath = "/healthz"
+const (
+	// ContentTypeHeader is the health check request type header.
+	ContentTypeHeader = "Content-Type"
+	// ContentTypeText is the health check request type text.
+	ContentTypeText = "text/plain"
+	// ContentTypeJSON is another health check request type text, which response contains more info.
+	ContentTypeJSON = "application/json"
+)

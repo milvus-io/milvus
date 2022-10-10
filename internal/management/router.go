@@ -14,11 +14,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package healthz
+package management
 
-const (
-	// ContentTypeHeader is the health check request type header.
-	ContentTypeHeader = "Content-Type"
-	// ContentTypeText is the health check request type text.
-	ContentTypeText = "text/plain"
-)
+// HealthzRouterPath is default path for check health state.
+const HealthzRouterPath = "/healthz"
+
+// LogLevelRouterPath is path for Get and Update log level at runtime.
+const LogLevelRouterPath = "/log/level"
