@@ -1314,8 +1314,8 @@ message OperatePrivilegeRequest {
 message GetLoadingProgressRequest {
   // Not useful for now
   common.MsgBase base = 1;
-  string collectionName = 2;
-  repeated string partitionNames = 3;
+  string collection_name = 2;
+  repeated string partition_names = 3;
 }
 
 message GetLoadingProgressResponse {
