@@ -198,7 +198,7 @@ func (m *mockDataCoord) UnsetIsImportingState(ctx context.Context, req *datapb.U
 	return m.UnsetIsImportingStateFunc(ctx, req)
 }
 
-func (m *mockDataCoord) BroadCastAlteredCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
+func (m *mockDataCoord) BroadcastAlteredCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
 	return m.broadCastAlteredCollectionFunc(ctx, req)
 }
 
@@ -805,7 +805,7 @@ type mockBroker struct {
 	DescribeIndexFunc        func(ctx context.Context, colID UniqueID) (*indexpb.DescribeIndexResponse, error)
 	GetSegmentIndexStateFunc func(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*indexpb.SegmentIndexState, error)
 
-	BroadCastAlteredCollectionFunc func(ctx context.Context, req *milvuspb.AlterCollectionRequest) error
+	BroadcastAlteredCollectionFunc func(ctx context.Context, req *milvuspb.AlterCollectionRequest) error
 }
 
 func newMockBroker() *mockBroker {
@@ -836,8 +836,8 @@ func (b mockBroker) GetSegmentIndexState(ctx context.Context, collID UniqueID, i
 	return b.GetSegmentIndexStateFunc(ctx, collID, indexName, segIDs)
 }
 
-func (b mockBroker) BroadCastAlteredCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) error {
-	return b.BroadCastAlteredCollectionFunc(ctx, req)
+func (b mockBroker) BroadcastAlteredCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) error {
+	return b.BroadcastAlteredCollectionFunc(ctx, req)
 }
 
 func withBroker(b Broker) Opt {

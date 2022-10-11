@@ -64,7 +64,7 @@ service DataCoord {
   rpc UnsetIsImportingState(UnsetIsImportingStateRequest) returns(common.Status) {}
   rpc MarkSegmentsDropped(MarkSegmentsDroppedRequest) returns(common.Status) {}
 
-  rpc BroadCastAlteredCollection(milvus.AlterCollectionRequest) returns (common.Status) {}
+  rpc BroadcastAlteredCollection(milvus.AlterCollectionRequest) returns (common.Status) {}
 }
 
 service DataNode {

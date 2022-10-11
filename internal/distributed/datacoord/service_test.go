@@ -220,7 +220,7 @@ func (m *MockDataCoord) MarkSegmentsDropped(ctx context.Context, req *datapb.Mar
 	return m.markSegmentsDroppedResp, m.err
 }
 
-func (m *MockDataCoord) BroadCastAlteredCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
+func (m *MockDataCoord) BroadcastAlteredCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
 	return m.broadCastResp, m.err
 }
 
@@ -520,6 +520,15 @@ func Test_NewServer(t *testing.T) {
 			},
 		}
 		resp, err := server.MarkSegmentsDropped(ctx, nil)
+		assert.Nil(t, err)
+		assert.NotNil(t, resp)
+	})
+
+	t.Run("broadcast altered collection", func(t *testing.T) {
+		server.dataCoord = &MockDataCoord{
+			broadCastResp: &commonpb.Status{},
+		}
+		resp, err := server.BroadcastAlteredCollection(ctx, nil)
 		assert.Nil(t, err)
 		assert.NotNil(t, resp)
 	})

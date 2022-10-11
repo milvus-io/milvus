@@ -95,7 +95,7 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 		}
 
 		broker := newMockBroker()
-		broker.BroadCastAlteredCollectionFunc = func(ctx context.Context, req *milvuspb.AlterCollectionRequest) error {
+		broker.BroadcastAlteredCollectionFunc = func(ctx context.Context, req *milvuspb.AlterCollectionRequest) error {
 			return errors.New("err")
 		}
 
@@ -123,7 +123,7 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 		}
 
 		broker := newMockBroker()
-		broker.BroadCastAlteredCollectionFunc = func(ctx context.Context, req *milvuspb.AlterCollectionRequest) error {
+		broker.BroadcastAlteredCollectionFunc = func(ctx context.Context, req *milvuspb.AlterCollectionRequest) error {
 			return nil
 		}
 

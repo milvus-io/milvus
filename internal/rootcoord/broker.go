@@ -45,7 +45,7 @@ type Broker interface {
 	GetSegmentIndexState(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*indexpb.SegmentIndexState, error)
 	DescribeIndex(ctx context.Context, colID UniqueID) (*indexpb.DescribeIndexResponse, error)
 
-	BroadCastAlteredCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) error
+	BroadcastAlteredCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) error
 }
 
 type ServerBroker struct {
@@ -230,8 +230,9 @@ func (b *ServerBroker) GetSegmentIndexState(ctx context.Context, collID UniqueID
 	return resp.GetStates(), nil
 }
 
-func (b *ServerBroker) BroadCastAlteredCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) error {
-	resp, err := b.s.dataCoord.BroadCastAlteredCollection(ctx, req)
+func (b *ServerBroker) BroadcastAlteredCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) error {
+	log.Info("")
+	resp, err := b.s.dataCoord.BroadcastAlteredCollection(ctx, req)
 	if err != nil {
 		return err
 	}

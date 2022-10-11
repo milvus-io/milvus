@@ -398,6 +398,6 @@ func (s *Server) MarkSegmentsDropped(ctx context.Context, req *datapb.MarkSegmen
 	return s.dataCoord.MarkSegmentsDropped(ctx, req)
 }
 
-func (s *Server) BroadCastAlteredCollection(ctx context.Context, request *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
-	return s.dataCoord.BroadCastAlteredCollection(ctx, request)
+func (s *Server) BroadcastAlteredCollection(ctx context.Context, request *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
+	return s.dataCoord.BroadcastAlteredCollection(ctx, request)
 }
