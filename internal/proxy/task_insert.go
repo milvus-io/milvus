@@ -367,6 +367,7 @@ func (it *insertTask) assignSegmentID(channelNames []string) (*msgstream.MsgPack
 			insertMsg.NumRows++
 			requestSize += curRowMessageSize
 		}
+		log.Debug("[YX] Repack insert messages", zap.Int64("segmentID", segmentID), zap.Uint64("msg numRows", insertMsg.GetNumRows()))
 		repackedMsgs = append(repackedMsgs, insertMsg)
 
 		return repackedMsgs, nil
@@ -460,7 +461,12 @@ func (it *insertTask) Execute(ctx context.Context) error {
 		it.result.Status.Reason = err.Error()
 		return err
 	}
-	log.Debug("assign segmentID for insert data success", zap.Int64("msgID", it.Base.MsgID), zap.Int64("collectionID", collID), zap.String("collection name", it.CollectionName))
+	log.Debug("assign segmentID for insert data success",
+		zap.Int64("msgID", it.Base.MsgID),
+		zap.Int64("collectionID", collID),
+		zap.String("collection name", it.CollectionName),
+		zap.Int("msg numbers", len(msgPack.Msgs)),
+	)
 	tr.Record("assign segment id")
 	err = stream.Produce(msgPack)
 	if err != nil {
