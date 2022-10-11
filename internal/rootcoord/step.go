@@ -367,7 +367,7 @@ type BroadcastAlteredCollectionStep struct {
 func (b *BroadcastAlteredCollectionStep) Execute(ctx context.Context) ([]nestedStep, error) {
 	// TODO: support online schema change mechanism
 	// It only broadcast collection properties to DataCoord service
-	err := b.core.broker.BroadCastAlteredCollection(ctx, b.req)
+	err := b.core.broker.BroadcastAlteredCollection(ctx, b.req)
 	return nil, err
 }
 

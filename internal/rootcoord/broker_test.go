@@ -279,12 +279,12 @@ func TestServerBroker_GetSegmentIndexState(t *testing.T) {
 	})
 }
 
-func TestServerBroker_BroadCastAlteredCollection(t *testing.T) {
+func TestServerBroker_BroadcastAlteredCollection(t *testing.T) {
 	t.Run("failed to execute", func(t *testing.T) {
 		c := newTestCore(withInvalidDataCoord())
 		b := newServerBroker(c)
 		ctx := context.Background()
-		err := b.BroadCastAlteredCollection(ctx, &milvuspb.AlterCollectionRequest{})
+		err := b.BroadcastAlteredCollection(ctx, &milvuspb.AlterCollectionRequest{})
 		assert.Error(t, err)
 	})
 
@@ -292,7 +292,7 @@ func TestServerBroker_BroadCastAlteredCollection(t *testing.T) {
 		c := newTestCore(withFailedDataCoord())
 		b := newServerBroker(c)
 		ctx := context.Background()
-		err := b.BroadCastAlteredCollection(ctx, &milvuspb.AlterCollectionRequest{})
+		err := b.BroadcastAlteredCollection(ctx, &milvuspb.AlterCollectionRequest{})
 		assert.Error(t, err)
 	})
 
@@ -300,7 +300,7 @@ func TestServerBroker_BroadCastAlteredCollection(t *testing.T) {
 		c := newTestCore(withValidDataCoord())
 		b := newServerBroker(c)
 		ctx := context.Background()
-		err := b.BroadCastAlteredCollection(ctx, &milvuspb.AlterCollectionRequest{})
+		err := b.BroadcastAlteredCollection(ctx, &milvuspb.AlterCollectionRequest{})
 		assert.NoError(t, err)
 	})
 }

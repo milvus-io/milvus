@@ -1359,7 +1359,7 @@ func (s *Server) MarkSegmentsDropped(ctx context.Context, req *datapb.MarkSegmen
 	}, nil
 }
 
-func (s *Server) BroadCastAlteredCollection(ctx context.Context,
+func (s *Server) BroadcastAlteredCollection(ctx context.Context,
 	req *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
 	errResp := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,

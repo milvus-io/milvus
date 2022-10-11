@@ -146,7 +146,7 @@ func Test_NewClient(t *testing.T) {
 		retCheck(retNotNil, r31, err)
 
 		{
-			ret, err := client.BroadCastAlteredCollection(ctx, nil)
+			ret, err := client.BroadcastAlteredCollection(ctx, nil)
 			retCheck(retNotNil, ret, err)
 		}
 	}

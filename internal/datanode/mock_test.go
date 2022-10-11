@@ -271,7 +271,7 @@ func (ds *DataCoordFactory) MarkSegmentsDropped(context.Context, *datapb.MarkSeg
 	}, nil
 }
 
-func (ds *DataCoordFactory) BroadCastAlteredCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
+func (ds *DataCoordFactory) BroadcastAlteredCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}, nil
