@@ -18,7 +18,6 @@ package flowgraph
 
 import (
 	"context"
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -27,7 +26,7 @@ import (
 )
 
 func TestInputNode(t *testing.T) {
-	os.Setenv("ROCKSMQ_PATH", "/tmp/MilvusTest/FlowGraph/TestInputNode")
+	t.Setenv("ROCKSMQ_PATH", "/tmp/MilvusTest/FlowGraph/TestInputNode")
 	factory := dependency.NewDefaultFactory(true)
 
 	msgStream, _ := factory.NewMsgStream(context.TODO())

@@ -32,7 +32,7 @@ func TestConfigFromEnv(t *testing.T) {
 	_, err := mgr.GetConfig("test.env")
 	assert.EqualError(t, err, "key not found: test.env")
 
-	os.Setenv("TEST_ENV", "value")
+	t.Setenv("TEST_ENV", "value")
 	mgr, _ = Init(WithEnvSource(formatKey))
 
 	v, err := mgr.GetConfig("test.env")
@@ -54,8 +54,8 @@ func TestConfigFromRemote(t *testing.T) {
 
 	client := v3client.New(e.Server)
 
-	os.Setenv("TMP_KEY", "1")
-	os.Setenv("log.level", "info")
+	t.Setenv("TMP_KEY", "1")
+	t.Setenv("log.level", "info")
 	mgr, _ := Init(WithEnvSource(formatKey),
 		WithFilesSource("../../configs/milvus.yaml"),
 		WithEtcdSource(&EtcdInfo{

@@ -30,7 +30,7 @@ import (
 
 func TestEtcdRestartLoad(te *testing.T) {
 	etcdDataDir := "/tmp/_etcd_data"
-	os.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode)
+	te.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode)
 	param := new(paramtable.ServiceParam)
 	param.Init()
 	param.BaseTable.Save("etcd.use.embed", "true")

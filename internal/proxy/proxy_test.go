@@ -412,9 +412,8 @@ func TestProxy(t *testing.T) {
 	var wg sync.WaitGroup
 
 	path := "/tmp/milvus/rocksmq" + funcutil.GenRandomStr()
-	err = os.Setenv("ROCKSMQ_PATH", path)
+	t.Setenv("ROCKSMQ_PATH", path)
 	defer os.RemoveAll(path)
-	assert.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	ctx = GetContext(ctx, "root:123456")

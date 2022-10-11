@@ -18,7 +18,6 @@ package datacoord
 
 import (
 	"context"
-	"os"
 	"path"
 	"strconv"
 	"sync"
@@ -92,7 +91,7 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 	}()
 
 	p := "/tmp/milvus_ut/rdb_data"
-	os.Setenv("ROCKSMQ_PATH", p)
+	t.Setenv("ROCKSMQ_PATH", p)
 
 	prefix := Params.DataCoordCfg.ChannelWatchSubPath
 

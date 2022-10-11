@@ -109,7 +109,7 @@ func TestBaseTable_Get(t *testing.T) {
 
 func TestBaseTable_Pulsar(t *testing.T) {
 	//test PULSAR ADDRESS
-	os.Setenv("PULSAR_ADDRESS", "pulsar://localhost:6650")
+	t.Setenv("PULSAR_ADDRESS", "pulsar://localhost:6650")
 	baseParams.Init()
 
 	address := baseParams.Get("pulsar.address")
@@ -149,8 +149,8 @@ func TestBaseTable_Pulsar(t *testing.T) {
 // }
 
 func TestBaseTable_Env(t *testing.T) {
-	os.Setenv("milvus.test", "test")
-	os.Setenv("milvus.test.test2", "test2")
+	t.Setenv("milvus.test", "test")
+	t.Setenv("milvus.test.test2", "test2")
 
 	baseParams.Init()
 	result, _ := baseParams.Load("test")
@@ -159,11 +159,7 @@ func TestBaseTable_Env(t *testing.T) {
 	result, _ = baseParams.Load("test.test2")
 	assert.Equal(t, result, "test2")
 
-	err := os.Setenv("milvus.invalid=xxx", "test")
-	assert.Error(t, err)
-
-	err = os.Setenv("milvus.invalid", "xxx=test")
-	assert.NoError(t, err)
+	t.Setenv("milvus.invalid", "xxx=test")
 
 	baseParams.Init()
 	result, _ = baseParams.Load("invalid")

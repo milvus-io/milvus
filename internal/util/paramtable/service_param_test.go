@@ -12,7 +12,6 @@
 package paramtable
 
 import (
-	"os"
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
@@ -52,10 +51,10 @@ func TestServiceParam(t *testing.T) {
 
 		// test UseEmbedEtcd
 		Params.Base.Save("etcd.use.embed", "true")
-		assert.Nil(t, os.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.ClusterDeployMode))
+		t.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.ClusterDeployMode)
 		assert.Panics(t, func() { Params.initUseEmbedEtcd() })
 
-		assert.Nil(t, os.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode))
+		t.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode)
 		Params.LoadCfgToMemory()
 	})
 
