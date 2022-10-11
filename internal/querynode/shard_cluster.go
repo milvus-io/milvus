@@ -831,6 +831,7 @@ func (sc *ShardCluster) ReleaseSegments(ctx context.Context, req *querypb.Releas
 			}
 		}
 	}
+	sc.healthCheck()
 	sc.mut.Unlock()
 
 	return err
