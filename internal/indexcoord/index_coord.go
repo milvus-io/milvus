@@ -868,6 +868,7 @@ func (i *IndexCoord) DescribeIndex(ctx context.Context, req *indexpb.DescribeInd
 			IndexParams:     index.IndexParams,
 			IsAutoIndex:     index.IsAutoIndex,
 			UserIndexParams: index.UserIndexParams,
+			IndexID:         index.IndexID,
 		}
 		if err := i.completeIndexInfo(ctx, indexInfo); err != nil {
 			log.Error("IndexCoord describe index fail", zap.Int64("collectionID", req.CollectionID),

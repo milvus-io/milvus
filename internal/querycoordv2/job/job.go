@@ -152,11 +152,15 @@ func (job *LoadCollectionJob) PreExecute() error {
 			msg := "load the partition after load collection is not supported"
 			log.Warn(msg)
 			return utils.WrapError(msg, ErrLoadParameterMismatched)
-		}
-		if old.GetReplicaNumber() != req.GetReplicaNumber() {
+		} else if old.GetReplicaNumber() != req.GetReplicaNumber() {
 			msg := fmt.Sprintf("collection with different replica number %d existed, release this collection first before changing its replica number",
 				job.meta.GetReplicaNumber(req.GetCollectionID()),
 			)
+			log.Warn(msg)
+			return utils.WrapError(msg, ErrLoadParameterMismatched)
+		} else if !typeutil.MapEqual(old.GetFieldIndexID(), req.GetFieldIndexID()) {
+			msg := fmt.Sprintf("collection with different index %v existed, release this collection first before changing its index",
+				old.GetFieldIndexID())
 			log.Warn(msg)
 			return utils.WrapError(msg, ErrLoadParameterMismatched)
 		}
@@ -221,6 +225,7 @@ func (job *LoadCollectionJob) Execute() error {
 			CollectionID:  req.GetCollectionID(),
 			ReplicaNumber: req.GetReplicaNumber(),
 			Status:        querypb.LoadStatus_Loading,
+			FieldIndexID:  req.GetFieldIndexID(),
 		},
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
@@ -350,9 +355,13 @@ func (job *LoadPartitionJob) PreExecute() error {
 			msg := "load the partition after load collection is not supported"
 			log.Warn(msg)
 			return utils.WrapError(msg, ErrLoadParameterMismatched)
-		}
-		if job.meta.GetReplicaNumber(req.GetCollectionID()) != req.GetReplicaNumber() {
+		} else if job.meta.GetReplicaNumber(req.GetCollectionID()) != req.GetReplicaNumber() {
 			msg := "collection with different replica number existed, release this collection first before changing its replica number"
+			log.Warn(msg)
+			return utils.WrapError(msg, ErrLoadParameterMismatched)
+		} else if !typeutil.MapEqual(job.meta.GetFieldIndex(req.GetCollectionID()), req.GetFieldIndexID()) {
+			msg := fmt.Sprintf("collection with different index %v existed, release this collection first before changing its index",
+				job.meta.GetFieldIndex(req.GetCollectionID()))
 			log.Warn(msg)
 			return utils.WrapError(msg, ErrLoadParameterMismatched)
 		}
@@ -423,6 +432,7 @@ func (job *LoadPartitionJob) Execute() error {
 				PartitionID:   partition,
 				ReplicaNumber: req.GetReplicaNumber(),
 				Status:        querypb.LoadStatus_Loading,
+				FieldIndexID:  req.GetFieldIndexID(),
 			},
 			CreatedAt: time.Now(),
 		}

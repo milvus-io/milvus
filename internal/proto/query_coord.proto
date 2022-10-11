@@ -466,6 +466,7 @@ message CollectionLoadInfo {
   repeated int64 released_partitions = 2;
   int32 replica_number = 3;
   LoadStatus status = 4;
+  map<int64, int64> field_indexID = 5;
 }
 
 message PartitionLoadInfo {
@@ -473,6 +474,7 @@ message PartitionLoadInfo {
   int64 partitionID = 2;
   int32 replica_number = 3;
   LoadStatus status = 4;
+  map<int64, int64> field_indexID = 5;
 }
 
 message Replica {
