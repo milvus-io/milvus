@@ -997,9 +997,9 @@ func TestMeta_GetAllSegments(t *testing.T) {
 	}
 
 	seg1 := m.GetSegment(1)
-	seg1All := m.GetAllSegment(1)
+	seg1All := m.GetSegmentUnsafe(1)
 	seg2 := m.GetSegment(2)
-	seg2All := m.GetAllSegment(2)
+	seg2All := m.GetSegmentUnsafe(2)
 	assert.NotNil(t, seg1)
 	assert.NotNil(t, seg1All)
 	assert.Nil(t, seg2)

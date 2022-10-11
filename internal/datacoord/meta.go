@@ -264,7 +264,8 @@ func (m *meta) GetSegment(segID UniqueID) *SegmentInfo {
 	return nil
 }
 
-// GetSegment returns segment info with provided id
+// GetSegmentUnsafe returns segment info with provided id
+// include the unhealthy segment
 // if not segment is found, nil will be returned
 func (m *meta) GetSegmentUnsafe(segID UniqueID) *SegmentInfo {
 	m.RLock()
@@ -272,16 +273,11 @@ func (m *meta) GetSegmentUnsafe(segID UniqueID) *SegmentInfo {
 	return m.segments.GetSegment(segID)
 }
 
-// GetAllSegment returns segment info with provided id
-// different from GetSegment, this will return unhealthy segment as well
-func (m *meta) GetAllSegment(segID UniqueID) *SegmentInfo {
+// GetAllSegmentsUnsafe returns all segments
+func (m *meta) GetAllSegmentsUnsafe() []*SegmentInfo {
 	m.RLock()
 	defer m.RUnlock()
-	segment := m.segments.GetSegment(segID)
-	if segment != nil {
-		return segment
-	}
-	return nil
+	return m.segments.GetSegments()
 }
 
 // SetState setting segment with provided ID state
@@ -644,32 +640,6 @@ func (m *meta) batchSaveDropSegments(channel string, modSegments map[int64]*Segm
 
 	metrics.DataCoordNumSegments.WithLabelValues(metrics.DropedSegmentLabel).Add(float64(len(segments)))
 	return nil
-}
-
-// ListSegmentFiles lists all segments' logs
-func (m *meta) ListSegmentFiles() []*datapb.Binlog {
-	m.RLock()
-	defer m.RUnlock()
-
-	var logs []*datapb.Binlog
-
-	for _, segment := range m.segments.GetSegments() {
-		if !isSegmentHealthy(segment) {
-			continue
-		}
-		for _, binlog := range segment.GetBinlogs() {
-			logs = append(logs, binlog.Binlogs...)
-		}
-
-		for _, statLog := range segment.GetStatslogs() {
-			logs = append(logs, statLog.Binlogs...)
-		}
-
-		for _, deltaLog := range segment.GetDeltalogs() {
-			logs = append(logs, deltaLog.Binlogs...)
-		}
-	}
-	return logs
 }
 
 // GetSegmentsByChannel returns all segment info which insert channel equals provided `dmlCh`

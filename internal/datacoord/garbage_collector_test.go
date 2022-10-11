@@ -119,8 +119,6 @@ func Test_garbageCollector_scan(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, segRefer)
 
-	indexCoord := mocks.NewMockIndexCoord(t)
-
 	t.Run("key is reference", func(t *testing.T) {
 		segReferManager := &SegmentReferenceManager{
 			etcdKV: etcdKV,
@@ -137,6 +135,8 @@ func Test_garbageCollector_scan(t *testing.T) {
 				2: 1,
 			},
 		}
+
+		indexCoord := mocks.NewMockIndexCoord(t)
 		gc := newGarbageCollector(meta, newMockHandler(), segRefer, indexCoord, GcOption{
 			cli:              cli,
 			enabled:          true,
@@ -158,6 +158,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 	})
 
 	t.Run("missing all but save tolerance", func(t *testing.T) {
+		indexCoord := mocks.NewMockIndexCoord(t)
 		gc := newGarbageCollector(meta, newMockHandler(), segRefer, indexCoord, GcOption{
 			cli:              cli,
 			enabled:          true,
@@ -183,6 +184,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 		err = meta.AddSegment(segment)
 		require.NoError(t, err)
 
+		indexCoord := mocks.NewMockIndexCoord(t)
 		gc := newGarbageCollector(meta, newMockHandler(), segRefer, indexCoord, GcOption{
 			cli:              cli,
 			enabled:          true,
@@ -211,6 +213,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 		err = meta.AddSegment(segment)
 		require.NoError(t, err)
 
+		indexCoord := mocks.NewMockIndexCoord(t)
 		gc := newGarbageCollector(meta, newMockHandler(), segRefer, indexCoord, GcOption{
 			cli:              cli,
 			enabled:          true,
@@ -227,6 +230,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 		gc.close()
 	})
 	t.Run("missing gc all", func(t *testing.T) {
+		indexCoord := mocks.NewMockIndexCoord(t)
 		gc := newGarbageCollector(meta, newMockHandler(), segRefer, indexCoord, GcOption{
 			cli:              cli,
 			enabled:          true,
@@ -248,6 +252,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 	})
 
 	t.Run("list object with error", func(t *testing.T) {
+		indexCoord := mocks.NewMockIndexCoord(t)
 		gc := newGarbageCollector(meta, newMockHandler(), segRefer, indexCoord, GcOption{
 			cli:              cli,
 			enabled:          true,
