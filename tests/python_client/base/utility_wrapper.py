@@ -22,6 +22,7 @@ class ApiUtilityWrapper:
                   using="default", check_task=None, check_items=None, **kwargs):
         working_tasks = self.get_bulk_load_working_list()
         log.info(f"before bulk load, there are {len(working_tasks)} working tasks")
+        log.info(f"files to load: {files}")
         func_name = sys._getframe().f_code.co_name
         res, is_succ = api_request([self.ut.bulk_load, collection_name, is_row_based,
                                     files, partition_name, timeout, using], **kwargs)

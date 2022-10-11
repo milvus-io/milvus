@@ -34,6 +34,7 @@ default_vec_n_int_fields = [df.vec_field, df.int_field]
 
 
 milvus_ns = "chaos-testing"
+base_dir = "/tmp/bulk_load_data"
 
 
 def entity_suffix(entities):
@@ -46,7 +47,8 @@ def entity_suffix(entities):
     return suffix
 
 
-class TestBulkLoad(TestcaseBase):
+class TestcaseBaseBulkLoad(TestcaseBase):
+
     @pytest.fixture(scope="function", autouse=True)
     def init_minio_client(self, host):
         Path("/tmp/bulk_load_data").mkdir(parents=True, exist_ok=True)
@@ -62,6 +64,9 @@ class TestBulkLoad(TestcaseBase):
         self.bucket_name = ms.index_nodes[0]["infos"]["system_configurations"][
             "minio_bucket_name"
         ]
+
+
+class TestBulkLoad(TestcaseBaseBulkLoad):
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("is_row_based", [True, False])
@@ -1067,29 +1072,26 @@ class TestBulkLoad(TestcaseBase):
         assert isinstance(res[0].get(df.float_field, 1), float)
 
     @pytest.mark.tags(CaseLabel.L3)
-    @pytest.mark.parametrize("auto_id", [True, False])
+    @pytest.mark.parametrize("auto_id", [True])
     @pytest.mark.parametrize("dim", [128])  # 128
     @pytest.mark.parametrize("entities", [1000])  # 1000
-    @pytest.mark.parametrize("with_int_field", [True, False])
-    def test_with_uid_n_int_numpy(self, auto_id, dim, entities, with_int_field):
+    def test_with_all_field_numpy(self, auto_id, dim, entities):
         """
-        collection schema 1: [pk, float_vector]
-        data file: vectors.npy and uid.npy
+        collection schema 1: [pk, int64, float64, string float_vector]
+        data file: vectors.npy and uid.npy,
         Steps:
         1. create collection
         2. import data
         3. verify failed with errors
         """
-        data_fields = [df.vec_field]
+        data_fields = [df.pk_field, df.int_field, df.float_field, df.double_field, df.vec_field]
         fields = [
             cf.gen_int64_field(name=df.pk_field, is_primary=True),
+            cf.gen_int64_field(name=df.int_field),
+            cf.gen_float_field(name=df.float_field),
+            cf.gen_double_field(name=df.double_field),
             cf.gen_float_vec_field(name=df.vec_field, dim=dim),
         ]
-        if not auto_id:
-            data_fields.append(df.pk_field)
-        if with_int_field:
-            data_fields.append(df.int_field)
-            fields.append(cf.gen_int64_field(name=df.int_field))
         files = prepare_bulk_load_numpy_files(
             minio_endpoint=self.minio_endpoint,
             bucket_name=self.bucket_name,
@@ -1155,9 +1157,12 @@ class TestBulkLoad(TestcaseBase):
         c_name = cf.gen_unique_str()
         fields = [
             cf.gen_int64_field(name=df.pk_field, is_primary=True),
+            cf.gen_int64_field(name=df.int_field),
+            cf.gen_float_field(name=df.float_field),
+            cf.gen_double_field(name=df.double_field),
             cf.gen_float_vec_field(name=df.vec_field, dim=dim),
         ]
-        schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
+        schema = cf.gen_collection_schema(fields=fields)
         self.collection_wrap.init_collection(c_name, schema=schema)
         # build index
         index_params = ct.default_index
@@ -1166,10 +1171,7 @@ class TestBulkLoad(TestcaseBase):
         )
         # load collection
         self.collection_wrap.load()
-
-        data_fields = [df.vec_field]
-        if not auto_id:
-            data_fields.append(df.pk_field)
+        data_fields = [f.name for f in fields if not f.to_dict().get("auto_id", False)]
         task_ids = []
         for i in range(file_nums):
             files = prepare_bulk_load_numpy_files(
@@ -1211,23 +1213,7 @@ class TestBulkLoad(TestcaseBase):
         pass
 
 
-
-class TestBulkLoadInvalidParams(TestcaseBase):
-    @pytest.fixture(scope="function", autouse=True)
-    def init_minio_client(self, host, port):
-        Path("/tmp/bulk_load_data").mkdir(parents=True, exist_ok=True)
-        self._connect()
-        self.instance_name = get_milvus_instance_name(milvus_ns, host)
-        minio_ip_pod_pair = get_pod_ip_name_pairs(
-            milvus_ns, f"release={self.instance_name}, app=minio"
-        )
-        ms = MilvusSys()
-        minio_ip = list(minio_ip_pod_pair.keys())[0]
-        minio_port = "9000"
-        self.minio_endpoint = f"{minio_ip}:{minio_port}"
-        self.bucket_name = ms.index_nodes[0]["infos"]["system_configurations"][
-            "minio_bucket_name"
-        ]
+class TestBulkLoadInvalidParams(TestcaseBaseBulkLoad):
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("is_row_based", [True, False])
@@ -2308,30 +2294,8 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         assert self.collection_wrap.num_entities == 0
 
 
-class TestBulkLoadAdvanced(TestcaseBase):
-    @pytest.fixture(scope="function", autouse=True)
-    def init_minio_client(self, host, port):
-        Path("/tmp/bulk_load_data").mkdir(parents=True, exist_ok=True)
-        self._connect()
-        self.instance_name = get_milvus_instance_name(milvus_ns, host)
-        minio_ip_pod_pair = get_pod_ip_name_pairs(
-            milvus_ns, f"release={self.instance_name}, app=minio"
-        )
-        ms = MilvusSys()
-        minio_ip = list(minio_ip_pod_pair.keys())[0]
-        minio_port = "9000"
-        self.minio_endpoint = f"{minio_ip}:{minio_port}"
-        self.bucket_name = ms.index_nodes[0]["infos"]["system_configurations"][
-            "minio_bucket_name"
-        ]
-
-    def setup_class(self):
-        log.info("[setup_import] Start setup class...")
-        log.info("copy data files to minio")
-
-    def teardown_class(self):
-        log.info("[teardown_import] Start teardown class...")
-        log.info("clean up data files in minio")
+@pytest.mark.skip()
+class TestBulkLoadAdvanced(TestcaseBaseBulkLoad):
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("auto_id", [True])
@@ -2350,6 +2314,7 @@ class TestBulkLoadAdvanced(TestcaseBase):
           4.1 verify the data entities equal the import data
           4.2 verify search and query successfully
         """
+        # NOTE: 128d_1m --> 977MB
         suffix = entity_suffix(entities)
         vec_field = f"vectors_{dim}d_{suffix}"
         self._connect()
@@ -2380,6 +2345,13 @@ class TestBulkLoadAdvanced(TestcaseBase):
             if not auto_id:
                 files.append(f"{dim}d_{suffix}_{i}/{df.pk_field}.npy")
             t0 = time.time()
+            check_flag = True
+            for file in files:
+                file_size = Path(f"{base_dir}/{file}").stat().st_size / 1024 / 1024
+                if file_size >= 1024:
+                    check_flag = False
+                    break
+
             task_ids, _ = self.utility_wrap.bulk_load(
                 collection_name=c_name, is_row_based=False, files=files
             )
@@ -2391,29 +2363,27 @@ class TestBulkLoadAdvanced(TestcaseBase):
             log.info(
                 f"auto_id:{auto_id}, bulk load{suffix}-{i} state:{success} in {tt}"
             )
-            assert success
+            assert success is check_flag
 
         # TODO: assert num entities
-        t0 = time.time()
-        num_entities = self.collection_wrap.num_entities
-        tt = time.time() - t0
-        log.info(f" collection entities: {num_entities} in {tt}")
-        assert num_entities == entities * file_nums
+        if success:
+            t0 = time.time()
+            num_entities = self.collection_wrap.num_entities
+            tt = time.time() - t0
+            log.info(f" collection entities: {num_entities} in {tt}")
+            assert num_entities == entities * file_nums
 
-        # verify imported data is available for search
-        self.collection_wrap.load()
-        loaded_segs = len(self.utility_wrap.get_query_segment_info(c_name)[0])
-        log.info(f"query seg info: {loaded_segs} segs loaded.")
-        search_data = cf.gen_vectors(1, dim)
-        search_params = {"metric_type": "L2", "params": {"nprobe": 2}}
-        res, _ = self.collection_wrap.search(
-            search_data,
-            vec_field,
-            param=search_params,
-            limit=1,
-            check_task=CheckTasks.check_search_results,
-            check_items={"nq": 1, "limit": 1},
-        )
-        # self.collection_wrap.query(expr=f"id in {ids}")
-
-    """Validate data consistency and availability during import"""
+            # verify imported data is available for search
+            self.collection_wrap.load()
+            loaded_segs = len(self.utility_wrap.get_query_segment_info(c_name)[0])
+            log.info(f"query seg info: {loaded_segs} segs loaded.")
+            search_data = cf.gen_vectors(1, dim)
+            search_params = {"metric_type": "L2", "params": {"nprobe": 2}}
+            res, _ = self.collection_wrap.search(
+                search_data,
+                vec_field,
+                param=search_params,
+                limit=1,
+                check_task=CheckTasks.check_search_results,
+                check_items={"nq": 1, "limit": 1},
+            )

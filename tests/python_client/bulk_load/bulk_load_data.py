@@ -6,7 +6,7 @@ import random
 from sklearn import preprocessing
 from common.common_func import gen_unique_str
 from minio_comm import copy_files_to_minio
-
+from utils.util_log import test_log as log
 
 data_source = "/tmp/bulk_load_data"
 
@@ -21,6 +21,7 @@ class DataField:
     string_field = "string_scalar"
     bool_field = "bool_scalar"
     float_field = "float_scalar"
+    double_field = "double_scalar"
 
 
 class DataErrorType:
@@ -255,6 +256,23 @@ def gen_vectors_in_numpy_file(dir, data_field, float_vector, rows, dim, force=Fa
             else:
                 vectors = gen_binary_vectors(rows, (dim // 8))
         arr = np.array(vectors)
+        # print(f"file_name: {file_name} data type: {arr.dtype}")
+        log.info(f"file_name: {file_name} data type: {arr.dtype} data shape: {arr.shape}")
+        np.save(file, arr)
+    return file_name
+
+
+def gen_string_in_numpy_file(dir, data_field, rows, start=0, force=False):
+    file_name = f"{data_field}.npy"
+    file = f"{dir}/{file_name}"
+    if not os.path.exists(file) or force:
+        # non vector columns
+        data = []
+        if rows > 0:
+            data = [gen_unique_str(str(i)) for i in range(start, rows+start)]
+        arr = np.array(data)
+        # print(f"file_name: {file_name} data type: {arr.dtype}")
+        log.info(f"file_name: {file_name} data type: {arr.dtype} data shape: {arr.shape}")
         np.save(file, arr)
     return file_name
 
@@ -265,15 +283,20 @@ def gen_int_or_float_in_numpy_file(dir, data_field, rows, start=0, force=False):
     if not os.path.exists(file) or force:
         # non vector columns
         data = []
+        # arr = np.array([])
         if rows > 0:
             if data_field == DataField.float_field:
-                data = [random.random() for _ in range(rows)]
+                data = [np.float32(random.random()) for _ in range(rows)]
+            elif data_field == DataField.double_field:
+                data = [np.float64(random.random()) for _ in range(rows)]
             elif data_field == DataField.pk_field:
                 data = [i for i in range(start, start + rows)]
             elif data_field == DataField.int_field:
                 data = [random.randint(-999999, 9999999) for _ in range(rows)]
-        arr = np.array(data)
-        np.save(file, arr)
+        # print(f"file_name: {file_name} data type: {arr.dtype}")
+            arr = np.array(data)
+            log.info(f"file_name: {file_name} data type: {arr.dtype} data shape: {arr.shape}")
+            np.save(file, arr)
     return file_name
 
 
@@ -344,7 +367,7 @@ def gen_json_files(is_row_based, rows, dim, auto_id, str_pk,
     return files
 
 
-def gen_npy_files(float_vector, rows, dim, data_fields, file_nums=1, force=False):
+def gen_npy_files(float_vector, rows, dim, data_fields, file_nums=1, err_type="", force=False):
     # gen numpy files
     files = []
     start_uid = 0
@@ -352,8 +375,10 @@ def gen_npy_files(float_vector, rows, dim, data_fields, file_nums=1, force=False
         # gen the numpy file without subfolders if only one set of files
         for data_field in data_fields:
             if data_field == DataField.vec_field:
-                file_name = gen_vectors_in_numpy_file(dir=data_source, float_vector=float_vector,
+                file_name = gen_vectors_in_numpy_file(dir=data_source, data_field=data_field, float_vector=float_vector,
                                                       rows=rows, dim=dim, force=force)
+            elif data_field == DataField.string_field:  # string field for numpy not supported yet at 2022-10-17
+                file_name = gen_string_in_numpy_file(dir=data_source, data_field=data_field, rows=rows, force=force)
             else:
                 file_name = gen_int_or_float_in_numpy_file(dir=data_source, data_field=data_field,
                                                            rows=rows, force=force)
