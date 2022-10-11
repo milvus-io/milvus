@@ -186,7 +186,7 @@ func (p *ImportWrapper) fileValidation(filePaths []string, rowBased bool) error 
 		size, err := p.chunkManager.Size(context.TODO(), filePath)
 		if err != nil {
 			log.Error("import wrapper: failed to get file size", zap.String("filePath", filePath), zap.Any("err", err))
-			return errors.New("failed to ")
+			return errors.New("failed to get file size of " + filePath)
 		}
 
 		if size == 0 {
