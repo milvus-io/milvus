@@ -30,8 +30,10 @@ import (
 
 // Handler handles some channel method for ChannelManager
 type Handler interface {
-	// GetVChanPositions gets the information recovery needed of a channel
-	GetVChanPositions(channel *channel, partitionID UniqueID) *datapb.VchannelInfo
+	// GetQueryVChanPositions gets the information recovery needed of a channel for QueryCoord
+	GetQueryVChanPositions(channel *channel, partitionID UniqueID) *datapb.VchannelInfo
+	// GetDataVChanPositions gets the information recovery needed of a channel for DataNode
+	GetDataVChanPositions(channel *channel, partitionID UniqueID) *datapb.VchannelInfo
 	CheckShouldDropChannel(channel string) bool
 	FinishDropChannel(channel string)
 }
@@ -46,10 +48,79 @@ func newServerHandler(s *Server) *ServerHandler {
 	return &ServerHandler{s: s}
 }
 
-// GetVChanPositions gets vchannel latest postitions with provided dml channel names,
+// GetDataVChanPositions gets vchannel latest postitions with provided dml channel names for DataNode.
+func (h *ServerHandler) GetDataVChanPositions(channel *channel, partitionID UniqueID) *datapb.VchannelInfo {
+	segments := h.s.meta.SelectSegments(func(s *SegmentInfo) bool {
+		return s.InsertChannel == channel.Name
+	})
+	log.Info("GetDataVChanPositions",
+		zap.Int64("collectionID", channel.CollectionID),
+		zap.String("channel", channel.Name),
+		zap.Int("numOfSegments", len(segments)),
+	)
+	var (
+		flushedIDs   = make(typeutil.UniqueSet)
+		unflushedIDs = make(typeutil.UniqueSet)
+		droppedIDs   = make(typeutil.UniqueSet)
+		seekPosition *internalpb.MsgPosition
+	)
+	for _, s := range segments {
+		if (partitionID > allPartitionID && s.PartitionID != partitionID) ||
+			(s.GetStartPosition() == nil && s.GetDmlPosition() == nil) {
+			continue
+		}
+		if s.GetIsImporting() {
+			// Skip bulk load segments.
+			continue
+		}
+
+		if s.GetState() == commonpb.SegmentState_Dropped {
+			droppedIDs.Insert(s.GetID())
+			continue
+		} else if s.GetState() == commonpb.SegmentState_Flushing || s.GetState() == commonpb.SegmentState_Flushed {
+			flushedIDs.Insert(s.GetID())
+		} else {
+			unflushedIDs.Insert(s.GetID())
+		}
+
+		var segmentPosition *internalpb.MsgPosition
+		if s.GetDmlPosition() != nil {
+			segmentPosition = s.GetDmlPosition()
+		} else {
+			segmentPosition = s.GetStartPosition()
+		}
+		if seekPosition == nil || segmentPosition.Timestamp < seekPosition.Timestamp {
+			seekPosition = segmentPosition
+		}
+	}
+
+	// use collection start position when segment position is not found
+	if seekPosition == nil {
+		if channel.StartPositions == nil {
+			collection := h.GetCollection(h.s.ctx, channel.CollectionID)
+			if collection != nil {
+				seekPosition = getCollectionStartPosition(channel.Name, collection)
+			}
+		} else {
+			// use passed start positions, skip to ask rootcoord.
+			seekPosition = toMsgPosition(channel.Name, channel.StartPositions)
+		}
+	}
+
+	return &datapb.VchannelInfo{
+		CollectionID:        channel.CollectionID,
+		ChannelName:         channel.Name,
+		SeekPosition:        seekPosition,
+		FlushedSegmentIds:   flushedIDs.Collect(),
+		UnflushedSegmentIds: unflushedIDs.Collect(),
+		DroppedSegmentIds:   droppedIDs.Collect(),
+	}
+}
+
+// GetQueryVChanPositions gets vchannel latest postitions with provided dml channel names for QueryCoord,
 // we expect QueryCoord gets the indexed segments to load, so the flushed segments below are actually the indexed segments,
 // the unflushed segments are actually the segments without index, even they are flushed.
-func (h *ServerHandler) GetVChanPositions(channel *channel, partitionID UniqueID) *datapb.VchannelInfo {
+func (h *ServerHandler) GetQueryVChanPositions(channel *channel, partitionID UniqueID) *datapb.VchannelInfo {
 	// cannot use GetSegmentsByChannel since dropped segments are needed here
 	segments := h.s.meta.SelectSegments(func(s *SegmentInfo) bool {
 		return s.InsertChannel == channel.Name
@@ -60,10 +131,10 @@ func (h *ServerHandler) GetVChanPositions(channel *channel, partitionID UniqueID
 	for _, segment := range indexedSegments {
 		indexed.Insert(segment.GetID())
 	}
-	log.Info("GetSegmentsByChannel",
-		zap.Any("collectionID", channel.CollectionID),
-		zap.Any("channel", channel),
-		zap.Any("numOfSegments", len(segments)),
+	log.Info("GetQueryVChanPositions",
+		zap.Int64("collectionID", channel.CollectionID),
+		zap.String("channel", channel.Name),
+		zap.Int("numOfSegments", len(segments)),
 	)
 	var (
 		indexedIDs   = make(typeutil.UniqueSet)

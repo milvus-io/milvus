@@ -444,7 +444,7 @@ func (c *ChannelManager) Watch(ch *channel) error {
 // fillChannelWatchInfo updates the channel op by filling in channel watch info.
 func (c *ChannelManager) fillChannelWatchInfo(op *ChannelOp) {
 	for _, ch := range op.Channels {
-		vcInfo := c.h.GetVChanPositions(ch, allPartitionID)
+		vcInfo := c.h.GetDataVChanPositions(ch, allPartitionID)
 		info := &datapb.ChannelWatchInfo{
 			Vchan:     vcInfo,
 			StartTs:   time.Now().Unix(),
@@ -462,7 +462,7 @@ func (c *ChannelManager) fillChannelWatchInfoWithState(op *ChannelOp, state data
 	startTs := time.Now().Unix()
 	timeoutTs := time.Now().Add(maxWatchDuration).UnixNano()
 	for _, ch := range op.Channels {
-		vcInfo := c.h.GetVChanPositions(ch, allPartitionID)
+		vcInfo := c.h.GetDataVChanPositions(ch, allPartitionID)
 		info := &datapb.ChannelWatchInfo{
 			Vchan:     vcInfo,
 			StartTs:   startTs,
