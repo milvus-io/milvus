@@ -447,8 +447,8 @@ For guidance on installation, development, deployment, and administration, check
 The implemented SDK and its API documentation are listed below:
 
 - [PyMilvus SDK](https://github.com/milvus-io/pymilvus)
-- [Java SDK](https://github.com/milvus-io/milvus-sdk-java)(ready for test)
-- [Go SDK](https://github.com/milvus-io/milvus-sdk-go)(ready for test)
+- [Java SDK](https://github.com/milvus-io/milvus-sdk-java)
+- [Go SDK](https://github.com/milvus-io/milvus-sdk-go)
 - [Cpp SDK](https://github.com/milvus-io/milvus-sdk-cpp)(under development)
 - [Node SDK](https://github.com/milvus-io/milvus-sdk-node)
 
