@@ -62,6 +62,7 @@ const (
 	channelNameLabelName     = "channel_name"
 	functionLabelName        = "function_name"
 	queryTypeLabelName       = "query_type"
+	collectionName           = "collection_name"
 	segmentStateLabelName    = "segment_state"
 	usernameLabelName        = "username"
 	rolenameLabelName        = "role_name"

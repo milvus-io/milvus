@@ -39,8 +39,8 @@ type channelsMgr interface {
 	getChannels(collectionID UniqueID) ([]pChan, error)
 	getVChannels(collectionID UniqueID) ([]vChan, error)
 	getOrCreateDmlStream(collectionID UniqueID) (msgstream.MsgStream, error)
-	removeDMLStream(collectionID UniqueID) error
-	removeAllDMLStream() error
+	removeDMLStream(collectionID UniqueID)
+	removeAllDMLStream()
 }
 
 type channelInfos struct {
@@ -279,7 +279,7 @@ func (mgr *singleTypeChannelsMgr) getOrCreateStream(collectionID UniqueID) (msgs
 
 // removeStream remove the corresponding stream of the specified collection. Idempotent.
 // If stream already exists, remove it, otherwise do nothing.
-func (mgr *singleTypeChannelsMgr) removeStream(collectionID UniqueID) error {
+func (mgr *singleTypeChannelsMgr) removeStream(collectionID UniqueID) {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
 	if info, ok := mgr.infos[collectionID]; ok {
@@ -288,11 +288,10 @@ func (mgr *singleTypeChannelsMgr) removeStream(collectionID UniqueID) error {
 		delete(mgr.infos, collectionID)
 	}
 	log.Info("dml stream removed", zap.Int64("collection_id", collectionID))
-	return nil
 }
 
 // removeAllStream remove all message stream.
-func (mgr *singleTypeChannelsMgr) removeAllStream() error {
+func (mgr *singleTypeChannelsMgr) removeAllStream() {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
 	for _, info := range mgr.infos {
@@ -301,7 +300,6 @@ func (mgr *singleTypeChannelsMgr) removeAllStream() error {
 	}
 	mgr.infos = make(map[UniqueID]streamInfos)
 	log.Info("all dml stream removed")
-	return nil
 }
 
 func newSingleTypeChannelsMgr(
@@ -339,12 +337,12 @@ func (mgr *channelsMgrImpl) getOrCreateDmlStream(collectionID UniqueID) (msgstre
 	return mgr.dmlChannelsMgr.getOrCreateStream(collectionID)
 }
 
-func (mgr *channelsMgrImpl) removeDMLStream(collectionID UniqueID) error {
-	return mgr.dmlChannelsMgr.removeStream(collectionID)
+func (mgr *channelsMgrImpl) removeDMLStream(collectionID UniqueID) {
+	mgr.dmlChannelsMgr.removeStream(collectionID)
 }
 
-func (mgr *channelsMgrImpl) removeAllDMLStream() error {
-	return mgr.dmlChannelsMgr.removeAllStream()
+func (mgr *channelsMgrImpl) removeAllDMLStream() {
+	mgr.dmlChannelsMgr.removeAllStream()
 }
 
 // newChannelsMgrImpl constructs a channels manager.
