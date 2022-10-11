@@ -54,6 +54,7 @@ type GcOption struct {
 type garbageCollector struct {
 	option     GcOption
 	meta       *meta
+	handler    Handler
 	segRefer   *SegmentReferenceManager
 	indexCoord types.IndexCoord
 
@@ -64,11 +65,12 @@ type garbageCollector struct {
 }
 
 // newGarbageCollector create garbage collector with meta and option
-func newGarbageCollector(meta *meta, segRefer *SegmentReferenceManager, indexCoord types.IndexCoord, opt GcOption) *garbageCollector {
+func newGarbageCollector(meta *meta, handler Handler, segRefer *SegmentReferenceManager, indexCoord types.IndexCoord, opt GcOption) *garbageCollector {
 	log.Info("GC with option", zap.Bool("enabled", opt.enabled), zap.Duration("interval", opt.checkInterval),
 		zap.Duration("missingTolerance", opt.missingTolerance), zap.Duration("dropTolerance", opt.dropTolerance))
 	return &garbageCollector{
 		meta:       meta,
+		handler:    handler,
 		segRefer:   segRefer,
 		indexCoord: indexCoord,
 		option:     opt,
@@ -194,7 +196,7 @@ func (gc *garbageCollector) clearEtcd() {
 			droppedCompactTo[to] = struct{}{}
 		}
 	}
-	indexedSegments := FilterInIndexedSegments(gc.meta, gc.indexCoord, lo.Keys(droppedCompactTo)...)
+	indexedSegments := FilterInIndexedSegments(gc.handler, gc.indexCoord, lo.Keys(droppedCompactTo)...)
 	indexedSet := make(typeutil.UniqueSet)
 	for _, segment := range indexedSegments {
 		indexedSet.Insert(segment.GetID())

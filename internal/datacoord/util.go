@@ -102,7 +102,7 @@ func GetCompactTime(ctx context.Context, allocator allocator) (*compactTime, err
 	return &compactTime{ttRetentionLogic, 0, 0}, nil
 }
 
-func FilterInIndexedSegments(meta *meta, indexCoord types.IndexCoord, segments ...*SegmentInfo) []*SegmentInfo {
+func FilterInIndexedSegments(handler Handler, indexCoord types.IndexCoord, segments ...*SegmentInfo) []*SegmentInfo {
 	if len(segments) == 0 {
 		return nil
 	}
@@ -118,8 +118,14 @@ func FilterInIndexedSegments(meta *meta, indexCoord types.IndexCoord, segments .
 		collectionSegments[collectionID] = append(collectionSegments[collectionID], segment.GetID())
 	}
 	for collection := range collectionSegments {
-		schema := meta.GetCollection(collection).Schema
-		for _, field := range schema.GetFields() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second*2)
+		coll, err := handler.GetCollection(ctx, collection)
+		cancel()
+		if err != nil {
+			log.Warn("failed to get collection schema", zap.Error(err))
+			continue
+		}
+		for _, field := range coll.Schema.GetFields() {
 			if field.GetDataType() == schemapb.DataType_BinaryVector ||
 				field.GetDataType() == schemapb.DataType_FloatVector {
 				vecFieldID[collection] = field.GetFieldID()

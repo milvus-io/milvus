@@ -66,6 +66,7 @@ type compactionSignal struct {
 var _ trigger = (*compactionTrigger)(nil)
 
 type compactionTrigger struct {
+	handler                   Handler
 	meta                      *meta
 	allocator                 allocator
 	signals                   chan *compactionSignal
@@ -85,6 +86,7 @@ func newCompactionTrigger(
 	allocator allocator,
 	segRefer *SegmentReferenceManager,
 	indexCoord types.IndexCoord,
+	handler Handler,
 ) *compactionTrigger {
 	return &compactionTrigger{
 		meta:                      meta,
@@ -94,6 +96,7 @@ func newCompactionTrigger(
 		segRefer:                  segRefer,
 		indexCoord:                indexCoord,
 		estimateDiskSegmentPolicy: calBySchemaPolicyWithDiskIndex,
+		handler:                   handler,
 	}
 }
 
@@ -168,9 +171,11 @@ func (t *compactionTrigger) allocTs() (Timestamp, error) {
 }
 
 func (t *compactionTrigger) getCompactTime(ts Timestamp, collectionID UniqueID) (*compactTime, error) {
-	coll := t.meta.GetCollection(collectionID)
-	if coll == nil {
-		return nil, fmt.Errorf("collection ID %d not found", collectionID)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	coll, err := t.handler.GetCollection(ctx, collectionID)
+	if err != nil {
+		return nil, fmt.Errorf("collection ID %d not found, err: %w", collectionID, err)
 	}
 
 	collectionTTL, err := getCollectionTTL(coll.Properties)
@@ -256,8 +261,10 @@ func (t *compactionTrigger) allocSignalID() (UniqueID, error) {
 }
 
 func (t *compactionTrigger) estimateDiskSegmentMaxNumOfRows(collectionID UniqueID) (int, error) {
-	collMeta := t.meta.GetCollection(collectionID)
-	if collMeta == nil {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	collMeta, err := t.handler.GetCollection(ctx, collectionID)
+	if err != nil {
 		return -1, fmt.Errorf("failed to get collection %d", collectionID)
 	}
 
@@ -327,7 +334,7 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) {
 			break
 		}
 
-		group.segments = FilterInIndexedSegments(t.meta, t.indexCoord, group.segments...)
+		group.segments = FilterInIndexedSegments(t.handler, t.indexCoord, group.segments...)
 
 		err := t.updateSegmentMaxSize(group.segments)
 		if err != nil {
@@ -591,7 +598,7 @@ func reverseGreedySelect(candidates []*SegmentInfo, free int64, maxSegment int) 
 
 func (t *compactionTrigger) getCandidateSegments(channel string, partitionID UniqueID) []*SegmentInfo {
 	segments := t.meta.GetSegmentsByChannel(channel)
-	segments = FilterInIndexedSegments(t.meta, t.indexCoord, segments...)
+	segments = FilterInIndexedSegments(t.handler, t.indexCoord, segments...)
 	var res []*SegmentInfo
 	for _, s := range segments {
 		if !isSegmentHealthy(s) ||
