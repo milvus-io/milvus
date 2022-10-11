@@ -730,6 +730,7 @@ func (m *mockRootCoordService) ListPolicy(ctx context.Context, in *internalpb.Li
 }
 
 type mockHandler struct {
+	meta *meta
 }
 
 func newMockHandler() *mockHandler {
@@ -755,6 +756,20 @@ func (h *mockHandler) CheckShouldDropChannel(channel string) bool {
 }
 
 func (h *mockHandler) FinishDropChannel(channel string) {}
+
+func (h *mockHandler) GetCollection(_ context.Context, collectionID UniqueID) (*collectionInfo, error) {
+	// empty schema
+	if h.meta != nil {
+		return h.meta.GetCollection(collectionID), nil
+	}
+	return &collectionInfo{ID: collectionID}, nil
+}
+
+func newMockHandlerWithMeta(meta *meta) *mockHandler {
+	return &mockHandler{
+		meta: meta,
+	}
+}
 
 type mockIndexCoord struct {
 	types.IndexCoord

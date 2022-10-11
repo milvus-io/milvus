@@ -36,6 +36,7 @@ type Handler interface {
 	GetDataVChanPositions(channel *channel, partitionID UniqueID) *datapb.VchannelInfo
 	CheckShouldDropChannel(channel string) bool
 	FinishDropChannel(channel string)
+	GetCollection(ctx context.Context, collectionID UniqueID) (*collectionInfo, error)
 }
 
 // ServerHandler is a helper of Server
@@ -97,8 +98,8 @@ func (h *ServerHandler) GetDataVChanPositions(channel *channel, partitionID Uniq
 	// use collection start position when segment position is not found
 	if seekPosition == nil {
 		if channel.StartPositions == nil {
-			collection := h.GetCollection(h.s.ctx, channel.CollectionID)
-			if collection != nil {
+			collection, err := h.GetCollection(h.s.ctx, channel.CollectionID)
+			if collection != nil && err == nil {
 				seekPosition = getCollectionStartPosition(channel.Name, collection)
 			}
 		} else {
@@ -126,7 +127,7 @@ func (h *ServerHandler) GetQueryVChanPositions(channel *channel, partitionID Uni
 		return s.InsertChannel == channel.Name
 	})
 	segmentInfos := make(map[int64]*SegmentInfo)
-	indexedSegments := FilterInIndexedSegments(h.s.meta, h.s.indexCoord, segments...)
+	indexedSegments := FilterInIndexedSegments(h, h.s.indexCoord, segments...)
 	indexed := make(typeutil.UniqueSet)
 	for _, segment := range indexedSegments {
 		indexed.Insert(segment.GetID())
@@ -201,8 +202,8 @@ func (h *ServerHandler) GetQueryVChanPositions(channel *channel, partitionID Uni
 	// use collection start position when segment position is not found
 	if seekPosition == nil {
 		if channel.StartPositions == nil {
-			collection := h.GetCollection(h.s.ctx, channel.CollectionID)
-			if collection != nil {
+			collection, err := h.GetCollection(h.s.ctx, channel.CollectionID)
+			if collection != nil && err == nil {
 				seekPosition = getCollectionStartPosition(channel.Name, collection)
 			}
 		} else {
@@ -255,17 +256,18 @@ func trimSegmentInfo(info *datapb.SegmentInfo) *datapb.SegmentInfo {
 }
 
 // GetCollection returns collection info with specified collection id
-func (h *ServerHandler) GetCollection(ctx context.Context, collectionID UniqueID) *collectionInfo {
+func (h *ServerHandler) GetCollection(ctx context.Context, collectionID UniqueID) (*collectionInfo, error) {
 	coll := h.s.meta.GetCollection(collectionID)
 	if coll != nil {
-		return coll
+		return coll, nil
 	}
 	err := h.s.loadCollectionFromRootCoord(ctx, collectionID)
 	if err != nil {
 		log.Warn("failed to load collection from rootcoord", zap.Int64("collectionID", collectionID), zap.Error(err))
+		return nil, err
 	}
 
-	return h.s.meta.GetCollection(collectionID)
+	return h.s.meta.GetCollection(collectionID), nil
 }
 
 // CheckShouldDropChannel returns whether specified channel is marked to be removed

@@ -374,6 +374,7 @@ func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID Unique
 }
 
 func (s *SegmentManager) estimateMaxNumOfRows(collectionID UniqueID) (int, error) {
+	// it's ok to use meta.GetCollection here, since collection meta is set before using segmentManager
 	collMeta := s.meta.GetCollection(collectionID)
 	if collMeta == nil {
 		return -1, fmt.Errorf("failed to get collection %d", collectionID)
