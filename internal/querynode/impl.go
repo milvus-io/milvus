@@ -1260,9 +1260,13 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 	sealedSegments := node.metaReplica.getSealedSegments()
 	shardClusters := node.ShardClusterService.GetShardClusters()
 
-	channelGrowingsMap := make(map[string][]int64)
+	channelGrowingsMap := make(map[string]map[int64]*internalpb.MsgPosition)
 	for _, s := range growingSegments {
-		channelGrowingsMap[s.vChannelID] = append(channelGrowingsMap[s.vChannelID], s.ID())
+		if _, ok := channelGrowingsMap[s.vChannelID]; !ok {
+			channelGrowingsMap[s.vChannelID] = make(map[int64]*internalpb.MsgPosition)
+		}
+
+		channelGrowingsMap[s.vChannelID][s.ID()] = s.startPosition
 	}
 
 	segmentVersionInfos := make([]*querypb.SegmentVersionInfo, 0, len(sealedSegments))
@@ -1292,10 +1296,10 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 			}
 		}
 		view := &querypb.LeaderView{
-			Collection:        sc.collectionID,
-			Channel:           sc.vchannelName,
-			SegmentDist:       mapping,
-			GrowingSegmentIDs: channelGrowingsMap[sc.vchannelName],
+			Collection:      sc.collectionID,
+			Channel:         sc.vchannelName,
+			SegmentDist:     mapping,
+			GrowingSegments: channelGrowingsMap[sc.vchannelName],
 		}
 		leaderViews = append(leaderViews, view)
 

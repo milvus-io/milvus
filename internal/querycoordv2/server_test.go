@@ -34,7 +34,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/dist"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/mocks"
-	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -272,11 +271,11 @@ func (suite *ServerSuite) loadAll() {
 func (suite *ServerSuite) assertLoaded(collection int64) {
 	suite.True(suite.server.meta.Exist(collection))
 	for _, channel := range suite.channels[collection] {
-		suite.NotNil(suite.server.targetMgr.GetDmChannel(channel))
+		suite.NotNil(suite.server.targetMgr.GetDmChannel(collection, channel, meta.NextTarget))
 	}
 	for _, partitions := range suite.segments[collection] {
 		for _, segment := range partitions {
-			suite.NotNil(suite.server.targetMgr.GetSegment(segment))
+			suite.NotNil(suite.server.targetMgr.GetHistoricalSegment(collection, segment, meta.NextTarget))
 		}
 	}
 }
@@ -346,6 +345,7 @@ func (suite *ServerSuite) updateCollectionStatus(collectionID int64, status quer
 func (suite *ServerSuite) hackServer() {
 	suite.broker = meta.NewMockBroker(suite.T())
 	suite.server.broker = suite.broker
+	suite.server.targetMgr = meta.NewTargetManager(suite.broker, suite.server.meta)
 	suite.server.taskScheduler = task.NewScheduler(
 		suite.server.ctx,
 		suite.server.meta,
@@ -354,13 +354,6 @@ func (suite *ServerSuite) hackServer() {
 		suite.broker,
 		suite.server.cluster,
 		suite.server.nodeMgr,
-	)
-	suite.server.handoffObserver = observers.NewHandoffObserver(
-		suite.server.store,
-		suite.server.meta,
-		suite.server.dist,
-		suite.server.targetMgr,
-		suite.server.broker,
 	)
 	suite.server.distController = dist.NewDistController(
 		suite.server.cluster,

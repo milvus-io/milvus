@@ -20,21 +20,25 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/suite"
+
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/etcd"
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/suite"
 )
 
 type ChannelCheckerTestSuite struct {
 	suite.Suite
 	kv      *etcdkv.EtcdKV
 	checker *ChannelChecker
+	meta    *meta.Meta
+	broker  *meta.MockBroker
 }
 
 func (suite *ChannelCheckerTestSuite) SetupSuite() {
@@ -51,13 +55,14 @@ func (suite *ChannelCheckerTestSuite) SetupTest() {
 	// meta
 	store := meta.NewMetaStore(suite.kv)
 	idAllocator := RandomIncrementIDAllocator()
-	testMeta := meta.NewMeta(idAllocator, store)
+	suite.meta = meta.NewMeta(idAllocator, store)
+	suite.broker = meta.NewMockBroker(suite.T())
+	targetManager := meta.NewTargetManager(suite.broker, suite.meta)
 
 	distManager := meta.NewDistributionManager()
-	targetManager := meta.NewTargetManager()
 
 	balancer := suite.createMockBalancer()
-	suite.checker = NewChannelChecker(testMeta, distManager, targetManager, balancer)
+	suite.checker = NewChannelChecker(suite.meta, distManager, targetManager, balancer)
 }
 
 func (suite *ChannelCheckerTestSuite) TearDownTest() {
@@ -87,7 +92,16 @@ func (suite *ChannelCheckerTestSuite) TestLoadChannel() {
 	checker.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
 	checker.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1}))
 
-	checker.targetMgr.AddDmChannel(utils.CreateTestChannel(1, 1, 1, "test-insert-channel"))
+	channels := []*datapb.VchannelInfo{
+		{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+	}
+
+	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, int64(1), int64(1)).Return(
+		channels, nil, nil)
+	checker.targetMgr.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
 
 	tasks := checker.Check(context.TODO())
 	suite.Len(tasks, 1)
@@ -119,9 +133,27 @@ func (suite *ChannelCheckerTestSuite) TestReduceChannel() {
 
 func (suite *ChannelCheckerTestSuite) TestRepeatedChannels() {
 	checker := suite.checker
-	checker.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
-	checker.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
-	checker.targetMgr.AddDmChannel(utils.CreateTestChannel(1, 1, 1, "test-insert-channel"))
+	err := checker.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
+	suite.NoError(err)
+	err = checker.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
+	suite.NoError(err)
+
+	segments := []*datapb.SegmentBinlogs{
+		{
+			SegmentID:     1,
+			InsertChannel: "test-insert-channel",
+		},
+	}
+
+	channels := []*datapb.VchannelInfo{
+		{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+	}
+	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, int64(1), int64(1)).Return(
+		channels, segments, nil)
+	checker.targetMgr.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
 	checker.dist.ChannelDistManager.Update(1, utils.CreateTestChannel(1, 1, 1, "test-insert-channel"))
 	checker.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 2, "test-insert-channel"))
 

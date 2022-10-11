@@ -148,7 +148,7 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context, req *querypb.LoadS
 			return err
 		}
 
-		segment, err := newSegment(collection, segmentID, partitionID, collectionID, vChannelID, segmentType, req.GetVersion(), loader.cgoPool)
+		segment, err := newSegment(collection, segmentID, partitionID, collectionID, vChannelID, segmentType, req.GetVersion(), info.StartPosition, loader.cgoPool)
 		if err != nil {
 			log.Error("load segment failed when create new segment",
 				zap.Int64("partitionID", partitionID),

@@ -198,7 +198,7 @@ func (s *DataSyncServiceSuite) TestRemoveEmptyFlowgraphByChannel() {
 		channelName := fmt.Sprintf("%s_%d_1", Params.CommonCfg.RootCoordDml, defaultCollectionID)
 		deltaChannelName, err := funcutil.ConvertChannelName(channelName, Params.CommonCfg.RootCoordDml, Params.CommonCfg.RootCoordDelta)
 		s.Require().NoError(err)
-		err = s.dsService.metaReplica.addSegment(defaultSegmentID, defaultPartitionID, defaultCollectionID, channelName, defaultSegmentVersion, segmentTypeSealed)
+		err = s.dsService.metaReplica.addSegment(defaultSegmentID, defaultPartitionID, defaultCollectionID, channelName, defaultSegmentVersion, defaultSegmentStartPosition, segmentTypeSealed)
 		s.Require().NoError(err)
 
 		_, err = s.dsService.addFlowGraphsForDeltaChannels(defaultCollectionID, []string{deltaChannelName})

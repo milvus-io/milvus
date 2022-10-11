@@ -287,7 +287,7 @@ func (s *Server) tryGetNodesMetrics(ctx context.Context, req *milvuspb.GetMetric
 func (s *Server) fillReplicaInfo(replica *meta.Replica, withShardNodes bool) (*milvuspb.ReplicaInfo, error) {
 	info := utils.Replica2ReplicaInfo(replica.Replica)
 
-	channels := s.targetMgr.GetDmChannelsByCollection(replica.GetCollectionID())
+	channels := s.targetMgr.GetDmChannelsByCollection(replica.GetCollectionID(), meta.CurrentTarget)
 	if len(channels) == 0 {
 		msg := "failed to get channels, collection not loaded"
 		log.Warn(msg)

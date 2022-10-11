@@ -25,6 +25,7 @@ import (
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
 )
 
@@ -73,16 +74,14 @@ func (c *ChannelChecker) Check(ctx context.Context) []task.Task {
 
 func (c *ChannelChecker) checkReplica(ctx context.Context, replica *meta.Replica) []task.Task {
 	ret := make([]task.Task, 0)
-	targets := c.targetMgr.GetDmChannelsByCollection(replica.GetCollectionID())
-	dists := c.getChannelDist(replica)
 
-	lacks, redundancies := diffChannels(targets, dists)
+	lacks, redundancies := c.getDmChannelDiff(c.targetMgr, c.dist, c.meta, replica.GetCollectionID(), replica.GetID())
 	tasks := c.createChannelLoadTask(ctx, lacks, replica)
 	ret = append(ret, tasks...)
 	tasks = c.createChannelReduceTasks(ctx, redundancies, replica.GetID())
 	ret = append(ret, tasks...)
 
-	repeated := findRepeatedChannels(dists)
+	repeated := c.findRepeatedChannels(c.dist, c.meta, replica.GetID())
 	tasks = c.createChannelReduceTasks(ctx, repeated, replica.GetID())
 	ret = append(ret, tasks...)
 
@@ -91,38 +90,69 @@ func (c *ChannelChecker) checkReplica(ctx context.Context, replica *meta.Replica
 	return ret
 }
 
-func (c *ChannelChecker) getChannelDist(replica *meta.Replica) []*meta.DmChannel {
-	dists := make([]*meta.DmChannel, 0)
-	for _, nodeID := range replica.Nodes.Collect() {
-		dists = append(dists, c.dist.ChannelDistManager.GetByCollectionAndNode(replica.GetCollectionID(), nodeID)...)
+// GetDmChannelDiff get channel diff between target and dist
+func (c *ChannelChecker) getDmChannelDiff(targetMgr *meta.TargetManager,
+	distMgr *meta.DistributionManager,
+	metaInfo *meta.Meta,
+	collectionID int64,
+	replicaID int64) (toLoad, toRelease []*meta.DmChannel) {
+	replica := metaInfo.Get(replicaID)
+	if replica == nil {
+		log.Info("replica does not exist, skip it")
+		return
 	}
-	return dists
-}
 
-func diffChannels(targets, dists []*meta.DmChannel) (lacks, redundancies []*meta.DmChannel) {
-	distMap := make(map[string]struct{})
-	targetMap := make(map[string]struct{})
-	for _, ch := range targets {
-		targetMap[ch.GetChannelName()] = struct{}{}
+	dist := c.getChannelDist(distMgr, replica)
+	distMap := typeutil.NewSet[string]()
+	for _, ch := range dist {
+		distMap.Insert(ch.GetChannelName())
 	}
-	for _, ch := range dists {
-		distMap[ch.GetChannelName()] = struct{}{}
-		if _, ok := targetMap[ch.GetChannelName()]; !ok {
-			redundancies = append(redundancies, ch)
+
+	nextTargetMap := targetMgr.GetDmChannelsByCollection(collectionID, meta.NextTarget)
+	currentTargetMap := targetMgr.GetDmChannelsByCollection(collectionID, meta.CurrentTarget)
+
+	// get channels which exists on dist, but not exist on current and next
+	for _, ch := range dist {
+		_, existOnCurrent := currentTargetMap[ch.GetChannelName()]
+		_, existOnNext := nextTargetMap[ch.GetChannelName()]
+		if !existOnNext && !existOnCurrent {
+			toRelease = append(toRelease, ch)
 		}
 	}
-	for _, ch := range targets {
-		if _, ok := distMap[ch.GetChannelName()]; !ok {
-			lacks = append(lacks, ch)
+
+	//get channels which exists on next target, but not on dist
+	for name, channel := range nextTargetMap {
+		_, existOnDist := distMap[name]
+		if !existOnDist {
+			toLoad = append(toLoad, channel)
 		}
 	}
+
 	return
 }
 
-func findRepeatedChannels(dists []*meta.DmChannel) []*meta.DmChannel {
+func (c *ChannelChecker) getChannelDist(distMgr *meta.DistributionManager, replica *meta.Replica) []*meta.DmChannel {
+	dist := make([]*meta.DmChannel, 0)
+	for _, nodeID := range replica.Nodes.Collect() {
+		dist = append(dist, distMgr.ChannelDistManager.GetByCollectionAndNode(replica.GetCollectionID(), nodeID)...)
+	}
+	return dist
+}
+
+func (c *ChannelChecker) findRepeatedChannels(distMgr *meta.DistributionManager,
+	metaInfo *meta.Meta,
+	replicaID int64) []*meta.DmChannel {
+	replica := metaInfo.Get(replicaID)
 	ret := make([]*meta.DmChannel, 0)
+
+	if replica == nil {
+		log.Info("replica does not exist, skip it")
+		return ret
+	}
+	dist := c.getChannelDist(distMgr, replica)
+
 	versionsMap := make(map[string]*meta.DmChannel)
-	for _, ch := range dists {
+	for _, ch := range dist {
 		maxVer, ok := versionsMap[ch.GetChannelName()]
 		if !ok {
 			versionsMap[ch.GetChannelName()] = ch

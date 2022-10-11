@@ -22,11 +22,6 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/milvus-io/milvus/internal/util/errorutil"
-	"github.com/milvus-io/milvus/internal/util/paramtable"
-
-	"golang.org/x/sync/errgroup"
-
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/log"
@@ -36,11 +31,14 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/util/errorutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 )
 
 var (
@@ -208,7 +206,6 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 		s.targetMgr,
 		s.broker,
 		s.nodeMgr,
-		s.handoffObserver,
 	)
 	s.jobScheduler.Add(loadJob)
 	err := loadJob.Wait()
@@ -245,7 +242,6 @@ func (s *Server) ReleaseCollection(ctx context.Context, req *querypb.ReleaseColl
 		s.dist,
 		s.meta,
 		s.targetMgr,
-		s.handoffObserver,
 	)
 	s.jobScheduler.Add(releaseJob)
 	err := releaseJob.Wait()
@@ -288,7 +284,6 @@ func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitions
 		s.targetMgr,
 		s.broker,
 		s.nodeMgr,
-		s.handoffObserver,
 	)
 	s.jobScheduler.Add(loadJob)
 	err := loadJob.Wait()
@@ -332,7 +327,6 @@ func (s *Server) ReleasePartitions(ctx context.Context, req *querypb.ReleasePart
 		s.dist,
 		s.meta,
 		s.targetMgr,
-		s.handoffObserver,
 	)
 	s.jobScheduler.Add(releaseJob)
 	err := releaseJob.Wait()
@@ -661,7 +655,7 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 		return resp, nil
 	}
 
-	channels := s.targetMgr.GetDmChannelsByCollection(req.GetCollectionID())
+	channels := s.targetMgr.GetDmChannelsByCollection(req.GetCollectionID(), meta.CurrentTarget)
 	if len(channels) == 0 {
 		msg := "failed to get channels"
 		log.Warn(msg, zap.Error(meta.ErrCollectionNotFound))

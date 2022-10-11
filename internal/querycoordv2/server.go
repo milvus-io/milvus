@@ -27,11 +27,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/samber/lo"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
-	"golang.org/x/sync/errgroup"
-
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -39,7 +34,6 @@ import (
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/dist"
@@ -57,6 +51,9 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 )
 
 var (
@@ -106,7 +103,7 @@ type Server struct {
 	// Observers
 	collectionObserver *observers.CollectionObserver
 	leaderObserver     *observers.LeaderObserver
-	handoffObserver    *observers.HandoffObserver
+	targetObserver     *observers.TargetObserver
 
 	balancer balance.Balance
 
@@ -264,12 +261,13 @@ func (s *Server) initMeta() error {
 		ChannelDistManager: meta.NewChannelDistManager(),
 		LeaderViewManager:  meta.NewLeaderViewManager(),
 	}
-	s.targetMgr = meta.NewTargetManager()
 	s.broker = meta.NewCoordinatorBroker(
 		s.dataCoord,
 		s.rootCoord,
 		s.indexCoord,
 	)
+	s.targetMgr = meta.NewTargetManager(s.broker, s.meta)
+
 	return nil
 }
 
@@ -286,11 +284,10 @@ func (s *Server) initObserver() {
 		s.targetMgr,
 		s.cluster,
 	)
-	s.handoffObserver = observers.NewHandoffObserver(
-		s.store,
+	s.targetObserver = observers.NewTargetObserver(
 		s.meta,
-		s.dist,
 		s.targetMgr,
+		s.dist,
 		s.broker,
 	)
 }
@@ -310,12 +307,6 @@ func (s *Server) Start() error {
 	}
 	s.wg.Add(1)
 	go s.watchNodes(revision)
-
-	// handoff master start before recover collection, to clean all outdated handoff event.
-	if err := s.handoffObserver.Start(s.ctx); err != nil {
-		log.Error("start handoff observer failed, exit...", zap.Error(err))
-		panic(err.Error())
-	}
 
 	log.Info("start recovering dist and target")
 	err = s.recover()
@@ -338,6 +329,7 @@ func (s *Server) Start() error {
 	log.Info("start observers...")
 	s.collectionObserver.Start(s.ctx)
 	s.leaderObserver.Start(s.ctx)
+	s.targetObserver.Start(s.ctx)
 
 	if s.enableActiveStandBy {
 		s.activateFunc = func() {
@@ -393,8 +385,8 @@ func (s *Server) Stop() error {
 	if s.leaderObserver != nil {
 		s.leaderObserver.Stop()
 	}
-	if s.handoffObserver != nil {
-		s.handoffObserver.Stop()
+	if s.targetObserver != nil {
+		s.targetObserver.Stop()
 	}
 
 	s.wg.Wait()
@@ -506,35 +498,12 @@ func (s *Server) recover() error {
 }
 
 func (s *Server) recoverCollectionTargets(ctx context.Context, collection int64) error {
-	var (
-		partitions []int64
-		err        error
-	)
-	if s.meta.GetLoadType(collection) == querypb.LoadType_LoadCollection {
-		partitions, err = s.broker.GetPartitions(ctx, collection)
-		if err != nil {
-			msg := "failed to get partitions from RootCoord"
-			log.Error(msg, zap.Error(err))
-			return utils.WrapError(msg, err)
-		}
-	} else {
-		partitions = lo.Map(s.meta.GetPartitionsByCollection(collection), func(partition *meta.Partition, _ int) int64 {
-			return partition.GetPartitionID()
-		})
-	}
-
-	s.handoffObserver.Register(collection)
-	err = utils.RegisterTargets(
-		ctx,
-		s.targetMgr,
-		s.broker,
-		collection,
-		partitions,
-	)
+	err := s.targetMgr.UpdateCollectionNextTarget(collection)
 	if err != nil {
-		return err
+		msg := "failed to update next target for collection"
+		log.Error(msg, zap.Error(err))
+		return utils.WrapError(msg, err)
 	}
-	s.handoffObserver.StartHandoff(collection)
 	return nil
 }
 
@@ -620,23 +589,12 @@ func (s *Server) handleNodeDown(node int64) {
 	// are missed, it will recover for a while.
 	channels := s.dist.ChannelDistManager.GetByNode(node)
 	for _, channel := range channels {
-		partitions, err := utils.GetPartitions(s.meta.CollectionManager,
-			s.broker,
-			channel.GetCollectionID())
+		err := s.targetMgr.UpdateCollectionNextTarget(channel.GetCollectionID())
 		if err != nil {
-			log.Warn("failed to refresh targets of collection",
-				zap.Int64("collectionID", channel.GetCollectionID()),
+			msg := "failed to update next targets for collection"
+			log.Error(msg,
 				zap.Error(err))
-		}
-		err = utils.RegisterTargets(s.ctx,
-			s.targetMgr,
-			s.broker,
-			channel.GetCollectionID(),
-			partitions)
-		if err != nil {
-			log.Warn("failed to refresh targets of collection",
-				zap.Int64("collectionID", channel.GetCollectionID()),
-				zap.Error(err))
+			continue
 		}
 	}
 

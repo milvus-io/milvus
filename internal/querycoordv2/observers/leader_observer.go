@@ -106,7 +106,7 @@ func (o *LeaderObserver) findNeedLoadedSegments(leaderView *meta.LeaderView, dis
 	for _, s := range dists {
 		version, ok := leaderView.Segments[s.GetID()]
 		if ok && version.GetVersion() >= s.Version ||
-			!o.target.ContainSegment(s.GetID()) {
+			o.target.GetHistoricalSegment(s.CollectionID, s.GetID(), meta.CurrentTarget) == nil {
 			continue
 		}
 		ret = append(ret, &querypb.SyncAction{
@@ -128,7 +128,7 @@ func (o *LeaderObserver) findNeedRemovedSegments(leaderView *meta.LeaderView, di
 	}
 	for sid := range leaderView.Segments {
 		_, ok := distMap[sid]
-		if ok || o.target.ContainSegment(sid) {
+		if ok || o.target.GetHistoricalSegment(leaderView.CollectionID, sid, meta.CurrentTarget) != nil {
 			continue
 		}
 		ret = append(ret, &querypb.SyncAction{
