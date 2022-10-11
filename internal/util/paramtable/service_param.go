@@ -219,6 +219,10 @@ type MetaStoreConfig struct {
 
 func (p *MetaStoreConfig) init(base *BaseTable) {
 	p.Base = base
+	p.LoadCfgToMemory()
+}
+
+func (p *MetaStoreConfig) LoadCfgToMemory() {
 	p.initMetaStoreType()
 }
 

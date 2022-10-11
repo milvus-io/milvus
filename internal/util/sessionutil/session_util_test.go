@@ -685,3 +685,20 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 	wg.Wait()
 	assert.False(t, s2.isStandby.Load().(bool))
 }
+
+func TestSessionEventType_String(t *testing.T) {
+	tests := []struct {
+		name string
+		t    SessionEventType
+		want string
+	}{
+		{t: SessionNoneEvent, want: ""},
+		{t: SessionAddEvent, want: "SessionAddEvent"},
+		{t: SessionDelEvent, want: "SessionDelEvent"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equalf(t, tt.want, tt.t.String(), "String()")
+		})
+	}
+}

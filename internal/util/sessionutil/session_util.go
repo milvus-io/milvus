@@ -33,6 +33,17 @@ var GlobalParams paramtable.ComponentParam
 // SessionEventType session event type
 type SessionEventType int
 
+func (t SessionEventType) String() string {
+	switch t {
+	case SessionAddEvent:
+		return "SessionAddEvent"
+	case SessionDelEvent:
+		return "SessionDelEvent"
+	default:
+		return ""
+	}
+}
+
 // Rewatch defines the behavior outer session watch handles ErrCompacted
 // it should process the current full list of session
 // and returns err if meta error or anything else goes wrong

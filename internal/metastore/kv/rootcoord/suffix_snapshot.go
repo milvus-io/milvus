@@ -27,6 +27,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/common"
+
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/retry"
@@ -38,6 +40,16 @@ var (
 	// SuffixSnapshotTombstone special value for tombstone mark
 	SuffixSnapshotTombstone = []byte{0xE2, 0x9B, 0xBC}
 )
+
+// IsTombstone used in migration tool also.
+func IsTombstone(value string) bool {
+	return bytes.Equal([]byte(value), SuffixSnapshotTombstone)
+}
+
+// ConstructTombstone used in migration tool also.
+func ConstructTombstone() []byte {
+	return common.CloneByteSlice(SuffixSnapshotTombstone)
+}
 
 // SuffixSnapshot implements SnapshotKV
 // this is a simple replacement for MetaSnapshot, which is not available due to etcd compaction
@@ -106,7 +118,7 @@ func NewSuffixSnapshot(txnKV kv.TxnKV, sep, root, snapshot string) (*SuffixSnaps
 
 // isTombstone helper function to check whether is tombstone mark
 func (ss *SuffixSnapshot) isTombstone(value string) bool {
-	return bytes.Equal([]byte(value), SuffixSnapshotTombstone)
+	return IsTombstone(value)
 }
 
 // hideRootPrefix helper function to hide root prefix from key
@@ -120,11 +132,17 @@ func (ss *SuffixSnapshot) composeSnapshotPrefix(key string) string {
 	return path.Join(ss.snapshotPrefix, key+ss.separator)
 }
 
+// ComposeSnapshotKey used in migration tool also, in case of any rules change.
+func ComposeSnapshotKey(snapshotPrefix string, key string, separator string, ts typeutil.Timestamp) string {
+	// [key][sep][ts]
+	return path.Join(snapshotPrefix, fmt.Sprintf("%s%s%d", key, separator, ts))
+}
+
 // composeTSKey unified tsKey composing method
 // uses key, ts and separator to form a key
 func (ss *SuffixSnapshot) composeTSKey(key string, ts typeutil.Timestamp) string {
 	// [key][sep][ts]
-	return path.Join(ss.snapshotPrefix, fmt.Sprintf("%s%s%d", key, ss.separator, ts))
+	return ComposeSnapshotKey(ss.snapshotPrefix, key, ss.separator, ts)
 }
 
 // isTSKey checks whether a key is in ts-key format
