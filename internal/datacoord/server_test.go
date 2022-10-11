@@ -1648,7 +1648,7 @@ func TestGetDataVChanPositions(t *testing.T) {
 	svr := newTestServer(t, nil)
 	defer closeTestServer(t, svr)
 	schema := newTestSchema()
-	svr.meta.AddCollection(&datapb.CollectionInfo{
+	svr.meta.AddCollection(&collectionInfo{
 		ID:     0,
 		Schema: schema,
 		StartPositions: []*commonpb.KeyDataPair{
@@ -1658,7 +1658,7 @@ func TestGetDataVChanPositions(t *testing.T) {
 			},
 		},
 	})
-	svr.meta.AddCollection(&datapb.CollectionInfo{
+	svr.meta.AddCollection(&collectionInfo{
 		ID:     1,
 		Schema: schema,
 		StartPositions: []*commonpb.KeyDataPair{
