@@ -46,7 +46,7 @@ $ make verifiers
 Compile milvus
 
 ```shell
-$ make all
+$ make milvus
 ```
 
 ## Install docker-compose

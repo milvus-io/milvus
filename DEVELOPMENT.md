@@ -126,7 +126,7 @@ Milvus depends on etcd, Pulsar and MinIO. Using Docker Compose to manage these i
 To build the Milvus project, run the following command:
 
 ```shell
-$ make all
+$ make milvus
 ```
 
 If this command succeed, you will now have an executable at `bin/milvus` off of your Milvus project directory.

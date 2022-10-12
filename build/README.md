@@ -115,7 +115,7 @@ docker exec -ti milvus_builder_1 bash
 Compile the project and run unit test, see details at the [DEVELOPMENT.md](../DEVELOPMENT.md)
 
 ```shell
-make all
+make milvus
 ```
 
 ```shell
