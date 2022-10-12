@@ -77,6 +77,7 @@ type Limit = ratelimitutil.Limit
 //   3. Disk quota protection ->		force deny writing if exceeded
 //   4. DQL Queue length protection ->  dqlRate = curDQLRate * CoolOffSpeed
 //   5. DQL queue latency protection -> dqlRate = curDQLRate * CoolOffSpeed
+//	 6. Search result protection ->	 	searchRate = curSearchRate * CoolOffSpeed
 // If necessary, user can also manually force to deny RW requests.
 type QuotaCenter struct {
 	// clients
@@ -285,9 +286,6 @@ func (q *QuotaCenter) calculateReadRates() {
 		q.forceDenyReading(ManualForceDeny)
 		return
 	}
-	if !Params.QuotaConfig.QueueProtectionEnabled {
-		return
-	}
 
 	coolOffSpeed := Params.QuotaConfig.CoolOffSpeed
 	coolOff := func(realTimeSearchRate float64, realTimeQueryRate float64) {
@@ -315,6 +313,13 @@ func (q *QuotaCenter) calculateReadRates() {
 	queueLengthFactor := q.checkNQInQuery()
 	log.Debug("QuotaCenter checkNQInQuery done", zap.Float64("queueLengthFactor", queueLengthFactor))
 	if Limit(queueLengthFactor) == Limit(coolOffSpeed) {
+		coolOff(realTimeSearchRate, realTimeQueryRate)
+		return
+	}
+
+	resultRateFactor := q.checkReadResultRate()
+	log.Debug("QuotaCenter checkReadResultRate done", zap.Float64("resultRateFactor", resultRateFactor))
+	if Limit(resultRateFactor) == Limit(coolOffSpeed) {
 		coolOff(realTimeSearchRate, realTimeQueryRate)
 	}
 }
@@ -443,15 +448,18 @@ func (q *QuotaCenter) timeTickDelay() (float64, error) {
 // checkNQInQuery checks search&query nq in QueryNode,
 // and return the factor according to NQInQueueThreshold.
 func (q *QuotaCenter) checkNQInQuery() float64 {
+	if !Params.QuotaConfig.QueueProtectionEnabled {
+		return 1
+	}
+
 	sum := func(ri metricsinfo.ReadInfoInQueue) int64 {
 		return ri.UnsolvedQueue + ri.ReadyQueue + ri.ReceiveChan + ri.ExecuteChan
 	}
 
-	factor := float64(1)
 	nqInQueueThreshold := Params.QuotaConfig.NQInQueueThreshold
 	if nqInQueueThreshold < 0 {
 		// < 0 means disable queue length protection
-		return factor
+		return 1
 	}
 	for _, metric := range q.queryNodeMetrics {
 		searchNQSum := sum(metric.SearchQueue)
@@ -461,17 +469,20 @@ func (q *QuotaCenter) checkNQInQuery() float64 {
 			return Params.QuotaConfig.CoolOffSpeed
 		}
 	}
-	return factor
+	return 1
 }
 
 // checkQueryLatency checks queueing latency in QueryNode for search&query requests,
 // and return the factor according to QueueLatencyThreshold.
 func (q *QuotaCenter) checkQueryLatency() float64 {
-	factor := float64(1)
+	if !Params.QuotaConfig.QueueProtectionEnabled {
+		return 1
+	}
+
 	queueLatencyThreshold := Params.QuotaConfig.QueueLatencyThreshold
 	if queueLatencyThreshold < 0 {
 		// < 0 means disable queue latency protection
-		return factor
+		return 1
 	}
 	for _, metric := range q.queryNodeMetrics {
 		searchLatency := metric.SearchQueue.AvgQueueDuration
@@ -480,7 +491,29 @@ func (q *QuotaCenter) checkQueryLatency() float64 {
 			return Params.QuotaConfig.CoolOffSpeed
 		}
 	}
-	return factor
+	return 1
+}
+
+// checkReadResultRate checks search result rate in Proxy,
+// and return the factor according to MaxReadResultRate.
+func (q *QuotaCenter) checkReadResultRate() float64 {
+	if !Params.QuotaConfig.ResultProtectionEnabled {
+		return 1
+	}
+
+	maxRate := Params.QuotaConfig.MaxReadResultRate
+	rateCount := float64(0)
+	for _, metric := range q.proxyMetrics {
+		for _, rm := range metric.Rms {
+			if rm.Label == metricsinfo.ReadResultThroughput {
+				rateCount += rm.Rate
+			}
+		}
+	}
+	if rateCount >= maxRate {
+		return Params.QuotaConfig.CoolOffSpeed
+	}
+	return 1
 }
 
 // memoryToWaterLevel checks whether any node has memory resource issue,

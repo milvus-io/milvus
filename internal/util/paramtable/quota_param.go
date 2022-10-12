@@ -29,10 +29,10 @@ import (
 const (
 	// defaultMax is the default unlimited rate or threshold.
 	defaultMax = float64(math.MaxFloat64)
-	// GB used to convert gigabytes and bytes.
-	GB = 1024.0 * 1024.0 * 1024.0
+	// GBSize used to convert gigabytes and bytes.
+	GBSize = 1024.0 * 1024.0 * 1024.0
 	// defaultDiskQuotaInGB is the default disk quota in gigabytes.
-	defaultDiskQuotaInGB = defaultMax / GB
+	defaultDiskQuotaInGB = defaultMax / GBSize
 	// defaultMin is the default minimal rate.
 	defaultMin = float64(0)
 	// defaultLowWaterLevel is the default memory low water level.
@@ -93,11 +93,13 @@ type quotaConfig struct {
 	DiskQuota                     float64
 
 	// limit reading
-	ForceDenyReading       bool
-	QueueProtectionEnabled bool
-	NQInQueueThreshold     int64
-	QueueLatencyThreshold  float64
-	CoolOffSpeed           float64
+	ForceDenyReading        bool
+	QueueProtectionEnabled  bool
+	NQInQueueThreshold      int64
+	QueueLatencyThreshold   float64
+	ResultProtectionEnabled bool
+	MaxReadResultRate       float64
+	CoolOffSpeed            float64
 }
 
 func (p *quotaConfig) init(base *BaseTable) {
@@ -154,6 +156,8 @@ func (p *quotaConfig) init(base *BaseTable) {
 	p.initQueueProtectionEnabled()
 	p.initNQInQueueThreshold()
 	p.initQueueLatencyThreshold()
+	p.initResultProtectionEnabled()
+	p.initMaxReadResultRate()
 	p.initCoolOffSpeed()
 }
 
@@ -520,7 +524,7 @@ func (p *quotaConfig) initDiskQuota() {
 		p.DiskQuota = defaultDiskQuotaInGB
 	}
 	// gigabytes to bytes
-	p.DiskQuota = p.DiskQuota * GB
+	p.DiskQuota = p.DiskQuota * GBSize
 }
 
 func (p *quotaConfig) initForceDenyReading() {
@@ -553,13 +557,32 @@ func (p *quotaConfig) initQueueLatencyThreshold() {
 	}
 }
 
+func (p *quotaConfig) initResultProtectionEnabled() {
+	p.ResultProtectionEnabled = p.Base.ParseBool("quotaAndLimits.limitReading.resultProtection.enabled", false)
+}
+
+func (p *quotaConfig) initMaxReadResultRate() {
+	if !p.ResultProtectionEnabled {
+		p.MaxReadResultRate = defaultMax
+		return
+	}
+	p.MaxReadResultRate = p.Base.ParseFloatWithDefault("quotaAndLimits.limitReading.resultProtection.maxReadResultRate", defaultMax)
+	if math.Abs(p.MaxReadResultRate-defaultMax) > 0.001 { // maxRate != defaultMax
+		p.MaxReadResultRate = megaBytesRate2Bytes(p.MaxReadResultRate)
+	}
+	// [0, inf)
+	if p.MaxReadResultRate < 0 {
+		p.MaxReadResultRate = defaultMax
+	}
+}
+
 func (p *quotaConfig) initCoolOffSpeed() {
 	const defaultSpeed = 0.9
 	p.CoolOffSpeed = defaultSpeed
 	if !p.QueueProtectionEnabled {
 		return
 	}
-	p.CoolOffSpeed = p.Base.ParseFloatWithDefault("quotaAndLimits.limitReading.queueProtection.coolOffSpeed", defaultSpeed)
+	p.CoolOffSpeed = p.Base.ParseFloatWithDefault("quotaAndLimits.limitReading.coolOffSpeed", defaultSpeed)
 	// (0, 1]
 	if p.CoolOffSpeed <= 0 || p.CoolOffSpeed > 1 {
 		log.Warn("CoolOffSpeed must in the range of `(0, 1]`, use default value", zap.Float64("speed", p.CoolOffSpeed), zap.Float64("default", defaultSpeed))

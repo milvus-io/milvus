@@ -28,6 +28,7 @@ type RateMetricLabel = string
 const (
 	NQPerSecond             RateMetricLabel = "NQPerSecond"
 	SearchThroughput        RateMetricLabel = "SearchThroughput"
+	ReadResultThroughput    RateMetricLabel = "ReadResultThroughput"
 	InsertConsumeThroughput RateMetricLabel = "InsertConsumeThroughput"
 	DeleteConsumeThroughput RateMetricLabel = "DeleteConsumeThroughput"
 )
