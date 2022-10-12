@@ -65,6 +65,10 @@ class TestcaseBaseBulkLoad(TestcaseBase):
             "minio_bucket_name"
         ]
 
+    def teardown_method(self, method):
+        log.info(("*" * 35) + " teardown " + ("*" * 35))
+        log.info("[teardown_method] Start teardown test case %s..." % method.__name__)
+
 
 class TestBulkLoad(TestcaseBaseBulkLoad):
 
@@ -1082,7 +1086,7 @@ class TestBulkLoad(TestcaseBaseBulkLoad):
         Steps:
         1. create collection
         2. import data
-        3. verify failed with errors
+        3. verify
         """
         data_fields = [df.pk_field, df.int_field, df.float_field, df.double_field, df.vec_field]
         fields = [
