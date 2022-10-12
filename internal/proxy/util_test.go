@@ -22,15 +22,19 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-
-	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
-
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"time"
 
 	"github.com/milvus-io/milvus/api/commonpb"
 	"github.com/milvus-io/milvus/api/schemapb"
+
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/crypto"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
+
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc/metadata"
 )
@@ -772,4 +776,36 @@ func TestPasswordVerify(t *testing.T) {
 	// Sha256Password already exists within cache
 	assert.True(t, passwordVerify(context.TODO(), username, password, metaCache))
 	assert.Equal(t, 1, invokedCount)
+}
+
+func TestValidateTravelTimestamp(t *testing.T) {
+	Params.Init()
+	originalRetentionDuration := Params.CommonCfg.RetentionDuration
+	defer func() {
+		Params.CommonCfg.RetentionDuration = originalRetentionDuration
+	}()
+
+	travelTs := tsoutil.GetCurrentTime()
+	tests := []struct {
+		description string
+		defaultRD   int64
+		nowTs       typeutil.Timestamp
+		isValid     bool
+	}{
+		{"one second", 100, tsoutil.AddPhysicalDurationOnTs(travelTs, time.Second), true},
+		{"retention duration", 100, tsoutil.AddPhysicalDurationOnTs(travelTs, 100*time.Second), true},
+		{"retention duration+1", 100, tsoutil.AddPhysicalDurationOnTs(travelTs, 101*time.Second), false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.description, func(t *testing.T) {
+			Params.CommonCfg.RetentionDuration = test.defaultRD
+			err := validateTravelTimestamp(travelTs, test.nowTs)
+			if test.isValid {
+				assert.NoError(t, err)
+			} else {
+				assert.Error(t, err)
+			}
+		})
+	}
 }
