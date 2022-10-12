@@ -1,11 +1,14 @@
 package backend
 
 import (
+	"context"
 	"fmt"
 	"io/ioutil"
 	"path"
 	"strconv"
 	"strings"
+
+	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus/cmd/tools/migration/configs"
 	"github.com/milvus-io/milvus/cmd/tools/migration/legacy"
@@ -398,18 +401,81 @@ func (b etcd210) Backup(meta *meta.Meta, backupFile string) error {
 	return ioutil.WriteFile(backupFile, backup, 0600)
 }
 
+func (b etcd210) BackupV2(file string) error {
+	var instance, metaPath string
+	metaRootPath := b.cfg.EtcdCfg.MetaRootPath
+	parts := strings.Split(metaRootPath, "/")
+	if len(parts) > 1 {
+		metaPath = parts[len(parts)-1]
+		instance = path.Join(parts[:len(parts)-1]...)
+	} else {
+		instance = metaRootPath
+	}
+
+	ctx := context.Background()
+	// TODO: optimize this if memory consumption is too large.
+	saves := make(map[string]string)
+	cntResp, err := b.etcdCli.Get(ctx, metaRootPath, clientv3.WithPrefix(), clientv3.WithCountOnly())
+	if err != nil {
+		return err
+	}
+
+	opts := []clientv3.OpOption{clientv3.WithFromKey(), clientv3.WithRev(cntResp.Header.Revision), clientv3.WithLimit(1)}
+	currentKey := metaRootPath
+	for i := 0; int64(i) < cntResp.Count; i++ {
+		resp, err := b.etcdCli.Get(ctx, currentKey, opts...)
+		if err != nil {
+			return err
+		}
+		for _, kv := range resp.Kvs {
+			if kv.Lease != 0 {
+				console.Warning(fmt.Sprintf("lease key won't be backuped: %s, lease id: %d", kv.Key, kv.Lease))
+				continue
+			}
+			saves[string(kv.Key)] = string(kv.Value)
+			currentKey = string(append(kv.Key, 0))
+		}
+	}
+
+	header := &BackupHeader{
+		Version:   BackupHeaderVersionV1,
+		Instance:  instance,
+		MetaPath:  metaPath,
+		Entries:   int64(len(saves)),
+		Component: "",
+		Extra:     newBackupHeaderExtra(setEntryIncludeRootPath(true)).ToJSONBytes(),
+	}
+
+	codec := NewBackupCodec()
+	backup, err := codec.Serialize(header, saves)
+	if err != nil {
+		return err
+	}
+
+	console.Warning(fmt.Sprintf("backup to: %s", file))
+	return ioutil.WriteFile(file, backup, 0600)
+}
+
 func (b etcd210) Restore(backupFile string) error {
 	backup, err := ioutil.ReadFile(backupFile)
 	if err != nil {
 		return err
 	}
 	codec := NewBackupCodec()
-	_, saves, err := codec.DeSerialize(backup)
+	header, saves, err := codec.DeSerialize(backup)
 	if err != nil {
 		return err
 	}
+	entryIncludeRootPath := GetExtra(header.Extra).EntryIncludeRootPath
+	getRealKey := func(key string) string {
+		if entryIncludeRootPath {
+			return key
+		}
+		return path.Join(header.Instance, header.MetaPath, key)
+	}
+	ctx := context.Background()
 	for k, v := range saves {
-		if err := b.txn.Save(k, v); err != nil {
+		if _, err := b.etcdCli.Put(ctx, getRealKey(k), v); err != nil {
 			return err
 		}
 	}
