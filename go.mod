@@ -5,7 +5,7 @@ go 1.18
 require (
 	github.com/99designs/keyring v1.2.1 // indirect
 	github.com/BurntSushi/toml v1.0.0
-	github.com/DATA-DOG/go-sqlmock v1.5.0 // indirect
+	github.com/DATA-DOG/go-sqlmock v1.5.0
 	github.com/HdrHistogram/hdrhistogram-go v1.0.1 // indirect
 	github.com/StackExchange/wmi v1.2.1 // indirect
 	github.com/antlr/antlr4/runtime/Go/antlr v0.0.0-20210826220005-b48c857c3a0e
@@ -20,7 +20,6 @@ require (
 	github.com/gin-gonic/gin v1.7.7
 	github.com/go-basic/ipv4 v1.0.0
 	github.com/gofrs/flock v0.8.1
-	github.com/golang/mock v1.5.0
 	github.com/golang/protobuf v1.5.2
 	github.com/google/btree v1.0.1
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
@@ -61,9 +60,14 @@ require (
 	stathat.com/c/consistent v1.0.0
 )
 
-require github.com/apache/thrift v0.15.0
+require (
+	github.com/apache/thrift v0.15.0 // indirect
+	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d
+)
 
-require github.com/sandertv/go-formula/v2 v2.0.0-alpha.7 // indirect
+require github.com/sandertv/go-formula/v2 v2.0.0-alpha.7
+
+require github.com/quasilyte/go-ruleguard/dsl v0.3.21 // indirect
 
 require (
 	github.com/99designs/go-keychain v0.0.0-20191008050251-8e49817e8af4 // indirect
@@ -141,7 +145,6 @@ require (
 	github.com/prometheus/client_model v0.2.0 // indirect
 	github.com/prometheus/common v0.26.0 // indirect
 	github.com/prometheus/procfs v0.6.0 // indirect
-	github.com/quasilyte/go-ruleguard/dsl v0.3.21 // indirect
 	github.com/rs/xid v1.2.1 // indirect
 	github.com/samber/lo v1.27.0
 	github.com/sirupsen/logrus v1.8.1 // indirect
@@ -202,8 +205,6 @@ replace (
 	github.com/tecbot/gorocksdb => github.com/milvus-io/gorocksdb v0.0.0-20220624081344-8c5f4212846b // indirect
 )
 
-replace (
-	// If you want to use the hook interceptor, the following code should be commented out
-	// and you should modify the api version to be the same as the `so` project.
-	github.com/milvus-io/milvus/api => ./api
-)
+// If you want to use the hook interceptor, the following code should be commented out
+// and you should modify the api version to be the same as the `so` project.
+replace github.com/milvus-io/milvus/api => ./api

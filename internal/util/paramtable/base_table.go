@@ -82,6 +82,14 @@ type BaseTable struct {
 	YamlFile string
 }
 
+// NewBaseTableFromYamlOnly only used in migration tool.
+// Maybe we shouldn't limit the configDir internally.
+func NewBaseTableFromYamlOnly(yaml string) *BaseTable {
+	mgr, _ := config.Init(config.WithFilesSource(yaml))
+	gp := &BaseTable{mgr: mgr, YamlFile: yaml}
+	return gp
+}
+
 // GlobalInitWithYaml initializes the param table with the given yaml.
 // We will update the global DefaultYaml variable directly, once and for all.
 // GlobalInitWithYaml shall be called at the very beginning before initiating the base table.

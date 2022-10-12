@@ -52,6 +52,8 @@ mkdir -p datapb
 mkdir -p querypb
 mkdir -p planpb
 
+mkdir -p ../../cmd/tools/migration/legacy/legacypb
+
 ${protoc} --proto_path="${GOOGLE_PROTO_DIR}" --proto_path=. \
     --go_opt="Mmilvus.proto=github.com/milvus-io/milvus/api/milvuspb;milvuspb" \
     --go_opt=Mcommon.proto=github.com/milvus-io/milvus/api/commonpb \
@@ -85,5 +87,8 @@ ${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./datapb data_coord.pr
 ${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./querypb query_coord.proto
 ${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./planpb plan.proto
 ${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./segcorepb segcore.proto
+
+${protoc_opt} --proto_path=../../cmd/tools/migration/legacy/ \
+  --go_out=plugins=grpc,paths=source_relative:../../cmd/tools/migration/legacy/legacypb legacy.proto
 
 popd

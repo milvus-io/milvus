@@ -283,3 +283,11 @@ func Test_SetLogger(t *testing.T) {
 		assert.Equal(t, true, grpclog.V(2))
 	})
 }
+
+func TestNewBaseTableFromYamlOnly(t *testing.T) {
+	var yaml string
+	var gp *BaseTable
+	yaml = "not_exist.yaml"
+	gp = NewBaseTableFromYamlOnly(yaml)
+	assert.Empty(t, gp.Get("key"))
+}

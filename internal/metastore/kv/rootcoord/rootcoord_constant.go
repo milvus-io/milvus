@@ -11,8 +11,11 @@ const (
 	AliasMetaPrefix     = ComponentPrefix + "/aliases"
 	FieldMetaPrefix     = ComponentPrefix + "/fields"
 
-	// CollectionAliasMetaPrefix prefix for collection alias meta
-	CollectionAliasMetaPrefix = ComponentPrefix + "/collection-alias"
+	// CollectionAliasMetaPrefix210 prefix for collection alias meta
+	CollectionAliasMetaPrefix210 = ComponentPrefix + "/collection-alias"
+
+	SnapshotsSep   = "_ts"
+	SnapshotPrefix = "snapshots"
 
 	// CommonCredentialPrefix subpath for common credential
 	/* #nosec G101 */

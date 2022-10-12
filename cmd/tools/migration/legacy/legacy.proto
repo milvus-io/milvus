@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package milvus.proto.legacy;
+
+option go_package = "github.com/milvus-io/milvus/internal/proto/legacypb";
+
+import "common.proto";
+import "schema.proto";
+
+/********************************** Index Build Meta Before Version 220 ***************************************/
+
+message BuildIndexRequest {
+  int64 indexBuildID = 1;
+  string index_name = 2;
+  int64 indexID = 3;
+  repeated string data_paths = 5;
+  repeated common.KeyValuePair type_params = 6;
+  repeated common.KeyValuePair index_params = 7;
+  int64 num_rows = 8;
+  schema.FieldSchema field_schema = 9;
+  int64 segmentID = 10;
+}
+
+message IndexMeta {
+  int64 indexBuildID = 1;
+  common.IndexState state = 2;
+  string fail_reason = 3;
+  BuildIndexRequest req = 4;
+  repeated string index_file_paths = 5;
+  bool mark_deleted = 6;
+  int64 nodeID = 7;
+  int64 index_version = 8;
+  bool recycled = 9;
+  uint64 serialize_size = 10;
+}
