@@ -1169,6 +1169,17 @@ func importFlushReqFunc(node *DataNode, req *datapb.ImportTaskRequest, res *root
 			rowNum = field.RowNum()
 			break
 		}
+
+		if rowNum <= 0 {
+			log.Info("fields data is empty, no need to generate segment",
+				zap.Int64("task ID", importTaskID),
+				zap.Int("shard ID", shardID),
+				zap.Int("# of channels", len(chNames)),
+				zap.Strings("channel names", chNames),
+			)
+			return nil
+		}
+
 		colID := req.GetImportTask().GetCollectionId()
 		partID := req.GetImportTask().GetPartitionId()
 		segmentIDReq := composeAssignSegmentIDRequest(rowNum, shardID, chNames, colID, partID)
