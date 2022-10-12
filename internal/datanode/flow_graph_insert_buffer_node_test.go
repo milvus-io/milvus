@@ -1107,3 +1107,47 @@ func TestInsertBufferNode_BufferData_updateTimeRange(t *testing.T) {
 		})
 	}
 }
+
+func TestInsertBufferNode_getTimestampRange(t *testing.T) {
+
+	type testCase struct {
+		tag string
+
+		timestamps []int64
+		expectFrom Timestamp
+		expectTo   Timestamp
+	}
+
+	cases := []testCase{
+		{
+			tag:        "no input",
+			timestamps: []int64{},
+			expectFrom: math.MaxUint64,
+			expectTo:   0,
+		},
+		{
+			tag:        "only one input",
+			timestamps: []int64{1234},
+			expectFrom: 1234,
+			expectTo:   1234,
+		},
+		{
+			tag:        "input reverse order",
+			timestamps: []int64{3, 2, 1},
+			expectFrom: 1,
+			expectTo:   3,
+		},
+	}
+
+	ibNode := &insertBufferNode{}
+	for _, tc := range cases {
+		t.Run(tc.tag, func(t *testing.T) {
+			tr := ibNode.getTimestampRange(&storage.Int64FieldData{
+				Data: tc.timestamps,
+			})
+
+			assert.Equal(t, tc.expectFrom, tr.timestampMin)
+			assert.Equal(t, tc.expectTo, tr.timestampMax)
+		})
+	}
+}

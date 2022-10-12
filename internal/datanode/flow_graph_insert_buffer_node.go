@@ -598,10 +598,10 @@ func (ibNode *insertBufferNode) getTimestampRange(tsData *storage.Int64FieldData
 	}
 
 	for _, data := range tsData.Data {
-		if data < int64(tr.timestampMin) {
+		if uint64(data) < tr.timestampMin {
 			tr.timestampMin = Timestamp(data)
 		}
-		if data > int64(tr.timestampMax) {
+		if uint64(data) > tr.timestampMax {
 			tr.timestampMax = Timestamp(data)
 		}
 	}
