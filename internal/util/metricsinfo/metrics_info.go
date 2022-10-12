@@ -172,6 +172,7 @@ type DataCoordConfiguration struct {
 type DataCoordInfos struct {
 	BaseComponentInfos
 	SystemConfigurations DataCoordConfiguration `json:"system_configurations"`
+	QuotaMetrics         *DataCoordQuotaMetrics `json:"quota_metrics"`
 }
 
 // RootCoordConfiguration records the configuration of RootCoord.

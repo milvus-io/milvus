@@ -62,6 +62,10 @@ type QueryNodeQuotaMetrics struct {
 	QueryQueue  ReadInfoInQueue
 }
 
+type DataCoordQuotaMetrics struct {
+	TotalBinlogSize int64
+}
+
 // DataNodeQuotaMetrics are metrics of DataNode.
 type DataNodeQuotaMetrics struct {
 	Hms HardwareMetrics

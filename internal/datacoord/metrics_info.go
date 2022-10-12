@@ -30,6 +30,13 @@ import (
 	"go.uber.org/zap"
 )
 
+// getQuotaMetrics returns DataCoordQuotaMetrics.
+func (s *Server) getQuotaMetrics() *metricsinfo.DataCoordQuotaMetrics {
+	return &metricsinfo.DataCoordQuotaMetrics{
+		TotalBinlogSize: s.meta.GetTotalBinlogSize(),
+	}
+}
+
 //getComponentConfigurations returns the configurations of dataNode matching req.Pattern
 func getComponentConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) *internalpb.ShowConfigurationsResponse {
 	prefix := "datacoord."
@@ -129,6 +136,7 @@ func (s *Server) getDataCoordMetrics() metricsinfo.DataCoordInfos {
 		SystemConfigurations: metricsinfo.DataCoordConfiguration{
 			SegmentMaxSize: Params.DataCoordCfg.SegmentMaxSize,
 		},
+		QuotaMetrics: s.getQuotaMetrics(),
 	}
 
 	metricsinfo.FillDeployMetricsWithEnv(&ret.BaseComponentInfos.SystemInfo)

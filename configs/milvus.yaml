@@ -368,6 +368,7 @@ common:
 # By default, we enable:
 #   1. TT protection;
 #   2. Memory protection.
+#   3. Disk quota protection.
 # You can enable:
 #   1. DML throughput limitation;
 #   2. DDL, DQL qps/rps limitation;
@@ -436,6 +437,10 @@ quotaAndLimits:
       dataNodeMemoryHighWaterLevel: 0.95 # (0, 1], memoryHighWaterLevel in DataNodes
       queryNodeMemoryLowWaterLevel: 0.85 # (0, 1], memoryLowWaterLevel in QueryNodes
       queryNodeMemoryHighWaterLevel: 0.95 # (0, 1], memoryHighWaterLevel in QueryNodes
+    diskProtection:
+      # When the total file size of object storage is greater than `diskQuota`, all dml requests would be rejected;
+      enabled: true
+      diskQuota: -1 # GB, (0, +inf), -1 means use default +inf
 
   # limitReading decides whether dql requests are allowed.
   limitReading:

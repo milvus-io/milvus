@@ -453,6 +453,35 @@ func TestMeta_Basic(t *testing.T) {
 		ret = meta.GetClonedCollectionInfo(collInfo.ID)
 		equalCollectionInfo(t, collInfo, ret)
 	})
+
+	t.Run("Test GetTotalBinlogSize", func(t *testing.T) {
+		const size0 = 1024
+		const size1 = 2048
+
+		// no binlog
+		size := meta.GetTotalBinlogSize()
+		assert.EqualValues(t, 0, size)
+
+		// add seg0 with size0
+		segID0, err := mockAllocator.allocID(ctx)
+		assert.Nil(t, err)
+		segInfo0 := buildSegment(collID, partID0, segID0, channelName, false)
+		segInfo0.size = size0
+		err = meta.AddSegment(segInfo0)
+		assert.Nil(t, err)
+
+		// add seg1 with size1
+		segID1, err := mockAllocator.allocID(ctx)
+		assert.Nil(t, err)
+		segInfo1 := buildSegment(collID, partID0, segID1, channelName, false)
+		segInfo1.size = size1
+		err = meta.AddSegment(segInfo1)
+		assert.Nil(t, err)
+
+		// check TotalBinlogSize
+		size = meta.GetTotalBinlogSize()
+		assert.Equal(t, int64(size0+size1), size)
+	})
 }
 
 func TestGetUnFlushedSegments(t *testing.T) {

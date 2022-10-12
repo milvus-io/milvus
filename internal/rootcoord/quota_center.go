@@ -47,6 +47,7 @@ type ForceDenyTriggerReason string
 const (
 	ManualForceDeny   ForceDenyTriggerReason = "ManualForceDeny"
 	MemoryExhausted   ForceDenyTriggerReason = "MemoryExhausted"
+	DiskQuotaExceeded ForceDenyTriggerReason = "DiskQuotaExceeded"
 	TimeTickLongDelay ForceDenyTriggerReason = "TimeTickLongDelay"
 )
 
@@ -73,8 +74,9 @@ type Limit = ratelimitutil.Limit
 // Protections:
 //   1. TT protection -> 				dqlRate = maxDQLRate * (maxDelay - ttDelay) / maxDelay
 //   2. Memory protection -> 			dmlRate = maxDMLRate * (highMem - curMem) / (highMem - lowMem)
-//   3. DQL Queue length protection ->  dqlRate = curDQLRate * CoolOffSpeed
-//   4. DQL queue latency protection -> dqlRate = curDQLRate * CoolOffSpeed
+//   3. Disk quota protection ->		force deny writing if exceeded
+//   4. DQL Queue length protection ->  dqlRate = curDQLRate * CoolOffSpeed
+//   5. DQL queue latency protection -> dqlRate = curDQLRate * CoolOffSpeed
 // If necessary, user can also manually force to deny RW requests.
 type QuotaCenter struct {
 	// clients
@@ -86,6 +88,7 @@ type QuotaCenter struct {
 	queryNodeMetrics []*metricsinfo.QueryNodeQuotaMetrics
 	dataNodeMetrics  []*metricsinfo.DataNodeQuotaMetrics
 	proxyMetrics     []*metricsinfo.ProxyQuotaMetrics
+	dataCoordMetrics *metricsinfo.DataCoordQuotaMetrics
 
 	currentRates map[internalpb.RateType]Limit
 	tsoAllocator tso.Allocator
@@ -205,6 +208,9 @@ func (q *QuotaCenter) syncMetrics() error {
 				q.dataNodeMetrics = append(q.dataNodeMetrics, dataNodeMetric.QuotaMetrics)
 			}
 		}
+		if dataCoordTopology.Cluster.Self.QuotaMetrics != nil {
+			q.dataCoordMetrics = dataCoordTopology.Cluster.Self.QuotaMetrics
+		}
 		return nil
 	})
 	// get Proxies metrics
@@ -230,10 +236,12 @@ func (q *QuotaCenter) syncMetrics() error {
 	if err != nil {
 		return err
 	}
+	// TODO: use rated log
 	log.Debug("QuotaCenter sync metrics done",
 		zap.Any("dataNodeMetrics", q.dataNodeMetrics),
 		zap.Any("queryNodeMetrics", q.queryNodeMetrics),
-		zap.Any("proxyMetrics", q.proxyMetrics))
+		zap.Any("proxyMetrics", q.proxyMetrics),
+		zap.Any("dataCoordMetrics", q.dataCoordMetrics))
 	return nil
 }
 
@@ -317,6 +325,13 @@ func (q *QuotaCenter) calculateWriteRates() error {
 		q.forceDenyWriting(ManualForceDeny)
 		return nil
 	}
+
+	exceeded := q.diskQuotaExceeded()
+	if exceeded {
+		q.forceDenyWriting(DiskQuotaExceeded) // disk quota protection
+		return nil
+	}
+	log.Debug("QuotaCenter check diskQuota done", zap.Bool("exceeded", exceeded))
 
 	ttFactor, err := q.timeTickDelay()
 	if err != nil {
@@ -516,6 +531,19 @@ func (q *QuotaCenter) memoryToWaterLevel() float64 {
 		}
 	}
 	return factor
+}
+
+// diskQuotaExceeded checks if disk quota exceeded.
+func (q *QuotaCenter) diskQuotaExceeded() bool {
+	if !Params.QuotaConfig.DiskProtectionEnabled {
+		return false
+	}
+	if q.dataCoordMetrics == nil {
+		return false
+	}
+	diskQuota := Params.QuotaConfig.DiskQuota
+	totalSize := q.dataCoordMetrics.TotalBinlogSize
+	return float64(totalSize) >= diskQuota
 }
 
 // setRates notifies Proxies to set rates for different rate types.
