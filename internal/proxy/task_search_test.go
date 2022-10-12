@@ -140,6 +140,7 @@ func TestSearchTask_PreExecute(t *testing.T) {
 			SearchRequest: &internalpb.SearchRequest{},
 			request: &milvuspb.SearchRequest{
 				CollectionName: collName,
+				Nq:             1,
 			},
 			qc: qc,
 			tr: timerecord.NewTimeRecorder("test-search"),
@@ -147,6 +148,35 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		require.NoError(t, task.OnEnqueue())
 		return task
 	}
+
+	getSearchTaskWithNq := func(t *testing.T, nq int64) *searchTask {
+		task := &searchTask{
+			ctx:           ctx,
+			SearchRequest: &internalpb.SearchRequest{},
+			request: &milvuspb.SearchRequest{
+				CollectionName: "collection name",
+				Nq:             nq,
+			},
+			qc: qc,
+			tr: timerecord.NewTimeRecorder("test-search"),
+		}
+		require.NoError(t, task.OnEnqueue())
+		return task
+	}
+
+	t.Run("bad nq 0", func(t *testing.T) {
+		// Nq must be in range [1, 16384].
+		task := getSearchTaskWithNq(t, 0)
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+	})
+
+	t.Run("bad nq 16385", func(t *testing.T) {
+		// Nq must be in range [1, 16384].
+		task := getSearchTaskWithNq(t, 16384+1)
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+	})
 
 	t.Run("collection not exist", func(t *testing.T) {
 		task := getSearchTask(t, collectionName)
@@ -1713,6 +1743,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 				SourceID: Params.ProxyCfg.GetNodeID(),
 			},
 			CollectionName: collectionName,
+			Nq:             2,
 		},
 		qc:       qc,
 		shardMgr: mgr,

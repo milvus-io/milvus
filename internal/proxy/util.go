@@ -54,6 +54,12 @@ const (
 
 	// DefaultStringIndexType name of default index type for varChar/string field
 	DefaultStringIndexType = "Trie"
+
+	// Search limit, which applies on:
+	// maximum # of results to return (topK), and
+	// maximum # of search requests (nq).
+	// Check https://milvus.io/docs/limitations.md for more details.
+	searchCountLimit = 16384
 )
 
 var logger = log.L().WithOptions(zap.Fields(zap.String("role", typeutil.ProxyRole)))
@@ -76,8 +82,8 @@ func isNumber(c uint8) bool {
 
 func validateLimit(limit int64) error {
 	// TODO make this configurable
-	if limit <= 0 || limit >= 16385 {
-		return fmt.Errorf("should be in range [1, 16385], but got %d", limit)
+	if limit <= 0 || limit > searchCountLimit {
+		return fmt.Errorf("should be in range [1, %d], but got %d", searchCountLimit, limit)
 	}
 	return nil
 }
@@ -274,7 +280,7 @@ func validateFieldType(schema *schemapb.CollectionSchema) error {
 	return nil
 }
 
-//ValidateFieldAutoID call after validatePrimaryKey
+// ValidateFieldAutoID call after validatePrimaryKey
 func ValidateFieldAutoID(coll *schemapb.CollectionSchema) error {
 	var idx = -1
 	for i, field := range coll.Fields {
@@ -741,14 +747,17 @@ func passwordVerify(ctx context.Context, username, rawPwd string, globalMetaCach
 }
 
 // Support wildcard in output fields:
-//   "*" - all scalar fields
-//   "%" - all vector fields
+//
+//	"*" - all scalar fields
+//	"%" - all vector fields
+//
 // For example, A and B are scalar fields, C and D are vector fields, duplicated fields will automatically be removed.
-//   output_fields=["*"] 	 ==> [A,B]
-//   output_fields=["%"] 	 ==> [C,D]
-//   output_fields=["*","%"] ==> [A,B,C,D]
-//   output_fields=["*",A] 	 ==> [A,B]
-//   output_fields=["*",C]   ==> [A,B,C]
+//
+//	output_fields=["*"] 	 ==> [A,B]
+//	output_fields=["%"] 	 ==> [C,D]
+//	output_fields=["*","%"] ==> [A,B,C,D]
+//	output_fields=["*",A] 	 ==> [A,B]
+//	output_fields=["*",C]   ==> [A,B,C]
 func translateOutputFields(outputFields []string, schema *schemapb.CollectionSchema, addPrimary bool) ([]string, error) {
 	var primaryFieldName string
 	scalarFieldNameMap := make(map[string]bool)
