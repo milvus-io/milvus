@@ -592,8 +592,10 @@ func ValidatePassword(password string) error {
 func validateTravelTimestamp(travelTs, tMax typeutil.Timestamp) error {
 	durationSeconds := tsoutil.CalculateDuration(tMax, travelTs) / 1000
 	if durationSeconds > Params.CommonCfg.RetentionDuration {
-		duration := time.Second * time.Duration(durationSeconds)
-		return fmt.Errorf("only support to travel back to %s so far", duration.String())
+
+		durationIn := time.Second * time.Duration(durationSeconds)
+		durationSupport := time.Second * time.Duration(Params.CommonCfg.RetentionDuration)
+		return fmt.Errorf("only support to travel back to %v so far, but got %v", durationSupport, durationIn)
 	}
 	return nil
 }
