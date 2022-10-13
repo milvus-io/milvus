@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
+	"github.com/milvus-io/milvus/internal/util/importutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/stretchr/testify/assert"
@@ -76,6 +77,8 @@ func TestMain(t *testing.M) {
 }
 
 func TestDataNode(t *testing.T) {
+	importutil.ReportImportAttempts = 1
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -465,7 +468,7 @@ func TestDataNode(t *testing.T) {
 			},
 		}
 		node.rootCoord.(*RootCoordFactory).ReportImportErr = true
-		_, err = node.Import(context.WithValue(ctx, ctxKey{}, ""), req)
+		_, err = node.Import(node.ctx, req)
 		assert.NoError(t, err)
 		node.rootCoord.(*RootCoordFactory).ReportImportErr = false
 
@@ -548,8 +551,9 @@ func TestDataNode(t *testing.T) {
 
 	t.Run("Test Import report import error", func(t *testing.T) {
 		node.rootCoord = &RootCoordFactory{
-			collectionID: 100,
-			pkType:       schemapb.DataType_Int64,
+			collectionID:    100,
+			pkType:          schemapb.DataType_Int64,
+			ReportImportErr: true,
 		}
 		content := []byte(`{
 		"rows":[
@@ -573,7 +577,7 @@ func TestDataNode(t *testing.T) {
 				RowBased:     true,
 			},
 		}
-		stat, err := node.Import(context.WithValue(node.ctx, ctxKey{}, returnError), req)
+		stat, err := node.Import(node.ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, stat.GetErrorCode())
 	})

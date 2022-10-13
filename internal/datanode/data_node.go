@@ -78,6 +78,9 @@ const (
 
 	// ConnectEtcdMaxRetryTime is used to limit the max retry time for connection etcd
 	ConnectEtcdMaxRetryTime = 100
+
+	// ImportCallTimeout is the timeout used in Import() method calls.
+	ImportCallTimeout = 30 * time.Second
 )
 
 var getFlowGraphServiceAttempts = uint(50)
@@ -95,14 +98,15 @@ var rateCol *rateCollector
 // services in datanode package.
 //
 // DataNode implements `types.Component`, `types.DataNode` interfaces.
-//  `etcdCli`   is a connection of etcd
-//  `rootCoord` is a grpc client of root coordinator.
-//  `dataCoord` is a grpc client of data service.
-//  `NodeID` is unique to each datanode.
-//  `State` is current statement of this data node, indicating whether it's healthy.
 //
-//  `clearSignal` is a signal channel for releasing the flowgraph resources.
-//  `segmentCache` stores all flushing and flushed segments.
+//	`etcdCli`   is a connection of etcd
+//	`rootCoord` is a grpc client of root coordinator.
+//	`dataCoord` is a grpc client of data service.
+//	`NodeID` is unique to each datanode.
+//	`State` is current statement of this data node, indicating whether it's healthy.
+//
+//	`clearSignal` is a signal channel for releasing the flowgraph resources.
+//	`segmentCache` stores all flushing and flushed segments.
 type DataNode struct {
 	ctx              context.Context
 	cancel           context.CancelFunc
@@ -570,10 +574,11 @@ func (node *DataNode) ReadyToFlush() error {
 }
 
 // FlushSegments packs flush messages into flowGraph through flushChan.
-//   If DataNode receives a valid segment to flush, new flush message for the segment should be ignored.
-//   So if receiving calls to flush segment A, DataNode should guarantee the segment to be flushed.
 //
-//   One precondition: The segmentID in req is in ascending order.
+//	If DataNode receives a valid segment to flush, new flush message for the segment should be ignored.
+//	So if receiving calls to flush segment A, DataNode should guarantee the segment to be flushed.
+//
+//	One precondition: The segmentID in req is in ascending order.
 func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest) (*commonpb.Status, error) {
 	metrics.DataNodeFlushReqCounter.WithLabelValues(
 		fmt.Sprint(Params.DataNodeCfg.GetNodeID()),
@@ -719,7 +724,7 @@ func (node *DataNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.Strin
 	}, nil
 }
 
-//ShowConfigurations returns the configurations of DataNode matching req.Pattern
+// ShowConfigurations returns the configurations of DataNode matching req.Pattern
 func (node *DataNode) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
 	log.Debug("DataNode.ShowConfigurations", zap.String("pattern", req.Pattern))
 	if !node.isHealthy() {
@@ -962,11 +967,15 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 		AutoIds:    make([]int64, 0),
 		RowCount:   0,
 	}
-	// func to report import state to rootcoord
+
+	// Spawn a new context to ignore cancellation from parental context.
+	newCtx, cancel := context.WithTimeout(context.TODO(), ImportCallTimeout)
+	defer cancel()
+	// func to report import state to RootCoord.
 	reportFunc := func(res *rootcoordpb.ImportResult) error {
-		status, err := node.rootCoord.ReportImport(ctx, res)
+		status, err := node.rootCoord.ReportImport(newCtx, res)
 		if err != nil {
-			log.Error("fail to report import state to root coord", zap.Error(err))
+			log.Error("fail to report import state to RootCoord", zap.Error(err))
 			return err
 		}
 		if status != nil && status.ErrorCode != commonpb.ErrorCode_Success {
@@ -979,7 +988,7 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 		log.Warn("DataNode import failed",
 			zap.Int64("collection ID", req.GetImportTask().GetCollectionId()),
 			zap.Int64("partition ID", req.GetImportTask().GetPartitionId()),
-			zap.Int64("taskID", req.GetImportTask().GetTaskId()),
+			zap.Int64("task ID", req.GetImportTask().GetTaskId()),
 			zap.Error(errDataNodeIsUnhealthy(Params.DataNodeCfg.GetNodeID())))
 
 		return &commonpb.Status{
@@ -989,7 +998,8 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 	}
 
 	// get a timestamp for all the rows
-	rep, err := node.rootCoord.AllocTimestamp(ctx, &rootcoordpb.AllocTimestampRequest{
+	// Ignore cancellation from parent context.
+	rep, err := node.rootCoord.AllocTimestamp(newCtx, &rootcoordpb.AllocTimestampRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_RequestTSO,
 			MsgID:     0,
@@ -1005,7 +1015,7 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 		importResult.State = commonpb.ImportState_ImportFailed
 		importResult.Infos = append(importResult.Infos, &commonpb.KeyValuePair{Key: "failed_reason", Value: msg})
 		if reportErr := reportFunc(importResult); reportErr != nil {
-			log.Warn("fail to report import state to root coord", zap.Error(reportErr))
+			log.Warn("fail to report import state to RootCoord", zap.Error(reportErr))
 		}
 		if err != nil {
 			return &commonpb.Status{
@@ -1019,13 +1029,17 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 
 	// get collection schema and shard number
 	metaService := newMetaService(node.rootCoord, req.GetImportTask().GetCollectionId())
-	colInfo, err := metaService.getCollectionInfo(ctx, req.GetImportTask().GetCollectionId(), 0)
+	colInfo, err := metaService.getCollectionInfo(newCtx, req.GetImportTask().GetCollectionId(), 0)
 	if err != nil {
+		log.Warn("failed to get collection info for collection ID",
+			zap.Int64("task ID", req.GetImportTask().GetTaskId()),
+			zap.Int64("collection ID", req.GetImportTask().GetCollectionId()),
+			zap.Error(err))
 		importResult.State = commonpb.ImportState_ImportFailed
 		importResult.Infos = append(importResult.Infos, &commonpb.KeyValuePair{Key: "failed_reason", Value: err.Error()})
 		reportErr := reportFunc(importResult)
 		if reportErr != nil {
-			log.Warn("fail to report import state to root coord", zap.Error(err))
+			log.Warn("fail to report import state to RootCoord", zap.Error(err))
 		}
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -1035,15 +1049,18 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 
 	// parse files and generate segments
 	segmentSize := int64(Params.DataCoordCfg.SegmentMaxSize) * 1024 * 1024
-	importWrapper := importutil.NewImportWrapper(ctx, colInfo.GetSchema(), colInfo.GetShardsNum(), segmentSize, node.rowIDAllocator, node.chunkManager,
+	importWrapper := importutil.NewImportWrapper(newCtx, colInfo.GetSchema(), colInfo.GetShardsNum(), segmentSize, node.rowIDAllocator, node.chunkManager,
 		importFlushReqFunc(node, req, importResult, colInfo.GetSchema(), ts), importResult, reportFunc)
 	err = importWrapper.Import(req.GetImportTask().GetFiles(), req.GetImportTask().GetRowBased(), false)
 	if err != nil {
+		log.Warn("import wrapper failed to parse import request",
+			zap.Int64("task ID", req.GetImportTask().GetTaskId()),
+			zap.Error(err))
 		importResult.State = commonpb.ImportState_ImportFailed
 		importResult.Infos = append(importResult.Infos, &commonpb.KeyValuePair{Key: "failed_reason", Value: err.Error()})
 		reportErr := reportFunc(importResult)
 		if reportErr != nil {
-			log.Warn("fail to report import state to root coord", zap.Error(err))
+			log.Warn("fail to report import state to RootCoord", zap.Error(err))
 		}
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,

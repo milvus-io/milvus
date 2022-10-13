@@ -279,7 +279,7 @@ func (ds *DataCoordFactory) BroadcastAlteredCollection(ctx context.Context, req 
 
 func (ds *DataCoordFactory) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
 	if ds.GetSegmentInfosError {
-		return nil, errors.New("mock error")
+		return nil, errors.New("mock get segment info error")
 	}
 	if ds.GetSegmentInfosNotSuccess {
 		return &datapb.GetSegmentInfoResponse{
@@ -1027,7 +1027,7 @@ func (m *RootCoordFactory) ReportImport(ctx context.Context, req *rootcoordpb.Im
 	if m.ReportImportErr {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
-		}, fmt.Errorf("mock error")
+		}, fmt.Errorf("mock report import error")
 	}
 	if m.ReportImportNotSuccess {
 		return &commonpb.Status{
