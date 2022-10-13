@@ -80,7 +80,7 @@ func packLoadSegmentRequest(
 	return &querypb.LoadSegmentsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_LoadSegments,
-			MsgID:   task.SourceID(),
+			MsgID:   task.ID(),
 		},
 		Infos:          []*querypb.SegmentLoadInfo{loadInfo},
 		Schema:         schema,
@@ -98,7 +98,7 @@ func packReleaseSegmentRequest(task *SegmentTask, action *SegmentAction) *queryp
 	return &querypb.ReleaseSegmentsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_ReleaseSegments,
-			MsgID:   task.SourceID(),
+			MsgID:   task.ID(),
 		},
 
 		NodeID:       action.Node(),
@@ -128,7 +128,7 @@ func packSubDmChannelRequest(
 	return &querypb.WatchDmChannelsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_WatchDmChannels,
-			MsgID:   task.SourceID(),
+			MsgID:   task.ID(),
 		},
 		NodeID:       action.Node(),
 		CollectionID: task.CollectionID(),
@@ -171,7 +171,7 @@ func packUnsubDmChannelRequest(task *ChannelTask, action Action) *querypb.UnsubD
 	return &querypb.UnsubDmChannelRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_UnsubDmChannel,
-			MsgID:   task.SourceID(),
+			MsgID:   task.ID(),
 		},
 		NodeID:       action.Node(),
 		CollectionID: task.CollectionID(),
