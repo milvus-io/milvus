@@ -149,24 +149,23 @@ func (gc *garbageCollector) scan() {
 
 			segmentID, err := storage.ParseSegmentIDByBinlog(gc.option.cli.RootPath(), infoKey)
 			if err != nil {
+				missing++
 				log.Warn("parse segment id error", zap.String("infoKey", infoKey), zap.Error(err))
 				continue
 			}
+
 			if gc.segRefer.HasSegmentLock(segmentID) {
 				valid++
 				continue
 			}
-			missing++
+
 			// not found in meta, check last modified time exceeds tolerance duration
-			if err != nil {
-				log.Error("get modified time error", zap.String("infoKey", infoKey))
-				continue
-			}
 			if time.Since(modTimes[i]) > gc.option.missingTolerance {
 				// ignore error since it could be cleaned up next time
 				removedKeys = append(removedKeys, infoKey)
 				err = gc.option.cli.Remove(ctx, infoKey)
 				if err != nil {
+					missing++
 					log.Error("failed to remove object", zap.String("infoKey", infoKey), zap.Error(err))
 				}
 			}
