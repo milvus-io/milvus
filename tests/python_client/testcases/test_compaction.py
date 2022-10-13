@@ -968,7 +968,7 @@ class TestCompactionOperation(TestcaseBase):
         search_res, _ = collection_w.search(df2[ct.default_float_vec_field_name][:1].to_list(),
                                             ct.default_float_vec_field_name,
                                             ct.default_search_params, ct.default_limit,
-                                            travel_timestamp=tt)
+                                            travel_timestamp=0)
         assert tmp_nb in search_res[0].ids
         assert len(search_res[0]) == ct.default_limit
 

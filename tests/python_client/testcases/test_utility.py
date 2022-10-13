@@ -257,7 +257,7 @@ class TestUtilityParams(TestcaseBase):
         collection_w = self.init_collection_general(prefix)[0]
         log.debug(collection_w.num_entities)
         collection_w.load()
-        err_msg = {ct.err_code: -1, ct.err_msg: f"Partitions not exist: [{ct.default_tag}]"}
+        err_msg = {ct.err_code: 1, ct.err_msg: f"partitionID of partitionName:{ct.default_tag} can not be find"}
         self.utility_wrap.loading_progress(collection_w.name, partition_names,
                                            check_task=CheckTasks.err_res, check_items=err_msg)
 
@@ -677,10 +677,11 @@ class TestUtilityBase(TestcaseBase):
         cw = self.init_collection_wrap(name=c_name)
         data = cf.gen_default_list_data(nb)
         cw.insert(data=data)
-        error = {ct.err_code: 1, ct.err_msg: "no index is created"}
+        error = {ct.err_code: 25, ct.err_msg: "index not exist"}
         self.utility_wrap.index_building_progress(c_name, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue 19752")
     def test_index_process_collection_index(self):
         """
         target: test building_process
@@ -699,6 +700,7 @@ class TestUtilityBase(TestcaseBase):
         assert res['total_rows'] == nb
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue 19753")
     def test_index_process_collection_indexing(self):
         """
         target: test building_process
@@ -752,6 +754,7 @@ class TestUtilityBase(TestcaseBase):
         assert res == exp_res
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue 19752")
     def test_wait_index_collection_index(self):
         """
         target: test wait_index
@@ -781,7 +784,7 @@ class TestUtilityBase(TestcaseBase):
         collection_w.insert(df)
         assert collection_w.num_entities == ct.default_nb
         res = self.utility_wrap.loading_progress(collection_w.name)[0]
-        exp_res = {loading_progress: '0%', num_loaded_partitions: 0, not_loaded_partitions: ['_default']}
+        exp_res = {loading_progress: '0%'}
 
         assert exp_res == res
 
@@ -827,11 +830,12 @@ class TestUtilityBase(TestcaseBase):
         collection_w = self.init_collection_wrap()
         collection_w.load()
         res, _ = self.utility_wrap.loading_progress(collection_w.name)
-        exp_res = {loading_progress: '100%', num_loaded_partitions: 1, not_loaded_partitions: []}
+        exp_res = {loading_progress: '100%'}
 
         assert exp_res == res
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue 19754")
     def test_loading_progress_after_release(self):
         """
         target: test loading progress after release
@@ -858,7 +862,7 @@ class TestUtilityBase(TestcaseBase):
         collection_w, partition_w, _, _ = self.insert_entities_into_two_partitions_in_half(half)
         partition_w.release()
         res = self.utility_wrap.loading_progress(collection_w.name)[0]
-        assert res[loading_progress] == '50%'
+        assert res[loading_progress] == '100%'
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_loading_progress_with_load_partition(self):
@@ -873,7 +877,7 @@ class TestUtilityBase(TestcaseBase):
         collection_w.release()
         partition_w.load()
         res = self.utility_wrap.loading_progress(collection_w.name)[0]
-        assert res[loading_progress] == '50%'
+        assert res[loading_progress] == '100%'
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_loading_progress_with_partition(self):
@@ -937,7 +941,7 @@ class TestUtilityBase(TestcaseBase):
         cw.load()
         self.utility_wrap.wait_for_loading_complete(cw.name)
         res, _ = self.utility_wrap.loading_progress(cw.name)
-        exp_res = {loading_progress: "100%", not_loaded_partitions: [], num_loaded_partitions: 1}
+        exp_res = {loading_progress: "100%"}
         assert res == exp_res
 
     @pytest.mark.tags(CaseLabel.L1)

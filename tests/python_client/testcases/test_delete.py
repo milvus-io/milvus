@@ -997,6 +997,7 @@ class TestDeleteOperation(TestcaseBase):
         pass
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="Time travel disabled")
     def test_delete_time_travel(self):
         """
         target: test search with time travel after delete
@@ -1618,6 +1619,7 @@ class TestDeleteString(TestcaseBase):
                            check_task=CheckTasks.check_query_empty)
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="Time travel disabled")
     def test_delete_time_travel_string(self):
         """
         target: test search with time travel after delete
