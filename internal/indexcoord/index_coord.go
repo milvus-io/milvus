@@ -616,6 +616,12 @@ func (i *IndexCoord) completeIndexInfo(ctx context.Context, indexInfo *indexpb.I
 		break
 	}
 
+	totalRow, err := calculateTotalRow()
+	if err != nil {
+		return err
+	}
+	indexInfo.TotalRows = totalRow
+
 	indexStates, indexStateCnt := i.metaTable.GetIndexStates(indexID, createTs)
 	allCnt := len(indexStates)
 	switch {
@@ -624,14 +630,11 @@ func (i *IndexCoord) completeIndexInfo(ctx context.Context, indexInfo *indexpb.I
 		indexInfo.IndexStateFailReason = indexStateCnt.FailReason
 	case indexStateCnt.Finished == allCnt:
 		indexInfo.State = commonpb.IndexState_Finished
+		indexInfo.IndexedRows = totalRow
 	default:
 		indexInfo.State = commonpb.IndexState_InProgress
 		indexInfo.IndexedRows = i.metaTable.GetIndexBuildProgress(indexID, createTs)
-		totalRow, err := calculateTotalRow()
-		if err != nil {
-			return err
-		}
-		indexInfo.TotalRows = totalRow
+
 	}
 
 	log.Debug("IndexCoord completeIndexInfo success", zap.Int64("collID", collectionID),
