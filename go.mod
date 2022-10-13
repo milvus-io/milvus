@@ -67,7 +67,10 @@ require (
 
 require github.com/sandertv/go-formula/v2 v2.0.0-alpha.7
 
-require github.com/quasilyte/go-ruleguard/dsl v0.3.21 // indirect
+require (
+	github.com/quasilyte/go-ruleguard/dsl v0.3.21 // indirect
+	github.com/traefik/yaegi v0.14.2 // indirect
+)
 
 require (
 	github.com/99designs/go-keychain v0.0.0-20191008050251-8e49817e8af4 // indirect
