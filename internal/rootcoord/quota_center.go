@@ -349,7 +349,7 @@ func (q *QuotaCenter) calculateWriteRates() error {
 	log.Debug("QuotaCenter check timeTickDelay done", zap.Float64("ttFactor", ttFactor))
 
 	memFactor := q.memoryToWaterLevel()
-	if ttFactor <= 0 {
+	if memFactor <= 0 {
 		q.forceDenyWriting(MemoryExhausted) // memory protection
 		return nil
 	}
