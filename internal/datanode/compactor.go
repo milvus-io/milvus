@@ -67,7 +67,7 @@ type compactionTask struct {
 	downloader
 	uploader
 	compactor
-	Replica
+	Channel
 	flushManager
 	allocatorInterface
 
@@ -87,7 +87,7 @@ func newCompactionTask(
 	ctx context.Context,
 	dl downloader,
 	ul uploader,
-	replica Replica,
+	channel Channel,
 	fm flushManager,
 	alloc allocatorInterface,
 	plan *datapb.CompactionPlan) *compactionTask {
@@ -99,7 +99,7 @@ func newCompactionTask(
 
 		downloader:         dl,
 		uploader:           ul,
-		Replica:            replica,
+		Channel:            channel,
 		flushManager:       fm,
 		allocatorInterface: alloc,
 		plan:               plan,
@@ -261,7 +261,7 @@ func (t *compactionTask) merge(
 		insertPaths      = make([]*datapb.FieldBinlog, 0)
 	)
 
-	t.Replica.initSegmentBloomFilter(segment)
+	t.Channel.initSegmentBloomFilter(segment)
 
 	isDeletedValue := func(v *storage.Value) bool {
 		ts, ok := delta[v.PK.GetValue()]
@@ -588,6 +588,7 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 	log.Info("compaction done",
 		zap.Int64("planID", t.plan.GetPlanID()),
 		zap.Int64("targetSegmentID", targetSegID),
+		zap.Int64s("compactedFrom", segIDs),
 		zap.Int("num of binlog paths", len(inPaths)),
 		zap.Int("num of stats paths", len(statsPaths)),
 		zap.Int("num of delta paths", len(deltaInfo)),

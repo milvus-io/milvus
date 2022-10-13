@@ -217,12 +217,11 @@ func TestDataNode(t *testing.T) {
 		fgservice, ok := node1.flowgraphManager.getFlowgraphService(dmChannelName)
 		assert.True(t, ok)
 
-		err = fgservice.replica.addSegment(addSegmentReq{
+		err = fgservice.channel.addSegment(addSegmentReq{
 			segType:     datapb.SegmentType_New,
 			segID:       0,
 			collID:      1,
 			partitionID: 1,
-			channelName: dmChannelName,
 			startPos:    &internalpb.MsgPosition{},
 			endPos:      &internalpb.MsgPosition{},
 		})
@@ -681,16 +680,22 @@ func TestDataNode(t *testing.T) {
 		fg, ok := node.flowgraphManager.getFlowgraphService(chanName)
 		assert.True(t, ok)
 
-		fg.replica.(*SegmentReplica).flushedSegments = map[UniqueID]*Segment{
-			100: {channelName: chanName},
-			101: {channelName: chanName},
-			102: {channelName: chanName},
+		s1 := Segment{segmentID: 100}
+		s2 := Segment{segmentID: 200}
+		s3 := Segment{segmentID: 300}
+		s1.setType(datapb.SegmentType_Flushed)
+		s2.setType(datapb.SegmentType_Flushed)
+		s3.setType(datapb.SegmentType_Flushed)
+		fg.channel.(*ChannelMeta).segments = map[UniqueID]*Segment{
+			s1.segmentID: &s1,
+			s2.segmentID: &s2,
+			s3.segmentID: &s3,
 		}
 
 		t.Run("invalid compacted from", func(t *testing.T) {
 			invalidCompactedFroms := [][]UniqueID{
 				{},
-				{100, 200},
+				{101, 201},
 			}
 			req := &datapb.SyncSegmentsRequest{}
 
@@ -704,38 +709,42 @@ func TestDataNode(t *testing.T) {
 
 		t.Run("valid request numRows>0", func(t *testing.T) {
 			req := &datapb.SyncSegmentsRequest{
-				CompactedFrom: []int64{100, 101},
-				CompactedTo:   200,
+				CompactedFrom: []int64{100, 200},
+				CompactedTo:   101,
 				NumOfRows:     100,
 			}
 			status, err := node.SyncSegments(ctx, req)
 			assert.NoError(t, err)
 			assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
 
-			assert.True(t, fg.replica.hasSegment(req.CompactedTo, true))
-			assert.False(t, fg.replica.hasSegment(req.CompactedFrom[0], true))
-			assert.False(t, fg.replica.hasSegment(req.CompactedFrom[1], true))
+			assert.True(t, fg.channel.hasSegment(req.CompactedTo, true))
+			assert.False(t, fg.channel.hasSegment(req.CompactedFrom[0], true))
+			assert.False(t, fg.channel.hasSegment(req.CompactedFrom[1], true))
 		})
 
 		t.Run("valid request numRows=0", func(t *testing.T) {
-			fg.replica.(*SegmentReplica).flushedSegments = map[UniqueID]*Segment{
-				100: {channelName: chanName},
-				101: {channelName: chanName},
-				102: {channelName: chanName},
+			s1.setType(datapb.SegmentType_Flushed)
+			s2.setType(datapb.SegmentType_Flushed)
+			s3.setType(datapb.SegmentType_Flushed)
+
+			fg.channel.(*ChannelMeta).segments = map[UniqueID]*Segment{
+				s1.segmentID: &s1,
+				s2.segmentID: &s2,
+				s3.segmentID: &s3,
 			}
 
 			req := &datapb.SyncSegmentsRequest{
-				CompactedFrom: []int64{100, 101},
-				CompactedTo:   200,
+				CompactedFrom: []int64{s1.segmentID, s2.segmentID},
+				CompactedTo:   101,
 				NumOfRows:     0,
 			}
 			status, err := node.SyncSegments(ctx, req)
 			assert.NoError(t, err)
 			assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
 
-			assert.False(t, fg.replica.hasSegment(req.CompactedTo, true))
-			assert.False(t, fg.replica.hasSegment(req.CompactedFrom[0], true))
-			assert.False(t, fg.replica.hasSegment(req.CompactedFrom[1], true))
+			assert.False(t, fg.channel.hasSegment(req.CompactedTo, true))
+			assert.False(t, fg.channel.hasSegment(req.CompactedFrom[0], true))
+			assert.False(t, fg.channel.hasSegment(req.CompactedFrom[1], true))
 		})
 	})
 }
@@ -1114,32 +1123,29 @@ func TestDataNode_ResendSegmentStats(t *testing.T) {
 	fgService, ok := node.flowgraphManager.getFlowgraphService(dmChannelName)
 	assert.True(t, ok)
 
-	err = fgService.replica.addSegment(addSegmentReq{
+	err = fgService.channel.addSegment(addSegmentReq{
 		segType:     datapb.SegmentType_New,
 		segID:       0,
 		collID:      1,
 		partitionID: 1,
-		channelName: dmChannelName,
 		startPos:    &internalpb.MsgPosition{},
 		endPos:      &internalpb.MsgPosition{},
 	})
 	assert.Nil(t, err)
-	err = fgService.replica.addSegment(addSegmentReq{
+	err = fgService.channel.addSegment(addSegmentReq{
 		segType:     datapb.SegmentType_New,
 		segID:       1,
 		collID:      1,
 		partitionID: 2,
-		channelName: dmChannelName,
 		startPos:    &internalpb.MsgPosition{},
 		endPos:      &internalpb.MsgPosition{},
 	})
 	assert.Nil(t, err)
-	err = fgService.replica.addSegment(addSegmentReq{
+	err = fgService.channel.addSegment(addSegmentReq{
 		segType:     datapb.SegmentType_New,
 		segID:       2,
 		collID:      1,
 		partitionID: 3,
-		channelName: dmChannelName,
 		startPos:    &internalpb.MsgPosition{},
 		endPos:      &internalpb.MsgPosition{},
 	})

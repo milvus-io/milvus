@@ -262,7 +262,7 @@ type dropHandler struct {
 type rendezvousFlushManager struct {
 	allocatorInterface
 	storage.ChunkManager
-	Replica
+	Channel
 
 	// segment id => flush queue
 	dispatcher sync.Map
@@ -422,7 +422,6 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segStats []by
 		LogSize:       int64(len(segStats)),
 	}
 
-	m.updateSegmentCheckPoint(segmentID)
 	m.handleInsertTask(segmentID, &flushBufferInsertTask{
 		ChunkManager: m.ChunkManager,
 		data:         kvs,
@@ -484,7 +483,7 @@ func (m *rendezvousFlushManager) injectFlush(injection *taskInjection, segments 
 // fetch meta info for segment
 func (m *rendezvousFlushManager) getSegmentMeta(segmentID UniqueID, pos *internalpb.MsgPosition) (UniqueID, UniqueID, *etcdpb.CollectionMeta, error) {
 	if !m.hasSegment(segmentID, true) {
-		return -1, -1, nil, fmt.Errorf("no such segment %d in the replica", segmentID)
+		return -1, -1, nil, fmt.Errorf("no such segment %d in the channel", segmentID)
 	}
 
 	// fetch meta information of segment
@@ -608,12 +607,12 @@ func (t *flushBufferDeleteTask) flushDeleteData() error {
 }
 
 // NewRendezvousFlushManager create rendezvousFlushManager with provided allocator and kv
-func NewRendezvousFlushManager(allocator allocatorInterface, cm storage.ChunkManager, replica Replica, f notifyMetaFunc, drop flushAndDropFunc) *rendezvousFlushManager {
+func NewRendezvousFlushManager(allocator allocatorInterface, cm storage.ChunkManager, channel Channel, f notifyMetaFunc, drop flushAndDropFunc) *rendezvousFlushManager {
 	fm := &rendezvousFlushManager{
 		allocatorInterface: allocator,
 		ChunkManager:       cm,
 		notifyFunc:         f,
-		Replica:            replica,
+		Channel:            channel,
 		dropHandler: dropHandler{
 			flushAndDrop: drop,
 		},
@@ -680,7 +679,7 @@ func dropVirtualChannelFunc(dsService *dataSyncService, opts ...retry.Option) fl
 			segment.Deltalogs = append(segment.Deltalogs, &datapb.FieldBinlog{
 				Binlogs: pack.deltaLogs,
 			})
-			updates, _ := dsService.replica.getSegmentStatisticsUpdates(pack.segmentID)
+			updates, _ := dsService.channel.getSegmentStatisticsUpdates(pack.segmentID)
 			segment.NumOfRows = updates.GetNumRows()
 			if pack.pos != nil {
 				if segment.CheckPoint == nil || pack.pos.Timestamp > segment.CheckPoint.Timestamp {
@@ -689,7 +688,7 @@ func dropVirtualChannelFunc(dsService *dataSyncService, opts ...retry.Option) fl
 			}
 		}
 
-		startPos := dsService.replica.listNewSegmentsStartPositions()
+		startPos := dsService.channel.listNewSegmentsStartPositions()
 		// start positions for all new segments
 		for _, pos := range startPos {
 			segment, has := segmentPack[pos.GetSegmentID()]
@@ -728,7 +727,7 @@ func dropVirtualChannelFunc(dsService *dataSyncService, opts ...retry.Option) fl
 			if rsp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 				return fmt.Errorf("data service DropVirtualChannel failed, reason = %s", rsp.GetStatus().GetReason())
 			}
-			dsService.replica.transferNewSegments(lo.Map(startPos, func(pos *datapb.SegmentStartPosition, _ int) UniqueID {
+			dsService.channel.transferNewSegments(lo.Map(startPos, func(pos *datapb.SegmentStartPosition, _ int) UniqueID {
 				return pos.GetSegmentID()
 			}))
 			return nil
@@ -738,7 +737,7 @@ func dropVirtualChannelFunc(dsService *dataSyncService, opts ...retry.Option) fl
 			panic(err)
 		}
 		for segID := range segmentPack {
-			dsService.replica.segmentFlushed(segID)
+			dsService.channel.segmentFlushed(segID)
 			dsService.flushingSegCache.Remove(segID)
 		}
 	}
@@ -768,14 +767,14 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 		deltaInfos[0] = &datapb.FieldBinlog{Binlogs: pack.deltaLogs}
 
 		// only current segment checkpoint info,
-		updates, _ := dsService.replica.getSegmentStatisticsUpdates(pack.segmentID)
+		updates, _ := dsService.channel.getSegmentStatisticsUpdates(pack.segmentID)
 		checkPoints = append(checkPoints, &datapb.CheckPoint{
 			SegmentID: pack.segmentID,
 			NumOfRows: updates.GetNumRows(),
 			Position:  pack.pos,
 		})
 
-		startPos := dsService.replica.listNewSegmentsStartPositions()
+		startPos := dsService.channel.listNewSegmentsStartPositions()
 
 		log.Info("SaveBinlogPath",
 			zap.Int64("SegmentID", pack.segmentID),
@@ -833,7 +832,7 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 				return fmt.Errorf("data service save bin log path failed, reason = %s", rsp.Reason)
 			}
 
-			dsService.replica.transferNewSegments(lo.Map(startPos, func(pos *datapb.SegmentStartPosition, _ int) UniqueID {
+			dsService.channel.transferNewSegments(lo.Map(startPos, func(pos *datapb.SegmentStartPosition, _ int) UniqueID {
 				return pos.GetSegmentID()
 			}))
 			return nil
@@ -846,7 +845,7 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 			panic(err)
 		}
 		if pack.flushed || pack.dropped {
-			dsService.replica.segmentFlushed(pack.segmentID)
+			dsService.channel.segmentFlushed(pack.segmentID)
 		}
 		dsService.flushingSegCache.Remove(req.GetSegmentID())
 	}
