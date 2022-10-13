@@ -373,6 +373,7 @@ common:
 #   1. DML throughput limitation;
 #   2. DDL, DQL qps/rps limitation;
 #   3. DQL Queue length/latency protection;
+#   4. DQL result rate protection;
 # If necessary, you can also manually force to deny RW requests.
 quotaAndLimits:
   enabled: false # `true` to enable quota and limits, `false` to disable.
@@ -383,38 +384,38 @@ quotaAndLimits:
 
   ddl: # ddl limit rates, default no limit.
     enabled: false
-    collectionRate: # qps, default no limit, rate for CreateCollection, DropCollection, LoadCollection, ReleaseCollection
-    partitionRate: # qps, default no limit, rate for CreatePartition, DropPartition, LoadPartition, ReleasePartition
+    collectionRate: -1 # qps, default no limit, rate for CreateCollection, DropCollection, LoadCollection, ReleaseCollection
+    partitionRate: -1 # qps, default no limit, rate for CreatePartition, DropPartition, LoadPartition, ReleasePartition
 
   indexRate:
     enabled: false
-    max: # qps, default no limit, rate for CreateIndex, DropIndex
+    max: -1 # qps, default no limit, rate for CreateIndex, DropIndex
   flushRate:
     enabled: false
-    max: # qps, default no limit, rate for flush
+    max: -1 # qps, default no limit, rate for flush
   compactionRate:
     enabled: false
-    max: # qps, default no limit, rate for manualCompaction
+    max: -1 # qps, default no limit, rate for manualCompaction
 
   # dml limit rates, default no limit.
   # The maximum rate will not be greater than `max`.
   dml:
     enabled: false
     insertRate:
-      max: # MB/s, default no limit
+      max: -1 # MB/s, default no limit
     deleteRate:
-      max: # MB/s, default no limit
+      max: -1 # MB/s, default no limit
     bulkLoadRate: # not support yet. TODO: limit bulkLoad rate
-      max: # MB/s, default no limit
+      max: -1 # MB/s, default no limit
 
   # dql limit rates, default no limit.
   # The maximum rate will not be greater than `max`.
   dql:
     enabled: false
     searchRate:
-      max: # vps (vectors per second), default no limit
+      max: -1 # vps (vectors per second), default no limit
     queryRate:
-      max: # qps, default no limit
+      max: -1 # qps, default no limit
 
   # limitWriting decides whether dml requests are allowed.
   limitWriting:
@@ -440,29 +441,33 @@ quotaAndLimits:
     diskProtection:
       # When the total file size of object storage is greater than `diskQuota`, all dml requests would be rejected;
       enabled: true
-      diskQuota: -1 # GB, (0, +inf), -1 means use default +inf
+      diskQuota: -1 # GB, (0, +inf), default no limit
 
   # limitReading decides whether dql requests are allowed.
   limitReading:
     # forceDeny `false` means dql requests are allowed (except for some
     # specific conditions, such as collection has been dropped), `true` means always reject all dql requests.
     forceDeny: false
-
     queueProtection:
       enabled: false
       # nqInQueueThreshold indicated that the system was under backpressure for Search/Query path.
       # If NQ in any QueryNode's queue is greater than nqInQueueThreshold, search&query rates would gradually cool off
       # until the NQ in queue no longer exceeds nqInQueueThreshold. We think of the NQ of query request as 1.
-      nqInQueueThreshold: # int, default no limit
+      nqInQueueThreshold: -1 # int, default no limit
 
       # queueLatencyThreshold indicated that the system was under backpressure for Search/Query path.
       # If dql latency of queuing is greater than queueLatencyThreshold, search&query rates would gradually cool off
       # until the latency of queuing no longer exceeds queueLatencyThreshold.
       # The latency here refers to the averaged latency over a period of time.
-      queueLatencyThreshold: # milliseconds, default no limit
-
-      # coolOffSpeed is the speed of search&query rates cool off.
-      coolOffSpeed: 0.9 # (0, 1]
+      queueLatencyThreshold: -1 # milliseconds, default no limit
+    resultProtection:
+      enabled: false
+      # maxReadResultRate indicated that the system was under backpressure for Search/Query path.
+      # If dql result rate is greater than maxReadResultRate, search&query rates would gradually cool off
+      # until the read result rate no longer exceeds maxReadResultRate.
+      maxReadResultRate: -1 # MB/s, default no limit
+    # coolOffSpeed is the speed of search&query rates cool off.
+    coolOffSpeed: 0.9 # (0, 1]
 
 # AutoIndexConfig
 autoIndex:

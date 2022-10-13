@@ -86,6 +86,8 @@ func TestQuotaParam(t *testing.T) {
 		assert.Equal(t, false, qc.QueueProtectionEnabled)
 		assert.Equal(t, int64(0), qc.NQInQueueThreshold)
 		assert.Equal(t, float64(0), qc.QueueLatencyThreshold)
+		assert.Equal(t, false, qc.ResultProtectionEnabled)
+		assert.Equal(t, defaultMax, qc.MaxReadResultRate)
 		assert.Equal(t, 0.9, qc.CoolOffSpeed)
 	})
 }

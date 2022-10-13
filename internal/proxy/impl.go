@@ -2850,6 +2850,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	if qt.result != nil {
 		sentSize := proto.Size(qt.result)
 		metrics.ProxyReadReqSendBytes.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10)).Add(float64(sentSize))
+		rateCol.Add(metricsinfo.ReadResultThroughput, float64(sentSize))
 	}
 	return qt.result, nil
 }
@@ -3068,6 +3069,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		FieldsData: qt.result.FieldsData,
 	}
 	sentSize := proto.Size(qt.result)
+	rateCol.Add(metricsinfo.ReadResultThroughput, float64(sentSize))
 	metrics.ProxyReadReqSendBytes.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10)).Add(float64(sentSize))
 	return ret, nil
 }

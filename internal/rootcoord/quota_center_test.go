@@ -244,8 +244,33 @@ func TestQuotaCenter(t *testing.T) {
 		}}
 		factor = quotaCenter.checkQueryLatency()
 		assert.Equal(t, 1.0, factor)
-		//ok := math.Abs(factor-1.0) < 0.0001
-		//assert.True(t, ok)
+	})
+
+	t.Run("test checkReadResult", func(t *testing.T) {
+		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
+		factor := quotaCenter.checkReadResultRate()
+		assert.Equal(t, float64(1), factor)
+
+		// test cool off
+		Params.QuotaConfig.ResultProtectionEnabled = true
+		Params.QuotaConfig.MaxReadResultRate = 1
+
+		quotaCenter.proxyMetrics = []*metricsinfo.ProxyQuotaMetrics{{
+			Rms: []metricsinfo.RateMetric{
+				{Label: metricsinfo.ReadResultThroughput, Rate: 1.2},
+			},
+		}}
+		factor = quotaCenter.checkReadResultRate()
+		assert.Equal(t, Params.QuotaConfig.CoolOffSpeed, factor)
+
+		// test no cool off
+		quotaCenter.proxyMetrics = []*metricsinfo.ProxyQuotaMetrics{{
+			Rms: []metricsinfo.RateMetric{
+				{Label: metricsinfo.ReadResultThroughput, Rate: 0.8},
+			},
+		}}
+		factor = quotaCenter.checkReadResultRate()
+		assert.Equal(t, 1.0, factor)
 	})
 
 	t.Run("test calculateReadRates", func(t *testing.T) {
@@ -275,6 +300,20 @@ func TestQuotaCenter(t *testing.T) {
 				UnsolvedQueue: Params.QuotaConfig.NQInQueueThreshold,
 			},
 		}}
+		quotaCenter.calculateReadRates()
+		assert.Equal(t, Limit(100.0*0.9), quotaCenter.currentRates[internalpb.RateType_DQLSearch])
+		assert.Equal(t, Limit(100.0*0.9), quotaCenter.currentRates[internalpb.RateType_DQLQuery])
+
+		Params.QuotaConfig.ResultProtectionEnabled = true
+		Params.QuotaConfig.MaxReadResultRate = 1
+		quotaCenter.proxyMetrics = []*metricsinfo.ProxyQuotaMetrics{{
+			Rms: []metricsinfo.RateMetric{
+				{Label: internalpb.RateType_DQLSearch.String(), Rate: 100},
+				{Label: internalpb.RateType_DQLQuery.String(), Rate: 100},
+				{Label: metricsinfo.ReadResultThroughput, Rate: 1.2},
+			},
+		}}
+		quotaCenter.queryNodeMetrics = []*metricsinfo.QueryNodeQuotaMetrics{{SearchQueue: metricsinfo.ReadInfoInQueue{}}}
 		quotaCenter.calculateReadRates()
 		assert.Equal(t, Limit(100.0*0.9), quotaCenter.currentRates[internalpb.RateType_DQLSearch])
 		assert.Equal(t, Limit(100.0*0.9), quotaCenter.currentRates[internalpb.RateType_DQLQuery])
