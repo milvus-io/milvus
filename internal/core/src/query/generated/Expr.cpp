@@ -49,9 +49,4 @@ CompareExpr::accept(ExprVisitor& visitor) {
     visitor.visit(*this);
 }
 
-void
-UdfExpr::accept(ExprVisitor& visitor) {
-    visitor.visit(*this);
-}
-
 }  // namespace milvus::query

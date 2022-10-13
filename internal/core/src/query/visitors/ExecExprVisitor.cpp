@@ -20,7 +20,6 @@
 #include "segcore/SegmentGrowingImpl.h"
 #include "query/Utils.h"
 #include "query/Relational.h"
-#include "wasm/WasmFunctionManager.h"
 
 namespace milvus::query {
 // THIS CONTAINS EXTRA BODY FOR VISITOR
@@ -66,14 +65,6 @@ class ExecExprVisitor : ExprVisitor {
     template <typename CmpFunc>
     auto
     ExecCompareExprDispatcher(CompareExpr& expr, CmpFunc cmp_func) -> BitsetType;
-
-    template <typename T, typename IndexFunc, typename ElementFunc>
-    auto
-    ExecUdfVisitorImpl(FieldId field_id, IndexFunc index_func, ElementFunc element_func) -> BitsetType;
-
-    template <typename T>
-    auto
-    ExecUdfVisitorDispatcher(UdfExpr& expr_raw) -> BitsetType;
 
  private:
     const segcore::SegmentInternalInterface& segment_;
@@ -890,171 +881,6 @@ ExecExprVisitor::visit(TermExpr& expr) {
         default:
             PanicInfo("unsupported");
     }
-    AssertInfo(res.size() == row_count_, "[ExecExprVisitor]Size of results not equal row count");
-    bitset_opt_ = std::move(res);
-}
-
-#pragma clang diagnostic push
-#pragma ide diagnostic ignored "Simplify"
-auto
-ExecExprVisitor::ExecUdfVisitorDispatcher(UdfExpr& expr) -> BitsetType {
-    using param = boost::variant<bool, int8_t, int16_t, int32_t, int64_t, float, double, FieldId>;
-    using number = boost::variant<bool, int8_t, int16_t, int32_t, int64_t, float, double, std::string>;
-    // function name
-    const std::string func_name = expr.func_name_;
-    // function body
-    const std::string wasm_body = expr.wasm_body_;
-    WasmFunctionManager& wasmFunctionManager = WasmFunctionManager::getInstance();
-    wasmFunctionManager.RegisterFunction(func_name, func_name, wasm_body);
-    // function parameter
-    const std::vector<param> values = expr.values_;
-    const std::vector<DataType> value_types = expr.arg_types_;
-    const std::vector<bool> is_field = expr.is_field_;
-    auto params_size = values.size();
-    std::vector<wasmtime::Val> params;
-    params.reserve(params_size);
-
-    std::deque<BitsetType> bitsets;
-    auto size_per_chunk = segment_.size_per_chunk();
-    auto num_chunk = upper_div(row_count_, size_per_chunk);
-    for (int i = 0; i < params_size; ++i) {
-        if (is_field[i]) {
-            auto field_id = boost::get<FieldId>(values[i]);
-            auto data_barrier = segment_.num_chunk_data(field_id);
-            AssertInfo(data_barrier == num_chunk, "data_barrier not equal to num_chunk");
-        }
-    }
-    for (int64_t chunk_id = 0; chunk_id < num_chunk; ++chunk_id) {
-        auto size = chunk_id == num_chunk - 1 ? row_count_ - chunk_id * size_per_chunk : size_per_chunk;
-        auto getChunkData = [&, chunk_id](DataType type, FieldId field_id) -> std::function<const number(int)> {
-            switch (type) {
-                case DataType::BOOL: {
-                    auto chunk_data = segment_.chunk_data<bool>(field_id, chunk_id).data();
-                    return [chunk_data](int i) -> const number { return chunk_data[i]; };
-                }
-                case DataType::INT8: {
-                    auto chunk_data = segment_.chunk_data<int8_t>(field_id, chunk_id).data();
-                    return [chunk_data](int i) -> const number { return chunk_data[i]; };
-                }
-                case DataType::INT16: {
-                    auto chunk_data = segment_.chunk_data<int16_t>(field_id, chunk_id).data();
-                    return [chunk_data](int i) -> const number { return chunk_data[i]; };
-                }
-                case DataType::INT32: {
-                    auto chunk_data = segment_.chunk_data<int32_t>(field_id, chunk_id).data();
-                    return [chunk_data](int i) -> const number { return chunk_data[i]; };
-                }
-                case DataType::INT64: {
-                    auto chunk_data = segment_.chunk_data<int64_t>(field_id, chunk_id).data();
-                    return [chunk_data](int i) -> const number { return chunk_data[i]; };
-                }
-                case DataType::FLOAT: {
-                    auto chunk_data = segment_.chunk_data<float>(field_id, chunk_id).data();
-                    return [chunk_data](int i) -> const number { return chunk_data[i]; };
-                }
-                case DataType::DOUBLE: {
-                    auto chunk_data = segment_.chunk_data<double>(field_id, chunk_id).data();
-                    return [chunk_data](int i) -> const number { return chunk_data[i]; };
-                }
-                default:
-                    PanicInfo("unsupported datatype");
-            }
-        };
-        BitsetType bitset(size);
-        for (int i = 0; i < size; ++i) {
-            for (int param_index = 0; param_index < params_size; ++param_index) {
-                if (is_field[param_index]) {
-                    auto field_id = boost::get<FieldId>(values[param_index]);
-                    auto data_barrier = segment_.num_chunk_data(field_id);
-                    auto data_type = value_types[param_index];
-                    auto chunkData = getChunkData(data_type, field_id);
-                    switch (data_type) {
-                        case DataType::BOOL:
-                            params.emplace_back(boost::get<bool>(chunkData(i)));
-                            break;
-                        case DataType::INT8:
-                            params.emplace_back(boost::get<int8_t>(chunkData(i)));
-                            break;
-                        case DataType::INT16:
-                            params.emplace_back(boost::get<int16_t>(chunkData(i)));
-                            break;
-                        case DataType::INT32:
-                            params.emplace_back(boost::get<int32_t>(chunkData(i)));
-                            break;
-                        case DataType::INT64:
-                            params.emplace_back(boost::get<int64_t>(chunkData(i)));
-                            break;
-                        case DataType::FLOAT:
-                            params.emplace_back(boost::get<float>(chunkData(i)));
-                            break;
-                        case DataType::DOUBLE:
-                            params.emplace_back(boost::get<double>(chunkData(i)));
-                            break;
-                        default: {
-                            PanicInfo("unsupported data type");
-                        }
-                    }
-                } else {
-                    auto data_type = value_types[param_index];
-                    auto value = values[param_index];
-                    switch (data_type) {
-                        case DataType::BOOL:
-                            params.emplace_back(boost::get<bool>(value));
-                            break;
-                        case DataType::INT8:
-                            params.emplace_back(boost::get<int8_t>(value));
-                            break;
-                        case DataType::INT16:
-                            params.emplace_back(boost::get<int16_t>(value));
-                            break;
-                        case DataType::INT32:
-                            params.emplace_back(boost::get<int32_t>(value));
-                            break;
-                        case DataType::INT64:
-                            params.emplace_back(boost::get<int64_t>(value));
-                            break;
-                        case DataType::FLOAT:
-                            params.emplace_back(boost::get<float>(value));
-                            break;
-                        case DataType::DOUBLE:
-                            params.emplace_back(boost::get<double>(value));
-                            break;
-                        default: {
-                            PanicInfo("unsupported data type");
-                        }
-                    }
-                }
-            }
-            bool is_in = wasmFunctionManager.runElemFunc(func_name, params);
-            bitset[i] = is_in;
-            params.clear();
-        }
-
-        bitsets.emplace_back(std::move(bitset));
-    }
-    auto final_result = Assemble(bitsets);
-    AssertInfo(final_result.size() == row_count_, "[ExecExprVisitor]Final result size not equal to row count");
-    return final_result;
-}
-#pragma clang diagnostic pop
-
-void
-ExecExprVisitor::visit(UdfExpr& expr) {
-    auto& schema = segment_.get_schema();
-    auto values = expr.values_;
-    auto is_field = expr.is_field_;
-    auto arg_types = expr.arg_types_;
-    auto size = values.size();
-    for (int i = 0; i < size; ++i) {
-        if (is_field[i]) {
-            auto field_id = boost::get<FieldId>(values[i]);
-            auto &field_meta = schema[field_id];
-            AssertInfo(arg_types[i] == field_meta.get_data_type(),
-                       "[ExecExprVisitor]field Data type not equal to field mata type");
-        }
-    }
-    BitsetType res;
-    res = ExecUdfVisitorDispatcher(expr);
     AssertInfo(res.size() == row_count_, "[ExecExprVisitor]Size of results not equal row count");
     bitset_opt_ = std::move(res);
 }

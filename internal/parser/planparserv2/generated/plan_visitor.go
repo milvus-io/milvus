@@ -58,9 +58,6 @@ type PlanVisitor interface {
 	// Visit a parse tree produced by PlanParser#Like.
 	VisitLike(ctx *LikeContext) interface{}
 
-	// Visit a parse tree produced by PlanParser#Udf.
-	VisitUdf(ctx *UdfContext) interface{}
-
 	// Visit a parse tree produced by PlanParser#BitAnd.
 	VisitBitAnd(ctx *BitAndContext) interface{}
 

@@ -212,10 +212,6 @@ func Test_NewClient(t *testing.T) {
 			r, err := client.ShowConfigurations(ctx, nil)
 			retCheck(retNotNil, r, err)
 		}
-		{
-			r, err := client.CreateFunction(ctx, nil)
-			retCheck(retNotNil, r, err)
-		}
 	}
 
 	client.grpcClient = &mock.GRPCClientBase{
@@ -414,7 +410,6 @@ func Test_NewClient(t *testing.T) {
 		rTimeout, err := client.ListPolicy(shortCtx, nil)
 		retCheck(rTimeout, err)
 	}
-
 	// clean up
 	err = client.Stop()
 	assert.Nil(t, err)

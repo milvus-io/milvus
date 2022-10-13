@@ -39,8 +39,5 @@ class ExprVisitor {
 
     virtual void
     visit(CompareExpr&) = 0;
-
-    virtual void
-    visit(UdfExpr&) = 0;
 };
 }  // namespace milvus::query

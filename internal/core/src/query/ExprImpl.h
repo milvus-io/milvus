@@ -75,4 +75,5 @@ struct BinaryRangeExprImpl : BinaryRangeExpr {
           upper_value_(upper_value) {
     }
 };
+
 }  // namespace milvus::query

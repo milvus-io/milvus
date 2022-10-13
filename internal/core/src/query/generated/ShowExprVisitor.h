@@ -40,9 +40,6 @@ class ShowExprVisitor : public ExprVisitor {
     void
     visit(CompareExpr& expr) override;
 
-    void
-    visit(UdfExpr& expr) override;
-
  public:
     Json
 

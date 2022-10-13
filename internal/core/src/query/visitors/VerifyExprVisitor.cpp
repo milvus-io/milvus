@@ -47,9 +47,4 @@ VerifyExprVisitor::visit(CompareExpr& expr) {
     // TODO
 }
 
-void
-VerifyExprVisitor::visit(UdfExpr& expr) {
-    // TODO
-}
-
 }  // namespace milvus::query

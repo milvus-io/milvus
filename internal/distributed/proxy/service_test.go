@@ -432,18 +432,6 @@ func (m *MockQueryCoord) ShowConfigurations(ctx context.Context, req *internalpb
 	return nil, nil
 }
 
-func (m *MockRootCoord) CreateFunction(ctx context.Context, req *milvuspb.CreateFunctionRequest) (*commonpb.Status, error) {
-	return nil, nil
-}
-
-func (m *MockRootCoord) DropFunction(ctx context.Context, request *milvuspb.DropFunctionRequest) (*commonpb.Status, error) {
-	return nil, nil
-}
-
-func (m *MockRootCoord) GetFunctionInfo(ctx context.Context, request *rootcoordpb.GetFunctionInfoRequest) (*rootcoordpb.GetFunctionInfoResponse, error) {
-	return nil, nil
-}
-
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type MockDataCoord struct {
 	MockBase
@@ -877,14 +865,6 @@ func (m *MockProxy) SelectGrant(ctx context.Context, in *milvuspb.SelectGrantReq
 }
 
 func (m *MockProxy) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error) {
-	return nil, nil
-}
-
-func (m *MockProxy) CreateFunction(ctx context.Context, request *milvuspb.CreateFunctionRequest) (*commonpb.Status, error) {
-	return nil, nil
-}
-
-func (m *MockProxy) DropFunction(ctx context.Context, request *milvuspb.DropFunctionRequest) (*commonpb.Status, error) {
 	return nil, nil
 }
 

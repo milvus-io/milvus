@@ -14,5 +14,4 @@ type LogicalExprVisitor interface {
 	VisitBinaryArithExpr(expr *planpb.BinaryArithExpr) interface{}
 	VisitValueExpr(expr *planpb.ValueExpr) interface{}
 	VisitColumnExpr(expr *planpb.ColumnExpr) interface{}
-	VisitUdfExpr(expr *planpb.UdfExpr) interface{}
 }

@@ -10,7 +10,7 @@ import (
 	"github.com/antlr/antlr4/runtime/Go/antlr"
 )
 
-func handleExpr(schema *typeutil.SchemaHelper, exprStr string, opts ...ParserVisitorOpt) interface{} {
+func handleExpr(schema *typeutil.SchemaHelper, exprStr string) interface{} {
 	if exprStr == "" {
 		return nil
 	}
@@ -37,16 +37,16 @@ func handleExpr(schema *typeutil.SchemaHelper, exprStr string, opts ...ParserVis
 	putLexer(lexer)
 	putParser(parser)
 
-	visitor := NewParserVisitor(schema, opts...)
+	visitor := NewParserVisitor(schema)
 	return ast.Accept(visitor)
 }
 
-func ParseExpr(schema *typeutil.SchemaHelper, exprStr string, opts ...ParserVisitorOpt) (*planpb.Expr, error) {
+func ParseExpr(schema *typeutil.SchemaHelper, exprStr string) (*planpb.Expr, error) {
 	if len(exprStr) <= 0 {
 		return nil, nil
 	}
 
-	ret := handleExpr(schema, exprStr, opts...)
+	ret := handleExpr(schema, exprStr)
 
 	if err := getError(ret); err != nil {
 		return nil, fmt.Errorf("cannot parse expression: %s, error: %s", exprStr, err)
@@ -64,13 +64,13 @@ func ParseExpr(schema *typeutil.SchemaHelper, exprStr string, opts ...ParserVisi
 	return predicate.expr, nil
 }
 
-func CreateRetrievePlan(schemaPb *schemapb.CollectionSchema, exprStr string, opts ...ParserVisitorOpt) (*planpb.PlanNode, error) {
+func CreateRetrievePlan(schemaPb *schemapb.CollectionSchema, exprStr string) (*planpb.PlanNode, error) {
 	schema, err := typeutil.CreateSchemaHelper(schemaPb)
 	if err != nil {
 		return nil, err
 	}
 
-	expr, err := ParseExpr(schema, exprStr, opts...)
+	expr, err := ParseExpr(schema, exprStr)
 	if err != nil {
 		return nil, err
 	}
@@ -83,13 +83,13 @@ func CreateRetrievePlan(schemaPb *schemapb.CollectionSchema, exprStr string, opt
 	return planNode, nil
 }
 
-func CreateSearchPlan(schemaPb *schemapb.CollectionSchema, exprStr string, vectorFieldName string, queryInfo *planpb.QueryInfo, opts ...ParserVisitorOpt) (*planpb.PlanNode, error) {
+func CreateSearchPlan(schemaPb *schemapb.CollectionSchema, exprStr string, vectorFieldName string, queryInfo *planpb.QueryInfo) (*planpb.PlanNode, error) {
 	schema, err := typeutil.CreateSchemaHelper(schemaPb)
 	if err != nil {
 		return nil, err
 	}
 
-	expr, err := ParseExpr(schema, exprStr, opts...)
+	expr, err := ParseExpr(schema, exprStr)
 	if err != nil {
 		return nil, err
 	}
