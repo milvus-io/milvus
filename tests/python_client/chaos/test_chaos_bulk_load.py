@@ -174,10 +174,12 @@ class TestChaos(TestChaosBase):
 		log.info(f'Alive threads: {threading.enumerate()}')
 		# assert statistic
 		log.info("******2nd assert after chaos injected: ")
-		assert_statistic(self.health_checkers,
-						 expectations={
-							 Op.bulk_load: constants.FAIL,
-						 })
+		for op, checker in self.health_checkers.items():
+			checker.check_result()
+		# assert_statistic(self.health_checkers,
+		# 				 expectations={
+		# 					 Op.bulk_load: constants.FAIL,
+		# 				 })
 		# delete chaos
 		chaos_res.delete(meta_name)
 		log.info("chaos deleted")
