@@ -353,7 +353,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 				segRefer:          tt.fields.segRefer,
 				indexCoord:        indexCoord,
 			}
-			_, err := tr.forceTriggerCompaction(tt.collectionID)
+			_, err := tr.triggerManualCompaction(tt.collectionID)
 			assert.Equal(t, tt.wantErr, err != nil)
 			spy := (tt.fields.compactionHandler).(*spyCompactionHandler)
 			plan := <-spy.spyChan
@@ -381,7 +381,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 				estimateDiskSegmentPolicy: calBySchemaPolicyWithDiskIndex,
 			}
 			tt.collectionID = 1000
-			_, err := tr.forceTriggerCompaction(tt.collectionID)
+			_, err := tr.triggerManualCompaction(tt.collectionID)
 			assert.Equal(t, tt.wantErr, err != nil)
 			// expect max row num =  2048*1024*1024/(128*4) = 4194304
 			assert.EqualValues(t, 4194304, tt.fields.meta.segments.GetSegments()[0].MaxRowNum)
@@ -409,7 +409,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 				estimateDiskSegmentPolicy: calBySchemaPolicyWithDiskIndex,
 			}
 			tt.collectionID = 2000
-			_, err := tr.forceTriggerCompaction(tt.collectionID)
+			_, err := tr.triggerManualCompaction(tt.collectionID)
 			assert.Equal(t, tt.wantErr, err != nil)
 			spy := (tt.fields.compactionHandler).(*spyCompactionHandler)
 			hasPlan := true
@@ -442,7 +442,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 				estimateDiskSegmentPolicy: calBySchemaPolicyWithDiskIndex,
 			}
 			tt.collectionID = 3000
-			_, err := tr.forceTriggerCompaction(tt.collectionID)
+			_, err := tr.triggerManualCompaction(tt.collectionID)
 			assert.Equal(t, tt.wantErr, err != nil)
 			spy := (tt.fields.compactionHandler).(*spyCompactionHandler)
 			hasPlan := true
@@ -475,7 +475,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 				estimateDiskSegmentPolicy: calBySchemaPolicyWithDiskIndex,
 			}
 			tt.collectionID = 4000
-			_, err := tr.forceTriggerCompaction(tt.collectionID)
+			_, err := tr.triggerManualCompaction(tt.collectionID)
 			assert.Equal(t, tt.wantErr, err != nil)
 			spy := (tt.fields.compactionHandler).(*spyCompactionHandler)
 			hasPlan := true
@@ -507,7 +507,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 				indexCoord:        indexCood,
 			}
 			tt.collectionID = 10000
-			_, err := tr.forceTriggerCompaction(tt.collectionID)
+			_, err := tr.triggerManualCompaction(tt.collectionID)
 			assert.Equal(t, tt.wantErr, err != nil)
 			spy := (tt.fields.compactionHandler).(*spyCompactionHandler)
 			hasPlan := true
@@ -538,12 +538,11 @@ func Test_compactionTrigger_force(t *testing.T) {
 			{
 				// test alloc ts fail for handle global signal
 				signal := &compactionSignal{
-					id:           0,
-					isForce:      true,
-					isGlobal:     true,
-					collectionID: tt.collectionID,
+					id:             0,
+					compactionType: ManualCompaction,
+					collectionID:   tt.collectionID,
 				}
-				tr.handleGlobalSignal(signal)
+				tr.handleAutoCompactionSignal(signal)
 
 				spy := (tt.fields.compactionHandler).(*spyCompactionHandler)
 				hasPlan := true
@@ -559,12 +558,12 @@ func Test_compactionTrigger_force(t *testing.T) {
 			{
 				// test alloc ts fail for handle signal
 				signal := &compactionSignal{
-					id:           0,
-					isForce:      true,
-					collectionID: tt.collectionID,
-					segmentID:    3,
+					id:             0,
+					compactionType: ManualCompaction,
+					collectionID:   tt.collectionID,
+					segmentID:      3,
 				}
-				tr.handleSignal(signal)
+				tr.handleFlushCompactionSignal(signal)
 
 				spy := (tt.fields.compactionHandler).(*spyCompactionHandler)
 				hasPlan := true
@@ -598,12 +597,11 @@ func Test_compactionTrigger_force(t *testing.T) {
 			{
 				// test getCompactTime fail for handle global signal
 				signal := &compactionSignal{
-					id:           0,
-					isForce:      true,
-					isGlobal:     true,
-					collectionID: 1111,
+					id:             0,
+					compactionType: ManualCompaction,
+					collectionID:   1111,
 				}
-				tr.handleGlobalSignal(signal)
+				tr.handleAutoCompactionSignal(signal)
 
 				spy := (tt.fields.compactionHandler).(*spyCompactionHandler)
 				hasPlan := true
@@ -619,12 +617,12 @@ func Test_compactionTrigger_force(t *testing.T) {
 			{
 				// test getCompactTime fail for handle signal
 				signal := &compactionSignal{
-					id:           0,
-					isForce:      true,
-					collectionID: 1111,
-					segmentID:    3,
+					id:             0,
+					compactionType: ManualCompaction,
+					collectionID:   1111,
+					segmentID:      3,
 				}
-				tr.handleSignal(signal)
+				tr.handleFlushCompactionSignal(signal)
 
 				spy := (tt.fields.compactionHandler).(*spyCompactionHandler)
 				hasPlan := true
@@ -788,7 +786,7 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 				segRefer:          &SegmentReferenceManager{segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{}},
 				indexCoord:        indexCoord,
 			}
-			_, err := tr.forceTriggerCompaction(tt.args.collectionID)
+			_, err := tr.triggerManualCompaction(tt.args.collectionID)
 			assert.Equal(t, tt.wantErr, err != nil)
 			spy := (tt.fields.compactionHandler).(*spyCompactionHandler)
 
@@ -965,7 +963,7 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 			}
 			tr.start()
 			defer tr.stop()
-			err := tr.triggerCompaction()
+			err := tr.triggerAutoCompaction()
 			assert.Equal(t, tt.wantErr, err != nil)
 			spy := (tt.fields.compactionHandler).(*spyCompactionHandler)
 			select {
@@ -1157,7 +1155,7 @@ func Test_compactionTrigger_smallfiles(t *testing.T) {
 			}
 			tr.start()
 			defer tr.stop()
-			err := tr.triggerCompaction()
+			err := tr.triggerAutoCompaction()
 			assert.Equal(t, tt.wantErr, err != nil)
 			spy := (tt.fields.compactionHandler).(*spyCompactionHandler)
 			select {
@@ -1279,7 +1277,7 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 			}
 			tr.start()
 			defer tr.stop()
-			err := tr.triggerCompaction()
+			err := tr.triggerAutoCompaction()
 			assert.Equal(t, tt.wantErr, err != nil)
 			spy := (tt.fields.compactionHandler).(*spyCompactionHandler)
 
@@ -1471,7 +1469,7 @@ func Test_handleSignal(t *testing.T) {
 		segmentID: 1,
 	}
 	assert.NotPanics(t, func() {
-		got.handleSignal(signal)
+		got.handleFlushCompactionSignal(signal)
 	})
 }
 

@@ -435,7 +435,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		s.flushCh <- req.SegmentID
 
 		if !req.Importing && Params.DataCoordCfg.EnableCompaction {
-			err = s.compactionTrigger.triggerSingleCompaction(segment.GetCollectionID(), segment.GetPartitionID(),
+			err = s.compactionTrigger.triggerFlushCompaction(segment.GetCollectionID(), segment.GetPartitionID(),
 				segmentID, segment.GetInsertChannel())
 			if err != nil {
 				log.Warn("failed to trigger single compaction", zap.Int64("segment ID", segmentID))
@@ -904,7 +904,7 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 		return resp, nil
 	}
 
-	id, err := s.compactionTrigger.forceTriggerCompaction(req.CollectionID)
+	id, err := s.compactionTrigger.triggerManualCompaction(req.CollectionID)
 	if err != nil {
 		log.Error("failed to trigger manual compaction", zap.Int64("collectionID", req.GetCollectionID()), zap.Error(err))
 		resp.Status.Reason = err.Error()

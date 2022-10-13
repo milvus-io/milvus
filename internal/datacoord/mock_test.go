@@ -628,8 +628,8 @@ type mockCompactionTrigger struct {
 }
 
 // triggerCompaction trigger a compaction if any compaction condition satisfy.
-func (t *mockCompactionTrigger) triggerCompaction() error {
-	if f, ok := t.methods["triggerCompaction"]; ok {
+func (t *mockCompactionTrigger) triggerAutoCompaction() error {
+	if f, ok := t.methods["triggerAutoCompaction"]; ok {
 		if ff, ok := f.(func() error); ok {
 			return ff()
 		}
@@ -638,8 +638,8 @@ func (t *mockCompactionTrigger) triggerCompaction() error {
 }
 
 // triggerSingleCompaction trigerr a compaction bundled with collection-partiiton-channel-segment
-func (t *mockCompactionTrigger) triggerSingleCompaction(collectionID, partitionID, segmentID int64, channel string) error {
-	if f, ok := t.methods["triggerSingleCompaction"]; ok {
+func (t *mockCompactionTrigger) triggerFlushCompaction(collectionID, partitionID, segmentID int64, channel string) error {
+	if f, ok := t.methods["triggerFlushCompaction"]; ok {
 		if ff, ok := f.(func(collectionID int64, partitionID int64, segmentID int64, channel string) error); ok {
 			return ff(collectionID, partitionID, segmentID, channel)
 		}
@@ -648,8 +648,8 @@ func (t *mockCompactionTrigger) triggerSingleCompaction(collectionID, partitionI
 }
 
 // forceTriggerCompaction force to start a compaction
-func (t *mockCompactionTrigger) forceTriggerCompaction(collectionID int64) (UniqueID, error) {
-	if f, ok := t.methods["forceTriggerCompaction"]; ok {
+func (t *mockCompactionTrigger) triggerManualCompaction(collectionID int64) (UniqueID, error) {
+	if f, ok := t.methods["triggerManualCompaction"]; ok {
 		if ff, ok := f.(func(collectionID int64) (UniqueID, error)); ok {
 			return ff(collectionID)
 		}
