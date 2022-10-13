@@ -23,6 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus/api/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -93,12 +94,7 @@ func (ia *IDAllocator) syncID() (bool, error) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	req := &rootcoordpb.AllocIDRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_RequestID,
-			MsgID:     0,
-			Timestamp: 0,
-			SourceID:  ia.PeerID,
-		},
+		Base:  commonpbutil.NewMsgBase(commonpb.MsgType_RequestID, 0, 0, ia.PeerID, -2),
 		Count: need,
 	}
 	resp, err := ia.remoteAllocator.AllocID(ctx, req)

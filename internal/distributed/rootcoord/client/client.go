@@ -510,6 +510,10 @@ func (c *Client) CreateCredential(ctx context.Context, req *internalpb.Credentia
 	return ret.(*commonpb.Status), err
 }
 
+func (c *Client) GetNodeID() int64 {
+	return c.sess.ServerID
+}
+
 func (c *Client) GetCredential(ctx context.Context, req *rootcoordpb.GetCredentialRequest) (*rootcoordpb.GetCredentialResponse, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
 		if !funcutil.CheckCtxValid(ctx) {

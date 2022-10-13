@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/logutil"
@@ -294,12 +295,12 @@ func (s *Server) Init() error {
 }
 
 // Start initialize `Server` members and start loops, follow steps are taken:
-// 1. initialize message factory parameters
-// 2. initialize root coord client, meta, datanode cluster, segment info channel,
-//		allocator, segment manager
-// 3. start service discovery and server loops, which includes message stream handler (segment statistics,datanode tt)
-//		datanodes etcd watch, etcd alive check and flush completed status check
-// 4. set server state to Healthy
+//  1. initialize message factory parameters
+//  2. initialize root coord client, meta, datanode cluster, segment info channel,
+//     allocator, segment manager
+//  3. start service discovery and server loops, which includes message stream handler (segment statistics,datanode tt)
+//     datanodes etcd watch, etcd alive check and flush completed status check
+//  4. set server state to Healthy
 func (s *Server) Start() error {
 	s.compactionHandler.start()
 	s.compactionTrigger.start()
@@ -833,6 +834,7 @@ func (s *Server) initRootCoordClient() error {
 // Stop do the Server finalize processes
 // it checks the server status is healthy, if not, just quit
 // if Server is healthy, set server state to stopped, release etcd session,
+//
 //	stop message stream client and stop server loops
 func (s *Server) Stop() error {
 	if !s.stateCode.CompareAndSwap(commonpb.StateCode_Healthy, commonpb.StateCode_Abnormal) {
@@ -881,10 +883,13 @@ func (s *Server) stopServerLoop() {
 // collection information will be added to server meta info.
 func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID int64) error {
 	resp, err := s.rootCoordClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:  commonpb.MsgType_DescribeCollection,
-			SourceID: Params.DataCoordCfg.GetNodeID(),
-		},
+		Base: commonpbutil.NewMsgBase(
+			commonpb.MsgType_DescribeCollection,
+			-2,
+			commonpbutil.GetNowTimestamp(),
+			Params.DataCoordCfg.GetNodeID(),
+			s.rootCoordClient.(*rootcoordclient.Client).GetNodeID(),
+		),
 		DbName:       "",
 		CollectionID: collectionID,
 	})
@@ -892,12 +897,13 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 		return err
 	}
 	presp, err := s.rootCoordClient.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_ShowPartitions,
-			MsgID:     0,
-			Timestamp: 0,
-			SourceID:  Params.DataCoordCfg.GetNodeID(),
-		},
+		Base: commonpbutil.NewMsgBase(
+			commonpb.MsgType_ShowPartitions,
+			0,
+			0,
+			Params.DataCoordCfg.GetNodeID(),
+			s.rootCoordClient.(*rootcoordclient.Client).GetNodeID(),
+		),
 		DbName:         "",
 		CollectionName: resp.Schema.Name,
 		CollectionID:   resp.CollectionID,

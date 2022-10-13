@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/retry"
@@ -589,10 +590,13 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 	}
 
 	dresp, err := s.rootCoordClient.DescribeCollection(s.ctx, &milvuspb.DescribeCollectionRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:  commonpb.MsgType_DescribeCollection,
-			SourceID: Params.DataCoordCfg.GetNodeID(),
-		},
+		Base: commonpbutil.NewMsgBase(
+			commonpb.MsgType_DescribeCollection,
+			req.GetBase().GetMsgID(),
+			req.GetBase().GetTimestamp(),
+			Params.DataCoordCfg.GetNodeID(),
+			req.GetBase().GetTargetID(),
+		),
 		CollectionID: collectionID,
 	})
 	if err = VerifyResponse(dresp, err); err != nil {
@@ -781,7 +785,7 @@ func (s *Server) GetSegmentsByStates(ctx context.Context, req *datapb.GetSegment
 	return resp, nil
 }
 
-//ShowConfigurations returns the configurations of DataCoord matching req.Pattern
+// ShowConfigurations returns the configurations of DataCoord matching req.Pattern
 func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
 	log.Debug("DataCoord.ShowConfigurations", zap.String("pattern", req.Pattern))
 	if s.isClosed() {
@@ -1276,10 +1280,13 @@ func (s *Server) SaveImportSegment(ctx context.Context, req *datapb.SaveImportSe
 	}
 	resp, err := cli.AddImportSegment(ctx,
 		&datapb.AddImportSegmentRequest{
-			Base: &commonpb.MsgBase{
-				SourceID:  Params.DataNodeCfg.GetNodeID(),
-				Timestamp: req.GetBase().GetTimestamp(),
-			},
+			Base: commonpbutil.NewMsgBase(
+				commonpb.MsgType_Undefined,
+				req.GetBase().GetMsgID(),
+				req.GetBase().GetTimestamp(),
+				req.GetBase().GetSourceID(),
+				req.GetBase().GetTargetID(),
+			),
 			SegmentId:    req.GetSegmentId(),
 			ChannelName:  req.GetChannelName(),
 			CollectionId: req.GetCollectionId(),
