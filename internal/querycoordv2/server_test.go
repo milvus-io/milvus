@@ -185,6 +185,49 @@ func (suite *ServerSuite) TestNodeDown() {
 	}, 5*time.Second, time.Second)
 }
 
+func (suite *ServerSuite) TestDisableActiveStandby() {
+	Params.QueryCoordCfg.EnableActiveStandby = false
+
+	err := suite.server.Stop()
+	suite.NoError(err)
+
+	suite.server, err = newQueryCoord()
+	suite.NoError(err)
+	suite.hackServer()
+	err = suite.server.Start()
+	suite.NoError(err)
+	err = suite.server.Register()
+	suite.NoError(err)
+
+	states, err := suite.server.GetComponentStates(context.Background())
+	suite.NoError(err)
+	suite.Equal(commonpb.StateCode_Healthy, states.GetState().GetStateCode())
+}
+
+func (suite *ServerSuite) TestEnableActiveStandby() {
+	Params.QueryCoordCfg.EnableActiveStandby = true
+
+	err := suite.server.Stop()
+	suite.NoError(err)
+
+	suite.server, err = newQueryCoord()
+	suite.NoError(err)
+	suite.hackServer()
+	err = suite.server.Start()
+	suite.NoError(err)
+	states1, err := suite.server.GetComponentStates(context.Background())
+	suite.NoError(err)
+	suite.Equal(commonpb.StateCode_StandBy, states1.GetState().GetStateCode())
+	err = suite.server.Register()
+	suite.NoError(err)
+
+	states2, err := suite.server.GetComponentStates(context.Background())
+	suite.NoError(err)
+	suite.Equal(commonpb.StateCode_Healthy, states2.GetState().GetStateCode())
+
+	Params.QueryCoordCfg.EnableActiveStandby = false
+}
+
 func (suite *ServerSuite) waitNodeUp(node *mocks.MockQueryNode, timeout time.Duration) bool {
 	start := time.Now()
 	for time.Since(start) < timeout {

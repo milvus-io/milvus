@@ -107,6 +107,10 @@ type Server struct {
 	handoffObserver    *observers.HandoffObserver
 
 	balancer balance.Balance
+
+	// Active-standby
+	enableActiveStandBy bool
+	activateFunc        func()
 }
 
 func NewQueryCoord(ctx context.Context, factory dependency.Factory) (*Server, error) {
@@ -122,6 +126,9 @@ func NewQueryCoord(ctx context.Context, factory dependency.Factory) (*Server, er
 
 func (s *Server) Register() error {
 	s.session.Register()
+	if s.enableActiveStandBy {
+		s.session.ProcessActiveStandBy(s.activateFunc)
+	}
 	go s.session.LivenessCheck(s.ctx, func() {
 		log.Error("QueryCoord disconnected from etcd, process will exit", zap.Int64("serverID", s.session.ServerID))
 		if err := s.Stop(); err != nil {
@@ -148,6 +155,8 @@ func (s *Server) Init() error {
 		return fmt.Errorf("failed to create session")
 	}
 	s.session.Init(typeutil.QueryCoordRole, Params.QueryCoordCfg.Address, true, true)
+	s.enableActiveStandBy = Params.QueryCoordCfg.EnableActiveStandby
+	s.session.SetEnableActiveStandBy(s.enableActiveStandBy)
 	Params.QueryCoordCfg.SetNodeID(s.session.ServerID)
 	Params.SetLogger(s.session.ServerID)
 	s.factory.Init(Params)
@@ -325,7 +334,17 @@ func (s *Server) Start() error {
 		panic(err.Error())
 	}
 
-	s.status.Store(commonpb.StateCode_Healthy)
+	if s.enableActiveStandBy {
+		s.activateFunc = func() {
+			// todo to complete
+			log.Info("querycoord switch from standby to active, activating")
+			s.initMeta()
+			s.UpdateStateCode(commonpb.StateCode_Healthy)
+		}
+		s.UpdateStateCode(commonpb.StateCode_StandBy)
+	} else {
+		s.UpdateStateCode(commonpb.StateCode_Healthy)
+	}
 	log.Info("QueryCoord started")
 
 	return nil
