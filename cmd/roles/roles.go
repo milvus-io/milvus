@@ -29,6 +29,8 @@ import (
 
 	"github.com/milvus-io/milvus/api/commonpb"
 	"github.com/milvus-io/milvus/api/milvuspb"
+	"github.com/milvus-io/milvus/internal/management"
+
 	"github.com/milvus-io/milvus/cmd/components"
 	"github.com/milvus-io/milvus/internal/datacoord"
 	"github.com/milvus-io/milvus/internal/datanode"
@@ -515,7 +517,8 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 		http.HandleFunc(healthz.HealthzRouterPath, multiRoleHealthzHandler)
 	}
 
-	metrics.ServeHTTP(Registry)
+	metrics.Register(Registry)
+	management.ServeHTTP()
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc,
 		syscall.SIGHUP,
