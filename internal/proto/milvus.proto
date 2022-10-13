@@ -83,6 +83,9 @@ service MilvusService {
   rpc SelectUser(SelectUserRequest) returns (SelectUserResponse) {}
   rpc OperatePrivilege(OperatePrivilegeRequest) returns (common.Status) {}
   rpc SelectGrant(SelectGrantRequest) returns (SelectGrantResponse) {}
+
+  rpc CreateFunction(CreateFunctionRequest) returns (common.Status){}
+  rpc DropFunction(DropFunctionRequest) returns (common.Status){}
 }
 
 message CreateAliasRequest {
@@ -1254,6 +1257,22 @@ message OperatePrivilegeRequest {
   GrantEntity entity = 2;
   // operation type
   OperatePrivilegeType type = 3;
+}
+
+message CreateFunctionRequest {
+  common.MsgBase base = 1;
+  // The unique function name in rootcoord.(Required)
+  string function_name = 2;
+  // wat file after base64.(Required)
+  string wat_body_base64 = 3;
+  // list of function parameter types.(Required)
+  repeated schema.DataType arg_types = 4;
+}
+
+message DropFunctionRequest {
+  common.MsgBase base = 1;
+  // The unique function name in rootcoord.(Required)
+  string function_name = 2;
 }
 
 message MilvusExt {

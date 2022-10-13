@@ -31,4 +31,5 @@ set(MILVUS_QUERY_SRCS
         PlanProto.cpp
         )
 add_library(milvus_query ${MILVUS_QUERY_SRCS})
-target_link_libraries(milvus_query milvus_index)
+
+target_link_libraries(milvus_query milvus_index milvus_wasm)

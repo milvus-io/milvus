@@ -297,4 +297,9 @@ ShowExprVisitor::visit(BinaryArithOpEvalRangeExpr& expr) {
     }
 }
 
+
+void
+ShowExprVisitor::visit(UdfExpr& expr) {
+    // TODO
+}
 }  // namespace milvus::query

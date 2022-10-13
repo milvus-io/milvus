@@ -6,6 +6,9 @@ import (
 	"math/rand"
 	"os"
 
+	"github.com/milvus-io/milvus/api/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -55,6 +58,9 @@ type mockMetaTable struct {
 	GetCollectionIDByNameFunc        func(name string) (UniqueID, error)
 	GetPartitionByNameFunc           func(collID UniqueID, partitionName string, ts Timestamp) (UniqueID, error)
 	GetCollectionVirtualChannelsFunc func(colID int64) []string
+	CreateFunctionFunc               func(ctx context.Context, funcName string, watBodyBase64 string, argTypes []schemapb.DataType, ts Timestamp) error
+	DropFunctionFunc                 func(ctx context.Context, funcName string, ts Timestamp) error
+	GetFunctionInfoFunc              func(ctx context.Context, funcName string, ts Timestamp) (*rootcoordpb.FunctionInfo, error)
 }
 
 func (m mockMetaTable) ListCollections(ctx context.Context, ts Timestamp) ([]*model.Collection, error) {
@@ -123,6 +129,18 @@ func (m mockMetaTable) GetPartitionByName(collID UniqueID, partitionName string,
 
 func (m mockMetaTable) GetCollectionVirtualChannels(colID int64) []string {
 	return m.GetCollectionVirtualChannelsFunc(colID)
+}
+
+func (m mockMetaTable) CreateFunction(ctx context.Context, funcName string, watBodyBase64 string, argTypes []schemapb.DataType, ts Timestamp) error {
+	return m.CreateFunctionFunc(ctx, funcName, watBodyBase64, argTypes, ts)
+}
+
+func (m mockMetaTable) DropFunction(ctx context.Context, funcName string, ts Timestamp) error {
+	return m.DropFunctionFunc(ctx, funcName, ts)
+}
+
+func (m mockMetaTable) GetFunctionInfo(ctx context.Context, funcName string, ts Timestamp) (*rootcoordpb.FunctionInfo, error) {
+	return m.GetFunctionInfoFunc(ctx, funcName, ts)
 }
 
 func newMockMetaTable() *mockMetaTable {
@@ -357,6 +375,15 @@ func withInvalidMeta() Opt {
 	}
 	meta.DropAliasFunc = func(ctx context.Context, alias string, ts Timestamp) error {
 		return errors.New("error mock DropAlias")
+	}
+	meta.CreateFunctionFunc = func(ctx context.Context, funcName string, watBodyBase64 string, argTypes []schemapb.DataType, ts Timestamp) error {
+		return errors.New("error mock CreateFunction")
+	}
+	meta.DropFunctionFunc = func(ctx context.Context, funcName string, ts Timestamp) error {
+		return errors.New("error mock DropFunction")
+	}
+	meta.GetFunctionInfoFunc = func(ctx context.Context, funcName string, ts Timestamp) (*rootcoordpb.FunctionInfo, error) {
+		return nil, errors.New("error mock GetFunctionInfo")
 	}
 	return withMeta(meta)
 }

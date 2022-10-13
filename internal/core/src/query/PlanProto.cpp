@@ -12,6 +12,7 @@
 #include <google/protobuf/text_format.h>
 
 #include <string>
+#include <boost/variant.hpp>
 
 #include "ExprImpl.h"
 #include "PlanProto.h"
@@ -412,6 +413,59 @@ ProtoParser::ParseBinaryArithOpEvalRangeExpr(const proto::plan::BinaryArithOpEva
 }
 
 ExprPtr
+ProtoParser::ParseUdfExpr(const proto::plan::UdfExpr &expr_pb) {
+    using param = boost::variant<bool, int8_t, int16_t, int32_t, int64_t, float, double, FieldId>;
+
+    auto func_name = expr_pb.udf_func_name();
+    auto udf_params = expr_pb.udf_params();
+    auto size = udf_params.size();
+    std::vector<param> values;
+    auto wasm_body = expr_pb.wasm_body();
+    auto expr_args = expr_pb.arg_types();
+
+    std::vector<DataType> arg_types;
+    std::vector<bool> is_field;
+
+    for (int i = 0; i < size; ++i) {
+        arg_types.emplace_back(static_cast<DataType>(expr_args[i]));
+    }
+    // TODO(wang ziyu): Add assert check about data_type transformer between values and arg_types
+
+    for (int i = 0; i < size; ++i) {
+        if (udf_params[i].has_column_info()) {
+            auto& column_info = udf_params[i].column_info();
+            auto field_id = FieldId(column_info.field_id());
+            auto data_type = schema[field_id].get_data_type();
+            Assert(data_type == static_cast<DataType>(column_info.data_type()));
+            AssertInfo(arg_types[i] == data_type,
+                       "[ExecExprVisitor]Column data type not equal to argument type");
+            values.emplace_back(field_id);
+            is_field.emplace_back(true);
+        } else if (udf_params[i].has_value()) {
+            auto& value_proto = udf_params[i].value();
+            is_field.emplace_back(false);
+            switch (value_proto.val_case()) {
+                case proto::plan::GenericValue::kBoolVal:
+                    values.emplace_back(value_proto.bool_val());
+                    break;
+                case proto::plan::GenericValue::kInt64Val:
+                    values.emplace_back(value_proto.int64_val());
+                    break;
+                case proto::plan::GenericValue::kFloatVal:
+                    values.emplace_back(value_proto.float_val());
+                    break;
+                default: {
+                    PanicInfo("unsupported data type");
+                }
+            }
+        } else {
+            PanicInfo("unsupported data type");
+        }
+    }
+    return std::make_unique<UdfExpr>(func_name, values, is_field, wasm_body, arg_types);
+}
+
+ExprPtr
 ProtoParser::ParseExpr(const proto::plan::Expr& expr_pb) {
     using ppe = proto::plan::Expr;
     switch (expr_pb.expr_case()) {
@@ -435,6 +489,9 @@ ProtoParser::ParseExpr(const proto::plan::Expr& expr_pb) {
         }
         case ppe::kBinaryArithOpEvalRangeExpr: {
             return ParseBinaryArithOpEvalRangeExpr(expr_pb.binary_arith_op_eval_range_expr());
+        }
+        case ppe::kUdfExpr: {
+            return ParseUdfExpr(expr_pb.udf_expr());
         }
         default:
             PanicInfo("unsupported expr proto node");

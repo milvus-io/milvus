@@ -417,7 +417,7 @@ func TestSearchTaskWithInvalidRoundDecimal(t *testing.T) {
 	//         ShardsNum:      shardsNum,
 	//     },
 	//     ctx:       ctx,
-	//     rootCoord: rc,
+	//     rc: rc,
 	//     result:    nil,
 	//     schema:    nil,
 	// }
@@ -661,7 +661,7 @@ func TestSearchTaskV2_all(t *testing.T) {
 	//         ShardsNum:      shardsNum,
 	//     },
 	//     ctx:       ctx,
-	//     rootCoord: rc,
+	//     rc: rc,
 	//     result:    nil,
 	//     schema:    nil,
 	// }
@@ -899,7 +899,7 @@ func TestSearchTaskV2_7803_reduce(t *testing.T) {
 	//         ShardsNum:      shardsNum,
 	//     },
 	//     ctx:       ctx,
-	//     rootCoord: rc,
+	//     rc: rc,
 	//     result:    nil,
 	//     schema:    nil,
 	// }

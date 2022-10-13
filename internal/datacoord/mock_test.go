@@ -266,6 +266,18 @@ type mockRootCoordService struct {
 	cnt   int64
 }
 
+func (m *mockRootCoordService) CreateFunction(ctx context.Context, req *milvuspb.CreateFunctionRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
+func (m *mockRootCoordService) DropFunction(ctx context.Context, req *milvuspb.DropFunctionRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
+func (m *mockRootCoordService) GetFunctionInfo(ctx context.Context, req *rootcoordpb.GetFunctionInfoRequest) (*rootcoordpb.GetFunctionInfoResponse, error) {
+	panic("implement me")
+}
+
 func (m *mockRootCoordService) CreateAlias(ctx context.Context, req *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
 	panic("implement me")
 }

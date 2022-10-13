@@ -40,6 +40,7 @@ type searchTask struct {
 	result         *milvuspb.SearchResults
 	request        *milvuspb.SearchRequest
 	qc             types.QueryCoord
+	rc             types.RootCoord
 	tr             *timerecord.TimeRecorder
 	collectionName string
 	schema         *schemapb.CollectionSchema
@@ -251,7 +252,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		}
 		t.offset = offset
 
-		plan, err := planparserv2.CreateSearchPlan(t.schema, t.request.Dsl, annsField, queryInfo)
+		plan, err := planparserv2.CreateSearchPlan(t.schema, t.request.Dsl, annsField, queryInfo, planparserv2.ParserVisitorWithRootCoord(t.rc))
 		if err != nil {
 			log.Ctx(ctx).Warn("failed to create query plan", zap.Error(err), zap.Int64("msgID", t.ID()),
 				zap.String("dsl", t.request.Dsl), // may be very large if large term passed.

@@ -125,6 +125,20 @@ message BinaryArithOpEvalRangeExpr {
   GenericValue value = 5;
 }
 
+message UdfParams {
+  oneof val {
+    GenericValue value = 1;
+    ColumnInfo column_info = 2;
+  };
+}
+
+message UdfExpr {
+  string udf_func_name = 1;
+  repeated UdfParams udf_params = 2;
+  string wasm_body = 3;
+  repeated schema.DataType arg_types = 4;
+}
+
 message Expr {
   oneof expr {
     TermExpr term_expr = 1;
@@ -137,6 +151,7 @@ message Expr {
     BinaryArithExpr binary_arith_expr = 8;
     ValueExpr value_expr = 9;
     ColumnExpr column_expr = 10;
+    UdfExpr udf_expr = 11;
   };
 }
 

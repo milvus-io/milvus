@@ -22,6 +22,9 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/milvus-io/milvus/api/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+
 	"github.com/milvus-io/milvus/internal/common"
 
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
@@ -115,15 +118,27 @@ type IMetaTable interface {
 	DropGrant(tenant string, role *milvuspb.RoleEntity) error
 	ListPolicy(tenant string) ([]string, error)
 	ListUserRole(tenant string) ([]string, error)
+
+	/* function */
+	CreateFunction(ctx context.Context, funcName string, watBodyBase64 string, argTypes []schemapb.DataType, ts Timestamp) error
+	DropFunction(ctx context.Context, funcName string, ts Timestamp) error
+	GetFunctionInfo(ctx context.Context, funcName string, ts Timestamp) (*rootcoordpb.FunctionInfo, error)
+}
+
+type FunctionInfo struct {
+	funcName      string
+	watBodyBase64 string
+	argTypes      []schemapb.DataType
 }
 
 type MetaTable struct {
 	ctx     context.Context
 	catalog metastore.RootCoordCatalog
 
-	collID2Meta  map[typeutil.UniqueID]*model.Collection // collection id -> collection meta
-	collName2ID  map[string]typeutil.UniqueID            // collection name to collection id
-	collAlias2ID map[string]typeutil.UniqueID            // collection alias to collection id
+	collID2Meta   map[typeutil.UniqueID]*model.Collection // collection id -> collection meta
+	collName2ID   map[string]typeutil.UniqueID            // collection name to collection id
+	collAlias2ID  map[string]typeutil.UniqueID            // collection alias to collection id
+	funcName2Info map[string]*FunctionInfo                // function name to function body and params
 
 	ddLock         sync.RWMutex
 	permissionLock sync.RWMutex
@@ -147,6 +162,7 @@ func (mt *MetaTable) reload() error {
 	mt.collID2Meta = make(map[UniqueID]*model.Collection)
 	mt.collName2ID = make(map[string]UniqueID)
 	mt.collAlias2ID = make(map[string]UniqueID)
+	mt.funcName2Info = make(map[string]*FunctionInfo)
 
 	// max ts means listing latest resources, meta table should always cache the latest version of catalog.
 	collections, err := mt.catalog.ListCollections(mt.ctx, typeutil.MaxTimestamp)
@@ -875,4 +891,56 @@ func (mt *MetaTable) ListUserRole(tenant string) ([]string, error) {
 	defer mt.permissionLock.RUnlock()
 
 	return mt.catalog.ListUserRole(mt.ctx, tenant)
+}
+
+func (mt *MetaTable) CreateFunction(ctx context.Context, funcName string, watBodyBase64 string, argTypes []schemapb.DataType, ts Timestamp) error {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+
+	if _, ok := mt.funcName2Info[funcName]; ok {
+		return fmt.Errorf("cannot create function, milvus already exists with same function name: %s", funcName)
+	}
+
+	// function didn't exist.
+	mt.funcName2Info[funcName] = &FunctionInfo{
+		funcName:      funcName,
+		watBodyBase64: watBodyBase64,
+		argTypes:      argTypes,
+	}
+
+	//TODO: storage in etcd
+	log.Info("create function", zap.String("function name", funcName), zap.String("wat body base64", watBodyBase64),
+		zap.String("function argument types", string(argTypes)),
+		zap.Uint64("ts", ts))
+
+	return nil
+}
+
+func (mt *MetaTable) DropFunction(ctx context.Context, funcName string, ts Timestamp) error {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+
+	delete(mt.funcName2Info, funcName)
+	log.Info("drop function", zap.String("function name", funcName), zap.Uint64("ts", ts))
+
+	return nil
+}
+
+func (mt *MetaTable) GetFunctionInfo(ctx context.Context, funcName string, ts Timestamp) (*rootcoordpb.FunctionInfo, error) {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+
+	if _, ok := mt.funcName2Info[funcName]; !ok {
+		return nil, fmt.Errorf("cannot get function information, function name not found: %s", funcName)
+	}
+
+	log.Info("get function information", zap.String("function name", funcName), zap.String("wat body base64", mt.funcName2Info[funcName].watBodyBase64),
+		zap.String("function argument types", string(mt.funcName2Info[funcName].argTypes)),
+		zap.Uint64("ts", ts))
+
+	return &rootcoordpb.FunctionInfo{
+		FunctionName:  funcName,
+		WatBodyBase64: mt.funcName2Info[funcName].watBodyBase64,
+		ArgTypes:      mt.funcName2Info[funcName].argTypes,
+	}, nil
 }

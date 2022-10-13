@@ -216,3 +216,15 @@ func (m *GrpcRootCoordClient) ListCredUsers(ctx context.Context, in *milvuspb.Li
 func (m *GrpcRootCoordClient) GetCredential(ctx context.Context, in *rootcoordpb.GetCredentialRequest, opts ...grpc.CallOption) (*rootcoordpb.GetCredentialResponse, error) {
 	return &rootcoordpb.GetCredentialResponse{}, m.Err
 }
+
+func (m *GrpcRootCoordClient) CreateFunction(ctx context.Context, in *milvuspb.CreateFunctionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) DropFunction(ctx context.Context, in *milvuspb.DropFunctionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) GetFunctionInfo(ctx context.Context, in *rootcoordpb.GetFunctionInfoRequest, opts ...grpc.CallOption) (*rootcoordpb.GetFunctionInfoResponse, error) {
+	return &rootcoordpb.GetFunctionInfoResponse{}, m.Err
+}

@@ -23,6 +23,8 @@ import (
 	"os"
 	"strconv"
 
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/api/commonpb"
 	"github.com/milvus-io/milvus/api/milvuspb"
@@ -2514,6 +2516,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 		},
 		request:  request,
 		qc:       node.queryCoord,
+		rc:       node.rootCoord,
 		tr:       timerecord.NewTimeRecorder("search"),
 		shardMgr: node.shardMgr,
 	}
@@ -2757,6 +2760,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		},
 		request:          request,
 		qc:               node.queryCoord,
+		rc:               node.rootCoord,
 		queryShardPolicy: mergeRoundRobinPolicy,
 		shardMgr:         node.shardMgr,
 	}
@@ -2850,6 +2854,276 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 	sentSize := proto.Size(qt.result)
 	metrics.ProxyReadReqSendBytes.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10)).Add(float64(sentSize))
 	return ret, nil
+}
+
+// CreateFunction create function, then you can use function in search.
+func (node *Proxy) CreateFunction(ctx context.Context, request *milvuspb.CreateFunctionRequest) (*commonpb.Status, error) {
+	if !node.checkHealthy() {
+		return unhealthyStatus(), nil
+	}
+
+	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-CreateFunction")
+	defer sp.Finish()
+	traceID, _, _ := trace.InfoFromSpan(sp)
+
+	cft := &createFunctionTask{
+		ctx:                   ctx,
+		Condition:             NewTaskCondition(ctx),
+		CreateFunctionRequest: request,
+		rootCoord:             node.rootCoord,
+	}
+
+	method := "CreateFunction"
+	tr := timerecord.NewTimeRecorder(method)
+	metrics.ProxyDDLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method, metrics.TotalLabel).Inc()
+
+	log.Debug(
+		rpcReceived(method),
+		zap.String("traceID", traceID),
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("functionName", request.FunctionName),
+		zap.String("WatBodyBase64", request.WatBodyBase64),
+		zap.String("ArgTypes", string(request.GetArgTypes())))
+
+	if err := node.sched.ddQueue.Enqueue(cft); err != nil {
+		log.Warn(
+			rpcFailedToEnqueue(method),
+			zap.Error(err),
+			zap.String("traceID", traceID),
+			zap.String("role", typeutil.ProxyRole),
+			zap.String("functionName", request.FunctionName),
+			zap.String("WatBodyBase64", request.WatBodyBase64),
+			zap.String("ArgTypes", string(request.GetArgTypes())))
+
+		metrics.ProxyDDLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method, metrics.AbandonLabel).Inc()
+
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, nil
+	}
+
+	log.Debug(
+		rpcEnqueued(method),
+		zap.String("traceID", traceID),
+		zap.String("role", typeutil.ProxyRole),
+		zap.Int64("MsgID", cft.ID()),
+		zap.Uint64("BeginTs", cft.BeginTs()),
+		zap.Uint64("EndTs", cft.EndTs()),
+		zap.String("functionName", request.FunctionName),
+		zap.String("WatBodyBase64", request.WatBodyBase64),
+		zap.String("ArgTypes", string(request.GetArgTypes())))
+
+	if err := cft.WaitToFinish(); err != nil {
+		log.Warn(
+			rpcFailedToWaitToFinish(method),
+			zap.Error(err),
+			zap.String("traceID", traceID),
+			zap.String("role", typeutil.ProxyRole),
+			zap.Int64("MsgID", cft.ID()),
+			zap.Uint64("BeginTs", cft.BeginTs()),
+			zap.Uint64("EndTs", cft.EndTs()),
+			zap.String("FunctionName", request.FunctionName),
+			zap.String("WatBodyBase64", request.WatBodyBase64),
+			zap.String("ArgTypes", string(request.GetArgTypes())))
+		metrics.ProxyDDLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method, metrics.FailLabel).Inc()
+
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, nil
+	}
+
+	log.Debug(
+		rpcDone(method),
+		zap.String("traceID", traceID),
+		zap.String("role", typeutil.ProxyRole),
+		zap.Int64("MsgID", cft.ID()),
+		zap.Uint64("BeginTs", cft.BeginTs()),
+		zap.Uint64("EndTs", cft.EndTs()),
+		zap.String("FunctionName", request.FunctionName),
+		zap.String("WatBodyBase64", request.WatBodyBase64),
+		zap.String("ArgTypes", string(request.GetArgTypes())))
+
+	metrics.ProxyDDLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method, metrics.SuccessLabel).Inc()
+	metrics.ProxyDDLReqLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return cft.result, nil
+}
+
+// DropFunction drop function by function name.
+func (node *Proxy) DropFunction(ctx context.Context, request *milvuspb.DropFunctionRequest) (*commonpb.Status, error) {
+	if !node.checkHealthy() {
+		return unhealthyStatus(), nil
+	}
+
+	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-DropFunction")
+	defer sp.Finish()
+	traceID, _, _ := trace.InfoFromSpan(sp)
+
+	dft := &dropFunctionTask{
+		ctx:                 ctx,
+		Condition:           NewTaskCondition(ctx),
+		DropFunctionRequest: request,
+		rootCoord:           node.rootCoord,
+	}
+
+	method := "DropFunction"
+	tr := timerecord.NewTimeRecorder(method)
+	metrics.ProxyDDLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method, metrics.TotalLabel).Inc()
+
+	log.Debug(
+		rpcReceived(method),
+		zap.String("traceID", traceID),
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("FunctionName", request.FunctionName))
+
+	if err := node.sched.ddQueue.Enqueue(dft); err != nil {
+		log.Warn(
+			rpcFailedToEnqueue(method),
+			zap.Error(err),
+			zap.String("traceID", traceID),
+			zap.String("role", typeutil.ProxyRole),
+			zap.String("FunctionName", request.FunctionName))
+
+		metrics.ProxyDDLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method, metrics.AbandonLabel).Inc()
+
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, nil
+	}
+
+	log.Debug(
+		rpcEnqueued(method),
+		zap.String("traceID", traceID),
+		zap.String("role", typeutil.ProxyRole),
+		zap.Int64("MsgID", dft.ID()),
+		zap.Uint64("BeginTs", dft.BeginTs()),
+		zap.Uint64("EndTs", dft.EndTs()),
+		zap.String("FunctionName", request.FunctionName))
+
+	if err := dft.WaitToFinish(); err != nil {
+		log.Warn(
+			rpcFailedToWaitToFinish(method),
+			zap.Error(err),
+			zap.String("traceID", traceID),
+			zap.String("role", typeutil.ProxyRole),
+			zap.Int64("MsgID", dft.ID()),
+			zap.Uint64("BeginTs", dft.BeginTs()),
+			zap.Uint64("EndTs", dft.EndTs()),
+			zap.String("FunctionName", request.FunctionName))
+		metrics.ProxyDDLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method, metrics.FailLabel).Inc()
+
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, nil
+	}
+
+	log.Debug(
+		rpcDone(method),
+		zap.String("traceID", traceID),
+		zap.String("role", typeutil.ProxyRole),
+		zap.Int64("MsgID", dft.ID()),
+		zap.Uint64("BeginTs", dft.BeginTs()),
+		zap.Uint64("EndTs", dft.EndTs()),
+		zap.String("functionName", request.FunctionName))
+
+	metrics.ProxyDDLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method, metrics.SuccessLabel).Inc()
+	metrics.ProxyDDLReqLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return dft.result, nil
+}
+
+// GetFunctionInfo get function information by function name, then use function in udf expression parser.
+func (node *Proxy) GetFunctionInfo(ctx context.Context, request *rootcoordpb.GetFunctionInfoRequest) (*rootcoordpb.GetFunctionInfoResponse, error) {
+
+	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-GetFunctionInfo")
+	defer sp.Finish()
+
+	if !node.checkHealthy() {
+		return &rootcoordpb.GetFunctionInfoResponse{
+			Status: unhealthyStatus(),
+		}, nil
+	}
+
+	traceID, _, _ := trace.InfoFromSpan(sp)
+
+	gft := &getFunctionInfoTask{
+		ctx:                    ctx,
+		Condition:              NewTaskCondition(ctx),
+		GetFunctionInfoRequest: request,
+		rootCoord:              node.rootCoord,
+	}
+
+	method := "GetFunctionInfo"
+	tr := timerecord.NewTimeRecorder(method)
+	metrics.ProxyDDLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method, metrics.TotalLabel).Inc()
+
+	log.Debug(
+		rpcReceived(method),
+		zap.String("traceID", traceID),
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("FunctionName", request.FunctionName))
+
+	if err := node.sched.ddQueue.Enqueue(gft); err != nil {
+		log.Warn(
+			rpcFailedToEnqueue(method),
+			zap.Error(err),
+			zap.String("traceID", traceID),
+			zap.String("role", typeutil.ProxyRole),
+			zap.String("FunctionName", request.FunctionName))
+
+		metrics.ProxyDDLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method, metrics.AbandonLabel).Inc()
+
+		return &rootcoordpb.GetFunctionInfoResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+		}, nil
+	}
+
+	log.Debug(
+		rpcEnqueued(method),
+		zap.String("traceID", traceID),
+		zap.String("role", typeutil.ProxyRole),
+		zap.Int64("MsgID", gft.ID()),
+		zap.Uint64("BeginTs", gft.BeginTs()),
+		zap.Uint64("EndTs", gft.EndTs()),
+		zap.String("FunctionName", request.FunctionName))
+
+	if err := gft.WaitToFinish(); err != nil {
+		log.Warn(
+			rpcFailedToWaitToFinish(method),
+			zap.Error(err),
+			zap.String("traceID", traceID),
+			zap.String("role", typeutil.ProxyRole),
+			zap.Int64("MsgID", gft.ID()),
+			zap.Uint64("BeginTs", gft.BeginTs()),
+			zap.Uint64("EndTs", gft.EndTs()),
+			zap.String("FunctionName", request.FunctionName))
+		metrics.ProxyDDLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method, metrics.FailLabel).Inc()
+
+		return &rootcoordpb.GetFunctionInfoResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+		}, nil
+	}
+
+	log.Debug(
+		rpcDone(method),
+		zap.String("traceID", traceID),
+		zap.String("role", typeutil.ProxyRole),
+		zap.Int64("MsgID", gft.ID()),
+		zap.Uint64("BeginTs", gft.BeginTs()),
+		zap.Uint64("EndTs", gft.EndTs()),
+		zap.String("FunctionName", request.FunctionName))
+
+	metrics.ProxyDDLFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method, metrics.SuccessLabel).Inc()
+	metrics.ProxyDDLReqLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return gft.result, nil
 }
 
 // CreateAlias create alias for collection, then you can search the collection with alias.
@@ -3163,6 +3437,7 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 			},
 			request: queryRequest,
 			qc:      node.queryCoord,
+			rc:      node.rootCoord,
 			ids:     ids.IdArray,
 
 			queryShardPolicy: mergeRoundRobinPolicy,
