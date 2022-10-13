@@ -3307,11 +3307,11 @@ func newTestServer2(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 
 	icSession := sessionutil.NewSession(context.Background(), Params.EtcdCfg.MetaRootPath, etcdCli)
 	icSession.Init(typeutil.IndexCoordRole, "localhost:31000", true, true)
-	icSession.Register()
+	icSession.Register(func() {})
 
 	qcSession := sessionutil.NewSession(context.Background(), Params.EtcdCfg.MetaRootPath, etcdCli)
 	qcSession.Init(typeutil.QueryCoordRole, "localhost:19532", true, true)
-	qcSession.Register()
+	qcSession.Register(func() {})
 
 	svr := CreateServer(context.TODO(), factory, opts...)
 	svr.SetEtcdClient(etcdCli)
@@ -3359,7 +3359,7 @@ func Test_initServiceDiscovery(t *testing.T) {
 
 	qcSession := sessionutil.NewSession(context.Background(), Params.EtcdCfg.MetaRootPath, server.etcdCli)
 	qcSession.Init(typeutil.QueryCoordRole, "localhost:19532", true, true)
-	qcSession.Register()
+	qcSession.Register(func() {})
 	req := &datapb.AcquireSegmentLockRequest{
 		NodeID:     qcSession.ServerID,
 		SegmentIDs: []UniqueID{segmentID},

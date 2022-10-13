@@ -47,7 +47,7 @@ func TestIndexCoordClient(t *testing.T) {
 	icm.CallRegister = func() error {
 		session := sessionutil.NewSession(context.Background(), indexcoord.Params.EtcdCfg.MetaRootPath, etcdCli)
 		session.Init(typeutil.IndexCoordRole, indexcoord.Params.IndexCoordCfg.Address, true, false)
-		session.Register()
+		session.Register(func() {})
 		return err
 	}
 	icm.CallStop = func() error {

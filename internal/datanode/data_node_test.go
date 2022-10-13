@@ -809,6 +809,7 @@ func TestDataNode_AddSegment(t *testing.T) {
 
 func TestWatchChannel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	node := newIDLEDataNodeMock(ctx, schemapb.DataType_Int64)
 	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.Nil(t, err)
@@ -818,11 +819,9 @@ func TestWatchChannel(t *testing.T) {
 	assert.Nil(t, err)
 	err = node.Start()
 	assert.Nil(t, err)
-	defer node.Stop()
 	err = node.Register()
+	defer node.Stop()
 	assert.Nil(t, err)
-
-	defer cancel()
 
 	t.Run("test watch channel", func(t *testing.T) {
 		// GOOSE TODO

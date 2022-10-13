@@ -121,8 +121,7 @@ func NewQueryCoord(ctx context.Context, factory dependency.Factory) (*Server, er
 }
 
 func (s *Server) Register() error {
-	s.session.Register()
-	go s.session.LivenessCheck(s.ctx, func() {
+	s.session.Register(func() {
 		log.Error("QueryCoord disconnected from etcd, process will exit", zap.Int64("serverID", s.session.ServerID))
 		if err := s.Stop(); err != nil {
 			log.Fatal("failed to stop server", zap.Error(err))

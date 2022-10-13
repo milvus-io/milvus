@@ -100,7 +100,7 @@ func TestInit(t *testing.T) {
 	s.Init("inittest", "testAddr", false, false)
 	assert.NotEqual(t, int64(0), s.leaseID)
 	assert.NotEqual(t, int64(0), s.ServerID)
-	s.Register()
+	s.Register(func() {})
 	sessions, _, err := s.GetSessions("inittest")
 	assert.Nil(t, err)
 	assert.Contains(t, sessions, "inittest-"+strconv.FormatInt(s.ServerID, 10))
@@ -138,7 +138,7 @@ func TestUpdateSessions(t *testing.T) {
 		require.NoError(t, err)
 		singleS := NewSession(ctx, metaRoot, etcdCli)
 		singleS.Init("test", "testAddr", false, false)
-		singleS.Register()
+		singleS.Register(func() {})
 		muList.Lock()
 		sList = append(sList, singleS)
 		muList.Unlock()
@@ -181,43 +181,6 @@ func TestUpdateSessions(t *testing.T) {
 	assert.Equal(t, len(sessionEvents), 20)
 	assert.Equal(t, addEventLen, 10)
 	assert.Equal(t, delEventLen, 10)
-}
-
-func TestSessionLivenessCheck(t *testing.T) {
-	s := &Session{}
-	ctx := context.Background()
-	ch := make(chan bool)
-	s.liveCh = ch
-	signal := make(chan struct{}, 1)
-
-	flag := false
-
-	go s.LivenessCheck(ctx, func() {
-		flag = true
-		signal <- struct{}{}
-	})
-
-	assert.False(t, flag)
-	ch <- true
-
-	assert.False(t, flag)
-	close(ch)
-
-	<-signal
-	assert.True(t, flag)
-
-	ctx, cancel := context.WithCancel(ctx)
-	cancel()
-	ch = make(chan bool)
-	s.liveCh = ch
-	flag = false
-
-	go s.LivenessCheck(ctx, func() {
-		flag = true
-		signal <- struct{}{}
-	})
-
-	assert.False(t, flag)
 }
 
 func TestWatcherHandleWatchResp(t *testing.T) {
@@ -498,14 +461,14 @@ func (suite *SessionWithVersionSuite) SetupTest() {
 	s1 := NewSession(ctx, suite.metaRoot, client)
 	s1.Version.Major, s1.Version.Minor, s1.Version.Patch = 0, 0, 0
 	s1.Init(suite.serverName, "s1", false, false)
-	s1.Register()
+	s1.Register(func() {})
 
 	suite.sessions = append(suite.sessions, s1)
 
 	s2 := NewSession(ctx, suite.metaRoot, client)
 	s2.Version.Major, s2.Version.Minor, s2.Version.Patch = 2, 1, 0
 	s2.Init(suite.serverName, "s2", false, false)
-	s2.Register()
+	s2.Register(func() {})
 
 	suite.sessions = append(suite.sessions, s2)
 
@@ -513,7 +476,7 @@ func (suite *SessionWithVersionSuite) SetupTest() {
 	s3.Version.Major, s3.Version.Minor, s3.Version.Patch = 2, 2, 0
 	s3.Version.Build = []string{"dev"}
 	s3.Init(suite.serverName, "s3", false, false)
-	s3.Register()
+	s3.Register(func() {})
 
 	suite.sessions = append(suite.sessions, s3)
 
@@ -640,20 +603,19 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 	s1 := NewSession(ctx1, metaRoot, etcdCli)
 	s1.Init("inittest", "testAddr", true, true)
 	s1.SetEnableActiveStandBy(true)
-	s1.Register()
-	wg.Add(1)
-	s1.liveCh = ch
-	s1.ProcessActiveStandBy(func() {
-		log.Debug("Session 1 become active")
-		wg.Done()
-	})
-	go s1.LivenessCheck(ctx1, func() {
+	s1.Register(func() {
 		flag = true
 		signal <- struct{}{}
 		s1.keepAliveCancel()
 		// directly delete the primary key to make this UT fast,
 		// or the session2 has to wait for session1 release after ttl(60s)
 		etcdCli.Delete(ctx1, s1.activeKey)
+	})
+	wg.Add(1)
+	s1.liveCh = ch
+	s1.ProcessActiveStandBy(func() {
+		log.Debug("Session 1 become active")
+		wg.Done()
 	})
 	assert.False(t, s1.isStandby.Load().(bool))
 
@@ -662,7 +624,7 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 	s2 := NewSession(ctx2, metaRoot, etcdCli)
 	s2.Init("inittest", "testAddr", true, true)
 	s2.SetEnableActiveStandBy(true)
-	s2.Register()
+	s2.Register(func() {})
 	wg.Add(1)
 	go s2.ProcessActiveStandBy(func() {
 		log.Debug("Session 2 become active")

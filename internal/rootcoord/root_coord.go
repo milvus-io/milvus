@@ -288,15 +288,7 @@ func (c *Core) SetQueryCoord(s types.QueryCoord) error {
 
 // Register register rootcoord at etcd
 func (c *Core) Register() error {
-	c.session.Register()
-	if c.enableActiveStandBy {
-		c.session.ProcessActiveStandBy(c.activateFunc)
-	} else {
-		c.UpdateStateCode(commonpb.StateCode_Healthy)
-		log.Debug("RootCoord start successfully ", zap.String("State Code", commonpb.StateCode_Healthy.String()))
-	}
-	log.Info("RootCoord Register Finished")
-	go c.session.LivenessCheck(c.ctx, func() {
+	c.session.Register(func() {
 		log.Error("Root Coord disconnected from etcd, process will exit", zap.Int64("Server Id", c.session.ServerID))
 		if err := c.Stop(); err != nil {
 			log.Fatal("failed to stop server", zap.Error(err))
@@ -308,8 +300,10 @@ func (c *Core) Register() error {
 			}
 		}
 	})
+	if c.enableActiveStandBy {
+		c.session.ProcessActiveStandBy(c.activateFunc)
+	}
 
-	c.UpdateStateCode(commonpb.StateCode_Healthy)
 	return nil
 }
 
