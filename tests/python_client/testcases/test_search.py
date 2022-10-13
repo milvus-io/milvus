@@ -944,15 +944,14 @@ class TestCollectionSearch(TestcaseBase):
                             default_search_params, default_limit,
                             default_search_exp,
                             travel_timestamp=time_stamp - 1,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": nq,
-                                         "ids": [],
-                                         "limit": 0})
+                            check_task=CheckTasks.err_res,
+                            check_items={"err_code": 1,
+                                         "err_msg": f"only support to travel back to 0s so far"})
         # 3. search after insert time_stamp
         collection_w.search(vectors[:nq], default_search_field,
                             default_search_params, default_limit,
                             default_search_exp,
-                            travel_timestamp=time_stamp,
+                            travel_timestamp=0,
                             guarantee_timestamp=0,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": nq,
@@ -1161,7 +1160,7 @@ class TestCollectionSearch(TestcaseBase):
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         collection_w.search(vectors[:nq], default_search_field, default_search_params,
                             default_limit, default_search_exp, _async=_async,
-                            travel_timestamp=time_stamp,
+                            travel_timestamp=0,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": nq,
                                          "ids": insert_ids,
@@ -1220,7 +1219,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w.search(vectors[:nq], default_search_field,
                             default_search_params, limit,
                             default_search_exp, _async=_async,
-                            travel_timestamp=time_stamp + 1,
+                            travel_timestamp=0,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": nq,
                                          "ids": insert_ids,
@@ -1426,7 +1425,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w.search(vectors[:default_nq], default_search_field,
                             search_param, default_limit,
                             default_search_exp, _async=_async,
-                            travel_timestamp=time_stamp,
+                            travel_timestamp=0,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
                                          "ids": insert_ids,
@@ -1459,7 +1458,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w.search(vectors[:default_nq], default_search_field,
                             search_param, limit,
                             default_search_exp, _async=_async,
-                            travel_timestamp=time_stamp,
+                            travel_timestamp=0,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
                                          "ids": insert_ids,
@@ -1499,7 +1498,7 @@ class TestCollectionSearch(TestcaseBase):
             collection_w.search(vectors[:default_nq], default_search_field,
                                 search_param, default_limit,
                                 default_search_exp, _async=_async,
-                                travel_timestamp=time_stamp,
+                                travel_timestamp=0,
                                 check_task=CheckTasks.check_search_results,
                                 check_items={"nq": default_nq,
                                              "ids": insert_ids,
@@ -1537,7 +1536,7 @@ class TestCollectionSearch(TestcaseBase):
             collection_w.search(vectors[:default_nq], default_search_field,
                                 search_param, default_limit,
                                 default_search_exp, _async=_async,
-                                travel_timestamp=time_stamp,
+                                travel_timestamp=0,
                                 check_task=CheckTasks.check_search_results,
                                 check_items={"nq": default_nq,
                                              "ids": insert_ids,
@@ -1579,7 +1578,7 @@ class TestCollectionSearch(TestcaseBase):
             collection_w.search(vectors[:default_nq], default_search_field,
                                 search_param, default_limit,
                                 default_search_exp, _async=_async,
-                                travel_timestamp=time_stamp,
+                                travel_timestamp=0,
                                 check_task=CheckTasks.check_search_results,
                                 check_items={"nq": default_nq,
                                              "ids": insert_ids,
@@ -1631,7 +1630,7 @@ class TestCollectionSearch(TestcaseBase):
                 collection_w.search(vectors[:nq], default_search_field,
                                     default_search_params, default_limit,
                                     default_search_exp, _async=_async,
-                                    travel_timestamp=time_stamp,
+                                    travel_timestamp=0,
                                     check_task=CheckTasks.check_search_results,
                                     check_items={"nq": nq,
                                                  "ids": insert_ids,
@@ -1696,7 +1695,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w.search(vectors[:default_nq], default_search_field,
                             search_params, limit, default_search_exp,
                             [par[1].name], _async=_async,
-                            travel_timestamp=time_stamp,
+                            travel_timestamp=0,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
                                          "ids": insert_ids[par[0].num_entities:],
@@ -1834,7 +1833,7 @@ class TestCollectionSearch(TestcaseBase):
         res = collection_w.search(binary_vectors[:nq], "binary_vector",
                                   search_params, default_limit, "int64 >= 0",
                                   _async=_async,
-                                  travel_timestamp=time_stamp,
+                                  travel_timestamp=0,
                                   check_task=CheckTasks.check_search_results,
                                   check_items={"nq": nq,
                                                "ids": insert_ids,
@@ -1952,7 +1951,7 @@ class TestCollectionSearch(TestcaseBase):
         res = collection_w.search(binary_vectors[:nq], "binary_vector",
                                   search_params, default_limit, "int64 >= 0",
                                   _async=_async,
-                                  travel_timestamp=time_stamp)[0]
+                                  travel_timestamp=0)[0]
         if _async:
             res.done()
             res = res.result()
@@ -1988,7 +1987,7 @@ class TestCollectionSearch(TestcaseBase):
         res = collection_w.search(binary_vectors[:nq], "binary_vector",
                                   search_params, default_limit, "int64 >= 0",
                                   _async=_async,
-                                  travel_timestamp=time_stamp,
+                                  travel_timestamp=0,
                                   check_task=CheckTasks.check_search_results,
                                   check_items={"nq": nq,
                                                "ids": insert_ids,
@@ -2025,6 +2024,7 @@ class TestCollectionSearch(TestcaseBase):
                                          "limit": default_limit})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="Time travel disabled")
     def test_search_travel_time_without_expression(self, auto_id):
         """
         target: test search using travel time without expression
@@ -2471,7 +2471,7 @@ class TestCollectionSearch(TestcaseBase):
             collection_w.search(vectors[:nq], default_search_field,
                                 default_search_params, default_limit,
                                 default_search_exp, _async=_async,
-                                travel_timestamp=time_stamp,
+                                travel_timestamp=0,
                                 check_task=CheckTasks.check_search_results,
                                 check_items={"nq": nq,
                                              "ids": insert_ids,
@@ -3228,7 +3228,7 @@ class TestSearchBase(TestcaseBase):
             collection_w.search(vectors[:nq], default_search_field,
                                 default_search_params, default_limit,
                                 default_search_exp, _async=_async,
-                                travel_timestamp=time_stamp,
+                                travel_timestamp=0,
                                 check_task=CheckTasks.check_search_results,
                                 check_items={"nq": nq,
                                              "ids": insert_ids,
@@ -4115,13 +4115,13 @@ class TestsearchPagination(TestcaseBase):
         for search_param in search_params:
             res = collection_w.search(vectors[:default_nq], default_search_field, search_param,
                                       default_limit + offset, default_search_exp, _async=_async,
-                                      travel_timestamp=time_stamp)[0]
+                                      travel_timestamp=0)[0]
             search_param["offset"] = offset
             log.info("Searching with search params: {}".format(search_param))
             search_res = collection_w.search(vectors[:default_nq], default_search_field,
                                              search_param, default_limit,
                                              default_search_exp, _async=_async,
-                                             travel_timestamp=time_stamp,
+                                             travel_timestamp=0,
                                              check_task=CheckTasks.check_search_results,
                                              check_items={"nq": default_nq,
                                                           "ids": insert_ids,
