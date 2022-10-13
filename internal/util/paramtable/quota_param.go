@@ -432,7 +432,7 @@ func (p *quotaConfig) initForceDenyWriting() {
 }
 
 func (p *quotaConfig) initTtProtectionEnabled() {
-	p.TtProtectionEnabled = p.Base.ParseBool("quotaAndLimits.limitWriting.ttProtection", true)
+	p.TtProtectionEnabled = p.Base.ParseBool("quotaAndLimits.limitWriting.ttProtection.enabled", true)
 }
 
 func (p *quotaConfig) initMaxTimeTickDelay() {
