@@ -9,24 +9,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func Test_GetVersion(t *testing.T) {
-	request := &milvuspb.HasCollectionRequest{
-		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_Undefined,
-			MsgID:   123,
-		},
-		DbName:         "test",
-		CollectionName: "col1",
-	}
-	str, err := GetVersion(request)
-	assert.Nil(t, err)
-	assert.Equal(t, str, "2.1.0")
-
-	request2 := &commonpb.MsgBase{}
-	_, err = GetVersion(request2)
-	assert.NotNil(t, err)
-}
-
 func Test_GetPrivilegeExtObj(t *testing.T) {
 	request := &milvuspb.LoadCollectionRequest{
 		DbName:         "test",

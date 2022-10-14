@@ -28,6 +28,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -1553,4 +1555,23 @@ func Test_NewServer_TLS_FileNotExisted(t *testing.T) {
 	err = runAndWaitForServerReady(server)
 	assert.NotNil(t, err)
 	server.Stop()
+}
+
+func Test_NewServer_GetVersion(t *testing.T) {
+	req := &milvuspb.GetVersionRequest{}
+	t.Run("test get version failed", func(t *testing.T) {
+		server := getServer(t)
+		resp, err := server.GetVersion(context.TODO(), req)
+		assert.Empty(t, resp.GetVersion())
+		assert.Nil(t, err)
+	})
+
+	t.Run("test get version failed", func(t *testing.T) {
+		server := getServer(t)
+		err := os.Setenv(metricsinfo.GitBuildTagsEnvKey, "v1")
+		assert.NoError(t, err)
+		resp, err := server.GetVersion(context.TODO(), req)
+		assert.Equal(t, "v1", resp.GetVersion())
+		assert.Nil(t, err)
+	})
 }

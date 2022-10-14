@@ -25,9 +25,12 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 
 	"github.com/gin-gonic/gin"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
@@ -871,4 +874,11 @@ func (s *Server) SetRates(ctx context.Context, request *proxypb.SetRatesRequest)
 // GetProxyMetrics gets the metrics of proxy.
 func (s *Server) GetProxyMetrics(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return s.proxy.GetProxyMetrics(ctx, request)
+}
+
+func (s *Server) GetVersion(ctx context.Context, request *milvuspb.GetVersionRequest) (*milvuspb.GetVersionResponse, error) {
+	buildTags := os.Getenv(metricsinfo.GitBuildTagsEnvKey)
+	return &milvuspb.GetVersionResponse{
+		Version: buildTags,
+	}, nil
 }

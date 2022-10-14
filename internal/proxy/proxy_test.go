@@ -328,6 +328,12 @@ func newProxyTestServer(node *Proxy) *proxyTestServer {
 	}
 }
 
+func (s *proxyTestServer) GetVersion(ctx context.Context, request *milvuspb.GetVersionRequest) (*milvuspb.GetVersionResponse, error) {
+	return &milvuspb.GetVersionResponse{
+		Version: "vx.x.x",
+	}, nil
+}
+
 func (s *proxyTestServer) GetComponentStates(ctx context.Context, request *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
 	return s.Proxy.GetComponentStates(ctx)
 }

@@ -90,6 +90,8 @@ service MilvusService {
   rpc SelectUser(SelectUserRequest) returns (SelectUserResponse) {}
   rpc OperatePrivilege(OperatePrivilegeRequest) returns (common.Status) {}
   rpc SelectGrant(SelectGrantRequest) returns (SelectGrantResponse) {}
+
+  rpc GetVersion(GetVersionRequest) returns (GetVersionResponse) {}
 }
 
 message CreateAliasRequest {
@@ -1319,7 +1321,6 @@ message GetLoadingProgressRequest {
 }
 
 message GetLoadingProgressResponse {
-  // Not useful for now
   common.Status status = 1;
   int64 progress = 2;
 }
@@ -1332,6 +1333,9 @@ extend google.protobuf.FileOptions {
   MilvusExt milvus_ext_obj = 1001;
 }
 
-option (milvus_ext_obj) = {
-  version: "2.1.0"
-};
+message GetVersionRequest {
+}
+
+message GetVersionResponse {
+  string version =1;
+}
