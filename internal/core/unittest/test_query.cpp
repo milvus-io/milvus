@@ -562,7 +562,7 @@ TEST(Query, ExecWithoutPredicate) {
     ASSERT_EQ(json.dump(2), ref.dump(2));
 }
 
-TEST(Indexing, InnerProduct) {
+TEST(Query, InnerProduct) {
     int64_t N = 100000;
     constexpr auto dim = 16;
     constexpr auto topk = 10;
