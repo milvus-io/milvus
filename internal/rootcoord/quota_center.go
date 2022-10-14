@@ -541,7 +541,7 @@ func (q *QuotaCenter) memoryToWaterLevel() float64 {
 				zap.Float64("QueryNodeMemoryHighWaterLevel", queryNodeMemoryHighWaterLevel))
 			return 0
 		}
-		p := (memoryWaterLevel - queryNodeMemoryLowWaterLevel) / (queryNodeMemoryHighWaterLevel - queryNodeMemoryLowWaterLevel)
+		p := (queryNodeMemoryHighWaterLevel - memoryWaterLevel) / (queryNodeMemoryHighWaterLevel - queryNodeMemoryLowWaterLevel)
 		if p < factor {
 			factor = p
 		}
@@ -558,7 +558,7 @@ func (q *QuotaCenter) memoryToWaterLevel() float64 {
 				zap.Float64("DataNodeMemoryHighWaterLevel", dataNodeMemoryHighWaterLevel))
 			return 0
 		}
-		p := (memoryWaterLevel - dataNodeMemoryLowWaterLevel) / (dataNodeMemoryHighWaterLevel - dataNodeMemoryLowWaterLevel)
+		p := (dataNodeMemoryHighWaterLevel - memoryWaterLevel) / (dataNodeMemoryHighWaterLevel - dataNodeMemoryLowWaterLevel)
 		if p < factor {
 			factor = p
 		}

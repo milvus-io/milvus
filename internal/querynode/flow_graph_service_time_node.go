@@ -64,6 +64,7 @@ func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		// should not happen, QueryNode should addTSafe before start flow graph
 		panic(fmt.Errorf("serviceTimeNode setTSafe timeout, collectionID = %d, err = %s", stNode.collectionID, err))
 	}
+	rateCol.updateTSafe(stNode.vChannel, serviceTimeMsg.timeRange.timestampMax)
 	p, _ := tsoutil.ParseTS(serviceTimeMsg.timeRange.timestampMax)
 	log.RatedDebug(10.0, "update tSafe:",
 		zap.Any("collectionID", stNode.collectionID),

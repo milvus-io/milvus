@@ -78,7 +78,6 @@ func (b *baseReadTask) SetStep(step TaskStep) {
 		b.tr.Record("enqueueStart")
 	case TaskStepPreExecute:
 		b.queueDur = b.tr.Record("enqueueEnd")
-		rateCol.rtCounter.increaseQueueTime(b)
 	}
 }
 

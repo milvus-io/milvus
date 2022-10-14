@@ -60,8 +60,10 @@ type searchTask struct {
 
 func (s *searchTask) PreExecute(ctx context.Context) error {
 	s.SetStep(TaskStepPreExecute)
+	rateCol.rtCounter.increaseQueueTime(s)
 	for _, t := range s.otherTasks {
 		t.SetStep(TaskStepPreExecute)
+		rateCol.rtCounter.increaseQueueTime(t)
 	}
 	s.combinePlaceHolderGroups()
 	return nil

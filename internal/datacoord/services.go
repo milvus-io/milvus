@@ -846,10 +846,6 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 		zap.String("metric_type", metricType))
 
 	if metricType == metricsinfo.SystemInfoMetrics {
-		ret, err := s.metricsCacheManager.GetSystemInfoMetrics()
-		if err == nil && ret != nil {
-			return ret, nil
-		}
 		log.Debug("failed to get system info metrics from cache, recompute instead",
 			zap.Error(err))
 
@@ -861,8 +857,6 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 			zap.String("metric_type", metricType),
 			zap.Any("metrics", metrics), // TODO(dragondriver): necessary? may be very large
 			zap.Error(err))
-
-		s.metricsCacheManager.UpdateSystemInfoMetrics(metrics)
 
 		return metrics, nil
 	}
