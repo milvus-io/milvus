@@ -48,6 +48,8 @@ type GrpcClient interface {
 	ReCall(ctx context.Context, caller func(client interface{}) (interface{}, error)) (interface{}, error)
 	Call(ctx context.Context, caller func(client interface{}) (interface{}, error)) (interface{}, error)
 	Close() error
+	SetNodeID(int64)
+	GetNodeID() int64
 }
 
 // ClientBase is a base of grpc client
@@ -63,6 +65,7 @@ type ClientBase struct {
 	ClientMaxSendSize      int
 	ClientMaxRecvSize      int
 	RetryServiceNameConfig string
+	nodeID                 int64
 
 	DialTimeout      time.Duration
 	KeepAliveTime    time.Duration
@@ -313,4 +316,12 @@ func (c *ClientBase) Close() error {
 		return c.conn.Close()
 	}
 	return nil
+}
+
+func (c *ClientBase) SetNodeID(nodeID int64) {
+
+}
+
+func (c *ClientBase) GetNodeID() int64 {
+	return c.nodeID
 }

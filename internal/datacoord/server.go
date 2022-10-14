@@ -33,6 +33,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
+	"github.com/milvus-io/milvus/internal/common"
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	rootcoordclient "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -881,10 +882,12 @@ func (s *Server) stopServerLoop() {
 // collection information will be added to server meta info.
 func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID int64) error {
 	resp, err := s.rootCoordClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:  commonpb.MsgType_DescribeCollection,
-			SourceID: Params.DataCoordCfg.GetNodeID(),
-		},
+		Base: common.NewMsgBase(
+			commonpb.MsgType_DescribeCollection,
+			common.msgIDNeedFull,
+			common.GetNowTimestamp(),
+			Params.DataCoordCfg.GetNodeID(),
+		),
 		DbName:       "",
 		CollectionID: collectionID,
 	})
@@ -892,12 +895,7 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 		return err
 	}
 	presp, err := s.rootCoordClient.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_ShowPartitions,
-			MsgID:     0,
-			Timestamp: 0,
-			SourceID:  Params.DataCoordCfg.GetNodeID(),
-		},
+		Base:           common.NewMsgBase(commonpb.MsgType_ShowPartitions, 0, 0, Params.DataCoordCfg.GetNodeID()),
 		DbName:         "",
 		CollectionName: resp.Schema.Name,
 		CollectionID:   resp.CollectionID,

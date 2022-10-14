@@ -22,7 +22,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus/api/commonpb"
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -155,12 +156,7 @@ func (cit *CreateIndexTask) Execute(ctx context.Context) error {
 
 	// Get flushed segments
 	flushedSegments, err := cit.dataCoordClient.GetFlushedSegments(cit.ctx, &datapb.GetFlushedSegmentsRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   0,
-			MsgID:     cit.indexID,
-			Timestamp: cit.req.Timestamp,
-			SourceID:  cit.indexCoordClient.serverID,
-		},
+		Base:         common.NewMsgBase(0, cit.indexID, cit.req.Timestamp, cit.indexCoordClient.serverID),
 		CollectionID: cit.req.CollectionID,
 		PartitionID:  -1,
 	})

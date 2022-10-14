@@ -29,8 +29,9 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus/api/commonpb"
+	"github.com/milvus-io/milvus/api/schemapb"
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
@@ -118,14 +119,17 @@ type BufferData struct {
 // `limit` is the segment numOfRows a buffer can buffer at most.
 //
 // For a float32 vector field:
-//  limit = 16 * 2^20 Byte [By default] / (dimension * 4 Byte)
+//
+//	limit = 16 * 2^20 Byte [By default] / (dimension * 4 Byte)
 //
 // For a binary vector field:
-//  limit = 16 * 2^20 Byte [By default]/ (dimension / 8 Byte)
+//
+//	limit = 16 * 2^20 Byte [By default]/ (dimension / 8 Byte)
 //
 // But since the buffer of binary vector fields is larger than the float32 one
-//   with the same dimension, newBufferData takes the smaller buffer limit
-//   to fit in both types of vector fields
+//
+//	with the same dimension, newBufferData takes the smaller buffer limit
+//	to fit in both types of vector fields
 //
 // * This need to change for string field support and multi-vector fields support.
 func newBufferData(dimension int64) (*BufferData, error) {
@@ -464,8 +468,9 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 }
 
 // updateSegStatesInReplica updates statistics in replica for the segments in insertMsgs.
-//  If the segment doesn't exist, a new segment will be created.
-//  The segment number of rows will be updated in mem, waiting to be uploaded to DataCoord.
+//
+//	If the segment doesn't exist, a new segment will be created.
+//	The segment number of rows will be updated in mem, waiting to be uploaded to DataCoord.
 func (ibNode *insertBufferNode) updateSegStatesInReplica(insertMsgs []*msgstream.InsertMsg, startPos, endPos *internalpb.MsgPosition) (seg2Upload []UniqueID, err error) {
 	uniqueSeg := make(map[UniqueID]int64)
 	for _, msg := range insertMsgs {
@@ -655,11 +660,7 @@ func newInsertBufferNode(ctx context.Context, collID UniqueID, flushCh <-chan fl
 				HashValues:     []uint32{0},
 			},
 			DataNodeTtMsg: datapb.DataNodeTtMsg{
-				Base: &commonpb.MsgBase{
-					MsgType:   commonpb.MsgType_DataNodeTt,
-					MsgID:     0,
-					Timestamp: ts,
-				},
+				Base:          common.NewMsgBase(commonpb.MsgType_DataNodeTt, 0, ts, Params.DataCoordCfg.GetNodeID()),
 				ChannelName:   config.vChannelName,
 				Timestamp:     ts,
 				SegmentsStats: stats,

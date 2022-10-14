@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
@@ -89,7 +90,7 @@ type repackFuncType = func(tsMsgs []msgstream.TsMsg, hashKeys [][]int32) (map[in
 func getDmlChannelsFunc(ctx context.Context, rc types.RootCoord) getChannelsFuncType {
 	return func(collectionID UniqueID) (channelInfos, error) {
 		req := &milvuspb.DescribeCollectionRequest{
-			Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_DescribeCollection},
+			Base:         common.NewMsgBase(commonpb.MsgType_DescribeCollection, common.msgIDNeedFull, common.GetNowTimestamp(), Params.DataNodeCfg.GetNodeID()),
 			CollectionID: collectionID,
 		}
 

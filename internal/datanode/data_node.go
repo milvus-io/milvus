@@ -476,12 +476,7 @@ func (node *DataNode) Start() error {
 	log.Debug("start id allocator done", zap.String("role", typeutil.DataNodeRole))
 
 	rep, err := node.rootCoord.AllocTimestamp(node.ctx, &rootcoordpb.AllocTimestampRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_RequestTSO,
-			MsgID:     0,
-			Timestamp: 0,
-			SourceID:  Params.DataNodeCfg.GetNodeID(),
-		},
+		Base:  common.NewMsgBase(commonpb.MsgType_RequestTSO, 0, 0, Params.DataNodeCfg.GetNodeID()),
 		Count: 1,
 	})
 	if err != nil || rep.Status.ErrorCode != commonpb.ErrorCode_Success {
@@ -998,14 +993,8 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 	}
 
 	// get a timestamp for all the rows
-	// Ignore cancellation from parent context.
-	rep, err := node.rootCoord.AllocTimestamp(newCtx, &rootcoordpb.AllocTimestampRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_RequestTSO,
-			MsgID:     0,
-			Timestamp: 0,
-			SourceID:  Params.DataNodeCfg.GetNodeID(),
-		},
+	rep, err := node.rootCoord.AllocTimestamp(ctx, &rootcoordpb.AllocTimestampRequest{
+		Base:  common.NewMsgBase(commonpb.MsgType_RequestTSO, 0, 0, Params.DataNodeCfg.GetNodeID()),
 		Count: 1,
 	})
 
@@ -1224,23 +1213,19 @@ func importFlushReqFunc(node *DataNode, req *datapb.ImportTaskRequest, res *root
 		err = retry.Do(context.Background(), func() error {
 			// Ask DataCoord to save binlog path and add segment to the corresponding DataNode flow graph.
 			resp, err := node.dataCoord.SaveImportSegment(context.Background(), &datapb.SaveImportSegmentRequest{
-				Base: &commonpb.MsgBase{
-					SourceID: Params.DataNodeCfg.GetNodeID(),
-					// Pass current timestamp downstream.
-					Timestamp: ts,
-				},
+				Base: common.NewMsgBase(
+					commonpb.MsgType_Undefined,
+					common.msgIDNeedFull,
+					ts, // Pass current timestamp downstream.
+					Params.DataNodeCfg.GetNodeID(),
+				),
 				SegmentId:    segmentID,
 				ChannelName:  targetChName,
 				CollectionId: req.GetImportTask().GetCollectionId(),
 				PartitionId:  req.GetImportTask().GetPartitionId(),
 				RowNum:       int64(rowNum),
 				SaveBinlogPathReq: &datapb.SaveBinlogPathsRequest{
-					Base: &commonpb.MsgBase{
-						MsgType:   0,
-						MsgID:     0,
-						Timestamp: ts,
-						SourceID:  Params.DataNodeCfg.GetNodeID(),
-					},
+					Base:                common.NewMsgBase(0, 0, 0, Params.DataNodeCfg.GetNodeID()),
 					SegmentID:           segmentID,
 					CollectionID:        req.GetImportTask().GetCollectionId(),
 					Field2BinlogPaths:   fieldInsert,

@@ -23,9 +23,10 @@ import (
 
 	"github.com/milvus-io/milvus/internal/types"
 
-	"github.com/milvus-io/milvus-proto/go-api/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus/api/commonpb"
+	"github.com/milvus-io/milvus/api/milvuspb"
+	"github.com/milvus-io/milvus/api/schemapb"
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 )
 
@@ -58,12 +59,12 @@ func (mService *metaService) getCollectionSchema(ctx context.Context, collID Uni
 // getCollectionInfo get collection info with provided collection id at specified timestamp.
 func (mService *metaService) getCollectionInfo(ctx context.Context, collID UniqueID, timestamp Timestamp) (*milvuspb.DescribeCollectionResponse, error) {
 	req := &milvuspb.DescribeCollectionRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_DescribeCollection,
-			MsgID:     0, //GOOSE TODO
-			Timestamp: 0, // GOOSE TODO
-			SourceID:  Params.DataNodeCfg.GetNodeID(),
-		},
+		Base: common.NewMsgBase(
+			commonpb.MsgType_DescribeCollection,
+			0, //GOOSE TODO
+			0, // GOOSE TODO
+			Params.DataNodeCfg.GetNodeID(),
+		),
 		DbName:       "default", // GOOSE TODO
 		CollectionID: collID,
 		TimeStamp:    timestamp,

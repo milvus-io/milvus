@@ -22,7 +22,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus/api/commonpb"
+	"github.com/milvus-io/milvus/internal/common"
 	grpcdatanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -218,10 +219,12 @@ func (c *SessionManager) execReCollectSegmentStats(ctx context.Context, nodeID i
 	ctx, cancel := context.WithTimeout(ctx, reCollectTimeout)
 	defer cancel()
 	resp, err := cli.ResendSegmentStats(ctx, &datapb.ResendSegmentStatsRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:  commonpb.MsgType_ResendSegmentStats,
-			SourceID: Params.DataCoordCfg.GetNodeID(),
-		},
+		Base: common.NewMsgBase(
+			commonpb.MsgType_ResendSegmentStats,
+			common.msgIDNeedFull,
+			common.GetNowTimestamp(),
+			Params.DataCoordCfg.GetNodeID(),
+		),
 	})
 	if err := VerifyResponse(resp, err); err != nil {
 		log.Error("re-collect segment stats call failed",
@@ -253,10 +256,12 @@ func (c *SessionManager) GetCompactionState() map[int64]*datapb.CompactionStateR
 			ctx, cancel := context.WithTimeout(ctx, rpcCompactionTimeout)
 			defer cancel()
 			resp, err := cli.GetCompactionState(ctx, &datapb.CompactionStateRequest{
-				Base: &commonpb.MsgBase{
-					MsgType:  commonpb.MsgType_GetSystemConfigs,
-					SourceID: Params.DataCoordCfg.GetNodeID(),
-				},
+				Base: common.NewMsgBase(
+					commonpb.MsgType_GetSystemConfigs,
+					common.msgIDNeedFull,
+					common.GetNowTimestamp(),
+					Params.DataCoordCfg.GetNodeID(),
+				),
 			})
 			if err != nil {
 				log.Info("Get State failed", zap.Error(err))

@@ -634,12 +634,12 @@ func getFieldBinlogs(fieldID UniqueID, binlogs []*datapb.FieldBinlog) *datapb.Fi
 func dropVirtualChannelFunc(dsService *dataSyncService, opts ...retry.Option) flushAndDropFunc {
 	return func(packs []*segmentFlushPack) {
 		req := &datapb.DropVirtualChannelRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   0, //TODO msg type
-				MsgID:     0, //TODO msg id
-				Timestamp: 0, //TODO time stamp
-				SourceID:  Params.DataNodeCfg.GetNodeID(),
-			},
+			Base: common.NewMsgBase(
+				0, //TODO msg type
+				0, //TODO msg id
+				0, //TODO time stamp
+				Params.DataNodeCfg.GetNodeID(),
+			),
 			ChannelName: dsService.vchannelName,
 		}
 
@@ -783,12 +783,12 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 		)
 
 		req := &datapb.SaveBinlogPathsRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   0, //TODO msg type
-				MsgID:     0, //TODO msg id
-				Timestamp: 0, //TODO time stamp
-				SourceID:  Params.DataNodeCfg.GetNodeID(),
-			},
+			Base: common.NewMsgBase(
+				0, //TODO msg type
+				0, //TODO msg id
+				0, //TODO time stamp
+				Params.DataNodeCfg.GetNodeID(),
+			),
 			SegmentID:           pack.segmentID,
 			CollectionID:        dsService.collectionID,
 			Field2BinlogPaths:   fieldInsert,
