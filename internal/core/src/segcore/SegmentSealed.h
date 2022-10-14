@@ -17,13 +17,14 @@
 #include "common/LoadInfo.h"
 #include "pb/segcore.pb.h"
 #include "segcore/SegmentInterface.h"
+#include "segcore/Types.h"
 
 namespace milvus::segcore {
 
 class SegmentSealed : public SegmentInternalInterface {
  public:
     virtual void
-    LoadIndex(const index::LoadIndexInfo& info) = 0;
+    LoadIndex(const LoadIndexInfo& info) = 0;
     virtual void
     LoadSegmentMeta(const milvus::proto::segcore::LoadSegmentMeta& meta) = 0;
     virtual void

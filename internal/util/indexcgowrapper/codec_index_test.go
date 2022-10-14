@@ -10,11 +10,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/internal/util/funcutil"
-
-	"github.com/milvus-io/milvus/internal/storage"
-
 	"github.com/milvus-io/milvus/api/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
 type indexTestCase struct {
@@ -293,9 +292,26 @@ func genIndexCase() []indexTestCase {
 	return ret
 }
 
+func genStorageConfig() *indexpb.StorageConfig {
+	InitOnce.Do(func() {
+		Params.Init()
+	})
+
+	return &indexpb.StorageConfig{
+		Address:         Params.MinioCfg.Address,
+		AccessKeyID:     Params.MinioCfg.AccessKeyID,
+		SecretAccessKey: Params.MinioCfg.SecretAccessKey,
+		BucketName:      Params.MinioCfg.BucketName,
+		RootPath:        Params.MinioCfg.RootPath,
+		IAMEndpoint:     Params.MinioCfg.IAMEndpoint,
+		UseSSL:          Params.MinioCfg.UseSSL,
+		UseIAM:          Params.MinioCfg.UseIAM,
+	}
+}
+
 func TestCgoIndex(t *testing.T) {
 	for _, testCase := range genIndexCase() {
-		index, err := NewCgoIndex(testCase.dtype, testCase.typeParams, testCase.indexParams)
+		index, err := NewCgoIndex(testCase.dtype, testCase.typeParams, testCase.indexParams, genStorageConfig())
 		assert.NoError(t, err, testCase)
 
 		dataset := GenDataset(genFieldData(testCase.dtype, nb, dim))
@@ -304,7 +320,7 @@ func TestCgoIndex(t *testing.T) {
 		blobs, err := index.Serialize()
 		assert.NoError(t, err, testCase)
 
-		copyIndex, err := NewCgoIndex(testCase.dtype, testCase.typeParams, testCase.indexParams)
+		copyIndex, err := NewCgoIndex(testCase.dtype, testCase.typeParams, testCase.indexParams, genStorageConfig())
 		assert.NoError(t, err, testCase)
 
 		assert.NoError(t, copyIndex.Load(blobs), testCase)

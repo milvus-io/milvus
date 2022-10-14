@@ -19,6 +19,7 @@
 #include "indexbuilder/IndexCreatorBase.h"
 #include "index/VectorIndex.h"
 #include "index/IndexInfo.h"
+#include "storage/Types.h"
 
 namespace milvus::indexbuilder {
 
@@ -27,7 +28,8 @@ class VecIndexCreator : public IndexCreatorBase {
  public:
     explicit VecIndexCreator(DataType data_type,
                              const char* serialized_type_params,
-                             const char* serialized_index_params);
+                             const char* serialized_index_params,
+                             const storage::StorageConfig& storage_config);
 
     void
     Build(const milvus::DatasetPtr& dataset) override;

@@ -106,7 +106,7 @@ Search_Sealed(benchmark::State& state) {
         // ivf
         auto vec = dataset_.get_col<float>(milvus::FieldId(100));
         auto indexing = GenVecIndexing(N, dim, vec.data());
-        index::LoadIndexInfo info;
+        segcore::LoadIndexInfo info;
         info.index = std::move(indexing);
         info.field_id = (*schema)[FieldName("fakevec")].get_id().get();
         info.index_params["index_type"] = "IVF";

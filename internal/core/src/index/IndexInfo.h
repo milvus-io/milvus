@@ -16,30 +16,9 @@
 
 #pragma once
 
-#include <iostream>
-#include <map>
-#include <string>
-#include <vector>
-
 #include "common/Types.h"
-#include "common/type_c.h"
-#include "index/Index.h"
 
 namespace milvus::index {
-
-struct LoadIndexInfo {
-    int64_t collection_id;
-    int64_t partition_id;
-    int64_t segment_id;
-    int64_t field_id;
-    DataType field_type;
-    int64_t index_id;
-    int64_t index_build_id;
-    int64_t index_version;
-    std::map<std::string, std::string> index_params;
-    std::vector<std::string> index_files;
-    index::IndexBasePtr index;
-};
 
 struct CreateIndexInfo {
     DataType field_type;

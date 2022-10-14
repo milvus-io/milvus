@@ -24,12 +24,15 @@
 
 #include "storage/IndexData.h"
 #include "storage/FileManager.h"
+#include "storage/MinioChunkManager.h"
 
 namespace milvus::storage {
 
 class DiskFileManagerImpl : public FileManagerImpl {
  public:
-    explicit DiskFileManagerImpl(const FieldDataMeta& field_mata, const IndexMeta& index_meta);
+    explicit DiskFileManagerImpl(const FieldDataMeta& field_mata,
+                                 const IndexMeta& index_meta,
+                                 const StorageConfig& storage_config);
 
     virtual ~DiskFileManagerImpl();
 
@@ -63,6 +66,11 @@ class DiskFileManagerImpl : public FileManagerImpl {
     std::map<std::string, int64_t>
     GetRemotePathsToFileSize() const {
         return remote_paths_to_size_;
+    }
+
+    std::vector<std::string>
+    GetLocalFilePaths() const {
+        return local_paths_;
     }
 
     void
@@ -99,6 +107,9 @@ class DiskFileManagerImpl : public FileManagerImpl {
 
     // remote file path
     std::map<std::string, int64_t> remote_paths_to_size_;
+
+    RemoteChunkManagerPtr rcm_;
+    std::string remote_root_path_;
 };
 
 using DiskANNFileManagerImplPtr = std::shared_ptr<DiskFileManagerImpl>;

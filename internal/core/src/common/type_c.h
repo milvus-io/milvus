@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #pragma once
+#include <stdbool.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -81,6 +82,18 @@ typedef struct CLoadDeletedRecordInfo {
     const uint64_t primary_keys_size;
     int64_t row_count;
 } CLoadDeletedRecordInfo;
+
+typedef struct CStorageConfig {
+    const char* address;
+    const char* bucket_name;
+    const char* access_key_id;
+    const char* access_key_value;
+    const char* remote_root_path;
+    const char* storage_type;
+    const char* iam_endpoint;
+    bool useSSL;
+    bool useIAM;
+} CStorageConfig;
 
 #ifdef __cplusplus
 }

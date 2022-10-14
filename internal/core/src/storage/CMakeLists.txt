@@ -14,7 +14,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
 option( EMBEDDED_MILVUS "Enable embedded Milvus" OFF )
 
 if ( EMBEDDED_MILVUS )
@@ -46,10 +45,12 @@ endif ()
 
 add_library(milvus_storage SHARED ${STORAGE_FILES})
 
+find_package(Boost REQUIRED COMPONENTS filesystem)
+
 if ( BUILD_DISK_ANN STREQUAL "ON" )
-    target_link_libraries( milvus_storage PUBLIC milvus_common boost_system boost_filesystem aws-cpp-sdk-s3 pthread)
+    target_link_libraries( milvus_storage PUBLIC milvus_common Boost::filesystem aws-cpp-sdk-s3 pthread)
 else()
-    target_link_libraries( milvus_storage PUBLIC milvus_common pthread)
+    target_link_libraries( milvus_storage PUBLIC milvus_common Boost::filesystem pthread)
 endif()
 
 if(NOT CMAKE_INSTALL_PREFIX)

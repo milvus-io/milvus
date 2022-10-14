@@ -27,39 +27,10 @@ import "C"
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"unsafe"
 
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
-
-func InitMinioConfig(params *paramtable.ComponentParam) {
-	CMinioAddress := C.CString(params.MinioCfg.Address)
-	C.MinioAddressInit(CMinioAddress)
-	C.free(unsafe.Pointer(CMinioAddress))
-
-	CMinioAccessKey := C.CString(params.MinioCfg.AccessKeyID)
-	C.MinioAccessKeyInit(CMinioAccessKey)
-	C.free(unsafe.Pointer(CMinioAccessKey))
-
-	CMinioAccessValue := C.CString(params.MinioCfg.SecretAccessKey)
-	C.MinioAccessValueInit(CMinioAccessValue)
-	C.free(unsafe.Pointer(CMinioAccessValue))
-
-	CUseSSL := C.bool(params.MinioCfg.UseSSL)
-	C.MinioSSLInit(CUseSSL)
-
-	CUseIam := C.bool(params.MinioCfg.UseIAM)
-	C.MinioUseIamInit(CUseIam)
-
-	CMinioBucketName := C.CString(strings.TrimLeft(params.MinioCfg.BucketName, "/"))
-	C.MinioBucketNameInit(CMinioBucketName)
-	C.free(unsafe.Pointer(CMinioBucketName))
-
-	CMinioRootPath := C.CString(params.MinioCfg.RootPath)
-	C.MinioRootPathInit(CMinioRootPath)
-	C.free(unsafe.Pointer(CMinioRootPath))
-}
 
 func InitLocalStorageConfig(params *paramtable.ComponentParam) {
 	b, _ := os.Getwd()

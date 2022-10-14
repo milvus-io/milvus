@@ -17,12 +17,11 @@
 #include "segcore/SegmentSealedImpl.h"
 #include "test_utils/DataGen.h"
 #include "index/IndexFactory.h"
-#include "segcore/segcore_init_c.h"
 
 using namespace milvus;
 using namespace milvus::query;
 using namespace milvus::segcore;
-using milvus::index::LoadIndexInfo;
+using milvus::segcore::LoadIndexInfo;
 
 const int64_t ROW_COUNT = 100 * 1000;
 

@@ -79,4 +79,16 @@ struct IndexMeta {
     std::string key;
 };
 
+struct StorageConfig {
+    std::string address = "localhost:9000";
+    std::string bucket_name = "a-bucket";
+    std::string access_key_id = "minioadmin";
+    std::string access_key_value = "minioadmin";
+    std::string remote_root_path = "files";
+    std::string storage_type = "minio";
+    std::string iam_endpoint = "";
+    bool useSSL = false;
+    bool useIAM = false;
+};
+
 }  // namespace milvus::storage

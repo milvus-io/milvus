@@ -21,48 +21,6 @@
 namespace milvus::ChunkMangerConfig {
 
 void
-SetAddress(const std::string& address);
-
-std::string
-GetAddress();
-
-void
-SetAccessKey(const std::string& access_key);
-
-std::string
-GetAccessKey();
-
-void
-SetAccessValue(const std::string& access_value);
-
-std::string
-GetAccessValue();
-
-void
-SetUseSSL(bool use_ssl);
-
-bool
-GetUseSSL();
-
-void
-SetUseIAM(bool use_iam);
-
-bool
-GetUseIAM();
-
-void
-SetBucketName(const std::string& bucket_name);
-
-std::string
-GetBucketName();
-
-void
-SetRemoteRootPath(const std::string& path_prefix);
-
-std::string
-GetRemoteRootPath();
-
-void
 SetLocalRootPath(const std::string& path_prefix);
 
 std::string

@@ -11,23 +11,19 @@
 
 #include <google/protobuf/text_format.h>
 #include <gtest/gtest.h>
-#include <map>
 #include <tuple>
 #include <knowhere/index/vector_index/helpers/IndexParameter.h>
 #include <knowhere/index/vector_index/adapter/VectorAdapter.h>
 #include <knowhere/index/vector_index/ConfAdapterMgr.h>
-#include <knowhere/archive/KnowhereConfig.h>
 #include "pb/index_cgo_msg.pb.h"
 
-#include "indexbuilder/VecIndexCreator.h"
 #include "indexbuilder/index_c.h"
-#include "test_utils/DataGen.h"
 #include "test_utils/indexbuilder_test_utils.h"
 #include "indexbuilder/ScalarIndexCreator.h"
-#include "indexbuilder/IndexFactory.h"
 #include "common/type_c.h"
 
 constexpr int NB = 10;
+const CStorageConfig c_storage_config = get_default_cstorage_config();
 
 TEST(FloatVecIndex, All) {
     auto index_type = knowhere::IndexEnum::INDEX_FAISS_IVFPQ;
@@ -51,7 +47,7 @@ TEST(FloatVecIndex, All) {
     CIndex copy_index;
 
     {
-        status = CreateIndex(dtype, type_params_str.c_str(), index_params_str.c_str(), &index);
+        status = CreateIndex(dtype, type_params_str.c_str(), index_params_str.c_str(), &index, c_storage_config);
         ASSERT_EQ(Success, status.error_code);
     }
     {
@@ -63,7 +59,7 @@ TEST(FloatVecIndex, All) {
         ASSERT_EQ(Success, status.error_code);
     }
     {
-        status = CreateIndex(dtype, type_params_str.c_str(), index_params_str.c_str(), &copy_index);
+        status = CreateIndex(dtype, type_params_str.c_str(), index_params_str.c_str(), &copy_index, c_storage_config);
         ASSERT_EQ(Success, status.error_code);
     }
     {
@@ -102,7 +98,7 @@ TEST(BinaryVecIndex, All) {
     CIndex copy_index;
 
     {
-        status = CreateIndex(dtype, type_params_str.c_str(), index_params_str.c_str(), &index);
+        status = CreateIndex(dtype, type_params_str.c_str(), index_params_str.c_str(), &index, c_storage_config);
         ASSERT_EQ(Success, status.error_code);
     }
     {
@@ -114,7 +110,7 @@ TEST(BinaryVecIndex, All) {
         ASSERT_EQ(Success, status.error_code);
     }
     {
-        status = CreateIndex(dtype, type_params_str.c_str(), index_params_str.c_str(), &copy_index);
+        status = CreateIndex(dtype, type_params_str.c_str(), index_params_str.c_str(), &copy_index, c_storage_config);
         ASSERT_EQ(Success, status.error_code);
     }
     {
@@ -154,7 +150,7 @@ TEST(CBoolIndexTest, All) {
         CIndex copy_index;
 
         {
-            status = CreateIndex(dtype, type_params_str.c_str(), index_params_str.c_str(), &index);
+            status = CreateIndex(dtype, type_params_str.c_str(), index_params_str.c_str(), &index, c_storage_config);
             ASSERT_EQ(Success, status.error_code);
         }
         {
@@ -166,7 +162,8 @@ TEST(CBoolIndexTest, All) {
             ASSERT_EQ(Success, status.error_code);
         }
         {
-            status = CreateIndex(dtype, type_params_str.c_str(), index_params_str.c_str(), &copy_index);
+            status =
+                CreateIndex(dtype, type_params_str.c_str(), index_params_str.c_str(), &copy_index, c_storage_config);
             ASSERT_EQ(Success, status.error_code);
         }
         {
@@ -204,7 +201,7 @@ TEST(CInt64IndexTest, All) {
         CIndex copy_index;
 
         {
-            status = CreateIndex(dtype, type_params_str.c_str(), index_params_str.c_str(), &index);
+            status = CreateIndex(dtype, type_params_str.c_str(), index_params_str.c_str(), &index, c_storage_config);
             ASSERT_EQ(Success, status.error_code);
         }
         {
@@ -216,7 +213,8 @@ TEST(CInt64IndexTest, All) {
             ASSERT_EQ(Success, status.error_code);
         }
         {
-            status = CreateIndex(dtype, type_params_str.c_str(), index_params_str.c_str(), &copy_index);
+            status =
+                CreateIndex(dtype, type_params_str.c_str(), index_params_str.c_str(), &copy_index, c_storage_config);
             ASSERT_EQ(Success, status.error_code);
         }
         {
@@ -256,7 +254,7 @@ TEST(CStringIndexTest, All) {
         CIndex copy_index;
 
         {
-            status = CreateIndex(dtype, type_params_str.c_str(), index_params_str.c_str(), &index);
+            status = CreateIndex(dtype, type_params_str.c_str(), index_params_str.c_str(), &index, c_storage_config);
             ASSERT_EQ(Success, status.error_code);
         }
         {
@@ -268,7 +266,8 @@ TEST(CStringIndexTest, All) {
             ASSERT_EQ(Success, status.error_code);
         }
         {
-            status = CreateIndex(dtype, type_params_str.c_str(), index_params_str.c_str(), &copy_index);
+            status =
+                CreateIndex(dtype, type_params_str.c_str(), index_params_str.c_str(), &copy_index, c_storage_config);
             ASSERT_EQ(Success, status.error_code);
         }
         {

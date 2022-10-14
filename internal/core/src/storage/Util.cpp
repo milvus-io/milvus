@@ -360,11 +360,14 @@ is_in_disk_list(const IndexType& index_type) {
 }
 
 FileManagerImplPtr
-CreateFileManager(IndexType index_type, const FieldDataMeta& field_meta, const IndexMeta& index_meta) {
+CreateFileManager(IndexType index_type,
+                  const FieldDataMeta& field_meta,
+                  const IndexMeta& index_meta,
+                  const StorageConfig& storage_config) {
     // TODO :: switch case index type to create file manager
 #ifdef BUILD_DISK_ANN
     if (is_in_disk_list(index_type)) {
-        return std::make_shared<DiskFileManagerImpl>(field_meta, index_meta);
+        return std::make_shared<DiskFileManagerImpl>(field_meta, index_meta, storage_config);
     }
 #endif
 

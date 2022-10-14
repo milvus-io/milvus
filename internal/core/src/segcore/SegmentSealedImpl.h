@@ -35,7 +35,7 @@ class SegmentSealedImpl : public SegmentSealed {
  public:
     explicit SegmentSealedImpl(SchemaPtr schema, int64_t segment_id);
     void
-    LoadIndex(const index::LoadIndexInfo& info) override;
+    LoadIndex(const LoadIndexInfo& info) override;
     void
     LoadFieldData(const LoadFieldDataInfo& info) override;
     void
@@ -172,10 +172,10 @@ class SegmentSealedImpl : public SegmentSealed {
     search_ids(const BitsetType& view, Timestamp timestamp) const override;
 
     void
-    LoadVecIndex(const index::LoadIndexInfo& info);
+    LoadVecIndex(const LoadIndexInfo& info);
 
     void
-    LoadScalarIndex(const index::LoadIndexInfo& info);
+    LoadScalarIndex(const LoadIndexInfo& info);
 
  private:
     // segment loading state

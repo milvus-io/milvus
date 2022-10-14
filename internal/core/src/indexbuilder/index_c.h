@@ -24,7 +24,8 @@ CStatus
 CreateIndex(enum CDataType dtype,
             const char* serialized_type_params,
             const char* serialized_index_params,
-            CIndex* res_index);
+            CIndex* res_index,
+            CStorageConfig storage_config);
 
 CStatus
 DeleteIndex(CIndex index);

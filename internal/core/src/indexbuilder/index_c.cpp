@@ -21,18 +21,37 @@
 #include "indexbuilder/index_c.h"
 #include "indexbuilder/IndexFactory.h"
 #include "common/type_c.h"
+#include "storage/Types.h"
 
 CStatus
 CreateIndex(enum CDataType dtype,
             const char* serialized_type_params,
             const char* serialized_index_params,
-            CIndex* res_index) {
+            CIndex* res_index,
+            CStorageConfig c_storage_config) {
     auto status = CStatus();
     try {
         AssertInfo(res_index, "failed to create index, passed index was null");
 
-        auto index = milvus::indexbuilder::IndexFactory::GetInstance().CreateIndex(dtype, serialized_type_params,
-                                                                                   serialized_index_params);
+        std::string address(c_storage_config.address);
+        std::string bucket_name(c_storage_config.bucket_name);
+        std::string access_key(c_storage_config.access_key_id);
+        std::string access_value(c_storage_config.access_key_value);
+        std::string remote_root_path(c_storage_config.remote_root_path);
+        std::string storage_type(c_storage_config.storage_type);
+        std::string iam_endpoint(c_storage_config.iam_endpoint);
+        auto storage_config = milvus::storage::StorageConfig{address,
+                                                             bucket_name,
+                                                             access_key,
+                                                             access_value,
+                                                             remote_root_path,
+                                                             storage_type,
+                                                             iam_endpoint,
+                                                             c_storage_config.useSSL,
+                                                             c_storage_config.useIAM};
+
+        auto index = milvus::indexbuilder::IndexFactory::GetInstance().CreateIndex(
+            dtype, serialized_type_params, serialized_index_params, storage_config);
         *res_index = index.release();
         status.error_code = Success;
         status.error_msg = "";

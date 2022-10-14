@@ -9,6 +9,7 @@ package indexcgowrapper
 import "C"
 import (
 	"fmt"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"path/filepath"
 	"runtime"
 	"unsafe"
@@ -49,7 +50,7 @@ type CgoIndex struct {
 }
 
 // TODO: use proto.Marshal instead of proto.MarshalTextString for better compatibility.
-func NewCgoIndex(dtype schemapb.DataType, typeParams, indexParams map[string]string) (*CgoIndex, error) {
+func NewCgoIndex(dtype schemapb.DataType, typeParams, indexParams map[string]string, config *indexpb.StorageConfig) (*CgoIndex, error) {
 	protoTypeParams := &indexcgopb.TypeParams{
 		Params: make([]*commonpb.KeyValuePair, 0),
 	}
@@ -71,9 +72,37 @@ func NewCgoIndex(dtype schemapb.DataType, typeParams, indexParams map[string]str
 	defer C.free(unsafe.Pointer(typeParamsPointer))
 	defer C.free(unsafe.Pointer(indexParamsPointer))
 
+	// TODO::xige-16 support embedded milvus
+	storageType := "minio"
+	cAddress := C.CString(config.Address)
+	cBucketName := C.CString(config.GetBucketName())
+	cAccessKey := C.CString(config.GetAccessKeyID())
+	cAccessValue := C.CString(config.GetSecretAccessKey())
+	cRootPath := C.CString(config.GetRootPath())
+	cStorageType := C.CString(storageType)
+	cIamEndPoint := C.CString(config.GetIAMEndpoint())
+	defer C.free(unsafe.Pointer(cAddress))
+	defer C.free(unsafe.Pointer(cBucketName))
+	defer C.free(unsafe.Pointer(cAccessKey))
+	defer C.free(unsafe.Pointer(cAccessValue))
+	defer C.free(unsafe.Pointer(cRootPath))
+	defer C.free(unsafe.Pointer(cStorageType))
+	defer C.free(unsafe.Pointer(cIamEndPoint))
+	storageConfig := C.CStorageConfig{
+		address:          cAddress,
+		bucket_name:      cBucketName,
+		access_key_id:    cAccessKey,
+		access_key_value: cAccessValue,
+		remote_root_path: cRootPath,
+		storage_type:     cStorageType,
+		iam_endpoint:     cIamEndPoint,
+		useSSL:           C.bool(config.GetUseSSL()),
+		useIAM:           C.bool(config.GetUseIAM()),
+	}
+
 	var indexPtr C.CIndex
 	cintDType := uint32(dtype)
-	status := C.CreateIndex(cintDType, typeParamsPointer, indexParamsPointer, &indexPtr)
+	status := C.CreateIndex(cintDType, typeParamsPointer, indexParamsPointer, &indexPtr, storageConfig)
 	if err := HandleCStatus(&status, "failed to create index"); err != nil {
 		return nil, err
 	}

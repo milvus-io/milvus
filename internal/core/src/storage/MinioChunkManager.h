@@ -23,9 +23,10 @@
 #include <string>
 #include <vector>
 
-#include "ChunkManager.h"
-#include "Exception.h"
 #include "config/ConfigChunkManager.h"
+#include "storage/ChunkManager.h"
+#include "storage/Exception.h"
+#include "storage/Types.h"
 
 namespace milvus::storage {
 
@@ -33,13 +34,8 @@ namespace milvus::storage {
  * @brief This MinioChunkManager is responsible for read and write file in S3.
  */
 class MinioChunkManager : public RemoteChunkManager {
- private:
-    explicit MinioChunkManager(const std::string& endpoint,
-                               const std::string& access_key,
-                               const std::string& access_value,
-                               const std::string& default_bucket_name,
-                               bool serure = false,
-                               bool use_iam = false);
+ public:
+    explicit MinioChunkManager(const StorageConfig& storage_config);
 
     MinioChunkManager(const MinioChunkManager&);
     MinioChunkManager&
@@ -47,15 +43,6 @@ class MinioChunkManager : public RemoteChunkManager {
 
  public:
     virtual ~MinioChunkManager();
-
-    static MinioChunkManager&
-    GetInstance() {
-        // thread-safe enough after c++ 11
-        static MinioChunkManager instance(ChunkMangerConfig::GetAddress(), ChunkMangerConfig::GetAccessKey(),
-                                          ChunkMangerConfig::GetAccessValue(), ChunkMangerConfig::GetBucketName(),
-                                          ChunkMangerConfig::GetUseSSL(), ChunkMangerConfig::GetUseIAM());
-        return instance;
-    }
 
     virtual bool
     Exist(const std::string& filepath);
@@ -132,6 +119,6 @@ class MinioChunkManager : public RemoteChunkManager {
     std::string default_bucket_name_;
 };
 
-using MinioChunkManagerSPtr = std::shared_ptr<MinioChunkManager>;
+using MinioChunkManagerPtr = std::unique_ptr<MinioChunkManager>;
 
 }  // namespace milvus::storage

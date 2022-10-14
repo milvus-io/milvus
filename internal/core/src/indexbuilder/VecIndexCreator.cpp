@@ -25,7 +25,8 @@ namespace milvus::indexbuilder {
 
 VecIndexCreator::VecIndexCreator(DataType data_type,
                                  const char* serialized_type_params,
-                                 const char* serialized_index_params)
+                                 const char* serialized_index_params,
+                                 const storage::StorageConfig& storage_config)
     : data_type_(data_type) {
     proto::indexcgo::TypeParams type_params_;
     proto::indexcgo::IndexParams index_params_;
@@ -52,8 +53,8 @@ VecIndexCreator::VecIndexCreator(DataType data_type,
 #ifdef BUILD_DISK_ANN
     if (index::is_in_disk_list(index_info.index_type)) {
         // For now, only support diskann index
-        file_manager = std::make_shared<storage::DiskFileManagerImpl>(index::GetFieldDataMetaFromConfig(config_),
-                                                                      index::GetIndexMetaFromConfig(config_));
+        file_manager = std::make_shared<storage::DiskFileManagerImpl>(
+            index::GetFieldDataMetaFromConfig(config_), index::GetIndexMetaFromConfig(config_), storage_config);
     }
 #endif
 

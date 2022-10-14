@@ -17,6 +17,7 @@
 #include "indexbuilder/ScalarIndexCreator.h"
 #include "indexbuilder/VecIndexCreator.h"
 #include "indexbuilder/type_c.h"
+#include "storage/Types.h"
 #include <memory>
 #include <string>
 
@@ -39,7 +40,10 @@ class IndexFactory {
     }
 
     IndexCreatorBasePtr
-    CreateIndex(CDataType dtype, const char* type_params, const char* index_params) {
+    CreateIndex(CDataType dtype,
+                const char* type_params,
+                const char* index_params,
+                const storage::StorageConfig& storage_config) {
         auto real_dtype = DataType(dtype);
         auto invalid_dtype_msg = std::string("invalid data type: ") + std::to_string(int(real_dtype));
 
@@ -57,7 +61,7 @@ class IndexFactory {
 
             case DataType::VECTOR_FLOAT:
             case DataType::VECTOR_BINARY:
-                return std::make_unique<VecIndexCreator>(real_dtype, type_params, index_params);
+                return std::make_unique<VecIndexCreator>(real_dtype, type_params, index_params, storage_config);
             default:
                 throw std::invalid_argument(invalid_dtype_msg);
         }

@@ -17,11 +17,21 @@
 #include "index/IndexFactory.h"
 #include "storage/Util.h"
 #include "segcore/load_index_c.h"
+#include "segcore/Types.h"
 
 CStatus
-NewLoadIndexInfo(CLoadIndexInfo* c_load_index_info) {
+NewLoadIndexInfo(CLoadIndexInfo* c_load_index_info, CStorageConfig c_storage_config) {
     try {
-        auto load_index_info = std::make_unique<milvus::index::LoadIndexInfo>();
+        auto load_index_info = std::make_unique<milvus::segcore::LoadIndexInfo>();
+        auto& storage_config = load_index_info->storage_config;
+        storage_config.address = std::string(c_storage_config.address);
+        storage_config.bucket_name = std::string(c_storage_config.bucket_name);
+        storage_config.access_key_id = std::string(c_storage_config.access_key_id);
+        storage_config.access_key_value = std::string(c_storage_config.access_key_value);
+        storage_config.remote_root_path = std::string(c_storage_config.remote_root_path);
+        storage_config.storage_type = std::string(c_storage_config.storage_type);
+        storage_config.iam_endpoint = std::string(c_storage_config.iam_endpoint);
+
         *c_load_index_info = load_index_info.release();
         auto status = CStatus();
         status.error_code = Success;
@@ -37,14 +47,14 @@ NewLoadIndexInfo(CLoadIndexInfo* c_load_index_info) {
 
 void
 DeleteLoadIndexInfo(CLoadIndexInfo c_load_index_info) {
-    auto info = (milvus::index::LoadIndexInfo*)c_load_index_info;
+    auto info = (milvus::segcore::LoadIndexInfo*)c_load_index_info;
     delete info;
 }
 
 CStatus
 AppendIndexParam(CLoadIndexInfo c_load_index_info, const char* c_index_key, const char* c_index_value) {
     try {
-        auto load_index_info = (milvus::index::LoadIndexInfo*)c_load_index_info;
+        auto load_index_info = (milvus::segcore::LoadIndexInfo*)c_load_index_info;
         std::string index_key(c_index_key);
         std::string index_value(c_index_value);
         load_index_info->index_params[index_key] = index_value;
@@ -69,7 +79,7 @@ AppendFieldInfo(CLoadIndexInfo c_load_index_info,
                 int64_t field_id,
                 enum CDataType field_type) {
     try {
-        auto load_index_info = (milvus::index::LoadIndexInfo*)c_load_index_info;
+        auto load_index_info = (milvus::segcore::LoadIndexInfo*)c_load_index_info;
         load_index_info->collection_id = collection_id;
         load_index_info->partition_id = partition_id;
         load_index_info->segment_id = segment_id;
@@ -91,7 +101,7 @@ AppendFieldInfo(CLoadIndexInfo c_load_index_info,
 CStatus
 appendVecIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
     try {
-        auto load_index_info = (milvus::index::LoadIndexInfo*)c_load_index_info;
+        auto load_index_info = (milvus::segcore::LoadIndexInfo*)c_load_index_info;
         auto binary_set = (knowhere::BinarySet*)c_binary_set;
         auto& index_params = load_index_info->index_params;
 
@@ -117,7 +127,8 @@ appendVecIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
                                                   load_index_info->segment_id, load_index_info->field_id};
         milvus::storage::IndexMeta index_meta{load_index_info->segment_id, load_index_info->field_id,
                                               load_index_info->index_build_id, load_index_info->index_version};
-        auto file_manager = milvus::storage::CreateFileManager(index_info.index_type, field_meta, index_meta);
+        auto file_manager = milvus::storage::CreateFileManager(index_info.index_type, field_meta, index_meta,
+                                                               load_index_info->storage_config);
 
         auto config = milvus::index::ParseConfigFromIndexParams(load_index_info->index_params);
         config["index_files"] = load_index_info->index_files;
@@ -139,7 +150,7 @@ appendVecIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
 CStatus
 appendScalarIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
     try {
-        auto load_index_info = (milvus::index::LoadIndexInfo*)c_load_index_info;
+        auto load_index_info = (milvus::segcore::LoadIndexInfo*)c_load_index_info;
         auto field_type = load_index_info->field_type;
         auto binary_set = (knowhere::BinarySet*)c_binary_set;
         auto& index_params = load_index_info->index_params;
@@ -171,7 +182,7 @@ appendScalarIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
 
 CStatus
 AppendIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
-    auto load_index_info = (milvus::index::LoadIndexInfo*)c_load_index_info;
+    auto load_index_info = (milvus::segcore::LoadIndexInfo*)c_load_index_info;
     auto field_type = load_index_info->field_type;
     if (milvus::datatype_is_vector(field_type)) {
         return appendVecIndex(c_load_index_info, c_binary_set);
@@ -182,7 +193,7 @@ AppendIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
 CStatus
 AppendIndexFilePath(CLoadIndexInfo c_load_index_info, const char* c_file_path) {
     try {
-        auto load_index_info = (milvus::index::LoadIndexInfo*)c_load_index_info;
+        auto load_index_info = (milvus::segcore::LoadIndexInfo*)c_load_index_info;
         std::string index_file_path(c_file_path);
         load_index_info->index_files.emplace_back(index_file_path);
 
@@ -201,7 +212,7 @@ AppendIndexFilePath(CLoadIndexInfo c_load_index_info, const char* c_file_path) {
 CStatus
 AppendIndexInfo(CLoadIndexInfo c_load_index_info, int64_t index_id, int64_t build_id, int64_t version) {
     try {
-        auto load_index_info = (milvus::index::LoadIndexInfo*)c_load_index_info;
+        auto load_index_info = (milvus::segcore::LoadIndexInfo*)c_load_index_info;
         load_index_info->index_id = index_id;
         load_index_info->index_build_id = build_id;
         load_index_info->index_version = version;
@@ -221,7 +232,7 @@ AppendIndexInfo(CLoadIndexInfo c_load_index_info, int64_t index_id, int64_t buil
 CStatus
 CleanLoadedIndex(CLoadIndexInfo c_load_index_info) {
     try {
-        auto load_index_info = (milvus::index::LoadIndexInfo*)c_load_index_info;
+        auto load_index_info = (milvus::segcore::LoadIndexInfo*)c_load_index_info;
         auto index_file_path_prefix =
             milvus::storage::GenLocalIndexPathPrefix(load_index_info->index_build_id, load_index_info->index_version);
 #ifdef BUILD_DISK_ANN

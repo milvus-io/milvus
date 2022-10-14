@@ -79,6 +79,9 @@ bool
 is_in_disk_list(const IndexType& index_type);
 
 FileManagerImplPtr
-CreateFileManager(IndexType index_type, const FieldDataMeta& field_meta, const IndexMeta& index_meta);
+CreateFileManager(IndexType index_type,
+                  const FieldDataMeta& field_meta,
+                  const IndexMeta& index_meta,
+                  const StorageConfig& storage_config);
 
 }  // namespace milvus::storage
