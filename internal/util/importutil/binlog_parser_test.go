@@ -28,17 +28,17 @@ import (
 
 func Test_NewBinlogParser(t *testing.T) {
 	// nil schema
-	parser, err := NewBinlogParser(nil, 2, 1024, nil, nil, 0)
+	parser, err := NewBinlogParser(nil, 2, 1024, nil, nil, 0, 0)
 	assert.Nil(t, parser)
 	assert.NotNil(t, err)
 
 	// nil chunkmanager
-	parser, err = NewBinlogParser(sampleSchema(), 2, 1024, nil, nil, 0)
+	parser, err = NewBinlogParser(sampleSchema(), 2, 1024, nil, nil, 0, 0)
 	assert.Nil(t, parser)
 	assert.NotNil(t, err)
 
 	// nil flushfunc
-	parser, err = NewBinlogParser(sampleSchema(), 2, 1024, &MockChunkManager{}, nil, 0)
+	parser, err = NewBinlogParser(sampleSchema(), 2, 1024, &MockChunkManager{}, nil, 0, 0)
 	assert.Nil(t, parser)
 	assert.NotNil(t, err)
 
@@ -46,7 +46,7 @@ func Test_NewBinlogParser(t *testing.T) {
 	flushFunc := func(fields map[storage.FieldID]storage.FieldData, shardID int) error {
 		return nil
 	}
-	parser, err = NewBinlogParser(sampleSchema(), 2, 1024, &MockChunkManager{}, flushFunc, 0)
+	parser, err = NewBinlogParser(sampleSchema(), 2, 1024, &MockChunkManager{}, flushFunc, 0, 0)
 	assert.NotNil(t, parser)
 	assert.Nil(t, err)
 }
@@ -116,7 +116,7 @@ func Test_BinlogParserConstructHolders(t *testing.T) {
 		"backup/bak1/data/delta_log/435978159196147009/435978159196147010/435978159261483009/434574382554415105",
 	}
 
-	parser, err := NewBinlogParser(sampleSchema(), 2, 1024, chunkManager, flushFunc, 0)
+	parser, err := NewBinlogParser(sampleSchema(), 2, 1024, chunkManager, flushFunc, 0, 0)
 	assert.NotNil(t, parser)
 	assert.Nil(t, err)
 
@@ -174,7 +174,7 @@ func Test_BinlogParserConstructHoldersFailed(t *testing.T) {
 		listResult: make(map[string][]string),
 	}
 
-	parser, err := NewBinlogParser(sampleSchema(), 2, 1024, chunkManager, flushFunc, 0)
+	parser, err := NewBinlogParser(sampleSchema(), 2, 1024, chunkManager, flushFunc, 0, 0)
 	assert.NotNil(t, parser)
 	assert.Nil(t, err)
 
@@ -218,7 +218,7 @@ func Test_BinlogParserParseFilesFailed(t *testing.T) {
 		return nil
 	}
 
-	parser, err := NewBinlogParser(sampleSchema(), 2, 1024, &MockChunkManager{}, flushFunc, 0)
+	parser, err := NewBinlogParser(sampleSchema(), 2, 1024, &MockChunkManager{}, flushFunc, 0, 0)
 	assert.NotNil(t, parser)
 	assert.Nil(t, err)
 
@@ -251,7 +251,7 @@ func Test_BinlogParserParse(t *testing.T) {
 		},
 	}
 
-	parser, err := NewBinlogParser(schema, 2, 1024, chunkManager, flushFunc, 0)
+	parser, err := NewBinlogParser(schema, 2, 1024, chunkManager, flushFunc, 0, 0)
 	assert.NotNil(t, parser)
 	assert.Nil(t, err)
 

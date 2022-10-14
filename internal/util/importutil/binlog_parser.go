@@ -36,10 +36,9 @@ type BinlogParser struct {
 	chunkManager     storage.ChunkManager       // storage interfaces to browse/read the files
 	callFlushFunc    ImportFlushFunc            // call back function to flush segment
 
-	// a timestamp to define the end point of restore, data after this point will be ignored
-	// set this value to 0, all the data will be ignored
-	// set this value to math.MaxUint64, all the data will be imported
-	tsEndPoint uint64
+	// timestamps to filter data, only data between tsStartPoint and tsEndPoint will be imported
+	tsStartPoint uint64
+	tsEndPoint   uint64
 }
 
 func NewBinlogParser(collectionSchema *schemapb.CollectionSchema,
@@ -47,6 +46,7 @@ func NewBinlogParser(collectionSchema *schemapb.CollectionSchema,
 	segmentSize int64,
 	chunkManager storage.ChunkManager,
 	flushFunc ImportFlushFunc,
+	tsStartPoint uint64,
 	tsEndPoint uint64) (*BinlogParser, error) {
 	if collectionSchema == nil {
 		log.Error("Binlog parser: collection schema is nil")
@@ -69,6 +69,7 @@ func NewBinlogParser(collectionSchema *schemapb.CollectionSchema,
 		segmentSize:      segmentSize,
 		chunkManager:     chunkManager,
 		callFlushFunc:    flushFunc,
+		tsStartPoint:     tsStartPoint,
 		tsEndPoint:       tsEndPoint,
 	}
 
@@ -196,7 +197,7 @@ func (p *BinlogParser) parseSegmentFiles(segmentHolder *SegmentFilesHolder) erro
 	}
 
 	adapter, err := NewBinlogAdapter(p.collectionSchema, p.shardNum, p.segmentSize,
-		MaxTotalSizeInMemory, p.chunkManager, p.callFlushFunc, p.tsEndPoint)
+		MaxTotalSizeInMemory, p.chunkManager, p.callFlushFunc, p.tsStartPoint, p.tsEndPoint)
 	if err != nil {
 		log.Error("Binlog parser: failed to create binlog adapter", zap.Error(err))
 		return err

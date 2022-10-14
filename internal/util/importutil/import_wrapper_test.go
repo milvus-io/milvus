@@ -22,6 +22,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"strconv"
 	"testing"
 	"time"
@@ -225,7 +226,7 @@ func Test_ImportWrapperRowBased(t *testing.T) {
 	wrapper := NewImportWrapper(ctx, sampleSchema(), 2, 1, idAllocator, cm, flushFunc, importResult, reportFunc)
 	files := make([]string, 0)
 	files = append(files, filePath)
-	err = wrapper.Import(files, true, false)
+	err = wrapper.Import(files, true, false, 0, math.MaxUint64)
 	assert.Nil(t, err)
 	assert.Equal(t, 5, rowCount)
 	assert.Equal(t, commonpb.ImportState_ImportPersisted, importResult.State)
@@ -245,14 +246,14 @@ func Test_ImportWrapperRowBased(t *testing.T) {
 	wrapper = NewImportWrapper(ctx, sampleSchema(), 2, 1, idAllocator, cm, flushFunc, importResult, reportFunc)
 	files = make([]string, 0)
 	files = append(files, filePath)
-	err = wrapper.Import(files, true, false)
+	err = wrapper.Import(files, true, false, 0, math.MaxUint64)
 	assert.NotNil(t, err)
 	assert.NotEqual(t, commonpb.ImportState_ImportPersisted, importResult.State)
 
 	// file doesn't exist
 	files = make([]string, 0)
 	files = append(files, "/dummy/dummy.json")
-	err = wrapper.Import(files, true, false)
+	err = wrapper.Import(files, true, false, 0, math.MaxUint64)
 	assert.NotNil(t, err)
 }
 
@@ -327,7 +328,7 @@ func Test_ImportWrapperColumnBased_json(t *testing.T) {
 	wrapper := NewImportWrapper(ctx, sampleSchema(), 2, 1, idAllocator, cm, flushFunc, importResult, reportFunc)
 	files := make([]string, 0)
 	files = append(files, filePath)
-	err = wrapper.Import(files, false, false)
+	err = wrapper.Import(files, false, false, 0, math.MaxUint64)
 	assert.Nil(t, err)
 	assert.Equal(t, 5, rowCount)
 	assert.Equal(t, commonpb.ImportState_ImportPersisted, importResult.State)
@@ -345,14 +346,14 @@ func Test_ImportWrapperColumnBased_json(t *testing.T) {
 	wrapper = NewImportWrapper(ctx, sampleSchema(), 2, 1, idAllocator, cm, flushFunc, importResult, reportFunc)
 	files = make([]string, 0)
 	files = append(files, filePath)
-	err = wrapper.Import(files, false, false)
+	err = wrapper.Import(files, false, false, 0, math.MaxUint64)
 	assert.NotNil(t, err)
 	assert.NotEqual(t, commonpb.ImportState_ImportPersisted, importResult.State)
 
 	// file doesn't exist
 	files = make([]string, 0)
 	files = append(files, "/dummy/dummy.json")
-	err = wrapper.Import(files, false, false)
+	err = wrapper.Import(files, false, false, 0, math.MaxUint64)
 	assert.NotNil(t, err)
 }
 
@@ -417,7 +418,7 @@ func Test_ImportWrapperColumnBased_StringKey(t *testing.T) {
 	wrapper := NewImportWrapper(ctx, strKeySchema(), 2, 1, idAllocator, cm, flushFunc, importResult, reportFunc)
 	files := make([]string, 0)
 	files = append(files, filePath)
-	err = wrapper.Import(files, false, false)
+	err = wrapper.Import(files, false, false, 0, math.MaxUint64)
 	assert.Nil(t, err)
 	assert.Equal(t, 5, rowCount)
 	assert.Equal(t, commonpb.ImportState_ImportPersisted, importResult.State)
@@ -502,7 +503,7 @@ func Test_ImportWrapperColumnBased_numpy(t *testing.T) {
 	schema.Fields[4].AutoID = true
 	wrapper := NewImportWrapper(ctx, schema, 2, 1, idAllocator, cm, flushFunc, importResult, reportFunc)
 
-	err = wrapper.Import(files, false, false)
+	err = wrapper.Import(files, false, false, 0, math.MaxUint64)
 	assert.Nil(t, err)
 	assert.Equal(t, 5, rowCount)
 	assert.Equal(t, commonpb.ImportState_ImportPersisted, importResult.State)
@@ -520,14 +521,14 @@ func Test_ImportWrapperColumnBased_numpy(t *testing.T) {
 	wrapper = NewImportWrapper(ctx, sampleSchema(), 2, 1, idAllocator, cm, flushFunc, importResult, reportFunc)
 	files = make([]string, 0)
 	files = append(files, filePath)
-	err = wrapper.Import(files, false, false)
+	err = wrapper.Import(files, false, false, 0, math.MaxUint64)
 	assert.NotNil(t, err)
 	assert.NotEqual(t, commonpb.ImportState_ImportPersisted, importResult.State)
 
 	// file doesn't exist
 	files = make([]string, 0)
 	files = append(files, "/dummy/dummy.json")
-	err = wrapper.Import(files, false, false)
+	err = wrapper.Import(files, false, false, 0, math.MaxUint64)
 	assert.NotNil(t, err)
 }
 
@@ -655,7 +656,7 @@ func Test_ImportWrapperRowBased_perf(t *testing.T) {
 	wrapper := NewImportWrapper(ctx, schema, int32(shardNum), int64(segmentSize), idAllocator, cm, flushFunc, importResult, reportFunc)
 	files := make([]string, 0)
 	files = append(files, filePath)
-	err = wrapper.Import(files, true, false)
+	err = wrapper.Import(files, true, false, 0, math.MaxUint64)
 	assert.Nil(t, err)
 	assert.Equal(t, rowCount, parseCount)
 
@@ -768,7 +769,7 @@ func Test_ImportWrapperColumnBased_perf(t *testing.T) {
 	files := make([]string, 0)
 	files = append(files, filePath1)
 	files = append(files, filePath2)
-	err = wrapper.Import(files, false, false)
+	err = wrapper.Import(files, false, false, 0, math.MaxUint64)
 	assert.Nil(t, err)
 	assert.Equal(t, rowCount, parseCount)
 
@@ -914,7 +915,7 @@ func Test_ImportWrapperReportFailRowBased(t *testing.T) {
 	wrapper.reportFunc = func(res *rootcoordpb.ImportResult) error {
 		return errors.New("mock error")
 	}
-	err = wrapper.Import(files, true, false)
+	err = wrapper.Import(files, true, false, 0, math.MaxUint64)
 	assert.NotNil(t, err)
 	assert.Equal(t, 5, rowCount)
 	assert.Equal(t, commonpb.ImportState_ImportPersisted, importResult.State)
@@ -995,7 +996,7 @@ func Test_ImportWrapperReportFailColumnBased_json(t *testing.T) {
 	wrapper.reportFunc = func(res *rootcoordpb.ImportResult) error {
 		return errors.New("mock error")
 	}
-	err = wrapper.Import(files, false, false)
+	err = wrapper.Import(files, false, false, 0, math.MaxUint64)
 	assert.NotNil(t, err)
 	assert.Equal(t, 5, rowCount)
 	assert.Equal(t, commonpb.ImportState_ImportPersisted, importResult.State)
@@ -1083,7 +1084,7 @@ func Test_ImportWrapperReportFailColumnBased_numpy(t *testing.T) {
 	wrapper.reportFunc = func(res *rootcoordpb.ImportResult) error {
 		return errors.New("mock error")
 	}
-	err = wrapper.Import(files, false, false)
+	err = wrapper.Import(files, false, false, 0, math.MaxUint64)
 	assert.NotNil(t, err)
 	assert.Equal(t, 5, rowCount)
 	assert.Equal(t, commonpb.ImportState_ImportPersisted, importResult.State)
@@ -1150,7 +1151,7 @@ func Test_ImportWrapperDoBinlogImport(t *testing.T) {
 	wrapper.chunkManager = nil
 
 	// failed to create new BinlogParser
-	err := wrapper.doBinlogImport(paths, 0)
+	err := wrapper.doBinlogImport(paths, 0, 0)
 	assert.NotNil(t, err)
 
 	cm.listErr = errors.New("error")
@@ -1160,11 +1161,11 @@ func Test_ImportWrapperDoBinlogImport(t *testing.T) {
 	}
 
 	// failed to call parser.Parse()
-	err = wrapper.doBinlogImport(paths, 0)
+	err = wrapper.doBinlogImport(paths, 0, 0)
 	assert.NotNil(t, err)
 
 	// Import() failed
-	err = wrapper.Import(paths, false, false)
+	err = wrapper.Import(paths, false, false, 0, math.MaxUint64)
 	assert.NotNil(t, err)
 
 	cm.listErr = nil
@@ -1184,6 +1185,6 @@ func Test_ImportWrapperDoBinlogImport(t *testing.T) {
 	}
 
 	// succeed
-	err = wrapper.doBinlogImport(paths, 0)
+	err = wrapper.doBinlogImport(paths, 0, math.MaxUint64)
 	assert.Nil(t, err)
 }

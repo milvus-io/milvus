@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/crypto"
 	"github.com/milvus-io/milvus/internal/util/errorutil"
+	"github.com/milvus-io/milvus/internal/util/importutil"
 	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
@@ -4002,6 +4003,13 @@ func (node *Proxy) Import(ctx context.Context, req *milvuspb.ImportRequest) (*mi
 	}
 	if !node.checkHealthy() {
 		resp.Status = unhealthyStatus()
+		return resp, nil
+	}
+	err := importutil.ValidateOptions(req.GetOptions())
+	if err != nil {
+		log.Error("failed to execute bulk load request", zap.Error(err))
+		resp.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		resp.Status.Reason = "request options is not illegal " + err.Error()
 		return resp, nil
 	}
 	// Call rootCoord to finish import.

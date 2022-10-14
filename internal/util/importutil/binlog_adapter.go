@@ -54,10 +54,9 @@ type BinlogAdapter struct {
 	primaryKey       storage.FieldID            // id of primary key
 	primaryType      schemapb.DataType          // data type of primary key
 
-	// a timestamp to define the end point of restore, data after this point will be ignored
-	// set this value to 0, all the data will be ignored
-	// set this value to math.MaxUint64, all the data will be imported
-	tsEndPoint uint64
+	// timestamps to filter data, only data between tsStartPoint and tsEndPoint will be imported
+	tsStartPoint uint64
+	tsEndPoint   uint64
 }
 
 func NewBinlogAdapter(collectionSchema *schemapb.CollectionSchema,
@@ -66,6 +65,7 @@ func NewBinlogAdapter(collectionSchema *schemapb.CollectionSchema,
 	maxTotalSize int64,
 	chunkManager storage.ChunkManager,
 	flushFunc ImportFlushFunc,
+	tsStartPoint uint64,
 	tsEndPoint uint64) (*BinlogAdapter, error) {
 	if collectionSchema == nil {
 		log.Error("Binlog adapter: collection schema is nil")
@@ -89,6 +89,7 @@ func NewBinlogAdapter(collectionSchema *schemapb.CollectionSchema,
 		shardNum:         shardNum,
 		segmentSize:      segmentSize,
 		maxTotalSize:     maxTotalSize,
+		tsStartPoint:     tsStartPoint,
 		tsEndPoint:       tsEndPoint,
 	}
 
@@ -345,8 +346,8 @@ func (p *BinlogAdapter) decodeDeleteLogs(segmentHolder *SegmentFilesHolder) ([]*
 			return nil, err
 		}
 
-		// ignore deletions whose timestamp is larger than the tsEndPoint
-		if deleteLog.Ts <= p.tsEndPoint {
+		// accept deletions whose timestamp is in [tsStartPoint, tsEndPoint)
+		if deleteLog.Ts >= p.tsStartPoint && deleteLog.Ts < p.tsEndPoint {
 			deleteLogs = append(deleteLogs, deleteLog)
 		}
 	}
@@ -496,7 +497,7 @@ func (p *BinlogAdapter) readPrimaryKeys(logPath string) ([]int64, []string, erro
 // This method generate a shard id list by primary key(int64) list and deleted list.
 // For example, an insert log has 10 rows, the no.3 and no.7 has been deleted, shardNum=2, the shardList could be:
 // [0, 1, -1, 1, 0, 1, -1, 1, 0, 1]
-// Compare timestampList with tsEndPoint to skip some rows.
+// Compare timestampList with tsStartPoint and tsEndPoint to skip some rows.
 func (p *BinlogAdapter) getShardingListByPrimaryInt64(primaryKeys []int64,
 	timestampList []int64,
 	memoryData []map[storage.FieldID]storage.FieldData,
@@ -513,10 +514,10 @@ func (p *BinlogAdapter) getShardingListByPrimaryInt64(primaryKeys []int64,
 	excluded := 0
 	shardList := make([]int32, 0, len(primaryKeys))
 	for i, key := range primaryKeys {
-		// if this entity's timestamp is greater than the tsEndPoint, set shardID = -1 to skip this entity
+		// if this entity's timestamp is out of [tsStartPoint, tsEndPoint), set shardID = -1 to skip this entity
 		// timestamp is stored as int64 type in log file, actually it is uint64, compare with uint64
 		ts := timestampList[i]
-		if uint64(ts) > p.tsEndPoint {
+		if uint64(ts) >= p.tsEndPoint || uint64(ts) < p.tsStartPoint {
 			shardList = append(shardList, -1)
 			excluded++
 			continue
@@ -565,10 +566,10 @@ func (p *BinlogAdapter) getShardingListByPrimaryVarchar(primaryKeys []string,
 	excluded := 0
 	shardList := make([]int32, 0, len(primaryKeys))
 	for i, key := range primaryKeys {
-		// if this entity's timestamp is greater than the tsEndPoint, set shardID = -1 to skip this entity
+		// if this entity's timestamp is out of [tsStartPoint, tsEndPoint), set shardID = -1 to skip this entity
 		// timestamp is stored as int64 type in log file, actually it is uint64, compare with uint64
 		ts := timestampList[i]
-		if uint64(ts) > p.tsEndPoint {
+		if uint64(ts) >= p.tsEndPoint || uint64(ts) < p.tsStartPoint {
 			shardList = append(shardList, -1)
 			excluded++
 			continue

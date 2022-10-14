@@ -20,7 +20,6 @@ import (
 	"bufio"
 	"context"
 	"errors"
-	"math"
 	"path"
 	"runtime/debug"
 	"strconv"
@@ -217,13 +216,17 @@ func (p *ImportWrapper) fileValidation(filePaths []string, rowBased bool) error 
 // import process entry
 // filePath and rowBased are from ImportTask
 // if onlyValidate is true, this process only do validation, no data generated, callFlushFunc will not be called
-func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate bool) error {
-	log.Info("import wrapper: filePaths", zap.Any("filePaths", filePaths))
+func (p *ImportWrapper) Import(filePaths []string, rowBased bool, onlyValidate bool, tsStartPoint uint64, tsEndPoint uint64) error {
+	log.Info("import wrapper: filePaths",
+		zap.Strings("filePaths", filePaths),
+		zap.Bool("rowBased", rowBased),
+		zap.Bool("onlyValidate", onlyValidate),
+		zap.Uint64(StartTs, tsStartPoint),
+		zap.Uint64(EndTs, tsEndPoint))
 	// data restore function to import milvus native binlog files(for backup/restore tools)
 	// the backup/restore tool provide two paths for a partition, the first path is binlog path, the second is deltalog path
 	if p.isBinlogImport(filePaths) {
-		// TODO: handle the timestamp end point passed from client side, currently use math.MaxUint64
-		return p.doBinlogImport(filePaths, math.MaxUint64)
+		return p.doBinlogImport(filePaths, tsStartPoint, tsEndPoint)
 	}
 
 	// normal logic for import general data files
@@ -378,12 +381,12 @@ func (p *ImportWrapper) isBinlogImport(filePaths []string) bool {
 	return true
 }
 
-func (p *ImportWrapper) doBinlogImport(filePaths []string, tsEndPoint uint64) error {
+func (p *ImportWrapper) doBinlogImport(filePaths []string, tsStartPoint uint64, tsEndPoint uint64) error {
 	flushFunc := func(fields map[storage.FieldID]storage.FieldData, shardID int) error {
 		p.printFieldsDataInfo(fields, "import wrapper: prepare to flush binlog data", filePaths)
 		return p.callFlushFunc(fields, shardID)
 	}
-	parser, err := NewBinlogParser(p.collectionSchema, p.shardNum, p.segmentSize, p.chunkManager, flushFunc, tsEndPoint)
+	parser, err := NewBinlogParser(p.collectionSchema, p.shardNum, p.segmentSize, p.chunkManager, flushFunc, tsStartPoint, tsEndPoint)
 	if err != nil {
 		return err
 	}

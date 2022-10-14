@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"math/rand"
 	"os"
 	"path"
@@ -51,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/importutil"
 	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/metautil"
@@ -1047,11 +1049,29 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 		}, nil
 	}
 
+	var tsStart uint64
+	var tsEnd uint64
+	importOptions := funcutil.KeyValuePair2Map(req.GetImportTask().GetInfos())
+	value, ok := importOptions[importutil.StartTs]
+	if ok {
+		pTs, _ := strconv.ParseInt(value, 10, 64)
+		tsStart = tsoutil.ComposeTS(pTs, 0)
+	} else {
+		tsStart = 0
+	}
+	value, ok = importOptions[importutil.StartTs]
+	if ok {
+		pTs, _ := strconv.ParseInt(value, 10, 64)
+		tsEnd = tsoutil.ComposeTS(pTs, 0)
+	} else {
+		tsEnd = math.MaxUint64
+	}
+
 	// parse files and generate segments
 	segmentSize := int64(Params.DataCoordCfg.SegmentMaxSize) * 1024 * 1024
 	importWrapper := importutil.NewImportWrapper(newCtx, colInfo.GetSchema(), colInfo.GetShardsNum(), segmentSize, node.rowIDAllocator, node.chunkManager,
 		importFlushReqFunc(node, req, importResult, colInfo.GetSchema(), ts), importResult, reportFunc)
-	err = importWrapper.Import(req.GetImportTask().GetFiles(), req.GetImportTask().GetRowBased(), false)
+	err = importWrapper.Import(req.GetImportTask().GetFiles(), req.GetImportTask().GetRowBased(), false, tsStart, tsEnd)
 	if err != nil {
 		log.Warn("import wrapper failed to parse import request",
 			zap.Int64("task ID", req.GetImportTask().GetTaskId()),
