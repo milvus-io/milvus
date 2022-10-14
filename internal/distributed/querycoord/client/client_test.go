@@ -21,6 +21,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/mock"
 	"google.golang.org/grpc"
 
@@ -50,7 +51,7 @@ func Test_NewClient(t *testing.T) {
 	assert.Nil(t, err)
 
 	checkFunc := func(retNotNil bool) {
-		retCheck := func(notNil bool, ret interface{}, err error) {
+		retCheck := func(notNil bool, ret any, err error) {
 			if notNil {
 				assert.NotNil(t, ret)
 				assert.Nil(t, err)
@@ -115,22 +116,22 @@ func Test_NewClient(t *testing.T) {
 		retCheck(retNotNil, r19, err)
 	}
 
-	client.grpcClient = &mock.GRPCClientBase{
+	client.grpcClient = &mock.GRPCClientBase[querypb.QueryCoordClient]{
 		GetGrpcClientErr: errors.New("dummy"),
 	}
 
-	newFunc1 := func(cc *grpc.ClientConn) interface{} {
+	newFunc1 := func(cc *grpc.ClientConn) querypb.QueryCoordClient {
 		return &mock.GrpcQueryCoordClient{Err: nil}
 	}
 	client.grpcClient.SetNewGrpcClientFunc(newFunc1)
 
 	checkFunc(false)
 
-	client.grpcClient = &mock.GRPCClientBase{
+	client.grpcClient = &mock.GRPCClientBase[querypb.QueryCoordClient]{
 		GetGrpcClientErr: nil,
 	}
 
-	newFunc2 := func(cc *grpc.ClientConn) interface{} {
+	newFunc2 := func(cc *grpc.ClientConn) querypb.QueryCoordClient {
 		return &mock.GrpcQueryCoordClient{Err: errors.New("dummy")}
 	}
 
@@ -138,11 +139,11 @@ func Test_NewClient(t *testing.T) {
 
 	checkFunc(false)
 
-	client.grpcClient = &mock.GRPCClientBase{
+	client.grpcClient = &mock.GRPCClientBase[querypb.QueryCoordClient]{
 		GetGrpcClientErr: nil,
 	}
 
-	newFunc3 := func(cc *grpc.ClientConn) interface{} {
+	newFunc3 := func(cc *grpc.ClientConn) querypb.QueryCoordClient {
 		return &mock.GrpcQueryCoordClient{Err: nil}
 	}
 	client.grpcClient.SetNewGrpcClientFunc(newFunc3)

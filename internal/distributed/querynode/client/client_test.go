@@ -21,6 +21,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/mock"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
@@ -50,7 +51,7 @@ func Test_NewClient(t *testing.T) {
 	ctx, cancel := context.WithCancel(ctx)
 
 	checkFunc := func(retNotNil bool) {
-		retCheck := func(notNil bool, ret interface{}, err error) {
+		retCheck := func(notNil bool, ret any, err error) {
 			if notNil {
 				assert.NotNil(t, ret)
 				assert.Nil(t, err)
@@ -106,22 +107,22 @@ func Test_NewClient(t *testing.T) {
 		retCheck(retNotNil, r18, err)
 	}
 
-	client.grpcClient = &mock.GRPCClientBase{
+	client.grpcClient = &mock.GRPCClientBase[querypb.QueryNodeClient]{
 		GetGrpcClientErr: errors.New("dummy"),
 	}
 
-	newFunc1 := func(cc *grpc.ClientConn) interface{} {
+	newFunc1 := func(cc *grpc.ClientConn) querypb.QueryNodeClient {
 		return &mock.GrpcQueryNodeClient{Err: nil}
 	}
 	client.grpcClient.SetNewGrpcClientFunc(newFunc1)
 
 	checkFunc(false)
 
-	client.grpcClient = &mock.GRPCClientBase{
+	client.grpcClient = &mock.GRPCClientBase[querypb.QueryNodeClient]{
 		GetGrpcClientErr: nil,
 	}
 
-	newFunc2 := func(cc *grpc.ClientConn) interface{} {
+	newFunc2 := func(cc *grpc.ClientConn) querypb.QueryNodeClient {
 		return &mock.GrpcQueryNodeClient{Err: errors.New("dummy")}
 	}
 
@@ -129,11 +130,11 @@ func Test_NewClient(t *testing.T) {
 
 	checkFunc(false)
 
-	client.grpcClient = &mock.GRPCClientBase{
+	client.grpcClient = &mock.GRPCClientBase[querypb.QueryNodeClient]{
 		GetGrpcClientErr: nil,
 	}
 
-	newFunc3 := func(cc *grpc.ClientConn) interface{} {
+	newFunc3 := func(cc *grpc.ClientConn) querypb.QueryNodeClient {
 		return &mock.GrpcQueryNodeClient{Err: nil}
 	}
 	client.grpcClient.SetNewGrpcClientFunc(newFunc3)
@@ -141,7 +142,7 @@ func Test_NewClient(t *testing.T) {
 	checkFunc(true)
 
 	// ctx canceled
-	client.grpcClient = &mock.GRPCClientBase{
+	client.grpcClient = &mock.GRPCClientBase[querypb.QueryNodeClient]{
 		GetGrpcClientErr: nil,
 	}
 	client.grpcClient.SetNewGrpcClientFunc(newFunc1)

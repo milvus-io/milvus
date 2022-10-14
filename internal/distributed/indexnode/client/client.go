@@ -36,7 +36,7 @@ var ClientParams paramtable.GrpcClientConfig
 
 // Client is the grpc client of IndexNode.
 type Client struct {
-	grpcClient grpcclient.GrpcClient
+	grpcClient grpcclient.GrpcClient[indexpb.IndexNodeClient]
 	addr       string
 }
 
@@ -48,7 +48,7 @@ func NewClient(ctx context.Context, addr string, encryption bool) (*Client, erro
 	ClientParams.InitOnce(typeutil.IndexNodeRole)
 	client := &Client{
 		addr: addr,
-		grpcClient: &grpcclient.ClientBase{
+		grpcClient: &grpcclient.ClientBase[indexpb.IndexNodeClient]{
 			ClientMaxRecvSize:      ClientParams.ClientMaxRecvSize,
 			ClientMaxSendSize:      ClientParams.ClientMaxSendSize,
 			DialTimeout:            ClientParams.DialTimeout,
@@ -90,7 +90,7 @@ func (c *Client) Register() error {
 	return nil
 }
 
-func (c *Client) newGrpcClient(cc *grpc.ClientConn) interface{} {
+func (c *Client) newGrpcClient(cc *grpc.ClientConn) indexpb.IndexNodeClient {
 	return indexpb.NewIndexNodeClient(cc)
 }
 
@@ -100,11 +100,11 @@ func (c *Client) getAddr() (string, error) {
 
 // GetComponentStates gets the component states of IndexNode.
 func (c *Client) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client indexpb.IndexNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(indexpb.IndexNodeClient).GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
+		return client.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -113,11 +113,11 @@ func (c *Client) GetComponentStates(ctx context.Context) (*milvuspb.ComponentSta
 }
 
 func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client indexpb.IndexNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(indexpb.IndexNodeClient).GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
+		return client.GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -127,11 +127,11 @@ func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 
 // CreateJob sends the build index request to IndexNode.
 func (c *Client) CreateJob(ctx context.Context, req *indexpb.CreateJobRequest) (*commonpb.Status, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client indexpb.IndexNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(indexpb.IndexNodeClient).CreateJob(ctx, req)
+		return client.CreateJob(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -141,11 +141,11 @@ func (c *Client) CreateJob(ctx context.Context, req *indexpb.CreateJobRequest) (
 
 // QueryJobs query the task info of the index task.
 func (c *Client) QueryJobs(ctx context.Context, req *indexpb.QueryJobsRequest) (*indexpb.QueryJobsResponse, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client indexpb.IndexNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(indexpb.IndexNodeClient).QueryJobs(ctx, req)
+		return client.QueryJobs(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -155,11 +155,11 @@ func (c *Client) QueryJobs(ctx context.Context, req *indexpb.QueryJobsRequest) (
 
 // DropJobs query the task info of the index task.
 func (c *Client) DropJobs(ctx context.Context, req *indexpb.DropJobsRequest) (*commonpb.Status, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client indexpb.IndexNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(indexpb.IndexNodeClient).DropJobs(ctx, req)
+		return client.DropJobs(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -169,11 +169,11 @@ func (c *Client) DropJobs(ctx context.Context, req *indexpb.DropJobsRequest) (*c
 
 // GetJobStats query the task info of the index task.
 func (c *Client) GetJobStats(ctx context.Context, req *indexpb.GetJobStatsRequest) (*indexpb.GetJobStatsResponse, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client indexpb.IndexNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(indexpb.IndexNodeClient).GetJobStats(ctx, req)
+		return client.GetJobStats(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -183,11 +183,11 @@ func (c *Client) GetJobStats(ctx context.Context, req *indexpb.GetJobStatsReques
 
 // ShowConfigurations gets specified configurations para of IndexNode
 func (c *Client) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client indexpb.IndexNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(indexpb.IndexNodeClient).ShowConfigurations(ctx, req)
+		return client.ShowConfigurations(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -198,11 +198,11 @@ func (c *Client) ShowConfigurations(ctx context.Context, req *internalpb.ShowCon
 
 // GetMetrics gets the metrics info of IndexNode.
 func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client indexpb.IndexNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(indexpb.IndexNodeClient).GetMetrics(ctx, req)
+		return client.GetMetrics(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err

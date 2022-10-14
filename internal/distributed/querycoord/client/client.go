@@ -39,7 +39,7 @@ var ClientParams paramtable.GrpcClientConfig
 
 // Client is the grpc client of QueryCoord.
 type Client struct {
-	grpcClient grpcclient.GrpcClient
+	grpcClient grpcclient.GrpcClient[querypb.QueryCoordClient]
 	sess       *sessionutil.Session
 }
 
@@ -53,7 +53,7 @@ func NewClient(ctx context.Context, metaRoot string, etcdCli *clientv3.Client) (
 	}
 	ClientParams.InitOnce(typeutil.QueryCoordRole)
 	client := &Client{
-		grpcClient: &grpcclient.ClientBase{
+		grpcClient: &grpcclient.ClientBase[querypb.QueryCoordClient]{
 			ClientMaxRecvSize:      ClientParams.ClientMaxRecvSize,
 			ClientMaxSendSize:      ClientParams.ClientMaxSendSize,
 			DialTimeout:            ClientParams.DialTimeout,
@@ -94,7 +94,7 @@ func (c *Client) getQueryCoordAddr() (string, error) {
 	return ms.Address, nil
 }
 
-func (c *Client) newGrpcClient(cc *grpc.ClientConn) interface{} {
+func (c *Client) newGrpcClient(cc *grpc.ClientConn) querypb.QueryCoordClient {
 	return querypb.NewQueryCoordClient(cc)
 }
 
@@ -115,11 +115,11 @@ func (c *Client) Register() error {
 
 // GetComponentStates gets the component states of QueryCoord.
 func (c *Client) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(querypb.QueryCoordClient).GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
+		return client.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -129,11 +129,11 @@ func (c *Client) GetComponentStates(ctx context.Context) (*milvuspb.ComponentSta
 
 // GetTimeTickChannel gets the time tick channel of QueryCoord.
 func (c *Client) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(querypb.QueryCoordClient).GetTimeTickChannel(ctx, &internalpb.GetTimeTickChannelRequest{})
+		return client.GetTimeTickChannel(ctx, &internalpb.GetTimeTickChannelRequest{})
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -143,11 +143,11 @@ func (c *Client) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringRespon
 
 // GetStatisticsChannel gets the statistics channel of QueryCoord.
 func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(querypb.QueryCoordClient).GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
+		return client.GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -157,11 +157,11 @@ func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 
 // ShowCollections shows the collections in the QueryCoord.
 func (c *Client) ShowCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(querypb.QueryCoordClient).ShowCollections(ctx, req)
+		return client.ShowCollections(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -171,11 +171,11 @@ func (c *Client) ShowCollections(ctx context.Context, req *querypb.ShowCollectio
 
 // LoadCollection loads the data of the specified collections in the QueryCoord.
 func (c *Client) LoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest) (*commonpb.Status, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(querypb.QueryCoordClient).LoadCollection(ctx, req)
+		return client.LoadCollection(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -185,11 +185,11 @@ func (c *Client) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 
 // ReleaseCollection release the data of the specified collections in the QueryCoord.
 func (c *Client) ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(querypb.QueryCoordClient).ReleaseCollection(ctx, req)
+		return client.ReleaseCollection(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -199,11 +199,11 @@ func (c *Client) ReleaseCollection(ctx context.Context, req *querypb.ReleaseColl
 
 // ShowPartitions shows the partitions in the QueryCoord.
 func (c *Client) ShowPartitions(ctx context.Context, req *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(querypb.QueryCoordClient).ShowPartitions(ctx, req)
+		return client.ShowPartitions(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -213,11 +213,11 @@ func (c *Client) ShowPartitions(ctx context.Context, req *querypb.ShowPartitions
 
 // LoadPartitions loads the data of the specified partitions in the QueryCoord.
 func (c *Client) LoadPartitions(ctx context.Context, req *querypb.LoadPartitionsRequest) (*commonpb.Status, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(querypb.QueryCoordClient).LoadPartitions(ctx, req)
+		return client.LoadPartitions(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -227,11 +227,11 @@ func (c *Client) LoadPartitions(ctx context.Context, req *querypb.LoadPartitions
 
 // ReleasePartitions release the data of the specified partitions in the QueryCoord.
 func (c *Client) ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(querypb.QueryCoordClient).ReleasePartitions(ctx, req)
+		return client.ReleasePartitions(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -241,11 +241,11 @@ func (c *Client) ReleasePartitions(ctx context.Context, req *querypb.ReleasePart
 
 // GetPartitionStates gets the states of the specified partition.
 func (c *Client) GetPartitionStates(ctx context.Context, req *querypb.GetPartitionStatesRequest) (*querypb.GetPartitionStatesResponse, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(querypb.QueryCoordClient).GetPartitionStates(ctx, req)
+		return client.GetPartitionStates(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -255,11 +255,11 @@ func (c *Client) GetPartitionStates(ctx context.Context, req *querypb.GetPartiti
 
 // GetSegmentInfo gets the information of the specified segment from QueryCoord.
 func (c *Client) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(querypb.QueryCoordClient).GetSegmentInfo(ctx, req)
+		return client.GetSegmentInfo(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -269,11 +269,11 @@ func (c *Client) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfo
 
 // LoadBalance migrate the sealed segments on the source node to the dst nodes.
 func (c *Client) LoadBalance(ctx context.Context, req *querypb.LoadBalanceRequest) (*commonpb.Status, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(querypb.QueryCoordClient).LoadBalance(ctx, req)
+		return client.LoadBalance(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -283,11 +283,11 @@ func (c *Client) LoadBalance(ctx context.Context, req *querypb.LoadBalanceReques
 
 // ShowConfigurations gets specified configurations para of QueryCoord
 func (c *Client) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(querypb.QueryCoordClient).ShowConfigurations(ctx, req)
+		return client.ShowConfigurations(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -298,11 +298,11 @@ func (c *Client) ShowConfigurations(ctx context.Context, req *internalpb.ShowCon
 
 // GetMetrics gets the metrics information of QueryCoord.
 func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(querypb.QueryCoordClient).GetMetrics(ctx, req)
+		return client.GetMetrics(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -312,11 +312,11 @@ func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 
 // GetReplicas gets the replicas of a certain collection.
 func (c *Client) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasRequest) (*milvuspb.GetReplicasResponse, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(querypb.QueryCoordClient).GetReplicas(ctx, req)
+		return client.GetReplicas(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -326,11 +326,11 @@ func (c *Client) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasReque
 
 // GetShardLeaders gets the shard leaders of a certain collection.
 func (c *Client) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeadersRequest) (*querypb.GetShardLeadersResponse, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(querypb.QueryCoordClient).GetShardLeaders(ctx, req)
+		return client.GetShardLeaders(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err

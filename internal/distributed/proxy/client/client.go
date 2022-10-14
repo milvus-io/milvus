@@ -35,7 +35,7 @@ var ClientParams paramtable.GrpcClientConfig
 
 // Client is the grpc client for Proxy
 type Client struct {
-	grpcClient grpcclient.GrpcClient
+	grpcClient grpcclient.GrpcClient[proxypb.ProxyClient]
 	addr       string
 }
 
@@ -47,7 +47,7 @@ func NewClient(ctx context.Context, addr string) (*Client, error) {
 	ClientParams.InitOnce(typeutil.ProxyRole)
 	client := &Client{
 		addr: addr,
-		grpcClient: &grpcclient.ClientBase{
+		grpcClient: &grpcclient.ClientBase[proxypb.ProxyClient]{
 			ClientMaxRecvSize:      ClientParams.ClientMaxRecvSize,
 			ClientMaxSendSize:      ClientParams.ClientMaxSendSize,
 			DialTimeout:            ClientParams.DialTimeout,
@@ -71,7 +71,7 @@ func (c *Client) Init() error {
 	return nil
 }
 
-func (c *Client) newGrpcClient(cc *grpc.ClientConn) interface{} {
+func (c *Client) newGrpcClient(cc *grpc.ClientConn) proxypb.ProxyClient {
 	return proxypb.NewProxyClient(cc)
 }
 
@@ -96,11 +96,11 @@ func (c *Client) Register() error {
 
 // GetComponentStates get the component state.
 func (c *Client) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client proxypb.ProxyClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(proxypb.ProxyClient).GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
+		return client.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -110,11 +110,11 @@ func (c *Client) GetComponentStates(ctx context.Context) (*milvuspb.ComponentSta
 
 //GetStatisticsChannel return the statistics channel in string
 func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client proxypb.ProxyClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(proxypb.ProxyClient).GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
+		return client.GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -124,11 +124,11 @@ func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 
 // InvalidateCollectionMetaCache invalidate collection meta cache
 func (c *Client) InvalidateCollectionMetaCache(ctx context.Context, req *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client proxypb.ProxyClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(proxypb.ProxyClient).InvalidateCollectionMetaCache(ctx, req)
+		return client.InvalidateCollectionMetaCache(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -137,11 +137,11 @@ func (c *Client) InvalidateCollectionMetaCache(ctx context.Context, req *proxypb
 }
 
 func (c *Client) InvalidateCredentialCache(ctx context.Context, req *proxypb.InvalidateCredCacheRequest) (*commonpb.Status, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client proxypb.ProxyClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(proxypb.ProxyClient).InvalidateCredentialCache(ctx, req)
+		return client.InvalidateCredentialCache(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -150,11 +150,11 @@ func (c *Client) InvalidateCredentialCache(ctx context.Context, req *proxypb.Inv
 }
 
 func (c *Client) UpdateCredentialCache(ctx context.Context, req *proxypb.UpdateCredCacheRequest) (*commonpb.Status, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client proxypb.ProxyClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(proxypb.ProxyClient).UpdateCredentialCache(ctx, req)
+		return client.UpdateCredentialCache(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -163,11 +163,11 @@ func (c *Client) UpdateCredentialCache(ctx context.Context, req *proxypb.UpdateC
 }
 
 func (c *Client) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client proxypb.ProxyClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(proxypb.ProxyClient).RefreshPolicyInfoCache(ctx, req)
+		return client.RefreshPolicyInfoCache(ctx, req)
 	})
 	if err != nil {
 		return nil, err
@@ -178,11 +178,11 @@ func (c *Client) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.Refres
 // GetProxyMetrics gets the metrics of proxy, it's an internal interface which is different from GetMetrics interface,
 // because it only obtains the metrics of Proxy, not including the topological metrics of Query cluster and Data cluster.
 func (c *Client) GetProxyMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client proxypb.ProxyClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(proxypb.ProxyClient).GetProxyMetrics(ctx, req)
+		return client.GetProxyMetrics(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -192,11 +192,11 @@ func (c *Client) GetProxyMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 
 // SetRates notifies Proxy to limit rates of requests.
 func (c *Client) SetRates(ctx context.Context, req *proxypb.SetRatesRequest) (*commonpb.Status, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client proxypb.ProxyClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(proxypb.ProxyClient).SetRates(ctx, req)
+		return client.SetRates(ctx, req)
 	})
 	if err != nil {
 		return nil, err

@@ -21,6 +21,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/mock"
@@ -48,7 +49,7 @@ func Test_NewClient(t *testing.T) {
 	assert.Nil(t, err)
 
 	checkFunc := func(retNotNil bool) {
-		retCheck := func(notNil bool, ret interface{}, err error) {
+		retCheck := func(notNil bool, ret any, err error) {
 			if notNil {
 				assert.NotNil(t, ret)
 				assert.Nil(t, err)
@@ -151,11 +152,11 @@ func Test_NewClient(t *testing.T) {
 		}
 	}
 
-	client.grpcClient = &mock.GRPCClientBase{
+	client.grpcClient = &mock.GRPCClientBase[datapb.DataCoordClient]{
 		GetGrpcClientErr: errors.New("dummy"),
 	}
 
-	newFunc1 := func(cc *grpc.ClientConn) interface{} {
+	newFunc1 := func(cc *grpc.ClientConn) datapb.DataCoordClient {
 		return &mock.GrpcDataCoordClient{Err: nil}
 	}
 	client.grpcClient.SetNewGrpcClientFunc(newFunc1)
@@ -167,10 +168,10 @@ func Test_NewClient(t *testing.T) {
 	assert.Nil(t, ret)
 	assert.NotNil(t, err)
 
-	client.grpcClient = &mock.GRPCClientBase{
+	client.grpcClient = &mock.GRPCClientBase[datapb.DataCoordClient]{
 		GetGrpcClientErr: nil,
 	}
-	newFunc2 := func(cc *grpc.ClientConn) interface{} {
+	newFunc2 := func(cc *grpc.ClientConn) datapb.DataCoordClient {
 		return &mock.GrpcDataCoordClient{Err: errors.New("dummy")}
 	}
 	client.grpcClient.SetNewGrpcClientFunc(newFunc2)
@@ -181,10 +182,10 @@ func Test_NewClient(t *testing.T) {
 	assert.Nil(t, ret)
 	assert.NotNil(t, err)
 
-	client.grpcClient = &mock.GRPCClientBase{
+	client.grpcClient = &mock.GRPCClientBase[datapb.DataCoordClient]{
 		GetGrpcClientErr: nil,
 	}
-	newFunc3 := func(cc *grpc.ClientConn) interface{} {
+	newFunc3 := func(cc *grpc.ClientConn) datapb.DataCoordClient {
 		return &mock.GrpcDataCoordClient{Err: nil}
 	}
 	client.grpcClient.SetNewGrpcClientFunc(newFunc3)

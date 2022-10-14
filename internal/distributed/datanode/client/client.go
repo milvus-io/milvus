@@ -35,7 +35,7 @@ var ClientParams paramtable.GrpcClientConfig
 
 // Client is the grpc client for DataNode
 type Client struct {
-	grpcClient grpcclient.GrpcClient
+	grpcClient grpcclient.GrpcClient[datapb.DataNodeClient]
 	addr       string
 }
 
@@ -47,7 +47,7 @@ func NewClient(ctx context.Context, addr string) (*Client, error) {
 	ClientParams.InitOnce(typeutil.DataNodeRole)
 	client := &Client{
 		addr: addr,
-		grpcClient: &grpcclient.ClientBase{
+		grpcClient: &grpcclient.ClientBase[datapb.DataNodeClient]{
 			ClientMaxRecvSize:      ClientParams.ClientMaxRecvSize,
 			ClientMaxSendSize:      ClientParams.ClientMaxSendSize,
 			DialTimeout:            ClientParams.DialTimeout,
@@ -89,7 +89,7 @@ func (c *Client) Register() error {
 	return nil
 }
 
-func (c *Client) newGrpcClient(cc *grpc.ClientConn) interface{} {
+func (c *Client) newGrpcClient(cc *grpc.ClientConn) datapb.DataNodeClient {
 	return datapb.NewDataNodeClient(cc)
 }
 
@@ -99,11 +99,11 @@ func (c *Client) getAddr() (string, error) {
 
 // GetComponentStates returns ComponentStates
 func (c *Client) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(datapb.DataNodeClient).GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
+		return client.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -114,11 +114,11 @@ func (c *Client) GetComponentStates(ctx context.Context) (*milvuspb.ComponentSta
 // GetStatisticsChannel return the statistics channel in string
 // Statistics channel contains statistics infos of query nodes, such as segment infos, memory infos
 func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(datapb.DataNodeClient).GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
+		return client.GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -129,11 +129,11 @@ func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 // Deprecated
 // WatchDmChannels create consumers on dmChannels to reveive Incremental data
 func (c *Client) WatchDmChannels(ctx context.Context, req *datapb.WatchDmChannelsRequest) (*commonpb.Status, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(datapb.DataNodeClient).WatchDmChannels(ctx, req)
+		return client.WatchDmChannels(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -150,11 +150,11 @@ func (c *Client) WatchDmChannels(ctx context.Context, req *datapb.WatchDmChannel
 // Return Success code in status and trigers background flush:
 //     Log an info log if a segment is under flushing
 func (c *Client) FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest) (*commonpb.Status, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(datapb.DataNodeClient).FlushSegments(ctx, req)
+		return client.FlushSegments(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -164,11 +164,11 @@ func (c *Client) FlushSegments(ctx context.Context, req *datapb.FlushSegmentsReq
 
 // ShowConfigurations gets specified configurations para of DataNode
 func (c *Client) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(datapb.DataNodeClient).ShowConfigurations(ctx, req)
+		return client.ShowConfigurations(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -179,11 +179,11 @@ func (c *Client) ShowConfigurations(ctx context.Context, req *internalpb.ShowCon
 
 // GetMetrics returns metrics
 func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(datapb.DataNodeClient).GetMetrics(ctx, req)
+		return client.GetMetrics(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -193,11 +193,11 @@ func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 
 // Compaction return compaction by given plan
 func (c *Client) Compaction(ctx context.Context, req *datapb.CompactionPlan) (*commonpb.Status, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(datapb.DataNodeClient).Compaction(ctx, req)
+		return client.Compaction(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -206,11 +206,11 @@ func (c *Client) Compaction(ctx context.Context, req *datapb.CompactionPlan) (*c
 }
 
 func (c *Client) GetCompactionState(ctx context.Context, req *datapb.CompactionStateRequest) (*datapb.CompactionStateResponse, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(datapb.DataNodeClient).GetCompactionState(ctx, req)
+		return client.GetCompactionState(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -220,11 +220,11 @@ func (c *Client) GetCompactionState(ctx context.Context, req *datapb.CompactionS
 
 // Import data files(json, numpy, etc.) on MinIO/S3 storage, read and parse them into sealed segments
 func (c *Client) Import(ctx context.Context, req *datapb.ImportTaskRequest) (*commonpb.Status, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(datapb.DataNodeClient).Import(ctx, req)
+		return client.Import(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -233,11 +233,11 @@ func (c *Client) Import(ctx context.Context, req *datapb.ImportTaskRequest) (*co
 }
 
 func (c *Client) ResendSegmentStats(ctx context.Context, req *datapb.ResendSegmentStatsRequest) (*datapb.ResendSegmentStatsResponse, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(datapb.DataNodeClient).ResendSegmentStats(ctx, req)
+		return client.ResendSegmentStats(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -247,11 +247,11 @@ func (c *Client) ResendSegmentStats(ctx context.Context, req *datapb.ResendSegme
 
 // AddImportSegment is the DataNode client side code for AddImportSegment call.
 func (c *Client) AddImportSegment(ctx context.Context, req *datapb.AddImportSegmentRequest) (*datapb.AddImportSegmentResponse, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(datapb.DataNodeClient).AddImportSegment(ctx, req)
+		return client.AddImportSegment(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -261,11 +261,11 @@ func (c *Client) AddImportSegment(ctx context.Context, req *datapb.AddImportSegm
 
 // SyncSegments is the DataNode client side code for SyncSegments call.
 func (c *Client) SyncSegments(ctx context.Context, req *datapb.SyncSegmentsRequest) (*commonpb.Status, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(datapb.DataNodeClient).SyncSegments(ctx, req)
+		return client.SyncSegments(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
