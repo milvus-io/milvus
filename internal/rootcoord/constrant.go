@@ -6,4 +6,6 @@ const (
 	globalIDAllocatorSubPath  = "gid"
 	globalTSOAllocatorKey     = "timestamp"
 	globalTSOAllocatorSubPath = "tso"
+
+	maxShardNum = 64
 )
