@@ -514,7 +514,6 @@ func TestGetUnFlushedSegments(t *testing.T) {
 }
 
 func TestUpdateFlushSegmentsInfo(t *testing.T) {
-	Params.Init()
 	t.Run("normal", func(t *testing.T) {
 		meta, err := newMeta(context.TODO(), memkv.NewMemoryKV(), "")
 		assert.Nil(t, err)
@@ -590,30 +589,6 @@ func TestUpdateFlushSegmentsInfo(t *testing.T) {
 		assert.Equal(t, commonpb.SegmentState_Growing, segmentInfo.State)
 		assert.Nil(t, segmentInfo.Binlogs)
 		assert.Nil(t, segmentInfo.StartPosition)
-	})
-
-	t.Run("test exceed disk quota", func(t *testing.T) {
-		meta, err := newMeta(context.TODO(), memkv.NewMemoryKV(), "")
-		assert.Nil(t, err)
-
-		diskQuotaBackup := Params.QuotaConfig.DiskQuota
-		const (
-			diskQuota   = 5 * 1024 * 1024 * 1024
-			segmentSize = 3 * 1024 * 1024 * 1024
-		)
-		Params.QuotaConfig.DiskQuota = diskQuota
-		segment1 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 1, State: commonpb.SegmentState_Growing,
-			Binlogs:   []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: segmentSize}}}},
-			Statslogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "statslog0")}}}
-		err = meta.AddSegment(segment1)
-		assert.Nil(t, err)
-
-		err = meta.UpdateFlushSegmentsInfo(1, true, false, true, []*datapb.FieldBinlog{getFieldBinlogPaths(1, "binlog1")},
-			[]*datapb.FieldBinlog{getFieldBinlogPaths(1, "statslog1")},
-			[]*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: segmentSize}}}},
-			[]*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10}}, []*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: &internalpb.MsgPosition{MsgID: []byte{1, 2, 3}}}})
-		assert.Error(t, err)
-		Params.QuotaConfig.DiskQuota = diskQuotaBackup
 	})
 }
 
