@@ -192,6 +192,7 @@ class TestChaos(TestChaosBase):
 		log.info("all pods are ready")
 		# reconnect if needed
 		sleep(constants.WAIT_PER_OP * 2)
+		log.info("reconnect to milvus")
 		cc.reconnect(connections, alias='default')
 		# recheck failed tasks in third assert
 		self.health_checkers[Op.bulk_load].recheck_failed_task = True
