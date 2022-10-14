@@ -18,6 +18,7 @@ package indexnode
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path"
@@ -36,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
+	"github.com/milvus-io/milvus/internal/util/indexparams"
 	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
@@ -334,6 +336,20 @@ func (it *indexBuildTask) BuildDiskAnnIndex(ctx context.Context) error {
 		it.newIndexParams["index_build_id"] = strconv.FormatInt(it.req.GetBuildID(), 10)
 		it.newIndexParams["index_id"] = strconv.FormatInt(it.req.IndexID, 10)
 		it.newIndexParams["index_version"] = strconv.FormatInt(it.req.GetIndexVersion(), 10)
+
+		err = indexparams.SetDiskIndexBuildParams(it.newIndexParams, it.statistic.NumRows)
+		if err != nil {
+			log.Ctx(ctx).Error("failed to fill disk index params", zap.Error(err))
+			return err
+		}
+		jsonIndexParams, err := json.Marshal(it.newIndexParams)
+		if err != nil {
+			log.Ctx(ctx).Error("failed to json marshal index params", zap.Error(err))
+			return err
+		}
+		log.Ctx(ctx).Info("disk index params are ready",
+			zap.Int64("buildID", it.BuildID),
+			zap.String("index params", string(jsonIndexParams)))
 
 		it.index, err = indexcgowrapper.NewCgoIndex(dType, it.newTypeParams, it.newIndexParams, it.req.GetStorageConfig())
 		if err != nil {

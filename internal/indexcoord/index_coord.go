@@ -818,6 +818,7 @@ func (i *IndexCoord) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInf
 						IndexFilePaths: segIdx.IndexFilePaths,
 						SerializedSize: segIdx.IndexSize,
 						IndexVersion:   segIdx.IndexVersion,
+						NumRows:        segIdx.NumRows,
 					})
 			}
 		}

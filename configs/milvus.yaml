@@ -350,6 +350,14 @@ common:
   # This configuration is only used by querynode and indexnode, it selects CPU instruction set for Searching and Index-building.
   simdType: auto
   indexSliceSize: 16 # MB
+  DiskIndex:
+    MaxDegree: 56
+    SearchListSize: 100
+    PGCodeBudgetGBRatio: 0.125
+    BuildNumThreadsRatio: 1.0
+    SearchCacheBudgetGBRatio: 0.125
+    LoadNumThreadRatio: 8.0
+    BeamWidthRatio: 4.0
 
   # please adjust in embedded Milvus: local
   storageType: minio

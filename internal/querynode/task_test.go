@@ -32,7 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
-	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/hardware"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -528,7 +528,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
 
-		totalRAM := int64(metricsinfo.GetMemoryCount())
+		totalRAM := int64(hardware.GetMemoryCount())
 
 		col, err := node.metaReplica.getCollectionByID(defaultCollectionID)
 		assert.NoError(t, err)

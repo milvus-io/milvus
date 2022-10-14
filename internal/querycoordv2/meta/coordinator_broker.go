@@ -191,6 +191,7 @@ func (broker *CoordinatorBroker) GetIndexInfo(ctx context.Context, collectionID 
 			IndexFilePaths: info.GetIndexFilePaths(),
 			IndexSize:      int64(info.GetSerializedSize()),
 			IndexVersion:   info.GetIndexVersion(),
+			NumRows:        info.GetNumRows(),
 		}
 
 		indexes = append(indexes, indexInfo)

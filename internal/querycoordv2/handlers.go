@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/util/hardware"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
@@ -142,12 +143,12 @@ func (s *Server) getSystemInfoMetrics(
 				Name: metricsinfo.ConstructComponentName(typeutil.QueryCoordRole, Params.QueryCoordCfg.GetNodeID()),
 				HardwareInfos: metricsinfo.HardwareMetrics{
 					IP:           s.session.Address,
-					CPUCoreCount: metricsinfo.GetCPUCoreCount(false),
-					CPUCoreUsage: metricsinfo.GetCPUUsage(),
-					Memory:       metricsinfo.GetMemoryCount(),
-					MemoryUsage:  metricsinfo.GetUsedMemoryCount(),
-					Disk:         metricsinfo.GetDiskCount(),
-					DiskUsage:    metricsinfo.GetDiskUsage(),
+					CPUCoreCount: hardware.GetCPUNum(),
+					CPUCoreUsage: hardware.GetCPUUsage(),
+					Memory:       hardware.GetMemoryCount(),
+					MemoryUsage:  hardware.GetUsedMemoryCount(),
+					Disk:         hardware.GetDiskCount(),
+					DiskUsage:    hardware.GetDiskUsage(),
 				},
 				SystemInfo:  metricsinfo.DeployMetrics{},
 				CreatedTime: Params.QueryCoordCfg.CreatedTime.String(),

@@ -9,7 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-package metricsinfo
+package hardware
 
 import (
 	"testing"
@@ -22,10 +22,7 @@ import (
 
 func Test_GetCPUCoreCount(t *testing.T) {
 	log.Info("TestGetCPUCoreCount",
-		zap.Int("physical CPUCoreCount", GetCPUCoreCount(false)))
-
-	log.Info("TestGetCPUCoreCount",
-		zap.Int("logical CPUCoreCount", GetCPUCoreCount(true)))
+		zap.Int("physical CPUCoreCount", GetCPUNum()))
 }
 
 func Test_GetCPUUsage(t *testing.T) {

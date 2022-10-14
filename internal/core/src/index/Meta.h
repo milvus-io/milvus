@@ -51,15 +51,15 @@ constexpr const char* INDEX_VERSION = "index_version";
 // DiskAnn build params
 constexpr const char* DISK_ANN_RAW_DATA_PATH = "data_path";
 constexpr const char* DISK_ANN_MAX_DEGREE = "max_degree";
-constexpr const char* DISK_ANN_BUILD_LIST = "build_list";
-constexpr const char* DISK_ANN_SEARCH_DRAM_BUDGET = "search_dram_budget";
-constexpr const char* DISK_ANN_BUILD_DRAM_BUDGET = "build_dram_budget";
+constexpr const char* DISK_ANN_SEARCH_LIST_SIZE = "search_list_size";
+constexpr const char* DISK_ANN_PQ_CODE_BUDGET = "pq_code_budget_gb";
+constexpr const char* DISK_ANN_BUILD_DRAM_BUDGET = "build_dram_budget_gb";
 constexpr const char* DISK_ANN_BUILD_THREAD_NUM = "num_build_thread";
-constexpr const char* DISK_ANN_PQ_BYTES = "ps_disk_bytes";
+constexpr const char* DISK_ANN_PQ_DIMS = "disk_pq_dims";
 
 // DiskAnn prepare params
-constexpr const char* DISK_ANN_PREPARE_THREAD_NUM = "num_prepare_thread";
-constexpr const char* NUM_ROW_OF_RAW_DATA = "count";
+constexpr const char* DISK_ANN_LOAD_THREAD_NUM = "num_load_thread";
+constexpr const char* DISK_ANN_SEARCH_CACHE_BUDGET = "search_cache_budget_gb";
 constexpr const char* DISK_ANN_PREPARE_WARM_UP = "warm_up";
 constexpr const char* DISK_ANN_PREPARE_USE_BFS_CACHE = "use_bfs_cache";
 

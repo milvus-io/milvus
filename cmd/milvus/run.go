@@ -6,13 +6,13 @@ import (
 	"io"
 	"os"
 
-	"github.com/milvus-io/milvus/internal/util/metricsinfo"
-	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/log"
-
 	"github.com/milvus-io/milvus/cmd/roles"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/hardware"
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -133,7 +133,10 @@ func (c *run) formatFlags(args []string, flags *flag.FlagSet) {
 	flags.BoolVar(&c.enableIndexNode, typeutil.IndexNodeRole, false, "enable index node")
 	flags.BoolVar(&c.enableProxy, typeutil.ProxyRole, false, "enable proxy node")
 
-	initMaxprocs(c.serverType, flags)
+	if c.serverType == typeutil.EmbeddedRole {
+		flags.SetOutput(io.Discard)
+	}
+	hardware.InitMaxprocs(c.serverType, flags)
 	if err := flags.Parse(args[3:]); err != nil {
 		os.Exit(-1)
 	}

@@ -42,8 +42,8 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/concurrency"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/hardware"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
-	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 )
 
@@ -245,12 +245,19 @@ func (loader *segmentLoader) loadFiles(ctx context.Context, segment *Segment,
 
 		for _, fieldBinlog := range loadInfo.BinlogPaths {
 			fieldID := fieldBinlog.FieldID
+			// check num rows of data meta and index meta are consistent
 			if indexInfo, ok := fieldID2IndexInfo[fieldID]; ok {
-				// TODO:: ugly
-				indexInfo.IndexParams = append(indexInfo.IndexParams, &commonpb.KeyValuePair{
-					Key:   "count",
-					Value: strconv.FormatInt(loadInfo.NumOfRows, 10),
-				})
+				if loadInfo.GetNumOfRows() != indexInfo.GetNumRows() {
+					err = fmt.Errorf("num rows of segment binlog file %d mismatch with num rows of index file %d",
+						loadInfo.GetNumOfRows(), indexInfo.GetNumRows())
+					log.Error("load segment failed, set segment to meta failed",
+						zap.Int64("collectionID", segment.collectionID),
+						zap.Int64("partitionID", segment.partitionID),
+						zap.Int64("segmentID", segment.segmentID),
+						zap.Int64("indexBuildID", indexInfo.BuildID),
+						zap.Error(err))
+					return err
+				}
 
 				fieldInfo := &IndexedFieldInfo{
 					fieldBinlog: fieldBinlog,
@@ -836,8 +843,8 @@ func GetStorageSizeByIndexInfo(indexInfo *querypb.FieldIndexInfo) (uint64, uint6
 }
 
 func (loader *segmentLoader) checkSegmentSize(collectionID UniqueID, segmentLoadInfos []*querypb.SegmentLoadInfo, concurrency int) error {
-	usedMem := metricsinfo.GetUsedMemoryCount()
-	totalMem := metricsinfo.GetMemoryCount()
+	usedMem := hardware.GetUsedMemoryCount()
+	totalMem := hardware.GetMemoryCount()
 	if len(segmentLoadInfos) < concurrency {
 		concurrency = len(segmentLoadInfos)
 	}

@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/api/milvuspb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/hardware"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
@@ -65,12 +66,12 @@ func getSystemInfoMetrics(
 				Name: metricsinfo.ConstructComponentName(typeutil.IndexCoordRole, coord.session.ServerID),
 				HardwareInfos: metricsinfo.HardwareMetrics{
 					IP:           coord.session.Address,
-					CPUCoreCount: metricsinfo.GetCPUCoreCount(false),
-					CPUCoreUsage: metricsinfo.GetCPUUsage(),
-					Memory:       metricsinfo.GetMemoryCount(),
-					MemoryUsage:  metricsinfo.GetUsedMemoryCount(),
-					Disk:         metricsinfo.GetDiskCount(),
-					DiskUsage:    metricsinfo.GetDiskUsage(),
+					CPUCoreCount: hardware.GetCPUNum(),
+					CPUCoreUsage: hardware.GetCPUUsage(),
+					Memory:       hardware.GetMemoryCount(),
+					MemoryUsage:  hardware.GetUsedMemoryCount(),
+					Disk:         hardware.GetDiskCount(),
+					DiskUsage:    hardware.GetDiskUsage(),
 				},
 				SystemInfo:  metricsinfo.DeployMetrics{},
 				CreatedTime: Params.IndexCoordCfg.CreatedTime.String(),

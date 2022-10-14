@@ -9,32 +9,24 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-//go:build linux
-// +build linux
-
-package metricsinfo
+package hardware
 
 import (
-	"testing"
-
-	"github.com/stretchr/testify/assert"
+	"errors"
 )
 
-func TestInContainer(t *testing.T) {
-	_, err := inContainer()
-	assert.NoError(t, err)
+// inContainer checks if the service is running inside a container
+// It should be always false while under windows.
+func inContainer() (bool, error) {
+	return false, nil
 }
 
-func TestGetContainerMemLimit(t *testing.T) {
-	limit, err := getContainerMemLimit()
-	assert.NoError(t, err)
-	assert.True(t, limit > 0)
-	t.Log("limit memory:", limit)
+// getContainerMemLimit returns memory limit and error
+func getContainerMemLimit() (uint64, error) {
+	return 0, errors.New("Not supported")
 }
 
-func TestGetContainerMemUsed(t *testing.T) {
-	used, err := getContainerMemUsed()
-	assert.NoError(t, err)
-	assert.True(t, used > 0)
-	t.Log("used memory:", used)
+// getContainerMemUsed returns memory usage and error
+func getContainerMemUsed() (uint64, error) {
+	return 0, errors.New("Not supported")
 }

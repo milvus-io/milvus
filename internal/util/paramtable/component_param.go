@@ -37,6 +37,14 @@ const (
 
 	DefaultSessionTTL        = 60 //s
 	DefaultSessionRetryTimes = 30
+
+	DefaultMaxDegree                = 56
+	DefaultSearchListSize           = 100
+	DefaultPGCodeBudgetGBRatio      = 0.125
+	DefaultBuildNumThreadsRatio     = 1.0
+	DefaultSearchCacheBudgetGBRatio = 0.125
+	DefaultLoadNumThreadRatio       = 8.0
+	DefaultBeamWidthRatio           = 4.0
 )
 
 // ComponentParam is used to quickly and easily access all components' configurations.
@@ -134,8 +142,15 @@ type commonConfig struct {
 	RetentionDuration    int64
 	EntityExpirationTTL  time.Duration
 
-	IndexSliceSize int64
-	GracefulTime   int64
+	IndexSliceSize           int64
+	MaxDegree                int64
+	SearchListSize           int64
+	PGCodeBudgetGBRatio      float64
+	BuildNumThreadsRatio     float64
+	SearchCacheBudgetGBRatio float64
+	LoadNumThreadRatio       float64
+	BeamWidthRatio           float64
+	GracefulTime             int64
 
 	StorageType string
 	SimdType    string
@@ -179,6 +194,13 @@ func (p *commonConfig) init(base *BaseTable) {
 
 	p.initSimdType()
 	p.initIndexSliceSize()
+	p.initMaxDegree()
+	p.initSearchListSize()
+	p.initPGCodeBudgetGBRatio()
+	p.initBuildNumThreadsRatio()
+	p.initSearchCacheBudgetGBRatio()
+	p.initLoadNumThreadRatio()
+	p.initBeamWidthRatio()
 	p.initGracefulTime()
 	p.initStorageType()
 
@@ -377,6 +399,34 @@ func (p *commonConfig) initSimdType() {
 
 func (p *commonConfig) initIndexSliceSize() {
 	p.IndexSliceSize = p.Base.ParseInt64WithDefault("common.indexSliceSize", DefaultIndexSliceSize)
+}
+
+func (p *commonConfig) initPGCodeBudgetGBRatio() {
+	p.PGCodeBudgetGBRatio = p.Base.ParseFloatWithDefault("common.DiskIndex.PGCodeBudgetGBRatio", DefaultPGCodeBudgetGBRatio)
+}
+
+func (p *commonConfig) initBuildNumThreadsRatio() {
+	p.BuildNumThreadsRatio = p.Base.ParseFloatWithDefault("common.DiskIndex.BuildNumThreadsRatio", DefaultBuildNumThreadsRatio)
+}
+
+func (p *commonConfig) initSearchCacheBudgetGBRatio() {
+	p.SearchCacheBudgetGBRatio = p.Base.ParseFloatWithDefault("common.DiskIndex.SearchCacheBudgetGBRatio", DefaultSearchCacheBudgetGBRatio)
+}
+
+func (p *commonConfig) initLoadNumThreadRatio() {
+	p.LoadNumThreadRatio = p.Base.ParseFloatWithDefault("common.DiskIndex.LoadNumThreadRatio", DefaultLoadNumThreadRatio)
+}
+
+func (p *commonConfig) initBeamWidthRatio() {
+	p.BeamWidthRatio = p.Base.ParseFloatWithDefault("common.DiskIndex.BeamWidthRatio", DefaultBeamWidthRatio)
+}
+
+func (p *commonConfig) initMaxDegree() {
+	p.MaxDegree = p.Base.ParseInt64WithDefault("common.DiskIndex.MaxDegree", DefaultMaxDegree)
+}
+
+func (p *commonConfig) initSearchListSize() {
+	p.SearchListSize = p.Base.ParseInt64WithDefault("common.DiskIndex.SearchListSize", DefaultSearchListSize)
 }
 
 func (p *commonConfig) initGracefulTime() {

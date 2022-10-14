@@ -146,6 +146,7 @@ message IndexFilePathInfo {
   repeated string index_file_paths = 7;
   uint64 serialized_size = 8;
   int64 index_version = 9;
+  int64 num_rows = 10;
 }
 
 message SegmentInfo {

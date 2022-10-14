@@ -75,6 +75,7 @@ class VectorDiskAnnIndex : public VectorIndex {
  private:
     std::unique_ptr<knowhere::IndexDiskANN<T>> index_;
     std::shared_ptr<storage::DiskFileManagerImpl> file_manager_;
+    uint32_t search_beamwidth_ = 8;
 };
 
 template <typename T>

@@ -225,6 +225,7 @@ message FieldIndexInfo {
   repeated string index_file_paths = 7;
   int64 index_size = 8;
   int64 index_version = 9;
+  int64 num_rows = 10;
 }
 
 message LoadSegmentsRequest {
