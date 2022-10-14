@@ -64,7 +64,8 @@ IndexBuilder_build(benchmark::State& state) {
 
     for (auto _ : state) {
         auto index = std::make_unique<milvus::indexbuilder::VecIndexCreator>(
-            milvus::DataType::VECTOR_FLOAT, type_params_str.c_str(), index_params_str.c_str());
+            milvus::DataType::VECTOR_FLOAT, type_params_str.c_str(), index_params_str.c_str(),
+            get_default_storage_config());
         index->Build(xb_dataset);
     }
 }
@@ -93,7 +94,8 @@ IndexBuilder_build_and_codec(benchmark::State& state) {
 
     for (auto _ : state) {
         auto index = std::make_unique<milvus::indexbuilder::VecIndexCreator>(
-            milvus::DataType::VECTOR_FLOAT, type_params_str.c_str(), index_params_str.c_str());
+            milvus::DataType::VECTOR_FLOAT, type_params_str.c_str(), index_params_str.c_str(),
+            get_default_storage_config());
 
         index->Build(xb_dataset);
         index->Serialize();

@@ -219,7 +219,6 @@ func (node *QueryNode) InitSegcore() {
 	C.SegcoreSetIndexSliceSize(cIndexSliceSize)
 
 	initcore.InitLocalStorageConfig(&Params)
-	initcore.InitMinioConfig(&Params)
 }
 
 // Init function init historical and streaming module to manage segments

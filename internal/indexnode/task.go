@@ -240,7 +240,7 @@ func (it *indexBuildTask) BuildIndex(ctx context.Context) error {
 	dType := dataset.DType
 	var err error
 	if dType != schemapb.DataType_None {
-		it.index, err = indexcgowrapper.NewCgoIndex(dType, it.newTypeParams, it.newIndexParams)
+		it.index, err = indexcgowrapper.NewCgoIndex(dType, it.newTypeParams, it.newIndexParams, it.req.GetStorageConfig())
 		if err != nil {
 			log.Ctx(ctx).Error("failed to create index", zap.Error(err))
 			return err
@@ -335,7 +335,7 @@ func (it *indexBuildTask) BuildDiskAnnIndex(ctx context.Context) error {
 		it.newIndexParams["index_id"] = strconv.FormatInt(it.req.IndexID, 10)
 		it.newIndexParams["index_version"] = strconv.FormatInt(it.req.GetIndexVersion(), 10)
 
-		it.index, err = indexcgowrapper.NewCgoIndex(dType, it.newTypeParams, it.newIndexParams)
+		it.index, err = indexcgowrapper.NewCgoIndex(dType, it.newTypeParams, it.newIndexParams, it.req.GetStorageConfig())
 		if err != nil {
 			log.Ctx(ctx).Error("failed to create index", zap.Error(err))
 			return err

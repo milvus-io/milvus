@@ -38,12 +38,13 @@ using namespace milvus;
 using namespace milvus::segcore;
 using namespace milvus::index;
 using namespace knowhere;
-using milvus::index::LoadIndexInfo;
 using milvus::index::VectorIndex;
+using milvus::segcore::LoadIndexInfo;
 
 namespace {
 // const int DIM = 16;
 const int64_t ROW_COUNT = 100 * 1000;
+const CStorageConfig c_storage_config = get_default_cstorage_config();
 
 const char*
 get_default_schema_config() {
@@ -1413,7 +1414,7 @@ TEST(CApiTest, LoadIndexInfo) {
     CBinarySet c_binary_set = (CBinarySet)&binary_set;
 
     void* c_load_index_info = nullptr;
-    auto status = NewLoadIndexInfo(&c_load_index_info);
+    auto status = NewLoadIndexInfo(&c_load_index_info, c_storage_config);
     assert(status.error_code == Success);
     std::string index_param_key1 = "index_type";
     std::string index_param_value1 = "IVF_PQ";
@@ -1462,7 +1463,7 @@ TEST(CApiTest, LoadIndex_Search) {
     auto binary_set = indexing->Serialize(conf);
 
     // fill loadIndexInfo
-    milvus::index::LoadIndexInfo load_index_info;
+    milvus::segcore::LoadIndexInfo load_index_info;
     auto& index_params = load_index_info.index_params;
     index_params["index_type"] = "IVF_PQ";
     index_params["index_mode"] = "CPU";
@@ -1567,7 +1568,7 @@ TEST(CApiTest, Indexing_Without_Predicate) {
 
     auto binary_set = indexing->Serialize(milvus::Config{});
     void* c_load_index_info = nullptr;
-    status = NewLoadIndexInfo(&c_load_index_info);
+    status = NewLoadIndexInfo(&c_load_index_info, c_storage_config);
     assert(status.error_code == Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "IVF_PQ";
@@ -1688,7 +1689,7 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
 
     auto binary_set = indexing->Serialize(milvus::Config{});
     void* c_load_index_info = nullptr;
-    status = NewLoadIndexInfo(&c_load_index_info);
+    status = NewLoadIndexInfo(&c_load_index_info, c_storage_config);
     assert(status.error_code == Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "IVF_PQ";
@@ -1826,7 +1827,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
 
     auto binary_set = indexing->Serialize(milvus::Config{});
     void* c_load_index_info = nullptr;
-    status = NewLoadIndexInfo(&c_load_index_info);
+    status = NewLoadIndexInfo(&c_load_index_info, c_storage_config);
     assert(status.error_code == Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "IVF_PQ";
@@ -1978,7 +1979,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
 
     auto binary_set = indexing->Serialize(milvus::Config{});
     void* c_load_index_info = nullptr;
-    status = NewLoadIndexInfo(&c_load_index_info);
+    status = NewLoadIndexInfo(&c_load_index_info, c_storage_config);
     assert(status.error_code == Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "IVF_PQ";
@@ -2114,7 +2115,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
 
     auto binary_set = indexing->Serialize(milvus::Config{});
     void* c_load_index_info = nullptr;
-    status = NewLoadIndexInfo(&c_load_index_info);
+    status = NewLoadIndexInfo(&c_load_index_info, c_storage_config);
     assert(status.error_code == Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "IVF_PQ";
@@ -2259,7 +2260,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
 
     auto binary_set = indexing->Serialize(milvus::Config{});
     void* c_load_index_info = nullptr;
-    status = NewLoadIndexInfo(&c_load_index_info);
+    status = NewLoadIndexInfo(&c_load_index_info, c_storage_config);
     assert(status.error_code == Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "IVF_PQ";
@@ -2397,7 +2398,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
 
     auto binary_set = indexing->Serialize(milvus::Config{});
     void* c_load_index_info = nullptr;
-    status = NewLoadIndexInfo(&c_load_index_info);
+    status = NewLoadIndexInfo(&c_load_index_info, c_storage_config);
     assert(status.error_code == Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "BIN_IVF_FLAT";
@@ -2547,7 +2548,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
 
     auto binary_set = indexing->Serialize(milvus::Config{});
     void* c_load_index_info = nullptr;
-    status = NewLoadIndexInfo(&c_load_index_info);
+    status = NewLoadIndexInfo(&c_load_index_info, c_storage_config);
     assert(status.error_code == Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "BIN_IVF_FLAT";
@@ -2684,7 +2685,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
 
     auto binary_set = indexing->Serialize(milvus::Config{});
     void* c_load_index_info = nullptr;
-    status = NewLoadIndexInfo(&c_load_index_info);
+    status = NewLoadIndexInfo(&c_load_index_info, c_storage_config);
     assert(status.error_code == Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "BIN_IVF_FLAT";
@@ -2844,7 +2845,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
 
     auto binary_set = indexing->Serialize(milvus::Config{});
     void* c_load_index_info = nullptr;
-    status = NewLoadIndexInfo(&c_load_index_info);
+    status = NewLoadIndexInfo(&c_load_index_info, c_storage_config);
     assert(status.error_code == Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "BIN_IVF_FLAT";
@@ -3003,7 +3004,7 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
                                    IndexEnum::INDEX_FAISS_IVFPQ, DIM, N);
     auto binary_set = indexing->Serialize(milvus::Config{});
     void* c_load_index_info = nullptr;
-    status = NewLoadIndexInfo(&c_load_index_info);
+    status = NewLoadIndexInfo(&c_load_index_info, c_storage_config);
     assert(status.error_code == Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "IVF_PQ";
@@ -3282,7 +3283,7 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
 
     auto binary_set = indexing->Serialize(milvus::Config{});
     void* c_load_index_info = nullptr;
-    status = NewLoadIndexInfo(&c_load_index_info);
+    status = NewLoadIndexInfo(&c_load_index_info, c_storage_config);
     assert(status.error_code == Success);
     std::string index_type_key = "index_type";
     std::string index_type_value = "IVF_PQ";

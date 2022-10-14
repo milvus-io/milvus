@@ -27,11 +27,6 @@ import (
 	"runtime"
 	"strconv"
 
-	"github.com/milvus-io/milvus/internal/util/concurrency"
-	"github.com/milvus-io/milvus/internal/util/dependency"
-	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
@@ -43,13 +38,18 @@ import (
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util"
+	"github.com/milvus-io/milvus/internal/util/concurrency"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 // ---------- unittest util functions ----------
@@ -278,7 +278,7 @@ func genVectorFieldSchema(param vecFieldParam) *schemapb.FieldSchema {
 func genIndexBinarySet() ([][]byte, error) {
 	typeParams, indexParams := genIndexParams(IndexFaissIVFPQ, L2)
 
-	index, err := indexcgowrapper.NewCgoIndex(schemapb.DataType_FloatVector, typeParams, indexParams)
+	index, err := indexcgowrapper.NewCgoIndex(schemapb.DataType_FloatVector, typeParams, indexParams, genStorageConfig())
 	if err != nil {
 		return nil, err
 	}
@@ -375,7 +375,7 @@ func generateAndSaveIndex(segmentID UniqueID, msgLength int, indexType, metricTy
 		})
 	}
 
-	index, err := indexcgowrapper.NewCgoIndex(schemapb.DataType_FloatVector, typeParams, indexParams)
+	index, err := indexcgowrapper.NewCgoIndex(schemapb.DataType_FloatVector, typeParams, indexParams, genStorageConfig())
 	if err != nil {
 		return nil, err
 	}
@@ -422,6 +422,19 @@ func generateAndSaveIndex(segmentID UniqueID, msgLength int, indexType, metricTy
 	}
 
 	return indexPaths, nil
+}
+
+func genStorageConfig() *indexpb.StorageConfig {
+	return &indexpb.StorageConfig{
+		Address:         Params.MinioCfg.Address,
+		AccessKeyID:     Params.MinioCfg.AccessKeyID,
+		SecretAccessKey: Params.MinioCfg.SecretAccessKey,
+		BucketName:      Params.MinioCfg.BucketName,
+		RootPath:        Params.MinioCfg.RootPath,
+		IAMEndpoint:     Params.MinioCfg.IAMEndpoint,
+		UseSSL:          Params.MinioCfg.UseSSL,
+		UseIAM:          Params.MinioCfg.UseIAM,
+	}
 }
 
 func genIndexParams(indexType, metricType string) (map[string]string, map[string]string) {

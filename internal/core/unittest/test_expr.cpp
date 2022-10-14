@@ -630,7 +630,7 @@ TEST(Expr, TestCompareWithScalarIndex) {
     auto seg = CreateSealedSegment(schema);
     int N = 1000;
     auto raw_data = DataGen(schema, N);
-    index::LoadIndexInfo load_index_info;
+    segcore::LoadIndexInfo load_index_info;
 
     // load index for int32 field
     auto age32_col = raw_data.get_col<int32_t>(i32_fid);
@@ -720,7 +720,7 @@ TEST(Expr, TestCompareWithScalarIndexMaris) {
     auto seg = CreateSealedSegment(schema);
     int N = 1000;
     auto raw_data = DataGen(schema, N);
-    index::LoadIndexInfo load_index_info;
+    segcore::LoadIndexInfo load_index_info;
 
     // load index for int32 field
     auto str1_col = raw_data.get_col<std::string>(str1_fid);
@@ -1300,7 +1300,7 @@ TEST(Expr, TestBinaryArithOpEvalRangeWithScalarSortIndex) {
     auto seg = CreateSealedSegment(schema);
     int N = 1000;
     auto raw_data = DataGen(schema, N);
-    index::LoadIndexInfo load_index_info;
+    segcore::LoadIndexInfo load_index_info;
 
     // load index for int8 field
     auto age8_col = raw_data.get_col<int8_t>(i8_fid);

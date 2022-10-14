@@ -39,7 +39,7 @@ SegmentSealedImpl::PreDelete(int64_t size) {
 }
 
 void
-SegmentSealedImpl::LoadIndex(const index::LoadIndexInfo& info) {
+SegmentSealedImpl::LoadIndex(const LoadIndexInfo& info) {
     // print(info);
     // NOTE: lock only when data is ready to avoid starvation
     auto field_id = FieldId(info.field_id);
@@ -53,7 +53,7 @@ SegmentSealedImpl::LoadIndex(const index::LoadIndexInfo& info) {
 }
 
 void
-SegmentSealedImpl::LoadVecIndex(const index::LoadIndexInfo& info) {
+SegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
     // NOTE: lock only when data is ready to avoid starvation
     auto field_id = FieldId(info.field_id);
     auto& field_meta = schema_->operator[](field_id);
@@ -76,8 +76,7 @@ SegmentSealedImpl::LoadVecIndex(const index::LoadIndexInfo& info) {
                        std::to_string(row_count_opt_.value()) + ")");
     }
     AssertInfo(!vector_indexings_.is_ready(field_id), "vec index is not ready");
-    vector_indexings_.append_field_indexing(field_id, metric_type,
-                                            std::move(const_cast<index::LoadIndexInfo&>(info).index));
+    vector_indexings_.append_field_indexing(field_id, metric_type, std::move(const_cast<LoadIndexInfo&>(info).index));
 
     set_bit(index_ready_bitset_, field_id, true);
     update_row_count(row_count);
@@ -85,7 +84,7 @@ SegmentSealedImpl::LoadVecIndex(const index::LoadIndexInfo& info) {
 }
 
 void
-SegmentSealedImpl::LoadScalarIndex(const index::LoadIndexInfo& info) {
+SegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
     // NOTE: lock only when data is ready to avoid starvation
     auto field_id = FieldId(info.field_id);
     auto& field_meta = schema_->operator[](field_id);
@@ -106,7 +105,7 @@ SegmentSealedImpl::LoadScalarIndex(const index::LoadIndexInfo& info) {
                        std::to_string(row_count_opt_.value()) + ")");
     }
 
-    scalar_indexings_[field_id] = std::move(const_cast<index::LoadIndexInfo&>(info).index);
+    scalar_indexings_[field_id] = std::move(const_cast<LoadIndexInfo&>(info).index);
     // reverse pk from scalar index and set pks to offset
     if (schema_->get_primary_field_id() == field_id) {
         AssertInfo(field_id.get() != -1, "Primary key is -1");

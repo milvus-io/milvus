@@ -156,7 +156,6 @@ func (i *IndexNode) initKnowhere() {
 	C.IndexBuilderSetIndexSliceSize(cIndexSliceSize)
 
 	initcore.InitLocalStorageConfig(&Params)
-	initcore.InitMinioConfig(&Params)
 }
 
 func (i *IndexNode) initSession() error {

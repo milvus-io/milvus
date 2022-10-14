@@ -123,6 +123,6 @@ class RemoteChunkManager : public ChunkManager {
     }
 };
 
-using RemoteChunkManagerSPtr = std::shared_ptr<milvus::storage::RemoteChunkManager>;
+using RemoteChunkManagerPtr = std::unique_ptr<RemoteChunkManager>;
 
 }  // namespace milvus::storage

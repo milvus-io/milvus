@@ -16,15 +16,31 @@
 
 #pragma once
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+#include <iostream>
+#include <map>
+#include <string>
+#include <vector>
 
-#include <stdbool.h>
+#include "common/Types.h"
+#include "common/type_c.h"
+#include "index/Index.h"
+#include "storage/Types.h"
 
-void
-LocalRootPathInit(const char*);
+namespace milvus::segcore {
 
-#ifdef __cplusplus
+struct LoadIndexInfo {
+    int64_t collection_id;
+    int64_t partition_id;
+    int64_t segment_id;
+    int64_t field_id;
+    DataType field_type;
+    int64_t index_id;
+    int64_t index_build_id;
+    int64_t index_version;
+    std::map<std::string, std::string> index_params;
+    std::vector<std::string> index_files;
+    index::IndexBasePtr index;
+    storage::StorageConfig storage_config;
 };
-#endif
+
+}  // namespace milvus::segcore

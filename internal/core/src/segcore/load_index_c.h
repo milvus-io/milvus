@@ -24,7 +24,7 @@ extern "C" {
 typedef void* CLoadIndexInfo;
 
 CStatus
-NewLoadIndexInfo(CLoadIndexInfo* c_load_index_info);
+NewLoadIndexInfo(CLoadIndexInfo* c_load_index_info, CStorageConfig c_storage_config);
 
 void
 DeleteLoadIndexInfo(CLoadIndexInfo c_load_index_info);

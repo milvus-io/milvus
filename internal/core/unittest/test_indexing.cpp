@@ -15,7 +15,6 @@
 #include <random>
 #include <string>
 #include <vector>
-#include <yaml-cpp/yaml.h>
 
 #include "faiss/utils/distances.h"
 #include "query/SearchBruteForce.h"
@@ -28,7 +27,6 @@
 #include "test_utils/Timer.h"
 
 #ifdef BUILD_DISK_ANN
-#include <boost/filesystem.hpp>
 #include "storage/MinioChunkManager.h"
 #include "storage/DiskFileManagerImpl.h"
 
@@ -284,68 +282,11 @@ using Param = std::pair<knowhere::IndexType, knowhere::MetricType>;
 
 class IndexTest : public ::testing::TestWithParam<Param> {
  protected:
-    //#ifdef BUILD_DISK_ANN
-    //    bool
-    //    FindFile(const path& dir, const std::string& file_name, path& path_found) {
-    //        const recursive_directory_iterator end;
-    //        boost::system::error_code err;
-    //        auto iter = recursive_directory_iterator(dir, err);
-    //        while (iter != end) {
-    //            try {
-    //                if ((*iter).path().filename() == file_name) {
-    //                    path_found = (*iter).path();
-    //                    return true;
-    //                }
-    //                iter++;
-    //            } catch (filesystem_error& e) {
-    //            } catch (std::exception& e) {
-    //                // ignore error
-    //            }
-    //        }
-    //        return false;
-    //    }
-    //
-    //    void
-    //    init_minio() {
-    //        char testPath[100];
-    //        auto pwd = std::string(getcwd(testPath, sizeof(testPath)));
-    //        path filepath;
-    //        auto currentPath = path(pwd);
-    //        while (!FindFile(currentPath, "milvus.yaml", filepath)) {
-    //            currentPath = currentPath.append("../");
-    //        }
-    //        auto configPath = filepath.string();
-    //        YAML::Node config;
-    //        config = YAML::LoadFile(configPath);
-    //        auto minioConfig = config["minio"];
-    //        auto address = minioConfig["address"].as<std::string>();
-    //        auto port = minioConfig["port"].as<std::string>();
-    //        auto endpoint = address + ":" + port;
-    //        auto accessKey = minioConfig["accessKeyID"].as<std::string>();
-    //        auto accessValue = minioConfig["secretAccessKey"].as<std::string>();
-    //        auto useSSL = minioConfig["useSSL"].as<bool>();
-    //        auto bucketName = minioConfig["bucketName"].as<std::string>();
-    //
-    //        ChunkMangerConfig::SetAddress(endpoint);
-    //        ChunkMangerConfig::SetAccessKey(accessKey);
-    //        ChunkMangerConfig::SetAccessValue(accessValue);
-    //        ChunkMangerConfig::SetBucketName(bucketName);
-    //        ChunkMangerConfig::SetUseSSL(useSSL);
-    //        auto& chunk_manager = milvus::storage::MinioChunkManager::GetInstance();
-    //        chunk_manager.SetBucketName(bucketName);
-    //        if (!chunk_manager.BucketExists(bucketName)) {
-    //            chunk_manager.CreateBucket(bucketName);
-    //        }
-    //    }
-    //#endif
-
     void
     SetUp() override {
         knowhere::KnowhereConfig::SetStatisticsLevel(3);
         knowhere::KnowhereConfig::SetIndexFileSliceSize(16);
-        //#ifdef BUILD_DISK_ANN
-        //        init_minio();
-        //#endif
+        storage_config_ = get_default_storage_config();
 
         auto param = GetParam();
         index_type = param.first;
@@ -402,6 +343,7 @@ class IndexTest : public ::testing::TestWithParam<Param> {
     knowhere::DatasetPtr xq_dataset;
     int64_t query_offset = 100;
     int64_t NB = 10000;
+    StorageConfig storage_config_;
 };
 
 INSTANTIATE_TEST_CASE_P(
@@ -431,7 +373,8 @@ TEST_P(IndexTest, BuildAndQuery) {
 #ifdef BUILD_DISK_ANN
         milvus::storage::FieldDataMeta field_data_meta{1, 2, 3, 100};
         milvus::storage::IndexMeta index_meta{3, 100, 1000, 1};
-        auto file_manager = std::make_shared<milvus::storage::DiskFileManagerImpl>(field_data_meta, index_meta);
+        auto file_manager =
+            std::make_shared<milvus::storage::DiskFileManagerImpl>(field_data_meta, index_meta, storage_config_);
         index = milvus::index::IndexFactory::GetInstance().CreateIndex(create_index_info, file_manager);
 #endif
     } else {
@@ -447,7 +390,8 @@ TEST_P(IndexTest, BuildAndQuery) {
         index.reset();
         milvus::storage::FieldDataMeta field_data_meta{1, 2, 3, 100};
         milvus::storage::IndexMeta index_meta{3, 100, 1000, 1};
-        auto file_manager = std::make_shared<milvus::storage::DiskFileManagerImpl>(field_data_meta, index_meta);
+        auto file_manager =
+            std::make_shared<milvus::storage::DiskFileManagerImpl>(field_data_meta, index_meta, storage_config_);
         auto new_index = milvus::index::IndexFactory::GetInstance().CreateIndex(create_index_info, file_manager);
         vec_index = dynamic_cast<milvus::index::VectorIndex*>(new_index.get());
 

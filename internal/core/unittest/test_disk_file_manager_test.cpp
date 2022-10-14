@@ -9,22 +9,16 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <boost/filesystem.hpp>
-#include <boost/system/error_code.hpp>
-#include <fstream>
 #include <gtest/gtest.h>
-#include <iostream>
-#include <random>
 #include <string>
 #include <vector>
-#include <yaml-cpp/yaml.h>
 
 #include "storage/Event.h"
-#include "storage/MinioChunkManager.h"
 #include "storage/LocalChunkManager.h"
 #include "storage/DiskFileManagerImpl.h"
 #include "config/ConfigChunkManager.h"
 #include "config/ConfigKnowhere.h"
+#include "test_utils/indexbuilder_test_utils.h"
 
 using namespace std;
 using namespace milvus;
@@ -39,84 +33,21 @@ class DiskAnnFileManagerTest : public testing::Test {
     ~DiskAnnFileManagerTest() {
     }
 
-    bool
-    FindFile(const path& dir, const string& file_name, path& path_found) {
-        const recursive_directory_iterator end;
-        boost::system::error_code err;
-        auto iter = recursive_directory_iterator(dir, err);
-        while (iter != end) {
-            try {
-                if ((*iter).path().filename() == file_name) {
-                    path_found = (*iter).path();
-                    return true;
-                }
-                iter++;
-            } catch (filesystem_error& e) {
-            } catch (std::exception& e) {
-                // ignore error
-            }
-        }
-        return false;
-    }
-
-    string
-    GetConfig() {
-        char testPath[100];
-        auto pwd = string(getcwd(testPath, sizeof(testPath)));
-        path filepath;
-        auto currentPath = path(pwd);
-        while (!FindFile(currentPath, "milvus.yaml", filepath)) {
-            currentPath = currentPath.append("../");
-        }
-        return filepath.string();
-    }
-
-    void
-    InitRemoteChunkManager() {
-        auto configPath = GetConfig();
-        cout << configPath << endl;
-        YAML::Node config;
-        config = YAML::LoadFile(configPath);
-        auto minioConfig = config["minio"];
-        auto address = minioConfig["address"].as<string>();
-        auto port = minioConfig["port"].as<string>();
-        auto endpoint = address + ":" + port;
-        auto accessKey = minioConfig["accessKeyID"].as<string>();
-        auto accessValue = minioConfig["secretAccessKey"].as<string>();
-        auto useSSL = minioConfig["useSSL"].as<bool>();
-        auto bucketName = minioConfig["bucketName"].as<string>();
-
-        ChunkMangerConfig::SetAddress(endpoint);
-        ChunkMangerConfig::SetAccessKey(accessKey);
-        ChunkMangerConfig::SetAccessValue(accessValue);
-        ChunkMangerConfig::SetBucketName(bucketName);
-        ChunkMangerConfig::SetUseSSL(useSSL);
-    }
-
-    void
-    InitLocalChunkManager() {
-        ChunkMangerConfig::SetLocalRootPath("/tmp/diskann");
-        config::KnowhereSetIndexSliceSize(5);
-    }
-
     virtual void
     SetUp() {
-        InitLocalChunkManager();
-        InitRemoteChunkManager();
+        ChunkMangerConfig::SetLocalRootPath("/tmp/diskann");
+        config::KnowhereSetIndexSliceSize(5);
+        storage_config_ = get_default_storage_config();
     }
+
+ protected:
+    StorageConfig storage_config_;
 };
 
 TEST_F(DiskAnnFileManagerTest, AddFilePositive) {
     auto& lcm = LocalChunkManager::GetInstance();
-    auto& rcm = MinioChunkManager::GetInstance();
-
     string testBucketName = "test-diskann";
-    rcm.SetBucketName(testBucketName);
-    EXPECT_EQ(rcm.GetBucketName(), testBucketName);
-
-    if (!rcm.BucketExists(testBucketName)) {
-        rcm.CreateBucket(testBucketName);
-    }
+    storage_config_.bucket_name = testBucketName;
 
     std::string indexFilePath = "/tmp/diskann/index_files/1000/index";
     auto exist = lcm.Exist(indexFilePath);
@@ -132,33 +63,32 @@ TEST_F(DiskAnnFileManagerTest, AddFilePositive) {
     IndexMeta index_meta = {3, 100, 1000, 1, "index"};
 
     int64_t slice_size = config::KnowhereGetIndexSliceSize() << 20;
-    auto diskAnnFileManager = std::make_shared<DiskFileManagerImpl>(filed_data_meta, index_meta);
-    diskAnnFileManager->AddFile(indexFilePath);
+    auto diskAnnFileManager = std::make_shared<DiskFileManagerImpl>(filed_data_meta, index_meta, storage_config_);
+    auto ok = diskAnnFileManager->AddFile(indexFilePath);
+    EXPECT_EQ(ok, true);
 
-    // check result
-    auto remotePrefix = diskAnnFileManager->GetRemoteIndexObjectPrefix();
-    auto remoteIndexFiles = rcm.ListWithPrefix(remotePrefix);
-
+    auto remote_files_to_size = diskAnnFileManager->GetRemotePathsToFileSize();
     auto num_slice = index_size / slice_size;
-    EXPECT_EQ(remoteIndexFiles.size(), index_size % slice_size == 0 ? num_slice : num_slice + 1);
+    EXPECT_EQ(remote_files_to_size.size(), index_size % slice_size == 0 ? num_slice : num_slice + 1);
 
-    diskAnnFileManager->CacheIndexToDisk(remoteIndexFiles);
-    auto fileSize1 = rcm.Size(remoteIndexFiles[0]);
-    auto buf = std::unique_ptr<uint8_t[]>(new uint8_t[fileSize1]);
-    rcm.Read(remoteIndexFiles[0], buf.get(), fileSize1);
-
-    auto index = DeserializeFileData(buf.get(), fileSize1);
-    auto payload = index->GetPayload();
-    auto rows = payload->rows;
-    auto rawData = payload->raw_data;
-
-    EXPECT_EQ(rows, index_size);
-    EXPECT_EQ(rawData[0], data[0]);
-    EXPECT_EQ(rawData[4], data[4]);
-
-    auto files = diskAnnFileManager->GetRemotePathsToFileSize();
-    for (auto& value : files) {
-        rcm.Remove(value.first);
+    std::vector<std::string> remote_files;
+    for (auto& file2size : remote_files_to_size) {
+        remote_files.emplace_back(file2size.first);
     }
-    rcm.DeleteBucket(testBucketName);
+    diskAnnFileManager->CacheIndexToDisk(remote_files);
+    auto local_files = diskAnnFileManager->GetLocalFilePaths();
+    for (auto& file : local_files) {
+        auto file_size = lcm.Size(file);
+        auto buf = std::unique_ptr<uint8_t[]>(new uint8_t[file_size]);
+        lcm.Read(file, buf.get(), file_size);
+
+        auto index = FieldData(buf.get(), file_size);
+        auto payload = index.get_payload();
+        auto rows = payload->rows;
+        auto rawData = payload->raw_data;
+
+        EXPECT_EQ(rows, index_size);
+        EXPECT_EQ(rawData[0], data[0]);
+        EXPECT_EQ(rawData[4], data[4]);
+    }
 }

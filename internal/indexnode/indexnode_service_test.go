@@ -16,6 +16,19 @@ import (
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 )
 
+func genStorageConfig() *indexpb.StorageConfig {
+	return &indexpb.StorageConfig{
+		Address:         Params.MinioCfg.Address,
+		AccessKeyID:     Params.MinioCfg.AccessKeyID,
+		SecretAccessKey: Params.MinioCfg.SecretAccessKey,
+		BucketName:      Params.MinioCfg.BucketName,
+		RootPath:        Params.MinioCfg.RootPath,
+		IAMEndpoint:     Params.MinioCfg.IAMEndpoint,
+		UseSSL:          Params.MinioCfg.UseSSL,
+		UseIAM:          Params.MinioCfg.UseIAM,
+	}
+}
+
 func TestIndexNodeSimple(t *testing.T) {
 	in, err := NewMockIndexNodeComponent(context.TODO())
 	assert.Nil(t, err)
@@ -71,6 +84,7 @@ func TestIndexNodeSimple(t *testing.T) {
 			IndexName:       idxName,
 			IndexParams:     indexParams,
 			TypeParams:      typeParams,
+			StorageConfig:   genStorageConfig(),
 		}
 		status, err := in.CreateJob(ctx, createReq)
 		assert.Nil(t, err)
@@ -242,6 +256,7 @@ func TestIndexNodeComplex(t *testing.T) {
 			IndexName:       fmt.Sprintf("idx%d", tasks[i].idxID),
 			IndexParams:     tasks[i].idxParams,
 			TypeParams:      tasks[i].typeParams,
+			StorageConfig:   genStorageConfig(),
 		}
 		testwg.Add(1)
 		go func() {
