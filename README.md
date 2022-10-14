@@ -492,6 +492,17 @@ Reference to cite when you use Milvus in a research paper:
   pages={2614--2627},
   year={2021}
 }
+
+@article{2022manu,
+  title={Manu: a cloud native vector database management system},
+  author={Guo, Rentong and Luan, Xiaofan and Xiang, Long and Yan, Xiao and Yi, Xiaomeng and Luo, Jigao and Cheng, Qianya and Xu, Weizhi and Luo, Jiarui and Liu, Frank and others},
+  journal={Proceedings of the VLDB Endowment},
+  volume={15},
+  number={12},
+  pages={3548--3561},
+  year={2022},
+  publisher={VLDB Endowment}
+}
 ```
 
 ## Acknowledgments
