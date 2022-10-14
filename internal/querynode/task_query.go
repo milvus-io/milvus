@@ -47,6 +47,8 @@ func (q *queryTask) PreExecute(ctx context.Context) error {
 	if !funcutil.CheckCtxValid(q.Ctx()) {
 		return errors.New("search context timeout1$")
 	}
+	q.SetStep(TaskStepPreExecute)
+	rateCol.rtCounter.increaseQueueTime(q)
 	return nil
 }
 

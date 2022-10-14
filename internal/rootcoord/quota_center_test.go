@@ -344,7 +344,7 @@ func TestQuotaCenter(t *testing.T) {
 		Params.QuotaConfig.ForceDenyWriting = forceBak
 	})
 
-	t.Run("test memoryToWaterLevel", func(t *testing.T) {
+	t.Run("test memoryToWaterLevel basic", func(t *testing.T) {
 		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
 		factor := quotaCenter.memoryToWaterLevel()
 		assert.Equal(t, float64(1), factor)
@@ -354,6 +354,48 @@ func TestQuotaCenter(t *testing.T) {
 		quotaCenter.queryNodeMetrics = []*metricsinfo.QueryNodeQuotaMetrics{{Hms: metricsinfo.HardwareMetrics{MemoryUsage: 100, Memory: 100}}}
 		factor = quotaCenter.memoryToWaterLevel()
 		assert.Equal(t, float64(0), factor)
+	})
+
+	t.Run("test memoryToWaterLevel factors", func(t *testing.T) {
+		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
+		type memCase struct {
+			lowWater       float64
+			highWater      float64
+			memUsage       uint64
+			memTotal       uint64
+			expectedFactor float64
+		}
+		memCases := []memCase{
+			{0.8, 0.9, 80, 100, 1},
+			{0.8, 0.9, 82, 100, 0.8},
+			{0.8, 0.9, 85, 100, 0.5},
+			{0.8, 0.9, 88, 100, 0.2},
+			{0.8, 0.9, 90, 100, 0},
+
+			{0.85, 0.95, 85, 100, 1},
+			{0.85, 0.95, 87, 100, 0.8},
+			{0.85, 0.95, 90, 100, 0.5},
+			{0.85, 0.95, 93, 100, 0.2},
+			{0.85, 0.95, 95, 100, 0},
+		}
+
+		lowBackup := Params.QuotaConfig.DataNodeMemoryLowWaterLevel
+		highBackup := Params.QuotaConfig.DataNodeMemoryHighWaterLevel
+
+		for i, c := range memCases {
+			Params.QuotaConfig.QueryNodeMemoryLowWaterLevel = c.lowWater
+			Params.QuotaConfig.QueryNodeMemoryHighWaterLevel = c.highWater
+			quotaCenter.queryNodeMetrics = []*metricsinfo.QueryNodeQuotaMetrics{{
+				Hms: metricsinfo.HardwareMetrics{MemoryUsage: c.memUsage, Memory: c.memTotal}}}
+			factor := quotaCenter.memoryToWaterLevel()
+			if math.Abs(factor-c.expectedFactor) > 0.000001 {
+				t.Errorf("case %d failed: waterLever[low:%v, high:%v], memMetric[used:%d, total:%d], expectedFactor: %f, actualFactor: %f",
+					i, c.lowWater, c.highWater, c.memUsage, c.memTotal, c.expectedFactor, factor)
+			}
+		}
+
+		Params.QuotaConfig.QueryNodeMemoryLowWaterLevel = lowBackup
+		Params.QuotaConfig.QueryNodeMemoryHighWaterLevel = highBackup
 	})
 
 	t.Run("test diskQuotaExceeded", func(t *testing.T) {

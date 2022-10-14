@@ -573,21 +573,15 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 		return resp, nil
 	}
 
-	metrics, err := s.metricsCacheManager.GetSystemInfoMetrics()
+	resp.Response, err = s.getSystemInfoMetrics(ctx, req)
 	if err != nil {
-		log.Warn("failed to read metrics from cache, re-calculate it", zap.Error(err))
-		metrics = resp
-		metrics.Response, err = s.getSystemInfoMetrics(ctx, req)
-		if err != nil {
-			msg := "failed to get system info metrics"
-			log.Warn(msg, zap.Error(err))
-			resp.Status = utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, err)
-			return resp, nil
-		}
+		msg := "failed to get system info metrics"
+		log.Warn(msg, zap.Error(err))
+		resp.Status = utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, err)
+		return resp, nil
 	}
 
-	s.metricsCacheManager.UpdateSystemInfoMetrics(metrics)
-	return metrics, nil
+	return resp, nil
 }
 
 func (s *Server) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasRequest) (*milvuspb.GetReplicasResponse, error) {
