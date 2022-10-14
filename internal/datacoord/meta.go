@@ -477,9 +477,18 @@ func (m *meta) UpdateFlushSegmentsInfo(
 		s.NumOfRows = cp.GetNumOfRows()
 		modSegments[cp.GetSegmentID()] = s
 	}
+	var totalSize int64
 	segments := make([]*datapb.SegmentInfo, 0, len(modSegments))
 	for _, seg := range modSegments {
 		segments = append(segments, seg.SegmentInfo)
+		totalSize += seg.getSegmentSize()
+	}
+	// check disk quota
+	for _, seg := range m.segments.GetSegments() {
+		totalSize += seg.getSegmentSize()
+	}
+	if float64(totalSize) >= Params.QuotaConfig.DiskQuota {
+		return fmt.Errorf("UpdateFlushSegmentsInfo failed: disk quota exceeds if update, segID = %d", segmentID)
 	}
 	if err := m.catalog.AlterSegments(m.ctx, segments); err != nil {
 		log.Error("meta update: update flush segments info - failed to store flush segment info into Etcd",

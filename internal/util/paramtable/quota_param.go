@@ -437,6 +437,7 @@ func (p *quotaConfig) initTtProtectionEnabled() {
 
 func (p *quotaConfig) initMaxTimeTickDelay() {
 	if !p.TtProtectionEnabled {
+		p.MaxTimeTickDelay = math.MaxInt64
 		return
 	}
 	const defaultMaxTtDelay = 30.0
@@ -466,6 +467,7 @@ func (p *quotaConfig) initDataNodeMemoryLowWaterLevel() {
 
 func (p *quotaConfig) initDataNodeMemoryHighWaterLevel() {
 	if !p.MemProtectionEnabled {
+		p.DataNodeMemoryHighWaterLevel = 1
 		return
 	}
 	p.DataNodeMemoryHighWaterLevel = p.Base.ParseFloatWithDefault("quotaAndLimits.limitWriting.memProtection.dataNodeMemoryHighWaterLevel", defaultHighWaterLevel)
@@ -494,6 +496,7 @@ func (p *quotaConfig) initQueryNodeMemoryLowWaterLevel() {
 
 func (p *quotaConfig) initQueryNodeMemoryHighWaterLevel() {
 	if !p.MemProtectionEnabled {
+		p.QueryNodeMemoryLowWaterLevel = defaultLowWaterLevel
 		return
 	}
 	p.QueryNodeMemoryHighWaterLevel = p.Base.ParseFloatWithDefault("quotaAndLimits.limitWriting.memProtection.queryNodeMemoryHighWaterLevel", defaultHighWaterLevel)
@@ -537,6 +540,7 @@ func (p *quotaConfig) initQueueProtectionEnabled() {
 
 func (p *quotaConfig) initNQInQueueThreshold() {
 	if !p.QueueProtectionEnabled {
+		p.NQInQueueThreshold = math.MaxInt64
 		return
 	}
 	p.NQInQueueThreshold = p.Base.ParseInt64WithDefault("quotaAndLimits.limitReading.queueProtection.nqInQueueThreshold", math.MaxInt64)
@@ -548,6 +552,7 @@ func (p *quotaConfig) initNQInQueueThreshold() {
 
 func (p *quotaConfig) initQueueLatencyThreshold() {
 	if !p.QueueProtectionEnabled {
+		p.QueueLatencyThreshold = defaultMax
 		return
 	}
 	p.QueueLatencyThreshold = p.Base.ParseFloatWithDefault("quotaAndLimits.limitReading.queueProtection.queueLatencyThreshold", defaultMax)
@@ -579,9 +584,6 @@ func (p *quotaConfig) initMaxReadResultRate() {
 func (p *quotaConfig) initCoolOffSpeed() {
 	const defaultSpeed = 0.9
 	p.CoolOffSpeed = defaultSpeed
-	if !p.QueueProtectionEnabled {
-		return
-	}
 	p.CoolOffSpeed = p.Base.ParseFloatWithDefault("quotaAndLimits.limitReading.coolOffSpeed", defaultSpeed)
 	// (0, 1]
 	if p.CoolOffSpeed <= 0 || p.CoolOffSpeed > 1 {

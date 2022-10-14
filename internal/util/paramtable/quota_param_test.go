@@ -17,6 +17,7 @@
 package paramtable
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -84,8 +85,8 @@ func TestQuotaParam(t *testing.T) {
 	t.Run("test limit reading", func(t *testing.T) {
 		assert.False(t, qc.ForceDenyReading)
 		assert.Equal(t, false, qc.QueueProtectionEnabled)
-		assert.Equal(t, int64(0), qc.NQInQueueThreshold)
-		assert.Equal(t, float64(0), qc.QueueLatencyThreshold)
+		assert.Equal(t, int64(math.MaxInt64), qc.NQInQueueThreshold)
+		assert.Equal(t, defaultMax, qc.QueueLatencyThreshold)
 		assert.Equal(t, false, qc.ResultProtectionEnabled)
 		assert.Equal(t, defaultMax, qc.MaxReadResultRate)
 		assert.Equal(t, 0.9, qc.CoolOffSpeed)
