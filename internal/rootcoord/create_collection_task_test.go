@@ -40,6 +40,17 @@ func Test_createCollectionTask_validate(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("shard num exceeds limit", func(t *testing.T) {
+		task := createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:      &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				ShardsNum: maxShardNum + 1,
+			},
+		}
+		err := task.validate()
+		assert.Error(t, err)
+	})
+
 	t.Run("normal case", func(t *testing.T) {
 		task := createCollectionTask{
 			Req: &milvuspb.CreateCollectionRequest{
