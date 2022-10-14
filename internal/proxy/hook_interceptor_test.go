@@ -16,9 +16,8 @@ func TestInitHook(t *testing.T) {
 	assert.IsType(t, defaultHook{}, hoo)
 
 	Params.ProxyCfg.SoPath = "/a/b/hook.so"
-	assert.Panics(t, func() {
-		initHook()
-	})
+	err := initHook()
+	assert.NotNil(t, err)
 	Params.ProxyCfg.SoPath = ""
 }
 

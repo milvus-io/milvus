@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"fmt"
 	"plugin"
 
 	"github.com/milvus-io/milvus/api/hook"
@@ -34,41 +35,41 @@ func (d defaultHook) Release() {}
 
 var hoo hook.Hook
 
-func initHook() {
+func initHook() error {
 	path := Params.ProxyCfg.SoPath
 	if path == "" {
 		hoo = defaultHook{}
-		return
+		return nil
 	}
 
 	logger.Debug("start to load plugin", zap.String("path", path))
 	p, err := plugin.Open(path)
 	if err != nil {
-		exit("fail to open the plugin", err)
+		return fmt.Errorf("fail to open the plugin, error: %s", err.Error())
 	}
 	logger.Debug("plugin open")
 
 	h, err := p.Lookup("MilvusHook")
 	if err != nil {
-		exit("fail to the 'MilvusHook' object in the plugin", err)
+		return fmt.Errorf("fail to the 'MilvusHook' object in the plugin, error: %s", err.Error())
 	}
 
 	var ok bool
 	hoo, ok = h.(hook.Hook)
 	if !ok {
-		exit("fail to convert the `Hook` interface", nil)
+		return fmt.Errorf("fail to convert the `Hook` interface")
 	}
 	if err = hoo.Init(Params.HookCfg.SoConfig); err != nil {
-		exit("fail to init configs for the hoo", err)
+		return fmt.Errorf("fail to init configs for the hook, error: %s", err.Error())
 	}
-}
-
-func exit(errMsg string, err error) {
-	logger.Panic("hoo error", zap.String("path", Params.ProxyCfg.SoPath), zap.String("msg", errMsg), zap.Error(err))
+	return nil
 }
 
 func UnaryServerHookInterceptor() grpc.UnaryServerInterceptor {
-	initHook()
+	if hookError := initHook(); hookError != nil {
+		logger.Error("hook error", zap.String("path", Params.ProxyCfg.SoPath), zap.Error(hookError))
+		hoo = defaultHook{}
+	}
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		var (
 			fullMethod = info.FullMethod
