@@ -107,8 +107,9 @@ type RootCoordMock struct {
 
 	// TODO(dragondriver): TimeTick-related
 
-	lastTs    typeutil.Timestamp
-	lastTsMtx sync.Mutex
+	lastTs          typeutil.Timestamp
+	lastTsMtx       sync.Mutex
+	checkHealthFunc func(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error)
 }
 
 func (coord *RootCoordMock) CreateAlias(ctx context.Context, req *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
@@ -1124,6 +1125,13 @@ func (coord *RootCoordMock) AlterCollection(ctx context.Context, request *milvus
 	return &commonpb.Status{}, nil
 }
 
+func (coord *RootCoordMock) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
+	if coord.checkHealthFunc != nil {
+		return coord.checkHealthFunc(ctx, req)
+	}
+	return &milvuspb.CheckHealthResponse{IsHealthy: true}, nil
+}
+
 type DescribeCollectionFunc func(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)
 type ShowPartitionsFunc func(ctx context.Context, request *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error)
 type ShowSegmentsFunc func(ctx context.Context, request *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error)
@@ -1189,6 +1197,12 @@ func (m *mockRootCoord) DropCollection(ctx context.Context, request *milvuspb.Dr
 
 func (m *mockRootCoord) ListPolicy(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
 	return &internalpb.ListPolicyResponse{}, nil
+}
+
+func (m *mockRootCoord) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
+	return &milvuspb.CheckHealthResponse{
+		IsHealthy: true,
+	}, nil
 }
 
 func newMockRootCoord() *mockRootCoord {

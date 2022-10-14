@@ -22,6 +22,9 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"sync"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -4586,4 +4589,62 @@ func (node *Proxy) SetRates(ctx context.Context, request *proxypb.SetRatesReques
 	}
 	resp.ErrorCode = commonpb.ErrorCode_Success
 	return resp, nil
+}
+
+func (node *Proxy) CheckHealth(ctx context.Context, request *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
+	if !node.checkHealthy() {
+		reason := errorutil.UnHealthReason("proxy", node.session.ServerID, "proxy is unhealthy")
+		return &milvuspb.CheckHealthResponse{IsHealthy: false, Reasons: []string{reason}}, nil
+	}
+
+	group, ctx := errgroup.WithContext(ctx)
+	errReasons := make([]string, 0)
+
+	mu := &sync.Mutex{}
+	fn := func(role string, resp *milvuspb.CheckHealthResponse, err error) error {
+		mu.Lock()
+		defer mu.Unlock()
+
+		if err != nil {
+			log.Warn("check health fail,", zap.String("role", role), zap.Error(err))
+			errReasons = append(errReasons, fmt.Sprintf("check health fail for %s", role))
+			return err
+		}
+
+		if !resp.IsHealthy {
+			log.Warn("check health fail,", zap.String("role", role))
+			errReasons = append(errReasons, resp.Reasons...)
+		}
+		return nil
+	}
+
+	group.Go(func() error {
+		resp, err := node.rootCoord.CheckHealth(ctx, request)
+		return fn("rootcoord", resp, err)
+	})
+
+	group.Go(func() error {
+		resp, err := node.queryCoord.CheckHealth(ctx, request)
+		return fn("querycoord", resp, err)
+	})
+
+	group.Go(func() error {
+		resp, err := node.dataCoord.CheckHealth(ctx, request)
+		return fn("datacoord", resp, err)
+	})
+
+	group.Go(func() error {
+		resp, err := node.indexCoord.CheckHealth(ctx, request)
+		return fn("indexcoord", resp, err)
+	})
+
+	err := group.Wait()
+	if err != nil || len(errReasons) != 0 {
+		return &milvuspb.CheckHealthResponse{
+			IsHealthy: false,
+			Reasons:   errReasons,
+		}, nil
+	}
+
+	return &milvuspb.CheckHealthResponse{IsHealthy: true}, nil
 }

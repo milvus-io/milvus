@@ -26,15 +26,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/metastore/model"
-
-	"github.com/stretchr/testify/assert"
-
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/indexnode"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/indexcoord"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -43,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestMockEtcd(t *testing.T) {
@@ -1014,5 +1013,62 @@ func TestIndexCoord_pullSegmentInfo(t *testing.T) {
 		info, err := ic.pullSegmentInfo(context.Background(), segID)
 		assert.ErrorIs(t, err, ErrSegmentNotFound)
 		assert.Nil(t, info)
+	})
+}
+
+func TestIndexCoord_CheckHealth(t *testing.T) {
+	t.Run("not healthy", func(t *testing.T) {
+		ctx := context.Background()
+		ic := &IndexCoord{session: &sessionutil.Session{ServerID: 1}}
+		ic.stateCode.Store(commonpb.StateCode_Abnormal)
+		resp, err := ic.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, false, resp.IsHealthy)
+		assert.NotEmpty(t, resp.Reasons)
+	})
+
+	t.Run("index node health check is ok", func(t *testing.T) {
+		ctx := context.Background()
+		indexNode := indexnode.NewIndexNodeMock()
+		nm := NewNodeManager(ctx)
+		nm.nodeClients[1] = indexNode
+		ic := &IndexCoord{
+			session:     &sessionutil.Session{ServerID: 1},
+			nodeManager: nm,
+		}
+		ic.stateCode.Store(commonpb.StateCode_Healthy)
+		resp, err := ic.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, true, resp.IsHealthy)
+		assert.Empty(t, resp.Reasons)
+	})
+
+	t.Run("index node health check is fail", func(t *testing.T) {
+		ctx := context.Background()
+		indexNode := indexnode.NewIndexNodeMock()
+		indexNode.CallGetComponentStates = func(ctx context.Context) (*milvuspb.ComponentStates, error) {
+			return &milvuspb.ComponentStates{
+				State: &milvuspb.ComponentInfo{
+					NodeID:    1,
+					StateCode: commonpb.StateCode_Abnormal,
+				},
+				SubcomponentStates: nil,
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+				},
+			}, nil
+		}
+		nm := NewNodeManager(ctx)
+		nm.nodeClients[1] = indexNode
+		ic := &IndexCoord{
+			nodeManager: nm,
+			session:     &sessionutil.Session{ServerID: 1},
+		}
+		ic.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := ic.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, false, resp.IsHealthy)
+		assert.NotEmpty(t, resp.Reasons)
 	})
 }

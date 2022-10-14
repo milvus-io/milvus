@@ -114,6 +114,9 @@ func Test_NewClient(t *testing.T) {
 
 		r19, err := client.ShowConfigurations(ctx, nil)
 		retCheck(retNotNil, r19, err)
+
+		r20, err := client.CheckHealth(ctx, nil)
+		retCheck(retNotNil, r20, err)
 	}
 
 	client.grpcClient = &mock.GRPCClientBase[querypb.QueryCoordClient]{

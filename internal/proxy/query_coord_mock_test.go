@@ -71,6 +71,14 @@ type QueryCoordMock struct {
 	timeTickChannel   string
 
 	validShardLeaders bool
+	checkHealthFunc   func(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error)
+}
+
+func (coord *QueryCoordMock) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
+	if coord.checkHealthFunc != nil {
+		return coord.checkHealthFunc(ctx, req)
+	}
+	return &milvuspb.CheckHealthResponse{IsHealthy: true}, nil
 }
 
 func (coord *QueryCoordMock) updateState(state commonpb.StateCode) {

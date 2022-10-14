@@ -27,6 +27,53 @@ func (_m *MockCluster) EXPECT() *MockCluster_Expecter {
 	return &MockCluster_Expecter{mock: &_m.Mock}
 }
 
+// GetComponentStates provides a mock function with given fields: ctx, nodeID
+func (_m *MockCluster) GetComponentStates(ctx context.Context, nodeID int64) (*milvuspb.ComponentStates, error) {
+	ret := _m.Called(ctx, nodeID)
+
+	var r0 *milvuspb.ComponentStates
+	if rf, ok := ret.Get(0).(func(context.Context, int64) *milvuspb.ComponentStates); ok {
+		r0 = rf(ctx, nodeID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.ComponentStates)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(context.Context, int64) error); ok {
+		r1 = rf(ctx, nodeID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockCluster_GetComponentStates_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetComponentStates'
+type MockCluster_GetComponentStates_Call struct {
+	*mock.Call
+}
+
+// GetComponentStates is a helper method to define mock.On call
+//  - ctx context.Context
+//  - nodeID int64
+func (_e *MockCluster_Expecter) GetComponentStates(ctx interface{}, nodeID interface{}) *MockCluster_GetComponentStates_Call {
+	return &MockCluster_GetComponentStates_Call{Call: _e.mock.On("GetComponentStates", ctx, nodeID)}
+}
+
+func (_c *MockCluster_GetComponentStates_Call) Run(run func(ctx context.Context, nodeID int64)) *MockCluster_GetComponentStates_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *MockCluster_GetComponentStates_Call) Return(_a0 *milvuspb.ComponentStates, _a1 error) *MockCluster_GetComponentStates_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
 // GetDataDistribution provides a mock function with given fields: ctx, nodeID, req
 func (_m *MockCluster) GetDataDistribution(ctx context.Context, nodeID int64, req *querypb.GetDataDistributionRequest) (*querypb.GetDataDistributionResponse, error) {
 	ret := _m.Called(ctx, nodeID, req)

@@ -20,6 +20,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
+
+	"github.com/milvus-io/milvus/internal/util/errorutil"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
@@ -701,4 +706,36 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 		})
 	}
 	return resp, nil
+}
+
+func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
+	if s.status.Load() != commonpb.StateCode_Healthy {
+		reason := errorutil.UnHealthReason("querycoord", s.session.ServerID, "querycoord is unhealthy")
+		return &milvuspb.CheckHealthResponse{IsHealthy: false, Reasons: []string{reason}}, nil
+	}
+
+	group, ctx := errgroup.WithContext(ctx)
+	errReasons := make([]string, 0, len(s.nodeMgr.GetAll()))
+
+	mu := &sync.Mutex{}
+	for _, node := range s.nodeMgr.GetAll() {
+		node := node
+		group.Go(func() error {
+			resp, err := s.cluster.GetComponentStates(ctx, node.ID())
+			isHealthy, reason := errorutil.UnHealthReasonWithComponentStatesOrErr("querynode", node.ID(), resp, err)
+			if !isHealthy {
+				mu.Lock()
+				defer mu.Unlock()
+				errReasons = append(errReasons, reason)
+			}
+			return err
+		})
+	}
+
+	err := group.Wait()
+	if err != nil || len(errReasons) != 0 {
+		return &milvuspb.CheckHealthResponse{IsHealthy: false, Reasons: errReasons}, nil
+	}
+
+	return &milvuspb.CheckHealthResponse{IsHealthy: true, Reasons: errReasons}, nil
 }

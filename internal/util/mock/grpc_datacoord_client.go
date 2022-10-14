@@ -34,6 +34,10 @@ type GrpcDataCoordClient struct {
 	Err error
 }
 
+func (m *GrpcDataCoordClient) CheckHealth(ctx context.Context, in *milvuspb.CheckHealthRequest, opts ...grpc.CallOption) (*milvuspb.CheckHealthResponse, error) {
+	return &milvuspb.CheckHealthResponse{}, m.Err
+}
+
 func (m *GrpcDataCoordClient) GetComponentStates(ctx context.Context, in *milvuspb.GetComponentStatesRequest, opts ...grpc.CallOption) (*milvuspb.ComponentStates, error) {
 	return &milvuspb.ComponentStates{}, m.Err
 }

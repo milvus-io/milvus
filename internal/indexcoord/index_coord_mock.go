@@ -145,6 +145,12 @@ func (m *Mock) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) 
 	return m.CallGetMetrics(ctx, req)
 }
 
+func (m *Mock) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
+	return &milvuspb.CheckHealthResponse{
+		IsHealthy: true,
+	}, nil
+}
+
 func NewIndexCoordMock() *Mock {
 	return &Mock{
 		CallInit: func() error {

@@ -224,6 +224,12 @@ func (m *MockDataCoord) BroadcastAlteredCollection(ctx context.Context, req *mil
 	return m.broadCastResp, m.err
 }
 
+func (m *MockDataCoord) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
+	return &milvuspb.CheckHealthResponse{
+		IsHealthy: true,
+	}, nil
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 func Test_NewServer(t *testing.T) {
 	ctx := context.Background()
@@ -531,6 +537,13 @@ func Test_NewServer(t *testing.T) {
 		resp, err := server.BroadcastAlteredCollection(ctx, nil)
 		assert.Nil(t, err)
 		assert.NotNil(t, resp)
+	})
+
+	t.Run("CheckHealth", func(t *testing.T) {
+		server.dataCoord = &MockDataCoord{}
+		ret, err := server.CheckHealth(ctx, nil)
+		assert.Nil(t, err)
+		assert.Equal(t, true, ret.IsHealthy)
 	})
 
 	err := server.Stop()

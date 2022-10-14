@@ -25,6 +25,7 @@ import (
 	"os/signal"
 	"path"
 	"strconv"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -3339,6 +3340,67 @@ func newTestServer2(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 	}
 
 	return svr
+}
+
+func Test_CheckHealth(t *testing.T) {
+	t.Run("not healthy", func(t *testing.T) {
+		ctx := context.Background()
+		s := &Server{session: &sessionutil.Session{ServerID: 1}}
+		s.stateCode.Store(commonpb.StateCode_Abnormal)
+		resp, err := s.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, false, resp.IsHealthy)
+		assert.NotEmpty(t, resp.Reasons)
+	})
+
+	t.Run("data node health check is ok", func(t *testing.T) {
+		svr := &Server{session: &sessionutil.Session{ServerID: 1}}
+		svr.stateCode.Store(commonpb.StateCode_Healthy)
+		healthClient := &mockDataNodeClient{
+			id:    1,
+			state: commonpb.StateCode_Healthy}
+		sm := NewSessionManager()
+		sm.sessions = struct {
+			sync.RWMutex
+			data map[int64]*Session
+		}{data: map[int64]*Session{1: {
+			client: healthClient,
+			clientCreator: func(ctx context.Context, addr string) (types.DataNode, error) {
+				return healthClient, nil
+			},
+		}}}
+
+		svr.sessionManager = sm
+		ctx := context.Background()
+		resp, err := svr.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, true, resp.IsHealthy)
+		assert.Empty(t, resp.Reasons)
+	})
+
+	t.Run("data node health check is fail", func(t *testing.T) {
+		svr := &Server{session: &sessionutil.Session{ServerID: 1}}
+		svr.stateCode.Store(commonpb.StateCode_Healthy)
+		unhealthClient := &mockDataNodeClient{
+			id:    1,
+			state: commonpb.StateCode_Abnormal}
+		sm := NewSessionManager()
+		sm.sessions = struct {
+			sync.RWMutex
+			data map[int64]*Session
+		}{data: map[int64]*Session{1: {
+			client: unhealthClient,
+			clientCreator: func(ctx context.Context, addr string) (types.DataNode, error) {
+				return unhealthClient, nil
+			},
+		}}}
+		svr.sessionManager = sm
+		ctx := context.Background()
+		resp, err := svr.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, false, resp.IsHealthy)
+		assert.NotEmpty(t, resp.Reasons)
+	})
 }
 
 func Test_initServiceDiscovery(t *testing.T) {

@@ -213,6 +213,10 @@ func Test_NewClient(t *testing.T) {
 			r, err := client.ShowConfigurations(ctx, nil)
 			retCheck(retNotNil, r, err)
 		}
+		{
+			r, err := client.CheckHealth(ctx, nil)
+			retCheck(retNotNil, r, err)
+		}
 	}
 
 	client.grpcClient = &mock.GRPCClientBase[rootcoordpb.RootCoordClient]{
@@ -409,6 +413,10 @@ func Test_NewClient(t *testing.T) {
 	}
 	{
 		rTimeout, err := client.ListPolicy(shortCtx, nil)
+		retCheck(rTimeout, err)
+	}
+	{
+		rTimeout, err := client.CheckHealth(shortCtx, nil)
 		retCheck(rTimeout, err)
 	}
 	// clean up

@@ -54,6 +54,7 @@ type Cluster interface {
 	GetDataDistribution(ctx context.Context, nodeID int64, req *querypb.GetDataDistributionRequest) (*querypb.GetDataDistributionResponse, error)
 	GetMetrics(ctx context.Context, nodeID int64, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 	SyncDistribution(ctx context.Context, nodeID int64, req *querypb.SyncDistributionRequest) (*commonpb.Status, error)
+	GetComponentStates(ctx context.Context, nodeID int64) (*milvuspb.ComponentStates, error)
 	Start(ctx context.Context)
 	Stop()
 }
@@ -201,6 +202,22 @@ func (c *QueryCluster) SyncDistribution(ctx context.Context, nodeID int64, req *
 		req.Base.TargetID = nodeID
 		resp, err = cli.SyncDistribution(ctx, req)
 	})
+	if err1 != nil {
+		return nil, err1
+	}
+	return resp, err
+}
+
+func (c *QueryCluster) GetComponentStates(ctx context.Context, nodeID int64) (*milvuspb.ComponentStates, error) {
+	var (
+		resp *milvuspb.ComponentStates
+		err  error
+	)
+
+	err1 := c.send(ctx, nodeID, func(cli *grpcquerynodeclient.Client) {
+		resp, err = cli.GetComponentStates(ctx)
+	})
+
 	if err1 != nil {
 		return nil, err1
 	}

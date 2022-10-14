@@ -65,6 +65,8 @@ service DataCoord {
   rpc MarkSegmentsDropped(MarkSegmentsDroppedRequest) returns(common.Status) {}
 
   rpc BroadcastAlteredCollection(milvus.AlterCollectionRequest) returns (common.Status) {}
+
+  rpc CheckHealth(milvus.CheckHealthRequest) returns (milvus.CheckHealthResponse) {}
 }
 
 service DataNode {

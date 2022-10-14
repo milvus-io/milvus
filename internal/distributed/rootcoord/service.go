@@ -77,6 +77,10 @@ type Server struct {
 	closer io.Closer
 }
 
+func (s *Server) CheckHealth(ctx context.Context, request *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
+	return s.rootCoord.CheckHealth(ctx, request)
+}
+
 // CreateAlias creates an alias for specified collection.
 func (s *Server) CreateAlias(ctx context.Context, request *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
 	return s.rootCoord.CreateAlias(ctx, request)

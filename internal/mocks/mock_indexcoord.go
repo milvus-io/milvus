@@ -29,6 +29,53 @@ func (_m *MockIndexCoord) EXPECT() *MockIndexCoord_Expecter {
 	return &MockIndexCoord_Expecter{mock: &_m.Mock}
 }
 
+// CheckHealth provides a mock function with given fields: ctx, req
+func (_m *MockIndexCoord) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
+	ret := _m.Called(ctx, req)
+
+	var r0 *milvuspb.CheckHealthResponse
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CheckHealthRequest) *milvuspb.CheckHealthResponse); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.CheckHealthResponse)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.CheckHealthRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockIndexCoord_CheckHealth_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CheckHealth'
+type MockIndexCoord_CheckHealth_Call struct {
+	*mock.Call
+}
+
+// CheckHealth is a helper method to define mock.On call
+//  - ctx context.Context
+//  - req *milvuspb.CheckHealthRequest
+func (_e *MockIndexCoord_Expecter) CheckHealth(ctx interface{}, req interface{}) *MockIndexCoord_CheckHealth_Call {
+	return &MockIndexCoord_CheckHealth_Call{Call: _e.mock.On("CheckHealth", ctx, req)}
+}
+
+func (_c *MockIndexCoord_CheckHealth_Call) Run(run func(ctx context.Context, req *milvuspb.CheckHealthRequest)) *MockIndexCoord_CheckHealth_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.CheckHealthRequest))
+	})
+	return _c
+}
+
+func (_c *MockIndexCoord_CheckHealth_Call) Return(_a0 *milvuspb.CheckHealthResponse, _a1 error) *MockIndexCoord_CheckHealth_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
 // CreateIndex provides a mock function with given fields: ctx, req
 func (_m *MockIndexCoord) CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
 	ret := _m.Called(ctx, req)

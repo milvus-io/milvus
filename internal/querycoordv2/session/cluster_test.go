@@ -134,6 +134,13 @@ func (suite *ClusterTestSuite) createDefaultMockServer() querypb.QueryNodeServer
 		mock.Anything,
 		mock.AnythingOfType("*querypb.SyncDistributionRequest"),
 	).Maybe().Return(succStatus, nil)
+	svr.EXPECT().GetComponentStates(
+		mock.Anything,
+		mock.AnythingOfType("*milvuspb.GetComponentStatesRequest"),
+	).Maybe().Return(&milvuspb.ComponentStates{
+		State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
+		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+	}, nil)
 	return svr
 }
 
@@ -172,6 +179,13 @@ func (suite *ClusterTestSuite) createFailedMockServer() querypb.QueryNodeServer 
 		mock.Anything,
 		mock.AnythingOfType("*querypb.SyncDistributionRequest"),
 	).Maybe().Return(failStatus, nil)
+	svr.EXPECT().GetComponentStates(
+		mock.Anything,
+		mock.AnythingOfType("*milvuspb.GetComponentStatesRequest"),
+	).Maybe().Return(&milvuspb.ComponentStates{
+		State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Abnormal},
+		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+	}, nil)
 	return svr
 }
 
@@ -326,6 +340,17 @@ func (suite *ClusterTestSuite) TestSyncDistribution() {
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		Reason:    "unexpected error",
 	}, status)
+}
+
+func (suite *ClusterTestSuite) TestGetComponentStates() {
+	ctx := context.TODO()
+	status, err := suite.cluster.GetComponentStates(ctx, 0)
+	suite.NoError(err)
+	suite.Equal(status.State.GetStateCode(), commonpb.StateCode_Healthy)
+
+	status, err = suite.cluster.GetComponentStates(ctx, 1)
+	suite.NoError(err)
+	suite.Equal(status.State.GetStateCode(), commonpb.StateCode_Abnormal)
 }
 
 func TestClusterSuite(t *testing.T) {

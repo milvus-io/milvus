@@ -337,3 +337,16 @@ func (c *Client) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 	}
 	return ret.(*querypb.GetShardLeadersResponse), err
 }
+
+func (c *Client) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryCoordClient) (any, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.CheckHealth(ctx, req)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+	return ret.(*milvuspb.CheckHealthResponse), err
+}

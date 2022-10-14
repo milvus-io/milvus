@@ -1416,3 +1416,36 @@ func TestRootCoord_AlterCollection(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
 	})
 }
+
+func TestRootCoord_CheckHealth(t *testing.T) {
+	t.Run("not healthy", func(t *testing.T) {
+		ctx := context.Background()
+		c := newTestCore(withAbnormalCode())
+		resp, err := c.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, false, resp.IsHealthy)
+		assert.NotEmpty(t, resp.Reasons)
+	})
+
+	t.Run("proxy health check is ok", func(t *testing.T) {
+		c := newTestCore(withHealthyCode(),
+			withValidProxyManager())
+
+		ctx := context.Background()
+		resp, err := c.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, true, resp.IsHealthy)
+		assert.Empty(t, resp.Reasons)
+	})
+
+	t.Run("proxy health check is fail", func(t *testing.T) {
+		c := newTestCore(withHealthyCode(),
+			withInvalidProxyManager())
+
+		ctx := context.Background()
+		resp, err := c.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, false, resp.IsHealthy)
+		assert.NotEmpty(t, resp.Reasons)
+	})
+}
