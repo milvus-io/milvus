@@ -54,12 +54,34 @@ VectorMemIndex::Serialize(const Config& config) {
         // Disassemble will only divide the raw vectors, other keys were already divided
         knowhere::Disassemble(ret, serialize_config);
     }
+
     return ret;
 }
 
 void
 VectorMemIndex::Load(const BinarySet& binary_set, const Config& config) {
+    /*
+    auto assembled_bs = std::make_unique<knowhere::BinarySet>();
+    for (auto it = map_.begin(); it != map_.end(); ++it) {
+        assembled_bs->Append(it->first, it->second);
+    }
+
+    // call Assemble to merge RAW_DATA_0 ... RAW_DATA_N to RAW_DATA
+    knowhere::Assemble(*assembled_bs);
+    auto& assembled_map_ = assembled_bs->binary_map_;
+    for (auto it = assembled_map_.begin(); it != assembled_map_.end(); ++it) {
+        if (it->first == RAW_DATA) {
+            raw_data_.clear();
+            auto data_size = it->second->size;
+            raw_data_.resize(data_size);
+            memcpy(raw_data_.data(), it->second->data.get(), data_size);
+            break;
+        }
+    }*/
+
+    index_->Load(binary_set);
     auto& map_ = binary_set.binary_map_;
+    // copy RAW_DATA after index->Load(), since assemble is performed inside.
     for (auto it = map_.begin(); it != map_.end(); ++it) {
         if (it->first == RAW_DATA) {
             raw_data_.clear();
@@ -69,7 +91,6 @@ VectorMemIndex::Load(const BinarySet& binary_set, const Config& config) {
             break;
         }
     }
-    index_->Load(binary_set);
     SetDim(index_->Dim());
 }
 
@@ -108,6 +129,7 @@ VectorMemIndex::Query(const DatasetPtr dataset, const SearchInfo& search_info, c
 
     auto load_raw_data_closure = [&]() { LoadRawData(); };  // hide this pointer
     auto index_type = GetIndexType();
+
     if (is_in_nm_list(index_type)) {
         std::call_once(raw_data_loaded_, load_raw_data_closure);
     }
