@@ -61,6 +61,9 @@ const (
 	MaxTotalSizeInMemory = 2 * 1024 * 1024 * 1024 // 2GB
 )
 
+// ReportImportAttempts is the maximum # of attempts to retry when import fails.
+var ReportImportAttempts uint = 10
+
 type ImportWrapper struct {
 	ctx              context.Context            // for canceling parse process
 	cancel           context.CancelFunc         // for canceling parse process
@@ -342,9 +345,9 @@ func (p *ImportWrapper) reportPersisted() error {
 	// persist state task is valuable, retry more times in case fail this task only because of network error
 	reportErr := retry.Do(p.ctx, func() error {
 		return p.reportFunc(p.importResult)
-	}, retry.Attempts(10))
+	}, retry.Attempts(ReportImportAttempts))
 	if reportErr != nil {
-		log.Warn("import wrapper: fail to report import state to root coord", zap.Error(reportErr))
+		log.Warn("import wrapper: fail to report import state to RootCoord", zap.Error(reportErr))
 		return reportErr
 	}
 	return nil
