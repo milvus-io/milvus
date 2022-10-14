@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"plugin"
 
-	"github.com/milvus-io/milvus/api/hook"
+	"github.com/milvus-io/milvus-proto/go-api/hook"
 
 	"go.uber.org/zap"
 

@@ -472,9 +472,9 @@ const char descriptor_table_protodef_common_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "lthy\020\001\022\014\n\010Abnormal\020\002\022\013\n\007StandBy\020\003:^\n\021pri"
   "vilege_ext_obj\022\037.google.protobuf.Message"
   "Options\030\351\007 \001(\0132!.milvus.proto.common.Pri"
-  "vilegeExtBL\n\016io.milvus.grpcB\013CommonProto"
-  "P\001Z(github.com/milvus-io/milvus/api/comm"
-  "onpb\240\001\001b\006proto3"
+  "vilegeExtBU\n\016io.milvus.grpcB\013CommonProto"
+  "P\001Z1github.com/milvus-io/milvus-proto/go"
+  "-api/commonpb\240\001\001b\006proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_common_2eproto_deps[1] = {
   &::descriptor_table_google_2fprotobuf_2fdescriptor_2eproto,
@@ -495,7 +495,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_com
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_common_2eproto_once;
 static bool descriptor_table_common_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_common_2eproto = {
-  &descriptor_table_common_2eproto_initialized, descriptor_table_protodef_common_2eproto, "common.proto", 5375,
+  &descriptor_table_common_2eproto_initialized, descriptor_table_protodef_common_2eproto, "common.proto", 5384,
   &descriptor_table_common_2eproto_once, descriptor_table_common_2eproto_sccs, descriptor_table_common_2eproto_deps, 11, 1,
   schemas, file_default_instances, TableStruct_common_2eproto::offsets,
   file_level_metadata_common_2eproto, 11, file_level_enum_descriptors_common_2eproto, file_level_service_descriptors_common_2eproto,

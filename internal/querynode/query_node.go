@@ -30,7 +30,6 @@ import "C"
 import (
 	"context"
 	"fmt"
-	"github.com/milvus-io/milvus/api/commonpb"
 	"math"
 	"os"
 	"path"
@@ -42,6 +41,8 @@ import (
 	"syscall"
 	"time"
 	"unsafe"
+
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/panjf2000/ants/v2"

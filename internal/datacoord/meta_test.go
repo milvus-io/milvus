@@ -27,7 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/common"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/milvus-io/milvus/api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/kv"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"

@@ -23,7 +23,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/milvus-io/milvus/api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 
 	"github.com/stretchr/testify/assert"
 

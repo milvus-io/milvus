@@ -26,7 +26,7 @@ import (
 	"github.com/bits-and-blooms/bloom/v3"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/api/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"

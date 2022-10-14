@@ -5,7 +5,7 @@ package mocks
 import (
 	context "context"
 
-	milvuspb "github.com/milvus-io/milvus/api/milvuspb"
+	milvuspb "github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	metastore "github.com/milvus-io/milvus/internal/metastore"
 
 	mock "github.com/stretchr/testify/mock"

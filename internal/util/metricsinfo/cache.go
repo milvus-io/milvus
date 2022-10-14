@@ -20,7 +20,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/api/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 )
 
 // DefaultMetricsRetention defines the default retention of metrics cache.

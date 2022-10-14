@@ -20,7 +20,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/milvus-io/milvus/api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 )
 
 // InsertRepackFunc is used to repack messages after hash by primary key
