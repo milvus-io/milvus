@@ -19,10 +19,12 @@ package components
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/api/commonpb"
 	"github.com/milvus-io/milvus/api/milvuspb"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 
 	grpcindexnode "github.com/milvus-io/milvus/internal/distributed/indexnode"
 )
@@ -63,6 +65,14 @@ func (n *IndexNode) Stop() error {
 }
 
 // GetComponentStates returns IndexNode's states
-func (n *IndexNode) GetComponentStates(ctx context.Context, request *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
-	return n.svr.GetComponentStates(ctx, request)
+func (n *IndexNode) Health(ctx context.Context) commonpb.StateCode {
+	resp, err := n.svr.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
+	if err != nil {
+		return commonpb.StateCode_Abnormal
+	}
+	return resp.State.GetStateCode()
+}
+
+func (n *IndexNode) GetName() string {
+	return typeutil.IndexNodeRole
 }

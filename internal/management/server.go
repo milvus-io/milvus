@@ -23,6 +23,7 @@ import (
 	"strconv"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/management/healthz"
 	"go.uber.org/zap"
 )
 
@@ -39,10 +40,14 @@ type HTTPHandler struct {
 
 func registerDefaults() {
 	Register(&HTTPHandler{
-		Path: "/log/level",
+		Path: LogLevelRouterPath,
 		HandlerFunc: func(w http.ResponseWriter, req *http.Request) {
 			log.Level().ServeHTTP(w, req)
 		},
+	})
+	Register(&HTTPHandler{
+		Path:    HealthzRouterPath,
+		Handler: healthz.Handler(),
 	})
 }
 

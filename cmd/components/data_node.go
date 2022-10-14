@@ -19,10 +19,12 @@ package components
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/api/commonpb"
 	"github.com/milvus-io/milvus/api/milvuspb"
 	grpcdatanode "github.com/milvus-io/milvus/internal/distributed/datanode"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 // DataNode implements DataNode grpc server
@@ -62,6 +64,14 @@ func (d *DataNode) Stop() error {
 }
 
 // GetComponentStates returns DataNode's states
-func (d *DataNode) GetComponentStates(ctx context.Context, request *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
-	return d.svr.GetComponentStates(ctx, request)
+func (d *DataNode) Health(ctx context.Context) commonpb.StateCode {
+	resp, err := d.svr.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
+	if err != nil {
+		return commonpb.StateCode_Abnormal
+	}
+	return resp.State.GetStateCode()
+}
+
+func (d *DataNode) GetName() string {
+	return typeutil.DataNodeRole
 }

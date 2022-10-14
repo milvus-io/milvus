@@ -19,11 +19,13 @@ package components
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/api/commonpb"
 	"github.com/milvus-io/milvus/api/milvuspb"
 
 	grpcindexcoord "github.com/milvus-io/milvus/internal/distributed/indexcoord"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 // IndexCoord implements IndexCoord grpc server
@@ -62,6 +64,14 @@ func (s *IndexCoord) Stop() error {
 }
 
 // GetComponentStates returns indexnode's states
-func (s *IndexCoord) GetComponentStates(ctx context.Context, request *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
-	return s.svr.GetComponentStates(ctx, request)
+func (s *IndexCoord) Health(ctx context.Context) commonpb.StateCode {
+	resp, err := s.svr.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
+	if err != nil {
+		return commonpb.StateCode_Abnormal
+	}
+	return resp.State.GetStateCode()
+}
+
+func (s *IndexCoord) GetName() string {
+	return typeutil.IndexCoordRole
 }
