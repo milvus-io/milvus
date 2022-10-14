@@ -230,8 +230,6 @@ VectorDiskAnnIndex<T>::parse_config(Config& config) {
     auto stof_closure = [](const std::string& s) -> float { return std::stof(s); };
 
     /***************************** meta *******************************/
-    CheckParameter<int>(config, knowhere::meta::SLICE_SIZE, stoi_closure,
-                        std::optional{config::KnowhereGetIndexSliceSize()});
     CheckParameter<int>(config, knowhere::meta::DIM, stoi_closure, std::nullopt);
     CheckParameter<int>(config, knowhere::meta::TOPK, stoi_closure, std::nullopt);
 

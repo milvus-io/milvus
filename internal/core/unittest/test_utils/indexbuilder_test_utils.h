@@ -221,7 +221,6 @@ search_with_nprobe_list() {
 auto
 generate_search_conf(const milvus::IndexType& index_type, const milvus::MetricType& metric_type) {
     auto conf = milvus::Config{
-        {knowhere::meta::SLICE_SIZE, knowhere::index_file_slice_size},
         {knowhere::meta::METRIC_TYPE, metric_type},
     };
 

@@ -25,6 +25,7 @@
 #include "common/BitsetView.h"
 #include "knowhere/index/vector_index/ConfAdapterMgr.h"
 #include "knowhere/index/vector_index/adapter/VectorAdapter.h"
+#include "common/Slice.h"
 
 namespace milvus::index {
 
@@ -52,32 +53,15 @@ VectorMemIndex::Serialize(const Config& config) {
         //        memcpy(raw_data.get(), raw_data_.data(), raw_data_.size());
         ret.Append(RAW_DATA, raw_data, raw_data_.size());
         // Disassemble will only divide the raw vectors, other keys were already divided
-        knowhere::Disassemble(ret, serialize_config);
     }
+    milvus::Disassemble(ret);
 
     return ret;
 }
 
 void
 VectorMemIndex::Load(const BinarySet& binary_set, const Config& config) {
-    /*
-    auto assembled_bs = std::make_unique<knowhere::BinarySet>();
-    for (auto it = map_.begin(); it != map_.end(); ++it) {
-        assembled_bs->Append(it->first, it->second);
-    }
-
-    // call Assemble to merge RAW_DATA_0 ... RAW_DATA_N to RAW_DATA
-    knowhere::Assemble(*assembled_bs);
-    auto& assembled_map_ = assembled_bs->binary_map_;
-    for (auto it = assembled_map_.begin(); it != assembled_map_.end(); ++it) {
-        if (it->first == RAW_DATA) {
-            raw_data_.clear();
-            auto data_size = it->second->size;
-            raw_data_.resize(data_size);
-            memcpy(raw_data_.data(), it->second->data.get(), data_size);
-            break;
-        }
-    }*/
+    milvus::Assemble(const_cast<BinarySet&>(binary_set));
 
     index_->Load(binary_set);
     auto& map_ = binary_set.binary_map_;
@@ -197,7 +181,7 @@ void
 VectorMemIndex::LoadRawData() {
     auto index_type = GetIndexType();
     if (is_in_nm_list(index_type)) {
-        auto bs = index_->Serialize(Config{knowhere::meta::SLICE_SIZE, config::KnowhereGetIndexSliceSize()});
+        auto bs = index_->Serialize(Config{});
         auto bptr = std::make_shared<knowhere::Binary>();
         auto deleter = [&](uint8_t*) {};  // avoid repeated deconstruction
         bptr->data = std::shared_ptr<uint8_t[]>(static_cast<uint8_t*>(raw_data_.data()), deleter);
@@ -212,8 +196,6 @@ VectorMemIndex::parse_config(Config& config) {
     auto stoi_closure = [](const std::string& s) -> int { return std::stoi(s); };
 
     /***************************** meta *******************************/
-    CheckParameter<int>(config, knowhere::meta::SLICE_SIZE, stoi_closure,
-                        std::optional{config::KnowhereGetIndexSliceSize()});
     CheckParameter<int>(config, knowhere::meta::DIM, stoi_closure, std::nullopt);
     CheckParameter<int>(config, knowhere::meta::TOPK, stoi_closure, std::nullopt);
 

@@ -17,10 +17,11 @@
 package indexnode
 
 /*
-#cgo pkg-config: milvus_indexbuilder
+#cgo pkg-config: milvus_common milvus_indexbuilder
 
 #include <stdlib.h>
 #include <stdint.h>
+#include "common/init_c.h"
 #include "indexbuilder/init_c.h"
 */
 import "C"
@@ -153,7 +154,7 @@ func (i *IndexNode) initKnowhere() {
 
 	// override segcore index slice size
 	cIndexSliceSize := C.int64_t(Params.CommonCfg.IndexSliceSize)
-	C.IndexBuilderSetIndexSliceSize(cIndexSliceSize)
+	C.InitIndexSliceSize(cIndexSliceSize)
 
 	initcore.InitLocalStorageConfig(&Params)
 }

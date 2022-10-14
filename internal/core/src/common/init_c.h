@@ -21,9 +21,13 @@ extern "C" {
 #endif
 
 #include <stdbool.h>
+#include <stdint.h>
 
 void
-LocalRootPathInit(const char*);
+InitIndexSliceSize(const int64_t);
+
+void
+InitLocalRootPath(const char*);
 
 #ifdef __cplusplus
 };
