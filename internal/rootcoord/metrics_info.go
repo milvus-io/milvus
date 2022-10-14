@@ -19,13 +19,15 @@ package rootcoord
 import (
 	"context"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/api/commonpb"
 	"github.com/milvus-io/milvus/api/milvuspb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/hardware"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.uber.org/zap"
 )
 
 //getComponentConfigurations returns the configurations of rootcoord matching req.Pattern
@@ -57,12 +59,12 @@ func (c *Core) getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetric
 				Name: metricsinfo.ConstructComponentName(typeutil.RootCoordRole, c.session.ServerID),
 				HardwareInfos: metricsinfo.HardwareMetrics{
 					IP:           c.session.Address,
-					CPUCoreCount: metricsinfo.GetCPUCoreCount(false),
-					CPUCoreUsage: metricsinfo.GetCPUUsage(),
-					Memory:       metricsinfo.GetMemoryCount(),
-					MemoryUsage:  metricsinfo.GetUsedMemoryCount(),
-					Disk:         metricsinfo.GetDiskCount(),
-					DiskUsage:    metricsinfo.GetDiskUsage(),
+					CPUCoreCount: hardware.GetCPUNum(),
+					CPUCoreUsage: hardware.GetCPUUsage(),
+					Memory:       hardware.GetMemoryCount(),
+					MemoryUsage:  hardware.GetUsedMemoryCount(),
+					Disk:         hardware.GetDiskCount(),
+					DiskUsage:    hardware.GetDiskUsage(),
 				},
 				SystemInfo:  metricsinfo.DeployMetrics{},
 				CreatedTime: Params.RootCoordCfg.CreatedTime.String(),

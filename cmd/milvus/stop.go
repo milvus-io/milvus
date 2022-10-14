@@ -3,10 +3,12 @@ package milvus
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"syscall"
 
+	"github.com/milvus-io/milvus/internal/util/hardware"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -47,7 +49,10 @@ func (c *stop) execute(args []string, flags *flag.FlagSet) {
 
 func (c *stop) formatFlags(args []string, flags *flag.FlagSet) {
 	flags.StringVar(&(c.svrAlias), "alias", "", "set alias")
-	initMaxprocs(c.serverType, flags)
+	if c.serverType == typeutil.EmbeddedRole {
+		flags.SetOutput(io.Discard)
+	}
+	hardware.InitMaxprocs(c.serverType, flags)
 	if err := flags.Parse(args[3:]); err != nil {
 		os.Exit(-1)
 	}

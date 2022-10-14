@@ -92,7 +92,12 @@ func (p *autoIndexConfig) parseBuildParams(paramsStr string) {
 }
 
 func (p *autoIndexConfig) parseExtraParams(paramsStr string) {
-	p.BigDataExtraParams = autoindex.NewBigDataExtraParamsFromJSON(paramsStr)
+	var err error
+	p.BigDataExtraParams, err = autoindex.NewBigDataExtraParamsFromJSON(paramsStr)
+	if err != nil {
+		err2 := fmt.Errorf("parse auto index extra params failed:%w", err)
+		panic(err2)
+	}
 }
 
 func (p *autoIndexConfig) parseSearchParams(paramsStr string) {

@@ -22,18 +22,18 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/tecbot/gorocksdb"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/kv"
 	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
-	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/hardware"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-
-	"github.com/tecbot/gorocksdb"
-	"go.uber.org/zap"
 )
 
 // UniqueID is the type of message ID
@@ -137,7 +137,7 @@ func NewRocksMQ(params paramtable.BaseTable, name string, idAllocator allocator.
 	} else if maxProcs > 8 {
 		parallelism = 2
 	}
-	memoryCount := metricsinfo.GetMemoryCount()
+	memoryCount := hardware.GetMemoryCount()
 	// default rocks db cache is set with memory
 	rocksDBLRUCacheCapacity := RocksDBLRUCacheMinCapacity
 	if memoryCount > 0 {

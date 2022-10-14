@@ -21,19 +21,18 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
-
 	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/internal/common"
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/types"
 
 	"github.com/milvus-io/milvus/api/commonpb"
 	"github.com/milvus-io/milvus/api/milvuspb"
 	"github.com/milvus-io/milvus/api/schemapb"
+	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
+	"github.com/milvus-io/milvus/internal/util/indexparams"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -144,6 +143,18 @@ func (cit *createIndexTask) parseIndexParams() error {
 				return fmt.Errorf("IndexType not specified")
 			}
 		}
+
+		indexType, exist := indexParamsMap[common.IndexTypeKey]
+		if !exist {
+			return fmt.Errorf("IndexType not specified")
+		}
+		if indexType == indexparamcheck.IndexDISKANN {
+			err := indexparams.FillDiskIndexParams(&Params, indexParamsMap)
+			if err != nil {
+				return err
+			}
+		}
+
 		err := checkTrain(cit.fieldSchema, indexParamsMap)
 		if err != nil {
 			return err

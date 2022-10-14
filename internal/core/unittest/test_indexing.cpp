@@ -381,6 +381,7 @@ TEST_P(IndexTest, BuildAndQuery) {
         index = milvus::index::IndexFactory::GetInstance().CreateIndex(create_index_info, nullptr);
     }
     ASSERT_NO_THROW(index->BuildWithDataset(xb_dataset, build_conf));
+    milvus::index::IndexBasePtr new_index;
     milvus::index::VectorIndex* vec_index = nullptr;
 
     if (index_type == knowhere::IndexEnum::INDEX_DISKANN) {
@@ -392,7 +393,8 @@ TEST_P(IndexTest, BuildAndQuery) {
         milvus::storage::IndexMeta index_meta{3, 100, 1000, 1};
         auto file_manager =
             std::make_shared<milvus::storage::DiskFileManagerImpl>(field_data_meta, index_meta, storage_config_);
-        auto new_index = milvus::index::IndexFactory::GetInstance().CreateIndex(create_index_info, file_manager);
+        new_index = milvus::index::IndexFactory::GetInstance().CreateIndex(create_index_info, file_manager);
+
         vec_index = dynamic_cast<milvus::index::VectorIndex*>(new_index.get());
 
         std::vector<std::string> index_files;
@@ -401,6 +403,7 @@ TEST_P(IndexTest, BuildAndQuery) {
         }
         load_conf["index_files"] = index_files;
         vec_index->Load(binary_set, load_conf);
+        EXPECT_EQ(vec_index->Count(), NB);
 #endif
     } else {
         vec_index = dynamic_cast<milvus::index::VectorIndex*>(index.get());

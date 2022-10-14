@@ -25,6 +25,12 @@ package querynode
 import "C"
 
 import (
+	"encoding/json"
+	"fmt"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/indexparams"
+	"go.uber.org/zap"
 	"path/filepath"
 	"unsafe"
 
@@ -95,8 +101,19 @@ func (li *LoadIndexInfo) appendLoadIndexInfo(bytesIndex [][]byte, indexInfo *que
 		return err
 	}
 
-	for _, param := range indexInfo.IndexParams {
-		err = li.appendIndexParam(param.Key, param.Value)
+	// some build params also exist in indexParams, which are useless during loading process
+	indexParams := funcutil.KeyValuePair2Map(indexInfo.IndexParams)
+	indexparams.SetDiskIndexLoadParams(indexParams, indexInfo.GetNumRows())
+
+	jsonIndexParams, err := json.Marshal(indexParams)
+	if err != nil {
+		err = fmt.Errorf("failed to json marshal index params %w", err)
+		return err
+	}
+	log.Info("start append index params", zap.String("index params", string(jsonIndexParams)))
+
+	for key, value := range indexParams {
+		err = li.appendIndexParam(key, value)
 		if err != nil {
 			return err
 		}

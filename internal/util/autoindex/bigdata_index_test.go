@@ -27,7 +27,8 @@ func TestBigDataIndex_parse(t *testing.T) {
 		mapString := make(map[string]string)
 		mapString[BuildRatioKey] = "{\"pg_code_budget_gb\": 0.125, \"num_threads\": 1}"
 		mapString[PrepareRatioKey] = "{\"search_cache_budget_gb\": 0.225, \"num_threads\": 8}"
-		extraParams := NewBigDataExtraParamsFromMap(mapString)
+		extraParams, err := NewBigDataExtraParamsFromMap(mapString)
+		assert.NoError(t, err)
 		assert.Equal(t, 1.0, extraParams.BuildNumThreadsRatio)
 		assert.Equal(t, 8.0, extraParams.LoadNumThreadRatio)
 		assert.Equal(t, 0.125, extraParams.PGCodeBudgetGBRatio)
@@ -37,7 +38,8 @@ func TestBigDataIndex_parse(t *testing.T) {
 	t.Run("parse with partial", func(t *testing.T) {
 		mapString := make(map[string]string)
 		mapString[PrepareRatioKey] = "{\"search_cache_budget_gb\": 0.225, \"num_threads\": 8}"
-		extraParams := NewBigDataExtraParamsFromMap(mapString)
+		extraParams, err := NewBigDataExtraParamsFromMap(mapString)
+		assert.NoError(t, err)
 		assert.Equal(t, 1.0, extraParams.BuildNumThreadsRatio)
 		assert.Equal(t, 8.0, extraParams.LoadNumThreadRatio)
 		assert.Equal(t, 0.125, extraParams.PGCodeBudgetGBRatio)
@@ -46,7 +48,8 @@ func TestBigDataIndex_parse(t *testing.T) {
 
 	t.Run("parse with empty", func(t *testing.T) {
 		mapString := make(map[string]string)
-		extraParams := NewBigDataExtraParamsFromMap(mapString)
+		extraParams, err := NewBigDataExtraParamsFromMap(mapString)
+		assert.NoError(t, err)
 		assert.Equal(t, 1.0, extraParams.BuildNumThreadsRatio)
 		assert.Equal(t, 8.0, extraParams.LoadNumThreadRatio)
 		assert.Equal(t, 0.125, extraParams.PGCodeBudgetGBRatio)
@@ -54,7 +57,8 @@ func TestBigDataIndex_parse(t *testing.T) {
 	})
 
 	t.Run("parse with nil", func(t *testing.T) {
-		extraParams := NewBigDataExtraParamsFromMap(nil)
+		extraParams, err := NewBigDataExtraParamsFromMap(nil)
+		assert.NoError(t, err)
 		assert.Equal(t, 1.0, extraParams.BuildNumThreadsRatio)
 		assert.Equal(t, 8.0, extraParams.LoadNumThreadRatio)
 		assert.Equal(t, 0.125, extraParams.PGCodeBudgetGBRatio)
@@ -69,7 +73,8 @@ func TestBigDataIndex_parse(t *testing.T) {
 					"beamwidth_ratio": "8.0"
 				}
 			`
-		extraParams := NewBigDataExtraParamsFromJSON(jsonStr)
+		extraParams, err := NewBigDataExtraParamsFromJSON(jsonStr)
+		assert.NoError(t, err)
 		assert.Equal(t, 1.0, extraParams.BuildNumThreadsRatio)
 		assert.Equal(t, 8.0, extraParams.LoadNumThreadRatio)
 		assert.Equal(t, 0.125, extraParams.PGCodeBudgetGBRatio)
@@ -83,7 +88,8 @@ func TestBigDataIndex_parse(t *testing.T) {
 					"build_ratio": "{\"pg_code_budget_gb\": 0.125, \"num_threads\": 1}"
 				}
 			`
-		extraParams := NewBigDataExtraParamsFromJSON(jsonStr)
+		extraParams, err := NewBigDataExtraParamsFromJSON(jsonStr)
+		assert.NoError(t, err)
 		assert.Equal(t, 1.0, extraParams.BuildNumThreadsRatio)
 		assert.Equal(t, 8.0, extraParams.LoadNumThreadRatio)
 		assert.Equal(t, 0.125, extraParams.PGCodeBudgetGBRatio)
@@ -96,7 +102,8 @@ func TestBigDataIndex_parse(t *testing.T) {
 				{
 				}
 			`
-		extraParams := NewBigDataExtraParamsFromJSON(jsonStr)
+		extraParams, err := NewBigDataExtraParamsFromJSON(jsonStr)
+		assert.NoError(t, err)
 		assert.Equal(t, 1.0, extraParams.BuildNumThreadsRatio)
 		assert.Equal(t, 8.0, extraParams.LoadNumThreadRatio)
 		assert.Equal(t, 0.125, extraParams.PGCodeBudgetGBRatio)
@@ -109,24 +116,15 @@ func TestBigDataIndex_parse(t *testing.T) {
 				{	x
 				}
 			`
-		extraParams := NewBigDataExtraParamsFromJSON(jsonStr)
-		assert.Equal(t, 1.0, extraParams.BuildNumThreadsRatio)
-		assert.Equal(t, 8.0, extraParams.LoadNumThreadRatio)
-		assert.Equal(t, 0.125, extraParams.PGCodeBudgetGBRatio)
-		assert.Equal(t, 0.125, extraParams.SearchCacheBudgetGBRatio)
-		assert.Equal(t, 4.0, extraParams.BeamWidthRatio)
+		_, err := NewBigDataExtraParamsFromJSON(jsonStr)
+		assert.Error(t, err)
 	})
 
 	t.Run("new from json invalid1", func(t *testing.T) {
 		jsonStr := `
 				""
 			`
-		extraParams := NewBigDataExtraParamsFromJSON(jsonStr)
-		assert.Equal(t, 1.0, extraParams.BuildNumThreadsRatio)
-		assert.Equal(t, 8.0, extraParams.LoadNumThreadRatio)
-		assert.Equal(t, 0.125, extraParams.PGCodeBudgetGBRatio)
-		assert.Equal(t, 0.125, extraParams.SearchCacheBudgetGBRatio)
-		assert.Equal(t, 4.0, extraParams.BeamWidthRatio)
+		_, err := NewBigDataExtraParamsFromJSON(jsonStr)
+		assert.Error(t, err)
 	})
-
 }

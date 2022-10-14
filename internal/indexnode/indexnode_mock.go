@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/hardware"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -216,12 +217,12 @@ func getMockSystemInfoMetrics(
 		BaseComponentInfos: metricsinfo.BaseComponentInfos{
 			Name: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, Params.IndexNodeCfg.GetNodeID()),
 			HardwareInfos: metricsinfo.HardwareMetrics{
-				CPUCoreCount: metricsinfo.GetCPUCoreCount(false),
-				CPUCoreUsage: metricsinfo.GetCPUUsage(),
+				CPUCoreCount: hardware.GetCPUNum(),
+				CPUCoreUsage: hardware.GetCPUUsage(),
 				Memory:       1000,
-				MemoryUsage:  metricsinfo.GetUsedMemoryCount(),
-				Disk:         metricsinfo.GetDiskCount(),
-				DiskUsage:    metricsinfo.GetDiskUsage(),
+				MemoryUsage:  hardware.GetUsedMemoryCount(),
+				Disk:         hardware.GetDiskCount(),
+				DiskUsage:    hardware.GetDiskUsage(),
 			},
 			SystemInfo:  metricsinfo.DeployMetrics{},
 			CreatedTime: Params.IndexNodeCfg.CreatedTime.String(),

@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/api/commonpb"
 	"github.com/milvus-io/milvus/api/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/hardware"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/ratelimitutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -82,8 +83,8 @@ func getComponentConfigurations(ctx context.Context, req *internalpb.ShowConfigu
 
 func (node *DataNode) getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	// TODO(dragondriver): add more metrics
-	usedMem := metricsinfo.GetUsedMemoryCount()
-	totalMem := metricsinfo.GetMemoryCount()
+	usedMem := hardware.GetUsedMemoryCount()
+	totalMem := hardware.GetMemoryCount()
 
 	quotaMetrics, err := node.getQuotaMetrics()
 	if err != nil {
@@ -97,12 +98,12 @@ func (node *DataNode) getSystemInfoMetrics(ctx context.Context, req *milvuspb.Ge
 	}
 	hardwareMetrics := metricsinfo.HardwareMetrics{
 		IP:           node.session.Address,
-		CPUCoreCount: metricsinfo.GetCPUCoreCount(false),
-		CPUCoreUsage: metricsinfo.GetCPUUsage(),
+		CPUCoreCount: hardware.GetCPUNum(),
+		CPUCoreUsage: hardware.GetCPUUsage(),
 		Memory:       totalMem,
 		MemoryUsage:  usedMem,
-		Disk:         metricsinfo.GetDiskCount(),
-		DiskUsage:    metricsinfo.GetDiskUsage(),
+		Disk:         hardware.GetDiskCount(),
+		DiskUsage:    hardware.GetDiskUsage(),
 	}
 	quotaMetrics.Hms = hardwareMetrics
 

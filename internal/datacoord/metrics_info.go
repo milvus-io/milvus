@@ -20,14 +20,16 @@ import (
 	"context"
 	"errors"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/api/commonpb"
 	"github.com/milvus-io/milvus/api/milvuspb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/hardware"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
-	"go.uber.org/zap"
 )
 
 // getQuotaMetrics returns DataCoordQuotaMetrics.
@@ -120,12 +122,12 @@ func (s *Server) getDataCoordMetrics() metricsinfo.DataCoordInfos {
 			Name: metricsinfo.ConstructComponentName(typeutil.DataCoordRole, Params.DataCoordCfg.GetNodeID()),
 			HardwareInfos: metricsinfo.HardwareMetrics{
 				IP:           s.session.Address,
-				CPUCoreCount: metricsinfo.GetCPUCoreCount(false),
-				CPUCoreUsage: metricsinfo.GetCPUUsage(),
-				Memory:       metricsinfo.GetMemoryCount(),
-				MemoryUsage:  metricsinfo.GetUsedMemoryCount(),
-				Disk:         metricsinfo.GetDiskCount(),
-				DiskUsage:    metricsinfo.GetDiskUsage(),
+				CPUCoreCount: hardware.GetCPUNum(),
+				CPUCoreUsage: hardware.GetCPUUsage(),
+				Memory:       hardware.GetMemoryCount(),
+				MemoryUsage:  hardware.GetUsedMemoryCount(),
+				Disk:         hardware.GetDiskCount(),
+				DiskUsage:    hardware.GetDiskUsage(),
 			},
 			SystemInfo:  metricsinfo.DeployMetrics{},
 			CreatedTime: Params.DataCoordCfg.CreatedTime.String(),

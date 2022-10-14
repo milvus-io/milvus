@@ -21,9 +21,10 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/util/autoindex"
-	"github.com/stretchr/testify/assert"
 )
 
 const (

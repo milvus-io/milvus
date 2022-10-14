@@ -1,18 +1,14 @@
 package milvus
 
 import (
-	"flag"
 	"fmt"
 	"io"
 	"io/ioutil"
-	syslog "log"
 	"os"
 	"path"
 	"runtime"
 
 	"github.com/gofrs/flock"
-
-	"go.uber.org/automaxprocs/maxprocs"
 
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -62,18 +58,6 @@ func createRuntimeDir(sType string) string {
 		}
 	}
 	return runtimeDir
-}
-
-// Initialize maxprocs
-func initMaxprocs(serverType string, flags *flag.FlagSet) {
-	if serverType == typeutil.EmbeddedRole {
-		flags.SetOutput(io.Discard)
-		// Initialize maxprocs while discarding log.
-		maxprocs.Set(maxprocs.Logger(nil))
-	} else {
-		// Initialize maxprocs.
-		maxprocs.Set(maxprocs.Logger(syslog.Printf))
-	}
 }
 
 func createPidFile(w io.Writer, filename string, runtimeDir string) (*flock.Flock, error) {

@@ -9,16 +9,21 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License.
 
-package metricsinfo
+package hardware
 
 import (
+	"flag"
+	syslog "log"
+	"runtime"
 	"sync"
 
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/mem"
+	"go.uber.org/automaxprocs/maxprocs"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 var (
@@ -27,16 +32,24 @@ var (
 	icErr  error
 )
 
-// GetCPUCoreCount returns the count of cpu core.
-func GetCPUCoreCount(logical bool) int {
-	c, err := cpu.Counts(logical)
-	if err != nil {
-		log.Warn("failed to get cpu counts",
-			zap.Error(err))
-		return 0
+// Initialize maxprocs
+func InitMaxprocs(serverType string, flags *flag.FlagSet) {
+	if serverType == typeutil.EmbeddedRole {
+		// Initialize maxprocs while discarding log.
+		maxprocs.Set(maxprocs.Logger(nil))
+	} else {
+		// Initialize maxprocs.
+		maxprocs.Set(maxprocs.Logger(syslog.Printf))
 	}
+}
 
-	return c
+// GetCPUNum returns the count of cpu core.
+func GetCPUNum() int {
+	cur := runtime.GOMAXPROCS(0)
+	if cur <= 0 {
+		cur = runtime.NumCPU()
+	}
+	return cur
 }
 
 // GetCPUUsage returns the cpu usage in percentage.
@@ -118,6 +131,11 @@ func GetUsedMemoryCount() uint64 {
 	}
 
 	return stats.Used
+}
+
+// GetFreeMemoryCount returns the free memory in bytes.
+func GetFreeMemoryCount() uint64 {
+	return GetMemoryCount() - GetUsedMemoryCount()
 }
 
 // TODO(dragondriver): not accurate to calculate disk usage when we use distributed storage

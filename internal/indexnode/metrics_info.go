@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/api/commonpb"
 	"github.com/milvus-io/milvus/api/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/hardware"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -60,12 +61,12 @@ func getSystemInfoMetrics(
 			Name: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, Params.IndexNodeCfg.GetNodeID()),
 			HardwareInfos: metricsinfo.HardwareMetrics{
 				IP:           node.session.Address,
-				CPUCoreCount: metricsinfo.GetCPUCoreCount(false),
-				CPUCoreUsage: metricsinfo.GetCPUUsage(),
-				Memory:       metricsinfo.GetMemoryCount(),
-				MemoryUsage:  metricsinfo.GetUsedMemoryCount(),
-				Disk:         metricsinfo.GetDiskCount(),
-				DiskUsage:    metricsinfo.GetDiskUsage(),
+				CPUCoreCount: hardware.GetCPUNum(),
+				CPUCoreUsage: hardware.GetCPUUsage(),
+				Memory:       hardware.GetMemoryCount(),
+				MemoryUsage:  hardware.GetUsedMemoryCount(),
+				Disk:         hardware.GetDiskCount(),
+				DiskUsage:    hardware.GetDiskUsage(),
 			},
 			SystemInfo:  metricsinfo.DeployMetrics{},
 			CreatedTime: Params.IndexNodeCfg.CreatedTime.String(),

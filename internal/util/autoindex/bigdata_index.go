@@ -30,85 +30,97 @@ type BigDataIndexExtraParams struct {
 }
 
 const (
-	BuildRatioKey     = "build_ratio"
-	PrepareRatioKey   = "prepare_ratio"
-	BeamWidthRatioKey = "beamwidth_ratio"
+	BuildRatioKey                   = "build_ratio"
+	PrepareRatioKey                 = "prepare_ratio"
+	BeamWidthRatioKey               = "beamwidth_ratio"
+	DefaultPGCodeBudgetGBRatio      = 0.125
+	DefaultBuildNumThreadsRatio     = 1.0
+	DefaultSearchCacheBudgetGBRatio = 0.125
+	DefaultLoadNumThreadRatio       = 8.0
+	DefaultBeamWidthRatio           = 4.0
 )
 
 func NewBigDataIndexExtraParams() *BigDataIndexExtraParams {
 	ret := &BigDataIndexExtraParams{
-		PGCodeBudgetGBRatio:      0.125,
-		BuildNumThreadsRatio:     1.0,
-		SearchCacheBudgetGBRatio: 0.125,
-		LoadNumThreadRatio:       8.0,
-		BeamWidthRatio:           4.0,
+		PGCodeBudgetGBRatio:      DefaultPGCodeBudgetGBRatio,
+		BuildNumThreadsRatio:     DefaultBuildNumThreadsRatio,
+		SearchCacheBudgetGBRatio: DefaultSearchCacheBudgetGBRatio,
+		LoadNumThreadRatio:       DefaultLoadNumThreadRatio,
+		BeamWidthRatio:           DefaultBeamWidthRatio,
 	}
 	return ret
 }
 
-func NewBigDataExtraParamsFromJSON(jsonStr string) *BigDataIndexExtraParams {
+func NewBigDataExtraParamsFromJSON(jsonStr string) (*BigDataIndexExtraParams, error) {
 	buffer := make(map[string]string)
 	err := json.Unmarshal([]byte(jsonStr), &buffer)
 	if err != nil {
-		return NewBigDataIndexExtraParams()
+		return nil, err
 	}
 	return NewBigDataExtraParamsFromMap(buffer)
 }
 
-func NewBigDataExtraParamsFromMap(value map[string]string) *BigDataIndexExtraParams {
+func NewBigDataExtraParamsFromMap(value map[string]string) (*BigDataIndexExtraParams, error) {
 	ret := &BigDataIndexExtraParams{}
 	var err error
 	buildRatio, ok := value[BuildRatioKey]
 	if !ok {
-		ret.PGCodeBudgetGBRatio = 0.125
-		ret.BuildNumThreadsRatio = 1.0
+		ret.PGCodeBudgetGBRatio = DefaultPGCodeBudgetGBRatio
+		ret.BuildNumThreadsRatio = DefaultBuildNumThreadsRatio
 	} else {
 		valueMap1 := make(map[string]float64)
 		err = json.Unmarshal([]byte(buildRatio), &valueMap1)
 		if err != nil {
-			ret.PGCodeBudgetGBRatio = 0.125
-			ret.BuildNumThreadsRatio = 1.0
+			return ret, err
+		}
+
+		PGCodeBudgetGBRatio, ok := valueMap1["pg_code_budget_gb"]
+		if !ok {
+			ret.PGCodeBudgetGBRatio = DefaultPGCodeBudgetGBRatio
 		} else {
-			ret.PGCodeBudgetGBRatio = valueMap1["pg_code_budget_gb"]
-			ret.BuildNumThreadsRatio = valueMap1["num_threads"]
+			ret.PGCodeBudgetGBRatio = PGCodeBudgetGBRatio
+		}
+		BuildNumThreadsRatio, ok := valueMap1["num_threads"]
+		if !ok {
+			ret.BuildNumThreadsRatio = DefaultBuildNumThreadsRatio
+		} else {
+			ret.BuildNumThreadsRatio = BuildNumThreadsRatio
 		}
 	}
 
 	prepareRatio, ok := value[PrepareRatioKey]
 	if !ok {
-		ret.SearchCacheBudgetGBRatio = 0.125
-		ret.LoadNumThreadRatio = 8
+		ret.SearchCacheBudgetGBRatio = DefaultSearchCacheBudgetGBRatio
+		ret.LoadNumThreadRatio = DefaultLoadNumThreadRatio
 	} else {
 		valueMap2 := make(map[string]float64)
 		err = json.Unmarshal([]byte(prepareRatio), &valueMap2)
 		if err != nil {
-			ret.SearchCacheBudgetGBRatio = 0.125
-			ret.LoadNumThreadRatio = 8
+			return ret, err
+		}
+		SearchCacheBudgetGBRatio, ok := valueMap2["search_cache_budget_gb"]
+		if !ok {
+			ret.SearchCacheBudgetGBRatio = DefaultSearchCacheBudgetGBRatio
 		} else {
-			SearchCacheBudgetGBRatio, ok := valueMap2["search_cache_budget_gb"]
-			if !ok {
-				ret.SearchCacheBudgetGBRatio = 0.125
-			} else {
-				ret.SearchCacheBudgetGBRatio = SearchCacheBudgetGBRatio
-			}
-			LoadNumThreadRatio, ok := valueMap2["num_threads"]
-			if !ok {
-				ret.LoadNumThreadRatio = 8
-			} else {
-				ret.LoadNumThreadRatio = LoadNumThreadRatio
-			}
+			ret.SearchCacheBudgetGBRatio = SearchCacheBudgetGBRatio
+		}
+		LoadNumThreadRatio, ok := valueMap2["num_threads"]
+		if !ok {
+			ret.LoadNumThreadRatio = DefaultLoadNumThreadRatio
+		} else {
+			ret.LoadNumThreadRatio = LoadNumThreadRatio
 		}
 	}
 	beamWidthRatioStr, ok := value[BeamWidthRatioKey]
 	if !ok {
-		ret.BeamWidthRatio = 4.0
+		ret.BeamWidthRatio = DefaultBeamWidthRatio
 	} else {
 		beamWidthRatio, err := strconv.ParseFloat(beamWidthRatioStr, 64)
 		if err != nil {
-			ret.BeamWidthRatio = 4.0
+			ret.BeamWidthRatio = DefaultBeamWidthRatio
 		} else {
 			ret.BeamWidthRatio = beamWidthRatio
 		}
 	}
-	return ret
+	return ret, nil
 }
