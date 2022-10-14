@@ -681,13 +681,12 @@ class TestUtilityBase(TestcaseBase):
         self.utility_wrap.index_building_progress(c_name, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue 19752")
     def test_index_process_collection_index(self):
         """
         target: test building_process
         method: 1.insert 1024 (because minSegmentSizeToEnableIndex=1024)
                 2.build(server does create index) and call building_process
-        expected: indexed_rows=0
+        expected: indexed_rows=nb
         """
         nb = 1024
         c_name = cf.gen_unique_str(prefix)
@@ -696,11 +695,10 @@ class TestUtilityBase(TestcaseBase):
         cw.insert(data=data)
         cw.create_index(default_field_name, default_index_params)
         res, _ = self.utility_wrap.index_building_progress(c_name)
-        assert res['indexed_rows'] == 0
+        assert res['indexed_rows'] == nb
         assert res['total_rows'] == nb
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue 19753")
     def test_index_process_collection_indexing(self):
         """
         target: test building_process
@@ -754,7 +752,6 @@ class TestUtilityBase(TestcaseBase):
         assert res == exp_res
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue 19752")
     def test_wait_index_collection_index(self):
         """
         target: test wait_index
@@ -777,16 +774,17 @@ class TestUtilityBase(TestcaseBase):
         """
         target: test loading progress without loading
         method: insert and flush data, call loading_progress without loading
-        expected: return successfully with 0%
+        expected: raise exception
         """
         collection_w = self.init_collection_wrap()
         df = cf.gen_default_dataframe_data()
         collection_w.insert(df)
         assert collection_w.num_entities == ct.default_nb
-        res = self.utility_wrap.loading_progress(collection_w.name)[0]
-        exp_res = {loading_progress: '0%'}
-
-        assert exp_res == res
+        self.utility_wrap.loading_progress(collection_w.name,
+                                           check_task=CheckTasks.err_res,
+                                           check_items={ct.err_code: 1,
+                                                        ct.err_msg: 'fail to show collections from '
+                                                                    'the querycoord, no data'})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("nb", [ct.default_nb, 5000])
@@ -908,26 +906,22 @@ class TestUtilityBase(TestcaseBase):
         assert collection_w.num_entities == ct.default_nb
         collection_w.load(partition_names=[ct.default_partition_name], replica_number=2)
         res_collection, _ = self.utility_wrap.loading_progress(collection_w.name)
-        assert res_collection == {loading_progress: '100%', num_loaded_partitions: 1, not_loaded_partitions: []}
+        assert res_collection == {loading_progress: '100%'}
 
         # create partition and insert
         partition_w = self.init_partition_wrap(collection_wrap=collection_w)
         partition_w.insert(cf.gen_default_dataframe_data(start=ct.default_nb))
         assert partition_w.num_entities == ct.default_nb
         res_part_partition, _ = self.utility_wrap.loading_progress(collection_w.name)
-        assert res_part_partition == {'loading_progress': '50%', 'num_loaded_partitions': 1,
-                                      'not_loaded_partitions': [partition_w.name]}
+        assert res_part_partition == {'loading_progress': '100%'}
 
-        res_part_partition, _ = self.utility_wrap.loading_progress(collection_w.name,
-                                                                   partition_names=[partition_w.name])
-        assert res_part_partition == {'loading_progress': '0%', 'num_loaded_partitions': 0,
-                                      'not_loaded_partitions': [partition_w.name]}
+        res_part_partition, _ = self.utility_wrap.loading_progress(collection_w.name)
+        assert res_part_partition == {'loading_progress': '100%'}
 
         collection_w.release()
         collection_w.load(replica_number=2)
         res_all_partitions, _ = self.utility_wrap.loading_progress(collection_w.name)
-        assert res_all_partitions == {'loading_progress': '100%', 'num_loaded_partitions': 2,
-                                      'not_loaded_partitions': []}
+        assert res_all_partitions == {'loading_progress': '100%'}
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_wait_loading_collection_empty(self):
