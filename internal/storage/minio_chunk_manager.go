@@ -36,6 +36,14 @@ import (
 	"golang.org/x/exp/mmap"
 )
 
+var (
+	ErrNoSuchKey = errors.New("NoSuchKey")
+)
+
+func WrapErrNoSuchKey(key string) error {
+	return fmt.Errorf("%w(key=%s)", ErrNoSuchKey, key)
+}
+
 var CheckBucketRetryAttempts uint = 20
 
 // MinioChunkManager is responsible for read and write data stored in minio.
@@ -215,7 +223,7 @@ func (mcm *MinioChunkManager) Read(ctx context.Context, filePath string) ([]byte
 	if err != nil {
 		errResponse := minio.ToErrorResponse(err)
 		if errResponse.Code == "NoSuchKey" {
-			return nil, errors.New("NoSuchKey")
+			return nil, WrapErrNoSuchKey(filePath)
 		}
 		log.Warn("failed to read object", zap.String("path", filePath), zap.Error(err))
 		return nil, err

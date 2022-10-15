@@ -594,11 +594,11 @@ func (s *Server) handleTimetickMessage(ctx context.Context, ttMsg *msgstream.Dat
 func (s *Server) updateSegmentStatistics(stats []*datapb.SegmentStats) {
 	for _, stat := range stats {
 		// Log if # of rows is updated.
-		if s.meta.GetAllSegment(stat.GetSegmentID()) != nil &&
-			s.meta.GetAllSegment(stat.GetSegmentID()).GetNumOfRows() != stat.GetNumRows() {
+		if s.meta.GetSegmentUnsafe(stat.GetSegmentID()) != nil &&
+			s.meta.GetSegmentUnsafe(stat.GetSegmentID()).GetNumOfRows() != stat.GetNumRows() {
 			log.Debug("Updating segment number of rows",
 				zap.Int64("segment ID", stat.GetSegmentID()),
-				zap.Int64("old value", s.meta.GetAllSegment(stat.GetSegmentID()).GetNumOfRows()),
+				zap.Int64("old value", s.meta.GetSegmentUnsafe(stat.GetSegmentID()).GetNumOfRows()),
 				zap.Int64("new value", stat.GetNumRows()),
 			)
 		}
