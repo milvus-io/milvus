@@ -355,7 +355,7 @@ func (q *QuotaCenter) calculateWriteRates() error {
 	}
 	log.Debug("QuotaCenter check memoryWaterLevel done", zap.Float64("memFactor", memFactor))
 
-	if ttFactor < memFactor {
+	if memFactor < ttFactor {
 		ttFactor = memFactor
 	}
 
