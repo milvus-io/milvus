@@ -8,9 +8,9 @@ import (
 	"reflect"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/milvus-io/milvus/api/commonpb"
-	"github.com/milvus-io/milvus/api/milvuspb"
-	"github.com/milvus-io/milvus/api/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 )
 
 // We wrap original protobuf structure for 2 reasons:

@@ -9,12 +9,12 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metastore/model"
 
-	"github.com/milvus-io/milvus/api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 
 	"github.com/milvus-io/milvus/internal/common"
 
-	"github.com/milvus-io/milvus/api/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 )
 
 type dropPartitionTask struct {

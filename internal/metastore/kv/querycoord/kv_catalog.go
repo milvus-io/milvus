@@ -8,7 +8,7 @@ import (
 	"github.com/samber/lo"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
-	"github.com/milvus-io/milvus/api/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util"

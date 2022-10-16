@@ -1,7 +1,7 @@
 package planparserv2
 
 import (
-	"github.com/milvus-io/milvus/api/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 )
 

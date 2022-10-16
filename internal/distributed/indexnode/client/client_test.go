@@ -24,7 +24,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus/api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	grpcindexnode "github.com/milvus-io/milvus/internal/distributed/indexnode"
 	"github.com/milvus-io/milvus/internal/indexnode"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"

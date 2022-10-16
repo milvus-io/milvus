@@ -23,8 +23,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/api/commonpb"
-	"github.com/milvus-io/milvus/api/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/datapb"

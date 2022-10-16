@@ -6,8 +6,8 @@ import (
 
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 
-	"github.com/milvus-io/milvus/api/commonpb"
-	"github.com/milvus-io/milvus/api/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/stretchr/testify/assert"
 )

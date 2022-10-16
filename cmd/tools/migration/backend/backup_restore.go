@@ -6,7 +6,7 @@ import (
 	"io"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/milvus-io/milvus/api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 )
 
 type BackupFile []byte

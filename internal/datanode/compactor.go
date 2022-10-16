@@ -25,7 +25,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/api/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/datapb"

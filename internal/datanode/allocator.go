@@ -22,7 +22,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/util/metautil"
 
-	"github.com/milvus-io/milvus/api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/types"
 )

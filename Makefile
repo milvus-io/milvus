@@ -22,12 +22,9 @@ ARCH := $(shell arch)
 mode = Release
 disk_index = OFF
 
+export GIT_BRANCH=master
 
-milvus: build-cpp print-build-info
-ifeq ($(RELEASE), TRUE)
-	@echo "Update milvus/api version ..."
-	@(env bash $(PWD)/scripts/update_api_version.sh)
-endif
+milvus: build-cpp update-api-version print-build-info
 	@echo "Building Milvus ..."
 	@source $(PWD)/scripts/setenv.sh && \
 		mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && \
@@ -74,7 +71,7 @@ lint: tools/bin/revive
 	@tools/bin/revive -formatter friendly -config tools/check/revive.toml ./...
 
 #TODO: Check code specifications by golangci-lint
-static-check:
+static-check: update-api-version
 	@echo "Running $@ check"
 	@GO111MODULE=on ${GOPATH}/bin/golangci-lint cache clean
 	@source $(PWD)/scripts/setenv.sh && GO111MODULE=on ${GOPATH}/bin/golangci-lint run --timeout=30m --config ./.golangci.yml ./internal/...
@@ -122,21 +119,27 @@ embd-milvus: build-cpp-embd print-build-info
 		GO111MODULE=on $(GO) build -ldflags="-r /tmp/milvus/lib/ -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)'" \
 		${APPLE_SILICON_FLAG} -buildmode=c-shared -o $(INSTALL_PATH)/embd-milvus.so $(PWD)/pkg/embedded/embedded.go 1>/dev/null
 
+download-milvus-proto:
+	@echo "Download milvus-proto repo ..."
+	@(env bash $(PWD)/scripts/download_milvus_proto.sh)
 
+update-api-version:
+	@echo "Update milvus/api version ..."
+	@(env bash $(PWD)/scripts/update_api_version.sh)
 
-build-cpp: 
+build-cpp: download-milvus-proto
 	@echo "Building Milvus cpp library ..."
 	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index})
 
-build-cpp-embd: 
+build-cpp-embd: download-milvus-proto
 	@echo "Building **Embedded** Milvus cpp library ..."
 	@(env bash $(PWD)/scripts/core_build.sh -b -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index})
 
-build-cpp-with-unittest: 
+build-cpp-with-unittest: download-milvus-proto
 	@echo "Building Milvus cpp library with unittest ..."
 	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -u -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index})
 
-build-cpp-with-coverage: 
+build-cpp-with-coverage: download-milvus-proto
 	@echo "Building Milvus cpp library with coverage and unittest ..."
 	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -u -c -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index})
 

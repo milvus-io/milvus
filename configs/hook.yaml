@@ -1,0 +1,41 @@
+denyAPI:
+  default:
+    - HasCollection
+    - GetCollectionStatistics
+    - CreatePartition
+    - DropPartition
+    - HasPartition
+    - LoadPartitions
+    - ReleasePartitions
+    - GetPartitionStatistics
+    - ShowPartitions
+    - CreateAlias
+    - DropAlias
+    - AlterAlias
+    - GetIndexState
+    - GetIndexBuildProgress
+    - CalcDistance
+    - GetFlushState
+    - GetPersistentSegmentInfo
+    - GetQuerySegmentInfo
+    - Dummy
+    - RegisterLink
+    - GetCompactionState
+    - ManualCompaction
+    - GetCompactionStateWithPlans
+    - GetReplicas
+    - GetMetrics
+    - LoadBalance
+    - CreateRole
+    - DropRole
+    - OperateUserRole
+    - SelectRole
+    - SelectUser
+    - OperatePrivilege
+    - SelectGrant
+  zcloud_root:
+  root:
+
+invisibleUsers:
+  - root
+  - zcloud_root

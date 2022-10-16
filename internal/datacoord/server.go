@@ -31,8 +31,8 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/api/commonpb"
-	"github.com/milvus-io/milvus/api/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	rootcoordclient "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"

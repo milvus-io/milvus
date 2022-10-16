@@ -24,7 +24,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus/api/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 )
 
 func genSimpleQueryShard(ctx context.Context) (*queryShard, error) {

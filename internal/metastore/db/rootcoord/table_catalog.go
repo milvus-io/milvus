@@ -15,7 +15,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/common"
 
-	"github.com/milvus-io/milvus/api/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metastore/db/dbmodel"
 	"github.com/milvus-io/milvus/internal/metastore/model"

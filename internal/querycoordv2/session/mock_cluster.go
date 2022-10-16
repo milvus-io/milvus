@@ -5,9 +5,9 @@ package session
 import (
 	context "context"
 
-	commonpb "github.com/milvus-io/milvus/api/commonpb"
+	commonpb "github.com/milvus-io/milvus-proto/go-api/commonpb"
 
-	milvuspb "github.com/milvus-io/milvus/api/milvuspb"
+	milvuspb "github.com/milvus-io/milvus-proto/go-api/milvuspb"
 
 	mock "github.com/stretchr/testify/mock"
 

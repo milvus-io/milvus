@@ -20,8 +20,8 @@ import (
 	"context"
 	"io"
 
-	"github.com/milvus-io/milvus/api/commonpb"
-	"github.com/milvus-io/milvus/api/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	rc "github.com/milvus-io/milvus/internal/distributed/rootcoord"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/dependency"

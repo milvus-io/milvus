@@ -9,7 +9,7 @@ import (
 	"github.com/apache/arrow/go/v8/parquet"
 	"github.com/apache/arrow/go/v8/parquet/file"
 
-	"github.com/milvus-io/milvus/api/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 )
 
 // PayloadReader reads data from payload

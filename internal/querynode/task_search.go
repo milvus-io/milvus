@@ -29,7 +29,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/milvus-io/milvus/api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"

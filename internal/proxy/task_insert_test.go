@@ -3,8 +3,8 @@ package proxy
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus/api/commonpb"
-	"github.com/milvus-io/milvus/api/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/stretchr/testify/assert"
 )

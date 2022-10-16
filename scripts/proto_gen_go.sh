@@ -20,6 +20,7 @@ SCRIPTS_DIR=$(dirname "$0")
 
 PROTO_DIR=$SCRIPTS_DIR/../internal/proto/
 GOOGLE_PROTO_DIR=$SCRIPTS_DIR/../cmake_build/thirdparty/protobuf/protobuf-src/src/
+API_PROTO_DIR=$SCRIPTS_DIR/../cmake_build/thirdparty/milvus-proto/proto/
 
 PROGRAM=$(basename "$0")
 GOPATH=$(go env GOPATH)
@@ -35,13 +36,10 @@ echo `which protoc-gen-go`
 # official go code ship with the crate, so we need to generate it manually.
 pushd ${PROTO_DIR}
 
-mkdir -p ../../api/commonpb
-mkdir -p ../../api/schemapb
 mkdir -p etcdpb
 mkdir -p indexcgopb
 
 mkdir -p internalpb
-mkdir -p ../../api/milvuspb
 mkdir -p rootcoordpb
 
 mkdir -p segcorepb
@@ -54,28 +52,30 @@ mkdir -p planpb
 
 mkdir -p ../../cmd/tools/migration/legacy/legacypb
 
-${protoc} --proto_path="${GOOGLE_PROTO_DIR}" --proto_path=. \
-    --go_opt="Mmilvus.proto=github.com/milvus-io/milvus/api/milvuspb;milvuspb" \
-    --go_opt=Mcommon.proto=github.com/milvus-io/milvus/api/commonpb \
-    --go_opt=Mschema.proto=github.com/milvus-io/milvus/api/schemapb \
-    --go_out=plugins=grpc,paths=source_relative:./../../api/milvuspb milvus.proto
+#${protoc} --proto_path="${GOOGLE_PROTO_DIR}" --proto_path=. \
+#    --go_opt="Mmilvus.proto=github.com/milvus-io/milvus/api/milvuspb;milvuspb" \
+#    --go_opt=Mcommon.proto=github.com/milvus-io/milvus/api/commonpb \
+#    --go_opt=Mschema.proto=github.com/milvus-io/milvus/api/schemapb \
+#    --go_out=plugins=grpc,paths=source_relative:./../../api/milvuspb milvus.proto
+#
+#${protoc} --proto_path="${GOOGLE_PROTO_DIR}" --proto_path=. \
+#    --go_opt=Mmilvus.proto=github.com/milvus-io/milvus/api/milvuspb \
+#    --go_opt=Mcommon.proto=github.com/milvus-io/milvus/api/commonpb \
+#    --go_opt="Mschema.proto=github.com/milvus-io/milvus/api/schemapb;schemapb" \
+#    --go_out=plugins=grpc,paths=source_relative:./../../api/schemapb schema.proto
+#
+#${protoc} --proto_path="${GOOGLE_PROTO_DIR}" --proto_path=. \
+#    --go_opt=Mmilvus.proto=github.com/milvus-io/milvus/api/milvuspb \
+#    --go_opt="Mcommon.proto=github.com/milvus-io/milvus/api/commonpb;commonpb" \
+#    --go_opt=Mschema.proto=github.com/milvus-io/milvus/api/schemapb \
+#    --go_out=plugins=grpc,paths=source_relative:./../../api/commonpb common.proto
 
-${protoc} --proto_path="${GOOGLE_PROTO_DIR}" --proto_path=. \
-    --go_opt=Mmilvus.proto=github.com/milvus-io/milvus/api/milvuspb \
-    --go_opt=Mcommon.proto=github.com/milvus-io/milvus/api/commonpb \
-    --go_opt="Mschema.proto=github.com/milvus-io/milvus/api/schemapb;schemapb" \
-    --go_out=plugins=grpc,paths=source_relative:./../../api/schemapb schema.proto
+#protoc_opt="${protoc} --proto_path=${GOOGLE_PROTO_DIR} --proto_path=${API_PROTO_DIR} --proto_path=.
+#            --go_opt=Mmilvus.proto=github.com/milvus-io/milvus/api/milvuspb
+#            --go_opt=Mcommon.proto=github.com/milvus-io/milvus/api/commonpb
+#            --go_opt=Mschema.proto=github.com/milvus-io/milvus/api/schemapb"
 
-${protoc} --proto_path="${GOOGLE_PROTO_DIR}" --proto_path=. \
-    --go_opt=Mmilvus.proto=github.com/milvus-io/milvus/api/milvuspb \
-    --go_opt="Mcommon.proto=github.com/milvus-io/milvus/api/commonpb;commonpb" \
-    --go_opt=Mschema.proto=github.com/milvus-io/milvus/api/schemapb \
-    --go_out=plugins=grpc,paths=source_relative:./../../api/commonpb common.proto
-
-protoc_opt="${protoc} --proto_path=${GOOGLE_PROTO_DIR} --proto_path=.
-            --go_opt=Mmilvus.proto=github.com/milvus-io/milvus/api/milvuspb
-            --go_opt=Mcommon.proto=github.com/milvus-io/milvus/api/commonpb
-            --go_opt=Mschema.proto=github.com/milvus-io/milvus/api/schemapb"
+protoc_opt="${protoc} --proto_path=${GOOGLE_PROTO_DIR} --proto_path=${API_PROTO_DIR} --proto_path=."
 
 ${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./etcdpb etcd_meta.proto
 ${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./indexcgopb index_cgo_msg.proto

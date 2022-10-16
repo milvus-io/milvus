@@ -20,7 +20,7 @@ import (
 	"encoding/json"
 
 	"github.com/bits-and-blooms/bloom/v3"
-	"github.com/milvus-io/milvus/api/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
 )
 

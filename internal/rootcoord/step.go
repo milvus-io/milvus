@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/milvus-io/milvus/api/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 

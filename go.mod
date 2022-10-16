@@ -11,6 +11,7 @@ require (
 	github.com/antonmedv/expr v1.8.9
 	github.com/apache/arrow/go/v8 v8.0.0-20220322092137-778b1772fd20
 	github.com/apache/pulsar-client-go v0.6.1-0.20210728062540-29414db801a7
+	github.com/apache/thrift v0.15.0
 	github.com/bits-and-blooms/bloom/v3 v3.0.1
 	github.com/casbin/casbin/v2 v2.44.2
 	github.com/casbin/json-adapter/v2 v2.0.0
@@ -19,6 +20,7 @@ require (
 	github.com/gin-gonic/gin v1.7.7
 	github.com/go-basic/ipv4 v1.0.0
 	github.com/gofrs/flock v0.8.1
+	github.com/golang/mock v1.5.0
 	github.com/golang/protobuf v1.5.2
 	github.com/google/btree v1.0.1
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
@@ -26,13 +28,16 @@ require (
 	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/klauspost/compress v1.14.2
 	github.com/lingdor/stackerror v0.0.0-20191119040541-976d8885ed76
-	github.com/milvus-io/milvus/api v0.0.0-20220915082433-b1f4c60117bb
+	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d
+	github.com/milvus-io/milvus-proto/go-api master
 	github.com/minio/minio-go/v7 v7.0.17
 	github.com/opentracing/opentracing-go v1.2.0
 	github.com/panjf2000/ants/v2 v2.4.8
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.11.0
+	github.com/sandertv/go-formula/v2 v2.0.0-alpha.7
 	github.com/sbinet/npyio v0.6.0
+	github.com/shirou/gopsutil/v3 v3.22.9
 	github.com/spaolacci/murmur3 v1.1.0
 	github.com/spf13/cast v1.3.1
 	github.com/spf13/viper v1.8.1
@@ -56,22 +61,6 @@ require (
 	gorm.io/driver/mysql v1.3.5
 	gorm.io/gorm v1.23.8
 	stathat.com/c/consistent v1.0.0
-)
-
-require (
-	github.com/apache/thrift v0.15.0 // indirect
-	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d
-)
-
-require github.com/sandertv/go-formula/v2 v2.0.0-alpha.7
-
-require github.com/quasilyte/go-ruleguard/dsl v0.3.21 // indirect
-
-require (
-	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
-	github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c // indirect
-	github.com/shirou/gopsutil/v3 v3.22.9
-	github.com/yusufpapurcu/wmi v1.2.2 // indirect
 )
 
 require (
@@ -130,6 +119,7 @@ require (
 	github.com/kris-nova/lolgopher v0.0.0-20180921204813-313b3abb0d9b // indirect
 	github.com/leodido/go-urn v1.2.0 // indirect
 	github.com/linkedin/goavro/v2 v2.11.1 // indirect
+	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
 	github.com/magiconair/properties v1.8.5 // indirect
 	github.com/mattn/go-colorable v0.1.8 // indirect
 	github.com/mattn/go-isatty v0.0.12 // indirect
@@ -147,6 +137,7 @@ require (
 	github.com/pelletier/go-toml v1.9.3 // indirect
 	github.com/pierrec/lz4 v2.5.2+incompatible // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
+	github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c // indirect
 	github.com/prometheus/client_model v0.2.0 // indirect
 	github.com/prometheus/common v0.26.0 // indirect
 	github.com/prometheus/procfs v0.6.0 // indirect
@@ -166,6 +157,7 @@ require (
 	github.com/uber/jaeger-lib v2.4.0+incompatible // indirect
 	github.com/ugorji/go/codec v1.1.7 // indirect
 	github.com/xiang90/probing v0.0.0-20190116061207-43a291ad63a2 // indirect
+	github.com/yusufpapurcu/wmi v1.2.2 // indirect
 	github.com/zeebo/xxh3 v1.0.1 // indirect
 	go.etcd.io/bbolt v1.3.6 // indirect
 	go.etcd.io/etcd/client/pkg/v3 v3.5.0 // indirect
@@ -206,12 +198,9 @@ replace (
 	github.com/bketelsen/crypt => github.com/bketelsen/crypt v0.0.4 // Fix security alert for core-os/etcd
 	github.com/dgrijalva/jwt-go => github.com/golang-jwt/jwt v3.2.2+incompatible // Fix security alert for jwt-go 3.2.0
 	github.com/go-kit/kit => github.com/go-kit/kit v0.1.0
-)
-
-replace (
-	// If you want to use the hook interceptor, the following code should be commented out
-	// and you should modify the api version to be the same as the `so` project.
-	github.com/milvus-io/milvus/api => ./api
 	github.com/streamnative/pulsarctl => github.com/xiaofan-luan/pulsarctl v0.5.1
 	github.com/tecbot/gorocksdb => github.com/milvus-io/gorocksdb v0.0.0-20220624081344-8c5f4212846b // indirect
+	// If you want to use the hook interceptor, the following code should be commented out
+	// and you should modify the api version to be the same as the `so` project.
+	//replace github.com/milvus-io/milvus-proto/go-api => github.com/SimFG/milvus-proto/go-api v0.0.0-20221012123137-df1cf6457a79
 )

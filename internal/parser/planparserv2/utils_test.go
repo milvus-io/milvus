@@ -3,7 +3,7 @@ package planparserv2
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus/api/schemapb"
+	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 )
 
 func Test_relationalCompatible(t *testing.T) {

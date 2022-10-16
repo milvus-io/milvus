@@ -20,7 +20,7 @@ import (
 	"testing"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/milvus-io/milvus/api/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"

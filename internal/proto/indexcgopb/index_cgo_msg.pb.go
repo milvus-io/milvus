@@ -6,7 +6,7 @@ package indexcgopb
 import (
 	fmt "fmt"
 	proto "github.com/golang/protobuf/proto"
-	commonpb "github.com/milvus-io/milvus/api/commonpb"
+	commonpb "github.com/milvus-io/milvus-proto/go-api/commonpb"
 	math "math"
 )
 

@@ -31,8 +31,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 
-	"github.com/milvus-io/milvus/api/commonpb"
-	"github.com/milvus-io/milvus/api/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	dcc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
 	icc "github.com/milvus-io/milvus/internal/distributed/indexcoord/client"
 	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"

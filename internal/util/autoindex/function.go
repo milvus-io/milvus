@@ -22,7 +22,7 @@ import (
 
 	//"strconv"
 
-	"github.com/milvus-io/milvus/api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/sandertv/go-formula/v2"
 )
 

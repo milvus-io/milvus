@@ -8,7 +8,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/api/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 )
 
 type alterCollectionTask struct {
