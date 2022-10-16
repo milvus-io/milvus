@@ -59,6 +59,10 @@ DeleteSearchResult(CSearchResult search_result) {
     auto res = (milvus::SearchResult*)search_result;
     delete res;
 }
+uint32_t nowMs() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+}
 
 CStatus
 Search(CSegmentInterface c_segment,
@@ -66,6 +70,7 @@ Search(CSegmentInterface c_segment,
        CPlaceholderGroup c_placeholder_group,
        uint64_t timestamp,
        CSearchResult* result) {
+    uint32_t start = nowMs();
     try {
         auto segment = (milvus::segcore::SegmentInterface*)c_segment;
         auto plan = (milvus::query::Plan*)c_plan;
@@ -77,9 +82,9 @@ Search(CSegmentInterface c_segment,
             }
         }
         *result = search_result.release();
-        return milvus::SuccessCStatus();
+        return milvus::SuccessCStatus(nowMs() - start);
     } catch (std::exception& e) {
-        return milvus::FailureCStatus(UnexpectedError, e.what());
+        return milvus::FailureCStatus(UnexpectedError, e.what(), nowMs() - start);
     }
 }
 

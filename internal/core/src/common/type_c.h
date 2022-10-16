@@ -62,6 +62,7 @@ typedef enum CDataType CDataType;
 typedef struct CStatus {
     int error_code;
     const char* error_msg;
+    uint32_t cost_ms;
 } CStatus;
 
 typedef struct CProto {

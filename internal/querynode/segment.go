@@ -365,6 +365,7 @@ func (s *Segment) search(searchReq *searchRequest) (*SearchResult, error) {
 		status = C.Search(s.segmentPtr, searchReq.plan.cSearchPlan, searchReq.cPlaceholderGroup,
 			C.uint64_t(searchReq.timestamp), &searchResult.cSearchResult)
 		metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.SearchLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
+		metrics.QueryNodeSQSegmentLatencyInCoreWithoutCGO.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.SearchLabel).Observe(float64(status.cost_ms))
 		return nil, nil
 	}).Await()
 	if err := HandleCStatus(&status, "Search failed"); err != nil {
@@ -394,6 +395,7 @@ func (s *Segment) retrieve(plan *RetrievePlan) (*segcorepb.RetrieveResults, erro
 		status = C.Retrieve(s.segmentPtr, plan.cRetrievePlan, ts, &retrieveResult.cRetrieveResult)
 		metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
 			metrics.QueryLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
+		metrics.QueryNodeSQSegmentLatencyInCoreWithoutCGO.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.SearchLabel).Observe(float64(status.cost_ms))
 		log.Debug("do retrieve on segment",
 			zap.Int64("msgID", plan.msgID),
 			zap.Int64("segmentID", s.segmentID), zap.String("segmentType", s.segmentType.String()))

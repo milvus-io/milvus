@@ -24,14 +24,24 @@
 namespace milvus {
 
 inline CStatus
-SuccessCStatus() {
-    return CStatus{Success, ""};
+SuccessCStatus(uint32_t cost) {
+    return CStatus{Success, "", cost};
 }
 
 inline CStatus
-FailureCStatus(ErrorCode error_code, const std::string& str) {
+SuccessCStatus() {
+    return SuccessCStatus(-1);
+}
+
+
+inline CStatus
+FailureCStatus(ErrorCode error_code, const std::string &str, uint32_t cost) {
     auto str_dup = strdup(str.c_str());
-    return CStatus{error_code, str_dup};
+    return CStatus{error_code, str_dup, cost};
+}
+inline CStatus
+FailureCStatus(ErrorCode error_code, const std::string &str) {
+    return FailureCStatus(error_code, str, -1);
 }
 
 }  // namespace milvus

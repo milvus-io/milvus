@@ -143,6 +143,18 @@ var (
 			queryTypeLabelName,
 		})
 
+	QueryNodeSQSegmentLatencyInCoreWithoutCGO = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "sq_core_latency_without_cgo",
+			Help:      "latency of search or query latency in segcore without_cgo",
+			Buckets:   buckets,
+		}, []string{
+			nodeIDLabelName,
+			queryTypeLabelName,
+		})
+
 	QueryNodeReduceLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
@@ -323,6 +335,7 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeSQLatencyInQueue)
 	registry.MustRegister(QueryNodeSQSegmentLatency)
 	registry.MustRegister(QueryNodeSQSegmentLatencyInCore)
+	registry.MustRegister(QueryNodeSQSegmentLatencyInCoreWithoutCGO)
 	registry.MustRegister(QueryNodeReduceLatency)
 	registry.MustRegister(QueryNodeLoadSegmentLatency)
 	registry.MustRegister(QueryNodeReadTaskUnsolveLen)
